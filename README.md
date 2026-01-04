@@ -15,6 +15,11 @@
 
 支持Windows、Mac及Linux系统。下载地址：[Github](https://github.com/wanglin2/mind-map/releases)、[百度网盘](https://pan.baidu.com/s/1C8phEJ5pagAAa-o1tU42Uw?pwd=jqfb)、[夸克网盘](https://pan.quark.cn/s/2733982f1976)
 
+> 如果在macOS上安装后无法打开，报错**不受信任**或者**移到垃圾箱**，执行下面命令后再启动即可：
+> ``` shell
+> sudo xattr -d com.apple.quarantine /Applications/思绪思维导图.app
+> ```
+
 - Obsidian插件
 
 下载地址：[Github](https://github.com/wanglin2/obsidian-simplemindmap/releases)
