@@ -1295,9 +1295,7 @@ export const transformTreeDataToObject = data => {
     }
     res[uid] = {
       isRoot: !parent,
-      data: {
-        ...root.data
-      },
+      data: simpleDeepClone(root.data) || { ...root.data },
       children: []
     }
     if (root.children && root.children.length > 0) {

@@ -358,6 +358,9 @@ export default {
     exportError: '匯出失敗',
     dragTip: '在此釋放以匯入檔案',
     autoOpenNodeRichTextTip: '檢測到導入了富文本內容，已自動開啓富文本模式',
+    importingTip: '正在匯入，請稍候…',
+    largeMapImportTip:
+      '節點較多，已收起深層分支並開啟效能模式，避免卡死。需要時再點節點上的展開。',
     localStorageExceededTip:
       '你創建的思維導圖體積已經超過浏覽器允許存儲的上限，請立即導出，否則數據將丟失！建議下載客戶端進行使用，客戶端無大小限制。',
     withBg: '帶背景',
@@ -553,6 +556,16 @@ export default {
     peers: '目前在線',
     you: '我',
     tip: '同一房間的人會即時同步畫布。區域網協作請把協同服務改成你的電腦 IP。',
-    startServerTip: '先啟動服務：在 web 目錄執行 npm run collab'
+    startServerTip: '可雙擊專案根目錄「啟動.bat」一鍵啟動頁面、協同和 AI 服務',
+    files: '已儲存的檔案',
+    refresh: '重新整理',
+    openFile: '打開',
+    deleteFile: '刪除',
+    renameFile: '重新命名',
+    noFiles: '還沒有儲存的檔案。進入協同後會自動存到 COS 的 mind-map 資料夾',
+    deleteConfirm: '確定刪除「{title}」？刪除後無法復原。',
+    openSuccess: '已打開該檔案',
+    fileDeleted: '已刪除',
+    renamed: '已重新命名'
   }
 }

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mind-map": {
+      "type": "http",
+      "url": "http://<启动脚本探测的主机IP>:8080/mcp"
+    }
+  }
+}

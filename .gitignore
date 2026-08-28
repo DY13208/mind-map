@@ -5,3 +5,4 @@ simple-mind-map/dist
 simple-mind-map/types
 utools/dist
 .env
+.mcp.json

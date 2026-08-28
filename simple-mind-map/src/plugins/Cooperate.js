@@ -36,6 +36,7 @@ class Cooperate {
       : null
     this.hasAppliedSync = false
     this.syncTimer = null
+    this.isApplyingRemote = false
     // 绑定事件
     this.bindEvent()
   }
@@ -53,7 +54,7 @@ class Cooperate {
     this.currentData = transformTreeDataToObject(data)
     // 将思维导图数据添加到共享数据中
     Object.keys(this.currentData).forEach(uid => {
-      this.ymap.set(uid, this.currentData[uid])
+      this.ymap.set(uid, simpleDeepClone(this.currentData[uid]))
     })
     // 监听数据同步
     this.onObserve = this.onObserve.bind(this)
@@ -124,10 +125,10 @@ class Cooperate {
     const remoteSize = [...this.ymap.keys()].length
     if (remoteSize > 0) {
       const data = this.ymap.toJSON()
-      this.currentData = data
+      this.currentData = simpleDeepClone(data)
       const res = transformObjectToTreeData(data)
       if (res) {
-        this.mindMap.updateData(res)
+        this.applyRemoteTree(res)
       }
       return
     }
@@ -208,17 +209,28 @@ class Cooperate {
     const data = event.target.toJSON()
     // 如果数据没有改变直接返回
     if (isSameObject(data, this.currentData)) return
-    this.currentData = data
+    this.currentData = simpleDeepClone(data)
     // 平级对象转树结构
     const res = transformObjectToTreeData(data)
     if (!res) return
-    // 更新思维导图画布
+    this.applyRemoteTree(res)
+  }
+
+  // 概要不是树里的子节点，对端更新后需要再排一次版才会画出来
+  applyRemoteTree(res) {
+    this.isApplyingRemote = true
     this.mindMap.updateData(res)
+    this.mindMap.render(() => {
+      this.mindMap.render()
+    })
+    setTimeout(() => {
+      this.isApplyingRemote = false
+    }, 250)
   }
 
   // 当前思维导图改变后的处理，触发同步
   onDataChange(data) {
-    if (this.isSetData) {
+    if (this.isSetData || this.isApplyingRemote) {
       this.isSetData = false
       return
     }
@@ -256,7 +268,7 @@ class Cooperate {
         })
       }
       createOrUpdateList.forEach(item => {
-        this.ymap.set(item.uid, item.data)
+        this.ymap.set(item.uid, simpleDeepClone(item.data))
       })
       // 找出删除的
       const deleteList = []

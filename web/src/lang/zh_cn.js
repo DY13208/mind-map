@@ -358,6 +358,9 @@ export default {
     dragTip: '在此释放以导入该文件',
     deleteNodeImgTip: '是否确认删除该节点图片？',
     autoOpenNodeRichTextTip: '检测到导入了富文本内容，已自动开启富文本模式',
+    importingTip: '正在导入，请稍候…',
+    largeMapImportTip:
+      '节点较多，已收起深层分支并开启性能模式，避免卡死。需要时再点节点上的展开。',
     localStorageExceededTip:
       '你创建的思维导图体积已经超过浏览器允许存储的上限，请立即导出，否则数据将丢失！建议下载客户端进行使用，客户端无大小限制。',
     withBg: '带背景',
@@ -553,6 +556,16 @@ export default {
     peers: '当前在线',
     you: '我',
     tip: '同一房间的人会实时同步画布。局域网协作请使用启动脚本写入的本机 IP。',
-    startServerTip: '可双击项目根目录「启动.bat」一键启动页面、协同和 AI 服务'
+    startServerTip: '可双击项目根目录「启动.bat」一键启动页面、协同和 AI 服务',
+    files: '已保存的文件',
+    refresh: '刷新',
+    openFile: '打开',
+    deleteFile: '删除',
+    renameFile: '重命名',
+    noFiles: '还没有保存的文件。进入协同后会自动存到 COS 的 mind-map 文件夹',
+    deleteConfirm: '确定删除「{title}」？删除后无法恢复。',
+    openSuccess: '已打开该文件',
+    fileDeleted: '已删除',
+    renamed: '已重命名'
   }
 }

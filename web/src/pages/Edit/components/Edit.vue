@@ -113,6 +113,7 @@ import NodeIconSidebar from './NodeIconSidebar.vue'
 import NodeIconToolbar from './NodeIconToolbar.vue'
 import OutlineEdit from './OutlineEdit.vue'
 import { showLoading, hideLoading } from '@/utils/loading'
+import { prepareImportedTree, yieldToUi } from '@/utils/importTree'
 import handleClipboardText from '@/utils/handleClipboardText'
 import { getParentWithClass } from '@/utils'
 import Scrollbar from './Scrollbar.vue'
@@ -292,9 +293,9 @@ export default {
     },
 
     // 显示loading
-    handleShowLoading() {
+    handleShowLoading(text) {
       this.enableShowLoading = true
-      showLoading()
+      showLoading(typeof text === 'string' ? text : '')
     },
 
     // 渲染结束后关闭loading
@@ -514,8 +515,15 @@ export default {
     },
 
     // 动态设置思维导图数据
-    setData(data) {
-      this.handleShowLoading()
+    async setData(data) {
+      this.handleShowLoading(this.$t('edit.importingTip'))
+      await yieldToUi()
+      const prepared = prepareImportedTree(data)
+      data = prepared.data
+      if (prepared.collapsed && this.mindMap) {
+        this.mindMap.updateConfig({ openPerformance: true })
+        this.$message.info(this.$t('edit.largeMapImportTip'))
+      }
       let rootNodeData = null
       if (data.root) {
         this.mindMap.setFullData(data)

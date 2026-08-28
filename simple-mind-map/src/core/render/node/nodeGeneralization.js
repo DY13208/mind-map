@@ -106,18 +106,25 @@ function renderGeneralization(forceRender) {
 
 // 更新节点概要数据
 function updateGeneralizationData() {
-  const childrenLength = this.getChildrenLength()
+  const childrenLength = Math.max(
+    this.getChildrenLength(),
+    this.children ? this.children.length : 0
+  )
   const list = this.formatGetGeneralization()
   const newList = []
   list.forEach(item => {
-    if (!item.range) {
+    const range = Array.isArray(item.range)
+      ? item.range
+      : item.range == null
+        ? null
+        : [Number(item.range[0]), Number(item.range[1])]
+    if (!range || !range.length) {
       newList.push(item)
       return
     }
     if (
-      item.range.length > 0 &&
-      item.range[0] <= childrenLength - 1 &&
-      item.range[1] <= childrenLength - 1
+      range[0] <= childrenLength - 1 &&
+      range[1] <= childrenLength - 1
     ) {
       newList.push(item)
     }

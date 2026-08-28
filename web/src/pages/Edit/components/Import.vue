@@ -61,6 +61,8 @@ import xmind from 'simple-mind-map/src/parse/xmind.js'
 import markdown from 'simple-mind-map/src/parse/markdown.js'
 import { mapMutations } from 'vuex'
 import Vue from 'vue'
+import { yieldToUi } from '@/utils/importTree'
+import { hideLoading } from '@/utils/loading'
 
 // 导入
 export default {
@@ -203,6 +205,9 @@ export default {
 
     // 处理.xmind文件
     async handleXmind(file) {
+      this.$bus.$emit('showLoading', this.$t('edit.importingTip'))
+      await this.$nextTick()
+      await yieldToUi()
       try {
         let data = await xmind.parseXmindFile(file.raw, content => {
           this.showSelectXmindCanvasDialog(content)
@@ -214,6 +219,7 @@ export default {
         this.$message.success(this.$t('import.importSuccess'))
       } catch (error) {
         console.log(error)
+        hideLoading()
         this.$message.error(this.$t('import.fileParsingFailed'))
       }
     },

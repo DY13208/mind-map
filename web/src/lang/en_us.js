@@ -369,6 +369,9 @@ export default {
     deleteNodeImgTip: 'Are you sure to delete the node image?',
     autoOpenNodeRichTextTip:
       'Detected imported rich text content, automatically enabled rich text mode',
+    importingTip: 'Importing, please wait…',
+    largeMapImportTip:
+      'This map is large, so deep branches were collapsed and performance mode was turned on. Expand nodes as needed.',
     localStorageExceededTip:
       'The volume of the mind map you created has exceeded the maximum storage limit allowed by the browser. Please export it immediately, otherwise the data will be lost! It is recommended to download the client for use, as there is no size limit for the client.',
     withBg: 'With background image',
@@ -573,6 +576,16 @@ export default {
     peers: 'Online',
     you: 'You',
     tip: 'People in the same room sync the canvas in real time. For LAN use, set the server to your computer IP.',
-    startServerTip: 'Run start.bat in the project root to start the page, collab and AI services'
+    startServerTip: 'Run start.bat in the project root to start the page, collab and AI services',
+    files: 'Saved files',
+    refresh: 'Refresh',
+    openFile: 'Open',
+    deleteFile: 'Delete',
+    renameFile: 'Rename',
+    noFiles: 'No saved files yet. Joining a room saves it to the COS mind-map folder.',
+    deleteConfirm: 'Delete "{title}"? This cannot be undone.',
+    openSuccess: 'Opened this file',
+    fileDeleted: 'Deleted',
+    renamed: 'Renamed'
   }
 }
