@@ -27,6 +27,7 @@ const store = new Vuex.Store({
     isSourceCodeEdit: false, // 是否是源码编辑模式
     extraTextOnExport: '', // 导出时底部添加的文字
     isDragOutlineTreeNode: false, // 当前是否正在拖拽大纲树的节点
+    cooperateStatus: 'disconnected',
     aiConfig: {
       api: 'http://ark.cn-beijing.volces.com/api/v3/chat/completions',
       key: '',
@@ -89,6 +90,10 @@ const store = new Vuex.Store({
     // 设置树节点拖拽
     setIsDragOutlineTreeNode(state, data) {
       state.isDragOutlineTreeNode = data
+    },
+
+    setCooperateStatus(state, data) {
+      state.cooperateStatus = data
     },
 
     // 扩展主题列表

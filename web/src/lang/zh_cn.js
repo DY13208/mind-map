@@ -342,7 +342,8 @@ export default {
     directory: '目录',
     newFileTip: '新建文件前请先导出当前编辑的文件，谨防内容丢失',
     openFileTip: '打开文件前请先导出当前编辑的文件，谨防内容丢失',
-    ai: 'AI'
+    ai: 'AI',
+    cooperate: '协同'
   },
   edit: {
     newFeatureNoticeTitle: '新特性提醒',
@@ -523,5 +524,35 @@ export default {
     tip3: '链接成功',
     tip4: '删除成功',
     tip5: '链接节点不存在，是否删除该链接？'
+  },
+  cooperate: {
+    title: '协同编辑',
+    userName: '昵称',
+    userNamePlaceholder: '请输入你的昵称',
+    roomName: '房间号',
+    roomNamePlaceholder: '同一房间即可实时同步',
+    newRoom: '新房间',
+    serverUrl: '协同服务',
+    serverUrlPlaceholder: '例如 ws://192.168.1.8:1234',
+    connected: '已连接',
+    connecting: '连接中…',
+    disconnected: '未连接',
+    join: '加入协同',
+    leave: '退出协同',
+    copyInvite: '复制邀请链接',
+    copied: '邀请链接已复制',
+    copyFailed: '复制失败',
+    joinSuccess: '已加入协同房间',
+    autoJoinSuccess: '已用昵称「{name}」进入房间，可在协同面板修改',
+    leaveSuccess: '已退出协同',
+    userNameRequired: '请输入昵称',
+    roomRequired: '请输入房间号',
+    serverRequired: '请填写协同服务地址',
+    pluginMissing: '协同插件未就绪',
+    connectFailed: '连接协同服务失败，请确认已启动协同服务',
+    peers: '当前在线',
+    you: '我',
+    tip: '同一房间的人会实时同步画布。局域网协作请使用启动脚本写入的本机 IP。',
+    startServerTip: '可双击项目根目录「启动.bat」一键启动页面、协同和 AI 服务'
   }
 }

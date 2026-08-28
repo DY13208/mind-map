@@ -112,6 +112,7 @@ import {
 } from 'simple-mind-map/src/utils'
 import { mapState } from 'vuex'
 import AiConfigDialog from './AiConfigDialog.vue'
+import { getAiBaseUrl } from '@/utils/runtimeConfig'
 
 export default {
   components: {
@@ -175,7 +176,7 @@ export default {
     // 客户端连接检测
     async testConnect() {
       try {
-        await fetch(`http://localhost:${this.aiConfig.port}/ai/test`, {
+        await fetch(`${getAiBaseUrl(this.aiConfig.port)}/ai/test`, {
           method: 'GET'
         })
         this.$message.success(this.$t('ai.connectSuccessful'))
@@ -204,7 +205,7 @@ export default {
       // 检查连接
       let isConnect = false
       try {
-        await fetch(`http://localhost:${this.aiConfig.port}/ai/test`, {
+        await fetch(`${getAiBaseUrl(this.aiConfig.port)}/ai/test`, {
           method: 'GET'
         })
         isConnect = true

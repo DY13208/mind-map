@@ -67,8 +67,8 @@ const createServe = () => {
     }
   })
 
-  app.listen(port, () => {
-    console.log(`app listening on port ${port}`)
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`AI server listening on http://0.0.0.0:${port}`)
   })
 }
 

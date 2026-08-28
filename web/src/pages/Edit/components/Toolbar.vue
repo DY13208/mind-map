@@ -62,6 +62,14 @@
         </div>
         <div
           class="toolbarBtn"
+          :class="{ cooperating: cooperateStatus === 'connected' }"
+          @click="$bus.$emit('showCooperate')"
+        >
+          <span class="icon iconfont iconxietongwendang"></span>
+          <span class="text">{{ $t('toolbar.cooperate') }}</span>
+        </div>
+        <div
+          class="toolbarBtn"
           @click="$bus.$emit('showExport')"
           style="margin-right: 0;"
         >
@@ -214,7 +222,8 @@ export default {
       isDark: state => state.localConfig.isDark,
       isHandleLocalFile: state => state.isHandleLocalFile,
       openNodeRichText: state => state.localConfig.openNodeRichText,
-      enableAi: state => state.localConfig.enableAi
+      enableAi: state => state.localConfig.enableAi,
+      cooperateStatus: state => state.cooperateStatus
     }),
 
     btnLit() {
@@ -586,6 +595,14 @@ export default {
           border-color: transparent;
         }
 
+        &.cooperating {
+          color: #67c23a;
+
+          .icon {
+            background: rgba(103, 194, 58, 0.15);
+          }
+        }
+
         &:hover {
           &:not(.disabled) {
             .icon {
@@ -737,6 +754,14 @@ export default {
       &.active {
         .icon {
           background: #f5f5f5;
+        }
+      }
+
+      &.cooperating {
+        color: #67c23a;
+
+        .icon {
+          background: #f0f9eb;
         }
       }
 
