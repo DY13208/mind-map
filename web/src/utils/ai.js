@@ -1,3 +1,5 @@
+import { getAiBaseUrl } from './runtimeConfig'
+
 class Ai {
   constructor(options = {}) {
     this.options = options
@@ -73,7 +75,7 @@ class Ai {
 
   async postMsg(data) {
     this.controller = new AbortController()
-    const res = await fetch(`http://localhost:${this.options.port}/ai/chat`, {
+    const res = await fetch(`${getAiBaseUrl(this.options.port)}/ai/chat`, {
       signal: this.controller.signal,
       method: 'POST',
       headers: {

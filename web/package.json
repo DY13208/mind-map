@@ -9,16 +9,19 @@
     "buildLibrary": "node ./scripts/updateVersion.js && vue-cli-service build --mode library --target lib --name simpleMindMap ../simple-mind-map/full.js --dest ../simple-mind-map/dist && esbuild ../simple-mind-map/full.js --bundle --external:buffer --format=esm --outfile=../simple-mind-map/dist/simpleMindMap.esm.js && esbuild ../simple-mind-map/full.js --bundle --minify --external:buffer --format=esm --outfile=../simple-mind-map/dist/simpleMindMap.esm.min.js",
     "format": "prettier --write src/* src/*/* src/*/*/* src/*/*/*/*",
     "createNodeImageList": "node ./scripts/createNodeImageList.js",
-    "ai:serve": "node ./scripts/ai.js"
+    "ai:serve": "node ./scripts/ai.js",
+    "collab": "node ../simple-mind-map/bin/collabServer.js"
   },
   "dependencies": {
     "@toast-ui/editor": "^3.1.5",
     "axios": "^1.7.9",
     "codemirror": "^5.65.16",
     "core-js": "^3.6.5",
+    "cos-nodejs-sdk-v5": "^3.0.0",
     "element-ui": "^2.15.1",
     "highlight.js": "^10.7.3",
     "katex": "^0.16.9",
+    "pg": "^8.23.0",
     "simple-mind-map": "^0.14.0-fix.3",
     "simple-mind-map-plugin-themes": "^1.0.0",
     "v-viewer": "^1.6.4",
@@ -26,7 +29,9 @@
     "vue-i18n": "^8.27.2",
     "vue-router": "^3.5.1",
     "vuex": "^3.6.2",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "y-websocket": "^1.5.4",
+    "yjs": "^13.6.8"
   },
   "devDependencies": {
     "@vue/cli-plugin-babel": "^4.5.0",

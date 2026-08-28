@@ -350,7 +350,8 @@ export default {
       'Vui lòng xuất tệp đang chỉnh sửa trước khi tạo mới, Cẩn thận mất nội dung',
     openFileTip:
       'Vui lòng xuất tệp đang chỉnh sửa trước khi mở tệp, Cẩn thận mất nội dung',
-    ai: 'AI'
+    ai: 'AI',
+    cooperate: 'Cộng tác'
   },
   edit: {
     newFeatureNoticeTitle: 'Nhắc nhở tính năng mới',
@@ -541,5 +542,35 @@ export default {
     tip3: 'Liên kết thành công',
     tip4: 'Xóa thành công',
     tip5: 'Nút liên kết không tồn tại. Có nên xóa liên kết không?'
+  },
+  cooperate: {
+    title: 'Chỉnh sửa cộng tác',
+    userName: 'Tên',
+    userNamePlaceholder: 'Nhập biệt danh',
+    roomName: 'Phòng',
+    roomNamePlaceholder: 'Cùng phòng sẽ đồng bộ thời gian thực',
+    newRoom: 'Phòng mới',
+    serverUrl: 'Máy chủ',
+    serverUrlPlaceholder: 'ví dụ ws://192.168.1.8:1234',
+    connected: 'Đã kết nối',
+    connecting: 'Đang kết nối…',
+    disconnected: 'Chưa kết nối',
+    join: 'Tham gia',
+    leave: 'Rời khỏi',
+    copyInvite: 'Sao chép liên kết mời',
+    copied: 'Đã sao chép liên kết',
+    copyFailed: 'Sao chép thất bại',
+    joinSuccess: 'Đã vào phòng',
+    autoJoinSuccess: 'Đã vào phòng với tên "{name}"',
+    leaveSuccess: 'Đã rời cộng tác',
+    userNameRequired: 'Vui lòng nhập biệt danh',
+    roomRequired: 'Vui lòng nhập tên phòng',
+    serverRequired: 'Vui lòng nhập địa chỉ máy chủ',
+    pluginMissing: 'Plugin cộng tác chưa sẵn sàng',
+    connectFailed: 'Không kết nối được máy chủ cộng tác',
+    peers: 'Đang online',
+    you: 'Tôi',
+    tip: 'Người trong cùng phòng sẽ đồng bộ canvas theo thời gian thực.',
+    startServerTip: 'Hãy chạy npm run collab trong thư mục web trước'
   }
 }

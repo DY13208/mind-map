@@ -1,86 +1,118 @@
-<h1 align="center">Simple mind map</h1>
+# 局域网思维导图
 
-[![npm-version](https://img.shields.io/npm/v/simple-mind-map)](https://www.npmjs.com/package/simple-mind-map)
-![npm download](https://img.shields.io/npm/dm/simple-mind-map)
-[![GitHub issues](https://img.shields.io/github/issues/wanglin2/mind-map)](https://github.com/wanglin2/mind-map/issues)
-![license](https://img.shields.io/npm/l/express.svg)
-[![GitHub stars](https://img.shields.io/github/stars/wanglin2/mind-map)](https://github.com/wanglin2/mind-map/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/wanglin2/mind-map)](https://github.com/wanglin2/mind-map/network/members)
+基于 [simple-mind-map](https://github.com/wanglin2/mind-map) 二次使用，用于在本机和局域网里画思维导图，并支持多人实时协同。
 
-[English](./README_EN.md) | 中文
+功能说明仍以官方文档为准：
 
-> 中文名：思绪思维导图。一个简单&强大的 Web 思维导图库和思维导图软件。
+> [https://wanglin2.github.io/mind-map-docs/](https://wanglin2.github.io/mind-map-docs/)
 
-本项目包含两部分：开源的JavaScript库和闭源的客户端软件。
+---
 
-# 库、Web
+## 能做什么
 
-> 即本仓库中的代码，目前已进入低维护状态。
+- 本机打开网页即可编辑思维导图
+- 一键探测本机 IP，局域网同事用同一个地址访问
+- 同一房间实时协同编辑
+- 导入 / 导出常见格式，主题、大纲、演示等功能可直接用
+- 可选 AI 功能（需自行配置密钥）
 
-- 一个 `js` 思维导图库，不依赖任何框架，可以用来快速完成 Web 思维导图产品的开发。
+---
 
->  开发文档：[https://wanglin2.github.io/mind-map-docs/](https://wanglin2.github.io/mind-map-docs/)
+## 环境
 
-- 一个 Web 思维导图，基于思维导图库、`Vue2.x`、`ElementUI` 开发，支持操作电脑本地文件，可以当做一个在线版思维导图应用使用，也可以自部署和二次开发。
+- Windows
+- 已安装 [Node.js](https://nodejs.org/)（建议 18+）
 
-> 在线地址：[https://web.sxmind.cn/](https://web.sxmind.cn/)
+首次使用前，如果还没装过依赖：
 
-了解更多信息：[README](./README_MORE_ZH.md)。
+```bash
+cd web
+npm i
+cd ../simple-mind-map
+npm i
+```
 
-# 客户端、插件
+双击启动脚本时，若检测到缺少依赖也会自动安装。
 
-> 客户端和插件代码不开源，正在积极开发维护中。
+数据库和对象存储配置写在项目根目录的 `.env`（和 `启动.bat` 同一级）。可先复制 `.env.example`。启动脚本会自动读取。
 
-产品官网：[https://sxmind.cn/](https://sxmind.cn/)
+---
 
-## 思绪思维导图客户端
+## 一键启动
 
-本地化存储，隐私优先，数据安全，软件无需联网即可使用！
+双击项目根目录的 `启动.bat`。
 
-- [x] 1.支持创建无限数量的文件、节点（自由节点）；支持创建使用模板；
-- [x] 2.提供丰富的设置：基础设置、自定义字体/快捷键/右键菜单/图标、图床配置、AI配置、webdav云同步配置等等，可玩性很高；
-- [x] 3.支持思维导图、逻辑结构图、目录组织图、组织结构图、时间轴、鱼骨图、表格等多种结构类型；
-- [x] 4.内置上百个丰富好看的主题，也支持自定义主题及AI生成主题；
-- [x] 5.节点支持添加文本、图片、链接、图标、备注、附件、标签、概要节点、关联线、外框、标记、待办、描述、编号、数学公式等丰富内容；
-- [x] 6.支持导入XMind、FreeMind、Markdown、Txt、Xlsx等格式文件；支持导出为PNG、XMind、SVG、PDF、Markdown、Txt、Xlsx、FreeMind、Mermaid、Html等格式；
-- [x] 7.丰富的样式设置：文字、边框、背景、形状、线条、内外边距、图片标签布局等等；
-- [x] 8.支持历史版本管理、演示模式、AI生成、手绘风格、大纲编辑、水印、滚动条、同级节点对齐、小地图、进入指定节点、彩虹线条、节点双向链接、搜索替换等等实用有趣的功能；
+| 选项 | 作用 |
+| --- | --- |
+| `1` | 获取本机 IP，并设为对外使用的地址 |
+| `2` | 启动全部服务（页面、协同、AI） |
+| `3` | 设 IP 并启动全部服务（直接回车就是这一项） |
+| `4` | 停止全部服务 |
 
-支持Windows、Mac及Linux系统；支持中文简体、繁體中文、English、Tiếng Việt、Русский、日本語、한국어、Deutsch、Français、Português语言。
+启动成功后会自动打开浏览器。本机 IP 一般是 `192.168.x.x`，例如：
 
-下载地址：[Github](https://github.com/wanglin2/mind-map/releases)、[百度网盘](https://pan.baidu.com/s/1C8phEJ5pagAAa-o1tU42Uw?pwd=jqfb)、[夸克网盘](https://pan.quark.cn/s/2733982f1976)、[微软应用商店](https://apps.microsoft.com/detail/9p58vg94khcq?hl=zh-CN&gl=CN)
+```
+http://192.168.0.204:8081
+```
 
-> 如果在macOS上安装后无法打开，报错**不受信任**或者**移到垃圾箱**，执行下面命令后再启动即可：
-> ``` shell
-> sudo xattr -d com.apple.quarantine /Applications/思绪思维导图.app
-> ```
+关掉启动窗口，或双击 `停止.bat`，全部服务会一起停掉。
 
-![](./assets/client/client1.png)
+也可以用命令行：
 
-![](./assets/client/client2.png)
+```bash
+node scripts/launcher.js          # 打开菜单
+node scripts/launcher.js ip       # 只设置 IP
+node scripts/launcher.js start    # 用已保存的 IP 启动
+node scripts/launcher.js all     # 设 IP 并启动
+node scripts/launcher.js stop     # 停止服务
+```
 
-![](./assets/client/client3.png)
+---
 
-![](./assets/client/client4.png)
+## 服务端口
 
-![](./assets/client/client5.png)
+| 服务 | 地址 | 说明 |
+| --- | --- | --- |
+| 页面 | `http://本机IP:8081` | 思维导图网页 |
+| 协同 | `ws://本机IP:1234` | 多人实时编辑 |
+| AI | `http://本机IP:3456` | AI 代理，可选 |
 
-![](./assets/client/client6.png)
+脚本会把 IP 写入 `web/public/runtime-config.js`，页面里的协同地址和邀请链接会跟这个 IP 走，不要再用 `localhost` 发给同事。
 
-## Obsidian插件
+---
 
-下载地址：[Github](https://github.com/wanglin2/obsidian-simplemindmap/releases)
+## 多人协同
 
-![](./assets/ob/ob1.png)
+1. 主机用 `启动.bat` 把服务跑起来。
+2. 所有人打开同一个页面地址，例如 `http://192.168.0.204:8081`。
+3. 点工具栏 **协同**，填昵称，加入**同一个房间号**。
+4. 协同服务地址用 `ws://本机IP:1234`。启动脚本写过 IP 后，页面会自动带上，一般不用改。
+5. 点 **复制邀请链接** 发给同事，链接里会带房间号。
 
-![](./assets/ob/ob2.png)
+同一局域网才能连上。如果同事打不开页面，检查 Windows 防火墙是否放行 `8081`、`1234`。
 
-![](./assets/ob/ob3.png)
+---
 
-![](./assets/ob/ob4.png)
+## 目录
 
-![](./assets/ob/ob5.png)
+```
+mind-map/
+  启动.bat                 一键启动
+  停止.bat                 一键停止
+  scripts/launcher.js     启动台
+  web/                    网页端
+  simple-mind-map/        思维导图库
+```
 
-## UTools插件
+---
 
-已上架[uTools](https://www.u.tools/)插件应用市场，可直接在`uTools`插件应用市场中搜索`思绪`进行安装，也可以直接访问该地址：[主页](https://www.u-tools.cn/plugins/detail/%E6%80%9D%E7%BB%AA%E6%80%9D%E7%BB%B4%E5%AF%BC%E5%9B%BE/)，点击右侧的【启动】按钮进行安装。
+## 常见问题
+
+**页面能开，但协同连不上**  
+确认主机上的协同服务还在跑，地址是 `ws://本机IP:1234`，双方房间号一致。
+
+**同事访问不了 192.168.x.x**  
+双方要在同一局域网。主机防火墙需要放行 8081、1234。不要把 `localhost` 链接发给别人。
+
+**AI 不可用**  
+AI 服务会随启动脚本一起起来。还要在页面里填好自己的 API Key。不配也能正常画图和协同。

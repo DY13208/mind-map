@@ -30,12 +30,14 @@ class Cooperate {
     this.userInfo = null
     // 是否正在重新设置思维导图数据
     this.isSetData = false
+    // 尚未写入 ydoc 的本地数据，等同步完成后再决定推送还是采用远端
+    this.pendingInitData = this.mindMap.opt.data
+      ? simpleDeepClone(this.mindMap.opt.data)
+      : null
+    this.hasAppliedSync = false
+    this.syncTimer = null
     // 绑定事件
     this.bindEvent()
-    // 处理实例化时传入的思维导图数据
-    if (this.mindMap.opt.data) {
-      this.initData(this.mindMap.opt.data)
-    }
   }
 
   // 初始化数据
@@ -65,7 +67,9 @@ class Cooperate {
 
   // 设置连接提供者
   setProvider(provider, webrtcProviderConfig = {}) {
+    this.disconnectProvider({ recreateDoc: false })
     const { roomName, signalingList, ...otherConfig } = webrtcProviderConfig
+    this.hasAppliedSync = false
     this.provider =
       provider ||
       new WebrtcProvider(roomName, this.ydoc, {
@@ -77,6 +81,98 @@ class Cooperate {
     // 监听状态同步事件
     this.onAwareness = this.onAwareness.bind(this)
     this.awareness.on('change', this.onAwareness)
+    this.bindProviderSync()
+  }
+
+  // 等待文档同步后再决定采用远端数据还是推送本地数据
+  bindProviderSync() {
+    const apply = () => {
+      if (this.hasAppliedSync) return
+      this.hasAppliedSync = true
+      if (this.syncTimer) {
+        clearTimeout(this.syncTimer)
+        this.syncTimer = null
+      }
+      this.applySyncedDoc()
+    }
+    if (this.provider && typeof this.provider.on === 'function') {
+      this.provider.on('sync', isSynced => {
+        if (isSynced !== false) apply()
+      })
+      this.provider.on('synced', synced => {
+        if (synced !== false) apply()
+      })
+    }
+    if (this.provider && this.provider.synced) {
+      apply()
+      return
+    }
+    this.syncTimer = setTimeout(apply, 4000)
+  }
+
+  applySyncedDoc() {
+    this.ymap = this.ydoc.getMap()
+    if (this.onObserve) {
+      try {
+        this.ymap.unobserve(this.onObserve)
+      } catch (e) {
+        // ignore
+      }
+    }
+    this.onObserve = this.onObserve.bind(this)
+    this.ymap.observe(this.onObserve)
+    const remoteSize = [...this.ymap.keys()].length
+    if (remoteSize > 0) {
+      const data = this.ymap.toJSON()
+      this.currentData = data
+      const res = transformObjectToTreeData(data)
+      if (res) {
+        this.mindMap.updateData(res)
+      }
+      return
+    }
+    if (this.pendingInitData) {
+      this.initData(this.pendingInitData)
+    }
+  }
+
+  // 断开协同连接
+  disconnectProvider({ recreateDoc = true } = {}) {
+    if (this.syncTimer) {
+      clearTimeout(this.syncTimer)
+      this.syncTimer = null
+    }
+    if (this.awareness) {
+      this.awareness.off('change', this.onAwareness)
+      try {
+        this.awareness.setLocalState(null)
+      } catch (e) {
+        // ignore
+      }
+    }
+    if (this.provider && typeof this.provider.destroy === 'function') {
+      this.provider.destroy()
+    }
+    this.provider = null
+    this.awareness = null
+    this.currentAwarenessData = []
+    this.waitNodeUidMap = {}
+    this.hasAppliedSync = false
+    if (!recreateDoc) return
+    if (this.ymap && this.onObserve) {
+      this.ymap.unobserve(this.onObserve)
+    }
+    this.ymap = null
+    this.currentData = null
+    try {
+      this.pendingInitData = simpleDeepClone(this.mindMap.getData())
+    } catch (e) {
+      // ignore
+    }
+    if (this.ydoc) {
+      this.ydoc.destroy()
+    }
+    this.ydoc = new Y.Doc()
   }
 
   // 绑定事件
@@ -100,14 +196,11 @@ class Cooperate {
 
   // 解绑事件
   unBindEvent() {
-    if (this.ymap) {
-      this.ymap.unobserve(this.onObserve)
-    }
+    this.disconnectProvider()
     this.mindMap.off('data_change', this.onDataChange)
     this.mindMap.off('node_active', this.onNodeActive)
     this.mindMap.off('node_tree_render_end', this.onNodeTreeRenderEnd)
     this.mindMap.off('set_data', this.onSetData)
-    this.ydoc.destroy()
   }
 
   // 数据同步时的处理，更新当前思维导图
@@ -127,6 +220,10 @@ class Cooperate {
   onDataChange(data) {
     if (this.isSetData) {
       this.isSetData = false
+      return
+    }
+    if (!this.ymap) {
+      this.pendingInitData = data
       return
     }
     const res = transformTreeDataToObject(data)
@@ -163,7 +260,7 @@ class Cooperate {
       })
       // 找出删除的
       const deleteList = []
-      Object.keys(oldData).forEach(uid => {
+      Object.keys(oldData || {}).forEach(uid => {
         if (!data[uid]) {
           deleteList.push({ uid, data: oldData[uid] })
         }
@@ -182,7 +279,7 @@ class Cooperate {
 
   // 节点激活状态改变后触发感知数据同步
   onNodeActive(node, nodeList) {
-    if (this.userInfo) {
+    if (this.userInfo && this.awareness) {
       this.awareness.setLocalStateField(this.userInfo.name, {
         // 用户信息
         userInfo: {
@@ -210,7 +307,10 @@ class Cooperate {
   // 监听思维导图数据的重新设置事件
   onSetData(data) {
     this.isSetData = true
-    this.initData(data)
+    this.pendingInitData = data
+    if (this.ymap) {
+      this.initData(data)
+    }
   }
 
   // 设置用户信息
@@ -241,6 +341,7 @@ class Cooperate {
         const data = value[userName]
         const userInfo = data.userInfo
         const nodeIdList = data.nodeIdList
+        if (!userInfo || !nodeIdList) return
         nodeIdList.forEach(uid => {
           const node = this.mindMap.renderer.findNodeByUid(uid)
           callback(uid, node, userInfo)
@@ -259,7 +360,7 @@ class Cooperate {
     this.waitNodeUidMap = {}
     walk(data, (uid, node, userInfo) => {
       // 不显示自己
-      if (userInfo.id === this.userInfo.id) return
+      if (this.userInfo && userInfo.id === this.userInfo.id) return
       if (node) {
         node.addUser(userInfo)
       } else {

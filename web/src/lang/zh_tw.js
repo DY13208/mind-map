@@ -343,7 +343,8 @@ export default {
     directory: '目錄',
     newFileTip: '新增檔案前，請先匯出目前編輯的檔案，以免內容遺失',
     openFileTip: '開啟檔案前，請先匯出目前編輯的檔案，以免內容遺失',
-    ai: 'AI'
+    ai: 'AI',
+    cooperate: '協同'
   },
   edit: {
     newFeatureNoticeTitle: '新功能提醒',
@@ -523,5 +524,35 @@ export default {
     tip3: '鏈接成功',
     tip4: '刪除成功',
     tip5: '鏈接節點不存在，是否刪除該鏈接？'
+  },
+  cooperate: {
+    title: '協同編輯',
+    userName: '暱稱',
+    userNamePlaceholder: '請輸入你的暱稱',
+    roomName: '房間號',
+    roomNamePlaceholder: '同一房間即可即時同步',
+    newRoom: '新房間',
+    serverUrl: '協同服務',
+    serverUrlPlaceholder: '例如 ws://192.168.1.8:1234',
+    connected: '已連線',
+    connecting: '連線中…',
+    disconnected: '未連線',
+    join: '加入協同',
+    leave: '退出協同',
+    copyInvite: '複製邀請連結',
+    copied: '邀請連結已複製',
+    copyFailed: '複製失敗',
+    joinSuccess: '已加入協同房間',
+    autoJoinSuccess: '已用暱稱「{name}」進入房間，可在協同面板修改',
+    leaveSuccess: '已退出協同',
+    userNameRequired: '請輸入暱稱',
+    roomRequired: '請輸入房間號',
+    serverRequired: '請填寫協同服務地址',
+    pluginMissing: '協同插件未就緒',
+    connectFailed: '連接協同服務失敗，請確認已啟動協同服務',
+    peers: '目前在線',
+    you: '我',
+    tip: '同一房間的人會即時同步畫布。區域網協作請把協同服務改成你的電腦 IP。',
+    startServerTip: '先啟動服務：在 web 目錄執行 npm run collab'
   }
 }

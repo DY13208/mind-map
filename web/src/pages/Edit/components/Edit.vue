@@ -52,6 +52,7 @@
     <NodeNoteSidebar v-if="mindMap" :mindMap="mindMap"></NodeNoteSidebar>
     <AiCreate v-if="mindMap && enableAi" :mindMap="mindMap"></AiCreate>
     <AiChat v-if="enableAi"></AiChat>
+    <CooperateDialog :mindMap="mindMap"></CooperateDialog>
     <div
       class="dragMask"
       v-if="showDragMask"
@@ -88,8 +89,7 @@ import OuterFrame from 'simple-mind-map/src/plugins/OuterFrame.js'
 import MindMapLayoutPro from 'simple-mind-map/src/plugins/MindMapLayoutPro.js'
 import NodeBase64ImageStorage from 'simple-mind-map/src/plugins/NodeBase64ImageStorage.js'
 import Themes from 'simple-mind-map-plugin-themes'
-// 协同编辑插件
-// import Cooperate from 'simple-mind-map/src/plugins/Cooperate.js'
+import Cooperate from 'simple-mind-map/src/plugins/Cooperate.js'
 import OutlineSidebar from './OutlineSidebar.vue'
 import Style from './Style.vue'
 import BaseStyle from './BaseStyle.vue'
@@ -126,6 +126,7 @@ import NodeImgPlacementToolbar from './NodeImgPlacementToolbar.vue'
 import NodeNoteSidebar from './NodeNoteSidebar.vue'
 import AiCreate from './AiCreate.vue'
 import AiChat from './AiChat.vue'
+import CooperateDialog from './CooperateDialog.vue'
 
 // 注册插件
 MindMap.usePlugin(MiniMap)
@@ -147,7 +148,7 @@ MindMap.usePlugin(MiniMap)
   .usePlugin(OuterFrame)
   .usePlugin(MindMapLayoutPro)
   .usePlugin(NodeBase64ImageStorage)
-// .usePlugin(Cooperate) // 协同插件
+  .usePlugin(Cooperate)
 
 // 注册主题
 Themes.init(MindMap)
@@ -185,7 +186,8 @@ export default {
     NodeImgPlacementToolbar,
     NodeNoteSidebar,
     AiCreate,
-    AiChat
+    AiChat,
+    CooperateDialog
   },
   data() {
     return {
@@ -243,8 +245,6 @@ export default {
     this.$bus.$on('showLoading', this.handleShowLoading)
     this.$bus.$on('localStorageExceeded', this.onLocalStorageExceeded)
     window.addEventListener('resize', this.handleResize)
-    this.$bus.$on('showDownloadTip', this.showDownloadTip)
-    this.webTip()
   },
   beforeDestroy() {
     this.$bus.$off('execCommand', this.execCommand)
@@ -259,7 +259,6 @@ export default {
     this.$bus.$off('showLoading', this.handleShowLoading)
     this.$bus.$off('localStorageExceeded', this.onLocalStorageExceeded)
     window.removeEventListener('resize', this.handleResize)
-    this.$bus.$off('showDownloadTip', this.showDownloadTip)
     this.mindMap.destroy()
   },
   methods: {
@@ -369,6 +368,7 @@ export default {
         },
         openRealtimeRenderOnNodeTextEdit: true,
         enableAutoEnterTextEditWhenKeydown: true,
+        onlyOneEnableActiveNodeOnCooperate: true,
         demonstrateConfig: {
           openBlankMode: false
         },
@@ -498,8 +498,6 @@ export default {
         const fullData = this.mindMap.getData(true)
         return { ...fullData }
       }
-      // 协同测试
-      this.cooperateTest()
     },
 
     // 加载相关插件
@@ -587,27 +585,6 @@ export default {
       this.mindMap.removePlugin(ScrollbarPlugin)
     },
 
-    // 协同测试
-    cooperateTest() {
-      if (this.mindMap.cooperate && this.$route.query.userName) {
-        this.mindMap.cooperate.setProvider(null, {
-          roomName: 'demo-room',
-          signalingList: ['ws://localhost:4444']
-        })
-        this.mindMap.cooperate.setUserInfo({
-          id: Math.random(),
-          name: this.$route.query.userName,
-          color: ['#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#909399'][
-            Math.floor(Math.random() * 5)
-          ],
-          avatar:
-            Math.random() > 0.5
-              ? 'https://img0.baidu.com/it/u=4270674549,2416627993&fm=253&app=138&size=w931&n=0&f=JPEG&fmt=auto?sec=1696006800&t=4d32871d14a7224a4591d0c3c7a97311'
-              : ''
-        })
-      }
-    },
-
     // 拖拽文件到页面导入
     onDragenter() {
       if (!this.enableDragImport || this.isDragOutlineTreeNode) return
@@ -625,57 +602,6 @@ export default {
       const file = dt.files && dt.files[0]
       if (!file) return
       this.$bus.$emit('importFile', file)
-    },
-
-    // 网页版试用提示
-    webTip() {
-      const storageKey = 'webUseTip'
-      const data = localStorage.getItem(storageKey)
-      if (data) {
-        return
-      }
-      this.showDownloadTip(
-        '重要提示',
-        '网页版仅供试用，请下载客户端获得完整体验~'
-      )
-      localStorage.setItem(storageKey, 1)
-    },
-
-    showDownloadTip(title, desc) {
-      const h = this.$createElement
-      this.$msgbox({
-        title,
-        message: h('div', null, [
-          h(
-            'p',
-            {
-              style: {
-                marginBottom: '12px'
-              }
-            },
-            desc
-          ),
-          h('div', null, [
-            h(
-              'a',
-              {
-                attrs: {
-                  href:
-                    'https://sxmind.cn/',
-                  target: '_blank'
-                },
-                style: {
-                  color: '#409eff',
-                  marginRight: '12px'
-                }
-              },
-              '详细了解：https://sxmind.cn/'
-            )
-          ])
-        ]),
-        showCancelButton: false,
-        showConfirmButton: false
-      })
     }
   }
 }

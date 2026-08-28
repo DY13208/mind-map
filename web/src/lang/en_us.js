@@ -352,7 +352,8 @@ export default {
       'Please export the currently edited file before creating a new one, Beware of content loss',
     openFileTip:
       'Please export the currently edited file before opening it, Beware of content loss',
-    ai: 'AI'
+    ai: 'AI',
+    cooperate: 'Collab'
   },
   edit: {
     newFeatureNoticeTitle: 'New feature reminder',
@@ -543,5 +544,35 @@ export default {
     tip3: 'Link successful',
     tip4: 'Delete successful',
     tip5: 'The link node does not exist. Weather to delete the link?'
+  },
+  cooperate: {
+    title: 'Collaborative editing',
+    userName: 'Name',
+    userNamePlaceholder: 'Enter your nickname',
+    roomName: 'Room',
+    roomNamePlaceholder: 'People in the same room sync in real time',
+    newRoom: 'New',
+    serverUrl: 'Server',
+    serverUrlPlaceholder: 'e.g. ws://192.168.1.8:1234',
+    connected: 'Connected',
+    connecting: 'Connecting…',
+    disconnected: 'Disconnected',
+    join: 'Join',
+    leave: 'Leave',
+    copyInvite: 'Copy invite link',
+    copied: 'Invite link copied',
+    copyFailed: 'Copy failed',
+    joinSuccess: 'Joined the room',
+    autoJoinSuccess: 'Entered the room as "{name}". You can change it in Collab.',
+    leaveSuccess: 'Left collaboration',
+    userNameRequired: 'Please enter a nickname',
+    roomRequired: 'Please enter a room name',
+    serverRequired: 'Please enter the collab server URL',
+    pluginMissing: 'Collaborate plugin is not ready',
+    connectFailed: 'Failed to connect. Make sure the collab server is running',
+    peers: 'Online',
+    you: 'You',
+    tip: 'People in the same room sync the canvas in real time. For LAN use, set the server to your computer IP.',
+    startServerTip: 'Run start.bat in the project root to start the page, collab and AI services'
   }
 }
