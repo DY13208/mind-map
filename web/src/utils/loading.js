@@ -2,9 +2,10 @@ import { Loading } from 'element-ui'
 
 let loadingInstance = null
 
-export const showLoading = () => {
+export const showLoading = (text = '') => {
   loadingInstance = Loading.service({
-    lock: true
+    lock: true,
+    text
   })
 }
 

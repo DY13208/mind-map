@@ -7,12 +7,14 @@
       name="viewport"
       content="width=device-width,user-scalable=no,initial-scale=1.0,maximum-scale=1.0,minimum-scale=1.0"
     />
-    <link rel="icon" href="dist/logo.ico" />
+    <link rel="icon" href="<%= BASE_URL %>logo.ico" />
     <title>思绪思维导图</title>
-    <script src="runtime-config.js"></script>
+    <script src="<%= BASE_URL %>runtime-config.js"></script>
     <script>
-      // 自定义静态资源的路径
-      window.externalPublicPath = './dist/'
+      window.externalPublicPath =
+        (window.__MIND_MAP_RUNTIME__ &&
+          window.__MIND_MAP_RUNTIME__.publicPath) ||
+        './dist/'
       // 接管应用
       window.takeOverApp = false
     </script>

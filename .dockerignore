@@ -1,0 +1,11 @@
+.git
+.idea
+node_modules
+**/node_modules
+web/node_modules/.cache
+dist
+dist_electron
+utools
+.env
+.mcp.json
+**/.DS_Store

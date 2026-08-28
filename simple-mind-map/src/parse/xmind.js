@@ -63,7 +63,8 @@ const transformXmind = async (content, files, handleMultiCanvas) => {
   const walk = async (node, newNode) => {
     newNode.data = {
       // 节点内容
-      text: isUndef(node.title) ? '' : node.title
+      text: isUndef(node.title) ? '' : node.title,
+      expand: node.branch !== 'folded'
     }
     // 节点备注
     if (node.notes) {
@@ -133,7 +134,8 @@ const transformOldXmind = content => {
     nodeTitle = nodeTitle && nodeTitle.elements && nodeTitle.elements[0].text
     // 节点内容
     newNode.data = {
-      text: isUndef(nodeTitle) ? '' : nodeTitle
+      text: isUndef(nodeTitle) ? '' : nodeTitle,
+      expand: !(node.attributes && node.attributes.branch === 'folded')
     }
     // 节点备注
     try {

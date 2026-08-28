@@ -367,6 +367,9 @@ export default {
     deleteNodeImgTip: 'Bạn có chắc xóa hình ảnh nút?',
     autoOpenNodeRichTextTip:
       'Phát hiện nội dung văn bản phong phú nhập vào, tự động bật chế độ văn bản phong phú',
+    importingTip: 'Đang nhập, vui lòng đợi…',
+    largeMapImportTip:
+      'Sơ đồ quá lớn nên đã thu gọn nhánh sâu và bật chế độ hiệu suất. Bấm mở rộng khi cần.',
     localStorageExceededTip:
       'Dung lượng sơ đồ tư duy bạn tạo đã vượt quá giới hạn lưu trữ tối đa cho phép của trình duyệt. Vui lòng xuất ngay lập tức, nếu không dữ liệu sẽ bị mất! Nên tải xuống ứng dụng khách để sử dụng, vì không có giới hạn kích thước khi sử dụng ứng dụng khách.',
     withBg: 'Với Background',
@@ -571,6 +574,16 @@ export default {
     peers: 'Đang online',
     you: 'Tôi',
     tip: 'Người trong cùng phòng sẽ đồng bộ canvas theo thời gian thực.',
-    startServerTip: 'Hãy chạy npm run collab trong thư mục web trước'
+    startServerTip: 'Chạy start.bat ở thư mục gốc để khởi động trang, cộng tác và AI',
+    files: 'Tệp đã lưu',
+    refresh: 'Làm mới',
+    openFile: 'Mở',
+    deleteFile: 'Xóa',
+    renameFile: 'Đổi tên',
+    noFiles: 'Chưa có tệp. Vào phòng cộng tác sẽ tự lưu vào thư mục mind-map trên COS.',
+    deleteConfirm: 'Xóa "{title}"? Không thể hoàn tác.',
+    openSuccess: 'Đã mở tệp',
+    fileDeleted: 'Đã xóa',
+    renamed: 'Đã đổi tên'
   }
 }

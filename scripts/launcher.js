@@ -37,6 +37,7 @@ loadRootEnv()
 const WEB_PORT = 8081
 const COLLAB_PORT = 1234
 const AI_PORT = 3456
+const MCP_PORT = 3847
 
 const children = []
 let stopping = false
@@ -108,18 +109,78 @@ function readSavedHost() {
   }
 }
 
+function mcpServerEntry(host) {
+  const entry = {
+    type: 'http',
+    url: `http://${host}:${MCP_PORT}/mcp`
+  }
+  if (process.env.MCP_TOKEN) {
+    entry.headers = {
+      Authorization: `Bearer ${process.env.MCP_TOKEN}`
+    }
+  }
+  return entry
+}
+
+function writeJson(file, data) {
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n', 'utf8')
+}
+
+function mergeUserMcp(file, host) {
+  if (!fs.existsSync(path.dirname(file))) return false
+  let data = { mcpServers: {} }
+  if (fs.existsSync(file)) {
+    try {
+      data = JSON.parse(fs.readFileSync(file, 'utf8')) || {}
+    } catch (e) {
+      return false
+    }
+  }
+  if (!data.mcpServers || typeof data.mcpServers !== 'object') {
+    data.mcpServers = {}
+  }
+  data.mcpServers['mind-map'] = {
+    ...(data.mcpServers['mind-map'] || {}),
+    ...mcpServerEntry(host)
+  }
+  writeJson(file, data)
+  return true
+}
+
+function writeMcpConfig(host) {
+  const entry = mcpServerEntry(host)
+  writeJson(path.join(ROOT, '.mcp.json'), {
+    mcpServers: {
+      'mind-map': entry
+    }
+  })
+  const home = os.homedir()
+  const updated = []
+  ;[
+    path.join(home, '.workbuddy', 'mcp.json'),
+    path.join(home, '.codebuddy', '.mcp.json'),
+    path.join(home, '.codebuddy', 'mcp.json')
+  ].forEach(file => {
+    if (mergeUserMcp(file, host)) updated.push(file)
+  })
+  return { entry, updated }
+}
+
 function writeRuntimeConfig(host) {
   const config = {
     host,
     webPort: WEB_PORT,
     collabPort: COLLAB_PORT,
-    aiPort: AI_PORT
+    aiPort: AI_PORT,
+    mcpPort: MCP_PORT
   }
   const content =
     'window.__MIND_MAP_RUNTIME__ = ' + JSON.stringify(config, null, 2) + '\n'
   fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true })
   fs.writeFileSync(CONFIG_FILE, content, 'utf8')
-  return config
+  const mcp = writeMcpConfig(host)
+  return { ...config, mcp }
 }
 
 function pidsOnPort(port) {
@@ -157,7 +218,7 @@ function killPort(port) {
 }
 
 function stopAll() {
-  ;[WEB_PORT, COLLAB_PORT, AI_PORT].forEach(port => {
+  ;[WEB_PORT, COLLAB_PORT, AI_PORT, MCP_PORT].forEach(port => {
     const n = killPort(port)
     if (n) log(paint(c.dim, `  已释放端口 ${port}`))
   })
@@ -166,10 +227,18 @@ function stopAll() {
 function ensureDeps() {
   const targets = [
     { dir: WEB_DIR, name: 'web' },
-    { dir: LIB_DIR, name: 'simple-mind-map' }
+    {
+      dir: LIB_DIR,
+      name: 'simple-mind-map',
+      extra: ['pg', 'cos-nodejs-sdk-v5']
+    }
   ]
   targets.forEach(item => {
-    if (fs.existsSync(path.join(item.dir, 'node_modules'))) return
+    const hasModules = fs.existsSync(path.join(item.dir, 'node_modules'))
+    const missingExtra = (item.extra || []).some(
+      name => !fs.existsSync(path.join(item.dir, 'node_modules', name))
+    )
+    if (hasModules && !missingExtra) return
     log(paint(c.yellow, `  正在安装 ${item.name} 依赖...`))
     execSync('npm install', { cwd: item.dir, stdio: 'inherit' })
   })
@@ -241,13 +310,23 @@ function openBrowser(url) {
 }
 
 function printUrls(host) {
+  const mcp = mcpServerEntry(host)
   log('')
   log(paint(c.bold, '  访问地址'))
   log(`  页面    ${paint(c.green, `http://${host}:${WEB_PORT}`)}`)
   log(`  协同    ${paint(c.green, `ws://${host}:${COLLAB_PORT}`)}`)
   log(`  AI      ${paint(c.green, `http://${host}:${AI_PORT}`)}`)
+  log(`  MCP     ${paint(c.green, mcp.url)}`)
   log('')
-  log(paint(c.dim, '  局域网同事打开页面地址，点「协同」，填同一房间即可。'))
+  log(paint(c.bold, '  WorkBuddy 配置（地址由启动脚本按当前主机 IP 写入）'))
+  log(
+    JSON.stringify({ mcpServers: { 'mind-map': mcp } }, null, 2)
+      .split(/\r?\n/)
+      .map(line => '  ' + line)
+      .join('\n')
+  )
+  log('')
+  log(paint(c.dim, '  已写入项目 .mcp.json。局域网同事打开页面地址即可协同。'))
   log(paint(c.dim, '  关闭本窗口或按 Ctrl+C 会停止全部服务。'))
   log('')
 }
@@ -296,9 +375,12 @@ async function pickHost({ interactive = true } = {}) {
 
 async function setHost({ interactive = true } = {}) {
   const host = await pickHost({ interactive })
-  writeRuntimeConfig(host)
+  const written = writeRuntimeConfig(host)
   log('')
   log(paint(c.green, `  已将使用 IP 设为 ${host}`))
+  ;(written.mcp.updated || []).forEach(file => {
+    log(paint(c.dim, `  已同步 MCP 地址到 ${file}`))
+  })
   printUrls(host)
   return host
 }
@@ -320,7 +402,25 @@ async function startAll({ pickIp = false } = {}) {
     ['./bin/collabServer.js'],
     LIB_DIR,
     c.cyan,
-    { PORT: String(COLLAB_PORT) }
+    {
+      PORT: String(COLLAB_PORT),
+      PUBLIC_HOST: host,
+      WEB_PORT: String(WEB_PORT)
+    }
+  )
+  startProcess(
+    'MCP',
+    'node',
+    ['./bin/mcpServer.mjs', '--http'],
+    LIB_DIR,
+    c.white,
+    {
+      MCP_PORT: String(MCP_PORT),
+      MCP_HOST: '0.0.0.0',
+      MIND_MAP_API: `http://127.0.0.1:${COLLAB_PORT}`,
+      PUBLIC_HOST: host,
+      WEB_PORT: String(WEB_PORT)
+    }
   )
   startProcess('AI', 'node', ['./scripts/ai.js'], WEB_DIR, c.yellow)
   startProcess(
@@ -366,14 +466,43 @@ async function startAll({ pickIp = false } = {}) {
   })
 }
 
+async function startDocker() {
+  const script = path.join(ROOT, 'scripts', 'docker-up.js')
+  log(paint(c.yellow, '  交给 Docker：内部跑协同 / MCP / AI / 数据库，对外只开一个端口。'))
+  log('')
+  await new Promise((resolve, reject) => {
+    const child = spawn('node', [script, 'up'], {
+      cwd: ROOT,
+      stdio: 'inherit',
+      shell: true
+    })
+    child.on('exit', code => {
+      if (code) reject(new Error('Docker 启动失败'))
+      else resolve()
+    })
+  })
+}
+
+function stopDocker() {
+  const script = path.join(ROOT, 'scripts', 'docker-up.js')
+  try {
+    execSync(`node "${script}" down`, { cwd: ROOT, stdio: 'inherit' })
+    log(paint(c.green, '  Docker 已停止'))
+  } catch (e) {
+    log(paint(c.red, '  停止 Docker 失败，请确认 Docker Desktop 正在运行'))
+  }
+}
+
 function printMenu(host) {
   banner()
   log(`  当前使用 IP：${paint(c.green, host || '未设置')}`)
   log('')
   log(`  ${paint(c.cyan, '[1]')}  获取本机 IP 并设为使用地址`)
-  log(`  ${paint(c.cyan, '[2]')}  启动全部服务（页面 / 协同 / AI）`)
+  log(`  ${paint(c.cyan, '[2]')}  启动全部服务（页面 / 协同 / AI / MCP）`)
   log(`  ${paint(c.cyan, '[3]')}  一键：设 IP + 启动全部服务  ${paint(c.dim, '← 回车默认')}`)
   log(`  ${paint(c.cyan, '[4]')}  停止全部服务`)
+  log(`  ${paint(c.cyan, '[5]')}  Docker 一键启动 ${paint(c.dim, '← 只对外开一个端口，推荐')}`)
+  log(`  ${paint(c.cyan, '[6]')}  停止 Docker`)
   log(`  ${paint(c.cyan, '[Q]')}  退出`)
   log('')
 }
@@ -399,6 +528,15 @@ async function menu() {
     if (answer === '4') {
       stopAll()
       log(paint(c.green, '  服务已停止'))
+      await ask(paint(c.dim, '  按回车返回菜单...'))
+      continue
+    }
+    if (answer === '5') {
+      await startDocker()
+      return
+    }
+    if (answer === '6') {
+      stopDocker()
       await ask(paint(c.dim, '  按回车返回菜单...'))
       continue
     }
@@ -435,6 +573,16 @@ async function main() {
     banner()
     stopAll()
     log(paint(c.green, '  服务已停止'))
+    return
+  }
+  if (cmd === 'docker' || cmd === 'docker-up') {
+    banner()
+    await startDocker()
+    return
+  }
+  if (cmd === 'docker-stop' || cmd === 'docker-down') {
+    banner()
+    stopDocker()
     return
   }
   await menu()

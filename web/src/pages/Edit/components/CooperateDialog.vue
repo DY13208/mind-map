@@ -3,7 +3,7 @@
     class="cooperateDialog"
     :title="$t('cooperate.title')"
     :visible.sync="dialogVisible"
-    width="520px"
+    width="600px"
     append-to-body
   >
     <div class="cooperateBox">
@@ -59,6 +59,39 @@
           <span class="you" v-if="peer.isMe">{{ $t('cooperate.you') }}</span>
         </div>
       </div>
+      <div class="fileBox">
+        <div class="fileHead">
+          <span>{{ $t('cooperate.files') }}</span>
+          <el-button type="text" @click="loadFiles">{{
+            $t('cooperate.refresh')
+          }}</el-button>
+        </div>
+        <div class="empty" v-if="!fileList.length && !filesLoading">
+          {{ $t('cooperate.noFiles') }}
+        </div>
+        <div
+          class="fileItem"
+          v-for="item in fileList"
+          :key="item.room_key"
+          :class="{ current: connected && roomName === item.room_key }"
+        >
+          <div class="fileMeta">
+            <div class="fileTitle">{{ item.title }}</div>
+            <div class="fileTime">{{ formatTime(item.updated_at) }}</div>
+          </div>
+          <div class="fileActions">
+            <el-button type="text" @click="openFile(item)">{{
+              $t('cooperate.openFile')
+            }}</el-button>
+            <el-button type="text" @click="renameSavedFile(item)">{{
+              $t('cooperate.renameFile')
+            }}</el-button>
+            <el-button type="text" class="danger" @click="removeSavedFile(item)">{{
+              $t('cooperate.deleteFile')
+            }}</el-button>
+          </div>
+        </div>
+      </div>
     </div>
     <div slot="footer" class="dialog-footer">
       <el-button @click="copyInvite" :disabled="!roomName">{{
@@ -78,6 +111,7 @@
 import { WebsocketProvider } from 'y-websocket'
 import { mapMutations, mapState } from 'vuex'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
+import { listFiles, renameFile as renameFileApi, deleteFile as deleteFileApi } from '@/utils/fileApi'
 
 const USER_NAME_KEY = 'COOPERATE_USER_NAME'
 const USER_ID_KEY = 'COOPERATE_USER_ID'
@@ -129,7 +163,9 @@ export default {
       peerList: [],
       provider: null,
       connectTimer: null,
-      joinedOnce: false
+      joinedOnce: false,
+      fileList: [],
+      filesLoading: false
     }
   },
   computed: {
@@ -176,6 +212,7 @@ export default {
 
     open() {
       this.dialogVisible = true
+      this.loadFiles()
     },
 
     createRoom() {
@@ -239,12 +276,9 @@ export default {
             clearTimeout(this.connectTimer)
             this.connectTimer = null
           }
-          if (!this.joinedOnce) {
-            this.joinedOnce = true
-            this.$message.success(
-              this.$t('cooperate.autoJoinSuccess', { name: this.userName })
-            )
-          }
+          this.loadFiles()
+          setTimeout(() => this.loadFiles(), 2500)
+          this.joinedOnce = true
         }
       })
       provider.on('connection-error', () => {
@@ -271,7 +305,8 @@ export default {
       provider.connect()
     },
 
-    leave() {
+    leave(options = {}) {
+      const silent = !!options.silent
       if (this.connectTimer) {
         clearTimeout(this.connectTimer)
         this.connectTimer = null
@@ -285,7 +320,7 @@ export default {
       this.joinedOnce = false
       this.peerList = []
       this.setCooperateStatus('disconnected')
-      this.$message.success(this.$t('cooperate.leaveSuccess'))
+      if (!silent) this.$message.success(this.$t('cooperate.leaveSuccess'))
     },
 
     unbindProvider() {
@@ -367,6 +402,79 @@ export default {
         this.$message.error(this.$t('cooperate.copyFailed'))
       }
       document.body.removeChild(input)
+    },
+
+    formatTime(value) {
+      if (!value) return ''
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) return ''
+      const pad = n => String(n).padStart(2, '0')
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+        date.getDate()
+      )} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+    },
+
+    async loadFiles() {
+      this.filesLoading = true
+      try {
+        const data = await listFiles()
+        this.fileList = data.list || []
+      } catch (err) {
+        this.fileList = []
+      } finally {
+        this.filesLoading = false
+      }
+    },
+
+    async openFile(item) {
+      if (!item || !item.room_key) return
+      if (this.connected && this.roomName === item.room_key) {
+        this.$message.success(this.$t('cooperate.openSuccess'))
+        return
+      }
+      if (this.connected) this.leave({ silent: true })
+      this.roomName = item.room_key
+      this.$nextTick(() => {
+        this.join()
+      })
+    },
+
+    async renameSavedFile(item) {
+      try {
+        const { value } = await this.$prompt(
+          this.$t('cooperate.renameFile'),
+          this.$t('cooperate.files'),
+          {
+            inputValue: item.title,
+            inputValidator: val => !!String(val || '').trim()
+          }
+        )
+        await renameFileApi(item.room_key, value)
+        this.$message.success(this.$t('cooperate.renamed'))
+        this.loadFiles()
+      } catch (err) {
+        if (err === 'cancel' || err === 'close') return
+        this.$message.error(err.message || this.$t('cooperate.connectFailed'))
+      }
+    },
+
+    async removeSavedFile(item) {
+      try {
+        await this.$confirm(
+          this.$t('cooperate.deleteConfirm', { title: item.title }),
+          this.$t('cooperate.deleteFile'),
+          { type: 'warning' }
+        )
+        await deleteFileApi(item.room_key)
+        if (this.connected && this.roomName === item.room_key) {
+          this.leave({ silent: true })
+        }
+        this.$message.success(this.$t('cooperate.fileDeleted'))
+        this.loadFiles()
+      } catch (err) {
+        if (err === 'cancel' || err === 'close') return
+        this.$message.error(err.message || this.$t('cooperate.connectFailed'))
+      }
     }
   }
 }
@@ -452,6 +560,61 @@ export default {
 
     .you {
       color: #409eff;
+    }
+  }
+
+  .fileBox {
+    margin-top: 12px;
+    border-top: 1px solid #eee;
+    padding-top: 10px;
+
+    .fileHead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      color: #333;
+      margin-bottom: 6px;
+    }
+
+    .empty {
+      font-size: 12px;
+      color: #999;
+      padding: 8px 0;
+    }
+
+    .fileItem {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 0;
+      border-bottom: 1px solid #f2f2f2;
+
+      &.current .fileTitle {
+        color: #409eff;
+      }
+    }
+
+    .fileTitle {
+      font-size: 13px;
+      color: #333;
+    }
+
+    .fileTime {
+      font-size: 12px;
+      color: #999;
+      margin-top: 2px;
+    }
+
+    .fileActions {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+
+      .danger {
+        color: #f56c6c;
+      }
     }
   }
 }
