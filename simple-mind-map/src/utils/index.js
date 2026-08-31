@@ -1288,44 +1288,31 @@ export const handleInputPasteText = (e, text) => {
   */
 export const transformTreeDataToObject = data => {
   const res = {}
-  const walk = (root, parent) => {
+  const stack = data ? [{ root: data, parentUid: '' }] : []
+  while (stack.length > 0) {
+    const { root, parentUid } = stack.pop()
+    if (!root || !root.data) continue
     const uid = root.data.uid
-    if (parent) {
-      parent.children.push(uid)
+    if (parentUid && res[parentUid]) {
+      res[parentUid].children.push(uid)
     }
     res[uid] = {
-      isRoot: !parent,
+      isRoot: !parentUid,
       data: simpleDeepClone(root.data) || { ...root.data },
       children: []
     }
     if (root.children && root.children.length > 0) {
-      root.children.forEach(item => {
-        walk(item, res[uid])
-      })
+      // 栈是后进先出，倒序压栈以保持原始子节点顺序
+      for (let i = root.children.length - 1; i >= 0; i--) {
+        stack.push({ root: root.children[i], parentUid: uid })
+      }
     }
   }
-  walk(data, null)
   return res
 }
 
 // 将平级对象转树结构
 // transformTreeDataToObject方法的反向操作
-// 找到父节点的uid
-const _findParentUid = (data, targetUid) => {
-  const uids = Object.keys(data)
-  let res = ''
-  uids.forEach(uid => {
-    const children = data[uid].children
-    const isParent =
-      children.findIndex(childUid => {
-        return childUid === targetUid
-      }) !== -1
-    if (isParent) {
-      res = uid
-    }
-  })
-  return res
-}
 export const transformObjectToTreeData = data => {
   const uids = Object.keys(data)
   if (uids.length <= 0) return null
@@ -1333,37 +1320,20 @@ export const transformObjectToTreeData = data => {
     return data[uid].isRoot
   })
   if (!rootKey || !data[rootKey]) return null
-  // 根节点
-  const res = {
-    data: simpleDeepClone(data[rootKey].data),
-    children: []
-  }
   const map = {}
-  map[rootKey] = res
   uids.forEach(uid => {
-    const parentUid = _findParentUid(data, uid)
-    const cur = data[uid]
-    const node = map[uid] || {
-      data: simpleDeepClone(cur.data),
+    map[uid] = {
+      data: simpleDeepClone(data[uid].data),
       children: []
     }
-    if (!map[uid]) {
-      map[uid] = node
-    }
-    if (parentUid) {
-      const index = data[parentUid].children.findIndex(item => {
-        return item === uid
-      })
-      if (!map[parentUid]) {
-        map[parentUid] = {
-          data: simpleDeepClone(data[parentUid].data),
-          children: []
-        }
-      }
-      map[parentUid].children[index] = node
-    }
   })
-  return res
+  uids.forEach(parentUid => {
+    const children = data[parentUid].children || []
+    map[parentUid].children = children
+      .map(childUid => map[childUid])
+      .filter(Boolean)
+  })
+  return map[rootKey]
 }
 
 // 计算两个点的直线距离

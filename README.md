@@ -2,6 +2,8 @@
 
 基于 [simple-mind-map](https://github.com/wanglin2/mind-map) 二次使用，用于在本机和局域网里画思维导图，并支持多人实时协同。
 
+Docker 与开发启动的完整端口列表见 [PORTS.md](./PORTS.md)。
+
 功能说明仍以官方文档为准：
 
 > [https://wanglin2.github.io/mind-map-docs/](https://wanglin2.github.io/mind-map-docs/)

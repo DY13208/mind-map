@@ -36,7 +36,8 @@ async function request(path, options = {}) {
 function connect(doc) {
   const provider = new WebsocketProvider(wsUrl, roomKey, doc, {
     WebSocketPolyfill: WebSocket,
-    disableBc: true
+    disableBc: true,
+    connect: false
   })
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -48,14 +49,20 @@ function connect(doc) {
       clearTimeout(timer)
       resolve(provider)
     })
-    provider.on('connection-error', reject)
+    provider.on('connection-error', error => {
+      clearTimeout(timer)
+      provider.destroy()
+      reject(error)
+    })
+    provider.connect()
   })
 }
 
 async function expectPolicyClose(doc) {
   const provider = new WebsocketProvider(wsUrl, roomKey, doc, {
     WebSocketPolyfill: WebSocket,
-    disableBc: true
+    disableBc: true,
+    connect: false
   })
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -69,6 +76,7 @@ async function expectPolicyClose(doc) {
         resolve()
       }
     })
+    provider.connect()
   })
 }
 
@@ -153,9 +161,16 @@ async function main() {
     { previousObject: current }
   )
 
-  const closed = new Promise(resolve => {
+  const closed = new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error('active client was not closed after deletion')),
+      5000
+    )
     providerC.on('connection-close', event => {
-      if (event && event.code === 1008) resolve()
+      if (event && event.code === 1008) {
+        clearTimeout(timer)
+        resolve()
+      }
     })
   })
   const deleted = await request(`/api/files/${encodeURIComponent(roomKey)}`, {
@@ -178,8 +193,9 @@ async function main() {
   console.log(`collab websocket integration passed (${roomKey})`)
 }
 
-main().catch(err => {
-  console.error(err)
-  process.exitCode = 1
-})
-
+main()
+  .then(() => process.exit(0))
+  .catch(err => {
+    console.error(err)
+    process.exit(1)
+  })
