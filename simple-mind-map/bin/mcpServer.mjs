@@ -91,7 +91,7 @@ function createServer() {
 
   server.tool(
     'get_map',
-    '读取一张导图。format=outline（默认）只返回大纲（每行带 uid，默认最多 800 个节点，超出请 search_nodes）；format=full 只返回完整树。两种格式不会叠在一起。日常先 outline，需要整图结构时再 full。',
+    '读取一张导图。format=outline（默认）只返回大纲（每行带 uid，默认最多 800 个节点，超出请 search_nodes）；format=full 返回树，超大图会截断或改回 outline。日常先 outline。',
     {
       room_key: z.string().describe('房间号'),
       format: z
@@ -103,7 +103,7 @@ function createServer() {
         .int()
         .min(1)
         .max(5000)
-        .describe('outline 最大节点数，默认 800')
+        .describe('outline/full 最大节点数，默认 800')
         .optional()
     },
     async ({ room_key, format, max_nodes }) => {
@@ -112,10 +112,10 @@ function createServer() {
         const qs =
           mode === 'outline'
             ? `?format=outline&max_nodes=${max_nodes || 800}`
-            : '?format=full'
+            : `?format=full&max_nodes=${max_nodes || 800}`
         return ok(
           await api(`/api/files/${encodeURIComponent(room_key)}${qs}`, {
-            timeoutMs: mode === 'full' ? 45000 : 25000
+            timeoutMs: 25000
           })
         )
       } catch (err) {

@@ -66,7 +66,33 @@ function mapPayload(roomKey, obj, row, extra = {}) {
   const meta = { ...mapMeta(roomKey, obj, row), ...rest }
   if (format === 'meta') return meta
   if (format === 'full') {
-    return { ...meta, tree: mindDoc.objectToTree(obj) }
+    const size = Object.keys(obj).length
+    const limit = Math.min(
+      5000,
+      Math.max(0, Number(max_nodes || maxNodes || 0) || 0)
+    )
+    if (!limit && size > 1200) {
+      return {
+        ...meta,
+        truncated: true,
+        node_count: size,
+        hint:
+          'Map too large for format=full. Returned outline. Use search_nodes or pass max_nodes.',
+        outline: mindDoc.toOutline(obj, { maxNodes: 800 })
+      }
+    }
+    const stats = {}
+    const tree = mindDoc.objectToTree(obj, {
+      maxNodes: limit || 0,
+      stats
+    })
+    const payload = { ...meta, tree, node_count: stats.node_count || size }
+    if (stats.truncated) {
+      payload.truncated = true
+      payload.hint =
+        'Tree truncated. Use search_nodes or raise max_nodes (max 5000).'
+    }
+    return payload
   }
   if (format === 'nodes') {
     return { ...meta, nodes: mindDoc.flattenNodes(obj) }
@@ -85,6 +111,19 @@ async function persist(roomKey, ydoc, obj, title, options = {}) {
   return mapPayload(roomKey, obj, { title: name, room_key: roomKey }, {
     format: responseFormat
   })
+}
+
+async function persistPatch(roomKey, ydoc, extra = {}) {
+  const row = await getRoom(roomKey)
+  const title = (row && row.title) || extra.title || '未命名'
+  await upsertRoom(roomKey, title)
+  scheduleSave(roomKey, ydoc)
+  return {
+    uid: extra.uid || '',
+    room_key: roomKey,
+    title,
+    share_url: shareUrl(roomKey)
+  }
 }
 
 async function handleApi(req, res) {
@@ -129,22 +168,25 @@ async function handleApi(req, res) {
   if (nodeMatch) {
     const roomKey = decodeURIComponent(nodeMatch[1])
     const nodeRef = nodeMatch[2] ? decodeURIComponent(nodeMatch[2]) : ''
-    const loaded = await loadMap(roomKey)
-    if (!loaded) {
+    if (isDeletedRoom(roomKey)) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    const ydoc = await ensureDoc(roomKey)
+    const row = await getRoom(roomKey)
+    if (!row && ydoc.getMap().size === 0) {
       sendJson(res, 404, { error: 'not found' })
       return true
     }
     try {
       if (req.method === 'POST' && !nodeRef) {
         const body = await readBody(req)
-        const result = mindDoc.addNode(loaded.obj, {
+        const result = mindDoc.addNodeOnDoc(ydoc, {
           parent: body.parent || body.parent_uid || 'root',
           text: body.text,
           note: body.note
         })
-        const payload = await persist(roomKey, loaded.ydoc, result.obj, null, {
-          previousObject: loaded.obj
-        })
+        const payload = await persistPatch(roomKey, ydoc, result)
         sendJson(res, 200, {
           ...payload,
           uid: result.uid,
@@ -154,19 +196,19 @@ async function handleApi(req, res) {
       }
       if (req.method === 'PATCH' && nodeRef) {
         const body = await readBody(req)
-        const result = mindDoc.updateNode(loaded.obj, nodeRef, body)
-        const payload = await persist(roomKey, loaded.ydoc, result.obj, null, {
-          previousObject: loaded.obj
-        })
+        const result = mindDoc.updateNodeOnDoc(ydoc, nodeRef, body)
+        const payload = await persistPatch(roomKey, ydoc, result)
         sendJson(res, 200, { ...payload, uid: result.uid })
         return true
       }
       if (req.method === 'DELETE' && nodeRef) {
-        const result = mindDoc.deleteNode(loaded.obj, nodeRef)
-        const payload = await persist(roomKey, loaded.ydoc, result.obj, null, {
-          previousObject: loaded.obj
+        const result = mindDoc.deleteNodeOnDoc(ydoc, nodeRef)
+        const payload = await persistPatch(roomKey, ydoc, result)
+        sendJson(res, 200, {
+          ...payload,
+          uid: result.uid,
+          removed: result.removed
         })
-        sendJson(res, 200, { ...payload, uid: result.uid, removed: result.removed })
         return true
       }
     } catch (err) {
