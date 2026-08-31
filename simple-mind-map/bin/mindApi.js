@@ -17,6 +17,21 @@ const {
   scheduleSave
 } = require('./storage')
 
+const roomMutationQueues = new Map()
+
+async function withRoomMutation(roomKey, mutation) {
+  const previous = roomMutationQueues.get(roomKey) || Promise.resolve()
+  const current = previous.catch(() => {}).then(mutation)
+  roomMutationQueues.set(roomKey, current)
+  try {
+    return await current
+  } finally {
+    if (roomMutationQueues.get(roomKey) === current) {
+      roomMutationQueues.delete(roomKey)
+    }
+  }
+}
+
 function normalizeTree(input, title) {
   if (!input) return mindDoc.createEmptyTree(title)
   if (input.data) return input
@@ -97,12 +112,22 @@ function mapPayload(roomKey, obj, row, extra = {}) {
   if (format === 'nodes') {
     return { ...meta, nodes: mindDoc.flattenNodes(obj) }
   }
-  const limit = Math.min(5000, Math.max(0, Number(max_nodes || maxNodes || 0) || 0))
-  return { ...meta, outline: mindDoc.toOutline(obj, limit ? { maxNodes: limit } : {}) }
+  const limit = Math.min(
+    5000,
+    Math.max(0, Number(max_nodes || maxNodes || 0) || 0)
+  )
+  return {
+    ...meta,
+    outline: mindDoc.toOutline(obj, limit ? { maxNodes: limit } : {})
+  }
 }
 
 async function persist(roomKey, ydoc, obj, title, options = {}) {
-  const { responseFormat = 'meta', persistNow = false, ...applyOptions } = options
+  const {
+    responseFormat = 'meta',
+    persistNow = false,
+    ...applyOptions
+  } = options
   mindDoc.applyObjectToDoc(ydoc, obj, applyOptions)
   const hasExplicitTitle = title !== undefined && title !== null
   const row = await upsertRoom(roomKey, title || mapTitle(obj, null), {
@@ -149,7 +174,10 @@ async function handleApi(req, res) {
     const body = await readBody(req)
     const roomKey = safeRoomKey(body.room_key || createRoomKey())
     if (isDeletedRoom(roomKey)) await reviveRoom(roomKey)
-    const title = String(body.title || '未命名').trim().slice(0, 80) || '未命名'
+    const title =
+      String(body.title || '未命名')
+        .trim()
+        .slice(0, 80) || '未命名'
     const existed = await loadMap(roomKey)
     if (existed && Object.keys(existed.obj).length) {
       sendJson(res, 409, { error: '房间已存在', room_key: roomKey })
@@ -168,7 +196,9 @@ async function handleApi(req, res) {
     return true
   }
 
-  const nodeMatch = pathname.match(/^\/api\/files\/([^/]+)\/nodes(?:\/([^/]+))?$/)
+  const nodeMatch = pathname.match(
+    /^\/api\/files\/([^/]+)\/nodes(?:\/([^/]+))?$/
+  )
   if (nodeMatch) {
     const roomKey = decodeURIComponent(nodeMatch[1])
     const nodeRef = nodeMatch[2] ? decodeURIComponent(nodeMatch[2]) : ''
@@ -185,6 +215,17 @@ async function handleApi(req, res) {
     try {
       if (req.method === 'POST' && !nodeRef) {
         const body = await readBody(req)
+        if (
+          mindDoc.isWithinSopOnDoc(
+            ydoc,
+            body.parent || body.parent_uid || 'root'
+          ) &&
+          body.confirm_sop_change !== true
+        ) {
+          throw new Error(
+            '修改SOP前必须获得用户确认并设置confirm_sop_change=true'
+          )
+        }
         const result = mindDoc.addNodeOnDoc(ydoc, {
           parent: body.parent || body.parent_uid || 'root',
           text: body.text,
@@ -200,12 +241,29 @@ async function handleApi(req, res) {
       }
       if (req.method === 'PATCH' && nodeRef) {
         const body = await readBody(req)
+        if (
+          mindDoc.isWithinSopOnDoc(ydoc, nodeRef) &&
+          body.confirm_sop_change !== true
+        ) {
+          throw new Error(
+            '修改SOP前必须获得用户确认并设置confirm_sop_change=true'
+          )
+        }
         const result = mindDoc.updateNodeOnDoc(ydoc, nodeRef, body)
         const payload = await persistPatch(roomKey, ydoc, result)
         sendJson(res, 200, { ...payload, uid: result.uid })
         return true
       }
       if (req.method === 'DELETE' && nodeRef) {
+        const body = await readBody(req).catch(() => ({}))
+        if (
+          mindDoc.isWithinSopOnDoc(ydoc, nodeRef) &&
+          (!body || body.confirm_sop_change !== true)
+        ) {
+          throw new Error(
+            '修改SOP前必须获得用户确认并设置confirm_sop_change=true'
+          )
+        }
         const result = mindDoc.deleteNodeOnDoc(ydoc, nodeRef)
         const payload = await persistPatch(roomKey, ydoc, result)
         sendJson(res, 200, {
@@ -221,12 +279,157 @@ async function handleApi(req, res) {
     }
   }
 
+  const todosMatch = pathname.match(/^\/api\/files\/([^/]+)\/todos$/)
+  if (todosMatch) {
+    const roomKey = decodeURIComponent(todosMatch[1])
+    const loaded = await loadMap(roomKey)
+    if (!loaded) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    try {
+      if (req.method === 'GET') {
+        const result = mindDoc.listTodos(loaded.obj)
+        const includeCompleted =
+          url.searchParams.get('include_completed') === 'true'
+        sendJson(res, 200, {
+          room_key: roomKey,
+          pending: result.pending,
+          completed: includeCompleted ? result.completed : undefined,
+          pending_count: result.pending.length,
+          completed_count: result.completed.length
+        })
+        return true
+      }
+    } catch (err) {
+      sendJson(res, 400, { error: err.message || 'bad request' })
+      return true
+    }
+  }
+
+  const prepareTodoMatch = pathname.match(
+    /^\/api\/files\/([^/]+)\/todos\/prepare$/
+  )
+  if (prepareTodoMatch && req.method === 'POST') {
+    const roomKey = decodeURIComponent(prepareTodoMatch[1])
+    const body = await readBody(req)
+    const loaded = await loadMap(roomKey)
+    if (!loaded) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    try {
+      if (!body.task) throw new Error('缺少task')
+      sendJson(res, 200, {
+        room_key: roomKey,
+        ...mindDoc.prepareTodo(loaded.obj, body.task, body.sop)
+      })
+    } catch (err) {
+      sendJson(res, 400, { error: err.message || 'bad request' })
+    }
+    return true
+  }
+
+  const completeTodoMatch = pathname.match(
+    /^\/api\/files\/([^/]+)\/todos\/complete$/
+  )
+  if (completeTodoMatch && req.method === 'POST') {
+    const roomKey = decodeURIComponent(completeTodoMatch[1])
+    const body = await readBody(req)
+    try {
+      const result = await withRoomMutation(roomKey, async () => {
+        const loaded = await loadMap(roomKey)
+        if (!loaded) throw new Error('not found')
+        const completed = mindDoc.completeTodo(loaded.obj, {
+          ...body,
+          completed_at: new Date().toISOString()
+        })
+        if (!completed.already_completed) {
+          await persist(roomKey, loaded.ydoc, completed.obj, null, {
+            previousObject: loaded.obj,
+            persistNow: true
+          })
+        }
+        return Object.fromEntries(
+          Object.entries(completed).filter(([key]) => key !== 'obj')
+        )
+      })
+      sendJson(res, 200, { room_key: roomKey, ...result })
+    } catch (err) {
+      sendJson(res, err.message === 'not found' ? 404 : 400, {
+        error: err.message || 'bad request'
+      })
+    }
+    return true
+  }
+
+  const proposalMatch = pathname.match(
+    /^\/api\/files\/([^/]+)\/sop\/proposals$/
+  )
+  if (proposalMatch && req.method === 'POST') {
+    const roomKey = decodeURIComponent(proposalMatch[1])
+    const body = await readBody(req)
+    const loaded = await loadMap(roomKey)
+    if (!loaded) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    try {
+      sendJson(res, 200, {
+        room_key: roomKey,
+        proposal: mindDoc.proposeSopImprovement(loaded.obj, body)
+      })
+    } catch (err) {
+      sendJson(res, 400, { error: err.message || 'bad request' })
+    }
+    return true
+  }
+
+  const applyProposalMatch = pathname.match(
+    /^\/api\/files\/([^/]+)\/sop\/proposals\/apply$/
+  )
+  if (applyProposalMatch && req.method === 'POST') {
+    const roomKey = decodeURIComponent(applyProposalMatch[1])
+    const body = await readBody(req)
+    try {
+      const result = await withRoomMutation(roomKey, async () => {
+        const loaded = await loadMap(roomKey)
+        if (!loaded) throw new Error('not found')
+        const applied = mindDoc.applySopImprovement(loaded.obj, body)
+        await persist(roomKey, loaded.ydoc, applied.obj, null, {
+          previousObject: loaded.obj,
+          persistNow: true
+        })
+        return Object.fromEntries(
+          Object.entries(applied).filter(([key]) => key !== 'obj')
+        )
+      })
+      sendJson(res, 200, { room_key: roomKey, ...result })
+    } catch (err) {
+      sendJson(res, err.message === 'not found' ? 404 : 400, {
+        error: err.message || 'bad request'
+      })
+    }
+    return true
+  }
+
   const replaceMatch = pathname.match(/^\/api\/files\/([^/]+)\/replace$/)
   if (replaceMatch && req.method === 'POST') {
     const roomKey = decodeURIComponent(replaceMatch[1])
     const body = await readBody(req)
     if (!body.tree) {
       sendJson(res, 400, { error: '缺少 tree' })
+      return true
+    }
+    const current = await loadMap(roomKey)
+    if (
+      current &&
+      mindDoc.isWithinSop(current.obj, 'SOP') &&
+      body.confirm_sop_change !== true
+    ) {
+      sendJson(res, 400, {
+        error: '整树覆盖会修改SOP，必须设置confirm_sop_change=true'
+      })
       return true
     }
     const ydoc = await ensureDoc(roomKey)
@@ -239,9 +442,7 @@ async function handleApi(req, res) {
     return true
   }
 
-  const saveStatusMatch = pathname.match(
-    /^\/api\/files\/([^/]+)\/save-status$/
-  )
+  const saveStatusMatch = pathname.match(/^\/api\/files\/([^/]+)\/save-status$/)
   if (saveStatusMatch && req.method === 'GET') {
     const roomKey = decodeURIComponent(saveStatusMatch[1])
     sendJson(res, 200, { room_key: roomKey, ...getSaveStatus(roomKey) })
