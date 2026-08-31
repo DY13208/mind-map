@@ -1,4 +1,5 @@
 const crypto = require('crypto')
+const { applyObjectToDoc: applyCollaborativeObject } = require('./collabYjs')
 
 function createUid() {
   return crypto.randomUUID()
@@ -13,6 +14,59 @@ function stripHtml(text) {
     .replace(/<[^>]+>/g, '')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function nodePlainText(obj, uid) {
+  return stripHtml(obj[uid] && obj[uid].data && obj[uid].data.text)
+}
+
+function applyNodeText(data, text) {
+  const next = String(text)
+  if (data && data.richText) {
+    const prev = String(data.text || '')
+    const escaped = escapeHtml(next)
+    if (/<span\b/i.test(prev)) {
+      const replaced = prev.replace(
+        /(<span\b[^>]*>)[\s\S]*?(<\/span>)/i,
+        `$1${escaped}$2`
+      )
+      data.text =
+        replaced !== prev ? replaced : `<p><span>${escaped}</span></p>`
+    } else {
+      data.text = `<p><span>${escaped}</span></p>`
+    }
+    data.resetRichText = true
+    return
+  }
+  data.text = next
+}
+
+function uniqueMatch(uids, label, kind) {
+  if (uids.length === 1) return uids[0]
+  if (uids.length > 1) {
+    throw new Error(
+      `有 ${uids.length} 个${kind}「${label}」，请改用更完整文字或 uid`
+    )
+  }
+  return null
+}
+
+function matchLabel(uids, getText, label) {
+  const needle = stripHtml(label)
+  if (!needle) return null
+  const exact = uids.filter(uid => getText(uid) === needle)
+  const exactHit = uniqueMatch(exact, label, '同名节点')
+  if (exactHit) return exactHit
+  const fuzzy = uids.filter(uid => getText(uid).includes(needle))
+  return uniqueMatch(fuzzy, label, '包含该文字的节点')
 }
 
 function createEmptyTree(title) {
@@ -87,17 +141,8 @@ function objectToTree(obj) {
   return walk(rootUid)
 }
 
-function applyObjectToDoc(ydoc, obj) {
-  const ymap = ydoc.getMap()
-  ydoc.transact(() => {
-    const keep = new Set(Object.keys(obj))
-    Object.keys(obj).forEach(uid => {
-      ymap.set(uid, clone(obj[uid]))
-    })
-    ;[...ymap.keys()].forEach(uid => {
-      if (!keep.has(uid)) ymap.delete(uid)
-    })
-  })
+function applyObjectToDoc(ydoc, obj, options = {}) {
+  applyCollaborativeObject(ydoc, obj, options)
 }
 
 function collectDescendants(obj, uid) {
@@ -160,6 +205,7 @@ function resolveNode(obj, ref) {
   if (obj[ref]) return ref
   const raw = String(ref).trim()
   if (!raw) return findRootUid(obj)
+  const getText = uid => nodePlainText(obj, uid)
 
   if (raw.includes('/')) {
     const byPath = raw
@@ -168,19 +214,15 @@ function resolveNode(obj, ref) {
       .filter(Boolean)
     let current = findRootUid(obj)
     let start = 0
-    const rootText = stripHtml(
-      obj[current] && obj[current].data && obj[current].data.text
-    )
-    if (byPath[0] === rootText) start = 1
+    const rootText = getText(current)
+    if (byPath[0] === rootText || (rootText && rootText.includes(byPath[0]))) {
+      start = 1
+    }
     let ok = true
     for (let i = start; i < byPath.length; i++) {
       const node = obj[current]
-      const next =
-        node &&
-        (node.children || []).find(childUid => {
-          const child = obj[childUid]
-          return stripHtml(child && child.data && child.data.text) === byPath[i]
-        })
+      const children = (node && node.children) || []
+      const next = matchLabel(children, getText, byPath[i])
       if (!next) {
         ok = false
         break
@@ -190,14 +232,7 @@ function resolveNode(obj, ref) {
     if (ok && current) return current
   }
 
-  const matches = Object.keys(obj).filter(uid => {
-    return stripHtml(obj[uid].data && obj[uid].data.text) === stripHtml(raw)
-  })
-  if (matches.length === 1) return matches[0]
-  if (matches.length > 1) {
-    throw new Error(`有 ${matches.length} 个同名节点「${raw}」，请改用 uid`)
-  }
-  return null
+  return matchLabel(Object.keys(obj), getText, raw)
 }
 
 function ensureRoot(obj, title) {
@@ -213,10 +248,15 @@ function addNode(obj, { parent, text, note } = {}) {
     throw new Error('找不到父节点，请先 get_map 查看 uid 或路径')
   }
   const uid = createUid()
+  const parentData = next[parentUid].data || {}
   const data = {
     uid,
     text: String(text || '新节点'),
     expand: true
+  }
+  if (parentData.richText) {
+    data.richText = true
+    applyNodeText(data, data.text)
   }
   if (note) data.note = String(note)
   next[uid] = {
@@ -238,7 +278,7 @@ function updateNode(obj, ref, patch = {}) {
     throw new Error('找不到节点，请先 get_map 查看 uid 或路径')
   }
   const data = { ...next[uid].data }
-  if (patch.text !== undefined) data.text = String(patch.text)
+  if (patch.text !== undefined) applyNodeText(data, patch.text)
   if (patch.note !== undefined) data.note = String(patch.note)
   next[uid] = { ...next[uid], data }
   return { obj: next, uid }

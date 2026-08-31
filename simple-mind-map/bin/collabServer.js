@@ -4,7 +4,14 @@ require('./loadEnv')
 const http = require('http')
 const WebSocket = require('ws')
 const { setupWSConnection } = require('y-websocket/bin/utils')
-const { initSchema, attachPersistence, preloadRoom, handleApi } = require('./storage')
+const {
+  initSchema,
+  attachPersistence,
+  preloadRoom,
+  handleApi,
+  safeRoomKey,
+  isDeletedRoom
+} = require('./storage')
 
 const host = process.env.HOST || '0.0.0.0'
 const port = Number(process.env.PORT || 1234)
@@ -31,8 +38,15 @@ const server = http.createServer(async (request, response) => {
 const wss = new WebSocket.Server({ noServer: true })
 
 wss.on('connection', (conn, req) => {
-  const raw = (req.url || '/').slice(1).split('?')[0]
-  const docName = decodeURIComponent(raw || 'default')
+  let docName
+  try {
+    const raw = (req.url || '/').slice(1).split('?')[0]
+    docName = safeRoomKey(decodeURIComponent(raw || 'default'))
+    if (isDeletedRoom(docName)) throw new Error('room deleted')
+  } catch (err) {
+    conn.close(1008, 'invalid room name')
+    return
+  }
   preloadRoom(docName)
     .catch(err => {
       console.error('[persist] preload failed', docName, err.message)

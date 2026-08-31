@@ -49,7 +49,7 @@ function createServer() {
     },
     {
       instructions:
-        '这是局域网思维导图的 MCP。工具写入的房间与网页协同是同一份 Yjs 文档：人在浏览器打开 share_url，WorkBuddy/AI 用这些工具改节点，双方实时看到。先 list_maps 或 get_map 拿 uid，再增删改。outline 里每个节点后面的 [uid] 可直接用于 parent / node 参数。'
+        '这是局域网思维导图的 MCP。工具写入的房间与网页协同是同一份 Yjs 文档：人在浏览器打开 share_url，WorkBuddy/AI 用这些工具改节点，双方实时看到。先 get_map 看 outline，优先用节点后面的 [uid] 再增删改。node 也可用完整标题或能唯一命中的部分文字（例如「蔡徐坤」可命中「分支主题蔡徐坤」）。工具返回 isError 或「找不到节点」表示没有写入，禁止声称已改好。'
     }
   )
 
@@ -155,7 +155,7 @@ function createServer() {
 
   server.tool(
     'update_node',
-    '修改节点文字或备注。node 可以是 uid 或文字路径。',
+    '修改节点文字或备注。node 优先用 get_map outline 里的 uid；也可用完整标题、部分文字或 根/父/子 路径。工具报错即未写入。',
     {
       room_key: z.string().describe('房间号'),
       node: z.string().describe('节点 uid 或文字路径'),

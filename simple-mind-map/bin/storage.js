@@ -27,11 +27,47 @@ const acl = process.env.TENCENT_COS_ACL || 'private'
 
 const saveTimers = new Map()
 const preloadCache = new Map()
+const deletedRooms = new Set()
+const roomSaveStates = new Map()
+
+function setSaveState(roomKey, status, error = '') {
+  roomSaveStates.set(roomKey, {
+    status,
+    error: error ? String(error) : '',
+    updated_at: new Date().toISOString()
+  })
+}
+
+function getSaveStatus(roomKey) {
+  if (deletedRooms.has(roomKey)) {
+    return { status: 'deleted', error: '', updated_at: new Date().toISOString() }
+  }
+  return (
+    roomSaveStates.get(roomKey) || {
+      status: 'saved',
+      error: '',
+      updated_at: null
+    }
+  )
+}
+
+function isDeletedRoom(roomKey) {
+  return deletedRooms.has(String(roomKey || ''))
+}
+
+async function reviveRoom(roomKey) {
+  const key = String(roomKey || '')
+  await pool.query('delete from room_tombstones where room_key = $1', [key])
+  deletedRooms.delete(key)
+  roomSaveStates.delete(key)
+}
 
 function safeRoomKey(roomKey) {
-  return String(roomKey || '')
-    .replace(/[^a-zA-Z0-9._-]/g, '_')
-    .slice(0, 80)
+  const key = String(roomKey || '').trim()
+  if (!/^[a-zA-Z0-9._-]{1,80}$/.test(key)) {
+    throw new Error('房间号只能包含字母、数字、点、下划线和短横线，且不能超过80个字符')
+  }
+  return key
 }
 
 function cosKey(roomKey) {
@@ -118,16 +154,44 @@ async function upsertRoom(roomKey, title) {
 }
 
 async function saveDoc(roomKey, ydoc) {
+  if (isDeletedRoom(roomKey)) return
   if (!ydoc.getMap().size) return
-  const buf = Buffer.from(Y.encodeStateAsUpdate(ydoc))
-  await putYjsBuffer(roomKey, buf)
-  preloadCache.set(roomKey, buf)
-  await upsertRoom(roomKey, titleFromDoc(ydoc))
+  setSaveState(roomKey, 'saving')
+  try {
+    const buf = Buffer.from(Y.encodeStateAsUpdate(ydoc))
+    await putYjsBuffer(roomKey, buf)
+    if (isDeletedRoom(roomKey)) {
+      await purgeRoomStorage(roomKey)
+      return
+    }
+    preloadCache.set(roomKey, buf)
+    await upsertRoom(roomKey, titleFromDoc(ydoc))
+    if (isDeletedRoom(roomKey)) {
+      await purgeRoomStorage(roomKey)
+      return
+    }
+    setSaveState(roomKey, 'saved')
+  } catch (err) {
+    setSaveState(
+      roomKey,
+      isDeletedRoom(roomKey) ? 'deleted' : 'error',
+      isDeletedRoom(roomKey) ? '' : err.message || err
+    )
+    throw err
+  }
+}
+
+async function purgeRoomStorage(roomKey) {
+  await deleteYjsBuffer(roomKey)
+  preloadCache.delete(roomKey)
+  await pool.query('delete from rooms where room_key = $1', [roomKey])
 }
 
 function scheduleSave(roomKey, ydoc) {
+  if (isDeletedRoom(roomKey)) return
   const prev = saveTimers.get(roomKey)
   if (prev) clearTimeout(prev)
+  setSaveState(roomKey, 'saving')
   saveTimers.set(
     roomKey,
     setTimeout(() => {
@@ -140,6 +204,9 @@ function scheduleSave(roomKey, ydoc) {
 }
 
 async function preloadRoom(roomKey) {
+  if (isDeletedRoom(roomKey)) {
+    throw new Error('room deleted')
+  }
   if (preloadCache.has(roomKey)) return preloadCache.get(roomKey)
   const task = getYjsBuffer(roomKey)
     .then(buf => {
@@ -216,6 +283,14 @@ async function initSchema() {
       updated_at timestamptz not null default now()
     )
   `)
+  await pool.query(`
+    create table if not exists room_tombstones (
+      room_key text primary key,
+      deleted_at timestamptz not null default now()
+    )
+  `)
+  const tombstones = await pool.query('select room_key from room_tombstones')
+  tombstones.rows.forEach(row => deletedRooms.add(row.room_key))
 }
 
 async function listRooms() {
@@ -239,11 +314,30 @@ async function renameRoom(roomKey, title) {
 }
 
 async function removeRoom(roomKey) {
-  await deleteYjsBuffer(roomKey)
-  preloadCache.delete(roomKey)
-  await pool.query('delete from rooms where room_key = $1', [roomKey])
+  deletedRooms.add(roomKey)
+  setSaveState(roomKey, 'deleted')
+  await pool.query(
+    `insert into room_tombstones (room_key, deleted_at)
+     values ($1, now())
+     on conflict (room_key) do update set deleted_at = now()`,
+    [roomKey]
+  )
+  const timer = saveTimers.get(roomKey)
+  if (timer) {
+    clearTimeout(timer)
+    saveTimers.delete(roomKey)
+  }
   const doc = docs.get(roomKey)
   if (doc) {
+    const connections = Array.from(doc.conns ? doc.conns.keys() : [])
+    if (doc.conns) doc.conns.clear()
+    connections.forEach(conn => {
+      try {
+        conn.close(1008, 'room deleted')
+      } catch (e) {
+        // ignore
+      }
+    })
     docs.delete(roomKey)
     try {
       doc.destroy()
@@ -251,6 +345,7 @@ async function removeRoom(roomKey) {
       // ignore
     }
   }
+  await purgeRoomStorage(roomKey)
 }
 
 function sendJson(res, code, data) {
@@ -309,5 +404,8 @@ module.exports = {
   upsertRoom,
   sendJson,
   readBody,
-  shareUrl
+  shareUrl,
+  getSaveStatus,
+  isDeletedRoom,
+  reviveRoom
 }
