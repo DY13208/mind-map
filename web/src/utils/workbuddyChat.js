@@ -1,0 +1,180 @@
+import { getRuntimeConfig } from './runtimeConfig'
+
+export function getWorkbuddyConfig() {
+  const runtime =
+    (typeof window !== 'undefined' && window.__MIND_MAP_RUNTIME__) || {}
+  const cfg = getRuntimeConfig()
+  const baseUrl = String(
+    runtime.workbuddyBase || cfg.workbuddyBase || '/wb-api'
+  ).replace(/\/$/, '')
+  return {
+    baseUrl,
+    apiKey: runtime.workbuddyKey || cfg.workbuddyKey || 'local',
+    model: runtime.workbuddyModel || cfg.workbuddyModel || 'auto'
+  }
+}
+
+export async function checkWorkbuddy() {
+  const { baseUrl } = getWorkbuddyConfig()
+  try {
+    const res = await fetch(`${baseUrl}/health`, { cache: 'no-store' })
+    if (!res.ok) return { ok: false, status: res.status }
+    const data = await res.json().catch(() => ({}))
+    return { ok: true, data }
+  } catch (err) {
+    return { ok: false, error: err }
+  }
+}
+
+function eventLabel(event) {
+  const type = String((event && event.type) || '')
+  if (type === 'workbuddy.tool_call') {
+    const name =
+      (event.tool && (event.tool.name || event.tool.tool)) ||
+      event.name ||
+      event.tool_name ||
+      ''
+    return name ? `正在调用 ${name}` : '正在使用工具'
+  }
+  if (type === 'workbuddy.tool_result') return '工具已返回'
+  if (type === 'workbuddy.phase') {
+    return event.phase || event.message || '处理中'
+  }
+  if (type === 'workbuddy.plan') return '正在规划'
+  if (type === 'workbuddy.interruption') return '已中断'
+  if (type === 'workbuddy.session_end') return ''
+  if (type === 'workbuddy.usage') return ''
+  return type.replace(/^workbuddy\./, '') || ''
+}
+
+function deltaText(json) {
+  const choice = json && json.choices && json.choices[0]
+  const delta = (choice && (choice.delta || choice.message)) || json.delta
+  if (!delta) return ''
+  if (typeof delta.content === 'string') return delta.content
+  if (Array.isArray(delta.content)) {
+    return delta.content
+      .map(part => {
+        if (typeof part === 'string') return part
+        return (part && (part.text || part.content)) || ''
+      })
+      .join('')
+  }
+  return ''
+}
+
+export async function streamChat({
+  messages,
+  signal,
+  onDelta,
+  onEvent,
+  extra = {}
+} = {}) {
+  const { baseUrl, apiKey, model } = getWorkbuddyConfig()
+  const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      Authorization: `Bearer ${apiKey}`,
+      'X-WorkBuddy-Events': '1'
+    },
+    body: JSON.stringify({
+      model,
+      stream: true,
+      workbuddy_events: true,
+      messages,
+      ...extra
+    }),
+    signal
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    let message = text || `HTTP ${res.status}`
+    try {
+      const json = JSON.parse(text)
+      message =
+        (json.error && json.error.message) || json.message || message
+    } catch (e) {
+      /* keep text */
+    }
+    const err = new Error(message)
+    err.status = res.status
+    throw err
+  }
+
+  if (!res.body || !res.body.getReader) {
+    const json = await res.json()
+    const message =
+      json.choices && json.choices[0] && json.choices[0].message
+    const text =
+      deltaText(json) || (message && message.content) || ''
+    const toolCalls = (message && message.tool_calls) || []
+    if (onDelta) onDelta(text)
+    return { content: text, toolCalls }
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let content = ''
+  const toolMap = {}
+
+  const consume = line => {
+    const trimmed = String(line || '').trim()
+    if (!trimmed || trimmed.startsWith(':')) return
+    if (!trimmed.startsWith('data:')) return
+    const data = trimmed.slice(5).trim()
+    if (!data || data === '[DONE]') return
+    let json
+    try {
+      json = JSON.parse(data)
+    } catch (e) {
+      return
+    }
+    const type = json && json.type
+    if (type && String(type).startsWith('workbuddy.')) {
+      const label = eventLabel(json)
+      if (label && onEvent) onEvent(label, json)
+      return
+    }
+    const piece = deltaText(json)
+    if (piece) {
+      content += piece
+      if (onDelta) onDelta(content)
+    }
+    const choice = json.choices && json.choices[0]
+    const delta = choice && choice.delta
+    const calls = (delta && delta.tool_calls) || []
+    calls.forEach(call => {
+      const index = call.index != null ? call.index : 0
+      if (!toolMap[index]) {
+        toolMap[index] = {
+          id: call.id || '',
+          name: (call.function && call.function.name) || '',
+          arguments: ''
+        }
+      }
+      if (call.id) toolMap[index].id = call.id
+      if (call.function && call.function.name) {
+        toolMap[index].name = call.function.name
+      }
+      if (call.function && call.function.arguments) {
+        toolMap[index].arguments += call.function.arguments
+      }
+    })
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split(/\r?\n/)
+    buffer = lines.pop() || ''
+    lines.forEach(consume)
+  }
+  if (buffer) consume(buffer)
+  const toolCalls = Object.keys(toolMap)
+    .sort((a, b) => Number(a) - Number(b))
+    .map(key => toolMap[key])
+  return { content, toolCalls }
+}

@@ -17,6 +17,7 @@ import { mapState, mapMutations } from 'vuex'
 import { getLocalConfig } from '@/api'
 
 export default {
+  name: 'EditPage',
   components: {
     Toolbar,
     Edit
@@ -73,6 +74,9 @@ export default {
 
 <style lang="less">
 .container {
+  position: relative;
+  width: 100%;
+  height: 100%;
 }
 
 body {
