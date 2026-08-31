@@ -16,8 +16,13 @@ export default {
   padding: 0;
   box-sizing: border-box;
 }
+html,
+body,
 #app {
-  font-family: Avenir, Helvetica, Arial, sans-serif;
+  height: 100%;
+}
+#app {
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   color: #2c3e50;
 }
 

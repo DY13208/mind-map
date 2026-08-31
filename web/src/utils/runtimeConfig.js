@@ -31,7 +31,10 @@ export function getRuntimeConfig() {
       collabApi: originHttp,
       aiBaseUrl: originHttp,
       mcpUrl: `${originHttp}/mcp`,
-      appUrl: originHttp
+      appUrl: originHttp,
+      workbuddyBase: runtime.workbuddyBase || '/wb-api',
+      workbuddyKey: runtime.workbuddyKey || 'local',
+      workbuddyModel: runtime.workbuddyModel || 'auto'
     }
   }
   return {
@@ -46,7 +49,10 @@ export function getRuntimeConfig() {
     collabApi: `${httpProtocol}//${host}:${collabPort}`,
     aiBaseUrl: `${httpProtocol}//${host}:${aiPort}`,
     mcpUrl: `${httpProtocol}//${host}:${mcpPort}/mcp`,
-    appUrl: `${httpProtocol}//${host}:${webPort}`
+    appUrl: `${httpProtocol}//${host}:${webPort}`,
+    workbuddyBase: runtime.workbuddyBase || '/wb-api',
+    workbuddyKey: runtime.workbuddyKey || 'local',
+    workbuddyModel: runtime.workbuddyModel || 'auto'
   }
 }
 
