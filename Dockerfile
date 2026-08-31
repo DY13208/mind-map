@@ -14,6 +14,7 @@ RUN rm -rf /src/web/node_modules/simple-mind-map \
 WORKDIR /src/web
 ENV NODE_ENV=production
 ENV PUBLIC_PATH=/
+ENV NODE_OPTIONS=--openssl-legacy-provider
 RUN npx vue-cli-service build --dest /out/web
 
 FROM node:20-bookworm-slim
