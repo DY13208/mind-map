@@ -10,7 +10,10 @@ const {
   sendJson,
   readBody,
   safeRoomKey,
-  shareUrl
+  shareUrl,
+  getSaveStatus,
+  isDeletedRoom,
+  reviveRoom
 } = require('./storage')
 
 function normalizeTree(input, title) {
@@ -33,6 +36,7 @@ function withShare(row) {
 }
 
 async function loadMap(roomKey) {
+  if (isDeletedRoom(roomKey)) return null
   const ydoc = await ensureDoc(roomKey)
   const obj = mindDoc.readObject(ydoc)
   const row = await getRoom(roomKey)
@@ -57,8 +61,8 @@ function mapPayload(roomKey, obj, row, extra = {}) {
   }
 }
 
-async function persist(roomKey, ydoc, obj, title) {
-  mindDoc.applyObjectToDoc(ydoc, obj)
+async function persist(roomKey, ydoc, obj, title, options = {}) {
+  mindDoc.applyObjectToDoc(ydoc, obj, options)
   const tree = mindDoc.objectToTree(obj)
   const name =
     title ||
@@ -87,6 +91,7 @@ async function handleApi(req, res) {
   if (req.method === 'POST' && pathname === '/api/files') {
     const body = await readBody(req)
     const roomKey = safeRoomKey(body.room_key || createRoomKey())
+    if (isDeletedRoom(roomKey)) await reviveRoom(roomKey)
     const title = String(body.title || '未命名').trim().slice(0, 80) || '未命名'
     const existed = await loadMap(roomKey)
     if (existed && Object.keys(existed.obj).length) {
@@ -95,7 +100,13 @@ async function handleApi(req, res) {
     }
     const tree = mindDoc.treeToObject(normalizeTree(body.tree, title))
     const ydoc = await ensureDoc(roomKey)
-    const payload = await persist(roomKey, ydoc, mindDoc.ensureRoot(tree, title), title)
+    const payload = await persist(
+      roomKey,
+      ydoc,
+      mindDoc.ensureRoot(tree, title),
+      title,
+      { replace: true }
+    )
     sendJson(res, 201, payload)
     return true
   }
@@ -117,7 +128,9 @@ async function handleApi(req, res) {
           text: body.text,
           note: body.note
         })
-        const payload = await persist(roomKey, loaded.ydoc, result.obj)
+        const payload = await persist(roomKey, loaded.ydoc, result.obj, null, {
+          previousObject: loaded.obj
+        })
         sendJson(res, 200, {
           ...payload,
           uid: result.uid,
@@ -128,13 +141,17 @@ async function handleApi(req, res) {
       if (req.method === 'PATCH' && nodeRef) {
         const body = await readBody(req)
         const result = mindDoc.updateNode(loaded.obj, nodeRef, body)
-        const payload = await persist(roomKey, loaded.ydoc, result.obj)
+        const payload = await persist(roomKey, loaded.ydoc, result.obj, null, {
+          previousObject: loaded.obj
+        })
         sendJson(res, 200, { ...payload, uid: result.uid })
         return true
       }
       if (req.method === 'DELETE' && nodeRef) {
         const result = mindDoc.deleteNode(loaded.obj, nodeRef)
-        const payload = await persist(roomKey, loaded.ydoc, result.obj)
+        const payload = await persist(roomKey, loaded.ydoc, result.obj, null, {
+          previousObject: loaded.obj
+        })
         sendJson(res, 200, { ...payload, uid: result.uid, removed: result.removed })
         return true
       }
@@ -154,8 +171,19 @@ async function handleApi(req, res) {
     }
     const ydoc = await ensureDoc(roomKey)
     const obj = mindDoc.treeToObject(normalizeTree(body.tree, body.title))
-    const payload = await persist(roomKey, ydoc, obj, body.title)
+    const payload = await persist(roomKey, ydoc, obj, body.title, {
+      replace: true
+    })
     sendJson(res, 200, payload)
+    return true
+  }
+
+  const saveStatusMatch = pathname.match(
+    /^\/api\/files\/([^/]+)\/save-status$/
+  )
+  if (saveStatusMatch && req.method === 'GET') {
+    const roomKey = decodeURIComponent(saveStatusMatch[1])
+    sendJson(res, 200, { room_key: roomKey, ...getSaveStatus(roomKey) })
     return true
   }
 

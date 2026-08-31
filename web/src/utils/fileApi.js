@@ -35,3 +35,7 @@ export function deleteFile(roomKey) {
     method: 'DELETE'
   })
 }
+
+export function getSaveStatus(roomKey) {
+  return request(`/api/files/${encodeURIComponent(roomKey)}/save-status`)
+}

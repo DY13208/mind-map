@@ -46,6 +46,13 @@
       <div class="statusRow">
         <span class="statusDot" :class="status"></span>
         <span>{{ statusText }}</span>
+        <span
+          v-if="connected"
+          class="saveState"
+          :class="saveStatus"
+          :title="saveError"
+          >{{ saveStatusText }}</span
+        >
         <span v-if="peerList.length" class="peerCount"
           >{{ $t('cooperate.peers') }} {{ peerList.length }}</span
         >
@@ -111,7 +118,12 @@
 import { WebsocketProvider } from 'y-websocket'
 import { mapMutations, mapState } from 'vuex'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
-import { listFiles, renameFile as renameFileApi, deleteFile as deleteFileApi } from '@/utils/fileApi'
+import {
+  listFiles,
+  renameFile as renameFileApi,
+  deleteFile as deleteFileApi,
+  getSaveStatus
+} from '@/utils/fileApi'
 
 const USER_NAME_KEY = 'COOPERATE_USER_NAME'
 const USER_ID_KEY = 'COOPERATE_USER_ID'
@@ -163,6 +175,9 @@ export default {
       peerList: [],
       provider: null,
       connectTimer: null,
+      saveStatusTimer: null,
+      saveStatus: 'idle',
+      saveError: '',
       joinedOnce: false,
       fileList: [],
       filesLoading: false
@@ -179,6 +194,12 @@ export default {
     },
     statusText() {
       return this.$t(`cooperate.${this.status}`)
+    },
+    saveStatusText() {
+      const status = ['saving', 'saved', 'saveError'].includes(this.saveStatus)
+        ? this.saveStatus
+        : 'saving'
+      return this.$t(`cooperate.${status}`)
     }
   },
   watch: {
@@ -205,6 +226,7 @@ export default {
   },
   beforeDestroy() {
     this.$bus.$off('showCooperate', this.open)
+    this.stopSaveStatusPolling()
     this.unbindProvider()
   },
   methods: {
@@ -232,6 +254,10 @@ export default {
       }
       if (!this.roomName) {
         this.$message.warning(this.$t('cooperate.roomRequired'))
+        return false
+      }
+      if (!/^[a-zA-Z0-9._-]{1,40}$/.test(this.roomName)) {
+        this.$message.warning(this.$t('cooperate.roomInvalid'))
         return false
       }
       if (!this.serverUrl) {
@@ -278,7 +304,10 @@ export default {
           }
           this.loadFiles()
           setTimeout(() => this.loadFiles(), 2500)
+          this.startSaveStatusPolling()
           this.joinedOnce = true
+        } else {
+          this.stopSaveStatusPolling()
         }
       })
       provider.on('connection-error', () => {
@@ -288,9 +317,15 @@ export default {
         }
         this.connecting = false
         this.connected = false
+        this.stopSaveStatusPolling()
         this.setCooperateStatus('disconnected')
         if (!silent) this.dialogVisible = true
         this.$message.error(this.$t('cooperate.connectFailed'))
+      })
+      provider.on('connection-close', event => {
+        if (!event || event.code !== 1008) return
+        this.leave({ silent: true })
+        if (!silent) this.$message.warning(this.$t('cooperate.roomUnavailable'))
       })
       provider.awareness.on('change', this.updatePeers)
       this.updatePeers()
@@ -319,6 +354,7 @@ export default {
       this.connected = false
       this.joinedOnce = false
       this.peerList = []
+      this.stopSaveStatusPolling()
       this.setCooperateStatus('disconnected')
       if (!silent) this.$message.success(this.$t('cooperate.leaveSuccess'))
     },
@@ -343,8 +379,11 @@ export default {
       const peers = []
       const seen = new Set()
       states.forEach(state => {
-        const key = Object.keys(state)[0]
-        const info = (state[key] && state[key].userInfo) || null
+        const legacyKey = Object.keys(state).find(key => {
+          return state[key] && state[key].userInfo
+        })
+        const presence = state.user || (legacyKey && state[legacyKey])
+        const info = (presence && presence.userInfo) || null
         if (!info || !info.id || seen.has(info.id)) return
         seen.add(info.id)
         peers.push({
@@ -365,6 +404,43 @@ export default {
         })
       }
       this.peerList = peers
+    },
+
+    startSaveStatusPolling() {
+      this.stopSaveStatusPolling()
+      this.loadSaveStatus()
+      this.saveStatusTimer = setInterval(this.loadSaveStatus, 1500)
+    },
+
+    stopSaveStatusPolling() {
+      if (this.saveStatusTimer) {
+        clearInterval(this.saveStatusTimer)
+        this.saveStatusTimer = null
+      }
+      this.saveStatus = 'idle'
+      this.saveError = ''
+    },
+
+    async loadSaveStatus() {
+      if (!this.connected || !this.roomName) return
+      try {
+        const data = await getSaveStatus(this.roomName)
+        if (data.status === 'error') {
+          this.saveStatus = 'saveError'
+          this.saveError = data.error || this.$t('cooperate.saveError')
+        } else if (data.status === 'saving') {
+          this.saveStatus = 'saving'
+          this.saveError = ''
+        } else if (data.status === 'deleted') {
+          this.leave({ silent: true })
+        } else {
+          this.saveStatus = 'saved'
+          this.saveError = ''
+        }
+      } catch (err) {
+        this.saveStatus = 'saveError'
+        this.saveError = err.message || this.$t('cooperate.saveError')
+      }
     },
 
     syncRoomQuery() {
@@ -528,6 +604,19 @@ export default {
 
     .peerCount {
       margin-left: auto;
+    }
+
+    .saveState {
+      margin-left: 8px;
+      color: #909399;
+
+      &.saved {
+        color: #67c23a;
+      }
+
+      &.saveError {
+        color: #f56c6c;
+      }
     }
   }
 
