@@ -15,7 +15,7 @@ const MCP_TOKEN = process.env.MCP_TOKEN || ''
 
 function ok(data) {
   return {
-    content: [{ type: 'text', text: JSON.stringify(data, null, 2) }]
+    content: [{ type: 'text', text: JSON.stringify(data) }]
   }
 }
 
@@ -89,18 +89,22 @@ function createServer() {
 
   server.tool(
     'get_map',
-    '读取一张导图。默认返回大纲（每行带 uid），适合先看结构再改。',
+    '读取一张导图。format=outline（默认）只返回大纲（每行带 uid）；format=full 只返回完整树。两种格式不会叠在一起。日常先 outline，需要整图结构时再 full。',
     {
       room_key: z.string().describe('房间号'),
       format: z
         .enum(['outline', 'full'])
-        .describe('outline=大纲；full=大纲+完整树')
+        .describe('outline=只返回大纲；full=只返回完整树')
         .optional()
     },
     async ({ room_key, format }) => {
       try {
-        const qs = format === 'full' ? '?format=full' : ''
-        return ok(await api(`/api/files/${encodeURIComponent(room_key)}${qs}`))
+        const mode = format === 'full' ? 'full' : 'outline'
+        return ok(
+          await api(
+            `/api/files/${encodeURIComponent(room_key)}?format=${mode}`
+          )
+        )
       } catch (err) {
         return fail(err)
       }
@@ -272,7 +276,9 @@ function createServer() {
     },
     async ({ room_key }) => {
       try {
-        const data = await api(`/api/files/${encodeURIComponent(room_key)}`)
+        const data = await api(
+          `/api/files/${encodeURIComponent(room_key)}?format=meta`
+        )
         return ok({
           room_key,
           title: data.title,
