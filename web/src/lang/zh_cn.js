@@ -199,6 +199,8 @@ export default {
     mdEmptyTip: '内容不能为空'
   },
   navigatorToolbar: {
+    collapseToolbar: '收起底部工具栏',
+    expandToolbar: '展开底部工具栏',
     openMiniMap: '开启小地图',
     closeMiniMap: '关闭小地图',
     readonly: '切换为只读模式',
@@ -303,6 +305,8 @@ export default {
     reserve: '保留'
   },
   toolbar: {
+    collapseToolbar: '收起顶部工具栏',
+    expandToolbar: '展开顶部工具栏',
     undo: '回退',
     redo: '前进',
     insertSiblingNode: '同级节点',

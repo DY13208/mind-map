@@ -204,6 +204,8 @@ export default {
     mdEmptyTip: 'Nội dung không được trống'
   },
   navigatorToolbar: {
+    collapseToolbar: 'Thu gọn thanh công cụ dưới',
+    expandToolbar: 'Mở rộng thanh công cụ dưới',
     openMiniMap: 'Mở bản đồ thu nhỏ',
     closeMiniMap: 'Đóng bản đồ thu nhỏ',
     readonly: 'Chuyển sang chế độ chỉ đọc',
@@ -308,6 +310,8 @@ export default {
     reserve: 'Giữ lại'
   },
   toolbar: {
+    collapseToolbar: 'Thu gọn thanh công cụ trên',
+    expandToolbar: 'Mở rộng thanh công cụ trên',
     undo: 'Hoàn tác',
     redo: 'Làm lại',
     insertSiblingNode: 'Nút cùng cấp',
@@ -579,13 +583,15 @@ export default {
     peers: 'Đang online',
     you: 'Tôi',
     tip: 'Người trong cùng phòng sẽ đồng bộ canvas theo thời gian thực.',
-    startServerTip: 'Chạy start.bat ở thư mục gốc để khởi động trang, cộng tác và AI',
+    startServerTip:
+      'Chạy start.bat ở thư mục gốc để khởi động trang, cộng tác và AI',
     files: 'Tệp đã lưu',
     refresh: 'Làm mới',
     openFile: 'Mở',
     deleteFile: 'Xóa',
     renameFile: 'Đổi tên',
-    noFiles: 'Chưa có tệp. Vào phòng cộng tác sẽ tự lưu vào thư mục mind-map trên COS.',
+    noFiles:
+      'Chưa có tệp. Vào phòng cộng tác sẽ tự lưu vào thư mục mind-map trên COS.',
     deleteConfirm: 'Xóa "{title}"? Không thể hoàn tác.',
     openSuccess: 'Đã mở tệp',
     fileDeleted: 'Đã xóa',
