@@ -37,6 +37,8 @@ class Cooperate {
       : null
     this.hasAppliedSync = false
     this.isApplyingRemote = false
+    this.pendingRemoteTree = null
+    this.observeApplyTimer = null
     this.localOrigin = { source: 'simple-mind-map-cooperate' }
     // 绑定事件
     this.bindEvent()
@@ -195,6 +197,9 @@ class Cooperate {
 
   // 解绑事件
   unBindEvent() {
+    clearTimeout(this.observeApplyTimer)
+    this.observeApplyTimer = null
+    this.pendingRemoteTree = null
     this.disconnectProvider()
     this.mindMap.off('data_change', this.onDataChange)
     this.mindMap.off('node_active', this.onNodeActive)
@@ -205,18 +210,31 @@ class Cooperate {
 
   // 数据同步时的处理，更新当前思维导图
   onObserve(events, transaction) {
-    if (transaction && transaction.origin === this.localOrigin) return
+    if (
+      transaction &&
+      (transaction.origin === this.localOrigin ||
+        transaction.origin === 'cooperate-schema-migration')
+    ) {
+      return
+    }
     const hasLegacyNode = Array.from(this.ymap.values()).some(
       node => !(node instanceof Y.Map)
     )
     if (hasLegacyNode) {
       migrateLegacyNodes(this.ymap)
     }
+    // 合并短时间内的多次 deep 变更，避免刷新/同步时主线程渲染风暴
+    clearTimeout(this.observeApplyTimer)
+    this.observeApplyTimer = setTimeout(() => {
+      this.flushRemoteObserve()
+    }, 50)
+  }
+
+  flushRemoteObserve() {
+    if (!this.ymap) return
     const data = this.ymap.toJSON()
-    // 如果数据没有改变直接返回
     if (isSameObject(data, this.currentData)) return
     this.currentData = simpleDeepClone(data)
-    // 平级对象转树结构
     const res = transformObjectToTreeData(data)
     if (!res) return
     this.applyRemoteTree(res)
@@ -224,16 +242,39 @@ class Cooperate {
 
   // 概要不是树里的子节点，对端更新后需要再排一次版才会画出来
   applyRemoteTree(res) {
+    if (this.isApplyingRemote) {
+      this.pendingRemoteTree = res
+      return
+    }
     this.isApplyingRemote = true
     const done = () => {
       this.isApplyingRemote = false
+      if (this.pendingRemoteTree) {
+        const next = this.pendingRemoteTree
+        this.pendingRemoteTree = null
+        this.applyRemoteTree(next)
+      }
     }
     try {
-      this.mindMap.updateData(res)
+      // 避免 updateData 自带的 render + addHistory 叠加二次 render
+      const data = this.mindMap.handleData(res)
+      this.mindMap.emit('before_update_data', data)
+      this.mindMap.command.pause()
+      this.mindMap.renderer.setData(data)
       this.mindMap.render(() => {
-        this.mindMap.render(done)
+        try {
+          this.mindMap.command.recovery()
+        } finally {
+          done()
+        }
       })
+      this.mindMap.emit('update_data', data)
     } catch (err) {
+      try {
+        this.mindMap.command.recovery()
+      } catch (e) {
+        // ignore
+      }
       done()
       throw err
     }
