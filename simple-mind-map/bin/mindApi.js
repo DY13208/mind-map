@@ -104,11 +104,15 @@ function mapPayload(roomKey, obj, row, extra = {}) {
 async function persist(roomKey, ydoc, obj, title, options = {}) {
   const { responseFormat = 'meta', persistNow = false, ...applyOptions } = options
   mindDoc.applyObjectToDoc(ydoc, obj, applyOptions)
-  const name = title || mapTitle(obj, null)
-  await upsertRoom(roomKey, name)
+  const hasExplicitTitle = title !== undefined && title !== null
+  const row = await upsertRoom(roomKey, title || mapTitle(obj, null), {
+    // 节点增删改和未指定 title 的 replace 只保存文档；保留已有的导图标题。
+    // 只有创建导图、rename_map 或 replace_tree 显式传 title 才更新该标题。
+    preserveExistingTitle: !hasExplicitTitle
+  })
   if (persistNow) await saveDoc(roomKey, ydoc)
   else scheduleSave(roomKey, ydoc)
-  return mapPayload(roomKey, obj, { title: name, room_key: roomKey }, {
+  return mapPayload(roomKey, obj, row, {
     format: responseFormat
   })
 }
