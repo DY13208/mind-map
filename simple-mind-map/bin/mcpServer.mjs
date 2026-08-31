@@ -8,7 +8,10 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 
-const API = (process.env.MIND_MAP_API || 'http://127.0.0.1:1234').replace(/\/$/, '')
+const API = (process.env.MIND_MAP_API || 'http://127.0.0.1:1234').replace(
+  /\/$/,
+  ''
+)
 const MCP_PORT = Number(process.env.MCP_PORT || 3847)
 const MCP_HOST = process.env.MCP_HOST || '0.0.0.0'
 const MCP_TOKEN = process.env.MCP_TOKEN || ''
@@ -47,11 +50,11 @@ function createServer() {
   const server = new McpServer(
     {
       name: 'mind-map',
-      version: '1.0.0'
+      version: '1.1.0'
     },
     {
       instructions:
-        '这是局域网思维导图的 MCP。工具写入的房间与网页协同是同一份 Yjs 文档：人在浏览器打开 share_url，WorkBuddy/AI 用这些工具改节点，双方实时看到。先 get_map 看 outline，优先用节点后面的 [uid] 再增删改。node 也可用完整标题或能唯一命中的部分文字（例如「蔡徐坤」可命中「分支主题蔡徐坤」）。工具返回 isError 或「找不到节点」表示没有写入，禁止声称已改好。'
+        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps，只有一张图可直接使用，多张图必须让用户确认。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。工具返回 isError 表示没有写入，禁止声称已完成。'
     }
   )
 
@@ -135,7 +138,169 @@ function createServer() {
       try {
         return ok(
           await api(
-            `/api/files/${encodeURIComponent(room_key)}/search?q=${encodeURIComponent(query)}`
+            `/api/files/${encodeURIComponent(
+              room_key
+            )}/search?q=${encodeURIComponent(query)}`
+          )
+        )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'list_todos',
+    '列出导图「待办」分支中的任务。默认不返回已完成任务；这不是执行工具，不会修改导图。',
+    {
+      room_key: z.string().describe('房间号'),
+      include_completed: z
+        .boolean()
+        .describe('是否同时返回已完成任务，默认false')
+        .optional()
+    },
+    async ({ room_key, include_completed }) => {
+      try {
+        const qs = include_completed ? '?include_completed=true' : ''
+        return ok(
+          await api(`/api/files/${encodeURIComponent(room_key)}/todos${qs}`)
+        )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'prepare_todo',
+    '处理任何业务待办前必须先调用。读取任务子树，匹配任意SOP目标，并返回其C检查项、P计划、版本和候选项。若match_status=needs_confirmation，先在对话中请用户选择候选SOP；若not_found，任务留在待办。该工具不会执行业务，也不会修改导图。',
+    {
+      room_key: z.string().describe('房间号'),
+      task: z.string().describe('待办任务uid或任务标题'),
+      sop: z
+        .string()
+        .describe('可选，用户确认后的SOP目标uid、标题或完整路径')
+        .optional()
+    },
+    async ({ room_key, task, sop }) => {
+      try {
+        return ok(
+          await api(
+            `/api/files/${encodeURIComponent(room_key)}/todos/prepare`,
+            {
+              method: 'POST',
+              body: JSON.stringify({ task, sop })
+            }
+          )
+        )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'complete_todo',
+    'AI完成P后调用。必须逐项提交prepare_todo返回的全部C叶子检查结果；仅当全部passed=true且SOP版本未变化时，才把整棵任务从「待办」移动到「已完成」。执行过程和错误不要写进导图。',
+    {
+      room_key: z.string().describe('房间号'),
+      task: z.string().describe('待办任务uid或任务标题'),
+      sop_uid: z.string().describe('prepare_todo返回的matched_sop.uid'),
+      sop_version: z.string().describe('prepare_todo返回的matched_sop.version'),
+      check_results: z
+        .array(
+          z.object({
+            check_uid: z.string().describe('C叶子检查项uid'),
+            passed: z.boolean().describe('该检查项是否已经通过'),
+            evidence: z
+              .string()
+              .describe('可选验收依据，仅用于本次校验，不写入思维导图')
+              .optional()
+          })
+        )
+        .describe('全部C叶子检查项的结果'),
+      summary: z
+        .string()
+        .describe('可选精简完成结果；保存为任务元数据，不新增过程节点')
+        .optional()
+    },
+    async ({ room_key, ...body }) => {
+      try {
+        return ok(
+          await api(
+            `/api/files/${encodeURIComponent(room_key)}/todos/complete`,
+            {
+              method: 'POST',
+              body: JSON.stringify(body)
+            }
+          )
+        )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'propose_sop_improvement',
+    '发现任意业务SOP的C或P存在缺失时生成结构化建议。此工具只返回建议和proposal_id，不修改思维导图；必须先把建议展示给用户确认。',
+    {
+      room_key: z.string().describe('房间号'),
+      sop_uid: z.string().describe('要完善的SOP目标uid'),
+      section: z.enum(['C', 'P']).describe('修改C检查规则或P执行计划'),
+      action: z.enum(['add', 'update', 'delete']).describe('建议的修改动作'),
+      node_uid: z
+        .string()
+        .describe('update/delete时必填，必须是对应C/P下的内容节点uid')
+        .optional(),
+      content: z.string().describe('add/update时的新节点内容').optional(),
+      reason: z.string().describe('提出修改的业务原因')
+    },
+    async ({ room_key, ...body }) => {
+      try {
+        return ok(
+          await api(
+            `/api/files/${encodeURIComponent(room_key)}/sop/proposals`,
+            {
+              method: 'POST',
+              body: JSON.stringify(body)
+            }
+          )
+        )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'apply_sop_improvement',
+    '仅在用户已经明确同意propose_sop_improvement展示的建议后调用。建议内容、proposal_id和SOP版本必须一致，否则拒绝写入。',
+    {
+      room_key: z.string().describe('房间号'),
+      proposal_id: z
+        .string()
+        .describe('propose_sop_improvement返回的proposal_id'),
+      sop_uid: z.string().describe('建议中的sop_uid'),
+      sop_version: z.string().describe('建议中的sop_version'),
+      section: z.enum(['C', 'P']).describe('建议中的section'),
+      action: z.enum(['add', 'update', 'delete']).describe('建议中的action'),
+      node_uid: z.string().describe('建议中的node_uid').optional(),
+      content: z.string().describe('建议中的content').optional(),
+      reason: z.string().describe('建议中的reason'),
+      user_confirmed: z
+        .boolean()
+        .describe('只有用户在当前对话明确同意后才能传true')
+    },
+    async ({ room_key, ...body }) => {
+      try {
+        return ok(
+          await api(
+            `/api/files/${encodeURIComponent(room_key)}/sop/proposals/apply`,
+            {
+              method: 'POST',
+              body: JSON.stringify(body)
+            }
           )
         )
       } catch (err) {
@@ -154,14 +319,23 @@ function createServer() {
         .string()
         .describe('父节点 uid / root / 文字路径，默认加到根下')
         .optional(),
-      note: z.string().describe('可选备注').optional()
+      note: z.string().describe('可选备注').optional(),
+      confirm_sop_change: z
+        .boolean()
+        .describe('父节点属于SOP时，必须先获得用户确认并传true')
+        .optional()
     },
-    async ({ room_key, text, parent, note }) => {
+    async ({ room_key, text, parent, note, confirm_sop_change }) => {
       try {
         return ok(
           await api(`/api/files/${encodeURIComponent(room_key)}/nodes`, {
             method: 'POST',
-            body: JSON.stringify({ text, parent: parent || 'root', note })
+            body: JSON.stringify({
+              text,
+              parent: parent || 'root',
+              note,
+              confirm_sop_change
+            })
           })
         )
       } catch (err) {
@@ -177,16 +351,22 @@ function createServer() {
       room_key: z.string().describe('房间号'),
       node: z.string().describe('节点 uid 或文字路径'),
       text: z.string().describe('新文字').optional(),
-      note: z.string().describe('新备注').optional()
+      note: z.string().describe('新备注').optional(),
+      confirm_sop_change: z
+        .boolean()
+        .describe('节点属于SOP时，必须先获得用户确认并传true')
+        .optional()
     },
-    async ({ room_key, node, text, note }) => {
+    async ({ room_key, node, text, note, confirm_sop_change }) => {
       try {
         return ok(
           await api(
-            `/api/files/${encodeURIComponent(room_key)}/nodes/${encodeURIComponent(node)}`,
+            `/api/files/${encodeURIComponent(
+              room_key
+            )}/nodes/${encodeURIComponent(node)}`,
             {
               method: 'PATCH',
-              body: JSON.stringify({ text, note })
+              body: JSON.stringify({ text, note, confirm_sop_change })
             }
           )
         )
@@ -201,14 +381,23 @@ function createServer() {
     '删除节点及其全部子节点。不能删根节点。成功只返回 uid，不返回整图。',
     {
       room_key: z.string().describe('房间号'),
-      node: z.string().describe('节点 uid 或文字路径')
+      node: z.string().describe('节点 uid 或文字路径'),
+      confirm_sop_change: z
+        .boolean()
+        .describe('节点属于SOP时，必须先获得用户确认并传true')
+        .optional()
     },
-    async ({ room_key, node }) => {
+    async ({ room_key, node, confirm_sop_change }) => {
       try {
         return ok(
           await api(
-            `/api/files/${encodeURIComponent(room_key)}/nodes/${encodeURIComponent(node)}`,
-            { method: 'DELETE' }
+            `/api/files/${encodeURIComponent(
+              room_key
+            )}/nodes/${encodeURIComponent(node)}`,
+            {
+              method: 'DELETE',
+              body: JSON.stringify({ confirm_sop_change })
+            }
           )
         )
       } catch (err) {
@@ -223,16 +412,18 @@ function createServer() {
     {
       room_key: z.string().describe('房间号'),
       title: z.string().describe('可选标题').optional(),
-      tree: z
-        .any()
-        .describe('思维导图树，{ data: { text }, children: [] }')
+      tree: z.any().describe('思维导图树，{ data: { text }, children: [] }'),
+      confirm_sop_change: z
+        .boolean()
+        .describe('覆盖含SOP的导图前，必须先获得用户确认并传true')
+        .optional()
     },
-    async ({ room_key, title, tree }) => {
+    async ({ room_key, title, tree, confirm_sop_change }) => {
       try {
         return ok(
           await api(`/api/files/${encodeURIComponent(room_key)}/replace`, {
             method: 'POST',
-            body: JSON.stringify({ title, tree })
+            body: JSON.stringify({ title, tree, confirm_sop_change })
           })
         )
       } catch (err) {
@@ -344,7 +535,10 @@ async function startHttp() {
 
   const httpServer = http.createServer(async (req, res) => {
     setCors(res)
-    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+    const url = new URL(
+      req.url || '/',
+      `http://${req.headers.host || 'localhost'}`
+    )
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204)
@@ -389,7 +583,9 @@ async function startHttp() {
           await server.connect(transport)
         }
         if (!transport) {
-          res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' })
+          res.writeHead(404, {
+            'Content-Type': 'application/json; charset=utf-8'
+          })
           res.end(
             JSON.stringify({
               jsonrpc: '2.0',
@@ -408,14 +604,18 @@ async function startHttp() {
 
       const transport = sessionId ? transports.get(sessionId) : undefined
       if (!transport) {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.writeHead(400, {
+          'Content-Type': 'application/json; charset=utf-8'
+        })
         res.end(JSON.stringify({ error: 'invalid session' }))
         return
       }
       await transport.handleRequest(req, res)
     } catch (err) {
       if (!res.headersSent) {
-        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.writeHead(500, {
+          'Content-Type': 'application/json; charset=utf-8'
+        })
         res.end(JSON.stringify({ error: err.message || 'mcp error' }))
       }
     }
