@@ -1,41 +1,137 @@
-import exampleData from 'simple-mind-map/example/exampleData'
-import { simpleDeepClone } from 'simple-mind-map/src/utils/index'
 import Vue from 'vue'
 import vuexStore from '@/store'
-import {
-  parseJsonOffMainThread,
-  stringifyJsonOffMainThread
-} from '@/utils/importTree'
+import { parseJsonOffMainThread } from '@/utils/importTree'
 
 const SIMPLE_MIND_MAP_DATA = 'SIMPLE_MIND_MAP_DATA'
+const SIMPLE_MIND_MAP_SESSION = 'SIMPLE_MIND_MAP_SESSION'
 const SIMPLE_MIND_MAP_CONFIG = 'SIMPLE_MIND_MAP_CONFIG'
 const SIMPLE_MIND_MAP_LANG = 'SIMPLE_MIND_MAP_LANG'
 const SIMPLE_MIND_MAP_LOCAL_CONFIG = 'SIMPLE_MIND_MAP_LOCAL_CONFIG'
+const IDB_NAME = 'mind-map-local'
+const IDB_STORE = 'drafts'
+const IDB_KEY = 'current'
 
 let mindMapData = null
 let localSaveVersion = 0
+let idb = null
+let skipHeavyLocalDraft = false
+const LOCAL_DRAFT_NODE_LIMIT = 400
+
+function currentRoom() {
+  try {
+    return String(
+      new URLSearchParams(window.location.search).get('room') || ''
+    ).trim()
+  } catch (e) {
+    return ''
+  }
+}
+
+function isCollabSession() {
+  if (currentRoom()) return true
+  const status = vuexStore.state.cooperateStatus
+  return status === 'connected' || status === 'connecting'
+}
+
+function writeSession(session) {
+  try {
+    localStorage.setItem(SIMPLE_MIND_MAP_SESSION, JSON.stringify(session))
+  } catch (e) {
+    // ignore
+  }
+}
+
+function clearLegacyLocalStorageTree() {
+  try {
+    localStorage.removeItem(SIMPLE_MIND_MAP_DATA)
+  } catch (e) {
+    // ignore
+  }
+}
+
+function openDraftDb() {
+  if (idb) return Promise.resolve(idb)
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1)
+    req.onupgradeneeded = () => {
+      const db = req.result
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE)
+      }
+    }
+    req.onsuccess = () => {
+      idb = req.result
+      resolve(idb)
+    }
+    req.onerror = () => reject(req.error)
+  })
+}
+
+async function readDraft() {
+  const db = await openDraftDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readonly')
+    const req = tx.objectStore(IDB_STORE).get(IDB_KEY)
+    req.onsuccess = () => resolve(req.result || null)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+async function writeDraft(data) {
+  const db = await openDraftDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite')
+    tx.objectStore(IDB_STORE).put(data, IDB_KEY)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+function countTreeNodes(data) {
+  const walk = node => {
+    if (!node) return 0
+    return 1 + (node.children || []).reduce((sum, child) => sum + walk(child), 0)
+  }
+  return walk(data && data.root)
+}
+
+function placeholderMap() {
+  return {
+    root: {
+      data: { text: '根节点' },
+      children: []
+    },
+    layout: 'logicalStructure',
+    theme: {
+      template: 'classic4',
+      config: {}
+    }
+  }
+}
+
+function notifyPersistFailed() {
+  Vue.prototype.$bus.$emit('localStorageExceeded')
+}
 
 // 获取缓存的思维导图数据
 export const getData = () => {
-  // 接管模式
   if (window.takeOverApp) {
     mindMapData = window.takeOverAppMethods.getMindMapData()
     return mindMapData
   }
-  // 操作本地文件模式
   if (vuexStore.state.isHandleLocalFile) {
     return Vue.prototype.getCurrentData()
   }
   if (mindMapData) return mindMapData
+  if (currentRoom()) return placeholderMap()
   let store = localStorage.getItem(SIMPLE_MIND_MAP_DATA)
   if (store === null) {
-    return simpleDeepClone(exampleData)
-  } else {
-    try {
-      return JSON.parse(store)
-    } catch (error) {
-      return simpleDeepClone(exampleData)
-    }
+    return placeholderMap()
+  }
+  try {
+    return JSON.parse(store)
+  } catch (error) {
+    return placeholderMap()
   }
 }
 
@@ -44,21 +140,41 @@ export const getDataAsync = async () => {
     return getData()
   }
   if (mindMapData) return mindMapData
+  if (currentRoom()) {
+    skipHeavyLocalDraft = true
+    mindMapData = placeholderMap()
+    writeSession({ backend: 'collab', room: currentRoom(), at: Date.now() })
+    clearLegacyLocalStorageTree()
+    return mindMapData
+  }
+  skipHeavyLocalDraft = false
+  try {
+    const draft = await readDraft()
+    if (draft && draft.root) {
+      mindMapData = draft
+      clearLegacyLocalStorageTree()
+      return mindMapData
+    }
+  } catch (error) {
+    console.log(error)
+  }
   const store = localStorage.getItem(SIMPLE_MIND_MAP_DATA)
   if (store === null) {
-    mindMapData = simpleDeepClone(exampleData)
+    mindMapData = placeholderMap()
     return mindMapData
   }
   try {
     mindMapData = await parseJsonOffMainThread(store)
+    writeDraft(mindMapData)
+      .then(() => clearLegacyLocalStorageTree())
+      .catch(() => {})
     return mindMapData
   } catch (error) {
-    mindMapData = simpleDeepClone(exampleData)
+    mindMapData = placeholderMap()
     return mindMapData
   }
 }
 
-// 存储思维导图数据
 export const storeData = data => {
   try {
     let originData = null
@@ -84,19 +200,37 @@ export const storeData = data => {
       return
     }
     mindMapData = originData
+    if (isCollabSession()) {
+      skipHeavyLocalDraft = true
+      writeSession({
+        backend: 'collab',
+        room: currentRoom(),
+        at: Date.now()
+      })
+      clearLegacyLocalStorageTree()
+      return
+    }
+    if (
+      skipHeavyLocalDraft ||
+      countTreeNodes(originData) > LOCAL_DRAFT_NODE_LIMIT
+    ) {
+      writeSession({ backend: 'memory', at: Date.now() })
+      return
+    }
+    writeSession({ backend: 'local', at: Date.now() })
     const saveVersion = ++localSaveVersion
-    return stringifyJsonOffMainThread(originData)
-      .then(serialized => {
+    return writeDraft(originData)
+      .then(() => {
         if (saveVersion !== localSaveVersion) return
-        localStorage.setItem(SIMPLE_MIND_MAP_DATA, serialized)
+        clearLegacyLocalStorageTree()
       })
       .catch(error => {
         console.log(error)
-        Vue.prototype.$bus.$emit('localStorageExceeded')
+        notifyPersistFailed()
       })
   } catch (error) {
     console.log(error)
-    Vue.prototype.$bus.$emit('localStorageExceeded')
+    notifyPersistFailed()
   }
 }
 

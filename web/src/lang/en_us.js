@@ -373,7 +373,7 @@ export default {
     largeMapImportTip:
       'This map is large, so deep branches were collapsed and performance mode was turned on. Expand nodes as needed.',
     localStorageExceededTip:
-      'The volume of the mind map you created has exceeded the maximum storage limit allowed by the browser. Please export it immediately, otherwise the data will be lost! It is recommended to download the client for use, as there is no size limit for the client.',
+      'Failed to save the local draft. Maps in a collab room are stored on the server and will not be lost. If you are not in a room, export a backup.',
     withBg: 'With background image',
     tryTipTitle: 'Function trial prompt',
     tryTipDesc:

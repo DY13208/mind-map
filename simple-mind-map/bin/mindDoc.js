@@ -130,26 +130,43 @@ function treeToObject(tree) {
   return res
 }
 
-function objectToTree(obj) {
+function objectToTree(obj, options = {}) {
+  const maxNodes = Number(options.maxNodes) > 0 ? Number(options.maxNodes) : 0
+  const stats = options.stats || {}
   const rootUid = findRootUid(obj)
   if (!rootUid || !obj[rootUid]) return null
   const map = {}
+  let count = 0
+  let truncated = false
   const walk = uid => {
     if (map[uid]) return map[uid]
+    if (maxNodes && count >= maxNodes) {
+      truncated = true
+      return null
+    }
     const cur = obj[uid]
     if (!cur) return null
+    count += 1
     const node = {
       data: clone(cur.data || {}),
       children: []
     }
     map[uid] = node
     ;(cur.children || []).forEach(childUid => {
+      if (maxNodes && count >= maxNodes) {
+        truncated = true
+        return
+      }
       const child = walk(childUid)
       if (child) node.children.push(child)
     })
     return node
   }
-  return walk(rootUid)
+  const tree = walk(rootUid)
+  stats.count = count
+  stats.truncated = truncated
+  stats.node_count = Object.keys(obj).length
+  return tree
 }
 
 function applyObjectToDoc(ydoc, obj, options = {}) {
@@ -333,6 +350,173 @@ function deleteNode(obj, ref) {
   return { obj: next, uid, removed }
 }
 
+function ymapOf(ydoc) {
+  return ydoc.getMap()
+}
+
+function findRootUidInDoc(ydoc) {
+  const ymap = ymapOf(ydoc)
+  let found = ''
+  ymap.forEach((value, key) => {
+    if (found) return
+    if (value && typeof value.get === 'function' && value.get('isRoot')) {
+      found = key
+    }
+  })
+  return found || null
+}
+
+function nodePlainFromDoc(ymap, uid) {
+  const n = ymap.get(uid)
+  if (!n || typeof n.get !== 'function') return ''
+  const data = n.get('data')
+  if (!data || typeof data.get !== 'function') return ''
+  const text = data.get('text')
+  const raw =
+    text && typeof text.toString === 'function' ? text.toString() : String(text || '')
+  return stripHtml(raw)
+}
+
+function childrenFromDoc(ymap, uid) {
+  const n = ymap.get(uid)
+  if (!n || typeof n.get !== 'function') return []
+  const ch = n.get('children')
+  if (ch && typeof ch.toArray === 'function') return ch.toArray()
+  return []
+}
+
+function nodeJsonFromDoc(ymap, uid) {
+  const n = ymap.get(uid)
+  if (!n || typeof n.toJSON !== 'function') return null
+  return n.toJSON()
+}
+
+function resolveNodeInDoc(ydoc, ref) {
+  const ymap = ymapOf(ydoc)
+  if (!ref || ref === 'root' || ref === '/') return findRootUidInDoc(ydoc)
+  if (ymap.has(ref)) return ref
+  const raw = String(ref).trim()
+  if (!raw) return findRootUidInDoc(ydoc)
+  const getText = uid => nodePlainFromDoc(ymap, uid)
+  if (raw.includes('/')) {
+    const byPath = raw.split('/').map(part => stripHtml(part)).filter(Boolean)
+    let current = findRootUidInDoc(ydoc)
+    let start = 0
+    const rootText = getText(current)
+    if (byPath[0] === rootText || (rootText && rootText.includes(byPath[0]))) {
+      start = 1
+    }
+    for (let i = start; i < byPath.length; i++) {
+      const next = matchLabel(childrenFromDoc(ymap, current), getText, byPath[i])
+      if (!next) return null
+      current = next
+    }
+    return current
+  }
+  return matchLabel(Array.from(ymap.keys()), getText, raw)
+}
+
+function findParentInDoc(ymap, uid) {
+  let parent = ''
+  ymap.forEach((value, key) => {
+    if (parent || key === uid || !value || typeof value.get !== 'function') return
+    const ch = value.get('children')
+    if (ch && typeof ch.toArray === 'function' && ch.toArray().includes(uid)) {
+      parent = key
+    }
+  })
+  return parent || null
+}
+
+function collectDescendantsInDoc(ymap, uid) {
+  const out = []
+  const walk = id => {
+    out.push(id)
+    childrenFromDoc(ymap, id).forEach(walk)
+  }
+  walk(uid)
+  return out
+}
+
+function addNodeOnDoc(ydoc, { parent, text, note } = {}) {
+  const ymap = ymapOf(ydoc)
+  const parentUid = resolveNodeInDoc(ydoc, parent)
+  if (!parentUid || !ymap.has(parentUid)) {
+    throw new Error('找不到父节点，请先 get_map 查看 uid 或路径')
+  }
+  const parentJson = nodeJsonFromDoc(ymap, parentUid)
+  const uid = createUid()
+  const parentData = (parentJson && parentJson.data) || {}
+  const data = {
+    uid,
+    text: String(text || '新节点'),
+    expand: true
+  }
+  if (parentData.richText) {
+    data.richText = true
+    applyNodeText(data, data.text)
+  }
+  if (note) data.note = String(note)
+  const previousObject = { [parentUid]: parentJson }
+  const nextObject = {
+    [parentUid]: {
+      ...parentJson,
+      children: [...((parentJson && parentJson.children) || []), uid]
+    },
+    [uid]: {
+      isRoot: false,
+      data,
+      children: []
+    }
+  }
+  applyObjectToDoc(ydoc, nextObject, { previousObject })
+  return { uid, parent_uid: parentUid }
+}
+
+function updateNodeOnDoc(ydoc, ref, patch = {}) {
+  const ymap = ymapOf(ydoc)
+  const uid = resolveNodeInDoc(ydoc, ref)
+  if (!uid || !ymap.has(uid)) {
+    throw new Error('找不到节点，请先 get_map 查看 uid 或路径')
+  }
+  const prev = nodeJsonFromDoc(ymap, uid)
+  const data = { ...(prev.data || {}) }
+  if (patch.text !== undefined) applyNodeText(data, patch.text)
+  if (patch.note !== undefined) data.note = String(patch.note)
+  applyObjectToDoc(
+    ydoc,
+    { [uid]: { ...prev, data } },
+    { previousObject: { [uid]: prev } }
+  )
+  return { uid }
+}
+
+function deleteNodeOnDoc(ydoc, ref) {
+  const ymap = ymapOf(ydoc)
+  const uid = resolveNodeInDoc(ydoc, ref)
+  if (!uid || !ymap.has(uid)) {
+    throw new Error('找不到节点，请先 get_map 查看 uid 或路径')
+  }
+  const json = nodeJsonFromDoc(ymap, uid)
+  if (json && json.isRoot) {
+    throw new Error('不能删除根节点')
+  }
+  const parentUid = findParentInDoc(ymap, uid)
+  const removed = collectDescendantsInDoc(ymap, uid)
+  const patch = {}
+  const previousObject = {}
+  if (parentUid) {
+    const parentJson = nodeJsonFromDoc(ymap, parentUid)
+    previousObject[parentUid] = parentJson
+    patch[parentUid] = {
+      ...parentJson,
+      children: ((parentJson && parentJson.children) || []).filter(id => id !== uid)
+    }
+  }
+  applyObjectToDoc(ydoc, patch, { previousObject, deleteUids: removed })
+  return { uid, removed }
+}
+
 function searchNodes(obj, query) {
   const q = stripHtml(query).toLowerCase()
   if (!q) return []
@@ -360,6 +544,9 @@ module.exports = {
   addNode,
   updateNode,
   deleteNode,
+  addNodeOnDoc,
+  updateNodeOnDoc,
+  deleteNodeOnDoc,
   searchNodes,
   nodePath,
   stripHtml

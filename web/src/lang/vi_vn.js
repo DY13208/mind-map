@@ -371,7 +371,7 @@ export default {
     largeMapImportTip:
       'Sơ đồ quá lớn nên đã thu gọn nhánh sâu và bật chế độ hiệu suất. Bấm mở rộng khi cần.',
     localStorageExceededTip:
-      'Dung lượng sơ đồ tư duy bạn tạo đã vượt quá giới hạn lưu trữ tối đa cho phép của trình duyệt. Vui lòng xuất ngay lập tức, nếu không dữ liệu sẽ bị mất! Nên tải xuống ứng dụng khách để sử dụng, vì không có giới hạn kích thước khi sử dụng ứng dụng khách.',
+      'Không lưu được bản nháp local. Sơ đồ trong phòng cộng tác lưu trên máy chủ, không mất. Nếu chưa vào phòng, hãy xuất bản sao lưu.',
     withBg: 'Với Background',
     tryTipTitle: 'Mẹo dùng thử chức năng',
     tryTipDesc:

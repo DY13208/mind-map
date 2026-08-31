@@ -13,10 +13,24 @@ const createYText = value => {
   return text
 }
 
+const looksLikeHtml = value => /<\/?[a-z][\s\S]*>/i.test(String(value || ''))
+
 const syncText = (text, nextValue, previousValue) => {
   const next = String(nextValue || '')
-  const previous = String(previousValue || '')
-  if (text.toString() === next || next === previous) return
+  const current = text.toString()
+  if (current === next) return
+  const snapshot = String(previousValue || '')
+  const staleSnapshot = snapshot !== current
+  if (
+    staleSnapshot ||
+    looksLikeHtml(current) ||
+    looksLikeHtml(next)
+  ) {
+    if (current.length) text.delete(0, current.length)
+    if (next) text.insert(0, next)
+    return
+  }
+  const previous = current
   let prefix = 0
   while (
     prefix < previous.length &&

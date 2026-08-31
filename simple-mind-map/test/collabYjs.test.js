@@ -178,6 +178,40 @@ testLegacyPlainObjectsAreMigrated()
 testLargeUnchangedMapDoesNotProduceUpdates()
 testSingleEditDoesNotRewriteIsRoot()
 
+function textOf(doc, uid = 'root') {
+  const value = doc.getMap().get(uid).get('data').get('text')
+  return value && value.toString ? value.toString() : value
+}
+
+function testStalePreviousDoesNotConcatDefaultText() {
+  const doc = new Y.Doc()
+  applyObjectToDoc(doc, { root: node('root', '分支主题') }, { replace: true })
+  applyObjectToDoc(
+    doc,
+    { root: node('root', 'D') },
+    { previousObject: { root: node('root', '') } }
+  )
+  assert.strictEqual(textOf(doc), 'D')
+}
+
+function testHtmlSpanDoesNotLeaveTagResidue() {
+  const doc = new Y.Doc()
+  applyObjectToDoc(
+    doc,
+    { root: node('root', '<span>分支主题</span>') },
+    { replace: true }
+  )
+  applyObjectToDoc(
+    doc,
+    { root: node('root', 'D') },
+    { previousObject: { root: node('root', '分支主题') } }
+  )
+  assert.strictEqual(textOf(doc), 'D')
+}
+
+testStalePreviousDoesNotConcatDefaultText()
+testHtmlSpanDoesNotLeaveTagResidue()
+
 const mindDoc = require('../bin/mindDoc')
 function testOutlineTruncates() {
   const obj = {
@@ -195,4 +229,34 @@ function testOutlineTruncates() {
   assert.ok(clipped.includes('truncated at 5 nodes'))
 }
 testOutlineTruncates()
+
+function testAddNodeOnDocDoesNotCloneWholeMap() {
+  const doc = new Y.Doc()
+  applyObjectToDoc(doc, { root: node('root', 'Root') }, { replace: true })
+  const result = mindDoc.addNodeOnDoc(doc, { parent: 'root', text: 'Child' })
+  assert.ok(result.uid)
+  assert.strictEqual(result.parent_uid, 'root')
+  assert.ok(doc.getMap().has(result.uid))
+  const children = doc.getMap().get('root').get('children').toArray()
+  assert.ok(children.includes(result.uid))
+}
+
+function testFullTreeTruncates() {
+  const obj = {
+    root: { data: { uid: 'root', text: 'Root' }, children: [], isRoot: true }
+  }
+  for (let i = 0; i < 20; i++) {
+    const uid = `n${i}`
+    obj.root.children.push(uid)
+    obj[uid] = { data: { uid, text: `Node ${i}` }, children: [] }
+  }
+  const stats = {}
+  const tree = mindDoc.objectToTree(obj, { maxNodes: 5, stats })
+  assert.ok(tree)
+  assert.strictEqual(stats.truncated, true)
+  assert.ok(stats.count <= 5)
+}
+
+testAddNodeOnDocDoesNotCloneWholeMap()
+testFullTreeTruncates()
 console.log('collabYjs tests passed')

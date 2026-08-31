@@ -288,7 +288,7 @@ export default {
         type: 'warning',
         title: this.$t('edit.tip'),
         message: this.$t('edit.localStorageExceededTip'),
-        duration: 0
+        duration: 8000
       })
     },
 

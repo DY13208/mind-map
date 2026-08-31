@@ -6,7 +6,8 @@ import {
   getType,
   isUndef,
   transformTreeDataToObject,
-  transformObjectToTreeData
+  transformObjectToTreeData,
+  removeFromParentNodeData
 } from '../utils/index'
 import { applyObjectToYMap, migrateLegacyNodes } from './cooperateYjs'
 
@@ -303,6 +304,8 @@ class Cooperate {
     if (!this.ymap) return
     this.flushLocalNow()
     const uids = Array.from(this.pendingRemoteUids)
+    const added = Array.from(this.pendingRemoteAdded)
+    const deleted = Array.from(this.pendingRemoteDeleted)
     const structure = this.pendingRemoteStructure
     this.pendingRemoteUids = new Set()
     this.pendingRemoteAdded = new Set()
@@ -311,6 +314,12 @@ class Cooperate {
     this.enableLargeMapMode(this.ymap.size || this.mapSize())
     if (!structure && uids.length > 0 && uids.length <= 12) {
       if (this.applyRemoteNodePatch(uids)) return
+    }
+    if (structure && added.length === 1 && deleted.length === 0) {
+      if (this.applyRemoteInsert(added[0])) return
+    }
+    if (structure && deleted.length === 1 && added.length === 0) {
+      if (this.applyRemoteRemove(deleted[0])) return
     }
     const data = this.ymap.toJSON()
     this.currentData = data
@@ -345,6 +354,110 @@ class Cooperate {
         })
         renderer.reRenderNodeCheckChange(node, true)
       })
+    } catch (err) {
+      return false
+    } finally {
+      try {
+        this.mindMap.command.recovery()
+      } catch (e) {
+        // ignore
+      }
+      this.suppressLocalUntil = Date.now() + 250
+      this.isApplyingRemote = false
+    }
+    return true
+  }
+
+  findRemoteParentUid(uid) {
+    let parentUid = ''
+    this.ymap.forEach((value, key) => {
+      if (parentUid || key === uid || !(value instanceof Y.Map)) return
+      const children = value.get('children')
+      if (
+        children &&
+        typeof children.toArray === 'function' &&
+        children.toArray().includes(uid)
+      ) {
+        parentUid = key
+      }
+    })
+    return parentUid
+  }
+
+  applyRemoteInsert(uid) {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!renderer || typeof renderer.findNodeByUid !== 'function') return false
+    if (renderer.findNodeByUid(uid)) return true
+    const nodeMap = this.ymap.get(uid)
+    if (!nodeMap || typeof nodeMap.toJSON !== 'function') return false
+    const json = nodeMap.toJSON()
+    const parentUid = this.findRemoteParentUid(uid)
+    if (!parentUid) return false
+    const parentNode = renderer.findNodeByUid(parentUid)
+    if (!parentNode) return false
+    this.isApplyingRemote = true
+    this.mindMap.command.pause()
+    try {
+      if (!parentNode.nodeData.children) parentNode.nodeData.children = []
+      const exists = parentNode.nodeData.children.some(
+        child => child && child.data && child.data.uid === uid
+      )
+      if (!exists) {
+        const data = json.data || {}
+        parentNode.nodeData.children.push({
+          data: {
+            uid,
+            text: data.text,
+            note: data.note,
+            richText: data.richText,
+            expand: data.expand !== false
+          },
+          children: []
+        })
+      }
+      renderer.setNodeData(parentNode, { expand: true })
+      this.mindMap.render()
+      if (this.currentData) {
+        this.currentData[uid] = json
+        const parent = this.currentData[parentUid]
+        if (parent) {
+          const children = parent.children || []
+          if (!children.includes(uid)) parent.children = [...children, uid]
+        }
+      }
+    } catch (err) {
+      return false
+    } finally {
+      try {
+        this.mindMap.command.recovery()
+      } catch (e) {
+        // ignore
+      }
+      this.suppressLocalUntil = Date.now() + 250
+      this.isApplyingRemote = false
+    }
+    return true
+  }
+
+  applyRemoteRemove(uid) {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!renderer || typeof renderer.findNodeByUid !== 'function') return false
+    const node = renderer.findNodeByUid(uid)
+    if (!node || node.isRoot) return false
+    this.isApplyingRemote = true
+    this.mindMap.command.pause()
+    try {
+      removeFromParentNodeData(node)
+      this.mindMap.render()
+      if (this.currentData) {
+        Object.keys(this.currentData).forEach(key => {
+          const children = this.currentData[key] && this.currentData[key].children
+          if (Array.isArray(children) && children.includes(uid)) {
+            this.currentData[key].children = children.filter(child => child !== uid)
+          }
+        })
+        delete this.currentData[uid]
+      }
     } catch (err) {
       return false
     } finally {
