@@ -233,16 +233,23 @@ async function deleteYjsBuffer(roomKey) {
   }
 }
 
-async function upsertRoom(roomKey, title) {
-  await pool.query(
+function normalizeTitle(title) {
+  return String(title || '').trim().slice(0, 80) || '未命名'
+}
+
+async function upsertRoom(roomKey, title, options = {}) {
+  const preserveExistingTitle = options.preserveExistingTitle === true
+  const res = await pool.query(
     `insert into rooms (room_key, title, cos_key, updated_at)
      values ($1, $2, $3, now())
      on conflict (room_key) do update set
-       title = excluded.title,
+       title = case when $4 then rooms.title else excluded.title end,
        cos_key = excluded.cos_key,
-       updated_at = now()`,
-    [roomKey, title, cosKey(roomKey)]
+       updated_at = now()
+     returning room_key, title, cos_key, created_at, updated_at`,
+    [roomKey, normalizeTitle(title), cosKey(roomKey), preserveExistingTitle]
   )
+  return res.rows[0]
 }
 
 async function saveDoc(roomKey, ydoc) {
@@ -269,7 +276,11 @@ async function saveDoc(roomKey, ydoc) {
       await purgeRoomStorage(roomKey)
       return
     }
-    await upsertRoom(roomKey, titleFromDoc(ydoc))
+    // 导图节点文本和导图标题是两个独立概念。协作层保存文档时只应补全
+    // 首次创建的标题，不能覆盖用户通过 rename_map 设置的标题。
+    await upsertRoom(roomKey, titleFromDoc(ydoc), {
+      preserveExistingTitle: true
+    })
     if (isDeletedRoom(roomKey)) {
       await purgeRoomStorage(roomKey)
       return
@@ -430,7 +441,7 @@ async function listRooms() {
 }
 
 async function renameRoom(roomKey, title) {
-  const name = String(title || '').trim().slice(0, 80) || '未命名'
+  const name = normalizeTitle(title)
   const res = await pool.query(
     `update rooms set title = $2, updated_at = now()
      where room_key = $1
