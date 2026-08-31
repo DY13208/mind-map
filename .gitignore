@@ -6,3 +6,5 @@ simple-mind-map/types
 utools/dist
 .env
 .mcp.json
+.playwright-cli/
+output/

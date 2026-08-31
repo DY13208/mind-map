@@ -13,20 +13,42 @@ const {
   safeRoomKey,
   isDeletedRoom
 } = require('./storage')
+const {
+  initAuth,
+  isAuthEnabled,
+  handleAuthApi,
+  authenticateRequest,
+  requireAuthenticatedRequest,
+  applyCorsHeaders,
+  isAllowedOrigin
+} = require('./auth')
 
 const host = process.env.HOST || '0.0.0.0'
 const port = Number(process.env.PORT || 1234)
 
 const server = http.createServer(async (request, response) => {
   try {
+    const pathname = new URL(request.url, 'http://127.0.0.1').pathname
+    if (request.method === 'OPTIONS' && pathname.startsWith('/api/')) {
+      applyCorsHeaders(request, response)
+      response.writeHead(isAllowedOrigin(request) ? 204 : 403)
+      response.end()
+      return
+    }
+    const authHandled = await handleAuthApi(request, response)
+    if (authHandled) return
+    if (pathname.startsWith('/api/') && pathname !== '/api/health') {
+      const authenticated = await requireAuthenticatedRequest(request, response)
+      if (!authenticated) return
+    }
     const handled = await handleApi(request, response)
     if (handled) return
   } catch (err) {
     console.error('[api]', err)
     if (!response.headersSent) {
+      applyCorsHeaders(request, response)
       response.writeHead(500, {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Content-Type': 'application/json; charset=utf-8'
       })
       response.end(JSON.stringify({ error: err.message || 'server error' }))
     }
@@ -71,13 +93,44 @@ wss.on('connection', (conn, req) => {
     })
 })
 
-server.on('upgrade', (request, socket, head) => {
-  wss.handleUpgrade(request, socket, head, ws => {
-    wss.emit('connection', ws, request)
-  })
+function rejectUpgrade(socket, status, message) {
+  const body = String(message || 'Unauthorized')
+  socket.write(
+    `HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${Buffer.byteLength(
+      body
+    )}\r\n\r\n${body}`
+  )
+  socket.destroy()
+}
+
+server.on('upgrade', async (request, socket, head) => {
+  try {
+    if (isAuthEnabled()) {
+      if (!isAllowedOrigin(request)) {
+        rejectUpgrade(socket, '403 Forbidden', 'Forbidden')
+        return
+      }
+      const user = await authenticateRequest(request)
+      if (!user) {
+        rejectUpgrade(socket, '401 Unauthorized', 'Unauthorized')
+        return
+      }
+      request.authUser = user
+    }
+    wss.handleUpgrade(request, socket, head, ws => {
+      wss.emit('connection', ws, request)
+    })
+  } catch (err) {
+    console.error('[auth] websocket authentication failed:', err.message)
+    rejectUpgrade(
+      socket,
+      '503 Service Unavailable',
+      'Authentication unavailable'
+    )
+  }
 })
 
-initSchema()
+Promise.all([initSchema(), initAuth()])
   .then(() => {
     attachPersistence()
     server.listen(port, host, () => {

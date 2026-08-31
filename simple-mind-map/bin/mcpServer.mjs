@@ -35,6 +35,7 @@ async function api(path, options = {}) {
     ...rest,
     headers: {
       'Content-Type': 'application/json',
+      ...(MCP_TOKEN ? { Authorization: `Bearer ${MCP_TOKEN}` } : {}),
       ...(headers || {})
     },
     signal: AbortSignal.timeout(timeoutMs)

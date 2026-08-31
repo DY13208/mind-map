@@ -78,6 +78,7 @@ class Ai {
     const res = await fetch(`${getAiBaseUrl(this.options.port)}/ai/chat`, {
       signal: this.controller.signal,
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json'
       },

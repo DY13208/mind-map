@@ -5,7 +5,6 @@ const { spawn, execSync } = require('child_process')
 
 const ROOT = path.resolve(__dirname, '..')
 const ENV_FILE = path.join(ROOT, '.env')
-const PORT = Number(process.env.MIND_MAP_PORT || 8080)
 
 function loadRootEnv() {
   if (!fs.existsSync(ENV_FILE)) return
@@ -29,6 +28,8 @@ function loadRootEnv() {
 }
 
 loadRootEnv()
+
+const PORT = Number(process.env.MIND_MAP_PORT || 8080)
 
 function isVirtualName(name) {
   return /virtual|vmware|vbox|hyper-v|loopback|docker|wsl|vethernet|bluetooth|vnic|pseudo|虚拟/i.test(
