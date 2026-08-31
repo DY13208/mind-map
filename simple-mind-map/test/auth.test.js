@@ -80,5 +80,19 @@ assert.throws(
     }),
   /HTTPS/
 )
+assert.throws(
+  () =>
+    __test.readConfig({
+      ...process.env,
+      AUTH_DEV_BYPASS_KEY: 'too-short'
+    }),
+  /AUTH_DEV_BYPASS_KEY/
+)
+
+assert.strictEqual(__test.isPrivateOrLocalHost('localhost'), true)
+assert.strictEqual(__test.isPrivateOrLocalHost('127.0.0.1:1234'), true)
+assert.strictEqual(__test.isPrivateOrLocalHost('192.168.1.20'), true)
+assert.strictEqual(__test.isPrivateOrLocalHost('10.0.0.8'), true)
+assert.strictEqual(__test.isPrivateOrLocalHost('mindmap.example.com'), false)
 
 console.log('auth unit tests passed')

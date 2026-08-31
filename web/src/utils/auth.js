@@ -60,3 +60,41 @@ export async function logout() {
   }
   currentUser = null
 }
+
+const DEV_AUTH_KEY_STORAGE = 'mind_map_dev_auth_key'
+
+export function getStoredDevAuthKey() {
+  try {
+    return localStorage.getItem(DEV_AUTH_KEY_STORAGE) || ''
+  } catch (err) {
+    return ''
+  }
+}
+
+export function storeDevAuthKey(key) {
+  try {
+    if (key) localStorage.setItem(DEV_AUTH_KEY_STORAGE, key)
+    else localStorage.removeItem(DEV_AUTH_KEY_STORAGE)
+  } catch (err) {
+    // ignore storage failures
+  }
+}
+
+export async function devLogin(key) {
+  const response = await fetch(getAuthApiUrl('/api/auth/dev-login'), {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ key })
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok || !data.authenticated) {
+    throw new Error(data.error || '开发者登录失败')
+  }
+  currentUser = data.user || null
+  storeDevAuthKey(key)
+  return data
+}

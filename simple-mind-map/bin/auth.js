@@ -75,6 +75,39 @@ function optionalHttpsUrl(value, key) {
   return url.toString()
 }
 
+function isPrivateOrLocalHost(value) {
+  const hostname = String(value || '')
+    .trim()
+    .replace(/^\[/, '')
+    .replace(/\]$/, '')
+    .split(':')[0]
+    .toLowerCase()
+  if (!hostname || hostname === 'localhost') return true
+  if (hostname === '127.0.0.1' || hostname === '::1') return true
+  if (hostname.endsWith('.local')) return true
+
+  const match = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/)
+  if (!match) return false
+  const parts = match.slice(1).map(Number)
+  if (parts[0] === 10) return true
+  if (parts[0] === 192 && parts[1] === 168) return true
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true
+  return false
+}
+
+function requestHost(req) {
+  const forwarded = String(req.headers['x-forwarded-host'] || '')
+    .split(',')[0]
+    .trim()
+  return forwarded || String(req.headers.host || '').trim()
+}
+
+function isDevBypassAllowed(req) {
+  if (!config.enabled || !config.devBypassKey) return false
+  if (config.devBypassAllowPublic) return true
+  return isPrivateOrLocalHost(requestHost(req))
+}
+
 function readConfig(env = process.env) {
   const enabled = enabledValue(env.WECOM_AUTH_ENABLED)
   if (!enabled) return { enabled: false }
@@ -141,6 +174,20 @@ function readConfig(env = process.env) {
     throw new Error('AUTH_COOKIE_SECURE 只能是 auto、true 或 false')
   }
 
+  const devBypassKey = String(env.AUTH_DEV_BYPASS_KEY || '').trim()
+  const devBypassAllowPublic = enabledValue(env.AUTH_DEV_BYPASS_ALLOW_PUBLIC)
+  const devBypassUserName =
+    String(env.AUTH_DEV_BYPASS_USER_NAME || '本地开发者')
+      .trim()
+      .slice(0, 100) || '本地开发者'
+  const devBypassUserId =
+    String(env.AUTH_DEV_BYPASS_USER_ID || 'dev-local')
+      .trim()
+      .slice(0, 255) || 'dev-local'
+  if (devBypassKey && devBypassKey.length < 32) {
+    throw new Error('AUTH_DEV_BYPASS_KEY 至少需要 32 个字符')
+  }
+
   return {
     enabled: true,
     corpId,
@@ -154,6 +201,10 @@ function readConfig(env = process.env) {
     sessionTtlSeconds: Math.round(sessionTtlHours * 60 * 60),
     sessionMaxSeconds: Math.round(sessionMaxHours * 60 * 60),
     cookieSecure,
+    devBypassKey,
+    devBypassAllowPublic,
+    devBypassUserName,
+    devBypassUserId,
     wecomApiBase: String(
       env.WECOM_API_BASE || 'https://qyapi.weixin.qq.com'
     ).replace(/\/$/, ''),
@@ -764,6 +815,49 @@ function publicUser(user) {
   }
 }
 
+function readJsonBody(req, limit = 4096) {
+  return new Promise((resolve, reject) => {
+    let raw = ''
+    req.on('data', chunk => {
+      raw += chunk
+      if (raw.length > limit) {
+        reject(new Error('payload too large'))
+        req.destroy()
+      }
+    })
+    req.on('end', () => {
+      if (!raw) {
+        resolve({})
+        return
+      }
+      try {
+        resolve(JSON.parse(raw))
+      } catch (err) {
+        reject(new Error('invalid json'))
+      }
+    })
+    req.on('error', reject)
+  })
+}
+
+async function createDevBypassSession(req, res) {
+  const user = {
+    id: config.devBypassUserId,
+    name: config.devBypassUserName,
+    avatar: '',
+    departments: []
+  }
+  await upsertUser(user)
+  const session = await createSession(user.id)
+  setCookie(res, req, SESSION_COOKIE, session, config.sessionMaxSeconds)
+  return {
+    id: user.id,
+    name: user.name,
+    avatar: user.avatar,
+    departments: user.departments
+  }
+}
+
 async function handleAuthApi(req, res) {
   const url = new URL(req.url, 'http://127.0.0.1')
   const pathname = url.pathname
@@ -783,7 +877,8 @@ async function handleAuthApi(req, res) {
   if (pathname === '/api/auth/config' && req.method === 'GET') {
     sendJson(req, res, 200, {
       enabled: config.enabled,
-      loginPath: config.enabled ? '/api/auth/login' : null
+      loginPath: config.enabled ? '/api/auth/login' : null,
+      devBypassAvailable: isDevBypassAllowed(req)
     })
     return true
   }
@@ -797,7 +892,8 @@ async function handleAuthApi(req, res) {
     sendJson(req, res, 200, {
       enabled: true,
       authenticated: !!user,
-      user: user ? publicUser(user) : null
+      user: user ? publicUser(user) : null,
+      devBypassAvailable: isDevBypassAllowed(req)
     })
     return true
   }
@@ -873,6 +969,52 @@ async function handleAuthApi(req, res) {
     return true
   }
 
+  if (pathname === '/api/auth/dev-login' && req.method === 'POST') {
+    if (!isDevBypassAllowed(req)) {
+      sendJson(req, res, 404, { error: 'not found' })
+      return true
+    }
+    if (!isAllowedOrigin(req)) {
+      sendJson(req, res, 403, {
+        error: '请求来源未获授权',
+        code: 'origin_denied'
+      })
+      return true
+    }
+    let body = {}
+    try {
+      body = await readJsonBody(req)
+    } catch (err) {
+      sendJson(req, res, 400, {
+        error: '请求体格式无效',
+        code: 'invalid_body'
+      })
+      return true
+    }
+    const key = String(body.key || req.headers['x-dev-auth-key'] || '').trim()
+    if (!key || !safeEqualString(key, config.devBypassKey)) {
+      sendJson(req, res, 401, {
+        error: '开发者密钥无效',
+        code: 'invalid_dev_key'
+      })
+      return true
+    }
+    try {
+      const user = await createDevBypassSession(req, res)
+      sendJson(req, res, 200, {
+        authenticated: true,
+        user: publicUser(user)
+      })
+    } catch (err) {
+      console.error('[auth] Dev bypass login failed:', err.message || err)
+      sendJson(req, res, 502, {
+        error: '开发者登录失败',
+        code: 'auth_unavailable'
+      })
+    }
+    return true
+  }
+
   if (pathname === '/api/auth/logout' && req.method === 'POST') {
     if (!isAllowedOrigin(req)) {
       sendJson(req, res, 403, {
@@ -915,6 +1057,8 @@ module.exports = {
     safeReturnTo,
     signValue,
     verifySignedValue,
-    buildWecomLoginUrl
+    buildWecomLoginUrl,
+    isPrivateOrLocalHost,
+    isDevBypassAllowed
   }
 }
