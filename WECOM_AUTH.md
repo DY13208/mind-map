@@ -93,6 +93,24 @@ curl -fsS https://mindmap.example.com/api/auth/me
 - 再次刷新不要求重复扫码，协同连接和文件列表正常；
 - 点击右上角“退出”后，文件 API 和协同连接重新变为未授权。
 
+## 本地开发者密钥登录
+
+本地或内网调试时，企业微信二维码往往无法扫码或回调域名不匹配。可在 `.env` 配置 `AUTH_DEV_BYPASS_KEY`（至少 32 字符）后，登录页会出现 **开发者密钥登录** 入口，输入同一密钥即可模拟成员会话，无需扫码。
+
+限制：
+
+- 仅在 **localhost / 127.0.0.1 / 内网 IP** 访问时生效；公网域名默认不可用。
+- 必须同时启用 `WECOM_AUTH_ENABLED=true`；生产环境不要配置该密钥。
+- 如需在公网域名调试（不推荐），需额外设置 `AUTH_DEV_BYPASS_ALLOW_PUBLIC=true`。
+- 可选 `AUTH_DEV_BYPASS_USER_NAME`、`AUTH_DEV_BYPASS_USER_ID` 自定义模拟成员信息。
+
+```dotenv
+AUTH_DEV_BYPASS_KEY=请替换为至少32字符的随机串
+AUTH_DEV_BYPASS_USER_NAME=本地开发者
+```
+
+生成密钥示例：`openssl rand -hex 32`
+
 ## 稳定性与安全边界
 
 - OAuth `state` 使用随机数、HMAC 签名、浏览器绑定和 PostgreSQL 一次性消费，10 分钟过期。

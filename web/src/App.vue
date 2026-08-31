@@ -41,6 +41,36 @@
         >
           <span class="authRefreshIcon" :class="{ spinning: qrRefreshing }">↻</span>
         </button>
+        <div class="authDevLogin" v-if="authState.devBypassAvailable">
+          <button
+            class="authDevToggle"
+            type="button"
+            @click="showDevLogin = !showDevLogin"
+          >
+            {{ showDevLogin ? '收起开发者登录' : '开发者密钥登录' }}
+          </button>
+          <form
+            v-if="showDevLogin"
+            class="authDevForm"
+            @submit.prevent="submitDevLogin"
+          >
+            <input
+              v-model="devAuthKey"
+              class="authDevInput"
+              type="password"
+              autocomplete="off"
+              placeholder="输入 .env 中的 AUTH_DEV_BYPASS_KEY"
+            />
+            <button
+              class="authButton authButton--small"
+              type="submit"
+              :disabled="devLoggingIn || !devAuthKey.trim()"
+            >
+              {{ devLoggingIn ? '登录中…' : '进入' }}
+            </button>
+            <p class="authDevError" v-if="devLoginError">{{ devLoginError }}</p>
+          </form>
+        </div>
       </div>
     </div>
     <router-view v-else></router-view>
@@ -50,7 +80,9 @@
 <script>
 import {
   createLoginQr,
+  devLogin,
   getAuthApiUrl,
+  getStoredDevAuthKey,
   loadAuthState
 } from '@/utils/auth'
 import { mountWecomLoginPanel } from '@/utils/wecomLogin'
@@ -77,14 +109,19 @@ export default {
       authState: {
         enabled: false,
         authenticated: false,
-        user: null
+        user: null,
+        devBypassAvailable: false
       },
       authErrorCode: '',
       qrChallenge: null,
       qrPanel: null,
       qrRefreshing: false,
       qrFailure: '',
-      qrRefreshTimer: null
+      qrRefreshTimer: null,
+      showDevLogin: false,
+      devAuthKey: '',
+      devLoggingIn: false,
+      devLoginError: ''
     }
   },
   computed: {
@@ -118,6 +155,7 @@ export default {
       )
     }
     this.initializeAuth()
+    this.devAuthKey = getStoredDevAuthKey()
   },
   beforeDestroy() {
     this.clearQrRefreshTimer()
@@ -148,7 +186,11 @@ export default {
         !this.authState.authenticated
       ) {
         document.title = PAGE_TITLE
-        await this.refreshLoginQr()
+        if (this.authState.devBypassAvailable) {
+          this.showDevLogin = true
+        } else {
+          await this.refreshLoginQr()
+        }
       }
     },
     clearQrRefreshTimer() {
@@ -199,6 +241,21 @@ export default {
       url.searchParams.set('code', code)
       url.searchParams.set('state', this.qrChallenge.state)
       window.location.assign(url.toString())
+    },
+    async submitDevLogin() {
+      const key = this.devAuthKey.trim()
+      if (!key || this.devLoggingIn) return
+      this.devLoggingIn = true
+      this.devLoginError = ''
+      try {
+        this.authState = await devLogin(key)
+        this.clearQrRefreshTimer()
+        this.destroyQrPanel()
+      } catch (err) {
+        this.devLoginError = err.message || '开发者登录失败'
+      } finally {
+        this.devLoggingIn = false
+      }
     }
   }
 }
@@ -392,6 +449,52 @@ body,
     padding: 8px 14px;
     font-size: 13px;
   }
+}
+
+.authDevLogin {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(15, 45, 35, 0.06);
+}
+
+.authDevToggle {
+  border: 0;
+  background: transparent;
+  color: #6b7c74;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.authDevForm {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.authDevInput {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid rgba(15, 45, 35, 0.1);
+  border-radius: 10px;
+  background: #fff;
+  color: #1f2933;
+  font-size: 13px;
+
+  &:focus {
+    outline: none;
+    border-color: rgba(15, 157, 104, 0.45);
+    box-shadow: 0 0 0 3px rgba(15, 157, 104, 0.08);
+  }
+}
+
+.authDevError {
+  color: #b4473c;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
 }
 
 .authSpinner {

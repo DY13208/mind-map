@@ -157,6 +157,9 @@ async function main() {
         'integration-test-session-secret-at-least-32-characters',
       MCP_TOKEN: 'integration-test-mcp-token-at-least-32-characters',
       AUTH_COOKIE_SECURE: 'false',
+      AUTH_DEV_BYPASS_KEY:
+        'integration-test-dev-bypass-key-at-least-32-characters',
+      AUTH_DEV_BYPASS_USER_NAME: '集成测试开发者',
       WECOM_API_BASE: `http://127.0.0.1:${wecomPort}`,
       WECOM_SSO_BASE: `http://127.0.0.1:${wecomPort}`,
       TENCENT_COS_SECRET_ID: '',
@@ -188,7 +191,53 @@ async function main() {
     assert.deepStrictEqual(await response.json(), {
       enabled: true,
       authenticated: false,
-      user: null
+      user: null,
+      devBypassAvailable: true
+    })
+
+    response = await request('/api/auth/dev-login', {
+      method: 'POST',
+      headers: {
+        Origin: appOrigin,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ key: 'wrong-key' })
+    })
+    assert.strictEqual(response.status, 401)
+
+    response = await request('/api/auth/dev-login', {
+      method: 'POST',
+      headers: {
+        Origin: appOrigin,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        key: 'integration-test-dev-bypass-key-at-least-32-characters'
+      })
+    })
+    assert.strictEqual(response.status, 200)
+    const devLogin = await response.json()
+    assert.strictEqual(devLogin.authenticated, true)
+    assert.strictEqual(devLogin.user.id, 'dev-local')
+    assert.strictEqual(devLogin.user.name, '集成测试开发者')
+
+    response = await request('/api/auth/me')
+    const devMe = await response.json()
+    assert.strictEqual(devMe.authenticated, true)
+    assert.strictEqual(devMe.user.name, '集成测试开发者')
+
+    response = await request('/api/auth/logout', {
+      method: 'POST',
+      headers: { Origin: appOrigin }
+    })
+    assert.strictEqual(response.status, 204)
+
+    response = await request('/api/auth/me')
+    assert.deepStrictEqual(await response.json(), {
+      enabled: true,
+      authenticated: false,
+      user: null,
+      devBypassAvailable: true
     })
 
     response = await request('/api/files')
