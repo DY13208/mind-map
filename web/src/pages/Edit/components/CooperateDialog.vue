@@ -178,6 +178,8 @@ export default {
       saveStatusTimer: null,
       saveStatus: 'idle',
       saveError: '',
+      lastConnectErrorAt: 0,
+      reconnectNoticeTimer: null,
       joinedOnce: false,
       fileList: [],
       filesLoading: false
@@ -227,6 +229,7 @@ export default {
   beforeDestroy() {
     this.$bus.$off('showCooperate', this.open)
     this.stopSaveStatusPolling()
+    this.clearReconnectNotice()
     this.unbindProvider()
   },
   methods: {
@@ -273,7 +276,7 @@ export default {
         this.$message.warning(this.$t('cooperate.roomRequired'))
         return false
       }
-      if (!/^[a-zA-Z0-9._-]{1,40}$/.test(this.roomName)) {
+      if (!/^[a-zA-Z0-9._-]{1,80}$/.test(this.roomName)) {
         this.$message.warning(this.$t('cooperate.roomInvalid'))
         return false
       }
@@ -290,7 +293,9 @@ export default {
 
     join(options = {}) {
       const silent = !!options.silent
-      if (!this.validate() || this.connecting || this.connected) return
+      if (!this.validate() || this.connected) return
+      if (this.joinedOnce && this.provider) return
+      if (this.connecting) return
       this.connecting = true
       this.setCooperateStatus('connecting')
       localStorage.setItem(USER_NAME_KEY, this.userName)
@@ -306,15 +311,17 @@ export default {
         this.serverUrl.replace(/\/$/, ''),
         this.roomName,
         cooperate.getDoc(),
-        { connect: false }
+        { connect: false, maxBackoffTime: 10000 }
       )
       this.provider = provider
       cooperate.setProvider(provider)
       provider.on('status', ({ status }) => {
-        this.connected = status === 'connected'
-        this.connecting = false
-        this.setCooperateStatus(this.connected ? 'connected' : 'disconnected')
         if (status === 'connected') {
+          this.connected = true
+          this.connecting = false
+          this.joinedOnce = true
+          this.clearReconnectNotice()
+          this.setCooperateStatus('connected')
           if (this.connectTimer) {
             clearTimeout(this.connectTimer)
             this.connectTimer = null
@@ -322,12 +329,27 @@ export default {
           this.loadFiles()
           setTimeout(() => this.loadFiles(), 2500)
           this.startSaveStatusPolling()
-          this.joinedOnce = true
-        } else {
-          this.stopSaveStatusPolling()
+          return
         }
+        this.connected = false
+        if (status === 'connecting' || this.joinedOnce) {
+          this.connecting = true
+          this.setCooperateStatus('connecting')
+          this.scheduleReconnectNotice()
+          return
+        }
+        this.connecting = false
+        this.stopSaveStatusPolling()
+        this.setCooperateStatus('disconnected')
       })
       provider.on('connection-error', () => {
+        if (this.joinedOnce) {
+          this.connected = false
+          this.connecting = true
+          this.setCooperateStatus('connecting')
+          this.scheduleReconnectNotice()
+          return
+        }
         if (this.connectTimer) {
           clearTimeout(this.connectTimer)
           this.connectTimer = null
@@ -336,8 +358,10 @@ export default {
         this.connected = false
         this.stopSaveStatusPolling()
         this.setCooperateStatus('disconnected')
-        if (!silent) this.dialogVisible = true
-        this.$message.error(this.$t('cooperate.connectFailed'))
+        if (!silent) {
+          this.dialogVisible = true
+          this.notifyConnectFailure()
+        }
       })
       provider.on('connection-close', event => {
         if (!event || event.code !== 1008) return
@@ -348,13 +372,40 @@ export default {
       this.updatePeers()
       if (this.connectTimer) clearTimeout(this.connectTimer)
       this.connectTimer = setTimeout(() => {
-        if (!this.connected) {
-          this.connecting = false
+        if (this.connected) return
+        if (this.joinedOnce || this.provider) {
           if (!silent) this.dialogVisible = true
-          this.$message.error(this.$t('cooperate.connectFailed'))
+          if (!this.joinedOnce) this.notifyConnectFailure()
+          return
         }
-      }, 8000)
+        this.connecting = false
+        if (!silent) this.dialogVisible = true
+        this.notifyConnectFailure()
+      }, 15000)
       provider.connect()
+    },
+
+    notifyConnectFailure() {
+      const now = Date.now()
+      if (now - this.lastConnectErrorAt < 60000) return
+      this.lastConnectErrorAt = now
+      this.$message.error(this.$t('cooperate.connectFailed'))
+    },
+
+    scheduleReconnectNotice() {
+      if (this.reconnectNoticeTimer || !this.joinedOnce) return
+      this.reconnectNoticeTimer = setTimeout(() => {
+        this.reconnectNoticeTimer = null
+        if (this.connected || !this.joinedOnce) return
+        this.notifyConnectFailure()
+      }, 12000)
+    },
+
+    clearReconnectNotice() {
+      if (this.reconnectNoticeTimer) {
+        clearTimeout(this.reconnectNoticeTimer)
+        this.reconnectNoticeTimer = null
+      }
     },
 
     leave(options = {}) {
@@ -363,6 +414,7 @@ export default {
         clearTimeout(this.connectTimer)
         this.connectTimer = null
       }
+      this.clearReconnectNotice()
       this.unbindProvider()
       if (this.mindMap && this.mindMap.cooperate) {
         this.mindMap.cooperate.disconnectProvider()

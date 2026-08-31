@@ -3,7 +3,8 @@
 require('./loadEnv')
 const http = require('http')
 const WebSocket = require('ws')
-const { setupWSConnection } = require('y-websocket/bin/utils')
+const { docs } = require('y-websocket/bin/utils')
+const { setupWSConnection } = require('./collabWs')
 const {
   initSchema,
   attachPersistence,
@@ -35,7 +36,10 @@ const server = http.createServer(async (request, response) => {
   response.end('simple-mind-map collab server ok')
 })
 
-const wss = new WebSocket.Server({ noServer: true })
+const wss = new WebSocket.Server({
+  noServer: true,
+  maxPayload: 120 * 1024 * 1024
+})
 
 wss.on('connection', (conn, req) => {
   let docName
@@ -45,6 +49,10 @@ wss.on('connection', (conn, req) => {
     if (isDeletedRoom(docName)) throw new Error('room deleted')
   } catch (err) {
     conn.close(1008, 'invalid room name')
+    return
+  }
+  if (docs.has(docName)) {
+    setupWSConnection(conn, req, { gc: true, docName })
     return
   }
   // upgrade 完成后客户端会立即发送 Yjs sync step 1。数据库预加载期间如果还没
@@ -58,7 +66,7 @@ wss.on('connection', (conn, req) => {
     })
     .finally(() => {
       if (conn.readyState !== WebSocket.OPEN) return
-      setupWSConnection(conn, req, { gc: true })
+      setupWSConnection(conn, req, { gc: true, docName })
       if (socket && typeof socket.resume === 'function') socket.resume()
     })
 })

@@ -110,9 +110,89 @@ function testLegacyPlainObjectsAreMigrated() {
   assert.deepStrictEqual(doc.getMap().toJSON().root.children, ['a'])
 }
 
+function testLargeUnchangedMapDoesNotProduceUpdates() {
+  const doc = new Y.Doc()
+  const children = []
+  const initial = { root: node('root', 'Root', children) }
+  for (let i = 0; i < 5000; i++) {
+    const uid = `node-${i}`
+    children.push(uid)
+    initial[uid] = node(uid, `Node ${i}`)
+  }
+  applyObjectToDoc(doc, initial, { replace: true })
+
+  let updateCount = 0
+  let updateBytes = 0
+  doc.on('update', update => {
+    updateCount += 1
+    updateBytes += update.length
+  })
+  applyObjectToDoc(doc, initial, { previousObject: initial })
+  assert.strictEqual(updateCount, 0, 'unchanged large maps must not emit Yjs updates')
+
+  const changed = {
+    ...initial,
+    'node-2500': node('node-2500', 'Changed')
+  }
+  applyObjectToDoc(doc, changed, { previousObject: initial })
+  assert.strictEqual(updateCount, 1)
+  assert(updateBytes < 1024, `single-node edit emitted ${updateBytes} bytes`)
+}
+
+function testSingleEditDoesNotRewriteIsRoot() {
+  const doc = new Y.Doc()
+  const children = []
+  const initial = { root: node('root', 'Root', children) }
+  for (let i = 0; i < 2000; i++) {
+    const uid = `node-${i}`
+    children.push(uid)
+    initial[uid] = node(uid, `Node ${i}`)
+  }
+  applyObjectToDoc(doc, initial, { replace: true })
+
+  let isRootWrites = 0
+  doc.getMap().observeDeep(events => {
+    events.forEach(event => {
+      const keys = event.changes && event.changes.keys
+      if (keys && keys.has('isRoot')) isRootWrites += 1
+    })
+  })
+
+  const changed = {
+    ...initial,
+    'node-7': node('node-7', 'Only this node')
+  }
+  applyObjectToDoc(doc, changed, { previousObject: initial })
+  assert.strictEqual(
+    isRootWrites,
+    0,
+    'editing one node must not rewrite isRoot on other nodes'
+  )
+}
+
 testConcurrentChildrenArePreserved()
 testDifferentNodeFieldsAreMerged()
 testConcurrentTextEditsAreMerged()
 testReplaceDeletesStaleNodes()
 testLegacyPlainObjectsAreMigrated()
+testLargeUnchangedMapDoesNotProduceUpdates()
+testSingleEditDoesNotRewriteIsRoot()
+
+const mindDoc = require('../bin/mindDoc')
+function testOutlineTruncates() {
+  const obj = {
+    root: { data: { uid: 'root', text: 'Root' }, children: [], isRoot: true }
+  }
+  for (let i = 0; i < 20; i++) {
+    const uid = `n${i}`
+    obj.root.children.push(uid)
+    obj[uid] = { data: { uid, text: `Node ${i}` }, children: [] }
+  }
+  const full = mindDoc.toOutline(obj)
+  const clipped = mindDoc.toOutline(obj, { maxNodes: 5 })
+  assert.ok(full.includes('Node 19'))
+  assert.ok(!clipped.includes('Node 19'))
+  assert.ok(clipped.includes('truncated at 5 nodes'))
+}
+testOutlineTruncates()
 console.log('collabYjs tests passed')

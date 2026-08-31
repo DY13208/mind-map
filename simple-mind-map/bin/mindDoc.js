@@ -93,12 +93,23 @@ function findRootUid(obj) {
   )
 }
 
-function findParentUid(obj, targetUid) {
+function findParentUid(obj, targetUid, parentOf) {
+  if (parentOf) return parentOf[targetUid] || null
   return (
     Object.keys(obj).find(uid =>
-      (obj[uid] && obj[uid].children || []).includes(targetUid)
+      ((obj[uid] && obj[uid].children) || []).includes(targetUid)
     ) || null
   )
+}
+
+function buildParentMap(obj) {
+  const parentOf = {}
+  Object.keys(obj).forEach(uid => {
+    ;((obj[uid] && obj[uid].children) || []).forEach(child => {
+      parentOf[child] = uid
+    })
+  })
+  return parentOf
 }
 
 function treeToObject(tree) {
@@ -157,7 +168,8 @@ function collectDescendants(obj, uid) {
   return out
 }
 
-function nodePath(obj, uid) {
+function nodePath(obj, uid, parentOf) {
+  const parents = parentOf || buildParentMap(obj)
   const parts = []
   let current = uid
   const seen = new Set()
@@ -167,36 +179,50 @@ function nodePath(obj, uid) {
     if (!node) break
     parts.unshift(stripHtml(node.data && node.data.text) || current)
     if (node.isRoot) break
-    current = findParentUid(obj, current)
+    current = parents[current]
   }
   return parts.join(' / ')
 }
 
 function flattenNodes(obj) {
+  const parentOf = buildParentMap(obj)
   return Object.keys(obj).map(uid => ({
     uid,
     text: stripHtml(obj[uid].data && obj[uid].data.text),
     note: obj[uid].data && obj[uid].data.note ? String(obj[uid].data.note) : '',
     isRoot: !!obj[uid].isRoot,
-    parent_uid: findParentUid(obj, uid),
+    parent_uid: parentOf[uid] || null,
     children: obj[uid].children || [],
-    path: nodePath(obj, uid)
+    path: nodePath(obj, uid, parentOf)
   }))
 }
 
-function toOutline(obj) {
+function toOutline(obj, options = {}) {
+  const maxNodes = Number(options.maxNodes) > 0 ? Number(options.maxNodes) : 0
   const rootUid = findRootUid(obj)
   if (!rootUid) return '(空导图)'
   const lines = []
+  let count = 0
+  let truncated = false
   const walk = (uid, depth) => {
+    if (maxNodes && count >= maxNodes) {
+      truncated = true
+      return
+    }
     const node = obj[uid]
     if (!node) return
+    count += 1
     const text = stripHtml(node.data && node.data.text) || '(无标题)'
     const prefix = depth === 0 ? '# ' : `${'  '.repeat(depth - 1)}- `
     lines.push(`${prefix}${text}  [${uid}]`)
     ;(node.children || []).forEach(child => walk(child, depth + 1))
   }
   walk(rootUid, 0)
+  if (truncated) {
+    lines.push(
+      `\n… truncated at ${maxNodes} nodes. Use search_nodes or get_map format=nodes with uid.`
+    )
+  }
   return lines.join('\n')
 }
 
