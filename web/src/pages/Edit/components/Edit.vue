@@ -52,6 +52,7 @@
     <NodeNoteSidebar v-if="mindMap" :mindMap="mindMap"></NodeNoteSidebar>
     <AiCreate v-if="mindMap && enableAi" :mindMap="mindMap"></AiCreate>
     <AiChat v-if="enableAi"></AiChat>
+    <NodeAutoExpand v-if="mindMap" :mindMap="mindMap"></NodeAutoExpand>
     <CooperateDialog :mindMap="mindMap"></CooperateDialog>
     <div
       class="dragMask"
@@ -126,6 +127,7 @@ import NodeImgPlacementToolbar from './NodeImgPlacementToolbar.vue'
 import NodeNoteSidebar from './NodeNoteSidebar.vue'
 import AiCreate from './AiCreate.vue'
 import AiChat from './AiChat.vue'
+import NodeAutoExpand from './NodeAutoExpand.vue'
 import CooperateDialog from './CooperateDialog.vue'
 
 // 注册插件
@@ -187,6 +189,7 @@ export default {
     NodeNoteSidebar,
     AiCreate,
     AiChat,
+    NodeAutoExpand,
     CooperateDialog
   },
   data() {
@@ -513,6 +516,7 @@ export default {
         'back_forward',
         'node_contextmenu',
         'node_click',
+        'node_dblclick',
         'draw_click',
         'expand_btn_click',
         'svg_mousedown',
