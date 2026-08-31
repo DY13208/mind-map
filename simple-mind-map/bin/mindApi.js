@@ -44,30 +44,38 @@ async function loadMap(roomKey) {
   return { ydoc, obj, row }
 }
 
-function mapPayload(roomKey, obj, row, extra = {}) {
-  const tree = mindDoc.objectToTree(obj)
-  const title =
-    (row && row.title) ||
-    mindDoc.stripHtml(tree && tree.data && tree.data.text) ||
-    '未命名'
+function mapTitle(obj, row) {
+  if (row && row.title) return row.title
+  const rootUid = mindDoc.findRootUid(obj)
+  const root = rootUid && obj[rootUid]
+  return mindDoc.stripHtml(root && root.data && root.data.text) || '未命名'
+}
+
+function mapMeta(roomKey, obj, row) {
   return {
     room_key: roomKey,
-    title,
+    title: mapTitle(obj, row),
     share_url: shareUrl(roomKey),
-    updated_at: row && row.updated_at,
-    outline: mindDoc.toOutline(obj),
-    ...extra,
-    tree
+    updated_at: row && row.updated_at
   }
+}
+
+function mapPayload(roomKey, obj, row, extra = {}) {
+  const { format = 'outline', ...rest } = extra
+  const meta = { ...mapMeta(roomKey, obj, row), ...rest }
+  if (format === 'meta') return meta
+  if (format === 'full') {
+    return { ...meta, tree: mindDoc.objectToTree(obj) }
+  }
+  if (format === 'nodes') {
+    return { ...meta, nodes: mindDoc.flattenNodes(obj) }
+  }
+  return { ...meta, outline: mindDoc.toOutline(obj) }
 }
 
 async function persist(roomKey, ydoc, obj, title, options = {}) {
   mindDoc.applyObjectToDoc(ydoc, obj, options)
-  const tree = mindDoc.objectToTree(obj)
-  const name =
-    title ||
-    mindDoc.stripHtml(tree && tree.data && tree.data.text) ||
-    '未命名'
+  const name = title || mapTitle(obj, null)
   await upsertRoom(roomKey, name)
   await saveDoc(roomKey, ydoc)
   return mapPayload(roomKey, obj, { title: name, room_key: roomKey })
@@ -229,11 +237,11 @@ async function handleApi(req, res) {
         return true
       }
       const format = url.searchParams.get('format') || 'outline'
-      const extra = {}
-      if (format === 'nodes' || format === 'full') {
-        extra.nodes = mindDoc.flattenNodes(loaded.obj)
-      }
-      sendJson(res, 200, mapPayload(roomKey, loaded.obj, loaded.row, extra))
+      sendJson(
+        res,
+        200,
+        mapPayload(roomKey, loaded.obj, loaded.row, { format })
+      )
       return true
     }
     if (req.method === 'PATCH') {

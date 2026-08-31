@@ -17,7 +17,7 @@ IP 由启动脚本探测，不要手写，也不要用 `127.0.0.1`（WorkBuddy �
 | --- | --- |
 | `list_maps` | 列出房间，含给人类打开的 `share_url` |
 | `create_map` | 新建导图 |
-| `get_map` | 读大纲（每行带 uid）或完整树 |
+| `get_map` | `format=outline` 只返回大纲（每行带 uid）；`format=full` 只返回完整树 |
 | `search_nodes` | 按文字搜节点 |
 | `add_node` | 在父节点下加子节点 |
 | `update_node` | 改文字 / 备注 |
