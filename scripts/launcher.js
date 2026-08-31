@@ -1,5 +1,6 @@
 const fs = require('fs')
 const os = require('os')
+const net = require('net')
 const http = require('http')
 const path = require('path')
 const readline = require('readline')
@@ -224,6 +225,55 @@ function stopAll() {
   })
 }
 
+function pgListen() {
+  return {
+    host: process.env.PGHOST || '127.0.0.1',
+    port: Number(process.env.PGPORT || 5432)
+  }
+}
+
+function pgReady(timeout = 1500) {
+  const { host, port } = pgListen()
+  return new Promise(resolve => {
+    const sock = net.connect({ host, port }, () => {
+      sock.end()
+      resolve(true)
+    })
+    sock.setTimeout(timeout, () => {
+      sock.destroy()
+      resolve(false)
+    })
+    sock.on('error', () => resolve(false))
+  })
+}
+
+async function ensurePostgres() {
+  if (await pgReady()) {
+    log(paint(c.green, `  数据库已就绪  ${pgListen().host}:${pgListen().port}`))
+    return true
+  }
+  log(paint(c.yellow, '  数据库未启动，协同依赖它。正在用 Docker 拉起 Postgres...'))
+  try {
+    execSync('docker compose up -d postgres', {
+      cwd: ROOT,
+      stdio: 'inherit',
+      env: process.env
+    })
+  } catch (e) {
+    log(paint(c.red, '  无法启动数据库。请打开 Docker Desktop 后重试。'))
+    return false
+  }
+  for (let i = 0; i < 40; i++) {
+    if (await pgReady()) {
+      log(paint(c.green, `  数据库已就绪  ${pgListen().host}:${pgListen().port}`))
+      return true
+    }
+    await new Promise(resolve => setTimeout(resolve, 500))
+  }
+  log(paint(c.red, '  数据库启动超时，协同服务将无法保持运行。'))
+  return false
+}
+
 function ensureDeps() {
   const targets = [
     { dir: WEB_DIR, name: 'web' },
@@ -395,7 +445,12 @@ async function startAll({ pickIp = false } = {}) {
   stopAll()
   await new Promise(resolve => setTimeout(resolve, 800))
 
-  log(paint(c.yellow, '  正在启动全部服务...'))
+  const dbOk = await ensurePostgres()
+  if (!dbOk) {
+    log(paint(c.red, '  未启动数据库时，协同端口 1234 起不来。页面仍会打开，但加入房间会失败。'))
+  }
+
+  log(paint(c.yellow, '  正在启动全部服务（含协同 1234）...'))
   startProcess(
     '协同',
     'node',
@@ -404,6 +459,7 @@ async function startAll({ pickIp = false } = {}) {
     c.cyan,
     {
       PORT: String(COLLAB_PORT),
+      HOST: '0.0.0.0',
       PUBLIC_HOST: host,
       WEB_PORT: String(WEB_PORT)
     }
@@ -432,7 +488,15 @@ async function startAll({ pickIp = false } = {}) {
   )
 
   printUrls(host)
-  log(paint(c.dim, '  等待页面编译完成...'))
+  log(paint(c.dim, '  等待协同服务和页面就绪...'))
+  const collabReady = await waitForHttp(
+    `http://127.0.0.1:${COLLAB_PORT}/api/health`
+  )
+  if (collabReady) {
+    log(paint(c.green, `  协同已监听  ws://${host}:${COLLAB_PORT}`))
+  } else {
+    log(paint(c.red, '  协同服务没有起来，加入房间会失败。请看上方 [协同] 日志。'))
+  }
   const ready = await waitForHttp(`http://127.0.0.1:${WEB_PORT}/`)
   if (ready) {
     const url = `http://${host}:${WEB_PORT}/`
@@ -498,8 +562,8 @@ function printMenu(host) {
   log(`  当前使用 IP：${paint(c.green, host || '未设置')}`)
   log('')
   log(`  ${paint(c.cyan, '[1]')}  获取本机 IP 并设为使用地址`)
-  log(`  ${paint(c.cyan, '[2]')}  启动全部服务（页面 / 协同 / AI / MCP）`)
-  log(`  ${paint(c.cyan, '[3]')}  一键：设 IP + 启动全部服务  ${paint(c.dim, '← 回车默认')}`)
+  log(`  ${paint(c.cyan, '[2]')}  启动全部服务（页面 / 协同 1234 / AI / MCP）`)
+  log(`  ${paint(c.cyan, '[3]')}  一键：设 IP + 启动全部服务  ${paint(c.dim, '← 回车默认，含协同')}`)
   log(`  ${paint(c.cyan, '[4]')}  停止全部服务`)
   log(`  ${paint(c.cyan, '[5]')}  Docker 一键启动 ${paint(c.dim, '← 只对外开一个端口，推荐')}`)
   log(`  ${paint(c.cyan, '[6]')}  停止 Docker`)
