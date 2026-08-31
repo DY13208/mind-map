@@ -47,12 +47,19 @@ wss.on('connection', (conn, req) => {
     conn.close(1008, 'invalid room name')
     return
   }
+  // upgrade 完成后客户端会立即发送 Yjs sync step 1。数据库预加载期间如果还没
+  // 注册 setupWSConnection 的 message 监听，这个首帧会直接丢失并导致页面永远
+  // 等不到 synced。先暂停底层 socket，装好处理器后再恢复读取。
+  const socket = conn._socket
+  if (socket && typeof socket.pause === 'function') socket.pause()
   preloadRoom(docName)
     .catch(err => {
       console.error('[persist] preload failed', docName, err.message)
     })
     .finally(() => {
+      if (conn.readyState !== WebSocket.OPEN) return
       setupWSConnection(conn, req, { gc: true })
+      if (socket && typeof socket.resume === 'function') socket.resume()
     })
 })
 

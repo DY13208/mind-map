@@ -60,8 +60,7 @@
 import xmind from 'simple-mind-map/src/parse/xmind.js'
 import markdown from 'simple-mind-map/src/parse/markdown.js'
 import { mapMutations } from 'vuex'
-import Vue from 'vue'
-import { yieldToUi } from '@/utils/importTree'
+import { parseJsonOffMainThread, yieldToUi } from '@/utils/importTree'
 import { hideLoading } from '@/utils/loading'
 
 // 导入
@@ -107,7 +106,7 @@ export default {
     },
 
     getRegexp() {
-      return new RegExp(`\.(smm|json|xmind|md)$`)
+      return /\.(smm|json|xmind|md)$/
     },
 
     // 检查url中是否操作需要打开的文件
@@ -188,9 +187,11 @@ export default {
     handleSmm(file) {
       let fileReader = new FileReader()
       fileReader.readAsText(file.raw)
-      fileReader.onload = evt => {
+      fileReader.onload = async evt => {
         try {
-          let data = JSON.parse(evt.target.result)
+          this.$bus.$emit('showLoading', this.$t('edit.importingTip'))
+          await yieldToUi()
+          let data = await parseJsonOffMainThread(evt.target.result)
           if (typeof data !== 'object') {
             throw new Error(this.$t('import.fileContentError'))
           }
@@ -198,6 +199,7 @@ export default {
           this.$message.success(this.$t('import.importSuccess'))
         } catch (error) {
           console.log(error)
+          hideLoading()
           this.$message.error(this.$t('import.fileParsingFailed'))
         }
       }

@@ -101,7 +101,7 @@ import ShortcutKey from './ShortcutKey.vue'
 import Contextmenu from './Contextmenu.vue'
 import RichTextToolbar from './RichTextToolbar.vue'
 import NodeNoteContentShow from './NodeNoteContentShow.vue'
-import { getData, getConfig, storeData } from '@/api'
+import { getDataAsync, getConfig, storeData } from '@/api'
 import Navigator from './Navigator.vue'
 import NodeImgPreview from './NodeImgPreview.vue'
 import SidebarTrigger from './SidebarTrigger.vue'
@@ -115,7 +115,6 @@ import OutlineEdit from './OutlineEdit.vue'
 import { showLoading, hideLoading } from '@/utils/loading'
 import { prepareImportedTree, yieldToUi } from '@/utils/importTree'
 import handleClipboardText from '@/utils/handleClipboardText'
-import { getParentWithClass } from '@/utils'
 import Scrollbar from './Scrollbar.vue'
 import exampleData from 'simple-mind-map/example/exampleData'
 import FormulaSidebar from './FormulaSidebar.vue'
@@ -154,8 +153,8 @@ MindMap.usePlugin(MiniMap)
 // 注册主题
 Themes.init(MindMap)
 // 扩展主题列表
-if (typeof MoreThemes !== 'undefined') {
-  MoreThemes.init(MindMap)
+if (typeof window.MoreThemes !== 'undefined') {
+  window.MoreThemes.init(MindMap)
 }
 
 export default {
@@ -197,6 +196,9 @@ export default {
       mindMap: null,
       mindMapData: null,
       mindMapConfig: {},
+      isLargeMap: false,
+      storeDataTimer: null,
+      pendingStoreData: null,
       prevImg: '',
       storeConfigTimer: null,
       showDragMask: false
@@ -231,7 +233,7 @@ export default {
       }
     }
   },
-  mounted() {
+  async mounted() {
     // 先注册关闭 loading，避免 init 渲染结束事件早于监听导致遮罩锁死
     this.$bus.$on('node_tree_render_end', this.handleHideLoading)
     this.$bus.$on('showLoading', this.handleShowLoading)
@@ -240,7 +242,7 @@ export default {
     this.loadingSafetyTimer = setTimeout(() => {
       this.handleHideLoading()
     }, 8000)
-    this.getData()
+    await this.getData()
     this.init()
     this.$bus.$on('execCommand', this.execCommand)
     this.$bus.$on('paddingChange', this.onPaddingChange)
@@ -254,6 +256,14 @@ export default {
     window.addEventListener('resize', this.handleResize)
   },
   beforeDestroy() {
+    if (this.storeDataTimer) {
+      clearTimeout(this.storeDataTimer)
+      this.storeDataTimer = null
+    }
+    if (this.pendingStoreData) {
+      storeData(this.pendingStoreData)
+      this.pendingStoreData = null
+    }
     if (this.loadingSafetyTimer) {
       clearTimeout(this.loadingSafetyTimer)
       this.loadingSafetyTimer = null
@@ -270,7 +280,7 @@ export default {
     this.$bus.$off('showLoading', this.handleShowLoading)
     this.$bus.$off('localStorageExceeded', this.onLocalStorageExceeded)
     window.removeEventListener('resize', this.handleResize)
-    this.mindMap.destroy()
+    if (this.mindMap) this.mindMap.destroy()
   },
   methods: {
     onLocalStorageExceeded() {
@@ -327,15 +337,28 @@ export default {
     },
 
     // 获取思维导图数据，实际应该调接口获取
-    getData() {
-      this.mindMapData = getData()
+    async getData() {
+      this.mindMapData = await getDataAsync()
+      const prepared = prepareImportedTree(this.mindMapData)
+      this.mindMapData = prepared.data
+      this.isLargeMap = prepared.collapsed
       this.mindMapConfig = getConfig() || {}
     },
 
     // 存储数据当数据有变时
     bindSaveEvent() {
       this.$bus.$on('data_change', data => {
-        storeData({ root: data })
+        this.pendingStoreData = { root: data }
+        clearTimeout(this.storeDataTimer)
+        this.storeDataTimer = setTimeout(
+          () => {
+            const pending = this.pendingStoreData
+            this.pendingStoreData = null
+            this.storeDataTimer = null
+            if (pending) storeData(pending)
+          },
+          this.isLargeMap ? 1000 : 300
+        )
       })
       this.$bus.$on('view_data_change', data => {
         clearTimeout(this.storeConfigTimer)
@@ -349,6 +372,11 @@ export default {
 
     // 手动保存
     manualSave() {
+      if (this.storeDataTimer) {
+        clearTimeout(this.storeDataTimer)
+        this.storeDataTimer = null
+      }
+      this.pendingStoreData = null
       storeData(this.mindMap.getData(true))
     },
 
@@ -394,6 +422,12 @@ export default {
           openBlankMode: false
         },
         ...(config || {}),
+        ...(this.isLargeMap
+          ? {
+              openPerformance: true,
+              openRealtimeRenderOnNodeTextEdit: false
+            }
+          : {}),
         iconList: [...icon],
         useLeftKeySelectionRightKeyDrag: this.useLeftKeySelectionRightKeyDrag,
         customInnerElsAppendTo: null,
@@ -447,7 +481,7 @@ export default {
         expandBtnNumHandler: num => {
           return num >= 100 ? '…' : num
         },
-        beforeDeleteNodeImg: node => {
+        beforeDeleteNodeImg: () => {
           return new Promise(resolve => {
             this.$confirm(
               this.$t('edit.deleteNodeImgTip'),
@@ -541,7 +575,11 @@ export default {
       const prepared = prepareImportedTree(data)
       data = prepared.data
       if (prepared.collapsed && this.mindMap) {
-        this.mindMap.updateConfig({ openPerformance: true })
+        this.isLargeMap = true
+        this.mindMap.updateConfig({
+          openPerformance: true,
+          openRealtimeRenderOnNodeTextEdit: false
+        })
         this.$message.info(this.$t('edit.largeMapImportTip'))
       }
       let rootNodeData = null

@@ -2,6 +2,10 @@ import exampleData from 'simple-mind-map/example/exampleData'
 import { simpleDeepClone } from 'simple-mind-map/src/utils/index'
 import Vue from 'vue'
 import vuexStore from '@/store'
+import {
+  parseJsonOffMainThread,
+  stringifyJsonOffMainThread
+} from '@/utils/importTree'
 
 const SIMPLE_MIND_MAP_DATA = 'SIMPLE_MIND_MAP_DATA'
 const SIMPLE_MIND_MAP_CONFIG = 'SIMPLE_MIND_MAP_CONFIG'
@@ -9,6 +13,7 @@ const SIMPLE_MIND_MAP_LANG = 'SIMPLE_MIND_MAP_LANG'
 const SIMPLE_MIND_MAP_LOCAL_CONFIG = 'SIMPLE_MIND_MAP_LOCAL_CONFIG'
 
 let mindMapData = null
+let localSaveVersion = 0
 
 // 获取缓存的思维导图数据
 export const getData = () => {
@@ -21,6 +26,7 @@ export const getData = () => {
   if (vuexStore.state.isHandleLocalFile) {
     return Vue.prototype.getCurrentData()
   }
+  if (mindMapData) return mindMapData
   let store = localStorage.getItem(SIMPLE_MIND_MAP_DATA)
   if (store === null) {
     return simpleDeepClone(exampleData)
@@ -33,6 +39,25 @@ export const getData = () => {
   }
 }
 
+export const getDataAsync = async () => {
+  if (window.takeOverApp || vuexStore.state.isHandleLocalFile) {
+    return getData()
+  }
+  if (mindMapData) return mindMapData
+  const store = localStorage.getItem(SIMPLE_MIND_MAP_DATA)
+  if (store === null) {
+    mindMapData = simpleDeepClone(exampleData)
+    return mindMapData
+  }
+  try {
+    mindMapData = await parseJsonOffMainThread(store)
+    return mindMapData
+  } catch (error) {
+    mindMapData = simpleDeepClone(exampleData)
+    return mindMapData
+  }
+}
+
 // 存储思维导图数据
 export const storeData = data => {
   try {
@@ -40,7 +65,7 @@ export const storeData = data => {
     if (window.takeOverApp) {
       originData = mindMapData
     } else {
-      originData = getData()
+      originData = mindMapData || getData()
     }
     if (!originData) {
       originData = {}
@@ -58,12 +83,20 @@ export const storeData = data => {
     if (vuexStore.state.isHandleLocalFile) {
       return
     }
-    localStorage.setItem(SIMPLE_MIND_MAP_DATA, JSON.stringify(originData))
+    mindMapData = originData
+    const saveVersion = ++localSaveVersion
+    return stringifyJsonOffMainThread(originData)
+      .then(serialized => {
+        if (saveVersion !== localSaveVersion) return
+        localStorage.setItem(SIMPLE_MIND_MAP_DATA, serialized)
+      })
+      .catch(error => {
+        console.log(error)
+        Vue.prototype.$bus.$emit('localStorageExceeded')
+      })
   } catch (error) {
     console.log(error)
-    if ('exceeded') {
-      Vue.prototype.$bus.$emit('localStorageExceeded')
-    }
+    Vue.prototype.$bus.$emit('localStorageExceeded')
   }
 }
 

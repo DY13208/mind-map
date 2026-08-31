@@ -39,6 +39,9 @@ class Cooperate {
     this.isApplyingRemote = false
     this.pendingRemoteTree = null
     this.observeApplyTimer = null
+    this.pendingLocalData = null
+    this.localApplyTimer = null
+    this.largeMapModeEnabled = false
     this.localOrigin = { source: 'simple-mind-map-cooperate' }
     // 绑定事件
     this.bindEvent()
@@ -60,7 +63,7 @@ class Cooperate {
       origin: this.localOrigin,
       replace
     })
-    this.currentData = simpleDeepClone(this.ymap.toJSON())
+    this.currentData = this.ymap.toJSON()
     // 监听数据同步
     this.onObserve = this.onObserve.bind(this)
     this.ymap.observeDeep(this.onObserve)
@@ -127,7 +130,8 @@ class Cooperate {
     const remoteSize = [...this.ymap.keys()].length
     if (remoteSize > 0) {
       const data = this.ymap.toJSON()
-      this.currentData = simpleDeepClone(data)
+      this.currentData = data
+      this.enableLargeMapMode(remoteSize)
       const res = transformObjectToTreeData(data)
       if (res) {
         this.applyRemoteTree(res)
@@ -198,8 +202,11 @@ class Cooperate {
   // 解绑事件
   unBindEvent() {
     clearTimeout(this.observeApplyTimer)
+    clearTimeout(this.localApplyTimer)
     this.observeApplyTimer = null
+    this.localApplyTimer = null
     this.pendingRemoteTree = null
+    this.pendingLocalData = null
     this.disconnectProvider()
     this.mindMap.off('data_change', this.onDataChange)
     this.mindMap.off('node_active', this.onNodeActive)
@@ -217,8 +224,11 @@ class Cooperate {
     ) {
       return
     }
-    const hasLegacyNode = Array.from(this.ymap.values()).some(
-      node => !(node instanceof Y.Map)
+    const changedRootKeys = events
+      .filter(event => event.target === this.ymap && event.changes)
+      .flatMap(event => Array.from(event.changes.keys.keys()))
+    const hasLegacyNode = changedRootKeys.some(
+      key => !(this.ymap.get(key) instanceof Y.Map)
     )
     if (hasLegacyNode) {
       migrateLegacyNodes(this.ymap)
@@ -233,11 +243,21 @@ class Cooperate {
   flushRemoteObserve() {
     if (!this.ymap) return
     const data = this.ymap.toJSON()
-    if (isSameObject(data, this.currentData)) return
-    this.currentData = simpleDeepClone(data)
+    this.currentData = data
+    this.enableLargeMapMode(Object.keys(data).length)
     const res = transformObjectToTreeData(data)
     if (!res) return
     this.applyRemoteTree(res)
+  }
+
+  // 大文件优先使用性能模式，避免远端全量同步后逐字编辑触发高频重排
+  enableLargeMapMode(nodeCount) {
+    if (nodeCount < 400 || this.largeMapModeEnabled) return
+    this.largeMapModeEnabled = true
+    this.mindMap.updateConfig({
+      openPerformance: true,
+      openRealtimeRenderOnNodeTextEdit: false
+    })
   }
 
   // 概要不是树里的子节点，对端更新后需要再排一次版才会画出来
@@ -287,6 +307,18 @@ class Cooperate {
       this.pendingInitData = data
       return
     }
+    // 文本输入会连续触发 data_change，只同步最后一版，避免每个按键都遍历整棵树
+    this.pendingLocalData = data
+    clearTimeout(this.localApplyTimer)
+    this.localApplyTimer = setTimeout(() => {
+      this.localApplyTimer = null
+      const pending = this.pendingLocalData
+      this.pendingLocalData = null
+      if (pending && this.ymap) this.flushLocalDataChange(pending)
+    }, 80)
+  }
+
+  flushLocalDataChange(data) {
     const res = transformTreeDataToObject(data)
     this.updateChanges(res)
   }
@@ -311,7 +343,7 @@ class Cooperate {
       beforeCooperateUpdate({ type: 'delete', list: deleteList })
     }
     applyObjectToYMap(this.ymap, data, oldData, { origin: this.localOrigin })
-    this.currentData = simpleDeepClone(this.ymap.toJSON())
+    this.currentData = this.ymap.toJSON()
   }
 
   // 节点激活状态改变后触发感知数据同步
@@ -331,6 +363,9 @@ class Cooperate {
   }
 
   onBeforeSetData() {
+    clearTimeout(this.localApplyTimer)
+    this.localApplyTimer = null
+    this.pendingLocalData = null
     this.isSetData = true
   }
 

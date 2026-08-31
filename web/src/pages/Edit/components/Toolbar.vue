@@ -164,6 +164,7 @@ import exampleData from 'simple-mind-map/example/exampleData'
 import { getData } from '../../../api'
 import ToolbarNodeBtnList from './ToolbarNodeBtnList.vue'
 import { throttle, isMobile } from 'simple-mind-map/src/utils/index'
+import { stringifyJsonOffMainThread } from '@/utils/importTree'
 
 // 工具栏
 let fileHandle = null
@@ -481,7 +482,7 @@ export default {
       if (!this.isFullDataFile) {
         content = content.root
       }
-      let string = JSON.stringify(content)
+      const string = await stringifyJsonOffMainThread(content)
       const writable = await fileHandle.createWritable()
       await writable.write(string)
       await writable.close()
