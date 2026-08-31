@@ -205,6 +205,8 @@ export default {
     mdEmptyTip: 'The content cannot be empty'
   },
   navigatorToolbar: {
+    collapseToolbar: 'Collapse bottom toolbar',
+    expandToolbar: 'Expand bottom toolbar',
     openMiniMap: 'Open mini map',
     closeMiniMap: 'Close mini map',
     readonly: 'Change to Readonly',
@@ -310,6 +312,8 @@ export default {
     reserve: 'Reserve'
   },
   toolbar: {
+    collapseToolbar: 'Collapse top toolbar',
+    expandToolbar: 'Expand top toolbar',
     undo: 'Undo',
     redo: 'Redo',
     insertSiblingNode: 'Sibling node',
@@ -570,7 +574,8 @@ export default {
     copied: 'Invite link copied',
     copyFailed: 'Copy failed',
     joinSuccess: 'Joined the room',
-    autoJoinSuccess: 'Entered the room as "{name}". You can change it in Collab.',
+    autoJoinSuccess:
+      'Entered the room as "{name}". You can change it in Collab.',
     leaveSuccess: 'Left collaboration',
     userNameRequired: 'Please enter a nickname',
     roomRequired: 'Please enter a room name',
@@ -580,14 +585,17 @@ export default {
     connectFailed: 'Failed to connect. Make sure the collab server is running',
     peers: 'Online',
     you: 'You',
-    tip: 'People in the same room sync the canvas in real time. For LAN use, set the server to your computer IP.',
-    startServerTip: 'Run start.bat in the project root to start the page, collab and AI services',
+    tip:
+      'People in the same room sync the canvas in real time. For LAN use, set the server to your computer IP.',
+    startServerTip:
+      'Run start.bat in the project root to start the page, collab and AI services',
     files: 'Saved files',
     refresh: 'Refresh',
     openFile: 'Open',
     deleteFile: 'Delete',
     renameFile: 'Rename',
-    noFiles: 'No saved files yet. Joining a room saves it to the COS mind-map folder.',
+    noFiles:
+      'No saved files yet. Joining a room saves it to the COS mind-map folder.',
     deleteConfirm: 'Delete "{title}"? This cannot be undone.',
     openSuccess: 'Opened this file',
     fileDeleted: 'Deleted',

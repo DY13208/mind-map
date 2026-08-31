@@ -200,6 +200,8 @@ export default {
     mdEmptyTip: '內容不能爲空'
   },
   navigatorToolbar: {
+    collapseToolbar: '收起底部工具列',
+    expandToolbar: '展開底部工具列',
     openMiniMap: '開啟小地圖',
     closeMiniMap: '關閉小地圖',
     readonly: '切換為唯讀模式',
@@ -304,6 +306,8 @@ export default {
     reserve: '保留'
   },
   toolbar: {
+    collapseToolbar: '收起頂部工具列',
+    expandToolbar: '展開頂部工具列',
     undo: '復原',
     redo: '重做',
     insertSiblingNode: '同層節點',

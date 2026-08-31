@@ -2,140 +2,188 @@
   <div class="toolbarContainer" :class="{ isDark: isDark }">
     <div class="toolbar" ref="toolbarRef">
       <!-- 节点操作 -->
-      <div class="toolbarBlock">
-        <ToolbarNodeBtnList :list="horizontalList"></ToolbarNodeBtnList>
-        <!-- 更多 -->
-        <el-popover
-          v-model="popoverShow"
-          placement="bottom-end"
-          width="120"
-          trigger="hover"
-          v-if="showMoreBtn"
-          :style="{ marginLeft: horizontalList.length > 0 ? '20px' : 0 }"
+      <div
+        class="toolbarBlockWrapper"
+        :class="{ collapsed: nodeToolbarCollapsed }"
+      >
+        <button
+          type="button"
+          class="collapseToggleBtn"
+          :class="{ collapsed: nodeToolbarCollapsed }"
+          :title="
+            nodeToolbarCollapsed
+              ? $t('toolbar.expandToolbar')
+              : $t('toolbar.collapseToolbar')
+          "
+          :aria-label="
+            nodeToolbarCollapsed
+              ? $t('toolbar.expandToolbar')
+              : $t('toolbar.collapseToolbar')
+          "
+          :aria-expanded="String(!nodeToolbarCollapsed)"
+          @click.stop="toggleNodeToolbar"
         >
-          <ToolbarNodeBtnList
-            dir="v"
-            :list="verticalList"
-            @click.native="popoverShow = false"
-          ></ToolbarNodeBtnList>
-          <div slot="reference" class="toolbarBtn">
-            <span class="icon iconfont icongongshi"></span>
-            <span class="text">{{ $t('toolbar.more') }}</span>
-          </div>
-        </el-popover>
+          <span class="iconfont iconjiantouyou"></span>
+        </button>
+        <div class="toolbarBlock">
+          <ToolbarNodeBtnList :list="horizontalList"></ToolbarNodeBtnList>
+          <!-- 更多 -->
+          <el-popover
+            v-model="popoverShow"
+            placement="bottom-end"
+            width="120"
+            trigger="hover"
+            v-if="showMoreBtn"
+            :style="{ marginLeft: horizontalList.length > 0 ? '20px' : 0 }"
+          >
+            <ToolbarNodeBtnList
+              dir="v"
+              :list="verticalList"
+              @click.native="popoverShow = false"
+            ></ToolbarNodeBtnList>
+            <div slot="reference" class="toolbarBtn">
+              <span class="icon iconfont icongongshi"></span>
+              <span class="text">{{ $t('toolbar.more') }}</span>
+            </div>
+          </el-popover>
+        </div>
       </div>
       <!-- 导出 -->
-      <div class="toolbarBlock">
-        <div class="toolbarBtn" @click="openDirectory" v-if="!isMobile">
-          <span class="icon iconfont icondakai"></span>
-          <span class="text">{{ $t('toolbar.directory') }}</span>
-        </div>
-        <el-tooltip
-          effect="dark"
-          :content="$t('toolbar.newFileTip')"
-          placement="bottom"
-          v-if="!isMobile"
+      <div
+        class="toolbarBlockWrapper"
+        :class="{ collapsed: fileToolbarCollapsed }"
+      >
+        <button
+          type="button"
+          class="collapseToggleBtn"
+          :class="{ collapsed: fileToolbarCollapsed }"
+          :title="
+            fileToolbarCollapsed
+              ? $t('toolbar.expandToolbar')
+              : $t('toolbar.collapseToolbar')
+          "
+          :aria-label="
+            fileToolbarCollapsed
+              ? $t('toolbar.expandToolbar')
+              : $t('toolbar.collapseToolbar')
+          "
+          :aria-expanded="String(!fileToolbarCollapsed)"
+          @click.stop="toggleFileToolbar"
         >
-          <div class="toolbarBtn" @click="createNewLocalFile">
-            <span class="icon iconfont iconxinjian"></span>
-            <span class="text">{{ $t('toolbar.newFile') }}</span>
+          <span class="iconfont iconjiantouyou"></span>
+        </button>
+        <div class="toolbarBlock">
+          <div class="toolbarBtn" @click="openDirectory" v-if="!isMobile">
+            <span class="icon iconfont icondakai"></span>
+            <span class="text">{{ $t('toolbar.directory') }}</span>
           </div>
-        </el-tooltip>
-        <el-tooltip
-          effect="dark"
-          :content="$t('toolbar.openFileTip')"
-          placement="bottom"
-          v-if="!isMobile"
-        >
-          <div class="toolbarBtn" @click="openLocalFile">
-            <span class="icon iconfont iconwenjian1"></span>
-            <span class="text">{{ $t('toolbar.openFile') }}</span>
-          </div>
-        </el-tooltip>
-        <div class="toolbarBtn" @click="saveLocalFile" v-if="!isMobile">
-          <span class="icon iconfont iconlingcunwei"></span>
-          <span class="text">{{ $t('toolbar.saveAs') }}</span>
-        </div>
-        <div class="toolbarBtn" @click="$bus.$emit('showImport')">
-          <span class="icon iconfont icondaoru"></span>
-          <span class="text">{{ $t('toolbar.import') }}</span>
-        </div>
-        <div
-          class="toolbarBtn"
-          :class="{ cooperating: cooperateStatus === 'connected' }"
-          @click="$bus.$emit('showCooperate')"
-        >
-          <span class="icon iconfont iconxietongwendang"></span>
-          <span class="text">{{ $t('toolbar.cooperate') }}</span>
-        </div>
-        <div
-          class="toolbarBtn"
-          @click="$bus.$emit('showExport')"
-          style="margin-right: 0;"
-        >
-          <span class="icon iconfont iconexport"></span>
-          <span class="text">{{ $t('toolbar.export') }}</span>
-        </div>
-        <!-- 本地文件树 -->
-        <div
-          class="fileTreeBox"
-          v-if="fileTreeVisible"
-          :class="{ expand: fileTreeExpand }"
-        >
-          <div class="fileTreeToolbar">
-            <div class="fileTreeName">
-              {{ rootDirName ? '/' + rootDirName : '' }}
+          <el-tooltip
+            effect="dark"
+            :content="$t('toolbar.newFileTip')"
+            placement="bottom"
+            v-if="!isMobile"
+          >
+            <div class="toolbarBtn" @click="createNewLocalFile">
+              <span class="icon iconfont iconxinjian"></span>
+              <span class="text">{{ $t('toolbar.newFile') }}</span>
             </div>
-            <div class="fileTreeActionList">
-              <div
-                class="btn"
-                :class="[
-                  fileTreeExpand ? 'el-icon-arrow-up' : 'el-icon-arrow-down'
-                ]"
-                @click="fileTreeExpand = !fileTreeExpand"
-              ></div>
-              <div
-                class="btn el-icon-close"
-                @click="fileTreeVisible = false"
-              ></div>
+          </el-tooltip>
+          <el-tooltip
+            effect="dark"
+            :content="$t('toolbar.openFileTip')"
+            placement="bottom"
+            v-if="!isMobile"
+          >
+            <div class="toolbarBtn" @click="openLocalFile">
+              <span class="icon iconfont iconwenjian1"></span>
+              <span class="text">{{ $t('toolbar.openFile') }}</span>
             </div>
+          </el-tooltip>
+          <div class="toolbarBtn" @click="saveLocalFile" v-if="!isMobile">
+            <span class="icon iconfont iconlingcunwei"></span>
+            <span class="text">{{ $t('toolbar.saveAs') }}</span>
           </div>
-          <div class="fileTreeWrap">
-            <el-tree
-              :props="fileTreeProps"
-              :load="loadFileTreeNode"
-              :expand-on-click-node="false"
-              node-key="id"
-              lazy
-            >
-              <span class="customTreeNode" slot-scope="{ node, data }">
-                <div class="treeNodeInfo">
-                  <span
-                    class="treeNodeIcon iconfont"
-                    :class="[
-                      data.type === 'file' ? 'iconwenjian' : 'icondakai'
-                    ]"
-                  ></span>
-                  <span class="treeNodeName">{{ node.label }}</span>
-                </div>
-                <div class="treeNodeBtnList" v-if="data.type === 'file'">
-                  <el-button
-                    type="text"
-                    size="mini"
-                    v-if="data.enableEdit"
-                    @click="editLocalFile(data)"
-                    >编辑</el-button
-                  >
-                  <el-button
-                    type="text"
-                    size="mini"
-                    v-else
-                    @click="importLocalFile(data)"
-                    >导入</el-button
-                  >
-                </div>
-              </span>
-            </el-tree>
+          <div class="toolbarBtn" @click="$bus.$emit('showImport')">
+            <span class="icon iconfont icondaoru"></span>
+            <span class="text">{{ $t('toolbar.import') }}</span>
+          </div>
+          <div
+            class="toolbarBtn"
+            :class="{ cooperating: cooperateStatus === 'connected' }"
+            @click="$bus.$emit('showCooperate')"
+          >
+            <span class="icon iconfont iconxietongwendang"></span>
+            <span class="text">{{ $t('toolbar.cooperate') }}</span>
+          </div>
+          <div
+            class="toolbarBtn"
+            @click="$bus.$emit('showExport')"
+            style="margin-right: 0"
+          >
+            <span class="icon iconfont iconexport"></span>
+            <span class="text">{{ $t('toolbar.export') }}</span>
+          </div>
+          <!-- 本地文件树 -->
+          <div
+            class="fileTreeBox"
+            v-if="fileTreeVisible"
+            :class="{ expand: fileTreeExpand }"
+          >
+            <div class="fileTreeToolbar">
+              <div class="fileTreeName">
+                {{ rootDirName ? '/' + rootDirName : '' }}
+              </div>
+              <div class="fileTreeActionList">
+                <div
+                  class="btn"
+                  :class="[
+                    fileTreeExpand ? 'el-icon-arrow-up' : 'el-icon-arrow-down'
+                  ]"
+                  @click="fileTreeExpand = !fileTreeExpand"
+                ></div>
+                <div
+                  class="btn el-icon-close"
+                  @click="fileTreeVisible = false"
+                ></div>
+              </div>
+            </div>
+            <div class="fileTreeWrap">
+              <el-tree
+                :props="fileTreeProps"
+                :load="loadFileTreeNode"
+                :expand-on-click-node="false"
+                node-key="id"
+                lazy
+              >
+                <span class="customTreeNode" slot-scope="{ node, data }">
+                  <div class="treeNodeInfo">
+                    <span
+                      class="treeNodeIcon iconfont"
+                      :class="[
+                        data.type === 'file' ? 'iconwenjian' : 'icondakai'
+                      ]"
+                    ></span>
+                    <span class="treeNodeName">{{ node.label }}</span>
+                  </div>
+                  <div class="treeNodeBtnList" v-if="data.type === 'file'">
+                    <el-button
+                      type="text"
+                      size="mini"
+                      v-if="data.enableEdit"
+                      @click="editLocalFile(data)"
+                      >编辑</el-button
+                    >
+                    <el-button
+                      type="text"
+                      size="mini"
+                      v-else
+                      @click="importLocalFile(data)"
+                      >导入</el-button
+                    >
+                  </div>
+                </span>
+              </el-tree>
+            </div>
           </div>
         </div>
       </div>
@@ -215,7 +263,9 @@ export default {
       fileTreeVisible: false,
       rootDirName: '',
       fileTreeExpand: true,
-      waitingWriteToLocalFile: false
+      waitingWriteToLocalFile: false,
+      nodeToolbarCollapsed: false,
+      fileToolbarCollapsed: false
     }
   },
   computed: {
@@ -274,6 +324,17 @@ export default {
     this.$bus.$off('node_note_dblclick', this.onNodeNoteDblclick)
   },
   methods: {
+    toggleNodeToolbar() {
+      this.nodeToolbarCollapsed = !this.nodeToolbarCollapsed
+      if (this.nodeToolbarCollapsed) {
+        this.popoverShow = false
+      }
+    },
+
+    toggleFileToolbar() {
+      this.fileToolbarCollapsed = !this.fileToolbarCollapsed
+    },
+
     // 计算工具按钮如何显示
     computeToolbarShow() {
       if (!this.$refs.toolbarRef) return
@@ -626,10 +687,68 @@ export default {
     width: max-content;
     display: flex;
     font-size: 12px;
-    font-family: PingFangSC-Regular, PingFang SC;
+    font-family:
+      PingFangSC-Regular,
+      PingFang SC;
     font-weight: 400;
     color: rgba(26, 26, 26, 0.8);
     z-index: 2;
+    .toolbarBlockWrapper {
+      position: relative;
+      margin-right: 20px;
+      transition: transform 0.3s;
+
+      &:last-of-type {
+        margin-right: 0;
+      }
+
+      &.collapsed {
+        transform: translateY(calc(-100% - 20px));
+      }
+
+      .collapseToggleBtn {
+        position: absolute;
+        left: 50%;
+        top: calc(100% - 22px);
+        width: 60px;
+        height: 28px;
+        padding: 0;
+        border: 0;
+        border-radius: 0 0 10px 10px;
+        background-color: #409eff;
+        color: #fff;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transform: translateX(-50%);
+        transition: top 0.1s linear;
+        z-index: 0;
+
+        &:hover,
+        &:focus-visible {
+          top: calc(100% - 10px);
+        }
+
+        &:focus-visible {
+          outline: 2px solid #409eff;
+          outline-offset: 2px;
+        }
+
+        span {
+          width: auto;
+          height: auto;
+          line-height: 1;
+          font-size: 10px;
+          transform: rotateZ(-90deg);
+          transition: transform 0.1s;
+        }
+
+        &.collapsed span {
+          transform: rotateZ(90deg);
+        }
+      }
+    }
 
     .toolbarBlock {
       display: flex;
@@ -638,13 +757,9 @@ export default {
       border-radius: 6px;
       box-shadow: 0 2px 16px 0 rgba(0, 0, 0, 0.06);
       border: 1px solid rgba(0, 0, 0, 0.06);
-      margin-right: 20px;
       flex-shrink: 0;
       position: relative;
-
-      &:last-of-type {
-        margin-right: 0;
-      }
+      z-index: 1;
 
       .fileTreeBox {
         position: absolute;
@@ -788,6 +903,14 @@ export default {
         margin-top: 3px;
       }
     }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toolbarContainer .toolbar .toolbarBlockWrapper,
+  .toolbarContainer .toolbar .collapseToggleBtn,
+  .toolbarContainer .toolbar .collapseToggleBtn span {
+    transition: none;
   }
 }
 </style>
