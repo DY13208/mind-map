@@ -42,7 +42,11 @@ module.exports = {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src/'),
-        yjs: path.resolve(__dirname, './node_modules/yjs')
+        // 使用仓库内源码，避免 node_modules 旧版 Cooperate 在刷新时 initData 死循环
+        'simple-mind-map': path.resolve(__dirname, '../simple-mind-map'),
+        yjs: path.resolve(__dirname, './node_modules/yjs'),
+        'y-webrtc': path.resolve(__dirname, './node_modules/y-webrtc'),
+        'y-websocket': path.resolve(__dirname, './node_modules/y-websocket')
       }
     }
   },

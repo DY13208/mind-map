@@ -193,6 +193,7 @@ export default {
   data() {
     return {
       enableShowLoading: true,
+      loadingSafetyTimer: null,
       mindMap: null,
       mindMapData: null,
       mindMapConfig: {},
@@ -231,7 +232,14 @@ export default {
     }
   },
   mounted() {
+    // 先注册关闭 loading，避免 init 渲染结束事件早于监听导致遮罩锁死
+    this.$bus.$on('node_tree_render_end', this.handleHideLoading)
+    this.$bus.$on('showLoading', this.handleShowLoading)
+    this.enableShowLoading = true
     showLoading()
+    this.loadingSafetyTimer = setTimeout(() => {
+      this.handleHideLoading()
+    }, 8000)
     this.getData()
     this.init()
     this.$bus.$on('execCommand', this.execCommand)
@@ -242,12 +250,14 @@ export default {
     this.$bus.$on('endTextEdit', this.handleEndTextEdit)
     this.$bus.$on('createAssociativeLine', this.handleCreateLineFromActiveNode)
     this.$bus.$on('startPainter', this.handleStartPainter)
-    this.$bus.$on('node_tree_render_end', this.handleHideLoading)
-    this.$bus.$on('showLoading', this.handleShowLoading)
     this.$bus.$on('localStorageExceeded', this.onLocalStorageExceeded)
     window.addEventListener('resize', this.handleResize)
   },
   beforeDestroy() {
+    if (this.loadingSafetyTimer) {
+      clearTimeout(this.loadingSafetyTimer)
+      this.loadingSafetyTimer = null
+    }
     this.$bus.$off('execCommand', this.execCommand)
     this.$bus.$off('paddingChange', this.onPaddingChange)
     this.$bus.$off('export', this.export)
@@ -296,10 +306,20 @@ export default {
     handleShowLoading(text) {
       this.enableShowLoading = true
       showLoading(typeof text === 'string' ? text : '')
+      if (this.loadingSafetyTimer) {
+        clearTimeout(this.loadingSafetyTimer)
+      }
+      this.loadingSafetyTimer = setTimeout(() => {
+        this.handleHideLoading()
+      }, 8000)
     },
 
     // 渲染结束后关闭loading
     handleHideLoading() {
+      if (this.loadingSafetyTimer) {
+        clearTimeout(this.loadingSafetyTimer)
+        this.loadingSafetyTimer = null
+      }
       if (this.enableShowLoading) {
         this.enableShowLoading = false
         hideLoading()

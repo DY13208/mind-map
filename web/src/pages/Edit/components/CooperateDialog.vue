@@ -244,7 +244,24 @@ export default {
     tryAutoJoin() {
       if (!this.mindMap || this.connected || this.connecting) return
       if (!this.$route.query.room) return
-      this.join({ silent: true })
+      if (this._autoJoinScheduled) return
+      this._autoJoinScheduled = true
+      // 等首屏本地渲染完成后再连协同，避免刷新时远端全量 apply 和首屏渲染抢主线程
+      const run = () => {
+        this._autoJoinScheduled = false
+        if (!this.mindMap || this.connected || this.connecting) return
+        if (!this.$route.query.room) return
+        this.join({ silent: true })
+      }
+      const onReady = () => {
+        this.mindMap.off('node_tree_render_end', onReady)
+        setTimeout(run, 50)
+      }
+      this.mindMap.on('node_tree_render_end', onReady)
+      setTimeout(() => {
+        this.mindMap && this.mindMap.off('node_tree_render_end', onReady)
+        run()
+      }, 1500)
     },
 
     validate() {
