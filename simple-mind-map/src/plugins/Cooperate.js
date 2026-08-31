@@ -10,6 +10,29 @@ import {
 } from '../utils/index'
 import { applyObjectToYMap, migrateLegacyNodes } from './cooperateYjs'
 
+const STRUCTURE_COMMANDS = {
+  INSERT_NODE: true,
+  INSERT_MULTI_NODE: true,
+  INSERT_CHILD_NODE: true,
+  INSERT_MULTI_CHILD_NODE: true,
+  INSERT_PARENT_NODE: true,
+  INSERT_AFTER: true,
+  INSERT_BEFORE: true,
+  REMOVE_NODE: true,
+  REMOVE_CURRENT_NODE: true,
+  PASTE_NODE: true,
+  CUT_NODE: true,
+  UP_NODE: true,
+  DOWN_NODE: true,
+  MOVE_UP_ONE_LEVEL: true,
+  MOVE_NODE_TO: true,
+  ADD_GENERALIZATION: true,
+  REMOVE_GENERALIZATION: true,
+  RESET_LAYOUT: true,
+  BACK: true,
+  FORWARD: true
+}
+
 // 协同插件
 class Cooperate {
   constructor(opt) {
@@ -46,6 +69,8 @@ class Cooperate {
     this.pendingRemoteAdded = new Set()
     this.pendingRemoteDeleted = new Set()
     this.pendingRemoteStructure = false
+    this.suppressLocalUntil = 0
+    this.recentDeleted = new Map()
     this.localOrigin = { source: 'simple-mind-map-cooperate' }
     // 绑定事件
     this.bindEvent()
@@ -141,6 +166,7 @@ class Cooperate {
     this.ymap.observeDeep(this.onObserve)
     const remoteSize = [...this.ymap.keys()].length
     if (remoteSize > 0) {
+      const hadLocalDoc = !!this.currentData
       const data = this.ymap.toJSON()
       this.currentData = data
       this.enableLargeMapMode(remoteSize)
@@ -148,6 +174,7 @@ class Cooperate {
       if (res) {
         this.applyRemoteTree(res)
       }
+      if (hadLocalDoc) this.flushLocalNow()
       return
     }
     if (this.pendingInitData) {
@@ -209,6 +236,8 @@ class Cooperate {
     this.onBeforeSetData = this.onBeforeSetData.bind(this)
     this.mindMap.on('before_set_data', this.onBeforeSetData)
     this.mindMap.on('set_data', this.onSetData)
+    this.onAfterExecCommand = this.onAfterExecCommand.bind(this)
+    this.mindMap.on('afterExecCommand', this.onAfterExecCommand)
   }
 
   // 解绑事件
@@ -229,6 +258,7 @@ class Cooperate {
     this.mindMap.off('node_tree_render_end', this.onNodeTreeRenderEnd)
     this.mindMap.off('before_set_data', this.onBeforeSetData)
     this.mindMap.off('set_data', this.onSetData)
+    this.mindMap.off('afterExecCommand', this.onAfterExecCommand)
   }
 
   // 数据同步时的处理，更新当前思维导图
@@ -271,9 +301,8 @@ class Cooperate {
 
   flushRemoteObserve() {
     if (!this.ymap) return
+    this.flushLocalNow()
     const uids = Array.from(this.pendingRemoteUids)
-    const added = Array.from(this.pendingRemoteAdded)
-    const deleted = Array.from(this.pendingRemoteDeleted)
     const structure = this.pendingRemoteStructure
     this.pendingRemoteUids = new Set()
     this.pendingRemoteAdded = new Set()
@@ -282,12 +311,6 @@ class Cooperate {
     this.enableLargeMapMode(this.ymap.size || this.mapSize())
     if (!structure && uids.length > 0 && uids.length <= 12) {
       if (this.applyRemoteNodePatch(uids)) return
-    }
-    if (structure && added.length === 1 && deleted.length === 0) {
-      if (this.applyRemoteInsert(added[0])) return
-    }
-    if (structure && deleted.length === 1 && added.length === 0) {
-      if (this.applyRemoteRemove(deleted[0])) return
     }
     const data = this.ymap.toJSON()
     this.currentData = data
@@ -315,15 +338,12 @@ class Cooperate {
       nextNodes.forEach(({ uid, json, node }) => {
         if (this.currentData) this.currentData[uid] = json
         const data = json.data || {}
-        renderer.setNodeDataRender(
-          node,
-          {
-            text: data.text,
-            note: data.note,
-            richText: data.richText
-          },
-          false
-        )
+        renderer.setNodeData(node, {
+          text: data.text,
+          note: data.note,
+          richText: data.richText
+        })
+        renderer.reRenderNodeCheckChange(node, true)
       })
     } catch (err) {
       return false
@@ -333,94 +353,10 @@ class Cooperate {
       } catch (e) {
         // ignore
       }
+      this.suppressLocalUntil = Date.now() + 250
       this.isApplyingRemote = false
     }
     return true
-  }
-
-  findRemoteParentUid(uid) {
-    let parentUid = ''
-    this.ymap.forEach((value, key) => {
-      if (parentUid || key === uid || !(value instanceof Y.Map)) return
-      const children = value.get('children')
-      if (
-        children &&
-        typeof children.toArray === 'function' &&
-        children.toArray().includes(uid)
-      ) {
-        parentUid = key
-      }
-    })
-    return parentUid
-  }
-
-  withRemoteCommand(fn) {
-    const renderer = this.mindMap && this.mindMap.renderer
-    if (!renderer || typeof renderer.findNodeByUid !== 'function') return false
-    this.isApplyingRemote = true
-    this.isSetData = true
-    this.mindMap.command.pause()
-    try {
-      fn(renderer)
-      return true
-    } catch (err) {
-      return false
-    } finally {
-      try {
-        this.mindMap.command.recovery()
-      } catch (e) {
-        // ignore
-      }
-      this.isSetData = false
-      this.isApplyingRemote = false
-    }
-  }
-
-  applyRemoteInsert(uid) {
-    const nodeMap = this.ymap.get(uid)
-    if (!nodeMap || typeof nodeMap.toJSON !== 'function') return false
-    const json = nodeMap.toJSON()
-    const parentUid = this.findRemoteParentUid(uid)
-    if (!parentUid) return false
-    return this.withRemoteCommand(renderer => {
-      const parentNode = renderer.findNodeByUid(parentUid)
-      if (!parentNode) throw new Error('missing parent')
-      const data = json.data || {}
-      this.mindMap.execCommand('INSERT_CHILD_NODE', false, [parentNode], {
-        uid,
-        text: data.text,
-        note: data.note,
-        richText: data.richText
-      })
-      if (this.currentData) {
-        this.currentData[uid] = json
-        const parent = this.currentData[parentUid]
-        if (parent) {
-          const children = parent.children || []
-          if (!children.includes(uid)) parent.children = [...children, uid]
-        }
-      }
-    })
-  }
-
-  applyRemoteRemove(uid) {
-    return this.withRemoteCommand(renderer => {
-      const node = renderer.findNodeByUid(uid)
-      if (!node || node.isRoot) throw new Error('missing node')
-      this.mindMap.execCommand('REMOVE_NODE', [node])
-      if (this.currentData) {
-        const parentUid = Object.keys(this.currentData).find(key => {
-          const children = this.currentData[key] && this.currentData[key].children
-          return Array.isArray(children) && children.includes(uid)
-        })
-        if (parentUid) {
-          this.currentData[parentUid].children = (
-            this.currentData[parentUid].children || []
-          ).filter(child => child !== uid)
-        }
-        delete this.currentData[uid]
-      }
-    })
   }
 
   // 大文件优先使用性能模式，避免远端全量同步后逐字编辑触发高频重排
@@ -441,6 +377,7 @@ class Cooperate {
     }
     this.isApplyingRemote = true
     const done = () => {
+      this.suppressLocalUntil = Date.now() + 250
       this.isApplyingRemote = false
       if (this.pendingRemoteTree) {
         const next = this.pendingRemoteTree
@@ -476,19 +413,35 @@ class Cooperate {
   // 当前思维导图改变后的处理，触发同步
   onDataChange(data) {
     if (this.isSetData || this.isApplyingRemote) return
+    if (Date.now() < this.suppressLocalUntil) return
     if (!this.ymap) {
       this.pendingInitData = data
       return
     }
-    // 文本输入会连续触发 data_change，只同步最后一版，避免每个按键都遍历整棵树
     this.pendingLocalData = data
     clearTimeout(this.localApplyTimer)
     this.localApplyTimer = setTimeout(() => {
       this.localApplyTimer = null
-      const pending = this.pendingLocalData
-      this.pendingLocalData = null
-      if (pending && this.ymap) this.flushLocalDataChange(pending)
+      this.flushLocalNow()
     }, this.largeMapDelay(80, 220))
+  }
+
+  onAfterExecCommand(name) {
+    if (this.isSetData || this.isApplyingRemote) return
+    if (!this.ymap || !STRUCTURE_COMMANDS[name]) return
+    if (name === 'BACK' || name === 'FORWARD') this.recentDeleted.clear()
+    const data = this.mindMap.command.getCopyData()
+    if (!data) return
+    this.pendingLocalData = data
+    this.flushLocalNow()
+  }
+
+  flushLocalNow() {
+    clearTimeout(this.localApplyTimer)
+    this.localApplyTimer = null
+    const pending = this.pendingLocalData
+    this.pendingLocalData = null
+    if (pending && this.ymap) this.flushLocalDataChange(pending)
   }
 
   flushLocalDataChange(data) {
@@ -500,6 +453,19 @@ class Cooperate {
   updateChanges(data) {
     const { beforeCooperateUpdate } = this.mindMap.opt
     const oldData = this.currentData || {}
+    const now = Date.now()
+    this.recentDeleted.forEach((at, uid) => {
+      if (now - at > 8000) this.recentDeleted.delete(uid)
+    })
+    Object.keys(data).forEach(uid => {
+      if (!this.recentDeleted.has(uid) || oldData[uid]) return
+      delete data[uid]
+      Object.keys(data).forEach(parentUid => {
+        const children = data[parentUid] && data[parentUid].children
+        if (!Array.isArray(children) || !children.includes(uid)) return
+        data[parentUid].children = children.filter(child => child !== uid)
+      })
+    })
     const createOrUpdateList = []
     Object.keys(data).forEach(uid => {
       if (!oldData[uid] || !isSameObject(oldData[uid], data[uid])) {
@@ -512,6 +478,7 @@ class Cooperate {
     const deleteList = Object.keys(oldData)
       .filter(uid => !data[uid])
       .map(uid => ({ uid, data: oldData[uid] }))
+    deleteList.forEach(item => this.recentDeleted.set(item.uid, now))
     if (beforeCooperateUpdate && deleteList.length > 0) {
       beforeCooperateUpdate({ type: 'delete', list: deleteList })
     }
