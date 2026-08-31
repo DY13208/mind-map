@@ -118,6 +118,7 @@
 import { WebsocketProvider } from 'y-websocket'
 import { mapMutations, mapState } from 'vuex'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
+import { getCurrentUser } from '@/utils/auth'
 import {
   listFiles,
   renameFile as renameFileApi,
@@ -210,12 +211,16 @@ export default {
     }
   },
   created() {
-    this.userId = localStorage.getItem(USER_ID_KEY) || createId()
+    const authenticatedUser = getCurrentUser()
+    this.userId = authenticatedUser
+      ? `wecom:${authenticatedUser.id}`
+      : localStorage.getItem(USER_ID_KEY) || createId()
     localStorage.setItem(USER_ID_KEY, this.userId)
-    this.userName =
-      this.$route.query.userName ||
-      localStorage.getItem(USER_NAME_KEY) ||
-      defaultGuestName(this.userId)
+    this.userName = authenticatedUser
+      ? authenticatedUser.name
+      : this.$route.query.userName ||
+        localStorage.getItem(USER_NAME_KEY) ||
+        defaultGuestName(this.userId)
     localStorage.setItem(USER_NAME_KEY, this.userName)
     this.roomName =
       this.$route.query.room || 'room-' + Math.random().toString(36).slice(2, 8)

@@ -177,7 +177,8 @@ export default {
     async testConnect() {
       try {
         await fetch(`${getAiBaseUrl(this.aiConfig.port)}/ai/test`, {
-          method: 'GET'
+          method: 'GET',
+          credentials: 'include'
         })
         this.$message.success(this.$t('ai.connectSuccessful'))
         this.clientTipDialogVisible = false
@@ -206,7 +207,8 @@ export default {
       let isConnect = false
       try {
         await fetch(`${getAiBaseUrl(this.aiConfig.port)}/ai/test`, {
-          method: 'GET'
+          method: 'GET',
+          credentials: 'include'
         })
         isConnect = true
       } catch (error) {
