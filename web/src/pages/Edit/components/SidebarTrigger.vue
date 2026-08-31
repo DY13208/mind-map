@@ -5,36 +5,32 @@
     :class="{ hasActive: show && activeSidebar, show: show, isDark: isDark }"
     :style="{ maxHeight: maxHeight + 'px' }"
   >
-    <div
-      class="authPanel"
-      v-if="authUser"
-      :class="{ compact: !show, isDark: isDark }"
-    >
-      <div class="authAvatarWrap" :title="authUser.name">
-        <img
-          v-if="authUser.avatar"
-          class="authAvatarImg"
-          :src="authUser.avatar"
-          :alt="authUser.name"
-        />
-        <span v-else class="authAvatar">{{ userInitial }}</span>
-      </div>
-      <template v-if="show">
-        <span class="authName">{{ authUser.name }}</span>
-        <button
-          class="authLogout"
-          @click="signOut"
-          :disabled="loggingOut"
-          title="退出登录"
-        >
-          {{ loggingOut ? '…' : '退出' }}
-        </button>
-      </template>
-    </div>
     <div class="toggleShowBtn" :class="{ hide: !show }" @click="show = !show">
       <span class="iconfont iconjiantouyou"></span>
     </div>
     <div class="trigger customScrollbar">
+      <div class="authSection" v-if="authUser">
+        <div class="authAvatarWrap" :title="authUser.name">
+          <img
+            v-if="authUser.avatar"
+            class="authAvatarImg"
+            :src="authUser.avatar"
+            :alt="authUser.name"
+          />
+          <span v-else class="authAvatar">{{ userInitial }}</span>
+        </div>
+        <div class="authMeta">
+          <span class="authName">{{ authUser.name }}</span>
+          <button
+            class="authLogout"
+            @click="signOut"
+            :disabled="loggingOut"
+            title="退出登录"
+          >
+            {{ loggingOut ? '退出中…' : '退出' }}
+          </button>
+        </div>
+      </div>
       <div
         class="triggerItem"
         v-for="item in triggerList"
@@ -153,26 +149,28 @@ export default {
     .trigger {
       background-color: #262a2e;
 
+      .authSection {
+        border-bottom-color: hsla(0, 0%, 100%, 0.08);
+
+        .authName {
+          color: hsla(0, 0%, 100%, 0.88);
+        }
+
+        .authLogout {
+          color: hsla(0, 0%, 100%, 0.45);
+
+          &:hover:not(:disabled) {
+            color: hsla(0, 0%, 100%, 0.72);
+          }
+        }
+      }
+
       .triggerItem {
         color: hsla(0, 0%, 100%, 0.6);
 
         &:hover {
           background-color: hsla(0, 0%, 100%, 0.05);
         }
-      }
-    }
-
-    .authPanel {
-      background-color: #262a2e;
-      border-color: hsla(0, 0%, 100%, 0.08);
-      box-shadow: 0 2px 16px rgba(0, 0, 0, 0.24);
-
-      .authName {
-        color: hsla(0, 0%, 100%, 0.88);
-      }
-
-      .authLogout {
-        color: hsla(0, 0%, 100%, 0.45);
       }
     }
   }
@@ -183,80 +181,6 @@ export default {
 
   &.hasActive {
     right: 305px;
-  }
-
-  .authPanel {
-    position: absolute;
-    top: -72px;
-    right: 0;
-    width: 60px;
-    padding: 8px 6px;
-    border: 1px solid rgba(0, 0, 0, 0.06);
-    border-radius: 10px;
-    background: #fff;
-    box-shadow: 0 2px 16px rgba(0, 0, 0, 0.06);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    z-index: 1;
-    transition: all 0.3s;
-
-    &.compact {
-      top: -48px;
-      padding: 6px;
-      gap: 0;
-    }
-
-    .authAvatarWrap {
-      flex: none;
-    }
-
-    .authAvatar,
-    .authAvatarImg {
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      display: block;
-    }
-
-    .authAvatar {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: linear-gradient(145deg, #0f9d68, #0a7a52);
-      color: #fff;
-      font-size: 14px;
-      font-weight: 700;
-    }
-
-    .authName {
-      width: 100%;
-      overflow: hidden;
-      color: #34463d;
-      font-size: 11px;
-      line-height: 1.3;
-      text-align: center;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .authLogout {
-      border: 0;
-      background: transparent;
-      color: #8a9690;
-      font-size: 11px;
-      cursor: pointer;
-      padding: 0;
-
-      &:disabled {
-        cursor: wait;
-      }
-    }
-  }
-
-  &.show .authPanel {
-    top: -78px;
   }
 
   .toggleShowBtn {
@@ -304,35 +228,99 @@ export default {
     max-height: 100%;
     overflow-y: auto;
     overflow-x: hidden;
+  }
 
-    .triggerItem {
-      height: 60px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      cursor: pointer;
-      color: #464646;
-      user-select: none;
-      white-space: nowrap;
+  .authSection {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 4px 8px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  }
 
-      &:hover {
-        background-color: #ededed;
-      }
+  .authAvatar,
+  .authAvatarImg {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: block;
+  }
 
-      &.active {
-        color: #409eff;
-        font-weight: bold;
-      }
+  .authAvatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(145deg, #0f9d68, #0a7a52);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+  }
 
-      .triggerIcon {
-        font-size: 18px;
-        margin-bottom: 5px;
-      }
+  .authMeta {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
 
-      .triggerName {
-        font-size: 13px;
-      }
+  .authName {
+    width: 100%;
+    overflow: hidden;
+    color: #34463d;
+    font-size: 11px;
+    line-height: 1.3;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .authLogout {
+    border: 0;
+    background: transparent;
+    color: #8a9690;
+    font-size: 11px;
+    line-height: 1.2;
+    cursor: pointer;
+    padding: 0;
+
+    &:hover:not(:disabled) {
+      color: #5f6d67;
+    }
+
+    &:disabled {
+      cursor: wait;
+    }
+  }
+
+  .triggerItem {
+    height: 60px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    color: #464646;
+    user-select: none;
+    white-space: nowrap;
+
+    &:hover {
+      background-color: #ededed;
+    }
+
+    &.active {
+      color: #409eff;
+      font-weight: bold;
+    }
+
+    .triggerIcon {
+      font-size: 18px;
+      margin-bottom: 5px;
+    }
+
+    .triggerName {
+      font-size: 13px;
     }
   }
 }
