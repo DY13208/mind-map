@@ -22,6 +22,7 @@
     "wsServe": "node ./bin/wsServer.mjs",
     "collabServe": "node ./bin/collabServer.js",
     "test:collab": "node ./test/collabYjs.test.js",
+    "test:todo": "node ./test/todoWorkflow.test.js",
     "test:collab:integration": "node ./test/collabWebsocket.integration.test.js",
     "test:collab:large": "node ./test/collabLarge.integration.test.js",
     "test:collab:title": "node ./test/collabTitle.integration.test.js",

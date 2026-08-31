@@ -105,7 +105,8 @@ function findParentUid(obj, targetUid, parentOf) {
 function buildParentMap(obj) {
   const parentOf = {}
   Object.keys(obj).forEach(uid => {
-    ;((obj[uid] && obj[uid].children) || []).forEach(child => {
+    const children = (obj[uid] && obj[uid].children) || []
+    children.forEach(child => {
       parentOf[child] = uid
     })
   })
@@ -529,6 +530,522 @@ function searchNodes(obj, query) {
   })
 }
 
+function baseLabel(text) {
+  return stripHtml(text)
+    .replace(/\s*[（(]\s*\d+\s*[）)]\s*$/, '')
+    .trim()
+}
+
+function childWithLabel(obj, parentUid, labels) {
+  const accepted = new Set(labels.map(label => String(label).toLowerCase()))
+  const children = (obj[parentUid] && obj[parentUid].children) || []
+  const matches = children.filter(uid =>
+    accepted.has(baseLabel(nodePlainText(obj, uid)).toLowerCase())
+  )
+  return uniqueMatch(matches, labels.join('/'), '匹配结构的节点')
+}
+
+function findTodoBranches(obj) {
+  const candidates = Object.keys(obj).filter(uid => {
+    if (baseLabel(nodePlainText(obj, uid)) !== '待办') return false
+    const children = (obj[uid] && obj[uid].children) || []
+    const labels = children.map(childUid =>
+      baseLabel(nodePlainText(obj, childUid))
+    )
+    return labels.includes('待办') && labels.includes('已完成')
+  })
+  const containerUid = uniqueMatch(candidates, '待办', '待办容器')
+  if (!containerUid) {
+    throw new Error('找不到同时包含「待办」和「已完成」的待办容器')
+  }
+  return {
+    container_uid: containerUid,
+    pending_uid: childWithLabel(obj, containerUid, ['待办']),
+    completed_uid: childWithLabel(obj, containerUid, ['已完成'])
+  }
+}
+
+function subtreePayload(obj, uid) {
+  const node = obj[uid]
+  if (!node) return null
+  return {
+    uid,
+    text: nodePlainText(obj, uid),
+    note: node.data && node.data.note ? String(node.data.note) : '',
+    children: (node.children || [])
+      .map(childUid => subtreePayload(obj, childUid))
+      .filter(Boolean)
+  }
+}
+
+function listTodos(obj) {
+  const branches = findTodoBranches(obj)
+  return {
+    ...branches,
+    pending: (obj[branches.pending_uid].children || [])
+      .map(uid => subtreePayload(obj, uid))
+      .filter(Boolean),
+    completed: (obj[branches.completed_uid].children || [])
+      .map(uid => subtreePayload(obj, uid))
+      .filter(Boolean)
+  }
+}
+
+function resolveDirectChild(obj, parentUid, ref) {
+  const children = (obj[parentUid] && obj[parentUid].children) || []
+  if (obj[ref] && children.includes(ref)) return ref
+  return matchLabel(children, uid => nodePlainText(obj, uid), ref)
+}
+
+function findSopRootUid(obj) {
+  const matches = Object.keys(obj).filter(
+    uid => baseLabel(nodePlainText(obj, uid)).toLowerCase() === 'sop'
+  )
+  const uid = uniqueMatch(matches, 'SOP', 'SOP根节点')
+  if (!uid) throw new Error('找不到SOP根节点')
+  return uid
+}
+
+function isWithinSop(obj, ref) {
+  let sopRootUid
+  try {
+    sopRootUid = findSopRootUid(obj)
+  } catch (err) {
+    return false
+  }
+  const uid = resolveNode(obj, ref)
+  if (!uid) return false
+  return uid === sopRootUid || isDescendantOf(obj, uid, sopRootUid)
+}
+
+function isWithinSopOnDoc(ydoc, ref) {
+  try {
+    const ymap = ymapOf(ydoc)
+    const matches = []
+    ymap.forEach((_, uid) => {
+      if (baseLabel(nodePlainFromDoc(ymap, uid)).toLowerCase() === 'sop') {
+        matches.push(uid)
+      }
+    })
+    const sopRootUid = uniqueMatch(matches, 'SOP', 'SOP根节点')
+    if (!sopRootUid) return false
+    const uid = resolveNodeInDoc(ydoc, ref)
+    if (!uid) return false
+    if (uid === sopRootUid) return true
+    return collectDescendantsInDoc(ymap, sopRootUid).slice(1).includes(uid)
+  } catch (err) {
+    return false
+  }
+}
+
+function descendantUids(obj, uid) {
+  return collectDescendants(obj, uid).slice(1)
+}
+
+function isDescendantOf(obj, uid, ancestorUid) {
+  return uid !== ancestorUid && descendantUids(obj, ancestorUid).includes(uid)
+}
+
+function sectionUid(obj, goalUid, kind) {
+  const aliases =
+    kind === 'check' ? ['c', 'check', '检查', '目标'] : ['p', 'plan', '计划']
+  const children = (obj[goalUid] && obj[goalUid].children) || []
+  for (const alias of aliases) {
+    const matches = children.filter(
+      uid => baseLabel(nodePlainText(obj, uid)).toLowerCase() === alias
+    )
+    const match = uniqueMatch(matches, alias, 'SOP分区')
+    if (match) return match
+  }
+  return null
+}
+
+function sectionItems(obj, sectionRootUid) {
+  const result = []
+  const walk = (uid, depth) => {
+    const node = obj[uid]
+    if (!node) return
+    result.push({
+      uid,
+      text: nodePlainText(obj, uid),
+      note: node.data && node.data.note ? String(node.data.note) : '',
+      depth,
+      leaf: !(node.children || []).length
+    })
+    ;(node.children || []).forEach(childUid => walk(childUid, depth + 1))
+  }
+  ;((obj[sectionRootUid] && obj[sectionRootUid].children) || []).forEach(uid =>
+    walk(uid, 0)
+  )
+  return result
+}
+
+function sopVersion(obj, goalUid) {
+  const payload = collectDescendants(obj, goalUid).map(uid => ({
+    uid,
+    text: nodePlainText(obj, uid),
+    note: obj[uid].data && obj[uid].data.note ? String(obj[uid].data.note) : '',
+    children: obj[uid].children || []
+  }))
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(payload))
+    .digest('hex')
+    .slice(0, 16)
+}
+
+function sopCandidate(obj, goalUid, parentOf) {
+  const checkUid = sectionUid(obj, goalUid, 'check')
+  const planUid = sectionUid(obj, goalUid, 'plan')
+  if (!checkUid || !planUid) return null
+  const check = sectionItems(obj, checkUid)
+  const plan = sectionItems(obj, planUid)
+  return {
+    uid: goalUid,
+    text: nodePlainText(obj, goalUid),
+    path: nodePath(obj, goalUid, parentOf),
+    version: sopVersion(obj, goalUid),
+    check_root_uid: checkUid,
+    plan_root_uid: planUid,
+    check,
+    plan,
+    required_check_uids: check.filter(item => item.leaf).map(item => item.uid)
+  }
+}
+
+function listSopCandidates(obj) {
+  const sopRootUid = findSopRootUid(obj)
+  const parentOf = buildParentMap(obj)
+  return descendantUids(obj, sopRootUid)
+    .map(uid => sopCandidate(obj, uid, parentOf))
+    .filter(Boolean)
+}
+
+const MATCH_STOP_WORDS = new Set([
+  '一个',
+  '一下',
+  '公司',
+  '任务',
+  '处理',
+  '完成',
+  '需要',
+  '目标',
+  '计划',
+  '帮忙'
+])
+
+function matchTerms(text) {
+  const normalized = stripHtml(text).toLowerCase()
+  const segments = normalized.match(/[\p{Script=Han}]+|[a-z0-9]+/gu) || []
+  const terms = new Set()
+  segments.forEach(segment => {
+    if (/^[a-z0-9]+$/.test(segment)) {
+      if (segment.length >= 2) terms.add(segment)
+      return
+    }
+    if (segment.length >= 2 && segment.length <= 8) terms.add(segment)
+    for (let size = 2; size <= Math.min(4, segment.length); size++) {
+      for (let index = 0; index <= segment.length - size; index++) {
+        terms.add(segment.slice(index, index + size))
+      }
+    }
+  })
+  MATCH_STOP_WORDS.forEach(term => terms.delete(term))
+  return terms
+}
+
+function scoreSopCandidate(taskText, candidate) {
+  const taskTerms = matchTerms(taskText)
+  const targetTerms = matchTerms(candidate.text)
+  const pathTerms = matchTerms(candidate.path)
+  const detailTerms = matchTerms(
+    [...candidate.check, ...candidate.plan].map(item => item.text).join(' ')
+  )
+  let score = 0
+  const matched = []
+  taskTerms.forEach(term => {
+    let weight = 0
+    if (targetTerms.has(term)) weight = Math.max(weight, 8)
+    if (pathTerms.has(term)) weight = Math.max(weight, 4)
+    if (detailTerms.has(term)) weight = Math.max(weight, 1)
+    if (weight) {
+      score += weight + Math.max(0, term.length - 2)
+      matched.push(term)
+    }
+  })
+  return { score, matched_terms: matched.sort((a, b) => b.length - a.length) }
+}
+
+function resolveSopCandidate(obj, ref) {
+  const candidates = listSopCandidates(obj)
+  if (obj[ref]) {
+    const direct = candidates.find(candidate => candidate.uid === ref)
+    if (direct) return direct
+  }
+  const matches = candidates.filter(candidate => {
+    const needle = stripHtml(ref)
+    return candidate.text === needle || candidate.path === needle
+  })
+  const exact = uniqueMatch(
+    matches.map(item => item.uid),
+    ref,
+    'SOP目标'
+  )
+  if (exact) return candidates.find(candidate => candidate.uid === exact)
+  const fuzzy = candidates.filter(candidate =>
+    `${candidate.text} ${candidate.path}`.includes(stripHtml(ref))
+  )
+  const fuzzyUid = uniqueMatch(
+    fuzzy.map(item => item.uid),
+    ref,
+    'SOP目标'
+  )
+  return fuzzyUid
+    ? candidates.find(candidate => candidate.uid === fuzzyUid)
+    : null
+}
+
+function prepareTodo(obj, taskRef, sopRef) {
+  const branches = findTodoBranches(obj)
+  const pendingUid = resolveDirectChild(obj, branches.pending_uid, taskRef)
+  const completedUid = resolveDirectChild(obj, branches.completed_uid, taskRef)
+  if (pendingUid && completedUid) {
+    throw new Error('待办和已完成中存在同名任务，请改用待办任务uid')
+  }
+  const taskUid = pendingUid || completedUid
+  if (!taskUid) throw new Error('在待办或已完成中找不到该任务')
+  const task = subtreePayload(obj, taskUid)
+  if (completedUid) {
+    return {
+      task,
+      location: '已完成',
+      match_status: 'already_completed',
+      matched_sop: null,
+      alternatives: []
+    }
+  }
+
+  if (sopRef) {
+    const selected = resolveSopCandidate(obj, sopRef)
+    if (!selected) throw new Error('找不到同时包含C和P的指定SOP目标')
+    return {
+      task,
+      location: '待办',
+      match_status: 'matched',
+      matched_sop: selected,
+      alternatives: []
+    }
+  }
+
+  const taskText = [task.text, task.note]
+    .concat(flattenTaskText(task.children))
+    .filter(Boolean)
+    .join(' ')
+  const ranked = listSopCandidates(obj)
+    .map(candidate => ({
+      ...candidate,
+      ...scoreSopCandidate(taskText, candidate)
+    }))
+    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
+  const alternatives = ranked.slice(0, 5)
+  const top = alternatives[0]
+  const second = alternatives[1]
+  const ambiguous =
+    !top || top.score <= 0 || (second && top.score - second.score < 3)
+  return {
+    task,
+    location: '待办',
+    match_status:
+      !top || top.score <= 0
+        ? 'not_found'
+        : ambiguous
+        ? 'needs_confirmation'
+        : 'matched',
+    matched_sop: ambiguous ? null : top,
+    alternatives
+  }
+}
+
+function flattenTaskText(children) {
+  const out = []
+  const walk = items => {
+    const list = items || []
+    list.forEach(item => {
+      out.push(item.text, item.note)
+      walk(item.children)
+    })
+  }
+  walk(children)
+  return out
+}
+
+function updateCountInLabel(obj, uid) {
+  const node = obj[uid]
+  if (!node) return
+  const current = nodePlainText(obj, uid)
+  if (!/[（(]\s*\d+\s*[）)]\s*$/.test(current)) return
+  const count = (node.children || []).length
+  const nextText = current.replace(
+    /([（(])\s*\d+\s*([）)])\s*$/,
+    (all, open, close) => `${open}${count}${close}`
+  )
+  applyNodeText(node.data, nextText)
+}
+
+function completeTodo(obj, options = {}) {
+  const next = clone(obj)
+  const branches = findTodoBranches(next)
+  const completedUid = resolveDirectChild(
+    next,
+    branches.completed_uid,
+    options.task
+  )
+  const taskUid = resolveDirectChild(next, branches.pending_uid, options.task)
+  if (taskUid && completedUid) {
+    throw new Error('待办和已完成中存在同名任务，请改用待办任务uid')
+  }
+  if (completedUid) {
+    return { obj: next, task_uid: completedUid, already_completed: true }
+  }
+  if (!taskUid) throw new Error('在待办中找不到该任务')
+  const candidate = resolveSopCandidate(next, options.sop_uid)
+  if (!candidate) throw new Error('找不到用于验收的SOP目标')
+  if (!candidate.required_check_uids.length) {
+    throw new Error('SOP的C下面没有可验收的检查项，不能完成任务')
+  }
+  if (options.sop_version !== candidate.version) {
+    throw new Error('SOP已发生变化，请重新读取任务和SOP后再验收')
+  }
+  const results = new Map(
+    (options.check_results || []).map(item => [item.check_uid, item])
+  )
+  const missing = candidate.required_check_uids.filter(uid => !results.has(uid))
+  const failed = candidate.required_check_uids.filter(uid => {
+    const result = results.get(uid)
+    return result && result.passed !== true
+  })
+  if (missing.length || failed.length) {
+    throw new Error(
+      `C检查未全部通过：缺少 ${missing.length} 项，未通过 ${failed.length} 项`
+    )
+  }
+
+  next[branches.pending_uid].children = next[
+    branches.pending_uid
+  ].children.filter(uid => uid !== taskUid)
+  next[branches.completed_uid].children = [
+    ...(next[branches.completed_uid].children || []),
+    taskUid
+  ]
+  const taskData = { ...(next[taskUid].data || {}) }
+  taskData.todoCompletion = {
+    completedAt: String(options.completed_at || new Date().toISOString()),
+    sopUid: candidate.uid,
+    sopVersion: candidate.version,
+    summary: String(options.summary || '').trim()
+  }
+  next[taskUid] = { ...next[taskUid], data: taskData }
+  updateCountInLabel(next, branches.pending_uid)
+  updateCountInLabel(next, branches.completed_uid)
+  return {
+    obj: next,
+    task_uid: taskUid,
+    already_completed: false,
+    completed_branch_uid: branches.completed_uid,
+    sop_uid: candidate.uid,
+    sop_version: candidate.version
+  }
+}
+
+function normalizeProposalInput(input) {
+  return {
+    sop_uid: String(input.sop_uid || ''),
+    sop_version: String(input.sop_version || ''),
+    section: String(input.section || '').toUpperCase(),
+    action: String(input.action || ''),
+    node_uid: String(input.node_uid || ''),
+    content: String(input.content || '').trim(),
+    reason: String(input.reason || '').trim()
+  }
+}
+
+function proposalId(proposal) {
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(normalizeProposalInput(proposal)))
+    .digest('hex')
+    .slice(0, 20)
+}
+
+function proposeSopImprovement(obj, input = {}) {
+  const candidate = resolveSopCandidate(obj, input.sop_uid)
+  if (!candidate) throw new Error('找不到要完善的SOP目标')
+  const proposal = normalizeProposalInput({
+    ...input,
+    sop_uid: candidate.uid,
+    sop_version: candidate.version
+  })
+  if (!['C', 'P'].includes(proposal.section))
+    throw new Error('section必须是C或P')
+  if (!['add', 'update', 'delete'].includes(proposal.action)) {
+    throw new Error('action必须是add、update或delete')
+  }
+  if (proposal.action === 'add' && !proposal.content) {
+    throw new Error('新增SOP节点时必须提供content')
+  }
+  if (proposal.action !== 'add' && !proposal.node_uid) {
+    throw new Error('修改或删除SOP节点时必须提供node_uid')
+  }
+  if (proposal.action === 'update' && !proposal.content) {
+    throw new Error('修改SOP节点时必须提供content')
+  }
+  const sectionRoot =
+    proposal.section === 'C'
+      ? candidate.check_root_uid
+      : candidate.plan_root_uid
+  if (
+    proposal.node_uid &&
+    !isDescendantOf(obj, proposal.node_uid, sectionRoot)
+  ) {
+    throw new Error('node_uid不属于指定SOP的C/P内容节点')
+  }
+  return { ...proposal, proposal_id: proposalId(proposal) }
+}
+
+function applySopImprovement(obj, input = {}) {
+  if (input.user_confirmed !== true) {
+    throw new Error('必须先在对话中获得用户明确确认')
+  }
+  const proposal = proposeSopImprovement(obj, input)
+  if (proposal.proposal_id !== input.proposal_id) {
+    throw new Error('SOP建议内容与proposal_id不一致，请重新生成建议')
+  }
+  if (proposal.sop_version !== input.sop_version) {
+    throw new Error('SOP已发生变化，请重新生成建议')
+  }
+  const candidate = resolveSopCandidate(obj, proposal.sop_uid)
+  const sectionRoot =
+    proposal.section === 'C'
+      ? candidate.check_root_uid
+      : candidate.plan_root_uid
+  let result
+  if (proposal.action === 'add') {
+    result = addNode(obj, { parent: sectionRoot, text: proposal.content })
+  } else if (proposal.action === 'update') {
+    result = updateNode(obj, proposal.node_uid, { text: proposal.content })
+  } else {
+    result = deleteNode(obj, proposal.node_uid)
+  }
+  const updatedCandidate = resolveSopCandidate(result.obj, proposal.sop_uid)
+  return {
+    obj: result.obj,
+    changed_uid: result.uid,
+    sop_uid: proposal.sop_uid,
+    previous_version: proposal.sop_version,
+    sop_version: updatedCandidate.version
+  }
+}
+
 module.exports = {
   createUid,
   createEmptyTree,
@@ -548,6 +1065,16 @@ module.exports = {
   updateNodeOnDoc,
   deleteNodeOnDoc,
   searchNodes,
+  baseLabel,
+  findTodoBranches,
+  listTodos,
+  listSopCandidates,
+  isWithinSop,
+  isWithinSopOnDoc,
+  prepareTodo,
+  completeTodo,
+  proposeSopImprovement,
+  applySopImprovement,
   nodePath,
   stripHtml
 }
