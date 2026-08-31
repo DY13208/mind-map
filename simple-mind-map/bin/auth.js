@@ -818,7 +818,11 @@ async function handleAuthApi(req, res) {
     )
     sendJson(req, res, 200, {
       loginUrl: buildWecomLoginUrl(state, { embedded: true }),
-      expiresIn: OAUTH_STATE_TTL_SECONDS
+      expiresIn: OAUTH_STATE_TTL_SECONDS,
+      corpId: config.corpId,
+      agentId: config.agentId,
+      redirectUri: config.redirectUri,
+      state
     })
     return true
   }

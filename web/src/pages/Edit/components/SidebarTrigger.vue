@@ -5,6 +5,32 @@
     :class="{ hasActive: show && activeSidebar, show: show, isDark: isDark }"
     :style="{ maxHeight: maxHeight + 'px' }"
   >
+    <div
+      class="authPanel"
+      v-if="authUser"
+      :class="{ compact: !show, isDark: isDark }"
+    >
+      <div class="authAvatarWrap" :title="authUser.name">
+        <img
+          v-if="authUser.avatar"
+          class="authAvatarImg"
+          :src="authUser.avatar"
+          :alt="authUser.name"
+        />
+        <span v-else class="authAvatar">{{ userInitial }}</span>
+      </div>
+      <template v-if="show">
+        <span class="authName">{{ authUser.name }}</span>
+        <button
+          class="authLogout"
+          @click="signOut"
+          :disabled="loggingOut"
+          title="退出登录"
+        >
+          {{ loggingOut ? '…' : '退出' }}
+        </button>
+      </template>
+    </div>
     <div class="toggleShowBtn" :class="{ hide: !show }" @click="show = !show">
       <span class="iconfont iconjiantouyou"></span>
     </div>
@@ -26,13 +52,15 @@
 <script>
 import { mapState, mapMutations } from 'vuex'
 import { sidebarTriggerList } from '@/config'
+import { getCurrentUser, logout } from '@/utils/auth'
 
-// 侧边栏触发器
 export default {
   data() {
     return {
       show: true,
-      maxHeight: 0
+      maxHeight: 0,
+      authUser: null,
+      loggingOut: false
     }
   },
   computed: {
@@ -56,6 +84,11 @@ export default {
         })
       }
       return list
+    },
+
+    userInitial() {
+      const name = (this.authUser && this.authUser.name) || '依'
+      return name.trim().slice(0, 1)
     }
   },
   watch: {
@@ -66,6 +99,7 @@ export default {
     }
   },
   created() {
+    this.authUser = getCurrentUser()
     window.addEventListener('resize', this.onResize)
     this.updateSize()
   },
@@ -77,6 +111,18 @@ export default {
 
     trigger(item) {
       this.setActiveSidebar(item.value)
+    },
+
+    async signOut() {
+      if (this.loggingOut) return
+      this.loggingOut = true
+      try {
+        await logout()
+        window.location.reload()
+      } catch (err) {
+        this.$message.error(err.message || '退出登录失败')
+        this.loggingOut = false
+      }
     },
 
     onResize() {
@@ -115,6 +161,20 @@ export default {
         }
       }
     }
+
+    .authPanel {
+      background-color: #262a2e;
+      border-color: hsla(0, 0%, 100%, 0.08);
+      box-shadow: 0 2px 16px rgba(0, 0, 0, 0.24);
+
+      .authName {
+        color: hsla(0, 0%, 100%, 0.88);
+      }
+
+      .authLogout {
+        color: hsla(0, 0%, 100%, 0.45);
+      }
+    }
   }
 
   &.show {
@@ -123,6 +183,80 @@ export default {
 
   &.hasActive {
     right: 305px;
+  }
+
+  .authPanel {
+    position: absolute;
+    top: -72px;
+    right: 0;
+    width: 60px;
+    padding: 8px 6px;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 2px 16px rgba(0, 0, 0, 0.06);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    z-index: 1;
+    transition: all 0.3s;
+
+    &.compact {
+      top: -48px;
+      padding: 6px;
+      gap: 0;
+    }
+
+    .authAvatarWrap {
+      flex: none;
+    }
+
+    .authAvatar,
+    .authAvatarImg {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: block;
+    }
+
+    .authAvatar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, #0f9d68, #0a7a52);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .authName {
+      width: 100%;
+      overflow: hidden;
+      color: #34463d;
+      font-size: 11px;
+      line-height: 1.3;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .authLogout {
+      border: 0;
+      background: transparent;
+      color: #8a9690;
+      font-size: 11px;
+      cursor: pointer;
+      padding: 0;
+
+      &:disabled {
+        cursor: wait;
+      }
+    }
+  }
+
+  &.show .authPanel {
+    top: -78px;
   }
 
   .toggleShowBtn {
