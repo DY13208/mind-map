@@ -13,7 +13,8 @@ const {
   shareUrl,
   getSaveStatus,
   isDeletedRoom,
-  reviveRoom
+  reviveRoom,
+  scheduleSave
 } = require('./storage')
 
 function normalizeTree(input, title) {
@@ -61,7 +62,7 @@ function mapMeta(roomKey, obj, row) {
 }
 
 function mapPayload(roomKey, obj, row, extra = {}) {
-  const { format = 'outline', ...rest } = extra
+  const { format = 'outline', max_nodes, maxNodes, ...rest } = extra
   const meta = { ...mapMeta(roomKey, obj, row), ...rest }
   if (format === 'meta') return meta
   if (format === 'full') {
@@ -70,15 +71,20 @@ function mapPayload(roomKey, obj, row, extra = {}) {
   if (format === 'nodes') {
     return { ...meta, nodes: mindDoc.flattenNodes(obj) }
   }
-  return { ...meta, outline: mindDoc.toOutline(obj) }
+  const limit = Math.min(5000, Math.max(0, Number(max_nodes || maxNodes || 0) || 0))
+  return { ...meta, outline: mindDoc.toOutline(obj, limit ? { maxNodes: limit } : {}) }
 }
 
 async function persist(roomKey, ydoc, obj, title, options = {}) {
-  mindDoc.applyObjectToDoc(ydoc, obj, options)
+  const { responseFormat = 'meta', persistNow = false, ...applyOptions } = options
+  mindDoc.applyObjectToDoc(ydoc, obj, applyOptions)
   const name = title || mapTitle(obj, null)
   await upsertRoom(roomKey, name)
-  await saveDoc(roomKey, ydoc)
-  return mapPayload(roomKey, obj, { title: name, room_key: roomKey })
+  if (persistNow) await saveDoc(roomKey, ydoc)
+  else scheduleSave(roomKey, ydoc)
+  return mapPayload(roomKey, obj, { title: name, room_key: roomKey }, {
+    format: responseFormat
+  })
 }
 
 async function handleApi(req, res) {
@@ -113,7 +119,7 @@ async function handleApi(req, res) {
       ydoc,
       mindDoc.ensureRoot(tree, title),
       title,
-      { replace: true }
+      { replace: true, responseFormat: 'outline', persistNow: true }
     )
     sendJson(res, 201, payload)
     return true
@@ -180,7 +186,8 @@ async function handleApi(req, res) {
     const ydoc = await ensureDoc(roomKey)
     const obj = mindDoc.treeToObject(normalizeTree(body.tree, body.title))
     const payload = await persist(roomKey, ydoc, obj, body.title, {
-      replace: true
+      replace: true,
+      persistNow: true
     })
     sendJson(res, 200, payload)
     return true
@@ -222,7 +229,9 @@ async function handleApi(req, res) {
       room_key: roomKey,
       title: (loaded.row && loaded.row.title) || '未命名',
       share_url: shareUrl(roomKey),
-      outline: mindDoc.toOutline(loaded.obj)
+      outline: mindDoc.toOutline(loaded.obj, {
+        maxNodes: Number(url.searchParams.get('max_nodes') || 0) || 0
+      })
     })
     return true
   }
@@ -240,7 +249,10 @@ async function handleApi(req, res) {
       sendJson(
         res,
         200,
-        mapPayload(roomKey, loaded.obj, loaded.row, { format })
+        mapPayload(roomKey, loaded.obj, loaded.row, {
+          format,
+          max_nodes: url.searchParams.get('max_nodes')
+        })
       )
       return true
     }

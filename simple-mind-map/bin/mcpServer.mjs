@@ -27,12 +27,14 @@ function fail(err) {
 }
 
 async function api(path, options = {}) {
+  const { timeoutMs = 25000, headers, ...rest } = options
   const res = await fetch(`${API}${path}`, {
+    ...rest,
     headers: {
       'Content-Type': 'application/json',
-      ...(options.headers || {})
+      ...(headers || {})
     },
-    ...options
+    signal: AbortSignal.timeout(timeoutMs)
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
@@ -89,21 +91,32 @@ function createServer() {
 
   server.tool(
     'get_map',
-    '读取一张导图。format=outline（默认）只返回大纲（每行带 uid）；format=full 只返回完整树。两种格式不会叠在一起。日常先 outline，需要整图结构时再 full。',
+    '读取一张导图。format=outline（默认）只返回大纲（每行带 uid，默认最多 800 个节点，超出请 search_nodes）；format=full 只返回完整树。两种格式不会叠在一起。日常先 outline，需要整图结构时再 full。',
     {
       room_key: z.string().describe('房间号'),
       format: z
         .enum(['outline', 'full'])
         .describe('outline=只返回大纲；full=只返回完整树')
+        .optional(),
+      max_nodes: z
+        .number()
+        .int()
+        .min(1)
+        .max(5000)
+        .describe('outline 最大节点数，默认 800')
         .optional()
     },
-    async ({ room_key, format }) => {
+    async ({ room_key, format, max_nodes }) => {
       try {
         const mode = format === 'full' ? 'full' : 'outline'
+        const qs =
+          mode === 'outline'
+            ? `?format=outline&max_nodes=${max_nodes || 800}`
+            : '?format=full'
         return ok(
-          await api(
-            `/api/files/${encodeURIComponent(room_key)}?format=${mode}`
-          )
+          await api(`/api/files/${encodeURIComponent(room_key)}${qs}`, {
+            timeoutMs: mode === 'full' ? 45000 : 25000
+          })
         )
       } catch (err) {
         return fail(err)
@@ -133,7 +146,7 @@ function createServer() {
 
   server.tool(
     'add_node',
-    '在指定节点下新增子节点。parent 可以是 uid、root，或路径如「根节点/产品」。',
+    '在指定节点下新增子节点。parent 可以是 uid、root，或路径如「根节点/产品」。成功只返回 uid，不返回整图。',
     {
       room_key: z.string().describe('房间号'),
       text: z.string().describe('节点文字'),
@@ -159,7 +172,7 @@ function createServer() {
 
   server.tool(
     'update_node',
-    '修改节点文字或备注。node 优先用 get_map outline 里的 uid；也可用完整标题、部分文字或 根/父/子 路径。工具报错即未写入。',
+    '修改节点文字或备注。node 优先用 get_map outline 里的 uid；也可用完整标题、部分文字或 根/父/子 路径。成功只返回 uid。工具报错即未写入。',
     {
       room_key: z.string().describe('房间号'),
       node: z.string().describe('节点 uid 或文字路径'),
@@ -185,7 +198,7 @@ function createServer() {
 
   server.tool(
     'delete_node',
-    '删除节点及其全部子节点。不能删根节点。',
+    '删除节点及其全部子节点。不能删根节点。成功只返回 uid，不返回整图。',
     {
       room_key: z.string().describe('房间号'),
       node: z.string().describe('节点 uid 或文字路径')
@@ -376,8 +389,17 @@ async function startHttp() {
           await server.connect(transport)
         }
         if (!transport) {
-          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
-          res.end(JSON.stringify({ error: 'missing mcp-session-id' }))
+          res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' })
+          res.end(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              error: {
+                code: -32001,
+                message: 'Session expired, please reinitialize'
+              },
+              id: body && body.id != null ? body.id : null
+            })
+          )
           return
         }
         await transport.handleRequest(req, res, body)

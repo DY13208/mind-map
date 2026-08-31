@@ -306,26 +306,51 @@ function prefixLines(name, color, chunk) {
   process.stdout.write(tagged)
 }
 
-function startProcess(name, command, args, cwd, color, extraEnv = {}) {
-  const child = spawn(command, args, {
-    cwd,
-    shell: true,
-    env: {
-      ...process.env,
-      HOST: '0.0.0.0',
-      FORCE_COLOR: '1',
-      ...extraEnv
+function startProcess(
+  name,
+  command,
+  args,
+  cwd,
+  color,
+  extraEnv = {},
+  { restart = false } = {}
+) {
+  let restarts = 0
+  let stableTimer = null
+  const spawnOnce = () => {
+    const child = spawn(command, args, {
+      cwd,
+      shell: true,
+      env: {
+        ...process.env,
+        HOST: '0.0.0.0',
+        FORCE_COLOR: '1',
+        ...extraEnv
+      }
+    })
+    child.stdout && child.stdout.on('data', chunk => prefixLines(name, color, chunk))
+    child.stderr && child.stderr.on('data', chunk => prefixLines(name, color, chunk))
+    children.push(child)
+    if (restart) {
+      if (stableTimer) clearTimeout(stableTimer)
+      stableTimer = setTimeout(() => {
+        restarts = 0
+      }, 30000)
     }
-  })
-  child.stdout && child.stdout.on('data', chunk => prefixLines(name, color, chunk))
-  child.stderr && child.stderr.on('data', chunk => prefixLines(name, color, chunk))
-  child.on('exit', code => {
-    if (!stopping) {
+    child.on('exit', code => {
+      const idx = children.indexOf(child)
+      if (idx >= 0) children.splice(idx, 1)
+      if (stopping) return
       log(paint(c.red, `  [${name}] 已退出${code ? ` (${code})` : ''}`))
-    }
-  })
-  children.push(child)
-  return child
+      if (!restart) return
+      const delay = Math.min(30000, 1000 * Math.pow(2, restarts))
+      restarts += 1
+      log(paint(c.yellow, `  [${name}] ${delay / 1000}s 后自动重启`))
+      setTimeout(spawnOnce, delay)
+    })
+    return child
+  }
+  return spawnOnce()
 }
 
 function waitForHttp(url, timeout = 90000) {
@@ -461,8 +486,10 @@ async function startAll({ pickIp = false } = {}) {
       PORT: String(COLLAB_PORT),
       HOST: '0.0.0.0',
       PUBLIC_HOST: host,
-      WEB_PORT: String(WEB_PORT)
-    }
+      WEB_PORT: String(WEB_PORT),
+      NODE_OPTIONS: '--max-old-space-size=3072'
+    },
+    { restart: true }
   )
   startProcess(
     'MCP',
@@ -476,9 +503,18 @@ async function startAll({ pickIp = false } = {}) {
       MIND_MAP_API: `http://127.0.0.1:${COLLAB_PORT}`,
       PUBLIC_HOST: host,
       WEB_PORT: String(WEB_PORT)
-    }
+    },
+    { restart: true }
   )
-  startProcess('AI', 'node', ['./scripts/ai.js'], WEB_DIR, c.yellow)
+  startProcess(
+    'AI',
+    'node',
+    ['./scripts/ai.js'],
+    WEB_DIR,
+    c.yellow,
+    {},
+    { restart: true }
+  )
   startProcess(
     '页面',
     'npx',

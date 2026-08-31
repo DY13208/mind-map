@@ -92,6 +92,31 @@ const reconcileChildren = (children, nextList = [], previousList = []) => {
   })
 }
 
+const sameList = (a = [], b = []) => {
+  if (a === b) return true
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+    return false
+  }
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+const sameJson = (a, b) => {
+  if (a === b) return true
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+const nodeUnchanged = (nextNode = {}, previousNode) => {
+  if (!previousNode) return false
+  return (
+    !!nextNode.isRoot === !!previousNode.isRoot &&
+    sameList(nextNode.children, previousNode.children) &&
+    sameJson(nextNode.data, previousNode.data)
+  )
+}
+
 const syncDataMap = (dataMap, nextData = {}, previousData = {}) => {
   Object.keys(previousData || {}).forEach(key => {
     if (!(key in nextData)) dataMap.delete(key)
@@ -159,27 +184,35 @@ export const applyObjectToYMap = (
   ymap,
   nextObject,
   previousObject = {},
-  { origin = null, replace = false } = {}
+  { origin = null, replace = false, deleteUids = null } = {}
 ) => {
   ymap.doc.transact(() => {
     Object.keys(nextObject).forEach(uid => {
       const nextNode = nextObject[uid]
-      const previousNode = previousObject[uid] || {
-        data: {},
-        children: []
-      }
+      const previousNode = previousObject[uid]
+      if (!replace && nodeUnchanged(nextNode, previousNode)) return
       const nodeMap = ensureNodeMap(ymap, uid, nextNode)
-      nodeMap.set('isRoot', !!nextNode.isRoot)
-      syncDataMap(nodeMap.get('data'), nextNode.data || {}, previousNode.data || {})
+      const isRoot = !!nextNode.isRoot
+      if (nodeMap.get('isRoot') !== isRoot) {
+        nodeMap.set('isRoot', isRoot)
+      }
+      syncDataMap(
+        nodeMap.get('data'),
+        nextNode.data || {},
+        (previousNode && previousNode.data) || {}
+      )
       reconcileChildren(
         nodeMap.get('children'),
         nextNode.children || [],
-        previousNode.children || []
+        (previousNode && previousNode.children) || []
       )
     })
 
-    Object.keys(previousObject || {}).forEach(uid => {
-      if (!nextObject[uid]) ymap.delete(uid)
+    const deletions = Array.isArray(deleteUids)
+      ? deleteUids
+      : Object.keys(previousObject || {}).filter(uid => !nextObject[uid])
+    deletions.forEach(uid => {
+      if (ymap.has(uid)) ymap.delete(uid)
     })
 
     if (replace) {

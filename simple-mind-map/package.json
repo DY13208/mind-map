@@ -23,6 +23,7 @@
     "collabServe": "node ./bin/collabServer.js",
     "test:collab": "node ./test/collabYjs.test.js",
     "test:collab:integration": "node ./test/collabWebsocket.integration.test.js",
+    "test:collab:large": "node ./test/collabLarge.integration.test.js",
     "mcp": "node ./bin/mcpServer.mjs",
     "mcpHttp": "node ./bin/mcpServer.mjs --http"
   },

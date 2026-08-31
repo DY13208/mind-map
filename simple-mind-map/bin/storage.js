@@ -26,9 +26,94 @@ const location = String(process.env.TENCENT_COS_LOCATION || 'mind-map').replace(
 const acl = process.env.TENCENT_COS_ACL || 'private'
 
 const saveTimers = new Map()
+const pendingSaves = new Map()
+const saveWorkers = new Map()
 const preloadCache = new Map()
 const deletedRooms = new Set()
 const roomSaveStates = new Map()
+const MAX_SAVE_CONCURRENCY = 1
+const IDLE_EVICT_MS = 10 * 60 * 1000
+const LARGE_MAP_NODES = 400
+let activeSaves = 0
+const saveGate = []
+const idleTimers = new Map()
+
+function cancelIdleEvict(roomKey) {
+  const key = String(roomKey || '')
+  const timer = idleTimers.get(key)
+  if (timer) clearTimeout(timer)
+  idleTimers.delete(key)
+}
+
+function scheduleIdleEvict(roomKey) {
+  const key = String(roomKey || '')
+  cancelIdleEvict(key)
+  idleTimers.set(
+    key,
+    setTimeout(() => {
+      idleTimers.delete(key)
+      const doc = docs.get(key)
+      if (!doc || (doc.conns && doc.conns.size > 0)) return
+      queueSave(key, doc)
+        .catch(err => {
+          console.error('[persist] idle save failed', key, err.message)
+        })
+        .finally(() => {
+          const current = docs.get(key)
+          if (!current || (current.conns && current.conns.size > 0)) return
+          docs.delete(key)
+          try {
+            current.destroy()
+          } catch (e) {
+            // ignore
+          }
+        })
+    }, IDLE_EVICT_MS)
+  )
+}
+
+function saveDelay(ydoc) {
+  try {
+    return ydoc.getMap().size > LARGE_MAP_NODES ? 5000 : 1500
+  } catch (e) {
+    return 1500
+  }
+}
+
+const COMPACT_MIN_BYTES = 512 * 1024
+
+function compactYjsUpdate(raw) {
+  const fresh = new Y.Doc({ gc: true })
+  try {
+    Y.applyUpdate(fresh, raw)
+    return Buffer.from(Y.encodeStateAsUpdate(fresh))
+  } finally {
+    try {
+      fresh.destroy()
+    } catch (e) {
+      // ignore
+    }
+  }
+}
+
+function acquireSaveSlot() {
+  if (activeSaves < MAX_SAVE_CONCURRENCY) {
+    activeSaves += 1
+    return Promise.resolve()
+  }
+  return new Promise(resolve => {
+    saveGate.push(resolve)
+  })
+}
+
+function releaseSaveSlot() {
+  const next = saveGate.shift()
+  if (next) {
+    next()
+    return
+  }
+  activeSaves = Math.max(0, activeSaves - 1)
+}
 
 function setSaveState(roomKey, status, error = '') {
   roomSaveStates.set(roomKey, {
@@ -76,11 +161,18 @@ function cosKey(roomKey) {
 
 function titleFromDoc(ydoc) {
   try {
-    const json = ydoc.getMap().toJSON()
-    const root = Object.values(json).find(item => item && item.isRoot)
-    const raw = root && root.data && root.data.text
+    let root = null
+    for (const item of ydoc.getMap().values()) {
+      const isRoot = item instanceof Y.Map ? item.get('isRoot') : item && item.isRoot
+      if (isRoot) {
+        root = item
+        break
+      }
+    }
+    const data = root instanceof Y.Map ? root.get('data') : root && root.data
+    const raw = data instanceof Y.Map ? data.get('text') : data && data.text
     if (!raw) return '未命名'
-    const text = String(raw)
+    const text = (raw instanceof Y.Text ? raw.toString() : String(raw))
       .replace(/<[^>]+>/g, '')
       .replace(/\s+/g, ' ')
       .trim()
@@ -155,16 +247,28 @@ async function upsertRoom(roomKey, title) {
 
 async function saveDoc(roomKey, ydoc) {
   if (isDeletedRoom(roomKey)) return
-  if (!ydoc.getMap().size) return
+  if (!ydoc || typeof ydoc.getMap !== 'function' || !ydoc.getMap().size) return
   setSaveState(roomKey, 'saving')
+  await acquireSaveSlot()
   try {
-    const buf = Buffer.from(Y.encodeStateAsUpdate(ydoc))
+    if (isDeletedRoom(roomKey) || typeof ydoc.getMap !== 'function') return
+    const raw = Y.encodeStateAsUpdate(ydoc)
+    const shouldCompact = raw.byteLength >= COMPACT_MIN_BYTES
+    const buf = shouldCompact ? compactYjsUpdate(raw) : Buffer.from(raw)
+    if (shouldCompact && buf.length < raw.byteLength) {
+      console.log(
+        '[persist] compacted',
+        roomKey,
+        raw.byteLength,
+        '->',
+        buf.length
+      )
+    }
     await putYjsBuffer(roomKey, buf)
     if (isDeletedRoom(roomKey)) {
       await purgeRoomStorage(roomKey)
       return
     }
-    preloadCache.set(roomKey, buf)
     await upsertRoom(roomKey, titleFromDoc(ydoc))
     if (isDeletedRoom(roomKey)) {
       await purgeRoomStorage(roomKey)
@@ -178,7 +282,27 @@ async function saveDoc(roomKey, ydoc) {
       isDeletedRoom(roomKey) ? '' : err.message || err
     )
     throw err
+  } finally {
+    releaseSaveSlot()
   }
+}
+
+function queueSave(roomKey, ydoc) {
+  if (isDeletedRoom(roomKey)) return Promise.resolve()
+  pendingSaves.set(roomKey, ydoc)
+  const currentWorker = saveWorkers.get(roomKey)
+  if (currentWorker) return currentWorker
+  const worker = (async () => {
+    while (pendingSaves.has(roomKey) && !isDeletedRoom(roomKey)) {
+      const latestDoc = pendingSaves.get(roomKey)
+      pendingSaves.delete(roomKey)
+      await saveDoc(roomKey, latestDoc)
+    }
+  })().finally(() => {
+    saveWorkers.delete(roomKey)
+  })
+  saveWorkers.set(roomKey, worker)
+  return worker
 }
 
 async function purgeRoomStorage(roomKey) {
@@ -196,10 +320,10 @@ function scheduleSave(roomKey, ydoc) {
     roomKey,
     setTimeout(() => {
       saveTimers.delete(roomKey)
-      saveDoc(roomKey, ydoc).catch(err => {
+      queueSave(roomKey, ydoc).catch(err => {
         console.error('[persist] save failed', roomKey, err.message)
       })
-    }, 1500)
+    }, saveDelay(ydoc))
   )
 }
 
@@ -223,6 +347,7 @@ async function preloadRoom(roomKey) {
 
 async function ensureDoc(roomKey) {
   const key = String(roomKey || '')
+  cancelIdleEvict(key)
   const buf = await preloadRoom(key)
   const ydoc = getYDoc(key)
   if (buf && buf.length && ydoc.getMap().size === 0) {
@@ -259,6 +384,8 @@ function attachPersistence() {
       if (buf && buf.length) {
         Y.applyUpdate(ydoc, new Uint8Array(buf))
       }
+      // Y.Doc 已接管状态，不再同时长期保留一份可能很大的二进制快照。
+      preloadCache.delete(roomKey)
       ydoc.on('update', () => scheduleSave(roomKey, ydoc))
     },
     writeState: async (docName, ydoc) => {
@@ -268,7 +395,7 @@ function attachPersistence() {
         clearTimeout(timer)
         saveTimers.delete(roomKey)
       }
-      await saveDoc(roomKey, ydoc)
+      await queueSave(roomKey, ydoc)
     }
   })
 }
@@ -327,6 +454,8 @@ async function removeRoom(roomKey) {
     clearTimeout(timer)
     saveTimers.delete(roomKey)
   }
+  pendingSaves.delete(roomKey)
+  cancelIdleEvict(roomKey)
   const doc = docs.get(roomKey)
   if (doc) {
     const connections = Array.from(doc.conns ? doc.conns.keys() : [])
@@ -407,5 +536,9 @@ module.exports = {
   shareUrl,
   getSaveStatus,
   isDeletedRoom,
-  reviveRoom
+  reviveRoom,
+  queueSave,
+  scheduleIdleEvict,
+  cancelIdleEvict,
+  scheduleSave
 }

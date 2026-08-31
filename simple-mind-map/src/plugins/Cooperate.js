@@ -42,9 +42,21 @@ class Cooperate {
     this.pendingLocalData = null
     this.localApplyTimer = null
     this.largeMapModeEnabled = false
+    this.pendingRemoteUids = new Set()
+    this.pendingRemoteAdded = new Set()
+    this.pendingRemoteDeleted = new Set()
+    this.pendingRemoteStructure = false
     this.localOrigin = { source: 'simple-mind-map-cooperate' }
     // 绑定事件
     this.bindEvent()
+  }
+
+  mapSize() {
+    return this.currentData ? Object.keys(this.currentData).length : 0
+  }
+
+  largeMapDelay(smallMs, largeMs) {
+    return this.mapSize() >= 200 ? largeMs : smallMs
   }
 
   // 初始化数据
@@ -206,6 +218,10 @@ class Cooperate {
     this.observeApplyTimer = null
     this.localApplyTimer = null
     this.pendingRemoteTree = null
+    this.pendingRemoteUids = new Set()
+    this.pendingRemoteAdded = new Set()
+    this.pendingRemoteDeleted = new Set()
+    this.pendingRemoteStructure = false
     this.pendingLocalData = null
     this.disconnectProvider()
     this.mindMap.off('data_change', this.onDataChange)
@@ -233,26 +249,183 @@ class Cooperate {
     if (hasLegacyNode) {
       migrateLegacyNodes(this.ymap)
     }
-    // 合并短时间内的多次 deep 变更，避免刷新/同步时主线程渲染风暴
+    events.forEach(event => {
+      if (event.target === this.ymap && event.changes) {
+        event.changes.keys.forEach((change, key) => {
+          this.pendingRemoteUids.add(key)
+          if (change.action === 'add') this.pendingRemoteAdded.add(key)
+          if (change.action === 'delete') this.pendingRemoteDeleted.add(key)
+          if (change.action !== 'update') this.pendingRemoteStructure = true
+        })
+        return
+      }
+      const path = event.path || []
+      if (typeof path[0] === 'string') this.pendingRemoteUids.add(path[0])
+      if (path[1] === 'children') this.pendingRemoteStructure = true
+    })
     clearTimeout(this.observeApplyTimer)
     this.observeApplyTimer = setTimeout(() => {
       this.flushRemoteObserve()
-    }, 50)
+    }, this.largeMapDelay(50, 200))
   }
 
   flushRemoteObserve() {
     if (!this.ymap) return
+    const uids = Array.from(this.pendingRemoteUids)
+    const added = Array.from(this.pendingRemoteAdded)
+    const deleted = Array.from(this.pendingRemoteDeleted)
+    const structure = this.pendingRemoteStructure
+    this.pendingRemoteUids = new Set()
+    this.pendingRemoteAdded = new Set()
+    this.pendingRemoteDeleted = new Set()
+    this.pendingRemoteStructure = false
+    this.enableLargeMapMode(this.ymap.size || this.mapSize())
+    if (!structure && uids.length > 0 && uids.length <= 12) {
+      if (this.applyRemoteNodePatch(uids)) return
+    }
+    if (structure && added.length === 1 && deleted.length === 0) {
+      if (this.applyRemoteInsert(added[0])) return
+    }
+    if (structure && deleted.length === 1 && added.length === 0) {
+      if (this.applyRemoteRemove(deleted[0])) return
+    }
     const data = this.ymap.toJSON()
     this.currentData = data
-    this.enableLargeMapMode(Object.keys(data).length)
     const res = transformObjectToTreeData(data)
     if (!res) return
     this.applyRemoteTree(res)
   }
 
+  applyRemoteNodePatch(uids) {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!renderer || typeof renderer.findNodeByUid !== 'function') return false
+    const nextNodes = []
+    for (let i = 0; i < uids.length; i++) {
+      const uid = uids[i]
+      const nodeMap = this.ymap.get(uid)
+      if (!nodeMap || typeof nodeMap.toJSON !== 'function') return false
+      const json = nodeMap.toJSON()
+      const node = renderer.findNodeByUid(uid)
+      if (!node) return false
+      nextNodes.push({ uid, json, node })
+    }
+    this.isApplyingRemote = true
+    this.mindMap.command.pause()
+    try {
+      nextNodes.forEach(({ uid, json, node }) => {
+        if (this.currentData) this.currentData[uid] = json
+        const data = json.data || {}
+        renderer.setNodeDataRender(
+          node,
+          {
+            text: data.text,
+            note: data.note,
+            richText: data.richText
+          },
+          false
+        )
+      })
+    } catch (err) {
+      return false
+    } finally {
+      try {
+        this.mindMap.command.recovery()
+      } catch (e) {
+        // ignore
+      }
+      this.isApplyingRemote = false
+    }
+    return true
+  }
+
+  findRemoteParentUid(uid) {
+    let parentUid = ''
+    this.ymap.forEach((value, key) => {
+      if (parentUid || key === uid || !(value instanceof Y.Map)) return
+      const children = value.get('children')
+      if (
+        children &&
+        typeof children.toArray === 'function' &&
+        children.toArray().includes(uid)
+      ) {
+        parentUid = key
+      }
+    })
+    return parentUid
+  }
+
+  withRemoteCommand(fn) {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!renderer || typeof renderer.findNodeByUid !== 'function') return false
+    this.isApplyingRemote = true
+    this.isSetData = true
+    this.mindMap.command.pause()
+    try {
+      fn(renderer)
+      return true
+    } catch (err) {
+      return false
+    } finally {
+      try {
+        this.mindMap.command.recovery()
+      } catch (e) {
+        // ignore
+      }
+      this.isSetData = false
+      this.isApplyingRemote = false
+    }
+  }
+
+  applyRemoteInsert(uid) {
+    const nodeMap = this.ymap.get(uid)
+    if (!nodeMap || typeof nodeMap.toJSON !== 'function') return false
+    const json = nodeMap.toJSON()
+    const parentUid = this.findRemoteParentUid(uid)
+    if (!parentUid) return false
+    return this.withRemoteCommand(renderer => {
+      const parentNode = renderer.findNodeByUid(parentUid)
+      if (!parentNode) throw new Error('missing parent')
+      const data = json.data || {}
+      this.mindMap.execCommand('INSERT_CHILD_NODE', false, [parentNode], {
+        uid,
+        text: data.text,
+        note: data.note,
+        richText: data.richText
+      })
+      if (this.currentData) {
+        this.currentData[uid] = json
+        const parent = this.currentData[parentUid]
+        if (parent) {
+          const children = parent.children || []
+          if (!children.includes(uid)) parent.children = [...children, uid]
+        }
+      }
+    })
+  }
+
+  applyRemoteRemove(uid) {
+    return this.withRemoteCommand(renderer => {
+      const node = renderer.findNodeByUid(uid)
+      if (!node || node.isRoot) throw new Error('missing node')
+      this.mindMap.execCommand('REMOVE_NODE', [node])
+      if (this.currentData) {
+        const parentUid = Object.keys(this.currentData).find(key => {
+          const children = this.currentData[key] && this.currentData[key].children
+          return Array.isArray(children) && children.includes(uid)
+        })
+        if (parentUid) {
+          this.currentData[parentUid].children = (
+            this.currentData[parentUid].children || []
+          ).filter(child => child !== uid)
+        }
+        delete this.currentData[uid]
+      }
+    })
+  }
+
   // 大文件优先使用性能模式，避免远端全量同步后逐字编辑触发高频重排
   enableLargeMapMode(nodeCount) {
-    if (nodeCount < 400 || this.largeMapModeEnabled) return
+    if (nodeCount < 200 || this.largeMapModeEnabled) return
     this.largeMapModeEnabled = true
     this.mindMap.updateConfig({
       openPerformance: true,
@@ -315,7 +488,7 @@ class Cooperate {
       const pending = this.pendingLocalData
       this.pendingLocalData = null
       if (pending && this.ymap) this.flushLocalDataChange(pending)
-    }, 80)
+    }, this.largeMapDelay(80, 220))
   }
 
   flushLocalDataChange(data) {
@@ -342,8 +515,20 @@ class Cooperate {
     if (beforeCooperateUpdate && deleteList.length > 0) {
       beforeCooperateUpdate({ type: 'delete', list: deleteList })
     }
-    applyObjectToYMap(this.ymap, data, oldData, { origin: this.localOrigin })
-    this.currentData = this.ymap.toJSON()
+    if (createOrUpdateList.length === 0 && deleteList.length === 0) return
+    const patch = {}
+    createOrUpdateList.forEach(item => {
+      patch[item.uid] = data[item.uid]
+    })
+    applyObjectToYMap(this.ymap, patch, oldData, {
+      origin: this.localOrigin,
+      deleteUids: deleteList.map(item => item.uid)
+    })
+    const next = { ...oldData, ...patch }
+    deleteList.forEach(item => {
+      delete next[item.uid]
+    })
+    this.currentData = next
   }
 
   // 节点激活状态改变后触发感知数据同步
