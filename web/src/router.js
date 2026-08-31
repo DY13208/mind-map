@@ -14,6 +14,10 @@ const routes = [
     redirect: '/'
   },
   {
+    path: '/map',
+    redirect: to => ({ path: '/', query: to.query })
+  },
+  {
     path: '/doc/zh',
     component: () => import(`./pages/Doc.vue`)
   }

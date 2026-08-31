@@ -58,6 +58,13 @@ module.exports = {
       '^/api/v3/': {
         target: 'http://ark.cn-beijing.volces.com',
         changeOrigin: true
+      },
+      '/wb-api': {
+        target: process.env.WORKBUDDY_API || 'http://127.0.0.1:3000',
+        changeOrigin: true,
+        pathRewrite: { '^/wb-api': '' },
+        timeout: 0,
+        proxyTimeout: 3600000
       }
     }
   }

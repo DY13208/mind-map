@@ -40,6 +40,8 @@ services:
       MCP_HOST: "127.0.0.1"
       MCP_PORT: "3847"
       MIND_MAP_API: "http://127.0.0.1:1234"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${MIND_MAP_PORT:-8080}:80"
     depends_on:
