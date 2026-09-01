@@ -14,7 +14,7 @@
       class="authScreen"
       v-else-if="authState.enabled && !authState.authenticated"
     >
-      <div class="authCard">
+      <div class="authCard authCard--login">
         <div class="authBrandBlock">
           <div class="authBrandMark">依</div>
           <h1 class="authBrand">依然中台</h1>
@@ -311,6 +311,10 @@ body,
   &--compact {
     padding-top: 32px;
   }
+
+  &--login {
+    width: 400px;
+  }
 }
 
 .authBrandBlock {
@@ -367,8 +371,9 @@ body,
 
 .authQrShell {
   position: relative;
-  width: 280px;
-  height: 280px;
+  // 企业微信 small 登录面板固定为 320 × 380，外层再预留 1px 边框。
+  width: 322px;
+  height: 382px;
   max-width: 100%;
   margin: 22px auto 0;
   overflow: hidden;
@@ -385,6 +390,9 @@ body,
   justify-content: center;
 
   iframe {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
     border: 0;
   }
 }
@@ -519,9 +527,9 @@ body,
   }
 
   .authQrShell {
-    width: 100%;
-    height: 72vw;
-    max-height: 280px;
+    width: 322px;
+    height: 382px;
+    max-height: none;
   }
 }
 
