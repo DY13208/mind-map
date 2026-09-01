@@ -1,6 +1,7 @@
 require('./loadEnv')
 
 const crypto = require('crypto')
+const net = require('net')
 const { Pool } = require('pg')
 
 const SESSION_COOKIE = 'mind_map_session'
@@ -16,11 +17,12 @@ let accessTokenCache = null
 let accessTokenRequest = null
 
 class AuthError extends Error {
-  constructor(code, message, status = 502) {
+  constructor(code, message, status = 502, details = {}) {
     super(message)
     this.name = 'AuthError'
     this.code = code
     this.status = status
+    this.details = details
   }
 }
 
@@ -459,9 +461,16 @@ function safeReturnTo(value) {
   }
 }
 
-function appRedirectUrl(returnTo = '/', error = '') {
+function appRedirectUrl(returnTo = '/', error = '', details = {}) {
   const url = new URL(safeReturnTo(returnTo), config.appOrigin)
   if (error) url.searchParams.set('auth_error', error)
+  if (
+    error === 'wecom_ip_not_allowed' &&
+    details.ip &&
+    net.isIP(details.ip)
+  ) {
+    url.searchParams.set('auth_ip', details.ip)
+  }
   return url.toString()
 }
 
@@ -537,11 +546,13 @@ function createWecomResponseError(data, fallbackCode, fallbackMessage) {
   if (normalizedErrcode === WECOM_IP_DENIED_ERROR_CODE) {
     const errmsg = String((data && data.errmsg) || '')
     const ipMatch = errmsg.match(/from ip:\s*([0-9a-f:.]+)/i)
-    const ipHint = ipMatch ? `，当前出口 IP：${ipMatch[1]}` : ''
+    const ip = ipMatch && net.isIP(ipMatch[1]) ? ipMatch[1] : ''
+    const ipHint = ip ? `，当前出口 IP：${ip}` : ''
     return new AuthError(
       'wecom_ip_not_allowed',
       `企业微信拒绝当前服务器出口 IP（60020${ipHint}）`,
-      503
+      503,
+      ip ? { ip } : {}
     )
   }
   return new AuthError(
@@ -994,9 +1005,10 @@ async function handleAuthApi(req, res) {
       redirect(res, appRedirectUrl(returnTo))
     } catch (err) {
       const code = err instanceof AuthError ? err.code : 'auth_unavailable'
+      const details = err instanceof AuthError ? err.details : {}
       const message = err && err.message ? err.message : 'unknown error'
       console.error(`[auth] WeCom callback failed: code=${code}; ${message}`)
-      redirect(res, appRedirectUrl(returnTo, code))
+      redirect(res, appRedirectUrl(returnTo, code, details))
     }
     return true
   }

@@ -107,6 +107,17 @@ assert.strictEqual(ipDeniedError.code, 'wecom_ip_not_allowed')
 assert.strictEqual(ipDeniedError.status, 503)
 assert.match(ipDeniedError.message, /60020/)
 assert.match(ipDeniedError.message, /203\.0\.113\.8/)
+assert.deepStrictEqual(ipDeniedError.details, { ip: '203.0.113.8' })
+
+const invalidIpDeniedError = __test.createWecomResponseError(
+  {
+    errcode: 60020,
+    errmsg: 'not allow to access from your ip, from ip: not-an-ip'
+  },
+  'wecom_identity_failed',
+  '企业微信身份校验失败'
+)
+assert.deepStrictEqual(invalidIpDeniedError.details, {})
 
 const genericIdentityError = __test.createWecomResponseError(
   { errcode: 40029, errmsg: 'invalid code' },

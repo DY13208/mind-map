@@ -286,6 +286,10 @@ async function main() {
       deniedCallbackLocation.searchParams.get('auth_error'),
       'wecom_ip_not_allowed'
     )
+    assert.strictEqual(
+      deniedCallbackLocation.searchParams.get('auth_ip'),
+      '203.0.113.8'
+    )
 
     response = await request('/api/auth/login?return_to=%2F%3Froom%3Ddemo')
     assert.strictEqual(response.status, 302)
