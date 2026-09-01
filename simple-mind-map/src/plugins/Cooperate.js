@@ -12,6 +12,10 @@ import {
   copyNodeTree
 } from '../utils/index'
 import { applyObjectToYMap, migrateLegacyNodes } from './cooperateYjs'
+import {
+  planCollabRecovery,
+  planAfterOperations
+} from './cooperateRecovery'
 
 function collapseDeepNodes(root, keepDepth = 2) {
   const stack = root ? [{ node: root, depth: 0 }] : []
@@ -196,7 +200,12 @@ class Cooperate {
     this.httpPatchNode = null
     this.httpAddNode = null
     this.httpDeleteNode = null
+    this.httpFetchOperations = null
+    this.httpFetchVersion = null
     this.httpUpdatedAt = ''
+    this.lastAppliedVersion = 0
+    this.httpRecovering = false
+    this.httpPendingRecoverVersion = 0
     this.hydratedUids = new Set()
     this.hydrateFailedUids = new Set()
     this.lastPushed = {}
@@ -979,7 +988,12 @@ class Cooperate {
     if (config.patchNode) this.httpPatchNode = config.patchNode
     if (config.addNode) this.httpAddNode = config.addNode
     if (config.deleteNode) this.httpDeleteNode = config.deleteNode
+    if (config.fetchOperations) this.httpFetchOperations = config.fetchOperations
+    if (config.fetchVersion) this.httpFetchVersion = config.fetchVersion
     if (config.updatedAt) this.httpUpdatedAt = config.updatedAt
+    if (config.version != null && Number.isFinite(Number(config.version))) {
+      this.lastAppliedVersion = Number(config.version)
+    }
   }
 
   setHttpCollab(config = {}) {
@@ -1004,7 +1018,12 @@ class Cooperate {
     this.httpPatchNode = null
     this.httpAddNode = null
     this.httpDeleteNode = null
+    this.httpFetchOperations = null
+    this.httpFetchVersion = null
     this.httpUpdatedAt = ''
+    this.lastAppliedVersion = 0
+    this.httpRecovering = false
+    this.httpPendingRecoverVersion = 0
     this.hydratedUids = new Set()
     this.hydrateFailedUids = new Set()
     this.lastPushed = {}
@@ -1680,6 +1699,61 @@ class Cooperate {
       nodes.push(...((payload && payload.nodes) || []))
     }
     return nodes
+  }
+
+  acknowledgeLocalVersion(version) {
+    const next = Number(version)
+    if (!Number.isFinite(next)) return
+    if (next > this.lastAppliedVersion) this.lastAppliedVersion = next
+  }
+
+  async recoverHttpCollab(targetVersion, options = {}) {
+    if (!this.httpCollabMode) return
+    const plan = planCollabRecovery(this.lastAppliedVersion, targetVersion)
+    if (plan.type === 'ignore') return
+    if (this.httpRecovering) {
+      this.httpPendingRecoverVersion = Math.max(
+        this.httpPendingRecoverVersion || 0,
+        Number(targetVersion) || 0
+      )
+      return
+    }
+    this.httpRecovering = true
+    try {
+      let action = plan
+      if (plan.type === 'fetch_operations' && this.httpFetchOperations) {
+        try {
+          const payload = await this.httpFetchOperations(plan.afterVersion)
+          action = planAfterOperations(this.lastAppliedVersion, payload)
+        } catch (err) {
+          action = { type: 'resnapshot', version: plan.version }
+        }
+      } else if (plan.type === 'fetch_operations') {
+        action = { type: 'resnapshot', version: plan.version }
+      }
+      if (action.type === 'ignore') return
+      const started = Date.now()
+      while (
+        (this.httpRefreshing || this.httpHydrating || this.isApplyingRemote) &&
+        Date.now() - started < 8000
+      ) {
+        await new Promise(resolve => setTimeout(resolve, 40))
+      }
+      await this.refreshVisibleFromHttp('', { force: true })
+      const applied = Number(action.version)
+      if (Number.isFinite(applied) && applied > this.lastAppliedVersion) {
+        this.lastAppliedVersion = applied
+      }
+    } finally {
+      this.httpRecovering = false
+      const pending = this.httpPendingRecoverVersion
+      this.httpPendingRecoverVersion = 0
+      if (pending > this.lastAppliedVersion) {
+        Promise.resolve().then(() => {
+          this.recoverHttpCollab(pending, options).catch(() => {})
+        })
+      }
+    }
   }
 
   async refreshVisibleFromHttp(updatedAt, options = {}) {
