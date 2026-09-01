@@ -88,6 +88,7 @@ import {
 import { mountWecomLoginPanel } from '@/utils/wecomLogin'
 
 const PAGE_TITLE = '依然'
+const AUTH_BOOTSTRAP_MS = 12000
 const authErrors = {
   invalid_state: '登录状态校验失败，请重新扫码。',
   expired_state: '二维码已过期，请重新扫码。',
@@ -174,12 +175,22 @@ export default {
     async initializeAuth() {
       this.authLoading = true
       this.authFailure = ''
+      let safetyTimer = null
       try {
+        safetyTimer = window.setTimeout(() => {
+          if (!this.authLoading) return
+          this.authLoading = false
+          if (!this.authFailure) {
+            this.authFailure = '认证服务响应超时，请稍后重试'
+            document.title = PAGE_TITLE
+          }
+        }, AUTH_BOOTSTRAP_MS)
         this.authState = await loadAuthState()
       } catch (err) {
         this.authFailure = err.message || '请确认服务已启动后重试'
         document.title = PAGE_TITLE
       } finally {
+        if (safetyTimer) window.clearTimeout(safetyTimer)
         this.authLoading = false
       }
       if (

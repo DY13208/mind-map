@@ -73,10 +73,10 @@ export function beatPresence(roomKey, user) {
   })
 }
 
-export function leavePresence(roomKey, userId) {
+export function leavePresence(roomKey, userId, clientId) {
   return request(`/api/files/${encodeURIComponent(roomKey)}/presence`, {
     method: 'DELETE',
-    body: JSON.stringify({ id: userId })
+    body: JSON.stringify({ id: userId, clientId })
   })
 }
 
@@ -190,7 +190,10 @@ function operationHeaders(body = {}) {
     body.operation_id ||
     (typeof crypto !== 'undefined' && crypto.randomUUID
       ? crypto.randomUUID()
-      : '')
+      : `op-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`)
+  if (!body.operationId && !body.operation_id) {
+    body.operationId = operationId
+  }
   return operationId ? { 'X-Operation-Id': operationId } : {}
 }
 
@@ -235,6 +238,14 @@ export function patchFileNode(roomKey, uid, body) {
       body: JSON.stringify(payload)
     }
   )
+}
+
+export function reorderFileNode(roomKey, uid, index, extra = {}) {
+  return patchFileNode(roomKey, uid, {
+    index,
+    reorder: true,
+    ...(extra || {})
+  })
 }
 
 export function deleteFileNode(roomKey, uid, options = {}) {

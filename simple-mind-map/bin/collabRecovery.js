@@ -98,11 +98,16 @@ function applyCollabEvent(obj, event) {
     placeChild(next, parentUid, uid, payload)
     return next
   }
-  if (type === 'node.updated' || type === 'node.moved') {
+  if (type === 'node.updated' || type === 'node.moved' || type === 'node.reordered') {
     const uid = payload.uid
     if (!uid || !next[uid]) throw new Error('node not found')
     const parent = payload.parentUid || payload.parent_uid || payload.parent
-    if (type === 'node.moved' || parent !== undefined || payload.index !== undefined) {
+    if (
+      type === 'node.moved' ||
+      type === 'node.reordered' ||
+      parent !== undefined ||
+      payload.index !== undefined
+    ) {
       const oldParent = findParentUid(next, uid)
       if (oldParent && next[oldParent]) {
         next[oldParent] = {
@@ -171,9 +176,14 @@ function applyCollabEvent(obj, event) {
         payload: inverse.payload || {}
       })
     }
-    if (inverse.type === 'node.update' || inverse.type === 'node.move') {
+    if (
+      inverse.type === 'node.update' ||
+      inverse.type === 'node.move' ||
+      inverse.type === 'node.reorder'
+    ) {
       return applyCollabEvent(next, {
-        type: 'node.moved',
+        type:
+          inverse.type === 'node.reorder' ? 'node.reordered' : 'node.moved',
         payload: inverse.payload || {}
       })
     }
@@ -194,9 +204,18 @@ function applyCollabEvent(obj, event) {
         payload: forward.payload || {}
       })
     }
-    if (forward.type === 'node.update' || forward.type === 'node.move') {
+    if (
+      forward.type === 'node.update' ||
+      forward.type === 'node.move' ||
+      forward.type === 'node.reorder'
+    ) {
       return applyCollabEvent(next, {
-        type: forward.type === 'node.move' ? 'node.moved' : 'node.updated',
+        type:
+          forward.type === 'node.reorder'
+            ? 'node.reordered'
+            : forward.type === 'node.move'
+              ? 'node.moved'
+              : 'node.updated',
         payload: forward.payload || {}
       })
     }

@@ -58,6 +58,30 @@ supervise() {
 
 supervise collab /tmp/collab.pid env NODE_OPTIONS=--max-old-space-size=3072 node /app/simple-mind-map/bin/collabServer.js &
 collab_loop=$!
+
+echo "[gateway] waiting for collab http://127.0.0.1:1234/api/health ..."
+i=0
+while [ "$i" -lt 120 ]; do
+  if node -e "
+    require('http')
+      .get('http://127.0.0.1:1234/api/health', res => {
+        res.resume()
+        process.exit(res.statusCode === 200 ? 0 : 1)
+      })
+      .on('error', () => process.exit(1))
+  " >/dev/null 2>&1; then
+    break
+  fi
+  i=$((i + 1))
+  sleep 1
+done
+
+if [ "$i" -ge 120 ]; then
+  echo "[gateway] collab is not ready" >&2
+  exit 1
+fi
+
+echo "[gateway] collab is ready"
 supervise mcp /tmp/mcp.pid node /app/simple-mind-map/bin/mcpServer.mjs --http &
 mcp_loop=$!
 supervise ai /tmp/ai.pid node /app/web/scripts/ai.js &

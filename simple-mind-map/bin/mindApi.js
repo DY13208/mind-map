@@ -30,13 +30,67 @@ const {
   getNearestSnapshot,
   auditRoomNodes,
   repairRoomNodes,
-  forceRoomSnapshot
+  forceRoomSnapshot,
+  getMinOperationVersion,
+  getRoomArchiveStats,
+  archiveRoomOperations,
+  archiveAllRoomOperations,
+  purgeDeletedNodes
 } = require('./storage')
 const { beatPresence, listPresence, leavePresence, getPresenceStatus } = require('./presence')
 const { applyCollabEvents } = require('./collabRecovery')
 const { evaluateUndo, evaluateRedo, reconstructByInverses } = require('./collabUndo')
+const {
+  assertRateLimit,
+  assertBatchSize,
+  assertPatchSize,
+  bodyLimitForPath,
+  getRateLimitStatus
+} = require('./rateLimit')
+const {
+  recordOperation,
+  recordRecovery,
+  getMetricsSnapshot,
+  logCollab
+} = require('./collabMetrics')
 
 const roomMutationQueues = new Map()
+const pausedRooms = new Map()
+
+function isRoomWritePaused(roomKey) {
+  const until = pausedRooms.get(String(roomKey || ''))
+  if (!until) return false
+  if (until === true) return true
+  if (Number(until) > Date.now()) return true
+  pausedRooms.delete(String(roomKey || ''))
+  return false
+}
+
+function setRoomWritePaused(roomKey, paused, ttlMs) {
+  const key = String(roomKey || '')
+  if (!paused) {
+    pausedRooms.delete(key)
+    return { room_key: key, paused: false }
+  }
+  if (ttlMs && Number(ttlMs) > 0) {
+    pausedRooms.set(key, Date.now() + Number(ttlMs))
+  } else {
+    pausedRooms.set(key, true)
+  }
+  return {
+    room_key: key,
+    paused: true,
+    until: pausedRooms.get(key) === true ? null : pausedRooms.get(key)
+  }
+}
+
+function assertRoomWritable(roomKey) {
+  if (!isRoomWritePaused(roomKey)) return
+  const err = new Error('该房间已暂停写入')
+  err.statusCode = 423
+  err.code = 'ROOM_WRITE_PAUSED'
+  throw err
+}
 
 async function withRoomMutation(roomKey, mutation) {
   const previous = roomMutationQueues.get(roomKey) || Promise.resolve()
@@ -113,7 +167,15 @@ async function applyCommittedLive(roomKey, command, committed) {
       if (replace) {
         mindDoc.applyObjectToDoc(liveDoc, nodes || {}, { replace: true })
       } else {
-        applyNodeCommand(liveDoc, command)
+        applyNodeCommand(liveDoc, command, {
+          version: Number(
+            (committed.operation && committed.operation.version) || 0
+          ),
+          allowUidReuse:
+            command.type === 'node.restore' ||
+            command.type === 'operation.undo' ||
+            command.type === 'operation.redo'
+        })
       }
     } catch (err) {
       mindDoc.applyObjectToDoc(liveDoc, nodes || {}, { replace: true })
@@ -124,27 +186,83 @@ async function applyCommittedLive(roomKey, command, committed) {
 }
 
 async function executeOperation(req, roomKey, command) {
-  return withRoomMutation(roomKey, async () => {
-    const committed = await commitRoomOperation(
-      roomKey,
-      command,
-      async ({ room }) => {
-        const base =
-          room.nodes && Object.keys(room.nodes).length
-            ? room.nodes
-            : getLiveObject(roomKey) || {}
-        const tempDoc = new Y.Doc()
-        try {
-          mindDoc.applyObjectToDoc(tempDoc, base, { replace: true })
-          const applied = applyNodeCommand(tempDoc, command)
-          return { ...applied, nodes: mindDoc.readObject(tempDoc) }
-        } finally {
-          tempDoc.destroy()
-        }
-      }
+  assertRoomWritable(roomKey)
+  assertRateLimit(roomKey)
+  if (command.type === 'node.update' || command.type === 'node.move') {
+    assertPatchSize(
+      (command.payload && (command.payload.patch || command.payload.data)) ||
+        command.payload
     )
-    return applyCommittedLive(roomKey, command, committed)
-  })
+  }
+  const started = Date.now()
+  try {
+    const committed = await withRoomMutation(roomKey, async () => {
+      return commitRoomOperation(
+        roomKey,
+        command,
+        async ({ room, currentVersion, deletedUids, allowUidReuse }) => {
+          const base =
+            room.nodes && Object.keys(room.nodes).length
+              ? room.nodes
+              : getLiveObject(roomKey) || {}
+          const tempDoc = new Y.Doc()
+          try {
+            mindDoc.applyObjectToDoc(tempDoc, base, { replace: true })
+            const applied = applyNodeCommand(tempDoc, command, {
+              version: currentVersion + 1,
+              deletedUids: deletedUids || new Set(),
+              allowUidReuse: !!allowUidReuse
+            })
+            return { ...applied, nodes: mindDoc.readObject(tempDoc) }
+          } finally {
+            tempDoc.destroy()
+          }
+        }
+      )
+    })
+    const live = await applyCommittedLive(roomKey, command, committed)
+    const version = Number(
+      (live.operation && live.operation.version) ||
+        (committed.operation && committed.operation.version) ||
+        0
+    )
+    const durationMs = Date.now() - started
+    recordOperation({
+      mapId: roomKey,
+      version,
+      ok: true,
+      duplicate: !!committed.duplicate,
+      durationMs
+    })
+    logCollab('operation.commit', {
+      mapId: roomKey,
+      operationId: command.operationId,
+      version,
+      actorId: command.actorId,
+      durationMs,
+      duplicate: !!committed.duplicate,
+      code: command.type
+    })
+    return live
+  } catch (err) {
+    const durationMs = Date.now() - started
+    recordOperation({
+      mapId: roomKey,
+      ok: false,
+      durationMs,
+      code: err.code || 'OPERATION_REJECTED'
+    })
+    logCollab('operation.reject', {
+      mapId: roomKey,
+      operationId: command.operationId,
+      actorId: command.actorId,
+      durationMs,
+      code: err.code || 'OPERATION_REJECTED',
+      message: err.message,
+      level: 'warn'
+    })
+    throw err
+  }
 }
 
 async function executeUndo(req, roomKey, operationId, body = {}) {
@@ -283,6 +401,8 @@ async function executeSnapshotOperation(
   nextNodes,
   extra = {}
 ) {
+  assertRoomWritable(roomKey)
+  assertRateLimit(roomKey)
   const committed = await commitRoomOperation(roomKey, command, async ({ room }) => {
     return {
       nodes: extra.keepNodes ? room.nodes : nextNodes,
@@ -511,12 +631,42 @@ async function handleApi(req, res) {
     } catch (err) {
       outbox = { pending: 0, failed: 0, oldestAgeMs: 0, error: err.message }
     }
+    const metrics = getMetricsSnapshot()
+    const alerts = []
+    if (outbox.failed > 0) {
+      alerts.push({
+        type: 'outbox_failed',
+        failed: outbox.failed,
+        oldestAgeMs: outbox.oldestAgeMs
+      })
+    }
+    if (outbox.oldestAgeMs > 60000) {
+      alerts.push({
+        type: 'outbox_backlog',
+        pending: outbox.pending,
+        oldestAgeMs: outbox.oldestAgeMs
+      })
+    }
+    if (metrics.lastVersionGap) {
+      alerts.push({ type: 'version_gap', ...metrics.lastVersionGap })
+    }
     sendJson(res, 200, {
-      ok: true,
+      ok: alerts.length === 0,
       service: 'mind-map-collab',
       outbox,
       presence: getPresenceStatus(),
-      bus: require('./eventBus').getEventBusStatus()
+      bus: require('./eventBus').getEventBusStatus(),
+      rateLimit: getRateLimitStatus(),
+      metrics,
+      alerts: alerts.concat(metrics.alerts || []).slice(0, 30)
+    })
+    return true
+  }
+
+  if (pathname === '/api/ops/metrics' && req.method === 'GET') {
+    sendJson(res, 200, {
+      metrics: getMetricsSnapshot(),
+      rateLimit: getRateLimitStatus()
     })
     return true
   }
@@ -545,6 +695,35 @@ async function handleApi(req, res) {
     }
   }
 
+  if (pathname === '/api/ops/archive') {
+    if (req.method === 'GET') {
+      const rooms = await listRooms()
+      const stats = []
+      for (const room of rooms) {
+        const item = await getRoomArchiveStats(room.room_key)
+        if (item) stats.push(item)
+      }
+      sendJson(res, 200, { rooms: stats })
+      return true
+    }
+    if (req.method === 'POST') {
+      const body = await readBody(req).catch(() => ({}))
+      const dryRun = body.dry_run === true || body.dryRun === true
+      const results = await archiveAllRoomOperations({ dryRun })
+      sendJson(res, 200, { dryRun, results })
+      return true
+    }
+  }
+
+  if (pathname === '/api/ops/tombstones/purge' && req.method === 'POST') {
+    const body = await readBody(req).catch(() => ({}))
+    const result = await purgeDeletedNodes({
+      days: body.days != null ? body.days : undefined
+    })
+    sendJson(res, 200, result)
+    return true
+  }
+
   const opsRoomMatch = pathname.match(/^\/api\/ops\/rooms\/([^/]+)(\/[^/]+)?$/)
   if (opsRoomMatch) {
     const roomKey = safeRoomKey(decodeURIComponent(opsRoomMatch[1]))
@@ -556,12 +735,26 @@ async function handleApi(req, res) {
         return true
       }
       const version = await getRoomVersion(roomKey)
+      const archive = await getRoomArchiveStats(roomKey)
       sendJson(res, 200, {
         room_key: roomKey,
         version,
         consistency: report,
-        presence: getPresenceStatus()
+        presence: getPresenceStatus(),
+        archive,
+        writePaused: isRoomWritePaused(roomKey)
       })
+      return true
+    }
+    if (req.method === 'POST' && action === '/pause') {
+      const body = await readBody(req).catch(() => ({}))
+      const paused = body.paused !== false && body.pause !== false
+      const result = setRoomWritePaused(
+        roomKey,
+        paused,
+        body.ttlMs || body.ttl_ms || body.ttl
+      )
+      sendJson(res, 200, result)
       return true
     }
     if (req.method === 'POST' && action === '/repair') {
@@ -575,6 +768,19 @@ async function handleApi(req, res) {
     }
     if (req.method === 'POST' && action === '/snapshot') {
       const result = await forceRoomSnapshot(roomKey)
+      if (!result) {
+        sendJson(res, 404, { error: 'not found' })
+        return true
+      }
+      sendJson(res, 200, result)
+      return true
+    }
+    if (req.method === 'POST' && action === '/archive') {
+      const body = await readBody(req).catch(() => ({}))
+      const result = await archiveRoomOperations(roomKey, {
+        dryRun: body.dry_run === true || body.dryRun === true,
+        forceSnapshot: body.force_snapshot !== false && body.forceSnapshot !== false
+      })
       if (!result) {
         sendJson(res, 404, { error: 'not found' })
         return true
@@ -733,9 +939,27 @@ async function handleApi(req, res) {
       const limit = Number(url.searchParams.get('limit') || 500) || 500
       const safeLimit = Math.min(1000, Math.max(1, limit))
       const actorId = url.searchParams.get('actor') || url.searchParams.get('actorId')
+      const minVersion = await getMinOperationVersion(roomKey)
+      if (
+        minVersion != null &&
+        afterVersion > 0 &&
+        afterVersion < minVersion
+      ) {
+        sendJson(res, 409, {
+          error: 'requested operations were archived',
+          code: 'RESNAPSHOT_REQUIRED',
+          mapId: roomKey,
+          afterVersion,
+          minVersion,
+          currentVersion
+        })
+        recordRecovery('resnapshot')
+        return true
+      }
       const operations = await listRoomOperations(roomKey, afterVersion, safeLimit, {
         actorId: actorId || undefined
       })
+      if (operations.length) recordRecovery('operations')
       const lastVersion = operations.length
         ? operations[operations.length - 1].version
         : afterVersion
@@ -751,19 +975,77 @@ async function handleApi(req, res) {
       return true
     }
     if (req.method === 'POST') {
-      const body = await readBody(req)
+      let body
       try {
-        const command = normalizeCommand(req, roomKey, body)
-        const committed = await executeOperation(req, roomKey, command)
-        sendJson(res, committed.duplicate ? 200 : 201, operationResponse(roomKey, committed))
+        body = await readBody(req, { maxBytes: bodyLimitForPath(pathname) })
       } catch (err) {
         sendJson(res, err.statusCode || 400, {
           error: err.message || 'bad request',
-          code: err.code || 'OPERATION_REJECTED'
+          code: err.code || 'BAD_BODY'
+        })
+        return true
+      }
+      try {
+        const command = normalizeCommand(req, roomKey, body)
+        const committed = await executeOperation(req, roomKey, command)
+        sendJson(
+          res,
+          committed.duplicate ? 200 : 201,
+          operationResponse(roomKey, committed)
+        )
+      } catch (err) {
+        sendJson(res, err.statusCode || 400, {
+          error: err.message || 'bad request',
+          code: err.code || 'OPERATION_REJECTED',
+          retryAfterMs: err.retryAfterMs
         })
       }
       return true
     }
+  }
+
+  const mapBatchMatch = pathname.match(
+    /^\/api\/maps\/([^/]+)\/operations\/batch$/
+  )
+  if (mapBatchMatch && req.method === 'POST') {
+    const roomKey = safeRoomKey(decodeURIComponent(mapBatchMatch[1]))
+    let body
+    try {
+      body = await readBody(req, { maxBytes: bodyLimitForPath(pathname) })
+    } catch (err) {
+      sendJson(res, err.statusCode || 400, {
+        error: err.message || 'bad request',
+        code: err.code || 'BAD_BODY'
+      })
+      return true
+    }
+    const ops = Array.isArray(body.operations)
+      ? body.operations
+      : Array.isArray(body.ops)
+        ? body.ops
+        : []
+    try {
+      assertBatchSize(ops)
+      assertRateLimit(roomKey)
+      const results = []
+      for (const item of ops) {
+        const command = normalizeCommand(req, roomKey, {
+          ...body,
+          ...item,
+          payload: item.payload || item
+        })
+        const committed = await executeOperation(req, roomKey, command)
+        results.push(operationResponse(roomKey, committed))
+      }
+      sendJson(res, 200, { mapId: roomKey, results })
+    } catch (err) {
+      sendJson(res, err.statusCode || 400, {
+        error: err.message || 'bad request',
+        code: err.code || 'BATCH_REJECTED',
+        retryAfterMs: err.retryAfterMs
+      })
+    }
+    return true
   }
 
   const mapSnapshotMatch = pathname.match(/^\/api\/maps\/([^/]+)\/snapshot$/)
@@ -915,20 +1197,27 @@ async function handleApi(req, res) {
       }
       if (req.method === 'PATCH' && nodeRef) {
         const body = await readBody(req)
-        const moving =
-          body.parent !== undefined ||
-          body.parent_uid !== undefined ||
-          body.index !== undefined
+        const hasParent =
+          body.parent !== undefined || body.parent_uid !== undefined
+        const hasIndex = body.index !== undefined
+        const patchFields = dataFields(body)
+        const hasData = Object.keys(patchFields).length > 0
+        let fallbackType = 'node.update'
+        if (hasParent) fallbackType = 'node.move'
+        else if (body.reorder === true || body.type === 'node.reorder') {
+          fallbackType = 'node.reorder'
+        } else if (hasIndex && !hasData) fallbackType = 'node.reorder'
+        else if (hasIndex) fallbackType = 'node.move'
         const command = normalizeCommand(
           req,
           roomKey,
           body,
-          moving ? 'node.move' : 'node.update',
+          fallbackType,
           {
             uid: nodeRef,
             parentUid: body.parent || body.parent_uid,
             index: body.index,
-            patch: dataFields(body),
+            patch: patchFields,
             confirm_sop_change: body.confirm_sop_change === true
           }
         )
@@ -1141,12 +1430,22 @@ async function handleApi(req, res) {
   const replaceMatch = pathname.match(/^\/api\/files\/([^/]+)\/replace$/)
   if (replaceMatch && req.method === 'POST') {
     const roomKey = decodeURIComponent(replaceMatch[1])
-    const body = await readBody(req)
+    let body
+    try {
+      body = await readBody(req, { maxBytes: bodyLimitForPath(pathname) })
+    } catch (err) {
+      sendJson(res, err.statusCode || 400, {
+        error: err.message || 'bad request',
+        code: err.code || 'BAD_BODY'
+      })
+      return true
+    }
     if (!body.tree) {
       sendJson(res, 400, { error: '缺少 tree' })
       return true
     }
     try {
+      assertRateLimit(roomKey)
       const payload = await withRoomMutation(roomKey, async () => {
         const snapshot = await getRoomSnapshot(roomKey)
         const live = getLiveObject(roomKey)
@@ -1185,7 +1484,9 @@ async function handleApi(req, res) {
       sendJson(res, 200, payload)
     } catch (err) {
       sendJson(res, err.statusCode || (err.message === 'not found' ? 404 : 400), {
-        error: err.message || 'bad request'
+        error: err.message || 'bad request',
+        code: err.code || undefined,
+        retryAfterMs: err.retryAfterMs
       })
     }
     return true

@@ -239,7 +239,7 @@ function nodesReadPreferEnabled() {
   return value !== '0' && value !== 'false'
 }
 
-async function replaceRoomNodes(db, roomKey, obj, version) {
+async function replaceRoomNodes(db, roomKey, obj, version, options = {}) {
   const graph = obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}
   const check = validateNodeGraph(graph)
   if (!check.ok) {
@@ -247,6 +247,25 @@ async function replaceRoomNodes(db, roomKey, obj, version) {
   }
   const rows = encodeNodeRows(graph)
   const uids = rows.map(row => row.uid)
+  const allowRestore = options.allowRestore === true
+  if (rows.length && !allowRestore) {
+    const blocked = await db.query(
+      `select uid from room_nodes
+       where room_key = $1
+         and deleted_at is not null
+         and uid = any($2::text[])`,
+      [roomKey, uids]
+    )
+    if (blocked.rows.length) {
+      const err = new Error(
+        `禁止复用已删除节点 UID: ${blocked.rows.map(row => row.uid).join(',')}`
+      )
+      err.statusCode = 409
+      err.code = 'UID_REUSED'
+      err.uids = blocked.rows.map(row => row.uid)
+      throw err
+    }
+  }
   if (rows.length) {
     await db.query(
       `insert into room_nodes (
@@ -267,8 +286,13 @@ async function replaceRoomNodes(db, roomKey, obj, version) {
          data = excluded.data,
          is_root = excluded.is_root,
          node_version = excluded.node_version,
-         deleted_at = null,
-         updated_at = now()`,
+         deleted_at = case
+           when $8::boolean then null
+           when room_nodes.deleted_at is null then null
+           else room_nodes.deleted_at
+         end,
+         updated_at = now()
+       where room_nodes.deleted_at is null or $8::boolean`,
       [
         roomKey,
         Number(version) || 0,
@@ -276,7 +300,8 @@ async function replaceRoomNodes(db, roomKey, obj, version) {
         rows.map(row => row.parent_uid),
         rows.map(row => row.position),
         rows.map(row => row.data),
-        rows.map(row => row.is_root)
+        rows.map(row => row.is_root),
+        allowRestore
       ]
     )
   }
@@ -298,6 +323,38 @@ async function replaceRoomNodes(db, roomKey, obj, version) {
     )
   }
   return { wrote: true, nodeCount: rows.length, rootUid: check.rootUid }
+}
+
+async function listDeletedNodeUids(db, roomKey) {
+  const res = await db.query(
+    `select uid from room_nodes
+     where room_key = $1 and deleted_at is not null`,
+    [roomKey]
+  )
+  return new Set(res.rows.map(row => row.uid))
+}
+
+async function purgeDeletedNodes(db, options = {}) {
+  const days = Math.max(
+    1,
+    Number(
+      options.days != null
+        ? options.days
+        : process.env.COLLAB_NODE_TOMBSTONE_DAYS || 30
+    )
+  )
+  const res = await db.query(
+    `delete from room_nodes
+     where deleted_at is not null
+       and deleted_at < now() - ($1::double precision * interval '1 day')
+     returning room_key, uid`,
+    [days]
+  )
+  return {
+    purged: res.rowCount,
+    days,
+    samples: res.rows.slice(0, 20)
+  }
 }
 
 async function readRoomNodes(db, roomKey) {
@@ -341,5 +398,7 @@ module.exports = {
   auditRoomNodesState,
   replaceRoomNodes,
   readRoomNodes,
+  listDeletedNodeUids,
+  purgeDeletedNodes,
   migrateRoomNodesFromJson
 }

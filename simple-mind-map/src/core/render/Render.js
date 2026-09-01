@@ -1855,12 +1855,26 @@ class Render {
     const after = () => {
       const hasKids =
         node.nodeData && node.nodeData.children && node.nodeData.children.length
-      if (hasKids) apply(true)
+      if (hasKids) {
+        apply(true)
+        return
+      }
+      const childCount = Number(node.getData && node.getData('childCount')) || 0
+      if (
+        childCount > 0 &&
+        cooperate &&
+        typeof cooperate.repairEmptyExpand === 'function'
+      ) {
+        cooperate.repairEmptyExpand(node)
+      }
     }
     const hydrated = cooperate.hydrateLazyChildren(node)
     if (hydrated && typeof hydrated.then === 'function') {
       hydrated.then(after).catch(err => {
         console.error('[mind-map] load children failed', err)
+        if (typeof cooperate.repairEmptyExpand === 'function') {
+          cooperate.repairEmptyExpand(node)
+        }
       })
       return
     }

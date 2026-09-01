@@ -15,6 +15,8 @@ const {
   auditRoomNodesState,
   replaceRoomNodes,
   readRoomNodes,
+  listDeletedNodeUids,
+  purgeDeletedNodes,
   validateNodeGraph
 } = require('./roomNodes')
 const mindDoc = require('./mindDoc')
@@ -24,7 +26,12 @@ const pool = new Pool({
   port: Number(process.env.PGPORT || 5432),
   database: process.env.PGDATABASE,
   user: process.env.PGUSER,
-  password: process.env.PGPASSWORD
+  password: process.env.PGPASSWORD,
+  application_name: process.env.COLLAB_PG_APP_NAME || 'mind-map-collab'
+})
+
+pool.on('error', err => {
+  console.error('[pg] idle client error:', err && err.message ? err.message : err)
 })
 
 const operationEvents = new EventEmitter()
@@ -32,6 +39,60 @@ operationEvents.setMaxListeners(50)
 
 function getPool() {
   return pool
+}
+
+const TRANSIENT_PG_CODES = new Set([
+  '57P01',
+  '57P02',
+  '57P03',
+  '08000',
+  '08003',
+  '08006',
+  '08001',
+  '53300',
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EPIPE'
+])
+
+function isTransientPgError(err) {
+  if (!err) return false
+  const code = String(err.code || err.errno || '')
+  if (TRANSIENT_PG_CODES.has(code)) return true
+  const msg = String(err.message || err)
+  return /Connection terminated|server closed the connection|not queryable|ECONNRESET|ECONNREFUSED|connect ETIMEDOUT|Connection refused/i.test(
+    msg
+  )
+}
+
+async function withPgRetry(fn, options = {}) {
+  const retries = Math.max(
+    0,
+    Number(
+      options.retries != null
+        ? options.retries
+        : process.env.COLLAB_PG_RETRY != null
+          ? process.env.COLLAB_PG_RETRY
+          : 3
+    )
+  )
+  const baseDelayMs = Math.max(
+    20,
+    Number(options.delayMs != null ? options.delayMs : 80)
+  )
+  let lastErr
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn(attempt)
+    } catch (err) {
+      lastErr = err
+      if (!isTransientPgError(err) || attempt >= retries) throw err
+      const wait = baseDelayMs * Math.pow(2, attempt)
+      await new Promise(resolve => setTimeout(resolve, wait))
+    }
+  }
+  throw lastErr
 }
 
 const cos = new COS({
@@ -303,10 +364,10 @@ function normalizeTitle(title) {
   return String(title || '').trim().slice(0, 80) || '未命名'
 }
 
-async function writeRoomNodeRows(db, roomKey, nodes, version) {
+async function writeRoomNodeRows(db, roomKey, nodes, version, options = {}) {
   if (!nodesDualWriteEnabled()) return { wrote: false, skipped: true }
   if (nodes == null) return { wrote: false, skipped: true }
-  const result = await replaceRoomNodes(db, roomKey, nodes, version)
+  const result = await replaceRoomNodes(db, roomKey, nodes, version, options)
   if (!result.wrote) {
     console.error(
       '[room_nodes] skip invalid graph',
@@ -679,6 +740,199 @@ async function forceRoomSnapshot(roomKey) {
   }
 }
 
+const OPS_KEEP_BUFFER = Math.max(
+  0,
+  Number(process.env.COLLAB_OPS_KEEP_AFTER_SNAPSHOT || 200)
+)
+const OPS_ARCHIVE_MIN = Math.max(
+  100,
+  Number(process.env.COLLAB_OPS_ARCHIVE_MIN_COUNT || 500)
+)
+
+async function getLatestSnapshotVersion(roomKey) {
+  const res = await pool.query(
+    `select max(version) as version from room_snapshots where room_key = $1`,
+    [roomKey]
+  )
+  if (!res.rows[0] || res.rows[0].version == null) return null
+  return Number(res.rows[0].version)
+}
+
+async function getMinOperationVersion(roomKey) {
+  const res = await pool.query(
+    `select min(version) as version from room_operations where room_key = $1`,
+    [roomKey]
+  )
+  if (!res.rows[0] || res.rows[0].version == null) return null
+  return Number(res.rows[0].version)
+}
+
+async function countArchivableOperations(roomKey, archiveUpTo) {
+  const res = await pool.query(
+    `select count(*)::int as count from room_operations
+     where room_key = $1 and version <= $2`,
+    [roomKey, archiveUpTo]
+  )
+  return res.rows[0] ? Number(res.rows[0].count) : 0
+}
+
+async function getRoomArchiveStats(roomKey) {
+  const version = await getRoomVersion(roomKey)
+  if (version === null) return null
+  const snapshotVersion = await getLatestSnapshotVersion(roomKey)
+  const minVersion = await getMinOperationVersion(roomKey)
+  const archiveUpTo =
+    snapshotVersion == null
+      ? null
+      : Math.max(0, snapshotVersion - OPS_KEEP_BUFFER)
+  const archivable =
+    archiveUpTo == null ? 0 : await countArchivableOperations(roomKey, archiveUpTo)
+  const archivedRes = await pool.query(
+    `select count(*)::int as count, coalesce(max(version), 0) as max_version
+     from room_operations_archive where room_key = $1`,
+    [roomKey]
+  )
+  const activeRes = await pool.query(
+    `select count(*)::int as count from room_operations where room_key = $1`,
+    [roomKey]
+  )
+  return {
+    room_key: roomKey,
+    currentVersion: version,
+    snapshotVersion,
+    minActiveVersion: minVersion,
+    archiveUpTo,
+    archivable,
+    activeCount: activeRes.rows[0] ? Number(activeRes.rows[0].count) : 0,
+    archivedCount: archivedRes.rows[0] ? Number(archivedRes.rows[0].count) : 0,
+    archivedMaxVersion: archivedRes.rows[0]
+      ? Number(archivedRes.rows[0].max_version)
+      : 0
+  }
+}
+
+async function archiveRoomOperations(roomKey, options = {}) {
+  const dryRun = !!options.dryRun
+  const version = await getRoomVersion(roomKey)
+  if (version === null) return null
+  let snapshotVersion = await getLatestSnapshotVersion(roomKey)
+  if (snapshotVersion == null && !dryRun && options.forceSnapshot !== false) {
+    await forceRoomSnapshot(roomKey)
+    snapshotVersion = await getLatestSnapshotVersion(roomKey)
+  }
+  if (snapshotVersion == null) {
+    return {
+      room_key: roomKey,
+      archived: 0,
+      skipped: true,
+      reason: 'no_snapshot'
+    }
+  }
+  const archiveUpTo = Math.max(0, snapshotVersion - OPS_KEEP_BUFFER)
+  const archivable = await countArchivableOperations(roomKey, archiveUpTo)
+  if (archivable < OPS_ARCHIVE_MIN) {
+    return {
+      room_key: roomKey,
+      archived: 0,
+      skipped: true,
+      reason: 'below_threshold',
+      archivable,
+      archiveUpTo,
+      snapshotVersion
+    }
+  }
+  if (dryRun) {
+    return {
+      room_key: roomKey,
+      archived: archivable,
+      dryRun: true,
+      archiveUpTo,
+      snapshotVersion
+    }
+  }
+  const client = await pool.connect()
+  try {
+    await client.query('begin')
+    const inserted = await client.query(
+      `insert into room_operations_archive
+       (room_key, version, operation_id, actor_id, client_id,
+        operation_type, payload, event, inverse_payload, created_at, archived_at)
+       select room_key, version, operation_id, actor_id, client_id,
+              operation_type, payload, event, inverse_payload, created_at, now()
+       from room_operations
+       where room_key = $1 and version <= $2
+       on conflict (room_key, version) do nothing
+       returning version`,
+      [roomKey, archiveUpTo]
+    )
+    await client.query(
+      `delete from room_operations
+       where room_key = $1 and version <= $2`,
+      [roomKey, archiveUpTo]
+    )
+    await client.query('commit')
+    return {
+      room_key: roomKey,
+      archived: inserted.rowCount,
+      archiveUpTo,
+      snapshotVersion,
+      minVersion: (await getMinOperationVersion(roomKey)) || archiveUpTo + 1
+    }
+  } catch (err) {
+    await client.query('rollback').catch(() => {})
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
+async function archiveAllRoomOperations(options = {}) {
+  const rooms = await listRooms()
+  const results = []
+  for (const room of rooms) {
+    try {
+      results.push(await archiveRoomOperations(room.room_key, options))
+    } catch (err) {
+      results.push({
+        room_key: room.room_key,
+        error: err.message
+      })
+    }
+  }
+  return results
+}
+
+function startOperationsArchiver() {
+  const intervalMs = Math.max(
+    60000,
+    Number(process.env.COLLAB_ARCHIVE_INTERVAL_MS || 3600000)
+  )
+  let running = false
+  const tick = async () => {
+    if (running) return
+    running = true
+    try {
+      const results = await archiveAllRoomOperations()
+      const archived = results.filter(item => item && item.archived > 0)
+      if (archived.length) {
+        console.log(`[archive] compressed logs for ${archived.length} room(s)`)
+      }
+      const purged = await purgeDeletedNodes(pool)
+      if (purged.purged > 0) {
+        console.log(
+          `[tombstone] purged ${purged.purged} soft-deleted node(s) older than ${purged.days}d`
+        )
+      }
+    } catch (err) {
+      console.error('[archive] tick failed:', err.message)
+    } finally {
+      running = false
+    }
+  }
+  setTimeout(tick, 30000)
+  return setInterval(tick, intervalMs)
+}
+
 async function getRoomSnapshot(roomKey) {
   const res = await pool.query(
     `select room_key, title, nodes, version, updated_at
@@ -850,6 +1104,26 @@ async function initSchemaOnce() {
       primary key (room_key, version)
     )
   `)
+  await pool.query(`
+    create table if not exists room_operations_archive (
+      room_key text not null,
+      version bigint not null,
+      operation_id uuid not null,
+      actor_id text not null,
+      client_id text,
+      operation_type text not null,
+      payload jsonb not null default '{}'::jsonb,
+      event jsonb not null default '{}'::jsonb,
+      inverse_payload jsonb,
+      created_at timestamptz not null,
+      archived_at timestamptz not null default now(),
+      primary key (room_key, version)
+    )
+  `)
+  await pool.query(`
+    create index if not exists room_operations_archive_lookup_idx
+    on room_operations_archive(room_key, version)
+  `)
   const tombstones = await pool.query('select room_key from room_tombstones')
   tombstones.rows.forEach(row => deletedRooms.add(row.room_key))
 }
@@ -891,141 +1165,164 @@ function operationRow(row) {
 }
 
 async function commitRoomOperation(roomKey, command, apply) {
-  const client = await pool.connect()
-  try {
-    await client.query('begin')
-    const roomResult = await client.query(
-      `select room_key, title, nodes, version, updated_at
-       from rooms where room_key = $1 for update`,
-      [roomKey]
-    )
-    const room = roomResult.rows[0]
-    if (!room) {
-      const err = new Error('not found')
-      err.statusCode = 404
+  return withPgRetry(async () => {
+    const client = await pool.connect()
+    try {
+      return await commitRoomOperationOnce(client, roomKey, command, apply)
+    } catch (err) {
+      await client.query('rollback').catch(() => {})
       throw err
+    } finally {
+      client.release()
     }
-    const existing = await client.query(
-      `select room_key, version, operation_id, actor_id, client_id,
-              operation_type, payload, event, inverse_payload, created_at
-       from room_operations
-       where room_key = $1 and operation_id = $2`,
-      [roomKey, command.operationId]
-    )
-    if (existing.rows[0]) {
-      await client.query('commit')
-      return { duplicate: true, operation: operationRow(existing.rows[0]) }
-    }
-    const currentVersion = Number(room.version || 0)
-    if (
-      command.baseVersion !== null &&
-      command.baseVersion !== undefined &&
-      Number(command.baseVersion) > currentVersion
-    ) {
-      const err = new Error('baseVersion不能大于房间当前版本')
-      err.statusCode = 409
-      err.code = 'VERSION_AHEAD'
-      throw err
-    }
-    const json = nodesFromJson(room.nodes) || {}
-    const table = await readRoomNodes(client, roomKey)
-    const picked = pickAuthoritativeNodes(json, table, currentVersion)
-    const applied = await apply({
-      room: { ...room, nodes: picked.nodes },
-      currentVersion
-    })
-    const version = currentVersion + 1
-    const event = {
-      ...(applied.event || {}),
-      mapId: roomKey,
+  })
+}
+
+async function commitRoomOperationOnce(client, roomKey, command, apply) {
+  await client.query('begin')
+  const roomResult = await client.query(
+    `select room_key, title, nodes, version, updated_at
+     from rooms where room_key = $1 for update`,
+    [roomKey]
+  )
+  const room = roomResult.rows[0]
+  if (!room) {
+    const err = new Error('not found')
+    err.statusCode = 404
+    throw err
+  }
+  const existing = await client.query(
+    `select room_key, version, operation_id, actor_id, client_id,
+            operation_type, payload, event, inverse_payload, created_at
+     from room_operations
+     where room_key = $1 and operation_id = $2`,
+    [roomKey, command.operationId]
+  )
+  if (existing.rows[0]) {
+    await client.query('commit')
+    return { duplicate: true, operation: operationRow(existing.rows[0]) }
+  }
+  const currentVersion = Number(room.version || 0)
+  if (
+    command.baseVersion !== null &&
+    command.baseVersion !== undefined &&
+    Number(command.baseVersion) > currentVersion
+  ) {
+    const err = new Error('baseVersion不能大于房间当前版本')
+    err.statusCode = 409
+    err.code = 'VERSION_AHEAD'
+    throw err
+  }
+  const json = nodesFromJson(room.nodes) || {}
+  const table = await readRoomNodes(client, roomKey)
+  const picked = pickAuthoritativeNodes(json, table, currentVersion)
+  const deletedUids = await listDeletedNodeUids(client, roomKey)
+  const allowRestore =
+    command.type === 'node.restore' ||
+    command.type === 'operation.undo' ||
+    command.type === 'operation.redo'
+  const applied = await apply({
+    room: { ...room, nodes: picked.nodes },
+    currentVersion,
+    deletedUids,
+    allowUidReuse: allowRestore
+  })
+  const version = currentVersion + 1
+  const event = {
+    ...(applied.event || {}),
+    mapId: roomKey,
+    version,
+    operationId: command.operationId,
+    actorId: command.actorId
+  }
+  const snapshot = snapshotNodesForStorage(applied.nodes || {})
+  await writeRoomNodeRows(client, roomKey, snapshot, version, {
+    allowRestore
+  })
+  await client.query(
+    `update rooms
+     set nodes = $2::jsonb,
+         version = $3,
+         title = coalesce($4, title),
+         updated_at = now()
+     where room_key = $1`,
+    [
+      roomKey,
+      JSON.stringify(snapshot),
       version,
-      operationId: command.operationId,
-      actorId: command.actorId
-    }
-    const snapshot = snapshotNodesForStorage(applied.nodes || {})
-    await writeRoomNodeRows(client, roomKey, snapshot, version)
+      applied.title ? String(applied.title).trim().slice(0, 80) : null
+    ]
+  )
+  const inserted = await client.query(
+    `insert into room_operations
+     (room_key, version, operation_id, actor_id, client_id,
+      operation_type, payload, event, inverse_payload)
+     values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb)
+     returning room_key, version, operation_id, actor_id, client_id,
+               operation_type, payload, event, inverse_payload, created_at`,
+    [
+      roomKey,
+      version,
+      command.operationId,
+      command.actorId,
+      command.clientId || null,
+      command.type,
+      JSON.stringify(command.payload || {}),
+      JSON.stringify(event),
+      applied.inversePayload == null
+        ? null
+        : JSON.stringify(applied.inversePayload)
+    ]
+  )
+  await client.query(
+    `insert into room_outbox (room_key, version, event)
+     values ($1, $2, $3::jsonb)
+     on conflict (room_key, version) do nothing`,
+    [roomKey, version, JSON.stringify(event)]
+  )
+  const snapshotEvery = Math.max(
+    1,
+    Number(process.env.COLLAB_SNAPSHOT_EVERY || 100)
+  )
+  if (version === 1 || version % snapshotEvery === 0) {
     await client.query(
-      `update rooms
-       set nodes = $2::jsonb,
-           version = $3,
-           title = coalesce($4, title),
-           updated_at = now()
-       where room_key = $1`,
-      [
-        roomKey,
-        JSON.stringify(snapshot),
-        version,
-        applied.title ? String(applied.title).trim().slice(0, 80) : null
-      ]
-    )
-    const inserted = await client.query(
-      `insert into room_operations
-       (room_key, version, operation_id, actor_id, client_id,
-        operation_type, payload, event, inverse_payload)
-       values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb)
-       returning room_key, version, operation_id, actor_id, client_id,
-                 operation_type, payload, event, inverse_payload, created_at`,
-      [
-        roomKey,
-        version,
-        command.operationId,
-        command.actorId,
-        command.clientId || null,
-        command.type,
-        JSON.stringify(command.payload || {}),
-        JSON.stringify(event),
-        applied.inversePayload == null
-          ? null
-          : JSON.stringify(applied.inversePayload)
-      ]
-    )
-    await client.query(
-      `insert into room_outbox (room_key, version, event)
+      `insert into room_snapshots (room_key, version, nodes)
        values ($1, $2, $3::jsonb)
        on conflict (room_key, version) do nothing`,
-      [roomKey, version, JSON.stringify(event)]
+      [roomKey, version, JSON.stringify(snapshot)]
     )
-    const snapshotEvery = Math.max(
-      1,
-      Number(process.env.COLLAB_SNAPSHOT_EVERY || 100)
-    )
-    if (version === 1 || version % snapshotEvery === 0) {
-      await client.query(
-        `insert into room_snapshots (room_key, version, nodes)
-         values ($1, $2, $3::jsonb)
-         on conflict (room_key, version) do nothing`,
-        [roomKey, version, JSON.stringify(snapshot)]
-      )
-    }
-    await client.query('select pg_notify($1, $2)', [
-      'collab_events',
-      JSON.stringify({
-        type: 'event',
-        mapId: roomKey,
-        version,
-        operationId: command.operationId
-      }).slice(0, 7900)
-    ])
-    await client.query('commit')
-    const operation = operationRow(inserted.rows[0])
-    setImmediate(() => {
-      operationEvents.emit('committed', {
-        roomKey,
-        version,
-        operation
-      })
-    })
-    return {
-      duplicate: false,
-      operation,
-      result: applied.result || {},
-      nodes: snapshot
-    }
-  } catch (err) {
-    await client.query('rollback').catch(() => {})
+  }
+  await client.query('select pg_notify($1, $2)', [
+    'collab_events',
+    JSON.stringify({
+      type: 'event',
+      mapId: roomKey,
+      version,
+      operationId: command.operationId
+    }).slice(0, 7900)
+  ])
+  // Test-only: abort before COMMIT so PG rolls back ops + outbox + notify.
+  if (process.env.COLLAB_FAULT_INJECT === 'before_commit_once') {
+    process.env.COLLAB_FAULT_INJECT = ''
+    const err = new Error('injected fault before commit')
+    err.statusCode = 500
+    err.code = 'FAULT_INJECTED'
     throw err
-  } finally {
-    client.release()
+  }
+  await client.query('commit')
+  const operation = operationRow(inserted.rows[0])
+  setImmediate(() => {
+    operationEvents.emit('committed', {
+      roomKey,
+      version,
+      operation
+    })
+  })
+  return {
+    duplicate: false,
+    operation,
+    result: applied.result || {},
+    nodes: snapshot
   }
 }
 
@@ -1134,10 +1431,31 @@ function sendJson(res, code, data) {
   res.end(body)
 }
 
-function readBody(req) {
+function readBody(req, options = {}) {
+  const maxBytes = Number(options.maxBytes)
+  const limit =
+    Number.isFinite(maxBytes) && maxBytes > 0
+      ? maxBytes
+      : Number(process.env.COLLAB_MAX_BODY_BYTES || 2 * 1024 * 1024)
   return new Promise((resolve, reject) => {
     const chunks = []
-    req.on('data', chunk => chunks.push(chunk))
+    let size = 0
+    req.on('data', chunk => {
+      size += chunk.length
+      if (size > limit) {
+        const err = new Error(`请求体过大（最多 ${limit} 字节）`)
+        err.statusCode = 413
+        err.code = 'BODY_TOO_LARGE'
+        reject(err)
+        try {
+          req.destroy()
+        } catch (e) {
+          // ignore
+        }
+        return
+      }
+      chunks.push(chunk)
+    })
     req.on('end', () => {
       const raw = Buffer.concat(chunks).toString('utf8')
       if (!raw) return resolve({})
@@ -1199,6 +1517,8 @@ module.exports = {
   payloadToObject,
   pickLatestTimestamp,
   commitRoomOperation,
+  isTransientPgError,
+  withPgRetry,
   getRoomVersion,
   listRoomOperations,
   getRoomOperation,
@@ -1206,6 +1526,13 @@ module.exports = {
   auditRoomNodes,
   repairRoomNodes,
   forceRoomSnapshot,
+  getMinOperationVersion,
+  getRoomArchiveStats,
+  archiveRoomOperations,
+  archiveAllRoomOperations,
+  startOperationsArchiver,
+  purgeDeletedNodes: options => purgeDeletedNodes(pool, options),
+  listDeletedNodeUids: roomKey => listDeletedNodeUids(pool, roomKey),
   getPool,
   operationEvents,
   readRoomNodes: roomKey => readRoomNodes(pool, roomKey),

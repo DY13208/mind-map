@@ -255,10 +255,19 @@ function applyInverseOperation(obj, operation) {
       payload: inverse.payload || {}
     })
   }
-  if (inverse.type === 'node.update' || inverse.type === 'node.move') {
+  if (
+    inverse.type === 'node.update' ||
+    inverse.type === 'node.move' ||
+    inverse.type === 'node.reorder'
+  ) {
     const { applyCollabEvent } = require('./collabRecovery')
     return applyCollabEvent(obj, {
-      type: 'node.moved',
+      type:
+        inverse.type === 'node.reorder'
+          ? 'node.reordered'
+          : inverse.type === 'node.move'
+            ? 'node.moved'
+            : 'node.moved',
       payload: inverse.payload || {}
     })
   }
