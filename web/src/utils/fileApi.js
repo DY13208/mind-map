@@ -75,6 +75,9 @@ export function getFileSubtree(roomKey, uid, options = {}) {
   if (options.maxNodes != null) params.set('max_nodes', String(options.maxNodes))
   if (options.offset != null) params.set('offset', String(options.offset))
   if (options.limit != null) params.set('limit', String(options.limit))
+  if (options.knownVersion != null) {
+    params.set('knownVersion', String(options.knownVersion))
+  }
   const query = params.toString()
   return request(
     `/api/files/${encodeURIComponent(roomKey)}/subtree${query ? `?${query}` : ''}`
@@ -107,12 +110,47 @@ export function getMapVersion(roomKey) {
   return request(`/api/maps/${encodeURIComponent(roomKey)}/version`)
 }
 
-export function getMapOperations(roomKey, afterVersion = 0, limit = 500) {
+export function getMapOperations(roomKey, afterVersion = 0, limit = 500, extra = {}) {
   const params = new URLSearchParams()
   params.set('after', String(Number(afterVersion) || 0))
   if (limit) params.set('limit', String(limit))
+  if (extra.actorId) params.set('actor', extra.actorId)
   return request(
     `/api/maps/${encodeURIComponent(roomKey)}/operations?${params.toString()}`
+  )
+}
+
+export function getMapAudit(roomKey, extra = {}) {
+  const params = new URLSearchParams()
+  if (extra.after != null) params.set('after', String(extra.after))
+  if (extra.limit != null) params.set('limit', String(extra.limit))
+  if (extra.actorId) params.set('actor', extra.actorId)
+  const query = params.toString()
+  return request(
+    `/api/maps/${encodeURIComponent(roomKey)}/audit${query ? `?${query}` : ''}`
+  )
+}
+
+export function undoMapOperation(roomKey, operationId, body = {}) {
+  return request(
+    `/api/maps/${encodeURIComponent(roomKey)}/operations/${encodeURIComponent(
+      operationId
+    )}/undo`,
+    {
+      method: 'POST',
+      headers: operationHeaders(body),
+      body: JSON.stringify(body || {})
+    }
+  )
+}
+
+export function getMapSnapshot(roomKey, extra = {}) {
+  const params = new URLSearchParams()
+  if (extra.depth != null) params.set('depth', String(extra.depth))
+  if (extra.version != null) params.set('version', String(extra.version))
+  const query = params.toString()
+  return request(
+    `/api/maps/${encodeURIComponent(roomKey)}/snapshot${query ? `?${query}` : ''}`
   )
 }
 
@@ -133,6 +171,19 @@ export function searchFile(roomKey, q, limit = 80) {
   return request(
     `/api/files/${encodeURIComponent(roomKey)}/search?${params.toString()}`
   )
+}
+
+export function replaceFileTree(roomKey, tree, extra = {}) {
+  return request(`/api/files/${encodeURIComponent(roomKey)}/replace`, {
+    method: 'POST',
+    headers: operationHeaders(extra),
+    body: JSON.stringify({
+      tree,
+      title: extra.title,
+      confirm_sop_change: extra.confirm_sop_change !== false,
+      operationId: extra.operationId
+    })
+  })
 }
 
 export function addFileNode(roomKey, body) {

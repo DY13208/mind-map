@@ -1,4 +1,5 @@
 require('./loadEnv')
+const { EventEmitter } = require('events')
 const { Pool } = require('pg')
 const COS = require('cos-nodejs-sdk-v5')
 const Y = require('yjs')
@@ -8,6 +9,10 @@ const {
   graphsEqual,
   nodesDualWriteEnabled,
   nodesReadPreferEnabled,
+  nodesTableAuthorityEnabled,
+  canonicalizeNodes,
+  pickAuthoritativeNodes,
+  auditRoomNodesState,
   replaceRoomNodes,
   readRoomNodes
 } = require('./roomNodes')
@@ -19,6 +24,13 @@ const pool = new Pool({
   user: process.env.PGUSER,
   password: process.env.PGPASSWORD
 })
+
+const operationEvents = new EventEmitter()
+operationEvents.setMaxListeners(50)
+
+function getPool() {
+  return pool
+}
 
 const cos = new COS({
   SecretId: process.env.TENCENT_COS_SECRET_ID,
@@ -290,8 +302,8 @@ function normalizeTitle(title) {
 }
 
 async function writeRoomNodeRows(db, roomKey, nodes, version) {
-  if (!nodesDualWriteEnabled()) return
-  if (nodes == null) return
+  if (!nodesDualWriteEnabled()) return { wrote: false, skipped: true }
+  if (nodes == null) return { wrote: false, skipped: true }
   const result = await replaceRoomNodes(db, roomKey, nodes, version)
   if (!result.wrote) {
     console.error(
@@ -300,6 +312,12 @@ async function writeRoomNodeRows(db, roomKey, nodes, version) {
       (result.errors || []).slice(0, 5).join('; ')
     )
   }
+  return result
+}
+
+function snapshotNodesForStorage(nodes) {
+  const canonical = canonicalizeNodes(nodes || {})
+  return canonical.ok ? canonical.nodes : nodes || {}
 }
 
 async function upsertRoom(roomKey, title, options = {}) {
@@ -328,12 +346,19 @@ async function upsertRoom(roomKey, title, options = {}) {
     )
     const row = res.rows[0]
     if (nodes) {
+      const snapshot = snapshotNodesForStorage(nodes)
       await writeRoomNodeRows(
         client,
         roomKey,
-        nodes,
+        snapshot,
         Number((row && row.version) || 0)
       )
+      if (nodesTableAuthorityEnabled() && snapshot !== nodes) {
+        await client.query(
+          `update rooms set nodes = $2::jsonb where room_key = $1`,
+          [roomKey, JSON.stringify(snapshot)]
+        )
+      }
     }
     await client.query('commit')
     return row
@@ -554,19 +579,41 @@ async function getRoom(roomKey) {
 }
 
 async function nodesFromTableIfCurrent(roomKey, json, version) {
-  if (!nodesReadPreferEnabled()) return null
   try {
     const table = await readRoomNodes(pool, roomKey)
-    const jsonObj = json || {}
-    const jsonCount = Object.keys(jsonObj).length
-    if (!table.nodes || !table.count) return null
-    if (table.version < Number(version || 0)) return null
-    if (jsonCount && table.count !== jsonCount) return null
-    if (jsonCount && !graphsEqual(table.nodes, jsonObj)) return null
-    return table.nodes
+    const picked = pickAuthoritativeNodes(json, table, version)
+    if (picked.source === 'table') return picked.nodes
+    if (
+      nodesReadPreferEnabled() &&
+      table.nodes &&
+      table.count &&
+      Number(table.version || 0) >= Number(version || 0) &&
+      graphsEqual(table.nodes, json || {})
+    ) {
+      return table.nodes
+    }
+    return null
   } catch (err) {
     console.error('[room_nodes] read failed', roomKey, err.message)
     return null
+  }
+}
+
+async function auditRoomNodes(roomKey) {
+  const res = await pool.query(
+    `select room_key, title, nodes, version, updated_at
+     from rooms where room_key = $1`,
+    [roomKey]
+  )
+  const row = res.rows[0]
+  if (!row) return null
+  const json = nodesFromJson(row.nodes) || {}
+  const version = Number(row.version || 0)
+  const table = await readRoomNodes(pool, roomKey)
+  return {
+    mapId: roomKey,
+    title: row.title,
+    ...auditRoomNodesState(json, table, version)
   }
 }
 
@@ -628,6 +675,21 @@ function attachPersistence() {
 }
 
 async function initSchema() {
+  let lastErr = null
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      await initSchemaOnce()
+      return
+    } catch (err) {
+      lastErr = err
+      if (err.code !== '23505' && err.code !== '42P07') throw err
+      await new Promise(resolve => setTimeout(resolve, 40 * (attempt + 1)))
+    }
+  }
+  throw lastErr
+}
+
+async function initSchemaOnce() {
   await pool.query(`
     create table if not exists rooms (
       room_key text primary key,
@@ -693,6 +755,37 @@ async function initSchema() {
     create table if not exists room_tombstones (
       room_key text primary key,
       deleted_at timestamptz not null default now()
+    )
+  `)
+  await pool.query(`
+    create sequence if not exists room_outbox_id_seq
+  `)
+  await pool.query(`
+    create table if not exists room_outbox (
+      id bigint primary key default nextval('room_outbox_id_seq'),
+      room_key text not null,
+      version bigint not null,
+      event jsonb not null,
+      created_at timestamptz not null default now(),
+      published_at timestamptz,
+      attempts integer not null default 0,
+      last_error text,
+      available_at timestamptz not null default now(),
+      unique (room_key, version)
+    )
+  `)
+  await pool.query(`
+    create index if not exists room_outbox_pending_idx
+    on room_outbox (available_at, id)
+    where published_at is null
+  `)
+  await pool.query(`
+    create table if not exists room_snapshots (
+      room_key text not null,
+      version bigint not null,
+      nodes jsonb not null,
+      created_at timestamptz not null default now(),
+      primary key (room_key, version)
     )
   `)
   const tombstones = await pool.query('select room_key from room_tombstones')
@@ -772,8 +865,11 @@ async function commitRoomOperation(roomKey, command, apply) {
       err.code = 'VERSION_AHEAD'
       throw err
     }
+    const json = nodesFromJson(room.nodes) || {}
+    const table = await readRoomNodes(client, roomKey)
+    const picked = pickAuthoritativeNodes(json, table, currentVersion)
     const applied = await apply({
-      room: { ...room, nodes: nodesFromJson(room.nodes) || {} },
+      room: { ...room, nodes: picked.nodes },
       currentVersion
     })
     const version = currentVersion + 1
@@ -784,6 +880,8 @@ async function commitRoomOperation(roomKey, command, apply) {
       operationId: command.operationId,
       actorId: command.actorId
     }
+    const snapshot = snapshotNodesForStorage(applied.nodes || {})
+    await writeRoomNodeRows(client, roomKey, snapshot, version)
     await client.query(
       `update rooms
        set nodes = $2::jsonb,
@@ -793,7 +891,7 @@ async function commitRoomOperation(roomKey, command, apply) {
        where room_key = $1`,
       [
         roomKey,
-        JSON.stringify(applied.nodes || {}),
+        JSON.stringify(snapshot),
         version,
         applied.title ? String(applied.title).trim().slice(0, 80) : null
       ]
@@ -819,13 +917,47 @@ async function commitRoomOperation(roomKey, command, apply) {
           : JSON.stringify(applied.inversePayload)
       ]
     )
-    await writeRoomNodeRows(client, roomKey, applied.nodes || {}, version)
+    await client.query(
+      `insert into room_outbox (room_key, version, event)
+       values ($1, $2, $3::jsonb)
+       on conflict (room_key, version) do nothing`,
+      [roomKey, version, JSON.stringify(event)]
+    )
+    const snapshotEvery = Math.max(
+      1,
+      Number(process.env.COLLAB_SNAPSHOT_EVERY || 100)
+    )
+    if (version === 1 || version % snapshotEvery === 0) {
+      await client.query(
+        `insert into room_snapshots (room_key, version, nodes)
+         values ($1, $2, $3::jsonb)
+         on conflict (room_key, version) do nothing`,
+        [roomKey, version, JSON.stringify(snapshot)]
+      )
+    }
+    await client.query('select pg_notify($1, $2)', [
+      'collab_events',
+      JSON.stringify({
+        type: 'event',
+        mapId: roomKey,
+        version,
+        operationId: command.operationId
+      }).slice(0, 7900)
+    ])
     await client.query('commit')
+    const operation = operationRow(inserted.rows[0])
+    setImmediate(() => {
+      operationEvents.emit('committed', {
+        roomKey,
+        version,
+        operation
+      })
+    })
     return {
       duplicate: false,
-      operation: operationRow(inserted.rows[0]),
+      operation,
       result: applied.result || {},
-      nodes: applied.nodes || {}
+      nodes: snapshot
     }
   } catch (err) {
     await client.query('rollback').catch(() => {})
@@ -843,18 +975,55 @@ async function getRoomVersion(roomKey) {
   return res.rows[0] ? Number(res.rows[0].version || 0) : null
 }
 
-async function listRoomOperations(roomKey, afterVersion = 0, limit = 500) {
-  const safeLimit = Math.min(1000, Math.max(1, Number(limit) || 500))
+async function getRoomOperation(roomKey, operationId) {
   const res = await pool.query(
     `select room_key, version, operation_id, actor_id, client_id,
             operation_type, payload, event, inverse_payload, created_at
      from room_operations
-     where room_key = $1 and version > $2
-     order by version asc
-     limit $3`,
-    [roomKey, Math.max(0, Number(afterVersion) || 0), safeLimit]
+     where room_key = $1 and operation_id = $2`,
+    [roomKey, operationId]
   )
+  return operationRow(res.rows[0])
+}
+
+async function listRoomOperations(roomKey, afterVersion = 0, limit = 500, options = {}) {
+  const safeLimit = Math.min(1000, Math.max(1, Number(limit) || 500))
+  const after = Math.max(0, Number(afterVersion) || 0)
+  const params = [roomKey, after, safeLimit]
+  let sql = `select room_key, version, operation_id, actor_id, client_id,
+                    operation_type, payload, event, inverse_payload, created_at
+             from room_operations
+             where room_key = $1 and version > $2`
+  if (options.actorId) {
+    params.push(String(options.actorId))
+    sql += ` and actor_id = $${params.length}`
+  }
+  if (options.untilVersion != null && Number.isFinite(Number(options.untilVersion))) {
+    params.push(Number(options.untilVersion))
+    sql += ` and version <= $${params.length}`
+  }
+  sql += ` order by version asc limit $3`
+  const res = await pool.query(sql, params)
   return res.rows.map(operationRow)
+}
+
+async function getNearestSnapshot(roomKey, version) {
+  const res = await pool.query(
+    `select room_key, version, nodes, created_at
+     from room_snapshots
+     where room_key = $1 and version <= $2
+     order by version desc
+     limit 1`,
+    [roomKey, Number(version)]
+  )
+  const row = res.rows[0]
+  if (!row) return null
+  return {
+    room_key: row.room_key,
+    version: Number(row.version || 0),
+    nodes: row.nodes || {},
+    created_at: row.created_at
+  }
 }
 
 async function removeRoom(roomKey) {
@@ -970,6 +1139,11 @@ module.exports = {
   commitRoomOperation,
   getRoomVersion,
   listRoomOperations,
+  getRoomOperation,
+  getNearestSnapshot,
+  auditRoomNodes,
+  getPool,
+  operationEvents,
   readRoomNodes: roomKey => readRoomNodes(pool, roomKey),
   replaceRoomNodes: (roomKey, nodes, version) =>
     replaceRoomNodes(pool, roomKey, nodes, version)

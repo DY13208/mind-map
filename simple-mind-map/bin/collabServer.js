@@ -12,8 +12,12 @@ const {
   handleApi,
   safeRoomKey,
   isDeletedRoom,
-  getRoom
+  getRoom,
+  getPool,
+  operationEvents
 } = require('./storage')
+const { createEventBus, createPostgresBus, setActiveEventBus } = require('./eventBus')
+const { startOutboxPublisher } = require('./outbox')
 const {
   initAuth,
   isAuthEnabled,
@@ -75,7 +79,7 @@ wss.on('connection', (conn, req) => {
     conn.close(1008, 'invalid room name')
     return
   }
-  if (docs.has(docName)) {
+  if (docs.has(docName) || String(docName).endsWith('__presence')) {
     setupWSConnection(conn, req, { gc: true, docName })
     return
   }
@@ -148,12 +152,31 @@ server.on('upgrade', async (request, socket, head) => {
 })
 
 Promise.all([initSchema(), initAuth()])
-  .then(() => {
+  .then(async () => {
     attachPersistence()
+    let bus = createEventBus({ pool: getPool() })
+    try {
+      if (typeof bus.start === 'function') await bus.start()
+    } catch (err) {
+      console.error('[event-bus] start failed, falling back to postgres:', err.message)
+      if (bus && bus.name === 'redis') {
+        if (typeof bus.close === 'function') await bus.close().catch(() => {})
+        bus = createPostgresBus(getPool())
+        setActiveEventBus(bus)
+        if (typeof bus.start === 'function') await bus.start()
+      } else {
+        throw err
+      }
+    }
+    const publisher = startOutboxPublisher({ pool: getPool(), bus })
+    operationEvents.on('committed', () => {
+      publisher.kick().catch(() => {})
+    })
     server.listen(port, host, () => {
       console.log(`Collab server running at ws://${host}:${port}`)
       console.log(`Collab HTTP API: http://${host}:${port}/api/files`)
       console.log('Persistence: PostgreSQL rooms + COS mind-map/')
+      console.log(`Event bus: ${bus.name} (outbox publisher on)`)
     })
   })
   .catch(err => {

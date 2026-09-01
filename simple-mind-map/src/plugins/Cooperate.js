@@ -14,7 +14,8 @@ import {
 import { applyObjectToYMap, migrateLegacyNodes } from './cooperateYjs'
 import {
   planCollabRecovery,
-  planAfterOperations
+  planAfterOperations,
+  markDirtySubtrees
 } from './cooperateRecovery'
 
 function collapseDeepNodes(root, keepDepth = 2) {
@@ -200,10 +201,13 @@ class Cooperate {
     this.httpPatchNode = null
     this.httpAddNode = null
     this.httpDeleteNode = null
+    this.httpUndoOperation = null
     this.httpFetchOperations = null
     this.httpFetchVersion = null
     this.httpUpdatedAt = ''
     this.lastAppliedVersion = 0
+    this.localUndoStack = []
+    this.dirtySubtrees = new Map()
     this.httpRecovering = false
     this.httpPendingRecoverVersion = 0
     this.hydratedUids = new Set()
@@ -311,6 +315,12 @@ class Cooperate {
   }
 
   applySyncedDoc() {
+    if (this.httpCollabMode) {
+      this.previewApplied = false
+      this.expectRemoteDoc = false
+      this.pendingInitData = null
+      return
+    }
     this.ymap = this.ydoc.getMap()
     migrateLegacyNodes(this.ymap)
     if (this.onObserve) {
@@ -404,9 +414,17 @@ class Cooperate {
     const live = data && data.children && data.children.length
     const count = Number(node.getData && node.getData('childCount')) || 0
     const uid = node.getData && node.getData('uid')
-    if (live && this.hydratedUids.has(uid) && (!count || live >= count)) return
+    const dirty = uid && this.dirtySubtrees && this.dirtySubtrees.has(uid)
+    if (
+      live &&
+      this.hydratedUids.has(uid) &&
+      (!count || live >= count) &&
+      !dirty
+    ) {
+      return
+    }
     if (this.httpFetchSubtree) {
-      if (!live && count <= 0) return
+      if (!live && count <= 0 && !dirty) return
       return this.hydrateFromHttp(node)
     }
     if (!this.ymap) return
@@ -988,6 +1006,7 @@ class Cooperate {
     if (config.patchNode) this.httpPatchNode = config.patchNode
     if (config.addNode) this.httpAddNode = config.addNode
     if (config.deleteNode) this.httpDeleteNode = config.deleteNode
+    if (config.undoOperation) this.httpUndoOperation = config.undoOperation
     if (config.fetchOperations) this.httpFetchOperations = config.fetchOperations
     if (config.fetchVersion) this.httpFetchVersion = config.fetchVersion
     if (config.updatedAt) this.httpUpdatedAt = config.updatedAt
@@ -1004,7 +1023,9 @@ class Cooperate {
     this.lastPushed = {}
     this.recentPushed = new Map()
     this.recentHttpDeleted = new Map()
-    this.enableLargeMapMode(config.nodeCount || 400)
+    this.dirtySubtrees = new Map()
+    this.localUndoStack = []
+    this.enableLargeMapMode(Number(config.nodeCount) || 0)
   }
 
   clearHttpCollab() {
@@ -1018,10 +1039,13 @@ class Cooperate {
     this.httpPatchNode = null
     this.httpAddNode = null
     this.httpDeleteNode = null
+    this.httpUndoOperation = null
     this.httpFetchOperations = null
     this.httpFetchVersion = null
     this.httpUpdatedAt = ''
     this.lastAppliedVersion = 0
+    this.localUndoStack = []
+    this.dirtySubtrees = new Map()
     this.httpRecovering = false
     this.httpPendingRecoverVersion = 0
     this.hydratedUids = new Set()
@@ -1083,9 +1107,43 @@ class Cooperate {
       0
     const count = Number(node.getData && node.getData('childCount')) || 0
     const uid = node.getData && node.getData('uid')
+    if (uid && this.dirtySubtrees && this.dirtySubtrees.has(uid)) return true
     if (!count) return false
     if (!live) return true
     return count > live && !this.hydratedUids.has(uid)
+  }
+
+  collectLoadedUids() {
+    const loaded = new Set(this.hydratedUids)
+    this.collectVisibleUids().forEach(uid => loaded.add(uid))
+    return loaded
+  }
+
+  markCollapsedLoadedDirty(version) {
+    const ver = Number(version) || 0
+    const walk = node => {
+      if (!node || !node.data) return
+      const uid = node.data.uid
+      const count = Number(node.data.childCount) || 0
+      const live = Array.isArray(node.children) ? node.children.length : 0
+      if (uid && count > live) this.dirtySubtrees.set(uid, ver)
+      ;(node.children || []).forEach(walk)
+    }
+    walk(this.mindMap.renderer && this.mindMap.renderer.renderTree)
+  }
+
+  stampLoadedSubtreeVersions(version) {
+    const ver = Number(version) || 0
+    if (!ver) return
+    const walk = node => {
+      if (node && node.data && node.data.uid) {
+        if (!this.dirtySubtrees.has(node.data.uid)) {
+          node.data.subtreeVersion = ver
+        }
+      }
+      ;(node.children || []).forEach(walk)
+    }
+    walk(this.mindMap.renderer && this.mindMap.renderer.renderTree)
   }
 
   async hydrateFromHttp(node) {
@@ -1095,22 +1153,39 @@ class Cooperate {
     if (!uid || !data) return
     const liveLen = Array.isArray(data.children) ? data.children.length : 0
     const count = Number(data.data && data.data.childCount) || 0
-    if (liveLen > 0 && this.hydratedUids.has(uid) && (count <= 0 || liveLen >= count)) {
-      return
-    }
+    const dirtyAt = this.dirtySubtrees.get(uid)
+    const alreadyHydrated =
+      liveLen > 0 &&
+      this.hydratedUids.has(uid) &&
+      (count <= 0 || liveLen >= count)
+    if (alreadyHydrated && !dirtyAt) return
     this.httpHydrating = true
     try {
-      const result = await this.httpFetchSubtree(uid)
+      const knownVersion = alreadyHydrated
+        ? Number((data.data && data.data.subtreeVersion) || 0) || 0
+        : 0
+      const result = await this.httpFetchSubtree(uid, { knownVersion })
+      if (result && result.unchanged) {
+        this.dirtySubtrees.delete(uid)
+        if (result.version && data.data) {
+          data.data.subtreeVersion = Number(result.version) || data.data.subtreeVersion
+        }
+        return
+      }
       this.mergeHttpChildren(data, result && result.children)
       if (data.data) {
         data.data.hasMore = !!(result && result.has_more)
         data.data.childCount =
           (result && result.total) || data.data.childCount || 0
+        if (result && result.version != null) {
+          data.data.subtreeVersion = Number(result.version) || 0
+        }
       }
       if (data.children && data.children.length) {
         this.hydratedUids.add(uid)
         this.hydrateFailedUids.delete(uid)
       }
+      this.dirtySubtrees.delete(uid)
     } catch (err) {
       throw err
     } finally {
@@ -1124,8 +1199,19 @@ class Cooperate {
     if (!uid) return data
     const live = Array.isArray(data.children) ? data.children.length : 0
     const count = Number(data.data && data.data.childCount) || 0
-    if (live && (!count || live >= count)) return data
-    const result = await this.httpFetchSubtree(uid)
+    const dirtyAt = uid && this.dirtySubtrees && this.dirtySubtrees.get(uid)
+    if (live && (!count || live >= count) && !dirtyAt) return data
+    const knownVersion = live
+      ? Number((data.data && data.data.subtreeVersion) || 0) || 0
+      : 0
+    const result = await this.httpFetchSubtree(uid, { knownVersion })
+    if (result && result.unchanged) {
+      this.dirtySubtrees.delete(uid)
+      if (result.version && data.data) {
+        data.data.subtreeVersion = Number(result.version)
+      }
+      return data
+    }
     if (!data.children || !data.children.length) {
       data.children = (result && result.children) || []
     } else {
@@ -1134,7 +1220,11 @@ class Cooperate {
     if (data.data) {
       data.data.hasMore = !!(result && result.has_more)
       data.data.childCount = (result && result.total) || count || 0
+      if (result && result.version != null) {
+        data.data.subtreeVersion = Number(result.version) || 0
+      }
     }
+    this.dirtySubtrees.delete(uid)
     this.hydratedUids.add(uid)
     this.markUidPushed(uid, data.data)
     ;(data.children || []).forEach(child => {
@@ -1381,6 +1471,24 @@ class Cooperate {
 
   syncHttpUndoRedo(name) {
     if (!this.httpCollabMode) return
+    if (name === 'BACK' && this.httpUndoOperation && this.localUndoStack.length) {
+      const last = this.localUndoStack.pop()
+      Promise.resolve(this.httpUndoOperation(last.operationId))
+        .then(result => {
+          if (result && result.version != null) {
+            this.acknowledgeLocalVersion(result.version, {
+              duplicate: true
+            })
+          }
+          return this.refreshVisibleFromHttp('', { force: true })
+        })
+        .catch(err => {
+          this.localUndoStack.push(last)
+          console.error('[mind-map] undo operation failed', err)
+          this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
+        })
+      return
+    }
     const command = this.mindMap.command
     if (!command || !Array.isArray(command.history)) {
       this.scheduleHttpStructureSync(0)
@@ -1701,10 +1809,19 @@ class Cooperate {
     return nodes
   }
 
-  acknowledgeLocalVersion(version) {
+  acknowledgeLocalVersion(version, extra = {}) {
     const next = Number(version)
-    if (!Number.isFinite(next)) return
-    if (next > this.lastAppliedVersion) this.lastAppliedVersion = next
+    if (Number.isFinite(next) && next > this.lastAppliedVersion) {
+      this.lastAppliedVersion = next
+    }
+    const operationId = extra.operationId || extra.operation_id
+    if (operationId && extra.duplicate !== true) {
+      this.localUndoStack.push({
+        operationId,
+        version: Number.isFinite(next) ? next : 0
+      })
+      if (this.localUndoStack.length > 200) this.localUndoStack.shift()
+    }
   }
 
   async recoverHttpCollab(targetVersion, options = {}) {
@@ -1732,6 +1849,20 @@ class Cooperate {
         action = { type: 'resnapshot', version: plan.version }
       }
       if (action.type === 'ignore') return
+      if (action.type === 'apply' && action.operations) {
+        const dirty = markDirtySubtrees(
+          this.collectLoadedUids(),
+          action.operations
+        )
+        Object.keys(dirty).forEach(uid => {
+          this.dirtySubtrees.set(
+            uid,
+            Math.max(this.dirtySubtrees.get(uid) || 0, dirty[uid])
+          )
+        })
+      } else if (action.type === 'resnapshot') {
+        this.markCollapsedLoadedDirty(action.version)
+      }
       const started = Date.now()
       while (
         (this.httpRefreshing || this.httpHydrating || this.isApplyingRemote) &&
@@ -1744,6 +1875,7 @@ class Cooperate {
       if (Number.isFinite(applied) && applied > this.lastAppliedVersion) {
         this.lastAppliedVersion = applied
       }
+      if (Number.isFinite(applied)) this.stampLoadedSubtreeVersions(applied)
     } finally {
       this.httpRecovering = false
       const pending = this.httpPendingRecoverVersion
@@ -1851,7 +1983,11 @@ class Cooperate {
             changed = true
           }
           if (treeNode.data) {
-            treeNode.data.childCount = Math.max(next.length, serverKids.length)
+            treeNode.data.childCount = Math.max(
+              next.length,
+              serverKids.length,
+              Number(item.data && item.data.childCount) || 0
+            )
           }
         })
         if (missing.length) {

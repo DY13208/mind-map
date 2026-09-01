@@ -607,6 +607,9 @@ export default {
     openFailed: 'Could not load the saved file',
     largeMapMode: 'Large map mode (load on demand, 10,000+ nodes)',
     fileDeleted: 'Deleted',
-    renamed: 'Renamed'
+    renamed: 'Renamed',
+    history: 'Operation history',
+    noHistory: 'No operations to audit yet',
+    undoFailed: 'This operation cannot be undone'
   }
 }

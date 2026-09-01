@@ -4,7 +4,10 @@ const {
   encodeNodeRows,
   decodeNodeRows,
   graphsEqual,
-  padPosition
+  padPosition,
+  canonicalizeNodes,
+  pickAuthoritativeNodes,
+  auditRoomNodesState
 } = require('../bin/roomNodes')
 
 const node = (uid, text, children = [], extra = {}) => ({
@@ -25,7 +28,11 @@ function testRoundtripPreservesTree() {
   const rows = encodeNodeRows(obj)
   assert.strictEqual(rows.find(row => row.uid === 'root').is_root, true)
   assert.strictEqual(rows.find(row => row.uid === 'a').parent_uid, 'root')
-  assert.strictEqual(rows.find(row => row.uid === 'b').position, padPosition(1))
+  const posA = rows.find(row => row.uid === 'a').position
+  const posB = rows.find(row => row.uid === 'b').position
+  assert.ok(posA)
+  assert.ok(posA < posB)
+  assert.ok(!/^\d{8}$/.test(posA))
   const restored = decodeNodeRows(rows)
   assert.ok(graphsEqual(obj, restored))
   assert.deepStrictEqual(restored.root.children, ['a', 'b'])
@@ -79,7 +86,39 @@ function testSoftDeletedRowsAreIgnored() {
   assert.deepStrictEqual(restored.root.children, ['a'])
 }
 
+function testCanonicalAndAuthority() {
+  const obj = {
+    root: node('root', 'Root', ['a']),
+    a: node('a', 'A')
+  }
+  const canonical = canonicalizeNodes(obj)
+  assert.strictEqual(canonical.ok, true)
+  assert.ok(graphsEqual(obj, canonical.nodes))
+  const invalid = canonicalizeNodes({ a: node('a', 'A') })
+  invalid.nodes.a.isRoot = false
+  const rejected = canonicalizeNodes(invalid.nodes)
+  assert.strictEqual(rejected.ok, false)
+
+  const table = { nodes: canonical.nodes, version: 3, count: 2 }
+  const picked = pickAuthoritativeNodes({ root: node('root', 'stale') }, table, 3)
+  assert.strictEqual(picked.source, 'table')
+  const staleTable = pickAuthoritativeNodes(obj, { ...table, version: 1 }, 3)
+  assert.strictEqual(staleTable.source, 'json')
+
+  const report = auditRoomNodesState(obj, table, 3)
+  assert.strictEqual(report.ok, true)
+  assert.strictEqual(report.source, 'table')
+  const mismatch = auditRoomNodesState(
+    { root: node('root', 'Other') },
+    table,
+    3
+  )
+  assert.strictEqual(mismatch.ok, false)
+  assert.strictEqual(mismatch.equal, false)
+}
+
 testRoundtripPreservesTree()
 testValidateRejectsCyclesAndMissingRoot()
 testSoftDeletedRowsAreIgnored()
+testCanonicalAndAuthority()
 console.log('room node tests passed')

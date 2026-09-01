@@ -1,3 +1,10 @@
+const {
+  applyPositionsToTree,
+  comparePositions,
+  encodeRank,
+  STEP
+} = require('./fractionalIndex')
+
 function padPosition(index) {
   const n = Number(index)
   if (!Number.isFinite(n) || n < 0) return '00000000'
@@ -74,24 +81,24 @@ function validateNodeGraph(obj) {
 }
 
 function encodeNodeRows(obj) {
+  const graph = obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}
+  applyPositionsToTree(graph)
   const parentOf = {}
-  const indexOf = {}
-  Object.keys(obj || {}).forEach(uid => {
-    const children = (obj[uid] && obj[uid].children) || []
-    children.forEach((child, index) => {
+  Object.keys(graph).forEach(uid => {
+    const children = (graph[uid] && graph[uid].children) || []
+    children.forEach(child => {
       parentOf[child] = uid
-      indexOf[child] = index
     })
   })
-  return Object.keys(obj || {}).map(uid => {
-    const node = obj[uid] || {}
+  return Object.keys(graph).map(uid => {
+    const node = graph[uid] || {}
     const data = { ...(node.data || {}), uid }
     return {
       uid,
       parent_uid: parentOf[uid] || null,
-      position: padPosition(indexOf[uid] || 0),
+      position: node.position || encodeRank(STEP),
       data,
-      is_root: !!(node.isRoot || (uid === findRootUid(obj) && !parentOf[uid]))
+      is_root: !!(node.isRoot || (uid === findRootUid(graph) && !parentOf[uid]))
     }
   })
 }
@@ -104,12 +111,15 @@ function decodeNodeRows(rows) {
     obj[uid] = {
       isRoot: !!row.is_root,
       data: { ...(row.data || {}), uid },
-      children: []
+      children: [],
+      position: row.position || ''
     }
   })
   live
     .slice()
-    .sort((a, b) => String(a.position || '').localeCompare(String(b.position || '')))
+    .sort((a, b) =>
+      comparePositions(a.position, b.position, a.uid, b.uid)
+    )
     .forEach(row => {
       if (row.parent_uid && obj[row.parent_uid] && obj[row.uid]) {
         obj[row.parent_uid].children.push(row.uid)
@@ -144,6 +154,79 @@ function structureSignature(obj) {
 
 function graphsEqual(a, b) {
   return structureSignature(a) === structureSignature(b)
+}
+
+function nodesTableAuthorityEnabled() {
+  const value = process.env.COLLAB_NODES_AUTHORITY
+  return value !== 'json'
+}
+
+function canonicalizeNodes(obj) {
+  const graph = obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}
+  const check = validateNodeGraph(graph)
+  if (!check.ok) {
+    return { ok: false, nodes: graph, errors: check.errors }
+  }
+  return {
+    ok: true,
+    nodes: decodeNodeRows(encodeNodeRows(graph)),
+    errors: []
+  }
+}
+
+function pickAuthoritativeNodes(json, table, roomVersion) {
+  const jsonObj = json || {}
+  const version = Number(roomVersion || 0)
+  if (nodesTableAuthorityEnabled() && table && table.nodes && table.count) {
+    const check = validateNodeGraph(table.nodes)
+    if (check.ok && Number(table.version || 0) >= version) {
+      return { nodes: table.nodes, source: 'table' }
+    }
+  }
+  if (
+    nodesReadPreferEnabled() &&
+    table &&
+    table.nodes &&
+    Number(table.version || 0) >= version &&
+    graphsEqual(table.nodes, jsonObj)
+  ) {
+    return { nodes: table.nodes, source: 'table' }
+  }
+  return { nodes: jsonObj, source: 'json' }
+}
+
+function auditRoomNodesState(json, table, roomVersion) {
+  const jsonObj = json || {}
+  const jsonCheck = validateNodeGraph(jsonObj)
+  const tableCheck =
+    table && table.nodes
+      ? validateNodeGraph(table.nodes)
+      : { ok: false, errors: ['missing table'], nodeCount: 0 }
+  const equal = !!(table && table.nodes && graphsEqual(jsonObj, table.nodes))
+  const picked = pickAuthoritativeNodes(jsonObj, table, roomVersion)
+  const tableVersion = table ? Number(table.version || 0) : 0
+  const version = Number(roomVersion || 0)
+  return {
+    ok:
+      jsonCheck.ok &&
+      tableCheck.ok &&
+      equal &&
+      tableVersion >= version,
+    equal,
+    source: picked.source,
+    roomVersion: version,
+    json: {
+      valid: jsonCheck.ok,
+      count: jsonCheck.nodeCount,
+      errors: jsonCheck.errors
+    },
+    table: {
+      valid: tableCheck.ok,
+      count: tableCheck.nodeCount,
+      version: tableVersion,
+      errors: tableCheck.errors
+    }
+  }
 }
 
 function nodesDualWriteEnabled() {
@@ -252,6 +335,10 @@ module.exports = {
   graphsEqual,
   nodesDualWriteEnabled,
   nodesReadPreferEnabled,
+  nodesTableAuthorityEnabled,
+  canonicalizeNodes,
+  pickAuthoritativeNodes,
+  auditRoomNodesState,
   replaceRoomNodes,
   readRoomNodes,
   migrateRoomNodesFromJson

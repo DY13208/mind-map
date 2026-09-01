@@ -120,6 +120,7 @@ function nodeUnchanged(nextNode = {}, previousNode) {
   if (!previousNode) return false
   return (
     !!nextNode.isRoot === !!previousNode.isRoot &&
+    String(nextNode.position || '') === String(previousNode.position || '') &&
     sameList(nextNode.children, previousNode.children) &&
     sameJson(nextNode.data, previousNode.data)
   )
@@ -130,6 +131,7 @@ function createNodeMap(node = {}) {
   const dataMap = new Y.Map()
   const children = new Y.Array()
   nodeMap.set('isRoot', !!node.isRoot)
+  if (node.position) nodeMap.set('position', String(node.position))
   Object.keys(node.data || {}).forEach(key => {
     const value = node.data[key]
     dataMap.set(
@@ -190,6 +192,11 @@ function applyObjectToDoc(
       const isRoot = !!nextNode.isRoot
       if (nodeMap.get('isRoot') !== isRoot) {
         nodeMap.set('isRoot', isRoot)
+      }
+      const position = nextNode.position == null ? '' : String(nextNode.position)
+      if (String(nodeMap.get('position') || '') !== position) {
+        if (position) nodeMap.set('position', position)
+        else if (nodeMap.has('position')) nodeMap.delete('position')
       }
       syncDataMap(
         nodeMap.get('data'),

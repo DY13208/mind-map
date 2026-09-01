@@ -357,6 +357,23 @@ function testPreviewKeepsCollapsedChildren() {
   assert.strictEqual(preview.tree.children[0].children.length, 0)
 }
 
+function testSmallPreviewUsesHttpCollabProtocol() {
+  const obj = {
+    root: {
+      isRoot: true,
+      data: { uid: 'root', text: 'R', expand: true },
+      children: []
+    }
+  }
+  const preview = mindDoc.buildPreview(obj)
+  assert.strictEqual(preview.http_collab, true)
+  assert.strictEqual(preview.collapsed, false)
+  assert.strictEqual(preview.lazy_load, false)
+  assert.strictEqual(preview.clipped, false)
+}
+
+testSmallPreviewUsesHttpCollabProtocol()
+
 testPreviewKeepsCollapsedChildren()
 
 function testMediumPreviewKeepsCollapsedDescendants() {
