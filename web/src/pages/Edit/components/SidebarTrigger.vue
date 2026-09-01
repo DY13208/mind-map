@@ -97,13 +97,25 @@ export default {
   created() {
     this.authUser = getCurrentUser()
     window.addEventListener('resize', this.onResize)
+    this.$bus.$on(
+      'set_canvas_toolbars_collapsed',
+      this.setCanvasToolbarsCollapsed
+    )
     this.updateSize()
   },
   beforeDestroy() {
     window.removeEventListener('resize', this.onResize)
+    this.$bus.$off(
+      'set_canvas_toolbars_collapsed',
+      this.setCanvasToolbarsCollapsed
+    )
   },
   methods: {
     ...mapMutations(['setActiveSidebar']),
+
+    setCanvasToolbarsCollapsed(collapsed) {
+      this.show = !collapsed
+    },
 
     trigger(item) {
       this.setActiveSidebar(item.value)

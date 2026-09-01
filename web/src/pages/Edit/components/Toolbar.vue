@@ -308,6 +308,10 @@ export default {
   },
   created() {
     this.$bus.$on('write_local_file', this.onWriteLocalFile)
+    this.$bus.$on(
+      'set_canvas_toolbars_collapsed',
+      this.setCanvasToolbarsCollapsed
+    )
   },
   mounted() {
     this.computeToolbarShow()
@@ -319,12 +323,24 @@ export default {
   },
   beforeDestroy() {
     this.$bus.$off('write_local_file', this.onWriteLocalFile)
+    this.$bus.$off(
+      'set_canvas_toolbars_collapsed',
+      this.setCanvasToolbarsCollapsed
+    )
     window.removeEventListener('resize', this.computeToolbarShowThrottle)
     this.$bus.$off('lang_change', this.computeToolbarShowThrottle)
     window.removeEventListener('beforeunload', this.onUnload)
     this.$bus.$off('node_note_dblclick', this.onNodeNoteDblclick)
   },
   methods: {
+    setCanvasToolbarsCollapsed(collapsed) {
+      this.nodeToolbarCollapsed = collapsed
+      this.fileToolbarCollapsed = collapsed
+      if (collapsed) {
+        this.popoverShow = false
+      }
+    },
+
     toggleNodeToolbar() {
       this.nodeToolbarCollapsed = !this.nodeToolbarCollapsed
       if (this.nodeToolbarCollapsed) {
