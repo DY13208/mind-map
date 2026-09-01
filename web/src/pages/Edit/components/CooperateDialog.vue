@@ -666,6 +666,9 @@ export default {
               quiet: true,
               fromSaved: true
             })
+            if (typeof cooperate.markTreeUids === 'function') {
+              cooperate.markTreeUids(preview.tree)
+            }
             setTimeout(done, 4000)
           })
           if (!silent) {

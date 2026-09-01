@@ -99,12 +99,12 @@ export function patchFileNode(roomKey, uid, body) {
   )
 }
 
-export function deleteFileNode(roomKey, uid) {
+export function deleteFileNode(roomKey, uid, options = {}) {
   return request(
     `/api/files/${encodeURIComponent(roomKey)}/nodes/${encodeURIComponent(uid)}`,
     {
       method: 'DELETE',
-      body: JSON.stringify({})
+      body: JSON.stringify({ keep_children: !!options.keepChildren })
     }
   )
 }

@@ -782,6 +782,49 @@ class Render {
     }
   }
 
+  runAfterHydrate(nodes, fn, commandName) {
+    const cooperate = this.mindMap.cooperate
+    if (
+      this._skipLazyHydrate ||
+      !cooperate ||
+      typeof cooperate.nodeNeedsHydrate !== 'function'
+    ) {
+      return false
+    }
+    const stubs = (nodes || []).filter(node => cooperate.nodeNeedsHydrate(node))
+    if (!stubs.length) return false
+    const command = this.mindMap.command
+    if (command) command.pause()
+    this._lazyCommandPending = true
+    Promise.all(
+      stubs.map(node => Promise.resolve(cooperate.hydrateLazyChildren(node)))
+    )
+      .catch(err => {
+        console.error('[mind-map] load children failed', err)
+      })
+      .then(() => {
+        this._skipLazyHydrate = true
+        this._lazyCommandPending = false
+        try {
+          fn()
+        } finally {
+          this._skipLazyHydrate = false
+        }
+        if (command && command.isPause) {
+          command.recovery()
+          command.addHistory()
+        }
+        if (
+          commandName &&
+          cooperate.httpCollabMode &&
+          typeof cooperate.onHttpCommand === 'function'
+        ) {
+          cooperate.onHttpCommand(commandName)
+        }
+      })
+    return true
+  }
+
   //  插入同级节点
   insertNode(
     openEdit = true,
@@ -906,6 +949,16 @@ class Render {
       defaultInsertBelowSecondLevelNodeText
     } = this.mindMap.opt
     const list = appointNodes.length > 0 ? appointNodes : this.activeNodeList
+    if (
+      this.runAfterHydrate(
+        list,
+        () =>
+          this.insertChildNode(openEdit, appointNodes, appointData, appointChildren),
+        'INSERT_CHILD_NODE'
+      )
+    ) {
+      return
+    }
     const handleMultiNodes = list.length > 1
     const isRichText = this.hasRichTextPlugin()
     const { focusNewNode, inserting } = this.getNewNodeBehavior(
@@ -949,9 +1002,11 @@ class Render {
       }
       createNewId = true
       node.nodeData.children.push(newNode)
-      // 插入子节点时自动展开子节点
+      const live = node.nodeData.children.length
+      const prev = Number(node.getData && node.getData('childCount')) || 0
       node.setData({
-        expand: true
+        expand: true,
+        childCount: Math.max(live, prev + 1)
       })
     })
     // 如果同时对多个节点插入子节点，需要清除原来激活的节点
@@ -970,6 +1025,15 @@ class Render {
     }
     this.textEdit.hideEditTextBox()
     const list = appointNodes.length > 0 ? appointNodes : this.activeNodeList
+    if (
+      this.runAfterHydrate(
+        list,
+        () => this.insertMultiChildNode(appointNodes, childList),
+        'INSERT_MULTI_CHILD_NODE'
+      )
+    ) {
+      return
+    }
     const isRichText = this.hasRichTextPlugin()
     const { focusNewNode } = this.getNewNodeBehavior(false, true)
     const params = {
@@ -992,9 +1056,11 @@ class Render {
       // 第一个引用不需要重新创建uid，后面的需要重新创建，否则id会重复
       createNewId = true
       node.nodeData.children.push(...childList)
-      // 插入子节点时自动展开子节点
+      const live = node.nodeData.children.length
+      const prev = Number(node.getData && node.getData('childCount')) || 0
       node.setData({
-        expand: true
+        expand: true,
+        childCount: Math.max(live, prev + childList.length)
       })
     })
     if (focusNewNode) {
@@ -1193,6 +1259,11 @@ class Render {
 
   // 复制节点
   copy() {
+    if (
+      this.runAfterHydrate(this.activeNodeList, () => this.copy())
+    ) {
+      return
+    }
     this.beingCopyData = this.copyNode()
     if (!this.beingCopyData) return
     if (!this.mindMap.opt.disabledClipboard) {
@@ -1488,6 +1559,15 @@ class Render {
     list = list.filter(node => {
       return !node.isRoot
     })
+    if (
+      this.runAfterHydrate(
+        list,
+        () => this.removeCurrentNode(appointNodes),
+        'REMOVE_CURRENT_NODE'
+      )
+    ) {
+      return
+    }
     // 删除节点后需要激活的节点，如果只选中了一个节点，删除后激活其兄弟节点或者父节点
     let needActiveNode = this.getNextActiveNode(list)
     for (let i = 0; i < list.length; i++) {
@@ -1560,6 +1640,9 @@ class Render {
   //  剪切节点
   cutNode(callback) {
     if (this.activeNodeList.length <= 0) {
+      return
+    }
+    if (this.runAfterHydrate(this.activeNodeList, () => this.cutNode(callback), 'CUT_NODE')) {
       return
     }
     // 找出激活节点中的顶层节点列表，并过滤掉根节点
