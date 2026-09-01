@@ -659,7 +659,15 @@ class Base {
 
   // 获取节点实际存在几个子节点
   getNodeActChildrenLength(node) {
-    return node.nodeData.children && node.nodeData.children.length
+    const live =
+      node.nodeData && node.nodeData.children
+        ? node.nodeData.children.length
+        : 0
+    if (live > 0) return live
+    const collapsed =
+      node.getData && node.getData('expand') === false
+    if (!collapsed) return 0
+    return Number(node.getData && node.getData('childCount')) || 0
   }
 
   // 设置连线样式

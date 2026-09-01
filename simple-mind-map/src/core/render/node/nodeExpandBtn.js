@@ -81,6 +81,8 @@ function updateExpandBtnNode() {
         })
         // 计算子节点数量
         let count = this.sumNode(this.nodeData.children || [])
+        const lazy = Number(this.getData('childCount')) || 0
+        if (lazy > count) count = lazy
         if (typeof expandBtnNumHandler === 'function') {
           const res = expandBtnNumHandler(count, this)
           if (!isUndef(res)) {
