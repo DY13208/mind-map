@@ -591,8 +591,9 @@ export default {
     deleteFile: 'Xóa',
     renameFile: 'Đổi tên',
     noFiles:
-      'Chưa có tệp. Vào phòng cộng tác sẽ tự lưu vào thư mục mind-map trên COS.',
+      'Chưa có tệp. Vào phòng cộng tác sẽ tự lưu các nút vào cơ sở dữ liệu.',
     deleteConfirm: 'Xóa "{title}"? Không thể hoàn tác.',
+    openingFile: 'Đang mở tệp…',
     openSuccess: 'Đã mở tệp',
     fileDeleted: 'Đã xóa',
     renamed: 'Đã đổi tên'

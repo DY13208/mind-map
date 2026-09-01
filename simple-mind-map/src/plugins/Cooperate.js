@@ -11,6 +11,21 @@ import {
 } from '../utils/index'
 import { applyObjectToYMap, migrateLegacyNodes } from './cooperateYjs'
 
+function collapseDeepNodes(root, keepDepth = 2) {
+  const stack = root ? [{ node: root, depth: 0 }] : []
+  while (stack.length) {
+    const { node, depth } = stack.pop()
+    if (!node || !node.data) continue
+    const children = node.children || []
+    if (depth >= keepDepth && children.length > 0) {
+      node.data.expand = false
+    }
+    for (let i = 0; i < children.length; i++) {
+      stack.push({ node: children[i], depth: depth + 1 })
+    }
+  }
+}
+
 const STRUCTURE_COMMANDS = {
   INSERT_NODE: true,
   INSERT_MULTI_NODE: true,
@@ -72,6 +87,7 @@ class Cooperate {
     this.pendingRemoteStructure = false
     this.suppressLocalUntil = 0
     this.recentDeleted = new Map()
+    this.expectRemoteDoc = false
     this.localOrigin = { source: 'simple-mind-map-cooperate' }
     // 绑定事件
     this.bindEvent()
@@ -153,6 +169,10 @@ class Cooperate {
     }
   }
 
+  setExpectRemoteDoc(value) {
+    this.expectRemoteDoc = !!value
+  }
+
   applySyncedDoc() {
     this.ymap = this.ydoc.getMap()
     migrateLegacyNodes(this.ymap)
@@ -167,15 +187,20 @@ class Cooperate {
     this.ymap.observeDeep(this.onObserve)
     const remoteSize = [...this.ymap.keys()].length
     if (remoteSize > 0) {
-      const hadLocalDoc = !!this.currentData
       const data = this.ymap.toJSON()
       this.currentData = data
       this.enableLargeMapMode(remoteSize)
       const res = transformObjectToTreeData(data)
       if (res) {
+        if (remoteSize >= 200) collapseDeepNodes(res, 2)
         this.applyRemoteTree(res)
       }
-      if (hadLocalDoc) this.flushLocalNow()
+      this.expectRemoteDoc = false
+      this.pendingInitData = null
+      return
+    }
+    if (this.expectRemoteDoc) {
+      this.expectRemoteDoc = false
       return
     }
     if (this.pendingInitData) {
@@ -490,7 +515,8 @@ class Cooperate {
     }
     this.isApplyingRemote = true
     const done = () => {
-      this.suppressLocalUntil = Date.now() + 250
+      this.suppressLocalUntil =
+        Date.now() + (this.largeMapModeEnabled ? 2000 : 250)
       this.isApplyingRemote = false
       if (this.pendingRemoteTree) {
         const next = this.pendingRemoteTree

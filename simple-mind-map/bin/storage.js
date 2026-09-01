@@ -3,6 +3,7 @@ const { Pool } = require('pg')
 const COS = require('cos-nodejs-sdk-v5')
 const Y = require('yjs')
 const { setPersistence, getYDoc, docs } = require('y-websocket/bin/utils')
+const { applyObjectToDoc } = require('./collabYjs')
 
 const pool = new Pool({
   host: process.env.PGHOST,
@@ -159,20 +160,12 @@ function cosKey(roomKey) {
   return `${location}/${safeRoomKey(roomKey)}.yjs`
 }
 
-function titleFromDoc(ydoc) {
+function titleFromObj(obj) {
   try {
-    let root = null
-    for (const item of ydoc.getMap().values()) {
-      const isRoot = item instanceof Y.Map ? item.get('isRoot') : item && item.isRoot
-      if (isRoot) {
-        root = item
-        break
-      }
-    }
-    const data = root instanceof Y.Map ? root.get('data') : root && root.data
-    const raw = data instanceof Y.Map ? data.get('text') : data && data.text
+    const root = Object.values(obj || {}).find(item => item && item.isRoot)
+    const raw = root && root.data && root.data.text
     if (!raw) return '未命名'
-    const text = (raw instanceof Y.Text ? raw.toString() : String(raw))
+    const text = String(raw)
       .replace(/<[^>]+>/g, '')
       .replace(/\s+/g, ' ')
       .trim()
@@ -180,6 +173,48 @@ function titleFromDoc(ydoc) {
   } catch (e) {
     return '未命名'
   }
+}
+
+function nodesFromJson(value) {
+  if (!value) return null
+  try {
+    const obj = typeof value === 'string' ? JSON.parse(value) : value
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null
+    return Object.keys(obj).length ? obj : null
+  } catch (e) {
+    return null
+  }
+}
+
+function payloadToObject(payload) {
+  if (!payload || payload.type === 'empty') return null
+  if (payload.type === 'nodes') return nodesFromJson(payload.nodes)
+  if (payload.type === 'yjs' && payload.buf && payload.buf.length) {
+    const tmp = new Y.Doc({ gc: true })
+    try {
+      Y.applyUpdate(
+        tmp,
+        Buffer.isBuffer(payload.buf)
+          ? payload.buf
+          : new Uint8Array(payload.buf)
+      )
+      return nodesFromJson(tmp.getMap().toJSON())
+    } finally {
+      try {
+        tmp.destroy()
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+  return null
+}
+
+function applyPayload(ydoc, payload) {
+  const obj = payloadToObject(payload)
+  if (!obj) return null
+  applyObjectToDoc(ydoc, obj, { replace: true, previousObject: {} })
+  return obj
 }
 
 function cosCall(method, params) {
@@ -239,17 +274,42 @@ function normalizeTitle(title) {
 
 async function upsertRoom(roomKey, title, options = {}) {
   const preserveExistingTitle = options.preserveExistingTitle === true
+  const nodes = nodesFromJson(options.nodes)
   const res = await pool.query(
-    `insert into rooms (room_key, title, cos_key, updated_at)
-     values ($1, $2, $3, now())
+    `insert into rooms (room_key, title, cos_key, nodes, updated_at)
+     values ($1, $2, $3, $4::jsonb, now())
      on conflict (room_key) do update set
-       title = case when $4 then rooms.title else excluded.title end,
+       title = case when $5 then rooms.title else excluded.title end,
        cos_key = excluded.cos_key,
+       nodes = case when $6 then excluded.nodes else rooms.nodes end,
        updated_at = now()
      returning room_key, title, cos_key, created_at, updated_at`,
-    [roomKey, normalizeTitle(title), cosKey(roomKey), preserveExistingTitle]
+    [
+      roomKey,
+      normalizeTitle(title),
+      cosKey(roomKey),
+      nodes ? JSON.stringify(nodes) : null,
+      preserveExistingTitle,
+      !!nodes
+    ]
   )
   return res.rows[0]
+}
+
+function backupYjsToCos(roomKey, ydoc) {
+  const raw = Y.encodeStateAsUpdate(ydoc)
+  const shouldCompact = raw.byteLength >= COMPACT_MIN_BYTES
+  const buf = shouldCompact ? compactYjsUpdate(raw) : Buffer.from(raw)
+  if (shouldCompact && buf.length < raw.byteLength) {
+    console.log(
+      '[persist] compacted',
+      roomKey,
+      raw.byteLength,
+      '->',
+      buf.length
+    )
+  }
+  return putYjsBuffer(roomKey, buf)
 }
 
 async function saveDoc(roomKey, ydoc) {
@@ -259,33 +319,24 @@ async function saveDoc(roomKey, ydoc) {
   await acquireSaveSlot()
   try {
     if (isDeletedRoom(roomKey) || typeof ydoc.getMap !== 'function') return
-    const raw = Y.encodeStateAsUpdate(ydoc)
-    const shouldCompact = raw.byteLength >= COMPACT_MIN_BYTES
-    const buf = shouldCompact ? compactYjsUpdate(raw) : Buffer.from(raw)
-    if (shouldCompact && buf.length < raw.byteLength) {
-      console.log(
-        '[persist] compacted',
-        roomKey,
-        raw.byteLength,
-        '->',
-        buf.length
-      )
-    }
-    await putYjsBuffer(roomKey, buf)
-    if (isDeletedRoom(roomKey)) {
-      await purgeRoomStorage(roomKey)
-      return
-    }
-    // 导图节点文本和导图标题是两个独立概念。协作层保存文档时只应补全
-    // 首次创建的标题，不能覆盖用户通过 rename_map 设置的标题。
-    await upsertRoom(roomKey, titleFromDoc(ydoc), {
-      preserveExistingTitle: true
+    const obj = ydoc.getMap().toJSON()
+    if (!obj || !Object.keys(obj).length) return
+    // 当前树快照进 PG。打开大图走这份数据，不再等 COS 灌带历史的 yjs 胀包。
+    await upsertRoom(roomKey, titleFromObj(obj), {
+      preserveExistingTitle: true,
+      nodes: obj
     })
     if (isDeletedRoom(roomKey)) {
       await purgeRoomStorage(roomKey)
       return
     }
     setSaveState(roomKey, 'saved')
+    const nodeCount = Object.keys(obj).length
+    if (nodeCount < LARGE_MAP_NODES) {
+      backupYjsToCos(roomKey, ydoc).catch(err => {
+        console.error('[persist] cos backup failed', roomKey, err.message)
+      })
+    }
   } catch (err) {
     setSaveState(
       roomKey,
@@ -338,15 +389,26 @@ function scheduleSave(roomKey, ydoc) {
   )
 }
 
+async function loadPersistedPayload(roomKey) {
+  const res = await pool.query('select nodes from rooms where room_key = $1', [
+    roomKey
+  ])
+  const nodes = nodesFromJson(res.rows[0] && res.rows[0].nodes)
+  if (nodes) return { type: 'nodes', nodes }
+  const buf = await getYjsBuffer(roomKey)
+  if (buf && buf.length) return { type: 'yjs', buf }
+  return { type: 'empty' }
+}
+
 async function preloadRoom(roomKey) {
   if (isDeletedRoom(roomKey)) {
     throw new Error('room deleted')
   }
   if (preloadCache.has(roomKey)) return preloadCache.get(roomKey)
-  const task = getYjsBuffer(roomKey)
-    .then(buf => {
-      preloadCache.set(roomKey, buf)
-      return buf
+  const task = loadPersistedPayload(roomKey)
+    .then(payload => {
+      preloadCache.set(roomKey, payload)
+      return payload
     })
     .catch(err => {
       preloadCache.delete(roomKey)
@@ -359,11 +421,9 @@ async function preloadRoom(roomKey) {
 async function ensureDoc(roomKey) {
   const key = String(roomKey || '')
   cancelIdleEvict(key)
-  const buf = await preloadRoom(key)
+  const payload = await preloadRoom(key)
   const ydoc = getYDoc(key)
-  if (buf && buf.length && ydoc.getMap().size === 0) {
-    Y.applyUpdate(ydoc, new Uint8Array(buf))
-  }
+  if (ydoc.getMap().size === 0) applyPayload(ydoc, payload)
   return ydoc
 }
 
@@ -391,13 +451,19 @@ function attachPersistence() {
     bindState: (docName, ydoc) => {
       const roomKey = decodeURIComponent(docName)
       const cached = preloadCache.get(roomKey)
-      const buf = Buffer.isBuffer(cached) ? cached : null
-      if (buf && buf.length) {
-        Y.applyUpdate(ydoc, new Uint8Array(buf))
-      }
-      // Y.Doc 已接管状态，不再同时长期保留一份可能很大的二进制快照。
+      const payload =
+        cached && typeof cached.then !== 'function' ? cached : null
+      const obj = applyPayload(ydoc, payload)
       preloadCache.delete(roomKey)
       ydoc.on('update', () => scheduleSave(roomKey, ydoc))
+      if (payload && payload.type === 'yjs' && obj) {
+        upsertRoom(roomKey, titleFromObj(obj), {
+          preserveExistingTitle: true,
+          nodes: obj
+        }).catch(err => {
+          console.error('[persist] pg snapshot failed', roomKey, err.message)
+        })
+      }
     },
     writeState: async (docName, ydoc) => {
       const roomKey = decodeURIComponent(docName)
@@ -417,9 +483,13 @@ async function initSchema() {
       room_key text primary key,
       title text not null default '未命名',
       cos_key text not null,
+      nodes jsonb,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     )
+  `)
+  await pool.query(`
+    alter table rooms add column if not exists nodes jsonb
   `)
   await pool.query(`
     create table if not exists room_tombstones (
@@ -550,5 +620,7 @@ module.exports = {
   queueSave,
   scheduleIdleEvict,
   cancelIdleEvict,
-  scheduleSave
+  scheduleSave,
+  applyPayload,
+  payloadToObject
 }

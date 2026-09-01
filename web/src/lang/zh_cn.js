@@ -571,8 +571,9 @@ export default {
     openFile: '打开',
     deleteFile: '删除',
     renameFile: '重命名',
-    noFiles: '还没有保存的文件。进入协同后会自动存到 COS 的 mind-map 文件夹',
+    noFiles: '还没有保存的文件。进入协同后会自动把节点存进数据库',
     deleteConfirm: '确定删除「{title}」？删除后无法恢复。',
+    openingFile: '正在打开文件…',
     openSuccess: '已打开该文件',
     fileDeleted: '已删除',
     renamed: '已重命名'

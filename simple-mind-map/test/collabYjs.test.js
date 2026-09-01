@@ -257,6 +257,34 @@ function testFullTreeTruncates() {
   assert.ok(stats.count <= 5)
 }
 
+function testPgSnapshotHydratesCompactDoc() {
+  const bloated = new Y.Doc()
+  const snapshot = {
+    root: node('root', 'Root', ['a', 'b']),
+    a: node('a', 'A'),
+    b: node('b', 'B', ['c']),
+    c: node('c', 'C')
+  }
+  applyObjectToDoc(bloated, snapshot, { replace: true })
+  applyObjectToDoc(
+    bloated,
+    { ...snapshot, a: node('a', 'A1') },
+    { previousObject: snapshot }
+  )
+  applyObjectToDoc(
+    bloated,
+    { ...snapshot, a: node('a', 'A2') },
+    { previousObject: { ...snapshot, a: node('a', 'A1') } }
+  )
+  const nodes = bloated.getMap().toJSON()
+  const live = new Y.Doc()
+  applyObjectToDoc(live, nodes, { replace: true, previousObject: {} })
+  assert.strictEqual(live.getMap().toJSON().a.data.text, 'A2')
+  assert.deepStrictEqual(live.getMap().toJSON().root.children, ['a', 'b'])
+  assert.strictEqual(live.getMap().size, 4)
+}
+
 testAddNodeOnDocDoesNotCloneWholeMap()
 testFullTreeTruncates()
+testPgSnapshotHydratesCompactDoc()
 console.log('collabYjs tests passed')

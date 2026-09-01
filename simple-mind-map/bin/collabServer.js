@@ -11,7 +11,8 @@ const {
   preloadRoom,
   handleApi,
   safeRoomKey,
-  isDeletedRoom
+  isDeletedRoom,
+  getRoom
 } = require('./storage')
 const {
   initAuth,
@@ -82,14 +83,31 @@ wss.on('connection', (conn, req) => {
   // 等不到 synced。先暂停底层 socket，装好处理器后再恢复读取。
   const socket = conn._socket
   if (socket && typeof socket.pause === 'function') socket.pause()
+  const resume = () => {
+    if (socket && typeof socket.resume === 'function') socket.resume()
+  }
   preloadRoom(docName)
+    .then(async payload => {
+      if (conn.readyState !== WebSocket.OPEN) return
+      if (!payload || payload.type === 'empty') {
+        const row = await getRoom(docName)
+        if (row) {
+          resume()
+          conn.close(1011, 'saved map missing content')
+          return
+        }
+      }
+      setupWSConnection(conn, req, { gc: true, docName })
+      resume()
+    })
     .catch(err => {
       console.error('[persist] preload failed', docName, err.message)
-    })
-    .finally(() => {
-      if (conn.readyState !== WebSocket.OPEN) return
-      setupWSConnection(conn, req, { gc: true, docName })
-      if (socket && typeof socket.resume === 'function') socket.resume()
+      resume()
+      try {
+        conn.close(1011, 'load failed')
+      } catch (e) {
+        // ignore
+      }
     })
 })
 
