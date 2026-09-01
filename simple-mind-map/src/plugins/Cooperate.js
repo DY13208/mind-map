@@ -2060,7 +2060,9 @@ class Cooperate {
     const pending = []
     const list = (renderer && renderer.activeNodeList) || []
     list.forEach(node => this.collectUnpushedNodes(node, pending))
-    if (!pending.length && renderer && renderer.root) {
+    // Always scan the full tree too. Relying only on the active node missed
+    // inserts when selection moved, or when the command finished on a parent.
+    if (renderer && renderer.root) {
       this.collectUnpushedNodes(renderer.root, pending)
     }
     const seen = new Set()
@@ -2084,6 +2086,9 @@ class Cooperate {
         item => item && item.data && item.data.uid === uid
       )
       try {
+        if (!parent) {
+          throw new Error('missing parent for insert')
+        }
         await this.httpAddNode({
           parent,
           uid,
@@ -2100,6 +2105,8 @@ class Cooperate {
           this.recentPushed.set(uid, Date.now())
         } else {
           console.error('[mind-map] add node failed', err)
+          // Retry shortly; otherwise the node stays local-only and peers never see it.
+          this.scheduleHttpStructureSync(600)
         }
       }
     }
@@ -2475,16 +2482,48 @@ class Cooperate {
             changed = true
           }
           if (treeNode.data) {
-            treeNode.data.childCount = Math.max(
+            const nextCount = Math.max(
               next.length,
               serverKids.length,
               Number(item.data && item.data.childCount) || 0
             )
+            if (Number(treeNode.data.childCount || 0) !== nextCount) {
+              treeNode.data.childCount = nextCount
+              changed = true
+            } else {
+              treeNode.data.childCount = nextCount
+            }
           }
         })
         if (missing.length) {
+          let byUid = new Map()
           const extraNodes = await this.fetchHttpNodes(missing.slice(0, 800))
-          const byUid = new Map(extraNodes.map(item => [item.uid, item]))
+          extraNodes.forEach(item => byUid.set(item.uid, item))
+          // Fallback: parent subtree when batch node fetch misses newly inserted kids.
+          for (const [parentUid, childIds] of missingFor) {
+            const stillMissing = childIds.filter(id => !byUid.has(id))
+            if (!stillMissing.length || !this.httpFetchSubtree) continue
+            try {
+              const subtree = await this.httpFetchSubtree(parentUid, {
+                knownVersion: 0
+              })
+              ;(subtree && subtree.children ? subtree.children : []).forEach(
+                child => {
+                  const id = child && child.data && child.data.uid
+                  if (!id) return
+                  byUid.set(id, {
+                    uid: id,
+                    data: child.data || {},
+                    children: (child.children || [])
+                      .map(item => item && item.data && item.data.uid)
+                      .filter(Boolean)
+                  })
+                }
+              )
+            } catch (err) {
+              console.error('[mind-map] subtree fallback failed', err)
+            }
+          }
           missingFor.forEach((childIds, parentUid) => {
             const parent = this.findTreeNode(tree, parentUid)
             if (!parent) return
@@ -2498,13 +2537,25 @@ class Cooperate {
                   expand: false,
                   childCount: Array.isArray(item.children)
                     ? item.children.length
-                    : 0
+                    : Number((item.data && item.data.childCount) || 0)
                 },
                 children: []
               }))
             const before = (parent.children || []).length
             this.mergeHttpChildren(parent, stubs)
             if ((parent.children || []).length !== before) changed = true
+            // Keep local child order aligned with server when possible.
+            if (Array.isArray(parent.children) && childIds.length) {
+              const order = new Map(childIds.map((id, index) => [id, index]))
+              parent.children.sort((a, b) => {
+                const ai = order.get(a && a.data && a.data.uid)
+                const bi = order.get(b && b.data && b.data.uid)
+                if (ai == null && bi == null) return 0
+                if (ai == null) return 1
+                if (bi == null) return -1
+                return ai - bi
+              })
+            }
           })
         }
         if (changed) this.mindMap.render()
