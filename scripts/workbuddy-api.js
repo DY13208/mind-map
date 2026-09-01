@@ -35,6 +35,112 @@ function ensureWorkbuddySource(root) {
   return dir
 }
 
+function resolveCliScript(exePath) {
+  const base = path.dirname(exePath)
+  const candidates = [
+    path.join(base, 'resources', 'app.asar.unpacked', 'cli', 'bin', 'codebuddy'),
+    path.join(base, 'resources', 'app.asar', 'cli', 'bin', 'codebuddy')
+  ]
+  return candidates.find(item => fs.existsSync(item)) || candidates[0]
+}
+
+function uniquePaths(items) {
+  const seen = new Set()
+  const result = []
+  for (const item of items) {
+    if (!item) continue
+    const resolved = path.resolve(item)
+    const key = resolved.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(resolved)
+  }
+  return result
+}
+
+function discoverWorkbuddyFromRegistry() {
+  if (process.platform !== 'win32') return []
+  const keys = [
+    'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\WorkBuddy',
+    'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\WorkBuddy',
+    'HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\WorkBuddy'
+  ]
+  const dirs = []
+  for (const key of keys) {
+    try {
+      const out = execSync(`reg query "${key}" /v InstallLocation`, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore']
+      })
+      const match = out.match(/InstallLocation\s+REG_\w+\s+(.+)/i)
+      if (match && match[1]) dirs.push(match[1].trim())
+    } catch (e) {
+      // key missing or unreadable
+    }
+  }
+  return dirs.map(dir => path.join(dir, 'WorkBuddy.exe'))
+}
+
+function discoverWorkbuddyFromPath() {
+  if (process.platform !== 'win32') return []
+  try {
+    const out = execSync('where WorkBuddy.exe', {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    })
+    return out
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean)
+  } catch (e) {
+    return []
+  }
+}
+
+function discoverWorkbuddyFromCommonDirs() {
+  const localAppData =
+    process.env.LOCALAPPDATA ||
+    path.join(process.env.USERPROFILE || '', 'AppData', 'Local')
+  const roots = uniquePaths([
+    path.join(localAppData, 'Programs'),
+    process.env.ProgramFiles,
+    process.env['ProgramFiles(x86)'],
+    'C:\\Program Files',
+    'C:\\Program Files (x86)'
+  ])
+  return roots.map(root => path.join(root, 'WorkBuddy', 'WorkBuddy.exe'))
+}
+
+function findWorkbuddyInstall() {
+  const candidates = uniquePaths([
+    process.env.WORKBUDDY_EXE,
+    ...discoverWorkbuddyFromRegistry(),
+    ...discoverWorkbuddyFromPath(),
+    ...discoverWorkbuddyFromCommonDirs()
+  ])
+  for (const exe of candidates) {
+    if (fs.existsSync(exe)) {
+      return { exe, cli: resolveCliScript(exe) }
+    }
+  }
+  return null
+}
+
+function readProxyLogTail(dir, maxLines = 8) {
+  const logFile = path.join(dir, 'runtime', 'proxy.out.log')
+  if (!fs.existsSync(logFile)) return ''
+  try {
+    const lines = fs
+      .readFileSync(logFile, 'utf8')
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean)
+    return lines.slice(-maxLines).join('\n')
+  } catch (e) {
+    return ''
+  }
+}
+
 function findPython() {
   const candidates = [
     ['python'],
@@ -150,6 +256,16 @@ async function ensureWorkbuddyApi({
 
   ensureEnvFile(dir, apiKey)
 
+  const install = findWorkbuddyInstall()
+  if (!install) {
+    return {
+      ok: false,
+      reason:
+        '未找到 WorkBuddy 客户端。请安装 WorkBuddy，或在 workbuddy_to_api/.env 中设置 WORKBUDDY_EXE',
+      dir
+    }
+  }
+
   const args = [
     path.join(dir, 'workbuddy_to_api.py'),
     '--background',
@@ -158,7 +274,11 @@ async function ensureWorkbuddyApi({
     '--port',
     String(port),
     '--cwd',
-    projectRoot
+    projectRoot,
+    '--workbuddy-exe',
+    install.exe,
+    '--cli-script',
+    install.cli
   ]
   if (fs.existsSync(mcpConfig)) {
     args.push('--mcp-config', mcpConfig)
@@ -171,9 +291,18 @@ async function ensureWorkbuddyApi({
   })
   if (result.status !== 0) {
     const detail = `${result.stdout || ''}${result.stderr || ''}`.trim()
+    const logTail = readProxyLogTail(dir)
+    const fatal =
+      logTail.match(/FileNotFoundError[^\n]*/)?.[0] ||
+      logTail.match(/\[fatal\][^\n]*/)?.[0] ||
+      ''
     return {
       ok: false,
-      reason: detail || 'workbuddy_to_api 后台启动失败',
+      reason:
+        fatal ||
+        detail ||
+        logTail ||
+        'workbuddy_to_api 后台启动失败',
       dir
     }
   }
@@ -217,6 +346,7 @@ module.exports = {
   DEFAULT_PORT,
   DEFAULT_API_KEY,
   resolveWorkbuddyDir,
+  findWorkbuddyInstall,
   ensureWorkbuddyApi,
   stopWorkbuddyApi,
   checkHealth,

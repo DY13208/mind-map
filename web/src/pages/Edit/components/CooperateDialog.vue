@@ -133,6 +133,8 @@ import {
   getFileExport,
   locateFileNode,
   getFileNodes,
+  getMapVersion,
+  getMapOperations,
   addFileNode,
   patchFileNode,
   deleteFileNode
@@ -591,25 +593,35 @@ export default {
       this._seenHttpChanges.set(key, nonce)
       const cooperate = this.mindMap && this.mindMap.cooperate
       if (!cooperate || !this.httpCollab) return
+      const version = Number(change.version)
+      if (Number.isFinite(version) && version > 0) {
+        cooperate.recoverHttpCollab(version).catch(() => {})
+        return
+      }
       cooperate
         .refreshVisibleFromHttp(change.updatedAt, { force: true })
         .catch(() => {})
     },
 
-    publishHttpChange(updatedAt) {
+    publishHttpChange(result = {}) {
       if (!this.provider || !this._presenceProvider) return
       this.provider.awareness.setLocalStateField('documentChange', {
         roomKey: this.roomName,
         userId: this.userId,
         clientId: this.provider.awareness.clientID,
-        updatedAt: updatedAt || '',
+        version: Number(result.version) || 0,
+        updatedAt: result.updated_at || result.updatedAt || '',
         nonce: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       })
     },
 
     notifyHttpMutation(request) {
       return Promise.resolve(request).then(result => {
-        this.publishHttpChange(result && result.updated_at)
+        const cooperate = this.mindMap && this.mindMap.cooperate
+        if (cooperate && result && result.version != null) {
+          cooperate.acknowledgeLocalVersion(result.version)
+        }
+        this.publishHttpChange(result || {})
         return result
       })
     },
@@ -683,10 +695,14 @@ export default {
           this.saveStatus = 'saved'
           this.saveError = ''
         }
-        // 落盘中/失败时 live 树可能已经变了，不能等 saved 才拉别人的增删。
+        // 用房间 version 补偿，不再把 updated_at 当作协作一致性依据。
         const cooperate = this.mindMap && this.mindMap.cooperate
-        if (this.httpCollab && cooperate && data.updated_at) {
-          cooperate.refreshVisibleFromHttp(data.updated_at).catch(() => {})
+        if (this.httpCollab && cooperate) {
+          if (data.version != null && Number.isFinite(Number(data.version))) {
+            cooperate.recoverHttpCollab(data.version).catch(() => {})
+          } else if (data.updated_at) {
+            cooperate.refreshVisibleFromHttp(data.updated_at).catch(() => {})
+          }
         }
       } catch (err) {
         this.saveStatus = 'saveError'
@@ -818,12 +834,15 @@ export default {
       cooperate.setHttpCollab({
         roomKey,
         nodeCount: preview.node_count,
+        version: preview.version || 0,
         updatedAt: preview.updated_at,
         fetchSubtree: uid => getFileSubtree(roomKey, uid),
         fetchDeepSubtree: uid => getFileSubtree(roomKey, uid, { deep: true }),
         fetchExportTree: () => getFileExport(roomKey),
         fetchNodes: uids => getFileNodes(roomKey, uids),
         fetchLocate: uid => locateFileNode(roomKey, uid),
+        fetchOperations: after => getMapOperations(roomKey, after),
+        fetchVersion: () => getMapVersion(roomKey),
         patchNode: (uid, body) =>
           this.notifyHttpMutation(patchFileNode(roomKey, uid, body)),
         addNode: body =>

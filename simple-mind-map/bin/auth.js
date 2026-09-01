@@ -800,6 +800,27 @@ async function deleteRequestSession(req) {
   ])
 }
 
+async function authenticateWebsocketRequest(req) {
+  if (!config.enabled) return { id: 'anonymous', name: 'anonymous' }
+  await initAuth()
+  const authorization = String(req.headers.authorization || '')
+  if (safeEqualString(authorization, `Bearer ${config.mcpToken}`)) {
+    return { id: 'mcp-service', name: 'MCP Service', service: true }
+  }
+  if (!isAllowedOrigin(req)) {
+    const err = new Error('Forbidden')
+    err.statusCode = 403
+    throw err
+  }
+  const user = await authenticateRequest(req)
+  if (!user) {
+    const err = new Error('Unauthorized')
+    err.statusCode = 401
+    throw err
+  }
+  return user
+}
+
 async function requireAuthenticatedRequest(req, res) {
   if (!config.enabled) return true
   const authorization = String(req.headers.authorization || '')
@@ -1081,6 +1102,7 @@ module.exports = {
   isAuthEnabled,
   handleAuthApi,
   authenticateRequest,
+  authenticateWebsocketRequest,
   requireAuthenticatedRequest,
   applyCorsHeaders,
   isAllowedOrigin,
