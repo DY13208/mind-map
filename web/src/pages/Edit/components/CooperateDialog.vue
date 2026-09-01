@@ -122,6 +122,7 @@ import { getRuntimeConfig } from '@/utils/runtimeConfig'
 import { getCurrentUser } from '@/utils/auth'
 import {
   listFiles,
+  createFile as createFileApi,
   renameFile as renameFileApi,
   deleteFile as deleteFileApi,
   getSaveStatus,
@@ -280,7 +281,33 @@ export default {
     },
 
     createRoom() {
-      this.roomName = 'room-' + Math.random().toString(36).slice(2, 8)
+      this.createBlankRoom()
+    },
+
+    async createBlankRoom() {
+      try {
+        const { value } = await this.$prompt(
+          this.$t('cooperate.roomTitlePlaceholder'),
+          this.$t('cooperate.newRoom'),
+          {
+            inputValue: this.$t('cooperate.unnamed'),
+            inputValidator: val => !!String(val || '').trim()
+          }
+        )
+        const title =
+          String(value || '')
+            .trim()
+            .slice(0, 80) || this.$t('cooperate.unnamed')
+        if (this.connected) this.leave({ silent: true })
+        const created = await createFileApi({ title })
+        this.roomName = created.room_key
+        this.syncRoomQuery()
+        await this.openSavedRoom({ silent: false })
+        this.loadFiles()
+      } catch (err) {
+        if (err === 'cancel' || err === 'close') return
+        this.$message.error(err.message || this.$t('cooperate.createFailed'))
+      }
     },
 
     tryAutoJoin() {
@@ -759,6 +786,59 @@ export default {
       })
     },
 
+    isNotFound(err) {
+      return /not found|404/i.test(String((err && err.message) || err || ''))
+    },
+
+    async ensureRoomFile(roomKey, title) {
+      try {
+        return await createFileApi({
+          room_key: roomKey,
+          title: title || this.$t('cooperate.unnamed')
+        })
+      } catch (err) {
+        if (/已存在|409|exist/i.test(String((err && err.message) || ''))) {
+          return null
+        }
+        throw err
+      }
+    },
+
+    async applyPreview(preview, silent) {
+      const cooperate = this.mindMap.cooperate
+      this.enableHttpCollab(preview)
+      const httpCollab = !!(preview.http_collab || preview.collapsed)
+      if (!httpCollab) cooperate.httpCollabMode = false
+      cooperate.setPreviewApplied(true)
+      await new Promise(resolve => {
+        let settled = false
+        const done = () => {
+          if (settled) return
+          settled = true
+          this.mindMap.off('node_tree_render_end', done)
+          resolve()
+        }
+        this.mindMap.on('node_tree_render_end', done)
+        this.$bus.$emit('setData', preview.tree, {
+          quiet: true,
+          fromSaved: true
+        })
+        if (typeof cooperate.markTreeUids === 'function') {
+          cooperate.markTreeUids(preview.tree)
+        }
+        setTimeout(done, 4000)
+      })
+      if (!silent) {
+        this.$message.success(this.$t('cooperate.openSuccess'))
+      }
+      if (httpCollab) {
+        cooperate.setPreviewApplied(false)
+        this.markHttpConnected()
+        return true
+      }
+      return false
+    },
+
     async openSavedRoom(options = {}) {
       const silent = !!options.silent
       if (this.connected) {
@@ -777,38 +857,17 @@ export default {
       this.setCooperateStatus('connecting')
       cooperate.setExpectRemoteDoc(true)
       try {
-        const preview = await getFilePreview(roomKey, 2)
+        let preview = null
+        try {
+          preview = await getFilePreview(roomKey, 2)
+        } catch (err) {
+          if (!this.isNotFound(err)) throw err
+          await this.ensureRoomFile(roomKey)
+          preview = await getFilePreview(roomKey, 2)
+        }
         if (preview && preview.tree) {
-          this.enableHttpCollab(preview)
-          const httpCollab = !!(preview.http_collab || preview.collapsed)
-          if (!httpCollab) cooperate.httpCollabMode = false
-          cooperate.setPreviewApplied(true)
-          await new Promise(resolve => {
-            let settled = false
-            const done = () => {
-              if (settled) return
-              settled = true
-              this.mindMap.off('node_tree_render_end', done)
-              resolve()
-            }
-            this.mindMap.on('node_tree_render_end', done)
-            this.$bus.$emit('setData', preview.tree, {
-              quiet: true,
-              fromSaved: true
-            })
-            if (typeof cooperate.markTreeUids === 'function') {
-              cooperate.markTreeUids(preview.tree)
-            }
-            setTimeout(done, 4000)
-          })
-          if (!silent) {
-            this.$message.success(this.$t('cooperate.openSuccess'))
-          }
-          if (httpCollab) {
-            cooperate.setPreviewApplied(false)
-            this.markHttpConnected()
-            return
-          }
+          const connected = await this.applyPreview(preview, silent)
+          if (connected) return
         }
       } catch (err) {
         cooperate.setPreviewApplied(false)

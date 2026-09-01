@@ -76,6 +76,67 @@ function keepHttpChild(uid, serverKids, lastPushed, recentPushed) {
   return !!(at && Date.now() - at < RECENT_PUSH_GRACE_MS)
 }
 
+function indexMindTree(root, out = new Map(), parent = null, index = 0) {
+  if (!root || !root.data) return out
+  const uid = root.data.uid
+  const childUids = (root.children || [])
+    .map(child => child && child.data && child.data.uid)
+    .filter(Boolean)
+  if (uid) {
+    out.set(uid, {
+      parent,
+      index,
+      data: root.data,
+      childUids
+    })
+  }
+  ;(root.children || []).forEach((child, i) => {
+    indexMindTree(child, out, uid || parent, i)
+  })
+  return out
+}
+
+function treeDataPlain(data) {
+  if (!data) return ''
+  return data.richText ? getTextFromHtml(data.text) : String(data.text || '')
+}
+
+function diffHttpHistoryTrees(previous, current) {
+  const prev = indexMindTree(previous)
+  const curr = indexMindTree(current)
+  const removed = []
+  const added = []
+  const moved = []
+  const updated = []
+  prev.forEach((info, uid) => {
+    if (uid === 'root' || curr.has(uid)) return
+    const childUids = info.childUids || []
+    const keepChildren =
+      childUids.length > 0 && childUids.every(id => curr.has(id))
+    if (info.parent && !curr.has(info.parent) && !keepChildren) return
+    removed.push({ uid, keepChildren })
+  })
+  curr.forEach((info, uid) => {
+    if (uid === 'root') return
+    const before = prev.get(uid)
+    if (!before) {
+      added.push({ uid, parent: info.parent, index: info.index, data: info.data })
+      return
+    }
+    if (before.parent !== info.parent || before.index !== info.index) {
+      moved.push({ uid, parent: info.parent, index: info.index })
+    }
+    if (
+      treeDataPlain(before.data) !== treeDataPlain(info.data) ||
+      String((before.data && before.data.note) || '') !==
+        String((info.data && info.data.note) || '')
+    ) {
+      updated.push({ uid, data: info.data })
+    }
+  })
+  return { removed, added, moved, updated }
+}
+
 // 协同插件
 class Cooperate {
   constructor(opt) {
@@ -139,6 +200,7 @@ class Cooperate {
     this.httpInsertPromise = null
     this.httpInsertRescan = false
     this.httpHydrating = false
+    this.httpHistorySyncing = false
     this.localOrigin = { source: 'simple-mind-map-cooperate' }
     // 绑定事件
     this.bindEvent()
@@ -725,6 +787,7 @@ class Cooperate {
       return
     }
     if (this.httpCollabMode) {
+      if (this.httpHistorySyncing) return
       this.scheduleHttpTextSync()
       // Some large-map commands finish through a deferred render path. In that
       // path afterExecCommand can be intentionally ignored while the renderer
@@ -746,6 +809,7 @@ class Cooperate {
   }
 
   onAfterExecCommand(name) {
+    const historyCmd = name === 'BACK' || name === 'FORWARD'
     if (
       this.isSetData ||
       this.isApplyingRemote ||
@@ -754,6 +818,7 @@ class Cooperate {
       this.httpHydrating ||
       (this.mindMap.renderer && this.mindMap.renderer._lazyCommandPending)
     ) {
+      if (this.httpCollabMode && historyCmd) this.httpHistorySyncing = false
       return
     }
     if (this.httpCollabMode) {
@@ -935,6 +1000,7 @@ class Cooperate {
     this.recentPushed = new Map()
     this.recentHttpDeleted = new Map()
     this.pendingHttpDeletes = []
+    this.httpHistorySyncing = false
     clearTimeout(this.httpTextTimer)
     this.httpTextTimer = null
     clearTimeout(this.httpStructureTimer)
@@ -1163,6 +1229,10 @@ class Cooperate {
 
   onBeforeExecCommand(name) {
     if (!this.httpCollabMode) return
+    if (name === 'BACK' || name === 'FORWARD') {
+      this.httpHistorySyncing = true
+      return
+    }
     if (
       name !== 'REMOVE_NODE' &&
       name !== 'REMOVE_CURRENT_NODE' &&
@@ -1177,6 +1247,14 @@ class Cooperate {
   }
 
   onHttpCommand(name) {
+    if (name === 'BACK' || name === 'FORWARD') {
+      try {
+        this.syncHttpUndoRedo(name)
+      } finally {
+        this.httpHistorySyncing = false
+      }
+      return
+    }
     if (
       name === 'REMOVE_NODE' ||
       name === 'REMOVE_CURRENT_NODE' ||
@@ -1241,6 +1319,88 @@ class Cooperate {
         console.error('[mind-map] structure sync failed', err)
       })
     }, delay)
+  }
+
+  historyTreePayload(data) {
+    const text = treeDataPlain(data)
+    const payload = {
+      text,
+      note: (data && data.note) || ''
+    }
+    ;[
+      'image',
+      'imageTitle',
+      'imageSize',
+      'icon',
+      'tag',
+      'hyperlink',
+      'hyperlinkTitle',
+      'outerFrame',
+      'generalization'
+    ].forEach(key => {
+      const value = data && data[key]
+      if (value !== undefined && value !== null && value !== '') {
+        payload[key] = value
+      }
+    })
+    return payload
+  }
+
+  syncHttpUndoRedo(name) {
+    if (!this.httpCollabMode) return
+    const command = this.mindMap.command
+    if (!command || !Array.isArray(command.history)) {
+      this.scheduleHttpStructureSync(0)
+      return
+    }
+    const idx = command.activeHistoryIndex
+    const other = name === 'BACK' ? idx + 1 : idx - 1
+    const currentStr = command.history[idx]
+    const previousStr = command.history[other]
+    if (!currentStr || !previousStr) {
+      this.scheduleHttpStructureSync(0)
+      return
+    }
+    let current
+    let previous
+    try {
+      current = JSON.parse(currentStr)
+      previous = JSON.parse(previousStr)
+    } catch (err) {
+      this.scheduleHttpStructureSync(0)
+      return
+    }
+    const diff = diffHttpHistoryTrees(previous, current)
+    diff.removed.forEach(item => {
+      this.forgetHttpUid(item.uid)
+      this.recentHttpDeleted.set(item.uid, Date.now())
+      if (!this.httpDeleteNode) return
+      this.httpDeleteNode(item.uid, { keepChildren: item.keepChildren }).catch(
+        () => {}
+      )
+    })
+    diff.added.forEach(item => {
+      this.recentHttpDeleted.delete(item.uid)
+    })
+    diff.moved.forEach(item => {
+      if (!this.httpPatchNode || !item.uid || !item.parent) return
+      this.httpPatchNode(item.uid, {
+        parent: item.parent,
+        index: item.index < 0 ? 0 : item.index
+      }).catch(err => console.error('[mind-map] undo move failed', err))
+    })
+    diff.updated.forEach(item => {
+      if (!this.httpPatchNode || !item.uid) return
+      const payload = this.historyTreePayload(item.data)
+      const snap = JSON.stringify(payload)
+      this.lastPushed[item.uid] = {
+        text: payload.text,
+        note: payload.note,
+        snap
+      }
+      this.httpPatchNode(item.uid, payload).catch(() => {})
+    })
+    if (diff.added.length) this.scheduleHttpStructureSync(0)
   }
 
   nodePlain(node) {

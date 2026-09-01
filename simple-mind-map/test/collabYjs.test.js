@@ -588,4 +588,120 @@ function testHttpRemoteDeleteDropsPushedChildren() {
 
 testHttpRemoteDeleteDropsPushedChildren()
 
+function indexMindTree(root, out = new Map(), parent = null, index = 0) {
+  if (!root || !root.data) return out
+  const uid = root.data.uid
+  const childUids = (root.children || [])
+    .map(child => child && child.data && child.data.uid)
+    .filter(Boolean)
+  if (uid) {
+    out.set(uid, { parent, index, data: root.data, childUids })
+  }
+  ;(root.children || []).forEach((child, i) => {
+    indexMindTree(child, out, uid || parent, i)
+  })
+  return out
+}
+
+function diffHttpHistoryTrees(previous, current) {
+  const prev = indexMindTree(previous)
+  const curr = indexMindTree(current)
+  const removed = []
+  const added = []
+  const moved = []
+  const updated = []
+  prev.forEach((info, uid) => {
+    if (uid === 'root' || curr.has(uid)) return
+    const childUids = info.childUids || []
+    const keepChildren =
+      childUids.length > 0 && childUids.every(id => curr.has(id))
+    if (info.parent && !curr.has(info.parent) && !keepChildren) return
+    removed.push({ uid, keepChildren })
+  })
+  curr.forEach((info, uid) => {
+    if (uid === 'root') return
+    const before = prev.get(uid)
+    if (!before) {
+      added.push({ uid, parent: info.parent, index: info.index })
+      return
+    }
+    if (before.parent !== info.parent || before.index !== info.index) {
+      moved.push({ uid, parent: info.parent, index: info.index })
+    }
+    if (String((before.data && before.data.text) || '') !== String((info.data && info.data.text) || '')) {
+      updated.push({ uid })
+    }
+  })
+  return { removed, added, moved, updated }
+}
+
+function testUndoAddDeletesOnlyNewNode() {
+  const before = {
+    data: { uid: 'root', text: 'R' },
+    children: [
+      { data: { uid: 'a', text: 'A' }, children: [] },
+      { data: { uid: 'n', text: 'New' }, children: [] }
+    ]
+  }
+  const after = {
+    data: { uid: 'root', text: 'R' },
+    children: [{ data: { uid: 'a', text: 'A' }, children: [] }]
+  }
+  const diff = diffHttpHistoryTrees(before, after)
+  assert.deepStrictEqual(
+    diff.removed.map(item => item.uid),
+    ['n']
+  )
+  assert.strictEqual(diff.removed[0].keepChildren, false)
+  assert.strictEqual(diff.added.length, 0)
+}
+
+testUndoAddDeletesOnlyNewNode()
+
+function testUndoInsertParentKeepsChildren() {
+  const before = {
+    data: { uid: 'root', text: 'R' },
+    children: [
+      {
+        data: { uid: 'p', text: 'Parent' },
+        children: [{ data: { uid: 'a', text: 'A' }, children: [] }]
+      }
+    ]
+  }
+  const after = {
+    data: { uid: 'root', text: 'R' },
+    children: [{ data: { uid: 'a', text: 'A' }, children: [] }]
+  }
+  const diff = diffHttpHistoryTrees(before, after)
+  assert.deepStrictEqual(
+    diff.removed.map(item => item.uid),
+    ['p']
+  )
+  assert.strictEqual(diff.removed[0].keepChildren, true)
+}
+
+testUndoInsertParentKeepsChildren()
+
+function testUndoTextAndMove() {
+  const before = {
+    data: { uid: 'root', text: 'R' },
+    children: [
+      { data: { uid: 'a', text: 'A2' }, children: [] },
+      { data: { uid: 'b', text: 'B' }, children: [] }
+    ]
+  }
+  const after = {
+    data: { uid: 'root', text: 'R' },
+    children: [
+      { data: { uid: 'b', text: 'B' }, children: [] },
+      { data: { uid: 'a', text: 'A1' }, children: [] }
+    ]
+  }
+  const diff = diffHttpHistoryTrees(before, after)
+  assert.ok(diff.moved.some(item => item.uid === 'a' && item.index === 1))
+  assert.ok(diff.updated.some(item => item.uid === 'a'))
+}
+
+testUndoTextAndMove()
+
 console.log('collabYjs tests passed')
