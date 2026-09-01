@@ -116,6 +116,7 @@ async function insertChild(roomKey, uid, text, extra = {}) {
       parent: extra.parent || 'root',
       uid,
       text,
+      index: extra.index,
       confirm_sop_change: true
     })
   })
@@ -259,6 +260,23 @@ async function testThousandVersions(roomKey) {
     const step = await insertChild(roomKey, `child-${i}`, `Child ${i}`)
     assert.strictEqual(step.response.status, 200, step.data.error)
     assert.strictEqual(step.data.version, i)
+    if (i === 198 || i === 200) {
+      const snap = await request(
+        `/api/maps/${encodeURIComponent(roomKey)}/snapshot?depth=2`
+      )
+      assert.strictEqual(snap.response.status, 200, snap.data.error)
+      assert.strictEqual(snap.data.http_collab, true)
+      assert.strictEqual(snap.data.version, i)
+      assert.strictEqual(snap.data.lazy_load, snap.data.collapsed)
+      if (i === 198) {
+        assert.strictEqual(snap.data.node_count, 199)
+        assert.strictEqual(snap.data.collapsed, false)
+      }
+      if (i === 200) {
+        assert.strictEqual(snap.data.node_count, 201)
+        assert.strictEqual(snap.data.collapsed, true)
+      }
+    }
   }
   const current = await request(`/api/maps/${encodeURIComponent(roomKey)}/version`)
   assert.strictEqual(current.data.version, 1000)
@@ -357,6 +375,13 @@ async function testNormalizedTableRoundtrip(roomKey) {
   assert.ok(table.nodes, 'room_nodes should be dual-written')
   assert.strictEqual(table.version, truth.version)
   assert.deepStrictEqual(structureOf(table.nodes), structureOf(truth.nodes))
+  const consistency = await request(
+    `/api/maps/${encodeURIComponent(roomKey)}/consistency`
+  )
+  assert.strictEqual(consistency.response.status, 200, consistency.data.error)
+  assert.strictEqual(consistency.data.ok, true)
+  assert.strictEqual(consistency.data.source, 'table')
+  assert.strictEqual(consistency.data.equal, true)
 }
 
 async function testDualClientReconnect(roomKey) {
@@ -435,6 +460,131 @@ async function testDualClientReconnect(roomKey) {
   docB2.destroy()
 }
 
+async function testSubtreeKnownVersion(roomKey) {
+  const added = await insertChild(roomKey, 'branch', 'Branch')
+  assert.strictEqual(added.data.version, 1)
+
+  const first = await request(
+    `/api/files/${encodeURIComponent(roomKey)}/subtree?uid=root`
+  )
+  assert.strictEqual(first.response.status, 200, first.data.error)
+  assert.notStrictEqual(first.data.unchanged, true)
+  assert.strictEqual(first.data.version, 1)
+  assert.ok(
+    (first.data.children || []).some(
+      child => child && child.data && child.data.uid === 'branch'
+    )
+  )
+
+  const skipped = await request(
+    `/api/files/${encodeURIComponent(roomKey)}/subtree?uid=root&knownVersion=1`
+  )
+  assert.strictEqual(skipped.response.status, 200, skipped.data.error)
+  assert.strictEqual(skipped.data.unchanged, true)
+  assert.strictEqual(skipped.data.version, 1)
+
+  const alias = await request(
+    `/api/maps/${encodeURIComponent(roomKey)}/subtrees/root?knownVersion=1`
+  )
+  assert.strictEqual(alias.response.status, 200, alias.data.error)
+  assert.strictEqual(alias.data.unchanged, true)
+
+  const snapshot = await request(
+    `/api/maps/${encodeURIComponent(roomKey)}/snapshot`
+  )
+  assert.strictEqual(snapshot.response.status, 200, snapshot.data.error)
+  assert.strictEqual(snapshot.data.version, 1)
+  assert.ok(snapshot.data.tree.data.childCount >= 1)
+  assert.strictEqual(snapshot.data.tree.data.subtreeVersion, 1)
+
+  const located = await request(
+    `/api/files/${encodeURIComponent(roomKey)}/locate?uid=branch`
+  )
+  assert.strictEqual(located.response.status, 200, located.data.error)
+  assert.strictEqual(located.data.version, 1)
+}
+
+async function testUndoAndHistoricalSnapshot(roomKey) {
+  const firstId = crypto.randomUUID()
+  const added = await insertChild(roomKey, 'keep', 'Keep', {
+    headers: { 'X-Operation-Id': firstId }
+  })
+  assert.strictEqual(added.data.version, 1)
+  const secondId = crypto.randomUUID()
+  const other = await insertChild(roomKey, 'gone', 'Gone', {
+    headers: { 'X-Operation-Id': secondId }
+  })
+  assert.strictEqual(other.data.version, 2)
+
+  const undone = await request(
+    `/api/maps/${encodeURIComponent(roomKey)}/operations/${secondId}/undo`,
+    { method: 'POST', body: JSON.stringify({}) }
+  )
+  assert.strictEqual(undone.response.status, 201, undone.data.error)
+  assert.strictEqual(undone.data.event.type, 'operation.undone')
+  const afterUndo = await serverNodes(roomKey)
+  assert.ok(afterUndo.nodes.keep)
+  assert.ok(!afterUndo.nodes.gone)
+  assert.strictEqual(afterUndo.version, 3)
+
+  const replay = await request(
+    `/api/maps/${encodeURIComponent(roomKey)}/operations/${secondId}/undo`,
+    { method: 'POST', body: JSON.stringify({}) }
+  )
+  assert.strictEqual(replay.response.status, 409)
+  assert.strictEqual(replay.data.code, 'ALREADY_UNDONE')
+
+  const historical = await request(
+    `/api/maps/${encodeURIComponent(roomKey)}/snapshot?version=1&depth=2`
+  )
+  assert.strictEqual(historical.response.status, 200, historical.data.error)
+  assert.strictEqual(historical.data.version, 1)
+  assert.strictEqual(historical.data.historical, true)
+  const names = []
+  const walk = node => {
+    if (!node || !node.data) return
+    names.push(node.data.text)
+    ;(node.children || []).forEach(walk)
+  }
+  walk(historical.data.tree)
+  assert.ok(names.includes('Keep'))
+  assert.ok(!names.includes('Gone'))
+
+  const sibling = await request(
+    `/api/maps/${encodeURIComponent(roomKey)}/operations/${firstId}/undo`,
+    { method: 'POST', body: JSON.stringify({}) }
+  )
+  assert.strictEqual(sibling.response.status, 201, sibling.data.error)
+  const afterKeep = await serverNodes(roomKey)
+  assert.ok(!afterKeep.nodes.keep)
+  assert.ok(!afterKeep.nodes.gone)
+  assert.strictEqual(afterKeep.version, 4)
+
+  const audit = await request(
+    `/api/maps/${encodeURIComponent(roomKey)}/audit?limit=10`
+  )
+  assert.strictEqual(audit.response.status, 200, audit.data.error)
+  assert.ok(audit.data.items.some(item => item.type === 'operation.undo'))
+  assert.ok(audit.data.items.some(item => item.operationId === secondId))
+}
+
+async function testConcurrentInsertsAtSameParent(roomKey) {
+  const first = await insertChild(roomKey, 'first', 'First', { index: 0 })
+  assert.strictEqual(first.response.status, 200, first.data.error)
+  assert.ok(first.data.position)
+  const second = await insertChild(roomKey, 'second', 'Second', { index: 0 })
+  assert.strictEqual(second.response.status, 200, second.data.error)
+  assert.ok(second.data.position)
+  assert.notStrictEqual(second.data.position, first.data.position)
+  assert.strictEqual(second.data.index, 0)
+  assert.ok(
+    second.data.position < first.data.position,
+    `${second.data.position} !< ${first.data.position}`
+  )
+  const loaded = await serverNodes(roomKey)
+  assert.deepStrictEqual(loaded.nodes.root.children, ['second', 'first'])
+}
+
 async function main() {
   const health = await request('/api/health')
   if (!health.response.ok) {
@@ -447,6 +597,9 @@ async function main() {
   await withRoom('双客户端重连', testDualClientReconnect)
   await withRoom('双客户端丢包', testDroppedEventsConverge)
   await withRoom('一千次版本', testThousandVersions)
+  await withRoom('子树版本短路', testSubtreeKnownVersion)
+  await withRoom('撤销与历史快照', testUndoAndHistoricalSnapshot)
+  await withRoom('同父并发插入', testConcurrentInsertsAtSameParent)
   console.log('room operations integration passed')
 }
 

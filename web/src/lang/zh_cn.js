@@ -583,6 +583,9 @@ export default {
     openFailed: '打开失败，未能加载文件内容',
     largeMapMode: '大图模式（按需加载，已支持一万节点以上）',
     fileDeleted: '已删除',
-    renamed: '已重命名'
+    renamed: '已重命名',
+    history: '操作历史',
+    noHistory: '还没有可审计的操作',
+    undoFailed: '无法撤销该操作'
   }
 }

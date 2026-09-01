@@ -6,8 +6,10 @@ const {
   planCollabRecovery,
   planAfterOperations,
   applyCollabEvent,
-  applyCollabEvents
+  applyCollabEvents,
+  markDirtySubtrees
 } = require('../bin/collabRecovery')
+const { evaluateUndo, reconstructByInverses } = require('../bin/collabUndo')
 
 const node = (uid, text, children = [], extra = {}) => ({
   isRoot: uid === 'root',
@@ -67,6 +69,9 @@ function testInsertRecordsInverseAndResolvedUid() {
   assert.strictEqual(payload.uid, applied.result.uid)
   assert.strictEqual(applied.inversePayload.type, 'node.delete')
   assert.strictEqual(applied.event.type, 'node.inserted')
+  assert.ok(applied.event.payload.position)
+  assert.strictEqual(applied.event.payload.index, 0)
+  assert.strictEqual(applied.result.position, applied.event.payload.position)
   assert.deepStrictEqual(applied.event.affectedUids, [
     applied.result.uid,
     'root'
@@ -217,6 +222,62 @@ function testApplyCollabEventKeepChildrenAndTitleNoop() {
   assert.strictEqual(batch.index, 0)
 }
 
+function testPreviewStampsMetaAndKnownVersion() {
+  const obj = {
+    root: node('root', 'Root', ['a']),
+    a: node('a', 'A', ['b']),
+    b: node('b', 'B')
+  }
+  const preview = mindDoc.buildPreview(obj, { keepDepth: 2, version: 7 })
+  assert.strictEqual(preview.tree.data.childCount, 1)
+  assert.strictEqual(preview.tree.data.subtreeVersion, 7)
+  assert.strictEqual(preview.tree.children[0].data.childCount, 1)
+  assert.strictEqual(preview.tree.children[0].data.subtreeVersion, 7)
+
+  const skip = mindDoc.versionedSubtree(obj, 'root', {
+    version: 4,
+    knownVersion: 4
+  })
+  assert.strictEqual(skip.unchanged, true)
+  assert.strictEqual(skip.version, 4)
+  assert.ok(!skip.children)
+
+  const fresh = mindDoc.versionedSubtree(obj, 'root', {
+    version: 5,
+    knownVersion: 4
+  })
+  assert.strictEqual(fresh.unchanged, false)
+  assert.strictEqual(fresh.total, 1)
+  assert.strictEqual(fresh.children[0].data.uid, 'a')
+  assert.strictEqual(fresh.children[0].data.subtreeVersion, 5)
+}
+
+function testMarkDirtySubtreesForUnloadedBranch() {
+  const dirty = markDirtySubtrees(['root', 'loaded'], [
+    {
+      version: 12,
+      event: {
+        type: 'node.inserted',
+        affectedUids: ['hidden', 'loaded'],
+        payload: { uid: 'hidden', parentUid: 'loaded' }
+      }
+    }
+  ])
+  assert.deepStrictEqual(dirty, { loaded: 12 })
+
+  const clean = markDirtySubtrees(['root', 'a'], [
+    {
+      version: 3,
+      event: {
+        type: 'node.updated',
+        affectedUids: ['a'],
+        payload: { uid: 'a' }
+      }
+    }
+  ])
+  assert.deepStrictEqual(clean, {})
+}
+
 function testPreviewTimings() {
   const make = n => {
     const obj = { root: node('root', 'Root', []) }
@@ -228,16 +289,197 @@ function testPreviewTimings() {
     return obj
   }
   const timings = {}
-  ;[100, 1000, 10000].forEach(n => {
+  ;[100, 1000, 10000, 100000].forEach(n => {
     const obj = make(n)
     const t0 = process.hrtime.bigint()
     const preview = mindDoc.buildPreview(obj, { keepDepth: 2, maxChildren: 8 })
     const ms = Number(process.hrtime.bigint() - t0) / 1e6
     timings[n] = Number(ms.toFixed(2))
     assert.ok(preview.node_count === n + 1)
-    assert.ok(ms < (n >= 10000 ? 3000 : 800), `${n} preview took ${ms}ms`)
+    if (n >= 10000) {
+      assert.strictEqual(preview.clipped, true)
+      assert.ok(preview.tree.children.length <= 8)
+      assert.ok(preview.tree.data.childCount === n)
+    }
+    const limit = n >= 100000 ? 15000 : n >= 10000 ? 3000 : 800
+    assert.ok(ms < limit, `${n} preview took ${ms}ms`)
   })
   console.log('preview timings ms', JSON.stringify(timings))
+}
+
+function testUndoSafetyBlocksOtherUsersAndOutOfOrder() {
+  const insert = {
+    operation_id: 'op-insert',
+    actor_id: 'alice',
+    operation_type: 'node.insert',
+    version: 1,
+    inverse_payload: { type: 'node.delete', payload: { uid: 'n1' } },
+    event: {
+      type: 'node.inserted',
+      affectedUids: ['n1', 'root'],
+      payload: { uid: 'n1' }
+    }
+  }
+  const otherEdit = {
+    operation_id: 'op-bob',
+    actor_id: 'bob',
+    operation_type: 'node.update',
+    version: 2,
+    event: {
+      type: 'node.updated',
+      affectedUids: ['n1'],
+      payload: { uid: 'n1' }
+    }
+  }
+  const conflict = evaluateUndo(insert, [otherEdit], 'alice')
+  assert.strictEqual(conflict.ok, false)
+  assert.strictEqual(conflict.code, 'UNDO_CONFLICT')
+
+  const ownLater = {
+    operation_id: 'op-alice-2',
+    actor_id: 'alice',
+    operation_type: 'node.update',
+    version: 2,
+    event: {
+      type: 'node.updated',
+      affectedUids: ['n1'],
+      payload: { uid: 'n1' }
+    }
+  }
+  const stale = evaluateUndo(insert, [ownLater], 'alice')
+  assert.strictEqual(stale.ok, false)
+  assert.strictEqual(stale.code, 'UNDO_OUT_OF_ORDER')
+
+  const unrelated = {
+    operation_id: 'op-bob-2',
+    actor_id: 'bob',
+    operation_type: 'node.insert',
+    version: 2,
+    event: {
+      type: 'node.inserted',
+      affectedUids: ['n2', 'root'],
+      payload: { uid: 'n2' }
+    }
+  }
+  const allowed = evaluateUndo(insert, [unrelated], 'alice')
+  assert.strictEqual(allowed.ok, true)
+  assert.strictEqual(allowed.inverse.type, 'node.delete')
+
+  const siblingInsert = {
+    operation_id: 'op-alice-n2',
+    actor_id: 'alice',
+    operation_type: 'node.insert',
+    version: 2,
+    event: {
+      type: 'node.inserted',
+      affectedUids: ['n2', 'root'],
+      payload: { uid: 'n2', parentUid: 'root' }
+    }
+  }
+  const siblingOk = evaluateUndo(insert, [siblingInsert], 'alice')
+  assert.strictEqual(siblingOk.ok, true)
+
+  const already = evaluateUndo(insert, [
+    {
+      operation_id: 'op-undo',
+      actor_id: 'alice',
+      operation_type: 'operation.undo',
+      version: 3,
+      event: {
+        type: 'operation.undone',
+        payload: { targetOperationId: 'op-insert' }
+      }
+    }
+  ], 'alice')
+  assert.strictEqual(already.code, 'ALREADY_UNDONE')
+
+  const forbidden = evaluateUndo(insert, [], 'bob')
+  assert.strictEqual(forbidden.code, 'UNDO_FORBIDDEN')
+}
+
+function testRestoreAndHistoricalReplay() {
+  const initial = {
+    root: node('root', 'Root', ['a']),
+    a: node('a', 'A')
+  }
+  const doc = seedDoc(initial)
+  const deleted = applyNodeCommand(doc, {
+    type: 'node.delete',
+    payload: { uid: 'a', confirm_sop_change: true }
+  })
+  assert.ok(!mindDoc.readObject(doc).a)
+  applyNodeCommand(doc, {
+    type: 'node.restore',
+    payload: {
+      ...deleted.inversePayload.payload,
+      confirm_sop_change: true
+    }
+  })
+  assert.strictEqual(mindDoc.readObject(doc).a.data.text, 'A')
+  assert.deepStrictEqual(mindDoc.readObject(doc).root.children, ['a'])
+
+  const afterInsert = {
+    root: node('root', 'Root', ['a', 'b']),
+    a: node('a', 'A'),
+    b: node('b', 'B')
+  }
+  const replayed = reconstructByInverses(afterInsert, [
+    {
+      version: 1,
+      inverse_payload: { type: 'node.delete', payload: { uid: 'b' } }
+    }
+  ])
+  assert.ok(!replayed.b)
+  assert.deepStrictEqual(replayed.root.children, ['a'])
+}
+
+function testConcurrentSiblingInsertsGetDistinctPositions() {
+  const doc = seedDoc({ root: node('root', 'Root') })
+  applyNodeCommand(doc, {
+    type: 'node.insert',
+    payload: { parentUid: 'root', uid: 'first', text: 'First', index: 0 }
+  })
+  applyNodeCommand(doc, {
+    type: 'node.insert',
+    payload: { parentUid: 'root', uid: 'second', text: 'Second', index: 0 }
+  })
+  const obj = mindDoc.readObject(doc)
+  assert.deepStrictEqual(obj.root.children, ['second', 'first'])
+  assert.ok(obj.second.position)
+  assert.ok(obj.first.position)
+  assert.notStrictEqual(obj.second.position, obj.first.position)
+  assert.ok(obj.second.position < obj.first.position)
+
+  const replayed = applyCollabEvents(
+    { root: node('root', 'Root') },
+    [
+      {
+        event: {
+          type: 'node.inserted',
+          payload: {
+            uid: 'first',
+            parentUid: 'root',
+            text: 'First',
+            position: obj.first.position,
+            index: 1
+          }
+        }
+      },
+      {
+        event: {
+          type: 'node.inserted',
+          payload: {
+            uid: 'second',
+            parentUid: 'root',
+            text: 'Second',
+            position: obj.second.position,
+            index: 0
+          }
+        }
+      }
+    ]
+  )
+  assert.deepStrictEqual(replayed.nodes.root.children, ['second', 'first'])
 }
 
 testInsertUpdateMoveDeleteStayOnTempDoc()
@@ -246,5 +488,10 @@ testSopChangesRequireConfirmation()
 testRecoveryPlannerDetectsGapsAndResnapshot()
 testApplyCollabEventsReplayInsertUpdateMoveDelete()
 testApplyCollabEventKeepChildrenAndTitleNoop()
+testPreviewStampsMetaAndKnownVersion()
+testMarkDirtySubtreesForUnloadedBranch()
+testUndoSafetyBlocksOtherUsersAndOutOfOrder()
+testRestoreAndHistoricalReplay()
+testConcurrentSiblingInsertsGetDistinctPositions()
 testPreviewTimings()
 console.log('room operation tests passed')

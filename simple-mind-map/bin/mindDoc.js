@@ -147,7 +147,7 @@ function collapseDeepNodes(root, keepDepth = 2) {
 }
 
 const LARGE_MAP_AT = 200
-const HTTP_COLLAB_AT = 200
+const HTTP_COLLAB_AT = 0
 const CLIP_JSON_AT = 1500
 const MAX_PREVIEW_CHILDREN = 120
 const MAX_SUBTREE_CHILDREN = 200
@@ -222,13 +222,34 @@ function buildPreview(obj, options = {}) {
     if (collapsed && tree) collapseDeepNodes(tree, keepDepth)
   }
   if (tree && tree.data) delete tree.data.imgMap
+  const version = Number(options.version) || 0
+  if (tree) stampPreviewMeta(tree, obj, version)
   return {
     tree,
     node_count: nodeCount,
     collapsed,
     clipped,
+    lazy_load: collapsed,
     http_collab: nodeCount >= HTTP_COLLAB_AT
   }
+}
+
+function stampPreviewMeta(tree, obj, version) {
+  const ver = Number(version) || 0
+  const walk = node => {
+    if (!node || !node.data) return
+    const uid = node.data.uid
+    const kids = (uid && obj && obj[uid] && obj[uid].children) || []
+    node.data.childCount = Array.isArray(kids)
+      ? kids.length
+      : Array.isArray(node.children)
+        ? node.children.length
+        : 0
+    if (ver) node.data.subtreeVersion = ver
+    ;(node.children || []).forEach(walk)
+  }
+  walk(tree)
+  return tree
 }
 
 function subtreeChildren(obj, uid, options = {}) {
@@ -276,12 +297,42 @@ function subtreeTree(obj, uid, options = {}) {
     return node
   }
   const tree = walk(uid)
+  if (tree) stampPreviewMeta(tree, obj, Number(options.version) || 0)
   return {
     uid,
     tree,
     node_count: stats.count,
     truncated: stats.truncated
   }
+}
+
+function versionedSubtree(obj, uid, options = {}) {
+  const version = Number(options.version) || 0
+  const known = Number(options.knownVersion) || 0
+  const resolved = resolveNode(obj, uid)
+  if (!resolved || !obj[resolved]) return null
+  if (known > 0 && known >= version) {
+    return { uid: resolved, version, unchanged: true }
+  }
+  if (options.deep) {
+    const subtree = subtreeTree(obj, resolved, {
+      maxNodes: options.maxNodes,
+      version
+    })
+    if (!subtree || !subtree.tree) return null
+    return { ...subtree, version, unchanged: false }
+  }
+  const subtree = subtreeChildren(obj, resolved, {
+    offset: options.offset,
+    limit: options.limit
+  })
+  if (!subtree) return null
+  if (version) {
+    ;(subtree.children || []).forEach(child => {
+      if (child && child.data) child.data.subtreeVersion = version
+    })
+  }
+  return { ...subtree, version, unchanged: false }
 }
 
 function nodesByUids(obj, uids) {
@@ -291,11 +342,15 @@ function nodesByUids(obj, uids) {
     .map(uid => {
       const cur = obj[uid]
       if (!cur) return null
+      const children = cur.children || []
       return {
         uid,
         isRoot: !!cur.isRoot,
-        data: stripHeavyFields(clone(cur.data || {})),
-        children: cur.children || []
+        data: {
+          ...stripHeavyFields(clone(cur.data || {})),
+          childCount: children.length
+        },
+        children
       }
     })
     .filter(Boolean)
@@ -309,11 +364,15 @@ function nodesByUidsFromDoc(ydoc, uids) {
     .map(uid => {
       const cur = nodeJsonFromDoc(ymap, uid)
       if (!cur) return null
+      const children = cur.children || []
       return {
         uid,
         isRoot: !!cur.isRoot,
-        data: stripHeavyFields(clone(cur.data || {})),
-        children: cur.children || []
+        data: {
+          ...stripHeavyFields(clone(cur.data || {})),
+          childCount: children.length
+        },
+        children
       }
     })
     .filter(Boolean)
@@ -1413,6 +1472,8 @@ module.exports = {
   objectToTree,
   collapseDeepNodes,
   buildPreview,
+  stampPreviewMeta,
+  versionedSubtree,
   subtreeChildren,
   subtreeTree,
   nodesByUids,

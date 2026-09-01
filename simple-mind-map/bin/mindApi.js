@@ -25,9 +25,14 @@ const {
   pickLatestTimestamp,
   commitRoomOperation,
   getRoomVersion,
-  listRoomOperations
+  listRoomOperations,
+  getRoomOperation,
+  getNearestSnapshot,
+  auditRoomNodes
 } = require('./storage')
 const { beatPresence, listPresence, leavePresence } = require('./presence')
+const { applyCollabEvents } = require('./collabRecovery')
+const { evaluateUndo, reconstructByInverses } = require('./collabUndo')
 
 const roomMutationQueues = new Map()
 
@@ -131,6 +136,89 @@ async function executeOperation(req, roomKey, command) {
   })
 }
 
+async function executeUndo(req, roomKey, operationId, body = {}) {
+  const actorId = requestActor(req, body)
+  const target = await getRoomOperation(roomKey, operationId)
+  if (!target) {
+    const err = new Error('operation not found')
+    err.statusCode = 404
+    err.code = 'NOT_FOUND'
+    throw err
+  }
+  const later = await listRoomOperations(roomKey, target.version, 1000)
+  const verdict = evaluateUndo(target, later, actorId)
+  if (!verdict.ok) {
+    const err = new Error(verdict.error)
+    err.statusCode = verdict.code === 'NOT_FOUND' ? 404 : 409
+    err.code = verdict.code
+    err.details = {
+      overlappingUids: verdict.overlappingUids || [],
+      blockingVersion: verdict.blockingVersion || null,
+      blockingActorId: verdict.blockingActorId || null
+    }
+    throw err
+  }
+  const command = normalizeCommand(
+    req,
+    roomKey,
+    {
+      ...body,
+      type: 'operation.undo',
+      payload: {
+        targetOperationId: target.operation_id,
+        targetVersion: target.version,
+        inverse: verdict.inverse,
+        confirm_sop_change: true
+      }
+    },
+    'operation.undo'
+  )
+  command.actorId = actorId
+  return executeOperation(req, roomKey, command)
+}
+
+async function loadNodesAtVersion(roomKey, version) {
+  const currentVersion = await getRoomVersion(roomKey)
+  if (currentVersion === null) return null
+  const ver = Number(version)
+  if (!Number.isFinite(ver) || ver < 0 || ver > currentVersion) {
+    const err = new Error('version out of range')
+    err.statusCode = 400
+    err.code = 'VERSION_RANGE'
+    throw err
+  }
+  const loaded = await loadSnapshot(roomKey)
+  if (!loaded) return null
+  if (ver === currentVersion) {
+    return { obj: loaded.obj, row: loaded.row, version: ver }
+  }
+  const checkpoint = await getNearestSnapshot(roomKey, ver)
+  if (checkpoint) {
+    const ops = await listRoomOperations(roomKey, checkpoint.version, 1000, {
+      untilVersion: ver
+    })
+    const applied = applyCollabEvents(checkpoint.nodes, ops)
+    if (applied.type === 'resnapshot') {
+      const err = new Error('该区间包含需要重快照的操作，无法精确重建')
+      err.statusCode = 409
+      err.code = 'SNAPSHOT_UNAVAILABLE'
+      throw err
+    }
+    return {
+      obj: applied.nodes,
+      row: { ...loaded.row, version: ver },
+      version: ver
+    }
+  }
+  const later = await listRoomOperations(roomKey, ver, 5000)
+  const nodes = reconstructByInverses(loaded.obj, later)
+  return {
+    obj: nodes,
+    row: { ...loaded.row, version: ver },
+    version: ver
+  }
+}
+
 async function executeSnapshotOperation(
   req,
   roomKey,
@@ -173,6 +261,11 @@ function operationResponse(roomKey, committed) {
     uid: (committed.result && committed.result.uid) || payload.uid || '',
     parent_uid:
       (committed.result && committed.result.parent_uid) || payload.parentUid || '',
+    position: (committed.result && committed.result.position) || payload.position || '',
+    index:
+      committed.result && committed.result.index != null
+        ? committed.result.index
+        : payload.index,
     removed: (committed.result && committed.result.removed) || payload.removed || []
   }
 }
@@ -242,6 +335,34 @@ function mapMeta(roomKey, obj, row) {
     share_url: shareUrl(roomKey),
     updated_at: row && row.updated_at
   }
+}
+
+function sendVersionedSubtree(res, roomKey, loaded, uid, url) {
+  const deep =
+    url.searchParams.get('deep') === '1' ||
+    url.searchParams.get('deep') === 'true'
+  const payload = mindDoc.versionedSubtree(loaded.obj, uid, {
+    version: Number((loaded.row && loaded.row.version) || 0),
+    knownVersion:
+      Number(
+        url.searchParams.get('knownVersion') ||
+          url.searchParams.get('known_version') ||
+          0
+      ) || 0,
+    deep,
+    maxNodes: url.searchParams.get('max_nodes'),
+    offset: url.searchParams.get('offset'),
+    limit: url.searchParams.get('limit')
+  })
+  if (!payload || (deep && !payload.unchanged && !payload.tree)) {
+    sendJson(res, 404, { error: 'not found' })
+    return
+  }
+  sendJson(res, 200, {
+    room_key: roomKey,
+    updated_at: loaded.row && loaded.row.updated_at,
+    ...payload
+  })
 }
 
 function mapPayload(roomKey, obj, row, extra = {}) {
@@ -329,8 +450,43 @@ async function handleApi(req, res) {
   const pathname = url.pathname
 
   if (req.method === 'GET' && pathname === '/api/health') {
-    sendJson(res, 200, { ok: true, service: 'mind-map-collab' })
+    let outbox = { pending: 0, failed: 0, oldestAgeMs: 0 }
+    try {
+      outbox = await require('./outbox').getOutboxStats()
+    } catch (err) {
+      outbox = { pending: 0, failed: 0, oldestAgeMs: 0, error: err.message }
+    }
+    sendJson(res, 200, {
+      ok: true,
+      service: 'mind-map-collab',
+      outbox,
+      bus: require('./eventBus').getEventBusStatus()
+    })
     return true
+  }
+
+  if (pathname === '/api/ops/outbox') {
+    const outbox = require('./outbox')
+    if (req.method === 'GET') {
+      const stats = await outbox.getOutboxStats()
+      const items = await outbox.listOutbox(undefined, {
+        pending: url.searchParams.get('pending') !== '0',
+        limit: url.searchParams.get('limit')
+      })
+      sendJson(res, 200, { ...stats, items })
+      return true
+    }
+    if (req.method === 'POST') {
+      const body = await readBody(req)
+      const result = await outbox.replayOutbox(undefined, {
+        id: body.id,
+        roomKey: body.room_key || body.roomKey || body.mapId,
+        version: body.version
+      })
+      await outbox.kickOutboxPublisher()
+      sendJson(res, 200, result)
+      return true
+    }
   }
 
   const presenceMatch = pathname.match(/^\/api\/files\/([^/]+)\/presence$/)
@@ -370,6 +526,74 @@ async function handleApi(req, res) {
     return true
   }
 
+  const mapConsistencyMatch = pathname.match(
+    /^\/api\/maps\/([^/]+)\/consistency$/
+  )
+  if (mapConsistencyMatch && req.method === 'GET') {
+    const roomKey = safeRoomKey(decodeURIComponent(mapConsistencyMatch[1]))
+    const report = await auditRoomNodes(roomKey)
+    if (!report) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    sendJson(res, 200, report)
+    return true
+  }
+
+  const undoMatch = pathname.match(
+    /^\/api\/maps\/([^/]+)\/operations\/([^/]+)\/undo$/
+  )
+  if (undoMatch && req.method === 'POST') {
+    const roomKey = safeRoomKey(decodeURIComponent(undoMatch[1]))
+    const operationId = decodeURIComponent(undoMatch[2])
+    const body = await readBody(req).catch(() => ({}))
+    try {
+      const committed = await executeUndo(req, roomKey, operationId, body)
+      sendJson(res, 201, operationResponse(roomKey, committed))
+    } catch (err) {
+      sendJson(res, err.statusCode || 400, {
+        error: err.message || 'bad request',
+        code: err.code || 'UNDO_REJECTED',
+        overlappingUids: (err.details && err.details.overlappingUids) || [],
+        blockingVersion: err.details && err.details.blockingVersion,
+        blockingActorId: err.details && err.details.blockingActorId
+      })
+    }
+    return true
+  }
+
+  const mapAuditMatch = pathname.match(/^\/api\/maps\/([^/]+)\/audit$/)
+  if (mapAuditMatch && req.method === 'GET') {
+    const roomKey = safeRoomKey(decodeURIComponent(mapAuditMatch[1]))
+    const currentVersion = await getRoomVersion(roomKey)
+    if (currentVersion === null) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    const afterVersion = Number(url.searchParams.get('after') || 0) || 0
+    const limit = Number(url.searchParams.get('limit') || 100) || 100
+    const actorId = url.searchParams.get('actor') || url.searchParams.get('actorId')
+    const operations = await listRoomOperations(roomKey, afterVersion, limit, {
+      actorId: actorId || undefined
+    })
+    sendJson(res, 200, {
+      mapId: roomKey,
+      currentVersion,
+      afterVersion,
+      items: operations.map(item => ({
+        version: item.version,
+        operationId: item.operation_id,
+        actorId: item.actor_id,
+        clientId: item.client_id,
+        type: item.operation_type,
+        eventType: item.event && item.event.type,
+        affectedUids: (item.event && item.event.affectedUids) || [],
+        created_at: item.created_at
+      }))
+    })
+    return true
+  }
+
   const mapOperationsMatch = pathname.match(
     /^\/api\/maps\/([^/]+)\/operations$/
   )
@@ -384,7 +608,10 @@ async function handleApi(req, res) {
       const afterVersion = Number(url.searchParams.get('after') || 0) || 0
       const limit = Number(url.searchParams.get('limit') || 500) || 500
       const safeLimit = Math.min(1000, Math.max(1, limit))
-      const operations = await listRoomOperations(roomKey, afterVersion, safeLimit)
+      const actorId = url.searchParams.get('actor') || url.searchParams.get('actorId')
+      const operations = await listRoomOperations(roomKey, afterVersion, safeLimit, {
+        actorId: actorId || undefined
+      })
       const lastVersion = operations.length
         ? operations[operations.length - 1].version
         : afterVersion
@@ -418,23 +645,61 @@ async function handleApi(req, res) {
   const mapSnapshotMatch = pathname.match(/^\/api\/maps\/([^/]+)\/snapshot$/)
   if (mapSnapshotMatch && req.method === 'GET') {
     const roomKey = safeRoomKey(decodeURIComponent(mapSnapshotMatch[1]))
+    const requested = url.searchParams.get('version')
+    try {
+      const loaded =
+        requested == null || requested === ''
+          ? await loadSnapshot(roomKey)
+          : await loadNodesAtVersion(roomKey, requested)
+      if (!loaded) {
+        sendJson(res, 404, { error: 'not found' })
+        return true
+      }
+      const depth = Math.min(8, Math.max(0, Number(url.searchParams.get('depth') || 2)))
+      const version = Number(
+        loaded.version != null
+          ? loaded.version
+          : (loaded.row && loaded.row.version) || 0
+      )
+      const preview = mindDoc.buildPreview(loaded.obj, {
+        keepDepth: depth,
+        largeAt: 200,
+        version
+      })
+      sendJson(res, 200, {
+        mapId: roomKey,
+        room_key: roomKey,
+        version,
+        historical: requested != null && requested !== '',
+        title: (loaded.row && loaded.row.title) || '未命名',
+        ...preview
+      })
+    } catch (err) {
+      sendJson(res, err.statusCode || 400, {
+        error: err.message || 'bad request',
+        code: err.code || 'SNAPSHOT_FAILED'
+      })
+    }
+    return true
+  }
+
+  const mapSubtreeMatch = pathname.match(
+    /^\/api\/maps\/([^/]+)\/subtrees\/([^/]+)$/
+  )
+  if (mapSubtreeMatch && req.method === 'GET') {
+    const roomKey = safeRoomKey(decodeURIComponent(mapSubtreeMatch[1]))
     const loaded = await loadSnapshot(roomKey)
     if (!loaded) {
       sendJson(res, 404, { error: 'not found' })
       return true
     }
-    const depth = Math.min(8, Math.max(0, Number(url.searchParams.get('depth') || 2)))
-    const preview = mindDoc.buildPreview(loaded.obj, {
-      keepDepth: depth,
-      largeAt: 200
-    })
-    sendJson(res, 200, {
-      mapId: roomKey,
-      room_key: roomKey,
-      version: Number((loaded.row && loaded.row.version) || 0),
-      title: (loaded.row && loaded.row.title) || '未命名',
-      ...preview
-    })
+    sendVersionedSubtree(
+      res,
+      roomKey,
+      loaded,
+      decodeURIComponent(mapSubtreeMatch[2]),
+      url
+    )
     return true
   }
 
@@ -820,7 +1085,11 @@ async function handleApi(req, res) {
     const obj = loaded.obj
     const row = loaded.row
     const keepDepth = Number(url.searchParams.get('depth') || 2) || 2
-    const preview = mindDoc.buildPreview(obj, { keepDepth, largeAt: 200 })
+    const preview = mindDoc.buildPreview(obj, {
+      keepDepth,
+      largeAt: 200,
+      version: Number((row && row.version) || 0)
+    })
     sendJson(res, 200, {
       ...mapMeta(roomKey, obj, row),
       ...preview
@@ -842,27 +1111,7 @@ async function handleApi(req, res) {
       return true
     }
     const uid = url.searchParams.get('uid') || 'root'
-    const resolved = mindDoc.resolveNode(loaded.obj, uid)
-    const deep =
-      url.searchParams.get('deep') === '1' ||
-      url.searchParams.get('deep') === 'true'
-    const subtree = deep
-      ? mindDoc.subtreeTree(loaded.obj, resolved, {
-          maxNodes: url.searchParams.get('max_nodes')
-        })
-      : mindDoc.subtreeChildren(loaded.obj, resolved, {
-          offset: url.searchParams.get('offset'),
-          limit: url.searchParams.get('limit')
-        })
-    if (!subtree || (deep && !subtree.tree)) {
-      sendJson(res, 404, { error: 'not found' })
-      return true
-    }
-    sendJson(res, 200, {
-      room_key: roomKey,
-      updated_at: loaded.row && loaded.row.updated_at,
-      ...subtree
-    })
+    sendVersionedSubtree(res, roomKey, loaded, uid, url)
     return true
   }
 
@@ -882,8 +1131,14 @@ async function handleApi(req, res) {
       sendJson(res, 404, { error: 'not found' })
       return true
     }
+    const version = Number((loaded.row && loaded.row.version) || 0)
+    Object.keys(located.nodes || {}).forEach(id => {
+      const node = located.nodes[id]
+      if (node && node.data && version) node.data.subtreeVersion = version
+    })
     sendJson(res, 200, {
       room_key: roomKey,
+      version,
       updated_at: loaded.row && loaded.row.updated_at,
       ...located
     })
@@ -917,6 +1172,7 @@ async function handleApi(req, res) {
     }
     sendJson(res, 200, {
       room_key: roomKey,
+      version: Number((loaded.row && loaded.row.version) || 0),
       matches: mindDoc.searchNodes(
         loaded.obj,
         url.searchParams.get('q') || '',
@@ -936,6 +1192,7 @@ async function handleApi(req, res) {
     }
     sendJson(res, 200, {
       room_key: roomKey,
+      version: Number((loaded.row && loaded.row.version) || 0),
       title: (loaded.row && loaded.row.title) || '未命名',
       share_url: shareUrl(roomKey),
       outline: mindDoc.toOutline(loaded.obj, {

@@ -99,6 +99,32 @@
           </div>
         </div>
       </div>
+      <div class="fileBox" v-if="connected">
+        <div class="fileHead">
+          <span>{{ $t('cooperate.history') }}</span>
+          <el-button type="text" @click="loadHistory">{{
+            $t('cooperate.refresh')
+          }}</el-button>
+        </div>
+        <div class="empty" v-if="!historyList.length && !historyLoading">
+          {{ $t('cooperate.noHistory') }}
+        </div>
+        <div
+          class="historyItem"
+          v-for="item in historyList"
+          :key="item.operationId"
+        >
+          <span class="historyMeta">
+            v{{ item.version }} · {{ item.type }} · {{ item.actorId }}
+          </span>
+          <el-button
+            v-if="canUndoHistoryItem(item)"
+            type="text"
+            @click="undoHistoryItem(item)"
+            >{{ $t('toolbar.undo') }}</el-button
+          >
+        </div>
+      </div>
     </div>
     <div slot="footer" class="dialog-footer">
       <el-button @click="copyInvite" :disabled="!roomName">{{
@@ -135,6 +161,8 @@ import {
   getFileNodes,
   getMapVersion,
   getMapOperations,
+  getMapAudit,
+  undoMapOperation,
   addFileNode,
   patchFileNode,
   deleteFileNode
@@ -213,7 +241,9 @@ export default {
       joinedOnce: false,
       fileList: [],
       filesLoading: false,
-      httpCollab: false
+      httpCollab: false,
+      historyList: [],
+      historyLoading: false
     }
   },
   computed: {
@@ -619,7 +649,7 @@ export default {
       return Promise.resolve(request).then(result => {
         const cooperate = this.mindMap && this.mindMap.cooperate
         if (cooperate && result && result.version != null) {
-          cooperate.acknowledgeLocalVersion(result.version)
+          cooperate.acknowledgeLocalVersion(result.version, result)
         }
         this.publishHttpChange(result || {})
         return result
@@ -757,6 +787,45 @@ export default {
       )} ${pad(date.getHours())}:${pad(date.getMinutes())}`
     },
 
+    canUndoHistoryItem(item) {
+      if (!item || !item.operationId) return false
+      if (item.type === 'operation.undo' || item.type === 'operation.redo') {
+        return false
+      }
+      return item.actorId === this.userId || item.actorId === 'anonymous'
+    },
+
+    async loadHistory() {
+      if (!this.connected || !this.roomName) return
+      this.historyLoading = true
+      try {
+        const data = await getMapAudit(this.roomName, { limit: 30 })
+        this.historyList = (data.items || []).slice().reverse()
+      } catch (err) {
+        this.historyList = []
+      } finally {
+        this.historyLoading = false
+      }
+    },
+
+    async undoHistoryItem(item) {
+      if (!item || !item.operationId || !this.roomName) return
+      try {
+        await this.notifyHttpMutation(
+          undoMapOperation(this.roomName, item.operationId)
+        )
+        const cooperate = this.mindMap && this.mindMap.cooperate
+        if (cooperate && cooperate.refreshVisibleFromHttp) {
+          await cooperate.refreshVisibleFromHttp('', { force: true })
+        }
+        await this.loadHistory()
+      } catch (err) {
+        this.$message.error(
+          (err && err.message) || this.$t('cooperate.undoFailed')
+        )
+      }
+    },
+
     async loadFiles() {
       this.filesLoading = true
       try {
@@ -796,6 +865,7 @@ export default {
       this.loadFiles()
       this.startSaveStatusPolling()
       this.syncHttpPresence()
+      this.loadHistory()
     },
 
     connectPresenceSocket() {
@@ -836,13 +906,16 @@ export default {
         nodeCount: preview.node_count,
         version: preview.version || 0,
         updatedAt: preview.updated_at,
-        fetchSubtree: uid => getFileSubtree(roomKey, uid),
-        fetchDeepSubtree: uid => getFileSubtree(roomKey, uid, { deep: true }),
+        fetchSubtree: (uid, options) => getFileSubtree(roomKey, uid, options),
+        fetchDeepSubtree: (uid, options) =>
+          getFileSubtree(roomKey, uid, { deep: true, ...(options || {}) }),
         fetchExportTree: () => getFileExport(roomKey),
         fetchNodes: uids => getFileNodes(roomKey, uids),
         fetchLocate: uid => locateFileNode(roomKey, uid),
         fetchOperations: after => getMapOperations(roomKey, after),
         fetchVersion: () => getMapVersion(roomKey),
+        undoOperation: operationId =>
+          this.notifyHttpMutation(undoMapOperation(roomKey, operationId)),
         patchNode: (uid, body) =>
           this.notifyHttpMutation(patchFileNode(roomKey, uid, body)),
         addNode: body =>
@@ -873,8 +946,6 @@ export default {
     async applyPreview(preview, silent) {
       const cooperate = this.mindMap.cooperate
       this.enableHttpCollab(preview)
-      const httpCollab = !!(preview.http_collab || preview.collapsed)
-      if (!httpCollab) cooperate.httpCollabMode = false
       cooperate.setPreviewApplied(true)
       await new Promise(resolve => {
         let settled = false
@@ -897,12 +968,9 @@ export default {
       if (!silent) {
         this.$message.success(this.$t('cooperate.openSuccess'))
       }
-      if (httpCollab) {
-        cooperate.setPreviewApplied(false)
-        this.markHttpConnected()
-        return true
-      }
-      return false
+      cooperate.setPreviewApplied(false)
+      this.markHttpConnected()
+      return true
     },
 
     async openSavedRoom(options = {}) {
@@ -1140,6 +1208,17 @@ export default {
       font-size: 12px;
       color: #999;
       margin-top: 2px;
+    }
+
+    .historyItem {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px solid #f2f2f2;
+      font-size: 12px;
+      color: #666;
     }
 
     .fileActions {
