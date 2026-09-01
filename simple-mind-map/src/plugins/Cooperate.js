@@ -101,6 +101,7 @@ class Cooperate {
     this.httpDeleteNode = null
     this.httpUpdatedAt = ''
     this.hydratedUids = new Set()
+    this.hydrateFailedUids = new Set()
     this.lastPushed = {}
     this.pendingHttpDeletes = []
     this.httpTextTimer = null
@@ -283,8 +284,11 @@ class Cooperate {
   }
 
   hydrateLazyChildren(node) {
-    if (this.httpCollabMode) return this.hydrateFromHttp(node)
-    if (!this.ymap || !node) return
+    if (!node) return
+    const data = node.nodeData
+    if (data && data.children && data.children.length) return
+    if (this.httpFetchSubtree) return this.hydrateFromHttp(node)
+    if (!this.ymap) return
     const uid = node.getData && node.getData('uid')
     if (!uid) return
     const nodeMap = this.ymap.get(uid)
@@ -292,7 +296,6 @@ class Cooperate {
     const children = nodeMap.get('children')
     const childUids =
       children && typeof children.toArray === 'function' ? children.toArray() : []
-    const data = node.nodeData
     if (!data) return
     if (!data.children) data.children = []
     const have = new Set(
@@ -307,7 +310,8 @@ class Cooperate {
         data: {
           ...(json.data || {}),
           uid: childUid,
-          expand: false
+          expand: false,
+          childCount: Array.isArray(json.children) ? json.children.length : 0
         },
         children: []
       })
@@ -373,19 +377,35 @@ class Cooperate {
     this.mindMap.on('afterExecCommand', this.onAfterExecCommand)
     this.onBeforeExecCommand = this.onBeforeExecCommand.bind(this)
     this.mindMap.on('beforeExecCommand', this.onBeforeExecCommand)
+    this.onExpandBtnClick = this.onExpandBtnClick.bind(this)
+    this.mindMap.on('expand_btn_click', this.onExpandBtnClick)
+    this.bindExpandHydrate()
+  }
+
+  bindExpandHydrate() {
     const renderer = this.mindMap.renderer
-    if (renderer && typeof renderer.setNodeExpand === 'function') {
-      this._origSetNodeExpand = renderer.setNodeExpand.bind(renderer)
-      renderer.setNodeExpand = (node, expand) => {
-        if (!expand) return this._origSetNodeExpand(node, expand)
-        const hydrated = this.hydrateLazyChildren(node)
-        if (hydrated && typeof hydrated.then === 'function') {
-          return hydrated
-            .then(() => this._origSetNodeExpand(node, expand))
-            .catch(() => this._origSetNodeExpand(node, expand))
-        }
+    if (!renderer || typeof renderer.setNodeExpand !== 'function') return
+    if (this._origSetNodeExpand) return
+    this._origSetNodeExpand = renderer.setNodeExpand.bind(renderer)
+    const wrapped = (node, expand) => {
+      if (!expand) return this._origSetNodeExpand(node, expand)
+      const finish = () => {
+        const live =
+          node.nodeData &&
+          node.nodeData.children &&
+          node.nodeData.children.length
+        if (!live) return
         return this._origSetNodeExpand(node, expand)
       }
+      const hydrated = this.hydrateLazyChildren(node)
+      if (hydrated && typeof hydrated.then === 'function') {
+        return hydrated.then(finish).catch(() => {})
+      }
+      return finish()
+    }
+    renderer.setNodeExpand = wrapped
+    if (this.mindMap.command && this.mindMap.command.commands) {
+      this.mindMap.command.commands.SET_NODE_EXPAND = [wrapped]
     }
   }
 
@@ -411,10 +431,16 @@ class Cooperate {
     if (this.onBeforeExecCommand) {
       this.mindMap.off('beforeExecCommand', this.onBeforeExecCommand)
     }
+    this.mindMap.off('expand_btn_click', this.onExpandBtnClick)
     clearTimeout(this.httpTextTimer)
     const renderer = this.mindMap.renderer
     if (renderer && this._origSetNodeExpand) {
       renderer.setNodeExpand = this._origSetNodeExpand
+      if (this.mindMap.command && this.mindMap.command.commands) {
+        this.mindMap.command.commands.SET_NODE_EXPAND = [
+          this._origSetNodeExpand
+        ]
+      }
       this._origSetNodeExpand = null
     }
   }
@@ -800,7 +826,37 @@ class Cooperate {
 
   // 节点激活状态改变后触发感知数据同步
   onNodeActive(node, nodeList) {
-    this.publishAwareness(nodeList.map(item => item.uid))
+    this.publishAwareness((nodeList || []).map(item => item.uid))
+    if (node) this.repairEmptyExpand(node)
+  }
+
+  onExpandBtnClick(node) {
+    if (!node) return
+    const live = node.nodeData && node.nodeData.children && node.nodeData.children.length
+    if (node.getData('expand') && !live) this.repairEmptyExpand(node)
+  }
+
+  async repairEmptyExpand(node) {
+    if (!node || this._repairingExpand) return
+    const childCount = Number(node.getData && node.getData('childCount')) || 0
+    const live =
+      node.nodeData && node.nodeData.children && node.nodeData.children.length
+    if (live || childCount <= 0) return
+    const uid = node.getData && node.getData('uid')
+    if (uid && this.hydrateFailedUids.has(uid)) return
+    this._repairingExpand = true
+    try {
+      await this.hydrateLazyChildren(node)
+      if (node.nodeData && node.nodeData.children && node.nodeData.children.length) {
+        if (node.getData('expand') !== true && this._origSetNodeExpand) {
+          this._origSetNodeExpand(node, true)
+        } else {
+          this.mindMap.render()
+        }
+      }
+    } finally {
+      this._repairingExpand = false
+    }
   }
 
   // 节点树渲染完毕事件
@@ -846,6 +902,7 @@ class Cooperate {
     this.httpDeleteNode = config.deleteNode || null
     this.httpUpdatedAt = config.updatedAt || ''
     this.hydratedUids = new Set()
+    this.hydrateFailedUids = new Set()
     this.lastPushed = {}
     this.enableLargeMapMode(config.nodeCount || 400)
   }
@@ -861,6 +918,7 @@ class Cooperate {
     this.httpDeleteNode = null
     this.httpUpdatedAt = ''
     this.hydratedUids = new Set()
+    this.hydrateFailedUids = new Set()
     this.lastPushed = {}
     this.pendingHttpDeletes = []
     clearTimeout(this.httpTextTimer)
@@ -886,7 +944,7 @@ class Cooperate {
     const uid = node.getData && node.getData('uid')
     const data = node.nodeData
     if (!uid || !data) return
-    if (this.hydratedUids.has(uid)) return
+    if (this.hydrateFailedUids.has(uid)) return
     const childCount =
       (node.getData && Number(node.getData('childCount'))) || 0
     const hasKids = Array.isArray(data.children) && data.children.length > 0
@@ -894,10 +952,8 @@ class Cooperate {
       this.hydratedUids.add(uid)
       return
     }
-    if (childCount <= 0) {
-      this.hydratedUids.add(uid)
-      return
-    }
+    if (this.hydratedUids.has(uid) && childCount <= 0) return
+    if (childCount <= 0) return
     this.httpHydrating = true
     try {
       const result = await this.httpFetchSubtree(uid)
@@ -907,7 +963,12 @@ class Cooperate {
         data.data.childCount =
           (result && result.total) || data.data.childCount || 0
       }
-      this.hydratedUids.add(uid)
+      if (data.children && data.children.length) {
+        this.hydratedUids.add(uid)
+        this.hydrateFailedUids.delete(uid)
+      }
+    } catch (err) {
+      throw err
     } finally {
       this.httpHydrating = false
     }
