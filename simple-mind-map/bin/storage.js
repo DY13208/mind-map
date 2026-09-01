@@ -116,6 +116,16 @@ function releaseSaveSlot() {
   activeSaves = Math.max(0, activeSaves - 1)
 }
 
+function timestampMs(value) {
+  if (!value) return 0
+  const ms = value instanceof Date ? value.getTime() : Date.parse(value)
+  return Number.isFinite(ms) ? ms : 0
+}
+
+function pickLatestTimestamp(a, b) {
+  return timestampMs(a) >= timestampMs(b) ? a || b || null : b || a || null
+}
+
 function setSaveState(roomKey, status, error = '') {
   roomSaveStates.set(roomKey, {
     status,
@@ -677,5 +687,6 @@ module.exports = {
   getLiveDoc,
   getLiveObject,
   applyPayload,
-  payloadToObject
+  payloadToObject,
+  pickLatestTimestamp
 }

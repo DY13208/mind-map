@@ -628,21 +628,24 @@ export default {
       if (this.httpCollab) this.syncHttpPresence()
       try {
         const data = await getSaveStatus(this.roomName)
+        if (data.status === 'deleted') {
+          this.leave({ silent: true })
+          return
+        }
         if (data.status === 'error') {
           this.saveStatus = 'saveError'
           this.saveError = data.error || this.$t('cooperate.saveError')
         } else if (data.status === 'saving') {
           this.saveStatus = 'saving'
           this.saveError = ''
-        } else if (data.status === 'deleted') {
-          this.leave({ silent: true })
         } else {
           this.saveStatus = 'saved'
           this.saveError = ''
-          const cooperate = this.mindMap && this.mindMap.cooperate
-          if (this.httpCollab && cooperate && data.updated_at) {
-            cooperate.refreshVisibleFromHttp(data.updated_at).catch(() => {})
-          }
+        }
+        // 落盘中/失败时 live 树可能已经变了，不能等 saved 才拉别人的增删。
+        const cooperate = this.mindMap && this.mindMap.cooperate
+        if (this.httpCollab && cooperate && data.updated_at) {
+          cooperate.refreshVisibleFromHttp(data.updated_at).catch(() => {})
         }
       } catch (err) {
         this.saveStatus = 'saveError'

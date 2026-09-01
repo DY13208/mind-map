@@ -67,6 +67,14 @@ function pruneRecentMap(map, maxAge = RECENT_HTTP_MS) {
   })
 }
 
+function sameHttpStamp(a, b) {
+  if (!a || !b) return false
+  if (String(a) === String(b)) return true
+  const ta = Date.parse(a)
+  const tb = Date.parse(b)
+  return Number.isFinite(ta) && ta === tb
+}
+
 function keepHttpChild(uid, serverKids, lastPushed, recentPushed) {
   if (!uid) return true
   if (serverKids.has(uid)) return true
@@ -200,6 +208,7 @@ class Cooperate {
     this.httpInsertPromise = null
     this.httpInsertRescan = false
     this.httpHydrating = false
+    this.httpRefreshing = false
     this.httpHistorySyncing = false
     this.localOrigin = { source: 'simple-mind-map-cooperate' }
     // 绑定事件
@@ -1001,6 +1010,7 @@ class Cooperate {
     this.recentHttpDeleted = new Map()
     this.pendingHttpDeletes = []
     this.httpHistorySyncing = false
+    this.httpRefreshing = false
     clearTimeout(this.httpTextTimer)
     this.httpTextTimer = null
     clearTimeout(this.httpStructureTimer)
@@ -1670,11 +1680,15 @@ class Cooperate {
 
   async refreshVisibleFromHttp(updatedAt) {
     if (!this.httpCollabMode || !this.httpFetchNodes) return
-    if (this.httpHydrating || this.isApplyingRemote) return
-    if (updatedAt && updatedAt === this.httpUpdatedAt) return
-    const first = !this.httpUpdatedAt
-    this.httpUpdatedAt = updatedAt || this.httpUpdatedAt
-    if (first) return
+    if (this.httpHydrating || this.isApplyingRemote || this.httpRefreshing) {
+      return
+    }
+    if (updatedAt && sameHttpStamp(updatedAt, this.httpUpdatedAt)) return
+    const pendingUpdatedAt = updatedAt || this.httpUpdatedAt
+    if (!this.httpUpdatedAt) {
+      this.httpUpdatedAt = pendingUpdatedAt
+      return
+    }
     const renderer = this.mindMap.renderer
     const tree = renderer && renderer.renderTree
     if (!tree) return
@@ -1682,115 +1696,121 @@ class Cooperate {
     if (!uids.length) return
     pruneRecentMap(this.recentHttpDeleted)
     pruneRecentMap(this.recentPushed, RECENT_PUSH_GRACE_MS)
-    const remoteNodes = await this.fetchHttpNodes(uids)
-    if (!remoteNodes.length) return
-    const editing =
-      renderer.textEdit &&
-      typeof renderer.textEdit.isShowTextEdit === 'function' &&
-      renderer.textEdit.isShowTextEdit()
-        ? renderer.textEdit.currentNode
-        : null
-    this.isApplyingRemote = true
-    this.mindMap.command.pause()
-    let changed = false
+    this.httpRefreshing = true
     try {
-      const missing = []
-      const missingFor = new Map()
-      remoteNodes.forEach(item => {
-        const node = renderer.findNodeByUid(item.uid)
-        const data = item.data || {}
-        if (node && node !== editing) {
-          const text = data.richText
-            ? getTextFromHtml(data.text)
-            : String(data.text || '')
-          const note = data.note || ''
-          const prev = this.lastPushed[item.uid]
-          if (!prev || prev.text !== text || (prev.note || '') !== note) {
-            renderer.setNodeData(node, {
-              text: data.text,
-              note: data.note,
-              richText: data.richText,
-              image: data.image,
-              imageTitle: data.imageTitle,
-              imageSize: data.imageSize,
-              icon: data.icon,
-              tag: data.tag,
-              hyperlink: data.hyperlink,
-              hyperlinkTitle: data.hyperlinkTitle
-            })
-            if (typeof renderer.reRenderNodeCheckChange === 'function') {
-              renderer.reRenderNodeCheckChange(node, true)
+      const remoteNodes = await this.fetchHttpNodes(uids)
+      if (!remoteNodes.length) return
+      this.httpUpdatedAt = pendingUpdatedAt
+      const editing =
+        renderer.textEdit &&
+        typeof renderer.textEdit.isShowTextEdit === 'function' &&
+        renderer.textEdit.isShowTextEdit()
+          ? renderer.textEdit.currentNode
+          : null
+      this.isApplyingRemote = true
+      this.mindMap.command.pause()
+      let changed = false
+      try {
+        const missing = []
+        const missingFor = new Map()
+        remoteNodes.forEach(item => {
+          const node = renderer.findNodeByUid(item.uid)
+          const data = item.data || {}
+          if (node && node !== editing) {
+            const text = data.richText
+              ? getTextFromHtml(data.text)
+              : String(data.text || '')
+            const note = data.note || ''
+            const prev = this.lastPushed[item.uid]
+            if (!prev || prev.text !== text || (prev.note || '') !== note) {
+              renderer.setNodeData(node, {
+                text: data.text,
+                note: data.note,
+                richText: data.richText,
+                image: data.image,
+                imageTitle: data.imageTitle,
+                imageSize: data.imageSize,
+                icon: data.icon,
+                tag: data.tag,
+                hyperlink: data.hyperlink,
+                hyperlinkTitle: data.hyperlinkTitle
+              })
+              if (typeof renderer.reRenderNodeCheckChange === 'function') {
+                renderer.reRenderNodeCheckChange(node, true)
+              }
+              this.lastPushed[item.uid] = { text, note }
+              changed = true
             }
-            this.lastPushed[item.uid] = { text, note }
+          }
+          const treeNode = this.findTreeNode(tree, item.uid)
+          if (!treeNode) return
+          const serverKids = item.children || []
+          const keep = new Set(serverKids)
+          const have = new Set(
+            (treeNode.children || [])
+              .map(child => child && child.data && child.data.uid)
+              .filter(Boolean)
+          )
+          const need = serverKids.filter(
+            id => id && !have.has(id) && !this.isRecentlyHttpDeleted(id)
+          )
+          if (need.length) {
+            missingFor.set(item.uid, need)
+            need.forEach(id => missing.push(id))
+          }
+          const prevKids = treeNode.children || []
+          const next = prevKids.filter(child => {
+            const id = child && child.data && child.data.uid
+            return keepHttpChild(id, keep, this.lastPushed, this.recentPushed)
+          })
+          if (next.length !== prevKids.length) {
+            prevKids
+              .filter(child => !next.includes(child))
+              .forEach(child => this.dropHttpTree(child))
+            treeNode.children = next
             changed = true
           }
-        }
-        const treeNode = this.findTreeNode(tree, item.uid)
-        if (!treeNode) return
-        const serverKids = item.children || []
-        const keep = new Set(serverKids)
-        const have = new Set(
-          (treeNode.children || [])
-            .map(child => child && child.data && child.data.uid)
-            .filter(Boolean)
-        )
-        const need = serverKids.filter(
-          id => id && !have.has(id) && !this.isRecentlyHttpDeleted(id)
-        )
-        if (need.length) {
-          missingFor.set(item.uid, need)
-          need.forEach(id => missing.push(id))
-        }
-        const prevKids = treeNode.children || []
-        const next = prevKids.filter(child => {
-          const id = child && child.data && child.data.uid
-          return keepHttpChild(id, keep, this.lastPushed, this.recentPushed)
+          if (treeNode.data) {
+            treeNode.data.childCount = Math.max(next.length, serverKids.length)
+          }
         })
-        if (next.length !== prevKids.length) {
-          prevKids
-            .filter(child => !next.includes(child))
-            .forEach(child => this.dropHttpTree(child))
-          treeNode.children = next
-          changed = true
+        if (missing.length) {
+          const extraNodes = await this.fetchHttpNodes(missing.slice(0, 800))
+          const byUid = new Map(extraNodes.map(item => [item.uid, item]))
+          missingFor.forEach((childIds, parentUid) => {
+            const parent = this.findTreeNode(tree, parentUid)
+            if (!parent) return
+            const stubs = childIds
+              .map(id => byUid.get(id))
+              .filter(Boolean)
+              .map(item => ({
+                data: {
+                  ...(item.data || {}),
+                  uid: item.uid,
+                  expand: false,
+                  childCount: Array.isArray(item.children)
+                    ? item.children.length
+                    : 0
+                },
+                children: []
+              }))
+            const before = (parent.children || []).length
+            this.mergeHttpChildren(parent, stubs)
+            if ((parent.children || []).length !== before) changed = true
+          })
         }
-        if (treeNode.data) {
-          treeNode.data.childCount = Math.max(next.length, serverKids.length)
+        if (changed) this.mindMap.render()
+      } finally {
+        try {
+          this.mindMap.command.recovery()
+        } catch (e) {
+          // ignore
         }
-      })
-      if (missing.length) {
-        const extraNodes = await this.fetchHttpNodes(missing.slice(0, 800))
-        const byUid = new Map(extraNodes.map(item => [item.uid, item]))
-        missingFor.forEach((childIds, parentUid) => {
-          const parent = this.findTreeNode(tree, parentUid)
-          if (!parent) return
-          const stubs = childIds
-            .map(id => byUid.get(id))
-            .filter(Boolean)
-            .map(item => ({
-              data: {
-                ...(item.data || {}),
-                uid: item.uid,
-                expand: false,
-                childCount: Array.isArray(item.children)
-                  ? item.children.length
-                  : 0
-              },
-              children: []
-            }))
-          const before = (parent.children || []).length
-          this.mergeHttpChildren(parent, stubs)
-          if ((parent.children || []).length !== before) changed = true
-        })
+        this.suppressLocalUntil = Date.now() + 250
+        this.isApplyingRemote = false
       }
-      if (changed) this.mindMap.render()
     } finally {
-      try {
-        this.mindMap.command.recovery()
-      } catch (e) {
-        // ignore
-      }
-      this.suppressLocalUntil = Date.now() + 250
-      this.isApplyingRemote = false
+      this.httpRefreshing = false
     }
   }
 
