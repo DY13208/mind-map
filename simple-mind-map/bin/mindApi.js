@@ -257,7 +257,8 @@ async function handleApi(req, res) {
           parent: body.parent || body.parent_uid || 'root',
           text: body.text,
           note: body.note,
-          uid: body.uid
+          uid: body.uid,
+          index: body.index
         })
         const payload = await persistPatch(roomKey, ydoc, result)
         sendJson(res, 200, {
@@ -277,7 +278,22 @@ async function handleApi(req, res) {
             '修改SOP前必须获得用户确认并设置confirm_sop_change=true'
           )
         }
-        const result = mindDoc.updateNodeOnDoc(ydoc, nodeRef, body)
+        const dataPatch = { ...body }
+        delete dataPatch.parent
+        delete dataPatch.parent_uid
+        delete dataPatch.index
+        delete dataPatch.confirm_sop_change
+        if (body.parent !== undefined || body.parent_uid !== undefined || body.index !== undefined) {
+          mindDoc.moveNodeOnDoc(ydoc, {
+            uid: nodeRef,
+            parent: body.parent || body.parent_uid,
+            index: body.index
+          })
+        }
+        let result = { uid: nodeRef }
+        if (Object.keys(dataPatch).length) {
+          result = mindDoc.updateNodeOnDoc(ydoc, nodeRef, dataPatch)
+        }
         const payload = await persistPatch(roomKey, ydoc, result)
         sendJson(res, 200, { ...payload, uid: result.uid })
         return true
@@ -292,7 +308,9 @@ async function handleApi(req, res) {
             '修改SOP前必须获得用户确认并设置confirm_sop_change=true'
           )
         }
-        const result = mindDoc.deleteNodeOnDoc(ydoc, nodeRef)
+        const result = body.keep_children
+          ? mindDoc.deleteCurrentNodeOnDoc(ydoc, nodeRef)
+          : mindDoc.deleteNodeOnDoc(ydoc, nodeRef)
         const payload = await persistPatch(roomKey, ydoc, result)
         sendJson(res, 200, {
           ...payload,

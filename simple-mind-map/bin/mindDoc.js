@@ -603,7 +603,17 @@ function collectDescendantsInDoc(ymap, uid) {
   return out
 }
 
-function addNodeOnDoc(ydoc, { parent, text, note, uid: clientUid } = {}) {
+function insertChildUid(list, uid, index) {
+  const next = Array.isArray(list) ? list.filter(id => id !== uid) : []
+  const max = next.length
+  let i = index == null || index === '' ? max : Number(index)
+  if (!Number.isFinite(i) || i < 0) i = max
+  if (i > max) i = max
+  next.splice(i, 0, uid)
+  return next
+}
+
+function addNodeOnDoc(ydoc, { parent, text, note, uid: clientUid, index } = {}) {
   const ymap = ymapOf(ydoc)
   const parentUid = resolveNodeInDoc(ydoc, parent)
   if (!parentUid || !ymap.has(parentUid)) {
@@ -629,7 +639,11 @@ function addNodeOnDoc(ydoc, { parent, text, note, uid: clientUid } = {}) {
   const nextObject = {
     [parentUid]: {
       ...parentJson,
-      children: [...((parentJson && parentJson.children) || []), uid]
+      children: insertChildUid(
+        (parentJson && parentJson.children) || [],
+        uid,
+        index
+      )
     },
     [uid]: {
       isRoot: false,
@@ -641,6 +655,22 @@ function addNodeOnDoc(ydoc, { parent, text, note, uid: clientUid } = {}) {
   return { uid, parent_uid: parentUid }
 }
 
+const NODE_DATA_PATCH_KEYS = [
+  'note',
+  'image',
+  'imageTitle',
+  'imageSize',
+  'icon',
+  'tag',
+  'hyperlink',
+  'hyperlinkTitle',
+  'outerFrame',
+  'generalization',
+  'formula',
+  'attachmentUrl',
+  'attachmentName'
+]
+
 function updateNodeOnDoc(ydoc, ref, patch = {}) {
   const ymap = ymapOf(ydoc)
   const uid = resolveNodeInDoc(ydoc, ref)
@@ -650,13 +680,102 @@ function updateNodeOnDoc(ydoc, ref, patch = {}) {
   const prev = nodeJsonFromDoc(ymap, uid)
   const data = { ...(prev.data || {}) }
   if (patch.text !== undefined) applyNodeText(data, patch.text)
-  if (patch.note !== undefined) data.note = String(patch.note)
+  NODE_DATA_PATCH_KEYS.forEach(key => {
+    if (patch[key] !== undefined) data[key] = patch[key]
+  })
   applyObjectToDoc(
     ydoc,
     { [uid]: { ...prev, data } },
     { previousObject: { [uid]: prev } }
   )
   return { uid }
+}
+
+function moveNodeOnDoc(ydoc, { uid: ref, parent: parentRef, index } = {}) {
+  const ymap = ymapOf(ydoc)
+  const uid = resolveNodeInDoc(ydoc, ref)
+  if (!uid || !ymap.has(uid)) {
+    throw new Error('找不到节点，请先 get_map 查看 uid 或路径')
+  }
+  const json = nodeJsonFromDoc(ymap, uid)
+  if (json && json.isRoot) {
+    throw new Error('不能移动根节点')
+  }
+  const oldParentUid = findParentInDoc(ymap, uid)
+  const newParentUid = parentRef
+    ? resolveNodeInDoc(ydoc, parentRef)
+    : oldParentUid
+  if (!newParentUid || !ymap.has(newParentUid)) {
+    throw new Error('找不到父节点，请先 get_map 查看 uid 或路径')
+  }
+  if (newParentUid === uid) {
+    throw new Error('不能把节点移动到自己下面')
+  }
+  const descendants = collectDescendantsInDoc(ymap, uid)
+  if (descendants.includes(newParentUid)) {
+    throw new Error('不能把节点移动到自己的子节点下')
+  }
+  const patch = {}
+  const previousObject = {}
+  if (oldParentUid && oldParentUid !== newParentUid) {
+    const oldParent = nodeJsonFromDoc(ymap, oldParentUid)
+    previousObject[oldParentUid] = oldParent
+    patch[oldParentUid] = {
+      ...oldParent,
+      children: ((oldParent && oldParent.children) || []).filter(id => id !== uid)
+    }
+  }
+  const newParent = nodeJsonFromDoc(ymap, newParentUid)
+  previousObject[newParentUid] = newParent
+  const from =
+    oldParentUid === newParentUid
+      ? (newParent && newParent.children) || []
+      : ((patch[newParentUid] && patch[newParentUid].children) ||
+          (newParent && newParent.children) ||
+          [])
+  patch[newParentUid] = {
+    ...newParent,
+    children: insertChildUid(from, uid, index)
+  }
+  applyObjectToDoc(ydoc, patch, { previousObject })
+  return { uid, parent_uid: newParentUid }
+}
+
+function deleteCurrentNodeOnDoc(ydoc, ref) {
+  const ymap = ymapOf(ydoc)
+  const uid = resolveNodeInDoc(ydoc, ref)
+  if (!uid || !ymap.has(uid)) {
+    throw new Error('找不到节点，请先 get_map 查看 uid 或路径')
+  }
+  const json = nodeJsonFromDoc(ymap, uid)
+  if (json && json.isRoot) {
+    throw new Error('不能删除根节点')
+  }
+  const parentUid = findParentInDoc(ymap, uid)
+  if (!parentUid || !ymap.has(parentUid)) {
+    throw new Error('找不到父节点')
+  }
+  const parentJson = nodeJsonFromDoc(ymap, parentUid)
+  const childUids = (json && json.children) || []
+  const nextChildren = []
+  ;((parentJson && parentJson.children) || []).forEach(id => {
+    if (id === uid) nextChildren.push(...childUids)
+    else nextChildren.push(id)
+  })
+  applyObjectToDoc(
+    ydoc,
+    {
+      [parentUid]: {
+        ...parentJson,
+        children: nextChildren
+      }
+    },
+    {
+      previousObject: { [parentUid]: parentJson },
+      deleteUids: [uid]
+    }
+  )
+  return { uid, parent_uid: parentUid, promoted: childUids }
 }
 
 function deleteNodeOnDoc(ydoc, ref) {
@@ -1258,6 +1377,8 @@ module.exports = {
   deleteNode,
   addNodeOnDoc,
   updateNodeOnDoc,
+  moveNodeOnDoc,
+  deleteCurrentNodeOnDoc,
   deleteNodeOnDoc,
   searchNodes,
   baseLabel,

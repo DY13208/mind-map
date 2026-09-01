@@ -288,6 +288,49 @@ testAddNodeOnDocDoesNotCloneWholeMap()
 testFullTreeTruncates()
 testPgSnapshotHydratesCompactDoc()
 
+function testMoveInsertIndexAndDeleteCurrentOnDoc() {
+  const doc = new Y.Doc()
+  applyObjectToDoc(
+    doc,
+    {
+      root: node('root', 'Root', ['a', 'b']),
+      a: node('a', 'A', ['c']),
+      b: node('b', 'B'),
+      c: node('c', 'C')
+    },
+    { replace: true }
+  )
+  mindDoc.addNodeOnDoc(doc, {
+    parent: 'root',
+    text: 'X',
+    uid: 'x',
+    index: 1
+  })
+  assert.deepStrictEqual(doc.getMap().get('root').get('children').toArray(), [
+    'a',
+    'x',
+    'b'
+  ])
+  mindDoc.moveNodeOnDoc(doc, { uid: 'b', parent: 'root', index: 0 })
+  assert.deepStrictEqual(doc.getMap().get('root').get('children').toArray(), [
+    'b',
+    'a',
+    'x'
+  ])
+  mindDoc.updateNodeOnDoc(doc, 'b', { image: 'http://img', note: 'n1' })
+  const b = doc.getMap().toJSON().b
+  assert.strictEqual(b.data.image, 'http://img')
+  assert.strictEqual(b.data.note, 'n1')
+  mindDoc.deleteCurrentNodeOnDoc(doc, 'a')
+  const obj = doc.getMap().toJSON()
+  assert.ok(!obj.a)
+  assert.ok(obj.c)
+  assert.ok(obj.root.children.includes('c'))
+  assert.ok(!obj.root.children.includes('a'))
+}
+
+testMoveInsertIndexAndDeleteCurrentOnDoc()
+
 function testPreviewKeepsCollapsedChildren() {
   const obj = {
     root: {

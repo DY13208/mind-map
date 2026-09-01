@@ -27,27 +27,33 @@ function collapseDeepNodes(root, keepDepth = 2) {
   }
 }
 
-const STRUCTURE_COMMANDS = {
+const INSERT_COMMANDS = {
   INSERT_NODE: true,
   INSERT_MULTI_NODE: true,
   INSERT_CHILD_NODE: true,
   INSERT_MULTI_CHILD_NODE: true,
   INSERT_PARENT_NODE: true,
-  INSERT_AFTER: true,
-  INSERT_BEFORE: true,
-  REMOVE_NODE: true,
-  REMOVE_CURRENT_NODE: true,
-  PASTE_NODE: true,
-  CUT_NODE: true,
+  PASTE_NODE: true
+}
+
+const MOVE_COMMANDS = {
   UP_NODE: true,
   DOWN_NODE: true,
   MOVE_UP_ONE_LEVEL: true,
   MOVE_NODE_TO: true,
+  INSERT_AFTER: true,
+  INSERT_BEFORE: true,
+  INSERT_PARENT_NODE: true
+}
+
+const STRUCTURE_COMMANDS = {
+  ...INSERT_COMMANDS,
+  ...MOVE_COMMANDS,
+  REMOVE_NODE: true,
+  REMOVE_CURRENT_NODE: true,
+  CUT_NODE: true,
   ADD_GENERALIZATION: true,
-  REMOVE_GENERALIZATION: true,
-  RESET_LAYOUT: true,
-  BACK: true,
-  FORWARD: true
+  REMOVE_GENERALIZATION: true
 }
 
 // 协同插件
@@ -286,10 +292,15 @@ class Cooperate {
   hydrateLazyChildren(node) {
     if (!node) return
     const data = node.nodeData
-    if (data && data.children && data.children.length) return
-    if (this.httpFetchSubtree) return this.hydrateFromHttp(node)
-    if (!this.ymap) return
+    const live = data && data.children && data.children.length
+    const count = Number(node.getData && node.getData('childCount')) || 0
     const uid = node.getData && node.getData('uid')
+    if (live && this.hydratedUids.has(uid) && (!count || live >= count)) return
+    if (this.httpFetchSubtree) {
+      if (!live && count <= 0) return
+      return this.hydrateFromHttp(node)
+    }
+    if (!this.ymap) return
     if (!uid) return
     const nodeMap = this.ymap.get(uid)
     if (!nodeMap || typeof nodeMap.get !== 'function') return
@@ -708,7 +719,8 @@ class Cooperate {
       this.isApplyingRemote ||
       this.previewApplied ||
       this.hydratingCurrentData ||
-      this.httpHydrating
+      this.httpHydrating ||
+      (this.mindMap.renderer && this.mindMap.renderer._lazyCommandPending)
     ) {
       return
     }
@@ -898,7 +910,40 @@ class Cooperate {
       if (!uid || have.has(uid)) return
       data.children.push(child)
       have.add(uid)
+      this.markUidPushed(uid, child.data)
     })
+  }
+
+  markUidPushed(uid, data) {
+    if (!uid || this.lastPushed[uid]) return
+    this.lastPushed[uid] = {
+      text: data && data.text ? String(data.text) : '',
+      note: (data && data.note) || ''
+    }
+  }
+
+  markTreeUids(root) {
+    const walk = node => {
+      if (!node) return
+      const data = node.data || (node.nodeData && node.nodeData.data)
+      const uid = data && data.uid
+      this.markUidPushed(uid, data)
+      const kids = node.children || (node.nodeData && node.nodeData.children) || []
+      kids.forEach(walk)
+    }
+    walk(root)
+  }
+
+  nodeNeedsHydrate(node) {
+    if (!node) return false
+    const live =
+      (node.nodeData && node.nodeData.children && node.nodeData.children.length) ||
+      0
+    const count = Number(node.getData && node.getData('childCount')) || 0
+    const uid = node.getData && node.getData('uid')
+    if (!count) return false
+    if (!live) return true
+    return count > live && !this.hydratedUids.has(uid)
   }
 
   async hydrateFromHttp(node) {
@@ -906,9 +951,9 @@ class Cooperate {
     const uid = node.getData && node.getData('uid')
     const data = node.nodeData
     if (!uid || !data) return
-    const hasKids = Array.isArray(data.children) && data.children.length > 0
-    if (hasKids) {
-      this.hydratedUids.add(uid)
+    const liveLen = Array.isArray(data.children) ? data.children.length : 0
+    const count = Number(data.data && data.data.childCount) || 0
+    if (liveLen > 0 && this.hydratedUids.has(uid) && (count <= 0 || liveLen >= count)) {
       return
     }
     this.httpHydrating = true
@@ -935,14 +980,25 @@ class Cooperate {
     if (!data || !this.httpFetchSubtree) return data
     const uid = data.data && data.data.uid
     if (!uid) return data
-    if (Array.isArray(data.children) && data.children.length) return data
+    const live = Array.isArray(data.children) ? data.children.length : 0
+    const count = Number(data.data && data.data.childCount) || 0
+    if (live && (!count || live >= count)) return data
     const result = await this.httpFetchSubtree(uid)
-    data.children = (result && result.children) || []
+    if (!data.children || !data.children.length) {
+      data.children = (result && result.children) || []
+    } else {
+      this.mergeHttpChildren(data, result && result.children)
+    }
     if (data.data) {
       data.data.hasMore = !!(result && result.has_more)
-      data.data.childCount = (result && result.total) || 0
+      data.data.childCount = (result && result.total) || count || 0
     }
     this.hydratedUids.add(uid)
+    this.markUidPushed(uid, data.data)
+    ;(data.children || []).forEach(child => {
+      const childUid = child && child.data && child.data.uid
+      this.markUidPushed(childUid, child && child.data)
+    })
     return data
   }
 
@@ -998,7 +1054,7 @@ class Cooperate {
       if (d === depth) {
         const kids = node.children || []
         const count = Number(node.data && node.data.childCount) || 0
-        if (!kids.length && count > 0) stubs.push(node)
+        if (count > kids.length) stubs.push(node)
         return
       }
       if (d < depth) {
@@ -1055,7 +1111,13 @@ class Cooperate {
 
   onBeforeExecCommand(name) {
     if (!this.httpCollabMode) return
-    if (name !== 'REMOVE_NODE' && name !== 'REMOVE_CURRENT_NODE') return
+    if (
+      name !== 'REMOVE_NODE' &&
+      name !== 'REMOVE_CURRENT_NODE' &&
+      name !== 'CUT_NODE'
+    ) {
+      return
+    }
     const list = (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
     this.pendingHttpDeletes = list
       .map(node => node && node.getData && node.getData('uid'))
@@ -1063,23 +1125,48 @@ class Cooperate {
   }
 
   onHttpCommand(name) {
-    if (name === 'REMOVE_NODE' || name === 'REMOVE_CURRENT_NODE') {
+    if (
+      name === 'REMOVE_NODE' ||
+      name === 'REMOVE_CURRENT_NODE' ||
+      name === 'CUT_NODE'
+    ) {
+      const keepChildren = name === 'REMOVE_CURRENT_NODE'
       const uids = this.pendingHttpDeletes.splice(0)
       uids.forEach(uid => {
         if (!this.httpDeleteNode) return
         delete this.lastPushed[uid]
-        this.httpDeleteNode(uid).catch(() => {})
+        this.httpDeleteNode(uid, { keepChildren }).catch(() => {})
       })
       return
     }
-    if (STRUCTURE_COMMANDS[name]) {
-      this.flushHttpInsert()
+    if (INSERT_COMMANDS[name]) {
+      const inserted = this.flushHttpInsert()
+      if (name === 'INSERT_PARENT_NODE') {
+        Promise.resolve(inserted)
+          .then(() => this.flushHttpMove())
+          .then(() => {
+            const node =
+              this.mindMap.renderer &&
+              this.mindMap.renderer.activeNodeList &&
+              this.mindMap.renderer.activeNodeList[0]
+            return this.flushHttpReparentChildren(node)
+          })
+          .catch(err => console.error('[mind-map] insert parent failed', err))
+      }
+      return
+    }
+    if (MOVE_COMMANDS[name]) {
+      this.flushHttpMove()
       return
     }
     if (
       name === 'SET_NODE_TEXT' ||
       name === 'SET_NODE_DATA' ||
-      name === 'SET_NODE_NOTE'
+      name === 'SET_NODE_NOTE' ||
+      name === 'SET_NODE_STYLE' ||
+      name === 'SET_NODE_STYLES' ||
+      name === 'ADD_GENERALIZATION' ||
+      name === 'REMOVE_GENERALIZATION'
     ) {
       this.scheduleHttpTextSync()
     }
@@ -1099,6 +1186,30 @@ class Cooperate {
     return node.getData('richText') ? getTextFromHtml(text) : String(text || '')
   }
 
+  nodePatchPayload(node) {
+    const payload = {
+      text: this.nodePlain(node),
+      note: (node.getData && node.getData('note')) || ''
+    }
+    ;[
+      'image',
+      'imageTitle',
+      'imageSize',
+      'icon',
+      'tag',
+      'hyperlink',
+      'hyperlinkTitle',
+      'outerFrame',
+      'generalization'
+    ].forEach(key => {
+      const value = node.getData && node.getData(key)
+      if (value !== undefined && value !== null && value !== '') {
+        payload[key] = value
+      }
+    })
+    return payload
+  }
+
   flushHttpText() {
     if (!this.httpPatchNode) return
     const nodes =
@@ -1106,33 +1217,90 @@ class Cooperate {
     nodes.forEach(node => {
       const uid = node.getData && node.getData('uid')
       if (!uid) return
-      const text = this.nodePlain(node)
-      const note = (node.getData && node.getData('note')) || ''
+      const payload = this.nodePatchPayload(node)
+      const snap = JSON.stringify(payload)
       const prev = this.lastPushed[uid]
-      if (prev && prev.text === text && prev.note === note) return
-      this.lastPushed[uid] = { text, note }
-      this.httpPatchNode(uid, { text, note }).catch(() => {})
+      if (prev && prev.snap === snap) return
+      this.lastPushed[uid] = {
+        text: payload.text,
+        note: payload.note,
+        snap
+      }
+      this.httpPatchNode(uid, payload).catch(() => {})
     })
   }
 
+  collectUnpushedNodes(node, out = []) {
+    if (!node || node.isRoot) return out
+    const uid = node.getData && node.getData('uid')
+    if (uid && !this.lastPushed[uid]) out.push(node)
+    const kids = node.children || []
+    kids.forEach(child => this.collectUnpushedNodes(child, out))
+    return out
+  }
+
   flushHttpInsert() {
-    if (!this.httpAddNode) return
+    if (!this.httpAddNode) return Promise.resolve()
+    const list =
+      (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
+    const pending = []
+    list.forEach(node => this.collectUnpushedNodes(node, pending))
+    const jobs = pending.map(node => {
+      const uid = node.getData && node.getData('uid')
+      const parent =
+        node.parent && node.parent.getData && node.parent.getData('uid')
+      const text = this.nodePlain(node)
+      const note = (node.getData && node.getData('note')) || ''
+      const kids = (node.parent && node.parent.nodeData && node.parent.nodeData.children) || []
+      const index = kids.findIndex(item => item && item.data && item.data.uid === uid)
+      this.lastPushed[uid] = { text, note }
+      return this.httpAddNode({
+        parent,
+        uid,
+        text,
+        note,
+        index: index < 0 ? undefined : index
+      }).catch(err => {
+        console.error('[mind-map] add node failed', err)
+      })
+    })
+    return Promise.all(jobs)
+  }
+
+  flushHttpMove() {
+    if (!this.httpPatchNode) return Promise.resolve()
     const node =
       this.mindMap.renderer &&
       this.mindMap.renderer.activeNodeList &&
       this.mindMap.renderer.activeNodeList[0]
-    if (!node || node.isRoot) return
+    if (!node || node.isRoot) return Promise.resolve()
     const uid = node.getData && node.getData('uid')
-    if (!uid || this.lastPushed[uid]) return
     const parent =
       node.parent && node.parent.getData && node.parent.getData('uid')
-    const text = this.nodePlain(node)
-    this.lastPushed[uid] = { text, note: node.getData('note') || '' }
-    this.httpAddNode({
+    if (!uid || !parent) return Promise.resolve()
+    const kids =
+      (node.parent.nodeData && node.parent.nodeData.children) || []
+    const index = kids.findIndex(item => item && item.data && item.data.uid === uid)
+    return this.httpPatchNode(uid, {
       parent,
-      uid,
-      text
-    }).catch(() => {})
+      index: index < 0 ? 0 : index
+    }).catch(err => console.error('[mind-map] move node failed', err))
+  }
+
+  flushHttpReparentChildren(node) {
+    if (!this.httpPatchNode || !node) return Promise.resolve()
+    const parentUid = node.getData && node.getData('uid')
+    const kids = (node.nodeData && node.nodeData.children) || []
+    return Promise.all(
+      kids.map((child, index) => {
+        const childUid = child && child.data && child.data.uid
+        if (!childUid) return Promise.resolve()
+        return this.httpPatchNode(childUid, {
+          parent: parentUid,
+          index
+        }).catch(err => console.error('[mind-map] reparent failed', err))
+      })
+    )
   }
 
   collectVisibleUids() {
