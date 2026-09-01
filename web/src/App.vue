@@ -93,6 +93,8 @@ const authErrors = {
   expired_state: '二维码已过期，请重新扫码。',
   missing_code: '你取消了授权，请重新扫码并确认登录。',
   not_enterprise_member: '当前账号不在该企业应用的可见范围内。',
+  wecom_ip_not_allowed:
+    '服务器出口 IP 未加入企业微信应用可信 IP，请联系管理员处理（错误码 60020）。',
   wecom_identity_failed: '企业微信未能确认成员身份，请稍后重试。',
   wecom_token_failed: '企业微信应用配置无效，请联系管理员。',
   wecom_timeout: '企业微信响应超时，请稍后重试。',

@@ -115,7 +115,18 @@ async function main() {
       return
     }
     if (url.pathname === '/cgi-bin/auth/getuserinfo') {
-      assert.strictEqual(url.searchParams.get('code'), 'valid-code')
+      const code = url.searchParams.get('code')
+      if (code === 'ip-denied') {
+        res.end(
+          JSON.stringify({
+            errcode: 60020,
+            errmsg:
+              'not allow to access from your ip, from ip: 203.0.113.8'
+          })
+        )
+        return
+      }
+      assert.strictEqual(code, 'valid-code')
       res.end(JSON.stringify({ errcode: 0, UserId: 'zhangsan' }))
       return
     }
@@ -257,6 +268,24 @@ async function main() {
       'jssdk'
     )
     assert(embeddedLoginLocation.searchParams.get('state'))
+
+    response = await request('/api/auth/login?return_to=%2F%3Froom%3Ddemo')
+    assert.strictEqual(response.status, 302)
+    const deniedLoginLocation = new URL(response.headers.get('location'))
+    const deniedState = deniedLoginLocation.searchParams.get('state')
+    assert(deniedState)
+
+    response = await request(
+      `/api/auth/wecom/callback?code=ip-denied&state=${encodeURIComponent(
+        deniedState
+      )}`
+    )
+    assert.strictEqual(response.status, 302)
+    const deniedCallbackLocation = new URL(response.headers.get('location'))
+    assert.strictEqual(
+      deniedCallbackLocation.searchParams.get('auth_error'),
+      'wecom_ip_not_allowed'
+    )
 
     response = await request('/api/auth/login?return_to=%2F%3Froom%3Ddemo')
     assert.strictEqual(response.status, 302)
