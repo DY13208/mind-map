@@ -9,7 +9,7 @@ const {
   applyCollabEvents,
   markDirtySubtrees
 } = require('../bin/collabRecovery')
-const { evaluateUndo, reconstructByInverses } = require('../bin/collabUndo')
+const { evaluateUndo, evaluateRedo, reconstructByInverses } = require('../bin/collabUndo')
 
 const node = (uid, text, children = [], extra = {}) => ({
   isRoot: uid === 'root',
@@ -482,6 +482,58 @@ function testConcurrentSiblingInsertsGetDistinctPositions() {
   assert.deepStrictEqual(replayed.nodes.root.children, ['second', 'first'])
 }
 
+function testRedoRequiresUndoAndBlocksDoubleRedo() {
+  const insert = {
+    operation_id: 'op-insert',
+    actor_id: 'alice',
+    operation_type: 'node.insert',
+    version: 1,
+    payload: { uid: 'n1', parentUid: 'root', text: 'One' },
+    inverse_payload: { type: 'node.delete', payload: { uid: 'n1' } },
+    event: {
+      type: 'node.inserted',
+      affectedUids: ['n1', 'root'],
+      payload: { uid: 'n1' }
+    }
+  }
+  const unavailable = evaluateRedo(insert, [], 'alice')
+  assert.strictEqual(unavailable.ok, false)
+  assert.strictEqual(unavailable.code, 'REDO_UNAVAILABLE')
+
+  const undoOp = {
+    operation_id: 'op-undo',
+    actor_id: 'alice',
+    operation_type: 'operation.undo',
+    version: 2,
+    payload: { targetOperationId: 'op-insert' },
+    event: {
+      type: 'operation.undone',
+      payload: {
+        targetOperationId: 'op-insert',
+        inverse: insert.inverse_payload
+      }
+    }
+  }
+  const allowed = evaluateRedo(insert, [undoOp], 'alice')
+  assert.strictEqual(allowed.ok, true)
+  assert.strictEqual(allowed.forward.type, 'node.insert')
+
+  const redoOp = {
+    operation_id: 'op-redo',
+    actor_id: 'alice',
+    operation_type: 'operation.redo',
+    version: 3,
+    payload: { targetOperationId: 'op-insert' },
+    event: {
+      type: 'operation.redone',
+      payload: { targetOperationId: 'op-insert' }
+    }
+  }
+  const again = evaluateRedo(insert, [undoOp, redoOp], 'alice')
+  assert.strictEqual(again.ok, false)
+  assert.strictEqual(again.code, 'ALREADY_REDONE')
+}
+
 testInsertUpdateMoveDeleteStayOnTempDoc()
 testInsertRecordsInverseAndResolvedUid()
 testSopChangesRequireConfirmation()
@@ -491,6 +543,7 @@ testApplyCollabEventKeepChildrenAndTitleNoop()
 testPreviewStampsMetaAndKnownVersion()
 testMarkDirtySubtreesForUnloadedBranch()
 testUndoSafetyBlocksOtherUsersAndOutOfOrder()
+testRedoRequiresUndoAndBlocksDoubleRedo()
 testRestoreAndHistoricalReplay()
 testConcurrentSiblingInsertsGetDistinctPositions()
 testPreviewTimings()

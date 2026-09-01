@@ -28,11 +28,13 @@ const {
   listRoomOperations,
   getRoomOperation,
   getNearestSnapshot,
-  auditRoomNodes
+  auditRoomNodes,
+  repairRoomNodes,
+  forceRoomSnapshot
 } = require('./storage')
-const { beatPresence, listPresence, leavePresence } = require('./presence')
+const { beatPresence, listPresence, leavePresence, getPresenceStatus } = require('./presence')
 const { applyCollabEvents } = require('./collabRecovery')
-const { evaluateUndo, reconstructByInverses } = require('./collabUndo')
+const { evaluateUndo, evaluateRedo, reconstructByInverses } = require('./collabUndo')
 
 const roomMutationQueues = new Map()
 
@@ -177,10 +179,56 @@ async function executeUndo(req, roomKey, operationId, body = {}) {
         targetOperationId: target.operation_id,
         targetVersion: target.version,
         inverse: verdict.inverse,
+        forward: {
+          type: target.operation_type,
+          payload: target.payload || {}
+        },
         confirm_sop_change: true
       }
     },
     'operation.undo'
+  )
+  command.actorId = actorId
+  return executeOperation(req, roomKey, command)
+}
+
+async function executeRedo(req, roomKey, operationId, body = {}) {
+  const actorId = requestActor(req, body)
+  const target = await getRoomOperation(roomKey, operationId)
+  if (!target) {
+    const err = new Error('operation not found')
+    err.statusCode = 404
+    err.code = 'NOT_FOUND'
+    throw err
+  }
+  const later = await listRoomOperations(roomKey, target.version, 1000)
+  const verdict = evaluateRedo(target, later, actorId)
+  if (!verdict.ok) {
+    const err = new Error(verdict.error)
+    err.statusCode = verdict.code === 'NOT_FOUND' ? 404 : 409
+    err.code = verdict.code
+    err.details = {
+      overlappingUids: verdict.overlappingUids || [],
+      blockingVersion: verdict.blockingVersion || null,
+      blockingActorId: verdict.blockingActorId || null
+    }
+    throw err
+  }
+  const command = normalizeCommand(
+    req,
+    roomKey,
+    {
+      ...body,
+      type: 'operation.redo',
+      payload: {
+        targetOperationId: target.operation_id,
+        undoOperationId: verdict.undoOperationId,
+        undoVersion: verdict.undoVersion,
+        forward: verdict.forward,
+        confirm_sop_change: true
+      }
+    },
+    'operation.redo'
   )
   command.actorId = actorId
   return executeOperation(req, roomKey, command)
@@ -467,6 +515,7 @@ async function handleApi(req, res) {
       ok: true,
       service: 'mind-map-collab',
       outbox,
+      presence: getPresenceStatus(),
       bus: require('./eventBus').getEventBusStatus()
     })
     return true
@@ -496,21 +545,67 @@ async function handleApi(req, res) {
     }
   }
 
+  const opsRoomMatch = pathname.match(/^\/api\/ops\/rooms\/([^/]+)(\/[^/]+)?$/)
+  if (opsRoomMatch) {
+    const roomKey = safeRoomKey(decodeURIComponent(opsRoomMatch[1]))
+    const action = opsRoomMatch[2] || ''
+    if (req.method === 'GET' && (action === '/diagnostics' || action === '')) {
+      const report = await auditRoomNodes(roomKey)
+      if (!report) {
+        sendJson(res, 404, { error: 'not found' })
+        return true
+      }
+      const version = await getRoomVersion(roomKey)
+      sendJson(res, 200, {
+        room_key: roomKey,
+        version,
+        consistency: report,
+        presence: getPresenceStatus()
+      })
+      return true
+    }
+    if (req.method === 'POST' && action === '/repair') {
+      const result = await repairRoomNodes(roomKey)
+      if (!result) {
+        sendJson(res, 404, { error: 'not found' })
+        return true
+      }
+      sendJson(res, 200, result)
+      return true
+    }
+    if (req.method === 'POST' && action === '/snapshot') {
+      const result = await forceRoomSnapshot(roomKey)
+      if (!result) {
+        sendJson(res, 404, { error: 'not found' })
+        return true
+      }
+      sendJson(res, 200, result)
+      return true
+    }
+  }
+
   const presenceMatch = pathname.match(/^\/api\/files\/([^/]+)\/presence$/)
   if (presenceMatch) {
     const roomKey = decodeURIComponent(presenceMatch[1])
     if (req.method === 'GET') {
-      sendJson(res, 200, { list: listPresence(roomKey) })
+      const list = await listPresence(roomKey)
+      sendJson(res, 200, { list })
       return true
     }
     if (req.method === 'POST') {
       const body = await readBody(req)
-      sendJson(res, 200, { list: beatPresence(roomKey, body) })
+      const list = await beatPresence(roomKey, body)
+      sendJson(res, 200, { list })
       return true
     }
     if (req.method === 'DELETE') {
       const body = await readBody(req).catch(() => ({}))
-      sendJson(res, 200, { list: leavePresence(roomKey, body && body.id) })
+      const list = await leavePresence(
+        roomKey,
+        body.id || body.userId,
+        body.clientId || body.client_id
+      )
+      sendJson(res, 200, { list })
       return true
     }
   }
@@ -561,6 +656,28 @@ async function handleApi(req, res) {
       sendJson(res, err.statusCode || 400, {
         error: err.message || 'bad request',
         code: err.code || 'UNDO_REJECTED',
+        overlappingUids: (err.details && err.details.overlappingUids) || [],
+        blockingVersion: err.details && err.details.blockingVersion,
+        blockingActorId: err.details && err.details.blockingActorId
+      })
+    }
+    return true
+  }
+
+  const redoMatch = pathname.match(
+    /^\/api\/maps\/([^/]+)\/operations\/([^/]+)\/redo$/
+  )
+  if (redoMatch && req.method === 'POST') {
+    const roomKey = safeRoomKey(decodeURIComponent(redoMatch[1]))
+    const operationId = decodeURIComponent(redoMatch[2])
+    const body = await readBody(req).catch(() => ({}))
+    try {
+      const committed = await executeRedo(req, roomKey, operationId, body)
+      sendJson(res, 201, operationResponse(roomKey, committed))
+    } catch (err) {
+      sendJson(res, err.statusCode || 400, {
+        error: err.message || 'bad request',
+        code: err.code || 'REDO_REJECTED',
         overlappingUids: (err.details && err.details.overlappingUids) || [],
         blockingVersion: err.details && err.details.blockingVersion,
         blockingActorId: err.details && err.details.blockingActorId

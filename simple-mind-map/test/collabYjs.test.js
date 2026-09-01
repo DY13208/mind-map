@@ -491,24 +491,29 @@ function testExpandToLevelThreeHydratesClippedBranch() {
 testExpandToLevelThreeHydratesClippedBranch()
 
 const presence = require('../bin/presence')
-function testPresenceTracksSameRoomUsers() {
+
+async function testPresenceTracksSameRoomUsers() {
+  process.env.COLLAB_PRESENCE_BACKEND = 'memory'
   const room = 'room-presence-test'
-  presence.leavePresence(room, 'a')
-  presence.leavePresence(room, 'b')
-  presence.beatPresence(room, { id: 'a', name: '李吉兵', color: '#111' })
-  presence.beatPresence(room, { id: 'b', name: '杨晓东', color: '#222' })
-  const list = presence.listPresence(room)
+  await presence.leavePresence(room, 'a')
+  await presence.leavePresence(room, 'b')
+  await presence.beatPresence(room, { id: 'a', name: '李吉兵', color: '#111' })
+  await presence.beatPresence(room, { id: 'b', name: '杨晓东', color: '#222' })
+  const list = await presence.listPresence(room)
   assert.strictEqual(list.length, 2)
   assert.deepStrictEqual(
     new Set(list.map(item => item.id)),
     new Set(['a', 'b'])
   )
-  presence.leavePresence(room, 'a')
-  assert.strictEqual(presence.listPresence(room).length, 1)
-  assert.strictEqual(presence.listPresence(room)[0].id, 'b')
+  await presence.leavePresence(room, 'a')
+  assert.strictEqual((await presence.listPresence(room)).length, 1)
+  assert.strictEqual((await presence.listPresence(room))[0].id, 'b')
 }
 
-testPresenceTracksSameRoomUsers()
+testPresenceTracksSameRoomUsers().catch(err => {
+  console.error(err)
+  process.exit(1)
+})
 
 function testAddNodeOnDocRequiresParentThenKeepsChild() {
   const ydoc = new Y.Doc()

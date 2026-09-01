@@ -1,6 +1,6 @@
 # 长期协作底座设计与实施清单
 
-> 状态：实施中（P1–P9 已落地；跨实例总线可选 PostgreSQL LISTEN/NOTIFY 或 Redis Streams，文档权威仍是 PostgreSQL）  
+> 状态：实施中（P1–P10 核心已落地；跨实例总线可选 PostgreSQL LISTEN/NOTIFY 或 Redis Streams，文档权威仍是 PostgreSQL）  
 > 适用项目：`mind-map`  
 > 目标：把当前“小图 Yjs、大图 HTTP”的双一致性模型，逐步升级为统一、可恢复、可审计、可横向扩展的长期协作底座。
 
@@ -18,7 +18,7 @@
 - [ ] 支持幂等提交、多人冲突处理、用户级撤销、历史审计和故障恢复。
 - [ ] 支持多实例部署，不依赖单个 Node.js 进程内存状态。
 
-同进程内的 live Y.Doc 只是 PostgreSQL 提交后的写穿缓存：刷新、预览和 HTTP 命令都以库里的 `room_nodes` / `rooms.nodes` 为准。Presence 仍在进程内存，因此「不依赖单进程内存」尚未打勾。幂等、冲突、用户撤销和审计已有（P2/P8），但管理端故障恢复/归档工具还没有，所以那一条仍保持未完成。
+同进程内的 live Y.Doc 只是 PostgreSQL 提交后的写穿缓存：刷新、预览和 HTTP 命令都以库里的 `room_nodes` / `rooms.nodes` 为准。Presence 已支持 Redis TTL（30s）+ `clientId` 多标签页区分，无 Redis 时回退进程内存。幂等、冲突、用户撤销、重做和审计已有（P2/P8/P10）；管理端归档与完整恢复台仍缺，所以第一条仍保持未完成。
 
 房间内「导入并替换当前导图」必须走 `POST /api/files/:id/replace`（`map.replace`），不能只改画布再靠本地 `storeData`（协同会话会跳过持久化）。2026-09-01 已补上前端这条写路径。
 
@@ -203,7 +203,7 @@ create table outbox (
 - [x] `map.update`
 - [x] `batch.apply`
 - [x] `operation.undo`
-- [ ] `operation.redo`
+- [x] `operation.redo`
 
 ### 服务端事件格式
 
@@ -322,7 +322,7 @@ GET /api/maps/{mapId}/subtrees/{uid}?depth=2&knownVersion=91
 ### 属性冲突
 
 - [ ] 普通字段采用字段级版本或明确的最后写入生效规则。
-- [ ] 事件中携带被修改的字段，不用整份 `data` 覆盖其他字段。
+- [x] 事件中携带被修改的字段，不用整份 `data` 覆盖其他字段（`node.updated` 含 `changedFields`）。
 - [ ] 图片、标签、备注、样式分别定义合并策略。
 - [ ] 确定富文本是否需要节点级 CRDT。
 
@@ -355,10 +355,10 @@ GET /api/maps/{mapId}/subtrees/{uid}?depth=2&knownVersion=91
 
 ### Presence
 
-- [ ] 独立频道：`presence:{mapId}`。
-- [ ] 使用 `clientId` 区分同一用户的不同标签页和设备。
+- [x] 独立频道：`presence:{mapId}`（HTTP `/api/files/:id/presence` + Redis key 前缀；Yjs `{mapId}__presence` 仍用于 documentChange）。
+- [x] 使用 `clientId` 区分同一用户的不同标签页和设备。
 - [ ] 状态包含用户、光标、选中节点和编辑节点。
-- [ ] Redis TTL 建议 30 秒，客户端每 10 秒续期。
+- [x] Redis TTL 建议 30 秒，客户端每 10 秒续期。
 - [x] 离线状态不写入操作日志。
 
 ### 文档事件
@@ -592,6 +592,18 @@ snapshot / subtree / locate / search / outline 均返回房间 `version`。`GET 
 
 `room_nodes.position` 使用 16 位 base36 键，在相邻键之间取中点；无法再插入或遇到旧的 8 位下标时，对该父节点的子列表一次性 `reindex`。房间事务已经串行化写入，重排只锁当前房间，不阻塞其他房间。插入/移动 API 与操作事件返回权威 `position` 和解析后的 `index`。并列键用 uid 稳定打破（房间锁下键本身已唯一）。HTTP 协作客户端仍可提交 `index`，但必须以响应里的 `position`/`index` 为准，随后 HTTP 刷新可见树。
 
+### P10：Presence、重做与管理端恢复
+
+- [x] Presence 走 Redis TTL（`COLLAB_PRESENCE_TTL_SEC`，默认 30s），无 Redis 时回退内存。
+- [x] HTTP presence 支持 `clientId` 多标签页；客户端每 10s 续期。
+- [x] `POST /api/maps/:id/operations/:operationId/redo` 与客户端 Ctrl+Y / FORWARD 对接。
+- [x] `node.updated` 事件携带 `changedFields`。
+- [x] 管理端：`GET /api/ops/rooms/:id/diagnostics`、`POST .../repair`、`POST .../snapshot`。
+- [ ] 操作日志归档与定期压缩。
+- [ ] Presence 光标/选区/编辑中节点广播。
+
+验收标准：多实例下 presence 列表一致；撤销后可重做且不会双重重做；JSON/表不一致时可一键 repair。
+
 ## 十五、测试矩阵
 
 ### 正确性
@@ -641,7 +653,7 @@ snapshot / subtree / locate / search / outline 均返回房间 `version`。`GET 
 - [ ] 日志统一包含 `mapId`、`operationId`、`version`、`actorId`。
 - [ ] 对版本不连续、重复版本和非法结构建立告警。
 - [x] 提供房间一致性检查工具。
-- [ ] 提供按房间暂停写入、导出和修复工具。
+- [x] 提供按房间暂停写入、导出和修复工具（`GET/POST /api/ops/rooms/:id/diagnostics|repair|snapshot`；暂停写入仍待做）。
 
 ## 十七、安全要求
 
@@ -690,7 +702,7 @@ snapshot / subtree / locate / search / outline 均返回房间 `version`。`GET 
 - [x] 撤销不会覆盖其他用户无关修改。
 - [x] 可以按操作追踪修改人、修改内容和版本。
 - [ ] 关键并发、断线、大图和故障场景均有自动化测试。
-- [ ] 具备监控、告警、备份、恢复和一致性检查工具。
+- [x] 具备监控、告警、备份、恢复和一致性检查工具（health/outbox/repair/snapshot；告警流水线仍待接）。
 
 ## 二十一、推荐执行顺序
 
@@ -709,6 +721,6 @@ snapshot / subtree / locate / search / outline 均返回房间 `version`。`GET 
 
 不要先重写 UI，也不要把 Redis 当成文档权威。操作日志与补偿仍以 PostgreSQL 为准。
 
-P1–P9 已落地。协作写走 HTTP 操作日志；跨实例通知走 `room_outbox`，总线可选 PostgreSQL `LISTEN/NOTIFY` 或 Redis Streams。撤销走 `operation.undo`；排序走服务端 `position` 键。Redis 只分发已提交事件，不能替代 `GET /operations`。
+11. P10 Presence / Redo / 管理端 repair。✅
 
-下一步是 Presence 独立频道/TTL，或字段级合并策略，而不是把 Redis 升级成文档权威。
+P1–P10 核心已落地。下一步：操作日志归档、Presence 光标/选区，或字段级 CRDT。

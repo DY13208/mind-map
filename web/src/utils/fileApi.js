@@ -1,19 +1,36 @@
+import { FetchTimeoutError, fetchWithTimeout } from './fetchWithTimeout'
 import { getRuntimeConfig } from './runtimeConfig'
+
+const DEFAULT_TIMEOUT_MS = 20000
 
 function apiBase() {
   return getRuntimeConfig().collabApi
 }
 
 async function request(path, options = {}) {
-  const res = await fetch(`${apiBase()}${path}`, {
-    credentials: 'include',
-    cache: 'no-store',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {})
-    },
-    ...options
-  })
+  const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS
+  let res
+  try {
+    res = await fetchWithTimeout(
+      `${apiBase()}${path}`,
+      {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options.headers || {})
+        },
+        method: options.method,
+        body: options.body
+      },
+      timeoutMs
+    )
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error('协作服务响应超时，请稍后重试')
+    }
+    throw err
+  }
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     throw new Error(data.error || res.statusText || 'request failed')
@@ -136,6 +153,19 @@ export function undoMapOperation(roomKey, operationId, body = {}) {
     `/api/maps/${encodeURIComponent(roomKey)}/operations/${encodeURIComponent(
       operationId
     )}/undo`,
+    {
+      method: 'POST',
+      headers: operationHeaders(body),
+      body: JSON.stringify(body || {})
+    }
+  )
+}
+
+export function redoMapOperation(roomKey, operationId, body = {}) {
+  return request(
+    `/api/maps/${encodeURIComponent(roomKey)}/operations/${encodeURIComponent(
+      operationId
+    )}/redo`,
     {
       method: 'POST',
       headers: operationHeaders(body),

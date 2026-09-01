@@ -1,4 +1,7 @@
+import { FetchTimeoutError, fetchWithTimeout } from './fetchWithTimeout'
 import { getRuntimeConfig } from './runtimeConfig'
+
+const AUTH_TIMEOUT_MS = 15000
 
 let currentUser = null
 
@@ -12,10 +15,22 @@ function currentReturnTo() {
 }
 
 export async function loadAuthState() {
-  const response = await fetch(getAuthApiUrl('/api/auth/me'), {
-    credentials: 'include',
-    headers: { Accept: 'application/json' }
-  })
+  let response
+  try {
+    response = await fetchWithTimeout(
+      getAuthApiUrl('/api/auth/me'),
+      {
+        credentials: 'include',
+        headers: { Accept: 'application/json' }
+      },
+      AUTH_TIMEOUT_MS
+    )
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error('认证服务响应超时，请稍后重试')
+    }
+    throw err
+  }
   const data = await response.json().catch(() => ({}))
   if (!response.ok) {
     throw new Error(data.error || '认证服务暂不可用')

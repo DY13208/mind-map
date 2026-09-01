@@ -142,6 +142,7 @@ function applyNodeCommand(ydoc, command) {
     }
     const patch = dataFields(payload.patch || payload.data || payload)
     if (Object.keys(patch).length) mindDoc.updateNodeOnDoc(ydoc, uid, patch)
+    const changedFields = Object.keys(patch)
     const moved = parent !== undefined || payload.index !== undefined || payload.position
     const after = mindDoc.readObject(ydoc)
     const newLocation = parentPosition(after, uid)
@@ -167,7 +168,11 @@ function applyNodeCommand(ydoc, command) {
       event: withAuthoritativeOrder(
         {
           type: moved ? 'node.moved' : 'node.updated',
-          payload: { ...payload, uid },
+          payload: {
+            ...payload,
+            uid,
+            ...(changedFields.length ? { changedFields } : {})
+          },
           affectedUids: [uid, oldLocation.parentUid, parent].filter(Boolean)
         },
         stamp
@@ -238,6 +243,33 @@ function applyNodeCommand(ydoc, command) {
         },
         stamp
       )
+    }
+  }
+  if (command.type === 'operation.redo') {
+    const forward = payload.forward || {}
+    if (!forward || !forward.type) {
+      throw new Error('缺少可执行的重做操作')
+    }
+    const applied = applyNodeCommand(ydoc, {
+      type: forward.type,
+      payload: {
+        ...(forward.payload || {}),
+        confirm_sop_change: true
+      }
+    })
+    return {
+      result: applied.result,
+      inversePayload: applied.inversePayload,
+      event: {
+        type: 'operation.redone',
+        payload: {
+          targetOperationId: payload.targetOperationId,
+          undoOperationId: payload.undoOperationId,
+          forwardType: forward.type,
+          forward
+        },
+        affectedUids: (applied.event && applied.event.affectedUids) || []
+      }
     }
   }
   if (command.type === 'operation.undo') {

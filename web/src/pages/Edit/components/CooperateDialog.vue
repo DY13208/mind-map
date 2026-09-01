@@ -146,6 +146,7 @@ import { WebsocketProvider } from 'y-websocket'
 import { mapMutations, mapState } from 'vuex'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
 import { getCurrentUser } from '@/utils/auth'
+import { roomFromLocation } from '@/utils/roomLocation'
 import {
   listFiles,
   createFile as createFileApi,
@@ -163,6 +164,7 @@ import {
   getMapOperations,
   getMapAudit,
   undoMapOperation,
+  redoMapOperation,
   addFileNode,
   patchFileNode,
   deleteFileNode,
@@ -199,21 +201,6 @@ const defaultServerUrl = () => {
   return getRuntimeConfig().collabUrl
 }
 
-const roomFromLocation = route => {
-  const fromRoute = route && route.query && route.query.room
-  if (fromRoute) return String(fromRoute).trim()
-  try {
-    const fromSearch = new URLSearchParams(window.location.search).get('room')
-    if (fromSearch) return String(fromSearch).trim()
-    const hash = String(window.location.hash || '')
-    const query = hash.indexOf('?') >= 0 ? hash.slice(hash.indexOf('?') + 1) : ''
-    const fromHash = new URLSearchParams(query).get('room')
-    return String(fromHash || '').trim()
-  } catch (e) {
-    return ''
-  }
-}
-
 export default {
   props: {
     mindMap: {
@@ -235,6 +222,7 @@ export default {
       provider: null,
       connectTimer: null,
       saveStatusTimer: null,
+      presenceTimer: null,
       saveStatus: 'idle',
       saveError: '',
       lastConnectErrorAt: 0,
@@ -379,7 +367,7 @@ export default {
     },
 
     joinFromDialog() {
-      this.openSavedRoom({ silent: false })
+      this.openSavedRoom({ silent: false, force: true })
     },
 
     deferJoin() {
@@ -483,14 +471,12 @@ export default {
       if (this.connectTimer) clearTimeout(this.connectTimer)
       this.connectTimer = setTimeout(() => {
         if (this.connected) return
-        if (this.joinedOnce || this.provider) {
-          if (!silent) this.dialogVisible = true
-          if (!this.joinedOnce) this.notifyConnectFailure()
-          return
-        }
         this.connecting = false
-        if (!silent) this.dialogVisible = true
-        this.notifyConnectFailure()
+        this.setCooperateStatus('disconnected')
+        if (!silent) {
+          this.dialogVisible = true
+          if (!this.joinedOnce) this.notifyConnectFailure()
+        }
       }, 60000)
       provider.connect()
     },
@@ -661,12 +647,18 @@ export default {
       this.stopSaveStatusPolling()
       this.loadSaveStatus()
       this.saveStatusTimer = setInterval(this.loadSaveStatus, 1500)
+      this.syncHttpPresence()
+      this.presenceTimer = setInterval(this.syncHttpPresence, 10000)
     },
 
     stopSaveStatusPolling() {
       if (this.saveStatusTimer) {
         clearInterval(this.saveStatusTimer)
         this.saveStatusTimer = null
+      }
+      if (this.presenceTimer) {
+        clearInterval(this.presenceTimer)
+        this.presenceTimer = null
       }
       this.saveStatus = 'idle'
       this.saveError = ''
@@ -696,8 +688,14 @@ export default {
       if (!this.httpCollab || !this.connected || !this.roomName) return
       if (this._presenceWs) return
       try {
+        const clientId =
+          (this.provider &&
+            this.provider.awareness &&
+            this.provider.awareness.clientID) ||
+          this.userId
         const data = await beatPresence(this.roomName, {
           id: this.userId,
+          clientId,
           name: this.userName,
           color: this.userColor
         })
@@ -917,6 +915,8 @@ export default {
         fetchVersion: () => getMapVersion(roomKey),
         undoOperation: operationId =>
           this.notifyHttpMutation(undoMapOperation(roomKey, operationId)),
+        redoOperation: operationId =>
+          this.notifyHttpMutation(redoMapOperation(roomKey, operationId)),
         patchNode: (uid, body) =>
           this.notifyHttpMutation(patchFileNode(roomKey, uid, body)),
         addNode: body =>
@@ -981,11 +981,12 @@ export default {
 
     async openSavedRoom(options = {}) {
       const silent = !!options.silent
+      const force = !!options.force
       if (this.connected) {
         if (!silent) this.$message.success(this.$t('cooperate.openSuccess'))
         return
       }
-      if (this.connecting) return
+      if (this.connecting && !force) return
       const roomKey = this.roomName
       const cooperate = this.mindMap && this.mindMap.cooperate
       if (!roomKey || !cooperate) {
@@ -993,9 +994,11 @@ export default {
         else this.join({ silent: true })
         return
       }
+      const attemptId = (this._openAttemptId = (this._openAttemptId || 0) + 1)
       this.connecting = true
       this.setCooperateStatus('connecting')
       cooperate.setExpectRemoteDoc(true)
+      let previewLoaded = false
       try {
         let preview = null
         try {
@@ -1006,6 +1009,7 @@ export default {
           preview = await getFilePreview(roomKey, 2)
         }
         if (preview && preview.tree) {
+          previewLoaded = true
           const connected = await this.applyPreview(preview, silent)
           if (connected) return
         }
@@ -1016,9 +1020,19 @@ export default {
             err.message || this.$t('cooperate.openFailed')
           )
         }
+      } finally {
+        if (this._openAttemptId === attemptId && !this.connected) {
+          this.connecting = false
+          this.setCooperateStatus('disconnected')
+        }
       }
-      this.connecting = false
-      this.setCooperateStatus('disconnected')
+      if (this.connected) return
+      if (getRuntimeConfig().gateway || previewLoaded) {
+        if (!silent) {
+          this.$message.error(this.$t('cooperate.connectFailed'))
+        }
+        return
+      }
       await this.$nextTick()
       this.deferJoin()
     },

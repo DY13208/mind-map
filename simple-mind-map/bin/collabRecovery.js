@@ -179,6 +179,33 @@ function applyCollabEvent(obj, event) {
     }
     return next
   }
+  if (type === 'operation.redone') {
+    const forward = payload.forward
+    if (!forward || !forward.type) return next
+    if (forward.type === 'node.insert') {
+      return applyCollabEvent(next, {
+        type: 'node.inserted',
+        payload: forward.payload || {}
+      })
+    }
+    if (forward.type === 'node.delete') {
+      return applyCollabEvent(next, {
+        type: 'node.deleted',
+        payload: forward.payload || {}
+      })
+    }
+    if (forward.type === 'node.update' || forward.type === 'node.move') {
+      return applyCollabEvent(next, {
+        type: forward.type === 'node.move' ? 'node.moved' : 'node.updated',
+        payload: forward.payload || {}
+      })
+    }
+    if (forward.type === 'node.restore') {
+      const { applyRestore } = require('./collabUndo')
+      return applyRestore(next, forward.payload || {})
+    }
+    return next
+  }
   throw new Error(`unsupported event type: ${type}`)
 }
 
