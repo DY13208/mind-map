@@ -152,6 +152,13 @@ function readConfig(env = process.env) {
   const appOrigin = env.AUTH_APP_ORIGIN
     ? parseOrigin(env.AUTH_APP_ORIGIN, 'AUTH_APP_ORIGIN')
     : callback.origin
+  const allowedOrigins = String(env.AUTH_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean)
+    .map((value, index) =>
+      parseOrigin(value, `AUTH_ALLOWED_ORIGINS entry ${index + 1}`)
+    )
   const qrStyleUrl = optionalHttpsUrl(
     env.WECOM_QR_STYLE_URL,
     'WECOM_QR_STYLE_URL'
@@ -198,6 +205,7 @@ function readConfig(env = process.env) {
     mcpToken,
     redirectUri: callback.toString(),
     appOrigin,
+    allowedOrigins,
     qrStyleUrl,
     sessionTtlSeconds: Math.round(sessionTtlHours * 60 * 60),
     sessionMaxSeconds: Math.round(sessionMaxHours * 60 * 60),
@@ -406,20 +414,60 @@ function forwardedOrigin(req) {
   return host ? `${protocol}://${host}` : ''
 }
 
-function normalizedRequestOrigin(value) {
+function normalizeOrigin(value) {
+  const input = String(value || '').trim()
+  if (!input) return ''
   try {
-    return new URL(value).origin
+    const url = new URL(input)
+    if (
+      (url.protocol === 'http:' && url.port === '80') ||
+      (url.protocol === 'https:' && url.port === '443')
+    ) {
+      url.port = ''
+    }
+    return url.origin
   } catch (err) {
     return ''
   }
 }
 
+function defaultPort(protocol) {
+  return protocol === 'https:' ? '443' : '80'
+}
+
+function originsEquivalent(a, b) {
+  const left = normalizeOrigin(a)
+  const right = normalizeOrigin(b)
+  if (!left || !right) return false
+  if (left === right) return true
+  try {
+    const ua = new URL(left)
+    const ub = new URL(right)
+    if (ua.protocol !== ub.protocol || ua.hostname !== ub.hostname) {
+      return false
+    }
+    const portA = ua.port || defaultPort(ua.protocol)
+    const portB = ub.port || defaultPort(ub.protocol)
+    if (portA === portB) return true
+    // AUTH_APP_ORIGIN often omits the public port while the browser Origin keeps it.
+    const nonDefault = [portA, portB].filter(
+      port => port !== defaultPort(ua.protocol)
+    )
+    return nonDefault.length <= 1
+  } catch (err) {
+    return false
+  }
+}
+
 function isAllowedOrigin(req, origin = req.headers.origin) {
   if (!origin) return true
-  const normalized = normalizedRequestOrigin(origin)
-  if (!normalized) return false
   if (!config.enabled) return true
-  return normalized === config.appOrigin || normalized === forwardedOrigin(req)
+  const normalized = normalizeOrigin(origin)
+  if (!normalized) return false
+  const candidates = [config.appOrigin, forwardedOrigin(req)]
+    .concat(config.allowedOrigins || [])
+    .filter(Boolean)
+  return candidates.some(candidate => originsEquivalent(candidate, normalized))
 }
 
 function applyCorsHeaders(req, res) {
@@ -1097,6 +1145,17 @@ async function handleAuthApi(req, res) {
   return true
 }
 
+function isAllowedOriginFor(req, origin, authConfig) {
+  if (!origin) return true
+  if (!authConfig || !authConfig.enabled) return true
+  const normalized = normalizeOrigin(origin)
+  if (!normalized) return false
+  const candidates = [authConfig.appOrigin, forwardedOrigin(req)]
+    .concat(authConfig.allowedOrigins || [])
+    .filter(Boolean)
+  return candidates.some(candidate => originsEquivalent(candidate, normalized))
+}
+
 module.exports = {
   initAuth,
   isAuthEnabled,
@@ -1114,6 +1173,10 @@ module.exports = {
     buildWecomLoginUrl,
     createWecomResponseError,
     isPrivateOrLocalHost,
-    isDevBypassAllowed
+    isDevBypassAllowed,
+    normalizeOrigin,
+    originsEquivalent,
+    forwardedOrigin,
+    isAllowedOriginFor
   }
 }
