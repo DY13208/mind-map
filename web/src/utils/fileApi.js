@@ -24,6 +24,13 @@ export function listFiles() {
   return request('/api/files')
 }
 
+export function createFile(body = {}) {
+  return request('/api/files', {
+    method: 'POST',
+    body: JSON.stringify(body || {})
+  })
+}
+
 export function renameFile(roomKey, title) {
   return request(`/api/files/${encodeURIComponent(roomKey)}`, {
     method: 'PATCH',
