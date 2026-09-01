@@ -571,8 +571,9 @@ export default {
     openFile: '打開',
     deleteFile: '刪除',
     renameFile: '重新命名',
-    noFiles: '還沒有儲存的檔案。進入協同後會自動存到 COS 的 mind-map 資料夾',
+    noFiles: '還沒有儲存的檔案。進入協同後會自動把節點存進資料庫',
     deleteConfirm: '確定刪除「{title}」？刪除後無法復原。',
+    openingFile: '正在打開檔案…',
     openSuccess: '已打開該檔案',
     fileDeleted: '已刪除',
     renamed: '已重新命名'

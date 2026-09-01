@@ -595,8 +595,9 @@ export default {
     deleteFile: 'Delete',
     renameFile: 'Rename',
     noFiles:
-      'No saved files yet. Joining a room saves it to the COS mind-map folder.',
+      'No saved files yet. Joining a room saves its nodes to the database.',
     deleteConfirm: 'Delete "{title}"? This cannot be undone.',
+    openingFile: 'Opening file…',
     openSuccess: 'Opened this file',
     fileDeleted: 'Deleted',
     renamed: 'Renamed'

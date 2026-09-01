@@ -386,7 +386,7 @@ export default {
         this.connecting = false
         if (!silent) this.dialogVisible = true
         this.notifyConnectFailure()
-      }, 15000)
+      }, 60000)
       provider.connect()
     },
 
@@ -584,6 +584,10 @@ export default {
       }
       if (this.connected) this.leave({ silent: true })
       this.roomName = item.room_key
+      if (this.mindMap && this.mindMap.cooperate) {
+        this.mindMap.cooperate.setExpectRemoteDoc(true)
+      }
+      this.$message.info(this.$t('cooperate.openingFile'))
       this.$nextTick(() => {
         this.join()
       })
