@@ -123,4 +123,66 @@ const missingResponseError = __test.createWecomResponseError(
 )
 assert.match(missingResponseError.message, /unknown/)
 
+const cfg = __test.readConfig(process.env)
+const reqWithForwardedHost = {
+  headers: {
+    origin: 'http://xx.stillgroup.net:8989',
+    host: 'xx.stillgroup.net',
+    'x-forwarded-host': 'xx.stillgroup.net:8989',
+    'x-forwarded-proto': 'http'
+  }
+}
+assert.strictEqual(
+  __test.isAllowedOriginFor(
+    reqWithForwardedHost,
+    'http://xx.stillgroup.net:8989',
+    cfg
+  ),
+  true
+)
+assert.strictEqual(
+  __test.isAllowedOriginFor(
+    reqWithForwardedHost,
+    'http://xx.stillgroup.net:8989',
+    { ...cfg, appOrigin: 'http://xx.stillgroup.net' }
+  ),
+  true
+)
+assert.strictEqual(
+  __test.isAllowedOriginFor(
+    { headers: { host: 'xx.stillgroup.net', 'x-forwarded-proto': 'http' } },
+    'http://xx.stillgroup.net:8989',
+    { ...cfg, appOrigin: 'http://192.168.0.204:8989' }
+  ),
+  true
+)
+assert.strictEqual(
+  __test.isAllowedOriginFor(
+    { headers: { host: 'xx.stillgroup.net:8989', 'x-forwarded-proto': 'http' } },
+    'http://evil.example.com:8989',
+    cfg
+  ),
+  false
+)
+assert.strictEqual(
+  __test.isAllowedOriginFor(
+    { headers: { host: 'xx.stillgroup.net:8989', 'x-forwarded-proto': 'http' } },
+    'http://xx.stillgroup.net:8989',
+    {
+      enabled: true,
+      appOrigin: 'http://192.168.0.204:8989',
+      allowedOrigins: ['http://xx.stillgroup.net:8989']
+    }
+  ),
+  true
+)
+assert.strictEqual(__test.originsEquivalent(
+  'http://xx.stillgroup.net:8989',
+  'http://xx.stillgroup.net'
+), true)
+assert.strictEqual(__test.originsEquivalent(
+  'http://xx.stillgroup.net:8080',
+  'http://xx.stillgroup.net:8989'
+), false)
+
 console.log('auth unit tests passed')
