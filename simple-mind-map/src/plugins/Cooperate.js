@@ -111,6 +111,9 @@ class Cooperate {
     this.lastPushed = {}
     this.pendingHttpDeletes = []
     this.httpTextTimer = null
+    this.httpStructureTimer = null
+    this.httpInsertPromise = null
+    this.httpInsertRescan = false
     this.httpHydrating = false
     this.localOrigin = { source: 'simple-mind-map-cooperate' }
     // 绑定事件
@@ -416,6 +419,7 @@ class Cooperate {
     }
     this.mindMap.off('expand_btn_click', this.onExpandBtnClick)
     clearTimeout(this.httpTextTimer)
+    clearTimeout(this.httpStructureTimer)
   }
 
   // 数据同步时的处理，更新当前思维导图
@@ -698,6 +702,10 @@ class Cooperate {
     }
     if (this.httpCollabMode) {
       this.scheduleHttpTextSync()
+      // Some large-map commands finish through a deferred render path. In that
+      // path afterExecCommand can be intentionally ignored while the renderer
+      // is busy, so structure changes must also be recovered from data_change.
+      this.scheduleHttpStructureSync()
       return
     }
     if (Date.now() < this.suppressLocalUntil) return
@@ -897,6 +905,9 @@ class Cooperate {
     this.pendingHttpDeletes = []
     clearTimeout(this.httpTextTimer)
     this.httpTextTimer = null
+    clearTimeout(this.httpStructureTimer)
+    this.httpStructureTimer = null
+    this.httpInsertRescan = false
   }
 
   mergeHttpChildren(data, incoming) {
@@ -1180,6 +1191,16 @@ class Cooperate {
     }, 280)
   }
 
+  scheduleHttpStructureSync(delay = 180) {
+    clearTimeout(this.httpStructureTimer)
+    this.httpStructureTimer = setTimeout(() => {
+      this.httpStructureTimer = null
+      this.flushHttpInsert().catch(err => {
+        console.error('[mind-map] structure sync failed', err)
+      })
+    }, delay)
+  }
+
   nodePlain(node) {
     if (!node || typeof node.getData !== 'function') return ''
     const text = node.getData('text')
@@ -1255,6 +1276,23 @@ class Cooperate {
 
   async flushHttpInsert() {
     if (!this.httpAddNode) return
+    if (this.httpInsertPromise) {
+      this.httpInsertRescan = true
+      return this.httpInsertPromise
+    }
+    this.httpInsertPromise = this.flushHttpInsertNow()
+    try {
+      await this.httpInsertPromise
+    } finally {
+      this.httpInsertPromise = null
+      if (this.httpInsertRescan) {
+        this.httpInsertRescan = false
+        this.scheduleHttpStructureSync(0)
+      }
+    }
+  }
+
+  async flushHttpInsertNow() {
     const renderer = this.mindMap.renderer
     const pending = []
     const list = (renderer && renderer.activeNodeList) || []
