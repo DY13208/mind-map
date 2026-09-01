@@ -313,6 +313,8 @@ export default {
     reserve: 'Reserve'
   },
   toolbar: {
+    collapseAllToolbars: 'Collapse all toolbars',
+    expandAllToolbars: 'Expand all toolbars',
     collapseToolbar: 'Collapse top toolbar',
     expandToolbar: 'Expand top toolbar',
     undo: 'Undo',
