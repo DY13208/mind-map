@@ -8,6 +8,13 @@ import MersenneTwister from './mersenneTwister'
 import { ForeignObject } from '@svgdotjs/svg.js'
 import merge from 'deepmerge'
 import { lineStyleProps } from '../theme/default'
+import {
+  nodesToTabOutline,
+  nodesToOutlineHtml,
+  clipboardTextLooksLikeOutline
+} from './copyOutline'
+
+export { clipboardTextLooksLikeOutline }
 
 //  深度优先遍历树
 export const walk = (
@@ -174,6 +181,14 @@ export const copyRenderTree = (tree, root, removeActiveState = false) => {
       tree.children[index] = copyRenderTree({}, item, removeActiveState)
     })
   }
+  const generalizationList = formatGetNodeGeneralization(tree.data)
+  generalizationList.forEach(item => {
+    if (item.children && item.children.length > 0) {
+      item.children = item.children.map(child =>
+        copyRenderTree({}, child, removeActiveState)
+      )
+    }
+  })
   // data、children外的其他字段
   Object.keys(root).forEach(key => {
     if (!['data', 'children'].includes(key) && !/^_/.test(key)) {
@@ -201,6 +216,10 @@ export const copyNodeTree = (
   }
   if (removeActiveState) {
     tree.data.isActive = false
+    const generalizationList = formatGetNodeGeneralization(tree.data)
+    generalizationList.forEach(item => {
+      item.isActive = false
+    })
   }
   tree.children = []
   if (root.children && root.children.length > 0) {
@@ -215,6 +234,18 @@ export const copyNodeTree = (
     root.nodeData.children.forEach((item, index) => {
       tree.children[index] = copyNodeTree({}, item, removeActiveState, removeId)
     })
+  }
+  // 概要节点上的子节点保存在 data.children，与 nodeData.children 同步
+  const generalizationList = formatGetNodeGeneralization(tree.data)
+  generalizationList.forEach(item => {
+    if (item.children && item.children.length > 0) {
+      item.children = item.children.map(child =>
+        copyNodeTree({}, child, removeActiveState, removeId)
+      )
+    }
+  })
+  if (root.isGeneralization && tree.children.length) {
+    tree.data.children = tree.children
   }
   // data、children外的其他字段
   Object.keys(rootData).forEach(key => {
@@ -1019,6 +1050,9 @@ export const createUidForAppointNodes = (
           if (createNewId || isUndef(gNode.uid)) {
             gNode.uid = createUid()
           }
+          if (gNode.children && gNode.children.length) {
+            walk(gNode.children)
+          }
         })
       }
       handle && handle(node)
@@ -1130,16 +1164,56 @@ export const checkClipboardReadEnable = () => {
   return navigator.clipboard && typeof navigator.clipboard.read === 'function'
 }
 
-// 将数据设置到用户剪切板中
+// 将数据设置到用户剪切板中（同时写入 Tab 大纲，便于粘贴到企业微信等外部思维导图）
 export const setDataToClipboard = data => {
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(JSON.stringify(data))
-  }
-}
+  const trees = data && data.data ? data.data : []
+  const outline = nodesToTabOutline(trees)
+  const html = nodesToOutlineHtml(trees)
+  const smmJson = JSON.stringify(data)
+  const plain = outline || smmJson
 
-// 从用户剪贴板中读取文字和图片
+  const fallbackCopy = text => {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.left = '-9999px'
+    document.body.appendChild(ta)
+    ta.select()
+    try {
+      document.execCommand('copy')
+    } finally {
+      document.body.removeChild(ta)
+    }
+  }
+
+  if (navigator.clipboard && navigator.clipboard.write && outline) {
+    const items = {
+      'text/plain': new Blob([outline], { type: 'text/plain' })
+    }
+    if (html) {
+      items['text/html'] = new Blob([html], { type: 'text/html' })
+    }
+    navigator.clipboard.write([new ClipboardItem(items)]).catch(() => {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(plain).catch(() => fallbackCopy(plain))
+      } else {
+        fallbackCopy(plain)
+      }
+    })
+    return
+  }
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(plain).catch(() => fallbackCopy(plain))
+    return
+  }
+
+  fallbackCopy(plain)
+}
 export const getDataFromClipboard = async () => {
   let text = null
+  let html = null
   let img = null
   if (checkClipboardReadEnable()) {
     const items = await navigator.clipboard.read()
@@ -1148,6 +1222,9 @@ export const getDataFromClipboard = async () => {
         for (const type of clipboardItem.types) {
           if (/^image\//.test(type)) {
             img = await clipboardItem.getType(type)
+          } else if (type === 'text/html') {
+            const blob = await clipboardItem.getType(type)
+            html = await blob.text()
           } else if (type === 'text/plain') {
             const blob = await clipboardItem.getType(type)
             text = await blob.text()
@@ -1158,6 +1235,7 @@ export const getDataFromClipboard = async () => {
   }
   return {
     text,
+    html,
     img
   }
 }

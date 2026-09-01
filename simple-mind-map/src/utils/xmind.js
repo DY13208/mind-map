@@ -3,20 +3,68 @@ import {
   imgToDataUrl,
   parseDataUrl,
   getTextFromHtml,
-  createUid
+  createUid,
+  isUndef
 } from './index'
 import { formatGetNodeGeneralization } from '../utils/index'
 
-// 解析出新xmind的概要文本
-export const getSummaryText = (node, topicId) => {
-  if (node.children.summary && node.children.summary.length > 0) {
+// 解析出新xmind的概要主题（含子节点）
+export const getSummaryTopic = (node, topicId) => {
+  if (node.children && node.children.summary && node.children.summary.length > 0) {
     for (let i = 0; i < node.children.summary.length; i++) {
       const cur = node.children.summary[i]
       if (cur.id === topicId) {
-        return cur.title
+        return cur
       }
     }
   }
+  return null
+}
+
+// 解析出新xmind的概要文本
+export const getSummaryText = (node, topicId) => {
+  const topic = getSummaryTopic(node, topicId)
+  return topic ? topic.title : ''
+}
+
+const xmindTopicToNodeTree = topic => {
+  const tree = {
+    data: {
+      text: topic && !isUndef(topic.title) ? topic.title : '',
+      expand: !(topic && topic.branch === 'folded')
+    },
+    children: []
+  }
+  if (
+    topic &&
+    topic.children &&
+    topic.children.attached &&
+    topic.children.attached.length > 0
+  ) {
+    tree.children = topic.children.attached.map(item =>
+      xmindTopicToNodeTree(item)
+    )
+  }
+  return tree
+}
+
+const nodeTreeToXmindTopic = node => {
+  const title = getTextFromHtml((node.data && node.data.text) || '')
+  const topic = {
+    id: (node.data && node.data.uid) || createUid(),
+    title,
+    attributedTitle: [
+      {
+        text: title
+      }
+    ]
+  }
+  if (node.children && node.children.length) {
+    topic.children = {
+      attached: node.children.map(item => nodeTreeToXmindTopic(item))
+    }
+  }
+  return topic
 }
 
 // 解析出旧xmind的概要文本
@@ -72,12 +120,32 @@ export const getElementsByType = (arr, type) => {
 }
 
 // 解析xmind数据，将概要转换为smm支持的结构
-export const addSummaryData = (selfList, childrenList, getText, range) => {
+export const addSummaryData = (selfList, childrenList, getTopic, range) => {
+  const topicOrText = typeof getTopic === 'function' ? getTopic() : getTopic
+  let text = ''
+  let children = []
+  if (topicOrText && typeof topicOrText === 'object') {
+    text = topicOrText.title || ''
+    if (
+      topicOrText.children &&
+      topicOrText.children.attached &&
+      topicOrText.children.attached.length
+    ) {
+      children = topicOrText.children.attached.map(item =>
+        xmindTopicToNodeTree(item)
+      )
+    }
+  } else {
+    text = topicOrText || ''
+  }
   const summaryData = {
     expand: true,
     isActive: false,
-    text: getText(),
+    text,
     range: null
+  }
+  if (children.length) {
+    summaryData.children = children
   }
   const match = range.match(/\((\d+),(\d+)\)/)
   if (match) {
@@ -213,7 +281,14 @@ export const parseNodeGeneralizationToXmind = node => {
         {
           text: summaryTitle
         }
-      ]
+      ],
+      ...(item.children && item.children.length
+        ? {
+            children: {
+              attached: item.children.map(child => nodeTreeToXmindTopic(child))
+            }
+          }
+        : {})
     })
     summaries.push({
       id: createUid(),

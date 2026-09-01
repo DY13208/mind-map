@@ -133,7 +133,7 @@ export const defaultOpt = {
   enableAutoEnterTextEditWhenKeydown: false,
   // 当enableAutoEnterTextEditWhenKeydown选项开启时生效，当通过按键进入文本编辑时是否自动清空原有文本
   autoEmptyTextWhenKeydownEnterEdit: false,
-  // 自定义对剪贴板文本的处理。当按ctrl+v粘贴时会读取用户剪贴板中的文本和图片，默认只会判断文本是否是普通文本和simple-mind-map格式的节点数据，如果你想处理其他思维导图的数据，比如processon、zhixi等，那么可以传递一个函数，接受当前剪贴板中的文本为参数，返回处理后的数据，可以返回两种类型：
+  // 自定义对剪贴板文本的处理。当按ctrl+v粘贴时会读取用户剪贴板中的文本和图片，默认只会判断文本是否是普通文本和simple-mind-map格式的节点数据，如果你想处理其他思维导图的数据，比如processon、zhixi、xmind等，那么可以传递一个函数，接受当前剪贴板中的文本为参数，第二个参数为 { html }，返回处理后的数据，可以返回两种类型：
   /*
     1.返回一个纯文本，那么会直接以该文本创建一个子节点
 
@@ -150,6 +150,7 @@ export const defaultOpt = {
         }
       }
   */
+  // 概要节点也支持 children 字段，可在概要后继续添加子节点
   // 如果你的处理逻辑存在异步逻辑，也可以返回一个promise
   customHandleClipboardText: null,
   // 禁止鼠标滚轮缩放，你仍旧可以使用api进行缩放

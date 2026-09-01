@@ -1,4 +1,5 @@
 import { imgToDataUrl } from 'simple-mind-map/src/utils/index'
+import { parseClipboardToNodes } from './parseClipboardTree'
 
 // 处理知犀
 const handleZHIXI = async data => {
@@ -72,19 +73,33 @@ const handleZHIXI = async data => {
   }
 }
 
-const handleClipboardText = async text => {
+const handleClipboardText = async (text, extra = {}) => {
+  const raw = text == null ? '' : String(text)
+  const html = (extra && extra.html) || ''
   // 知犀数据格式1
   try {
-    let parsedData = JSON.parse(text)
+    let parsedData = JSON.parse(raw)
     if (parsedData.__c_zx_v !== undefined) {
       const res = await handleZHIXI(parsedData.children)
       return res
     }
+    // 本应用内部复制的节点 JSON，交给默认粘贴逻辑
+    if (parsedData && parsedData.simpleMindMap) {
+      return ''
+    }
   } catch (error) {}
   // 知犀数据格式2
-  if (text.includes('￿﻿')) {
-    const res = await handleZHIXI(text)
+  if (raw.includes('￿﻿')) {
+    const res = await handleZHIXI(raw)
     return res
+  }
+  // XMind / 大纲 / HTML 列表 / OPML
+  const tree = parseClipboardToNodes(raw, html)
+  if (tree && tree.length) {
+    return {
+      simpleMindMap: true,
+      data: tree
+    }
   }
   return ''
 }

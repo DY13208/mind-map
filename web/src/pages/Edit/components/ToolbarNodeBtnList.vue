@@ -50,7 +50,7 @@
         v-if="item === 'childNode'"
         class="toolbarBtn"
         :class="{
-          disabled: activeNodes.length <= 0 || hasGeneralization
+          disabled: activeNodes.length <= 0
         }"
         @click="$bus.$emit('execCommand', 'INSERT_CHILD_NODE')"
       >
@@ -179,6 +179,17 @@
         <span class="text">{{ $t('toolbar.outerFrame') }}</span>
       </div>
       <div
+        v-if="item === 'flowExpand'"
+        class="toolbarBtn"
+        :class="{
+          disabled: activeNodes.length <= 0 || hasRoot || readonly || flowExpandBusy
+        }"
+        @click="flowExpand"
+      >
+        <span class="icon iconfont icontianjiazijiedian"></span>
+        <span class="text">{{ $t('toolbar.flowExpand') }}</span>
+      </div>
+      <div
         v-if="item === 'ai'"
         class="toolbarBtn"
         :class="{
@@ -217,7 +228,8 @@ export default {
       readonly: false,
       isFullDataFile: false,
       timer: null,
-      isInPainter: false
+      isInPainter: false,
+      flowExpandBusy: false
     }
   },
   computed: {
@@ -251,6 +263,7 @@ export default {
     this.$bus.$on('back_forward', this.onBackForward)
     this.$bus.$on('painter_start', this.onPainterStart)
     this.$bus.$on('painter_end', this.onPainterEnd)
+    this.$bus.$on('node_flow_expand_busy', this.onFlowExpandBusy)
   },
   beforeDestroy() {
     this.$bus.$off('mode_change', this.onModeChange)
@@ -258,6 +271,7 @@ export default {
     this.$bus.$off('back_forward', this.onBackForward)
     this.$bus.$off('painter_start', this.onPainterStart)
     this.$bus.$off('painter_end', this.onPainterEnd)
+    this.$bus.$off('node_flow_expand_busy', this.onFlowExpandBusy)
   },
   methods: {
     ...mapMutations(['setActiveSidebar']),
@@ -286,6 +300,22 @@ export default {
     // 格式刷结束
     onPainterEnd() {
       this.isInPainter = false
+    },
+
+    onFlowExpandBusy(busy) {
+      this.flowExpandBusy = !!busy
+    },
+
+    flowExpand() {
+      if (
+        this.readonly ||
+        this.flowExpandBusy ||
+        this.activeNodes.length <= 0 ||
+        this.hasRoot
+      ) {
+        return
+      }
+      this.$bus.$emit('node_flow_expand', this.activeNodes[0])
     },
 
     // 显示节点图标侧边栏

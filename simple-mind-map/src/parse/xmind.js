@@ -4,6 +4,7 @@ import { getTextFromHtml, isUndef } from '../utils/index'
 import {
   getSummaryText,
   getSummaryText2,
+  getSummaryTopic,
   getRoot,
   getItemByName,
   getElementsByType,
@@ -93,7 +94,11 @@ const transformXmind = async (content, files, handleMultiCanvas) => {
           selfSummary,
           childrenSummary,
           () => {
-            return getSummaryText(node, item.topicId)
+            return (
+              getSummaryTopic(node, item.topicId) || {
+                title: getSummaryText(node, item.topicId)
+              }
+            )
           },
           item.range
         )
