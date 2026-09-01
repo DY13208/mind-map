@@ -49,6 +49,14 @@ async function withRoomMutation(roomKey, mutation) {
   }
 }
 
+function nodesFromSnapshotOrLive(snapshot, live) {
+  if (snapshot && snapshot.nodes && Object.keys(snapshot.nodes).length) {
+    return snapshot.nodes
+  }
+  if (live && Object.keys(live).length) return live
+  return null
+}
+
 function requestActor(req, body = {}) {
   return String(
     (req.authUser && req.authUser.id) || body.actorId || body.actor_id || 'anonymous'
@@ -119,9 +127,10 @@ async function executeOperation(req, roomKey, command) {
       roomKey,
       command,
       async ({ room }) => {
-        const live = getLiveObject(roomKey)
         const base =
-          live && Object.keys(live).length ? live : room.nodes || {}
+          room.nodes && Object.keys(room.nodes).length
+            ? room.nodes
+            : getLiveObject(roomKey) || {}
         const tempDoc = new Y.Doc()
         try {
           mindDoc.applyObjectToDoc(tempDoc, base, { replace: true })
@@ -311,12 +320,10 @@ async function loadMap(roomKey) {
 
 async function loadSnapshot(roomKey) {
   if (isDeletedRoom(roomKey)) return null
-  const live = getLiveObject(roomKey)
   const snapshot = await getRoomSnapshot(roomKey)
-  if (live) return { obj: live, row: snapshot }
-  if (snapshot && snapshot.nodes && Object.keys(snapshot.nodes).length) {
-    return { obj: snapshot.nodes, row: snapshot }
-  }
+  const live = getLiveObject(roomKey)
+  const obj = nodesFromSnapshotOrLive(snapshot, live)
+  if (obj) return { obj, row: snapshot }
   return loadMap(roomKey)
 }
 
@@ -1026,10 +1033,7 @@ async function handleApi(req, res) {
       const payload = await withRoomMutation(roomKey, async () => {
         const snapshot = await getRoomSnapshot(roomKey)
         const live = getLiveObject(roomKey)
-        const current =
-          live && Object.keys(live).length
-            ? live
-            : (snapshot && snapshot.nodes) || {}
+        const current = nodesFromSnapshotOrLive(snapshot, live) || {}
         if (
           Object.keys(current).length &&
           mindDoc.isWithinSop(current, 'SOP') &&
