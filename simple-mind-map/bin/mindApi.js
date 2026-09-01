@@ -18,7 +18,8 @@ const {
   getSaveStatus,
   isDeletedRoom,
   reviveRoom,
-  scheduleSave
+  scheduleSave,
+  pickLatestTimestamp
 } = require('./storage')
 const { beatPresence, listPresence, leavePresence } = require('./presence')
 
@@ -616,7 +617,10 @@ async function handleApi(req, res) {
     sendJson(res, 200, {
       room_key: roomKey,
       ...local,
-      updated_at: (row && row.updated_at) || local.updated_at
+      updated_at: pickLatestTimestamp(
+        row && row.updated_at,
+        local.updated_at
+      )
     })
     return true
   }

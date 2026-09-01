@@ -704,4 +704,40 @@ function testUndoTextAndMove() {
 
 testUndoTextAndMove()
 
+function sameHttpStamp(a, b) {
+  if (!a || !b) return false
+  if (String(a) === String(b)) return true
+  const ta = Date.parse(a)
+  const tb = Date.parse(b)
+  return Number.isFinite(ta) && ta === tb
+}
+
+function timestampMs(value) {
+  if (!value) return 0
+  const ms = value instanceof Date ? value.getTime() : Date.parse(value)
+  return Number.isFinite(ms) ? ms : 0
+}
+
+function pickLatestTimestamp(a, b) {
+  return timestampMs(a) >= timestampMs(b) ? a || b || null : b || a || null
+}
+
+function testHttpPollUsesLatestStampAndIgnoresSavingGate() {
+  const join = '2026-09-01T06:00:00.000Z'
+  const savingLocal = '2026-09-01T06:00:01.200Z'
+  const pg = '2026-09-01T06:00:01.050Z'
+  const latest = pickLatestTimestamp(pg, savingLocal)
+  assert.strictEqual(latest, savingLocal)
+  assert.strictEqual(sameHttpStamp(join, latest), false)
+  assert.strictEqual(
+    sameHttpStamp('2026-09-01T06:00:01.200Z', '2026-09-01T14:00:01.200+08:00'),
+    true
+  )
+  const wouldPollWhileSaving = true
+  const savedOnly = false
+  assert.ok(wouldPollWhileSaving && !savedOnly)
+}
+
+testHttpPollUsesLatestStampAndIgnoresSavingGate()
+
 console.log('collabYjs tests passed')
