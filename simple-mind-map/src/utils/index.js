@@ -1161,7 +1161,12 @@ export const isSameObject = (a, b) => {
 
 // 检查navigator.clipboard对象的读取是否可用
 export const checkClipboardReadEnable = () => {
-  return navigator.clipboard && typeof navigator.clipboard.read === 'function'
+  return (
+    typeof window !== 'undefined' &&
+    !!window.isSecureContext &&
+    navigator.clipboard &&
+    typeof navigator.clipboard.read === 'function'
+  )
 }
 
 // 将数据设置到用户剪切板中（同时写入 Tab 大纲，便于粘贴到企业微信等外部思维导图）

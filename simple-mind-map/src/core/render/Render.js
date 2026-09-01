@@ -71,6 +71,11 @@ const layouts = {
   [CONSTANTS.LAYOUT.FISHBONE2]: Fishbone
 }
 
+const EXPAND_ALL_BATCH = 6
+const EXPAND_ALL_PER_FRAME = 48
+const EXPAND_ALL_MAX_NODES = 200
+const EXPAND_ALL_MAX_ROUNDS = 24
+
 //  渲染
 class Render {
   //  构造函数
@@ -100,6 +105,7 @@ class Render {
     // 防抖定时器
     this.emitNodeActiveEventTimer = null
     this.renderTimer = null
+    this._expandAllToken = 0
     // 根节点
     this.root = null
     // 文本编辑框，需要再bindEvent之前实例化，否则单击事件只能触发隐藏文本编辑框，而无法保存文本修改
@@ -792,6 +798,52 @@ class Render {
     }
   }
 
+  runAfterHydrate(nodes, fn, commandName) {
+    const cooperate = this.mindMap.cooperate
+    if (
+      this._skipLazyHydrate ||
+      !cooperate ||
+      typeof cooperate.nodeNeedsHydrate !== 'function'
+    ) {
+      return false
+    }
+    const stubs = (nodes || []).filter(node => cooperate.nodeNeedsHydrate(node))
+    if (!stubs.length) return false
+    const command = this.mindMap.command
+    if (command) command.pause()
+    this._lazyCommandPending = true
+    const hydrate = Promise.all(
+      stubs.map(node =>
+        Promise.resolve(cooperate.hydrateLazyChildren(node)).catch(err => {
+          console.error('[mind-map] load children failed', err)
+        })
+      )
+    )
+    const timeout = new Promise(resolve => setTimeout(resolve, 2000))
+    Promise.race([hydrate, timeout])
+      .then(() => {
+        this._skipLazyHydrate = true
+        this._lazyCommandPending = false
+        try {
+          fn()
+        } finally {
+          this._skipLazyHydrate = false
+        }
+        if (command && command.isPause) {
+          command.recovery()
+          command.addHistory()
+        }
+        if (
+          commandName &&
+          cooperate.httpCollabMode &&
+          typeof cooperate.onHttpCommand === 'function'
+        ) {
+          cooperate.onHttpCommand(commandName)
+        }
+      })
+    return true
+  }
+
   //  插入同级节点
   insertNode(
     openEdit = true,
@@ -956,9 +1008,11 @@ class Render {
       }
       createNewId = true
       node.nodeData.children.push(newNode)
-      // 插入子节点时自动展开子节点
+      const live = node.nodeData.children.length
+      const prev = Number(node.getData && node.getData('childCount')) || 0
       node.setData({
-        expand: true
+        expand: true,
+        childCount: Math.max(live, prev + 1)
       })
       if (node.isGeneralization && node.generalizationBelongNode) {
         node.generalizationBelongNode.createGeneralizationNode()
@@ -999,9 +1053,11 @@ class Render {
       // 第一个引用不需要重新创建uid，后面的需要重新创建，否则id会重复
       createNewId = true
       node.nodeData.children.push(...childList)
-      // 插入子节点时自动展开子节点
+      const live = node.nodeData.children.length
+      const prev = Number(node.getData && node.getData('childCount')) || 0
       node.setData({
-        expand: true
+        expand: true,
+        childCount: Math.max(live, prev + childList.length)
       })
       if (node.isGeneralization && node.generalizationBelongNode) {
         node.generalizationBelongNode.createGeneralizationNode()
@@ -1202,8 +1258,35 @@ class Render {
   }
 
   // 复制节点
-  copy() {
-    this.beingCopyData = this.copyNode()
+  async copy() {
+    if (this._copyPromise) {
+      try {
+        await this._copyPromise
+      } catch (e) {
+        // ignore
+      }
+    }
+    this._copyPromise = this.copyNow()
+    try {
+      await this._copyPromise
+    } finally {
+      this._copyPromise = null
+    }
+  }
+
+  async copyNow() {
+    if (this.activeNodeList.length <= 0) {
+      this.beingCopyData = null
+      return
+    }
+    let nodeList = getTopAncestorsFomNodeList(this.activeNodeList)
+    nodeList = sortNodeList(nodeList)
+    const cooperate = this.mindMap.cooperate
+    if (cooperate && typeof cooperate.copyNodeTrees === 'function') {
+      this.beingCopyData = await cooperate.copyNodeTrees(nodeList)
+    } else {
+      this.beingCopyData = nodeList.map(node => copyNodeTree({}, node, true))
+    }
     if (!this.beingCopyData) return
     if (!this.mindMap.opt.disabledClipboard) {
       setDataToClipboard(createSmmFormatData(this.beingCopyData))
@@ -1211,11 +1294,40 @@ class Render {
   }
 
   // 剪切节点
-  cut() {
+  async cut() {
+    if (this._copyPromise) {
+      try {
+        await this._copyPromise
+      } catch (e) {
+        // ignore
+      }
+    }
+    this._copyPromise = this.cutNow()
+    try {
+      await this._copyPromise
+    } finally {
+      this._copyPromise = null
+    }
+  }
+
+  async cutNow() {
+    const cooperate = this.mindMap.cooperate
+    let copied = null
+    if (
+      this.activeNodeList.length > 0 &&
+      cooperate &&
+      typeof cooperate.copyNodeTrees === 'function'
+    ) {
+      let nodeList = getTopAncestorsFomNodeList(this.activeNodeList).filter(
+        node => !node.isRoot
+      )
+      nodeList = sortNodeList(nodeList)
+      copied = await cooperate.copyNodeTrees(nodeList)
+    }
     this.mindMap.execCommand('CUT_NODE', copyData => {
-      this.beingCopyData = copyData
+      this.beingCopyData = copied || copyData
       if (!this.mindMap.opt.disabledClipboard) {
-        setDataToClipboard(createSmmFormatData(copyData))
+        setDataToClipboard(createSmmFormatData(this.beingCopyData))
       }
     })
   }
@@ -1269,8 +1381,21 @@ class Render {
     this.paste(payload)
   }
 
+  pasteInAppCopy() {
+    if (!this.beingCopyData) return false
+    this.mindMap.execCommand('PASTE_NODE', this.beingCopyData)
+    return true
+  }
+
   // 粘贴
   async paste(preset = null) {
+    if (this._copyPromise) {
+      try {
+        await this._copyPromise
+      } catch (e) {
+        // ignore
+      }
+    }
     const { errorHandler, disabledClipboard } = this.mindMap.opt
     const hasPreset =
       preset && (preset.text || preset.html || preset.img)
@@ -1537,6 +1662,15 @@ class Render {
     list = list.filter(node => {
       return !node.isRoot
     })
+    if (
+      this.runAfterHydrate(
+        list,
+        () => this.removeCurrentNode(appointNodes),
+        'REMOVE_CURRENT_NODE'
+      )
+    ) {
+      return
+    }
     // 删除节点后需要激活的节点，如果只选中了一个节点，删除后激活其兄弟节点或者父节点
     let needActiveNode = this.getNextActiveNode(list)
     for (let i = 0; i < list.length; i++) {
@@ -1611,6 +1745,9 @@ class Render {
     if (this.activeNodeList.length <= 0) {
       return
     }
+    if (this.runAfterHydrate(this.activeNodeList, () => this.cutNode(callback), 'CUT_NODE')) {
+      return
+    }
     // 找出激活节点中的顶层节点列表，并过滤掉根节点
     let nodeList = getTopAncestorsFomNodeList(this.activeNodeList).filter(
       node => {
@@ -1654,7 +1791,8 @@ class Render {
 
   //   粘贴节点到节点
   pasteNode(data) {
-    data = formatDataToArray(data)
+    data = formatDataToArray(simpleDeepClone(data))
+    createUidForAppointNodes(data, true)
     this.mindMap.execCommand('INSERT_MULTI_CHILD_NODE', [], data)
   }
 
@@ -1697,50 +1835,259 @@ class Render {
 
   //  设置节点是否展开
   setNodeExpand(node, expand) {
-    this.mindMap.execCommand('SET_NODE_DATA', node, {
-      expand
+    const apply = nextExpand => {
+      this.mindMap.execCommand('SET_NODE_DATA', node, {
+        expand: nextExpand
+      })
+      this.mindMap.render()
+    }
+    if (!expand) {
+      apply(false)
+      return
+    }
+    const live =
+      node.nodeData && node.nodeData.children && node.nodeData.children.length
+    const cooperate = this.mindMap.cooperate
+    if (live || !cooperate || typeof cooperate.hydrateLazyChildren !== 'function') {
+      apply(true)
+      return
+    }
+    const after = () => {
+      const hasKids =
+        node.nodeData && node.nodeData.children && node.nodeData.children.length
+      if (hasKids) apply(true)
+    }
+    const hydrated = cooperate.hydrateLazyChildren(node)
+    if (hydrated && typeof hydrated.then === 'function') {
+      hydrated.then(after).catch(err => {
+        console.error('[mind-map] load children failed', err)
+      })
+      return
+    }
+    after()
+  }
+
+  nodeHasChildren(node) {
+    if (!node) return false
+    if (node.children && node.children.length > 0) return true
+    return Number(node.data && node.data.childCount) > 0
+  }
+
+  applyExpandFlagsToLevel(level) {
+    walk(
+      this.renderTree,
+      null,
+      (node, parent, isRoot, layerIndex) => {
+        const expand = layerIndex < level
+        if (expand) {
+          node.data.expand = true
+        } else if (!isRoot && this.nodeHasChildren(node)) {
+          node.data.expand = false
+        }
+      },
+      null,
+      true,
+      0,
+      0
+    )
+  }
+
+  hydrateThen(root, level, options, after) {
+    const command = this.mindMap.command
+    const finish = () => {
+      after()
+      if (command && command.isPause) {
+        command.recovery()
+        command.addHistory()
+      }
+    }
+    if (command) command.pause()
+    const cooperate = this.mindMap.cooperate
+    if (
+      !cooperate ||
+      typeof cooperate.hydrateTreeToLevel !== 'function'
+    ) {
+      finish()
+      return
+    }
+    const hydrated = cooperate.hydrateTreeToLevel(root, level, options)
+    if (hydrated && typeof hydrated.then === 'function') {
+      hydrated.then(finish).catch(err => {
+        console.error('[mind-map] load children failed', err)
+        finish()
+      })
+      return
+    }
+    finish()
+  }
+
+  waitForRender() {
+    return new Promise(resolve => {
+      let settled = false
+      const done = () => {
+        if (settled) return
+        settled = true
+        resolve()
+      }
+      this.render(done)
+      setTimeout(done, 1200)
     })
-    this.mindMap.render()
+  }
+
+  collectCollapsedFrontier(root) {
+    const out = []
+    const visit = (node, parentExpanded) => {
+      if (!node || !node.data) return
+      const expanded = node.data.expand !== false
+      if (parentExpanded && this.nodeHasChildren(node) && !expanded) {
+        out.push(node)
+        return
+      }
+      if (!expanded) return
+      const kids = node.children || []
+      for (let i = 0; i < kids.length; i++) visit(kids[i], true)
+    }
+    if (!root) return out
+    if (root.data && root.data.expand === false) {
+      if (this.nodeHasChildren(root)) out.push(root)
+      return out
+    }
+    const kids = root.children || []
+    for (let i = 0; i < kids.length; i++) visit(kids[i], true)
+    return out
+  }
+
+  async hydrateFrontier(nodes) {
+    const cooperate = this.mindMap.cooperate
+    if (!cooperate || typeof cooperate.hydrateNodeData !== 'function') return
+    const stubs = (nodes || []).filter(node => {
+      const live = node.children && node.children.length
+      const count = Number(node.data && node.data.childCount) || 0
+      return count > live
+    })
+    if (!stubs.length) return
+    const jobs = stubs.slice(0, EXPAND_ALL_BATCH * 2)
+    const concurrency = 4
+    let index = 0
+    const worker = async () => {
+      while (index < jobs.length) {
+        const node = jobs[index++]
+        try {
+          await cooperate.hydrateNodeData(node)
+        } catch (err) {
+          console.error('[mind-map] load children failed', err)
+        }
+      }
+    }
+    await Promise.all(
+      new Array(Math.min(concurrency, jobs.length)).fill(0).map(() => worker())
+    )
   }
 
   //  展开所有
   expandAllNode(uid = '') {
     if (!this.renderTree) return
+    const token = (this._expandAllToken || 0) + 1
+    this._expandAllToken = token
+    const command = this.mindMap.command
+    if (command) command.pause()
+    const start = this.findExpandStartNode(uid)
+    this.expandSubtreeProgressive(start, token)
+      .catch(err => {
+        console.error('[mind-map] expand all failed', err)
+      })
+      .finally(() => {
+        if (this._expandAllToken === token) this._expandAllToken = 0
+        if (command && command.isPause) {
+          command.recovery()
+          command.addHistory()
+        }
+      })
+  }
 
-    const _walk = (node, enableExpand) => {
-      // 如果该节点为目标节点，那么修改允许展开的标志
-      if (!enableExpand && node.data.uid === uid) {
-        enableExpand = true
+  findExpandStartNode(uid) {
+    if (!uid || !this.renderTree) return this.renderTree
+    const cooperate = this.mindMap.cooperate
+    if (cooperate && typeof cooperate.findTreeNode === 'function') {
+      return cooperate.findTreeNode(this.renderTree, uid) || this.renderTree
+    }
+    let found = null
+    walk(this.renderTree, null, node => {
+      if (node.data && node.data.uid === uid) {
+        found = node
+        return true
       }
-      if (enableExpand && !node.data.expand) {
-        node.data.expand = true
-      }
-      if (node.children && node.children.length > 0) {
-        node.children.forEach(child => {
-          _walk(child, enableExpand)
+    })
+    return found || this.renderTree
+  }
+
+  async expandSubtreeProgressive(start, token) {
+    if (!start) return
+    if (start.data && start.data.expand === false && this.nodeHasChildren(start)) {
+      start.data.expand = true
+      await this.waitForRender()
+    }
+    let painted = 0
+    for (let round = 0; round < EXPAND_ALL_MAX_ROUNDS; round++) {
+      if (this._expandAllToken !== token) return
+      let frontier = this.collectCollapsedFrontier(start)
+      if (!frontier.length) return
+      await this.hydrateFrontier(frontier)
+      if (this._expandAllToken !== token) return
+      frontier = this.collectCollapsedFrontier(start).filter(node => {
+        return node.children && node.children.length > 0
+      })
+      if (!frontier.length) return
+      let i = 0
+      while (i < frontier.length) {
+        if (this._expandAllToken !== token) return
+        if (painted >= EXPAND_ALL_MAX_NODES) return
+        const slice = []
+        let willShow = 0
+        while (i < frontier.length && slice.length < EXPAND_ALL_BATCH) {
+          const node = frontier[i]
+          const kids = (node.children && node.children.length) || 0
+          if (
+            slice.length &&
+            (willShow + kids > EXPAND_ALL_PER_FRAME ||
+              painted + willShow + kids > EXPAND_ALL_MAX_NODES)
+          ) {
+            break
+          }
+          slice.push(node)
+          willShow += kids
+          i += 1
+          if (willShow >= EXPAND_ALL_PER_FRAME) break
+        }
+        if (!slice.length) {
+          const node = frontier[i++]
+          if (!node) break
+          node.data.expand = true
+          painted += (node.children && node.children.length) || 0
+          await this.waitForRender()
+          if (painted >= EXPAND_ALL_MAX_NODES) return
+          continue
+        }
+        slice.forEach(node => {
+          node.data.expand = true
         })
+        painted += willShow
+        await this.waitForRender()
       }
     }
-    _walk(this.renderTree, !uid)
-
-    this.mindMap.render()
   }
 
   //  收起所有
   unexpandAllNode(isSetRootNodeCenter = true, uid = '') {
     if (!this.renderTree) return
+    this._expandAllToken = 0
 
     const _walk = (node, isRoot, enableUnExpand) => {
       // 如果该节点为目标节点，那么修改允许展开的标志
       if (!enableUnExpand && node.data.uid === uid) {
         enableUnExpand = true
       }
-      if (
-        enableUnExpand &&
-        !isRoot &&
-        node.children &&
-        node.children.length > 0
-      ) {
+      if (enableUnExpand && !isRoot && this.nodeHasChildren(node)) {
         node.data.expand = false
       }
       if (node.children && node.children.length > 0) {
@@ -1761,29 +2108,20 @@ class Render {
   //  展开到指定层级
   expandToLevel(level) {
     if (!this.renderTree) return
-    walk(
-      this.renderTree,
-      null,
-      (node, parent, isRoot, layerIndex) => {
-        const expand = layerIndex < level
-        if (expand) {
-          node.data.expand = true
-        } else if (!isRoot && node.children && node.children.length > 0) {
-          node.data.expand = false
-        }
-      },
-      null,
-      true,
-      0,
-      0
-    )
-    this.mindMap.render()
+    const target = Number(level) || 0
+    this.hydrateThen(this.renderTree, target, { maxFetches: 120 }, () => {
+      this.applyExpandFlagsToLevel(target)
+      this.mindMap.render()
+    })
   }
 
   //  切换激活节点的展开状态
   toggleActiveExpand() {
     this.activeNodeList.forEach(node => {
-      if (node.nodeData.children.length <= 0 || node.isRoot) {
+      if (node.isRoot) return
+      if (typeof node.getChildrenLength === 'function') {
+        if (node.getChildrenLength() <= 0) return
+      } else if (!node.nodeData.children || node.nodeData.children.length <= 0) {
         return
       }
       this.toggleNodeExpand(node)

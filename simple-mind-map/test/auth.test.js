@@ -95,4 +95,32 @@ assert.strictEqual(__test.isPrivateOrLocalHost('192.168.1.20'), true)
 assert.strictEqual(__test.isPrivateOrLocalHost('10.0.0.8'), true)
 assert.strictEqual(__test.isPrivateOrLocalHost('mindmap.example.com'), false)
 
+const ipDeniedError = __test.createWecomResponseError(
+  {
+    errcode: 60020,
+    errmsg: 'not allow to access from your ip, from ip: 203.0.113.8'
+  },
+  'wecom_identity_failed',
+  '企业微信身份校验失败'
+)
+assert.strictEqual(ipDeniedError.code, 'wecom_ip_not_allowed')
+assert.strictEqual(ipDeniedError.status, 503)
+assert.match(ipDeniedError.message, /60020/)
+assert.match(ipDeniedError.message, /203\.0\.113\.8/)
+
+const genericIdentityError = __test.createWecomResponseError(
+  { errcode: 40029, errmsg: 'invalid code' },
+  'wecom_identity_failed',
+  '企业微信身份校验失败'
+)
+assert.strictEqual(genericIdentityError.code, 'wecom_identity_failed')
+assert.match(genericIdentityError.message, /40029/)
+
+const missingResponseError = __test.createWecomResponseError(
+  null,
+  'wecom_identity_failed',
+  '企业微信身份校验失败'
+)
+assert.match(missingResponseError.message, /unknown/)
+
 console.log('auth unit tests passed')

@@ -8,6 +8,7 @@ const OAUTH_BROWSER_COOKIE = 'mind_map_oauth_browser'
 const OAUTH_STATE_TTL_SECONDS = 10 * 60
 const TOKEN_REFRESH_MARGIN_SECONDS = 5 * 60
 const WECOM_TOKEN_ERROR_CODES = new Set([40014, 42001])
+const WECOM_IP_DENIED_ERROR_CODE = 60020
 
 let authPool = null
 let authInitialization = null
@@ -526,6 +527,29 @@ function successfulWecomResponse(data) {
   return Number(data && data.errcode) === 0
 }
 
+function createWecomResponseError(data, fallbackCode, fallbackMessage) {
+  const rawErrcode = data && data.errcode
+  const errcode =
+    rawErrcode === undefined || rawErrcode === null || rawErrcode === ''
+      ? NaN
+      : Number(rawErrcode)
+  const normalizedErrcode = Number.isFinite(errcode) ? errcode : null
+  if (normalizedErrcode === WECOM_IP_DENIED_ERROR_CODE) {
+    const errmsg = String((data && data.errmsg) || '')
+    const ipMatch = errmsg.match(/from ip:\s*([0-9a-f:.]+)/i)
+    const ipHint = ipMatch ? `，当前出口 IP：${ipMatch[1]}` : ''
+    return new AuthError(
+      'wecom_ip_not_allowed',
+      `企业微信拒绝当前服务器出口 IP（60020${ipHint}）`,
+      503
+    )
+  }
+  return new AuthError(
+    fallbackCode,
+    `${fallbackMessage}（${normalizedErrcode === null ? 'unknown' : normalizedErrcode}）`
+  )
+}
+
 async function getAccessToken(forceRefresh = false) {
   const now = Date.now()
   if (!forceRefresh && accessTokenCache && accessTokenCache.expiresAt > now) {
@@ -543,9 +567,10 @@ async function getAccessToken(forceRefresh = false) {
       { retries: 2 }
     )
     if (!successfulWecomResponse(data) || !data.access_token) {
-      throw new AuthError(
+      throw createWecomResponseError(
+        data,
         'wecom_token_failed',
-        `企业微信令牌获取失败（${Number(data && data.errcode) || 'unknown'}）`
+        '企业微信令牌获取失败'
       )
     }
     const expiresIn = Math.max(600, Number(data.expires_in || 7200))
@@ -597,11 +622,10 @@ async function exchangeWecomCode(code) {
     identity = await getIdentityResponse(authCode, token)
   }
   if (!successfulWecomResponse(identity)) {
-    throw new AuthError(
+    throw createWecomResponseError(
+      identity,
       'wecom_identity_failed',
-      `企业微信身份校验失败（${
-        Number(identity && identity.errcode) || 'unknown'
-      }）`
+      '企业微信身份校验失败'
     )
   }
 
@@ -624,7 +648,14 @@ async function exchangeWecomCode(code) {
       token = await getAccessToken(true)
       profile = await getProfileResponse(userId, token)
     }
-    if (!successfulWecomResponse(profile)) profile = null
+    if (!successfulWecomResponse(profile)) {
+      console.warn(
+        `[auth] WeCom profile lookup failed: errcode=${
+          Number(profile && profile.errcode) || 'unknown'
+        }; using verified UserId`
+      )
+      profile = null
+    }
   } catch (err) {
     console.warn('[auth] WeCom profile lookup failed; using verified UserId')
   }
@@ -767,6 +798,27 @@ async function deleteRequestSession(req) {
   await authPool.query('delete from auth_sessions where token_hash = $1', [
     sha256(token)
   ])
+}
+
+async function authenticateWebsocketRequest(req) {
+  if (!config.enabled) return { id: 'anonymous', name: 'anonymous' }
+  await initAuth()
+  const authorization = String(req.headers.authorization || '')
+  if (safeEqualString(authorization, `Bearer ${config.mcpToken}`)) {
+    return { id: 'mcp-service', name: 'MCP Service', service: true }
+  }
+  if (!isAllowedOrigin(req)) {
+    const err = new Error('Forbidden')
+    err.statusCode = 403
+    throw err
+  }
+  const user = await authenticateRequest(req)
+  if (!user) {
+    const err = new Error('Unauthorized')
+    err.statusCode = 401
+    throw err
+  }
+  return user
 }
 
 async function requireAuthenticatedRequest(req, res) {
@@ -963,7 +1015,8 @@ async function handleAuthApi(req, res) {
       redirect(res, appRedirectUrl(returnTo))
     } catch (err) {
       const code = err instanceof AuthError ? err.code : 'auth_unavailable'
-      console.error(`[auth] WeCom callback failed: ${code}`)
+      const message = err && err.message ? err.message : 'unknown error'
+      console.error(`[auth] WeCom callback failed: code=${code}; ${message}`)
       redirect(res, appRedirectUrl(returnTo, code))
     }
     return true
@@ -1049,6 +1102,7 @@ module.exports = {
   isAuthEnabled,
   handleAuthApi,
   authenticateRequest,
+  authenticateWebsocketRequest,
   requireAuthenticatedRequest,
   applyCorsHeaders,
   isAllowedOrigin,
@@ -1058,6 +1112,7 @@ module.exports = {
     signValue,
     verifySignedValue,
     buildWecomLoginUrl,
+    createWecomResponseError,
     isPrivateOrLocalHost,
     isDevBypassAllowed
   }

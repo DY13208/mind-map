@@ -485,6 +485,36 @@ export default {
     },
 
     // 复制到剪贴板
+    async getExportData(withConfig) {
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (
+        cooperate &&
+        cooperate.httpCollabMode &&
+        typeof cooperate.fetchExportTree === 'function'
+      ) {
+        try {
+          const tree = await cooperate.fetchExportTree()
+          if (tree) {
+            if (withConfig) {
+              return {
+                layout: this.mindMap.getLayout(),
+                root: tree,
+                theme: {
+                  template: this.mindMap.getTheme(),
+                  config: this.mindMap.getCustomThemeConfig()
+                },
+                view: this.mindMap.view.getTransformData()
+              }
+            }
+            return tree
+          }
+        } catch (error) {
+          console.log(error)
+        }
+      }
+      return this.mindMap.getData(withConfig)
+    },
+
     async copyToClipboard(type) {
       try {
         this.hide()
@@ -492,16 +522,17 @@ export default {
         let str
         switch (type) {
           case 'smm':
-          case 'json':
-            data = this.mindMap.getData(true)
+          case 'json': {
+            data = await this.getExportData(true)
             str = JSON.stringify(data)
             break
+          }
           case 'md':
-            data = this.mindMap.getData()
+            data = await this.getExportData()
             str = transformToMarkdown(data)
             break
           case 'txt':
-            data = this.mindMap.getData()
+            data = await this.getExportData()
             str = transformToTxt(data)
             break
           case 'png':

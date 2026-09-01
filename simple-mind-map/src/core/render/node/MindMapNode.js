@@ -1140,7 +1140,9 @@ class MindMapNode {
 
   // 获取子节点的数量
   getChildrenLength() {
-    return this.nodeData.children ? this.nodeData.children.length : 0
+    const live = this.nodeData.children ? this.nodeData.children.length : 0
+    if (live > 0) return live
+    return Number(this.getData('childCount')) || 0
   }
 }
 
