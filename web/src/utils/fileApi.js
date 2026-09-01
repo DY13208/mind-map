@@ -7,6 +7,7 @@ function apiBase() {
 async function request(path, options = {}) {
   const res = await fetch(`${apiBase()}${path}`, {
     credentials: 'include',
+    cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers || {})
