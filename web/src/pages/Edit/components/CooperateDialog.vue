@@ -658,14 +658,13 @@ export default {
     },
 
     handleHttpChange(change) {
-      if (
-        !change ||
-        change.roomKey !== this.roomName ||
-        (this.provider &&
-          Number(change.clientId) === this.provider.awareness.clientID)
-      ) {
-        return
-      }
+      if (!change || change.roomKey !== this.roomName) return
+      const myClientId =
+        this.provider && this.provider.awareness
+          ? String(this.provider.awareness.clientID)
+          : ''
+      // Compare as strings: outbox uses "outbox-publisher", browsers use numeric ids.
+      if (myClientId && String(change.clientId) === myClientId) return
       const key = String(change.clientId || change.userId || '')
       const nonce = String(change.nonce || change.updatedAt || '')
       if (!key || !nonce || this._seenHttpChanges.get(key) === nonce) return
@@ -718,7 +717,8 @@ export default {
     startSaveStatusPolling() {
       this.stopSaveStatusPolling()
       this.loadSaveStatus()
-      this.saveStatusTimer = setInterval(this.loadSaveStatus, 1500)
+      // Faster than presence alone: catch peer inserts within ~1s even if WS misses.
+      this.saveStatusTimer = setInterval(this.loadSaveStatus, 1000)
       this.syncHttpPresence()
       this.presenceTimer = setInterval(this.syncHttpPresence, 10000)
     },
