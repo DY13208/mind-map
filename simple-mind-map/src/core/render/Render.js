@@ -1248,8 +1248,35 @@ class Render {
   }
 
   // 复制节点
-  copy() {
-    this.beingCopyData = this.copyNode()
+  async copy() {
+    if (this._copyPromise) {
+      try {
+        await this._copyPromise
+      } catch (e) {
+        // ignore
+      }
+    }
+    this._copyPromise = this.copyNow()
+    try {
+      await this._copyPromise
+    } finally {
+      this._copyPromise = null
+    }
+  }
+
+  async copyNow() {
+    if (this.activeNodeList.length <= 0) {
+      this.beingCopyData = null
+      return
+    }
+    let nodeList = getTopAncestorsFomNodeList(this.activeNodeList)
+    nodeList = sortNodeList(nodeList)
+    const cooperate = this.mindMap.cooperate
+    if (cooperate && typeof cooperate.copyNodeTrees === 'function') {
+      this.beingCopyData = await cooperate.copyNodeTrees(nodeList)
+    } else {
+      this.beingCopyData = nodeList.map(node => copyNodeTree({}, node, true))
+    }
     if (!this.beingCopyData) return
     if (!this.mindMap.opt.disabledClipboard) {
       setDataToClipboard(createSmmFormatData(this.beingCopyData))
@@ -1257,11 +1284,40 @@ class Render {
   }
 
   // 剪切节点
-  cut() {
+  async cut() {
+    if (this._copyPromise) {
+      try {
+        await this._copyPromise
+      } catch (e) {
+        // ignore
+      }
+    }
+    this._copyPromise = this.cutNow()
+    try {
+      await this._copyPromise
+    } finally {
+      this._copyPromise = null
+    }
+  }
+
+  async cutNow() {
+    const cooperate = this.mindMap.cooperate
+    let copied = null
+    if (
+      this.activeNodeList.length > 0 &&
+      cooperate &&
+      typeof cooperate.copyNodeTrees === 'function'
+    ) {
+      let nodeList = getTopAncestorsFomNodeList(this.activeNodeList).filter(
+        node => !node.isRoot
+      )
+      nodeList = sortNodeList(nodeList)
+      copied = await cooperate.copyNodeTrees(nodeList)
+    }
     this.mindMap.execCommand('CUT_NODE', copyData => {
-      this.beingCopyData = copyData
+      this.beingCopyData = copied || copyData
       if (!this.mindMap.opt.disabledClipboard) {
-        setDataToClipboard(createSmmFormatData(copyData))
+        setDataToClipboard(createSmmFormatData(this.beingCopyData))
       }
     })
   }
@@ -1294,6 +1350,13 @@ class Render {
 
   // 粘贴
   async paste() {
+    if (this._copyPromise) {
+      try {
+        await this._copyPromise
+      } catch (e) {
+        // ignore
+      }
+    }
     const {
       errorHandler,
       handleIsSplitByWrapOnPasteCreateNewNode,
@@ -1672,7 +1735,8 @@ class Render {
 
   //   粘贴节点到节点
   pasteNode(data) {
-    data = formatDataToArray(data)
+    data = formatDataToArray(simpleDeepClone(data))
+    createUidForAppointNodes(data, true)
     this.mindMap.execCommand('INSERT_MULTI_CHILD_NODE', [], data)
   }
 

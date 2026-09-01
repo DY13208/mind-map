@@ -63,11 +63,19 @@ export function getFilePreview(roomKey, depth = 2) {
 export function getFileSubtree(roomKey, uid, options = {}) {
   const params = new URLSearchParams()
   if (uid) params.set('uid', uid)
+  if (options.deep) params.set('deep', '1')
+  if (options.maxNodes != null) params.set('max_nodes', String(options.maxNodes))
   if (options.offset != null) params.set('offset', String(options.offset))
   if (options.limit != null) params.set('limit', String(options.limit))
   const query = params.toString()
   return request(
     `/api/files/${encodeURIComponent(roomKey)}/subtree${query ? `?${query}` : ''}`
+  )
+}
+
+export function getFileExport(roomKey) {
+  return request(
+    `/api/files/${encodeURIComponent(roomKey)}?format=full&max_nodes=10000`
   )
 }
 

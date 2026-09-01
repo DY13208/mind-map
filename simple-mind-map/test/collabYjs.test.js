@@ -536,4 +536,56 @@ function testNodesByUidsFromDocReadsLiveChildren() {
 
 testNodesByUidsFromDocReadsLiveChildren()
 
+function testDeepSubtreeCopiesNestedChildren() {
+  const obj = {
+    root: {
+      isRoot: true,
+      data: { uid: 'root', text: 'R', expand: true },
+      children: ['a']
+    },
+    a: { data: { uid: 'a', text: 'A', imgMap: { x: 1 } }, children: ['b', 'c'] },
+    b: { data: { uid: 'b', text: 'B' }, children: ['d'] },
+    c: { data: { uid: 'c', text: 'C' }, children: [] },
+    d: { data: { uid: 'd', text: 'D' }, children: [] }
+  }
+  const shallow = mindDoc.subtreeChildren(obj, 'a')
+  assert.strictEqual(shallow.children.length, 2)
+  assert.strictEqual(shallow.children[0].children.length, 0)
+  const deep = mindDoc.subtreeTree(obj, 'a')
+  assert.strictEqual(deep.tree.data.uid, 'a')
+  assert.strictEqual(deep.tree.data.imgMap, undefined)
+  assert.strictEqual(deep.tree.children.length, 2)
+  assert.strictEqual(deep.tree.children[0].data.text, 'B')
+  assert.strictEqual(deep.tree.children[0].children[0].data.text, 'D')
+  assert.strictEqual(deep.node_count, 4)
+  const limited = mindDoc.subtreeTree(obj, 'a', { maxNodes: 2 })
+  assert.strictEqual(limited.truncated, true)
+  assert.ok(limited.tree)
+}
+
+testDeepSubtreeCopiesNestedChildren()
+
+function keepHttpChild(uid, serverKids, lastPushed, recentPushed, now = Date.now()) {
+  if (!uid) return true
+  if (serverKids.has(uid)) return true
+  if (!lastPushed[uid]) return true
+  const at = recentPushed && recentPushed.get(uid)
+  return !!(at && now - at < 2500)
+}
+
+function testHttpRemoteDeleteDropsPushedChildren() {
+  const lastPushed = { a: { text: 'A' }, b: { text: 'B' } }
+  const recentPushed = new Map()
+  const keep = new Set(['a'])
+  assert.strictEqual(keepHttpChild('a', keep, lastPushed, recentPushed), true)
+  assert.strictEqual(keepHttpChild('b', keep, lastPushed, recentPushed), false)
+  assert.strictEqual(keepHttpChild('local', keep, lastPushed, recentPushed), true)
+  recentPushed.set('b', Date.now())
+  assert.strictEqual(keepHttpChild('b', keep, lastPushed, recentPushed), true)
+  const emptyKeep = new Set()
+  assert.strictEqual(keepHttpChild('a', emptyKeep, lastPushed, recentPushed), false)
+}
+
+testHttpRemoteDeleteDropsPushedChildren()
+
 console.log('collabYjs tests passed')

@@ -390,7 +390,7 @@ class Export {
     if (!this.mindMap.doExportXMind) {
       throw new Error('请注册ExportXMind插件')
     }
-    const data = this.mindMap.getData()
+    const data = await this.getExportMindData()
     const blob = await this.mindMap.doExportXMind.xmind(data, name)
     const res = await readBlob(blob)
     return res
@@ -423,11 +423,41 @@ class Export {
 
   //  导出为json
   async json(name, withConfig = true) {
-    const data = this.mindMap.getData(withConfig)
+    const data = await this.getExportMindData(withConfig)
     const str = JSON.stringify(data)
     const blob = new Blob([str])
     const res = await readBlob(blob)
     return res
+  }
+
+  async getExportMindData(withConfig) {
+    const cooperate = this.mindMap.cooperate
+    if (
+      cooperate &&
+      cooperate.httpCollabMode &&
+      typeof cooperate.fetchExportTree === 'function'
+    ) {
+      try {
+        const tree = await cooperate.fetchExportTree()
+        if (tree) {
+          if (withConfig) {
+            return {
+              layout: this.mindMap.getLayout(),
+              root: tree,
+              theme: {
+                template: this.mindMap.getTheme(),
+                config: this.mindMap.getCustomThemeConfig()
+              },
+              view: this.mindMap.view.getTransformData()
+            }
+          }
+          return tree
+        }
+      } catch (err) {
+        console.error('[mind-map] export tree failed', err)
+      }
+    }
+    return this.mindMap.getData(withConfig)
   }
 
   //  专有文件，其实就是json文件
@@ -438,7 +468,7 @@ class Export {
 
   // markdown文件
   async md() {
-    const data = this.mindMap.getData()
+    const data = await this.getExportMindData()
     const content = transformToMarkdown(data)
     const blob = new Blob([content])
     const res = await readBlob(blob)
@@ -447,7 +477,7 @@ class Export {
 
   // txt文件
   async txt() {
-    const data = this.mindMap.getData()
+    const data = await this.getExportMindData()
     const content = transformToTxt(data)
     const blob = new Blob([content])
     const res = await readBlob(blob)

@@ -561,11 +561,18 @@ async function handleApi(req, res) {
     }
     const uid = url.searchParams.get('uid') || 'root'
     const resolved = mindDoc.resolveNode(loaded.obj, uid)
-    const subtree = mindDoc.subtreeChildren(loaded.obj, resolved, {
-      offset: url.searchParams.get('offset'),
-      limit: url.searchParams.get('limit')
-    })
-    if (!subtree) {
+    const deep =
+      url.searchParams.get('deep') === '1' ||
+      url.searchParams.get('deep') === 'true'
+    const subtree = deep
+      ? mindDoc.subtreeTree(loaded.obj, resolved, {
+          maxNodes: url.searchParams.get('max_nodes')
+        })
+      : mindDoc.subtreeChildren(loaded.obj, resolved, {
+          offset: url.searchParams.get('offset'),
+          limit: url.searchParams.get('limit')
+        })
+    if (!subtree || (deep && !subtree.tree)) {
       sendJson(res, 404, { error: 'not found' })
       return true
     }
