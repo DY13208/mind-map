@@ -38,7 +38,8 @@ loadRootEnv()
 const {
   DEFAULT_PORT: WORKBUDDY_PORT,
   ensureWorkbuddyApi,
-  stopWorkbuddyApi
+  stopWorkbuddyApi,
+  formatWorkbuddyResult
 } = require('./workbuddy-api')
 
 const WEB_PORT = 8081
@@ -497,26 +498,12 @@ async function startAll({ pickIp = false } = {}) {
     port: WORKBUDDY_PORT,
     mcpConfigPath: path.join(ROOT, '.mcp.json')
   })
-  if (wb.ok) {
-    log(
-      paint(
-        c.green,
-        wb.alreadyRunning
-          ? `  WorkBuddy API 已在运行  http://127.0.0.1:${WORKBUDDY_PORT}`
-          : `  WorkBuddy API 已启动  http://127.0.0.1:${WORKBUDDY_PORT}`
-      )
-    )
-  } else if (wb.skipped) {
-    log(paint(c.yellow, `  WorkBuddy API：${wb.reason}`))
-  } else {
-    log(paint(c.red, `  WorkBuddy API 未就绪：${wb.reason}`))
-    log(
-      paint(
-        c.dim,
-        '  补齐流程等功能需要 WorkBuddy。请安装客户端并登录后重试，或手动运行 workbuddy_to_api。'
-      )
-    )
-  }
+  formatWorkbuddyResult(wb)
+    .split('\n')
+    .forEach(line => {
+      const color = wb.ok ? c.green : wb.skipped ? c.yellow : c.red
+      log(paint(color, `  ${line}`))
+    })
 
   log(paint(c.yellow, '  正在启动全部服务（含协同 1234）...'))
   startProcess(
