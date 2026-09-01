@@ -1,13 +1,16 @@
 <template>
   <el-tree
+    :key="treeVersion"
     ref="tree"
     class="outlineTree"
     node-key="uid"
     draggable
-    default-expand-all
+    lazy
     :class="{ isDark: isDark }"
     :data="data"
     :props="defaultProps"
+    :load="loadNode"
+    :default-expanded-keys="defaultExpandedKeys"
     :highlight-current="true"
     :expand-on-click-node="false"
     :allow-drag="checkAllowDrag"
@@ -59,12 +62,17 @@ export default {
     return {
       data: [],
       defaultProps: {
-        label: 'label'
+        label: 'label',
+        children: 'children',
+        isLeaf: 'isLeaf'
       },
+      treeVersion: 0,
+      defaultExpandedKeys: [],
       currentData: null,
       notHandleDataChange: false,
       isHandleNodeTreeRenderEnd: false,
       beInsertNodeUid: '',
+      pendingExpandedUid: '',
       insertType: '',
       isInTreArea: false,
       isAfterCreateNewNode: false
@@ -77,6 +85,10 @@ export default {
     })
   },
   created() {
+    // These caches deliberately stay outside Vue's reactive data. Keeping the
+    // original node here prevents Vue from observing the complete mind map when
+    // the outline only needs to render a small, expanded portion of it.
+    this._outlineSourceByData = new WeakMap()
     window.addEventListener('keydown', this.onKeyDown)
     this.$bus.$on('data_change', this.handleDataChange)
     this.$bus.$on('node_tree_render_end', this.handleNodeTreeRenderEnd)
@@ -134,25 +146,63 @@ export default {
 
     // 刷新树数据
     refresh() {
-      let data = this.mindMap.getData()
-      data.root = true // 标记根节点
-      let walk = root => {
-        let text = root.data.richText
-          ? nodeRichTextToTextWithWrap(root.data.text)
-          : root.data.text
-        text = htmlEscape(text)
-        text = text.replace(/\n/g, '<br>')
-        root.textCache = text // 保存一份修改前的数据，用于对比是否修改了
-        root.label = text
-        root.uid = root.data.uid
-        if (root.children && root.children.length > 0) {
-          root.children.forEach(item => {
-            walk(item)
-          })
-        }
+      const expandedKeys = this.getExpandedKeys()
+      // renderTree is already maintained by the renderer. Reading it directly
+      // avoids getData() deep-cloning every node merely to open the outline.
+      const sourceData =
+        this.mindMap.renderer.renderTree || this.mindMap.getData()
+      const rootData = this.createOutlineNode(sourceData, true)
+
+      this.data = [rootData]
+      // The root remains open by default, while all of its descendants are
+      // created only after their parent is expanded for the first time.
+      this.defaultExpandedKeys = Array.from(
+        new Set([rootData.uid, this.pendingExpandedUid, ...expandedKeys])
+      ).filter(Boolean)
+      this.treeVersion += 1
+    },
+
+    // 只转换当前层。原始 children 不放入响应式数据，避免 Vue 一次观察整棵树
+    createOutlineNode(source, isRoot = false) {
+      let text = source.data.richText
+        ? nodeRichTextToTextWithWrap(source.data.text)
+        : source.data.text
+      text = htmlEscape(text).replace(/\n/g, '<br>')
+      const hasChildren = Boolean(source.children && source.children.length)
+      const outlineData = {
+        data: source.data,
+        root: isRoot,
+        textCache: text,
+        label: text,
+        uid: source.data.uid,
+        isLeaf: !hasChildren
       }
-      walk(data)
-      this.data = [data]
+
+      this._outlineSourceByData.set(outlineData, source)
+      return outlineData
+    },
+
+    // Element Tree invokes this only when a branch is expanded for the first time
+    loadNode(node, resolve) {
+      if (node.level === 0) {
+        resolve(this.data)
+        return
+      }
+      const source = this._outlineSourceByData.get(node.data)
+      if (!source || !source.children || source.children.length === 0) {
+        resolve([])
+        return
+      }
+      resolve(source.children.map(item => this.createOutlineNode(item)))
+    },
+
+    getExpandedKeys() {
+      const tree = this.$refs.tree
+      if (!tree || !tree.store || !tree.store.nodesMap) return []
+      return Object.keys(tree.store.nodesMap).filter(key => {
+        const node = tree.store.nodesMap[key]
+        return node && node.expanded
+      })
     },
 
     // 插入了新节点之后
@@ -186,6 +236,7 @@ export default {
         }
       }
       this.beInsertNodeUid = ''
+      this.pendingExpandedUid = ''
     },
 
     // 根节点不允许拖拽
@@ -269,6 +320,8 @@ export default {
       this.notHandleDataChange = true
       this.isHandleNodeTreeRenderEnd = true
       this.beInsertNodeUid = createUid()
+      // 新节点需要在刷新后的树中可见，主动展开它的父节点
+      this.pendingExpandedUid = this.currentData ? this.currentData.uid : ''
       this.mindMap.execCommand('INSERT_CHILD_NODE', false, [], {
         uid: this.beInsertNodeUid
       })
