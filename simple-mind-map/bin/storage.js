@@ -395,9 +395,15 @@ async function persistHotSnapshot(roomKey, ydoc) {
   scheduleSave(roomKey, ydoc)
 }
 
-function getLiveObject(roomKey) {
+function getLiveDoc(roomKey) {
   const doc = docs.get(String(roomKey || ''))
   if (!doc || typeof doc.getMap !== 'function' || !doc.getMap().size) return null
+  return doc
+}
+
+function getLiveObject(roomKey) {
+  const doc = getLiveDoc(roomKey)
+  if (!doc) return null
   return doc.getMap().toJSON()
 }
 
@@ -668,6 +674,7 @@ module.exports = {
   cancelIdleEvict,
   scheduleSave,
   persistHotSnapshot,
+  getLiveDoc,
   getLiveObject,
   applyPayload,
   payloadToObject

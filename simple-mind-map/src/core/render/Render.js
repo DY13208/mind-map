@@ -802,12 +802,15 @@ class Render {
     const command = this.mindMap.command
     if (command) command.pause()
     this._lazyCommandPending = true
-    Promise.all(
-      stubs.map(node => Promise.resolve(cooperate.hydrateLazyChildren(node)))
+    const hydrate = Promise.all(
+      stubs.map(node =>
+        Promise.resolve(cooperate.hydrateLazyChildren(node)).catch(err => {
+          console.error('[mind-map] load children failed', err)
+        })
+      )
     )
-      .catch(err => {
-        console.error('[mind-map] load children failed', err)
-      })
+    const timeout = new Promise(resolve => setTimeout(resolve, 2000))
+    Promise.race([hydrate, timeout])
       .then(() => {
         this._skipLazyHydrate = true
         this._lazyCommandPending = false
@@ -955,16 +958,6 @@ class Render {
       defaultInsertBelowSecondLevelNodeText
     } = this.mindMap.opt
     const list = appointNodes.length > 0 ? appointNodes : this.activeNodeList
-    if (
-      this.runAfterHydrate(
-        list,
-        () =>
-          this.insertChildNode(openEdit, appointNodes, appointData, appointChildren),
-        'INSERT_CHILD_NODE'
-      )
-    ) {
-      return
-    }
     const handleMultiNodes = list.length > 1
     const isRichText = this.hasRichTextPlugin()
     const { focusNewNode, inserting } = this.getNewNodeBehavior(
@@ -1031,15 +1024,6 @@ class Render {
     }
     this.textEdit.hideEditTextBox()
     const list = appointNodes.length > 0 ? appointNodes : this.activeNodeList
-    if (
-      this.runAfterHydrate(
-        list,
-        () => this.insertMultiChildNode(appointNodes, childList),
-        'INSERT_MULTI_CHILD_NODE'
-      )
-    ) {
-      return
-    }
     const isRichText = this.hasRichTextPlugin()
     const { focusNewNode } = this.getNewNodeBehavior(false, true)
     const params = {
@@ -1265,11 +1249,6 @@ class Render {
 
   // 复制节点
   copy() {
-    if (
-      this.runAfterHydrate(this.activeNodeList, () => this.copy())
-    ) {
-      return
-    }
     this.beingCopyData = this.copyNode()
     if (!this.beingCopyData) return
     if (!this.mindMap.opt.disabledClipboard) {
@@ -1307,6 +1286,12 @@ class Render {
     this.paste()
   }
 
+  pasteInAppCopy() {
+    if (!this.beingCopyData) return false
+    this.mindMap.execCommand('PASTE_NODE', this.beingCopyData)
+    return true
+  }
+
   // 粘贴
   async paste() {
     const {
@@ -1316,24 +1301,22 @@ class Render {
       disabledClipboard,
       onlyPasteTextWhenHasImgAndText
     } = this.mindMap.opt
-    // 如果支持剪贴板操作，那么以剪贴板数据为准
     if (!disabledClipboard && checkClipboardReadEnable()) {
       try {
         const res = await getDataFromClipboard()
         let text = res.text || ''
         let img = res.img || null
-        // 存在文本，则创建子节点
+        let smmData = null
         if (text) {
-          // 判断粘贴的是否是simple-mind-map的数据
-          let smmData = null
           let useDefault = true
-          // 用户自定义处理
           if (this.mindMap.opt.customHandleClipboardText) {
             try {
-              const res = await this.mindMap.opt.customHandleClipboardText(text)
-              if (!isUndef(res)) {
+              const custom = await this.mindMap.opt.customHandleClipboardText(
+                text
+              )
+              if (!isUndef(custom)) {
                 useDefault = false
-                const checkRes = checkSmmFormatData(res)
+                const checkRes = checkSmmFormatData(custom)
                 if (checkRes.isSmm) {
                   smmData = checkRes.data
                 } else {
@@ -1347,7 +1330,6 @@ class Render {
               )
             }
           }
-          // 默认处理
           if (useDefault) {
             const checkRes = checkSmmFormatData(text)
             if (checkRes.isSmm) {
@@ -1356,56 +1338,54 @@ class Render {
               text = checkRes.data
             }
           }
-          if (smmData) {
-            this.mindMap.execCommand(
-              'INSERT_MULTI_CHILD_NODE',
-              [],
-              Array.isArray(smmData) ? smmData : [smmData]
-            )
-          } else {
-            // 如果是富文本模式，那么需要转义特殊字符
-            if (this.hasRichTextPlugin()) {
-              text = htmlEscape(text)
-            }
-            const textArr = text
-              .split(new RegExp('\r?\n|(?<!\n)\r', 'g'))
-              .filter(item => {
-                return !!item
-              })
-            // 判断是否需要根据换行自动分割节点
-            if (textArr.length > 1 && handleIsSplitByWrapOnPasteCreateNewNode) {
-              handleIsSplitByWrapOnPasteCreateNewNode()
-                .then(() => {
-                  this.mindMap.execCommand(
-                    'INSERT_MULTI_CHILD_NODE',
-                    [],
-                    textArr.map(item => {
-                      return {
-                        data: {
-                          text: item
-                        },
-                        children: []
-                      }
-                    })
-                  )
-                })
-                .catch(() => {
-                  this.mindMap.execCommand('INSERT_CHILD_NODE', false, [], {
-                    text
+        }
+        if (smmData) {
+          this.mindMap.execCommand(
+            'INSERT_MULTI_CHILD_NODE',
+            [],
+            Array.isArray(smmData) ? smmData : [smmData]
+          )
+        } else if (this.pasteInAppCopy()) {
+          // HTTP 非安全上下文写剪贴板会失败，优先用画布内复制的节点
+        } else if (text) {
+          if (this.hasRichTextPlugin()) {
+            text = htmlEscape(text)
+          }
+          const textArr = text
+            .split(new RegExp('\r?\n|(?<!\n)\r', 'g'))
+            .filter(item => {
+              return !!item
+            })
+          if (textArr.length > 1 && handleIsSplitByWrapOnPasteCreateNewNode) {
+            handleIsSplitByWrapOnPasteCreateNewNode()
+              .then(() => {
+                this.mindMap.execCommand(
+                  'INSERT_MULTI_CHILD_NODE',
+                  [],
+                  textArr.map(item => {
+                    return {
+                      data: {
+                        text: item
+                      },
+                      children: []
+                    }
                   })
-                })
-            } else {
-              this.mindMap.execCommand('INSERT_CHILD_NODE', false, [], {
-                text
+                )
               })
-            }
+              .catch(() => {
+                this.mindMap.execCommand('INSERT_CHILD_NODE', false, [], {
+                  text
+                })
+              })
+          } else {
+            this.mindMap.execCommand('INSERT_CHILD_NODE', false, [], {
+              text
+            })
           }
         }
-        // 存在图片，则添加到当前激活节点
         if (img && (!text || !onlyPasteTextWhenHasImgAndText)) {
           try {
             let imgData = null
-            // 自定义图片处理函数
             if (
               handleNodePasteImg &&
               typeof handleNodePasteImg === 'function'
@@ -1429,15 +1409,13 @@ class Render {
           }
         }
       } catch (error) {
-        errorHandler(ERROR_TYPES.READ_CLIPBOARD_ERROR, error)
+        if (!this.pasteInAppCopy()) {
+          errorHandler(ERROR_TYPES.READ_CLIPBOARD_ERROR, error)
+        }
       }
-    } else {
-      // 禁用剪贴板或不支持剪贴板时
-      // 粘贴画布内的节点数据
-      if (this.beingCopyData) {
-        this.mindMap.execCommand('PASTE_NODE', this.beingCopyData)
-      }
+      return
     }
+    this.pasteInAppCopy()
   }
 
   //  将节点移动到另一个节点的前面

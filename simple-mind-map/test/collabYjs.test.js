@@ -492,4 +492,48 @@ function testPresenceTracksSameRoomUsers() {
 }
 
 testPresenceTracksSameRoomUsers()
+
+function testAddNodeOnDocRequiresParentThenKeepsChild() {
+  const ydoc = new Y.Doc()
+  applyObjectToDoc(
+    ydoc,
+    { root: node('root', 'Root') },
+    { replace: true }
+  )
+  mindDoc.addNodeOnDoc(ydoc, { parent: 'root', uid: 'a', text: 'A' })
+  mindDoc.addNodeOnDoc(ydoc, { parent: 'a', uid: 'b', text: 'B' })
+  const obj = ydoc.getMap().toJSON()
+  assert.deepStrictEqual(obj.root.children, ['a'])
+  assert.deepStrictEqual(obj.a.children, ['b'])
+  assert.strictEqual(obj.b.data.text, 'B')
+  let missingParent = false
+  try {
+    mindDoc.addNodeOnDoc(ydoc, { parent: 'missing', uid: 'c', text: 'C' })
+  } catch (err) {
+    missingParent = /找不到父节点/.test(String(err && err.message))
+  }
+  assert.strictEqual(missingParent, true)
+}
+
+testAddNodeOnDocRequiresParentThenKeepsChild()
+
+function testNodesByUidsFromDocReadsLiveChildren() {
+  const ydoc = new Y.Doc()
+  applyObjectToDoc(
+    ydoc,
+    {
+      root: node('root', 'Root', ['a']),
+      a: node('a', 'A')
+    },
+    { replace: true }
+  )
+  mindDoc.addNodeOnDoc(ydoc, { parent: 'a', uid: 'b', text: 'B' })
+  const rows = mindDoc.nodesByUidsFromDoc(ydoc, ['root', 'a'])
+  assert.strictEqual(rows.length, 2)
+  assert.deepStrictEqual(rows[0].children, ['a'])
+  assert.deepStrictEqual(rows[1].children, ['b'])
+}
+
+testNodesByUidsFromDocReadsLiveChildren()
+
 console.log('collabYjs tests passed')
