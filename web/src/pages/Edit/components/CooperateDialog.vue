@@ -275,9 +275,7 @@ export default {
         localStorage.getItem(USER_NAME_KEY) ||
         defaultGuestName(this.userId)
     localStorage.setItem(USER_NAME_KEY, this.userName)
-    this.roomName =
-      roomFromLocation(this.$route) ||
-      'room-' + Math.random().toString(36).slice(2, 8)
+    this.roomName = roomFromLocation(this.$route) || ''
     this.userColor =
       USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)]
     this.$bus.$on('showCooperate', this.open)
@@ -326,9 +324,8 @@ export default {
     open() {
       this.dialogVisible = true
       this.loadFiles()
-      if (!this.connected && !this.connecting && this.roomName && this.mindMap) {
-        this.openSavedRoom({ silent: true })
-      }
+      // Do not auto-join / auto-create here. Opening the dialog used to call
+      // openSavedRoom with a random roomName, which created "未命名" rooms.
     },
 
     createRoom() {
@@ -353,7 +350,7 @@ export default {
         const created = await createFileApi({ title })
         this.roomName = created.room_key
         this.syncRoomQuery()
-        await this.openSavedRoom({ silent: false })
+        await this.openSavedRoom({ silent: false, createIfMissing: true })
         this.loadFiles()
       } catch (err) {
         if (err === 'cancel' || err === 'close') return
@@ -1142,6 +1139,7 @@ export default {
     async openSavedRoom(options = {}) {
       const silent = !!options.silent
       const force = !!options.force
+      const createIfMissing = !!options.createIfMissing
       if (this.connected) {
         if (!silent) this.$message.success(this.$t('cooperate.openSuccess'))
         return
@@ -1165,6 +1163,15 @@ export default {
           preview = await getFilePreview(roomKey, 2)
         } catch (err) {
           if (!this.isNotFound(err)) throw err
+          // Only create when the user explicitly asked for a new room.
+          // Auto-creating on join / dialog open produced "未命名" rooms and
+          // also revived rooms right after delete.
+          if (!createIfMissing) {
+            if (!silent) {
+              this.$message.warning(this.$t('cooperate.openFailed'))
+            }
+            return
+          }
           await this.ensureRoomFile(roomKey)
           preview = await getFilePreview(roomKey, 2)
         }
@@ -1235,10 +1242,20 @@ export default {
           this.$t('cooperate.deleteFile'),
           { type: 'warning' }
         )
-        await deleteFileApi(item.room_key)
-        if (this.connected && this.roomName === item.room_key) {
-          this.leave({ silent: true })
+        const deletedKey = item.room_key
+        await deleteFileApi(deletedKey)
+        if (this.roomName === deletedKey) {
+          if (this.connected || this.connecting) {
+            this.leave({ silent: true })
+          }
+          this.roomName = ''
+          const query = { ...this.$route.query }
+          delete query.room
+          this.$router.replace({ query }).catch(() => {})
         }
+        this.fileList = this.fileList.filter(
+          file => file && file.room_key !== deletedKey
+        )
         this.$message.success(this.$t('cooperate.fileDeleted'))
         this.loadFiles()
       } catch (err) {

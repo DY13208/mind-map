@@ -1119,7 +1119,20 @@ async function handleApi(req, res) {
   if (req.method === 'POST' && pathname === '/api/files') {
     const body = await readBody(req)
     const roomKey = safeRoomKey(body.room_key || createRoomKey())
-    if (isDeletedRoom(roomKey)) await reviveRoom(roomKey)
+    // Do not silently revive tombstoned rooms unless the client asks for it.
+    // Otherwise "delete then open dialog" could recreate the same room key.
+    if (isDeletedRoom(roomKey)) {
+      if (body.revive === true || body.force_revive === true) {
+        await reviveRoom(roomKey)
+      } else {
+        sendJson(res, 409, {
+          error: '房间已删除，如需重建请使用新房间号',
+          room_key: roomKey,
+          code: 'ROOM_DELETED'
+        })
+        return true
+      }
+    }
     const title =
       String(body.title || '未命名')
         .trim()
