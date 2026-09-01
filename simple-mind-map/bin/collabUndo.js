@@ -38,6 +38,114 @@ function targetOperationIdOf(operation) {
   return payload.targetOperationId || payload.target_operation_id || ''
 }
 
+function redoTargetOperationIdOf(operation) {
+  const payload =
+    (operation && operation.event && operation.event.payload) ||
+    (operation && operation.payload) ||
+    {}
+  return (
+    payload.targetOperationId ||
+    payload.target_operation_id ||
+    payload.forwardTargetOperationId ||
+    ''
+  )
+}
+
+function findUndoFor(originalOperationId, laterOperations) {
+  return (laterOperations || []).find(
+    op =>
+      op.operation_type === 'operation.undo' &&
+      targetOperationIdOf(op) === originalOperationId
+  )
+}
+
+function evaluateRedo(original, laterOperations, actorId) {
+  if (!original) {
+    return { ok: false, code: 'NOT_FOUND', error: 'operation not found' }
+  }
+  if (String(original.actor_id || '') !== String(actorId || '')) {
+    return {
+      ok: false,
+      code: 'REDO_FORBIDDEN',
+      error: '只能重做自己撤销的操作'
+    }
+  }
+  if (original.operation_type === 'operation.undo') {
+    return {
+      ok: false,
+      code: 'REDO_FORBIDDEN',
+      error: '不能直接重做撤销操作本身'
+    }
+  }
+  const later = Array.isArray(laterOperations) ? laterOperations : []
+  const undoOp = findUndoFor(original.operation_id, later)
+  if (!undoOp) {
+    return {
+      ok: false,
+      code: 'REDO_UNAVAILABLE',
+      error: '该操作尚未撤销，无法重做'
+    }
+  }
+  const afterUndo = later.filter(op => Number(op.version) > Number(undoOp.version))
+  if (
+    afterUndo.some(
+      op =>
+        op.operation_type === 'operation.redo' &&
+        redoTargetOperationIdOf(op) === original.operation_id
+    )
+  ) {
+    return {
+      ok: false,
+      code: 'ALREADY_REDONE',
+      error: '该操作已经重做'
+    }
+  }
+  const mine = new Set(primaryUidsOf(original))
+  if (!mine.size) {
+    affectedUidsOf(original).forEach(uid => mine.add(uid))
+  }
+  for (let i = 0; i < afterUndo.length; i++) {
+    const op = afterUndo[i]
+    if (
+      op.operation_type === 'operation.redo' &&
+      redoTargetOperationIdOf(op) === original.operation_id
+    ) {
+      continue
+    }
+    const overlap = unique([
+      ...primaryUidsOf(op),
+      ...affectedUidsOf(op)
+    ]).filter(uid => mine.has(uid))
+    if (!overlap.length) continue
+    if (String(op.actor_id || '') !== String(actorId || '')) {
+      return {
+        ok: false,
+        code: 'REDO_CONFLICT',
+        error: '后续其他用户修改了相关节点，不能直接重做',
+        overlappingUids: overlap,
+        blockingVersion: op.version,
+        blockingActorId: op.actor_id
+      }
+    }
+    return {
+      ok: false,
+      code: 'REDO_OUT_OF_ORDER',
+      error: '请先处理自己之后的相关操作',
+      overlappingUids: overlap,
+      blockingVersion: op.version
+    }
+  }
+  return {
+    ok: true,
+    forward: {
+      type: original.operation_type,
+      payload: original.payload || {}
+    },
+    undoOperationId: undoOp.operation_id,
+    undoVersion: undoOp.version
+  }
+}
+
 function evaluateUndo(target, laterOperations, actorId) {
   if (!target) {
     return { ok: false, code: 'NOT_FOUND', error: 'operation not found' }
@@ -176,6 +284,7 @@ function reconstructByInverses(currentNodes, laterOperations) {
 module.exports = {
   affectedUidsOf,
   evaluateUndo,
+  evaluateRedo,
   applyRestore,
   applyInverseOperation,
   reconstructByInverses

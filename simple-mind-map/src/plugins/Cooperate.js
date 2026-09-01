@@ -203,12 +203,14 @@ class Cooperate {
     this.httpDeleteNode = null
     this.httpReplaceTree = null
     this.httpUndoOperation = null
+    this.httpRedoOperation = null
     this.httpFetchOperations = null
     this.httpFetchVersion = null
     this.httpUpdatedAt = ''
     this.httpReplacing = false
     this.lastAppliedVersion = 0
     this.localUndoStack = []
+    this.localRedoStack = []
     this.dirtySubtrees = new Map()
     this.httpRecovering = false
     this.httpPendingRecoverVersion = 0
@@ -1012,6 +1014,7 @@ class Cooperate {
     if (config.deleteNode) this.httpDeleteNode = config.deleteNode
     if (config.replaceTree) this.httpReplaceTree = config.replaceTree
     if (config.undoOperation) this.httpUndoOperation = config.undoOperation
+    if (config.redoOperation) this.httpRedoOperation = config.redoOperation
     if (config.fetchOperations) this.httpFetchOperations = config.fetchOperations
     if (config.fetchVersion) this.httpFetchVersion = config.fetchVersion
     if (config.updatedAt) this.httpUpdatedAt = config.updatedAt
@@ -1030,6 +1033,7 @@ class Cooperate {
     this.recentHttpDeleted = new Map()
     this.dirtySubtrees = new Map()
     this.localUndoStack = []
+    this.localRedoStack = []
     this.enableLargeMapMode(Number(config.nodeCount) || 0)
   }
 
@@ -1046,12 +1050,14 @@ class Cooperate {
     this.httpDeleteNode = null
     this.httpReplaceTree = null
     this.httpUndoOperation = null
+    this.httpRedoOperation = null
     this.httpFetchOperations = null
     this.httpFetchVersion = null
     this.httpUpdatedAt = ''
     this.httpReplacing = false
     this.lastAppliedVersion = 0
     this.localUndoStack = []
+    this.localRedoStack = []
     this.dirtySubtrees = new Map()
     this.httpRecovering = false
     this.httpPendingRecoverVersion = 0
@@ -1548,11 +1554,31 @@ class Cooperate {
               duplicate: true
             })
           }
+          this.localRedoStack.push({ operationId: last.operationId })
           return this.refreshVisibleFromHttp('', { force: true })
         })
         .catch(err => {
           this.localUndoStack.push(last)
           console.error('[mind-map] undo operation failed', err)
+          this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
+        })
+      return
+    }
+    if (name === 'FORWARD' && this.httpRedoOperation && this.localRedoStack.length) {
+      const last = this.localRedoStack.pop()
+      Promise.resolve(this.httpRedoOperation(last.operationId))
+        .then(result => {
+          if (result && result.version != null) {
+            this.acknowledgeLocalVersion(result.version, {
+              duplicate: true
+            })
+          }
+          this.localUndoStack.push({ operationId: last.operationId })
+          return this.refreshVisibleFromHttp('', { force: true })
+        })
+        .catch(err => {
+          this.localRedoStack.push(last)
+          console.error('[mind-map] redo operation failed', err)
           this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
         })
       return
@@ -1889,6 +1915,7 @@ class Cooperate {
         version: Number.isFinite(next) ? next : 0
       })
       if (this.localUndoStack.length > 200) this.localUndoStack.shift()
+      this.localRedoStack = []
     }
   }
 

@@ -14,8 +14,10 @@ const {
   pickAuthoritativeNodes,
   auditRoomNodesState,
   replaceRoomNodes,
-  readRoomNodes
+  readRoomNodes,
+  validateNodeGraph
 } = require('./roomNodes')
+const mindDoc = require('./mindDoc')
 
 const pool = new Pool({
   host: process.env.PGHOST,
@@ -617,6 +619,66 @@ async function auditRoomNodes(roomKey) {
   }
 }
 
+async function repairRoomNodes(roomKey) {
+  const before = await auditRoomNodes(roomKey)
+  if (!before) return null
+  if (before.ok) {
+    return {
+      repaired: false,
+      ok: true,
+      reason: 'already_consistent',
+      report: before
+    }
+  }
+  const snapshot = await getRoomSnapshot(roomKey)
+  if (!snapshot) return null
+  const table = await readRoomNodes(pool, roomKey)
+  const picked = pickAuthoritativeNodes(snapshot.nodes || {}, table, snapshot.version)
+  const check = validateNodeGraph(picked.nodes || {})
+  if (!check.ok) {
+    return {
+      repaired: false,
+      ok: false,
+      errors: check.errors,
+      report: before
+    }
+  }
+  await pool.query(
+    `update rooms set nodes = $2::jsonb, updated_at = now() where room_key = $1`,
+    [roomKey, JSON.stringify(picked.nodes)]
+  )
+  await replaceRoomNodes(pool, roomKey, picked.nodes, snapshot.version)
+  rememberRoomNodes(roomKey, picked.nodes)
+  const liveDoc = getLiveDoc(roomKey)
+  if (liveDoc) {
+    mindDoc.applyObjectToDoc(liveDoc, picked.nodes, { replace: true })
+  }
+  const after = await auditRoomNodes(roomKey)
+  return {
+    repaired: true,
+    ok: !!(after && after.ok),
+    source: picked.source,
+    nodeCount: check.nodeCount,
+    report: after
+  }
+}
+
+async function forceRoomSnapshot(roomKey) {
+  const snapshot = await getRoomSnapshot(roomKey)
+  if (!snapshot) return null
+  await pool.query(
+    `insert into room_snapshots (room_key, version, nodes)
+     values ($1, $2, $3::jsonb)
+     on conflict (room_key, version) do update set nodes = excluded.nodes`,
+    [roomKey, snapshot.version, JSON.stringify(snapshot.nodes || {})]
+  )
+  return {
+    room_key: roomKey,
+    version: snapshot.version,
+    nodeCount: Object.keys(snapshot.nodes || {}).length
+  }
+}
+
 async function getRoomSnapshot(roomKey) {
   const res = await pool.query(
     `select room_key, title, nodes, version, updated_at
@@ -1142,6 +1204,8 @@ module.exports = {
   getRoomOperation,
   getNearestSnapshot,
   auditRoomNodes,
+  repairRoomNodes,
+  forceRoomSnapshot,
   getPool,
   operationEvents,
   readRoomNodes: roomKey => readRoomNodes(pool, roomKey),
