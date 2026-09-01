@@ -1125,11 +1125,17 @@ export default {
         setTimeout(done, 600)
       })
       this.markHttpConnected()
+      // Release the preview gate ASAP so early inserts/edits are uploaded.
+      // Waiting the full render timeout previously dropped those mutations.
+      await this.$nextTick()
+      cooperate.setPreviewApplied(false)
+      if (typeof cooperate.scheduleHttpStructureSync === 'function') {
+        cooperate.scheduleHttpStructureSync(0)
+      }
       if (!silent) {
         this.$message.success(this.$t('cooperate.openSuccess'))
       }
       await renderWait
-      cooperate.setPreviewApplied(false)
       return true
     },
 

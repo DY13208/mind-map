@@ -186,7 +186,8 @@ async function applyCommittedLive(roomKey, command, committed) {
     } catch (err) {
       mindDoc.applyObjectToDoc(liveDoc, nodes || {}, { replace: true })
     }
-    scheduleSave(roomKey, liveDoc)
+    // Do not scheduleSave here: saveDoc must not rewrite rooms.nodes while the
+    // op-log is authoritative, and a deferred save races with newer commits.
   }
   return committed
 }
