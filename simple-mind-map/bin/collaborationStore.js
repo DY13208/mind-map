@@ -3,15 +3,14 @@
  * Keeps connection/version, pending optimistic ops, and a strict event buffer.
  */
 
+const { createOperationId } = require('../src/utils/operationId')
+
 function now() {
   return Date.now()
 }
 
 function createId() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `op-${now()}-${Math.random().toString(36).slice(2, 10)}`
+  return createOperationId()
 }
 
 function createCollaborationStore(options = {}) {
