@@ -102,7 +102,7 @@ import ShortcutKey from './ShortcutKey.vue'
 import Contextmenu from './Contextmenu.vue'
 import RichTextToolbar from './RichTextToolbar.vue'
 import NodeNoteContentShow from './NodeNoteContentShow.vue'
-import { getDataAsync, getConfig, storeData } from '@/api'
+import { getData, getDataAsync, getConfig, storeData } from '@/api'
 import Navigator from './Navigator.vue'
 import NodeImgPreview from './NodeImgPreview.vue'
 import SidebarTrigger from './SidebarTrigger.vue'
@@ -114,6 +114,7 @@ import NodeIconSidebar from './NodeIconSidebar.vue'
 import NodeIconToolbar from './NodeIconToolbar.vue'
 import OutlineEdit from './OutlineEdit.vue'
 import { showLoading, hideLoading } from '@/utils/loading'
+import { promiseWithTimeout } from '@/utils/promiseWithTimeout'
 import { prepareImportedTree, yieldToUi } from '@/utils/importTree'
 import handleClipboardText from '@/utils/handleClipboardText'
 import Scrollbar from './Scrollbar.vue'
@@ -245,8 +246,32 @@ export default {
     this.loadingSafetyTimer = setTimeout(() => {
       this.handleHideLoading()
     }, 8000)
-    await this.getData()
+    let dataReady = true
+    try {
+      await promiseWithTimeout(this.getData(), 10000, 'mind map data')
+    } catch (err) {
+      dataReady = false
+      console.warn('[edit] data load slow, using fallback:', err.message || err)
+      if (!this.mindMapData || !this.mindMapData.root) {
+        this.mindMapData = getData()
+        const prepared = prepareImportedTree(this.mindMapData)
+        this.mindMapData = prepared.data
+        this.isLargeMap = prepared.collapsed
+      }
+      this.mindMapConfig = getConfig() || {}
+    }
     this.init()
+    if (!dataReady) {
+      this.getData()
+        .then(() => {
+          if (this.mindMap && this.mindMapData && this.mindMapData.root) {
+            this.mindMap.setData(this.mindMapData.root)
+          }
+        })
+        .catch(err => {
+          console.warn('[edit] deferred data load failed:', err.message || err)
+        })
+    }
     this.$bus.$on('execCommand', this.execCommand)
     this.$bus.$on('paddingChange', this.onPaddingChange)
     this.$bus.$on('export', this.export)

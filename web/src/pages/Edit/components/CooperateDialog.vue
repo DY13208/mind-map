@@ -223,6 +223,7 @@ export default {
       connectTimer: null,
       saveStatusTimer: null,
       presenceTimer: null,
+      presenceQuickTimer: null,
       saveStatus: 'idle',
       saveError: '',
       lastConnectErrorAt: 0,
@@ -281,6 +282,7 @@ export default {
       USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)]
     this.$bus.$on('showCooperate', this.open)
     this._seenHttpChanges = new Map()
+    this._unsubCollabStore = null
   },
   mounted() {
     this.tryAutoJoin()
@@ -289,10 +291,37 @@ export default {
     this.$bus.$off('showCooperate', this.open)
     this.stopSaveStatusPolling()
     this.clearReconnectNotice()
+    this.unbindCollabStore()
     this.unbindProvider()
   },
   methods: {
     ...mapMutations(['setCooperateStatus']),
+
+    mapCollabStoreStatus(status) {
+      if (status === 'live' || status === 'recovering') return 'connected'
+      if (status === 'connecting') return 'connecting'
+      return 'disconnected'
+    },
+
+    bindCollabStore() {
+      this.unbindCollabStore()
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (!cooperate || typeof cooperate.subscribeCollaboration !== 'function') {
+        return
+      }
+      this._unsubCollabStore = cooperate.subscribeCollaboration(snap => {
+        this.setCooperateStatus(this.mapCollabStoreStatus(snap.status))
+      })
+      const snap = cooperate.getCollaborationSnapshot()
+      if (snap) this.setCooperateStatus(this.mapCollabStoreStatus(snap.status))
+    },
+
+    unbindCollabStore() {
+      if (typeof this._unsubCollabStore === 'function') {
+        this._unsubCollabStore()
+      }
+      this._unsubCollabStore = null
+    },
 
     open() {
       this.dialogVisible = true
@@ -511,6 +540,7 @@ export default {
         this.connectTimer = null
       }
       this.clearReconnectNotice()
+      this.unbindCollabStore()
       this.unbindProvider()
       if (this.mindMap && this.mindMap.cooperate) {
         this.mindMap.cooperate.clearHttpCollab()
@@ -522,8 +552,21 @@ export default {
       this.httpCollab = false
       this.peerList = []
       this.stopSaveStatusPolling()
+      if (this.mindMap && this.mindMap.cooperate) {
+        if (typeof this.mindMap.cooperate.setPresenceSyncHandler === 'function') {
+          this.mindMap.cooperate.setPresenceSyncHandler(null)
+        }
+        if (typeof this.mindMap.cooperate.applyPresenceUsers === 'function') {
+          this.mindMap.cooperate.applyPresenceUsers([])
+        }
+      }
       if (this.roomName && this.userId) {
-        leavePresence(this.roomName, this.userId).catch(() => {})
+        const clientId =
+          (this.provider &&
+            this.provider.awareness &&
+            this.provider.awareness.clientID) ||
+          this.userId
+        leavePresence(this.roomName, this.userId, clientId).catch(() => {})
       }
       this.setCooperateStatus('disconnected')
       if (!silent) this.$message.success(this.$t('cooperate.leaveSuccess'))
@@ -565,6 +608,7 @@ export default {
       }
       const states = Array.from(this.provider.awareness.getStates().values())
       const peers = []
+      const presenceUsers = []
       const seen = new Set()
       states.forEach(state => {
         const legacyKey = Object.keys(state).find(key => {
@@ -575,12 +619,26 @@ export default {
         this.handleHttpChange(state.documentChange)
         if (!info || !info.id || seen.has(info.id)) return
         seen.add(info.id)
+        const selectedUids = presence.selectedUids || presence.nodeIdList || []
+        const editingUid = presence.editingUid || null
         peers.push({
           id: info.id,
           name: info.name,
           color: info.color || '#409EFF',
           shortName: (info.name || '?').slice(0, 1),
-          isMe: info.id === this.userId
+          isMe: info.id === this.userId,
+          selectedUids,
+          editingUid,
+          cursor: presence.cursor || null
+        })
+        presenceUsers.push({
+          id: info.id,
+          name: info.name,
+          color: info.color || '#409EFF',
+          avatar: info.avatar,
+          selectedUids,
+          editingUid,
+          cursor: presence.cursor || null
         })
       })
       if (!peers.find(item => item.id === this.userId) && this.userName) {
@@ -589,10 +647,17 @@ export default {
           name: this.userName,
           color: this.userColor,
           shortName: this.userName.slice(0, 1),
-          isMe: true
+          isMe: true,
+          selectedUids: [],
+          editingUid: null,
+          cursor: null
         })
       }
       this.peerList = peers
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (cooperate && typeof cooperate.applyPresenceUsers === 'function') {
+        cooperate.applyPresenceUsers(presenceUsers)
+      }
     },
 
     handleHttpChange(change) {
@@ -660,6 +725,10 @@ export default {
         clearInterval(this.presenceTimer)
         this.presenceTimer = null
       }
+      if (this.presenceQuickTimer) {
+        clearTimeout(this.presenceQuickTimer)
+        this.presenceQuickTimer = null
+      }
       this.saveStatus = 'idle'
       this.saveError = ''
     },
@@ -670,7 +739,10 @@ export default {
         name: info.name,
         color: info.color || '#409EFF',
         shortName: (info.name || '?').slice(0, 1),
-        isMe: info.id === this.userId
+        isMe: info.id === this.userId,
+        selectedUids: info.selectedUids || [],
+        editingUid: info.editingUid || null,
+        cursor: info.cursor || null
       }))
       if (!peers.find(item => item.id === this.userId) && this.userName) {
         peers.unshift({
@@ -678,26 +750,48 @@ export default {
           name: this.userName,
           color: this.userColor,
           shortName: this.userName.slice(0, 1),
-          isMe: true
+          isMe: true,
+          selectedUids: [],
+          editingUid: null,
+          cursor: null
         })
       }
       this.peerList = peers
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (cooperate && typeof cooperate.applyPresenceUsers === 'function') {
+        cooperate.applyPresenceUsers(list || [])
+      }
+    },
+
+    schedulePresenceSync() {
+      if (this.presenceQuickTimer) clearTimeout(this.presenceQuickTimer)
+      this.presenceQuickTimer = setTimeout(() => {
+        this.presenceQuickTimer = null
+        this.syncHttpPresence()
+      }, 250)
     },
 
     async syncHttpPresence() {
       if (!this.httpCollab || !this.connected || !this.roomName) return
-      if (this._presenceWs) return
       try {
         const clientId =
           (this.provider &&
             this.provider.awareness &&
             this.provider.awareness.clientID) ||
           this.userId
+        const cooperate = this.mindMap && this.mindMap.cooperate
+        const local =
+          cooperate && typeof cooperate.getLocalPresence === 'function'
+            ? cooperate.getLocalPresence()
+            : {}
         const data = await beatPresence(this.roomName, {
           id: this.userId,
           clientId,
           name: this.userName,
-          color: this.userColor
+          color: this.userColor,
+          selectedUids: local.selectedUids || [],
+          editingUid: local.editingUid || null,
+          cursor: local.cursor || null
         })
         this.applyPresenceList(data.list)
       } catch (e) {
@@ -850,6 +944,12 @@ export default {
           name: this.userName,
           color: this.userColor
         })
+        if (typeof this.mindMap.cooperate.setPresenceSyncHandler === 'function') {
+          this.mindMap.cooperate.setPresenceSyncHandler(() => {
+            this.schedulePresenceSync()
+            this.publishLocalAwarenessPresence()
+          })
+        }
       }
       this.peerList = [
         {
@@ -867,6 +967,26 @@ export default {
       this.loadHistory()
     },
 
+    publishLocalAwarenessPresence() {
+      if (!this.provider || !this.provider.awareness) return
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      const local =
+        cooperate && typeof cooperate.getLocalPresence === 'function'
+          ? cooperate.getLocalPresence()
+          : {}
+      this.provider.awareness.setLocalStateField('user', {
+        userInfo: {
+          id: this.userId,
+          name: this.userName,
+          color: this.userColor
+        },
+        nodeIdList: local.selectedUids || [],
+        selectedUids: local.selectedUids || [],
+        editingUid: local.editingUid || null,
+        cursor: local.cursor || null
+      })
+    },
+
     connectPresenceSocket() {
       if (!this.serverUrl || !this.roomName) return
       this.unbindProvider()
@@ -881,13 +1001,7 @@ export default {
       this.provider = provider
       this._presenceProvider = true
       this._presenceWs = false
-      provider.awareness.setLocalStateField('user', {
-        userInfo: {
-          id: this.userId,
-          name: this.userName,
-          color: this.userColor
-        }
-      })
+      this.publishLocalAwarenessPresence()
       provider.awareness.on('change', this.updatePeers)
       provider.on('status', ({ status }) => {
         this._presenceWs = status === 'connected'
@@ -929,6 +1043,7 @@ export default {
             return result
           })
       })
+      this.bindCollabStore()
     },
 
     isNotFound(err) {
@@ -968,6 +1083,9 @@ export default {
         })
         if (typeof cooperate.markTreeUids === 'function') {
           cooperate.markTreeUids(preview.tree)
+        }
+        if (typeof cooperate.seedPreviewHydration === 'function') {
+          cooperate.seedPreviewHydration(preview.tree)
         }
         setTimeout(done, 4000)
       })

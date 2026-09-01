@@ -4,6 +4,7 @@ const PRESENCE_TTL_SEC = Math.max(
 )
 const PRESENCE_TTL_MS = PRESENCE_TTL_SEC * 1000
 const BACKEND = String(process.env.COLLAB_PRESENCE_BACKEND || 'auto').toLowerCase()
+const MAX_SELECTED = 40
 
 const memoryRooms = new Map()
 let redisClient = null
@@ -38,14 +39,67 @@ function presenceScanPattern(roomKey) {
   return `presence:${encodeURIComponent(String(roomKey || ''))}:*`
 }
 
+function normalizeSelectedUids(value) {
+  const list = Array.isArray(value)
+    ? value
+    : typeof value === 'string' && value
+      ? [value]
+      : []
+  const seen = new Set()
+  const out = []
+  list.forEach(item => {
+    const uid = String(item || '').trim().slice(0, 120)
+    if (!uid || seen.has(uid)) return
+    seen.add(uid)
+    out.push(uid)
+  })
+  return out.slice(0, MAX_SELECTED)
+}
+
+function normalizeCursor(value) {
+  if (!value || typeof value !== 'object') return null
+  const x = Number(value.x)
+  const y = Number(value.y)
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+  return {
+    x: Math.round(x),
+    y: Math.round(y)
+  }
+}
+
 function normalizeUser(user = {}) {
   const id = String(user.id || '').trim()
   const clientId = String(user.clientId || user.client_id || id).trim() || id
+  const selectedUids = normalizeSelectedUids(
+    user.selectedUids || user.selected_uids || user.nodeIdList
+  )
+  const editingUid = String(
+    user.editingUid || user.editing_uid || user.editing || ''
+  )
+    .trim()
+    .slice(0, 120)
+  const cursor = normalizeCursor(user.cursor)
   return {
     id,
     clientId,
     name: String(user.name || id).slice(0, 40),
-    color: String(user.color || '#409EFF').slice(0, 20)
+    color: String(user.color || '#409EFF').slice(0, 20),
+    selectedUids,
+    editingUid: editingUid || null,
+    cursor
+  }
+}
+
+function publicPresence(entry) {
+  if (!entry || !entry.id) return null
+  return {
+    id: entry.id,
+    name: entry.name,
+    color: entry.color,
+    clientId: entry.clientId,
+    selectedUids: Array.isArray(entry.selectedUids) ? entry.selectedUids : [],
+    editingUid: entry.editingUid || null,
+    cursor: entry.cursor || null
   }
 }
 
@@ -69,12 +123,9 @@ function listMemory(roomKey) {
     const prev = byUser.get(entry.id)
     if (!prev || entry.at >= prev.at) byUser.set(entry.id, entry)
   })
-  return Array.from(byUser.values()).map(entry => ({
-    id: entry.id,
-    name: entry.name,
-    color: entry.color,
-    clientId: entry.clientId
-  }))
+  return Array.from(byUser.values())
+    .map(publicPresence)
+    .filter(Boolean)
 }
 
 function beatMemory(roomKey, user = {}) {
@@ -162,12 +213,9 @@ async function listRedis(roomKey) {
       }
     })
   } while (cursor !== '0')
-  return Array.from(byUser.values()).map(entry => ({
-    id: entry.id,
-    name: entry.name,
-    color: entry.color,
-    clientId: entry.clientId
-  }))
+  return Array.from(byUser.values())
+    .map(publicPresence)
+    .filter(Boolean)
 }
 
 async function beatRedis(roomKey, user = {}) {
@@ -179,10 +227,7 @@ async function beatRedis(roomKey, user = {}) {
   await client.set(
     presenceKey(key, normalized.clientId),
     JSON.stringify({
-      id: normalized.id,
-      clientId: normalized.clientId,
-      name: normalized.name,
-      color: normalized.color,
+      ...normalized,
       at: Date.now()
     }),
     { EX: PRESENCE_TTL_SEC }
@@ -255,5 +300,6 @@ module.exports = {
   beatPresence,
   listPresence,
   leavePresence,
-  getPresenceStatus
+  getPresenceStatus,
+  normalizeUser
 }

@@ -28,9 +28,21 @@ const {
   applyCorsHeaders,
   isAllowedOrigin
 } = require('./auth')
+const { setWsConnections, recordBroadcast } = require('./collabMetrics')
 
 const host = process.env.HOST || '0.0.0.0'
 const port = Number(process.env.PORT || 1234)
+
+let openSockets = 0
+
+function trackSocket(conn) {
+  openSockets += 1
+  setWsConnections(openSockets)
+  conn.on('close', () => {
+    openSockets = Math.max(0, openSockets - 1)
+    setWsConnections(openSockets)
+  })
+}
 
 const server = http.createServer(async (request, response) => {
   try {
@@ -70,6 +82,7 @@ const wss = new WebSocket.Server({
 })
 
 wss.on('connection', (conn, req) => {
+  trackSocket(conn)
   let docName
   try {
     const raw = (req.url || '/').slice(1).split('?')[0]
@@ -168,15 +181,27 @@ Promise.all([initSchema(), initAuth()])
         throw err
       }
     }
-    const publisher = startOutboxPublisher({ pool: getPool(), bus })
-    operationEvents.on('committed', () => {
-      publisher.kick().catch(() => {})
-    })
+    const outboxEnabled = !/^(0|false|off|no)$/i.test(
+      String(process.env.COLLAB_OUTBOX_PUBLISHER || '1')
+    )
+    let publisher = null
+    if (outboxEnabled) {
+      publisher = startOutboxPublisher({ pool: getPool(), bus })
+      operationEvents.on('committed', () => {
+        publisher.kick().catch(() => {})
+      })
+    } else {
+      console.warn('[outbox] publisher disabled (COLLAB_OUTBOX_PUBLISHER)')
+    }
+    const { startOperationsArchiver } = require('./storage')
+    startOperationsArchiver()
     server.listen(port, host, () => {
       console.log(`Collab server running at ws://${host}:${port}`)
       console.log(`Collab HTTP API: http://${host}:${port}/api/files`)
       console.log('Persistence: PostgreSQL rooms + COS mind-map/')
-      console.log(`Event bus: ${bus.name} (outbox publisher on)`)
+      console.log(
+        `Event bus: ${bus.name} (outbox publisher ${outboxEnabled ? 'on' : 'off'})`
+      )
     })
   })
   .catch(err => {

@@ -17,6 +17,13 @@ import {
   planAfterOperations,
   markDirtySubtrees
 } from './cooperateRecovery'
+import {
+  applyRemoteNodeData,
+  patchDelta,
+  publicNodeData,
+  readFieldVersions
+} from '../utils/fieldMerge'
+import { createCollaborationStore } from '../utils/collaborationStore'
 
 function collapseDeepNodes(root, keepDepth = 2) {
   const stack = root ? [{ node: root, depth: 0 }] : []
@@ -137,7 +144,12 @@ function diffHttpHistoryTrees(previous, current) {
       return
     }
     if (before.parent !== info.parent || before.index !== info.index) {
-      moved.push({ uid, parent: info.parent, index: info.index })
+      moved.push({
+        uid,
+        parent: info.parent,
+        index: info.index,
+        fromParent: before.parent
+      })
     }
     if (
       treeDataPlain(before.data) !== treeDataPlain(info.data) ||
@@ -193,6 +205,11 @@ class Cooperate {
     this.hydratingCurrentData = false
     this.httpCollabMode = false
     this.httpRoomKey = ''
+    this.collabStore = createCollaborationStore({
+      timeoutMs: Number(
+        (this.mindMap.opt && this.mindMap.opt.collabOperationTimeoutMs) || 12000
+      )
+    })
     this.httpFetchSubtree = null
     this.httpFetchDeepSubtree = null
     this.httpFetchExportTree = null
@@ -230,6 +247,13 @@ class Cooperate {
     this.httpPendingRefreshForce = false
     this.httpHistorySyncing = false
     this.localOrigin = { source: 'simple-mind-map-cooperate' }
+    this.localPresence = {
+      selectedUids: [],
+      editingUid: null,
+      cursor: null
+    }
+    this.presenceUsers = []
+    this.presenceSyncHandler = null
     // 绑定事件
     this.bindEvent()
   }
@@ -521,6 +545,10 @@ class Cooperate {
     this.mindMap.on('beforeExecCommand', this.onBeforeExecCommand)
     this.onExpandBtnClick = this.onExpandBtnClick.bind(this)
     this.mindMap.on('expand_btn_click', this.onExpandBtnClick)
+    this.onBeforeShowTextEdit = this.onBeforeShowTextEdit.bind(this)
+    this.onHideTextEdit = this.onHideTextEdit.bind(this)
+    this.mindMap.on('before_show_text_edit', this.onBeforeShowTextEdit)
+    this.mindMap.on('hide_text_edit', this.onHideTextEdit)
   }
 
   // 解绑事件
@@ -546,6 +574,12 @@ class Cooperate {
       this.mindMap.off('beforeExecCommand', this.onBeforeExecCommand)
     }
     this.mindMap.off('expand_btn_click', this.onExpandBtnClick)
+    if (this.onBeforeShowTextEdit) {
+      this.mindMap.off('before_show_text_edit', this.onBeforeShowTextEdit)
+    }
+    if (this.onHideTextEdit) {
+      this.mindMap.off('hide_text_edit', this.onHideTextEdit)
+    }
     clearTimeout(this.httpTextTimer)
     clearTimeout(this.httpStructureTimer)
   }
@@ -941,14 +975,132 @@ class Cooperate {
 
   // 节点激活状态改变后触发感知数据同步
   onNodeActive(node, nodeList) {
-    this.publishAwareness((nodeList || []).map(item => item.uid))
+    const selectedUids = (nodeList || [])
+      .map(item => {
+        if (!item) return ''
+        if (item.uid) return item.uid
+        return item.getData && item.getData('uid')
+      })
+      .filter(Boolean)
+    this.setLocalPresence({ selectedUids })
     if (node) this.repairEmptyExpand(node)
+  }
+
+  onBeforeShowTextEdit() {
+    const renderer = this.mindMap.renderer
+    const node =
+      (renderer &&
+        renderer.textEdit &&
+        renderer.textEdit.currentNode) ||
+      (renderer &&
+        renderer.activeNodeList &&
+        renderer.activeNodeList[0]) ||
+      null
+    const uid = node && node.getData && node.getData('uid')
+    this.setLocalPresence({ editingUid: uid || null })
+  }
+
+  onHideTextEdit() {
+    this.setLocalPresence({ editingUid: null })
+  }
+
+  setPresenceSyncHandler(handler) {
+    this.presenceSyncHandler =
+      typeof handler === 'function' ? handler : null
+  }
+
+  getLocalPresence() {
+    return {
+      selectedUids: [...(this.localPresence.selectedUids || [])],
+      editingUid: this.localPresence.editingUid || null,
+      cursor: this.localPresence.cursor || null
+    }
+  }
+
+  setLocalPresence( partial = {}) {
+    const next = {
+      selectedUids: Array.isArray(partial.selectedUids)
+        ? partial.selectedUids.filter(Boolean).slice(0, 40)
+        : this.localPresence.selectedUids,
+      editingUid:
+        partial.editingUid !== undefined
+          ? partial.editingUid || null
+          : this.localPresence.editingUid,
+      cursor:
+        partial.cursor !== undefined
+          ? partial.cursor
+          : this.localPresence.cursor
+    }
+    const same =
+      JSON.stringify(next) === JSON.stringify(this.localPresence)
+    this.localPresence = next
+    this.publishAwareness(next.selectedUids)
+    if (!same && this.presenceSyncHandler) {
+      try {
+        this.presenceSyncHandler(this.getLocalPresence())
+      } catch (err) {
+        // ignore presence sync failures
+      }
+    }
+  }
+
+  applyPresenceUsers(list = []) {
+    const renderer = this.mindMap.renderer
+    if (!renderer) {
+      this.presenceUsers = list || []
+      return
+    }
+    const prev = this.presenceUsers || []
+    const clearMap = new Map()
+    prev.forEach(item => {
+      const uids = new Set([
+        ...(item.selectedUids || []),
+        ...(item.editingUid ? [item.editingUid] : [])
+      ])
+      uids.forEach(uid => {
+        if (!clearMap.has(uid)) clearMap.set(uid, [])
+        clearMap.get(uid).push(item)
+      })
+    })
+    clearMap.forEach((users, uid) => {
+      const node = renderer.findNodeByUid(uid)
+      if (!node) return
+      users.forEach(user => node.removeUser(user))
+    })
+    this.waitNodeUidMap = {}
+    const next = (list || []).filter(
+      item => item && item.id && !(this.userInfo && item.id === this.userInfo.id)
+    )
+    this.presenceUsers = next
+    next.forEach(item => {
+      const uids = [
+        ...(item.selectedUids || []),
+        ...(item.editingUid ? [item.editingUid] : [])
+      ]
+      const unique = [...new Set(uids.filter(Boolean))]
+      unique.forEach(uid => {
+        const userInfo = {
+          id: item.id,
+          name: item.name,
+          color: item.color,
+          avatar: item.avatar,
+          editing: item.editingUid === uid
+        }
+        const node = renderer.findNodeByUid(uid)
+        if (node) node.addUser(userInfo)
+        else this.waitNodeUidMap[uid] = userInfo
+      })
+    })
   }
 
   onExpandBtnClick(node) {
     if (!node) return
-    const live = node.nodeData && node.nodeData.children && node.nodeData.children.length
-    if (node.getData('expand') && !live) this.repairEmptyExpand(node)
+    const live =
+      node.nodeData && node.nodeData.children && node.nodeData.children.length
+    const childCount = Number(node.getData && node.getData('childCount')) || 0
+    if (!live && childCount > 0) {
+      this.repairEmptyExpand(node)
+    }
   }
 
   async repairEmptyExpand(node) {
@@ -958,13 +1110,15 @@ class Cooperate {
       node.nodeData && node.nodeData.children && node.nodeData.children.length
     if (live || childCount <= 0) return
     const uid = node.getData && node.getData('uid')
-    if (uid && this.hydrateFailedUids.has(uid)) return
+    if (uid) this.hydrateFailedUids.delete(uid)
     this._repairingExpand = true
     try {
       await this.hydrateLazyChildren(node)
       if (node.nodeData && node.nodeData.children && node.nodeData.children.length) {
         this.mindMap.execCommand('SET_NODE_EXPAND', node, true)
       }
+    } catch (err) {
+      console.error('[mind-map] load children failed', err)
     } finally {
       this._repairingExpand = false
     }
@@ -1035,6 +1189,84 @@ class Cooperate {
     this.localUndoStack = []
     this.localRedoStack = []
     this.enableLargeMapMode(Number(config.nodeCount) || 0)
+    const roomKey = config.roomKey || this.httpRoomKey || ''
+    if (roomKey) this.httpRoomKey = roomKey
+    this.collabStore.reset(roomKey, Number(config.version) || 0)
+    this.collabStore.setStatus('live')
+    this.wrapHttpMutators(config)
+  }
+
+  wrapHttpMutators(config = {}) {
+    if (typeof config.patchNode === 'function') {
+      this.httpPatchNode = (uid, body) =>
+        this.wrapHttpMutation('node.update', { ...(body || {}), uid }, payload =>
+          config.patchNode(uid, payload)
+        )
+    }
+    if (typeof config.addNode === 'function') {
+      this.httpAddNode = body =>
+        this.wrapHttpMutation('node.insert', body || {}, payload =>
+          config.addNode(payload)
+        )
+    }
+    if (typeof config.deleteNode === 'function') {
+      this.httpDeleteNode = (uid, options) =>
+        this.wrapHttpMutation(
+          'node.delete',
+          { ...(options || {}), uid },
+          payload => config.deleteNode(uid, payload)
+        )
+    }
+    if (typeof config.replaceTree === 'function') {
+      this.httpReplaceTree = tree =>
+        this.wrapHttpMutation('map.replace', { tree }, payload =>
+          config.replaceTree(payload.tree)
+        )
+    }
+  }
+
+  wrapHttpMutation(type, body, send) {
+    const operationId =
+      (body && (body.operationId || body.operation_id)) ||
+      this.collabStore.createId()
+    const payload = { ...(body || {}), operationId }
+    this.collabStore.trackPending({
+      operationId,
+      type,
+      payload,
+      send: () => send(payload)
+    })
+    return Promise.resolve()
+      .then(() => send(payload))
+      .then(result => {
+        this.acknowledgeLocalVersion(result && result.version, {
+            operationId,
+            duplicate: !!(result && result.duplicate)
+          })
+        this.collabStore.confirmPending(
+          operationId,
+          result && result.version,
+          result || {}
+        )
+        if (this.collabStore.getSnapshot().status === 'recovering') {
+          // keep recovering until recoverHttpCollab finishes
+        } else {
+          this.collabStore.setStatus('live')
+        }
+        return result
+      })
+      .catch(err => {
+        this.collabStore.rejectPending(operationId, err)
+        throw err
+      })
+  }
+
+  getCollaborationSnapshot() {
+    return this.collabStore.getSnapshot()
+  }
+
+  subscribeCollaboration(listener) {
+    return this.collabStore.subscribe(listener)
   }
 
   clearHttpCollab() {
@@ -1076,6 +1308,7 @@ class Cooperate {
     clearTimeout(this.httpStructureTimer)
     this.httpStructureTimer = null
     this.httpInsertRescan = false
+    if (this.collabStore) this.collabStore.reset('', 0)
   }
 
   beginHttpReplace() {
@@ -1174,6 +1407,20 @@ class Cooperate {
     walk(root)
   }
 
+  seedPreviewHydration(root) {
+    const walk = node => {
+      if (!node || !node.data) return
+      const uid = node.data.uid
+      const live = Array.isArray(node.children) ? node.children.length : 0
+      const count = Number(node.data.childCount) || 0
+      if (uid && live > 0 && (!count || live >= count)) {
+        this.hydratedUids.add(uid)
+      }
+      ;(node.children || []).forEach(walk)
+    }
+    walk(root)
+  }
+
   nodeNeedsHydrate(node) {
     if (!node) return false
     const live =
@@ -1184,7 +1431,7 @@ class Cooperate {
     if (uid && this.dirtySubtrees && this.dirtySubtrees.has(uid)) return true
     if (!count) return false
     if (!live) return true
-    return count > live && !this.hydratedUids.has(uid)
+    return count > live
   }
 
   collectLoadedUids() {
@@ -1235,16 +1482,44 @@ class Cooperate {
     if (alreadyHydrated && !dirtyAt) return
     this.httpHydrating = true
     try {
+      const fetchSubtree = (options = {}) =>
+        this.httpFetchSubtree(uid, {
+          knownVersion: options.knownVersion ?? 0,
+          deep: options.deep
+        })
       const knownVersion = alreadyHydrated
         ? Number((data.data && data.data.subtreeVersion) || 0) || 0
         : 0
-      const result = await this.httpFetchSubtree(uid, { knownVersion })
+      let result = await fetchSubtree({ knownVersion })
+      const needsLocalChildren = count > 0 && liveLen < count
+      if (result && result.unchanged && needsLocalChildren) {
+        result = await fetchSubtree({ knownVersion: 0 })
+      }
       if (result && result.unchanged) {
-        this.dirtySubtrees.delete(uid)
-        if (result.version && data.data) {
-          data.data.subtreeVersion = Number(result.version) || data.data.subtreeVersion
+        if (!needsLocalChildren) {
+          this.dirtySubtrees.delete(uid)
+          if (result.version && data.data) {
+            data.data.subtreeVersion =
+              Number(result.version) || data.data.subtreeVersion
+          }
+          return
         }
-        return
+        result = await fetchSubtree({ knownVersion: 0 })
+      }
+      if (
+        (!result || !result.children || !result.children.length) &&
+        count > 0 &&
+        this.httpFetchDeepSubtree
+      ) {
+        const deep = await this.httpFetchDeepSubtree(uid, { knownVersion: 0 })
+        if (deep && deep.tree) {
+          result = {
+            children: deep.tree.children || [],
+            total: count,
+            version: deep.version,
+            has_more: false
+          }
+        }
       }
       this.mergeHttpChildren(data, result && result.children)
       if (data.data) {
@@ -1258,6 +1533,11 @@ class Cooperate {
       if (data.children && data.children.length) {
         this.hydratedUids.add(uid)
         this.hydrateFailedUids.delete(uid)
+      } else if (count > 0) {
+        this.hydrateFailedUids.add(uid)
+        const err = new Error('subtree empty')
+        err.code = 'SUBTREE_EMPTY'
+        throw err
       }
       this.dirtySubtrees.delete(uid)
     } catch (err) {
@@ -1278,8 +1558,12 @@ class Cooperate {
     const knownVersion = live
       ? Number((data.data && data.data.subtreeVersion) || 0) || 0
       : 0
-    const result = await this.httpFetchSubtree(uid, { knownVersion })
-    if (result && result.unchanged) {
+    let result = await this.httpFetchSubtree(uid, { knownVersion })
+    const needsLocalChildren = count > 0 && live < count
+    if (result && result.unchanged && needsLocalChildren) {
+      result = await this.httpFetchSubtree(uid, { knownVersion: 0 })
+    }
+    if (result && result.unchanged && !needsLocalChildren) {
       this.dirtySubtrees.delete(uid)
       if (result.version && data.data) {
         data.data.subtreeVersion = Number(result.version)
@@ -1618,7 +1902,19 @@ class Cooperate {
       this.recentHttpDeleted.delete(item.uid)
     })
     diff.moved.forEach(item => {
-      if (!this.httpPatchNode || !item.uid || !item.parent) return
+      if (!this.httpPatchNode || !item.uid) return
+      const sameParent =
+        item.fromParent == null ||
+        item.parent == null ||
+        String(item.fromParent) === String(item.parent)
+      if (sameParent) {
+        this.httpPatchNode(item.uid, {
+          index: item.index < 0 ? 0 : item.index,
+          reorder: true
+        }).catch(err => console.error('[mind-map] reorder failed', err))
+        return
+      }
+      if (!item.parent) return
       this.httpPatchNode(item.uid, {
         parent: item.parent,
         index: item.index < 0 ? 0 : item.index
@@ -1644,8 +1940,9 @@ class Cooperate {
     return node.getData('richText') ? getTextFromHtml(text) : String(text || '')
   }
 
-  nodePatchPayload(node) {
-    const payload = {
+  nodePatchPayload(node, options = {}) {
+    const uid = node.getData && node.getData('uid')
+    const full = {
       text: this.nodePlain(node),
       note: (node.getData && node.getData('note')) || ''
     }
@@ -1662,10 +1959,14 @@ class Cooperate {
     ].forEach(key => {
       const value = node.getData && node.getData(key)
       if (value !== undefined && value !== null && value !== '') {
-        payload[key] = value
+        full[key] = value
       }
     })
-    return payload
+    if (!options.onlyChanged || !uid) return full
+    const prev = this.lastPushed[uid]
+    if (!prev || !prev.full) return full
+    const delta = patchDelta(prev.full, full)
+    return Object.keys(delta).length ? delta : null
   }
 
   flushHttpText() {
@@ -1675,16 +1976,17 @@ class Cooperate {
     nodes.forEach(node => {
       const uid = node.getData && node.getData('uid')
       if (!uid) return
-      const payload = this.nodePatchPayload(node)
-      const snap = JSON.stringify(payload)
-      const prev = this.lastPushed[uid]
-      if (prev && prev.snap === snap) return
+      const full = this.nodePatchPayload(node)
+      const delta = this.nodePatchPayload(node, { onlyChanged: true })
+      if (!delta) return
+      const snap = JSON.stringify(full)
       this.lastPushed[uid] = {
-        text: payload.text,
-        note: payload.note,
+        text: full.text,
+        note: full.note,
+        full,
         snap
       }
-      this.httpPatchNode(uid, payload).catch(() => {})
+      this.httpPatchNode(uid, delta).catch(() => {})
     })
   }
 
@@ -1908,6 +2210,9 @@ class Cooperate {
     if (Number.isFinite(next) && next > this.lastAppliedVersion) {
       this.lastAppliedVersion = next
     }
+    if (this.collabStore && Number.isFinite(next)) {
+      this.collabStore.setLastAppliedVersion(next)
+    }
     const operationId = extra.operationId || extra.operation_id
     if (operationId && extra.duplicate !== true) {
       this.localUndoStack.push({
@@ -1931,6 +2236,7 @@ class Cooperate {
       return
     }
     this.httpRecovering = true
+    if (this.collabStore) this.collabStore.setStatus('recovering')
     try {
       let action = plan
       if (plan.type === 'fetch_operations' && this.httpFetchOperations) {
@@ -1945,6 +2251,17 @@ class Cooperate {
       }
       if (action.type === 'ignore') return
       if (action.type === 'apply' && action.operations) {
+        if (this.collabStore) {
+          action.operations.forEach(op => {
+            this.collabStore.enqueueRemoteEvent({
+              version: Number(op.version),
+              operationId: op.operationId || op.operation_id,
+              type: op.type || (op.event && op.event.type),
+              event: op.event || op
+            })
+          })
+          this.collabStore.drainReadyEvents()
+        }
         const dirty = markDirtySubtrees(
           this.collectLoadedUids(),
           action.operations
@@ -1970,9 +2287,13 @@ class Cooperate {
       if (Number.isFinite(applied) && applied > this.lastAppliedVersion) {
         this.lastAppliedVersion = applied
       }
+      if (this.collabStore && Number.isFinite(applied)) {
+        this.collabStore.setLastAppliedVersion(applied)
+      }
       if (Number.isFinite(applied)) this.stampLoadedSubtreeVersions(applied)
     } finally {
       this.httpRecovering = false
+      if (this.collabStore) this.collabStore.setStatus('live')
       const pending = this.httpPendingRecoverVersion
       this.httpPendingRecoverVersion = 0
       if (pending > this.lastAppliedVersion) {
@@ -2024,28 +2345,49 @@ class Cooperate {
           const node = renderer.findNodeByUid(item.uid)
           const data = item.data || {}
           if (node && node !== editing) {
-            const text = data.richText
-              ? getTextFromHtml(data.text)
-              : String(data.text || '')
-            const note = data.note || ''
+            const localData = (node.getData && node.getData()) || {}
+            const merged = applyRemoteNodeData(localData, data)
+            const next = publicNodeData(merged.data)
+            const text = next.richText
+              ? getTextFromHtml(next.text)
+              : String(next.text || '')
+            const note = next.note || ''
             const prev = this.lastPushed[item.uid]
-            if (!prev || prev.text !== text || (prev.note || '') !== note) {
+            const fv = readFieldVersions(merged.data)
+            const sameTextNote =
+              prev && prev.text === text && (prev.note || '') === note
+            if (!sameTextNote || (merged.appliedKeys && merged.appliedKeys.length)) {
               renderer.setNodeData(node, {
-                text: data.text,
-                note: data.note,
-                richText: data.richText,
-                image: data.image,
-                imageTitle: data.imageTitle,
-                imageSize: data.imageSize,
-                icon: data.icon,
-                tag: data.tag,
-                hyperlink: data.hyperlink,
-                hyperlinkTitle: data.hyperlinkTitle
+                text: next.text,
+                note: next.note,
+                richText: next.richText,
+                image: next.image,
+                imageTitle: next.imageTitle,
+                imageSize: next.imageSize,
+                icon: next.icon,
+                tag: next.tag,
+                hyperlink: next.hyperlink,
+                hyperlinkTitle: next.hyperlinkTitle
               })
               if (typeof renderer.reRenderNodeCheckChange === 'function') {
                 renderer.reRenderNodeCheckChange(node, true)
               }
-              this.lastPushed[item.uid] = { text, note }
+              this.lastPushed[item.uid] = {
+                text,
+                note,
+                full: {
+                  text,
+                  note,
+                  image: next.image,
+                  imageTitle: next.imageTitle,
+                  imageSize: next.imageSize,
+                  icon: next.icon,
+                  tag: next.tag,
+                  hyperlink: next.hyperlink,
+                  hyperlinkTitle: next.hyperlinkTitle
+                },
+                fieldVersions: fv
+              }
               changed = true
             }
           }
@@ -2203,49 +2545,41 @@ class Cooperate {
 
   publishAwareness(nodeIdList = []) {
     if (!this.userInfo || !this.awareness) return
+    const selected = Array.isArray(nodeIdList)
+      ? nodeIdList
+      : this.localPresence.selectedUids || []
     this.awareness.setLocalStateField('user', {
       userInfo: { ...this.userInfo },
-      nodeIdList
+      nodeIdList: selected,
+      selectedUids: selected,
+      editingUid: this.localPresence.editingUid || null,
+      cursor: this.localPresence.cursor || null
     })
   }
 
   // 监听感知数据同步事件
   onAwareness() {
-    const walk = (list, callback) => {
-      list.forEach(value => {
-        const legacyKey = Object.keys(value).find(key => {
-          return value[key] && value[key].userInfo
-        })
-        const data = value.user || (legacyKey && value[legacyKey])
-        if (!data) return
-        const userInfo = data.userInfo
-        const nodeIdList = data.nodeIdList
-        if (!userInfo || !nodeIdList) return
-        nodeIdList.forEach(uid => {
-          const node = this.mindMap.renderer.findNodeByUid(uid)
-          callback(uid, node, userInfo)
-        })
+    const states = Array.from(this.awareness.getStates().values())
+    const peers = []
+    states.forEach(value => {
+      const legacyKey = Object.keys(value).find(key => {
+        return value[key] && value[key].userInfo
       })
-    }
-    // 清除之前的数据
-    walk(this.currentAwarenessData, (uid, node, userInfo) => {
-      if (node) {
-        node.removeUser(userInfo)
-      }
+      const data = value.user || (legacyKey && value[legacyKey])
+      if (!data || !data.userInfo) return
+      const selectedUids = data.selectedUids || data.nodeIdList || []
+      peers.push({
+        id: data.userInfo.id,
+        name: data.userInfo.name,
+        color: data.userInfo.color,
+        avatar: data.userInfo.avatar,
+        selectedUids,
+        editingUid: data.editingUid || null,
+        cursor: data.cursor || null
+      })
     })
-    // 设置当前数据
-    const data = Array.from(this.awareness.getStates().values())
-    this.currentAwarenessData = data
-    this.waitNodeUidMap = {}
-    walk(data, (uid, node, userInfo) => {
-      // 不显示自己
-      if (this.userInfo && userInfo.id === this.userInfo.id) return
-      if (node) {
-        node.addUser(userInfo)
-      } else {
-        this.waitNodeUidMap[uid] = userInfo
-      }
-    })
+    this.currentAwarenessData = states
+    this.applyPresenceUsers(peers)
   }
 
   // 插件被移除前做的事情

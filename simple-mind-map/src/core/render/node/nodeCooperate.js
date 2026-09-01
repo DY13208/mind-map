@@ -21,6 +21,12 @@ function createTextAvatar(item) {
   circle.fill({
     color: item.color || generateColorByContent(str)
   })
+  if (item.editing) {
+    circle.stroke({
+      color: '#fff',
+      width: 2
+    })
+  }
   // 文本
   const text = new Text()
     .text(str)
@@ -83,12 +89,14 @@ function updateUserListNode() {
 
 // 添加用户
 function addUser(userInfo) {
-  if (
-    this.userList.find(item => {
-      return item.id == userInfo.id
-    })
-  )
+  const index = this.userList.findIndex(item => {
+    return item.id == userInfo.id
+  })
+  if (index !== -1) {
+    this.userList.splice(index, 1, { ...this.userList[index], ...userInfo })
+    this.updateUserListNode()
     return
+  }
   this.userList.push(userInfo)
   this.updateUserListNode()
 }

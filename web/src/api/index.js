@@ -1,6 +1,7 @@
 import Vue from 'vue'
 import vuexStore from '@/store'
 import { parseJsonOffMainThread } from '@/utils/importTree'
+import { promiseWithTimeout } from '@/utils/promiseWithTimeout'
 
 const SIMPLE_MIND_MAP_DATA = 'SIMPLE_MIND_MAP_DATA'
 const SIMPLE_MIND_MAP_SESSION = 'SIMPLE_MIND_MAP_SESSION'
@@ -10,6 +11,8 @@ const SIMPLE_MIND_MAP_LOCAL_CONFIG = 'SIMPLE_MIND_MAP_LOCAL_CONFIG'
 const IDB_NAME = 'mind-map-local'
 const IDB_STORE = 'drafts'
 const IDB_KEY = 'current'
+const IDB_TIMEOUT_MS = 5000
+const JSON_PARSE_TIMEOUT_MS = 15000
 
 let mindMapData = null
 let localSaveVersion = 0
@@ -54,7 +57,7 @@ function clearLegacyLocalStorageTree() {
 
 function openDraftDb() {
   if (idb) return Promise.resolve(idb)
-  return new Promise((resolve, reject) => {
+  const openPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(IDB_NAME, 1)
     req.onupgradeneeded = () => {
       const db = req.result
@@ -67,17 +70,21 @@ function openDraftDb() {
       resolve(idb)
     }
     req.onerror = () => reject(req.error)
+    req.onblocked = () =>
+      reject(new Error('IndexedDB open blocked by another tab'))
   })
+  return promiseWithTimeout(openPromise, IDB_TIMEOUT_MS, 'IndexedDB open')
 }
 
 async function readDraft() {
   const db = await openDraftDb()
-  return new Promise((resolve, reject) => {
+  const readPromise = new Promise((resolve, reject) => {
     const tx = db.transaction(IDB_STORE, 'readonly')
     const req = tx.objectStore(IDB_STORE).get(IDB_KEY)
     req.onsuccess = () => resolve(req.result || null)
     req.onerror = () => reject(req.error)
   })
+  return promiseWithTimeout(readPromise, IDB_TIMEOUT_MS, 'IndexedDB read')
 }
 
 async function writeDraft(data) {
@@ -159,7 +166,7 @@ export const getDataAsync = async () => {
       return mindMapData
     }
   } catch (error) {
-    console.log(error)
+    console.warn('[draft] skipped local draft:', error.message || error)
   }
   const store = localStorage.getItem(SIMPLE_MIND_MAP_DATA)
   if (store === null) {
@@ -167,7 +174,11 @@ export const getDataAsync = async () => {
     return mindMapData
   }
   try {
-    mindMapData = await parseJsonOffMainThread(store)
+    mindMapData = await promiseWithTimeout(
+      parseJsonOffMainThread(store),
+      JSON_PARSE_TIMEOUT_MS,
+      'local draft parse'
+    )
     writeDraft(mindMapData)
       .then(() => clearLegacyLocalStorageTree())
       .catch(() => {})

@@ -546,5 +546,55 @@ testUndoSafetyBlocksOtherUsersAndOutOfOrder()
 testRedoRequiresUndoAndBlocksDoubleRedo()
 testRestoreAndHistoricalReplay()
 testConcurrentSiblingInsertsGetDistinctPositions()
+testNodeReorderSameParent()
 testPreviewTimings()
+
+function testNodeReorderSameParent() {
+  const doc = seedDoc({
+    root: node('root', 'Root', ['a', 'b', 'c']),
+    a: node('a', 'A'),
+    b: node('b', 'B'),
+    c: node('c', 'C')
+  })
+  const applied = applyNodeCommand(doc, {
+    type: 'node.reorder',
+    payload: { uid: 'c', index: 0, confirm_sop_change: true }
+  })
+  assert.strictEqual(applied.event.type, 'node.reordered')
+  assert.strictEqual(applied.result.index, 0)
+  const obj = mindDoc.readObject(doc)
+  assert.deepStrictEqual(obj.root.children, ['c', 'a', 'b'])
+  assert.ok(applied.inversePayload.type === 'node.reorder')
+
+  const rejected = () =>
+    applyNodeCommand(doc, {
+      type: 'node.reorder',
+      payload: {
+        uid: 'c',
+        parentUid: 'a',
+        index: 0,
+        confirm_sop_change: true
+      }
+    })
+  assert.throws(rejected, err => err && err.code === 'REORDER_PARENT_CHANGED')
+
+  const replayed = applyCollabEvent(
+    {
+      root: node('root', 'Root', ['a', 'b', 'c']),
+      a: node('a', 'A'),
+      b: node('b', 'B'),
+      c: node('c', 'C')
+    },
+    {
+      type: 'node.reordered',
+      payload: {
+        uid: 'c',
+        parentUid: 'root',
+        index: 0,
+        position: applied.result.position
+      }
+    }
+  )
+  assert.strictEqual(replayed.root.children[0], 'c')
+}
 console.log('room operation tests passed')

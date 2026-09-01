@@ -779,7 +779,8 @@ const NODE_DATA_PATCH_KEYS = [
   'generalization',
   'formula',
   'attachmentUrl',
-  'attachmentName'
+  'attachmentName',
+  '__fv'
 ]
 
 function updateNodeOnDoc(ydoc, ref, patch = {}) {
@@ -790,9 +791,18 @@ function updateNodeOnDoc(ydoc, ref, patch = {}) {
   }
   const prev = nodeJsonFromDoc(ymap, uid)
   const data = { ...(prev.data || {}) }
-  if (patch.text !== undefined) applyNodeText(data, patch.text)
+  if (patch.text !== undefined) {
+    if (patch.text === null) {
+      data.text = ''
+      delete data.richText
+    } else {
+      applyNodeText(data, patch.text)
+    }
+  }
   NODE_DATA_PATCH_KEYS.forEach(key => {
-    if (patch[key] !== undefined) data[key] = patch[key]
+    if (patch[key] === undefined) return
+    if (patch[key] === null) delete data[key]
+    else data[key] = patch[key]
   })
   applyObjectToDoc(
     ydoc,
