@@ -148,6 +148,7 @@ function collapseDeepNodes(root, keepDepth = 2) {
 
 const LARGE_MAP_AT = 200
 const HTTP_COLLAB_AT = 200
+const CLIP_JSON_AT = 1500
 const MAX_PREVIEW_CHILDREN = 120
 const MAX_SUBTREE_CHILDREN = 200
 const MAX_SEARCH_HITS = 80
@@ -209,16 +210,23 @@ function objectToTreeLimited(obj, keepDepth = 2, options = {}) {
 function buildPreview(obj, options = {}) {
   const keepDepth = Number(options.keepDepth) > 0 ? Number(options.keepDepth) : 2
   const largeAt = Number(options.largeAt) > 0 ? Number(options.largeAt) : LARGE_MAP_AT
+  const clipAt = Number(options.clipAt) > 0 ? Number(options.clipAt) : CLIP_JSON_AT
   const nodeCount = Object.keys(obj || {}).length
   const collapsed = nodeCount >= largeAt
-  const tree = collapsed
-    ? objectToTreeLimited(obj, keepDepth, { maxChildren: options.maxChildren })
-    : objectToTree(obj)
+  const clipped = nodeCount >= clipAt
+  let tree
+  if (clipped) {
+    tree = objectToTreeLimited(obj, keepDepth, { maxChildren: options.maxChildren })
+  } else {
+    tree = objectToTree(obj)
+    if (collapsed && tree) collapseDeepNodes(tree, keepDepth)
+  }
   if (tree && tree.data) delete tree.data.imgMap
   return {
     tree,
     node_count: nodeCount,
     collapsed,
+    clipped,
     http_collab: nodeCount >= HTTP_COLLAB_AT
   }
 }
@@ -242,12 +250,64 @@ function subtreeChildren(obj, uid, options = {}) {
   }
 }
 
+function subtreeTree(obj, uid, options = {}) {
+  const maxNodes =
+    Number(options.maxNodes) > 0 ? Number(options.maxNodes) : 8000
+  const stats = { count: 0, truncated: false }
+  const walk = id => {
+    if (stats.count >= maxNodes) {
+      stats.truncated = true
+      return null
+    }
+    const cur = obj[id]
+    if (!cur) return null
+    stats.count += 1
+    const node = {
+      data: {
+        ...stripHeavyFields(clone(cur.data || {})),
+        uid: id
+      },
+      children: []
+    }
+    ;(cur.children || []).forEach(childUid => {
+      const child = walk(childUid)
+      if (child) node.children.push(child)
+    })
+    return node
+  }
+  const tree = walk(uid)
+  return {
+    uid,
+    tree,
+    node_count: stats.count,
+    truncated: stats.truncated
+  }
+}
+
 function nodesByUids(obj, uids) {
   const list = Array.isArray(uids) ? uids : []
   return list
     .slice(0, MAX_NODE_FETCH)
     .map(uid => {
       const cur = obj[uid]
+      if (!cur) return null
+      return {
+        uid,
+        isRoot: !!cur.isRoot,
+        data: stripHeavyFields(clone(cur.data || {})),
+        children: cur.children || []
+      }
+    })
+    .filter(Boolean)
+}
+
+function nodesByUidsFromDoc(ydoc, uids) {
+  const ymap = ymapOf(ydoc)
+  const list = Array.isArray(uids) ? uids : []
+  return list
+    .slice(0, MAX_NODE_FETCH)
+    .map(uid => {
+      const cur = nodeJsonFromDoc(ymap, uid)
       if (!cur) return null
       return {
         uid,
@@ -595,7 +655,17 @@ function collectDescendantsInDoc(ymap, uid) {
   return out
 }
 
-function addNodeOnDoc(ydoc, { parent, text, note, uid: clientUid } = {}) {
+function insertChildUid(list, uid, index) {
+  const next = Array.isArray(list) ? list.filter(id => id !== uid) : []
+  const max = next.length
+  let i = index == null || index === '' ? max : Number(index)
+  if (!Number.isFinite(i) || i < 0) i = max
+  if (i > max) i = max
+  next.splice(i, 0, uid)
+  return next
+}
+
+function addNodeOnDoc(ydoc, { parent, text, note, uid: clientUid, index } = {}) {
   const ymap = ymapOf(ydoc)
   const parentUid = resolveNodeInDoc(ydoc, parent)
   if (!parentUid || !ymap.has(parentUid)) {
@@ -621,7 +691,11 @@ function addNodeOnDoc(ydoc, { parent, text, note, uid: clientUid } = {}) {
   const nextObject = {
     [parentUid]: {
       ...parentJson,
-      children: [...((parentJson && parentJson.children) || []), uid]
+      children: insertChildUid(
+        (parentJson && parentJson.children) || [],
+        uid,
+        index
+      )
     },
     [uid]: {
       isRoot: false,
@@ -633,6 +707,22 @@ function addNodeOnDoc(ydoc, { parent, text, note, uid: clientUid } = {}) {
   return { uid, parent_uid: parentUid }
 }
 
+const NODE_DATA_PATCH_KEYS = [
+  'note',
+  'image',
+  'imageTitle',
+  'imageSize',
+  'icon',
+  'tag',
+  'hyperlink',
+  'hyperlinkTitle',
+  'outerFrame',
+  'generalization',
+  'formula',
+  'attachmentUrl',
+  'attachmentName'
+]
+
 function updateNodeOnDoc(ydoc, ref, patch = {}) {
   const ymap = ymapOf(ydoc)
   const uid = resolveNodeInDoc(ydoc, ref)
@@ -642,13 +732,102 @@ function updateNodeOnDoc(ydoc, ref, patch = {}) {
   const prev = nodeJsonFromDoc(ymap, uid)
   const data = { ...(prev.data || {}) }
   if (patch.text !== undefined) applyNodeText(data, patch.text)
-  if (patch.note !== undefined) data.note = String(patch.note)
+  NODE_DATA_PATCH_KEYS.forEach(key => {
+    if (patch[key] !== undefined) data[key] = patch[key]
+  })
   applyObjectToDoc(
     ydoc,
     { [uid]: { ...prev, data } },
     { previousObject: { [uid]: prev } }
   )
   return { uid }
+}
+
+function moveNodeOnDoc(ydoc, { uid: ref, parent: parentRef, index } = {}) {
+  const ymap = ymapOf(ydoc)
+  const uid = resolveNodeInDoc(ydoc, ref)
+  if (!uid || !ymap.has(uid)) {
+    throw new Error('找不到节点，请先 get_map 查看 uid 或路径')
+  }
+  const json = nodeJsonFromDoc(ymap, uid)
+  if (json && json.isRoot) {
+    throw new Error('不能移动根节点')
+  }
+  const oldParentUid = findParentInDoc(ymap, uid)
+  const newParentUid = parentRef
+    ? resolveNodeInDoc(ydoc, parentRef)
+    : oldParentUid
+  if (!newParentUid || !ymap.has(newParentUid)) {
+    throw new Error('找不到父节点，请先 get_map 查看 uid 或路径')
+  }
+  if (newParentUid === uid) {
+    throw new Error('不能把节点移动到自己下面')
+  }
+  const descendants = collectDescendantsInDoc(ymap, uid)
+  if (descendants.includes(newParentUid)) {
+    throw new Error('不能把节点移动到自己的子节点下')
+  }
+  const patch = {}
+  const previousObject = {}
+  if (oldParentUid && oldParentUid !== newParentUid) {
+    const oldParent = nodeJsonFromDoc(ymap, oldParentUid)
+    previousObject[oldParentUid] = oldParent
+    patch[oldParentUid] = {
+      ...oldParent,
+      children: ((oldParent && oldParent.children) || []).filter(id => id !== uid)
+    }
+  }
+  const newParent = nodeJsonFromDoc(ymap, newParentUid)
+  previousObject[newParentUid] = newParent
+  const from =
+    oldParentUid === newParentUid
+      ? (newParent && newParent.children) || []
+      : ((patch[newParentUid] && patch[newParentUid].children) ||
+          (newParent && newParent.children) ||
+          [])
+  patch[newParentUid] = {
+    ...newParent,
+    children: insertChildUid(from, uid, index)
+  }
+  applyObjectToDoc(ydoc, patch, { previousObject })
+  return { uid, parent_uid: newParentUid }
+}
+
+function deleteCurrentNodeOnDoc(ydoc, ref) {
+  const ymap = ymapOf(ydoc)
+  const uid = resolveNodeInDoc(ydoc, ref)
+  if (!uid || !ymap.has(uid)) {
+    throw new Error('找不到节点，请先 get_map 查看 uid 或路径')
+  }
+  const json = nodeJsonFromDoc(ymap, uid)
+  if (json && json.isRoot) {
+    throw new Error('不能删除根节点')
+  }
+  const parentUid = findParentInDoc(ymap, uid)
+  if (!parentUid || !ymap.has(parentUid)) {
+    throw new Error('找不到父节点')
+  }
+  const parentJson = nodeJsonFromDoc(ymap, parentUid)
+  const childUids = (json && json.children) || []
+  const nextChildren = []
+  ;((parentJson && parentJson.children) || []).forEach(id => {
+    if (id === uid) nextChildren.push(...childUids)
+    else nextChildren.push(id)
+  })
+  applyObjectToDoc(
+    ydoc,
+    {
+      [parentUid]: {
+        ...parentJson,
+        children: nextChildren
+      }
+    },
+    {
+      previousObject: { [parentUid]: parentJson },
+      deleteUids: [uid]
+    }
+  )
+  return { uid, parent_uid: parentUid, promoted: childUids }
 }
 
 function deleteNodeOnDoc(ydoc, ref) {
@@ -1235,10 +1414,13 @@ module.exports = {
   collapseDeepNodes,
   buildPreview,
   subtreeChildren,
+  subtreeTree,
   nodesByUids,
+  nodesByUidsFromDoc,
   locateNode,
   LARGE_MAP_AT,
   HTTP_COLLAB_AT,
+  CLIP_JSON_AT,
   applyObjectToDoc,
   flattenNodes,
   toOutline,
@@ -1249,6 +1431,8 @@ module.exports = {
   deleteNode,
   addNodeOnDoc,
   updateNodeOnDoc,
+  moveNodeOnDoc,
+  deleteCurrentNodeOnDoc,
   deleteNodeOnDoc,
   searchNodes,
   baseLabel,

@@ -19,6 +19,7 @@ const {
   isAuthEnabled,
   handleAuthApi,
   authenticateRequest,
+  authenticateWebsocketRequest,
   requireAuthenticatedRequest,
   applyCorsHeaders,
   isAllowedOrigin
@@ -124,16 +125,14 @@ function rejectUpgrade(socket, status, message) {
 server.on('upgrade', async (request, socket, head) => {
   try {
     if (isAuthEnabled()) {
-      if (!isAllowedOrigin(request)) {
-        rejectUpgrade(socket, '403 Forbidden', 'Forbidden')
+      try {
+        request.authUser = await authenticateWebsocketRequest(request)
+      } catch (err) {
+        const status =
+          err.statusCode === 403 ? '403 Forbidden' : '401 Unauthorized'
+        rejectUpgrade(socket, status, err.message || 'Unauthorized')
         return
       }
-      const user = await authenticateRequest(request)
-      if (!user) {
-        rejectUpgrade(socket, '401 Unauthorized', 'Unauthorized')
-        return
-      }
-      request.authUser = user
     }
     wss.handleUpgrade(request, socket, head, ws => {
       wss.emit('connection', ws, request)

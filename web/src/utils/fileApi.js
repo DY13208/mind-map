@@ -7,6 +7,7 @@ function apiBase() {
 async function request(path, options = {}) {
   const res = await fetch(`${apiBase()}${path}`, {
     credentials: 'include',
+    cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers || {})
@@ -22,6 +23,13 @@ async function request(path, options = {}) {
 
 export function listFiles() {
   return request('/api/files')
+}
+
+export function createFile(body = {}) {
+  return request('/api/files', {
+    method: 'POST',
+    body: JSON.stringify(body || {})
+  })
 }
 
 export function renameFile(roomKey, title) {
@@ -41,6 +49,20 @@ export function getSaveStatus(roomKey) {
   return request(`/api/files/${encodeURIComponent(roomKey)}/save-status`)
 }
 
+export function beatPresence(roomKey, user) {
+  return request(`/api/files/${encodeURIComponent(roomKey)}/presence`, {
+    method: 'POST',
+    body: JSON.stringify(user || {})
+  })
+}
+
+export function leavePresence(roomKey, userId) {
+  return request(`/api/files/${encodeURIComponent(roomKey)}/presence`, {
+    method: 'DELETE',
+    body: JSON.stringify({ id: userId })
+  })
+}
+
 export function getFilePreview(roomKey, depth = 2) {
   const query = Number(depth) > 0 ? `?depth=${Number(depth)}` : ''
   return request(`/api/files/${encodeURIComponent(roomKey)}/preview${query}`)
@@ -49,11 +71,19 @@ export function getFilePreview(roomKey, depth = 2) {
 export function getFileSubtree(roomKey, uid, options = {}) {
   const params = new URLSearchParams()
   if (uid) params.set('uid', uid)
+  if (options.deep) params.set('deep', '1')
+  if (options.maxNodes != null) params.set('max_nodes', String(options.maxNodes))
   if (options.offset != null) params.set('offset', String(options.offset))
   if (options.limit != null) params.set('limit', String(options.limit))
   const query = params.toString()
   return request(
     `/api/files/${encodeURIComponent(roomKey)}/subtree${query ? `?${query}` : ''}`
+  )
+}
+
+export function getFileExport(roomKey) {
+  return request(
+    `/api/files/${encodeURIComponent(roomKey)}?format=full&max_nodes=10000`
   )
 }
 
@@ -73,6 +103,29 @@ export function getFileNodes(roomKey, uids = []) {
   return request(`/api/files/${encodeURIComponent(roomKey)}/nodes${query}`)
 }
 
+export function getMapVersion(roomKey) {
+  return request(`/api/maps/${encodeURIComponent(roomKey)}/version`)
+}
+
+export function getMapOperations(roomKey, afterVersion = 0, limit = 500) {
+  const params = new URLSearchParams()
+  params.set('after', String(Number(afterVersion) || 0))
+  if (limit) params.set('limit', String(limit))
+  return request(
+    `/api/maps/${encodeURIComponent(roomKey)}/operations?${params.toString()}`
+  )
+}
+
+function operationHeaders(body = {}) {
+  const operationId =
+    body.operationId ||
+    body.operation_id ||
+    (typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : '')
+  return operationId ? { 'X-Operation-Id': operationId } : {}
+}
+
 export function searchFile(roomKey, q, limit = 80) {
   const params = new URLSearchParams()
   if (q) params.set('q', q)
@@ -83,28 +136,38 @@ export function searchFile(roomKey, q, limit = 80) {
 }
 
 export function addFileNode(roomKey, body) {
+  const payload = { ...(body || {}), confirm_sop_change: true }
   return request(`/api/files/${encodeURIComponent(roomKey)}/nodes`, {
     method: 'POST',
-    body: JSON.stringify(body)
+    headers: operationHeaders(payload),
+    body: JSON.stringify(payload)
   })
 }
 
 export function patchFileNode(roomKey, uid, body) {
+  const payload = { ...(body || {}), confirm_sop_change: true }
   return request(
     `/api/files/${encodeURIComponent(roomKey)}/nodes/${encodeURIComponent(uid)}`,
     {
       method: 'PATCH',
-      body: JSON.stringify(body)
+      headers: operationHeaders(payload),
+      body: JSON.stringify(payload)
     }
   )
 }
 
-export function deleteFileNode(roomKey, uid) {
+export function deleteFileNode(roomKey, uid, options = {}) {
+  const payload = {
+    keep_children: !!options.keepChildren,
+    confirm_sop_change: true,
+    operationId: options.operationId
+  }
   return request(
     `/api/files/${encodeURIComponent(roomKey)}/nodes/${encodeURIComponent(uid)}`,
     {
       method: 'DELETE',
-      body: JSON.stringify({})
+      headers: operationHeaders(payload),
+      body: JSON.stringify(payload)
     }
   )
 }

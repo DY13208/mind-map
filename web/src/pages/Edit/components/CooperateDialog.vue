@@ -23,12 +23,12 @@
             v-model.trim="roomName"
             :placeholder="$t('cooperate.roomNamePlaceholder')"
             maxlength="40"
-            :disabled="connected"
+            :disabled="connected || connecting"
             @keydown.native.stop
           >
             <el-button
               slot="append"
-              :disabled="connected"
+              :disabled="connected || connecting"
               @click="createRoom"
               >{{ $t('cooperate.newRoom') }}</el-button
             >
@@ -38,7 +38,7 @@
           <el-input
             v-model.trim="serverUrl"
             :placeholder="$t('cooperate.serverUrlPlaceholder')"
-            :disabled="connected"
+            :disabled="connected || connecting"
             @keydown.native.stop
           ></el-input>
         </el-form-item>
@@ -115,19 +115,26 @@
 </template>
 
 <script>
+import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import { mapMutations, mapState } from 'vuex'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
 import { getCurrentUser } from '@/utils/auth'
 import {
   listFiles,
+  createFile as createFileApi,
   renameFile as renameFileApi,
   deleteFile as deleteFileApi,
   getSaveStatus,
+  beatPresence,
+  leavePresence,
   getFilePreview,
   getFileSubtree,
+  getFileExport,
   locateFileNode,
   getFileNodes,
+  getMapVersion,
+  getMapOperations,
   addFileNode,
   patchFileNode,
   deleteFileNode
@@ -161,6 +168,21 @@ const defaultGuestName = userId => {
 
 const defaultServerUrl = () => {
   return getRuntimeConfig().collabUrl
+}
+
+const roomFromLocation = route => {
+  const fromRoute = route && route.query && route.query.room
+  if (fromRoute) return String(fromRoute).trim()
+  try {
+    const fromSearch = new URLSearchParams(window.location.search).get('room')
+    if (fromSearch) return String(fromSearch).trim()
+    const hash = String(window.location.hash || '')
+    const query = hash.indexOf('?') >= 0 ? hash.slice(hash.indexOf('?') + 1) : ''
+    const fromHash = new URLSearchParams(query).get('room')
+    return String(fromHash || '').trim()
+  } catch (e) {
+    return ''
+  }
 }
 
 export default {
@@ -234,10 +256,12 @@ export default {
         defaultGuestName(this.userId)
     localStorage.setItem(USER_NAME_KEY, this.userName)
     this.roomName =
-      this.$route.query.room || 'room-' + Math.random().toString(36).slice(2, 8)
+      roomFromLocation(this.$route) ||
+      'room-' + Math.random().toString(36).slice(2, 8)
     this.userColor =
       USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)]
     this.$bus.$on('showCooperate', this.open)
+    this._seenHttpChanges = new Map()
   },
   mounted() {
     this.tryAutoJoin()
@@ -254,18 +278,48 @@ export default {
     open() {
       this.dialogVisible = true
       this.loadFiles()
+      if (!this.connected && !this.connecting && this.roomName && this.mindMap) {
+        this.openSavedRoom({ silent: true })
+      }
     },
 
     createRoom() {
-      this.roomName = 'room-' + Math.random().toString(36).slice(2, 8)
+      this.createBlankRoom()
+    },
+
+    async createBlankRoom() {
+      try {
+        const { value } = await this.$prompt(
+          this.$t('cooperate.roomTitlePlaceholder'),
+          this.$t('cooperate.newRoom'),
+          {
+            inputValue: this.$t('cooperate.unnamed'),
+            inputValidator: val => !!String(val || '').trim()
+          }
+        )
+        const title =
+          String(value || '')
+            .trim()
+            .slice(0, 80) || this.$t('cooperate.unnamed')
+        if (this.connected) this.leave({ silent: true })
+        const created = await createFileApi({ title })
+        this.roomName = created.room_key
+        this.syncRoomQuery()
+        await this.openSavedRoom({ silent: false })
+        this.loadFiles()
+      } catch (err) {
+        if (err === 'cancel' || err === 'close') return
+        this.$message.error(err.message || this.$t('cooperate.createFailed'))
+      }
     },
 
     tryAutoJoin() {
       if (!this.mindMap || this.connected || this.connecting) return
-      if (!this.$route.query.room) return
+      const room = roomFromLocation(this.$route)
+      if (!room) return
       if (this._autoJoinScheduled) return
       this._autoJoinScheduled = true
-      this.roomName = this.$route.query.room
+      this.roomName = room
       this.openSavedRoom({ silent: true })
     },
 
@@ -311,8 +365,11 @@ export default {
 
     join(options = {}) {
       const silent = !!options.silent
-      if (!this.validate() || this.connected) return
-      if (this.mindMap.cooperate && this.mindMap.cooperate.httpCollabMode) {
+      if (!this.validate() || this.connected || this.connecting) return
+      if (
+        this.httpCollab ||
+        (this.mindMap.cooperate && this.mindMap.cooperate.httpCollabMode)
+      ) {
         this.markHttpConnected()
         return
       }
@@ -448,6 +505,9 @@ export default {
       this.httpCollab = false
       this.peerList = []
       this.stopSaveStatusPolling()
+      if (this.roomName && this.userId) {
+        leavePresence(this.roomName, this.userId).catch(() => {})
+      }
       this.setCooperateStatus('disconnected')
       if (!silent) this.$message.success(this.$t('cooperate.leaveSuccess'))
     },
@@ -459,7 +519,25 @@ export default {
         } catch (e) {
           // ignore
         }
+        if (this._presenceProvider && typeof this.provider.destroy === 'function') {
+          try {
+            this.provider.destroy()
+          } catch (e) {
+            // ignore
+          }
+        }
         this.provider = null
+      }
+      this._presenceProvider = false
+      this._presenceWs = false
+      this._seenHttpChanges = new Map()
+      if (this.presenceDoc) {
+        try {
+          this.presenceDoc.destroy()
+        } catch (e) {
+          // ignore
+        }
+        this.presenceDoc = null
       }
     },
 
@@ -477,6 +555,7 @@ export default {
         })
         const presence = state.user || (legacyKey && state[legacyKey])
         const info = (presence && presence.userInfo) || null
+        this.handleHttpChange(state.documentChange)
         if (!info || !info.id || seen.has(info.id)) return
         seen.add(info.id)
         peers.push({
@@ -499,6 +578,54 @@ export default {
       this.peerList = peers
     },
 
+    handleHttpChange(change) {
+      if (
+        !change ||
+        change.roomKey !== this.roomName ||
+        (this.provider &&
+          Number(change.clientId) === this.provider.awareness.clientID)
+      ) {
+        return
+      }
+      const key = String(change.clientId || change.userId || '')
+      const nonce = String(change.nonce || change.updatedAt || '')
+      if (!key || !nonce || this._seenHttpChanges.get(key) === nonce) return
+      this._seenHttpChanges.set(key, nonce)
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (!cooperate || !this.httpCollab) return
+      const version = Number(change.version)
+      if (Number.isFinite(version) && version > 0) {
+        cooperate.recoverHttpCollab(version).catch(() => {})
+        return
+      }
+      cooperate
+        .refreshVisibleFromHttp(change.updatedAt, { force: true })
+        .catch(() => {})
+    },
+
+    publishHttpChange(result = {}) {
+      if (!this.provider || !this._presenceProvider) return
+      this.provider.awareness.setLocalStateField('documentChange', {
+        roomKey: this.roomName,
+        userId: this.userId,
+        clientId: this.provider.awareness.clientID,
+        version: Number(result.version) || 0,
+        updatedAt: result.updated_at || result.updatedAt || '',
+        nonce: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      })
+    },
+
+    notifyHttpMutation(request) {
+      return Promise.resolve(request).then(result => {
+        const cooperate = this.mindMap && this.mindMap.cooperate
+        if (cooperate && result && result.version != null) {
+          cooperate.acknowledgeLocalVersion(result.version)
+        }
+        this.publishHttpChange(result || {})
+        return result
+      })
+    },
+
     startSaveStatusPolling() {
       this.stopSaveStatusPolling()
       this.loadSaveStatus()
@@ -514,23 +641,66 @@ export default {
       this.saveError = ''
     },
 
+    applyPresenceList(list) {
+      const peers = (list || []).map(info => ({
+        id: info.id,
+        name: info.name,
+        color: info.color || '#409EFF',
+        shortName: (info.name || '?').slice(0, 1),
+        isMe: info.id === this.userId
+      }))
+      if (!peers.find(item => item.id === this.userId) && this.userName) {
+        peers.unshift({
+          id: this.userId,
+          name: this.userName,
+          color: this.userColor,
+          shortName: this.userName.slice(0, 1),
+          isMe: true
+        })
+      }
+      this.peerList = peers
+    },
+
+    async syncHttpPresence() {
+      if (!this.httpCollab || !this.connected || !this.roomName) return
+      if (this._presenceWs) return
+      try {
+        const data = await beatPresence(this.roomName, {
+          id: this.userId,
+          name: this.userName,
+          color: this.userColor
+        })
+        this.applyPresenceList(data.list)
+      } catch (e) {
+        // keep last peer list
+      }
+    },
+
     async loadSaveStatus() {
       if (!this.connected || !this.roomName) return
+      if (this.httpCollab) this.syncHttpPresence()
       try {
         const data = await getSaveStatus(this.roomName)
+        if (data.status === 'deleted') {
+          this.leave({ silent: true })
+          return
+        }
         if (data.status === 'error') {
           this.saveStatus = 'saveError'
           this.saveError = data.error || this.$t('cooperate.saveError')
         } else if (data.status === 'saving') {
           this.saveStatus = 'saving'
           this.saveError = ''
-        } else if (data.status === 'deleted') {
-          this.leave({ silent: true })
         } else {
           this.saveStatus = 'saved'
           this.saveError = ''
-          const cooperate = this.mindMap && this.mindMap.cooperate
-          if (this.httpCollab && cooperate && data.updated_at) {
+        }
+        // 用房间 version 补偿，不再把 updated_at 当作协作一致性依据。
+        const cooperate = this.mindMap && this.mindMap.cooperate
+        if (this.httpCollab && cooperate) {
+          if (data.version != null && Number.isFinite(Number(data.version))) {
+            cooperate.recoverHttpCollab(data.version).catch(() => {})
+          } else if (data.updated_at) {
             cooperate.refreshVisibleFromHttp(data.updated_at).catch(() => {})
           }
         }
@@ -606,6 +776,13 @@ export default {
       this.httpCollab = true
       this.clearReconnectNotice()
       this.setCooperateStatus('connected')
+      if (this.mindMap && this.mindMap.cooperate) {
+        this.mindMap.cooperate.setUserInfo({
+          id: this.userId,
+          name: this.userName,
+          color: this.userColor
+        })
+      }
       this.peerList = [
         {
           id: this.userId,
@@ -615,8 +792,39 @@ export default {
           isMe: true
         }
       ]
+      this.connectPresenceSocket()
       this.loadFiles()
       this.startSaveStatusPolling()
+      this.syncHttpPresence()
+    },
+
+    connectPresenceSocket() {
+      if (!this.serverUrl || !this.roomName) return
+      this.unbindProvider()
+      const doc = new Y.Doc()
+      const provider = new WebsocketProvider(
+        this.serverUrl.replace(/\/$/, ''),
+        `${this.roomName}__presence`,
+        doc,
+        { connect: true, maxBackoffTime: 10000 }
+      )
+      this.presenceDoc = doc
+      this.provider = provider
+      this._presenceProvider = true
+      this._presenceWs = false
+      provider.awareness.setLocalStateField('user', {
+        userInfo: {
+          id: this.userId,
+          name: this.userName,
+          color: this.userColor
+        }
+      })
+      provider.awareness.on('change', this.updatePeers)
+      provider.on('status', ({ status }) => {
+        this._presenceWs = status === 'connected'
+        if (status === 'connected') this.updatePeers()
+      })
+      this.updatePeers()
     },
 
     enableHttpCollab(preview) {
@@ -626,18 +834,84 @@ export default {
       cooperate.setHttpCollab({
         roomKey,
         nodeCount: preview.node_count,
+        version: preview.version || 0,
         updatedAt: preview.updated_at,
         fetchSubtree: uid => getFileSubtree(roomKey, uid),
+        fetchDeepSubtree: uid => getFileSubtree(roomKey, uid, { deep: true }),
+        fetchExportTree: () => getFileExport(roomKey),
         fetchNodes: uids => getFileNodes(roomKey, uids),
         fetchLocate: uid => locateFileNode(roomKey, uid),
-        patchNode: (uid, body) => patchFileNode(roomKey, uid, body),
-        addNode: body => addFileNode(roomKey, body),
-        deleteNode: uid => deleteFileNode(roomKey, uid)
+        fetchOperations: after => getMapOperations(roomKey, after),
+        fetchVersion: () => getMapVersion(roomKey),
+        patchNode: (uid, body) =>
+          this.notifyHttpMutation(patchFileNode(roomKey, uid, body)),
+        addNode: body =>
+          this.notifyHttpMutation(addFileNode(roomKey, body)),
+        deleteNode: (uid, options) =>
+          this.notifyHttpMutation(deleteFileNode(roomKey, uid, options))
       })
+    },
+
+    isNotFound(err) {
+      return /not found|404/i.test(String((err && err.message) || err || ''))
+    },
+
+    async ensureRoomFile(roomKey, title) {
+      try {
+        return await createFileApi({
+          room_key: roomKey,
+          title: title || this.$t('cooperate.unnamed')
+        })
+      } catch (err) {
+        if (/已存在|409|exist/i.test(String((err && err.message) || ''))) {
+          return null
+        }
+        throw err
+      }
+    },
+
+    async applyPreview(preview, silent) {
+      const cooperate = this.mindMap.cooperate
+      this.enableHttpCollab(preview)
+      const httpCollab = !!(preview.http_collab || preview.collapsed)
+      if (!httpCollab) cooperate.httpCollabMode = false
+      cooperate.setPreviewApplied(true)
+      await new Promise(resolve => {
+        let settled = false
+        const done = () => {
+          if (settled) return
+          settled = true
+          this.mindMap.off('node_tree_render_end', done)
+          resolve()
+        }
+        this.mindMap.on('node_tree_render_end', done)
+        this.$bus.$emit('setData', preview.tree, {
+          quiet: true,
+          fromSaved: true
+        })
+        if (typeof cooperate.markTreeUids === 'function') {
+          cooperate.markTreeUids(preview.tree)
+        }
+        setTimeout(done, 4000)
+      })
+      if (!silent) {
+        this.$message.success(this.$t('cooperate.openSuccess'))
+      }
+      if (httpCollab) {
+        cooperate.setPreviewApplied(false)
+        this.markHttpConnected()
+        return true
+      }
+      return false
     },
 
     async openSavedRoom(options = {}) {
       const silent = !!options.silent
+      if (this.connected) {
+        if (!silent) this.$message.success(this.$t('cooperate.openSuccess'))
+        return
+      }
+      if (this.connecting) return
       const roomKey = this.roomName
       const cooperate = this.mindMap && this.mindMap.cooperate
       if (!roomKey || !cooperate) {
@@ -645,36 +919,21 @@ export default {
         else this.join({ silent: true })
         return
       }
+      this.connecting = true
+      this.setCooperateStatus('connecting')
       cooperate.setExpectRemoteDoc(true)
       try {
-        const preview = await getFilePreview(roomKey, 2)
+        let preview = null
+        try {
+          preview = await getFilePreview(roomKey, 2)
+        } catch (err) {
+          if (!this.isNotFound(err)) throw err
+          await this.ensureRoomFile(roomKey)
+          preview = await getFilePreview(roomKey, 2)
+        }
         if (preview && preview.tree) {
-          const httpCollab = !!(preview.http_collab || preview.collapsed)
-          if (httpCollab) this.enableHttpCollab(preview)
-          cooperate.setPreviewApplied(true)
-          await new Promise(resolve => {
-            let settled = false
-            const done = () => {
-              if (settled) return
-              settled = true
-              this.mindMap.off('node_tree_render_end', done)
-              resolve()
-            }
-            this.mindMap.on('node_tree_render_end', done)
-            this.$bus.$emit('setData', preview.tree, {
-              quiet: true,
-              fromSaved: true
-            })
-            setTimeout(done, 4000)
-          })
-          if (!silent) {
-            this.$message.success(this.$t('cooperate.openSuccess'))
-          }
-          if (httpCollab) {
-            cooperate.setPreviewApplied(false)
-            this.markHttpConnected()
-            return
-          }
+          const connected = await this.applyPreview(preview, silent)
+          if (connected) return
         }
       } catch (err) {
         cooperate.setPreviewApplied(false)
@@ -684,6 +943,8 @@ export default {
           )
         }
       }
+      this.connecting = false
+      this.setCooperateStatus('disconnected')
       await this.$nextTick()
       this.deferJoin()
     },
