@@ -1231,7 +1231,11 @@ class Cooperate {
   }
 
   collectUnpushedNodes(node, out = []) {
-    if (!node || node.isRoot) return out
+    if (!node) return out
+    if (node.isRoot) {
+      ;(node.children || []).forEach(child => this.collectUnpushedNodes(child, out))
+      return out
+    }
     const uid = node.getData && node.getData('uid')
     if (uid && !this.lastPushed[uid]) out.push(node)
     const kids = node.children || []
@@ -1239,32 +1243,63 @@ class Cooperate {
     return out
   }
 
-  flushHttpInsert() {
-    if (!this.httpAddNode) return Promise.resolve()
-    const list =
-      (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
+  nodeDepth(node) {
+    let depth = 0
+    let current = node
+    while (current && current.parent) {
+      depth += 1
+      current = current.parent
+    }
+    return depth
+  }
+
+  async flushHttpInsert() {
+    if (!this.httpAddNode) return
+    const renderer = this.mindMap.renderer
     const pending = []
+    const list = (renderer && renderer.activeNodeList) || []
     list.forEach(node => this.collectUnpushedNodes(node, pending))
-    const jobs = pending.map(node => {
+    if (!pending.length && renderer && renderer.root) {
+      this.collectUnpushedNodes(renderer.root, pending)
+    }
+    const seen = new Set()
+    const unique = pending.filter(node => {
+      const uid = node.getData && node.getData('uid')
+      if (!uid || seen.has(uid)) return false
+      seen.add(uid)
+      return true
+    })
+    unique.sort((a, b) => this.nodeDepth(a) - this.nodeDepth(b))
+    for (const node of unique) {
       const uid = node.getData && node.getData('uid')
       const parent =
         node.parent && node.parent.getData && node.parent.getData('uid')
       const text = this.nodePlain(node)
       const note = (node.getData && node.getData('note')) || ''
-      const kids = (node.parent && node.parent.nodeData && node.parent.nodeData.children) || []
-      const index = kids.findIndex(item => item && item.data && item.data.uid === uid)
-      this.lastPushed[uid] = { text, note }
-      return this.httpAddNode({
-        parent,
-        uid,
-        text,
-        note,
-        index: index < 0 ? undefined : index
-      }).catch(err => {
-        console.error('[mind-map] add node failed', err)
-      })
-    })
-    return Promise.all(jobs)
+      const kids =
+        (node.parent && node.parent.nodeData && node.parent.nodeData.children) ||
+        []
+      const index = kids.findIndex(
+        item => item && item.data && item.data.uid === uid
+      )
+      try {
+        await this.httpAddNode({
+          parent,
+          uid,
+          text,
+          note,
+          index: index < 0 ? undefined : index
+        })
+        this.lastPushed[uid] = { text, note }
+      } catch (err) {
+        const msg = String((err && err.message) || err)
+        if (/节点已存在/.test(msg)) {
+          this.lastPushed[uid] = { text, note }
+        } else {
+          console.error('[mind-map] add node failed', err)
+        }
+      }
+    }
   }
 
   flushHttpMove() {

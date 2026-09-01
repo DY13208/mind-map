@@ -23,12 +23,12 @@
             v-model.trim="roomName"
             :placeholder="$t('cooperate.roomNamePlaceholder')"
             maxlength="40"
-            :disabled="connected"
+            :disabled="connected || connecting"
             @keydown.native.stop
           >
             <el-button
               slot="append"
-              :disabled="connected"
+              :disabled="connected || connecting"
               @click="createRoom"
               >{{ $t('cooperate.newRoom') }}</el-button
             >
@@ -38,7 +38,7 @@
           <el-input
             v-model.trim="serverUrl"
             :placeholder="$t('cooperate.serverUrlPlaceholder')"
-            :disabled="connected"
+            :disabled="connected || connecting"
             @keydown.native.stop
           ></el-input>
         </el-form-item>
@@ -115,6 +115,7 @@
 </template>
 
 <script>
+import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import { mapMutations, mapState } from 'vuex'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
@@ -163,6 +164,21 @@ const defaultGuestName = userId => {
 
 const defaultServerUrl = () => {
   return getRuntimeConfig().collabUrl
+}
+
+const roomFromLocation = route => {
+  const fromRoute = route && route.query && route.query.room
+  if (fromRoute) return String(fromRoute).trim()
+  try {
+    const fromSearch = new URLSearchParams(window.location.search).get('room')
+    if (fromSearch) return String(fromSearch).trim()
+    const hash = String(window.location.hash || '')
+    const query = hash.indexOf('?') >= 0 ? hash.slice(hash.indexOf('?') + 1) : ''
+    const fromHash = new URLSearchParams(query).get('room')
+    return String(fromHash || '').trim()
+  } catch (e) {
+    return ''
+  }
 }
 
 export default {
@@ -236,7 +252,8 @@ export default {
         defaultGuestName(this.userId)
     localStorage.setItem(USER_NAME_KEY, this.userName)
     this.roomName =
-      this.$route.query.room || 'room-' + Math.random().toString(36).slice(2, 8)
+      roomFromLocation(this.$route) ||
+      'room-' + Math.random().toString(36).slice(2, 8)
     this.userColor =
       USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)]
     this.$bus.$on('showCooperate', this.open)
@@ -267,10 +284,11 @@ export default {
 
     tryAutoJoin() {
       if (!this.mindMap || this.connected || this.connecting) return
-      if (!this.$route.query.room) return
+      const room = roomFromLocation(this.$route)
+      if (!room) return
       if (this._autoJoinScheduled) return
       this._autoJoinScheduled = true
-      this.roomName = this.$route.query.room
+      this.roomName = room
       this.openSavedRoom({ silent: true })
     },
 
@@ -316,8 +334,11 @@ export default {
 
     join(options = {}) {
       const silent = !!options.silent
-      if (!this.validate() || this.connected) return
-      if (this.mindMap.cooperate && this.mindMap.cooperate.httpCollabMode) {
+      if (!this.validate() || this.connected || this.connecting) return
+      if (
+        this.httpCollab ||
+        (this.mindMap.cooperate && this.mindMap.cooperate.httpCollabMode)
+      ) {
         this.markHttpConnected()
         return
       }
@@ -467,7 +488,24 @@ export default {
         } catch (e) {
           // ignore
         }
+        if (this._presenceProvider && typeof this.provider.destroy === 'function') {
+          try {
+            this.provider.destroy()
+          } catch (e) {
+            // ignore
+          }
+        }
         this.provider = null
+      }
+      this._presenceProvider = false
+      this._presenceWs = false
+      if (this.presenceDoc) {
+        try {
+          this.presenceDoc.destroy()
+        } catch (e) {
+          // ignore
+        }
+        this.presenceDoc = null
       }
     },
 
@@ -544,6 +582,7 @@ export default {
 
     async syncHttpPresence() {
       if (!this.httpCollab || !this.connected || !this.roomName) return
+      if (this._presenceWs) return
       try {
         const data = await beatPresence(this.roomName, {
           id: this.userId,
@@ -649,6 +688,13 @@ export default {
       this.httpCollab = true
       this.clearReconnectNotice()
       this.setCooperateStatus('connected')
+      if (this.mindMap && this.mindMap.cooperate) {
+        this.mindMap.cooperate.setUserInfo({
+          id: this.userId,
+          name: this.userName,
+          color: this.userColor
+        })
+      }
       this.peerList = [
         {
           id: this.userId,
@@ -658,9 +704,39 @@ export default {
           isMe: true
         }
       ]
+      this.connectPresenceSocket()
       this.loadFiles()
       this.startSaveStatusPolling()
       this.syncHttpPresence()
+    },
+
+    connectPresenceSocket() {
+      if (!this.serverUrl || !this.roomName) return
+      this.unbindProvider()
+      const doc = new Y.Doc()
+      const provider = new WebsocketProvider(
+        this.serverUrl.replace(/\/$/, ''),
+        `${this.roomName}__presence`,
+        doc,
+        { connect: true, maxBackoffTime: 10000 }
+      )
+      this.presenceDoc = doc
+      this.provider = provider
+      this._presenceProvider = true
+      this._presenceWs = false
+      provider.awareness.setLocalStateField('user', {
+        userInfo: {
+          id: this.userId,
+          name: this.userName,
+          color: this.userColor
+        }
+      })
+      provider.awareness.on('change', this.updatePeers)
+      provider.on('status', ({ status }) => {
+        this._presenceWs = status === 'connected'
+        if (status === 'connected') this.updatePeers()
+      })
+      this.updatePeers()
     },
 
     enableHttpCollab(preview) {
@@ -676,12 +752,17 @@ export default {
         fetchLocate: uid => locateFileNode(roomKey, uid),
         patchNode: (uid, body) => patchFileNode(roomKey, uid, body),
         addNode: body => addFileNode(roomKey, body),
-        deleteNode: uid => deleteFileNode(roomKey, uid)
+        deleteNode: (uid, options) => deleteFileNode(roomKey, uid, options)
       })
     },
 
     async openSavedRoom(options = {}) {
       const silent = !!options.silent
+      if (this.connected) {
+        if (!silent) this.$message.success(this.$t('cooperate.openSuccess'))
+        return
+      }
+      if (this.connecting) return
       const roomKey = this.roomName
       const cooperate = this.mindMap && this.mindMap.cooperate
       if (!roomKey || !cooperate) {
@@ -689,6 +770,8 @@ export default {
         else this.join({ silent: true })
         return
       }
+      this.connecting = true
+      this.setCooperateStatus('connecting')
       cooperate.setExpectRemoteDoc(true)
       try {
         const preview = await getFilePreview(roomKey, 2)
@@ -732,6 +815,8 @@ export default {
           )
         }
       }
+      this.connecting = false
+      this.setCooperateStatus('disconnected')
       await this.$nextTick()
       this.deferJoin()
     },

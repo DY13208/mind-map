@@ -99,7 +99,7 @@ export function searchFile(roomKey, q, limit = 80) {
 export function addFileNode(roomKey, body) {
   return request(`/api/files/${encodeURIComponent(roomKey)}/nodes`, {
     method: 'POST',
-    body: JSON.stringify(body)
+    body: JSON.stringify({ ...(body || {}), confirm_sop_change: true })
   })
 }
 
@@ -108,7 +108,7 @@ export function patchFileNode(roomKey, uid, body) {
     `/api/files/${encodeURIComponent(roomKey)}/nodes/${encodeURIComponent(uid)}`,
     {
       method: 'PATCH',
-      body: JSON.stringify(body)
+      body: JSON.stringify({ ...(body || {}), confirm_sop_change: true })
     }
   )
 }
@@ -118,7 +118,10 @@ export function deleteFileNode(roomKey, uid, options = {}) {
     `/api/files/${encodeURIComponent(roomKey)}/nodes/${encodeURIComponent(uid)}`,
     {
       method: 'DELETE',
-      body: JSON.stringify({ keep_children: !!options.keepChildren })
+      body: JSON.stringify({
+        keep_children: !!options.keepChildren,
+        confirm_sop_change: true
+      })
     }
   )
 }

@@ -9,6 +9,7 @@ const {
   saveDoc,
   upsertRoom,
   persistHotSnapshot,
+  getLiveDoc,
   getLiveObject,
   sendJson,
   readBody,
@@ -241,15 +242,25 @@ async function handleApi(req, res) {
       return true
     }
     if (req.method === 'GET' && !nodeRef) {
+      const uids = String(url.searchParams.get('uids') || '')
+        .split(',')
+        .map(item => item.trim())
+        .filter(Boolean)
+      const liveDoc = getLiveDoc(roomKey)
+      if (liveDoc) {
+        const row = await getRoom(roomKey)
+        sendJson(res, 200, {
+          room_key: roomKey,
+          updated_at: row && row.updated_at,
+          nodes: mindDoc.nodesByUidsFromDoc(liveDoc, uids)
+        })
+        return true
+      }
       const loaded = await loadSnapshot(roomKey)
       if (!loaded) {
         sendJson(res, 404, { error: 'not found' })
         return true
       }
-      const uids = String(url.searchParams.get('uids') || '')
-        .split(',')
-        .map(item => item.trim())
-        .filter(Boolean)
       sendJson(res, 200, {
         room_key: roomKey,
         updated_at: loaded.row && loaded.row.updated_at,

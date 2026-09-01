@@ -267,6 +267,24 @@ function nodesByUids(obj, uids) {
     .filter(Boolean)
 }
 
+function nodesByUidsFromDoc(ydoc, uids) {
+  const ymap = ymapOf(ydoc)
+  const list = Array.isArray(uids) ? uids : []
+  return list
+    .slice(0, MAX_NODE_FETCH)
+    .map(uid => {
+      const cur = nodeJsonFromDoc(ymap, uid)
+      if (!cur) return null
+      return {
+        uid,
+        isRoot: !!cur.isRoot,
+        data: stripHeavyFields(clone(cur.data || {})),
+        children: cur.children || []
+      }
+    })
+    .filter(Boolean)
+}
+
 function locateNode(obj, ref) {
   const uid = resolveNode(obj, ref)
   if (!uid || !obj[uid]) return null
@@ -1363,6 +1381,7 @@ module.exports = {
   buildPreview,
   subtreeChildren,
   nodesByUids,
+  nodesByUidsFromDoc,
   locateNode,
   LARGE_MAP_AT,
   HTTP_COLLAB_AT,
