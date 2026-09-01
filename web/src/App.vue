@@ -115,6 +115,7 @@ export default {
         devBypassAvailable: false
       },
       authErrorCode: '',
+      authErrorIp: '',
       qrChallenge: null,
       qrPanel: null,
       qrRefreshing: false,
@@ -128,6 +129,9 @@ export default {
   },
   computed: {
     authErrorMessage() {
+      if (this.authErrorCode === 'wecom_ip_not_allowed' && this.authErrorIp) {
+        return `服务器出口 IP ${this.authErrorIp} 未加入企业微信应用可信 IP，请联系管理员处理（错误码 60020）。`
+      }
       return authErrors[this.authErrorCode] || ''
     }
   },
@@ -148,8 +152,15 @@ export default {
   created() {
     const url = new URL(window.location.href)
     this.authErrorCode = url.searchParams.get('auth_error') || ''
+    const authErrorIp = url.searchParams.get('auth_ip') || ''
+    this.authErrorIp =
+      this.authErrorCode === 'wecom_ip_not_allowed' &&
+      /^[0-9a-f:.]{3,45}$/i.test(authErrorIp)
+        ? authErrorIp
+        : ''
     if (this.authErrorCode) {
       url.searchParams.delete('auth_error')
+      url.searchParams.delete('auth_ip')
       window.history.replaceState(
         null,
         '',
