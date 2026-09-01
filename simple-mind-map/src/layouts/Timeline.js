@@ -334,6 +334,7 @@ class Timeline extends Base {
       item.generalizationNode.left = right + generalizationNodeMargin
       item.generalizationNode.top =
         top + (bottom - top - item.generalizationNode.height) / 2
+      this.layoutGeneralizationChildren(item.generalizationNode, 'h', false)
     })
   }
 

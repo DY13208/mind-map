@@ -141,6 +141,7 @@ export default {
     addToDo: 'Add toDo',
     removeToDo: 'Remove toDo',
     aiCreate: 'AI Continuation',
+    flowExpand: 'Complete flow/data',
     modifyNodeLink: 'Modify node link',
     linkToNode: 'Link to node',
     removeNodeLink: 'Remove node link'
@@ -357,6 +358,7 @@ export default {
     openFileTip:
       'Please export the currently edited file before opening it, Beware of content loss',
     ai: 'AI',
+    flowExpand: 'Complete flow',
     cooperate: 'Collab'
   },
   edit: {

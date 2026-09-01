@@ -67,7 +67,8 @@ class OrganizationStructure extends Base {
 
         // 如果存在概要，则和概要的高度取最大值
         let generalizationNodeWidth = cur._node.checkHasGeneralization()
-          ? cur._node._generalizationNodeWidth + this.getMarginY(layerIndex + 1)
+          ? (cur._node._generalizationSubtreeWidth ||
+              cur._node._generalizationNodeWidth) + this.getMarginY(layerIndex + 1)
           : 0
         cur._node.childrenAreaWidth2 = Math.max(
           cur._node.childrenAreaWidth,
@@ -311,6 +312,7 @@ class OrganizationStructure extends Base {
       item.generalizationNode.top = bottom + generalizationNodeMargin
       item.generalizationNode.left =
         left + (right - left - item.generalizationNode.width) / 2
+      this.layoutGeneralizationChildren(item.generalizationNode, 'v', false)
     })
   }
 

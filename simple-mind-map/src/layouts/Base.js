@@ -1,7 +1,7 @@
 import MindMapNode from '../core/render/node/MindMapNode'
 import { CONSTANTS, initRootNodePositionMap } from '../constants/constant'
 import Lru from '../utils/Lru'
-import { createUid } from '../utils/index'
+import { createUid, walk } from '../utils/index'
 
 //  布局基类
 class Base {
@@ -292,6 +292,9 @@ class Base {
         ) {
           if (newData) {
             gNode.nodeData.data = newData
+            if (Array.isArray(newData.children)) {
+              gNode.nodeData.children = newData.children
+            }
           }
           gNode.getSize()
           gNode.needLayout = true
@@ -376,6 +379,143 @@ class Base {
     return this.rootNodeCenterOffset
   }
 
+  getGeneralizationChildGrowDir() {
+    return this.mindMap.opt.layout ===
+      CONSTANTS.LAYOUT.ORGANIZATION_STRUCTURE
+      ? 'v'
+      : 'h'
+  }
+
+  // 为概要节点创建子树实例
+  createGeneralizationChildNodes(gNode) {
+    if (!gNode) return
+    gNode.children = []
+    const tree = gNode.nodeData
+    if (!tree.children) tree.children = []
+    if (gNode.getData('expand') === false || tree.children.length <= 0) {
+      gNode.childrenAreaHeight = 0
+      return
+    }
+    walk(
+      tree,
+      null,
+      (cur, parent, isRoot, layerIndex, index, ancestors) => {
+        if (isRoot) {
+          cur._node = gNode
+          return
+        }
+        this.createNode(
+          cur,
+          parent,
+          false,
+          gNode.layerIndex + layerIndex,
+          index,
+          ancestors
+        )
+      },
+      (cur, parent, isRoot, layerIndex) => {
+        if (isRoot || !cur._node) return
+        const len =
+          cur.data.expand === false ? 0 : cur._node.children.length
+        cur._node.childrenAreaHeight = len
+          ? cur._node.children.reduce((h, item) => {
+              return h + item.height
+            }, 0) +
+            (len + 1) * this.getMarginY(gNode.layerIndex + layerIndex + 1)
+          : 0
+      },
+      true,
+      0
+    )
+    const len = gNode.children.length
+    gNode.childrenAreaHeight = len
+      ? gNode.children.reduce((h, item) => {
+          return h + item.height
+        }, 0) +
+        (len + 1) * this.getMarginY(gNode.layerIndex + 1)
+      : 0
+    const stripNodeRef = list => {
+      ;(list || []).forEach(item => {
+        delete item._node
+        stripNodeRef(item.children)
+      })
+    }
+    stripNodeRef(tree.children)
+    delete tree._node
+  }
+
+  // 测量概要子树宽高
+  measureGeneralizationTree(node, dir = 'h') {
+    if (!node) return { width: 0, height: 0 }
+    if (
+      node.getData('expand') === false ||
+      !node.children ||
+      node.children.length <= 0
+    ) {
+      return { width: node.width, height: node.height }
+    }
+    const marginX = this.getMarginX(node.layerIndex + 1)
+    const marginY = this.getMarginY(node.layerIndex + 1)
+    if (dir === 'v') {
+      let stackW = 0
+      let maxH = 0
+      node.children.forEach(child => {
+        const size = this.measureGeneralizationTree(child, dir)
+        stackW += size.width
+        maxH = Math.max(maxH, size.height)
+      })
+      stackW += (node.children.length + 1) * marginY
+      return {
+        width: Math.max(node.width, stackW),
+        height: node.height + marginX + maxH
+      }
+    }
+    let extraW = 0
+    let extraH = 0
+    node.children.forEach(child => {
+      const size = this.measureGeneralizationTree(child, dir)
+      extraW = Math.max(extraW, size.width)
+      extraH += size.height
+    })
+    extraH += (node.children.length + 1) * marginY
+    return {
+      width: node.width + marginX + extraW,
+      height: Math.max(node.height, extraH)
+    }
+  }
+
+  // 定位概要节点的子树
+  layoutGeneralizationChildren(gNode, dir = 'h', isLeft = false) {
+    if (!gNode || gNode.getData('expand') === false) return
+    if (!gNode.children || gNode.children.length <= 0) return
+    const marginX = this.getMarginX(gNode.layerIndex + 1)
+    const marginY = this.getMarginY(gNode.layerIndex + 1)
+    if (dir === 'v') {
+      const areaW = gNode.children.reduce((w, item) => w + item.width, 0)
+      let left =
+        gNode.left + gNode.width / 2 - (areaW + (gNode.children.length + 1) * marginY) / 2
+      let totalLeft = left + marginY
+      gNode.children.forEach(cur => {
+        cur.left = totalLeft
+        cur.top = gNode.top + gNode.height + marginX
+        totalLeft += cur.width + marginY
+        this.layoutGeneralizationChildren(cur, dir, isLeft)
+      })
+      return
+    }
+    const areaH = gNode.childrenAreaHeight || gNode.height
+    let top = gNode.top + gNode.height / 2 - areaH / 2
+    let totalTop = top + marginY
+    gNode.children.forEach(cur => {
+      cur.left = isLeft
+        ? gNode.left - marginX - cur.width
+        : gNode.left + gNode.width + marginX
+      cur.top = totalTop
+      totalTop += cur.height + marginY
+      this.layoutGeneralizationChildren(cur, dir, isLeft)
+    })
+  }
+
   //  更新子节点属性
   updateChildren(children, prop, offset) {
     children.forEach(item => {
@@ -406,7 +546,8 @@ class Base {
     let totalGeneralizationNodeWidth = 0
     let loop = (node, width) => {
       if (withGeneralization && node.checkHasGeneralization()) {
-        totalGeneralizationNodeWidth += node._generalizationNodeWidth
+        totalGeneralizationNodeWidth +=
+          node._generalizationSubtreeWidth || node._generalizationNodeWidth
       }
       if (node.children.length) {
         width += node.width / 2
@@ -537,7 +678,9 @@ class Base {
   getNodeWidthWithGeneralization(node) {
     return Math.max(
       node.width,
-      node.checkHasGeneralization() ? node._generalizationNodeWidth : 0
+      node.checkHasGeneralization()
+        ? node._generalizationSubtreeWidth || node._generalizationNodeWidth
+        : 0
     )
   }
 
@@ -545,7 +688,9 @@ class Base {
   getNodeHeightWithGeneralization(node) {
     return Math.max(
       node.height,
-      node.checkHasGeneralization() ? node._generalizationNodeHeight : 0
+      node.checkHasGeneralization()
+        ? node._generalizationSubtreeHeight || node._generalizationNodeHeight
+        : 0
     )
   }
 
@@ -568,12 +713,14 @@ class Base {
           // 概要内容的宽度
           let generalizationWidth =
             child.checkHasGeneralization() && child.getData('expand')
-              ? child._generalizationNodeWidth + generalizationNodeMargin
+              ? (child._generalizationSubtreeWidth ||
+                  child._generalizationNodeWidth) + generalizationNodeMargin
               : 0
           // 概要内容的高度
           let generalizationHeight =
             child.checkHasGeneralization() && child.getData('expand')
-              ? child._generalizationNodeHeight + generalizationNodeMargin
+              ? (child._generalizationSubtreeHeight ||
+                  child._generalizationNodeHeight) + generalizationNodeMargin
               : 0
           if (left - (dir === 'h' ? generalizationWidth : 0) < _left) {
             _left = left - (dir === 'h' ? generalizationWidth : 0)
