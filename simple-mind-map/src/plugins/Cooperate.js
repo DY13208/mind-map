@@ -1544,6 +1544,7 @@ class Cooperate {
       throw err
     } finally {
       this.httpHydrating = false
+      this.flushPendingHttpRefresh()
     }
   }
 
@@ -1704,6 +1705,7 @@ class Cooperate {
       }
     } finally {
       this.httpHydrating = false
+      this.flushPendingHttpRefresh()
     }
     return root
   }
@@ -2282,7 +2284,22 @@ class Cooperate {
       ) {
         await new Promise(resolve => setTimeout(resolve, 40))
       }
-      await this.refreshVisibleFromHttp('', { force: true })
+      const refreshed = await this.refreshVisibleFromHttp('', { force: true })
+      if (refreshed && refreshed.deferred) {
+        // Keep version open so the next poll/presence event retries.
+        this.httpPendingRecoverVersion = Math.max(
+          this.httpPendingRecoverVersion || 0,
+          Number(action.version) || Number(targetVersion) || 0
+        )
+        return
+      }
+      if (refreshed && refreshed.skipped && !refreshed.applied) {
+        this.httpPendingRecoverVersion = Math.max(
+          this.httpPendingRecoverVersion || 0,
+          Number(action.version) || Number(targetVersion) || 0
+        )
+        return
+      }
       const applied = Number(action.version)
       if (Number.isFinite(applied) && applied > this.lastAppliedVersion) {
         this.lastAppliedVersion = applied
@@ -2305,30 +2322,37 @@ class Cooperate {
   }
 
   async refreshVisibleFromHttp(updatedAt, options = {}) {
-    if (!this.httpCollabMode || !this.httpFetchNodes) return
+    if (!this.httpCollabMode || !this.httpFetchNodes) {
+      return { applied: false, skipped: true }
+    }
     const force = !!options.force
     if (this.httpHydrating || this.isApplyingRemote || this.httpRefreshing) {
-      this.httpPendingRefreshAt = updatedAt || this.httpPendingRefreshAt
+      this.httpPendingRefreshAt = updatedAt || this.httpPendingRefreshAt || '1'
       this.httpPendingRefreshForce = force || this.httpPendingRefreshForce
-      return
+      return { applied: false, deferred: true }
     }
-    if (!force && updatedAt && sameHttpStamp(updatedAt, this.httpUpdatedAt)) return
-    const pendingUpdatedAt = updatedAt || this.httpUpdatedAt
-    if (!this.httpUpdatedAt) {
+    if (!force && updatedAt && sameHttpStamp(updatedAt, this.httpUpdatedAt)) {
+      return { applied: false, skipped: true }
+    }
+    const pendingUpdatedAt = updatedAt || this.httpUpdatedAt || ''
+    // force=true must always fetch. Previously an empty httpUpdatedAt caused a
+    // no-op return, then recover stamped lastAppliedVersion and blocked retries.
+    if (!force && !this.httpUpdatedAt) {
       this.httpUpdatedAt = pendingUpdatedAt
-      return
+      return { applied: false, skipped: true }
     }
     const renderer = this.mindMap.renderer
     const tree = renderer && renderer.renderTree
-    if (!tree) return
+    if (!tree) return { applied: false, skipped: true }
     const uids = this.collectVisibleUids()
-    if (!uids.length) return
+    if (!uids.length) return { applied: false, skipped: true }
     pruneRecentMap(this.recentHttpDeleted)
     pruneRecentMap(this.recentPushed, RECENT_PUSH_GRACE_MS)
     this.httpRefreshing = true
+    let applied = false
     try {
       const remoteNodes = await this.fetchHttpNodes(uids)
-      if (!remoteNodes.length) return
+      if (!remoteNodes.length) return { applied: false, skipped: true }
       const editing =
         renderer.textEdit &&
         typeof renderer.textEdit.isShowTextEdit === 'function' &&
@@ -2354,9 +2378,18 @@ class Cooperate {
             const note = next.note || ''
             const prev = this.lastPushed[item.uid]
             const fv = readFieldVersions(merged.data)
+            const localText = this.nodePlain(node)
+            const localNote = (node.getData && node.getData('note')) || ''
             const sameTextNote =
               prev && prev.text === text && (prev.note || '') === note
-            if (!sameTextNote || (merged.appliedKeys && merged.appliedKeys.length)) {
+            const localMatchesRemote =
+              localText === text && String(localNote || '') === String(note || '')
+            if (
+              force ||
+              !localMatchesRemote ||
+              !sameTextNote ||
+              (merged.appliedKeys && merged.appliedKeys.length)
+            ) {
               renderer.setNodeData(node, {
                 text: next.text,
                 note: next.note,
@@ -2455,7 +2488,9 @@ class Cooperate {
         if (changed) this.mindMap.render()
         // Only acknowledge a revision after every fetch and merge completed.
         // A transient request/render failure must remain retryable by polling.
-        this.httpUpdatedAt = pendingUpdatedAt
+        this.httpUpdatedAt =
+          pendingUpdatedAt || this.httpUpdatedAt || new Date().toISOString()
+        applied = true
       } finally {
         try {
           this.mindMap.command.recovery()
@@ -2482,6 +2517,19 @@ class Cooperate {
         })
       }
     }
+    return { applied, skipped: !applied }
+  }
+
+  flushPendingHttpRefresh() {
+    const queuedAt = this.httpPendingRefreshAt
+    const queuedForce = this.httpPendingRefreshForce
+    if (!queuedAt && !queuedForce) return
+    if (this.httpHydrating || this.httpRefreshing || this.isApplyingRemote) return
+    this.httpPendingRefreshAt = ''
+    this.httpPendingRefreshForce = false
+    this.refreshVisibleFromHttp(queuedAt || '', { force: queuedForce }).catch(
+      () => {}
+    )
   }
 
   async revealUid(uid) {
@@ -2518,6 +2566,7 @@ class Cooperate {
       }
     } finally {
       this.httpHydrating = false
+      this.flushPendingHttpRefresh()
     }
     target = renderer.findNodeByUid(uid)
     if (target) this.mindMap.execCommand('GO_TARGET_NODE', uid)

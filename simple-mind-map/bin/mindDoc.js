@@ -181,8 +181,23 @@ function objectToTreeLimited(obj, keepDepth = 2, options = {}) {
     Number(options.maxChildren) > 0
       ? Number(options.maxChildren)
       : MAX_PREVIEW_CHILDREN
+  const stubAtCut = options.stubAtCut === true
   const rootUid = findRootUid(obj)
   if (!rootUid || !obj[rootUid]) return null
+  const stubChild = childUid => {
+    const child = obj[childUid]
+    if (!child) return null
+    const kids = child.children || []
+    return {
+      data: {
+        ...stripHeavyFields(clone(child.data || {})),
+        uid: childUid,
+        expand: false,
+        childCount: kids.length
+      },
+      children: []
+    }
+  }
   const walk = (uid, depth) => {
     const cur = obj[uid]
     if (!cur) return null
@@ -195,6 +210,11 @@ function objectToTreeLimited(obj, keepDepth = 2, options = {}) {
     node.data.childCount = childUids.length
     if (depth >= keepDepth) {
       node.data.expand = false
+      if (stubAtCut) {
+        const shown = childUids.slice(0, maxChildren)
+        node.children = shown.map(stubChild).filter(Boolean)
+        if (childUids.length > shown.length) node.data.hasMore = true
+      }
       return node
     }
     const shown = childUids.slice(0, maxChildren)
@@ -214,12 +234,21 @@ function buildPreview(obj, options = {}) {
   const nodeCount = Object.keys(obj || {}).length
   const collapsed = nodeCount >= largeAt
   const clipped = nodeCount >= clipAt
+  // Depth-limit large/clipped maps instead of materializing the full tree.
+  // Medium collapsed maps keep one stub level under the cut for expand UX.
   let tree
-  if (clipped) {
-    tree = objectToTreeLimited(obj, keepDepth, { maxChildren: options.maxChildren })
+  if (clipped || options.forceClip) {
+    tree = objectToTreeLimited(obj, keepDepth, {
+      maxChildren: options.maxChildren,
+      stubAtCut: false
+    })
+  } else if (collapsed) {
+    tree = objectToTreeLimited(obj, keepDepth, {
+      maxChildren: options.maxChildren,
+      stubAtCut: true
+    })
   } else {
     tree = objectToTree(obj)
-    if (collapsed && tree) collapseDeepNodes(tree, keepDepth)
   }
   if (tree && tree.data) delete tree.data.imgMap
   const version = Number(options.version) || 0

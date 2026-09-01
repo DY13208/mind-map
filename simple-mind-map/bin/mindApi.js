@@ -12,6 +12,7 @@ const {
   upsertRoom,
   persistHotSnapshot,
   getLiveDoc,
+  getMemoryDoc,
   getLiveObject,
   rememberRoomNodes,
   sendJson,
@@ -159,10 +160,15 @@ async function applyCommittedLive(roomKey, command, committed) {
   if (nodes) rememberRoomNodes(roomKey, nodes)
   if (committed.duplicate) return committed
   if (command.type === 'map.update') return committed
-  const liveDoc = getLiveDoc(roomKey)
+  // Prefer the in-memory doc even when still empty (warmup race): otherwise the
+  // first HTTP mutation can land in PG while ensureDoc later hydrates a stale
+  // snapshot into live Y.Doc, and GET /nodes would keep serving old content.
+  const liveDoc = getMemoryDoc(roomKey)
   if (liveDoc) {
     const replace =
-      command.type === 'batch.apply' || command.type === 'map.replace'
+      command.type === 'batch.apply' ||
+      command.type === 'map.replace' ||
+      !liveDoc.getMap().size
     try {
       if (replace) {
         mindDoc.applyObjectToDoc(liveDoc, nodes || {}, { replace: true })
@@ -1150,17 +1156,8 @@ async function handleApi(req, res) {
         .split(',')
         .map(item => item.trim())
         .filter(Boolean)
-      const liveDoc = getLiveDoc(roomKey)
-      if (liveDoc) {
-        const row = await getRoom(roomKey)
-        sendJson(res, 200, {
-          room_key: roomKey,
-          version: Number((row && row.version) || 0),
-          updated_at: row && row.updated_at,
-          nodes: mindDoc.nodesByUidsFromDoc(liveDoc, uids)
-        })
-        return true
-      }
+      // Always read from authoritative snapshot/cache. Live Y.Doc can lag behind
+      // HTTP commits during ensureDoc warmup and would poison remote recover.
       const loaded = await loadSnapshot(roomKey)
       if (!loaded) {
         sendJson(res, 404, { error: 'not found' })
