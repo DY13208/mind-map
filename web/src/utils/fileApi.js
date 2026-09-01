@@ -1,5 +1,6 @@
 import { FetchTimeoutError, fetchWithTimeout } from './fetchWithTimeout'
 import { getRuntimeConfig } from './runtimeConfig'
+import { createOperationId } from 'simple-mind-map/src/utils/operationId'
 
 const DEFAULT_TIMEOUT_MS = 20000
 
@@ -188,11 +189,7 @@ export function getMapSnapshot(roomKey, extra = {}) {
 
 function operationHeaders(body = {}) {
   const operationId =
-    body.operationId ||
-    body.operation_id ||
-    (typeof crypto !== 'undefined' && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `op-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`)
+    body.operationId || body.operation_id || createOperationId()
   if (!body.operationId && !body.operation_id) {
     body.operationId = operationId
   }
