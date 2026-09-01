@@ -573,8 +573,9 @@ export default {
     },
 
     // 动态设置思维导图数据
-    async setData(data) {
-      this.handleShowLoading(this.$t('edit.importingTip'))
+    async setData(data, options = {}) {
+      const quiet = !!(options && options.quiet)
+      if (!quiet) this.handleShowLoading(this.$t('edit.importingTip'))
       await yieldToUi()
       const prepared = prepareImportedTree(data)
       data = prepared.data
@@ -584,7 +585,7 @@ export default {
           openPerformance: true,
           openRealtimeRenderOnNodeTextEdit: false
         })
-        this.$message.info(this.$t('edit.largeMapImportTip'))
+        if (!quiet) this.$message.info(this.$t('edit.largeMapImportTip'))
       }
       let rootNodeData = null
       if (data.root) {

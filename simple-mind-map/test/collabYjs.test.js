@@ -287,4 +287,26 @@ function testPgSnapshotHydratesCompactDoc() {
 testAddNodeOnDocDoesNotCloneWholeMap()
 testFullTreeTruncates()
 testPgSnapshotHydratesCompactDoc()
+
+function testPreviewKeepsCollapsedChildren() {
+  const obj = {
+    root: {
+      isRoot: true,
+      data: { uid: 'root', text: 'R', expand: true },
+      children: ['a']
+    },
+    a: { data: { uid: 'a', text: 'A', expand: true }, children: ['b'] },
+    b: { data: { uid: 'b', text: 'B', expand: true }, children: ['c'] },
+    c: { data: { uid: 'c', text: 'C', expand: true }, children: [] }
+  }
+  const preview = mindDoc.buildPreview(obj, { keepDepth: 1, largeAt: 3 })
+  assert.strictEqual(preview.collapsed, true)
+  assert.strictEqual(preview.node_count, 4)
+  assert.ok(preview.tree)
+  assert.notStrictEqual(preview.tree.data.expand, false)
+  assert.strictEqual(preview.tree.children[0].data.expand, false)
+  assert.strictEqual(preview.tree.children[0].children[0].data.text, 'B')
+}
+
+testPreviewKeepsCollapsedChildren()
 console.log('collabYjs tests passed')

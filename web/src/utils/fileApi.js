@@ -40,3 +40,8 @@ export function deleteFile(roomKey) {
 export function getSaveStatus(roomKey) {
   return request(`/api/files/${encodeURIComponent(roomKey)}/save-status`)
 }
+
+export function getFilePreview(roomKey, depth = 2) {
+  const query = Number(depth) > 0 ? `?depth=${Number(depth)}` : ''
+  return request(`/api/files/${encodeURIComponent(roomKey)}/preview${query}`)
+}

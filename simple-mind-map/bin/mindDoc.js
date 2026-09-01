@@ -131,6 +131,32 @@ function treeToObject(tree) {
   return res
 }
 
+function collapseDeepNodes(root, keepDepth = 2) {
+  const stack = root ? [{ node: root, depth: 0 }] : []
+  while (stack.length) {
+    const { node, depth } = stack.pop()
+    if (!node || !node.data) continue
+    const children = node.children || []
+    if (depth >= keepDepth && children.length > 0) {
+      node.data.expand = false
+    }
+    for (let i = 0; i < children.length; i++) {
+      stack.push({ node: children[i], depth: depth + 1 })
+    }
+  }
+}
+
+function buildPreview(obj, options = {}) {
+  const keepDepth = Number(options.keepDepth) > 0 ? Number(options.keepDepth) : 2
+  const largeAt = Number(options.largeAt) > 0 ? Number(options.largeAt) : 200
+  const stats = {}
+  const tree = objectToTree(obj, { stats })
+  const nodeCount = (stats && stats.node_count) || Object.keys(obj || {}).length
+  const collapsed = nodeCount >= largeAt
+  if (tree && collapsed) collapseDeepNodes(tree, keepDepth)
+  return { tree, node_count: nodeCount, collapsed }
+}
+
 function objectToTree(obj, options = {}) {
   const maxNodes = Number(options.maxNodes) > 0 ? Number(options.maxNodes) : 0
   const stats = options.stats || {}
@@ -1053,6 +1079,8 @@ module.exports = {
   findRootUid,
   treeToObject,
   objectToTree,
+  collapseDeepNodes,
+  buildPreview,
   applyObjectToDoc,
   flattenNodes,
   toOutline,
