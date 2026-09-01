@@ -372,6 +372,8 @@ export default {
     autoOpenNodeRichTextTip:
       'Phát hiện nội dung văn bản phong phú nhập vào, tự động bật chế độ văn bản phong phú',
     importingTip: 'Đang nhập, vui lòng đợi…',
+    importPersistFailed:
+      'Không lưu được bản nhập vào phòng này. Đã khôi phục bản trên máy chủ.',
     largeMapImportTip:
       'Sơ đồ quá lớn nên đã thu gọn nhánh sâu và bật chế độ hiệu suất. Bấm mở rộng khi cần.',
     localStorageExceededTip:

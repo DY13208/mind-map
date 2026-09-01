@@ -201,10 +201,12 @@ class Cooperate {
     this.httpPatchNode = null
     this.httpAddNode = null
     this.httpDeleteNode = null
+    this.httpReplaceTree = null
     this.httpUndoOperation = null
     this.httpFetchOperations = null
     this.httpFetchVersion = null
     this.httpUpdatedAt = ''
+    this.httpReplacing = false
     this.lastAppliedVersion = 0
     this.localUndoStack = []
     this.dirtySubtrees = new Map()
@@ -820,7 +822,8 @@ class Cooperate {
       this.isApplyingRemote ||
       this.previewApplied ||
       this.hydratingCurrentData ||
-      this.httpHydrating
+      this.httpHydrating ||
+      this.httpReplacing
     ) {
       return
     }
@@ -854,6 +857,7 @@ class Cooperate {
       this.previewApplied ||
       this.hydratingCurrentData ||
       this.httpHydrating ||
+      this.httpReplacing ||
       (this.mindMap.renderer && this.mindMap.renderer._lazyCommandPending)
     ) {
       if (this.httpCollabMode && historyCmd) this.httpHistorySyncing = false
@@ -1006,6 +1010,7 @@ class Cooperate {
     if (config.patchNode) this.httpPatchNode = config.patchNode
     if (config.addNode) this.httpAddNode = config.addNode
     if (config.deleteNode) this.httpDeleteNode = config.deleteNode
+    if (config.replaceTree) this.httpReplaceTree = config.replaceTree
     if (config.undoOperation) this.httpUndoOperation = config.undoOperation
     if (config.fetchOperations) this.httpFetchOperations = config.fetchOperations
     if (config.fetchVersion) this.httpFetchVersion = config.fetchVersion
@@ -1039,10 +1044,12 @@ class Cooperate {
     this.httpPatchNode = null
     this.httpAddNode = null
     this.httpDeleteNode = null
+    this.httpReplaceTree = null
     this.httpUndoOperation = null
     this.httpFetchOperations = null
     this.httpFetchVersion = null
     this.httpUpdatedAt = ''
+    this.httpReplacing = false
     this.lastAppliedVersion = 0
     this.localUndoStack = []
     this.dirtySubtrees = new Map()
@@ -1063,6 +1070,67 @@ class Cooperate {
     clearTimeout(this.httpStructureTimer)
     this.httpStructureTimer = null
     this.httpInsertRescan = false
+  }
+
+  beginHttpReplace() {
+    this.httpReplacing = true
+    clearTimeout(this.httpTextTimer)
+    this.httpTextTimer = null
+    clearTimeout(this.httpStructureTimer)
+    this.httpStructureTimer = null
+  }
+
+  endHttpReplace() {
+    this.httpReplacing = false
+  }
+
+  afterHttpReplace(result) {
+    this.lastPushed = {}
+    this.recentPushed = new Map()
+    this.recentHttpDeleted = new Map()
+    this.dirtySubtrees = new Map()
+    this.pendingHttpDeletes = []
+    this.hydrateFailedUids = new Set()
+    const tree =
+      (this.mindMap.renderer && this.mindMap.renderer.renderTree) || null
+    if (tree) this.markTreeUids(tree)
+    this.hydratedUids = this.collectLoadedUids()
+    if (result && result.updated_at) this.httpUpdatedAt = result.updated_at
+    if (result && result.version != null) {
+      this.acknowledgeLocalVersion(result.version, {
+        duplicate: true,
+        operationId: result.operationId || result.operation_id
+      })
+      this.stampLoadedSubtreeVersions(this.lastAppliedVersion)
+    }
+  }
+
+  async persistHttpReplace(fullData) {
+    if (!this.httpReplaceTree) {
+      throw new Error('replaceTree not configured')
+    }
+    const tree = (fullData && fullData.root) || fullData
+    const result = await this.httpReplaceTree(tree)
+    this.afterHttpReplace(result)
+    return result
+  }
+
+  async restoreHttpTree() {
+    if (!this.httpFetchExportTree) return false
+    const exported = await this.httpFetchExportTree()
+    const tree = exported && exported.tree
+    if (!tree) return false
+    this.isSetData = true
+    try {
+      this.mindMap.setFullData({
+        ...exported,
+        root: tree
+      })
+      this.afterHttpReplace(exported)
+    } finally {
+      this.isSetData = false
+    }
+    return true
   }
 
   mergeHttpChildren(data, incoming) {
@@ -1575,7 +1643,7 @@ class Cooperate {
   }
 
   flushHttpText() {
-    if (!this.httpPatchNode) return
+    if (this.httpReplacing || !this.httpPatchNode) return
     const nodes =
       (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
     nodes.forEach(node => {
@@ -1618,7 +1686,7 @@ class Cooperate {
   }
 
   async flushHttpInsert() {
-    if (!this.httpAddNode) return
+    if (this.httpReplacing || !this.httpAddNode) return
     if (this.httpInsertPromise) {
       this.httpInsertRescan = true
       return this.httpInsertPromise

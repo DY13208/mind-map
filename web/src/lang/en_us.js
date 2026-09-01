@@ -376,6 +376,8 @@ export default {
     autoOpenNodeRichTextTip:
       'Detected imported rich text content, automatically enabled rich text mode',
     importingTip: 'Importing, please wait…',
+    importPersistFailed:
+      'Import could not be saved to this room. The server copy was restored.',
     largeMapImportTip:
       'This map is large, so deep branches were collapsed and performance mode was turned on. Expand nodes as needed.',
     localStorageExceededTip:

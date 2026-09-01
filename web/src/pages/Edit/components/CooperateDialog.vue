@@ -165,7 +165,8 @@ import {
   undoMapOperation,
   addFileNode,
   patchFileNode,
-  deleteFileNode
+  deleteFileNode,
+  replaceFileTree
 } from '@/utils/fileApi'
 
 const USER_NAME_KEY = 'COOPERATE_USER_NAME'
@@ -921,7 +922,12 @@ export default {
         addNode: body =>
           this.notifyHttpMutation(addFileNode(roomKey, body)),
         deleteNode: (uid, options) =>
-          this.notifyHttpMutation(deleteFileNode(roomKey, uid, options))
+          this.notifyHttpMutation(deleteFileNode(roomKey, uid, options)),
+        replaceTree: tree =>
+          Promise.resolve(replaceFileTree(roomKey, tree)).then(result => {
+            this.publishHttpChange(result || {})
+            return result
+          })
       })
     },
 

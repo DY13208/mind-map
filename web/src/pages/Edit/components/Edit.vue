@@ -599,18 +599,49 @@ export default {
           isShowExpandNum: true
         })
       }
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      const persistReplace =
+        !(options && options.fromSaved) &&
+        cooperate &&
+        cooperate.httpCollabMode &&
+        typeof cooperate.persistHttpReplace === 'function' &&
+        typeof cooperate.httpReplaceTree === 'function'
+      if (persistReplace) cooperate.beginHttpReplace()
       let rootNodeData = null
-      if (data.root) {
-        this.mindMap.setFullData(data)
-        rootNodeData = data.root
-      } else {
-        this.mindMap.setData(data)
-        rootNodeData = data
+      try {
+        if (data.root) {
+          this.mindMap.setFullData(data)
+          rootNodeData = data.root
+        } else {
+          this.mindMap.setData(data)
+          rootNodeData = data
+        }
+        this.mindMap.view.reset()
+        if (persistReplace) {
+          await cooperate.persistHttpReplace(this.mindMap.getData(true))
+        } else if (!(options && options.fromSaved)) {
+          this.manualSave()
+        }
+      } catch (err) {
+        if (persistReplace) {
+          try {
+            if (typeof cooperate.restoreHttpTree === 'function') {
+              await cooperate.restoreHttpTree()
+            }
+          } catch (restoreErr) {
+            console.error('[mind-map] restore after import failed', restoreErr)
+          }
+          this.$message.error(
+            (err && err.message) || this.$t('edit.importPersistFailed')
+          )
+        } else {
+          throw err
+        }
+      } finally {
+        if (persistReplace) cooperate.endHttpReplace()
       }
-      this.mindMap.view.reset()
-      if (!(options && options.fromSaved)) this.manualSave()
       // 如果导入的是富文本内容，那么自动开启富文本模式
-      if (rootNodeData.data.richText && !this.openNodeRichText) {
+      if (rootNodeData && rootNodeData.data && rootNodeData.data.richText && !this.openNodeRichText) {
         this.$bus.$emit('toggleOpenNodeRichText', true)
         this.$notify.info({
           title: this.$t('edit.tip'),

@@ -365,6 +365,7 @@ export default {
     dragTip: '在此釋放以匯入檔案',
     autoOpenNodeRichTextTip: '檢測到導入了富文本內容，已自動開啓富文本模式',
     importingTip: '正在匯入，請稍候…',
+    importPersistFailed: '匯入未能儲存到目前房間，已恢復為伺服器上的心智圖',
     largeMapImportTip:
       '節點較多，已收起深層分支並開啟效能模式，避免卡死。需要時再點節點上的展開。',
     localStorageExceededTip:
