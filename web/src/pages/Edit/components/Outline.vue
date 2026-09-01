@@ -168,7 +168,10 @@ export default {
         ? nodeRichTextToTextWithWrap(source.data.text)
         : source.data.text
       text = htmlEscape(text).replace(/\n/g, '<br>')
-      const hasChildren = Boolean(source.children && source.children.length)
+      const hasChildren = Boolean(
+        (source.children && source.children.length) ||
+          (source.data && source.data.childCount > 0)
+      )
       const outlineData = {
         data: source.data,
         root: isRoot,
@@ -183,12 +186,23 @@ export default {
     },
 
     // Element Tree invokes this only when a branch is expanded for the first time
-    loadNode(node, resolve) {
+    async loadNode(node, resolve) {
       if (node.level === 0) {
         resolve(this.data)
         return
       }
-      const source = this._outlineSourceByData.get(node.data)
+      let source = this._outlineSourceByData.get(node.data)
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (
+        cooperate &&
+        cooperate.httpCollabMode &&
+        source &&
+        (!source.children || !source.children.length) &&
+        source.data &&
+        source.data.childCount > 0
+      ) {
+        source = (await cooperate.hydrateNodeData(source)) || source
+      }
       if (!source || !source.children || source.children.length === 0) {
         resolve([])
         return

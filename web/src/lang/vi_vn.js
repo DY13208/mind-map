@@ -596,6 +596,7 @@ export default {
     openingFile: 'Đang mở tệp…',
     openSuccess: 'Đã mở tệp',
     openFailed: 'Không tải được tệp đã lưu',
+    largeMapMode: 'Chế độ sơ đồ lớn (tải theo nhu cầu, 10.000+ nút)',
     fileDeleted: 'Đã xóa',
     renamed: 'Đã đổi tên'
   }

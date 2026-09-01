@@ -75,6 +75,7 @@
 <script>
 import { mapState } from 'vuex'
 import { isUndef, getTextFromHtml } from 'simple-mind-map/src/utils/index'
+import { searchFile } from '@/utils/fileApi'
 
 // 搜索替换
 export default {
@@ -189,7 +190,49 @@ export default {
 
     onSearchNext() {
       this.showSearchResultList = true
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (cooperate && cooperate.httpCollabMode && cooperate.httpRoomKey) {
+        this.searchLargeMap(cooperate)
+        return
+      }
       this.mindMap.search.search(this.searchText)
+    },
+
+    async searchLargeMap(cooperate) {
+      if (isUndef(this.searchText)) {
+        this.searchResultList = []
+        this.total = 0
+        this.showSearchInfo = false
+        return
+      }
+      try {
+        const data = await searchFile(cooperate.httpRoomKey, this.searchText)
+        const matches = data.matches || []
+        this.total = matches.length
+        this.currentIndex = matches.length ? 1 : 0
+        this.showSearchInfo = true
+        const needle = this.searchText.trim()
+        this.searchResultList = matches.map(item => {
+          const name = item.text || ''
+          const text = needle
+            ? name.replace(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), a => {
+                return `<span class="match">${a}</span>`
+              })
+            : name
+          return {
+            data: item,
+            id: item.uid,
+            text,
+            name,
+            uid: item.uid
+          }
+        })
+        if (matches[0]) await cooperate.revealUid(matches[0].uid)
+      } catch (err) {
+        this.searchResultList = []
+        this.total = 0
+        this.showSearchInfo = false
+      }
     },
 
     replace() {
@@ -237,6 +280,13 @@ export default {
     },
 
     onSearchResultItemClick(index) {
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      const item = this.searchResultList[index]
+      if (cooperate && cooperate.httpCollabMode && item && item.uid) {
+        this.currentIndex = index + 1
+        cooperate.revealUid(item.uid)
+        return
+      }
       this.mindMap.search.jump(index)
     }
   }

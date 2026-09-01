@@ -146,15 +146,145 @@ function collapseDeepNodes(root, keepDepth = 2) {
   }
 }
 
+const LARGE_MAP_AT = 200
+const HTTP_COLLAB_AT = 200
+const MAX_PREVIEW_CHILDREN = 120
+const MAX_SUBTREE_CHILDREN = 200
+const MAX_SEARCH_HITS = 80
+const MAX_NODE_FETCH = 200
+
+function stripHeavyFields(data) {
+  if (!data || typeof data !== 'object') return data || {}
+  const next = { ...data }
+  delete next.imgMap
+  return next
+}
+
+function stubChild(obj, uid) {
+  const cur = obj[uid]
+  if (!cur) return null
+  const kids = cur.children || []
+  return {
+    data: {
+      ...stripHeavyFields(clone(cur.data || {})),
+      uid,
+      expand: false,
+      childCount: kids.length
+    },
+    children: []
+  }
+}
+
+function objectToTreeLimited(obj, keepDepth = 2, options = {}) {
+  const maxChildren =
+    Number(options.maxChildren) > 0
+      ? Number(options.maxChildren)
+      : MAX_PREVIEW_CHILDREN
+  const rootUid = findRootUid(obj)
+  if (!rootUid || !obj[rootUid]) return null
+  const walk = (uid, depth) => {
+    const cur = obj[uid]
+    if (!cur) return null
+    const childUids = cur.children || []
+    const node = {
+      data: stripHeavyFields(clone(cur.data || {})),
+      children: []
+    }
+    node.data.uid = uid
+    node.data.childCount = childUids.length
+    if (depth >= keepDepth) {
+      node.data.expand = false
+      return node
+    }
+    const shown = childUids.slice(0, maxChildren)
+    node.children = shown
+      .map(childUid => walk(childUid, depth + 1))
+      .filter(Boolean)
+    if (childUids.length > shown.length) node.data.hasMore = true
+    return node
+  }
+  return walk(rootUid, 0)
+}
+
 function buildPreview(obj, options = {}) {
   const keepDepth = Number(options.keepDepth) > 0 ? Number(options.keepDepth) : 2
-  const largeAt = Number(options.largeAt) > 0 ? Number(options.largeAt) : 200
-  const stats = {}
-  const tree = objectToTree(obj, { stats })
-  const nodeCount = (stats && stats.node_count) || Object.keys(obj || {}).length
+  const largeAt = Number(options.largeAt) > 0 ? Number(options.largeAt) : LARGE_MAP_AT
+  const nodeCount = Object.keys(obj || {}).length
   const collapsed = nodeCount >= largeAt
-  if (tree && collapsed) collapseDeepNodes(tree, keepDepth)
-  return { tree, node_count: nodeCount, collapsed }
+  const tree = collapsed
+    ? objectToTreeLimited(obj, keepDepth, { maxChildren: options.maxChildren })
+    : objectToTree(obj)
+  if (tree && tree.data) delete tree.data.imgMap
+  return {
+    tree,
+    node_count: nodeCount,
+    collapsed,
+    http_collab: nodeCount >= HTTP_COLLAB_AT
+  }
+}
+
+function subtreeChildren(obj, uid, options = {}) {
+  const cur = obj[uid]
+  if (!cur) return null
+  const childUids = cur.children || []
+  const offset = Math.max(0, Number(options.offset) || 0)
+  const limit = Math.min(
+    500,
+    Math.max(1, Number(options.limit) || MAX_SUBTREE_CHILDREN)
+  )
+  const slice = childUids.slice(offset, offset + limit)
+  return {
+    uid,
+    total: childUids.length,
+    offset,
+    has_more: offset + slice.length < childUids.length,
+    children: slice.map(id => stubChild(obj, id)).filter(Boolean)
+  }
+}
+
+function nodesByUids(obj, uids) {
+  const list = Array.isArray(uids) ? uids : []
+  return list
+    .slice(0, MAX_NODE_FETCH)
+    .map(uid => {
+      const cur = obj[uid]
+      if (!cur) return null
+      return {
+        uid,
+        isRoot: !!cur.isRoot,
+        data: stripHeavyFields(clone(cur.data || {})),
+        children: cur.children || []
+      }
+    })
+    .filter(Boolean)
+}
+
+function locateNode(obj, ref) {
+  const uid = resolveNode(obj, ref)
+  if (!uid || !obj[uid]) return null
+  const parentOf = buildParentMap(obj)
+  const ancestors = []
+  let current = uid
+  const seen = new Set()
+  while (current && !seen.has(current)) {
+    seen.add(current)
+    ancestors.unshift(current)
+    if (obj[current] && obj[current].isRoot) break
+    current = parentOf[current]
+  }
+  const nodes = {}
+  ancestors.forEach(id => {
+    const stub = stubChild(obj, id)
+    if (!stub) return
+    if (obj[id] && obj[id].isRoot) stub.data.expand = true
+    nodes[id] = stub
+  })
+  return {
+    uid,
+    ancestors,
+    path: nodePath(obj, uid, parentOf),
+    nodes
+  }
 }
 
 function objectToTree(obj, options = {}) {
@@ -465,14 +595,17 @@ function collectDescendantsInDoc(ymap, uid) {
   return out
 }
 
-function addNodeOnDoc(ydoc, { parent, text, note } = {}) {
+function addNodeOnDoc(ydoc, { parent, text, note, uid: clientUid } = {}) {
   const ymap = ymapOf(ydoc)
   const parentUid = resolveNodeInDoc(ydoc, parent)
   if (!parentUid || !ymap.has(parentUid)) {
     throw new Error('找不到父节点，请先 get_map 查看 uid 或路径')
   }
   const parentJson = nodeJsonFromDoc(ymap, parentUid)
-  const uid = createUid()
+  const uid = String(clientUid || '').trim() || createUid()
+  if (ymap.has(uid)) {
+    throw new Error('节点已存在')
+  }
   const parentData = (parentJson && parentJson.data) || {}
   const data = {
     uid,
@@ -544,16 +677,36 @@ function deleteNodeOnDoc(ydoc, ref) {
   return { uid, removed }
 }
 
-function searchNodes(obj, query) {
+function searchNodes(obj, query, options = {}) {
   const q = stripHtml(query).toLowerCase()
   if (!q) return []
-  return flattenNodes(obj).filter(item => {
-    return (
-      item.text.toLowerCase().includes(q) ||
-      item.note.toLowerCase().includes(q) ||
-      item.path.toLowerCase().includes(q)
-    )
-  })
+  const limit =
+    Number(options.limit) > 0 ? Number(options.limit) : MAX_SEARCH_HITS
+  const parentOf = buildParentMap(obj)
+  const matches = []
+  const uids = Object.keys(obj || {})
+  for (let i = 0; i < uids.length; i++) {
+    const uid = uids[i]
+    const text = stripHtml(obj[uid].data && obj[uid].data.text)
+    const note = obj[uid].data && obj[uid].data.note ? String(obj[uid].data.note) : ''
+    if (
+      !text.toLowerCase().includes(q) &&
+      !note.toLowerCase().includes(q)
+    ) {
+      continue
+    }
+    matches.push({
+      uid,
+      text,
+      note,
+      isRoot: !!obj[uid].isRoot,
+      parent_uid: parentOf[uid] || null,
+      children: obj[uid].children || [],
+      path: nodePath(obj, uid, parentOf)
+    })
+    if (limit && matches.length >= limit) break
+  }
+  return matches
 }
 
 function baseLabel(text) {
@@ -1081,6 +1234,11 @@ module.exports = {
   objectToTree,
   collapseDeepNodes,
   buildPreview,
+  subtreeChildren,
+  nodesByUids,
+  locateNode,
+  LARGE_MAP_AT,
+  HTTP_COLLAB_AT,
   applyObjectToDoc,
   flattenNodes,
   toOutline,

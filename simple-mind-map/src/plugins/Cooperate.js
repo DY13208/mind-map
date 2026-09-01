@@ -5,6 +5,7 @@ import {
   simpleDeepClone,
   getType,
   isUndef,
+  getTextFromHtml,
   transformTreeDataToObject,
   transformObjectToTreeData,
   removeFromParentNodeData
@@ -89,6 +90,21 @@ class Cooperate {
     this.recentDeleted = new Map()
     this.expectRemoteDoc = false
     this.previewApplied = false
+    this.hydratingCurrentData = false
+    this.httpCollabMode = false
+    this.httpRoomKey = ''
+    this.httpFetchSubtree = null
+    this.httpFetchNodes = null
+    this.httpFetchLocate = null
+    this.httpPatchNode = null
+    this.httpAddNode = null
+    this.httpDeleteNode = null
+    this.httpUpdatedAt = ''
+    this.hydratedUids = new Set()
+    this.lastPushed = {}
+    this.pendingHttpDeletes = []
+    this.httpTextTimer = null
+    this.httpHydrating = false
     this.localOrigin = { source: 'simple-mind-map-cooperate' }
     // 绑定事件
     this.bindEvent()
@@ -192,18 +208,22 @@ class Cooperate {
     this.ymap.observeDeep(this.onObserve)
     const remoteSize = [...this.ymap.keys()].length
     if (remoteSize > 0) {
-      const data = this.ymap.toJSON()
-      this.currentData = data
       this.enableLargeMapMode(remoteSize)
-      if (!this.previewApplied) {
-        const res = transformObjectToTreeData(data)
-        if (res) {
-          if (remoteSize >= 200) collapseDeepNodes(res, 2)
-          this.applyRemoteTree(res)
+      if (this.previewApplied || remoteSize >= 200) {
+        this.suppressLocalUntil = Date.now() + (remoteSize >= 200 ? 4000 : 250)
+        if (!this.previewApplied) {
+          const res = transformObjectToTreeData(this.ymapToShallowJSON())
+          if (res) {
+            collapseDeepNodes(res, 2)
+            this.applyRemoteTree(res)
+          }
         }
+        if (remoteSize < 400) this.scheduleCurrentDataHydrate()
       } else {
-        this.suppressLocalUntil =
-          Date.now() + (remoteSize >= 200 ? 2000 : 250)
+        const data = this.ymap.toJSON()
+        this.currentData = data
+        const res = transformObjectToTreeData(data)
+        if (res) this.applyRemoteTree(res)
       }
       this.previewApplied = false
       this.expectRemoteDoc = false
@@ -218,6 +238,80 @@ class Cooperate {
     if (this.pendingInitData) {
       this.initData(this.pendingInitData, { replace: true })
     }
+  }
+
+  ymapToShallowJSON() {
+    const data = {}
+    this.ymap.forEach((value, uid) => {
+      if (!value || typeof value.toJSON !== 'function') return
+      const json = value.toJSON()
+      data[uid] = {
+        isRoot: !!json.isRoot,
+        data: json.data || {},
+        children: json.children || []
+      }
+    })
+    return data
+  }
+
+  scheduleCurrentDataHydrate() {
+    if (!this.ymap) return
+    this.hydratingCurrentData = true
+    const keys = Array.from(this.ymap.keys())
+    const next = {}
+    let index = 0
+    const step = () => {
+      if (!this.ymap) {
+        this.hydratingCurrentData = false
+        return
+      }
+      const end = Math.min(index + 250, keys.length)
+      for (; index < end; index++) {
+        const uid = keys[index]
+        const value = this.ymap.get(uid)
+        next[uid] =
+          value && typeof value.toJSON === 'function' ? value.toJSON() : value
+      }
+      if (index < keys.length) {
+        setTimeout(step, 0)
+        return
+      }
+      this.currentData = next
+      this.hydratingCurrentData = false
+    }
+    step()
+  }
+
+  hydrateLazyChildren(node) {
+    if (this.httpCollabMode) return this.hydrateFromHttp(node)
+    if (!this.ymap || !node) return
+    const uid = node.getData && node.getData('uid')
+    if (!uid) return
+    const nodeMap = this.ymap.get(uid)
+    if (!nodeMap || typeof nodeMap.get !== 'function') return
+    const children = nodeMap.get('children')
+    const childUids =
+      children && typeof children.toArray === 'function' ? children.toArray() : []
+    const data = node.nodeData
+    if (!data) return
+    if (!data.children) data.children = []
+    const have = new Set(
+      data.children.map(child => child && child.data && child.data.uid)
+    )
+    childUids.forEach(childUid => {
+      if (have.has(childUid)) return
+      const childMap = this.ymap.get(childUid)
+      if (!childMap || typeof childMap.toJSON !== 'function') return
+      const json = childMap.toJSON()
+      data.children.push({
+        data: {
+          ...(json.data || {}),
+          uid: childUid,
+          expand: false
+        },
+        children: []
+      })
+    })
   }
 
   // 断开协同连接
@@ -277,6 +371,22 @@ class Cooperate {
     this.mindMap.on('set_data', this.onSetData)
     this.onAfterExecCommand = this.onAfterExecCommand.bind(this)
     this.mindMap.on('afterExecCommand', this.onAfterExecCommand)
+    this.onBeforeExecCommand = this.onBeforeExecCommand.bind(this)
+    this.mindMap.on('beforeExecCommand', this.onBeforeExecCommand)
+    const renderer = this.mindMap.renderer
+    if (renderer && typeof renderer.setNodeExpand === 'function') {
+      this._origSetNodeExpand = renderer.setNodeExpand.bind(renderer)
+      renderer.setNodeExpand = (node, expand) => {
+        if (!expand) return this._origSetNodeExpand(node, expand)
+        const hydrated = this.hydrateLazyChildren(node)
+        if (hydrated && typeof hydrated.then === 'function') {
+          return hydrated
+            .then(() => this._origSetNodeExpand(node, expand))
+            .catch(() => this._origSetNodeExpand(node, expand))
+        }
+        return this._origSetNodeExpand(node, expand)
+      }
+    }
   }
 
   // 解绑事件
@@ -298,6 +408,15 @@ class Cooperate {
     this.mindMap.off('before_set_data', this.onBeforeSetData)
     this.mindMap.off('set_data', this.onSetData)
     this.mindMap.off('afterExecCommand', this.onAfterExecCommand)
+    if (this.onBeforeExecCommand) {
+      this.mindMap.off('beforeExecCommand', this.onBeforeExecCommand)
+    }
+    clearTimeout(this.httpTextTimer)
+    const renderer = this.mindMap.renderer
+    if (renderer && this._origSetNodeExpand) {
+      renderer.setNodeExpand = this._origSetNodeExpand
+      this._origSetNodeExpand = null
+    }
   }
 
   // 数据同步时的处理，更新当前思维导图
@@ -358,6 +477,10 @@ class Cooperate {
     }
     if (structure && deleted.length === 1 && added.length === 0) {
       if (this.applyRemoteRemove(deleted[0])) return
+    }
+    if ((this.ymap.size || 0) >= 200) {
+      if (uids.length) this.applyRemoteNodePatch(uids.slice(0, 20))
+      return
     }
     const data = this.ymap.toJSON()
     this.currentData = data
@@ -564,7 +687,19 @@ class Cooperate {
 
   // 当前思维导图改变后的处理，触发同步
   onDataChange(data) {
-    if (this.isSetData || this.isApplyingRemote || this.previewApplied) return
+    if (
+      this.isSetData ||
+      this.isApplyingRemote ||
+      this.previewApplied ||
+      this.hydratingCurrentData ||
+      this.httpHydrating
+    ) {
+      return
+    }
+    if (this.httpCollabMode) {
+      this.scheduleHttpTextSync()
+      return
+    }
     if (Date.now() < this.suppressLocalUntil) return
     if (!this.ymap) {
       this.pendingInitData = data
@@ -579,7 +714,19 @@ class Cooperate {
   }
 
   onAfterExecCommand(name) {
-    if (this.isSetData || this.isApplyingRemote || this.previewApplied) return
+    if (
+      this.isSetData ||
+      this.isApplyingRemote ||
+      this.previewApplied ||
+      this.hydratingCurrentData ||
+      this.httpHydrating
+    ) {
+      return
+    }
+    if (this.httpCollabMode) {
+      this.onHttpCommand(name)
+      return
+    }
     if (!this.ymap || !STRUCTURE_COMMANDS[name]) return
     if (name === 'BACK' || name === 'FORWARD') this.recentDeleted.clear()
     const data = this.mindMap.command.getCopyData()
@@ -675,7 +822,7 @@ class Cooperate {
 
   // 监听思维导图数据的重新设置事件
   onSetData(data) {
-    if (this.previewApplied) {
+    if (this.previewApplied || this.httpCollabMode) {
       this.isSetData = false
       this.pendingInitData = null
       return
@@ -685,6 +832,267 @@ class Cooperate {
       this.initData(data, { replace: true })
     }
     this.isSetData = false
+  }
+
+  setHttpCollab(config = {}) {
+    this.httpCollabMode = true
+    this.httpRoomKey = config.roomKey || ''
+    this.httpFetchSubtree = config.fetchSubtree || null
+    this.httpFetchNodes = config.fetchNodes || null
+    this.httpFetchLocate = config.fetchLocate || null
+    this.httpPatchNode = config.patchNode || null
+    this.httpAddNode = config.addNode || null
+    this.httpDeleteNode = config.deleteNode || null
+    this.httpUpdatedAt = config.updatedAt || ''
+    this.hydratedUids = new Set()
+    this.lastPushed = {}
+    this.enableLargeMapMode(config.nodeCount || 400)
+  }
+
+  clearHttpCollab() {
+    this.httpCollabMode = false
+    this.httpRoomKey = ''
+    this.httpFetchSubtree = null
+    this.httpFetchNodes = null
+    this.httpFetchLocate = null
+    this.httpPatchNode = null
+    this.httpAddNode = null
+    this.httpDeleteNode = null
+    this.httpUpdatedAt = ''
+    this.hydratedUids = new Set()
+    this.lastPushed = {}
+    this.pendingHttpDeletes = []
+    clearTimeout(this.httpTextTimer)
+    this.httpTextTimer = null
+  }
+
+  mergeHttpChildren(data, incoming) {
+    if (!data) return
+    if (!data.children) data.children = []
+    const have = new Set(
+      data.children.map(child => child && child.data && child.data.uid)
+    )
+    ;(incoming || []).forEach(child => {
+      const uid = child && child.data && child.data.uid
+      if (!uid || have.has(uid)) return
+      data.children.push(child)
+      have.add(uid)
+    })
+  }
+
+  async hydrateFromHttp(node) {
+    if (!node || !this.httpFetchSubtree) return
+    const uid = node.getData && node.getData('uid')
+    const data = node.nodeData
+    if (!uid || !data) return
+    if (this.hydratedUids.has(uid)) return
+    const childCount =
+      (node.getData && Number(node.getData('childCount'))) || 0
+    const hasKids = Array.isArray(data.children) && data.children.length > 0
+    if (!hasKids && childCount <= 0) {
+      this.hydratedUids.add(uid)
+      return
+    }
+    this.httpHydrating = true
+    try {
+      const result = await this.httpFetchSubtree(uid)
+      this.mergeHttpChildren(data, result && result.children)
+      if (data.data) {
+        data.data.hasMore = !!(result && result.has_more)
+        data.data.childCount =
+          (result && result.total) || data.data.childCount || 0
+      }
+      this.hydratedUids.add(uid)
+    } finally {
+      this.httpHydrating = false
+    }
+  }
+
+  async hydrateNodeData(data) {
+    if (!this.httpCollabMode || !data || !this.httpFetchSubtree) return data
+    const uid = data.data && data.data.uid
+    if (!uid) return data
+    if (Array.isArray(data.children) && data.children.length) return data
+    const result = await this.httpFetchSubtree(uid)
+    data.children = (result && result.children) || []
+    if (data.data) {
+      data.data.hasMore = !!(result && result.has_more)
+      data.data.childCount = (result && result.total) || 0
+    }
+    this.hydratedUids.add(uid)
+    return data
+  }
+
+  onBeforeExecCommand(name) {
+    if (!this.httpCollabMode) return
+    if (name !== 'REMOVE_NODE' && name !== 'REMOVE_CURRENT_NODE') return
+    const list = (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
+    this.pendingHttpDeletes = list
+      .map(node => node && node.getData && node.getData('uid'))
+      .filter(Boolean)
+  }
+
+  onHttpCommand(name) {
+    if (name === 'REMOVE_NODE' || name === 'REMOVE_CURRENT_NODE') {
+      const uids = this.pendingHttpDeletes.splice(0)
+      uids.forEach(uid => {
+        if (!this.httpDeleteNode) return
+        delete this.lastPushed[uid]
+        this.httpDeleteNode(uid).catch(() => {})
+      })
+      return
+    }
+    if (STRUCTURE_COMMANDS[name]) {
+      this.flushHttpInsert()
+      return
+    }
+    if (
+      name === 'SET_NODE_TEXT' ||
+      name === 'SET_NODE_DATA' ||
+      name === 'SET_NODE_NOTE'
+    ) {
+      this.scheduleHttpTextSync()
+    }
+  }
+
+  scheduleHttpTextSync() {
+    clearTimeout(this.httpTextTimer)
+    this.httpTextTimer = setTimeout(() => {
+      this.httpTextTimer = null
+      this.flushHttpText()
+    }, 280)
+  }
+
+  nodePlain(node) {
+    if (!node || typeof node.getData !== 'function') return ''
+    const text = node.getData('text')
+    return node.getData('richText') ? getTextFromHtml(text) : String(text || '')
+  }
+
+  flushHttpText() {
+    if (!this.httpPatchNode) return
+    const nodes =
+      (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
+    nodes.forEach(node => {
+      const uid = node.getData && node.getData('uid')
+      if (!uid) return
+      const text = this.nodePlain(node)
+      const note = (node.getData && node.getData('note')) || ''
+      const prev = this.lastPushed[uid]
+      if (prev && prev.text === text && prev.note === note) return
+      this.lastPushed[uid] = { text, note }
+      this.httpPatchNode(uid, { text, note }).catch(() => {})
+    })
+  }
+
+  flushHttpInsert() {
+    if (!this.httpAddNode) return
+    const node =
+      this.mindMap.renderer &&
+      this.mindMap.renderer.activeNodeList &&
+      this.mindMap.renderer.activeNodeList[0]
+    if (!node || node.isRoot) return
+    const uid = node.getData && node.getData('uid')
+    if (!uid || this.lastPushed[uid]) return
+    const parent =
+      node.parent && node.parent.getData && node.parent.getData('uid')
+    const text = this.nodePlain(node)
+    this.lastPushed[uid] = { text, note: node.getData('note') || '' }
+    this.httpAddNode({
+      parent,
+      uid,
+      text
+    }).catch(() => {})
+  }
+
+  collectVisibleUids() {
+    const uids = []
+    const walk = node => {
+      if (!node || !node.data) return
+      if (node.data.uid) uids.push(node.data.uid)
+      ;(node.children || []).forEach(walk)
+    }
+    walk(this.mindMap.renderer && this.mindMap.renderer.renderTree)
+    return uids.slice(0, 200)
+  }
+
+  async refreshVisibleFromHttp(updatedAt) {
+    if (!this.httpCollabMode || !this.httpFetchNodes) return
+    if (updatedAt && updatedAt === this.httpUpdatedAt) return
+    this.httpUpdatedAt = updatedAt || this.httpUpdatedAt
+    const uids = this.collectVisibleUids()
+    if (!uids.length) return
+    const payload = await this.httpFetchNodes(uids)
+    const nodes = (payload && payload.nodes) || []
+    if (!nodes.length) return
+    this.isApplyingRemote = true
+    this.mindMap.command.pause()
+    try {
+      const renderer = this.mindMap.renderer
+      nodes.forEach(item => {
+        const node = renderer.findNodeByUid(item.uid)
+        if (!node) return
+        const data = item.data || {}
+        renderer.setNodeData(node, {
+          text: data.text,
+          note: data.note,
+          richText: data.richText
+        })
+        renderer.reRenderNodeCheckChange(node, true)
+        this.lastPushed[item.uid] = {
+          text: data.richText ? getTextFromHtml(data.text) : String(data.text || ''),
+          note: data.note || ''
+        }
+      })
+    } finally {
+      try {
+        this.mindMap.command.recovery()
+      } catch (e) {
+        // ignore
+      }
+      this.suppressLocalUntil = Date.now() + 250
+      this.isApplyingRemote = false
+    }
+  }
+
+  async revealUid(uid) {
+    if (!uid) return null
+    const renderer = this.mindMap.renderer
+    let target = renderer.findNodeByUid(uid)
+    if (target) {
+      this.mindMap.execCommand('GO_TARGET_NODE', uid)
+      return target
+    }
+    if (!this.httpFetchLocate) return null
+    const located = await this.httpFetchLocate(uid)
+    if (!located || !located.ancestors) return null
+    this.httpHydrating = true
+    try {
+      for (let i = 0; i < located.ancestors.length; i++) {
+        const id = located.ancestors[i]
+        let node = renderer.findNodeByUid(id)
+        if (!node && i > 0) {
+          const parent = renderer.findNodeByUid(located.ancestors[i - 1])
+          const stub = located.nodes && located.nodes[id]
+          if (parent && stub) {
+            this.mergeHttpChildren(parent.nodeData, [stub])
+            if (this._origSetNodeExpand) this._origSetNodeExpand(parent, true)
+            this.mindMap.render()
+            node = renderer.findNodeByUid(id)
+          }
+        }
+        if (node) {
+          await this.hydrateFromHttp(node)
+          if (this._origSetNodeExpand) this._origSetNodeExpand(node, true)
+          this.mindMap.render()
+        }
+      }
+    } finally {
+      this.httpHydrating = false
+    }
+    target = renderer.findNodeByUid(uid)
+    if (target) this.mindMap.execCommand('GO_TARGET_NODE', uid)
+    return target
   }
 
   // 设置用户信息

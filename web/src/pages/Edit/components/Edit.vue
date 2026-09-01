@@ -389,12 +389,15 @@ export default {
       let { root, layout, theme, view } = this.mindMapData
       const config = this.mindMapConfig
       // 如果url中存在要打开的文件，那么思维导图数据、主题、布局都使用默认的
-      if (hasFileURL) {
+      if (hasFileURL || this.$route.query.room) {
         root = {
           data: {
             text: this.$t('edit.root')
           },
           children: []
+        }
+        if (this.$route.query.room) {
+          this.isLargeMap = true
         }
         layout = exampleData.layout
         theme = exampleData.theme
