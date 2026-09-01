@@ -34,7 +34,13 @@ function createGeneralizationNode() {
   }
   let maxWidth = 0
   let maxHeight = 0
+  let maxSubtreeWidth = 0
+  let maxSubtreeHeight = 0
   const list = this.formatGetGeneralization()
+  const layout = this.renderer.layout
+  const growDir = layout.getGeneralizationChildGrowDir
+    ? layout.getGeneralizationChildGrowDir()
+    : 'h'
   list.forEach((item, index) => {
     let cur = this._generalizationList[index]
     if (!cur) {
@@ -44,6 +50,12 @@ function createGeneralizationNode() {
     cur.node = this
     // 区间范围
     cur.range = item.range
+    if (!Array.isArray(item.children)) {
+      item.children = []
+    }
+    if (!item.uid) {
+      item.uid = createUid()
+    }
     // 线和节点
     if (!cur.generalizationLine) {
       cur.generalizationLine = this.lineDraw.path()
@@ -52,22 +64,40 @@ function createGeneralizationNode() {
       cur.generalizationNode = new MindMapNode({
         data: {
           inserting: item.inserting,
-          data: item
+          data: item,
+          children: item.children
         },
-        uid: createUid(),
+        uid: item.uid || createUid(),
         renderer: this.renderer,
         mindMap: this.mindMap,
-        isGeneralization: true
+        isGeneralization: true,
+        layerIndex: this.layerIndex + 1
       })
+    } else {
+      cur.generalizationNode.nodeData =
+        cur.generalizationNode.handleData({
+          inserting: item.inserting,
+          data: item,
+          children: item.children
+        })
+      cur.generalizationNode.layerIndex = this.layerIndex + 1
     }
     delete item.inserting
     // 关联所属节点
     cur.generalizationNode.generalizationBelongNode = this
+    cur.generalizationNode.parent = this
+    layout.createGeneralizationChildNodes(cur.generalizationNode)
     // 大小
     if (cur.generalizationNode.width > maxWidth)
       maxWidth = cur.generalizationNode.width
     if (cur.generalizationNode.height > maxHeight)
       maxHeight = cur.generalizationNode.height
+    const subtree = layout.measureGeneralizationTree(
+      cur.generalizationNode,
+      growDir
+    )
+    if (subtree.width > maxSubtreeWidth) maxSubtreeWidth = subtree.width
+    if (subtree.height > maxSubtreeHeight) maxSubtreeHeight = subtree.height
     // 如果该概要为激活状态，那么加入激活节点列表
     if (item.isActive) {
       this.renderer.addNodeToActiveList(cur.generalizationNode)
@@ -75,6 +105,8 @@ function createGeneralizationNode() {
   })
   this._generalizationNodeWidth = maxWidth
   this._generalizationNodeHeight = maxHeight
+  this._generalizationSubtreeWidth = maxSubtreeWidth || maxWidth
+  this._generalizationSubtreeHeight = maxSubtreeHeight || maxHeight
 }
 
 //  更新概要节点

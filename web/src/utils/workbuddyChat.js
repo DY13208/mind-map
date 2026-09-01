@@ -68,7 +68,8 @@ export async function streamChat({
   signal,
   onDelta,
   onEvent,
-  extra = {}
+  extra = {},
+  stream = true
 } = {}) {
   const { baseUrl, apiKey, model } = getWorkbuddyConfig()
   const res = await fetch(`${baseUrl}/v1/chat/completions`, {
@@ -80,7 +81,7 @@ export async function streamChat({
     },
     body: JSON.stringify({
       model,
-      stream: true,
+      stream: !!stream,
       workbuddy_events: true,
       messages,
       ...extra
@@ -102,15 +103,29 @@ export async function streamChat({
     throw err
   }
 
-  if (!res.body || !res.body.getReader) {
+  // 非流式：一次拿完整 tool_calls，大 payload 更稳
+  if (!stream || !res.body || !res.body.getReader) {
     const json = await res.json()
     const message =
       json.choices && json.choices[0] && json.choices[0].message
     const text =
       deltaText(json) || (message && message.content) || ''
-    const toolCalls = (message && message.tool_calls) || []
-    if (onDelta) onDelta(text)
-    return { content: text, toolCalls }
+    const rawCalls = (message && message.tool_calls) || []
+    const toolCalls = rawCalls.map(call => ({
+      id: call.id || '',
+      name: (call.function && call.function.name) || call.name || '',
+      arguments:
+        (call.function && call.function.arguments) ||
+        call.arguments ||
+        ''
+    }))
+    if (onDelta && text) onDelta(text)
+    return {
+      content: text || '',
+      toolCalls,
+      eventToolCalls: [],
+      events: json.workbuddy_events || []
+    }
   }
 
   const reader = res.body.getReader()
@@ -118,6 +133,27 @@ export async function streamChat({
   let buffer = ''
   let content = ''
   const toolMap = {}
+  const eventToolCalls = []
+  const events = []
+
+  const pushEventToolCall = (name, args, id) => {
+    if (!name) return
+    const normalized =
+      typeof args === 'string' ? args : JSON.stringify(args || {})
+    const existing = eventToolCalls.find(
+      item => item.id && id && item.id === id
+    )
+    if (existing) {
+      existing.name = name
+      if (normalized) existing.arguments = normalized
+      return
+    }
+    eventToolCalls.push({
+      id: id || `evt_${eventToolCalls.length}`,
+      name,
+      arguments: normalized
+    })
+  }
 
   const consume = line => {
     const trimmed = String(line || '').trim()
@@ -133,6 +169,22 @@ export async function streamChat({
     }
     const type = json && json.type
     if (type && String(type).startsWith('workbuddy.')) {
+      events.push(json)
+      if (type === 'workbuddy.tool_call') {
+        pushEventToolCall(
+          json.name || json.tool_name,
+          json.input || json.rawInput,
+          json.id
+        )
+      }
+      if (type === 'workbuddy.tool_result') {
+        const result = json.result || json.text || json.output
+        pushEventToolCall(
+          json.name || json.tool_name,
+          result,
+          json.id
+        )
+      }
       const label = eventLabel(json)
       if (label && onEvent) onEvent(label, json)
       return
@@ -176,5 +228,5 @@ export async function streamChat({
   const toolCalls = Object.keys(toolMap)
     .sort((a, b) => Number(a) - Number(b))
     .map(key => toolMap[key])
-  return { content, toolCalls }
+  return { content, toolCalls, eventToolCalls, events }
 }

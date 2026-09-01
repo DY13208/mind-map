@@ -219,6 +219,7 @@ let fileHandle = null
 const defaultBtnList = [
   'back',
   'forward',
+  'flowExpand',
   'painter',
   'siblingNode',
   'childNode',
