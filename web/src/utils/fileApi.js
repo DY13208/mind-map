@@ -82,7 +82,9 @@ export function leavePresence(roomKey, userId, clientId) {
 
 export function getFilePreview(roomKey, depth = 2) {
   const query = Number(depth) > 0 ? `?depth=${Number(depth)}` : ''
-  return request(`/api/files/${encodeURIComponent(roomKey)}/preview${query}`)
+  return request(`/api/files/${encodeURIComponent(roomKey)}/preview${query}`, {
+    timeoutMs: 12000
+  })
 }
 
 export function getFileSubtree(roomKey, uid, options = {}) {

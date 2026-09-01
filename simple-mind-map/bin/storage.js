@@ -532,9 +532,15 @@ async function persistHotSnapshot(roomKey, ydoc) {
   scheduleSave(roomKey, ydoc)
 }
 
-function getLiveDoc(roomKey) {
+function getMemoryDoc(roomKey) {
   const doc = docs.get(String(roomKey || ''))
-  if (!doc || typeof doc.getMap !== 'function' || !doc.getMap().size) return null
+  if (!doc || typeof doc.getMap !== 'function') return null
+  return doc
+}
+
+function getLiveDoc(roomKey) {
+  const doc = getMemoryDoc(roomKey)
+  if (!doc || !doc.getMap().size) return null
   return doc
 }
 
@@ -602,11 +608,17 @@ async function preloadRoom(roomKey) {
   if (preloadCache.has(roomKey)) return preloadCache.get(roomKey)
   const task = loadPersistedPayload(roomKey)
     .then(payload => {
+      const current = preloadCache.get(roomKey)
+      // A concurrent commit may have written fresher nodes via rememberRoomNodes
+      // while this query was in flight — never clobber that cache entry.
+      if (current !== task && current && typeof current.then !== 'function') {
+        return current
+      }
       preloadCache.set(roomKey, payload)
       return payload
     })
     .catch(err => {
-      preloadCache.delete(roomKey)
+      if (preloadCache.get(roomKey) === task) preloadCache.delete(roomKey)
       throw err
     })
   preloadCache.set(roomKey, task)
@@ -617,8 +629,11 @@ async function ensureDoc(roomKey) {
   const key = String(roomKey || '')
   cancelIdleEvict(key)
   const payload = await preloadRoom(key)
+  const fresh = preloadCache.get(key)
+  const usePayload =
+    fresh && typeof fresh.then !== 'function' ? fresh : payload
   const ydoc = getYDoc(key)
-  if (ydoc.getMap().size === 0) applyPayload(ydoc, payload)
+  if (ydoc.getMap().size === 0) applyPayload(ydoc, usePayload)
   return ydoc
 }
 
@@ -1510,6 +1525,7 @@ module.exports = {
   scheduleSave,
   persistHotSnapshot,
   getLiveDoc,
+  getMemoryDoc,
   getLiveObject,
   invalidateRoomCache,
   rememberRoomNodes,

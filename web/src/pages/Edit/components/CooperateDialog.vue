@@ -686,14 +686,21 @@ export default {
     },
 
     publishHttpChange(result = {}) {
-      if (!this.provider || !this._presenceProvider) return
-      this.provider.awareness.setLocalStateField('documentChange', {
+      const version = Number(result.version) || 0
+      const updatedAt = result.updated_at || result.updatedAt || ''
+      this._lastHttpChange = {
         roomKey: this.roomName,
         userId: this.userId,
-        clientId: this.provider.awareness.clientID,
-        version: Number(result.version) || 0,
-        updatedAt: result.updated_at || result.updatedAt || '',
+        version,
+        updatedAt,
         nonce: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      }
+      if (!this.provider || !this._presenceProvider || !this.provider.awareness) {
+        return
+      }
+      this.provider.awareness.setLocalStateField('documentChange', {
+        ...this._lastHttpChange,
+        clientId: this.provider.awareness.clientID
       })
     },
 
@@ -701,7 +708,10 @@ export default {
       return Promise.resolve(request).then(result => {
         const cooperate = this.mindMap && this.mindMap.cooperate
         if (cooperate && result && result.version != null) {
-          cooperate.acknowledgeLocalVersion(result.version, result)
+          cooperate.acknowledgeLocalVersion(result.version, {
+            operationId: result.operationId || result.operation_id,
+            duplicate: !!(result && result.duplicate)
+          })
         }
         this.publishHttpChange(result || {})
         return result
@@ -818,13 +828,16 @@ export default {
           this.saveStatus = 'saved'
           this.saveError = ''
         }
-        // 用房间 version 补偿，不再把 updated_at 当作协作一致性依据。
+        // Version poll is the reliable fallback when presence WS misses events.
         const cooperate = this.mindMap && this.mindMap.cooperate
         if (this.httpCollab && cooperate) {
           if (data.version != null && Number.isFinite(Number(data.version))) {
-            cooperate.recoverHttpCollab(data.version).catch(() => {})
+            const remoteVersion = Number(data.version)
+            if (remoteVersion > Number(cooperate.lastAppliedVersion || 0)) {
+              cooperate.recoverHttpCollab(remoteVersion).catch(() => {})
+            }
           } else if (data.updated_at) {
-            cooperate.refreshVisibleFromHttp(data.updated_at).catch(() => {})
+            cooperate.refreshVisibleFromHttp(data.updated_at, { force: true }).catch(() => {})
           }
         }
       } catch (err) {
@@ -961,10 +974,13 @@ export default {
         }
       ]
       this.connectPresenceSocket()
-      this.loadFiles()
       this.startSaveStatusPolling()
-      this.syncHttpPresence()
-      this.loadHistory()
+      // Keep room-entry critical path light: defer secondary HTTP.
+      setTimeout(() => {
+        this.loadFiles()
+        this.syncHttpPresence()
+        this.loadHistory()
+      }, 0)
     },
 
     publishLocalAwarenessPresence() {
@@ -1002,10 +1018,27 @@ export default {
       this._presenceProvider = true
       this._presenceWs = false
       this.publishLocalAwarenessPresence()
+      if (this._lastHttpChange) {
+        provider.awareness.setLocalStateField('documentChange', {
+          ...this._lastHttpChange,
+          clientId: provider.awareness.clientID,
+          nonce: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        })
+      }
       provider.awareness.on('change', this.updatePeers)
       provider.on('status', ({ status }) => {
         this._presenceWs = status === 'connected'
-        if (status === 'connected') this.updatePeers()
+        if (status === 'connected') {
+          this.publishLocalAwarenessPresence()
+          if (this._lastHttpChange) {
+            provider.awareness.setLocalStateField('documentChange', {
+              ...this._lastHttpChange,
+              clientId: provider.awareness.clientID,
+              nonce: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+            })
+          }
+          this.updatePeers()
+        }
       })
       this.updatePeers()
     },
@@ -1068,7 +1101,9 @@ export default {
       const cooperate = this.mindMap.cooperate
       this.enableHttpCollab(preview)
       cooperate.setPreviewApplied(true)
-      await new Promise(resolve => {
+      // Apply canvas data, but do not block room entry on first paint.
+      // Previously waited up to 4s for node_tree_render_end, which felt like a hang.
+      const renderWait = new Promise(resolve => {
         let settled = false
         const done = () => {
           if (settled) return
@@ -1087,13 +1122,14 @@ export default {
         if (typeof cooperate.seedPreviewHydration === 'function') {
           cooperate.seedPreviewHydration(preview.tree)
         }
-        setTimeout(done, 4000)
+        setTimeout(done, 600)
       })
+      this.markHttpConnected()
       if (!silent) {
         this.$message.success(this.$t('cooperate.openSuccess'))
       }
+      await renderWait
       cooperate.setPreviewApplied(false)
-      this.markHttpConnected()
       return true
     },
 
