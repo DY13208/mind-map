@@ -18,6 +18,7 @@ Docker 与开发启动的完整端口列表见 [PORTS.md](./PORTS.md)。
 - 导图自动保存到 PostgreSQL + 腾讯云 COS（`mind-map/` 文件夹）
 - 导入 / 导出常见格式，主题、大纲、演示等功能可直接用
 - 可选 AI 功能（需自行配置密钥）
+- 「补齐流程」等功能依赖本机 WorkBuddy；用 `启动.bat` / Docker 启动时会**自动拉起** API 代理（需 Windows + Python 3.10+ + 已登录 WorkBuddy）
 
 ---
 
