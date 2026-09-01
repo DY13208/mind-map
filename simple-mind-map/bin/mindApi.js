@@ -8,6 +8,8 @@ const {
   ensureDoc,
   saveDoc,
   upsertRoom,
+  persistHotSnapshot,
+  getLiveObject,
   sendJson,
   readBody,
   safeRoomKey,
@@ -17,6 +19,7 @@ const {
   reviveRoom,
   scheduleSave
 } = require('./storage')
+const { beatPresence, listPresence, leavePresence } = require('./presence')
 
 const roomMutationQueues = new Map()
 
@@ -63,7 +66,9 @@ async function loadMap(roomKey) {
 
 async function loadSnapshot(roomKey) {
   if (isDeletedRoom(roomKey)) return null
+  const live = getLiveObject(roomKey)
   const snapshot = await getRoomSnapshot(roomKey)
+  if (live) return { obj: live, row: snapshot }
   if (snapshot && snapshot.nodes && Object.keys(snapshot.nodes).length) {
     return { obj: snapshot.nodes, row: snapshot }
   }
@@ -153,15 +158,15 @@ async function persist(roomKey, ydoc, obj, title, options = {}) {
 }
 
 async function persistPatch(roomKey, ydoc, extra = {}) {
+  await persistHotSnapshot(roomKey, ydoc)
   const row = await getRoom(roomKey)
   const title = (row && row.title) || extra.title || '未命名'
-  await upsertRoom(roomKey, title)
-  scheduleSave(roomKey, ydoc)
   return {
     uid: extra.uid || '',
     room_key: roomKey,
     title,
-    share_url: shareUrl(roomKey)
+    share_url: shareUrl(roomKey),
+    updated_at: row && row.updated_at
   }
 }
 
@@ -172,6 +177,25 @@ async function handleApi(req, res) {
   if (req.method === 'GET' && pathname === '/api/health') {
     sendJson(res, 200, { ok: true, service: 'mind-map-collab' })
     return true
+  }
+
+  const presenceMatch = pathname.match(/^\/api\/files\/([^/]+)\/presence$/)
+  if (presenceMatch) {
+    const roomKey = decodeURIComponent(presenceMatch[1])
+    if (req.method === 'GET') {
+      sendJson(res, 200, { list: listPresence(roomKey) })
+      return true
+    }
+    if (req.method === 'POST') {
+      const body = await readBody(req)
+      sendJson(res, 200, { list: beatPresence(roomKey, body) })
+      return true
+    }
+    if (req.method === 'DELETE') {
+      const body = await readBody(req).catch(() => ({}))
+      sendJson(res, 200, { list: leavePresence(roomKey, body && body.id) })
+      return true
+    }
   }
 
   if (req.method === 'GET' && pathname === '/api/files') {
@@ -495,18 +519,13 @@ async function handleApi(req, res) {
       sendJson(res, 404, { error: 'not found' })
       return true
     }
-    const snapshot = await getRoomSnapshot(roomKey)
-    let obj = snapshot && snapshot.nodes
-    let row = snapshot
-    if (!obj) {
-      const loaded = await loadMap(roomKey)
-      if (!loaded) {
-        sendJson(res, 404, { error: 'not found' })
-        return true
-      }
-      obj = loaded.obj
-      row = loaded.row
+    const loaded = await loadSnapshot(roomKey)
+    if (!loaded) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
     }
+    const obj = loaded.obj
+    const row = loaded.row
     const keepDepth = Number(url.searchParams.get('depth') || 2) || 2
     const preview = mindDoc.buildPreview(obj, { keepDepth, largeAt: 200 })
     sendJson(res, 200, {
