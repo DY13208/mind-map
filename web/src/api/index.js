@@ -19,9 +19,12 @@ const LOCAL_DRAFT_NODE_LIMIT = 400
 
 function currentRoom() {
   try {
-    return String(
-      new URLSearchParams(window.location.search).get('room') || ''
-    ).trim()
+    const fromSearch = new URLSearchParams(window.location.search).get('room')
+    if (fromSearch) return String(fromSearch).trim()
+    const hash = String(window.location.hash || '')
+    const query = hash.indexOf('?') >= 0 ? hash.slice(hash.indexOf('?') + 1) : ''
+    const fromHash = new URLSearchParams(query).get('room')
+    return String(fromHash || '').trim()
   } catch (e) {
     return ''
   }

@@ -576,6 +576,7 @@ export default {
     openingFile: '正在打开文件…',
     openSuccess: '已打开该文件',
     openFailed: '打开失败，未能加载文件内容',
+    largeMapMode: '大图模式（按需加载，已支持一万节点以上）',
     fileDeleted: '已删除',
     renamed: '已重命名'
   }

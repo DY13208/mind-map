@@ -61,6 +61,15 @@ async function loadMap(roomKey) {
   return { ydoc, obj, row }
 }
 
+async function loadSnapshot(roomKey) {
+  if (isDeletedRoom(roomKey)) return null
+  const snapshot = await getRoomSnapshot(roomKey)
+  if (snapshot && snapshot.nodes && Object.keys(snapshot.nodes).length) {
+    return { obj: snapshot.nodes, row: snapshot }
+  }
+  return loadMap(roomKey)
+}
+
 function mapTitle(obj, row) {
   if (row && row.title) return row.title
   const rootUid = mindDoc.findRootUid(obj)
@@ -84,7 +93,7 @@ function mapPayload(roomKey, obj, row, extra = {}) {
   if (format === 'full') {
     const size = Object.keys(obj).length
     const limit = Math.min(
-      5000,
+      10000,
       Math.max(0, Number(max_nodes || maxNodes || 0) || 0)
     )
     if (!limit && size > 1200) {
@@ -106,7 +115,7 @@ function mapPayload(roomKey, obj, row, extra = {}) {
     if (stats.truncated) {
       payload.truncated = true
       payload.hint =
-        'Tree truncated. Use search_nodes or raise max_nodes (max 5000).'
+        'Tree truncated. Use search_nodes or raise max_nodes (max 10000).'
     }
     return payload
   }
@@ -114,7 +123,7 @@ function mapPayload(roomKey, obj, row, extra = {}) {
     return { ...meta, nodes: mindDoc.flattenNodes(obj) }
   }
   const limit = Math.min(
-    5000,
+    10000,
     Math.max(0, Number(max_nodes || maxNodes || 0) || 0)
   )
   return {
@@ -207,6 +216,23 @@ async function handleApi(req, res) {
       sendJson(res, 404, { error: 'not found' })
       return true
     }
+    if (req.method === 'GET' && !nodeRef) {
+      const loaded = await loadSnapshot(roomKey)
+      if (!loaded) {
+        sendJson(res, 404, { error: 'not found' })
+        return true
+      }
+      const uids = String(url.searchParams.get('uids') || '')
+        .split(',')
+        .map(item => item.trim())
+        .filter(Boolean)
+      sendJson(res, 200, {
+        room_key: roomKey,
+        updated_at: loaded.row && loaded.row.updated_at,
+        nodes: mindDoc.nodesByUids(loaded.obj, uids)
+      })
+      return true
+    }
     const ydoc = await ensureDoc(roomKey)
     const row = await getRoom(roomKey)
     if (!row && ydoc.getMap().size === 0) {
@@ -230,7 +256,8 @@ async function handleApi(req, res) {
         const result = mindDoc.addNodeOnDoc(ydoc, {
           parent: body.parent || body.parent_uid || 'root',
           text: body.text,
-          note: body.note
+          note: body.note,
+          uid: body.uid
         })
         const payload = await persistPatch(roomKey, ydoc, result)
         sendJson(res, 200, {
@@ -468,27 +495,92 @@ async function handleApi(req, res) {
       ...mapMeta(roomKey, obj, row),
       ...preview
     })
+    setImmediate(() => {
+      ensureDoc(roomKey).catch(err => {
+        console.error('[persist] warmup failed', roomKey, err.message)
+      })
+    })
+    return true
+  }
+
+  const subtreeMatch = pathname.match(/^\/api\/files\/([^/]+)\/subtree$/)
+  if (subtreeMatch && req.method === 'GET') {
+    const roomKey = decodeURIComponent(subtreeMatch[1])
+    const loaded = await loadSnapshot(roomKey)
+    if (!loaded) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    const uid = url.searchParams.get('uid') || 'root'
+    const resolved = mindDoc.resolveNode(loaded.obj, uid)
+    const subtree = mindDoc.subtreeChildren(loaded.obj, resolved, {
+      offset: url.searchParams.get('offset'),
+      limit: url.searchParams.get('limit')
+    })
+    if (!subtree) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    sendJson(res, 200, {
+      room_key: roomKey,
+      updated_at: loaded.row && loaded.row.updated_at,
+      ...subtree
+    })
+    return true
+  }
+
+  const locateMatch = pathname.match(/^\/api\/files\/([^/]+)\/locate$/)
+  if (locateMatch && req.method === 'GET') {
+    const roomKey = decodeURIComponent(locateMatch[1])
+    const loaded = await loadSnapshot(roomKey)
+    if (!loaded) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    const located = mindDoc.locateNode(
+      loaded.obj,
+      url.searchParams.get('uid') || url.searchParams.get('q') || 'root'
+    )
+    if (!located) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    sendJson(res, 200, {
+      room_key: roomKey,
+      updated_at: loaded.row && loaded.row.updated_at,
+      ...located
+    })
     return true
   }
 
   const saveStatusMatch = pathname.match(/^\/api\/files\/([^/]+)\/save-status$/)
   if (saveStatusMatch && req.method === 'GET') {
     const roomKey = decodeURIComponent(saveStatusMatch[1])
-    sendJson(res, 200, { room_key: roomKey, ...getSaveStatus(roomKey) })
+    const local = getSaveStatus(roomKey)
+    const row = await getRoom(roomKey)
+    sendJson(res, 200, {
+      room_key: roomKey,
+      ...local,
+      updated_at: (row && row.updated_at) || local.updated_at
+    })
     return true
   }
 
   const searchMatch = pathname.match(/^\/api\/files\/([^/]+)\/search$/)
   if (searchMatch && req.method === 'GET') {
     const roomKey = decodeURIComponent(searchMatch[1])
-    const loaded = await loadMap(roomKey)
+    const loaded = await loadSnapshot(roomKey)
     if (!loaded) {
       sendJson(res, 404, { error: 'not found' })
       return true
     }
     sendJson(res, 200, {
       room_key: roomKey,
-      matches: mindDoc.searchNodes(loaded.obj, url.searchParams.get('q') || '')
+      matches: mindDoc.searchNodes(
+        loaded.obj,
+        url.searchParams.get('q') || '',
+        { limit: url.searchParams.get('limit') }
+      )
     })
     return true
   }

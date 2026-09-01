@@ -107,7 +107,7 @@
       <el-button v-if="connected" @click="leave">{{
         $t('cooperate.leave')
       }}</el-button>
-      <el-button type="primary" :loading="connecting" @click="join" v-else>{{
+      <el-button type="primary" :loading="connecting" @click="joinFromDialog" v-else>{{
         $t('cooperate.join')
       }}</el-button>
     </div>
@@ -124,7 +124,13 @@ import {
   renameFile as renameFileApi,
   deleteFile as deleteFileApi,
   getSaveStatus,
-  getFilePreview
+  getFilePreview,
+  getFileSubtree,
+  locateFileNode,
+  getFileNodes,
+  addFileNode,
+  patchFileNode,
+  deleteFileNode
 } from '@/utils/fileApi'
 
 const USER_NAME_KEY = 'COOPERATE_USER_NAME'
@@ -184,7 +190,8 @@ export default {
       reconnectNoticeTimer: null,
       joinedOnce: false,
       fileList: [],
-      filesLoading: false
+      filesLoading: false,
+      httpCollab: false
     }
   },
   computed: {
@@ -197,6 +204,9 @@ export default {
       return 'disconnected'
     },
     statusText() {
+      if (this.httpCollab && this.connected) {
+        return this.$t('cooperate.largeMapMode')
+      }
       return this.$t(`cooperate.${this.status}`)
     },
     saveStatusText() {
@@ -283,9 +293,29 @@ export default {
       return true
     },
 
+    joinFromDialog() {
+      this.openSavedRoom({ silent: false })
+    },
+
+    deferJoin() {
+      if (this.httpCollab) return
+      const run = () => {
+        this.join({ silent: true })
+      }
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(run, { timeout: 2500 })
+        return
+      }
+      setTimeout(run, 400)
+    },
+
     join(options = {}) {
       const silent = !!options.silent
       if (!this.validate() || this.connected) return
+      if (this.mindMap.cooperate && this.mindMap.cooperate.httpCollabMode) {
+        this.markHttpConnected()
+        return
+      }
       if (this.joinedOnce && this.provider) return
       if (this.connecting) return
       this.connecting = true
@@ -409,11 +439,13 @@ export default {
       this.clearReconnectNotice()
       this.unbindProvider()
       if (this.mindMap && this.mindMap.cooperate) {
+        this.mindMap.cooperate.clearHttpCollab()
         this.mindMap.cooperate.disconnectProvider()
       }
       this.connecting = false
       this.connected = false
       this.joinedOnce = false
+      this.httpCollab = false
       this.peerList = []
       this.stopSaveStatusPolling()
       this.setCooperateStatus('disconnected')
@@ -497,6 +529,10 @@ export default {
         } else {
           this.saveStatus = 'saved'
           this.saveError = ''
+          const cooperate = this.mindMap && this.mindMap.cooperate
+          if (this.httpCollab && cooperate && data.updated_at) {
+            cooperate.refreshVisibleFromHttp(data.updated_at).catch(() => {})
+          }
         }
       } catch (err) {
         this.saveStatus = 'saveError'
@@ -563,6 +599,43 @@ export default {
       }
     },
 
+    markHttpConnected() {
+      this.connecting = false
+      this.connected = true
+      this.joinedOnce = true
+      this.httpCollab = true
+      this.clearReconnectNotice()
+      this.setCooperateStatus('connected')
+      this.peerList = [
+        {
+          id: this.userId,
+          name: this.userName,
+          color: this.userColor,
+          shortName: (this.userName || '?').slice(0, 1),
+          isMe: true
+        }
+      ]
+      this.loadFiles()
+      this.startSaveStatusPolling()
+    },
+
+    enableHttpCollab(preview) {
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      const roomKey = this.roomName
+      if (!cooperate || !roomKey) return
+      cooperate.setHttpCollab({
+        roomKey,
+        nodeCount: preview.node_count,
+        updatedAt: preview.updated_at,
+        fetchSubtree: uid => getFileSubtree(roomKey, uid),
+        fetchNodes: uids => getFileNodes(roomKey, uids),
+        fetchLocate: uid => locateFileNode(roomKey, uid),
+        patchNode: (uid, body) => patchFileNode(roomKey, uid, body),
+        addNode: body => addFileNode(roomKey, body),
+        deleteNode: uid => deleteFileNode(roomKey, uid)
+      })
+    },
+
     async openSavedRoom(options = {}) {
       const silent = !!options.silent
       const roomKey = this.roomName
@@ -576,6 +649,8 @@ export default {
       try {
         const preview = await getFilePreview(roomKey, 2)
         if (preview && preview.tree) {
+          const httpCollab = !!(preview.http_collab || preview.collapsed)
+          if (httpCollab) this.enableHttpCollab(preview)
           cooperate.setPreviewApplied(true)
           await new Promise(resolve => {
             let settled = false
@@ -595,6 +670,11 @@ export default {
           if (!silent) {
             this.$message.success(this.$t('cooperate.openSuccess'))
           }
+          if (httpCollab) {
+            cooperate.setPreviewApplied(false)
+            this.markHttpConnected()
+            return
+          }
         }
       } catch (err) {
         cooperate.setPreviewApplied(false)
@@ -605,7 +685,7 @@ export default {
         }
       }
       await this.$nextTick()
-      this.join({ silent: true })
+      this.deferJoin()
     },
 
     async openFile(item) {

@@ -59,6 +59,7 @@ class Command {
   //  执行命令
   exec(name, ...args) {
     if (this.commands[name]) {
+      this.mindMap.emit('beforeExecCommand', name, ...args)
       this.commands[name].forEach(fn => {
         fn(...args)
       })

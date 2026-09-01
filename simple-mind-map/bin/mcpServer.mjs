@@ -141,7 +141,7 @@ function createServer() {
           await api(
             `/api/files/${encodeURIComponent(
               room_key
-            )}/search?q=${encodeURIComponent(query)}`
+            )}/search?q=${encodeURIComponent(query)}&limit=200`
           )
         )
       } catch (err) {

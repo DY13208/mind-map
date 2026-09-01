@@ -304,9 +304,45 @@ function testPreviewKeepsCollapsedChildren() {
   assert.strictEqual(preview.node_count, 4)
   assert.ok(preview.tree)
   assert.notStrictEqual(preview.tree.data.expand, false)
+  assert.strictEqual(preview.tree.children.length, 1)
+  assert.strictEqual(preview.tree.children[0].data.text, 'A')
   assert.strictEqual(preview.tree.children[0].data.expand, false)
-  assert.strictEqual(preview.tree.children[0].children[0].data.text, 'B')
+  assert.strictEqual(preview.tree.children[0].children.length, 0)
 }
 
 testPreviewKeepsCollapsedChildren()
+
+function testTenThousandPreviewAndSubtree() {
+  const obj = {
+    root: {
+      isRoot: true,
+      data: { uid: 'root', text: 'R', expand: true },
+      children: []
+    }
+  }
+  for (let i = 0; i < 10000; i++) {
+    const uid = 'n' + i
+    obj.root.children.push(uid)
+    obj[uid] = { data: { uid, text: 'N' + i }, children: [] }
+  }
+  const preview = mindDoc.buildPreview(obj, { keepDepth: 2, maxChildren: 8 })
+  assert.strictEqual(preview.node_count, 10001)
+  assert.strictEqual(preview.http_collab, true)
+  assert.strictEqual(preview.collapsed, true)
+  assert.strictEqual(preview.tree.children.length, 8)
+  assert.strictEqual(preview.tree.data.hasMore, true)
+  const subtree = mindDoc.subtreeChildren(obj, 'root', { limit: 3, offset: 10 })
+  assert.strictEqual(subtree.total, 10000)
+  assert.strictEqual(subtree.children.length, 3)
+  assert.strictEqual(subtree.children[0].data.uid, 'n10')
+  assert.strictEqual(subtree.children[0].children.length, 0)
+  const located = mindDoc.locateNode(obj, 'n5000')
+  assert.strictEqual(located.uid, 'n5000')
+  assert.deepStrictEqual(located.ancestors, ['root', 'n5000'])
+  const hits = mindDoc.searchNodes(obj, 'N9999', { limit: 5 })
+  assert.strictEqual(hits.length, 1)
+  assert.strictEqual(hits[0].uid, 'n9999')
+}
+
+testTenThousandPreviewAndSubtree()
 console.log('collabYjs tests passed')
