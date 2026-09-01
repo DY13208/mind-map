@@ -1648,33 +1648,121 @@ class Render {
 
   //  设置节点是否展开
   setNodeExpand(node, expand) {
-    this.mindMap.execCommand('SET_NODE_DATA', node, {
-      expand
-    })
-    this.mindMap.render()
+    const apply = nextExpand => {
+      this.mindMap.execCommand('SET_NODE_DATA', node, {
+        expand: nextExpand
+      })
+      this.mindMap.render()
+    }
+    if (!expand) {
+      apply(false)
+      return
+    }
+    const live =
+      node.nodeData && node.nodeData.children && node.nodeData.children.length
+    const cooperate = this.mindMap.cooperate
+    if (live || !cooperate || typeof cooperate.hydrateLazyChildren !== 'function') {
+      apply(true)
+      return
+    }
+    const after = () => {
+      const hasKids =
+        node.nodeData && node.nodeData.children && node.nodeData.children.length
+      if (hasKids) apply(true)
+    }
+    const hydrated = cooperate.hydrateLazyChildren(node)
+    if (hydrated && typeof hydrated.then === 'function') {
+      hydrated.then(after).catch(err => {
+        console.error('[mind-map] load children failed', err)
+      })
+      return
+    }
+    after()
+  }
+
+  nodeHasChildren(node) {
+    if (!node) return false
+    if (node.children && node.children.length > 0) return true
+    return Number(node.data && node.data.childCount) > 0
+  }
+
+  applyExpandFlagsToLevel(level) {
+    walk(
+      this.renderTree,
+      null,
+      (node, parent, isRoot, layerIndex) => {
+        const expand = layerIndex < level
+        if (expand) {
+          node.data.expand = true
+        } else if (!isRoot && this.nodeHasChildren(node)) {
+          node.data.expand = false
+        }
+      },
+      null,
+      true,
+      0,
+      0
+    )
+  }
+
+  hydrateThen(root, level, options, after) {
+    const command = this.mindMap.command
+    const finish = () => {
+      after()
+      if (command && command.isPause) {
+        command.recovery()
+        command.addHistory()
+      }
+    }
+    if (command) command.pause()
+    const cooperate = this.mindMap.cooperate
+    if (
+      !cooperate ||
+      typeof cooperate.hydrateTreeToLevel !== 'function'
+    ) {
+      finish()
+      return
+    }
+    const hydrated = cooperate.hydrateTreeToLevel(root, level, options)
+    if (hydrated && typeof hydrated.then === 'function') {
+      hydrated.then(finish).catch(err => {
+        console.error('[mind-map] load children failed', err)
+        finish()
+      })
+      return
+    }
+    finish()
   }
 
   //  展开所有
   expandAllNode(uid = '') {
     if (!this.renderTree) return
 
-    const _walk = (node, enableExpand) => {
-      // 如果该节点为目标节点，那么修改允许展开的标志
-      if (!enableExpand && node.data.uid === uid) {
-        enableExpand = true
+    const apply = () => {
+      const _walk = (node, enableExpand) => {
+        // 如果该节点为目标节点，那么修改允许展开的标志
+        if (!enableExpand && node.data.uid === uid) {
+          enableExpand = true
+        }
+        if (enableExpand && !node.data.expand) {
+          node.data.expand = true
+        }
+        if (node.children && node.children.length > 0) {
+          node.children.forEach(child => {
+            _walk(child, enableExpand)
+          })
+        }
       }
-      if (enableExpand && !node.data.expand) {
-        node.data.expand = true
-      }
-      if (node.children && node.children.length > 0) {
-        node.children.forEach(child => {
-          _walk(child, enableExpand)
-        })
-      }
+      _walk(this.renderTree, !uid)
+      this.mindMap.render()
     }
-    _walk(this.renderTree, !uid)
 
-    this.mindMap.render()
+    const cooperate = this.mindMap.cooperate
+    const start =
+      uid && cooperate && typeof cooperate.findTreeNode === 'function'
+        ? cooperate.findTreeNode(this.renderTree, uid) || this.renderTree
+        : this.renderTree
+    this.hydrateThen(start, 8, { maxFetches: 80 }, apply)
   }
 
   //  收起所有
@@ -1686,12 +1774,7 @@ class Render {
       if (!enableUnExpand && node.data.uid === uid) {
         enableUnExpand = true
       }
-      if (
-        enableUnExpand &&
-        !isRoot &&
-        node.children &&
-        node.children.length > 0
-      ) {
+      if (enableUnExpand && !isRoot && this.nodeHasChildren(node)) {
         node.data.expand = false
       }
       if (node.children && node.children.length > 0) {
@@ -1712,29 +1795,20 @@ class Render {
   //  展开到指定层级
   expandToLevel(level) {
     if (!this.renderTree) return
-    walk(
-      this.renderTree,
-      null,
-      (node, parent, isRoot, layerIndex) => {
-        const expand = layerIndex < level
-        if (expand) {
-          node.data.expand = true
-        } else if (!isRoot && node.children && node.children.length > 0) {
-          node.data.expand = false
-        }
-      },
-      null,
-      true,
-      0,
-      0
-    )
-    this.mindMap.render()
+    const target = Number(level) || 0
+    this.hydrateThen(this.renderTree, target, { maxFetches: 120 }, () => {
+      this.applyExpandFlagsToLevel(target)
+      this.mindMap.render()
+    })
   }
 
   //  切换激活节点的展开状态
   toggleActiveExpand() {
     this.activeNodeList.forEach(node => {
-      if (node.nodeData.children.length <= 0 || node.isRoot) {
+      if (node.isRoot) return
+      if (typeof node.getChildrenLength === 'function') {
+        if (node.getChildrenLength() <= 0) return
+      } else if (!node.nodeData.children || node.nodeData.children.length <= 0) {
         return
       }
       this.toggleNodeExpand(node)

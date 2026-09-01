@@ -649,8 +649,9 @@ export default {
       try {
         const preview = await getFilePreview(roomKey, 2)
         if (preview && preview.tree) {
+          this.enableHttpCollab(preview)
           const httpCollab = !!(preview.http_collab || preview.collapsed)
-          if (httpCollab) this.enableHttpCollab(preview)
+          if (!httpCollab) cooperate.httpCollabMode = false
           cooperate.setPreviewApplied(true)
           await new Promise(resolve => {
             let settled = false

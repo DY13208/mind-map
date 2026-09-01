@@ -1140,10 +1140,7 @@ class MindMapNode {
   getChildrenLength() {
     const live = this.nodeData.children ? this.nodeData.children.length : 0
     if (live > 0) return live
-    if (this.getData('expand') === false) {
-      return Number(this.getData('childCount')) || 0
-    }
-    return 0
+    return Number(this.getData('childCount')) || 0
   }
 }
 

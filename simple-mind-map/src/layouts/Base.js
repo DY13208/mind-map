@@ -664,9 +664,6 @@ class Base {
         ? node.nodeData.children.length
         : 0
     if (live > 0) return live
-    const collapsed =
-      node.getData && node.getData('expand') === false
-    if (!collapsed) return 0
     return Number(node.getData && node.getData('childCount')) || 0
   }
 
