@@ -622,7 +622,8 @@ async function removeRoom(roomKey) {
 function sendJson(res, code, data) {
   const body = JSON.stringify(data)
   res.writeHead(code, {
-    'Content-Type': 'application/json; charset=utf-8'
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store'
   })
   res.end(body)
 }

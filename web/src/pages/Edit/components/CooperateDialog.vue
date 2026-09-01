@@ -259,6 +259,7 @@ export default {
     this.userColor =
       USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)]
     this.$bus.$on('showCooperate', this.open)
+    this._seenHttpChanges = new Map()
   },
   mounted() {
     this.tryAutoJoin()
@@ -527,6 +528,7 @@ export default {
       }
       this._presenceProvider = false
       this._presenceWs = false
+      this._seenHttpChanges = new Map()
       if (this.presenceDoc) {
         try {
           this.presenceDoc.destroy()
@@ -551,6 +553,7 @@ export default {
         })
         const presence = state.user || (legacyKey && state[legacyKey])
         const info = (presence && presence.userInfo) || null
+        this.handleHttpChange(state.documentChange)
         if (!info || !info.id || seen.has(info.id)) return
         seen.add(info.id)
         peers.push({
@@ -571,6 +574,44 @@ export default {
         })
       }
       this.peerList = peers
+    },
+
+    handleHttpChange(change) {
+      if (
+        !change ||
+        change.roomKey !== this.roomName ||
+        (this.provider &&
+          Number(change.clientId) === this.provider.awareness.clientID)
+      ) {
+        return
+      }
+      const key = String(change.clientId || change.userId || '')
+      const nonce = String(change.nonce || change.updatedAt || '')
+      if (!key || !nonce || this._seenHttpChanges.get(key) === nonce) return
+      this._seenHttpChanges.set(key, nonce)
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (!cooperate || !this.httpCollab) return
+      cooperate
+        .refreshVisibleFromHttp(change.updatedAt, { force: true })
+        .catch(() => {})
+    },
+
+    publishHttpChange(updatedAt) {
+      if (!this.provider || !this._presenceProvider) return
+      this.provider.awareness.setLocalStateField('documentChange', {
+        roomKey: this.roomName,
+        userId: this.userId,
+        clientId: this.provider.awareness.clientID,
+        updatedAt: updatedAt || '',
+        nonce: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      })
+    },
+
+    notifyHttpMutation(request) {
+      return Promise.resolve(request).then(result => {
+        this.publishHttpChange(result && result.updated_at)
+        return result
+      })
     },
 
     startSaveStatusPolling() {
@@ -783,9 +824,12 @@ export default {
         fetchExportTree: () => getFileExport(roomKey),
         fetchNodes: uids => getFileNodes(roomKey, uids),
         fetchLocate: uid => locateFileNode(roomKey, uid),
-        patchNode: (uid, body) => patchFileNode(roomKey, uid, body),
-        addNode: body => addFileNode(roomKey, body),
-        deleteNode: (uid, options) => deleteFileNode(roomKey, uid, options)
+        patchNode: (uid, body) =>
+          this.notifyHttpMutation(patchFileNode(roomKey, uid, body)),
+        addNode: body =>
+          this.notifyHttpMutation(addFileNode(roomKey, body)),
+        deleteNode: (uid, options) =>
+          this.notifyHttpMutation(deleteFileNode(roomKey, uid, options))
       })
     },
 

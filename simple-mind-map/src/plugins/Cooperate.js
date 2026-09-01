@@ -209,6 +209,8 @@ class Cooperate {
     this.httpInsertRescan = false
     this.httpHydrating = false
     this.httpRefreshing = false
+    this.httpPendingRefreshAt = ''
+    this.httpPendingRefreshForce = false
     this.httpHistorySyncing = false
     this.localOrigin = { source: 'simple-mind-map-cooperate' }
     // 绑定事件
@@ -1011,6 +1013,8 @@ class Cooperate {
     this.pendingHttpDeletes = []
     this.httpHistorySyncing = false
     this.httpRefreshing = false
+    this.httpPendingRefreshAt = ''
+    this.httpPendingRefreshForce = false
     clearTimeout(this.httpTextTimer)
     this.httpTextTimer = null
     clearTimeout(this.httpStructureTimer)
@@ -1678,12 +1682,15 @@ class Cooperate {
     return nodes
   }
 
-  async refreshVisibleFromHttp(updatedAt) {
+  async refreshVisibleFromHttp(updatedAt, options = {}) {
     if (!this.httpCollabMode || !this.httpFetchNodes) return
+    const force = !!options.force
     if (this.httpHydrating || this.isApplyingRemote || this.httpRefreshing) {
+      this.httpPendingRefreshAt = updatedAt || this.httpPendingRefreshAt
+      this.httpPendingRefreshForce = force || this.httpPendingRefreshForce
       return
     }
-    if (updatedAt && sameHttpStamp(updatedAt, this.httpUpdatedAt)) return
+    if (!force && updatedAt && sameHttpStamp(updatedAt, this.httpUpdatedAt)) return
     const pendingUpdatedAt = updatedAt || this.httpUpdatedAt
     if (!this.httpUpdatedAt) {
       this.httpUpdatedAt = pendingUpdatedAt
@@ -1700,7 +1707,6 @@ class Cooperate {
     try {
       const remoteNodes = await this.fetchHttpNodes(uids)
       if (!remoteNodes.length) return
-      this.httpUpdatedAt = pendingUpdatedAt
       const editing =
         renderer.textEdit &&
         typeof renderer.textEdit.isShowTextEdit === 'function' &&
@@ -1800,6 +1806,9 @@ class Cooperate {
           })
         }
         if (changed) this.mindMap.render()
+        // Only acknowledge a revision after every fetch and merge completed.
+        // A transient request/render failure must remain retryable by polling.
+        this.httpUpdatedAt = pendingUpdatedAt
       } finally {
         try {
           this.mindMap.command.recovery()
@@ -1811,6 +1820,20 @@ class Cooperate {
       }
     } finally {
       this.httpRefreshing = false
+      const queuedAt = this.httpPendingRefreshAt
+      const queuedForce = this.httpPendingRefreshForce
+      this.httpPendingRefreshAt = ''
+      this.httpPendingRefreshForce = false
+      if (
+        queuedAt &&
+        (queuedForce || !sameHttpStamp(queuedAt, this.httpUpdatedAt))
+      ) {
+        Promise.resolve().then(() => {
+          this.refreshVisibleFromHttp(queuedAt, { force: queuedForce }).catch(
+            () => {}
+          )
+        })
+      }
     }
   }
 
