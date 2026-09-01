@@ -117,6 +117,15 @@ const roomSaveStates = new Map()
 const MAX_SAVE_CONCURRENCY = 1
 const IDLE_EVICT_MS = 10 * 60 * 1000
 const LARGE_MAP_NODES = 400
+
+function isPresenceDocName(roomKey) {
+  return String(roomKey || '').endsWith('__presence')
+}
+
+/** Once the op-log owns the room (version>0), live Y.Doc must not rewrite nodes. */
+function shouldWriteLiveNodesToPg(pgVersion) {
+  return !(Number(pgVersion) > 0)
+}
 let activeSaves = 0
 const saveGate = []
 const idleTimers = new Map()
@@ -450,7 +459,7 @@ function backupYjsToCos(roomKey, ydoc) {
 }
 
 async function saveDoc(roomKey, ydoc) {
-  if (isDeletedRoom(roomKey)) return
+  if (isDeletedRoom(roomKey) || isPresenceDocName(roomKey)) return
   if (!ydoc || typeof ydoc.getMap !== 'function' || !ydoc.getMap().size) return
   setSaveState(roomKey, 'saving')
   await acquireSaveSlot()
@@ -458,7 +467,21 @@ async function saveDoc(roomKey, ydoc) {
     if (isDeletedRoom(roomKey) || typeof ydoc.getMap !== 'function') return
     const obj = ydoc.getMap().toJSON()
     if (!obj || !Object.keys(obj).length) return
-    // 当前树快照进 PG。打开大图走这份数据，不再等 COS 灌带历史的 yjs 胀包。
+    const row = await getRoom(roomKey)
+    const pgVersion = Number((row && row.version) || 0)
+    // HTTP op-log is authoritative after version advances. A concurrent live Y.Doc
+    // save (toJSON then upsert) can otherwise clobber a newer insert/update and
+    // make newly added children disappear after refresh.
+    if (!shouldWriteLiveNodesToPg(pgVersion)) {
+      setSaveState(roomKey, 'saved')
+      const nodeCount = Object.keys(obj).length
+      if (nodeCount < LARGE_MAP_NODES) {
+        backupYjsToCos(roomKey, ydoc).catch(err => {
+          console.error('[persist] cos backup failed', roomKey, err.message)
+        })
+      }
+      return
+    }
     await upsertRoom(roomKey, titleFromObj(obj), {
       preserveExistingTitle: true,
       nodes: obj
@@ -511,11 +534,22 @@ async function purgeRoomStorage(roomKey) {
 }
 
 async function persistHotSnapshot(roomKey, ydoc) {
-  if (isDeletedRoom(roomKey) || !ydoc || typeof ydoc.getMap !== 'function') {
+  if (
+    isDeletedRoom(roomKey) ||
+    isPresenceDocName(roomKey) ||
+    !ydoc ||
+    typeof ydoc.getMap !== 'function'
+  ) {
     return
   }
   const size = ydoc.getMap().size
   if (!size) return
+  const row = await getRoom(roomKey)
+  const pgVersion = Number((row && row.version) || 0)
+  if (!shouldWriteLiveNodesToPg(pgVersion)) {
+    setSaveState(roomKey, 'saved')
+    return
+  }
   if (size >= LARGE_MAP_NODES) {
     await pool.query('update rooms set updated_at = now() where room_key = $1', [
       roomKey
@@ -978,6 +1012,7 @@ function attachPersistence() {
   setPersistence({
     bindState: (docName, ydoc) => {
       const roomKey = decodeURIComponent(docName)
+      if (isPresenceDocName(roomKey)) return
       const cached = preloadCache.get(roomKey)
       const payload =
         cached && typeof cached.then !== 'function' ? cached : null
@@ -985,16 +1020,24 @@ function attachPersistence() {
       preloadCache.delete(roomKey)
       ydoc.on('update', () => scheduleSave(roomKey, ydoc))
       if (payload && payload.type === 'yjs' && obj) {
-        upsertRoom(roomKey, titleFromObj(obj), {
-          preserveExistingTitle: true,
-          nodes: obj
-        }).catch(err => {
-          console.error('[persist] pg snapshot failed', roomKey, err.message)
-        })
+        getRoom(roomKey)
+          .then(row => {
+            if (!shouldWriteLiveNodesToPg(Number((row && row.version) || 0))) {
+              return null
+            }
+            return upsertRoom(roomKey, titleFromObj(obj), {
+              preserveExistingTitle: true,
+              nodes: obj
+            })
+          })
+          .catch(err => {
+            console.error('[persist] pg snapshot failed', roomKey, err.message)
+          })
       }
     },
     writeState: async (docName, ydoc) => {
       const roomKey = decodeURIComponent(docName)
+      if (isPresenceDocName(roomKey)) return
       const timer = saveTimers.get(roomKey)
       if (timer) {
         clearTimeout(timer)
@@ -1529,6 +1572,8 @@ module.exports = {
   getLiveObject,
   invalidateRoomCache,
   rememberRoomNodes,
+  shouldWriteLiveNodesToPg,
+  isPresenceDocName,
   applyPayload,
   payloadToObject,
   pickLatestTimestamp,

@@ -853,14 +853,19 @@ class Cooperate {
 
   // 当前思维导图改变后的处理，触发同步
   onDataChange(data) {
+    if (this.isSetData || this.isApplyingRemote || this.httpReplacing) {
+      return
+    }
     if (
-      this.isSetData ||
-      this.isApplyingRemote ||
       this.previewApplied ||
       this.hydratingCurrentData ||
-      this.httpHydrating ||
-      this.httpReplacing
+      this.httpHydrating
     ) {
+      // User edits during preview/hydrate must not be dropped.
+      if (this.httpCollabMode && !this.httpHistorySyncing) {
+        this.scheduleHttpTextSync()
+        this.scheduleHttpStructureSync(80)
+      }
       return
     }
     if (this.httpCollabMode) {
@@ -887,16 +892,33 @@ class Cooperate {
 
   onAfterExecCommand(name) {
     const historyCmd = name === 'BACK' || name === 'FORWARD'
-    if (
+    const busy =
       this.isSetData ||
       this.isApplyingRemote ||
       this.previewApplied ||
       this.hydratingCurrentData ||
       this.httpHydrating ||
       this.httpReplacing ||
-      (this.mindMap.renderer && this.mindMap.renderer._lazyCommandPending)
-    ) {
+      !!(this.mindMap.renderer && this.mindMap.renderer._lazyCommandPending)
+    if (busy) {
       if (this.httpCollabMode && historyCmd) this.httpHistorySyncing = false
+      // Queue instead of drop: preview/hydrate windows previously ate inserts,
+      // so a refresh showed the map without the new child nodes.
+      if (
+        this.httpCollabMode &&
+        !this.isApplyingRemote &&
+        !this.httpReplacing &&
+        !this.isSetData
+      ) {
+        if (STRUCTURE_COMMANDS[name]) this.scheduleHttpStructureSync(80)
+        if (
+          name === 'SET_NODE_TEXT' ||
+          name === 'SET_NODE_DATA' ||
+          name === 'SET_NODE_NOTE'
+        ) {
+          this.scheduleHttpTextSync()
+        }
+      }
       return
     }
     if (this.httpCollabMode) {
