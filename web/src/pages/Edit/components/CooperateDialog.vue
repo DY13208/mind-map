@@ -224,6 +224,8 @@ export default {
       saveStatusTimer: null,
       presenceTimer: null,
       presenceQuickTimer: null,
+      presenceSyncInFlight: false,
+      presenceSyncQueued: false,
       saveStatus: 'idle',
       saveError: '',
       lastConnectErrorAt: 0,
@@ -736,6 +738,8 @@ export default {
         clearTimeout(this.presenceQuickTimer)
         this.presenceQuickTimer = null
       }
+      this.presenceSyncInFlight = false
+      this.presenceSyncQueued = false
       this.saveStatus = 'idle'
       this.saveError = ''
     },
@@ -780,6 +784,11 @@ export default {
 
     async syncHttpPresence() {
       if (!this.httpCollab || !this.connected || !this.roomName) return
+      if (this.presenceSyncInFlight) {
+        this.presenceSyncQueued = true
+        return
+      }
+      this.presenceSyncInFlight = true
       try {
         const clientId =
           (this.provider &&
@@ -803,12 +812,17 @@ export default {
         this.applyPresenceList(data.list)
       } catch (e) {
         // keep last peer list
+      } finally {
+        this.presenceSyncInFlight = false
+        if (this.presenceSyncQueued) {
+          this.presenceSyncQueued = false
+          this.syncHttpPresence()
+        }
       }
     },
 
     async loadSaveStatus() {
       if (!this.connected || !this.roomName) return
-      if (this.httpCollab) this.syncHttpPresence()
       try {
         const data = await getSaveStatus(this.roomName)
         if (data.status === 'deleted') {
