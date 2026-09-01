@@ -1188,11 +1188,13 @@ async function initSchemaOnce() {
 
 async function listRooms() {
   const res = await pool.query(
-    `select room_key, title, cos_key, version, created_at, updated_at
-     from rooms
-     order by updated_at desc`
+    `select r.room_key, r.title, r.cos_key, r.version, r.created_at, r.updated_at
+     from rooms r
+     left join room_tombstones t on t.room_key = r.room_key
+     where t.room_key is null
+     order by r.updated_at desc`
   )
-  return res.rows
+  return res.rows.filter(row => !deletedRooms.has(row.room_key))
 }
 
 async function renameRoom(roomKey, title) {
