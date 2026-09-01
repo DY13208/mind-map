@@ -580,15 +580,24 @@ export default {
       const quiet = !!(options && options.quiet)
       if (!quiet) this.handleShowLoading(this.$t('edit.importingTip'))
       await yieldToUi()
-      const prepared = prepareImportedTree(data)
-      data = prepared.data
-      if (prepared.collapsed && this.mindMap) {
+      if (!(options && options.fromSaved)) {
+        const prepared = prepareImportedTree(data)
+        data = prepared.data
+        if (prepared.collapsed && this.mindMap) {
+          this.isLargeMap = true
+          this.mindMap.updateConfig({
+            openPerformance: true,
+            openRealtimeRenderOnNodeTextEdit: false
+          })
+          if (!quiet) this.$message.info(this.$t('edit.largeMapImportTip'))
+        }
+      } else if (this.mindMap) {
         this.isLargeMap = true
         this.mindMap.updateConfig({
           openPerformance: true,
-          openRealtimeRenderOnNodeTextEdit: false
+          openRealtimeRenderOnNodeTextEdit: false,
+          isShowExpandNum: true
         })
-        if (!quiet) this.$message.info(this.$t('edit.largeMapImportTip'))
       }
       let rootNodeData = null
       if (data.root) {
@@ -599,7 +608,7 @@ export default {
         rootNodeData = data
       }
       this.mindMap.view.reset()
-      this.manualSave()
+      if (!(options && options.fromSaved)) this.manualSave()
       // 如果导入的是富文本内容，那么自动开启富文本模式
       if (rootNodeData.data.richText && !this.openNodeRichText) {
         this.$bus.$emit('toggleOpenNodeRichText', true)

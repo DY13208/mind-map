@@ -299,7 +299,11 @@ function testPreviewKeepsCollapsedChildren() {
     b: { data: { uid: 'b', text: 'B', expand: true }, children: ['c'] },
     c: { data: { uid: 'c', text: 'C', expand: true }, children: [] }
   }
-  const preview = mindDoc.buildPreview(obj, { keepDepth: 1, largeAt: 3 })
+  const preview = mindDoc.buildPreview(obj, {
+    keepDepth: 1,
+    largeAt: 3,
+    clipAt: 3
+  })
   assert.strictEqual(preview.collapsed, true)
   assert.strictEqual(preview.node_count, 4)
   assert.ok(preview.tree)
@@ -311,6 +315,35 @@ function testPreviewKeepsCollapsedChildren() {
 }
 
 testPreviewKeepsCollapsedChildren()
+
+function testMediumPreviewKeepsCollapsedDescendants() {
+  const obj = {
+    root: {
+      isRoot: true,
+      data: { uid: 'root', text: 'R', expand: true },
+      children: ['a']
+    },
+    a: { data: { uid: 'a', text: 'A', expand: true }, children: ['b'] },
+    b: { data: { uid: 'b', text: 'B', expand: true }, children: ['c'] },
+    c: { data: { uid: 'c', text: 'C', expand: true }, children: [] }
+  }
+  for (let i = 0; i < 250; i++) {
+    const uid = 'n' + i
+    obj.root.children.push(uid)
+    obj[uid] = { data: { uid, text: 'N' + i }, children: [] }
+  }
+  const preview = mindDoc.buildPreview(obj, { keepDepth: 2 })
+  assert.strictEqual(preview.http_collab, true)
+  assert.strictEqual(preview.clipped, false)
+  const branch = preview.tree.children.find(item => item.data.uid === 'a')
+  assert.ok(branch)
+  assert.strictEqual(branch.children.length, 1)
+  assert.strictEqual(branch.children[0].data.text, 'B')
+  assert.strictEqual(branch.children[0].data.expand, false)
+  assert.strictEqual(branch.children[0].children.length, 1)
+}
+
+testMediumPreviewKeepsCollapsedDescendants()
 
 function testTenThousandPreviewAndSubtree() {
   const obj = {
@@ -329,6 +362,7 @@ function testTenThousandPreviewAndSubtree() {
   assert.strictEqual(preview.node_count, 10001)
   assert.strictEqual(preview.http_collab, true)
   assert.strictEqual(preview.collapsed, true)
+  assert.strictEqual(preview.clipped, true)
   assert.strictEqual(preview.tree.children.length, 8)
   assert.strictEqual(preview.tree.data.hasMore, true)
   const subtree = mindDoc.subtreeChildren(obj, 'root', { limit: 3, offset: 10 })

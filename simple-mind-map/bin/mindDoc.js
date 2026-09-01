@@ -148,6 +148,7 @@ function collapseDeepNodes(root, keepDepth = 2) {
 
 const LARGE_MAP_AT = 200
 const HTTP_COLLAB_AT = 200
+const CLIP_JSON_AT = 1500
 const MAX_PREVIEW_CHILDREN = 120
 const MAX_SUBTREE_CHILDREN = 200
 const MAX_SEARCH_HITS = 80
@@ -209,16 +210,23 @@ function objectToTreeLimited(obj, keepDepth = 2, options = {}) {
 function buildPreview(obj, options = {}) {
   const keepDepth = Number(options.keepDepth) > 0 ? Number(options.keepDepth) : 2
   const largeAt = Number(options.largeAt) > 0 ? Number(options.largeAt) : LARGE_MAP_AT
+  const clipAt = Number(options.clipAt) > 0 ? Number(options.clipAt) : CLIP_JSON_AT
   const nodeCount = Object.keys(obj || {}).length
   const collapsed = nodeCount >= largeAt
-  const tree = collapsed
-    ? objectToTreeLimited(obj, keepDepth, { maxChildren: options.maxChildren })
-    : objectToTree(obj)
+  const clipped = nodeCount >= clipAt
+  let tree
+  if (clipped) {
+    tree = objectToTreeLimited(obj, keepDepth, { maxChildren: options.maxChildren })
+  } else {
+    tree = objectToTree(obj)
+    if (collapsed && tree) collapseDeepNodes(tree, keepDepth)
+  }
   if (tree && tree.data) delete tree.data.imgMap
   return {
     tree,
     node_count: nodeCount,
     collapsed,
+    clipped,
     http_collab: nodeCount >= HTTP_COLLAB_AT
   }
 }
@@ -1239,6 +1247,7 @@ module.exports = {
   locateNode,
   LARGE_MAP_AT,
   HTTP_COLLAB_AT,
+  CLIP_JSON_AT,
   applyObjectToDoc,
   flattenNodes,
   toOutline,

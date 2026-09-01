@@ -639,7 +639,8 @@ class Cooperate {
     this.largeMapModeEnabled = true
     this.mindMap.updateConfig({
       openPerformance: true,
-      openRealtimeRenderOnNodeTextEdit: false
+      openRealtimeRenderOnNodeTextEdit: false,
+      isShowExpandNum: true
     })
   }
 
@@ -889,7 +890,11 @@ class Cooperate {
     const childCount =
       (node.getData && Number(node.getData('childCount'))) || 0
     const hasKids = Array.isArray(data.children) && data.children.length > 0
-    if (!hasKids && childCount <= 0) {
+    if (hasKids) {
+      this.hydratedUids.add(uid)
+      return
+    }
+    if (childCount <= 0) {
       this.hydratedUids.add(uid)
       return
     }
