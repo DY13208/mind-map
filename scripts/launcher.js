@@ -35,6 +35,12 @@ function loadRootEnv() {
 
 loadRootEnv()
 
+const {
+  DEFAULT_PORT: WORKBUDDY_PORT,
+  ensureWorkbuddyApi,
+  stopWorkbuddyApi
+} = require('./workbuddy-api')
+
 const WEB_PORT = 8081
 const COLLAB_PORT = 1234
 const AI_PORT = 3456
@@ -219,7 +225,8 @@ function killPort(port) {
 }
 
 function stopAll() {
-  ;[WEB_PORT, COLLAB_PORT, AI_PORT, MCP_PORT].forEach(port => {
+  stopWorkbuddyApi({ root: ROOT })
+  ;[WEB_PORT, COLLAB_PORT, AI_PORT, MCP_PORT, WORKBUDDY_PORT].forEach(port => {
     const n = killPort(port)
     if (n) log(paint(c.dim, `  已释放端口 ${port}`))
   })
@@ -392,6 +399,9 @@ function printUrls(host) {
   log(`  协同    ${paint(c.green, `ws://${host}:${COLLAB_PORT}`)}`)
   log(`  AI      ${paint(c.green, `http://${host}:${AI_PORT}`)}`)
   log(`  MCP     ${paint(c.green, mcp.url)}`)
+  log(
+    `  WorkBuddy API  ${paint(c.green, `http://127.0.0.1:${WORKBUDDY_PORT}`)}  ${paint(c.dim, '(页面走 /wb-api)')}`
+  )
   log('')
   log(paint(c.bold, '  WorkBuddy 配置（地址由启动脚本按当前主机 IP 写入）'))
   log(
@@ -402,6 +412,12 @@ function printUrls(host) {
   )
   log('')
   log(paint(c.dim, '  已写入项目 .mcp.json。局域网同事打开页面地址即可协同。'))
+  log(
+    paint(
+      c.dim,
+      '  WorkBuddy 代理会随启动台自动拉起（需本机安装并登录 WorkBuddy + Python 3.10+）。'
+    )
+  )
   log(paint(c.dim, '  关闭本窗口或按 Ctrl+C 会停止全部服务。'))
   log('')
 }
@@ -473,6 +489,33 @@ async function startAll({ pickIp = false } = {}) {
   const dbOk = await ensurePostgres()
   if (!dbOk) {
     log(paint(c.red, '  未启动数据库时，协同端口 1234 起不来。页面仍会打开，但加入房间会失败。'))
+  }
+
+  log(paint(c.yellow, '  正在启动 WorkBuddy API 代理...'))
+  const wb = await ensureWorkbuddyApi({
+    root: ROOT,
+    port: WORKBUDDY_PORT,
+    mcpConfigPath: path.join(ROOT, '.mcp.json')
+  })
+  if (wb.ok) {
+    log(
+      paint(
+        c.green,
+        wb.alreadyRunning
+          ? `  WorkBuddy API 已在运行  http://127.0.0.1:${WORKBUDDY_PORT}`
+          : `  WorkBuddy API 已启动  http://127.0.0.1:${WORKBUDDY_PORT}`
+      )
+    )
+  } else if (wb.skipped) {
+    log(paint(c.yellow, `  WorkBuddy API：${wb.reason}`))
+  } else {
+    log(paint(c.red, `  WorkBuddy API 未就绪：${wb.reason}`))
+    log(
+      paint(
+        c.dim,
+        '  补齐流程等功能需要 WorkBuddy。请安装客户端并登录后重试，或手动运行 workbuddy_to_api。'
+      )
+    )
   }
 
   log(paint(c.yellow, '  正在启动全部服务（含协同 1234）...'))
@@ -598,7 +641,9 @@ function printMenu(host) {
   log(`  当前使用 IP：${paint(c.green, host || '未设置')}`)
   log('')
   log(`  ${paint(c.cyan, '[1]')}  获取本机 IP 并设为使用地址`)
-  log(`  ${paint(c.cyan, '[2]')}  启动全部服务（页面 / 协同 1234 / AI / MCP）`)
+  log(
+    `  ${paint(c.cyan, '[2]')}  启动全部服务（页面 / 协同 / AI / MCP / WorkBuddy API）`
+  )
   log(`  ${paint(c.cyan, '[3]')}  一键：设 IP + 启动全部服务  ${paint(c.dim, '← 回车默认，含协同')}`)
   log(`  ${paint(c.cyan, '[4]')}  停止全部服务`)
   log(`  ${paint(c.cyan, '[5]')}  Docker 一键启动 ${paint(c.dim, '← 只对外开一个端口，推荐')}`)

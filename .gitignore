@@ -7,4 +7,4 @@ utools/dist
 .env
 .mcp.json
 .playwright-cli/
-output/
+workbuddy_to_api/

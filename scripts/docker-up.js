@@ -2,6 +2,10 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { spawn, execSync } = require('child_process')
+const {
+  DEFAULT_PORT: WORKBUDDY_PORT,
+  ensureWorkbuddyApi
+} = require('./workbuddy-api')
 
 const ROOT = path.resolve(__dirname, '..')
 const ENV_FILE = path.join(ROOT, '.env')
@@ -135,10 +139,28 @@ async function up() {
     MIND_MAP_PORT: String(PORT),
     PGPASSWORD: process.env.PGPASSWORD
   })
-  child.on('exit', code => {
+  child.on('exit', async code => {
     if (code) process.exit(code)
     console.log('')
     console.log('  已启动。浏览器打开上面的页面地址。')
+    if (process.platform === 'win32') {
+      console.log('')
+      console.log('  正在启动本机 WorkBuddy API 代理（补齐流程等功能需要）...')
+      const wb = await ensureWorkbuddyApi({
+        root: ROOT,
+        port: WORKBUDDY_PORT,
+        mcpConfigPath: path.join(ROOT, '.mcp.json')
+      })
+      if (wb.ok) {
+        console.log(`  WorkBuddy API  ${wb.alreadyRunning ? '已在运行' : '已启动'}  http://127.0.0.1:${WORKBUDDY_PORT}`)
+      } else {
+        console.log(`  WorkBuddy API 未就绪：${wb.reason || '未知错误'}`)
+        console.log('  请安装并登录 WorkBuddy，并确保已安装 Python 3.10+。')
+      }
+    } else {
+      console.log('  WorkBuddy API 需在 Windows 本机单独启动（补齐流程依赖 WorkBuddy 客户端）。')
+    }
+    console.log('')
     console.log('  WorkBuddy 把 .mcp.json 里的 url 配上即可，不要再用 3847。')
     console.log('  停止：node scripts/docker-up.js down')
   })
