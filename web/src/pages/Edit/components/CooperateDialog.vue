@@ -660,6 +660,7 @@ export default {
       ]
       this.loadFiles()
       this.startSaveStatusPolling()
+      this.syncHttpPresence()
     },
 
     enableHttpCollab(preview) {
