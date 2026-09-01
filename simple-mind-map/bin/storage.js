@@ -373,6 +373,34 @@ async function purgeRoomStorage(roomKey) {
   await pool.query('delete from rooms where room_key = $1', [roomKey])
 }
 
+async function persistHotSnapshot(roomKey, ydoc) {
+  if (isDeletedRoom(roomKey) || !ydoc || typeof ydoc.getMap !== 'function') {
+    return
+  }
+  const size = ydoc.getMap().size
+  if (!size) return
+  if (size >= LARGE_MAP_NODES) {
+    await pool.query('update rooms set updated_at = now() where room_key = $1', [
+      roomKey
+    ])
+    setSaveState(roomKey, 'saved')
+    return
+  }
+  const obj = ydoc.getMap().toJSON()
+  await upsertRoom(roomKey, titleFromObj(obj), {
+    preserveExistingTitle: true,
+    nodes: obj
+  })
+  setSaveState(roomKey, 'saved')
+  scheduleSave(roomKey, ydoc)
+}
+
+function getLiveObject(roomKey) {
+  const doc = docs.get(String(roomKey || ''))
+  if (!doc || typeof doc.getMap !== 'function' || !doc.getMap().size) return null
+  return doc.getMap().toJSON()
+}
+
 function scheduleSave(roomKey, ydoc) {
   if (isDeletedRoom(roomKey)) return
   const prev = saveTimers.get(roomKey)
@@ -639,6 +667,8 @@ module.exports = {
   scheduleIdleEvict,
   cancelIdleEvict,
   scheduleSave,
+  persistHotSnapshot,
+  getLiveObject,
   applyPayload,
   payloadToObject
 }

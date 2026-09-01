@@ -41,6 +41,20 @@ export function getSaveStatus(roomKey) {
   return request(`/api/files/${encodeURIComponent(roomKey)}/save-status`)
 }
 
+export function beatPresence(roomKey, user) {
+  return request(`/api/files/${encodeURIComponent(roomKey)}/presence`, {
+    method: 'POST',
+    body: JSON.stringify(user || {})
+  })
+}
+
+export function leavePresence(roomKey, userId) {
+  return request(`/api/files/${encodeURIComponent(roomKey)}/presence`, {
+    method: 'DELETE',
+    body: JSON.stringify({ id: userId })
+  })
+}
+
 export function getFilePreview(roomKey, depth = 2) {
   const query = Number(depth) > 0 ? `?depth=${Number(depth)}` : ''
   return request(`/api/files/${encodeURIComponent(roomKey)}/preview${query}`)

@@ -70,6 +70,11 @@ const layouts = {
   [CONSTANTS.LAYOUT.FISHBONE2]: Fishbone
 }
 
+const EXPAND_ALL_BATCH = 6
+const EXPAND_ALL_PER_FRAME = 48
+const EXPAND_ALL_MAX_NODES = 200
+const EXPAND_ALL_MAX_ROUNDS = 24
+
 //  渲染
 class Render {
   //  构造函数
@@ -99,6 +104,7 @@ class Render {
     // 防抖定时器
     this.emitNodeActiveEventTimer = null
     this.renderTimer = null
+    this._expandAllToken = 0
     // 根节点
     this.root = null
     // 文本编辑框，需要再bindEvent之前实例化，否则单击事件只能触发隐藏文本编辑框，而无法保存文本修改
@@ -1817,40 +1823,166 @@ class Render {
     finish()
   }
 
+  waitForRender() {
+    return new Promise(resolve => {
+      let settled = false
+      const done = () => {
+        if (settled) return
+        settled = true
+        resolve()
+      }
+      this.render(done)
+      setTimeout(done, 1200)
+    })
+  }
+
+  collectCollapsedFrontier(root) {
+    const out = []
+    const visit = (node, parentExpanded) => {
+      if (!node || !node.data) return
+      const expanded = node.data.expand !== false
+      if (parentExpanded && this.nodeHasChildren(node) && !expanded) {
+        out.push(node)
+        return
+      }
+      if (!expanded) return
+      const kids = node.children || []
+      for (let i = 0; i < kids.length; i++) visit(kids[i], true)
+    }
+    if (!root) return out
+    if (root.data && root.data.expand === false) {
+      if (this.nodeHasChildren(root)) out.push(root)
+      return out
+    }
+    const kids = root.children || []
+    for (let i = 0; i < kids.length; i++) visit(kids[i], true)
+    return out
+  }
+
+  async hydrateFrontier(nodes) {
+    const cooperate = this.mindMap.cooperate
+    if (!cooperate || typeof cooperate.hydrateNodeData !== 'function') return
+    const stubs = (nodes || []).filter(node => {
+      const live = node.children && node.children.length
+      const count = Number(node.data && node.data.childCount) || 0
+      return count > live
+    })
+    if (!stubs.length) return
+    const jobs = stubs.slice(0, EXPAND_ALL_BATCH * 2)
+    const concurrency = 4
+    let index = 0
+    const worker = async () => {
+      while (index < jobs.length) {
+        const node = jobs[index++]
+        try {
+          await cooperate.hydrateNodeData(node)
+        } catch (err) {
+          console.error('[mind-map] load children failed', err)
+        }
+      }
+    }
+    await Promise.all(
+      new Array(Math.min(concurrency, jobs.length)).fill(0).map(() => worker())
+    )
+  }
+
   //  展开所有
   expandAllNode(uid = '') {
     if (!this.renderTree) return
+    const token = (this._expandAllToken || 0) + 1
+    this._expandAllToken = token
+    const command = this.mindMap.command
+    if (command) command.pause()
+    const start = this.findExpandStartNode(uid)
+    this.expandSubtreeProgressive(start, token)
+      .catch(err => {
+        console.error('[mind-map] expand all failed', err)
+      })
+      .finally(() => {
+        if (this._expandAllToken === token) this._expandAllToken = 0
+        if (command && command.isPause) {
+          command.recovery()
+          command.addHistory()
+        }
+      })
+  }
 
-    const apply = () => {
-      const _walk = (node, enableExpand) => {
-        // 如果该节点为目标节点，那么修改允许展开的标志
-        if (!enableExpand && node.data.uid === uid) {
-          enableExpand = true
-        }
-        if (enableExpand && !node.data.expand) {
-          node.data.expand = true
-        }
-        if (node.children && node.children.length > 0) {
-          node.children.forEach(child => {
-            _walk(child, enableExpand)
-          })
-        }
-      }
-      _walk(this.renderTree, !uid)
-      this.mindMap.render()
-    }
-
+  findExpandStartNode(uid) {
+    if (!uid || !this.renderTree) return this.renderTree
     const cooperate = this.mindMap.cooperate
-    const start =
-      uid && cooperate && typeof cooperate.findTreeNode === 'function'
-        ? cooperate.findTreeNode(this.renderTree, uid) || this.renderTree
-        : this.renderTree
-    this.hydrateThen(start, 8, { maxFetches: 80 }, apply)
+    if (cooperate && typeof cooperate.findTreeNode === 'function') {
+      return cooperate.findTreeNode(this.renderTree, uid) || this.renderTree
+    }
+    let found = null
+    walk(this.renderTree, null, node => {
+      if (node.data && node.data.uid === uid) {
+        found = node
+        return true
+      }
+    })
+    return found || this.renderTree
+  }
+
+  async expandSubtreeProgressive(start, token) {
+    if (!start) return
+    if (start.data && start.data.expand === false && this.nodeHasChildren(start)) {
+      start.data.expand = true
+      await this.waitForRender()
+    }
+    let painted = 0
+    for (let round = 0; round < EXPAND_ALL_MAX_ROUNDS; round++) {
+      if (this._expandAllToken !== token) return
+      let frontier = this.collectCollapsedFrontier(start)
+      if (!frontier.length) return
+      await this.hydrateFrontier(frontier)
+      if (this._expandAllToken !== token) return
+      frontier = this.collectCollapsedFrontier(start).filter(node => {
+        return node.children && node.children.length > 0
+      })
+      if (!frontier.length) return
+      let i = 0
+      while (i < frontier.length) {
+        if (this._expandAllToken !== token) return
+        if (painted >= EXPAND_ALL_MAX_NODES) return
+        const slice = []
+        let willShow = 0
+        while (i < frontier.length && slice.length < EXPAND_ALL_BATCH) {
+          const node = frontier[i]
+          const kids = (node.children && node.children.length) || 0
+          if (
+            slice.length &&
+            (willShow + kids > EXPAND_ALL_PER_FRAME ||
+              painted + willShow + kids > EXPAND_ALL_MAX_NODES)
+          ) {
+            break
+          }
+          slice.push(node)
+          willShow += kids
+          i += 1
+          if (willShow >= EXPAND_ALL_PER_FRAME) break
+        }
+        if (!slice.length) {
+          const node = frontier[i++]
+          if (!node) break
+          node.data.expand = true
+          painted += (node.children && node.children.length) || 0
+          await this.waitForRender()
+          if (painted >= EXPAND_ALL_MAX_NODES) return
+          continue
+        }
+        slice.forEach(node => {
+          node.data.expand = true
+        })
+        painted += willShow
+        await this.waitForRender()
+      }
+    }
   }
 
   //  收起所有
   unexpandAllNode(isSetRootNodeCenter = true, uid = '') {
     if (!this.renderTree) return
+    this._expandAllToken = 0
 
     const _walk = (node, isRoot, enableUnExpand) => {
       // 如果该节点为目标节点，那么修改允许展开的标志

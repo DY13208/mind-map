@@ -1316,32 +1316,119 @@ class Cooperate {
 
   async refreshVisibleFromHttp(updatedAt) {
     if (!this.httpCollabMode || !this.httpFetchNodes) return
+    if (this.httpHydrating || this.isApplyingRemote) return
     if (updatedAt && updatedAt === this.httpUpdatedAt) return
+    const first = !this.httpUpdatedAt
     this.httpUpdatedAt = updatedAt || this.httpUpdatedAt
+    if (first) return
+    const renderer = this.mindMap.renderer
+    const tree = renderer && renderer.renderTree
+    if (!tree) return
     const uids = this.collectVisibleUids()
     if (!uids.length) return
     const payload = await this.httpFetchNodes(uids)
-    const nodes = (payload && payload.nodes) || []
-    if (!nodes.length) return
+    const remoteNodes = (payload && payload.nodes) || []
+    if (!remoteNodes.length) return
+    const editing =
+      renderer.textEdit &&
+      typeof renderer.textEdit.isShowTextEdit === 'function' &&
+      renderer.textEdit.isShowTextEdit()
+        ? renderer.textEdit.currentNode
+        : null
     this.isApplyingRemote = true
     this.mindMap.command.pause()
+    let changed = false
     try {
-      const renderer = this.mindMap.renderer
-      nodes.forEach(item => {
+      const missing = []
+      const missingFor = new Map()
+      remoteNodes.forEach(item => {
         const node = renderer.findNodeByUid(item.uid)
-        if (!node) return
         const data = item.data || {}
-        renderer.setNodeData(node, {
-          text: data.text,
-          note: data.note,
-          richText: data.richText
-        })
-        renderer.reRenderNodeCheckChange(node, true)
-        this.lastPushed[item.uid] = {
-          text: data.richText ? getTextFromHtml(data.text) : String(data.text || ''),
-          note: data.note || ''
+        if (node && node !== editing) {
+          const text = data.richText
+            ? getTextFromHtml(data.text)
+            : String(data.text || '')
+          const note = data.note || ''
+          const prev = this.lastPushed[item.uid]
+          if (!prev || prev.text !== text || (prev.note || '') !== note) {
+            renderer.setNodeData(node, {
+              text: data.text,
+              note: data.note,
+              richText: data.richText,
+              image: data.image,
+              imageTitle: data.imageTitle,
+              imageSize: data.imageSize,
+              icon: data.icon,
+              tag: data.tag,
+              hyperlink: data.hyperlink,
+              hyperlinkTitle: data.hyperlinkTitle
+            })
+            if (typeof renderer.reRenderNodeCheckChange === 'function') {
+              renderer.reRenderNodeCheckChange(node, true)
+            }
+            this.lastPushed[item.uid] = { text, note }
+            changed = true
+          }
+        }
+        const treeNode = this.findTreeNode(tree, item.uid)
+        if (!treeNode) return
+        const serverKids = item.children || []
+        const have = new Set(
+          (treeNode.children || [])
+            .map(child => child && child.data && child.data.uid)
+            .filter(Boolean)
+        )
+        const need = serverKids.filter(id => id && !have.has(id))
+        if (need.length) {
+          missingFor.set(item.uid, need)
+          need.forEach(id => missing.push(id))
+        }
+        if (serverKids.length) {
+          const keep = new Set(serverKids)
+          const next = (treeNode.children || []).filter(child => {
+            const id = child && child.data && child.data.uid
+            if (!id) return true
+            if (keep.has(id)) return true
+            return !!this.lastPushed[id]
+          })
+          if (next.length !== (treeNode.children || []).length) {
+            treeNode.children = next
+            changed = true
+          }
+        }
+        if (treeNode.data && serverKids.length) {
+          treeNode.data.childCount = Math.max(
+            Number(treeNode.data.childCount) || 0,
+            serverKids.length
+          )
         }
       })
+      if (missing.length) {
+        const extra = await this.httpFetchNodes(missing.slice(0, 200))
+        const byUid = new Map(
+          ((extra && extra.nodes) || []).map(item => [item.uid, item])
+        )
+        missingFor.forEach((childIds, parentUid) => {
+          const parent = this.findTreeNode(tree, parentUid)
+          if (!parent) return
+          const stubs = childIds
+            .map(id => byUid.get(id))
+            .filter(Boolean)
+            .map(item => ({
+              data: {
+                ...(item.data || {}),
+                uid: item.uid,
+                expand: false,
+                childCount: Array.isArray(item.children) ? item.children.length : 0
+              },
+              children: []
+            }))
+          const before = (parent.children || []).length
+          this.mergeHttpChildren(parent, stubs)
+          if ((parent.children || []).length !== before) changed = true
+        })
+      }
+      if (changed) this.mindMap.render()
     } finally {
       try {
         this.mindMap.command.recovery()

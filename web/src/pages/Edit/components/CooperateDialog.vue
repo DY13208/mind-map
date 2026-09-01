@@ -124,6 +124,8 @@ import {
   renameFile as renameFileApi,
   deleteFile as deleteFileApi,
   getSaveStatus,
+  beatPresence,
+  leavePresence,
   getFilePreview,
   getFileSubtree,
   locateFileNode,
@@ -254,6 +256,9 @@ export default {
     open() {
       this.dialogVisible = true
       this.loadFiles()
+      if (!this.connected && !this.connecting && this.roomName && this.mindMap) {
+        this.openSavedRoom({ silent: true })
+      }
     },
 
     createRoom() {
@@ -448,6 +453,9 @@ export default {
       this.httpCollab = false
       this.peerList = []
       this.stopSaveStatusPolling()
+      if (this.roomName && this.userId) {
+        leavePresence(this.roomName, this.userId).catch(() => {})
+      }
       this.setCooperateStatus('disconnected')
       if (!silent) this.$message.success(this.$t('cooperate.leaveSuccess'))
     },
@@ -514,8 +522,43 @@ export default {
       this.saveError = ''
     },
 
+    applyPresenceList(list) {
+      const peers = (list || []).map(info => ({
+        id: info.id,
+        name: info.name,
+        color: info.color || '#409EFF',
+        shortName: (info.name || '?').slice(0, 1),
+        isMe: info.id === this.userId
+      }))
+      if (!peers.find(item => item.id === this.userId) && this.userName) {
+        peers.unshift({
+          id: this.userId,
+          name: this.userName,
+          color: this.userColor,
+          shortName: this.userName.slice(0, 1),
+          isMe: true
+        })
+      }
+      this.peerList = peers
+    },
+
+    async syncHttpPresence() {
+      if (!this.httpCollab || !this.connected || !this.roomName) return
+      try {
+        const data = await beatPresence(this.roomName, {
+          id: this.userId,
+          name: this.userName,
+          color: this.userColor
+        })
+        this.applyPresenceList(data.list)
+      } catch (e) {
+        // keep last peer list
+      }
+    },
+
     async loadSaveStatus() {
       if (!this.connected || !this.roomName) return
+      if (this.httpCollab) this.syncHttpPresence()
       try {
         const data = await getSaveStatus(this.roomName)
         if (data.status === 'error') {
