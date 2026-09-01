@@ -123,7 +123,8 @@ import {
   listFiles,
   renameFile as renameFileApi,
   deleteFile as deleteFileApi,
-  getSaveStatus
+  getSaveStatus,
+  getFilePreview
 } from '@/utils/fileApi'
 
 const USER_NAME_KEY = 'COOPERATE_USER_NAME'
@@ -254,22 +255,8 @@ export default {
       if (!this.$route.query.room) return
       if (this._autoJoinScheduled) return
       this._autoJoinScheduled = true
-      // 等首屏本地渲染完成后再连协同，避免刷新时远端全量 apply 和首屏渲染抢主线程
-      const run = () => {
-        this._autoJoinScheduled = false
-        if (!this.mindMap || this.connected || this.connecting) return
-        if (!this.$route.query.room) return
-        this.join({ silent: true })
-      }
-      const onReady = () => {
-        this.mindMap.off('node_tree_render_end', onReady)
-        setTimeout(run, 50)
-      }
-      this.mindMap.on('node_tree_render_end', onReady)
-      setTimeout(() => {
-        this.mindMap && this.mindMap.off('node_tree_render_end', onReady)
-        run()
-      }, 1500)
+      this.roomName = this.$route.query.room
+      this.openSavedRoom({ silent: true })
     },
 
     validate() {
@@ -576,6 +563,51 @@ export default {
       }
     },
 
+    async openSavedRoom(options = {}) {
+      const silent = !!options.silent
+      const roomKey = this.roomName
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (!roomKey || !cooperate) {
+        if (!silent) this.join()
+        else this.join({ silent: true })
+        return
+      }
+      cooperate.setExpectRemoteDoc(true)
+      try {
+        const preview = await getFilePreview(roomKey, 2)
+        if (preview && preview.tree) {
+          cooperate.setPreviewApplied(true)
+          await new Promise(resolve => {
+            let settled = false
+            const done = () => {
+              if (settled) return
+              settled = true
+              this.mindMap.off('node_tree_render_end', done)
+              resolve()
+            }
+            this.mindMap.on('node_tree_render_end', done)
+            this.$bus.$emit('setData', preview.tree, {
+              quiet: true,
+              fromSaved: true
+            })
+            setTimeout(done, 4000)
+          })
+          if (!silent) {
+            this.$message.success(this.$t('cooperate.openSuccess'))
+          }
+        }
+      } catch (err) {
+        cooperate.setPreviewApplied(false)
+        if (!silent) {
+          this.$message.warning(
+            err.message || this.$t('cooperate.openFailed')
+          )
+        }
+      }
+      await this.$nextTick()
+      this.join({ silent: true })
+    },
+
     async openFile(item) {
       if (!item || !item.room_key) return
       if (this.connected && this.roomName === item.room_key) {
@@ -584,13 +616,8 @@ export default {
       }
       if (this.connected) this.leave({ silent: true })
       this.roomName = item.room_key
-      if (this.mindMap && this.mindMap.cooperate) {
-        this.mindMap.cooperate.setExpectRemoteDoc(true)
-      }
-      this.$message.info(this.$t('cooperate.openingFile'))
-      this.$nextTick(() => {
-        this.join()
-      })
+      this.syncRoomQuery()
+      await this.openSavedRoom({ silent: false })
     },
 
     async renameSavedFile(item) {

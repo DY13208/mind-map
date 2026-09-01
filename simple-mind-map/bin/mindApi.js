@@ -2,6 +2,7 @@ const mindDoc = require('./mindDoc')
 const {
   listRooms,
   getRoom,
+  getRoomSnapshot,
   renameRoom,
   removeRoom,
   ensureDoc,
@@ -439,6 +440,34 @@ async function handleApi(req, res) {
       persistNow: true
     })
     sendJson(res, 200, payload)
+    return true
+  }
+
+  const previewMatch = pathname.match(/^\/api\/files\/([^/]+)\/preview$/)
+  if (previewMatch && req.method === 'GET') {
+    const roomKey = decodeURIComponent(previewMatch[1])
+    if (isDeletedRoom(roomKey)) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    const snapshot = await getRoomSnapshot(roomKey)
+    let obj = snapshot && snapshot.nodes
+    let row = snapshot
+    if (!obj) {
+      const loaded = await loadMap(roomKey)
+      if (!loaded) {
+        sendJson(res, 404, { error: 'not found' })
+        return true
+      }
+      obj = loaded.obj
+      row = loaded.row
+    }
+    const keepDepth = Number(url.searchParams.get('depth') || 2) || 2
+    const preview = mindDoc.buildPreview(obj, { keepDepth, largeAt: 200 })
+    sendJson(res, 200, {
+      ...mapMeta(roomKey, obj, row),
+      ...preview
+    })
     return true
   }
 

@@ -88,6 +88,7 @@ class Cooperate {
     this.suppressLocalUntil = 0
     this.recentDeleted = new Map()
     this.expectRemoteDoc = false
+    this.previewApplied = false
     this.localOrigin = { source: 'simple-mind-map-cooperate' }
     // 绑定事件
     this.bindEvent()
@@ -173,6 +174,10 @@ class Cooperate {
     this.expectRemoteDoc = !!value
   }
 
+  setPreviewApplied(applied) {
+    this.previewApplied = !!applied
+  }
+
   applySyncedDoc() {
     this.ymap = this.ydoc.getMap()
     migrateLegacyNodes(this.ymap)
@@ -190,17 +195,24 @@ class Cooperate {
       const data = this.ymap.toJSON()
       this.currentData = data
       this.enableLargeMapMode(remoteSize)
-      const res = transformObjectToTreeData(data)
-      if (res) {
-        if (remoteSize >= 200) collapseDeepNodes(res, 2)
-        this.applyRemoteTree(res)
+      if (!this.previewApplied) {
+        const res = transformObjectToTreeData(data)
+        if (res) {
+          if (remoteSize >= 200) collapseDeepNodes(res, 2)
+          this.applyRemoteTree(res)
+        }
+      } else {
+        this.suppressLocalUntil =
+          Date.now() + (remoteSize >= 200 ? 2000 : 250)
       }
+      this.previewApplied = false
       this.expectRemoteDoc = false
       this.pendingInitData = null
       return
     }
-    if (this.expectRemoteDoc) {
+    if (this.expectRemoteDoc || this.previewApplied) {
       this.expectRemoteDoc = false
+      this.previewApplied = false
       return
     }
     if (this.pendingInitData) {
@@ -227,6 +239,7 @@ class Cooperate {
     this.waitNodeUidMap = {}
     this.hasAppliedSync = false
     if (!recreateDoc) return
+    this.previewApplied = false
     if (this.ymap && this.onObserve) {
       this.ymap.unobserveDeep(this.onObserve)
     }
@@ -551,7 +564,7 @@ class Cooperate {
 
   // 当前思维导图改变后的处理，触发同步
   onDataChange(data) {
-    if (this.isSetData || this.isApplyingRemote) return
+    if (this.isSetData || this.isApplyingRemote || this.previewApplied) return
     if (Date.now() < this.suppressLocalUntil) return
     if (!this.ymap) {
       this.pendingInitData = data
@@ -566,7 +579,7 @@ class Cooperate {
   }
 
   onAfterExecCommand(name) {
-    if (this.isSetData || this.isApplyingRemote) return
+    if (this.isSetData || this.isApplyingRemote || this.previewApplied) return
     if (!this.ymap || !STRUCTURE_COMMANDS[name]) return
     if (name === 'BACK' || name === 'FORWARD') this.recentDeleted.clear()
     const data = this.mindMap.command.getCopyData()
@@ -662,6 +675,11 @@ class Cooperate {
 
   // 监听思维导图数据的重新设置事件
   onSetData(data) {
+    if (this.previewApplied) {
+      this.isSetData = false
+      this.pendingInitData = null
+      return
+    }
     this.pendingInitData = data
     if (this.ymap) {
       this.initData(data, { replace: true })

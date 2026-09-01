@@ -599,6 +599,7 @@ export default {
     deleteConfirm: 'Delete "{title}"? This cannot be undone.',
     openingFile: 'Opening file…',
     openSuccess: 'Opened this file',
+    openFailed: 'Could not load the saved file',
     fileDeleted: 'Deleted',
     renamed: 'Renamed'
   }

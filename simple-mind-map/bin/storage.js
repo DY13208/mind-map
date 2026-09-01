@@ -446,6 +446,23 @@ async function getRoom(roomKey) {
   return res.rows[0] || null
 }
 
+async function getRoomSnapshot(roomKey) {
+  const res = await pool.query(
+    `select room_key, title, nodes, updated_at
+     from rooms
+     where room_key = $1`,
+    [roomKey]
+  )
+  const row = res.rows[0]
+  if (!row) return null
+  return {
+    room_key: row.room_key,
+    title: row.title,
+    updated_at: row.updated_at,
+    nodes: nodesFromJson(row.nodes)
+  }
+}
+
 function attachPersistence() {
   setPersistence({
     bindState: (docName, ydoc) => {
@@ -607,6 +624,7 @@ module.exports = {
   safeRoomKey,
   listRooms,
   getRoom,
+  getRoomSnapshot,
   renameRoom,
   removeRoom,
   saveDoc,

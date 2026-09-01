@@ -575,6 +575,7 @@ export default {
     deleteConfirm: '确定删除「{title}」？删除后无法恢复。',
     openingFile: '正在打开文件…',
     openSuccess: '已打开该文件',
+    openFailed: '打开失败，未能加载文件内容',
     fileDeleted: '已删除',
     renamed: '已重命名'
   }

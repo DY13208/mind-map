@@ -595,6 +595,7 @@ export default {
     deleteConfirm: 'Xóa "{title}"? Không thể hoàn tác.',
     openingFile: 'Đang mở tệp…',
     openSuccess: 'Đã mở tệp',
+    openFailed: 'Không tải được tệp đã lưu',
     fileDeleted: 'Đã xóa',
     renamed: 'Đã đổi tên'
   }

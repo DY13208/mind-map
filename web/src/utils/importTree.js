@@ -1,4 +1,4 @@
-const LARGE_NODE_THRESHOLD = 400
+const LARGE_NODE_THRESHOLD = 200
 const KEEP_EXPAND_DEPTH = 2
 
 export function yieldToUi() {
