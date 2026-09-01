@@ -138,6 +138,7 @@ export default {
     addToDo: '添加待辦',
     removeToDo: '刪除待辦',
     aiCreate: 'AI續寫',
+    flowExpand: '補齊流程/數據',
     modifyNodeLink: '修改節點鏈接',
     linkToNode: '鏈接到指定節點',
     removeNodeLink: '刪除節點鏈接'
@@ -348,6 +349,7 @@ export default {
     newFileTip: '新增檔案前，請先匯出目前編輯的檔案，以免內容遺失',
     openFileTip: '開啟檔案前，請先匯出目前編輯的檔案，以免內容遺失',
     ai: 'AI',
+    flowExpand: '補齊流程',
     cooperate: '協同'
   },
   edit: {

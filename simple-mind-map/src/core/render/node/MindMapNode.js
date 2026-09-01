@@ -109,6 +109,8 @@ class MindMapNode {
     // 概要节点的宽高
     this._generalizationNodeWidth = 0
     this._generalizationNodeHeight = 0
+    this._generalizationSubtreeWidth = 0
+    this._generalizationSubtreeHeight = 0
     // 展开收缩按钮尺寸
     this.expandBtnSize = this.mindMap.opt.expandBtnSize
     // 是否是多选节点

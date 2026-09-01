@@ -421,6 +421,11 @@ class VerticalTimeline extends Base {
         (isLeft ? item.generalizationNode.width : 0)
       item.generalizationNode.top =
         top + (bottom - top - item.generalizationNode.height) / 2
+      this.layoutGeneralizationChildren(
+        item.generalizationNode,
+        'h',
+        isLeft
+      )
     })
   }
 
