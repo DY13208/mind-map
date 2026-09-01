@@ -379,34 +379,6 @@ class Cooperate {
     this.mindMap.on('beforeExecCommand', this.onBeforeExecCommand)
     this.onExpandBtnClick = this.onExpandBtnClick.bind(this)
     this.mindMap.on('expand_btn_click', this.onExpandBtnClick)
-    this.bindExpandHydrate()
-  }
-
-  bindExpandHydrate() {
-    const renderer = this.mindMap.renderer
-    if (!renderer || typeof renderer.setNodeExpand !== 'function') return
-    if (this._origSetNodeExpand) return
-    this._origSetNodeExpand = renderer.setNodeExpand.bind(renderer)
-    const wrapped = (node, expand) => {
-      if (!expand) return this._origSetNodeExpand(node, expand)
-      const finish = () => {
-        const live =
-          node.nodeData &&
-          node.nodeData.children &&
-          node.nodeData.children.length
-        if (!live) return
-        return this._origSetNodeExpand(node, expand)
-      }
-      const hydrated = this.hydrateLazyChildren(node)
-      if (hydrated && typeof hydrated.then === 'function') {
-        return hydrated.then(finish).catch(() => {})
-      }
-      return finish()
-    }
-    renderer.setNodeExpand = wrapped
-    if (this.mindMap.command && this.mindMap.command.commands) {
-      this.mindMap.command.commands.SET_NODE_EXPAND = [wrapped]
-    }
   }
 
   // 解绑事件
@@ -433,16 +405,6 @@ class Cooperate {
     }
     this.mindMap.off('expand_btn_click', this.onExpandBtnClick)
     clearTimeout(this.httpTextTimer)
-    const renderer = this.mindMap.renderer
-    if (renderer && this._origSetNodeExpand) {
-      renderer.setNodeExpand = this._origSetNodeExpand
-      if (this.mindMap.command && this.mindMap.command.commands) {
-        this.mindMap.command.commands.SET_NODE_EXPAND = [
-          this._origSetNodeExpand
-        ]
-      }
-      this._origSetNodeExpand = null
-    }
   }
 
   // 数据同步时的处理，更新当前思维导图
@@ -848,11 +810,7 @@ class Cooperate {
     try {
       await this.hydrateLazyChildren(node)
       if (node.nodeData && node.nodeData.children && node.nodeData.children.length) {
-        if (node.getData('expand') !== true && this._origSetNodeExpand) {
-          this._origSetNodeExpand(node, true)
-        } else {
-          this.mindMap.render()
-        }
+        this.mindMap.execCommand('SET_NODE_EXPAND', node, true)
       }
     } finally {
       this._repairingExpand = false
@@ -891,16 +849,20 @@ class Cooperate {
     this.isSetData = false
   }
 
+  setLazyLoaders(config = {}) {
+    if (config.roomKey) this.httpRoomKey = config.roomKey
+    if (config.fetchSubtree) this.httpFetchSubtree = config.fetchSubtree
+    if (config.fetchNodes) this.httpFetchNodes = config.fetchNodes
+    if (config.fetchLocate) this.httpFetchLocate = config.fetchLocate
+    if (config.patchNode) this.httpPatchNode = config.patchNode
+    if (config.addNode) this.httpAddNode = config.addNode
+    if (config.deleteNode) this.httpDeleteNode = config.deleteNode
+    if (config.updatedAt) this.httpUpdatedAt = config.updatedAt
+  }
+
   setHttpCollab(config = {}) {
+    this.setLazyLoaders(config)
     this.httpCollabMode = true
-    this.httpRoomKey = config.roomKey || ''
-    this.httpFetchSubtree = config.fetchSubtree || null
-    this.httpFetchNodes = config.fetchNodes || null
-    this.httpFetchLocate = config.fetchLocate || null
-    this.httpPatchNode = config.patchNode || null
-    this.httpAddNode = config.addNode || null
-    this.httpDeleteNode = config.deleteNode || null
-    this.httpUpdatedAt = config.updatedAt || ''
     this.hydratedUids = new Set()
     this.hydrateFailedUids = new Set()
     this.lastPushed = {}
@@ -944,16 +906,11 @@ class Cooperate {
     const uid = node.getData && node.getData('uid')
     const data = node.nodeData
     if (!uid || !data) return
-    if (this.hydrateFailedUids.has(uid)) return
-    const childCount =
-      (node.getData && Number(node.getData('childCount'))) || 0
     const hasKids = Array.isArray(data.children) && data.children.length > 0
     if (hasKids) {
       this.hydratedUids.add(uid)
       return
     }
-    if (this.hydratedUids.has(uid) && childCount <= 0) return
-    if (childCount <= 0) return
     this.httpHydrating = true
     try {
       const result = await this.httpFetchSubtree(uid)
@@ -975,7 +932,7 @@ class Cooperate {
   }
 
   async hydrateNodeData(data) {
-    if (!this.httpCollabMode || !data || !this.httpFetchSubtree) return data
+    if (!data || !this.httpFetchSubtree) return data
     const uid = data.data && data.data.uid
     if (!uid) return data
     if (Array.isArray(data.children) && data.children.length) return data
@@ -987,6 +944,113 @@ class Cooperate {
     }
     this.hydratedUids.add(uid)
     return data
+  }
+
+  findTreeNode(root, uid) {
+    if (!root) return null
+    if (!uid) return root
+    const stack = [root]
+    while (stack.length) {
+      const node = stack.pop()
+      if (node && node.data && node.data.uid === uid) return node
+      const kids = (node && node.children) || []
+      for (let i = 0; i < kids.length; i++) stack.push(kids[i])
+    }
+    return null
+  }
+
+  hydrateTreeNodeFromYmap(data) {
+    if (!data || !this.ymap) return data
+    if (Array.isArray(data.children) && data.children.length) return data
+    const uid = data.data && data.data.uid
+    if (!uid) return data
+    const nodeMap = this.ymap.get(uid)
+    if (!nodeMap || typeof nodeMap.get !== 'function') return data
+    const children = nodeMap.get('children')
+    const childUids =
+      children && typeof children.toArray === 'function' ? children.toArray() : []
+    if (!data.children) data.children = []
+    const have = new Set(
+      data.children.map(child => child && child.data && child.data.uid)
+    )
+    childUids.forEach(childUid => {
+      if (have.has(childUid)) return
+      const childMap = this.ymap.get(childUid)
+      if (!childMap || typeof childMap.toJSON !== 'function') return
+      const json = childMap.toJSON()
+      data.children.push({
+        data: {
+          ...(json.data || {}),
+          uid: childUid,
+          expand: false,
+          childCount: Array.isArray(json.children) ? json.children.length : 0
+        },
+        children: []
+      })
+    })
+    return data
+  }
+
+  collectEmptyChildNodesAtDepth(root, depth) {
+    const stubs = []
+    const walk = (node, d) => {
+      if (!node) return
+      if (d === depth) {
+        const kids = node.children || []
+        const count = Number(node.data && node.data.childCount) || 0
+        if (!kids.length && count > 0) stubs.push(node)
+        return
+      }
+      if (d < depth) {
+        const kids = node.children || []
+        for (let i = 0; i < kids.length; i++) walk(kids[i], d + 1)
+      }
+    }
+    walk(root, 0)
+    return stubs
+  }
+
+  async hydrateTreeToLevel(root, level, options = {}) {
+    if (!root || !(level > 0)) return root
+    if (!this.httpFetchSubtree && !this.ymap) return root
+    const maxFetches =
+      Number(options.maxFetches) > 0 ? Number(options.maxFetches) : 120
+    const concurrency = Math.min(
+      8,
+      Math.max(1, Number(options.concurrency) || 6)
+    )
+    let fetches = 0
+    const hydrateOne = async node => {
+      if (this.httpFetchSubtree) return this.hydrateNodeData(node)
+      return this.hydrateTreeNodeFromYmap(node)
+    }
+    const runPool = async jobs => {
+      let index = 0
+      const worker = async () => {
+        while (index < jobs.length && fetches < maxFetches) {
+          const job = jobs[index++]
+          fetches += 1
+          try {
+            await hydrateOne(job)
+          } catch (err) {
+            console.error('[mind-map] load children failed', err)
+          }
+        }
+      }
+      const size = Math.min(concurrency, jobs.length)
+      await Promise.all(new Array(size).fill(0).map(() => worker()))
+    }
+    this.httpHydrating = true
+    try {
+      for (let depth = 0; depth < level && fetches < maxFetches; depth++) {
+        const stubs = this.collectEmptyChildNodesAtDepth(root, depth)
+        if (!stubs.length) continue
+        await runPool(stubs)
+      }
+    } finally {
+      this.httpHydrating = false
+    }
+    return root
   }
 
   onBeforeExecCommand(name) {

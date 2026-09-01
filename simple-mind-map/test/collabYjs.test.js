@@ -370,6 +370,9 @@ function testTenThousandPreviewAndSubtree() {
   assert.strictEqual(subtree.children.length, 3)
   assert.strictEqual(subtree.children[0].data.uid, 'n10')
   assert.strictEqual(subtree.children[0].children.length, 0)
+  const one = mindDoc.subtreeChildren(obj, 'n5000')
+  assert.strictEqual(one.uid, 'n5000')
+  assert.strictEqual(one.total, 0)
   const located = mindDoc.locateNode(obj, 'n5000')
   assert.strictEqual(located.uid, 'n5000')
   assert.deepStrictEqual(located.ancestors, ['root', 'n5000'])
@@ -379,4 +382,51 @@ function testTenThousandPreviewAndSubtree() {
 }
 
 testTenThousandPreviewAndSubtree()
+
+function applyExpandToLevel(root, level) {
+  const walk = (node, layerIndex, isRoot) => {
+    if (!node || !node.data) return
+    if (layerIndex < level) node.data.expand = true
+    else if (!isRoot && ((node.children && node.children.length) || node.data.childCount)) {
+      node.data.expand = false
+    }
+    ;(node.children || []).forEach(child => walk(child, layerIndex + 1, false))
+  }
+  walk(root, 0, true)
+}
+
+function testExpandToLevelThreeHydratesClippedBranch() {
+  const obj = {
+    root: {
+      isRoot: true,
+      data: { uid: 'root', text: 'R', expand: true },
+      children: ['a']
+    },
+    a: { data: { uid: 'a', text: 'A', expand: true }, children: ['b'] },
+    b: { data: { uid: 'b', text: 'B', expand: false }, children: ['c'] },
+    c: { data: { uid: 'c', text: 'C', expand: false }, children: [] }
+  }
+  for (let i = 0; i < 1500; i++) {
+    const uid = 'n' + i
+    obj.root.children.push(uid)
+    obj[uid] = { data: { uid, text: 'N' + i }, children: [] }
+  }
+  const preview = mindDoc.buildPreview(obj, { keepDepth: 2 })
+  assert.strictEqual(preview.clipped, true)
+  const branch = preview.tree.children.find(item => item.data.uid === 'a')
+  const second = branch.children.find(item => item.data.uid === 'b')
+  assert.ok(second)
+  assert.strictEqual(second.children.length, 0)
+  assert.strictEqual(second.data.childCount, 1)
+  const subtree = mindDoc.subtreeChildren(obj, 'b')
+  second.children = subtree.children
+  applyExpandToLevel(preview.tree, 3)
+  assert.strictEqual(preview.tree.data.expand, true)
+  assert.strictEqual(branch.data.expand, true)
+  assert.strictEqual(second.data.expand, true)
+  assert.strictEqual(second.children[0].data.uid, 'c')
+  assert.notStrictEqual(second.children[0].data.expand, true)
+}
+
+testExpandToLevelThreeHydratesClippedBranch()
 console.log('collabYjs tests passed')

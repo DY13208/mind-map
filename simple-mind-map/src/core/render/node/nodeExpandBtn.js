@@ -129,8 +129,14 @@ function renderExpandBtn() {
     })
     this._expandBtn.on('click', e => {
       e.stopPropagation()
-      // 展开收缩
-      this.mindMap.execCommand('SET_NODE_EXPAND', this, !this.getData('expand'))
+      const live =
+        this.nodeData && this.nodeData.children && this.nodeData.children.length
+      const childCount = Number(this.getData('childCount')) || 0
+      const expanding = this.getData('expand') !== false
+      // 已展开但子树还没灌进来时，再点一次是重新加载，不是收起
+      const next =
+        expanding && !live && childCount > 0 ? true : !expanding
+      this.mindMap.execCommand('SET_NODE_EXPAND', this, next)
       this.mindMap.emit('expand_btn_click', this)
     })
     this._expandBtn.on('dblclick', e => {
