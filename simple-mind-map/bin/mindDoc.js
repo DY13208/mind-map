@@ -250,6 +250,40 @@ function subtreeChildren(obj, uid, options = {}) {
   }
 }
 
+function subtreeTree(obj, uid, options = {}) {
+  const maxNodes =
+    Number(options.maxNodes) > 0 ? Number(options.maxNodes) : 8000
+  const stats = { count: 0, truncated: false }
+  const walk = id => {
+    if (stats.count >= maxNodes) {
+      stats.truncated = true
+      return null
+    }
+    const cur = obj[id]
+    if (!cur) return null
+    stats.count += 1
+    const node = {
+      data: {
+        ...stripHeavyFields(clone(cur.data || {})),
+        uid: id
+      },
+      children: []
+    }
+    ;(cur.children || []).forEach(childUid => {
+      const child = walk(childUid)
+      if (child) node.children.push(child)
+    })
+    return node
+  }
+  const tree = walk(uid)
+  return {
+    uid,
+    tree,
+    node_count: stats.count,
+    truncated: stats.truncated
+  }
+}
+
 function nodesByUids(obj, uids) {
   const list = Array.isArray(uids) ? uids : []
   return list
@@ -1380,6 +1414,7 @@ module.exports = {
   collapseDeepNodes,
   buildPreview,
   subtreeChildren,
+  subtreeTree,
   nodesByUids,
   nodesByUidsFromDoc,
   locateNode,

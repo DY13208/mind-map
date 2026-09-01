@@ -8,7 +8,8 @@ import {
   getTextFromHtml,
   transformTreeDataToObject,
   transformObjectToTreeData,
-  removeFromParentNodeData
+  removeFromParentNodeData,
+  copyNodeTree
 } from '../utils/index'
 import { applyObjectToYMap, migrateLegacyNodes } from './cooperateYjs'
 
@@ -56,6 +57,25 @@ const STRUCTURE_COMMANDS = {
   REMOVE_GENERALIZATION: true
 }
 
+const RECENT_HTTP_MS = 8000
+const RECENT_PUSH_GRACE_MS = 2500
+
+function pruneRecentMap(map, maxAge = RECENT_HTTP_MS) {
+  const now = Date.now()
+  map.forEach((at, uid) => {
+    if (now - at > maxAge) map.delete(uid)
+  })
+}
+
+function keepHttpChild(uid, serverKids, lastPushed, recentPushed) {
+  if (!uid) return true
+  if (serverKids.has(uid)) return true
+  // Not uploaded yet: keep so a delayed add is not wiped by a stale poll.
+  if (!lastPushed[uid]) return true
+  const at = recentPushed && recentPushed.get(uid)
+  return !!(at && Date.now() - at < RECENT_PUSH_GRACE_MS)
+}
+
 // 协同插件
 class Cooperate {
   constructor(opt) {
@@ -100,6 +120,8 @@ class Cooperate {
     this.httpCollabMode = false
     this.httpRoomKey = ''
     this.httpFetchSubtree = null
+    this.httpFetchDeepSubtree = null
+    this.httpFetchExportTree = null
     this.httpFetchNodes = null
     this.httpFetchLocate = null
     this.httpPatchNode = null
@@ -109,6 +131,8 @@ class Cooperate {
     this.hydratedUids = new Set()
     this.hydrateFailedUids = new Set()
     this.lastPushed = {}
+    this.recentPushed = new Map()
+    this.recentHttpDeleted = new Map()
     this.pendingHttpDeletes = []
     this.httpTextTimer = null
     this.httpStructureTimer = null
@@ -872,6 +896,8 @@ class Cooperate {
   setLazyLoaders(config = {}) {
     if (config.roomKey) this.httpRoomKey = config.roomKey
     if (config.fetchSubtree) this.httpFetchSubtree = config.fetchSubtree
+    if (config.fetchDeepSubtree) this.httpFetchDeepSubtree = config.fetchDeepSubtree
+    if (config.fetchExportTree) this.httpFetchExportTree = config.fetchExportTree
     if (config.fetchNodes) this.httpFetchNodes = config.fetchNodes
     if (config.fetchLocate) this.httpFetchLocate = config.fetchLocate
     if (config.patchNode) this.httpPatchNode = config.patchNode
@@ -886,6 +912,8 @@ class Cooperate {
     this.hydratedUids = new Set()
     this.hydrateFailedUids = new Set()
     this.lastPushed = {}
+    this.recentPushed = new Map()
+    this.recentHttpDeleted = new Map()
     this.enableLargeMapMode(config.nodeCount || 400)
   }
 
@@ -893,6 +921,8 @@ class Cooperate {
     this.httpCollabMode = false
     this.httpRoomKey = ''
     this.httpFetchSubtree = null
+    this.httpFetchDeepSubtree = null
+    this.httpFetchExportTree = null
     this.httpFetchNodes = null
     this.httpFetchLocate = null
     this.httpPatchNode = null
@@ -902,6 +932,8 @@ class Cooperate {
     this.hydratedUids = new Set()
     this.hydrateFailedUids = new Set()
     this.lastPushed = {}
+    this.recentPushed = new Map()
+    this.recentHttpDeleted = new Map()
     this.pendingHttpDeletes = []
     clearTimeout(this.httpTextTimer)
     this.httpTextTimer = null
@@ -1058,6 +1090,15 @@ class Cooperate {
     return data
   }
 
+  hydrateYmapTree(data) {
+    if (!data || !this.ymap) return data
+    if (!Array.isArray(data.children) || !data.children.length) {
+      this.hydrateTreeNodeFromYmap(data)
+    }
+    ;(data.children || []).forEach(child => this.hydrateYmapTree(child))
+    return data
+  }
+
   collectEmptyChildNodesAtDepth(root, depth) {
     const stubs = []
     const walk = (node, d) => {
@@ -1145,7 +1186,8 @@ class Cooperate {
       const uids = this.pendingHttpDeletes.splice(0)
       uids.forEach(uid => {
         if (!this.httpDeleteNode) return
-        delete this.lastPushed[uid]
+        this.forgetHttpUid(uid)
+        this.recentHttpDeleted.set(uid, Date.now())
         this.httpDeleteNode(uid, { keepChildren }).catch(() => {})
       })
       return
@@ -1329,10 +1371,12 @@ class Cooperate {
           index: index < 0 ? undefined : index
         })
         this.lastPushed[uid] = { text, note }
+        this.recentPushed.set(uid, Date.now())
       } catch (err) {
         const msg = String((err && err.message) || err)
         if (/节点已存在/.test(msg)) {
           this.lastPushed[uid] = { text, note }
+          this.recentPushed.set(uid, Date.now())
         } else {
           console.error('[mind-map] add node failed', err)
         }
@@ -1376,6 +1420,72 @@ class Cooperate {
     )
   }
 
+  forgetHttpUid(uid) {
+    if (!uid) return
+    delete this.lastPushed[uid]
+    this.recentPushed.delete(uid)
+    this.hydratedUids.delete(uid)
+  }
+
+  isRecentlyHttpDeleted(uid) {
+    if (!uid || !this.recentHttpDeleted) return false
+    pruneRecentMap(this.recentHttpDeleted)
+    return this.recentHttpDeleted.has(uid)
+  }
+
+  dropHttpTree(node) {
+    if (!node) return
+    const uid = node.data && node.data.uid
+    this.forgetHttpUid(uid)
+    ;(node.children || []).forEach(child => this.dropHttpTree(child))
+  }
+
+  async copyNodeTrees(nodes) {
+    const list = (nodes || []).filter(Boolean)
+    if (!list.length) return null
+    const trees = []
+    for (const node of list) {
+      const uid = node.getData && node.getData('uid')
+      let copied = null
+      if (uid && this.httpFetchDeepSubtree) {
+        try {
+          const result = await this.httpFetchDeepSubtree(uid)
+          if (result && result.tree) {
+            copied = copyNodeTree({}, result.tree, true, true)
+          }
+        } catch (err) {
+          console.error('[mind-map] copy subtree failed', err)
+        }
+      }
+      if (!copied && node.nodeData) {
+        if (this.httpFetchSubtree) {
+          await this.hydrateDataTree(node.nodeData)
+        } else {
+          this.hydrateYmapTree(node.nodeData)
+        }
+        copied = copyNodeTree({}, node, true, true)
+      }
+      if (copied) trees.push(copied)
+    }
+    return trees.length ? trees : null
+  }
+
+  async fetchExportTree() {
+    if (!this.httpFetchExportTree) return null
+    const payload = await this.httpFetchExportTree()
+    return payload && payload.tree ? payload.tree : null
+  }
+
+  async hydrateDataTree(data) {
+    if (!data) return data
+    await this.hydrateNodeData(data)
+    const kids = data.children || []
+    for (let i = 0; i < kids.length; i++) {
+      await this.hydrateDataTree(kids[i])
+    }
+    return data
+  }
+
   collectVisibleUids() {
     const uids = []
     const walk = node => {
@@ -1384,7 +1494,18 @@ class Cooperate {
       ;(node.children || []).forEach(walk)
     }
     walk(this.mindMap.renderer && this.mindMap.renderer.renderTree)
-    return uids.slice(0, 200)
+    return uids.slice(0, 800)
+  }
+
+  async fetchHttpNodes(uids) {
+    const list = (uids || []).filter(Boolean)
+    if (!list.length || !this.httpFetchNodes) return []
+    const nodes = []
+    for (let i = 0; i < list.length; i += 200) {
+      const payload = await this.httpFetchNodes(list.slice(i, i + 200))
+      nodes.push(...((payload && payload.nodes) || []))
+    }
+    return nodes
   }
 
   async refreshVisibleFromHttp(updatedAt) {
@@ -1399,8 +1520,9 @@ class Cooperate {
     if (!tree) return
     const uids = this.collectVisibleUids()
     if (!uids.length) return
-    const payload = await this.httpFetchNodes(uids)
-    const remoteNodes = (payload && payload.nodes) || []
+    pruneRecentMap(this.recentHttpDeleted)
+    pruneRecentMap(this.recentPushed, RECENT_PUSH_GRACE_MS)
+    const remoteNodes = await this.fetchHttpNodes(uids)
     if (!remoteNodes.length) return
     const editing =
       renderer.textEdit &&
@@ -1446,41 +1568,38 @@ class Cooperate {
         const treeNode = this.findTreeNode(tree, item.uid)
         if (!treeNode) return
         const serverKids = item.children || []
+        const keep = new Set(serverKids)
         const have = new Set(
           (treeNode.children || [])
             .map(child => child && child.data && child.data.uid)
             .filter(Boolean)
         )
-        const need = serverKids.filter(id => id && !have.has(id))
+        const need = serverKids.filter(
+          id => id && !have.has(id) && !this.isRecentlyHttpDeleted(id)
+        )
         if (need.length) {
           missingFor.set(item.uid, need)
           need.forEach(id => missing.push(id))
         }
-        if (serverKids.length) {
-          const keep = new Set(serverKids)
-          const next = (treeNode.children || []).filter(child => {
-            const id = child && child.data && child.data.uid
-            if (!id) return true
-            if (keep.has(id)) return true
-            return !!this.lastPushed[id]
-          })
-          if (next.length !== (treeNode.children || []).length) {
-            treeNode.children = next
-            changed = true
-          }
+        const prevKids = treeNode.children || []
+        const next = prevKids.filter(child => {
+          const id = child && child.data && child.data.uid
+          return keepHttpChild(id, keep, this.lastPushed, this.recentPushed)
+        })
+        if (next.length !== prevKids.length) {
+          prevKids
+            .filter(child => !next.includes(child))
+            .forEach(child => this.dropHttpTree(child))
+          treeNode.children = next
+          changed = true
         }
-        if (treeNode.data && serverKids.length) {
-          treeNode.data.childCount = Math.max(
-            Number(treeNode.data.childCount) || 0,
-            serverKids.length
-          )
+        if (treeNode.data) {
+          treeNode.data.childCount = Math.max(next.length, serverKids.length)
         }
       })
       if (missing.length) {
-        const extra = await this.httpFetchNodes(missing.slice(0, 200))
-        const byUid = new Map(
-          ((extra && extra.nodes) || []).map(item => [item.uid, item])
-        )
+        const extraNodes = await this.fetchHttpNodes(missing.slice(0, 800))
+        const byUid = new Map(extraNodes.map(item => [item.uid, item]))
         missingFor.forEach((childIds, parentUid) => {
           const parent = this.findTreeNode(tree, parentUid)
           if (!parent) return
@@ -1492,7 +1611,9 @@ class Cooperate {
                 ...(item.data || {}),
                 uid: item.uid,
                 expand: false,
-                childCount: Array.isArray(item.children) ? item.children.length : 0
+                childCount: Array.isArray(item.children)
+                  ? item.children.length
+                  : 0
               },
               children: []
             }))
