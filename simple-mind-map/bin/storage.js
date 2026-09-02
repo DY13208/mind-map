@@ -1536,8 +1536,17 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
     actorId: command.actorId
   }
   const snapshot = snapshotNodesForStorage(applied.nodes || {})
+  const affectedUids = (event.affectedUids || []).filter(Boolean)
+  const incrementalWrite =
+    (command.type === 'node.update' ||
+      command.type === 'node.move' ||
+      command.type === 'node.reorder' ||
+      command.type === 'node.insert') &&
+    affectedUids.length > 0 &&
+    affectedUids.length <= 20
   await writeRoomNodeRows(client, roomKey, snapshot, version, {
-    allowRestore
+    allowRestore,
+    ...(incrementalWrite ? { onlyUids: affectedUids } : {})
   })
   const snapshotNodeCount = Object.keys(snapshot).length
   const roomsJsonPayload =

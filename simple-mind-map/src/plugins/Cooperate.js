@@ -74,6 +74,8 @@ const STRUCTURE_COMMANDS = {
 
 const RECENT_HTTP_MS = 8000
 const RECENT_PUSH_GRACE_MS = 2500
+const GEN_INTENT_MS = 30000
+const PATCH_CONCURRENCY = 6
 const NULLABLE_PATCH_KEYS = [
   'image',
   'imageTitle',
@@ -163,6 +165,45 @@ function stableFieldValue(value) {
   }
 }
 
+function generalizationSignature(generalization) {
+  const list = formatGetNodeGeneralization({ generalization })
+  if (!list.length) return ''
+  return list
+    .map(item => {
+      if (!item || typeof item !== 'object') return String(item || '')
+      const range =
+        Array.isArray(item.range) && item.range.length >= 2
+          ? `${Number(item.range[0])},${Number(item.range[1])}`
+          : ''
+      return [item.uid || '', String(item.text || ''), range].join(':')
+    })
+    .join('|')
+}
+
+function isRateLimitedError(err) {
+  return (
+    (err && err.code === 'RATE_LIMITED') ||
+    Number(err && err.statusCode) === 429
+  )
+}
+
+function sleepMs(ms) {
+  return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)))
+}
+
+async function runPromisePool(jobs, size = PATCH_CONCURRENCY) {
+  const list = (jobs || []).filter(job => typeof job === 'function')
+  if (!list.length) return
+  let index = 0
+  const workers = new Array(Math.min(size, list.length)).fill(0).map(async () => {
+    while (index < list.length) {
+      const job = list[index++]
+      await job()
+    }
+  })
+  await Promise.all(workers)
+}
+
 function nodeDataSyncChanged(before = {}, after = {}) {
   if (treeDataPlain(before) !== treeDataPlain(after)) return true
   if (
@@ -171,8 +212,8 @@ function nodeDataSyncChanged(before = {}, after = {}) {
     return true
   }
   if (
-    stableFieldValue(before.generalization) !==
-    stableFieldValue(after.generalization)
+    generalizationSignature(before.generalization) !==
+    generalizationSignature(after.generalization)
   ) {
     return true
   }
@@ -286,6 +327,9 @@ class Cooperate {
     this.httpFetchVersion = null
     this.httpUpdatedAt = ''
     this.httpReplacing = false
+    this.httpSettlingAfterReplace = false
+    this.httpSettleTimer = null
+    this.httpReplaceNodeCount = 0
     this.lastAppliedVersion = 0
     this.localUndoStack = []
     this.localRedoStack = []
@@ -299,7 +343,7 @@ class Cooperate {
     this.recentHttpDeleted = new Map()
     this.pendingHttpDeletes = []
     this.pendingHttpGeneralizationOwners = []
-    this.pendingGenClear = new Map()
+    this.pendingGenIntent = new Map()
     this.httpTextTimer = null
     this.httpStructureTimer = null
     this.httpInsertPromise = null
@@ -937,7 +981,9 @@ class Cooperate {
     if (this.isSetData || this.isApplyingRemote || this.httpReplacing) {
       return
     }
-    if (Date.now() < this.suppressLocalUntil) return
+    if (this.httpSettlingAfterReplace || Date.now() < this.suppressLocalUntil) {
+      return
+    }
     if (
       this.previewApplied ||
       this.hydratingCurrentData ||
@@ -985,14 +1031,23 @@ class Cooperate {
       !!(this.mindMap.renderer && this.mindMap.renderer._lazyCommandPending)
     if (busy) {
       if (this.httpCollabMode && historyCmd) this.httpHistorySyncing = false
-      // Queue instead of drop: preview/hydrate windows previously ate inserts,
-      // so a refresh showed the map without the new child nodes.
       if (
         this.httpCollabMode &&
         !this.isApplyingRemote &&
         !this.httpReplacing &&
         !this.isSetData
       ) {
+        const settling =
+          this.httpSettlingAfterReplace || Date.now() < this.suppressLocalUntil
+        if (settling) {
+          if (INSERT_COMMANDS[name] || MOVE_COMMANDS[name]) {
+            this.scheduleHttpStructureSync(80)
+          }
+          if (name === 'SET_NODE_TEXT' || name === 'SET_NODE_NOTE') {
+            this.scheduleHttpTextSync()
+          }
+          return
+        }
         if (STRUCTURE_COMMANDS[name]) this.scheduleHttpStructureSync(80)
         if (
           name === 'SET_NODE_TEXT' ||
@@ -1294,6 +1349,7 @@ class Cooperate {
     this.dirtySubtrees = new Map()
     this.localUndoStack = []
     this.localRedoStack = []
+    this.pendingGenIntent = new Map()
     this.enableLargeMapMode(Number(config.nodeCount) || 0)
     const roomKey = config.roomKey || this.httpRoomKey || ''
     if (roomKey) this.httpRoomKey = roomKey
@@ -1347,8 +1403,23 @@ class Cooperate {
       payload,
       send: () => send(payload)
     })
+    const run = async () => {
+      let lastErr
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          return await send(payload)
+        } catch (err) {
+          lastErr = err
+          if (!isRateLimitedError(err) || attempt === 3) throw err
+          await sleepMs(
+            Math.min(8000, Number(err.retryAfterMs) || 400 * Math.pow(2, attempt))
+          )
+        }
+      }
+      throw lastErr
+    }
     return Promise.resolve()
-      .then(() => send(payload))
+      .then(() => run())
       .then(result => {
         this.acknowledgeLocalVersion(result && result.version, {
             operationId,
@@ -1398,6 +1469,8 @@ class Cooperate {
     this.httpFetchVersion = null
     this.httpUpdatedAt = ''
     this.httpReplacing = false
+    this.httpSettlingAfterReplace = false
+    this.httpReplaceNodeCount = 0
     this.lastAppliedVersion = 0
     this.localUndoStack = []
     this.localRedoStack = []
@@ -1411,7 +1484,7 @@ class Cooperate {
     this.recentHttpDeleted = new Map()
     this.pendingHttpDeletes = []
     this.pendingHttpGeneralizationOwners = []
-    this.pendingGenClear = new Map()
+    this.pendingGenIntent = new Map()
     this.httpHistorySyncing = false
     this.httpRefreshing = false
     this.httpPendingRefreshAt = ''
@@ -1423,26 +1496,58 @@ class Cooperate {
     this.httpTextTimer = null
     clearTimeout(this.httpStructureTimer)
     this.httpStructureTimer = null
+    clearTimeout(this.httpSettleTimer)
+    this.httpSettleTimer = null
+    this.httpSettlingAfterReplace = false
     this.httpInsertRescan = false
     if (this.collabStore) this.collabStore.reset('', 0)
   }
 
   beginHttpReplace() {
     this.httpReplacing = true
+    this.httpSettlingAfterReplace = false
     clearTimeout(this.httpTextTimer)
     this.httpTextTimer = null
     clearTimeout(this.httpStructureTimer)
     this.httpStructureTimer = null
+    clearTimeout(this.httpSettleTimer)
+    this.httpSettleTimer = null
+  }
+
+  isHttpSettling() {
+    return !!(
+      this.httpReplacing ||
+      this.httpReplaceInFlight ||
+      this.httpSettlingAfterReplace ||
+      Date.now() < this.suppressLocalUntil
+    )
+  }
+
+  postReplaceSettleMs() {
+    const count = Number(this.httpReplaceNodeCount) || 0
+    if (count >= 400) return 12000
+    if (count >= 100) return 6000
+    return 3000
   }
 
   endHttpReplace() {
     this.httpReplacing = false
     this.httpReplaceInFlight = false
-    this.suppressLocalUntil = Date.now() + 2000
+    this.httpSettlingAfterReplace = true
+    const settleMs = this.postReplaceSettleMs()
+    this.suppressLocalUntil = Date.now() + settleMs
     clearTimeout(this.httpTextTimer)
     this.httpTextTimer = null
     clearTimeout(this.httpStructureTimer)
     this.httpStructureTimer = null
+    clearTimeout(this.httpSettleTimer)
+    this.httpSettleTimer = setTimeout(() => {
+      this.httpSettleTimer = null
+      this.captureHttpBaselineFromRenderer()
+      this.httpPendingRefreshAt = ''
+      this.httpPendingRefreshForce = false
+      this.httpSettlingAfterReplace = false
+    }, settleMs)
   }
 
   afterHttpReplace(result, treeOverride) {
@@ -1452,13 +1557,17 @@ class Cooperate {
     this.dirtySubtrees = new Map()
     this.pendingHttpDeletes = []
     this.pendingHttpGeneralizationOwners = []
-    this.pendingGenClear = new Map()
+    this.pendingGenIntent = new Map()
     this.hydrateFailedUids = new Set()
     const tree =
       treeOverride ||
       (this.mindMap.renderer && this.mindMap.renderer.renderTree) ||
       null
-    if (tree) this.markTreeUids(tree)
+    this.httpReplaceNodeCount = 0
+    if (tree) {
+      this.markTreeUids(tree)
+      this.httpReplaceNodeCount = Object.keys(this.lastPushed || {}).length
+    }
     this.hydratedUids = new Set()
     if (result && result.updated_at) this.httpUpdatedAt = result.updated_at
     if (result && result.version != null) {
@@ -1474,6 +1583,27 @@ class Cooperate {
     this.lastPushed = {}
     this.recentPushed = new Map()
     if (tree) this.markTreeUids(tree)
+  }
+
+  captureHttpBaselineFromRenderer() {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!renderer) return
+    const walk = node => {
+      if (!node || typeof node.getData !== 'function') return
+      if (node.isGeneralization) return
+      const uid = node.getData('uid')
+      if (uid) {
+        const full = this.nodePatchPayload(node)
+        this.lastPushed[uid] = {
+          text: full.text,
+          note: full.note,
+          full
+        }
+      }
+      ;(node.children || []).forEach(walk)
+    }
+    if (renderer.root) walk(renderer.root)
+    else if (renderer.renderTree) this.markTreeUids(renderer.renderTree)
   }
 
   async persistHttpReplace(fullData, extra = {}) {
@@ -1531,7 +1661,10 @@ class Cooperate {
 
   markUidPushed(uid, data) {
     if (!uid || this.lastPushed[uid]) return
-    const text = data && data.text ? String(data.text) : ''
+    const text =
+      data && data.richText
+        ? getTextFromHtml(data.text)
+        : String((data && data.text) || '')
     const note = (data && data.note) || ''
     const full = {
       text,
@@ -1558,13 +1691,13 @@ class Cooperate {
 
   generalizationRemoteChanged(localData = {}, next = {}) {
     return (
-      stableFieldValue(localData.generalization) !==
-      stableFieldValue(next.generalization)
+      generalizationSignature(localData.generalization) !==
+      generalizationSignature(next.generalization)
     )
   }
 
   normalizeGeneralizationData(generalization) {
-    if (generalization == null) return generalization
+    if (generalization == null) return null
     const list = formatGetNodeGeneralization({ generalization })
     if (!list.length) return null
     return list.map(item => {
@@ -1577,6 +1710,102 @@ class Cooperate {
       }
       return next
     })
+  }
+
+  stampLocalFieldVersion(node, group) {
+    if (!node || !group) return
+    const uid = node.getData && node.getData('uid')
+    const fv = { ...readFieldVersions(node.getData && node.getData()) }
+    const pushed =
+      uid && this.lastPushed[uid] && this.lastPushed[uid].fieldVersions
+    fv[group] = Math.max(
+      Number(fv[group] || 0),
+      Number((pushed && pushed[group]) || 0)
+    ) + 1
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (renderer && typeof renderer.setNodeData === 'function') {
+      renderer.setNodeData(node, { [FV_KEY]: fv })
+    } else if (typeof node.setData === 'function') {
+      node.setData({ [FV_KEY]: fv })
+    }
+    if (uid && this.lastPushed[uid]) {
+      this.lastPushed[uid].fieldVersions = {
+        ...(this.lastPushed[uid].fieldVersions || {}),
+        [group]: fv[group]
+      }
+    }
+  }
+
+  setGenIntent(uid, generalization) {
+    if (!uid) return
+    if (!this.pendingGenIntent) this.pendingGenIntent = new Map()
+    this.pendingGenIntent.set(uid, {
+      gen: this.normalizeGeneralizationData(generalization),
+      at: Date.now()
+    })
+  }
+
+  getGenIntent(uid) {
+    if (!uid || !this.pendingGenIntent) return null
+    const pending = this.pendingGenIntent.get(uid)
+    if (!pending) return null
+    if (Date.now() - pending.at > GEN_INTENT_MS) {
+      this.pendingGenIntent.delete(uid)
+      return null
+    }
+    return pending
+  }
+
+  stampGenIntentFromLocal() {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!renderer || typeof renderer.findNodeByUid !== 'function') return
+    Object.keys(this.lastPushed || {}).forEach(uid => {
+      const node = renderer.findNodeByUid(uid)
+      if (!node || typeof node.getData !== 'function') return
+      const localGen = node.getData('generalization')
+      const pushed =
+        this.lastPushed[uid] &&
+        this.lastPushed[uid].full &&
+        this.lastPushed[uid].full.generalization
+      if (generalizationSignature(localGen) === generalizationSignature(pushed)) {
+        return
+      }
+      this.setGenIntent(uid, localGen)
+      this.stampLocalFieldVersion(node, 'generalization')
+    })
+  }
+
+  applyLocalGeneralization(node, generalization) {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!node || !renderer) return false
+    const localData = (node.getData && node.getData()) || {}
+    const nextGen = this.normalizeGeneralizationData(generalization)
+    const empty = nextGen == null || (Array.isArray(nextGen) && nextGen.length === 0)
+    if (
+      generalizationSignature(localData.generalization) ===
+      generalizationSignature(empty ? null : nextGen)
+    ) {
+      return false
+    }
+    if (empty) {
+      renderer.setNodeData(node, { generalization: null })
+      if (typeof node.removeGeneralization === 'function') {
+        node.removeGeneralization()
+      }
+      return true
+    }
+    renderer.setNodeData(node, { generalization: nextGen })
+    if (typeof node.updateGeneralization === 'function') {
+      node.updateGeneralization()
+    } else if (typeof node.createGeneralizationNode === 'function') {
+      node.createGeneralizationNode()
+    }
+    this.hydrateGeneralizationParent(node, nextGen)
+      .then(hydrated => {
+        if (hydrated && this.mindMap) this.mindMap.render()
+      })
+      .catch(() => {})
+    return true
   }
 
   generalizationNeedsHydrate(node, generalization) {
@@ -1625,17 +1854,13 @@ class Cooperate {
   }
 
   shouldIgnoreRemoteGeneralization(uid, nextGen) {
-    if (!uid || !this.pendingGenClear) return false
-    const at = this.pendingGenClear.get(uid)
-    if (!at) return false
-    if (Date.now() - at > 8000) {
-      this.pendingGenClear.delete(uid)
-      return false
-    }
-    const empty =
-      nextGen == null || (Array.isArray(nextGen) && nextGen.length === 0)
-    if (empty) {
-      this.pendingGenClear.delete(uid)
+    const pending = this.getGenIntent(uid)
+    if (!pending) return false
+    if (
+      generalizationSignature(pending.gen) ===
+      generalizationSignature(nextGen)
+    ) {
+      this.pendingGenIntent.delete(uid)
       return false
     }
     return true
@@ -1644,7 +1869,6 @@ class Cooperate {
   applyHttpRemoteNodeFields(node, next = {}, merged = {}) {
     const renderer = this.mindMap.renderer
     if (!node || !renderer) return false
-    const localData = (node.getData && node.getData()) || {}
     let changed = false
     const stylePayload = {
       text: next.text,
@@ -1673,33 +1897,13 @@ class Cooperate {
       renderer.setNodeData(node, { [FV_KEY]: merged.data[FV_KEY] })
     }
     const nextGen = this.normalizeGeneralizationData(next.generalization)
-    const prevGen = this.normalizeGeneralizationData(localData.generalization)
     const ownerUid = node.getData && node.getData('uid')
+    const pending = this.getGenIntent(ownerUid)
     if (this.shouldIgnoreRemoteGeneralization(ownerUid, nextGen)) {
-      renderer.setNodeData(node, { generalization: null })
-      if (typeof node.removeGeneralization === 'function') {
-        node.removeGeneralization()
+      if (this.applyLocalGeneralization(node, pending && pending.gen)) {
+        changed = true
       }
-      changed = true
-    } else if (stableFieldValue(prevGen) !== stableFieldValue(nextGen)) {
-      if (nextGen == null || (Array.isArray(nextGen) && nextGen.length === 0)) {
-        renderer.setNodeData(node, { generalization: null })
-        if (typeof node.removeGeneralization === 'function') {
-          node.removeGeneralization()
-        }
-      } else {
-        renderer.setNodeData(node, { generalization: nextGen })
-        if (typeof node.updateGeneralization === 'function') {
-          node.updateGeneralization()
-        } else if (typeof node.createGeneralizationNode === 'function') {
-          node.createGeneralizationNode()
-        }
-        this.hydrateGeneralizationParent(node, nextGen)
-          .then(hydrated => {
-            if (hydrated && this.mindMap) this.mindMap.render()
-          })
-          .catch(() => {})
-      }
+    } else if (this.applyLocalGeneralization(node, next.generalization)) {
       changed = true
     }
     return changed
@@ -2208,9 +2412,9 @@ class Cooperate {
       generalization = null
     }
     if (generalization == null) generalization = null
-    if (!this.pendingGenClear) this.pendingGenClear = new Map()
-    if (generalization == null) this.pendingGenClear.set(uid, Date.now())
-    else this.pendingGenClear.delete(uid)
+    if (!this.pendingGenIntent) this.pendingGenIntent = new Map()
+    this.setGenIntent(uid, generalization)
+    this.stampLocalFieldVersion(owner, 'generalization')
     const prev = this.lastPushed[uid] || {
       text: this.nodePlain(owner),
       note: (owner.getData && owner.getData('note')) || ''
@@ -2233,7 +2437,7 @@ class Cooperate {
           note: latest.note,
           full: latest
         }
-        if (generalization == null) this.pendingGenClear.set(uid, Date.now())
+        if (this.pendingGenIntent) this.pendingGenIntent.delete(uid)
       })
       .catch(err => {
         console.error('[mind-map] generalization sync failed', err)
@@ -2365,6 +2569,7 @@ class Cooperate {
 
   syncHttpUndoRedo(name) {
     if (!this.httpCollabMode) return
+    this.stampGenIntentFromLocal()
     if (name === 'BACK' && this.httpUndoOperation && this.localUndoStack.length) {
       const last = this.localUndoStack.pop()
       Promise.resolve(this.httpUndoOperation(last.operationId))
@@ -2380,7 +2585,32 @@ class Cooperate {
         .catch(err => {
           this.localUndoStack.push(last)
           console.error('[mind-map] undo operation failed', err)
-          this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
+          this.stampGenIntentFromLocal()
+          if (isRateLimitedError(err)) {
+            const wait = Math.min(
+              8000,
+              Number(err.retryAfterMs) || 1000
+            )
+            setTimeout(() => {
+              Promise.resolve(this.httpUndoOperation(last.operationId))
+                .then(result => {
+                  if (result && result.version != null) {
+                    this.acknowledgeLocalVersion(result.version, {
+                      duplicate: true
+                    })
+                  }
+                  this.localUndoStack = this.localUndoStack.filter(
+                    item => item.operationId !== last.operationId
+                  )
+                  this.localRedoStack.push({ operationId: last.operationId })
+                })
+                .catch(() => {
+                  this.flushHttpTextNow().catch(() => {})
+                })
+            }, wait)
+            return
+          }
+          this.flushHttpTextNow().catch(() => {})
         })
       return
     }
@@ -2399,7 +2629,8 @@ class Cooperate {
         .catch(err => {
           this.localRedoStack.push(last)
           console.error('[mind-map] redo operation failed', err)
-          this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
+          this.stampGenIntentFromLocal()
+          this.flushHttpTextNow().catch(() => {})
         })
       return
     }
@@ -2500,6 +2731,19 @@ class Cooperate {
     return Array.from(byUid.values())
   }
 
+  collectActivePendingText() {
+    const renderer = this.mindMap.renderer
+    if (!renderer) return []
+    const byUid = new Map()
+    ;(renderer.activeNodeList || []).forEach(node => {
+      const target = this.resolveHttpPatchNode(node)
+      const uid = target.getData && target.getData('uid')
+      if (!uid || !this.lastPushed[uid]) return
+      if (this.hasUnsyncedLocalText(target)) byUid.set(uid, target)
+    })
+    return Array.from(byUid.values())
+  }
+
   nodePatchPayload(node, options = {}) {
     const target = this.resolveHttpPatchNode(node)
     const uid = target.getData && target.getData('uid')
@@ -2539,9 +2783,13 @@ class Cooperate {
 
   async flushHttpTextNow() {
     if (this.httpReplacing || !this.httpPatchNode) return
-    if (Date.now() < this.suppressLocalUntil) return
-    const pending = this.collectNodesWithPendingText()
-    const tasks = []
+    const settling =
+      this.httpSettlingAfterReplace || Date.now() < this.suppressLocalUntil
+    const pending = settling
+      ? this.collectActivePendingText()
+      : this.collectNodesWithPendingText()
+    if (settling && !pending.length) return
+    const jobs = []
     let droppedGhosts = false
     pending.forEach(node => {
       const target = this.resolveHttpPatchNode(node)
@@ -2554,7 +2802,7 @@ class Cooperate {
       const delta = this.nodePatchPayload(node, { onlyChanged: true })
       if (!delta) return
       const snap = JSON.stringify(full)
-      tasks.push(
+      jobs.push(() =>
         this.httpPatchNode(uid, delta)
           .then(() => {
             this.lastPushed[uid] = {
@@ -2575,7 +2823,7 @@ class Cooperate {
           })
       )
     })
-    if (tasks.length) await Promise.all(tasks)
+    if (jobs.length) await runPromisePool(jobs, PATCH_CONCURRENCY)
     if (droppedGhosts) {
       this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
     }
@@ -2623,10 +2871,20 @@ class Cooperate {
       this.httpReplacing ||
       !this.httpAddNode ||
       this.previewApplied ||
-      this.isSetData ||
-      Date.now() < this.suppressLocalUntil
+      this.isSetData
     ) {
       return
+    }
+    const settling =
+      this.httpSettlingAfterReplace || Date.now() < this.suppressLocalUntil
+    if (settling) {
+      const renderer = this.mindMap.renderer
+      const active = (renderer && renderer.activeNodeList) || []
+      const hasUnpushed = active.some(node => {
+        const uid = node && node.getData && node.getData('uid')
+        return uid && !this.lastPushed[uid] && !node.isRoot && !node.isGeneralization
+      })
+      if (!hasUnpushed) return
     }
     if (this.httpInsertPromise) {
       this.httpInsertRescan = true
@@ -2650,9 +2908,9 @@ class Cooperate {
     const pending = []
     const list = (renderer && renderer.activeNodeList) || []
     list.forEach(node => this.collectUnpushedNodes(node, pending))
-    // Always scan the full tree too. Relying only on the active node missed
-    // inserts when selection moved, or when the command finished on a parent.
-    if (renderer && renderer.root) {
+    const settling =
+      this.httpSettlingAfterReplace || Date.now() < this.suppressLocalUntil
+    if (!settling && renderer && renderer.root) {
       this.collectUnpushedNodes(renderer.root, pending)
     }
     const seen = new Set()
@@ -3033,6 +3291,11 @@ class Cooperate {
       return { applied: false, skipped: true }
     }
     const force = !!options.force
+    if (this.httpSettlingAfterReplace || Date.now() < this.suppressLocalUntil) {
+      this.httpPendingRefreshAt = updatedAt || this.httpPendingRefreshAt || '1'
+      this.httpPendingRefreshForce = force || this.httpPendingRefreshForce
+      return { applied: false, deferred: true }
+    }
     if (this.httpHydrating || this.isApplyingRemote || this.httpRefreshing) {
       this.httpPendingRefreshAt = updatedAt || this.httpPendingRefreshAt || '1'
       this.httpPendingRefreshForce = force || this.httpPendingRefreshForce
@@ -3141,11 +3404,8 @@ class Cooperate {
                     hyperlink: next.hyperlink,
                     hyperlinkTitle: next.hyperlinkTitle,
                     outerFrame: next.outerFrame,
-                    generalization: this.shouldIgnoreRemoteGeneralization(
-                      item.uid,
-                      next.generalization
-                    )
-                      ? null
+                    generalization: node.getData
+                      ? node.getData('generalization')
                       : next.generalization
                   },
                   fieldVersions: fv

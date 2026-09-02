@@ -766,6 +766,22 @@ export default {
         }
         this.mindMap.view.reset()
         await yieldToUi()
+        if (persistReplace && cooperate) {
+          await new Promise(resolve => {
+            let settled = false
+            const done = () => {
+              if (settled) return
+              settled = true
+              this.mindMap.off('node_tree_render_end', done)
+              resolve()
+            }
+            this.mindMap.on('node_tree_render_end', done)
+            setTimeout(done, nodeCount >= 400 ? 4000 : 1200)
+          })
+          if (typeof cooperate.captureHttpBaselineFromRenderer === 'function') {
+            cooperate.captureHttpBaselineFromRenderer()
+          }
+        }
         if (!persistReplace && isUserImport) {
           this.manualSave()
         }

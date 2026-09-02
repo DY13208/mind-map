@@ -974,6 +974,7 @@ async function handleApi(req, res) {
       sendJson(res, err.statusCode || 400, {
         error: err.message || 'bad request',
         code: err.code || 'UNDO_REJECTED',
+        retryAfterMs: err.retryAfterMs,
         overlappingUids: (err.details && err.details.overlappingUids) || [],
         blockingVersion: err.details && err.details.blockingVersion,
         blockingActorId: err.details && err.details.blockingActorId
@@ -996,6 +997,7 @@ async function handleApi(req, res) {
       sendJson(res, err.statusCode || 400, {
         error: err.message || 'bad request',
         code: err.code || 'REDO_REJECTED',
+        retryAfterMs: err.retryAfterMs,
         overlappingUids: (err.details && err.details.overlappingUids) || [],
         blockingVersion: err.details && err.details.blockingVersion,
         blockingActorId: err.details && err.details.blockingActorId
@@ -1355,7 +1357,8 @@ async function handleApi(req, res) {
     } catch (err) {
       sendJson(res, err.statusCode || 400, {
         error: err.message || 'bad request',
-        code: err.code || 'OPERATION_REJECTED'
+        code: err.code || 'OPERATION_REJECTED',
+        retryAfterMs: err.retryAfterMs
       })
       return true
     }
