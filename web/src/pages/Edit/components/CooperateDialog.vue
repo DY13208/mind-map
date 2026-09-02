@@ -1,15 +1,121 @@
 <template>
   <el-dialog
     class="cooperateDialog"
+    :custom-class="'cooperateDialogShell' + (isDark ? ' isDark' : '')"
     :title="$t('cooperate.title')"
     :visible.sync="dialogVisible"
-    width="600px"
+    width="720px"
     append-to-body
   >
-    <div class="cooperateBox">
-      <p class="desc">{{ $t('cooperate.tip') }}</p>
-      <p class="serverTip">{{ $t('cooperate.startServerTip') }}</p>
-      <el-form label-width="100px" @submit.native.prevent>
+    <div class="cooperateBox" :class="{ isDark: isDark }">
+      <div class="statusBar">
+        <span class="statusDot" :class="status"></span>
+        <span class="statusLabel">{{ statusText }}</span>
+        <span
+          v-if="connected"
+          class="saveState"
+          :class="saveStatus"
+          :title="saveError"
+          >{{ saveStatusText }}</span
+        >
+        <span v-if="peerList.length" class="peerCount"
+          >{{ $t('cooperate.peers') }} {{ peerList.length }}</span
+        >
+      </div>
+      <div class="peerList" v-if="peerList.length">
+        <div class="peer" v-for="peer in peerList" :key="peer.id">
+          <span class="avatar" :style="{ background: peer.color }">{{
+            peer.shortName
+          }}</span>
+          <span class="name">{{ peer.name }}</span>
+          <span class="you" v-if="peer.isMe">{{ $t('cooperate.you') }}</span>
+        </div>
+      </div>
+
+      <section class="filePanel">
+        <div class="fileHead">
+          <div class="fileHeadTitle">
+            <span>{{ $t('cooperate.files') }}</span>
+            <span class="fileCount">{{
+              $t('cooperate.fileCount', { count: fileTotal })
+            }}</span>
+          </div>
+          <el-button type="text" :disabled="filesLoading" @click="loadFiles">{{
+            $t('cooperate.refresh')
+          }}</el-button>
+        </div>
+        <el-input
+          v-model.trim="fileQuery"
+          class="fileSearch"
+          size="small"
+          clearable
+          prefix-icon="el-icon-search"
+          :placeholder="$t('cooperate.searchFiles')"
+          @keydown.native.stop
+        ></el-input>
+        <div class="fileList">
+          <div v-if="filesLoading" class="fileSkeleton">
+            <div class="fileSkeletonRow" v-for="n in 4" :key="'sk-' + n"></div>
+          </div>
+          <div
+            class="empty"
+            v-else-if="!fileList.length"
+          >
+            {{
+              fileQuery
+                ? $t('cooperate.emptySearch', { q: fileQuery })
+                : $t('cooperate.noFiles')
+            }}
+          </div>
+          <template v-else>
+            <div
+              class="fileItem"
+              v-for="item in fileList"
+              :key="item.room_key"
+              :class="{ current: connected && roomName === item.room_key }"
+              @dblclick="openFile(item)"
+            >
+            <div class="fileMeta">
+              <div class="fileTitle">
+                {{ item.title }}
+                <span
+                  v-if="connected && roomName === item.room_key"
+                  class="currentTag"
+                  >{{ $t('cooperate.currentRoom') }}</span
+                >
+              </div>
+              <div class="fileTime">{{ formatTime(item.updated_at) }}</div>
+            </div>
+            <div class="fileActions" @click.stop>
+              <el-button type="text" @click="openFile(item)">{{
+                $t('cooperate.openFile')
+              }}</el-button>
+              <el-button type="text" @click="renameSavedFile(item)">{{
+                $t('cooperate.renameFile')
+              }}</el-button>
+              <el-button
+                type="text"
+                class="danger"
+                @click="removeSavedFile(item)"
+                >{{ $t('cooperate.deleteFile') }}</el-button
+              >
+            </div>
+            </div>
+          </template>
+        </div>
+        <div class="filePager" v-if="fileTotal > filePageSize">
+          <el-pagination
+            small
+            layout="total, prev, pager, next"
+            :page-size="filePageSize"
+            :current-page="filePage"
+            :total="fileTotal"
+            @current-change="onFilePageChange"
+          ></el-pagination>
+        </div>
+      </section>
+
+      <el-form class="joinForm" label-width="88px" size="small" @submit.native.prevent>
         <el-form-item :label="$t('cooperate.userName')" required>
           <el-input
             v-model.trim="userName"
@@ -34,72 +140,32 @@
             >
           </el-input>
         </el-form-item>
-        <el-form-item :label="$t('cooperate.serverUrl')" required>
-          <el-input
-            v-model.trim="serverUrl"
-            :placeholder="$t('cooperate.serverUrlPlaceholder')"
-            :disabled="connected || connecting"
-            @keydown.native.stop
-          ></el-input>
-        </el-form-item>
       </el-form>
-      <div class="statusRow">
-        <span class="statusDot" :class="status"></span>
-        <span>{{ statusText }}</span>
-        <span
-          v-if="connected"
-          class="saveState"
-          :class="saveStatus"
-          :title="saveError"
-          >{{ saveStatusText }}</span
-        >
-        <span v-if="peerList.length" class="peerCount"
-          >{{ $t('cooperate.peers') }} {{ peerList.length }}</span
-        >
+
+      <button
+        class="advancedToggle"
+        type="button"
+        @click="showAdvanced = !showAdvanced"
+      >
+        {{ $t('cooperate.advanced') }}
+        <i :class="showAdvanced ? 'el-icon-arrow-up' : 'el-icon-arrow-down'"></i>
+      </button>
+      <div class="advancedBox" v-show="showAdvanced">
+        <p class="hint">{{ $t('cooperate.tip') }}</p>
+        <p class="hint">{{ $t('cooperate.startServerTip') }}</p>
+        <el-form label-width="88px" size="small" @submit.native.prevent>
+          <el-form-item :label="$t('cooperate.serverUrl')" required>
+            <el-input
+              v-model.trim="serverUrl"
+              :placeholder="$t('cooperate.serverUrlPlaceholder')"
+              :disabled="connected || connecting"
+              @keydown.native.stop
+            ></el-input>
+          </el-form-item>
+        </el-form>
       </div>
-      <div class="peerList" v-if="peerList.length">
-        <div class="peer" v-for="peer in peerList" :key="peer.id">
-          <span class="avatar" :style="{ background: peer.color }">{{
-            peer.shortName
-          }}</span>
-          <span class="name">{{ peer.name }}</span>
-          <span class="you" v-if="peer.isMe">{{ $t('cooperate.you') }}</span>
-        </div>
-      </div>
-      <div class="fileBox">
-        <div class="fileHead">
-          <span>{{ $t('cooperate.files') }}</span>
-          <el-button type="text" @click="loadFiles">{{
-            $t('cooperate.refresh')
-          }}</el-button>
-        </div>
-        <div class="empty" v-if="!fileList.length && !filesLoading">
-          {{ $t('cooperate.noFiles') }}
-        </div>
-        <div
-          class="fileItem"
-          v-for="item in fileList"
-          :key="item.room_key"
-          :class="{ current: connected && roomName === item.room_key }"
-        >
-          <div class="fileMeta">
-            <div class="fileTitle">{{ item.title }}</div>
-            <div class="fileTime">{{ formatTime(item.updated_at) }}</div>
-          </div>
-          <div class="fileActions">
-            <el-button type="text" @click="openFile(item)">{{
-              $t('cooperate.openFile')
-            }}</el-button>
-            <el-button type="text" @click="renameSavedFile(item)">{{
-              $t('cooperate.renameFile')
-            }}</el-button>
-            <el-button type="text" class="danger" @click="removeSavedFile(item)">{{
-              $t('cooperate.deleteFile')
-            }}</el-button>
-          </div>
-        </div>
-      </div>
-      <div class="fileBox" v-if="connected">
+
+      <section class="historyPanel" v-if="connected">
         <div class="fileHead">
           <span>{{ $t('cooperate.history') }}</span>
           <el-button type="text" @click="loadHistory">{{
@@ -111,7 +177,7 @@
         </div>
         <div
           class="historyItem"
-          v-for="item in historyList"
+          v-for="item in filteredHistory"
           :key="item.operationId"
         >
           <span class="historyMeta">
@@ -124,7 +190,16 @@
             >{{ $t('toolbar.undo') }}</el-button
           >
         </div>
-      </div>
+        <div class="filePager" v-if="historyList.length > historyPageSize">
+          <el-pagination
+            small
+            layout="prev, pager, next"
+            :page-size="historyPageSize"
+            :current-page.sync="historyPage"
+            :total="historyList.length"
+          ></el-pagination>
+        </div>
+      </section>
     </div>
     <div slot="footer" class="dialog-footer">
       <el-button @click="copyInvite" :disabled="!roomName">{{
@@ -133,9 +208,13 @@
       <el-button v-if="connected" @click="leave">{{
         $t('cooperate.leave')
       }}</el-button>
-      <el-button type="primary" :loading="connecting" @click="joinFromDialog" v-else>{{
-        $t('cooperate.join')
-      }}</el-button>
+      <el-button
+        type="primary"
+        :loading="connecting"
+        @click="joinFromDialog"
+        v-else
+        >{{ $t('cooperate.join') }}</el-button
+      >
     </div>
   </el-dialog>
 </template>
@@ -170,6 +249,7 @@ import {
   deleteFileNode,
   replaceFileTree
 } from '@/utils/fileApi'
+import { countNodes, stubImportedTree } from '@/utils/importTree'
 
 const USER_NAME_KEY = 'COOPERATE_USER_NAME'
 const USER_ID_KEY = 'COOPERATE_USER_ID'
@@ -234,10 +314,16 @@ export default {
       joinedOnce: false,
       fileList: [],
       filesLoading: false,
-      filesLoadPromise: null,
+      fileQuery: '',
+      filePage: 1,
+      filePageSize: 8,
+      fileTotal: 0,
+      showAdvanced: false,
       httpCollab: false,
       historyList: [],
-      historyLoading: false
+      historyLoading: false,
+      historyPage: 1,
+      historyPageSize: 8
     }
   },
   computed: {
@@ -260,11 +346,19 @@ export default {
         ? this.saveStatus
         : 'saving'
       return this.$t(`cooperate.${status}`)
+    },
+    filteredHistory() {
+      const start = (this.historyPage - 1) * this.historyPageSize
+      return this.historyList.slice(start, start + this.historyPageSize)
     }
   },
   watch: {
     mindMap(val) {
       if (val) this.tryAutoJoin()
+    },
+    fileQuery() {
+      this.filePage = 1
+      this.scheduleFileSearch()
     }
   },
   created() {
@@ -295,6 +389,10 @@ export default {
     this.clearReconnectNotice()
     this.unbindCollabStore()
     this.unbindProvider()
+    if (this._fileSearchTimer) {
+      clearTimeout(this._fileSearchTimer)
+      this._fileSearchTimer = null
+    }
   },
   methods: {
     ...mapMutations(['setCooperateStatus']),
@@ -327,6 +425,7 @@ export default {
 
     open() {
       this.dialogVisible = true
+      this.filePage = 1
       this.loadFiles()
       // Do not auto-join / auto-create here. Opening the dialog used to call
       // openSavedRoom with a random roomName, which created "未命名" rooms.
@@ -922,6 +1021,7 @@ export default {
       try {
         const data = await getMapAudit(this.roomName, { limit: 30 })
         this.historyList = (data.items || []).slice().reverse()
+        this.historyPage = 1
       } catch (err) {
         this.historyList = []
       } finally {
@@ -947,23 +1047,42 @@ export default {
       }
     },
 
+    scheduleFileSearch() {
+      if (this._fileSearchTimer) clearTimeout(this._fileSearchTimer)
+      this._fileSearchTimer = setTimeout(() => {
+        this._fileSearchTimer = null
+        this.loadFiles()
+      }, 280)
+    },
+
     async loadFiles() {
-      if (this.filesLoadPromise) return this.filesLoadPromise
+      const attempt = (this._filesAttempt = (this._filesAttempt || 0) + 1)
       this.filesLoading = true
-      this.filesLoadPromise = listFiles()
-        .then(data => {
-          this.fileList = data.list || []
-          return this.fileList
+      const query = String(this.fileQuery || '').trim()
+      const offset = (this.filePage - 1) * this.filePageSize
+      try {
+        const data = await listFiles({
+          q: query,
+          limit: this.filePageSize,
+          offset
         })
-        .catch(() => {
-          this.fileList = []
-          return this.fileList
-        })
-        .finally(() => {
-          this.filesLoading = false
-          this.filesLoadPromise = null
-        })
-      return this.filesLoadPromise
+        if (attempt !== this._filesAttempt) return
+        this.fileList = data.list || []
+        this.fileTotal = Number(
+          data.total != null ? data.total : this.fileList.length
+        )
+      } catch (err) {
+        if (attempt !== this._filesAttempt) return
+        this.fileList = []
+        this.fileTotal = 0
+      } finally {
+        if (attempt === this._filesAttempt) this.filesLoading = false
+      }
+    },
+
+    onFilePageChange(page) {
+      this.filePage = page
+      this.loadFiles()
     },
 
     markHttpConnected() {
@@ -1076,7 +1195,11 @@ export default {
         updatedAt: preview.updated_at,
         fetchSubtree: (uid, options) => getFileSubtree(roomKey, uid, options),
         fetchDeepSubtree: (uid, options) =>
-          getFileSubtree(roomKey, uid, { deep: true, ...(options || {}) }),
+          getFileSubtree(roomKey, uid, {
+            deep: true,
+            maxNodes: 400,
+            ...(options || {})
+          }),
         fetchExportTree: () => getFileExport(roomKey),
         fetchNodes: uids => getFileNodes(roomKey, uids),
         fetchLocate: uid => locateFileNode(roomKey, uid),
@@ -1134,7 +1257,15 @@ export default {
           resolve()
         }
         this.mindMap.on('node_tree_render_end', done)
-        this.$bus.$emit('setData', preview.tree, {
+        let tree = preview.tree
+        if (tree && countNodes(tree) > 280) {
+          stubImportedTree(tree, {
+            keepDepth: 1,
+            maxNodes: 280,
+            maxChildren: 40
+          })
+        }
+        this.$bus.$emit('setData', tree, {
           quiet: true,
           fromSaved: true
         })
@@ -1287,6 +1418,7 @@ export default {
         this.fileList = this.fileList.filter(
           file => file && file.room_key !== deletedKey
         )
+        if (this.fileTotal > 0) this.fileTotal -= 1
         this.$message.success(this.$t('cooperate.fileDeleted'))
         this.loadFiles()
       } catch (err) {
@@ -1299,66 +1431,57 @@ export default {
 </script>
 
 <style lang="less" scoped>
-.cooperateDialog {
-  /deep/ .el-dialog__body {
-    padding: 12px 20px 8px;
-  }
-}
-
 .cooperateBox {
-  .desc,
-  .serverTip {
-    margin: 0 0 12px;
-    padding-left: 12px;
-    border-left: 5px solid #ccc;
-    color: #666;
-    line-height: 1.6;
-    font-size: 13px;
-  }
+  color: #1f2328;
 
-  .serverTip {
-    border-left-color: #409eff;
-    word-break: break-all;
-  }
-
-  .statusRow {
+  .statusBar {
     display: flex;
     align-items: center;
     gap: 8px;
+    min-height: 36px;
+    padding: 0 12px;
+    margin-bottom: 10px;
+    border: 1px solid #e6e8eb;
+    border-radius: 8px;
+    background: #f7f8fa;
     font-size: 13px;
-    color: #666;
-    margin: 4px 0 8px;
+    color: #4b5563;
+  }
 
-    .statusDot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #c0c4cc;
+  .statusDot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #c0c4cc;
+    flex-shrink: 0;
 
-      &.connecting {
-        background: #e6a23c;
-      }
-
-      &.connected {
-        background: #67c23a;
-      }
+    &.connecting {
+      background: #d97706;
     }
 
-    .peerCount {
-      margin-left: auto;
+    &.connected {
+      background: #16a34a;
+    }
+  }
+
+  .statusLabel {
+    font-weight: 600;
+    color: #1f2328;
+  }
+
+  .peerCount {
+    margin-left: auto;
+  }
+
+  .saveState {
+    color: #6b7280;
+
+    &.saved {
+      color: #16a34a;
     }
 
-    .saveState {
-      margin-left: 8px;
-      color: #909399;
-
-      &.saved {
-        color: #67c23a;
-      }
-
-      &.saveError {
-        color: #f56c6c;
-      }
+    &.saveError {
+      color: #dc2626;
     }
   }
 
@@ -1366,7 +1489,7 @@ export default {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin-bottom: 4px;
+    margin-bottom: 12px;
   }
 
   .peer {
@@ -1374,7 +1497,7 @@ export default {
     align-items: center;
     gap: 6px;
     padding: 4px 8px 4px 4px;
-    background: #f5f7fa;
+    background: #f3f4f6;
     border-radius: 999px;
     font-size: 12px;
 
@@ -1390,73 +1513,298 @@ export default {
     }
 
     .you {
-      color: #409eff;
+      color: #2563eb;
     }
   }
 
-  .fileBox {
+  .filePanel,
+  .historyPanel {
+    margin-top: 4px;
+    padding: 12px;
+    border: 1px solid #e6e8eb;
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  .historyPanel {
     margin-top: 12px;
-    border-top: 1px solid #eee;
-    padding-top: 10px;
+  }
 
-    .fileHead {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 13px;
-      color: #333;
-      margin-bottom: 6px;
+  .fileHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 600;
+    color: #1f2328;
+    margin-bottom: 8px;
+  }
+
+  .fileHeadTitle {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .fileCount {
+    font-size: 12px;
+    font-weight: 400;
+    color: #6b7280;
+  }
+
+  .fileSearch {
+    margin-bottom: 8px;
+  }
+
+  .fileList {
+    min-height: 168px;
+    max-height: 280px;
+    overflow: auto;
+  }
+
+  .empty {
+    font-size: 13px;
+    color: #6b7280;
+    padding: 28px 8px;
+    text-align: center;
+    line-height: 1.6;
+  }
+
+  .fileSkeletonRow {
+    height: 48px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 37%, #f3f4f6 63%);
+    background-size: 400% 100%;
+    animation: filePulse 1.2s ease-in-out infinite;
+  }
+
+  .fileItem {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    margin: 0 0 4px;
+    padding: 10px 10px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+
+    &:hover {
+      background: #f7f8fa;
     }
 
-    .empty {
-      font-size: 12px;
-      color: #999;
-      padding: 8px 0;
+    &.current {
+      background: #eff6ff;
+      border-color: #bfdbfe;
+    }
+  }
+
+  .fileTitle {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1f2328;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .currentTag {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 600;
+    color: #1d4ed8;
+    background: #dbeafe;
+    border-radius: 999px;
+    padding: 1px 7px;
+  }
+
+  .fileTime {
+    font-size: 12px;
+    color: #6b7280;
+    margin-top: 2px;
+  }
+
+  .fileActions {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+
+    .danger {
+      color: #dc2626;
+    }
+  }
+
+  .filePager {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 8px;
+  }
+
+  .joinForm {
+    margin-top: 14px;
+  }
+
+  .advancedToggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 4px 0 8px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: #4b5563;
+    font-size: 12px;
+    cursor: pointer;
+
+    &:hover {
+      color: #1f2328;
+    }
+  }
+
+  .advancedBox {
+    padding: 10px 12px;
+    border: 1px solid #e6e8eb;
+    border-radius: 8px;
+    background: #f7f8fa;
+  }
+
+  .hint {
+    margin: 0 0 8px;
+    color: #4b5563;
+    line-height: 1.6;
+    font-size: 12px;
+  }
+
+  .historyItem {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 4px;
+    border-bottom: 1px solid #f3f4f6;
+    font-size: 12px;
+    color: #4b5563;
+  }
+
+  &.isDark {
+    color: hsla(0, 0%, 100%, 0.9);
+
+    .statusBar,
+    .advancedBox {
+      background: #2b3035;
+      border-color: hsla(0, 0%, 100%, 0.08);
+      color: hsla(0, 0%, 100%, 0.7);
     }
 
-    .fileItem {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 8px 0;
-      border-bottom: 1px solid #f2f2f2;
-
-      &.current .fileTitle {
-        color: #409eff;
-      }
+    .statusLabel,
+    .fileHead,
+    .fileTitle,
+    .advancedToggle:hover {
+      color: hsla(0, 0%, 100%, 0.92);
     }
 
-    .fileTitle {
-      font-size: 13px;
-      color: #333;
+    .filePanel,
+    .historyPanel {
+      background: #262b30;
+      border-color: hsla(0, 0%, 100%, 0.08);
     }
 
-    .fileTime {
-      font-size: 12px;
-      color: #999;
-      margin-top: 2px;
+    .fileItem:hover {
+      background: #32383e;
+    }
+
+    .fileItem.current {
+      background: rgba(64, 158, 255, 0.16);
+      border-color: rgba(64, 158, 255, 0.35);
+    }
+
+    .currentTag {
+      background: rgba(64, 158, 255, 0.22);
+      color: #93c5fd;
+    }
+
+    .peer {
+      background: #32383e;
+    }
+
+    .fileTime,
+    .fileCount,
+    .empty,
+    .hint,
+    .historyItem,
+    .advancedToggle {
+      color: hsla(0, 0%, 100%, 0.55);
     }
 
     .historyItem {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 6px 0;
-      border-bottom: 1px solid #f2f2f2;
-      font-size: 12px;
-      color: #666;
+      border-bottom-color: hsla(0, 0%, 100%, 0.06);
     }
 
-    .fileActions {
-      display: flex;
-      align-items: center;
-      flex-shrink: 0;
+    .fileSkeletonRow {
+      background: linear-gradient(
+        90deg,
+        #32383e 25%,
+        #3a4148 37%,
+        #32383e 63%
+      );
+      background-size: 400% 100%;
+    }
+  }
+}
 
-      .danger {
-        color: #f56c6c;
-      }
+@keyframes filePulse {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fileSkeletonRow {
+    animation: none;
+  }
+}
+</style>
+
+<style lang="less">
+.cooperateDialogShell {
+  .el-dialog__body {
+    padding: 12px 20px 8px;
+  }
+
+  .el-dialog__header {
+    padding: 16px 20px 10px;
+  }
+
+  .el-dialog__title {
+    font-size: 16px;
+    font-weight: 650;
+  }
+
+  &.isDark {
+    background: #1f2428;
+    border: 1px solid hsla(0, 0%, 100%, 0.08);
+
+    .el-dialog__header,
+    .el-dialog__body,
+    .el-dialog__footer {
+      background: #1f2428;
+    }
+
+    .el-dialog__title,
+    .el-dialog__close {
+      color: hsla(0, 0%, 100%, 0.9);
+    }
+
+    .el-pagination button,
+    .el-pagination .el-pager li {
+      background: transparent;
+      color: hsla(0, 0%, 100%, 0.75);
     }
   }
 }

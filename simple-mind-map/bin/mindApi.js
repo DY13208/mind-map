@@ -4,10 +4,14 @@ const mindDoc = require('./mindDoc')
 const { applyNodeCommand, dataFields } = require('./roomCommands')
 const {
   listRooms,
+  listRoomsPage,
   getRoom,
   getRoomSnapshot,
   removeRoom,
   ensureDoc,
+  warmDoc,
+  dropLiveDoc,
+  isLiveDocAllowed,
   saveDoc,
   upsertRoom,
   persistHotSnapshot,
@@ -824,8 +828,27 @@ async function handleApi(req, res) {
   }
 
   if (req.method === 'GET' && pathname === '/api/files') {
-    const list = (await listRooms()).map(withShare)
-    sendJson(res, 200, { list })
+    const limit = Number(url.searchParams.get('limit') || 0)
+    const offset = Number(url.searchParams.get('offset') || 0)
+    const q = url.searchParams.get('q') || url.searchParams.get('query') || ''
+    if (limit > 0) {
+      const page = await listRoomsPage({ q, limit, offset })
+      sendJson(res, 200, {
+        list: page.list.map(withShare),
+        total: page.total,
+        limit: page.limit,
+        offset: page.offset
+      })
+      return true
+    }
+    let list = (await listRooms()).map(withShare)
+    const query = String(q || '').trim().toLowerCase()
+    if (query) {
+      list = list.filter(item =>
+        String((item && item.title) || '').toLowerCase().includes(query)
+      )
+    }
+    sendJson(res, 200, { list, total: list.length })
     return true
   }
 
@@ -1528,7 +1551,7 @@ async function handleApi(req, res) {
       ...preview
     })
     setImmediate(() => {
-      ensureDoc(roomKey).catch(err => {
+      warmDoc(roomKey).catch(err => {
         console.error('[persist] warmup failed', roomKey, err.message)
       })
     })

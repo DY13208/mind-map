@@ -590,6 +590,11 @@ export default {
     tip: 'Người trong cùng phòng sẽ đồng bộ canvas theo thời gian thực.',
     startServerTip:
       'Chạy start.bat ở thư mục gốc để khởi động trang, cộng tác và AI',
+    searchFiles: 'Tìm theo tên',
+    fileCount: '{count}',
+    currentRoom: 'Hiện tại',
+    advanced: 'Nâng cao',
+    emptySearch: 'Không có tệp khớp "{q}"',
     files: 'Tệp đã lưu',
     refresh: 'Làm mới',
     openFile: 'Mở',

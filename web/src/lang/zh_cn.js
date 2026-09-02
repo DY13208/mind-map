@@ -388,7 +388,7 @@ export default {
     importSavingTip: '正在保存到服务器，大图可能需要几分钟，请勿关闭页面…',
     importPersistFailed: '导入未能保存到当前房间，已恢复为服务器上的导图',
     largeMapImportTip:
-      '节点较多，已收起深层分支并开启性能模式，避免卡死。需要时再点节点上的展开。',
+      '节点较多，已只展开浅层并限制同级数量，避免卡死。需要时再点节点上的展开。',
     localStorageExceededTip:
       '本地草稿保存失败。协同房间里的图以服务器为准，不会因此丢失。若未进入房间，请导出一份备份。',
     withBg: '带背景',
@@ -593,6 +593,11 @@ export default {
     you: '我',
     tip: '同一房间的人会实时同步画布。局域网协作请使用启动脚本写入的本机 IP。',
     startServerTip: '可双击项目根目录「启动.bat」一键启动页面、协同和 AI 服务',
+    searchFiles: '搜索文件名',
+    fileCount: '{count} 个',
+    currentRoom: '当前',
+    advanced: '高级设置',
+    emptySearch: '没有找到「{q}」',
     files: '已保存的文件',
     refresh: '刷新',
     openFile: '打开',

@@ -117,6 +117,13 @@ const roomSaveStates = new Map()
 const MAX_SAVE_CONCURRENCY = 1
 const IDLE_EVICT_MS = 10 * 60 * 1000
 const LARGE_MAP_NODES = 400
+// Building a Y.Doc costs ~4 CRDT objects per node (node map, data map, children
+// array, text) inside one synchronous transaction. Above this size the warmup is
+// slower and heavier than simply reading the authoritative snapshot from PG.
+const LIVE_DOC_MAX_NODES =
+  Number(process.env.COLLAB_LIVE_DOC_MAX_NODES) > 0
+    ? Number(process.env.COLLAB_LIVE_DOC_MAX_NODES)
+    : 2000
 
 function isPresenceDocName(roomKey) {
   return String(roomKey || '').endsWith('__presence')
@@ -145,7 +152,10 @@ function scheduleIdleEvict(roomKey) {
     setTimeout(() => {
       idleTimers.delete(key)
       const doc = docs.get(key)
-      if (!doc || (doc.conns && doc.conns.size > 0)) return
+      if (!doc || (doc.conns && doc.conns.size > 0)) {
+        if (!doc) preloadCache.delete(key)
+        return
+      }
       queueSave(key, doc)
         .catch(err => {
           console.error('[persist] idle save failed', key, err.message)
@@ -153,15 +163,47 @@ function scheduleIdleEvict(roomKey) {
         .finally(() => {
           const current = docs.get(key)
           if (!current || (current.conns && current.conns.size > 0)) return
-          docs.delete(key)
-          try {
-            current.destroy()
-          } catch (e) {
-            // ignore
-          }
+          destroyMemoryDoc(key)
         })
     }, IDLE_EVICT_MS)
   )
+}
+
+// Drops both the in-memory CRDT doc and the cached snapshot JSON. Without the
+// preloadCache half, every room ever opened stays resident for the process life.
+function destroyMemoryDoc(roomKey) {
+  const key = String(roomKey || '')
+  const doc = docs.get(key)
+  docs.delete(key)
+  preloadCache.delete(key)
+  if (!doc) return
+  try {
+    doc.destroy()
+  } catch (e) {
+    // ignore
+  }
+}
+
+function payloadNodeCount(payload) {
+  if (!payload || payload.type !== 'nodes' || !payload.nodes) return 0
+  return Object.keys(payload.nodes).length
+}
+
+// Evicts a live doc instead of rewriting it. PG stays authoritative, so readers
+// fall back to the snapshot and skip a full CRDT rebuild.
+function dropLiveDoc(roomKey) {
+  const key = String(roomKey || '')
+  const doc = docs.get(key)
+  if (!doc) return false
+  if (doc.conns && doc.conns.size > 0) return false
+  cancelIdleEvict(key)
+  docs.delete(key)
+  try {
+    doc.destroy()
+  } catch (e) {
+    // ignore
+  }
+  return true
 }
 
 function saveDelay(ydoc) {
@@ -669,6 +711,25 @@ async function ensureDoc(roomKey) {
   const ydoc = getYDoc(key)
   if (ydoc.getMap().size === 0) applyPayload(ydoc, usePayload)
   return ydoc
+}
+
+// Opportunistic warmup for the HTTP collab path. Large maps are skipped: their
+// Y.Doc is never used to sync the tree (presence rides a separate doc), so
+// hydrating one would block the event loop and leak hundreds of MB per room.
+async function warmDoc(roomKey) {
+  const key = String(roomKey || '')
+  if (isPresenceDocName(key) || isDeletedRoom(key)) return null
+  if (docs.has(key)) return docs.get(key)
+  const payload = await preloadRoom(key)
+  if (payloadNodeCount(payload) > LIVE_DOC_MAX_NODES) return null
+  const ydoc = await ensureDoc(key)
+  scheduleIdleEvict(key)
+  return ydoc
+}
+
+function isLiveDocAllowed(nodes) {
+  const count = nodes ? Object.keys(nodes).length : 0
+  return count <= LIVE_DOC_MAX_NODES
 }
 
 function shareUrl(roomKey) {
@@ -1203,6 +1264,42 @@ async function listRooms() {
   return res.rows.filter(row => !deletedRooms.has(row.room_key))
 }
 
+async function listRoomsPage(options = {}) {
+  const safeLimit = Math.min(100, Math.max(1, Number(options.limit) || 20))
+  const safeOffset = Math.max(0, Number(options.offset) || 0)
+  const query = String(options.q || '').trim()
+  const params = []
+  let where = 't.room_key is null'
+  if (query) {
+    params.push('%' + query.replace(/[%_\\]/g, ch => '\\' + ch) + '%')
+    where += ` and r.title ilike $${params.length} escape '\\'`
+  }
+  const countRes = await pool.query(
+    `select count(*)::int as total
+     from rooms r
+     left join room_tombstones t on t.room_key = r.room_key
+     where ${where}`,
+    params
+  )
+  const listParams = params.slice()
+  listParams.push(safeLimit, safeOffset)
+  const listRes = await pool.query(
+    `select r.room_key, r.title, r.cos_key, r.version, r.created_at, r.updated_at
+     from rooms r
+     left join room_tombstones t on t.room_key = r.room_key
+     where ${where}
+     order by r.updated_at desc
+     limit $${listParams.length - 1} offset $${listParams.length}`,
+    listParams
+  )
+  return {
+    list: listRes.rows.filter(row => !deletedRooms.has(row.room_key)),
+    total: Number((countRes.rows[0] && countRes.rows[0].total) || 0),
+    limit: safeLimit,
+    offset: safeOffset
+  }
+}
+
 async function renameRoom(roomKey, title) {
   const name = normalizeTitle(title)
   const res = await pool.query(
@@ -1564,9 +1661,14 @@ module.exports = {
   attachPersistence,
   preloadRoom,
   ensureDoc,
+  warmDoc,
+  dropLiveDoc,
+  isLiveDocAllowed,
+  LIVE_DOC_MAX_NODES,
   handleApi,
   safeRoomKey,
   listRooms,
+  listRoomsPage,
   getRoom,
   getRoomSnapshot,
   renameRoom,

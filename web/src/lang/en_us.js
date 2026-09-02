@@ -401,7 +401,7 @@ export default {
     importPersistFailed:
       'Import could not be saved to this room. The server copy was restored.',
     largeMapImportTip:
-      'This map is large, so deep branches were collapsed and performance mode was turned on. Expand nodes as needed.',
+      'This map is large, so only shallow branches are expanded and wide fan-out is capped. Expand nodes as needed.',
     localStorageExceededTip:
       'Failed to save the local draft. Maps in a collab room are stored on the server and will not be lost. If you are not in a room, export a backup.',
     withBg: 'With background image',
@@ -618,6 +618,11 @@ export default {
       'People in the same room sync the canvas in real time. For LAN use, set the server to your computer IP.',
     startServerTip:
       'Run start.bat in the project root to start the page, collab and AI services',
+    searchFiles: 'Search by title',
+    fileCount: '{count}',
+    currentRoom: 'Current',
+    advanced: 'Advanced',
+    emptySearch: 'No files matching "{q}"',
     files: 'Saved files',
     refresh: 'Refresh',
     openFile: 'Open',

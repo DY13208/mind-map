@@ -514,6 +514,20 @@ class Cooperate {
     ) {
       return
     }
+    const overflow =
+      data &&
+      data.data &&
+      Array.isArray(data.data._overflowChildren) &&
+      data.data._overflowChildren
+    if (overflow && overflow.length && !this.httpFetchSubtree) {
+      const chunk = overflow.splice(0, 48)
+      data.children = (data.children || []).concat(chunk)
+      if (!overflow.length) {
+        delete data.data._overflowChildren
+        data.data.hasMore = false
+      }
+      return
+    }
     if (this.httpFetchSubtree) {
       if (!live && count <= 0 && !dirty) return
       return this.hydrateFromHttp(node)
@@ -1412,7 +1426,7 @@ class Cooperate {
     this.httpReplacing = false
   }
 
-  afterHttpReplace(result) {
+  afterHttpReplace(result, treeOverride) {
     this.lastPushed = {}
     this.recentPushed = new Map()
     this.recentHttpDeleted = new Map()
@@ -1420,9 +1434,11 @@ class Cooperate {
     this.pendingHttpDeletes = []
     this.hydrateFailedUids = new Set()
     const tree =
-      (this.mindMap.renderer && this.mindMap.renderer.renderTree) || null
+      treeOverride ||
+      (this.mindMap.renderer && this.mindMap.renderer.renderTree) ||
+      null
     if (tree) this.markTreeUids(tree)
-    this.hydratedUids = this.collectLoadedUids()
+    this.hydratedUids = new Set()
     if (result && result.updated_at) this.httpUpdatedAt = result.updated_at
     if (result && result.version != null) {
       this.acknowledgeLocalVersion(result.version, {
@@ -1439,7 +1455,7 @@ class Cooperate {
     }
     const tree = (fullData && fullData.root) || fullData
     const result = await this.httpReplaceTree(tree)
-    this.afterHttpReplace(result)
+    this.afterHttpReplace(result, tree)
     return result
   }
 
@@ -1770,7 +1786,10 @@ class Cooperate {
         count > 0 &&
         this.httpFetchDeepSubtree
       ) {
-        const deep = await this.httpFetchDeepSubtree(uid, { knownVersion: 0 })
+        const deep = await this.httpFetchDeepSubtree(uid, {
+          knownVersion: 0,
+          maxNodes: 400
+        })
         if (deep && deep.tree) {
           result = {
             children: deep.tree.children || [],
@@ -2737,7 +2756,7 @@ class Cooperate {
       ;(node.children || []).forEach(walk)
     }
     walk(this.mindMap.renderer && this.mindMap.renderer.renderTree)
-    return uids.slice(0, 800)
+    return uids.slice(0, 200)
   }
 
   async fetchHttpNodes(uids) {
@@ -2894,7 +2913,7 @@ class Cooperate {
         ...this.collectVisibleUids(),
         ...Array.from(this.dirtySubtrees.keys())
       ])
-    ].slice(0, 800)
+    ].slice(0, 200)
     if (!uids.length) return { applied: false, skipped: true }
     pruneRecentMap(this.recentHttpDeleted)
     pruneRecentMap(this.recentPushed, RECENT_PUSH_GRACE_MS)
@@ -3040,7 +3059,7 @@ class Cooperate {
         })
         if (missing.length) {
           let byUid = new Map()
-          const extraNodes = await this.fetchHttpNodes(missing.slice(0, 800))
+          const extraNodes = await this.fetchHttpNodes(missing.slice(0, 200))
           extraNodes.forEach(item => byUid.set(item.uid, item))
           // Fallback: parent subtree when batch node fetch misses newly inserted kids.
           for (const [parentUid, childIds] of missingFor) {

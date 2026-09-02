@@ -612,16 +612,22 @@ class Render {
       })
       // 更新根节点
       this.root = root
-      // 渲染节点
-      this.root.render(() => {
-        this.isRendering = false
-        if (this.hasWaitRendering) {
-          this.hasWaitRendering = false
-          this.render()
-          return
-        }
-        this.onRenderEnd()
-      })
+      // Large maps paint off the main thread in chunks so opening / importing
+      // a deep tree cannot freeze the tab.
+      const asyncPaint = !!this.mindMap.opt.openPerformance
+      this.root.render(
+        () => {
+          this.isRendering = false
+          if (this.hasWaitRendering) {
+            this.hasWaitRendering = false
+            this.render()
+            return
+          }
+          this.onRenderEnd()
+        },
+        false,
+        asyncPaint
+      )
     })
     this.emitNodeActiveEvent()
   }
