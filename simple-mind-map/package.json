@@ -21,7 +21,7 @@
     "types": "npx -p typescript tsc index.js --declaration --allowJs --emitDeclarationOnly --outDir types --target es2017 --skipLibCheck & node ./bin/createPluginsTypeFiles.js",
     "wsServe": "node ./bin/wsServer.mjs",
     "collabServe": "node ./bin/collabServer.js",
-    "test:collab": "node ./test/collabYjs.test.js && node ./test/roomNodes.test.js && node ./test/fractionalIndex.test.js && node ./test/roomOperations.test.js && node ./test/outbox.test.js && node ./test/collaborationStore.test.js",
+    "test:collab": "node ./test/collabYjs.test.js && node ./test/roomNodes.test.js && node ./test/fractionalIndex.test.js && node ./test/roomOperations.test.js && node ./test/outbox.test.js && node ./test/presence.test.js && node ./test/collaborationStore.test.js",
     "test:collab:redis": "node ./test/outbox.redis.integration.test.js",
     "test:auth": "node ./test/auth.test.js",
     "test:auth:integration": "node ./test/auth.integration.test.js",

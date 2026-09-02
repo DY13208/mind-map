@@ -39,6 +39,10 @@ function presenceScanPattern(roomKey) {
   return `presence:${encodeURIComponent(String(roomKey || ''))}:*`
 }
 
+function scanFinished(cursor) {
+  return String(cursor) === '0'
+}
+
 function normalizeSelectedUids(value) {
   const list = Array.isArray(value)
     ? value
@@ -212,7 +216,10 @@ async function listRedis(roomKey) {
         // ignore malformed presence entries
       }
     })
-  } while (cursor !== '0')
+  // node-redis v4 returns cursor as a number, while older clients returned a
+  // string. Comparing it strictly with '0' leaves this loop running forever
+  // after Redis has already returned numeric 0.
+  } while (!scanFinished(cursor))
   return Array.from(byUser.values())
     .map(publicPresence)
     .filter(Boolean)
@@ -263,7 +270,7 @@ async function leaveRedis(roomKey, userId, clientId) {
         }
       })
       if (toDelete.length) await client.del(toDelete)
-    } while (cursor !== '0')
+    } while (!scanFinished(cursor))
   }
   return listRedis(key)
 }
@@ -301,5 +308,6 @@ module.exports = {
   listPresence,
   leavePresence,
   getPresenceStatus,
-  normalizeUser
+  normalizeUser,
+  scanFinished
 }
