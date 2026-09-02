@@ -263,7 +263,7 @@ function testMarkDirtySubtreesForUnloadedBranch() {
       }
     }
   ])
-  assert.deepStrictEqual(dirty, { loaded: 12 })
+  assert.deepStrictEqual(dirty, { hidden: 12, loaded: 12 })
 
   const clean = markDirtySubtrees(['root', 'a'], [
     {

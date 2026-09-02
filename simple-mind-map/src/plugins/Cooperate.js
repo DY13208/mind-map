@@ -15,7 +15,8 @@ import { applyObjectToYMap, migrateLegacyNodes } from './cooperateYjs'
 import {
   planCollabRecovery,
   planAfterOperations,
-  markDirtySubtrees
+  markDirtySubtrees,
+  affectedUidsFromOperation
 } from './cooperateRecovery'
 import {
   applyRemoteNodeData,
@@ -1644,6 +1645,110 @@ class Cooperate {
     return null
   }
 
+  expandTreeNode(node) {
+    if (!node || !node.data || node.data.expand === true) return false
+    node.data.expand = true
+    return true
+  }
+
+  async ensureHttpNodePath(uid, locatedCache) {
+    if (!uid || uid === 'root') return false
+    const renderer = this.mindMap.renderer
+    const tree = renderer && renderer.renderTree
+    if (!tree) return false
+    if (this.findTreeNode(tree, uid)) return true
+    if (!this.httpFetchLocate) return false
+    let located = locatedCache
+    if (!located) {
+      try {
+        located = await this.httpFetchLocate(uid)
+      } catch (err) {
+        console.error('[mind-map] locate node failed', uid, err)
+        return false
+      }
+    }
+    if (!located || !Array.isArray(located.ancestors) || !located.ancestors.length) {
+      return false
+    }
+    let changed = false
+    for (let i = 0; i < located.ancestors.length; i++) {
+      const id = located.ancestors[i]
+      let treeNode = this.findTreeNode(tree, id)
+      if (!treeNode && i > 0) {
+        const parentId = located.ancestors[i - 1]
+        const parent = this.findTreeNode(tree, parentId)
+        const stub = located.nodes && located.nodes[id]
+        if (parent && stub) {
+          this.mergeHttpChildren(parent, [stub])
+          if (this.expandTreeNode(parent)) changed = true
+          treeNode = this.findTreeNode(tree, id)
+        }
+      }
+      if (treeNode) {
+        try {
+          await this.hydrateNodeData(treeNode)
+        } catch (err) {
+          console.error('[mind-map] hydrate path failed', id, err)
+        }
+        if (this.expandTreeNode(treeNode)) changed = true
+        this.hydratedUids.add(id)
+        this.dirtySubtrees.delete(id)
+      }
+    }
+    return changed || !!this.findTreeNode(tree, uid)
+  }
+
+  async syncHttpDirtySubtrees() {
+    if (!this.httpCollabMode || !this.httpFetchSubtree) return false
+    const tree = this.mindMap.renderer && this.mindMap.renderer.renderTree
+    if (!tree) return false
+    const roots = Array.from(this.dirtySubtrees.keys())
+    if (!roots.length) return false
+    let changed = false
+    for (const uid of roots) {
+      let treeNode = this.findTreeNode(tree, uid)
+      if (!treeNode) {
+        await this.ensureHttpNodePath(uid)
+        treeNode = this.findTreeNode(tree, uid)
+      }
+      if (!treeNode) continue
+      const before = (treeNode.children || []).length
+      try {
+        await this.hydrateNodeData(treeNode)
+      } catch (err) {
+        console.error('[mind-map] dirty subtree sync failed', uid, err)
+        continue
+      }
+      this.hydratedUids.add(uid)
+      this.dirtySubtrees.delete(uid)
+      if ((treeNode.children || []).length !== before) changed = true
+      if (this.expandTreeNode(treeNode)) changed = true
+    }
+    return changed
+  }
+
+  async syncHttpRemoteOperations(operations) {
+    if (!this.httpCollabMode || !operations || !operations.length) return false
+    const uids = new Set()
+    operations.forEach(op => {
+      affectedUidsFromOperation(op).forEach(uid => uids.add(uid))
+    })
+    if (!uids.size) return false
+    this.httpHydrating = true
+    let changed = false
+    try {
+      for (const uid of uids) {
+        if (await this.ensureHttpNodePath(uid)) changed = true
+      }
+      if (await this.syncHttpDirtySubtrees()) changed = true
+    } finally {
+      this.httpHydrating = false
+      this.flushPendingHttpRefresh()
+    }
+    if (changed && this.mindMap) this.mindMap.render()
+    return changed
+  }
+
   hydrateTreeNodeFromYmap(data) {
     if (!data || !this.ymap) return data
     if (Array.isArray(data.children) && data.children.length) return data
@@ -2441,6 +2546,7 @@ class Cooperate {
             Math.max(this.dirtySubtrees.get(uid) || 0, dirty[uid])
           )
         })
+        await this.syncHttpRemoteOperations(action.operations)
       } else if (action.type === 'resnapshot') {
         this.markCollapsedLoadedDirty(action.version)
       }
@@ -2511,7 +2617,12 @@ class Cooperate {
     const renderer = this.mindMap.renderer
     const tree = renderer && renderer.renderTree
     if (!tree) return { applied: false, skipped: true }
-    const uids = this.collectVisibleUids()
+    const uids = [
+      ...new Set([
+        ...this.collectVisibleUids(),
+        ...Array.from(this.dirtySubtrees.keys())
+      ])
+    ].slice(0, 800)
     if (!uids.length) return { applied: false, skipped: true }
     pruneRecentMap(this.recentHttpDeleted)
     pruneRecentMap(this.recentPushed, RECENT_PUSH_GRACE_MS)
@@ -2701,7 +2812,9 @@ class Cooperate {
               }))
             const before = (parent.children || []).length
             this.mergeHttpChildren(parent, stubs)
-            if ((parent.children || []).length !== before) changed = true
+            if ((parent.children || []).length !== before) {
+              if (this.expandTreeNode(parent)) changed = true
+            }
             // Keep local child order aligned with server when possible.
             if (Array.isArray(parent.children) && childIds.length) {
               const order = new Map(childIds.map((id, index) => [id, index]))
@@ -2716,7 +2829,10 @@ class Cooperate {
             }
           })
         }
-        if (changed) this.mindMap.render()
+        if (changed) {
+          await this.syncHttpDirtySubtrees()
+          this.mindMap.render()
+        }
         // Only acknowledge a revision after every fetch and merge completed.
         // A transient request/render failure must remain retryable by polling.
         this.httpUpdatedAt =
