@@ -7,6 +7,7 @@ const {
   listRoomsPage,
   getRoom,
   getRoomSnapshot,
+  getRoomSubtree,
   removeRoom,
   ensureDoc,
   warmDoc,
@@ -65,6 +66,27 @@ const {
 
 const roomMutationQueues = new Map()
 const pausedRooms = new Map()
+const SUBTREE_SNAPSHOT_SLOTS = 2
+let subtreeSnapshotActive = 0
+const subtreeSnapshotWait = []
+
+function withSubtreeSnapshotSlot(fn) {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      subtreeSnapshotActive += 1
+      Promise.resolve()
+        .then(fn)
+        .then(resolve, reject)
+        .finally(() => {
+          subtreeSnapshotActive -= 1
+          const next = subtreeSnapshotWait.shift()
+          if (next) next()
+        })
+    }
+    if (subtreeSnapshotActive < SUBTREE_SNAPSHOT_SLOTS) run()
+    else subtreeSnapshotWait.push(run)
+  })
+}
 
 function isRoomWritePaused(roomKey) {
   const until = pausedRooms.get(String(roomKey || ''))
@@ -1733,12 +1755,40 @@ async function handleApi(req, res) {
   const subtreeMatch = pathname.match(/^\/api\/files\/([^/]+)\/subtree$/)
   if (subtreeMatch && req.method === 'GET') {
     const roomKey = decodeURIComponent(subtreeMatch[1])
-    const loaded = await loadSnapshot(roomKey)
+    const uid = url.searchParams.get('uid') || 'root'
+    const subtreeOptions = {
+      deep:
+        url.searchParams.get('deep') === '1' ||
+        url.searchParams.get('deep') === 'true',
+      knownVersion:
+        Number(
+          url.searchParams.get('knownVersion') ||
+            url.searchParams.get('known_version') ||
+            0
+        ) || 0,
+      maxNodes: url.searchParams.get('max_nodes'),
+      offset: url.searchParams.get('offset'),
+      limit: url.searchParams.get('limit')
+    }
+    const fast = await getRoomSubtree(roomKey, uid, subtreeOptions)
+    if (fast && fast.notFound) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    if (fast && !fast.missing) {
+      const { updated_at, notFound, missing, ...payload } = fast
+      sendJson(res, 200, {
+        room_key: roomKey,
+        updated_at,
+        ...payload
+      })
+      return true
+    }
+    const loaded = await withSubtreeSnapshotSlot(() => loadSnapshot(roomKey))
     if (!loaded) {
       sendJson(res, 404, { error: 'not found' })
       return true
     }
-    const uid = url.searchParams.get('uid') || 'root'
     sendVersionedSubtree(res, roomKey, loaded, uid, url)
     return true
   }

@@ -405,6 +405,140 @@ async function readRoomNodes(db, roomKey) {
   }
 }
 
+const MAX_SUBTREE_CHILDREN = 200
+const MAX_DEEP_SUBTREE_NODES = 400
+
+async function resolveRoomNodeUid(db, roomKey, uid) {
+  if (!uid || uid === 'root') {
+    const root = await db.query(
+      `select uid from room_nodes
+       where room_key = $1 and is_root and deleted_at is null
+       limit 1`,
+      [roomKey]
+    )
+    return (root.rows[0] && root.rows[0].uid) || null
+  }
+  const row = await db.query(
+    `select uid from room_nodes
+     where room_key = $1 and uid = $2 and deleted_at is null`,
+    [roomKey, uid]
+  )
+  return (row.rows[0] && row.rows[0].uid) || null
+}
+
+function childStubFromRow(row, childCount, version) {
+  const raw = row && row.data
+  const data =
+    raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {}
+  delete data.imgMap
+  return {
+    data: {
+      ...data,
+      uid: row.uid,
+      expand: false,
+      childCount: Number(childCount) || 0,
+      subtreeVersion: Number(version) || 0
+    },
+    children: []
+  }
+}
+
+async function readRoomSubtree(db, roomKey, uid, options = {}) {
+  if (!nodesTableAuthorityEnabled()) return null
+  const meta = await db.query(
+    `select version, updated_at from rooms where room_key = $1`,
+    [roomKey]
+  )
+  if (!meta.rows.length) return { notFound: true }
+  const version = Number(meta.rows[0].version || 0)
+  const updated_at = meta.rows[0].updated_at
+  const resolved = await resolveRoomNodeUid(db, roomKey, uid)
+  if (!resolved) return { missing: true, version, updated_at }
+  const known = Number(options.knownVersion) || 0
+  if (known > 0 && known >= version) {
+    return { uid: resolved, version, unchanged: true, updated_at }
+  }
+  if (options.deep) {
+    const maxNodes = Math.min(
+      2000,
+      Math.max(1, Number(options.maxNodes) || MAX_DEEP_SUBTREE_NODES)
+    )
+    const descendants = await db.query(
+      `with recursive walk as (
+         select uid, parent_uid, position, data, is_root, node_version, deleted_at, 0 as depth
+         from room_nodes
+         where room_key = $1 and uid = $2 and deleted_at is null
+         union all
+         select n.uid, n.parent_uid, n.position, n.data, n.is_root, n.node_version, n.deleted_at, w.depth + 1
+         from room_nodes n
+         inner join walk w on n.room_key = $1 and n.parent_uid = w.uid and n.deleted_at is null
+         where w.depth < 12
+       )
+       select uid, parent_uid, position, data, is_root, node_version, deleted_at
+       from walk
+       limit $3`,
+      [roomKey, resolved, maxNodes + 1]
+    )
+    const mindDoc = require('./mindDoc')
+    const obj = decodeNodeRows(descendants.rows)
+    const payload = mindDoc.versionedSubtree(obj, resolved, {
+      version,
+      knownVersion: 0,
+      deep: true,
+      maxNodes
+    })
+    if (!payload) return { missing: true, version, updated_at }
+    return { ...payload, updated_at }
+  }
+  const offset = Math.max(0, Number(options.offset) || 0)
+  const limit = Math.min(
+    500,
+    Math.max(1, Number(options.limit) || MAX_SUBTREE_CHILDREN)
+  )
+  const kids = await db.query(
+    `select uid, parent_uid, position, data, is_root, node_version
+     from room_nodes
+     where room_key = $1 and parent_uid = $2 and deleted_at is null
+     order by position, uid
+     offset $3 limit $4`,
+    [roomKey, resolved, offset, limit]
+  )
+  const totalRes = await db.query(
+    `select count(*)::int as total
+     from room_nodes
+     where room_key = $1 and parent_uid = $2 and deleted_at is null`,
+    [roomKey, resolved]
+  )
+  const total = Number((totalRes.rows[0] && totalRes.rows[0].total) || 0)
+  const childUids = kids.rows.map(row => row.uid)
+  const childCounts = {}
+  if (childUids.length) {
+    const gc = await db.query(
+      `select parent_uid, count(*)::int as n
+       from room_nodes
+       where room_key = $1 and parent_uid = any($2::text[]) and deleted_at is null
+       group by parent_uid`,
+      [roomKey, childUids]
+    )
+    gc.rows.forEach(row => {
+      childCounts[row.parent_uid] = Number(row.n || 0)
+    })
+  }
+  const children = kids.rows.map(row =>
+    childStubFromRow(row, childCounts[row.uid] || 0, version)
+  )
+  return {
+    uid: resolved,
+    total,
+    offset,
+    has_more: offset + children.length < total,
+    children,
+    version,
+    unchanged: false,
+    updated_at
+  }
+}
+
 async function migrateRoomNodesFromJson(db, roomKey, obj, version) {
   return replaceRoomNodes(db, roomKey, obj, version)
 }
@@ -425,6 +559,7 @@ module.exports = {
   auditRoomNodesState,
   replaceRoomNodes,
   readRoomNodes,
+  readRoomSubtree,
   listDeletedNodeUids,
   purgeDeletedNodes,
   migrateRoomNodesFromJson

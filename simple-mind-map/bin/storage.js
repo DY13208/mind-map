@@ -15,6 +15,7 @@ const {
   auditRoomNodesState,
   replaceRoomNodes,
   readRoomNodes,
+  readRoomSubtree,
   listDeletedNodeUids,
   purgeDeletedNodes,
   validateNodeGraph
@@ -1167,6 +1168,15 @@ function startOperationsArchiver() {
   return setInterval(tick, intervalMs)
 }
 
+async function getRoomSubtree(roomKey, uid, options = {}) {
+  try {
+    return await readRoomSubtree(pool, roomKey, uid, options)
+  } catch (err) {
+    console.error('[room_nodes] subtree failed', roomKey, err.message)
+    return null
+  }
+}
+
 async function getRoomSnapshot(roomKey) {
   const res = await pool.query(
     `select room_key, title, nodes, version, updated_at
@@ -1851,6 +1861,7 @@ module.exports = {
   listRoomsPage,
   getRoom,
   getRoomSnapshot,
+  getRoomSubtree,
   renameRoom,
   removeRoom,
   saveDoc,
