@@ -71,8 +71,13 @@ async function request(path, options = {}) {
   return data
 }
 
-export function listFiles() {
-  return request('/api/files')
+export function listFiles(extra = {}) {
+  const params = new URLSearchParams()
+  if (extra.q) params.set('q', extra.q)
+  if (extra.limit != null) params.set('limit', String(extra.limit))
+  if (extra.offset != null) params.set('offset', String(extra.offset))
+  const query = params.toString()
+  return request(`/api/files${query ? `?${query}` : ''}`)
 }
 
 export function createFile(body = {}) {

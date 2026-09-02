@@ -307,6 +307,41 @@ function testPreviewTimings() {
   console.log('preview timings ms', JSON.stringify(timings))
 }
 
+function countLiveTree(root) {
+  let count = 0
+  const stack = root ? [root] : []
+  while (stack.length) {
+    const node = stack.pop()
+    if (!node) continue
+    count += 1
+    const kids = node.children || []
+    for (let i = 0; i < kids.length; i++) stack.push(kids[i])
+  }
+  return count
+}
+
+function testPreviewLiveTreeCapped() {
+  const obj = { root: node('root', 'Root', []) }
+  for (let i = 0; i < 60; i++) {
+    const a = 'a' + i
+    obj.root.children.push(a)
+    obj[a] = node(a, 'A' + i, [])
+    for (let j = 0; j < 60; j++) {
+      const b = a + '-' + j
+      obj[a].children.push(b)
+      obj[b] = node(b, 'B')
+    }
+  }
+  const preview = mindDoc.buildPreview(obj, { keepDepth: 2 })
+  const live = countLiveTree(preview.tree)
+  assert.ok(preview.node_count > 3000)
+  assert.ok(
+    live <= mindDoc.MAX_PREVIEW_NODES,
+    `preview live tree was ${live}`
+  )
+  assert.ok(preview.tree.data.hasMore || preview.tree.children.length <= 40)
+}
+
 function testUndoSafetyBlocksOtherUsersAndOutOfOrder() {
   const insert = {
     operation_id: 'op-insert',
@@ -548,6 +583,7 @@ testRestoreAndHistoricalReplay()
 testConcurrentSiblingInsertsGetDistinctPositions()
 testNodeReorderSameParent()
 testPreviewTimings()
+testPreviewLiveTreeCapped()
 
 function testNodeReorderSameParent() {
   const doc = seedDoc({

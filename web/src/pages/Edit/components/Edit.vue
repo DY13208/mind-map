@@ -115,7 +115,11 @@ import NodeIconToolbar from './NodeIconToolbar.vue'
 import OutlineEdit from './OutlineEdit.vue'
 import { showLoading, hideLoading } from '@/utils/loading'
 import { promiseWithTimeout } from '@/utils/promiseWithTimeout'
-import { prepareImportedTree, yieldToUi } from '@/utils/importTree'
+import {
+  prepareImportedTree,
+  stubImportedTree,
+  yieldToUi
+} from '@/utils/importTree'
 import handleClipboardText from '@/utils/handleClipboardText'
 import Scrollbar from './Scrollbar.vue'
 import exampleData from 'simple-mind-map/example/exampleData'
@@ -608,8 +612,15 @@ export default {
       let prepared = null
       if (!quiet) this.handleShowLoading(this.$t('edit.importingTip'))
       await yieldToUi()
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      const persistReplace =
+        isUserImport &&
+        cooperate &&
+        cooperate.httpCollabMode &&
+        typeof cooperate.persistHttpReplace === 'function' &&
+        typeof cooperate.httpReplaceTree === 'function'
       if (!(options && options.fromSaved)) {
-        prepared = prepareImportedTree(data)
+        prepared = prepareImportedTree(data, { prune: !persistReplace })
         data = prepared.data
       } else if (this.mindMap) {
         this.isLargeMap = true
@@ -638,35 +649,40 @@ export default {
       if (!quiet && nodeCount >= 400) {
         this.handleShowLoading(this.$t('edit.importingTip'), loadingMs)
       }
-      const cooperate = this.mindMap && this.mindMap.cooperate
-      const persistReplace =
-        isUserImport &&
-        cooperate &&
-        cooperate.httpCollabMode &&
-        typeof cooperate.persistHttpReplace === 'function' &&
-        typeof cooperate.httpReplaceTree === 'function'
       if (persistReplace) cooperate.beginHttpReplace()
       let rootNodeData = null
       let importDone = !isUserImport
       try {
-        if (data.root) {
-          this.mindMap.setFullData(data)
-          rootNodeData = data.root
-        } else {
-          this.mindMap.setData(data)
-          rootNodeData = data
-        }
-        this.mindMap.view.reset()
-        await yieldToUi()
+        rootNodeData = data.root || data
         if (persistReplace) {
           if (!quiet) {
             this.handleShowLoading(this.$t('edit.importSavingTip'), loadingMs)
           }
-          const treePayload = data.root
-            ? { root: data.root }
-            : { root: rootNodeData }
-          await cooperate.persistHttpReplace(treePayload)
-        } else if (isUserImport) {
+          await cooperate.persistHttpReplace(
+            data.root ? { root: data.root } : { root: rootNodeData }
+          )
+          if (nodeCount >= 100 && rootNodeData) {
+            stubImportedTree(rootNodeData, {
+              keepDepth: nodeCount >= 500 ? 1 : 2
+            })
+          }
+        }
+        if (data.root) {
+          this.mindMap.setFullData(data)
+        } else {
+          this.mindMap.setData(data)
+        }
+        if (persistReplace && rootNodeData) {
+          if (typeof cooperate.markTreeUids === 'function') {
+            cooperate.markTreeUids(rootNodeData)
+          }
+          if (typeof cooperate.seedPreviewHydration === 'function') {
+            cooperate.seedPreviewHydration(rootNodeData)
+          }
+        }
+        this.mindMap.view.reset()
+        await yieldToUi()
+        if (!persistReplace && isUserImport) {
           this.manualSave()
         }
         importDone = true

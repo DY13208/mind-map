@@ -592,6 +592,11 @@ export default {
     you: '我',
     tip: '同一房間的人會即時同步畫布。區域網協作請把協同服務改成你的電腦 IP。',
     startServerTip: '可雙擊專案根目錄「啟動.bat」一鍵啟動頁面、協同和 AI 服務',
+    searchFiles: '搜尋檔名',
+    fileCount: '{count} 個',
+    currentRoom: '目前',
+    advanced: '進階設定',
+    emptySearch: '沒有找到「{q}」',
     files: '已儲存的檔案',
     refresh: '重新整理',
     openFile: '打開',
@@ -604,6 +609,9 @@ export default {
     openFailed: '打開失敗，未能載入檔案內容',
     largeMapMode: '大圖模式（按需載入，已支援一萬節點以上）',
     fileDeleted: '已刪除',
-    renamed: '已重新命名'
+    renamed: '已重新命名',
+    history: '操作歷史',
+    noHistory: '還沒有可審計的操作',
+    undoFailed: '無法撤銷該操作'
   }
 }

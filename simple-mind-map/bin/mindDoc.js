@@ -149,7 +149,9 @@ function collapseDeepNodes(root, keepDepth = 2) {
 const LARGE_MAP_AT = 200
 const HTTP_COLLAB_AT = 0
 const CLIP_JSON_AT = 1500
-const MAX_PREVIEW_CHILDREN = 120
+const MAX_PREVIEW_CHILDREN = 40
+const MAX_PREVIEW_NODES = 280
+const MAX_DEEP_SUBTREE_NODES = 400
 const MAX_SUBTREE_CHILDREN = 200
 const MAX_SEARCH_HITS = 80
 const MAX_NODE_FETCH = 200
@@ -181,12 +183,19 @@ function objectToTreeLimited(obj, keepDepth = 2, options = {}) {
     Number(options.maxChildren) > 0
       ? Number(options.maxChildren)
       : MAX_PREVIEW_CHILDREN
+  const maxNodes =
+    Number(options.maxNodes) > 0
+      ? Number(options.maxNodes)
+      : MAX_PREVIEW_NODES
   const stubAtCut = options.stubAtCut === true
   const rootUid = findRootUid(obj)
   if (!rootUid || !obj[rootUid]) return null
+  let produced = 0
   const stubChild = childUid => {
+    if (produced >= maxNodes) return null
     const child = obj[childUid]
     if (!child) return null
+    produced += 1
     const kids = child.children || []
     return {
       data: {
@@ -199,8 +208,10 @@ function objectToTreeLimited(obj, keepDepth = 2, options = {}) {
     }
   }
   const walk = (uid, depth) => {
+    if (produced >= maxNodes) return null
     const cur = obj[uid]
     if (!cur) return null
+    produced += 1
     const childUids = cur.children || []
     const node = {
       data: stripHeavyFields(clone(cur.data || {})),
@@ -211,17 +222,21 @@ function objectToTreeLimited(obj, keepDepth = 2, options = {}) {
     if (depth >= keepDepth) {
       node.data.expand = false
       if (stubAtCut) {
-        const shown = childUids.slice(0, maxChildren)
+        const remain = Math.max(0, maxNodes - produced)
+        const shown = childUids.slice(0, Math.min(maxChildren, remain))
         node.children = shown.map(stubChild).filter(Boolean)
         if (childUids.length > shown.length) node.data.hasMore = true
       }
       return node
     }
-    const shown = childUids.slice(0, maxChildren)
+    const remain = Math.max(0, maxNodes - produced)
+    const shown = childUids.slice(0, Math.min(maxChildren, remain))
     node.children = shown
       .map(childUid => walk(childUid, depth + 1))
       .filter(Boolean)
-    if (childUids.length > shown.length) node.data.hasMore = true
+    if (childUids.length > shown.length || produced >= maxNodes) {
+      node.data.hasMore = true
+    }
     return node
   }
   return walk(rootUid, 0)
@@ -240,11 +255,13 @@ function buildPreview(obj, options = {}) {
   if (clipped || options.forceClip) {
     tree = objectToTreeLimited(obj, keepDepth, {
       maxChildren: options.maxChildren,
+      maxNodes: options.maxNodes,
       stubAtCut: false
     })
   } else if (collapsed) {
     tree = objectToTreeLimited(obj, keepDepth, {
       maxChildren: options.maxChildren,
+      maxNodes: options.maxNodes,
       stubAtCut: true
     })
   } else {
@@ -302,7 +319,9 @@ function subtreeChildren(obj, uid, options = {}) {
 
 function subtreeTree(obj, uid, options = {}) {
   const maxNodes =
-    Number(options.maxNodes) > 0 ? Number(options.maxNodes) : 8000
+    Number(options.maxNodes) > 0
+      ? Number(options.maxNodes)
+      : MAX_DEEP_SUBTREE_NODES
   const stats = { count: 0, truncated: false }
   const walk = id => {
     if (stats.count >= maxNodes) {
@@ -1521,6 +1540,8 @@ module.exports = {
   LARGE_MAP_AT,
   HTTP_COLLAB_AT,
   CLIP_JSON_AT,
+  MAX_PREVIEW_NODES,
+  MAX_DEEP_SUBTREE_NODES,
   applyObjectToDoc,
   flattenNodes,
   toOutline,
