@@ -24,10 +24,12 @@ const {
   safeRoomKey,
   shareUrl,
   getSaveStatus,
+  setSaveState,
+  beginRoomReplace,
+  endRoomReplace,
   isDeletedRoom,
   reviveRoom,
   scheduleSave,
-  pickLatestTimestamp,
   commitRoomOperation,
   getRoomVersion,
   listRoomOperations,
@@ -95,6 +97,37 @@ function assertRoomWritable(roomKey) {
   err.statusCode = 423
   err.code = 'ROOM_WRITE_PAUSED'
   throw err
+}
+
+function yieldEventLoop() {
+  return new Promise(resolve => setImmediate(resolve))
+}
+
+function logApiError(action, err, extra = {}) {
+  const payload = {
+    ts: new Date().toISOString(),
+    event: 'api.error',
+    action,
+    code: err && err.code ? err.code : 'ERROR',
+    message: (err && err.message) || String(err || 'unknown error'),
+    ...extra
+  }
+  Object.keys(payload).forEach(key => {
+    if (payload[key] === undefined) delete payload[key]
+  })
+  console.error('[api] ERROR ' + JSON.stringify(payload))
+  if (err && err.stack) console.error(err.stack)
+}
+
+function logApiInfo(action, extra = {}) {
+  console.log(
+    '[api] ' +
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        event: action,
+        ...extra
+      })
+  )
 }
 
 async function withRoomMutation(roomKey, mutation) {
@@ -270,7 +303,13 @@ async function executeOperation(req, roomKey, command) {
       durationMs,
       code: err.code || 'OPERATION_REJECTED',
       message: err.message,
-      level: 'warn'
+      level: 'error'
+    })
+    logApiError('operation.reject', err, {
+      mapId: roomKey,
+      operationId: command.operationId,
+      actorId: command.actorId,
+      code: err.code || 'OPERATION_REJECTED'
     })
     throw err
   }
@@ -804,25 +843,34 @@ async function handleApi(req, res) {
   const presenceMatch = pathname.match(/^\/api\/files\/([^/]+)\/presence$/)
   if (presenceMatch) {
     const roomKey = decodeURIComponent(presenceMatch[1])
-    if (req.method === 'GET') {
-      const list = await listPresence(roomKey)
-      sendJson(res, 200, { list })
-      return true
-    }
-    if (req.method === 'POST') {
-      const body = await readBody(req)
-      const list = await beatPresence(roomKey, body)
-      sendJson(res, 200, { list })
-      return true
-    }
-    if (req.method === 'DELETE') {
-      const body = await readBody(req).catch(() => ({}))
-      const list = await leavePresence(
-        roomKey,
-        body.id || body.userId,
-        body.clientId || body.client_id
-      )
-      sendJson(res, 200, { list })
+    try {
+      if (req.method === 'GET') {
+        const list = await listPresence(roomKey)
+        sendJson(res, 200, { list })
+        return true
+      }
+      if (req.method === 'POST') {
+        const body = await readBody(req)
+        const list = await beatPresence(roomKey, body)
+        sendJson(res, 200, { list })
+        return true
+      }
+      if (req.method === 'DELETE') {
+        const body = await readBody(req).catch(() => ({}))
+        const list = await leavePresence(
+          roomKey,
+          body.id || body.userId,
+          body.clientId || body.client_id
+        )
+        sendJson(res, 200, { list })
+        return true
+      }
+    } catch (err) {
+      logApiError('presence', err, { mapId: roomKey, method: req.method })
+      sendJson(res, 500, {
+        error: err.message || 'presence failed',
+        code: err.code || 'PRESENCE_ERROR'
+      })
       return true
     }
   }
@@ -1464,10 +1512,34 @@ async function handleApi(req, res) {
   const replaceMatch = pathname.match(/^\/api\/files\/([^/]+)\/replace$/)
   if (replaceMatch && req.method === 'POST') {
     const roomKey = decodeURIComponent(replaceMatch[1])
+    const replaceStarted = Date.now()
+    try {
+      beginRoomReplace(roomKey)
+    } catch (err) {
+      logApiError('map.replace.busy', err, { mapId: roomKey })
+      sendJson(res, err.statusCode || 409, {
+        error: err.message || 'replace in progress',
+        code: err.code || 'REPLACE_IN_PROGRESS',
+        ...((err.progress && { progress: err.progress }) || {})
+      })
+      return true
+    }
+    setSaveState(roomKey, 'saving', {
+      phase: 'receiving',
+      progress: 5,
+      message: '正在接收导图数据'
+    })
     let body
     try {
       body = await readBody(req, { maxBytes: bodyLimitForPath(pathname) })
     } catch (err) {
+      endRoomReplace(roomKey)
+      setSaveState(roomKey, 'error', {
+        error: err.message || 'bad request',
+        phase: 'error',
+        progress: 0
+      })
+      logApiError('map.replace.body', err, { mapId: roomKey })
       sendJson(res, err.statusCode || 400, {
         error: err.message || 'bad request',
         code: err.code || 'BAD_BODY'
@@ -1475,11 +1547,22 @@ async function handleApi(req, res) {
       return true
     }
     if (!body.tree) {
+      endRoomReplace(roomKey)
+      setSaveState(roomKey, 'error', {
+        error: '缺少 tree',
+        phase: 'error'
+      })
       sendJson(res, 400, { error: '缺少 tree' })
       return true
     }
     try {
       assertRateLimit(roomKey)
+      setSaveState(roomKey, 'saving', {
+        phase: 'parsing',
+        progress: 20,
+        message: '正在解析节点'
+      })
+      await yieldEventLoop()
       const payload = await withRoomMutation(roomKey, async () => {
         const snapshot = await getRoomSnapshot(roomKey)
         const live = getLiveObject(roomKey)
@@ -1497,9 +1580,28 @@ async function handleApi(req, res) {
           await upsertRoom(roomKey, body.title || '未命名')
         }
         const obj = mindDoc.treeToObject(normalizeTree(body.tree, body.title))
+        const nodeCount = Object.keys(obj || {}).length
+        setSaveState(roomKey, 'saving', {
+          phase: 'writing',
+          progress: 45,
+          nodeCount,
+          message: `正在写入 ${nodeCount} 个节点`
+        })
+        logApiInfo('map.replace.start', {
+          mapId: roomKey,
+          nodeCount,
+          actorId: requestActor(req, body)
+        })
+        await yieldEventLoop()
         const command = normalizeCommand(req, roomKey, body, 'map.replace', {
           resnapshot: true,
           confirm_sop_change: body.confirm_sop_change === true
+        })
+        setSaveState(roomKey, 'saving', {
+          phase: 'committing',
+          progress: 75,
+          nodeCount,
+          message: '正在提交到数据库'
         })
         const committed = await executeSnapshotOperation(
           req,
@@ -1515,13 +1617,36 @@ async function handleApi(req, res) {
         const row = await getRoom(roomKey)
         return mapPayload(roomKey, obj, { ...row, version: committed.operation.version })
       })
+      setSaveState(roomKey, 'saved', {
+        phase: 'done',
+        progress: 100,
+        nodeCount: payload.node_count,
+        message: '保存完成'
+      })
+      logApiInfo('map.replace.done', {
+        mapId: roomKey,
+        version: payload.version,
+        nodeCount: payload.node_count,
+        durationMs: Date.now() - replaceStarted
+      })
       sendJson(res, 200, payload)
     } catch (err) {
+      setSaveState(roomKey, 'error', {
+        error: err.message || 'bad request',
+        phase: 'error',
+        progress: 0
+      })
+      logApiError('map.replace', err, {
+        mapId: roomKey,
+        durationMs: Date.now() - replaceStarted
+      })
       sendJson(res, err.statusCode || (err.message === 'not found' ? 404 : 400), {
         error: err.message || 'bad request',
         code: err.code || undefined,
         retryAfterMs: err.retryAfterMs
       })
+    } finally {
+      endRoomReplace(roomKey)
     }
     return true
   }
@@ -1604,16 +1729,9 @@ async function handleApi(req, res) {
   const saveStatusMatch = pathname.match(/^\/api\/files\/([^/]+)\/save-status$/)
   if (saveStatusMatch && req.method === 'GET') {
     const roomKey = decodeURIComponent(saveStatusMatch[1])
-    const local = getSaveStatus(roomKey)
-    const row = await getRoom(roomKey)
     sendJson(res, 200, {
       room_key: roomKey,
-      ...local,
-      version: Number((row && row.version) || 0),
-      updated_at: pickLatestTimestamp(
-        row && row.updated_at,
-        local.updated_at
-      )
+      ...getSaveStatus(roomKey)
     })
     return true
   }

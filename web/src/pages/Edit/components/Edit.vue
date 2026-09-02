@@ -113,7 +113,8 @@ import Search from './Search.vue'
 import NodeIconSidebar from './NodeIconSidebar.vue'
 import NodeIconToolbar from './NodeIconToolbar.vue'
 import OutlineEdit from './OutlineEdit.vue'
-import { showLoading, hideLoading } from '@/utils/loading'
+import { showLoading, hideLoading, updateLoading } from '@/utils/loading'
+import { getSaveStatus } from '@/utils/fileApi'
 import { promiseWithTimeout } from '@/utils/promiseWithTimeout'
 import {
   prepareImportedTree,
@@ -201,6 +202,8 @@ export default {
     return {
       enableShowLoading: true,
       loadingSafetyTimer: null,
+      importPersistLock: false,
+      importProgressTimer: null,
       mindMap: null,
       mindMapData: null,
       mindMapConfig: {},
@@ -300,6 +303,8 @@ export default {
       clearTimeout(this.loadingSafetyTimer)
       this.loadingSafetyTimer = null
     }
+    this.importPersistLock = false
+    this.stopImportProgressPoll()
     this.$bus.$off('execCommand', this.execCommand)
     this.$bus.$off('paddingChange', this.onPaddingChange)
     this.$bus.$off('export', this.export)
@@ -345,20 +350,77 @@ export default {
     },
 
     // 显示loading
-    handleShowLoading(text, durationMs) {
+    handleShowLoading(text, durationOrOptions) {
       this.enableShowLoading = true
-      showLoading(typeof text === 'string' ? text : '')
+      const options =
+        typeof durationOrOptions === 'number'
+          ? { timeout: durationOrOptions }
+          : durationOrOptions || {}
+      showLoading(typeof text === 'string' ? text : '', {
+        percent: options.percent,
+        detail: options.detail
+      })
       if (this.loadingSafetyTimer) {
         clearTimeout(this.loadingSafetyTimer)
       }
-      const timeout = Math.max(8000, Number(durationMs) || 8000)
+      const timeout = Math.max(8000, Number(options.timeout) || 8000)
       this.loadingSafetyTimer = setTimeout(() => {
+        if (this.importPersistLock) return
         this.handleHideLoading()
       }, timeout)
     },
 
+    updateImportProgress(percent, detail, text) {
+      if (!this.enableShowLoading) return
+      updateLoading({
+        text: text || this.$t('edit.importSavingTip'),
+        percent,
+        detail
+      })
+    },
+
+    stopImportProgressPoll() {
+      if (this.importProgressTimer) {
+        clearInterval(this.importProgressTimer)
+        this.importProgressTimer = null
+      }
+    },
+
+    startImportProgressPoll(roomKey) {
+      this.stopImportProgressPoll()
+      if (!roomKey) return
+      this.importProgressTimer = setInterval(async () => {
+        try {
+          const data = await getSaveStatus(roomKey)
+          if (!this.importPersistLock) return
+          const percent = Number(data.progress)
+          const detail =
+            data.message ||
+            (data.phase === 'writing'
+              ? this.$t('edit.importSavingWrite')
+              : data.phase === 'committing'
+                ? this.$t('edit.importSavingCommit')
+                : data.phase === 'receiving'
+                  ? this.$t('edit.importSavingUpload')
+                  : '')
+          if (Number.isFinite(percent) && percent > 0) {
+            this.updateImportProgress(
+              Math.max(30, Math.min(95, percent)),
+              detail
+            )
+          } else if (detail) {
+            this.updateImportProgress(null, detail)
+          }
+        } catch (err) {
+          // 保存中轮询失败不打断导入，避免把超时显示成失败
+        }
+      }, 1000)
+    },
+
     // 渲染结束后关闭loading
     handleHideLoading() {
+      if (this.importPersistLock) return
+      this.stopImportProgressPoll()
       if (this.loadingSafetyTimer) {
         clearTimeout(this.loadingSafetyTimer)
         this.loadingSafetyTimer = null
@@ -647,7 +709,11 @@ export default {
           ? Math.min(600000, Math.max(120000, nodeCount * 20))
           : 30000
       if (!quiet && nodeCount >= 400) {
-        this.handleShowLoading(this.$t('edit.importingTip'), loadingMs)
+        this.handleShowLoading(this.$t('edit.importingTip'), {
+          timeout: loadingMs,
+          percent: 8,
+          detail: this.$t('edit.importSavingParse')
+        })
       }
       if (persistReplace) cooperate.beginHttpReplace()
       let rootNodeData = null
@@ -655,12 +721,28 @@ export default {
       try {
         rootNodeData = data.root || data
         if (persistReplace) {
+          this.importPersistLock = true
           if (!quiet) {
-            this.handleShowLoading(this.$t('edit.importSavingTip'), loadingMs)
+            this.handleShowLoading(this.$t('edit.importSavingTip'), {
+              timeout: loadingMs,
+              percent: 12,
+              detail: this.$t('edit.importSavingUpload')
+            })
           }
+          this.startImportProgressPoll(cooperate.httpRoomKey)
           await cooperate.persistHttpReplace(
-            data.root ? { root: data.root } : { root: rootNodeData }
+            data.root ? { root: data.root } : { root: rootNodeData },
+            {
+              onUploadProgress: evt => {
+                const uploadPct = Number(evt && evt.percent) || 0
+                this.updateImportProgress(
+                  Math.min(35, 12 + Math.round(uploadPct * 0.23)),
+                  this.$t('edit.importSavingUpload')
+                )
+              }
+            }
           )
+          this.updateImportProgress(96, this.$t('edit.importSavingApply'))
           if (nodeCount >= 100 && rootNodeData) {
             stubImportedTree(rootNodeData, {
               keepDepth: nodeCount >= 500 ? 1 : 2
@@ -705,6 +787,8 @@ export default {
           throw err
         }
       } finally {
+        this.importPersistLock = false
+        this.stopImportProgressPoll()
         if (persistReplace) cooperate.endHttpReplace()
         if (!quiet) this.handleHideLoading()
       }

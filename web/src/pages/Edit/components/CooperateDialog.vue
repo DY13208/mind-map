@@ -303,10 +303,14 @@ export default {
       connectTimer: null,
       saveStatusTimer: null,
       saveStatusInFlight: false,
+      saveStatusBackoffUntil: 0,
+      saveStatusFailCount: 0,
       presenceTimer: null,
       presenceQuickTimer: null,
       presenceSyncInFlight: false,
       presenceSyncQueued: false,
+      presenceBackoffUntil: 0,
+      presenceFailCount: 0,
       saveStatus: 'idle',
       saveError: '',
       lastConnectErrorAt: 0,
@@ -846,6 +850,10 @@ export default {
       }
       this.presenceSyncInFlight = false
       this.presenceSyncQueued = false
+      this.presenceBackoffUntil = 0
+      this.presenceFailCount = 0
+      this.saveStatusBackoffUntil = 0
+      this.saveStatusFailCount = 0
       this.saveStatus = 'idle'
       this.saveError = ''
     },
@@ -890,6 +898,13 @@ export default {
 
     async syncHttpPresence() {
       if (!this.httpCollab || !this.connected || !this.roomName) return
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (cooperate && (cooperate.httpReplacing || cooperate.httpReplaceInFlight)) {
+        return
+      }
+      if (this.presenceBackoffUntil && Date.now() < this.presenceBackoffUntil) {
+        return
+      }
       if (this.presenceSyncInFlight) {
         this.presenceSyncQueued = true
         return
@@ -901,7 +916,6 @@ export default {
             this.provider.awareness &&
             this.provider.awareness.clientID) ||
           this.userId
-        const cooperate = this.mindMap && this.mindMap.cooperate
         const local =
           cooperate && typeof cooperate.getLocalPresence === 'function'
             ? cooperate.getLocalPresence()
@@ -915,9 +929,13 @@ export default {
           editingUid: local.editingUid || null,
           cursor: local.cursor || null
         })
+        this.presenceFailCount = 0
         this.applyPresenceList(data.list)
       } catch (e) {
-        // keep last peer list
+        this.presenceFailCount = (this.presenceFailCount || 0) + 1
+        this.presenceBackoffUntil =
+          Date.now() + Math.min(30000, 2000 * Math.pow(2, this.presenceFailCount - 1))
+        this.presenceSyncQueued = false
       } finally {
         this.presenceSyncInFlight = false
         if (this.presenceSyncQueued) {
@@ -929,11 +947,20 @@ export default {
 
     async loadSaveStatus() {
       if (!this.connected || !this.roomName) return
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (cooperate && (cooperate.httpReplacing || cooperate.httpReplaceInFlight)) {
+        this.saveStatus = 'saving'
+        return
+      }
       if (this.saveStatusInFlight) return
+      if (this.saveStatusBackoffUntil && Date.now() < this.saveStatusBackoffUntil) {
+        return
+      }
       const roomKey = this.roomName
       this.saveStatusInFlight = true
       try {
         const data = await getSaveStatus(roomKey)
+        this.saveStatusFailCount = 0
         // Ignore a delayed response for a room that was closed or switched.
         if (!this.connected || this.roomName !== roomKey) return
         if (data.status === 'deleted') {
@@ -943,7 +970,7 @@ export default {
         if (data.status === 'error') {
           this.saveStatus = 'saveError'
           this.saveError = data.error || this.$t('cooperate.saveError')
-        } else if (data.status === 'saving') {
+        } else if (data.status === 'saving' || data.replacing) {
           this.saveStatus = 'saving'
           this.saveError = ''
         } else {
@@ -951,7 +978,15 @@ export default {
           this.saveError = ''
         }
       } catch (err) {
+        this.saveStatusFailCount = (this.saveStatusFailCount || 0) + 1
+        this.saveStatusBackoffUntil =
+          Date.now() +
+          Math.min(30000, 2000 * Math.pow(2, this.saveStatusFailCount - 1))
         if (this.connected && this.roomName === roomKey) {
+          if (cooperate && (cooperate.httpReplacing || cooperate.httpReplaceInFlight)) {
+            this.saveStatus = 'saving'
+            return
+          }
           this.saveStatus = 'saveError'
           this.saveError = err.message || this.$t('cooperate.saveError')
         }
@@ -1215,8 +1250,8 @@ export default {
           this.notifyHttpMutation(addFileNode(roomKey, body)),
         deleteNode: (uid, options) =>
           this.notifyHttpMutation(deleteFileNode(roomKey, uid, options)),
-        replaceTree: tree =>
-          Promise.resolve(replaceFileTree(roomKey, tree)).then(result => {
+        replaceTree: (tree, extra) =>
+          Promise.resolve(replaceFileTree(roomKey, tree, extra)).then(result => {
             this.publishHttpChange(result || {})
             return result
           })

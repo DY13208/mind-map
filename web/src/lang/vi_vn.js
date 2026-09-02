@@ -372,6 +372,12 @@ export default {
     autoOpenNodeRichTextTip:
       'Phát hiện nội dung văn bản phong phú nhập vào, tự động bật chế độ văn bản phong phú',
     importingTip: 'Đang nhập, vui lòng đợi…',
+    importSavingTip: 'Đang lưu lên máy chủ, vui lòng không đóng trang',
+    importSavingParse: 'Đang chuẩn bị sơ đồ…',
+    importSavingUpload: 'Đang tải lên máy chủ…',
+    importSavingWrite: 'Đang ghi các nút…',
+    importSavingCommit: 'Đang ghi vào cơ sở dữ liệu…',
+    importSavingApply: 'Đã lưu. Đang áp dụng lên canvas…',
     importPersistFailed:
       'Không lưu được bản nhập vào phòng này. Đã khôi phục bản trên máy chủ.',
     largeMapImportTip:
