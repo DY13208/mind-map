@@ -1,6 +1,7 @@
 import { FetchTimeoutError, fetchWithTimeout } from './fetchWithTimeout'
 import { getRuntimeConfig } from './runtimeConfig'
 import { createOperationId } from 'simple-mind-map/src/utils/operationId'
+import { stringifyJsonOffMainThread } from '@/utils/importTree'
 
 const DEFAULT_TIMEOUT_MS = 20000
 const REPLACE_TIMEOUT_MIN_MS = 120000
@@ -234,17 +235,23 @@ export function searchFile(roomKey, q, limit = 80) {
   )
 }
 
-export function replaceFileTree(roomKey, tree, extra = {}) {
+export async function replaceFileTree(roomKey, tree, extra = {}) {
+  const payload = {
+    tree,
+    title: extra.title,
+    confirm_sop_change: extra.confirm_sop_change !== false,
+    operationId: extra.operationId
+  }
+  const nodeCount = countTreeNodes(tree)
+  const body =
+    nodeCount >= 400
+      ? await stringifyJsonOffMainThread(payload)
+      : JSON.stringify(payload)
   return request(`/api/files/${encodeURIComponent(roomKey)}/replace`, {
     method: 'POST',
     timeoutMs: replaceTimeoutMs(tree, extra),
     headers: operationHeaders(extra),
-    body: JSON.stringify({
-      tree,
-      title: extra.title,
-      confirm_sop_change: extra.confirm_sop_change !== false,
-      operationId: extra.operationId
-    })
+    body
   })
 }
 

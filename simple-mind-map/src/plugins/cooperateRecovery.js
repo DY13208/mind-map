@@ -265,6 +265,38 @@ export function applyCollabEvents(obj, operations) {
   return { type: 'apply', nodes }
 }
 
+const STRUCTURAL_EVENT_TYPES = new Set([
+  'node.inserted',
+  'node.deleted',
+  'node.moved',
+  'node.reordered',
+  'node.updated',
+  'map.replaced',
+  'batch.applied',
+  'operation.undone',
+  'operation.redone'
+])
+
+export function affectedUidsFromOperation(item) {
+  const event = (item && item.event) || item || {}
+  const payload = event.payload || {}
+  const uids = [
+    ...(Array.isArray(event.affectedUids) ? event.affectedUids : []),
+    payload.uid,
+    payload.parentUid,
+    payload.parent_uid,
+    payload.parent,
+    payload.fromParent,
+    payload.from_parent
+  ].filter(Boolean)
+  if (Array.isArray(payload.removed)) {
+    payload.removed.forEach(uid => {
+      if (uid) uids.push(uid)
+    })
+  }
+  return uids
+}
+
 export function markDirtySubtrees(loadedUids, operations) {
   const loaded =
     loadedUids instanceof Set ? loadedUids : new Set(loadedUids || [])
@@ -273,13 +305,16 @@ export function markDirtySubtrees(loadedUids, operations) {
     const event = (item && item.event) || item || {}
     const version = Number(item.version || event.version || 0)
     const payload = event.payload || {}
-    const uids = [
-      ...(Array.isArray(event.affectedUids) ? event.affectedUids : []),
-      payload.uid,
-      payload.parentUid,
-      payload.parent_uid,
-      payload.parent
-    ].filter(Boolean)
+    const type = String(event.type || item.operation_type || '')
+    const uids = affectedUidsFromOperation(item)
+    if (STRUCTURAL_EVENT_TYPES.has(type)) {
+      uids.forEach(uid => {
+        dirty[uid] = Math.max(dirty[uid] || 0, version)
+      })
+      const parent = payload.parentUid || payload.parent_uid || payload.parent
+      if (parent) dirty[parent] = Math.max(dirty[parent] || 0, version)
+      return
+    }
     const hasUnloaded = uids.some(uid => !loaded.has(uid))
     if (!hasUnloaded) return
     uids.forEach(uid => {

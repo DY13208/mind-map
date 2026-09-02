@@ -653,11 +653,32 @@ export default {
           rootNodeData = data
         }
         this.mindMap.view.reset()
+        await yieldToUi()
         if (persistReplace) {
           if (!quiet) {
             this.handleShowLoading(this.$t('edit.importSavingTip'), loadingMs)
           }
-          await cooperate.persistHttpReplace(this.mindMap.getData(true))
+          const treePayload = data.root
+            ? { root: data.root }
+            : { root: rootNodeData }
+          const backgroundSave = nodeCount >= 400
+          const savePromise = cooperate.persistHttpReplace(treePayload)
+          if (backgroundSave) {
+            savePromise.catch(async err => {
+              try {
+                if (typeof cooperate.restoreHttpTree === 'function') {
+                  await cooperate.restoreHttpTree()
+                }
+              } catch (restoreErr) {
+                console.error('[mind-map] restore after import failed', restoreErr)
+              }
+              this.$message.error(
+                (err && err.message) || this.$t('edit.importPersistFailed')
+              )
+            })
+          } else {
+            await savePromise
+          }
         } else if (isUserImport) {
           this.manualSave()
         }
