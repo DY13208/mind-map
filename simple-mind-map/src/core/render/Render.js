@@ -668,7 +668,7 @@ class Render {
   addNodeToActiveList(node, notEmitBeforeNodeActiveEvent = false) {
     if (
       this.mindMap.opt.onlyOneEnableActiveNodeOnCooperate &&
-      node.userList.length > 0
+      node.userList.some(item => item && item.editing)
     )
       return
     const index = this.findActiveNodeIndex(node)

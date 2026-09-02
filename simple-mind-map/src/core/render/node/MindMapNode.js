@@ -346,7 +346,7 @@ class MindMapNode {
       }
       if (
         this.mindMap.opt.onlyOneEnableActiveNodeOnCooperate &&
-        this.userList.length > 0
+        this.userList.some(item => item && item.editing)
       ) {
         return
       }
@@ -425,7 +425,10 @@ class MindMapNode {
         return
       }
       e.stopPropagation()
-      if (onlyOneEnableActiveNodeOnCooperate && this.userList.length > 0) {
+      if (
+        onlyOneEnableActiveNodeOnCooperate &&
+        this.userList.some(item => item && item.editing)
+      ) {
         return
       }
       this.mindMap.emit('node_dblclick', this, e)
