@@ -2308,12 +2308,42 @@ class Render {
     if (this.activeNodeList.length <= 0) {
       return
     }
+
+    // 概要节点的数据实际存在它的所属节点上。直接选中概要时，
+    // node.checkHasGeneralization() 为 false，所以需要按所属节点反向删除对应条目。
+    const selectedGeneralizationMap = new Map()
+    const selectedOwnerNodes = new Set()
     this.activeNodeList.forEach(node => {
+      if (node.isGeneralization) {
+        const owner = node.generalizationBelongNode
+        if (!owner) return
+        if (!selectedGeneralizationMap.has(owner)) {
+          selectedGeneralizationMap.set(owner, new Set())
+        }
+        selectedGeneralizationMap.get(owner).add(node.getData('uid'))
+        return
+      }
       if (!node.checkHasGeneralization()) {
         return
       }
+      selectedOwnerNodes.add(node)
       this.mindMap.execCommand('SET_NODE_DATA', node, {
         generalization: null
+      })
+    })
+
+    selectedGeneralizationMap.forEach((uidSet, owner) => {
+      // 所属节点也被选中时，上面已经删除了它的全部概要。
+      if (selectedOwnerNodes.has(owner)) return
+      const generalization = owner.getData('generalization')
+      const list = Array.isArray(generalization)
+        ? generalization
+        : generalization
+          ? [generalization]
+          : []
+      const nextList = list.filter(item => !uidSet.has(item.uid))
+      this.mindMap.execCommand('SET_NODE_DATA', owner, {
+        generalization: nextList.length ? nextList : null
       })
     })
     this.mindMap.render()
