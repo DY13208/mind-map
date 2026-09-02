@@ -96,6 +96,15 @@ function keepHttpChild(uid, serverKids, lastPushed, recentPushed) {
   return !!(at && Date.now() - at < RECENT_PUSH_GRACE_MS)
 }
 
+function isPermanentInsertError(err) {
+  const msg = String((err && err.message) || err || '')
+  const code = String((err && err.code) || '')
+  return (
+    code === 'PARENT_DELETED' ||
+    /父节点已删除|PARENT_DELETED|missing parent/i.test(msg)
+  )
+}
+
 function indexMindTree(root, out = new Map(), parent = null, index = 0) {
   if (!root || !root.data) return out
   const uid = root.data.uid
@@ -241,6 +250,7 @@ class Cooperate {
     this.httpStructureTimer = null
     this.httpInsertPromise = null
     this.httpInsertRescan = false
+    this.abandonedInsertUids = new Set()
     this.httpHydrating = false
     this.httpRefreshing = false
     this.httpPendingRefreshAt = ''
@@ -1207,6 +1217,7 @@ class Cooperate {
     this.lastPushed = {}
     this.recentPushed = new Map()
     this.recentHttpDeleted = new Map()
+    this.abandonedInsertUids = new Set()
     this.dirtySubtrees = new Map()
     this.localUndoStack = []
     this.localRedoStack = []
@@ -2021,6 +2032,20 @@ class Cooperate {
       return out
     }
     const uid = node.getData && node.getData('uid')
+    if (uid && this.abandonedInsertUids && this.abandonedInsertUids.has(uid)) {
+      const kids = node.children || []
+      kids.forEach(child => this.collectUnpushedNodes(child, out))
+      return out
+    }
+    const parentUid =
+      node.parent && node.parent.getData && node.parent.getData('uid')
+    if (
+      parentUid &&
+      this.abandonedInsertUids &&
+      this.abandonedInsertUids.has(parentUid)
+    ) {
+      return out
+    }
     if (uid && !this.lastPushed[uid]) out.push(node)
     const kids = node.children || []
     kids.forEach(child => this.collectUnpushedNodes(child, out))
@@ -2038,7 +2063,14 @@ class Cooperate {
   }
 
   async flushHttpInsert() {
-    if (this.httpReplacing || !this.httpAddNode) return
+    if (
+      this.httpReplacing ||
+      !this.httpAddNode ||
+      this.previewApplied ||
+      this.isSetData
+    ) {
+      return
+    }
     if (this.httpInsertPromise) {
       this.httpInsertRescan = true
       return this.httpInsertPromise
@@ -2073,6 +2105,7 @@ class Cooperate {
       return true
     })
     unique.sort((a, b) => this.nodeDepth(a) - this.nodeDepth(b))
+    let droppedOrphans = false
     for (const node of unique) {
       const uid = node.getData && node.getData('uid')
       const parent =
@@ -2103,11 +2136,60 @@ class Cooperate {
         if (/节点已存在/.test(msg)) {
           this.lastPushed[uid] = { text, note }
           this.recentPushed.set(uid, Date.now())
+        } else if (isPermanentInsertError(err)) {
+          this.abandonOrphanInsert(node)
+          droppedOrphans = true
+          console.warn('[mind-map] dropped orphan insert', uid, msg)
         } else {
           console.error('[mind-map] add node failed', err)
           // Retry shortly; otherwise the node stays local-only and peers never see it.
           this.scheduleHttpStructureSync(600)
         }
+      }
+    }
+    if (droppedOrphans) {
+      this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
+    }
+  }
+
+  abandonOrphanInsert(node) {
+    if (!node) return
+    if (!this.abandonedInsertUids) this.abandonedInsertUids = new Set()
+    const walk = current => {
+      if (!current) return
+      const id = current.getData && current.getData('uid')
+      if (id) {
+        this.abandonedInsertUids.add(id)
+        this.forgetHttpUid(id)
+      }
+      ;(current.children || []).forEach(walk)
+    }
+    walk(node)
+    const uid = node.getData && node.getData('uid')
+    const renderer = this.mindMap.renderer
+    const tree = renderer && renderer.renderTree
+    const parentUid =
+      node.parent && node.parent.getData && node.parent.getData('uid')
+    if (tree && uid && parentUid) {
+      const parentTree = this.findTreeNode(tree, parentUid)
+      if (parentTree && Array.isArray(parentTree.children)) {
+        parentTree.children = parentTree.children.filter(
+          child => child && child.data && child.data.uid !== uid
+        )
+      }
+      const parentNode = node.parent
+      if (parentNode) {
+        if (parentNode.nodeData && parentNode.nodeData.children) {
+          parentNode.nodeData.children = parentNode.nodeData.children.filter(
+            child => child && child.data && child.data.uid !== uid
+          )
+        }
+        if (Array.isArray(parentNode.children)) {
+          parentNode.children = parentNode.children.filter(child => child !== node)
+        }
+      }
+      if (renderer && typeof renderer.reRender === 'function') {
+        renderer.reRender()
       }
     }
   }
