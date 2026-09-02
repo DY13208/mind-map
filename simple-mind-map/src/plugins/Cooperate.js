@@ -935,6 +935,7 @@ class Cooperate {
     if (this.isSetData || this.isApplyingRemote || this.httpReplacing) {
       return
     }
+    if (Date.now() < this.suppressLocalUntil) return
     if (
       this.previewApplied ||
       this.hydratingCurrentData ||
@@ -978,6 +979,7 @@ class Cooperate {
       this.hydratingCurrentData ||
       this.httpHydrating ||
       this.httpReplacing ||
+      Date.now() < this.suppressLocalUntil ||
       !!(this.mindMap.renderer && this.mindMap.renderer._lazyCommandPending)
     if (busy) {
       if (this.httpCollabMode && historyCmd) this.httpHistorySyncing = false
@@ -1328,6 +1330,11 @@ class Cooperate {
   }
 
   wrapHttpMutation(type, body, send) {
+    if (this.httpReplacing && type !== 'map.replace') {
+      const err = new Error('正在保存整图，请稍候再试')
+      err.code = 'REPLACE_IN_PROGRESS'
+      return Promise.reject(err)
+    }
     const operationId =
       (body && (body.operationId || body.operation_id)) ||
       this.collabStore.createId()
@@ -1428,6 +1435,11 @@ class Cooperate {
   endHttpReplace() {
     this.httpReplacing = false
     this.httpReplaceInFlight = false
+    this.suppressLocalUntil = Date.now() + 2000
+    clearTimeout(this.httpTextTimer)
+    this.httpTextTimer = null
+    clearTimeout(this.httpStructureTimer)
+    this.httpStructureTimer = null
   }
 
   afterHttpReplace(result, treeOverride) {
@@ -1452,6 +1464,12 @@ class Cooperate {
       })
       this.stampLoadedSubtreeVersions(this.lastAppliedVersion)
     }
+  }
+
+  resyncHttpBaseline(tree) {
+    this.lastPushed = {}
+    this.recentPushed = new Map()
+    if (tree) this.markTreeUids(tree)
   }
 
   async persistHttpReplace(fullData, extra = {}) {
@@ -2488,6 +2506,7 @@ class Cooperate {
 
   async flushHttpTextNow() {
     if (this.httpReplacing || !this.httpPatchNode) return
+    if (Date.now() < this.suppressLocalUntil) return
     const pending = this.collectNodesWithPendingText()
     const tasks = []
     let droppedGhosts = false
@@ -2571,7 +2590,8 @@ class Cooperate {
       this.httpReplacing ||
       !this.httpAddNode ||
       this.previewApplied ||
-      this.isSetData
+      this.isSetData ||
+      Date.now() < this.suppressLocalUntil
     ) {
       return
     }
