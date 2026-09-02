@@ -134,8 +134,8 @@ async function up() {
   console.log(`  页面     http://${host}:${PORT}`)
   console.log(`  MCP      ${mcpUrl}`)
   console.log('')
-  console.log('  正在构建并启动容器（首次会较慢）...')
-  const child = compose(['up', '-d', '--build'], {
+  console.log('  正在重新构建并启动容器（会套用最新代码和 Nginx 配置，首次或改代码后会较慢）...')
+  const child = compose(['up', '-d', '--build', '--force-recreate'], {
     PUBLIC_HOST: host,
     MIND_MAP_PORT: String(PORT),
     PGPASSWORD: process.env.PGPASSWORD
