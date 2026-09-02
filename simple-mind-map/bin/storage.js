@@ -1080,6 +1080,12 @@ async function initSchemaOnce() {
   await pool.query(`
     alter table rooms add column if not exists version bigint not null default 0
   `)
+  // Serves the collaboration room list without a full-table sort as the number
+  // of saved rooms grows.  The primary key already covers single-room reads.
+  await pool.query(`
+    create index if not exists rooms_updated_at_desc_idx
+    on rooms(updated_at desc)
+  `)
   await pool.query(`
     create table if not exists room_operations (
       room_key text not null,
