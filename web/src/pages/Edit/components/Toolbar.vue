@@ -219,7 +219,6 @@ let fileHandle = null
 const defaultBtnList = [
   'back',
   'forward',
-  'flowExpand',
   'painter',
   'siblingNode',
   'childNode',
@@ -235,6 +234,7 @@ const defaultBtnList = [
   // 'attachment',
   'outerFrame',
   'annotation',
+  'flowExpand',
   'ai'
 ]
 

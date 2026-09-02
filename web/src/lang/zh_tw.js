@@ -88,7 +88,27 @@ export default {
     enableAutoEnterTextEditWhenKeydown: '鍵盤輸入時自動進入文本編輯',
     enableInheritAncestorLineStyle: '節點連線樣式繼承祖先節點的樣式',
     alwaysShowExpandBtn: '是否壹直顯示展開收起按鈕',
-    enableAi: '是否開啓AI功能'
+    enableAi: '是否開啓AI功能',
+    workbuddyModel: 'WorkBuddy 模型',
+    workbuddyModelPlaceholder: '選擇模型',
+    workbuddyModelRefresh: '刷新列表',
+    workbuddyModelPlatform: '平台模型',
+    workbuddyModelCustom: '自定義模型',
+    workbuddyModelCustomTag: '自定義',
+    workbuddyModelUnavailable: 'WorkBuddy 未就緒，無法載入模型列表',
+    workbuddyModelLoadFailed: '載入模型列表失敗',
+    flowExpandConcurrency: '補齊並發數',
+    flowExpandConcurrencyTip: '同時運行的補齊任務數，建議 1-3（對應 WorkBuddy 多會話）'
+  },
+  flowExpand: {
+    enqueued: '已加入補齊隊列',
+    cancelQueue: '取消',
+    queueHint: '還有 {count} 個任務排隊中',
+    panelTitle: '補齊隊列',
+    summary: '執行 {running} · 排隊 {queued} · 並發 {concurrency}',
+    runningSlot: '執行 #{slot}',
+    queuedSlot: '排隊 #{index}',
+    done: '已完成'
   },
   color: {
     moreColor: '更多顏色'

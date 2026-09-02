@@ -91,7 +91,27 @@ export default {
     textContentMargin: 'Node contents margin',
     enableInheritAncestorLineStyle:
       'Node connection style inherits the style of ancestor nodes',
-    enableAi: 'Is enable AI function'
+    enableAi: 'Is enable AI function',
+    workbuddyModel: 'WorkBuddy model',
+    workbuddyModelPlaceholder: 'Select model',
+    workbuddyModelRefresh: 'Refresh',
+    workbuddyModelPlatform: 'Platform models',
+    workbuddyModelCustom: 'Custom models',
+    workbuddyModelCustomTag: 'Custom',
+    workbuddyModelUnavailable: 'WorkBuddy is not ready',
+    workbuddyModelLoadFailed: 'Failed to load models',
+    flowExpandConcurrency: 'Flow expand concurrency',
+    flowExpandConcurrencyTip: 'Parallel flow-expand jobs (1-3, matches WorkBuddy sessions)'
+  },
+  flowExpand: {
+    enqueued: 'Added to flow-expand queue',
+    cancelQueue: 'Cancel',
+    queueHint: '{count} more in queue',
+    panelTitle: 'Flow expand queue',
+    summary: 'Running {running} · Queued {queued} · Concurrency {concurrency}',
+    runningSlot: 'Run #{slot}',
+    queuedSlot: 'Queue #{index}',
+    done: 'Done'
   },
   color: {
     moreColor: 'More color'

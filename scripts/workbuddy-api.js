@@ -1,5 +1,6 @@
 const fs = require('fs')
 const http = require('http')
+const os = require('os')
 const path = require('path')
 const { execSync, spawnSync } = require('child_process')
 
@@ -19,6 +20,54 @@ function resolveWorkbuddyDir(root) {
     if (fs.existsSync(path.join(dir, 'workbuddy_to_api.py'))) return dir
   }
   return path.join(root, 'workbuddy_to_api')
+}
+
+function getWorkbuddyPaths() {
+  const local =
+    process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
+  const exe = path.join(local, 'Programs', 'WorkBuddy', 'WorkBuddy.exe')
+  const packedCli = path.join(
+    local,
+    'Programs',
+    'WorkBuddy',
+    'resources',
+    'app.asar',
+    'cli',
+    'bin',
+    'codebuddy'
+  )
+  const unpackedCli = path.join(
+    local,
+    'Programs',
+    'WorkBuddy',
+    'resources',
+    'app.asar.unpacked',
+    'cli',
+    'bin',
+    'codebuddy'
+  )
+  const cli = fs.existsSync(unpackedCli) ? unpackedCli : packedCli
+  return { exe, cli, local }
+}
+
+function checkWorkbuddyClient() {
+  const { exe, cli } = getWorkbuddyPaths()
+  if (!fs.existsSync(exe)) {
+    return {
+      ok: false,
+      reason: `未找到 WorkBuddy 客户端：${exe}`,
+      hint:
+        '请先安装并登录 WorkBuddy 桌面版（默认装到 %LOCALAPPDATA%\\Programs\\WorkBuddy），再重新运行启动脚本。'
+    }
+  }
+  if (!fs.existsSync(cli)) {
+    return {
+      ok: false,
+      reason: `未找到 WorkBuddy CLI：${cli}`,
+      hint: 'WorkBuddy 可能未装完整，请重新安装桌面客户端后再试。'
+    }
+  }
+  return { ok: true, exe, cli }
 }
 
 function ensureWorkbuddySource(root) {
@@ -181,6 +230,67 @@ function ensureEnvFile(dir, apiKey = DEFAULT_API_KEY) {
   }
 }
 
+function readTailLog(filePath, maxLines = 30) {
+  if (!fs.existsSync(filePath)) return ''
+  try {
+    const text = fs.readFileSync(filePath, 'utf8')
+    const lines = text.split(/\r?\n/).filter(Boolean)
+    return lines.slice(-maxLines).join('\n')
+  } catch (e) {
+    return ''
+  }
+}
+
+function diagnoseStartupFailure(dir) {
+  const errLog = path.join(dir, 'runtime', 'proxy.err.log')
+  const outLog = path.join(dir, 'runtime', 'proxy.out.log')
+  const errText = readTailLog(errLog, 40)
+  const outText = readTailLog(outLog, 20)
+  const merged = `${errText}\n${outText}`
+
+  if (/WorkBuddy executable not found/i.test(merged)) {
+    const { exe } = getWorkbuddyPaths()
+    return {
+      reason: `未找到 WorkBuddy 客户端（${exe}）`,
+      hint:
+        '请先安装并登录 WorkBuddy 桌面版，再重新运行启动脚本。导图页面可正常打开，但「补齐流程」需要 WorkBuddy。'
+    }
+  }
+  if (/WorkBuddy CLI script not found/i.test(merged)) {
+    return {
+      reason: 'WorkBuddy 安装不完整，缺少 CLI 组件',
+      hint: '请重新安装 WorkBuddy 桌面客户端后再试。'
+    }
+  }
+  if (/FileNotFoundError/i.test(merged)) {
+    return {
+      reason: 'WorkBuddy 依赖文件缺失',
+      hint: merged.split('\n').slice(-3).join(' ')
+    }
+  }
+  if (/ModuleNotFoundError|ImportError/i.test(merged)) {
+    return {
+      reason: 'Python 环境异常',
+      hint: merged.split('\n').slice(-3).join(' ')
+    }
+  }
+  if (errText) {
+    const lastLine =
+      errText
+        .split('\n')
+        .reverse()
+        .find(line => line.trim() && !/^-+$/.test(line.trim())) || ''
+    return {
+      reason: lastLine || '代理进程启动后立即退出',
+      hint: `详细日志：${errLog}`
+    }
+  }
+  return {
+    reason: '代理进程启动失败',
+    hint: `请查看日志：${errLog}`
+  }
+}
+
 function checkHealth(port = DEFAULT_PORT, timeout = 1500) {
   return new Promise(resolve => {
     const req = http.get(`http://127.0.0.1:${port}/health`, res => {
@@ -195,7 +305,7 @@ function checkHealth(port = DEFAULT_PORT, timeout = 1500) {
   })
 }
 
-function waitForHealth(port = DEFAULT_PORT, timeout = 45000) {
+function waitForHealth(port = DEFAULT_PORT, timeout = 60000) {
   const started = Date.now()
   return new Promise(resolve => {
     const tick = async () => {
@@ -204,6 +314,19 @@ function waitForHealth(port = DEFAULT_PORT, timeout = 45000) {
       setTimeout(tick, 500)
     }
     tick()
+  })
+}
+
+function runPythonBackground(python, args, cwd) {
+  return spawnSync(python[0], [...python.slice(1), ...args], {
+    cwd,
+    encoding: 'utf8',
+    shell: false,
+    env: {
+      ...process.env,
+      PYTHONIOENCODING: 'utf-8',
+      PYTHONUTF8: '1'
+    }
   })
 }
 
@@ -239,8 +362,17 @@ async function ensureWorkbuddyApi({
   if (!python) {
     return {
       ok: false,
-      reason:
-        '未检测到 Python 3.10+。请安装 https://www.python.org/ 并勾选 Add to PATH'
+      reason: '未检测到 Python 3.10+',
+      hint: '请安装 https://www.python.org/ 并勾选「Add python.exe to PATH」后重试。'
+    }
+  }
+
+  const client = checkWorkbuddyClient()
+  if (!client.ok) {
+    return {
+      ok: false,
+      reason: client.reason,
+      hint: client.hint
     }
   }
 
@@ -250,7 +382,8 @@ async function ensureWorkbuddyApi({
   } catch (err) {
     return {
       ok: false,
-      reason: `无法获取 workbuddy_to_api：${err.message || err}`
+      reason: `无法获取 workbuddy_to_api：${err.message || err}`,
+      hint: '请确认已安装 Git，且网络可访问 GitHub。'
     }
   }
 
@@ -284,37 +417,37 @@ async function ensureWorkbuddyApi({
     args.push('--mcp-config', mcpConfig)
   }
 
-  const result = spawnSync(python[0], [...python.slice(1), ...args], {
-    cwd: dir,
-    encoding: 'utf8',
-    shell: false
-  })
+  const result = runPythonBackground(python, args, dir)
   if (result.status !== 0) {
-    const detail = `${result.stdout || ''}${result.stderr || ''}`.trim()
-    const logTail = readProxyLogTail(dir)
-    const fatal =
-      logTail.match(/FileNotFoundError[^\n]*/)?.[0] ||
-      logTail.match(/\[fatal\][^\n]*/)?.[0] ||
-      ''
+    const diag = diagnoseStartupFailure(dir)
     return {
       ok: false,
-      reason:
-        fatal ||
-        detail ||
-        logTail ||
-        'workbuddy_to_api 后台启动失败',
-      dir
+      reason: diag.reason,
+      hint: diag.hint,
+      dir,
+      log: path.join(dir, 'runtime', 'proxy.err.log')
     }
   }
 
   const ready = await waitForHealth(port)
+  if (!ready) {
+    const diag = diagnoseStartupFailure(dir)
+    return {
+      ok: false,
+      port,
+      dir,
+      reason: diag.reason || '代理已拉起但 /health 未就绪',
+      hint:
+        diag.hint ||
+        '请确认 WorkBuddy 已安装并登录；若刚装好，可等 1 分钟后重新运行启动脚本。',
+      log: path.join(dir, 'runtime', 'proxy.err.log')
+    }
+  }
+
   return {
-    ok: ready,
+    ok: true,
     port,
-    dir,
-    reason: ready
-      ? ''
-      : '代理已拉起但 /health 未就绪，请确认已安装并登录 WorkBuddy 客户端'
+    dir
   }
 }
 
@@ -342,6 +475,27 @@ function stopWorkbuddyApi({ root, apiKey = DEFAULT_API_KEY } = {}) {
   }
 }
 
+function formatWorkbuddyResult(wb) {
+  if (!wb) return ''
+  const lines = []
+  if (wb.ok) {
+    lines.push(
+      wb.alreadyRunning
+        ? `WorkBuddy API 已在运行  http://127.0.0.1:${wb.port}`
+        : `WorkBuddy API 已启动  http://127.0.0.1:${wb.port}`
+    )
+    return lines.join('\n')
+  }
+  if (wb.skipped) {
+    lines.push(`WorkBuddy API：${wb.reason}`)
+    return lines.join('\n')
+  }
+  lines.push(`WorkBuddy API 未就绪：${wb.reason || '未知错误'}`)
+  if (wb.hint) lines.push(`  → ${wb.hint}`)
+  if (wb.log) lines.push(`  → 日志：${wb.log}`)
+  return lines.join('\n')
+}
+
 module.exports = {
   DEFAULT_PORT,
   DEFAULT_API_KEY,
@@ -350,5 +504,7 @@ module.exports = {
   ensureWorkbuddyApi,
   stopWorkbuddyApi,
   checkHealth,
-  findPython
+  findPython,
+  checkWorkbuddyClient,
+  formatWorkbuddyResult
 }
