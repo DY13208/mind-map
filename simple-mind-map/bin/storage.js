@@ -99,6 +99,15 @@ async function withPgRetry(fn, options = {}) {
       lastErr = err
       if (!isTransientPgError(err) || attempt >= retries) throw err
       const wait = baseDelayMs * Math.pow(2, attempt)
+      console.warn(
+        '[pg] retry ' +
+          JSON.stringify({
+            attempt: attempt + 1,
+            wait,
+            code: err.code || undefined,
+            message: err.message
+          })
+      )
       await new Promise(resolve => setTimeout(resolve, wait))
     }
   }
@@ -126,6 +135,7 @@ const deletedRooms = new Set()
 const roomSaveStates = new Map()
 const roomMetaCache = new Map()
 const replacingRooms = new Set()
+const roomReplaceSeq = new Map()
 const MAX_SAVE_CONCURRENCY = 1
 const IDLE_EVICT_MS = 10 * 60 * 1000
 const LARGE_MAP_NODES = 400
@@ -336,8 +346,16 @@ function beginRoomReplace(roomKey) {
   replacingRooms.add(key)
 }
 
-function endRoomReplace(roomKey) {
-  replacingRooms.delete(String(roomKey || ''))
+function getReplaceSeq(roomKey) {
+  return Number(roomReplaceSeq.get(String(roomKey || '')) || 0)
+}
+
+function endRoomReplace(roomKey, options = {}) {
+  const key = String(roomKey || '')
+  replacingRooms.delete(key)
+  if (options.succeeded) {
+    roomReplaceSeq.set(key, getReplaceSeq(key) + 1)
+  }
 }
 
 function isRoomReplacing(roomKey) {
@@ -385,6 +403,7 @@ async function reviveRoom(roomKey) {
   roomSaveStates.delete(key)
   roomMetaCache.delete(key)
   replacingRooms.delete(key)
+  roomReplaceSeq.delete(key)
 }
 
 function safeRoomKey(roomKey) {
@@ -1493,12 +1512,15 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
   const json = nodesFromJson(room.nodes) || {}
   const table = await readRoomNodes(client, roomKey)
   const picked = pickAuthoritativeNodes(json, table, currentVersion)
-  const deletedUids = await listDeletedNodeUids(client, roomKey)
   const allowRestore =
     command.type === 'node.restore' ||
     command.type === 'operation.undo' ||
     command.type === 'operation.redo' ||
     command.type === 'map.replace'
+  const deletedUids =
+    command.type === 'map.replace'
+      ? new Set()
+      : await listDeletedNodeUids(client, roomKey)
   const applied = await apply({
     room: { ...room, nodes: picked.nodes },
     currentVersion,
@@ -1833,6 +1855,7 @@ module.exports = {
   beginRoomReplace,
   endRoomReplace,
   isRoomReplacing,
+  getReplaceSeq,
   isDeletedRoom,
   reviveRoom,
   queueSave,

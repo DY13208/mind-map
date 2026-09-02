@@ -755,7 +755,9 @@ export default {
           this.mindMap.setData(data)
         }
         if (persistReplace && rootNodeData) {
-          if (typeof cooperate.markTreeUids === 'function') {
+          if (typeof cooperate.resyncHttpBaseline === 'function') {
+            cooperate.resyncHttpBaseline(rootNodeData)
+          } else if (typeof cooperate.markTreeUids === 'function') {
             cooperate.markTreeUids(rootNodeData)
           }
           if (typeof cooperate.seedPreviewHydration === 'function') {

@@ -27,6 +27,8 @@ const {
   setSaveState,
   beginRoomReplace,
   endRoomReplace,
+  isRoomReplacing,
+  getReplaceSeq,
   isDeletedRoom,
   reviveRoom,
   scheduleSave,
@@ -116,7 +118,10 @@ function logApiError(action, err, extra = {}) {
     if (payload[key] === undefined) delete payload[key]
   })
   console.error('[api] ERROR ' + JSON.stringify(payload))
-  if (err && err.stack) console.error(err.stack)
+  const skipStack =
+    Number(err && err.statusCode) === 409 ||
+    Number(err && err.statusCode) === 429
+  if (err && err.stack && !skipStack) console.error(err.stack)
 }
 
 function logApiInfo(action, extra = {}) {
@@ -130,9 +135,33 @@ function logApiInfo(action, extra = {}) {
   )
 }
 
-async function withRoomMutation(roomKey, mutation) {
+function replaceBusyError() {
+  const err = new Error('正在保存整图，请稍候再试')
+  err.statusCode = 409
+  err.code = 'REPLACE_IN_PROGRESS'
+  return err
+}
+
+function staleAfterReplaceError() {
+  const err = new Error('整图已覆盖，已忽略保存期间的旧修改')
+  err.statusCode = 409
+  err.code = 'STALE_AFTER_REPLACE'
+  return err
+}
+
+async function withRoomMutation(roomKey, mutation, options = {}) {
+  if (!options.allowDuringReplace && isRoomReplacing(roomKey)) {
+    throw replaceBusyError()
+  }
+  const seqAtStart = getReplaceSeq(roomKey)
   const previous = roomMutationQueues.get(roomKey) || Promise.resolve()
-  const current = previous.catch(() => {}).then(mutation)
+  const current = previous.catch(() => {}).then(async () => {
+    if (!options.allowDuringReplace) {
+      if (isRoomReplacing(roomKey)) throw replaceBusyError()
+      if (getReplaceSeq(roomKey) !== seqAtStart) throw staleAfterReplaceError()
+    }
+    return mutation()
+  })
   roomMutationQueues.set(roomKey, current)
   try {
     return await current
@@ -201,6 +230,11 @@ async function applyCommittedLive(roomKey, command, committed) {
   // first HTTP mutation can land in PG while ensureDoc later hydrates a stale
   // snapshot into live Y.Doc, and GET /nodes would keep serving old content.
   const liveDoc = getMemoryDoc(roomKey)
+  const tooLarge = nodes && !isLiveDocAllowed(nodes)
+  if (tooLarge && (command.type === 'map.replace' || command.type === 'batch.apply')) {
+    dropLiveDoc(roomKey)
+    return committed
+  }
   if (liveDoc) {
     const replace =
       command.type === 'batch.apply' ||
@@ -1563,7 +1597,9 @@ async function handleApi(req, res) {
         message: '正在解析节点'
       })
       await yieldEventLoop()
-      const payload = await withRoomMutation(roomKey, async () => {
+      const payload = await withRoomMutation(
+        roomKey,
+        async () => {
         const snapshot = await getRoomSnapshot(roomKey)
         const live = getLiveObject(roomKey)
         const current = nodesFromSnapshotOrLive(snapshot, live) || {}
@@ -1616,7 +1652,9 @@ async function handleApi(req, res) {
         )
         const row = await getRoom(roomKey)
         return mapPayload(roomKey, obj, { ...row, version: committed.operation.version })
-      })
+      },
+      { allowDuringReplace: true }
+      )
       setSaveState(roomKey, 'saved', {
         phase: 'done',
         progress: 100,
@@ -1630,6 +1668,8 @@ async function handleApi(req, res) {
         durationMs: Date.now() - replaceStarted
       })
       sendJson(res, 200, payload)
+      endRoomReplace(roomKey, { succeeded: true })
+      return true
     } catch (err) {
       setSaveState(roomKey, 'error', {
         error: err.message || 'bad request',
