@@ -297,12 +297,14 @@ class Cooperate {
     this.recentPushed = new Map()
     this.recentHttpDeleted = new Map()
     this.pendingHttpDeletes = []
+    this.pendingHttpGeneralizationOwners = []
     this.httpTextTimer = null
     this.httpStructureTimer = null
     this.httpInsertPromise = null
     this.httpInsertRescan = false
     this.abandonedInsertUids = new Set()
     this.httpHydrating = false
+    this.httpReplaceInFlight = false
     this.httpRefreshing = false
     this.httpPendingRefreshAt = ''
     this.httpPendingRefreshForce = false
@@ -1318,9 +1320,9 @@ class Cooperate {
         )
     }
     if (typeof config.replaceTree === 'function') {
-      this.httpReplaceTree = tree =>
+      this.httpReplaceTree = (tree, extra) =>
         this.wrapHttpMutation('map.replace', { tree }, payload =>
-          config.replaceTree(payload.tree)
+          config.replaceTree(payload.tree, extra)
         )
     }
   }
@@ -1399,6 +1401,7 @@ class Cooperate {
     this.recentPushed = new Map()
     this.recentHttpDeleted = new Map()
     this.pendingHttpDeletes = []
+    this.pendingHttpGeneralizationOwners = []
     this.httpHistorySyncing = false
     this.httpRefreshing = false
     this.httpPendingRefreshAt = ''
@@ -1424,6 +1427,7 @@ class Cooperate {
 
   endHttpReplace() {
     this.httpReplacing = false
+    this.httpReplaceInFlight = false
   }
 
   afterHttpReplace(result, treeOverride) {
@@ -1432,6 +1436,7 @@ class Cooperate {
     this.recentHttpDeleted = new Map()
     this.dirtySubtrees = new Map()
     this.pendingHttpDeletes = []
+    this.pendingHttpGeneralizationOwners = []
     this.hydrateFailedUids = new Set()
     const tree =
       treeOverride ||
@@ -1449,14 +1454,24 @@ class Cooperate {
     }
   }
 
-  async persistHttpReplace(fullData) {
+  async persistHttpReplace(fullData, extra = {}) {
     if (!this.httpReplaceTree) {
       throw new Error('replaceTree not configured')
     }
+    if (this.httpReplaceInFlight) {
+      const err = new Error('正在保存整图，请稍候再试')
+      err.code = 'REPLACE_IN_PROGRESS'
+      throw err
+    }
+    this.httpReplaceInFlight = true
     const tree = (fullData && fullData.root) || fullData
-    const result = await this.httpReplaceTree(tree)
-    this.afterHttpReplace(result, tree)
-    return result
+    try {
+      const result = await this.httpReplaceTree(tree, extra)
+      this.afterHttpReplace(result, tree)
+      return result
+    } finally {
+      this.httpReplaceInFlight = false
+    }
   }
 
   async restoreHttpTree() {
@@ -2098,6 +2113,25 @@ class Cooperate {
       this.httpHistorySyncing = true
       return
     }
+    if (name === 'ADD_GENERALIZATION' || name === 'REMOVE_GENERALIZATION') {
+      const genList =
+        (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
+      const owners = []
+      const seen = new Set()
+      genList.forEach(node => {
+        if (!node) return
+        const owner =
+          node.isGeneralization && node.generalizationBelongNode
+            ? node.generalizationBelongNode
+            : node
+        const uid = owner.getData && owner.getData('uid')
+        if (!uid || seen.has(uid) || owner.isRoot) return
+        seen.add(uid)
+        owners.push(owner)
+      })
+      this.pendingHttpGeneralizationOwners = owners
+      return
+    }
     if (
       name !== 'REMOVE_NODE' &&
       name !== 'REMOVE_CURRENT_NODE' &&
@@ -2105,10 +2139,54 @@ class Cooperate {
     ) {
       return
     }
-    const list = (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
-    this.pendingHttpDeletes = list
-      .map(node => node && node.getData && node.getData('uid'))
-      .filter(Boolean)
+    const list =
+      (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
+    const deletes = []
+    const owners = []
+    const seenOwner = new Set()
+    list.forEach(node => {
+      if (!node) return
+      if (node.isGeneralization && node.generalizationBelongNode) {
+        const owner = node.generalizationBelongNode
+        const ownerUid = owner.getData && owner.getData('uid')
+        if (ownerUid && !seenOwner.has(ownerUid)) {
+          seenOwner.add(ownerUid)
+          owners.push(owner)
+        }
+        return
+      }
+      const uid = node.getData && node.getData('uid')
+      if (uid) deletes.push(uid)
+    })
+    this.pendingHttpDeletes = deletes
+    this.pendingHttpGeneralizationOwners = owners
+  }
+
+  syncHttpGeneralization(owner) {
+    if (!this.httpCollabMode || !this.httpPatchNode || !owner) return
+    const uid = owner.getData && owner.getData('uid')
+    if (!uid) return
+    let generalization = owner.getData && owner.getData('generalization')
+    if (Array.isArray(generalization) && generalization.length === 0) {
+      generalization = null
+    }
+    if (generalization == null) generalization = null
+    this.httpPatchNode(uid, { generalization })
+      .then(() => {
+        const full = this.nodePatchPayload(owner) || {
+          text: this.nodePlain(owner),
+          note: (owner.getData && owner.getData('note')) || ''
+        }
+        full.generalization = generalization
+        this.lastPushed[uid] = {
+          text: full.text,
+          note: full.note,
+          full
+        }
+      })
+      .catch(err => {
+        console.error('[mind-map] generalization sync failed', err)
+      })
   }
 
   onHttpCommand(name) {
@@ -2126,6 +2204,7 @@ class Cooperate {
       name === 'CUT_NODE'
     ) {
       const keepChildren = name === 'REMOVE_CURRENT_NODE'
+      const owners = (this.pendingHttpGeneralizationOwners || []).splice(0)
       const uids = this.pendingHttpDeletes.splice(0)
       uids.forEach(uid => {
         if (!this.httpDeleteNode) return
@@ -2133,6 +2212,7 @@ class Cooperate {
         this.recentHttpDeleted.set(uid, Date.now())
         this.httpDeleteNode(uid, { keepChildren }).catch(() => {})
       })
+      owners.forEach(owner => this.syncHttpGeneralization(owner))
       return
     }
     if (INSERT_COMMANDS[name]) {
@@ -2165,9 +2245,14 @@ class Cooperate {
       name === 'REMOVE_GENERALIZATION'
     ) {
       if (name === 'ADD_GENERALIZATION' || name === 'REMOVE_GENERALIZATION') {
-        this.flushHttpTextNow().catch(err => {
-          console.error('[mind-map] generalization sync failed', err)
-        })
+        const owners = (this.pendingHttpGeneralizationOwners || []).splice(0)
+        if (owners.length) {
+          owners.forEach(owner => this.syncHttpGeneralization(owner))
+        } else {
+          this.flushHttpTextNow().catch(err => {
+            console.error('[mind-map] generalization sync failed', err)
+          })
+        }
         return
       }
       this.scheduleHttpTextSync()
@@ -2377,9 +2462,14 @@ class Cooperate {
     }
     NULLABLE_PATCH_KEYS.forEach(key => {
       const value = target.getData && target.getData(key)
-      if (value !== undefined && value !== null && value !== '') {
+      const empty =
+        value === undefined ||
+        value === null ||
+        value === '' ||
+        (Array.isArray(value) && value.length === 0)
+      if (!empty) {
         full[key] = value
-      } else if (prevFull && prevFull[key] !== undefined) {
+      } else if (key === 'generalization' || (prevFull && prevFull[key] !== undefined)) {
         full[key] = null
       }
     })

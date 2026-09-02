@@ -27,11 +27,21 @@ const pool = new Pool({
   database: process.env.PGDATABASE,
   user: process.env.PGUSER,
   password: process.env.PGPASSWORD,
-  application_name: process.env.COLLAB_PG_APP_NAME || 'mind-map-collab'
+  application_name: process.env.COLLAB_PG_APP_NAME || 'mind-map-collab',
+  max: Math.max(4, Number(process.env.PGPOOL_MAX || 20)),
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: Math.max(
+    1000,
+    Number(process.env.PGPOOL_CONNECT_TIMEOUT_MS || 8000)
+  )
 })
 
 pool.on('error', err => {
-  console.error('[pg] idle client error:', err && err.message ? err.message : err)
+  console.error(
+    '[pg] idle client error:',
+    err && err.message ? err.message : err,
+    err && err.stack ? err.stack : ''
+  )
 })
 
 const operationEvents = new EventEmitter()
@@ -114,6 +124,8 @@ const saveWorkers = new Map()
 const preloadCache = new Map()
 const deletedRooms = new Set()
 const roomSaveStates = new Map()
+const roomMetaCache = new Map()
+const replacingRooms = new Set()
 const MAX_SAVE_CONCURRENCY = 1
 const IDLE_EVICT_MS = 10 * 60 * 1000
 const LARGE_MAP_NODES = 400
@@ -259,25 +271,107 @@ function pickLatestTimestamp(a, b) {
   return timestampMs(a) >= timestampMs(b) ? a || b || null : b || a || null
 }
 
-function setSaveState(roomKey, status, error = '') {
-  roomSaveStates.set(roomKey, {
+function setSaveState(roomKey, status, errorOrExtra = '') {
+  const extra =
+    errorOrExtra &&
+    typeof errorOrExtra === 'object' &&
+    !Array.isArray(errorOrExtra)
+      ? errorOrExtra
+      : { error: errorOrExtra }
+  const prev = roomSaveStates.get(roomKey) || {}
+  const next = {
     status,
-    error: error ? String(error) : '',
-    updated_at: new Date().toISOString()
+    error:
+      extra.error != null && extra.error !== ''
+        ? String(extra.error)
+        : status === 'error'
+          ? String(prev.error || '')
+          : '',
+    updated_at: new Date().toISOString(),
+    phase:
+      extra.phase != null
+        ? extra.phase
+        : status === 'saved'
+          ? 'done'
+          : status === 'error'
+            ? 'error'
+            : prev.phase || '',
+    progress:
+      extra.progress != null
+        ? Math.max(0, Math.min(100, Number(extra.progress) || 0))
+        : status === 'saved'
+          ? 100
+          : prev.progress || 0,
+    nodeCount:
+      extra.nodeCount != null ? Number(extra.nodeCount) || 0 : prev.nodeCount || 0,
+    message: extra.message != null ? String(extra.message) : prev.message || ''
+  }
+  roomSaveStates.set(roomKey, next)
+  return next
+}
+
+function rememberRoomMeta(roomKey, meta = {}) {
+  const key = String(roomKey || '')
+  if (!key) return
+  const prev = roomMetaCache.get(key) || {}
+  const version =
+    meta.version != null && Number.isFinite(Number(meta.version))
+      ? Number(meta.version)
+      : prev.version || 0
+  roomMetaCache.set(key, {
+    version,
+    updated_at: meta.updated_at || prev.updated_at || null
   })
+}
+
+function beginRoomReplace(roomKey) {
+  const key = String(roomKey || '')
+  if (replacingRooms.has(key)) {
+    const err = new Error('正在保存整图，请稍候再试')
+    err.statusCode = 409
+    err.code = 'REPLACE_IN_PROGRESS'
+    err.progress = getSaveStatus(key)
+    throw err
+  }
+  replacingRooms.add(key)
+}
+
+function endRoomReplace(roomKey) {
+  replacingRooms.delete(String(roomKey || ''))
+}
+
+function isRoomReplacing(roomKey) {
+  return replacingRooms.has(String(roomKey || ''))
 }
 
 function getSaveStatus(roomKey) {
   if (deletedRooms.has(roomKey)) {
-    return { status: 'deleted', error: '', updated_at: new Date().toISOString() }
-  }
-  return (
-    roomSaveStates.get(roomKey) || {
-      status: 'saved',
+    return {
+      status: 'deleted',
       error: '',
-      updated_at: null
+      updated_at: new Date().toISOString(),
+      replacing: false,
+      version: 0,
+      progress: 0,
+      phase: 'deleted'
     }
-  )
+  }
+  const local = roomSaveStates.get(roomKey) || {
+    status: 'saved',
+    error: '',
+    updated_at: null,
+    phase: '',
+    progress: 0,
+    nodeCount: 0,
+    message: ''
+  }
+  const meta = roomMetaCache.get(roomKey) || {}
+  return {
+    ...local,
+    replacing: isRoomReplacing(roomKey),
+    version: Number(meta.version || 0),
+    updated_at: pickLatestTimestamp(meta.updated_at, local.updated_at)
+  }
 }
 
 function isDeletedRoom(roomKey) {
@@ -289,6 +383,8 @@ async function reviveRoom(roomKey) {
   await pool.query('delete from room_tombstones where room_key = $1', [key])
   deletedRooms.delete(key)
   roomSaveStates.delete(key)
+  roomMetaCache.delete(key)
+  replacingRooms.delete(key)
 }
 
 function safeRoomKey(roomKey) {
@@ -742,13 +838,22 @@ function shareUrl(roomKey) {
 }
 
 async function getRoom(roomKey) {
-  const res = await pool.query(
-    `select room_key, title, cos_key, version, created_at, updated_at
-     from rooms
-     where room_key = $1`,
-    [roomKey]
-  )
-  return res.rows[0] || null
+  return withPgRetry(async () => {
+    const res = await pool.query(
+      `select room_key, title, cos_key, version, created_at, updated_at
+       from rooms
+       where room_key = $1`,
+      [roomKey]
+    )
+    const row = res.rows[0] || null
+    if (row) {
+      rememberRoomMeta(roomKey, {
+        version: row.version,
+        updated_at: row.updated_at
+      })
+    }
+    return row
+  })
 }
 
 async function nodesFromTableIfCurrent(roomKey, json, version) {
@@ -1054,6 +1159,10 @@ async function getRoomSnapshot(roomKey) {
   if (!row) return null
   const json = nodesFromJson(row.nodes)
   const version = Number(row.version || 0)
+  rememberRoomMeta(roomKey, {
+    version,
+    updated_at: row.updated_at
+  })
   const fromTable = await nodesFromTableIfCurrent(roomKey, json, version)
   if (!fromTable && json && nodesDualWriteEnabled()) {
     writeRoomNodeRows(pool, roomKey, json, version).catch(err => {
@@ -1363,7 +1472,12 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
   )
   if (existing.rows[0]) {
     await client.query('commit')
-    return { duplicate: true, operation: operationRow(existing.rows[0]) }
+    const operation = operationRow(existing.rows[0])
+    rememberRoomMeta(roomKey, {
+      version: operation.version,
+      updated_at: operation.created_at
+    })
+    return { duplicate: true, operation }
   }
   const currentVersion = Number(room.version || 0)
   if (
@@ -1483,6 +1597,10 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
   }
   await client.query('commit')
   const operation = operationRow(inserted.rows[0])
+  rememberRoomMeta(roomKey, {
+    version,
+    updated_at: operation.created_at || new Date().toISOString()
+  })
   setImmediate(() => {
     operationEvents.emit('committed', {
       roomKey,
@@ -1653,7 +1771,38 @@ async function handleApi(req, res) {
     return true
   }
   const mindApi = require('./mindApi')
-  return mindApi.handleApi(req, res)
+  const started = Date.now()
+  const path = String((req.url || '').split('?')[0] || '')
+  try {
+    return await mindApi.handleApi(req, res)
+  } catch (err) {
+    console.error(
+      '[api] ERROR ' +
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          method: req.method,
+          path,
+          code: err && err.code,
+          message: (err && err.message) || String(err),
+          durationMs: Date.now() - started
+        })
+    )
+    if (err && err.stack) console.error(err.stack)
+    throw err
+  } finally {
+    const durationMs = Date.now() - started
+    if (durationMs >= 1500) {
+      console.warn(
+        '[api] slow ' +
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            method: req.method,
+            path,
+            durationMs
+          })
+      )
+    }
+  }
 }
 
 module.exports = {
@@ -1679,6 +1828,11 @@ module.exports = {
   readBody,
   shareUrl,
   getSaveStatus,
+  setSaveState,
+  rememberRoomMeta,
+  beginRoomReplace,
+  endRoomReplace,
+  isRoomReplacing,
   isDeletedRoom,
   reviveRoom,
   queueSave,

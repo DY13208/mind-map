@@ -1642,18 +1642,29 @@ class Render {
 
   // 删除概要节点，即从所属节点里删除该概要
   deleteNodeGeneralization(node) {
-    const targetNode = node.generalizationBelongNode
-    const index = targetNode.getGeneralizationNodeIndex(node)
-    let generalization = targetNode.getData('generalization')
-    if (Array.isArray(generalization)) {
-      generalization.splice(index, 1)
-    } else {
-      generalization = null
+    const targetNode = node && node.generalizationBelongNode
+    if (!targetNode) return
+    const genUid = (node.getData && node.getData('uid')) || node.uid
+    const raw = targetNode.getData('generalization')
+    const list = Array.isArray(raw) ? raw.slice() : raw ? [raw] : []
+    let index =
+      typeof targetNode.getGeneralizationNodeIndex === 'function'
+        ? targetNode.getGeneralizationNodeIndex(node)
+        : -1
+    if (index < 0) {
+      index = list.findIndex(item => item && item.uid === genUid)
     }
-    // 删除概要节点
+    const next = index < 0 ? [] : list.filter((_, i) => i !== index)
     this.mindMap.execCommand('SET_NODE_DATA', targetNode, {
-      generalization
+      generalization: next.length ? next : null
     })
+    if (!next.length) {
+      if (typeof targetNode.removeGeneralization === 'function') {
+        targetNode.removeGeneralization()
+      }
+    } else if (typeof targetNode.updateGeneralization === 'function') {
+      targetNode.updateGeneralization()
+    }
     this.closeHighlightNode()
   }
 
@@ -2336,6 +2347,9 @@ class Render {
       this.mindMap.execCommand('SET_NODE_DATA', node, {
         generalization: null
       })
+      if (typeof node.removeGeneralization === 'function') {
+        node.removeGeneralization()
+      }
     })
 
     selectedGeneralizationMap.forEach((uidSet, owner) => {
@@ -2347,10 +2361,15 @@ class Render {
         : generalization
           ? [generalization]
           : []
-      const nextList = list.filter(item => !uidSet.has(item.uid))
+      const nextList = list.filter(item => item && !uidSet.has(item.uid))
       this.mindMap.execCommand('SET_NODE_DATA', owner, {
         generalization: nextList.length ? nextList : null
       })
+      if (!nextList.length && typeof owner.removeGeneralization === 'function') {
+        owner.removeGeneralization()
+      } else if (typeof owner.updateGeneralization === 'function') {
+        owner.updateGeneralization()
+      }
     })
     this.mindMap.render()
     this.closeHighlightNode()

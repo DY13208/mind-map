@@ -40,6 +40,9 @@ function apiBase() {
 
 async function request(path, options = {}) {
   const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS
+  if (options.onUploadProgress) {
+    return requestWithUploadProgress(path, { ...options, timeoutMs })
+  }
   let res
   try {
     res = await fetchWithTimeout(
@@ -69,6 +72,51 @@ async function request(path, options = {}) {
     throw err
   }
   return data
+}
+
+function requestWithUploadProgress(path, options = {}) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open(options.method || 'POST', `${apiBase()}${path}`)
+    xhr.withCredentials = true
+    xhr.timeout = options.timeoutMs || DEFAULT_TIMEOUT_MS
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    }
+    Object.keys(headers).forEach(key => {
+      if (headers[key] != null) xhr.setRequestHeader(key, headers[key])
+    })
+    xhr.upload.onprogress = event => {
+      if (!options.onUploadProgress || !event.lengthComputable) return
+      const percent = event.total
+        ? Math.round((event.loaded / event.total) * 100)
+        : 0
+      options.onUploadProgress({
+        loaded: event.loaded,
+        total: event.total,
+        percent
+      })
+    }
+    xhr.onload = () => {
+      let data = {}
+      try {
+        data = JSON.parse(xhr.responseText || '{}')
+      } catch (err) {
+        data = {}
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data)
+        return
+      }
+      const error = new Error(data.error || xhr.statusText || 'request failed')
+      if (data.code) error.code = data.code
+      reject(error)
+    }
+    xhr.onerror = () => reject(new Error('网络错误，请稍后重试'))
+    xhr.ontimeout = () => reject(new Error('协作服务响应超时，请稍后重试'))
+    xhr.send(options.body)
+  })
 }
 
 export function listFiles(extra = {}) {
@@ -101,12 +149,15 @@ export function deleteFile(roomKey) {
 }
 
 export function getSaveStatus(roomKey) {
-  return request(`/api/files/${encodeURIComponent(roomKey)}/save-status`)
+  return request(`/api/files/${encodeURIComponent(roomKey)}/save-status`, {
+    timeoutMs: 8000
+  })
 }
 
 export function beatPresence(roomKey, user) {
   return request(`/api/files/${encodeURIComponent(roomKey)}/presence`, {
     method: 'POST',
+    timeoutMs: 8000,
     body: JSON.stringify(user || {})
   })
 }
@@ -258,7 +309,8 @@ export async function replaceFileTree(roomKey, tree, extra = {}) {
     method: 'POST',
     timeoutMs: replaceTimeoutMs(tree, extra),
     headers: operationHeaders(extra),
-    body
+    body,
+    onUploadProgress: extra.onUploadProgress
   })
 }
 

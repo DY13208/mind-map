@@ -396,8 +396,12 @@ export default {
     autoOpenNodeRichTextTip:
       'Detected imported rich text content, automatically enabled rich text mode',
     importingTip: 'Importing, please wait…',
-    importSavingTip:
-      'Saving to the server. Large maps may take a few minutes — please keep this tab open.',
+    importSavingTip: 'Saving to the server — please keep this tab open.',
+    importSavingParse: 'Preparing the map…',
+    importSavingUpload: 'Uploading to the server…',
+    importSavingWrite: 'Writing nodes…',
+    importSavingCommit: 'Committing to the database…',
+    importSavingApply: 'Saved. Applying to the canvas…',
     importPersistFailed:
       'Import could not be saved to this room. The server copy was restored.',
     largeMapImportTip:
