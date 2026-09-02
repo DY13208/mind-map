@@ -73,6 +73,17 @@ const STRUCTURE_COMMANDS = {
 
 const RECENT_HTTP_MS = 8000
 const RECENT_PUSH_GRACE_MS = 2500
+const NULLABLE_PATCH_KEYS = [
+  'image',
+  'imageTitle',
+  'imageSize',
+  'icon',
+  'tag',
+  'hyperlink',
+  'hyperlinkTitle',
+  'outerFrame',
+  'generalization'
+]
 
 function pruneRecentMap(map, maxAge = RECENT_HTTP_MS) {
   const now = Date.now()
@@ -1507,6 +1518,67 @@ class Cooperate {
     )
   }
 
+  normalizeGeneralizationData(generalization) {
+    if (generalization == null) return generalization
+    const list = formatGetNodeGeneralization({ generalization })
+    if (!list.length) return null
+    return list.map(item => {
+      if (!item || typeof item !== 'object') return item
+      const next = { ...item }
+      if (Array.isArray(next.range) && next.range.length >= 2) {
+        next.range = [Number(next.range[0]), Number(next.range[1])]
+      } else {
+        delete next.range
+      }
+      return next
+    })
+  }
+
+  generalizationNeedsHydrate(node, generalization) {
+    if (!node || !generalization) return false
+    const list = formatGetNodeGeneralization({ generalization })
+    let maxIndex = -1
+    list.forEach(item => {
+      if (!item || !Array.isArray(item.range) || item.range.length < 2) return
+      maxIndex = Math.max(maxIndex, Number(item.range[1]))
+    })
+    if (maxIndex < 0) return false
+    const live = node.children ? node.children.length : 0
+    const childCount = Number(node.getData && node.getData('childCount')) || 0
+    return live <= maxIndex && childCount > live
+  }
+
+  async hydrateGeneralizationParent(node, generalization) {
+    if (!node || !this.httpFetchSubtree) return false
+    const uid = node.getData && node.getData('uid')
+    if (!uid) return false
+    if (!this.generalizationNeedsHydrate(node, generalization)) return false
+    node.setData({ expand: true })
+    const treeNode = this.findTreeNode(
+      this.mindMap.renderer && this.mindMap.renderer.renderTree,
+      uid
+    )
+    if (treeNode && treeNode.data) treeNode.data.expand = true
+    try {
+      const result = await this.httpFetchSubtree(uid, { knownVersion: 0 })
+      if (treeNode) {
+        this.mergeHttpChildren(treeNode, (result && result.children) || [])
+        if (treeNode.data) {
+          treeNode.data.childCount =
+            (result && result.total) ||
+            Number(treeNode.data.childCount) ||
+            (treeNode.children || []).length
+        }
+      }
+      this.dirtySubtrees.delete(uid)
+      this.hydratedUids.add(uid)
+      return true
+    } catch (err) {
+      console.error('[mind-map] hydrate generalization parent failed', uid, err)
+      return false
+    }
+  }
+
   applyHttpRemoteNodeFields(node, next = {}, merged = {}) {
     const renderer = this.mindMap.renderer
     if (!node || !renderer) return false
@@ -1537,11 +1609,8 @@ class Cooperate {
       changed = true
     }
     if (this.generalizationRemoteChanged(localData, next, merged)) {
-      const nextGen = next.generalization
-      if (
-        nextGen == null ||
-        (Array.isArray(nextGen) && nextGen.length === 0)
-      ) {
+      const nextGen = this.normalizeGeneralizationData(next.generalization)
+      if (nextGen == null || (Array.isArray(nextGen) && nextGen.length === 0)) {
         renderer.setNodeData(node, { generalization: null })
         if (typeof node.removeGeneralization === 'function') {
           node.removeGeneralization()
@@ -1553,6 +1622,11 @@ class Cooperate {
         } else if (typeof node.createGeneralizationNode === 'function') {
           node.createGeneralizationNode()
         }
+        this.hydrateGeneralizationParent(node, nextGen)
+          .then(hydrated => {
+            if (hydrated && this.mindMap) this.mindMap.render()
+          })
+          .catch(() => {})
       }
       needsGeneralizationRender = true
       changed = true
@@ -2071,6 +2145,12 @@ class Cooperate {
       name === 'ADD_GENERALIZATION' ||
       name === 'REMOVE_GENERALIZATION'
     ) {
+      if (name === 'ADD_GENERALIZATION' || name === 'REMOVE_GENERALIZATION') {
+        this.flushHttpTextNow().catch(err => {
+          console.error('[mind-map] generalization sync failed', err)
+        })
+        return
+      }
       this.scheduleHttpTextSync()
     }
   }
@@ -2117,20 +2197,12 @@ class Cooperate {
       text,
       note: (data && data.note) || ''
     }
-    ;[
-      'image',
-      'imageTitle',
-      'imageSize',
-      'icon',
-      'tag',
-      'hyperlink',
-      'hyperlinkTitle',
-      'outerFrame',
-      'generalization'
-    ].forEach(key => {
+    NULLABLE_PATCH_KEYS.forEach(key => {
       const value = data && data[key]
       if (value !== undefined && value !== null && value !== '') {
         payload[key] = value
+      } else if (data && Object.prototype.hasOwnProperty.call(data, key)) {
+        payload[key] = null
       }
     })
     return payload
@@ -2261,8 +2333,9 @@ class Cooperate {
     const skipUid = uid =>
       uid && this.abandonedInsertUids && this.abandonedInsertUids.has(uid)
     ;(renderer.activeNodeList || []).forEach(node => {
-      const uid = node.getData && node.getData('uid')
-      if (uid && !skipUid(uid)) byUid.set(uid, node)
+      const target = this.resolveHttpPatchNode(node)
+      const uid = target.getData && target.getData('uid')
+      if (uid && !skipUid(uid)) byUid.set(uid, target)
     })
     this.collectVisibleUids().forEach(uid => {
       if (byUid.has(uid) || skipUid(uid)) return
@@ -2275,24 +2348,20 @@ class Cooperate {
   nodePatchPayload(node, options = {}) {
     const target = this.resolveHttpPatchNode(node)
     const uid = target.getData && target.getData('uid')
+    const prevFull =
+      uid && this.lastPushed[uid] && this.lastPushed[uid].full
+        ? this.lastPushed[uid].full
+        : null
     const full = {
       text: this.nodePlain(target),
       note: (target.getData && target.getData('note')) || ''
     }
-    ;[
-      'image',
-      'imageTitle',
-      'imageSize',
-      'icon',
-      'tag',
-      'hyperlink',
-      'hyperlinkTitle',
-      'outerFrame',
-      'generalization'
-    ].forEach(key => {
+    NULLABLE_PATCH_KEYS.forEach(key => {
       const value = target.getData && target.getData(key)
       if (value !== undefined && value !== null && value !== '') {
         full[key] = value
+      } else if (prevFull && prevFull[key] !== undefined) {
+        full[key] = null
       }
     })
     if (!options.onlyChanged || !uid) return full

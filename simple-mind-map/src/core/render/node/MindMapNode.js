@@ -519,7 +519,7 @@ class MindMapNode {
     }
     // 更新快速创建子节点按钮
     if (isShowCreateChildBtnIcon) {
-      if (childrenLength > 0) {
+      if (this.isGeneralization || childrenLength > 0) {
         this.removeQuickCreateChildBtn()
       } else {
         const { isActive } = this.getData()
