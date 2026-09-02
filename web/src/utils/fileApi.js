@@ -5,35 +5,63 @@ import { stringifyJsonOffMainThread } from '@/utils/importTree'
 
 const DEFAULT_TIMEOUT_MS = 20000
 const SUBTREE_TIMEOUT_MS = 12000
-const MAX_SUBTREE_INFLIGHT = 2
+const MAX_API_INFLIGHT = 2
 const REPLACE_TIMEOUT_MIN_MS = 120000
 const REPLACE_TIMEOUT_MAX_MS = 600000
 
-let subtreeActive = 0
-const subtreeHighWait = []
-const subtreeLowWait = []
+let apiActive = 0
+const apiHighWait = []
+const apiLowWait = []
 const inflightSubtree = new Map()
+let apiFailCount = 0
+let apiPauseUntil = 0
 
-function acquireSubtreeSlot(priority = 'high') {
+function acquireApiSlot(priority = 'high') {
   return new Promise(resolve => {
     const start = () => {
-      subtreeActive += 1
+      apiActive += 1
       let released = false
       resolve(() => {
         if (released) return
         released = true
-        subtreeActive -= 1
-        const next = subtreeHighWait.shift() || subtreeLowWait.shift()
+        apiActive -= 1
+        const next = apiHighWait.shift() || apiLowWait.shift()
         if (next) next()
       })
     }
-    if (subtreeActive < MAX_SUBTREE_INFLIGHT) {
+    if (apiActive < MAX_API_INFLIGHT) {
       start()
       return
     }
-    if (priority === 'low') subtreeLowWait.push(start)
-    else subtreeHighWait.push(start)
+    if (priority === 'low') apiLowWait.push(start)
+    else apiHighWait.push(start)
   })
+}
+
+function requestPriority(options = {}) {
+  if (options.priority) return options.priority
+  const method = String(options.method || 'GET').toUpperCase()
+  return method === 'GET' || method === 'HEAD' ? 'high' : 'low'
+}
+
+function noteApiSuccess() {
+  apiFailCount = 0
+  apiPauseUntil = 0
+}
+
+function noteApiFailure(err) {
+  const msg = String((err && err.message) || err || '')
+  const network =
+    (err && err.name === 'FetchTimeoutError') ||
+    msg.includes('超时') ||
+    msg.includes('Failed to fetch') ||
+    msg.includes('NetworkError') ||
+    msg.includes('网络错误')
+  if (!network) return
+  apiFailCount += 1
+  if (apiFailCount >= 3) {
+    apiPauseUntil = Date.now() + Math.min(15000, 2000 * apiFailCount)
+  }
 }
 
 function subtreeDedupeKey(roomKey, uid, options = {}) {
@@ -81,9 +109,16 @@ function apiBase() {
 
 async function request(path, options = {}) {
   const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS
+  const priority = requestPriority(options)
+  if (priority === 'low' && Date.now() < apiPauseUntil) {
+    const err = new Error('协作服务繁忙，请稍后重试')
+    err.code = 'API_BACKOFF'
+    throw err
+  }
   if (options.onUploadProgress) {
     return requestWithUploadProgress(path, { ...options, timeoutMs })
   }
+  const release = await acquireApiSlot(priority)
   let res
   try {
     res = await fetchWithTimeout(
@@ -101,10 +136,13 @@ async function request(path, options = {}) {
       timeoutMs
     )
   } catch (err) {
+    noteApiFailure(err)
     if (err instanceof FetchTimeoutError) {
       throw new Error('协作服务响应超时，请稍后重试')
     }
     throw err
+  } finally {
+    release()
   }
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
@@ -112,8 +150,10 @@ async function request(path, options = {}) {
     if (data.code) err.code = data.code
     if (data.retryAfterMs != null) err.retryAfterMs = data.retryAfterMs
     err.statusCode = res.status
+    if (res.status >= 500) noteApiFailure(err)
     throw err
   }
+  noteApiSuccess()
   return data
 }
 
@@ -193,7 +233,8 @@ export function deleteFile(roomKey) {
 
 export function getSaveStatus(roomKey) {
   return request(`/api/files/${encodeURIComponent(roomKey)}/save-status`, {
-    timeoutMs: 8000
+    timeoutMs: 8000,
+    priority: 'low'
   })
 }
 
@@ -201,6 +242,7 @@ export function beatPresence(roomKey, user) {
   return request(`/api/files/${encodeURIComponent(roomKey)}/presence`, {
     method: 'POST',
     timeoutMs: 8000,
+    priority: 'low',
     body: JSON.stringify(user || {})
   })
 }
@@ -233,19 +275,13 @@ export function getFileSubtree(roomKey, uid, options = {}) {
   const key = subtreeDedupeKey(roomKey, uid, options)
   const pending = inflightSubtree.get(key)
   if (pending) return pending
-  const job = (async () => {
-    const release = await acquireSubtreeSlot(options.priority || 'high')
-    try {
-      return await request(
-        `/api/files/${encodeURIComponent(roomKey)}/subtree${
-          query ? `?${query}` : ''
-        }`,
-        { timeoutMs: options.timeoutMs || SUBTREE_TIMEOUT_MS }
-      )
-    } finally {
-      release()
+  const job = request(
+    `/api/files/${encodeURIComponent(roomKey)}/subtree${query ? `?${query}` : ''}`,
+    {
+      timeoutMs: options.timeoutMs || SUBTREE_TIMEOUT_MS,
+      priority: options.priority || 'high'
     }
-  })().finally(() => {
+  ).finally(() => {
     if (inflightSubtree.get(key) === job) inflightSubtree.delete(key)
   })
   inflightSubtree.set(key, job)

@@ -899,7 +899,7 @@ export default {
     async syncHttpPresence() {
       if (!this.httpCollab || !this.connected || !this.roomName) return
       const cooperate = this.mindMap && this.mindMap.cooperate
-      if (cooperate && (cooperate.httpReplacing || cooperate.httpReplaceInFlight || cooperate.httpSettlingAfterReplace || (typeof cooperate.isHttpSettling === 'function' && cooperate.isHttpSettling()))) {
+      if (cooperate && (cooperate.httpReplacing || cooperate.httpReplaceInFlight || cooperate.httpSettlingAfterReplace || cooperate.httpHydrating || (typeof cooperate.isHttpSettling === 'function' && cooperate.isHttpSettling()))) {
         return
       }
       if (this.presenceBackoffUntil && Date.now() < this.presenceBackoffUntil) {
@@ -948,8 +948,8 @@ export default {
     async loadSaveStatus() {
       if (!this.connected || !this.roomName) return
       const cooperate = this.mindMap && this.mindMap.cooperate
-      if (cooperate && (cooperate.httpReplacing || cooperate.httpReplaceInFlight || cooperate.httpSettlingAfterReplace)) {
-        this.saveStatus = 'saving'
+      if (cooperate && (cooperate.httpReplacing || cooperate.httpReplaceInFlight || cooperate.httpSettlingAfterReplace || cooperate.httpHydrating)) {
+        this.saveStatus = cooperate.httpHydrating ? this.saveStatus : 'saving'
         return
       }
       if (this.saveStatusInFlight) return

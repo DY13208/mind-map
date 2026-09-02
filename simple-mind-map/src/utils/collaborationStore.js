@@ -141,18 +141,6 @@ export function createCollaborationStore(options = {}) {
         entry.updatedAt = now()
         entry.error = 'timeout_retry'
         emit()
-        Promise.resolve()
-          .then(() => entry.send(entry))
-          .then(result => {
-            confirmPending(operationId, result && result.version, result || {})
-          })
-          .catch(err => {
-            if (entry.attempts >= 3) {
-              rejectPending(operationId, err)
-            } else {
-              scheduleTimeout(operationId)
-            }
-          })
         scheduleTimeout(operationId)
         return
       }
