@@ -1652,9 +1652,18 @@ class Render {
         ? targetNode.getGeneralizationNodeIndex(node)
         : -1
     if (index < 0) {
-      index = list.findIndex(item => item && item.uid === genUid)
+      index = list.findIndex(
+        item =>
+          item &&
+          (item.uid === genUid || item.uid === node.uid)
+      )
     }
-    const next = index < 0 ? [] : list.filter((_, i) => i !== index)
+    const next =
+      index < 0
+        ? list.filter(
+            item => item && item.uid !== genUid && item.uid !== node.uid
+          )
+        : list.filter((_, i) => i !== index)
     this.mindMap.execCommand('SET_NODE_DATA', targetNode, {
       generalization: next.length ? next : null
     })
