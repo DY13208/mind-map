@@ -9,7 +9,8 @@ import {
   transformTreeDataToObject,
   transformObjectToTreeData,
   removeFromParentNodeData,
-  copyNodeTree
+  copyNodeTree,
+  formatGetNodeGeneralization
 } from '../utils/index'
 import { applyObjectToYMap, migrateLegacyNodes } from './cooperateYjs'
 import {
@@ -141,6 +142,36 @@ function treeDataPlain(data) {
   return data.richText ? getTextFromHtml(data.text) : String(data.text || '')
 }
 
+function stableFieldValue(value) {
+  if (value === undefined) return undefined
+  try {
+    return JSON.stringify(value)
+  } catch (err) {
+    return String(value)
+  }
+}
+
+function nodeDataSyncChanged(before = {}, after = {}) {
+  if (treeDataPlain(before) !== treeDataPlain(after)) return true
+  if (
+    String((before && before.note) || '') !== String((after && after.note) || '')
+  ) {
+    return true
+  }
+  if (
+    stableFieldValue(before.generalization) !==
+    stableFieldValue(after.generalization)
+  ) {
+    return true
+  }
+  if (
+    stableFieldValue(before.outerFrame) !== stableFieldValue(after.outerFrame)
+  ) {
+    return true
+  }
+  return false
+}
+
 function diffHttpHistoryTrees(previous, current) {
   const prev = indexMindTree(previous)
   const curr = indexMindTree(current)
@@ -172,9 +203,7 @@ function diffHttpHistoryTrees(previous, current) {
       })
     }
     if (
-      treeDataPlain(before.data) !== treeDataPlain(info.data) ||
-      String((before.data && before.data.note) || '') !==
-        String((info.data && info.data.note) || '')
+      nodeDataSyncChanged(before.data, info.data)
     ) {
       updated.push({ uid, data: info.data })
     }
@@ -1438,10 +1467,117 @@ class Cooperate {
 
   markUidPushed(uid, data) {
     if (!uid || this.lastPushed[uid]) return
-    this.lastPushed[uid] = {
-      text: data && data.text ? String(data.text) : '',
-      note: (data && data.note) || ''
+    const text = data && data.text ? String(data.text) : ''
+    const note = (data && data.note) || ''
+    const full = {
+      text,
+      note,
+      image: data && data.image,
+      imageTitle: data && data.imageTitle,
+      imageSize: data && data.imageSize,
+      icon: data && data.icon,
+      tag: data && data.tag,
+      hyperlink: data && data.hyperlink,
+      hyperlinkTitle: data && data.hyperlinkTitle,
+      outerFrame: data && data.outerFrame,
+      generalization: data && data.generalization
     }
+    this.lastPushed[uid] = { text, note, full }
+  }
+
+  resolveHttpPatchNode(node) {
+    if (
+      node &&
+      node.isGeneralization &&
+      node.generalizationBelongNode &&
+      !node.generalizationBelongNode.isRoot
+    ) {
+      return node.generalizationBelongNode
+    }
+    return node
+  }
+
+  generalizationRemoteChanged(localData = {}, next = {}, merged = {}) {
+    if (merged.appliedGroups && merged.appliedGroups.includes('generalization')) {
+      return true
+    }
+    return (
+      stableFieldValue(localData.generalization) !==
+      stableFieldValue(next.generalization)
+    )
+  }
+
+  applyHttpRemoteNodeFields(node, next = {}, merged = {}) {
+    const renderer = this.mindMap.renderer
+    if (!node || !renderer) return false
+    const localData = (node.getData && node.getData()) || {}
+    let changed = false
+    let needsGeneralizationRender = false
+    const stylePayload = {
+      text: next.text,
+      note: next.note,
+      richText: next.richText,
+      image: next.image,
+      imageTitle: next.imageTitle,
+      imageSize: next.imageSize,
+      icon: next.icon,
+      tag: next.tag,
+      hyperlink: next.hyperlink,
+      hyperlinkTitle: next.hyperlinkTitle,
+      outerFrame: next.outerFrame
+    }
+    Object.keys(stylePayload).forEach(key => {
+      if (stylePayload[key] === undefined) delete stylePayload[key]
+    })
+    if (Object.keys(stylePayload).length) {
+      renderer.setNodeData(node, stylePayload)
+      if (typeof renderer.reRenderNodeCheckChange === 'function') {
+        renderer.reRenderNodeCheckChange(node, true)
+      }
+      changed = true
+    }
+    if (this.generalizationRemoteChanged(localData, next, merged)) {
+      const nextGen = next.generalization
+      if (
+        nextGen == null ||
+        (Array.isArray(nextGen) && nextGen.length === 0)
+      ) {
+        renderer.setNodeData(node, { generalization: null })
+        if (typeof node.removeGeneralization === 'function') {
+          node.removeGeneralization()
+        }
+      } else {
+        renderer.setNodeData(node, { generalization: nextGen })
+        if (typeof node.updateGeneralization === 'function') {
+          node.updateGeneralization()
+        } else if (typeof node.createGeneralizationNode === 'function') {
+          node.createGeneralizationNode()
+        }
+      }
+      needsGeneralizationRender = true
+      changed = true
+    }
+    if (needsGeneralizationRender && this.mindMap) {
+      this.mindMap.render()
+    }
+    return changed
+  }
+
+  syncGeneralizationChildStubs(treeNode, localData = {}, remoteData = {}) {
+    if (!treeNode || !Array.isArray(treeNode.children)) return false
+    const genUids = new Set(
+      [...formatGetNodeGeneralization(localData), ...formatGetNodeGeneralization(remoteData)]
+        .map(item => item && item.uid)
+        .filter(Boolean)
+    )
+    if (!genUids.size) return false
+    const next = treeNode.children.filter(child => {
+      const id = child && child.data && child.data.uid
+      return !genUids.has(id)
+    })
+    if (next.length === treeNode.children.length) return false
+    treeNode.children = next
+    return true
   }
 
   markTreeUids(root) {
@@ -2137,10 +2273,11 @@ class Cooperate {
   }
 
   nodePatchPayload(node, options = {}) {
-    const uid = node.getData && node.getData('uid')
+    const target = this.resolveHttpPatchNode(node)
+    const uid = target.getData && target.getData('uid')
     const full = {
-      text: this.nodePlain(node),
-      note: (node.getData && node.getData('note')) || ''
+      text: this.nodePlain(target),
+      note: (target.getData && target.getData('note')) || ''
     }
     ;[
       'image',
@@ -2153,7 +2290,7 @@ class Cooperate {
       'outerFrame',
       'generalization'
     ].forEach(key => {
-      const value = node.getData && node.getData(key)
+      const value = target.getData && target.getData(key)
       if (value !== undefined && value !== null && value !== '') {
         full[key] = value
       }
@@ -2177,7 +2314,8 @@ class Cooperate {
     const tasks = []
     let droppedGhosts = false
     pending.forEach(node => {
-      const uid = node.getData && node.getData('uid')
+      const target = this.resolveHttpPatchNode(node)
+      const uid = target.getData && target.getData('uid')
       if (!uid) return
       // New local nodes are inserted (with text) by flushHttpInsert; patching
       // them first returns NODE_DELETED and would drop the orphan incorrectly.
@@ -2751,44 +2889,46 @@ class Cooperate {
               force ||
               !localMatchesRemote ||
               !sameTextNote ||
-              (merged.appliedKeys && merged.appliedKeys.length)
+              (merged.appliedKeys && merged.appliedKeys.length) ||
+              this.generalizationRemoteChanged(localData, next, merged)
             ) {
-              renderer.setNodeData(node, {
-                text: next.text,
-                note: next.note,
-                richText: next.richText,
-                image: next.image,
-                imageTitle: next.imageTitle,
-                imageSize: next.imageSize,
-                icon: next.icon,
-                tag: next.tag,
-                hyperlink: next.hyperlink,
-                hyperlinkTitle: next.hyperlinkTitle
-              })
-              if (typeof renderer.reRenderNodeCheckChange === 'function') {
-                renderer.reRenderNodeCheckChange(node, true)
-              }
-              this.lastPushed[item.uid] = {
-                text,
-                note,
-                full: {
+              if (
+                this.applyHttpRemoteNodeFields(node, next, merged)
+              ) {
+                const fv = readFieldVersions(merged.data)
+                this.lastPushed[item.uid] = {
                   text,
                   note,
-                  image: next.image,
-                  imageTitle: next.imageTitle,
-                  imageSize: next.imageSize,
-                  icon: next.icon,
-                  tag: next.tag,
-                  hyperlink: next.hyperlink,
-                  hyperlinkTitle: next.hyperlinkTitle
-                },
-                fieldVersions: fv
+                  full: {
+                    text,
+                    note,
+                    image: next.image,
+                    imageTitle: next.imageTitle,
+                    imageSize: next.imageSize,
+                    icon: next.icon,
+                    tag: next.tag,
+                    hyperlink: next.hyperlink,
+                    hyperlinkTitle: next.hyperlinkTitle,
+                    outerFrame: next.outerFrame,
+                    generalization: next.generalization
+                  },
+                  fieldVersions: fv
+                }
+                changed = true
               }
-              changed = true
             }
           }
           const treeNode = this.findTreeNode(tree, item.uid)
           if (!treeNode) return
+          if (
+            this.syncGeneralizationChildStubs(
+              treeNode,
+              treeNode.data || {},
+              item.data || {}
+            )
+          ) {
+            changed = true
+          }
           const serverKids = item.children || []
           const keep = new Set(serverKids)
           const have = new Set(
