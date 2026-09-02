@@ -611,14 +611,6 @@ export default {
       if (!(options && options.fromSaved)) {
         prepared = prepareImportedTree(data)
         data = prepared.data
-        if (prepared.collapsed && this.mindMap) {
-          this.isLargeMap = true
-          this.mindMap.updateConfig({
-            openPerformance: true,
-            openRealtimeRenderOnNodeTextEdit: false
-          })
-          if (!quiet) this.$message.info(this.$t('edit.largeMapImportTip'))
-        }
       } else if (this.mindMap) {
         this.isLargeMap = true
         this.mindMap.updateConfig({
@@ -628,6 +620,17 @@ export default {
         })
       }
       const nodeCount = (prepared && prepared.nodeCount) || 0
+      if (this.mindMap && nodeCount >= 100) {
+        this.isLargeMap = true
+        this.mindMap.updateConfig({
+          openPerformance: true,
+          openRealtimeRenderOnNodeTextEdit: false,
+          isShowExpandNum: nodeCount >= 200
+        })
+        if (prepared && prepared.collapsed && !quiet) {
+          this.$message.info(this.$t('edit.largeMapImportTip'))
+        }
+      }
       const loadingMs =
         nodeCount >= 400
           ? Math.min(600000, Math.max(120000, nodeCount * 20))
@@ -644,6 +647,7 @@ export default {
         typeof cooperate.httpReplaceTree === 'function'
       if (persistReplace) cooperate.beginHttpReplace()
       let rootNodeData = null
+      let importDone = !isUserImport
       try {
         if (data.root) {
           this.mindMap.setFullData(data)
@@ -661,27 +665,11 @@ export default {
           const treePayload = data.root
             ? { root: data.root }
             : { root: rootNodeData }
-          const backgroundSave = nodeCount >= 400
-          const savePromise = cooperate.persistHttpReplace(treePayload)
-          if (backgroundSave) {
-            savePromise.catch(async err => {
-              try {
-                if (typeof cooperate.restoreHttpTree === 'function') {
-                  await cooperate.restoreHttpTree()
-                }
-              } catch (restoreErr) {
-                console.error('[mind-map] restore after import failed', restoreErr)
-              }
-              this.$message.error(
-                (err && err.message) || this.$t('edit.importPersistFailed')
-              )
-            })
-          } else {
-            await savePromise
-          }
+          await cooperate.persistHttpReplace(treePayload)
         } else if (isUserImport) {
           this.manualSave()
         }
+        importDone = true
       } catch (err) {
         if (persistReplace) {
           try {
@@ -694,19 +682,18 @@ export default {
           this.$message.error(
             (err && err.message) || this.$t('edit.importPersistFailed')
           )
-          if (isUserImport) {
-            this.$bus.$emit('setDataFailed', (err && err.message) || '')
-          }
+        }
+        if (isUserImport) {
+          this.$bus.$emit('setDataFailed', (err && err.message) || '')
         } else {
-          if (isUserImport) {
-            this.$bus.$emit('setDataFailed', (err && err.message) || '')
-          }
           throw err
         }
       } finally {
         if (persistReplace) cooperate.endHttpReplace()
         if (!quiet) this.handleHideLoading()
-        if (isUserImport) this.$bus.$emit('setDataComplete')
+      }
+      if (isUserImport && importDone) {
+        this.$bus.$emit('setDataComplete')
       }
       // 如果导入的是富文本内容，那么自动开启富文本模式
       if (rootNodeData && rootNodeData.data && rootNodeData.data.richText && !this.openNodeRichText) {

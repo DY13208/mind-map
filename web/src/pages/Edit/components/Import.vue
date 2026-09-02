@@ -270,11 +270,14 @@ export default {
       fileReader.readAsText(file.raw)
       fileReader.onload = async evt => {
         try {
+          this.$bus.$emit('showLoading', this.$t('edit.importingTip'))
+          await yieldToUi()
           let data = markdown.transformMarkdownTo(evt.target.result)
-          this.$bus.$emit('setData', data)
+          await this.applyImportedData(data)
           this.$message.success(this.$t('import.importSuccess'))
         } catch (error) {
           console.log(error)
+          hideLoading()
           this.$message.error(this.$t('import.fileParsingFailed'))
         }
       }
