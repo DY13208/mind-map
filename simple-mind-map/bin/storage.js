@@ -1286,7 +1286,8 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
   const allowRestore =
     command.type === 'node.restore' ||
     command.type === 'operation.undo' ||
-    command.type === 'operation.redo'
+    command.type === 'operation.redo' ||
+    command.type === 'map.replace'
   const applied = await apply({
     room: { ...room, nodes: picked.nodes },
     currentVersion,
@@ -1305,6 +1306,14 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
   await writeRoomNodeRows(client, roomKey, snapshot, version, {
     allowRestore
   })
+  const snapshotNodeCount = Object.keys(snapshot).length
+  const roomsJsonPayload =
+    nodesTableAuthorityEnabled() &&
+    nodesDualWriteEnabled() &&
+    snapshotNodeCount >= LARGE_MAP_NODES &&
+    snapshot.root
+      ? JSON.stringify({ root: snapshot.root })
+      : JSON.stringify(snapshot)
   await client.query(
     `update rooms
      set nodes = $2::jsonb,
@@ -1314,7 +1323,7 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
      where room_key = $1`,
     [
       roomKey,
-      JSON.stringify(snapshot),
+      roomsJsonPayload,
       version,
       applied.title ? String(applied.title).trim().slice(0, 80) : null
     ]

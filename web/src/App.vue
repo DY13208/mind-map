@@ -88,7 +88,7 @@ import {
 import { mountWecomLoginPanel } from '@/utils/wecomLogin'
 
 const PAGE_TITLE = '依然'
-const AUTH_BOOTSTRAP_MS = 12000
+const AUTH_BOOTSTRAP_MS = 45000
 const authErrors = {
   invalid_state: '登录状态校验失败，请重新扫码。',
   expired_state: '二维码已过期，请重新扫码。',

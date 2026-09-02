@@ -341,15 +341,16 @@ export default {
     },
 
     // 显示loading
-    handleShowLoading(text) {
+    handleShowLoading(text, durationMs) {
       this.enableShowLoading = true
       showLoading(typeof text === 'string' ? text : '')
       if (this.loadingSafetyTimer) {
         clearTimeout(this.loadingSafetyTimer)
       }
+      const timeout = Math.max(8000, Number(durationMs) || 8000)
       this.loadingSafetyTimer = setTimeout(() => {
         this.handleHideLoading()
-      }, 8000)
+      }, timeout)
     },
 
     // 渲染结束后关闭loading
@@ -603,10 +604,12 @@ export default {
     // 动态设置思维导图数据
     async setData(data, options = {}) {
       const quiet = !!(options && options.quiet)
+      const isUserImport = !(options && options.fromSaved)
+      let prepared = null
       if (!quiet) this.handleShowLoading(this.$t('edit.importingTip'))
       await yieldToUi()
       if (!(options && options.fromSaved)) {
-        const prepared = prepareImportedTree(data)
+        prepared = prepareImportedTree(data)
         data = prepared.data
         if (prepared.collapsed && this.mindMap) {
           this.isLargeMap = true
@@ -624,9 +627,17 @@ export default {
           isShowExpandNum: true
         })
       }
+      const nodeCount = (prepared && prepared.nodeCount) || 0
+      const loadingMs =
+        nodeCount >= 400
+          ? Math.min(600000, Math.max(120000, nodeCount * 20))
+          : 30000
+      if (!quiet && nodeCount >= 400) {
+        this.handleShowLoading(this.$t('edit.importingTip'), loadingMs)
+      }
       const cooperate = this.mindMap && this.mindMap.cooperate
       const persistReplace =
-        !(options && options.fromSaved) &&
+        isUserImport &&
         cooperate &&
         cooperate.httpCollabMode &&
         typeof cooperate.persistHttpReplace === 'function' &&
@@ -643,8 +654,11 @@ export default {
         }
         this.mindMap.view.reset()
         if (persistReplace) {
+          if (!quiet) {
+            this.handleShowLoading(this.$t('edit.importSavingTip'), loadingMs)
+          }
           await cooperate.persistHttpReplace(this.mindMap.getData(true))
-        } else if (!(options && options.fromSaved)) {
+        } else if (isUserImport) {
           this.manualSave()
         }
       } catch (err) {
@@ -659,11 +673,19 @@ export default {
           this.$message.error(
             (err && err.message) || this.$t('edit.importPersistFailed')
           )
+          if (isUserImport) {
+            this.$bus.$emit('setDataFailed', (err && err.message) || '')
+          }
         } else {
+          if (isUserImport) {
+            this.$bus.$emit('setDataFailed', (err && err.message) || '')
+          }
           throw err
         }
       } finally {
         if (persistReplace) cooperate.endHttpReplace()
+        if (!quiet) this.handleHideLoading()
+        if (isUserImport) this.$bus.$emit('setDataComplete')
       }
       // 如果导入的是富文本内容，那么自动开启富文本模式
       if (rootNodeData && rootNodeData.data && rootNodeData.data.richText && !this.openNodeRichText) {

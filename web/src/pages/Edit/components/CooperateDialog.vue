@@ -677,7 +677,8 @@ export default {
       if (!cooperate || !this.httpCollab) return
       const version = Number(change.version)
       if (Number.isFinite(version) && version > 0) {
-        cooperate.recoverHttpCollab(version).catch(() => {})
+        if (version <= (Number(cooperate.lastAppliedVersion) || 0)) return
+        cooperate.scheduleRemoteRecover(version)
         return
       }
       cooperate
