@@ -138,10 +138,12 @@ function renderGeneralization(forceRender) {
 
 // 更新节点概要数据
 function updateGeneralizationData() {
-  const childrenLength = Math.max(
-    this.getChildrenLength(),
-    this.children ? this.children.length : 0
-  )
+  const live = this.children ? this.children.length : 0
+  const childCount = Number(this.getData('childCount')) || 0
+  // Lazy-loaded trees may only mount part of the children while childCount
+  // reflects the server total; dropping range summaries here turns them into
+  // whole-node summaries with a huge bracket on the next render.
+  const childrenLength = Math.max(live, childCount)
   const list = this.formatGetGeneralization()
   const newList = []
   list.forEach(item => {
@@ -154,16 +156,24 @@ function updateGeneralizationData() {
       newList.push(item)
       return
     }
+    const start = Number(range[0])
+    const end = Number(range[1])
     if (
-      range[0] <= childrenLength - 1 &&
-      range[1] <= childrenLength - 1
+      Number.isFinite(start) &&
+      Number.isFinite(end) &&
+      start >= 0 &&
+      end >= start &&
+      end <= childrenLength - 1
     ) {
-      newList.push(item)
+      newList.push({
+        ...item,
+        range: [start, end]
+      })
     }
   })
   if (newList.length !== list.length) {
     this.setData({
-      generalization: newList
+      generalization: newList.length ? newList : null
     })
   }
 }

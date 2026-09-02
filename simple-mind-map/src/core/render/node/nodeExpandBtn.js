@@ -108,6 +108,7 @@ function updateExpandBtnPos() {
 
 //  创建展开收缩按钮
 function renderExpandBtn() {
+  if (this.isGeneralization) return
   if (this.getChildrenLength() <= 0 || this.isRoot) {
     return
   }

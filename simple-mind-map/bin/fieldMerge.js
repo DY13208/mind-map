@@ -177,7 +177,8 @@ function applyRemoteNodeData(localData = {}, remoteData = {}, options = {}) {
   } else {
     keys.forEach(key => {
       if (remote[key] === undefined) {
-        if (explicitFields && explicitFields.includes(key)) delete local[key]
+        // A versioned group update with the field absent means it was cleared.
+        delete local[key]
         return
       }
       if (remote[key] === null) delete local[key]

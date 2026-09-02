@@ -8,6 +8,7 @@ function initQuickCreateChildBtn() {
 
 // 显示按钮
 function showQuickCreateChildBtn() {
+  if (this.isGeneralization) return
   if (this.getChildrenLength() > 0) return
   // 创建按钮
   if (this._quickCreateChildBtn) {
