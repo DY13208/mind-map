@@ -222,6 +222,7 @@ export default {
       provider: null,
       connectTimer: null,
       saveStatusTimer: null,
+      saveStatusInFlight: false,
       presenceTimer: null,
       presenceQuickTimer: null,
       presenceSyncInFlight: false,
@@ -233,6 +234,7 @@ export default {
       joinedOnce: false,
       fileList: [],
       filesLoading: false,
+      filesLoadPromise: null,
       httpCollab: false,
       historyList: [],
       historyLoading: false
@@ -719,8 +721,12 @@ export default {
     startSaveStatusPolling() {
       this.stopSaveStatusPolling()
       this.loadSaveStatus()
-      // Faster than presence alone: catch peer inserts within ~1s even if WS misses.
-      this.saveStatusTimer = setInterval(this.loadSaveStatus, 1000)
+      // This endpoint only reports persistence state. It must not drive document
+      // synchronization: operation events, reconnect and explicit version-gap
+      // recovery already provide the reliable synchronization path.
+      // Keep it infrequent and single-flight so a slow database cannot create an
+      // ever-growing queue of status requests.
+      this.saveStatusTimer = setInterval(this.loadSaveStatus, 5000)
       this.syncHttpPresence()
       this.presenceTimer = setInterval(this.syncHttpPresence, 10000)
     },
@@ -823,8 +829,13 @@ export default {
 
     async loadSaveStatus() {
       if (!this.connected || !this.roomName) return
+      if (this.saveStatusInFlight) return
+      const roomKey = this.roomName
+      this.saveStatusInFlight = true
       try {
-        const data = await getSaveStatus(this.roomName)
+        const data = await getSaveStatus(roomKey)
+        // Ignore a delayed response for a room that was closed or switched.
+        if (!this.connected || this.roomName !== roomKey) return
         if (data.status === 'deleted') {
           this.leave({ silent: true })
           return
@@ -839,21 +850,13 @@ export default {
           this.saveStatus = 'saved'
           this.saveError = ''
         }
-        // Version poll is the reliable fallback when presence WS misses events.
-        const cooperate = this.mindMap && this.mindMap.cooperate
-        if (this.httpCollab && cooperate) {
-          if (data.version != null && Number.isFinite(Number(data.version))) {
-            const remoteVersion = Number(data.version)
-            if (remoteVersion > Number(cooperate.lastAppliedVersion || 0)) {
-              cooperate.recoverHttpCollab(remoteVersion).catch(() => {})
-            }
-          } else if (data.updated_at) {
-            cooperate.refreshVisibleFromHttp(data.updated_at, { force: true }).catch(() => {})
-          }
-        }
       } catch (err) {
-        this.saveStatus = 'saveError'
-        this.saveError = err.message || this.$t('cooperate.saveError')
+        if (this.connected && this.roomName === roomKey) {
+          this.saveStatus = 'saveError'
+          this.saveError = err.message || this.$t('cooperate.saveError')
+        }
+      } finally {
+        this.saveStatusInFlight = false
       }
     },
 
@@ -944,15 +947,22 @@ export default {
     },
 
     async loadFiles() {
+      if (this.filesLoadPromise) return this.filesLoadPromise
       this.filesLoading = true
-      try {
-        const data = await listFiles()
-        this.fileList = data.list || []
-      } catch (err) {
-        this.fileList = []
-      } finally {
-        this.filesLoading = false
-      }
+      this.filesLoadPromise = listFiles()
+        .then(data => {
+          this.fileList = data.list || []
+          return this.fileList
+        })
+        .catch(() => {
+          this.fileList = []
+          return this.fileList
+        })
+        .finally(() => {
+          this.filesLoading = false
+          this.filesLoadPromise = null
+        })
+      return this.filesLoadPromise
     },
 
     markHttpConnected() {
