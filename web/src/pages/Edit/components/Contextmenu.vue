@@ -104,14 +104,6 @@
       <div class="item" @click="exec('EXPORT_CUR_NODE_TO_PNG')">
         <span class="name">{{ $t('contextmenu.exportNodeToPng') }}</span>
       </div>
-      <div class="splitLine"></div>
-      <div
-        class="item"
-        @click="flowExpand"
-        :class="{ disabled: flowExpandDisabled }"
-      >
-        <span class="name">{{ $t('contextmenu.flowExpand') }}</span>
-      </div>
       <div class="splitLine" v-if="enableAi"></div>
       <div class="item" @click="aiCreate" v-if="enableAi">
         <span class="name">{{ $t('contextmenu.aiCreate') }}</span>
@@ -217,8 +209,7 @@ export default {
       numberType: '',
       numberLevel: '',
       subItemsShowLeft: false,
-      isNodeMousedown: false,
-      flowExpandBusy: false
+      isNodeMousedown: false
     }
   },
   computed: {
@@ -289,13 +280,6 @@ export default {
         children.length - 1
       return isLast
     },
-    flowExpandDisabled() {
-      return (
-        !this.node ||
-        this.node.isRoot ||
-        this.flowExpandBusy
-      )
-    },
     isGeneralization() {
       return this.node.isGeneralization
     },
@@ -327,7 +311,6 @@ export default {
     this.$bus.$on('mouseup', this.onMouseup)
     this.$bus.$on('translate', this.hide)
     this.$bus.$on('node_mousedown', this.onNodeMousedown)
-    this.$bus.$on('node_flow_expand_busy', this.onFlowExpandBusy)
   },
   beforeDestroy() {
     this.$bus.$off('node_contextmenu', this.show)
@@ -338,7 +321,6 @@ export default {
     this.$bus.$off('mouseup', this.onMouseup)
     this.$bus.$off('translate', this.hide)
     this.$bus.$off('node_mousedown', this.onNodeMousedown)
-    this.$bus.$off('node_flow_expand_busy', this.onFlowExpandBusy)
   },
   methods: {
     ...mapMutations(['setLocalConfig']),
@@ -560,16 +542,6 @@ export default {
     // AI续写
     aiCreate() {
       this.$bus.$emit('ai_create_part', this.node)
-      this.hide()
-    },
-
-    onFlowExpandBusy(busy) {
-      this.flowExpandBusy = !!busy
-    },
-
-    flowExpand() {
-      if (this.flowExpandDisabled) return
-      this.$bus.$emit('node_flow_expand', this.node)
       this.hide()
     }
   }

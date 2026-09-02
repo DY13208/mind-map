@@ -9,6 +9,10 @@ function uidOf(node) {
   return node.uid || (node.getData && node.getData('uid')) || ''
 }
 
+export function nodeUid(node) {
+  return uidOf(node)
+}
+
 function stripHtml(text) {
   return String(text || '')
     .replace(/<[^>]+>/g, '')
@@ -531,7 +535,13 @@ export const FLOW_EXPAND_SYSTEM = `你是良策思维导图流程补齐助手，
 【代办人节点 — 必须补充】
 在「提供 / 模块」数据区之后（或与之同级、紧接其后），必须接一个「代办人」节点，格式固定为：
 - 代办人：具体人名或角色（优先该部门负责人 / 对应 BP，结合导图事实）
-不要只写「代办人」空壳，必须带冒号和具体值`
+不要只写「代办人」空壳，必须带冒号和具体值
+
+【禁止复制的内容 — 必须遵守】
+- 禁止在 children 中出现名为「SOP」的节点（这是导图索引，不是实例内容）
+- 禁止复制系统/工具清单（如金蝶、吉客云、企业微信、品牌立项、线上运营等目录项）
+- 只输出与当前待补充节点直接相关的执行步骤、数据字段与代办人
+- 若 SOP 模板中含与当前节点无关的分支，必须裁剪，不得整棵照搬`
 
 /**
  * 一律交给 WorkBuddy：
@@ -569,16 +579,33 @@ export function buildFlowExpandPrompt(mindMap, targetNode) {
 
   sections.push(formatFactsBlock(facts))
 
-  // 父分支局部上下文（含部门名），比整图小但能读到 AI部
+  // 父分支局部上下文（跳过 SOP 索引等无关兄弟分支）
   if (targetNode && targetNode.parent) {
     const ctxCounter = { count: 0 }
     const branchRoot =
       (targetNode.parent.parent && targetNode.parent.parent) ||
       targetNode.parent
+    const branchLines = []
+    const appendBranch = (node, depth) => {
+      if (!node || depth > 6 || ctxCounter.count >= MAX_OUTLINE_NODES) return
+      const title = plainText(node)
+      if (
+        depth > 0 &&
+        (/^sop$/i.test(title) ||
+          /^系统|^工具|金蝶|吉客云|企业微信/.test(title))
+      ) {
+        return
+      }
+      branchLines.push(...subtreeOutline(node, depth, 6, ctxCounter))
+    }
+    ;(branchRoot.children || []).forEach(child => appendBranch(child, 0))
+    if (!branchLines.length) {
+      appendBranch(branchRoot, 0)
+    }
     sections.push(
       [
-        '## 目标所在分支上下文（请从中读取部门/公司）',
-        subtreeOutline(branchRoot, 0, 6, ctxCounter).join('\n') || '(空)'
+        '## 目标所在分支上下文（请从中读取部门/公司；勿复制 SOP 索引）',
+        branchLines.join('\n') || '(空)'
       ].join('\n')
     )
   }
@@ -645,8 +672,8 @@ export function buildFlowExpandPrompt(mindMap, targetNode) {
   }
 
   const modeHint = hasTemplate
-    ? `请照抄 SOP「${plainText(templateNode)}」到「${query}」下；填满提供字段。招聘部门以提取事实为准（天猫运营→运营/电商相关，不要因为测试节点挂在 AI部下就填 AI部）。`
-    : `未命中可用 SOP 模板。请基于导图上下文硬编完整流程；部门按岗位业务归属填写。`
+    ? `请仅照抄 SOP「${plainText(templateNode)}」中与「${query}」相关的步骤到该节点下；填满提供字段；禁止挂载 SOP 索引、系统工具清单或其它无关分支。招聘部门以提取事实为准。`
+    : `未命中可用 SOP 模板。请基于导图上下文硬编完整流程；部门按岗位业务归属填写；禁止输出 SOP 索引节点。`
 
   const user = [
     modeHint,

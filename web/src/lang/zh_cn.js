@@ -87,7 +87,27 @@ export default {
     enableDragImport: '是否允许直接拖拽文件到页面进行导入',
     imgTextMargin: '节点图片和文本间隔',
     textContentMargin: '节点各种内容间隔',
-    enableAi: '是否开启AI功能'
+    enableAi: '是否开启AI功能',
+    workbuddyModel: 'WorkBuddy 模型',
+    workbuddyModelPlaceholder: '选择模型',
+    workbuddyModelRefresh: '刷新列表',
+    workbuddyModelPlatform: '平台模型',
+    workbuddyModelCustom: '自定义模型',
+    workbuddyModelCustomTag: '自定义',
+    workbuddyModelUnavailable: 'WorkBuddy 未就绪，无法加载模型列表',
+    workbuddyModelLoadFailed: '加载模型列表失败',
+    flowExpandConcurrency: '补齐并发数',
+    flowExpandConcurrencyTip: '同时运行的补齐任务数，建议 1-3（对应 WorkBuddy 多会话）'
+  },
+  flowExpand: {
+    enqueued: '已加入补齐队列',
+    cancelQueue: '取消',
+    queueHint: '还有 {count} 个任务排队中',
+    panelTitle: '补齐队列',
+    summary: '执行 {running} · 排队 {queued} · 并发 {concurrency}',
+    runningSlot: '执行 #{slot}',
+    queuedSlot: '排队 #{index}',
+    done: '已完成'
   },
   color: {
     moreColor: '更多颜色'
@@ -137,7 +157,7 @@ export default {
     addToDo: '添加待办',
     removeToDo: '删除待办',
     aiCreate: 'AI续写',
-    flowExpand: '补齐流程/数据',
+    flowExpand: '补齐',
     modifyNodeLink: '修改节点链接',
     linkToNode: '链接到指定节点',
     removeNodeLink: '删除节点链接'
@@ -348,7 +368,7 @@ export default {
     newFileTip: '新建文件前请先导出当前编辑的文件，谨防内容丢失',
     openFileTip: '打开文件前请先导出当前编辑的文件，谨防内容丢失',
     ai: 'AI',
-    flowExpand: '补齐流程',
+    flowExpand: '补齐',
     cooperate: '协同'
   },
   edit: {
