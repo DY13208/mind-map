@@ -3,6 +3,35 @@ import { getRuntimeConfig } from './runtimeConfig'
 import { createOperationId } from 'simple-mind-map/src/utils/operationId'
 
 const DEFAULT_TIMEOUT_MS = 20000
+const REPLACE_TIMEOUT_MIN_MS = 120000
+const REPLACE_TIMEOUT_MAX_MS = 600000
+
+function countTreeNodes(tree) {
+  if (!tree || typeof tree !== 'object') return 0
+  if (!tree.data && !tree.children && !Array.isArray(tree)) {
+    return Object.keys(tree).length
+  }
+  let count = 0
+  const stack = [tree]
+  while (stack.length) {
+    const node = stack.pop()
+    if (!node) continue
+    count += 1
+    const kids = node.children || []
+    for (let i = 0; i < kids.length; i++) stack.push(kids[i])
+  }
+  return count
+}
+
+function replaceTimeoutMs(tree, extra = {}) {
+  if (extra.timeoutMs) return extra.timeoutMs
+  const nodeCount = countTreeNodes(tree)
+  if (nodeCount < 400) return DEFAULT_TIMEOUT_MS
+  return Math.min(
+    REPLACE_TIMEOUT_MAX_MS,
+    Math.max(REPLACE_TIMEOUT_MIN_MS, nodeCount * 20)
+  )
+}
 
 function apiBase() {
   return getRuntimeConfig().collabApi
@@ -208,6 +237,7 @@ export function searchFile(roomKey, q, limit = 80) {
 export function replaceFileTree(roomKey, tree, extra = {}) {
   return request(`/api/files/${encodeURIComponent(roomKey)}/replace`, {
     method: 'POST',
+    timeoutMs: replaceTimeoutMs(tree, extra),
     headers: operationHeaders(extra),
     body: JSON.stringify({
       tree,

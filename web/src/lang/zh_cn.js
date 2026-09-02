@@ -365,6 +365,7 @@ export default {
     deleteNodeImgTip: '是否确认删除该节点图片？',
     autoOpenNodeRichTextTip: '检测到导入了富文本内容，已自动开启富文本模式',
     importingTip: '正在导入，请稍候…',
+    importSavingTip: '正在保存到服务器，大图可能需要几分钟，请勿关闭页面…',
     importPersistFailed: '导入未能保存到当前房间，已恢复为服务器上的导图',
     largeMapImportTip:
       '节点较多，已收起深层分支并开启性能模式，避免卡死。需要时再点节点上的展开。',

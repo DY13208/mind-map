@@ -255,6 +255,8 @@ class Cooperate {
     this.httpRefreshing = false
     this.httpPendingRefreshAt = ''
     this.httpPendingRefreshForce = false
+    this.httpRemoteRecoverTimer = null
+    this.httpPendingRemoteVersion = 0
     this.httpHistorySyncing = false
     this.localOrigin = { source: 'simple-mind-map-cooperate' }
     this.localPresence = {
@@ -1336,6 +1338,9 @@ class Cooperate {
     this.httpRefreshing = false
     this.httpPendingRefreshAt = ''
     this.httpPendingRefreshForce = false
+    clearTimeout(this.httpRemoteRecoverTimer)
+    this.httpRemoteRecoverTimer = null
+    this.httpPendingRemoteVersion = 0
     clearTimeout(this.httpTextTimer)
     this.httpTextTimer = null
     clearTimeout(this.httpStructureTimer)
@@ -1827,6 +1832,24 @@ class Cooperate {
     }, 280)
   }
 
+  scheduleRemoteRecover(version) {
+    const target = Number(version) || 0
+    if (!target || !this.httpCollabMode) return
+    if (target <= (Number(this.lastAppliedVersion) || 0)) return
+    this.httpPendingRemoteVersion = Math.max(
+      this.httpPendingRemoteVersion || 0,
+      target
+    )
+    clearTimeout(this.httpRemoteRecoverTimer)
+    this.httpRemoteRecoverTimer = setTimeout(() => {
+      this.httpRemoteRecoverTimer = null
+      const pending = this.httpPendingRemoteVersion
+      this.httpPendingRemoteVersion = 0
+      if (!pending || pending <= (Number(this.lastAppliedVersion) || 0)) return
+      this.recoverHttpCollab(pending).catch(() => {})
+    }, 150)
+  }
+
   scheduleHttpStructureSync(delay = 180) {
     clearTimeout(this.httpStructureTimer)
     this.httpStructureTimer = setTimeout(() => {
@@ -1975,6 +1998,27 @@ class Cooperate {
     return node.getData('richText') ? getTextFromHtml(text) : String(text || '')
   }
 
+  hasUnsyncedLocalText(node) {
+    if (!node) return false
+    return !!this.nodePatchPayload(node, { onlyChanged: true })
+  }
+
+  collectNodesWithPendingText() {
+    const renderer = this.mindMap.renderer
+    if (!renderer) return []
+    const byUid = new Map()
+    ;(renderer.activeNodeList || []).forEach(node => {
+      const uid = node.getData && node.getData('uid')
+      if (uid) byUid.set(uid, node)
+    })
+    this.collectVisibleUids().forEach(uid => {
+      if (byUid.has(uid)) return
+      const node = renderer.findNodeByUid(uid)
+      if (node && this.hasUnsyncedLocalText(node)) byUid.set(uid, node)
+    })
+    return Array.from(byUid.values())
+  }
+
   nodePatchPayload(node, options = {}) {
     const uid = node.getData && node.getData('uid')
     const full = {
@@ -2005,10 +2049,16 @@ class Cooperate {
   }
 
   flushHttpText() {
+    this.flushHttpTextNow().catch(err => {
+      console.error('[mind-map] text sync failed', err)
+    })
+  }
+
+  async flushHttpTextNow() {
     if (this.httpReplacing || !this.httpPatchNode) return
-    const nodes =
-      (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
-    nodes.forEach(node => {
+    const pending = this.collectNodesWithPendingText()
+    const tasks = []
+    pending.forEach(node => {
       const uid = node.getData && node.getData('uid')
       if (!uid) return
       const full = this.nodePatchPayload(node)
@@ -2021,8 +2071,13 @@ class Cooperate {
         full,
         snap
       }
-      this.httpPatchNode(uid, delta).catch(() => {})
+      tasks.push(
+        this.httpPatchNode(uid, delta).catch(err => {
+          console.error('[mind-map] patch node failed', err)
+        })
+      )
     })
+    if (tasks.length) await Promise.all(tasks)
   }
 
   collectUnpushedNodes(node, out = []) {
@@ -2088,6 +2143,7 @@ class Cooperate {
   }
 
   async flushHttpInsertNow() {
+    await this.flushHttpTextNow()
     const renderer = this.mindMap.renderer
     const pending = []
     const list = (renderer && renderer.activeNodeList) || []
@@ -2495,6 +2551,26 @@ class Cooperate {
               prev && prev.text === text && (prev.note || '') === note
             const localMatchesRemote =
               localText === text && String(localNote || '') === String(note || '')
+            const localMatchesLastPushed =
+              prev &&
+              localText === String(prev.text || '') &&
+              String(localNote || '') === String(prev.note || '')
+            const hasLocalPending = this.hasUnsyncedLocalText(node)
+            if (
+              !localMatchesRemote &&
+              (localMatchesLastPushed || hasLocalPending)
+            ) {
+              const remoteFv = readFieldVersions(data)
+              const localFv = readFieldVersions(localData)
+              const remoteFieldNewer = Object.keys(remoteFv).some(
+                group =>
+                  Number(remoteFv[group] || 0) > Number(localFv[group] || 0)
+              )
+              if (!remoteFieldNewer) {
+                this.scheduleHttpTextSync()
+                return
+              }
+            }
             if (
               force ||
               !localMatchesRemote ||

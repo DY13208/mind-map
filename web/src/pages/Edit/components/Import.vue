@@ -195,12 +195,15 @@ export default {
           if (typeof data !== 'object') {
             throw new Error(this.$t('import.fileContentError'))
           }
-          this.$bus.$emit('setData', data)
+          await this.applyImportedData(data)
           this.$message.success(this.$t('import.importSuccess'))
         } catch (error) {
           console.log(error)
           hideLoading()
-          this.$message.error(this.$t('import.fileParsingFailed'))
+          this.$message.error(
+            (error && error.message) ||
+              this.$t('import.fileParsingFailed')
+          )
         }
       }
     },

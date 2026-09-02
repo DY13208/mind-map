@@ -1,7 +1,7 @@
 import { FetchTimeoutError, fetchWithTimeout } from './fetchWithTimeout'
 import { getRuntimeConfig } from './runtimeConfig'
 
-const AUTH_TIMEOUT_MS = 10000
+const AUTH_TIMEOUT_MS = 30000
 
 let currentUser = null
 
