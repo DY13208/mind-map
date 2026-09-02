@@ -1136,17 +1136,23 @@ export default {
         setTimeout(done, 600)
       })
       this.markHttpConnected()
-      // Release the preview gate ASAP so early inserts/edits are uploaded.
-      // Waiting the full render timeout previously dropped those mutations.
+      await renderWait
+      const renderRoot =
+        this.mindMap.renderer && this.mindMap.renderer.renderTree
+      if (renderRoot && typeof cooperate.markTreeUids === 'function') {
+        cooperate.markTreeUids(renderRoot)
+      }
+      if (renderRoot && typeof cooperate.seedPreviewHydration === 'function') {
+        cooperate.seedPreviewHydration(renderRoot)
+      }
       await this.$nextTick()
       cooperate.setPreviewApplied(false)
       if (typeof cooperate.scheduleHttpStructureSync === 'function') {
-        cooperate.scheduleHttpStructureSync(0)
+        cooperate.scheduleHttpStructureSync(120)
       }
       if (!silent) {
         this.$message.success(this.$t('cooperate.openSuccess'))
       }
-      await renderWait
       return true
     },
 
