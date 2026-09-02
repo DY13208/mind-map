@@ -4,8 +4,49 @@ import { createOperationId } from 'simple-mind-map/src/utils/operationId'
 import { stringifyJsonOffMainThread } from '@/utils/importTree'
 
 const DEFAULT_TIMEOUT_MS = 20000
+const SUBTREE_TIMEOUT_MS = 12000
+const MAX_SUBTREE_INFLIGHT = 2
 const REPLACE_TIMEOUT_MIN_MS = 120000
 const REPLACE_TIMEOUT_MAX_MS = 600000
+
+let subtreeActive = 0
+const subtreeHighWait = []
+const subtreeLowWait = []
+const inflightSubtree = new Map()
+
+function acquireSubtreeSlot(priority = 'high') {
+  return new Promise(resolve => {
+    const start = () => {
+      subtreeActive += 1
+      let released = false
+      resolve(() => {
+        if (released) return
+        released = true
+        subtreeActive -= 1
+        const next = subtreeHighWait.shift() || subtreeLowWait.shift()
+        if (next) next()
+      })
+    }
+    if (subtreeActive < MAX_SUBTREE_INFLIGHT) {
+      start()
+      return
+    }
+    if (priority === 'low') subtreeLowWait.push(start)
+    else subtreeHighWait.push(start)
+  })
+}
+
+function subtreeDedupeKey(roomKey, uid, options = {}) {
+  return [
+    roomKey,
+    uid || '',
+    options.deep ? '1' : '0',
+    options.maxNodes == null ? '' : String(options.maxNodes),
+    options.offset == null ? '' : String(options.offset),
+    options.limit == null ? '' : String(options.limit),
+    options.knownVersion == null ? '0' : String(options.knownVersion)
+  ].join('|')
+}
 
 function countTreeNodes(tree) {
   if (!tree || typeof tree !== 'object') return 0
@@ -189,9 +230,26 @@ export function getFileSubtree(roomKey, uid, options = {}) {
     params.set('knownVersion', String(options.knownVersion))
   }
   const query = params.toString()
-  return request(
-    `/api/files/${encodeURIComponent(roomKey)}/subtree${query ? `?${query}` : ''}`
-  )
+  const key = subtreeDedupeKey(roomKey, uid, options)
+  const pending = inflightSubtree.get(key)
+  if (pending) return pending
+  const job = (async () => {
+    const release = await acquireSubtreeSlot(options.priority || 'high')
+    try {
+      return await request(
+        `/api/files/${encodeURIComponent(roomKey)}/subtree${
+          query ? `?${query}` : ''
+        }`,
+        { timeoutMs: options.timeoutMs || SUBTREE_TIMEOUT_MS }
+      )
+    } finally {
+      release()
+    }
+  })().finally(() => {
+    if (inflightSubtree.get(key) === job) inflightSubtree.delete(key)
+  })
+  inflightSubtree.set(key, job)
+  return job
 }
 
 export function getFileExport(roomKey) {

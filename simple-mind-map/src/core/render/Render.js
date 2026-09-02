@@ -2007,7 +2007,7 @@ class Render {
     })
     if (!stubs.length) return
     const jobs = stubs.slice(0, EXPAND_ALL_BATCH * 2)
-    const concurrency = 4
+    const concurrency = 2
     let index = 0
     const worker = async () => {
       while (index < jobs.length) {
@@ -2149,7 +2149,7 @@ class Render {
   expandToLevel(level) {
     if (!this.renderTree) return
     const target = Number(level) || 0
-    this.hydrateThen(this.renderTree, target, { maxFetches: 120 }, () => {
+    this.hydrateThen(this.renderTree, target, { maxFetches: 40, concurrency: 2 }, () => {
       this.applyExpandFlagsToLevel(target)
       this.mindMap.render()
     })
