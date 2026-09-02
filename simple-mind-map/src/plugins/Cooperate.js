@@ -75,7 +75,7 @@ const STRUCTURE_COMMANDS = {
 const RECENT_HTTP_MS = 8000
 const RECENT_PUSH_GRACE_MS = 2500
 const GEN_INTENT_MS = 30000
-const PATCH_CONCURRENCY = 6
+const PATCH_CONCURRENCY = 2
 const NULLABLE_PATCH_KEYS = [
   'image',
   'imageTitle',
@@ -346,6 +346,8 @@ class Cooperate {
     this.pendingHttpGeneralizationOwners = []
     this.pendingGenIntent = new Map()
     this.httpTextTimer = null
+    this.httpTextFlushing = false
+    this.httpTextFlushQueued = false
     this.httpStructureTimer = null
     this.httpInsertPromise = null
     this.httpInsertRescan = false
@@ -990,11 +992,8 @@ class Cooperate {
       this.hydratingCurrentData ||
       this.httpHydrating
     ) {
-      // User edits during preview/hydrate must not be dropped.
-      if (this.httpCollabMode && !this.httpHistorySyncing) {
-        this.scheduleHttpTextSync()
-        this.scheduleHttpStructureSync(80)
-      }
+      // Render-driven data_change during hydrate must not PATCH every node.
+      // Real user edits still go through onAfterExecCommand.
       return
     }
     if (this.httpCollabMode) {
@@ -1049,12 +1048,10 @@ class Cooperate {
           }
           return
         }
-        if (STRUCTURE_COMMANDS[name]) this.scheduleHttpStructureSync(80)
-        if (
-          name === 'SET_NODE_TEXT' ||
-          name === 'SET_NODE_DATA' ||
-          name === 'SET_NODE_NOTE'
-        ) {
+        if (STRUCTURE_COMMANDS[name] && !this.httpHydrating) {
+          this.scheduleHttpStructureSync(80)
+        }
+        if (name === 'SET_NODE_TEXT' || name === 'SET_NODE_NOTE') {
           this.scheduleHttpTextSync()
         }
       }
@@ -1663,25 +1660,20 @@ class Cooperate {
   }
 
   markUidPushed(uid, data) {
-    if (!uid || this.lastPushed[uid]) return
+    if (!uid || !data) return
     const text =
-      data && data.richText
-        ? getTextFromHtml(data.text)
-        : String((data && data.text) || '')
-    const note = (data && data.note) || ''
-    const full = {
-      text,
-      note,
-      image: data && data.image,
-      imageTitle: data && data.imageTitle,
-      imageSize: data && data.imageSize,
-      icon: data && data.icon,
-      tag: data && data.tag,
-      hyperlink: data && data.hyperlink,
-      hyperlinkTitle: data && data.hyperlinkTitle,
-      outerFrame: data && data.outerFrame,
-      generalization: data && data.generalization
-    }
+      data.richText ? getTextFromHtml(data.text) : String(data.text || '')
+    const note = data.note || ''
+    const full = { text, note }
+    NULLABLE_PATCH_KEYS.forEach(key => {
+      const value = data[key]
+      const empty =
+        value === undefined ||
+        value === null ||
+        value === '' ||
+        (Array.isArray(value) && value.length === 0)
+      if (!empty) full[key] = value
+    })
     this.lastPushed[uid] = { text, note, full }
   }
 
@@ -2788,7 +2780,12 @@ class Cooperate {
         (Array.isArray(value) && value.length === 0)
       if (!empty) {
         full[key] = value
-      } else if (key === 'generalization' || (prevFull && prevFull[key] !== undefined)) {
+      } else if (
+        prevFull &&
+        prevFull[key] !== undefined &&
+        prevFull[key] !== null &&
+        prevFull[key] !== ''
+      ) {
         full[key] = null
       }
     })
@@ -2807,6 +2804,22 @@ class Cooperate {
 
   async flushHttpTextNow() {
     if (this.httpReplacing || !this.httpPatchNode) return
+    if (this.httpTextFlushing) {
+      this.httpTextFlushQueued = true
+      return
+    }
+    this.httpTextFlushing = true
+    try {
+      do {
+        this.httpTextFlushQueued = false
+        await this.flushHttpTextOnce()
+      } while (this.httpTextFlushQueued)
+    } finally {
+      this.httpTextFlushing = false
+    }
+  }
+
+  async flushHttpTextOnce() {
     const settling =
       this.httpSettlingAfterReplace || Date.now() < this.suppressLocalUntil
     const pending = settling
