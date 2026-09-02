@@ -245,11 +245,18 @@ async function replaceRoomNodes(db, roomKey, obj, version, options = {}) {
   if (!check.ok) {
     return { wrote: false, reason: 'invalid', errors: check.errors }
   }
-  const rows = encodeNodeRows(graph)
+  const allRows = encodeNodeRows(graph)
   const rootUid = check.rootUid
-  rows.forEach(row => {
+  allRows.forEach(row => {
     row.is_root = !!rootUid && row.uid === rootUid
   })
+  const onlyUids = Array.isArray(options.onlyUids)
+    ? options.onlyUids.filter(Boolean)
+    : null
+  const rows = onlyUids && onlyUids.length
+    ? allRows.filter(row => onlyUids.includes(row.uid))
+    : allRows
+  const incremental = !!(onlyUids && onlyUids.length)
   const uids = rows.map(row => row.uid)
   const allowRestore = options.allowRestore === true
   if (rows.length && !allowRestore) {
@@ -274,14 +281,16 @@ async function replaceRoomNodes(db, roomKey, obj, version, options = {}) {
     // Partial unique index room_nodes_one_root_idx allows only one live root.
     // Full replace usually inserts a new root uid before the old root is
     // tombstoned; demote first so the upsert cannot collide.
-    await db.query(
-      `update room_nodes
-       set is_root = false, updated_at = now()
-       where room_key = $1
-         and is_root
-         and deleted_at is null`,
-      [roomKey]
-    )
+    if (!incremental || rows.some(row => row.is_root)) {
+      await db.query(
+        `update room_nodes
+         set is_root = false, updated_at = now()
+         where room_key = $1
+           and is_root
+           and deleted_at is null`,
+        [roomKey]
+      )
+    }
     await db.query(
       `insert into room_nodes (
          room_key, uid, parent_uid, position, data, is_root, node_version,
@@ -319,6 +328,9 @@ async function replaceRoomNodes(db, roomKey, obj, version, options = {}) {
         allowRestore
       ]
     )
+  }
+  if (incremental) {
+    return { wrote: true, nodeCount: rows.length, rootUid: check.rootUid }
   }
   if (uids.length) {
     await db.query(

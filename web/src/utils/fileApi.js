@@ -69,6 +69,8 @@ async function request(path, options = {}) {
   if (!res.ok) {
     const err = new Error(data.error || res.statusText || 'request failed')
     if (data.code) err.code = data.code
+    if (data.retryAfterMs != null) err.retryAfterMs = data.retryAfterMs
+    err.statusCode = res.status
     throw err
   }
   return data

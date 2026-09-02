@@ -4,11 +4,11 @@ const WINDOW_MS = Math.max(
 )
 const ROOM_LIMIT = Math.max(
   1,
-  Number(process.env.COLLAB_RATE_LIMIT_PER_ROOM || 120)
+  Number(process.env.COLLAB_RATE_LIMIT_PER_ROOM || 800)
 )
 const GLOBAL_LIMIT = Math.max(
   1,
-  Number(process.env.COLLAB_RATE_LIMIT_GLOBAL || 2000)
+  Number(process.env.COLLAB_RATE_LIMIT_GLOBAL || 8000)
 )
 const MAX_BODY_BYTES = Math.max(
   64 * 1024,

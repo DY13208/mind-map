@@ -118,8 +118,35 @@ function createGeneralizationNode() {
 //  更新概要节点
 function updateGeneralization() {
   if (this.isGeneralization) return
+  const nextSig = this.formatGetGeneralization()
+    .map(item => {
+      if (!item || typeof item !== 'object') return String(item || '')
+      const range =
+        Array.isArray(item.range) && item.range.length >= 2
+          ? `${Number(item.range[0])},${Number(item.range[1])}`
+          : ''
+      return [item.uid || '', String(item.text || ''), range].join(':')
+    })
+    .join('|')
+  if (
+    this._generalizationSig === nextSig &&
+    ((nextSig && this._generalizationList.length) ||
+      (!nextSig && !this._generalizationList.length))
+  ) {
+    return
+  }
   this.removeGeneralization()
   this.createGeneralizationNode()
+  this._generalizationSig = this.formatGetGeneralization()
+    .map(item => {
+      if (!item || typeof item !== 'object') return String(item || '')
+      const range =
+        Array.isArray(item.range) && item.range.length >= 2
+          ? `${Number(item.range[0])},${Number(item.range[1])}`
+          : ''
+      return [item.uid || '', String(item.text || ''), range].join(':')
+    })
+    .join('|')
 }
 
 //  渲染概要节点
@@ -206,6 +233,7 @@ function removeGeneralization() {
     }
   })
   this._generalizationList = []
+  this._generalizationSig = ''
   // hack修复当激活一个节点时创建概要，然后立即激活创建的概要节点后会重复创建概要节点并且无法删除的问题
   if (this.generalizationBelongNode) {
     this.nodeDraw
