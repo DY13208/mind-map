@@ -9,7 +9,8 @@ export async function dispatchTodo({
   detail,
   context,
   onEvent,
-  signal
+  signal,
+  conversationId
 }) {
   const assigneeName = (assignee && assignee.name) || '负责人'
   const result = await streamChat({
@@ -32,6 +33,7 @@ export async function dispatchTodo({
       }
     ],
     signal,
+    conversationId,
     onEvent
   })
 

@@ -19,7 +19,11 @@ const store = new Vuex.Store({
       // 是否是暗黑模式
       isDark: false,
       // 是否开启AI功能
-      enableAi: true
+      enableAi: true,
+      // WorkBuddy 补齐等使用的模型（auto 为自动选择）
+      workbuddyModel: 'auto',
+      // 补齐并发数（与 WorkBuddy 多会话对齐，建议 1-3）
+      flowExpandConcurrency: 2
     },
     activeSidebar: '', // 当前显示的侧边栏
     isOutlineEdit: false, // 是否是大纲编辑模式

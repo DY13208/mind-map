@@ -1,4 +1,16 @@
 import { getRuntimeConfig } from './runtimeConfig'
+import { getLocalConfig } from '@/api'
+
+function resolveWorkbuddyModel(runtime, cfg) {
+  const saved = getLocalConfig()
+  const fromStorage = saved && saved.workbuddyModel
+  return (
+    runtime.workbuddyModel ||
+    fromStorage ||
+    cfg.workbuddyModel ||
+    'auto'
+  )
+}
 
 export function getWorkbuddyConfig() {
   const runtime =
@@ -10,8 +22,32 @@ export function getWorkbuddyConfig() {
   return {
     baseUrl,
     apiKey: runtime.workbuddyKey || cfg.workbuddyKey || 'local',
-    model: runtime.workbuddyModel || cfg.workbuddyModel || 'auto'
+    model: resolveWorkbuddyModel(runtime, cfg)
   }
+}
+
+export async function fetchWorkbuddyModels() {
+  const { baseUrl, apiKey } = getWorkbuddyConfig()
+  const res = await fetch(`${baseUrl}/v1/models`, {
+    cache: 'no-store',
+    headers: { Authorization: `Bearer ${apiKey}` }
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status}`)
+  }
+  const json = await res.json()
+  const list = Array.isArray(json.data) ? json.data : []
+  return list
+    .map(item => ({
+      id: item.id,
+      name: item.name || item.id,
+      vendor: item.vendor || '',
+      custom: item.custom === true || item.owned_by === 'custom',
+      baseId: item.base_id || item.baseId || '',
+      supportsToolCall: item.supports_tool_call !== false
+    }))
+    .filter(item => item.id)
 }
 
 export async function checkWorkbuddy() {
@@ -38,7 +74,14 @@ function eventLabel(event) {
   }
   if (type === 'workbuddy.tool_result') return '工具已返回'
   if (type === 'workbuddy.phase') {
-    return event.phase || event.message || '处理中'
+    const phase = String(event.phase || event.message || '')
+    const labels = {
+      model_requesting: '正在请求模型…',
+      model_streaming: '正在生成内容…',
+      tool_calling: '正在调用工具…',
+      planning: '正在规划…'
+    }
+    return labels[phase] || phase || '处理中'
   }
   if (type === 'workbuddy.plan') return '正在规划'
   if (type === 'workbuddy.interruption') return '已中断'
@@ -69,16 +112,21 @@ export async function streamChat({
   onDelta,
   onEvent,
   extra = {},
-  stream = true
+  stream = true,
+  conversationId
 } = {}) {
   const { baseUrl, apiKey, model } = getWorkbuddyConfig()
+  const headers = {
+    'Content-Type': 'application/json; charset=utf-8',
+    Authorization: `Bearer ${apiKey}`,
+    'X-WorkBuddy-Events': '1'
+  }
+  if (conversationId) {
+    headers['X-Conversation-ID'] = String(conversationId)
+  }
   const res = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      Authorization: `Bearer ${apiKey}`,
-      'X-WorkBuddy-Events': '1'
-    },
+    headers,
     body: JSON.stringify({
       model,
       stream: !!stream,
