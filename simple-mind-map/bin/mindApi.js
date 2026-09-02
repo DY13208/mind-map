@@ -1550,7 +1550,11 @@ async function handleApi(req, res) {
     try {
       beginRoomReplace(roomKey)
     } catch (err) {
-      logApiError('map.replace.busy', err, { mapId: roomKey })
+      logApiInfo('map.replace.busy', {
+        mapId: roomKey,
+        code: err.code || 'REPLACE_IN_PROGRESS',
+        message: err.message || 'replace in progress'
+      })
       sendJson(res, err.statusCode || 409, {
         error: err.message || 'replace in progress',
         code: err.code || 'REPLACE_IN_PROGRESS',

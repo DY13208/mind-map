@@ -23,7 +23,8 @@ import {
   applyRemoteNodeData,
   patchDelta,
   publicNodeData,
-  readFieldVersions
+  readFieldVersions,
+  FV_KEY
 } from '../utils/fieldMerge'
 import { createCollaborationStore } from '../utils/collaborationStore'
 
@@ -298,6 +299,7 @@ class Cooperate {
     this.recentHttpDeleted = new Map()
     this.pendingHttpDeletes = []
     this.pendingHttpGeneralizationOwners = []
+    this.pendingGenClear = new Map()
     this.httpTextTimer = null
     this.httpStructureTimer = null
     this.httpInsertPromise = null
@@ -1409,6 +1411,7 @@ class Cooperate {
     this.recentHttpDeleted = new Map()
     this.pendingHttpDeletes = []
     this.pendingHttpGeneralizationOwners = []
+    this.pendingGenClear = new Map()
     this.httpHistorySyncing = false
     this.httpRefreshing = false
     this.httpPendingRefreshAt = ''
@@ -1449,6 +1452,7 @@ class Cooperate {
     this.dirtySubtrees = new Map()
     this.pendingHttpDeletes = []
     this.pendingHttpGeneralizationOwners = []
+    this.pendingGenClear = new Map()
     this.hydrateFailedUids = new Set()
     const tree =
       treeOverride ||
@@ -1546,21 +1550,13 @@ class Cooperate {
   }
 
   resolveHttpPatchNode(node) {
-    if (
-      node &&
-      node.isGeneralization &&
-      node.generalizationBelongNode &&
-      !node.generalizationBelongNode.isRoot
-    ) {
+    if (node && node.isGeneralization && node.generalizationBelongNode) {
       return node.generalizationBelongNode
     }
     return node
   }
 
-  generalizationRemoteChanged(localData = {}, next = {}, merged = {}) {
-    if (merged.appliedGroups && merged.appliedGroups.includes('generalization')) {
-      return true
-    }
+  generalizationRemoteChanged(localData = {}, next = {}) {
     return (
       stableFieldValue(localData.generalization) !==
       stableFieldValue(next.generalization)
@@ -1628,12 +1624,28 @@ class Cooperate {
     }
   }
 
+  shouldIgnoreRemoteGeneralization(uid, nextGen) {
+    if (!uid || !this.pendingGenClear) return false
+    const at = this.pendingGenClear.get(uid)
+    if (!at) return false
+    if (Date.now() - at > 8000) {
+      this.pendingGenClear.delete(uid)
+      return false
+    }
+    const empty =
+      nextGen == null || (Array.isArray(nextGen) && nextGen.length === 0)
+    if (empty) {
+      this.pendingGenClear.delete(uid)
+      return false
+    }
+    return true
+  }
+
   applyHttpRemoteNodeFields(node, next = {}, merged = {}) {
     const renderer = this.mindMap.renderer
     if (!node || !renderer) return false
     const localData = (node.getData && node.getData()) || {}
     let changed = false
-    let needsGeneralizationRender = false
     const stylePayload = {
       text: next.text,
       note: next.note,
@@ -1657,8 +1669,19 @@ class Cooperate {
       }
       changed = true
     }
-    if (this.generalizationRemoteChanged(localData, next, merged)) {
-      const nextGen = this.normalizeGeneralizationData(next.generalization)
+    if (merged.data && merged.data[FV_KEY]) {
+      renderer.setNodeData(node, { [FV_KEY]: merged.data[FV_KEY] })
+    }
+    const nextGen = this.normalizeGeneralizationData(next.generalization)
+    const prevGen = this.normalizeGeneralizationData(localData.generalization)
+    const ownerUid = node.getData && node.getData('uid')
+    if (this.shouldIgnoreRemoteGeneralization(ownerUid, nextGen)) {
+      renderer.setNodeData(node, { generalization: null })
+      if (typeof node.removeGeneralization === 'function') {
+        node.removeGeneralization()
+      }
+      changed = true
+    } else if (stableFieldValue(prevGen) !== stableFieldValue(nextGen)) {
       if (nextGen == null || (Array.isArray(nextGen) && nextGen.length === 0)) {
         renderer.setNodeData(node, { generalization: null })
         if (typeof node.removeGeneralization === 'function') {
@@ -1677,11 +1700,7 @@ class Cooperate {
           })
           .catch(() => {})
       }
-      needsGeneralizationRender = true
       changed = true
-    }
-    if (needsGeneralizationRender && this.mindMap) {
-      this.mindMap.render()
     }
     return changed
   }
@@ -2143,7 +2162,7 @@ class Cooperate {
             ? node.generalizationBelongNode
             : node
         const uid = owner.getData && owner.getData('uid')
-        if (!uid || seen.has(uid) || owner.isRoot) return
+        if (!uid || seen.has(uid)) return
         seen.add(uid)
         owners.push(owner)
       })
@@ -2189,18 +2208,32 @@ class Cooperate {
       generalization = null
     }
     if (generalization == null) generalization = null
+    if (!this.pendingGenClear) this.pendingGenClear = new Map()
+    if (generalization == null) this.pendingGenClear.set(uid, Date.now())
+    else this.pendingGenClear.delete(uid)
+    const prev = this.lastPushed[uid] || {
+      text: this.nodePlain(owner),
+      note: (owner.getData && owner.getData('note')) || ''
+    }
+    const full = {
+      ...(prev.full || { text: prev.text, note: prev.note }),
+      generalization
+    }
+    this.lastPushed[uid] = {
+      text: full.text,
+      note: full.note,
+      full
+    }
     this.httpPatchNode(uid, { generalization })
       .then(() => {
-        const full = this.nodePatchPayload(owner) || {
-          text: this.nodePlain(owner),
-          note: (owner.getData && owner.getData('note')) || ''
-        }
-        full.generalization = generalization
+        const latest = this.nodePatchPayload(owner) || full
+        latest.generalization = generalization
         this.lastPushed[uid] = {
-          text: full.text,
-          note: full.note,
-          full
+          text: latest.text,
+          note: latest.note,
+          full: latest
         }
+        if (generalization == null) this.pendingGenClear.set(uid, Date.now())
       })
       .catch(err => {
         console.error('[mind-map] generalization sync failed', err)
@@ -3108,7 +3141,12 @@ class Cooperate {
                     hyperlink: next.hyperlink,
                     hyperlinkTitle: next.hyperlinkTitle,
                     outerFrame: next.outerFrame,
-                    generalization: next.generalization
+                    generalization: this.shouldIgnoreRemoteGeneralization(
+                      item.uid,
+                      next.generalization
+                    )
+                      ? null
+                      : next.generalization
                   },
                   fieldVersions: fv
                 }

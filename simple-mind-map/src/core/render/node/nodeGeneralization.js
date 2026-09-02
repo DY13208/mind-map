@@ -22,8 +22,14 @@ function checkHasSelfGeneralization() {
 
 // 获取概要节点所在的概要列表里的索引
 function getGeneralizationNodeIndex(node) {
+  const genUid = (node.getData && node.getData('uid')) || node.uid
   return this._generalizationList.findIndex(item => {
-    return item.generalizationNode.uid === node.uid
+    const gen = item && item.generalizationNode
+    if (!gen) return false
+    if (gen === node) return true
+    if (gen.uid && (gen.uid === node.uid || gen.uid === genUid)) return true
+    const dataUid = gen.getData && gen.getData('uid')
+    return !!(dataUid && (dataUid === genUid || dataUid === node.uid))
   })
 }
 
@@ -169,6 +175,11 @@ function updateGeneralizationData() {
         ...item,
         range: [start, end]
       })
+      return
+    }
+    const fullyLoaded = childCount > 0 && live >= childCount
+    if (!fullyLoaded) {
+      newList.push(item)
     }
   })
   if (newList.length !== list.length) {
