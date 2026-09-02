@@ -97,13 +97,23 @@ function keepHttpChild(uid, serverKids, lastPushed, recentPushed) {
   return !!(at && Date.now() - at < RECENT_PUSH_GRACE_MS)
 }
 
-function isPermanentInsertError(err) {
+function isPermanentNodeError(err) {
   const msg = String((err && err.message) || err || '')
   const code = String((err && err.code) || '')
   return (
     code === 'PARENT_DELETED' ||
-    /父节点已删除|PARENT_DELETED|missing parent/i.test(msg)
+    code === 'NODE_DELETED' ||
+    code === 'MOVE_CONFLICT' ||
+    code === 'UID_REUSED' ||
+    /父节点已删除|PARENT_DELETED|missing parent/i.test(msg) ||
+    /节点已删除或不存在|NODE_DELETED|MOVE_CONFLICT|UID_REUSED|禁止复用已删除节点/i.test(
+      msg
+    )
   )
+}
+
+function isPermanentInsertError(err) {
+  return isPermanentNodeError(err)
 }
 
 function indexMindTree(root, out = new Map(), parent = null, index = 0) {
@@ -2112,12 +2122,14 @@ class Cooperate {
     const renderer = this.mindMap.renderer
     if (!renderer) return []
     const byUid = new Map()
+    const skipUid = uid =>
+      uid && this.abandonedInsertUids && this.abandonedInsertUids.has(uid)
     ;(renderer.activeNodeList || []).forEach(node => {
       const uid = node.getData && node.getData('uid')
-      if (uid) byUid.set(uid, node)
+      if (uid && !skipUid(uid)) byUid.set(uid, node)
     })
     this.collectVisibleUids().forEach(uid => {
-      if (byUid.has(uid)) return
+      if (byUid.has(uid) || skipUid(uid)) return
       const node = renderer.findNodeByUid(uid)
       if (node && this.hasUnsyncedLocalText(node)) byUid.set(uid, node)
     })
@@ -2163,26 +2175,42 @@ class Cooperate {
     if (this.httpReplacing || !this.httpPatchNode) return
     const pending = this.collectNodesWithPendingText()
     const tasks = []
+    let droppedGhosts = false
     pending.forEach(node => {
       const uid = node.getData && node.getData('uid')
       if (!uid) return
+      // New local nodes are inserted (with text) by flushHttpInsert; patching
+      // them first returns NODE_DELETED and would drop the orphan incorrectly.
+      if (!this.lastPushed[uid]) return
       const full = this.nodePatchPayload(node)
       const delta = this.nodePatchPayload(node, { onlyChanged: true })
       if (!delta) return
       const snap = JSON.stringify(full)
-      this.lastPushed[uid] = {
-        text: full.text,
-        note: full.note,
-        full,
-        snap
-      }
       tasks.push(
-        this.httpPatchNode(uid, delta).catch(err => {
-          console.error('[mind-map] patch node failed', err)
-        })
+        this.httpPatchNode(uid, delta)
+          .then(() => {
+            this.lastPushed[uid] = {
+              text: full.text,
+              note: full.note,
+              full,
+              snap
+            }
+          })
+          .catch(err => {
+            if (isPermanentNodeError(err)) {
+              droppedGhosts = true
+              this.abandonGhostNodeByUid(uid, node)
+              console.warn('[mind-map] dropped ghost node patch', uid, err.message || err)
+            } else {
+              console.error('[mind-map] patch node failed', err)
+            }
+          })
       )
     })
     if (tasks.length) await Promise.all(tasks)
+    if (droppedGhosts) {
+      this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
+    }
   }
 
   collectUnpushedNodes(node, out = []) {
@@ -2297,7 +2325,7 @@ class Cooperate {
         if (/节点已存在/.test(msg)) {
           this.lastPushed[uid] = { text, note }
           this.recentPushed.set(uid, Date.now())
-        } else if (isPermanentInsertError(err)) {
+        } else if (isPermanentNodeError(err)) {
           this.abandonOrphanInsert(node)
           droppedOrphans = true
           console.warn('[mind-map] dropped orphan insert', uid, msg)
@@ -2311,6 +2339,24 @@ class Cooperate {
     if (droppedOrphans) {
       this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
     }
+  }
+
+  abandonGhostNodeByUid(uid, node) {
+    if (!uid) return
+    const renderer = this.mindMap.renderer
+    const target =
+      node ||
+      (renderer && typeof renderer.findNodeByUid === 'function'
+        ? renderer.findNodeByUid(uid)
+        : null)
+    if (target && !target.isRoot) {
+      this.abandonOrphanInsert(target)
+      return
+    }
+    if (!this.abandonedInsertUids) this.abandonedInsertUids = new Set()
+    this.abandonedInsertUids.add(uid)
+    this.forgetHttpUid(uid)
+    delete this.lastPushed[uid]
   }
 
   abandonOrphanInsert(node) {
@@ -2372,7 +2418,15 @@ class Cooperate {
     return this.httpPatchNode(uid, {
       parent,
       index: index < 0 ? 0 : index
-    }).catch(err => console.error('[mind-map] move node failed', err))
+    }).catch(err => {
+      if (isPermanentNodeError(err)) {
+        this.abandonGhostNodeByUid(uid, node)
+        this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
+        console.warn('[mind-map] dropped ghost node move', uid, err.message || err)
+      } else {
+        console.error('[mind-map] move node failed', err)
+      }
+    })
   }
 
   flushHttpReparentChildren(node) {
@@ -2386,7 +2440,18 @@ class Cooperate {
         return this.httpPatchNode(childUid, {
           parent: parentUid,
           index
-        }).catch(err => console.error('[mind-map] reparent failed', err))
+        }).catch(err => {
+          if (isPermanentNodeError(err)) {
+            this.abandonGhostNodeByUid(childUid)
+            console.warn(
+              '[mind-map] dropped ghost node reparent',
+              childUid,
+              err.message || err
+            )
+          } else {
+            console.error('[mind-map] reparent failed', err)
+          }
+        })
       })
     )
   }
