@@ -42,10 +42,8 @@ export default {
 
 <style lang="less" scoped>
 .canvasToolbarActions {
-  position: fixed;
-  right: 78px;
-  bottom: 80px;
-  z-index: 3;
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -70,14 +68,15 @@ export default {
   }
 
   .actionBtn {
-    width: 36px;
-    height: 32px;
+    width: 40px;
+    height: 36px;
     padding: 0;
     color: #606266;
     background-color: transparent;
     border: 0;
     border-radius: 4px;
     cursor: pointer;
+    touch-action: manipulation;
     transition: color 0.2s ease, background-color 0.2s ease;
 
     &:hover {
@@ -108,8 +107,15 @@ export default {
 
 @media screen and (max-width: 700px) {
   .canvasToolbarActions {
-    right: 16px;
-    bottom: 92px;
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 12px);
+    flex-direction: row;
+
+    .actionBtn {
+      width: 44px;
+      height: 44px;
+    }
   }
 }
 
