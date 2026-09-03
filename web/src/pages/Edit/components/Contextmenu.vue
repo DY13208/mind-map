@@ -92,6 +92,12 @@
         <span class="desc">Ctrl + V</span>
       </div>
       <div class="splitLine"></div>
+      <div class="item" data-testid="mapref" @click="openMapRef">
+        <span class="name">{{ $t('contextmenu.mapRef') }}</span>
+      </div>
+      <div class="item" @click="clearMapRef" v-if="hasMapRef">
+        <span class="name">{{ $t('contextmenu.removeMapRef') }}</span>
+      </div>
       <div class="item" @click="exec('REMOVE_HYPERLINK')" v-if="hasHyperlink">
         <span class="name">{{ $t('contextmenu.removeHyperlink') }}</span>
       </div>
@@ -286,6 +292,10 @@ export default {
     hasHyperlink() {
       return !!this.node.getData('hyperlink')
     },
+    hasMapRef() {
+      const ref = this.node && this.node.getData && this.node.getData('mapRef')
+      return !!(ref && (ref.mapId || ref.map_id || ref.room_key))
+    },
     hasNote() {
       return !!this.node.getData('note')
     },
@@ -357,6 +367,20 @@ export default {
 
     onNodeMousedown() {
       this.isNodeMousedown = true
+    },
+
+    openMapRef() {
+      const node = this.node
+      this.hide()
+      this.$bus.$emit('showMapRef', node)
+    },
+
+    clearMapRef() {
+      if (this.node && typeof this.node.setMapRef === 'function') {
+        this.node.setMapRef(null)
+      }
+      this.hide()
+      this.$message.success(this.$t('mapRef.removed'))
     },
 
     // 鼠标按下事件

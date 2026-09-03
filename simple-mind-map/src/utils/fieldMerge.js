@@ -7,8 +7,16 @@ export const FIELD_GROUPS = {
   icon: ['icon'],
   tag: ['tag'],
   hyperlink: ['hyperlink', 'hyperlinkTitle'],
+  mapRef: ['mapRef'],
   outerFrame: ['outerFrame'],
   generalization: ['generalization'],
+  associativeLine: [
+    'associativeLineTargets',
+    'associativeLineTargetControlOffsets',
+    'associativeLinePoint',
+    'associativeLineText',
+    'associativeLineStyle'
+  ],
   formula: ['formula'],
   attachment: ['attachmentUrl', 'attachmentName']
 }

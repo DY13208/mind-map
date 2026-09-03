@@ -67,6 +67,7 @@
           <div
             class="btn iconfont"
             :class="[isReadonly ? 'iconyanjing' : 'iconbianji1']"
+            v-if="roomCanEdit"
             @click="readonlyChange"
           ></div>
         </el-tooltip>
@@ -187,7 +188,8 @@ export default {
   computed: {
     ...mapState({
       isReadonly: state => state.isReadonly,
-      isDark: state => state.localConfig.isDark
+      isDark: state => state.localConfig.isDark,
+      roomCanEdit: state => state.roomCanEdit
     })
   },
   created() {
@@ -202,6 +204,7 @@ export default {
     ]),
 
     readonlyChange() {
+      if (!this.roomCanEdit) return
       this.setIsReadonly(!this.isReadonly)
       this.mindMap.setMode(this.isReadonly ? 'readonly' : 'edit')
     },

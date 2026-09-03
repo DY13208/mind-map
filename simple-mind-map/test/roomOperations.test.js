@@ -253,6 +253,10 @@ function testPreviewStampsMetaAndKnownVersion() {
 }
 
 function testMarkDirtySubtreesForUnloadedBranch() {
+  // Lazy-load recovery only marks currently loaded parents. The new child
+  // `hidden` is not in the loaded set, so callers hydrate `loaded` (the
+  // visible parent) instead of pretending the unloaded node is already on
+  // the canvas. Remote V2 ops and gap recovery reuse this same dirty map.
   const dirty = markDirtySubtrees(['root', 'loaded'], [
     {
       version: 12,
@@ -263,7 +267,7 @@ function testMarkDirtySubtreesForUnloadedBranch() {
       }
     }
   ])
-  assert.deepStrictEqual(dirty, { hidden: 12, loaded: 12 })
+  assert.deepStrictEqual(dirty, { loaded: 12 })
 
   const clean = markDirtySubtrees(['root', 'a'], [
     {

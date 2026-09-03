@@ -81,6 +81,7 @@ class MindMapNode {
     this._iconData = null
     this._textData = null
     this._hyperlinkData = null
+    this._mapRefData = null
     this._tagData = null
     this._noteData = null
     this.noteEl = null
@@ -229,6 +230,7 @@ class MindMapNode {
       'icon',
       'text',
       'hyperlink',
+      'mapRef',
       'tag',
       'note',
       'attachment',
@@ -271,6 +273,7 @@ class MindMapNode {
     if (createTypes.icon) this._iconData = this.createIconNode()
     if (createTypes.text) this._textData = this.createTextNode()
     if (createTypes.hyperlink) this._hyperlinkData = this.createHyperlinkNode()
+    if (createTypes.mapRef) this._mapRefData = this.createMapRefNode()
     if (createTypes.tag) this._tagData = this.createTagNode()
     if (createTypes.note) this._noteData = this.createNoteNode()
     if (createTypes.attachment)

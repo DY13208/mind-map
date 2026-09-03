@@ -224,6 +224,21 @@ function applyRestore(obj, payload = {}) {
   Object.keys(nodes).forEach(uid => {
     next[uid] = JSON.parse(JSON.stringify(nodes[uid]))
   })
+  ;(payload.rows || []).forEach(row => {
+    next[row.uid] = {
+      isRoot: !!row.is_root,
+      data: { ...(row.data || {}), uid: row.uid },
+      children: (next[row.uid] && next[row.uid].children) || [],
+      position: row.position || ''
+    }
+  })
+  ;(payload.rows || []).forEach(row => {
+    const parentUid = row.parent_uid
+    if (!parentUid || !next[parentUid]) return
+    const kids = [...(next[parentUid].children || [])]
+    if (!kids.includes(row.uid)) kids.push(row.uid)
+    next[parentUid] = { ...next[parentUid], children: kids }
+  })
   const uid = payload.uid
   const parentUid = payload.parentUid || payload.parent_uid || payload.parent
   const promoted = (uid && next[uid] && next[uid].children) || []

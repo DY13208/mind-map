@@ -1,5 +1,9 @@
 <template>
-  <div class="searchContainer" :class="{ isDark: isDark, show: show }">
+  <div
+    class="searchContainer"
+    data-testid="search"
+    :class="{ isDark: isDark, show: show }"
+  >
     <div class="closeBtnBox">
       <span class="closeBtn el-icon-close" @click="close"></span>
     </div>
@@ -18,6 +22,7 @@
         <el-button
           size="small"
           slot="append"
+          data-testid="replace"
           v-if="!isUndef(searchText)"
           @click="showReplaceInput = true"
           >{{ $t('search.replace') }}</el-button
@@ -44,12 +49,20 @@
       }}</el-button>
     </el-input>
     <div class="btnList" v-if="showReplaceInput">
-      <el-button size="small" :disabled="isReadonly" @click="replace">{{
-        $t('search.replace')
-      }}</el-button>
-      <el-button size="small" :disabled="isReadonly" @click="replaceAll">{{
-        $t('search.replaceAll')
-      }}</el-button>
+      <el-button
+        size="small"
+        :disabled="replaceDisabled"
+        :loading="searching"
+        @click="replace"
+        >{{ $t('search.replace') }}</el-button
+      >
+      <el-button
+        size="small"
+        :disabled="replaceDisabled"
+        :loading="searching"
+        @click="replaceAll"
+        >{{ $t('search.replaceAll') }}</el-button
+      >
     </div>
     <div
       class="searchResultList"
@@ -59,7 +72,7 @@
       <div
         class="searchResultItem"
         v-for="(item, index) in searchResultList"
-        :key="item.id"
+        :key="(item.uid || item.id || 'hit') + '-' + index"
         :title="item.name"
         v-html="item.text"
         @click.stop="onSearchResultItemClick(index)"
@@ -75,7 +88,7 @@
 <script>
 import { mapState } from 'vuex'
 import { isUndef, getTextFromHtml } from 'simple-mind-map/src/utils/index'
-import { searchFile } from '@/utils/fileApi'
+import { searchFile, searchFileAll } from '@/utils/fileApi'
 
 // 搜索替换
 export default {
@@ -95,14 +108,27 @@ export default {
       showSearchInfo: false,
       searchResultListHeight: 0,
       searchResultList: [],
-      showSearchResultList: false
+      showSearchResultList: false,
+      searching: false,
+      lastExecutedQuery: '',
+      currentMatchUid: '',
+      searchTimer: null,
+      invalidateTimer: null,
+      searchSeq: 0
     }
   },
   computed: {
     ...mapState({
       isReadonly: state => state.isReadonly,
       isDark: state => state.localConfig.isDark
-    })
+    }),
+    httpSearchActive() {
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      return !!(cooperate && cooperate.httpCollabMode && cooperate.httpRoomKey)
+    },
+    replaceDisabled() {
+      return this.isReadonly || isUndef(this.searchText) || !String(this.searchText).trim()
+    }
   },
   watch: {
     searchText() {
@@ -110,7 +136,13 @@ export default {
         this.currentIndex = 0
         this.total = 0
         this.showSearchInfo = false
+        this.searchResultList = []
+        this.lastExecutedQuery = ''
+        this.currentMatchUid = ''
+        this.clearSearchTimer()
+        return
       }
+      this.scheduleAutoSearch()
     }
   },
   created() {
@@ -124,6 +156,8 @@ export default {
       this.onSearchMatchNodeListChange
     )
     this.mindMap.keyCommand.addShortcut('Control+f', this.showSearch)
+    this.mindMap.on('collab_search_invalidate', this.onCollabSearchInvalidate)
+    this.mindMap.on('collab_replace_all_done', this.onCollabReplaceAllDone)
     window.addEventListener('resize', this.setSearchResultListHeight)
     this.$bus.$on('setData', this.close)
   },
@@ -141,13 +175,21 @@ export default {
       this.onSearchMatchNodeListChange
     )
     this.mindMap.keyCommand.removeShortcut('Control+f', this.showSearch)
+    this.mindMap.off('collab_search_invalidate', this.onCollabSearchInvalidate)
+    this.mindMap.off('collab_replace_all_done', this.onCollabReplaceAllDone)
     window.removeEventListener('resize', this.setSearchResultListHeight)
     this.$bus.$off('setData', this.close)
+    this.clearSearchTimer()
+    if (this.invalidateTimer) {
+      clearTimeout(this.invalidateTimer)
+      this.invalidateTimer = null
+    }
   },
   methods: {
     isUndef,
 
     handleSearchInfoChange(data) {
+      if (this.httpSearchActive) return
       this.currentIndex = data.currentIndex + 1
       this.total = data.total
       this.showSearchInfo = true
@@ -188,58 +230,237 @@ export default {
       }
     },
 
+    clearSearchTimer() {
+      if (this.searchTimer) {
+        clearTimeout(this.searchTimer)
+        this.searchTimer = null
+      }
+    },
+
+    scheduleAutoSearch() {
+      this.clearSearchTimer()
+      this.searchTimer = setTimeout(() => {
+        this.searchTimer = null
+        this.runSearch({ reveal: false })
+      }, 250)
+    },
+
+    onCollabSearchInvalidate() {
+      if (!this.show || !this.searchText) return
+      if (this.invalidateTimer) clearTimeout(this.invalidateTimer)
+      this.invalidateTimer = setTimeout(() => {
+        this.invalidateTimer = null
+        this.lastExecutedQuery = ''
+        this.runSearch({ reveal: false })
+      }, 300)
+    },
+
+    onCollabReplaceAllDone(info) {
+      if (!info || !info.skipped) return
+      this.$message &&
+        this.$message.warning(
+          `已替换 ${info.replaced} 项，${info.skipped} 项因其他协作者已修改而跳过。`
+        )
+    },
+
     onSearchNext() {
       this.showSearchResultList = true
+      this.clearSearchTimer()
+      this.runSearch({ reveal: true, immediate: true })
+    },
+
+    mapSearchHits(matches, needle) {
+      const q = String(needle || '').trim()
+      return (matches || []).map(item => {
+        const uid = item.uid || item.id
+        const name = item.name || item.text || ''
+        const text = q
+          ? name.replace(
+              new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
+              a => `<span class="match">${a}</span>`
+            )
+          : name
+        return {
+          data: item,
+          id: uid,
+          text,
+          name,
+          uid
+        }
+      })
+    },
+
+    mergeLocalMatches(httpMatches, query) {
       const cooperate = this.mindMap && this.mindMap.cooperate
-      if (cooperate && cooperate.httpCollabMode && cooperate.httpRoomKey) {
-        this.searchLargeMap(cooperate)
-        return
+      const local =
+        cooperate && typeof cooperate.collectLocalSearchMatches === 'function'
+          ? cooperate.collectLocalSearchMatches(query)
+          : []
+      const seen = new Set()
+      const out = []
+      ;(httpMatches || []).concat(local || []).forEach(item => {
+        const uid = item && (item.uid || item.id)
+        if (!uid || seen.has(uid)) return
+        seen.add(uid)
+        out.push(item)
+      })
+      return out
+    },
+
+    applySearchHits(matches, query, opts = {}) {
+      const keepUid = this.currentMatchUid
+      const mapped = this.mapSearchHits(matches, query)
+      this.searchResultList = mapped
+      this.total = Number(opts.total != null ? opts.total : mapped.length)
+      this.showSearchInfo = true
+      this.showSearchResultList = true
+      this.lastExecutedQuery = String(query || '').trim()
+      let idx = mapped.findIndex(item => item.uid === keepUid)
+      if (idx < 0) idx = 0
+      this.currentIndex = mapped.length ? idx + 1 : 0
+      this.currentMatchUid = mapped[idx] ? mapped[idx].uid : ''
+      return mapped
+    },
+
+    async runSearch(opts = {}) {
+      const query = String(this.searchText || '').trim()
+      if (!query) {
+        this.searchResultList = []
+        this.total = 0
+        this.showSearchInfo = false
+        this.lastExecutedQuery = ''
+        return []
+      }
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (this.httpSearchActive) {
+        const seq = ++this.searchSeq
+        this.searching = true
+        try {
+          const data = opts.all
+            ? await searchFileAll(cooperate.httpRoomKey, query)
+            : await searchFile(cooperate.httpRoomKey, query, 200)
+          if (seq !== this.searchSeq) return this.searchResultList
+          const merged = this.mergeLocalMatches(data.matches || [], query)
+          const mapped = this.applySearchHits(merged, query, {
+            total: Math.max(
+              Number(data.total || 0),
+              merged.length
+            )
+          })
+          if (opts.reveal && this.currentMatchUid) {
+            await cooperate.revealUid(this.currentMatchUid)
+          }
+          return mapped
+        } catch (err) {
+          if (seq !== this.searchSeq) return this.searchResultList
+          const local = this.mergeLocalMatches([], query)
+          return this.applySearchHits(local, query, { total: local.length })
+        } finally {
+          if (seq === this.searchSeq) this.searching = false
+        }
       }
       this.mindMap.search.search(this.searchText)
+      return this.searchResultList
     },
 
-    async searchLargeMap(cooperate) {
-      if (isUndef(this.searchText)) {
-        this.searchResultList = []
-        this.total = 0
-        this.showSearchInfo = false
+    async ensureSearchExecuted(opts = {}) {
+      const query = String(this.searchText || '').trim()
+      if (!query) return false
+      if (
+        !opts.force &&
+        this.lastExecutedQuery === query &&
+        (this.searchResultList.length > 0 || this.total === 0)
+      ) {
+        if (opts.all && this.httpSearchActive) {
+          await this.runSearch({ all: true, reveal: false })
+        }
+        return true
+      }
+      await this.runSearch({
+        reveal: !!opts.reveal,
+        all: !!opts.all,
+        immediate: true
+      })
+      return true
+    },
+
+    async searchLargeMap(cooperate, opts = {}) {
+      return this.runSearch(opts)
+    },
+
+    async replace() {
+      const query = String(this.searchText || '').trim()
+      if (!query || this.isReadonly) return
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (cooperate && cooperate.httpCollabMode && cooperate.collabV2Adapter) {
+        await this.ensureSearchExecuted()
+        const idx = Math.max(0, (this.currentIndex || 1) - 1)
+        const item = this.searchResultList[idx]
+        if (!item || !item.uid) return
+        const replacedUid = item.uid
+        try {
+          await cooperate.replaceOneBySearchMatch(
+            item,
+            query,
+            this.replaceText
+          )
+          this.currentMatchUid = replacedUid
+          await this.runSearch({ reveal: false })
+          if (this.currentMatchUid === replacedUid) {
+            const still = this.searchResultList.find(hit => hit.uid === replacedUid)
+            if (!still && this.searchResultList[0]) {
+              this.currentMatchUid = this.searchResultList[0].uid
+              this.currentIndex = 1
+            }
+          }
+        } catch (err) {
+          if (err && err.code === 'REPLACE_CONFLICT') {
+            this.$message &&
+              this.$message.warning('该项已被其他协作者修改，已跳过')
+            await this.runSearch({ reveal: false })
+            return
+          }
+          this.$message &&
+            this.$message.error((err && (err.message || err.code)) || '替换失败')
+        }
         return
       }
-      try {
-        const data = await searchFile(cooperate.httpRoomKey, this.searchText)
-        const matches = data.matches || []
-        this.total = matches.length
-        this.currentIndex = matches.length ? 1 : 0
-        this.showSearchInfo = true
-        const needle = this.searchText.trim()
-        this.searchResultList = matches.map(item => {
-          const name = item.text || ''
-          const text = needle
-            ? name.replace(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), a => {
-                return `<span class="match">${a}</span>`
-              })
-            : name
-          return {
-            data: item,
-            id: item.uid,
-            text,
-            name,
-            uid: item.uid
-          }
-        })
-        if (matches[0]) await cooperate.revealUid(matches[0].uid)
-      } catch (err) {
-        this.searchResultList = []
-        this.total = 0
-        this.showSearchInfo = false
+      if (this.lastExecutedQuery !== query) {
+        this.mindMap.search.search(query)
       }
-    },
-
-    replace() {
       this.mindMap.search.replace(this.replaceText, true)
     },
 
-    replaceAll() {
+    async replaceAll() {
+      const query = String(this.searchText || '').trim()
+      if (!query || this.isReadonly) return
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (cooperate && cooperate.httpCollabMode && cooperate.collabV2Adapter) {
+        await this.ensureSearchExecuted({ all: true })
+        const data = await searchFileAll(cooperate.httpRoomKey, query)
+        const matches = this.mergeLocalMatches(data.matches || [], query)
+        this.applySearchHits(matches, query, {
+          total: Math.max(Number(data.total || 0), matches.length)
+        })
+        if (!matches.length) return
+        try {
+          await cooperate.replaceAllBySearchMatches(
+            matches,
+            query,
+            this.replaceText
+          )
+          await this.runSearch({ reveal: false, all: true })
+        } catch (err) {
+          this.$message &&
+            this.$message.error(
+              (err && (err.message || err.code)) || '全部替换失败'
+            )
+        }
+        return
+      }
+      if (this.lastExecutedQuery !== query) {
+        this.mindMap.search.search(query)
+      }
       this.mindMap.search.replaceAll(this.replaceText)
     },
 
@@ -250,11 +471,15 @@ export default {
       this.total = 0
       this.currentIndex = 0
       this.searchText = ''
+      this.lastExecutedQuery = ''
+      this.currentMatchUid = ''
       this.hideReplaceInput()
+      this.clearSearchTimer()
       this.mindMap.search.endSearch()
     },
 
     onSearchMatchNodeListChange(list) {
+      if (this.httpSearchActive) return
       this.searchResultList = list.map(item => {
         const data = item.data || item.nodeData.data
         let name = data.text
@@ -269,6 +494,7 @@ export default {
         return {
           data: item,
           id,
+          uid: id,
           text,
           name
         }
@@ -284,6 +510,7 @@ export default {
       const item = this.searchResultList[index]
       if (cooperate && cooperate.httpCollabMode && item && item.uid) {
         this.currentIndex = index + 1
+        this.currentMatchUid = item.uid
         cooperate.revealUid(item.uid)
         return
       }

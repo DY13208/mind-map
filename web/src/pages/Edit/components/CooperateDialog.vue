@@ -21,6 +21,9 @@
         <span v-if="peerList.length" class="peerCount"
           >{{ $t('cooperate.peers') }} {{ peerList.length }}</span
         >
+        <span v-if="roomRole" class="roleTag" :class="roomRole">{{
+          memberRoleText(roomRole)
+        }}</span>
       </div>
       <div class="peerList" v-if="peerList.length">
         <div class="peer" v-for="peer in peerList" :key="peer.id">
@@ -31,6 +34,73 @@
           <span class="you" v-if="peer.isMe">{{ $t('cooperate.you') }}</span>
         </div>
       </div>
+
+      <section class="memberPanel" v-if="connected && roomName">
+        <div class="fileHead">
+          <div class="fileHeadTitle">
+            <span>{{ $t('acl.share') }}</span>
+          </div>
+        </div>
+        <div v-if="membersLoading" class="empty">{{ $t('other.loading') }}</div>
+        <div v-else class="memberList">
+          <div class="memberItem" v-for="item in memberList" :key="item.user_id">
+            <span
+              class="avatar"
+              :style="memberAvatarStyle(item)"
+            >{{ memberInitial(item) }}</span>
+            <span class="name">{{ item.name || item.user_id }}</span>
+            <span class="roleTag" v-if="!roomCanManage" :class="item.role">{{
+              memberRoleText(item.role)
+            }}</span>
+            <template v-if="roomCanManage">
+              <el-select
+                :value="item.role"
+                size="mini"
+                class="roleSelect"
+                :disabled="memberBusy"
+                @change="val => changeMemberRole(item, val)"
+              >
+                <el-option :label="$t('acl.owner')" value="owner"></el-option>
+                <el-option :label="$t('acl.editor')" value="editor"></el-option>
+                <el-option :label="$t('acl.viewer')" value="viewer"></el-option>
+              </el-select>
+              <el-button
+                type="text"
+                class="danger"
+                :disabled="memberBusy"
+                @click="dropMember(item)"
+                >{{ $t('acl.remove') }}</el-button
+              >
+            </template>
+          </div>
+        </div>
+        <div v-if="roomCanManage" class="memberAdd">
+          <el-input
+            v-model.trim="memberQuery"
+            size="small"
+            :placeholder="$t('acl.searchUsers')"
+            @input="searchMemberUsers"
+            @keydown.native.stop
+          ></el-input>
+          <div class="userHits" v-if="userHits.length">
+            <div
+              class="memberItem"
+              v-for="user in userHits"
+              :key="user.user_id"
+            >
+              <span class="name">{{ user.name || user.user_id }}</span>
+              <el-button
+                type="text"
+                @click="addMember(user, 'viewer')"
+                >{{ $t('acl.addViewer') }}</el-button
+              >
+              <el-button type="text" @click="addMember(user, 'editor')">{{
+                $t('acl.addEditor')
+              }}</el-button>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section class="filePanel">
         <div class="fileHead">
@@ -83,6 +153,9 @@
                   class="currentTag"
                   >{{ $t('cooperate.currentRoom') }}</span
                 >
+                <span class="roleTag" :class="item.role || 'editor'">{{
+                  fileRoleText(item.role)
+                }}</span>
               </div>
               <div class="fileTime">{{ formatTime(item.updated_at) }}</div>
             </div>
@@ -90,12 +163,16 @@
               <el-button type="text" @click="openFile(item)">{{
                 $t('cooperate.openFile')
               }}</el-button>
-              <el-button type="text" @click="renameSavedFile(item)">{{
-                $t('cooperate.renameFile')
-              }}</el-button>
+              <el-button
+                type="text"
+                v-if="item.canManage"
+                @click="renameSavedFile(item)"
+                >{{ $t('cooperate.renameFile') }}</el-button
+              >
               <el-button
                 type="text"
                 class="danger"
+                v-if="item.canManage"
                 @click="removeSavedFile(item)"
                 >{{ $t('cooperate.deleteFile') }}</el-button
               >
@@ -247,12 +324,52 @@ import {
   addFileNode,
   patchFileNode,
   deleteFileNode,
-  replaceFileTree
+  replaceFileTree,
+  getFileMembers,
+  addFileMember,
+  updateFileMember,
+  removeFileMember,
+  searchUsers
 } from '@/utils/fileApi'
 import { countNodes, stubImportedTree } from '@/utils/importTree'
+import {
+  captureMapView,
+  inspectMapRef,
+  loadMapView,
+  normalizeMapRef,
+  restoreMapView,
+  saveMapView
+} from '@/utils/mapRefNav'
+import { applyRoomAccess, fileRoleLabelKey, memberRoleLabelKey } from '@/utils/roomAcl'
+import { createCollaborationAdapter } from 'simple-mind-map/bin/collabV2/adapter'
+import { io } from 'socket.io-client'
 
 const USER_NAME_KEY = 'COOPERATE_USER_NAME'
 const USER_ID_KEY = 'COOPERATE_USER_ID'
+const V2_CLIENT_KEY = 'mind-map-collab-v2-client'
+
+function tabClientId() {
+  try {
+    let id = sessionStorage.getItem(V2_CLIENT_KEY)
+    if (!id || !String(id).trim()) {
+      id =
+        (typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, ch => {
+              const n = (Math.random() * 16) | 0
+              const v = ch === 'x' ? n : (n & 0x3) | 0x8
+              return v.toString(16)
+            }))
+      sessionStorage.setItem(V2_CLIENT_KEY, id)
+    }
+    return String(id).trim()
+  } catch (err) {
+    return (
+      (typeof crypto !== 'undefined' && crypto.randomUUID && crypto.randomUUID()) ||
+      'client-' + Date.now() + '-' + Math.random().toString(36).slice(2)
+    )
+  }
+}
 const USER_COLORS = [
   '#409EFF',
   '#67C23A',
@@ -327,12 +444,21 @@ export default {
       historyList: [],
       historyLoading: false,
       historyPage: 1,
-      historyPageSize: 8
+      historyPageSize: 8,
+      memberList: [],
+      membersLoading: false,
+      memberQuery: '',
+      userHits: [],
+      memberBusy: false,
+      collabV2Adapter: null
     }
   },
   computed: {
     ...mapState({
-      isDark: state => state.localConfig.isDark
+      isDark: state => state.localConfig.isDark,
+      roomRole: state => state.roomRole,
+      roomCanEdit: state => state.roomCanEdit,
+      roomCanManage: state => state.roomCanManage
     }),
     status() {
       if (this.connecting) return 'connecting'
@@ -346,7 +472,13 @@ export default {
       return this.$t(`cooperate.${this.status}`)
     },
     saveStatusText() {
-      const status = ['saving', 'saved', 'saveError'].includes(this.saveStatus)
+      const status = [
+        'saving',
+        'saved',
+        'saveError',
+        'offline',
+        'reconnecting'
+      ].includes(this.saveStatus)
         ? this.saveStatus
         : 'saving'
       return this.$t(`cooperate.${status}`)
@@ -357,12 +489,28 @@ export default {
     }
   },
   watch: {
-    mindMap(val) {
-      if (val) this.tryAutoJoin()
+    mindMap(val, prev) {
+      if (prev) {
+        prev.off('room_acl_denied', this.onAclDenied)
+        prev.off('undo_conflict', this.onUndoConflict)
+      }
+      if (val) {
+        val.on('room_acl_denied', this.onAclDenied)
+        val.on('undo_conflict', this.onUndoConflict)
+        this.tryAutoJoin()
+      }
     },
     fileQuery() {
       this.filePage = 1
       this.scheduleFileSearch()
+    },
+    '$route.query.room'() {
+      this.onRoomRouteChange()
+    },
+    '$route.query.focus'() {
+      if (!this.connected) return
+      if (this.roomName !== roomFromLocation(this.$route)) return
+      this.tryFocusFromQuery()
     }
   },
   created() {
@@ -381,6 +529,8 @@ export default {
     this.userColor =
       USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)]
     this.$bus.$on('showCooperate', this.open)
+    this.$bus.$on('map_ref_click', this.onMapRefClick)
+    this.$bus.$on('showShareAcl', this.openShare)
     this._seenHttpChanges = new Map()
     this._unsubCollabStore = null
   },
@@ -389,17 +539,328 @@ export default {
   },
   beforeDestroy() {
     this.$bus.$off('showCooperate', this.open)
+    this.$bus.$off('map_ref_click', this.onMapRefClick)
+    this.$bus.$off('showShareAcl', this.openShare)
+    if (this.mindMap) {
+      this.mindMap.off('room_acl_denied', this.onAclDenied)
+      this.mindMap.off('undo_conflict', this.onUndoConflict)
+    }
+    this.persistCurrentMapView()
     this.stopSaveStatusPolling()
     this.clearReconnectNotice()
     this.unbindCollabStore()
     this.unbindProvider()
+    if (this._unsubCollabV2) {
+      this._unsubCollabV2()
+      this._unsubCollabV2 = null
+    }
+    if (this.collabV2Adapter && this.collabV2Adapter.disconnect) {
+      this.collabV2Adapter.disconnect()
+    }
     if (this._fileSearchTimer) {
       clearTimeout(this._fileSearchTimer)
       this._fileSearchTimer = null
     }
+    if (this._memberSearchTimer) {
+      clearTimeout(this._memberSearchTimer)
+      this._memberSearchTimer = null
+    }
   },
   methods: {
     ...mapMutations(['setCooperateStatus']),
+
+    applyAccess(access) {
+      applyRoomAccess(this.$store, this.mindMap, access || {})
+    },
+
+    useCollabV2() {
+      return getRuntimeConfig().collabV2 !== false
+    },
+
+    mapV2Peers(peers) {
+      const mine = this.collabV2Adapter && this.collabV2Adapter.getClientId()
+      const list = (peers || []).map(peer => ({
+        id: peer.clientId || peer.userId,
+        name: peer.name || peer.userId || 'user',
+        color: peer.color || '#409EFF',
+        shortName: String(peer.name || peer.userId || '?').slice(0, 1),
+        isMe: peer.clientId === mine,
+        avatar: peer.avatar || '',
+        editingUid: peer.editingUid || null
+      }))
+      if (!list.some(item => item.isMe)) {
+        list.unshift({
+          id: this.userId,
+          name: this.userName,
+          color: this.userColor,
+          shortName: (this.userName || '?').slice(0, 1),
+          isMe: true
+        })
+      }
+      return list
+    },
+
+    exposeCollabV2Debug() {
+      if (typeof window === 'undefined' || !this.collabV2Adapter) return
+      const adapter = this.collabV2Adapter
+      const debug = adapter.getDebugState
+        ? adapter.getDebugState()
+        : adapter.getStatus()
+      window.__COLLAB_V2_STATE__ = debug
+      window.__COLLAB_V2_STATUS__ = () =>
+        (adapter.getDebugState && adapter.getDebugState()) || adapter.getStatus()
+      try {
+        const trace =
+          window.__COLLAB_V2_TRACE__ === true ||
+          (window.localStorage &&
+            window.localStorage.getItem('COLLAB_V2_TRACE') === '1')
+        if (trace && console && console.table) {
+          console.table({
+            userId: debug.userId,
+            clientId: debug.clientId,
+            socketId: debug.socketId,
+            roomKey: debug.roomKey,
+            status: debug.status,
+            lastServerRevision: debug.lastServerRevision,
+            serverRevision: debug.serverRevision,
+            pending: debug.outboxPending
+          })
+        }
+      } catch (err) {
+        // ignore
+      }
+    },
+
+    ensureCollabV2() {
+      if (this.collabV2Adapter) return this.collabV2Adapter
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      const clientId = tabClientId()
+      if (typeof window !== 'undefined') {
+        window.__COLLAB_V2_STATE__ = {
+          status: 'booting',
+          clientId,
+          userId: String(this.userId || '').replace(/^wecom:/, ''),
+          roomKey: this.roomName || ''
+        }
+      }
+      const adapter = createCollaborationAdapter({
+        clientId,
+        name: this.userName,
+        color: this.userColor,
+        createSocket: () => {
+          const cfg = getRuntimeConfig()
+          const raw = String(cfg.collabApi || this.serverUrl || '')
+            .replace(/^ws/i, 'http')
+            .replace(/\/$/, '')
+            .replace(/\/collab$/i, '')
+          return io(raw, {
+            path: '/collab-v2',
+            auth: {
+              clientId,
+              userId: String(this.userId || '').replace(/^wecom:/, '')
+            },
+            withCredentials: true,
+            transports: ['websocket', 'polling']
+          })
+        },
+        httpSync: async ({ afterRevision }) => {
+          const api = getRuntimeConfig().collabApi || ''
+          const roomKey = encodeURIComponent(this.roomName || '')
+          const res = await fetch(
+            `${api}/api/collab-v2/ops?roomKey=${roomKey}&afterRevision=${Number(afterRevision) || 0}`,
+            { credentials: 'include', headers: { Accept: 'application/json' } }
+          )
+          return res.json().catch(() => ({ ok: false }))
+        },
+        onRemoteOperation: op => {
+          if (cooperate && typeof cooperate.applyV2RemoteOperation === 'function') {
+            return cooperate.applyV2RemoteOperation(op)
+          }
+        },
+        onReloadRequired: () => {
+          if (cooperate && typeof cooperate.recoverHttpCollab === 'function') {
+            return cooperate.recoverHttpCollab(
+              this.collabV2Adapter &&
+                this.collabV2Adapter.getStatus().lastServerRevision
+            )
+          }
+        },
+        onRejected: (op, err) => {
+          if (err && (err.statusCode === 403 || err.code === 'FORBIDDEN')) {
+            this.onAclDenied()
+          }
+          const skipHttp =
+            err &&
+            (err.code === 'VERSION_AHEAD' ||
+              err.code === 'STALE_BASE' ||
+              err.code === 'VERSION_CONFLICT' ||
+              err.code === 'ACK_TIMEOUT' ||
+              err.code === 'UID_REUSED' ||
+              err.code === 'TARGET_DELETED' ||
+              err.code === 'NODE_DELETED' ||
+              err.code === 'PARENT_DELETED' ||
+              err.code === 'MOVE_CONFLICT' ||
+              err.code === 'DROPPED_DELETED')
+          if (
+            !skipHttp &&
+            cooperate &&
+            typeof cooperate.recoverHttpCollab === 'function'
+          ) {
+            cooperate.recoverHttpCollab(
+              this.collabV2Adapter.getStatus().lastServerRevision
+            )
+          }
+        },
+        onLockDenied: owner => {
+          this.$message.warning(
+            (owner && owner.name ? owner.name : '同事') + ' 正在编辑该节点'
+          )
+        }
+      })
+      this.collabV2Adapter = adapter
+      if (cooperate && typeof cooperate.setCollabV2Adapter === 'function') {
+        cooperate.setCollabV2Adapter(adapter)
+      }
+      this.exposeCollabV2Debug()
+      this._unsubCollabV2 = adapter.subscribe(snap => {
+        this.exposeCollabV2Debug()
+        if (snap.peers) this.peerList = this.mapV2Peers(snap.peers)
+        if (
+          snap.phase === 'LIVE' &&
+          cooperate &&
+          typeof cooperate.establishV2HistoryBaseline === 'function'
+        ) {
+          cooperate.establishV2HistoryBaseline()
+        }
+        if (snap.saveState === 'saved') this.saveStatus = 'saved'
+        else if (snap.status === 'reconnecting' || snap.saveState === 'resync') {
+          this.saveStatus = 'reconnecting'
+          this.saveError = ''
+        } else if (snap.saveState === 'offline') {
+          this.saveStatus = 'offline'
+          this.saveError = ''
+        } else if (snap.saveState === 'error') {
+          this.saveStatus = 'saveError'
+          const reason = [snap.lastErrorCode, snap.lastErrorMessage || snap.error]
+            .filter(Boolean)
+            .join(': ')
+          this.saveError = reason || this.$t('cooperate.saveError')
+        } else if (snap.saveState === 'saving') this.saveStatus = 'saving'
+        this.$store.commit('setCollabPresence', {
+          phase: snap.phase || '',
+          status: snap.status || '',
+          saveState: snap.saveState || 'idle',
+          error: snap.lastErrorMessage || snap.error || '',
+          diagnostic: this.collabV2Adapter.getDebugState
+            ? this.collabV2Adapter.getDebugState()
+            : snap,
+          peers: this.peerList,
+          pendingCount: snap.pendingCount || 0
+        })
+        if (snap.role || snap.canEdit != null) {
+          this.applyAccess({
+            role: snap.role,
+            canEdit: snap.canEdit,
+            canManage: snap.role === 'owner',
+            canView: snap.canView
+          })
+        }
+      })
+      return adapter
+    },
+
+    async connectCollabV2() {
+      const adapter = this.ensureCollabV2()
+      const previewVersion = Math.max(
+        Number(
+          (this.mindMap.cooperate && this.mindMap.cooperate.lastAppliedVersion) || 0
+        ),
+        Number((this._httpCollabPreview && this._httpCollabPreview.version) || 0)
+      )
+      adapter.setLastServerRevision(previewVersion)
+      await adapter.connect({
+        roomKey: this.roomName,
+        userId: this.userId.replace(/^wecom:/, ''),
+        clientId: adapter.getClientId && adapter.getClientId(),
+        lastServerRevision: previewVersion
+      })
+      this.peerList = this.mapV2Peers(adapter.getStatus().peers)
+      const snap = adapter.getStatus()
+      this.$store.commit('setCollabPresence', {
+        phase: snap.phase || '',
+        status: snap.status || '',
+        saveState: snap.saveState || 'idle',
+        error: snap.lastErrorMessage || snap.error || '',
+        diagnostic: adapter.getDebugState ? adapter.getDebugState() : snap,
+        peers: this.peerList,
+        pendingCount: snap.pendingCount || 0
+      })
+      this.exposeCollabV2Debug()
+    },
+
+    fallbackToV1Collab() {
+      if (this.useCollabV2()) {
+        console.warn('[collab-v2] V1 fallback disabled while COLLAB_V2 is on')
+        return
+      }
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (this._unsubCollabV2) {
+        this._unsubCollabV2()
+        this._unsubCollabV2 = null
+      }
+      if (this.collabV2Adapter && this.collabV2Adapter.disconnect) {
+        this.collabV2Adapter.disconnect()
+      }
+      this.collabV2Adapter = null
+      if (cooperate && typeof cooperate.setCollabV2Adapter === 'function') {
+        cooperate.setCollabV2Adapter(null)
+      }
+      if (this._httpCollabPreview) this.enableHttpCollab(this._httpCollabPreview)
+      this.connectPresenceSocket()
+    },
+
+    fileRoleText(role) {
+      return this.$t(fileRoleLabelKey(role))
+    },
+
+    memberRoleText(role) {
+      return this.$t(memberRoleLabelKey(role))
+    },
+
+    memberInitial(item) {
+      const name = String((item && (item.name || item.user_id)) || '?').trim()
+      return name.slice(0, 1)
+    },
+
+    memberAvatarStyle(item) {
+      if (item && item.avatar) {
+        return {
+          backgroundImage: `url(${item.avatar})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center'
+        }
+      }
+      return {}
+    },
+
+    onAclDenied() {
+      this.applyAccess({ role: 'viewer', canEdit: false, canManage: false })
+      this.$message.warning(this.$t('acl.demoted'))
+    },
+
+    onUndoConflict(err) {
+      const code = err && err.code
+      if (code === 'REDO_CONFLICT') {
+        this.$message.warning(this.$t('cooperate.redoConflict'))
+        return
+      }
+      this.$message.warning(this.$t('cooperate.undoConflict'))
+    },
+
+    openShare() {
+      this.dialogVisible = true
+      this.loadMembers()
+    },
 
     mapCollabStoreStatus(status) {
       if (status === 'live' || status === 'recovering') return 'connected'
@@ -431,8 +892,7 @@ export default {
       this.dialogVisible = true
       this.filePage = 1
       this.loadFiles()
-      // Do not auto-join / auto-create here. Opening the dialog used to call
-      // openSavedRoom with a random roomName, which created "未命名" rooms.
+      if (this.connected) this.loadMembers()
     },
 
     createRoom() {
@@ -453,10 +913,13 @@ export default {
           String(value || '')
             .trim()
             .slice(0, 80) || this.$t('cooperate.unnamed')
-        if (this.connected) this.leave({ silent: true })
+        if (this.connected) {
+          this.persistCurrentMapView()
+          this.leave({ silent: true })
+        }
         const created = await createFileApi({ title })
         this.roomName = created.room_key
-        this.syncRoomQuery()
+        this.syncRoomQuery({ clearFocus: true })
         await this.openSavedRoom({ silent: false, createIfMissing: true })
         this.loadFiles()
       } catch (err) {
@@ -465,9 +928,129 @@ export default {
       }
     },
 
-    tryAutoJoin() {
-      if (!this.mindMap || this.connected || this.connecting) return
+    persistCurrentMapView() {
+      if (!this.roomName || !this.mindMap) return
+      saveMapView(this.roomName, captureMapView(this.mindMap))
+    },
+
+    async onRoomRouteChange() {
       const room = roomFromLocation(this.$route)
+      if (!room) return
+      if (this.roomName === room) {
+        if (this.connected) this.tryFocusFromQuery()
+        return
+      }
+      if (this.connected || this.connecting) {
+        this.persistCurrentMapView()
+        this.leave({ silent: true })
+      }
+      this.roomName = room
+      await this.openSavedRoom({ silent: true })
+    },
+
+    async tryFocusFromQuery() {
+      const focus = this.$route.query.focus
+      if (!focus || !this.mindMap || !this.mindMap.cooperate) return false
+      const found = await this.mindMap.cooperate.revealUid(focus)
+      if (!found) {
+        this.$message.warning(this.$t('mapRef.missingNode'))
+        return false
+      }
+      return true
+    },
+
+    async restoreOpenedMapView() {
+      const snap = loadMapView(this.roomName)
+      if (!snap || !this.mindMap) return
+      restoreMapView(this.mindMap, snap)
+      const uid = snap.selectedUids && snap.selectedUids[0]
+      if (uid && this.mindMap.cooperate) {
+        try {
+          await this.mindMap.cooperate.revealUid(uid)
+        } catch (err) {
+          // ignore missing historical selection
+        }
+      }
+    },
+
+    async afterMapOpened() {
+      const gen = (this._mapOpenGen = (this._mapOpenGen || 0) + 1)
+      await this.$nextTick()
+      if (gen !== this._mapOpenGen) return
+      if (this.$route.query.focus) {
+        await this.tryFocusFromQuery()
+        return
+      }
+      await this.restoreOpenedMapView()
+    },
+
+    async onMapRefClick(_node, ref) {
+      const current = roomFromLocation(this.$route)
+      this.persistCurrentMapView()
+      let info
+      try {
+        info = await inspectMapRef(ref)
+      } catch (err) {
+        const msg = String((err && err.message) || '')
+        if (err && (err.code === 'FORBIDDEN' || err.statusCode === 403 || /403|permission/i.test(msg))) {
+          this.$message.warning(this.$t('mapRef.noPermission'))
+          return
+        }
+        if (
+          err &&
+          (err.statusCode === 404 ||
+            err.code === 'NOT_FOUND' ||
+            err.code === 'ROOM_DELETED' ||
+            /not found|404/i.test(msg))
+        ) {
+          this.$message.warning(this.$t('mapRef.missingMap'))
+          return
+        }
+        this.$message.warning(this.$t('mapRef.openFailed'))
+        return
+      }
+      if (!info || !info.exists) {
+        this.$message.warning(this.$t('mapRef.missingMap'))
+        return
+      }
+      const normalized = normalizeMapRef(ref)
+      if (!normalized) return
+      if (normalized.nodeId && info.nodeExists === false) {
+        this.$message.warning(this.$t('mapRef.missingNode'))
+      }
+      const query = { ...this.$route.query, room: normalized.mapId }
+      if (normalized.nodeId && info.nodeExists !== false) {
+        query.focus = normalized.nodeId
+      } else {
+        delete query.focus
+      }
+      if (normalized.mapId === current) {
+        if (
+          normalized.nodeId &&
+          info.nodeExists !== false &&
+          this.mindMap &&
+          this.mindMap.cooperate
+        ) {
+          await this.mindMap.cooperate.revealUid(normalized.nodeId)
+        }
+        return
+      }
+      this.$router.push({ query }).catch(() => {})
+    },
+
+    tryAutoJoin() {
+      const room = roomFromLocation(this.$route)
+      if (typeof window !== 'undefined') {
+        window.__COLLAB_V2_JOIN__ = {
+          room,
+          hasMindMap: !!this.mindMap,
+          connected: this.connected,
+          connecting: this.connecting,
+          useV2: this.useCollabV2 && this.useCollabV2(),
+          autoJoinScheduled: !!this._autoJoinScheduled
+        }
+      }
+      if (!this.mindMap || this.connected || this.connecting) return
       if (!room) return
       if (this._autoJoinScheduled) return
       this._autoJoinScheduled = true
@@ -517,6 +1100,12 @@ export default {
 
     join(options = {}) {
       const silent = !!options.silent
+      if (this.useCollabV2()) {
+        if (this.mindMap && this.mindMap.cooperate && this.roomName) {
+          this.openSavedRoom({ silent, createIfMissing: !silent })
+        }
+        return
+      }
       if (!this.validate() || this.connected || this.connecting) return
       if (
         this.httpCollab ||
@@ -823,19 +1412,16 @@ export default {
     },
 
     startSaveStatusPolling() {
-      this.stopSaveStatusPolling()
+      this.clearSaveStatusTimers()
+      // V1 leftover. Collaboration V2 derives save UI from socket / outbox / ACK.
+      if (this.useCollabV2()) return
       this.loadSaveStatus()
-      // This endpoint only reports persistence state. It must not drive document
-      // synchronization: operation events, reconnect and explicit version-gap
-      // recovery already provide the reliable synchronization path.
-      // Keep it infrequent and single-flight so a slow database cannot create an
-      // ever-growing queue of status requests.
-      this.saveStatusTimer = setInterval(this.loadSaveStatus, 5000)
+      this.saveStatusTimer = setInterval(this.loadSaveStatus, 15000)
       this.syncHttpPresence()
       this.presenceTimer = setInterval(this.syncHttpPresence, 10000)
     },
 
-    stopSaveStatusPolling() {
+    clearSaveStatusTimers() {
       if (this.saveStatusTimer) {
         clearInterval(this.saveStatusTimer)
         this.saveStatusTimer = null
@@ -848,6 +1434,10 @@ export default {
         clearTimeout(this.presenceQuickTimer)
         this.presenceQuickTimer = null
       }
+    },
+
+    stopSaveStatusPolling() {
+      this.clearSaveStatusTimers()
       this.presenceSyncInFlight = false
       this.presenceSyncQueued = false
       this.presenceBackoffUntil = 0
@@ -946,6 +1536,7 @@ export default {
     },
 
     async loadSaveStatus() {
+      if (this.useCollabV2()) return
       if (!this.connected || !this.roomName) return
       const cooperate = this.mindMap && this.mindMap.cooperate
       if (cooperate && (cooperate.httpReplacing || cooperate.httpReplaceInFlight || cooperate.httpSettlingAfterReplace || cooperate.httpHydrating)) {
@@ -967,6 +1558,8 @@ export default {
           this.leave({ silent: true })
           return
         }
+        // UI-only. Never hydrate, flush, markTreeUids, rewrite lastPushed, or
+        // reload SimpleMindMap from this response.
         if (data.status === 'error') {
           this.saveStatus = 'saveError'
           this.saveError = data.error || this.$t('cooperate.saveError')
@@ -995,8 +1588,10 @@ export default {
       }
     },
 
-    syncRoomQuery() {
+    syncRoomQuery(extra = {}) {
       const query = { ...this.$route.query, room: this.roomName }
+      if (extra.focus) query.focus = extra.focus
+      else if (extra.clearFocus) delete query.focus
       this.$router.replace({ query }).catch(() => {})
     },
 
@@ -1043,6 +1638,7 @@ export default {
     },
 
     canUndoHistoryItem(item) {
+      if (!this.roomCanEdit) return false
       if (!item || !item.operationId) return false
       if (item.type === 'operation.undo' || item.type === 'operation.redo') {
         return false
@@ -1149,12 +1745,26 @@ export default {
           isMe: true
         }
       ]
-      this.connectPresenceSocket()
+      if (this.useCollabV2()) {
+        const status =
+          this.collabV2Adapter &&
+          this.collabV2Adapter.getStatus &&
+          this.collabV2Adapter.getStatus()
+        if (!status || status.status !== 'live') {
+          this.connectCollabV2().catch(err => {
+            console.warn('[collab-v2] connect failed, V1 fallback disabled', err)
+          })
+        }
+      } else {
+        this.connectPresenceSocket()
+      }
       this.startSaveStatusPolling()
       // Keep room-entry critical path light: defer secondary HTTP.
       setTimeout(() => {
         this.loadFiles()
-        this.syncHttpPresence()
+        if (!(this.useCollabV2() && this.collabV2Adapter)) {
+          this.syncHttpPresence()
+        }
         this.loadHistory()
       }, 0)
     },
@@ -1180,6 +1790,10 @@ export default {
     },
 
     connectPresenceSocket() {
+      if (this.useCollabV2()) {
+        console.warn('[collab-v2] V1 presence socket disabled')
+        return
+      }
       if (!this.serverUrl || !this.roomName) return
       this.unbindProvider()
       const doc = new Y.Doc()
@@ -1220,6 +1834,7 @@ export default {
     },
 
     enableHttpCollab(preview) {
+      this._httpCollabPreview = preview
       const cooperate = this.mindMap && this.mindMap.cooperate
       const roomKey = this.roomName
       if (!cooperate || !roomKey) return
@@ -1279,6 +1894,28 @@ export default {
 
     async applyPreview(preview, silent) {
       const cooperate = this.mindMap.cooperate
+      if (typeof window !== 'undefined') {
+        window.__COLLAB_V2_APPLY__ = {
+          useV2: this.useCollabV2(),
+          collabV2: getRuntimeConfig().collabV2,
+          hasCooperate: !!cooperate,
+          room: this.roomName
+        }
+      }
+      this.applyAccess(preview)
+      if (this.useCollabV2()) {
+        try {
+          this.ensureCollabV2()
+          if (cooperate && typeof cooperate.setCollabV2Adapter === 'function') {
+            cooperate.setCollabV2Adapter(this.collabV2Adapter)
+          }
+        } catch (err) {
+          if (typeof window !== 'undefined') {
+            window.__COLLAB_V2_BOOT_ERROR__ = String((err && err.stack) || err)
+          }
+          console.error('[collab-v2] adapter init failed', err)
+        }
+      }
       this.enableHttpCollab(preview)
       cooperate.setPreviewApplied(true)
       // Apply canvas data, but do not block room entry on first paint.
@@ -1312,24 +1949,31 @@ export default {
         }
         setTimeout(done, 600)
       })
-      this.markHttpConnected()
       await renderWait
       const renderRoot =
         this.mindMap.renderer && this.mindMap.renderer.renderTree
-      if (renderRoot && typeof cooperate.markTreeUids === 'function') {
-        cooperate.markTreeUids(renderRoot)
-      }
       if (renderRoot && typeof cooperate.seedPreviewHydration === 'function') {
         cooperate.seedPreviewHydration(renderRoot)
       }
       await this.$nextTick()
       cooperate.setPreviewApplied(false)
+      if (this.useCollabV2()) {
+        try {
+          await this.connectCollabV2()
+        } catch (err) {
+          console.warn('[collab-v2] connect failed, V1 fallback disabled', err)
+        }
+      }
+      this.markHttpConnected()
       if (typeof cooperate.scheduleHttpStructureSync === 'function') {
         cooperate.scheduleHttpStructureSync(120)
       }
       if (!silent) {
         this.$message.success(this.$t('cooperate.openSuccess'))
       }
+      this.applyAccess(preview)
+      this.loadMembers()
+      await this.afterMapOpened()
       return true
     },
 
@@ -1359,6 +2003,10 @@ export default {
         try {
           preview = await getFilePreview(roomKey, 2)
         } catch (err) {
+          if (err && (err.statusCode === 403 || err.code === 'FORBIDDEN')) {
+            this.$message.warning(this.$t('acl.noAccess'))
+            return
+          }
           if (!this.isNotFound(err)) throw err
           // Only create when the user explicitly asked for a new room.
           // Auto-creating on join / dialog open produced "未命名" rooms and
@@ -1407,9 +2055,12 @@ export default {
         this.$message.success(this.$t('cooperate.openSuccess'))
         return
       }
-      if (this.connected) this.leave({ silent: true })
+      if (this.connected) {
+        this.persistCurrentMapView()
+        this.leave({ silent: true })
+      }
       this.roomName = item.room_key
-      this.syncRoomQuery()
+      this.syncRoomQuery({ clearFocus: true })
       await this.openSavedRoom({ silent: false })
     },
 
@@ -1459,6 +2110,85 @@ export default {
       } catch (err) {
         if (err === 'cancel' || err === 'close') return
         this.$message.error(err.message || this.$t('cooperate.connectFailed'))
+      }
+    },
+
+    async loadMembers() {
+      if (!this.roomName) {
+        this.memberList = []
+        return
+      }
+      this.membersLoading = true
+      try {
+        const data = await getFileMembers(this.roomName)
+        this.memberList = data.list || []
+        if (data.role || data.canEdit != null) this.applyAccess(data)
+      } catch (err) {
+        this.memberList = []
+      } finally {
+        this.membersLoading = false
+      }
+    },
+
+    async searchMemberUsers() {
+      if (this._memberSearchTimer) clearTimeout(this._memberSearchTimer)
+      if (!this.memberQuery) {
+        this.userHits = []
+        return
+      }
+      this._memberSearchTimer = setTimeout(async () => {
+        this._memberSearchTimer = null
+        const q = this.memberQuery
+        try {
+          const data = await searchUsers(q, 8)
+          if (this.memberQuery !== q) return
+          this.userHits = data.list || []
+        } catch (err) {
+          this.userHits = []
+        }
+      }, 280)
+    },
+
+    async addMember(user, role) {
+      if (!this.roomCanManage || !user || !user.user_id) return
+      this.memberBusy = true
+      try {
+        await addFileMember(this.roomName, user.user_id, role || 'viewer')
+        this.memberQuery = ''
+        this.userHits = []
+        await this.loadMembers()
+        this.$message.success(this.$t('acl.memberAdded'))
+      } catch (err) {
+        this.$message.error(err.message || this.$t('acl.updateFailed'))
+      } finally {
+        this.memberBusy = false
+      }
+    },
+
+    async changeMemberRole(item, role) {
+      if (!this.roomCanManage || !item) return
+      this.memberBusy = true
+      try {
+        await updateFileMember(this.roomName, item.user_id, role)
+        await this.loadMembers()
+      } catch (err) {
+        this.$message.error(err.message || this.$t('acl.updateFailed'))
+      } finally {
+        this.memberBusy = false
+      }
+    },
+
+    async dropMember(item) {
+      if (!this.roomCanManage || !item) return
+      this.memberBusy = true
+      try {
+        await removeFileMember(this.roomName, item.user_id)
+        await this.loadMembers()
+        this.$message.success(this.$t('acl.memberRemoved'))
+      } catch (err) {
+        this.$message.error(err.message || this.$t('acl.updateFailed'))
+      } finally {
+        this.memberBusy = false
       }
     }
   }
@@ -1517,6 +2247,11 @@ export default {
 
     &.saveError {
       color: #dc2626;
+    }
+
+    &.offline,
+    &.reconnecting {
+      color: #d97706;
     }
   }
 
@@ -1656,6 +2391,75 @@ export default {
     padding: 1px 7px;
   }
 
+  .roleTag {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 999px;
+    padding: 1px 7px;
+    color: #4b5563;
+    background: #eef2f6;
+  }
+  .roleTag.owner {
+    color: #1d4ed8;
+    background: #dbeafe;
+  }
+  .roleTag.editor {
+    color: #047857;
+    background: #d1fae5;
+  }
+  .roleTag.viewer {
+    color: #92400e;
+    background: #fef3c7;
+  }
+
+  .memberPanel {
+    margin-bottom: 12px;
+    padding: 12px;
+    border: 1px solid #e6e8eb;
+    border-radius: 10px;
+    background: #fff;
+  }
+  .memberList,
+  .userHits {
+    border: 1px solid #e6e8eb;
+    border-radius: 8px;
+    max-height: 180px;
+    overflow: auto;
+  }
+  .memberItem {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+    .avatar {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #94a3b8;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+    .name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .roleSelect {
+      width: 96px;
+    }
+  }
+  .memberAdd {
+    margin-top: 8px;
+  }
+
   .fileTime {
     font-size: 12px;
     color: #6b7280;
@@ -1742,7 +2546,8 @@ export default {
     }
 
     .filePanel,
-    .historyPanel {
+    .historyPanel,
+    .memberPanel {
       background: #262b30;
       border-color: hsla(0, 0%, 100%, 0.08);
     }

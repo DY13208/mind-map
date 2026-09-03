@@ -23,6 +23,10 @@ function setHyperlink(link, title) {
   this.mindMap.execCommand('SET_NODE_HYPERLINK', this, link, title)
 }
 
+function setMapRef(mapRef) {
+  this.mindMap.execCommand('SET_NODE_MAP_REF', this, mapRef)
+}
+
 //  设置备注
 function setNote(note) {
   this.mindMap.execCommand('SET_NODE_NOTE', this, note)
@@ -59,6 +63,7 @@ export default {
   setImage,
   setIcon,
   setHyperlink,
+  setMapRef,
   setNote,
   setAttachment,
   setTag,

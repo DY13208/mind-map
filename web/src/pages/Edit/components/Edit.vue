@@ -10,6 +10,7 @@
       class="mindMapContainer"
       id="mindMapContainer"
       ref="mindMapContainer"
+      data-testid="mindmap-canvas"
     ></div>
     <Count :mindMap="mindMap" v-if="!isZenMode"></Count>
     <Navigator v-if="mindMap" :mindMap="mindMap"></Navigator>
@@ -54,6 +55,7 @@
     <AiChat v-if="enableAi"></AiChat>
     <NodeAutoExpand v-if="mindMap" :mindMap="mindMap"></NodeAutoExpand>
     <CooperateDialog :mindMap="mindMap"></CooperateDialog>
+    <MapRefDialog></MapRefDialog>
     <div
       class="dragMask"
       v-if="showDragMask"
@@ -114,7 +116,7 @@ import NodeIconSidebar from './NodeIconSidebar.vue'
 import NodeIconToolbar from './NodeIconToolbar.vue'
 import OutlineEdit from './OutlineEdit.vue'
 import { showLoading, hideLoading, updateLoading } from '@/utils/loading'
-import { getSaveStatus } from '@/utils/fileApi'
+import { getSaveStatus as requestSaveStatus } from '@/utils/fileApi'
 import { promiseWithTimeout } from '@/utils/promiseWithTimeout'
 import {
   prepareImportedTree,
@@ -122,6 +124,7 @@ import {
   yieldToUi
 } from '@/utils/importTree'
 import handleClipboardText from '@/utils/handleClipboardText'
+import { getRuntimeConfig } from '@/utils/runtimeConfig'
 import Scrollbar from './Scrollbar.vue'
 import exampleData from 'simple-mind-map/example/exampleData'
 import FormulaSidebar from './FormulaSidebar.vue'
@@ -135,6 +138,7 @@ import AiCreate from './AiCreate.vue'
 import AiChat from './AiChat.vue'
 import NodeAutoExpand from './NodeAutoExpand.vue'
 import CooperateDialog from './CooperateDialog.vue'
+import MapRefDialog from './MapRefDialog.vue'
 
 // 注册插件
 MindMap.usePlugin(MiniMap)
@@ -196,7 +200,8 @@ export default {
     AiCreate,
     AiChat,
     NodeAutoExpand,
-    CooperateDialog
+    CooperateDialog,
+    MapRefDialog
   },
   data() {
     return {
@@ -338,6 +343,9 @@ export default {
     },
 
     handleCreateLineFromActiveNode() {
+      if (this.mindMap.cooperate && this.mindMap.cooperate.ensureActiveSelection) {
+        this.mindMap.cooperate.ensureActiveSelection()
+      }
       this.mindMap.associativeLine.createLineFromActiveNode()
     },
 
@@ -389,9 +397,11 @@ export default {
     startImportProgressPoll(roomKey) {
       this.stopImportProgressPoll()
       if (!roomKey) return
+      // Collaboration V2 save state comes from socket/outbox/ACK, not V1 /save-status.
+      if (getRuntimeConfig().collabV2 !== false) return
       this.importProgressTimer = setInterval(async () => {
         try {
-          const data = await getSaveStatus(roomKey)
+          const data = await requestSaveStatus(roomKey)
           if (!this.importPersistLock) return
           const percent = Number(data.progress)
           const detail =
@@ -516,6 +526,7 @@ export default {
         openRealtimeRenderOnNodeTextEdit: true,
         enableAutoEnterTextEditWhenKeydown: true,
         onlyOneEnableActiveNodeOnCooperate: true,
+        collabV2Only: getRuntimeConfig().collabV2 !== false,
         demonstrateConfig: {
           openBlankMode: false
         },
@@ -631,7 +642,8 @@ export default {
         'demonstrate_jump',
         'exit_demonstrate',
         'node_note_dblclick',
-        'node_mousedown'
+        'node_mousedown',
+        'map_ref_click'
       ].forEach(event => {
         this.mindMap.on(event, (...args) => {
           this.$bus.$emit(event, ...args)
@@ -830,6 +842,24 @@ export default {
 
     // 执行命令
     execCommand(...args) {
+      const name = args[0]
+      const needsSelection = {
+        ADD_GENERALIZATION: true,
+        ADD_OUTER_FRAME: true,
+        INSERT_NODE: true,
+        INSERT_CHILD_NODE: true,
+        INSERT_PARENT_NODE: true,
+        REMOVE_NODE: true,
+        REMOVE_CURRENT_NODE: true,
+        SET_NOTATION: true
+      }
+      if (
+        needsSelection[name] &&
+        this.mindMap.cooperate &&
+        typeof this.mindMap.cooperate.ensureActiveSelection === 'function'
+      ) {
+        this.mindMap.cooperate.ensureActiveSelection()
+      }
       this.mindMap.execCommand(...args)
     },
 
