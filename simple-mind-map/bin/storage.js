@@ -14,15 +14,37 @@ const {
   pickAuthoritativeNodes,
   auditRoomNodesState,
   replaceRoomNodes,
-  readRoomNodes
+  readRoomNodes,
+  searchRoomNodes,
+  readRoomSubtree,
+  resolveRoomRef,
+  listDeletedNodeUids,
+  purgeDeletedNodes,
+  validateNodeGraph
 } = require('./roomNodes')
+const mindDoc = require('./mindDoc')
 
 const pool = new Pool({
   host: process.env.PGHOST,
   port: Number(process.env.PGPORT || 5432),
   database: process.env.PGDATABASE,
   user: process.env.PGUSER,
-  password: process.env.PGPASSWORD
+  password: process.env.PGPASSWORD,
+  application_name: process.env.COLLAB_PG_APP_NAME || 'mind-map-collab',
+  max: Math.max(4, Number(process.env.PGPOOL_MAX || 20)),
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: Math.max(
+    1000,
+    Number(process.env.PGPOOL_CONNECT_TIMEOUT_MS || 8000)
+  )
+})
+
+pool.on('error', err => {
+  console.error(
+    '[pg] idle client error:',
+    err && err.message ? err.message : err,
+    err && err.stack ? err.stack : ''
+  )
 })
 
 const operationEvents = new EventEmitter()
@@ -30,6 +52,69 @@ operationEvents.setMaxListeners(50)
 
 function getPool() {
   return pool
+}
+
+const TRANSIENT_PG_CODES = new Set([
+  '57P01',
+  '57P02',
+  '57P03',
+  '08000',
+  '08003',
+  '08006',
+  '08001',
+  '53300',
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EPIPE'
+])
+
+function isTransientPgError(err) {
+  if (!err) return false
+  const code = String(err.code || err.errno || '')
+  if (TRANSIENT_PG_CODES.has(code)) return true
+  const msg = String(err.message || err)
+  return /Connection terminated|server closed the connection|not queryable|ECONNRESET|ECONNREFUSED|connect ETIMEDOUT|Connection refused/i.test(
+    msg
+  )
+}
+
+async function withPgRetry(fn, options = {}) {
+  const retries = Math.max(
+    0,
+    Number(
+      options.retries != null
+        ? options.retries
+        : process.env.COLLAB_PG_RETRY != null
+          ? process.env.COLLAB_PG_RETRY
+          : 3
+    )
+  )
+  const baseDelayMs = Math.max(
+    20,
+    Number(options.delayMs != null ? options.delayMs : 80)
+  )
+  let lastErr
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn(attempt)
+    } catch (err) {
+      lastErr = err
+      if (!isTransientPgError(err) || attempt >= retries) throw err
+      const wait = baseDelayMs * Math.pow(2, attempt)
+      console.warn(
+        '[pg] retry ' +
+          JSON.stringify({
+            attempt: attempt + 1,
+            wait,
+            code: err.code || undefined,
+            message: err.message
+          })
+      )
+      await new Promise(resolve => setTimeout(resolve, wait))
+    }
+  }
+  throw lastErr
 }
 
 const cos = new COS({
@@ -51,9 +136,28 @@ const saveWorkers = new Map()
 const preloadCache = new Map()
 const deletedRooms = new Set()
 const roomSaveStates = new Map()
+const roomMetaCache = new Map()
+const replacingRooms = new Set()
+const roomReplaceSeq = new Map()
 const MAX_SAVE_CONCURRENCY = 1
 const IDLE_EVICT_MS = 10 * 60 * 1000
 const LARGE_MAP_NODES = 400
+// Building a Y.Doc costs ~4 CRDT objects per node (node map, data map, children
+// array, text) inside one synchronous transaction. Above this size the warmup is
+// slower and heavier than simply reading the authoritative snapshot from PG.
+const LIVE_DOC_MAX_NODES =
+  Number(process.env.COLLAB_LIVE_DOC_MAX_NODES) > 0
+    ? Number(process.env.COLLAB_LIVE_DOC_MAX_NODES)
+    : 2000
+
+function isPresenceDocName(roomKey) {
+  return String(roomKey || '').endsWith('__presence')
+}
+
+/** Once the op-log owns the room (version>0), live Y.Doc must not rewrite nodes. */
+function shouldWriteLiveNodesToPg(pgVersion) {
+  return !(Number(pgVersion) > 0)
+}
 let activeSaves = 0
 const saveGate = []
 const idleTimers = new Map()
@@ -73,7 +177,10 @@ function scheduleIdleEvict(roomKey) {
     setTimeout(() => {
       idleTimers.delete(key)
       const doc = docs.get(key)
-      if (!doc || (doc.conns && doc.conns.size > 0)) return
+      if (!doc || (doc.conns && doc.conns.size > 0)) {
+        if (!doc) preloadCache.delete(key)
+        return
+      }
       queueSave(key, doc)
         .catch(err => {
           console.error('[persist] idle save failed', key, err.message)
@@ -81,15 +188,47 @@ function scheduleIdleEvict(roomKey) {
         .finally(() => {
           const current = docs.get(key)
           if (!current || (current.conns && current.conns.size > 0)) return
-          docs.delete(key)
-          try {
-            current.destroy()
-          } catch (e) {
-            // ignore
-          }
+          destroyMemoryDoc(key)
         })
     }, IDLE_EVICT_MS)
   )
+}
+
+// Drops both the in-memory CRDT doc and the cached snapshot JSON. Without the
+// preloadCache half, every room ever opened stays resident for the process life.
+function destroyMemoryDoc(roomKey) {
+  const key = String(roomKey || '')
+  const doc = docs.get(key)
+  docs.delete(key)
+  preloadCache.delete(key)
+  if (!doc) return
+  try {
+    doc.destroy()
+  } catch (e) {
+    // ignore
+  }
+}
+
+function payloadNodeCount(payload) {
+  if (!payload || payload.type !== 'nodes' || !payload.nodes) return 0
+  return Object.keys(payload.nodes).length
+}
+
+// Evicts a live doc instead of rewriting it. PG stays authoritative, so readers
+// fall back to the snapshot and skip a full CRDT rebuild.
+function dropLiveDoc(roomKey) {
+  const key = String(roomKey || '')
+  const doc = docs.get(key)
+  if (!doc) return false
+  if (doc.conns && doc.conns.size > 0) return false
+  cancelIdleEvict(key)
+  docs.delete(key)
+  try {
+    doc.destroy()
+  } catch (e) {
+    // ignore
+  }
+  return true
 }
 
 function saveDelay(ydoc) {
@@ -145,25 +284,117 @@ function pickLatestTimestamp(a, b) {
   return timestampMs(a) >= timestampMs(b) ? a || b || null : b || a || null
 }
 
-function setSaveState(roomKey, status, error = '') {
-  roomSaveStates.set(roomKey, {
+function setSaveState(roomKey, status, errorOrExtra = '') {
+  const extra =
+    errorOrExtra &&
+    typeof errorOrExtra === 'object' &&
+    !Array.isArray(errorOrExtra)
+      ? errorOrExtra
+      : { error: errorOrExtra }
+  const prev = roomSaveStates.get(roomKey) || {}
+  const next = {
     status,
-    error: error ? String(error) : '',
-    updated_at: new Date().toISOString()
+    error:
+      extra.error != null && extra.error !== ''
+        ? String(extra.error)
+        : status === 'error'
+          ? String(prev.error || '')
+          : '',
+    updated_at: new Date().toISOString(),
+    phase:
+      extra.phase != null
+        ? extra.phase
+        : status === 'saved'
+          ? 'done'
+          : status === 'error'
+            ? 'error'
+            : prev.phase || '',
+    progress:
+      extra.progress != null
+        ? Math.max(0, Math.min(100, Number(extra.progress) || 0))
+        : status === 'saved'
+          ? 100
+          : prev.progress || 0,
+    nodeCount:
+      extra.nodeCount != null ? Number(extra.nodeCount) || 0 : prev.nodeCount || 0,
+    message: extra.message != null ? String(extra.message) : prev.message || ''
+  }
+  roomSaveStates.set(roomKey, next)
+  return next
+}
+
+function rememberRoomMeta(roomKey, meta = {}) {
+  const key = String(roomKey || '')
+  if (!key) return
+  const prev = roomMetaCache.get(key) || {}
+  const version =
+    meta.version != null && Number.isFinite(Number(meta.version))
+      ? Number(meta.version)
+      : prev.version || 0
+  roomMetaCache.set(key, {
+    version,
+    updated_at: meta.updated_at || prev.updated_at || null
   })
 }
 
+function beginRoomReplace(roomKey) {
+  const key = String(roomKey || '')
+  if (replacingRooms.has(key)) {
+    const err = new Error('正在保存整图，请稍候再试')
+    err.statusCode = 409
+    err.code = 'REPLACE_IN_PROGRESS'
+    err.progress = getSaveStatus(key)
+    throw err
+  }
+  replacingRooms.add(key)
+}
+
+function getReplaceSeq(roomKey) {
+  return Number(roomReplaceSeq.get(String(roomKey || '')) || 0)
+}
+
+function endRoomReplace(roomKey, options = {}) {
+  const key = String(roomKey || '')
+  replacingRooms.delete(key)
+  if (options.succeeded) {
+    roomReplaceSeq.set(key, getReplaceSeq(key) + 1)
+  }
+}
+
+function isRoomReplacing(roomKey) {
+  return replacingRooms.has(String(roomKey || ''))
+}
+
+// Read-only in-memory persistence UI. Does not flush, hydrate, mutate rooms,
+// bump versions, or touch collaboration / outbox state.
 function getSaveStatus(roomKey) {
   if (deletedRooms.has(roomKey)) {
-    return { status: 'deleted', error: '', updated_at: new Date().toISOString() }
-  }
-  return (
-    roomSaveStates.get(roomKey) || {
-      status: 'saved',
+    return {
+      status: 'deleted',
       error: '',
-      updated_at: null
+      updated_at: new Date().toISOString(),
+      replacing: false,
+      version: 0,
+      progress: 0,
+      phase: 'deleted'
     }
-  )
+  }
+  const local = roomSaveStates.get(roomKey) || {
+    status: 'saved',
+    error: '',
+    updated_at: null,
+    phase: '',
+    progress: 0,
+    nodeCount: 0,
+    message: ''
+  }
+  const meta = roomMetaCache.get(roomKey) || {}
+  return {
+    ...local,
+    replacing: isRoomReplacing(roomKey),
+    version: Number(meta.version || 0),
+    updated_at: pickLatestTimestamp(meta.updated_at, local.updated_at)
+  }
 }
 
 function isDeletedRoom(roomKey) {
@@ -175,6 +406,9 @@ async function reviveRoom(roomKey) {
   await pool.query('delete from room_tombstones where room_key = $1', [key])
   deletedRooms.delete(key)
   roomSaveStates.delete(key)
+  roomMetaCache.delete(key)
+  replacingRooms.delete(key)
+  roomReplaceSeq.delete(key)
 }
 
 function safeRoomKey(roomKey) {
@@ -301,10 +535,10 @@ function normalizeTitle(title) {
   return String(title || '').trim().slice(0, 80) || '未命名'
 }
 
-async function writeRoomNodeRows(db, roomKey, nodes, version) {
+async function writeRoomNodeRows(db, roomKey, nodes, version, options = {}) {
   if (!nodesDualWriteEnabled()) return { wrote: false, skipped: true }
   if (nodes == null) return { wrote: false, skipped: true }
-  const result = await replaceRoomNodes(db, roomKey, nodes, version)
+  const result = await replaceRoomNodes(db, roomKey, nodes, version, options)
   if (!result.wrote) {
     console.error(
       '[room_nodes] skip invalid graph',
@@ -387,7 +621,7 @@ function backupYjsToCos(roomKey, ydoc) {
 }
 
 async function saveDoc(roomKey, ydoc) {
-  if (isDeletedRoom(roomKey)) return
+  if (isDeletedRoom(roomKey) || isPresenceDocName(roomKey)) return
   if (!ydoc || typeof ydoc.getMap !== 'function' || !ydoc.getMap().size) return
   setSaveState(roomKey, 'saving')
   await acquireSaveSlot()
@@ -395,7 +629,21 @@ async function saveDoc(roomKey, ydoc) {
     if (isDeletedRoom(roomKey) || typeof ydoc.getMap !== 'function') return
     const obj = ydoc.getMap().toJSON()
     if (!obj || !Object.keys(obj).length) return
-    // 当前树快照进 PG。打开大图走这份数据，不再等 COS 灌带历史的 yjs 胀包。
+    const row = await getRoom(roomKey)
+    const pgVersion = Number((row && row.version) || 0)
+    // HTTP op-log is authoritative after version advances. A concurrent live Y.Doc
+    // save (toJSON then upsert) can otherwise clobber a newer insert/update and
+    // make newly added children disappear after refresh.
+    if (!shouldWriteLiveNodesToPg(pgVersion)) {
+      setSaveState(roomKey, 'saved')
+      const nodeCount = Object.keys(obj).length
+      if (nodeCount < LARGE_MAP_NODES) {
+        backupYjsToCos(roomKey, ydoc).catch(err => {
+          console.error('[persist] cos backup failed', roomKey, err.message)
+        })
+      }
+      return
+    }
     await upsertRoom(roomKey, titleFromObj(obj), {
       preserveExistingTitle: true,
       nodes: obj
@@ -448,11 +696,22 @@ async function purgeRoomStorage(roomKey) {
 }
 
 async function persistHotSnapshot(roomKey, ydoc) {
-  if (isDeletedRoom(roomKey) || !ydoc || typeof ydoc.getMap !== 'function') {
+  if (
+    isDeletedRoom(roomKey) ||
+    isPresenceDocName(roomKey) ||
+    !ydoc ||
+    typeof ydoc.getMap !== 'function'
+  ) {
     return
   }
   const size = ydoc.getMap().size
   if (!size) return
+  const row = await getRoom(roomKey)
+  const pgVersion = Number((row && row.version) || 0)
+  if (!shouldWriteLiveNodesToPg(pgVersion)) {
+    setSaveState(roomKey, 'saved')
+    return
+  }
   if (size >= LARGE_MAP_NODES) {
     await pool.query('update rooms set updated_at = now() where room_key = $1', [
       roomKey
@@ -469,9 +728,15 @@ async function persistHotSnapshot(roomKey, ydoc) {
   scheduleSave(roomKey, ydoc)
 }
 
-function getLiveDoc(roomKey) {
+function getMemoryDoc(roomKey) {
   const doc = docs.get(String(roomKey || ''))
-  if (!doc || typeof doc.getMap !== 'function' || !doc.getMap().size) return null
+  if (!doc || typeof doc.getMap !== 'function') return null
+  return doc
+}
+
+function getLiveDoc(roomKey) {
+  const doc = getMemoryDoc(roomKey)
+  if (!doc || !doc.getMap().size) return null
   return doc
 }
 
@@ -539,11 +804,17 @@ async function preloadRoom(roomKey) {
   if (preloadCache.has(roomKey)) return preloadCache.get(roomKey)
   const task = loadPersistedPayload(roomKey)
     .then(payload => {
+      const current = preloadCache.get(roomKey)
+      // A concurrent commit may have written fresher nodes via rememberRoomNodes
+      // while this query was in flight — never clobber that cache entry.
+      if (current !== task && current && typeof current.then !== 'function') {
+        return current
+      }
       preloadCache.set(roomKey, payload)
       return payload
     })
     .catch(err => {
-      preloadCache.delete(roomKey)
+      if (preloadCache.get(roomKey) === task) preloadCache.delete(roomKey)
       throw err
     })
   preloadCache.set(roomKey, task)
@@ -554,9 +825,31 @@ async function ensureDoc(roomKey) {
   const key = String(roomKey || '')
   cancelIdleEvict(key)
   const payload = await preloadRoom(key)
+  const fresh = preloadCache.get(key)
+  const usePayload =
+    fresh && typeof fresh.then !== 'function' ? fresh : payload
   const ydoc = getYDoc(key)
-  if (ydoc.getMap().size === 0) applyPayload(ydoc, payload)
+  if (ydoc.getMap().size === 0) applyPayload(ydoc, usePayload)
   return ydoc
+}
+
+// Opportunistic warmup for the HTTP collab path. Large maps are skipped: their
+// Y.Doc is never used to sync the tree (presence rides a separate doc), so
+// hydrating one would block the event loop and leak hundreds of MB per room.
+async function warmDoc(roomKey) {
+  const key = String(roomKey || '')
+  if (isPresenceDocName(key) || isDeletedRoom(key)) return null
+  if (docs.has(key)) return docs.get(key)
+  const payload = await preloadRoom(key)
+  if (payloadNodeCount(payload) > LIVE_DOC_MAX_NODES) return null
+  const ydoc = await ensureDoc(key)
+  scheduleIdleEvict(key)
+  return ydoc
+}
+
+function isLiveDocAllowed(nodes) {
+  const count = nodes ? Object.keys(nodes).length : 0
+  return count <= LIVE_DOC_MAX_NODES
 }
 
 function shareUrl(roomKey) {
@@ -569,13 +862,22 @@ function shareUrl(roomKey) {
 }
 
 async function getRoom(roomKey) {
-  const res = await pool.query(
-    `select room_key, title, cos_key, version, created_at, updated_at
-     from rooms
-     where room_key = $1`,
-    [roomKey]
-  )
-  return res.rows[0] || null
+  return withPgRetry(async () => {
+    const res = await pool.query(
+      `select room_key, title, cos_key, version, created_at, updated_at
+       from rooms
+       where room_key = $1`,
+      [roomKey]
+    )
+    const row = res.rows[0] || null
+    if (row) {
+      rememberRoomMeta(roomKey, {
+        version: row.version,
+        updated_at: row.updated_at
+      })
+    }
+    return row
+  })
 }
 
 async function nodesFromTableIfCurrent(roomKey, json, version) {
@@ -617,6 +919,277 @@ async function auditRoomNodes(roomKey) {
   }
 }
 
+async function repairRoomNodes(roomKey) {
+  const before = await auditRoomNodes(roomKey)
+  if (!before) return null
+  if (before.ok) {
+    return {
+      repaired: false,
+      ok: true,
+      reason: 'already_consistent',
+      report: before
+    }
+  }
+  const snapshot = await getRoomSnapshot(roomKey)
+  if (!snapshot) return null
+  const table = await readRoomNodes(pool, roomKey)
+  const picked = pickAuthoritativeNodes(snapshot.nodes || {}, table, snapshot.version)
+  const check = validateNodeGraph(picked.nodes || {})
+  if (!check.ok) {
+    return {
+      repaired: false,
+      ok: false,
+      errors: check.errors,
+      report: before
+    }
+  }
+  await pool.query(
+    `update rooms set nodes = $2::jsonb, updated_at = now() where room_key = $1`,
+    [roomKey, JSON.stringify(picked.nodes)]
+  )
+  await replaceRoomNodes(pool, roomKey, picked.nodes, snapshot.version)
+  rememberRoomNodes(roomKey, picked.nodes)
+  const liveDoc = getLiveDoc(roomKey)
+  if (liveDoc) {
+    mindDoc.applyObjectToDoc(liveDoc, picked.nodes, { replace: true })
+  }
+  const after = await auditRoomNodes(roomKey)
+  return {
+    repaired: true,
+    ok: !!(after && after.ok),
+    source: picked.source,
+    nodeCount: check.nodeCount,
+    report: after
+  }
+}
+
+async function forceRoomSnapshot(roomKey) {
+  const snapshot = await getRoomSnapshot(roomKey)
+  if (!snapshot) return null
+  await pool.query(
+    `insert into room_snapshots (room_key, version, nodes)
+     values ($1, $2, $3::jsonb)
+     on conflict (room_key, version) do update set nodes = excluded.nodes`,
+    [roomKey, snapshot.version, JSON.stringify(snapshot.nodes || {})]
+  )
+  return {
+    room_key: roomKey,
+    version: snapshot.version,
+    nodeCount: Object.keys(snapshot.nodes || {}).length
+  }
+}
+
+const OPS_KEEP_BUFFER = Math.max(
+  0,
+  Number(process.env.COLLAB_OPS_KEEP_AFTER_SNAPSHOT || 200)
+)
+const OPS_ARCHIVE_MIN = Math.max(
+  100,
+  Number(process.env.COLLAB_OPS_ARCHIVE_MIN_COUNT || 500)
+)
+
+async function getLatestSnapshotVersion(roomKey) {
+  const res = await pool.query(
+    `select max(version) as version from room_snapshots where room_key = $1`,
+    [roomKey]
+  )
+  if (!res.rows[0] || res.rows[0].version == null) return null
+  return Number(res.rows[0].version)
+}
+
+async function getMinOperationVersion(roomKey) {
+  const res = await pool.query(
+    `select min(version) as version from room_operations where room_key = $1`,
+    [roomKey]
+  )
+  if (!res.rows[0] || res.rows[0].version == null) return null
+  return Number(res.rows[0].version)
+}
+
+async function countArchivableOperations(roomKey, archiveUpTo) {
+  const res = await pool.query(
+    `select count(*)::int as count from room_operations
+     where room_key = $1 and version <= $2`,
+    [roomKey, archiveUpTo]
+  )
+  return res.rows[0] ? Number(res.rows[0].count) : 0
+}
+
+async function getRoomArchiveStats(roomKey) {
+  const version = await getRoomVersion(roomKey)
+  if (version === null) return null
+  const snapshotVersion = await getLatestSnapshotVersion(roomKey)
+  const minVersion = await getMinOperationVersion(roomKey)
+  const archiveUpTo =
+    snapshotVersion == null
+      ? null
+      : Math.max(0, snapshotVersion - OPS_KEEP_BUFFER)
+  const archivable =
+    archiveUpTo == null ? 0 : await countArchivableOperations(roomKey, archiveUpTo)
+  const archivedRes = await pool.query(
+    `select count(*)::int as count, coalesce(max(version), 0) as max_version
+     from room_operations_archive where room_key = $1`,
+    [roomKey]
+  )
+  const activeRes = await pool.query(
+    `select count(*)::int as count from room_operations where room_key = $1`,
+    [roomKey]
+  )
+  return {
+    room_key: roomKey,
+    currentVersion: version,
+    snapshotVersion,
+    minActiveVersion: minVersion,
+    archiveUpTo,
+    archivable,
+    activeCount: activeRes.rows[0] ? Number(activeRes.rows[0].count) : 0,
+    archivedCount: archivedRes.rows[0] ? Number(archivedRes.rows[0].count) : 0,
+    archivedMaxVersion: archivedRes.rows[0]
+      ? Number(archivedRes.rows[0].max_version)
+      : 0
+  }
+}
+
+async function archiveRoomOperations(roomKey, options = {}) {
+  const dryRun = !!options.dryRun
+  const version = await getRoomVersion(roomKey)
+  if (version === null) return null
+  let snapshotVersion = await getLatestSnapshotVersion(roomKey)
+  if (snapshotVersion == null && !dryRun && options.forceSnapshot !== false) {
+    await forceRoomSnapshot(roomKey)
+    snapshotVersion = await getLatestSnapshotVersion(roomKey)
+  }
+  if (snapshotVersion == null) {
+    return {
+      room_key: roomKey,
+      archived: 0,
+      skipped: true,
+      reason: 'no_snapshot'
+    }
+  }
+  const archiveUpTo = Math.max(0, snapshotVersion - OPS_KEEP_BUFFER)
+  const archivable = await countArchivableOperations(roomKey, archiveUpTo)
+  if (archivable < OPS_ARCHIVE_MIN) {
+    return {
+      room_key: roomKey,
+      archived: 0,
+      skipped: true,
+      reason: 'below_threshold',
+      archivable,
+      archiveUpTo,
+      snapshotVersion
+    }
+  }
+  if (dryRun) {
+    return {
+      room_key: roomKey,
+      archived: archivable,
+      dryRun: true,
+      archiveUpTo,
+      snapshotVersion
+    }
+  }
+  const client = await pool.connect()
+  try {
+    await client.query('begin')
+    const inserted = await client.query(
+      `insert into room_operations_archive
+       (room_key, version, operation_id, actor_id, client_id,
+        operation_type, payload, event, inverse_payload, created_at, archived_at)
+       select room_key, version, operation_id, actor_id, client_id,
+              operation_type, payload, event, inverse_payload, created_at, now()
+       from room_operations
+       where room_key = $1 and version <= $2
+       on conflict (room_key, version) do nothing
+       returning version`,
+      [roomKey, archiveUpTo]
+    )
+    await client.query(
+      `delete from room_operations
+       where room_key = $1 and version <= $2`,
+      [roomKey, archiveUpTo]
+    )
+    await client.query('commit')
+    return {
+      room_key: roomKey,
+      archived: inserted.rowCount,
+      archiveUpTo,
+      snapshotVersion,
+      minVersion: (await getMinOperationVersion(roomKey)) || archiveUpTo + 1
+    }
+  } catch (err) {
+    await client.query('rollback').catch(() => {})
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
+async function archiveAllRoomOperations(options = {}) {
+  const rooms = await listRooms()
+  const results = []
+  for (const room of rooms) {
+    try {
+      results.push(await archiveRoomOperations(room.room_key, options))
+    } catch (err) {
+      results.push({
+        room_key: room.room_key,
+        error: err.message
+      })
+    }
+  }
+  return results
+}
+
+function startOperationsArchiver() {
+  const intervalMs = Math.max(
+    60000,
+    Number(process.env.COLLAB_ARCHIVE_INTERVAL_MS || 3600000)
+  )
+  let running = false
+  const tick = async () => {
+    if (running) return
+    running = true
+    try {
+      const results = await archiveAllRoomOperations()
+      const archived = results.filter(item => item && item.archived > 0)
+      if (archived.length) {
+        console.log(`[archive] compressed logs for ${archived.length} room(s)`)
+      }
+      const purged = await purgeDeletedNodes(pool)
+      if (purged.purged > 0) {
+        console.log(
+          `[tombstone] purged ${purged.purged} soft-deleted node(s) older than ${purged.days}d`
+        )
+      }
+    } catch (err) {
+      console.error('[archive] tick failed:', err.message)
+    } finally {
+      running = false
+    }
+  }
+  setTimeout(tick, 30000)
+  return setInterval(tick, intervalMs)
+}
+
+async function getRoomSubtree(roomKey, uid, options = {}) {
+  try {
+    return await readRoomSubtree(pool, roomKey, uid, options)
+  } catch (err) {
+    console.error('[room_nodes] subtree failed', roomKey, err.message)
+    return null
+  }
+}
+
+async function getRoomRef(roomKey, uid) {
+  try {
+    return await resolveRoomRef(pool, roomKey, uid)
+  } catch (err) {
+    console.error('[room_nodes] ref resolve failed', roomKey, err.message)
+    return { exists: false, mapId: roomKey, error: err.message }
+  }
+}
+
 async function getRoomSnapshot(roomKey) {
   const res = await pool.query(
     `select room_key, title, nodes, version, updated_at
@@ -628,6 +1201,10 @@ async function getRoomSnapshot(roomKey) {
   if (!row) return null
   const json = nodesFromJson(row.nodes)
   const version = Number(row.version || 0)
+  rememberRoomMeta(roomKey, {
+    version,
+    updated_at: row.updated_at
+  })
   const fromTable = await nodesFromTableIfCurrent(roomKey, json, version)
   if (!fromTable && json && nodesDualWriteEnabled()) {
     writeRoomNodeRows(pool, roomKey, json, version).catch(err => {
@@ -647,6 +1224,7 @@ function attachPersistence() {
   setPersistence({
     bindState: (docName, ydoc) => {
       const roomKey = decodeURIComponent(docName)
+      if (isPresenceDocName(roomKey)) return
       const cached = preloadCache.get(roomKey)
       const payload =
         cached && typeof cached.then !== 'function' ? cached : null
@@ -654,16 +1232,24 @@ function attachPersistence() {
       preloadCache.delete(roomKey)
       ydoc.on('update', () => scheduleSave(roomKey, ydoc))
       if (payload && payload.type === 'yjs' && obj) {
-        upsertRoom(roomKey, titleFromObj(obj), {
-          preserveExistingTitle: true,
-          nodes: obj
-        }).catch(err => {
-          console.error('[persist] pg snapshot failed', roomKey, err.message)
-        })
+        getRoom(roomKey)
+          .then(row => {
+            if (!shouldWriteLiveNodesToPg(Number((row && row.version) || 0))) {
+              return null
+            }
+            return upsertRoom(roomKey, titleFromObj(obj), {
+              preserveExistingTitle: true,
+              nodes: obj
+            })
+          })
+          .catch(err => {
+            console.error('[persist] pg snapshot failed', roomKey, err.message)
+          })
       }
     },
     writeState: async (docName, ydoc) => {
       const roomKey = decodeURIComponent(docName)
+      if (isPresenceDocName(roomKey)) return
       const timer = saveTimers.get(roomKey)
       if (timer) {
         clearTimeout(timer)
@@ -705,6 +1291,15 @@ async function initSchemaOnce() {
   `)
   await pool.query(`
     alter table rooms add column if not exists version bigint not null default 0
+  `)
+  await pool.query(`
+    alter table rooms add column if not exists metadata jsonb
+  `)
+  // Serves the collaboration room list without a full-table sort as the number
+  // of saved rooms grows.  The primary key already covers single-room reads.
+  await pool.query(`
+    create index if not exists rooms_updated_at_desc_idx
+    on rooms(updated_at desc)
   `)
   await pool.query(`
     create table if not exists room_operations (
@@ -788,17 +1383,80 @@ async function initSchemaOnce() {
       primary key (room_key, version)
     )
   `)
+  await pool.query(`
+    create table if not exists room_operations_archive (
+      room_key text not null,
+      version bigint not null,
+      operation_id uuid not null,
+      actor_id text not null,
+      client_id text,
+      operation_type text not null,
+      payload jsonb not null default '{}'::jsonb,
+      event jsonb not null default '{}'::jsonb,
+      inverse_payload jsonb,
+      created_at timestamptz not null,
+      archived_at timestamptz not null default now(),
+      primary key (room_key, version)
+    )
+  `)
+  await pool.query(`
+    create index if not exists room_operations_archive_lookup_idx
+    on room_operations_archive(room_key, version)
+  `)
   const tombstones = await pool.query('select room_key from room_tombstones')
   tombstones.rows.forEach(row => deletedRooms.add(row.room_key))
+  const roomAcl = require('./roomAcl')
+  await roomAcl.initSchema(pool)
+  await roomAcl.migrateLegacyOwners(pool)
+  const collabV2Schema = require('./collabV2/schema')
+  await collabV2Schema.initCollabV2Schema(pool)
 }
 
 async function listRooms() {
   const res = await pool.query(
-    `select room_key, title, cos_key, version, created_at, updated_at
-     from rooms
-     order by updated_at desc`
+    `select r.room_key, r.title, r.cos_key, r.version, r.created_at, r.updated_at
+     from rooms r
+     left join room_tombstones t on t.room_key = r.room_key
+     where t.room_key is null
+     order by r.updated_at desc`
   )
-  return res.rows
+  return res.rows.filter(row => !deletedRooms.has(row.room_key))
+}
+
+async function listRoomsPage(options = {}) {
+  const safeLimit = Math.min(100, Math.max(1, Number(options.limit) || 20))
+  const safeOffset = Math.max(0, Number(options.offset) || 0)
+  const query = String(options.q || '').trim()
+  const params = []
+  let where = 't.room_key is null'
+  if (query) {
+    params.push('%' + query.replace(/[%_\\]/g, ch => '\\' + ch) + '%')
+    where += ` and r.title ilike $${params.length} escape '\\'`
+  }
+  const countRes = await pool.query(
+    `select count(*)::int as total
+     from rooms r
+     left join room_tombstones t on t.room_key = r.room_key
+     where ${where}`,
+    params
+  )
+  const listParams = params.slice()
+  listParams.push(safeLimit, safeOffset)
+  const listRes = await pool.query(
+    `select r.room_key, r.title, r.cos_key, r.version, r.created_at, r.updated_at
+     from rooms r
+     left join room_tombstones t on t.room_key = r.room_key
+     where ${where}
+     order by r.updated_at desc
+     limit $${listParams.length - 1} offset $${listParams.length}`,
+    listParams
+  )
+  return {
+    list: listRes.rows.filter(row => !deletedRooms.has(row.room_key)),
+    total: Number((countRes.rows[0] && countRes.rows[0].total) || 0),
+    limit: safeLimit,
+    offset: safeOffset
+  }
 }
 
 async function renameRoom(roomKey, title) {
@@ -820,6 +1478,8 @@ function operationRow(row) {
     operation_id: row.operation_id,
     actor_id: row.actor_id,
     client_id: row.client_id || '',
+    client_seq: row.client_seq == null ? null : Number(row.client_seq),
+    target_id: row.target_id || '',
     operation_type: row.operation_type,
     payload: row.payload || {},
     event: row.event || {},
@@ -829,141 +1489,370 @@ function operationRow(row) {
 }
 
 async function commitRoomOperation(roomKey, command, apply) {
-  const client = await pool.connect()
-  try {
-    await client.query('begin')
-    const roomResult = await client.query(
-      `select room_key, title, nodes, version, updated_at
-       from rooms where room_key = $1 for update`,
-      [roomKey]
-    )
-    const room = roomResult.rows[0]
-    if (!room) {
-      const err = new Error('not found')
-      err.statusCode = 404
+  return withPgRetry(async () => {
+    const client = await pool.connect()
+    try {
+      return await commitRoomOperationOnce(client, roomKey, command, apply)
+    } catch (err) {
+      await client.query('rollback').catch(() => {})
       throw err
+    } finally {
+      client.release()
     }
-    const existing = await client.query(
-      `select room_key, version, operation_id, actor_id, client_id,
-              operation_type, payload, event, inverse_payload, created_at
-       from room_operations
-       where room_key = $1 and operation_id = $2`,
-      [roomKey, command.operationId]
-    )
-    if (existing.rows[0]) {
-      await client.query('commit')
-      return { duplicate: true, operation: operationRow(existing.rows[0]) }
-    }
-    const currentVersion = Number(room.version || 0)
-    if (
-      command.baseVersion !== null &&
-      command.baseVersion !== undefined &&
-      Number(command.baseVersion) > currentVersion
-    ) {
-      const err = new Error('baseVersion不能大于房间当前版本')
-      err.statusCode = 409
-      err.code = 'VERSION_AHEAD'
+  })
+}
+
+async function commitDirectRoomOperation(roomKey, command, apply) {
+  return withPgRetry(async () => {
+    const client = await pool.connect()
+    try {
+      return await commitDirectRoomOperationOnce(client, roomKey, command, apply)
+    } catch (err) {
+      await client.query('rollback').catch(() => {})
       throw err
+    } finally {
+      client.release()
     }
-    const json = nodesFromJson(room.nodes) || {}
-    const table = await readRoomNodes(client, roomKey)
-    const picked = pickAuthoritativeNodes(json, table, currentVersion)
-    const applied = await apply({
-      room: { ...room, nodes: picked.nodes },
-      currentVersion
+  })
+}
+
+async function commitDirectRoomOperationOnce(client, roomKey, command, apply) {
+  await client.query('begin')
+  const roomResult = await client.query(
+    `select room_key, title, version, updated_at, metadata
+     from rooms where room_key = $1 for update`,
+    [roomKey]
+  )
+  const room = roomResult.rows[0]
+  if (!room) {
+    const err = new Error('not found')
+    err.statusCode = 404
+    throw err
+  }
+  const existing = await client.query(
+    `select room_key, version, operation_id, actor_id, client_id,
+            operation_type, payload, event, inverse_payload, created_at,
+            client_seq, target_id
+     from room_operations
+     where room_key = $1 and operation_id = $2`,
+    [roomKey, command.operationId]
+  )
+  if (existing.rows[0]) {
+    await client.query('commit')
+    const operation = operationRow(existing.rows[0])
+    rememberRoomMeta(roomKey, {
+      version: operation.version,
+      updated_at: operation.created_at
     })
-    const version = currentVersion + 1
-    const event = {
-      ...(applied.event || {}),
+    return { duplicate: true, operation }
+  }
+  const currentVersion = Number(room.version || 0)
+  if (
+    command.baseVersion !== null &&
+    command.baseVersion !== undefined &&
+    Number(command.baseVersion) > currentVersion
+  ) {
+    const err = new Error('baseVersion不能大于房间当前版本')
+    err.statusCode = 409
+    err.code = 'VERSION_AHEAD'
+    err.currentVersion = currentVersion
+    err.details = {
+      opId: command.operationId,
+      baseVersion: Number(command.baseVersion),
+      baseRevision: Number(command.baseVersion),
+      currentVersion,
+      roomCurrentRevision: currentVersion
+    }
+    throw err
+  }
+  const applied = await apply({
+    client,
+    room,
+    currentVersion
+  })
+  const version = currentVersion + 1
+  const event = {
+    ...(applied.event || {}),
+    mapId: roomKey,
+    version,
+    operationId: command.operationId,
+    actorId: command.actorId
+  }
+  await client.query(
+    `update rooms
+     set version = $2,
+         title = coalesce($3, title),
+         metadata = coalesce($4::jsonb, metadata),
+         updated_at = now()
+     where room_key = $1`,
+    [
+      roomKey,
+      version,
+      applied.title ? String(applied.title).trim().slice(0, 80) : null,
+      applied.metadata ? JSON.stringify(applied.metadata) : null
+    ]
+  )
+  const inserted = await client.query(
+    `insert into room_operations
+     (room_key, version, operation_id, actor_id, client_id,
+      operation_type, payload, event, inverse_payload, client_seq, target_id)
+     values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11)
+     returning room_key, version, operation_id, actor_id, client_id,
+               operation_type, payload, event, inverse_payload, created_at,
+               client_seq, target_id`,
+    [
+      roomKey,
+      version,
+      command.operationId,
+      command.actorId,
+      command.clientId || null,
+      command.type,
+      JSON.stringify(command.payload || {}),
+      JSON.stringify(event),
+      applied.inversePayload == null
+        ? null
+        : JSON.stringify(applied.inversePayload),
+      Number.isFinite(Number(command.payload && command.payload.clientSeq))
+        ? Number(command.payload.clientSeq)
+        : null,
+      (command.payload && (command.payload.uid || command.payload.targetId)) ||
+        null
+    ]
+  )
+  await client.query(
+    `insert into room_outbox (room_key, version, event)
+     values ($1, $2, $3::jsonb)
+     on conflict (room_key, version) do nothing`,
+    [roomKey, version, JSON.stringify(event)]
+  )
+  await client.query('select pg_notify($1, $2)', [
+    'collab_events',
+    JSON.stringify({
+      type: 'event',
       mapId: roomKey,
       version,
-      operationId: command.operationId,
-      actorId: command.actorId
+      operationId: command.operationId
+    }).slice(0, 7900)
+  ])
+  if (process.env.COLLAB_FAULT_INJECT === 'before_commit_once') {
+    process.env.COLLAB_FAULT_INJECT = ''
+    const err = new Error('injected fault before commit')
+    err.statusCode = 500
+    err.code = 'FAULT_INJECTED'
+    throw err
+  }
+  await client.query('commit')
+  const operation = operationRow(inserted.rows[0])
+  rememberRoomMeta(roomKey, {
+    version,
+    updated_at: operation.created_at || new Date().toISOString()
+  })
+  setImmediate(() => {
+    operationEvents.emit('committed', {
+      roomKey,
+      version,
+      operation
+    })
+  })
+  return {
+    duplicate: false,
+    operation,
+    result: applied.result || {},
+    queryStats: applied.queryStats || null
+  }
+}
+
+async function commitRoomOperationOnce(client, roomKey, command, apply) {
+  await client.query('begin')
+  const roomResult = await client.query(
+    `select room_key, title, nodes, version, updated_at
+     from rooms where room_key = $1 for update`,
+    [roomKey]
+  )
+  const room = roomResult.rows[0]
+  if (!room) {
+    const err = new Error('not found')
+    err.statusCode = 404
+    throw err
+  }
+  const existing = await client.query(
+    `select room_key, version, operation_id, actor_id, client_id,
+            operation_type, payload, event, inverse_payload, created_at,
+            client_seq, target_id
+     from room_operations
+     where room_key = $1 and operation_id = $2`,
+    [roomKey, command.operationId]
+  )
+  if (existing.rows[0]) {
+    await client.query('commit')
+    const operation = operationRow(existing.rows[0])
+    rememberRoomMeta(roomKey, {
+      version: operation.version,
+      updated_at: operation.created_at
+    })
+    return { duplicate: true, operation }
+  }
+  const currentVersion = Number(room.version || 0)
+  if (
+    command.baseVersion !== null &&
+    command.baseVersion !== undefined &&
+    Number(command.baseVersion) > currentVersion
+  ) {
+    const err = new Error('baseVersion不能大于房间当前版本')
+    err.statusCode = 409
+    err.code = 'VERSION_AHEAD'
+    err.currentVersion = currentVersion
+    err.details = {
+      opId: command.operationId,
+      baseVersion: Number(command.baseVersion),
+      baseRevision: Number(command.baseVersion),
+      currentVersion,
+      roomCurrentRevision: currentVersion
     }
-    const snapshot = snapshotNodesForStorage(applied.nodes || {})
-    await writeRoomNodeRows(client, roomKey, snapshot, version)
+    throw err
+  }
+  const json = nodesFromJson(room.nodes) || {}
+  const table = await readRoomNodes(client, roomKey)
+  const picked = pickAuthoritativeNodes(json, table, currentVersion)
+  const allowRestore =
+    command.type === 'node.restore' ||
+    command.type === 'operation.undo' ||
+    command.type === 'operation.redo' ||
+    command.type === 'map.replace'
+  const deletedUids =
+    command.type === 'map.replace'
+      ? new Set()
+      : await listDeletedNodeUids(client, roomKey)
+  const applied = await apply({
+    room: { ...room, nodes: picked.nodes },
+    currentVersion,
+    deletedUids,
+    allowUidReuse: allowRestore,
+    client
+  })
+  const version = currentVersion + 1
+  const event = {
+    ...(applied.event || {}),
+    mapId: roomKey,
+    version,
+    operationId: command.operationId,
+    actorId: command.actorId
+  }
+  const snapshot = snapshotNodesForStorage(applied.nodes || {})
+  const affectedUids = (event.affectedUids || []).filter(Boolean)
+  const incrementalWrite =
+    (command.type === 'node.update' ||
+      command.type === 'node.move' ||
+      command.type === 'node.reorder' ||
+      command.type === 'node.insert') &&
+    affectedUids.length > 0 &&
+    affectedUids.length <= 20
+  await writeRoomNodeRows(client, roomKey, snapshot, version, {
+    allowRestore,
+    ...(incrementalWrite ? { onlyUids: affectedUids } : {})
+  })
+  const snapshotNodeCount = Object.keys(snapshot).length
+  const roomsJsonPayload =
+    nodesTableAuthorityEnabled() &&
+    nodesDualWriteEnabled() &&
+    snapshotNodeCount >= LARGE_MAP_NODES &&
+    snapshot.root
+      ? JSON.stringify({ root: snapshot.root })
+      : JSON.stringify(snapshot)
+  await client.query(
+    `update rooms
+     set nodes = $2::jsonb,
+         version = $3,
+         title = coalesce($4, title),
+         updated_at = now()
+     where room_key = $1`,
+    [
+      roomKey,
+      roomsJsonPayload,
+      version,
+      applied.title ? String(applied.title).trim().slice(0, 80) : null
+    ]
+  )
+  const inserted = await client.query(
+    `insert into room_operations
+     (room_key, version, operation_id, actor_id, client_id,
+      operation_type, payload, event, inverse_payload, client_seq, target_id)
+     values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11)
+     returning room_key, version, operation_id, actor_id, client_id,
+               operation_type, payload, event, inverse_payload, created_at,
+               client_seq, target_id`,
+    [
+      roomKey,
+      version,
+      command.operationId,
+      command.actorId,
+      command.clientId || null,
+      command.type,
+      JSON.stringify(command.payload || {}),
+      JSON.stringify(event),
+      applied.inversePayload == null
+        ? null
+        : JSON.stringify(applied.inversePayload),
+      Number.isFinite(Number(command.payload && command.payload.clientSeq))
+        ? Number(command.payload.clientSeq)
+        : null,
+      (command.payload && (command.payload.uid || command.payload.targetId)) ||
+        null
+    ]
+  )
+  await client.query(
+    `insert into room_outbox (room_key, version, event)
+     values ($1, $2, $3::jsonb)
+     on conflict (room_key, version) do nothing`,
+    [roomKey, version, JSON.stringify(event)]
+  )
+  const snapshotEvery = Math.max(
+    1,
+    Number(process.env.COLLAB_SNAPSHOT_EVERY || 100)
+  )
+  if (version === 1 || version % snapshotEvery === 0) {
     await client.query(
-      `update rooms
-       set nodes = $2::jsonb,
-           version = $3,
-           title = coalesce($4, title),
-           updated_at = now()
-       where room_key = $1`,
-      [
-        roomKey,
-        JSON.stringify(snapshot),
-        version,
-        applied.title ? String(applied.title).trim().slice(0, 80) : null
-      ]
-    )
-    const inserted = await client.query(
-      `insert into room_operations
-       (room_key, version, operation_id, actor_id, client_id,
-        operation_type, payload, event, inverse_payload)
-       values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb)
-       returning room_key, version, operation_id, actor_id, client_id,
-                 operation_type, payload, event, inverse_payload, created_at`,
-      [
-        roomKey,
-        version,
-        command.operationId,
-        command.actorId,
-        command.clientId || null,
-        command.type,
-        JSON.stringify(command.payload || {}),
-        JSON.stringify(event),
-        applied.inversePayload == null
-          ? null
-          : JSON.stringify(applied.inversePayload)
-      ]
-    )
-    await client.query(
-      `insert into room_outbox (room_key, version, event)
+      `insert into room_snapshots (room_key, version, nodes)
        values ($1, $2, $3::jsonb)
        on conflict (room_key, version) do nothing`,
-      [roomKey, version, JSON.stringify(event)]
+      [roomKey, version, JSON.stringify(snapshot)]
     )
-    const snapshotEvery = Math.max(
-      1,
-      Number(process.env.COLLAB_SNAPSHOT_EVERY || 100)
-    )
-    if (version === 1 || version % snapshotEvery === 0) {
-      await client.query(
-        `insert into room_snapshots (room_key, version, nodes)
-         values ($1, $2, $3::jsonb)
-         on conflict (room_key, version) do nothing`,
-        [roomKey, version, JSON.stringify(snapshot)]
-      )
-    }
-    await client.query('select pg_notify($1, $2)', [
-      'collab_events',
-      JSON.stringify({
-        type: 'event',
-        mapId: roomKey,
-        version,
-        operationId: command.operationId
-      }).slice(0, 7900)
-    ])
-    await client.query('commit')
-    const operation = operationRow(inserted.rows[0])
-    setImmediate(() => {
-      operationEvents.emit('committed', {
-        roomKey,
-        version,
-        operation
-      })
-    })
-    return {
-      duplicate: false,
-      operation,
-      result: applied.result || {},
-      nodes: snapshot
-    }
-  } catch (err) {
-    await client.query('rollback').catch(() => {})
+  }
+  await client.query('select pg_notify($1, $2)', [
+    'collab_events',
+    JSON.stringify({
+      type: 'event',
+      mapId: roomKey,
+      version,
+      operationId: command.operationId
+    }).slice(0, 7900)
+  ])
+  // Test-only: abort before COMMIT so PG rolls back ops + outbox + notify.
+  if (process.env.COLLAB_FAULT_INJECT === 'before_commit_once') {
+    process.env.COLLAB_FAULT_INJECT = ''
+    const err = new Error('injected fault before commit')
+    err.statusCode = 500
+    err.code = 'FAULT_INJECTED'
     throw err
-  } finally {
-    client.release()
+  }
+  await client.query('commit')
+  const operation = operationRow(inserted.rows[0])
+  rememberRoomMeta(roomKey, {
+    version,
+    updated_at: operation.created_at || new Date().toISOString()
+  })
+  setImmediate(() => {
+    operationEvents.emit('committed', {
+      roomKey,
+      version,
+      operation
+    })
+  })
+  return {
+    duplicate: false,
+    operation,
+    result: applied.result || {},
+    nodes: snapshot
   }
 }
 
@@ -978,7 +1867,8 @@ async function getRoomVersion(roomKey) {
 async function getRoomOperation(roomKey, operationId) {
   const res = await pool.query(
     `select room_key, version, operation_id, actor_id, client_id,
-            operation_type, payload, event, inverse_payload, created_at
+            operation_type, payload, event, inverse_payload, created_at,
+            client_seq, target_id
      from room_operations
      where room_key = $1 and operation_id = $2`,
     [roomKey, operationId]
@@ -991,7 +1881,8 @@ async function listRoomOperations(roomKey, afterVersion = 0, limit = 500, option
   const after = Math.max(0, Number(afterVersion) || 0)
   const params = [roomKey, after, safeLimit]
   let sql = `select room_key, version, operation_id, actor_id, client_id,
-                    operation_type, payload, event, inverse_payload, created_at
+                    operation_type, payload, event, inverse_payload, created_at,
+                    client_seq, target_id
              from room_operations
              where room_key = $1 and version > $2`
   if (options.actorId) {
@@ -1072,10 +1963,31 @@ function sendJson(res, code, data) {
   res.end(body)
 }
 
-function readBody(req) {
+function readBody(req, options = {}) {
+  const maxBytes = Number(options.maxBytes)
+  const limit =
+    Number.isFinite(maxBytes) && maxBytes > 0
+      ? maxBytes
+      : Number(process.env.COLLAB_MAX_BODY_BYTES || 2 * 1024 * 1024)
   return new Promise((resolve, reject) => {
     const chunks = []
-    req.on('data', chunk => chunks.push(chunk))
+    let size = 0
+    req.on('data', chunk => {
+      size += chunk.length
+      if (size > limit) {
+        const err = new Error(`请求体过大（最多 ${limit} 字节）`)
+        err.statusCode = 413
+        err.code = 'BODY_TOO_LARGE'
+        reject(err)
+        try {
+          req.destroy()
+        } catch (e) {
+          // ignore
+        }
+        return
+      }
+      chunks.push(chunk)
+    })
     req.on('end', () => {
       const raw = Buffer.concat(chunks).toString('utf8')
       if (!raw) return resolve({})
@@ -1101,7 +2013,38 @@ async function handleApi(req, res) {
     return true
   }
   const mindApi = require('./mindApi')
-  return mindApi.handleApi(req, res)
+  const started = Date.now()
+  const path = String((req.url || '').split('?')[0] || '')
+  try {
+    return await mindApi.handleApi(req, res)
+  } catch (err) {
+    console.error(
+      '[api] ERROR ' +
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          method: req.method,
+          path,
+          code: err && err.code,
+          message: (err && err.message) || String(err),
+          durationMs: Date.now() - started
+        })
+    )
+    if (err && err.stack) console.error(err.stack)
+    throw err
+  } finally {
+    const durationMs = Date.now() - started
+    if (durationMs >= 1500) {
+      console.warn(
+        '[api] slow ' +
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            method: req.method,
+            path,
+            durationMs
+          })
+      )
+    }
+  }
 }
 
 module.exports = {
@@ -1109,11 +2052,18 @@ module.exports = {
   attachPersistence,
   preloadRoom,
   ensureDoc,
+  warmDoc,
+  dropLiveDoc,
+  isLiveDocAllowed,
+  LIVE_DOC_MAX_NODES,
   handleApi,
   safeRoomKey,
   listRooms,
+  listRoomsPage,
   getRoom,
   getRoomSnapshot,
+  getRoomSubtree,
+  getRoomRef,
   renameRoom,
   removeRoom,
   saveDoc,
@@ -1122,6 +2072,12 @@ module.exports = {
   readBody,
   shareUrl,
   getSaveStatus,
+  setSaveState,
+  rememberRoomMeta,
+  beginRoomReplace,
+  endRoomReplace,
+  isRoomReplacing,
+  getReplaceSeq,
   isDeletedRoom,
   reviveRoom,
   queueSave,
@@ -1130,21 +2086,38 @@ module.exports = {
   scheduleSave,
   persistHotSnapshot,
   getLiveDoc,
+  getMemoryDoc,
   getLiveObject,
   invalidateRoomCache,
   rememberRoomNodes,
+  shouldWriteLiveNodesToPg,
+  isPresenceDocName,
   applyPayload,
   payloadToObject,
   pickLatestTimestamp,
   commitRoomOperation,
+  commitDirectRoomOperation,
+  isTransientPgError,
+  withPgRetry,
   getRoomVersion,
   listRoomOperations,
   getRoomOperation,
   getNearestSnapshot,
   auditRoomNodes,
+  repairRoomNodes,
+  forceRoomSnapshot,
+  getMinOperationVersion,
+  getRoomArchiveStats,
+  archiveRoomOperations,
+  archiveAllRoomOperations,
+  startOperationsArchiver,
+  purgeDeletedNodes: options => purgeDeletedNodes(pool, options),
+  listDeletedNodeUids: roomKey => listDeletedNodeUids(pool, roomKey),
   getPool,
   operationEvents,
   readRoomNodes: roomKey => readRoomNodes(pool, roomKey),
+  searchRoomNodes: (roomKey, query, options) =>
+    searchRoomNodes(pool, roomKey, query, options),
   replaceRoomNodes: (roomKey, nodes, version) =>
     replaceRoomNodes(pool, roomKey, nodes, version)
 }

@@ -68,7 +68,9 @@ async function replayOutbox(pool = getPool(), options = {}) {
   if (options.id) {
     const res = await pool.query(
       `update room_outbox
-       set available_at = now(), last_error = null
+       set published_at = null,
+           available_at = now(),
+           last_error = null
        where id = $1
        returning id`,
       [Number(options.id)]
@@ -78,7 +80,9 @@ async function replayOutbox(pool = getPool(), options = {}) {
   if (options.roomKey && options.version != null) {
     const res = await pool.query(
       `update room_outbox
-       set available_at = now(), last_error = null
+       set published_at = null,
+           available_at = now(),
+           last_error = null
        where room_key = $1 and version = $2
        returning id`,
       [options.roomKey, Number(options.version)]
@@ -102,6 +106,9 @@ function fanoutDocumentChange(payload) {
   const now = Date.now()
   const prev = recentFanout.get(key)
   if (prev && now - prev < 8000) return
+  const createdAt = payload && payload.created_at
+    ? Date.parse(payload.created_at)
+    : 0
   recentFanout.set(key, now)
   if (recentFanout.size > 2000) {
     recentFanout.forEach((ts, item) => {
@@ -121,12 +128,18 @@ function fanoutDocumentChange(payload) {
   names.forEach(name => {
     const doc = docs.get(name)
     if (!doc || !doc.awareness) return
-    const prev = doc.awareness.getLocalState() || {}
+    const prevState = doc.awareness.getLocalState() || {}
     doc.awareness.setLocalState({
-      ...prev,
+      ...prevState,
       documentChange: change
     })
   })
+  try {
+    const { recordBroadcast } = require('./collabMetrics')
+    recordBroadcast(createdAt ? Math.max(0, now - createdAt) : 0)
+  } catch (err) {
+    // ignore metrics failures
+  }
 }
 
 async function flushOutbox(pool, bus) {

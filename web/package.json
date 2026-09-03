@@ -24,6 +24,7 @@
     "pg": "^8.23.0",
     "simple-mind-map": "^0.14.0-fix.3",
     "simple-mind-map-plugin-themes": "^1.0.0",
+    "socket.io-client": "^4.8.1",
     "v-viewer": "^1.6.4",
     "vue": "^2.6.11",
     "vue-i18n": "^8.27.2",

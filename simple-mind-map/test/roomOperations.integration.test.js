@@ -534,6 +534,16 @@ async function testUndoAndHistoricalSnapshot(roomKey) {
   assert.strictEqual(replay.response.status, 409)
   assert.strictEqual(replay.data.code, 'ALREADY_UNDONE')
 
+  const redone = await request(
+    `/api/maps/${encodeURIComponent(roomKey)}/operations/${secondId}/redo`,
+    { method: 'POST', body: JSON.stringify({}) }
+  )
+  assert.strictEqual(redone.response.status, 201, redone.data.error)
+  assert.strictEqual(redone.data.event.type, 'operation.redone')
+  const afterRedo = await serverNodes(roomKey)
+  assert.ok(afterRedo.nodes.gone)
+  assert.strictEqual(afterRedo.version, 4)
+
   const historical = await request(
     `/api/maps/${encodeURIComponent(roomKey)}/snapshot?version=1&depth=2`
   )
@@ -557,14 +567,15 @@ async function testUndoAndHistoricalSnapshot(roomKey) {
   assert.strictEqual(sibling.response.status, 201, sibling.data.error)
   const afterKeep = await serverNodes(roomKey)
   assert.ok(!afterKeep.nodes.keep)
-  assert.ok(!afterKeep.nodes.gone)
-  assert.strictEqual(afterKeep.version, 4)
+  assert.ok(afterKeep.nodes.gone)
+  assert.strictEqual(afterKeep.version, 5)
 
   const audit = await request(
     `/api/maps/${encodeURIComponent(roomKey)}/audit?limit=10`
   )
   assert.strictEqual(audit.response.status, 200, audit.data.error)
   assert.ok(audit.data.items.some(item => item.type === 'operation.undo'))
+  assert.ok(audit.data.items.some(item => item.type === 'operation.redo'))
   assert.ok(audit.data.items.some(item => item.operationId === secondId))
 }
 

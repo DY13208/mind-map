@@ -88,7 +88,27 @@ export default {
     enableAutoEnterTextEditWhenKeydown: '鍵盤輸入時自動進入文本編輯',
     enableInheritAncestorLineStyle: '節點連線樣式繼承祖先節點的樣式',
     alwaysShowExpandBtn: '是否壹直顯示展開收起按鈕',
-    enableAi: '是否開啓AI功能'
+    enableAi: '是否開啓AI功能',
+    workbuddyModel: 'WorkBuddy 模型',
+    workbuddyModelPlaceholder: '選擇模型',
+    workbuddyModelRefresh: '刷新列表',
+    workbuddyModelPlatform: '平台模型',
+    workbuddyModelCustom: '自定義模型',
+    workbuddyModelCustomTag: '自定義',
+    workbuddyModelUnavailable: 'WorkBuddy 未就緒，無法載入模型列表',
+    workbuddyModelLoadFailed: '載入模型列表失敗',
+    flowExpandConcurrency: '補齊並發數',
+    flowExpandConcurrencyTip: '同時運行的補齊任務數，建議 1-3（對應 WorkBuddy 多會話）'
+  },
+  flowExpand: {
+    enqueued: '已加入補齊隊列',
+    cancelQueue: '取消',
+    queueHint: '還有 {count} 個任務排隊中',
+    panelTitle: '補齊隊列',
+    summary: '執行 {running} · 排隊 {queued} · 並發 {concurrency}',
+    runningSlot: '執行 #{slot}',
+    queuedSlot: '排隊 #{index}',
+    done: '已完成'
   },
   color: {
     moreColor: '更多顏色'
@@ -141,7 +161,9 @@ export default {
     flowExpand: '補齊流程/數據',
     modifyNodeLink: '修改節點鏈接',
     linkToNode: '鏈接到指定節點',
-    removeNodeLink: '刪除節點鏈接'
+    removeNodeLink: '刪除節點鏈接',
+    mapRef: '引用思維導圖',
+    removeMapRef: '移除導圖引用'
   },
   count: {
     words: '字數',
@@ -367,6 +389,12 @@ export default {
     dragTip: '在此釋放以匯入檔案',
     autoOpenNodeRichTextTip: '檢測到導入了富文本內容，已自動開啓富文本模式',
     importingTip: '正在匯入，請稍候…',
+    importSavingTip: '正在儲存到伺服器，請勿關閉頁面',
+    importSavingParse: '正在整理心智圖結構…',
+    importSavingUpload: '正在上傳到伺服器…',
+    importSavingWrite: '正在寫入節點…',
+    importSavingCommit: '正在提交資料庫…',
+    importSavingApply: '儲存完成，正在套用到畫布…',
     importPersistFailed: '匯入未能儲存到目前房間，已恢復為伺服器上的心智圖',
     largeMapImportTip:
       '節點較多，已收起深層分支並開啟效能模式，避免卡死。需要時再點節點上的展開。',
@@ -537,6 +565,39 @@ export default {
     tip4: '刪除成功',
     tip5: '鏈接節點不存在，是否刪除該鏈接？'
   },
+  mapRef: {
+    title: '引用思維導圖',
+    searchMaps: '搜尋導圖名稱',
+    bindMap: '綁定整張導圖',
+    bindNode: '定位到節點（可選）',
+    searchNodes: '在目標導圖中搜尋節點',
+    wholeMap: '整張導圖',
+    noFiles: '暫無導圖',
+    emptySearch: '沒有符合「{q}」的導圖',
+    missingMap: '目標導圖不存在或已刪除',
+    missingNode: '目標節點不存在，已打開導圖根節點',
+    noPermission: '沒有訪問該導圖的權限',
+    saved: '已保存引用',
+    removed: '已移除引用',
+    openFailed: '無法打開引用的導圖',
+    currentMap: '不能引用當前導圖'
+  },
+  acl: {
+    share: '分享 / 權限',
+    mine: '我的',
+    owner: '所有者',
+    editor: '可編輯',
+    viewer: '唯讀',
+    remove: '移除',
+    searchUsers: '搜尋同事姓名或帳號',
+    addViewer: '設為唯讀',
+    addEditor: '設為可編輯',
+    memberAdded: '已新增成員',
+    memberRemoved: '已移除成員',
+    updateFailed: '更新權限失敗',
+    demoted: '你對該導圖的權限已變為唯讀',
+    noAccess: '你沒有權限存取該思維導圖'
+  },
   cooperate: {
     title: '協同編輯',
     userName: '暱稱',
@@ -555,6 +616,8 @@ export default {
     saving: '儲存中…',
     saved: '已儲存',
     saveError: '儲存失敗',
+    offline: '離線編輯',
+    reconnecting: '正在重新連線',
     roomUnavailable: '房間已刪除或無法使用',
     join: '加入協同',
     leave: '退出協同',
@@ -572,8 +635,22 @@ export default {
     connectFailed: '連接協同服務失敗，請確認已啟動協同服務',
     peers: '目前在線',
     you: '我',
+    noOnlinePeers: '暫無其他在線成員',
+    chipSaved: '✓ 已儲存',
+    chipSaving: '● 儲存中',
+    chipOffline: '○ 離線編輯',
+    chipSyncing: '↻ 正在同步',
+    chipFailed: '! 同步失敗',
+    diagTitle: '同步失敗詳情',
+    diagCopy: '複製診斷資訊',
+    diagCopied: '已複製',
     tip: '同一房間的人會即時同步畫布。區域網協作請把協同服務改成你的電腦 IP。',
     startServerTip: '可雙擊專案根目錄「啟動.bat」一鍵啟動頁面、協同和 AI 服務',
+    searchFiles: '搜尋檔名',
+    fileCount: '{count} 個',
+    currentRoom: '目前',
+    advanced: '進階設定',
+    emptySearch: '沒有找到「{q}」',
     files: '已儲存的檔案',
     refresh: '重新整理',
     openFile: '打開',
@@ -586,6 +663,9 @@ export default {
     openFailed: '打開失敗，未能載入檔案內容',
     largeMapMode: '大圖模式（按需載入，已支援一萬節點以上）',
     fileDeleted: '已刪除',
-    renamed: '已重新命名'
+    renamed: '已重新命名',
+    history: '操作歷史',
+    noHistory: '還沒有可審計的操作',
+    undoFailed: '無法撤銷該操作'
   }
 }

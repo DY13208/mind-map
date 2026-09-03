@@ -19,7 +19,11 @@ const store = new Vuex.Store({
       // 是否是暗黑模式
       isDark: false,
       // 是否开启AI功能
-      enableAi: true
+      enableAi: true,
+      // WorkBuddy 补齐等使用的模型（auto 为自动选择）
+      workbuddyModel: 'auto',
+      // 补齐并发数（与 WorkBuddy 多会话对齐，建议 1-3）
+      flowExpandConcurrency: 2
     },
     activeSidebar: '', // 当前显示的侧边栏
     isOutlineEdit: false, // 是否是大纲编辑模式
@@ -28,6 +32,16 @@ const store = new Vuex.Store({
     extraTextOnExport: '', // 导出时底部添加的文字
     isDragOutlineTreeNode: false, // 当前是否正在拖拽大纲树的节点
     cooperateStatus: 'disconnected',
+    collabPhase: 'DISCONNECTED',
+    collabSaveState: 'idle',
+    collabPeers: [],
+    collabPendingCount: 0,
+    collabError: '',
+    collabDiagnostic: null,
+    roomRole: '',
+    roomCanEdit: true,
+    roomCanManage: true,
+    aclForcedReadonly: false,
     aiConfig: {
       api: 'http://ark.cn-beijing.volces.com/api/v3/chat/completions',
       key: '',
@@ -94,6 +108,30 @@ const store = new Vuex.Store({
 
     setCooperateStatus(state, data) {
       state.cooperateStatus = data
+    },
+
+    setCollabPresence(state, data = {}) {
+      if (data.phase != null) state.collabPhase = data.phase
+      if (data.saveState != null) state.collabSaveState = data.saveState
+      if (data.peers) state.collabPeers = data.peers
+      if (data.pendingCount != null) state.collabPendingCount = data.pendingCount
+      if (data.error != null) state.collabError = data.error
+      if (data.diagnostic !== undefined) state.collabDiagnostic = data.diagnostic
+      if (data.status) {
+        if (data.status === 'live') state.cooperateStatus = 'connected'
+        else if (data.status === 'connecting' || data.status === 'reconnecting') {
+          state.cooperateStatus = 'connecting'
+        } else if (data.status === 'disconnected') {
+          state.cooperateStatus = 'disconnected'
+        }
+      }
+    },
+
+    setRoomAcl(state, data = {}) {
+      state.roomRole = data.role || ''
+      state.roomCanEdit = data.canEdit !== false
+      state.roomCanManage = !!data.canManage
+      state.aclForcedReadonly = !state.roomCanEdit
     },
 
     // 扩展主题列表

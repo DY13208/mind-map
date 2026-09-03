@@ -256,6 +256,77 @@
           >
         </div>
       </div>
+      <!-- WorkBuddy 模型 -->
+      <div class="row">
+        <div class="rowItem workbuddyModelRow">
+          <span class="name">{{ $t('setting.workbuddyModel') }}</span>
+          <el-select
+            size="mini"
+            style="width: 200px"
+            v-model="localConfigs.workbuddyModel"
+            :loading="workbuddyModelsLoading"
+            :placeholder="$t('setting.workbuddyModelPlaceholder')"
+            @change="updateLocalConfig('workbuddyModel', $event)"
+            @visible-change="onWorkbuddyModelDropdown"
+          >
+            <el-option
+              key="auto"
+              label="auto"
+              value="auto"
+            ></el-option>
+            <el-option-group
+              v-if="workbuddyPlatformModels.length"
+              :label="$t('setting.workbuddyModelPlatform')"
+            >
+              <el-option
+                v-for="item in workbuddyPlatformModels"
+                :key="item.id"
+                :label="workbuddyModelLabel(item)"
+                :value="item.id"
+              ></el-option>
+            </el-option-group>
+            <el-option-group
+              v-if="workbuddyCustomModels.length"
+              :label="$t('setting.workbuddyModelCustom')"
+            >
+              <el-option
+                v-for="item in workbuddyCustomModels"
+                :key="item.id"
+                :label="workbuddyModelLabel(item)"
+                :value="item.id"
+              ></el-option>
+            </el-option-group>
+          </el-select>
+          <el-button
+            size="mini"
+            class="refreshModelsBtn"
+            :loading="workbuddyModelsLoading"
+            @click="loadWorkbuddyModels(true)"
+          >
+            {{ $t('setting.workbuddyModelRefresh') }}
+          </el-button>
+        </div>
+      </div>
+      <!-- 补齐并发 -->
+      <div class="row">
+        <div class="rowItem">
+          <span class="name">{{ $t('setting.flowExpandConcurrency') }}</span>
+          <el-select
+            size="mini"
+            style="width: 200px"
+            v-model="localConfigs.flowExpandConcurrency"
+            @change="updateLocalConfig('flowExpandConcurrency', $event)"
+          >
+            <el-option :label="'1'" :value="1"></el-option>
+            <el-option :label="'2'" :value="2"></el-option>
+            <el-option :label="'3'" :value="3"></el-option>
+          </el-select>
+        </div>
+        <div class="rowItem tip">
+          <span class="name"></span>
+          <span class="tipText">{{ $t('setting.flowExpandConcurrencyTip') }}</span>
+        </div>
+      </div>
       <!-- 配置鼠标滚轮行为 -->
       <div class="row">
         <div class="rowItem">
@@ -376,6 +447,10 @@ import Sidebar from './Sidebar.vue'
 import { storeConfig } from '@/api'
 import { mapState, mapMutations } from 'vuex'
 import Color from './Color.vue'
+import {
+  fetchWorkbuddyModels,
+  checkWorkbuddy
+} from '@/utils/workbuddyChat'
 
 export default {
   components: {
@@ -424,8 +499,14 @@ export default {
       localConfigs: {
         isShowScrollbar: false,
         enableDragImport: false,
-        enableAi: false
-      }
+        enableAi: false,
+        workbuddyModel: 'auto',
+        flowExpandConcurrency: 2
+      },
+      workbuddyModelOptions: [{ id: 'auto', name: 'auto', vendor: '' }],
+      workbuddyPlatformModels: [],
+      workbuddyCustomModels: [],
+      workbuddyModelsLoading: false
     }
   },
   computed: {
@@ -441,6 +522,8 @@ export default {
         this.$refs.sidebar.show = true
         this.initConfig()
         this.initWatermark()
+        this.initLoacalConfig()
+        this.loadWorkbuddyModels()
       } else {
         this.$refs.sidebar.show = false
       }
@@ -573,6 +656,69 @@ export default {
       this.setLocalConfig({
         [key]: value
       })
+    },
+
+    workbuddyModelLabel(item) {
+      if (!item) return ''
+      if (item.custom) {
+        const suffix = item.baseId ? `:${item.baseId}` : ''
+        return `${item.name || item.id}${suffix}`
+      }
+      const vendor =
+        item.vendor && String(item.vendor).length > 1
+          ? ` · ${item.vendor}`
+          : ''
+      return `${item.name || item.id}${vendor}`
+    },
+
+    syncWorkbuddyModelGroups(models) {
+      const map = new Map()
+      ;[{ id: 'auto', name: 'auto', vendor: '' }, ...models].forEach(item => {
+        map.set(item.id, item)
+      })
+      this.workbuddyModelOptions = Array.from(map.values())
+      this.workbuddyPlatformModels = models.filter(item => !item.custom)
+      this.workbuddyCustomModels = models.filter(item => item.custom)
+      const current = this.localConfigs.workbuddyModel || 'auto'
+      if (!map.has(current)) {
+        this.localConfigs.workbuddyModel = 'auto'
+        this.updateLocalConfig('workbuddyModel', 'auto')
+      }
+    },
+
+    onWorkbuddyModelDropdown(visible) {
+      if (
+        visible &&
+        !this.workbuddyPlatformModels.length &&
+        !this.workbuddyCustomModels.length
+      ) {
+        this.loadWorkbuddyModels()
+      }
+    },
+
+    async loadWorkbuddyModels(force = false) {
+      if (this.workbuddyModelsLoading) return
+      const wb = await checkWorkbuddy()
+      if (!wb.ok) {
+        if (force && this.$message) {
+          this.$message.warning(this.$t('setting.workbuddyModelUnavailable'))
+        }
+        return
+      }
+      this.workbuddyModelsLoading = true
+      try {
+        const models = await fetchWorkbuddyModels()
+        this.syncWorkbuddyModelGroups(models)
+      } catch (err) {
+        if (force && this.$message) {
+          this.$message.error(
+            this.$t('setting.workbuddyModelLoadFailed') +
+              (err.message ? `：${err.message}` : '')
+          )
+        }
+      } finally {
+        this.workbuddyModelsLoading = false
+      }
     }
   }
 }
@@ -594,6 +740,17 @@ export default {
           color: hsla(0, 0%, 100%, 0.6);
         }
       }
+    }
+  }
+
+  .workbuddyModelRow {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+
+    .refreshModelsBtn {
+      margin-left: 4px;
     }
   }
 

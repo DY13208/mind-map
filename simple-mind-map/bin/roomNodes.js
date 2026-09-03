@@ -239,15 +239,58 @@ function nodesReadPreferEnabled() {
   return value !== '0' && value !== 'false'
 }
 
-async function replaceRoomNodes(db, roomKey, obj, version) {
+async function replaceRoomNodes(db, roomKey, obj, version, options = {}) {
   const graph = obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}
   const check = validateNodeGraph(graph)
   if (!check.ok) {
     return { wrote: false, reason: 'invalid', errors: check.errors }
   }
-  const rows = encodeNodeRows(graph)
+  const allRows = encodeNodeRows(graph)
+  const rootUid = check.rootUid
+  allRows.forEach(row => {
+    row.is_root = !!rootUid && row.uid === rootUid
+  })
+  const onlyUids = Array.isArray(options.onlyUids)
+    ? options.onlyUids.filter(Boolean)
+    : null
+  const rows = onlyUids && onlyUids.length
+    ? allRows.filter(row => onlyUids.includes(row.uid))
+    : allRows
+  const incremental = !!(onlyUids && onlyUids.length)
   const uids = rows.map(row => row.uid)
+  const allowRestore = options.allowRestore === true
+  if (rows.length && !allowRestore) {
+    const blocked = await db.query(
+      `select uid from room_nodes
+       where room_key = $1
+         and deleted_at is not null
+         and uid = any($2::text[])`,
+      [roomKey, uids]
+    )
+    if (blocked.rows.length) {
+      const err = new Error(
+        `禁止复用已删除节点 UID: ${blocked.rows.map(row => row.uid).join(',')}`
+      )
+      err.statusCode = 409
+      err.code = 'UID_REUSED'
+      err.uids = blocked.rows.map(row => row.uid)
+      throw err
+    }
+  }
   if (rows.length) {
+    // Partial unique index room_nodes_one_root_idx allows only one live root.
+    // Full replace usually inserts a new root uid before the old root is
+    // tombstoned; demote first so the upsert cannot collide.
+    if (!incremental || rows.some(row => row.is_root)) {
+      await db.query(
+        `update room_nodes
+         set is_root = false, updated_at = now()
+         where room_key = $1
+           and is_root
+           and deleted_at is null`,
+        [roomKey]
+      )
+    }
     await db.query(
       `insert into room_nodes (
          room_key, uid, parent_uid, position, data, is_root, node_version,
@@ -267,8 +310,13 @@ async function replaceRoomNodes(db, roomKey, obj, version) {
          data = excluded.data,
          is_root = excluded.is_root,
          node_version = excluded.node_version,
-         deleted_at = null,
-         updated_at = now()`,
+         deleted_at = case
+           when $8::boolean then null
+           when room_nodes.deleted_at is null then null
+           else room_nodes.deleted_at
+         end,
+         updated_at = now()
+       where room_nodes.deleted_at is null or $8::boolean`,
       [
         roomKey,
         Number(version) || 0,
@@ -276,9 +324,13 @@ async function replaceRoomNodes(db, roomKey, obj, version) {
         rows.map(row => row.parent_uid),
         rows.map(row => row.position),
         rows.map(row => row.data),
-        rows.map(row => row.is_root)
+        rows.map(row => row.is_root),
+        allowRestore
       ]
     )
+  }
+  if (incremental) {
+    return { wrote: true, nodeCount: rows.length, rootUid: check.rootUid }
   }
   if (uids.length) {
     await db.query(
@@ -298,6 +350,38 @@ async function replaceRoomNodes(db, roomKey, obj, version) {
     )
   }
   return { wrote: true, nodeCount: rows.length, rootUid: check.rootUid }
+}
+
+async function listDeletedNodeUids(db, roomKey) {
+  const res = await db.query(
+    `select uid from room_nodes
+     where room_key = $1 and deleted_at is not null`,
+    [roomKey]
+  )
+  return new Set(res.rows.map(row => row.uid))
+}
+
+async function purgeDeletedNodes(db, options = {}) {
+  const days = Math.max(
+    1,
+    Number(
+      options.days != null
+        ? options.days
+        : process.env.COLLAB_NODE_TOMBSTONE_DAYS || 30
+    )
+  )
+  const res = await db.query(
+    `delete from room_nodes
+     where deleted_at is not null
+       and deleted_at < now() - ($1::double precision * interval '1 day')
+     returning room_key, uid`,
+    [days]
+  )
+  return {
+    purged: res.rowCount,
+    days,
+    samples: res.rows.slice(0, 20)
+  }
 }
 
 async function readRoomNodes(db, roomKey) {
@@ -321,6 +405,293 @@ async function readRoomNodes(db, roomKey) {
   }
 }
 
+const SEARCH_PAGE = 500
+const SEARCH_HARD_CAP = 10000
+const SEARCH_DEFAULT_LIMIT = 200
+
+function stripSearchHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function queryNeedsSearch(inputQuery, lastExecutedQuery) {
+  return String(inputQuery || '').trim() !== String(lastExecutedQuery || '').trim()
+}
+
+function dedupeMatchesByUid(list) {
+  const seen = new Set()
+  const out = []
+  ;(Array.isArray(list) ? list : []).forEach(item => {
+    const uid = item && (item.uid || item.id)
+    if (!uid || seen.has(uid)) return
+    seen.add(uid)
+    out.push({
+      ...item,
+      uid,
+      text: stripSearchHtml(item.text || item.name || '')
+    })
+  })
+  return out
+}
+
+function mapSearchRows(rows) {
+  return (rows || []).map(row => ({
+    uid: row.uid,
+    text: stripSearchHtml(row.text || ''),
+    note: row.note || '',
+    isRoot: !!row.is_root,
+    parent_uid: row.parent_uid || null,
+    path: row.parent_uid ? [row.parent_uid, row.uid] : [row.uid]
+  }))
+}
+
+async function searchRoomNodes(db, roomKey, query, options = {}) {
+  const q = String(query || '').trim()
+  if (!q) return { matches: [], total: 0, limit: 0, offset: 0 }
+  const fetchAll =
+    options.all === true || options.all === 1 || options.all === '1'
+  const pageSize = Math.min(
+    SEARCH_PAGE,
+    Math.max(1, Number(options.limit) || (fetchAll ? SEARCH_PAGE : SEARCH_DEFAULT_LIMIT))
+  )
+  const offset = Math.max(0, Number(options.offset) || 0)
+  const like = '%' + q.replace(/[\\%_]/g, ch => '\\' + ch) + '%'
+  const sql = `select uid, parent_uid, data->>'text' as text, data->>'note' as note, is_root,
+      count(*) over() as total
+     from room_nodes
+     where room_key = $1
+       and deleted_at is null
+       and (
+         coalesce(data->>'text', '') ilike $2 escape '\\'
+         or regexp_replace(coalesce(data->>'text', ''), '<[^>]+>', ' ', 'g') ilike $2 escape '\\'
+         or coalesce(data->>'note', '') ilike $2 escape '\\'
+         or regexp_replace(coalesce(data->>'note', ''), '<[^>]+>', ' ', 'g') ilike $2 escape '\\'
+       )
+     order by is_root desc, uid
+     limit $3 offset $4`
+
+  async function page(off, lim) {
+    const res = await db.query(sql, [roomKey, like, lim, off])
+    const total = res.rows.length ? Number(res.rows[0].total || 0) : 0
+    return { rows: res.rows, total }
+  }
+
+  if (fetchAll) {
+    const matches = []
+    let off = 0
+    let total = 0
+    while (off < SEARCH_HARD_CAP) {
+      const chunk = await page(off, SEARCH_PAGE)
+      total = chunk.total
+      matches.push(...mapSearchRows(chunk.rows))
+      if (!chunk.rows.length) break
+      off += chunk.rows.length
+      if (matches.length >= total || chunk.rows.length < SEARCH_PAGE) break
+    }
+    return {
+      matches: dedupeMatchesByUid(matches).slice(0, SEARCH_HARD_CAP),
+      total,
+      limit: SEARCH_HARD_CAP,
+      offset: 0,
+      all: true
+    }
+  }
+
+  const chunk = await page(offset, pageSize)
+  const matches = dedupeMatchesByUid(mapSearchRows(chunk.rows))
+  return {
+    matches,
+    total: chunk.total,
+    limit: pageSize,
+    offset
+  }
+}
+
+const MAX_SUBTREE_CHILDREN = 200
+const MAX_DEEP_SUBTREE_NODES = 400
+
+async function resolveRoomNodeUid(db, roomKey, uid) {
+  if (!uid || uid === 'root') {
+    const root = await db.query(
+      `select uid from room_nodes
+       where room_key = $1 and is_root and deleted_at is null
+       limit 1`,
+      [roomKey]
+    )
+    return (root.rows[0] && root.rows[0].uid) || null
+  }
+  const row = await db.query(
+    `select uid from room_nodes
+     where room_key = $1 and uid = $2 and deleted_at is null`,
+    [roomKey, uid]
+  )
+  return (row.rows[0] && row.rows[0].uid) || null
+}
+
+function childStubFromRow(row, childCount, version) {
+  const raw = row && row.data
+  const data =
+    raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {}
+  delete data.imgMap
+  return {
+    data: {
+      ...data,
+      uid: row.uid,
+      expand: false,
+      childCount: Number(childCount) || 0,
+      subtreeVersion: Number(version) || 0
+    },
+    children: []
+  }
+}
+
+async function readRoomSubtree(db, roomKey, uid, options = {}) {
+  if (!nodesTableAuthorityEnabled()) return null
+  const meta = await db.query(
+    `select version, updated_at from rooms where room_key = $1`,
+    [roomKey]
+  )
+  if (!meta.rows.length) return { notFound: true }
+  const version = Number(meta.rows[0].version || 0)
+  const updated_at = meta.rows[0].updated_at
+  const resolved = await resolveRoomNodeUid(db, roomKey, uid)
+  if (!resolved) return { missing: true, version, updated_at }
+  const known = Number(options.knownVersion) || 0
+  if (known > 0 && known >= version) {
+    return { uid: resolved, version, unchanged: true, updated_at }
+  }
+  if (options.deep) {
+    const maxNodes = Math.min(
+      2000,
+      Math.max(1, Number(options.maxNodes) || MAX_DEEP_SUBTREE_NODES)
+    )
+    const descendants = await db.query(
+      `with recursive walk as (
+         select uid, parent_uid, position, data, is_root, node_version, deleted_at, 0 as depth
+         from room_nodes
+         where room_key = $1 and uid = $2 and deleted_at is null
+         union all
+         select n.uid, n.parent_uid, n.position, n.data, n.is_root, n.node_version, n.deleted_at, w.depth + 1
+         from room_nodes n
+         inner join walk w on n.room_key = $1 and n.parent_uid = w.uid and n.deleted_at is null
+         where w.depth < 12
+       )
+       select uid, parent_uid, position, data, is_root, node_version, deleted_at
+       from walk
+       limit $3`,
+      [roomKey, resolved, maxNodes + 1]
+    )
+    const mindDoc = require('./mindDoc')
+    const obj = decodeNodeRows(descendants.rows)
+    const payload = mindDoc.versionedSubtree(obj, resolved, {
+      version,
+      knownVersion: 0,
+      deep: true,
+      maxNodes
+    })
+    if (!payload) return { missing: true, version, updated_at }
+    return { ...payload, updated_at }
+  }
+  const offset = Math.max(0, Number(options.offset) || 0)
+  const limit = Math.min(
+    500,
+    Math.max(1, Number(options.limit) || MAX_SUBTREE_CHILDREN)
+  )
+  const kids = await db.query(
+    `select uid, parent_uid, position, data, is_root, node_version
+     from room_nodes
+     where room_key = $1 and parent_uid = $2 and deleted_at is null
+     order by position, uid
+     offset $3 limit $4`,
+    [roomKey, resolved, offset, limit]
+  )
+  const totalRes = await db.query(
+    `select count(*)::int as total
+     from room_nodes
+     where room_key = $1 and parent_uid = $2 and deleted_at is null`,
+    [roomKey, resolved]
+  )
+  const total = Number((totalRes.rows[0] && totalRes.rows[0].total) || 0)
+  const childUids = kids.rows.map(row => row.uid)
+  const childCounts = {}
+  if (childUids.length) {
+    const gc = await db.query(
+      `select parent_uid, count(*)::int as n
+       from room_nodes
+       where room_key = $1 and parent_uid = any($2::text[]) and deleted_at is null
+       group by parent_uid`,
+      [roomKey, childUids]
+    )
+    gc.rows.forEach(row => {
+      childCounts[row.parent_uid] = Number(row.n || 0)
+    })
+  }
+  const children = kids.rows.map(row =>
+    childStubFromRow(row, childCounts[row.uid] || 0, version)
+  )
+  return {
+    uid: resolved,
+    total,
+    offset,
+    has_more: offset + children.length < total,
+    children,
+    version,
+    unchanged: false,
+    updated_at
+  }
+}
+
+async function resolveRoomRef(db, roomKey, uid) {
+  const key = String(roomKey || '')
+  if (!key) return { exists: false }
+  const tomb = await db.query(
+    `select 1 from room_tombstones where room_key = $1`,
+    [key]
+  )
+  if (tomb.rows.length) {
+    return { exists: false, deleted: true, mapId: key }
+  }
+  const meta = await db.query(
+    `select room_key, title, version, updated_at from rooms where room_key = $1`,
+    [key]
+  )
+  if (!meta.rows.length) return { exists: false, mapId: key }
+  const row = meta.rows[0]
+  const result = {
+    exists: true,
+    deleted: false,
+    mapId: row.room_key,
+    title: row.title || '未命名',
+    version: Number(row.version || 0),
+    updated_at: row.updated_at,
+    nodeId: uid ? String(uid) : null,
+    nodeExists: true,
+    nodeText: ''
+  }
+  if (!uid) return result
+  const node = await db.query(
+    `select uid, data from room_nodes
+     where room_key = $1 and uid = $2 and deleted_at is null`,
+    [key, String(uid)]
+  )
+  if (!node.rows.length) {
+    result.nodeExists = false
+    return result
+  }
+  const data = node.rows[0].data || {}
+  result.nodeText = String(data.text || '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return result
+}
+
 async function migrateRoomNodesFromJson(db, roomKey, obj, version) {
   return replaceRoomNodes(db, roomKey, obj, version)
 }
@@ -341,5 +712,13 @@ module.exports = {
   auditRoomNodesState,
   replaceRoomNodes,
   readRoomNodes,
+  searchRoomNodes,
+  stripSearchHtml,
+  dedupeMatchesByUid,
+  queryNeedsSearch,
+  readRoomSubtree,
+  resolveRoomRef,
+  listDeletedNodeUids,
+  purgeDeletedNodes,
   migrateRoomNodesFromJson
 }

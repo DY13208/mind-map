@@ -9,7 +9,7 @@ const {
   applyCollabEvents,
   markDirtySubtrees
 } = require('../bin/collabRecovery')
-const { evaluateUndo, reconstructByInverses } = require('../bin/collabUndo')
+const { evaluateUndo, evaluateRedo, reconstructByInverses } = require('../bin/collabUndo')
 
 const node = (uid, text, children = [], extra = {}) => ({
   isRoot: uid === 'root',
@@ -253,6 +253,10 @@ function testPreviewStampsMetaAndKnownVersion() {
 }
 
 function testMarkDirtySubtreesForUnloadedBranch() {
+  // Lazy-load recovery only marks currently loaded parents. The new child
+  // `hidden` is not in the loaded set, so callers hydrate `loaded` (the
+  // visible parent) instead of pretending the unloaded node is already on
+  // the canvas. Remote V2 ops and gap recovery reuse this same dirty map.
   const dirty = markDirtySubtrees(['root', 'loaded'], [
     {
       version: 12,
@@ -305,6 +309,41 @@ function testPreviewTimings() {
     assert.ok(ms < limit, `${n} preview took ${ms}ms`)
   })
   console.log('preview timings ms', JSON.stringify(timings))
+}
+
+function countLiveTree(root) {
+  let count = 0
+  const stack = root ? [root] : []
+  while (stack.length) {
+    const node = stack.pop()
+    if (!node) continue
+    count += 1
+    const kids = node.children || []
+    for (let i = 0; i < kids.length; i++) stack.push(kids[i])
+  }
+  return count
+}
+
+function testPreviewLiveTreeCapped() {
+  const obj = { root: node('root', 'Root', []) }
+  for (let i = 0; i < 60; i++) {
+    const a = 'a' + i
+    obj.root.children.push(a)
+    obj[a] = node(a, 'A' + i, [])
+    for (let j = 0; j < 60; j++) {
+      const b = a + '-' + j
+      obj[a].children.push(b)
+      obj[b] = node(b, 'B')
+    }
+  }
+  const preview = mindDoc.buildPreview(obj, { keepDepth: 2 })
+  const live = countLiveTree(preview.tree)
+  assert.ok(preview.node_count > 3000)
+  assert.ok(
+    live <= mindDoc.MAX_PREVIEW_NODES,
+    `preview live tree was ${live}`
+  )
+  assert.ok(preview.tree.data.hasMore || preview.tree.children.length <= 40)
 }
 
 function testUndoSafetyBlocksOtherUsersAndOutOfOrder() {
@@ -482,6 +521,58 @@ function testConcurrentSiblingInsertsGetDistinctPositions() {
   assert.deepStrictEqual(replayed.nodes.root.children, ['second', 'first'])
 }
 
+function testRedoRequiresUndoAndBlocksDoubleRedo() {
+  const insert = {
+    operation_id: 'op-insert',
+    actor_id: 'alice',
+    operation_type: 'node.insert',
+    version: 1,
+    payload: { uid: 'n1', parentUid: 'root', text: 'One' },
+    inverse_payload: { type: 'node.delete', payload: { uid: 'n1' } },
+    event: {
+      type: 'node.inserted',
+      affectedUids: ['n1', 'root'],
+      payload: { uid: 'n1' }
+    }
+  }
+  const unavailable = evaluateRedo(insert, [], 'alice')
+  assert.strictEqual(unavailable.ok, false)
+  assert.strictEqual(unavailable.code, 'REDO_UNAVAILABLE')
+
+  const undoOp = {
+    operation_id: 'op-undo',
+    actor_id: 'alice',
+    operation_type: 'operation.undo',
+    version: 2,
+    payload: { targetOperationId: 'op-insert' },
+    event: {
+      type: 'operation.undone',
+      payload: {
+        targetOperationId: 'op-insert',
+        inverse: insert.inverse_payload
+      }
+    }
+  }
+  const allowed = evaluateRedo(insert, [undoOp], 'alice')
+  assert.strictEqual(allowed.ok, true)
+  assert.strictEqual(allowed.forward.type, 'node.insert')
+
+  const redoOp = {
+    operation_id: 'op-redo',
+    actor_id: 'alice',
+    operation_type: 'operation.redo',
+    version: 3,
+    payload: { targetOperationId: 'op-insert' },
+    event: {
+      type: 'operation.redone',
+      payload: { targetOperationId: 'op-insert' }
+    }
+  }
+  const again = evaluateRedo(insert, [undoOp, redoOp], 'alice')
+  assert.strictEqual(again.ok, false)
+  assert.strictEqual(again.code, 'ALREADY_REDONE')
+}
+
 testInsertUpdateMoveDeleteStayOnTempDoc()
 testInsertRecordsInverseAndResolvedUid()
 testSopChangesRequireConfirmation()
@@ -491,7 +582,59 @@ testApplyCollabEventKeepChildrenAndTitleNoop()
 testPreviewStampsMetaAndKnownVersion()
 testMarkDirtySubtreesForUnloadedBranch()
 testUndoSafetyBlocksOtherUsersAndOutOfOrder()
+testRedoRequiresUndoAndBlocksDoubleRedo()
 testRestoreAndHistoricalReplay()
 testConcurrentSiblingInsertsGetDistinctPositions()
+testNodeReorderSameParent()
 testPreviewTimings()
+testPreviewLiveTreeCapped()
+
+function testNodeReorderSameParent() {
+  const doc = seedDoc({
+    root: node('root', 'Root', ['a', 'b', 'c']),
+    a: node('a', 'A'),
+    b: node('b', 'B'),
+    c: node('c', 'C')
+  })
+  const applied = applyNodeCommand(doc, {
+    type: 'node.reorder',
+    payload: { uid: 'c', index: 0, confirm_sop_change: true }
+  })
+  assert.strictEqual(applied.event.type, 'node.reordered')
+  assert.strictEqual(applied.result.index, 0)
+  const obj = mindDoc.readObject(doc)
+  assert.deepStrictEqual(obj.root.children, ['c', 'a', 'b'])
+  assert.ok(applied.inversePayload.type === 'node.reorder')
+
+  const rejected = () =>
+    applyNodeCommand(doc, {
+      type: 'node.reorder',
+      payload: {
+        uid: 'c',
+        parentUid: 'a',
+        index: 0,
+        confirm_sop_change: true
+      }
+    })
+  assert.throws(rejected, err => err && err.code === 'REORDER_PARENT_CHANGED')
+
+  const replayed = applyCollabEvent(
+    {
+      root: node('root', 'Root', ['a', 'b', 'c']),
+      a: node('a', 'A'),
+      b: node('b', 'B'),
+      c: node('c', 'C')
+    },
+    {
+      type: 'node.reordered',
+      payload: {
+        uid: 'c',
+        parentUid: 'root',
+        index: 0,
+        position: applied.result.position
+      }
+    }
+  )
+  assert.strictEqual(replayed.root.children[0], 'c')
+}
 console.log('room operation tests passed')

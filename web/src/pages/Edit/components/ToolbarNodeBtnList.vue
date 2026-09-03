@@ -1,5 +1,9 @@
 <template>
-  <div class="toolbarNodeBtnList" :class="[dir, { isDark: isDark }]">
+  <div
+    class="toolbarNodeBtnList"
+    :class="[dir, { isDark: isDark }]"
+    @mousedown.prevent
+  >
     <template v-for="item in list">
       <div
         v-if="item === 'back'"
@@ -38,6 +42,7 @@
       <div
         v-if="item === 'siblingNode'"
         class="toolbarBtn"
+        data-testid="add-sibling"
         :class="{
           disabled: activeNodes.length <= 0 || hasRoot || hasGeneralization
         }"
@@ -49,6 +54,7 @@
       <div
         v-if="item === 'childNode'"
         class="toolbarBtn"
+        data-testid="add-child"
         :class="{
           disabled: activeNodes.length <= 0
         }"
@@ -60,6 +66,7 @@
       <div
         v-if="item === 'deleteNode'"
         class="toolbarBtn"
+        data-testid="delete-node"
         :class="{
           disabled: activeNodes.length <= 0
         }"
@@ -71,6 +78,7 @@
       <div
         v-if="item === 'image'"
         class="toolbarBtn"
+        data-testid="image"
         :class="{
           disabled: activeNodes.length <= 0
         }"
@@ -93,6 +101,7 @@
       <div
         v-if="item === 'link'"
         class="toolbarBtn"
+        data-testid="hyperlink"
         :class="{
           disabled: activeNodes.length <= 0
         }"
@@ -104,6 +113,7 @@
       <div
         v-if="item === 'note'"
         class="toolbarBtn"
+        data-testid="note"
         :class="{
           disabled: activeNodes.length <= 0
         }"
@@ -115,6 +125,7 @@
       <div
         v-if="item === 'tag'"
         class="toolbarBtn"
+        data-testid="tag"
         :class="{
           disabled: activeNodes.length <= 0
         }"
@@ -126,6 +137,7 @@
       <div
         v-if="item === 'summary'"
         class="toolbarBtn"
+        data-testid="generalization"
         :class="{
           disabled: activeNodes.length <= 0 || hasRoot || hasGeneralization
         }"
@@ -137,6 +149,7 @@
       <div
         v-if="item === 'associativeLine'"
         class="toolbarBtn"
+        data-testid="associative-line"
         :class="{
           disabled: activeNodes.length <= 0 || hasGeneralization
         }"
@@ -170,6 +183,7 @@
       <div
         v-if="item === 'outerFrame'"
         class="toolbarBtn"
+        data-testid="outer-frame"
         :class="{
           disabled: activeNodes.length <= 0 || hasGeneralization
         }"
@@ -182,11 +196,17 @@
         v-if="item === 'flowExpand'"
         class="toolbarBtn"
         :class="{
-          disabled: activeNodes.length <= 0 || hasRoot || readonly || flowExpandBusy
+          disabled: activeNodes.length <= 0 || hasRoot || readonly,
+          loading: flowExpandRunning > 0
         }"
         @click="flowExpand"
       >
-        <span class="icon iconfont icontianjiazijiedian"></span>
+        <span class="icon workbuddy-icon-wrap">
+          <img class="workbuddy-icon" :src="workbuddyFillIcon" alt="" />
+          <span v-if="flowExpandTotal > 0" class="flow-expand-badge">{{
+            flowExpandTotal
+          }}</span>
+        </span>
         <span class="text">{{ $t('toolbar.flowExpand') }}</span>
       </div>
       <div
@@ -206,6 +226,8 @@
 
 <script>
 import { mapState, mapMutations } from 'vuex'
+import workbuddyFillIcon from '@/assets/img/workbuddy-fill.svg'
+import { checkWorkbuddy } from '@/utils/workbuddyChat'
 
 export default {
   props: {
@@ -222,6 +244,7 @@ export default {
   },
   data() {
     return {
+      workbuddyFillIcon,
       activeNodes: [],
       backEnd: true,
       forwardEnd: true,
@@ -229,7 +252,9 @@ export default {
       isFullDataFile: false,
       timer: null,
       isInPainter: false,
-      flowExpandBusy: false
+      flowExpandRunning: 0,
+      flowExpandQueued: 0,
+      flowExpandTotal: 0
     }
   },
   computed: {
@@ -263,7 +288,7 @@ export default {
     this.$bus.$on('back_forward', this.onBackForward)
     this.$bus.$on('painter_start', this.onPainterStart)
     this.$bus.$on('painter_end', this.onPainterEnd)
-    this.$bus.$on('node_flow_expand_busy', this.onFlowExpandBusy)
+    this.$bus.$on('node_flow_expand_queue', this.onFlowExpandQueue)
   },
   beforeDestroy() {
     this.$bus.$off('mode_change', this.onModeChange)
@@ -271,7 +296,7 @@ export default {
     this.$bus.$off('back_forward', this.onBackForward)
     this.$bus.$off('painter_start', this.onPainterStart)
     this.$bus.$off('painter_end', this.onPainterEnd)
-    this.$bus.$off('node_flow_expand_busy', this.onFlowExpandBusy)
+    this.$bus.$off('node_flow_expand_queue', this.onFlowExpandQueue)
   },
   methods: {
     ...mapMutations(['setActiveSidebar']),
@@ -302,17 +327,29 @@ export default {
       this.isInPainter = false
     },
 
-    onFlowExpandBusy(busy) {
-      this.flowExpandBusy = !!busy
+    onFlowExpandQueue({ running = 0, queued = 0, total = 0 } = {}) {
+      this.flowExpandRunning = running
+      this.flowExpandQueued = queued
+      this.flowExpandTotal = total
     },
 
     flowExpand() {
       if (
         this.readonly ||
-        this.flowExpandBusy ||
         this.activeNodes.length <= 0 ||
         this.hasRoot
       ) {
+        return
+      }
+      this.runFlowExpand()
+    },
+
+    async runFlowExpand() {
+      const wb = await checkWorkbuddy()
+      if (!wb.ok) {
+        if (this.$message) {
+          this.$message.warning('WorkBuddy 未就绪，请确认服务器已启动代理')
+        }
         return
       }
       this.$bus.$emit('node_flow_expand', this.activeNodes[0])
@@ -377,6 +414,7 @@ export default {
   .toolbarBtn {
     display: flex;
     justify-content: center;
+    align-items: center;
     flex-direction: column;
     cursor: pointer;
     margin-right: 20px;
@@ -407,12 +445,15 @@ export default {
 
     .icon {
       display: flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      min-width: 28px;
       height: 26px;
       background: #fff;
       border-radius: 4px;
       border: 1px solid #e9e9e9;
-      justify-content: center;
-      flex-direction: column;
+      flex-direction: row;
       text-align: center;
       padding: 0 5px;
     }
@@ -420,6 +461,44 @@ export default {
     .text {
       margin-top: 3px;
       text-align: center;
+      width: 100%;
+      white-space: nowrap;
+    }
+
+    &.loading {
+      .workbuddy-icon-wrap .workbuddy-icon {
+        opacity: 0.65;
+        animation: workbuddy-pulse 1.2s ease-in-out infinite;
+      }
+    }
+
+    .workbuddy-icon-wrap {
+      position: relative;
+      padding: 2px !important;
+
+      .workbuddy-icon {
+        width: 20px;
+        height: 20px;
+        display: block;
+        border-radius: 3px;
+        object-fit: cover;
+        margin: 0 auto;
+      }
+
+      .flow-expand-badge {
+        position: absolute;
+        top: -4px;
+        right: -6px;
+        min-width: 14px;
+        height: 14px;
+        padding: 0 3px;
+        border-radius: 7px;
+        background: #1268ff;
+        color: #fff;
+        font-size: 10px;
+        line-height: 14px;
+        text-align: center;
+      }
     }
   }
 
@@ -449,6 +528,18 @@ export default {
         text-overflow: ellipsis;
       }
     }
+  }
+}
+
+@keyframes workbuddy-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 </style>

@@ -35,6 +35,9 @@
         class="triggerItem"
         v-for="item in triggerList"
         :key="item.value"
+        :data-testid="
+          item.value === 'structure' ? 'layout' : item.value === 'theme' ? 'theme' : 'sidebar-' + item.value
+        "
         :class="{ active: activeSidebar === item.value }"
         @click="trigger(item)"
       >

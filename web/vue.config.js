@@ -1,4 +1,15 @@
 const path = require('path')
+const { execSync } = require('child_process')
+try {
+  process.env.VUE_APP_BUILD_COMMIT = execSync('git rev-parse --short HEAD', {
+    cwd: path.resolve(__dirname, '..')
+  })
+    .toString()
+    .trim()
+} catch (err) {
+  process.env.VUE_APP_BUILD_COMMIT = process.env.VUE_APP_BUILD_COMMIT || 'unknown'
+}
+process.env.VUE_APP_BUILD_TIME = new Date().toISOString()
 const isDev = process.env.NODE_ENV === 'development'
 const isLibrary = process.env.NODE_ENV === 'library'
 const publicPath =
@@ -16,7 +27,7 @@ module.exports = {
   lintOnSave: false,
   productionSourceMap: false,
   filenameHashing: false,
-  transpileDependencies: ['yjs', 'lib0', 'quill', 'y-websocket', 'y-protocols'],
+    transpileDependencies: ['yjs', 'lib0', 'quill', 'y-websocket', 'y-protocols', 'socket.io-client', 'engine.io-client'],
   chainWebpack: config => {
     // 移除 preload 插件
     config.plugins.delete('preload')
@@ -65,6 +76,16 @@ module.exports = {
         pathRewrite: { '^/wb-api': '' },
         timeout: 0,
         proxyTimeout: 3600000
+      },
+      '/collab-v2': {
+        target: process.env.COLLAB_API || 'http://127.0.0.1:1234',
+        changeOrigin: true,
+        ws: true
+      },
+      '/api': {
+        target: process.env.COLLAB_API || 'http://127.0.0.1:1234',
+        changeOrigin: true,
+        ws: true
       }
     }
   }

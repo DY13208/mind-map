@@ -7,6 +7,7 @@ import {
 } from '../../utils'
 import { ERROR_TYPES } from '../../constants/constant'
 import pkg from '../../../package.json'
+import { undoTrace } from '../../utils/collabTrace'
 
 //  命令类
 class Command {
@@ -49,17 +50,69 @@ class Command {
   //  注册快捷键
   registerShortcutKeys() {
     this.mindMap.keyCommand.addShortcut('Control+z', () => {
+      const cooperate = this.mindMap.cooperate
+      undoTrace('keyboard', {
+        key: 'Control+z',
+        command: 'BACK',
+        v2: !!(cooperate && cooperate.collabV2Adapter),
+        historyLength: this.history.length,
+        historyIndex: this.activeHistoryIndex
+      })
       this.mindMap.execCommand('BACK')
     })
     this.mindMap.keyCommand.addShortcut('Control+y', () => {
+      const cooperate = this.mindMap.cooperate
+      undoTrace('keyboard', {
+        key: 'Control+y',
+        command: 'FORWARD',
+        v2: !!(cooperate && cooperate.collabV2Adapter),
+        historyLength: this.history.length,
+        historyIndex: this.activeHistoryIndex
+      })
       this.mindMap.execCommand('FORWARD')
     })
   }
 
   //  执行命令
   exec(name, ...args) {
+    if (this.mindMap.opt.readonly) {
+      const data = name === 'SET_NODE_DATA' ? args[1] : null
+      const allowed = {
+        SET_NODE_ACTIVE: true,
+        CLEAR_ACTIVE_NODE: true,
+        SET_NODE_EXPAND: true,
+        EXPAND_ALL: true,
+        UNEXPAND_ALL: true,
+        UNEXPAND_TO_LEVEL: true,
+        GO_TARGET_NODE: true,
+        SELECT_ALL: true,
+        RETURN_CENTER: true,
+        BACK: true,
+        FORWARD: true
+      }
+      const expandOnly =
+        name === 'SET_NODE_DATA' &&
+        data &&
+        typeof data === 'object' &&
+        Object.keys(data).length > 0 &&
+        Object.keys(data).every(key => key === 'expand' || key === 'isActive')
+      if (!allowed[name] && !expandOnly) {
+        return
+      }
+    }
     if (this.commands[name]) {
       this.mindMap.emit('beforeExecCommand', name, ...args)
+      if (name === 'BACK' || name === 'FORWARD') {
+        const cooperate = this.mindMap.cooperate
+        const top = this.history[this.activeHistoryIndex]
+        undoTrace('command.exec', {
+          name,
+          v2: !!(cooperate && cooperate.collabV2Adapter),
+          historyLength: this.history.length,
+          historyIndex: this.activeHistoryIndex,
+          topType: top ? 'snapshot' : 'empty'
+        })
+      }
       this.commands[name].forEach(fn => {
         fn(...args)
       })

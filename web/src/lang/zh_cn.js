@@ -87,7 +87,27 @@ export default {
     enableDragImport: '是否允许直接拖拽文件到页面进行导入',
     imgTextMargin: '节点图片和文本间隔',
     textContentMargin: '节点各种内容间隔',
-    enableAi: '是否开启AI功能'
+    enableAi: '是否开启AI功能',
+    workbuddyModel: 'WorkBuddy 模型',
+    workbuddyModelPlaceholder: '选择模型',
+    workbuddyModelRefresh: '刷新列表',
+    workbuddyModelPlatform: '平台模型',
+    workbuddyModelCustom: '自定义模型',
+    workbuddyModelCustomTag: '自定义',
+    workbuddyModelUnavailable: 'WorkBuddy 未就绪，无法加载模型列表',
+    workbuddyModelLoadFailed: '加载模型列表失败',
+    flowExpandConcurrency: '补齐并发数',
+    flowExpandConcurrencyTip: '同时运行的补齐任务数，建议 1-3（对应 WorkBuddy 多会话）'
+  },
+  flowExpand: {
+    enqueued: '已加入补齐队列',
+    cancelQueue: '取消',
+    queueHint: '还有 {count} 个任务排队中',
+    panelTitle: '补齐队列',
+    summary: '执行 {running} · 排队 {queued} · 并发 {concurrency}',
+    runningSlot: '执行 #{slot}',
+    queuedSlot: '排队 #{index}',
+    done: '已完成'
   },
   color: {
     moreColor: '更多颜色'
@@ -137,10 +157,12 @@ export default {
     addToDo: '添加待办',
     removeToDo: '删除待办',
     aiCreate: 'AI续写',
-    flowExpand: '补齐流程/数据',
+    flowExpand: '补齐',
     modifyNodeLink: '修改节点链接',
     linkToNode: '链接到指定节点',
-    removeNodeLink: '删除节点链接'
+    removeNodeLink: '删除节点链接',
+    mapRef: '引用思维导图',
+    removeMapRef: '移除导图引用'
   },
   count: {
     words: '字数',
@@ -350,7 +372,7 @@ export default {
     newFileTip: '新建文件前请先导出当前编辑的文件，谨防内容丢失',
     openFileTip: '打开文件前请先导出当前编辑的文件，谨防内容丢失',
     ai: 'AI',
-    flowExpand: '补齐流程',
+    flowExpand: '补齐',
     cooperate: '协同'
   },
   edit: {
@@ -367,9 +389,15 @@ export default {
     deleteNodeImgTip: '是否确认删除该节点图片？',
     autoOpenNodeRichTextTip: '检测到导入了富文本内容，已自动开启富文本模式',
     importingTip: '正在导入，请稍候…',
+    importSavingTip: '正在保存到服务器，请勿关闭页面',
+    importSavingParse: '正在整理导图结构…',
+    importSavingUpload: '正在上传到服务器…',
+    importSavingWrite: '正在写入节点…',
+    importSavingCommit: '正在提交数据库…',
+    importSavingApply: '保存完成，正在应用到画布…',
     importPersistFailed: '导入未能保存到当前房间，已恢复为服务器上的导图',
     largeMapImportTip:
-      '节点较多，已收起深层分支并开启性能模式，避免卡死。需要时再点节点上的展开。',
+      '节点较多，已只展开浅层并限制同级数量，避免卡死。需要时再点节点上的展开。',
     localStorageExceededTip:
       '本地草稿保存失败。协同房间里的图以服务器为准，不会因此丢失。若未进入房间，请导出一份备份。',
     withBg: '带背景',
@@ -537,6 +565,39 @@ export default {
     tip4: '删除成功',
     tip5: '链接节点不存在，是否删除该链接？'
   },
+  mapRef: {
+    title: '引用思维导图',
+    searchMaps: '搜索导图名称',
+    bindMap: '绑定整张导图',
+    bindNode: '定位到节点（可选）',
+    searchNodes: '在目标导图中搜索节点',
+    wholeMap: '整张导图',
+    noFiles: '暂无导图',
+    emptySearch: '没有匹配「{q}」的导图',
+    missingMap: '目标导图不存在或已删除',
+    missingNode: '目标节点不存在，已打开导图根节点',
+    noPermission: '没有访问该导图的权限',
+    saved: '已保存引用',
+    removed: '已移除引用',
+    openFailed: '无法打开引用的导图',
+    currentMap: '不能引用当前导图'
+  },
+  acl: {
+    share: '分享 / 权限',
+    mine: '我的',
+    owner: '所有者',
+    editor: '可编辑',
+    viewer: '只读',
+    remove: '移除',
+    searchUsers: '搜索同事姓名或账号',
+    addViewer: '设为只读',
+    addEditor: '设为可编辑',
+    memberAdded: '已添加成员',
+    memberRemoved: '已移除成员',
+    updateFailed: '更新权限失败',
+    demoted: '你对该导图的权限已变为只读',
+    noAccess: '你没有权限访问该思维导图'
+  },
   cooperate: {
     title: '协同编辑',
     userName: '昵称',
@@ -555,6 +616,8 @@ export default {
     saving: '保存中…',
     saved: '已保存',
     saveError: '保存失败',
+    offline: '离线编辑',
+    reconnecting: '正在重新连接',
     roomUnavailable: '房间已删除或不可用',
     join: '加入协同',
     leave: '退出协同',
@@ -572,8 +635,22 @@ export default {
     connectFailed: '连接协同服务失败，请确认已启动协同服务',
     peers: '当前在线',
     you: '我',
+    noOnlinePeers: '暂无其他在线成员',
+    chipSaved: '✓ 已保存',
+    chipSaving: '● 保存中',
+    chipOffline: '○ 离线编辑',
+    chipSyncing: '↻ 正在同步',
+    chipFailed: '! 同步失败',
+    diagTitle: '同步失败详情',
+    diagCopy: '复制诊断信息',
+    diagCopied: '已复制',
     tip: '同一房间的人会实时同步画布。局域网协作请使用启动脚本写入的本机 IP。',
     startServerTip: '可双击项目根目录「启动.bat」一键启动页面、协同和 AI 服务',
+    searchFiles: '搜索文件名',
+    fileCount: '{count} 个',
+    currentRoom: '当前',
+    advanced: '高级设置',
+    emptySearch: '没有找到「{q}」',
     files: '已保存的文件',
     refresh: '刷新',
     openFile: '打开',
@@ -589,6 +666,8 @@ export default {
     renamed: '已重命名',
     history: '操作历史',
     noHistory: '还没有可审计的操作',
-    undoFailed: '无法撤销该操作'
+    undoFailed: '无法撤销该操作',
+    undoConflict: '无法撤销：该内容已被其他协作者修改',
+    redoConflict: '无法重做：该内容已被其他协作者修改'
   }
 }
