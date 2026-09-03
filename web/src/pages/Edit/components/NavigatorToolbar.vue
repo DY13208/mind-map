@@ -1,91 +1,96 @@
 <template>
-  <div
-    class="navigatorToolbarWrapper"
-    :class="{ isDark: isDark, collapsed: toolbarCollapsed }"
-  >
-    <div class="navigatorContainer customScrollbar">
-      <div class="item">
-        <el-select
-          v-model="lang"
-          size="small"
-          style="width: 100px"
-          @change="onLangChange"
-        >
-          <el-option
-            v-for="item in langList"
-            :key="item.value"
-            :label="item.name"
-            :value="item.value"
-          />
-        </el-select>
-      </div>
-      <div class="item">
-        <el-tooltip
-          effect="dark"
-          :content="$t('navigatorToolbar.backToRoot')"
-          placement="top"
-        >
-          <div class="btn iconfont icondingwei" @click="backToRoot"></div>
-        </el-tooltip>
-      </div>
-      <div class="item">
-        <div class="btn iconfont iconsousuo" @click="showSearch"></div>
-      </div>
-      <div class="item">
-        <MouseAction :isDark="isDark" :mindMap="mindMap"></MouseAction>
-      </div>
-      <div class="item">
-        <el-tooltip
-          effect="dark"
-          :content="
-            openMiniMap
-              ? $t('navigatorToolbar.closeMiniMap')
-              : $t('navigatorToolbar.openMiniMap')
-          "
-          placement="top"
-        >
-          <div class="btn iconfont icondaohang1" @click="toggleMiniMap"></div>
-        </el-tooltip>
-      </div>
-      <div class="item">
-        <!-- <el-switch
+  <div class="navigatorToolbarDock">
+    <CanvasToolbarActions
+      class="navigatorToolbarActions"
+      :collapsed="toolbarCollapsed"
+    ></CanvasToolbarActions>
+    <div
+      class="navigatorToolbarWrapper"
+      :class="{ isDark: isDark, collapsed: toolbarCollapsed }"
+    >
+      <div class="navigatorContainer customScrollbar">
+        <div class="item">
+          <el-select
+            v-model="lang"
+            size="small"
+            style="width: 100px"
+            @change="onLangChange"
+          >
+            <el-option
+              v-for="item in langList"
+              :key="item.value"
+              :label="item.name"
+              :value="item.value"
+            />
+          </el-select>
+        </div>
+        <div class="item">
+          <el-tooltip
+            effect="dark"
+            :content="$t('navigatorToolbar.backToRoot')"
+            placement="top"
+          >
+            <div class="btn iconfont icondingwei" @click="backToRoot"></div>
+          </el-tooltip>
+        </div>
+        <div class="item">
+          <div class="btn iconfont iconsousuo" @click="showSearch"></div>
+        </div>
+        <div class="item">
+          <MouseAction :isDark="isDark" :mindMap="mindMap"></MouseAction>
+        </div>
+        <div class="item">
+          <el-tooltip
+            effect="dark"
+            :content="
+              openMiniMap
+                ? $t('navigatorToolbar.closeMiniMap')
+                : $t('navigatorToolbar.openMiniMap')
+            "
+            placement="top"
+          >
+            <div class="btn iconfont icondaohang1" @click="toggleMiniMap"></div>
+          </el-tooltip>
+        </div>
+        <div class="item">
+          <!-- <el-switch
         v-model="isReadonly"
         :active-text="$t('navigatorToolbar.readonly')"
         :inactive-text="$t('navigatorToolbar.edit')"
         @change="readonlyChange"
       >
       </el-switch> -->
-        <el-tooltip
-          effect="dark"
-          :content="
-            isReadonly
-              ? $t('navigatorToolbar.edit')
-              : $t('navigatorToolbar.readonly')
-          "
-          placement="top"
-        >
+          <el-tooltip
+            effect="dark"
+            :content="
+              isReadonly
+                ? $t('navigatorToolbar.edit')
+                : $t('navigatorToolbar.readonly')
+            "
+            placement="top"
+          >
+            <div
+              class="btn iconfont"
+              :class="[isReadonly ? 'iconyanjing' : 'iconbianji1']"
+              v-if="roomCanEdit"
+              @click="readonlyChange"
+            ></div>
+          </el-tooltip>
+        </div>
+        <div class="item">
+          <Fullscreen :isDark="isDark" :mindMap="mindMap"></Fullscreen>
+        </div>
+        <div class="item">
+          <Scale :isDark="isDark" :mindMap="mindMap"></Scale>
+        </div>
+        <div class="item">
           <div
             class="btn iconfont"
-            :class="[isReadonly ? 'iconyanjing' : 'iconbianji1']"
-            v-if="roomCanEdit"
-            @click="readonlyChange"
+            :class="[isDark ? 'iconmoon_line' : 'iconlieri']"
+            @click="toggleDark"
           ></div>
-        </el-tooltip>
-      </div>
-      <div class="item">
-        <Fullscreen :isDark="isDark" :mindMap="mindMap"></Fullscreen>
-      </div>
-      <div class="item">
-        <Scale :isDark="isDark" :mindMap="mindMap"></Scale>
-      </div>
-      <div class="item">
-        <div
-          class="btn iconfont"
-          :class="[isDark ? 'iconmoon_line' : 'iconlieri']"
-          @click="toggleDark"
-        ></div>
-      </div>
-      <!-- <div class="item">
+        </div>
+        <!-- <div class="item">
       <el-tooltip
         effect="dark"
         :content="$t('navigatorToolbar.changeSourceCodeEdit')"
@@ -94,61 +99,62 @@
         <div class="btn iconfont iconyuanma" @click="openSourceCodeEdit"></div>
       </el-tooltip>
       </div> -->
-      <div class="item">
-        <Demonstrate :isDark="isDark" :mindMap="mindMap"></Demonstrate>
+        <div class="item">
+          <Demonstrate :isDark="isDark" :mindMap="mindMap"></Demonstrate>
+        </div>
+        <div class="item">
+          <el-dropdown @command="handleCommand">
+            <div class="btn el-icon-more"></div>
+            <el-dropdown-menu slot="dropdown">
+              <el-dropdown-item command="shortcutKey">
+                <span class="iconfont iconjianpan"></span>
+                {{ $t('navigatorToolbar.shortcutKeys') }}
+              </el-dropdown-item>
+              <el-dropdown-item command="aiChat">
+                <span class="iconfont iconAIshengcheng"></span>
+                {{ $t('navigatorToolbar.ai') }}
+              </el-dropdown-item>
+              <el-dropdown-item command="client">
+                <span class="iconfont iconxiazai"></span>
+                {{ $t('navigatorToolbar.downloadClient') }}
+              </el-dropdown-item>
+              <el-dropdown-item command="github">
+                <span class="iconfont icongithub"></span>
+                Github
+              </el-dropdown-item>
+              <el-dropdown-item command="site">
+                <span class="iconfont iconwangzhan"></span>
+                {{ $t('navigatorToolbar.site') }}
+              </el-dropdown-item>
+              <el-dropdown-item disabled
+                >{{ $t('navigatorToolbar.current') }}v{{
+                  version
+                }}</el-dropdown-item
+              >
+            </el-dropdown-menu>
+          </el-dropdown>
+        </div>
       </div>
-      <div class="item">
-        <el-dropdown @command="handleCommand">
-          <div class="btn el-icon-more"></div>
-          <el-dropdown-menu slot="dropdown">
-            <el-dropdown-item command="shortcutKey">
-              <span class="iconfont iconjianpan"></span>
-              {{ $t('navigatorToolbar.shortcutKeys') }}
-            </el-dropdown-item>
-            <el-dropdown-item command="aiChat">
-              <span class="iconfont iconAIshengcheng"></span>
-              {{ $t('navigatorToolbar.ai') }}
-            </el-dropdown-item>
-            <el-dropdown-item command="client">
-              <span class="iconfont iconxiazai"></span>
-              {{ $t('navigatorToolbar.downloadClient') }}
-            </el-dropdown-item>
-            <el-dropdown-item command="github">
-              <span class="iconfont icongithub"></span>
-              Github
-            </el-dropdown-item>
-            <el-dropdown-item command="site">
-              <span class="iconfont iconwangzhan"></span>
-              {{ $t('navigatorToolbar.site') }}
-            </el-dropdown-item>
-            <el-dropdown-item disabled
-              >{{ $t('navigatorToolbar.current') }}v{{
-                version
-              }}</el-dropdown-item
-            >
-          </el-dropdown-menu>
-        </el-dropdown>
-      </div>
+      <button
+        type="button"
+        class="collapseToggleBtn"
+        :class="{ collapsed: toolbarCollapsed }"
+        :title="
+          toolbarCollapsed
+            ? $t('navigatorToolbar.expandToolbar')
+            : $t('navigatorToolbar.collapseToolbar')
+        "
+        :aria-label="
+          toolbarCollapsed
+            ? $t('navigatorToolbar.expandToolbar')
+            : $t('navigatorToolbar.collapseToolbar')
+        "
+        :aria-expanded="String(!toolbarCollapsed)"
+        @click.stop="toolbarCollapsed = !toolbarCollapsed"
+      >
+        <span class="iconfont iconjiantouyou"></span>
+      </button>
     </div>
-    <button
-      type="button"
-      class="collapseToggleBtn"
-      :class="{ collapsed: toolbarCollapsed }"
-      :title="
-        toolbarCollapsed
-          ? $t('navigatorToolbar.expandToolbar')
-          : $t('navigatorToolbar.collapseToolbar')
-      "
-      :aria-label="
-        toolbarCollapsed
-          ? $t('navigatorToolbar.expandToolbar')
-          : $t('navigatorToolbar.collapseToolbar')
-      "
-      :aria-expanded="String(!toolbarCollapsed)"
-      @click.stop="toolbarCollapsed = !toolbarCollapsed"
-    >
-      <span class="iconfont iconjiantouyou"></span>
-    </button>
   </div>
 </template>
 
@@ -156,6 +162,7 @@
 import Scale from './Scale.vue'
 import Fullscreen from './Fullscreen.vue'
 import MouseAction from './MouseAction.vue'
+import CanvasToolbarActions from './CanvasToolbarActions.vue'
 import { langList } from '@/config'
 import i18n from '@/i18n'
 import { storeLang, getLang } from '@/api'
@@ -169,6 +176,7 @@ export default {
     Scale,
     Fullscreen,
     MouseAction,
+    CanvasToolbarActions,
     Demonstrate
   },
   props: {
@@ -294,10 +302,26 @@ export default {
 </script>
 
 <style lang="less" scoped>
-.navigatorToolbarWrapper {
+.navigatorToolbarDock {
   position: fixed;
-  right: 20px;
+  right: 68px;
   bottom: 20px;
+  z-index: 3;
+  pointer-events: none;
+
+  > * {
+    pointer-events: auto;
+  }
+}
+
+.navigatorToolbarActions {
+  position: absolute;
+  left: calc(100% + 12px);
+  bottom: 0;
+}
+
+.navigatorToolbarWrapper {
+  position: relative;
   transition: transform 0.25s ease;
 
   &.collapsed {
@@ -396,9 +420,22 @@ export default {
 }
 
 @media screen and (max-width: 700px) {
-  .navigatorToolbarWrapper {
+  .navigatorToolbarDock {
     left: 20px;
     right: 20px;
+    bottom: 20px;
+    display: block;
+  }
+
+  .navigatorToolbarActions {
+    left: auto;
+    right: 0;
+    bottom: calc(100% + 12px);
+  }
+
+  .navigatorToolbarWrapper {
+    left: auto;
+    right: auto;
 
     .navigatorContainer {
       overflow-x: auto;
