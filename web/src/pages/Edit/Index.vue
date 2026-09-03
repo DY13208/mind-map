@@ -5,7 +5,6 @@
   >
     <template v-if="show">
       <Toolbar v-if="!isZenMode"></Toolbar>
-      <CanvasToolbarActions v-if="!isZenMode"></CanvasToolbarActions>
       <Edit></Edit>
     </template>
   </div>
@@ -13,7 +12,6 @@
 
 <script>
 import Toolbar from './components/Toolbar.vue'
-import CanvasToolbarActions from './components/CanvasToolbarActions.vue'
 import Edit from './components/Edit.vue'
 import { mapState, mapMutations } from 'vuex'
 import { getLocalConfig } from '@/api'
@@ -22,7 +20,6 @@ export default {
   name: 'EditPage',
   components: {
     Toolbar,
-    CanvasToolbarActions,
     Edit
   },
   data() {
