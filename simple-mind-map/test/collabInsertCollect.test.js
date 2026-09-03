@@ -1,7 +1,9 @@
 const assert = require('assert')
 const {
   snapshotNodeDataUids,
-  collectNewNodeDataInserts
+  collectNewNodeDataInserts,
+  collectNodeDataUids,
+  removeUidsFromNodeData
 } = require('../src/utils/collabInsertCollect')
 
 function node(uid, text, children = [], extra = {}) {
@@ -97,9 +99,35 @@ function testSkipsAckedAndTombstoned() {
   )
 }
 
+function testRemoveUidFromNodeDataBeforeInstanceExists() {
+  const parent = node('p', 'P', [node('a', 'A'), node('ghost', '蔡徐坤123')])
+  const uids = collectNodeDataUids(parent.children[1])
+  assert.deepStrictEqual(uids, ['ghost'])
+  const changed = removeUidsFromNodeData(parent, uids)
+  assert.strictEqual(changed, true)
+  assert.deepStrictEqual(
+    parent.children.map(item => item.data.uid),
+    ['a']
+  )
+}
+
+function testTombstonedInsertNotCollected() {
+  const parent = node('p', 'P', [node('a', 'A'), node('ghost', '蔡徐坤123')])
+  const rows = collectNewNodeDataInserts([parent], {
+    knownUids: new Set(['p', 'a']),
+    isTombstoned: uid => uid === 'ghost'
+  })
+  assert.deepStrictEqual(
+    rows.map(item => item.uid),
+    []
+  )
+}
+
 testSiblingInsertNotFoundByActiveWalk()
 testInsertChild()
 testSkipsKnownUnackedGhost()
 testPasteSubtreeDepthOrder()
 testSkipsAckedAndTombstoned()
+testRemoveUidFromNodeDataBeforeInstanceExists()
+testTombstonedInsertNotCollected()
 console.log('collabInsertCollect.test.js ok')

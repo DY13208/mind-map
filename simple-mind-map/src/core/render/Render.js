@@ -1084,7 +1084,7 @@ class Render {
       if (!node.nodeData.children) {
         node.nodeData.children = []
       }
-      childList = createUidForAppointNodes(childList, createNewId)
+      childList = createUidForAppointNodes(childList, createNewId, null, true)
       // 第一个引用不需要重新创建uid，后面的需要重新创建，否则id会重复
       createNewId = true
       node.nodeData.children.push(...childList)
@@ -1850,7 +1850,7 @@ class Render {
   //   粘贴节点到节点
   pasteNode(data) {
     data = formatDataToArray(simpleDeepClone(data))
-    createUidForAppointNodes(data, true)
+    createUidForAppointNodes(data, true, null, true)
     this.mindMap.execCommand('INSERT_MULTI_CHILD_NODE', [], data)
   }
 
