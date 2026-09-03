@@ -329,6 +329,8 @@ export default {
     reserve: '保留'
   },
   toolbar: {
+    collapseAllToolbars: '一鍵收起工具列',
+    expandAllToolbars: '一鍵展開工具列',
     collapseToolbar: '收起頂部工具列',
     expandToolbar: '展開頂部工具列',
     undo: '復原',
