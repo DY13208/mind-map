@@ -42,6 +42,8 @@ import { shapeList } from './node/Shape'
 import { lineStyleProps } from '../../theme/default'
 import { CONSTANTS, ERROR_TYPES } from '../../constants/constant'
 import { Polygon } from '@svgdotjs/svg.js'
+import mapRefUtil from '../../utils/mapRef'
+import { undoTrace, undoFullTreeForbidden } from '../../utils/collabTrace'
 
 // 布局列表
 const layouts = {
@@ -144,6 +146,13 @@ class Render {
 
   // 重新设置思维导图数据
   setData(data) {
+    const cooperate = this.mindMap.cooperate
+    if (cooperate && cooperate._v2UndoActive && !cooperate._v2UndoAllowReplace) {
+      undoFullTreeForbidden('Render.setData', {
+        duringUndo: true
+      })
+      return
+    }
     this.renderTree = data || null
   }
 
@@ -341,6 +350,8 @@ class Render {
     // 设置节点超链接
     this.setNodeHyperlink = this.setNodeHyperlink.bind(this)
     this.mindMap.command.add('SET_NODE_HYPERLINK', this.setNodeHyperlink)
+    this.setNodeMapRef = this.setNodeMapRef.bind(this)
+    this.mindMap.command.add('SET_NODE_MAP_REF', this.setNodeMapRef)
     // 设置节点备注
     this.setNodeNote = this.setNodeNote.bind(this)
     this.mindMap.command.add('SET_NODE_NOTE', this.setNodeNote)
@@ -765,9 +776,27 @@ class Render {
 
   // 前进回退
   backForward(type, step) {
+    const cooperate = this.mindMap.cooperate
+    const v2 = !!(cooperate && cooperate.collabV2Adapter)
+    undoTrace('render.backForward', {
+      type,
+      step,
+      v2,
+      authority: v2 ? 'v2-adapter' : 'native-history'
+    })
+    if (v2) {
+      undoTrace('render.skip-native-restore', {
+        type,
+        reason: 'COLLAB_V2 undo authority'
+      })
+      return
+    }
     this.mindMap.execCommand('CLEAR_ACTIVE_NODE')
     const data = this.mindMap.command[type](step)
     if (data) {
+      if (cooperate && typeof cooperate.sanitizeHistoryTree === 'function') {
+        cooperate.sanitizeHistoryTree(data)
+      }
       this.renderTree = data
       this.mindMap.render()
     }
@@ -1372,6 +1401,7 @@ class Render {
 
   // 原生 paste：HTTP 可用，且点击节点后焦点在 SVG 上也能粘贴
   handlePaste(event) {
+    if (this.mindMap.opt.readonly) return
     const { disabledClipboard } = this.mindMap.opt
     if (disabledClipboard) return
     if (this.isClipboardPasteTargetBlocked(event)) return
@@ -1412,18 +1442,20 @@ class Render {
     if (!disabledClipboard && checkClipboardReadEnable()) {
       try {
         const res = await getDataFromClipboard()
-        await this.applyClipboardPaste({
-          text: res.text || '',
-          html: res.html || '',
-          img: res.img || null
-        })
+        const hasClip = !!(res && (res.text || res.html || res.img))
+        if (hasClip) {
+          await this.applyClipboardPaste({
+            text: res.text || '',
+            html: res.html || '',
+            img: res.img || null
+          })
+          return
+        }
       } catch (error) {
         errorHandler(ERROR_TYPES.READ_CLIPBOARD_ERROR, error)
-        if (this.beingCopyData) {
-          this.mindMap.execCommand('PASTE_NODE', this.beingCopyData)
-        }
       }
-    } else if (this.beingCopyData) {
+    }
+    if (this.beingCopyData) {
       this.mindMap.execCommand('PASTE_NODE', this.beingCopyData)
     }
   }
@@ -2215,6 +2247,12 @@ class Render {
     this.setNodeDataRender(node, {
       hyperlink: link,
       hyperlinkTitle: title
+    })
+  }
+
+  setNodeMapRef(node, mapRef) {
+    this.setNodeDataRender(node, {
+      mapRef: mapRefUtil.normalizeMapRef(mapRef)
     })
   }
 

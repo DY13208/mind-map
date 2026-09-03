@@ -160,7 +160,9 @@ export default {
     flowExpand: '补齐',
     modifyNodeLink: '修改节点链接',
     linkToNode: '链接到指定节点',
-    removeNodeLink: '删除节点链接'
+    removeNodeLink: '删除节点链接',
+    mapRef: '引用思维导图',
+    removeMapRef: '移除导图引用'
   },
   count: {
     words: '字数',
@@ -561,6 +563,39 @@ export default {
     tip4: '删除成功',
     tip5: '链接节点不存在，是否删除该链接？'
   },
+  mapRef: {
+    title: '引用思维导图',
+    searchMaps: '搜索导图名称',
+    bindMap: '绑定整张导图',
+    bindNode: '定位到节点（可选）',
+    searchNodes: '在目标导图中搜索节点',
+    wholeMap: '整张导图',
+    noFiles: '暂无导图',
+    emptySearch: '没有匹配「{q}」的导图',
+    missingMap: '目标导图不存在或已删除',
+    missingNode: '目标节点不存在，已打开导图根节点',
+    noPermission: '没有访问该导图的权限',
+    saved: '已保存引用',
+    removed: '已移除引用',
+    openFailed: '无法打开引用的导图',
+    currentMap: '不能引用当前导图'
+  },
+  acl: {
+    share: '分享 / 权限',
+    mine: '我的',
+    owner: '所有者',
+    editor: '可编辑',
+    viewer: '只读',
+    remove: '移除',
+    searchUsers: '搜索同事姓名或账号',
+    addViewer: '设为只读',
+    addEditor: '设为可编辑',
+    memberAdded: '已添加成员',
+    memberRemoved: '已移除成员',
+    updateFailed: '更新权限失败',
+    demoted: '你对该导图的权限已变为只读',
+    noAccess: '你没有权限访问该思维导图'
+  },
   cooperate: {
     title: '协同编辑',
     userName: '昵称',
@@ -579,6 +614,8 @@ export default {
     saving: '保存中…',
     saved: '已保存',
     saveError: '保存失败',
+    offline: '离线编辑',
+    reconnecting: '正在重新连接',
     roomUnavailable: '房间已删除或不可用',
     join: '加入协同',
     leave: '退出协同',
@@ -596,6 +633,15 @@ export default {
     connectFailed: '连接协同服务失败，请确认已启动协同服务',
     peers: '当前在线',
     you: '我',
+    noOnlinePeers: '暂无其他在线成员',
+    chipSaved: '✓ 已保存',
+    chipSaving: '● 保存中',
+    chipOffline: '○ 离线编辑',
+    chipSyncing: '↻ 正在同步',
+    chipFailed: '! 同步失败',
+    diagTitle: '同步失败详情',
+    diagCopy: '复制诊断信息',
+    diagCopied: '已复制',
     tip: '同一房间的人会实时同步画布。局域网协作请使用启动脚本写入的本机 IP。',
     startServerTip: '可双击项目根目录「启动.bat」一键启动页面、协同和 AI 服务',
     searchFiles: '搜索文件名',
@@ -618,6 +664,8 @@ export default {
     renamed: '已重命名',
     history: '操作历史',
     noHistory: '还没有可审计的操作',
-    undoFailed: '无法撤销该操作'
+    undoFailed: '无法撤销该操作',
+    undoConflict: '无法撤销：该内容已被其他协作者修改',
+    redoConflict: '无法重做：该内容已被其他协作者修改'
   }
 }

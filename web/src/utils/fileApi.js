@@ -1,6 +1,7 @@
 import { FetchTimeoutError, fetchWithTimeout } from './fetchWithTimeout'
 import { getRuntimeConfig } from './runtimeConfig'
 import { createOperationId } from 'simple-mind-map/src/utils/operationId'
+import { collabTrace, collabPersistSnapshot } from 'simple-mind-map/src/utils/collabTrace'
 import { stringifyJsonOffMainThread } from '@/utils/importTree'
 
 const DEFAULT_TIMEOUT_MS = 20000
@@ -107,6 +108,36 @@ function apiBase() {
   return getRuntimeConfig().collabApi
 }
 
+function currentClientId() {
+  try {
+    if (typeof window === 'undefined') return ''
+    const debug = window.__COLLAB_V2_STATE__
+    if (debug && debug.clientId) return String(debug.clientId)
+    const snap =
+      window.__COLLAB_V2_STATUS__ &&
+      typeof window.__COLLAB_V2_STATUS__ === 'function' &&
+      window.__COLLAB_V2_STATUS__()
+    if (snap && snap.clientId) return String(snap.clientId)
+    const key = 'mind-map-collab-v2-client'
+    let id = sessionStorage.getItem(key)
+    if (!id && typeof crypto !== 'undefined' && crypto.randomUUID) {
+      id = crypto.randomUUID()
+      sessionStorage.setItem(key, id)
+    }
+    return id || ''
+  } catch (err) {
+    return ''
+  }
+}
+
+function clientHeaders(extra = {}) {
+  const clientId = currentClientId()
+  return {
+    ...(clientId ? { 'x-client-id': clientId } : {}),
+    ...extra
+  }
+}
+
 async function request(path, options = {}) {
   const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS
   const priority = requestPriority(options)
@@ -128,7 +159,7 @@ async function request(path, options = {}) {
         cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',
-          ...(options.headers || {})
+          ...clientHeaders(options.headers || {})
         },
         method: options.method,
         body: options.body
@@ -165,7 +196,7 @@ function requestWithUploadProgress(path, options = {}) {
     xhr.timeout = options.timeoutMs || DEFAULT_TIMEOUT_MS
     const headers = {
       'Content-Type': 'application/json',
-      ...(options.headers || {})
+      ...clientHeaders(options.headers || {})
     }
     Object.keys(headers).forEach(key => {
       if (headers[key] != null) xhr.setRequestHeader(key, headers[key])
@@ -232,9 +263,56 @@ export function deleteFile(roomKey) {
 }
 
 export function getSaveStatus(roomKey) {
+  const persistBefore = collabPersistSnapshot()
+  let statusBefore = null
+  try {
+    statusBefore =
+      typeof window !== 'undefined' &&
+      window.__COLLAB_V2_STATUS__ &&
+      window.__COLLAB_V2_STATUS__()
+  } catch (err) {
+    statusBefore = null
+  }
+  collabTrace('save-status.request', {
+    roomKey,
+    lastPushedCount: persistBefore.lastPushedCount,
+    lastServerRevision: statusBefore && statusBefore.lastServerRevision,
+    outboxPending: statusBefore && statusBefore.outboxPending,
+    pendingCount: statusBefore && statusBefore.pendingCount,
+    saveState: statusBefore && statusBefore.saveState
+  })
   return request(`/api/files/${encodeURIComponent(roomKey)}/save-status`, {
     timeoutMs: 8000,
     priority: 'low'
+  }).then(data => {
+    const persistAfter = collabPersistSnapshot()
+    let statusAfter = null
+    try {
+      statusAfter =
+        typeof window !== 'undefined' &&
+        window.__COLLAB_V2_STATUS__ &&
+        window.__COLLAB_V2_STATUS__()
+    } catch (err) {
+      statusAfter = null
+    }
+    collabTrace('save-status.response', {
+      roomKey,
+      status: data && data.status,
+      replacing: data && data.replacing,
+      version: data && data.version,
+      lastPushedCount: persistAfter.lastPushedCount,
+      lastPushedChanged:
+        persistBefore.lastPushedCount !== persistAfter.lastPushedCount,
+      lastServerRevision: statusAfter && statusAfter.lastServerRevision,
+      lastServerRevisionChanged:
+        (statusBefore && statusBefore.lastServerRevision) !==
+        (statusAfter && statusAfter.lastServerRevision),
+      outboxPending: statusAfter && statusAfter.outboxPending,
+      outboxChanged:
+        (statusBefore && statusBefore.outboxPending) !==
+        (statusAfter && statusAfter.outboxPending)
+    })
+    return data
   })
 }
 
@@ -299,6 +377,18 @@ export function locateFileNode(roomKey, uid) {
     `/api/files/${encodeURIComponent(roomKey)}/locate?uid=${encodeURIComponent(
       uid || ''
     )}`
+  )
+}
+
+export function resolveFileRef(roomKey, uid) {
+  const params = new URLSearchParams()
+  if (uid) params.set('uid', uid)
+  const query = params.toString()
+  return request(
+    `/api/files/${encodeURIComponent(roomKey)}/ref-resolve${
+      query ? `?${query}` : ''
+    }`,
+    { timeoutMs: 8000, priority: 'high' }
   )
 }
 
@@ -377,16 +467,35 @@ function operationHeaders(body = {}) {
   if (!body.operationId && !body.operation_id) {
     body.operationId = operationId
   }
-  return operationId ? { 'X-Operation-Id': operationId } : {}
+  const clientId = currentClientId()
+  if (clientId && !body.clientId && !body.client_id) {
+    body.clientId = clientId
+  }
+  return {
+    ...(operationId ? { 'X-Operation-Id': operationId } : {}),
+    ...clientHeaders()
+  }
 }
 
-export function searchFile(roomKey, q, limit = 80) {
+export function searchFile(roomKey, q, limit = 200, offset = 0, extra = {}) {
   const params = new URLSearchParams()
   if (q) params.set('q', q)
   if (limit) params.set('limit', String(limit))
+  if (offset) params.set('offset', String(offset))
+  if (extra.all) params.set('all', '1')
   return request(
     `/api/files/${encodeURIComponent(roomKey)}/search?${params.toString()}`
   )
+}
+
+export async function searchFileAll(roomKey, q) {
+  const data = await searchFile(roomKey, q, 500, 0, { all: true })
+  const matches = data.matches || []
+  return {
+    ...data,
+    matches,
+    total: Number(data.total != null ? data.total : matches.length)
+  }
 }
 
 export async function replaceFileTree(roomKey, tree, extra = {}) {
@@ -453,4 +562,43 @@ export function deleteFileNode(roomKey, uid, options = {}) {
       body: JSON.stringify(payload)
     }
   )
+}
+
+export function getFileMembers(roomKey) {
+  return request(`/api/files/${encodeURIComponent(roomKey)}/members`)
+}
+
+export function addFileMember(roomKey, userId, role) {
+  return request(`/api/files/${encodeURIComponent(roomKey)}/members`, {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId, role })
+  })
+}
+
+export function updateFileMember(roomKey, userId, role) {
+  return request(
+    `/api/files/${encodeURIComponent(roomKey)}/members/${encodeURIComponent(
+      userId
+    )}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ role })
+    }
+  )
+}
+
+export function removeFileMember(roomKey, userId) {
+  return request(
+    `/api/files/${encodeURIComponent(roomKey)}/members/${encodeURIComponent(
+      userId
+    )}`,
+    { method: 'DELETE' }
+  )
+}
+
+export function searchUsers(q, limit = 20) {
+  const params = new URLSearchParams()
+  if (q) params.set('q', q)
+  if (limit) params.set('limit', String(limit))
+  return request(`/api/users?${params.toString()}`)
 }

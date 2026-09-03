@@ -1,5 +1,9 @@
 <template>
-  <div class="toolbarNodeBtnList" :class="[dir, { isDark: isDark }]">
+  <div
+    class="toolbarNodeBtnList"
+    :class="[dir, { isDark: isDark }]"
+    @mousedown.prevent
+  >
     <template v-for="item in list">
       <div
         v-if="item === 'back'"
@@ -38,6 +42,7 @@
       <div
         v-if="item === 'siblingNode'"
         class="toolbarBtn"
+        data-testid="add-sibling"
         :class="{
           disabled: activeNodes.length <= 0 || hasRoot || hasGeneralization
         }"
@@ -49,6 +54,7 @@
       <div
         v-if="item === 'childNode'"
         class="toolbarBtn"
+        data-testid="add-child"
         :class="{
           disabled: activeNodes.length <= 0
         }"
@@ -60,6 +66,7 @@
       <div
         v-if="item === 'deleteNode'"
         class="toolbarBtn"
+        data-testid="delete-node"
         :class="{
           disabled: activeNodes.length <= 0
         }"
@@ -71,6 +78,7 @@
       <div
         v-if="item === 'image'"
         class="toolbarBtn"
+        data-testid="image"
         :class="{
           disabled: activeNodes.length <= 0
         }"
@@ -93,6 +101,7 @@
       <div
         v-if="item === 'link'"
         class="toolbarBtn"
+        data-testid="hyperlink"
         :class="{
           disabled: activeNodes.length <= 0
         }"
@@ -104,6 +113,7 @@
       <div
         v-if="item === 'note'"
         class="toolbarBtn"
+        data-testid="note"
         :class="{
           disabled: activeNodes.length <= 0
         }"
@@ -115,6 +125,7 @@
       <div
         v-if="item === 'tag'"
         class="toolbarBtn"
+        data-testid="tag"
         :class="{
           disabled: activeNodes.length <= 0
         }"
@@ -126,6 +137,7 @@
       <div
         v-if="item === 'summary'"
         class="toolbarBtn"
+        data-testid="generalization"
         :class="{
           disabled: activeNodes.length <= 0 || hasRoot || hasGeneralization
         }"
@@ -137,6 +149,7 @@
       <div
         v-if="item === 'associativeLine'"
         class="toolbarBtn"
+        data-testid="associative-line"
         :class="{
           disabled: activeNodes.length <= 0 || hasGeneralization
         }"
@@ -170,6 +183,7 @@
       <div
         v-if="item === 'outerFrame'"
         class="toolbarBtn"
+        data-testid="outer-frame"
         :class="{
           disabled: activeNodes.length <= 0 || hasGeneralization
         }"

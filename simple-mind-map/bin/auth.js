@@ -488,10 +488,13 @@ function applyCorsHeaders(req, res) {
 
 function sendJson(req, res, status, payload) {
   applyCorsHeaders(req, res)
-  res.writeHead(status, {
+  const headers = {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store'
-  })
+  }
+  const cookies = res.getHeader('Set-Cookie')
+  if (cookies) headers['Set-Cookie'] = cookies
+  res.writeHead(status, headers)
   res.end(JSON.stringify(payload))
 }
 
@@ -1070,6 +1073,31 @@ async function handleAuthApi(req, res) {
     return true
   }
 
+  if (
+    pathname === '/api/auth/e2e-identity' &&
+    req.method === 'POST' &&
+    /^(1|true|yes)$/i.test(String(process.env.COLLAB_E2E || ''))
+  ) {
+    let body = {}
+    try {
+      body = await readJsonBody(req)
+    } catch (err) {
+      sendJson(req, res, 400, { error: '请求体格式无效', code: 'invalid_body' })
+      return true
+    }
+    try {
+      const identity = await createTestIdentity(body)
+      setCookie(res, req, SESSION_COOKIE, identity.token, config.sessionMaxSeconds)
+      sendJson(req, res, 200, identity)
+    } catch (err) {
+      sendJson(req, res, 500, {
+        error: err.message || 'e2e identity failed',
+        code: 'E2E_IDENTITY'
+      })
+    }
+    return true
+  }
+
   if (pathname === '/api/auth/dev-login' && req.method === 'POST') {
     if (!isDevBypassAllowed(req)) {
       sendJson(req, res, 404, { error: 'not found' })
@@ -1131,7 +1159,10 @@ async function handleAuthApi(req, res) {
     return true
   }
 
-  if (pathname === '/api/auth/check' && req.method === 'GET') {
+  if (
+    (pathname === '/api/auth/check' || pathname === '/api/auth/me') &&
+    req.method === 'GET'
+  ) {
     const user = await authenticateRequest(req)
     if (!user) {
       sendJson(req, res, 401, { error: 'unauthorized', code: 'unauthorized' })
@@ -1156,6 +1187,22 @@ function isAllowedOriginFor(req, origin, authConfig) {
   return candidates.some(candidate => originsEquivalent(candidate, normalized))
 }
 
+async function createTestIdentity(options = {}) {
+  if (!/^(1|true|yes)$/i.test(String(process.env.COLLAB_E2E || ''))) {
+    throw new Error('createTestIdentity requires COLLAB_E2E=1')
+  }
+  await initAuth()
+  const user = {
+    id: String(options.userId || 'e2e-user').slice(0, 160),
+    name: String(options.name || options.userId || 'E2E'),
+    avatar: '',
+    departments: []
+  }
+  await upsertUser(user)
+  const token = await createSession(user.id)
+  return { userId: user.id, name: user.name, token }
+}
+
 module.exports = {
   initAuth,
   isAuthEnabled,
@@ -1165,6 +1212,7 @@ module.exports = {
   requireAuthenticatedRequest,
   applyCorsHeaders,
   isAllowedOrigin,
+  createTestIdentity,
   __test: {
     readConfig,
     safeReturnTo,

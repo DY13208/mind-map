@@ -55,6 +55,7 @@ services:
       MIND_MAP_API: "http://127.0.0.1:1234"
       COLLAB_RATE_LIMIT_PER_ROOM: "800"
       COLLAB_RATE_LIMIT_GLOBAL: "8000"
+      COLLAB_V2: "1"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

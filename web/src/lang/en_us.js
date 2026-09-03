@@ -164,7 +164,9 @@ export default {
     flowExpand: 'Complete flow/data',
     modifyNodeLink: 'Modify node link',
     linkToNode: 'Link to node',
-    removeNodeLink: 'Remove node link'
+    removeNodeLink: 'Remove node link',
+    mapRef: 'Reference mind map',
+    removeMapRef: 'Remove map reference'
   },
   count: {
     words: 'Words',
@@ -582,6 +584,39 @@ export default {
     tip4: 'Delete successful',
     tip5: 'The link node does not exist. Weather to delete the link?'
   },
+  mapRef: {
+    title: 'Reference mind map',
+    searchMaps: 'Search maps',
+    bindMap: 'Bind whole map',
+    bindNode: 'Locate a node (optional)',
+    searchNodes: 'Search nodes in the target map',
+    wholeMap: 'Whole map',
+    noFiles: 'No maps yet',
+    emptySearch: 'No maps matching "{q}"',
+    missingMap: 'The target map is missing or deleted',
+    missingNode: 'Target node is missing; opened the map root',
+    noPermission: 'You do not have access to this map',
+    saved: 'Reference saved',
+    removed: 'Reference removed',
+    openFailed: 'Could not open the referenced map',
+    currentMap: 'Cannot reference the current map'
+  },
+  acl: {
+    share: 'Share / Access',
+    mine: 'Mine',
+    owner: 'Owner',
+    editor: 'Can edit',
+    viewer: 'View only',
+    remove: 'Remove',
+    searchUsers: 'Search name or account',
+    addViewer: 'Add as viewer',
+    addEditor: 'Add as editor',
+    memberAdded: 'Member added',
+    memberRemoved: 'Member removed',
+    updateFailed: 'Failed to update access',
+    demoted: 'Your access to this map is now view only',
+    noAccess: 'You do not have access to this mind map'
+  },
   cooperate: {
     title: 'Collaborative editing',
     userName: 'Name',
@@ -600,6 +635,8 @@ export default {
     saving: 'Saving…',
     saved: 'Saved',
     saveError: 'Save failed',
+    offline: 'Editing offline',
+    reconnecting: 'Reconnecting',
     roomUnavailable: 'This room was deleted or is unavailable',
     join: 'Join',
     leave: 'Leave',
@@ -618,6 +655,15 @@ export default {
     connectFailed: 'Failed to connect. Make sure the collab server is running',
     peers: 'Online',
     you: 'You',
+    noOnlinePeers: 'No one else is online',
+    chipSaved: '✓ Saved',
+    chipSaving: '● Saving',
+    chipOffline: '○ Offline',
+    chipSyncing: '↻ Syncing',
+    chipFailed: '! Sync failed',
+    diagTitle: 'Sync failure details',
+    diagCopy: 'Copy diagnostics',
+    diagCopied: 'Copied',
     tip:
       'People in the same room sync the canvas in real time. For LAN use, set the server to your computer IP.',
     startServerTip:

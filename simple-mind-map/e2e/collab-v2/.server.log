@@ -1,0 +1,1287 @@
+[outbox] publisher disabled (COLLAB_OUTBOX_PUBLISHER)
+Collab server running at ws://127.0.0.1:51916
+Collab HTTP API: http://127.0.0.1:51916/api/files
+Collaboration V2: ws://127.0.0.1:51916/collab-v2
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+node:events:497
+      throw er; // Unhandled 'error' event
+      ^
+
+RangeError: Invalid WebSocket frame: MASK must be set
+    at Receiver.getInfo (D:\mind-map\simple-mind-map\node_modules\ws\lib\receiver.js:284:16)
+    at Receiver.startLoop (D:\mind-map\simple-mind-map\node_modules\ws\lib\receiver.js:131:22)
+    at Receiver._write (D:\mind-map\simple-mind-map\node_modules\ws\lib\receiver.js:78:10)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.socketOnData (D:\mind-map\simple-mind-map\node_modules\ws\lib\websocket.js:1162:35)
+    at Socket.emit (node:events:519:28)
+    at addChunk (node:internal/streams/readable:561:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:512:3)
+Emitted 'error' event on WebSocket instance at:
+    at Receiver.receiverOnError (D:\mind-map\simple-mind-map\node_modules\ws\lib\websocket.js:1049:13)
+    at Receiver.emit (node:events:519:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:89:21) {
+  code: 'WS_ERR_EXPECTED_MASK',
+  [Symbol(status-code)]: 1002
+}
+
+Node.js v22.23.1
+(node:15388) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[outbox] publisher disabled (COLLAB_OUTBOX_PUBLISHER)
+Collab server running at ws://127.0.0.1:52925
+Collab HTTP API: http://127.0.0.1:52925/api/files
+Collaboration V2 disabled (COLLAB_V2=0)
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[outbox] publisher disabled (COLLAB_OUTBOX_PUBLISHER)
+Collab server running at ws://127.0.0.1:51676
+Collab HTTP API: http://127.0.0.1:51676/api/files
+Collaboration V2: ws://127.0.0.1:51676/collab-v2
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[outbox] publisher disabled (COLLAB_OUTBOX_PUBLISHER)
+Collab server running at ws://127.0.0.1:54074
+Collab HTTP API: http://127.0.0.1:54074/api/files
+Collaboration V2: ws://127.0.0.1:54074/collab-v2
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:62465
+Collab HTTP API: http://127.0.0.1:62465/api/files
+Collaboration V2: ws://127.0.0.1:62465/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:52200
+Collab HTTP API: http://127.0.0.1:52200/api/files
+Collaboration V2: ws://127.0.0.1:52200/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:60047
+Collab HTTP API: http://127.0.0.1:60047/api/files
+Collaboration V2: ws://127.0.0.1:60047/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+(node:40952) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:60058
+Collab HTTP API: http://127.0.0.1:60058/api/files
+Collaboration V2: ws://127.0.0.1:60058/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+(node:6808) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:60068
+Collab HTTP API: http://127.0.0.1:60068/api/files
+Collaboration V2: ws://127.0.0.1:60068/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:60843
+Collab server running at ws://127.0.0.1:60841
+Collab HTTP API: http://127.0.0.1:60843/api/files
+Collaboration V2: ws://127.0.0.1:60843/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+Collab HTTP API: http://127.0.0.1:60841/api/files
+Collaboration V2: ws://127.0.0.1:60841/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+(node:28616) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:60860
+Collab HTTP API: http://127.0.0.1:60860/api/files
+Collaboration V2: ws://127.0.0.1:60860/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[archive] compressed logs for 1 room(s)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:61297
+Collab HTTP API: http://127.0.0.1:61297/api/files
+Collaboration V2: ws://127.0.0.1:61297/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:57658
+Collab HTTP API: http://127.0.0.1:57658/api/files
+Collaboration V2: ws://127.0.0.1:57658/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:57096
+Collab HTTP API: http://127.0.0.1:57096/api/files
+Collaboration V2: ws://127.0.0.1:57096/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:63101
+Collab HTTP API: http://127.0.0.1:63101/api/files
+Collaboration V2: ws://127.0.0.1:63101/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:59163
+Collab HTTP API: http://127.0.0.1:59163/api/files
+Collaboration V2: ws://127.0.0.1:59163/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:53367
+Collab HTTP API: http://127.0.0.1:53367/api/files
+Collaboration V2: ws://127.0.0.1:53367/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:60710
+Collab HTTP API: http://127.0.0.1:60710/api/files
+Collaboration V2: ws://127.0.0.1:60710/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:58163
+Collab HTTP API: http://127.0.0.1:58163/api/files
+Collaboration V2: ws://127.0.0.1:58163/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[room_nodes] backfill failed e2e-6ed066ba 禁止复用已删除节点 UID: alpha
+[room_nodes] backfill failed e2e-fb5fd3d1 禁止复用已删除节点 UID: alpha
+[room_nodes] backfill failed e2e-fb5fd3d1 禁止复用已删除节点 UID: alpha
+[room_nodes] backfill failed e2e-fb5fd3d1 禁止复用已删除节点 UID: alpha
+[room_nodes] backfill failed e2e-6ed066ba 禁止复用已删除节点 UID: alpha
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:61030
+Collab HTTP API: http://127.0.0.1:61030/api/files
+Collaboration V2: ws://127.0.0.1:61030/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[v2-trace] 5.server.recv {
+  t: '2026-09-03T06:11:23.436Z',
+  stage: '5.server.recv',
+  traceId: 'tr-1a065e4b892-5eb2e286',
+  opId: 'ac657140-310f-4f93-9946-b57f81667c14',
+  roomKey: 'e2e-7dc30d3f',
+  userId: 'anonymous',
+  type: 'node.update'
+}
+[v2-trace] 5.acl {
+  t: '2026-09-03T06:11:23.442Z',
+  stage: '5.acl',
+  traceId: 'tr-1a065e4b892-5eb2e286',
+  opId: 'ac657140-310f-4f93-9946-b57f81667c14',
+  roomKey: 'e2e-7dc30d3f',
+  userId: 'anonymous',
+  role: null,
+  canEdit: true
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-03T06:11:23.451Z',
+  stage: '6.applier.sql',
+  traceId: 'tr-1a065e4b892-5eb2e286',
+  type: 'node.update',
+  targetUid: 'alpha',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-03T06:11:23.459Z',
+  stage: '6.applier.done',
+  type: 'node.update',
+  targetUid: 'alpha',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier {
+  t: '2026-09-03T06:11:23.488Z',
+  stage: '6.applier',
+  traceId: 'tr-1a065e4b892-5eb2e286',
+  opId: 'ac657140-310f-4f93-9946-b57f81667c14',
+  type: 'node.update',
+  targetUid: 'alpha',
+  queries: 3,
+  writes: 1
+}
+[v2-trace] 7.pg.commit {
+  t: '2026-09-03T06:11:23.488Z',
+  stage: '7.pg.commit',
+  traceId: 'tr-1a065e4b892-5eb2e286',
+  opId: 'ac657140-310f-4f93-9946-b57f81667c14',
+  serverRevision: 1,
+  affectedRows: 1,
+  duplicate: false,
+  commitSuccess: true
+}
+[v2-trace] 9.broadcast {
+  t: '2026-09-03T06:11:23.490Z',
+  stage: '9.broadcast',
+  traceId: 'tr-1a065e4b892-5eb2e286',
+  room: 'e2e-7dc30d3f',
+  recipientCount: 1,
+  opId: 'ac657140-310f-4f93-9946-b57f81667c14'
+}
+[v2-trace] 5.server.recv {
+  t: '2026-09-03T06:11:33.705Z',
+  stage: '5.server.recv',
+  traceId: 'tr-1a065e4d6f6-0727a45d',
+  opId: 'e36a09fa-bd91-4fba-99d0-218138849b36',
+  roomKey: 'e2e-aae09b89',
+  userId: 'anonymous',
+  type: 'node.insert'
+}
+[v2-trace] 5.acl {
+  t: '2026-09-03T06:11:33.709Z',
+  stage: '5.acl',
+  traceId: 'tr-1a065e4d6f6-0727a45d',
+  opId: 'e36a09fa-bd91-4fba-99d0-218138849b36',
+  roomKey: 'e2e-aae09b89',
+  userId: 'anonymous',
+  role: null,
+  canEdit: true
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-03T06:11:33.715Z',
+  stage: '6.applier.sql',
+  traceId: 'tr-1a065e4d6f6-0727a45d',
+  type: 'node.insert',
+  targetUid: '5edbc521-e133-4c5b-b84f-65bdc825c1be',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-03T06:11:33.723Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: '5edbc521-e133-4c5b-b84f-65bdc825c1be',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier {
+  t: '2026-09-03T06:11:33.739Z',
+  stage: '6.applier',
+  traceId: 'tr-1a065e4d6f6-0727a45d',
+  opId: 'e36a09fa-bd91-4fba-99d0-218138849b36',
+  type: 'node.insert',
+  targetUid: '5edbc521-e133-4c5b-b84f-65bdc825c1be',
+  queries: 6,
+  writes: 1
+}
+[v2-trace] 7.pg.commit {
+  t: '2026-09-03T06:11:33.739Z',
+  stage: '7.pg.commit',
+  traceId: 'tr-1a065e4d6f6-0727a45d',
+  opId: 'e36a09fa-bd91-4fba-99d0-218138849b36',
+  serverRevision: 1,
+  affectedRows: 1,
+  duplicate: false,
+  commitSuccess: true
+}
+[v2-trace] 9.broadcast {
+  t: '2026-09-03T06:11:33.739Z',
+  stage: '9.broadcast',
+  traceId: 'tr-1a065e4d6f6-0727a45d',
+  room: 'e2e-aae09b89',
+  recipientCount: 1,
+  opId: 'e36a09fa-bd91-4fba-99d0-218138849b36'
+}
+[v2-trace] 5.server.recv {
+  t: '2026-09-03T06:11:41.863Z',
+  stage: '5.server.recv',
+  traceId: 'tr-1a065e4f69b-3bc98d6a',
+  opId: 'eaf839d2-f40b-42e3-98ec-fe109d3d6b24',
+  roomKey: 'e2e-53f55f5a',
+  userId: 'anonymous',
+  type: 'node.insert'
+}
+[v2-trace] 5.acl {
+  t: '2026-09-03T06:11:41.867Z',
+  stage: '5.acl',
+  traceId: 'tr-1a065e4f69b-3bc98d6a',
+  opId: 'eaf839d2-f40b-42e3-98ec-fe109d3d6b24',
+  roomKey: 'e2e-53f55f5a',
+  userId: 'anonymous',
+  role: null,
+  canEdit: true
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-03T06:11:41.870Z',
+  stage: '6.applier.sql',
+  traceId: 'tr-1a065e4f69b-3bc98d6a',
+  type: 'node.insert',
+  targetUid: '16b83b54-d801-4b50-82ae-45fde5b6d9d7',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-03T06:11:41.877Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: '16b83b54-d801-4b50-82ae-45fde5b6d9d7',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier {
+  t: '2026-09-03T06:11:41.884Z',
+  stage: '6.applier',
+  traceId: 'tr-1a065e4f69b-3bc98d6a',
+  opId: 'eaf839d2-f40b-42e3-98ec-fe109d3d6b24',
+  type: 'node.insert',
+  targetUid: '16b83b54-d801-4b50-82ae-45fde5b6d9d7',
+  queries: 5,
+  writes: 1
+}
+[v2-trace] 7.pg.commit {
+  t: '2026-09-03T06:11:41.884Z',
+  stage: '7.pg.commit',
+  traceId: 'tr-1a065e4f69b-3bc98d6a',
+  opId: 'eaf839d2-f40b-42e3-98ec-fe109d3d6b24',
+  serverRevision: 1,
+  affectedRows: 1,
+  duplicate: false,
+  commitSuccess: true
+}
+[v2-trace] 9.broadcast {
+  t: '2026-09-03T06:11:41.884Z',
+  stage: '9.broadcast',
+  traceId: 'tr-1a065e4f69b-3bc98d6a',
+  room: 'e2e-53f55f5a',
+  recipientCount: 1,
+  opId: 'eaf839d2-f40b-42e3-98ec-fe109d3d6b24'
+}
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:64256
+Collab HTTP API: http://127.0.0.1:64256/api/files
+Collaboration V2: ws://127.0.0.1:64256/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[v2-trace] 5.server.recv {
+  t: '2026-09-03T06:16:05.728Z',
+  stage: '5.server.recv',
+  traceId: 'tr-1a065e90747-8955bf28',
+  opId: '5976720a-4f98-4754-b2c8-1d98e1cba806',
+  roomKey: 'e2e-160a13b3',
+  userId: 'anonymous',
+  type: 'node.update'
+}
+[v2-trace] 5.acl {
+  t: '2026-09-03T06:16:05.735Z',
+  stage: '5.acl',
+  traceId: 'tr-1a065e90747-8955bf28',
+  opId: '5976720a-4f98-4754-b2c8-1d98e1cba806',
+  roomKey: 'e2e-160a13b3',
+  userId: 'anonymous',
+  role: null,
+  canEdit: true
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-03T06:16:05.745Z',
+  stage: '6.applier.sql',
+  traceId: 'tr-1a065e90747-8955bf28',
+  type: 'node.update',
+  targetUid: 'alpha',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-03T06:16:05.754Z',
+  stage: '6.applier.done',
+  type: 'node.update',
+  targetUid: 'alpha',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier {
+  t: '2026-09-03T06:16:05.783Z',
+  stage: '6.applier',
+  traceId: 'tr-1a065e90747-8955bf28',
+  opId: '5976720a-4f98-4754-b2c8-1d98e1cba806',
+  type: 'node.update',
+  targetUid: 'alpha',
+  queries: 3,
+  writes: 1
+}
+[v2-trace] 7.pg.commit {
+  t: '2026-09-03T06:16:05.783Z',
+  stage: '7.pg.commit',
+  traceId: 'tr-1a065e90747-8955bf28',
+  opId: '5976720a-4f98-4754-b2c8-1d98e1cba806',
+  serverRevision: 1,
+  affectedRows: 1,
+  duplicate: false,
+  commitSuccess: true
+}
+[v2-trace] 9.broadcast {
+  t: '2026-09-03T06:16:05.785Z',
+  stage: '9.broadcast',
+  traceId: 'tr-1a065e90747-8955bf28',
+  room: 'e2e-160a13b3',
+  recipientCount: 1,
+  opId: '5976720a-4f98-4754-b2c8-1d98e1cba806'
+}
+[v2-trace] 5.server.recv {
+  t: '2026-09-03T06:16:13.443Z',
+  stage: '5.server.recv',
+  traceId: 'tr-1a065e91b92-1aa9b908',
+  opId: '0b95ce54-ded8-4c3b-a0fd-393f049730e6',
+  roomKey: 'e2e-94287fef',
+  userId: 'anonymous',
+  type: 'node.insert'
+}
+[v2-trace] 5.acl {
+  t: '2026-09-03T06:16:13.451Z',
+  stage: '5.acl',
+  traceId: 'tr-1a065e91b92-1aa9b908',
+  opId: '0b95ce54-ded8-4c3b-a0fd-393f049730e6',
+  roomKey: 'e2e-94287fef',
+  userId: 'anonymous',
+  role: null,
+  canEdit: true
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-03T06:16:13.461Z',
+  stage: '6.applier.sql',
+  traceId: 'tr-1a065e91b92-1aa9b908',
+  type: 'node.insert',
+  targetUid: '6feefab7-2a00-4564-a8e0-08d8c631b071',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-03T06:16:13.479Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: '6feefab7-2a00-4564-a8e0-08d8c631b071',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier {
+  t: '2026-09-03T06:16:13.500Z',
+  stage: '6.applier',
+  traceId: 'tr-1a065e91b92-1aa9b908',
+  opId: '0b95ce54-ded8-4c3b-a0fd-393f049730e6',
+  type: 'node.insert',
+  targetUid: '6feefab7-2a00-4564-a8e0-08d8c631b071',
+  queries: 6,
+  writes: 1
+}
+[v2-trace] 7.pg.commit {
+  t: '2026-09-03T06:16:13.500Z',
+  stage: '7.pg.commit',
+  traceId: 'tr-1a065e91b92-1aa9b908',
+  opId: '0b95ce54-ded8-4c3b-a0fd-393f049730e6',
+  serverRevision: 1,
+  affectedRows: 1,
+  duplicate: false,
+  commitSuccess: true
+}
+[v2-trace] 9.broadcast {
+  t: '2026-09-03T06:16:13.501Z',
+  stage: '9.broadcast',
+  traceId: 'tr-1a065e91b92-1aa9b908',
+  room: 'e2e-94287fef',
+  recipientCount: 1,
+  opId: '0b95ce54-ded8-4c3b-a0fd-393f049730e6'
+}
+[v2-trace] 5.server.recv {
+  t: '2026-09-03T06:16:21.546Z',
+  stage: '5.server.recv',
+  traceId: 'tr-1a065e93b19-d9cf7792',
+  opId: 'c90e4af3-e857-48b3-b801-95f3815a98b9',
+  roomKey: 'e2e-5f916e34',
+  userId: 'anonymous',
+  type: 'node.insert'
+}
+[v2-trace] 5.acl {
+  t: '2026-09-03T06:16:21.552Z',
+  stage: '5.acl',
+  traceId: 'tr-1a065e93b19-d9cf7792',
+  opId: 'c90e4af3-e857-48b3-b801-95f3815a98b9',
+  roomKey: 'e2e-5f916e34',
+  userId: 'anonymous',
+  role: null,
+  canEdit: true
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-03T06:16:21.557Z',
+  stage: '6.applier.sql',
+  traceId: 'tr-1a065e93b19-d9cf7792',
+  type: 'node.insert',
+  targetUid: '3386738c-b79e-4a20-8f5f-212e4397b6a3',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-03T06:16:21.566Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: '3386738c-b79e-4a20-8f5f-212e4397b6a3',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier {
+  t: '2026-09-03T06:16:21.584Z',
+  stage: '6.applier',
+  traceId: 'tr-1a065e93b19-d9cf7792',
+  opId: 'c90e4af3-e857-48b3-b801-95f3815a98b9',
+  type: 'node.insert',
+  targetUid: '3386738c-b79e-4a20-8f5f-212e4397b6a3',
+  queries: 5,
+  writes: 1
+}
+[v2-trace] 7.pg.commit {
+  t: '2026-09-03T06:16:21.584Z',
+  stage: '7.pg.commit',
+  traceId: 'tr-1a065e93b19-d9cf7792',
+  opId: 'c90e4af3-e857-48b3-b801-95f3815a98b9',
+  serverRevision: 1,
+  affectedRows: 1,
+  duplicate: false,
+  commitSuccess: true
+}
+[v2-trace] 9.broadcast {
+  t: '2026-09-03T06:16:21.584Z',
+  stage: '9.broadcast',
+  traceId: 'tr-1a065e93b19-d9cf7792',
+  room: 'e2e-5f916e34',
+  recipientCount: 1,
+  opId: 'c90e4af3-e857-48b3-b801-95f3815a98b9'
+}
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:61882
+Collab HTTP API: http://127.0.0.1:61882/api/files
+Collaboration V2: ws://127.0.0.1:61882/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:64924
+Collab HTTP API: http://127.0.0.1:64924/api/files
+Collaboration V2: ws://127.0.0.1:64924/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:56845
+Collab HTTP API: http://127.0.0.1:56845/api/files
+Collaboration V2: ws://127.0.0.1:56845/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:53278
+Collab HTTP API: http://127.0.0.1:53278/api/files
+Collaboration V2: ws://127.0.0.1:53278/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:22.413Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-2f9ba846',
+  userId: 'anonymous',
+  clientId: '4203bb09-14fd-4192-b6a4-8c17541bd592',
+  socketId: 'eD8UcKkslivEEfwHAAAB',
+  lastServerRevision: 0
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:22.432Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-2f9ba846',
+  userId: 'anonymous',
+  clientId: '4203bb09-14fd-4192-b6a4-8c17541bd592',
+  socketId: 'eD8UcKkslivEEfwHAAAB',
+  lastServerRevision: 0
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:23.510Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-2f9ba846',
+  userId: 'anonymous',
+  clientId: '78bdc234-a18a-470a-86ff-c7f9b41f9137',
+  socketId: '_3yWNTgXtOWgu2gYAAAD',
+  lastServerRevision: 0
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:23.511Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-2f9ba846',
+  userId: 'anonymous',
+  clientId: '78bdc234-a18a-470a-86ff-c7f9b41f9137',
+  socketId: '_3yWNTgXtOWgu2gYAAAD',
+  lastServerRevision: 0
+}
+[v2-trace] 5.server.recv {
+  t: '2026-09-03T06:57:24.190Z',
+  stage: '5.server.recv',
+  traceId: 'tr-1a0660ed8ba-a229105f',
+  opId: 'db17322a-2ebf-4b3e-958c-0363c9774539',
+  roomKey: 'e2e-2f9ba846',
+  userId: 'anonymous',
+  clientId: '4203bb09-14fd-4192-b6a4-8c17541bd592',
+  type: 'node.update'
+}
+[v2-trace] 5.acl {
+  t: '2026-09-03T06:57:24.197Z',
+  stage: '5.acl',
+  traceId: 'tr-1a0660ed8ba-a229105f',
+  opId: 'db17322a-2ebf-4b3e-958c-0363c9774539',
+  roomKey: 'e2e-2f9ba846',
+  userId: 'anonymous',
+  role: null,
+  canEdit: true
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-03T06:57:24.208Z',
+  stage: '6.applier.sql',
+  traceId: 'tr-1a0660ed8ba-a229105f',
+  type: 'node.update',
+  targetUid: 'alpha',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-03T06:57:24.220Z',
+  stage: '6.applier.done',
+  type: 'node.update',
+  targetUid: 'alpha',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier {
+  t: '2026-09-03T06:57:24.246Z',
+  stage: '6.applier',
+  traceId: 'tr-1a0660ed8ba-a229105f',
+  opId: 'db17322a-2ebf-4b3e-958c-0363c9774539',
+  type: 'node.update',
+  targetUid: 'alpha',
+  queries: 3,
+  writes: 1
+}
+[v2-trace] 7.pg.commit {
+  t: '2026-09-03T06:57:24.247Z',
+  stage: '7.pg.commit',
+  traceId: 'tr-1a0660ed8ba-a229105f',
+  opId: 'db17322a-2ebf-4b3e-958c-0363c9774539',
+  serverRevision: 1,
+  affectedRows: 1,
+  duplicate: false,
+  commitSuccess: true
+}
+[v2-trace] 9.broadcast {
+  t: '2026-09-03T06:57:24.249Z',
+  stage: '9.broadcast',
+  traceId: 'tr-1a0660ed8ba-a229105f',
+  room: 'e2e-2f9ba846',
+  recipientCount: 1,
+  opId: 'db17322a-2ebf-4b3e-958c-0363c9774539',
+  clientId: '4203bb09-14fd-4192-b6a4-8c17541bd592',
+  actorId: 'anonymous'
+}
+[v2-trace] 5.server.recv {
+  t: '2026-09-03T06:57:26.156Z',
+  stage: '5.server.recv',
+  traceId: 'tr-1a0660ed635-8b91fb9f',
+  opId: '7993db48-845d-4691-838c-228bb34d32ba',
+  roomKey: 'e2e-2f9ba846',
+  userId: 'anonymous',
+  clientId: '78bdc234-a18a-470a-86ff-c7f9b41f9137',
+  type: 'node.update'
+}
+[v2-trace] 5.acl {
+  t: '2026-09-03T06:57:26.165Z',
+  stage: '5.acl',
+  traceId: 'tr-1a0660ed635-8b91fb9f',
+  opId: '7993db48-845d-4691-838c-228bb34d32ba',
+  roomKey: 'e2e-2f9ba846',
+  userId: 'anonymous',
+  role: null,
+  canEdit: true
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-03T06:57:26.172Z',
+  stage: '6.applier.sql',
+  traceId: 'tr-1a0660ed635-8b91fb9f',
+  type: 'node.update',
+  targetUid: 'alpha',
+  version: 2
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-03T06:57:26.186Z',
+  stage: '6.applier.done',
+  type: 'node.update',
+  targetUid: 'alpha',
+  version: 2,
+  affected: undefined
+}
+[v2-trace] 6.applier {
+  t: '2026-09-03T06:57:26.201Z',
+  stage: '6.applier',
+  traceId: 'tr-1a0660ed635-8b91fb9f',
+  opId: '7993db48-845d-4691-838c-228bb34d32ba',
+  type: 'node.update',
+  targetUid: 'alpha',
+  queries: 3,
+  writes: 1
+}
+[v2-trace] 7.pg.commit {
+  t: '2026-09-03T06:57:26.201Z',
+  stage: '7.pg.commit',
+  traceId: 'tr-1a0660ed635-8b91fb9f',
+  opId: '7993db48-845d-4691-838c-228bb34d32ba',
+  serverRevision: 2,
+  affectedRows: 1,
+  duplicate: false,
+  commitSuccess: true
+}
+[v2-trace] 9.broadcast {
+  t: '2026-09-03T06:57:26.202Z',
+  stage: '9.broadcast',
+  traceId: 'tr-1a0660ed635-8b91fb9f',
+  room: 'e2e-2f9ba846',
+  recipientCount: 0,
+  opId: '7993db48-845d-4691-838c-228bb34d32ba',
+  clientId: '78bdc234-a18a-470a-86ff-c7f9b41f9137',
+  actorId: 'anonymous'
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:26.529Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-2f9ba846',
+  userId: 'anonymous',
+  clientId: '4203bb09-14fd-4192-b6a4-8c17541bd592',
+  socketId: 't1pSbGRy2pBVPYm8AAAF',
+  lastServerRevision: 2
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:26.530Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-2f9ba846',
+  userId: 'anonymous',
+  clientId: '4203bb09-14fd-4192-b6a4-8c17541bd592',
+  socketId: 't1pSbGRy2pBVPYm8AAAF',
+  lastServerRevision: 2
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:27.465Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-2f9ba846',
+  userId: 'anonymous',
+  clientId: '78bdc234-a18a-470a-86ff-c7f9b41f9137',
+  socketId: '9yx1iURY8n8i6zQ8AAAH',
+  lastServerRevision: 2
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:27.468Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-2f9ba846',
+  userId: 'anonymous',
+  clientId: '78bdc234-a18a-470a-86ff-c7f9b41f9137',
+  socketId: '9yx1iURY8n8i6zQ8AAAH',
+  lastServerRevision: 2
+}
+[outbox] V1 publisher off (COLLAB_V2 runtime)
+Collab server running at ws://127.0.0.1:50702
+Collab HTTP API: http://127.0.0.1:50702/api/files
+Collaboration V2: ws://127.0.0.1:50702/collab-v2
+V1 y-websocket / presence / outbox publisher: off
+Persistence: PostgreSQL rooms + COS mind-map/
+Event bus: postgres (outbox publisher off)
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:46.753Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-cf23f1f3',
+  userId: 'anonymous',
+  clientId: '2ef43e5e-abce-47bc-a417-8bd1ddce69cb',
+  socketId: '0mJ8oZMv-vrCtNwyAAAB',
+  lastServerRevision: 0
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:46.790Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-cf23f1f3',
+  userId: 'anonymous',
+  clientId: '2ef43e5e-abce-47bc-a417-8bd1ddce69cb',
+  socketId: '0mJ8oZMv-vrCtNwyAAAB',
+  lastServerRevision: 0
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:48.241Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-cf23f1f3',
+  userId: 'anonymous',
+  clientId: '7b972d9f-6e11-4c48-891b-0bbf5acac71d',
+  socketId: '71Y4YKRD64vG6_HkAAAD',
+  lastServerRevision: 0
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:48.242Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-cf23f1f3',
+  userId: 'anonymous',
+  clientId: '7b972d9f-6e11-4c48-891b-0bbf5acac71d',
+  socketId: '71Y4YKRD64vG6_HkAAAD',
+  lastServerRevision: 0
+}
+[v2-trace] 5.server.recv {
+  t: '2026-09-03T06:57:48.938Z',
+  stage: '5.server.recv',
+  traceId: 'tr-1a0660f395e-2843bf45',
+  opId: '304d96e2-fe2d-4f60-98e8-76c6a1933b13',
+  roomKey: 'e2e-cf23f1f3',
+  userId: 'anonymous',
+  clientId: '2ef43e5e-abce-47bc-a417-8bd1ddce69cb',
+  type: 'node.update'
+}
+[v2-trace] 5.acl {
+  t: '2026-09-03T06:57:48.947Z',
+  stage: '5.acl',
+  traceId: 'tr-1a0660f395e-2843bf45',
+  opId: '304d96e2-fe2d-4f60-98e8-76c6a1933b13',
+  roomKey: 'e2e-cf23f1f3',
+  userId: 'anonymous',
+  role: null,
+  canEdit: true
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-03T06:57:48.960Z',
+  stage: '6.applier.sql',
+  traceId: 'tr-1a0660f395e-2843bf45',
+  type: 'node.update',
+  targetUid: 'alpha',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-03T06:57:48.972Z',
+  stage: '6.applier.done',
+  type: 'node.update',
+  targetUid: 'alpha',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier {
+  t: '2026-09-03T06:57:49.002Z',
+  stage: '6.applier',
+  traceId: 'tr-1a0660f395e-2843bf45',
+  opId: '304d96e2-fe2d-4f60-98e8-76c6a1933b13',
+  type: 'node.update',
+  targetUid: 'alpha',
+  queries: 3,
+  writes: 1
+}
+[v2-trace] 7.pg.commit {
+  t: '2026-09-03T06:57:49.003Z',
+  stage: '7.pg.commit',
+  traceId: 'tr-1a0660f395e-2843bf45',
+  opId: '304d96e2-fe2d-4f60-98e8-76c6a1933b13',
+  serverRevision: 1,
+  affectedRows: 1,
+  duplicate: false,
+  commitSuccess: true
+}
+[v2-trace] 9.broadcast {
+  t: '2026-09-03T06:57:49.004Z',
+  stage: '9.broadcast',
+  traceId: 'tr-1a0660f395e-2843bf45',
+  room: 'e2e-cf23f1f3',
+  recipientCount: 1,
+  opId: '304d96e2-fe2d-4f60-98e8-76c6a1933b13',
+  clientId: '2ef43e5e-abce-47bc-a417-8bd1ddce69cb',
+  actorId: 'anonymous'
+}
+[v2-trace] 5.server.recv {
+  t: '2026-09-03T06:57:50.906Z',
+  stage: '5.server.recv',
+  traceId: 'tr-1a0660f36e8-93b82c75',
+  opId: 'c91cc971-d766-49e1-949c-81713d6e864a',
+  roomKey: 'e2e-cf23f1f3',
+  userId: 'anonymous',
+  clientId: '7b972d9f-6e11-4c48-891b-0bbf5acac71d',
+  type: 'node.update'
+}
+[v2-trace] 5.acl {
+  t: '2026-09-03T06:57:50.999Z',
+  stage: '5.acl',
+  traceId: 'tr-1a0660f36e8-93b82c75',
+  opId: 'c91cc971-d766-49e1-949c-81713d6e864a',
+  roomKey: 'e2e-cf23f1f3',
+  userId: 'anonymous',
+  role: null,
+  canEdit: true
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-03T06:57:51.060Z',
+  stage: '6.applier.sql',
+  traceId: 'tr-1a0660f36e8-93b82c75',
+  type: 'node.update',
+  targetUid: 'alpha',
+  version: 2
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-03T06:57:51.096Z',
+  stage: '6.applier.done',
+  type: 'node.update',
+  targetUid: 'alpha',
+  version: 2,
+  affected: undefined
+}
+[v2-trace] 6.applier {
+  t: '2026-09-03T06:57:51.183Z',
+  stage: '6.applier',
+  traceId: 'tr-1a0660f36e8-93b82c75',
+  opId: 'c91cc971-d766-49e1-949c-81713d6e864a',
+  type: 'node.update',
+  targetUid: 'alpha',
+  queries: 3,
+  writes: 1
+}
+[v2-trace] 7.pg.commit {
+  t: '2026-09-03T06:57:51.183Z',
+  stage: '7.pg.commit',
+  traceId: 'tr-1a0660f36e8-93b82c75',
+  opId: 'c91cc971-d766-49e1-949c-81713d6e864a',
+  serverRevision: 2,
+  affectedRows: 1,
+  duplicate: false,
+  commitSuccess: true
+}
+[v2-trace] 9.broadcast {
+  t: '2026-09-03T06:57:51.184Z',
+  stage: '9.broadcast',
+  traceId: 'tr-1a0660f36e8-93b82c75',
+  room: 'e2e-cf23f1f3',
+  recipientCount: 0,
+  opId: 'c91cc971-d766-49e1-949c-81713d6e864a',
+  clientId: '7b972d9f-6e11-4c48-891b-0bbf5acac71d',
+  actorId: 'anonymous'
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:51.456Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-cf23f1f3',
+  userId: 'anonymous',
+  clientId: '2ef43e5e-abce-47bc-a417-8bd1ddce69cb',
+  socketId: 'cDNukSXGZ17fVqKoAAAF',
+  lastServerRevision: 2
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:51.457Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-cf23f1f3',
+  userId: 'anonymous',
+  clientId: '2ef43e5e-abce-47bc-a417-8bd1ddce69cb',
+  socketId: 'cDNukSXGZ17fVqKoAAAF',
+  lastServerRevision: 2
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:52.348Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-cf23f1f3',
+  userId: 'anonymous',
+  clientId: '7b972d9f-6e11-4c48-891b-0bbf5acac71d',
+  socketId: '8qtmtZVjc6wCRL8iAAAH',
+  lastServerRevision: 2
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:52.348Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-cf23f1f3',
+  userId: 'anonymous',
+  clientId: '7b972d9f-6e11-4c48-891b-0bbf5acac71d',
+  socketId: '8qtmtZVjc6wCRL8iAAAH',
+  lastServerRevision: 2
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:54.344Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-4aa799da',
+  userId: 'anonymous',
+  clientId: '5abd8a29-b42b-4724-a7b7-111550208133',
+  socketId: 'mRQCKudSFaWaZApvAAAJ',
+  lastServerRevision: 0
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:54.345Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-4aa799da',
+  userId: 'anonymous',
+  clientId: '5abd8a29-b42b-4724-a7b7-111550208133',
+  socketId: 'mRQCKudSFaWaZApvAAAJ',
+  lastServerRevision: 0
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:55.401Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-4aa799da',
+  userId: 'anonymous',
+  clientId: '97608440-625b-43c2-ac18-48b8d1687a15',
+  socketId: 'uhP3g8bfyfi_W4QUAAAL',
+  lastServerRevision: 0
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:55.402Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-4aa799da',
+  userId: 'anonymous',
+  clientId: '97608440-625b-43c2-ac18-48b8d1687a15',
+  socketId: 'uhP3g8bfyfi_W4QUAAAL',
+  lastServerRevision: 0
+}
+[v2-trace] 5.server.recv {
+  t: '2026-09-03T06:57:58.277Z',
+  stage: '5.server.recv',
+  traceId: 'tr-1a0660f5463-7aa935d5',
+  opId: '1261fed8-fd21-4098-85d3-e67968dbcc5d',
+  roomKey: 'e2e-4aa799da',
+  userId: 'anonymous',
+  clientId: '5abd8a29-b42b-4724-a7b7-111550208133',
+  type: 'node.insert'
+}
+[v2-trace] 5.acl {
+  t: '2026-09-03T06:57:58.283Z',
+  stage: '5.acl',
+  traceId: 'tr-1a0660f5463-7aa935d5',
+  opId: '1261fed8-fd21-4098-85d3-e67968dbcc5d',
+  roomKey: 'e2e-4aa799da',
+  userId: 'anonymous',
+  role: null,
+  canEdit: true
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-03T06:57:58.289Z',
+  stage: '6.applier.sql',
+  traceId: 'tr-1a0660f5463-7aa935d5',
+  type: 'node.insert',
+  targetUid: 'cc344151-efd9-42d4-a697-35f5763247fd',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-03T06:57:58.304Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: 'cc344151-efd9-42d4-a697-35f5763247fd',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier {
+  t: '2026-09-03T06:57:58.321Z',
+  stage: '6.applier',
+  traceId: 'tr-1a0660f5463-7aa935d5',
+  opId: '1261fed8-fd21-4098-85d3-e67968dbcc5d',
+  type: 'node.insert',
+  targetUid: 'cc344151-efd9-42d4-a697-35f5763247fd',
+  queries: 6,
+  writes: 1
+}
+[v2-trace] 7.pg.commit {
+  t: '2026-09-03T06:57:58.321Z',
+  stage: '7.pg.commit',
+  traceId: 'tr-1a0660f5463-7aa935d5',
+  opId: '1261fed8-fd21-4098-85d3-e67968dbcc5d',
+  serverRevision: 1,
+  affectedRows: 1,
+  duplicate: false,
+  commitSuccess: true
+}
+[v2-trace] 9.broadcast {
+  t: '2026-09-03T06:57:58.324Z',
+  stage: '9.broadcast',
+  traceId: 'tr-1a0660f5463-7aa935d5',
+  room: 'e2e-4aa799da',
+  recipientCount: 1,
+  opId: '1261fed8-fd21-4098-85d3-e67968dbcc5d',
+  clientId: '5abd8a29-b42b-4724-a7b7-111550208133',
+  actorId: 'anonymous'
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:59.558Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-4aa799da',
+  userId: 'anonymous',
+  clientId: '5abd8a29-b42b-4724-a7b7-111550208133',
+  socketId: 'mhfTd6zhIXNEvvuPAAAN',
+  lastServerRevision: 1
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:57:59.558Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-4aa799da',
+  userId: 'anonymous',
+  clientId: '5abd8a29-b42b-4724-a7b7-111550208133',
+  socketId: 'mhfTd6zhIXNEvvuPAAAN',
+  lastServerRevision: 1
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:58:00.504Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-4aa799da',
+  userId: 'anonymous',
+  clientId: '97608440-625b-43c2-ac18-48b8d1687a15',
+  socketId: 'hj4yYjPBQcz9zygGAAAP',
+  lastServerRevision: 1
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:58:00.506Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-4aa799da',
+  userId: 'anonymous',
+  clientId: '97608440-625b-43c2-ac18-48b8d1687a15',
+  socketId: 'hj4yYjPBQcz9zygGAAAP',
+  lastServerRevision: 1
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:58:02.155Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-595386c9',
+  userId: 'anonymous',
+  clientId: '863a53f7-adbb-488a-8267-553be5b7d990',
+  socketId: '5WHmQQzEEzvbdEqOAAAR',
+  lastServerRevision: 0
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:58:02.156Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-595386c9',
+  userId: 'anonymous',
+  clientId: '863a53f7-adbb-488a-8267-553be5b7d990',
+  socketId: '5WHmQQzEEzvbdEqOAAAR',
+  lastServerRevision: 0
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:58:03.167Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-595386c9',
+  userId: 'anonymous',
+  clientId: '90121308-59a1-478c-99a5-52f0f5c2c68b',
+  socketId: 'y8WHaogf-o1aTR61AAAT',
+  lastServerRevision: 0
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:58:03.170Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-595386c9',
+  userId: 'anonymous',
+  clientId: '90121308-59a1-478c-99a5-52f0f5c2c68b',
+  socketId: 'y8WHaogf-o1aTR61AAAT',
+  lastServerRevision: 0
+}
+[v2-trace] 5.server.recv {
+  t: '2026-09-03T06:58:06.256Z',
+  stage: '5.server.recv',
+  traceId: 'tr-1a0660f731f-fdb63144',
+  opId: 'eb819881-6e5b-43e8-8014-ca67f76f0d20',
+  roomKey: 'e2e-595386c9',
+  userId: 'anonymous',
+  clientId: '863a53f7-adbb-488a-8267-553be5b7d990',
+  type: 'node.insert'
+}
+[v2-trace] 5.acl {
+  t: '2026-09-03T06:58:06.263Z',
+  stage: '5.acl',
+  traceId: 'tr-1a0660f731f-fdb63144',
+  opId: 'eb819881-6e5b-43e8-8014-ca67f76f0d20',
+  roomKey: 'e2e-595386c9',
+  userId: 'anonymous',
+  role: null,
+  canEdit: true
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-03T06:58:06.270Z',
+  stage: '6.applier.sql',
+  traceId: 'tr-1a0660f731f-fdb63144',
+  type: 'node.insert',
+  targetUid: '1ec0b6aa-74cc-4539-a9b0-11e4924300c1',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-03T06:58:06.283Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: '1ec0b6aa-74cc-4539-a9b0-11e4924300c1',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier {
+  t: '2026-09-03T06:58:06.302Z',
+  stage: '6.applier',
+  traceId: 'tr-1a0660f731f-fdb63144',
+  opId: 'eb819881-6e5b-43e8-8014-ca67f76f0d20',
+  type: 'node.insert',
+  targetUid: '1ec0b6aa-74cc-4539-a9b0-11e4924300c1',
+  queries: 5,
+  writes: 1
+}
+[v2-trace] 7.pg.commit {
+  t: '2026-09-03T06:58:06.302Z',
+  stage: '7.pg.commit',
+  traceId: 'tr-1a0660f731f-fdb63144',
+  opId: 'eb819881-6e5b-43e8-8014-ca67f76f0d20',
+  serverRevision: 1,
+  affectedRows: 1,
+  duplicate: false,
+  commitSuccess: true
+}
+[v2-trace] 9.broadcast {
+  t: '2026-09-03T06:58:06.302Z',
+  stage: '9.broadcast',
+  traceId: 'tr-1a0660f731f-fdb63144',
+  room: 'e2e-595386c9',
+  recipientCount: 1,
+  opId: 'eb819881-6e5b-43e8-8014-ca67f76f0d20',
+  clientId: '863a53f7-adbb-488a-8267-553be5b7d990',
+  actorId: 'anonymous'
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:58:07.400Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-595386c9',
+  userId: 'anonymous',
+  clientId: '863a53f7-adbb-488a-8267-553be5b7d990',
+  socketId: 'mWRZA2Opaq2PFwU-AAAV',
+  lastServerRevision: 1
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:58:07.401Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-595386c9',
+  userId: 'anonymous',
+  clientId: '863a53f7-adbb-488a-8267-553be5b7d990',
+  socketId: 'mWRZA2Opaq2PFwU-AAAV',
+  lastServerRevision: 1
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:58:08.251Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-595386c9',
+  userId: 'anonymous',
+  clientId: '90121308-59a1-478c-99a5-52f0f5c2c68b',
+  socketId: 'SqHn10maAx6j4xZMAAAX',
+  lastServerRevision: 1
+}
+[v2-trace] join.identity {
+  t: '2026-09-03T06:58:08.252Z',
+  stage: 'join.identity',
+  roomKey: 'e2e-595386c9',
+  userId: 'anonymous',
+  clientId: '90121308-59a1-478c-99a5-52f0f5c2c68b',
+  socketId: 'SqHn10maAx6j4xZMAAAX',
+  lastServerRevision: 1
+}

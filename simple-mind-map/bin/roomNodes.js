@@ -405,6 +405,114 @@ async function readRoomNodes(db, roomKey) {
   }
 }
 
+const SEARCH_PAGE = 500
+const SEARCH_HARD_CAP = 10000
+const SEARCH_DEFAULT_LIMIT = 200
+
+function stripSearchHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function queryNeedsSearch(inputQuery, lastExecutedQuery) {
+  return String(inputQuery || '').trim() !== String(lastExecutedQuery || '').trim()
+}
+
+function dedupeMatchesByUid(list) {
+  const seen = new Set()
+  const out = []
+  ;(Array.isArray(list) ? list : []).forEach(item => {
+    const uid = item && (item.uid || item.id)
+    if (!uid || seen.has(uid)) return
+    seen.add(uid)
+    out.push({
+      ...item,
+      uid,
+      text: stripSearchHtml(item.text || item.name || '')
+    })
+  })
+  return out
+}
+
+function mapSearchRows(rows) {
+  return (rows || []).map(row => ({
+    uid: row.uid,
+    text: stripSearchHtml(row.text || ''),
+    note: row.note || '',
+    isRoot: !!row.is_root,
+    parent_uid: row.parent_uid || null,
+    path: row.parent_uid ? [row.parent_uid, row.uid] : [row.uid]
+  }))
+}
+
+async function searchRoomNodes(db, roomKey, query, options = {}) {
+  const q = String(query || '').trim()
+  if (!q) return { matches: [], total: 0, limit: 0, offset: 0 }
+  const fetchAll =
+    options.all === true || options.all === 1 || options.all === '1'
+  const pageSize = Math.min(
+    SEARCH_PAGE,
+    Math.max(1, Number(options.limit) || (fetchAll ? SEARCH_PAGE : SEARCH_DEFAULT_LIMIT))
+  )
+  const offset = Math.max(0, Number(options.offset) || 0)
+  const like = '%' + q.replace(/[\\%_]/g, ch => '\\' + ch) + '%'
+  const sql = `select uid, parent_uid, data->>'text' as text, data->>'note' as note, is_root,
+      count(*) over() as total
+     from room_nodes
+     where room_key = $1
+       and deleted_at is null
+       and (
+         coalesce(data->>'text', '') ilike $2 escape '\\'
+         or regexp_replace(coalesce(data->>'text', ''), '<[^>]+>', ' ', 'g') ilike $2 escape '\\'
+         or coalesce(data->>'note', '') ilike $2 escape '\\'
+         or regexp_replace(coalesce(data->>'note', ''), '<[^>]+>', ' ', 'g') ilike $2 escape '\\'
+       )
+     order by is_root desc, uid
+     limit $3 offset $4`
+
+  async function page(off, lim) {
+    const res = await db.query(sql, [roomKey, like, lim, off])
+    const total = res.rows.length ? Number(res.rows[0].total || 0) : 0
+    return { rows: res.rows, total }
+  }
+
+  if (fetchAll) {
+    const matches = []
+    let off = 0
+    let total = 0
+    while (off < SEARCH_HARD_CAP) {
+      const chunk = await page(off, SEARCH_PAGE)
+      total = chunk.total
+      matches.push(...mapSearchRows(chunk.rows))
+      if (!chunk.rows.length) break
+      off += chunk.rows.length
+      if (matches.length >= total || chunk.rows.length < SEARCH_PAGE) break
+    }
+    return {
+      matches: dedupeMatchesByUid(matches).slice(0, SEARCH_HARD_CAP),
+      total,
+      limit: SEARCH_HARD_CAP,
+      offset: 0,
+      all: true
+    }
+  }
+
+  const chunk = await page(offset, pageSize)
+  const matches = dedupeMatchesByUid(mapSearchRows(chunk.rows))
+  return {
+    matches,
+    total: chunk.total,
+    limit: pageSize,
+    offset
+  }
+}
+
 const MAX_SUBTREE_CHILDREN = 200
 const MAX_DEEP_SUBTREE_NODES = 400
 
@@ -539,6 +647,51 @@ async function readRoomSubtree(db, roomKey, uid, options = {}) {
   }
 }
 
+async function resolveRoomRef(db, roomKey, uid) {
+  const key = String(roomKey || '')
+  if (!key) return { exists: false }
+  const tomb = await db.query(
+    `select 1 from room_tombstones where room_key = $1`,
+    [key]
+  )
+  if (tomb.rows.length) {
+    return { exists: false, deleted: true, mapId: key }
+  }
+  const meta = await db.query(
+    `select room_key, title, version, updated_at from rooms where room_key = $1`,
+    [key]
+  )
+  if (!meta.rows.length) return { exists: false, mapId: key }
+  const row = meta.rows[0]
+  const result = {
+    exists: true,
+    deleted: false,
+    mapId: row.room_key,
+    title: row.title || '未命名',
+    version: Number(row.version || 0),
+    updated_at: row.updated_at,
+    nodeId: uid ? String(uid) : null,
+    nodeExists: true,
+    nodeText: ''
+  }
+  if (!uid) return result
+  const node = await db.query(
+    `select uid, data from room_nodes
+     where room_key = $1 and uid = $2 and deleted_at is null`,
+    [key, String(uid)]
+  )
+  if (!node.rows.length) {
+    result.nodeExists = false
+    return result
+  }
+  const data = node.rows[0].data || {}
+  result.nodeText = String(data.text || '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return result
+}
+
 async function migrateRoomNodesFromJson(db, roomKey, obj, version) {
   return replaceRoomNodes(db, roomKey, obj, version)
 }
@@ -559,7 +712,12 @@ module.exports = {
   auditRoomNodesState,
   replaceRoomNodes,
   readRoomNodes,
+  searchRoomNodes,
+  stripSearchHtml,
+  dedupeMatchesByUid,
+  queryNeedsSearch,
   readRoomSubtree,
+  resolveRoomRef,
   listDeletedNodeUids,
   purgeDeletedNodes,
   migrateRoomNodesFromJson

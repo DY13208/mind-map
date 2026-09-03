@@ -117,14 +117,19 @@ class Search {
       : this.mindMap.renderer.renderTree
     if (!tree) return
     const matchList = []
+    const seen = new Set()
     bfsWalk(tree, node => {
-      let { richText, text, generalization } = isOnlySearchCurrentRenderNodes
+      let { richText, text, generalization, uid } = isOnlySearchCurrentRenderNodes
         ? node.getData()
-        : node.data
+        : node.data || {}
       if (richText) {
         text = getTextFromHtml(text)
       }
-      if (text.includes(this.searchText)) {
+      const nodeUid =
+        uid ||
+        (this.isNodeInstance(node) && node.getData && node.getData('uid'))
+      if (text && String(text).includes(this.searchText) && (!nodeUid || !seen.has(nodeUid))) {
+        if (nodeUid) seen.add(nodeUid)
         matchList.push(node)
       }
       // 概要节点
@@ -146,6 +151,7 @@ class Search {
           matchList.push({
             data: gNode
           })
+          if (uid) seen.add(uid)
         }
       })
     })
@@ -239,7 +245,23 @@ class Search {
     const keep = replaceText.includes(this.searchText)
     const text = this.getReplacedText(currentNode, this.searchText, replaceText)
     this.notResetSearchText = true
-    currentNode.setText(text, currentNode.getData('richText'))
+    const instance = this.isNodeInstance(currentNode)
+      ? currentNode
+      : this.mindMap.renderer &&
+        typeof this.mindMap.renderer.findNodeByUid === 'function'
+        ? this.mindMap.renderer.findNodeByUid(
+            currentNode.data && currentNode.data.uid
+          )
+        : null
+    if (instance && typeof instance.setText === 'function') {
+      instance.setText(text, instance.getData('richText'))
+    } else if (currentNode && currentNode.data) {
+      currentNode.data.text = text
+      this.mindMap.render()
+      this.mindMap.command.addHistory()
+    } else {
+      return
+    }
     if (keep) {
       this.updateMatchNodeList(this.matchNodeList)
       return

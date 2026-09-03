@@ -181,6 +181,7 @@ export const nodeDataNoStylePropList = [
   'tag',
   'hyperlink',
   'hyperlinkTitle',
+  'mapRef',
   'note',
   'expand',
   'isActive',

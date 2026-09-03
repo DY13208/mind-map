@@ -12,6 +12,7 @@ import {
 import { Image as SVGImage, SVG, A, G, Rect, Text } from '@svgdotjs/svg.js'
 import iconsSvg from '../../../svg/icons'
 import { noneRichTextNodeLineHeight } from '../../../constants/constant'
+import mapRefUtil from '../../../utils/mapRef'
 
 // 测量svg文本宽高
 const measureText = (text, style) => {
@@ -356,6 +357,32 @@ function createHyperlinkNode() {
   }
 }
 
+function createMapRefNode() {
+  const ref = mapRefUtil.normalizeMapRef(this.getData('mapRef'))
+  if (!ref) return
+  const iconSize = this.getNodeIconSize('hyperlinkIcon')
+  const node = new SVG().size(iconSize, iconSize)
+  const title = ref.nodeId
+    ? `引用 ${ref.mapId} / ${ref.nodeId}`
+    : `引用 ${ref.mapId}`
+  node.add(SVG(`<title>${title}</title>`))
+  node.rect(iconSize, iconSize).fill({ color: 'transparent' })
+  const iconNode = SVG(iconsSvg.mapRef).size(iconSize, iconSize)
+  this.style.iconNode(iconNode, '#409EFF')
+  node.add(iconNode)
+  node.css('cursor', 'pointer')
+  node.on('click', e => {
+    e.stopPropagation()
+    e.preventDefault()
+    this.mindMap.emit('map_ref_click', this, ref)
+  })
+  return {
+    node,
+    width: iconSize,
+    height: iconSize
+  }
+}
+
 //  创建标签节点
 function createTagNode() {
   const tagData = this.getData('tag')
@@ -584,6 +611,7 @@ export default {
   createRichTextNode,
   createTextNode,
   createHyperlinkNode,
+  createMapRefNode,
   createTagNode,
   createNoteNode,
   createAttachmentNode,

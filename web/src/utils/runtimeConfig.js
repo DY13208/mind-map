@@ -41,7 +41,7 @@ export function getRuntimeConfig() {
   const originWs = `${wsProtocol}//${
     typeof window !== 'undefined' ? loc.host : host
   }`
-  if (sameOrigin) {
+      if (sameOrigin) {
     return {
       gateway: true,
       host,
@@ -52,6 +52,9 @@ export function getRuntimeConfig() {
       publicPath: runtime.publicPath || '/',
       collabUrl: `${originWs}/collab`,
       collabApi: originHttp,
+      collabV2: runtime.collabV2 !== false && runtime.collabV2 !== '0',
+      collabV2Trace:
+        runtime.collabV2Trace === true || runtime.collabV2Trace === '1',
       aiBaseUrl: originHttp,
       mcpUrl: `${originHttp}/mcp`,
       appUrl: originHttp,
@@ -70,6 +73,9 @@ export function getRuntimeConfig() {
     publicPath: runtime.publicPath || '',
     collabUrl: `${wsProtocol}//${runtime.host || host}:${collabPort}`,
     collabApi: `${httpProtocol}//${runtime.host || host}:${collabPort}`,
+    collabV2: runtime.collabV2 !== false && runtime.collabV2 !== '0',
+    collabV2Trace:
+      runtime.collabV2Trace === true || runtime.collabV2Trace === '1',
     aiBaseUrl: `${httpProtocol}//${runtime.host || host}:${aiPort}`,
     mcpUrl: `${httpProtocol}//${runtime.host || host}:${mcpPort}/mcp`,
     appUrl: `${httpProtocol}//${runtime.host || host}:${webPort}`,

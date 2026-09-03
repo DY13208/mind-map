@@ -376,12 +376,18 @@ class Drag extends Base {
 
   //  移除克隆节点
   removeCloneNode() {
-    if (!this.clone) {
-      return
+    if (this.clone) {
+      this.clone.remove()
+      this.clone = null
     }
-    this.clone.remove()
-    this.placeholder.remove()
-    this.placeHolderLine.remove()
+    if (this.placeholder) {
+      this.placeholder.remove()
+      this.placeholder = null
+    }
+    if (this.placeHolderLine) {
+      this.placeHolderLine.remove()
+      this.placeHolderLine = null
+    }
     this.removeExtraLines()
   }
 

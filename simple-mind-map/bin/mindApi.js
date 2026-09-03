@@ -2,12 +2,15 @@ const crypto = require('crypto')
 const Y = require('yjs')
 const mindDoc = require('./mindDoc')
 const { applyNodeCommand, dataFields } = require('./roomCommands')
+const roomAcl = require('./roomAcl')
+const { isAuthEnabled } = require('./auth')
 const {
   listRooms,
   listRoomsPage,
   getRoom,
   getRoomSnapshot,
   getRoomSubtree,
+  getRoomRef,
   removeRoom,
   ensureDoc,
   warmDoc,
@@ -16,6 +19,7 @@ const {
   saveDoc,
   upsertRoom,
   persistHotSnapshot,
+  getPool,
   getLiveDoc,
   getMemoryDoc,
   getLiveObject,
@@ -45,7 +49,8 @@ const {
   getRoomArchiveStats,
   archiveRoomOperations,
   archiveAllRoomOperations,
-  purgeDeletedNodes
+  purgeDeletedNodes,
+  searchRoomNodes
 } = require('./storage')
 const { beatPresence, listPresence, leavePresence, getPresenceStatus } = require('./presence')
 const { applyCollabEvents } = require('./collabRecovery')
@@ -226,11 +231,16 @@ function normalizeOperationId(req, body = {}) {
 function normalizeCommand(req, roomKey, body, fallbackType, fallbackPayload) {
   const base = body || {}
   const baseVersionRaw = base.baseVersion ?? base.base_version
-  return {
+  const command = {
     operationId: normalizeOperationId(req, base),
     mapId: roomKey,
     actorId: requestActor(req, base),
-    clientId: String(base.clientId || base.client_id || '').slice(0, 160),
+    clientId: String(
+      base.clientId ||
+        base.client_id ||
+        (req.headers && (req.headers['x-client-id'] || req.headers['x-collab-client'])) ||
+        ''
+    ).trim().slice(0, 160),
     baseVersion:
       baseVersionRaw === undefined || baseVersionRaw === null
         ? null
@@ -238,6 +248,12 @@ function normalizeCommand(req, roomKey, body, fallbackType, fallbackPayload) {
     type: String(base.type || fallbackType || ''),
     payload: base.payload || fallbackPayload || {}
   }
+  if (require('./collabV2/flag').isCollabV2Enabled()) {
+    command.clientId = require('./collabV2/protocol').requireClientId(
+      command.clientId
+    )
+  }
+  return command
 }
 
 async function applyCommittedLive(roomKey, command, committed) {
@@ -286,6 +302,7 @@ async function applyCommittedLive(roomKey, command, committed) {
 }
 
 async function executeOperation(req, roomKey, command) {
+  await roomAcl.assertRoomAccess(getPool(), req, roomKey, 'edit')
   assertRoomWritable(roomKey)
   assertRateLimit(roomKey)
   if (command.type === 'node.update' || command.type === 'node.move') {
@@ -507,6 +524,12 @@ async function executeSnapshotOperation(
   nextNodes,
   extra = {}
 ) {
+  await roomAcl.assertRoomAccess(
+    getPool(),
+    req,
+    roomKey,
+    command && command.type === 'map.update' ? 'manage' : 'edit'
+  )
   assertRoomWritable(roomKey)
   assertRateLimit(roomKey)
   const committed = await commitRoomOperation(roomKey, command, async ({ room }) => {
@@ -583,8 +606,29 @@ function withShare(row) {
   }
 }
 
+function withFileAcl(row, options = {}) {
+  const item = withShare(row)
+  const summary = roomAcl.accessSummary(item.role, {
+    legacyOpen: item.legacy_open === true || item.legacy_open === 't',
+    bypass: !!options.bypass
+  })
+  return {
+    ...item,
+    role: summary.role,
+    canView: summary.canView,
+    canEdit: summary.canEdit,
+    canManage: summary.canManage
+  }
+}
+
 async function loadMap(roomKey) {
   if (isDeletedRoom(roomKey)) return null
+  if (require('./collabV2/flag').isCollabV2Enabled()) {
+    const snapshot = await getRoomSnapshot(roomKey)
+    if (snapshot && snapshot.nodes && Object.keys(snapshot.nodes).length) {
+      return { obj: snapshot.nodes, row: snapshot }
+    }
+  }
   const ydoc = await ensureDoc(roomKey)
   const obj = mindDoc.readObject(ydoc)
   const row = await getRoom(roomKey)
@@ -692,6 +736,54 @@ function mapPayload(roomKey, obj, row, extra = {}) {
   }
 }
 
+async function denyIfCannot(req, res, roomKey, action) {
+  try {
+    if (isDeletedRoom(roomKey)) {
+      sendJson(res, 404, { error: 'not found', code: 'ROOM_DELETED' })
+      return true
+    }
+    req.roomAccess = await roomAcl.assertRoomAccess(
+      getPool(),
+      req,
+      roomKey,
+      action
+    )
+    return false
+  } catch (err) {
+    sendJson(res, err.statusCode || 403, {
+      error: err.message || 'forbidden',
+      code: err.code || 'FORBIDDEN'
+    })
+    return true
+  }
+}
+
+async function attachRoomAccess(req, roomKey) {
+  if (req.roomAccess && req.roomAccess.exists) return req.roomAccess
+  try {
+    req.roomAccess = await roomAcl.assertRoomAccess(
+      getPool(),
+      req,
+      roomKey,
+      'view'
+    )
+  } catch (err) {
+    req.roomAccess = null
+  }
+  return req.roomAccess
+}
+
+function publicAccess(access) {
+  if (!access) return {}
+  return {
+    role: access.role || null,
+    canView: !!access.canView,
+    canEdit: !!access.canEdit,
+    canManage: !!access.canManage,
+    legacyOpen: !!access.legacyOpen
+  }
+}
+
 async function persist(roomKey, ydoc, obj, title, options = {}) {
   const {
     responseFormat = 'meta',
@@ -759,12 +851,96 @@ async function handleApi(req, res) {
     sendJson(res, 200, {
       ok: alerts.length === 0,
       service: 'mind-map-collab',
+      collabV2: require('./collabV2/flag').isCollabV2Enabled(),
       outbox,
       presence: getPresenceStatus(),
       bus: require('./eventBus').getEventBusStatus(),
       rateLimit: getRateLimitStatus(),
       metrics,
       alerts: alerts.concat(metrics.alerts || []).slice(0, 30)
+    })
+    return true
+  }
+
+  if (req.method === 'GET' && pathname === '/api/collab-v2/meta') {
+    sendJson(res, 200, {
+      enabled: require('./collabV2/flag').isCollabV2Enabled(),
+      path: '/collab-v2'
+    })
+    return true
+  }
+
+  if (pathname === '/api/collab-v2/op' && req.method === 'POST') {
+    if (!require('./collabV2/flag').isCollabV2Enabled()) {
+      sendJson(res, 404, { ok: false, error: 'collab v2 disabled' })
+      return true
+    }
+    try {
+      const body = await readBody(req)
+      const result = await require('./collabV2/sequencer').submitOperation(req, body)
+      sendJson(res, 200, {
+        ok: true,
+        opId: result.operation.opId,
+        serverRevision: result.operation.serverRevision,
+        duplicate: result.duplicate,
+        operation: result.operation
+      })
+    } catch (err) {
+      sendJson(res, err.statusCode || 400, {
+        ok: false,
+        code: err.code || 'OP_REJECTED',
+        error: err.message,
+        statusCode: err.statusCode || 400
+      })
+    }
+    return true
+  }
+
+  if (pathname === '/api/collab-v2/ops' && req.method === 'GET') {
+    if (!require('./collabV2/flag').isCollabV2Enabled()) {
+      sendJson(res, 404, { ok: false, error: 'collab v2 disabled' })
+      return true
+    }
+    try {
+      const roomKey = url.searchParams.get('roomKey') || url.searchParams.get('mapId')
+      const after = url.searchParams.get('afterRevision') || url.searchParams.get('after')
+      const result = await require('./collabV2/sequencer').listOperations(
+        req,
+        roomKey,
+        after,
+        url.searchParams.get('limit')
+      )
+      sendJson(res, 200, { ok: true, ...result })
+    } catch (err) {
+      sendJson(res, err.statusCode || 400, {
+        ok: false,
+        code: err.code || 'SYNC_FAILED',
+        error: err.message,
+        statusCode: err.statusCode || 400
+      })
+    }
+    return true
+  }
+
+  const roomAclHit = roomAcl.inferRoomAcl(pathname, req.method)
+  if (roomAclHit) {
+    if (await denyIfCannot(req, res, roomAclHit.roomKey, roomAclHit.action)) {
+      return true
+    }
+  }
+
+  if (req.method === 'GET' && pathname === '/api/users') {
+    const users = await roomAcl.searchUsers(
+      getPool(),
+      url.searchParams.get('q') || '',
+      url.searchParams.get('limit')
+    )
+    sendJson(res, 200, {
+      list: users.map(item => ({
+        user_id: item.user_id,
+        name: item.name,
+        avatar: item.avatar || ''
+      }))
     })
     return true
   }
@@ -935,24 +1111,41 @@ async function handleApi(req, res) {
     const limit = Number(url.searchParams.get('limit') || 0)
     const offset = Number(url.searchParams.get('offset') || 0)
     const q = url.searchParams.get('q') || url.searchParams.get('query') || ''
+    const actor = roomAcl.actorFromReq(req)
+    if (isAuthEnabled() && !actor.bypass && !actor.id) {
+      sendJson(res, 401, {
+        error: '请先使用企业微信扫码登录',
+        code: 'unauthorized'
+      })
+      return true
+    }
+    const userId = isAuthEnabled() && !actor.bypass ? actor.id : ''
+    const listOpts = { bypass: !userId }
     if (limit > 0) {
-      const page = await listRoomsPage({ q, limit, offset })
+      const page = await roomAcl.listAccessibleRooms(getPool(), {
+        q,
+        limit,
+        offset,
+        userId
+      })
       sendJson(res, 200, {
-        list: page.list.map(withShare),
+        list: page.list.map(row => withFileAcl(row, listOpts)),
         total: page.total,
         limit: page.limit,
         offset: page.offset
       })
       return true
     }
-    let list = (await listRooms()).map(withShare)
-    const query = String(q || '').trim().toLowerCase()
-    if (query) {
-      list = list.filter(item =>
-        String((item && item.title) || '').toLowerCase().includes(query)
-      )
-    }
-    sendJson(res, 200, { list, total: list.length })
+    const page = await roomAcl.listAccessibleRooms(getPool(), {
+      q,
+      limit: 200,
+      offset: 0,
+      userId
+    })
+    sendJson(res, 200, {
+      list: page.list.map(row => withFileAcl(row, listOpts)),
+      total: page.total
+    })
     return true
   }
 
@@ -1280,8 +1473,69 @@ async function handleApi(req, res) {
       title,
       { replace: true, responseFormat: 'outline', persistNow: true }
     )
-    sendJson(res, 201, payload)
+    const actor = roomAcl.actorFromReq(req)
+    if (actor.id && !actor.service) {
+      await roomAcl.ensureOwner(getPool(), roomKey, actor.id)
+    }
+    const access = await attachRoomAccess(req, roomKey)
+    sendJson(res, 201, { ...payload, ...publicAccess(access) })
     return true
+  }
+
+  const membersMatch = pathname.match(
+    /^\/api\/files\/([^/]+)\/members(?:\/([^/]+))?$/
+  )
+  if (membersMatch) {
+    const roomKey = decodeURIComponent(membersMatch[1])
+    const memberId = membersMatch[2]
+      ? decodeURIComponent(membersMatch[2])
+      : ''
+    try {
+      if (req.method === 'GET' && !memberId) {
+        const list = await roomAcl.listMembers(getPool(), roomKey)
+        sendJson(res, 200, {
+          room_key: roomKey,
+          ...publicAccess(req.roomAccess),
+          list
+        })
+        return true
+      }
+      if (req.method === 'POST' && !memberId) {
+        const body = await readBody(req)
+        const row = await roomAcl.setMember(
+          getPool(),
+          roomKey,
+          body.user_id || body.userId,
+          body.role,
+          roomAcl.actorFromReq(req).id
+        )
+        sendJson(res, 200, row)
+        return true
+      }
+      if ((req.method === 'PATCH' || req.method === 'PUT') && memberId) {
+        const body = await readBody(req)
+        const row = await roomAcl.setMember(
+          getPool(),
+          roomKey,
+          memberId,
+          body.role,
+          roomAcl.actorFromReq(req).id
+        )
+        sendJson(res, 200, row)
+        return true
+      }
+      if (req.method === 'DELETE' && memberId) {
+        const result = await roomAcl.removeMember(getPool(), roomKey, memberId)
+        sendJson(res, 200, result)
+        return true
+      }
+    } catch (err) {
+      sendJson(res, err.statusCode || 400, {
+        error: err.message || 'bad request',
+        code: err.code || 'ACL_ERROR'
+      })
+      return true
+    }
   }
 
   const nodeMatch = pathname.match(
@@ -1742,7 +1996,8 @@ async function handleApi(req, res) {
     })
     sendJson(res, 200, {
       ...mapMeta(roomKey, obj, row),
-      ...preview
+      ...preview,
+      ...publicAccess(req.roomAccess || (await attachRoomAccess(req, roomKey)))
     })
     setImmediate(() => {
       warmDoc(roomKey).catch(err => {
@@ -1793,6 +2048,23 @@ async function handleApi(req, res) {
     return true
   }
 
+  const refResolveMatch = pathname.match(/^\/api\/files\/([^/]+)\/ref-resolve$/)
+  if (refResolveMatch && req.method === 'GET') {
+    const roomKey = decodeURIComponent(refResolveMatch[1])
+    if (isDeletedRoom(roomKey)) {
+      sendJson(res, 200, {
+        exists: false,
+        deleted: true,
+        mapId: roomKey,
+        nodeExists: false
+      })
+      return true
+    }
+    const resolved = await getRoomRef(roomKey, url.searchParams.get('uid') || '')
+    sendJson(res, 200, resolved || { exists: false, mapId: roomKey })
+    return true
+  }
+
   const locateMatch = pathname.match(/^\/api\/files\/([^/]+)\/locate$/)
   if (locateMatch && req.method === 'GET') {
     const roomKey = decodeURIComponent(locateMatch[1])
@@ -1826,9 +2098,12 @@ async function handleApi(req, res) {
   const saveStatusMatch = pathname.match(/^\/api\/files\/([^/]+)\/save-status$/)
   if (saveStatusMatch && req.method === 'GET') {
     const roomKey = decodeURIComponent(saveStatusMatch[1])
+    // V1 leftover: in-memory save phase + ACL lookup only. No scheduleSave,
+    // hydrate, markTreeUids, lastPushed, version bump, reload, or outbox.
     sendJson(res, 200, {
       room_key: roomKey,
-      ...getSaveStatus(roomKey)
+      ...getSaveStatus(roomKey),
+      ...publicAccess(req.roomAccess || (await attachRoomAccess(req, roomKey)))
     })
     return true
   }
@@ -1836,20 +2111,50 @@ async function handleApi(req, res) {
   const searchMatch = pathname.match(/^\/api\/files\/([^/]+)\/search$/)
   if (searchMatch && req.method === 'GET') {
     const roomKey = decodeURIComponent(searchMatch[1])
-    const loaded = await loadSnapshot(roomKey)
-    if (!loaded) {
-      sendJson(res, 404, { error: 'not found' })
+    const q = url.searchParams.get('q') || ''
+    const limit = url.searchParams.get('limit')
+    try {
+      const all =
+        url.searchParams.get('all') === '1' ||
+        url.searchParams.get('all') === 'true'
+      const offset = url.searchParams.get('offset')
+      const result = await searchRoomNodes(roomKey, q, { limit, offset, all })
+      const matches = Array.isArray(result) ? result : result.matches || []
+      const row = await getRoom(roomKey)
+      if (!row && !matches.length) {
+        sendJson(res, 404, { error: 'not found' })
+        return true
+      }
+      sendJson(res, 200, {
+        room_key: roomKey,
+        version: Number((row && row.version) || 0),
+        matches,
+        total: Array.isArray(result)
+          ? matches.length
+          : Number(result.total != null ? result.total : matches.length),
+        limit: Array.isArray(result) ? matches.length : result.limit,
+        offset: Array.isArray(result) ? 0 : Number(result.offset || 0)
+      })
+      return true
+    } catch (err) {
+      if (require('./collabV2/flag').isCollabV2Enabled()) {
+        sendJson(res, 500, { error: (err && err.message) || 'search failed' })
+        return true
+      }
+      const loaded = await loadSnapshot(roomKey)
+      if (!loaded) {
+        sendJson(res, 404, { error: 'not found' })
+        return true
+      }
+      const fallback = mindDoc.searchNodes(loaded.obj, q, { limit })
+      sendJson(res, 200, {
+        room_key: roomKey,
+        version: Number((loaded.row && loaded.row.version) || 0),
+        matches: fallback,
+        total: fallback.length
+      })
       return true
     }
-    sendJson(res, 200, {
-      room_key: roomKey,
-      version: Number((loaded.row && loaded.row.version) || 0),
-      matches: mindDoc.searchNodes(
-        loaded.obj,
-        url.searchParams.get('q') || '',
-        { limit: url.searchParams.get('limit') }
-      )
-    })
     return true
   }
 
@@ -1888,7 +2193,8 @@ async function handleApi(req, res) {
         200,
         mapPayload(roomKey, loaded.obj, loaded.row, {
           format,
-          max_nodes: url.searchParams.get('max_nodes')
+          max_nodes: url.searchParams.get('max_nodes'),
+          ...publicAccess(req.roomAccess)
         })
       )
       return true

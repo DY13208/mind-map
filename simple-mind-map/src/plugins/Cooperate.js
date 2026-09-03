@@ -17,7 +17,8 @@ import {
   planCollabRecovery,
   planAfterOperations,
   markDirtySubtrees,
-  affectedUidsFromOperation
+  affectedUidsFromOperation,
+  applyCollabEvent
 } from './cooperateRecovery'
 import {
   applyRemoteNodeData,
@@ -27,6 +28,14 @@ import {
   FV_KEY
 } from '../utils/fieldMerge'
 import { createCollaborationStore } from '../utils/collaborationStore'
+import mapRefUtil from '../utils/mapRef'
+import {
+  collabTrace,
+  createTraceId,
+  setCollabTraceSnapshotProvider,
+  undoTrace,
+  undoFullTreeForbidden
+} from '../utils/collabTrace'
 
 function collapseDeepNodes(root, keepDepth = 2) {
   const stack = root ? [{ node: root, depth: 0 }] : []
@@ -85,8 +94,40 @@ const NULLABLE_PATCH_KEYS = [
   'hyperlink',
   'hyperlinkTitle',
   'outerFrame',
-  'generalization'
+  'generalization',
+  'mapRef',
+  'associativeLineTargets',
+  'associativeLineTargetControlOffsets',
+  'associativeLinePoint',
+  'associativeLineText',
+  'associativeLineStyle',
+  'formula',
+  'attachmentUrl',
+  'attachmentName',
+  'customLeft',
+  'customTop'
 ]
+
+const FIELD_COMMANDS = {
+  SET_NODE_TEXT: true,
+  SET_NODE_DATA: true,
+  SET_NODE_NOTE: true,
+  SET_NODE_STYLE: true,
+  SET_NODE_STYLES: true,
+  SET_NODE_IMAGE: true,
+  SET_NODE_ICON: true,
+  SET_NODE_HYPERLINK: true,
+  SET_NODE_MAP_REF: true,
+  SET_NODE_ATTACHMENT: true,
+  SET_NODE_TAG: true,
+  SET_NODE_SHAPE: true,
+  SET_NODE_CUSTOM_POSITION: true,
+  INSERT_FORMULA: true,
+  ADD_OUTER_FRAME: true,
+  ADD_ASSOCIATIVE_LINE: true,
+  REMOVE_CUSTOM_STYLES: true,
+  REMOVE_ALL_NODE_CUSTOM_STYLES: true
+}
 
 function pruneRecentMap(map, maxAge = RECENT_HTTP_MS) {
   const now = Date.now()
@@ -118,8 +159,10 @@ function isPermanentNodeError(err) {
   return (
     code === 'PARENT_DELETED' ||
     code === 'NODE_DELETED' ||
+    code === 'TARGET_DELETED' ||
     code === 'MOVE_CONFLICT' ||
     code === 'UID_REUSED' ||
+    code === 'DROPPED_DELETED' ||
     /父节点已删除|PARENT_DELETED|missing parent/i.test(msg) ||
     /节点已删除或不存在|NODE_DELETED|MOVE_CONFLICT|UID_REUSED|禁止复用已删除节点/i.test(
       msg
@@ -178,6 +221,53 @@ function generalizationSignature(generalization) {
       return [item.uid || '', String(item.text || ''), range].join(':')
     })
     .join('|')
+}
+
+function generalizationUidsOf(data) {
+  return new Set(
+    formatGetNodeGeneralization(data || {})
+      .map(item => item && item.uid)
+      .filter(Boolean)
+  )
+}
+
+function v2Trace(layer, detail) {
+  collabTrace(layer, detail)
+}
+
+function payloadParentUid(payload) {
+  return (
+    (payload &&
+      (payload.parentUid || payload.parent_uid || payload.parent)) ||
+    ''
+  )
+}
+
+function uidsFromPayload(type, payload) {
+  const uids = []
+  if (!payload || typeof payload !== 'object') return uids
+  if (payload.uid) uids.push(payload.uid)
+  if (Array.isArray(payload.ops)) {
+    payload.ops.forEach(item => {
+      const inner = (item && item.payload) || item || {}
+      if (inner.uid) uids.push(inner.uid)
+    })
+  }
+  void type
+  return uids.filter(Boolean)
+}
+
+function payloadNodeData(payload) {
+  const data =
+    (payload && (payload.data || payload.patch) && {
+      ...(payload.data || {}),
+      ...(payload.patch || {})
+    }) ||
+    {}
+  if (payload && payload.text != null && data.text == null) data.text = payload.text
+  if (payload && payload.note != null && data.note == null) data.note = payload.note
+  if (payload && payload.uid && !data.uid) data.uid = payload.uid
+  return data
 }
 
 function isRateLimitedError(err) {
@@ -269,8 +359,9 @@ class Cooperate {
   constructor(opt) {
     this.opt = opt
     this.mindMap = opt.mindMap
-    // yjs文档
-    this.ydoc = new Y.Doc()
+    this.collabV2Only = !!(this.mindMap.opt && this.mindMap.opt.collabV2Only)
+    // yjs文档 — V2 运行时不创建、不连接 Yjs
+    this.ydoc = this.collabV2Only ? null : new Y.Doc()
     // 共享数据
     this.ymap = null
     // 连接提供者
@@ -306,6 +397,13 @@ class Cooperate {
     this.previewApplied = false
     this.hydratingCurrentData = false
     this.httpCollabMode = false
+    this.collabV2Adapter = null
+    this._v2UndoActive = false
+    this._v2UndoAllowReplace = false
+    this._v2HistoryBaselined = false
+    this._undoFullTreeHits = 0
+    this._pasteTraceId = ''
+    setCollabTraceSnapshotProvider(() => this.persistTraceSnapshot())
     this.httpRoomKey = ''
     this.collabStore = createCollaborationStore({
       timeoutMs: Number(
@@ -340,6 +438,8 @@ class Cooperate {
     this.hydrateFailedUids = new Set()
     this.hydrateInflight = new Map()
     this.lastPushed = {}
+    this.ackedUids = new Set()
+    this.pendingUids = new Set()
     this.recentPushed = new Map()
     this.recentHttpDeleted = new Map()
     this.pendingHttpDeletes = []
@@ -352,6 +452,7 @@ class Cooperate {
     this.httpInsertPromise = null
     this.httpInsertRescan = false
     this.abandonedInsertUids = new Set()
+    this.deletedUids = new Set()
     this.httpHydrating = false
     this.httpReplaceInFlight = false
     this.httpRefreshing = false
@@ -383,6 +484,10 @@ class Cooperate {
   // 初始化数据
   initData(data, { replace = false } = {}) {
     data = simpleDeepClone(data)
+    if (this.collabV2Only || !this.ydoc) {
+      this.currentData = transformTreeDataToObject(data)
+      return
+    }
     // 解绑原来的数据
     if (this.ymap) {
       this.ymap.unobserveDeep(this.onObserve)
@@ -645,7 +750,7 @@ class Cooperate {
     if (this.ydoc) {
       this.ydoc.destroy()
     }
-    this.ydoc = new Y.Doc()
+    this.ydoc = this.collabV2Only ? null : new Y.Doc()
   }
 
   // 绑定事件
@@ -671,12 +776,18 @@ class Cooperate {
     this.mindMap.on('afterExecCommand', this.onAfterExecCommand)
     this.onBeforeExecCommand = this.onBeforeExecCommand.bind(this)
     this.mindMap.on('beforeExecCommand', this.onBeforeExecCommand)
+    setCollabTraceSnapshotProvider(() => this.persistTraceSnapshot())
     this.onExpandBtnClick = this.onExpandBtnClick.bind(this)
     this.mindMap.on('expand_btn_click', this.onExpandBtnClick)
     this.onBeforeShowTextEdit = this.onBeforeShowTextEdit.bind(this)
     this.onHideTextEdit = this.onHideTextEdit.bind(this)
     this.mindMap.on('before_show_text_edit', this.onBeforeShowTextEdit)
     this.mindMap.on('hide_text_edit', this.onHideTextEdit)
+    this.onThemeChange = this.onThemeChange.bind(this)
+    this.onLayoutChange = this.onLayoutChange.bind(this)
+    this.mindMap.on('view_theme_change', this.onThemeChange)
+    this.mindMap.on('layout_change', this.onLayoutChange)
+    this.wrapSearchReplace()
   }
 
   // 解绑事件
@@ -698,6 +809,7 @@ class Cooperate {
     this.mindMap.off('before_set_data', this.onBeforeSetData)
     this.mindMap.off('set_data', this.onSetData)
     this.mindMap.off('afterExecCommand', this.onAfterExecCommand)
+    setCollabTraceSnapshotProvider(null)
     if (this.onBeforeExecCommand) {
       this.mindMap.off('beforeExecCommand', this.onBeforeExecCommand)
     }
@@ -708,6 +820,8 @@ class Cooperate {
     if (this.onHideTextEdit) {
       this.mindMap.off('hide_text_edit', this.onHideTextEdit)
     }
+    if (this.onThemeChange) this.mindMap.off('view_theme_change', this.onThemeChange)
+    if (this.onLayoutChange) this.mindMap.off('layout_change', this.onLayoutChange)
     clearTimeout(this.httpTextTimer)
     clearTimeout(this.httpStructureTimer)
   }
@@ -939,6 +1053,11 @@ class Cooperate {
 
   // 概要不是树里的子节点，对端更新后需要再排一次版才会画出来
   applyRemoteTree(res) {
+    if (this._v2UndoActive && !this._v2UndoAllowReplace) {
+      this._undoFullTreeHits = Number(this._undoFullTreeHits || 0) + 1
+      undoFullTreeForbidden('applyRemoteTree')
+      return
+    }
     if (this.isApplyingRemote) {
       this.pendingRemoteTree = res
       return
@@ -997,12 +1116,10 @@ class Cooperate {
       return
     }
     if (this.httpCollabMode) {
-      if (this.httpHistorySyncing) return
+      if (this.httpHistorySyncing || this.httpReplaceAllActive) return
       this.scheduleHttpTextSync()
-      // Some large-map commands finish through a deferred render path. In that
-      // path afterExecCommand can be intentionally ignored while the renderer
-      // is busy, so structure changes must also be recovered from data_change.
-      this.scheduleHttpStructureSync()
+      // Scan is recovery only. Normal inserts submit from the command path.
+      this.scheduleHttpStructureSync(2500)
       return
     }
     if (Date.now() < this.suppressLocalUntil) return
@@ -1018,7 +1135,49 @@ class Cooperate {
     }, this.largeMapDelay(80, 220))
   }
 
+  persistTraceSnapshot() {
+    const adapter = this.collabV2Adapter
+    const status = adapter && adapter.getStatus ? adapter.getStatus() : null
+    return {
+      lastPushedCount: Object.keys(this.lastPushed || {}).length,
+      lastAppliedVersion: this.lastAppliedVersion || 0,
+      pendingUidCount: this.pendingUids ? this.pendingUids.size : 0,
+      ackedUidCount: this.ackedUids ? this.ackedUids.size : 0,
+      saveState: status && status.saveState,
+      lastServerRevision: status && status.lastServerRevision,
+      pendingAckCount: status && status.pendingCount,
+      outboxPending: status && status.outboxPending,
+      socketStatus: status && status.status,
+      phase: status && status.phase
+    }
+  }
+
   onAfterExecCommand(name) {
+    if (name === 'PASTE_NODE') {
+      this._pasteTraceId = this._commandTraceId || createTraceId()
+      collabTrace('paste.command', {
+        generated: true,
+        traceId: this._pasteTraceId,
+        command: name
+      })
+    }
+    if ((name === 'BACK' || name === 'FORWARD') && this.collabV2Adapter) {
+      this.onHttpCommand(name, Array.prototype.slice.call(arguments, 1))
+      return
+    }
+    const lazyPending = !!(
+      this.mindMap.renderer && this.mindMap.renderer._lazyCommandPending
+    )
+    if (
+      this.httpCollabMode &&
+      INSERT_COMMANDS[name] &&
+      !this.httpReplacing &&
+      !this.isSetData &&
+      (lazyPending || this.httpHydrating || this.previewApplied)
+    ) {
+      // V2: command path is the only insert writer. Scanner is warn-only.
+      if (!this.collabV2Adapter) this.scheduleHttpStructureSync(400)
+    }
     const historyCmd = name === 'BACK' || name === 'FORWARD'
     const busy =
       this.isSetData ||
@@ -1028,9 +1187,22 @@ class Cooperate {
       this.httpHydrating ||
       this.httpReplacing ||
       Date.now() < this.suppressLocalUntil ||
-      !!(this.mindMap.renderer && this.mindMap.renderer._lazyCommandPending)
+      (lazyPending && !INSERT_COMMANDS[name])
     if (busy) {
       if (this.httpCollabMode && historyCmd) this.httpHistorySyncing = false
+      if (
+        this.httpCollabMode &&
+        !this.isApplyingRemote &&
+        !this.httpReplacing &&
+        !this.isSetData &&
+        !this.httpHydrating &&
+        (name === 'REMOVE_NODE' ||
+          name === 'REMOVE_CURRENT_NODE' ||
+          name === 'CUT_NODE')
+      ) {
+        this.onHttpCommand(name, Array.prototype.slice.call(arguments, 1))
+        return
+      }
       if (
         this.httpCollabMode &&
         !this.isApplyingRemote &&
@@ -1040,7 +1212,9 @@ class Cooperate {
         const settling =
           this.httpSettlingAfterReplace || Date.now() < this.suppressLocalUntil
         if (settling) {
-          if (INSERT_COMMANDS[name] || MOVE_COMMANDS[name]) {
+          if (INSERT_COMMANDS[name] && this.collabV2Adapter) {
+            this.onHttpCommand(name, Array.prototype.slice.call(arguments, 1))
+          } else if (INSERT_COMMANDS[name] || MOVE_COMMANDS[name]) {
             this.scheduleHttpStructureSync(80)
           }
           if (name === 'SET_NODE_TEXT' || name === 'SET_NODE_NOTE') {
@@ -1049,7 +1223,11 @@ class Cooperate {
           return
         }
         if (STRUCTURE_COMMANDS[name] && !this.httpHydrating) {
-          this.scheduleHttpStructureSync(80)
+          if (this.collabV2Adapter && INSERT_COMMANDS[name]) {
+            this.onHttpCommand(name, Array.prototype.slice.call(arguments, 1))
+          } else {
+            this.scheduleHttpStructureSync(80)
+          }
         }
         if (name === 'SET_NODE_TEXT' || name === 'SET_NODE_NOTE') {
           this.scheduleHttpTextSync()
@@ -1058,7 +1236,7 @@ class Cooperate {
       return
     }
     if (this.httpCollabMode) {
-      this.onHttpCommand(name)
+      this.onHttpCommand(name, Array.prototype.slice.call(arguments, 1))
       return
     }
     if (!this.ymap || !STRUCTURE_COMMANDS[name]) return
@@ -1140,8 +1318,32 @@ class Cooperate {
         return item.getData && item.getData('uid')
       })
       .filter(Boolean)
+    if (selectedUids.length) {
+      this.lastActiveUids = selectedUids.slice()
+    }
     this.setLocalPresence({ selectedUids })
     if (node) this.repairEmptyExpand(node)
+  }
+
+  ensureActiveSelection() {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!renderer) return false
+    if (renderer.activeNodeList && renderer.activeNodeList.length) return true
+    const uids = this.lastActiveUids || []
+    if (!uids.length || typeof renderer.findNodeByUid !== 'function') return false
+    let restored = 0
+    uids.forEach(uid => {
+      const live = renderer.findNodeByUid(uid)
+      if (!live) return
+      if (typeof renderer.addNodeToActiveList === 'function') {
+        renderer.addNodeToActiveList(live)
+        restored += 1
+      }
+    })
+    if (restored && typeof renderer.emitNodeActiveEvent === 'function') {
+      renderer.emitNodeActiveEvent()
+    }
+    return restored > 0
   }
 
   onBeforeShowTextEdit() {
@@ -1155,11 +1357,35 @@ class Cooperate {
         renderer.activeNodeList[0]) ||
       null
     const uid = node && node.getData && node.getData('uid')
+    if (uid && this.collabV2Adapter) {
+      const snap = this.collabV2Adapter.getStatus()
+      const mine = this.collabV2Adapter.getClientId && this.collabV2Adapter.getClientId()
+      const other = (snap.peers || []).find(
+        peer =>
+          peer.editingUid === uid &&
+          peer.clientId &&
+          peer.clientId !== mine
+      )
+      if (other) {
+        const editor =
+          this.mindMap.renderer && this.mindMap.renderer.textEdit
+        if (editor && typeof editor.hideEditTextBox === 'function') {
+          setTimeout(() => editor.hideEditTextBox(), 0)
+        }
+        this.mindMap.emit('collab_lock_denied', other)
+        return
+      }
+    }
     this.setLocalPresence({ editingUid: uid || null })
   }
 
   onHideTextEdit() {
     this.setLocalPresence({ editingUid: null })
+    if (this.httpCollabMode) {
+      this.flushHttpTextNow().catch(err => {
+        console.error('[mind-map] text sync failed', err)
+      })
+    }
   }
 
   setPresenceSyncHandler(handler) {
@@ -1199,6 +1425,9 @@ class Cooperate {
       } catch (err) {
         // ignore presence sync failures
       }
+    }
+    if (this.collabV2Adapter && typeof this.collabV2Adapter.updatePresence === 'function') {
+      this.collabV2Adapter.updatePresence(this.getLocalPresence())
     }
   }
 
@@ -1335,6 +1564,524 @@ class Cooperate {
     }
   }
 
+  setCollabV2Adapter(adapter) {
+    this.collabV2Adapter = adapter || null
+  }
+
+  establishV2HistoryBaseline() {
+    if (this._v2HistoryBaselined) return
+    const command = this.mindMap && this.mindMap.command
+    if (!command) return
+    this._v2HistoryBaselined = true
+    command.pause()
+    command.clearHistory()
+    command.recovery()
+    try {
+      if (typeof command.originAddHistory === 'function') {
+        command.originAddHistory()
+      }
+    } catch (err) {
+      // ignore
+    }
+    undoTrace('history.baseline', {
+      historyLength: command.history.length,
+      historyIndex: command.activeHistoryIndex
+    })
+  }
+
+  submitV2(type, payload) {
+    if (!this.collabV2Adapter) {
+      return Promise.reject(new Error('collab v2 adapter missing'))
+    }
+    if (type === 'node.update' && payload) {
+      const keys = ['parentUid', 'parent_uid', 'parent', 'index', 'position', 'order']
+      const hit = keys.filter(key => payload[key] !== undefined)
+      if (hit.length) {
+        v2Trace('UPDATE_STRUCTURAL_FIELD_FORBIDDEN', {
+          uid: payload.uid,
+          keys: hit
+        })
+        payload = { ...payload }
+        keys.forEach(key => {
+          delete payload[key]
+        })
+      }
+    }
+    const traceId =
+      (payload && payload.traceId) ||
+      this._commandTraceId ||
+      this._pasteTraceId ||
+      createTraceId()
+    if (payload && !payload.traceId) payload.traceId = traceId
+    if (this._pasteTraceId && traceId === this._pasteTraceId) {
+      collabTrace('paste.operation', {
+        generated: true,
+        traceId,
+        type
+      })
+    }
+    const uids = uidsFromPayload(type, payload)
+    uids.forEach(uid => this.pendingUids.add(uid))
+    collabTrace('2.adapter.submit', {
+      traceId,
+      type,
+      roomKey: this.httpRoomKey,
+      uids,
+      clientId: this.collabV2Adapter.getClientId && this.collabV2Adapter.getClientId()
+    })
+    const clientId =
+      this.collabV2Adapter.getClientId && this.collabV2Adapter.getClientId()
+    return this.collabV2Adapter
+      .submitOperation({
+        type,
+        payload,
+        roomKey: this.httpRoomKey,
+        clientId,
+        traceId
+      })
+      .then(result => {
+        this.acknowledgeLocalVersion(result && result.serverRevision, {
+          operationId: result && result.opId,
+          duplicate: !!(result && result.duplicate)
+        })
+        this.markAckedFromPayload(type, payload)
+        collabTrace('8.ack', {
+          traceId,
+          opId: result && result.opId,
+          revision: result && result.serverRevision,
+          type
+        })
+        return {
+          version: result && result.serverRevision,
+          duplicate: !!(result && result.duplicate),
+          operationId: result && result.opId,
+          operation: result && result.operation
+        }
+      })
+      .catch(err => {
+        uids.forEach(uid => this.pendingUids.delete(uid))
+        collabTrace('8.ack.fail', {
+          traceId,
+          type,
+          message: err && err.message,
+          code: err && err.code
+        })
+        throw err
+      })
+  }
+
+  async applyV2RemoteOperation(op, meta = {}) {
+    const event = (op && op.event) || op || {}
+    const type = event.type || op.type
+    const payload = event.payload || op.payload || {}
+    const mine =
+      this.collabV2Adapter &&
+      this.collabV2Adapter.getClientId &&
+      this.collabV2Adapter.getClientId()
+    const opClientId = String(
+      (op && op.clientId) ||
+        (event && event.clientId) ||
+        (payload && payload.clientId) ||
+        ''
+    ).trim()
+    if (mine && opClientId && opClientId === mine && !meta.applySelf) {
+      v2Trace('remote.skip-self-client', {
+        type,
+        opId: op && (op.opId || op.operationId),
+        clientId: opClientId
+      })
+      return true
+    }
+    v2Trace('remote.recv', {
+      type,
+      uid: payload.uid,
+      parent: payloadParentUid(payload),
+      rev: op && (op.serverRevision || op.version),
+      clientId: opClientId,
+      userId: op && op.userId
+    })
+    collabTrace('10.remote.recv', {
+      traceId: (op && op.traceId) || payload.traceId,
+      type,
+      uid: payload.uid,
+      parent: payloadParentUid(payload),
+      rev: op && (op.serverRevision || op.version),
+      opId: op && (op.opId || op.operationId)
+    })
+    if (type === 'batch.applied' && payload.resnapshot) {
+      return this.syncHttpRemoteOperations([op])
+    }
+    if (type === 'batch.applied' && Array.isArray(payload.events)) {
+      const pending = payload.events.slice()
+      let guard = 0
+      while (pending.length && guard < pending.length + 3) {
+        guard += 1
+        const next = []
+        for (const child of pending) {
+          const applied = await this.applyV2RemoteOperation(
+            {
+              event: child,
+              serverRevision: op.serverRevision
+            },
+            { deferFallback: true }
+          )
+          if (!applied) next.push(child)
+        }
+        if (next.length === pending.length) break
+        pending.splice(0, pending.length, ...next)
+      }
+      if (pending.length) {
+        v2Trace('remote.apply.batch.leftover', { left: pending.length })
+        return this.syncHttpRemoteOperations([op])
+      }
+      return true
+    }
+    if (type === 'map.updated') {
+      this.applyRemoteMapMeta(payload)
+      this.lastAppliedVersion = Math.max(
+        Number(this.lastAppliedVersion) || 0,
+        Number(op.serverRevision) || 0
+      )
+      return true
+    }
+    if (type === 'map.replaced' || payload.resnapshot) {
+      if (this._v2UndoActive && !this._v2UndoAllowReplace) {
+        this._undoFullTreeHits = Number(this._undoFullTreeHits || 0) + 1
+        undoFullTreeForbidden('applyV2RemoteOperation.map.replaced')
+        return false
+      }
+      return this.recoverHttpCollab(op.serverRevision || this.lastAppliedVersion)
+    }
+    const uid = payload.uid
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (this.currentData && type && type !== 'map.replaced') {
+      try {
+        this.currentData = applyCollabEvent(this.currentData, event)
+      } catch (err) {
+        v2Trace('remote.currentData.fail', { type, uid, message: err && err.message })
+      }
+    }
+    if (type === 'node.inserted' || type === 'node.insert') {
+      const inserted = this.applyV2PayloadInsert(payload)
+      v2Trace('remote.apply.insert', { uid, ok: inserted })
+      if (inserted) {
+        this.notifySearchInvalidate()
+        return true
+      }
+      if (meta.deferFallback) return false
+    } else if (type === 'node.moved' || type === 'node.reordered' || type === 'node.move') {
+      const moved = this.applyV2PayloadMove(payload)
+      v2Trace('remote.apply.move', { uid, ok: moved, parent: payloadParentUid(payload) })
+      if (moved) {
+        this.notifySearchInvalidate()
+        return true
+      }
+      if (meta.deferFallback) return false
+    } else if (type === 'node.deleted' || type === 'node.delete') {
+      const removed = this.applyV2PayloadDelete(payload)
+      v2Trace('remote.apply.delete', { uid, ok: removed })
+      if (removed) {
+        this.notifySearchInvalidate()
+        return true
+      }
+      if (meta.deferFallback) return false
+    } else if (type === 'node.updated' || type === 'node.update') {
+      const updated = this.applyV2PayloadUpdate(payload)
+      v2Trace('remote.apply.update', { uid, ok: updated })
+      if (updated) {
+        this.notifySearchInvalidate()
+        return true
+      }
+      if (meta.deferFallback) return false
+    } else if (type === 'operation.undone' || type === 'operation.redone') {
+      const inner = payload.inverse || payload.forward
+      if (inner && inner.type) {
+        const applied = await this.applyV2RemoteOperation({
+          event: {
+            type:
+              inner.type === 'node.update'
+                ? 'node.updated'
+                : inner.type === 'node.insert'
+                  ? 'node.inserted'
+                  : inner.type === 'node.delete'
+                    ? 'node.deleted'
+                    : inner.type === 'node.move'
+                      ? 'node.moved'
+                      : inner.type,
+            payload: inner.payload || {}
+          },
+          serverRevision: op.serverRevision
+        })
+        if (applied) return true
+      }
+    }
+    if (type === 'node.updated' && uid && renderer && typeof renderer.findNodeByUid === 'function') {
+      const node = renderer.findNodeByUid(uid)
+      const next = this.currentData && this.currentData[uid]
+      if (node && next && next.data) {
+        this.isApplyingRemote = true
+        try {
+          this.applyHttpRemoteNodeFields(node, next.data, { data: next.data })
+        } finally {
+          this.isApplyingRemote = false
+        }
+        this.notifySearchInvalidate()
+        return true
+      }
+    }
+    // Structural remote ops stay node-path incremental (affected uids only).
+    // Never reload the whole room / setData(fullTree) on a single op:event.
+    const parentUid = payloadParentUid(payload)
+    if (
+      (type === 'node.inserted' ||
+        type === 'node.moved' ||
+        type === 'node.deleted') &&
+      this.dirtySubtrees
+    ) {
+      if (parentUid) this.dirtySubtrees.set(parentUid, Date.now())
+      if (uid) this.dirtySubtrees.set(uid, Date.now())
+    }
+    v2Trace('remote.apply.fallback-hydrate', { type, uid, parentUid })
+    const applied = this.syncHttpRemoteOperations([op])
+    this.notifySearchInvalidate()
+    return applied
+  }
+
+  isGeneralizationUid(parentUid, uid) {
+    if (!parentUid || !uid) return false
+    const renderer = this.mindMap && this.mindMap.renderer
+    const parentNode =
+      renderer && typeof renderer.findNodeByUid === 'function'
+        ? renderer.findNodeByUid(parentUid)
+        : null
+    const parentData = parentNode && parentNode.getData ? parentNode.getData() : null
+    if (parentData && generalizationUidsOf(parentData).has(uid)) return true
+    const tree = renderer && renderer.renderTree
+    const treeNode = tree && this.findTreeNode(tree, parentUid)
+    return !!(treeNode && treeNode.data && generalizationUidsOf(treeNode.data).has(uid))
+  }
+
+  applyV2PayloadInsert(payload = {}) {
+    const uid = payload.uid
+    const parentUid = payloadParentUid(payload)
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!uid || !parentUid || !renderer || typeof renderer.findNodeByUid !== 'function') {
+      return false
+    }
+    if (this.isGeneralizationUid(parentUid, uid)) {
+      v2Trace('remote.apply.insert.skip-gen', { uid, parentUid })
+      return true
+    }
+    if (renderer.findNodeByUid(uid)) return true
+    const parentNode = renderer.findNodeByUid(parentUid)
+    if (!parentNode) return false
+    const data = payloadNodeData(payload)
+    this.isApplyingRemote = true
+    this.mindMap.command.pause()
+    try {
+      if (!parentNode.nodeData.children) parentNode.nodeData.children = []
+      const exists = parentNode.nodeData.children.some(
+        child => child && child.data && child.data.uid === uid
+      )
+      if (!exists) {
+        const index = Number(payload.index)
+        const child = {
+          data: {
+            uid,
+            text: data.text,
+            note: data.note,
+            richText: data.richText,
+            expand: data.expand !== false,
+            ...data
+          },
+          children: []
+        }
+        if (Number.isInteger(index) && index >= 0 && index <= parentNode.nodeData.children.length) {
+          parentNode.nodeData.children.splice(index, 0, child)
+        } else {
+          parentNode.nodeData.children.push(child)
+        }
+      }
+      const count = Number(parentNode.getData && parentNode.getData('childCount')) || 0
+      const live = parentNode.nodeData.children.length
+      renderer.setNodeData(parentNode, {
+        expand: true,
+        childCount: Math.max(count, live)
+      })
+      this.mindMap.render()
+    } catch (err) {
+      v2Trace('remote.apply.insert.err', { uid, message: err && err.message })
+      return false
+    } finally {
+      try {
+        this.mindMap.command.recovery()
+      } catch (e) {
+        // ignore
+      }
+      this.suppressLocalUntil = Date.now() + 250
+      this.isApplyingRemote = false
+    }
+    return !!renderer.findNodeByUid(uid)
+  }
+
+  applyV2PayloadMove(payload = {}) {
+    const uid = payload.uid
+    const parentUid = payloadParentUid(payload)
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!uid || !renderer || typeof renderer.findNodeByUid !== 'function') return false
+    const node = renderer.findNodeByUid(uid)
+    if (!node || node.isRoot) return false
+    const nextParent = parentUid ? renderer.findNodeByUid(parentUid) : node.parent
+    if (!nextParent) return false
+    const oldParent = node.parent
+    this.isApplyingRemote = true
+    this.mindMap.command.pause()
+    try {
+      if (oldParent && oldParent !== nextParent) {
+        removeFromParentNodeData(node)
+        if (!nextParent.nodeData.children) nextParent.nodeData.children = []
+        const exists = nextParent.nodeData.children.some(
+          child => child && child.data && child.data.uid === uid
+        )
+        if (!exists) {
+          const index = Number(payload.index)
+          if (Number.isInteger(index) && index >= 0 && index <= nextParent.nodeData.children.length) {
+            nextParent.nodeData.children.splice(index, 0, node.nodeData)
+          } else {
+            nextParent.nodeData.children.push(node.nodeData)
+          }
+        }
+      } else if (oldParent && oldParent === nextParent && payload.index != null) {
+        const kids = oldParent.nodeData.children || []
+        const from = kids.findIndex(child => child && child.data && child.data.uid === uid)
+        const to = Number(payload.index)
+        if (from >= 0 && Number.isInteger(to) && from !== to) {
+          const [item] = kids.splice(from, 1)
+          kids.splice(Math.max(0, Math.min(to, kids.length)), 0, item)
+        }
+      }
+      if (oldParent && typeof oldParent.renderLine === 'function') oldParent.renderLine()
+      if (nextParent && typeof nextParent.renderLine === 'function') nextParent.renderLine()
+      this.mindMap.render()
+    } catch (err) {
+      v2Trace('remote.apply.move.err', { uid, message: err && err.message })
+      return false
+    } finally {
+      try {
+        this.mindMap.command.recovery()
+      } catch (e) {
+        // ignore
+      }
+      this.suppressLocalUntil = Date.now() + 250
+      this.isApplyingRemote = false
+    }
+    const live = renderer.findNodeByUid(uid)
+    const liveParent = live && live.parent && live.parent.getData && live.parent.getData('uid')
+    v2Trace('remote.render.move', { uid, parent: liveParent })
+    return !!(live && (!parentUid || liveParent === parentUid))
+  }
+
+  applyV2PayloadDelete(payload = {}) {
+    const uid = payload.uid
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!uid || !renderer || typeof renderer.findNodeByUid !== 'function') return false
+    const node = renderer.findNodeByUid(uid)
+    if (!node || node.isRoot) return true
+    if (node.isGeneralization && node.generalizationBelongNode) {
+      return this.applyLocalGeneralization(
+        node.generalizationBelongNode,
+        (node.generalizationBelongNode.getData &&
+          node.generalizationBelongNode.getData('generalization')) ||
+          null
+      )
+    }
+    this.isApplyingRemote = true
+    this.mindMap.command.pause()
+    try {
+      const parent = node.parent
+      removeFromParentNodeData(node)
+      if (parent && typeof parent.renderLine === 'function') parent.renderLine()
+      this.mindMap.render()
+    } catch (err) {
+      v2Trace('remote.apply.delete.err', { uid, message: err && err.message })
+      return false
+    } finally {
+      try {
+        this.mindMap.command.recovery()
+      } catch (e) {
+        // ignore
+      }
+      this.suppressLocalUntil = Date.now() + 250
+      this.isApplyingRemote = false
+    }
+    return !renderer.findNodeByUid(uid)
+  }
+
+  applyV2PayloadUpdate(payload = {}) {
+    const uid = payload.uid
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!uid || !renderer || typeof renderer.findNodeByUid !== 'function') return false
+    const node = renderer.findNodeByUid(uid)
+    if (!node) return false
+    if (
+      payload.parentUid !== undefined ||
+      payload.parent_uid !== undefined ||
+      payload.parent !== undefined ||
+      payload.index !== undefined ||
+      payload.position !== undefined ||
+      payload.order !== undefined
+    ) {
+      v2Trace('UPDATE_STRUCTURAL_FIELD_FORBIDDEN', {
+        uid,
+        keys: ['parent', 'index', 'position'].filter(
+          () =>
+            payload.parentUid !== undefined ||
+            payload.index !== undefined ||
+            payload.position !== undefined
+        )
+      })
+    }
+    const next = payloadNodeData(payload)
+    this.isApplyingRemote = true
+    try {
+      this.applyHttpRemoteNodeFields(node, next, { data: next })
+    } finally {
+      this.suppressLocalUntil = Date.now() + 250
+      this.isApplyingRemote = false
+    }
+    return true
+  }
+
+  applyRemoteMapMeta(payload = {}) {
+    if (!this.mindMap || this.isApplyingRemote) return
+    this.isApplyingRemote = true
+    try {
+      const theme = payload.theme || (payload.metadata && payload.metadata.theme)
+      const themeConfig =
+        payload.themeConfig || (payload.metadata && payload.metadata.themeConfig)
+      const layout = payload.layout || (payload.metadata && payload.metadata.layout)
+      if (theme && this.mindMap.opt) {
+        this.mindMap.opt.theme = theme
+      }
+      if (themeConfig && this.mindMap.opt) {
+        this.mindMap.opt.themeConfig = themeConfig
+      }
+      if (layout && this.mindMap.opt && this.mindMap.renderer) {
+        this.mindMap.opt.layout = layout
+        if (typeof this.mindMap.renderer.setLayout === 'function') {
+          this.mindMap.renderer.setLayout()
+        }
+      }
+      if (typeof this.mindMap.initTheme === 'function') this.mindMap.initTheme()
+      if (typeof this.mindMap.render === 'function') {
+        this.mindMap.render(null, theme ? 'changeTheme' : layout ? 'changeLayout' : '')
+      }
+    } finally {
+      this.suppressLocalUntil = Date.now() + 250
+      this.isApplyingRemote = false
+    }
+  }
+
   setHttpCollab(config = {}) {
     this.setLazyLoaders(config)
     this.httpCollabMode = true
@@ -1342,9 +2089,12 @@ class Cooperate {
     this.hydrateFailedUids = new Set()
     this.hydrateInflight = new Map()
     this.lastPushed = {}
+    this.ackedUids = new Set()
+    this.pendingUids = new Set()
     this.recentPushed = new Map()
     this.recentHttpDeleted = new Map()
     this.abandonedInsertUids = new Set()
+    this.deletedUids = new Set()
     this.dirtySubtrees = new Map()
     this.localUndoStack = []
     this.localRedoStack = []
@@ -1355,9 +2105,299 @@ class Cooperate {
     this.collabStore.reset(roomKey, Number(config.version) || 0)
     this.collabStore.setStatus('live')
     this.wrapHttpMutators(config)
+    this.wrapSearchReplace()
+  }
+
+  submitMapMeta(patch) {
+    if (!this.httpCollabMode || !this.collabV2Adapter || !patch) return
+    if (this.isApplyingRemote || this.httpReplacing) return
+    this.submitV2('map.meta.update', patch).catch(err => {
+      console.error('[mind-map] map meta sync failed', err)
+    })
+  }
+
+  onThemeChange(theme) {
+    if (!this.httpCollabMode || this.isApplyingRemote) return
+    this.submitMapMeta({
+      theme,
+      themeConfig: this.mindMap.getCustomThemeConfig
+        ? this.mindMap.getCustomThemeConfig()
+        : undefined
+    })
+  }
+
+  onLayoutChange(layout) {
+    if (!this.httpCollabMode || this.isApplyingRemote) return
+    this.submitMapMeta({ layout })
+  }
+
+  wrapSearchReplace() {
+    const search = this.mindMap && this.mindMap.search
+    if (!search || search._v2Wrapped) return
+    search._v2Wrapped = true
+    const origOne = search.replace.bind(search)
+    const origAll = search.replaceAll.bind(search)
+    search.replace = (replaceText, jumpNext = false) => {
+      if (!this.httpCollabMode || !this.collabV2Adapter) {
+        return origOne(replaceText, jumpNext)
+      }
+      return this.replaceOneViaV2(search, replaceText, jumpNext, origOne)
+    }
+    search.replaceAll = replaceText => {
+      if (!this.httpCollabMode || !this.collabV2Adapter) {
+        return origAll(replaceText)
+      }
+      return this.replaceAllViaV2(search, replaceText, origAll)
+    }
+  }
+
+  resolveSearchNode(search, node) {
+    if (!node) return null
+    if (search && typeof search.isNodeInstance === 'function' && search.isNodeInstance(node)) {
+      return node
+    }
+    const uid =
+      (node.getData && node.getData('uid')) ||
+      (node.data && node.data.uid) ||
+      node.uid
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (uid && renderer && typeof renderer.findNodeByUid === 'function') {
+      return renderer.findNodeByUid(uid)
+    }
+    return null
+  }
+
+  replacedSearchText(source, needle, replacement) {
+    const text = String(source == null ? '' : source)
+    const from = String(needle || '')
+    if (!from) return text
+    const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return text.replace(new RegExp(escaped, 'g'), String(replacement == null ? '' : replacement))
+  }
+
+  collectLocalSearchMatches(query) {
+    const q = String(query || '').trim().toLowerCase()
+    if (!q) return []
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!renderer) return []
+    const seen = new Set()
+    const out = []
+    const take = (uid, text) => {
+      if (!uid || seen.has(uid)) return
+      const plain = getTextFromHtml(String(text == null ? '' : text))
+      const hay = (plain || String(text || '')).toLowerCase()
+      if (!hay.includes(q)) return
+      seen.add(uid)
+      out.push({
+        uid,
+        text: plain || String(text || ''),
+        name: plain || String(text || '')
+      })
+    }
+    const visitTree = node => {
+      if (!node) return
+      if (typeof node.getData === 'function') {
+        const data = node.getData() || {}
+        take(data.uid, data.text)
+        ;(node.children || []).forEach(visitTree)
+        return
+      }
+      const data = node.data || {}
+      take(data.uid, data.text)
+      ;(node.children || []).forEach(child => {
+        if (child && typeof child === 'object') visitTree(child)
+      })
+    }
+    if (renderer.root) visitTree(renderer.root)
+    if (renderer.renderTree) visitTree(renderer.renderTree)
+    return out
+  }
+
+  matchExpectedText(match) {
+    if (!match) return ''
+    if (match.name != null && String(match.name) !== '') return String(match.name)
+    const data = match.data || {}
+    if (data.text != null) return String(data.text)
+    if (match.text != null && String(match.text).indexOf('<') === -1) {
+      return String(match.text)
+    }
+    return ''
+  }
+
+  applyLocalReplaceText(uid, nextText) {
+    const renderer = this.mindMap && this.mindMap.renderer
+    const live =
+      uid && renderer && typeof renderer.findNodeByUid === 'function'
+        ? renderer.findNodeByUid(uid)
+        : null
+    if (!live || typeof live.setText !== 'function') return false
+    this.isApplyingRemote = true
+    try {
+      live.setText(nextText, live.getData && live.getData('richText'))
+    } finally {
+      this.suppressLocalUntil = Date.now() + 250
+      this.isApplyingRemote = false
+    }
+    return true
+  }
+
+  replaceOneBySearchMatch(match, searchText, replaceText) {
+    const uid = match && (match.uid || match.id)
+    if (!uid) return Promise.resolve({ replaced: 0, skipped: 0 })
+    const renderer = this.mindMap && this.mindMap.renderer
+    const live =
+      renderer && typeof renderer.findNodeByUid === 'function'
+        ? renderer.findNodeByUid(uid)
+        : null
+    const oldText = live ? this.nodePlain(live) : this.matchExpectedText(match)
+    const nextText = this.replacedSearchText(oldText, searchText, replaceText)
+    if (oldText === nextText) return Promise.resolve({ replaced: 0, skipped: 0 })
+    this.applyLocalReplaceText(uid, nextText)
+    return this.submitV2('node.update', {
+      uid,
+      text: nextText,
+      expected: { text: oldText }
+    }).then(result => {
+      this.notifySearchInvalidate()
+      return result
+    })
+  }
+
+  replaceAllBySearchMatches(matches, searchText, replaceText) {
+    const list = Array.isArray(matches) ? matches : []
+    const renderer = this.mindMap && this.mindMap.renderer
+    const ops = []
+    const seen = new Set()
+    this.httpReplaceAllActive = true
+    try {
+      list.forEach(match => {
+        const uid = match && (match.uid || match.id)
+        if (!uid || seen.has(uid)) return
+        seen.add(uid)
+        const live =
+          renderer && typeof renderer.findNodeByUid === 'function'
+            ? renderer.findNodeByUid(uid)
+            : null
+        const oldText = live ? this.nodePlain(live) : this.matchExpectedText(match)
+        const nextText = this.replacedSearchText(oldText, searchText, replaceText)
+        if (oldText === nextText) return
+        this.applyLocalReplaceText(uid, nextText)
+        ops.push({
+          type: 'node.update',
+          payload: {
+            uid,
+            text: nextText,
+            expected: { text: oldText }
+          }
+        })
+      })
+    } catch (err) {
+      this.httpReplaceAllActive = false
+      throw err
+    }
+    if (!ops.length) {
+      this.httpReplaceAllActive = false
+      return Promise.resolve({ replaced: 0, skipped: 0 })
+    }
+    const batchId =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : 'replace-all-' + Date.now()
+    return this.submitV2('node.batch', { ops, batchId })
+      .then(result => {
+        const skipped =
+          (result &&
+            result.operation &&
+            result.operation.event &&
+            result.operation.event.payload &&
+            result.operation.event.payload.skipped) ||
+          (result && result.result && result.result.skipped) ||
+          0
+        this.mindMap.emit('collab_replace_all_done', {
+          replaced: Math.max(0, ops.length - Number(skipped || 0)),
+          skipped: Number(skipped || 0)
+        })
+        this.notifySearchInvalidate()
+        return result
+      })
+      .finally(() => {
+        this.httpReplaceAllActive = false
+      })
+  }
+
+  replaceOneViaV2(search, replaceText, jumpNext, origOne) {
+    const current = search.matchNodeList && search.matchNodeList[search.currentIndex]
+    const node = this.resolveSearchNode(search, current)
+    const uid =
+      (node && node.getData && node.getData('uid')) ||
+      (current && current.uid) ||
+      (current && current.data && current.data.uid)
+    if (!uid) {
+      const orig = origOne(replaceText, jumpNext)
+      return orig
+    }
+    const oldText = node ? this.nodePlain(node) : this.matchExpectedText(current)
+    const nextText = node
+      ? search.getReplacedText(node, search.searchText, String(replaceText))
+      : this.replacedSearchText(oldText, search.searchText, replaceText)
+    if (oldText === nextText) return { replaced: 0, skipped: 0 }
+    this.applyLocalReplaceText(uid, nextText)
+    return this.submitV2('node.update', {
+      uid,
+      text: nextText,
+      expected: { text: oldText }
+    }).then(result => {
+      this.notifySearchInvalidate()
+      return result
+    })
+  }
+
+  replaceAllViaV2(search, replaceText, origAll) {
+    const matches = (search.matchNodeList || []).slice()
+    if (!matches.length) return origAll(replaceText)
+    return this.replaceAllBySearchMatches(
+      matches.map(node => {
+        const resolved = this.resolveSearchNode(search, node) || node
+        const uid =
+          (resolved && resolved.getData && resolved.getData('uid')) ||
+          (node && node.uid) ||
+          (node && node.data && node.data.uid)
+        const oldText = resolved && resolved.getData ? this.nodePlain(resolved) : this.matchExpectedText(node)
+        return { uid, name: oldText }
+      }),
+      search.searchText,
+      replaceText
+    )
+  }
+
+  notifySearchInvalidate() {
+    if (!this.mindMap) return
+    this.mindMap.emit('collab_search_invalidate')
+    if (this.httpCollabMode && this.httpRoomKey) return
+    const search = this.mindMap.search
+    if (search && search.isSearching && search.searchText) {
+      search.search(search.searchText)
+    }
   }
 
   wrapHttpMutators(config = {}) {
+    if (this.collabV2Adapter) {
+      this.httpPatchNode = (uid, body) => {
+        const next = { ...(body || {}), uid }
+        ;['parentUid', 'parent_uid', 'parent', 'index', 'position', 'order'].forEach(
+          key => {
+            delete next[key]
+          }
+        )
+        return this.submitV2('node.update', next)
+      }
+      this.httpAddNode = body => this.submitV2('node.insert', body || {})
+      this.httpDeleteNode = (uid, options) =>
+        this.submitV2('node.delete', { ...(options || {}), uid })
+      this.httpReplaceTree = (tree, extra) =>
+        this.submitV2('map.replace', { tree, ...(extra || {}) })
+      return
+    }
     if (typeof config.patchNode === 'function') {
       this.httpPatchNode = (uid, body) =>
         this.wrapHttpMutation('node.update', { ...(body || {}), uid }, payload =>
@@ -1387,6 +2427,12 @@ class Cooperate {
   }
 
   wrapHttpMutation(type, body, send) {
+    if (this.mindMap && this.mindMap.opt && this.mindMap.opt.readonly) {
+      const err = new Error('当前为只读权限，无法修改')
+      err.code = 'FORBIDDEN'
+      err.statusCode = 403
+      return Promise.reject(err)
+    }
     if (this.httpReplacing && type !== 'map.replace') {
       const err = new Error('正在保存整图，请稍候再试')
       err.code = 'REPLACE_IN_PROGRESS'
@@ -1409,6 +2455,10 @@ class Cooperate {
           return await send(payload)
         } catch (err) {
           lastErr = err
+          if (err && (err.statusCode === 403 || err.code === 'FORBIDDEN')) {
+            this.mindMap.emit('room_acl_denied', err)
+            throw err
+          }
           if (!isRateLimitedError(err) || attempt === 3) throw err
           await sleepMs(
             Math.min(8000, Number(err.retryAfterMs) || 400 * Math.pow(2, attempt))
@@ -1480,11 +2530,15 @@ class Cooperate {
     this.hydrateFailedUids = new Set()
     this.hydrateInflight = new Map()
     this.lastPushed = {}
+    this.ackedUids = new Set()
+    this.pendingUids = new Set()
     this.recentPushed = new Map()
     this.recentHttpDeleted = new Map()
     this.pendingHttpDeletes = []
     this.pendingHttpGeneralizationOwners = []
     this.pendingGenIntent = new Map()
+    this.abandonedInsertUids = new Set()
+    this.deletedUids = new Set()
     this.httpHistorySyncing = false
     this.httpRefreshing = false
     this.httpPendingRefreshAt = ''
@@ -1552,9 +2606,13 @@ class Cooperate {
 
   afterHttpReplace(result, treeOverride) {
     this.lastPushed = {}
+    this.ackedUids = new Set()
+    this.pendingUids = new Set()
     this.recentPushed = new Map()
     this.recentHttpDeleted = new Map()
     this.dirtySubtrees = new Map()
+    this.abandonedInsertUids = new Set()
+    this.deletedUids = new Set()
     this.pendingHttpDeletes = []
     this.pendingHttpGeneralizationOwners = []
     this.pendingGenIntent = new Map()
@@ -1581,6 +2639,8 @@ class Cooperate {
 
   resyncHttpBaseline(tree) {
     this.lastPushed = {}
+    this.ackedUids = new Set()
+    this.pendingUids = new Set()
     this.recentPushed = new Map()
     if (tree) this.markTreeUids(tree)
   }
@@ -1592,7 +2652,7 @@ class Cooperate {
       if (!node || typeof node.getData !== 'function') return
       if (node.isGeneralization) return
       const uid = node.getData('uid')
-      if (uid) {
+      if (uid && this.isPersistAcked(uid)) {
         const full = this.nodePatchPayload(node)
         this.lastPushed[uid] = {
           text: full.text,
@@ -1603,7 +2663,6 @@ class Cooperate {
       ;(node.children || []).forEach(walk)
     }
     if (renderer.root) walk(renderer.root)
-    else if (renderer.renderTree) this.markTreeUids(renderer.renderTree)
   }
 
   async persistHttpReplace(fullData, extra = {}) {
@@ -1655,12 +2714,13 @@ class Cooperate {
       if (!uid || have.has(uid)) return
       data.children.push(child)
       have.add(uid)
-      this.markUidPushed(uid, child.data)
+      this.markUidPushed(uid, child.data, 'server')
     })
   }
 
-  markUidPushed(uid, data) {
+  markUidPushed(uid, data, source = 'server') {
     if (!uid || !data) return
+    if (source !== 'server' && source !== 'ack') return
     const text =
       data.richText ? getTextFromHtml(data.text) : String(data.text || '')
     const note = data.note || ''
@@ -1674,7 +2734,32 @@ class Cooperate {
         (Array.isArray(value) && value.length === 0)
       if (!empty) full[key] = value
     })
+    if (!this.ackedUids) this.ackedUids = new Set()
+    if (!this.pendingUids) this.pendingUids = new Set()
+    this.ackedUids.add(uid)
+    this.pendingUids.delete(uid)
     this.lastPushed[uid] = { text, note, full }
+  }
+
+  markAckedFromPayload(type, payload) {
+    const uids = uidsFromPayload(type, payload)
+    uids.forEach(uid => {
+      if (!this.ackedUids) this.ackedUids = new Set()
+      this.ackedUids.add(uid)
+      if (this.pendingUids) this.pendingUids.delete(uid)
+      if (!this.lastPushed[uid]) {
+        const text = payload && (payload.text != null ? String(payload.text) : '')
+        this.lastPushed[uid] = {
+          text,
+          note: (payload && payload.note) || '',
+          full: { text, note: (payload && payload.note) || '' }
+        }
+      }
+    })
+  }
+
+  isPersistAcked(uid) {
+    return !!(uid && this.ackedUids && this.ackedUids.has(uid))
   }
 
   resolveHttpPatchNode(node) {
@@ -1879,7 +2964,18 @@ class Cooperate {
       tag: next.tag,
       hyperlink: next.hyperlink,
       hyperlinkTitle: next.hyperlinkTitle,
-      outerFrame: next.outerFrame
+      outerFrame: next.outerFrame,
+      mapRef: next.mapRef,
+      associativeLineTargets: next.associativeLineTargets,
+      associativeLineTargetControlOffsets: next.associativeLineTargetControlOffsets,
+      associativeLinePoint: next.associativeLinePoint,
+      associativeLineText: next.associativeLineText,
+      associativeLineStyle: next.associativeLineStyle,
+      formula: next.formula,
+      attachmentUrl: next.attachmentUrl,
+      attachmentName: next.attachmentName,
+      customLeft: next.customLeft,
+      customTop: next.customTop
     }
     Object.keys(stylePayload).forEach(key => {
       if (stylePayload[key] === undefined) delete stylePayload[key]
@@ -1894,15 +2990,17 @@ class Cooperate {
     if (merged.data && merged.data[FV_KEY]) {
       renderer.setNodeData(node, { [FV_KEY]: merged.data[FV_KEY] })
     }
-    const nextGen = this.normalizeGeneralizationData(next.generalization)
-    const ownerUid = node.getData && node.getData('uid')
-    const pending = this.getGenIntent(ownerUid)
-    if (this.shouldIgnoreRemoteGeneralization(ownerUid, nextGen)) {
-      if (this.applyLocalGeneralization(node, pending && pending.gen)) {
+    if (Object.prototype.hasOwnProperty.call(next, 'generalization')) {
+      const nextGen = this.normalizeGeneralizationData(next.generalization)
+      const ownerUid = node.getData && node.getData('uid')
+      const pending = this.getGenIntent(ownerUid)
+      if (this.shouldIgnoreRemoteGeneralization(ownerUid, nextGen)) {
+        if (this.applyLocalGeneralization(node, pending && pending.gen)) {
+          changed = true
+        }
+      } else if (this.applyLocalGeneralization(node, next.generalization)) {
         changed = true
       }
-    } else if (this.applyLocalGeneralization(node, next.generalization)) {
-      changed = true
     }
     return changed
   }
@@ -1925,11 +3023,13 @@ class Cooperate {
   }
 
   markTreeUids(root) {
+    // Server-authoritative trees only. Never walk the live renderer
+    // after a local edit — that would mark un-ACKed uids as persisted.
     const walk = node => {
       if (!node) return
       const data = node.data || (node.nodeData && node.nodeData.data)
       const uid = data && data.uid
-      this.markUidPushed(uid, data)
+      this.markUidPushed(uid, data, 'server')
       const kids = node.children || (node.nodeData && node.nodeData.children) || []
       kids.forEach(walk)
     }
@@ -2135,10 +3235,11 @@ class Cooperate {
     }
     this.dirtySubtrees.delete(uid)
     this.hydratedUids.add(uid)
-    this.markUidPushed(uid, data.data)
-    ;(data.children || []).forEach(child => {
+    this.markUidPushed(uid, data.data, 'server')
+    const serverKids = (result && result.children) || []
+    serverKids.forEach(child => {
       const childUid = child && child.data && child.data.uid
-      this.markUidPushed(childUid, child && child.data)
+      this.markUidPushed(childUid, child && child.data, 'server')
     })
     return data
   }
@@ -2366,6 +3467,28 @@ class Cooperate {
 
   onBeforeExecCommand(name) {
     if (!this.httpCollabMode) return
+    if (
+      INSERT_COMMANDS[name] ||
+      name === 'SET_NODE_TEXT' ||
+      name === 'SET_NODE_DATA'
+    ) {
+      const traceId = createTraceId()
+      this._commandTraceId = traceId
+      const active =
+        (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
+      collabTrace('1.local.command', {
+        traceId,
+        command: name,
+        roomKey: this.httpRoomKey,
+        uids: active
+          .map(node => node && node.getData && node.getData('uid'))
+          .filter(Boolean),
+        clientId:
+          this.collabV2Adapter &&
+          this.collabV2Adapter.getClientId &&
+          this.collabV2Adapter.getClientId()
+      })
+    }
     if (name === 'BACK' || name === 'FORWARD') {
       this.httpHistorySyncing = true
       return
@@ -2413,7 +3536,17 @@ class Cooperate {
         return
       }
       const uid = node.getData && node.getData('uid')
-      if (uid) deletes.push(uid)
+      if (uid) {
+        const keepChildren = name === 'REMOVE_CURRENT_NODE'
+        const walk = current => {
+          if (!current) return
+          const id = current.getData && current.getData('uid')
+          if (id) deletes.push(id)
+          if (keepChildren) return
+          ;(current.children || []).forEach(walk)
+        }
+        walk(node)
+      }
     })
     this.pendingHttpDeletes = deletes
     this.pendingHttpGeneralizationOwners = owners
@@ -2460,7 +3593,7 @@ class Cooperate {
       })
   }
 
-  onHttpCommand(name) {
+  onHttpCommand(name, args = []) {
     if (name === 'BACK' || name === 'FORWARD') {
       try {
         this.syncHttpUndoRedo(name)
@@ -2477,20 +3610,46 @@ class Cooperate {
       const keepChildren = name === 'REMOVE_CURRENT_NODE'
       const owners = (this.pendingHttpGeneralizationOwners || []).splice(0)
       const uids = this.pendingHttpDeletes.splice(0)
-      uids.forEach(uid => {
-        if (!this.httpDeleteNode) return
-        this.forgetHttpUid(uid)
-        this.recentHttpDeleted.set(uid, Date.now())
-        this.httpDeleteNode(uid, { keepChildren }).catch(() => {})
-      })
+      const tombstone = uid => {
+        this.tombstoneDeletedUid(uid)
+      }
+      if (this.collabV2Adapter && uids.length > 1) {
+        uids.forEach(tombstone)
+        const drop = this.collabV2Adapter.dropPendingInsertsForUid
+        Promise.resolve(
+          drop
+            ? Promise.all(uids.map(uid => drop.call(this.collabV2Adapter, uid)))
+            : null
+        )
+          .then(() =>
+            this.submitV2('node.batch', {
+              ops: uids.map(uid => ({
+                type: 'node.delete',
+                payload: { uid, keepChildren }
+              }))
+            })
+          )
+          .catch(() => {})
+      } else {
+        uids.forEach(uid => {
+          if (!this.httpDeleteNode) return
+          tombstone(uid)
+          const drop =
+            this.collabV2Adapter && this.collabV2Adapter.dropPendingInsertsForUid
+          Promise.resolve(drop ? drop.call(this.collabV2Adapter, uid) : null)
+            .then(() => this.httpDeleteNode(uid, { keepChildren }))
+            .catch(() => {})
+        })
+      }
       owners.forEach(owner => this.syncHttpGeneralization(owner))
       return
     }
     if (INSERT_COMMANDS[name]) {
+      this._v2InsertFromCommand = true
       const inserted = this.flushHttpInsert()
       if (name === 'INSERT_PARENT_NODE') {
         Promise.resolve(inserted)
-          .then(() => this.flushHttpMove())
+          .then(() => this.flushHttpMove(name, args))
           .then(() => {
             const node =
               this.mindMap.renderer &&
@@ -2503,15 +3662,12 @@ class Cooperate {
       return
     }
     if (MOVE_COMMANDS[name]) {
-      this.flushHttpMove()
+      this.flushHttpMove(name, args)
       return
     }
+    if (this.httpReplaceAllActive) return
     if (
-      name === 'SET_NODE_TEXT' ||
-      name === 'SET_NODE_DATA' ||
-      name === 'SET_NODE_NOTE' ||
-      name === 'SET_NODE_STYLE' ||
-      name === 'SET_NODE_STYLES' ||
+      FIELD_COMMANDS[name] ||
       name === 'ADD_GENERALIZATION' ||
       name === 'REMOVE_GENERALIZATION'
     ) {
@@ -2557,6 +3713,10 @@ class Cooperate {
   }
 
   scheduleHttpStructureSync(delay = 180) {
+    if (this.collabV2Adapter) {
+      this.warnLocalNodesWithoutOperation()
+      return
+    }
     clearTimeout(this.httpStructureTimer)
     this.httpStructureTimer = setTimeout(() => {
       this.httpStructureTimer = null
@@ -2583,9 +3743,78 @@ class Cooperate {
     return payload
   }
 
+  sanitizeHistoryTree(root) {
+    if (!root) return root
+    const walk = node => {
+      if (!node) return
+      const genUids = generalizationUidsOf(node.data || {})
+      if (genUids.size && Array.isArray(node.children)) {
+        node.children = node.children.filter(child => {
+          const id = child && child.data && child.data.uid
+          return !id || !genUids.has(id)
+        })
+      }
+      ;(node.children || []).forEach(walk)
+    }
+    walk(root)
+    return root
+  }
+
   syncHttpUndoRedo(name) {
     if (!this.httpCollabMode) return
     this.stampGenIntentFromLocal()
+    if (this.collabV2Adapter && typeof this.collabV2Adapter.undo === 'function') {
+      const isUndo = name === 'BACK'
+      const status =
+        this.collabV2Adapter.getStatus && this.collabV2Adapter.getStatus()
+      undoTrace('cooperate.v2-authority', {
+        name,
+        call: isUndo ? 'undoLastLocalOperation' : 'redoLastLocalOperation',
+        undoDepth: status && status.undoDepth,
+        redoDepth: status && status.redoDepth,
+        nativeHistory: 'skipped'
+      })
+      this._v2UndoActive = true
+      this._v2UndoAllowReplace = false
+      const run = isUndo
+        ? this.collabV2Adapter.undoLastLocalOperation()
+        : this.collabV2Adapter.redoLastLocalOperation()
+      Promise.resolve(run)
+        .then(result => {
+          if (result && result.serverRevision != null) {
+            this.acknowledgeLocalVersion(result.serverRevision, {
+              duplicate: true
+            })
+          }
+          const op = result && result.operation
+          const evType = op && ((op.event && op.event.type) || op.type)
+          if (evType === 'map.replaced' || evType === 'map.replace') {
+            this._v2UndoAllowReplace = true
+          }
+          if (op && (op.event || op.type)) {
+            return this.applyV2RemoteOperation(op, { applySelf: true })
+          }
+        })
+        .catch(err => {
+          if (err && (err.code === 'UNDO_EMPTY' || err.code === 'REDO_EMPTY' || err.code === 'UNDO_PENDING')) {
+            undoTrace('cooperate.undo.skip', { code: err.code, name })
+            return
+          }
+          console.error('[mind-map] v2 undo/redo failed', err)
+          if (
+            this.mindMap &&
+            err &&
+            (err.code === 'UNDO_CONFLICT' || err.code === 'REDO_CONFLICT')
+          ) {
+            this.mindMap.emit('undo_conflict', err)
+          }
+        })
+        .finally(() => {
+          this._v2UndoActive = false
+          this._v2UndoAllowReplace = false
+        })
+      return
+    }
     if (name === 'BACK' && this.httpUndoOperation && this.localUndoStack.length) {
       const last = this.localUndoStack.pop()
       Promise.resolve(this.httpUndoOperation(last.operationId))
@@ -2777,7 +4006,8 @@ class Cooperate {
         value === undefined ||
         value === null ||
         value === '' ||
-        (Array.isArray(value) && value.length === 0)
+        (Array.isArray(value) && value.length === 0) ||
+        (key === 'mapRef' && !mapRefUtil.normalizeMapRef(value))
       if (!empty) {
         full[key] = value
       } else if (
@@ -2828,13 +4058,14 @@ class Cooperate {
     if (settling && !pending.length) return
     const jobs = []
     let droppedGhosts = false
+    let skipGhostRefresh = false
     pending.forEach(node => {
       const target = this.resolveHttpPatchNode(node)
       const uid = target.getData && target.getData('uid')
       if (!uid) return
       // New local nodes are inserted (with text) by flushHttpInsert; patching
       // them first returns NODE_DELETED and would drop the orphan incorrectly.
-      if (!this.lastPushed[uid]) return
+      if (!this.isPersistAcked(uid)) return
       const full = this.nodePatchPayload(node)
       const delta = this.nodePatchPayload(node, { onlyChanged: true })
       if (!delta) return
@@ -2853,6 +4084,14 @@ class Cooperate {
             if (isPermanentNodeError(err)) {
               droppedGhosts = true
               this.abandonGhostNodeByUid(uid, node)
+              if (
+                this.isTombstonedUid(uid) ||
+                /UID_REUSED|DROPPED_DELETED|TARGET_DELETED|NODE_DELETED|PARENT_DELETED/.test(
+                  String((err && err.code) || '') + ' ' + String((err && err.message) || '')
+                )
+              ) {
+                skipGhostRefresh = true
+              }
               console.warn('[mind-map] dropped ghost node patch', uid, err.message || err)
             } else {
               console.error('[mind-map] patch node failed', err)
@@ -2861,36 +4100,59 @@ class Cooperate {
       )
     })
     if (jobs.length) await runPromisePool(jobs, PATCH_CONCURRENCY)
-    if (droppedGhosts) {
+    if (droppedGhosts && !skipGhostRefresh) {
       this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
     }
   }
 
   collectUnpushedNodes(node, out = []) {
     if (!node) return out
+    if (node.isGeneralization) return out
     if (node.isRoot) {
       ;(node.children || []).forEach(child => this.collectUnpushedNodes(child, out))
       return out
     }
     const uid = node.getData && node.getData('uid')
-    if (uid && this.abandonedInsertUids && this.abandonedInsertUids.has(uid)) {
+    if (
+      uid &&
+      (this.isTombstonedUid(uid) ||
+        (this.abandonedInsertUids && this.abandonedInsertUids.has(uid)))
+    ) {
       const kids = node.children || []
       kids.forEach(child => this.collectUnpushedNodes(child, out))
       return out
     }
     const parentUid =
       node.parent && node.parent.getData && node.parent.getData('uid')
-    if (
-      parentUid &&
-      this.abandonedInsertUids &&
-      this.abandonedInsertUids.has(parentUid)
-    ) {
+    if (parentUid && this.isTombstonedUid(parentUid)) {
       return out
     }
-    if (uid && !this.lastPushed[uid]) out.push(node)
+    if (uid && !this.isPersistAcked(uid) && !(this.pendingUids && this.pendingUids.has(uid))) {
+      out.push(node)
+    }
     const kids = node.children || []
     kids.forEach(child => this.collectUnpushedNodes(child, out))
     return out
+  }
+
+  warnLocalNodesWithoutOperation() {
+    if (!this.collabV2Adapter) return
+    const now = Date.now()
+    if (this._localNodeWarnAt && now - this._localNodeWarnAt < 4000) return
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!renderer || !renderer.root) return
+    const pending = []
+    this.collectUnpushedNodes(renderer.root, pending)
+    const uids = pending
+      .map(node => node && node.getData && node.getData('uid'))
+      .filter(Boolean)
+    if (!uids.length) return
+    this._localNodeWarnAt = now
+    const row = { count: uids.length, uids: uids.slice(0, 20) }
+    v2Trace('LOCAL_NODE_WITHOUT_OPERATION', row)
+    if (typeof console !== 'undefined' && console.warn) {
+      console.warn('LOCAL_NODE_WITHOUT_OPERATION', row)
+    }
   }
 
   nodeDepth(node) {
@@ -2910,16 +4172,29 @@ class Cooperate {
       this.previewApplied ||
       this.isSetData
     ) {
+      this._v2InsertFromCommand = false
       return
     }
+    if (this.collabV2Adapter && !this._v2InsertFromCommand) {
+      this.warnLocalNodesWithoutOperation()
+      return
+    }
+    const fromCommand = this._v2InsertFromCommand
+    this._v2InsertFromCommand = false
     const settling =
       this.httpSettlingAfterReplace || Date.now() < this.suppressLocalUntil
-    if (settling) {
+    if (!fromCommand && settling) {
       const renderer = this.mindMap.renderer
       const active = (renderer && renderer.activeNodeList) || []
       const hasUnpushed = active.some(node => {
         const uid = node && node.getData && node.getData('uid')
-        return uid && !this.lastPushed[uid] && !node.isRoot && !node.isGeneralization
+        return (
+          uid &&
+          !this.isPersistAcked(uid) &&
+          !(this.pendingUids && this.pendingUids.has(uid)) &&
+          !node.isRoot &&
+          !node.isGeneralization
+        )
       })
       if (!hasUnpushed) return
     }
@@ -2934,7 +4209,7 @@ class Cooperate {
       this.httpInsertPromise = null
       if (this.httpInsertRescan) {
         this.httpInsertRescan = false
-        this.scheduleHttpStructureSync(0)
+        if (!this.collabV2Adapter) this.scheduleHttpStructureSync(0)
       }
     }
   }
@@ -2947,18 +4222,79 @@ class Cooperate {
     list.forEach(node => this.collectUnpushedNodes(node, pending))
     const settling =
       this.httpSettlingAfterReplace || Date.now() < this.suppressLocalUntil
-    if (!settling && renderer && renderer.root) {
+    if (!this.collabV2Adapter && !settling && renderer && renderer.root) {
       this.collectUnpushedNodes(renderer.root, pending)
     }
     const seen = new Set()
     const unique = pending.filter(node => {
+      if (node.isGeneralization) return false
       const uid = node.getData && node.getData('uid')
       if (!uid || seen.has(uid)) return false
+      if (this.isTombstonedUid(uid)) return false
+      const parentUid =
+        node.parent && node.parent.getData && node.parent.getData('uid')
+      if (parentUid && this.isGeneralizationUid(parentUid, uid)) return false
       seen.add(uid)
       return true
     })
+    v2Trace('local.insert.flush', {
+      count: unique.length,
+      uids: unique.map(node => node.getData && node.getData('uid'))
+    })
     unique.sort((a, b) => this.nodeDepth(a) - this.nodeDepth(b))
+    unique.forEach(node => {
+      const uid = node.getData && node.getData('uid')
+      if (uid && this.pendingUids) this.pendingUids.add(uid)
+    })
+    if (!unique.length) {
+      this._insertEmptyRetries = (this._insertEmptyRetries || 0) + 1
+      if (!this.collabV2Adapter && this._insertEmptyRetries < 6) {
+        this.scheduleHttpStructureSync(1600)
+      }
+    } else {
+      this._insertEmptyRetries = 0
+    }
     let droppedOrphans = false
+    let skipOrphanRefresh = false
+    if (this.collabV2Adapter && unique.length > 1) {
+      const ops = unique.map(node => {
+        const uid = node.getData && node.getData('uid')
+        const parent =
+          node.parent && node.parent.getData && node.parent.getData('uid')
+        const kids =
+          (node.parent && node.parent.nodeData && node.parent.nodeData.children) ||
+          []
+        const index = kids.findIndex(
+          item => item && item.data && item.data.uid === uid
+        )
+        return {
+          type: 'node.insert',
+          payload: {
+            parent,
+            uid,
+            text: this.nodePlain(node),
+            note: (node.getData && node.getData('note')) || '',
+            index: index < 0 ? undefined : index
+          }
+        }
+      })
+      try {
+        await this.submitV2('node.batch', { ops })
+        unique.forEach(node => {
+          const uid = node.getData && node.getData('uid')
+          const data = (node.getData && node.getData()) || {}
+          this.markUidPushed(uid, data, 'ack')
+          this.recentPushed.set(uid, Date.now())
+        })
+        return
+      } catch (err) {
+        if (!isPermanentNodeError(err)) {
+          console.error('[mind-map] batch insert failed', err)
+          this.scheduleHttpStructureSync(600)
+          return
+        }
+      }
+    }
     for (const node of unique) {
       const uid = node.getData && node.getData('uid')
       const parent =
@@ -2982,16 +4318,23 @@ class Cooperate {
           note,
           index: index < 0 ? undefined : index
         })
-        this.lastPushed[uid] = { text, note }
+        this.markUidPushed(uid, { text, note }, 'ack')
         this.recentPushed.set(uid, Date.now())
       } catch (err) {
         const msg = String((err && err.message) || err)
         if (/节点已存在/.test(msg)) {
-          this.lastPushed[uid] = { text, note }
+          this.markUidPushed(uid, { text, note }, 'ack')
           this.recentPushed.set(uid, Date.now())
         } else if (isPermanentNodeError(err)) {
           this.abandonOrphanInsert(node)
           droppedOrphans = true
+          if (
+            /UID_REUSED|DROPPED_DELETED|TARGET_DELETED|NODE_DELETED|PARENT_DELETED/.test(
+              String((err && err.code) || '') + ' ' + msg
+            )
+          ) {
+            skipOrphanRefresh = true
+          }
           console.warn('[mind-map] dropped orphan insert', uid, msg)
         } else {
           console.error('[mind-map] add node failed', err)
@@ -3000,7 +4343,7 @@ class Cooperate {
         }
       }
     }
-    if (droppedOrphans) {
+    if (droppedOrphans && !skipOrphanRefresh) {
       this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
     }
   }
@@ -3018,8 +4361,7 @@ class Cooperate {
       return
     }
     if (!this.abandonedInsertUids) this.abandonedInsertUids = new Set()
-    this.abandonedInsertUids.add(uid)
-    this.forgetHttpUid(uid)
+    this.tombstoneDeletedUid(uid)
     delete this.lastPushed[uid]
   }
 
@@ -3029,10 +4371,7 @@ class Cooperate {
     const walk = current => {
       if (!current) return
       const id = current.getData && current.getData('uid')
-      if (id) {
-        this.abandonedInsertUids.add(id)
-        this.forgetHttpUid(id)
-      }
+      if (id) this.tombstoneDeletedUid(id)
       ;(current.children || []).forEach(walk)
     }
     walk(node)
@@ -3065,38 +4404,106 @@ class Cooperate {
     }
   }
 
-  flushHttpMove() {
+  collectMovesFromCommand(name, args = []) {
+    const nodes = []
+    const pushNode = node => {
+      if (!node || node.isRoot || node.isGeneralization) return
+      const uid = node.getData && node.getData('uid')
+      if (!uid) return
+      const parent =
+        node.parent && node.parent.getData && node.parent.getData('uid')
+      if (!parent) return
+      const kids =
+        (node.parent.nodeData && node.parent.nodeData.children) || []
+      const index = kids.findIndex(item => item && item.data && item.data.uid === uid)
+      nodes.push({
+        uid,
+        parent,
+        index: index < 0 ? 0 : index,
+        node
+      })
+    }
+    const first = args[0]
+    if (Array.isArray(first)) first.forEach(pushNode)
+    else if (first && typeof first.getData === 'function') pushNode(first)
+    if (!nodes.length) {
+      const active =
+        (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
+      active.forEach(pushNode)
+    }
+    v2Trace('local.move.collect', { name, count: nodes.length, uids: nodes.map(n => n.uid) })
+    return nodes
+  }
+
+  flushHttpMove(name, args = []) {
     if (!this.httpPatchNode) return Promise.resolve()
-    const node =
-      this.mindMap.renderer &&
-      this.mindMap.renderer.activeNodeList &&
-      this.mindMap.renderer.activeNodeList[0]
-    if (!node || node.isRoot) return Promise.resolve()
-    const uid = node.getData && node.getData('uid')
-    const parent =
-      node.parent && node.parent.getData && node.parent.getData('uid')
-    if (!uid || !parent) return Promise.resolve()
-    const kids =
-      (node.parent.nodeData && node.parent.nodeData.children) || []
-    const index = kids.findIndex(item => item && item.data && item.data.uid === uid)
-    return this.httpPatchNode(uid, {
-      parent,
-      index: index < 0 ? 0 : index
-    }).catch(err => {
-      if (isPermanentNodeError(err)) {
-        this.abandonGhostNodeByUid(uid, node)
-        this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
-        console.warn('[mind-map] dropped ghost node move', uid, err.message || err)
-      } else {
-        console.error('[mind-map] move node failed', err)
-      }
-    })
+    const moves = this.collectMovesFromCommand(name, args)
+    if (!moves.length) {
+      v2Trace('local.move.skip', { name, reason: 'no-nodes' })
+      return Promise.resolve()
+    }
+    const submitOne = item => {
+      v2Trace('local.move.submit', {
+        uid: item.uid,
+        parent: item.parent,
+        index: item.index
+      })
+      const send = this.collabV2Adapter
+        ? this.submitV2('node.move', {
+            uid: item.uid,
+            parent: item.parent,
+            index: item.index
+          })
+        : this.httpPatchNode(item.uid, {
+            parent: item.parent,
+            index: item.index
+          })
+      return send.catch(err => {
+        if (isPermanentNodeError(err)) {
+          this.abandonGhostNodeByUid(item.uid, item.node)
+          this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
+          console.warn('[mind-map] dropped ghost node move', item.uid, err.message || err)
+        } else {
+          console.error('[mind-map] move node failed', err)
+        }
+      })
+    }
+    if (this.collabV2Adapter && moves.length > 1) {
+      return this.submitV2('node.batch', {
+        ops: moves.map(item => ({
+          type: 'node.move',
+          payload: {
+            uid: item.uid,
+            parent: item.parent,
+            index: item.index
+          }
+        }))
+      }).catch(err => {
+        console.error('[mind-map] batch move failed', err)
+        return Promise.all(moves.map(submitOne))
+      })
+    }
+    return Promise.all(moves.map(submitOne))
   }
 
   flushHttpReparentChildren(node) {
     if (!this.httpPatchNode || !node) return Promise.resolve()
     const parentUid = node.getData && node.getData('uid')
     const kids = (node.nodeData && node.nodeData.children) || []
+    if (this.collabV2Adapter && kids.length > 1) {
+      return this.submitV2('node.batch', {
+        ops: kids.map((child, index) => ({
+          type: 'node.move',
+          payload: {
+            uid: child && child.data && child.data.uid,
+            parent: parentUid,
+            index
+          }
+        }))
+      }).catch(err => {
+        console.error('[mind-map] batch reparent failed', err)
+      })
+    }
     return Promise.all(
       kids.map((child, index) => {
         const childUid = child && child.data && child.data.uid
@@ -3123,8 +4530,27 @@ class Cooperate {
   forgetHttpUid(uid) {
     if (!uid) return
     delete this.lastPushed[uid]
+    if (this.ackedUids) this.ackedUids.delete(uid)
+    if (this.pendingUids) this.pendingUids.delete(uid)
     this.recentPushed.delete(uid)
     this.hydratedUids.delete(uid)
+  }
+
+  isTombstonedUid(uid) {
+    if (!uid) return false
+    if (this.deletedUids && this.deletedUids.has(uid)) return true
+    if (this.abandonedInsertUids && this.abandonedInsertUids.has(uid)) return true
+    return this.isRecentlyHttpDeleted(uid)
+  }
+
+  tombstoneDeletedUid(uid) {
+    if (!uid) return
+    this.forgetHttpUid(uid)
+    if (!this.deletedUids) this.deletedUids = new Set()
+    this.deletedUids.add(uid)
+    if (!this.abandonedInsertUids) this.abandonedInsertUids = new Set()
+    this.abandonedInsertUids.add(uid)
+    this.recentHttpDeleted.set(uid, Date.now())
   }
 
   isRecentlyHttpDeleted(uid) {
@@ -3441,6 +4867,7 @@ class Cooperate {
                     hyperlink: next.hyperlink,
                     hyperlinkTitle: next.hyperlinkTitle,
                     outerFrame: next.outerFrame,
+                    mapRef: next.mapRef,
                     generalization: node.getData
                       ? node.getData('generalization')
                       : next.generalization
