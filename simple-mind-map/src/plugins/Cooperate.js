@@ -29,6 +29,7 @@ import {
 } from '../utils/fieldMerge'
 import { createCollaborationStore } from '../utils/collaborationStore'
 import mapRefUtil from '../utils/mapRef'
+import collabInsertCollect from '../utils/collabInsertCollect'
 import {
   collabTrace,
   createTraceId,
@@ -824,6 +825,7 @@ class Cooperate {
     if (this.onLayoutChange) this.mindMap.off('layout_change', this.onLayoutChange)
     clearTimeout(this.httpTextTimer)
     clearTimeout(this.httpStructureTimer)
+    clearTimeout(this._v2InsertRetryTimer)
   }
 
   // 数据同步时的处理，更新当前思维导图
@@ -3489,6 +3491,9 @@ class Cooperate {
           this.collabV2Adapter.getClientId()
       })
     }
+    if (INSERT_COMMANDS[name] && this.collabV2Adapter) {
+      this.snapshotV2InsertCollect()
+    }
     if (name === 'BACK' || name === 'FORWARD') {
       this.httpHistorySyncing = true
       return
@@ -4105,6 +4110,105 @@ class Cooperate {
     }
   }
 
+  snapshotV2InsertCollect() {
+    const renderer = this.mindMap && this.mindMap.renderer
+    const active = (renderer && renderer.activeNodeList) || []
+    const collectNodes = []
+    const seen = new Set()
+    const add = node => {
+      if (!node || seen.has(node)) return
+      seen.add(node)
+      collectNodes.push(node)
+    }
+    active.forEach(node => {
+      add(node)
+      if (node && node.parent) add(node.parent)
+    })
+    this._insertCollectNodes = collectNodes
+    this._insertKnownUids = collabInsertCollect.snapshotNodeDataUids(
+      collectNodes.map(node => node && node.nodeData).filter(Boolean)
+    )
+  }
+
+  collectV2CommandInsertRecords(opts = {}) {
+    const knownUids = opts.knownUids || this._insertKnownUids || new Set()
+    let nodes = opts.collectNodes || this._insertCollectNodes || []
+    if (!nodes.length) {
+      const renderer = this.mindMap && this.mindMap.renderer
+      const list = (renderer && renderer.activeNodeList) || []
+      nodes = list.slice()
+      list.forEach(node => {
+        if (node && node.parent) nodes.push(node.parent)
+      })
+      if (!nodes.length && this.lastActiveUids && renderer && renderer.findNodeByUid) {
+        this.lastActiveUids.forEach(uid => {
+          const live = renderer.findNodeByUid(uid)
+          if (live) {
+            nodes.push(live)
+            if (live.parent) nodes.push(live.parent)
+          }
+        })
+      }
+    }
+    const roots = []
+    const seenRoot = new Set()
+    nodes.forEach(node => {
+      const data = node && node.nodeData
+      if (!data || seenRoot.has(data)) return
+      seenRoot.add(data)
+      roots.push(data)
+    })
+    const rows = collabInsertCollect.collectNewNodeDataInserts(roots, {
+      knownUids,
+      isAcked: uid => this.isPersistAcked(uid),
+      isPending: uid => !!(this.pendingUids && this.pendingUids.has(uid)),
+      isTombstoned: uid => this.isTombstonedUid(uid),
+      isAbandoned: uid =>
+        !!(this.abandonedInsertUids && this.abandonedInsertUids.has(uid)),
+      textOf: data =>
+        data && data.richText
+          ? getTextFromHtml(data.text)
+          : String((data && data.text) || '')
+    })
+    const filtered = rows.filter(row => {
+      if (!row || !row.uid || !row.parent) return false
+      return !this.isGeneralizationUid(row.parent, row.uid)
+    })
+    if (knownUids && knownUids.size) return filtered
+    return filtered.filter(row => row.data && row.data.inserting)
+  }
+
+  recordsFromMindMapNodes(nodes) {
+    return (nodes || [])
+      .map(node => {
+        if (!node || node.isGeneralization || node.isRoot) return null
+        const uid = node.getData && node.getData('uid')
+        const parent =
+          node.parent && node.parent.getData && node.parent.getData('uid')
+        if (!uid || !parent) return null
+        if (this.isGeneralizationUid(parent, uid)) return null
+        const kids =
+          (node.parent &&
+            node.parent.nodeData &&
+            node.parent.nodeData.children) ||
+          []
+        const index = kids.findIndex(
+          item => item && item.data && item.data.uid === uid
+        )
+        const data = (node.getData && node.getData()) || {}
+        return {
+          uid,
+          parent,
+          text: this.nodePlain(node),
+          note: data.note || '',
+          index: index < 0 ? undefined : index,
+          depth: this.nodeDepth(node),
+          data
+        }
+      })
+      .filter(Boolean)
+  }
+
   collectUnpushedNodes(node, out = []) {
     if (!node) return out
     if (node.isGeneralization) return out
@@ -4165,6 +4269,18 @@ class Cooperate {
     return depth
   }
 
+  scheduleV2InsertRetry(opts, delay = 48) {
+    if (!this.collabV2Adapter || !opts || !opts.fromCommand) return
+    clearTimeout(this._v2InsertRetryTimer)
+    this._v2InsertRetryTimer = setTimeout(() => {
+      this._v2InsertRetryTimer = null
+      this._v2InsertFromCommand = true
+      this._insertKnownUids = opts.knownUids
+      this._insertCollectNodes = opts.collectNodes
+      this.flushHttpInsert().catch(() => {})
+    }, delay)
+  }
+
   async flushHttpInsert() {
     if (
       this.httpReplacing ||
@@ -4181,6 +4297,12 @@ class Cooperate {
     }
     const fromCommand = this._v2InsertFromCommand
     this._v2InsertFromCommand = false
+    const knownUids = this._insertKnownUids
+    const collectNodes = this._insertCollectNodes
+    const flushOpts = { fromCommand, knownUids, collectNodes }
+    if (this.collabV2Adapter && fromCommand) {
+      flushOpts.preRecords = this.collectV2CommandInsertRecords(flushOpts)
+    }
     const settling =
       this.httpSettlingAfterReplace || Date.now() < this.suppressLocalUntil
     if (!fromCommand && settling) {
@@ -4199,114 +4321,124 @@ class Cooperate {
       if (!hasUnpushed) return
     }
     if (this.httpInsertPromise) {
-      this.httpInsertRescan = true
+      this._insertFlushQueue = this._insertFlushQueue || []
+      this._insertFlushQueue.push(flushOpts)
       return this.httpInsertPromise
     }
-    this.httpInsertPromise = this.flushHttpInsertNow()
+    this.httpInsertPromise = (async () => {
+      let current = flushOpts
+      while (current) {
+        await this.flushHttpInsertNow(current)
+        current = (this._insertFlushQueue || []).shift() || null
+      }
+    })()
     try {
       await this.httpInsertPromise
     } finally {
       this.httpInsertPromise = null
-      if (this.httpInsertRescan) {
-        this.httpInsertRescan = false
-        if (!this.collabV2Adapter) this.scheduleHttpStructureSync(0)
-      }
     }
   }
 
-  async flushHttpInsertNow() {
+  async flushHttpInsertNow(opts = {}) {
+    const fromCommand = !!opts.fromCommand
+    let records =
+      this.collabV2Adapter && fromCommand && Array.isArray(opts.preRecords)
+        ? opts.preRecords.slice()
+        : []
     await this.flushHttpTextNow()
-    const renderer = this.mindMap.renderer
-    const pending = []
-    const list = (renderer && renderer.activeNodeList) || []
-    list.forEach(node => this.collectUnpushedNodes(node, pending))
-    const settling =
-      this.httpSettlingAfterReplace || Date.now() < this.suppressLocalUntil
-    if (!this.collabV2Adapter && !settling && renderer && renderer.root) {
-      this.collectUnpushedNodes(renderer.root, pending)
+    if (!records.length && this.collabV2Adapter && fromCommand) {
+      records = this.collectV2CommandInsertRecords(opts)
     }
-    const seen = new Set()
-    const unique = pending.filter(node => {
-      if (node.isGeneralization) return false
-      const uid = node.getData && node.getData('uid')
-      if (!uid || seen.has(uid)) return false
-      if (this.isTombstonedUid(uid)) return false
-      const parentUid =
-        node.parent && node.parent.getData && node.parent.getData('uid')
-      if (parentUid && this.isGeneralizationUid(parentUid, uid)) return false
-      seen.add(uid)
+    if (!records.length && !(this.collabV2Adapter && fromCommand)) {
+      const renderer = this.mindMap && this.mindMap.renderer
+      const pending = []
+      const list = (renderer && renderer.activeNodeList) || []
+      list.forEach(node => this.collectUnpushedNodes(node, pending))
+      const settling =
+        this.httpSettlingAfterReplace || Date.now() < this.suppressLocalUntil
+      if (!this.collabV2Adapter && !settling && renderer && renderer.root) {
+        this.collectUnpushedNodes(renderer.root, pending)
+      }
+      const seen = new Set()
+      const unique = pending.filter(node => {
+        if (node.isGeneralization) return false
+        const uid = node.getData && node.getData('uid')
+        if (!uid || seen.has(uid)) return false
+        if (this.isTombstonedUid(uid)) return false
+        const parentUid =
+          node.parent && node.parent.getData && node.parent.getData('uid')
+        if (parentUid && this.isGeneralizationUid(parentUid, uid)) return false
+        seen.add(uid)
+        return true
+      })
+      records = this.recordsFromMindMapNodes(unique)
+    }
+    records = records.filter(row => {
+      if (!row || !row.uid || !row.parent) return false
+      if (this.isPersistAcked(row.uid) || this.isTombstonedUid(row.uid)) return false
+      if (this.abandonedInsertUids && this.abandonedInsertUids.has(row.uid)) {
+        return false
+      }
       return true
     })
     v2Trace('local.insert.flush', {
-      count: unique.length,
-      uids: unique.map(node => node.getData && node.getData('uid'))
+      count: records.length,
+      uids: records.map(row => row.uid)
     })
-    unique.sort((a, b) => this.nodeDepth(a) - this.nodeDepth(b))
-    unique.forEach(node => {
-      const uid = node.getData && node.getData('uid')
-      if (uid && this.pendingUids) this.pendingUids.add(uid)
+    records.sort((a, b) => (a.depth || 0) - (b.depth || 0))
+    records.forEach(row => {
+      if (row.uid && this.pendingUids) this.pendingUids.add(row.uid)
     })
-    if (!unique.length) {
+    if (!records.length) {
       this._insertEmptyRetries = (this._insertEmptyRetries || 0) + 1
-      if (!this.collabV2Adapter && this._insertEmptyRetries < 6) {
+      if (this.collabV2Adapter && fromCommand && this._insertEmptyRetries < 5) {
+        this.scheduleV2InsertRetry(opts, 32 * this._insertEmptyRetries)
+      } else if (!this.collabV2Adapter && this._insertEmptyRetries < 6) {
         this.scheduleHttpStructureSync(1600)
       }
-    } else {
-      this._insertEmptyRetries = 0
+      return
     }
+    this._insertEmptyRetries = 0
     let droppedOrphans = false
     let skipOrphanRefresh = false
-    if (this.collabV2Adapter && unique.length > 1) {
-      const ops = unique.map(node => {
-        const uid = node.getData && node.getData('uid')
-        const parent =
-          node.parent && node.parent.getData && node.parent.getData('uid')
-        const kids =
-          (node.parent && node.parent.nodeData && node.parent.nodeData.children) ||
-          []
-        const index = kids.findIndex(
-          item => item && item.data && item.data.uid === uid
-        )
-        return {
-          type: 'node.insert',
-          payload: {
-            parent,
-            uid,
-            text: this.nodePlain(node),
-            note: (node.getData && node.getData('note')) || '',
-            index: index < 0 ? undefined : index
-          }
+    if (this.collabV2Adapter && records.length > 1) {
+      const ops = records.map(row => ({
+        type: 'node.insert',
+        payload: {
+          parent: row.parent,
+          uid: row.uid,
+          text: row.text,
+          note: row.note || '',
+          index: row.index
         }
-      })
+      }))
       try {
         await this.submitV2('node.batch', { ops })
-        unique.forEach(node => {
-          const uid = node.getData && node.getData('uid')
-          const data = (node.getData && node.getData()) || {}
-          this.markUidPushed(uid, data, 'ack')
-          this.recentPushed.set(uid, Date.now())
+        records.forEach(row => {
+          this.markUidPushed(row.uid, row.data || { text: row.text, note: row.note }, 'ack')
+          this.recentPushed.set(row.uid, Date.now())
         })
         return
       } catch (err) {
         if (!isPermanentNodeError(err)) {
           console.error('[mind-map] batch insert failed', err)
-          this.scheduleHttpStructureSync(600)
+          if (this.collabV2Adapter && fromCommand) {
+            records.forEach(row => {
+              if (this.pendingUids) this.pendingUids.delete(row.uid)
+            })
+            this.scheduleV2InsertRetry(opts, 600)
+          } else {
+            this.scheduleHttpStructureSync(600)
+          }
           return
         }
       }
     }
-    for (const node of unique) {
-      const uid = node.getData && node.getData('uid')
-      const parent =
-        node.parent && node.parent.getData && node.parent.getData('uid')
-      const text = this.nodePlain(node)
-      const note = (node.getData && node.getData('note')) || ''
-      const kids =
-        (node.parent && node.parent.nodeData && node.parent.nodeData.children) ||
-        []
-      const index = kids.findIndex(
-        item => item && item.data && item.data.uid === uid
-      )
+    for (const row of records) {
+      const uid = row.uid
+      const parent = row.parent
+      const text = row.text
+      const note = row.note || ''
       try {
         if (!parent) {
           throw new Error('missing parent for insert')
@@ -4316,17 +4448,17 @@ class Cooperate {
           uid,
           text,
           note,
-          index: index < 0 ? undefined : index
+          index: row.index
         })
-        this.markUidPushed(uid, { text, note }, 'ack')
+        this.markUidPushed(uid, row.data || { text, note }, 'ack')
         this.recentPushed.set(uid, Date.now())
       } catch (err) {
         const msg = String((err && err.message) || err)
         if (/节点已存在/.test(msg)) {
-          this.markUidPushed(uid, { text, note }, 'ack')
+          this.markUidPushed(uid, row.data || { text, note }, 'ack')
           this.recentPushed.set(uid, Date.now())
         } else if (isPermanentNodeError(err)) {
-          this.abandonOrphanInsert(node)
+          this.abandonGhostNodeByUid(uid)
           droppedOrphans = true
           if (
             /UID_REUSED|DROPPED_DELETED|TARGET_DELETED|NODE_DELETED|PARENT_DELETED/.test(
@@ -4338,8 +4470,12 @@ class Cooperate {
           console.warn('[mind-map] dropped orphan insert', uid, msg)
         } else {
           console.error('[mind-map] add node failed', err)
-          // Retry shortly; otherwise the node stays local-only and peers never see it.
-          this.scheduleHttpStructureSync(600)
+          if (this.pendingUids) this.pendingUids.delete(uid)
+          if (this.collabV2Adapter && fromCommand) {
+            this.scheduleV2InsertRetry(opts, 600)
+          } else {
+            this.scheduleHttpStructureSync(600)
+          }
         }
       }
     }
