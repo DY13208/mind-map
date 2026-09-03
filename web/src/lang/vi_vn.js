@@ -312,6 +312,8 @@ export default {
     reserve: 'Giữ lại'
   },
   toolbar: {
+    collapseAllToolbars: 'Thu gọn tất cả thanh công cụ',
+    expandAllToolbars: 'Mở rộng tất cả thanh công cụ',
     collapseToolbar: 'Thu gọn thanh công cụ trên',
     expandToolbar: 'Mở rộng thanh công cụ trên',
     undo: 'Hoàn tác',

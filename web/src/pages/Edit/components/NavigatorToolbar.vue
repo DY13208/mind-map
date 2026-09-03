@@ -194,6 +194,16 @@ export default {
   },
   created() {
     this.lang = getLang()
+    this.$bus.$on(
+      'set_canvas_toolbars_collapsed',
+      this.setCanvasToolbarsCollapsed
+    )
+  },
+  beforeDestroy() {
+    this.$bus.$off(
+      'set_canvas_toolbars_collapsed',
+      this.setCanvasToolbarsCollapsed
+    )
   },
   methods: {
     ...mapMutations([
@@ -202,6 +212,10 @@ export default {
       'setIsSourceCodeEdit',
       'setActiveSidebar'
     ]),
+
+    setCanvasToolbarsCollapsed(collapsed) {
+      this.toolbarCollapsed = collapsed
+    },
 
     readonlyChange() {
       if (!this.roomCanEdit) return

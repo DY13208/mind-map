@@ -328,6 +328,8 @@ export default {
     reserve: '保留'
   },
   toolbar: {
+    collapseAllToolbars: '一键收起工具栏',
+    expandAllToolbars: '一键展开工具栏',
     collapseToolbar: '收起顶部工具栏',
     expandToolbar: '展开顶部工具栏',
     undo: '回退',
