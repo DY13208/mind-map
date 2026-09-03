@@ -1,5 +1,6 @@
 import MindMapNode from './MindMapNode'
 import { createUid } from '../../../utils/index'
+import collabGeneralization from '../../../utils/collabGeneralization'
 
 // 获取节点概要数据
 function formatGetGeneralization() {
@@ -118,16 +119,9 @@ function createGeneralizationNode() {
 //  更新概要节点
 function updateGeneralization() {
   if (this.isGeneralization) return
-  const nextSig = this.formatGetGeneralization()
-    .map(item => {
-      if (!item || typeof item !== 'object') return String(item || '')
-      const range =
-        Array.isArray(item.range) && item.range.length >= 2
-          ? `${Number(item.range[0])},${Number(item.range[1])}`
-          : ''
-      return [item.uid || '', String(item.text || ''), range].join(':')
-    })
-    .join('|')
+  const nextSig = collabGeneralization.generalizationSignature(
+    this.getData('generalization')
+  )
   if (
     this._generalizationSig === nextSig &&
     ((nextSig && this._generalizationList.length) ||
@@ -137,16 +131,7 @@ function updateGeneralization() {
   }
   this.removeGeneralization()
   this.createGeneralizationNode()
-  this._generalizationSig = this.formatGetGeneralization()
-    .map(item => {
-      if (!item || typeof item !== 'object') return String(item || '')
-      const range =
-        Array.isArray(item.range) && item.range.length >= 2
-          ? `${Number(item.range[0])},${Number(item.range[1])}`
-          : ''
-      return [item.uid || '', String(item.text || ''), range].join(':')
-    })
-    .join('|')
+  this._generalizationSig = nextSig
 }
 
 //  渲染概要节点

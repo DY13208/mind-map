@@ -11,6 +11,40 @@ function snapshotNodeDataUids(roots) {
   return set
 }
 
+function collectNodeDataUids(item, out = []) {
+  if (!item) return out
+  const uid = item.data && item.data.uid
+  if (uid) out.push(uid)
+  const kids = item.children || []
+  for (let i = 0; i < kids.length; i++) collectNodeDataUids(kids[i], out)
+  return out
+}
+
+function removeUidsFromNodeData(parent, uids) {
+  const drop = uids instanceof Set ? uids : new Set(uids || [])
+  if (!parent || !Array.isArray(parent.children) || !drop.size) return false
+  const next = parent.children.filter(child => {
+    const uid = child && child.data && child.data.uid
+    return !uid || !drop.has(uid)
+  })
+  if (next.length === parent.children.length) return false
+  parent.children = next
+  return true
+}
+
+function collectNewNodeDataInserts(roots, opts = {}) {
+  const set = new Set()
+  const walk = item => {
+    if (!item) return
+    const uid = item.data && item.data.uid
+    if (uid) set.add(uid)
+    const kids = item.children || []
+    for (let i = 0; i < kids.length; i++) walk(kids[i])
+  }
+  ;(roots || []).forEach(walk)
+  return set
+}
+
 function collectNewNodeDataInserts(roots, opts = {}) {
   const knownUids = opts.knownUids || new Set()
   const isAcked = opts.isAcked || (() => false)
@@ -73,6 +107,8 @@ function collectNewNodeDataInserts(roots, opts = {}) {
 
 const api = {
   snapshotNodeDataUids,
+  collectNodeDataUids,
+  removeUidsFromNodeData,
   collectNewNodeDataInserts
 }
 

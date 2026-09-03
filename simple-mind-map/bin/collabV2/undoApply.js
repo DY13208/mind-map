@@ -1,6 +1,7 @@
 const { groupsForKeys, readFieldVersions } = require('../fieldMerge')
 const { applyDirect } = require('./directApplier')
 const { normalizeType } = require('./protocol')
+const { generalizationSignature } = require('../../src/utils/collabGeneralization')
 
 function unique(list) {
   return Array.from(new Set((list || []).filter(Boolean)))
@@ -168,7 +169,24 @@ function forwardValue(target, key) {
   const payload = payloadOf(target)
   if (payload.patch && payload.patch[key] !== undefined) return payload.patch[key]
   if (payload.data && payload.data[key] !== undefined) return payload.data[key]
-  return payload[key]
+  if (payload[key] !== undefined) return payload[key]
+  const eventPayload = (target && target.event && target.event.payload) || {}
+  if (eventPayload.patch && eventPayload.patch[key] !== undefined) {
+    return eventPayload.patch[key]
+  }
+  if (eventPayload.data && eventPayload.data[key] !== undefined) {
+    return eventPayload.data[key]
+  }
+  return eventPayload[key]
+}
+
+function fieldValueEquals(key, current, expected) {
+  if (expected === null && (current === undefined || current === null)) return true
+  if (stable(current) === stable(expected === null ? undefined : expected)) return true
+  if (key === 'generalization') {
+    return generalizationSignature(current) === generalizationSignature(expected)
+  }
+  return false
 }
 
 async function assertFieldSafe(store, target, inverse, later, actorId, kind) {
@@ -209,14 +227,12 @@ async function assertFieldSafe(store, target, inverse, later, actorId, kind) {
     keys.forEach(key => {
       const current = live.data[key]
       const wanted = patch[key]
-      if (stable(current) === stable(wanted === null ? undefined : wanted) || (wanted === null && current === undefined)) {
-        return
-      }
+      if (fieldValueEquals(key, current, wanted)) return
       const expected =
         kind === 'redo'
           ? ((inverseOf(target) && (inverseOf(target).payload.patch || inverseOf(target).payload)) || {})[key]
           : forwardValue(target, key)
-      if (expected !== undefined && stable(current) === stable(expected)) return
+      if (expected !== undefined && fieldValueEquals(key, current, expected)) return
       const blocker = activeLater.find(op => laterTouchesUid(op, uid))
       if (blocker && actorOf(blocker) === String(actorId || '')) {
         throw reject(order, '请先处理自己之后的相关操作', {
@@ -224,6 +240,9 @@ async function assertFieldSafe(store, target, inverse, later, actorId, kind) {
           blockingVersion: versionOf(blocker)
         })
       }
+      // generalization is an object group. Merge may add defaults/__fv so live
+      // JSON differs from the original patch even when no later op touched it.
+      if (!blocker && key === 'generalization') return
       throw reject(code, '该内容已被其他协作者修改，无法直接撤销。', {
         overlappingUids: [uid],
         blockingVersion: blocker ? versionOf(blocker) : null,

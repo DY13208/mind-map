@@ -30,6 +30,7 @@ import {
 import { createCollaborationStore } from '../utils/collaborationStore'
 import mapRefUtil from '../utils/mapRef'
 import collabInsertCollect from '../utils/collabInsertCollect'
+import collabGeneralization from '../utils/collabGeneralization'
 import {
   collabTrace,
   createTraceId,
@@ -210,18 +211,7 @@ function stableFieldValue(value) {
 }
 
 function generalizationSignature(generalization) {
-  const list = formatGetNodeGeneralization({ generalization })
-  if (!list.length) return ''
-  return list
-    .map(item => {
-      if (!item || typeof item !== 'object') return String(item || '')
-      const range =
-        Array.isArray(item.range) && item.range.length >= 2
-          ? `${Number(item.range[0])},${Number(item.range[1])}`
-          : ''
-      return [item.uid || '', String(item.text || ''), range].join(':')
-    })
-    .join('|')
+  return collabGeneralization.generalizationSignature(generalization)
 }
 
 function generalizationUidsOf(data) {
@@ -267,6 +257,13 @@ function payloadNodeData(payload) {
     {}
   if (payload && payload.text != null && data.text == null) data.text = payload.text
   if (payload && payload.note != null && data.note == null) data.note = payload.note
+  if (
+    payload &&
+    Object.prototype.hasOwnProperty.call(payload, 'generalization') &&
+    data.generalization === undefined
+  ) {
+    data.generalization = payload.generalization
+  }
   if (payload && payload.uid && !data.uid) data.uid = payload.uid
   return data
 }
@@ -1197,7 +1194,6 @@ class Cooperate {
         !this.isApplyingRemote &&
         !this.httpReplacing &&
         !this.isSetData &&
-        !this.httpHydrating &&
         (name === 'REMOVE_NODE' ||
           name === 'REMOVE_CURRENT_NODE' ||
           name === 'CUT_NODE')
@@ -1219,7 +1215,13 @@ class Cooperate {
           } else if (INSERT_COMMANDS[name] || MOVE_COMMANDS[name]) {
             this.scheduleHttpStructureSync(80)
           }
-          if (name === 'SET_NODE_TEXT' || name === 'SET_NODE_NOTE') {
+          if (
+            FIELD_COMMANDS[name] ||
+            name === 'ADD_GENERALIZATION' ||
+            name === 'REMOVE_GENERALIZATION'
+          ) {
+            this.onHttpCommand(name, Array.prototype.slice.call(arguments, 1))
+          } else if (name === 'SET_NODE_TEXT' || name === 'SET_NODE_NOTE') {
             this.scheduleHttpTextSync()
           }
           return
@@ -1231,7 +1233,13 @@ class Cooperate {
             this.scheduleHttpStructureSync(80)
           }
         }
-        if (name === 'SET_NODE_TEXT' || name === 'SET_NODE_NOTE') {
+        if (
+          FIELD_COMMANDS[name] ||
+          name === 'ADD_GENERALIZATION' ||
+          name === 'REMOVE_GENERALIZATION'
+        ) {
+          this.onHttpCommand(name, Array.prototype.slice.call(arguments, 1))
+        } else if (name === 'SET_NODE_TEXT' || name === 'SET_NODE_NOTE') {
           this.scheduleHttpTextSync()
         }
       }
@@ -1874,6 +1882,15 @@ class Cooperate {
       v2Trace('remote.apply.insert.skip-gen', { uid, parentUid })
       return true
     }
+    if (this.isTombstonedUid(uid)) {
+      v2Trace('remote.apply.insert.skip-tombstone', { uid, parentUid })
+      const live =
+        typeof renderer.findNodeByUid === 'function'
+          ? renderer.findNodeByUid(uid)
+          : null
+      this.removeLocalDeletedUids(new Set([uid]), parentUid, live)
+      return true
+    }
     if (renderer.findNodeByUid(uid)) return true
     const parentNode = renderer.findNodeByUid(parentUid)
     if (!parentNode) return false
@@ -1923,7 +1940,7 @@ class Cooperate {
       this.suppressLocalUntil = Date.now() + 250
       this.isApplyingRemote = false
     }
-    return !!renderer.findNodeByUid(uid)
+    return true
   }
 
   applyV2PayloadMove(payload = {}) {
@@ -1986,23 +2003,38 @@ class Cooperate {
   applyV2PayloadDelete(payload = {}) {
     const uid = payload.uid
     const renderer = this.mindMap && this.mindMap.renderer
-    if (!uid || !renderer || typeof renderer.findNodeByUid !== 'function') return false
-    const node = renderer.findNodeByUid(uid)
-    if (!node || node.isRoot) return true
-    if (node.isGeneralization && node.generalizationBelongNode) {
-      return this.applyLocalGeneralization(
-        node.generalizationBelongNode,
-        (node.generalizationBelongNode.getData &&
-          node.generalizationBelongNode.getData('generalization')) ||
-          null
-      )
+    if (!uid || !renderer) return false
+    const node =
+      typeof renderer.findNodeByUid === 'function'
+        ? renderer.findNodeByUid(uid)
+        : null
+    if (node && node.isRoot) return true
+    if (node && node.isGeneralization) {
+      v2Trace('remote.apply.delete.skip-gen', { uid })
+      return true
+    }
+    if (this.isGeneralizationUid(payloadParentUid(payload), uid)) {
+      v2Trace('remote.apply.delete.skip-gen-uid', { uid })
+      return true
+    }
+    const removed =
+      Array.isArray(payload.removed) && payload.removed.length
+        ? payload.removed.filter(Boolean)
+        : [uid]
+    const drop = new Set(removed)
+    removed.forEach(id => this.tombstoneDeletedUid(id))
+    this.purgeQueuedInserts(drop)
+    const dropAdapter =
+      this.collabV2Adapter && this.collabV2Adapter.dropPendingInsertsForUid
+    if (dropAdapter) {
+      removed.forEach(id => {
+        Promise.resolve(dropAdapter.call(this.collabV2Adapter, id)).catch(() => {})
+      })
     }
     this.isApplyingRemote = true
     this.mindMap.command.pause()
     try {
-      const parent = node.parent
-      removeFromParentNodeData(node)
-      if (parent && typeof parent.renderLine === 'function') parent.renderLine()
+      this.removeLocalDeletedUids(drop, payloadParentUid(payload), node)
       this.mindMap.render()
     } catch (err) {
       v2Trace('remote.apply.delete.err', { uid, message: err && err.message })
@@ -2016,14 +2048,107 @@ class Cooperate {
       this.suppressLocalUntil = Date.now() + 250
       this.isApplyingRemote = false
     }
-    return !renderer.findNodeByUid(uid)
+    return true
+  }
+
+  removeLocalDeletedUids(drop, parentUid, node) {
+    const removed = drop instanceof Set ? drop : new Set(drop || [])
+    if (!removed.size && node) {
+      const uid = node.getData && node.getData('uid')
+      if (uid) removed.add(uid)
+    }
+    const renderer = this.mindMap && this.mindMap.renderer
+    const tree = renderer && renderer.renderTree
+    const parentInstance =
+      (node && node.parent) ||
+      (parentUid &&
+        renderer &&
+        typeof renderer.findNodeByUid === 'function' &&
+        renderer.findNodeByUid(parentUid)) ||
+      null
+    const parentTree =
+      (parentInstance && parentInstance.nodeData) ||
+      (tree && parentUid && this.findTreeNode(tree, parentUid))
+    if (parentTree && Array.isArray(parentTree.children)) {
+      parentTree.children.forEach(child => {
+        const id = child && child.data && child.data.uid
+        if (id && removed.has(id)) {
+          collabInsertCollect.collectNodeDataUids(child).forEach(childUid => {
+            removed.add(childUid)
+            this.tombstoneDeletedUid(childUid)
+          })
+        }
+      })
+      collabInsertCollect.removeUidsFromNodeData(parentTree, removed)
+    }
+    if (parentInstance) {
+      if (
+        parentInstance.nodeData &&
+        parentInstance.nodeData !== parentTree
+      ) {
+        collabInsertCollect.removeUidsFromNodeData(
+          parentInstance.nodeData,
+          removed
+        )
+      }
+      if (Array.isArray(parentInstance.children)) {
+        parentInstance.children = parentInstance.children.filter(child => {
+          const id = child && child.getData && child.getData('uid')
+          if (id && removed.has(id)) return false
+          return child !== node
+        })
+      }
+      if (typeof parentInstance.renderLine === 'function') parentInstance.renderLine()
+    }
+    if (tree && parentUid) {
+      const treeParent = this.findTreeNode(tree, parentUid)
+      if (treeParent && treeParent !== parentTree) {
+        collabInsertCollect.removeUidsFromNodeData(treeParent, removed)
+      }
+    }
+    if (tree && (!parentTree || !parentUid)) {
+      const stack = [{ node: tree, parent: null }]
+      while (stack.length) {
+        const item = stack.pop()
+        const cur = item.node
+        const parent = item.parent
+        const id = cur && cur.data && cur.data.uid
+        if (id && removed.has(id) && parent) {
+          collabInsertCollect.collectNodeDataUids(cur).forEach(childUid => {
+            removed.add(childUid)
+            this.tombstoneDeletedUid(childUid)
+          })
+          collabInsertCollect.removeUidsFromNodeData(parent, removed)
+        }
+        const kids = (cur && cur.children) || []
+        for (let i = 0; i < kids.length; i++) {
+          stack.push({ node: kids[i], parent: cur })
+        }
+      }
+    }
+  }
+
+  purgeQueuedInserts(uids) {
+    const drop = uids instanceof Set ? uids : new Set(uids || [])
+    if (!drop.size) return
+    if (this._insertFlushQueue) {
+      this._insertFlushQueue.forEach(item => {
+        if (!item || !Array.isArray(item.preRecords)) return
+        item.preRecords = item.preRecords.filter(
+          row => row && !drop.has(row.uid)
+        )
+      })
+    }
+    drop.forEach(uid => {
+      if (this.pendingUids) this.pendingUids.delete(uid)
+    })
   }
 
   applyV2PayloadUpdate(payload = {}) {
     const uid = payload.uid
     const renderer = this.mindMap && this.mindMap.renderer
     if (!uid || !renderer || typeof renderer.findNodeByUid !== 'function') return false
-    const node = renderer.findNodeByUid(uid)
+    let node = renderer.findNodeByUid(uid)
     if (!node) return false
     if (
       payload.parentUid !== undefined ||
@@ -2043,7 +2168,25 @@ class Cooperate {
         )
       })
     }
-    const next = payloadNodeData(payload)
+    let next = payloadNodeData(payload)
+    if (node.isGeneralization && node.generalizationBelongNode) {
+      const owner = node.generalizationBelongNode
+      const genUid = (node.getData && node.getData('uid')) || uid
+      if (!Object.prototype.hasOwnProperty.call(next, 'generalization')) {
+        next = {
+          generalization: collabGeneralization.mergeVirtualEditIntoOwner(
+            owner.getData && owner.getData('generalization'),
+            genUid,
+            next
+          )
+        }
+      }
+      node = owner
+      v2Trace('remote.apply.update.gen-remap', {
+        virtualUid: uid,
+        ownerUid: owner.getData && owner.getData('uid')
+      })
+    }
     this.isApplyingRemote = true
     try {
       this.applyHttpRemoteNodeFields(node, next, { data: next })
@@ -2713,7 +2856,7 @@ class Cooperate {
     )
     ;(incoming || []).forEach(child => {
       const uid = child && child.data && child.data.uid
-      if (!uid || have.has(uid)) return
+      if (!uid || have.has(uid) || this.isTombstonedUid(uid)) return
       data.children.push(child)
       have.add(uid)
       this.markUidPushed(uid, child.data, 'server')
@@ -2734,7 +2877,7 @@ class Cooperate {
         value === null ||
         value === '' ||
         (Array.isArray(value) && value.length === 0)
-      if (!empty) full[key] = value
+      if (!empty) full[key] = collabGeneralization.snapshotValue(value)
     })
     if (!this.ackedUids) this.ackedUids = new Set()
     if (!this.pendingUids) this.pendingUids = new Set()
@@ -2779,18 +2922,16 @@ class Cooperate {
   }
 
   normalizeGeneralizationData(generalization) {
-    if (generalization == null) return null
-    const list = formatGetNodeGeneralization({ generalization })
-    if (!list.length) return null
+    const list = collabGeneralization.ownerGeneralizationPayload(generalization)
+    if (!list) return null
     return list.map(item => {
       if (!item || typeof item !== 'object') return item
-      const next = { ...item }
-      if (Array.isArray(next.range) && next.range.length >= 2) {
-        next.range = [Number(next.range[0]), Number(next.range[1])]
+      if (Array.isArray(item.range) && item.range.length >= 2) {
+        item.range = [Number(item.range[0]), Number(item.range[1])]
       } else {
-        delete next.range
+        delete item.range
       }
-      return next
+      return item
     })
   }
 
@@ -2874,13 +3015,25 @@ class Cooperate {
       if (typeof node.removeGeneralization === 'function') {
         node.removeGeneralization()
       }
+      if (typeof renderer.reRenderNodeCheckChange === 'function') {
+        renderer.reRenderNodeCheckChange(node, false)
+      }
       return true
     }
     renderer.setNodeData(node, { generalization: nextGen })
-    if (typeof node.updateGeneralization === 'function') {
-      node.updateGeneralization()
-    } else if (typeof node.createGeneralizationNode === 'function') {
+    if (typeof node.removeGeneralization === 'function') {
+      node.removeGeneralization()
+    }
+    if (typeof node.createGeneralizationNode === 'function') {
       node.createGeneralizationNode()
+    }
+    if (typeof node.renderGeneralization === 'function') {
+      node.renderGeneralization(true)
+    } else if (typeof node.updateGeneralization === 'function') {
+      node.updateGeneralization()
+    }
+    if (typeof renderer.reRenderNodeCheckChange === 'function') {
+      renderer.reRenderNodeCheckChange(node, false)
     }
     this.hydrateGeneralizationParent(node, nextGen)
       .then(hydrated => {
@@ -3267,6 +3420,7 @@ class Cooperate {
 
   async ensureHttpNodePath(uid, locatedCache) {
     if (!uid || uid === 'root') return false
+    if (this.isTombstonedUid(uid)) return false
     const renderer = this.mindMap.renderer
     const tree = renderer && renderer.renderTree
     if (!tree) return false
@@ -3292,7 +3446,7 @@ class Cooperate {
         const parentId = located.ancestors[i - 1]
         const parent = this.findTreeNode(tree, parentId)
         const stub = located.nodes && located.nodes[id]
-        if (parent && stub) {
+        if (parent && stub && !this.isTombstonedUid(id)) {
           this.mergeHttpChildren(parent, [stub])
           if (this.expandTreeNode(parent)) changed = true
           treeNode = this.findTreeNode(tree, id)
@@ -3320,6 +3474,10 @@ class Cooperate {
     if (!roots.length) return false
     let changed = false
     for (const uid of roots) {
+      if (this.isTombstonedUid(uid)) {
+        this.dirtySubtrees.delete(uid)
+        continue
+      }
       let treeNode = this.findTreeNode(tree, uid)
       if (!treeNode) {
         await this.ensureHttpNodePath(uid)
@@ -3352,6 +3510,7 @@ class Cooperate {
     let changed = false
     try {
       for (const uid of uids) {
+        if (this.isTombstonedUid(uid)) continue
         if (await this.ensureHttpNodePath(uid)) changed = true
       }
       if (await this.syncHttpDirtySubtrees()) changed = true
@@ -3543,18 +3702,59 @@ class Cooperate {
       const uid = node.getData && node.getData('uid')
       if (uid) {
         const keepChildren = name === 'REMOVE_CURRENT_NODE'
+        const walkData = item => {
+          if (!item) return
+          const id = item.data && item.data.uid
+          if (id) deletes.push(id)
+          if (keepChildren) return
+          ;(item.children || []).forEach(walkData)
+        }
         const walk = current => {
           if (!current) return
           const id = current.getData && current.getData('uid')
           if (id) deletes.push(id)
           if (keepChildren) return
+          const dataKids = (current.nodeData && current.nodeData.children) || []
+          dataKids.forEach(walkData)
           ;(current.children || []).forEach(walk)
         }
         walk(node)
       }
     })
-    this.pendingHttpDeletes = deletes
+    this.pendingHttpDeletes = [...new Set(deletes)]
     this.pendingHttpGeneralizationOwners = owners
+  }
+
+  collectGeneralizationOwners(name, args = []) {
+    const owners = []
+    const seen = new Set()
+    const addOwner = owner => {
+      if (!owner || owner.isGeneralization) return
+      const uid = owner.getData && owner.getData('uid')
+      if (!uid || seen.has(uid)) return
+      seen.add(uid)
+      owners.push(owner)
+    }
+    const consider = node => {
+      if (!node) return
+      if (node.isGeneralization && node.generalizationBelongNode) {
+        addOwner(node.generalizationBelongNode)
+      }
+    }
+    consider(args[0])
+    if (
+      name === 'SET_NODE_DATA' &&
+      args[0] &&
+      !args[0].isGeneralization &&
+      args[1] &&
+      Object.prototype.hasOwnProperty.call(args[1], 'generalization')
+    ) {
+      addOwner(args[0])
+    }
+    const active =
+      (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
+    active.forEach(consider)
+    return owners
   }
 
   syncHttpGeneralization(owner) {
@@ -3562,38 +3762,75 @@ class Cooperate {
     const uid = owner.getData && owner.getData('uid')
     if (!uid) return
     let generalization = owner.getData && owner.getData('generalization')
+    const active =
+      (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
+    active.forEach(node => {
+      if (
+        !node ||
+        !node.isGeneralization ||
+        node.generalizationBelongNode !== owner
+      ) {
+        return
+      }
+      const genUid = (node.getData && node.getData('uid')) || node.uid
+      const liveData = (node.getData && node.getData()) || {}
+      const merged = collabGeneralization.mergeVirtualEditIntoOwner(
+        generalization,
+        genUid,
+        liveData
+      )
+      if (merged) generalization = merged
+    })
     if (Array.isArray(generalization) && generalization.length === 0) {
       generalization = null
     }
     if (generalization == null) generalization = null
-    if (!this.pendingGenIntent) this.pendingGenIntent = new Map()
-    this.setGenIntent(uid, generalization)
-    this.stampLocalFieldVersion(owner, 'generalization')
+    const cloned = collabGeneralization.ownerGeneralizationPayload(
+      generalization
+    )
     const prev = this.lastPushed[uid] || {
       text: this.nodePlain(owner),
       note: (owner.getData && owner.getData('note')) || ''
     }
+    const prevFull = prev.full || { text: prev.text, note: prev.note }
+    if (
+      Object.prototype.hasOwnProperty.call(prevFull, 'generalization') &&
+      generalizationSignature(prevFull.generalization) ===
+        generalizationSignature(cloned)
+    ) {
+      return
+    }
+    if (!this.pendingGenIntent) this.pendingGenIntent = new Map()
+    const prevSnapshot = {
+      text: prev.text,
+      note: prev.note,
+      full: collabGeneralization.snapshotValue(prevFull),
+      fieldVersions: prev.fieldVersions
+    }
+    this.setGenIntent(uid, cloned)
+    this.stampLocalFieldVersion(owner, 'generalization')
     const full = {
-      ...(prev.full || { text: prev.text, note: prev.note }),
-      generalization
+      ...collabGeneralization.snapshotValue(prevFull),
+      generalization: cloned
     }
     this.lastPushed[uid] = {
       text: full.text,
       note: full.note,
       full
     }
-    this.httpPatchNode(uid, { generalization })
+    this.httpPatchNode(uid, { generalization: cloned })
       .then(() => {
         const latest = this.nodePatchPayload(owner) || full
-        latest.generalization = generalization
+        latest.generalization = cloned
         this.lastPushed[uid] = {
           text: latest.text,
           note: latest.note,
-          full: latest
+          full: collabGeneralization.snapshotValue(latest)
         }
         if (this.pendingGenIntent) this.pendingGenIntent.delete(uid)
       })
       .catch(err => {
+        this.lastPushed[uid] = prevSnapshot
         console.error('[mind-map] generalization sync failed', err)
       })
   }
@@ -3618,6 +3855,7 @@ class Cooperate {
       const tombstone = uid => {
         this.tombstoneDeletedUid(uid)
       }
+      this.purgeQueuedInserts(uids)
       if (this.collabV2Adapter && uids.length > 1) {
         uids.forEach(tombstone)
         const drop = this.collabV2Adapter.dropPendingInsertsForUid
@@ -3681,10 +3919,15 @@ class Cooperate {
         if (owners.length) {
           owners.forEach(owner => this.syncHttpGeneralization(owner))
         } else {
-          this.flushHttpTextNow().catch(err => {
-            console.error('[mind-map] generalization sync failed', err)
-          })
+          this.collectGeneralizationOwners(name, args).forEach(owner =>
+            this.syncHttpGeneralization(owner)
+          )
         }
+        return
+      }
+      const genOwners = this.collectGeneralizationOwners(name, args)
+      if (genOwners.length) {
+        genOwners.forEach(owner => this.syncHttpGeneralization(owner))
         return
       }
       this.scheduleHttpTextSync()
@@ -4014,7 +4257,7 @@ class Cooperate {
         (Array.isArray(value) && value.length === 0) ||
         (key === 'mapRef' && !mapRefUtil.normalizeMapRef(value))
       if (!empty) {
-        full[key] = value
+        full[key] = collabGeneralization.snapshotValue(value)
       } else if (
         prevFull &&
         prevFull[key] !== undefined &&
@@ -4081,7 +4324,7 @@ class Cooperate {
             this.lastPushed[uid] = {
               text: full.text,
               note: full.note,
-              full,
+              full: collabGeneralization.snapshotValue(full),
               snap
             }
           })
