@@ -68,8 +68,8 @@ export default {
   }
 
   .actionBtn {
-    width: 40px;
-    height: 36px;
+    width: 34px;
+    height: 34px;
     padding: 0;
     color: #606266;
     background-color: transparent;

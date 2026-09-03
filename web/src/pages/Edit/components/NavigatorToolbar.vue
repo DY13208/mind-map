@@ -1,6 +1,8 @@
 <template>
   <div class="navigatorToolbarDock">
-    <CanvasToolbarActions></CanvasToolbarActions>
+    <CanvasToolbarActions
+      class="navigatorToolbarActions"
+    ></CanvasToolbarActions>
     <div
       class="navigatorToolbarWrapper"
       :class="{ isDark: isDark, collapsed: toolbarCollapsed }"
@@ -301,17 +303,20 @@ export default {
 <style lang="less" scoped>
 .navigatorToolbarDock {
   position: fixed;
-  right: 20px;
+  right: 68px;
   bottom: 20px;
   z-index: 3;
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
   pointer-events: none;
 
   > * {
     pointer-events: auto;
   }
+}
+
+.navigatorToolbarActions {
+  position: absolute;
+  left: calc(100% + 12px);
+  bottom: -20px;
 }
 
 .navigatorToolbarWrapper {
@@ -419,6 +424,12 @@ export default {
     right: 20px;
     bottom: 20px;
     display: block;
+  }
+
+  .navigatorToolbarActions {
+    left: auto;
+    right: 0;
+    bottom: calc(100% + 12px);
   }
 
   .navigatorToolbarWrapper {
