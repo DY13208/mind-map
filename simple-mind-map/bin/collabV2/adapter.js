@@ -7,8 +7,7 @@ const {
   isValidClientId,
   requireClientId,
   normalizeType,
-  BATCH_CHUNK,
-  BATCH_MAX
+  BATCH_CHUNK
 } = require('./protocol')
 
 function adapterTrace(stage, detail) {
