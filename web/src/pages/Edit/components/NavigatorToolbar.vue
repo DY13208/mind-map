@@ -2,6 +2,7 @@
   <div class="navigatorToolbarDock">
     <CanvasToolbarActions
       class="navigatorToolbarActions"
+      :collapsed="toolbarCollapsed"
     ></CanvasToolbarActions>
     <div
       class="navigatorToolbarWrapper"

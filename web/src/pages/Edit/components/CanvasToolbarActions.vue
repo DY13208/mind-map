@@ -1,23 +1,17 @@
 <template>
   <div class="canvasToolbarActions" :class="{ isDark: isDark }">
-    <el-tooltip :content="$t('toolbar.expandAllToolbars')" placement="left">
+    <el-tooltip :content="actionLabel" placement="left">
       <button
         type="button"
         class="actionBtn"
-        :aria-label="$t('toolbar.expandAllToolbars')"
-        @click.stop="setCollapsed(false)"
+        :aria-label="actionLabel"
+        :aria-expanded="String(!collapsed)"
+        @click.stop="setCollapsed(!collapsed)"
       >
-        <span class="iconfont iconjiantouyou expandIcon"></span>
-      </button>
-    </el-tooltip>
-    <el-tooltip :content="$t('toolbar.collapseAllToolbars')" placement="left">
-      <button
-        type="button"
-        class="actionBtn"
-        :aria-label="$t('toolbar.collapseAllToolbars')"
-        @click.stop="setCollapsed(true)"
-      >
-        <span class="iconfont iconjiantouyou collapseIcon"></span>
+        <span
+          class="iconfont iconjiantouyou"
+          :class="collapsed ? 'expandIcon' : 'collapseIcon'"
+        ></span>
       </button>
     </el-tooltip>
   </div>
@@ -27,10 +21,21 @@
 import { mapState } from 'vuex'
 
 export default {
+  props: {
+    collapsed: {
+      type: Boolean,
+      default: false
+    }
+  },
   computed: {
     ...mapState({
       isDark: state => state.localConfig.isDark
-    })
+    }),
+    actionLabel() {
+      return this.collapsed
+        ? this.$t('toolbar.expandAllToolbars')
+        : this.$t('toolbar.collapseAllToolbars')
+    }
   },
   methods: {
     setCollapsed(collapsed) {
