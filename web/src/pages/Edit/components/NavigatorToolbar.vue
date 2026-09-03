@@ -316,7 +316,7 @@ export default {
 .navigatorToolbarActions {
   position: absolute;
   left: calc(100% + 12px);
-  bottom: -20px;
+  bottom: 0;
 }
 
 .navigatorToolbarWrapper {
