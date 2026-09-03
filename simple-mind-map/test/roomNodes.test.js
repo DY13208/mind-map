@@ -7,7 +7,10 @@ const {
   padPosition,
   canonicalizeNodes,
   pickAuthoritativeNodes,
-  auditRoomNodesState
+  auditRoomNodesState,
+  searchRoomNodes,
+  dedupeMatchesByUid,
+  queryNeedsSearch
 } = require('../bin/roomNodes')
 
 const node = (uid, text, children = [], extra = {}) => ({
@@ -117,8 +120,56 @@ function testCanonicalAndAuthority() {
   assert.strictEqual(mismatch.equal, false)
 }
 
+async function testSearchKeepsDuplicateBetaUids() {
+  const rows = [
+    { uid: 'uid1', parent_uid: 'root', text: 'Beta', note: '', is_root: false, total: '3' },
+    { uid: 'uid2', parent_uid: 'root', text: '<p>Beta</p>', note: '', is_root: false, total: '3' },
+    { uid: 'uid3', parent_uid: 'root', text: 'Beta', note: '', is_root: false, total: '3' }
+  ]
+  const sqls = []
+  const db = {
+    async query(text, params) {
+      sqls.push({ text, params })
+      return { rows }
+    }
+  }
+  const result = await searchRoomNodes(db, 'room-beta', 'Beta')
+  assert.strictEqual(result.matches.length, 3)
+  assert.deepStrictEqual(
+    result.matches.map(item => item.uid),
+    ['uid1', 'uid2', 'uid3']
+  )
+  assert.strictEqual(result.total, 3)
+  assert.ok(/from room_nodes/.test(sqls[0].text))
+  assert.ok(/deleted_at is null/.test(sqls[0].text))
+  assert.ok(!/yjs|ydoc/i.test(sqls[0].text))
+}
+
+function testSearchDedupeIsUidOnly() {
+  const list = dedupeMatchesByUid([
+    { uid: 'uid1', text: 'Beta' },
+    { uid: 'uid2', text: 'Beta' },
+    { uid: 'uid1', text: 'Beta' }
+  ])
+  assert.strictEqual(list.length, 2)
+  assert.deepStrictEqual(
+    list.map(item => item.uid),
+    ['uid1', 'uid2']
+  )
+  assert.strictEqual(queryNeedsSearch('Beta', ''), true)
+  assert.strictEqual(queryNeedsSearch('Beta', 'Beta'), false)
+}
+
 testRoundtripPreservesTree()
 testValidateRejectsCyclesAndMissingRoot()
 testSoftDeletedRowsAreIgnored()
 testCanonicalAndAuthority()
-console.log('room node tests passed')
+testSearchDedupeIsUidOnly()
+testSearchKeepsDuplicateBetaUids()
+  .then(() => {
+    console.log('room node tests passed')
+  })
+  .catch(err => {
+    console.error(err)
+    process.exit(1)
+  })
