@@ -11,6 +11,7 @@ const {
 const { createUid } = require('../mindDoc')
 const { isSopLabel } = require('./directStore')
 const { normalizeOperation, normalizeType, BATCH_MAX } = require('./protocol')
+const { collabTrace } = require('./trace')
 const { stripSearchHtml } = require('../roomNodes')
 
 const DIRECT_TYPES = new Set([

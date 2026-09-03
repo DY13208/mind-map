@@ -1434,6 +1434,91 @@ async function testReplaceAllConflictViaAdapter() {
   assert.strictEqual(Number(skipped || 0), 1)
 }
 
+async function testThreeDuplicateBetaReplaceOneAndAll() {
+  const roomKey = 'room-three-beta-one'
+  const engine = createEngine()
+  const hub = createHub(engine)
+  const a = await makeClient(hub, { roomKey, userId: 'A' })
+  const b = await makeClient(hub, { roomKey, userId: 'B' })
+  await a.adapter.submitOperation({
+    type: 'node.insert',
+    payload: { uid: 'uid1', parent: 'root', text: 'Beta' }
+  })
+  await a.adapter.submitOperation({
+    type: 'node.insert',
+    payload: { uid: 'uid2', parent: 'root', text: 'Beta' }
+  })
+  await a.adapter.submitOperation({
+    type: 'node.insert',
+    payload: { uid: 'uid3', parent: 'root', text: 'Beta' }
+  })
+  await a.adapter.submitOperation({
+    type: 'node.update',
+    payload: { uid: 'uid2', text: 'Beta-X', expected: { text: 'Beta' } }
+  })
+  await wait(30)
+  assert.strictEqual(nodeText(engine, roomKey, 'uid1'), 'Beta')
+  assert.strictEqual(nodeText(engine, roomKey, 'uid2'), 'Beta-X')
+  assert.strictEqual(nodeText(engine, roomKey, 'uid3'), 'Beta')
+
+  const roomAll = 'room-three-beta-all'
+  const engine2 = createEngine()
+  const hub2 = createHub(engine2)
+  const c = await makeClient(hub2, { roomKey: roomAll, userId: 'A' })
+  const d = await makeClient(hub2, { roomKey: roomAll, userId: 'B' })
+  await c.adapter.submitOperation({
+    type: 'node.insert',
+    payload: { uid: 'uid1', parent: 'root', text: 'Beta' }
+  })
+  await c.adapter.submitOperation({
+    type: 'node.insert',
+    payload: { uid: 'uid2', parent: 'root', text: 'Beta' }
+  })
+  await c.adapter.submitOperation({
+    type: 'node.insert',
+    payload: { uid: 'uid3', parent: 'root', text: 'Beta' }
+  })
+  const result = await c.adapter.submitOperation({
+    type: 'node.batch',
+    payload: {
+      batchId: randomUUID(),
+      ops: ['uid1', 'uid2', 'uid3'].map(uid => ({
+        type: 'node.update',
+        payload: { uid, text: 'Beta-X', expected: { text: 'Beta' } }
+      }))
+    }
+  })
+  await wait(30)
+  assert.strictEqual(nodeText(engine2, roomAll, 'uid1'), 'Beta-X')
+  assert.strictEqual(nodeText(engine2, roomAll, 'uid2'), 'Beta-X')
+  assert.strictEqual(nodeText(engine2, roomAll, 'uid3'), 'Beta-X')
+  const skipped =
+    result.operation &&
+    result.operation.event &&
+    result.operation.event.payload &&
+    result.operation.event.payload.skipped
+  assert.strictEqual(Number(skipped || 0), 0)
+  assert.strictEqual(nodeText(engine2, roomAll, 'uid1'), nodeText(engine2, roomAll, 'uid2'))
+  void b
+  void d
+}
+
+async function testQueryNeedsSearchWithoutEnter() {
+  const {
+    queryNeedsSearch,
+    dedupeMatchesByUid
+  } = require('../bin/roomNodes')
+  assert.strictEqual(queryNeedsSearch('Beta', ''), true)
+  assert.strictEqual(queryNeedsSearch('Beta', 'Alpha'), true)
+  assert.strictEqual(queryNeedsSearch('Beta', 'Beta'), false)
+  const hits = dedupeMatchesByUid([
+    { uid: 'uid1', text: 'Beta' },
+    { uid: 'uid2', text: 'Beta' },
+    { uid: 'uid3', text: 'Beta' }
+  ])
+  assert.strictEqual(hits.length, 3)
+}
+
 async function testGapPagination() {
   const roomKey = 'room-gap'
   const engine = createEngine()
@@ -1488,6 +1573,8 @@ async function main() {
   await testUpdateDoesNotReorderRemoteSiblings()
   await testPresenceDoesNotChangeSaveState()
   await testReplaceAllConflictViaAdapter()
+  await testThreeDuplicateBetaReplaceOneAndAll()
+  await testQueryNeedsSearchWithoutEnter()
   console.log('collabV2 tests ok')
 }
 

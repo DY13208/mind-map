@@ -144,10 +144,11 @@ class Search {
         ) {
           return
         }
+        if (uid && seen.has(uid)) return
         if (richText) {
           text = getTextFromHtml(text)
         }
-        if (text.includes(this.searchText)) {
+        if (text && text.includes(this.searchText)) {
           matchList.push({
             data: gNode
           })
