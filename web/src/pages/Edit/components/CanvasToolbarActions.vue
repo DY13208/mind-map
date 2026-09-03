@@ -1,23 +1,17 @@
 <template>
   <div class="canvasToolbarActions" :class="{ isDark: isDark }">
-    <el-tooltip :content="$t('toolbar.expandAllToolbars')" placement="left">
+    <el-tooltip :content="actionLabel" placement="left">
       <button
         type="button"
         class="actionBtn"
-        :aria-label="$t('toolbar.expandAllToolbars')"
-        @click.stop="setCollapsed(false)"
+        :aria-label="actionLabel"
+        :aria-expanded="String(!collapsed)"
+        @click.stop="setCollapsed(!collapsed)"
       >
-        <span class="iconfont iconjiantouyou expandIcon"></span>
-      </button>
-    </el-tooltip>
-    <el-tooltip :content="$t('toolbar.collapseAllToolbars')" placement="left">
-      <button
-        type="button"
-        class="actionBtn"
-        :aria-label="$t('toolbar.collapseAllToolbars')"
-        @click.stop="setCollapsed(true)"
-      >
-        <span class="iconfont iconjiantouyou collapseIcon"></span>
+        <span
+          class="iconfont iconjiantouyou"
+          :class="collapsed ? 'expandIcon' : 'collapseIcon'"
+        ></span>
       </button>
     </el-tooltip>
   </div>
@@ -27,10 +21,21 @@
 import { mapState } from 'vuex'
 
 export default {
+  props: {
+    collapsed: {
+      type: Boolean,
+      default: false
+    }
+  },
   computed: {
     ...mapState({
       isDark: state => state.localConfig.isDark
-    })
+    }),
+    actionLabel() {
+      return this.collapsed
+        ? this.$t('toolbar.expandAllToolbars')
+        : this.$t('toolbar.collapseAllToolbars')
+    }
   },
   methods: {
     setCollapsed(collapsed) {
@@ -42,10 +47,8 @@ export default {
 
 <style lang="less" scoped>
 .canvasToolbarActions {
-  position: fixed;
-  right: 78px;
-  bottom: 80px;
-  z-index: 3;
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -70,14 +73,15 @@ export default {
   }
 
   .actionBtn {
-    width: 36px;
-    height: 32px;
+    width: 34px;
+    height: 34px;
     padding: 0;
     color: #606266;
     background-color: transparent;
     border: 0;
     border-radius: 4px;
     cursor: pointer;
+    touch-action: manipulation;
     transition: color 0.2s ease, background-color 0.2s ease;
 
     &:hover {
@@ -108,8 +112,15 @@ export default {
 
 @media screen and (max-width: 700px) {
   .canvasToolbarActions {
-    right: 16px;
-    bottom: 92px;
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 12px);
+    flex-direction: row;
+
+    .actionBtn {
+      width: 44px;
+      height: 44px;
+    }
   }
 }
 
