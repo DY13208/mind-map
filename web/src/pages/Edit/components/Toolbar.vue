@@ -5,6 +5,7 @@
       <div
         class="toolbarBlockWrapper"
         :class="{ collapsed: nodeToolbarCollapsed }"
+        v-if="!isReadonly"
       >
         <button
           type="button"
@@ -103,17 +104,105 @@
             <span class="icon iconfont iconlingcunwei"></span>
             <span class="text">{{ $t('toolbar.saveAs') }}</span>
           </div>
-          <div class="toolbarBtn" @click="$bus.$emit('showImport')">
+          <div
+            class="toolbarBtn"
+            data-testid="import"
+            @click="$bus.$emit('showImport')"
+            v-if="!isReadonly"
+          >
             <span class="icon iconfont icondaoru"></span>
             <span class="text">{{ $t('toolbar.import') }}</span>
           </div>
           <div
+            class="collabStatus"
+            data-testid="collab-status"
+            :class="[displayedSaveChip, { cooperating: collabLive }]"
+          >
+            <el-popover
+              placement="bottom"
+              width="240"
+              trigger="click"
+              popper-class="collabPeerPopper"
+            >
+              <div class="collabPeerPopover">
+                <div class="peerHead">{{ $t('cooperate.peers') }} {{ collabPeers.length }}</div>
+                <div
+                  class="peerRow"
+                  v-for="peer in collabPeers"
+                  :key="peer.id"
+                >
+                  <span
+                    class="miniAvatar"
+                    :style="peerAvatarStyle(peer)"
+                    >{{ peer.shortName || '?' }}</span
+                  >
+                  <span class="peerName">{{ peer.name }}</span>
+                  <span class="you" v-if="peer.isMe">{{ $t('cooperate.you') }}</span>
+                </div>
+                <div class="empty" v-if="!collabPeers.length">
+                  {{ $t('cooperate.noOnlinePeers') }}
+                </div>
+              </div>
+              <div slot="reference" class="collabAvatars" data-testid="collab-peers">
+                <span
+                  class="miniAvatar"
+                  v-for="peer in visibleCollabPeers"
+                  :key="peer.id"
+                  :style="peerAvatarStyle(peer)"
+                  >{{ peer.shortName || '?' }}</span
+                >
+                <span class="more" v-if="extraPeerCount">+{{ extraPeerCount }}</span>
+                <span class="peerCount">{{ collabPeers.length }}</span>
+              </div>
+            </el-popover>
+            <el-popover
+              v-if="displayedSaveChip === 'failed'"
+              placement="bottom-end"
+              width="380"
+              trigger="click"
+              popper-class="collabDiagPopper"
+            >
+              <div class="collabDiag">
+                <div class="diagHead">{{ $t('cooperate.diagTitle') }}</div>
+                <div
+                  class="diagRow"
+                  v-for="row in collabDiagRows"
+                  :key="row.key"
+                >
+                  <span class="k">{{ row.key }}</span>
+                  <span class="v">{{ row.value }}</span>
+                </div>
+                <el-button
+                  v-if="isCollabDiagDev"
+                  size="mini"
+                  type="primary"
+                  plain
+                  class="diagCopy"
+                  @click="copyCollabDiag"
+                >{{
+                  diagCopied
+                    ? $t('cooperate.diagCopied')
+                    : $t('cooperate.diagCopy')
+                }}</el-button>
+              </div>
+              <span
+                slot="reference"
+                class="saveChip clickable"
+                data-testid="collab-sync-failed"
+                >{{ collabSaveLabel }}</span
+              >
+            </el-popover>
+            <span v-else class="saveChip" :title="collabError">{{
+              collabSaveLabel
+            }}</span>
+          </div>
+          <div
             class="toolbarBtn"
-            :class="{ cooperating: cooperateStatus === 'connected' }"
-            @click="$bus.$emit('showCooperate')"
+            data-testid="share"
+            @click="$bus.$emit('showShareAcl')"
           >
             <span class="icon iconfont iconxietongwendang"></span>
-            <span class="text">{{ $t('toolbar.cooperate') }}</span>
+            <span class="text">{{ $t('acl.share') }}</span>
           </div>
           <div
             class="toolbarBtn"
@@ -219,7 +308,6 @@ let fileHandle = null
 const defaultBtnList = [
   'back',
   'forward',
-  'flowExpand',
   'painter',
   'siblingNode',
   'childNode',
@@ -235,6 +323,7 @@ const defaultBtnList = [
   // 'attachment',
   'outerFrame',
   'annotation',
+  'flowExpand',
   'ai'
 ]
 
@@ -266,7 +355,10 @@ export default {
       fileTreeExpand: true,
       waitingWriteToLocalFile: false,
       nodeToolbarCollapsed: false,
-      fileToolbarCollapsed: false
+      fileToolbarCollapsed: false,
+      diagCopied: false,
+      displayedSaveChip: 'offline',
+      saveChipTimer: null
     }
   },
   computed: {
@@ -275,8 +367,105 @@ export default {
       isHandleLocalFile: state => state.isHandleLocalFile,
       openNodeRichText: state => state.localConfig.openNodeRichText,
       enableAi: state => state.localConfig.enableAi,
-      cooperateStatus: state => state.cooperateStatus
+      cooperateStatus: state => state.cooperateStatus,
+      isReadonly: state => state.isReadonly,
+      collabPhase: state => state.collabPhase,
+      collabSaveState: state => state.collabSaveState,
+      collabPeers: state => state.collabPeers,
+      collabPendingCount: state => state.collabPendingCount,
+      collabError: state => state.collabError,
+      collabDiagnostic: state => state.collabDiagnostic
     }),
+    collabLive() {
+      return this.collabPhase === 'LIVE' || this.cooperateStatus === 'connected'
+    },
+    visibleCollabPeers() {
+      return (this.collabPeers || []).slice(0, 3)
+    },
+    extraPeerCount() {
+      return Math.max(0, (this.collabPeers || []).length - 3)
+    },
+    collabSaveChip() {
+      const phase = this.collabPhase
+      const save = this.collabSaveState
+      if (save === 'error') return 'failed'
+      if (phase === 'ERROR' && save !== 'saved' && save !== 'saving') {
+        return 'failed'
+      }
+      if (save === 'offline' || phase === 'OFFLINE' || phase === 'DISCONNECTED') {
+        return this.collabPendingCount || save === 'offline' ? 'offline' : 'offline'
+      }
+      if (
+        save === 'resync' ||
+        save === 'reconnecting' ||
+        phase === 'RESYNCING' ||
+        phase === 'CONNECTING' ||
+        phase === 'JOINING'
+      ) {
+        return 'syncing'
+      }
+      if (save === 'saving' || this.collabPendingCount > 0) return 'saving'
+      if (save === 'saved' && this.collabLive) return 'saved'
+      return 'offline'
+    },
+    collabSaveLabel() {
+      const key = {
+        saved: 'chipSaved',
+        saving: 'chipSaving',
+        offline: 'chipOffline',
+        syncing: 'chipSyncing',
+        failed: 'chipFailed'
+      }[this.displayedSaveChip]
+      return this.$t('cooperate.' + (key || 'chipOffline'))
+    },
+    isCollabDiagDev() {
+      if (typeof window === 'undefined') return false
+      if (window.__COLLAB_V2_DIAG__ === true) return true
+      if (process.env.NODE_ENV !== 'production') return true
+      const host = (window.location && window.location.hostname) || ''
+      return (
+        host === 'localhost' ||
+        host === '127.0.0.1' ||
+        /^192\.168\./.test(host) ||
+        /^10\./.test(host) ||
+        /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+      )
+    },
+    collabDiag() {
+      const fromWin =
+        typeof window !== 'undefined' && window.__COLLAB_V2_STATE__
+          ? window.__COLLAB_V2_STATE__
+          : null
+      return fromWin || this.collabDiagnostic || {}
+    },
+    collabDiagRows() {
+      const d = this.collabDiag || {}
+      const err = d.lastError || {}
+      return [
+        ['errorCode', d.errorCode || err.code || ''],
+        ['errorMessage', d.errorMessage || err.message || this.collabError || ''],
+        ['stage', d.stage || err.stage || ''],
+        ['roomKey', d.roomKey || ''],
+        ['userId', d.userId || ''],
+        ['clientId', d.clientId || ''],
+        ['socketId', d.socketId || ''],
+        ['lastServerRevision', d.lastServerRevision],
+        ['serverRevision', d.serverRevision],
+        ['outboxPending', d.outboxPending],
+        ['outboxSending', d.outboxSending],
+        ['baseRevision', d.baseRevision != null ? d.baseRevision : (err.details && err.details.baseRevision)],
+        ['roomCurrentRevision', d.roomCurrentRevision != null ? d.roomCurrentRevision : (err.details && err.details.roomCurrentRevision)],
+        ['clientSeq', d.clientSeq != null ? d.clientSeq : (err.details && err.details.clientSeq)],
+        ['outboxIndex', d.outboxIndex != null ? d.outboxIndex : (err.details && err.details.outboxIndex)],
+        ['lastOpId', d.lastOpId || err.opId || ''],
+        ['currentError', d.currentError && d.currentError.code],
+        ['lastErrorRecovered', d.lastErrorRecovered],
+        ['timestamp', d.timestamp || err.timestamp || '']
+      ].map(([key, value]) => ({
+        key,
+        value: value == null || value === '' ? '—' : String(value)
+      }))
+    },
 
     btnLit() {
       let res = [...defaultBtnList]
@@ -304,6 +493,12 @@ export default {
       handler() {
         this.computeToolbarShow()
       }
+    },
+    collabSaveChip: {
+      immediate: true,
+      handler(next) {
+        this.syncDisplayedSaveChip(next)
+      }
     }
   },
   created() {
@@ -322,6 +517,10 @@ export default {
     this.$bus.$on('node_note_dblclick', this.onNodeNoteDblclick)
   },
   beforeDestroy() {
+    if (this.saveChipTimer) {
+      clearTimeout(this.saveChipTimer)
+      this.saveChipTimer = null
+    }
     this.$bus.$off('write_local_file', this.onWriteLocalFile)
     this.$bus.$off(
       'set_canvas_toolbars_collapsed',
@@ -339,6 +538,72 @@ export default {
       if (collapsed) {
         this.popoverShow = false
       }
+    },
+
+    syncDisplayedSaveChip(next) {
+      const chip = next || 'offline'
+      if (this.saveChipTimer) {
+        clearTimeout(this.saveChipTimer)
+        this.saveChipTimer = null
+      }
+      if (chip === 'saving' && this.displayedSaveChip !== 'saving') {
+        this.saveChipTimer = setTimeout(() => {
+          this.saveChipTimer = null
+          this.displayedSaveChip = 'saving'
+        }, 200)
+        return
+      }
+      this.displayedSaveChip = chip
+    },
+
+    peerAvatarStyle(peer) {
+      if (peer && peer.avatar) {
+        return {
+          backgroundImage: 'url(' + peer.avatar + ')',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center'
+        }
+      }
+      return { background: (peer && peer.color) || '#409EFF' }
+    },
+
+    copyCollabDiag() {
+      const payload =
+        (typeof window !== 'undefined' && window.__COLLAB_V2_STATE__) ||
+        this.collabDiag ||
+        {}
+      const text = JSON.stringify(payload, null, 2)
+      const done = () => {
+        this.diagCopied = true
+        setTimeout(() => {
+          this.diagCopied = false
+        }, 1500)
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(() => {
+          this.fallbackCopyDiag(text)
+          done()
+        })
+        return
+      }
+      this.fallbackCopyDiag(text)
+      done()
+    },
+
+    fallbackCopyDiag(text) {
+      const el = document.createElement('textarea')
+      el.value = text
+      el.setAttribute('readonly', 'readonly')
+      el.style.position = 'fixed'
+      el.style.left = '-9999px'
+      document.body.appendChild(el)
+      el.select()
+      try {
+        document.execCommand('copy')
+      } catch (err) {
+        // ignore
+      }
+      document.body.removeChild(el)
     },
 
     toggleNodeToolbar() {
@@ -627,6 +892,17 @@ export default {
   &.isDark {
     .toolbar {
       color: hsla(0, 0%, 100%, 0.9);
+      .collabStatus {
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(255, 255, 255, 0.1);
+        .more,
+        .peerCount {
+          color: hsla(0, 0%, 100%, 0.7);
+        }
+        .miniAvatar {
+          border-color: #262a2e;
+        }
+      }
       .toolbarBlock {
         background-color: #262a2e;
 
@@ -920,6 +1196,114 @@ export default {
         margin-top: 3px;
       }
     }
+
+    .collabStatus {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-right: 16px;
+      padding: 4px 8px 4px 6px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.04);
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      cursor: default;
+
+      &.cooperating {
+        border-color: rgba(16, 185, 129, 0.35);
+      }
+
+      .collabAvatars {
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+      }
+
+      .miniAvatar {
+        width: 22px;
+        height: 22px;
+        margin-left: -6px;
+        border-radius: 50%;
+        color: #fff;
+        font-size: 11px;
+        line-height: 22px;
+        text-align: center;
+        border: 2px solid #fff;
+        box-sizing: border-box;
+
+        &:first-child {
+          margin-left: 0;
+        }
+      }
+
+      .more,
+      .peerCount {
+        margin-left: 4px;
+        font-size: 11px;
+        color: rgba(26, 26, 26, 0.65);
+      }
+
+      .saveChip {
+        font-size: 11px;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+      }
+
+      &.saved .saveChip {
+        color: #059669;
+      }
+      &.saving .saveChip {
+        color: #d97706;
+      }
+      &.offline .saveChip {
+        color: #64748b;
+      }
+      &.syncing .saveChip {
+        color: #2563eb;
+      }
+      &.failed .saveChip {
+        color: #dc2626;
+      }
+      .saveChip.clickable {
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+    }
+  }
+}
+
+.collabPeerPopover {
+  .peerHead {
+    font-size: 12px;
+    color: #64748b;
+    margin-bottom: 8px;
+  }
+  .peerRow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+  }
+  .miniAvatar {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 11px;
+    line-height: 22px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .peerName {
+    font-size: 13px;
+  }
+  .you {
+    font-size: 11px;
+    color: #94a3b8;
+  }
+  .empty {
+    font-size: 12px;
+    color: #94a3b8;
   }
 }
 
@@ -928,6 +1312,39 @@ export default {
   .toolbarContainer .toolbar .collapseToggleBtn,
   .toolbarContainer .toolbar .collapseToggleBtn span {
     transition: none;
+  }
+}
+</style>
+
+<style lang="less">
+.collabDiagPopper {
+  .collabDiag {
+    font-size: 12px;
+    color: #1f2937;
+  }
+  .diagHead {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .diagRow {
+    display: flex;
+    gap: 8px;
+    padding: 2px 0;
+    line-height: 1.45;
+    word-break: break-all;
+  }
+  .k {
+    flex: 0 0 140px;
+    color: #64748b;
+    font-family: Consolas, 'SF Mono', monospace;
+  }
+  .v {
+    flex: 1;
+    font-family: Consolas, 'SF Mono', monospace;
+  }
+  .diagCopy {
+    margin-top: 10px;
   }
 }
 </style>

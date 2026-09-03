@@ -96,6 +96,11 @@ function getNodeRect() {
     textContentHeight = Math.max(textContentHeight, this._hyperlinkData.height)
     spaceCount++
   }
+  if (this._mapRefData) {
+    textContentWidth += this._mapRefData.width
+    textContentHeight = Math.max(textContentHeight, this._mapRefData.height)
+    spaceCount++
+  }
   // 标签
   if (this._tagData.length > 0) {
     const { width: totalTagWidth, height: maxTagHeight } =
@@ -386,6 +391,13 @@ function layout() {
       .y((textContentHeight - this._hyperlinkData.height) / 2)
     textContentNested.add(this._hyperlinkData.node)
     textContentOffsetX += this._hyperlinkData.width + textContentMargin
+  }
+  if (this._mapRefData) {
+    this._mapRefData.node
+      .x(textContentOffsetX)
+      .y((textContentHeight - this._mapRefData.height) / 2)
+    textContentNested.add(this._mapRefData.node)
+    textContentOffsetX += this._mapRefData.width + textContentMargin
   }
   // 标签
   let tagNested = new G()

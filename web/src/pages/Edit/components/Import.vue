@@ -165,6 +165,26 @@ export default {
       this.dialogVisible = false
     },
 
+    applyImportedData(data) {
+      return new Promise((resolve, reject) => {
+        const cleanup = () => {
+          this.$bus.$off('setDataComplete', onDone)
+          this.$bus.$off('setDataFailed', onFail)
+        }
+        const onDone = () => {
+          cleanup()
+          resolve()
+        }
+        const onFail = message => {
+          cleanup()
+          reject(new Error(message || 'import failed'))
+        }
+        this.$bus.$once('setDataComplete', onDone)
+        this.$bus.$once('setDataFailed', onFail)
+        this.$bus.$emit('setData', data)
+      })
+    },
+
     // 确定
     confirm() {
       if (this.fileList.length <= 0) {
@@ -195,12 +215,15 @@ export default {
           if (typeof data !== 'object') {
             throw new Error(this.$t('import.fileContentError'))
           }
-          this.$bus.$emit('setData', data)
+          await this.applyImportedData(data)
           this.$message.success(this.$t('import.importSuccess'))
         } catch (error) {
           console.log(error)
           hideLoading()
-          this.$message.error(this.$t('import.fileParsingFailed'))
+          this.$message.error(
+            (error && error.message) ||
+              this.$t('import.fileParsingFailed')
+          )
         }
       }
     },
@@ -217,7 +240,7 @@ export default {
             this.selectPromiseResolve = resolve
           })
         })
-        this.$bus.$emit('setData', data)
+        await this.applyImportedData(data)
         this.$message.success(this.$t('import.importSuccess'))
       } catch (error) {
         console.log(error)
@@ -247,11 +270,14 @@ export default {
       fileReader.readAsText(file.raw)
       fileReader.onload = async evt => {
         try {
+          this.$bus.$emit('showLoading', this.$t('edit.importingTip'))
+          await yieldToUi()
           let data = markdown.transformMarkdownTo(evt.target.result)
-          this.$bus.$emit('setData', data)
+          await this.applyImportedData(data)
           this.$message.success(this.$t('import.importSuccess'))
         } catch (error) {
           console.log(error)
+          hideLoading()
           this.$message.error(this.$t('import.fileParsingFailed'))
         }
       }

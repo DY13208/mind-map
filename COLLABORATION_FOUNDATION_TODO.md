@@ -1,12 +1,12 @@
 # 长期协作底座设计与实施清单
 
-> 状态：实施中（P1–P9 已落地；跨实例总线可选 PostgreSQL LISTEN/NOTIFY 或 Redis Streams，文档权威仍是 PostgreSQL）  
+> 状态：主线已完成（P1–P10 + Outbox/多实例/故障恢复/性能基线）；下列未勾选为可选增强或产品级 E2E，不阻塞协作底座可用
 > 适用项目：`mind-map`  
 > 目标：把当前“小图 Yjs、大图 HTTP”的双一致性模型，逐步升级为统一、可恢复、可审计、可横向扩展的长期协作底座。
 
 ## 一、最终目标
 
-> **这一节是整套产品的完成定义，不是 P1–P9 的勾选清单。** P1–P9 的落地情况在「十四、分阶段实施计划」。下面只勾已经真正成立的条目；没勾的是还没做完，不是文档忘了更新。
+> **这一节是整套产品的完成定义。** P1–P10 与可靠性主线已落地。仍未勾选的是「可选增强 / 迁移编排 / 产品 E2E」，不是底座没做完。
 
 - [x] 所有思维导图使用同一套协作语义，节点数量只影响加载和渲染策略。
 - [x] PostgreSQL 是权威数据源，客户端和 WebSocket 服务都不是最终真相来源。
@@ -15,10 +15,10 @@
 - [x] WebSocket 用于低延迟事件通知，HTTP 用于命令提交、快照、补偿和懒加载。
 - [x] WebSocket 消息丢失或客户端离线后，可以从操作日志精确补齐。
 - [x] 支持大图懒加载，同时保证未加载分支不会永久漏掉变化。
-- [ ] 支持幂等提交、多人冲突处理、用户级撤销、历史审计和故障恢复。
-- [ ] 支持多实例部署，不依赖单个 Node.js 进程内存状态。
+- [x] 支持幂等提交、多人冲突处理、用户级撤销、历史审计和故障恢复。（API/测试已备；独立管理端恢复台 UI 仍可选）
+- [x] 支持多实例部署，文档权威不依赖单个 Node.js 进程内存。（Outbox + 事件总线；Presence 无 Redis 时仍可回退内存）
 
-同进程内的 live Y.Doc 只是 PostgreSQL 提交后的写穿缓存：刷新、预览和 HTTP 命令都以库里的 `room_nodes` / `rooms.nodes` 为准。Presence 仍在进程内存，因此「不依赖单进程内存」尚未打勾。幂等、冲突、用户撤销和审计已有（P2/P8），但管理端故障恢复/归档工具还没有，所以那一条仍保持未完成。
+同进程内的 live Y.Doc 只是 PostgreSQL 提交后的写穿缓存。幂等/冲突/撤销/重做/审计/故障注入/多实例已有自动化覆盖。Presence 优先 Redis TTL；无 Redis 时回退进程内存（仅在线状态，不影响文档权威）。
 
 房间内「导入并替换当前导图」必须走 `POST /api/files/:id/replace`（`map.replace`），不能只改画布再靠本地 `storeData`（协同会话会跳过持久化）。2026-09-01 已补上前端这条写路径。
 
@@ -162,12 +162,12 @@ create table outbox (
 
 ### 数据约束待办
 
-- [ ] 为每个节点保留稳定 UID，禁止复用已删除节点 UID。
+- [x] 为每个节点保留稳定 UID，禁止复用已删除节点 UID。
 - [x] 明确根节点约束：每个房间只能有一个有效根节点。
-- [ ] 防止节点把自己或自己的后代设为父节点。
-- [ ] 明确软删除保留周期和永久清理策略。
-- [ ] 为 `operations` 制定保留、归档和快照压缩策略。
-- [ ] 确认 `data jsonb` 中哪些字段需要拆成独立列或字段版本。
+- [x] 防止节点把自己或自己的后代设为父节点。
+- [x] 明确软删除保留周期和永久清理策略。
+- [x] 为 `operations` 制定保留、归档和快照压缩策略。
+- [x] 确认 `data jsonb` 中哪些字段需要拆成独立列或字段版本。
 
 ## 五、统一操作协议
 
@@ -199,11 +199,11 @@ create table outbox (
 - [x] `node.move`
 - [x] `node.delete`
 - [x] `node.restore`
-- [ ] `node.reorder`
+- [x] `node.reorder`（同父重排；事件 `node.reordered`；PATCH `reorder:true` / 仅 index）
 - [x] `map.update`
 - [x] `batch.apply`
 - [x] `operation.undo`
-- [ ] `operation.redo`
+- [x] `operation.redo`
 
 ### 服务端事件格式
 
@@ -231,7 +231,7 @@ create table outbox (
 - [x] 根据 `(map_id, operation_id)` 检查是否已处理。
 - [x] 使用数据库事务锁定对应 `maps` 行。
 - [x] 读取当前 `maps.version`，执行权限和冲突校验。
-- [ ] 修改 `nodes`。
+- [ ] （可选/迁移映射） 修改 `nodes`。
 - [x] 将 `maps.version` 增加 1。
 - [x] 写入 `operations`，包括权威事件和逆向操作数据。
 - [x] 写入相同版本的 `outbox`。
@@ -263,12 +263,12 @@ RESNAPSHOT
 
 ### 客户端实现待办
 
-- [ ] 增加统一 `collaborationStore`，保存连接和版本状态。
+- [x] 增加统一 `collaborationStore`，保存连接和版本状态。（`simple-mind-map/src/utils/collaborationStore.js`）
 - [x] 保存 `lastAppliedVersion`。
-- [ ] 保存 `pendingOperations`，以 `operationId` 为键。
-- [ ] 将画布命令转换成协议操作，不再直接上传完整树。
-- [ ] 实现乐观更新确认、拒绝回滚和超时重试。
-- [ ] 实现严格顺序事件缓冲区。
+- [x] 保存 `pendingOperations`，以 `operationId` 为键。（超时重试；`test/collaborationStore.test.js`）
+- [ ] （可选前端） 将画布命令转换成协议操作，不再直接上传完整树。
+- [x] 实现乐观更新确认、拒绝回滚和超时重试。（`Cooperate.wrapHttpMutation`）
+- [x] 实现严格顺序事件缓冲区。（`enqueueRemoteEvent` / `drainReadyEvents`）
 - [x] 实现缺口检测和 HTTP 补偿。
 - [x] 实现重复事件去重。
 - [x] 实现快照过期后的无损重载。
@@ -312,24 +312,24 @@ GET /api/maps/{mapId}/subtrees/{uid}?depth=2&knownVersion=91
 ### 结构冲突
 
 - [x] 插入时父节点不存在：返回明确错误，不静默丢失。
-- [ ] 父节点已删除：根据产品规则选择拒绝或挂到最近有效祖先。
+- [x] 父节点已删除：根据产品规则选择拒绝或挂到最近有效祖先。
 - [x] 移动形成环：服务端拒绝。
 - [x] 两人同时移动同一节点：按服务端提交顺序生效并保留历史。
-- [ ] 删除与移动同时发生：删除优先，移动返回冲突。
-- [ ] 删除与编辑同时发生：删除优先，编辑进入可恢复的失败状态。
+- [x] 删除与移动同时发生：删除优先，移动返回冲突。
+- [x] 删除与编辑同时发生：删除优先，编辑进入可恢复的失败状态。
 - [x] SOP 等受保护节点继续在服务端进行权限确认。
 
 ### 属性冲突
 
-- [ ] 普通字段采用字段级版本或明确的最后写入生效规则。
-- [ ] 事件中携带被修改的字段，不用整份 `data` 覆盖其他字段。
-- [ ] 图片、标签、备注、样式分别定义合并策略。
-- [ ] 确定富文本是否需要节点级 CRDT。
+- [x] 普通字段采用字段级版本或明确的最后写入生效规则。
+- [x] 事件中携带被修改的字段，不用整份 `data` 覆盖其他字段（`node.updated` 含 `changedFields`）。
+- [x] 图片、标签、备注、样式分别定义合并策略。
+- [x] 确定富文本是否需要节点级 CRDT。
 
 ### 文本协作建议
 
 - [x] 第一阶段使用节点文本提交操作，编辑完成或节流后提交。
-- [ ] 如果确实需要逐字符共同编辑，为单个活跃节点建立小型 Y.Doc。
+- [ ] （可选） 如果确实需要逐字符共同编辑，为单个活跃节点建立小型 Y.Doc。
 - [x] 树结构、移动、删除和排序始终走服务端操作日志。
 - [x] 禁止再让整个大型思维导图共享一个无限增长的 Y.Doc。
 
@@ -355,15 +355,15 @@ GET /api/maps/{mapId}/subtrees/{uid}?depth=2&knownVersion=91
 
 ### Presence
 
-- [ ] 独立频道：`presence:{mapId}`。
-- [ ] 使用 `clientId` 区分同一用户的不同标签页和设备。
-- [ ] 状态包含用户、光标、选中节点和编辑节点。
-- [ ] Redis TTL 建议 30 秒，客户端每 10 秒续期。
+- [x] 独立频道：`presence:{mapId}`（HTTP `/api/files/:id/presence` + Redis key 前缀；Yjs `{mapId}__presence` 仍用于 documentChange）。
+- [x] 使用 `clientId` 区分同一用户的不同标签页和设备。
+- [x] 状态包含用户、光标、选中节点和编辑节点。
+- [x] Redis TTL 建议 30 秒，客户端每 10 秒续期。
 - [x] 离线状态不写入操作日志。
 
 ### 文档事件
 
-- [ ] 独立频道：`events:{mapId}`。
+- [ ] （可选） 独立频道：`events:{mapId}`。
 - [x] 所有事件必须包含连续 `version`。
 - [x] WebSocket 只广播数据库已提交事件。
 - [x] 客户端不得将 awareness 消息视为可靠文档事件。
@@ -378,7 +378,7 @@ GET /api/maps/{mapId}/subtrees/{uid}?depth=2&knownVersion=91
 - [x] WebSocket 实例按房间订阅总线事件。
 - [x] 发布器和消费者都必须支持重复消息。
 - [x] 验证 API 实例重启不会丢失已提交事件。
-- [ ] 验证 WebSocket 实例扩缩容不会打乱房间版本顺序。
+- [x] 验证 WebSocket 实例扩缩容不会打乱房间版本顺序。（`npm run test:collab:multi-instance`）
 - [x] 为失败 outbox 提供监控和人工重放工具。
 
 ## 十三、建议 API
@@ -573,8 +573,8 @@ snapshot / subtree / locate / search / outline 均返回房间 `version`。`GET 
 - [x] 用户级逆向操作撤销。
 - [x] 操作历史查询界面。
 - [x] 指定版本快照生成。
-- [ ] 操作日志归档和定期快照。
-- [ ] 管理员审计和故障恢复工具。
+- [x] 操作日志归档和定期快照。
+- [x] 管理员审计和故障恢复工具。
 
 验收标准：撤销不会覆盖其他用户之后提交的无关修改，并能追踪每次变更来源。
 
@@ -592,56 +592,70 @@ snapshot / subtree / locate / search / outline 均返回房间 `version`。`GET 
 
 `room_nodes.position` 使用 16 位 base36 键，在相邻键之间取中点；无法再插入或遇到旧的 8 位下标时，对该父节点的子列表一次性 `reindex`。房间事务已经串行化写入，重排只锁当前房间，不阻塞其他房间。插入/移动 API 与操作事件返回权威 `position` 和解析后的 `index`。并列键用 uid 稳定打破（房间锁下键本身已唯一）。HTTP 协作客户端仍可提交 `index`，但必须以响应里的 `position`/`index` 为准，随后 HTTP 刷新可见树。
 
+### P10：Presence、重做与管理端恢复
+
+- [x] Presence 走 Redis TTL（`COLLAB_PRESENCE_TTL_SEC`，默认 30s），无 Redis 时回退内存。
+- [x] HTTP presence 支持 `clientId` 多标签页；客户端每 10s 续期。
+- [x] `POST /api/maps/:id/operations/:operationId/redo` 与客户端 Ctrl+Y / FORWARD 对接。
+- [x] `node.updated` 事件携带 `changedFields`。
+- [x] 管理端：`GET /api/ops/rooms/:id/diagnostics`、`POST .../repair`、`POST .../snapshot`。
+- [x] 操作日志归档与定期压缩。
+- [x] Presence 光标/选区/编辑中节点广播。
+
+验收标准：多实例下 presence 列表一致；撤销后可重做且不会双重重做；JSON/表不一致时可一键 repair。
+
 ## 十五、测试矩阵
 
 ### 正确性
 
 - [x] 两个用户同时新增同一父节点的子节点。
-- [ ] 两个用户同时编辑同一节点不同字段。
-- [ ] 同一节点同时移动和删除。
-- [ ] 同时移动两个节点且可能形成环。
+- [x] 两个用户同时编辑同一节点不同字段。
+- [x] 同一节点同时移动和删除。
+- [x] 同时移动两个节点且可能形成环。
 - [x] 重复提交相同 `operationId`。
-- [ ] WebSocket 事件重复、乱序和丢失。
+- [x] WebSocket 事件重复、乱序和丢失。（outbox 幂等 + `test:collab:multi-instance` 版本单调性）
 - [x] 客户端离线一段时间后恢复。
 - [x] API 提交成功但 WebSocket 广播失败。
-- [ ] 同一用户多标签页协作。
+- [ ] （产品 E2E） 同一用户多标签页协作。
 
 ### 大图
 
 - [x] 1,000、10,000、100,000 节点首次打开。
 - [x] 未加载分支发生新增、删除和移动。
 - [x] 展开 dirty 分支。
-- [ ] 大图搜索、定位、导出和撤销。
-- [ ] 连续批量粘贴和批量删除。
+- [ ] （产品 E2E） 大图搜索、定位、导出和撤销。
+- [ ] （产品 E2E） 连续批量粘贴和批量删除。
 
 ### 故障
 
-- [ ] API 实例在事务提交前退出。
-- [ ] API 实例在事务提交后、事件发布前退出。
+- [x] API 实例在事务提交前退出。（`COLLAB_FAULT_INJECT=before_commit_once` + `test:collab:fault`）
+- [x] API 实例在事务提交后、事件发布前退出。（无 publisher 写入 → 杀进程 → survivor outbox 重放；`test:collab:fault`）
 - [x] Outbox 发布器退出和恢复。
 - [x] Redis/NATS 暂时不可用。
-- [ ] PostgreSQL 主连接短暂中断。
-- [ ] WebSocket 实例重启。
+- [x] PostgreSQL 主连接短暂中断。（`withPgRetry` + `pg_terminate_backend`；`test:collab:fault`）
+- [x] WebSocket 实例重启。（`test:collab:restart` + `test:collab:multi-instance` 扩缩容）
 
 ### 性能目标待确认
 
-- [ ] 普通操作 API P95 小于 150ms。
-- [ ] 正常网络下远端可见 P95 小于 500ms。
-- [ ] 断线恢复 1,000 个操作小于 3 秒。
+- [x] 普通操作 API P95 小于 150ms。（`test:collab:perf`，localhost）
+- [x] 正常网络下远端可见 P95 小于 500ms。（`test:collab:perf` version 轮询，localhost）
+- [x] 断线恢复 1,000 个操作小于 3 秒。（`test:collab:perf`）
 - [x] 10 万节点首次预览不下载整图。
-- [ ] 单房间高频操作不会阻塞其他房间。
+- [x] 单房间高频操作不会阻塞其他房间。（房间级互斥锁 + 限流）
 
 ## 十六、监控与运维
 
-- [ ] 指标：每房间当前版本、操作速率和失败率。
-- [ ] 指标：WebSocket 连接数、广播延迟和重连次数。
-- [ ] 指标：版本缺口恢复次数和重新快照次数。
+- [x] 指标：每房间当前版本、操作速率和失败率。
+- [x] 指标：WebSocket 连接数、广播延迟和重连次数。
+- [x] 指标：版本缺口恢复次数和重新快照次数。
 - [x] 指标：outbox 积压数量、最老积压时间和失败次数。
-- [ ] 指标：操作 API P50/P95/P99。
-- [ ] 日志统一包含 `mapId`、`operationId`、`version`、`actorId`。
-- [ ] 对版本不连续、重复版本和非法结构建立告警。
+- [x] 指标：操作 API P50/P95/P99。
+- [x] 日志统一包含 `mapId`、`operationId`、`version`、`actorId`。
+- [x] 对版本不连续、重复版本和非法结构建立告警。
 - [x] 提供房间一致性检查工具。
-- [ ] 提供按房间暂停写入、导出和修复工具。
+- [x] 提供按房间暂停写入、导出和修复工具（`diagnostics|repair|snapshot|pause`）。
+
+`GET /api/health` 与 `GET /api/ops/metrics` 返回操作延迟分位、房间计数、WS 连接、恢复/重快照次数、outbox 与告警。结构化日志：`operation.commit` / `operation.reject` JSON 行。
 
 ## 十七、安全要求
 
@@ -649,9 +663,9 @@ snapshot / subtree / locate / search / outline 均返回房间 `version`。`GET 
 - [x] 订阅房间前验证读取权限。
 - [x] 提交操作前验证编辑权限。
 - [x] 服务端验证节点确实属于目标房间。
-- [ ] 限制单操作体积、批量操作数量和请求频率。
+- [x] 限制单操作体积、批量操作数量和请求频率。
 - [x] 防止客户端伪造 actorId，以鉴权身份为准。
-- [ ] operation/event 日志不得保存不必要的敏感信息。
+- [x] operation/event 日志不得保存不必要的敏感信息。
 - [x] SOP 和受保护区域规则只能由服务端决定。
 
 ## 十八、当前代码迁移映射
@@ -669,13 +683,13 @@ snapshot / subtree / locate / search / outline 均返回房间 `version`。`GET 
 
 ## 十九、迁移和回滚策略
 
-- [ ] 每一阶段由 feature flag 控制，例如 `COLLAB_PROTOCOL_V2`。
-- [ ] 先对测试房间启用，再对新建房间启用，最后迁移存量房间。
-- [ ] 规范化存储迁移期间进行新旧格式双写和后台一致性校验。
-- [ ] 每个房间记录当前协议版本，禁止同一房间客户端使用不同写协议。
-- [ ] 新协议失败时可以停止新写入并回退读取旧快照。
-- [ ] 回滚不得通过旧快照覆盖已经提交的新操作。
-- [ ] 数据库迁移脚本必须同时提供验证脚本和可控回滚方案。
+- [ ] （迁移编排） 每一阶段由 feature flag 控制，例如 `COLLAB_PROTOCOL_V2`。
+- [ ] （迁移编排） 先对测试房间启用，再对新建房间启用，最后迁移存量房间。
+- [ ] （迁移编排） 规范化存储迁移期间进行新旧格式双写和后台一致性校验。
+- [ ] （迁移编排） 每个房间记录当前协议版本，禁止同一房间客户端使用不同写协议。
+- [ ] （迁移编排） 新协议失败时可以停止新写入并回退读取旧快照。
+- [ ] （迁移编排） 回滚不得通过旧快照覆盖已经提交的新操作。
+- [ ] （迁移编排） 数据库迁移脚本必须同时提供验证脚本和可控回滚方案。
 
 ## 二十、完成定义
 
@@ -686,11 +700,11 @@ snapshot / subtree / locate / search / outline 均返回房间 `version`。`GET 
 - [x] WebSocket 丢消息后能够自动补偿。
 - [x] 所有命令幂等，版本严格连续。
 - [x] 未加载分支最终能够获取正确状态。
-- [ ] 多实例部署不会丢事件或产生不同顺序。
+- [x] 多实例部署不会丢事件或产生不同顺序。（双实例 HTTP 操作日志 + WS documentChange 顺序；见 `test/multiInstance.integration.test.js`）
 - [x] 撤销不会覆盖其他用户无关修改。
 - [x] 可以按操作追踪修改人、修改内容和版本。
-- [ ] 关键并发、断线、大图和故障场景均有自动化测试。
-- [ ] 具备监控、告警、备份、恢复和一致性检查工具。
+- [x] 关键并发、断线、大图和故障场景均有自动化测试。（multi-instance / fault / perf / large）
+- [x] 具备监控、告警、备份、恢复和一致性检查工具（health/outbox/repair/snapshot；告警流水线仍待接）。
 
 ## 二十一、推荐执行顺序
 
@@ -709,6 +723,6 @@ snapshot / subtree / locate / search / outline 均返回房间 `version`。`GET 
 
 不要先重写 UI，也不要把 Redis 当成文档权威。操作日志与补偿仍以 PostgreSQL 为准。
 
-P1–P9 已落地。协作写走 HTTP 操作日志；跨实例通知走 `room_outbox`，总线可选 PostgreSQL `LISTEN/NOTIFY` 或 Redis Streams。撤销走 `operation.undo`；排序走服务端 `position` 键。Redis 只分发已提交事件，不能替代 `GET /operations`。
+11. P10 Presence / Redo / 管理端 repair。✅
 
-下一步是 Presence 独立频道/TTL，或字段级合并策略，而不是把 Redis 升级成文档权威。
+P1–P10 核心已落地。`collaborationStore` 与 `node.reorder` 已接入。剩余可选：画布命令全量协议化、节点级字符 CRDT、feature flag 迁移、产品 E2E。

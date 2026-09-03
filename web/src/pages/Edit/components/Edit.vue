@@ -10,6 +10,7 @@
       class="mindMapContainer"
       id="mindMapContainer"
       ref="mindMapContainer"
+      data-testid="mindmap-canvas"
     ></div>
     <Count :mindMap="mindMap" v-if="!isZenMode"></Count>
     <Navigator v-if="mindMap" :mindMap="mindMap"></Navigator>
@@ -54,6 +55,7 @@
     <AiChat v-if="enableAi"></AiChat>
     <NodeAutoExpand v-if="mindMap" :mindMap="mindMap"></NodeAutoExpand>
     <CooperateDialog :mindMap="mindMap"></CooperateDialog>
+    <MapRefDialog></MapRefDialog>
     <div
       class="dragMask"
       v-if="showDragMask"
@@ -102,7 +104,7 @@ import ShortcutKey from './ShortcutKey.vue'
 import Contextmenu from './Contextmenu.vue'
 import RichTextToolbar from './RichTextToolbar.vue'
 import NodeNoteContentShow from './NodeNoteContentShow.vue'
-import { getDataAsync, getConfig, storeData } from '@/api'
+import { getData, getDataAsync, getConfig, storeData } from '@/api'
 import Navigator from './Navigator.vue'
 import NodeImgPreview from './NodeImgPreview.vue'
 import SidebarTrigger from './SidebarTrigger.vue'
@@ -113,9 +115,16 @@ import Search from './Search.vue'
 import NodeIconSidebar from './NodeIconSidebar.vue'
 import NodeIconToolbar from './NodeIconToolbar.vue'
 import OutlineEdit from './OutlineEdit.vue'
-import { showLoading, hideLoading } from '@/utils/loading'
-import { prepareImportedTree, yieldToUi } from '@/utils/importTree'
+import { showLoading, hideLoading, updateLoading } from '@/utils/loading'
+import { getSaveStatus as requestSaveStatus } from '@/utils/fileApi'
+import { promiseWithTimeout } from '@/utils/promiseWithTimeout'
+import {
+  prepareImportedTree,
+  stubImportedTree,
+  yieldToUi
+} from '@/utils/importTree'
 import handleClipboardText from '@/utils/handleClipboardText'
+import { getRuntimeConfig } from '@/utils/runtimeConfig'
 import Scrollbar from './Scrollbar.vue'
 import exampleData from 'simple-mind-map/example/exampleData'
 import FormulaSidebar from './FormulaSidebar.vue'
@@ -129,6 +138,7 @@ import AiCreate from './AiCreate.vue'
 import AiChat from './AiChat.vue'
 import NodeAutoExpand from './NodeAutoExpand.vue'
 import CooperateDialog from './CooperateDialog.vue'
+import MapRefDialog from './MapRefDialog.vue'
 
 // 注册插件
 MindMap.usePlugin(MiniMap)
@@ -190,12 +200,15 @@ export default {
     AiCreate,
     AiChat,
     NodeAutoExpand,
-    CooperateDialog
+    CooperateDialog,
+    MapRefDialog
   },
   data() {
     return {
       enableShowLoading: true,
       loadingSafetyTimer: null,
+      importPersistLock: false,
+      importProgressTimer: null,
       mindMap: null,
       mindMapData: null,
       mindMapConfig: {},
@@ -245,8 +258,32 @@ export default {
     this.loadingSafetyTimer = setTimeout(() => {
       this.handleHideLoading()
     }, 8000)
-    await this.getData()
+    let dataReady = true
+    try {
+      await promiseWithTimeout(this.getData(), 10000, 'mind map data')
+    } catch (err) {
+      dataReady = false
+      console.warn('[edit] data load slow, using fallback:', err.message || err)
+      if (!this.mindMapData || !this.mindMapData.root) {
+        this.mindMapData = getData()
+        const prepared = prepareImportedTree(this.mindMapData)
+        this.mindMapData = prepared.data
+        this.isLargeMap = prepared.collapsed
+      }
+      this.mindMapConfig = getConfig() || {}
+    }
     this.init()
+    if (!dataReady) {
+      this.getData()
+        .then(() => {
+          if (this.mindMap && this.mindMapData && this.mindMapData.root) {
+            this.mindMap.setData(this.mindMapData.root)
+          }
+        })
+        .catch(err => {
+          console.warn('[edit] deferred data load failed:', err.message || err)
+        })
+    }
     this.$bus.$on('execCommand', this.execCommand)
     this.$bus.$on('paddingChange', this.onPaddingChange)
     this.$bus.$on('export', this.export)
@@ -271,6 +308,8 @@ export default {
       clearTimeout(this.loadingSafetyTimer)
       this.loadingSafetyTimer = null
     }
+    this.importPersistLock = false
+    this.stopImportProgressPoll()
     this.$bus.$off('execCommand', this.execCommand)
     this.$bus.$off('paddingChange', this.onPaddingChange)
     this.$bus.$off('export', this.export)
@@ -304,6 +343,9 @@ export default {
     },
 
     handleCreateLineFromActiveNode() {
+      if (this.mindMap.cooperate && this.mindMap.cooperate.ensureActiveSelection) {
+        this.mindMap.cooperate.ensureActiveSelection()
+      }
       this.mindMap.associativeLine.createLineFromActiveNode()
     },
 
@@ -316,19 +358,79 @@ export default {
     },
 
     // 显示loading
-    handleShowLoading(text) {
+    handleShowLoading(text, durationOrOptions) {
       this.enableShowLoading = true
-      showLoading(typeof text === 'string' ? text : '')
+      const options =
+        typeof durationOrOptions === 'number'
+          ? { timeout: durationOrOptions }
+          : durationOrOptions || {}
+      showLoading(typeof text === 'string' ? text : '', {
+        percent: options.percent,
+        detail: options.detail
+      })
       if (this.loadingSafetyTimer) {
         clearTimeout(this.loadingSafetyTimer)
       }
+      const timeout = Math.max(8000, Number(options.timeout) || 8000)
       this.loadingSafetyTimer = setTimeout(() => {
+        if (this.importPersistLock) return
         this.handleHideLoading()
-      }, 8000)
+      }, timeout)
+    },
+
+    updateImportProgress(percent, detail, text) {
+      if (!this.enableShowLoading) return
+      updateLoading({
+        text: text || this.$t('edit.importSavingTip'),
+        percent,
+        detail
+      })
+    },
+
+    stopImportProgressPoll() {
+      if (this.importProgressTimer) {
+        clearInterval(this.importProgressTimer)
+        this.importProgressTimer = null
+      }
+    },
+
+    startImportProgressPoll(roomKey) {
+      this.stopImportProgressPoll()
+      if (!roomKey) return
+      // Collaboration V2 save state comes from socket/outbox/ACK, not V1 /save-status.
+      if (getRuntimeConfig().collabV2 !== false) return
+      this.importProgressTimer = setInterval(async () => {
+        try {
+          const data = await requestSaveStatus(roomKey)
+          if (!this.importPersistLock) return
+          const percent = Number(data.progress)
+          const detail =
+            data.message ||
+            (data.phase === 'writing'
+              ? this.$t('edit.importSavingWrite')
+              : data.phase === 'committing'
+                ? this.$t('edit.importSavingCommit')
+                : data.phase === 'receiving'
+                  ? this.$t('edit.importSavingUpload')
+                  : '')
+          if (Number.isFinite(percent) && percent > 0) {
+            this.updateImportProgress(
+              Math.max(30, Math.min(95, percent)),
+              detail
+            )
+          } else if (detail) {
+            this.updateImportProgress(null, detail)
+          }
+        } catch (err) {
+          // 保存中轮询失败不打断导入，避免把超时显示成失败
+        }
+      }, 1000)
     },
 
     // 渲染结束后关闭loading
     handleHideLoading() {
+      if (this.importPersistLock) return
+      this.stopImportProgressPoll()
       if (this.loadingSafetyTimer) {
         clearTimeout(this.loadingSafetyTimer)
         this.loadingSafetyTimer = null
@@ -424,6 +526,7 @@ export default {
         openRealtimeRenderOnNodeTextEdit: true,
         enableAutoEnterTextEditWhenKeydown: true,
         onlyOneEnableActiveNodeOnCooperate: true,
+        collabV2Only: getRuntimeConfig().collabV2 !== false,
         demonstrateConfig: {
           openBlankMode: false
         },
@@ -539,7 +642,8 @@ export default {
         'demonstrate_jump',
         'exit_demonstrate',
         'node_note_dblclick',
-        'node_mousedown'
+        'node_mousedown',
+        'map_ref_click'
       ].forEach(event => {
         this.mindMap.on(event, (...args) => {
           this.$bus.$emit(event, ...args)
@@ -578,19 +682,20 @@ export default {
     // 动态设置思维导图数据
     async setData(data, options = {}) {
       const quiet = !!(options && options.quiet)
+      const isUserImport = !(options && options.fromSaved)
+      let prepared = null
       if (!quiet) this.handleShowLoading(this.$t('edit.importingTip'))
       await yieldToUi()
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      const persistReplace =
+        isUserImport &&
+        cooperate &&
+        cooperate.httpCollabMode &&
+        typeof cooperate.persistHttpReplace === 'function' &&
+        typeof cooperate.httpReplaceTree === 'function'
       if (!(options && options.fromSaved)) {
-        const prepared = prepareImportedTree(data)
+        prepared = prepareImportedTree(data, { prune: !persistReplace })
         data = prepared.data
-        if (prepared.collapsed && this.mindMap) {
-          this.isLargeMap = true
-          this.mindMap.updateConfig({
-            openPerformance: true,
-            openRealtimeRenderOnNodeTextEdit: false
-          })
-          if (!quiet) this.$message.info(this.$t('edit.largeMapImportTip'))
-        }
       } else if (this.mindMap) {
         this.isLargeMap = true
         this.mindMap.updateConfig({
@@ -599,29 +704,100 @@ export default {
           isShowExpandNum: true
         })
       }
-      const cooperate = this.mindMap && this.mindMap.cooperate
-      const persistReplace =
-        !(options && options.fromSaved) &&
-        cooperate &&
-        cooperate.httpCollabMode &&
-        typeof cooperate.persistHttpReplace === 'function' &&
-        typeof cooperate.httpReplaceTree === 'function'
+      const nodeCount = (prepared && prepared.nodeCount) || 0
+      if (this.mindMap && nodeCount >= 100) {
+        this.isLargeMap = true
+        this.mindMap.updateConfig({
+          openPerformance: true,
+          openRealtimeRenderOnNodeTextEdit: false,
+          isShowExpandNum: nodeCount >= 200
+        })
+        if (prepared && prepared.collapsed && !quiet) {
+          this.$message.info(this.$t('edit.largeMapImportTip'))
+        }
+      }
+      const loadingMs =
+        nodeCount >= 400
+          ? Math.min(600000, Math.max(120000, nodeCount * 20))
+          : 30000
+      if (!quiet && nodeCount >= 400) {
+        this.handleShowLoading(this.$t('edit.importingTip'), {
+          timeout: loadingMs,
+          percent: 8,
+          detail: this.$t('edit.importSavingParse')
+        })
+      }
       if (persistReplace) cooperate.beginHttpReplace()
       let rootNodeData = null
+      let importDone = !isUserImport
       try {
+        rootNodeData = data.root || data
+        if (persistReplace) {
+          this.importPersistLock = true
+          if (!quiet) {
+            this.handleShowLoading(this.$t('edit.importSavingTip'), {
+              timeout: loadingMs,
+              percent: 12,
+              detail: this.$t('edit.importSavingUpload')
+            })
+          }
+          this.startImportProgressPoll(cooperate.httpRoomKey)
+          await cooperate.persistHttpReplace(
+            data.root ? { root: data.root } : { root: rootNodeData },
+            {
+              onUploadProgress: evt => {
+                const uploadPct = Number(evt && evt.percent) || 0
+                this.updateImportProgress(
+                  Math.min(35, 12 + Math.round(uploadPct * 0.23)),
+                  this.$t('edit.importSavingUpload')
+                )
+              }
+            }
+          )
+          this.updateImportProgress(96, this.$t('edit.importSavingApply'))
+          if (nodeCount >= 100 && rootNodeData) {
+            stubImportedTree(rootNodeData, {
+              keepDepth: nodeCount >= 500 ? 1 : 2
+            })
+          }
+        }
         if (data.root) {
           this.mindMap.setFullData(data)
-          rootNodeData = data.root
         } else {
           this.mindMap.setData(data)
-          rootNodeData = data
+        }
+        if (persistReplace && rootNodeData) {
+          if (typeof cooperate.resyncHttpBaseline === 'function') {
+            cooperate.resyncHttpBaseline(rootNodeData)
+          } else if (typeof cooperate.markTreeUids === 'function') {
+            cooperate.markTreeUids(rootNodeData)
+          }
+          if (typeof cooperate.seedPreviewHydration === 'function') {
+            cooperate.seedPreviewHydration(rootNodeData)
+          }
         }
         this.mindMap.view.reset()
-        if (persistReplace) {
-          await cooperate.persistHttpReplace(this.mindMap.getData(true))
-        } else if (!(options && options.fromSaved)) {
+        await yieldToUi()
+        if (persistReplace && cooperate) {
+          await new Promise(resolve => {
+            let settled = false
+            const done = () => {
+              if (settled) return
+              settled = true
+              this.mindMap.off('node_tree_render_end', done)
+              resolve()
+            }
+            this.mindMap.on('node_tree_render_end', done)
+            setTimeout(done, nodeCount >= 400 ? 4000 : 1200)
+          })
+          if (typeof cooperate.captureHttpBaselineFromRenderer === 'function') {
+            cooperate.captureHttpBaselineFromRenderer()
+          }
+        }
+        if (!persistReplace && isUserImport) {
           this.manualSave()
         }
+        importDone = true
       } catch (err) {
         if (persistReplace) {
           try {
@@ -634,11 +810,20 @@ export default {
           this.$message.error(
             (err && err.message) || this.$t('edit.importPersistFailed')
           )
+        }
+        if (isUserImport) {
+          this.$bus.$emit('setDataFailed', (err && err.message) || '')
         } else {
           throw err
         }
       } finally {
+        this.importPersistLock = false
+        this.stopImportProgressPoll()
         if (persistReplace) cooperate.endHttpReplace()
+        if (!quiet) this.handleHideLoading()
+      }
+      if (isUserImport && importDone) {
+        this.$bus.$emit('setDataComplete')
       }
       // 如果导入的是富文本内容，那么自动开启富文本模式
       if (rootNodeData && rootNodeData.data && rootNodeData.data.richText && !this.openNodeRichText) {
@@ -657,6 +842,24 @@ export default {
 
     // 执行命令
     execCommand(...args) {
+      const name = args[0]
+      const needsSelection = {
+        ADD_GENERALIZATION: true,
+        ADD_OUTER_FRAME: true,
+        INSERT_NODE: true,
+        INSERT_CHILD_NODE: true,
+        INSERT_PARENT_NODE: true,
+        REMOVE_NODE: true,
+        REMOVE_CURRENT_NODE: true,
+        SET_NOTATION: true
+      }
+      if (
+        needsSelection[name] &&
+        this.mindMap.cooperate &&
+        typeof this.mindMap.cooperate.ensureActiveSelection === 'function'
+      ) {
+        this.mindMap.cooperate.ensureActiveSelection()
+      }
       this.mindMap.execCommand(...args)
     },
 

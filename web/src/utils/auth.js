@@ -1,4 +1,7 @@
+import { FetchTimeoutError, fetchWithTimeout } from './fetchWithTimeout'
 import { getRuntimeConfig } from './runtimeConfig'
+
+const AUTH_TIMEOUT_MS = 30000
 
 let currentUser = null
 
@@ -12,10 +15,25 @@ function currentReturnTo() {
 }
 
 export async function loadAuthState() {
-  const response = await fetch(getAuthApiUrl('/api/auth/me'), {
-    credentials: 'include',
-    headers: { Accept: 'application/json' }
-  })
+  let response
+  try {
+    response = await fetchWithTimeout(
+      getAuthApiUrl('/api/auth/me'),
+      {
+        credentials: 'include',
+        headers: { Accept: 'application/json' }
+      },
+      AUTH_TIMEOUT_MS
+    )
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error('认证服务响应超时，请稍后重试')
+    }
+    if (err instanceof TypeError || String(err.message || '').includes('fetch')) {
+      throw new Error('无法连接认证服务，请确认服务已启动后重试')
+    }
+    throw err
+  }
   const data = await response.json().catch(() => ({}))
   if (!response.ok) {
     throw new Error(data.error || '认证服务暂不可用')
@@ -37,10 +55,22 @@ export function getLoginUrl() {
 export async function createLoginQr() {
   const url = new URL(getAuthApiUrl('/api/auth/qr'))
   url.searchParams.set('return_to', currentReturnTo())
-  const response = await fetch(url.toString(), {
-    credentials: 'include',
-    headers: { Accept: 'application/json' }
-  })
+  let response
+  try {
+    response = await fetchWithTimeout(
+      url.toString(),
+      {
+        credentials: 'include',
+        headers: { Accept: 'application/json' }
+      },
+      AUTH_TIMEOUT_MS
+    )
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error('登录二维码请求超时，请稍后重试')
+    }
+    throw new Error('无法连接认证服务，请确认服务已启动后重试')
+  }
   const data = await response.json().catch(() => ({}))
   if (!response.ok || !data.loginUrl) {
     throw new Error(data.error || '登录二维码生成失败')
@@ -81,15 +111,27 @@ export function storeDevAuthKey(key) {
 }
 
 export async function devLogin(key) {
-  const response = await fetch(getAuthApiUrl('/api/auth/dev-login'), {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ key })
-  })
+  let response
+  try {
+    response = await fetchWithTimeout(
+      getAuthApiUrl('/api/auth/dev-login'),
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ key })
+      },
+      AUTH_TIMEOUT_MS
+    )
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      throw new Error('开发者登录请求超时，请稍后重试')
+    }
+    throw new Error('无法连接认证服务，请确认服务已启动后重试')
+  }
   const data = await response.json().catch(() => ({}))
   if (!response.ok || !data.authenticated) {
     throw new Error(data.error || '开发者登录失败')

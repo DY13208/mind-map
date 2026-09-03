@@ -4,7 +4,8 @@ const path = require('path')
 const { spawn, execSync } = require('child_process')
 const {
   DEFAULT_PORT: WORKBUDDY_PORT,
-  ensureWorkbuddyApi
+  ensureWorkbuddyApi,
+  formatWorkbuddyResult
 } = require('./workbuddy-api')
 
 const ROOT = path.resolve(__dirname, '..')
@@ -133,8 +134,8 @@ async function up() {
   console.log(`  页面     http://${host}:${PORT}`)
   console.log(`  MCP      ${mcpUrl}`)
   console.log('')
-  console.log('  正在构建并启动容器（首次会较慢）...')
-  const child = compose(['up', '-d', '--build'], {
+  console.log('  正在重新构建并启动容器（会套用最新代码和 Nginx 配置，首次或改代码后会较慢）...')
+  const child = compose(['up', '-d', '--build', '--force-recreate'], {
     PUBLIC_HOST: host,
     MIND_MAP_PORT: String(PORT),
     PGPASSWORD: process.env.PGPASSWORD
@@ -151,12 +152,9 @@ async function up() {
         port: WORKBUDDY_PORT,
         mcpConfigPath: path.join(ROOT, '.mcp.json')
       })
-      if (wb.ok) {
-        console.log(`  WorkBuddy API  ${wb.alreadyRunning ? '已在运行' : '已启动'}  http://127.0.0.1:${WORKBUDDY_PORT}`)
-      } else {
-        console.log(`  WorkBuddy API 未就绪：${wb.reason || '未知错误'}`)
-        console.log('  请安装并登录 WorkBuddy，并确保已安装 Python 3.10+。')
-      }
+      formatWorkbuddyResult(wb)
+        .split('\n')
+        .forEach(line => console.log(`  ${line}`))
     } else {
       console.log('  WorkBuddy API 需在 Windows 本机单独启动（补齐流程依赖 WorkBuddy 客户端）。')
     }

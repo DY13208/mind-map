@@ -28,9 +28,25 @@ const {
   applyCorsHeaders,
   isAllowedOrigin
 } = require('./auth')
+const roomAcl = require('./roomAcl')
+const { setWsConnections, recordBroadcast } = require('./collabMetrics')
+const { attachCollabV2, shouldHandleUpgrade } = require('./collabV2/socketServer')
+const { isCollabV2Enabled } = require('./collabV2/flag')
 
 const host = process.env.HOST || '0.0.0.0'
 const port = Number(process.env.PORT || 1234)
+
+let openSockets = 0
+
+function trackSocket(conn) {
+  openSockets += 1
+  setWsConnections(openSockets)
+  conn.on('error', () => {})
+  conn.on('close', () => {
+    openSockets = Math.max(0, openSockets - 1)
+    setWsConnections(openSockets)
+  })
+}
 
 const server = http.createServer(async (request, response) => {
   try {
@@ -64,12 +80,16 @@ const server = http.createServer(async (request, response) => {
   response.end('simple-mind-map collab server ok')
 })
 
-const wss = new WebSocket.Server({
-  noServer: true,
-  maxPayload: 120 * 1024 * 1024
-})
+const v2RuntimeOnly = isCollabV2Enabled()
+const wss = v2RuntimeOnly
+  ? null
+  : new WebSocket.Server({
+      noServer: true,
+      maxPayload: 120 * 1024 * 1024
+    })
 
-wss.on('connection', (conn, req) => {
+if (wss) wss.on('connection', (conn, req) => {
+  trackSocket(conn)
   let docName
   try {
     const raw = (req.url || '/').slice(1).split('?')[0]
@@ -79,41 +99,64 @@ wss.on('connection', (conn, req) => {
     conn.close(1008, 'invalid room name')
     return
   }
-  if (docs.has(docName) || String(docName).endsWith('__presence')) {
-    setupWSConnection(conn, req, { gc: true, docName })
-    return
-  }
-  // upgrade 完成后客户端会立即发送 Yjs sync step 1。数据库预加载期间如果还没
-  // 注册 setupWSConnection 的 message 监听，这个首帧会直接丢失并导致页面永远
-  // 等不到 synced。先暂停底层 socket，装好处理器后再恢复读取。
-  const socket = conn._socket
-  if (socket && typeof socket.pause === 'function') socket.pause()
-  const resume = () => {
-    if (socket && typeof socket.resume === 'function') socket.resume()
-  }
-  preloadRoom(docName)
-    .then(async payload => {
-      if (conn.readyState !== WebSocket.OPEN) return
-      if (!payload || payload.type === 'empty') {
-        const row = await getRoom(docName)
-        if (row) {
-          resume()
-          conn.close(1011, 'saved map missing content')
-          return
-        }
-      }
+  const baseRoom = roomAcl.presenceDocRoomKey(docName)
+  const wsAction = String(docName).endsWith('__presence') ? 'view' : 'edit'
+  const finishSetup = () => {
+    if (docs.has(docName) || String(docName).endsWith('__presence')) {
       setupWSConnection(conn, req, { gc: true, docName })
-      resume()
-    })
-    .catch(err => {
-      console.error('[persist] preload failed', docName, err.message)
-      resume()
-      try {
-        conn.close(1011, 'load failed')
-      } catch (e) {
-        // ignore
-      }
-    })
+      return true
+    }
+    return false
+  }
+  const rejectForbidden = err => {
+    const code = err && err.statusCode === 404 ? 1008 : 1008
+    try {
+      conn.close(code, (err && err.code) || 'forbidden')
+    } catch (e) {
+      // ignore
+    }
+  }
+  const authorizeThen = next => {
+    if (!isAuthEnabled()) {
+      next()
+      return
+    }
+    roomAcl
+      .assertRoomAccess(getPool(), req, baseRoom, wsAction)
+      .then(() => next())
+      .catch(rejectForbidden)
+  }
+  authorizeThen(() => {
+    if (finishSetup()) return
+    const socket = conn._socket
+    if (socket && typeof socket.pause === 'function') socket.pause()
+    const resume = () => {
+      if (socket && typeof socket.resume === 'function') socket.resume()
+    }
+    preloadRoom(docName)
+      .then(async payload => {
+        if (conn.readyState !== WebSocket.OPEN) return
+        if (!payload || payload.type === 'empty') {
+          const row = await getRoom(docName)
+          if (row) {
+            resume()
+            conn.close(1011, 'saved map missing content')
+            return
+          }
+        }
+        setupWSConnection(conn, req, { gc: true, docName })
+        resume()
+      })
+      .catch(err => {
+        console.error('[persist] preload failed', docName, err.message)
+        resume()
+        try {
+          conn.close(1011, 'load failed')
+        } catch (e) {
+          // ignore
+        }
+      })
+  })
 })
 
 function rejectUpgrade(socket, status, message) {
@@ -128,6 +171,13 @@ function rejectUpgrade(socket, status, message) {
 
 server.on('upgrade', async (request, socket, head) => {
   try {
+    if (shouldHandleUpgrade(request.url || '')) {
+      return
+    }
+    if (v2RuntimeOnly) {
+      rejectUpgrade(socket, '404 Not Found', 'v1 collab disabled')
+      return
+    }
     if (isAuthEnabled()) {
       try {
         request.authUser = await authenticateWebsocketRequest(request)
@@ -168,15 +218,38 @@ Promise.all([initSchema(), initAuth()])
         throw err
       }
     }
-    const publisher = startOutboxPublisher({ pool: getPool(), bus })
-    operationEvents.on('committed', () => {
-      publisher.kick().catch(() => {})
-    })
+    const outboxEnabled =
+      !v2RuntimeOnly &&
+      !/^(0|false|off|no)$/i.test(String(process.env.COLLAB_OUTBOX_PUBLISHER || '1'))
+    let publisher = null
+    if (outboxEnabled) {
+      publisher = startOutboxPublisher({ pool: getPool(), bus })
+      operationEvents.on('committed', () => {
+        publisher.kick().catch(() => {})
+      })
+    } else {
+      console.warn(
+        v2RuntimeOnly
+          ? '[outbox] V1 publisher off (COLLAB_V2 runtime)'
+          : '[outbox] publisher disabled (COLLAB_OUTBOX_PUBLISHER)'
+      )
+    }
+    const { startOperationsArchiver } = require('./storage')
+    startOperationsArchiver()
+    const v2 = attachCollabV2(server)
     server.listen(port, host, () => {
       console.log(`Collab server running at ws://${host}:${port}`)
       console.log(`Collab HTTP API: http://${host}:${port}/api/files`)
+      if (v2.enabled) {
+        console.log(`Collaboration V2: ws://${host}:${port}/collab-v2`)
+        console.log('V1 y-websocket / presence / outbox publisher: off')
+      } else {
+        console.log('Collaboration V2 disabled (COLLAB_V2=0)')
+      }
       console.log('Persistence: PostgreSQL rooms + COS mind-map/')
-      console.log(`Event bus: ${bus.name} (outbox publisher on)`)
+      console.log(
+        `Event bus: ${bus.name} (outbox publisher ${outboxEnabled ? 'on' : 'off'})`
+      )
     })
   })
   .catch(err => {

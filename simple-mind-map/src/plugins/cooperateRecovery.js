@@ -7,8 +7,7 @@ export function operationRequiresResnapshot(item) {
   return (
     payload.resnapshot === true ||
     event.resnapshot === true ||
-    type === 'map.replaced' ||
-    type === 'batch.applied'
+    type === 'map.replaced'
   )
 }
 
@@ -37,7 +36,7 @@ function findParentUid(obj, uid) {
 }
 
 function cloneNodes(obj) {
-  return JSON.parse(JSON.stringify(obj || {}))
+  return Object.assign({}, obj || {})
 }
 
 function applySiblingPositionsFromPayload(next, payload) {
@@ -103,11 +102,16 @@ export function applyCollabEvent(obj, event) {
     placeChild(next, parentUid, uid, payload)
     return next
   }
-  if (type === 'node.updated' || type === 'node.moved') {
+  if (type === 'node.updated' || type === 'node.moved' || type === 'node.reordered') {
     const uid = payload.uid
     if (!uid || !next[uid]) throw new Error('node not found')
     const parent = payload.parentUid || payload.parent_uid || payload.parent
-    if (type === 'node.moved' || parent !== undefined || payload.index !== undefined) {
+    if (
+      type === 'node.moved' ||
+      type === 'node.reordered' ||
+      parent !== undefined ||
+      payload.index !== undefined
+    ) {
       const oldParent = findParentUid(next, uid)
       if (oldParent && next[oldParent]) {
         next[oldParent] = {
@@ -131,7 +135,8 @@ export function applyCollabEvent(obj, event) {
   }
   if (type === 'node.deleted') {
     const uid = payload.uid
-    const parentUid = findParentUid(next, uid)
+    const parentUid =
+      payload.parentUid || payload.parent_uid || findParentUid(next, uid)
     const keepChildren = !!(payload.keepChildren || payload.keep_children)
     const promoted = payload.promoted || (next[uid] && next[uid].children) || []
     if (keepChildren && parentUid && next[parentUid]) {
@@ -146,16 +151,28 @@ export function applyCollabEvent(obj, event) {
     }
     const removed =
       payload.removed && payload.removed.length ? payload.removed : [uid]
-    Object.keys(next).forEach(id => {
-      const kids = next[id] && next[id].children
-      if (!Array.isArray(kids)) return
-      const filtered = kids.filter(child => !removed.includes(child))
-      if (filtered.length !== kids.length) {
-        next[id] = { ...next[id], children: filtered }
+    if (parentUid && next[parentUid]) {
+      const kids = next[parentUid].children
+      if (Array.isArray(kids)) {
+        const filtered = kids.filter(child => !removed.includes(child))
+        if (filtered.length !== kids.length) {
+          next[parentUid] = { ...next[parentUid], children: filtered }
+        }
       }
-    })
+    }
     removed.forEach(id => {
       delete next[id]
+    })
+    Object.keys(next).forEach(id => {
+      const data = next[id] && next[id].data
+      const targets = data && data.associativeLineTargets
+      if (!Array.isArray(targets) || !targets.length) return
+      const filtered = targets.filter(target => !removed.includes(target))
+      if (filtered.length === targets.length) return
+      next[id] = {
+        ...next[id],
+        data: { ...data, associativeLineTargets: filtered }
+      }
     })
     return next
   }
@@ -174,11 +191,51 @@ export function applyCollabEvent(obj, event) {
         payload: inverse.payload || {}
       })
     }
-    if (inverse.type === 'node.update' || inverse.type === 'node.move') {
+    if (
+      inverse.type === 'node.update' ||
+      inverse.type === 'node.move' ||
+      inverse.type === 'node.reorder'
+    ) {
       return applyCollabEvent(next, {
-        type: 'node.moved',
+        type:
+          inverse.type === 'node.reorder' ? 'node.reordered' : 'node.moved',
         payload: inverse.payload || {}
       })
+    }
+    return next
+  }
+  if (type === 'operation.redone') {
+    const forward = payload.forward
+    if (!forward || !forward.type) return next
+    if (forward.type === 'node.insert') {
+      return applyCollabEvent(next, {
+        type: 'node.inserted',
+        payload: forward.payload || {}
+      })
+    }
+    if (forward.type === 'node.delete') {
+      return applyCollabEvent(next, {
+        type: 'node.deleted',
+        payload: forward.payload || {}
+      })
+    }
+    if (
+      forward.type === 'node.update' ||
+      forward.type === 'node.move' ||
+      forward.type === 'node.reorder'
+    ) {
+      return applyCollabEvent(next, {
+        type:
+          forward.type === 'node.reorder'
+            ? 'node.reordered'
+            : forward.type === 'node.move'
+              ? 'node.moved'
+              : 'node.updated',
+        payload: forward.payload || {}
+      })
+    }
+    if (forward.type === 'node.restore') {
+      return applyRestoreEvent(next, forward.payload || {})
     }
     return next
   }
@@ -190,6 +247,21 @@ function applyRestoreEvent(obj, payload = {}) {
   const nodes = payload.nodes || {}
   Object.keys(nodes).forEach(uid => {
     next[uid] = cloneNodes(nodes[uid])
+  })
+  ;(payload.rows || []).forEach(row => {
+    next[row.uid] = {
+      isRoot: !!row.is_root,
+      data: { ...(row.data || {}), uid: row.uid },
+      children: (next[row.uid] && next[row.uid].children) || [],
+      position: row.position || ''
+    }
+  })
+  ;(payload.rows || []).forEach(row => {
+    const parentUid = row.parent_uid
+    if (!parentUid || !next[parentUid]) return
+    const kids = [...(next[parentUid].children || [])]
+    if (!kids.includes(row.uid)) kids.push(row.uid)
+    next[parentUid] = { ...next[parentUid], children: kids }
   })
   const uid = payload.uid
   const parentUid = payload.parentUid || payload.parent_uid || payload.parent
@@ -212,12 +284,41 @@ export function applyCollabEvents(obj, operations) {
   let nodes = cloneNodes(obj)
   for (let i = 0; i < operations.length; i++) {
     const item = operations[i]
+    const event = (item && item.event) || item || {}
+    const payload = event.payload || {}
+    const type = String(event.type || (item && item.operation_type) || '')
     if (operationRequiresResnapshot(item)) {
       return { type: 'resnapshot', nodes, index: i }
     }
-    nodes = applyCollabEvent(nodes, item.event || item)
+    if (type === 'batch.applied' && Array.isArray(payload.events)) {
+      payload.events.forEach(child => {
+        nodes = applyCollabEvent(nodes, child)
+      })
+      continue
+    }
+    nodes = applyCollabEvent(nodes, event)
   }
   return { type: 'apply', nodes }
+}
+
+export function affectedUidsFromOperation(item) {
+  const event = (item && item.event) || item || {}
+  const payload = event.payload || {}
+  const uids = [
+    ...(Array.isArray(event.affectedUids) ? event.affectedUids : []),
+    payload.uid,
+    payload.parentUid,
+    payload.parent_uid,
+    payload.parent,
+    payload.fromParent,
+    payload.from_parent
+  ].filter(Boolean)
+  if (Array.isArray(payload.removed)) {
+    payload.removed.forEach(uid => {
+      if (uid) uids.push(uid)
+    })
+  }
+  return uids
 }
 
 export function markDirtySubtrees(loadedUids, operations) {
@@ -228,15 +329,20 @@ export function markDirtySubtrees(loadedUids, operations) {
     const event = (item && item.event) || item || {}
     const version = Number(item.version || event.version || 0)
     const payload = event.payload || {}
-    const uids = [
-      ...(Array.isArray(event.affectedUids) ? event.affectedUids : []),
-      payload.uid,
-      payload.parentUid,
-      payload.parent_uid,
-      payload.parent
-    ].filter(Boolean)
+    const type = String(event.type || item.operation_type || '')
+    const uids = affectedUidsFromOperation(item)
     const hasUnloaded = uids.some(uid => !loaded.has(uid))
-    if (!hasUnloaded) return
+    if (
+      !hasUnloaded &&
+      type !== 'node.inserted' &&
+      type !== 'node.deleted' &&
+      type !== 'node.moved' &&
+      type !== 'node.reordered' &&
+      type !== 'batch.applied' &&
+      type !== 'map.replaced'
+    ) {
+      return
+    }
     uids.forEach(uid => {
       if (!loaded.has(uid)) return
       dirty[uid] = Math.max(dirty[uid] || 0, version)

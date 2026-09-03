@@ -92,6 +92,12 @@
         <span class="desc">Ctrl + V</span>
       </div>
       <div class="splitLine"></div>
+      <div class="item" data-testid="mapref" @click="openMapRef">
+        <span class="name">{{ $t('contextmenu.mapRef') }}</span>
+      </div>
+      <div class="item" @click="clearMapRef" v-if="hasMapRef">
+        <span class="name">{{ $t('contextmenu.removeMapRef') }}</span>
+      </div>
       <div class="item" @click="exec('REMOVE_HYPERLINK')" v-if="hasHyperlink">
         <span class="name">{{ $t('contextmenu.removeHyperlink') }}</span>
       </div>
@@ -103,14 +109,6 @@
       </div>
       <div class="item" @click="exec('EXPORT_CUR_NODE_TO_PNG')">
         <span class="name">{{ $t('contextmenu.exportNodeToPng') }}</span>
-      </div>
-      <div class="splitLine"></div>
-      <div
-        class="item"
-        @click="flowExpand"
-        :class="{ disabled: flowExpandDisabled }"
-      >
-        <span class="name">{{ $t('contextmenu.flowExpand') }}</span>
       </div>
       <div class="splitLine" v-if="enableAi"></div>
       <div class="item" @click="aiCreate" v-if="enableAi">
@@ -217,8 +215,7 @@ export default {
       numberType: '',
       numberLevel: '',
       subItemsShowLeft: false,
-      isNodeMousedown: false,
-      flowExpandBusy: false
+      isNodeMousedown: false
     }
   },
   computed: {
@@ -289,18 +286,15 @@ export default {
         children.length - 1
       return isLast
     },
-    flowExpandDisabled() {
-      return (
-        !this.node ||
-        this.node.isRoot ||
-        this.flowExpandBusy
-      )
-    },
     isGeneralization() {
       return this.node.isGeneralization
     },
     hasHyperlink() {
       return !!this.node.getData('hyperlink')
+    },
+    hasMapRef() {
+      const ref = this.node && this.node.getData && this.node.getData('mapRef')
+      return !!(ref && (ref.mapId || ref.map_id || ref.room_key))
     },
     hasNote() {
       return !!this.node.getData('note')
@@ -327,7 +321,6 @@ export default {
     this.$bus.$on('mouseup', this.onMouseup)
     this.$bus.$on('translate', this.hide)
     this.$bus.$on('node_mousedown', this.onNodeMousedown)
-    this.$bus.$on('node_flow_expand_busy', this.onFlowExpandBusy)
   },
   beforeDestroy() {
     this.$bus.$off('node_contextmenu', this.show)
@@ -338,7 +331,6 @@ export default {
     this.$bus.$off('mouseup', this.onMouseup)
     this.$bus.$off('translate', this.hide)
     this.$bus.$off('node_mousedown', this.onNodeMousedown)
-    this.$bus.$off('node_flow_expand_busy', this.onFlowExpandBusy)
   },
   methods: {
     ...mapMutations(['setLocalConfig']),
@@ -375,6 +367,20 @@ export default {
 
     onNodeMousedown() {
       this.isNodeMousedown = true
+    },
+
+    openMapRef() {
+      const node = this.node
+      this.hide()
+      this.$bus.$emit('showMapRef', node)
+    },
+
+    clearMapRef() {
+      if (this.node && typeof this.node.setMapRef === 'function') {
+        this.node.setMapRef(null)
+      }
+      this.hide()
+      this.$message.success(this.$t('mapRef.removed'))
     },
 
     // 鼠标按下事件
@@ -560,16 +566,6 @@ export default {
     // AI续写
     aiCreate() {
       this.$bus.$emit('ai_create_part', this.node)
-      this.hide()
-    },
-
-    onFlowExpandBusy(busy) {
-      this.flowExpandBusy = !!busy
-    },
-
-    flowExpand() {
-      if (this.flowExpandDisabled) return
-      this.$bus.$emit('node_flow_expand', this.node)
       this.hide()
     }
   }

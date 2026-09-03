@@ -42,6 +42,8 @@ import { shapeList } from './node/Shape'
 import { lineStyleProps } from '../../theme/default'
 import { CONSTANTS, ERROR_TYPES } from '../../constants/constant'
 import { Polygon } from '@svgdotjs/svg.js'
+import mapRefUtil from '../../utils/mapRef'
+import { undoTrace, undoFullTreeForbidden } from '../../utils/collabTrace'
 
 // 布局列表
 const layouts = {
@@ -144,6 +146,13 @@ class Render {
 
   // 重新设置思维导图数据
   setData(data) {
+    const cooperate = this.mindMap.cooperate
+    if (cooperate && cooperate._v2UndoActive && !cooperate._v2UndoAllowReplace) {
+      undoFullTreeForbidden('Render.setData', {
+        duringUndo: true
+      })
+      return
+    }
     this.renderTree = data || null
   }
 
@@ -341,6 +350,8 @@ class Render {
     // 设置节点超链接
     this.setNodeHyperlink = this.setNodeHyperlink.bind(this)
     this.mindMap.command.add('SET_NODE_HYPERLINK', this.setNodeHyperlink)
+    this.setNodeMapRef = this.setNodeMapRef.bind(this)
+    this.mindMap.command.add('SET_NODE_MAP_REF', this.setNodeMapRef)
     // 设置节点备注
     this.setNodeNote = this.setNodeNote.bind(this)
     this.mindMap.command.add('SET_NODE_NOTE', this.setNodeNote)
@@ -612,16 +623,22 @@ class Render {
       })
       // 更新根节点
       this.root = root
-      // 渲染节点
-      this.root.render(() => {
-        this.isRendering = false
-        if (this.hasWaitRendering) {
-          this.hasWaitRendering = false
-          this.render()
-          return
-        }
-        this.onRenderEnd()
-      })
+      // Large maps paint off the main thread in chunks so opening / importing
+      // a deep tree cannot freeze the tab.
+      const asyncPaint = !!this.mindMap.opt.openPerformance
+      this.root.render(
+        () => {
+          this.isRendering = false
+          if (this.hasWaitRendering) {
+            this.hasWaitRendering = false
+            this.render()
+            return
+          }
+          this.onRenderEnd()
+        },
+        false,
+        asyncPaint
+      )
     })
     this.emitNodeActiveEvent()
   }
@@ -668,7 +685,7 @@ class Render {
   addNodeToActiveList(node, notEmitBeforeNodeActiveEvent = false) {
     if (
       this.mindMap.opt.onlyOneEnableActiveNodeOnCooperate &&
-      node.userList.length > 0
+      node.userList.some(item => item && item.editing)
     )
       return
     const index = this.findActiveNodeIndex(node)
@@ -759,9 +776,27 @@ class Render {
 
   // 前进回退
   backForward(type, step) {
+    const cooperate = this.mindMap.cooperate
+    const v2 = !!(cooperate && cooperate.collabV2Adapter)
+    undoTrace('render.backForward', {
+      type,
+      step,
+      v2,
+      authority: v2 ? 'v2-adapter' : 'native-history'
+    })
+    if (v2) {
+      undoTrace('render.skip-native-restore', {
+        type,
+        reason: 'COLLAB_V2 undo authority'
+      })
+      return
+    }
     this.mindMap.execCommand('CLEAR_ACTIVE_NODE')
     const data = this.mindMap.command[type](step)
     if (data) {
+      if (cooperate && typeof cooperate.sanitizeHistoryTree === 'function') {
+        cooperate.sanitizeHistoryTree(data)
+      }
       this.renderTree = data
       this.mindMap.render()
     }
@@ -1366,6 +1401,7 @@ class Render {
 
   // 原生 paste：HTTP 可用，且点击节点后焦点在 SVG 上也能粘贴
   handlePaste(event) {
+    if (this.mindMap.opt.readonly) return
     const { disabledClipboard } = this.mindMap.opt
     if (disabledClipboard) return
     if (this.isClipboardPasteTargetBlocked(event)) return
@@ -1406,18 +1442,20 @@ class Render {
     if (!disabledClipboard && checkClipboardReadEnable()) {
       try {
         const res = await getDataFromClipboard()
-        await this.applyClipboardPaste({
-          text: res.text || '',
-          html: res.html || '',
-          img: res.img || null
-        })
+        const hasClip = !!(res && (res.text || res.html || res.img))
+        if (hasClip) {
+          await this.applyClipboardPaste({
+            text: res.text || '',
+            html: res.html || '',
+            img: res.img || null
+          })
+          return
+        }
       } catch (error) {
         errorHandler(ERROR_TYPES.READ_CLIPBOARD_ERROR, error)
-        if (this.beingCopyData) {
-          this.mindMap.execCommand('PASTE_NODE', this.beingCopyData)
-        }
       }
-    } else if (this.beingCopyData) {
+    }
+    if (this.beingCopyData) {
       this.mindMap.execCommand('PASTE_NODE', this.beingCopyData)
     }
   }
@@ -1636,18 +1674,38 @@ class Render {
 
   // 删除概要节点，即从所属节点里删除该概要
   deleteNodeGeneralization(node) {
-    const targetNode = node.generalizationBelongNode
-    const index = targetNode.getGeneralizationNodeIndex(node)
-    let generalization = targetNode.getData('generalization')
-    if (Array.isArray(generalization)) {
-      generalization.splice(index, 1)
-    } else {
-      generalization = null
+    const targetNode = node && node.generalizationBelongNode
+    if (!targetNode) return
+    const genUid = (node.getData && node.getData('uid')) || node.uid
+    const raw = targetNode.getData('generalization')
+    const list = Array.isArray(raw) ? raw.slice() : raw ? [raw] : []
+    let index =
+      typeof targetNode.getGeneralizationNodeIndex === 'function'
+        ? targetNode.getGeneralizationNodeIndex(node)
+        : -1
+    if (index < 0) {
+      index = list.findIndex(
+        item =>
+          item &&
+          (item.uid === genUid || item.uid === node.uid)
+      )
     }
-    // 删除概要节点
+    const next =
+      index < 0
+        ? list.filter(
+            item => item && item.uid !== genUid && item.uid !== node.uid
+          )
+        : list.filter((_, i) => i !== index)
     this.mindMap.execCommand('SET_NODE_DATA', targetNode, {
-      generalization
+      generalization: next.length ? next : null
     })
+    if (!next.length) {
+      if (typeof targetNode.removeGeneralization === 'function') {
+        targetNode.removeGeneralization()
+      }
+    } else if (typeof targetNode.updateGeneralization === 'function') {
+      targetNode.updateGeneralization()
+    }
     this.closeHighlightNode()
   }
 
@@ -1855,12 +1913,26 @@ class Render {
     const after = () => {
       const hasKids =
         node.nodeData && node.nodeData.children && node.nodeData.children.length
-      if (hasKids) apply(true)
+      if (hasKids) {
+        apply(true)
+        return
+      }
+      const childCount = Number(node.getData && node.getData('childCount')) || 0
+      if (
+        childCount > 0 &&
+        cooperate &&
+        typeof cooperate.repairEmptyExpand === 'function'
+      ) {
+        cooperate.repairEmptyExpand(node)
+      }
     }
     const hydrated = cooperate.hydrateLazyChildren(node)
     if (hydrated && typeof hydrated.then === 'function') {
       hydrated.then(after).catch(err => {
         console.error('[mind-map] load children failed', err)
+        if (typeof cooperate.repairEmptyExpand === 'function') {
+          cooperate.repairEmptyExpand(node)
+        }
       })
       return
     }
@@ -1967,7 +2039,7 @@ class Render {
     })
     if (!stubs.length) return
     const jobs = stubs.slice(0, EXPAND_ALL_BATCH * 2)
-    const concurrency = 4
+    const concurrency = 2
     let index = 0
     const worker = async () => {
       while (index < jobs.length) {
@@ -2109,7 +2181,7 @@ class Render {
   expandToLevel(level) {
     if (!this.renderTree) return
     const target = Number(level) || 0
-    this.hydrateThen(this.renderTree, target, { maxFetches: 120 }, () => {
+    this.hydrateThen(this.renderTree, target, { maxFetches: 40, concurrency: 2 }, () => {
       this.applyExpandFlagsToLevel(target)
       this.mindMap.render()
     })
@@ -2175,6 +2247,12 @@ class Render {
     this.setNodeDataRender(node, {
       hyperlink: link,
       hyperlinkTitle: title
+    })
+  }
+
+  setNodeMapRef(node, mapRef) {
+    this.setNodeDataRender(node, {
+      mapRef: mapRefUtil.normalizeMapRef(mapRef)
     })
   }
 
@@ -2294,13 +2372,51 @@ class Render {
     if (this.activeNodeList.length <= 0) {
       return
     }
+
+    // 概要节点的数据实际存在它的所属节点上。直接选中概要时，
+    // node.checkHasGeneralization() 为 false，所以需要按所属节点反向删除对应条目。
+    const selectedGeneralizationMap = new Map()
+    const selectedOwnerNodes = new Set()
     this.activeNodeList.forEach(node => {
+      if (node.isGeneralization) {
+        const owner = node.generalizationBelongNode
+        if (!owner) return
+        if (!selectedGeneralizationMap.has(owner)) {
+          selectedGeneralizationMap.set(owner, new Set())
+        }
+        selectedGeneralizationMap.get(owner).add(node.getData('uid'))
+        return
+      }
       if (!node.checkHasGeneralization()) {
         return
       }
+      selectedOwnerNodes.add(node)
       this.mindMap.execCommand('SET_NODE_DATA', node, {
         generalization: null
       })
+      if (typeof node.removeGeneralization === 'function') {
+        node.removeGeneralization()
+      }
+    })
+
+    selectedGeneralizationMap.forEach((uidSet, owner) => {
+      // 所属节点也被选中时，上面已经删除了它的全部概要。
+      if (selectedOwnerNodes.has(owner)) return
+      const generalization = owner.getData('generalization')
+      const list = Array.isArray(generalization)
+        ? generalization
+        : generalization
+          ? [generalization]
+          : []
+      const nextList = list.filter(item => item && !uidSet.has(item.uid))
+      this.mindMap.execCommand('SET_NODE_DATA', owner, {
+        generalization: nextList.length ? nextList : null
+      })
+      if (!nextList.length && typeof owner.removeGeneralization === 'function') {
+        owner.removeGeneralization()
+      } else if (typeof owner.updateGeneralization === 'function') {
+        owner.updateGeneralization()
+      }
     })
     this.mindMap.render()
     this.closeHighlightNode()

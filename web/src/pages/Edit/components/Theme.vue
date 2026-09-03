@@ -76,9 +76,10 @@ export default {
     },
 
     currentList() {
-      return this.groupList.find(item => {
+      const group = this.groupList.find(item => {
         return item.name === this.activeName
-      }).list
+      })
+      return (group && group.list) || []
     }
   },
   watch: {
@@ -180,7 +181,6 @@ export default {
     },
 
     changeTheme(theme, config) {
-      this.$bus.$emit('showLoading')
       this.mindMap.setTheme(theme.value)
       storeData({
         theme: {
@@ -193,13 +193,14 @@ export default {
     handleDark() {
       const extendThemeList = []
       this.extendThemeGroupList.forEach(group => {
-        extendThemeList.push(...group.list)
+        extendThemeList.push(...(group.list || []))
       })
       let target = [...this.themeList, ...extendThemeList].find(item => {
         return item.value === this.theme
       })
+      if (!target) return
       this.setLocalConfig({
-        isDark: target.dark
+        isDark: !!target.dark
       })
     }
   }

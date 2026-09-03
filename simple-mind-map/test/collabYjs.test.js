@@ -491,24 +491,221 @@ function testExpandToLevelThreeHydratesClippedBranch() {
 testExpandToLevelThreeHydratesClippedBranch()
 
 const presence = require('../bin/presence')
-function testPresenceTracksSameRoomUsers() {
+
+async function testPresenceTracksSameRoomUsers() {
+  process.env.COLLAB_PRESENCE_BACKEND = 'memory'
   const room = 'room-presence-test'
-  presence.leavePresence(room, 'a')
-  presence.leavePresence(room, 'b')
-  presence.beatPresence(room, { id: 'a', name: '李吉兵', color: '#111' })
-  presence.beatPresence(room, { id: 'b', name: '杨晓东', color: '#222' })
-  const list = presence.listPresence(room)
+  await presence.leavePresence(room, 'a')
+  await presence.leavePresence(room, 'b')
+  await presence.beatPresence(room, { id: 'a', name: '李吉兵', color: '#111' })
+  await presence.beatPresence(room, { id: 'b', name: '杨晓东', color: '#222' })
+  const list = await presence.listPresence(room)
   assert.strictEqual(list.length, 2)
   assert.deepStrictEqual(
     new Set(list.map(item => item.id)),
     new Set(['a', 'b'])
   )
-  presence.leavePresence(room, 'a')
-  assert.strictEqual(presence.listPresence(room).length, 1)
-  assert.strictEqual(presence.listPresence(room)[0].id, 'b')
+  await presence.leavePresence(room, 'a')
+  assert.strictEqual((await presence.listPresence(room)).length, 1)
+  assert.strictEqual((await presence.listPresence(room))[0].id, 'b')
 }
 
-testPresenceTracksSameRoomUsers()
+testPresenceTracksSameRoomUsers().catch(err => {
+  console.error(err)
+  process.exit(1)
+})
+
+async function testPresenceIncludesSelectionAndEditing() {
+  process.env.COLLAB_PRESENCE_BACKEND = 'memory'
+  const room = 'room-presence-selection'
+  await presence.leavePresence(room, 'a')
+  await presence.beatPresence(room, {
+    id: 'a',
+    name: '李吉兵',
+    color: '#111',
+    clientId: 'tab-1',
+    selectedUids: ['n1', 'n2'],
+    editingUid: 'n1',
+    cursor: { x: 12.6, y: 40.2 }
+  })
+  const list = await presence.listPresence(room)
+  assert.strictEqual(list.length, 1)
+  assert.deepStrictEqual(list[0].selectedUids, ['n1', 'n2'])
+  assert.strictEqual(list[0].editingUid, 'n1')
+  assert.deepStrictEqual(list[0].cursor, { x: 13, y: 40 })
+}
+
+testPresenceIncludesSelectionAndEditing().catch(err => {
+  console.error(err)
+  process.exit(1)
+})
+
+const fieldMerge = require('../bin/fieldMerge')
+const { applyNodeCommand } = require('../bin/roomCommands')
+
+function testFieldLevelLwwKeepsUntouchedFields() {
+  const base = {
+    text: 'A',
+    note: 'note-a',
+    tag: ['x'],
+    __fv: { text: 1, note: 1, tag: 1 }
+  }
+  const merged = fieldMerge.mergeNodeDataLww(base, { note: 'note-b' }, 5)
+  assert.strictEqual(merged.data.text, 'A')
+  assert.strictEqual(merged.data.note, 'note-b')
+  assert.deepStrictEqual(merged.data.tag, ['x'])
+  assert.deepStrictEqual(merged.changedFields, ['note'])
+  assert.strictEqual(merged.fieldVersions.note, 5)
+  assert.strictEqual(merged.fieldVersions.text, 1)
+
+  const remoteApply = fieldMerge.applyRemoteNodeData(
+    {
+      text: 'local-text',
+      note: 'local-note',
+      __fv: { text: 8, note: 2 }
+    },
+    {
+      text: 'server-text',
+      note: 'server-note',
+      __fv: { text: 7, note: 9 }
+    }
+  )
+  assert.strictEqual(remoteApply.data.text, 'local-text')
+  assert.strictEqual(remoteApply.data.note, 'server-note')
+  assert.strictEqual(remoteApply.data.__fv.text, 8)
+  assert.strictEqual(remoteApply.data.__fv.note, 9)
+
+  const delta = fieldMerge.patchDelta(
+    { text: 'A', note: '1' },
+    { text: 'A', note: '2', tag: ['t'] }
+  )
+  assert.deepStrictEqual(delta, { note: '2', tag: ['t'] })
+}
+
+testFieldLevelLwwKeepsUntouchedFields()
+
+function testNodeUpdateCommandStampsFieldVersions() {
+  const ydoc = new Y.Doc()
+  applyObjectToDoc(
+    ydoc,
+    {
+      root: node('root', 'Root', ['a']),
+      a: node('a', 'Old', [])
+    },
+    { replace: true }
+  )
+  mindDoc.updateNodeOnDoc(ydoc, 'a', { note: 'n1' })
+  const applied = applyNodeCommand(
+    ydoc,
+    {
+      type: 'node.update',
+      payload: { uid: 'a', patch: { text: 'New' } }
+    },
+    { version: 12 }
+  )
+  assert.ok(applied.event.payload.changedFields.includes('text'))
+  assert.strictEqual(applied.event.payload.fieldVersions.text, 12)
+  const obj = mindDoc.readObject(ydoc)
+  assert.strictEqual(obj.a.data.text, 'New')
+  assert.strictEqual(obj.a.data.note, 'n1')
+  assert.strictEqual(obj.a.data.__fv.text, 12)
+}
+
+testNodeUpdateCommandStampsFieldVersions()
+
+function testStructureConflictsPreferDeleteAndRejectMissingParent() {
+  const doc = new Y.Doc()
+  applyObjectToDoc(
+    doc,
+    {
+      root: node('root', 'Root', ['a', 'b']),
+      a: node('a', 'A'),
+      b: node('b', 'B')
+    },
+    { replace: true }
+  )
+  applyNodeCommand(doc, { type: 'node.delete', payload: { uid: 'a' } })
+  let moveCode = ''
+  try {
+    applyNodeCommand(doc, {
+      type: 'node.move',
+      payload: { uid: 'a', parentUid: 'root', index: 0 }
+    })
+  } catch (err) {
+    moveCode = err.code
+  }
+  assert.strictEqual(moveCode, 'MOVE_CONFLICT')
+
+  let parentCode = ''
+  try {
+    applyNodeCommand(doc, {
+      type: 'node.insert',
+      payload: { parentUid: 'a', uid: 'c', text: 'C' }
+    })
+  } catch (err) {
+    parentCode = err.code
+  }
+  assert.strictEqual(parentCode, 'PARENT_DELETED')
+
+  let reuseCode = ''
+  try {
+    applyNodeCommand(
+      doc,
+      { type: 'node.insert', payload: { parentUid: 'root', uid: 'a', text: 'A2' } },
+      { deletedUids: new Set(['a']) }
+    )
+  } catch (err) {
+    reuseCode = err.code
+  }
+  assert.strictEqual(reuseCode, 'UID_REUSED')
+
+  // Cycle rejection
+  applyNodeCommand(doc, {
+    type: 'node.insert',
+    payload: { parentUid: 'b', uid: 'c', text: 'C' }
+  })
+  let cycleCode = ''
+  try {
+    applyNodeCommand(doc, {
+      type: 'node.move',
+      payload: { uid: 'b', parentUid: 'c' }
+    })
+  } catch (err) {
+    cycleCode = err.code
+  }
+  assert.strictEqual(cycleCode, 'CYCLE_REJECTED')
+}
+
+testStructureConflictsPreferDeleteAndRejectMissingParent()
+
+function testConcurrentFieldPatchesDoNotClobber() {
+  const doc = new Y.Doc()
+  applyObjectToDoc(
+    doc,
+    {
+      root: node('root', 'Root', ['a']),
+      a: node('a', 'Base', [], { note: 'n0' })
+    },
+    { replace: true }
+  )
+  applyNodeCommand(
+    doc,
+    { type: 'node.update', payload: { uid: 'a', patch: { text: 'T1' } } },
+    { version: 2 }
+  )
+  applyNodeCommand(
+    doc,
+    { type: 'node.update', payload: { uid: 'a', patch: { note: 'N2' } } },
+    { version: 3 }
+  )
+  const obj = mindDoc.readObject(doc)
+  assert.strictEqual(obj.a.data.text, 'T1')
+  assert.strictEqual(obj.a.data.note, 'N2')
+  assert.strictEqual(obj.a.data.__fv.text, 2)
+  assert.strictEqual(obj.a.data.__fv.note, 3)
+}
+
+testConcurrentFieldPatchesDoNotClobber()
 
 function testAddNodeOnDocRequiresParentThenKeepsChild() {
   const ydoc = new Y.Doc()

@@ -22,8 +22,14 @@ function checkHasSelfGeneralization() {
 
 // 获取概要节点所在的概要列表里的索引
 function getGeneralizationNodeIndex(node) {
+  const genUid = (node.getData && node.getData('uid')) || node.uid
   return this._generalizationList.findIndex(item => {
-    return item.generalizationNode.uid === node.uid
+    const gen = item && item.generalizationNode
+    if (!gen) return false
+    if (gen === node) return true
+    if (gen.uid && (gen.uid === node.uid || gen.uid === genUid)) return true
+    const dataUid = gen.getData && gen.getData('uid')
+    return !!(dataUid && (dataUid === genUid || dataUid === node.uid))
   })
 }
 
@@ -112,8 +118,35 @@ function createGeneralizationNode() {
 //  更新概要节点
 function updateGeneralization() {
   if (this.isGeneralization) return
+  const nextSig = this.formatGetGeneralization()
+    .map(item => {
+      if (!item || typeof item !== 'object') return String(item || '')
+      const range =
+        Array.isArray(item.range) && item.range.length >= 2
+          ? `${Number(item.range[0])},${Number(item.range[1])}`
+          : ''
+      return [item.uid || '', String(item.text || ''), range].join(':')
+    })
+    .join('|')
+  if (
+    this._generalizationSig === nextSig &&
+    ((nextSig && this._generalizationList.length) ||
+      (!nextSig && !this._generalizationList.length))
+  ) {
+    return
+  }
   this.removeGeneralization()
   this.createGeneralizationNode()
+  this._generalizationSig = this.formatGetGeneralization()
+    .map(item => {
+      if (!item || typeof item !== 'object') return String(item || '')
+      const range =
+        Array.isArray(item.range) && item.range.length >= 2
+          ? `${Number(item.range[0])},${Number(item.range[1])}`
+          : ''
+      return [item.uid || '', String(item.text || ''), range].join(':')
+    })
+    .join('|')
 }
 
 //  渲染概要节点
@@ -138,10 +171,12 @@ function renderGeneralization(forceRender) {
 
 // 更新节点概要数据
 function updateGeneralizationData() {
-  const childrenLength = Math.max(
-    this.getChildrenLength(),
-    this.children ? this.children.length : 0
-  )
+  const live = this.children ? this.children.length : 0
+  const childCount = Number(this.getData('childCount')) || 0
+  // Lazy-loaded trees may only mount part of the children while childCount
+  // reflects the server total; dropping range summaries here turns them into
+  // whole-node summaries with a huge bracket on the next render.
+  const childrenLength = Math.max(live, childCount)
   const list = this.formatGetGeneralization()
   const newList = []
   list.forEach(item => {
@@ -154,16 +189,29 @@ function updateGeneralizationData() {
       newList.push(item)
       return
     }
+    const start = Number(range[0])
+    const end = Number(range[1])
     if (
-      range[0] <= childrenLength - 1 &&
-      range[1] <= childrenLength - 1
+      Number.isFinite(start) &&
+      Number.isFinite(end) &&
+      start >= 0 &&
+      end >= start &&
+      end <= childrenLength - 1
     ) {
+      newList.push({
+        ...item,
+        range: [start, end]
+      })
+      return
+    }
+    const fullyLoaded = childCount > 0 && live >= childCount
+    if (!fullyLoaded) {
       newList.push(item)
     }
   })
   if (newList.length !== list.length) {
     this.setData({
-      generalization: newList
+      generalization: newList.length ? newList : null
     })
   }
 }
@@ -185,6 +233,7 @@ function removeGeneralization() {
     }
   })
   this._generalizationList = []
+  this._generalizationSig = ''
   // hack修复当激活一个节点时创建概要，然后立即激活创建的概要节点后会重复创建概要节点并且无法删除的问题
   if (this.generalizationBelongNode) {
     this.nodeDraw

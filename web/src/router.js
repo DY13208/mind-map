@@ -3,11 +3,27 @@ import VueRouter from 'vue-router'
 
 Vue.use(VueRouter)
 
+const roomPathRedirect = to => ({
+  path: '/',
+  query: {
+    ...to.query,
+    room: to.params.roomKey
+  }
+})
+
 const routes = [
   {
     path: '/',
     name: 'Edit',
     component: () => import(`./pages/Edit/Index.vue`)
+  },
+  {
+    path: '/room-:roomSuffix',
+    redirect: to => roomPathRedirect({ ...to, params: { roomKey: `room-${to.params.roomSuffix}` } })
+  },
+  {
+    path: '/room/:roomKey',
+    redirect: roomPathRedirect
   },
   {
     path: '/index',

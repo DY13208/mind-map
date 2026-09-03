@@ -13,6 +13,15 @@ import { getLang } from '@/api'
 // const vConsole = new VConsole()
 
 Vue.config.productionTip = false
+const APP_BUILD_COMMIT = process.env.VUE_APP_BUILD_COMMIT || 'dev'
+const APP_BUILD_TIME = process.env.VUE_APP_BUILD_TIME || ''
+if (typeof window !== 'undefined') {
+  window.__MIND_MAP_BUILD__ = {
+    commit: APP_BUILD_COMMIT,
+    time: APP_BUILD_TIME
+  }
+  console.info('[APP_BUILD_COMMIT]', APP_BUILD_COMMIT, APP_BUILD_TIME)
+}
 const bus = new Vue()
 Vue.prototype.$bus = bus
 Vue.use(ElementUI)
