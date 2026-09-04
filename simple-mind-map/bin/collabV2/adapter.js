@@ -12,6 +12,10 @@ const {
   canClaimOrphan
 } = require('../collabReliability')
 const {
+  isVersionRestoreEvent,
+  quarantinePendingAfterRestore
+} = require('../collabHistory/clientEpoch')
+const {
   createOpId,
   isOpId,
   normalizeOperation,
@@ -728,6 +732,12 @@ function createCollaborationAdapter(options = {}) {
     }
     if (opId) state.seenOpIds.add(opId)
     advanceRevision(rev)
+    if (!meta.local && isVersionRestoreEvent(op)) {
+      state.drainPaused = true
+      await quarantinePendingAfterRestore(outbox, state.clientId, state.roomKey)
+      await refreshOutboxCounts()
+      state.drainPaused = false
+    }
     if (options.onRemoteOperation && !meta.local) {
       await options.onRemoteOperation(op)
     }

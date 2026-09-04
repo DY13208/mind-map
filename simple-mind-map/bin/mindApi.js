@@ -953,6 +953,11 @@ async function handleApi(req, res) {
     }
   }
 
+  if (require('./collabHistory/http').matchHistory(pathname)) {
+    const handled = await require('./collabHistory').handleHistoryApi(req, res, { url })
+    if (handled) return true
+  }
+
   if (req.method === 'GET' && pathname === '/api/users') {
     const users = await roomAcl.searchUsers(
       getPool(),
