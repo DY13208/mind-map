@@ -56,6 +56,7 @@ async function main() {
   const folders = []
   const versions = {}
   const members = {}
+  const userState = {}
   let seq = 0
   const now = () => new Date().toISOString()
 
@@ -66,14 +67,36 @@ async function main() {
     const fileItem = pathname.match(/^\/api\/files\/([^/]+)$/)
     const fileInfo = pathname.match(/^\/api\/files\/([^/]+)\/info$/)
     const fileMove = pathname.match(/^\/api\/files\/([^/]+)\/move$/)
+    const fileFav = pathname.match(/^\/api\/files\/([^/]+)\/favorite$/)
+    const fileOpen = pathname.match(/^\/api\/files\/([^/]+)\/open$/)
+    const fileTrash = pathname.match(/^\/api\/files\/([^/]+)\/trash$/)
+    const fileRestore = pathname.match(/^\/api\/files\/([^/]+)\/restore$/)
+    const filePermanent = pathname.match(/^\/api\/files\/([^/]+)\/permanent$/)
     const membersPath = pathname.match(/^\/api\/files\/([^/]+)\/members(?:\/([^/]+))?$/)
     const versionsPath = pathname.match(
       /^\/api\/files\/([^/]+)\/versions(?:\/([^/]+)(?:\/(tree|restore))?)?$/
     )
     const folderItem = pathname.match(/^\/api\/folders\/([^/]+)$/)
 
+    if (method === 'GET' && pathname === '/api/files/recent') {
+      const list = files.filter(
+        item => !item.deletedAt && userState[item.roomKey] && userState[item.roomKey].lastOpenedAt
+      ).map(item => ({ ...item, ...userState[item.roomKey] }))
+      return { list, total: list.length, limit: 50, offset: 0, nextCursor: null }
+    }
+    if (method === 'GET' && pathname === '/api/files/favorites') {
+      const list = files.filter(
+        item => !item.deletedAt && userState[item.roomKey] && userState[item.roomKey].favorite
+      ).map(item => ({ ...item, ...userState[item.roomKey] }))
+      return { list, total: list.length, limit: 50, offset: 0, nextCursor: null }
+    }
+    if (method === 'GET' && pathname === '/api/files/trash') {
+      const list = files.filter(item => item.deletedAt)
+      return { list, total: list.length, limit: 50, offset: 0, nextCursor: null }
+    }
+
     if (method === 'GET' && pathname === '/api/files') {
-      let list = files.slice()
+      let list = files.filter(item => !item.deletedAt)
       const folderId = search.has('folderId') ? search.get('folderId') : undefined
       if (folderId === 'root' || folderId === 'null')
         list = list.filter(item => !item.folderId)
@@ -116,7 +139,10 @@ async function main() {
         revision: 0,
         canView: true,
         canEdit: true,
-        canManage: true
+        canManage: true,
+        favorite: false,
+        lastOpenedAt: null,
+        deletedAt: null
       }
       files.push(row)
       versions[roomKey] = []
@@ -129,7 +155,8 @@ async function main() {
     if (method === 'GET' && fileInfo) {
       const row = files.find(item => item.roomKey === decodeURIComponent(fileInfo[1]))
       if (!row) fail('ROOM_NOT_FOUND', 404)
-      return { file: row }
+      if (row.deletedAt) fail('ROOM_TRASHED', 409)
+      return { file: { ...row, ...(userState[row.roomKey] || {}) } }
     }
 
     if (method === 'PATCH' && fileItem) {
@@ -150,8 +177,59 @@ async function main() {
       return { file: row }
     }
 
+    if (method === 'POST' && fileFav) {
+      const key = decodeURIComponent(fileFav[1])
+      const row = files.find(item => item.roomKey === key)
+      if (!row) fail('ROOM_NOT_FOUND', 404)
+      if (row.deletedAt) fail('ROOM_TRASHED', 409)
+      userState[key] = { ...(userState[key] || {}), favorite: true }
+      return { file: { ...row, ...userState[key] } }
+    }
+    if (method === 'DELETE' && fileFav) {
+      const key = decodeURIComponent(fileFav[1])
+      const row = files.find(item => item.roomKey === key)
+      if (!row) fail('ROOM_NOT_FOUND', 404)
+      userState[key] = { ...(userState[key] || {}), favorite: false }
+      return { file: { ...row, ...userState[key] } }
+    }
+    if (method === 'POST' && fileOpen) {
+      const key = decodeURIComponent(fileOpen[1])
+      const row = files.find(item => item.roomKey === key)
+      if (!row) fail('ROOM_NOT_FOUND', 404)
+      if (row.deletedAt) fail('ROOM_TRASHED', 409)
+      userState[key] = { ...(userState[key] || {}), lastOpenedAt: now() }
+      return { file: { ...row, ...userState[key] } }
+    }
+    if (method === 'POST' && fileTrash) {
+      const key = decodeURIComponent(fileTrash[1])
+      const row = files.find(item => item.roomKey === key)
+      if (!row) fail('ROOM_NOT_FOUND', 404)
+      row.deletedAt = now()
+      row.deletedFromFolderId = row.folderId
+      row.folderId = null
+      return { file: row }
+    }
+    if (method === 'POST' && fileRestore) {
+      const key = decodeURIComponent(fileRestore[1])
+      const row = files.find(item => item.roomKey === key)
+      if (!row) fail('ROOM_NOT_FOUND', 404)
+      if (!row.deletedAt) fail('ROOM_NOT_TRASHED', 409)
+      row.folderId = row.deletedFromFolderId || null
+      row.deletedAt = null
+      row.deletedFromFolderId = null
+      return { file: row }
+    }
+    if (method === 'DELETE' && filePermanent) {
+      const key = decodeURIComponent(filePermanent[1])
+      const idx = files.findIndex(item => item.roomKey === key)
+      if (idx < 0) fail('ROOM_NOT_FOUND', 404)
+      if (!files[idx].deletedAt) fail('ROOM_NOT_TRASHED', 409)
+      files.splice(idx, 1)
+      return { ok: true }
+    }
+
     if (method === 'DELETE' && fileItem) {
-      fail('TRASH_BACKEND_PENDING', 501)
+      fail('ROOM_NOT_TRASHED', 409)
     }
 
     if (method === 'GET' && pathname === '/api/folders') {
@@ -370,22 +448,41 @@ async function main() {
 
   const recentCalls = calls.length
   await room.listRooms({ recent: true })
-  assert.equal(calls.length, recentCalls, 'Recent stays mock and must not hit /api/files')
+  assert.ok(
+    calls.slice(recentCalls).some(item => item.path.startsWith('/api/files/recent')),
+    'Recent must hit /api/files/recent'
+  )
 
-  const favCalls = calls.length
   await room.toggleFavorite(created.roomKey)
-  assert.equal(calls.length, favCalls, 'Favorite overlay must not PATCH rooms')
+  assert.ok(
+    calls.some(
+      item => item.method === 'POST' && item.path.includes('/favorite')
+    )
+  )
   assert.equal((await room.getRoomInfo(created.roomKey)).favorite, true)
 
-  const beforeDelete = calls.slice()
-  await assert.rejects(room.deleteRoom(created.roomKey), err => {
-    return err.code === 'TRASH_BACKEND_PENDING'
-  })
+  const listCalls = calls.length
+  await room.listRooms({})
   assert.ok(
-    !calls
-      .slice(beforeDelete.length)
-      .some(item => item.method === 'DELETE' && item.path.includes('/api/files/')),
-    'Trash must not call real DELETE'
+    calls.slice(listCalls).every(item => !item.path.includes('/open')),
+    'Files list must not record Recent'
+  )
+  await room.markOpened(created.roomKey)
+  assert.ok(
+    calls.some(item => item.method === 'POST' && item.path.endsWith('/open'))
+  )
+
+  await room.deleteRoom(created.roomKey)
+  assert.ok(
+    calls.some(item => item.method === 'POST' && item.path.endsWith('/trash'))
+  )
+  const afterTrash = await room.listRooms({})
+  assert.ok(!afterTrash.list.some(item => item.roomKey === created.roomKey))
+  const trashList = await room.listRooms({ trash: true })
+  assert.ok(trashList.list.some(item => item.roomKey === created.roomKey))
+  await room.restoreRoom(created.roomKey)
+  assert.ok(
+    (await room.listRooms({})).list.some(item => item.roomKey === created.roomKey)
   )
 
   const teamCalls = calls.length
@@ -453,7 +550,9 @@ async function main() {
     fs.readFileSync(path.join(repo, 'simple-mind-map/bin/storage.js'), 'utf8') +
     fs.readFileSync(path.join(repo, 'simple-mind-map/bin/fileSystem/schema.js'), 'utf8')
   assert.doesNotMatch(schemaSrc, /CREATE TABLE\s+files\b/i)
-  assert.doesNotMatch(schemaSrc, /file_permissions|share_permissions/i)
+  assert.doesNotMatch(schemaSrc, /favorite_permissions|trash_permissions|file_permissions/)
+  assert.match(schemaSrc, /room_user_state/)
+  assert.match(schemaSrc, /deleted_from_folder_id/)
   assert.doesNotMatch(schemaSrc, /CREATE TABLE\s+mind_maps\b/i)
 
   const historySrc = fs.readFileSync(

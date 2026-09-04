@@ -12,6 +12,8 @@ const MESSAGES = {
   RESTORE_CONFLICT: '脑图已有更新，请刷新后再恢复',
   VERSION_CONFLICT: '脑图已有更新，请刷新后再恢复',
   VERSION_NOT_FOUND: '找不到该历史版本',
+  ROOM_TRASHED: '该脑图已在回收站，无法打开',
+  ROOM_NOT_TRASHED: '只能对回收站中的脑图执行该操作',
   TRASH_BACKEND_PENDING: '回收站尚未接入，暂不可删除真实脑图'
 }
 

@@ -36,30 +36,12 @@ async function main() {
   assert.equal(C3_SERVICE_STATUS_MATRIX.Folder, 'REAL')
   assert.equal(C3_SERVICE_STATUS_MATRIX.History, 'REAL')
   assert.equal(C3_SERVICE_STATUS_MATRIX.Share, 'REAL')
-  assert.equal(C3_SERVICE_STATUS_MATRIX.Recent, 'MOCK_PENDING')
-  assert.equal(C3_SERVICE_STATUS_MATRIX.Favorites, 'MOCK_PENDING')
-  assert.equal(C3_SERVICE_STATUS_MATRIX.Trash, 'MOCK_PENDING')
+  assert.equal(C3_SERVICE_STATUS_MATRIX.Recent, 'REAL')
+  assert.equal(C3_SERVICE_STATUS_MATRIX.Favorites, 'REAL')
+  assert.equal(C3_SERVICE_STATUS_MATRIX.Trash, 'REAL')
   assert.equal(C3_SERVICE_STATUS_MATRIX.Team, 'MOCK_PENDING')
   assert.equal(room.backendStatus, 'REAL')
   assert.equal(team.backendStatus, 'MOCK_PENDING')
-
-  const recent = await room.listRooms({ recent: true })
-  assert.ok(recent.list.length >= 1)
-  assert.ok(recent.list.every(item => item.lastOpenedAt))
-
-  const favorites = await room.listRooms({ favorite: true })
-  assert.ok(favorites.list.length >= 1)
-  assert.ok(favorites.list.every(item => item.favorite))
-
-  const trash = await room.listRooms({ trash: true })
-  assert.equal(trash.list.length, 1)
-
-  const mockId = mockStore.rooms.find(item => !item.deletedAt).id
-  await room.toggleFavorite(mockId)
-  await room.markOpened(mockId)
-  await room.deleteRoom(mockId)
-  assert.ok((await room.listRooms({ trash: true })).list.some(item => item.id === mockId))
-  await room.restoreRoom(mockId)
 
   const spaces = await team.listSpaces()
   assert.ok(spaces.length >= 1)

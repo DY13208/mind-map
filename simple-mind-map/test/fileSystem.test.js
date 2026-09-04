@@ -243,6 +243,217 @@ function mockRes() {
   assert.strictEqual(resRename.body.file.title, 'http-renamed')
 
   assert.strictEqual(typeof handleHistoryApi, 'function')
+
+  const c1 = engineWith()
+  const owned = await c1.fs.createRoom({ title: 'c1-owned', userId: OWNER })
+  await c1.store.insertMember({
+    room_key: owned.room.roomKey,
+    user_id: EDITOR,
+    role: 'editor'
+  })
+  await c1.store.insertMember({
+    room_key: owned.room.roomKey,
+    user_id: VIEWER,
+    role: 'viewer'
+  })
+  const otherUser = await c1.fs.createRoom({ title: 'c1-other', userId: OTHER })
+
+  await c1.fs.setFavorite(owned.room.roomKey, OWNER, true)
+  const ownerFav = await c1.fs.listFavorites({ userId: OWNER, limit: 50 })
+  const editorFav = await c1.fs.listFavorites({ userId: EDITOR, limit: 50 })
+  const otherFav = await c1.fs.listFavorites({ userId: OTHER, limit: 50 })
+  assert.ok(ownerFav.list.some(item => item.roomKey === owned.room.roomKey))
+  assert.ok(!editorFav.list.some(item => item.roomKey === owned.room.roomKey))
+  assert.ok(!otherFav.list.some(item => item.roomKey === owned.room.roomKey))
+  let favAcl = ''
+  try {
+    await c1.fs.setFavorite(owned.room.roomKey, OTHER, true)
+  } catch (err) {
+    favAcl = err.code
+  }
+  assert.strictEqual(favAcl, 'FORBIDDEN')
+
+  const stateBeforeList = c1.store.userState.size
+  await c1.fs.listRooms({ userId: OWNER, q: 'c1', limit: 50 })
+  assert.strictEqual(c1.store.userState.size, stateBeforeList)
+  const recentBeforeOpen = await c1.fs.listRecent({ userId: OWNER, limit: 50 })
+  assert.ok(!recentBeforeOpen.list.some(item => item.roomKey === owned.room.roomKey))
+  await c1.fs.recordRoomOpened(owned.room.roomKey, OWNER)
+  const ownerRecent = await c1.fs.listRecent({ userId: OWNER, limit: 50 })
+  const editorRecent = await c1.fs.listRecent({ userId: EDITOR, limit: 50 })
+  assert.ok(ownerRecent.list.some(item => item.roomKey === owned.room.roomKey))
+  assert.ok(!editorRecent.list.some(item => item.roomKey === owned.room.roomKey))
+
+  let editorTrash = ''
+  try {
+    await c1.fs.trashRoom(owned.room.roomKey, {
+      access: { canManage: false, canEdit: true, role: 'editor' },
+      userId: EDITOR
+    })
+  } catch (err) {
+    editorTrash = err.code
+  }
+  assert.strictEqual(editorTrash, 'FORBIDDEN')
+  let viewerTrash = ''
+  try {
+    await c1.fs.trashRoom(owned.room.roomKey, {
+      access: { canManage: false, role: 'viewer' },
+      userId: VIEWER
+    })
+  } catch (err) {
+    viewerTrash = err.code
+  }
+  assert.strictEqual(viewerTrash, 'FORBIDDEN')
+
+  const folderHome = await c1.fs.createFolder({ name: 'c1-home', userId: OWNER })
+  await c1.fs.moveRoom(owned.room.roomKey, folderHome.id, {
+    access: { canEdit: true, canManage: true, role: 'owner' }
+  })
+  const c1VersionBefore = Number(c1.store.rooms.get(owned.room.roomKey).version)
+  const c1NodesBefore = JSON.stringify(c1.store.nodes.get(owned.room.roomKey))
+  const c1OpsBefore = c1.store.operations.length
+  const historyBefore = c1.historyCalls.length
+  const trashed = await c1.fs.trashRoom(owned.room.roomKey, {
+    access: { canManage: true, role: 'owner' },
+    userId: OWNER
+  })
+  assert.strictEqual(trashed.file.roomKey, owned.room.roomKey)
+  assert.ok(trashed.file.deletedAt)
+  assert.strictEqual(Number(c1.store.rooms.get(owned.room.roomKey).version), c1VersionBefore)
+  assert.strictEqual(JSON.stringify(c1.store.nodes.get(owned.room.roomKey)), c1NodesBefore)
+  assert.strictEqual(c1.store.operations.length, c1OpsBefore)
+  assert.strictEqual(c1.historyCalls.length, historyBefore)
+  assert.strictEqual(c1.store.rooms.get(owned.room.roomKey).folder_id, null)
+  assert.ok(c1.store.nodes.get(owned.room.roomKey).root)
+
+  const filesList = await c1.fs.listRooms({ userId: OWNER, limit: 100 })
+  assert.ok(!filesList.list.some(item => item.roomKey === owned.room.roomKey))
+  const favHidden = await c1.fs.listFavorites({ userId: OWNER, limit: 50 })
+  assert.ok(!favHidden.list.some(item => item.roomKey === owned.room.roomKey))
+  const recentHidden = await c1.fs.listRecent({ userId: OWNER, limit: 50 })
+  assert.ok(!recentHidden.list.some(item => item.roomKey === owned.room.roomKey))
+  const trashList = await c1.fs.listTrash({ userId: OWNER, limit: 50 })
+  assert.ok(trashList.list.some(item => item.roomKey === owned.room.roomKey))
+  const editorTrashList = await c1.fs.listTrash({ userId: EDITOR, limit: 50 })
+  assert.ok(!editorTrashList.list.some(item => item.roomKey === owned.room.roomKey))
+
+  let openTrashed = ''
+  try {
+    await c1.fs.getRoom(owned.room.roomKey, { userId: OWNER })
+  } catch (err) {
+    openTrashed = err.code
+  }
+  assert.strictEqual(openTrashed, 'ROOM_TRASHED')
+
+  let livePermanent = ''
+  try {
+    await c1.fs.permanentDeleteRoom(otherUser.room.roomKey, {
+      access: { canManage: true, role: 'owner' },
+      userId: OTHER
+    })
+  } catch (err) {
+    livePermanent = err.code
+  }
+  assert.strictEqual(livePermanent, 'ROOM_NOT_TRASHED')
+
+  const restored = await c1.fs.restoreRoom(owned.room.roomKey, {
+    access: { canManage: true, role: 'owner' },
+    userId: OWNER
+  })
+  assert.strictEqual(restored.roomKey, owned.room.roomKey)
+  assert.strictEqual(restored.folderId, folderHome.id)
+  const favVisible = await c1.fs.listFavorites({ userId: OWNER, limit: 50 })
+  const recentVisible = await c1.fs.listRecent({ userId: OWNER, limit: 50 })
+  assert.ok(favVisible.list.some(item => item.roomKey === owned.room.roomKey))
+  assert.ok(recentVisible.list.some(item => item.roomKey === owned.room.roomKey))
+
+  await c1.fs.trashRoom(owned.room.roomKey, {
+    access: { canManage: true, role: 'owner' },
+    userId: OWNER
+  })
+  await c1.fs.deleteFolder(folderHome.id, { userId: OWNER })
+  const restoredRoot = await c1.fs.restoreRoom(owned.room.roomKey, {
+    access: { canManage: true, role: 'owner' },
+    userId: OWNER
+  })
+  assert.strictEqual(restoredRoot.folderId, null)
+
+  await c1.fs.trashRoom(owned.room.roomKey, {
+    access: { canManage: true, role: 'owner' },
+    userId: OWNER
+  })
+  await c1.fs.permanentDeleteRoom(owned.room.roomKey, {
+    access: { canManage: true, role: 'owner' },
+    userId: OWNER
+  })
+  assert.strictEqual(c1.store.rooms.has(owned.room.roomKey), false)
+  assert.strictEqual(c1.store.nodes.has(owned.room.roomKey), false)
+  assert.ok(!c1.store.members.some(item => item.room_key === owned.room.roomKey))
+  assert.ok(
+    ![...c1.store.userState.keys()].some(key =>
+      key.startsWith(owned.room.roomKey + '\0')
+    )
+  )
+
+  const httpC1 = engineWith()
+  const httpRoom = await httpC1.fs.createRoom({ title: 'http-c1', userId: OWNER })
+  const resFav = mockRes()
+  await handleFileSystemApi(
+    {
+      method: 'POST',
+      url: `/api/files/${httpRoom.room.roomKey}/favorite`,
+      authUser: { id: OWNER }
+    },
+    resFav,
+    { engine: httpC1.fs }
+  )
+  assert.strictEqual(resFav.code, 200)
+  assert.strictEqual(resFav.body.file.favorite, true)
+  const resFavList = mockRes()
+  await handleFileSystemApi(
+    { method: 'GET', url: '/api/files/favorites', authUser: { id: OWNER } },
+    resFavList,
+    { engine: httpC1.fs }
+  )
+  assert.ok(resFavList.body.list.some(item => item.roomKey === httpRoom.room.roomKey))
+  const resOpen = mockRes()
+  await handleFileSystemApi(
+    {
+      method: 'POST',
+      url: `/api/files/${httpRoom.room.roomKey}/open`,
+      authUser: { id: OWNER }
+    },
+    resOpen,
+    { engine: httpC1.fs }
+  )
+  assert.ok(resOpen.body.file.lastOpenedAt)
+  const resTrash = mockRes()
+  await handleFileSystemApi(
+    {
+      method: 'POST',
+      url: `/api/files/${httpRoom.room.roomKey}/trash`,
+      authUser: { id: OWNER },
+      roomAccess: { canManage: true, role: 'owner' }
+    },
+    resTrash,
+    { engine: httpC1.fs }
+  )
+  assert.strictEqual(resTrash.code, 200)
+  const resFiles = mockRes()
+  await handleFileSystemApi(
+    { method: 'GET', url: '/api/files?limit=50', authUser: { id: OWNER } },
+    resFiles,
+    { engine: httpC1.fs }
+  )
+  assert.ok(!resFiles.body.list.some(item => item.roomKey === httpRoom.room.roomKey))
+  const resTrashList = mockRes()
+  await handleFileSystemApi(
+    { method: 'GET', url: '/api/files/trash', authUser: { id: OWNER } },
+    resTrashList,
+    { engine: httpC1.fs }
+  )
+  assert.ok(resTrashList.body.list.some(item => item.roomKey === httpRoom.room.roomKey))
+
   console.log('fileSystem.test.js ok')
 })().catch(err => {
   console.error(err)

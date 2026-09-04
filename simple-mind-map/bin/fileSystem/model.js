@@ -83,7 +83,13 @@ function publicFile(row, access = {}) {
     revision: Number(row.version != null ? row.version : row.revision || 0),
     canView: access.canView != null ? access.canView : true,
     canEdit: !!access.canEdit,
-    canManage: !!access.canManage
+    canManage: !!access.canManage,
+    favorite: !!(row.is_favorite != null ? row.is_favorite : row.favorite),
+    lastOpenedAt: row.last_opened_at || row.lastOpenedAt || null,
+    deletedAt: row.deleted_at || row.deletedAt || null,
+    deletedBy: row.deleted_by || row.deletedBy || null,
+    deletedFromFolderId:
+      row.deleted_from_folder_id || row.deletedFromFolderId || null
   }
 }
 

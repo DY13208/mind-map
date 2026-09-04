@@ -7,6 +7,37 @@ function testNormalizeAndInfer() {
   assert.strictEqual(roomAcl.normalizeRole('guest'), '')
 
   assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/recent', 'GET'),
+    null
+  )
+  assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/favorites', 'GET'),
+    null
+  )
+  assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/trash', 'GET'),
+    null
+  )
+  assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/room-a/favorite', 'POST'),
+    { roomKey: 'room-a', action: 'view' }
+  )
+  assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/room-a/trash', 'POST'),
+    { roomKey: 'room-a', action: 'manage' }
+  )
+  assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/room-a/restore', 'POST'),
+    { roomKey: 'room-a', action: 'manage' }
+  )
+  assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/room-a/permanent', 'DELETE'),
+    { roomKey: 'room-a', action: 'manage' }
+  )
+  assert.strictEqual(roomAcl.roleAllows('editor', 'manage'), false)
+  assert.strictEqual(roomAcl.roleAllows('viewer', 'manage'), false)
+  assert.strictEqual(roomAcl.roleAllows('owner', 'manage'), true)
+  assert.deepStrictEqual(
     roomAcl.inferRoomAcl('/api/files/room-a/preview', 'GET'),
     { roomKey: 'room-a', action: 'view' }
   )

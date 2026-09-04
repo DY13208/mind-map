@@ -53,7 +53,7 @@
     </aside>
     <main class="productMain">
       <div class="mockNotice">
-        文件、文件夹与历史已接入真实 API。最近、收藏、回收站和团队空间仍为演示数据，删除脑图暂未开放。
+        文件、最近、收藏与回收站已接入真实 API。团队空间仍为演示数据。
       </div>
       <router-view />
     </main>

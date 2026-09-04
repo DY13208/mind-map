@@ -12,8 +12,18 @@ function createMemoryFileStore(seed = {}) {
   const members = []
   const nodes = new Map()
   const operations = []
+  const versions = []
+  const userState = new Map()
   const tombstones = new Set()
   let queryCount = 0
+
+  function stateKey(roomKey, userId) {
+    return String(roomKey || '') + '\0' + String(userId || '')
+  }
+
+  function isActiveRoom(row) {
+    return row && !row.deleted_at && !tombstones.has(row.room_key)
+  }
 
   function bump() {
     queryCount += 1
@@ -43,6 +53,8 @@ function createMemoryFileStore(seed = {}) {
     members,
     nodes,
     operations,
+    versions,
+    userState,
     tombstones,
     async withTx(fn) {
       bump()
@@ -51,7 +63,9 @@ function createMemoryFileStore(seed = {}) {
         folders: cloneJson([...folders.entries()]),
         members: cloneJson(members),
         nodes: cloneJson([...nodes.entries()]),
-        operations: cloneJson(operations)
+        operations: cloneJson(operations),
+        versions: cloneJson(versions),
+        userState: cloneJson([...userState.entries()])
       }
       try {
         return await fn()
@@ -64,6 +78,9 @@ function createMemoryFileStore(seed = {}) {
         nodes.clear()
         snap.nodes.forEach(([key, value]) => nodes.set(key, value))
         operations.splice(0, operations.length, ...snap.operations)
+        versions.splice(0, versions.length, ...snap.versions)
+        userState.clear()
+        snap.userState.forEach(([key, value]) => userState.set(key, value))
         throw err
       }
     },
@@ -104,7 +121,10 @@ function createMemoryFileStore(seed = {}) {
         owner_id: row.owner_id || '',
         created_at: row.created_at || nowIso(),
         updated_at: row.updated_at || nowIso(),
-        content_updated_at: row.content_updated_at || nowIso()
+        content_updated_at: row.content_updated_at || nowIso(),
+        deleted_at: row.deleted_at || null,
+        deleted_by: row.deleted_by || null,
+        deleted_from_folder_id: row.deleted_from_folder_id || null
       }
       rooms.set(key, next)
       return cloneJson(next)
@@ -144,7 +164,7 @@ function createMemoryFileStore(seed = {}) {
     async listRooms(filter) {
       bump()
       return [...rooms.values()]
-        .filter(row => !tombstones.has(row.room_key))
+        .filter(row => isActiveRoom(row))
         .filter(row => {
           if (filter.folderId === undefined) return true
           if (filter.folderId === null) return !row.folder_id
@@ -224,7 +244,7 @@ function createMemoryFileStore(seed = {}) {
     async countRoomsInFolder(id) {
       bump()
       return [...rooms.values()].filter(
-        row => row.folder_id === id && !tombstones.has(row.room_key)
+        row => row.folder_id === id && isActiveRoom(row)
       ).length
     },
     async deleteFolder(id) {
@@ -236,10 +256,89 @@ function createMemoryFileStore(seed = {}) {
       bump()
       const counts = {}
       rooms.forEach(row => {
-        if (!row.folder_id || tombstones.has(row.room_key)) return
+        if (!row.folder_id || !isActiveRoom(row)) return
         counts[row.folder_id] = (counts[row.folder_id] || 0) + 1
       })
       return counts
+    },
+    async listUserState(userId) {
+      bump()
+      const uid = String(userId || '')
+      return [...userState.entries()]
+        .filter(([key]) => key.endsWith('\0' + uid))
+        .map(([key, value]) => {
+          const room_key = key.split('\0')[0]
+          return cloneJson({ room_key, user_id: uid, ...value })
+        })
+    },
+    async upsertUserState(roomKey, userId, patch) {
+      bump()
+      const key = stateKey(roomKey, userId)
+      const prev = userState.get(key) || {
+        is_favorite: false,
+        last_opened_at: null,
+        created_at: nowIso()
+      }
+      const next = {
+        ...prev,
+        is_favorite:
+          patch.is_favorite != null ? !!patch.is_favorite : !!prev.is_favorite,
+        last_opened_at:
+          patch.last_opened_at !== undefined
+            ? patch.last_opened_at
+            : prev.last_opened_at,
+        updated_at: nowIso()
+      }
+      if (patch.touch_opened) next.last_opened_at = nowIso()
+      userState.set(key, next)
+      return cloneJson({ room_key: roomKey, user_id: userId, ...next })
+    },
+    async trashRoom(roomKey, userId) {
+      bump()
+      const row = rooms.get(String(roomKey || ''))
+      if (!row || tombstones.has(row.room_key)) return null
+      if (row.deleted_at) return cloneJson(row)
+      row.deleted_from_folder_id = row.folder_id || null
+      row.folder_id = null
+      row.deleted_at = nowIso()
+      row.deleted_by = userId || ''
+      return cloneJson(row)
+    },
+    async restoreRoom(roomKey, folderId) {
+      bump()
+      const row = rooms.get(String(roomKey || ''))
+      if (!row || tombstones.has(row.room_key)) return null
+      row.folder_id = folderId || null
+      row.deleted_at = null
+      row.deleted_by = null
+      row.deleted_from_folder_id = null
+      return cloneJson(row)
+    },
+    async listTrashedRooms() {
+      bump()
+      return [...rooms.values()]
+        .filter(row => row.deleted_at && !tombstones.has(row.room_key))
+        .map(cloneJson)
+    },
+    async purgeRoom(roomKey) {
+      bump()
+      const key = String(roomKey || '')
+      rooms.delete(key)
+      nodes.delete(key)
+      tombstones.delete(key)
+      for (let i = members.length - 1; i >= 0; i--) {
+        if (members[i].room_key === key) members.splice(i, 1)
+      }
+      for (let i = operations.length - 1; i >= 0; i--) {
+        if (operations[i].room_key === key) operations.splice(i, 1)
+      }
+      for (let i = versions.length - 1; i >= 0; i--) {
+        if (versions[i].room_key === key) versions.splice(i, 1)
+      }
+      ;[...userState.keys()].forEach(item => {
+        if (item.startsWith(key + '\0')) userState.delete(item)
+      })
+      return true
     }
   }
 }

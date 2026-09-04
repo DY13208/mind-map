@@ -56,7 +56,7 @@
             ><el-dropdown-item command="move">移动</el-dropdown-item
             ><el-dropdown-item command="share">分享</el-dropdown-item
             ><el-dropdown-item command="history">历史版本</el-dropdown-item
-            ><el-dropdown-item v-if="allowDelete" command="delete" divided
+            ><el-dropdown-item v-if="allowDelete && scope.row.canManage" command="delete" divided
               >删除</el-dropdown-item
             ></el-dropdown-menu
           ></el-dropdown
