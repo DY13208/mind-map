@@ -23,6 +23,19 @@ export function displayRole(role) {
   return role || ''
 }
 
+export function isSharedWithMe({
+  role,
+  ownerUserId,
+  currentUserId,
+  legacyOpen
+} = {}) {
+  if (legacyOpen) return false
+  const ownerId = String(ownerUserId || '').trim()
+  const me = String(currentUserId || '').trim()
+  if (!ownerId || !me) return false
+  return normalizeRole(role) !== 'owner' && ownerId !== me
+}
+
 export function normalizeRoomDto(apiRoom = {}, extras = {}) {
   const roomKey = String(
     apiRoom.roomKey || apiRoom.room_key || apiRoom.id || extras.roomKey || ''
@@ -56,7 +69,12 @@ export function normalizeRoomDto(apiRoom = {}, extras = {}) {
     roleLabel:
       role === 'owner' ? 'Owner' : role === 'editor' ? 'Editor' : role === 'viewer' ? 'Viewer' : role,
     favorite: !!extras.favorite,
-    sharedWithMe: !!(role && role !== 'owner'),
+    sharedWithMe: isSharedWithMe({
+      role,
+      ownerUserId: ownerId,
+      currentUserId: extras.currentUserId,
+      legacyOpen: apiRoom.legacyOpen
+    }),
     createdAt: apiRoom.createdAt || apiRoom.created_at || '',
     updatedAt: apiRoom.updatedAt || apiRoom.updated_at || '',
     contentUpdatedAt:

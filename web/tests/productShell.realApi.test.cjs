@@ -27,7 +27,7 @@ function load(filename) {
 const service = name => load(path.join(root, 'services', name)).default
 const { setProductHttp } = load(path.join(root, 'services/productHttp'))
 const { wrapHttpError } = load(path.join(root, 'services/apiError'))
-const { normalizeRoomDto, folderIdForApi } = load(
+const { normalizeRoomDto, folderIdForApi, isSharedWithMe } = load(
   path.join(root, 'services/roomDto')
 )
 const room = service('roomService')
@@ -402,13 +402,52 @@ async function main() {
     title: 't',
     folderId: null,
     role: 'owner',
+    owner: { userId: 'me' },
     canView: true,
     canEdit: true,
     canManage: true
-  })
+  }, { currentUserId: 'me' })
   assert.equal(dto.id, 'room-x')
   assert.equal(dto.favorite, false)
+  assert.equal(dto.sharedWithMe, false)
   assert.ok(!('lastOpenedAt' in dto) || dto.lastOpenedAt == null)
+
+  assert.equal(
+    isSharedWithMe({
+      role: 'owner',
+      ownerUserId: 'me',
+      currentUserId: 'me'
+    }),
+    false
+  )
+  assert.equal(
+    normalizeRoomDto(
+      { role: 'editor', owner: { userId: 'other' } },
+      { currentUserId: 'me' }
+    ).sharedWithMe,
+    true
+  )
+  assert.equal(
+    normalizeRoomDto(
+      { role: 'viewer', owner: { userId: 'other' } },
+      { currentUserId: 'me' }
+    ).sharedWithMe,
+    true
+  )
+  assert.equal(
+    normalizeRoomDto(
+      { role: 'editor', owner: {} },
+      { currentUserId: 'me' }
+    ).sharedWithMe,
+    false
+  )
+  assert.equal(
+    normalizeRoomDto(
+      { role: 'editor', owner: { userId: 'ghost' }, legacyOpen: true },
+      { currentUserId: 'me' }
+    ).sharedWithMe,
+    false
+  )
 
   const schemaSrc =
     fs.readFileSync(path.join(repo, 'simple-mind-map/bin/storage.js'), 'utf8') +
