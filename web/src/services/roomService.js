@@ -1,3 +1,4 @@
+import { getCurrentUser } from '../utils/auth'
 import { productRequest } from './productHttp'
 import { userMessageFromError } from './apiError'
 import { C3_SERVICE_STATUS_MATRIX } from './serviceStatus'
@@ -32,6 +33,17 @@ function applyFavorite(room) {
   return { ...room, favorite: mockStore.favoriteKeys.has(key) }
 }
 
+function currentUserId() {
+  const user = getCurrentUser()
+  return (user && user.id) || ''
+}
+
+function toRoomDto(item, extras = {}) {
+  return applyFavorite(
+    normalizeRoomDto(item, { currentUserId: currentUserId(), ...extras })
+  )
+}
+
 function isMockListMode(filters = {}) {
   return !!(filters.trash || filters.favorite || filters.recent)
 }
@@ -53,13 +65,11 @@ async function listRealRooms(filters = {}) {
   const data = await productRequest(`/api/files${query ? `?${query}` : ''}`)
   const foldersById = filters.foldersById || {}
   let list = (data.list || []).map(item =>
-    applyFavorite(
-      normalizeRoomDto(item, {
-        folderName: item.folderId
-          ? (foldersById[item.folderId] && foldersById[item.folderId].name) || ''
-          : '根目录'
-      })
-    )
+    toRoomDto(item, {
+      folderName: item.folderId
+        ? (foldersById[item.folderId] && foldersById[item.folderId].name) || ''
+        : '根目录'
+    })
   )
   if (filters.shared) list = list.filter(room => room.sharedWithMe)
   if (filters.role) {
@@ -74,7 +84,7 @@ async function getRoom(roomKey) {
     const data = await productRequest(
       `/api/files/${encodeURIComponent(roomKey)}/info`
     )
-    return applyFavorite(normalizeRoomDto(data.file || data.room || data))
+    return toRoomDto(data.file || data.room || data)
   } catch (error) {
     error.message = userMessageFromError(error)
     throw error
@@ -123,7 +133,7 @@ export default {
       if (!created || !created.roomKey) {
         throw new Error('创建脑图未返回 roomKey')
       }
-      return applyFavorite(normalizeRoomDto(created))
+      return toRoomDto(created)
     } catch (error) {
       error.message = userMessageFromError(error)
       throw error
@@ -138,7 +148,7 @@ export default {
           body: JSON.stringify({ title: validName(title) })
         }
       )
-      return applyFavorite(normalizeRoomDto(data.file || data.room || data))
+      return toRoomDto(data.file || data.room || data)
     } catch (error) {
       error.message = userMessageFromError(error)
       throw error
@@ -153,7 +163,7 @@ export default {
           body: JSON.stringify({ folderId: folderIdForApi(folderId) })
         }
       )
-      return applyFavorite(normalizeRoomDto(data.file || data.room || data))
+      return toRoomDto(data.file || data.room || data)
     } catch (error) {
       error.message = userMessageFromError(error)
       throw error
