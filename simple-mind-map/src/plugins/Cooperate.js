@@ -199,10 +199,6 @@ function isPermanentNodeError(err) {
   )
 }
 
-function isPermanentInsertError(err) {
-  return isPermanentNodeError(err)
-}
-
 function indexMindTree(root, out = new Map(), parent = null, index = 0) {
   if (!root || !root.data) return out
   const uid = root.data.uid
@@ -217,7 +213,7 @@ function indexMindTree(root, out = new Map(), parent = null, index = 0) {
       childUids
     })
   }
-  ;(root.children || []).forEach((child, i) => {
+  (root.children || []).forEach((child, i) => {
     indexMindTree(child, out, uid || parent, i)
   })
   return out
@@ -3442,7 +3438,7 @@ class Cooperate {
           full
         }
       }
-      ;(node.children || []).forEach(walk)
+      (node.children || []).forEach(walk)
     }
     if (renderer.root) walk(renderer.root)
   }
@@ -3996,7 +3992,7 @@ class Cooperate {
       if (uid && live > 0 && (!count || live >= count)) {
         this.hydratedUids.add(uid)
       }
-      ;(node.children || []).forEach(walk)
+      (node.children || []).forEach(walk)
     }
     walk(root)
   }
@@ -4042,7 +4038,7 @@ class Cooperate {
           node.data.subtreeVersion = ver
         }
       }
-      ;(node.children || []).forEach(walk)
+      (node.children || []).forEach(walk)
     }
     walk(this.mindMap.renderer && this.mindMap.renderer.renderTree)
   }
@@ -4355,7 +4351,7 @@ class Cooperate {
     if (!Array.isArray(data.children) || !data.children.length) {
       this.hydrateTreeNodeFromYmap(data)
     }
-    ;(data.children || []).forEach(child => this.hydrateYmapTree(child))
+    (data.children || []).forEach(child => this.hydrateYmapTree(child))
     return data
   }
 
@@ -4827,7 +4823,7 @@ class Cooperate {
           return !id || !genUids.has(id)
         })
       }
-      ;(node.children || []).forEach(walk)
+      (node.children || []).forEach(walk)
     }
     walk(root)
     return root
@@ -5384,7 +5380,7 @@ class Cooperate {
     if (!node) return out
     if (node.isGeneralization) return out
     if (node.isRoot) {
-      ;(node.children || []).forEach(child => this.collectUnpushedNodes(child, out))
+      (node.children || []).forEach(child => this.collectUnpushedNodes(child, out))
       return out
     }
     const uid = node.getData && node.getData('uid')
@@ -6269,7 +6265,6 @@ class Cooperate {
             const text = content.text
             const note = content.note
             const prev = this.lastPushed[item.uid]
-            const fv = readFieldVersions(merged.data)
             const localText = this.nodePlain(node)
             const localNote = (node.getData && node.getData('note')) || ''
             const sameTextNote =
