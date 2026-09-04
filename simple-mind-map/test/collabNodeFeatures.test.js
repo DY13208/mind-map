@@ -115,6 +115,11 @@ async function update(store, payload, version) {
     { text: richHtml, richText: true }
   )
   assert.strictEqual(cleared.richText, null)
+  const htmlWithoutFlag = buildNodeContentFields(
+    { text: '<p>这个看了没</p>', note: '' },
+    { text: '这个看了没' }
+  )
+  assert.strictEqual(htmlWithoutFlag.richText, true)
 
   await update(store, { uid: 'n1', note: 'memo' }, nextVer())
   n1 = await store.getLive('n1')

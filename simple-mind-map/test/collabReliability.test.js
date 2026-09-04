@@ -120,6 +120,7 @@ async function testRealSopRenameRequiresConfirm() {
 
 async function testTerminalSets() {
   assert.strictEqual(isTerminalError('SOP_CONFIRM_REQUIRED'), true)
+  assert.strictEqual(isTerminalError('CYCLE_REJECTED'), true)
   assert.strictEqual(isTerminalError('FORBIDDEN'), true)
   assert.strictEqual(isRetryableError('ACK_TIMEOUT'), true)
   assert.strictEqual(isRetryableError('SOP_CONFIRM_REQUIRED'), false)
@@ -160,17 +161,31 @@ async function testSopQuarantineNoRetry() {
 async function testIndependentOpsContinue() {
   assert.strictEqual(
     dependsOnBlockedOp(
-      { payload: { uid: 'b' }, clientSeq: 3 },
-      { payload: { uid: 'a' }, clientSeq: 2 }
+      { type: 'node.update', payload: { uid: 'b' }, clientSeq: 3 },
+      { type: 'node.update', payload: { uid: 'a' }, clientSeq: 2 }
     ),
     false
   )
   assert.strictEqual(
     dependsOnBlockedOp(
-      { payload: { uid: 'a', text: 'later' }, clientSeq: 3 },
-      { payload: { uid: 'a' }, clientSeq: 2 }
+      { type: 'node.update', payload: { uid: 'a', text: 'later' }, clientSeq: 3 },
+      { type: 'node.update', payload: { uid: 'a' }, clientSeq: 2 }
+    ),
+    false
+  )
+  assert.strictEqual(
+    dependsOnBlockedOp(
+      { type: 'node.update', payload: { uid: 'a', text: 'later' }, clientSeq: 3 },
+      { type: 'node.insert', payload: { uid: 'a' }, clientSeq: 2 }
     ),
     true
+  )
+  assert.strictEqual(
+    dependsOnBlockedOp(
+      { type: 'node.delete', payload: { uid: 'n3' }, clientSeq: 5 },
+      { type: 'node.move', payload: { uid: 'n1', parent: 'n3' }, clientSeq: 4 }
+    ),
+    false
   )
 }
 
