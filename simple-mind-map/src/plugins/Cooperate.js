@@ -6127,7 +6127,11 @@ class Cooperate {
         action = { type: 'resnapshot', version: plan.version }
       }
       if (action.type === 'ignore') return
-      if (this.safeLoadMode && action.type === 'resnapshot') {
+      if (
+        this.safeLoadMode &&
+        action.type === 'resnapshot' &&
+        options.reason !== 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
+      ) {
         return
       }
       if (action.type === 'apply' && action.operations) {

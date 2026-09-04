@@ -1910,15 +1910,6 @@ async function handleApi(req, res) {
         const snapshot = await getRoomSnapshot(roomKey)
         const live = getLiveObject(roomKey)
         const current = nodesFromSnapshotOrLive(snapshot, live) || {}
-        if (
-          Object.keys(current).length &&
-          mindDoc.isWithinSop(current, 'SOP') &&
-          body.confirm_sop_change !== true
-        ) {
-          const err = new Error('整树覆盖会修改SOP，必须设置confirm_sop_change=true')
-          err.statusCode = 400
-          throw err
-        }
         if (!(await getRoom(roomKey))) {
           await upsertRoom(roomKey, body.title || '未命名')
         }
@@ -1928,6 +1919,16 @@ async function handleApi(req, res) {
         if (stats.tooLarge) throw importUtil.importTooLargeError(stats)
         await yieldEventLoop()
         const obj = mindDoc.treeToObject(normalizedTree)
+        const sopGuard = require('./collabSopGuard')
+        const sopTrace = sopGuard.inspectSopChange({
+          type: 'map.replace',
+          payload: body,
+          currentNodes: current,
+          nextNodes: obj
+        })
+        if (sopTrace.required && body.confirm_sop_change !== true) {
+          throw sopGuard.sopConfirmError(sopTrace)
+        }
         const nodeCount = Object.keys(obj || {}).length
         if (nodeCount > stats.maxNodes) {
           throw importUtil.importTooLargeError({
