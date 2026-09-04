@@ -31,7 +31,7 @@ function walkTree(node, depth, lines) {
     if (gText) {
       lines.push('\t'.repeat(depth + 1) + `[概要] ${gText}`)
     }
-    ;(item.children || []).forEach(child => walkDataNode(child, depth + 2, lines))
+    (item.children || []).forEach(child => walkDataNode(child, depth + 2, lines))
   })
 
   ;(node.children || []).forEach(child => walkTree(child, depth + 1, lines))

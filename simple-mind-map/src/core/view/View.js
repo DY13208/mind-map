@@ -223,7 +223,9 @@ class View {
   transform() {
     try {
       this.limitMindMapInCanvas()
-    } catch (error) {}
+    } catch (error) {
+      // 边界计算失败时仍应用当前视图变换。
+    }
     this.mindMap.draw.transform({
       origin: [0, 0],
       scale: this.scale,
@@ -320,13 +322,10 @@ class View {
       flag = 1
     } else {
       let newWidth = 0
-      let newHeight = 0
       if (drawRatio > elRatio) {
         newWidth = elWidth
-        newHeight = elWidth / drawRatio
         flag = 2
       } else {
-        newHeight = elHeight
         newWidth = elHeight * drawRatio
         flag = 3
       }
@@ -439,6 +438,7 @@ class View {
     switch (type) {
       case 'scale':
         this.mindMap.emit('scale', this.scale)
+        // falls through: 缩放后同时通知平移位置。
       case 'translate':
         this.mindMap.emit('translate', this.x, this.y)
     }

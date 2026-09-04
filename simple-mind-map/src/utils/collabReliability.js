@@ -1,3 +1,4 @@
+/* global module:readonly */
 const TERMINAL_ERROR_SET = {
   FORBIDDEN: true,
   INVALID_CLIENT_ID: true,
@@ -9,6 +10,7 @@ const TERMINAL_ERROR_SET = {
   IMPORT_APPLY_FAILED: true,
   OUTBOX_NON_CLONEABLE_PAYLOAD: true,
   SOP_CONFIRM_REQUIRED: true,
+  STALE_AFTER_VERSION_RESTORE: true,
   UNSUPPORTED_OPERATION: true,
   BAD_OP_ID: true,
   INVALID_PAYLOAD: true,
@@ -68,11 +70,11 @@ function collectCreatedUids(op) {
   const out = []
   if (isCreateOpType(type) && payload.uid) out.push(String(payload.uid))
   if (type === 'node.paste') {
-    ;(payload.createdUids || payload.newUids || payload.pastedUids || []).forEach(
+    (payload.createdUids || payload.newUids || payload.pastedUids || []).forEach(
       id => out.push(String(id))
     )
   }
-  ;(payload.ops || []).forEach(inner => {
+  (payload.ops || []).forEach(inner => {
     collectCreatedUids(inner).forEach(id => out.push(id))
   })
   return Array.from(new Set(out.filter(Boolean)))
@@ -80,6 +82,9 @@ function collectCreatedUids(op) {
 
 function dependsOnBlockedOp(item, blocked) {
   if (!item || !blocked) return false
+  // Creator dependency only: a failed insert/create/paste/import of UID N
+  // blocks later uses of N. Failed mutations (move/update/delete) of an
+  // already-existing business node must not block later ops on the same UID.
   const created = new Set(collectCreatedUids(blocked))
   if (!created.size) return false
   return collectOpUids(item).some(id => created.has(id))
@@ -99,7 +104,9 @@ function writeClientHeartbeat(storage, clientId, now = Date.now()) {
   if (!storage || !clientId) return
   try {
     storage.setItem(heartbeatKey(clientId), String(now))
-  } catch (err) {}
+  } catch (err) {
+    // Storage can be disabled; heartbeat persistence is best effort.
+  }
 }
 
 function isClientHeartbeatFresh(storage, clientId, now = Date.now(), ttl = 8000) {

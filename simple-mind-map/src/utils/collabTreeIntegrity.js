@@ -1,3 +1,5 @@
+/* global module:readonly */
+
 function walkTree(root, visit) {
   const stack = root ? [root] : []
   while (stack.length) {

@@ -63,8 +63,6 @@ export const STYLE_COMMAND_MATRIX = [
   }
 ]
 
-const VIEW_STATE_SET = new Set(VIEW_STATE_KEYS)
-
 function isPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }

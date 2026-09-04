@@ -1,3 +1,5 @@
+/* global module:readonly, require:readonly */
+
 const {
   canonicalImageFields,
   isVirtualGeneralization

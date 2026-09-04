@@ -451,7 +451,7 @@ class Drag extends Base {
 
   // 移除额外创建的连线
   removeExtraLines() {
-    ;(this.placeHolderExtraLines || []).forEach(item => {
+    (this.placeHolderExtraLines || []).forEach(item => {
       if (item && typeof item.remove === 'function') item.remove()
     })
     this.placeHolderExtraLines = []
@@ -1173,8 +1173,8 @@ class Drag extends Base {
     this.mindMap.renderer.layout.renderLine(
       parent,
       [this.placeHolderLine],
-      (...args) => {
-        // node.styleLine(...args)
+      () => {
+        // 占位连线在下方统一应用拖拽样式。
       },
       node.style.getStyle('lineStyle', true)
     )

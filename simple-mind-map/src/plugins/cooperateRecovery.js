@@ -319,7 +319,6 @@ export function markDirtySubtrees(loadedUids, operations) {
   ;(operations || []).forEach(item => {
     const event = (item && item.event) || item || {}
     const version = Number(item.version || event.version || 0)
-    const payload = event.payload || {}
     const type = String(event.type || item.operation_type || '')
     const uids = affectedUidsFromOperation(item)
     const hasUnloaded = uids.some(uid => !loaded.has(uid))

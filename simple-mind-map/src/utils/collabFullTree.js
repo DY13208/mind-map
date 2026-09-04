@@ -1,3 +1,5 @@
+/* global module:readonly */
+
 const FULL_TREE_REASONS = {
   IMPORT: true,
   VERSION_RESTORE: true,

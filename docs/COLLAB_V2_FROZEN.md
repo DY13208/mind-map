@@ -7,7 +7,7 @@
 | `COLLAB_V2_FREEZE_P0` | **0** |
 | Package | `simple-mind-map@0.14.0-fix.3` |
 | Suggested tag | `collab-v2-freeze-20260904` |
-| Freeze suite | `npm run test:collab:v2:freeze` (cwd: `simple-mind-map`) |
+| Freeze suite | `npm run test:collab:v2:freeze` → `scripts/runCollabSuite.js freeze` (cwd: `simple-mind-map`) |
 
 This checkpoint freezes **Collaboration V2 core**. It does **not** remove V1 / Yjs. History, folders, favorites, recycle bin, and team space are out of scope.
 
@@ -159,3 +159,25 @@ Only a **true P0** may change Collaboration V2 core after this checkpoint:
 Not Freeze-breakers: P1 UX, performance of huge XMind, Offline-first, V1/Yjs cleanup, History/folders/favorites/recycle/team space.
 
 Do **not** delete V1 or Yjs as part of Freeze follow-up.
+
+---
+
+## Freeze Amendment — 2026-09-04
+
+Outbox reliability P0s found by C4 drain regressions. Collaboration V2 stays frozen; this amendment only changes drain/settlement so the outbox can make progress without spinning or dropping ACKs.
+
+| Field | Value |
+|---|---|
+| `COLLAB_V2_FREEZE_P0` | **0** |
+| In scope | blocked-queue busy-loop; terminal **creator** dependency quarantine; `FORBIDDEN` independent sibling drain; ACK/reject before counter refresh |
+| Out of scope | C4 target-UID dependency; C4 adapter rewrite; Recent / Favorites / Trash / Team Space |
+
+Fixes:
+
+1. **Blocked queue busy-loop** — pending-but-blocked work must yield (`DRAIN_BLOCKED_NO_BUSY_LOOP`). Drain reschedules only when a drainable head exists (dependency ACK/quarantine, reconnect, revision sync, user confirmation), not on microtask spin.
+2. **Terminal creator dependency** — a failed create of UID N that never reached the server quarantines later ops that use N (`BLOCKED_BY_TERMINAL_CREATE`). Failed **mutations** of an existing business node (e.g. `CYCLE_REJECTED` move) must not block a later legal delete of that node.
+3. **ACK / rejection settlement ordering** — protocol settle (`settleAck`, mark acked/retry/quarantine, clear sending) runs before `refreshOutboxCounts`. Counter `list()` failure is `OUTBOX_COUNTER_REFRESH_FAILED` and must not leave sending hung.
+4. **FORBIDDEN sibling drain** — terminal `FORBIDDEN` quarantines the current op only; independent sibling ops continue. Dependent descendants of a terminal **create** still do not continue.
+
+`COLLABORATION_V2_CORE_FROZEN = YES`  
+`COLLAB_V2_FREEZE_P0 = 0`
