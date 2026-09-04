@@ -1,0 +1,253 @@
+<template>
+  <div class="productShell">
+    <aside class="productSidebar">
+      <div class="productLogo" @click="$router.push('/files')">
+        <span>依</span><strong>依然中台</strong>
+      </div>
+      <nav>
+        <p class="navLabel">文件</p>
+        <router-link
+          v-for="item in fileNav"
+          :key="item.path"
+          :to="item.path"
+          :title="item.label"
+          ><i :class="item.icon"></i>{{ item.label }}</router-link
+        >
+        <p class="navLabel navLabel--space">空间</p>
+        <router-link to="/spaces" title="团队空间"
+          ><i class="el-icon-office-building"></i>团队空间</router-link
+        >
+      </nav>
+      <div class="sidebarFooter" v-if="profile">
+        <el-avatar size="small">依</el-avatar>
+        <div>
+          <strong>{{ profile.name }}</strong
+          ><span>演示账号</span>
+        </div>
+      </div>
+    </aside>
+    <main class="productMain">
+      <div class="mockNotice">
+        产品外壳预开发 · Mock
+        数据仅本页会话生效，刷新重置；不修改真实文件、历史或权限。
+      </div>
+      <router-view />
+    </main>
+  </div>
+</template>
+
+<script>
+import productService from '@/services/productService'
+export default {
+  name: 'ProductShellLayout',
+  data: () => ({
+    profile: null,
+    fileNav: [
+      { path: '/files/recent', label: '最近', icon: 'el-icon-time' },
+      { path: '/files', label: '我的脑图', icon: 'el-icon-files' },
+      { path: '/files/favorites', label: '收藏', icon: 'el-icon-star-off' },
+      { path: '/files/shared', label: '与我共享', icon: 'el-icon-user' },
+      { path: '/files/trash', label: '回收站', icon: 'el-icon-delete' }
+    ]
+  }),
+  async created() {
+    try {
+      this.profile = await productService.getProfile()
+    } catch (error) {
+      this.profile = null
+    }
+  }
+}
+</script>
+
+<style lang="less">
+.productShell .mockNotice {
+  padding: 10px 28px;
+  background: #edf4f1;
+  color: #647c71;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.productShell .el-dialog {
+  max-width: calc(100vw - 24px);
+}
+.productShell .el-drawer {
+  max-width: 100vw;
+}
+@media (max-width: 600px) {
+  .productShell .teamGrid,
+  .productShell .roomGrid,
+  .productShell .folderGrid {
+    grid-template-columns: 1fr;
+  }
+  .productShell .trashRow {
+    flex-wrap: wrap;
+  }
+  .productShell .fileToolbar .toolbarSearch {
+    min-width: 0;
+    flex-basis: 100%;
+  }
+}
+.productShell {
+  min-height: 100vh;
+  background: #f5f7f6;
+  color: #17362c;
+  display: flex;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    sans-serif;
+}
+.productShell .productSidebar {
+  width: 224px;
+  background: #fff;
+  border-right: 1px solid #e7ece9;
+  padding: 22px 14px 18px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 10;
+  .productLogo {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 0 10px 24px;
+    cursor: pointer;
+    font-size: 17px;
+    span {
+      width: 32px;
+      height: 32px;
+      border-radius: 9px;
+      display: grid;
+      place-items: center;
+      color: white;
+      background: #0b9366;
+      font-size: 18px;
+    }
+  }
+  nav {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  a {
+    height: 40px;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 0 12px;
+    border-radius: 8px;
+    color: #52665f;
+    text-decoration: none;
+    font-size: 14px;
+    &:hover {
+      background: #f3f8f6;
+      color: #087854;
+    }
+    &.router-link-exact-active {
+      background: #eaf6f1;
+      color: #087854;
+      font-weight: 600;
+    }
+    i {
+      font-size: 17px;
+    }
+  }
+  .navLabel {
+    margin: 6px 12px 7px;
+    color: #9aa7a2;
+    font-size: 12px;
+    &--space {
+      margin-top: 22px;
+    }
+  }
+  .sidebarFooter {
+    margin-top: auto;
+    display: flex;
+    gap: 10px;
+    padding: 14px 10px 4px;
+    border-top: 1px solid #eef1ef;
+    align-items: center;
+    div {
+      display: flex;
+      flex-direction: column;
+      font-size: 12px;
+    }
+    span {
+      color: #98a59f;
+      margin-top: 2px;
+    }
+  }
+}
+.productShell .productMain {
+  min-width: 0;
+  flex: 1;
+  margin-left: 224px;
+}
+.productShell .productPage {
+  padding: 32px 38px 60px;
+  max-width: 1480px;
+  margin: auto;
+}
+.productShell .productHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 24px;
+  h1 {
+    margin: 0;
+    font-size: 26px;
+    letter-spacing: -0.4px;
+  }
+  p {
+    margin: 7px 0 0;
+    color: #819089;
+    font-size: 13px;
+  }
+}
+.productShell .sectionTitle {
+  font-size: 15px;
+  margin: 26px 0 14px;
+  color: #40564e;
+}
+@media (max-width: 760px) {
+  .productShell .productSidebar {
+    width: 72px;
+    padding-inline: 10px;
+    .productLogo strong,
+    a:not(.router-link-exact-active)::after,
+    a {
+      font-size: 0;
+    }
+    .productLogo {
+      padding-inline: 0;
+      justify-content: center;
+      gap: 0;
+      strong {
+        display: none;
+      }
+      span {
+        flex-shrink: 0;
+      }
+    }
+    a {
+      justify-content: center;
+      padding: 0;
+      i {
+        font-size: 20px;
+      }
+    }
+    .navLabel,
+    .sidebarFooter div {
+      display: none;
+    }
+  }
+  .productShell .productMain {
+    margin-left: 72px;
+  }
+  .productShell .productPage {
+    padding: 24px 16px 40px;
+  }
+}
+</style>
