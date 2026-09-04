@@ -487,11 +487,11 @@ function createCollaborationAdapter(options = {}) {
     state.error = ''
   }
 
-  function maybeClearRecoveredError() {
+  function maybeClearRecoveredError(opts = {}) {
     if (!isLive()) return false
     if (Number(state.outboxPending || 0) > 0) return false
     if (Number(state.outboxSending || 0) > 0) return false
-    if (state.pendingAcks.size > 0) return false
+    if (!opts.ignorePendingAcks && state.pendingAcks.size > 0) return false
     const activeCode = state.currentError && state.currentError.code
     if (activeCode && isStickyErrorCode(activeCode)) return false
     if (state.currentError) {
@@ -520,7 +520,9 @@ function createCollaborationAdapter(options = {}) {
     if (extra.saveState) state.saveState = extra.saveState
     if (extra.opId) state.lastOpId = extra.opId
     if (extra.error === '') {
-      maybeClearRecoveredError()
+      maybeClearRecoveredError({
+        ignorePendingAcks: extra.saveState === 'saved'
+      })
     } else if (extra.errorCode != null || extra.error) {
       recordError({
         code: extra.errorCode,
@@ -962,6 +964,10 @@ function createCollaborationAdapter(options = {}) {
   }
 
   async function disconnect() {
+    if (state.heartbeatTimer) {
+      clearInterval(state.heartbeatTimer)
+      state.heartbeatTimer = null
+    }
     state.roomKey = ''
     connecting = null
     if (socket && socket.disconnect) socket.disconnect()
@@ -1490,7 +1496,6 @@ function createCollaborationAdapter(options = {}) {
         originalBaseRevision: originalBase,
         sendBaseRevision: sendBase
       })
-      settleAck(op.opId, err)
       await refreshOutboxCounts()
       const stage =
         err.code === 'FORBIDDEN'
@@ -1526,6 +1531,7 @@ function createCollaborationAdapter(options = {}) {
         }
       })
       if (options.onRejected) options.onRejected(op, err)
+      settleAck(op.opId, err)
       return { terminal: true, stopDrain: err.code === 'FORBIDDEN', err }
     }
     await outbox.remove(op.opId)
@@ -1539,9 +1545,9 @@ function createCollaborationAdapter(options = {}) {
       // keep lastError; room continues
     }
     endSending()
-    settleAck(op.opId, null, result)
     await refreshOutboxCounts()
     setStatus('live', { saveState: 'saved', error: '' })
+    settleAck(op.opId, null, result)
     const kind = normalizeType(op.type)
     if (kind === 'operation.undo') {
       // stacks updated by undo()

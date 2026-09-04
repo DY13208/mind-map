@@ -242,7 +242,12 @@ function createTextNode(specifyText) {
     delete this.nodeData.data.needUpdate
   }
   // 如果是富文本内容，那么转给富文本函数
-  if (this.getData('richText')) {
+  const rawText =
+    typeof specifyText === 'string' ? specifyText : this.getData('text')
+  if (
+    this.getData('richText') ||
+    /<\/?[a-z][\s\S]*>/i.test(String(rawText || ''))
+  ) {
     return this.createRichTextNode(specifyText)
   }
   const text =

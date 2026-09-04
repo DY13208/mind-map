@@ -4,6 +4,7 @@ const TERMINAL_ERROR_SET = {
   UID_REUSED: true,
   UID_ALREADY_EXISTS: true,
   UID_EXISTS: true,
+  CYCLE_REJECTED: true,
   IMPORT_TOO_LARGE: true,
   IMPORT_APPLY_FAILED: true,
   OUTBOX_NON_CLONEABLE_PAYLOAD: true,
@@ -51,18 +52,37 @@ function collectOpUids(op) {
   return Array.from(new Set(uids.filter(Boolean)))
 }
 
+function isCreateOpType(type) {
+  const raw = String(type || '')
+  return (
+    raw === 'node.insert' ||
+    raw === 'node.create' ||
+    raw === 'node.paste' ||
+    raw === 'node.import'
+  )
+}
+
+function collectCreatedUids(op) {
+  const type = String((op && op.type) || '')
+  const payload = (op && op.payload) || {}
+  const out = []
+  if (isCreateOpType(type) && payload.uid) out.push(String(payload.uid))
+  if (type === 'node.paste') {
+    ;(payload.createdUids || payload.newUids || payload.pastedUids || []).forEach(
+      id => out.push(String(id))
+    )
+  }
+  ;(payload.ops || []).forEach(inner => {
+    collectCreatedUids(inner).forEach(id => out.push(id))
+  })
+  return Array.from(new Set(out.filter(Boolean)))
+}
+
 function dependsOnBlockedOp(item, blocked) {
   if (!item || !blocked) return false
-  const blockedUids = new Set(collectOpUids(blocked))
-  const itemUids = collectOpUids(item)
-  if (itemUids.some(id => blockedUids.has(id))) return true
-  const blockedSeq = Number(blocked.clientSeq || 0)
-  const itemSeq = Number(item.clientSeq || 0)
-  return (
-    blockedSeq > 0 &&
-    itemSeq > blockedSeq &&
-    itemUids.some(id => blockedUids.has(id))
-  )
+  const created = new Set(collectCreatedUids(blocked))
+  if (!created.size) return false
+  return collectOpUids(item).some(id => created.has(id))
 }
 
 function shouldQuarantineError(code, op) {
@@ -114,6 +134,7 @@ const api = {
   isRetryableError,
   collectOpUids,
   dependsOnBlockedOp,
+  collectCreatedUids,
   shouldQuarantineError,
   writeClientHeartbeat,
   isClientHeartbeatFresh,

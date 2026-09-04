@@ -152,6 +152,17 @@ function createHub(engine) {
   return { createSocket, sockets }
 }
 
+const liveAdapters = []
+
+async function disposeClients() {
+  while (liveAdapters.length) {
+    const adapter = liveAdapters.pop()
+    try {
+      if (adapter && adapter.disconnect) await adapter.disconnect()
+    } catch (err) {}
+  }
+}
+
 async function makeClient(hub, opts) {
   const applied = []
   const rejected = []
@@ -178,6 +189,7 @@ async function makeClient(hub, opts) {
     userId: opts.userId,
     lastServerRevision: opts.lastServerRevision || 0
   })
+  liveAdapters.push(adapter)
   return { adapter, applied, rejected, socket }
 }
 
@@ -1578,7 +1590,10 @@ async function main() {
   console.log('collabV2 tests ok')
 }
 
-main().catch(err => {
-  console.error(err)
-  process.exit(1)
-})
+main()
+  .then(() => disposeClients())
+  .catch(err => {
+    console.error(err)
+    disposeClients()
+    process.exit(1)
+  })
