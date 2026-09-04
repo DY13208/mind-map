@@ -1843,6 +1843,14 @@ export default {
         nodeCount: preview.node_count,
         version: preview.version || 0,
         updatedAt: preview.updated_at,
+        treeSource: preview.treeSource || 'room_nodes',
+        roomNodesCount: preview.roomNodesCount,
+        roomsJsonCount: preview.roomsJsonCount,
+        roomNodesHash: preview.roomNodesHash,
+        roomsJsonHash: preview.roomsJsonHash,
+        roomNodesInitialized: preview.roomNodesInitialized,
+        legacyFallback: preview.legacyFallback,
+        legacyFallbackReason: preview.legacyFallbackReason,
         fetchSubtree: (uid, options) => getFileSubtree(roomKey, uid, options),
         fetchDeepSubtree: (uid, options) =>
           getFileSubtree(roomKey, uid, {
@@ -1866,7 +1874,9 @@ export default {
         deleteNode: (uid, options) =>
           this.notifyHttpMutation(deleteFileNode(roomKey, uid, options)),
         replaceTree: (tree, extra) =>
-          Promise.resolve(replaceFileTree(roomKey, tree, extra)).then(result => {
+          Promise.resolve(
+            replaceFileTree(roomKey, tree, { allowFullTree: true, source: 'import', ...(extra || {}) })
+          ).then(result => {
             this.publishHttpChange(result || {})
             return result
           })

@@ -65,7 +65,13 @@ const DATA_META_KEYS = [
   'event',
   'expected',
   'expectedValue',
-  'batchId'
+  'batchId',
+  'oldParentUid',
+  'newParentUid',
+  'oldPosition',
+  'newPosition',
+  'oldIndex',
+  'kind'
 ]
 
 const STRUCTURAL_PAYLOAD_KEYS = ['parentUid', 'parent_uid', 'parent', 'index', 'position', 'order']

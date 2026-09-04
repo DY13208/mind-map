@@ -92,6 +92,19 @@ export function undoFullTreeForbidden(reason, extra = {}) {
   undoTrace('UNDO_FULL_TREE_REPLACE_FORBIDDEN', row)
 }
 
+export function moveFullTreeForbidden(reason, extra = {}) {
+  const row = { reason, ...extra }
+  try {
+    window.__MOVE_FULL_TREE_HITS__ = Number(window.__MOVE_FULL_TREE_HITS__ || 0) + 1
+  } catch (err) {
+    // ignore
+  }
+  if (typeof console !== 'undefined' && console.error) {
+    console.error('MOVE_FULL_TREE_RESET_FORBIDDEN', row)
+  }
+  collabTrace('MOVE_FULL_TREE_RESET_FORBIDDEN', row)
+}
+
 export function collabTrace(stage, detail = {}) {
   if (!runtimeTraceFlag()) return
   const snap = collabPersistSnapshot()

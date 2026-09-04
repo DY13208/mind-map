@@ -1146,9 +1146,17 @@ class MindMapNode {
 
   // 获取子节点的数量
   getChildrenLength() {
-    const live = this.nodeData.children ? this.nodeData.children.length : 0
+    const live = this.nodeData && this.nodeData.children
+      ? this.nodeData.children.length
+      : 0
     if (live > 0) return live
-    return Number(this.getData('childCount')) || 0
+    // childCount is only authoritative while collapsed/lazy.
+    // After a last-child move, children=[] and expand=true; using childCount
+    // here leaves a leftover connector on lineDraw.
+    if (this.getData('expand') === false) {
+      return Number(this.getData('childCount')) || 0
+    }
+    return 0
   }
 }
 

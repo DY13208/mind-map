@@ -1,0 +1,4 @@
+.status_browser > p:nth-child(2),
+.status_browser > p:nth-of-type(2) {
+  display: none !important;
+}
