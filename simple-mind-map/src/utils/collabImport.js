@@ -1,3 +1,5 @@
+/* global module:readonly, process:readonly, setImmediate:readonly */
+
 const DEFAULT_MAX_NODES = 20000
 const DEFAULT_MAX_BYTES = 32 * 1024 * 1024
 

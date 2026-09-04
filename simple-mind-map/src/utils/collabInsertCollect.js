@@ -1,3 +1,5 @@
+/* global module:readonly */
+
 function snapshotNodeDataUids(roots) {
   const set = new Set()
   const walk = item => {
@@ -30,19 +32,6 @@ function removeUidsFromNodeData(parent, uids) {
   if (next.length === parent.children.length) return false
   parent.children = next
   return true
-}
-
-function collectNewNodeDataInserts(roots, opts = {}) {
-  const set = new Set()
-  const walk = item => {
-    if (!item) return
-    const uid = item.data && item.data.uid
-    if (uid) set.add(uid)
-    const kids = item.children || []
-    for (let i = 0; i < kids.length; i++) walk(kids[i])
-  }
-  ;(roots || []).forEach(walk)
-  return set
 }
 
 function collectNewNodeDataInserts(roots, opts = {}) {

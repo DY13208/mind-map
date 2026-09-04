@@ -129,7 +129,7 @@ class TouchEvent {
   }
 
   // 手指取消事件
-  onTouchcancel(e) {}
+  onTouchcancel() {}
 
   // 手指松开事件
   onTouchend(e) {

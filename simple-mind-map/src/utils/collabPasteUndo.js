@@ -1,3 +1,5 @@
+/* global module:readonly */
+
 function parentOfInsert(payload = {}) {
   return String(
     payload.parentUid || payload.parent_uid || payload.parent || ''

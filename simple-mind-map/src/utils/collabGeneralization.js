@@ -1,3 +1,5 @@
+/* global module:readonly */
+
 function snapshotValue(value) {
   if (value === undefined) return undefined
   if (value === null || typeof value !== 'object') return value

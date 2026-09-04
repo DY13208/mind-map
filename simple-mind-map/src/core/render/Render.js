@@ -852,7 +852,7 @@ class Render {
               if (!gNode.getData('isActive')) {
                 this.addNodeToActiveList(gNode)
               }
-              ;(gNode.children || []).forEach(addTree)
+              (gNode.children || []).forEach(addTree)
             }
             addTree(item.generalizationNode)
           })
@@ -1620,7 +1620,7 @@ class Render {
           text = htmlEscape(text)
         }
         const textArr = text
-          .split(new RegExp('\r?\n|(?<!\n)\r', 'g'))
+          .split(/\r?\n|(?<!\n)\r/g)
           .filter(item => {
             return !!item
           })

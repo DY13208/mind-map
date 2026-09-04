@@ -1,3 +1,4 @@
+/* global module:readonly */
 const TERMINAL_ERROR_SET = {
   FORBIDDEN: true,
   INVALID_CLIENT_ID: true,
@@ -69,11 +70,11 @@ function collectCreatedUids(op) {
   const out = []
   if (isCreateOpType(type) && payload.uid) out.push(String(payload.uid))
   if (type === 'node.paste') {
-    ;(payload.createdUids || payload.newUids || payload.pastedUids || []).forEach(
+    (payload.createdUids || payload.newUids || payload.pastedUids || []).forEach(
       id => out.push(String(id))
     )
   }
-  ;(payload.ops || []).forEach(inner => {
+  (payload.ops || []).forEach(inner => {
     collectCreatedUids(inner).forEach(id => out.push(id))
   })
   return Array.from(new Set(out.filter(Boolean)))
@@ -103,7 +104,9 @@ function writeClientHeartbeat(storage, clientId, now = Date.now()) {
   if (!storage || !clientId) return
   try {
     storage.setItem(heartbeatKey(clientId), String(now))
-  } catch (err) {}
+  } catch (err) {
+    // Storage can be disabled; heartbeat persistence is best effort.
+  }
 }
 
 function isClientHeartbeatFresh(storage, clientId, now = Date.now(), ttl = 8000) {
