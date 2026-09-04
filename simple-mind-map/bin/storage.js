@@ -1670,6 +1670,8 @@ async function initSchemaOnce() {
   await roomAcl.migrateLegacyOwners(pool)
   const collabV2Schema = require('./collabV2/schema')
   await collabV2Schema.initCollabV2Schema(pool)
+  const historySchema = require('./collabHistory/schema')
+  await historySchema.initHistorySchema(pool)
 }
 
 async function listRooms() {

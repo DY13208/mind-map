@@ -59,6 +59,13 @@ function inferRoomAcl(pathname, method) {
   if (rest === '/presence' || rest.startsWith('/presence/')) {
     return { roomKey, action: 'view' }
   }
+  if (rest === '/versions' || rest.startsWith('/versions/')) {
+    if (verb === 'GET' || verb === 'HEAD') return { roomKey, action: 'view' }
+    if (/\/restore$/.test(rest) || /\/hide$/.test(rest)) {
+      return { roomKey, action: 'manage' }
+    }
+    return { roomKey, action: 'edit' }
+  }
   if (!rest) {
     if (verb === 'PATCH' || verb === 'DELETE') {
       return { roomKey, action: 'manage' }

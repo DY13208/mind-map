@@ -121,6 +121,7 @@ async function testRealSopRenameRequiresConfirm() {
 async function testTerminalSets() {
   assert.strictEqual(isTerminalError('SOP_CONFIRM_REQUIRED'), true)
   assert.strictEqual(isTerminalError('CYCLE_REJECTED'), true)
+  assert.strictEqual(isTerminalError('STALE_AFTER_VERSION_RESTORE'), true)
   assert.strictEqual(isTerminalError('FORBIDDEN'), true)
   assert.strictEqual(isRetryableError('ACK_TIMEOUT'), true)
   assert.strictEqual(isRetryableError('SOP_CONFIRM_REQUIRED'), false)

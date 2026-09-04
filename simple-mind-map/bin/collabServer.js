@@ -218,6 +218,13 @@ Promise.all([initSchema(), initAuth()])
         throw err
       }
     }
+    const history = require('./collabHistory')
+    history.createServerHistoryEngine(getPool())
+    operationEvents.on('committed', event => {
+      history.onCommitted(event).catch(err => {
+        console.error('[history] onCommitted', err && err.message)
+      })
+    })
     const outboxEnabled =
       !v2RuntimeOnly &&
       !/^(0|false|off|no)$/i.test(String(process.env.COLLAB_OUTBOX_PUBLISHER || '1'))
