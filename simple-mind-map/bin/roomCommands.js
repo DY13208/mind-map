@@ -100,13 +100,16 @@ function sopError() {
 }
 
 function assertSopAllowed(obj, command) {
+  const { inspectSopChange, sopConfirmError } = require('../src/utils/collabSopGuard')
   const payload = command.payload || {}
-  if (payload.confirm_sop_change === true) return
-  const target =
-    command.type === 'node.insert'
-      ? payload.parentUid || payload.parent_uid || payload.parent || 'root'
-      : payload.uid
-  if (mindDoc.isWithinSop(obj, target)) throw sopError()
+  const trace = inspectSopChange({
+    type: command.type,
+    payload,
+    nodes: obj,
+    targetUid: payload.uid,
+    currentNodes: obj
+  })
+  if (trace.required) throw sopConfirmError(trace)
 }
 
 function wrapMindDocError(err) {

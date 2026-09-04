@@ -9,7 +9,7 @@ const {
   commandError
 } = require('../conflictErrors')
 const { createUid } = require('../mindDoc')
-const { isSopLabel } = require('./directStore')
+const { inspectSopChange, sopConfirmError } = require('../collabSopGuard')
 const { normalizeOperation, normalizeType, BATCH_MAX } = require('./protocol')
 const { collabTrace } = require('./trace')
 const { stripSearchHtml } = require('../roomNodes')
@@ -108,11 +108,8 @@ function warnStructuralUpdate(op) {
   return true
 }
 
-function sopError() {
-  const err = new Error('修改SOP前必须获得用户确认并设置confirm_sop_change=true')
-  err.statusCode = 400
-  err.code = 'SOP_CONFIRM_REQUIRED'
-  return err
+function sopError(trace) {
+  return sopConfirmError(trace)
 }
 
 function dataFields(input = {}) {
@@ -136,11 +133,17 @@ function clampIndex(index, max) {
   return Math.min(Math.floor(n), max)
 }
 
-async function assertNotSop(store, uid, payload) {
+async function assertNotSop(store, uid, payload, type) {
   if (payload && payload.confirm_sop_change === true) return
   if (!uid) return
-  const chain = await store.walkAncestors(uid)
-  if (chain.some(item => isSopLabel(item.data))) throw sopError()
+  const live = await store.getLive(uid)
+  const trace = inspectSopChange({
+    type: type || 'node.update',
+    payload,
+    target: live,
+    targetUid: uid
+  })
+  if (trace.required) throw sopError(trace)
 }
 
 async function resolveParent(store, raw) {
@@ -208,7 +211,7 @@ async function applyInsert(store, op, version) {
     store,
     payload.parentUid || payload.parent_uid || payload.parent
   )
-  await assertNotSop(store, parent.uid, payload)
+  await assertNotSop(store, parent.uid, payload, 'node.insert')
   const uid = String(payload.uid || '').trim() || createUid()
   const existing = await store.getAny(uid)
   if (existing && !existing.deleted) {
@@ -297,7 +300,7 @@ async function applyUpdate(store, op, version) {
   if (!uid) throw nodeDeletedError(uid)
   const live = await store.getLive(uid)
   if (!live) throw nodeDeletedError(uid)
-  await assertNotSop(store, uid, payload)
+  await assertNotSop(store, uid, payload, type)
   const expected = payload.expected || payload.expectedValue
   if (expected && typeof expected === 'object') {
     const keys = Object.keys(expected).filter(key => key !== 'revision' && key !== 'uid')
@@ -412,7 +415,7 @@ async function applyDelete(store, op, version) {
   if (live.is_root) {
     throw commandError('不能删除根节点', 'ROOT_DELETE', 400)
   }
-  await assertNotSop(store, uid, payload)
+  await assertNotSop(store, uid, payload, 'node.delete')
   const keepChildren = !!(payload.keepChildren || payload.keep_children)
   const kids = await store.listChildren(uid)
   let promoted = []
@@ -625,7 +628,7 @@ async function applyInsertBulk(store, childOps, version, roomKey) {
     let parent = parentCache.get(parentRaw)
     if (!parent) {
       parent = await resolveParent(store, parentRaw)
-      await assertNotSop(store, parent.uid, item.payload)
+      await assertNotSop(store, parent.uid, item.payload, 'node.insert')
       parentCache.set(parentRaw, parent)
       parentCache.set(parent.uid, parent)
     }

@@ -687,17 +687,22 @@ export default {
             return cooperate.applyV2RemoteOperation(op)
           }
         },
-        onReloadRequired: () => {
+        onReloadRequired: sync => {
           if (this._roomLoadFailed || this.roomLoadError) return
-          if (cooperate && cooperate.safeLoadMode) return
+          if (!sync || sync.reason !== 'AUTHORITATIVE_SNAPSHOT_RECOVERY') return
           if (cooperate && typeof cooperate.recoverHttpCollab === 'function') {
             return cooperate.recoverHttpCollab(
               this.collabV2Adapter &&
-                this.collabV2Adapter.getStatus().lastServerRevision
+                this.collabV2Adapter.getStatus().lastServerRevision,
+              { reason: 'AUTHORITATIVE_SNAPSHOT_RECOVERY' }
             )
           }
         },
         onRejected: (op, err) => {
+          if (err && err.code === 'SOP_CONFIRM_REQUIRED') {
+            this.promptSopConfirmation(op, err)
+            return
+          }
           if (err && (err.statusCode === 403 || err.code === 'FORBIDDEN')) {
             this.onAclDenied()
           }
@@ -712,7 +717,9 @@ export default {
               err.code === 'NODE_DELETED' ||
               err.code === 'PARENT_DELETED' ||
               err.code === 'MOVE_CONFLICT' ||
-              err.code === 'DROPPED_DELETED')
+              err.code === 'DROPPED_DELETED' ||
+              err.code === 'SOP_CONFIRM_REQUIRED' ||
+              err.code === 'FORBIDDEN')
           if (
             !skipHttp &&
             !this._roomLoadFailed &&
@@ -747,6 +754,10 @@ export default {
           cooperate.establishV2HistoryBaseline()
         }
         if (snap.saveState === 'saved') this.saveStatus = 'saved'
+        else if (snap.saveState === 'requires_confirmation') {
+          this.saveStatus = 'saveError'
+          this.saveError = '需要确认 SOP 修改'
+        }
         else if (snap.status === 'reconnecting' || snap.saveState === 'resync') {
           this.saveStatus = 'reconnecting'
           this.saveError = ''
@@ -2018,6 +2029,31 @@ export default {
       this.loadMembers()
       await this.afterMapOpened()
       return true
+    },
+
+    async promptSopConfirmation(op) {
+      if (this._sopPrompting) return
+      this._sopPrompting = true
+      try {
+        await this.$confirm(
+          '此操作会修改 SOP 根节点，确认后才会提交。取消则丢弃该次修改。',
+          '确认修改 SOP',
+          { type: 'warning', distinguishCancelAndClose: true }
+        )
+        if (!this.collabV2Adapter || !op) return
+        const payload = Object.assign({}, op.payload || {}, {
+          confirm_sop_change: true
+        })
+        await this.collabV2Adapter.submitOperation({
+          type: op.type,
+          payload,
+          roomKey: op.roomKey || this.roomName
+        })
+      } catch (err) {
+        if (err === 'cancel' || err === 'close') return
+      } finally {
+        this._sopPrompting = false
+      }
     },
 
     async openSavedRoom(options = {}) {

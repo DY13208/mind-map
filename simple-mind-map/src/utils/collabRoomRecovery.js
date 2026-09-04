@@ -64,7 +64,12 @@ function shouldQuarantineOutboxOp(op) {
   if (
     code === 'IMPORT_TOO_LARGE' ||
     code === 'IMPORT_APPLY_FAILED' ||
-    code === 'OUTBOX_NON_CLONEABLE_PAYLOAD'
+    code === 'OUTBOX_NON_CLONEABLE_PAYLOAD' ||
+    code === 'SOP_CONFIRM_REQUIRED' ||
+    code === 'FORBIDDEN' ||
+    code === 'INVALID_CLIENT_ID' ||
+    code === 'UID_REUSED' ||
+    code === 'UID_ALREADY_EXISTS'
   ) {
     return true
   }

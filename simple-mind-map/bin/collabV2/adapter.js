@@ -4,6 +4,14 @@ const {
   summarizeOutbox
 } = require('../collabRoomRecovery')
 const {
+  isTerminalError,
+  isRetryableError,
+  dependsOnBlockedOp,
+  shouldQuarantineError,
+  writeClientHeartbeat,
+  canClaimOrphan
+} = require('../collabReliability')
+const {
   createOpId,
   isOpId,
   normalizeOperation,
@@ -281,7 +289,14 @@ function createCollaborationAdapter(options = {}) {
     aheadAttempts: 0,
     maxSendingObserved: 0,
     versionAheadCount: 0,
-    droppedInsertOpIds: new Set()
+    droppedInsertOpIds: new Set(),
+    lastSyncAt: 0,
+    lastAckAt: 0,
+    reconnectCount: 0,
+    gapRecoveredOps: 0,
+    snapshotRecoveryCount: 0,
+    requiresConfirmation: null,
+    heartbeatTimer: null
   }
   let socket = options.socket || null
   let connecting = null
@@ -410,7 +425,20 @@ function createCollaborationAdapter(options = {}) {
             details: last.details || {},
             recovered: !!state.lastErrorRecovered && !state.currentError
           }
-        : null
+        : null,
+      lastSyncAt: Number(state.lastSyncAt || 0),
+      lastAckAt: Number(state.lastAckAt || 0),
+      reconnectCount: Number(state.reconnectCount || 0),
+      gapRecoveredOps: Number(state.gapRecoveredOps || 0),
+      snapshotRecoveryCount: Number(state.snapshotRecoveryCount || 0),
+      originalBaseRevision:
+        (last && last.details && last.details.originalBaseRevision) != null
+          ? last.details.originalBaseRevision
+          : '',
+      sendBaseRevision:
+        (last && last.details && last.details.sendBaseRevision) != null
+          ? last.details.sendBaseRevision
+          : ''
     })
   }
 
@@ -558,6 +586,7 @@ function createCollaborationAdapter(options = {}) {
       if (state.phase === 'OFFLINE' || state.status === 'reconnecting') {
         return 'offline'
       }
+      if (current.code === 'SOP_CONFIRM_REQUIRED') return 'requires_confirmation'
       return 'error'
     }
     if (state.phase === 'ERROR' && current && current.code) return 'error'
@@ -628,6 +657,12 @@ function createCollaborationAdapter(options = {}) {
       socketId: socket && socket.id ? socket.id : '',
       socketConnected: !!(socket && socket.connected),
       lastSync: state.lastSync || null,
+      lastSyncAt: Number(state.lastSyncAt || 0),
+      lastAckAt: Number(state.lastAckAt || 0),
+      reconnectCount: Number(state.reconnectCount || 0),
+      gapRecoveredOps: Number(state.gapRecoveredOps || 0),
+      snapshotRecoveryCount: Number(state.snapshotRecoveryCount || 0),
+      requiresConfirmation: state.requiresConfirmation || null,
       outboxInspect: state.outboxInspect || []
     }
   }
@@ -752,6 +787,7 @@ function createCollaborationAdapter(options = {}) {
     })
     socket.on('disconnect', () => {
       if (state.status !== 'disconnected') {
+        state.reconnectCount = Number(state.reconnectCount || 0) + 1
         state.stage = STAGES.RECONNECT
         setStatus('reconnecting', {
           saveState: 'offline',
@@ -827,8 +863,11 @@ function createCollaborationAdapter(options = {}) {
       }
     }
     setStatus('live', { saveState: 'saved', error: '', errorCode: '', phase: 'LIVE' })
+    startHeartbeat()
     await quarantineStaleImportOps()
+    await claimOrphanOutbox()
     await rebaseUnsent(state.lastServerRevision)
+    await refreshOutboxCounts()
     kickDrain()
     return result
   }
@@ -988,6 +1027,7 @@ function createCollaborationAdapter(options = {}) {
       clientId
     })
     op.clientId = clientId
+    op.userId = state.userId || op.userId
     if (!op.opId) op.opId = createOpId()
     if (!isOpId(op.opId)) {
       const err = new Error('opId必须是UUID')
@@ -1119,23 +1159,85 @@ function createCollaborationAdapter(options = {}) {
     return row
   }
 
+  function localStorageRef() {
+    try {
+      return typeof localStorage !== 'undefined' ? localStorage : null
+    } catch (err) {
+      return null
+    }
+  }
+
+  function startHeartbeat() {
+    const storage = localStorageRef()
+    writeClientHeartbeat(storage, state.clientId)
+    if (state.heartbeatTimer) return
+    state.heartbeatTimer = setInterval(() => {
+      writeClientHeartbeat(localStorageRef(), state.clientId)
+    }, 3000)
+    if (state.heartbeatTimer.unref) state.heartbeatTimer.unref()
+  }
+
+  async function refreshOutboxCounts() {
+    const rows = await outbox.list(state.clientId, state.roomKey)
+    state.outboxInspect = summarizeOutbox(rows)
+    state.outboxPending = (rows || []).filter(
+      item =>
+        item &&
+        (item.status === 'pending' ||
+          item.status === 'retryable' ||
+          item.status === 'sending')
+    ).length
+  }
+
+  async function claimOrphanOutbox() {
+    const storage = localStorageRef()
+    const rows = await outbox.list('', state.roomKey)
+    for (const item of rows) {
+      if (!canClaimOrphan(item, state, storage)) continue
+      await outbox.update(item.opId, {
+        clientId: state.clientId,
+        claimedFrom: item.clientId,
+        userId: item.userId || state.userId
+      })
+      adapterTrace('outbox.claim', {
+        opId: item.opId,
+        from: item.clientId,
+        to: state.clientId
+      })
+    }
+  }
+
   async function quarantineStaleImportOps() {
     const pending = await outbox.list(state.clientId, state.roomKey)
-    state.outboxInspect = summarizeOutbox(pending)
-    for (const item of pending) {
-      if (!item || item.status === 'quarantined' || item.status === 'failed') {
+    const roomRows = await outbox.list('', state.roomKey)
+    const rows = pending.concat(
+      roomRows.filter(item => !pending.some(row => row.opId === item.opId))
+    )
+    state.outboxInspect = summarizeOutbox(rows)
+    for (const item of rows) {
+      if (!item || item.status === 'quarantined') continue
+      const type = normalizeType(item.type)
+      const code = item.errorCode || item.code || ''
+      const knownSopOp = item.opId === '753eb6d8-3241-4e00-94dd-a7907dbd5454'
+      if (
+        !shouldQuarantineOutboxOp(item) &&
+        type !== 'map.replace' &&
+        !shouldQuarantineError(code, item) &&
+        !knownSopOp &&
+        String(item.error || '').indexOf('SOP_CONFIRM_REQUIRED') < 0 &&
+        String(item.error || '').indexOf('confirm_sop_change') < 0
+      ) {
         continue
       }
-      const type = normalizeType(item.type)
-      if (!shouldQuarantineOutboxOp(item) && type !== 'map.replace') continue
       await outbox.update(item.opId, {
         status: 'quarantined',
-        error: 'OUTBOX_QUARANTINED_MAP_REPLACE',
-        errorCode: item.errorCode || 'OUTBOX_QUARANTINED_MAP_REPLACE'
+        error: item.error || code || 'OUTBOX_QUARANTINED',
+        errorCode: code || (knownSopOp ? 'SOP_CONFIRM_REQUIRED' : 'OUTBOX_QUARANTINED')
       })
       adapterTrace('outbox.quarantine', {
         opId: item.opId,
         type: item.type,
+        code: code || item.error,
         roomKey: state.roomKey
       })
     }
@@ -1157,10 +1259,17 @@ function createCollaborationAdapter(options = {}) {
         clientSeq: item.clientSeq
       }
       await outbox.update(item.opId, {
+        originalBaseRevision:
+          item.originalBaseRevision != null
+            ? item.originalBaseRevision
+            : item.observedRevision != null
+              ? item.observedRevision
+              : item.baseRevision,
         observedRevision:
           item.observedRevision != null ? item.observedRevision : item.baseRevision,
         baseRevision: base,
-        status: item.status === 'failed' || item.status === 'retryable' ? 'pending' : item.status,
+        sendBaseRevision: base,
+        status: item.status === 'retryable' ? 'pending' : item.status,
         payload: nextPayload
       })
     }
@@ -1182,10 +1291,16 @@ function createCollaborationAdapter(options = {}) {
         await outbox.update(sending[i].opId, { status: 'pending' })
       }
     }
+    const blocked = pending.filter(
+      item => item && (item.status === 'quarantined' || item.status === 'failed')
+    )
+    const drainable = active.filter(
+      item => !blocked.some(fail => dependsOnBlockedOp(item, fail))
+    )
     const head =
-      active.find(item => item.status === 'sending') ||
-      active.find(item => item.status === 'pending' || item.status === 'retryable')
-    return { head, pending: active, index: head ? active.indexOf(head) : -1 }
+      drainable.find(item => item.status === 'sending') ||
+      drainable.find(item => item.status === 'pending' || item.status === 'retryable')
+    return { head, pending: drainable, index: head ? drainable.indexOf(head) : -1 }
   }
 
   async function recoverVersionAhead(op, err, extra) {
@@ -1198,28 +1313,6 @@ function createCollaborationAdapter(options = {}) {
       details: { ...row, ...(err && err.details) }
     })
     state.aheadAttempts += 1
-    if (state.aheadAttempts > 1) {
-      state.drainPaused = true
-      const fatal = err || new Error('VERSION_AHEAD')
-      fatal.code = 'VERSION_AHEAD'
-      fatal.details = row
-      settleAck(op.opId, fatal)
-      setStatus('disconnected', {
-        saveState: 'error',
-        error:
-          'VERSION_AHEAD baseRevision=' +
-          row.baseRevision +
-          ' roomCurrentRevision=' +
-          row.roomCurrentRevision,
-        errorCode: 'VERSION_AHEAD',
-        phase: 'ERROR',
-        stage: STAGES.SERVER_APPLY,
-        opId: op && op.opId,
-        details: row
-      })
-      if (options.onRejected) options.onRejected(op, fatal)
-      return false
-    }
     state.drainPaused = true
     setStatus('live', {
       saveState: 'resync',
@@ -1256,6 +1349,14 @@ function createCollaborationAdapter(options = {}) {
 
   async function sendOp(op, extra = {}) {
     const sendBase = Math.max(0, Number(state.lastServerRevision) || 0)
+    const originalBase =
+      op.originalBaseRevision != null
+        ? op.originalBaseRevision
+        : op.observedRevision != null
+          ? op.observedRevision
+          : op.baseRevision
+    op.originalBaseRevision = originalBase
+    op.sendBaseRevision = sendBase
     op.baseRevision = sendBase
     op.payload = {
       ...(op.payload || {}),
@@ -1265,6 +1366,8 @@ function createCollaborationAdapter(options = {}) {
     beginSending(op)
     await outbox.update(op.opId, {
       status: 'sending',
+      originalBaseRevision: originalBase,
+      sendBaseRevision: sendBase,
       baseRevision: sendBase,
       payload: op.payload
     })
@@ -1379,22 +1482,41 @@ function createCollaborationAdapter(options = {}) {
         })
         return { skipped: true, err }
       }
-      await outbox.update(op.opId, { status: 'failed', error: err.message })
+      const terminal = shouldQuarantineError(err.code, op) || isTerminalError(err.code)
+      await outbox.update(op.opId, {
+        status: terminal ? 'quarantined' : 'failed',
+        error: err.message,
+        errorCode: err.code,
+        originalBaseRevision: originalBase,
+        sendBaseRevision: sendBase
+      })
       settleAck(op.opId, err)
+      await refreshOutboxCounts()
       const stage =
         err.code === 'FORBIDDEN'
           ? STAGES.SERVER_ACL
           : isPgCommitCode(err.code, err.message)
             ? STAGES.PG_COMMIT
             : STAGES.SERVER_APPLY
+      if (err.code === 'SOP_CONFIRM_REQUIRED') {
+        state.requiresConfirmation = {
+          opId: op.opId,
+          type: op.type,
+          originalBaseRevision: originalBase,
+          sendBaseRevision: sendBase
+        }
+      }
       setStatus('live', {
-        saveState: 'error',
+        saveState:
+          err.code === 'SOP_CONFIRM_REQUIRED' ? 'requires_confirmation' : 'error',
         error: err.message,
         errorCode: err.code,
         stage,
         opId: op.opId,
         details: {
           statusCode: err.statusCode,
+          originalBaseRevision: originalBase,
+          sendBaseRevision: sendBase,
           baseRevision: sendBase,
           clientSeq: op.clientSeq,
           outboxIndex: extra.outboxIndex,
@@ -1412,8 +1534,13 @@ function createCollaborationAdapter(options = {}) {
     const rev = Number(result.serverRevision || 0)
     advanceRevision(rev)
     state.aheadAttempts = 0
+    state.lastAckAt = Date.now()
+    if (state.currentError && state.currentError.code === 'SOP_CONFIRM_REQUIRED') {
+      // keep lastError; room continues
+    }
     endSending()
     settleAck(op.opId, null, result)
+    await refreshOutboxCounts()
     setStatus('live', { saveState: 'saved', error: '' })
     const kind = normalizeType(op.type)
     if (kind === 'operation.undo') {
@@ -1666,8 +1793,16 @@ function createCollaborationAdapter(options = {}) {
     while (result && result.ok !== false) {
       if (result.reload) {
         advanceRevision(result.serverRevision || 0)
+        state.snapshotRecoveryCount = Number(state.snapshotRecoveryCount || 0) + 1
+        state.lastSyncAt = Date.now()
         state.lastSync = { pages: pages + 1, reload: true, syncPages }
-        if (options.onReloadRequired) await options.onReloadRequired(result)
+        if (options.onReloadRequired) {
+          await options.onReloadRequired({
+            ...result,
+            reason: 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
+          })
+        }
+        await rebaseUnsent(state.lastServerRevision)
         setStatus('live', { saveState: 'saved', error: '', phase: 'LIVE' })
         return result
       }
@@ -1686,6 +1821,7 @@ function createCollaborationAdapter(options = {}) {
       })
       for (const op of result.operations || []) {
         await applyRemoteOperation(op, { fromSync: true })
+        state.gapRecoveredOps = Number(state.gapRecoveredOps || 0) + 1
       }
       if (result.serverRevision) {
         state.serverRevision = Math.max(
@@ -1712,6 +1848,7 @@ function createCollaborationAdapter(options = {}) {
       hasMore: !!(syncPages.length && syncPages[syncPages.length - 1].hasMore),
       syncPages
     }
+    state.lastSyncAt = Date.now()
     setStatus('live', { saveState: 'saved', error: '', phase: 'LIVE' })
     return result
   }
