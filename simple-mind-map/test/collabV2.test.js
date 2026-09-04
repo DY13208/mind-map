@@ -6,6 +6,10 @@ const { createOutbox } = require('../bin/collabV2/outbox')
 const { createOpId, normalizeOperation, isOpId } = require('../bin/collabV2/protocol')
 const { createPresenceHub } = require('../bin/collabV2/presenceHub')
 
+const TEST_HANG_TRACE = process.env.TEST_HANG_TRACE === '1'
+const TEST_CASE_TIMEOUT_MS = Number(process.env.COLLAB_V2_TEST_TIMEOUT_MS || 15000)
+const liveAdapters = new Set()
+
 function wait(ms = 25) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
@@ -152,14 +156,39 @@ function createHub(engine) {
   return { createSocket, sockets }
 }
 
-const liveAdapters = []
+async function cleanupTestClients() {
+  const adapters = Array.from(liveAdapters)
+  liveAdapters.clear()
+  await Promise.all(
+    adapters.map(adapter => Promise.resolve(adapter.disconnect()).catch(() => undefined))
+  )
+}
 
 async function disposeClients() {
-  while (liveAdapters.length) {
-    const adapter = liveAdapters.pop()
-    try {
-      if (adapter && adapter.disconnect) await adapter.disconnect()
-    } catch (err) {}
+  await cleanupTestClients()
+}
+
+async function runTestCase(name, test) {
+  const startedAt = Date.now()
+  let timer = null
+  const timeout = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(
+        `TEST_HANG_TRACE timeout: ${name} exceeded ${TEST_CASE_TIMEOUT_MS}ms`
+      )
+      error.code = 'TEST_HANG_TIMEOUT'
+      reject(error)
+    }, TEST_CASE_TIMEOUT_MS)
+  })
+  if (TEST_HANG_TRACE) console.error(`[TEST_HANG_TRACE] START ${name}`)
+  try {
+    await Promise.race([test(), timeout])
+    if (TEST_HANG_TRACE) {
+      console.error(`[TEST_HANG_TRACE] PASS ${name} ${Date.now() - startedAt}ms`)
+    }
+  } finally {
+    clearTimeout(timer)
+    await cleanupTestClients()
   }
 }
 
@@ -184,12 +213,23 @@ async function makeClient(hub, opts) {
     },
     onRejected: (op, err) => rejected.push({ op, err })
   })
+  if (TEST_HANG_TRACE) {
+    const submitOperation = adapter.submitOperation
+    adapter.submitOperation = async operation => {
+      const target =
+        operation && operation.payload && (operation.payload.uid || operation.payload.parent)
+      console.error(`[TEST_HANG_TRACE] OP_START ${opts.userId} ${operation.type} ${target || ''}`)
+      const result = await submitOperation(operation)
+      console.error(`[TEST_HANG_TRACE] OP_DONE ${opts.userId} ${operation.type} ${target || ''}`)
+      return result
+    }
+  }
   await adapter.connect({
     roomKey: opts.roomKey,
     userId: opts.userId,
     lastServerRevision: opts.lastServerRevision || 0
   })
-  liveAdapters.push(adapter)
+  liveAdapters.add(adapter)
   return { adapter, applied, rejected, socket }
 }
 
@@ -1558,42 +1598,42 @@ async function testGapPagination() {
 }
 
 async function main() {
-  await testProtocolAndOutbox()
-  await testPresenceSoftLock()
-  await testThreeClientsAndConflicts()
-  await testAckLossReconnectGapUndoTabs()
-  await testViewerAndDemote()
-  await testOfflineOutboxRefresh()
-  await testUndoRedoConflictAndRestore()
-  await testGapPagination()
-  await testSaveStateFromSocketOutboxAck()
-  await testStructuredLastError()
-  await testEmptyClientIdRejected()
-  await testSameUserTwoClients()
-  await testDifferentUserTwoClients()
-  await testSequentialOutboxDrainBurst()
-  await testRapidTextThirty()
-  await testPasteThenImmediateUpdate()
-  await testVersionAheadRecoveryAndStaleOutbox()
-  await testTwoClientsInterleaveWithoutAhead()
-  await testErrorClearsAfterRecovery()
-  await testTextInsertDeleteUndoRedo()
-  await testSequentialAndMultiUserUndo()
-  await testUidReusedSkipDoesNotSticky()
-  await testDropPendingInsertThenDelete()
-  await testDeleteAfterAckedInsert()
-  await testUpdateDoesNotReorderRemoteSiblings()
-  await testPresenceDoesNotChangeSaveState()
-  await testReplaceAllConflictViaAdapter()
-  await testThreeDuplicateBetaReplaceOneAndAll()
-  await testQueryNeedsSearchWithoutEnter()
+  const cases = [
+    ['ProtocolAndOutbox', testProtocolAndOutbox],
+    ['PresenceSoftLock', testPresenceSoftLock],
+    ['ThreeClientsAndConflicts', testThreeClientsAndConflicts],
+    ['AckLossReconnectGapUndoTabs', testAckLossReconnectGapUndoTabs],
+    ['ViewerAndDemote', testViewerAndDemote],
+    ['OfflineOutboxRefresh', testOfflineOutboxRefresh],
+    ['UndoRedoConflictAndRestore', testUndoRedoConflictAndRestore],
+    ['GapPagination', testGapPagination],
+    ['SaveStateFromSocketOutboxAck', testSaveStateFromSocketOutboxAck],
+    ['StructuredLastError', testStructuredLastError],
+    ['EmptyClientIdRejected', testEmptyClientIdRejected],
+    ['SameUserTwoClients', testSameUserTwoClients],
+    ['DifferentUserTwoClients', testDifferentUserTwoClients],
+    ['SequentialOutboxDrainBurst', testSequentialOutboxDrainBurst],
+    ['RapidTextThirty', testRapidTextThirty],
+    ['PasteThenImmediateUpdate', testPasteThenImmediateUpdate],
+    ['VersionAheadRecoveryAndStaleOutbox', testVersionAheadRecoveryAndStaleOutbox],
+    ['TwoClientsInterleaveWithoutAhead', testTwoClientsInterleaveWithoutAhead],
+    ['ErrorClearsAfterRecovery', testErrorClearsAfterRecovery],
+    ['TextInsertDeleteUndoRedo', testTextInsertDeleteUndoRedo],
+    ['SequentialAndMultiUserUndo', testSequentialAndMultiUserUndo],
+    ['UidReusedSkipDoesNotSticky', testUidReusedSkipDoesNotSticky],
+    ['DropPendingInsertThenDelete', testDropPendingInsertThenDelete],
+    ['DeleteAfterAckedInsert', testDeleteAfterAckedInsert],
+    ['UpdateDoesNotReorderRemoteSiblings', testUpdateDoesNotReorderRemoteSiblings],
+    ['PresenceDoesNotChangeSaveState', testPresenceDoesNotChangeSaveState],
+    ['ReplaceAllConflictViaAdapter', testReplaceAllConflictViaAdapter],
+    ['ThreeDuplicateBetaReplaceOneAndAll', testThreeDuplicateBetaReplaceOneAndAll],
+    ['QueryNeedsSearchWithoutEnter', testQueryNeedsSearchWithoutEnter]
+  ]
+  for (const [name, test] of cases) await runTestCase(name, test)
   console.log('collabV2 tests ok')
 }
 
-main()
-  .then(() => disposeClients())
-  .catch(err => {
-    console.error(err)
-    disposeClients()
-    process.exit(1)
-  })
+main().catch(err => {
+  console.error(err)
+  process.exit(1)
+})
