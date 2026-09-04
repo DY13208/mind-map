@@ -68,7 +68,9 @@ export function normalizeRoomDto(apiRoom = {}, extras = {}) {
     role,
     roleLabel:
       role === 'owner' ? 'Owner' : role === 'editor' ? 'Editor' : role === 'viewer' ? 'Viewer' : role,
-    favorite: !!extras.favorite,
+    favorite: !!(apiRoom.favorite || extras.favorite),
+    lastOpenedAt: apiRoom.lastOpenedAt || apiRoom.last_opened_at || extras.lastOpenedAt || null,
+    deletedAt: apiRoom.deletedAt || apiRoom.deleted_at || extras.deletedAt || null,
     sharedWithMe: isSharedWithMe({
       role,
       ownerUserId: ownerId,

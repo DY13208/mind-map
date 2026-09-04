@@ -8,7 +8,7 @@ Folders: `/api/folders` only.
 
 Tree loading for the editor stays the existing Collaboration V2 / `GET /api/files/:roomKey` hydrate path. File System APIs never return `room_nodes`.
 
-Favorites / Recent / Trash / Team Space are **not** implemented. C3 keeps mocks for those.
+Favorites / Recent / Trash are implemented on `rooms` + `room_user_state`. Team Space is **not** implemented.
 
 ---
 
@@ -59,6 +59,8 @@ Collab operation commit updates both in the **same** `UPDATE rooms` as `version`
 
 Never returned: `nodes`, operations, checkpoint trees, full `rooms.metadata`.
 
+`favorite` / `lastOpenedAt` come from `room_user_state` (current user), never from `rooms` columns.
+
 ---
 
 ## List rooms
@@ -67,7 +69,7 @@ Never returned: `nodes`, operations, checkpoint trees, full `rooms.metadata`.
 
 Query: `folderId` (`root` or omit for all accessible), `q` / `search` (title `ILIKE` only — not node text), `sort`=`updatedAt`|`createdAt`|`title`, `order`=`asc`|`desc`, `limit`, `offset`, `cursor`.
 
-Default `sort=updatedAt` `order=desc`. Recent/`lastOpenedAt` is **not** this phase.
+Default `sort=updatedAt` `order=desc`. Recent is not this list; use `GET /api/files/recent`.
 
 ```json
 {
@@ -157,7 +159,7 @@ First version: **root folders only** (`parent_id` must be null). Virtual root = 
 | `INVALID_FOLDER_NAME` | 400 |
 | `INVALID_MOVE` | 400 |
 | `INVALID_ROOM_KEY` | 400 |
-| `ROOM_ALREADY_EXISTS` / `ROOM_DELETED` | 409 |
+| `ROOM_ALREADY_EXISTS` / `ROOM_DELETED` / `ROOM_TRASHED` / `ROOM_NOT_TRASHED` | 409 |
 | `FOLDER_NAME_CONFLICT` | 409 |
 | `FOLDER_NOT_EMPTY` | 409 |
 
@@ -175,12 +177,20 @@ First version: **root folders only** (`parent_id` must be null). Virtual root = 
 | open editor | existing roomKey hydrate (not this DTO) |
 | rename file | `PATCH /api/files/:roomKey` `{ title }` |
 | move file | `POST /api/files/:roomKey/move` |
+| recent | `GET /api/files/recent` |
+| favorites | `GET /api/files/favorites` |
+| favorite | `POST/DELETE /api/files/:roomKey/favorite` |
+| record open | `POST /api/files/:roomKey/open` or editor `format=full\|nodes` |
+| trash list | `GET /api/files/trash` |
+| move to trash | `POST /api/files/:roomKey/trash` |
+| restore | `POST /api/files/:roomKey/restore` |
+| permanent delete | `DELETE /api/files/:roomKey/permanent` |
 | list folders | `GET /api/folders` |
 | create folder | `POST /api/folders` |
 | rename folder | `PATCH /api/folders/:id` |
 | delete folder | `DELETE /api/folders/:id` |
 
-Swap mock → HTTP without changing page structure. Do not call File System for History UI, Favorites, Recycle, or Team Space yet.
+Swap mock → HTTP without changing page structure. Team Space stays mock.
 
 ---
 

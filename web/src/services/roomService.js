@@ -7,15 +7,7 @@ import {
   normalizeFolderId,
   normalizeRoomDto
 } from './roomDto'
-import {
-  mockRequest,
-  mockStore,
-  requiredItem,
-  validName
-} from './mockStore'
-
-const find = id => requiredItem(mockStore.rooms, id, '脑图')
-const update = (id, changes) => Object.assign(find(id), changes)
+import { validName } from './mockStore'
 
 function wrapList(list, extra = {}) {
   const rows = list || []
@@ -28,24 +20,20 @@ function wrapList(list, extra = {}) {
   }
 }
 
-function applyFavorite(room) {
-  const key = room.roomKey || room.id
-  return { ...room, favorite: mockStore.favoriteKeys.has(key) }
-}
-
 function currentUserId() {
   const user = getCurrentUser()
   return (user && user.id) || ''
 }
 
 function toRoomDto(item, extras = {}) {
-  return applyFavorite(
-    normalizeRoomDto(item, { currentUserId: currentUserId(), ...extras })
-  )
+  return normalizeRoomDto(item, { currentUserId: currentUserId(), ...extras })
 }
 
-function isMockListMode(filters = {}) {
-  return !!(filters.trash || filters.favorite || filters.recent)
+function listPath(filters = {}) {
+  if (filters.trash) return '/api/files/trash'
+  if (filters.favorite) return '/api/files/favorites'
+  if (filters.recent) return '/api/files/recent'
+  return '/api/files'
 }
 
 async function listRealRooms(filters = {}) {
@@ -62,7 +50,7 @@ async function listRealRooms(filters = {}) {
   if (filters.offset != null) params.set('offset', String(filters.offset))
   if (filters.cursor) params.set('cursor', filters.cursor)
   const query = params.toString()
-  const data = await productRequest(`/api/files${query ? `?${query}` : ''}`)
+  const data = await productRequest(`${listPath(filters)}${query ? `?${query}` : ''}`)
   const foldersById = filters.foldersById || {}
   let list = (data.list || []).map(item =>
     toRoomDto(item, {
@@ -94,23 +82,6 @@ async function getRoom(roomKey) {
 export default {
   backendStatus: C3_SERVICE_STATUS_MATRIX.Room,
   listRooms: async (filters = {}) => {
-    if (isMockListMode(filters)) {
-      return mockRequest(() =>
-        wrapList(
-          mockStore.rooms.filter(
-            room =>
-              (filters.trash ? !!room.deletedAt : !room.deletedAt) &&
-              (!filters.favorite || room.favorite) &&
-              (!filters.recent || !!room.lastOpenedAt) &&
-              (!filters.role ||
-                String(room.role).toLowerCase() ===
-                  String(filters.role).toLowerCase()) &&
-              (filters.folderId === undefined ||
-                room.folderId === filters.folderId)
-          )
-        )
-      )
-    }
     try {
       return await listRealRooms(filters)
     } catch (error) {
@@ -169,46 +140,65 @@ export default {
       throw error
     }
   },
-  markOpened: id =>
-    mockRequest(() => {
-      try {
-        return update(id, { lastOpenedAt: new Date().toISOString() })
-      } catch (error) {
-        return { ok: true, backendStatus: 'MOCK_PENDING' }
-      }
-    }),
-  deleteRoom: id =>
-    mockRequest(() => {
-      try {
-        return update(id, { deletedAt: new Date().toISOString() })
-      } catch (error) {
-        const err = new Error('回收站尚未接入，暂不可删除真实脑图')
-        err.code = 'TRASH_BACKEND_PENDING'
-        throw err
-      }
-    }),
-  restoreRoom: id => mockRequest(() => update(id, { deletedAt: null })),
-  permanentDelete: id =>
-    mockRequest(() => {
-      if (!find(id).deletedAt) throw new Error('只能永久删除回收站中的脑图')
-      mockStore.rooms.splice(
-        mockStore.rooms.findIndex(room => room.id === id),
-        1
+  markOpened: async roomKey => {
+    try {
+      const data = await productRequest(
+        `/api/files/${encodeURIComponent(roomKey)}/open`,
+        { method: 'POST' }
       )
-      delete mockStore.roomMembers[id]
-      mockStore.versions = mockStore.versions.filter(
-        version => version.roomId !== id
+      return toRoomDto(data.file || data.room || data)
+    } catch (error) {
+      error.message = userMessageFromError(error)
+      throw error
+    }
+  },
+  deleteRoom: async roomKey => {
+    try {
+      const data = await productRequest(
+        `/api/files/${encodeURIComponent(roomKey)}/trash`,
+        { method: 'POST' }
+      )
+      return toRoomDto(data.file || data.room || data)
+    } catch (error) {
+      error.message = userMessageFromError(error)
+      throw error
+    }
+  },
+  restoreRoom: async roomKey => {
+    try {
+      const data = await productRequest(
+        `/api/files/${encodeURIComponent(roomKey)}/restore`,
+        { method: 'POST' }
+      )
+      return toRoomDto(data.file || data.room || data)
+    } catch (error) {
+      error.message = userMessageFromError(error)
+      throw error
+    }
+  },
+  permanentDelete: async roomKey => {
+    try {
+      await productRequest(
+        `/api/files/${encodeURIComponent(roomKey)}/permanent`,
+        { method: 'DELETE' }
       )
       return { ok: true }
-    }),
-  toggleFavorite: id =>
-    mockRequest(() => {
-      if (mockStore.favoriteKeys.has(id)) mockStore.favoriteKeys.delete(id)
-      else mockStore.favoriteKeys.add(id)
-      try {
-        return update(id, { favorite: mockStore.favoriteKeys.has(id) })
-      } catch (error) {
-        return { id, roomKey: id, favorite: mockStore.favoriteKeys.has(id) }
-      }
-    })
+    } catch (error) {
+      error.message = userMessageFromError(error)
+      throw error
+    }
+  },
+  toggleFavorite: async roomKey => {
+    try {
+      const current = await getRoom(roomKey)
+      const data = await productRequest(
+        `/api/files/${encodeURIComponent(roomKey)}/favorite`,
+        { method: current.favorite ? 'DELETE' : 'POST' }
+      )
+      return toRoomDto(data.file || data.room || { ...current, favorite: !current.favorite })
+    } catch (error) {
+      error.message = userMessageFromError(error)
+      throw error
+    }
+  }
 }

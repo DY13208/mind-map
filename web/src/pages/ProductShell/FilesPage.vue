@@ -73,7 +73,7 @@
           v-for="room in visibleRooms"
           :key="room.roomKey || room.id"
           :room="room"
-          :allow-delete="false"
+          :allow-delete="!!room.canManage"
           @open="openRoom"
           @favorite="favorite"
           @rename="renameRoom"
@@ -86,7 +86,7 @@
       <RoomList
         v-if="mode !== 'trash' && view === 'list' && visibleRooms.length"
         :rooms="visibleRooms"
-        :allow-delete="false"
+        :allow-delete="true"
         @open="openRoom"
         @favorite="favorite"
         @rename="renameRoom"
@@ -382,9 +382,11 @@ export default {
     },
     async openRoom(room) {
       try {
+        const roomKey = room.roomKey || room.id
+        await roomService.markOpened(roomKey)
         await this.$router.push({
           path: '/',
-          query: { room: room.roomKey }
+          query: { room: roomKey }
         })
       } catch (error) {
         this.$message.error(userMessageFromError(error))
@@ -494,21 +496,24 @@ export default {
     favorite(room) {
       return this.perform(
         () => roomService.toggleFavorite(room.roomKey || room.id),
-        room.favorite ? '已取消收藏（仅本机会话）' : '已收藏（仅本机会话）'
+        room.favorite ? '已取消收藏' : '已收藏'
       )
     },
-    async deleteRoom() {
-      this.$message.warning('回收站尚未接入，暂不可删除真实脑图')
+    deleteRoom(room) {
+      return this.perform(
+        () => roomService.deleteRoom(room.roomKey || room.id),
+        '已移入回收站'
+      )
     },
     restore(room) {
       return this.perform(
-        () => roomService.restoreRoom(room.id),
-        '已恢复（Mock）'
+        () => roomService.restoreRoom(room.roomKey || room.id),
+        '已恢复'
       )
     },
     async permanentDelete(room) {
       const confirmed = await this.$confirm(
-        '永久删除「' + room.title + '」？此 Mock 操作不可恢复。',
+        '永久删除「' + room.title + '」？此操作不可恢复。',
         '永久删除',
         { type: 'warning' }
       )
@@ -516,8 +521,8 @@ export default {
         .catch(() => false)
       if (confirmed)
         await this.perform(
-          () => roomService.permanentDelete(room.id),
-          '已永久删除（Mock）'
+          () => roomService.permanentDelete(room.roomKey || room.id),
+          '已永久删除'
         )
     },
     formatDate(value) {

@@ -50,7 +50,8 @@ function createPgFileStore(pool) {
       const res = await pool.query(
         `select r.room_key, r.title, r.cos_key, r.version, r.metadata,
                 r.folder_id, r.owner_id, r.created_at, r.updated_at,
-                r.content_updated_at
+                r.content_updated_at, r.deleted_at, r.deleted_by,
+                r.deleted_from_folder_id
          from rooms r
          left join room_tombstones t on t.room_key = r.room_key
          where r.room_key = $1 and t.room_key is null`,
@@ -82,7 +83,8 @@ function createPgFileStore(pool) {
          values
            ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,$8,now(),now(),now())
          returning room_key, title, cos_key, version, metadata, folder_id,
-                   owner_id, created_at, updated_at, content_updated_at`,
+                   owner_id, created_at, updated_at, content_updated_at,
+                   deleted_at, deleted_by, deleted_from_folder_id`,
         [
           row.room_key,
           normalizeTitle(row.title),
@@ -205,6 +207,7 @@ function createPgFileStore(pool) {
                     select count(*)::int from rooms r
                     left join room_tombstones t on t.room_key = r.room_key
                     where r.folder_id = f.id and t.room_key is null
+                      and r.deleted_at is null
                   ) as room_count
            from folders f
            where f.deleted_at is null
@@ -218,6 +221,7 @@ function createPgFileStore(pool) {
                   select count(*)::int from rooms r
                   left join room_tombstones t on t.room_key = r.room_key
                   where r.folder_id = f.id and t.room_key is null
+                    and r.deleted_at is null
                 ) as room_count
          from folders f
          where f.deleted_at is null
@@ -230,6 +234,7 @@ function createPgFileStore(pool) {
                  on m.room_key = r2.room_key and m.user_id = $1
                left join room_tombstones t2 on t2.room_key = r2.room_key
                where r2.folder_id = f.id and t2.room_key is null
+                 and r2.deleted_at is null
              )
            )
          order by f.name asc`,
@@ -253,7 +258,7 @@ function createPgFileStore(pool) {
         `select count(*)::int as n
          from rooms r
          left join room_tombstones t on t.room_key = r.room_key
-         where r.folder_id = $1 and t.room_key is null`,
+         where r.folder_id = $1 and t.room_key is null and r.deleted_at is null`,
         [id]
       )
       return Number((res.rows[0] && res.rows[0].n) || 0)
@@ -261,6 +266,87 @@ function createPgFileStore(pool) {
     async deleteFolder(id) {
       queryCount += 1
       await pool.query(`delete from folders where id = $1`, [id])
+      return true
+    },
+    async upsertUserState(roomKey, userId, patch, db) {
+      const conn = db || pool
+      if (!db) queryCount += 1
+      const favorite =
+        patch.is_favorite == null ? null : !!patch.is_favorite
+      const res = await conn.query(
+        `insert into room_user_state
+           (room_key, user_id, is_favorite, last_opened_at, created_at, updated_at)
+         values
+           ($1, $2, coalesce($3, false), $4, now(), now())
+         on conflict (room_key, user_id) do update set
+           is_favorite = coalesce($3, room_user_state.is_favorite),
+           last_opened_at = coalesce($4, room_user_state.last_opened_at),
+           updated_at = now()
+         returning *`,
+        [
+          roomKey,
+          userId,
+          favorite,
+          patch.touch_opened ? new Date().toISOString() : patch.last_opened_at || null
+        ]
+      )
+      return res.rows[0]
+    },
+    async trashRoom(roomKey, userId) {
+      queryCount += 1
+      const res = await pool.query(
+        `update rooms
+         set deleted_from_folder_id = folder_id,
+             folder_id = null,
+             deleted_at = now(),
+             deleted_by = $2
+         where room_key = $1
+           and deleted_at is null
+           and not exists (
+             select 1 from room_tombstones t where t.room_key = rooms.room_key
+           )
+         returning room_key, title, folder_id, owner_id, version,
+                   created_at, updated_at, content_updated_at,
+                   deleted_at, deleted_by, deleted_from_folder_id`,
+        [roomKey, userId || '']
+      )
+      return res.rows[0] || null
+    },
+    async restoreRoom(roomKey, folderId) {
+      queryCount += 1
+      const res = await pool.query(
+        `update rooms
+         set folder_id = $2,
+             deleted_at = null,
+             deleted_by = null,
+             deleted_from_folder_id = null
+         where room_key = $1
+         returning room_key, title, folder_id, owner_id, version,
+                   created_at, updated_at, content_updated_at,
+                   deleted_at, deleted_by, deleted_from_folder_id`,
+        [roomKey, folderId]
+      )
+      return res.rows[0] || null
+    },
+    async purgeRoom(roomKey) {
+      const key = String(roomKey || '')
+      await this.withTx(async db => {
+        await db.query(`delete from room_history_audit where room_key = $1`, [key])
+        await db.query(`delete from room_versions where room_key = $1`, [key])
+        await db.query(`delete from room_checkpoints where room_key = $1`, [key])
+        await db.query(`delete from room_user_state where room_key = $1`, [key])
+        await db.query(`delete from room_members where room_key = $1`, [key])
+        await db.query(`delete from room_outbox where room_key = $1`, [key])
+        await db.query(`delete from room_operations where room_key = $1`, [key])
+        await db.query(
+          `delete from room_operations_archive where room_key = $1`,
+          [key]
+        )
+        await db.query(`delete from room_snapshots where room_key = $1`, [key])
+        await db.query(`delete from room_nodes where room_key = $1`, [key])
+        await db.query(`delete from room_tombstones where room_key = $1`, [key])
+        await db.query(`delete from rooms where room_key = $1`, [key])
+      })
       return true
     }
   }

@@ -67,13 +67,17 @@ export default {
       if (action === 'favorite')
         await this.perform(() =>
           roomService.toggleFavorite(this.roomKey(room)),
-          '收藏仅保存在本机会话'
+          '收藏已更新'
         )
       if (action === 'delete') {
-        this.$message.warning('回收站尚未接入，暂不可删除真实脑图')
+        await this.perform(
+          () => roomService.deleteRoom(this.roomKey(room)),
+          '已移入回收站'
+        )
       }
       if (action === 'open') {
         try {
+          await roomService.markOpened(this.roomKey(room))
           await this.$router.push({
             path: '/',
             query: { room: this.roomKey(room) }

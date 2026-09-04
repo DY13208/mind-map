@@ -53,6 +53,41 @@ async function initFileSystemSchema(db) {
     create index if not exists rooms_content_updated_at_desc_idx
     on rooms (content_updated_at desc)
   `)
+  await db.query(`
+    alter table rooms add column if not exists deleted_at timestamptz
+  `)
+  await db.query(`
+    alter table rooms add column if not exists deleted_by text
+  `)
+  await db.query(`
+    alter table rooms add column if not exists deleted_from_folder_id uuid
+  `)
+  await db.query(`
+    create index if not exists rooms_deleted_at_idx
+    on rooms (deleted_at)
+    where deleted_at is not null
+  `)
+  await db.query(`
+    create table if not exists room_user_state (
+      room_key text not null references rooms(room_key) on delete cascade,
+      user_id text not null,
+      is_favorite boolean not null default false,
+      last_opened_at timestamptz,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      primary key (room_key, user_id)
+    )
+  `)
+  await db.query(`
+    create index if not exists room_user_state_user_opened_idx
+    on room_user_state (user_id, last_opened_at desc)
+    where last_opened_at is not null
+  `)
+  await db.query(`
+    create index if not exists room_user_state_user_fav_idx
+    on room_user_state (user_id)
+    where is_favorite = true
+  `)
 }
 
 module.exports = { initFileSystemSchema }
