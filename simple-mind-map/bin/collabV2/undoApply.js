@@ -2,6 +2,12 @@ const { groupsForKeys, readFieldVersions } = require('../fieldMerge')
 const { applyDirect } = require('./directApplier')
 const { normalizeType } = require('./protocol')
 const { generalizationSignature } = require('../../src/utils/collabGeneralization')
+const {
+  isInsertLikeOperation,
+  rewriteInsertInverse,
+  assertPasteUndoSafe,
+  pasteUndoFullTreeForbidden
+} = require('../collabPasteUndo')
 
 function unique(list) {
   return Array.from(new Set((list || []).filter(Boolean)))
@@ -302,10 +308,22 @@ async function applyUndoOrRedo(store, raw, options = {}) {
   if (type === 'operation.undo') {
     const verdict = evaluateUndo(target, later, actorId)
     if (!verdict.ok) throw reject(verdict.code, verdict.error)
-    await assertFieldSafe(store, target, verdict.inverse, later, actorId, 'undo')
-    const generated = generatedFromInverse(verdict.inverse, {
+    const inverse = isInsertLikeOperation(target)
+      ? rewriteInsertInverse(target, verdict.inverse)
+      : verdict.inverse
+    await assertFieldSafe(store, target, inverse, later, actorId, 'undo')
+    const generated = generatedFromInverse(inverse, {
       undoOf: opIdOf(target)
     })
+    if (isInsertLikeOperation(target) && normalizeType(generated.type) === 'map.replace') {
+      throw pasteUndoFullTreeForbidden('applyUndoOrRedo', {
+        targetId: opIdOf(target),
+        targetType: typeOf(target)
+      })
+    }
+    if (isInsertLikeOperation(target)) {
+      assertPasteUndoSafe(target, generated)
+    }
     if (normalizeType(generated.type) === 'map.replace') {
       if (typeof options.applyReplace !== 'function') {
         throw reject('UNDO_UNSUPPORTED', '无法撤销整图导入')

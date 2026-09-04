@@ -332,11 +332,31 @@ export function leavePresence(roomKey, userId, clientId) {
   })
 }
 
-export function getFilePreview(roomKey, depth = 2) {
-  const query = Number(depth) > 0 ? `?depth=${Number(depth)}` : ''
-  return request(`/api/files/${encodeURIComponent(roomKey)}/preview${query}`, {
-    timeoutMs: 12000
+export function getFileMeta(roomKey) {
+  return request(`/api/files/${encodeURIComponent(roomKey)}/meta`, {
+    timeoutMs: 8000
   })
+}
+
+export function recoverFileRoom(roomKey, body = {}) {
+  return request(`/api/files/${encodeURIComponent(roomKey)}/recover`, {
+    method: 'POST',
+    timeoutMs: 20000,
+    body: JSON.stringify(body || {})
+  })
+}
+
+export function getFilePreview(roomKey, depth = 2, options = {}) {
+  const params = new URLSearchParams()
+  if (Number(depth) > 0) params.set('depth', String(Number(depth)))
+  if (options.safe) params.set('safe', '1')
+  const query = params.toString()
+  return request(
+    `/api/files/${encodeURIComponent(roomKey)}/preview${query ? `?${query}` : ''}`,
+    {
+      timeoutMs: options.timeoutMs || 12000
+    }
+  )
 }
 
 export function getFileSubtree(roomKey, uid, options = {}) {

@@ -14,7 +14,36 @@ function currentReturnTo() {
     .hash || ''}`
 }
 
+export async function probeCollabHealth(timeoutMs = 4000) {
+  try {
+    const response = await fetchWithTimeout(
+      getAuthApiUrl('/api/health'),
+      {
+        headers: { Accept: 'application/json' }
+      },
+      timeoutMs
+    )
+    if (!response.ok) {
+      const err = new Error('协作服务未启动或暂时不可用')
+      err.code = 'SERVICE_UNAVAILABLE'
+      throw err
+    }
+    return response.json().catch(() => ({ ok: true }))
+  } catch (err) {
+    if (err && err.code === 'SERVICE_UNAVAILABLE') throw err
+    if (err instanceof FetchTimeoutError) {
+      const timeout = new Error('协作服务未启动或暂时不可用')
+      timeout.code = 'SERVICE_UNAVAILABLE'
+      throw timeout
+    }
+    const down = new Error('无法连接协作服务，请确认服务已启动后重试')
+    down.code = 'SERVICE_UNAVAILABLE'
+    throw down
+  }
+}
+
 export async function loadAuthState() {
+  await probeCollabHealth(4000)
   let response
   try {
     response = await fetchWithTimeout(
@@ -27,7 +56,9 @@ export async function loadAuthState() {
     )
   } catch (err) {
     if (err instanceof FetchTimeoutError) {
-      throw new Error('认证服务响应超时，请稍后重试')
+      const timeout = new Error('AUTH_TIMEOUT')
+      timeout.code = 'AUTH_TIMEOUT'
+      throw timeout
     }
     if (err instanceof TypeError || String(err.message || '').includes('fetch')) {
       throw new Error('无法连接认证服务，请确认服务已启动后重试')

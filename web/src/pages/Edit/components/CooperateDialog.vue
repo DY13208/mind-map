@@ -312,6 +312,8 @@ import {
   beatPresence,
   leavePresence,
   getFilePreview,
+  getFileMeta,
+  recoverFileRoom,
   getFileSubtree,
   getFileExport,
   locateFileNode,
@@ -433,6 +435,9 @@ export default {
       lastConnectErrorAt: 0,
       reconnectNoticeTimer: null,
       joinedOnce: false,
+      roomLoadError: '',
+      roomLoadPhase: '',
+      _roomLoadFailed: false,
       fileList: [],
       filesLoading: false,
       fileQuery: '',
@@ -660,7 +665,12 @@ export default {
               userId: String(this.userId || '').replace(/^wecom:/, '')
             },
             withCredentials: true,
-            transports: ['websocket', 'polling']
+            transports: ['websocket', 'polling'],
+            reconnection: !this._roomLoadFailed,
+            reconnectionAttempts: this._roomLoadFailed ? 0 : 8,
+            reconnectionDelay: 800,
+            reconnectionDelayMax: 15000,
+            randomizationFactor: 0.4
           })
         },
         httpSync: async ({ afterRevision }) => {
@@ -678,6 +688,8 @@ export default {
           }
         },
         onReloadRequired: () => {
+          if (this._roomLoadFailed || this.roomLoadError) return
+          if (cooperate && cooperate.safeLoadMode) return
           if (cooperate && typeof cooperate.recoverHttpCollab === 'function') {
             return cooperate.recoverHttpCollab(
               this.collabV2Adapter &&
@@ -703,6 +715,8 @@ export default {
               err.code === 'DROPPED_DELETED')
           if (
             !skipHttp &&
+            !this._roomLoadFailed &&
+            !(cooperate && cooperate.safeLoadMode) &&
             cooperate &&
             typeof cooperate.recoverHttpCollab === 'function'
           ) {
@@ -1940,6 +1954,9 @@ export default {
         }
       }
       this.enableHttpCollab(preview)
+      if (cooperate) {
+        cooperate.safeLoadMode = !!(preview && preview.safe_load)
+      }
       cooperate.setPreviewApplied(true)
       // Apply canvas data, but do not block room entry on first paint.
       // Previously waited up to 4s for node_tree_render_end, which felt like a hang.
@@ -2007,6 +2024,9 @@ export default {
       const silent = !!options.silent
       const force = !!options.force
       const createIfMissing = !!options.createIfMissing
+      if (this._roomLoadFailed && !force) {
+        return
+      }
       if (this.connected) {
         if (!silent) this.$message.success(this.$t('cooperate.openSuccess'))
         return
@@ -2020,23 +2040,71 @@ export default {
         return
       }
       const attemptId = (this._openAttemptId = (this._openAttemptId || 0) + 1)
+      const started = Date.now()
+      const ROOM_LOAD_MS = 25000
       this.connecting = true
+      this.roomLoadError = ''
+      this.roomLoadPhase = 'ROOM_LOADING_TREE'
       this.setCooperateStatus('connecting')
       cooperate.setExpectRemoteDoc(true)
       let previewLoaded = false
+      const markPhase = phase => {
+        this.roomLoadPhase = phase
+        if (typeof window !== 'undefined') {
+          window.__ROOM_LOAD_TRACE__ = {
+            roomKey,
+            phase,
+            elapsedMs: Date.now() - started
+          }
+        }
+      }
       try {
         let preview = null
+        let meta = null
         try {
-          preview = await getFilePreview(roomKey, 2)
+          markPhase('ROOM_LOADING_TREE')
+          meta = await getFileMeta(roomKey)
+          if (typeof window !== 'undefined') {
+            window.__ROOM_INTEGRITY_REPORT__ = meta
+            window.__SERVICE_RECOVERY_TRACE__ = {
+              roomKey,
+              auth: 'skipped_here',
+              metaMs: Date.now() - started,
+              liveCount: meta && meta.liveCount,
+              ok: meta && meta.ok
+            }
+          }
+          if (meta && !meta.ok && Array.isArray(meta.errors) && meta.errors.length) {
+            try {
+              await recoverFileRoom(roomKey, {
+                lastKnownGoodRevision: meta.version
+              })
+              meta = await getFileMeta(roomKey)
+            } catch (recoverErr) {
+              if (recoverErr && recoverErr.code === 'ROOM_INTEGRITY_ERROR') {
+                this._roomLoadFailed = true
+                this.roomLoadError = 'ROOM_INTEGRITY_ERROR'
+                this.setCooperateStatus('disconnected')
+                this.$bus.$emit('hideLoading')
+                if (!silent) {
+                  this.$message.error('脑图数据异常，已停止自动重试')
+                }
+                return
+              }
+            }
+          }
+          const safe = !!(options.safe || (meta && Number(meta.liveCount || 0) >= 400))
+          if (cooperate) cooperate.safeLoadMode = safe
+          preview = await getFilePreview(roomKey, 2, {
+            safe,
+            timeoutMs: safe ? 15000 : 12000
+          })
         } catch (err) {
           if (err && (err.statusCode === 403 || err.code === 'FORBIDDEN')) {
             this.$message.warning(this.$t('acl.noAccess'))
             return
           }
           if (!this.isNotFound(err)) throw err
-          // Only create when the user explicitly asked for a new room.
-          // Auto-creating on join / dialog open produced "未命名" rooms and
-          // also revived rooms right after delete.
           if (!createIfMissing) {
             if (!silent) {
               this.$message.warning(this.$t('cooperate.openFailed'))
@@ -2044,15 +2112,31 @@ export default {
             return
           }
           await this.ensureRoomFile(roomKey)
-          preview = await getFilePreview(roomKey, 2)
+          preview = await getFilePreview(roomKey, 2, { timeoutMs: 12000 })
+        }
+        if (Date.now() - started > ROOM_LOAD_MS) {
+          const timeout = new Error('ROOM_LOAD_TIMEOUT')
+          timeout.code = 'ROOM_LOAD_TIMEOUT'
+          throw timeout
         }
         if (preview && preview.tree) {
           previewLoaded = true
+          markPhase('ROOM_BUILDING_RUNTIME')
           const connected = await this.applyPreview(preview, silent)
+          markPhase('ROOM_RENDERING')
           if (connected) return
         }
       } catch (err) {
         cooperate.setPreviewApplied(false)
+        const code = (err && err.code) || ''
+        if (code === 'ROOM_LOAD_TIMEOUT') {
+          this._roomLoadFailed = true
+          this.roomLoadError = 'ROOM_LOAD_TIMEOUT'
+          this.setCooperateStatus('disconnected')
+          this.$bus.$emit('hideLoading')
+          if (!silent) this.$message.error('脑图加载超时')
+          return
+        }
         if (!silent) {
           this.$message.warning(
             err.message || this.$t('cooperate.openFailed')
@@ -2061,10 +2145,11 @@ export default {
       } finally {
         if (this._openAttemptId === attemptId && !this.connected) {
           this.connecting = false
-          this.setCooperateStatus('disconnected')
+          if (!this._roomLoadFailed) this.setCooperateStatus('disconnected')
         }
       }
       if (this.connected) return
+      if (this._roomLoadFailed) return
       if (getRuntimeConfig().gateway || previewLoaded) {
         if (!silent) {
           this.$message.error(this.$t('cooperate.connectFailed'))

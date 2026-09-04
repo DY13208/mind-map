@@ -168,6 +168,7 @@ class AssociativeLine {
   // 节点点击事件
   onNodeClick(node) {
     if (this.isCreatingLine) {
+      if (!node || node.isGeneralization) return
       this.completeCreateLine(node)
     } else {
       this.clearActiveLine()
@@ -448,7 +449,10 @@ class AssociativeLine {
   // 从当前激活节点开始创建连接线
   createLineFromActiveNode() {
     if (this.mindMap.renderer.activeNodeList.length <= 0) return
-    let node = this.mindMap.renderer.activeNodeList[0]
+    let node = this.mindMap.renderer.activeNodeList.find(
+      item => item && !item.isGeneralization
+    )
+    if (!node) return
     this.createLine(node)
   }
 
@@ -544,7 +548,11 @@ class AssociativeLine {
       if (node.getData('isActive')) {
         this.mindMap.execCommand('SET_NODE_ACTIVE', node, false)
       }
-      if (node.uid === this.creatingStartNode.uid || this.overlapNode) {
+      if (
+        node.isGeneralization ||
+        node.uid === this.creatingStartNode.uid ||
+        this.overlapNode
+      ) {
         return
       }
       let { left, top, width, height } = node
@@ -577,6 +585,8 @@ class AssociativeLine {
 
   // 添加连接线
   addLine(fromNode, toNode) {
+    if (fromNode && fromNode.isGeneralization) return
+    if (toNode && toNode.isGeneralization) return
     if (!fromNode || !toNode) return
     // 目标节点如果没有id，则生成一个id
     let uid = toNode.getData('uid')

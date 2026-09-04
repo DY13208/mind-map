@@ -27,6 +27,14 @@ import {
   publishLayoutApplyTrace,
   inspectLayoutRenderer
 } from '../utils/collabLayoutCleanup'
+import collabNodeFeatures from '../utils/collabNodeFeatures'
+import collabDelete from '../utils/collabDelete'
+import collabFullTree from '../utils/collabFullTree'
+import collabSpecialObjects from '../utils/collabSpecialObjects'
+import collabPaste from '../utils/collabPaste'
+import collabPasteUndo from '../utils/collabPasteUndo'
+import collabTreeIntegrity from '../utils/collabTreeIntegrity'
+import collabImport from '../utils/collabImport'
 import { applyObjectToYMap, migrateLegacyNodes } from './cooperateYjs'
 import {
   planCollabRecovery,
@@ -181,6 +189,8 @@ function isPermanentNodeError(err) {
     code === 'TARGET_DELETED' ||
     code === 'MOVE_CONFLICT' ||
     code === 'UID_REUSED' ||
+    code === 'UID_EXISTS' ||
+    code === 'UID_ALREADY_EXISTS' ||
     code === 'DROPPED_DELETED' ||
     /父节点已删除|PARENT_DELETED|missing parent/i.test(msg) ||
     /节点已删除或不存在|NODE_DELETED|MOVE_CONFLICT|UID_REUSED|禁止复用已删除节点/i.test(
@@ -274,6 +284,9 @@ function payloadNodeData(payload) {
     {}
   if (payload && payload.text != null && data.text == null) data.text = payload.text
   if (payload && payload.note != null && data.note == null) data.note = payload.note
+  if (payload && payload.richText != null && data.richText == null) {
+    data.richText = payload.richText
+  }
   if (
     payload &&
     Object.prototype.hasOwnProperty.call(payload, 'generalization') &&
@@ -412,6 +425,7 @@ class Cooperate {
     this.previewApplied = false
     this.hydratingCurrentData = false
     this.httpCollabMode = false
+    this.safeLoadMode = false
     this.collabV2Adapter = null
     this._v2UndoActive = false
     this._v2UndoAllowReplace = false
@@ -1642,19 +1656,37 @@ class Cooperate {
     if (!this.collabV2Adapter) {
       return Promise.reject(new Error('collab v2 adapter missing'))
     }
+    if (type === 'map.replace') {
+      payload = collabSpecialObjects.buildMapReplacePayload(
+        payload && payload.tree,
+        payload || {}
+      )
+    }
     if (type === 'node.update' && payload) {
-      const keys = ['parentUid', 'parent_uid', 'parent', 'index', 'position', 'order']
-      const hit = keys.filter(key => payload[key] !== undefined)
-      if (hit.length) {
+      const guarded = collabNodeFeatures.guardFeatureStructuralMutation(payload)
+      if (guarded.hit.length) {
+        v2Trace('NODE_FEATURE_STRUCTURAL_MUTATION', {
+          uid: payload.uid,
+          keys: guarded.hit
+        })
         v2Trace('UPDATE_STRUCTURAL_FIELD_FORBIDDEN', {
           uid: payload.uid,
-          keys: hit
+          keys: guarded.hit
         })
-        payload = { ...payload }
-        keys.forEach(key => {
-          delete payload[key]
-        })
+        payload = guarded.payload
       }
+    }
+    try {
+      collabSpecialObjects.assertStructuredCloneSafeOperation({
+        type,
+        payload
+      })
+    } catch (err) {
+      v2Trace('OUTBOX_NON_CLONEABLE_PAYLOAD', {
+        type,
+        paths: err && err.paths
+      })
+      throw err
     }
     const traceId =
       (payload && payload.traceId) ||
@@ -1843,16 +1875,65 @@ class Cooperate {
         return true
       }
       if (meta.deferFallback) return false
+    } else if (type === 'node.restored' || type === 'node.restore') {
+      const restored = this.applyV2PayloadRestore(payload)
+      v2Trace('remote.apply.restore', {
+        uid,
+        ok: restored,
+        rows: Array.isArray(payload.rows) ? payload.rows.length : 0
+      })
+      if (restored) {
+        this.notifySearchInvalidate()
+        return true
+      }
+      if (meta.deferFallback) return false
     } else if (type === 'node.updated' || type === 'node.update') {
-      const updated = this.applyV2PayloadUpdate(payload)
-      v2Trace('remote.apply.update', { uid, ok: updated })
+      const normalized = collabNodeFeatures.normalizeAppliedUpdatePayload(op)
+      const updated = this.applyV2PayloadUpdate(
+        normalized.uid
+          ? { uid: normalized.uid, patch: normalized.patch }
+          : payload
+      )
+      v2Trace('remote.apply.update', {
+        uid: normalized.uid || uid,
+        ok: updated,
+        keys: Object.keys(normalized.patch || {})
+      })
       if (updated) {
         this.notifySearchInvalidate()
         return true
       }
       if (meta.deferFallback) return false
-    } else if (type === 'operation.undone' || type === 'operation.redone') {
-      const inner = payload.inverse || payload.forward
+    } else if (
+      type === 'operation.undone' ||
+      type === 'operation.redone' ||
+      type === 'operation.undo' ||
+      type === 'operation.redo'
+    ) {
+      const normalized = collabNodeFeatures.normalizeAppliedUpdatePayload(op)
+      if (normalized.uid && Object.keys(normalized.patch || {}).length) {
+        const updated = this.applyV2PayloadUpdate({
+          uid: normalized.uid,
+          patch: normalized.patch
+        })
+        collabNodeFeatures.publishUndoApplyTrace({
+          undoOpId: op && (op.opId || op.operationId),
+          targetOpId:
+            (payload && (payload.targetOperationId || payload.undoOf || payload.redoOf)) ||
+            '',
+          targetUid: normalized.uid,
+          inversePatch: normalized.patch,
+          serverAppliedEvent: (op && op.event && op.event.type) || type,
+          originNodeDataAfter: !!meta.applySelf,
+          remoteNodeDataAfter: !meta.applySelf,
+          rendererRefreshed: !!updated
+        })
+        if (updated) {
+          this.notifySearchInvalidate()
+          return true
+        }
+      }
+      const inner = payload.inverse || payload.forward || (op && op.inversePayload)
       if (inner && inner.type) {
         const applied = await this.applyV2RemoteOperation({
           event: {
@@ -1867,11 +1948,13 @@ class Cooperate {
                       ? 'node.moved'
                       : inner.type === 'node.reorder'
                         ? 'node.reordered'
-                        : inner.type,
+                        : inner.type === 'node.restore'
+                          ? 'node.restored'
+                          : inner.type,
             payload: inner.payload || {}
           },
           serverRevision: op.serverRevision
-        })
+        }, meta)
         if (applied) return true
       }
     }
@@ -2217,9 +2300,11 @@ class Cooperate {
       return true
     }
     const removed =
-      Array.isArray(payload.removed) && payload.removed.length
-        ? payload.removed.filter(Boolean)
-        : [uid]
+      Array.isArray(payload.deletedUids) && payload.deletedUids.length
+        ? payload.deletedUids.filter(Boolean)
+        : Array.isArray(payload.removed) && payload.removed.length
+          ? payload.removed.filter(Boolean)
+          : [uid]
     const drop = new Set(removed)
     removed.forEach(id => this.tombstoneDeletedUid(id))
     this.purgeQueuedInserts(drop)
@@ -2234,6 +2319,10 @@ class Cooperate {
     this.mindMap.command.pause()
     try {
       this.removeLocalDeletedUids(drop, payloadParentUid(payload), node)
+      const assoc = this.mindMap && this.mindMap.associativeLine
+      if (assoc && typeof assoc.removeAllLines === 'function') {
+        assoc.removeAllLines()
+      }
       this.mindMap.render()
     } catch (err) {
       v2Trace('remote.apply.delete.err', { uid, message: err && err.message })
@@ -2248,6 +2337,108 @@ class Cooperate {
       this.isApplyingRemote = false
     }
     return true
+  }
+
+  applyV2PayloadRestore(payload = {}) {
+    const uid = payload.uid
+    const renderer = this.mindMap && this.mindMap.renderer
+    const rows = Array.isArray(payload.rows) ? payload.rows : []
+    if (!uid || !renderer) return false
+    const reviveIds = rows.map(row => row && row.uid).filter(Boolean)
+    if (!reviveIds.includes(uid)) reviveIds.push(uid)
+    reviveIds.forEach(id => this.reviveDeletedUid(id))
+    const missing = reviveIds.filter(id => {
+      const live =
+        typeof renderer.findNodeByUid === 'function' && renderer.findNodeByUid(id)
+      return !live
+    })
+    if (!missing.length) {
+      this.postRestoreDecorations(reviveIds)
+      return true
+    }
+    const parentUid = payloadParentUid(payload)
+    const parentNode =
+      (parentUid &&
+        typeof renderer.findNodeByUid === 'function' &&
+        renderer.findNodeByUid(parentUid)) ||
+      null
+    if (!parentNode || !parentNode.nodeData) return false
+    const tree = collabDelete.buildSubtreeFromRows(rows, uid)
+    if (!tree) return false
+    this.isApplyingRemote = true
+    this.mindMap.command.pause()
+    try {
+      if (!parentNode.nodeData.children) parentNode.nodeData.children = []
+      const exists = parentNode.nodeData.children.some(
+        child => child && child.data && child.data.uid === uid
+      )
+      if (!exists) {
+        const index = Number(payload.index)
+        if (Number.isInteger(index) && index >= 0 && index <= parentNode.nodeData.children.length) {
+          parentNode.nodeData.children.splice(index, 0, tree)
+        } else {
+          parentNode.nodeData.children.push(tree)
+        }
+      }
+      renderer.setNodeData(parentNode, { expand: true })
+      this.mindMap.render()
+    } catch (err) {
+      v2Trace('remote.apply.restore.err', { uid, message: err && err.message })
+      return false
+    } finally {
+      try {
+        this.mindMap.command.recovery()
+      } catch (e) {
+        // ignore
+      }
+      this.suppressLocalUntil = Date.now() + 250
+      this.isApplyingRemote = false
+    }
+    this.postRestoreDecorations(reviveIds)
+    return true
+  }
+
+  postRestoreDecorations(restoredUidSet) {
+    const ids = Array.isArray(restoredUidSet)
+      ? restoredUidSet
+      : Array.from(restoredUidSet || [])
+    const renderer = this.mindMap && this.mindMap.renderer
+    const run = () => {
+      ids.forEach(id => {
+        const node =
+          renderer &&
+          typeof renderer.findNodeByUid === 'function' &&
+          renderer.findNodeByUid(id)
+        if (!node) return
+        if (typeof node.updateGeneralization === 'function') {
+          node.updateGeneralization()
+        }
+        if (typeof node.renderGeneralization === 'function') {
+          node.renderGeneralization(true)
+        }
+        if (node.parent && typeof node.parent.updateGeneralization === 'function') {
+          node.parent.updateGeneralization()
+          if (typeof node.parent.renderGeneralization === 'function') {
+            node.parent.renderGeneralization(true)
+          }
+        }
+      })
+      const assoc = this.mindMap && this.mindMap.associativeLine
+      if (assoc && typeof assoc.renderAllLines === 'function') {
+        assoc.renderAllLines()
+      }
+      const frame = this.mindMap && this.mindMap.outerFrame
+      if (frame && typeof frame.renderOuterFrames === 'function') {
+        frame.renderOuterFrames()
+      } else if (frame && typeof frame.render === 'function') {
+        frame.render()
+      }
+    }
+    if (this.mindMap && typeof this.mindMap.render === 'function') {
+      this.mindMap.render(run)
+    } else {
+      run()
+    }
   }
 
   removeLocalDeletedUids(drop, parentUid, node) {
@@ -2349,25 +2540,34 @@ class Cooperate {
     if (!uid || !renderer || typeof renderer.findNodeByUid !== 'function') return false
     let node = renderer.findNodeByUid(uid)
     if (!node) return false
-    if (
-      payload.parentUid !== undefined ||
-      payload.parent_uid !== undefined ||
-      payload.parent !== undefined ||
-      payload.index !== undefined ||
-      payload.position !== undefined ||
-      payload.order !== undefined
-    ) {
+    const structuralHit = collabNodeFeatures.featureStructuralHits(payload)
+    if (structuralHit.length) {
+      v2Trace('NODE_FEATURE_STRUCTURAL_MUTATION', {
+        uid,
+        keys: structuralHit
+      })
       v2Trace('UPDATE_STRUCTURAL_FIELD_FORBIDDEN', {
         uid,
-        keys: ['parent', 'index', 'position'].filter(
-          () =>
-            payload.parentUid !== undefined ||
-            payload.index !== undefined ||
-            payload.position !== undefined
-        )
+        keys: structuralHit
       })
     }
-    let next = payloadNodeData(payload)
+    const normalized = collabNodeFeatures.normalizeAppliedUpdatePayload({
+      payload,
+      event: { payload }
+    })
+    let next =
+      normalized.patch && Object.keys(normalized.patch).length
+        ? normalized.patch
+        : collabNodeFeatures.payloadFeaturePatch(payload)
+    if (
+      !Object.keys(next || {}).length &&
+      payload &&
+      !Object.prototype.hasOwnProperty.call(payload, 'patch')
+    ) {
+      next = payloadNodeData(payload)
+    }
+    const stripped = collabNodeFeatures.stripFeatureStructuralKeys(next)
+    next = stripped.payload
     if (node.isGeneralization && node.generalizationBelongNode) {
       const owner = node.generalizationBelongNode
       const genUid = (node.getData && node.getData('uid')) || uid
@@ -2390,7 +2590,8 @@ class Cooperate {
       parent:
         (node.parent && node.parent.getData && node.parent.getData('uid')) ||
         null,
-      position: node.getData && node.getData('position')
+      position: node.getData && node.getData('position'),
+      siblings: collabNodeFeatures.siblingUids(node.parent)
     }
     this.isApplyingRemote = true
     try {
@@ -2402,8 +2603,19 @@ class Cooperate {
     }
     const afterParent =
       (node.parent && node.parent.getData && node.parent.getData('uid')) || null
-    if (afterParent !== before.parent) {
-      console.error('STYLE_STRUCTURAL_MUTATION', {
+    const afterPosition = node.getData && node.getData('position')
+    const afterSiblings = collabNodeFeatures.siblingUids(node.parent)
+    if (
+      afterParent !== before.parent ||
+      afterPosition !== before.position ||
+      JSON.stringify(afterSiblings) !== JSON.stringify(before.siblings)
+    ) {
+      v2Trace('NODE_FEATURE_STRUCTURAL_MUTATION', {
+        uid,
+        parent: [before.parent, afterParent],
+        position: [before.position, afterPosition]
+      })
+      console.error('NODE_FEATURE_STRUCTURAL_MUTATION', {
         uid,
         parent: [before.parent, afterParent]
       })
@@ -2860,18 +3072,22 @@ class Cooperate {
     if (this.collabV2Adapter) {
       this.httpPatchNode = (uid, body) => {
         const next = { ...(body || {}), uid }
-        ;['parentUid', 'parent_uid', 'parent', 'index', 'position', 'order'].forEach(
-          key => {
-            delete next[key]
-          }
-        )
-        return this.submitV2('node.update', next)
+        const guarded = collabNodeFeatures.guardFeatureStructuralMutation(next)
+        return this.submitV2('node.update', guarded.payload)
       }
       this.httpAddNode = body => this.submitV2('node.insert', body || {})
       this.httpDeleteNode = (uid, options) =>
         this.submitV2('node.delete', { ...(options || {}), uid })
-      this.httpReplaceTree = (tree, extra) =>
-        this.submitV2('map.replace', { tree, ...(extra || {}) })
+      if (typeof config.replaceTree === 'function') {
+        this.httpReplaceTree = (tree, extra) =>
+          this.submitHttpMapReplace(tree, extra, config.replaceTree)
+      } else {
+        this.httpReplaceTree = (tree, extra) =>
+          this.submitV2(
+            'map.replace',
+            collabSpecialObjects.buildMapReplacePayload(tree, extra)
+          )
+      }
       return
     }
     if (typeof config.patchNode === 'function') {
@@ -2978,6 +3194,7 @@ class Cooperate {
 
   clearHttpCollab() {
     this.httpCollabMode = false
+    this.safeLoadMode = false
     this.httpRoomKey = ''
     this.httpFetchSubtree = null
     this.httpFetchDeepSubtree = null
@@ -3060,9 +3277,20 @@ class Cooperate {
     return 3000
   }
 
-  endHttpReplace() {
+  endHttpReplace(options = {}) {
     this.httpReplacing = false
     this.httpReplaceInFlight = false
+    const liveImmediately =
+      !!options.liveImmediately || !!this._liveImmediatelyAfterReplace
+    this._liveImmediatelyAfterReplace = false
+    if (liveImmediately) {
+      this.httpSettlingAfterReplace = false
+      this.suppressLocalUntil = 0
+      clearTimeout(this.httpSettleTimer)
+      this.httpSettleTimer = null
+      this.captureHttpBaselineFromRenderer()
+      return
+    }
     this.httpSettlingAfterReplace = true
     const settleMs = this.postReplaceSettleMs()
     this.suppressLocalUntil = Date.now() + settleMs
@@ -3078,6 +3306,84 @@ class Cooperate {
       this.httpPendingRefreshForce = false
       this.httpSettlingAfterReplace = false
     }, settleMs)
+  }
+
+  applyAuthoritativeTreeReplace(tree, reason = 'IMPORT', extra = {}) {
+    const renderer = this.mindMap && this.mindMap.renderer
+    const full = extra.fullData || null
+    const generation = renderer
+      ? (renderer._renderGeneration = (renderer._renderGeneration || 0) + 1)
+      : Date.now()
+    if (renderer) {
+      renderer.nodeCache = {}
+      renderer.lastNodeCache = {}
+      renderer.activeNodeList = []
+      renderer.root = null
+    }
+    const assoc = this.mindMap && this.mindMap.associativeLine
+    if (assoc && typeof assoc.removeAllLines === 'function') {
+      assoc.removeAllLines()
+    }
+    const nodeCount = collabImport.countTreeNodes(tree)
+    if (nodeCount >= 200) {
+      this.enableLargeMapMode(nodeCount)
+    }
+    this.isSetData = true
+    this._importPhase = 'IMPORT_APPLYING'
+    try {
+      if (full && typeof this.mindMap.setFullData === 'function') {
+        this.mindMap.setFullData({ ...full, root: tree })
+      } else if (typeof this.mindMap.setData === 'function') {
+        this.mindMap.setData(tree)
+      }
+    } finally {
+      this.isSetData = false
+    }
+    if (renderer && renderer._renderGeneration !== generation) return false
+    this.afterHttpReplace(extra.result || {}, tree)
+    const uids = []
+    const expandable = []
+    const walk = node => {
+      if (!node || !node.data) return
+      if (node.data.uid) uids.push(node.data.uid)
+      if (node.children && node.children.length) expandable.push(node.data.uid)
+      ;(node.children || []).forEach(walk)
+    }
+    walk(tree)
+    if (uids.length <= 400) {
+      this.postRestoreDecorations(uids)
+    } else {
+      const chunk = 200
+      let offset = 0
+      const tick = () => {
+        if (renderer && renderer._renderGeneration !== generation) return
+        this.postRestoreDecorations(uids.slice(offset, offset + chunk))
+        offset += chunk
+        if (offset < uids.length) {
+          setTimeout(tick, 0)
+        }
+      }
+      setTimeout(tick, 0)
+    }
+    this._liveImmediatelyAfterReplace = true
+    this._importPhase = 'LIVE'
+    const cacheCount = renderer ? Object.keys(renderer.nodeCache || {}).length : 0
+    collabPaste.publishImportRuntimeTrace({
+      reason,
+      treeHash: String(uids.length),
+      renderTreeNodeCount: uids.length,
+      nodeCacheCount: cacheCount,
+      expandableNodes: expandable.length,
+      staleInstanceCount: 0,
+      renderCompleted: true,
+      generation
+    })
+    collabImport.publishLargeImportTrace({
+      phase: 'LIVE',
+      rendererEnd: Date.now(),
+      nodeCount: uids.length
+    })
+    return true
   }
 
   afterHttpReplace(result, treeOverride) {
@@ -3141,25 +3447,76 @@ class Cooperate {
     if (renderer.root) walk(renderer.root)
   }
 
+  async submitHttpMapReplace(tree, extra, send) {
+    const stats = collabImport.inspectImportTree(tree)
+    collabImport.publishLargeImportTrace({
+      phase: 'IMPORT_PREPARING',
+      fileSize: extra && extra.fileSize,
+      ...stats
+    })
+    if (stats.tooLarge) {
+      const err = collabImport.importTooLargeError(stats)
+      collabImport.publishLargeImportTrace({
+        phase: 'IMPORT_TOO_LARGE',
+        ...stats
+      })
+      throw err
+    }
+    this._importPhase = 'IMPORT_COMMITTING'
+    collabImport.publishLargeImportTrace({
+      phase: 'IMPORT_COMMITTING',
+      outboxPutStart: Date.now(),
+      ...stats
+    })
+    const started = Date.now()
+    const result = await send(tree, extra)
+    if (result && result.version != null) {
+      this.acknowledgeLocalVersion(result.version, { duplicate: true })
+      if (this.collabV2Adapter && this.collabV2Adapter.setLastServerRevision) {
+        this.collabV2Adapter.setLastServerRevision(result.version)
+      }
+    }
+    this._importPhase = 'IMPORT_APPLYING'
+    collabImport.publishLargeImportTrace({
+      phase: 'IMPORT_APPLYING',
+      ack: Date.now(),
+      durationMs: Date.now() - started,
+      serverRevision: result && (result.version || result.serverRevision),
+      ...stats
+    })
+    return result
+  }
+
   async persistHttpReplace(fullData, extra = {}) {
     if (!this.httpReplaceTree) {
       throw new Error('replaceTree not configured')
     }
-    const allowed =
-      extra.allowFullTree === true ||
-      extra.source === 'import' ||
-      extra.source === 'restore' ||
-      extra.source === 'legacy-migrate'
+    const reason = collabFullTree.resolveFullTreeReason({
+      ...extra,
+      reason: extra.reason || collabFullTree.currentFullTreeReason()
+    })
+    const allowed = collabFullTree.isFullTreeMutationAllowed({
+      ...extra,
+      reason
+    })
+    collabFullTree.publishImportTrace({
+      parseResult: extra.parseResult || 'ready',
+      fullTreeReason: reason || extra.reason || '',
+      allowed,
+      feature: extra.feature || extra.source || 'persistHttpReplace'
+    })
     if (this.collabV2Adapter && !allowed) {
       const row = {
         feature: extra.feature || 'persistHttpReplace',
         caller: extra.caller || 'Cooperate.persistHttpReplace',
         roomKey: this.httpRoomKey,
+        reason: reason || extra.reason || '',
         stack: new Error('COLLAB_V2_UNEXPECTED_FULL_TREE_MUTATION').stack
       }
       console.error('COLLAB_V2_UNEXPECTED_FULL_TREE_MUTATION', row)
       const err = new Error('COLLAB_V2_UNEXPECTED_FULL_TREE_MUTATION')
       err.code = 'UNEXPECTED_FULL_TREE_MUTATION'
+      err.stage = 'FULL_TREE_MUTATION_FORBIDDEN'
       throw err
     }
     if (this.httpReplaceInFlight) {
@@ -3170,8 +3527,18 @@ class Cooperate {
     this.httpReplaceInFlight = true
     const tree = (fullData && fullData.root) || fullData
     try {
-      const result = await this.httpReplaceTree(tree, extra)
+      const result = await collabFullTree.withAllowedFullTreeMutation(
+        reason || 'IMPORT',
+        () => this.httpReplaceTree(tree, extra)
+      )
       this.afterHttpReplace(result, tree)
+      collabFullTree.publishImportTrace({
+        parseResult: extra.parseResult || 'applied',
+        fullTreeReason: reason || extra.reason || '',
+        mapReplaceOpId: result && (result.operationId || result.operation_id),
+        serverRevision: result && (result.version || result.serverRevision),
+        allowed: true
+      })
       return result
     } finally {
       this.httpReplaceInFlight = false
@@ -3214,10 +3581,11 @@ class Cooperate {
   markUidPushed(uid, data, source = 'server') {
     if (!uid || !data) return
     if (source !== 'server' && source !== 'ack') return
-    const text =
-      data.richText ? getTextFromHtml(data.text) : String(data.text || '')
-    const note = data.note || ''
+    const content = collabNodeFeatures.buildNodeContentFields(data)
+    const text = content.text
+    const note = content.note
     const full = { text, note, ...collectStyleFields(data) }
+    if (content.richText !== undefined) full.richText = content.richText
     NULLABLE_PATCH_KEYS.forEach(key => {
       const value = data[key]
       const empty =
@@ -3268,7 +3636,10 @@ class Cooperate {
     return !!(uid && this.ackedUids && this.ackedUids.has(uid))
   }
 
-  resolveHttpPatchNode(node) {
+  resolveHttpPatchNode(node, command) {
+    const resolved = collabSpecialObjects.resolveCollaborationTarget(node, command)
+    if (resolved.kind === 'generalization' && resolved.owner) return resolved.owner
+    if (resolved.kind === 'business-node') return resolved.node || node
     if (node && node.isGeneralization && node.generalizationBelongNode) {
       return node.generalizationBelongNode
     }
@@ -3469,11 +3840,34 @@ class Cooperate {
     const renderer = this.mindMap.renderer
     if (!node || !renderer) return false
     let changed = false
+    const imgMap =
+      (renderer.renderTree &&
+        renderer.renderTree.data &&
+        renderer.renderTree.data.imgMap) ||
+      {}
+    const imageFields = Object.prototype.hasOwnProperty.call(next, 'image')
+      ? collabSpecialObjects.canonicalImageFields(
+          next,
+          imgMap,
+          node.getImageUrl && node.getImageUrl.bind(node)
+        )
+      : null
+    if (imageFields) {
+      collabSpecialObjects.publishImageTrace({
+        uid: node.getData && node.getData('uid'),
+        command: 'remote.apply',
+        imageAfter: imageFields.image,
+        storedImageValue: imageFields.storedImageValue,
+        imageTitle: imageFields.imageTitle,
+        imageSize: imageFields.imageSize,
+        remoteEvent: true
+      })
+    }
     const stylePayload = {
       text: next.text,
       note: next.note,
       richText: next.richText,
-      image: next.image,
+      image: imageFields && !imageFields.unresolvedKey ? imageFields.image : next.image,
       imageTitle: next.imageTitle,
       imageSize: next.imageSize,
       icon: next.icon,
@@ -3497,7 +3891,9 @@ class Cooperate {
       if (checkIsNodeStyleDataKey(key)) stylePayload[key] = next[key]
     })
     Object.keys(stylePayload).forEach(key => {
-      if (stylePayload[key] === undefined) delete stylePayload[key]
+      if (!Object.prototype.hasOwnProperty.call(next, key)) {
+        if (stylePayload[key] === undefined) delete stylePayload[key]
+      }
     })
     if (Object.keys(stylePayload).length) {
       const data = node.nodeData && node.nodeData.data
@@ -3506,15 +3902,29 @@ class Cooperate {
         if (stylePayload[key] === null) delete data[key]
         else data[key] = stylePayload[key]
       })
-      if (typeof renderer.reRenderNodeCheckChange === 'function') {
+      if (next.text != null && next.richText) {
+        collabNodeFeatures.publishRichTextPersistTrace({
+          hydrateText: next.text,
+          richTextFlag: next.richText
+        })
+      }
+      const recreate = collabNodeFeatures.recreateTypesFromPatch(stylePayload)
+      if (typeof node.reRender === 'function') {
+        node.reRender(recreate.length ? recreate : undefined)
+      } else if (typeof renderer.reRenderNodeCheckChange === 'function') {
         renderer.reRenderNodeCheckChange(node, false)
-      } else if (node.reRender) {
-        node.reRender()
       }
       if (node.parent && typeof node.parent.renderLine === 'function') {
         node.parent.renderLine(true)
       } else if (typeof node.renderLine === 'function') {
         node.renderLine(true)
+      }
+      if (
+        this.mindMap &&
+        typeof this.mindMap.render === 'function' &&
+        collabNodeFeatures.needsGeometryRefresh(stylePayload)
+      ) {
+        this.mindMap.render()
       }
       changed = true
     }
@@ -3529,8 +3939,18 @@ class Cooperate {
         if (this.applyLocalGeneralization(node, pending && pending.gen)) {
           changed = true
         }
-      } else if (this.applyLocalGeneralization(node, next.generalization)) {
+      } else       if (this.applyLocalGeneralization(node, next.generalization)) {
         changed = true
+      }
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(next, 'associativeLineTargets') ||
+      Object.prototype.hasOwnProperty.call(next, 'associativeLinePoint') ||
+      Object.prototype.hasOwnProperty.call(next, 'associativeLineTargetControlOffsets')
+    ) {
+      const assoc = this.mindMap && this.mindMap.associativeLine
+      if (assoc && typeof assoc.renderAllLines === 'function') {
+        assoc.renderAllLines()
       }
     }
     return changed
@@ -4069,44 +4489,21 @@ class Cooperate {
     }
     const list =
       (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
-    const deletes = []
-    const owners = []
-    const seenOwner = new Set()
-    list.forEach(node => {
-      if (!node) return
-      if (node.isGeneralization && node.generalizationBelongNode) {
-        const owner = node.generalizationBelongNode
-        const ownerUid = owner.getData && owner.getData('uid')
-        if (ownerUid && !seenOwner.has(ownerUid)) {
-          seenOwner.add(ownerUid)
-          owners.push(owner)
-        }
-        return
-      }
-      const uid = node.getData && node.getData('uid')
-      if (uid) {
-        const keepChildren = name === 'REMOVE_CURRENT_NODE'
-        const walkData = item => {
-          if (!item) return
-          const id = item.data && item.data.uid
-          if (id) deletes.push(id)
-          if (keepChildren) return
-          ;(item.children || []).forEach(walkData)
-        }
-        const walk = current => {
-          if (!current) return
-          const id = current.getData && current.getData('uid')
-          if (id) deletes.push(id)
-          if (keepChildren) return
-          const dataKids = (current.nodeData && current.nodeData.children) || []
-          dataKids.forEach(walkData)
-          ;(current.children || []).forEach(walk)
-        }
-        walk(node)
-      }
+    const selection = collabDelete.collectDeleteRoots(list, name)
+    this.pendingHttpDeletes = selection.roots.map(item => ({
+      uid: item.uid,
+      keepChildren: item.keepChildren,
+      descendantUids: item.descendantUids
+    }))
+    this.pendingHttpGeneralizationOwners = selection.owners
+    collabDelete.publishDeleteTrace({
+      command: name,
+      rootUid: selection.rootUids[0] || '',
+      rootUids: selection.rootUids,
+      descendantUids: selection.descendantUids,
+      generatedOperation:
+        selection.rootUids.length === 1 ? 'node.delete' : 'node.batch'
     })
-    this.pendingHttpDeletes = [...new Set(deletes)]
-    this.pendingHttpGeneralizationOwners = owners
   }
 
   collectGeneralizationOwners(name, args = []) {
@@ -4233,41 +4630,64 @@ class Cooperate {
       name === 'REMOVE_CURRENT_NODE' ||
       name === 'CUT_NODE'
     ) {
-      const keepChildren = name === 'REMOVE_CURRENT_NODE'
       const owners = (this.pendingHttpGeneralizationOwners || []).splice(0)
-      const uids = this.pendingHttpDeletes.splice(0)
-      const tombstone = uid => {
-        this.tombstoneDeletedUid(uid)
-      }
-      this.purgeQueuedInserts(uids)
-      if (this.collabV2Adapter && uids.length > 1) {
-        uids.forEach(tombstone)
-        const drop = this.collabV2Adapter.dropPendingInsertsForUid
-        Promise.resolve(
-          drop
-            ? Promise.all(uids.map(uid => drop.call(this.collabV2Adapter, uid)))
-            : null
+      const items = this.pendingHttpDeletes.splice(0)
+      const roots = items
+        .map(item =>
+          typeof item === 'string'
+            ? { uid: item, keepChildren: name === 'REMOVE_CURRENT_NODE' }
+            : item
         )
-          .then(() =>
-            this.submitV2('node.batch', {
-              ops: uids.map(uid => ({
-                type: 'node.delete',
-                payload: { uid, keepChildren }
-              }))
-            })
-          )
-          .catch(() => {})
-      } else {
-        uids.forEach(uid => {
-          if (!this.httpDeleteNode) return
-          tombstone(uid)
-          const drop =
-            this.collabV2Adapter && this.collabV2Adapter.dropPendingInsertsForUid
-          Promise.resolve(drop ? drop.call(this.collabV2Adapter, uid) : null)
-            .then(() => this.httpDeleteNode(uid, { keepChildren }))
-            .catch(() => {})
+        .filter(item => item && item.uid)
+      const allLocal = []
+      roots.forEach(item => {
+        allLocal.push(item.uid)
+        ;(item.descendantUids || []).forEach(id => allLocal.push(id))
+      })
+      this.purgeQueuedInserts(allLocal)
+      allLocal.forEach(uid => this.tombstoneDeletedUid(uid))
+      const drop = this.collabV2Adapter && this.collabV2Adapter.dropPendingInsertsForUid
+      const ops = collabDelete.deleteOperationsFromRoots({ roots })
+      collabDelete.publishDeleteTrace({
+        command: name,
+        rootUid: roots[0] && roots[0].uid,
+        rootUids: roots.map(item => item.uid),
+        descendantUids: roots.reduce(
+          (list, item) => list.concat(item.descendantUids || []),
+          []
+        ),
+        generatedOperation:
+          ops.length === 1 ? 'node.delete' : ops.length > 1 ? 'node.batch' : ''
+      })
+      Promise.resolve(
+        drop ? Promise.all(allLocal.map(uid => drop.call(this.collabV2Adapter, uid))) : null
+      )
+        .then(() => {
+          if (!ops.length) return null
+          if (ops.length === 1) {
+            return this.httpDeleteNode
+              ? this.httpDeleteNode(ops[0].payload.uid, {
+                  keepChildren: ops[0].payload.keepChildren
+                })
+              : this.submitV2('node.delete', ops[0].payload)
+          }
+          return this.submitV2('node.batch', { ops })
         })
-      }
+        .then(result => {
+          const op = result && result.operation
+          const ev = op && op.event && op.event.payload
+          collabDelete.publishDeleteTrace({
+            command: name,
+            rootUid: roots[0] && roots[0].uid,
+            generatedOperation: ops.length === 1 ? 'node.delete' : 'node.batch',
+            serverDeletedUids: (ev && (ev.deletedUids || ev.removed)) || [],
+            ackRevision: result && (result.version || result.serverRevision),
+            originApplied: true
+          })
+        })
+        .catch(err => {
+          console.error('[mind-map] subtree delete failed', err)
+        })
       owners.forEach(owner => this.syncHttpGeneralization(owner))
       return
     }
@@ -4312,6 +4732,27 @@ class Cooperate {
       const genOwners = this.collectGeneralizationOwners(name, args)
       if (genOwners.length) {
         genOwners.forEach(owner => this.syncHttpGeneralization(owner))
+      }
+      if (
+        name === 'SET_NODE_TAG' ||
+        name === 'SET_NODE_IMAGE' ||
+        name === 'SET_NODE_HYPERLINK' ||
+        name === 'SET_NODE_MAP_REF' ||
+        name === 'SET_NODE_ICON' ||
+        name === 'ADD_ASSOCIATIVE_LINE' ||
+        (name === 'SET_NODE_DATA' &&
+          args[1] &&
+          (Object.prototype.hasOwnProperty.call(args[1], 'associativeLineTargets') ||
+            Object.prototype.hasOwnProperty.call(args[1], 'image') ||
+            Object.prototype.hasOwnProperty.call(args[1], 'imageSize')))
+      ) {
+        if (name === 'SET_NODE_IMAGE') {
+          const store = this.mindMap && this.mindMap.nodeBase64ImageStorage
+          if (store && typeof store.onBeforeAddHistory === 'function') {
+            store.onBeforeAddHistory()
+          }
+        }
+        this.flushHttpText()
         return
       }
       this.scheduleHttpTextSync()
@@ -4408,6 +4849,31 @@ class Cooperate {
       })
       this._v2UndoActive = true
       this._v2UndoAllowReplace = false
+      const statusNow =
+        this.collabV2Adapter.getStatus && this.collabV2Adapter.getStatus()
+      const top =
+        (this.collabV2Adapter.peekUndoTarget &&
+          this.collabV2Adapter.peekUndoTarget()) ||
+        (statusNow && statusNow.undoTop) ||
+        null
+      collabPasteUndo.publishUndoTargetTrace({
+        undoOpId: '',
+        targetOperationId: top && (top.opId || (top.opIds && top.opIds[top.opIds.length - 1])),
+        targetType: top && top.type,
+        targetUids: top && top.opIds,
+        inversePayload: null,
+        undoDepth: statusNow && statusNow.undoDepth
+      })
+      if (isUndo && top && (top.type === 'map.replace' || top.type === 'map.replaced')) {
+        if (this._lastPastedUids && this._lastPastedUids.size) {
+          undoFullTreeForbidden('PASTE_UNDO_FULL_TREE_FORBIDDEN')
+          this._v2UndoActive = false
+          const err = collabPasteUndo.pasteUndoFullTreeForbidden('undo-target-map.replace', {
+            targetOperationId: top.opId
+          })
+          return Promise.reject(err)
+        }
+      }
       const run = isUndo
         ? this.collabV2Adapter.undoLastLocalOperation()
         : this.collabV2Adapter.redoLastLocalOperation()
@@ -4423,8 +4889,24 @@ class Cooperate {
           if (evType === 'map.replaced' || evType === 'map.replace') {
             this._v2UndoAllowReplace = true
           }
-          if (op && (op.event || op.type)) {
-            return this.applyV2RemoteOperation(op, { applySelf: true })
+          if (op && (op.event || op.type || op.payload)) {
+            const normalized = collabNodeFeatures.normalizeAppliedUpdatePayload(op)
+            const applied = this.applyV2RemoteOperation(op, { applySelf: true })
+            collabNodeFeatures.publishUndoApplyTrace({
+              undoOpId: op.opId || op.operationId,
+              targetOpId:
+                (op.payload &&
+                  (op.payload.targetOperationId ||
+                    op.payload.undoOf ||
+                    op.payload.redoOf)) ||
+                '',
+              targetUid: normalized.uid,
+              inversePatch: normalized.patch,
+              serverAppliedEvent: (op.event && op.event.type) || op.type,
+              originNodeDataAfter: true,
+              rendererRefreshed: true
+            })
+            return applied
           }
         })
         .catch(err => {
@@ -4629,18 +5111,48 @@ class Cooperate {
         ? this.lastPushed[uid].full
         : null
     const data = (target.getData && target.getData()) || {}
+    const content = collabNodeFeatures.buildNodeContentFields(data, prevFull)
+    const imgMap =
+      (this.mindMap &&
+        this.mindMap.renderer &&
+        this.mindMap.renderer.renderTree &&
+        this.mindMap.renderer.renderTree.data &&
+        this.mindMap.renderer.renderTree.data.imgMap) ||
+      {}
     const full = {
-      text: this.nodePlain(target),
-      note: (target.getData && target.getData('note')) || '',
+      text: content.text,
+      note: content.note,
       ...collectStyleFields(data, prevFull)
     }
+    if (content.richText !== undefined) full.richText = content.richText
+    if (content.richText) {
+      collabNodeFeatures.publishRichTextPersistTrace({
+        operationText: content.text,
+        richTextFlag: true
+      })
+    }
+    const imageFields = collabSpecialObjects.canonicalImageFields(
+      data,
+      imgMap,
+      target.getImageUrl && target.getImageUrl.bind(target)
+    )
+    collabSpecialObjects.publishImageTrace({
+      uid,
+      command: 'node.update',
+      imageBefore: prevFull && prevFull.image,
+      imageAfter: imageFields.image,
+      storedImageValue: imageFields.storedImageValue,
+      imageTitle: imageFields.imageTitle,
+      imageSize: imageFields.imageSize
+    })
     NULLABLE_PATCH_KEYS.forEach(key => {
-      const value = target.getData && target.getData(key)
+      let value = target.getData && target.getData(key)
+      if (key === 'image') {
+        if (imageFields.unresolvedKey || imageFields.skipTransient) return
+        value = imageFields.image
+      }
       const empty =
-        value === undefined ||
-        value === null ||
-        value === '' ||
-        (Array.isArray(value) && value.length === 0) ||
+        collabNodeFeatures.isEmptyFeatureValue(key, value) ||
         (key === 'mapRef' && !mapRefUtil.normalizeMapRef(value))
       if (!empty) {
         full[key] = collabGeneralization.snapshotValue(value)
@@ -4653,6 +5165,7 @@ class Cooperate {
         full[key] = null
       }
     })
+    collabNodeFeatures.applyNullableGroupClears(full, data, prevFull)
     if (!options.onlyChanged || !uid) return full
     const prev = this.lastPushed[uid]
     if (!prev || !prev.full) return full
@@ -4827,6 +5340,9 @@ class Cooperate {
     })
     const filtered = rows.filter(row => {
       if (!row || !row.uid || !row.parent) return false
+      if (this._lastPastedUids && this._lastPastedUids.size) {
+        if (!this._lastPastedUids.has(row.uid)) return false
+      }
       return !this.isGeneralizationUid(row.parent, row.uid)
     })
     if (knownUids && knownUids.size) return filtered
@@ -5064,15 +5580,40 @@ class Cooperate {
           uid: row.uid,
           text: row.text,
           note: row.note || '',
-          index: row.index
+          index: row.index,
+          data: row.data || undefined
         }
       }))
       try {
-        await this.submitV2('node.batch', { ops })
+        const submitted = await this.submitV2('node.batch', { ops })
         records.forEach(row => {
           this.markUidPushed(row.uid, row.data || { text: row.text, note: row.note }, 'ack')
           this.recentPushed.set(row.uid, Date.now())
         })
+        const inverse = collabPasteUndo.pasteUndoInverse(ops)
+        const insertedUids = records.map(row => row.uid)
+        const roots = collabPasteUndo.forestRootsFromInserts(ops)
+        collabPasteUndo.publishPasteUndoTrace({
+          pasteOperationId:
+            (submitted && (submitted.opId || submitted.operationId)) || '',
+          type: 'node.batch',
+          batchItems: ops.map(item => ({
+            type: item.type,
+            uid: item.payload.uid,
+            parent: item.payload.parent
+          })),
+          insertedUids,
+          pastedRoots: roots,
+          inversePayload: inverse,
+          undoGroupId:
+            (submitted && submitted.opId) ||
+            (this.collabV2Adapter &&
+              this.collabV2Adapter.getStatus &&
+              this.collabV2Adapter.getStatus().lastOpId) ||
+            '',
+          originalUids: Array.from(this._lastOriginalUids || [])
+        })
+        this._lastPastedUids = null
         return
       } catch (err) {
         if (!isPermanentNodeError(err)) {
@@ -5420,6 +5961,13 @@ class Cooperate {
     this.recentHttpDeleted.set(uid, Date.now())
   }
 
+  reviveDeletedUid(uid) {
+    if (!uid) return
+    if (this.deletedUids) this.deletedUids.delete(uid)
+    if (this.abandonedInsertUids) this.abandonedInsertUids.delete(uid)
+    if (this.recentHttpDeleted) this.recentHttpDeleted.delete(uid)
+  }
+
   isRecentlyHttpDeleted(uid) {
     if (!uid || !this.recentHttpDeleted) return false
     pruneRecentMap(this.recentHttpDeleted)
@@ -5460,7 +6008,40 @@ class Cooperate {
       }
       if (copied) trees.push(copied)
     }
-    return trees.length ? trees : null
+    const imgMap =
+      (this.mindMap &&
+        this.mindMap.renderer &&
+        this.mindMap.renderer.renderTree &&
+        this.mindMap.renderer.renderTree.data &&
+        this.mindMap.renderer.renderTree.data.imgMap) ||
+      {}
+    return trees.length ? collabPaste.cloneCopyTrees(trees, imgMap) : null
+  }
+
+  preparePasteTrees(input) {
+    const imgMap =
+      (this.mindMap &&
+        this.mindMap.renderer &&
+        this.mindMap.renderer.renderTree &&
+        this.mindMap.renderer.renderTree.data &&
+        this.mindMap.renderer.renderTree.data.imgMap) ||
+      {}
+    const prepared = collabPaste.preparePasteTrees(input, { imgMap })
+    this._lastPasteIdentity = prepared.trace
+    this._lastPastedUids = new Set(prepared.pastedUids || [])
+    this._lastOriginalUids = new Set(prepared.originalUids || [])
+    try {
+      collabTreeIntegrity.checkTreeGraph(
+        { root: { data: { uid: 'virtual-root', isRoot: true }, children: prepared.trees } },
+        {
+          originalUids: prepared.originalUids,
+          pastedUids: prepared.pastedUids
+        }
+      )
+    } catch (err) {
+      // integrity logs TREE_GRAPH_INTEGRITY_FAILED
+    }
+    return prepared.trees
   }
 
   async fetchExportTree() {
@@ -5546,6 +6127,9 @@ class Cooperate {
         action = { type: 'resnapshot', version: plan.version }
       }
       if (action.type === 'ignore') return
+      if (this.safeLoadMode && action.type === 'resnapshot') {
+        return
+      }
       if (action.type === 'apply' && action.operations) {
         if (this.collabStore) {
           action.operations.forEach(op => {
@@ -5608,7 +6192,7 @@ class Cooperate {
       if (this.collabStore) this.collabStore.setStatus('live')
       const pending = this.httpPendingRecoverVersion
       this.httpPendingRecoverVersion = 0
-      if (pending > this.lastAppliedVersion) {
+      if (!this.safeLoadMode && pending > this.lastAppliedVersion) {
         Promise.resolve().then(() => {
           this.recoverHttpCollab(pending, options).catch(() => {})
         })
@@ -5677,10 +6261,9 @@ class Cooperate {
             const localData = (node.getData && node.getData()) || {}
             const merged = applyRemoteNodeData(localData, data)
             const next = publicNodeData(merged.data)
-            const text = next.richText
-              ? getTextFromHtml(next.text)
-              : String(next.text || '')
-            const note = next.note || ''
+            const content = collabNodeFeatures.buildNodeContentFields(next)
+            const text = content.text
+            const note = content.note
             const prev = this.lastPushed[item.uid]
             const fv = readFieldVersions(merged.data)
             const localText = this.nodePlain(node)
@@ -5726,6 +6309,7 @@ class Cooperate {
                   full: {
                     text,
                     note,
+                    richText: next.richText || undefined,
                     image: next.image,
                     imageTitle: next.imageTitle,
                     imageSize: next.imageSize,

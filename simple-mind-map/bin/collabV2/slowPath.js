@@ -1,4 +1,10 @@
 const mindDoc = require('../mindDoc')
+const {
+  inspectImportTree,
+  importTooLargeError,
+  importMaxNodes,
+  publishLargeImportTrace
+} = require('../collabImport')
 
 const SLOW_PATH_TYPES = new Set(['map.replace'])
 
@@ -22,12 +28,30 @@ function logSlowPath(info) {
 function applyMapReplace(nodes, op, command) {
   const started = process.hrtime.bigint()
   const previous = nodes || {}
+  const tree = op.payload && op.payload.tree
+  if (tree) {
+    const stats = inspectImportTree(tree)
+    publishLargeImportTrace({
+      phase: 'map.replace.inspect',
+      ...stats
+    })
+    if (stats.tooLarge) throw importTooLargeError(stats)
+  }
   const next =
     (op.payload && op.payload.nodes) ||
-    mindDoc.treeToObject(op.payload && op.payload.tree) ||
+    mindDoc.treeToObject(tree) ||
     nodes ||
     {}
   const count = Object.keys(next).length
+  const maxNodes = importMaxNodes()
+  if (count > maxNodes) {
+    throw importTooLargeError({
+      nodeCount: count,
+      serializedBytes: 0,
+      maxNodes,
+      maxBytes: 0
+    })
+  }
   logSlowPath({
     roomKey: op.roomKey || (command && command.mapId),
     type: 'map.replace',

@@ -7,7 +7,14 @@
       <div class="authCard authCard--compact">
         <h1 class="authBrand">依然中台</h1>
         <p class="authFailureText">{{ authFailure }}</p>
-        <button class="authButton" @click="initializeAuth">重新连接</button>
+        <p class="authFailureCode" v-if="authFailureCode">{{ authFailureCode }}</p>
+        <button
+          class="authButton"
+          :disabled="authRetrying"
+          @click="retryAuth"
+        >
+          {{ authRetrying ? '请稍候…' : '重新连接' }}
+        </button>
       </div>
     </div>
     <div
@@ -109,6 +116,9 @@ export default {
     return {
       authLoading: true,
       authFailure: '',
+      authFailureCode: '',
+      authRetryAttempt: 0,
+      authRetrying: false,
       authState: {
         enabled: false,
         authenticated: false,
@@ -172,9 +182,20 @@ export default {
         (this.authState.enabled && !this.authState.authenticated)
       if (onLoginScreen) document.title = PAGE_TITLE
     },
+    retryAuth() {
+      if (this.authRetrying) return
+      this.authRetrying = true
+      const wait = Math.min(15000, 800 * Math.pow(2, this.authRetryAttempt))
+      this.authRetryAttempt += 1
+      window.setTimeout(() => {
+        this.authRetrying = false
+        this.initializeAuth()
+      }, wait)
+    },
     async initializeAuth() {
       this.authLoading = true
       this.authFailure = ''
+      this.authFailureCode = ''
       let safetyTimer = null
       try {
         safetyTimer = window.setTimeout(() => {
@@ -182,12 +203,27 @@ export default {
           this.authLoading = false
           if (!this.authFailure) {
             this.authFailure = '认证服务响应超时，请稍后重试'
+            this.authFailureCode = 'AUTH_TIMEOUT'
             document.title = PAGE_TITLE
           }
         }, AUTH_BOOTSTRAP_MS)
         this.authState = await loadAuthState()
+        this.authRetryAttempt = 0
       } catch (err) {
-        this.authFailure = err.message || '请确认服务已启动后重试'
+        const code =
+          (err && err.code) ||
+          (/AUTH_TIMEOUT/.test(err && err.message)
+            ? 'AUTH_TIMEOUT'
+            : /SERVICE_UNAVAILABLE/.test((err && err.code) || (err && err.message))
+              ? 'SERVICE_UNAVAILABLE'
+              : '')
+        this.authFailureCode = code || 'AUTH_UNAVAILABLE'
+        this.authFailure =
+          code === 'SERVICE_UNAVAILABLE'
+            ? (err && err.message) || '协作服务未启动或无法连接'
+            : code === 'AUTH_TIMEOUT'
+              ? '认证服务响应超时，请稍后重试'
+              : (err && err.message) || '请确认服务已启动后重试'
         document.title = PAGE_TITLE
       } finally {
         if (safetyTimer) window.clearTimeout(safetyTimer)
@@ -509,6 +545,13 @@ body,
     border-color: rgba(15, 157, 104, 0.45);
     box-shadow: 0 0 0 3px rgba(15, 157, 104, 0.08);
   }
+}
+
+.authFailureCode {
+  margin: 0;
+  color: #8a6d3b;
+  font-size: 12px;
+  letter-spacing: 0.04em;
 }
 
 .authDevError {

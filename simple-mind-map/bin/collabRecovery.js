@@ -158,17 +158,6 @@ function applyCollabEvent(obj, event) {
     removed.forEach(id => {
       delete next[id]
     })
-    Object.keys(next).forEach(id => {
-      const data = next[id] && next[id].data
-      const targets = data && data.associativeLineTargets
-      if (!Array.isArray(targets) || !targets.length) return
-      const filtered = targets.filter(target => !removed.includes(target))
-      if (filtered.length === targets.length) return
-      next[id] = {
-        ...next[id],
-        data: { ...data, associativeLineTargets: filtered }
-      }
-    })
     return next
   }
   if (type === 'node.restored') {

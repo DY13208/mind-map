@@ -150,8 +150,13 @@ function createRichTextNode(specifyText) {
   }
   if (recoverText && !isUndef(text)) {
     if (checkIsRichText(text)) {
-      // 如果是富文本那么移除内联样式
-      text = removeRichTextStyes(text)
+      const keepInline =
+        /<(strong|em|u|s|span)\b/i.test(text) ||
+        /style\s*=/i.test(text) ||
+        /ql-formula/i.test(text)
+      if (!keepInline) {
+        text = removeRichTextStyes(text)
+      }
     } else {
       // 非富文本则改为富文本结构
       text = `<p>${text}</p>`

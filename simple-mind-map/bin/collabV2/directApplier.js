@@ -1,5 +1,5 @@
 const { generateKeyBetween, generateNKeysBetween, isPaddedIndex } = require('../fractionalIndex')
-const { mergeNodeDataLww } = require('../fieldMerge')
+const { mergeNodeDataLww, expandInverseByGroups } = require('../fieldMerge')
 const {
   parentDeletedError,
   nodeDeletedError,
@@ -14,6 +14,11 @@ const { normalizeOperation, normalizeType, BATCH_MAX } = require('./protocol')
 const { collabTrace } = require('./trace')
 const { stripSearchHtml } = require('../roomNodes')
 const { mergeMapMetadata, pickMetaPatch } = require('../mapMetadata')
+const {
+  pasteUndoInverse,
+  forestRootsFromInserts,
+  collapseDeleteOpsToForestRoots
+} = require('../collabPasteUndo')
 
 const DIRECT_TYPES = new Set([
   'node.insert',
@@ -91,11 +96,13 @@ function warnStructuralUpdate(op) {
     keys
   }
   try {
+    collabTrace('NODE_FEATURE_STRUCTURAL_MUTATION', row)
     collabTrace('UPDATE_STRUCTURAL_FIELD_FORBIDDEN', row)
   } catch (err) {
     // ignore
   }
   if (typeof console !== 'undefined' && console.warn) {
+    console.warn('NODE_FEATURE_STRUCTURAL_MUTATION', row)
     console.warn('UPDATE_STRUCTURAL_FIELD_FORBIDDEN', row)
   }
   return true
@@ -205,7 +212,7 @@ async function applyInsert(store, op, version) {
   const uid = String(payload.uid || '').trim() || createUid()
   const existing = await store.getAny(uid)
   if (existing && !existing.deleted) {
-    throw commandError(`节点已存在: ${uid}`, 'UID_EXISTS', 409)
+    throw commandError(`节点已存在: ${uid}`, 'UID_ALREADY_EXISTS', 409)
   }
   if (existing && existing.deleted) throw uidReusedError(uid)
   const stamp = await placeAmongSiblings(
@@ -341,10 +348,7 @@ async function applyUpdate(store, op, version) {
       ? 'node.moved'
       : 'node.reordered'
     : 'node.updated'
-  const inversePatch = {}
-  merged.changedFields.forEach(key => {
-    inversePatch[key] = live.data[key] === undefined ? null : live.data[key]
-  })
+  const inversePatch = expandInverseByGroups(live.data, merged.changedFields)
   const fieldPayload = {
     uid,
     patch: merged.changedFields.length
@@ -452,6 +456,7 @@ async function applyDelete(store, op, version) {
         uid,
         parentUid: live.parent_uid,
         removed,
+        deletedUids: removed,
         keepChildren,
         promoted
       },
@@ -566,37 +571,81 @@ async function applyMeta(store, op, version) {
   }
 }
 
+function topoSortInserts(childOps) {
+  const items = childOps.map(op => {
+    const payload = op.payload || {}
+    const uid = String(payload.uid || '').trim() || createUid()
+    const parentRaw = String(
+      payload.parentUid || payload.parent_uid || payload.parent || 'root'
+    ).trim() || 'root'
+    return { payload, uid, parentRaw }
+  })
+  const insertUids = new Set(items.map(item => item.uid))
+  const sorted = []
+  const placed = new Set()
+  let guard = items.length + 2
+  while (sorted.length < items.length && guard--) {
+    let progressed = false
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (placed.has(item.uid)) continue
+      if (!insertUids.has(item.parentRaw) || placed.has(item.parentRaw)) {
+        placed.add(item.uid)
+        sorted.push(item)
+        progressed = true
+      }
+    }
+    if (!progressed) break
+  }
+  if (sorted.length < items.length) {
+    items.forEach(item => {
+      if (!placed.has(item.uid)) sorted.push(item)
+    })
+  }
+  return { items: sorted, insertUids }
+}
+
 async function applyInsertBulk(store, childOps, version, roomKey) {
   const existing = await store.getMany(childOps.map(op => (op.payload || {}).uid).filter(Boolean))
   existing.forEach(row => {
-    if (!row.deleted) throw commandError(`节点已存在: ${row.uid}`, 'UID_EXISTS', 409)
+    if (!row.deleted) throw commandError(`节点已存在: ${row.uid}`, 'UID_ALREADY_EXISTS', 409)
     if (row.deleted) throw uidReusedError(row.uid)
   })
+  const { items, insertUids } = topoSortInserts(childOps)
   const byParent = new Map()
   const parentCache = new Map()
-  for (let i = 0; i < childOps.length; i++) {
-    const payload = childOps[i].payload || {}
-    const parentRaw = payload.parentUid || payload.parent_uid || payload.parent || 'root'
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    const parentRaw = item.parentRaw
+    if (insertUids.has(parentRaw)) {
+      if (!byParent.has(parentRaw)) byParent.set(parentRaw, { parent: { uid: parentRaw }, items: [], inBatch: true })
+      byParent.get(parentRaw).items.push(item)
+      continue
+    }
     let parent = parentCache.get(parentRaw)
     if (!parent) {
       parent = await resolveParent(store, parentRaw)
-      await assertNotSop(store, parent.uid, payload)
+      await assertNotSop(store, parent.uid, item.payload)
       parentCache.set(parentRaw, parent)
       parentCache.set(parent.uid, parent)
     }
-    if (!byParent.has(parent.uid)) byParent.set(parent.uid, { parent, items: [] })
-    byParent.get(parent.uid).items.push({ payload, uid: String(payload.uid || '').trim() || createUid() })
+    if (!byParent.has(parent.uid)) byParent.set(parent.uid, { parent, items: [], inBatch: false })
+    byParent.get(parent.uid).items.push(item)
   }
   const events = []
-  const inverses = []
   const rows = []
   for (const [parentUid, group] of byParent.entries()) {
-    const kids = await store.listChildren(parentUid)
-    const keys = generateNKeysBetween(
-      kids.length ? kids[kids.length - 1].position : null,
-      null,
-      group.items.length
-    )
+    const kids = group.inBatch ? [] : await store.listChildren(parentUid)
+    let keys
+    try {
+      keys = generateNKeysBetween(
+        kids.length ? kids[kids.length - 1].position : null,
+        null,
+        group.items.length
+      )
+    } catch (err) {
+      keys = generateNKeysBetween(null, null, group.items.length)
+    }
     group.items.forEach((item, index) => {
       const extra = dataFields(item.payload.data || item.payload)
       const data = {
@@ -615,7 +664,6 @@ async function applyInsertBulk(store, childOps, version, roomKey) {
         is_root: false,
         node_version: version
       })
-      inverses.push({ type: 'node.delete', payload: { uid: item.uid } })
       events.push({
         type: 'node.inserted',
         payload: {
@@ -634,12 +682,13 @@ async function applyInsertBulk(store, childOps, version, roomKey) {
   else {
     for (let i = 0; i < rows.length; i++) await store.insert(rows[i])
   }
+  const inversePayload = pasteUndoInverse(childOps) || {
+    type: 'node.delete',
+    payload: { uid: forestRootsFromInserts(childOps)[0] }
+  }
   return {
-    result: { count: rows.length, bulk: true },
-    inversePayload: {
-      type: 'node.batch',
-      payload: { ops: inverses.reverse() }
-    },
+    result: { count: rows.length, bulk: true, pastedRoots: forestRootsFromInserts(childOps) },
+    inversePayload,
     event: {
       type: 'batch.applied',
       payload: { count: rows.length, events, resnapshot: false, bulk: true },
@@ -668,9 +717,25 @@ async function applyBatch(store, op, options) {
   const skipped = []
   let appliedCount = 0
   let last = { result: {} }
-  for (let i = 0; i < normalized.length; i++) {
+  const allDeletes =
+    normalized.length >= 1 &&
+    normalized.every(child => normalizeType(child.type) === 'node.delete')
+  let deleteOps = normalized
+  if (allDeletes && store.getLive) {
+    const parentOf = {}
+    for (let i = 0; i < normalized.length; i++) {
+      const uid = normalized[i].payload && normalized[i].payload.uid
+      if (!uid) continue
+      const live = await store.getLive(uid).catch(() => null)
+      if (live) parentOf[uid] = live.parent_uid
+    }
+    const collapsed = collapseDeleteOpsToForestRoots(normalized, uid => parentOf[uid])
+    deleteOps = collapsed.map(child => normalizeOperation({ ...child, roomKey: op.roomKey }))
+  }
+  const toApply = allDeletes ? deleteOps : normalized
+  for (let i = 0; i < toApply.length; i++) {
     try {
-      last = await applyDirect(store, normalized[i], options)
+      last = await applyDirect(store, toApply[i], options)
       appliedCount += 1
       if (last.event) {
         events.push(last.event)
@@ -678,15 +743,27 @@ async function applyBatch(store, op, options) {
       }
       if (last.inversePayload) inverses.push(last.inversePayload)
     } catch (err) {
-      if (err && err.code === 'REPLACE_CONFLICT') {
+      const code = err && err.code
+      if (
+        code === 'REPLACE_CONFLICT' ||
+        code === 'TARGET_DELETED' ||
+        code === 'NODE_DELETED'
+      ) {
         skipped.push({
-          uid: (normalized[i].payload && normalized[i].payload.uid) || '',
-          code: err.code
+          uid: (toApply[i].payload && toApply[i].payload.uid) || '',
+          code
         })
         continue
       }
       throw err
     }
+  }
+  let inversePayload = {
+    type: 'node.batch',
+    payload: { ops: inverses.reverse(), batchId: op.payload && op.payload.batchId }
+  }
+  if (allInserts) {
+    inversePayload = pasteUndoInverse(normalized) || inversePayload
   }
   return {
     result: {
@@ -695,10 +772,7 @@ async function applyBatch(store, op, options) {
       skippedItems: skipped,
       batchId: op.payload && op.payload.batchId
     },
-    inversePayload: {
-      type: 'node.batch',
-      payload: { ops: inverses.reverse(), batchId: op.payload && op.payload.batchId }
-    },
+    inversePayload,
     event: {
       type: 'batch.applied',
       payload: {

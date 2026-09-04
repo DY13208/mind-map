@@ -120,7 +120,6 @@ import { getSaveStatus as requestSaveStatus } from '@/utils/fileApi'
 import { promiseWithTimeout } from '@/utils/promiseWithTimeout'
 import {
   prepareImportedTree,
-  stubImportedTree,
   yieldToUi
 } from '@/utils/importTree'
 import handleClipboardText from '@/utils/handleClipboardText'
@@ -253,11 +252,12 @@ export default {
     // 先注册关闭 loading，避免 init 渲染结束事件早于监听导致遮罩锁死
     this.$bus.$on('node_tree_render_end', this.handleHideLoading)
     this.$bus.$on('showLoading', this.handleShowLoading)
+    this.$bus.$on('hideLoading', this.handleForceHideLoading)
     this.enableShowLoading = true
     showLoading()
     this.loadingSafetyTimer = setTimeout(() => {
-      this.handleHideLoading()
-    }, 8000)
+      this.handleHideLoading({ force: true })
+    }, 20000)
     let dataReady = true
     try {
       await promiseWithTimeout(this.getData(), 10000, 'mind map data')
@@ -320,6 +320,7 @@ export default {
     this.$bus.$off('startPainter', this.handleStartPainter)
     this.$bus.$off('node_tree_render_end', this.handleHideLoading)
     this.$bus.$off('showLoading', this.handleShowLoading)
+    this.$bus.$off('hideLoading', this.handleForceHideLoading)
     this.$bus.$off('localStorageExceeded', this.onLocalStorageExceeded)
     window.removeEventListener('resize', this.handleResize)
     if (this.mindMap) this.mindMap.destroy()
@@ -397,8 +398,6 @@ export default {
     startImportProgressPoll(roomKey) {
       this.stopImportProgressPoll()
       if (!roomKey) return
-      // Collaboration V2 save state comes from socket/outbox/ACK, not V1 /save-status.
-      if (getRuntimeConfig().collabV2 !== false) return
       this.importProgressTimer = setInterval(async () => {
         try {
           const data = await requestSaveStatus(roomKey)
@@ -428,8 +427,12 @@ export default {
     },
 
     // 渲染结束后关闭loading
-    handleHideLoading() {
-      if (this.importPersistLock) return
+    handleForceHideLoading() {
+      this.handleHideLoading({ force: true })
+    },
+
+    handleHideLoading(options = {}) {
+      if (this.importPersistLock && !options.force) return
       this.stopImportProgressPoll()
       if (this.loadingSafetyTimer) {
         clearTimeout(this.loadingSafetyTimer)
@@ -730,10 +733,14 @@ export default {
       if (persistReplace) cooperate.beginHttpReplace()
       let rootNodeData = null
       let importDone = !isUserImport
+      const prevReadonly = !!(this.mindMap && this.mindMap.opt && this.mindMap.opt.readonly)
       try {
         rootNodeData = data.root || data
         if (persistReplace) {
           this.importPersistLock = true
+          if (this.mindMap && typeof this.mindMap.updateConfig === 'function') {
+            this.mindMap.updateConfig({ readonly: true })
+          }
           if (!quiet) {
             this.handleShowLoading(this.$t('edit.importSavingTip'), {
               timeout: loadingMs,
@@ -745,6 +752,11 @@ export default {
           await cooperate.persistHttpReplace(
             data.root ? { root: data.root } : { root: rootNodeData },
             {
+              allowFullTree: true,
+              source: 'import',
+              reason: 'IMPORT',
+              feature: 'import',
+              parseResult: 'ok',
               onUploadProgress: evt => {
                 const uploadPct = Number(evt && evt.percent) || 0
                 this.updateImportProgress(
@@ -755,13 +767,18 @@ export default {
             }
           )
           this.updateImportProgress(96, this.$t('edit.importSavingApply'))
-          if (nodeCount >= 100 && rootNodeData) {
-            stubImportedTree(rootNodeData, {
-              keepDepth: nodeCount >= 500 ? 1 : 2
-            })
-          }
         }
-        if (data.root) {
+        if (
+          persistReplace &&
+          cooperate &&
+          typeof cooperate.applyAuthoritativeTreeReplace === 'function'
+        ) {
+          cooperate.applyAuthoritativeTreeReplace(
+            rootNodeData,
+            'IMPORT',
+            { fullData: data.root ? data : { root: rootNodeData } }
+          )
+        } else if (data.root) {
           this.mindMap.setFullData(data)
         } else {
           this.mindMap.setData(data)
@@ -807,19 +824,45 @@ export default {
           } catch (restoreErr) {
             console.error('[mind-map] restore after import failed', restoreErr)
           }
+          const serializeFailed =
+            (err &&
+              (err.code === 'OUTBOX_NON_CLONEABLE_PAYLOAD' ||
+                err.code === 'IMPORT_OUTBOX_SERIALIZE_FAILED' ||
+                err.stage === 'IMPORT_OUTBOX_SERIALIZE_FAILED')) ||
+            /DataCloneError|OUTBOX_NON_CLONEABLE_PAYLOAD|could not be cloned/.test(
+              String((err && err.message) || '')
+            )
+          const code = (err && err.code) || ''
           this.$message.error(
-            (err && err.message) || this.$t('edit.importPersistFailed')
+            serializeFailed
+              ? 'IMPORT_OUTBOX_SERIALIZE_FAILED'
+              : code === 'IMPORT_TOO_LARGE'
+                ? 'IMPORT_TOO_LARGE'
+                : code === 'IMPORT_APPLY_FAILED'
+                  ? 'IMPORT_APPLY_FAILED'
+                  : (err && err.message) || this.$t('edit.importPersistFailed')
           )
         }
         if (isUserImport) {
-          this.$bus.$emit('setDataFailed', (err && err.message) || '')
+          this.$bus.$emit('setDataFailed', {
+            code: (err && err.code) || 'IMPORT_APPLY_FAILED',
+            stage: (err && err.stage) || 'IMPORT_APPLY_FAILED',
+            message: (err && err.message) || ''
+          })
         } else {
           throw err
         }
       } finally {
         this.importPersistLock = false
         this.stopImportProgressPoll()
-        if (persistReplace) cooperate.endHttpReplace()
+        if (this.mindMap && typeof this.mindMap.updateConfig === 'function') {
+          this.mindMap.updateConfig({ readonly: prevReadonly })
+        }
+        if (persistReplace) {
+          cooperate.endHttpReplace(
+            importDone ? { liveImmediately: true } : {}
+          )
+        }
         if (!quiet) this.handleHideLoading()
       }
       if (isUserImport && importDone) {
