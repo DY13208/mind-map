@@ -670,7 +670,15 @@ class MindMapNode {
           )
         }
         if (async) {
-          setTimeout(renderChild, 0)
+          const gen = this.renderer && this.renderer._renderGeneration
+          setTimeout(() => {
+            if (gen != null && gen !== this.renderer._renderGeneration) {
+              index++
+              if (index >= this.children.length) callback()
+              return
+            }
+            renderChild()
+          }, 0)
         } else {
           renderChild()
         }

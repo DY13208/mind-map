@@ -1705,7 +1705,7 @@ async function commitDirectRoomOperationOnce(client, roomKey, command, apply) {
     `update rooms
      set version = $2,
          title = coalesce($3, title),
-         metadata = coalesce($4::jsonb, metadata),
+         metadata = coalesce(metadata, '{}'::jsonb) || coalesce($4::jsonb, '{}'::jsonb),
          updated_at = now()
      where room_key = $1`,
     [
@@ -2188,6 +2188,12 @@ module.exports = {
   listRooms,
   listRoomsPage,
   getRoom,
+  getRoomMetadata: roomKey =>
+    require('./mapMetadata').getRoomMetadata(pool, roomKey),
+  updateRoomMetadata: (roomKey, patch, options) =>
+    require('./mapMetadata').updateRoomMetadata(pool, roomKey, patch, options),
+  hydrateRoomMetadata: require('./mapMetadata').hydrateRoomMetadata,
+  mergeMapMetadata: require('./mapMetadata').mergeMapMetadata,
   getRoomSnapshot,
   getRoomSubtree,
   getRoomRef,

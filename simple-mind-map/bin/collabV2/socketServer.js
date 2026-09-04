@@ -1,7 +1,13 @@
 const { Server } = require('socket.io')
 const { isAuthEnabled, authenticateWebsocketRequest } = require('../auth')
 const roomAcl = require('../roomAcl')
-const { getPool, getRoomVersion, safeRoomKey, isDeletedRoom } = require('../storage')
+const {
+  getPool,
+  getRoomVersion,
+  getRoomMetadata,
+  safeRoomKey,
+  isDeletedRoom
+} = require('../storage')
 const { isCollabV2Enabled } = require('./flag')
 const { submitOperation, listOperations } = require('./sequencer')
 const { isValidClientId, requireClientId } = require('./protocol')
@@ -143,6 +149,8 @@ function attachCollabV2(httpServer, options = {}) {
         const last = Math.max(0, Number(body && body.lastServerRevision) || 0)
         const sync = await listOperations(req, roomKey, last, 500)
         const version = await getRoomVersion(roomKey)
+        const metaRow = await getRoomMetadata(roomKey)
+        const metadata = (metaRow && metaRow.metadata) || {}
         reply({
           ok: true,
           roomKey,
@@ -152,6 +160,10 @@ function attachCollabV2(httpServer, options = {}) {
           canManage: !!access.canManage,
           legacyOpen: !!access.legacyOpen,
           serverRevision: Number(version || 0),
+          metadata,
+          theme: metadata.theme,
+          themeConfig: metadata.themeConfig,
+          layout: metadata.layout,
           sync,
           peers: presence.list(roomKey)
         })

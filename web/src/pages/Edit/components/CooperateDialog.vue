@@ -778,12 +778,25 @@ export default {
         Number((this._httpCollabPreview && this._httpCollabPreview.version) || 0)
       )
       adapter.setLastServerRevision(previewVersion)
-      await adapter.connect({
+      const joinResult = await adapter.connect({
         roomKey: this.roomName,
         userId: this.userId.replace(/^wecom:/, ''),
         clientId: adapter.getClientId && adapter.getClientId(),
         lastServerRevision: previewVersion
       })
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      const joinMeta = (joinResult && joinResult.metadata) || {}
+      if (
+        joinResult &&
+        cooperate &&
+        typeof cooperate.hydrateRoomMetadata === 'function' &&
+        (joinMeta.theme ||
+          joinMeta.layout ||
+          joinResult.theme ||
+          joinResult.layout)
+      ) {
+        cooperate.hydrateRoomMetadata(joinResult)
+      }
       this.peerList = this.mapV2Peers(adapter.getStatus().peers)
       const snap = adapter.getStatus()
       this.$store.commit('setCollabPresence', {
@@ -1964,6 +1977,9 @@ export default {
         this.mindMap.renderer && this.mindMap.renderer.renderTree
       if (renderRoot && typeof cooperate.seedPreviewHydration === 'function') {
         cooperate.seedPreviewHydration(renderRoot)
+      }
+      if (typeof cooperate.hydrateRoomMetadata === 'function') {
+        cooperate.hydrateRoomMetadata(preview)
       }
       await this.$nextTick()
       cooperate.setPreviewApplied(false)

@@ -75,6 +75,18 @@ export default {
       }
     }
   },
+  created() {
+    this.layout = this.mindMap.getLayout()
+    this.handleLayoutChange = layout => {
+      this.layout = layout || this.mindMap.getLayout()
+    }
+    this.mindMap.on('layout_change', this.handleLayoutChange)
+  },
+  beforeDestroy() {
+    if (this.handleLayoutChange) {
+      this.mindMap.off('layout_change', this.handleLayoutChange)
+    }
+  },
   methods: {
     useLayout(layout) {
       this.layout = layout

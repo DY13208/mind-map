@@ -13,6 +13,7 @@ const { isSopLabel } = require('./directStore')
 const { normalizeOperation, normalizeType, BATCH_MAX } = require('./protocol')
 const { collabTrace } = require('./trace')
 const { stripSearchHtml } = require('../roomNodes')
+const { mergeMapMetadata, pickMetaPatch } = require('../mapMetadata')
 
 const DIRECT_TYPES = new Set([
   'node.insert',
@@ -532,26 +533,34 @@ async function applyRestore(store, op, version) {
 async function applyMeta(store, op, version) {
   const payload = op.payload || {}
   const prev = (store.getMeta && store.getMeta()) || {}
-  const next = { ...prev }
-  META_KEYS.forEach(key => {
-    if (payload[key] !== undefined) next[key] = payload[key]
-  })
-  if (payload.metadata && typeof payload.metadata === 'object') {
-    Object.assign(next, payload.metadata)
-  }
+  const patch = pickMetaPatch(payload)
+  const next = mergeMapMetadata(prev, patch)
   if (store.setMeta) store.setMeta(next)
-  const title = payload.title != null ? String(payload.title).trim().slice(0, 80) : next.title
+  const title =
+    payload.title != null ? String(payload.title).trim().slice(0, 80) : next.title
+  const inversePatch = {}
+  Object.keys(patch).forEach(key => {
+    inversePatch[key] = prev[key] === undefined ? null : prev[key]
+  })
   return {
-    result: { metadata: next, title },
+    result: { metadata: next, title, patch },
     title: title || null,
     metadata: next,
     inversePayload: {
       type: 'map.meta.update',
-      payload: { metadata: prev, title: prev.title }
+      payload: { patch: inversePatch, title: prev.title }
     },
     event: {
       type: 'map.updated',
-      payload: { metadata: next, title, resnapshot: false },
+      payload: {
+        metadata: next,
+        patch,
+        title,
+        resnapshot: false,
+        ...(patch.theme !== undefined ? { theme: patch.theme } : {}),
+        ...(patch.themeConfig !== undefined ? { themeConfig: patch.themeConfig } : {}),
+        ...(patch.layout !== undefined ? { layout: patch.layout } : {})
+      },
       affectedUids: []
     }
   }

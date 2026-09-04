@@ -668,12 +668,17 @@ function mapTitle(obj, row) {
 }
 
 function mapMeta(roomKey, obj, row) {
+  const metadata = (row && row.metadata) || {}
   return {
     room_key: roomKey,
     version: Number((row && row.version) || 0),
     title: mapTitle(obj, row),
     share_url: shareUrl(roomKey),
-    updated_at: row && row.updated_at
+    updated_at: row && row.updated_at,
+    metadata,
+    theme: metadata.theme,
+    themeConfig: metadata.themeConfig,
+    layout: metadata.layout
   }
 }
 
