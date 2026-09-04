@@ -63,6 +63,7 @@ class Base {
   checkIsLayoutChangeRerenderExpandBtnPlaceholderRect(node) {
     if (this.renderer.checkHasRenderSource(CONSTANTS.CHANGE_LAYOUT)) {
       node.needRerenderExpandBtnPlaceholderRect = true
+      node.needLayout = true
     }
   }
 

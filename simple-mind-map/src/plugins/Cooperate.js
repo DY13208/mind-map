@@ -10,8 +10,23 @@ import {
   transformObjectToTreeData,
   removeFromParentNodeData,
   copyNodeTree,
-  formatGetNodeGeneralization
+  formatGetNodeGeneralization,
+  checkIsNodeStyleDataKey
 } from '../utils/index'
+import {
+  pickLiveMetaPatch,
+  hydrateSharedMetadata,
+  collectStyleFields,
+  canonicalStructureFromTree,
+  structureSignature,
+  publishMapMetaState,
+  warnStructuralMutation,
+  STYLE_COMMAND_MATRIX
+} from '../utils/collabMapMeta'
+import {
+  publishLayoutApplyTrace,
+  inspectLayoutRenderer
+} from '../utils/collabLayoutCleanup'
 import { applyObjectToYMap, migrateLegacyNodes } from './cooperateYjs'
 import {
   planCollabRecovery,
@@ -1546,6 +1561,14 @@ class Cooperate {
       }
     })
     this.waitNodeUidMap = {}
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (renderer && renderer._lastRenderWasLayoutSwitch) {
+      inspectLayoutRenderer(
+        this.mindMap,
+        '',
+        this.mindMap.getLayout && this.mindMap.getLayout()
+      )
+    }
   }
 
   onBeforeSetData() {
@@ -2363,44 +2386,145 @@ class Cooperate {
         ownerUid: owner.getData && owner.getData('uid')
       })
     }
+    const before = {
+      parent:
+        (node.parent && node.parent.getData && node.parent.getData('uid')) ||
+        null,
+      position: node.getData && node.getData('position')
+    }
     this.isApplyingRemote = true
     try {
       this.applyHttpRemoteNodeFields(node, next, { data: next })
+      this.rememberPushedNode(node)
     } finally {
       this.suppressLocalUntil = Date.now() + 250
       this.isApplyingRemote = false
     }
+    const afterParent =
+      (node.parent && node.parent.getData && node.parent.getData('uid')) || null
+    if (afterParent !== before.parent) {
+      console.error('STYLE_STRUCTURAL_MUTATION', {
+        uid,
+        parent: [before.parent, afterParent]
+      })
+    }
     return true
   }
 
-  applyRemoteMapMeta(payload = {}) {
+  applyRemoteMapMeta(payload = {}, options = {}) {
     if (!this.mindMap || this.isApplyingRemote) return
+    const hydrate = !!options.hydrate
+    const patch = hydrate
+      ? hydrateSharedMetadata(payload)
+      : {
+          ...pickLiveMetaPatch(payload),
+          source: 'remote apply'
+        }
+    const theme = patch.theme
+    const themeConfig = patch.themeConfig
+    const layout = patch.layout
+    if (theme == null && themeConfig == null && layout == null) return
+    const before = canonicalStructureFromTree(
+      this.mindMap.renderer && this.mindMap.renderer.renderTree
+    )
+    const beforeSig = structureSignature(before)
     this.isApplyingRemote = true
     try {
-      const theme = payload.theme || (payload.metadata && payload.metadata.theme)
-      const themeConfig =
-        payload.themeConfig || (payload.metadata && payload.metadata.themeConfig)
-      const layout = payload.layout || (payload.metadata && payload.metadata.layout)
-      if (theme && this.mindMap.opt) {
+      if (theme != null && this.mindMap.opt) {
         this.mindMap.opt.theme = theme
       }
-      if (themeConfig && this.mindMap.opt) {
-        this.mindMap.opt.themeConfig = themeConfig
+      if (themeConfig !== undefined && this.mindMap.opt) {
+        this.mindMap.opt.themeConfig = themeConfig || {}
       }
-      if (layout && this.mindMap.opt && this.mindMap.renderer) {
+      const currentLayout =
+        this.mindMap.getLayout && this.mindMap.getLayout()
+      const layoutChanged = !!(layout && layout !== currentLayout)
+      if (layoutChanged && this.mindMap.opt && this.mindMap.renderer) {
         this.mindMap.opt.layout = layout
         if (typeof this.mindMap.renderer.setLayout === 'function') {
           this.mindMap.renderer.setLayout()
         }
       }
-      if (typeof this.mindMap.initTheme === 'function') this.mindMap.initTheme()
-      if (typeof this.mindMap.render === 'function') {
-        this.mindMap.render(null, theme ? 'changeTheme' : layout ? 'changeLayout' : '')
+      if (theme != null || themeConfig !== undefined) {
+        if (typeof this.mindMap.initTheme === 'function') this.mindMap.initTheme()
       }
+      const shouldRender =
+        theme != null || themeConfig !== undefined || layoutChanged
+      if (shouldRender && typeof this.mindMap.render === 'function') {
+        this.mindMap.render(
+          null,
+          theme != null || themeConfig !== undefined
+            ? 'changeTheme'
+            : 'changeLayout'
+        )
+      }
+      if (theme != null) this.mindMap.emit('view_theme_change', theme)
+      if (layoutChanged) this.mindMap.emit('layout_change', layout)
+      if (layoutChanged || (hydrate && layout)) {
+        publishLayoutApplyTrace({
+          layout: layout || currentLayout,
+          source: hydrate ? 'server metadata' : 'remote apply',
+          revision: Number(payload.version || this.lastAppliedVersion || 0),
+          renderCount:
+            this.mindMap.renderer && this.mindMap.renderer._layoutRenderCount,
+          layoutCount:
+            this.mindMap.renderer && this.mindMap.renderer._layoutSwitchCount
+        })
+      }
+      const after = canonicalStructureFromTree(
+        this.mindMap.renderer && this.mindMap.renderer.renderTree
+      )
+      if (beforeSig !== structureSignature(after)) {
+        warnStructuralMutation(layout && theme == null ? 'layout' : 'theme', before, after)
+      }
+      publishMapMetaState({
+        roomKey: this.httpRoomKey || '',
+        serverMetadata: payload.metadata || {
+          ...(theme != null ? { theme } : {}),
+          ...(themeConfig !== undefined ? { themeConfig } : {}),
+          ...(layout ? { layout } : {})
+        },
+        appliedTheme: this.mindMap.getTheme ? this.mindMap.getTheme() : theme,
+        appliedLayout: this.mindMap.getLayout ? this.mindMap.getLayout() : layout,
+        lastMetaRevision: Number(payload.version || this.lastAppliedVersion || 0),
+        source: hydrate ? 'server metadata' : 'remote apply'
+      })
     } finally {
       this.suppressLocalUntil = Date.now() + 250
       this.isApplyingRemote = false
     }
+  }
+
+  hydrateRoomMetadata(input = {}, options = {}) {
+    if (!this.mindMap) return
+    if (typeof window !== 'undefined') {
+      window.__STYLE_COMMAND_MATRIX__ = STYLE_COMMAND_MATRIX
+    }
+    const shared = hydrateSharedMetadata(input)
+    if (shared.source !== 'server metadata') {
+      publishMapMetaState({
+        roomKey: this.httpRoomKey || options.roomKey || '',
+        serverMetadata: shared.metadata,
+        appliedTheme: this.mindMap.getTheme ? this.mindMap.getTheme() : '',
+        appliedLayout: this.mindMap.getLayout ? this.mindMap.getLayout() : '',
+        lastMetaRevision: Number(input.version || 0),
+        source: 'default'
+      })
+      if (typeof window !== 'undefined') {
+        window.__STYLE_COMMAND_MATRIX__ = STYLE_COMMAND_MATRIX
+      }
+      return
+    }
+    this.applyRemoteMapMeta(
+      {
+        metadata: shared.metadata,
+        theme: shared.theme,
+        themeConfig: shared.themeConfig,
+        layout: shared.layout,
+        version: input.version
+      },
+      { hydrate: true }
+    )
   }
 
   setHttpCollab(config = {}) {
@@ -2469,7 +2593,17 @@ class Cooperate {
   }
 
   onLayoutChange(layout) {
-    if (!this.httpCollabMode || this.isApplyingRemote) return
+    if (this.isApplyingRemote) return
+    publishLayoutApplyTrace({
+      layout,
+      source: 'local setLayout',
+      revision: Number(this.lastAppliedVersion || 0),
+      renderCount:
+        this.mindMap.renderer && this.mindMap.renderer._layoutRenderCount,
+      layoutCount:
+        this.mindMap.renderer && this.mindMap.renderer._layoutSwitchCount
+    })
+    if (!this.httpCollabMode) return
     this.submitMapMeta({ layout })
   }
 
@@ -3083,7 +3217,7 @@ class Cooperate {
     const text =
       data.richText ? getTextFromHtml(data.text) : String(data.text || '')
     const note = data.note || ''
-    const full = { text, note }
+    const full = { text, note, ...collectStyleFields(data) }
     NULLABLE_PATCH_KEYS.forEach(key => {
       const value = data[key]
       const empty =
@@ -3098,6 +3232,19 @@ class Cooperate {
     this.ackedUids.add(uid)
     this.pendingUids.delete(uid)
     this.lastPushed[uid] = { text, note, full }
+  }
+
+  rememberPushedNode(node) {
+    const target = this.resolveHttpPatchNode(node)
+    const uid = target && target.getData && target.getData('uid')
+    if (!uid) return
+    const full = this.nodePatchPayload(target)
+    this.lastPushed[uid] = {
+      text: full.text,
+      note: full.note,
+      full: collabGeneralization.snapshotValue(full),
+      snap: JSON.stringify(full)
+    }
   }
 
   markAckedFromPayload(type, payload) {
@@ -3346,13 +3493,28 @@ class Cooperate {
       customLeft: next.customLeft,
       customTop: next.customTop
     }
+    Object.keys(next || {}).forEach(key => {
+      if (checkIsNodeStyleDataKey(key)) stylePayload[key] = next[key]
+    })
     Object.keys(stylePayload).forEach(key => {
       if (stylePayload[key] === undefined) delete stylePayload[key]
     })
     if (Object.keys(stylePayload).length) {
-      renderer.setNodeData(node, stylePayload)
+      const data = node.nodeData && node.nodeData.data
+      Object.keys(stylePayload).forEach(key => {
+        if (!data) return
+        if (stylePayload[key] === null) delete data[key]
+        else data[key] = stylePayload[key]
+      })
       if (typeof renderer.reRenderNodeCheckChange === 'function') {
-        renderer.reRenderNodeCheckChange(node, true)
+        renderer.reRenderNodeCheckChange(node, false)
+      } else if (node.reRender) {
+        node.reRender()
+      }
+      if (node.parent && typeof node.parent.renderLine === 'function') {
+        node.parent.renderLine(true)
+      } else if (typeof node.renderLine === 'function') {
+        node.renderLine(true)
       }
       changed = true
     }
@@ -4466,9 +4628,11 @@ class Cooperate {
       uid && this.lastPushed[uid] && this.lastPushed[uid].full
         ? this.lastPushed[uid].full
         : null
+    const data = (target.getData && target.getData()) || {}
     const full = {
       text: this.nodePlain(target),
-      note: (target.getData && target.getData('note')) || ''
+      note: (target.getData && target.getData('note')) || '',
+      ...collectStyleFields(data, prevFull)
     }
     NULLABLE_PATCH_KEYS.forEach(key => {
       const value = target.getData && target.getData(key)
@@ -4527,6 +4691,7 @@ class Cooperate {
       : this.collectNodesWithPendingText()
     if (settling && !pending.length) return
     const jobs = []
+    const items = []
     let droppedGhosts = false
     let skipGhostRefresh = false
     pending.forEach(node => {
@@ -4540,6 +4705,31 @@ class Cooperate {
       const delta = this.nodePatchPayload(node, { onlyChanged: true })
       if (!delta) return
       const snap = JSON.stringify(full)
+      items.push({ uid, node, target, full, delta, snap })
+    })
+    if (this.collabV2Adapter && items.length > 1) {
+      try {
+        await this.submitV2('node.batch', {
+          ops: items.map(item => ({
+            type: 'node.update',
+            payload: { uid: item.uid, ...item.delta }
+          }))
+        })
+        items.forEach(item => {
+          this.lastPushed[item.uid] = {
+            text: item.full.text,
+            note: item.full.note,
+            full: collabGeneralization.snapshotValue(item.full),
+            snap: item.snap
+          }
+        })
+      } catch (err) {
+        console.error('[mind-map] batch style/text sync failed', err)
+      }
+      return
+    }
+    items.forEach(item => {
+      const { uid, node, full, delta, snap } = item
       jobs.push(() =>
         this.httpPatchNode(uid, delta)
           .then(() => {

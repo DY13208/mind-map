@@ -112,7 +112,7 @@ async function submitOperation(req, raw) {
         command,
         async ({ client, currentVersion, room }) => {
           const store = createPgStore(client, op.roomKey)
-          if (room && room.metadata && store.setMeta) store.setMeta(room.metadata)
+          if (store.setMeta) store.setMeta((room && room.metadata) || {})
           const version = currentVersion + 1
           const applied =
             op.type === 'operation.undo' || op.type === 'operation.redo'

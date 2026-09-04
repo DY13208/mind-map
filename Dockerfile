@@ -1,9 +1,20 @@
 FROM node:20-bookworm-slim AS deps
 WORKDIR /src
+
+# Playwright postinstall 会下浏览器；y-websocket 可选依赖 leveldown 会在
+# slim 镜像里编译原生模块，两者都会让 docker build 长时间停在 npm ci。
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    PUPPETEER_SKIP_DOWNLOAD=1 \
+    npm_config_fund=false \
+    npm_config_audit=false \
+    npm_config_update_notifier=false
+
 COPY web/package.json web/package-lock.json ./web/
 COPY simple-mind-map/package.json simple-mind-map/package-lock.json ./simple-mind-map/
-RUN cd web && npm ci
-RUN cd simple-mind-map && npm ci
+# vue-cli 在 devDependencies，前端构建必须装上。
+RUN cd web && npm ci --omit=optional
+# 协作服务不需要测试工具，也不需要 y-leveldb/leveldown。
+RUN cd simple-mind-map && npm ci --omit=dev --omit=optional
 
 FROM deps AS build
 COPY web ./web

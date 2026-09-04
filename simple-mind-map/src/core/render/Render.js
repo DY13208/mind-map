@@ -44,6 +44,10 @@ import { CONSTANTS, ERROR_TYPES } from '../../constants/constant'
 import { Polygon } from '@svgdotjs/svg.js'
 import mapRefUtil from '../../utils/mapRef'
 import { undoTrace, undoFullTreeForbidden } from '../../utils/collabTrace'
+import {
+  destroyStaleLayoutNodes,
+  inspectLayoutRenderer
+} from '../../utils/collabLayoutCleanup'
 
 // 布局列表
 const layouts = {
@@ -108,6 +112,10 @@ class Render {
     this.emitNodeActiveEventTimer = null
     this.renderTimer = null
     this._expandAllToken = 0
+    this._renderGeneration = 0
+    this._layoutSwitchCount = 0
+    this._layoutRenderCount = 0
+    this._lastLayoutName = ''
     // 根节点
     this.root = null
     // 文本编辑框，需要再bindEvent之前实例化，否则单击事件只能触发隐藏文本编辑框，而无法保存文本修改
@@ -132,16 +140,83 @@ class Render {
 
   //  设置布局结构
   setLayout() {
+    this._renderGeneration = (this._renderGeneration || 0) + 1
+    this.isRendering = false
+    this.hasWaitRendering = false
+    clearTimeout(this.renderTimer)
     if (this.layout && this.layout.beforeChange) {
       this.layout.beforeChange()
     }
+    this.cleanupLayoutRenderer()
     const { layout } = this.mindMap.opt
     let L = layouts[layout] || this.mindMap[layout]
     if (!L) {
       L = layouts[CONSTANTS.LAYOUT.LOGICAL_STRUCTURE]
       this.mindMap.opt.layout = CONSTANTS.LAYOUT.LOGICAL_STRUCTURE
     }
-    this.layout = new L(this, layout)
+    this.layout = new L(this, this.mindMap.opt.layout)
+    this._layoutSwitchCount = (this._layoutSwitchCount || 0) + 1
+    this._lastLayoutName = this.mindMap.opt.layout
+  }
+
+  cleanupLayoutRenderer() {
+    const caches = [this.nodeCache, this.lastNodeCache]
+    const seen = new Set()
+    caches.forEach(cache => {
+      Object.keys(cache || {}).forEach(uid => {
+        const node = cache[uid]
+        if (!node || seen.has(node)) return
+        seen.add(node)
+        if (typeof node.removeLine === 'function') node.removeLine()
+        if (typeof node.removeGeneralization === 'function') {
+          node.removeGeneralization()
+        }
+        node.needLayout = true
+      })
+    })
+    if (this.layout && this.layout.lru && typeof this.layout.lru.clear === 'function') {
+      this.layout.lru.clear()
+    }
+    if (this.mindMap && this.mindMap.lineDraw && this.mindMap.lineDraw.clear) {
+      this.mindMap.lineDraw.clear()
+    }
+  }
+
+  restoreActiveUids(uids = []) {
+    if (!uids.length || typeof this.findNodeByUid !== 'function') return
+    uids.forEach(uid => {
+      const node = this.findNodeByUid(uid)
+      if (node && typeof node.active === 'function') node.active()
+    })
+  }
+
+  sweepOrphanNodeGroups() {
+    const draw = this.mindMap && this.mindMap.nodeDraw
+    if (!draw || typeof draw.children !== 'function') return
+    const live = new Set()
+    Object.keys(this.nodeCache || {}).forEach(uid => {
+      const node = this.nodeCache[uid]
+      if (node && node.group) live.add(node.group)
+      ;(node && node._generalizationList ? node._generalizationList : []).forEach(
+        item => {
+          if (item && item.generalizationNode && item.generalizationNode.group) {
+            live.add(item.generalizationNode.group)
+          }
+        }
+      )
+    })
+    const kids = draw.children()
+    const list = kids && typeof kids.each === 'function' ? [] : Array.from(kids || [])
+    if (kids && typeof kids.each === 'function') {
+      kids.each(child => list.push(child))
+    }
+    list.forEach(child => {
+      if (!child || live.has(child)) return
+      if (typeof child.hasClass !== 'function' || !child.hasClass('smm-node')) {
+        return
+      }
+      if (typeof child.remove === 'function') child.remove()
+    })
   }
 
   // 重新设置思维导图数据
@@ -601,6 +676,16 @@ class Render {
       return
     }
     this.isRendering = true
+    const renderGeneration = this._renderGeneration
+    const isLayoutSwitch = this.checkHasRenderSource(CONSTANTS.CHANGE_LAYOUT)
+    if (isLayoutSwitch) {
+      this._layoutRenderCount = (this._layoutRenderCount || 0) + 1
+    }
+    const activeUids = isLayoutSwitch
+      ? (this.activeNodeList || [])
+          .map(node => node && node.getData && node.getData('uid'))
+          .filter(Boolean)
+      : []
     // 节点缓存
     this.lastNodeCache = this.nodeCache
     this.nodeCache = {}
@@ -617,32 +702,43 @@ class Render {
     // 计算布局
     this.root = null
     this.layout.doLayout(root => {
-      // 删除本次渲染时不再需要的节点
-      Object.keys(this.lastNodeCache).forEach(uid => {
-        if (!this.nodeCache[uid]) {
-          // 从激活节点列表里删除
-          this.removeNodeFromActiveList(this.lastNodeCache[uid])
-          this.emitNodeActiveEvent()
-          // 调用节点的销毁方法
-          this.lastNodeCache[uid].destroy()
-        }
+      if (renderGeneration !== this._renderGeneration) return
+      const stale = destroyStaleLayoutNodes(this.lastNodeCache, this.nodeCache)
+      stale.destroyed.forEach(uid => {
+        const prev = this.lastNodeCache[uid]
+        if (prev) this.removeNodeFromActiveList(prev)
       })
+      if (stale.destroyed.length) this.emitNodeActiveEvent()
       // 更新根节点
       this.root = root
-      // Large maps paint off the main thread in chunks so opening / importing
-      // a deep tree cannot freeze the tab.
-      const asyncPaint = !!this.mindMap.opt.openPerformance
+      // Layout switch must paint synchronously so an in-flight performance
+      // pass cannot leave the previous structure on the canvas.
+      const asyncPaint =
+        !!this.mindMap.opt.openPerformance && !isLayoutSwitch
       this.root.render(
         () => {
+          if (renderGeneration !== this._renderGeneration) return
           this.isRendering = false
           if (this.hasWaitRendering) {
             this.hasWaitRendering = false
             this.render()
             return
           }
+          if (isLayoutSwitch) {
+            this.restoreActiveUids(activeUids)
+            this.sweepOrphanNodeGroups()
+            this._lastRenderWasLayoutSwitch = true
+            inspectLayoutRenderer(
+              this.mindMap,
+              '',
+              this.mindMap.opt && this.mindMap.opt.layout
+            )
+          } else {
+            this._lastRenderWasLayoutSwitch = false
+          }
           this.onRenderEnd()
         },
-        false,
+        isLayoutSwitch,
         asyncPaint
       )
     })
