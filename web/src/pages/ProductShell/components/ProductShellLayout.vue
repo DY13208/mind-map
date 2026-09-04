@@ -1,20 +1,45 @@
 <template>
-  <div class="productShell">
+  <div
+    class="productShell"
+    :class="{ 'productShell--collapsed': sidebarCollapsed }"
+  >
+    <button
+      v-if="!sidebarCollapsed"
+      class="sidebarBackdrop"
+      aria-label="关闭展开的侧栏"
+      @click="setSidebarCollapsed(true)"
+    />
     <aside class="productSidebar">
+      <button
+        class="sidebarToggle"
+        :title="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
+        :aria-label="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
+        :aria-expanded="String(!sidebarCollapsed)"
+        aria-controls="product-navigation"
+        @click="setSidebarCollapsed(!sidebarCollapsed)"
+      >
+        <i
+          :class="
+            sidebarCollapsed ? 'el-icon-arrow-right' : 'el-icon-arrow-left'
+          "
+          aria-hidden="true"
+        />
+      </button>
       <div class="productLogo" @click="$router.push('/files')">
         <span>依</span><strong>依然中台</strong>
       </div>
-      <nav>
+      <nav id="product-navigation" aria-label="产品导航">
         <p class="navLabel">文件</p>
         <router-link
           v-for="item in fileNav"
           :key="item.path"
           :to="item.path"
           :title="item.label"
+          :aria-label="item.label"
           ><i :class="item.icon"></i>{{ item.label }}</router-link
         >
         <p class="navLabel navLabel--space">空间</p>
-        <router-link to="/spaces" title="团队空间"
+        <router-link to="/spaces" title="团队空间" aria-label="团队空间"
           ><i class="el-icon-office-building"></i>团队空间</router-link
         >
       </nav>
@@ -38,18 +63,53 @@
 
 <script>
 import productService from '@/services/productService'
+const SIDEBAR_PREFERENCE_KEY = 'product-shell-sidebar-collapsed'
+const isSmallScreen = () => window.matchMedia('(max-width: 760px)').matches
+const readSidebarPreference = () => {
+  try {
+    const value = localStorage.getItem(SIDEBAR_PREFERENCE_KEY)
+    return value === 'true' ? true : value === 'false' ? false : null
+  } catch (error) {
+    return null
+  }
+}
 export default {
   name: 'ProductShellLayout',
-  data: () => ({
-    profile: null,
-    fileNav: [
-      { path: '/files/recent', label: '最近', icon: 'el-icon-time' },
-      { path: '/files', label: '我的脑图', icon: 'el-icon-files' },
-      { path: '/files/favorites', label: '收藏', icon: 'el-icon-star-off' },
-      { path: '/files/shared', label: '与我共享', icon: 'el-icon-user' },
-      { path: '/files/trash', label: '回收站', icon: 'el-icon-delete' }
-    ]
-  }),
+  data() {
+    const preference = readSidebarPreference()
+    return {
+      sidebarCollapsed: preference === null ? isSmallScreen() : preference,
+      hasSidebarPreference: preference !== null,
+      profile: null,
+      fileNav: [
+        { path: '/files/recent', label: '最近', icon: 'el-icon-time' },
+        { path: '/files', label: '我的脑图', icon: 'el-icon-files' },
+        { path: '/files/favorites', label: '收藏', icon: 'el-icon-star-off' },
+        { path: '/files/shared', label: '与我共享', icon: 'el-icon-user' },
+        { path: '/files/trash', label: '回收站', icon: 'el-icon-delete' }
+      ]
+    }
+  },
+  mounted() {
+    window.addEventListener('resize', this.updateAutoSidebar)
+  },
+  beforeDestroy() {
+    window.removeEventListener('resize', this.updateAutoSidebar)
+  },
+  methods: {
+    updateAutoSidebar() {
+      if (!this.hasSidebarPreference) this.sidebarCollapsed = isSmallScreen()
+    },
+    setSidebarCollapsed(collapsed) {
+      this.sidebarCollapsed = collapsed
+      this.hasSidebarPreference = true
+      try {
+        localStorage.setItem(SIDEBAR_PREFERENCE_KEY, String(collapsed))
+      } catch (error) {
+        // Layout remains usable when browser storage is unavailable.
+      }
+    }
+  },
   async created() {
     try {
       this.profile = await productService.getProfile()
@@ -95,6 +155,31 @@ export default {
   display: flex;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     sans-serif;
+}
+.productShell .sidebarBackdrop {
+  display: none;
+}
+.productShell .sidebarToggle {
+  position: absolute;
+  top: 24px;
+  right: -14px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #dce7e1;
+  border-radius: 50%;
+  background: #fff;
+  color: #52665f;
+  cursor: pointer;
+  &:hover {
+    background: #eaf6f1;
+    color: #087854;
+  }
+  &:focus-visible {
+    outline: 2px solid #087854;
+    outline-offset: 3px;
+  }
 }
 .productShell .productSidebar {
   width: 224px;
@@ -211,8 +296,8 @@ export default {
   margin: 26px 0 14px;
   color: #40564e;
 }
-@media (max-width: 760px) {
-  .productShell .productSidebar {
+.productShell--collapsed {
+  .productSidebar {
     width: 72px;
     padding-inline: 10px;
     .productLogo strong,
@@ -243,8 +328,21 @@ export default {
       display: none;
     }
   }
+  .productMain {
+    margin-left: 72px;
+  }
+}
+@media (max-width: 760px) {
   .productShell .productMain {
     margin-left: 72px;
+  }
+  .productShell .sidebarBackdrop {
+    display: block;
+    position: fixed;
+    inset: 0 0 0 224px;
+    background: rgba(23, 54, 44, 0.18);
+    border: 0;
+    z-index: 9;
   }
   .productShell .productPage {
     padding: 24px 16px 40px;
