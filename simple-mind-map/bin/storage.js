@@ -1670,6 +1670,10 @@ async function initSchemaOnce() {
   await roomAcl.migrateLegacyOwners(pool)
   const collabV2Schema = require('./collabV2/schema')
   await collabV2Schema.initCollabV2Schema(pool)
+  const historySchema = require('./collabHistory/schema')
+  await historySchema.initHistorySchema(pool)
+  const fileSystemSchema = require('./fileSystem/schema')
+  await fileSystemSchema.initFileSystemSchema(pool)
 }
 
 async function listRooms() {
@@ -1843,7 +1847,8 @@ async function commitDirectRoomOperationOnce(client, roomKey, command, apply) {
      set version = $2,
          title = coalesce($3, title),
          metadata = coalesce(metadata, '{}'::jsonb) || coalesce($4::jsonb, '{}'::jsonb),
-         updated_at = now()
+         updated_at = now(),
+         content_updated_at = now()
      where room_key = $1`,
     [
       roomKey,
@@ -2028,7 +2033,8 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
      set nodes = $2::jsonb,
          version = $3,
          title = coalesce($4, title),
-         updated_at = now()
+         updated_at = now(),
+         content_updated_at = now()
      where room_key = $1`,
     [
       roomKey,

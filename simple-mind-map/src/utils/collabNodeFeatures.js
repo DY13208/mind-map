@@ -1,3 +1,4 @@
+/* global module:readonly */
 const NODE_FEATURE_STRUCTURAL_KEYS = [
   'parentUid',
   'parent_uid',

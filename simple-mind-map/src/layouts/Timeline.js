@@ -79,7 +79,7 @@ class Timeline extends Base {
     walk(
       this.root,
       null,
-      (node, parent, isRoot, layerIndex, index) => {
+      (node, parent, isRoot, layerIndex) => {
         if (node.getData('expand') && node.children && node.children.length) {
           let marginX = this.getMarginX(layerIndex + 1)
           let marginY = this.getMarginY(layerIndex + 1)
@@ -143,7 +143,7 @@ class Timeline extends Base {
           this.updateBrothersTop(node, totalHeight)
         }
       },
-      (node, parent, isRoot, layerIndex) => {
+      (node, parent) => {
         if (
           parent &&
           parent.isRoot &&
@@ -231,7 +231,7 @@ class Timeline extends Base {
     if (node.children.length <= 0) {
       return []
     }
-    let { left, top, width, height, expandBtnSize } = node
+    let { top, height, expandBtnSize } = node
     const { alwaysShowExpandBtn, notShowExpandBtn } = this.mindMap.opt
     if (!alwaysShowExpandBtn || notShowExpandBtn) {
       expandBtnSize = 0
