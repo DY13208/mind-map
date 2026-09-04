@@ -32,7 +32,18 @@ export async function productRequest(path, options = {}) {
     }
     throw err
   })
-  const data = await res.json().catch(() => ({}))
+  const raw = await res.text()
+  let data = {}
+  if (raw) {
+    try {
+      data = JSON.parse(raw)
+    } catch (err) {
+      const invalid = new Error('协作服务返回了无效响应')
+      invalid.code = 'INVALID_RESPONSE'
+      invalid.statusCode = res.status
+      throw invalid
+    }
+  }
   if (!res.ok) throw wrapHttpError(data, res.status)
   return data
 }
