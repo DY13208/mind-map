@@ -7,7 +7,7 @@
 | `COLLAB_V2_FREEZE_P0` | **0** |
 | Package | `simple-mind-map@0.14.0-fix.3` |
 | Suggested tag | `collab-v2-freeze-20260904` |
-| Freeze suite | `npm run test:collab:v2:freeze` (cwd: `simple-mind-map`) |
+| Freeze suite | `npm run test:collab:v2:freeze` → `scripts/runCollabSuite.js freeze` (cwd: `simple-mind-map`) |
 
 This checkpoint freezes **Collaboration V2 core**. It does **not** remove V1 / Yjs. History, folders, favorites, recycle bin, and team space are out of scope.
 
