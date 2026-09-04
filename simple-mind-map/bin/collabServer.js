@@ -220,6 +220,9 @@ Promise.all([initSchema(), initAuth()])
     }
     const history = require('./collabHistory')
     history.createServerHistoryEngine(getPool())
+    require('./fileSystem').createServerFileSystem(getPool(), {
+      history: require('./collabHistory').getHistoryEngine()
+    })
     operationEvents.on('committed', event => {
       history.onCommitted(event).catch(err => {
         console.error('[history] onCommitted', err && err.message)

@@ -953,6 +953,12 @@ async function handleApi(req, res) {
     }
   }
 
+  if (
+    await require('./fileSystem').handleFileSystemApi(req, res, { url, pathname })
+  ) {
+    return true
+  }
+
   if (require('./collabHistory/http').matchHistory(pathname)) {
     const handled = await require('./collabHistory').handleHistoryApi(req, res, { url })
     if (handled) return true
