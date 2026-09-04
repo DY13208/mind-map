@@ -1,3 +1,5 @@
+/* global module:readonly */
+
 function publishServiceRecoveryTrace(row = {}) {
   const next = { timestamp: Date.now(), ...row }
   if (typeof console !== 'undefined' && console.info) {

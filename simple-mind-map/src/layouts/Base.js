@@ -436,7 +436,7 @@ class Base {
         (len + 1) * this.getMarginY(gNode.layerIndex + 1)
       : 0
     const stripNodeRef = list => {
-      ;(list || []).forEach(item => {
+      (list || []).forEach(item => {
         delete item._node
         stripNodeRef(item.children)
       })

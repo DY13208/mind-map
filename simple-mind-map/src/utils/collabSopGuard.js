@@ -1,3 +1,5 @@
+/* global module:readonly */
+
 function stripHtml(text) {
   return String(text || '')
     .replace(/<[^>]+>/g, '')

@@ -1,3 +1,5 @@
+/* global module:readonly */
+
 function normalizeMapRef(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const mapId = String(

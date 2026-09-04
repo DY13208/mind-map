@@ -1,3 +1,5 @@
+/* global module:readonly */
+
 function nodeUid(node) {
   if (!node) return ''
   if (typeof node.getData === 'function') {

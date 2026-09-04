@@ -308,25 +308,20 @@ class Export {
   }
 
   //  在svg上绘制思维导图背景
-  drawBackgroundToSvg(svg) {
-    return new Promise(async resolve => {
-      const {
-        backgroundColor = '#fff',
-        backgroundImage,
-        backgroundRepeat = 'repeat'
-      } = this.mindMap.themeConfig
-      // 背景颜色
-      svg.css('background-color', backgroundColor)
-      // 背景图片
-      if (backgroundImage && backgroundImage !== 'none') {
-        const imgDataUrl = await imgToDataUrl(backgroundImage)
-        svg.css('background-image', `url(${imgDataUrl})`)
-        svg.css('background-repeat', backgroundRepeat)
-        resolve()
-      } else {
-        resolve()
-      }
-    })
+  async drawBackgroundToSvg(svg) {
+    const {
+      backgroundColor = '#fff',
+      backgroundImage,
+      backgroundRepeat = 'repeat'
+    } = this.mindMap.themeConfig
+    // 背景颜色
+    svg.css('background-color', backgroundColor)
+    // 背景图片
+    if (backgroundImage && backgroundImage !== 'none') {
+      const imgDataUrl = await imgToDataUrl(backgroundImage)
+      svg.css('background-image', `url(${imgDataUrl})`)
+      svg.css('background-repeat', backgroundRepeat)
+    }
   }
 
   // 导出为指定格式的图片
