@@ -17,12 +17,16 @@ function getImgTextMarin(dir, imgWidth, textWidth, imgHeight, textHeight) {
 
 // 获取标签内容的大小
 function getTagContentSize(space) {
+  const tags = this._tagData || []
+  if (!tags.length) {
+    return { width: 0, height: 0 }
+  }
   let maxTagHeight = 0
-  let width = this._tagData.reduce((sum, cur) => {
+  let width = tags.reduce((sum, cur) => {
     maxTagHeight = Math.max(maxTagHeight, cur.height)
     return (sum += cur.width)
   }, 0)
-  width += (this._tagData.length - 1) * space
+  width += (tags.length - 1) * space
   return {
     width,
     height: maxTagHeight
@@ -102,7 +106,7 @@ function getNodeRect() {
     spaceCount++
   }
   // 标签
-  if (this._tagData.length > 0) {
+  if (this._tagData && this._tagData.length > 0) {
     const { width: totalTagWidth, height: maxTagHeight } =
       this.getTagContentSize(textContentMargin)
     if (tagIsBottom) {

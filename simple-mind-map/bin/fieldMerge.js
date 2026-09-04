@@ -208,6 +208,18 @@ function applyRemoteNodeData(localData = {}, remoteData = {}, options = {}) {
   }
 }
 
+function expandInverseByGroups(liveData = {}, changedFields = []) {
+  const inverse = {}
+  const keys = new Set()
+  keysForGroups(groupsForKeys(changedFields || [])).forEach(key => keys.add(key))
+  ;(changedFields || []).forEach(key => keys.add(key))
+  keys.forEach(key => {
+    if (!key || key === FV_KEY) return
+    inverse[key] = liveData[key] === undefined ? null : liveData[key]
+  })
+  return inverse
+}
+
 function patchDelta(previous = {}, next = {}) {
   const prev = previous || {}
   const curr = next || {}
@@ -235,5 +247,6 @@ module.exports = {
   diffChangedKeys,
   mergeNodeDataLww,
   applyRemoteNodeData,
+  expandInverseByGroups,
   patchDelta
 }

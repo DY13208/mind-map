@@ -1612,8 +1612,7 @@ class Render {
       }
       if (smmData) {
         this.mindMap.execCommand(
-          'INSERT_MULTI_CHILD_NODE',
-          [],
+          'PASTE_NODE',
           Array.isArray(smmData) ? smmData : [smmData]
         )
       } else if (text) {
@@ -1962,9 +1961,15 @@ class Render {
 
   //   粘贴节点到节点
   pasteNode(data) {
-    data = formatDataToArray(simpleDeepClone(data))
-    createUidForAppointNodes(data, true, null, true)
-    this.mindMap.execCommand('INSERT_MULTI_CHILD_NODE', [], data)
+    const cooperate = this.mindMap.cooperate
+    let trees = formatDataToArray(data)
+    if (cooperate && typeof cooperate.preparePasteTrees === 'function') {
+      trees = cooperate.preparePasteTrees(trees)
+    } else {
+      trees = formatDataToArray(simpleDeepClone(data))
+      createUidForAppointNodes(trees, true, null, true)
+    }
+    this.mindMap.execCommand('INSERT_MULTI_CHILD_NODE', [], trees)
   }
 
   //  设置节点样式

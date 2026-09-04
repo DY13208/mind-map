@@ -10,7 +10,8 @@ import {
   nodeRichTextToTextWithWrap,
   getNodeRichTextStyles,
   htmlEscape,
-  compareVersion
+  compareVersion,
+  checkIsRichText
 } from '../utils'
 import { richTextSupportStyleList } from '../constants/constant'
 import MindMapNode from '../core/render/node/MindMapNode'
@@ -825,9 +826,15 @@ class RichText {
 
   handleDataToRichText(data) {
     const oldIsRichText = data.richText
+    const alreadyHtml = !!(oldIsRichText && checkIsRichText(String(data.text || '')))
     data.richText = true
+    // Authoritative collab HTML must keep inline styles / formula data-value.
+    // resetRichText + removeRichTextStyes would strip bold/color on F5.
+    if (alreadyHtml) {
+      delete data.resetRichText
+      return
+    }
     data.resetRichText = true
-    // 如果原本就是富文本，那么不能转换
     if (!oldIsRichText) {
       data.text = htmlEscape(data.text)
     }
@@ -840,14 +847,23 @@ class RichText {
     const isOldRichTextVersion =
       !data.smmVersion || compareVersion(data.smmVersion, '0.13.0') === '<'
     const walk = root => {
-      if (root.data && (!root.data.richText || isOldRichTextVersion)) {
+      if (!root.data) {
+        // continue
+      } else if (
+        root.data.richText &&
+        checkIsRichText(String(root.data.text || ''))
+      ) {
+        delete root.data.resetRichText
+      } else if (!root.data.richText || isOldRichTextVersion) {
         this.handleDataToRichText(root.data)
       }
       // 概要
       if (root.data) {
         const generalizationList = formatGetNodeGeneralization(root.data)
         generalizationList.forEach(item => {
-          if (!item.richText || isOldRichTextVersion) {
+          if (item.richText && checkIsRichText(String(item.text || ''))) {
+            delete item.resetRichText
+          } else if (!item.richText || isOldRichTextVersion) {
             this.handleDataToRichText(item)
           }
         })

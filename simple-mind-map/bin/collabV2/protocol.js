@@ -128,7 +128,21 @@ function toCommand(op) {
 
 function fromCommitted(operation, extra = {}) {
   const event = operation.event || {}
-  const payload = operation.payload || event.payload || {}
+  const rawPayload = operation.payload || {}
+  const eventPayload = event.payload || {}
+  const undoControl =
+    !rawPayload.uid &&
+    (rawPayload.targetOperationId ||
+      rawPayload.target_operation_id ||
+      rawPayload.targetOpId)
+  const payload =
+    undoControl && eventPayload && typeof eventPayload === 'object'
+      ? eventPayload
+      : rawPayload.uid || rawPayload.patch
+        ? rawPayload
+        : rawPayload && Object.keys(rawPayload).length
+          ? rawPayload
+          : eventPayload
   return {
     opId: operation.operationId || operation.operation_id,
     roomKey: operation.roomKey || operation.room_key || extra.roomKey,

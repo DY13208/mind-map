@@ -150,6 +150,9 @@ function renderGeneralization(forceRender) {
   this.renderer.layout.renderGeneralization(this._generalizationList)
   this._generalizationList.forEach(item => {
     this.style.generalizationLine(item.generalizationLine)
+    if (item.generalizationLine && item.generalizationLine.attr) {
+      item.generalizationLine.attr('pointer-events', 'none')
+    }
     item.generalizationNode.render(() => {}, forceRender)
   })
 }

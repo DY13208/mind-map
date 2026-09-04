@@ -142,8 +142,12 @@ const preloadCache = new Map()
 const deletedRooms = new Set()
 const roomSaveStates = new Map()
 const roomMetaCache = new Map()
-const replacingRooms = new Set()
+const replacingRooms = new Map()
 const roomReplaceSeq = new Map()
+const REPLACE_LOCK_TTL_MS = Math.max(
+  30000,
+  Number(process.env.COLLAB_REPLACE_LOCK_TTL_MS || 120000)
+)
 const MAX_SAVE_CONCURRENCY = 1
 const IDLE_EVICT_MS = 10 * 60 * 1000
 const LARGE_MAP_NODES = 400
@@ -344,14 +348,15 @@ function rememberRoomMeta(roomKey, meta = {}) {
 
 function beginRoomReplace(roomKey) {
   const key = String(roomKey || '')
-  if (replacingRooms.has(key)) {
+  const startedAt = replacingRooms.get(key)
+  if (startedAt && Date.now() - startedAt < REPLACE_LOCK_TTL_MS) {
     const err = new Error('正在保存整图，请稍候再试')
     err.statusCode = 409
     err.code = 'REPLACE_IN_PROGRESS'
     err.progress = getSaveStatus(key)
     throw err
   }
-  replacingRooms.add(key)
+  replacingRooms.set(key, Date.now())
 }
 
 function getReplaceSeq(roomKey) {
@@ -367,7 +372,139 @@ function endRoomReplace(roomKey, options = {}) {
 }
 
 function isRoomReplacing(roomKey) {
-  return replacingRooms.has(String(roomKey || ''))
+  const key = String(roomKey || '')
+  const startedAt = replacingRooms.get(key)
+  if (!startedAt) return false
+  if (Date.now() - startedAt >= REPLACE_LOCK_TTL_MS) {
+    replacingRooms.delete(key)
+    return false
+  }
+  return true
+}
+
+function inspectReplaceLock(roomKey) {
+  const key = String(roomKey || '')
+  const startedAt = replacingRooms.get(key)
+  const row = require('./collabRoomRecovery').describeReplaceLock(
+    startedAt,
+    Date.now(),
+    REPLACE_LOCK_TTL_MS
+  )
+  if (row.expired && startedAt) replacingRooms.delete(key)
+  return { roomKey: key, ...row }
+}
+
+function expireStaleReplaceLocks() {
+  const now = Date.now()
+  const released = []
+  replacingRooms.forEach((startedAt, key) => {
+    if (now - startedAt >= REPLACE_LOCK_TTL_MS) {
+      replacingRooms.delete(key)
+      released.push(key)
+    }
+  })
+  return released
+}
+
+async function inspectRoomMeta(roomKey) {
+  expireStaleReplaceLocks()
+  const inspect = await require('./collabRoomRecovery').inspectRoom(pool, roomKey)
+  if (!inspect) return null
+  return {
+    ...inspect,
+    replaceLock: inspectReplaceLock(roomKey)
+  }
+}
+
+async function recoverRoomToLastKnownGood(roomKey, options = {}) {
+  expireStaleReplaceLocks()
+  replacingRooms.delete(String(roomKey || ''))
+  const inspect = await inspectRoomMeta(roomKey)
+  if (!inspect) {
+    const err = new Error('not found')
+    err.statusCode = 404
+    err.code = 'NOT_FOUND'
+    throw err
+  }
+  if (inspect.ok && inspect.liveCount > 0) {
+    return {
+      ok: true,
+      recovered: false,
+      reason: 'already_ok',
+      inspect,
+      lastKnownGoodRevision: inspect.version
+    }
+  }
+  const target =
+    Number(options.lastKnownGoodRevision) > 0
+      ? Number(options.lastKnownGoodRevision)
+      : Math.max(0, Number(inspect.version || 0) - 1)
+  const snap = target > 0 ? await getNearestSnapshot(roomKey, target) : null
+  const snapCount = snap && snap.nodes ? Object.keys(snap.nodes).length : 0
+  if (!snap || snapCount <= 0 || snapCount > 8000) {
+    const err = new Error('ROOM_INTEGRITY_ERROR')
+    err.code = 'ROOM_INTEGRITY_ERROR'
+    err.statusCode = 409
+    err.inspect = inspect
+    throw err
+  }
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const wrote = await replaceRoomNodes(client, roomKey, snap.nodes, snap.version)
+    if (!wrote || wrote.wrote === false) {
+      throw Object.assign(new Error('ROOM_INTEGRITY_ERROR'), {
+        code: 'ROOM_INTEGRITY_ERROR',
+        statusCode: 409
+      })
+    }
+    const verRes = await client.query(
+      `update rooms set version = version + 1, updated_at = now()
+       where room_key = $1
+       returning version`,
+      [roomKey]
+    )
+    const nextVersion = Number(verRes.rows[0] && verRes.rows[0].version)
+    await client.query(
+      `insert into room_operations
+       (room_key, version, operation_id, actor_id, client_id,
+        operation_type, payload, event, inverse_payload)
+       values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb)`,
+      [
+        roomKey,
+        nextVersion,
+        'recovery-' + Date.now(),
+        'system',
+        null,
+        'recovery.restore',
+        JSON.stringify({
+          explicit: true,
+          fromVersion: inspect.version,
+          snapshotVersion: snap.version
+        }),
+        JSON.stringify({ type: 'recovery.restore' }),
+        null
+      ]
+    )
+    await client.query('COMMIT')
+    invalidateRoomCache(roomKey)
+    const after = await inspectRoomMeta(roomKey)
+    return {
+      ok: true,
+      recovered: true,
+      reason: 'restored_snapshot',
+      inspect: after,
+      lastKnownGoodRevision: snap.version,
+      newRevision: nextVersion
+    }
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK')
+    } catch (ignore) {}
+    throw err
+  } finally {
+    client.release()
+  }
 }
 
 // Read-only in-memory persistence UI. Does not flush, hydrate, mutate rooms,
@@ -2210,6 +2347,11 @@ module.exports = {
   beginRoomReplace,
   endRoomReplace,
   isRoomReplacing,
+  inspectReplaceLock,
+  expireStaleReplaceLocks,
+  inspectRoomMeta,
+  recoverRoomToLastKnownGood,
+  REPLACE_LOCK_TTL_MS,
   getReplaceSeq,
   isDeletedRoom,
   reviveRoom,

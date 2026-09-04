@@ -1,3 +1,5 @@
+const { assertStructuredCloneSafeOperation } = require('./../collabSpecialObjects')
+
 const DB_NAME = 'mind-map-collab-v2'
 const STORE = 'outbox'
 const VERSION = 1
@@ -7,6 +9,7 @@ function memoryOutbox() {
   return {
     driver: 'memory',
     async put(op) {
+      assertStructuredCloneSafeOperation(op)
       rows.set(op.opId, { ...op, status: op.status || 'pending' })
       return op
     },
@@ -77,6 +80,7 @@ function idbOutbox(indexedDB) {
   return {
     driver: 'indexeddb',
     async put(op) {
+      assertStructuredCloneSafeOperation(op)
       const row = { ...op, status: op.status || 'pending' }
       await tx('readwrite', store => store.put(row))
       return row

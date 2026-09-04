@@ -175,9 +175,24 @@ export default {
           cleanup()
           resolve()
         }
-        const onFail = message => {
+        const onFail = payload => {
           cleanup()
-          reject(new Error(message || 'import failed'))
+          const err = new Error(
+            (payload && payload.message) || payload || 'IMPORT_APPLY_FAILED'
+          )
+          err.code =
+            (payload && payload.code) ||
+            (/DataCloneError|OUTBOX_NON_CLONEABLE_PAYLOAD|IMPORT_OUTBOX_SERIALIZE_FAILED|could not be cloned/.test(
+              String((payload && payload.message) || payload || '')
+            )
+              ? 'IMPORT_OUTBOX_SERIALIZE_FAILED'
+              : /COLLAB_V2_UNEXPECTED_FULL_TREE_MUTATION|UNEXPECTED_FULL_TREE_MUTATION/.test(
+                  String((payload && payload.message) || payload || '')
+                )
+                ? 'FULL_TREE_MUTATION_FORBIDDEN'
+                : 'IMPORT_APPLY_FAILED')
+          err.stage = (payload && payload.stage) || err.code
+          reject(err)
         }
         this.$bus.$once('setDataComplete', onDone)
         this.$bus.$once('setDataFailed', onFail)
@@ -220,10 +235,7 @@ export default {
         } catch (error) {
           console.log(error)
           hideLoading()
-          this.$message.error(
-            (error && error.message) ||
-              this.$t('import.fileParsingFailed')
-          )
+          this.$message.error(this.importErrorText(error, 'IMPORT_PARSE_FAILED'))
         }
       }
     },
@@ -245,7 +257,7 @@ export default {
       } catch (error) {
         console.log(error)
         hideLoading()
-        this.$message.error(this.$t('import.fileParsingFailed'))
+        this.$message.error(this.importErrorText(error, 'IMPORT_PARSE_FAILED'))
       }
     },
 
@@ -278,9 +290,32 @@ export default {
         } catch (error) {
           console.log(error)
           hideLoading()
-          this.$message.error(this.$t('import.fileParsingFailed'))
+          this.$message.error(this.importErrorText(error, 'IMPORT_PARSE_FAILED'))
         }
       }
+    },
+
+    importErrorText(error, fallbackStage) {
+      const code = String((error && error.code) || '')
+      const msg = String((error && error.message) || '')
+      if (
+        code === 'OUTBOX_NON_CLONEABLE_PAYLOAD' ||
+        code === 'IMPORT_OUTBOX_SERIALIZE_FAILED' ||
+        /DataCloneError|OUTBOX_NON_CLONEABLE_PAYLOAD|could not be cloned/.test(msg)
+      ) {
+        return 'IMPORT_OUTBOX_SERIALIZE_FAILED'
+      }
+      if (
+        code === 'FULL_TREE_MUTATION_FORBIDDEN' ||
+        code === 'UNEXPECTED_FULL_TREE_MUTATION' ||
+        /COLLAB_V2_UNEXPECTED_FULL_TREE_MUTATION/.test(msg)
+      ) {
+        return this.$t('edit.importPersistFailed')
+      }
+      if (code === 'IMPORT_APPLY_FAILED' || fallbackStage === 'IMPORT_APPLY_FAILED') {
+        return this.$t('edit.importPersistFailed')
+      }
+      return msg || this.$t('import.fileParsingFailed')
     },
 
     // 导入指定文件

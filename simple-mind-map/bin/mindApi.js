@@ -33,6 +33,10 @@ const {
   beginRoomReplace,
   endRoomReplace,
   isRoomReplacing,
+  inspectReplaceLock,
+  expireStaleReplaceLocks,
+  inspectRoomMeta,
+  recoverRoomToLastKnownGood,
   getReplaceSeq,
   isDeletedRoom,
   reviveRoom,
@@ -1918,8 +1922,19 @@ async function handleApi(req, res) {
         if (!(await getRoom(roomKey))) {
           await upsertRoom(roomKey, body.title || '未命名')
         }
-        const obj = mindDoc.treeToObject(normalizeTree(body.tree, body.title))
+        const normalizedTree = normalizeTree(body.tree, body.title)
+        const importUtil = require('./collabImport')
+        const stats = importUtil.inspectImportTree(normalizedTree)
+        if (stats.tooLarge) throw importUtil.importTooLargeError(stats)
+        await yieldEventLoop()
+        const obj = mindDoc.treeToObject(normalizedTree)
         const nodeCount = Object.keys(obj || {}).length
+        if (nodeCount > stats.maxNodes) {
+          throw importUtil.importTooLargeError({
+            ...stats,
+            nodeCount
+          })
+        }
         setSaveState(roomKey, 'saving', {
           phase: 'writing',
           progress: 45,
@@ -1994,11 +2009,90 @@ async function handleApi(req, res) {
     return true
   }
 
+  const metaMatch = pathname.match(/^\/api\/files\/([^/]+)\/meta$/)
+  if (metaMatch && req.method === 'GET') {
+    const roomKey = decodeURIComponent(metaMatch[1])
+    expireStaleReplaceLocks()
+    if (isDeletedRoom(roomKey)) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    const inspect = await inspectRoomMeta(roomKey)
+    if (!inspect) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    sendJson(res, 200, {
+      ...inspect,
+      replaceLock: inspect.replaceLock || inspectReplaceLock(roomKey),
+      ...publicAccess(req.roomAccess || (await attachRoomAccess(req, roomKey)))
+    })
+    return true
+  }
+
+  const recoverMatch = pathname.match(/^\/api\/files\/([^/]+)\/recover$/)
+  if (recoverMatch && req.method === 'POST') {
+    const roomKey = decodeURIComponent(recoverMatch[1])
+    const body = await readBody(req)
+    try {
+      const result = await recoverRoomToLastKnownGood(roomKey, body || {})
+      sendJson(res, 200, result)
+    } catch (err) {
+      sendJson(res, err.statusCode || 400, {
+        error: err.message || 'recover failed',
+        code: err.code || undefined,
+        inspect: err.inspect
+      })
+    }
+    return true
+  }
+
   const previewMatch = pathname.match(/^\/api\/files\/([^/]+)\/preview$/)
   if (previewMatch && req.method === 'GET') {
     const roomKey = decodeURIComponent(previewMatch[1])
     if (isDeletedRoom(roomKey)) {
       sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    expireStaleReplaceLocks()
+    const inspect = await inspectRoomMeta(roomKey)
+    if (!inspect) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    const wantSafe =
+      url.searchParams.get('safe') === '1' ||
+      url.searchParams.get('safe') === 'true' ||
+      Number(inspect.liveCount || 0) >= 400
+    if (wantSafe) {
+      const subtree = await getRoomSubtree(roomKey, 'root', {
+        deep: true,
+        maxNodes: 80
+      })
+      const tree =
+        subtree && subtree.tree
+          ? subtree.tree
+          : {
+              data: { uid: 'root', text: inspect.title || 'Root', isRoot: true },
+              children: []
+            }
+      sendJson(res, 200, {
+        room_key: roomKey,
+        title: inspect.title,
+        version: inspect.version,
+        updated_at: inspect.updatedAt,
+        metadata: inspect.metadata || {},
+        tree,
+        node_count: inspect.liveCount,
+        collapsed: true,
+        clipped: true,
+        lazy_load: true,
+        safe_load: true,
+        http_collab: true,
+        inspect,
+        replaceLock: inspect.replaceLock || inspectReplaceLock(roomKey),
+        ...publicAccess(req.roomAccess || (await attachRoomAccess(req, roomKey)))
+      })
       return true
     }
     const loaded = await loadSnapshot(roomKey)
@@ -2017,14 +2111,17 @@ async function handleApi(req, res) {
     sendJson(res, 200, {
       ...mapMeta(roomKey, obj, row),
       ...preview,
+      inspect,
       ...treeAuthorityFields(row),
       ...publicAccess(req.roomAccess || (await attachRoomAccess(req, roomKey)))
     })
-    setImmediate(() => {
-      warmDoc(roomKey).catch(err => {
-        console.error('[persist] warmup failed', roomKey, err.message)
+    if (Number(inspect.liveCount || 0) < 400) {
+      setImmediate(() => {
+        warmDoc(roomKey).catch(err => {
+          console.error('[persist] warmup failed', roomKey, err.message)
+        })
       })
-    })
+    }
     return true
   }
 

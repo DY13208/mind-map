@@ -1,5 +1,9 @@
 const { createOutbox } = require('./outbox')
 const {
+  shouldQuarantineOutboxOp,
+  summarizeOutbox
+} = require('../collabRoomRecovery')
+const {
   createOpId,
   isOpId,
   normalizeOperation,
@@ -614,9 +618,17 @@ function createCollaborationAdapter(options = {}) {
       versionAheadCount: Number(state.versionAheadCount || 0),
       undoDepth: state.undoStack.length,
       redoDepth: state.redoStack.length,
+      undoTop: state.undoStack.length
+        ? {
+            opId: state.undoStack[state.undoStack.length - 1].opId,
+            type: state.undoStack[state.undoStack.length - 1].type,
+            opIds: state.undoStack[state.undoStack.length - 1].opIds || []
+          }
+        : null,
       socketId: socket && socket.id ? socket.id : '',
       socketConnected: !!(socket && socket.connected),
-      lastSync: state.lastSync || null
+      lastSync: state.lastSync || null,
+      outboxInspect: state.outboxInspect || []
     }
   }
 
@@ -815,6 +827,7 @@ function createCollaborationAdapter(options = {}) {
       }
     }
     setStatus('live', { saveState: 'saved', error: '', errorCode: '', phase: 'LIVE' })
+    await quarantineStaleImportOps()
     await rebaseUnsent(state.lastServerRevision)
     kickDrain()
     return result
@@ -1106,11 +1119,38 @@ function createCollaborationAdapter(options = {}) {
     return row
   }
 
+  async function quarantineStaleImportOps() {
+    const pending = await outbox.list(state.clientId, state.roomKey)
+    state.outboxInspect = summarizeOutbox(pending)
+    for (const item of pending) {
+      if (!item || item.status === 'quarantined' || item.status === 'failed') {
+        continue
+      }
+      const type = normalizeType(item.type)
+      if (!shouldQuarantineOutboxOp(item) && type !== 'map.replace') continue
+      await outbox.update(item.opId, {
+        status: 'quarantined',
+        error: 'OUTBOX_QUARANTINED_MAP_REPLACE',
+        errorCode: item.errorCode || 'OUTBOX_QUARANTINED_MAP_REPLACE'
+      })
+      adapterTrace('outbox.quarantine', {
+        opId: item.opId,
+        type: item.type,
+        roomKey: state.roomKey
+      })
+    }
+    return state.outboxInspect
+  }
+
   async function rebaseUnsent(baseRevision) {
     const base = Math.max(0, Number(baseRevision != null ? baseRevision : state.lastServerRevision) || 0)
     const pending = await outbox.list(state.clientId, state.roomKey)
     for (const item of pending) {
       if (!item || item.status === 'sending') continue
+      if (item.status === 'quarantined' || item.status === 'failed') continue
+      if (shouldQuarantineOutboxOp(item) || normalizeType(item.type) === 'map.replace') {
+        continue
+      }
       const nextPayload = {
         ...(item.payload || {}),
         baseRevision: base,
@@ -1129,7 +1169,12 @@ function createCollaborationAdapter(options = {}) {
   async function pickDrainHead() {
     const pending = await outbox.list(state.clientId, state.roomKey)
     const active = pending.filter(
-      item => item && item.status !== 'acked' && item.status !== 'acknowledged'
+      item =>
+        item &&
+        item.status !== 'acked' &&
+        item.status !== 'acknowledged' &&
+        item.status !== 'quarantined' &&
+        item.status !== 'failed'
     )
     const sending = active.filter(item => item.status === 'sending')
     if (sending.length > 1) {
@@ -1704,6 +1749,8 @@ function createCollaborationAdapter(options = {}) {
     outbox,
     getClientId: () => state.clientId,
     getDebugState: getDiagnosticState,
+    peekUndoTarget: () =>
+      state.undoStack.length ? state.undoStack[state.undoStack.length - 1] : null,
     setLastServerRevision: value => {
       advanceRevision(value)
     }

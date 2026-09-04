@@ -8,6 +8,7 @@ import {
 import Base from '../layouts/Base'
 import { CONSTANTS } from '../constants/constant'
 import AutoMove from '../utils/AutoMove'
+import collabPaste from '../utils/collabPaste'
 
 // 节点拖动插件
 class Drag extends Base {
@@ -147,9 +148,28 @@ class Drag extends Base {
       .map(node => node && node.getData && node.getData('uid'))
       .filter(Boolean)
     const hadClone = !!this.clone
+    this.overlapNode = collabPaste.resolveDropBusinessNode(this.overlapNode)
+    this.prevNode = collabPaste.resolveDropBusinessNode(this.prevNode)
+    this.nextNode = collabPaste.resolveDropBusinessNode(this.nextNode)
     let overlapNodeUid = this.overlapNode ? this.overlapNode.getData('uid') : ''
     let prevNodeUid = this.prevNode ? this.prevNode.getData('uid') : ''
     let nextNodeUid = this.nextNode ? this.nextNode.getData('uid') : ''
+    collabPaste.publishGeneralizationDragTrace({
+      overlapNodeUid,
+      prevNodeUid,
+      nextNodeUid,
+      parentUid:
+        (this.prevNode &&
+          this.prevNode.parent &&
+          this.prevNode.parent.getData &&
+          this.prevNode.parent.getData('uid')) ||
+        (this.nextNode &&
+          this.nextNode.parent &&
+          this.nextNode.parent.getData &&
+          this.nextNode.parent.getData('uid')) ||
+        (this.overlapNode && this.overlapNode.getData && this.overlapNode.getData('uid')) ||
+        ''
+    })
     if (this.isDragging && typeof beforeDragEnd === 'function') {
       const isCancel = await beforeDragEnd({
         overlapNodeUid,
@@ -218,6 +238,7 @@ class Drag extends Base {
     this.removeCloneNode()
     if (didMove && draggedUids.length) {
       const renderer = this.mindMap.renderer
+      const owners = new Set()
       draggedUids.forEach(uid => {
         const live =
           renderer && typeof renderer.findNodeByUid === 'function'
@@ -225,6 +246,19 @@ class Drag extends Base {
             : null
         if (live && typeof renderer.setNodeActive === 'function') {
           renderer.setNodeActive(live, true)
+        }
+        if (live && live.parent) owners.add(live.parent)
+      })
+      owners.forEach(owner => {
+        if (typeof owner.updateGeneralization === 'function') {
+          owner.updateGeneralization()
+        }
+        if (typeof owner.renderGeneralization === 'function') {
+          owner.renderGeneralization(true)
+        }
+        const cooperate = this.mindMap.cooperate
+        if (cooperate && typeof cooperate.syncHttpGeneralization === 'function') {
+          cooperate.syncHttpGeneralization(owner)
         }
       })
     }
@@ -312,6 +346,9 @@ class Drag extends Base {
   nodeTreeToList() {
     const list = []
     bfsWalk(this.mindMap.renderer.root, node => {
+      if (!node || node.isGeneralization) {
+        return
+      }
       // 过滤掉当前被拖拽的节点
       if (this.checkIsInBeingDragNodeList(node)) {
         return
@@ -808,7 +845,11 @@ class Drag extends Base {
     let oneFourthHeight = nodeRect.originHeight / 4
     let { prevBrotherOffset, nextBrotherOffset } =
       this.getNodeDistanceToSiblingNode(checkList, node, nodeRect, 'v')
-    if (nodeRect.left <= mouseMoveX && nodeRect.right >= mouseMoveX) {
+    const corridor = collabPaste.generalizationCorridorPx(node)
+    const { scaleX } = this.drawTransform
+    const hitLeft = nodeRect.left - (dir === LEFT ? corridor * scaleX : 0)
+    const hitRight = nodeRect.right + (dir === LEFT ? 0 : corridor * scaleX)
+    if (hitLeft <= mouseMoveX && hitRight >= mouseMoveX) {
       // 检测兄弟节点位置
       if (
         !this.overlapNode &&
@@ -950,7 +991,11 @@ class Drag extends Base {
     let oneFourthWidth = nodeRect.originWidth / 4
     let { prevBrotherOffset, nextBrotherOffset } =
       this.getNodeDistanceToSiblingNode(checkList, node, nodeRect, 'h')
-    if (nodeRect.top <= mouseMoveY && nodeRect.bottom >= mouseMoveY) {
+    const corridorY = collabPaste.generalizationCorridorPx(node)
+    const { scaleY } = this.drawTransform
+    const hitTop = nodeRect.top - corridorY * scaleY
+    const hitBottom = nodeRect.bottom + corridorY * scaleY
+    if (hitTop <= mouseMoveY && hitBottom >= mouseMoveY) {
       // 检测兄弟节点位置
       if (
         !this.overlapNode &&
