@@ -1,3 +1,5 @@
+/* global module:readonly */
+
 const SPECIAL_OBJECT_MATRIX = [
   {
     type: 'BusinessNode',

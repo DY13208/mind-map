@@ -1307,7 +1307,9 @@ export const checkSmmFormatData = data => {
       if (typeof parsedData === 'object' && parsedData.simpleMindMap) {
         smmData = parsedData.data
       }
-    } catch (error) {}
+    } catch (error) {
+      // 非 JSON 剪贴板内容继续按普通文本处理。
+    }
   } else if (typeof data === 'object' && data.simpleMindMap) {
     // 否则如果是对象，则检查属性标志
     smmData = data.data
@@ -1532,7 +1534,9 @@ export const getNodeTreeBoundingRect = (
         if (y + height > maxY) {
           maxY = y + height
         }
-      } catch (e) {}
+      } catch (e) {
+        // 暂不可测量的节点不参与本次边界计算。
+      }
     }
     if (!excludeGeneralization && root._generalizationList.length > 0) {
       root._generalizationList.forEach(item => {

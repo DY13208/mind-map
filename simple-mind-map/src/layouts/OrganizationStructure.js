@@ -317,7 +317,7 @@ class OrganizationStructure extends Base {
   }
 
   // 渲染展开收起按钮的隐藏占位元素
-  renderExpandBtnRect(rect, expandBtnSize, width, height, node) {
+  renderExpandBtnRect(rect, expandBtnSize, width, height) {
     rect.size(width, expandBtnSize).x(0).y(height)
   }
 }

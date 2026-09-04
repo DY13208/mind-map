@@ -109,7 +109,7 @@ class VerticalTimeline extends Base {
     walk(
       this.root,
       null,
-      (node, parent, isRoot, layerIndex, index) => {
+      (node, parent, isRoot, layerIndex) => {
         if (node.getData('expand') && node.children && node.children.length) {
           let marginY = this.getMarginY(layerIndex + 1)
           // 定位二级节点的top

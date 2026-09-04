@@ -1,3 +1,4 @@
+/* global module:readonly */
 const TERMINAL_ERROR_SET = {
   FORBIDDEN: true,
   INVALID_CLIENT_ID: true,
@@ -11,7 +12,8 @@ const TERMINAL_ERROR_SET = {
   UNSUPPORTED_OPERATION: true,
   BAD_OP_ID: true,
   INVALID_PAYLOAD: true,
-  ROOT_DELETE: true
+  ROOT_DELETE: true,
+  CYCLE_REJECTED: true
 }
 
 const RETRYABLE_ERROR_SET = {
@@ -38,31 +40,30 @@ function isRetryableError(code) {
   return !!RETRYABLE_ERROR_SET[raw]
 }
 
-function collectOpUids(op) {
+function collectOpUids(op, includeParents = true) {
   const payload = (op && op.payload) || {}
   const uids = []
   if (payload.uid) uids.push(String(payload.uid))
-  if (payload.parent) uids.push(String(payload.parent))
-  if (payload.parentUid) uids.push(String(payload.parentUid))
-  if (payload.parent_uid) uids.push(String(payload.parent_uid))
+  if (includeParents && payload.parent) uids.push(String(payload.parent))
+  if (includeParents && payload.parentUid) uids.push(String(payload.parentUid))
+  if (includeParents && payload.parent_uid) uids.push(String(payload.parent_uid))
   ;(payload.ops || []).forEach(inner => {
-    collectOpUids(inner).forEach(id => uids.push(id))
+    collectOpUids(inner, includeParents).forEach(id => uids.push(id))
   })
   return Array.from(new Set(uids.filter(Boolean)))
 }
 
 function dependsOnBlockedOp(item, blocked) {
   if (!item || !blocked) return false
-  const blockedUids = new Set(collectOpUids(blocked))
-  const itemUids = collectOpUids(item)
-  if (itemUids.some(id => blockedUids.has(id))) return true
+  // A rejected cycle move created no nodes or state for later writes to depend on.
+  if (blocked.type === 'node.move' && blocked.errorCode === 'CYCLE_REJECTED') return false
   const blockedSeq = Number(blocked.clientSeq || 0)
   const itemSeq = Number(item.clientSeq || 0)
-  return (
-    blockedSeq > 0 &&
-    itemSeq > blockedSeq &&
-    itemUids.some(id => blockedUids.has(id))
-  )
+  if (blockedSeq > 0 && itemSeq > 0 && itemSeq <= blockedSeq) return false
+  // A failed write targets its uid, not the existing parent it merely references.
+  // Later inserts/moves may still depend on that target as their parent.
+  const blockedUids = new Set(collectOpUids(blocked, false))
+  return collectOpUids(item).some(id => blockedUids.has(id))
 }
 
 function shouldQuarantineError(code, op) {
@@ -79,7 +80,9 @@ function writeClientHeartbeat(storage, clientId, now = Date.now()) {
   if (!storage || !clientId) return
   try {
     storage.setItem(heartbeatKey(clientId), String(now))
-  } catch (err) {}
+  } catch (err) {
+    // Storage can be disabled; heartbeat persistence is best effort.
+  }
 }
 
 function isClientHeartbeatFresh(storage, clientId, now = Date.now(), ttl = 8000) {

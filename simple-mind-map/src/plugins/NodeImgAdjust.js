@@ -179,7 +179,7 @@ class NodeImgAdjust {
       e.preventDefault()
       this.onMousedown(e)
     })
-    btnEl.addEventListener('mouseup', e => {
+    btnEl.addEventListener('mouseup', () => {
       setTimeout(() => {
         //点击后直接松开异常处理; 其他事件响应之后处理
         this.hideHandleEl()
@@ -207,14 +207,14 @@ class NodeImgAdjust {
       align-items: center;
       cursor: pointer;
     `
-    btnRemove.addEventListener('mouseenter', e => {
+    btnRemove.addEventListener('mouseenter', () => {
       this.showHandleEl()
     })
-    btnRemove.addEventListener('mouseleave', e => {
+    btnRemove.addEventListener('mouseleave', () => {
       if (this.isMousedown) return
       this.hideHandleEl()
     })
-    btnRemove.addEventListener('click', async e => {
+    btnRemove.addEventListener('click', async () => {
       let stop = false
       if (typeof this.mindMap.opt.beforeDeleteNodeImg === 'function') {
         stop = await this.mindMap.opt.beforeDeleteNodeImg(this.node)

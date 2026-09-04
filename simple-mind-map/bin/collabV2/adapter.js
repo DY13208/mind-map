@@ -1490,8 +1490,8 @@ function createCollaborationAdapter(options = {}) {
         originalBaseRevision: originalBase,
         sendBaseRevision: sendBase
       })
+      bumpOutboxPending(-1)
       settleAck(op.opId, err)
-      await refreshOutboxCounts()
       const stage =
         err.code === 'FORBIDDEN'
           ? STAGES.SERVER_ACL
@@ -1526,6 +1526,7 @@ function createCollaborationAdapter(options = {}) {
         }
       })
       if (options.onRejected) options.onRejected(op, err)
+      await refreshOutboxCounts()
       return { terminal: true, stopDrain: err.code === 'FORBIDDEN', err }
     }
     await outbox.remove(op.opId)
@@ -1539,9 +1540,6 @@ function createCollaborationAdapter(options = {}) {
       // keep lastError; room continues
     }
     endSending()
-    settleAck(op.opId, null, result)
-    await refreshOutboxCounts()
-    setStatus('live', { saveState: 'saved', error: '' })
     const kind = normalizeType(op.type)
     if (kind === 'operation.undo') {
       // stacks updated by undo()
@@ -1556,6 +1554,12 @@ function createCollaborationAdapter(options = {}) {
         groupId: (op.payload && op.payload.batchId) || op.opId
       })
     }
+    // Finish local ACK bookkeeping before exposing completion to the caller.
+    // No asynchronous gap between resolving the waiter and publishing saved.
+    settleAck(op.opId, null, result)
+    setStatus('live', { saveState: 'saved', error: '' })
+    // Counters are diagnostic; a failed refresh must not strand an ACK waiter.
+    await refreshOutboxCounts()
     return { ok: true, result }
   }
 
@@ -1564,26 +1568,22 @@ function createCollaborationAdapter(options = {}) {
     if (draining || drainLoop) return drainLoop
     if (!socket || !socket.connected || !isLive()) return drainLoop
     draining = true
+    let stopDrain = false
     drainLoop = runDrain()
-      .catch(() => {})
+      .then(outcome => { stopDrain = !!(outcome && outcome.stopDrain) })
+      .catch(() => { stopDrain = true })
       .finally(() => {
         draining = false
         drainLoop = null
         state.outboxSending = 0
         state.sendingOpId = ''
-        if (!socket || !socket.connected || !isLive() || state.drainPaused) return
-        outbox
-          .list(state.clientId, state.roomKey)
-          .then(rows => {
-            const hasWork = (rows || []).some(
-              item =>
-                item &&
-                (item.status === 'pending' ||
-                  item.status === 'retryable' ||
-                  item.status === 'sending')
-            )
+        if (stopDrain || !socket || !socket.connected || !isLive() || state.drainPaused) return
+        // Use the same eligibility rules as runDrain. Pending-but-blocked rows
+        // must not recursively schedule empty drains and starve the event loop.
+        pickDrainHead()
+          .then(({ head }) => {
             if (
-              hasWork &&
+              head &&
               !state.drainPaused &&
               socket &&
               socket.connected &&
@@ -1630,7 +1630,7 @@ function createCollaborationAdapter(options = {}) {
       }
       if (outcome && outcome.skipped) continue
       if (outcome && outcome.terminal) {
-        if (outcome.stopDrain) break
+        if (outcome.stopDrain) return outcome
         continue
       }
     }
