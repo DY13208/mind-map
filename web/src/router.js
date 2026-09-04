@@ -13,6 +13,94 @@ const roomPathRedirect = to => ({
 
 const routes = [
   {
+    path: '/files',
+    component: () =>
+      import(
+        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'
+      ),
+    children: [
+      {
+        path: '',
+        name: 'Files',
+        component: () =>
+          import(
+            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'
+          ),
+        props: { mode: 'files' }
+      },
+      {
+        path: 'recent',
+        name: 'RecentFiles',
+        component: () =>
+          import(
+            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'
+          ),
+        props: { mode: 'recent' }
+      },
+      {
+        path: 'favorites',
+        name: 'FavoriteFiles',
+        component: () =>
+          import(
+            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'
+          ),
+        props: { mode: 'favorites' }
+      },
+      {
+        path: 'shared',
+        name: 'SharedFiles',
+        component: () =>
+          import(
+            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'
+          ),
+        props: { mode: 'shared' }
+      },
+      {
+        path: 'trash',
+        name: 'TrashFiles',
+        component: () =>
+          import(
+            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'
+          ),
+        props: { mode: 'trash' }
+      },
+      {
+        path: 'folder/:id',
+        name: 'FolderFiles',
+        component: () =>
+          import(
+            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'
+          ),
+        props: { mode: 'folder' }
+      }
+    ]
+  },
+  {
+    path: '/spaces',
+    component: () =>
+      import(
+        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'
+      ),
+    children: [
+      {
+        path: '',
+        name: 'Spaces',
+        component: () =>
+          import(
+            /* webpackChunkName: "product-shell" */ './pages/ProductShell/SpacesPage.vue'
+          )
+      },
+      {
+        path: ':id',
+        name: 'SpaceDetail',
+        component: () =>
+          import(
+            /* webpackChunkName: "product-shell" */ './pages/ProductShell/SpaceDetailPage.vue'
+          )
+      }
+    ]
+  },
+  {
     path: '/',
     name: 'Edit',
     component: () => import(`./pages/Edit/Index.vue`)
