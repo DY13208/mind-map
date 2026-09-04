@@ -443,8 +443,17 @@ async function main() {
   assert.match(routerSrc, /path: 'trash'/)
   assert.match(routerSrc, /path: '\/spaces'/)
   assert.match(routerSrc, /name: 'Edit'/)
+  assert.match(routerSrc, /beforeEnter/)
+  assert.match(routerSrc, /path: '\/files'/)
   assert.doesNotMatch(routerSrc, /redirect: '\/files'/)
   assert.match(routerSrc, /room: to\.params\.roomKey/)
+  assert.match(
+    fs.readFileSync(
+      path.join(root, 'pages', 'Edit', 'components', 'Toolbar.vue'),
+      'utf8'
+    ),
+    /data-testid="back-to-files"/
+  )
 
   const recentCalls = calls.length
   await room.listRooms({ recent: true })
