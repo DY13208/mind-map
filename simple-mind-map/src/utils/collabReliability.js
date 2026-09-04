@@ -81,6 +81,9 @@ function collectCreatedUids(op) {
 
 function dependsOnBlockedOp(item, blocked) {
   if (!item || !blocked) return false
+  // Creator dependency only: a failed insert/create/paste/import of UID N
+  // blocks later uses of N. Failed mutations (move/update/delete) of an
+  // already-existing business node must not block later ops on the same UID.
   const created = new Set(collectCreatedUids(blocked))
   if (!created.size) return false
   return collectOpUids(item).some(id => created.has(id))

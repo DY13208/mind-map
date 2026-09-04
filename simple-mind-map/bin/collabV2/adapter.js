@@ -7,6 +7,7 @@ const {
   isTerminalError,
   isRetryableError,
   dependsOnBlockedOp,
+  collectCreatedUids,
   shouldQuarantineError,
   writeClientHeartbeat,
   canClaimOrphan
@@ -290,6 +291,7 @@ function createCollaborationAdapter(options = {}) {
     outboxSending: 0,
     sendingOpId: '',
     drainPaused: false,
+    drainKickCount: 0,
     aheadAttempts: 0,
     maxSendingObserved: 0,
     versionAheadCount: 0,
@@ -648,6 +650,7 @@ function createCollaborationAdapter(options = {}) {
       pendingCount: state.pendingAcks.size,
       outboxPending: Number(state.outboxPending || 0),
       outboxSending: Number(state.outboxSending || 0),
+      drainKickCount: Number(state.drainKickCount || 0),
       sendingOpId: state.sendingOpId || '',
       maxSendingObserved: Number(state.maxSendingObserved || 0),
       versionAheadCount: Number(state.versionAheadCount || 0),
@@ -1194,15 +1197,23 @@ function createCollaborationAdapter(options = {}) {
   }
 
   async function refreshOutboxCounts() {
-    const rows = await outbox.list(state.clientId, state.roomKey)
-    state.outboxInspect = summarizeOutbox(rows)
-    state.outboxPending = (rows || []).filter(
-      item =>
-        item &&
-        (item.status === 'pending' ||
-          item.status === 'retryable' ||
-          item.status === 'sending')
-    ).length
+    try {
+      const rows = await outbox.list(state.clientId, state.roomKey)
+      state.outboxInspect = summarizeOutbox(rows)
+      state.outboxPending = (rows || []).filter(
+        item =>
+          item &&
+          (item.status === 'pending' ||
+            item.status === 'retryable' ||
+            item.status === 'sending')
+      ).length
+    } catch (err) {
+      adapterTrace('OUTBOX_COUNTER_REFRESH_FAILED', {
+        roomKey: state.roomKey,
+        clientId: state.clientId,
+        message: (err && err.message) || 'outbox list failed'
+      })
+    }
   }
 
   async function claimOrphanOutbox() {
@@ -1291,8 +1302,48 @@ function createCollaborationAdapter(options = {}) {
     }
   }
 
+  function isTerminalBlockedCreate(item) {
+    if (!item) return false
+    if (item.status !== 'quarantined' && item.status !== 'failed') return false
+    if (!collectCreatedUids(item).length) return false
+    if (item.status === 'quarantined') return true
+    return isTerminalError(item.errorCode || item.code)
+  }
+
+  async function quarantineTerminalCreateDependents(rows) {
+    const blockedCreates = (rows || []).filter(isTerminalBlockedCreate)
+    if (!blockedCreates.length) return false
+    let changed = false
+    for (const item of rows || []) {
+      if (!item) continue
+      if (
+        item.status === 'acked' ||
+        item.status === 'acknowledged' ||
+        item.status === 'quarantined' ||
+        item.status === 'failed' ||
+        item.status === 'sending'
+      ) {
+        continue
+      }
+      if (!blockedCreates.some(fail => dependsOnBlockedOp(item, fail))) continue
+      await outbox.update(item.opId, {
+        status: 'quarantined',
+        error: 'blocked by terminal create',
+        errorCode: 'BLOCKED_BY_TERMINAL_CREATE'
+      })
+      const err = new Error('blocked by terminal create')
+      err.code = 'BLOCKED_BY_TERMINAL_CREATE'
+      settleAck(item.opId, err)
+      changed = true
+    }
+    return changed
+  }
+
   async function pickDrainHead() {
-    const pending = await outbox.list(state.clientId, state.roomKey)
+    let pending = await outbox.list(state.clientId, state.roomKey)
+    if (await quarantineTerminalCreateDependents(pending)) {
+      pending = await outbox.list(state.clientId, state.roomKey)
+    }
     const active = pending.filter(
       item =>
         item &&
@@ -1316,7 +1367,15 @@ function createCollaborationAdapter(options = {}) {
     const head =
       drainable.find(item => item.status === 'sending') ||
       drainable.find(item => item.status === 'pending' || item.status === 'retryable')
-    return { head, pending: drainable, index: head ? drainable.indexOf(head) : -1 }
+    const blockedPending = active.filter(
+      item => !drainable.some(row => row.opId === item.opId)
+    )
+    return {
+      head,
+      pending: drainable,
+      blockedPending,
+      index: head ? drainable.indexOf(head) : -1
+    }
   }
 
   async function recoverVersionAhead(op, err, extra) {
@@ -1506,7 +1565,6 @@ function createCollaborationAdapter(options = {}) {
         originalBaseRevision: originalBase,
         sendBaseRevision: sendBase
       })
-      await refreshOutboxCounts()
       const stage =
         err.code === 'FORBIDDEN'
           ? STAGES.SERVER_ACL
@@ -1542,7 +1600,8 @@ function createCollaborationAdapter(options = {}) {
       })
       if (options.onRejected) options.onRejected(op, err)
       settleAck(op.opId, err)
-      return { terminal: true, stopDrain: err.code === 'FORBIDDEN', err }
+      await refreshOutboxCounts()
+      return { terminal: true, err }
     }
     await outbox.remove(op.opId)
     bumpOutboxPending(-1)
@@ -1555,9 +1614,9 @@ function createCollaborationAdapter(options = {}) {
       // keep lastError; room continues
     }
     endSending()
+    settleAck(op.opId, null, result)
     await refreshOutboxCounts()
     setStatus('live', { saveState: 'saved', error: '' })
-    settleAck(op.opId, null, result)
     const kind = normalizeType(op.type)
     if (kind === 'operation.undo') {
       // stacks updated by undo()
@@ -1579,6 +1638,7 @@ function createCollaborationAdapter(options = {}) {
     if (state.drainPaused) return drainLoop
     if (draining || drainLoop) return drainLoop
     if (!socket || !socket.connected || !isLive()) return drainLoop
+    state.drainKickCount = Number(state.drainKickCount || 0) + 1
     draining = true
     drainLoop = runDrain()
       .catch(() => {})
@@ -1588,18 +1648,10 @@ function createCollaborationAdapter(options = {}) {
         state.outboxSending = 0
         state.sendingOpId = ''
         if (!socket || !socket.connected || !isLive() || state.drainPaused) return
-        outbox
-          .list(state.clientId, state.roomKey)
-          .then(rows => {
-            const hasWork = (rows || []).some(
-              item =>
-                item &&
-                (item.status === 'pending' ||
-                  item.status === 'retryable' ||
-                  item.status === 'sending')
-            )
+        pickDrainHead()
+          .then(picked => {
             if (
-              hasWork &&
+              picked.head &&
               !state.drainPaused &&
               socket &&
               socket.connected &&
@@ -1617,7 +1669,17 @@ function createCollaborationAdapter(options = {}) {
     while (!state.drainPaused && state.roomKey) {
       const picked = await pickDrainHead()
       const head = picked.head
-      if (!head) break
+      if (!head) {
+        if ((picked.blockedPending || []).length) {
+          adapterTrace('DRAIN_BLOCKED_NO_BUSY_LOOP', {
+            roomKey: state.roomKey,
+            clientId: state.clientId,
+            blocked: picked.blockedPending.length,
+            drainKickCount: Number(state.drainKickCount || 0)
+          })
+        }
+        break
+      }
       if (state.outboxSending > 1) {
         adapterTrace('drain.sending.overflow', { sending: state.outboxSending })
       }
@@ -1645,10 +1707,7 @@ function createCollaborationAdapter(options = {}) {
         continue
       }
       if (outcome && outcome.skipped) continue
-      if (outcome && outcome.terminal) {
-        if (outcome.stopDrain) break
-        continue
-      }
+      if (outcome && outcome.terminal) continue
     }
   }
 
