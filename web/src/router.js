@@ -103,11 +103,23 @@ const routes = [
   {
     path: '/',
     name: 'Edit',
-    component: () => import(`./pages/Edit/Index.vue`)
+    component: () => import(`./pages/Edit/Index.vue`),
+    beforeEnter(to, from, next) {
+      const room = to.query && to.query.room
+      if (room == null || String(room).trim() === '') {
+        next({ path: '/files', replace: true })
+        return
+      }
+      next()
+    }
   },
   {
     path: '/room-:roomSuffix',
-    redirect: to => roomPathRedirect({ ...to, params: { roomKey: `room-${to.params.roomSuffix}` } })
+    redirect: to =>
+      roomPathRedirect({
+        ...to,
+        params: { roomKey: `room-${to.params.roomSuffix}` }
+      })
   },
   {
     path: '/room/:roomKey',
@@ -115,11 +127,17 @@ const routes = [
   },
   {
     path: '/index',
-    redirect: '/'
+    redirect: to =>
+      to.query && to.query.room
+        ? { path: '/', query: to.query }
+        : { path: '/files', replace: true }
   },
   {
     path: '/map',
-    redirect: to => ({ path: '/', query: to.query })
+    redirect: to =>
+      to.query && to.query.room
+        ? { path: '/', query: to.query }
+        : { path: '/files', replace: true }
   },
   {
     path: '/doc/zh',

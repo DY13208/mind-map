@@ -74,6 +74,15 @@
           <span class="iconfont iconjiantouyou"></span>
         </button>
         <div class="toolbarBlock">
+          <div
+            class="toolbarBtn"
+            data-testid="back-to-files"
+            title="返回文件"
+            @click="goToFiles"
+          >
+            <span class="icon el-icon-back"></span>
+            <span class="text">返回文件</span>
+          </div>
           <div class="toolbarBtn" @click="openDirectory" v-if="!isMobile">
             <span class="icon iconfont icondakai"></span>
             <span class="text">{{ $t('toolbar.directory') }}</span>
@@ -706,6 +715,11 @@ export default {
         }
         this.$message.warning(this.$t('toolbar.notSupportTip'))
       }
+    },
+
+    // 返回 Product Shell 文件列表
+    goToFiles() {
+      this.$router.push({ path: '/files' }).catch(() => {})
     },
 
     // 扫描本地文件夹
