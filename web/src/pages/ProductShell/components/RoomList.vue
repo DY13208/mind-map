@@ -18,7 +18,7 @@
       label="Owner"
       width="110"
     /><el-table-column
-      prop="role"
+      prop="roleLabel"
       label="我的角色"
       width="100"
     /><el-table-column label="协作者" width="125"
@@ -56,7 +56,7 @@
             ><el-dropdown-item command="move">移动</el-dropdown-item
             ><el-dropdown-item command="share">分享</el-dropdown-item
             ><el-dropdown-item command="history">历史版本</el-dropdown-item
-            ><el-dropdown-item command="delete" divided
+            ><el-dropdown-item v-if="allowDelete" command="delete" divided
               >删除</el-dropdown-item
             ></el-dropdown-menu
           ></el-dropdown
@@ -68,7 +68,7 @@
 <script>
 export default {
   name: 'RoomList',
-  props: { rooms: Array },
+  props: { rooms: Array, allowDelete: { type: Boolean, default: false } },
   methods: {
     formatDate(value) {
       return new Date(value).toLocaleString('zh-CN', {

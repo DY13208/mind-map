@@ -1,72 +1,182 @@
+import { productRequest } from './productHttp'
+import { userMessageFromError } from './apiError'
+import { C3_SERVICE_STATUS_MATRIX } from './serviceStatus'
+import {
+  folderIdForApi,
+  normalizeFolderId,
+  normalizeRoomDto
+} from './roomDto'
 import {
   mockRequest,
   mockStore,
-  makeId,
   requiredItem,
   validName
 } from './mockStore'
+
 const find = id => requiredItem(mockStore.rooms, id, '脑图')
 const update = (id, changes) => Object.assign(find(id), changes)
-/** Product metadata only; no snapshots or collaboration operations. */
-export default {
-  listRooms: (filters = {}) =>
-    mockRequest(() =>
-      mockStore.rooms.filter(
-        room =>
-          (filters.trash ? !!room.deletedAt : !room.deletedAt) &&
-          (!filters.favorite || room.favorite) &&
-          (!filters.shared || room.sharedWithMe) &&
-          (!filters.recent || !!room.lastOpenedAt) &&
-          (!filters.role || room.role === filters.role) &&
-          (filters.folderId === undefined || room.folderId === filters.folderId)
-      )
-    ),
-  getRoom: id => mockRequest(() => find(id)),
-  createRoom: (title, folderId = null) =>
-    mockRequest(() => {
-      const folder = folderId
-        ? requiredItem(mockStore.folders, folderId, '文件夹')
-        : null
-      const id = makeId('room')
-      const now = new Date().toISOString()
-      const room = {
-        id,
-        roomKey: id,
-        title: validName(title),
-        folderId,
-        folderName: folder ? folder.name : '根目录',
-        owner: { id: 'u1', name: '李依然', avatar: '依' },
-        collaborators: [],
-        role: 'Owner',
-        favorite: false,
-        sharedWithMe: false,
-        createdAt: now,
-        updatedAt: now,
-        lastOpenedAt: null,
-        deletedAt: null
-      }
-      mockStore.rooms.unshift(room)
-      mockStore.roomMembers[id] = [
-        {
-          ...room.owner,
-          role: 'Owner',
-          email: 'yiran@stillgroup.net',
-          joinedAt: now.slice(0, 10)
-        }
-      ]
-      return room
-    }),
-  renameRoom: (id, title) =>
-    mockRequest(() =>
-      update(id, {
-        title: validName(title),
-        updatedAt: new Date().toISOString()
+
+function wrapList(list, extra = {}) {
+  const rows = list || []
+  return {
+    list: rows,
+    total: extra.total != null ? extra.total : rows.length,
+    limit: extra.limit != null ? extra.limit : rows.length,
+    offset: extra.offset != null ? extra.offset : 0,
+    nextCursor: extra.nextCursor || null
+  }
+}
+
+function applyFavorite(room) {
+  const key = room.roomKey || room.id
+  return { ...room, favorite: mockStore.favoriteKeys.has(key) }
+}
+
+function isMockListMode(filters = {}) {
+  return !!(filters.trash || filters.favorite || filters.recent)
+}
+
+async function listRealRooms(filters = {}) {
+  const params = new URLSearchParams()
+  if (filters.q || filters.search) params.set('q', filters.q || filters.search)
+  if (filters.folderId !== undefined) {
+    const id = normalizeFolderId(filters.folderId)
+    if (id) params.set('folderId', id)
+    else params.set('folderId', 'root')
+  }
+  if (filters.sort) params.set('sort', filters.sort)
+  if (filters.order) params.set('order', filters.order)
+  if (filters.limit != null) params.set('limit', String(filters.limit))
+  if (filters.offset != null) params.set('offset', String(filters.offset))
+  if (filters.cursor) params.set('cursor', filters.cursor)
+  const query = params.toString()
+  const data = await productRequest(`/api/files${query ? `?${query}` : ''}`)
+  const foldersById = filters.foldersById || {}
+  let list = (data.list || []).map(item =>
+    applyFavorite(
+      normalizeRoomDto(item, {
+        folderName: item.folderId
+          ? (foldersById[item.folderId] && foldersById[item.folderId].name) || ''
+          : '根目录'
       })
-    ),
+    )
+  )
+  if (filters.shared) list = list.filter(room => room.sharedWithMe)
+  if (filters.role) {
+    const want = String(filters.role).toLowerCase()
+    list = list.filter(room => room.role === want)
+  }
+  return wrapList(list, data)
+}
+
+async function getRoom(roomKey) {
+  try {
+    const data = await productRequest(
+      `/api/files/${encodeURIComponent(roomKey)}/info`
+    )
+    return applyFavorite(normalizeRoomDto(data.file || data.room || data))
+  } catch (error) {
+    error.message = userMessageFromError(error)
+    throw error
+  }
+}
+
+export default {
+  backendStatus: C3_SERVICE_STATUS_MATRIX.Room,
+  listRooms: async (filters = {}) => {
+    if (isMockListMode(filters)) {
+      return mockRequest(() =>
+        wrapList(
+          mockStore.rooms.filter(
+            room =>
+              (filters.trash ? !!room.deletedAt : !room.deletedAt) &&
+              (!filters.favorite || room.favorite) &&
+              (!filters.recent || !!room.lastOpenedAt) &&
+              (!filters.role ||
+                String(room.role).toLowerCase() ===
+                  String(filters.role).toLowerCase()) &&
+              (filters.folderId === undefined ||
+                room.folderId === filters.folderId)
+          )
+        )
+      )
+    }
+    try {
+      return await listRealRooms(filters)
+    } catch (error) {
+      error.message = userMessageFromError(error)
+      throw error
+    }
+  },
+  getRoom,
+  getRoomInfo: getRoom,
+  createRoom: async (title, folderId = null) => {
+    try {
+      const data = await productRequest('/api/files', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: validName(title),
+          folderId: normalizeFolderId(folderId)
+        })
+      })
+      const created = data.room || data.file
+      if (!created || !created.roomKey) {
+        throw new Error('创建脑图未返回 roomKey')
+      }
+      return applyFavorite(normalizeRoomDto(created))
+    } catch (error) {
+      error.message = userMessageFromError(error)
+      throw error
+    }
+  },
+  renameRoom: async (roomKey, title) => {
+    try {
+      const data = await productRequest(
+        `/api/files/${encodeURIComponent(roomKey)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ title: validName(title) })
+        }
+      )
+      return applyFavorite(normalizeRoomDto(data.file || data.room || data))
+    } catch (error) {
+      error.message = userMessageFromError(error)
+      throw error
+    }
+  },
+  moveRoom: async (roomKey, folderId) => {
+    try {
+      const data = await productRequest(
+        `/api/files/${encodeURIComponent(roomKey)}/move`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ folderId: folderIdForApi(folderId) })
+        }
+      )
+      return applyFavorite(normalizeRoomDto(data.file || data.room || data))
+    } catch (error) {
+      error.message = userMessageFromError(error)
+      throw error
+    }
+  },
   markOpened: id =>
-    mockRequest(() => update(id, { lastOpenedAt: new Date().toISOString() })),
+    mockRequest(() => {
+      try {
+        return update(id, { lastOpenedAt: new Date().toISOString() })
+      } catch (error) {
+        return { ok: true, backendStatus: 'MOCK_PENDING' }
+      }
+    }),
   deleteRoom: id =>
-    mockRequest(() => update(id, { deletedAt: new Date().toISOString() })),
+    mockRequest(() => {
+      try {
+        return update(id, { deletedAt: new Date().toISOString() })
+      } catch (error) {
+        const err = new Error('回收站尚未接入，暂不可删除真实脑图')
+        err.code = 'TRASH_BACKEND_PENDING'
+        throw err
+      }
+    }),
   restoreRoom: id => mockRequest(() => update(id, { deletedAt: null })),
   permanentDelete: id =>
     mockRequest(() => {
@@ -82,5 +192,13 @@ export default {
       return { ok: true }
     }),
   toggleFavorite: id =>
-    mockRequest(() => update(id, { favorite: !find(id).favorite }))
+    mockRequest(() => {
+      if (mockStore.favoriteKeys.has(id)) mockStore.favoriteKeys.delete(id)
+      else mockStore.favoriteKeys.add(id)
+      try {
+        return update(id, { favorite: mockStore.favoriteKeys.has(id) })
+      } catch (error) {
+        return { id, roomKey: id, favorite: mockStore.favoriteKeys.has(id) }
+      }
+    })
 }

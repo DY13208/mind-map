@@ -23,7 +23,7 @@
           >添加成员</el-button
         >
       </div>
-      <h4>已共享成员 <small>角色仅演示，不修改真实 ACL</small></h4>
+      <h4>已共享成员 <small>基于房间成员 ACL</small></h4>
       <TeamMemberList :members="members" @role="updateRole" @remove="remove" />
     </div>
     <span slot="footer"
@@ -53,6 +53,9 @@ export default {
       set(value) {
         this.$emit('update:visible', value)
       }
+    },
+    roomKey() {
+      return (this.room && (this.room.roomKey || this.room.id)) || ''
     }
   },
   watch: {
@@ -69,7 +72,7 @@ export default {
       this.loading = true
       this.error = ''
       try {
-        this.members = await shareService.getMembers(this.room.id)
+        this.members = await shareService.getMembers(this.roomKey)
       } catch (error) {
         this.error = error.message
       } finally {
@@ -83,7 +86,7 @@ export default {
         await action()
         await this.load()
         this.$emit('changed')
-        this.$message.success('共享设置已更新（Mock）')
+        this.$message.success('共享设置已更新')
       } catch (error) {
         this.$message.error(error.message)
       } finally {
@@ -92,13 +95,13 @@ export default {
     },
     add() {
       return this.perform(async () => {
-        await shareService.addMember(this.room.id, this.email.trim())
+        await shareService.addMember(this.roomKey, this.email.trim())
         this.email = ''
       })
     },
     updateRole(member, role) {
       return this.perform(() =>
-        shareService.updateMemberRole(this.room.id, member.id, role)
+        shareService.updateMemberRole(this.roomKey, member.id, role)
       )
     },
     async remove(member) {
@@ -110,7 +113,7 @@ export default {
         .catch(() => false)
       if (confirmed)
         await this.perform(() =>
-          shareService.removeMember(this.room.id, member.id)
+          shareService.removeMember(this.roomKey, member.id)
         )
     }
   }

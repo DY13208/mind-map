@@ -5,7 +5,11 @@
       :value="search"
       @input="$emit('update:search', $event)"
     />
-    <FileSort :value="sort" @input="$emit('update:sort', $event)" />
+    <FileSort
+      :value="sort"
+      :hide-opened-sort="hideOpenedSort"
+      @input="$emit('update:sort', $event)"
+    />
     <el-select
       class="roleFilter"
       :value="roleFilter"
@@ -32,7 +36,7 @@
         @click="$emit('update:view', 'list')"
     /></el-button-group>
     <el-button
-      v-if="showCreate"
+      v-if="showCreateFolder"
       icon="el-icon-folder-add"
       @click="$emit('create-folder')"
       >新建文件夹</el-button
@@ -57,7 +61,9 @@ export default {
     roleFilter: { type: String, default: '' },
     sort: String,
     view: String,
-    showCreate: { type: Boolean, default: true }
+    showCreate: { type: Boolean, default: true },
+    showCreateFolder: { type: Boolean, default: true },
+    hideOpenedSort: { type: Boolean, default: false }
   }
 }
 </script>

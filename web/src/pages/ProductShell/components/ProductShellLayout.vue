@@ -47,14 +47,13 @@
         <el-avatar size="small">依</el-avatar>
         <div>
           <strong>{{ profile.name }}</strong
-          ><span>演示账号</span>
+          ><span>{{ profile.id }}</span>
         </div>
       </div>
     </aside>
     <main class="productMain">
       <div class="mockNotice">
-        产品外壳预开发 · Mock
-        数据仅本页会话生效，刷新重置；不修改真实文件、历史或权限。
+        文件、文件夹与历史已接入真实 API。最近、收藏、回收站和团队空间仍为演示数据，删除脑图暂未开放。
       </div>
       <router-view />
     </main>
