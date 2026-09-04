@@ -153,6 +153,12 @@ class Render {
       })
       return
     }
+    if (cooperate && cooperate._v2MoveActive && !cooperate._v2MoveAllowReplace) {
+      if (typeof cooperate.markMoveFullTreeForbidden === 'function') {
+        cooperate.markMoveFullTreeForbidden('Render.setData')
+      }
+      return
+    }
     this.renderTree = data || null
   }
 
@@ -1617,6 +1623,7 @@ class Render {
       }
       existBorthers.splice(existIndex, 0, item)
       existParent.nodeData.children.splice(existIndex, 0, item.nodeData)
+      item.parent = existParent
     })
     this.mindMap.render()
   }
@@ -1837,11 +1844,21 @@ class Render {
     })
     nodeList.forEach(item => {
       this.removeNodeFromActiveList(item)
+      const fromParent = item.parent
       removeFromParentNodeData(item)
+      if (fromParent && Array.isArray(fromParent.children)) {
+        const idx = getNodeIndexInNodeList(item, fromParent.children)
+        if (idx > -1) fromParent.children.splice(idx, 1)
+      }
       toNode.setData({
         expand: true
       })
+      if (!toNode.nodeData.children) toNode.nodeData.children = []
       toNode.nodeData.children.push(item.nodeData)
+      if (Array.isArray(toNode.children) && !toNode.children.includes(item)) {
+        toNode.children.push(item)
+      }
+      item.parent = toNode
     })
     this.emitNodeActiveEvent()
     this.mindMap.render()

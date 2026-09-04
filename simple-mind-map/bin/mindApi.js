@@ -207,6 +207,21 @@ function nodesFromSnapshotOrLive(snapshot, live) {
   return null
 }
 
+function treeAuthorityFields(row) {
+  if (!row) return {}
+  return {
+    treeSource: row.treeSource || '',
+    roomNodesInitialized: row.roomNodesInitialized,
+    roomNodesCount: row.roomNodesCount,
+    roomsJsonCount: row.roomsJsonCount,
+    roomNodesHash: row.roomNodesHash,
+    roomsJsonHash: row.roomsJsonHash,
+    roomsVersion: row.roomsVersion != null ? row.roomsVersion : row.version,
+    legacyFallback: !!row.legacyFallback,
+    legacyFallbackReason: row.legacyFallbackReason || ''
+  }
+}
+
 function requestActor(req, body = {}) {
   return String(
     (req.authUser && req.authUser.id) || body.actorId || body.actor_id || 'anonymous'
@@ -1997,6 +2012,7 @@ async function handleApi(req, res) {
     sendJson(res, 200, {
       ...mapMeta(roomKey, obj, row),
       ...preview,
+      ...treeAuthorityFields(row),
       ...publicAccess(req.roomAccess || (await attachRoomAccess(req, roomKey)))
     })
     setImmediate(() => {

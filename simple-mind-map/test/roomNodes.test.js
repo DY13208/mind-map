@@ -105,8 +105,14 @@ function testCanonicalAndAuthority() {
   const table = { nodes: canonical.nodes, version: 3, count: 2 }
   const picked = pickAuthoritativeNodes({ root: node('root', 'stale') }, table, 3)
   assert.strictEqual(picked.source, 'table')
-  const staleTable = pickAuthoritativeNodes(obj, { ...table, version: 1 }, 3)
-  assert.strictEqual(staleTable.source, 'json')
+  const staleTable = pickAuthoritativeNodes(obj, { ...table, version: 1 }, 3, {
+    collabV2: true
+  })
+  assert.strictEqual(staleTable.source, 'table')
+  const v1Stale = pickAuthoritativeNodes(obj, { ...table, version: 1 }, 3, {
+    collabV2: false
+  })
+  assert.strictEqual(v1Stale.source, 'json')
 
   const report = auditRoomNodesState(obj, table, 3)
   assert.strictEqual(report.ok, true)

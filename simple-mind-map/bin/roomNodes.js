@@ -1,3 +1,4 @@
+const crypto = require('crypto')
 const {
   applyPositionsToTree,
   comparePositions,
@@ -156,6 +157,97 @@ function graphsEqual(a, b) {
   return structureSignature(a) === structureSignature(b)
 }
 
+function jsonNodeCount(json) {
+  return json && typeof json === 'object' ? Object.keys(json).length : 0
+}
+
+function isTableInitialized(table) {
+  return !!(table && table.nodes && Number(table.count || 0) > 0)
+}
+
+function collabV2Enabled(options = {}) {
+  if (options.collabV2 != null) return !!options.collabV2
+  try {
+    return require('./collabV2/flag').isCollabV2Enabled()
+  } catch (err) {
+    return true
+  }
+}
+
+let treeAuthorityFallbackHits = 0
+let lastTreeAuthorityFallback = null
+
+function getTreeAuthorityFallbackHits() {
+  return treeAuthorityFallbackHits
+}
+
+function resetTreeAuthorityFallbackHits() {
+  treeAuthorityFallbackHits = 0
+  lastTreeAuthorityFallback = null
+}
+
+function treeAuthorityFallbackForbidden(detail = {}) {
+  treeAuthorityFallbackHits += 1
+  const row = {
+    roomKey: detail.roomKey || '',
+    caller: detail.caller || 'unknown',
+    roomsVersion: detail.roomsVersion,
+    roomNodesCount: detail.roomNodesCount,
+    roomsJsonCount: detail.roomsJsonCount,
+    reason: detail.reason || 'json_fallback',
+    stack: detail.stack || new Error('V2_TREE_AUTHORITY_FALLBACK_FORBIDDEN').stack
+  }
+  lastTreeAuthorityFallback = row
+  if (typeof console !== 'undefined' && console.error) {
+    console.error('V2_TREE_AUTHORITY_FALLBACK_FORBIDDEN', row)
+  }
+  try {
+    if (typeof window !== 'undefined') {
+      window.__TREE_AUTHORITY_FALLBACK_HITS__ =
+        Number(window.__TREE_AUTHORITY_FALLBACK_HITS__ || 0) + 1
+    }
+  } catch (err) {
+    // ignore
+  }
+  return row
+}
+
+function canonicalTreeHash(obj) {
+  const graph = obj && typeof obj === 'object' ? obj : {}
+  const check = validateNodeGraph(graph)
+  const rows = (check.ok ? encodeNodeRows(graph) : []).map(row => ({
+    uid: row.uid,
+    parent_uid: row.parent_uid || null,
+    position: row.position || '',
+    text: row.data && row.data.text != null ? row.data.text : '',
+    data: row.data || {},
+    deleted: false
+  }))
+  rows.sort((a, b) => String(a.uid).localeCompare(String(b.uid)))
+  return crypto
+    .createHash('sha256')
+    .update(stableStringify(rows))
+    .digest('hex')
+}
+
+function describeTreeAuthority(json, table, roomVersion, options = {}) {
+  const picked = pickAuthoritativeNodes(json, table, roomVersion, options)
+  const jsonObj = json || {}
+  return {
+    treeSource: picked.source === 'table' ? 'room_nodes' : 'rooms.nodes',
+    roomNodesInitialized: isTableInitialized(table),
+    roomNodesCount: table ? Number(table.count || 0) : 0,
+    roomNodesHash: table && table.nodes ? canonicalTreeHash(table.nodes) : '',
+    roomsJsonCount: jsonNodeCount(jsonObj),
+    roomsJsonHash: jsonObj ? canonicalTreeHash(jsonObj) : '',
+    roomsVersion: Number(roomVersion || 0),
+    tableVersion: table ? Number(table.version || 0) : 0,
+    legacyFallback: picked.source !== 'table',
+    legacyFallbackReason: picked.reason || '',
+    migrate: !!picked.migrate
+  }
+}
+
 function nodesTableAuthorityEnabled() {
   const value = process.env.COLLAB_NODES_AUTHORITY
   return value !== 'json'
@@ -174,25 +266,79 @@ function canonicalizeNodes(obj) {
   }
 }
 
-function pickAuthoritativeNodes(json, table, roomVersion) {
+function pickAuthoritativeNodes(json, table, roomVersion, options = {}) {
   const jsonObj = json || {}
   const version = Number(roomVersion || 0)
-  if (nodesTableAuthorityEnabled() && table && table.nodes && table.count) {
+  const v2 = collabV2Enabled(options)
+  const initialized = isTableInitialized(table)
+  if (v2 && initialized) {
+    const check = validateNodeGraph(table.nodes)
+    if (!check.ok) {
+      treeAuthorityFallbackForbidden({
+        caller: options.caller || 'pickAuthoritativeNodes',
+        roomKey: options.roomKey,
+        roomsVersion: version,
+        roomNodesCount: table.count,
+        roomsJsonCount: jsonNodeCount(jsonObj),
+        reason: 'initialized_table_invalid'
+      })
+    }
+    return {
+      nodes: table.nodes,
+      source: 'table',
+      reason: 'v2_room_nodes_authority',
+      migrate: false,
+      initialized: true
+    }
+  }
+  if (v2 && !initialized && jsonNodeCount(jsonObj) > 0) {
+    return {
+      nodes: jsonObj,
+      source: 'json',
+      reason: 'legacy_uninitialized',
+      migrate: true,
+      initialized: false
+    }
+  }
+  if (!v2 && nodesTableAuthorityEnabled() && initialized) {
     const check = validateNodeGraph(table.nodes)
     if (check.ok && Number(table.version || 0) >= version) {
-      return { nodes: table.nodes, source: 'table' }
+      return { nodes: table.nodes, source: 'table', reason: 'v1_table_current' }
     }
   }
   if (
+    !v2 &&
     nodesReadPreferEnabled() &&
-    table &&
-    table.nodes &&
+    initialized &&
     Number(table.version || 0) >= version &&
     graphsEqual(table.nodes, jsonObj)
   ) {
-    return { nodes: table.nodes, source: 'table' }
+    return { nodes: table.nodes, source: 'table', reason: 'v1_table_equal' }
   }
-  return { nodes: jsonObj, source: 'json' }
+  if (v2 && initialized) {
+    treeAuthorityFallbackForbidden({
+      caller: options.caller || 'pickAuthoritativeNodes',
+      roomKey: options.roomKey,
+      roomsVersion: version,
+      roomNodesCount: table.count,
+      roomsJsonCount: jsonNodeCount(jsonObj),
+      reason: 'unreachable_json_fallback'
+    })
+    return {
+      nodes: table.nodes,
+      source: 'table',
+      reason: 'blocked_json_fallback',
+      migrate: false,
+      initialized: true
+    }
+  }
+  return {
+    nodes: jsonObj,
+    source: 'json',
+    reason: initialized ? 'v1_table_stale' : 'empty_or_legacy',
+    migrate: false,
+    initialized
+  }
 }
 
 function auditRoomNodesState(json, table, roomVersion) {
@@ -214,6 +360,7 @@ function auditRoomNodesState(json, table, roomVersion) {
       tableVersion >= version,
     equal,
     source: picked.source,
+    reason: picked.reason,
     roomVersion: version,
     json: {
       valid: jsonCheck.ok,
@@ -720,5 +867,11 @@ module.exports = {
   resolveRoomRef,
   listDeletedNodeUids,
   purgeDeletedNodes,
-  migrateRoomNodesFromJson
+  migrateRoomNodesFromJson,
+  canonicalTreeHash,
+  describeTreeAuthority,
+  isTableInitialized,
+  treeAuthorityFallbackForbidden,
+  getTreeAuthorityFallbackHits,
+  resetTreeAuthorityFallbackHits
 }

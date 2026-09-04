@@ -22,6 +22,7 @@ class Drag extends Base {
 
   //  复位
   reset() {
+    this.removeCloneNode()
     // 是否正在拖拽中
     this.isDragging = false
     // 鼠标按下的节点
@@ -142,7 +143,10 @@ class Drag extends Base {
       node.showChildren()
       node.endDrag()
     })
-    this.removeCloneNode()
+    const draggedUids = (this.beingDragNodeList || [])
+      .map(node => node && node.getData && node.getData('uid'))
+      .filter(Boolean)
+    const hadClone = !!this.clone
     let overlapNodeUid = this.overlapNode ? this.overlapNode.getData('uid') : ''
     let prevNodeUid = this.prevNode ? this.prevNode.getData('uid') : ''
     let nextNodeUid = this.nextNode ? this.nextNode.getData('uid') : ''
@@ -158,6 +162,7 @@ class Drag extends Base {
         return
       }
     }
+    let didMove = false
     // 存在重叠子节点，则移动作为其子节点
     if (this.overlapNode) {
       this.removeNodeActive(this.overlapNode)
@@ -166,6 +171,7 @@ class Drag extends Base {
         this.beingDragNodeList,
         this.overlapNode
       )
+      didMove = true
     } else if (this.prevNode) {
       // 存在前一个相邻节点，作为其下一个兄弟节点
       this.removeNodeActive(this.prevNode)
@@ -174,6 +180,7 @@ class Drag extends Base {
         this.beingDragNodeList,
         this.prevNode
       )
+      didMove = true
     } else if (this.nextNode) {
       // 存在下一个相邻节点，作为其前一个兄弟节点
       this.removeNodeActive(this.nextNode)
@@ -182,8 +189,9 @@ class Drag extends Base {
         this.beingDragNodeList,
         this.nextNode
       )
+      didMove = true
     } else if (
-      this.clone &&
+      hadClone &&
       enableFreeDrag &&
       this.beingDragNodeList.length === 1
     ) {
@@ -206,6 +214,19 @@ class Drag extends Base {
         y
       )
       this.mindMap.render()
+    }
+    this.removeCloneNode()
+    if (didMove && draggedUids.length) {
+      const renderer = this.mindMap.renderer
+      draggedUids.forEach(uid => {
+        const live =
+          renderer && typeof renderer.findNodeByUid === 'function'
+            ? renderer.findNodeByUid(uid)
+            : null
+        if (live && typeof renderer.setNodeActive === 'function') {
+          renderer.setNodeActive(live, true)
+        }
+      })
     }
     if (this.isDragging) {
       this.mindMap.emit('node_dragend', {
@@ -393,8 +414,8 @@ class Drag extends Base {
 
   // 移除额外创建的连线
   removeExtraLines() {
-    this.placeHolderExtraLines.forEach(item => {
-      item.remove()
+    ;(this.placeHolderExtraLines || []).forEach(item => {
+      if (item && typeof item.remove === 'function') item.remove()
     })
     this.placeHolderExtraLines = []
   }

@@ -20,9 +20,14 @@ const {
   resolveRoomRef,
   listDeletedNodeUids,
   purgeDeletedNodes,
-  validateNodeGraph
+  validateNodeGraph,
+  isTableInitialized,
+  describeTreeAuthority,
+  treeAuthorityFallbackForbidden,
+  canonicalTreeHash,
+  migrateRoomNodesFromJson
 } = require('./roomNodes')
-const mindDoc = require('./mindDoc')
+const { isCollabV2Enabled, isCollabV2Trace } = require('./collabV2/flag')
 
 const pool = new Pool({
   host: process.env.PGHOST,
@@ -581,13 +586,29 @@ async function upsertRoom(roomKey, title, options = {}) {
     const row = res.rows[0]
     if (nodes) {
       const snapshot = snapshotNodesForStorage(nodes)
-      await writeRoomNodeRows(
-        client,
-        roomKey,
-        snapshot,
-        Number((row && row.version) || 0)
-      )
-      if (nodesTableAuthorityEnabled() && snapshot !== nodes) {
+      const existingTable = await readRoomNodes(client, roomKey)
+      const overwriteTable =
+        !isCollabV2Enabled() ||
+        !isTableInitialized(existingTable) ||
+        options.allowFullTree === true
+      if (overwriteTable) {
+        await writeRoomNodeRows(
+          client,
+          roomKey,
+          snapshot,
+          Number((row && row.version) || 0)
+        )
+      } else if (isCollabV2Enabled() && isTableInitialized(existingTable)) {
+        treeAuthorityFallbackForbidden({
+          caller: 'upsertRoom',
+          roomKey,
+          roomsVersion: Number((row && row.version) || 0),
+          roomNodesCount: existingTable.count,
+          roomsJsonCount: Object.keys(snapshot || {}).length,
+          reason: 'json_overwrite_blocked'
+        })
+      }
+      if (nodesTableAuthorityEnabled() && overwriteTable && snapshot !== nodes) {
         await client.query(
           `update rooms set nodes = $2::jsonb where room_key = $1`,
           [roomKey, JSON.stringify(snapshot)]
@@ -782,14 +803,22 @@ async function loadPersistedPayload(roomKey) {
   )
   const json = nodesFromJson(res.rows[0] && res.rows[0].nodes)
   const version = Number((res.rows[0] && res.rows[0].version) || 0)
-  const fromTable = await nodesFromTableIfCurrent(roomKey, json, version)
-  if (fromTable) return { type: 'nodes', nodes: fromTable }
+  const table = await readRoomNodes(pool, roomKey)
+  const picked = pickAuthoritativeNodes(json, table, version, {
+    caller: 'loadPersistedPayload',
+    roomKey,
+    collabV2: isCollabV2Enabled()
+  })
+  if (picked.source === 'table' || (isCollabV2Enabled() && isTableInitialized(table))) {
+    return { type: 'nodes', nodes: table.nodes || picked.nodes }
+  }
+  if (picked.migrate && json && nodesDualWriteEnabled()) {
+    writeRoomNodeRows(pool, roomKey, json, version).catch(err => {
+      console.error('[room_nodes] legacy migrate failed', roomKey, err.message)
+    })
+    return { type: 'nodes', nodes: json }
+  }
   if (json) {
-    if (nodesDualWriteEnabled()) {
-      writeRoomNodeRows(pool, roomKey, json, version).catch(err => {
-        console.error('[room_nodes] backfill failed', roomKey, err.message)
-      })
-    }
     return { type: 'nodes', nodes: json }
   }
   const buf = await getYjsBuffer(roomKey)
@@ -883,17 +912,12 @@ async function getRoom(roomKey) {
 async function nodesFromTableIfCurrent(roomKey, json, version) {
   try {
     const table = await readRoomNodes(pool, roomKey)
-    const picked = pickAuthoritativeNodes(json, table, version)
+    const picked = pickAuthoritativeNodes(json, table, version, {
+      caller: 'nodesFromTableIfCurrent',
+      roomKey,
+      collabV2: isCollabV2Enabled()
+    })
     if (picked.source === 'table') return picked.nodes
-    if (
-      nodesReadPreferEnabled() &&
-      table.nodes &&
-      table.count &&
-      Number(table.version || 0) >= Number(version || 0) &&
-      graphsEqual(table.nodes, json || {})
-    ) {
-      return table.nodes
-    }
     return null
   } catch (err) {
     console.error('[room_nodes] read failed', roomKey, err.message)
@@ -933,7 +957,27 @@ async function repairRoomNodes(roomKey) {
   const snapshot = await getRoomSnapshot(roomKey)
   if (!snapshot) return null
   const table = await readRoomNodes(pool, roomKey)
-  const picked = pickAuthoritativeNodes(snapshot.nodes || {}, table, snapshot.version)
+  if (isCollabV2Enabled() && isTableInitialized(table)) {
+    if (nodesDualWriteEnabled() && table.nodes) {
+      await pool.query(
+        `update rooms set nodes = $2::jsonb, updated_at = now() where room_key = $1`,
+        [roomKey, JSON.stringify(table.nodes)]
+      )
+    }
+    const after = await auditRoomNodes(roomKey)
+    return {
+      repaired: true,
+      ok: !!(after && after.source === 'table'),
+      source: 'table',
+      nodeCount: table.count,
+      report: after
+    }
+  }
+  const picked = pickAuthoritativeNodes(snapshot.nodes || {}, table, snapshot.version, {
+    caller: 'repairRoomNodes',
+    roomKey,
+    collabV2: isCollabV2Enabled()
+  })
   const check = validateNodeGraph(picked.nodes || {})
   if (!check.ok) {
     return {
@@ -1192,7 +1236,7 @@ async function getRoomRef(roomKey, uid) {
 
 async function getRoomSnapshot(roomKey) {
   const res = await pool.query(
-    `select room_key, title, nodes, version, updated_at
+    `select room_key, title, nodes, version, updated_at, metadata
      from rooms
      where room_key = $1`,
     [roomKey]
@@ -1205,10 +1249,83 @@ async function getRoomSnapshot(roomKey) {
     version,
     updated_at: row.updated_at
   })
-  const fromTable = await nodesFromTableIfCurrent(roomKey, json, version)
-  if (!fromTable && json && nodesDualWriteEnabled()) {
-    writeRoomNodeRows(pool, roomKey, json, version).catch(err => {
-      console.error('[room_nodes] backfill failed', roomKey, err.message)
+  const table = await readRoomNodes(pool, roomKey)
+  const picked = pickAuthoritativeNodes(json, table, version, {
+    caller: 'getRoomSnapshot',
+    roomKey,
+    collabV2: isCollabV2Enabled()
+  })
+  const desc = describeTreeAuthority(json, table, version, {
+    caller: 'getRoomSnapshot',
+    roomKey,
+    collabV2: isCollabV2Enabled()
+  })
+  if (picked.migrate && json && nodesDualWriteEnabled()) {
+    try {
+      await migrateRoomNodesFromJson(pool, roomKey, json, version)
+      const migrated = await readRoomNodes(pool, roomKey)
+      if (isTableInitialized(migrated)) {
+        const migratedDesc = describeTreeAuthority(json, migrated, version, {
+          caller: 'getRoomSnapshot.migrate',
+          roomKey,
+          collabV2: true
+        })
+        if (isCollabV2Trace()) {
+          console.log('REFRESH_TREE_SOURCE', {
+            roomKey,
+            source: 'room_nodes',
+            roomsVersion: version,
+            roomNodesCount: migratedDesc.roomNodesCount,
+            roomsJsonCount: migratedDesc.roomsJsonCount,
+            roomNodesHash: migratedDesc.roomNodesHash,
+            roomsJsonHash: migratedDesc.roomsJsonHash,
+            reason: 'legacy_migrated_once'
+          })
+        }
+        return {
+          room_key: row.room_key,
+          title: row.title,
+          version,
+          updated_at: row.updated_at,
+          metadata: row.metadata || {},
+          nodes: migrated.nodes,
+          treeSource: 'room_nodes',
+          ...migratedDesc,
+          legacyFallback: false,
+          legacyFallbackReason: ''
+        }
+      }
+    } catch (err) {
+      console.error('[room_nodes] legacy migrate failed', roomKey, err.message)
+    }
+  }
+  if (
+    isCollabV2Enabled() &&
+    isTableInitialized(table) &&
+    picked.source !== 'table'
+  ) {
+    treeAuthorityFallbackForbidden({
+      caller: 'getRoomSnapshot',
+      roomKey,
+      roomsVersion: version,
+      roomNodesCount: table.count,
+      roomsJsonCount: json ? Object.keys(json).length : 0,
+      reason: picked.reason || 'json_fallback'
+    })
+  }
+  const useTable = picked.source === 'table' || (isCollabV2Enabled() && isTableInitialized(table))
+  const nodes = useTable ? table.nodes : picked.nodes
+  const treeSource = useTable ? 'room_nodes' : 'rooms.nodes'
+  if (isCollabV2Trace() || process.env.NODE_ENV !== 'production') {
+    console.log('REFRESH_TREE_SOURCE', {
+      roomKey,
+      source: treeSource,
+      roomsVersion: version,
+      roomNodesCount: desc.roomNodesCount,
+      roomsJsonCount: desc.roomsJsonCount,
+      roomNodesHash: desc.roomNodesHash,
+      roomsJsonHash: desc.roomsJsonHash,
+      reason: picked.reason
     })
   }
   return {
@@ -1216,7 +1333,13 @@ async function getRoomSnapshot(roomKey) {
     title: row.title,
     version,
     updated_at: row.updated_at,
-    nodes: fromTable || json
+    metadata: row.metadata || {},
+    nodes,
+    treeSource,
+    ...desc,
+    treeSource,
+    legacyFallback: treeSource !== 'room_nodes',
+    legacyFallbackReason: treeSource === 'room_nodes' ? '' : picked.reason
   }
 }
 
@@ -1713,7 +1836,11 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
   }
   const json = nodesFromJson(room.nodes) || {}
   const table = await readRoomNodes(client, roomKey)
-  const picked = pickAuthoritativeNodes(json, table, currentVersion)
+  const picked = pickAuthoritativeNodes(json, table, currentVersion, {
+    caller: 'commitRoomOperationOnce',
+    roomKey,
+    collabV2: isCollabV2Enabled()
+  })
   const allowRestore =
     command.type === 'node.restore' ||
     command.type === 'operation.undo' ||

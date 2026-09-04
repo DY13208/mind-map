@@ -31,12 +31,14 @@ import { createCollaborationStore } from '../utils/collaborationStore'
 import mapRefUtil from '../utils/mapRef'
 import collabInsertCollect from '../utils/collabInsertCollect'
 import collabGeneralization from '../utils/collabGeneralization'
+import collabMove from '../utils/collabMove'
 import {
   collabTrace,
   createTraceId,
   setCollabTraceSnapshotProvider,
   undoTrace,
-  undoFullTreeForbidden
+  undoFullTreeForbidden,
+  moveFullTreeForbidden
 } from '../utils/collabTrace'
 
 function collapseDeepNodes(root, keepDepth = 2) {
@@ -400,6 +402,10 @@ class Cooperate {
     this._v2UndoAllowReplace = false
     this._v2HistoryBaselined = false
     this._undoFullTreeHits = 0
+    this._v2MoveActive = false
+    this._v2MoveAllowReplace = false
+    this._moveFullTreeHits = 0
+    this.pendingMoveCommand = null
     this._pasteTraceId = ''
     setCollabTraceSnapshotProvider(() => this.persistTraceSnapshot())
     this.httpRoomKey = ''
@@ -1057,6 +1063,10 @@ class Cooperate {
       undoFullTreeForbidden('applyRemoteTree')
       return
     }
+    if (this._v2MoveActive && !this._v2MoveAllowReplace) {
+      this.markMoveFullTreeForbidden('applyRemoteTree')
+      return
+    }
     if (this.isApplyingRemote) {
       this.pendingRemoteTree = res
       return
@@ -1210,7 +1220,10 @@ class Cooperate {
         const settling =
           this.httpSettlingAfterReplace || Date.now() < this.suppressLocalUntil
         if (settling) {
-          if (INSERT_COMMANDS[name] && this.collabV2Adapter) {
+          if (
+            (INSERT_COMMANDS[name] || MOVE_COMMANDS[name]) &&
+            this.collabV2Adapter
+          ) {
             this.onHttpCommand(name, Array.prototype.slice.call(arguments, 1))
           } else if (INSERT_COMMANDS[name] || MOVE_COMMANDS[name]) {
             this.scheduleHttpStructureSync(80)
@@ -1227,7 +1240,10 @@ class Cooperate {
           return
         }
         if (STRUCTURE_COMMANDS[name] && !this.httpHydrating) {
-          if (this.collabV2Adapter && INSERT_COMMANDS[name]) {
+          if (
+            this.collabV2Adapter &&
+            (INSERT_COMMANDS[name] || MOVE_COMMANDS[name])
+          ) {
             this.onHttpCommand(name, Array.prototype.slice.call(arguments, 1))
           } else {
             this.scheduleHttpStructureSync(80)
@@ -1760,6 +1776,10 @@ class Cooperate {
         undoFullTreeForbidden('applyV2RemoteOperation.map.replaced')
         return false
       }
+      if (this._v2MoveActive && !this._v2MoveAllowReplace) {
+        this.markMoveFullTreeForbidden('applyV2RemoteOperation.map.replaced')
+        return false
+      }
       return this.recoverHttpCollab(op.serverRevision || this.lastAppliedVersion)
     }
     const uid = payload.uid
@@ -1779,8 +1799,13 @@ class Cooperate {
         return true
       }
       if (meta.deferFallback) return false
-    } else if (type === 'node.moved' || type === 'node.reordered' || type === 'node.move') {
-      const moved = this.applyV2PayloadMove(payload)
+    } else if (
+      type === 'node.moved' ||
+      type === 'node.reordered' ||
+      type === 'node.move' ||
+      type === 'node.reorder'
+    ) {
+      const moved = await this.applyV2PayloadMove(payload)
       v2Trace('remote.apply.move', { uid, ok: moved, parent: payloadParentUid(payload) })
       if (moved) {
         this.notifySearchInvalidate()
@@ -1817,7 +1842,9 @@ class Cooperate {
                     ? 'node.deleted'
                     : inner.type === 'node.move'
                       ? 'node.moved'
-                      : inner.type,
+                      : inner.type === 'node.reorder'
+                        ? 'node.reordered'
+                        : inner.type,
             payload: inner.payload || {}
           },
           serverRevision: op.serverRevision
@@ -1943,45 +1970,185 @@ class Cooperate {
     return true
   }
 
-  applyV2PayloadMove(payload = {}) {
+  markMoveFullTreeForbidden(reason) {
+    this._moveFullTreeHits = Number(this._moveFullTreeHits || 0) + 1
+    moveFullTreeForbidden(reason, {
+      hits: this._moveFullTreeHits
+    })
+  }
+
+  cleanupDragArtifacts() {
+    const drag = this.mindMap && this.mindMap.drag
+    if (drag && typeof drag.removeCloneNode === 'function') {
+      drag.removeCloneNode()
+    }
+  }
+
+  snapshotActiveUids() {
+    const renderer = this.mindMap && this.mindMap.renderer
+    return ((renderer && renderer.activeNodeList) || [])
+      .map(node => node && node.getData && node.getData('uid'))
+      .filter(Boolean)
+  }
+
+  restoreActiveUids(uids = []) {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!renderer || typeof renderer.findNodeByUid !== 'function') return
+    if (typeof renderer.clearActiveNodeList === 'function') {
+      renderer.clearActiveNodeList()
+    }
+    uids.forEach(uid => {
+      const node = renderer.findNodeByUid(uid)
+      if (node && typeof renderer.setNodeActive === 'function') {
+        renderer.setNodeActive(node, true)
+      }
+    })
+  }
+
+  nodeDataHasChild(parent, uid) {
+    const kids = (parent && parent.nodeData && parent.nodeData.children) || []
+    return kids.some(child => child && child.data && child.data.uid === uid)
+  }
+
+  applyNativeMoveCommand(node, nextParent, plan) {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!renderer || !node || !nextParent || !plan) return false
+    if (plan.command === 'MOVE_NODE_TO' && typeof renderer.moveNodeTo === 'function') {
+      renderer.moveNodeTo(node, nextParent)
+      node.parent = nextParent
+      return true
+    }
+    const anchor =
+      plan.anchorUid && typeof renderer.findNodeByUid === 'function'
+        ? renderer.findNodeByUid(plan.anchorUid)
+        : null
+    if (anchor && plan.command === 'INSERT_AFTER' && typeof renderer.insertAfter === 'function') {
+      renderer.insertAfter(node, anchor)
+      node.parent = nextParent
+      return true
+    }
+    if (anchor && plan.command === 'INSERT_BEFORE' && typeof renderer.insertBefore === 'function') {
+      renderer.insertBefore(node, anchor)
+      node.parent = nextParent
+      return true
+    }
+    return false
+  }
+
+  applyMoveNodeData(node, nextParent, index) {
+    const uid = node.getData && node.getData('uid')
+    const oldParent = node.parent
+    if (oldParent && oldParent !== nextParent) {
+      removeFromParentNodeData(node)
+    }
+    if (!nextParent.nodeData.children) nextParent.nodeData.children = []
+    const kids = nextParent.nodeData.children
+    const from = kids.findIndex(child => child && child.data && child.data.uid === uid)
+    if (from >= 0) kids.splice(from, 1)
+    const slot = Number.isInteger(Number(index))
+      ? Math.max(0, Math.min(Number(index), kids.length))
+      : kids.length
+    kids.splice(slot, 0, node.nodeData)
+    node.parent = nextParent
+    if (oldParent && oldParent !== nextParent && Array.isArray(oldParent.children)) {
+      oldParent.children = oldParent.children.filter(item => item !== node)
+    }
+    if (Array.isArray(nextParent.children) && !nextParent.children.includes(node)) {
+      const liveSlot = Math.max(0, Math.min(slot, nextParent.children.length))
+      nextParent.children.splice(liveSlot, 0, node)
+    }
+  }
+
+  waitForMoveRender() {
+    return new Promise(resolve => {
+      const mm = this.mindMap
+      if (!mm) return resolve()
+      let settled = false
+      const done = () => {
+        if (settled) return
+        settled = true
+        if (typeof mm.off === 'function') mm.off('node_tree_render_end', done)
+        resolve()
+      }
+      if (typeof mm.once === 'function') mm.once('node_tree_render_end', done)
+      else if (typeof mm.on === 'function') mm.on('node_tree_render_end', done)
+      if (typeof mm.render === 'function') mm.render()
+      setTimeout(done, 120)
+    })
+  }
+
+  async applyV2PayloadMove(payload = {}) {
     const uid = payload.uid
     const parentUid = payloadParentUid(payload)
     const renderer = this.mindMap && this.mindMap.renderer
     if (!uid || !renderer || typeof renderer.findNodeByUid !== 'function') return false
     const node = renderer.findNodeByUid(uid)
     if (!node || node.isRoot) return false
-    const nextParent = parentUid ? renderer.findNodeByUid(parentUid) : node.parent
+    if (this.isTombstonedUid && this.isTombstonedUid(uid)) {
+      v2Trace('remote.apply.move.skip-tombstone', { uid })
+      return true
+    }
+    let nextParent = parentUid ? renderer.findNodeByUid(parentUid) : node.parent
     if (!nextParent) return false
-    const oldParent = node.parent
+    if (collabMove.isCycleMove(node, parentUid || (nextParent.getData && nextParent.getData('uid')))) {
+      v2Trace('remote.apply.move.cycle', { uid, parentUid })
+      return true
+    }
     this.isApplyingRemote = true
+    this._v2MoveActive = true
     this.mindMap.command.pause()
+    let plan = null
     try {
-      if (oldParent && oldParent !== nextParent) {
-        removeFromParentNodeData(node)
-        if (!nextParent.nodeData.children) nextParent.nodeData.children = []
-        const exists = nextParent.nodeData.children.some(
-          child => child && child.data && child.data.uid === uid
-        )
-        if (!exists) {
-          const index = Number(payload.index)
-          if (Number.isInteger(index) && index >= 0 && index <= nextParent.nodeData.children.length) {
-            nextParent.nodeData.children.splice(index, 0, node.nodeData)
-          } else {
-            nextParent.nodeData.children.push(node.nodeData)
-          }
+      if (
+        typeof this.hydrateLazyChildren === 'function' &&
+        nextParent.getData &&
+        Number(nextParent.getData('childCount') || 0) >
+          ((nextParent.nodeData && nextParent.nodeData.children) || []).length
+      ) {
+        try {
+          await this.hydrateLazyChildren(nextParent)
+        } catch (err) {
+          v2Trace('remote.apply.move.hydrate.err', {
+            uid,
+            parentUid,
+            message: err && err.message
+          })
         }
-      } else if (oldParent && oldParent === nextParent && payload.index != null) {
-        const kids = oldParent.nodeData.children || []
-        const from = kids.findIndex(child => child && child.data && child.data.uid === uid)
-        const to = Number(payload.index)
-        if (from >= 0 && Number.isInteger(to) && from !== to) {
-          const [item] = kids.splice(from, 1)
-          kids.splice(Math.max(0, Math.min(to, kids.length)), 0, item)
+        nextParent = renderer.findNodeByUid(parentUid) || nextParent
+      }
+      const oldParent = node.parent
+      const oldParentUid = oldParent && oldParent.getData && oldParent.getData('uid')
+      const activeUids = this.snapshotActiveUids()
+      const plan = collabMove.planNativeMove({
+        uid,
+        parentUid: parentUid || (nextParent.getData && nextParent.getData('uid')),
+        index: payload.index,
+        parentKids: (nextParent.nodeData && nextParent.nodeData.children) || [],
+        oldParentUid
+      })
+      const usedNative = this.applyNativeMoveCommand(node, nextParent, plan)
+      if (!usedNative || !this.nodeDataHasChild(nextParent, uid)) {
+        this.applyMoveNodeData(node, nextParent, payload.index)
+        if (typeof this.mindMap.render === 'function') this.mindMap.render()
+      }
+      const syncChildCount = parent => {
+        if (!parent || typeof parent.getData !== 'function') return
+        const liveKids = ((parent.nodeData && parent.nodeData.children) || []).length
+        if (typeof parent.setData === 'function') {
+          parent.setData({ childCount: liveKids })
         }
       }
-      if (oldParent && typeof oldParent.renderLine === 'function') oldParent.renderLine()
-      if (nextParent && typeof nextParent.renderLine === 'function') nextParent.renderLine()
-      this.mindMap.render()
+      syncChildCount(oldParent)
+      syncChildCount(nextParent)
+      this.cleanupDragArtifacts()
+      await this.waitForMoveRender()
+      if (oldParent && typeof oldParent.renderLine === 'function') {
+        oldParent.renderLine(true)
+      }
+      if (nextParent && typeof nextParent.renderLine === 'function') {
+        nextParent.renderLine(true)
+      }
+      this.restoreActiveUids(activeUids)
     } catch (err) {
       v2Trace('remote.apply.move.err', { uid, message: err && err.message })
       return false
@@ -1993,11 +2160,20 @@ class Cooperate {
       }
       this.suppressLocalUntil = Date.now() + 250
       this.isApplyingRemote = false
+      this._v2MoveActive = false
     }
     const live = renderer.findNodeByUid(uid)
-    const liveParent = live && live.parent && live.parent.getData && live.parent.getData('uid')
-    v2Trace('remote.render.move', { uid, parent: liveParent })
-    return !!(live && (!parentUid || liveParent === parentUid))
+    const liveParent =
+      live && live.parent && live.parent.getData && live.parent.getData('uid')
+    const dataOk = this.nodeDataHasChild(nextParent, uid)
+    v2Trace('remote.render.move', {
+      uid,
+      parent: liveParent,
+      kind: plan && plan.kind,
+      command: plan && plan.command,
+      dataOk
+    })
+    return !!(dataOk || (live && (!parentUid || liveParent === parentUid)))
   }
 
   applyV2PayloadDelete(payload = {}) {
@@ -2251,6 +2427,27 @@ class Cooperate {
     this.collabStore.setStatus('live')
     this.wrapHttpMutators(config)
     this.wrapSearchReplace()
+    this.publishTreeAuthorityState(config)
+  }
+
+  publishTreeAuthorityState(extra = {}) {
+    if (typeof window === 'undefined') return
+    const adapter = this.collabV2Adapter
+    const status = adapter && adapter.getStatus ? adapter.getStatus() : null
+    window.__TREE_AUTHORITY_STATE__ = {
+      roomKey: extra.roomKey || this.httpRoomKey || '',
+      treeSource: extra.treeSource || 'room_nodes',
+      roomNodesInitialized: extra.roomNodesInitialized !== false,
+      roomNodesCount: extra.roomNodesCount,
+      roomNodesHash: extra.roomNodesHash || '',
+      roomsJsonCount: extra.roomsJsonCount,
+      roomsJsonHash: extra.roomsJsonHash || '',
+      roomsVersion: extra.version || extra.roomsVersion || this.lastAppliedVersion || 0,
+      lastServerRevision:
+        (status && status.lastServerRevision) || extra.version || 0,
+      legacyFallback: !!extra.legacyFallback,
+      legacyFallbackReason: extra.legacyFallbackReason || ''
+    }
   }
 
   submitMapMeta(patch) {
@@ -2813,6 +3010,23 @@ class Cooperate {
   async persistHttpReplace(fullData, extra = {}) {
     if (!this.httpReplaceTree) {
       throw new Error('replaceTree not configured')
+    }
+    const allowed =
+      extra.allowFullTree === true ||
+      extra.source === 'import' ||
+      extra.source === 'restore' ||
+      extra.source === 'legacy-migrate'
+    if (this.collabV2Adapter && !allowed) {
+      const row = {
+        feature: extra.feature || 'persistHttpReplace',
+        caller: extra.caller || 'Cooperate.persistHttpReplace',
+        roomKey: this.httpRoomKey,
+        stack: new Error('COLLAB_V2_UNEXPECTED_FULL_TREE_MUTATION').stack
+      }
+      console.error('COLLAB_V2_UNEXPECTED_FULL_TREE_MUTATION', row)
+      const err = new Error('COLLAB_V2_UNEXPECTED_FULL_TREE_MUTATION')
+      err.code = 'UNEXPECTED_FULL_TREE_MUTATION'
+      throw err
     }
     if (this.httpReplaceInFlight) {
       const err = new Error('正在保存整图，请稍候再试')
@@ -3628,6 +3842,14 @@ class Cooperate {
 
   onBeforeExecCommand(name) {
     if (!this.httpCollabMode) return
+    const args = Array.prototype.slice.call(arguments, 1)
+    if (MOVE_COMMANDS[name] && name !== 'INSERT_PARENT_NODE') {
+      this.pendingMoveCommand = {
+        name,
+        args,
+        origins: collabMove.snapshotMoveOrigins(args)
+      }
+    }
     if (
       INSERT_COMMANDS[name] ||
       name === 'SET_NODE_TEXT' ||
@@ -4784,68 +5006,135 @@ class Cooperate {
   }
 
   collectMovesFromCommand(name, args = []) {
-    const nodes = []
-    const pushNode = node => {
-      if (!node || node.isRoot || node.isGeneralization) return
-      const uid = node.getData && node.getData('uid')
-      if (!uid) return
-      const parent =
-        node.parent && node.parent.getData && node.parent.getData('uid')
-      if (!parent) return
-      const kids =
-        (node.parent.nodeData && node.parent.nodeData.children) || []
-      const index = kids.findIndex(item => item && item.data && item.data.uid === uid)
-      nodes.push({
-        uid,
-        parent,
-        index: index < 0 ? 0 : index,
-        node
+    const fromArgs = collabMove.collectMovesAfterCommand(name, args)
+    if (fromArgs.length) {
+      v2Trace('local.move.collect', {
+        name,
+        count: fromArgs.length,
+        uids: fromArgs.map(item => item.uid),
+        parent: fromArgs[0] && fromArgs[0].parent,
+        index: fromArgs[0] && fromArgs[0].index,
+        source: 'command-args'
+      })
+      return fromArgs
+    }
+    const pending =
+      this.pendingMoveCommand && this.pendingMoveCommand.name === name
+        ? this.pendingMoveCommand.origins || []
+        : []
+    if (pending.length && name !== 'UP_NODE' && name !== 'DOWN_NODE' && name !== 'MOVE_UP_ONE_LEVEL') {
+      v2Trace('local.move.collect', {
+        name,
+        count: pending.length,
+        uids: pending.map(item => item.uid),
+        source: 'before-command'
+      })
+      return pending.map(item => {
+        const live = collabMove.snapshotMoveOrigins([item.node])[0]
+        return live || item
       })
     }
-    const first = args[0]
-    if (Array.isArray(first)) first.forEach(pushNode)
-    else if (first && typeof first.getData === 'function') pushNode(first)
-    if (!nodes.length) {
+    if (name === 'UP_NODE' || name === 'DOWN_NODE' || name === 'MOVE_UP_ONE_LEVEL') {
       const active =
         (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
-      active.forEach(pushNode)
+      const fromActive = collabMove.snapshotMoveOrigins([active])
+      v2Trace('local.move.collect', {
+        name,
+        count: fromActive.length,
+        uids: fromActive.map(item => item.uid),
+        source: 'active-fallback'
+      })
+      return fromActive
     }
-    v2Trace('local.move.collect', { name, count: nodes.length, uids: nodes.map(n => n.uid) })
-    return nodes
+    v2Trace('local.move.collect', { name, count: 0, uids: [], source: 'empty' })
+    return []
+  }
+
+  revertLocalMove(origin) {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!origin || !renderer || typeof renderer.findNodeByUid !== 'function') return
+    const node = renderer.findNodeByUid(origin.uid)
+    const parent = origin.parent ? renderer.findNodeByUid(origin.parent) : null
+    if (!node || !parent) return
+    this.isApplyingRemote = true
+    this._v2MoveActive = true
+    try {
+      this.applyMoveNodeData(node, parent, origin.index)
+      if (typeof this.mindMap.render === 'function') this.mindMap.render()
+    } finally {
+      this.isApplyingRemote = false
+      this._v2MoveActive = false
+    }
   }
 
   flushHttpMove(name, args = []) {
     if (!this.httpPatchNode) return Promise.resolve()
+    if (this.isApplyingRemote) {
+      v2Trace('local.move.skip', { name, reason: 'applying-remote' })
+      return Promise.resolve()
+    }
+    const origins = (this.pendingMoveCommand && this.pendingMoveCommand.origins) || []
+    const originByUid = new Map(origins.map(item => [item.uid, item]))
     const moves = this.collectMovesFromCommand(name, args)
+    this.pendingMoveCommand = null
     if (!moves.length) {
       v2Trace('local.move.skip', { name, reason: 'no-nodes' })
       return Promise.resolve()
     }
     const submitOne = item => {
+      const origin = originByUid.get(item.uid)
+      const kind =
+        origin && origin.parent === item.parent ? 'reorder' : 'move'
+      if (collabMove.isCycleMove(item.node, item.parent)) {
+        v2Trace('local.move.cycle', { uid: item.uid, parent: item.parent })
+        this.revertLocalMove(origin || item)
+        return Promise.resolve()
+      }
       v2Trace('local.move.submit', {
         uid: item.uid,
         parent: item.parent,
-        index: item.index
+        index: item.index,
+        kind,
+        oldParent: origin && origin.parent
       })
+      const payload = {
+        uid: item.uid,
+        parent: item.parent,
+        parentUid: item.parent,
+        newParentUid: item.parent,
+        index: item.index,
+        oldParentUid: origin && origin.parent,
+        oldIndex: origin && origin.index,
+        kind
+      }
       const send = this.collabV2Adapter
-        ? this.submitV2('node.move', {
-            uid: item.uid,
-            parent: item.parent,
-            index: item.index
-          })
+        ? this.submitV2('node.move', payload)
         : this.httpPatchNode(item.uid, {
             parent: item.parent,
             index: item.index
           })
-      return send.catch(err => {
-        if (isPermanentNodeError(err)) {
-          this.abandonGhostNodeByUid(item.uid, item.node)
-          this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
-          console.warn('[mind-map] dropped ghost node move', item.uid, err.message || err)
-        } else {
-          console.error('[mind-map] move node failed', err)
-        }
-      })
+      return send
+        .then(result => {
+          this.cleanupDragArtifacts()
+          return result
+        })
+        .catch(err => {
+          const code = String((err && err.code) || '')
+          if (code === 'CYCLE_REJECTED') {
+            this.revertLocalMove(origin)
+            return
+          }
+          if (isPermanentNodeError(err)) {
+            if (code === 'TARGET_DELETED' || code === 'NODE_DELETED') {
+              this.revertLocalMove(origin)
+            }
+            this.abandonGhostNodeByUid(item.uid, item.node)
+            this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
+            console.warn('[mind-map] dropped ghost node move', item.uid, err.message || err)
+          } else {
+            console.error('[mind-map] move node failed', err)
+          }
+        })
     }
     if (this.collabV2Adapter && moves.length > 1) {
       return this.submitV2('node.batch', {
@@ -4854,7 +5143,16 @@ class Cooperate {
           payload: {
             uid: item.uid,
             parent: item.parent,
-            index: item.index
+            parentUid: item.parent,
+            newParentUid: item.parent,
+            index: item.index,
+            oldParentUid: originByUid.get(item.uid) && originByUid.get(item.uid).parent,
+            oldIndex: originByUid.get(item.uid) && originByUid.get(item.uid).index,
+            kind:
+              originByUid.get(item.uid) &&
+              originByUid.get(item.uid).parent === item.parent
+                ? 'reorder'
+                : 'move'
           }
         }))
       }).catch(err => {
