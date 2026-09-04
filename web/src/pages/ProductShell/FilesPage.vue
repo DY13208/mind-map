@@ -13,6 +13,8 @@
       :sort.sync="sort"
       :view.sync="view"
       :show-create="mode === 'files' || mode === 'folder'"
+      :show-create-folder="mode === 'files'"
+      :hide-opened-sort="isRealFilesMode"
       @create-room="createRoom"
       @create-folder="createFolder"
     />
@@ -69,8 +71,9 @@
       >
         <RoomCard
           v-for="room in visibleRooms"
-          :key="room.id"
+          :key="room.roomKey || room.id"
           :room="room"
+          :allow-delete="false"
           @open="openRoom"
           @favorite="favorite"
           @rename="renameRoom"
@@ -83,6 +86,7 @@
       <RoomList
         v-if="mode !== 'trash' && view === 'list' && visibleRooms.length"
         :rooms="visibleRooms"
+        :allow-delete="false"
         @open="openRoom"
         @favorite="favorite"
         @rename="renameRoom"
@@ -91,6 +95,9 @@
         @history="historyRoom"
         @delete="deleteRoom"
       />
+      <div v-if="hasMore" class="pager">
+        <el-button size="small" :loading="busy" @click="loadMore">加载更多</el-button>
+      </div>
       <EmptyState
         v-if="!loading && !visibleRooms.length && !filteredFolders.length"
         :title="emptyTitle"
@@ -117,11 +124,16 @@
       :room="activeRoom"
       @changed="load"
     />
-    <HistoryPanel :visible.sync="historyVisible" :room="activeRoom" />
+    <HistoryPanel
+      :visible.sync="historyVisible"
+      :room="activeRoom"
+      @restored="load"
+    />
   </section>
 </template>
 
 <script>
+import { userMessageFromError } from '@/services/apiError'
 import roomService from '@/services/roomService'
 import folderService from '@/services/folderService'
 import EmptyState from './components/EmptyState.vue'
@@ -138,7 +150,7 @@ const copy = {
   files: ['我的脑图', '管理你的文件夹与脑图'],
   recent: ['最近', '快速回到最近打开的脑图'],
   favorites: ['收藏', '集中查看重要脑图'],
-  shared: ['与我共享', '角色仅展示，真实权限由主线 ACL 判定'],
+  shared: ['与我共享', '根据成员角色展示与你共享的脑图'],
   trash: ['回收站', '已删除内容将在这里暂存'],
   folder: ['文件夹', '查看文件夹中的脑图']
 }
@@ -184,10 +196,23 @@ export default {
       renameVisible: false,
       moveVisible: false,
       shareVisible: false,
-      historyVisible: false
+      historyVisible: false,
+      limit: 50,
+      offset: 0,
+      total: 0,
+      nextCursor: '',
+      searchTimer: null
     }
   },
   computed: {
+    isRealFilesMode() {
+      return this.mode === 'files' || this.mode === 'folder' || this.mode === 'shared'
+    },
+    hasMore() {
+      if (!this.isRealFilesMode) return false
+      if (this.nextCursor) return true
+      return this.rooms.length < Number(this.total || 0)
+    },
     folder() {
       return this.mode === 'folder'
         ? this.folders.find(item => item.id === this.$route.params.id)
@@ -204,6 +229,9 @@ export default {
     showFolders() {
       return this.mode === 'files'
     },
+    folderMap() {
+      return Object.fromEntries(this.folders.map(folder => [folder.id, folder]))
+    },
     filteredFolders() {
       const q = this.search.trim().toLowerCase()
       return this.showFolders && !this.roleFilter
@@ -214,22 +242,19 @@ export default {
     },
     visibleRooms() {
       const q = this.search.trim().toLowerCase()
-      return this.rooms
-        .filter(
-          room =>
-            (!this.roleFilter || room.role === this.roleFilter) &&
-            (!q ||
-              [room.title, room.owner.name, room.folderName].some(value =>
-                String(value)
-                  .toLowerCase()
-                  .includes(q)
-              ))
+      return this.rooms.filter(room => {
+        if (this.roleFilter && room.role !== String(this.roleFilter).toLowerCase()) {
+          return false
+        }
+        if (this.isRealFilesMode) return true
+        if (!q) return true
+        return [room.title, room.owner && room.owner.name, room.folderName].some(
+          value =>
+            String(value || '')
+              .toLowerCase()
+              .includes(q)
         )
-        .sort((a, b) =>
-          this.sort === 'title'
-            ? a.title.localeCompare(b.title, 'zh-CN')
-            : new Date(b[this.sort] || 0) - new Date(a[this.sort] || 0)
-        )
+      })
     },
     emptyTitle() {
       if (this.search || this.roleFilter) return '没有搜索结果'
@@ -255,6 +280,14 @@ export default {
   },
   watch: {
     '$route.fullPath': 'resetPage',
+    search() {
+      if (!this.isRealFilesMode) return
+      clearTimeout(this.searchTimer)
+      this.searchTimer = setTimeout(() => this.load({ reset: true }), 300)
+    },
+    sort() {
+      if (this.isRealFilesMode) this.load({ reset: true })
+    },
     view(value) {
       try {
         localStorage.setItem('product-shell-view', value)
@@ -274,40 +307,62 @@ export default {
       this.search = ''
       this.roleFilter = ''
       this.sort = this.mode === 'recent' ? 'lastOpenedAt' : 'updatedAt'
-      this.load()
+      this.offset = 0
+      this.nextCursor = ''
+      this.load({ reset: true })
     },
-    async load() {
+    async load(options = {}) {
+      const reset = options.reset !== false
       const request = ++this.requestId
       const mode = this.mode
       const folderId = this.$route.params.id
-      this.loading = true
+      if (reset) {
+        this.offset = 0
+        this.nextCursor = ''
+      }
+      this.loading = reset
       this.error = ''
       try {
+        const folders = await folderService.listFolders()
+        if (request !== this.requestId) return
+        this.folders = folders
+        if (
+          mode === 'folder' &&
+          !this.folders.some(folder => folder.id === folderId)
+        )
+          throw new Error('文件夹不存在或已删除')
         const filters = {
           favorite: mode === 'favorites',
           shared: mode === 'shared',
           trash: mode === 'trash',
-          recent: mode === 'recent'
+          recent: mode === 'recent',
+          foldersById: this.folderMap
         }
         if (mode === 'folder') filters.folderId = folderId
-        const [folders, rooms] = await Promise.all([
-          folderService.listFolders(),
-          roomService.listRooms(filters)
-        ])
+        if (this.isRealFilesMode) {
+          filters.q = this.search.trim()
+          filters.sort = this.sort === 'lastOpenedAt' ? 'updatedAt' : this.sort
+          filters.order = this.sort === 'title' ? 'asc' : 'desc'
+          filters.limit = this.limit
+          filters.offset = reset ? 0 : this.offset
+          if (!reset && this.nextCursor) filters.cursor = this.nextCursor
+        }
+        const rooms = await roomService.listRooms(filters)
         if (request !== this.requestId) return
-        if (
-          mode === 'folder' &&
-          !folders.some(folder => folder.id === folderId)
-        )
-          throw new Error('文件夹不存在或已删除')
-        this.folders = folders
-        this.rooms = rooms
+        const list = rooms.list || rooms
+        this.total = Number(rooms.total || list.length)
+        this.nextCursor = rooms.nextCursor || ''
+        this.offset = Number(rooms.offset || 0) + list.length
+        this.rooms = reset ? list : this.rooms.concat(list)
       } catch (error) {
         if (request === this.requestId)
-          this.error = error.message || '列表加载失败'
+          this.error = userMessageFromError(error)
       } finally {
         if (request === this.requestId) this.loading = false
       }
+    },
+    loadMore() {
+      return this.load({ reset: false })
     },
     async perform(action, message) {
       if (this.busy) return
@@ -317,7 +372,7 @@ export default {
         if (message) this.$message.success(message)
         await this.load()
       } catch (error) {
-        this.$message.error(error.message || '操作失败，请重试')
+        this.$message.error(userMessageFromError(error))
       } finally {
         this.busy = false
       }
@@ -326,44 +381,44 @@ export default {
       this.$router.push('/files/folder/' + folder.id)
     },
     async openRoom(room) {
-      const confirmed = await this.$confirm(
-        '此处是 Mock 元数据。将进入现有编辑器；示例 roomKey 不代表真实文件，编辑器仍按现有认证与协同流程处理。是否继续？',
-        '打开现有编辑器'
-      )
-        .then(() => true)
-        .catch(() => false)
-      if (!confirmed) return
       try {
-        await roomService.markOpened(room.id)
-        await this.$router.push({ path: '/', query: { room: room.roomKey } })
+        await this.$router.push({
+          path: '/',
+          query: { room: room.roomKey }
+        })
       } catch (error) {
-        this.$message.error(error.message)
+        this.$message.error(userMessageFromError(error))
       }
     },
     async createRoom() {
-      const result = await this.$prompt(
-        '请输入脑图名称（仅创建 Mock 元数据）',
-        '新建脑图',
-        {
-          inputValue: '未命名脑图',
-          inputValidator: value =>
-            (!!value && !!value.trim() && value.length <= 60) ||
-            '请输入 1 至 60 个字符'
-        }
-      ).catch(() => null)
-      if (result)
-        await this.perform(
-          () =>
-            roomService.createRoom(
-              result.value.trim(),
-              this.folder ? this.folder.id : null
-            ),
-          '脑图已创建（Mock）'
+      const result = await this.$prompt('请输入脑图名称', '新建脑图', {
+        inputValue: '未命名脑图',
+        inputValidator: value =>
+          (!!value && !!value.trim() && value.length <= 60) ||
+          '请输入 1 至 60 个字符'
+      }).catch(() => null)
+      if (!result) return
+      if (this.busy) return
+      this.busy = true
+      try {
+        const created = await roomService.createRoom(
+          result.value.trim(),
+          this.folder ? this.folder.id : null
         )
+        this.$message.success('脑图已创建')
+        await this.$router.push({
+          path: '/',
+          query: { room: created.roomKey }
+        })
+      } catch (error) {
+        this.$message.error(userMessageFromError(error))
+      } finally {
+        this.busy = false
+      }
     },
     async createFolder() {
       const result = await this.$prompt(
-        '当前采用一级文件夹，创建于根目录',
+        '当前仅支持一级文件夹，创建于根目录',
         '新建文件夹',
         {
           inputValidator: value =>
@@ -374,7 +429,7 @@ export default {
       if (result)
         await this.perform(
           () => folderService.createFolder(result.value.trim()),
-          '文件夹已创建（Mock）'
+          '文件夹已创建'
         )
     },
     renameRoom(room) {
@@ -392,13 +447,18 @@ export default {
         () =>
           this.renameKind === 'folder'
             ? folderService.renameFolder(this.activeItem.id, name)
-            : roomService.renameRoom(this.activeItem.id, name),
-        '重命名成功（Mock）'
+            : roomService.renameRoom(
+                this.activeItem.roomKey || this.activeItem.id,
+                name
+              ),
+        '重命名成功'
       )
     },
     async deleteFolder(folder) {
       const confirmed = await this.$confirm(
-        '删除文件夹「' + folder.name + '」？其中脑图将移到根目录。',
+        '删除文件夹「' +
+          folder.name +
+          '」？若其中还有脑图，需要先把脑图移出后再删除。',
         '删除文件夹'
       )
         .then(() => true)
@@ -406,7 +466,7 @@ export default {
       if (confirmed)
         await this.perform(
           () => folderService.deleteFolder(folder.id),
-          '文件夹已删除（Mock）'
+          '文件夹已删除'
         )
     },
     moveRoom(room) {
@@ -415,8 +475,12 @@ export default {
     },
     confirmMove(folderId) {
       return this.perform(
-        () => folderService.moveRoom(this.activeRoom.id, folderId),
-        '移动成功（Mock）'
+        () =>
+          roomService.moveRoom(
+            this.activeRoom.roomKey || this.activeRoom.id,
+            folderId
+          ),
+        '移动成功'
       )
     },
     shareRoom(room) {
@@ -429,22 +493,12 @@ export default {
     },
     favorite(room) {
       return this.perform(
-        () => roomService.toggleFavorite(room.id),
-        room.favorite ? '已取消收藏（Mock）' : '已收藏（Mock）'
+        () => roomService.toggleFavorite(room.roomKey || room.id),
+        room.favorite ? '已取消收藏（仅本机会话）' : '已收藏（仅本机会话）'
       )
     },
-    async deleteRoom(room) {
-      const confirmed = await this.$confirm(
-        '将「' + room.title + '」移入回收站？',
-        '删除脑图'
-      )
-        .then(() => true)
-        .catch(() => false)
-      if (confirmed)
-        await this.perform(
-          () => roomService.deleteRoom(room.id),
-          '已移入回收站（Mock）'
-        )
+    async deleteRoom() {
+      this.$message.warning('回收站尚未接入，暂不可删除真实脑图')
     },
     restore(room) {
       return this.perform(

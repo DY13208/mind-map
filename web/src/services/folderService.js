@@ -1,70 +1,56 @@
-import {
-  mockRequest,
-  mockStore,
-  makeId,
-  requiredItem,
-  validName
-} from './mockStore'
+import { productRequest } from './productHttp'
+import { userMessageFromError } from './apiError'
+import { C3_SERVICE_STATUS_MATRIX } from './serviceStatus'
+import { normalizeFolderDto } from './roomDto'
+import roomService from './roomService'
+
 export default {
-  listFolders: () =>
-    mockRequest(() =>
-      mockStore.folders.map(folder => ({
-        ...folder,
-        roomCount: mockStore.rooms.filter(
-          room => room.folderId === folder.id && !room.deletedAt
-        ).length
-      }))
-    ),
-  createFolder: name =>
-    mockRequest(() => {
-      const folder = {
-        id: makeId('folder'),
-        name: validName(name),
-        parentId: null,
-        roomCount: 0,
-        updatedAt: new Date().toISOString()
-      }
-      mockStore.folders.unshift(folder)
-      return folder
-    }),
-  renameFolder: (id, value) =>
-    mockRequest(() => {
-      const folder = requiredItem(mockStore.folders, id, '文件夹')
-      const name = validName(value)
-      Object.assign(folder, { name, updatedAt: new Date().toISOString() })
-      mockStore.rooms
-        .filter(room => room.folderId === id)
-        .forEach(room => {
-          room.folderName = name
-        })
-      return folder
-    }),
-  deleteFolder: id =>
-    mockRequest(() => {
-      requiredItem(mockStore.folders, id, '文件夹')
-      mockStore.rooms
-        .filter(room => room.folderId === id)
-        .forEach(room => {
-          room.folderId = null
-          room.folderName = '根目录'
-        })
-      mockStore.folders.splice(
-        mockStore.folders.findIndex(folder => folder.id === id),
-        1
-      )
-      return { ok: true }
-    }),
-  moveRoom: (roomId, folderId) =>
-    mockRequest(() => {
-      const room = requiredItem(mockStore.rooms, roomId, '脑图')
-      const folder = folderId
-        ? requiredItem(mockStore.folders, folderId, '文件夹')
-        : null
-      Object.assign(room, {
-        folderId: folderId || null,
-        folderName: folder ? folder.name : '根目录',
-        updatedAt: new Date().toISOString()
+  backendStatus: C3_SERVICE_STATUS_MATRIX.Folder,
+  listFolders: async () => {
+    try {
+      const data = await productRequest('/api/folders')
+      return (data.list || []).map(normalizeFolderDto)
+    } catch (error) {
+      error.message = userMessageFromError(error)
+      throw error
+    }
+  },
+  createFolder: async name => {
+    try {
+      const data = await productRequest('/api/folders', {
+        method: 'POST',
+        body: JSON.stringify({ name })
       })
-      return room
-    })
+      return normalizeFolderDto(data.folder || data)
+    } catch (error) {
+      error.message = userMessageFromError(error)
+      throw error
+    }
+  },
+  renameFolder: async (id, name) => {
+    try {
+      const data = await productRequest(
+        `/api/folders/${encodeURIComponent(id)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ name })
+        }
+      )
+      return normalizeFolderDto(data.folder || data)
+    } catch (error) {
+      error.message = userMessageFromError(error)
+      throw error
+    }
+  },
+  deleteFolder: async id => {
+    try {
+      return await productRequest(`/api/folders/${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      })
+    } catch (error) {
+      error.message = userMessageFromError(error)
+      throw error
+    }
+  },
+  moveRoom: (roomKey, folderId) => roomService.moveRoom(roomKey, folderId)
 }

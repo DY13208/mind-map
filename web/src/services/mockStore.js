@@ -44,7 +44,8 @@ export const mockStore = {
             : member.role
       }))
     ])
-  )
+  ),
+  favoriteKeys: new Set()
 }
 let sequence = 0
 let failure = ''

@@ -16,9 +16,14 @@
       :room="room"
       @changed="$emit('changed')"
     />
-    <HistoryPanel :visible.sync="historyVisible" :room="room" /></div
+    <HistoryPanel
+      :visible.sync="historyVisible"
+      :room="room"
+      @restored="$emit('changed')"
+    /></div
 ></template>
 <script>
+import { userMessageFromError } from '@/services/apiError'
 import roomService from '@/services/roomService'
 import folderService from '@/services/folderService'
 import RenameDialog from './RenameDialog.vue'
@@ -43,6 +48,9 @@ export default {
     busy: false
   }),
   methods: {
+    roomKey(room) {
+      return (room && (room.roomKey || room.id)) || ''
+    },
     async handle(action, room) {
       this.room = room
       if (action === 'rename') this.renameVisible = true
@@ -53,55 +61,49 @@ export default {
           this.folders = await folderService.listFolders()
           this.moveVisible = true
         } catch (error) {
-          this.$message.error(error.message)
+          this.$message.error(userMessageFromError(error))
         }
       }
       if (action === 'favorite')
-        await this.perform(() => roomService.toggleFavorite(room.id))
-      if (action === 'delete') {
-        const ok = await this.$confirm(
-          '将「' + room.title + '」移入回收站？',
-          '删除脑图'
+        await this.perform(() =>
+          roomService.toggleFavorite(this.roomKey(room)),
+          '收藏仅保存在本机会话'
         )
-          .then(() => true)
-          .catch(() => false)
-        if (ok) await this.perform(() => roomService.deleteRoom(room.id))
+      if (action === 'delete') {
+        this.$message.warning('回收站尚未接入，暂不可删除真实脑图')
       }
       if (action === 'open') {
-        const ok = await this.$confirm(
-          '将进入现有编辑器。Mock roomKey 不代表真实文件；编辑器仍使用现有认证与协同流程。',
-          '打开现有编辑器'
-        )
-          .then(() => true)
-          .catch(() => false)
-        if (ok) {
-          try {
-            await roomService.markOpened(room.id)
-            await this.$router.push({
-              path: '/',
-              query: { room: room.roomKey }
-            })
-          } catch (error) {
-            this.$message.error(error.message)
-          }
+        try {
+          await this.$router.push({
+            path: '/',
+            query: { room: this.roomKey(room) }
+          })
+        } catch (error) {
+          this.$message.error(userMessageFromError(error))
         }
       }
     },
     rename(name) {
-      return this.perform(() => roomService.renameRoom(this.room.id, name))
+      return this.perform(
+        () => roomService.renameRoom(this.roomKey(this.room), name),
+        '重命名成功'
+      )
     },
     move(id) {
-      return this.perform(() => folderService.moveRoom(this.room.id, id))
+      return this.perform(
+        () => roomService.moveRoom(this.roomKey(this.room), id),
+        '移动成功'
+      )
     },
-    async perform(action) {
+    async perform(action, message) {
       if (this.busy) return
       this.busy = true
       try {
         await action()
         this.$emit('changed')
-        this.$message.success('操作成功（Mock）')
+        if (message) this.$message.success(message)
       } catch (error) {
-        this.$message.error(error.message)
+        this.$message.error(userMessageFromError(error))
       } finally {
         this.busy = false
       }

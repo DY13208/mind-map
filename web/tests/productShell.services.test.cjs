@@ -1,4 +1,4 @@
-// Isolated Mock contract tests. No HTTP, database, browser storage or collaboration imports.
+// Mock-only domains. Real Files/Folder/History/Share use productShell.realApi.test.cjs.
 const assert = require('assert').strict
 const fs = require('fs')
 const path = require('path')
@@ -24,91 +24,45 @@ function load(filename) {
 }
 const service = name => load(path.join(root, 'services', name)).default
 const room = service('roomService')
-const folder = service('folderService')
-const history = service('historyService')
 const team = service('teamService')
-const share = service('shareService')
+const { C3_SERVICE_STATUS_MATRIX } = load(
+  path.join(root, 'services/serviceStatus')
+)
 const { mockControl, mockStore } = load(path.join(root, 'services/mockStore'))
 mockControl.setLatency(0)
 
 async function main() {
-  const initial = await room.listRooms()
-  assert.equal(initial.length, 4)
-  initial[0].title = 'not written back'
-  assert.notEqual((await room.getRoom(initial[0].id)).title, initial[0].title)
-  assert.equal((await room.listRooms({ favorite: true })).length, 2)
-  assert.equal((await room.listRooms({ shared: true })).length, 2)
-  assert.equal((await room.listRooms({ role: 'Viewer' })).length, 1)
-  assert.equal((await room.listRooms({ trash: true })).length, 1)
-  await assert.rejects(room.createRoom('   '))
-  await assert.rejects(room.getRoom('missing'))
-  const f = await folder.createFolder('验收文件夹')
-  const a = await room.createRoom('验收脑图 A', f.id)
-  const b = await room.createRoom('验收脑图 B')
-  assert.notEqual(a.id, b.id)
-  assert.equal((await room.listRooms({ folderId: f.id })).length, 1)
-  await folder.renameFolder(f.id, '验收文件夹二')
-  assert.equal((await room.getRoom(a.id)).folderName, '验收文件夹二')
-  await room.renameRoom(a.id, '已重命名')
-  assert.equal((await room.getRoom(a.id)).title, '已重命名')
-  await room.toggleFavorite(a.id)
-  assert.equal((await room.getRoom(a.id)).favorite, true)
-  await room.markOpened(a.id)
-  assert(
-    (await room.listRooms({ recent: true })).some(item => item.id === a.id)
-  )
-  await folder.moveRoom(b.id, f.id)
-  assert.equal(
-    (await folder.listFolders()).find(item => item.id === f.id).roomCount,
-    2
-  )
-  await assert.rejects(folder.moveRoom(a.id, 'missing'))
-  await room.deleteRoom(a.id)
-  assert(!(await room.listRooms()).some(item => item.id === a.id))
-  assert.equal(
-    (await folder.listFolders()).find(item => item.id === f.id).roomCount,
-    1
-  )
-  await room.restoreRoom(a.id)
-  await assert.rejects(room.permanentDelete(a.id))
-  await room.deleteRoom(a.id)
-  await room.permanentDelete(a.id)
-  await assert.rejects(room.getRoom(a.id))
-  await folder.deleteFolder(f.id)
-  assert.equal((await room.getRoom(b.id)).folderId, null)
-  const room1Members = await share.getMembers('growth-plan')
-  const room2Members = await share.getMembers('product-roadmap')
-  const added = await share.addMember('growth-plan', 'qa@example.test')
-  assert(
-    (await room.getRoom('growth-plan')).collaborators.some(
-      member => member.id === added.id
-    )
-  )
-  await assert.rejects(
-    share.addMember('growth-plan', 'invalid@example.test', 'Owner')
-  )
-  assert.equal(
-    (await share.getMembers('growth-plan')).length,
-    room1Members.length + 1
-  )
-  assert.deepEqual(await share.getMembers('product-roadmap'), room2Members)
-  await assert.rejects(share.addMember('growth-plan', 'qa@example.test'))
-  await share.updateMemberRole('growth-plan', added.id, 'Editor')
-  assert.equal(
-    (await share.getMembers('growth-plan')).find(item => item.id === added.id)
-      .role,
-    'Editor'
-  )
-  await share.removeMember('growth-plan', added.id)
-  assert(
-    !(await room.getRoom('growth-plan')).collaborators.some(
-      member => member.id === added.id
-    )
-  )
-  assert.equal(
-    (await share.getMembers('growth-plan')).length,
-    room1Members.length
-  )
+  assert.equal(C3_SERVICE_STATUS_MATRIX.Room, 'REAL')
+  assert.equal(C3_SERVICE_STATUS_MATRIX.Folder, 'REAL')
+  assert.equal(C3_SERVICE_STATUS_MATRIX.History, 'REAL')
+  assert.equal(C3_SERVICE_STATUS_MATRIX.Share, 'REAL')
+  assert.equal(C3_SERVICE_STATUS_MATRIX.Recent, 'MOCK_PENDING')
+  assert.equal(C3_SERVICE_STATUS_MATRIX.Favorites, 'MOCK_PENDING')
+  assert.equal(C3_SERVICE_STATUS_MATRIX.Trash, 'MOCK_PENDING')
+  assert.equal(C3_SERVICE_STATUS_MATRIX.Team, 'MOCK_PENDING')
+  assert.equal(room.backendStatus, 'REAL')
+  assert.equal(team.backendStatus, 'MOCK_PENDING')
+
+  const recent = await room.listRooms({ recent: true })
+  assert.ok(recent.list.length >= 1)
+  assert.ok(recent.list.every(item => item.lastOpenedAt))
+
+  const favorites = await room.listRooms({ favorite: true })
+  assert.ok(favorites.list.length >= 1)
+  assert.ok(favorites.list.every(item => item.favorite))
+
+  const trash = await room.listRooms({ trash: true })
+  assert.equal(trash.list.length, 1)
+
+  const mockId = mockStore.rooms.find(item => !item.deletedAt).id
+  await room.toggleFavorite(mockId)
+  await room.markOpened(mockId)
+  await room.deleteRoom(mockId)
+  assert.ok((await room.listRooms({ trash: true })).list.some(item => item.id === mockId))
+  await room.restoreRoom(mockId)
+
+  const spaces = await team.listSpaces()
+  assert.ok(spaces.length >= 1)
   const team2 = await team.listMembers('brand-center')
   await team.updateMemberRole('still-product', 'u2', 'Viewer')
   assert.deepEqual(await team.listMembers('brand-center'), team2)
@@ -116,29 +70,8 @@ async function main() {
   assert.equal((await team.listMembers('still-product')).length, 3)
   assert((await team.listFolders('still-product')).length > 0)
   await assert.rejects(team.getSpace('missing'))
-  const versions = await history.listVersions('growth-plan')
-  assert.equal(versions.length, 3)
-  assert.equal(
-    (await history.getVersion('growth-plan', versions[0].id)).version,
-    'V18'
-  )
-  await assert.rejects(history.getVersion('product-roadmap', versions[0].id))
-  const before = JSON.stringify(mockStore.rooms)
-  assert.equal(
-    (await history.restoreVersion('growth-plan', versions[0].id)).mock,
-    true
-  )
-  assert.equal(
-    JSON.stringify(mockStore.rooms),
-    before,
-    'Mock restore must never change real or mock document content'
-  )
-  mockControl.failNext('retry me')
-  await assert.rejects(room.listRooms(), /retry me/)
-  assert((await room.listRooms()).length > 0, 'retry succeeds')
-  console.log(
-    'Product shell service contracts passed; no collaboration/DB calls'
-  )
+
+  console.log('Product shell mock-pending contracts passed')
 }
 main().catch(error => {
   console.error(error)

@@ -1,4 +1,5 @@
 import { mockRequest, mockStore, requiredItem } from './mockStore'
+import { C3_SERVICE_STATUS_MATRIX } from './serviceStatus'
 const membersFor = id => {
   requiredItem(mockStore.teams, id, '团队空间')
   return mockStore.teamMembers[id]
@@ -8,6 +9,7 @@ const roomsFor = id => {
   return mockStore.rooms.filter(room => !room.deletedAt && room.spaceId === id)
 }
 export default {
+  backendStatus: C3_SERVICE_STATUS_MATRIX.Team,
   listSpaces: () =>
     mockRequest(() =>
       mockStore.teams.map(team => ({

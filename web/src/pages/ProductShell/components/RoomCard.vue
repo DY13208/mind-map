@@ -34,7 +34,7 @@
             }}</el-dropdown-item
             ><el-dropdown-item command="share">分享</el-dropdown-item
             ><el-dropdown-item command="history">历史版本</el-dropdown-item
-            ><el-dropdown-item command="delete" divided
+            ><el-dropdown-item v-if="allowDelete" command="delete" divided
               >删除</el-dropdown-item
             ></el-dropdown-menu
           ></el-dropdown
@@ -43,7 +43,7 @@
       <p><i class="el-icon-folder-opened"></i> {{ room.folderName }}</p>
       <p class="ownerLine">
         Owner {{ room.owner.name }}
-        <el-tag size="mini" type="info">{{ room.role }}</el-tag>
+        <el-tag size="mini" type="info">{{ room.roleLabel || room.role }}</el-tag>
       </p>
       <div class="roomMeta">
         <div class="avatarStack">
@@ -63,7 +63,7 @@
 <script>
 export default {
   name: 'RoomCard',
-  props: { room: Object },
+  props: { room: Object, allowDelete: { type: Boolean, default: false } },
   computed: {
     dateText() {
       return new Date(this.room.updatedAt).toLocaleDateString('zh-CN')

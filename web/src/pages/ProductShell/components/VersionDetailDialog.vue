@@ -5,26 +5,35 @@
     width="min(480px, calc(100vw - 24px))"
     append-to-body
     ><el-descriptions v-if="version" :column="1" border
-      ><el-descriptions-item label="版本">{{
-        version.version
+      ><el-descriptions-item label="versionId">{{
+        version.versionId
+      }}</el-descriptions-item
+      ><el-descriptions-item label="revision">{{
+        version.revision
+      }}</el-descriptions-item
+      ><el-descriptions-item label="名称">{{
+        version.name
+      }}</el-descriptions-item
+      ><el-descriptions-item label="类型">{{
+        version.type
+      }}</el-descriptions-item
+      ><el-descriptions-item label="操作人">{{
+        version.createdBy || version.operator
       }}</el-descriptions-item
       ><el-descriptions-item label="时间">{{
         format(version.createdAt)
       }}</el-descriptions-item
-      ><el-descriptions-item label="操作人">{{
-        version.operator
+      ><el-descriptions-item label="说明">{{
+        version.description || '—'
       }}</el-descriptions-item
-      ><el-descriptions-item label="Revision">{{
-        version.revision
-      }}</el-descriptions-item
-      ><el-descriptions-item label="变更摘要">{{
-        version.summary
+      ><el-descriptions-item label="摘要">{{
+        version.summary || '—'
       }}</el-descriptions-item></el-descriptions
     ><el-alert
       class="apiNote"
       type="info"
       :closable="false"
-      title="TODO_API_REQUIRED：真实脑图预览与差异对比等待历史版本 API。"
+      title="TODO_HISTORY_PREVIEW：完整脑图预览尚未接入独立只读预览，不会写入当前 LIVE Editor。"
     /><span slot="footer"
       ><el-button @click="shown = false">关闭</el-button></span
     ></el-dialog
