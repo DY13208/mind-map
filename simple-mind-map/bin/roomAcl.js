@@ -47,7 +47,7 @@ function presenceDocRoomKey(docName) {
 
 function inferRoomAcl(pathname, method) {
   const path = String(pathname || '')
-  const match = path.match(/^\/api\/(?:files|maps)\/([^/]+)(.*)$/)
+  const match = path.match(/^\/api\/(?:files|maps|rooms)\/([^/]+)(.*)$/)
   if (!match) return null
   const roomKey = decodeURIComponent(match[1])
   const rest = match[2] || ''
@@ -55,7 +55,6 @@ function inferRoomAcl(pathname, method) {
   if (rest === '/members' || rest.startsWith('/members/')) {
     return { roomKey, action: verb === 'GET' ? 'view' : 'manage' }
   }
-  // Presence beats are not map mutations; viewers may join and broadcast presence.
   if (rest === '/presence' || rest.startsWith('/presence/')) {
     return { roomKey, action: 'view' }
   }
@@ -66,9 +65,18 @@ function inferRoomAcl(pathname, method) {
     }
     return { roomKey, action: 'edit' }
   }
+  if (rest === '/move' || rest.startsWith('/move')) {
+    return { roomKey, action: 'edit' }
+  }
+  if (rest === '/info' || rest.startsWith('/info')) {
+    return { roomKey, action: 'view' }
+  }
   if (!rest) {
-    if (verb === 'PATCH' || verb === 'DELETE') {
+    if (verb === 'DELETE') {
       return { roomKey, action: 'manage' }
+    }
+    if (verb === 'PATCH') {
+      return { roomKey, action: 'edit' }
     }
     if (verb === 'GET' || verb === 'HEAD') {
       return { roomKey, action: 'view' }
