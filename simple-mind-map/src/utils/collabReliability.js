@@ -14,7 +14,8 @@ const TERMINAL_ERROR_SET = {
   UNSUPPORTED_OPERATION: true,
   BAD_OP_ID: true,
   INVALID_PAYLOAD: true,
-  ROOT_DELETE: true
+  ROOT_DELETE: true,
+  CYCLE_REJECTED: true
 }
 
 const RETRYABLE_ERROR_SET = {
@@ -41,15 +42,15 @@ function isRetryableError(code) {
   return !!RETRYABLE_ERROR_SET[raw]
 }
 
-function collectOpUids(op) {
+function collectOpUids(op, includeParents = true) {
   const payload = (op && op.payload) || {}
   const uids = []
   if (payload.uid) uids.push(String(payload.uid))
-  if (payload.parent) uids.push(String(payload.parent))
-  if (payload.parentUid) uids.push(String(payload.parentUid))
-  if (payload.parent_uid) uids.push(String(payload.parent_uid))
+  if (includeParents && payload.parent) uids.push(String(payload.parent))
+  if (includeParents && payload.parentUid) uids.push(String(payload.parentUid))
+  if (includeParents && payload.parent_uid) uids.push(String(payload.parent_uid))
   ;(payload.ops || []).forEach(inner => {
-    collectOpUids(inner).forEach(id => uids.push(id))
+    collectOpUids(inner, includeParents).forEach(id => uids.push(id))
   })
   return Array.from(new Set(uids.filter(Boolean)))
 }
@@ -82,12 +83,15 @@ function collectCreatedUids(op) {
 
 function dependsOnBlockedOp(item, blocked) {
   if (!item || !blocked) return false
-  // Creator dependency only: a failed insert/create/paste/import of UID N
-  // blocks later uses of N. Failed mutations (move/update/delete) of an
-  // already-existing business node must not block later ops on the same UID.
-  const created = new Set(collectCreatedUids(blocked))
-  if (!created.size) return false
-  return collectOpUids(item).some(id => created.has(id))
+  // A rejected cycle move created no nodes or state for later writes to depend on.
+  if (blocked.type === 'node.move' && blocked.errorCode === 'CYCLE_REJECTED') return false
+  const blockedSeq = Number(blocked.clientSeq || 0)
+  const itemSeq = Number(item.clientSeq || 0)
+  if (blockedSeq > 0 && itemSeq > 0 && itemSeq <= blockedSeq) return false
+  // A failed write targets its uid, not the existing parent it merely references.
+  // Later inserts/moves may still depend on that target as their parent.
+  const blockedUids = new Set(collectOpUids(blocked, false))
+  return collectOpUids(item).some(id => blockedUids.has(id))
 }
 
 function shouldQuarantineError(code, op) {

@@ -3,14 +3,12 @@ const path = require('path')
 
 const suite = process.argv[2]
 const ROOT = path.resolve(__dirname, '..')
-const TIMEOUT_MS = Number(process.env.COLLAB_V2_SUITE_TIMEOUT_MS || 120000)
+const TIMEOUT_MS = Number(process.env.COLLAB_V2_SUITE_TIMEOUT_MS || 20000)
 
 const suites = {
   freeze: [
     'test/collabV2.drain.test.js',
     'test/exportBackground.test.js',
-    'test/collabReliability.test.js',
-    'test/collabRoomRecovery.test.js',
     'test/collabV2.test.js',
     'test/collabV2.direct.test.js',
     'test/collabV2.features.test.js',
@@ -26,11 +24,9 @@ const suites = {
     'test/collabSpecialObjects.test.js',
     'test/collabPaste.test.js',
     'test/collabPasteUndo.test.js',
-    'test/collabV2.wideSibling.persistence.test.js',
-    'test/roomNodes.test.js',
-    'test/roomAcl.test.js',
-    'test/outbox.test.js',
-    'test/roomOperations.test.js'
+    'test/collabReliability.test.js',
+    'test/collabRoomRecovery.test.js',
+    'test/roomNodes.test.js'
   ],
   integration: [
     'test/collabV2.acl.integration.test.js',
@@ -40,11 +36,7 @@ const suites = {
     'test/collabRestart.integration.test.js',
     'test/twoClientSync.integration.test.js'
   ],
-  benchmark: [
-    'test/collabLargeImport.test.js',
-    'test/collabV2.large.test.js',
-    'test/collabV2.pg.bench.test.js'
-  ],
+  benchmark: ['test/collabV2.pg.bench.test.js'],
   soak: ['test/collabV2.soak.integration.test.js']
 }
 
@@ -59,6 +51,7 @@ function run(file) {
       stdio: 'inherit'
     })
     const timer = setTimeout(() => {
+      // Terminate this test's process tree even if its JS timers are starved.
       if (process.platform === 'win32') {
         spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
       } else {

@@ -216,8 +216,7 @@ async function makeClient(hub, opts) {
   if (TEST_HANG_TRACE) {
     const submitOperation = adapter.submitOperation
     adapter.submitOperation = async operation => {
-      const target =
-        operation && operation.payload && (operation.payload.uid || operation.payload.parent)
+      const target = operation && operation.payload && (operation.payload.uid || operation.payload.parent)
       console.error(`[TEST_HANG_TRACE] OP_START ${opts.userId} ${operation.type} ${target || ''}`)
       const result = await submitOperation(operation)
       console.error(`[TEST_HANG_TRACE] OP_DONE ${opts.userId} ${operation.type} ${target || ''}`)
@@ -231,6 +230,40 @@ async function makeClient(hub, opts) {
   })
   liveAdapters.add(adapter)
   return { adapter, applied, rejected, socket }
+}
+
+async function cleanupTestClients() {
+  const adapters = Array.from(liveAdapters)
+  liveAdapters.clear()
+  await Promise.all(
+    adapters.map(adapter =>
+      Promise.resolve(adapter.disconnect()).catch(() => undefined)
+    )
+  )
+}
+
+async function runTestCase(name, test) {
+  const startedAt = Date.now()
+  let timer = null
+  const timeout = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(
+        `TEST_HANG_TRACE timeout: ${name} exceeded ${TEST_CASE_TIMEOUT_MS}ms`
+      )
+      error.code = 'TEST_HANG_TIMEOUT'
+      reject(error)
+    }, TEST_CASE_TIMEOUT_MS)
+  })
+  if (TEST_HANG_TRACE) console.error(`[TEST_HANG_TRACE] START ${name}`)
+  try {
+    await Promise.race([test(), timeout])
+    if (TEST_HANG_TRACE) {
+      console.error(`[TEST_HANG_TRACE] PASS ${name} ${Date.now() - startedAt}ms`)
+    }
+  } finally {
+    clearTimeout(timer)
+    await cleanupTestClients()
+  }
 }
 
 function nodeText(engine, roomKey, uid) {

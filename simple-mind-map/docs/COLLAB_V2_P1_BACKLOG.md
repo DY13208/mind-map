@@ -1,19 +1,11 @@
 # Collaboration V2 P1 Backlog
 
-Merged from C4 inventory and current main freeze notes. **Do not list closed P0s here.**
+| Priority | Item | Reproduction / evidence | Action |
+| --- | --- | --- | --- |
+| P1 | Renderer Ghost DOM/SVG 计数 | 浏览器 soak 尚未执行 | 建立 Playwright/浏览器计数器后跑 20/50 次矩阵 |
+| P1 | Socket listener leak | room open/close 20 次尚未量测 | 集成 harness 输出 listener count |
+| P1 | Timer leak | heartbeat/ack/reconnect 生命周期未量测 | unmount 后计数与 heap 快照 |
+| P1 | Import/export authoritative reload | 现有普通 import test 未覆盖全部格式 | 在 P0 后补格式矩阵 |
+| P1 | V1/Yjs 可删除项 | 当前仅静态分类 | Freeze 后以生产配置验证 |
 
-| Priority | Item | Notes |
-| --- | --- | --- |
-| P1 | Large XMind / huge import performance | Product accepted as P1, not freeze-breaker |
-| P1 | Generalization extreme drag slot | Renderer edge |
-| P1 | Image / AssociativeLine small paint delay | Renderer |
-| P1 | Multi-select Style flicker | UI |
-| P1 | Renderer Ghost DOM/SVG counts | Browser soak not run (C4) |
-| P1 | Socket listener leak on room open/close | Not measured |
-| P1 | Timer leak (heartbeat / ack / reconnect) | Not measured |
-| P1 | Import/export full format matrix + F5 | Partial tests only; RichText F5 HTML escape is **fixed on main** |
-| P1 | Docker / collab restart human QA | Deferred |
-| P1 | V1/Yjs cleanup | Inventory only — **do not delete yet** |
-| — | Offline-first as product requirement | **Not a requirement** |
-
-Closed (not P1): CYCLE_REJECTED drain hang; Outbox shared-uid false dependency; blocked-queue busy-loop; terminal-create dependency chain; ACK vs counter-refresh ordering; History bootstrap empty-tree replay; File System dual-entity risk.
+P1 不阻塞 P0 修复以外的专项工作；本轮未顺手修改业务核心。

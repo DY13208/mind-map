@@ -4007,7 +4007,7 @@ class Cooperate {
         this.hydratedUids.delete(uid)
         this.dirtySubtrees.set(uid, Number(node.data.subtreeVersion) || 1)
       }
-      if (Array.isArray(node.children)) node.children.forEach(walk)
+      (node.children || []).forEach(walk)
     }
     walk(root)
   }
