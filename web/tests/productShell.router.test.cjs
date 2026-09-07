@@ -12,8 +12,13 @@ const filesPageSrc = fs.readFileSync(
   path.join(root, 'pages', 'ProductShell', 'FilesPage.vue'),
   'utf8'
 )
+const roomLocSrc = fs.readFileSync(
+  path.join(root, 'utils', 'roomLocation.js'),
+  'utf8'
+)
 
 assert.match(routerSrc, /name:\s*'Edit'/)
+assert.match(routerSrc, /mode:\s*'history'/)
 assert.match(routerSrc, /beforeEnter/)
 assert.match(routerSrc, /path:\s*'\/files'/)
 assert.match(routerSrc, /next\(\{\s*path:\s*'\/files'/)
@@ -21,16 +26,22 @@ assert.match(routerSrc, /to\.query\.room/)
 assert.match(routerSrc, /room:\s*to\.params\.roomKey/)
 assert.match(routerSrc, /path:\s*'\/room\/:roomKey'/)
 assert.match(routerSrc, /path:\s*'\/room-:roomSuffix'/)
+assert.match(routerSrc, /migrateLegacyHashUrl/)
 assert.doesNotMatch(routerSrc, /redirect:\s*'\/files'/)
+assert.doesNotMatch(routerSrc, /mode:\s*'hash'/)
 
 assert.match(toolbarSrc, /data-testid="back-to-files"/)
 assert.match(toolbarSrc, /goToFiles\s*\(/)
 assert.match(toolbarSrc, /path:\s*'\/files'/)
-assert.match(toolbarSrc, /返回文件/)
+assert.match(toolbarSrc, /返回首页/)
 
 assert.match(filesPageSrc, /query:\s*\{\s*room:\s*roomKey\s*\}/)
 assert.match(filesPageSrc, /query:\s*\{\s*room:\s*created\.roomKey\s*\}/)
 assert.match(filesPageSrc, /room\.roomKey\s*\|\|\s*room\.id/)
+
+assert.match(roomLocSrc, /buildInviteUrl/)
+assert.match(roomLocSrc, /migrateLegacyHashUrl/)
+assert.match(roomLocSrc, /roomFromPathname/)
 
 function decideRoot(to) {
   const room = to.query && to.query.room
@@ -52,8 +63,8 @@ function roomPathRedirect(to) {
 
 function resolveEntry(rawPath, query = {}) {
   const pathOnly = String(rawPath || '/')
-  if (pathOnly === '/files') {
-    return { path: '/files', name: 'Files', query: {} }
+  if (pathOnly === '/files' || pathOnly.startsWith('/files/')) {
+    return { path: pathOnly, name: 'Files', query: {} }
   }
   const roomMatch = pathOnly.match(/^\/room\/([^/]+)$/)
   if (roomMatch) {
@@ -103,6 +114,11 @@ assert.deepStrictEqual(resolveEntry('/room-xyz'), {
 })
 assert.deepStrictEqual(resolveEntry('/files'), {
   path: '/files',
+  name: 'Files',
+  query: {}
+})
+assert.deepStrictEqual(resolveEntry('/files/recent'), {
+  path: '/files/recent',
   name: 'Files',
   query: {}
 })

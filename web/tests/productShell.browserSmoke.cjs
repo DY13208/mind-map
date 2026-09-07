@@ -70,12 +70,12 @@ async function main() {
     }
   })
   try {
-    await page.goto(ORIGIN + '/#/files', { waitUntil: 'domcontentloaded' })
+    await page.goto(ORIGIN + '/files', { waitUntil: 'domcontentloaded' })
     await page.locator('.authDevInput').waitFor({ timeout: 20000 })
     await page.locator('.authDevInput').fill(key)
     await page.locator('.authDevForm button[type="submit"]').click()
     await page.waitForSelector('.productShell, .editContainer', { timeout: 20000 })
-    await page.goto(ORIGIN + '/#/files', { waitUntil: 'domcontentloaded' })
+    await page.goto(ORIGIN + '/files', { waitUntil: 'domcontentloaded' })
     await page.getByRole('heading', { name: '我的脑图' }).waitFor({ timeout: 20000 })
 
     const listed = await api(page, '/api/files?limit=5')
@@ -92,14 +92,13 @@ async function main() {
 
     await page.getByRole('button', { name: '新建脑图' }).click()
     await confirmPrompt(page, ROOM)
-    await page.waitForURL(/room=room-/, { timeout: 20000 })
-    const roomKey = decodeURIComponent(
-      new URL(page.url()).hash.match(/room=([^&]+)/)[1]
-    )
-    assert.ok(roomKey.startsWith('room-'), roomKey)
+    await page.waitForURL(/[?&]room=room-/, { timeout: 20000 })
+    const roomKey = new URL(page.url()).searchParams.get('room')
+    assert.ok(roomKey && roomKey.startsWith('room-'), roomKey)
+    assert.ok(!String(page.url()).includes('/#/'), page.url())
     await page.waitForSelector('#mindMapContainer', { timeout: 25000 })
 
-    await page.goto(ORIGIN + '/#/files')
+    await page.goto(ORIGIN + '/files')
     await page.locator('.roomCard', { hasText: ROOM }).waitFor({ timeout: 20000 })
 
     const renamed = await api(page, '/api/files/' + encodeURIComponent(roomKey), {
@@ -175,12 +174,13 @@ async function main() {
     const body = JSON.parse(restorePosts[0].postData || '{}')
     assert.ok(Object.prototype.hasOwnProperty.call(body, 'expectedCurrentRevision'))
 
-    await page.goto(ORIGIN + '/#/files')
+    await page.goto(ORIGIN + '/files')
     await page.getByRole('heading', { name: '我的脑图' }).waitFor()
     await page.locator('.roomCard', { hasText: RENAMED }).click()
-    await page.waitForURL(new RegExp('room=' + roomKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), {
+    await page.waitForURL(new RegExp('[?&]room=' + roomKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), {
       timeout: 20000
     })
+    assert.ok(!String(page.url()).includes('/#/'), page.url())
     await page.waitForSelector('#mindMapContainer', { timeout: 25000 })
 
     console.log(

@@ -257,8 +257,8 @@ export function renameFile(roomKey, title) {
 }
 
 export function deleteFile(roomKey) {
-  return request(`/api/files/${encodeURIComponent(roomKey)}`, {
-    method: 'DELETE'
+  return request(`/api/files/${encodeURIComponent(roomKey)}/trash`, {
+    method: 'POST'
   })
 }
 

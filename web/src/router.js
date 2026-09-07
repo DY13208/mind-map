@@ -1,7 +1,10 @@
 import Vue from 'vue'
 import VueRouter from 'vue-router'
+import { migrateLegacyHashUrl } from './utils/roomLocation'
 
 Vue.use(VueRouter)
+
+migrateLegacyHashUrl()
 
 const roomPathRedirect = to => ({
   path: '/',
@@ -146,6 +149,7 @@ const routes = [
 ]
 
 const router = new VueRouter({
+  mode: 'history',
   routes
 })
 

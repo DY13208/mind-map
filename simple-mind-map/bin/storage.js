@@ -1046,7 +1046,7 @@ function shareUrl(roomKey) {
   const gateway = process.env.GATEWAY === '1' || process.env.GATEWAY === 'true'
   const portPart =
     gateway && (webPort === 80 || webPort === 443) ? '' : `:${webPort}`
-  return `http://${host}${portPart}/#/?room=${encodeURIComponent(roomKey)}`
+  return `http://${host}${portPart}/?room=${encodeURIComponent(roomKey)}`
 }
 
 async function getRoom(roomKey) {

@@ -39,7 +39,14 @@ export function isSharedWithMe({
 export function normalizeRoomDto(apiRoom = {}, extras = {}) {
   const roomKey = String(
     apiRoom.roomKey || apiRoom.room_key || apiRoom.id || extras.roomKey || ''
-  )
+  ).trim()
+  if (
+    !roomKey ||
+    roomKey === 'undefined' ||
+    roomKey === 'null'
+  ) {
+    // keep empty; callers that must hit API should use requireRoomKey
+  }
   const ownerSrc = apiRoom.owner || {}
   const ownerId = String(
     ownerSrc.userId || ownerSrc.user_id || ownerSrc.id || ''
@@ -78,11 +85,17 @@ export function normalizeRoomDto(apiRoom = {}, extras = {}) {
       legacyOpen: apiRoom.legacyOpen
     }),
     createdAt: apiRoom.createdAt || apiRoom.created_at || '',
-    updatedAt: apiRoom.updatedAt || apiRoom.updated_at || '',
+    updatedAt:
+      apiRoom.updatedAt ||
+      apiRoom.updated_at ||
+      apiRoom.contentUpdatedAt ||
+      apiRoom.content_updated_at ||
+      '',
     contentUpdatedAt:
       apiRoom.contentUpdatedAt ||
       apiRoom.content_updated_at ||
       apiRoom.updatedAt ||
+      apiRoom.updated_at ||
       '',
     revision: Number(apiRoom.revision || apiRoom.version || 0),
     canView: apiRoom.canView !== false,
@@ -93,6 +106,20 @@ export function normalizeRoomDto(apiRoom = {}, extras = {}) {
     canManage:
       apiRoom.canManage != null ? !!apiRoom.canManage : role === 'owner'
   }
+}
+
+export function requireRoomKey(input) {
+  const key = String(
+    (input && (input.roomKey || input.room_key || input.id)) ||
+      (typeof input === 'string' ? input : '') ||
+      ''
+  ).trim()
+  if (!key || key === 'undefined' || key === 'null') {
+    const err = new Error('INVALID_ROOM_KEY')
+    err.code = 'INVALID_ROOM_KEY'
+    throw err
+  }
+  return key
 }
 
 export function normalizeFolderDto(apiFolder = {}) {
