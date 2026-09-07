@@ -44,11 +44,27 @@
         >
       </nav>
       <div class="sidebarFooter" v-if="profile">
-        <el-avatar size="small">依</el-avatar>
-        <div>
-          <strong>{{ profile.name }}</strong
-          ><span>{{ profile.id }}</span>
+        <div class="accountInfo" :title="`${profile.name}（${profile.id}）`">
+          <UserAvatar :person="profile" size="small" fallback="依" />
+          <div class="accountMeta">
+            <strong>{{ profile.name }}</strong
+            ><span>{{ profile.id }}</span>
+          </div>
         </div>
+        <button
+          class="accountLogout"
+          type="button"
+          title="退出登录"
+          aria-label="退出登录"
+          data-testid="sidebar-logout"
+          :disabled="loggingOut"
+          @click="signOut"
+        >
+          <i class="el-icon-switch-button" aria-hidden="true"></i>
+          <span class="accountLogoutText">{{
+            loggingOut ? '退出中…' : '退出'
+          }}</span>
+        </button>
       </div>
     </aside>
     <main class="productMain">
@@ -62,6 +78,8 @@
 
 <script>
 import productService from '@/services/productService'
+import { logoutAndRedirect } from '@/utils/auth'
+import UserAvatar from '@/components/UserAvatar.vue'
 const SIDEBAR_PREFERENCE_KEY = 'product-shell-sidebar-collapsed'
 const isSmallScreen = () => window.matchMedia('(max-width: 760px)').matches
 const readSidebarPreference = () => {
@@ -74,6 +92,7 @@ const readSidebarPreference = () => {
 }
 export default {
   name: 'ProductShellLayout',
+  components: { UserAvatar },
   data() {
     const preference = readSidebarPreference()
     return {
@@ -86,7 +105,8 @@ export default {
         { path: '/files/favorites', label: '收藏', icon: 'el-icon-star-off' },
         { path: '/files/shared', label: '与我共享', icon: 'el-icon-user' },
         { path: '/files/trash', label: '回收站', icon: 'el-icon-delete' }
-      ]
+      ],
+      loggingOut: false
     }
   },
   mounted() {
@@ -98,6 +118,20 @@ export default {
   methods: {
     updateAutoSidebar() {
       if (!this.hasSidebarPreference) this.sidebarCollapsed = isSmallScreen()
+    },
+    async signOut() {
+      if (this.loggingOut) return
+      try {
+        await this.$confirm('确定要退出登录吗？', '退出登录', {
+          confirmButtonText: '退出',
+          cancelButtonText: '取消',
+          type: 'warning'
+        })
+      } catch (error) {
+        return
+      }
+      this.loggingOut = true
+      await logoutAndRedirect('/')
     },
     setSidebarCollapsed(collapsed) {
       this.sidebarCollapsed = collapsed
@@ -247,19 +281,60 @@ export default {
   }
   .sidebarFooter {
     margin-top: auto;
+    padding: 10px 10px 2px;
+    border-top: 1px solid #eef1ef;
+  }
+  .accountInfo {
     display: flex;
     gap: 10px;
-    padding: 14px 10px 4px;
-    border-top: 1px solid #eef1ef;
     align-items: center;
-    div {
-      display: flex;
-      flex-direction: column;
-      font-size: 12px;
+  }
+  .accountMeta {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    font-size: 12px;
+    strong,
+    span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     span {
       color: #98a59f;
       margin-top: 2px;
+    }
+  }
+  .accountLogout {
+    margin-top: 8px;
+    width: 100%;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid #e3e9e6;
+    border-radius: 8px;
+    background: #fff;
+    color: #52665f;
+    font-size: 13px;
+    cursor: pointer;
+    &:hover:not(:disabled) {
+      border-color: #f0c9c4;
+      background: #fdf5f4;
+      color: #b4473c;
+    }
+    &:focus-visible {
+      outline: 2px solid #087854;
+      outline-offset: 2px;
+    }
+    &:disabled {
+      cursor: wait;
+      opacity: 0.6;
+    }
+    i {
+      font-size: 15px;
     }
   }
 }
@@ -323,8 +398,20 @@ export default {
       }
     }
     .navLabel,
-    .sidebarFooter div {
+    .accountMeta,
+    .accountLogoutText {
       display: none;
+    }
+    .sidebarFooter {
+      padding-inline: 0;
+    }
+    .accountInfo {
+      justify-content: center;
+    }
+    .accountLogout {
+      width: 36px;
+      margin-inline: auto;
+      padding: 0;
     }
   }
   .productMain {

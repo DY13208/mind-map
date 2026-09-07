@@ -47,13 +47,13 @@
       </p>
       <div class="roomMeta">
         <div class="avatarStack">
-          <el-avatar :size="24">{{ room.owner.avatar }}</el-avatar
-          ><el-avatar
+          <UserAvatar :person="room.owner" :size="24" />
+          <UserAvatar
             v-for="person in room.collaborators.slice(0, 2)"
             :key="person.id"
+            :person="person"
             :size="24"
-            >{{ person.avatar }}</el-avatar
-          >
+          />
         </div>
         <span>{{ dateText }}</span>
       </div>
@@ -61,8 +61,11 @@
   </article>
 </template>
 <script>
+import UserAvatar from '@/components/UserAvatar.vue'
+
 export default {
   name: 'RoomCard',
+  components: { UserAvatar },
   props: { room: Object, allowDelete: { type: Boolean, default: false } },
   computed: {
     dateText() {
@@ -147,11 +150,9 @@ export default {
   }
   .avatarStack {
     display: flex;
-    /deep/ .el-avatar {
+    /deep/ .userAvatar {
       margin-right: -5px;
       border: 2px solid white;
-      background: #15936a;
-      font-size: 10px;
     }
   }
 }

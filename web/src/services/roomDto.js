@@ -67,6 +67,7 @@ export function normalizeRoomDto(apiRoom = {}, extras = {}) {
       id: ownerId,
       userId: ownerId,
       name: ownerName,
+      // 可能是企业微信头像 URL，也可能退化成姓名首字，渲染前用 resolveAvatar 区分。
       avatar: ownerSrc.avatar || (ownerName ? ownerName.slice(0, 1) : '用')
     },
     collaborators: Array.isArray(apiRoom.collaborators)
