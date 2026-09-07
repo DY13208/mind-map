@@ -39,11 +39,13 @@
     </header>
 
     <p class="hint">
-      点击「运行」选择产物后，经 WorkBuddy 直接执行该 SOP（类似客户端里「执行这个节点的
-      SOP」）；双击卡片可编辑导图 / 历史 / 产物。
+      点击「运行」选择产物后入队，经 WorkBuddy 多会话并行执行（默认并发 2）；可同时跑多个
+      SOP。双击卡片可编辑导图 / 历史 / 产物。
     </p>
     <div class="statusLine" v-if="statusText">{{ statusText }}</div>
-    <div class="statusLine runStatus" v-if="runStatusText">{{ runStatusText }}</div>
+    <div class="statusLine runStatus" v-if="sopQueueSummary">
+      {{ sopQueueSummary }}
+    </div>
 
     <div v-if="!roomKey" class="emptyState">请先选择空间</div>
     <div v-else-if="!pullLoading && !sops.length" class="emptyState">
@@ -59,15 +61,23 @@
       >
         <div class="cardHead">
           <h2 class="cardTitle">{{ item.title }}</h2>
-          <el-button
-            type="primary"
-            size="mini"
-            :loading="runningKey === item.rowKey"
-            :disabled="!!runningKey && runningKey !== item.rowKey"
-            @click.stop="openRunDialog(item)"
-          >
-            运行
-          </el-button>
+          <div class="cardActions">
+            <span
+              v-if="sopCardJobState(item)"
+              class="jobChip"
+              :class="sopCardJobState(item)"
+              >{{ sopCardJobLabel(item) }}</span
+            >
+            <el-button
+              type="primary"
+              size="mini"
+              :loading="sopCardJobState(item) === 'running'"
+              :disabled="!!sopCardJobState(item)"
+              @click.stop="openRunDialog(item)"
+            >
+              运行
+            </el-button>
+          </div>
         </div>
         <div class="cardMeta">
           <span class="metaChip">{{ item.id || 'SOP' }}</span>
@@ -87,18 +97,127 @@
       </article>
     </div>
 
+    <div
+      class="sopTaskPanel"
+      v-if="sopTaskJobs.length"
+    >
+      <div class="taskPanelHead">
+        <div class="taskTitleRow">
+          <strong>SOP 任务</strong>
+          <span class="taskSummary">{{ sopQueueSummary }}</span>
+        </div>
+        <div class="taskHeadActions">
+          <el-button
+            size="mini"
+            type="danger"
+            plain
+            :disabled="!sopActiveJobCount"
+            @click="cancelAllSopJobs"
+          >
+            全部取消
+          </el-button>
+        </div>
+      </div>
+      <div class="taskBody">
+        <ul class="taskList">
+          <li
+            v-for="job in sopTaskJobs"
+            :key="job.id"
+            class="taskItem"
+            :class="{ active: selectedSopJobId === job.id, [job.state]: true }"
+            @click="selectSopJob(job.id)"
+          >
+            <div class="taskItemMain">
+              <span class="taskState">{{ sopJobStateLabel(job) }}</span>
+              <span class="taskName">{{ job.sopId || 'SOP' }}：{{ job.sopTitle }}</span>
+            </div>
+            <div class="taskItemStatus">{{ job.status }}</div>
+            <div class="taskItemActions" @click.stop>
+              <el-button
+                v-if="job.state === 'done'"
+                type="text"
+                size="mini"
+                @click="openJobDeliverables(job)"
+              >
+                看产物
+              </el-button>
+              <el-button
+                v-if="job.state === 'running' || job.state === 'queued'"
+                type="text"
+                size="mini"
+                @click="cancelSopJob(job.id)"
+              >
+                取消
+              </el-button>
+            </div>
+          </li>
+        </ul>
+        <div class="taskDetail" v-if="selectedSopJob">
+          <div class="liveHead">
+            <strong>{{ selectedSopJob.sopTitle }}</strong>
+            <span>{{ selectedSopJob.status }}</span>
+          </div>
+          <div class="ctxBox" v-if="selectedSopJob.context">
+            <div class="ctxMeta">
+              <span>节点 uid：{{ selectedSopJob.context.sopUid || '无' }}</span>
+              <span>来源：{{ selectedSopJob.context.outlineSource }}</span>
+              <span>大纲 {{ selectedSopJob.context.outlineChars || 0 }} 字</span>
+            </div>
+          </div>
+          <div
+            class="eventBox"
+            v-if="selectedSopJob.eventLog && selectedSopJob.eventLog.length"
+          >
+            <div class="boxLabel">事件流</div>
+            <ul class="eventList">
+              <li v-for="(ev, i) in selectedSopJob.eventLog" :key="i">
+                <span class="evTime">{{ ev.time }}</span>
+                <span class="evLabel">{{ ev.label }}</span>
+              </li>
+            </ul>
+          </div>
+          <div class="streamBox">
+            <div class="boxLabel">流式输出</div>
+            <pre ref="runStreamPre" class="streamText">{{
+              selectedJobStreamDisplay
+            }}</pre>
+          </div>
+          <div
+            class="runPreview"
+            v-if="selectedSopJob.result && selectedSopJob.result.deliverables"
+          >
+            <div class="previewMeta">
+              <span>{{ selectedSopJob.result.runResult }}</span>
+              <span v-if="selectedSopJob.result.elapsedSec"
+                >约 {{ selectedSopJob.result.elapsedSec }}s</span
+              >
+            </div>
+            <ul
+              v-if="selectedSopJob.result.deliverables.length"
+            >
+              <li
+                v-for="(d, i) in selectedSopJob.result.deliverables"
+                :key="i"
+              >
+                {{ d.name }}
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <el-dialog
       title="运行 SOP"
       :visible.sync="runDialogVisible"
-      width="760px"
-      top="6vh"
+      width="640px"
+      top="8vh"
       append-to-body
       :close-on-click-modal="false"
       custom-class="sopRunDialog"
     >
       <p class="runDialogLead" v-if="runTarget">
-        执行「{{ runTarget.id }}：{{ runTarget.title }}」——选择产物后开始，下方会显示发给
-        WorkBuddy 的节点上下文与流式过程
+        配置「{{ runTarget.id }}：{{ runTarget.title }}」后加入任务队列；可关闭本窗口，任务在后台并行执行（WorkBuddy 多会话）。
       </p>
       <div class="runModelRow">
         <span class="runModelLabel">模型</span>
@@ -107,7 +226,6 @@
           size="small"
           filterable
           :loading="runModelsLoading"
-          :disabled="!!runningKey"
           placeholder="选择 WorkBuddy 模型"
           class="runModelSelect"
           @visible-change="onRunModelDropdown"
@@ -138,7 +256,6 @@
         <el-button
           size="mini"
           :loading="runModelsLoading"
-          :disabled="!!runningKey"
           @click="loadRunModels(true)"
           >刷新</el-button
         >
@@ -148,7 +265,6 @@
           v-for="opt in outputPresets"
           :key="opt.id"
           :label="opt.id"
-          :disabled="!!runningKey"
         >
           <span class="optLabel">{{ opt.label }}</span>
           <span class="optHint">{{ opt.hint }}</span>
@@ -158,89 +274,20 @@
         v-model="runExtraNote"
         type="textarea"
         :rows="2"
-        :disabled="!!runningKey"
         placeholder="额外要求，例如：生成的 html 要简洁美观"
         class="runExtra"
       ></el-input>
-
-      <div class="runLivePanel" v-if="runningKey || runContext || runStreamText || runEventLog.length">
-        <div class="liveHead">
-          <strong>{{ runningKey ? 'WorkBuddy 执行中…' : '执行过程' }}</strong>
-          <span v-if="runStatusText">{{ runStatusText }}</span>
-        </div>
-        <div class="ctxBox" v-if="runContext">
-          <div class="ctxMeta">
-            <span>节点 uid：{{ runContext.sopUid || '无' }}</span>
-            <span>来源：{{ runContext.outlineSource }}</span>
-            <span>大纲 {{ runContext.outlineChars || 0 }} 字</span>
-            <span>prompt {{ runContext.userPromptChars || 0 }} 字</span>
-          </div>
-          <details>
-            <summary>查看发给 WorkBuddy 的节点大纲（前 1200 字）</summary>
-            <pre class="ctxPreview">{{ runContext.outlinePreview || '(空)' }}</pre>
-          </details>
-        </div>
-        <div class="eventBox" v-if="runEventLog.length">
-          <div class="boxLabel">事件流</div>
-          <ul class="eventList">
-            <li v-for="(ev, i) in runEventLog" :key="i">
-              <span class="evTime">{{ ev.time }}</span>
-              <span class="evLabel">{{ ev.label }}</span>
-            </li>
-          </ul>
-        </div>
-        <div class="streamBox">
-          <div class="boxLabel">流式输出</div>
-          <pre ref="runStreamPre" class="streamText">{{
-            runStreamText || (runningKey ? '等待 WorkBuddy 输出…' : '')
-          }}</pre>
-        </div>
-      </div>
-
-      <div v-if="runPreview" class="runPreview">
-        <div class="previewMeta">
-          <span>{{ runPreview.runResult }}</span>
-          <span>约 {{ runPreview.elapsedSec }}s</span>
-          <span v-if="runPreview.toolEvents != null"
-            >工具事件 {{ runPreview.toolEvents }}</span
-          >
-        </div>
-        <ul v-if="runPreview.deliverables && runPreview.deliverables.length">
-          <li v-for="(d, i) in runPreview.deliverables" :key="i">
-            <a
-              v-if="isHttp(d.uri_or_path)"
-              :href="d.uri_or_path"
-              target="_blank"
-              rel="noopener"
-              >{{ d.name }}</a
-            >
-            <span v-else>{{ d.name }} · {{ d.uri_or_path }}</span>
-          </li>
-        </ul>
-      </div>
       <span slot="footer">
-        <el-button
-          size="small"
-          v-if="runningKey"
-          type="danger"
-          plain
-          @click="cancelRunSop"
+        <el-button size="small" @click="runDialogVisible = false"
           >取消</el-button
-        >
-        <el-button
-          size="small"
-          :disabled="!!runningKey"
-          @click="runDialogVisible = false"
-          >关闭</el-button
         >
         <el-button
           type="primary"
           size="small"
-          :loading="!!runningKey"
-          :disabled="!runOutputIds.length || !!runningKey"
+          :disabled="!runOutputIds.length"
           @click="confirmRunSop"
         >
-          开始运行
+          加入队列并开始
         </el-button>
       </span>
     </el-dialog>
@@ -356,17 +403,69 @@
                     >{{ d.name }}</a
                   >
                   <template v-else>{{ d.name }}</template>
-                  <span class="liPath" v-if="d.uri_or_path && !isHttp(d.uri_or_path)">
+                  <span
+                    class="liPath"
+                    v-if="d.uri_or_path && !isHttp(d.uri_or_path)"
+                  >
                     {{ d.uri_or_path }}
                   </span>
+                  <span class="liAt" v-if="d.at">{{ d.at }}</span>
                 </span>
-                <span class="liKind">{{ d.kind }}</span>
+                <span class="liActions">
+                  <el-button
+                    v-if="canPreviewDeliverable(d)"
+                    type="text"
+                    size="mini"
+                    @click="previewDeliverable(d)"
+                  >
+                    预览
+                  </el-button>
+                  <el-button
+                    v-if="canDownloadDeliverable(d)"
+                    type="text"
+                    size="mini"
+                    @click="downloadDeliverable(d)"
+                  >
+                    下载
+                  </el-button>
+                  <span class="liKind">{{ d.kind }}</span>
+                </span>
               </li>
             </ul>
             <div v-else class="paneEmpty">暂无产物</div>
           </div>
         </el-tab-pane>
       </el-tabs>
+    </el-dialog>
+
+    <el-dialog
+      :title="artifactPreviewTitle"
+      :visible.sync="artifactPreviewVisible"
+      width="860px"
+      append-to-body
+      custom-class="artifactPreviewDialog"
+      @closed="onArtifactPreviewClosed"
+    >
+      <iframe
+        v-if="artifactPreviewUrl"
+        class="artifactPreviewFrame"
+        :src="artifactPreviewUrl"
+        title="产物预览"
+      ></iframe>
+      <div v-else class="paneEmpty">无法预览</div>
+      <span slot="footer" class="dialog-footer">
+        <el-button
+          v-if="artifactPreviewDownloadUrl"
+          type="primary"
+          size="small"
+          @click="openUrl(artifactPreviewDownloadUrl)"
+        >
+          下载
+        </el-button>
+        <el-button size="small" @click="artifactPreviewVisible = false"
+          >关闭</el-button
+        >
+      </span>
     </el-dialog>
   </div>
 </template>
@@ -398,7 +497,8 @@ import {
   deleteFileNode,
   replaceFileTree,
   undoMapOperation,
-  redoMapOperation
+  redoMapOperation,
+  artifactLocalUrl
 } from '@/utils/fileApi'
 import {
   listRoomDRegistrySops,
@@ -414,9 +514,14 @@ import {
   addDeliverableToLedger,
   persistSopLedger,
   suggestCosPath,
-  readLedgerFromNodeLike
+  readLedgerFromNodeLike,
+  formatMinuteStamp
 } from '@/utils/sopLedger'
-import { SOP_OUTPUT_PRESETS, runSopWithWorkbuddy } from '@/utils/sopRun'
+import { SOP_OUTPUT_PRESETS } from '@/utils/sopRun'
+import {
+  createSopRunQueue,
+  resolveSopRunConcurrency
+} from '@/utils/sopRunQueue'
 import {
   fetchWorkbuddyModels,
   getWorkbuddyConfig,
@@ -508,20 +613,28 @@ export default {
       runModelsLoading: false,
       runCustomModels: WORKBUDDY_CUSTOM_MODEL_HINTS.slice(),
       runPlatformModels: [],
-      runStatusText: '',
-      runPreview: null,
-      runContext: null,
-      runStreamText: '',
-      runEventLog: [],
-      runningKey: '',
-      runAbort: null,
+      sopRunQueue: null,
+      sopQueueSnap: {
+        pending: [],
+        running: [],
+        recent: [],
+        queuedCount: 0,
+        runningCount: 0,
+        total: 0,
+        concurrency: 2
+      },
+      selectedSopJobId: '',
       subtreeLoading: false,
       subtreeError: '',
       pendingRoot: null,
       pendingVersion: 0,
       previewMindMap: null,
       collabV2Adapter: null,
-      syncStatus: 'idle'
+      syncStatus: 'idle',
+      artifactPreviewVisible: false,
+      artifactPreviewTitle: '产物预览',
+      artifactPreviewUrl: '',
+      artifactPreviewDownloadUrl: ''
     }
   },
   computed: {
@@ -542,6 +655,53 @@ export default {
         name: user.name || '用户',
         color: user.color || '#409EFF'
       }
+    },
+    sopQueueSummary() {
+      const s = this.sopQueueSnap || {}
+      if (!s.total && !(s.recent && s.recent.length)) return ''
+      return `执行 ${s.runningCount || 0} · 排队 ${s.queuedCount || 0} · 并发 ${
+        s.concurrency || 2
+      }`
+    },
+    sopActiveJobCount() {
+      return (
+        (this.sopQueueSnap.runningCount || 0) +
+        (this.sopQueueSnap.queuedCount || 0)
+      )
+    },
+    sopTaskJobs() {
+      const s = this.sopQueueSnap || {}
+      const active = [...(s.running || []), ...(s.pending || [])]
+      const activeIds = new Set(active.map(j => j.id))
+      const recent = (s.recent || []).filter(j => !activeIds.has(j.id))
+      return [...active, ...recent].slice(0, 20)
+    },
+    selectedSopJob() {
+      if (!this.selectedSopJobId) return this.sopTaskJobs[0] || null
+      return (
+        this.sopTaskJobs.find(j => j.id === this.selectedSopJobId) ||
+        (this.sopRunQueue && this.sopRunQueue.getJob(this.selectedSopJobId)) ||
+        null
+      )
+    },
+    selectedJobStreamDisplay() {
+      const job = this.selectedSopJob
+      if (!job) return ''
+      const modelText = String(job.streamText || '').trim()
+      if (modelText) return job.streamText
+      const progress = String(job.progressText || '').trim()
+      if (progress) {
+        return (
+          progress +
+          (job.state === 'running' || job.state === 'queued'
+            ? '\n\n（模型正文会在生成后出现在此处）'
+            : '')
+        )
+      }
+      if (job.state === 'running' || job.state === 'queued') {
+        return '等待 WorkBuddy 输出…'
+      }
+      return job.error || ''
     }
   },
   watch: {
@@ -574,6 +734,21 @@ export default {
   async created() {
     this.initLocalConfig()
     this.setBodyDark()
+    this.sopRunQueue = createSopRunQueue({
+      getConcurrency: () => resolveSopRunConcurrency(),
+      onChange: snap => {
+        this.sopQueueSnap = snap
+        if (
+          this.selectedSopJobId &&
+          !snap.pending.some(j => j.id === this.selectedSopJobId) &&
+          !snap.running.some(j => j.id === this.selectedSopJobId) &&
+          !(snap.recent || []).some(j => j.id === this.selectedSopJobId)
+        ) {
+          /* keep id; getJob may still resolve from recent copy */
+        }
+        this.scrollRunStream()
+      }
+    })
     this.roomKey = roomFromLocation(this.$route) || ''
     await this.loadSpaces()
     if (this.roomKey) this.refreshRoomList()
@@ -581,9 +756,9 @@ export default {
   },
   beforeDestroy() {
     this.teardownPreview()
-    if (this.runAbort) {
+    if (this.sopRunQueue) {
       try {
-        this.runAbort.abort()
+        this.sopRunQueue.cancelAll()
       } catch (e) {
         /* ignore */
       }
@@ -696,14 +871,77 @@ export default {
     isHttp(uri) {
       return /^https?:\/\//i.test(String(uri || ''))
     },
+    isLocalAbsPath(uri) {
+      return /^[A-Za-z]:[\\/]/.test(String(uri || ''))
+    },
+    deliverableOpenUrl(d, { download = false } = {}) {
+      const uri = String((d && d.uri_or_path) || '')
+      const name = String((d && d.name) || '')
+      if (this.isHttp(uri)) return uri
+      if (this.isLocalAbsPath(uri) || /\.(html?|xlsx?|pdf|md|csv)$/i.test(name || uri)) {
+        return artifactLocalUrl(this.isLocalAbsPath(uri) ? uri : name || uri, {
+          download,
+          name: name || uri
+        })
+      }
+      return ''
+    },
+    canDownloadDeliverable(d) {
+      const uri = String((d && d.uri_or_path) || '')
+      const name = String((d && d.name) || '')
+      return (
+        this.isHttp(uri) ||
+        this.isLocalAbsPath(uri) ||
+        /\.(html?|xlsx?|pdf|md|csv)$/i.test(name || uri)
+      )
+    },
+    canPreviewDeliverable(d) {
+      const uri = String((d && d.uri_or_path) || '')
+      const name = String((d && d.name) || '')
+      if (this.isHttp(uri)) {
+        return (
+          /\.(html?|pdf|md|txt)(\?|#|$)/i.test(uri) ||
+          /执行单|报告/i.test(name)
+        )
+      }
+      if (this.isLocalAbsPath(uri)) {
+        return /\.(html?|pdf|md|txt)$/i.test(uri)
+      }
+      return /\.(html?|pdf|md|txt)$/i.test(name)
+    },
+    openUrl(url) {
+      if (!url) return
+      window.open(url, '_blank', 'noopener')
+    },
+    previewDeliverable(d) {
+      const url = this.deliverableOpenUrl(d, { download: false })
+      if (!url) {
+        this.$message.warning('无法预览该产物')
+        return
+      }
+      this.artifactPreviewTitle = (d && d.name) || '产物预览'
+      this.artifactPreviewUrl = url
+      this.artifactPreviewDownloadUrl = this.deliverableOpenUrl(d, {
+        download: true
+      })
+      this.artifactPreviewVisible = true
+    },
+    downloadDeliverable(d) {
+      const url = this.deliverableOpenUrl(d, { download: true })
+      if (!url) {
+        this.$message.warning('无法下载该产物')
+        return
+      }
+      this.openUrl(url)
+    },
+    onArtifactPreviewClosed() {
+      this.artifactPreviewUrl = ''
+      this.artifactPreviewDownloadUrl = ''
+    },
     resetLedgerForms() {
-      const now = new Date()
-      const pad = n => String(n).padStart(2, '0')
-      const at = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
-        now.getDate()
-      )} ${pad(now.getHours())}:${pad(now.getMinutes())}`
+      const at = formatMinuteStamp()
       this.runForm = { at, result: '完成', note: '' }
-      this.delForm = { name: '', uri_or_path: '', kind: 'link' }
+      this.delForm = { name: '', uri_or_path: '', kind: 'file' }
       this.cosHint = ''
     },
     fillCosHint() {
@@ -786,16 +1024,19 @@ export default {
         this.$message.warning('请先选择空间')
         return
       }
+      if (this.sopCardJobState(item)) {
+        this.$message.info('该 SOP 已在运行或排队中')
+        const job = this.sopRunQueue.findActiveBySop(
+          this.roomKey,
+          this.resolveSopUid(item)
+        )
+        if (job) this.selectSopJob(job.id)
+        return
+      }
       this.runTarget = item
       this.runOutputIds = ['html']
       this.runExtraNote = '生成的 html 要简洁美观'
-      this.runModel =
-        getWorkbuddyConfig().model || 'deepseek-v4-flash'
-      this.runPreview = null
-      this.runContext = null
-      this.runStreamText = ''
-      this.runEventLog = []
-      this.runStatusText = ''
+      this.runModel = getWorkbuddyConfig().model || 'deepseek-v4-flash'
       this.runDialogVisible = true
       this.loadRunModels()
     },
@@ -832,14 +1073,74 @@ export default {
         this.runModelsLoading = false
       }
     },
-    cancelRunSop() {
-      if (this.runAbort) {
-        try {
-          this.runAbort.abort()
-        } catch (e) {
-          /* ignore */
-        }
+    sopCardJobState(item) {
+      if (!this.sopRunQueue || !item) return ''
+      const job = this.sopRunQueue.findActiveBySop(
+        this.roomKey,
+        this.resolveSopUid(item)
+      )
+      return (job && job.state) || ''
+    },
+    sopCardJobLabel(item) {
+      const state = this.sopCardJobState(item)
+      if (state === 'running') return '运行中'
+      if (state === 'queued') return '排队中'
+      return ''
+    },
+    sopJobStateLabel(job) {
+      const map = {
+        running: '运行中',
+        queued: '排队',
+        done: '完成',
+        error: '失败',
+        cancelled: '已取消'
       }
+      return map[job && job.state] || (job && job.state) || ''
+    },
+    selectSopJob(jobId) {
+      this.selectedSopJobId = jobId
+      this.scrollRunStream()
+    },
+    cancelSopJob(jobId) {
+      if (!this.sopRunQueue) return
+      this.sopRunQueue.cancel(jobId)
+    },
+    cancelAllSopJobs() {
+      if (!this.sopRunQueue) return
+      this.sopRunQueue.cancelAll()
+      this.$message.info('已取消全部 SOP 任务')
+    },
+    applyJobLedgerToList(job, ledger) {
+      if (!job || !ledger) return
+      const idx = this.sops.findIndex(
+        s =>
+          s.rowKey === job.sopRowKey ||
+          this.resolveSopUid(s) === job.sopUid
+      )
+      if (idx < 0) return
+      const next = {
+        ...this.sops[idx],
+        runs: ledger.runs,
+        deliverables: ledger.deliverables,
+        frequency: ledger.frequency,
+        sopLedger: ledger
+      }
+      this.$set(this.sops, idx, next)
+    },
+    openJobDeliverables(job) {
+      const item = this.sops.find(
+        s =>
+          s.rowKey === job.sopRowKey ||
+          this.resolveSopUid(s) === job.sopUid
+      )
+      if (!item) {
+        this.$message.warning('列表中找不到该 SOP')
+        return
+      }
+      this.openSubtree(item)
+      this.$nextTick(() => {
+        this.dialogTab = 'dels'
+      })
     },
     scrollRunStream() {
       this.$nextTick(() => {
@@ -847,141 +1148,72 @@ export default {
         if (el) el.scrollTop = el.scrollHeight
       })
     },
-    formatEventTime(ts) {
-      const d = new Date(ts || Date.now())
-      const pad = n => String(n).padStart(2, '0')
-      return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-    },
-    async confirmRunSop() {
-      if (!this.runTarget || !this.roomKey) return
+    confirmRunSop() {
+      if (!this.runTarget || !this.roomKey || !this.sopRunQueue) return
       if (!this.runOutputIds.length) {
         this.$message.warning('请至少选择一种产物')
         return
       }
-      if (this.runAbort) {
-        try {
-          this.runAbort.abort()
-        } catch (e) {
-          /* ignore */
-        }
+      if (this.runModel) {
+        this.setLocalConfig({ workbuddyModel: this.runModel })
       }
-      const controller =
-        typeof AbortController !== 'undefined' ? new AbortController() : null
-      this.runAbort = controller
-      this.runningKey = this.runTarget.rowKey
-      this.runPreview = null
-      this.runContext = null
-      this.runStreamText = ''
-      this.runEventLog = []
-      this.runStatusText = '准备运行…'
-      try {
-        if (this.runModel) {
-          this.setLocalConfig({ workbuddyModel: this.runModel })
-        }
-        const result = await runSopWithWorkbuddy({
-          roomKey: this.roomKey,
-          sop: this.runTarget,
-          outputIds: this.runOutputIds,
-          extraNote: this.runExtraNote,
-          model: this.runModel,
-          actor: this.userInfo.name || '台账',
-          signal: controller && controller.signal,
-          onStatus: text => {
-            this.runStatusText = text
-          },
-          onContext: ctx => {
-            this.runContext = ctx
-          },
-          onDelta: text => {
-            this.runStreamText = String(text || '')
-            this.scrollRunStream()
-          },
-          onEventDetail: ({ label, at }) => {
-            if (!label) return
-            this.runEventLog.push({
-              label,
-              time: this.formatEventTime(at)
-            })
-            if (this.runEventLog.length > 80) {
-              this.runEventLog = this.runEventLog.slice(-80)
-            }
-          }
-        })
-        if (!this.runStreamText && result.reply) {
-          this.runStreamText = result.reply
-        }
-        this.runPreview = {
-          runResult: result.runResult,
-          elapsedSec: result.elapsedSec,
-          reply: result.reply,
-          deliverables: result.deliverables || [],
-          toolEvents:
-            (result.assessment && result.assessment.toolEvents) ||
-            ((result.events && result.events.length) || 0)
-        }
-        const idx = this.sops.findIndex(
-          s => s.rowKey === this.runTarget.rowKey || s === this.runTarget
-        )
-        if (idx >= 0 && result.ledger) {
-          const next = {
-            ...this.sops[idx],
-            runs: result.ledger.runs,
-            deliverables: result.ledger.deliverables,
-            frequency: result.ledger.frequency,
-            sopLedger: result.ledger
-          }
-          this.$set(this.sops, idx, next)
-          this.runTarget = next
-        }
-        if (result.ok) {
-          this.$message.success(
-            `SOP 执行完成（约 ${result.elapsedSec}s，产物 ${
-              (result.deliverables && result.deliverables.length) || 0
-            } 个）`
-          )
-        } else {
-          const reason =
-            (result.assessment && result.assessment.reason) ||
-            result.runResult ||
-            '未确认真执行'
-          this.$message.warning(
-            `可能未真正执行（约 ${result.elapsedSec}s）：${reason}`
-          )
-        }
-      } catch (err) {
-        if (err && err.name === 'AbortError') {
-          this.runStatusText = '已取消'
-          return
-        }
-        console.error('[sopRun]', err)
-        const msg = (err && err.message) || '运行失败'
-        this.runStatusText = msg
-        if (!this.runStreamText) {
-          this.runStreamText =
-            msg +
-            '\n\n（本机探测：/wb-api/health 正常，但 chat 常返回空正文 + 仅 phase 事件。请在 WorkBuddy 客户端里先手动跑通同一 SOP。）'
-        }
-        if (err && err.ledger && this.runTarget) {
-          const idx = this.sops.findIndex(
-            s => s.rowKey === this.runTarget.rowKey || s === this.runTarget
-          )
-          if (idx >= 0) {
-            const next = {
-              ...this.sops[idx],
-              runs: err.ledger.runs,
-              deliverables: err.ledger.deliverables,
-              frequency: err.ledger.frequency,
-              sopLedger: err.ledger
-            }
-            this.$set(this.sops, idx, next)
-            this.runTarget = next
-          }
-        }
-        this.$message.error(msg)
-      } finally {
-        this.runningKey = ''
-        this.runAbort = null
+      const sop = {
+        ...this.runTarget,
+        uid: this.resolveSopUid(this.runTarget)
       }
+      const enqueued = this.sopRunQueue.enqueue({
+        roomKey: this.roomKey,
+        sop,
+        outputIds: this.runOutputIds.slice(),
+        extraNote: this.runExtraNote,
+        model: this.runModel,
+        actor: this.userInfo.name || '台账',
+        onSuccess: (result, job) => {
+          if (result && result.ledger) {
+            this.applyJobLedgerToList(job, result.ledger)
+          }
+          if (result && result.ok) {
+            this.$message.success(
+              `「${job.sopTitle}」完成（约 ${result.elapsedSec}s，产物 ${
+                (result.deliverables && result.deliverables.length) || 0
+              } 个）`
+            )
+          } else {
+            const reason =
+              (result &&
+                result.assessment &&
+                result.assessment.reason) ||
+              (result && result.runResult) ||
+              '未确认真执行'
+            this.$message.warning(`「${job.sopTitle}」：${reason}`)
+          }
+        },
+        onError: (err, msg) => {
+          if (err && err.ledger) {
+            this.applyJobLedgerToList(
+              {
+                sopRowKey: sop.rowKey,
+                sopUid: sop.uid
+              },
+              err.ledger
+            )
+          }
+          if (!(err && err.name === 'AbortError')) {
+            this.$message.error(`「${sop.title}」：${msg}`)
+          }
+        }
+      })
+      if (!enqueued.ok) {
+        this.$message.warning(enqueued.message || '入队失败')
+        return
+      }
+      this.selectedSopJobId = enqueued.job.id
+      this.runDialogVisible = false
+      this.$message.success(
+        `已加入队列：${sop.title}（并发上限 ${
+          this.sopQueueSnap.concurrency || 2
+        }）`
+      )
     },
     resolveSopUid(item) {
       if (!item) return ''
@@ -1266,6 +1498,10 @@ export default {
         // 子树根上可能有更新的 sopLedger
         const nodeData = (root && root.data) || {}
         if (nodeData.sopLedger || nodeData.note) {
+          const rawDels =
+            (nodeData.sopLedger && nodeData.sopLedger.deliverables) ||
+            item.deliverables ||
+            []
           this.activeLedger = mergeLedgerSources(
             readLedgerFromNodeLike(nodeData),
             {
@@ -1274,6 +1510,38 @@ export default {
               deliverables: item.deliverables
             }
           )
+          // 打开时清掉过程数据 / MCP 噪声，并静默回写
+          if (
+            Array.isArray(rawDels) &&
+            rawDels.length > this.activeLedger.deliverables.length
+          ) {
+            try {
+              await persistSopLedger(
+                this.roomKey,
+                this.activeSopUid,
+                {
+                  id: (item && item.id) || '',
+                  title: (item && item.title) || ''
+                },
+                this.activeLedger
+              )
+              const idx = this.sops.findIndex(
+                s =>
+                  this.resolveSopUid(s) === this.activeSopUid || s === item
+              )
+              if (idx >= 0) {
+                const next = {
+                  ...this.sops[idx],
+                  deliverables: this.activeLedger.deliverables,
+                  sopLedger: normalizeLedger(this.activeLedger)
+                }
+                this.$set(this.sops, idx, next)
+                this.activeSop = next
+              }
+            } catch (e) {
+              console.warn('[sopRegistry] clean junk deliverables failed', e)
+            }
+          }
         }
         this.pendingRoot = root
         this.pendingVersion = Number((data && data.version) || 0)
@@ -1366,6 +1634,37 @@ export default {
         color: #dcdfe6;
       }
     }
+
+    .sopTaskPanel {
+      background: #262a2e;
+      border-color: rgba(255, 255, 255, 0.08);
+
+      .taskPanelHead {
+        background: #1f2329;
+        border-bottom-color: rgba(255, 255, 255, 0.08);
+      }
+
+      .taskTitleRow strong {
+        color: #e5eaf3;
+      }
+
+      .taskList {
+        border-right-color: rgba(255, 255, 255, 0.08);
+      }
+
+      .taskItem {
+        border-bottom-color: rgba(255, 255, 255, 0.06);
+
+        &:hover,
+        &.active {
+          background: rgba(255, 255, 255, 0.04);
+        }
+      }
+
+      .taskName {
+        color: #e5eaf3;
+      }
+    }
   }
 
   .sopHeader {
@@ -1427,6 +1726,155 @@ export default {
     margin-top: 8px;
   }
 
+  .sopTaskPanel {
+    margin-top: 20px;
+    border: 1px solid #ebeef5;
+    border-radius: 10px;
+    background: #fff;
+    overflow: hidden;
+
+    .taskPanelHead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 14px;
+      border-bottom: 1px solid #ebeef5;
+      background: #f8faf9;
+    }
+
+    .taskTitleRow {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+
+      strong {
+        font-size: 14px;
+        color: #303133;
+      }
+    }
+
+    .taskSummary {
+      font-size: 12px;
+      color: #909399;
+    }
+
+    .taskBody {
+      display: grid;
+      grid-template-columns: minmax(220px, 320px) 1fr;
+      min-height: 220px;
+      max-height: 420px;
+    }
+
+    .taskList {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      overflow: auto;
+      border-right: 1px solid #ebeef5;
+    }
+
+    .taskItem {
+      padding: 10px 12px;
+      border-bottom: 1px solid #f2f3f5;
+      cursor: pointer;
+
+      &:hover,
+      &.active {
+        background: #f5faf7;
+      }
+
+      &.error .taskState {
+        color: #f56c6c;
+      }
+
+      &.done .taskState {
+        color: #67c23a;
+      }
+
+      &.running .taskState {
+        color: #409eff;
+      }
+
+      &.queued .taskState {
+        color: #e6a23c;
+      }
+    }
+
+    .taskItemMain {
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+      margin-bottom: 4px;
+    }
+
+    .taskState {
+      flex-shrink: 0;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .taskName {
+      font-size: 13px;
+      color: #303133;
+      word-break: break-word;
+    }
+
+    .taskItemStatus {
+      font-size: 12px;
+      color: #909399;
+      line-height: 1.4;
+      max-height: 2.8em;
+      overflow: hidden;
+    }
+
+    .taskItemActions {
+      margin-top: 4px;
+    }
+
+    .taskDetail {
+      padding: 12px 14px;
+      overflow: auto;
+
+      .liveHead {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+        font-size: 13px;
+      }
+
+      .ctxBox,
+      .eventBox,
+      .streamBox {
+        margin-bottom: 10px;
+      }
+
+      .eventList {
+        max-height: 120px;
+        overflow: auto;
+      }
+
+      .streamText {
+        max-height: 180px;
+      }
+    }
+  }
+
+  @media (max-width: 900px) {
+    .sopTaskPanel .taskBody {
+      grid-template-columns: 1fr;
+      max-height: none;
+    }
+
+    .sopTaskPanel .taskList {
+      border-right: 0;
+      border-bottom: 1px solid #ebeef5;
+      max-height: 160px;
+    }
+  }
+
   .sopCard {
     background: #fff;
     border: 1px solid #ebeef5;
@@ -1448,6 +1896,31 @@ export default {
       justify-content: space-between;
       gap: 8px;
       margin-bottom: 10px;
+    }
+
+    .cardActions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .jobChip {
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #ecf5ff;
+      color: #409eff;
+
+      &.running {
+        background: #f0f9eb;
+        color: #67c23a;
+      }
+
+      &.queued {
+        background: #fdf6ec;
+        color: #e6a23c;
+      }
     }
 
     .cardTitle {
@@ -1616,6 +2089,7 @@ export default {
     }
 
     .liPath,
+    .liAt,
     .liActor,
     .liKind {
       flex-shrink: 0;
@@ -1626,6 +2100,21 @@ export default {
     .liPath {
       display: block;
       margin-top: 4px;
+      word-break: break-all;
+    }
+
+    .liAt {
+      display: inline-block;
+      margin-top: 4px;
+      margin-right: 8px;
+      color: #a0a4ab;
+    }
+
+    .liActions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
     }
   }
 
@@ -1867,6 +2356,22 @@ export default {
       word-break: break-word;
       color: #606266;
     }
+  }
+}
+</style>
+
+<style lang="less">
+.artifactPreviewDialog {
+  .el-dialog__body {
+    padding: 8px 16px 0;
+  }
+
+  .artifactPreviewFrame {
+    width: 100%;
+    height: 70vh;
+    border: 1px solid #ebeef5;
+    border-radius: 8px;
+    background: #fff;
   }
 }
 </style>

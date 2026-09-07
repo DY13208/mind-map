@@ -33,11 +33,106 @@ export function normalizeRun(run) {
   }
 }
 
+export function formatMinuteStamp(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
+    d.getHours()
+  )}:${pad(d.getMinutes())}`
+}
+
+/** 文件名用时间戳：2026-09-07_1730 */
+export function formatMinuteFileStamp(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(
+    d.getHours()
+  )}${pad(d.getMinutes())}`
+}
+
+export function isOpenableDeliverableUri(uri) {
+  const u = String(uri || '').trim()
+  return (
+    /^https?:\/\//i.test(u) ||
+    /^[A-Za-z]:[\\/]/.test(u) ||
+    (u.startsWith('/') && /\.[a-z0-9]+$/i.test(u))
+  )
+}
+
+export function isPreferredLocalDeliverable(item) {
+  const uri = String((item && item.uri_or_path) || '').trim()
+  return /[\\/]output[\\/][^\\/]+\.(html?|xlsx?|docx?|pdf|md|csv)$/i.test(uri)
+}
+
+export function isJunkDeliverable(item) {
+  const name = String((item && item.name) || '').trim()
+  const uri = String((item && item.uri_or_path) || '').trim()
+  const blob = `${name}\n${uri}`
+  if (!name && !uri) return true
+  if (/过程数据|_map_full|_map_outline|mcp[\\/]stdout|schema#/i.test(blob)) {
+    return true
+  }
+  if (/^(mcp|stdout|schema|s3_|e3_)([\\/#:_.]|$)/i.test(name)) return true
+  if (/mcp[)）]|房间\s*$/i.test(name)) return true
+  // 必须是可打开的绝对路径或 http(s)
+  if (!isOpenableDeliverableUri(uri)) return true
+  // COS/临时对象链接：没有交付扩展名则丢弃
+  if (
+    /^https?:\/\//i.test(uri) &&
+    !/\.(html?|xlsx?|docx?|pdf|md|csv)(\?|#|$)/i.test(uri) &&
+    !/(执行单|报告)/i.test(`${name} ${uri}`)
+  ) {
+    return true
+  }
+  if (
+    /(?:^|[\\/])mcp(?:[\\/]|$)|\/stdout/i.test(uri) &&
+    !/\.(html?|xlsx?|docx?|pdf|md|csv)(\?|#|$)/i.test(uri)
+  ) {
+    return true
+  }
+  return false
+}
+
+/** 若存在 output 下落盘文件，只保留这类最终产物 */
+export function pruneDeliverables(list) {
+  const cleaned = (Array.isArray(list) ? list : [])
+    .map(normalizeDeliverable)
+    .filter(Boolean)
+    .filter(d => !/SOP_LEDGER/.test(`${d.name}${d.uri_or_path}`))
+  const preferred = cleaned.filter(isPreferredLocalDeliverable)
+  const source = preferred.length ? preferred : cleaned
+  // 同名只留一条（优先带绝对路径的）
+  const byBase = new Map()
+  source.forEach(item => {
+    const base = String(item.name || '')
+      .split(/[\\/]/)
+      .pop()
+      .toLowerCase()
+    const prev = byBase.get(base)
+    if (!prev) {
+      byBase.set(base, item)
+      return
+    }
+    const score = d =>
+      (isPreferredLocalDeliverable(d) ? 100 : 0) +
+      (/^[A-Za-z]:[\\/]/.test(d.uri_or_path) ? 50 : 0) +
+      (/^https?:\/\//i.test(d.uri_or_path) ? 10 : 0)
+    if (score(item) > score(prev)) byBase.set(base, item)
+  })
+  return Array.from(byBase.values()).sort((a, b) =>
+    String(b.at || b.createdAt).localeCompare(String(a.at || a.createdAt))
+  )
+}
+
 export function normalizeDeliverable(item) {
   if (!item || typeof item !== 'object') return null
-  const name = String(item.name || '').trim()
+  let name = String(item.name || '').trim()
   const uri = String(item.uri_or_path || item.uri || item.url || '').trim()
+  name = name.replace(/^name\s*[:：]\s*/i, '').trim()
   if (!name && !uri) return null
+  if (isJunkDeliverable({ name, uri_or_path: uri })) return null
   const kind = ['file', 'link', 'node', 'cos'].includes(item.kind)
     ? item.kind
     : uri
@@ -49,8 +144,8 @@ export function normalizeDeliverable(item) {
     id:
       item.id ||
       `del_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-    name: name || uri,
-    uri_or_path: uri,
+    name: name || uri.split(/[\\/]/).pop() || uri,
+    uri_or_path: uri || name,
     kind,
     at: String(item.at || '').trim(),
     createdAt: item.createdAt || new Date().toISOString()
@@ -70,13 +165,9 @@ export function normalizeLedger(raw) {
     .filter(Boolean)
     .filter(r => !/SOP_LEDGER|【SOP台账】/.test(String(r.note || '')))
     .sort((a, b) => String(b.at || b.createdAt).localeCompare(String(a.at || a.createdAt)))
-  base.deliverables = (Array.isArray(raw.deliverables) ? raw.deliverables : [])
-    .map(normalizeDeliverable)
-    .filter(Boolean)
-    .filter(d => !/SOP_LEDGER/.test(`${d.name}${d.uri_or_path}`))
-    .sort((a, b) =>
-      String(b.at || b.createdAt).localeCompare(String(a.at || a.createdAt))
-    )
+  base.deliverables = pruneDeliverables(
+    Array.isArray(raw.deliverables) ? raw.deliverables : []
+  )
   return base
 }
 
@@ -226,46 +317,65 @@ export function sanitizeDisplayText(text) {
 
 /** 建议的 COS/对象路径（仅作填写提示，不自动上传） */
 export function suggestCosPath(roomKey, sopId, fileName) {
-  const day = new Date().toISOString().slice(0, 10)
+  const stamp = formatMinuteFileStamp()
   const safeName = String(fileName || 'file')
     .replace(/[\\/:*?"<>|]/g, '_')
     .slice(0, 80)
-  return `mind-map/sop-runs/${roomKey || 'room'}/${sopId || 'SOP'}/${day}/${safeName}`
+  return `mind-map/sop-runs/${roomKey || 'room'}/${sopId || 'SOP'}/${stamp}/${safeName}`
 }
 
 /**
  * 持久化台账到节点：data.sopLedger + note 摘要
  */
+const ledgerPersistChains = new Map()
+
+function withLedgerPersistLock(nodeUid, fn) {
+  const key = String(nodeUid || '').trim() || '_unknown'
+  const prev = ledgerPersistChains.get(key) || Promise.resolve()
+  const next = prev.catch(() => {}).then(fn)
+  ledgerPersistChains.set(
+    key,
+    next.finally(() => {
+      if (ledgerPersistChains.get(key) === next) {
+        ledgerPersistChains.delete(key)
+      }
+    })
+  )
+  return next
+}
+
 export async function persistSopLedger(roomKey, uid, sopMeta, ledger, options = {}) {
   const key = String(roomKey || '').trim()
   const nodeUid = String(uid || '').trim()
   if (!key || !nodeUid) throw new Error('缺少房间或节点')
 
-  const { getFileNodes, patchFileNode } = await import('@/utils/fileApi')
-  const normalized = normalizeLedger(ledger)
+  return withLedgerPersistLock(nodeUid, async () => {
+    const { getFileNodes, patchFileNode } = await import('@/utils/fileApi')
+    const normalized = normalizeLedger(ledger)
 
-  let prevNote = options.prevNote || ''
-  if (!prevNote) {
-    try {
-      const res = await getFileNodes(key, [nodeUid])
-      const node = (res && res.nodes && res.nodes[0]) || null
-      prevNote =
-        (node && node.data && node.data.note) ||
-        (node && node.note) ||
-        ''
-      if (node && node.data && node.data.sopLedger && !options.replace) {
-        // 已在外部合并好则跳过
+    let prevNote = options.prevNote || ''
+    if (!prevNote) {
+      try {
+        const res = await getFileNodes(key, [nodeUid])
+        const node = (res && res.nodes && res.nodes[0]) || null
+        prevNote =
+          (node && node.data && node.data.note) ||
+          (node && node.note) ||
+          ''
+        if (node && node.data && node.data.sopLedger && !options.replace) {
+          // 已在外部合并好则跳过
+        }
+      } catch (e) {
+        /* keep empty */
       }
-    } catch (e) {
-      /* keep empty */
     }
-  }
 
-  const note = composeNodeNote(prevNote, sopMeta, normalized)
-  return patchFileNode(key, nodeUid, {
-    sopLedger: normalized,
-    note,
-    confirm_sop_change: true
+    const note = composeNodeNote(prevNote, sopMeta, normalized)
+    return patchFileNode(key, nodeUid, {
+      sopLedger: normalized,
+      note,
+      confirm_sop_change: true
+    })
   })
 }
 
@@ -286,7 +396,7 @@ export function addDeliverableToLedger(ledger, itemInput) {
   const L = normalizeLedger(ledger)
   const item = normalizeDeliverable({
     ...itemInput,
-    at: itemInput.at || new Date().toISOString().slice(0, 10)
+    at: itemInput.at || formatMinuteStamp()
   })
   if (!item) return L
   return normalizeLedger({
