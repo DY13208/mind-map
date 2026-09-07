@@ -531,6 +531,10 @@ function flattenNodes(obj) {
     uid,
     text: stripHtml(obj[uid].data && obj[uid].data.text),
     note: obj[uid].data && obj[uid].data.note ? String(obj[uid].data.note) : '',
+    sopLedger:
+      obj[uid].data && obj[uid].data.sopLedger
+        ? obj[uid].data.sopLedger
+        : null,
     isRoot: !!obj[uid].isRoot,
     parent_uid: parentOf[uid] || null,
     children: obj[uid].children || [],

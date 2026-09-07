@@ -216,6 +216,15 @@
           </div>
           <div
             class="toolbarBtn"
+            data-testid="sop-registry"
+            @click="openSopRegistry"
+            v-if="!isReadonly"
+          >
+            <span class="icon iconfont icongaikuozonglan"></span>
+            <span class="text">{{ $t('toolbar.sopRegistry') }}</span>
+          </div>
+          <div
+            class="toolbarBtn"
             @click="$bus.$emit('showExport')"
             style="margin-right: 0"
           >
@@ -312,6 +321,7 @@ import { getData } from '../../../api'
 import ToolbarNodeBtnList from './ToolbarNodeBtnList.vue'
 import { throttle, isMobile } from 'simple-mind-map/src/utils/index'
 import { stringifyJsonOffMainThread } from '@/utils/importTree'
+import { roomFromLocation } from '@/utils/roomLocation'
 
 // 工具栏
 let fileHandle = null
@@ -548,6 +558,14 @@ export default {
       if (collapsed) {
         this.popoverShow = false
       }
+    },
+
+    openSopRegistry() {
+      const room = roomFromLocation(this.$route) || ''
+      this.$router.push({
+        path: '/sop',
+        query: room ? { room } : {}
+      })
     },
 
     syncDisplayedSaveChip(next) {
