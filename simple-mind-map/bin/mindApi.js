@@ -601,7 +601,7 @@ async function nodeMutationResponse(roomKey, committed) {
   const row = await getRoom(roomKey)
   return {
     ...op,
-    title: (row && row.title) || '未命名',
+    title: mindDoc.stripHtml((row && row.title) || '') || '未命名',
     share_url: shareUrl(roomKey),
     updated_at: row && row.updated_at
   }
@@ -666,7 +666,9 @@ async function loadSnapshot(roomKey) {
 }
 
 function mapTitle(obj, row) {
-  if (row && row.title) return row.title
+  if (row && row.title) {
+    return mindDoc.stripHtml(row.title) || '未命名'
+  }
   const rootUid = mindDoc.findRootUid(obj)
   const root = rootUid && obj[rootUid]
   return mindDoc.stripHtml(root && root.data && root.data.text) || '未命名'
@@ -1452,7 +1454,8 @@ async function handleApi(req, res) {
         room_key: roomKey,
         version,
         historical: requested != null && requested !== '',
-        title: (loaded.row && loaded.row.title) || '未命名',
+        title:
+          mindDoc.stripHtml((loaded.row && loaded.row.title) || '') || '未命名',
         ...preview
       })
     } catch (err) {
@@ -1502,9 +1505,8 @@ async function handleApi(req, res) {
       }
     }
     const title =
-      String(body.title || '未命名')
-        .trim()
-        .slice(0, 80) || '未命名'
+      mindDoc.stripHtml(String(body.title || '未命名')).trim().slice(0, 80) ||
+      '未命名'
     const existed = await loadMap(roomKey)
     if (existed && Object.keys(existed.obj).length) {
       sendJson(res, 409, { error: '房间已存在', room_key: roomKey })
@@ -2346,7 +2348,7 @@ async function handleApi(req, res) {
     sendJson(res, 200, {
       room_key: roomKey,
       version: Number((loaded.row && loaded.row.version) || 0),
-      title: (loaded.row && loaded.row.title) || '未命名',
+      title: mindDoc.stripHtml((loaded.row && loaded.row.title) || '') || '未命名',
       share_url: shareUrl(roomKey),
       outline: mindDoc.toOutline(loaded.obj, {
         maxNodes: Number(url.searchParams.get('max_nodes') || 0) || 0

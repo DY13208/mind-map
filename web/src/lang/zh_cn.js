@@ -163,8 +163,8 @@ export default {
     modifyNodeLink: '修改节点链接',
     linkToNode: '链接到指定节点',
     removeNodeLink: '删除节点链接',
-    mapRef: '引用思维导图',
-    removeMapRef: '移除导图引用'
+    mapRef: '插入子脑图',
+    removeMapRef: '移除子脑图'
   },
   count: {
     words: '字数',
@@ -569,7 +569,7 @@ export default {
     tip5: '链接节点不存在，是否删除该链接？'
   },
   mapRef: {
-    title: '引用思维导图',
+    title: '插入子脑图',
     searchMaps: '搜索导图名称',
     bindMap: '绑定整张导图',
     bindNode: '定位到节点（可选）',
@@ -580,10 +580,21 @@ export default {
     missingMap: '目标导图不存在或已删除',
     missingNode: '目标节点不存在，已打开导图根节点',
     noPermission: '没有访问该导图的权限',
-    saved: '已保存引用',
-    removed: '已移除引用',
+    saved: '已插入子脑图',
+    savedTip: '已插入子脑图：节点应变为灰底卡片+紫色图标，双击打开预览（F2 可改名）',
+    applyFailed: '插入失败，请重新选中节点后再试',
+    removed: '已移除子脑图',
     openFailed: '无法打开引用的导图',
-    currentMap: '不能引用当前导图'
+    currentMap: '不能引用当前导图',
+    previewTitle: '子脑图预览',
+    openEdit: '打开编辑',
+    closePreview: '关闭',
+    previewLoading: '正在加载子脑图…',
+    previewFailed: '子脑图预览失败',
+    selectedHint: '已选中：{name}',
+    dblclickTip: '双击列表项可直接确认',
+    needSelect: '请先点击选择一张导图',
+    needNode: '请先选中要插入子脑图的节点'
   },
   acl: {
     share: '分享 / 权限',

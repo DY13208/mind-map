@@ -370,6 +370,14 @@ function layout() {
     textContentNested.add(iconNested)
     textContentOffsetX += iconLeft
   }
+  // 子脑图图标前置（企业微信文件卡片：图标在左、标题在右）
+  if (this._mapRefData) {
+    this._mapRefData.node
+      .x(textContentOffsetX)
+      .y((textContentHeight - this._mapRefData.height) / 2)
+    textContentNested.add(this._mapRefData.node)
+    textContentOffsetX += this._mapRefData.width + textContentMargin
+  }
   // 文字
   if (this._textData) {
     const oldX = this._textData.node.attr('data-offsetx') || 0
@@ -395,13 +403,6 @@ function layout() {
       .y((textContentHeight - this._hyperlinkData.height) / 2)
     textContentNested.add(this._hyperlinkData.node)
     textContentOffsetX += this._hyperlinkData.width + textContentMargin
-  }
-  if (this._mapRefData) {
-    this._mapRefData.node
-      .x(textContentOffsetX)
-      .y((textContentHeight - this._mapRefData.height) / 2)
-    textContentNested.add(this._mapRefData.node)
-    textContentOffsetX += this._mapRefData.width + textContentMargin
   }
   // 标签
   let tagNested = new G()

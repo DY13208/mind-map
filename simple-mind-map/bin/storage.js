@@ -1884,7 +1884,14 @@ async function commitDirectRoomOperationOnce(client, roomKey, command, apply) {
     [
       roomKey,
       version,
-      applied.title ? String(applied.title).trim().slice(0, 80) : null,
+      applied.title
+        ? String(applied.title)
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 80) || null
+        : null,
       applied.metadata ? JSON.stringify(applied.metadata) : null
     ]
   )
@@ -2075,7 +2082,14 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
       roomKey,
       roomsJsonPayload,
       version,
-      applied.title ? String(applied.title).trim().slice(0, 80) : null
+      applied.title
+        ? String(applied.title)
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 80) || null
+        : null
     ]
   )
   const inserted = await client.query(

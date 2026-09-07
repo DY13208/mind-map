@@ -68,10 +68,12 @@ export function normalizeLedger(raw) {
   base.runs = (Array.isArray(raw.runs) ? raw.runs : [])
     .map(normalizeRun)
     .filter(Boolean)
+    .filter(r => !/SOP_LEDGER|【SOP台账】/.test(String(r.note || '')))
     .sort((a, b) => String(b.at || b.createdAt).localeCompare(String(a.at || a.createdAt)))
   base.deliverables = (Array.isArray(raw.deliverables) ? raw.deliverables : [])
     .map(normalizeDeliverable)
     .filter(Boolean)
+    .filter(d => !/SOP_LEDGER/.test(`${d.name}${d.uri_or_path}`))
     .sort((a, b) =>
       String(b.at || b.createdAt).localeCompare(String(a.at || a.createdAt))
     )
@@ -152,8 +154,13 @@ export function buildLedgerNoteSummary(sopMeta, ledger) {
     `频率: ${(L.frequency && L.frequency.label) || '未知'}`
   ]
   if (latestRun) {
+    const runNote = String(latestRun.note || '')
+      .replace(/<!--SOP_LEDGER:[\s\S]*?:SOP_LEDGER-->/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120)
     lines.push(
-      `最近运行: ${[latestRun.at, latestRun.result, latestRun.note]
+      `最近运行: ${[latestRun.at, latestRun.result, runNote]
         .filter(Boolean)
         .join(' ')}`
     )
@@ -192,7 +199,8 @@ export function latestRunText(runs) {
   const list = Array.isArray(runs) ? runs : []
   if (!list.length) return '暂无'
   const r = list[0]
-  return [r.at, r.result, r.note].filter(Boolean).join(' ') || '暂无'
+  const note = sanitizeDisplayText(r.note)
+  return [r.at, r.result, note].filter(Boolean).join(' · ') || '暂无'
 }
 
 export function latestDeliverableText(deliverables) {
@@ -200,7 +208,20 @@ export function latestDeliverableText(deliverables) {
   if (!list.length) return '暂无'
   const d = list[0]
   const extra = list.length > 1 ? ` +${list.length - 1}` : ''
-  return `${d.name || d.uri_or_path || '产物'}${extra}`
+  const name = sanitizeDisplayText(d.name || d.uri_or_path || '产物')
+  return `${name}${extra}`
+}
+
+/** 卡片/摘要展示用：去掉台账标记与 HTML 注释，避免把 JSON 块露出来 */
+export function sanitizeDisplayText(text) {
+  let t = String(text || '')
+  t = t.replace(/<!--SOP_LEDGER:[\s\S]*?:SOP_LEDGER-->/g, '')
+  t = t.replace(/【SOP台账】[\s\S]*/g, '')
+  t = t.replace(/最近运行:\s*/g, '')
+  t = t.replace(/最新产物:\s*/g, '')
+  t = t.replace(/\s+/g, ' ').trim()
+  if (t.length > 96) t = `${t.slice(0, 96)}…`
+  return t
 }
 
 /** 建议的 COS/对象路径（仅作填写提示，不自动上传） */

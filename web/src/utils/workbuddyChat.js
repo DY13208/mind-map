@@ -4,11 +4,13 @@ import { getLocalConfig } from '@/api'
 function resolveWorkbuddyModel(runtime, cfg) {
   const saved = getLocalConfig()
   const fromStorage = saved && saved.workbuddyModel
+  // auto / 空 → 自定义 DeepSeek（平台积分耗尽时不会空跑）
+  const pick = v => (v && v !== 'auto' ? v : '')
   return (
-    runtime.workbuddyModel ||
-    fromStorage ||
-    cfg.workbuddyModel ||
-    'auto'
+    pick(runtime.workbuddyModel) ||
+    pick(fromStorage) ||
+    pick(cfg.workbuddyModel) ||
+    'deepseek-v4-flash'
   )
 }
 
@@ -26,6 +28,20 @@ export function getWorkbuddyConfig() {
   }
 }
 
+/** 本机 WorkBuddy 自定义模型（无平台积分时用） */
+export const WORKBUDDY_CUSTOM_MODEL_HINTS = [
+  {
+    id: 'deepseek-v4-flash',
+    name: 'DeepSeek-V4 Flash（自定义）',
+    custom: true
+  },
+  {
+    id: 'deepseek-v4-flash-vision-exp',
+    name: 'deepseek-v4-flash-vision-exp（自定义）',
+    custom: true
+  }
+]
+
 export async function fetchWorkbuddyModels() {
   const { baseUrl, apiKey } = getWorkbuddyConfig()
   const res = await fetch(`${baseUrl}/v1/models`, {
@@ -38,7 +54,7 @@ export async function fetchWorkbuddyModels() {
   }
   const json = await res.json()
   const list = Array.isArray(json.data) ? json.data : []
-  return list
+  const mapped = list
     .map(item => ({
       id: item.id,
       name: item.name || item.id,
@@ -48,6 +64,19 @@ export async function fetchWorkbuddyModels() {
       supportsToolCall: item.supports_tool_call !== false
     }))
     .filter(item => item.id)
+
+  // 合并本机已知自定义模型，避免被平台同名模型盖住
+  const byId = new Map(mapped.map(item => [item.id, item]))
+  WORKBUDDY_CUSTOM_MODEL_HINTS.forEach(hint => {
+    const prev = byId.get(hint.id)
+    byId.set(hint.id, {
+      ...(prev || {}),
+      ...hint,
+      name: hint.name || (prev && prev.name) || hint.id,
+      custom: true
+    })
+  })
+  return Array.from(byId.values())
 }
 
 export async function checkWorkbuddy() {
@@ -113,9 +142,11 @@ export async function streamChat({
   onEvent,
   extra = {},
   stream = true,
-  conversationId
+  conversationId,
+  model
 } = {}) {
-  const { baseUrl, apiKey, model } = getWorkbuddyConfig()
+  const { baseUrl, apiKey, model: defaultModel } = getWorkbuddyConfig()
+  const useModel = String(model || defaultModel || 'auto').trim() || 'auto'
   const headers = {
     'Content-Type': 'application/json; charset=utf-8',
     Authorization: `Bearer ${apiKey}`,
@@ -128,7 +159,7 @@ export async function streamChat({
     method: 'POST',
     headers,
     body: JSON.stringify({
-      model,
+      model: useModel,
       stream: !!stream,
       workbuddy_events: true,
       messages,
