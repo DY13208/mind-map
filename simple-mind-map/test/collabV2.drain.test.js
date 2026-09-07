@@ -109,6 +109,20 @@ const cases = {
       assert.ok(dependents.every(row => row.errorCode === 'BLOCKED_BY_TERMINAL_CREATE'))
     } finally { await f.adapter.disconnect() }
   },
+  async terminalMutationDoesNotBlockExistingNode() {
+    const f = await fixture([
+      { type: 'node.update', clientSeq: 1, status: 'quarantined', errorCode: 'SOP_CONFIRM_REQUIRED', payload: { uid: 'sop' } },
+      { type: 'node.update', clientSeq: 2, status: 'pending', payload: { uid: 'sop', text: 'unconfirmed' } }
+    ])
+    try {
+      await wait(30)
+      assert.deepStrictEqual(f.sent.map(op => op.payload.uid), ['sop'])
+      assert.deepStrictEqual(
+        (await f.rows()).map(row => row.status),
+        ['quarantined']
+      )
+    } finally { await f.adapter.disconnect() }
+  },
   async forbiddenStopsAutomaticDrain() {
     const f = await fixture([
       { type: 'node.update', clientSeq: 1, status: 'pending', payload: { uid: 'a' } },
