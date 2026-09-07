@@ -28,7 +28,7 @@
     </div>
     <div v-else v-loading="loading || busy" class="contentArea">
       <h2 class="sectionTitle" v-if="mode !== 'trash' && itemCount">
-        {{ folder ? '当前目录' : pageTitle }} <span>{{ itemCount }}</span>
+        {{ folder ? '当前目录' : pageTitle }} <span>{{ displayCount }}</span>
       </h2>
       <div v-if="mode !== 'trash' && view === 'card' && itemCount" class="itemGrid">
         <template v-if="showFolders">
@@ -91,8 +91,18 @@
         @history="historyRoom"
         @delete="deleteRoom"
       />
-      <div v-if="hasMore" class="pager">
-        <el-button size="small" :loading="busy" @click="loadMore">加载更多</el-button>
+      <div v-if="showPager" class="pager">
+        <el-pagination
+          background
+          layout="total, sizes, prev, pager, next, jumper"
+          :current-page="page"
+          :page-size="limit"
+          :page-sizes="pageSizes"
+          :total="total"
+          :disabled="loading || busy"
+          @size-change="onPageSizeChange"
+          @current-change="onPageChange"
+        />
       </div>
       <EmptyState
         v-if="!loading && !visibleRooms.length && !filteredFolders.length"
@@ -118,12 +128,12 @@
     <ShareRoomDialog
       :visible.sync="shareVisible"
       :room="activeRoom"
-      @changed="load"
+      @changed="() => load({ reset: true, keepPage: true })"
     />
     <HistoryPanel
       :visible.sync="historyVisible"
       :room="activeRoom"
-      @restored="load"
+      @restored="() => load({ reset: true, keepPage: true })"
     />
   </section>
 </template>
@@ -157,6 +167,16 @@ const savedView = () => {
       : 'card'
   } catch (error) {
     return 'card'
+  }
+}
+const PAGE_SIZES = [10, 20, 50, 100]
+const PAGE_SIZE_KEY = 'product-shell-page-size'
+const savedPageSize = () => {
+  try {
+    const value = Number(localStorage.getItem(PAGE_SIZE_KEY))
+    return PAGE_SIZES.includes(value) ? value : 20
+  } catch (error) {
+    return 20
   }
 }
 export default {
@@ -193,10 +213,10 @@ export default {
       moveVisible: false,
       shareVisible: false,
       historyVisible: false,
-      limit: 50,
-      offset: 0,
+      pageSizes: PAGE_SIZES,
+      limit: savedPageSize(),
+      page: 1,
       total: 0,
-      nextCursor: '',
       searchTimer: null
     }
   },
@@ -204,10 +224,9 @@ export default {
     isRealFilesMode() {
       return this.mode === 'files' || this.mode === 'folder' || this.mode === 'shared'
     },
-    hasMore() {
-      if (!this.isRealFilesMode) return false
-      if (this.nextCursor) return true
-      return this.rooms.length < Number(this.total || 0)
+    showPager() {
+      // 无数据时不展示分页/加载更多；有数据时提供页码与每页数量调节。
+      return this.isRealFilesMode && !this.loading && Number(this.total || 0) > 0
     },
     folder() {
       return this.mode === 'folder'
@@ -219,11 +238,17 @@ export default {
     },
     pageDescription() {
       return this.folder
-        ? this.itemCount + ' 个项目'
+        ? this.displayCount + ' 个项目'
         : copy[this.mode][1]
     },
     itemCount() {
       return this.visibleRooms.length + this.filteredFolders.length
+    },
+    displayCount() {
+      if (this.isRealFilesMode && Number(this.total || 0) > 0) {
+        return Number(this.total)
+      }
+      return this.itemCount
     },
     showFolders() {
       return this.mode === 'files'
@@ -282,10 +307,15 @@ export default {
     search() {
       if (!this.isRealFilesMode) return
       clearTimeout(this.searchTimer)
-      this.searchTimer = setTimeout(() => this.load({ reset: true }), 300)
+      this.searchTimer = setTimeout(() => {
+        this.page = 1
+        this.load({ reset: true, keepPage: true })
+      }, 300)
     },
     sort() {
-      if (this.isRealFilesMode) this.load({ reset: true })
+      if (!this.isRealFilesMode) return
+      this.page = 1
+      this.load({ reset: true, keepPage: true })
     },
     view(value) {
       try {
@@ -306,18 +336,16 @@ export default {
       this.search = ''
       this.roleFilter = ''
       this.sort = this.mode === 'recent' ? 'lastOpenedAt' : 'updatedAt'
-      this.offset = 0
-      this.nextCursor = ''
-      this.load({ reset: true })
+      this.page = 1
+      this.load({ reset: true, keepPage: true })
     },
     async load(options = {}) {
       const reset = options.reset !== false
       const request = ++this.requestId
       const mode = this.mode
       const folderId = this.$route.params.id
-      if (reset) {
-        this.offset = 0
-        this.nextCursor = ''
+      if (reset && !options.keepPage) {
+        this.page = 1
       }
       this.loading = reset
       this.error = ''
@@ -348,16 +376,21 @@ export default {
           filters.sort = this.sort === 'lastOpenedAt' ? 'updatedAt' : this.sort
           filters.order = this.sort === 'title' ? 'asc' : 'desc'
           filters.limit = this.limit
-          filters.offset = reset ? 0 : this.offset
-          if (!reset && this.nextCursor) filters.cursor = this.nextCursor
+          filters.offset = Math.max(0, (this.page - 1) * this.limit)
         }
         const rooms = await roomService.listRooms(filters)
         if (request !== this.requestId) return
         const list = rooms.list || rooms
-        this.total = Number(rooms.total || list.length)
-        this.nextCursor = rooms.nextCursor || ''
-        this.offset = Number(rooms.offset || 0) + list.length
-        this.rooms = reset ? list : this.rooms.concat(list)
+        const total = Number(rooms.total != null ? rooms.total : list.length)
+        this.total = total
+        // 删到最后一页为空时，自动回到有效页。
+        const maxPage = Math.max(1, Math.ceil(total / this.limit) || 1)
+        if (this.isRealFilesMode && total > 0 && this.page > maxPage) {
+          this.page = maxPage
+          await this.load({ reset: true, keepPage: true })
+          return
+        }
+        this.rooms = list
       } catch (error) {
         if (request === this.requestId)
           this.error = userMessageFromError(error)
@@ -365,8 +398,20 @@ export default {
         if (request === this.requestId) this.loading = false
       }
     },
-    loadMore() {
-      return this.load({ reset: false })
+    onPageChange(page) {
+      this.page = Math.max(1, Number(page) || 1)
+      this.load({ reset: true, keepPage: true })
+    },
+    onPageSizeChange(size) {
+      const next = PAGE_SIZES.includes(Number(size)) ? Number(size) : 20
+      this.limit = next
+      this.page = 1
+      try {
+        localStorage.setItem(PAGE_SIZE_KEY, String(next))
+      } catch (error) {
+        /* preference is optional */
+      }
+      this.load({ reset: true, keepPage: true })
     },
     async perform(action, message) {
       if (this.busy) return
@@ -374,7 +419,7 @@ export default {
       try {
         await action()
         if (message) this.$message.success(message)
-        await this.load()
+        await this.load({ reset: true, keepPage: true })
       } catch (error) {
         this.$message.error(userMessageFromError(error))
       } finally {
@@ -558,6 +603,12 @@ export default {
   .el-alert {
     flex: 1;
   }
+}
+.pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 4px;
 }
 .trashList {
   background: white;

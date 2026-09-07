@@ -198,8 +198,44 @@ function mockRes() {
   })
   const shared = await fs.listRooms({ userId: VIEWER, limit: 100 })
   assert.ok(shared.list.some(item => item.roomKey === created.room.roomKey))
+  const sharedOnly = await fs.listRooms({
+    userId: VIEWER,
+    shared: true,
+    limit: 100
+  })
+  assert.ok(sharedOnly.list.every(item => item.role === 'viewer' || item.role === 'editor'))
+  assert.ok(sharedOnly.list.some(item => item.roomKey === created.room.roomKey))
+  assert.ok(sharedOnly.total >= 1)
+  assert.ok(sharedOnly.list.length <= sharedOnly.total)
+  const ownerShared = await fs.listRooms({
+    userId: OWNER,
+    shared: true,
+    limit: 100
+  })
+  assert.ok(!ownerShared.list.some(item => item.roomKey === created.room.roomKey))
+  assert.strictEqual(ownerShared.total, ownerShared.list.length)
   const sharedFolders = await fs.listFolders({ userId: VIEWER })
   assert.ok(sharedFolders.list.some(item => item.id === folder.id))
+
+  const resShared = mockRes()
+  await handleFileSystemApi(
+    {
+      method: 'GET',
+      url: '/api/files?shared=1&limit=10',
+      authUser: { id: VIEWER }
+    },
+    resShared,
+    { engine: fs }
+  )
+  assert.strictEqual(resShared.code, 200)
+  assert.ok(
+    (resShared.body.list || []).every(
+      item => item.role === 'viewer' || item.role === 'editor'
+    )
+  )
+  assert.ok(
+    (resShared.body.list || []).some(item => item.roomKey === created.room.roomKey)
+  )
 
   store.members.push({
     room_key: created.room.roomKey,
