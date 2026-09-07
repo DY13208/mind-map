@@ -1,13 +1,13 @@
 import {
   resizeImgSize,
   removeRichTextStyes,
-  checkIsRichText,
   isUndef,
   createForeignObjectNode,
   addXmlns,
   generateColorByContent,
   camelCaseToHyphen,
-  getNodeRichTextStyles
+  getNodeRichTextStyles,
+  measureText as measureTextCanvas
 } from '../../../utils'
 import { Image as SVGImage, SVG, A, G, Rect, Text } from '@svgdotjs/svg.js'
 import iconsSvg from '../../../svg/icons'
@@ -21,6 +21,90 @@ const measureText = (text, style) => {
   style.text(node)
   g.add(node)
   return g.bbox()
+}
+
+// Simple rich-text HTML that can be measured without forced DOM reflow.
+// Matches RichText.handleDataToRichText + resetRichText wrapping: <p>escaped</p>
+const SIMPLE_RICH_TEXT_RE = /^<p>([\s\S]*)<\/p>$/i
+const HAS_NESTED_TAG_RE = /<[a-z][\s\S]*?>/i
+
+const decodeBasicEntities = str =>
+  String(str || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+
+const tryPlainFromSimpleRichText = html => {
+  const raw = String(html || '').trim()
+  if (!raw) return ''
+  const m = SIMPLE_RICH_TEXT_RE.exec(raw)
+  if (!m) return null
+  const inner = m[1]
+  if (HAS_NESTED_TAG_RE.test(inner)) return null
+  return decodeBasicEntities(inner)
+}
+
+const wrapPlainLines = (plain, styleObj, maxWidth) => {
+  const fontSize = parseFloat(styleObj.fontSize) || 16
+  const fontFamily = styleObj.fontFamily || '微软雅黑, Microsoft YaHei'
+  const bold =
+    styleObj.fontWeight === 'bold' ||
+    styleObj.fontWeight === '700' ||
+    Number(styleObj.fontWeight) >= 700
+  const italic = styleObj.fontStyle === 'italic'
+  const style = { italic, bold, fontSize, fontFamily }
+  const source = String(plain)
+  // Fast path: single-line label that fits maxWidth (common for large maps).
+  if (source.indexOf('\n') < 0) {
+    const one = measureTextCanvas(source || '﻿', style)
+    if (one.width <= maxWidth) {
+      return {
+        width: Math.min(Math.ceil(one.width) + 1, maxWidth),
+        height: Math.ceil(fontSize * noneRichTextNodeLineHeight)
+      }
+    }
+  }
+  const paragraphs = source.split(/\n/)
+  const lines = []
+  paragraphs.forEach(para => {
+    const chars = Array.from(para)
+    if (!chars.length) {
+      lines.push('')
+      return
+    }
+    let line = ''
+    for (let i = 0; i < chars.length; i++) {
+      const next = line + chars[i]
+      if (measureTextCanvas(next, style).width <= maxWidth || !line) {
+        line = next
+      } else {
+        lines.push(line)
+        line = chars[i]
+      }
+    }
+    if (line) lines.push(line)
+  })
+  let width = 0
+  lines.forEach(line => {
+    const w = measureTextCanvas(line || '﻿', style).width
+    if (w > width) width = w
+  })
+  const lineCount = Math.max(1, lines.length)
+  const height = fontSize * noneRichTextNodeLineHeight * lineCount
+  return {
+    width: Math.min(Math.ceil(width) + 1, maxWidth),
+    height: Math.ceil(height)
+  }
+}
+
+const getRichTextMeasureCache = mindMap => {
+  if (!mindMap.commonCaches.richTextMeasureCache) {
+    mindMap.commonCaches.richTextMeasureCache = new Map()
+  }
+  return mindMap.commonCaches.richTextMeasureCache
 }
 
 // 标签默认的样式
@@ -149,7 +233,9 @@ function createRichTextNode(specifyText) {
     recoverText = true
   }
   if (recoverText && !isUndef(text)) {
-    if (checkIsRichText(text)) {
+    // Prefer regex over checkIsRichText() — that helper writes innerHTML per call.
+    const looksHtml = /<[a-z][\s\S]*?>/i.test(String(text))
+    if (looksHtml) {
       const keepInline =
         /<(strong|em|u|s|span)\b/i.test(text) ||
         /style\s*=/i.test(text) ||
@@ -161,9 +247,11 @@ function createRichTextNode(specifyText) {
       // 非富文本则改为富文本结构
       text = `<p>${text}</p>`
     }
-    this.setData({
-      text
-    })
+    // CRITICAL: never this.setData() here.
+    // setData → SET_NODE_DATA → addHistory() would snapshot the whole tree
+    // once per node during cold layout (O(n²) for large maps).
+    if (!this.nodeData.data) this.nodeData.data = {}
+    this.nodeData.data.text = text
   }
   // 节点的富文本样式数据
   const nodeTextStyleList = []
@@ -171,50 +259,127 @@ function createRichTextNode(specifyText) {
   Object.keys(nodeRichTextStyles).forEach(prop => {
     nodeTextStyleList.push([prop, nodeRichTextStyles[prop]])
   })
-  // 测量文本大小
-  if (!this.mindMap.commonCaches.measureRichtextNodeTextSizeEl) {
-    this.mindMap.commonCaches.measureRichtextNodeTextSizeEl =
-      document.createElement('div')
-    this.mindMap.commonCaches.measureRichtextNodeTextSizeEl.style.position =
-      'fixed'
-    this.mindMap.commonCaches.measureRichtextNodeTextSizeEl.style.left =
-      '-999999px'
-    this.mindMap.el.appendChild(
-      this.mindMap.commonCaches.measureRichtextNodeTextSizeEl
-    )
-  }
-  const div = this.mindMap.commonCaches.measureRichtextNodeTextSizeEl
-  // 应用节点的文本样式
-  nodeTextStyleList.forEach(([prop, value]) => {
-    div.style[prop] = value
-  })
-  div.style.lineHeight = 1.2
-  const html = `<div>${text}</div>`
-  div.innerHTML = html
-  const el = div.children[0]
-  el.classList.add('smm-richtext-node-wrap')
-  addXmlns(el)
-  el.style.maxWidth = textAutoWrapWidth + 'px'
-  if (hasCustomWidth) {
-    el.style.width = this.customTextWidth + 'px'
+  const styleCacheKey = nodeTextStyleList
+    .map(([prop, value]) => prop + ':' + value)
+    .join('|')
+  const measureCache = getRichTextMeasureCache(this.mindMap)
+  const measureKey =
+    styleCacheKey +
+    '|' +
+    textAutoWrapWidth +
+    '|' +
+    (hasCustomWidth ? this.customTextWidth : '') +
+    '|' +
+    text
+
+  let width
+  let height
+  const cached = measureCache.get(measureKey)
+  if (cached) {
+    width = cached.width
+    height = cached.height
   } else {
-    el.style.width = ''
+    const plain = tryPlainFromSimpleRichText(text)
+    if (plain != null && !hasCustomWidth) {
+      // Avoid write→read forced reflow for the common <p>plain</p> path.
+      const measured = wrapPlainLines(
+        plain,
+        nodeRichTextStyles,
+        textAutoWrapWidth
+      )
+      width = measured.width
+      height = measured.height
+    } else {
+      // 测量文本大小（复杂 HTML 仍走 DOM）
+      if (!this.mindMap.commonCaches.measureRichtextNodeTextSizeEl) {
+        this.mindMap.commonCaches.measureRichtextNodeTextSizeEl =
+          document.createElement('div')
+        this.mindMap.commonCaches.measureRichtextNodeTextSizeEl.style.position =
+          'fixed'
+        this.mindMap.commonCaches.measureRichtextNodeTextSizeEl.style.left =
+          '-999999px'
+        this.mindMap.el.appendChild(
+          this.mindMap.commonCaches.measureRichtextNodeTextSizeEl
+        )
+      }
+      const measureDiv = this.mindMap.commonCaches.measureRichtextNodeTextSizeEl
+      nodeTextStyleList.forEach(([prop, value]) => {
+        measureDiv.style[prop] = value
+      })
+      measureDiv.style.lineHeight = 1.2
+      const html = `<div>${text}</div>`
+      measureDiv.innerHTML = html
+      const measureEl = measureDiv.children[0]
+      measureEl.classList.add('smm-richtext-node-wrap')
+      addXmlns(measureEl)
+      measureEl.style.maxWidth = textAutoWrapWidth + 'px'
+      if (hasCustomWidth) {
+        measureEl.style.width = this.customTextWidth + 'px'
+      } else {
+        measureEl.style.width = ''
+      }
+      let rect = measureEl.getBoundingClientRect()
+      width = rect.width
+      height = rect.height
+      if (height <= 0) {
+        measureDiv.innerHTML = `<p>${emptyTextMeasureHeightText}</p>`
+        let elTmp = measureDiv.children[0]
+        elTmp.classList.add('smm-richtext-node-wrap')
+        height = elTmp.getBoundingClientRect().height
+        measureDiv.innerHTML = html
+      }
+      width = Math.min(Math.ceil(width) + 1, textAutoWrapWidth)
+      height = Math.ceil(height)
+    }
+    measureCache.set(measureKey, { width, height })
   }
-  let { width, height } = el.getBoundingClientRect()
-  // 如果文本为空，那么需要计算一个默认高度
-  if (height <= 0) {
-    div.innerHTML = `<p>${emptyTextMeasureHeightText}</p>`
-    let elTmp = div.children[0]
-    elTmp.classList.add('smm-richtext-node-wrap')
-    height = elTmp.getBoundingClientRect().height
-    div.innerHTML = html
+
+  // Build display foreignObject without a second layout-read.
+  let el
+  const plainForDom = tryPlainFromSimpleRichText(text)
+  if (plainForDom != null) {
+    el = document.createElement('div')
+    el.classList.add('smm-richtext-node-wrap')
+    addXmlns(el)
+    el.style.maxWidth = textAutoWrapWidth + 'px'
+    if (hasCustomWidth) {
+      el.style.width = this.customTextWidth + 'px'
+    }
+    const p = document.createElement('p')
+    p.textContent = plainForDom
+    el.appendChild(p)
+  } else {
+    if (!this.mindMap.commonCaches.measureRichtextNodeTextSizeEl) {
+      this.mindMap.commonCaches.measureRichtextNodeTextSizeEl =
+        document.createElement('div')
+      this.mindMap.commonCaches.measureRichtextNodeTextSizeEl.style.position =
+        'fixed'
+      this.mindMap.commonCaches.measureRichtextNodeTextSizeEl.style.left =
+        '-999999px'
+      this.mindMap.el.appendChild(
+        this.mindMap.commonCaches.measureRichtextNodeTextSizeEl
+      )
+    }
+    const div = this.mindMap.commonCaches.measureRichtextNodeTextSizeEl
+    nodeTextStyleList.forEach(([prop, value]) => {
+      div.style[prop] = value
+    })
+    div.style.lineHeight = 1.2
+    div.innerHTML = `<div>${text}</div>`
+    el = div.children[0]
+    el.classList.add('smm-richtext-node-wrap')
+    addXmlns(el)
+    el.style.maxWidth = textAutoWrapWidth + 'px'
+    if (hasCustomWidth) {
+      el.style.width = this.customTextWidth + 'px'
+    } else {
+      el.style.width = ''
+    }
   }
-  width = Math.min(Math.ceil(width) + 1, textAutoWrapWidth) // 修复getBoundingClientRect方法对实际宽度是小数的元素获取到的值是整数，导致宽度不够文本发生换行的问题
-  height = Math.ceil(height)
   g.attr('data-width', width)
   g.attr('data-height', height)
   const foreignObject = createForeignObjectNode({
-    el: div.children[0],
+    el,
     width,
     height
   })
