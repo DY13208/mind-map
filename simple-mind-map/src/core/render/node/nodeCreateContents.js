@@ -161,9 +161,12 @@ function createRichTextNode(specifyText) {
       // 非富文本则改为富文本结构
       text = `<p>${text}</p>`
     }
-    this.setData({
-      text
-    })
+    // resetRichText is render-time normalization. Going through setData here
+    // executes a command for every node and repeatedly schedules a full-tree
+    // history snapshot while a large tree is still being created (O(n^2)).
+    // Keep the normalized value on the authoritative node data; real user
+    // edits still use SET_NODE_TEXT and retain their normal history entry.
+    this.nodeData.data.text = text
   }
   // 节点的富文本样式数据
   const nodeTextStyleList = []
