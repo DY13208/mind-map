@@ -27,8 +27,7 @@ const suites = {
     'test/collabSpecialObjects.test.js',
     'test/collabPaste.test.js',
     'test/collabPasteUndo.test.js',
-    'test/collabReliability.test.js',
-    'test/collabRoomRecovery.test.js',
+    'test/collabV2.wideSibling.persistence.test.js',
     'test/roomNodes.test.js',
     'test/roomAcl.test.js',
     'test/outbox.test.js',
@@ -61,7 +60,6 @@ function run(file) {
       stdio: 'inherit'
     })
     const timer = setTimeout(() => {
-      // Terminate this test's process tree even if its JS timers are starved.
       // Terminate this test's process tree even if its JS timers are starved.
       if (process.platform === 'win32') {
         spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' })

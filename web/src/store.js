@@ -16,6 +16,10 @@ const store = new Vuex.Store({
       useLeftKeySelectionRightKeyDrag: false,
       // 是否显示滚动条
       isShowScrollbar: false,
+      // 是否显示小地图
+      showNavigator: true,
+      // 是否显示导航工具栏
+      showNavigatorToolbar: true,
       // 是否是暗黑模式
       isDark: false,
       // 是否开启AI功能

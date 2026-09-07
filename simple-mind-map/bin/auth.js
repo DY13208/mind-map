@@ -470,9 +470,42 @@ function isAllowedOrigin(req, origin = req.headers.origin) {
   return candidates.some(candidate => originsEquivalent(candidate, normalized))
 }
 
-function applyCorsHeaders(req, res) {
+// 浏览器对同源/同站请求会发送 Sec-Fetch-Site，可以在 AUTH_APP_ORIGIN 配置与实际
+// 访问地址不一致时（内网 IP、反向代理换协议等）依然识别出这是本站自己发起的请求。
+function fetchSite(req) {
+  return String(req.headers['sec-fetch-site'] || '')
+    .trim()
+    .toLowerCase()
+}
+
+function isSameSiteRequest(req) {
+  const site = fetchSite(req)
+  return site === 'same-origin' || site === 'same-site'
+}
+
+// 退出登录不涉及数据变更，被跨站伪造的最坏结果只是掉线，因此在来源白名单之外
+// 额外接受浏览器标记的同站请求，避免用户因为配置问题永远退不出去。
+function isLogoutRequestAllowed(req) {
+  return isAllowedOrigin(req) || isSameSiteRequest(req)
+}
+
+// GET 退出用于顶层跳转兜底，必须拒绝 <img>/<script>/<iframe> 这类子资源发起的伪造
+// 请求。Sec-Fetch-Dest 恰好能区分它们：只有顶层跳转才是 document。
+function isTopLevelNavigation(req) {
+  const dest = String(req.headers['sec-fetch-dest'] || '')
+    .trim()
+    .toLowerCase()
+  // 不支持 Sec-Fetch-Dest 的旧浏览器只能放行，否则它们永远退不出去。
+  return !dest || dest === 'document'
+}
+
+function applyCorsHeaders(req, res, options = {}) {
   const origin = String(req.headers.origin || '')
-  if (origin && isAllowedOrigin(req, origin)) {
+  const allowOrigin =
+    origin &&
+    (isAllowedOrigin(req, origin) ||
+      (options.allowSameSite && isSameSiteRequest(req)))
+  if (allowOrigin) {
     res.setHeader('Access-Control-Allow-Origin', origin)
     res.setHeader('Access-Control-Allow-Credentials', 'true')
     res.setHeader('Vary', 'Origin')
@@ -714,11 +747,21 @@ async function exchangeWecomCode(code) {
   return {
     id: userId,
     name: String((profile && profile.name) || userId).slice(0, 100),
-    avatar: String((profile && profile.avatar) || '').slice(0, 1000),
+    avatar: wecomAvatarUrl(profile),
     departments: Array.isArray(profile && profile.department)
       ? profile.department.slice(0, 100)
       : []
   }
+}
+
+function wecomAvatarUrl(profile) {
+  if (!profile || typeof profile !== 'object') return ''
+  const candidates = [profile.avatar, profile.thumb_avatar, profile.thumbAvatar]
+  for (const value of candidates) {
+    const url = String(value || '').trim()
+    if (/^https?:\/\//i.test(url)) return url.slice(0, 1000)
+  }
+  return ''
 }
 
 async function storeOAuthState(nonce, browserId, returnTo) {
@@ -780,8 +823,16 @@ async function upsertUser(user) {
        (user_id, name, avatar, departments, last_login_at)
      values ($1, $2, $3, $4::jsonb, now())
      on conflict (user_id) do update set
-       name = excluded.name,
-       avatar = excluded.avatar,
+       name = case
+         when excluded.name <> '' and excluded.name is distinct from excluded.user_id
+           then excluded.name
+         when wecom_users.name <> '' then wecom_users.name
+         else excluded.name
+       end,
+       avatar = case
+         when excluded.avatar <> '' then excluded.avatar
+         else wecom_users.avatar
+       end,
        departments = excluded.departments,
        updated_at = now(),
        last_login_at = now()`,
@@ -843,12 +894,19 @@ async function authenticateRequest(req) {
 }
 
 async function deleteRequestSession(req) {
-  if (!config.enabled || !authPool) return
+  if (!config.enabled) return
   const token = parseCookies(req)[SESSION_COOKIE]
   if (!token || token.length > 256) return
-  await authPool.query('delete from auth_sessions where token_hash = $1', [
-    sha256(token)
-  ])
+  try {
+    await initAuth()
+    if (!authPool) return
+    await authPool.query('delete from auth_sessions where token_hash = $1', [
+      sha256(token)
+    ])
+  } catch (err) {
+    // 退出登录必须成功：数据库不可用时仍然继续清除浏览器 Cookie。
+    console.error('[auth] 撤销会话失败:', (err && err.message) || err)
+  }
 }
 
 async function authenticateWebsocketRequest(req) {
@@ -961,6 +1019,59 @@ async function createDevBypassSession(req, res) {
   }
 }
 
+function hostnamesEquivalent(a, b) {
+  const left = String(a || '').toLowerCase()
+  const right = String(b || '').toLowerCase()
+  if (!left || !right) return false
+  if (left === right) return true
+  const loopbacks = new Set(['localhost', '127.0.0.1', '::1'])
+  return loopbacks.has(left) && loopbacks.has(right)
+}
+
+// 退出后回到用户实际打开的前端地址。开发态页面在 :8081、接口在 :1234 时，
+// 不能用接口自己的 Host，否则顶层跳转兜底会落到协作服务空白页。
+function requestAppOrigin(req) {
+  const refererOrigin = normalizeOrigin(
+    req.headers.referer || req.headers.referrer || ''
+  )
+  const headerOrigin = normalizeOrigin(req.headers.origin || '')
+  const app = normalizeOrigin(config.appOrigin)
+  const forwarded = normalizeOrigin(forwardedOrigin(req))
+  const looksLikeApp = origin => {
+    if (!origin) return false
+    if (app && originsEquivalent(origin, app)) return true
+    if (isAllowedOrigin(req, origin)) return true
+    const known = [app, forwarded].filter(Boolean)
+    try {
+      const host = new URL(origin).hostname
+      return known.some(value =>
+        hostnamesEquivalent(host, new URL(value).hostname)
+      )
+    } catch (err) {
+      return false
+    }
+  }
+  if (looksLikeApp(refererOrigin)) return refererOrigin
+  if (looksLikeApp(headerOrigin)) return headerOrigin
+  return app || forwarded || headerOrigin || refererOrigin
+}
+
+function logoutRedirectUrl(req, returnTo) {
+  const base = requestAppOrigin(req) || config.appOrigin
+  const path = safeReturnTo(returnTo || '/')
+  try {
+    return new URL(path, base).toString()
+  } catch (err) {
+    return path
+  }
+}
+
+async function performLogout(req, res) {
+  await deleteRequestSession(req)
+  clearCookie(res, req, SESSION_COOKIE)
+  clearCookie(res, req, OAUTH_BROWSER_COOKIE)
+}
+
 async function handleAuthApi(req, res) {
   const url = new URL(req.url, 'http://127.0.0.1')
   const pathname = url.pathname
@@ -998,6 +1109,36 @@ async function handleAuthApi(req, res) {
       user: user ? publicUser(user) : null,
       devBypassAvailable: isDevBypassAllowed(req)
     })
+    return true
+  }
+
+  // 退出登录放在「未启用」分支之前：关闭企业微信登录后遗留的 Cookie 也要能清掉。
+  if (pathname === '/api/auth/logout' && req.method === 'POST') {
+    if (!isLogoutRequestAllowed(req)) {
+      sendJson(req, res, 403, {
+        error: '请求来源未获授权',
+        code: 'origin_denied'
+      })
+      return true
+    }
+    await performLogout(req, res)
+    applyCorsHeaders(req, res, { allowSameSite: true })
+    res.writeHead(204, { 'Cache-Control': 'no-store' })
+    res.end()
+    return true
+  }
+
+  // 顶层跳转退出：不经过 CORS，是前端 POST 失败时的兜底通道。
+  if (pathname === '/api/auth/logout' && req.method === 'GET') {
+    if (!isTopLevelNavigation(req)) {
+      sendJson(req, res, 403, {
+        error: '请求来源未获授权',
+        code: 'origin_denied'
+      })
+      return true
+    }
+    await performLogout(req, res)
+    redirect(res, logoutRedirectUrl(req, url.searchParams.get('return_to')))
     return true
   }
 
@@ -1144,21 +1285,6 @@ async function handleAuthApi(req, res) {
     return true
   }
 
-  if (pathname === '/api/auth/logout' && req.method === 'POST') {
-    if (!isAllowedOrigin(req)) {
-      sendJson(req, res, 403, {
-        error: '请求来源未获授权',
-        code: 'origin_denied'
-      })
-      return true
-    }
-    await deleteRequestSession(req)
-    clearCookie(res, req, SESSION_COOKIE)
-    res.writeHead(204, { 'Cache-Control': 'no-store' })
-    res.end()
-    return true
-  }
-
   if (
     (pathname === '/api/auth/check' || pathname === '/api/auth/me') &&
     req.method === 'GET'
@@ -1225,6 +1351,13 @@ module.exports = {
     normalizeOrigin,
     originsEquivalent,
     forwardedOrigin,
-    isAllowedOriginFor
+    isAllowedOriginFor,
+    wecomAvatarUrl,
+    isLogoutRequestAllowed,
+    isTopLevelNavigation,
+    isSameSiteRequest,
+    requestAppOrigin,
+    logoutRedirectUrl,
+    hostnamesEquivalent
   }
 }

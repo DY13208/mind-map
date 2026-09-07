@@ -588,6 +588,14 @@ class Cooperate {
 
   setPreviewApplied(applied) {
     this.previewApplied = !!applied
+    if (applied && this.httpCollabMode && this.safeLoadMode) {
+      // Defer: renderer root may not exist until setData finishes.
+      Promise.resolve()
+        .then(() => this.hydrateExpandedPartialParents())
+        .catch(err =>
+          console.error('[mind-map] expanded partial hydrate failed', err)
+        )
+    }
   }
 
   applySyncedDoc() {
@@ -714,7 +722,9 @@ class Cooperate {
       return
     }
     if (this.httpFetchSubtree) {
+      // Authoritative empty parent: nothing to fetch.
       if (!live && count <= 0 && !dirty) return
+      // Partial or empty-with-total>0 must hydrate (single-flight inside).
       return this.hydrateFromHttp(node)
     }
     if (!this.ymap) return
@@ -3989,10 +3999,15 @@ class Cooperate {
       const uid = node.data.uid
       const live = Array.isArray(node.children) ? node.children.length : 0
       const count = Number(node.data.childCount) || 0
-      if (uid && live > 0 && (!count || live >= count)) {
+      // Only mark complete when authoritative total is known and fully loaded.
+      // Never treat clipped children.length as complete when childCount > live.
+      if (uid && count > 0 && live >= count) {
         this.hydratedUids.add(uid)
+      } else if (uid && count > live) {
+        this.hydratedUids.delete(uid)
+        this.dirtySubtrees.set(uid, Number(node.data.subtreeVersion) || 1)
       }
-      (node.children || []).forEach(walk)
+      if (Array.isArray(node.children)) node.children.forEach(walk)
     }
     walk(root)
   }
@@ -4005,9 +4020,49 @@ class Cooperate {
     const count = Number(node.getData && node.getData('childCount')) || 0
     const uid = node.getData && node.getData('uid')
     if (uid && this.dirtySubtrees && this.dirtySubtrees.has(uid)) return true
-    if (!count) return false
-    if (!live) return true
-    return count > live
+    // Authoritative total: 0 means no children. Partial load with unknown
+    // total is handled once childCount is stamped from room_nodes.
+    if (count > 0 && live < count) return true
+    if (!live && count > 0) return true
+    return false
+  }
+
+  /**
+   * After safe_load / F5: hydrate parents that already show incomplete children
+   * (or are expanded). Do not hydrate the whole map.
+   */
+  async hydrateExpandedPartialParents() {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!renderer || !renderer.root || !this.httpFetchSubtree) return { hydrated: 0 }
+    const jobs = []
+    const seen = new Set()
+    const visit = node => {
+      if (!node) return
+      const uid = node.getData && node.getData('uid')
+      const live =
+        (node.nodeData && node.nodeData.children && node.nodeData.children.length) ||
+        0
+      const expanded = !(node.getData && node.getData('expand') === false)
+      const needs = this.nodeNeedsHydrate(node)
+      if (needs && uid && !seen.has(uid) && (live > 0 || expanded)) {
+        seen.add(uid)
+        jobs.push(this.hydrateFromHttp(node))
+      }
+      if (Array.isArray(node.children)) node.children.forEach(visit)
+    }
+    visit(renderer.root)
+    if (!jobs.length) return { hydrated: 0 }
+    await Promise.all(jobs)
+    if (typeof this.mindMap.render === 'function') this.mindMap.render()
+    return { hydrated: jobs.length }
+  }
+
+  async ensurePlacementParent(parentNode) {
+    if (!parentNode || !this.httpCollabMode) return parentNode
+    if (!this.nodeNeedsHydrate(parentNode)) return parentNode
+    await this.hydrateFromHttp(parentNode)
+    if (typeof this.mindMap.render === 'function') this.mindMap.render()
+    return parentNode
   }
 
   collectLoadedUids() {
@@ -4051,11 +4106,16 @@ class Cooperate {
     const liveLen = Array.isArray(data.children) ? data.children.length : 0
     const count = Number(data.data && data.data.childCount) || 0
     const dirtyAt = this.dirtySubtrees.get(uid)
+    // Completeness: loaded >= authoritative total. Never treat clipped
+    // children as complete when childCount is larger.
+    const complete = count > 0 && liveLen >= count
     const alreadyHydrated =
-      liveLen > 0 &&
-      this.hydratedUids.has(uid) &&
-      (count <= 0 || liveLen >= count)
-    if (alreadyHydrated && !dirtyAt) return
+      complete && this.hydratedUids.has(uid) && !dirtyAt
+    if (alreadyHydrated) return
+    // count==0 and live==0: nothing to load (authoritative empty).
+    if (!dirtyAt && count <= 0 && liveLen <= 0 && this.hydratedUids.has(uid)) {
+      return
+    }
     const pending = this.hydrateInflight && this.hydrateInflight.get(uid)
     if (pending) return pending
     const job = (async () => {
@@ -4067,7 +4127,7 @@ class Cooperate {
             deep: options.deep,
             priority: 'high'
           })
-        const knownVersion = alreadyHydrated
+        const knownVersion = complete
           ? Number((data.data && data.data.subtreeVersion) || 0) || 0
           : 0
         let result = await fetchSubtree({ knownVersion })
@@ -4093,13 +4153,16 @@ class Cooperate {
         ) {
           const deep = await this.httpFetchDeepSubtree(uid, {
             knownVersion: 0,
-            maxNodes: 400,
+            maxNodes: Math.max(400, count + 10),
             priority: 'high'
           })
           if (deep && deep.tree) {
             result = {
               children: deep.tree.children || [],
-              total: count,
+              total:
+                Number(
+                  (deep.tree.data && deep.tree.data.childCount) || count
+                ) || count,
               version: deep.version,
               has_more: false
             }
@@ -4107,14 +4170,27 @@ class Cooperate {
         }
         this.mergeHttpChildren(data, result && result.children)
         if (data.data) {
+          const total =
+            Number((result && result.total) || 0) ||
+            Number(data.data.childCount) ||
+            0
           data.data.hasMore = !!(result && result.has_more)
-          data.data.childCount =
-            (result && result.total) || data.data.childCount || 0
+          // Prefer server total; never shrink authoritative count to loaded length.
+          if (total > 0) data.data.childCount = total
           if (result && result.version != null) {
             data.data.subtreeVersion = Number(result.version) || 0
           }
         }
-        if (data.children && data.children.length) {
+        const afterLen = Array.isArray(data.children) ? data.children.length : 0
+        const afterCount = Number(data.data && data.data.childCount) || 0
+        if (afterCount > 0 && afterLen >= afterCount) {
+          this.hydratedUids.add(uid)
+          this.hydrateFailedUids.delete(uid)
+        } else if (afterCount > 0 && afterLen < afterCount) {
+          this.hydrateFailedUids.add(uid)
+          // Deep fetch may still be incomplete for very wide parents; keep dirty.
+          this.dirtySubtrees.set(uid, afterCount)
+        } else if (afterLen > 0) {
           this.hydratedUids.add(uid)
           this.hydrateFailedUids.delete(uid)
         } else if (count > 0) {
@@ -4122,6 +4198,8 @@ class Cooperate {
           const err = new Error('subtree empty')
           err.code = 'SUBTREE_EMPTY'
           throw err
+        } else {
+          this.hydratedUids.add(uid)
         }
         this.dirtySubtrees.delete(uid)
       } finally {
@@ -4129,7 +4207,8 @@ class Cooperate {
         this.flushPendingHttpRefresh()
       }
     })()
-    if (this.hydrateInflight) this.hydrateInflight.set(uid, job)
+    if (!this.hydrateInflight) this.hydrateInflight = new Map()
+    this.hydrateInflight.set(uid, job)
     try {
       return await job
     } finally {

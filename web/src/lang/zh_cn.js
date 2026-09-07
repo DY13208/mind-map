@@ -60,6 +60,8 @@ export default {
     activeOnly: '只激活新节点，不进入编辑',
     openRealtimeRenderOnNodeTextEdit: '开启文本编辑实时渲染效果',
     isShowScrollbar: '是否显示滚动条',
+    showNavigator: '是否显示小地图',
+    showNavigatorToolbar: '是否显示导航工具栏',
     isUseHandDrawnLikeStyle: '是否开启手绘风格',
     isUseMomentum: '是否开启拖动画布的动量效果',
     openBlankMode: '是否开启演示模式的填空功能',
@@ -373,6 +375,7 @@ export default {
     openFileTip: '打开文件前请先导出当前编辑的文件，谨防内容丢失',
     ai: 'AI',
     flowExpand: '补齐',
+    sopRegistry: 'SOP台账',
     cooperate: '协同'
   },
   edit: {

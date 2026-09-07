@@ -24,12 +24,12 @@
     /><el-table-column label="协作者" width="125"
       ><template slot-scope="scope"
         ><div class="avatars">
-          <el-avatar
+          <UserAvatar
             v-for="person in scope.row.collaborators.slice(0, 3)"
             :key="person.id"
+            :person="person"
             :size="24"
-            >{{ person.avatar }}</el-avatar
-          >
+          />
         </div></template
       ></el-table-column
     ><el-table-column label="更新时间" width="145"
@@ -66,8 +66,11 @@
   ></template
 >
 <script>
+import UserAvatar from '@/components/UserAvatar.vue'
+
 export default {
   name: 'RoomList',
+  components: { UserAvatar },
   props: { rooms: Array, allowDelete: { type: Boolean, default: false } },
   methods: {
     formatDate(value) {
@@ -97,11 +100,9 @@ export default {
   }
   .avatars {
     display: flex;
-    /deep/ .el-avatar {
+    /deep/ .userAvatar {
       margin-right: -5px;
-      background: #168f68;
       border: 2px solid white;
-      font-size: 10px;
     }
   }
 }

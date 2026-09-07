@@ -355,7 +355,8 @@ function createFileSystem(options = {}) {
               ${roleSelect}
               ${stateSelect},
               own.user_id as owner_user_id,
-              coalesce(u.name, own.user_id, r.owner_id, '') as owner_name
+              coalesce(u.name, own.user_id, r.owner_id, '') as owner_name,
+              coalesce(u.avatar, '') as owner_avatar
        from rooms r
        left join room_tombstones t on t.room_key = r.room_key
        ${stateJoin}

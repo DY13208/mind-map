@@ -78,7 +78,9 @@ export function stashOverflowChildren(root, maxChildren = MAX_IMPORT_FANOUT) {
     const children = node.children || []
     if (children.length > maxChildren) {
       node.data = node.data || {}
-      node.data.childCount = children.length
+      const prev = Number(node.data.childCount) || 0
+      // Never shrink authoritative childCount to the visible slice.
+      node.data.childCount = Math.max(prev, children.length)
       node.data.hasMore = true
       node.data[OVERFLOW_KEY] = children.slice(maxChildren)
       node.children = children.slice(0, maxChildren)
@@ -119,7 +121,9 @@ export function stubImportedTree(root, options = {}) {
       ? node.data[OVERFLOW_KEY]
       : []
     const total = children.length + overflow.length
-    if (total) node.data.childCount = total
+    const prev = Number(node.data.childCount) || 0
+    // Preserve PG-authoritative childCount from safe_load when larger.
+    if (total || prev) node.data.childCount = Math.max(total, prev)
     delete node.data[OVERFLOW_KEY]
     if (produced >= maxNodes || depth >= keepDepth) {
       if (total > 0) {

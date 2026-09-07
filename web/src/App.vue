@@ -235,11 +235,9 @@ export default {
         !this.authState.authenticated
       ) {
         document.title = PAGE_TITLE
-        if (this.authState.devBypassAvailable) {
-          this.showDevLogin = true
-        } else {
-          await this.refreshLoginQr()
-        }
+        // 扫码始终是主登录方式：内网访问时后端会开放开发者密钥，但那只是附加入口，
+        // 不能因此不加载二维码，否则内网用户会看到一个空白的登录框。
+        await this.refreshLoginQr()
       }
     },
     clearQrRefreshTimer() {

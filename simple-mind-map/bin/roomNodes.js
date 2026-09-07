@@ -81,27 +81,110 @@ function validateNodeGraph(obj) {
   }
 }
 
-function encodeNodeRows(obj) {
+function encodeNodeRows(obj, options = {}) {
+  const profileEnabled =
+    !!(options && options.profile) ||
+    process.env.ENCODE_PROFILE === '1' ||
+    process.env.ENCODE_PROFILE === 'true'
+  const timings = profileEnabled
+    ? {
+        nodeCount: 0,
+        applyPositionsMs: 0,
+        parentIndexMs: 0,
+        rootLookupMs: 0,
+        rowAllocationMs: 0,
+        dataCopyMs: 0,
+        totalMs: 0
+      }
+    : null
+  const t0 = profileEnabled ? process.hrtime.bigint() : 0n
+  const mark = name => {
+    if (!timings) return
+    const now = process.hrtime.bigint()
+    timings[name] = Number(now - (timings._last || t0)) / 1e6
+    timings._last = now
+  }
+
   const graph = obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}
   applyPositionsToTree(graph)
-  const parentOf = {}
-  Object.keys(graph).forEach(uid => {
+  mark('applyPositionsMs')
+
+  const parentOf = Object.create(null)
+  const uids = Object.keys(graph)
+  for (let i = 0; i < uids.length; i++) {
+    const uid = uids[i]
     const children = (graph[uid] && graph[uid].children) || []
-    children.forEach(child => {
-      parentOf[child] = uid
-    })
-  })
-  return Object.keys(graph).map(uid => {
+    for (let j = 0; j < children.length; j++) {
+      parentOf[children[j]] = uid
+    }
+  }
+  mark('parentIndexMs')
+
+  let rootUid = options && options.rootUid != null ? options.rootUid : null
+  if (rootUid == null) {
+    rootUid = null
+    for (let i = 0; i < uids.length; i++) {
+      const uid = uids[i]
+      if (graph[uid] && graph[uid].isRoot) {
+        rootUid = uid
+        break
+      }
+    }
+    if (rootUid == null) rootUid = uids[0] || null
+  }
+  mark('rootLookupMs')
+
+  const rows = new Array(uids.length)
+  let dataCopyMs = 0
+  for (let i = 0; i < uids.length; i++) {
+    const uid = uids[i]
     const node = graph[uid] || {}
+    const copyStarted = profileEnabled ? process.hrtime.bigint() : 0n
     const data = { ...(node.data || {}), uid }
-    return {
+    if (profileEnabled) {
+      dataCopyMs += Number(process.hrtime.bigint() - copyStarted) / 1e6
+    }
+    rows[i] = {
       uid,
       parent_uid: parentOf[uid] || null,
       position: node.position || encodeRank(STEP),
       data,
-      is_root: !!(node.isRoot || (uid === findRootUid(graph) && !parentOf[uid]))
+      is_root: !!rootUid && uid === rootUid
     }
-  })
+  }
+  mark('rowAllocationMs')
+  if (timings) {
+    timings.dataCopyMs = Number(dataCopyMs.toFixed(3))
+    timings.nodeCount = uids.length
+    timings.totalMs = Number(process.hrtime.bigint() - t0) / 1e6
+    delete timings._last
+    encodeNodeRows.lastProfile = timings
+    if (options && options.profile === 'log') {
+      console.info('ENCODE_PROFILE', timings)
+    }
+  }
+  return rows
+}
+
+/**
+ * Normalize caller-supplied encoded rows through the canonical encoder shape.
+ * Does not invent fields; only copies known schema columns.
+ */
+function assertEncodedRows(rows) {
+  if (!Array.isArray(rows)) {
+    const err = new Error('encodedRows must be an array')
+    err.code = 'INVALID_ENCODED_ROWS'
+    throw err
+  }
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    if (!row || typeof row.uid !== 'string' || !row.uid) {
+      const err = new Error('encodedRows[' + i + '] missing uid')
+      err.code = 'INVALID_ENCODED_ROWS'
+      throw err
+    }
+  }
+  return rows
 }
 
 function decodeNodeRows(rows) {
@@ -253,15 +336,57 @@ function nodesTableAuthorityEnabled() {
   return value !== 'json'
 }
 
+function stripLegacyEncodedRowsProp(graph) {
+  if (!graph || typeof graph !== 'object') return
+  if (!Object.prototype.hasOwnProperty.call(graph, '__encodedRows')) return
+  try {
+    delete graph.__encodedRows
+  } catch (_) {
+    try {
+      Object.defineProperty(graph, '__encodedRows', {
+        value: undefined,
+        enumerable: false,
+        configurable: true
+      })
+      delete graph.__encodedRows
+    } catch (e) {
+      /* ignore */
+    }
+  }
+}
+
 function canonicalizeNodes(obj) {
   const graph = obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}
+  stripLegacyEncodedRowsProp(graph)
   const check = validateNodeGraph(graph)
   if (!check.ok) {
-    return { ok: false, nodes: graph, errors: check.errors }
+    return { ok: false, nodes: graph, encodedRows: null, errors: check.errors }
+  }
+  const encodedRows = encodeNodeRows(graph, { rootUid: check.rootUid })
+  const nodes = decodeNodeRows(encodedRows)
+  return {
+    ok: true,
+    nodes,
+    encodedRows,
+    errors: []
+  }
+}
+
+/** Canonical snapshot + transient encode cache for storage write path. */
+function snapshotCanonicalForStorage(nodes) {
+  const canonical = canonicalizeNodes(nodes || {})
+  if (!canonical.ok) {
+    return {
+      ok: false,
+      nodes: nodes || {},
+      encodedRows: null,
+      errors: canonical.errors
+    }
   }
   return {
     ok: true,
-    nodes: decodeNodeRows(encodeNodeRows(graph)),
+    nodes: canonical.nodes,
+    encodedRows: canonical.encodedRows,
     errors: []
   }
 }
@@ -388,12 +513,31 @@ function nodesReadPreferEnabled() {
 
 async function replaceRoomNodes(db, roomKey, obj, version, options = {}) {
   const graph = obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}
-  const check = validateNodeGraph(graph)
-  if (!check.ok) {
-    return { wrote: false, reason: 'invalid', errors: check.errors }
+  let allRows
+  let rootUid
+  if (options.encodedRows) {
+    allRows = assertEncodedRows(options.encodedRows)
+    if (Object.keys(graph).length) {
+      const check = validateNodeGraph(graph)
+      if (!check.ok) {
+        return { wrote: false, reason: 'invalid', errors: check.errors }
+      }
+      rootUid = check.rootUid
+    } else {
+      const rootRow = allRows.find(row => row.is_root)
+      rootUid = rootRow ? rootRow.uid : allRows[0] && allRows[0].uid
+    }
+  } else {
+    const check = validateNodeGraph(graph)
+    if (!check.ok) {
+      return { wrote: false, reason: 'invalid', errors: check.errors }
+    }
+    rootUid = check.rootUid
+    allRows = encodeNodeRows(graph, {
+      rootUid,
+      profile: options.profileEncode
+    })
   }
-  const allRows = encodeNodeRows(graph)
-  const rootUid = check.rootUid
   allRows.forEach(row => {
     row.is_root = !!rootUid && row.uid === rootUid
   })
@@ -477,7 +621,7 @@ async function replaceRoomNodes(db, roomKey, obj, version, options = {}) {
     )
   }
   if (incremental) {
-    return { wrote: true, nodeCount: rows.length, rootUid: check.rootUid }
+    return { wrote: true, nodeCount: rows.length, rootUid }
   }
   if (uids.length) {
     await db.query(
@@ -496,7 +640,7 @@ async function replaceRoomNodes(db, roomKey, obj, version, options = {}) {
       [roomKey]
     )
   }
-  return { wrote: true, nodeCount: rows.length, rootUid: check.rootUid }
+  return { wrote: true, nodeCount: rows.length, rootUid }
 }
 
 async function listDeletedNodeUids(db, roomKey) {
@@ -698,6 +842,50 @@ function childStubFromRow(row, childCount, version) {
   }
 }
 
+function collectTreeUids(tree, out = []) {
+  if (!tree || !tree.data) return out
+  if (tree.data.uid) out.push(String(tree.data.uid))
+  ;(tree.children || []).forEach(child => collectTreeUids(child, out))
+  return out
+}
+
+/**
+ * Stamp authoritative live direct-child totals from room_nodes.
+ * childCount must NEVER equal clipped children.length.
+ * Uses one grouped query (not N+1).
+ */
+async function stampAuthoritativeChildCounts(db, roomKey, tree) {
+  const uids = Array.from(new Set(collectTreeUids(tree)))
+  if (!uids.length) return { queryCount: 0, stamped: 0 }
+  const res = await db.query(
+    `select parent_uid, count(*)::int as n
+     from room_nodes
+     where room_key = $1
+       and deleted_at is null
+       and parent_uid = any($2::text[])
+     group by parent_uid`,
+    [roomKey, uids]
+  )
+  const totals = new Map()
+  res.rows.forEach(row => {
+    totals.set(String(row.parent_uid), Number(row.n) || 0)
+  })
+  let stamped = 0
+  const walk = node => {
+    if (!node || !node.data) return
+    const uid = String(node.data.uid || '')
+    const total = totals.has(uid) ? totals.get(uid) : 0
+    node.data.childCount = total
+    stamped += 1
+    const loaded = Array.isArray(node.children) ? node.children.length : 0
+    if (total > loaded) node.data.hasMore = true
+    else if (node.data.hasMore && total <= loaded) node.data.hasMore = false
+    ;(node.children || []).forEach(walk)
+  }
+  walk(tree)
+  return { queryCount: 1, stamped, totals }
+}
+
 async function readRoomSubtree(db, roomKey, uid, options = {}) {
   if (!nodesTableAuthorityEnabled()) return null
   const meta = await db.query(
@@ -743,7 +931,18 @@ async function readRoomSubtree(db, roomKey, uid, options = {}) {
       maxNodes
     })
     if (!payload) return { missing: true, version, updated_at }
-    return { ...payload, updated_at }
+    // Overwrite clipped stampPreviewMeta childCount with PG authority.
+    const stamp = await stampAuthoritativeChildCounts(
+      db,
+      roomKey,
+      payload.tree
+    )
+    return {
+      ...payload,
+      updated_at,
+      childCountAuthority: 'room_nodes',
+      childCountQueryCount: stamp.queryCount
+    }
   }
   const offset = Math.max(0, Number(options.offset) || 0)
   const limit = Math.min(
@@ -843,6 +1042,13 @@ async function migrateRoomNodesFromJson(db, roomKey, obj, version) {
   return replaceRoomNodes(db, roomKey, obj, version)
 }
 
+async function replaceRoomNodeRows(db, roomKey, encodedRows, version, options = {}) {
+  return replaceRoomNodes(db, roomKey, options.graph || {}, version, {
+    ...options,
+    encodedRows
+  })
+}
+
 module.exports = {
   padPosition,
   findRootUid,
@@ -855,15 +1061,18 @@ module.exports = {
   nodesReadPreferEnabled,
   nodesTableAuthorityEnabled,
   canonicalizeNodes,
+  snapshotCanonicalForStorage,
   pickAuthoritativeNodes,
   auditRoomNodesState,
   replaceRoomNodes,
+  replaceRoomNodeRows,
   readRoomNodes,
   searchRoomNodes,
   stripSearchHtml,
   dedupeMatchesByUid,
   queryNeedsSearch,
   readRoomSubtree,
+  stampAuthoritativeChildCounts,
   resolveRoomRef,
   listDeletedNodeUids,
   purgeDeletedNodes,

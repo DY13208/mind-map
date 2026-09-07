@@ -2099,6 +2099,38 @@ async function handleApi(req, res) {
               data: { uid: 'root', text: inspect.title || 'Root', isRoot: true },
               children: []
             }
+      // Light authority fields (count only) so clients/F5 can verify room_nodes
+      // without materializing the full safe_load tree.
+      let authority = {}
+      try {
+        const countRes = await getPool().query(
+          `select count(*)::int as c
+             from room_nodes
+            where room_key = $1 and deleted_at is null`,
+          [roomKey]
+        )
+        const roomNodesCount = Number(countRes.rows[0] && countRes.rows[0].c) || 0
+        authority = {
+          treeSource: roomNodesCount > 0 ? 'room_nodes' : 'rooms.nodes',
+          roomNodesInitialized: roomNodesCount > 0,
+          roomNodesCount,
+          roomsJsonCount: null,
+          legacyFallback: roomNodesCount <= 0,
+          legacyFallbackReason:
+            roomNodesCount > 0 ? '' : 'safe_load_no_room_nodes'
+        }
+      } catch (_) {
+        authority = {}
+      }
+      if (process.env.NODE_ENV !== 'production' || process.env.COLLAB_V2_TRACE) {
+        console.log('SAFE_LOAD_CHILDCOUNT_QUERY_COUNT =', {
+          roomKey,
+          childCountQueryCount:
+            (subtree && subtree.childCountQueryCount) || 0,
+          childCountAuthority:
+            (subtree && subtree.childCountAuthority) || 'unknown'
+        })
+      }
       sendJson(res, 200, {
         room_key: roomKey,
         title: inspect.title,
@@ -2112,8 +2144,12 @@ async function handleApi(req, res) {
         lazy_load: true,
         safe_load: true,
         http_collab: true,
+        childCountAuthority:
+          (subtree && subtree.childCountAuthority) || 'room_nodes',
+        childCountQueryCount: (subtree && subtree.childCountQueryCount) || 0,
         inspect,
         replaceLock: inspect.replaceLock || inspectReplaceLock(roomKey),
+        ...authority,
         ...publicAccess(req.roomAccess || (await attachRoomAccess(req, roomKey)))
       })
       return true

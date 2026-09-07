@@ -1,0 +1,6 @@
+[mcp_servers.mind-map]
+command = "node"
+args = ["simple-mind-map/bin/mcpServer.mjs"]
+
+[mcp_servers.mind-map.env]
+MIND_MAP_API = "http://127.0.0.1:1234"

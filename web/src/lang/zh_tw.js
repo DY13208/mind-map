@@ -61,6 +61,8 @@ export default {
     activeOnly: '僅啟用新節點，不進入編輯',
     openRealtimeRenderOnNodeTextEdit: '開啟文本編輯實時渲染效果',
     isShowScrollbar: '顯示捲軸',
+    showNavigator: '顯示小地圖',
+    showNavigatorToolbar: '顯示導航工具列',
     isUseHandDrawnLikeStyle: '使用手繪風格',
     isUseMomentum: '是否開啓拖動畫布的動量效果',
     openBlankMode: '是否開啓演示模式的填空功能',
@@ -374,6 +376,7 @@ export default {
     openFileTip: '開啟檔案前，請先匯出目前編輯的檔案，以免內容遺失',
     ai: 'AI',
     flowExpand: '補齊流程',
+    sopRegistry: 'SOP台帳',
     cooperate: '協同'
   },
   edit: {
