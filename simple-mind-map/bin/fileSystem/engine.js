@@ -105,6 +105,8 @@ function createFileSystem(options = {}) {
       throw fsError('INVALID_ROOM_KEY', err.message, 400)
     }
     const userId = roomAcl.normalizeUserId(input.userId || '')
+    const teamId = String(input.teamId || input.team_id || '').trim()
+    const teamMembers = Array.isArray(input.teamMembers) ? input.teamMembers : []
     const folderId = parseFolderId(input.folderId || input.folder_id)
     if (await store.isDeleted(roomKey)) {
       throw fsError('ROOM_DELETED', '房间已删除，如需重建请使用新房间号', 409)
@@ -126,7 +128,8 @@ function createFileSystem(options = {}) {
           version: 0,
           metadata: DEFAULT_METADATA,
           folder_id: folderId,
-          owner_id: userId || ''
+          owner_id: userId || '',
+          team_id: teamId || null
         },
         db
       )
@@ -134,6 +137,20 @@ function createFileSystem(options = {}) {
       if (userId) {
         await store.insertMember(
           { room_key: roomKey, user_id: userId, role: 'owner' },
+          db
+        )
+      }
+      for (const member of teamMembers) {
+        const memberId = roomAcl.normalizeUserId(member.userId || member.user_id)
+        if (!memberId || memberId === userId) continue
+        await store.insertMember(
+          {
+            room_key: roomKey,
+            user_id: memberId,
+            role: 'editor',
+            source: 'team',
+            source_team_id: teamId
+          },
           db
         )
       }

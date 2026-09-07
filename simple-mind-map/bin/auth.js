@@ -249,14 +249,41 @@ async function initAuth() {
     await authPool.query(`
       create table if not exists wecom_users (
         user_id text primary key,
+        corp_id text not null default '',
+        wecom_userid text not null default '',
         name text not null,
         avatar text not null default '',
+        position text not null default '',
         departments jsonb not null default '[]'::jsonb,
         created_at timestamptz not null default now(),
         updated_at timestamptz not null default now(),
         last_login_at timestamptz not null default now()
       )
     `)
+    await authPool.query(
+      `alter table wecom_users add column if not exists corp_id text not null default ''`
+    )
+    await authPool.query(
+      `alter table wecom_users add column if not exists wecom_userid text not null default ''`
+    )
+    await authPool.query(
+      `alter table wecom_users add column if not exists position text not null default ''`
+    )
+    await authPool.query(
+      `update wecom_users set corp_id = $1 where corp_id = ''`,
+      [config.corpId]
+    )
+    await authPool.query(
+      `update wecom_users set wecom_userid = user_id where wecom_userid = ''`
+    )
+    await authPool.query(
+      `create unique index if not exists wecom_users_corp_wecom_userid_uq
+       on wecom_users(corp_id, wecom_userid)`
+    )
+    await authPool.query(
+      `create index if not exists wecom_users_corp_name_idx
+       on wecom_users(corp_id, name, user_id)`
+    )
     await authPool.query(`
       create table if not exists auth_sessions (
         token_hash text primary key,
@@ -746,12 +773,47 @@ async function exchangeWecomCode(code) {
 
   return {
     id: userId,
+    corpId: config.corpId,
     name: String((profile && profile.name) || userId).slice(0, 100),
     avatar: wecomAvatarUrl(profile),
+    position: String((profile && profile.position) || '').slice(0, 100),
     departments: Array.isArray(profile && profile.department)
       ? profile.department.slice(0, 100)
       : []
   }
+}
+
+async function listWecomContacts(options = {}) {
+  if (!config.enabled) {
+    throw new AuthError('wecom_contacts_unavailable', '企业微信登录未启用', 503)
+  }
+  const departmentId = Number(options.departmentId || 1)
+  const token = await getAccessToken()
+  const data = await fetchJson(
+    wecomUrl('/cgi-bin/user/list', {
+      access_token: token,
+      department_id: Number.isFinite(departmentId) && departmentId > 0 ? departmentId : 1,
+      fetch_child: 1
+    }),
+    { retries: 1 }
+  )
+  if (!successfulWecomResponse(data)) {
+    const code = Number(data && data.errcode)
+    throw new AuthError(
+      code === 60011 || code === 60012 || code === 40001
+        ? 'wecom_contacts_forbidden'
+        : 'wecom_contacts_failed',
+      `企业微信通讯录读取失败（${Number.isFinite(code) ? code : 'unknown'}）`,
+      502
+    )
+  }
+  return (Array.isArray(data.userlist) ? data.userlist : []).map(item => ({
+    userId: String(item.userid || '').trim(),
+    name: String(item.name || item.userid || '').slice(0, 100),
+    avatar: String(item.avatar || '').slice(0, 1000),
+    position: String(item.position || '').slice(0, 100),
+    departments: Array.isArray(item.department) ? item.department.slice(0, 100) : []
+  })).filter(item => item.userId)
 }
 
 function wecomAvatarUrl(profile) {
@@ -818,13 +880,17 @@ async function consumeOAuthState(nonce, browserId) {
 }
 
 async function upsertUser(user) {
-  await authPool.query(
+  const corpId = user.corpId || config.corpId
+  const wecomUserId = String(user.wecomUserId || user.id || '').trim()
+  if (!wecomUserId) throw new AuthError('invalid_user', '企业微信成员身份为空', 400)
+  const internalUserId = await resolveInternalUserId(corpId, wecomUserId)
+  const result = await authPool.query(
     `insert into wecom_users
-       (user_id, name, avatar, departments, last_login_at)
-     values ($1, $2, $3, $4::jsonb, now())
-     on conflict (user_id) do update set
+       (user_id, corp_id, wecom_userid, name, avatar, position, departments, last_login_at)
+     values ($1, $2, $3, $4, $5, $6, $7::jsonb, now())
+     on conflict (corp_id, wecom_userid) do update set
        name = case
-         when excluded.name <> '' and excluded.name is distinct from excluded.user_id
+         when excluded.name <> '' and excluded.name is distinct from excluded.wecom_userid
            then excluded.name
          when wecom_users.name <> '' then wecom_users.name
          else excluded.name
@@ -833,11 +899,41 @@ async function upsertUser(user) {
          when excluded.avatar <> '' then excluded.avatar
          else wecom_users.avatar
        end,
+       position = case
+         when excluded.position <> '' then excluded.position
+         else wecom_users.position
+       end,
        departments = excluded.departments,
        updated_at = now(),
-       last_login_at = now()`,
-    [user.id, user.name, user.avatar, JSON.stringify(user.departments)]
+       last_login_at = now()
+     returning user_id, corp_id, wecom_userid`,
+    [internalUserId, corpId, wecomUserId, user.name, user.avatar, user.position || '', JSON.stringify(user.departments)]
   )
+  const row = result.rows[0]
+  return { ...user, id: row.user_id, corpId: row.corp_id, wecomUserId: row.wecom_userid }
+}
+
+async function resolveInternalUserId(corpId, wecomUserId) {
+  const existing = await authPool.query(
+    `select user_id from wecom_users where corp_id = $1 and wecom_userid = $2`,
+    [corpId, wecomUserId]
+  )
+  if (existing.rows[0]) return existing.rows[0].user_id
+  const collision = await authPool.query(
+    `select 1 from wecom_users where user_id = $1 and corp_id <> $2 limit 1`,
+    [wecomUserId, corpId]
+  )
+  if (!collision.rows.length) return wecomUserId
+  return collisionInternalUserId(corpId, wecomUserId)
+}
+
+function collisionInternalUserId(corpId, wecomUserId) {
+  return `wecom:${sha256(`${corpId}:${wecomUserId}`).slice(0, 48)}`
+}
+
+async function upsertWecomUser(user) {
+  await initAuth()
+  return upsertUser(user)
 }
 
 async function createSession(userId) {
@@ -876,8 +972,11 @@ async function authenticateRequest(req) {
        and session.absolute_expires_at > now()
      returning
        member.user_id,
+       member.corp_id,
+       member.wecom_userid,
        member.name,
        member.avatar,
+       member.position,
        member.departments,
        session.expires_at`,
     [sha256(token), config.sessionTtlSeconds]
@@ -886,8 +985,11 @@ async function authenticateRequest(req) {
   if (!row) return null
   return {
     id: row.user_id,
+    corpId: row.corp_id,
+    wecomUserId: row.wecom_userid,
     name: row.name,
     avatar: row.avatar,
+    position: row.position || '',
     departments: Array.isArray(row.departments) ? row.departments : [],
     expiresAt: row.expires_at
   }
@@ -969,6 +1071,8 @@ function redirect(res, location) {
 function publicUser(user) {
   return {
     id: user.id,
+    corpId: user.corpId,
+    wecomUserId: user.wecomUserId || user.id,
     name: user.name,
     avatar: user.avatar,
     departments: user.departments,
@@ -1004,12 +1108,15 @@ function readJsonBody(req, limit = 4096) {
 async function createDevBypassSession(req, res) {
   const user = {
     id: config.devBypassUserId,
+    corpId: config.corpId,
     name: config.devBypassUserName,
     avatar: '',
     departments: []
   }
-  await upsertUser(user)
-  const session = await createSession(user.id)
+  const stored = await upsertUser(user)
+  const session = await createSession(stored.id)
+  user.id = stored.id
+  user.wecomUserId = stored.wecomUserId
   setCookie(res, req, SESSION_COOKIE, session, config.sessionMaxSeconds)
   return {
     id: user.id,
@@ -1201,8 +1308,10 @@ async function handleAuthApi(req, res) {
       }
       returnTo = consumedReturnTo
       const user = await exchangeWecomCode(url.searchParams.get('code'))
-      await upsertUser(user)
-      const session = await createSession(user.id)
+      const stored = await upsertUser(user)
+      const session = await createSession(stored.id)
+      user.id = stored.id
+      user.wecomUserId = stored.wecomUserId
       setCookie(res, req, SESSION_COOKIE, session, config.sessionMaxSeconds)
       redirect(res, appRedirectUrl(returnTo))
     } catch (err) {
@@ -1320,13 +1429,14 @@ async function createTestIdentity(options = {}) {
   await initAuth()
   const user = {
     id: String(options.userId || 'e2e-user').slice(0, 160),
+    corpId: config.corpId,
     name: String(options.name || options.userId || 'E2E'),
     avatar: '',
     departments: []
   }
-  await upsertUser(user)
-  const token = await createSession(user.id)
-  return { userId: user.id, name: user.name, token }
+  const stored = await upsertUser(user)
+  const token = await createSession(stored.id)
+  return { userId: stored.id, wecomUserId: stored.wecomUserId, name: user.name, token }
 }
 
 module.exports = {
@@ -1339,6 +1449,9 @@ module.exports = {
   applyCorsHeaders,
   isAllowedOrigin,
   createTestIdentity,
+  listWecomContacts,
+  upsertWecomUser,
+  resolveInternalUserId,
   __test: {
     readConfig,
     safeReturnTo,
@@ -1358,6 +1471,7 @@ module.exports = {
     isSameSiteRequest,
     requestAppOrigin,
     logoutRedirectUrl,
-    hostnamesEquivalent
+    hostnamesEquivalent,
+    collisionInternalUserId
   }
 }

@@ -140,7 +140,10 @@ function memoryDb() {
       if (text.includes('select room_key from rooms')) {
         return { rows: rooms.has(params[0]) ? [{ room_key: params[0] }] : [] }
       }
-      if (text.includes('select user_id, role from room_members where room_key')) {
+      if (
+        text.includes('from room_members where room_key') &&
+        !text.includes('and user_id')
+      ) {
         return {
           rows: members.filter(item => item.room_key === params[0])
         }
@@ -154,10 +157,24 @@ function memoryDb() {
         const current = members.find(
           item => item.room_key === roomKey && item.user_id === userId
         )
+        const isTeam = text.includes("'team'")
         if (current) {
           if (!keepExisting) current.role = role
+          if (isTeam) current.team_role = role
+          else current.direct_role = role
+          current.role = current.direct_role === 'owner' || current.team_role === 'owner'
+            ? 'owner'
+            : current.direct_role === 'editor' || current.team_role === 'editor'
+              ? 'editor'
+              : current.direct_role || current.team_role || current.role
         } else {
-          members.push({ room_key: roomKey, user_id: userId, role })
+          members.push({
+            room_key: roomKey,
+            user_id: userId,
+            role,
+            direct_role: isTeam ? null : role,
+            team_role: isTeam ? role : null
+          })
         }
         const row = members.find(
           item => item.room_key === roomKey && item.user_id === userId
@@ -173,6 +190,16 @@ function memoryDb() {
             : []
         }
       }
+      if (text.includes('update room_members') && text.includes('direct_role = null')) {
+        const current = members.find(
+          item => item.room_key === params[0] && item.user_id === params[1]
+        )
+        if (current) {
+          current.direct_role = null
+          current.role = current.team_role
+        }
+        return { rows: [] }
+      }
       if (text.includes('delete from room_members')) {
         const idx = members.findIndex(
           item => item.room_key === params[0] && item.user_id === params[1]
@@ -180,7 +207,7 @@ function memoryDb() {
         if (idx >= 0) members.splice(idx, 1)
         return { rows: [] }
       }
-      if (text.includes('select user_id, role from room_members') && text.includes('and user_id')) {
+      if (text.includes('select user_id') && text.includes('from room_members') && text.includes('and user_id')) {
         return {
           rows: members.filter(
             item => item.room_key === params[0] && item.user_id === params[1]
@@ -192,7 +219,10 @@ function memoryDb() {
           rows: [
             {
               total: members.filter(
-                item => item.room_key === params[0] && item.role === 'owner'
+                item =>
+                  item.room_key === params[0] &&
+                  item.role === 'owner' &&
+                  (!text.includes('user_id <>') || item.user_id !== params[1])
               ).length
             }
           ]
@@ -269,9 +299,30 @@ async function testAccessAndMembers() {
   assert.strictEqual(missing.exists, false)
 }
 
+async function testMultiSourceGrants() {
+  const db = memoryDb()
+  db.rooms.add('room-shared')
+  await roomAcl.ensureOwner(db, 'room-shared', 'owner')
+  await roomAcl.setMember(db, 'room-shared', 'member-1', 'viewer')
+  const shared = db.members.find(item => item.user_id === 'member-1')
+  shared.team_role = 'editor'
+  shared.source = 'direct_share'
+  shared.source_team_id = 'team-1'
+  shared.role = 'editor'
+
+  await roomAcl.removeMember(db, 'room-shared', 'member-1')
+  const afterDirectRemoval = db.members.find(item => item.user_id === 'member-1')
+  assert(afterDirectRemoval, 'team grant must keep the ACL row after direct-share removal')
+  assert.strictEqual(afterDirectRemoval.direct_role, null)
+  assert.strictEqual(afterDirectRemoval.team_role, 'editor')
+  assert.strictEqual(afterDirectRemoval.role, 'editor')
+  assert.strictEqual((await roomAcl.getAccess(db, 'room-shared', 'member-1')).role, 'editor')
+}
+
 testNormalizeAndInfer()
 testRoleMatrix()
 testAccessAndMembers()
+  .then(testMultiSourceGrants)
   .then(() => {
     console.log('roomAcl tests passed')
   })

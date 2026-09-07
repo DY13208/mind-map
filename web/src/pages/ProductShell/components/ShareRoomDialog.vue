@@ -24,7 +24,12 @@
         >
       </div>
       <h4>已共享成员 <small>基于房间成员 ACL</small></h4>
-      <TeamMemberList :members="members" @role="updateRole" @remove="remove" />
+      <TeamMemberList
+        variant="room"
+        :members="members"
+        @role="updateRole"
+        @remove="remove"
+      />
     </div>
     <span slot="footer"
       ><el-button @click="shown = false">完成</el-button></span
