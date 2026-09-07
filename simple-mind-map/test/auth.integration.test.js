@@ -158,6 +158,8 @@ async function main() {
       ...process.env,
       HOST: '127.0.0.1',
       PORT: String(apiPort),
+      // 这里校验的是 v1 升级握手上的鉴权；v2 的 socket 鉴权由 collabV2.acl 集成测试覆盖。
+      COLLAB_V2: '0',
       WECOM_AUTH_ENABLED: 'true',
       WECOM_CORP_ID: 'wwintegrationtest',
       WECOM_AGENT_ID: '1000002',
@@ -314,11 +316,12 @@ async function main() {
     assert.strictEqual(me.authenticated, true)
     assert.strictEqual(me.user.id, 'zhangsan')
     assert.strictEqual(me.user.name, '张三')
+    assert.strictEqual(me.user.avatar, 'https://example.test/avatar.png')
     assert.deepStrictEqual(me.user.departments, [1, 2])
 
     response = await request('/api/files')
     assert.strictEqual(response.status, 200)
-    assert.deepStrictEqual(await response.json(), { list: [] })
+    assert.deepStrictEqual((await response.json()).list, [])
     assert.strictEqual(tokenCalls, 1)
 
     response = await request(
@@ -338,11 +341,29 @@ async function main() {
     })
     assert.strictEqual(response.status, 403)
 
+    // 跨站伪造依然要拦住，即使浏览器带上了 Sec-Fetch-Site。
     response = await request('/api/auth/logout', {
       method: 'POST',
-      headers: { Origin: appOrigin }
+      headers: {
+        Origin: 'http://evil.example',
+        'Sec-Fetch-Site': 'cross-site'
+      }
+    })
+    assert.strictEqual(response.status, 403)
+
+    // AUTH_APP_ORIGIN 配置与实际访问地址不一致时，同源请求仍然要能退出。
+    response = await request('/api/auth/logout', {
+      method: 'POST',
+      headers: {
+        Origin: 'http://192.168.77.77:8989',
+        'Sec-Fetch-Site': 'same-origin'
+      }
     })
     assert.strictEqual(response.status, 204)
+    assert.strictEqual(
+      response.headers.get('access-control-allow-origin'),
+      'http://192.168.77.77:8989'
+    )
 
     response = await request('/api/files')
     assert.strictEqual(response.status, 401)
@@ -357,6 +378,58 @@ async function main() {
     await expectUnauthorizedWebSocket(
       `ws://127.0.0.1:${apiPort}/room-test`,
       appOrigin
+    )
+
+    // GET 退出：POST 被 CORS 拦下时的顶层跳转兜底。
+    response = await request('/api/auth/dev-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: appOrigin },
+      body: JSON.stringify({
+        key: 'integration-test-dev-bypass-key-at-least-32-characters'
+      })
+    })
+    assert.strictEqual(response.status, 200)
+    assert.strictEqual((await request('/api/auth/me').then(r => r.json())).authenticated, true)
+
+    // 子资源（<img>、<iframe> 等）发起的 GET 退出属于伪造请求，必须拒绝。
+    for (const dest of ['image', 'script', 'iframe', 'empty']) {
+      response = await request('/api/auth/logout', {
+        headers: { 'Sec-Fetch-Dest': dest }
+      })
+      assert.strictEqual(response.status, 403, `dest=${dest} 应被拒绝`)
+      assert.strictEqual(
+        (await request('/api/auth/me').then(r => r.json())).authenticated,
+        true
+      )
+    }
+
+    response = await request('/api/auth/logout?return_to=%2Ffiles', {
+      headers: { 'Sec-Fetch-Dest': 'document' }
+    })
+    assert.strictEqual(response.status, 302)
+    assert.strictEqual(response.headers.get('location'), `${appOrigin}/files`)
+    assert.strictEqual((await request('/api/auth/me').then(r => r.json())).authenticated, false)
+
+    response = await request('/api/auth/dev-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: appOrigin },
+      body: JSON.stringify({
+        key: 'integration-test-dev-bypass-key-at-least-32-characters'
+      })
+    })
+    assert.strictEqual(response.status, 200)
+
+    // 开发态页面和接口端口不同时，顶层跳转要回到用户原来的前端地址。
+    response = await request('/api/auth/logout?return_to=%2Ffiles', {
+      headers: {
+        'Sec-Fetch-Dest': 'document',
+        Referer: 'http://127.0.0.1:8081/edit'
+      }
+    })
+    assert.strictEqual(response.status, 302)
+    assert.strictEqual(
+      response.headers.get('location'),
+      'http://127.0.0.1:8081/files'
     )
 
     console.log('auth integration tests passed')

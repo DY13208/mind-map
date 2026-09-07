@@ -109,17 +109,46 @@ export async function createLoginQr() {
   return data
 }
 
+const LOGOUT_TIMEOUT_MS = 8000
+
+// 顶层跳转退出：不受 CORS / 来源白名单影响，是 POST 失败时的兜底通道。
+export function getLogoutNavigationUrl(returnTo) {
+  const url = new URL(getAuthApiUrl('/api/auth/logout'))
+  url.searchParams.set('return_to', returnTo || '/')
+  return url.toString()
+}
+
+// 永远不抛异常：返回服务端是否确认退出，让调用方决定是否走兜底跳转。
+// 退出按钮卡在「退出中…」出不来，比退出失败更让人困惑。
 export async function logout() {
-  const response = await fetch(getAuthApiUrl('/api/auth/logout'), {
-    method: 'POST',
-    credentials: 'include',
-    headers: { Accept: 'application/json' }
-  })
-  if (!response.ok && response.status !== 204) {
-    const data = await response.json().catch(() => ({}))
-    throw new Error(data.error || '退出登录失败')
+  let confirmed = false
+  try {
+    const response = await fetchWithTimeout(
+      getAuthApiUrl('/api/auth/logout'),
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { Accept: 'application/json' }
+      },
+      LOGOUT_TIMEOUT_MS
+    )
+    confirmed = response.ok || response.status === 204
+  } catch (err) {
+    confirmed = false
   }
   currentUser = null
+  return confirmed
+}
+
+// 无论服务端是否响应，都要把用户送回登录页。
+export async function logoutAndRedirect(returnTo = '/') {
+  const confirmed = await logout()
+  if (confirmed) {
+    window.location.assign(returnTo)
+    return true
+  }
+  window.location.assign(getLogoutNavigationUrl(returnTo))
+  return false
 }
 
 const DEV_AUTH_KEY_STORAGE = 'mind_map_dev_auth_key'
