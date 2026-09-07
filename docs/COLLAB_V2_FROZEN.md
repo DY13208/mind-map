@@ -181,3 +181,73 @@ Fixes:
 
 `COLLABORATION_V2_CORE_FROZEN = YES`  
 `COLLAB_V2_FREEZE_P0 = 0`
+
+---
+
+## Freeze Amendment — Wide Sibling Position Canonicalization P0 (2026-09-07)
+
+P0 DATA LOSS / F5 WRONG RESTORE found on wide / import / legacy parents. Collaboration V2 stays frozen; this amendment only hardens sibling position placement so PG order matches the requested insert index after reconnect / F5.
+
+| Field | Value |
+|---|---|
+| Title | Wide Sibling Position Canonicalization P0 Amendment |
+| `FREEZE_BREAK_REQUIRED` | **YES** (minimal) |
+| In scope | `bin/collabV2/directApplier.js` — `placeAmongSiblings`; insert `affectedUids` when `reindex=true` |
+| Related (non-schema) | `storage` must not use `onlyUids` partial persistence when `reindex=true`; client `siblingPositions` apply must clone-on-write |
+| Out of scope | Renderer; protocol; outbox; revision; ACK; PG schema; C2 encode/performance |
+
+### Problem
+
+`node.insert` under siblings whose positions were empty, duplicate, padded legacy, non-canonical, or not strictly increasing could skip reindex. Realtime clients could still look correct while `room_nodes` reconstructed by `ORDER BY position` drifted — appearing as F5 loss or wrong slot.
+
+### Root cause
+
+`placeAmongSiblings` only inspected left/right bounds for `generateKeyBetween`, and treated empty `''` like absent bounds. It did not validate the **entire** live sibling position set as canonical.
+
+### Fix
+
+Before allocating a key, require every live sibling position to be:
+
+1. non-empty  
+2. canonical (`isValidPosition`)  
+3. not legacy padded (`!isPaddedIndex`)  
+4. unique (implied by strict increase)  
+5. strictly increasing  
+
+If any check fails → deterministic full sibling reindex (`generateNKeysBetween` + `updatePositions`). Reindex events must include `siblingPositions` and `affectedUids` covering every reindexed UID.
+
+### Frozen invariants (this amendment)
+
+**`FROZEN_SIBLING_POSITION_INVARIANT`**
+
+For `node.insert` / `node.move` / `node.reorder`: if the existing sibling position set is not canonical + unique + strictly ordered, the applier **must** run a deterministic full sibling reindex first. Forbidden: `generateKeyBetween(left, right)` incremental placement on an invalid sibling set.
+
+**Storage invariant**
+
+When event `payload.reindex === true`, persistence **must not** use `onlyUids` partial `room_nodes` writes. Reindex is a sibling-set structural mutation; every rewritten position in `siblingPositions` must be durable. (No schema change.)
+
+**Event invariant**
+
+When `reindex=true`, the event **must** carry `siblingPositions`, and `affectedUids` **must** cover all reindexed sibling UIDs (plus insert/move targets as needed). A, B, reconnect, and F5 must converge to the same position state.
+
+### Position report vocabulary
+
+| Field | Meaning |
+|---|---|
+| `EMPTY_POSITION_COUNT` | `position` is `''` / null |
+| `DUPLICATE_POSITION_COUNT` | same position string on multiple live siblings |
+| `LEGACY_PADDED_POSITION_COUNT` | 8-digit padded legacy index (`isPaddedIndex`) — valid digits, **not** canonical fractional |
+| `INVALID_POSITION_COUNT` | non-empty and not `isValidPosition` (excludes empty and padded) |
+
+Do not fold padded into `INVALID_POSITION`; padded is `LEGACY_PADDED`.
+
+### Regression
+
+Freeze suite includes `test/collabV2.wideSibling.persistence.test.js`:
+
+- empty sibling middle insert → must reindex; PG / event / hydrate agree  
+- first legacy padded insert → must reindex; second insert on now-canonical set → fast path (`reindex=false`) unless bounds truly cannot allocate  
+- 500-sibling forced reindex duration / query count sanity (batch `updatePositions`, not N SQL per sibling)
+
+`COLLABORATION_V2_CORE_FROZEN = YES`  
+`FROZEN_SIBLING_POSITION_INVARIANT = YES`

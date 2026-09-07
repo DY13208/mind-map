@@ -1,4 +1,4 @@
-const { generateKeyBetween, generateNKeysBetween, isPaddedIndex } = require('../fractionalIndex')
+const { generateKeyBetween, generateNKeysBetween, isPaddedIndex, isValidPosition } = require('../fractionalIndex')
 const { mergeNodeDataLww, expandInverseByGroups } = require('../fieldMerge')
 const {
   parentDeletedError,
@@ -164,9 +164,15 @@ async function placeAmongSiblings(store, parentUid, uid, index, version) {
   const slot = clampIndex(index, kids.length)
   const left = slot > 0 ? kids[slot - 1].position : null
   const right = slot < kids.length ? kids[slot].position : null
+  // Empty bounds are not absent siblings. Normalize the entire sibling set
+  // before allocating a key so PG order and the requested client index agree.
+  const canonical = kids.every((item, i) =>
+    isValidPosition(item.position) && !isPaddedIndex(item.position) &&
+    (i === 0 || kids[i - 1].position < item.position)
+  )
   let key = null
   try {
-    if (!isPaddedIndex(left) && !isPaddedIndex(right)) {
+    if (canonical) {
       key = generateKeyBetween(left || null, right || null)
     }
   } catch (err) {
@@ -243,6 +249,13 @@ async function applyInsert(store, op, version) {
     is_root: false,
     node_version: version
   })
+  const affected = stamp.reindexed
+    ? unique([
+        uid,
+        parent.uid,
+        ...Object.keys(stamp.siblingPositions || {})
+      ])
+    : [uid, parent.uid]
   return {
     result: { uid, parent_uid: parent.uid, position: stamp.position, index: stamp.index },
     inversePayload: { type: 'node.delete', payload: { uid } },
@@ -256,7 +269,7 @@ async function applyInsert(store, op, version) {
           data: merged.data,
           text: merged.data.text
         },
-        affectedUids: [uid, parent.uid]
+        affectedUids: affected
       },
       stamp
     )

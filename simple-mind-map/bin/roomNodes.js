@@ -336,54 +336,6 @@ function nodesTableAuthorityEnabled() {
   return value !== 'json'
 }
 
-/**
- * Transient encode cache: WeakMap only (never on wire / JSON / PG / hash input).
- * Fingerprint invalidates reuse after any business mutation of the graph.
- */
-const encodedRowsByGraph = new WeakMap()
-
-function fingerprintGraph(graph) {
-  const uids = Object.keys(graph || {})
-  let childAccum = 0
-  let dataAccum = 0
-  for (let i = 0; i < uids.length; i++) {
-    const uid = uids[i]
-    const node = graph[uid] || {}
-    const children = Array.isArray(node.children) ? node.children : []
-    childAccum =
-      (childAccum +
-        children.length * 131 +
-        (children[0] ? String(children[0]).length : 0) +
-        (children[children.length - 1]
-          ? String(children[children.length - 1]).length
-          : 0)) |
-      0
-    const data = node.data || {}
-    const text = data.text == null ? '' : String(data.text)
-    dataAccum =
-      (dataAccum +
-        text.length * 17 +
-        (data.expand === false ? 3 : 0) +
-        (data.uid ? String(data.uid).length : 0) +
-        (node.isRoot ? 5 : 0)) |
-      0
-    if (i === (uids.length >> 1)) {
-      dataAccum = (dataAccum + String(uid).length * 7) | 0
-    }
-  }
-  return (
-    uids.length +
-    '|' +
-    childAccum +
-    '|' +
-    dataAccum +
-    '|' +
-    (uids[0] || '') +
-    '|' +
-    (uids[uids.length - 1] || '')
-  )
-}
-
 function stripLegacyEncodedRowsProp(graph) {
   if (!graph || typeof graph !== 'object') return
   if (!Object.prototype.hasOwnProperty.call(graph, '__encodedRows')) return
@@ -403,41 +355,9 @@ function stripLegacyEncodedRowsProp(graph) {
   }
 }
 
-function attachEncodedRowsCache(graph, encodedRows) {
-  if (!graph || typeof graph !== 'object' || Array.isArray(graph)) return graph
-  if (!encodedRows) return graph
-  stripLegacyEncodedRowsProp(graph)
-  encodedRowsByGraph.set(graph, {
-    rows: encodedRows,
-    fp: fingerprintGraph(graph)
-  })
-  return graph
-}
-
-function takeEncodedRowsCache(graph) {
-  if (!graph || typeof graph !== 'object') return null
-  stripLegacyEncodedRowsProp(graph)
-  const hit = encodedRowsByGraph.get(graph)
-  if (!hit) return null
-  if (hit.fp !== fingerprintGraph(graph)) {
-    encodedRowsByGraph.delete(graph)
-    return null
-  }
-  return hit.rows
-}
-
-function peekEncodedRowsCache(graph) {
-  return takeEncodedRowsCache(graph)
-}
-
-function clearEncodedRowsCache(graph) {
-  if (!graph || typeof graph !== 'object') return
-  stripLegacyEncodedRowsProp(graph)
-  encodedRowsByGraph.delete(graph)
-}
-
 function canonicalizeNodes(obj) {
   const graph = obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}
+  stripLegacyEncodedRowsProp(graph)
   const check = validateNodeGraph(graph)
   if (!check.ok) {
     return { ok: false, nodes: graph, encodedRows: null, errors: check.errors }
@@ -463,7 +383,6 @@ function snapshotCanonicalForStorage(nodes) {
       errors: canonical.errors
     }
   }
-  attachEncodedRowsCache(canonical.nodes, canonical.encodedRows)
   return {
     ok: true,
     nodes: canonical.nodes,
@@ -1088,11 +1007,6 @@ module.exports = {
   nodesTableAuthorityEnabled,
   canonicalizeNodes,
   snapshotCanonicalForStorage,
-  attachEncodedRowsCache,
-  takeEncodedRowsCache,
-  peekEncodedRowsCache,
-  clearEncodedRowsCache,
-  fingerprintGraph,
   pickAuthoritativeNodes,
   auditRoomNodesState,
   replaceRoomNodes,
