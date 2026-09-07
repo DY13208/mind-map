@@ -206,6 +206,16 @@
           </div>
           <div
             class="toolbarBtn"
+            data-testid="back-to-files"
+            title="返回首页"
+            v-if="$route.query.room"
+            @click="goToFiles"
+          >
+            <span class="icon el-icon-back"></span>
+            <span class="text">返回首页</span>
+          </div>
+          <div
+            class="toolbarBtn"
             @click="$bus.$emit('showExport')"
             style="margin-right: 0"
           >
@@ -706,6 +716,11 @@ export default {
         }
         this.$message.warning(this.$t('toolbar.notSupportTip'))
       }
+    },
+
+    // 返回 Product Shell 文件列表
+    goToFiles() {
+      this.$router.push({ path: '/files' }).catch(() => {})
     },
 
     // 扫描本地文件夹

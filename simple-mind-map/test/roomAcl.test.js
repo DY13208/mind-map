@@ -7,6 +7,37 @@ function testNormalizeAndInfer() {
   assert.strictEqual(roomAcl.normalizeRole('guest'), '')
 
   assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/recent', 'GET'),
+    null
+  )
+  assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/favorites', 'GET'),
+    null
+  )
+  assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/trash', 'GET'),
+    null
+  )
+  assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/room-a/favorite', 'POST'),
+    { roomKey: 'room-a', action: 'view' }
+  )
+  assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/room-a/trash', 'POST'),
+    { roomKey: 'room-a', action: 'manage' }
+  )
+  assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/room-a/restore', 'POST'),
+    { roomKey: 'room-a', action: 'manage' }
+  )
+  assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/room-a/permanent', 'DELETE'),
+    { roomKey: 'room-a', action: 'manage' }
+  )
+  assert.strictEqual(roomAcl.roleAllows('editor', 'manage'), false)
+  assert.strictEqual(roomAcl.roleAllows('viewer', 'manage'), false)
+  assert.strictEqual(roomAcl.roleAllows('owner', 'manage'), true)
+  assert.deepStrictEqual(
     roomAcl.inferRoomAcl('/api/files/room-a/preview', 'GET'),
     { roomKey: 'room-a', action: 'view' }
   )
@@ -16,7 +47,7 @@ function testNormalizeAndInfer() {
   )
   assert.deepStrictEqual(
     roomAcl.inferRoomAcl('/api/files/room-a', 'PATCH'),
-    { roomKey: 'room-a', action: 'manage' }
+    { roomKey: 'room-a', action: 'edit' }
   )
   assert.deepStrictEqual(
     roomAcl.inferRoomAcl('/api/files/room-a', 'DELETE'),
@@ -38,7 +69,12 @@ function testNormalizeAndInfer() {
     roomAcl.inferRoomAcl('/api/maps/room-a/operations', 'POST'),
     { roomKey: 'room-a', action: 'edit' }
   )
-  assert.strictEqual(roomAcl.inferRoomAcl('/api/files', 'GET'), null)
+  assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/room-a/move', 'POST'),
+    { roomKey: 'room-a', action: 'edit' }
+  )
+  assert.strictEqual(roomAcl.roleAllows('viewer', 'edit'), false)
+  assert.strictEqual(roomAcl.roleAllows('editor', 'edit'), true)
   assert.strictEqual(
     roomAcl.presenceDocRoomKey('room-a__presence'),
     'room-a'
@@ -55,6 +91,17 @@ function testRoleMatrix() {
   assert.strictEqual(roomAcl.roleAllows(null, 'edit', { legacyOpen: true }), true)
   assert.strictEqual(roomAcl.roleAllows(null, 'view', { bypass: true }), true)
   assert.strictEqual(roomAcl.roleAllows(null, 'view'), false)
+  const restoreHit = roomAcl.inferRoomAcl('/api/files/room-a/versions/v1/restore', 'POST')
+  assert.strictEqual(restoreHit.action, 'manage')
+  assert.strictEqual(roomAcl.roleAllows('editor', restoreHit.action), false)
+  assert.strictEqual(roomAcl.roleAllows('owner', restoreHit.action), true)
+  const versionWrite = roomAcl.inferRoomAcl('/api/files/room-a/versions', 'POST')
+  assert.strictEqual(versionWrite.action, 'edit')
+  assert.strictEqual(roomAcl.roleAllows('viewer', versionWrite.action), false)
+  assert.strictEqual(roomAcl.roleAllows('editor', versionWrite.action), true)
+  const versionRead = roomAcl.inferRoomAcl('/api/rooms/room-a/versions', 'GET')
+  assert.strictEqual(versionRead.action, 'view')
+  assert.strictEqual(roomAcl.roleAllows('viewer', versionRead.action), true)
   const writeHit = roomAcl.inferRoomAcl('/api/files/room-a/nodes', 'POST')
   assert.strictEqual(writeHit.action, 'edit')
   assert.strictEqual(roomAcl.roleAllows('viewer', writeHit.action), false)

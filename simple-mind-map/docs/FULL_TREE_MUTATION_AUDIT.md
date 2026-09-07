@@ -11,3 +11,5 @@
 | Guarded forbidden | `src/plugins/Cooperate.js:4867-4890` | Paste Undo 禁止 `map.replace` |
 
 普通 Text、Style、Move、Delete、Paste、Theme/Layout、Search/Replace、Generalization 与 AssociativeLine 均不得产生 `map.replace`。`index.js` 的通用 `setData/setFullData` 是基础 API，不能脱离调用场景判错。现有 `collabMove`、`collabGeneralization`、`collabPasteUndo`、`collabTreeAuthority` 已覆盖关键 guard，并在 P0 修复后随 Freeze 全部通过。
+
+Allowlist remains limited to `IMPORT`, `IMPORT_UNDO`, `VERSION_RESTORE`, `INITIAL_LEGACY_MIGRATION` and `AUTHORITATIVE_SNAPSHOT_RECOVERY`; file-system rename/move must not create `map.replace`.
