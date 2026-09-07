@@ -2,8 +2,10 @@
   <div class="sopPage" :class="{ isDark: isDark }">
     <header class="sopHeader">
       <div class="left">
-        <el-button size="mini" @click="goBack">返回导图</el-button>
-        <h1>SOP 台账</h1>
+          <el-button size="mini" @click="goBack">{{
+            roomKey ? '打开导图' : '返回文件'
+          }}</el-button>
+          <h1>SOP 台账</h1>
       </div>
       <div class="right">
         <span class="spaceLabel">空间</span>
@@ -37,9 +39,11 @@
     </header>
 
     <p class="hint">
-      双击卡片打开导图 / 历史 / 产物；运行与产物写入节点并回写备注摘要，与导图页协同同步。
+      点击「运行」选择产物后，经 WorkBuddy 直接执行该 SOP（类似客户端里「执行这个节点的
+      SOP」）；双击卡片可编辑导图 / 历史 / 产物。
     </p>
     <div class="statusLine" v-if="statusText">{{ statusText }}</div>
+    <div class="statusLine runStatus" v-if="runStatusText">{{ runStatusText }}</div>
 
     <div v-if="!roomKey" class="emptyState">请先选择空间</div>
     <div v-else-if="!pullLoading && !sops.length" class="emptyState">
@@ -53,8 +57,20 @@
         title="双击编辑并同步"
         @dblclick="openSubtree(item)"
       >
-        <h2 class="cardTitle">{{ item.title }}</h2>
+        <div class="cardHead">
+          <h2 class="cardTitle">{{ item.title }}</h2>
+          <el-button
+            type="primary"
+            size="mini"
+            :loading="runningKey === item.rowKey"
+            :disabled="!!runningKey && runningKey !== item.rowKey"
+            @click.stop="openRunDialog(item)"
+          >
+            运行
+          </el-button>
+        </div>
         <div class="cardMeta">
+          <span class="metaChip">{{ item.id || 'SOP' }}</span>
           <span class="metaChip">出现 {{ item.occurrenceCount || 1 }} 次</span>
           <span class="metaChip">{{
             (item.frequency && item.frequency.label) || '频率未知'
@@ -70,6 +86,164 @@
         </div>
       </article>
     </div>
+
+    <el-dialog
+      title="运行 SOP"
+      :visible.sync="runDialogVisible"
+      width="760px"
+      top="6vh"
+      append-to-body
+      :close-on-click-modal="false"
+      custom-class="sopRunDialog"
+    >
+      <p class="runDialogLead" v-if="runTarget">
+        执行「{{ runTarget.id }}：{{ runTarget.title }}」——选择产物后开始，下方会显示发给
+        WorkBuddy 的节点上下文与流式过程
+      </p>
+      <div class="runModelRow">
+        <span class="runModelLabel">模型</span>
+        <el-select
+          v-model="runModel"
+          size="small"
+          filterable
+          :loading="runModelsLoading"
+          :disabled="!!runningKey"
+          placeholder="选择 WorkBuddy 模型"
+          class="runModelSelect"
+          @visible-change="onRunModelDropdown"
+        >
+          <el-option-group
+            v-if="runCustomModels.length"
+            label="自定义模型（推荐，不耗积分）"
+          >
+            <el-option
+              v-for="item in runCustomModels"
+              :key="'c-' + item.id"
+              :label="item.name || item.id"
+              :value="item.id"
+            ></el-option>
+          </el-option-group>
+          <el-option-group
+            v-if="runPlatformModels.length"
+            label="平台模型"
+          >
+            <el-option
+              v-for="item in runPlatformModels"
+              :key="'p-' + item.id"
+              :label="item.name || item.id"
+              :value="item.id"
+            ></el-option>
+          </el-option-group>
+        </el-select>
+        <el-button
+          size="mini"
+          :loading="runModelsLoading"
+          :disabled="!!runningKey"
+          @click="loadRunModels(true)"
+          >刷新</el-button
+        >
+      </div>
+      <el-checkbox-group v-model="runOutputIds" class="outputChecks">
+        <el-checkbox
+          v-for="opt in outputPresets"
+          :key="opt.id"
+          :label="opt.id"
+          :disabled="!!runningKey"
+        >
+          <span class="optLabel">{{ opt.label }}</span>
+          <span class="optHint">{{ opt.hint }}</span>
+        </el-checkbox>
+      </el-checkbox-group>
+      <el-input
+        v-model="runExtraNote"
+        type="textarea"
+        :rows="2"
+        :disabled="!!runningKey"
+        placeholder="额外要求，例如：生成的 html 要简洁美观"
+        class="runExtra"
+      ></el-input>
+
+      <div class="runLivePanel" v-if="runningKey || runContext || runStreamText || runEventLog.length">
+        <div class="liveHead">
+          <strong>{{ runningKey ? 'WorkBuddy 执行中…' : '执行过程' }}</strong>
+          <span v-if="runStatusText">{{ runStatusText }}</span>
+        </div>
+        <div class="ctxBox" v-if="runContext">
+          <div class="ctxMeta">
+            <span>节点 uid：{{ runContext.sopUid || '无' }}</span>
+            <span>来源：{{ runContext.outlineSource }}</span>
+            <span>大纲 {{ runContext.outlineChars || 0 }} 字</span>
+            <span>prompt {{ runContext.userPromptChars || 0 }} 字</span>
+          </div>
+          <details>
+            <summary>查看发给 WorkBuddy 的节点大纲（前 1200 字）</summary>
+            <pre class="ctxPreview">{{ runContext.outlinePreview || '(空)' }}</pre>
+          </details>
+        </div>
+        <div class="eventBox" v-if="runEventLog.length">
+          <div class="boxLabel">事件流</div>
+          <ul class="eventList">
+            <li v-for="(ev, i) in runEventLog" :key="i">
+              <span class="evTime">{{ ev.time }}</span>
+              <span class="evLabel">{{ ev.label }}</span>
+            </li>
+          </ul>
+        </div>
+        <div class="streamBox">
+          <div class="boxLabel">流式输出</div>
+          <pre ref="runStreamPre" class="streamText">{{
+            runStreamText || (runningKey ? '等待 WorkBuddy 输出…' : '')
+          }}</pre>
+        </div>
+      </div>
+
+      <div v-if="runPreview" class="runPreview">
+        <div class="previewMeta">
+          <span>{{ runPreview.runResult }}</span>
+          <span>约 {{ runPreview.elapsedSec }}s</span>
+          <span v-if="runPreview.toolEvents != null"
+            >工具事件 {{ runPreview.toolEvents }}</span
+          >
+        </div>
+        <ul v-if="runPreview.deliverables && runPreview.deliverables.length">
+          <li v-for="(d, i) in runPreview.deliverables" :key="i">
+            <a
+              v-if="isHttp(d.uri_or_path)"
+              :href="d.uri_or_path"
+              target="_blank"
+              rel="noopener"
+              >{{ d.name }}</a
+            >
+            <span v-else>{{ d.name }} · {{ d.uri_or_path }}</span>
+          </li>
+        </ul>
+      </div>
+      <span slot="footer">
+        <el-button
+          size="small"
+          v-if="runningKey"
+          type="danger"
+          plain
+          @click="cancelRunSop"
+          >取消</el-button
+        >
+        <el-button
+          size="small"
+          :disabled="!!runningKey"
+          @click="runDialogVisible = false"
+          >关闭</el-button
+        >
+        <el-button
+          type="primary"
+          size="small"
+          :loading="!!runningKey"
+          :disabled="!runOutputIds.length || !!runningKey"
+          @click="confirmRunSop"
+        >
+          开始运行
+        </el-button>
+      </span>
+    </el-dialog>
 
     <el-dialog
       :title="dialogTitle"
@@ -242,6 +416,12 @@ import {
   suggestCosPath,
   readLedgerFromNodeLike
 } from '@/utils/sopLedger'
+import { SOP_OUTPUT_PRESETS, runSopWithWorkbuddy } from '@/utils/sopRun'
+import {
+  fetchWorkbuddyModels,
+  getWorkbuddyConfig,
+  WORKBUDDY_CUSTOM_MODEL_HINTS
+} from '@/utils/workbuddyChat'
 
 MindMap.usePlugin(Drag)
   .usePlugin(Select)
@@ -319,6 +499,22 @@ export default {
       runForm: { at: '', result: '完成', note: '' },
       delForm: { name: '', uri_or_path: '', kind: 'link' },
       cosHint: '',
+      outputPresets: SOP_OUTPUT_PRESETS,
+      runDialogVisible: false,
+      runTarget: null,
+      runOutputIds: ['html'],
+      runExtraNote: '生成的 html 要简洁美观',
+      runModel: 'deepseek-v4-flash',
+      runModelsLoading: false,
+      runCustomModels: WORKBUDDY_CUSTOM_MODEL_HINTS.slice(),
+      runPlatformModels: [],
+      runStatusText: '',
+      runPreview: null,
+      runContext: null,
+      runStreamText: '',
+      runEventLog: [],
+      runningKey: '',
+      runAbort: null,
       subtreeLoading: false,
       subtreeError: '',
       pendingRoot: null,
@@ -385,6 +581,13 @@ export default {
   },
   beforeDestroy() {
     this.teardownPreview()
+    if (this.runAbort) {
+      try {
+        this.runAbort.abort()
+      } catch (e) {
+        /* ignore */
+      }
+    }
   },
   methods: {
     ...mapMutations(['setLocalConfig']),
@@ -403,9 +606,11 @@ export default {
         : document.body.classList.remove('isDark')
     },
     goBack() {
-      const q = {}
-      if (this.roomKey) q.room = this.roomKey
-      this.$router.push({ path: '/', query: q })
+      if (this.roomKey) {
+        this.$router.push({ path: '/', query: { room: this.roomKey } })
+        return
+      }
+      this.$router.push({ path: '/files' })
     },
     spaceOptionLabel(item) {
       const key = item.room_key || item.roomKey || ''
@@ -574,6 +779,208 @@ export default {
         this.resetLedgerForms()
       } catch (err) {
         this.$message.error((err && err.message) || '保存失败')
+      }
+    },
+    openRunDialog(item) {
+      if (!this.roomKey) {
+        this.$message.warning('请先选择空间')
+        return
+      }
+      this.runTarget = item
+      this.runOutputIds = ['html']
+      this.runExtraNote = '生成的 html 要简洁美观'
+      this.runModel =
+        getWorkbuddyConfig().model || 'deepseek-v4-flash'
+      this.runPreview = null
+      this.runContext = null
+      this.runStreamText = ''
+      this.runEventLog = []
+      this.runStatusText = ''
+      this.runDialogVisible = true
+      this.loadRunModels()
+    },
+    onRunModelDropdown(visible) {
+      if (visible && !this.runPlatformModels.length) {
+        this.loadRunModels()
+      }
+    },
+    async loadRunModels(force = false) {
+      if (this.runModelsLoading) return
+      this.runModelsLoading = true
+      try {
+        const models = await fetchWorkbuddyModels()
+        this.runCustomModels = models.filter(m => m.custom)
+        this.runPlatformModels = models.filter(m => !m.custom)
+        if (!this.runCustomModels.length) {
+          this.runCustomModels = WORKBUDDY_CUSTOM_MODEL_HINTS.slice()
+        }
+        const ids = new Set(
+          [...this.runCustomModels, ...this.runPlatformModels].map(m => m.id)
+        )
+        if (!ids.has(this.runModel)) {
+          this.runModel =
+            (this.runCustomModels[0] && this.runCustomModels[0].id) ||
+            'deepseek-v4-flash'
+        }
+      } catch (err) {
+        if (force && this.$message) {
+          this.$message.warning(
+            '模型列表加载失败：' + ((err && err.message) || '未知错误')
+          )
+        }
+      } finally {
+        this.runModelsLoading = false
+      }
+    },
+    cancelRunSop() {
+      if (this.runAbort) {
+        try {
+          this.runAbort.abort()
+        } catch (e) {
+          /* ignore */
+        }
+      }
+    },
+    scrollRunStream() {
+      this.$nextTick(() => {
+        const el = this.$refs.runStreamPre
+        if (el) el.scrollTop = el.scrollHeight
+      })
+    },
+    formatEventTime(ts) {
+      const d = new Date(ts || Date.now())
+      const pad = n => String(n).padStart(2, '0')
+      return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    },
+    async confirmRunSop() {
+      if (!this.runTarget || !this.roomKey) return
+      if (!this.runOutputIds.length) {
+        this.$message.warning('请至少选择一种产物')
+        return
+      }
+      if (this.runAbort) {
+        try {
+          this.runAbort.abort()
+        } catch (e) {
+          /* ignore */
+        }
+      }
+      const controller =
+        typeof AbortController !== 'undefined' ? new AbortController() : null
+      this.runAbort = controller
+      this.runningKey = this.runTarget.rowKey
+      this.runPreview = null
+      this.runContext = null
+      this.runStreamText = ''
+      this.runEventLog = []
+      this.runStatusText = '准备运行…'
+      try {
+        if (this.runModel) {
+          this.setLocalConfig({ workbuddyModel: this.runModel })
+        }
+        const result = await runSopWithWorkbuddy({
+          roomKey: this.roomKey,
+          sop: this.runTarget,
+          outputIds: this.runOutputIds,
+          extraNote: this.runExtraNote,
+          model: this.runModel,
+          actor: this.userInfo.name || '台账',
+          signal: controller && controller.signal,
+          onStatus: text => {
+            this.runStatusText = text
+          },
+          onContext: ctx => {
+            this.runContext = ctx
+          },
+          onDelta: text => {
+            this.runStreamText = String(text || '')
+            this.scrollRunStream()
+          },
+          onEventDetail: ({ label, at }) => {
+            if (!label) return
+            this.runEventLog.push({
+              label,
+              time: this.formatEventTime(at)
+            })
+            if (this.runEventLog.length > 80) {
+              this.runEventLog = this.runEventLog.slice(-80)
+            }
+          }
+        })
+        if (!this.runStreamText && result.reply) {
+          this.runStreamText = result.reply
+        }
+        this.runPreview = {
+          runResult: result.runResult,
+          elapsedSec: result.elapsedSec,
+          reply: result.reply,
+          deliverables: result.deliverables || [],
+          toolEvents:
+            (result.assessment && result.assessment.toolEvents) ||
+            ((result.events && result.events.length) || 0)
+        }
+        const idx = this.sops.findIndex(
+          s => s.rowKey === this.runTarget.rowKey || s === this.runTarget
+        )
+        if (idx >= 0 && result.ledger) {
+          const next = {
+            ...this.sops[idx],
+            runs: result.ledger.runs,
+            deliverables: result.ledger.deliverables,
+            frequency: result.ledger.frequency,
+            sopLedger: result.ledger
+          }
+          this.$set(this.sops, idx, next)
+          this.runTarget = next
+        }
+        if (result.ok) {
+          this.$message.success(
+            `SOP 执行完成（约 ${result.elapsedSec}s，产物 ${
+              (result.deliverables && result.deliverables.length) || 0
+            } 个）`
+          )
+        } else {
+          const reason =
+            (result.assessment && result.assessment.reason) ||
+            result.runResult ||
+            '未确认真执行'
+          this.$message.warning(
+            `可能未真正执行（约 ${result.elapsedSec}s）：${reason}`
+          )
+        }
+      } catch (err) {
+        if (err && err.name === 'AbortError') {
+          this.runStatusText = '已取消'
+          return
+        }
+        console.error('[sopRun]', err)
+        const msg = (err && err.message) || '运行失败'
+        this.runStatusText = msg
+        if (!this.runStreamText) {
+          this.runStreamText =
+            msg +
+            '\n\n（本机探测：/wb-api/health 正常，但 chat 常返回空正文 + 仅 phase 事件。请在 WorkBuddy 客户端里先手动跑通同一 SOP。）'
+        }
+        if (err && err.ledger && this.runTarget) {
+          const idx = this.sops.findIndex(
+            s => s.rowKey === this.runTarget.rowKey || s === this.runTarget
+          )
+          if (idx >= 0) {
+            const next = {
+              ...this.sops[idx],
+              runs: err.ledger.runs,
+              deliverables: err.ledger.deliverables,
+              frequency: err.ledger.frequency,
+              sopLedger: err.ledger
+            }
+            this.$set(this.sops, idx, next)
+            this.runTarget = next
+          }
+        }
+        this.$message.error(msg)
+      } finally {
+        this.runningKey = ''
+        this.runAbort = null
       }
     },
     resolveSopUid(item) {
@@ -918,13 +1325,13 @@ export default {
 
 <style lang="less" scoped>
 .sopPage {
-  min-height: 100vh;
-  padding: 16px 20px 28px;
-  background: #f5f7fa;
+  min-height: calc(100vh - 48px);
+  padding: 20px 28px 36px;
+  background: transparent;
   box-sizing: border-box;
 
   &.isDark {
-    background: #1a1d21;
+    background: transparent;
     color: #e5eaf3;
 
     .sopHeader h1 {
@@ -1002,6 +1409,10 @@ export default {
     line-height: 1.5;
   }
 
+  .runStatus {
+    color: #087854;
+  }
+
   .emptyState {
     margin-top: 48px;
     text-align: center;
@@ -1031,13 +1442,22 @@ export default {
       transform: translateY(-1px);
     }
 
+    .cardHead {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
     .cardTitle {
-      margin: 0 0 10px;
+      margin: 0;
       font-size: 16px;
       font-weight: 600;
       color: #303133;
       line-height: 1.4;
       word-break: break-word;
+      flex: 1;
     }
 
     .cardMeta {
@@ -1242,6 +1662,210 @@ export default {
     .ledgerList li {
       border-bottom-color: rgba(255, 255, 255, 0.08);
       color: #dcdfe6;
+    }
+  }
+}
+
+.sopRunDialog {
+  .runDialogLead {
+    margin: 0 0 14px;
+    font-size: 14px;
+    color: #303133;
+    line-height: 1.5;
+  }
+
+  .runModelRow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+
+    .runModelLabel {
+      flex: 0 0 auto;
+      font-size: 13px;
+      color: #606266;
+    }
+
+    .runModelSelect {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+  }
+
+  .outputChecks {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 14px;
+
+    .el-checkbox {
+      display: flex;
+      align-items: flex-start;
+      margin-right: 0;
+      white-space: normal;
+      height: auto;
+    }
+
+    .optLabel {
+      font-weight: 600;
+      color: #17362c;
+    }
+
+    .optHint {
+      display: block;
+      margin-top: 2px;
+      font-size: 12px;
+      color: #909399;
+      font-weight: 400;
+    }
+  }
+
+  .runExtra {
+    margin-bottom: 8px;
+  }
+
+  .runLivePanel {
+    margin-top: 12px;
+    border: 1px solid #dce7e1;
+    border-radius: 10px;
+    background: #f7faf8;
+    padding: 10px 12px 12px;
+  }
+
+  .liveHead {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: baseline;
+    margin-bottom: 8px;
+    font-size: 13px;
+
+    strong {
+      color: #087854;
+    }
+
+    span {
+      color: #647c71;
+      font-size: 12px;
+    }
+  }
+
+  .ctxBox {
+    margin-bottom: 10px;
+    font-size: 12px;
+    color: #52665f;
+
+    .ctxMeta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      margin-bottom: 6px;
+    }
+
+    details summary {
+      cursor: pointer;
+      color: #087854;
+    }
+
+    .ctxPreview {
+      max-height: 140px;
+      overflow: auto;
+      margin: 6px 0 0;
+      padding: 8px;
+      background: #fff;
+      border-radius: 6px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+  }
+
+  .boxLabel {
+    font-size: 12px;
+    color: #80948c;
+    margin-bottom: 4px;
+  }
+
+  .eventBox {
+    margin-bottom: 10px;
+  }
+
+  .eventList {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 120px;
+    overflow: auto;
+    background: #fff;
+    border-radius: 6px;
+
+    li {
+      display: flex;
+      gap: 10px;
+      padding: 4px 8px;
+      border-bottom: 1px solid #eef3f0;
+      font-size: 12px;
+    }
+
+    .evTime {
+      color: #98a59f;
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .evLabel {
+      color: #17362c;
+      word-break: break-word;
+    }
+  }
+
+  .streamBox .streamText {
+    max-height: 260px;
+    min-height: 120px;
+    overflow: auto;
+    margin: 0;
+    padding: 10px;
+    background: #1a1d21;
+    color: #d7ebe1;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .runPreview {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid #ebeef5;
+
+    .previewMeta {
+      display: flex;
+      gap: 12px;
+      font-size: 13px;
+      color: #087854;
+      margin-bottom: 8px;
+    }
+
+    ul {
+      margin: 0 0 8px;
+      padding-left: 18px;
+      font-size: 13px;
+    }
+
+    .previewReply {
+      max-height: 220px;
+      overflow: auto;
+      margin: 0;
+      padding: 10px;
+      background: #f5f7f6;
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #606266;
     }
   }
 }

@@ -522,10 +522,12 @@ export default {
         showNavigatorToolbar: true,
         enableDragImport: false,
         enableAi: false,
-        workbuddyModel: 'auto',
+        workbuddyModel: 'deepseek-v4-flash',
         flowExpandConcurrency: 2
       },
-      workbuddyModelOptions: [{ id: 'auto', name: 'auto', vendor: '' }],
+      workbuddyModelOptions: [
+        { id: 'deepseek-v4-flash', name: 'DeepSeek-V4 Flash（自定义）', custom: true }
+      ],
       workbuddyPlatformModels: [],
       workbuddyCustomModels: [],
       workbuddyModelsLoading: false
@@ -701,10 +703,19 @@ export default {
       this.workbuddyModelOptions = Array.from(map.values())
       this.workbuddyPlatformModels = models.filter(item => !item.custom)
       this.workbuddyCustomModels = models.filter(item => item.custom)
-      const current = this.localConfigs.workbuddyModel || 'auto'
+      let current = this.localConfigs.workbuddyModel || 'deepseek-v4-flash'
+      if (current === 'auto') {
+        current = 'deepseek-v4-flash'
+        this.localConfigs.workbuddyModel = current
+        this.updateLocalConfig('workbuddyModel', current)
+      }
       if (!map.has(current)) {
-        this.localConfigs.workbuddyModel = 'auto'
-        this.updateLocalConfig('workbuddyModel', 'auto')
+        const fallback =
+          (this.workbuddyCustomModels[0] &&
+            this.workbuddyCustomModels[0].id) ||
+          'deepseek-v4-flash'
+        this.localConfigs.workbuddyModel = fallback
+        this.updateLocalConfig('workbuddyModel', fallback)
       }
     },
 

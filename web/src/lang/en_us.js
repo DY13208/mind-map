@@ -167,8 +167,8 @@ export default {
     modifyNodeLink: 'Modify node link',
     linkToNode: 'Link to node',
     removeNodeLink: 'Remove node link',
-    mapRef: 'Reference mind map',
-    removeMapRef: 'Remove map reference'
+    mapRef: 'Insert sub-map',
+    removeMapRef: 'Remove sub-map'
   },
   count: {
     words: 'Words',
@@ -590,7 +590,7 @@ export default {
     tip5: 'The link node does not exist. Weather to delete the link?'
   },
   mapRef: {
-    title: 'Reference mind map',
+    title: 'Insert sub-map',
     searchMaps: 'Search maps',
     bindMap: 'Bind whole map',
     bindNode: 'Locate a node (optional)',
@@ -601,10 +601,22 @@ export default {
     missingMap: 'The target map is missing or deleted',
     missingNode: 'Target node is missing; opened the map root',
     noPermission: 'You do not have access to this map',
-    saved: 'Reference saved',
-    removed: 'Reference removed',
+    saved: 'Sub-map inserted',
+    savedTip:
+      'Sub-map inserted: node should become a gray card with a purple icon; double-click to preview (F2 to rename)',
+    applyFailed: 'Insert failed; select the node and try again',
+    removed: 'Sub-map removed',
     openFailed: 'Could not open the referenced map',
-    currentMap: 'Cannot reference the current map'
+    currentMap: 'Cannot reference the current map',
+    previewTitle: 'Sub-map preview',
+    openEdit: 'Open to edit',
+    closePreview: 'Close',
+    previewLoading: 'Loading sub-map…',
+    previewFailed: 'Failed to preview sub-map',
+    selectedHint: 'Selected: {name}',
+    dblclickTip: 'Double-click an item to confirm',
+    needSelect: 'Please select a map first',
+    needNode: 'Please select a node first'
   },
   acl: {
     share: 'Share / Access',

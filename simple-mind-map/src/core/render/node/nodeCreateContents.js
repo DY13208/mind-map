@@ -535,22 +535,24 @@ function createHyperlinkNode() {
 function createMapRefNode() {
   const ref = mapRefUtil.normalizeMapRef(this.getData('mapRef'))
   if (!ref) return
-  const iconSize = this.getNodeIconSize('hyperlinkIcon')
+  // 企业微信式文档图标（略大于普通链接标）
+  const iconSize = Math.max(18, this.getNodeIconSize('hyperlinkIcon') + 4)
   const node = new SVG().size(iconSize, iconSize)
   const title = ref.nodeId
-    ? `引用 ${ref.mapId} / ${ref.nodeId}`
-    : `引用 ${ref.mapId}`
+    ? `双击预览子脑图 ${ref.mapId} / ${ref.nodeId}`
+    : `双击预览子脑图 ${ref.mapId}`
   node.add(SVG(`<title>${title}</title>`))
   node.rect(iconSize, iconSize).fill({ color: 'transparent' })
   const iconNode = SVG(iconsSvg.mapRef).size(iconSize, iconSize)
-  this.style.iconNode(iconNode, '#409EFF')
   node.add(iconNode)
   node.css('cursor', 'pointer')
-  node.on('click', e => {
+  const emitOpen = e => {
     e.stopPropagation()
     e.preventDefault()
     this.mindMap.emit('map_ref_click', this, ref)
-  })
+  }
+  node.on('click', emitOpen)
+  node.on('dblclick', emitOpen)
   return {
     node,
     width: iconSize,

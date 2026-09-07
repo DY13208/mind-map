@@ -1,5 +1,6 @@
 const fs = require('fs')
 const http = require('http')
+const crypto = require('crypto')
 const os = require('os')
 const path = require('path')
 const { execSync, spawnSync } = require('child_process')
@@ -155,9 +156,18 @@ function discoverWorkbuddyFromCommonDirs() {
     process.env.ProgramFiles,
     process.env['ProgramFiles(x86)'],
     'C:\\Program Files',
-    'C:\\Program Files (x86)'
+    'C:\\Program Files (x86)',
+    'D:\\workbuddy',
+    'C:\\workbuddy',
+    'D:\\Program Files',
+    'D:\\Programs'
   ])
-  return roots.map(root => path.join(root, 'WorkBuddy', 'WorkBuddy.exe'))
+  const results = []
+  for (const root of roots) {
+    results.push(path.join(root, 'WorkBuddy', 'WorkBuddy.exe'))
+    results.push(path.join(root, 'WorkBuddy.exe'))
+  }
+  return results
 }
 
 function findWorkbuddyInstall() {
@@ -227,6 +237,126 @@ function ensureEnvFile(dir, apiKey = DEFAULT_API_KEY) {
       `PROXY_HOST=127.0.0.1\nPROXY_PORT=${DEFAULT_PORT}\nPROXY_API_KEY=${apiKey}\n`,
       'utf8'
     )
+  }
+}
+
+/** 把 workbuddy_to_api/.env 里的 WORKBUDDY_* 灌进 process.env（不覆盖已有值） */
+function hydrateWorkbuddyEnvFromDir(dir) {
+  const envFile = path.join(dir, '.env')
+  if (!fs.existsSync(envFile)) return
+  try {
+    fs.readFileSync(envFile, 'utf8')
+      .split(/\r?\n/)
+      .forEach(line => {
+        const text = line.trim()
+        if (!text || text.startsWith('#')) return
+        const i = text.indexOf('=')
+        if (i <= 0) return
+        const key = text.slice(0, i).trim()
+        let value = text.slice(i + 1).trim()
+        if (
+          (value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))
+        ) {
+          value = value.slice(1, -1)
+        }
+        if (!key.startsWith('WORKBUDDY_')) return
+        if (process.env[key] == null || process.env[key] === '') {
+          process.env[key] = value
+        }
+      })
+  } catch (e) {
+    // ignore
+  }
+}
+
+/**
+ * 从本机 WorkBuddy 自定义模型配置注入 DeepSeek / CodeBuddy 环境变量，
+ * 让 --serve 网关走自定义 API，而不是平台积分。
+ */
+function hydrateCustomModelApiKeys() {
+  const home = process.env.USERPROFILE || process.env.HOME || ''
+  if (!home) return
+  const file = path.join(home, '.workbuddy', 'models.json')
+  if (!fs.existsSync(file)) return
+  let hit = null
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''))
+    const list = Array.isArray(raw) ? raw : raw.models || []
+    hit = list.find(
+      m =>
+        m &&
+        m.apiKey &&
+        !String(m.apiKey).startsWith('${') &&
+        (/deepseek/i.test(String(m.id || '')) ||
+          /deepseek/i.test(String(m.vendor || '')) ||
+          /deepseek\.com/i.test(String(m.url || '')))
+    )
+  } catch (e) {
+    return
+  }
+  if (!hit || !hit.apiKey) return
+
+  const apiKey = String(hit.apiKey)
+  if (!process.env.DEEPSEEK_API_KEY) process.env.DEEPSEEK_API_KEY = apiKey
+
+  // 官方推荐：用 CODEBUDDY_* 直连第三方模型，绕开平台额度
+  if (!process.env.CODEBUDDY_API_KEY) process.env.CODEBUDDY_API_KEY = apiKey
+  if (!process.env.CODEBUDDY_BASE_URL) {
+    let base = 'https://api.deepseek.com'
+    try {
+      if (hit.url) {
+        const u = new URL(String(hit.url))
+        base = `${u.protocol}//${u.host}`
+      }
+    } catch (e) {
+      /* keep default */
+    }
+    process.env.CODEBUDDY_BASE_URL = base
+  }
+  const modelId = String(hit.id || 'deepseek-v4-flash')
+  if (!process.env.CODEBUDDY_MODEL) process.env.CODEBUDDY_MODEL = modelId
+  if (!process.env.CODEBUDDY_BIG_SLOW_MODEL) {
+    process.env.CODEBUDDY_BIG_SLOW_MODEL = modelId
+  }
+  if (!process.env.CODEBUDDY_SMALL_FAST_MODEL) {
+    process.env.CODEBUDDY_SMALL_FAST_MODEL = modelId
+  }
+  if (!process.env.CODEBUDDY_CODE_SUBAGENT_MODEL) {
+    process.env.CODEBUDDY_CODE_SUBAGENT_MODEL = modelId
+  }
+  if (!process.env.WORKBUDDY_DEFAULT_MODEL) {
+    process.env.WORKBUDDY_DEFAULT_MODEL = modelId
+  }
+}
+
+function customModelEnvFingerprint() {
+  const parts = [
+    process.env.CODEBUDDY_BASE_URL || '',
+    process.env.CODEBUDDY_MODEL || '',
+    process.env.WORKBUDDY_DEFAULT_MODEL || '',
+    // 不落盘完整 key，只用尾缀判断是否换过密钥
+    String(process.env.CODEBUDDY_API_KEY || '').slice(-8)
+  ]
+  return crypto.createHash('sha1').update(parts.join('|')).digest('hex')
+}
+
+function readCustomModelEnvMarker(dir) {
+  const file = path.join(dir, 'runtime', 'custom-model.env.sha')
+  try {
+    return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim() : ''
+  } catch (e) {
+    return ''
+  }
+}
+
+function writeCustomModelEnvMarker(dir, fp) {
+  try {
+    const runtime = path.join(dir, 'runtime')
+    fs.mkdirSync(runtime, { recursive: true })
+    fs.writeFileSync(path.join(runtime, 'custom-model.env.sha'), fp, 'utf8')
+  } catch (e) {
+    // ignore
   }
 }
 
@@ -349,12 +479,30 @@ async function ensureWorkbuddyApi({
     mcpConfigPath || path.join(projectRoot, '.mcp.json')
   )
 
+  // 优先读已有 workbuddy_to_api/.env（例如 WORKBUDDY_EXE=D:\workbuddy\...）
+  hydrateWorkbuddyEnvFromDir(resolveWorkbuddyDir(projectRoot))
+  hydrateCustomModelApiKeys()
+
+  const dirEarly = resolveWorkbuddyDir(projectRoot)
+  const envFp = customModelEnvFingerprint()
   if (await checkHealth(port)) {
-    return {
-      ok: true,
-      alreadyRunning: true,
-      port,
-      dir: resolveWorkbuddyDir(projectRoot)
+    const prevFp = readCustomModelEnvMarker(dirEarly)
+    // 自定义模型环境变了（或旧进程未写入标记）→ 重启，避免仍走平台积分
+    if (
+      process.env.CODEBUDDY_API_KEY &&
+      process.env.CODEBUDDY_BASE_URL &&
+      prevFp !== envFp
+    ) {
+      stopWorkbuddyApi({ root: projectRoot, apiKey })
+      await new Promise(r => setTimeout(r, 1200))
+    } else {
+      return {
+        ok: true,
+        alreadyRunning: true,
+        port,
+        dir: dirEarly,
+        exe: (findWorkbuddyInstall() || {}).exe
+      }
     }
   }
 
@@ -367,12 +515,24 @@ async function ensureWorkbuddyApi({
     }
   }
 
-  const client = checkWorkbuddyClient()
-  if (!client.ok) {
+  const install = findWorkbuddyInstall()
+  if (!install) {
+    const fallback = checkWorkbuddyClient()
     return {
       ok: false,
-      reason: client.reason,
-      hint: client.hint
+      reason:
+        (fallback && fallback.reason) ||
+        '未找到 WorkBuddy 客户端。请安装 WorkBuddy，或设置环境变量 WORKBUDDY_EXE',
+      hint:
+        (fallback && fallback.hint) ||
+        '也可在 workbuddy_to_api/.env 中设置 WORKBUDDY_EXE=你的 WorkBuddy.exe 路径'
+    }
+  }
+  if (!fs.existsSync(install.cli)) {
+    return {
+      ok: false,
+      reason: `未找到 WorkBuddy CLI：${install.cli}`,
+      hint: 'WorkBuddy 可能未装完整，请重新安装桌面客户端后再试。'
     }
   }
 
@@ -388,14 +548,20 @@ async function ensureWorkbuddyApi({
   }
 
   ensureEnvFile(dir, apiKey)
+  hydrateWorkbuddyEnvFromDir(dir)
 
-  const install = findWorkbuddyInstall()
-  if (!install) {
-    return {
-      ok: false,
-      reason:
-        '未找到 WorkBuddy 客户端。请安装 WorkBuddy，或在 workbuddy_to_api/.env 中设置 WORKBUDDY_EXE',
-      dir
+  // 若启动时发现了 exe，写回 .env，方便下次 Start-Docker 自动找到
+  if (install.exe) {
+    try {
+      const envFile = path.join(dir, '.env')
+      let text = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : ''
+      if (!/^\s*WORKBUDDY_EXE\s*=/m.test(text)) {
+        text += `\nWORKBUDDY_EXE=${install.exe}\n`
+        if (install.cli) text += `WORKBUDDY_CLI_SCRIPT=${install.cli}\n`
+        fs.writeFileSync(envFile, text, 'utf8')
+      }
+    } catch (e) {
+      // ignore
     }
   }
 
@@ -444,10 +610,13 @@ async function ensureWorkbuddyApi({
     }
   }
 
+  writeCustomModelEnvMarker(dir, envFp)
+
   return {
     ok: true,
     port,
-    dir
+    dir,
+    exe: install.exe
   }
 }
 
