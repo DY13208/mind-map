@@ -2009,6 +2009,14 @@ export default {
       if (renderRoot && typeof cooperate.seedPreviewHydration === 'function') {
         cooperate.seedPreviewHydration(renderRoot)
       }
+      if (
+        cooperate &&
+        typeof cooperate.hydrateExpandedPartialParents === 'function'
+      ) {
+        await cooperate.hydrateExpandedPartialParents().catch(err => {
+          console.error('[mind-map] expanded partial hydrate failed', err)
+        })
+      }
       if (typeof cooperate.hydrateRoomMetadata === 'function') {
         cooperate.hydrateRoomMetadata(preview)
       }

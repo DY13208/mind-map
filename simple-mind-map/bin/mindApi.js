@@ -2122,6 +2122,15 @@ async function handleApi(req, res) {
       } catch (_) {
         authority = {}
       }
+      if (process.env.NODE_ENV !== 'production' || process.env.COLLAB_V2_TRACE) {
+        console.log('SAFE_LOAD_CHILDCOUNT_QUERY_COUNT =', {
+          roomKey,
+          childCountQueryCount:
+            (subtree && subtree.childCountQueryCount) || 0,
+          childCountAuthority:
+            (subtree && subtree.childCountAuthority) || 'unknown'
+        })
+      }
       sendJson(res, 200, {
         room_key: roomKey,
         title: inspect.title,
@@ -2135,6 +2144,9 @@ async function handleApi(req, res) {
         lazy_load: true,
         safe_load: true,
         http_collab: true,
+        childCountAuthority:
+          (subtree && subtree.childCountAuthority) || 'room_nodes',
+        childCountQueryCount: (subtree && subtree.childCountQueryCount) || 0,
         inspect,
         replaceLock: inspect.replaceLock || inspectReplaceLock(roomKey),
         ...authority,

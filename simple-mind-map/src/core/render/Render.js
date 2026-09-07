@@ -949,15 +949,19 @@ class Render {
     const command = this.mindMap.command
     if (command) command.pause()
     this._lazyCommandPending = true
+    // Wait for full hydrate — do not race a timeout (partial tree must not edit).
     const hydrate = Promise.all(
       stubs.map(node =>
-        Promise.resolve(cooperate.hydrateLazyChildren(node)).catch(err => {
+        Promise.resolve(
+          typeof cooperate.ensurePlacementParent === 'function'
+            ? cooperate.ensurePlacementParent(node)
+            : cooperate.hydrateLazyChildren(node)
+        ).catch(err => {
           console.error('[mind-map] load children failed', err)
         })
       )
     )
-    const timeout = new Promise(resolve => setTimeout(resolve, 2000))
-    Promise.race([hydrate, timeout])
+    hydrate
       .then(() => {
         this._skipLazyHydrate = true
         this._lazyCommandPending = false
@@ -978,6 +982,12 @@ class Render {
           cooperate.onHttpCommand(commandName)
         }
       })
+      .catch(err => {
+        this._lazyCommandPending = false
+        this._skipLazyHydrate = false
+        if (command && command.isPause) command.recovery()
+        console.error('[mind-map] placement hydrate failed', err)
+      })
     return true
   }
 
@@ -992,12 +1002,23 @@ class Render {
     if (this.activeNodeList.length <= 0 && appointNodes.length <= 0) {
       return
     }
+    const list = appointNodes.length > 0 ? appointNodes : this.activeNodeList
+    const parents = list.map(node => node && node.parent).filter(Boolean)
+    if (
+      this.runAfterHydrate(
+        parents,
+        () =>
+          this.insertNode(openEdit, appointNodes, appointData, appointChildren),
+        'INSERT_NODE'
+      )
+    ) {
+      return
+    }
     this.textEdit.hideEditTextBox()
     const {
       defaultInsertSecondLevelNodeText,
       defaultInsertBelowSecondLevelNodeText
     } = this.mindMap.opt
-    const list = appointNodes.length > 0 ? appointNodes : this.activeNodeList
     const handleMultiNodes = list.length > 1
     const isRichText = this.hasRichTextPlugin()
     const { focusNewNode, inserting } = this.getNewNodeBehavior(
@@ -1099,12 +1120,27 @@ class Render {
     if (this.activeNodeList.length <= 0 && appointNodes.length <= 0) {
       return
     }
+    const list = appointNodes.length > 0 ? appointNodes : this.activeNodeList
+    if (
+      this.runAfterHydrate(
+        list,
+        () =>
+          this.insertChildNode(
+            openEdit,
+            appointNodes,
+            appointData,
+            appointChildren
+          ),
+        'INSERT_CHILD_NODE'
+      )
+    ) {
+      return
+    }
     this.textEdit.hideEditTextBox()
     const {
       defaultInsertSecondLevelNodeText,
       defaultInsertBelowSecondLevelNodeText
     } = this.mindMap.opt
-    const list = appointNodes.length > 0 ? appointNodes : this.activeNodeList
     const handleMultiNodes = list.length > 1
     const isRichText = this.hasRichTextPlugin()
     const { focusNewNode, inserting } = this.getNewNodeBehavior(
@@ -1275,6 +1311,15 @@ class Render {
     if (node.isRoot) {
       return
     }
+    if (
+      this.runAfterHydrate(
+        [node.parent].filter(Boolean),
+        () => this.upNode(appointNode),
+        'UP_NODE'
+      )
+    ) {
+      return
+    }
     let parent = node.parent
     let childList = parent.children
     let index = getNodeIndexInNodeList(node, childList)
@@ -1299,6 +1344,15 @@ class Render {
     const list = appointNode ? [appointNode] : this.activeNodeList
     const node = list[0]
     if (node.isRoot) {
+      return
+    }
+    if (
+      this.runAfterHydrate(
+        [node.parent].filter(Boolean),
+        () => this.downNode(appointNode),
+        'DOWN_NODE'
+      )
+    ) {
       return
     }
     let parent = node.parent
@@ -1692,6 +1746,15 @@ class Render {
     nodeList = nodeList.filter(item => {
       return !item.isRoot
     })
+    if (
+      this.runAfterHydrate(
+        [exist && exist.parent].filter(Boolean),
+        () => this.insertTo(node, exist, dir),
+        dir === 'after' ? 'INSERT_AFTER' : 'INSERT_BEFORE'
+      )
+    ) {
+      return
+    }
     if (dir === 'after') {
       nodeList.reverse()
     }
@@ -1937,6 +2000,15 @@ class Render {
     nodeList = nodeList.filter(item => {
       return !item.isRoot
     })
+    if (
+      this.runAfterHydrate(
+        [toNode].filter(Boolean),
+        () => this.moveNodeTo(node, toNode),
+        'MOVE_NODE_TO'
+      )
+    ) {
+      return
+    }
     nodeList.forEach(item => {
       this.removeNodeFromActiveList(item)
       const fromParent = item.parent

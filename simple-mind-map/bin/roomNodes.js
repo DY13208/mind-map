@@ -842,6 +842,50 @@ function childStubFromRow(row, childCount, version) {
   }
 }
 
+function collectTreeUids(tree, out = []) {
+  if (!tree || !tree.data) return out
+  if (tree.data.uid) out.push(String(tree.data.uid))
+  ;(tree.children || []).forEach(child => collectTreeUids(child, out))
+  return out
+}
+
+/**
+ * Stamp authoritative live direct-child totals from room_nodes.
+ * childCount must NEVER equal clipped children.length.
+ * Uses one grouped query (not N+1).
+ */
+async function stampAuthoritativeChildCounts(db, roomKey, tree) {
+  const uids = Array.from(new Set(collectTreeUids(tree)))
+  if (!uids.length) return { queryCount: 0, stamped: 0 }
+  const res = await db.query(
+    `select parent_uid, count(*)::int as n
+     from room_nodes
+     where room_key = $1
+       and deleted_at is null
+       and parent_uid = any($2::text[])
+     group by parent_uid`,
+    [roomKey, uids]
+  )
+  const totals = new Map()
+  res.rows.forEach(row => {
+    totals.set(String(row.parent_uid), Number(row.n) || 0)
+  })
+  let stamped = 0
+  const walk = node => {
+    if (!node || !node.data) return
+    const uid = String(node.data.uid || '')
+    const total = totals.has(uid) ? totals.get(uid) : 0
+    node.data.childCount = total
+    stamped += 1
+    const loaded = Array.isArray(node.children) ? node.children.length : 0
+    if (total > loaded) node.data.hasMore = true
+    else if (node.data.hasMore && total <= loaded) node.data.hasMore = false
+    ;(node.children || []).forEach(walk)
+  }
+  walk(tree)
+  return { queryCount: 1, stamped, totals }
+}
+
 async function readRoomSubtree(db, roomKey, uid, options = {}) {
   if (!nodesTableAuthorityEnabled()) return null
   const meta = await db.query(
@@ -887,7 +931,18 @@ async function readRoomSubtree(db, roomKey, uid, options = {}) {
       maxNodes
     })
     if (!payload) return { missing: true, version, updated_at }
-    return { ...payload, updated_at }
+    // Overwrite clipped stampPreviewMeta childCount with PG authority.
+    const stamp = await stampAuthoritativeChildCounts(
+      db,
+      roomKey,
+      payload.tree
+    )
+    return {
+      ...payload,
+      updated_at,
+      childCountAuthority: 'room_nodes',
+      childCountQueryCount: stamp.queryCount
+    }
   }
   const offset = Math.max(0, Number(options.offset) || 0)
   const limit = Math.min(
@@ -1017,6 +1072,7 @@ module.exports = {
   dedupeMatchesByUid,
   queryNeedsSearch,
   readRoomSubtree,
+  stampAuthoritativeChildCounts,
   resolveRoomRef,
   listDeletedNodeUids,
   purgeDeletedNodes,
