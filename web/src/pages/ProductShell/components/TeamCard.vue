@@ -21,6 +21,8 @@ export default { name: 'TeamCard', props: { team: Object } }
   display: flex;
   align-items: center;
   gap: 16px;
+  width: 300px;
+  box-sizing: border-box;
   background: #fff;
   border: 1px solid #e2e9e6;
   border-radius: 13px;
@@ -33,6 +35,7 @@ export default { name: 'TeamCard', props: { team: Object } }
   .teamIcon {
     width: 48px;
     height: 48px;
+    flex: 0 0 48px;
     border-radius: 12px;
     background: #eaf5f0;
     color: #0c9065;
@@ -42,15 +45,22 @@ export default { name: 'TeamCard', props: { team: Object } }
   }
   div:nth-child(2) {
     flex: 1;
+    min-width: 0;
   }
   h3 {
     margin: 0;
     font-size: 16px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   p {
     margin: 6px 0;
     color: #71827b;
     font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   span {
     color: #98a39f;
@@ -58,6 +68,7 @@ export default { name: 'TeamCard', props: { team: Object } }
   }
   .arrow {
     color: #9aa7a2;
+    flex: 0 0 auto;
   }
 }
 </style>

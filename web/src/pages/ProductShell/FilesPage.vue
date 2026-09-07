@@ -337,7 +337,12 @@ export default {
           recent: mode === 'recent',
           foldersById: this.folderMap
         }
-        if (mode === 'folder') filters.folderId = folderId
+        if (mode === 'folder') {
+          filters.folderId = folderId
+        } else if (mode === 'files' && !this.search.trim()) {
+          // Root of 我的脑图: only rooms not in a folder (folder contents stay inside).
+          filters.folderId = null
+        }
         if (this.isRealFilesMode) {
           filters.q = this.search.trim()
           filters.sort = this.sort === 'lastOpenedAt' ? 'updatedAt' : this.sort
