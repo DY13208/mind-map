@@ -10,9 +10,6 @@ const assert = require('assert')
 const {
   canonicalizeNodes,
   snapshotCanonicalForStorage,
-  attachEncodedRowsCache,
-  takeEncodedRowsCache,
-  clearEncodedRowsCache,
   encodeNodeRows,
   canonicalTreeHash,
   structureSignature
@@ -63,12 +60,12 @@ function assertNoEncodedRowsLeak(label, value) {
     assert.ok(Array.isArray(snap.encodedRows))
     assert.strictEqual(snap.encodedRows.length, 200)
 
-    // Cache is WeakMap-backed; property must not exist on the object.
+    // Encoded rows are returned separately, never cached on a mutable graph.
     assert.strictEqual(
       Object.prototype.hasOwnProperty.call(snap.nodes, '__encodedRows'),
       false
     )
-    assert.ok(takeEncodedRowsCache(snap.nodes))
+    assert.ok(snap.encodedRows)
 
     // 1) API tree / export-shaped JSON
     const apiTree = JSON.parse(JSON.stringify(snap.nodes))
@@ -123,12 +120,11 @@ function assertNoEncodedRowsLeak(label, value) {
       enumerable: true,
       configurable: true
     })
-    clearEncodedRowsCache(legacyGraph)
+    canonicalizeNodes(legacyGraph)
     assert.strictEqual(
       Object.prototype.hasOwnProperty.call(legacyGraph, '__encodedRows'),
       false
     )
-    assert.strictEqual(takeEncodedRowsCache(legacyGraph), null)
   } catch (err) {
     leak = 'FAIL'
     console.error('ENCODE_CACHE_LEAK FAIL', err)
@@ -139,44 +135,19 @@ function assertNoEncodedRowsLeak(label, value) {
     const graph = bushObjectGraph(120)
     const snap = snapshotCanonicalForStorage(graph)
     assert.ok(snap.ok)
-    const cached = takeEncodedRowsCache(snap.nodes)
-    assert.ok(cached)
-    assert.strictEqual(cached.length, 120)
-
-    // Mutate business field → must not reuse old rows
     const victim = Object.keys(snap.nodes).find(uid => uid !== 'root')
-    assert.ok(victim)
-    snap.nodes[victim].data = {
-      ...snap.nodes[victim].data,
-      text: 'STALE_REUSE_PROBE_' + Date.now()
-    }
-    assert.strictEqual(
-      takeEncodedRowsCache(snap.nodes),
-      null,
-      'stale cache must invalidate after text mutation'
-    )
-
-    // Re-attach then mutate children → invalidate
-    const again = canonicalizeNodes(snap.nodes)
-    assert.ok(again.ok)
-    attachEncodedRowsCache(again.nodes, again.encodedRows)
-    assert.ok(takeEncodedRowsCache(again.nodes))
-    const childUid = again.nodes.root.children[0]
-    again.nodes.root.children = again.nodes.root.children.slice(1)
-    if (childUid && again.nodes[childUid]) {
-      delete again.nodes[childUid]
-    }
-    assert.strictEqual(
-      takeEncodedRowsCache(again.nodes),
-      null,
-      'stale cache must invalidate after structure mutation'
-    )
+    // Same-length edits defeated the former fingerprint. No graph cache remains.
+    const previousText = snap.nodes[victim].data.text
+    snap.nodes[victim].data.text = 'X'.repeat(previousText.length)
+    const updated = snapshotCanonicalForStorage(snap.nodes)
+    assert.strictEqual(updated.encodedRows.find(r => r.uid === victim).data.text,
+      snap.nodes[victim].data.text)
 
     // Fresh snapshot after mutation encodes new text
     snap.nodes[victim].data.text = 'AFTER_MUTATION_OK'
     const fresh = snapshotCanonicalForStorage(snap.nodes)
     assert.ok(fresh.ok)
-    const freshRows = takeEncodedRowsCache(fresh.nodes)
+    const freshRows = fresh.encodedRows
     assert.ok(freshRows)
     const hit = freshRows.find(r => r.uid === victim)
     assert.ok(hit)

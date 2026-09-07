@@ -43,7 +43,9 @@ function applySiblingPositionsFromPayload(next, payload) {
   const map = payload && payload.siblingPositions
   if (!map || typeof map !== 'object') return
   Object.keys(map).forEach(uid => {
-    if (next[uid]) next[uid].position = map[uid]
+    if (!next[uid]) return
+    // Shallow cloneNodes shares node objects; never mutate in place.
+    next[uid] = { ...next[uid], position: map[uid] }
   })
 }
 

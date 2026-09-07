@@ -12,7 +12,6 @@ const {
   nodesTableAuthorityEnabled,
   canonicalizeNodes,
   snapshotCanonicalForStorage,
-  takeEncodedRowsCache,
   pickAuthoritativeNodes,
   auditRoomNodesState,
   replaceRoomNodes,
@@ -704,11 +703,8 @@ function normalizeTitle(title) {
 async function writeRoomNodeRows(db, roomKey, nodes, version, options = {}) {
   if (!nodesDualWriteEnabled()) return { wrote: false, skipped: true }
   if (nodes == null) return { wrote: false, skipped: true }
-  const encodedRows =
-    options.encodedRows || takeEncodedRowsCache(nodes) || null
   const result = await replaceRoomNodes(db, roomKey, nodes, version, {
-    ...options,
-    ...(encodedRows ? { encodedRows } : {})
+    ...options
   })
   if (!result.wrote) {
     console.error(
@@ -722,7 +718,7 @@ async function writeRoomNodeRows(db, roomKey, nodes, version, options = {}) {
 
 function snapshotNodesForStorage(nodes) {
   const snap = snapshotCanonicalForStorage(nodes)
-  return snap.ok ? snap.nodes : nodes || {}
+  return snap.ok ? snap : { nodes: nodes || {}, encodedRows: null }
 }
 
 async function upsertRoom(roomKey, title, options = {}) {
@@ -751,7 +747,8 @@ async function upsertRoom(roomKey, title, options = {}) {
     )
     const row = res.rows[0]
     if (nodes) {
-      const snapshot = snapshotNodesForStorage(nodes)
+      const canonical = snapshotNodesForStorage(nodes)
+      const snapshot = canonical.nodes
       const existingTable = await readRoomNodes(client, roomKey)
       const overwriteTable =
         !isCollabV2Enabled() ||
@@ -762,7 +759,8 @@ async function upsertRoom(roomKey, title, options = {}) {
           client,
           roomKey,
           snapshot,
-          Number((row && row.version) || 0)
+          Number((row && row.version) || 0),
+          { encodedRows: canonical.encodedRows }
         )
       } else if (isCollabV2Enabled() && isTableInitialized(existingTable)) {
         treeAuthorityFallbackForbidden({
@@ -2040,9 +2038,12 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
     operationId: command.operationId,
     actorId: command.actorId
   }
-  const snapshot = snapshotNodesForStorage(applied.nodes || {})
+  const canonical = snapshotNodesForStorage(applied.nodes || {})
+  const snapshot = canonical.nodes
   const affectedUids = (event.affectedUids || []).filter(Boolean)
+  const reindexed = !!(event.payload && event.payload.reindex)
   const incrementalWrite =
+    !reindexed &&
     (command.type === 'node.update' ||
       command.type === 'node.move' ||
       command.type === 'node.reorder' ||
@@ -2050,6 +2051,7 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
     affectedUids.length > 0 &&
     affectedUids.length <= 20
   await writeRoomNodeRows(client, roomKey, snapshot, version, {
+    encodedRows: canonical.encodedRows,
     allowRestore,
     ...(incrementalWrite ? { onlyUids: affectedUids } : {})
   })

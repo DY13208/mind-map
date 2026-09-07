@@ -26,6 +26,7 @@ const suites = {
     'test/collabSpecialObjects.test.js',
     'test/collabPaste.test.js',
     'test/collabPasteUndo.test.js',
+    'test/collabV2.wideSibling.persistence.test.js',
     'test/roomNodes.test.js',
     'test/roomAcl.test.js',
     'test/outbox.test.js',

@@ -1,0 +1,533 @@
+
+> simple-mind-map@0.14.0-fix.3 test:collab:history
+> node ./test/collabHistory.test.js
+
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.959Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.insert',
+  targetUid: 'a',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.961Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: 'a',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.962Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.update',
+  targetUid: 'a',
+  version: 2
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.963Z',
+  stage: '6.applier.done',
+  type: 'node.update',
+  targetUid: 'a',
+  version: 2,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.963Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.insert',
+  targetUid: 'b',
+  version: 3
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.964Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: 'b',
+  version: 3,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.973Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.move',
+  targetUid: 'b',
+  version: 4
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.974Z',
+  stage: '6.applier.done',
+  type: 'node.move',
+  targetUid: 'b',
+  version: 4,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.974Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.batch',
+  targetUid: '',
+  version: 5
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.975Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.insert',
+  targetUid: 'c',
+  version: 5
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.975Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: 'c',
+  version: 5,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.975Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.update',
+  targetUid: 'c',
+  version: 5
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.976Z',
+  stage: '6.applier.done',
+  type: 'node.update',
+  targetUid: 'c',
+  version: 5,
+  affected: undefined
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.976Z',
+  stage: '6.applier.done',
+  type: 'node.batch',
+  targetUid: '',
+  version: 5,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.976Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'map.meta.update',
+  targetUid: '',
+  version: 6
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.976Z',
+  stage: '6.applier.done',
+  type: 'map.meta.update',
+  targetUid: '',
+  version: 6,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.977Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.977Z',
+  stage: '6.applier.done',
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.978Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.978Z',
+  stage: '6.applier.done',
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.980Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.980Z',
+  stage: '6.applier.done',
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.980Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.980Z',
+  stage: '6.applier.done',
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.981Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.981Z',
+  stage: '6.applier.done',
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.981Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.981Z',
+  stage: '6.applier.done',
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.981Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.982Z',
+  stage: '6.applier.done',
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.982Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.982Z',
+  stage: '6.applier.done',
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.982Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.982Z',
+  stage: '6.applier.done',
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.983Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.983Z',
+  stage: '6.applier.done',
+  type: 'node.delete',
+  targetUid: 'c',
+  version: 7,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.983Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.insert',
+  targetUid: 'a',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.983Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: 'a',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.983Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.insert',
+  targetUid: 'd',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.983Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: 'd',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.983Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.delete',
+  targetUid: 'd',
+  version: 2
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.983Z',
+  stage: '6.applier.done',
+  type: 'node.delete',
+  targetUid: 'd',
+  version: 2,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.983Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.restore',
+  targetUid: 'd',
+  version: 3
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.984Z',
+  stage: '6.applier.done',
+  type: 'node.restore',
+  targetUid: 'd',
+  version: 3,
+  affected: undefined
+}
+IMPORT_LARGE_TRACE {
+  timestamp: 1788749493984,
+  phase: 'map.replace.inspect',
+  nodeCount: 2,
+  serializedBytes: 144,
+  maxNodes: 20000,
+  maxBytes: 33554432,
+  tooLarge: false
+}
+[COLLAB_SLOW_PATH] {
+  room: undefined,
+  operation: 'map.replace',
+  reason: 'bulk_replace',
+  nodeCount: 2,
+  durationMs: 0.3042
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.985Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.update',
+  targetUid: 'x',
+  version: 9
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.985Z',
+  stage: '6.applier.done',
+  type: 'node.update',
+  targetUid: 'x',
+  version: 9,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.986Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.insert',
+  targetUid: 'n1',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.986Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: 'n1',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.986Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.insert',
+  targetUid: 'n2',
+  version: 2
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.987Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: 'n2',
+  version: 2,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.991Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.insert',
+  targetUid: 'a',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.991Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: 'a',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.992Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.insert',
+  targetUid: 'a',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.992Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: 'a',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.992Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.update',
+  targetUid: 'a',
+  version: 2
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.992Z',
+  stage: '6.applier.done',
+  type: 'node.update',
+  targetUid: 'a',
+  version: 2,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:33.993Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.insert',
+  targetUid: 'z',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:33.993Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: 'z',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:34.203Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.insert',
+  targetUid: 'z',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:34.204Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: 'z',
+  version: 1,
+  affected: undefined
+}
+[v2-trace] 6.applier.sql {
+  t: '2026-09-07T02:51:34.205Z',
+  stage: '6.applier.sql',
+  traceId: undefined,
+  type: 'node.insert',
+  targetUid: 'z',
+  version: 1
+}
+[v2-trace] 6.applier.done {
+  t: '2026-09-07T02:51:34.206Z',
+  stage: '6.applier.done',
+  type: 'node.insert',
+  targetUid: 'z',
+  version: 1,
+  affected: undefined
+}
+IMPORT_LARGE_TRACE {
+  timestamp: 1788749494225,
+  phase: 'map.replace.inspect',
+  nodeCount: 2,
+  serializedBytes: 104,
+  maxNodes: 20000,
+  maxBytes: 33554432,
+  tooLarge: false
+}
+[COLLAB_SLOW_PATH] {
+  room: undefined,
+  operation: 'map.replace',
+  reason: 'bulk_replace',
+  nodeCount: 2,
+  durationMs: 0.2155
+}
+collabHistory.test.js ok
