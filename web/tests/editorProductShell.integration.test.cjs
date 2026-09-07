@@ -181,5 +181,21 @@ const nginxSrc = fs.readFileSync(
 assert.match(nginxSrc, /try_files \$uri \$uri\/ \/index\.html/)
 assert.match(nginxSrc, /location \/api\//)
 assert.match(nginxSrc, /location \/collab-v2/)
+assert.match(nginxSrc, /location \^~ \/socket\.io\//)
+assert.match(
+  nginxSrc,
+  /rewrite \^\/socket\\\.io\/\(\.\*\)\$ \/collab-v2\/\$1 break/
+)
+const socketLocation = nginxSrc.indexOf('location ^~ /socket.io/')
+const spaLocation = nginxSrc.indexOf('location / {')
+assert.ok(socketLocation >= 0 && socketLocation < spaLocation)
+
+const collabServerSrc = fs.readFileSync(
+  path.join(__dirname, '..', '..', 'simple-mind-map', 'bin', 'collabServer.js'),
+  'utf8'
+)
+assert.doesNotMatch(collabServerSrc, /simple-mind-map collab server ok/)
+assert.match(collabServerSrc, /response\.writeHead\(404/)
+assert.match(collabServerSrc, /code: 'not_found'/)
 
 console.log('Editor product shell integration contract tests passed')
