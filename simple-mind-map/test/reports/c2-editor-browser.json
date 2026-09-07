@@ -1,0 +1,12 @@
+{
+  "generatedAt": "2026-09-07T01:48:59.339Z",
+  "origin": null,
+  "phases": [],
+  "summary": {
+    "EDITOR_1K_BROWSER": "NOT_RUN",
+    "EDITOR_5K_BROWSER": "NOT_RUN",
+    "EDITOR_10K_BROWSER": "NOT_RUN",
+    "EDITOR_20K_BROWSER": "NOT_RUN",
+    "reason": "C2_BROWSER_ORIGIN / COLLAB_TEST_BASE_URL not set"
+  }
+}
