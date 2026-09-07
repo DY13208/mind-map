@@ -374,6 +374,7 @@ export default {
     openFileTip: '開啟檔案前，請先匯出目前編輯的檔案，以免內容遺失',
     ai: 'AI',
     flowExpand: '補齊流程',
+    sopRegistry: 'SOP台帳',
     cooperate: '協同'
   },
   edit: {

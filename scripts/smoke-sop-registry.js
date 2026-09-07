@@ -1,0 +1,140 @@
+/**
+ * SOP 台账抽取冒烟（纯 Node，不依赖 Vue 打包）
+ * 与 web/src/utils/sopRegistryPrompt.js 中 D_REGISTRY_RE / 抽取约定对齐
+ */
+const D_REGISTRY_RE = /(D\d+)\s*[：:]\s*(.+)/
+
+function cleanTitle(title) {
+  return String(title || '')
+    .replace(/[\s]*[|｜].*$/, '')
+    .replace(/[\s]+$/g, '')
+    .trim()
+}
+
+function detectFrequency(text) {
+  const t = String(text || '')
+  const rules = [
+    { re: /每天|每日|daily/i, label: '每天' },
+    { re: /每周|weekly/i, label: '每周' },
+    { re: /每月|monthly/i, label: '每月' },
+    { re: /每季度|季度/i, label: '每季度' },
+    { re: /按需|需要时/i, label: '按需' },
+    { re: /触发时|事件触发/i, label: '触发时' }
+  ]
+  for (const rule of rules) {
+    if (rule.re.test(t)) return { label: rule.label, cron_hint: null }
+  }
+  return { label: '未知', cron_hint: null }
+}
+
+function parseSample(rawText) {
+  const lines = String(rawText || '').split(/\r?\n/)
+  const sops = []
+  lines.forEach((line, index) => {
+    const trimmed = line.trim().replace(/^[-*•]\s*/, '')
+    const m = trimmed.match(D_REGISTRY_RE)
+    if (!m) return
+    const id = m[1].toUpperCase()
+    const title = cleanTitle(m[2])
+    const block = []
+    const baseIndent = (line.match(/^(\s*)/) || ['', ''])[1].length
+    for (let i = index; i < lines.length && i < index + 30; i++) {
+      const l = lines[i]
+      if (!l || !l.trim()) continue
+      const indent = (l.match(/^(\s*)/) || ['', ''])[1].length
+      if (i > index && indent <= baseIndent && D_REGISTRY_RE.test(l.trim().replace(/^[-*•]\s*/, ''))) break
+      if (i > index && indent <= baseIndent) break
+      block.push(l)
+    }
+    const ctx = block.join('\n')
+    const deliverables = []
+    block.forEach(l => {
+      const t = l.trim()
+      if (/交付|产出/.test(t)) {
+        deliverables.push({
+          name: t.replace(/^[-*•]\s*/, '').replace(/^[^：:]*[：:]/, '').trim() || t,
+          uri_or_path: '',
+          kind: 'node'
+        })
+      }
+      const file = t.match(/([\w.\u4e00-\u9fff/-]+\.(xlsx?|docx?|pdf|md))/i)
+      if (file) {
+        deliverables.push({ name: file[1], uri_or_path: file[1], kind: 'file' })
+      }
+    })
+    const runs = []
+    block.forEach(l => {
+      const t = l.trim().replace(/^[-*•]\s*/, '')
+      if (/^(频率|每天|每日|每周|每月|每季度|按需)/.test(t)) return
+      const hasTime = /\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(t)
+      const hasRunWord = /(运行记录|执行记录|日志|已完成|完成于)/.test(t)
+      if (!hasTime && !hasRunWord) return
+      runs.push({
+        at: (t.match(/\d{4}[-/]\d{1,2}[-/]\d{1,2}/) || [''])[0],
+        result: /完成|成功/.test(t) ? '完成' : '',
+        note: t
+      })
+    })
+    sops.push({
+      id,
+      title,
+      source: { type: 'paste', ref: '粘贴', path: '' },
+      frequency: detectFrequency(ctx),
+      runs,
+      deliverables,
+      cpda: { goal: title, C: [], P: [] }
+    })
+  })
+  return {
+    sops,
+    conflicts: [],
+    notes: ''
+  }
+}
+
+function assert(cond, msg) {
+  if (!cond) throw new Error(msg)
+}
+
+const sample1 = `中心主题
+- SOP
+  - D2：采购目标`
+
+const r1 = parseSample(sample1)
+assert(r1.sops.length === 1, 'sample1 should find 1 sop')
+assert(r1.sops[0].id === 'D2', 'id D2')
+assert(r1.sops[0].title === '采购目标', 'title 采购目标')
+assert(r1.sops[0].frequency.label === '未知', 'no frequency => 未知')
+assert(r1.sops[0].runs.length === 0, 'no runs')
+assert(r1.sops[0].deliverables.length === 0, 'no deliverables')
+
+const sample2 = `业务
+- D1：供应商准入
+  - 频率：每月
+  - 交付：供应商评估表.xlsx
+  - 运行记录：2026-03-01 完成季度复核
+- D2：采购目标
+  - 每周执行
+  - 产出：采购计划.md`
+
+const r2 = parseSample(sample2)
+assert(r2.sops.length === 2, 'sample2 should find 2 sops')
+const d1 = r2.sops.find(s => s.id === 'D1')
+const d2 = r2.sops.find(s => s.id === 'D2')
+assert(d1 && d1.title === '供应商准入', 'D1 title')
+assert(d1.frequency.label === '每月', 'D1 monthly')
+assert(d1.deliverables.some(d => /供应商评估表/.test(d.name)), 'D1 deliverable')
+assert(d1.runs.length >= 1, 'D1 runs')
+assert(d2 && d2.title === '采购目标', 'D2 title')
+assert(d2.frequency.label === '每周', 'D2 weekly')
+assert(d2.runs.length === 0, 'D2 should not treat 每周执行 as run')
+assert(d2.deliverables.some(d => /采购计划/.test(d.name)), 'D2 deliverable')
+
+const sample3 = `- D2：采购目标A
+- D2：采购目标B`
+const r3 = parseSample(sample3)
+assert(r3.sops.length === 2, 'same id must keep 2 rows')
+assert(r3.sops[0].id === 'D2' && r3.sops[1].id === 'D2', 'both D2')
+
+console.log('SOP registry smoke OK')
+console.log(JSON.stringify({ sample1: r1, sample2: r2, sample3: r3 }, null, 2))
