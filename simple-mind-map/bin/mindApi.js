@@ -1,4 +1,6 @@
 const crypto = require('crypto')
+const fs = require('fs')
+const path = require('path')
 const Y = require('yjs')
 const mindDoc = require('./mindDoc')
 const { applyNodeCommand, dataFields } = require('./roomCommands')
@@ -877,6 +879,168 @@ async function persistPatch(roomKey, ydoc, extra = {}) {
 async function handleApi(req, res) {
   const url = new URL(req.url, 'http://127.0.0.1')
   const pathname = url.pathname
+
+  // 本地 SOP 产物预览 / 下载（仅允许项目 output 目录）
+  if (req.method === 'GET' && pathname === '/api/artifacts/local') {
+    const rawPath = String(url.searchParams.get('path') || '').trim()
+    const rawName = String(url.searchParams.get('name') || '').trim()
+    const asDownload = url.searchParams.get('download') === '1'
+
+    const basenameSafe = input => {
+      const s = String(input || '')
+        .trim()
+        .replace(/^["']|["']$/g, '')
+      if (!s) return ''
+      const parts = s.replace(/\\/g, '/').split('/').filter(Boolean)
+      return parts[parts.length - 1] || ''
+    }
+
+    const windowsToWslPath = input => {
+      const m = String(input || '').match(/^([A-Za-z]):[\\/]([\s\S]*)$/)
+      if (!m) return ''
+      return `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`
+    }
+
+    const outputRoots = [
+      process.env.SOP_OUTPUT_DIR,
+      process.env.MIND_MAP_OUTPUT_DIR,
+      path.resolve(__dirname, '../..', 'output'),
+      path.resolve(process.cwd(), 'output'),
+      path.resolve(process.cwd(), '..', 'output')
+    ]
+      .filter(Boolean)
+      .map(p => path.resolve(String(p)))
+
+    // 若请求带 Windows 绝对路径，额外把对应 WSL /mnt/<drive>/.../output 加入候选根
+    if (rawPath) {
+      const wslFull = windowsToWslPath(rawPath)
+      if (wslFull) {
+        const idx = wslFull.toLowerCase().lastIndexOf('/output/')
+        if (idx >= 0) {
+          outputRoots.push(wslFull.slice(0, idx + '/output'.length))
+        } else if (/\/output$/i.test(wslFull)) {
+          outputRoots.push(wslFull)
+        } else {
+          // D:\proj\output\file.html → /mnt/d/proj/output
+          const parent = wslFull.replace(/\/[^/]+$/, '')
+          if (/\/output$/i.test(parent)) outputRoots.push(parent)
+        }
+      }
+    }
+
+    const uniqRoots = outputRoots
+      .filter((p, i, arr) => p && arr.indexOf(p) === i)
+      .filter(p => {
+        try {
+          return fs.existsSync(p)
+        } catch (e) {
+          return false
+        }
+      })
+
+    const tryFile = candidate => {
+      try {
+        if (candidate && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+          return candidate
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      return null
+    }
+
+    const findByName = fileName => {
+      const want = String(fileName || '').trim()
+      if (!want) return null
+      const wantLower = want.toLowerCase()
+      for (const root of uniqRoots) {
+        if (!fs.existsSync(root)) continue
+        const direct = tryFile(path.join(root, want))
+        if (direct) return direct
+        try {
+          const hit = fs.readdirSync(root).find(name => name.toLowerCase() === wantLower)
+          if (hit) {
+            const found = tryFile(path.join(root, hit))
+            if (found) return found
+          }
+        } catch (e) {
+          /* ignore */
+        }
+      }
+      return null
+    }
+
+    let target = null
+    const fileName = basenameSafe(rawName) || basenameSafe(rawPath)
+
+    // 1) 优先按文件名在 output 目录查找（兼容宿主机 Windows 路径 + 容器 Linux）
+    if (fileName) target = findByName(fileName)
+
+    // 2) Windows 路径映射到 WSL 后再试
+    if (!target && rawPath) {
+      const wslFull = windowsToWslPath(rawPath)
+      if (wslFull) target = tryFile(wslFull)
+    }
+
+    // 3) 若传入绝对路径且确实在某个 output 根下，直接使用
+    if (!target && rawPath) {
+      const normalized = rawPath.replace(/\\/g, '/')
+      let resolved = null
+      try {
+        resolved = path.resolve(normalized)
+      } catch (e) {
+        resolved = null
+      }
+      if (resolved) {
+        for (const root of uniqRoots) {
+          const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep
+          if (
+            resolved === root ||
+            resolved.toLowerCase().startsWith(rootWithSep.toLowerCase())
+          ) {
+            target = tryFile(resolved)
+            if (target) break
+          }
+        }
+      }
+    }
+
+    if (!target) {
+      sendJson(res, 404, {
+        ok: false,
+        error: 'artifact not found',
+        path: rawPath,
+        name: fileName || rawName,
+        roots: uniqRoots
+      })
+      return true
+    }
+    const ext = path.extname(target).toLowerCase()
+    const mime =
+      {
+        '.html': 'text/html; charset=utf-8',
+        '.htm': 'text/html; charset=utf-8',
+        '.md': 'text/markdown; charset=utf-8',
+        '.csv': 'text/csv; charset=utf-8',
+        '.json': 'application/json; charset=utf-8',
+        '.pdf': 'application/pdf',
+        '.xlsx':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.xls': 'application/vnd.ms-excel'
+      }[ext] || 'application/octet-stream'
+    const outName = path.basename(target)
+    const buf = fs.readFileSync(target)
+    res.writeHead(200, {
+      'Content-Type': mime,
+      'Content-Length': buf.length,
+      'Content-Disposition': `${
+        asDownload ? 'attachment' : 'inline'
+      }; filename*=UTF-8''${encodeURIComponent(outName)}`,
+      'Cache-Control': 'no-store'
+    })
+    res.end(buf)
+    return true
+  }
 
   if (req.method === 'GET' && pathname === '/api/health') {
     let outbox = { pending: 0, failed: 0, oldestAgeMs: 0 }

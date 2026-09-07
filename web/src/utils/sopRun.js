@@ -7,7 +7,8 @@ import {
   addRunToLedger,
   addDeliverableToLedger,
   persistSopLedger,
-  normalizeLedger
+  normalizeLedger,
+  isJunkDeliverable
 } from './sopLedger'
 
 /** 可选产物预设（运行前勾选） */
@@ -16,7 +17,8 @@ export const SOP_OUTPUT_PRESETS = [
     id: 'html',
     label: 'HTML 执行单',
     hint: '单页简洁美观，含 KPI / 表格 / 本周动作',
-    prompt: '生成一份简洁美观的单页 HTML 执行单，并给出可打开的文件路径或链接'
+    prompt:
+      '生成一份简洁美观的单页 HTML 执行单，落到项目 output 目录，文件名带 YYYY-MM-DD_HHmm，并给出可打开的绝对路径'
   },
   {
     id: 'md',
@@ -111,13 +113,15 @@ function buildSystemPrompt() {
 1. 必须实际调用工具/MCP 去读数据、算数、写文件；禁止只根据大纲「口头完成」。
 2. 没有工具调用、没有生成真实文件路径，就不能说「已完成」。
 3. 按该 SOP 的步骤与检查项执行；HTML 要真正落盘（简洁美观：KPI 卡 + 表格 + 本周动作）。
-4. 文末必须有可解析的「产物清单」（绝对路径或可打开链接）：
+4. 文末必须有可解析的「产物清单」，且只列用户勾选的最终产物（绝对路径或可打开链接；文件名时间精确到分）：
 ## 产物清单
-- name: UN排产下单执行单_2026-09-07.html
-  path: D:\\\\path\\\\to\\\\file.html
-5. 同时给出：是否完成、核心判断一句话、单页内容要点、数据来源。
-6. 不要修改 SOP 本体结构；过程日志不必写入导图。
-7. 缺关键数据时说明缺什么，仍尽量用已有数据给出可执行结论，但不要伪造文件。`
+- name: UN排产下单执行单_2026-09-07_1730.html
+  path: D:\\\\path\\\\to\\\\output\\\\UN排产下单执行单_2026-09-07_1730.html
+5. 禁止把过程数据、中间 JSON、MCP/工具临时路径、stdout、schema 片段、COS 临时对象写入产物清单。
+6. 最终文件请落到项目 output 目录；文件名带 YYYY-MM-DD_HHmm。
+7. 同时给出：是否完成、核心判断一句话、单页内容要点、数据来源。
+8. 不要修改 SOP 本体结构；过程日志不必写入导图。
+9. 缺关键数据时说明缺什么，仍尽量用已有数据给出可执行结论，但不要伪造文件。`
 }
 
 function buildUserPrompt({ ctx, outputs, extraNote }) {
@@ -130,8 +134,10 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
     ctx.sopUid ? `节点 uid：${ctx.sopUid}` : '',
     `房间：${ctx.roomKey}`,
     '',
-    '## 需要输出的产物（必须尽量全部给出，并在文末「产物清单」列出真实路径/链接）',
+    '## 需要输出的产物（只生成并回报这些；文末「产物清单」也只能列这些最终文件）',
     selected || '- HTML 执行单：简洁美观',
+    '',
+    '注意：中间快照、_map_full/_map_outline、MCP 日志不要出现在产物清单里。',
     extraNote ? `\n## 额外要求\n${extraNote}` : '',
     '',
     '## SOP 子树 / 大纲上下文',
@@ -143,16 +149,111 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
     .join('\n')
 }
 
-export function extractDeliverablesFromReply(text, events = []) {
+/** 过程数据 / 工具噪声，不应进入用户可见产物 */
+export { isJunkDeliverable }
+
+function deliverableExt(item) {
+  const blob = `${(item && item.name) || ''}\n${(item && item.uri_or_path) || ''}`
+  const m = blob.match(/\.(html?|xlsx?|docx?|pdf|md|csv|json)(?=(\?|#|$|[\s"'<>]))/i)
+  return m ? m[1].toLowerCase() : ''
+}
+
+/** 只保留用户勾选的产物类型；每种类型最多 1 个（优先本地 output 落盘） */
+export function filterDeliverablesByOutputs(list, outputs = []) {
+  const ids = (outputs || []).map(o => o.id || o).filter(Boolean)
+  const idSet = new Set(ids)
+  const allowAll = !idSet.size
+
+  const typed = (list || []).filter(item => {
+    if (isJunkDeliverable(item)) return false
+    if (allowAll) return true
+    const type = guessOutputId(item)
+    return type && idSet.has(type)
+  })
+
+  const score = item => {
+    const uri = String((item && item.uri_or_path) || '')
+    let s = 0
+    if (/[\\/]output[\\/]/i.test(uri)) s += 100
+    if (/^[A-Za-z]:[\\/]/.test(uri)) s += 50
+    if (/^https?:\/\//i.test(uri)) s += 10
+    if (/\.(html?|xlsx?|md|csv)$/i.test(uri)) s += 20
+    return s
+  }
+
+  const bestByType = new Map()
+  typed.forEach(item => {
+    const type = guessOutputId(item) || '_other'
+    const prev = bestByType.get(type)
+    if (!prev || score(item) > score(prev)) bestByType.set(type, item)
+  })
+
+  const order = ids.length ? ids : Array.from(bestByType.keys())
   const out = []
-  const raw = [String(text || ''), serializeEvents(events)].join('\n')
+  const seen = new Set()
+  order.forEach(id => {
+    const item = bestByType.get(id)
+    if (!item) return
+    const key = `${item.name}|${item.uri_or_path}`
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push(item)
+  })
+  // 未映射到预设类型的（allowAll）附在后面
+  if (allowAll) {
+    bestByType.forEach((item, key) => {
+      if (ids.includes(key)) return
+      const k = `${item.name}|${item.uri_or_path}`
+      if (seen.has(k)) return
+      seen.add(k)
+      out.push(item)
+    })
+  }
+  return out
+}
+
+function guessOutputId(item) {
+  const ext = deliverableExt(item)
+  const uri = String((item && item.uri_or_path) || '')
+  const name = String((item && item.name) || '')
+  if (/^html?$/i.test(ext)) return 'html'
+  if (/^md$/i.test(ext)) return 'md'
+  if (/^(xlsx?|csv)$/i.test(ext)) return 'xlsx'
+  if (/^json$/i.test(ext)) return 'json'
+  if (
+    /^https?:\/\//i.test(uri) &&
+    /(执行单|报告|\.html?)/i.test(`${name} ${uri}`)
+  ) {
+    return 'html'
+  }
+  return ''
+}
+
+function cleanDeliverableName(name, uri) {
+  let n = String(name || '').trim()
+  n = n.replace(/^name\s*[:：]\s*/i, '').trim()
+  if (!n || isJunkDeliverable({ name: n, uri_or_path: '' })) {
+    const base = String(uri || '')
+      .split(/[\\/]/)
+      .pop()
+      .split(/[?#]/)[0]
+    if (base && /\.(html?|xlsx?|docx?|pdf|md|csv|json)$/i.test(base)) return base
+  }
+  return n || uri
+}
+
+export function extractDeliverablesFromReply(text, events = [], outputs = []) {
+  const out = []
+  // 只用模型正文解析产物；工具事件里会有大量 MCP/过程路径噪声
+  const reply = String(text || '')
   const seen = new Set()
 
   const push = item => {
-    if (!item) return
-    const name = String(item.name || '').trim()
+    if (!item || isJunkDeliverable(item)) return
     const uri = String(item.uri_or_path || '').trim()
+    const name = cleanDeliverableName(item.name, uri)
     if (!name && !uri) return
+    if (isJunkDeliverable({ name, uri_or_path: uri })) return
     const key = `${name}|${uri}`
     if (seen.has(key)) return
     seen.add(key)
@@ -163,8 +264,8 @@ export function extractDeliverablesFromReply(text, events = []) {
     })
   }
 
-  // 结构化「产物清单」段
-  const block = raw.match(/##\s*产物清单([\s\S]*?)(?=\n##\s|\n---|\s*$)/i)
+  // 优先：结构化「产物清单」
+  const block = reply.match(/##\s*产物清单([\s\S]*?)(?=\n##\s|\n---|\s*$)/i)
   if (block) {
     const chunk = block[1]
     const namePathPairs = chunk.matchAll(
@@ -177,63 +278,45 @@ export function extractDeliverablesFromReply(text, events = []) {
     for (const m of bullets) {
       const line = m[1].trim()
       const file = line.match(
-        /([A-Za-z]:\\[^\s"'<>]+|\/[^\s"'<>]+|https?:\/\/\S+|[\w.\u4e00-\u9fff/\\-]+\.(html?|xlsx?|docx?|pdf|md|csv|json))/i
+        /([A-Za-z]:\\[^\s"'<>]+|\/(?:[\w.\u4e00-\u9fff/-]+\/)+[^\s"'<>]+|https?:\/\/\S+|[\w.\u4e00-\u9fff/\\-]+\.(html?|xlsx?|docx?|pdf|md|csv))/i
       )
       if (file) {
         push({
-          name: line.replace(file[1], '').replace(/^[\s\-–—:：]+/, '') || file[1],
+          name:
+            line.replace(file[1], '').replace(/^[\s\-–—:：]+/, '') || file[1],
           uri_or_path: file[1]
         })
       }
     }
   }
 
-  const urlRe = /https?:\/\/[^\s)\]>`"'，,]+/gi
-  let m
-  while ((m = urlRe.exec(raw))) {
-    push({ name: m[0].split('/').pop() || m[0], uri_or_path: m[0], kind: 'link' })
+  // 清单为空时，才从正文（仍不含事件）兜底扫最终文件
+  if (!out.length) {
+    const winPathRe =
+      /([A-Za-z]:\\[^\s"'<>|]+\.(html?|xlsx?|docx?|pdf|md|csv))/gi
+    let m
+    while ((m = winPathRe.exec(reply))) {
+      push({ name: m[1].split(/[\\/]/).pop(), uri_or_path: m[1], kind: 'file' })
+    }
+    const urlRe =
+      /https?:\/\/[^\s)\]>`"'，,]+\.(html?|xlsx?|docx?|pdf|md|csv)(?:\?[^\s)\]>`"'，,]*)?/gi
+    while ((m = urlRe.exec(reply))) {
+      push({
+        name: m[0].split('/').pop().split('?')[0] || m[0],
+        uri_or_path: m[0],
+        kind: 'link'
+      })
+    }
   }
 
-  const winPathRe =
-    /([A-Za-z]:\\[^\s"'<>|]+\.(html?|xlsx?|docx?|pdf|md|csv|json))/gi
-  while ((m = winPathRe.exec(raw))) {
-    push({ name: m[1].split(/[\\/]/).pop(), uri_or_path: m[1], kind: 'file' })
-  }
-
-  const fileRe =
-    /(?:^|[\s("'「])([\w.\u4e00-\u9fff/-]+\.(html?|xlsx?|docx?|pdf|md|csv|json))/gi
-  while ((m = fileRe.exec(raw))) {
-    push({ name: m[1], uri_or_path: m[1], kind: 'file' })
-  }
-
-  return out.slice(0, 12)
+  void events // 保留签名兼容，刻意不扫事件正文
+  return filterDeliverablesByOutputs(out, outputs).slice(0, 8)
 }
 
 function guessKind(uri) {
   if (/^https?:\/\//i.test(uri)) return 'link'
   if (/\.html?/i.test(uri)) return 'file'
   return 'file'
-}
-
-function serializeEvents(events) {
-  return (events || [])
-    .map(ev => {
-      try {
-        if (!ev) return ''
-        if (typeof ev === 'string') return ev
-        const parts = [
-          ev.type,
-          ev.name || ev.tool_name,
-          typeof ev.result === 'string'
-            ? ev.result
-            : JSON.stringify(ev.result || ev.output || ev.text || ev)
-        ]
-        return parts.filter(Boolean).join(' ')
-      } catch (e) {
-        return ''
-      }
-    })
-    .join('\n')
 }
 
 function inferRunResult(reply) {
@@ -310,6 +393,7 @@ export async function runSopWithWorkbuddy({
   actor = '台账',
   model,
   signal,
+  conversationId: conversationIdInput,
   onStatus,
   onDelta,
   onEventDetail,
@@ -361,10 +445,12 @@ export async function runSopWithWorkbuddy({
   }
 
   const started = Date.now()
-  const conversationId = `sop-exec-${key}-${String(sop.id || sop.title)
-    .toLowerCase()
-    .replace(/[^\w\u4e00-\u9fff]+/g, '-')
-    .slice(0, 40)}-${Date.now().toString(36)}`
+  const conversationId =
+    String(conversationIdInput || '').trim() ||
+    `sop-exec-${key}-${String(sop.id || sop.title)
+      .toLowerCase()
+      .replace(/[^\w\u4e00-\u9fff]+/g, '-')
+      .slice(0, 40)}-${Date.now().toString(36)}`
 
   let lastEvent = ''
   if (model) setStatus(`使用模型：${model}`)
@@ -392,7 +478,7 @@ export async function runSopWithWorkbuddy({
   const reply = String((result && result.content) || '').trim()
   const elapsedSec = Math.max(1, Math.round((Date.now() - started) / 1000))
   const events = (result && result.events) || []
-  let deliverables = extractDeliverablesFromReply(reply, events)
+  let deliverables = extractDeliverablesFromReply(reply, events, outputs)
 
   // 通路通但正文为空：典型是 ACP 只吐 phase、模型没真正生成
   if (!reply) {
@@ -486,7 +572,7 @@ export async function runSopWithWorkbuddy({
     if (!uri || /待回填/.test(String((d && d.name) || ''))) return
     ledger = addDeliverableToLedger(ledger, {
       ...d,
-      at: new Date().toISOString().slice(0, 10)
+      at: new Date().toISOString().slice(0, 16).replace('T', ' ')
     })
   })
 
