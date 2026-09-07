@@ -86,7 +86,13 @@
           placeholder="搜索企业微信成员"
           @input="loadContacts"
         />
-        <el-checkbox-group v-model="selectedContactIds" class="contactList">
+        <el-checkbox-group
+          v-model="selectedContactIds"
+          class="contactList"
+          role="list"
+          tabindex="0"
+          @scroll.native="handleContactScroll"
+        >
           <label v-for="contact in contacts" :key="contact.id" class="contactRow">
             <el-checkbox :label="contact.wecomUserId || contact.id" />
             <el-avatar :size="34" :src="contact.avatarUrl || ''">{{ contact.avatar }}</el-avatar>
@@ -95,6 +101,16 @@
               <small>{{ contact.department || '未填写部门' }} · {{ contact.position || '未填写职位' }}</small>
             </span>
           </label>
+          <div v-if="contactLoadingMore" class="contactLoadState" role="status">
+            <i class="el-icon-loading" /> 正在加载更多成员…
+          </div>
+          <button
+            v-else-if="contactHasMore"
+            type="button"
+            class="contactLoadMore"
+            @click="loadMoreContacts"
+          >加载更多成员</button>
+          <p v-else-if="contacts.length" class="contactLoadState">已显示全部 {{ contactTotal || contacts.length }} 位成员</p>
         </el-checkbox-group>
         <EmptyState v-if="!contactLoading && !contacts.length" title="没有匹配的企业微信成员" />
       </div>
@@ -143,13 +159,23 @@ export default {
     requestId: 0,
     contactDialogVisible: false,
     contactLoading: false,
+    contactLoadingMore: false,
     contactQuery: '',
     contacts: [],
+    contactOffset: 0,
+    contactNextCursor: null,
+    contactTotal: 0,
+    contactRequestId: 0,
+    contactSearchTimer: null,
     selectedContactIds: [],
     settingsVisible: false,
     settingsForm: { name: '', description: '' }
   }),
   computed: {
+    contactHasMore() {
+      if (this.contactNextCursor) return true
+      return this.contactTotal > this.contactOffset
+    },
     canManage() {
       return this.team && ['owner', 'admin'].includes(this.team.role)
     },
@@ -196,6 +222,8 @@ export default {
   },
   beforeDestroy() {
     this.requestId++
+    this.contactRequestId++
+    clearTimeout(this.contactSearchTimer)
   },
   methods: {
     async load() {
@@ -239,20 +267,54 @@ export default {
       this.contactDialogVisible = true
       this.contactQuery = ''
       this.selectedContactIds = []
-      await this.loadContacts()
+      await this.fetchContacts({ reset: true })
     },
-    async loadContacts() {
+    loadContacts() {
+      clearTimeout(this.contactSearchTimer)
+      this.contactSearchTimer = setTimeout(() => this.fetchContacts({ reset: true }), 250)
+    },
+    async fetchContacts({ reset = false } = {}) {
       if (!this.contactDialogVisible) return
-      this.contactLoading = true
+      if (!reset && (this.contactLoading || this.contactLoadingMore)) return
+      const request = ++this.contactRequestId
+      if (reset) {
+        this.contactOffset = 0
+        this.contactNextCursor = null
+        this.contactTotal = 0
+        this.contactLoading = true
+      } else {
+        this.contactLoadingMore = true
+      }
       try {
-        const result = await teamService.listContacts({ search: this.contactQuery })
+        const result = await teamService.listContacts({
+          search: this.contactQuery,
+          limit: 50,
+          offset: reset ? 0 : this.contactOffset,
+          cursor: reset ? null : this.contactNextCursor
+        })
+        if (request !== this.contactRequestId) return
         const existing = new Set(this.members.map(member => member.wecomUserId || member.userId || member.id))
-        this.contacts = result.list.filter(contact => !existing.has(contact.wecomUserId || contact.id))
+        const incoming = result.list.filter(contact => !existing.has(contact.wecomUserId || contact.id))
+        const merged = reset ? incoming : this.contacts.concat(incoming)
+        this.contacts = Array.from(new Map(merged.map(contact => [contact.wecomUserId || contact.id, contact])).values())
+        this.contactOffset = (reset ? 0 : this.contactOffset) + result.list.length
+        this.contactNextCursor = result.nextCursor
+        this.contactTotal = result.total
       } catch (error) {
         this.$message.error(error.message)
       } finally {
-        this.contactLoading = false
+        if (request === this.contactRequestId) {
+          this.contactLoading = false
+          this.contactLoadingMore = false
+        }
       }
+    },
+    loadMoreContacts() {
+      if (this.contactHasMore) this.fetchContacts()
+    },
+    handleContactScroll(event) {
+      const el = event.target
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 72) this.loadMoreContacts()
     },
     async addMembers() {
       this.busy = true
@@ -376,8 +438,28 @@ export default {
 }
 .contactList {
   max-height: 360px;
-  overflow: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   margin-top: 14px;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+.contactLoadMore {
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  background: transparent;
+  color: var(--ui-primary);
+  cursor: pointer;
+  font-size: 13px;
+  &:hover { background: var(--ui-primary-soft); }
+}
+.contactLoadState {
+  margin: 0;
+  padding: 12px;
+  color: var(--ui-text-secondary);
+  text-align: center;
+  font-size: 12px;
 }
 .contactRow {
   min-height: 54px;

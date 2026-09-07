@@ -6,11 +6,11 @@
     @keydown.enter.self="$emit('open', folder)"
     @click="$emit('open', folder)"
   >
-    <span class="folderIcon"><i class="el-icon-folder"/></span
-    ><span class="folderInfo"
+    <div class="folderPreview"><span class="folderIcon"><i class="el-icon-folder-opened"/></span></div>
+    <div class="folderBody"><span class="folderInfo"
       ><strong>{{ folder.name }}</strong
-      ><small>{{ itemCountText }}</small><small>{{ dateText }} 更新</small></span
-    ><el-dropdown
+      ><small>{{ itemCountText }}</small><small>{{ dateText }} 更新</small></span>
+    <el-dropdown
       v-if="editable"
       trigger="click"
       @command="$emit($event, folder)"
@@ -22,7 +22,7 @@
           >删除</el-dropdown-item
         ></el-dropdown-menu
       ></el-dropdown
-    >
+    ></div>
   </article></template
 >
 <script>
@@ -45,13 +45,11 @@ export default {
   width: 100%;
   border: 1px solid #e3e9e6;
   background: white;
-  min-height: 210px;
-  padding: 20px;
+  min-height: 0;
+  padding: 0;
   border-radius: var(--ui-radius-lg);
-  display: grid;
-  grid-template-columns: 48px 1fr auto;
-  align-content: end;
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
   cursor: pointer;
   text-align: left;
   color: var(--ui-text);
@@ -61,15 +59,29 @@ export default {
     box-shadow: var(--ui-shadow-hover);
     transform: translateY(-1px);
   }
+  .folderPreview {
+    height: 126px;
+    display: grid;
+    place-items: center;
+    background: var(--ui-surface-muted);
+    border-bottom: 1px solid var(--ui-border);
+  }
   .folderIcon {
-    width: 48px;
-    height: 48px;
+    width: 64px;
+    height: 52px;
     background: var(--ui-primary-soft);
     color: var(--ui-primary);
     border-radius: var(--ui-radius-lg);
     display: grid;
     place-items: center;
-    font-size: 20px;
+    font-size: 27px;
+  }
+  .folderBody {
+    min-height: 116px;
+    padding: 16px;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
   }
   .folderInfo {
     display: flex;
