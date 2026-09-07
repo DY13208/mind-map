@@ -1,0 +1,16 @@
+# C2 Full-tree Renderer BEFORE Profile
+
+```
+RENDER_ROOT_CAUSE_1 = per_node_richtext_DOM_measure_getBoundingClientRect_forced_reflow
+RENDER_ROOT_CAUSE_2 = O_n_JSON_stringify_node_data_compare_during_createNode_reuse
+RENDER_ROOT_CAUSE_3 = layout_doLayout_tree_walk_and_positioning
+10K_SETDATA_BEFORE = 76048
+10K_MAX_LONG_TASK_BEFORE = 56651
+FULL_TREE_HTTP_10K_BEFORE = 199
+GET_BBOX_CALL_COUNT = 1041
+GET_BOUNDING_CLIENT_RECT_COUNT = 10000
+LAYOUT_PASS_COUNT = 1
+FULL_RENDER_PASS_COUNT = 5
+NODE_RENDER_CALL_COUNT = 10000
+LINE_RENDER_CALL_COUNT = 20080
+```

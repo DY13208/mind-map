@@ -1,0 +1,48 @@
+{
+  "generatedAt": "2026-09-07T07:06:18.549Z",
+  "origin": "http://127.0.0.1:8989",
+  "mode": "wall",
+  "sizes": [
+    10000
+  ],
+  "rows": {
+    "10000": {
+      "ok": true,
+      "size": 10000,
+      "treeNodes": 10000,
+      "httpMs": 295,
+      "parseMs": 86,
+      "setDataMs": 143563,
+      "renderReason": "node_tree_render_end",
+      "MAX_LONG_TASK_MS": 58695,
+      "LONG_TASK_COUNT": 15,
+      "svgNodeGroups": 8,
+      "cacheCount": 10000,
+      "correctness": "PASS"
+    }
+  },
+  "BEFORE": {
+    "10K_SETDATA_BEFORE": 39074,
+    "10K_MAX_LONG_TASK_BEFORE": 30263,
+    "FULL_TREE_HTTP_10K_BEFORE": 11460
+  },
+  "AFTER": {
+    "10K_SETDATA_AFTER": 143563,
+    "10K_MAX_LONG_TASK_AFTER": 58695,
+    "FULL_TREE_HTTP_10K_AFTER": 295,
+    "RENDER_CORRECTNESS": "PASS"
+  },
+  "ROOT_CAUSES": [
+    "per_node_richtext_DOM_measure_getBoundingClientRect_forced_reflow",
+    "sync_doLayout_createNode_getSize_for_entire_tree_before_paint",
+    "repeated_full_render_passes_around_setData_reRender"
+  ],
+  "FULL": {
+    "FULL_10000": {
+      "setDataMs": 143563,
+      "httpMs": 295,
+      "maxLong": 58695,
+      "correctness": "PASS"
+    }
+  }
+}
