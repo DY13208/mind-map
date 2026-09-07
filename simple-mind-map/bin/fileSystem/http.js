@@ -116,6 +116,11 @@ async function handleFileSystemApi(req, res, options = {}) {
 
   try {
     if (method === 'GET' && collectionPath(pathname)) {
+      const sharedParam = String(
+        url.searchParams.get('shared') || url.searchParams.get('scope') || ''
+      )
+        .trim()
+        .toLowerCase()
       const listed = await fs.listRooms({
         q: url.searchParams.get('q') || url.searchParams.get('search') || '',
         folderId: url.searchParams.has('folderId')
@@ -126,6 +131,10 @@ async function handleFileSystemApi(req, res, options = {}) {
         limit: url.searchParams.get('limit') || 200,
         offset: url.searchParams.get('offset') || 0,
         cursor: url.searchParams.get('cursor') || '',
+        shared:
+          sharedParam === '1' ||
+          sharedParam === 'true' ||
+          sharedParam === 'shared',
         userId,
         bypass
       })

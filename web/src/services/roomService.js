@@ -49,6 +49,7 @@ async function listRealRooms(filters = {}) {
   if (filters.limit != null) params.set('limit', String(filters.limit))
   if (filters.offset != null) params.set('offset', String(filters.offset))
   if (filters.cursor) params.set('cursor', filters.cursor)
+  if (filters.shared) params.set('shared', '1')
   const query = params.toString()
   const data = await productRequest(`${listPath(filters)}${query ? `?${query}` : ''}`)
   const foldersById = filters.foldersById || {}
@@ -59,7 +60,6 @@ async function listRealRooms(filters = {}) {
         : '根目录'
     })
   )
-  if (filters.shared) list = list.filter(room => room.sharedWithMe)
   if (filters.role) {
     const want = String(filters.role).toLowerCase()
     list = list.filter(room => room.role === want)
