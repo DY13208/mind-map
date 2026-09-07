@@ -39,8 +39,8 @@
           ><i :class="item.icon"></i>{{ item.label }}</router-link
         >
         <p class="navLabel navLabel--space">空间</p>
-        <router-link to="/spaces" title="团队空间" aria-label="团队空间"
-          ><i class="el-icon-office-building"></i>团队空间</router-link
+        <router-link to="/spaces" title="我的团队" aria-label="我的团队"
+          ><i class="el-icon-office-building"></i>我的团队</router-link
         >
       </nav>
       <div class="sidebarFooter" v-if="profile">
@@ -69,7 +69,7 @@
     </aside>
     <main class="productMain">
       <div class="mockNotice">
-        文件、最近、收藏与回收站已接入真实 API。团队空间仍为演示数据。
+        文件、最近、收藏、回收站与团队空间已接入真实 API。
       </div>
       <router-view />
     </main>

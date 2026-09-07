@@ -5,7 +5,7 @@ export const C3_SERVICE_STATUS_MATRIX = {
   Recent: 'REAL',
   Favorites: 'REAL',
   Trash: 'REAL',
-  Team: 'MOCK_PENDING',
+  Team: 'REAL',
   Share: 'REAL'
 }
 

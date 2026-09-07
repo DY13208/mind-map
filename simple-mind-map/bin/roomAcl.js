@@ -4,6 +4,22 @@ const ROLES = ['owner', 'editor', 'viewer']
 const ROLE_RANK = { owner: 3, editor: 2, viewer: 1 }
 const ACTION_RANK = { view: 1, edit: 2, manage: 3 }
 
+function effectiveRole(directRole, teamRole, legacyRole = '') {
+  const roles = [directRole, teamRole, legacyRole]
+    .map(normalizeRole)
+    .filter(Boolean)
+  if (roles.includes('owner')) return 'owner'
+  if (roles.includes('editor')) return 'editor'
+  if (roles.includes('viewer')) return 'viewer'
+  return ''
+}
+
+function sourceForRoles(directRole, teamRole) {
+  if (normalizeRole(directRole)) return 'direct_share'
+  if (normalizeRole(teamRole)) return 'team'
+  return null
+}
+
 function aclError(status, code, message) {
   const err = new Error(message)
   err.statusCode = status
@@ -135,6 +151,10 @@ async function initSchema(db) {
       room_key text not null references rooms(room_key) on delete cascade,
       user_id text not null,
       role text not null,
+      direct_role text,
+      team_role text,
+      source text not null default 'direct_share',
+      source_team_id text,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       primary key (room_key, user_id),
@@ -146,6 +166,20 @@ async function initSchema(db) {
     create index if not exists room_members_user_id_idx
     on room_members(user_id)
   `)
+  await db.query(`alter table room_members add column if not exists source text not null default 'direct_share'`)
+  await db.query(`alter table room_members add column if not exists source_team_id text`)
+  await db.query(`alter table room_members add column if not exists direct_role text`)
+  await db.query(`alter table room_members add column if not exists team_role text`)
+  await db.query(`
+    update room_members
+    set direct_role = role
+    where direct_role is null and coalesce(source, 'direct_share') = 'direct_share'
+  `)
+  await db.query(`
+    update room_members
+    set team_role = role
+    where team_role is null and source = 'team'
+  `)
 }
 
 function normalizeActorId(value) {
@@ -156,8 +190,8 @@ function normalizeActorId(value) {
 
 async function migrateLegacyOwners(db) {
   await db.query(`
-    insert into room_members (room_key, user_id, role)
-    select first.room_key, first.user_id, 'owner'
+    insert into room_members (room_key, user_id, role, direct_role, source)
+    select first.room_key, first.user_id, 'owner', 'owner', 'direct_share'
     from (
       select distinct on (o.room_key)
         o.room_key,
@@ -179,11 +213,11 @@ async function migrateLegacyOwners(db) {
   `)
   // Other historical writers keep edit access so old maps do not lock to one person.
   await db.query(`
-    insert into room_members (room_key, user_id, role)
+    insert into room_members (room_key, user_id, role, direct_role, source)
     select distinct
       o.room_key,
       regexp_replace(o.actor_id, '^wecom:', '', 'i') as user_id,
-      'editor'
+       'editor', 'editor', 'direct_share'
     from room_operations o
     left join room_tombstones t on t.room_key = o.room_key
     where t.room_key is null
@@ -277,8 +311,8 @@ async function ensureOwner(db, roomKey, userId) {
   const key = String(roomKey || '')
   if (!key || !uid) return null
   const res = await db.query(
-    `insert into room_members (room_key, user_id, role)
-     values ($1, $2, $3)
+    `insert into room_members (room_key, user_id, role, direct_role, source)
+     values ($1, $2, $3, $3, 'direct_share')
      on conflict (room_key, user_id) do update set
        role = room_members.role,
        updated_at = now()
@@ -291,8 +325,8 @@ async function ensureOwner(db, roomKey, userId) {
   )
   if (!existing.rows.length) {
     await db.query(
-      `insert into room_members (room_key, user_id, role)
-       values ($1, $2, $3)
+      `insert into room_members (room_key, user_id, role, direct_role, source)
+       values ($1, $2, $3, $3, 'direct_share')
        on conflict (room_key, user_id) do update set
          role = 'owner',
          updated_at = now()`,
@@ -368,7 +402,12 @@ async function listMembers(db, roomKey) {
     const res = await db.query(
       `select
          m.user_id,
+         coalesce(u.wecom_userid, m.user_id) as wecom_userid,
          m.role,
+         m.direct_role,
+         m.team_role,
+         m.source,
+         m.source_team_id,
          m.created_at,
          m.updated_at,
          coalesce(u.name, m.user_id) as name,
@@ -385,7 +424,7 @@ async function listMembers(db, roomKey) {
   } catch (err) {
     if (err.code !== '42P01') throw err
     const res = await db.query(
-      `select user_id, role, created_at, updated_at, user_id as name, '' as avatar
+       `select user_id, user_id as wecom_userid, role, direct_role, team_role, source, source_team_id, created_at, updated_at, user_id as name, '' as avatar
        from room_members
        where room_key = $1
        order by
@@ -397,18 +436,23 @@ async function listMembers(db, roomKey) {
   }
 }
 
-async function searchUsers(db, q, limit = 20) {
+async function searchUsers(db, q, limit = 20, corpId = '') {
   const query = String(q || '').trim()
   const safeLimit = Math.min(50, Math.max(1, Number(limit) || 20))
   if (!query) return []
   try {
+    const params = ['%' + query.replace(/[%_\\]/g, ch => '\\' + ch) + '%', safeLimit]
+    const corpFilter = String(corpId || '').trim()
+      ? ' and corp_id = $3'
+      : ''
+    if (corpFilter) params.push(corpFilter.slice(0, 255))
     const res = await db.query(
-      `select user_id, name, avatar
+      `select user_id, wecom_userid, name, avatar
        from wecom_users
-       where name ilike $1 or user_id ilike $1
+       where (name ilike $1 or user_id ilike $1 or wecom_userid ilike $1)${corpFilter}
        order by last_login_at desc
        limit $2`,
-      ['%' + query.replace(/[%_\\]/g, ch => '\\' + ch) + '%', safeLimit]
+      params
     )
     return res.rows
   } catch (err) {
@@ -417,13 +461,25 @@ async function searchUsers(db, q, limit = 20) {
   }
 }
 
-async function setMember(db, roomKey, targetUserId, role, actorUserId) {
-  const uid = normalizeUserId(targetUserId)
+async function resolveUserId(db, value, corpId = '') {
+  const uid = normalizeUserId(value)
+  if (!uid || !corpId) return uid
+  const result = await db.query(
+    `select user_id from wecom_users
+     where corp_id = $1 and (wecom_userid = $2 or user_id = $2)
+     limit 1`,
+    [corpId, uid]
+  )
+  return result.rows[0] ? result.rows[0].user_id : uid
+}
+
+async function setMember(db, roomKey, targetUserId, role, actorUserId, corpId = '') {
+  const uid = await resolveUserId(db, targetUserId, corpId)
   const nextRole = normalizeRole(role)
   if (!uid) throw aclError(400, 'BAD_REQUEST', '缺少用户')
   if (!nextRole) throw aclError(400, 'BAD_REQUEST', '无效的权限角色')
   let memberRows = (
-    await db.query(`select user_id, role from room_members where room_key = $1`, [
+    await db.query(`select user_id, role, direct_role, team_role from room_members where room_key = $1`, [
       roomKey
     ])
   ).rows
@@ -432,58 +488,82 @@ async function setMember(db, roomKey, targetUserId, role, actorUserId) {
     await ensureOwner(db, roomKey, actor)
     memberRows = (
       await db.query(
-        `select user_id, role from room_members where room_key = $1`,
+        `select user_id, role, direct_role, team_role from room_members where room_key = $1`,
         [roomKey]
       )
     ).rows
   }
-  const owners = memberRows.filter(row => row.role === 'owner')
+  const owners = memberRows.filter(row =>
+    effectiveRole(row.direct_role, row.team_role, row.role) === 'owner'
+  )
   const current = memberRows.find(row => row.user_id === uid)
   if (
     current &&
-    current.role === 'owner' &&
-    nextRole !== 'owner' &&
+    effectiveRole(current.direct_role, current.team_role, current.role) === 'owner' &&
+    effectiveRole(nextRole, current.team_role) !== 'owner' &&
     owners.length <= 1
   ) {
     throw aclError(400, 'LAST_OWNER', '不能取消最后一个所有者')
   }
   const res = await db.query(
-    `insert into room_members (room_key, user_id, role)
-     values ($1, $2, $3)
+    `insert into room_members (room_key, user_id, role, direct_role, team_role, source, source_team_id)
+     values ($1, $2, $3, $3, null, 'direct_share', null)
      on conflict (room_key, user_id) do update set
-       role = excluded.role,
+       direct_role = excluded.direct_role,
+       role = case
+         when excluded.direct_role = 'owner' or room_members.team_role = 'owner' then 'owner'
+         when excluded.direct_role = 'editor' or room_members.team_role = 'editor' then 'editor'
+         when excluded.direct_role = 'viewer' or room_members.team_role = 'viewer' then 'viewer'
+         else room_members.role
+       end,
+       source = 'direct_share',
        updated_at = now()
-     returning room_key, user_id, role, created_at, updated_at`,
+     returning room_key, user_id, role, direct_role, team_role, source, source_team_id, created_at, updated_at`,
     [roomKey, uid, nextRole]
   )
   return res.rows[0]
 }
 
-async function removeMember(db, roomKey, targetUserId) {
-  const uid = normalizeUserId(targetUserId)
+async function removeMember(db, roomKey, targetUserId, corpId = '') {
+  const uid = await resolveUserId(db, targetUserId, corpId)
   if (!uid) throw aclError(400, 'BAD_REQUEST', '缺少用户')
   const current = await db.query(
-    `select user_id, role from room_members
-     where room_key = $1 and user_id = $2`,
+    `select user_id, role, direct_role, team_role from room_members
+      where room_key = $1 and user_id = $2`,
     [roomKey, uid]
   )
   if (!current.rows.length) {
     throw aclError(404, 'NOT_FOUND', '成员不存在')
   }
-  if (current.rows[0].role === 'owner') {
+  const currentRow = current.rows[0]
+  const nextRole = effectiveRole('', currentRow.team_role)
+  if (effectiveRole(currentRow.direct_role, currentRow.team_role, currentRow.role) === 'owner' && nextRole !== 'owner') {
     const owners = await db.query(
-      `select count(*)::int as total from room_members
-       where room_key = $1 and role = 'owner'`,
-      [roomKey]
+       `select count(*)::int as total from room_members
+        where room_key = $1 and role = 'owner' and user_id <> $2`,
+      [roomKey, uid]
     )
-    if (Number(owners.rows[0].total) <= 1) {
+    if (Number(owners.rows[0].total) < 1) {
       throw aclError(400, 'LAST_OWNER', '不能删除最后一个所有者')
     }
   }
-  await db.query(
-    `delete from room_members where room_key = $1 and user_id = $2`,
-    [roomKey, uid]
-  )
+  if (currentRow.team_role) {
+    await db.query(
+      `update room_members
+       set direct_role = null,
+           role = team_role,
+           source = 'team',
+           source_team_id = source_team_id,
+           updated_at = now()
+       where room_key = $1 and user_id = $2`,
+      [roomKey, uid]
+    )
+  } else {
+    await db.query(
+      `delete from room_members where room_key = $1 and user_id = $2`,
+      [roomKey, uid]
+    )
+  }
   return { ok: true, user_id: uid }
 }
 
@@ -513,6 +593,7 @@ module.exports = {
   ROLES,
   normalizeUserId,
   normalizeRole,
+  effectiveRole,
   normalizeActorId,
   actorFromReq,
   presenceDocRoomKey,
@@ -528,6 +609,7 @@ module.exports = {
   listAccessibleRooms,
   listMembers,
   searchUsers,
+  resolveUserId,
   setMember,
   removeMember,
   readonlyCommandAllowed,

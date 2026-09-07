@@ -19,7 +19,25 @@
           <h1>{{ team.name }}</h1>
           <p>{{ team.description }}</p>
           <span
-            >Owner {{ team.owner }} · 更新于 {{ format(team.updatedAt) }}</span
+            >{{ team.corpName || '当前企业' }} · {{ team.role }} · 更新于
+            {{ format(team.updatedAt) }}</span
+          >
+        </div>
+        <div class="teamActions">
+          <el-button type="primary" icon="el-icon-plus" @click="createRoom"
+            >新建脑图</el-button
+          >
+          <el-button
+            icon="el-icon-user"
+            :disabled="!canManage"
+            @click="openContacts"
+            >添加成员</el-button
+          >
+          <el-button
+            icon="el-icon-setting"
+            :disabled="!canManage"
+            @click="openSettings"
+            >团队设置</el-button
           >
         </div>
       </div>
@@ -56,32 +74,45 @@
               title="暂无成员"
             /></div
         ></el-tab-pane>
-        <el-tab-pane label="文件夹" name="folders" lazy>
-          <el-input
-            v-model="folderQuery"
-            prefix-icon="el-icon-search"
-            clearable
-            placeholder="搜索团队文件夹"
-          />
-          <div class="folderGrid">
-            <FolderCard
-              v-for="folder in visibleFolders"
-              :key="folder.id"
-              :folder="folder"
-              :editable="false"
-              @open="openFolder"
-            />
-          </div>
-          <EmptyState
-            v-if="!loading && !visibleFolders.length"
-            title="暂无匹配文件夹"
-            description="换个关键词再试试"
-            icon="el-icon-folder"
-          />
-        </el-tab-pane>
       </el-tabs>
     </div>
     <RoomActionDialogs ref="actions" @changed="load" />
+    <el-dialog title="从企业微信添加成员" :visible.sync="contactDialogVisible" width="620px">
+      <div v-loading="contactLoading">
+        <el-input
+          v-model="contactQuery"
+          clearable
+          prefix-icon="el-icon-search"
+          placeholder="搜索企业微信成员"
+          @input="loadContacts"
+        />
+        <el-checkbox-group v-model="selectedContactIds" class="contactList">
+          <label v-for="contact in contacts" :key="contact.id" class="contactRow">
+            <el-checkbox :label="contact.wecomUserId || contact.id" />
+            <el-avatar :size="34" :src="contact.avatarUrl || ''">{{ contact.avatar }}</el-avatar>
+            <span class="contactIdentity">
+              <strong>{{ contact.name }}</strong>
+              <small>{{ contact.department || '未填写部门' }} · {{ contact.position || '未填写职位' }}</small>
+            </span>
+          </label>
+        </el-checkbox-group>
+        <EmptyState v-if="!contactLoading && !contacts.length" title="没有匹配的企业微信成员" />
+      </div>
+      <span slot="footer">
+        <el-button @click="contactDialogVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!selectedContactIds.length" @click="addMembers">添加</el-button>
+      </span>
+    </el-dialog>
+    <el-dialog title="团队设置" :visible.sync="settingsVisible" width="520px">
+      <el-form label-width="80px" @submit.native.prevent="saveSettings">
+        <el-form-item label="团队名称"><el-input v-model="settingsForm.name" maxlength="60" /></el-form-item>
+        <el-form-item label="团队描述"><el-input v-model="settingsForm.description" type="textarea" :rows="3" maxlength="200" /></el-form-item>
+      </el-form>
+      <span slot="footer">
+        <el-button @click="settingsVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveSettings">保存</el-button>
+      </span>
+    </el-dialog>
   </section>
 </template>
 <script>
@@ -89,7 +120,6 @@ import teamService from '@/services/teamService'
 import RoomCard from './components/RoomCard.vue'
 import TeamMemberList from './components/TeamMemberList.vue'
 import EmptyState from './components/EmptyState.vue'
-import FolderCard from './components/FolderCard.vue'
 import RoomActionDialogs from './components/RoomActionDialogs.vue'
 export default {
   name: 'SpaceDetailPage',
@@ -97,7 +127,6 @@ export default {
     RoomCard,
     TeamMemberList,
     EmptyState,
-    FolderCard,
     RoomActionDialogs
   },
   data: () => ({
@@ -111,9 +140,19 @@ export default {
     loading: false,
     busy: false,
     error: '',
-    requestId: 0
+    requestId: 0,
+    contactDialogVisible: false,
+    contactLoading: false,
+    contactQuery: '',
+    contacts: [],
+    selectedContactIds: [],
+    settingsVisible: false,
+    settingsForm: { name: '', description: '' }
   }),
   computed: {
+    canManage() {
+      return this.team && ['owner', 'admin'].includes(this.team.role)
+    },
     visibleRooms() {
       return this.rooms.filter(
         room => !this.folderId || room.folderId === this.folderId
@@ -165,14 +204,13 @@ export default {
       this.loading = true
       this.error = ''
       try {
-        const [team, rooms, members, folders] = await Promise.all([
+        const [team, rooms, members] = await Promise.all([
           teamService.getSpace(id),
           teamService.listRooms(id),
-          teamService.listMembers(id),
-          teamService.listFolders(id)
+          teamService.listMembers(id)
         ])
         if (request === this.requestId)
-          Object.assign(this, { team, rooms, members, folders })
+          Object.assign(this, { team, rooms, members })
       } catch (error) {
         if (request === this.requestId) this.error = error.message
       } finally {
@@ -182,6 +220,68 @@ export default {
     openFolder(folder) {
       this.folderId = folder.id
       this.tab = 'rooms'
+    },
+    async createRoom() {
+      try {
+        const result = await this.$prompt('请输入脑图名称', '新建团队脑图', {
+          inputValue: '未命名脑图',
+          confirmButtonText: '创建',
+          cancelButtonText: '取消'
+        })
+        await teamService.createRoom(this.$route.params.id, result.value, this.folderId)
+        await this.load()
+        this.$message.success('脑图已创建')
+      } catch (error) {
+        if (error !== 'cancel' && error !== 'close') this.$message.error(error.message || '创建脑图失败')
+      }
+    },
+    async openContacts() {
+      this.contactDialogVisible = true
+      this.contactQuery = ''
+      this.selectedContactIds = []
+      await this.loadContacts()
+    },
+    async loadContacts() {
+      if (!this.contactDialogVisible) return
+      this.contactLoading = true
+      try {
+        const result = await teamService.listContacts({ search: this.contactQuery })
+        const existing = new Set(this.members.map(member => member.wecomUserId || member.userId || member.id))
+        this.contacts = result.list.filter(contact => !existing.has(contact.wecomUserId || contact.id))
+      } catch (error) {
+        this.$message.error(error.message)
+      } finally {
+        this.contactLoading = false
+      }
+    },
+    async addMembers() {
+      this.busy = true
+      try {
+        await teamService.addMembers(this.$route.params.id, this.selectedContactIds)
+        this.contactDialogVisible = false
+        await this.load()
+        this.$message.success('成员已添加')
+      } catch (error) {
+        this.$message.error(error.message)
+      } finally {
+        this.busy = false
+      }
+    },
+    openSettings() {
+      this.settingsForm = { name: this.team.name, description: this.team.description || '' }
+      this.settingsVisible = true
+    },
+    async saveSettings() {
+      this.busy = true
+      try {
+        this.team = await teamService.updateSpace(this.$route.params.id, this.settingsForm)
+        this.settingsVisible = false
+        this.$message.success('团队设置已保存')
+      } catch (error) {
+        this.$message.error(error.message)
+      } finally {
+        this.busy = false
+      }
     },
     format(value) {
       return new Date(value).toLocaleDateString('zh-CN')
@@ -209,7 +309,7 @@ export default {
       try {
         await action()
         await this.load()
-        this.$message.success('团队成员已更新（Mock）')
+        this.$message.success('团队成员已更新')
       } catch (error) {
         this.$message.error(error.message)
       } finally {
@@ -250,6 +350,13 @@ export default {
     color: #76897f;
     font-size: 12px;
   }
+  .teamActions {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
 }
 .roomGrid,
 .folderGrid {
@@ -266,5 +373,29 @@ export default {
   border: 1px solid #e3e9e6;
   padding: 12px 20px;
   border-radius: 12px;
+}
+.contactList {
+  max-height: 360px;
+  overflow: auto;
+  margin-top: 14px;
+}
+.contactRow {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid #eef1ef;
+  cursor: pointer;
+  .contactIdentity {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    strong { font-size: 13px; }
+    small { color: #83918c; }
+  }
+}
+@media (max-width: 760px) {
+  .teamHero { align-items: flex-start; flex-wrap: wrap; }
+  .teamHero .teamActions { margin-left: 0; width: 100%; justify-content: flex-start; }
 }
 </style>
