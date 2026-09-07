@@ -3,6 +3,7 @@ const Y = require('yjs')
 const mindDoc = require('./mindDoc')
 const { applyNodeCommand, dataFields } = require('./roomCommands')
 const roomAcl = require('./roomAcl')
+const teamSpace = require('./teamSpace')
 const { isAuthEnabled } = require('./auth')
 const {
   listRooms,
@@ -839,6 +840,24 @@ async function persist(roomKey, ydoc, obj, title, options = {}) {
   })
 }
 
+async function createTeamRoom(req, who, teamId, body = {}) {
+  await teamSpace.getTeam(getPool(), who.corpId, teamId, who.userId)
+  const members = await teamSpace.creationMembers(getPool(), who, teamId)
+  const fs = require('./fileSystem').getFileSystem()
+  if (!fs || typeof fs.createRoom !== 'function') {
+    throw teamSpace.error(503, 'TEAM_ROOM_UNAVAILABLE', '团队房间服务尚未就绪')
+  }
+  const created = await fs.createRoom({
+    title: body.title,
+    roomKey: body.room_key || body.roomKey,
+    folderId: body.folderId || body.folder_id,
+    userId: who.userId,
+    teamId,
+    teamMembers: members
+  })
+  return { ...created.room, teamId, historyBaseline: created.historyBaseline }
+}
+
 async function persistPatch(roomKey, ydoc, extra = {}) {
   await persistHotSnapshot(roomKey, ydoc)
   const row = await getRoom(roomKey)
@@ -957,6 +976,16 @@ async function handleApi(req, res) {
     return true
   }
 
+  const teamHandled = await teamSpace.handleApi(req, res, {
+    db: getPool(),
+    readBody,
+    sendJson,
+    createRoom: createTeamRoom,
+    fetchWecomContacts: options => require('./auth').listWecomContacts(options),
+    upsertWecomContact: user => require('./auth').upsertWecomUser(user)
+  })
+  if (teamHandled) return true
+
   const roomAclHit = roomAcl.inferRoomAcl(pathname, req.method)
   if (roomAclHit) {
     if (await denyIfCannot(req, res, roomAclHit.roomKey, roomAclHit.action)) {
@@ -979,11 +1008,13 @@ async function handleApi(req, res) {
     const users = await roomAcl.searchUsers(
       getPool(),
       url.searchParams.get('q') || '',
-      url.searchParams.get('limit')
+      url.searchParams.get('limit'),
+      req.authUser && req.authUser.corpId
     )
     sendJson(res, 200, {
       list: users.map(item => ({
         user_id: item.user_id,
+        wecomUserId: item.wecom_userid || item.user_id,
         name: item.name,
         avatar: item.avatar || ''
       }))
@@ -1553,7 +1584,8 @@ async function handleApi(req, res) {
           roomKey,
           body.user_id || body.userId,
           body.role,
-          roomAcl.actorFromReq(req).id
+          roomAcl.actorFromReq(req).id,
+          req.authUser && req.authUser.corpId
         )
         sendJson(res, 200, row)
         return true
@@ -1565,13 +1597,19 @@ async function handleApi(req, res) {
           roomKey,
           memberId,
           body.role,
-          roomAcl.actorFromReq(req).id
+          roomAcl.actorFromReq(req).id,
+          req.authUser && req.authUser.corpId
         )
         sendJson(res, 200, row)
         return true
       }
       if (req.method === 'DELETE' && memberId) {
-        const result = await roomAcl.removeMember(getPool(), roomKey, memberId)
+        const result = await roomAcl.removeMember(
+          getPool(),
+          roomKey,
+          memberId,
+          req.authUser && req.authUser.corpId
+        )
         sendJson(res, 200, result)
         return true
       }

@@ -3,8 +3,11 @@
     <div class="productHeader">
       <div>
         <h1>团队空间</h1>
-        <p>在个人空间和团队空间之间快速协作</p>
+        <p>当前企业：{{ corpName || '企业微信企业' }} · 在企业内部协作</p>
       </div>
+      <el-button type="primary" icon="el-icon-plus" @click="createTeam"
+        >新建团队</el-button
+      >
     </div>
     <div class="personal">
       <i class="el-icon-user-solid" />
@@ -39,12 +42,24 @@
 </template>
 <script>
 import teamService from '@/services/teamService'
+import { getCurrentUser } from '@/utils/auth'
 import TeamCard from './components/TeamCard.vue'
 import EmptyState from './components/EmptyState.vue'
+
+function currentCorpName() {
+  const user = getCurrentUser()
+  return (user && (user.corpName || user.corpId)) || ''
+}
+
 export default {
   name: 'SpacesPage',
   components: { TeamCard, EmptyState },
-  data: () => ({ loading: false, teams: [], error: '' }),
+  data: () => ({
+    loading: false,
+    teams: [],
+    error: '',
+    corpName: currentCorpName()
+  }),
   created() {
     this.load()
   },
@@ -54,6 +69,8 @@ export default {
       this.error = ''
       try {
         this.teams = await teamService.listSpaces()
+        this.corpName =
+          (this.teams[0] && this.teams[0].corpName) || this.corpName
       } catch (error) {
         this.error = error.message
       } finally {
@@ -62,6 +79,23 @@ export default {
     },
     open(team) {
       this.$router.push('/spaces/' + team.id)
+    },
+    async createTeam() {
+      try {
+        const result = await this.$prompt('请输入团队名称', '新建自定义团队', {
+          inputValue: '',
+          inputPlaceholder: '例如：产品研发组',
+          confirmButtonText: '创建',
+          cancelButtonText: '取消',
+          inputValidator: value => (value && value.trim() ? true : '请输入团队名称')
+        })
+        const team = await teamService.createSpace(result.value)
+        this.teams = [team, ...this.teams]
+        this.corpName = team.corpName || this.corpName
+        this.$message.success('团队已创建')
+      } catch (error) {
+        if (error !== 'cancel' && error !== 'close') this.$message.error(error.message || '创建团队失败')
+      }
     }
   }
 }

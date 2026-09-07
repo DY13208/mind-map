@@ -3,6 +3,7 @@
     <div class="teamIcon"><i class="el-icon-office-building" /></div>
     <div>
       <h3>{{ team.name }}</h3>
+      <small>{{ team.corpName || '当前企业' }} · {{ team.sourceType || 'CUSTOM_TEAM' }}</small>
       <p>{{ team.description }}</p>
       <span>{{ team.memberCount }} 位成员 · {{ team.roomCount }} 个脑图</span>
       <p>
