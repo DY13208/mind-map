@@ -392,6 +392,21 @@ export function getFileExport(roomKey) {
   )
 }
 
+/** 服务端全量大纲（不依赖画布展开/懒加载） */
+export function getFileOutline(roomKey, maxNodes = 5000) {
+  const limit = Math.min(10000, Math.max(1, Number(maxNodes) || 5000))
+  return request(
+    `/api/files/${encodeURIComponent(roomKey)}?format=outline&max_nodes=${limit}`
+  )
+}
+
+/** 扁平化全部节点（底层 room 数据，不依赖画布展开） */
+export function getFileFlatNodes(roomKey) {
+  return request(
+    `/api/files/${encodeURIComponent(roomKey)}?format=nodes`
+  )
+}
+
 export function locateFileNode(roomKey, uid) {
   return request(
     `/api/files/${encodeURIComponent(roomKey)}/locate?uid=${encodeURIComponent(

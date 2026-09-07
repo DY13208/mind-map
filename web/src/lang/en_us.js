@@ -383,6 +383,7 @@ export default {
       'Please export the currently edited file before opening it, Beware of content loss',
     ai: 'AI',
     flowExpand: 'Complete flow',
+    sopRegistry: 'SOP registry',
     cooperate: 'Collab'
   },
   edit: {

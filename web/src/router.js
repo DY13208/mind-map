@@ -34,6 +34,11 @@ const routes = [
     redirect: to => ({ path: '/', query: to.query })
   },
   {
+    path: '/sop',
+    name: 'SopRegistry',
+    component: () => import(`./pages/SopRegistry/Index.vue`)
+  },
+  {
     path: '/doc/zh',
     component: () => import(`./pages/Doc.vue`)
   }
