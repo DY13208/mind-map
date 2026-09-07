@@ -202,6 +202,26 @@
           >
         </div>
       </div>
+      <!-- 是否显示小地图 -->
+      <div class="row">
+        <div class="rowItem">
+          <el-checkbox
+            v-model="localConfigs.showNavigator"
+            @change="updateLocalConfig('showNavigator', $event)"
+            >{{ $t('setting.showNavigator') }}</el-checkbox
+          >
+        </div>
+      </div>
+      <!-- 是否显示导航工具栏 -->
+      <div class="row">
+        <div class="rowItem">
+          <el-checkbox
+            v-model="localConfigs.showNavigatorToolbar"
+            @change="updateLocalConfig('showNavigatorToolbar', $event)"
+            >{{ $t('setting.showNavigatorToolbar') }}</el-checkbox
+          >
+        </div>
+      </div>
       <!-- 是否一直显示展开收起按钮 -->
       <div class="row">
         <div class="rowItem">
@@ -498,6 +518,8 @@ export default {
       enableNodeRichText: true,
       localConfigs: {
         isShowScrollbar: false,
+        showNavigator: true,
+        showNavigatorToolbar: true,
         enableDragImport: false,
         enableAi: false,
         workbuddyModel: 'auto',

@@ -62,6 +62,8 @@ export default {
     openRealtimeRenderOnNodeTextEdit:
       'Bật hiệu ứng kết xuất thời gian thực cho chỉnh sửa văn bản',
     isShowScrollbar: 'Hiển thị thanh cuộn',
+    showNavigator: 'Hiển thị bản đồ thu nhỏ',
+    showNavigatorToolbar: 'Hiển thị thanh công cụ điều hướng',
     isUseHandDrawnLikeStyle: 'Sử dụng kiểu vẽ tay',
     isUseMomentum: 'Mở động lượng kéo',
     openBlankMode: 'Mở chế độ trống cho trình diễn',

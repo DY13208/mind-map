@@ -702,7 +702,14 @@ function normalizeTitle(title) {
 async function writeRoomNodeRows(db, roomKey, nodes, version, options = {}) {
   if (!nodesDualWriteEnabled()) return { wrote: false, skipped: true }
   if (nodes == null) return { wrote: false, skipped: true }
-  const result = await replaceRoomNodes(db, roomKey, nodes, version, options)
+  const encodedRows =
+    options.encodedRows ||
+    (nodes && nodes.__encodedRows) ||
+    null
+  const result = await replaceRoomNodes(db, roomKey, nodes, version, {
+    ...options,
+    ...(encodedRows ? { encodedRows } : {})
+  })
   if (!result.wrote) {
     console.error(
       '[room_nodes] skip invalid graph',
@@ -715,7 +722,16 @@ async function writeRoomNodeRows(db, roomKey, nodes, version, options = {}) {
 
 function snapshotNodesForStorage(nodes) {
   const canonical = canonicalizeNodes(nodes || {})
-  return canonical.ok ? canonical.nodes : nodes || {}
+  if (!canonical.ok) return nodes || {}
+  const out = canonical.nodes
+  if (canonical.encodedRows) {
+    Object.defineProperty(out, '__encodedRows', {
+      value: canonical.encodedRows,
+      enumerable: false,
+      configurable: true
+    })
+  }
+  return out
 }
 
 async function upsertRoom(roomKey, title, options = {}) {

@@ -13,8 +13,8 @@
       data-testid="mindmap-canvas"
     ></div>
     <Count :mindMap="mindMap" v-if="!isZenMode"></Count>
-    <Navigator v-if="mindMap" :mindMap="mindMap"></Navigator>
-    <NavigatorToolbar :mindMap="mindMap" v-if="!isZenMode"></NavigatorToolbar>
+    <Navigator v-if="mindMap && !isZenMode && showNavigator" :mindMap="mindMap"></Navigator>
+    <NavigatorToolbar :mindMap="mindMap" v-if="!isZenMode && showNavigatorToolbar"></NavigatorToolbar>
     <OutlineSidebar :mindMap="mindMap"></OutlineSidebar>
     <Style v-if="mindMap && !isZenMode" :mindMap="mindMap"></Style>
     <BaseStyle
@@ -224,6 +224,8 @@ export default {
       isZenMode: state => state.localConfig.isZenMode,
       openNodeRichText: state => state.localConfig.openNodeRichText,
       isShowScrollbar: state => state.localConfig.isShowScrollbar,
+      showNavigator: state => state.localConfig.showNavigator,
+      showNavigatorToolbar: state => state.localConfig.showNavigatorToolbar,
       enableDragImport: state => state.localConfig.enableDragImport,
       useLeftKeySelectionRightKeyDrag: state =>
         state.localConfig.useLeftKeySelectionRightKeyDrag,

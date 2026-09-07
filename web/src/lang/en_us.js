@@ -62,6 +62,8 @@ export default {
     openRealtimeRenderOnNodeTextEdit:
       'Enable real-time rendering effect for text editing',
     isShowScrollbar: 'Is show scrollbar',
+    showNavigator: 'Show mini map',
+    showNavigatorToolbar: 'Show navigator toolbar',
     isUseHandDrawnLikeStyle: 'Is use hand drawn like style',
     isUseMomentum: 'Is open drag momentum',
     openBlankMode: 'Is open blank mode of the demonstrate',
