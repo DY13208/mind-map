@@ -130,7 +130,7 @@ export default {
 }
 .teamGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, 300px);
   gap: 14px;
   min-height: 120px;
 }

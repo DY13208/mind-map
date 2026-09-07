@@ -180,8 +180,10 @@ export default {
       return this.team && ['owner', 'admin'].includes(this.team.role)
     },
     visibleRooms() {
-      return this.rooms.filter(
-        room => !this.folderId || room.folderId === this.folderId
+      return this.rooms.filter(room =>
+        this.folderId
+          ? room.folderId === this.folderId
+          : !room.folderId
       )
     },
     visibleFolders() {
@@ -423,7 +425,7 @@ export default {
 .roomGrid,
 .folderGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fill, 240px);
   gap: 14px;
 }
 .folderGrid {
