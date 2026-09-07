@@ -60,7 +60,7 @@ export function getRuntimeConfig() {
       appUrl: originHttp,
       workbuddyBase: runtime.workbuddyBase || '/wb-api',
       workbuddyKey: runtime.workbuddyKey || 'local',
-      workbuddyModel: runtime.workbuddyModel || 'auto'
+      workbuddyModel: runtime.workbuddyModel || 'deepseek-v4-flash'
     }
   }
   return {
@@ -81,7 +81,7 @@ export function getRuntimeConfig() {
     appUrl: `${httpProtocol}//${runtime.host || host}:${webPort}`,
     workbuddyBase: runtime.workbuddyBase || '/wb-api',
     workbuddyKey: runtime.workbuddyKey || 'local',
-    workbuddyModel: runtime.workbuddyModel || 'auto'
+    workbuddyModel: runtime.workbuddyModel || 'deepseek-v4-flash'
   }
 }
 

@@ -144,8 +144,20 @@ const routes = [
   },
   {
     path: '/sop',
-    name: 'SopRegistry',
-    component: () => import(`./pages/SopRegistry/Index.vue`)
+    component: () =>
+      import(
+        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'
+      ),
+    children: [
+      {
+        path: '',
+        name: 'SopRegistry',
+        component: () =>
+          import(
+            /* webpackChunkName: "sop-registry" */ './pages/SopRegistry/Index.vue'
+          )
+      }
+    ]
   },
   {
     path: '/doc/zh',

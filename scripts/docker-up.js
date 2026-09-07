@@ -146,7 +146,7 @@ async function up() {
     console.log('  已启动。浏览器打开上面的页面地址。')
     if (process.platform === 'win32') {
       console.log('')
-      console.log('  正在启动本机 WorkBuddy API 代理（补齐流程等功能需要）...')
+      console.log('  正在启动本机 WorkBuddy API 代理（SOP 运行 / 补齐流程需要）...')
       const wb = await ensureWorkbuddyApi({
         root: ROOT,
         port: WORKBUDDY_PORT,
@@ -155,8 +155,15 @@ async function up() {
       formatWorkbuddyResult(wb)
         .split('\n')
         .forEach(line => console.log(`  ${line}`))
+      if (wb && wb.ok) {
+        console.log(
+          `  页面访问 /wb-api → http://127.0.0.1:${wb.port}（经 Docker 网关转发）`
+        )
+      }
     } else {
-      console.log('  WorkBuddy API 需在 Windows 本机单独启动（补齐流程依赖 WorkBuddy 客户端）。')
+      console.log(
+        '  WorkBuddy API 需在 Windows 本机单独启动（SOP 运行 / 补齐依赖 WorkBuddy 客户端）。'
+      )
     }
     console.log('')
     console.log('  WorkBuddy 把 .mcp.json 里的 url 配上即可，不要再用 3847。')

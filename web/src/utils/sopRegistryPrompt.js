@@ -2,7 +2,8 @@ import { plainText, noteOf, findSopNode } from './flowSearch'
 import {
   readLedgerFromNodeLike,
   mergeLedgerSources,
-  normalizeLedger
+  normalizeLedger,
+  stripLedgerBlocksFromNote
 } from './sopLedger'
 
 const MAX_OUTLINE_NODES = 2000
@@ -182,7 +183,8 @@ function detectDeliverables(text) {
   lines.forEach(line => {
     const t = line.trim()
     if (!t) return
-    if (/交付|产出|结果文档|附件|导出/.test(t)) {
+    if (/SOP_LEDGER|【SOP台账】/.test(t)) return
+    if (/交付|产出|结果文档|附件|导出|产物/.test(t)) {
       const name = t.replace(/^[-*•]\s*/, '').replace(/^[^：:]*[：:]/, '').trim() || t
       out.push({
         name: cleanTitle(name),
@@ -190,7 +192,9 @@ function detectDeliverables(text) {
         kind: 'node'
       })
     }
-    const file = t.match(/([\w.\u4e00-\u9fff/-]+\.(xlsx?|docx?|pdf|md|json|png|jpg))/i)
+    const file = t.match(
+      /([\w.\u4e00-\u9fff/\\:-]+\.(html?|xlsx?|docx?|pdf|md|json|csv|png|jpg))/i
+    )
     if (file) {
       out.push({ name: file[1], uri_or_path: file[1], kind: 'file' })
     }
@@ -208,7 +212,10 @@ function detectRuns(text) {
   lines.forEach(line => {
     const t = line.trim().replace(/^[-*•]\s*/, '')
     if (!t) return
-    // 避免把「每周执行」等频率句误当成运行记录
+    // 避免把台账摘要 / 频率句误当成运行记录
+    if (/SOP_LEDGER|【SOP台账】|^编号:|^标题:|^频率:|^最近运行:|^最新产物:|^历史运行:|^产物总数:/.test(t)) {
+      return
+    }
     if (/^(频率|每天|每日|每周|每月|每季度|按需)/.test(t)) return
     const hasTime = /\d{4}[-/年]\d{1,2}[-/月]\d{1,2}/.test(t)
     const hasRunWord = /(运行记录|执行记录|日志|已完成|完成于)/.test(t)
@@ -220,7 +227,7 @@ function detectRuns(text) {
     out.push({
       at: time,
       result: /完成|成功|通过/.test(t) ? '完成' : '',
-      note: t
+      note: t.slice(0, 160)
     })
   })
   return out
@@ -405,8 +412,10 @@ function matchToRegistrySop(item, roomKey) {
   const title = cleanTitle(m[2])
   if (!title) return null
   const note = item.note ? String(item.note) : ''
+  const noteClean = stripLedgerBlocksFromNote(note)
   const path = pathToString(item.path)
-  const ctx = [raw, note, path].join('\n')
+  const ctx = [raw, noteClean, path].join('\n')
+  // 结构化台账优先；文本启发式只用清理后的备注，避免把 <!--SOP_LEDGER--> 再抽成运行记录
   const ledger = normalizeLedger(
     mergeLedgerSources(readLedgerFromNodeLike(item), {
       frequency: detectFrequency(ctx),
@@ -599,35 +608,44 @@ export function mergeRegistryResults(localPayload, aiPayload) {
   const ai = aiPayload || { sops: [], conflicts: [], notes: '' }
   const rows = local.sops.map(s => ({ ...s, rowKey: sopRowKey(s) }))
 
-  const patchFields = (prev, s) => ({
-    ...prev,
-    title: s.title || prev.title,
-    source: {
-      type: (s.source && s.source.type) || prev.source.type,
-      ref: (s.source && s.source.ref) || prev.source.ref,
-      path: (s.source && s.source.path) || prev.source.path
-    },
-    frequency:
-      s.frequency && s.frequency.label && s.frequency.label !== '未知'
-        ? s.frequency
-        : prev.frequency,
-    runs: s.runs && s.runs.length ? s.runs : prev.runs,
-    deliverables:
-      s.deliverables && s.deliverables.length
-        ? s.deliverables
-        : prev.deliverables,
-    cpda: {
-      goal: (s.cpda && s.cpda.goal) || prev.cpda.goal,
-      C: s.cpda && s.cpda.C && s.cpda.C.length ? s.cpda.C : prev.cpda.C,
-      P: s.cpda && s.cpda.P && s.cpda.P.length ? s.cpda.P : prev.cpda.P
+  const patchFields = (prev, s) => {
+    const ledger = mergeLedgerSources(prev.sopLedger || prev, {
+      frequency: s.frequency,
+      runs: s.runs,
+      deliverables: s.deliverables
+    })
+    return {
+      ...prev,
+      title: s.title || prev.title,
+      source: {
+        type: (s.source && s.source.type) || prev.source.type,
+        ref: (s.source && s.source.ref) || prev.source.ref,
+        path: (s.source && s.source.path) || prev.source.path
+      },
+      frequency: ledger.frequency,
+      runs: ledger.runs,
+      deliverables: ledger.deliverables,
+      sopLedger: ledger,
+      cpda: {
+        goal: (s.cpda && s.cpda.goal) || prev.cpda.goal,
+        C: s.cpda && s.cpda.C && s.cpda.C.length ? s.cpda.C : prev.cpda.C,
+        P: s.cpda && s.cpda.P && s.cpda.P.length ? s.cpda.P : prev.cpda.P
+      },
+      aiEnriched: true
     }
-  })
+  }
 
   ai.sops.forEach(s => {
     const key = sopRowKey(s)
     let idx = -1
     if (s.uid) idx = rows.findIndex(r => r.uid && r.uid === s.uid)
     if (idx < 0 && key) idx = rows.findIndex(r => sopRowKey(r) === key)
+    if (idx < 0 && s.id && s.title) {
+      const title = cleanTitle(s.title)
+      idx = rows.findIndex(
+        r => r.id === s.id && cleanTitle(r.title) === title
+      )
+    }
     // 仅当列表里该编号只有一条时，才允许按编号补全
     if (idx < 0 && s.id) {
       const sameId = rows
@@ -638,7 +656,7 @@ export function mergeRegistryResults(localPayload, aiPayload) {
     if (idx >= 0) {
       rows[idx] = patchFields(rows[idx], s)
     } else {
-      rows.push({ ...s, rowKey: key || sopRowKey(s) })
+      rows.push({ ...s, rowKey: key || sopRowKey(s), aiEnriched: true })
     }
   })
 
