@@ -39,6 +39,7 @@ const {
   recoverRoomToLastKnownGood,
   getReplaceSeq,
   isDeletedRoom,
+  isTrashedRoom,
   reviveRoom,
   scheduleSave,
   commitRoomOperation,
@@ -762,7 +763,17 @@ function mapPayload(roomKey, obj, row, extra = {}) {
 
 async function denyIfCannot(req, res, roomKey, action) {
   try {
-    if (isDeletedRoom(roomKey)) {
+    const pathOnly = String(req.url || '').split('?')[0]
+    const trashMutate = /\/(restore|permanent|trash)$/.test(pathOnly)
+    if (isTrashedRoom(roomKey) && !trashMutate) {
+      sendJson(res, 409, {
+        ok: false,
+        error: '房间已在回收站',
+        code: 'ROOM_TRASHED'
+      })
+      return true
+    }
+    if (isDeletedRoom(roomKey) && !isTrashedRoom(roomKey)) {
       sendJson(res, 404, { error: 'not found', code: 'ROOM_DELETED' })
       return true
     }
@@ -951,6 +962,17 @@ async function handleApi(req, res) {
     if (await denyIfCannot(req, res, roomAclHit.roomKey, roomAclHit.action)) {
       return true
     }
+  }
+
+  if (
+    await require('./fileSystem').handleFileSystemApi(req, res, { url, pathname })
+  ) {
+    return true
+  }
+
+  if (require('./collabHistory/http').matchHistory(pathname)) {
+    const handled = await require('./collabHistory').handleHistoryApi(req, res, { url })
+    if (handled) return true
   }
 
   if (req.method === 'GET' && pathname === '/api/users') {
@@ -2316,6 +2338,15 @@ async function handleApi(req, res) {
           ...publicAccess(req.roomAccess)
         })
       )
+      if (format === 'full' || format === 'nodes') {
+        const actor = roomAcl.actorFromReq(req)
+        const fsEngine = require('./fileSystem').getFileSystem()
+        if (actor && actor.id && fsEngine && fsEngine.recordRoomOpened) {
+          await fsEngine.recordRoomOpened(roomKey, actor.id, {
+            bypass: !!actor.bypass
+          }).catch(() => {})
+        }
+      }
       return true
     }
     if (req.method === 'PATCH') {

@@ -85,24 +85,28 @@ function testSopChangesRequireConfirmation() {
     goal: node('goal', '目标：测试')
   }
   const doc = seedDoc(obj)
+  const underSop = applyNodeCommand(doc, {
+    type: 'node.insert',
+    payload: { parentUid: 'goal', text: '普通编辑不需要SOP确认' }
+  })
+  assert.ok(underSop.result.uid)
   assert.throws(
     () =>
       applyNodeCommand(doc, {
-        type: 'node.insert',
-        payload: { parentUid: 'goal', text: '未确认' }
+        type: 'node.update',
+        payload: { uid: 'sop', patch: { text: '流程' } }
       }),
     /confirm_sop_change/
   )
   const applied = applyNodeCommand(doc, {
-    type: 'node.insert',
+    type: 'node.update',
     payload: {
-      parentUid: 'goal',
-      uid: 'step',
-      text: '已确认',
+      uid: 'sop',
+      patch: { text: '流程' },
       confirm_sop_change: true
     }
   })
-  assert.strictEqual(applied.result.uid, 'step')
+  assert.strictEqual(applied.event.type, 'node.updated')
 }
 
 function testRecoveryPlannerDetectsGapsAndResnapshot() {

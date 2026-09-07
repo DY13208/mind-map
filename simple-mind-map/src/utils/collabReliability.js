@@ -5,10 +5,12 @@ const TERMINAL_ERROR_SET = {
   UID_REUSED: true,
   UID_ALREADY_EXISTS: true,
   UID_EXISTS: true,
+  CYCLE_REJECTED: true,
   IMPORT_TOO_LARGE: true,
   IMPORT_APPLY_FAILED: true,
   OUTBOX_NON_CLONEABLE_PAYLOAD: true,
   SOP_CONFIRM_REQUIRED: true,
+  STALE_AFTER_VERSION_RESTORE: true,
   UNSUPPORTED_OPERATION: true,
   BAD_OP_ID: true,
   INVALID_PAYLOAD: true,
@@ -53,17 +55,40 @@ function collectOpUids(op, includeParents = true) {
   return Array.from(new Set(uids.filter(Boolean)))
 }
 
+function isCreateOpType(type) {
+  const raw = String(type || '')
+  return (
+    raw === 'node.insert' ||
+    raw === 'node.create' ||
+    raw === 'node.paste' ||
+    raw === 'node.import'
+  )
+}
+
+function collectCreatedUids(op) {
+  const type = String((op && op.type) || '')
+  const payload = (op && op.payload) || {}
+  const out = []
+  if (isCreateOpType(type) && payload.uid) out.push(String(payload.uid))
+  if (type === 'node.paste') {
+    (payload.createdUids || payload.newUids || payload.pastedUids || []).forEach(
+      id => out.push(String(id))
+    )
+  }
+  (payload.ops || []).forEach(inner => {
+    collectCreatedUids(inner).forEach(id => out.push(id))
+  })
+  return Array.from(new Set(out.filter(Boolean)))
+}
+
 function dependsOnBlockedOp(item, blocked) {
   if (!item || !blocked) return false
-  // A rejected cycle move created no nodes or state for later writes to depend on.
-  if (blocked.type === 'node.move' && blocked.errorCode === 'CYCLE_REJECTED') return false
-  const blockedSeq = Number(blocked.clientSeq || 0)
-  const itemSeq = Number(item.clientSeq || 0)
-  if (blockedSeq > 0 && itemSeq > 0 && itemSeq <= blockedSeq) return false
-  // A failed write targets its uid, not the existing parent it merely references.
-  // Later inserts/moves may still depend on that target as their parent.
-  const blockedUids = new Set(collectOpUids(blocked, false))
-  return collectOpUids(item).some(id => blockedUids.has(id))
+  // Creator dependency only: a failed insert/create/paste/import of UID N
+  // blocks later uses of N. Failed mutations (move/update/delete) of an
+  // already-existing business node must not block later ops on the same UID.
+  const created = new Set(collectCreatedUids(blocked))
+  if (!created.size) return false
+  return collectOpUids(item).some(id => created.has(id))
 }
 
 function shouldQuarantineError(code, op) {
@@ -117,6 +142,7 @@ const api = {
   isRetryableError,
   collectOpUids,
   dependsOnBlockedOp,
+  collectCreatedUids,
   shouldQuarantineError,
   writeClientHeartbeat,
   isClientHeartbeatFresh,

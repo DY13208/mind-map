@@ -826,10 +826,13 @@ class RichText {
 
   handleDataToRichText(data) {
     const oldIsRichText = data.richText
-    const alreadyHtml = !!(oldIsRichText && checkIsRichText(String(data.text || '')))
+    const text = String(data.text || '')
+    const alreadyHtml = !!(oldIsRichText && checkIsRichText(text)) ||
+      /<\/?[a-z][\s\S]*>/i.test(text)
     data.richText = true
     // Authoritative collab HTML must keep inline styles / formula data-value.
     // resetRichText + removeRichTextStyes would strip bold/color on F5.
+    // HTML without a persisted richText flag must not be escaped again.
     if (alreadyHtml) {
       delete data.resetRichText
       return

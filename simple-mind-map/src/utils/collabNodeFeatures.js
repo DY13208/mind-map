@@ -1,5 +1,4 @@
 /* global module:readonly */
-
 const NODE_FEATURE_STRUCTURAL_KEYS = [
   'parentUid',
   'parent_uid',
@@ -247,14 +246,20 @@ function applyNullableGroupClears(full, data = {}, prevFull = null) {
 }
 
 function buildNodeContentFields(data = {}, prevFull = null) {
-  const isRich = !!data.richText
   const text = String(data.text == null ? '' : data.text)
+  const explicitOff = data.richText === false || data.richText === null
+  const isRich =
+    data.richText === true ||
+    isRichHtml(text) ||
+    (!explicitOff && !!(prevFull && prevFull.richText && isRichHtml(text)))
   const out = {
     text,
     note: data.note || ''
   }
   if (isRich) out.richText = true
-  else if (prevFull && prevFull.richText) out.richText = null
+  else if (explicitOff || (prevFull && prevFull.richText && !isRichHtml(text))) {
+    out.richText = null
+  }
   return out
 }
 
@@ -322,7 +327,7 @@ function isRichHtml(text) {
 }
 
 function shouldPreserveRichHtml(data = {}) {
-  return !!(data && data.richText && isRichHtml(data.text))
+  return !!isRichHtml(data && data.text)
 }
 
 const UNDO_CONTROL_KEYS = [

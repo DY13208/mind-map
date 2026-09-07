@@ -140,6 +140,7 @@ const pendingSaves = new Map()
 const saveWorkers = new Map()
 const preloadCache = new Map()
 const deletedRooms = new Set()
+const trashedRooms = new Set()
 const roomSaveStates = new Map()
 const roomMetaCache = new Map()
 const replacingRooms = new Map()
@@ -539,8 +540,29 @@ function getSaveStatus(roomKey) {
   }
 }
 
+function isTrashedRoom(roomKey) {
+  return trashedRooms.has(String(roomKey || ''))
+}
+
 function isDeletedRoom(roomKey) {
-  return deletedRooms.has(String(roomKey || ''))
+  const key = String(roomKey || '')
+  return deletedRooms.has(key) || trashedRooms.has(key)
+}
+
+function noteRoomTrashed(roomKey) {
+  const key = String(roomKey || '')
+  if (key) trashedRooms.add(key)
+}
+
+function noteRoomRestored(roomKey) {
+  const key = String(roomKey || '')
+  trashedRooms.delete(key)
+}
+
+function noteRoomPurged(roomKey) {
+  const key = String(roomKey || '')
+  trashedRooms.delete(key)
+  deletedRooms.delete(key)
 }
 
 async function reviveRoom(roomKey) {
@@ -1024,7 +1046,7 @@ function shareUrl(roomKey) {
   const gateway = process.env.GATEWAY === '1' || process.env.GATEWAY === 'true'
   const portPart =
     gateway && (webPort === 80 || webPort === 443) ? '' : `:${webPort}`
-  return `http://${host}${portPart}/#/?room=${encodeURIComponent(roomKey)}`
+  return `http://${host}${portPart}/?room=${encodeURIComponent(roomKey)}`
 }
 
 async function getRoom(roomKey) {
@@ -1670,6 +1692,14 @@ async function initSchemaOnce() {
   await roomAcl.migrateLegacyOwners(pool)
   const collabV2Schema = require('./collabV2/schema')
   await collabV2Schema.initCollabV2Schema(pool)
+  const historySchema = require('./collabHistory/schema')
+  await historySchema.initHistorySchema(pool)
+  const fileSystemSchema = require('./fileSystem/schema')
+  await fileSystemSchema.initFileSystemSchema(pool)
+  const trashed = await pool.query(
+    `select room_key from rooms where deleted_at is not null`
+  )
+  trashed.rows.forEach(row => trashedRooms.add(row.room_key))
 }
 
 async function listRooms() {
@@ -1677,10 +1707,10 @@ async function listRooms() {
     `select r.room_key, r.title, r.cos_key, r.version, r.created_at, r.updated_at
      from rooms r
      left join room_tombstones t on t.room_key = r.room_key
-     where t.room_key is null
+     where t.room_key is null and r.deleted_at is null
      order by r.updated_at desc`
   )
-  return res.rows.filter(row => !deletedRooms.has(row.room_key))
+  return res.rows.filter(row => !isDeletedRoom(row.room_key))
 }
 
 async function listRoomsPage(options = {}) {
@@ -1688,7 +1718,7 @@ async function listRoomsPage(options = {}) {
   const safeOffset = Math.max(0, Number(options.offset) || 0)
   const query = String(options.q || '').trim()
   const params = []
-  let where = 't.room_key is null'
+  let where = 't.room_key is null and r.deleted_at is null'
   if (query) {
     params.push('%' + query.replace(/[%_\\]/g, ch => '\\' + ch) + '%')
     where += ` and r.title ilike $${params.length} escape '\\'`
@@ -1712,7 +1742,7 @@ async function listRoomsPage(options = {}) {
     listParams
   )
   return {
-    list: listRes.rows.filter(row => !deletedRooms.has(row.room_key)),
+    list: listRes.rows.filter(row => !isDeletedRoom(row.room_key)),
     total: Number((countRes.rows[0] && countRes.rows[0].total) || 0),
     limit: safeLimit,
     offset: safeOffset
@@ -1843,7 +1873,8 @@ async function commitDirectRoomOperationOnce(client, roomKey, command, apply) {
      set version = $2,
          title = coalesce($3, title),
          metadata = coalesce(metadata, '{}'::jsonb) || coalesce($4::jsonb, '{}'::jsonb),
-         updated_at = now()
+         updated_at = now(),
+         content_updated_at = now()
      where room_key = $1`,
     [
       roomKey,
@@ -2028,7 +2059,8 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
      set nodes = $2::jsonb,
          version = $3,
          title = coalesce($4, title),
-         updated_at = now()
+         updated_at = now(),
+         content_updated_at = now()
      where room_key = $1`,
     [
       roomKey,
@@ -2354,6 +2386,10 @@ module.exports = {
   REPLACE_LOCK_TTL_MS,
   getReplaceSeq,
   isDeletedRoom,
+  isTrashedRoom,
+  noteRoomTrashed,
+  noteRoomRestored,
+  noteRoomPurged,
   reviveRoom,
   queueSave,
   scheduleIdleEvict,

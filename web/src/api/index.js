@@ -2,6 +2,7 @@ import Vue from 'vue'
 import vuexStore from '@/store'
 import { parseJsonOffMainThread } from '@/utils/importTree'
 import { promiseWithTimeout } from '@/utils/promiseWithTimeout'
+import { roomFromLocation } from '@/utils/roomLocation'
 
 const SIMPLE_MIND_MAP_DATA = 'SIMPLE_MIND_MAP_DATA'
 const SIMPLE_MIND_MAP_SESSION = 'SIMPLE_MIND_MAP_SESSION'
@@ -22,12 +23,7 @@ const LOCAL_DRAFT_NODE_LIMIT = 400
 
 function currentRoom() {
   try {
-    const fromSearch = new URLSearchParams(window.location.search).get('room')
-    if (fromSearch) return String(fromSearch).trim()
-    const hash = String(window.location.hash || '')
-    const query = hash.indexOf('?') >= 0 ? hash.slice(hash.indexOf('?') + 1) : ''
-    const fromHash = new URLSearchParams(query).get('room')
-    return String(fromHash || '').trim()
+    return roomFromLocation()
   } catch (e) {
     return ''
   }

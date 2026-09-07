@@ -45,23 +45,56 @@ function presenceDocRoomKey(docName) {
   return name.endsWith('__presence') ? name.slice(0, -'__presence'.length) : name
 }
 
+const FILE_COLLECTION_KEYS = new Set(['recent', 'favorites', 'trash'])
+
 function inferRoomAcl(pathname, method) {
   const path = String(pathname || '')
-  const match = path.match(/^\/api\/(?:files|maps)\/([^/]+)(.*)$/)
+  const match = path.match(/^\/api\/(?:files|maps|rooms)\/([^/]+)(.*)$/)
   if (!match) return null
   const roomKey = decodeURIComponent(match[1])
   const rest = match[2] || ''
   const verb = String(method || 'GET').toUpperCase()
+  if (FILE_COLLECTION_KEYS.has(roomKey) && !rest) return null
   if (rest === '/members' || rest.startsWith('/members/')) {
     return { roomKey, action: verb === 'GET' ? 'view' : 'manage' }
   }
-  // Presence beats are not map mutations; viewers may join and broadcast presence.
   if (rest === '/presence' || rest.startsWith('/presence/')) {
     return { roomKey, action: 'view' }
   }
-  if (!rest) {
-    if (verb === 'PATCH' || verb === 'DELETE') {
+  if (rest === '/versions' || rest.startsWith('/versions/')) {
+    if (verb === 'GET' || verb === 'HEAD') return { roomKey, action: 'view' }
+    if (/\/restore$/.test(rest) || /\/hide$/.test(rest)) {
       return { roomKey, action: 'manage' }
+    }
+    return { roomKey, action: 'edit' }
+  }
+  if (rest === '/move' || rest.startsWith('/move')) {
+    return { roomKey, action: 'edit' }
+  }
+  if (rest === '/info' || rest.startsWith('/info')) {
+    return { roomKey, action: 'view' }
+  }
+  if (rest === '/favorite' || rest.startsWith('/favorite')) {
+    return { roomKey, action: 'view' }
+  }
+  if (rest === '/open' || rest.startsWith('/open')) {
+    return { roomKey, action: 'view' }
+  }
+  if (rest === '/trash' || rest.startsWith('/trash')) {
+    return { roomKey, action: 'manage' }
+  }
+  if (rest === '/restore' || rest.startsWith('/restore')) {
+    return { roomKey, action: 'manage' }
+  }
+  if (rest === '/permanent' || rest.startsWith('/permanent')) {
+    return { roomKey, action: 'manage' }
+  }
+  if (!rest) {
+    if (verb === 'DELETE') {
+      return { roomKey, action: 'manage' }
+    }
+    if (verb === 'PATCH') {
+      return { roomKey, action: 'edit' }
     }
     if (verb === 'GET' || verb === 'HEAD') {
       return { roomKey, action: 'view' }
@@ -484,6 +517,7 @@ module.exports = {
   actorFromReq,
   presenceDocRoomKey,
   inferRoomAcl,
+  FILE_COLLECTION_KEYS,
   roleAllows,
   accessSummary,
   initSchema,

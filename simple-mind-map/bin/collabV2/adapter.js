@@ -7,10 +7,15 @@ const {
   isTerminalError,
   isRetryableError,
   dependsOnBlockedOp,
+  collectCreatedUids,
   shouldQuarantineError,
   writeClientHeartbeat,
   canClaimOrphan
 } = require('../collabReliability')
+const {
+  isVersionRestoreEvent,
+  quarantinePendingAfterRestore
+} = require('../collabHistory/clientEpoch')
 const {
   createOpId,
   isOpId,
@@ -286,6 +291,7 @@ function createCollaborationAdapter(options = {}) {
     outboxSending: 0,
     sendingOpId: '',
     drainPaused: false,
+    drainKickCount: 0,
     aheadAttempts: 0,
     maxSendingObserved: 0,
     versionAheadCount: 0,
@@ -487,11 +493,11 @@ function createCollaborationAdapter(options = {}) {
     state.error = ''
   }
 
-  function maybeClearRecoveredError() {
+  function maybeClearRecoveredError(opts = {}) {
     if (!isLive()) return false
     if (Number(state.outboxPending || 0) > 0) return false
     if (Number(state.outboxSending || 0) > 0) return false
-    if (state.pendingAcks.size > 0) return false
+    if (!opts.ignorePendingAcks && state.pendingAcks.size > 0) return false
     const activeCode = state.currentError && state.currentError.code
     if (activeCode && isStickyErrorCode(activeCode)) return false
     if (state.currentError) {
@@ -520,7 +526,9 @@ function createCollaborationAdapter(options = {}) {
     if (extra.saveState) state.saveState = extra.saveState
     if (extra.opId) state.lastOpId = extra.opId
     if (extra.error === '') {
-      maybeClearRecoveredError()
+      maybeClearRecoveredError({
+        ignorePendingAcks: extra.saveState === 'saved'
+      })
     } else if (extra.errorCode != null || extra.error) {
       recordError({
         code: extra.errorCode,
@@ -642,6 +650,7 @@ function createCollaborationAdapter(options = {}) {
       pendingCount: state.pendingAcks.size,
       outboxPending: Number(state.outboxPending || 0),
       outboxSending: Number(state.outboxSending || 0),
+      drainKickCount: Number(state.drainKickCount || 0),
       sendingOpId: state.sendingOpId || '',
       maxSendingObserved: Number(state.maxSendingObserved || 0),
       versionAheadCount: Number(state.versionAheadCount || 0),
@@ -726,6 +735,12 @@ function createCollaborationAdapter(options = {}) {
     }
     if (opId) state.seenOpIds.add(opId)
     advanceRevision(rev)
+    if (!meta.local && isVersionRestoreEvent(op)) {
+      state.drainPaused = true
+      await quarantinePendingAfterRestore(outbox, state.clientId, state.roomKey)
+      await refreshOutboxCounts()
+      state.drainPaused = false
+    }
     if (options.onRemoteOperation && !meta.local) {
       await options.onRemoteOperation(op)
     }
@@ -962,6 +977,10 @@ function createCollaborationAdapter(options = {}) {
   }
 
   async function disconnect() {
+    if (state.heartbeatTimer) {
+      clearInterval(state.heartbeatTimer)
+      state.heartbeatTimer = null
+    }
     state.roomKey = ''
     connecting = null
     if (socket && socket.disconnect) socket.disconnect()
@@ -1178,15 +1197,23 @@ function createCollaborationAdapter(options = {}) {
   }
 
   async function refreshOutboxCounts() {
-    const rows = await outbox.list(state.clientId, state.roomKey)
-    state.outboxInspect = summarizeOutbox(rows)
-    state.outboxPending = (rows || []).filter(
-      item =>
-        item &&
-        (item.status === 'pending' ||
-          item.status === 'retryable' ||
-          item.status === 'sending')
-    ).length
+    try {
+      const rows = await outbox.list(state.clientId, state.roomKey)
+      state.outboxInspect = summarizeOutbox(rows)
+      state.outboxPending = (rows || []).filter(
+        item =>
+          item &&
+          (item.status === 'pending' ||
+            item.status === 'retryable' ||
+            item.status === 'sending')
+      ).length
+    } catch (err) {
+      adapterTrace('OUTBOX_COUNTER_REFRESH_FAILED', {
+        roomKey: state.roomKey,
+        clientId: state.clientId,
+        message: (err && err.message) || 'outbox list failed'
+      })
+    }
   }
 
   async function claimOrphanOutbox() {
@@ -1275,8 +1302,48 @@ function createCollaborationAdapter(options = {}) {
     }
   }
 
+  function isTerminalBlockedCreate(item) {
+    if (!item) return false
+    if (item.status !== 'quarantined' && item.status !== 'failed') return false
+    if (!collectCreatedUids(item).length) return false
+    if (item.status === 'quarantined') return true
+    return isTerminalError(item.errorCode || item.code)
+  }
+
+  async function quarantineTerminalCreateDependents(rows) {
+    const blockedCreates = (rows || []).filter(isTerminalBlockedCreate)
+    if (!blockedCreates.length) return false
+    let changed = false
+    for (const item of rows || []) {
+      if (!item) continue
+      if (
+        item.status === 'acked' ||
+        item.status === 'acknowledged' ||
+        item.status === 'quarantined' ||
+        item.status === 'failed' ||
+        item.status === 'sending'
+      ) {
+        continue
+      }
+      if (!blockedCreates.some(fail => dependsOnBlockedOp(item, fail))) continue
+      await outbox.update(item.opId, {
+        status: 'quarantined',
+        error: 'blocked by terminal create',
+        errorCode: 'BLOCKED_BY_TERMINAL_CREATE'
+      })
+      const err = new Error('blocked by terminal create')
+      err.code = 'BLOCKED_BY_TERMINAL_CREATE'
+      settleAck(item.opId, err)
+      changed = true
+    }
+    return changed
+  }
+
   async function pickDrainHead() {
-    const pending = await outbox.list(state.clientId, state.roomKey)
+    let pending = await outbox.list(state.clientId, state.roomKey)
+    if (await quarantineTerminalCreateDependents(pending)) {
+      pending = await outbox.list(state.clientId, state.roomKey)
+    }
     const active = pending.filter(
       item =>
         item &&
@@ -1300,7 +1367,15 @@ function createCollaborationAdapter(options = {}) {
     const head =
       drainable.find(item => item.status === 'sending') ||
       drainable.find(item => item.status === 'pending' || item.status === 'retryable')
-    return { head, pending: drainable, index: head ? drainable.indexOf(head) : -1 }
+    const blockedPending = active.filter(
+      item => !drainable.some(row => row.opId === item.opId)
+    )
+    return {
+      head,
+      pending: drainable,
+      blockedPending,
+      index: head ? drainable.indexOf(head) : -1
+    }
   }
 
   async function recoverVersionAhead(op, err, extra) {
@@ -1567,6 +1642,7 @@ function createCollaborationAdapter(options = {}) {
     if (state.drainPaused) return drainLoop
     if (draining || drainLoop) return drainLoop
     if (!socket || !socket.connected || !isLive()) return drainLoop
+    state.drainKickCount = Number(state.drainKickCount || 0) + 1
     draining = true
     let stopDrain = false
     drainLoop = runDrain()
@@ -1601,7 +1677,17 @@ function createCollaborationAdapter(options = {}) {
     while (!state.drainPaused && state.roomKey) {
       const picked = await pickDrainHead()
       const head = picked.head
-      if (!head) break
+      if (!head) {
+        if ((picked.blockedPending || []).length) {
+          adapterTrace('DRAIN_BLOCKED_NO_BUSY_LOOP', {
+            roomKey: state.roomKey,
+            clientId: state.clientId,
+            blocked: picked.blockedPending.length,
+            drainKickCount: Number(state.drainKickCount || 0)
+          })
+        }
+        break
+      }
       if (state.outboxSending > 1) {
         adapterTrace('drain.sending.overflow', { sending: state.outboxSending })
       }
