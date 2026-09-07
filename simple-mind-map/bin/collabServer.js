@@ -76,8 +76,12 @@ const server = http.createServer(async (request, response) => {
     }
     return
   }
-  response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
-  response.end('simple-mind-map collab server ok')
+  applyCorsHeaders(request, response)
+  response.writeHead(404, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store'
+  })
+  response.end(JSON.stringify({ error: 'not found', code: 'not_found' }))
 })
 
 const v2RuntimeOnly = isCollabV2Enabled()
