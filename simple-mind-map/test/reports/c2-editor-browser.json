@@ -1,26 +1,26 @@
 {
-  "generatedAt": "2026-09-07T06:10:04.260Z",
+  "generatedAt": "2026-09-07T08:37:55.938Z",
   "origin": "http://127.0.0.1:8989",
   "phases": [
     {
       "size": 1000,
-      "roomKey": "c2-browser-1000-1788761405584",
+      "roomKey": "c2-browser-1000-1788770276493",
       "phases": {
-        "NAVIGATION_START": 9.600000023841858,
-        "MINDMAP_CONSTRUCTOR_START": 565.9000000357628,
-        "MINDMAP_DATA_APPLIED": 824.1000000238419,
-        "ROOM_HTTP_START": 881.1000000238419,
-        "ROOM_DATA_READY": 976,
-        "FIRST_RENDER_COMPLETE": 1087.4000000357628,
-        "LAYOUT_COMPLETE": 1087.4000000357628,
-        "FIRST_INTERACTION_READY": 1638.699999988079,
-        "AUTH_READY": 9.600000023841858
+        "NAVIGATION_START": 3,
+        "MINDMAP_CONSTRUCTOR_START": 227.6000000089407,
+        "ROOM_HTTP_START": 295.5,
+        "ROOM_DATA_READY": 307.30000001192093,
+        "MINDMAP_DATA_APPLIED": 328.20000000298023,
+        "FIRST_RENDER_COMPLETE": 354.80000001192093,
+        "LAYOUT_COMPLETE": 354.80000001192093,
+        "FIRST_INTERACTION_READY": 927.2000000029802,
+        "AUTH_READY": 3
       },
       "renderReason": "mutation",
-      "TIME_TO_DATA_READY": 966,
-      "TIME_DATA_TO_RENDER": 111,
-      "TIME_TO_FIRST_RENDER": 1078,
-      "TIME_TO_INTERACTIVE": 1097,
+      "TIME_TO_DATA_READY": 304,
+      "TIME_DATA_TO_RENDER": 48,
+      "TIME_TO_FIRST_RENDER": 352,
+      "TIME_TO_INTERACTIVE": 361,
       "previewMeta": {
         "nodeCount": 1000,
         "treeSource": "room_nodes",
@@ -35,33 +35,23 @@
         "roomNodesCount": 1000
       },
       "productSafeLoad": true,
-      "LONG_TASK_COUNT": 5,
-      "MAX_LONG_TASK_MS": 621,
+      "LONG_TASK_COUNT": 3,
+      "MAX_LONG_TASK_MS": 353,
       "longTasksTop": [
         {
           "name": "self",
-          "duration": 621,
-          "startTime": 1801.1000000238419
+          "duration": 353,
+          "startTime": 538.7000000029802
         },
         {
           "name": "self",
-          "duration": 574,
-          "startTime": 190.5
+          "duration": 157,
+          "startTime": 115.30000001192093
         },
         {
           "name": "self",
-          "duration": 279,
-          "startTime": 1318.699999988079
-        },
-        {
-          "name": "self",
-          "duration": 104,
-          "startTime": 2441
-        },
-        {
-          "name": "self",
-          "duration": 58,
-          "startTime": 1003.6999999880791
+          "duration": 60,
+          "startTime": 975.3000000119209
         }
       ],
       "HEAP_BEFORE": {
@@ -69,10 +59,10 @@
       },
       "HEAP_AFTER": {
         "usedJSHeapSize": 21700000,
-        "totalJSHeapSize": 39600000
+        "totalJSHeapSize": 33100000
       },
-      "DOM_COUNT": 1211,
-      "SVG_COUNT": 1206,
+      "DOM_COUNT": 1630,
+      "SVG_COUNT": 1625,
       "plugins": {
         "richText": true,
         "associativeLine": true,
@@ -81,7 +71,7 @@
       },
       "interactions": {
         "ZOOM_LATENCY": {
-          "ms": 28,
+          "ms": 30,
           "ok": true,
           "err": null
         },
@@ -96,17 +86,17 @@
           "err": null
         },
         "SELECT_LATENCY": {
-          "ms": 56,
+          "ms": 34,
           "ok": true,
           "err": null
         },
         "COLLAPSE_LATENCY": {
-          "ms": 33,
+          "ms": 41,
           "ok": true,
           "err": null
         },
         "EXPAND_LATENCY": {
-          "ms": 320,
+          "ms": 386,
           "ok": true,
           "err": null
         }
@@ -118,13 +108,13 @@
         "treeNodes": 1000,
         "apiNodeCount": 1000,
         "truncated": false,
-        "httpMs": 84,
-        "parseMs": 35,
-        "renderMs": 931,
-        "fullMs": 1051,
+        "httpMs": 13,
+        "parseMs": 1,
+        "renderMs": 185,
+        "fullMs": 199,
         "renderReason": "node_tree_render_end",
-        "domCount": 1211,
-        "svgCount": 1206
+        "domCount": 1630,
+        "svgCount": 1625
       },
       "whiteScreen": false,
       "crashed": false,
@@ -138,23 +128,23 @@
     },
     {
       "size": 5000,
-      "roomKey": "c2-browser-5000-1788761408598",
+      "roomKey": "c2-browser-5000-1788770277714",
       "phases": {
-        "NAVIGATION_START": 21.200000047683716,
-        "MINDMAP_CONSTRUCTOR_START": 461.9000000357628,
-        "MINDMAP_DATA_APPLIED": 697.9000000357628,
-        "ROOM_HTTP_START": 712.9000000357628,
-        "ROOM_DATA_READY": 764.5,
-        "FIRST_RENDER_COMPLETE": 891.1000000238419,
-        "LAYOUT_COMPLETE": 891.1000000238419,
-        "FIRST_INTERACTION_READY": 1875.5,
-        "AUTH_READY": 21.200000047683716
+        "NAVIGATION_START": 6.600000008940697,
+        "MINDMAP_CONSTRUCTOR_START": 193.90000000596046,
+        "ROOM_HTTP_START": 247.90000000596046,
+        "ROOM_DATA_READY": 266.40000000596046,
+        "MINDMAP_DATA_APPLIED": 295.1000000089407,
+        "FIRST_RENDER_COMPLETE": 314.79999999701977,
+        "LAYOUT_COMPLETE": 314.79999999701977,
+        "FIRST_INTERACTION_READY": 757.2999999970198,
+        "AUTH_READY": 6.600000008940697
       },
       "renderReason": "mutation",
-      "TIME_TO_DATA_READY": 743,
-      "TIME_DATA_TO_RENDER": 127,
-      "TIME_TO_FIRST_RENDER": 870,
-      "TIME_TO_INTERACTIVE": 912,
+      "TIME_TO_DATA_READY": 260,
+      "TIME_DATA_TO_RENDER": 48,
+      "TIME_TO_FIRST_RENDER": 308,
+      "TIME_TO_INTERACTIVE": 312,
       "previewMeta": {
         "nodeCount": 5000,
         "treeSource": "room_nodes",
@@ -169,48 +159,48 @@
         "roomNodesCount": 5000
       },
       "productSafeLoad": true,
-      "LONG_TASK_COUNT": 14,
-      "MAX_LONG_TASK_MS": 13901,
+      "LONG_TASK_COUNT": 10,
+      "MAX_LONG_TASK_MS": 1139,
       "longTasksTop": [
         {
           "name": "self",
-          "duration": 13901,
-          "startTime": 24449.5
+          "duration": 1139,
+          "startTime": 2447.1000000089407
         },
         {
           "name": "self",
-          "duration": 12666,
-          "startTime": 48173.700000047684
+          "duration": 1124,
+          "startTime": 4457.600000008941
         },
         {
           "name": "self",
-          "duration": 8378,
-          "startTime": 16030.400000035763
+          "duration": 686,
+          "startTime": 1209.7000000029802
         },
         {
           "name": "self",
-          "duration": 8305,
-          "startTime": 7075.200000047684
+          "duration": 654,
+          "startTime": 3785.4000000059605
         },
         {
           "name": "self",
-          "duration": 5620,
-          "startTime": 42524.40000003576
+          "duration": 517,
+          "startTime": 1919.9000000059605
         },
         {
           "name": "self",
-          "duration": 4920,
-          "startTime": 2063.400000035763
+          "duration": 362,
+          "startTime": 821
         },
         {
           "name": "self",
-          "duration": 3439,
-          "startTime": 39036.5
+          "duration": 250,
+          "startTime": 484
         },
         {
           "name": "self",
-          "duration": 703,
-          "startTime": 1149.5
+          "duration": 99,
+          "startTime": 135
         }
       ],
       "HEAP_BEFORE": {
@@ -218,7 +208,7 @@
       },
       "HEAP_AFTER": {
         "usedJSHeapSize": 21700000,
-        "totalJSHeapSize": 39600000
+        "totalJSHeapSize": 33100000
       },
       "DOM_COUNT": 5069,
       "SVG_COUNT": 5064,
@@ -230,7 +220,7 @@
       },
       "interactions": {
         "ZOOM_LATENCY": {
-          "ms": 41,
+          "ms": 30,
           "ok": true,
           "err": null
         },
@@ -245,17 +235,17 @@
           "err": null
         },
         "SELECT_LATENCY": {
-          "ms": 61,
+          "ms": 34,
           "ok": true,
           "err": null
         },
         "COLLAPSE_LATENCY": {
-          "ms": 37,
+          "ms": 32,
           "ok": true,
           "err": null
         },
         "EXPAND_LATENCY": {
-          "ms": 726,
+          "ms": 268,
           "ok": true,
           "err": null
         }
@@ -267,10 +257,10 @@
         "treeNodes": 5000,
         "apiNodeCount": 5000,
         "truncated": false,
-        "httpMs": 95,
-        "parseMs": 37,
-        "renderMs": 59438,
-        "fullMs": 59570,
+        "httpMs": 47,
+        "parseMs": 4,
+        "renderMs": 4943,
+        "fullMs": 4994,
         "renderReason": "node_tree_render_end",
         "domCount": 5069,
         "svgCount": 5064
@@ -280,21 +270,21 @@
       "oom": false,
       "hotspots": [
         "SimpleMindMap_setData_layout_render",
-        "full_tree_node_creation_layout",
-        "product_safe_load_clips_to_~80_nodes"
+        "product_safe_load_clips_to_~80_nodes",
+        "JS_longtask_during_render"
       ],
-      "verdict": "PARTIAL",
+      "verdict": "PASS",
       "f5": {
         "before": {
-          "roomKey": "c2-browser-5000-1788761408598",
+          "roomKey": "c2-browser-5000-1788770277714",
           "version": 1,
           "treeSource": "room_nodes",
           "legacyFallback": false,
           "nodeCount": 5000
         },
         "after": {
-          "roomKey": "c2-browser-5000-1788761408598",
-          "version": 3,
+          "roomKey": "c2-browser-5000-1788770277714",
+          "version": 2,
           "treeSource": "room_nodes",
           "legacyFallback": false,
           "nodeCount": 5000,
@@ -303,7 +293,7 @@
           "authority": {
             "status": 200,
             "nodeCount": 5000,
-            "version": 3
+            "version": 2
           }
         },
         "waitOk": true,
@@ -312,23 +302,23 @@
     },
     {
       "size": 10000,
-      "roomKey": "c2-browser-10000-1788761472060",
+      "roomKey": "c2-browser-10000-1788770284043",
       "phases": {
-        "NAVIGATION_START": 73.09999996423721,
-        "MINDMAP_CONSTRUCTOR_START": 467.69999998807907,
-        "MINDMAP_DATA_APPLIED": 634.6999999880791,
-        "ROOM_HTTP_START": 643.0999999642372,
-        "ROOM_DATA_READY": 694.5999999642372,
-        "FIRST_RENDER_COMPLETE": 813.0999999642372,
-        "LAYOUT_COMPLETE": 813.0999999642372,
-        "FIRST_INTERACTION_READY": 1551.8999999761581,
-        "AUTH_READY": 73.09999996423721
+        "NAVIGATION_START": 24,
+        "MINDMAP_CONSTRUCTOR_START": 190.69999998807907,
+        "ROOM_HTTP_START": 274.79999999701977,
+        "MINDMAP_DATA_APPLIED": 292.29999999701977,
+        "ROOM_DATA_READY": 308,
+        "FIRST_RENDER_COMPLETE": 344.59999999403954,
+        "LAYOUT_COMPLETE": 344.59999999403954,
+        "FIRST_INTERACTION_READY": 837.0999999940395,
+        "AUTH_READY": 24
       },
       "renderReason": "mutation",
-      "TIME_TO_DATA_READY": 622,
-      "TIME_DATA_TO_RENDER": 119,
-      "TIME_TO_FIRST_RENDER": 740,
-      "TIME_TO_INTERACTIVE": 759,
+      "TIME_TO_DATA_READY": 284,
+      "TIME_DATA_TO_RENDER": 37,
+      "TIME_TO_FIRST_RENDER": 321,
+      "TIME_TO_INTERACTIVE": 323,
       "previewMeta": {
         "nodeCount": 10000,
         "treeSource": "room_nodes",
@@ -344,47 +334,47 @@
       },
       "productSafeLoad": true,
       "LONG_TASK_COUNT": 11,
-      "MAX_LONG_TASK_MS": 35117,
+      "MAX_LONG_TASK_MS": 7165,
       "longTasksTop": [
         {
           "name": "self",
-          "duration": 35117,
-          "startTime": 52710.39999997616
+          "duration": 7165,
+          "startTime": 14890.199999988079
         },
         {
           "name": "self",
-          "duration": 19932,
-          "startTime": 14653.599999964237
+          "duration": 5935,
+          "startTime": 6368.29999999702
         },
         {
           "name": "self",
-          "duration": 17068,
-          "startTime": 35594
+          "duration": 2943,
+          "startTime": 1974.3999999910593
         },
         {
           "name": "self",
-          "duration": 12670,
-          "startTime": 1780.300000011921
+          "duration": 2163,
+          "startTime": 12694.89999999106
         },
         {
           "name": "self",
-          "duration": 519,
-          "startTime": 87832.19999998808
+          "duration": 1402,
+          "startTime": 4950.29999999702
         },
         {
           "name": "self",
-          "duration": 503,
-          "startTime": 1026.3999999761581
+          "duration": 973,
+          "startTime": 952.1999999880791
         },
         {
           "name": "self",
-          "duration": 344,
-          "startTime": 264.69999998807907
+          "duration": 308,
+          "startTime": 511.8999999910593
         },
         {
           "name": "self",
-          "duration": 156,
-          "startTime": 35431
+          "duration": 115,
+          "startTime": 22060.59999999404
         }
       ],
       "HEAP_BEFORE": {
@@ -392,7 +382,7 @@
       },
       "HEAP_AFTER": {
         "usedJSHeapSize": 21700000,
-        "totalJSHeapSize": 39600000
+        "totalJSHeapSize": 33100000
       },
       "DOM_COUNT": 10039,
       "SVG_COUNT": 10034,
@@ -404,12 +394,12 @@
       },
       "interactions": {
         "ZOOM_LATENCY": {
-          "ms": 36,
+          "ms": 30,
           "ok": true,
           "err": null
         },
         "PAN_LATENCY": {
-          "ms": 35,
+          "ms": 33,
           "ok": true,
           "err": null
         },
@@ -419,17 +409,17 @@
           "err": null
         },
         "SELECT_LATENCY": {
-          "ms": 53,
+          "ms": 34,
           "ok": true,
           "err": null
         },
         "COLLAPSE_LATENCY": {
-          "ms": 29,
+          "ms": 33,
           "ok": true,
           "err": null
         },
         "EXPAND_LATENCY": {
-          "ms": 521,
+          "ms": 322,
           "ok": true,
           "err": null
         }
@@ -441,10 +431,10 @@
         "treeNodes": 10000,
         "apiNodeCount": 10000,
         "truncated": false,
-        "httpMs": 147,
-        "parseMs": 19,
-        "renderMs": 87804,
-        "fullMs": 87971,
+        "httpMs": 85,
+        "parseMs": 6,
+        "renderMs": 21457,
+        "fullMs": 21548,
         "renderReason": "node_tree_render_end",
         "domCount": 10039,
         "svgCount": 10034
@@ -460,15 +450,15 @@
       "verdict": "PARTIAL",
       "f5": {
         "before": {
-          "roomKey": "c2-browser-10000-1788761472060",
+          "roomKey": "c2-browser-10000-1788770284043",
           "version": 1,
           "treeSource": "room_nodes",
           "legacyFallback": false,
           "nodeCount": 10000
         },
         "after": {
-          "roomKey": "c2-browser-10000-1788761472060",
-          "version": 1,
+          "roomKey": "c2-browser-10000-1788770284043",
+          "version": 2,
           "treeSource": "room_nodes",
           "legacyFallback": false,
           "nodeCount": 10000,
@@ -477,7 +467,7 @@
           "authority": {
             "status": 200,
             "nodeCount": 10000,
-            "version": 1
+            "version": 2
           }
         },
         "waitOk": true,
@@ -486,23 +476,23 @@
     },
     {
       "size": 20000,
-      "roomKey": "c2-browser-20000-1788761566040",
+      "roomKey": "c2-browser-20000-1788770308037",
       "phases": {
-        "NAVIGATION_START": 67.40000003576279,
-        "MINDMAP_CONSTRUCTOR_START": 531.4000000357628,
-        "MINDMAP_DATA_APPLIED": 725.3000000119209,
-        "ROOM_HTTP_START": 777.3000000119209,
-        "ROOM_DATA_READY": 881.7000000476837,
-        "FIRST_RENDER_COMPLETE": 4597.5,
-        "LAYOUT_COMPLETE": 4597.5,
-        "FIRST_INTERACTION_READY": 7686.900000035763,
-        "AUTH_READY": 67.40000003576279
+        "NAVIGATION_START": 3386.9000000059605,
+        "MINDMAP_CONSTRUCTOR_START": 3892.300000011921,
+        "MINDMAP_DATA_APPLIED": 3992,
+        "ROOM_HTTP_START": 4043.6000000089407,
+        "ROOM_DATA_READY": 4127.300000011921,
+        "FIRST_RENDER_COMPLETE": 5197.800000011921,
+        "LAYOUT_COMPLETE": 5197.800000011921,
+        "FIRST_INTERACTION_READY": 5903.20000000298,
+        "AUTH_READY": 3386.9000000059605
       },
       "renderReason": "mutation",
-      "TIME_TO_DATA_READY": 814,
-      "TIME_DATA_TO_RENDER": 3716,
-      "TIME_TO_FIRST_RENDER": 4530,
-      "TIME_TO_INTERACTIVE": 4576,
+      "TIME_TO_DATA_READY": 740,
+      "TIME_DATA_TO_RENDER": 1071,
+      "TIME_TO_FIRST_RENDER": 1811,
+      "TIME_TO_INTERACTIVE": 1823,
       "previewMeta": {
         "nodeCount": 20000,
         "treeSource": "room_nodes",
@@ -517,48 +507,43 @@
         "roomNodesCount": 20000
       },
       "productSafeLoad": true,
-      "LONG_TASK_COUNT": 12,
-      "MAX_LONG_TASK_MS": 39740,
+      "LONG_TASK_COUNT": 7,
+      "MAX_LONG_TASK_MS": 7934,
       "longTasksTop": [
         {
           "name": "self",
-          "duration": 39740,
-          "startTime": 26323.100000023842
+          "duration": 7934,
+          "startTime": 7043.100000008941
+        },
+        {
+          "name": "unknown",
+          "duration": 3365,
+          "startTime": 21.5
         },
         {
           "name": "self",
-          "duration": 15509,
-          "startTime": 10599.900000035763
+          "duration": 3290,
+          "startTime": 14984.300000011921
         },
         {
           "name": "self",
-          "duration": 2817,
-          "startTime": 4737.700000047684
+          "duration": 899,
+          "startTime": 6093.9000000059605
         },
         {
           "name": "self",
-          "duration": 2629,
-          "startTime": 1811.9000000357628
+          "duration": 519,
+          "startTime": 5217.70000000298
         },
         {
           "name": "self",
-          "duration": 2557,
-          "startTime": 7743.900000035763
+          "duration": 512,
+          "startTime": 4629.100000008941
         },
         {
           "name": "self",
-          "duration": 420,
-          "startTime": 271.80000001192093
-        },
-        {
-          "name": "self",
-          "duration": 111,
-          "startTime": 26118.700000047684
-        },
-        {
-          "name": "self",
-          "duration": 89,
-          "startTime": 168.4000000357628
+          "duration": 187,
+          "startTime": 3793
         }
       ],
       "HEAP_BEFORE": {
@@ -566,10 +551,10 @@
       },
       "HEAP_AFTER": {
         "usedJSHeapSize": 21700000,
-        "totalJSHeapSize": 39600000
+        "totalJSHeapSize": 33100000
       },
-      "DOM_COUNT": 10511,
-      "SVG_COUNT": 10506,
+      "DOM_COUNT": 10039,
+      "SVG_COUNT": 10034,
       "plugins": {
         "richText": true,
         "associativeLine": true,
@@ -578,32 +563,32 @@
       },
       "interactions": {
         "ZOOM_LATENCY": {
-          "ms": 43,
+          "ms": 528,
           "ok": true,
           "err": null
         },
         "PAN_LATENCY": {
-          "ms": 37,
+          "ms": 29,
           "ok": true,
           "err": null
         },
         "SEARCH_LATENCY": {
-          "ms": 2831,
+          "ms": 35,
           "ok": true,
           "err": null
         },
         "SELECT_LATENCY": {
-          "ms": 56,
-          "ok": false,
+          "ms": 33,
+          "ok": true,
           "err": null
         },
         "COLLAPSE_LATENCY": {
-          "ms": 30,
-          "ok": false,
+          "ms": 33,
+          "ok": true,
           "err": null
         },
         "EXPAND_LATENCY": {
-          "ms": 35,
+          "ms": 33,
           "ok": true,
           "err": null
         }
@@ -615,13 +600,13 @@
         "treeNodes": 10000,
         "apiNodeCount": 20000,
         "truncated": true,
-        "httpMs": 2608,
-        "parseMs": 16,
-        "renderMs": 56490,
-        "fullMs": 59114,
+        "httpMs": 158,
+        "parseMs": 6,
+        "renderMs": 12860,
+        "fullMs": 13024,
         "renderReason": "node_tree_render_end",
-        "domCount": 10511,
-        "svgCount": 10506
+        "domCount": 10039,
+        "svgCount": 10034
       },
       "whiteScreen": false,
       "crashed": false,
@@ -631,17 +616,17 @@
         "full_tree_node_creation_layout",
         "product_safe_load_clips_to_~80_nodes"
       ],
-      "verdict": "PARTIAL",
+      "verdict": "PASS",
       "f5": {
         "before": {
-          "roomKey": "c2-browser-20000-1788761566040",
+          "roomKey": "c2-browser-20000-1788770308037",
           "version": 1,
           "treeSource": "room_nodes",
           "legacyFallback": false,
           "nodeCount": 20000
         },
         "after": {
-          "roomKey": "c2-browser-20000-1788761566040",
+          "roomKey": "c2-browser-20000-1788770308037",
           "version": 2,
           "treeSource": "room_nodes",
           "legacyFallback": false,
@@ -662,39 +647,39 @@
   "summary": {
     "AUTH_MODE": "DEV_NORMAL_ACL",
     "EDITOR_1K_BROWSER": "PASS",
-    "EDITOR_5K_BROWSER": "PARTIAL",
+    "EDITOR_5K_BROWSER": "PASS",
     "EDITOR_10K_BROWSER": "PARTIAL",
-    "EDITOR_20K_BROWSER": "PARTIAL",
-    "1K_TIME_TO_DATA_READY": 966,
-    "1K_TIME_TO_FIRST_RENDER": 1078,
-    "1K_TIME_TO_INTERACTIVE": 1097,
-    "5K_TIME_TO_DATA_READY": 743,
-    "5K_TIME_TO_FIRST_RENDER": 870,
-    "5K_TIME_TO_INTERACTIVE": 912,
-    "10K_TIME_TO_DATA_READY": 622,
-    "10K_TIME_TO_FIRST_RENDER": 740,
-    "10K_TIME_TO_INTERACTIVE": 759,
-    "20K_TIME_TO_DATA_READY": 814,
-    "20K_TIME_TO_FIRST_RENDER": 4530,
-    "20K_TIME_TO_INTERACTIVE": 4576,
-    "10K_TIME_DATA_TO_RENDER": 119,
+    "EDITOR_20K_BROWSER": "PASS",
+    "1K_TIME_TO_DATA_READY": 304,
+    "1K_TIME_TO_FIRST_RENDER": 352,
+    "1K_TIME_TO_INTERACTIVE": 361,
+    "5K_TIME_TO_DATA_READY": 260,
+    "5K_TIME_TO_FIRST_RENDER": 308,
+    "5K_TIME_TO_INTERACTIVE": 312,
+    "10K_TIME_TO_DATA_READY": 284,
+    "10K_TIME_TO_FIRST_RENDER": 321,
+    "10K_TIME_TO_INTERACTIVE": 323,
+    "20K_TIME_TO_DATA_READY": 740,
+    "20K_TIME_TO_FIRST_RENDER": 1811,
+    "20K_TIME_TO_INTERACTIVE": 1823,
+    "10K_TIME_DATA_TO_RENDER": 37,
     "10K_PRODUCT_SAFE_LOAD": true,
-    "10K_FULL_HTTP_MS": 147,
-    "10K_FULL_PARSE_MS": 19,
-    "10K_FULL_RENDER_MS": 87804,
+    "10K_FULL_HTTP_MS": 85,
+    "10K_FULL_PARSE_MS": 6,
+    "10K_FULL_RENDER_MS": 21457,
     "10K_FULL_DOM_COUNT": 10039,
     "10K_FULL_SVG_COUNT": 10034,
-    "10K_ZOOM_LATENCY": 36,
-    "10K_PAN_LATENCY": 35,
+    "10K_ZOOM_LATENCY": 30,
+    "10K_PAN_LATENCY": 33,
     "10K_SEARCH_LATENCY": 33,
-    "10K_SELECT_LATENCY": 53,
-    "10K_COLLAPSE_LATENCY": 29,
-    "10K_EXPAND_LATENCY": 521,
+    "10K_SELECT_LATENCY": 34,
+    "10K_COLLAPSE_LATENCY": 33,
+    "10K_EXPAND_LATENCY": 322,
     "10K_LONG_TASK_COUNT": 11,
-    "10K_MAX_LONG_TASK_MS": 35117,
+    "10K_MAX_LONG_TASK_MS": 7165,
     "10K_HEAP": {
       "usedJSHeapSize": 21700000,
-      "totalJSHeapSize": 39600000
+      "totalJSHeapSize": 33100000
     },
     "10K_DOM_COUNT": 10039,
     "10K_SVG_COUNT": 10034,
