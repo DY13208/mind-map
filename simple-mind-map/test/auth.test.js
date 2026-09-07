@@ -185,4 +185,69 @@ assert.strictEqual(__test.originsEquivalent(
   'http://xx.stillgroup.net:8989'
 ), false)
 
+assert.strictEqual(
+  __test.wecomAvatarUrl({
+    avatar: 'https://wework.qpic.cn/photo.png',
+    thumb_avatar: 'https://wework.qpic.cn/thumb.png'
+  }),
+  'https://wework.qpic.cn/photo.png'
+)
+assert.strictEqual(
+  __test.wecomAvatarUrl({ thumb_avatar: 'https://wework.qpic.cn/thumb.png' }),
+  'https://wework.qpic.cn/thumb.png'
+)
+assert.strictEqual(__test.wecomAvatarUrl({ avatar: '张' }), '')
+assert.strictEqual(__test.wecomAvatarUrl(null), '')
+
+const logoutReq = {
+  headers: {
+    origin: 'http://192.168.1.20:8081',
+    'sec-fetch-site': 'same-origin',
+    host: '192.168.1.20:1234'
+  }
+}
+assert.strictEqual(__test.isLogoutRequestAllowed(logoutReq), true)
+assert.strictEqual(
+  __test.isLogoutRequestAllowed({
+    headers: { origin: 'http://evil.example', 'sec-fetch-site': 'cross-site' }
+  }),
+  false
+)
+assert.strictEqual(
+  __test.isTopLevelNavigation({ headers: { 'sec-fetch-dest': 'document' } }),
+  true
+)
+assert.strictEqual(
+  __test.isTopLevelNavigation({ headers: { 'sec-fetch-dest': 'image' } }),
+  false
+)
+assert.strictEqual(
+  __test.logoutRedirectUrl(
+    {
+      headers: {
+        host: '127.0.0.1:1234',
+        referer: 'http://127.0.0.1:8081/edit',
+        'x-forwarded-proto': 'http'
+      }
+    },
+    '/files'
+  ),
+  'http://127.0.0.1:8081/files'
+)
+
+assert.strictEqual(
+  __test.logoutRedirectUrl(
+    {
+      headers: {
+        host: '127.0.0.1:1234',
+        referer: 'http://localhost:8081/edit',
+        'x-forwarded-proto': 'http'
+      }
+    },
+    '/files'
+  ),
+  'http://localhost:8081/files'
+)
+assert.strictEqual(__test.hostnamesEquivalent('localhost', '127.0.0.1'), true)
+
 console.log('auth unit tests passed')

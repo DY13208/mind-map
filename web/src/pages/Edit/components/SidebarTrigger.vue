@@ -12,10 +12,12 @@
       <div class="authSection" v-if="authUser">
         <div class="authAvatarWrap" :title="authUser.name">
           <img
-            v-if="authUser.avatar"
+            v-if="avatarUrl"
             class="authAvatarImg"
-            :src="authUser.avatar"
+            :src="avatarUrl"
             :alt="authUser.name"
+            referrerpolicy="no-referrer"
+            @error="avatarFailed = true"
           />
           <span v-else class="authAvatar">{{ userInitial }}</span>
         </div>
@@ -51,7 +53,8 @@
 <script>
 import { mapState, mapMutations } from 'vuex'
 import { sidebarTriggerList } from '@/config'
-import { getCurrentUser, logout } from '@/utils/auth'
+import { getCurrentUser, logoutAndRedirect } from '@/utils/auth'
+import { isAvatarImage } from '@/utils/avatar'
 
 export default {
   data() {
@@ -59,7 +62,8 @@ export default {
       show: true,
       maxHeight: 0,
       authUser: null,
-      loggingOut: false
+      loggingOut: false,
+      avatarFailed: false
     }
   },
   computed: {
@@ -88,6 +92,11 @@ export default {
     userInitial() {
       const name = (this.authUser && this.authUser.name) || '依'
       return name.trim().slice(0, 1)
+    },
+
+    avatarUrl() {
+      if (this.avatarFailed) return ''
+      return isAvatarImage(this.authUser && this.authUser.avatar) ? this.authUser.avatar : ''
     }
   },
   watch: {
@@ -127,13 +136,7 @@ export default {
     async signOut() {
       if (this.loggingOut) return
       this.loggingOut = true
-      try {
-        await logout()
-        window.location.reload()
-      } catch (err) {
-        this.$message.error(err.message || '退出登录失败')
-        this.loggingOut = false
-      }
+      await logoutAndRedirect('/')
     },
 
     onResize() {
