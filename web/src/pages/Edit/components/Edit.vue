@@ -56,6 +56,7 @@
     <NodeAutoExpand v-if="mindMap" :mindMap="mindMap"></NodeAutoExpand>
     <CooperateDialog :mindMap="mindMap"></CooperateDialog>
     <MapRefDialog></MapRefDialog>
+    <SubMapPreviewDialog></SubMapPreviewDialog>
     <div
       class="dragMask"
       v-if="showDragMask"
@@ -138,6 +139,8 @@ import AiChat from './AiChat.vue'
 import NodeAutoExpand from './NodeAutoExpand.vue'
 import CooperateDialog from './CooperateDialog.vue'
 import MapRefDialog from './MapRefDialog.vue'
+import SubMapPreviewDialog from './SubMapPreviewDialog.vue'
+import { normalizeMapRef } from '@/utils/mapRefNav'
 
 // 注册插件
 MindMap.usePlugin(MiniMap)
@@ -200,7 +203,8 @@ export default {
     AiChat,
     NodeAutoExpand,
     CooperateDialog,
-    MapRefDialog
+    MapRefDialog,
+    SubMapPreviewDialog
   },
   data() {
     return {
@@ -287,6 +291,7 @@ export default {
         })
     }
     this.$bus.$on('execCommand', this.execCommand)
+    this.$bus.$on('applySubMapToNode', this.applySubMapToNode)
     this.$bus.$on('paddingChange', this.onPaddingChange)
     this.$bus.$on('export', this.export)
     this.$bus.$on('setData', this.setData)
@@ -313,6 +318,7 @@ export default {
     this.importPersistLock = false
     this.stopImportProgressPoll()
     this.$bus.$off('execCommand', this.execCommand)
+    this.$bus.$off('applySubMapToNode', this.applySubMapToNode)
     this.$bus.$off('paddingChange', this.onPaddingChange)
     this.$bus.$off('export', this.export)
     this.$bus.$off('setData', this.setData)
@@ -906,6 +912,82 @@ export default {
         this.mindMap.cooperate.ensureActiveSelection()
       }
       this.mindMap.execCommand(...args)
+    },
+
+    /** 原子写入子脑图引用 + 企业微信卡片样式 */
+    applySubMapToNode(payload) {
+      const result =
+        payload && payload.result && typeof payload.result === 'object'
+          ? payload.result
+          : { ok: false }
+      try {
+        if (!this.mindMap || !this.mindMap.renderer) {
+          result.ok = false
+          result.error = 'mindMap missing'
+          return result.ok
+        }
+        const ref = normalizeMapRef(
+          payload && (payload.mapRef || payload.ref)
+        )
+        if (!ref) {
+          result.ok = false
+          result.error = 'invalid mapRef'
+          return result.ok
+        }
+        let node = payload && payload.node
+        const uid =
+          (payload && payload.uid) ||
+          (node && node.getData && node.getData('uid')) ||
+          ''
+        if (uid && typeof this.mindMap.renderer.findNodeByUid === 'function') {
+          const live = this.mindMap.renderer.findNodeByUid(uid)
+          if (live) node = live
+        }
+        if (
+          !node &&
+          this.mindMap.renderer.activeNodeList &&
+          this.mindMap.renderer.activeNodeList[0]
+        ) {
+          node = this.mindMap.renderer.activeNodeList[0]
+        }
+        if (!node || typeof node.getData !== 'function') {
+          result.ok = false
+          result.error = 'node missing'
+          return result.ok
+        }
+        const text =
+          String(
+            (payload && payload.title) || ref.mapId || '子脑图'
+          ).trim() || '子脑图'
+        // 一次写入，避免多次 command 互相覆盖
+        this.mindMap.renderer.setNodeDataRender(node, {
+          mapRef: ref,
+          text,
+          richText: false,
+          resetRichText: true,
+          shape: 'roundedRectangle',
+          fillColor: '#F2F3F5',
+          borderColor: 'transparent',
+          borderWidth: 0,
+          color: '#1F2329',
+          fontSize: 14,
+          fontWeight: 'normal',
+          paddingX: 10,
+          paddingY: 8
+        })
+        // 再显式走 SET_NODE_MAP_REF，便于协同推送 mapRef 字段
+        this.mindMap.execCommand('SET_NODE_MAP_REF', node, ref)
+        const saved = normalizeMapRef(node.getData('mapRef'))
+        result.ok = !!saved
+        result.uid = node.getData('uid') || uid
+        if (!result.ok) result.error = 'mapRef not persisted'
+        return result.ok
+      } catch (err) {
+        console.error('[applySubMapToNode]', err)
+        result.ok = false
+        result.error = (err && err.message) || 'apply failed'
+        return result.ok
+      }
     },
 
     // 导出

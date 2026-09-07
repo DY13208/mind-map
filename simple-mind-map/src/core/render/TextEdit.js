@@ -15,6 +15,7 @@ import {
   CONSTANTS,
   noneRichTextNodeLineHeight
 } from '../../constants/constant'
+import mapRefUtil from '../../utils/mapRef'
 
 const SMM_NODE_EDIT_WRAP = 'smm-node-edit-wrap'
 
@@ -45,8 +46,17 @@ export default class TextEdit {
     this.show = this.show.bind(this)
     this.onScale = this.onScale.bind(this)
     this.onKeydown = this.onKeydown.bind(this)
-    // 节点双击事件
+    // 节点双击事件：子脑图节点打开预览，不进入文字编辑
     this.mindMap.on('node_dblclick', (node, e, isInserting) => {
+      if (
+        !isInserting &&
+        node &&
+        mapRefUtil.normalizeMapRef(node.getData && node.getData('mapRef'))
+      ) {
+        const ref = mapRefUtil.normalizeMapRef(node.getData('mapRef'))
+        this.mindMap.emit('map_ref_click', node, ref)
+        return
+      }
       this.show({ node, e, isInserting })
     })
     // 点击事件
@@ -91,7 +101,8 @@ export default class TextEdit {
         return
       }
       this.show({
-        node: this.renderer.activeNodeList[0]
+        node: this.renderer.activeNodeList[0],
+        forceEdit: true
       })
     })
     this.mindMap.on('scale', this.onScale)
@@ -213,10 +224,19 @@ export default class TextEdit {
     node,
     isInserting = false,
     isFromKeyDown = false,
-    isFromScale = false
+    isFromScale = false,
+    forceEdit = false
   }) {
     // 使用了自定义节点内容那么不响应编辑事件
     if (node.isUseCustomNodeContent()) {
+      return
+    }
+    // 子脑图：双击/自动输入 → 预览；F2(forceEdit) 仍可改名
+    const mapRef = mapRefUtil.normalizeMapRef(
+      node && node.getData && node.getData('mapRef')
+    )
+    if (mapRef && !isInserting && !forceEdit) {
+      this.mindMap.emit('map_ref_click', node, mapRef)
       return
     }
     // 如果有正在编辑中的节点，那么先结束它

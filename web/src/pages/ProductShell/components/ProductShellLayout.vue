@@ -42,6 +42,9 @@
         <router-link to="/spaces" title="团队空间" aria-label="团队空间"
           ><i class="el-icon-office-building"></i>团队空间</router-link
         >
+        <router-link to="/sop" title="SOP台账" aria-label="SOP台账"
+          ><i class="el-icon-notebook-2"></i>SOP台账</router-link
+        >
       </nav>
       <div class="sidebarFooter" v-if="profile">
         <el-avatar size="small">依</el-avatar>

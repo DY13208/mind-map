@@ -305,7 +305,7 @@ const getNodeIconListIcon = (name, extendIconList = []) => {
 }
 
 const mapRef =
-  '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 1024 1024"><path d="M192 128h448v64H256v640h512V448h64v448H192V128z m384 0l256 256h-192a64 64 0 0 1-64-64V128z m64 448v-64h192v64H640z m0 128v-64h192v64H640zM320 448h192v64H320v-64z m0 128h192v64H320v-64z m0 128h384v64H320v-64z" fill="currentColor"></path></svg>'
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="1.5" y="1.5" width="21" height="21" rx="5" fill="#7B61FF"/><path d="M7.2 7.5h9.6a1.2 1.2 0 0 1 1.2 1.2v8.1a1.2 1.2 0 0 1-1.2 1.2H7.2A1.2 1.2 0 0 1 6 16.8V8.7a1.2 1.2 0 0 1 1.2-1.2z" fill="none" stroke="#fff" stroke-width="1.4"/><circle cx="12" cy="12.2" r="2.4" fill="none" stroke="#fff" stroke-width="1.4"/><path d="M10.2 12.2h3.6" stroke="#fff" stroke-width="1.3" stroke-linecap="round"/></svg>'
 
 export default {
   hyperlink,

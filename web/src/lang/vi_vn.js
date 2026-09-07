@@ -126,8 +126,8 @@ export default {
     fitCanvas: 'Vừa với khung vẽ',
     removeImage: 'Xóa hình ảnh',
     removeHyperlink: 'Xóa liên kết',
-    mapRef: 'Tham chiếu sơ đồ tư duy',
-    removeMapRef: 'Xóa tham chiếu sơ đồ',
+    mapRef: 'Chèn sơ đồ con',
+    removeMapRef: 'Xóa sơ đồ con',
     removeNote: 'Xóa ghi chú',
     removeCustomStyles: 'Xóa kiểu tùy chỉnh',
     removeAllNodeCustomStyles: 'Xóa tất cả kiểu tùy chỉnh của nút',
@@ -565,7 +565,7 @@ export default {
     tip5: 'Nút liên kết không tồn tại. Có nên xóa liên kết không?'
   },
   mapRef: {
-    title: 'Tham chiếu sơ đồ tư duy',
+    title: 'Chèn sơ đồ con',
     searchMaps: 'Tìm sơ đồ',
     bindMap: 'Gắn cả sơ đồ',
     bindNode: 'Định vị nút (tuỳ chọn)',
@@ -576,10 +576,22 @@ export default {
     missingMap: 'Sơ đồ đích không tồn tại hoặc đã bị xóa',
     missingNode: 'Nút đích không tồn tại, đã mở gốc sơ đồ',
     noPermission: 'Bạn không có quyền truy cập sơ đồ này',
-    saved: 'Đã lưu tham chiếu',
-    removed: 'Đã xóa tham chiếu',
+    saved: 'Đã chèn sơ đồ con',
+    savedTip:
+      'Đã chèn sơ đồ con: nút sẽ thành thẻ xám + icon tím; nhấp đúp để xem (F2 để đổi tên)',
+    applyFailed: 'Chèn thất bại; hãy chọn lại nút rồi thử',
+    removed: 'Đã xóa sơ đồ con',
     openFailed: 'Không mở được sơ đồ được tham chiếu',
-    currentMap: 'Không thể tham chiếu sơ đồ hiện tại'
+    currentMap: 'Không thể tham chiếu sơ đồ hiện tại',
+    previewTitle: 'Xem trước sơ đồ con',
+    openEdit: 'Mở để chỉnh sửa',
+    closePreview: 'Đóng',
+    previewLoading: 'Đang tải sơ đồ con…',
+    previewFailed: 'Xem trước sơ đồ con thất bại',
+    selectedHint: 'Đã chọn: {name}',
+    dblclickTip: 'Nhấp đúp để xác nhận',
+    needSelect: 'Hãy chọn một sơ đồ trước',
+    needNode: 'Hãy chọn một nút trước'
   },
   acl: {
     share: 'Chia sẻ / Quyền',

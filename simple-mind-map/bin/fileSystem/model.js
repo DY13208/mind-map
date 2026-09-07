@@ -12,7 +12,16 @@ function fsError(code, message, status) {
 }
 
 function normalizeTitle(title) {
-  return String(title || '').trim().slice(0, TITLE_MAX) || '未命名'
+  const plain = String(title || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, TITLE_MAX)
+  return plain || '未命名'
 }
 
 function normalizeFolderName(name) {

@@ -36,6 +36,17 @@ export function isSharedWithMe({
   return normalizeRole(role) !== 'owner' && ownerId !== me
 }
 
+function stripTitleHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export function normalizeRoomDto(apiRoom = {}, extras = {}) {
   const roomKey = String(
     apiRoom.roomKey || apiRoom.room_key || apiRoom.id || extras.roomKey || ''
@@ -57,7 +68,7 @@ export function normalizeRoomDto(apiRoom = {}, extras = {}) {
   return {
     id: roomKey,
     roomKey,
-    title: apiRoom.title || '未命名',
+    title: stripTitleHtml(apiRoom.title) || '未命名',
     folderId,
     folderName:
       extras.folderName ||
