@@ -114,18 +114,6 @@
                 <span class="iconfont iconAIshengcheng"></span>
                 {{ $t('navigatorToolbar.ai') }}
               </el-dropdown-item>
-              <el-dropdown-item command="client">
-                <span class="iconfont iconxiazai"></span>
-                {{ $t('navigatorToolbar.downloadClient') }}
-              </el-dropdown-item>
-              <el-dropdown-item command="github">
-                <span class="iconfont icongithub"></span>
-                Github
-              </el-dropdown-item>
-              <el-dropdown-item command="site">
-                <span class="iconfont iconwangzhan"></span>
-                {{ $t('navigatorToolbar.site') }}
-              </el-dropdown-item>
               <el-dropdown-item disabled
                 >{{ $t('navigatorToolbar.current') }}v{{
                   version
@@ -256,38 +244,10 @@ export default {
       if (command === 'shortcutKey') {
         this.setActiveSidebar('shortcutKey')
         return
-      } else if (command === 'aiChat') {
+      }
+      if (command === 'aiChat') {
         this.setActiveSidebar('ai')
-        return
       }
-      let url = ''
-      switch (command) {
-        case 'github':
-          url = 'https://github.com/wanglin2/mind-map'
-          break
-        case 'helpDoc':
-          url = 'https://wanglin2.github.io/mind-map-docs/help/help1.html'
-          break
-        case 'devDoc':
-          url =
-            'https://wanglin2.github.io/mind-map-docs/start/introduction.html'
-          break
-        case 'site':
-          url = 'https://sxmind.cn/'
-          break
-        case 'issue':
-          url = 'https://github.com/wanglin2/mind-map/issues/new'
-          break
-        case 'client':
-          url = 'https://sxmind.cn/'
-          break
-        default:
-          break
-      }
-      const a = document.createElement('a')
-      a.href = url
-      a.target = '_blank'
-      a.click()
     },
 
     backToRoot() {

@@ -1,0 +1,237 @@
+{
+  "generatedAt": "2026-09-07T07:00:05.175Z",
+  "origin": "http://127.0.0.1:8989",
+  "mode": "profile",
+  "sizes": [
+    10000
+  ],
+  "rows": {
+    "10000": {
+      "ok": true,
+      "size": 10000,
+      "treeNodes": 10000,
+      "apiNodeCount": 10000,
+      "httpMs": 239,
+      "parseMs": 276,
+      "setDataMs": 84925,
+      "fullMs": 85440,
+      "renderReason": "node_tree_render_end",
+      "phaseSumMs": 97015,
+      "phaseOverlapNote": "Phase timers nest (createNode includes getSize/render); sum can exceed wall clock.",
+      "phasesMs": [
+        {
+          "k": "other_setData",
+          "ms": 21315
+        },
+        {
+          "k": "layout_calculation",
+          "ms": 21301
+        },
+        {
+          "k": "node_instance_creation",
+          "ms": 20988
+        },
+        {
+          "k": "text_measurement",
+          "ms": 20542
+        },
+        {
+          "k": "rich_text",
+          "ms": 9855
+        },
+        {
+          "k": "line_creation",
+          "ms": 1352
+        },
+        {
+          "k": "svg_node_creation",
+          "ms": 1170
+        },
+        {
+          "k": "bounding_geometry",
+          "ms": 413
+        },
+        {
+          "k": "json_stringify_compare",
+          "ms": 78
+        },
+        {
+          "k": "dom_append",
+          "ms": 1
+        },
+        {
+          "k": "tree_traversal",
+          "ms": 0
+        },
+        {
+          "k": "generalization_summary",
+          "ms": 0
+        },
+        {
+          "k": "associative_line",
+          "ms": 0
+        },
+        {
+          "k": "event_binding",
+          "ms": 0
+        },
+        {
+          "k": "fit_transform",
+          "ms": 0
+        }
+      ],
+      "phases": {
+        "other_setData": 21315,
+        "layout_calculation": 21301,
+        "node_instance_creation": 20988,
+        "text_measurement": 20542,
+        "rich_text": 9855,
+        "line_creation": 1352,
+        "svg_node_creation": 1170,
+        "bounding_geometry": 413,
+        "json_stringify_compare": 78,
+        "dom_append": 1,
+        "tree_traversal": 0,
+        "generalization_summary": 0,
+        "associative_line": 0,
+        "event_binding": 0,
+        "fit_transform": 0
+      },
+      "counts": {
+        "GET_BBOX_CALL_COUNT": 1078,
+        "GET_BOUNDING_CLIENT_RECT_COUNT": 0,
+        "LAYOUT_PASS_COUNT": 1,
+        "FULL_RENDER_PASS_COUNT": 4,
+        "NODE_RENDER_CALL_COUNT": 10000,
+        "LINE_RENDER_CALL_COUNT": 20080,
+        "CREATE_NODE_CALL_COUNT": 10000,
+        "CREATE_NODE_NEW_COUNT": 10000,
+        "CREATE_NODE_REUSE_COUNT": 0,
+        "GET_SIZE_CALL_COUNT": 9999,
+        "CREATE_TEXT_NODE_COUNT": 9999,
+        "CREATE_RICH_TEXT_COUNT": 9999,
+        "MEASURE_TEXT_SVG_COUNT": 0,
+        "INNERHTML_WRITE_COUNT": 20040,
+        "NODE_DRAW_ADD_COUNT": 45,
+        "BIND_GROUP_EVENT_COUNT": 8,
+        "CHECK_IS_NODE_DATA_CHANGE_COUNT": 0,
+        "JSON_STRINGIFY_COUNT": 30899
+      },
+      "topGetBoundingClientRect": [],
+      "topGetBBox": [
+        {
+          "k": "at di.zt [as bbox] (http://127.0.0.1:8989/js/chunk-65750680.js:1:469845)",
+          "n": 518
+        },
+        {
+          "k": "at xi.zt [as bbox] (http://127.0.0.1:8989/js/chunk-65750680.js:1:469845)",
+          "n": 454
+        },
+        {
+          "k": "at Rn.zt [as bbox] (http://127.0.0.1:8989/js/chunk-65750680.js:1:469845)",
+          "n": 106
+        }
+      ],
+      "longTasks": [
+        {
+          "start": 28337,
+          "dur": 60314
+        },
+        {
+          "start": 6708,
+          "dur": 21335
+        },
+        {
+          "start": 2422,
+          "dur": 3269
+        },
+        {
+          "start": 502,
+          "dur": 703
+        },
+        {
+          "start": 266,
+          "dur": 194
+        },
+        {
+          "start": 28056,
+          "dur": 138
+        },
+        {
+          "start": 6574,
+          "dur": 131
+        },
+        {
+          "start": 6282,
+          "dur": 130
+        },
+        {
+          "start": 1451,
+          "dur": 118
+        },
+        {
+          "start": 28206,
+          "dur": 110
+        }
+      ],
+      "MAX_LONG_TASK_MS": 60314,
+      "LONG_TASK_COUNT": 15,
+      "domCount": 10089,
+      "svgCount": 10084,
+      "svgNodeGroups": 8
+    }
+  },
+  "BEFORE": {
+    "10K_SETDATA_BEFORE": 39074,
+    "10K_MAX_LONG_TASK_BEFORE": 30263,
+    "FULL_TREE_HTTP_10K_BEFORE": 11460
+  },
+  "AFTER": {},
+  "ROOT_CAUSES": [
+    "per_node_richtext_DOM_measure_getBoundingClientRect_forced_reflow",
+    "sync_doLayout_createNode_getSize_for_entire_tree_before_paint",
+    "repeated_full_render_passes_around_setData_reRender"
+  ],
+  "PROFILED_10K": {
+    "setDataMs": 84925,
+    "maxLong": 60314,
+    "httpMs": 239,
+    "counts": {
+      "GET_BBOX_CALL_COUNT": 1078,
+      "GET_BOUNDING_CLIENT_RECT_COUNT": 0,
+      "LAYOUT_PASS_COUNT": 1,
+      "FULL_RENDER_PASS_COUNT": 4,
+      "NODE_RENDER_CALL_COUNT": 10000,
+      "LINE_RENDER_CALL_COUNT": 20080,
+      "CREATE_NODE_CALL_COUNT": 10000,
+      "CREATE_NODE_NEW_COUNT": 10000,
+      "CREATE_NODE_REUSE_COUNT": 0,
+      "GET_SIZE_CALL_COUNT": 9999,
+      "CREATE_TEXT_NODE_COUNT": 9999,
+      "CREATE_RICH_TEXT_COUNT": 9999,
+      "MEASURE_TEXT_SVG_COUNT": 0,
+      "INNERHTML_WRITE_COUNT": 20040,
+      "NODE_DRAW_ADD_COUNT": 45,
+      "BIND_GROUP_EVENT_COUNT": 8,
+      "CHECK_IS_NODE_DATA_CHANGE_COUNT": 0,
+      "JSON_STRINGIFY_COUNT": 30899
+    },
+    "phases": {
+      "other_setData": 21315,
+      "layout_calculation": 21301,
+      "node_instance_creation": 20988,
+      "text_measurement": 20542,
+      "rich_text": 9855,
+      "line_creation": 1352,
+      "svg_node_creation": 1170,
+      "bounding_geometry": 413,
+      "json_stringify_compare": 78,
+      "dom_append": 1,
+      "tree_traversal": 0,
+      "generalization_summary": 0,
+      "associative_line": 0,
+      "event_binding": 0,
+      "fit_transform": 0
+    }
+  }
+}
