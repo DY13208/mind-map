@@ -1,15 +1,15 @@
 <template
   ><el-table
-    :data="rooms"
+    :data="items"
     class="roomTable"
-    @row-click="row => $emit('open', row)"
+    @row-click="openItem"
     ><el-table-column label="名称" min-width="220"
       ><template slot-scope="scope"
         ><div class="roomName">
-          <i class="el-icon-share" /><strong>{{ scope.row.title }}</strong>
+          <i :class="scope.row.__kind === 'folder' ? 'el-icon-folder' : 'el-icon-document'" /><strong>{{ scope.row.title || scope.row.name }}</strong>
         </div></template
       ></el-table-column
-    ><el-table-column
+    ><el-table-column label="类型" width="90"><template slot-scope="scope">{{ scope.row.__kind === 'folder' ? '文件夹' : '脑图' }}</template></el-table-column><el-table-column
       prop="folderName"
       label="所属文件夹"
       min-width="120"
@@ -23,7 +23,7 @@
       width="100"
     /><el-table-column label="协作者" width="125"
       ><template slot-scope="scope"
-        ><div class="avatars">
+        ><div v-if="scope.row.__kind !== 'folder'" class="avatars">
           <UserAvatar
             v-for="person in scope.row.collaborators.slice(0, 3)"
             :key="person.id"
@@ -40,13 +40,14 @@
       ><template slot-scope="scope"
         ><el-button
           type="text"
+          v-if="scope.row.__kind !== 'folder'"
           :icon="scope.row.favorite ? 'el-icon-star-on' : 'el-icon-star-off'"
           @click.stop="
             $emit('favorite', scope.row)
           "/></template></el-table-column
     ><el-table-column width="65"
       ><template slot-scope="scope"
-        ><el-dropdown
+        ><el-dropdown v-if="scope.row.__kind !== 'folder'"
           trigger="click"
           @command="$emit($event, scope.row)"
           @click.native.stop
@@ -71,8 +72,16 @@ import UserAvatar from '@/components/UserAvatar.vue'
 export default {
   name: 'RoomList',
   components: { UserAvatar },
-  props: { rooms: Array, allowDelete: { type: Boolean, default: false } },
+  props: { rooms: Array, folders: { type: Array, default: () => [] }, allowDelete: { type: Boolean, default: false } },
+  computed: {
+    items() {
+      return this.folders.map(folder => ({ ...folder, __kind: 'folder', folderName: '—' })).concat(this.rooms.map(room => ({ ...room, __kind: 'room' })))
+    }
+  },
   methods: {
+    openItem(item) {
+      this.$emit(item.__kind === 'folder' ? 'open-folder' : 'open', item)
+    },
     formatDate(value) {
       return new Date(value).toLocaleString('zh-CN', {
         month: '2-digit',

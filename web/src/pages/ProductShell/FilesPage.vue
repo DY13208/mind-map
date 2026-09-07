@@ -27,9 +27,11 @@
       /><el-button @click="load">重试</el-button>
     </div>
     <div v-else v-loading="loading || busy" class="contentArea">
-      <template v-if="showFolders && filteredFolders.length"
-        ><h2 class="sectionTitle">文件夹</h2>
-        <div class="folderGrid">
+      <h2 class="sectionTitle" v-if="mode !== 'trash' && itemCount">
+        {{ folder ? '当前目录' : pageTitle }} <span>{{ itemCount }}</span>
+      </h2>
+      <div v-if="mode !== 'trash' && view === 'card' && itemCount" class="itemGrid">
+        <template v-if="showFolders">
           <FolderCard
             v-for="item in filteredFolders"
             :key="item.id"
@@ -37,12 +39,8 @@
             @open="openFolder"
             @rename="renameFolder"
             @delete="deleteFolder"
-          /></div
-      ></template>
-      <h2 class="sectionTitle" v-if="visibleRooms.length">
-        {{ mode === 'trash' ? '已删除' : '脑图' }}
-        <span>{{ visibleRooms.length }}</span>
-      </h2>
+          />
+        </template>
       <template v-if="mode === 'trash' && visibleRooms.length"
         ><div class="trashList">
           <div v-for="room in visibleRooms" :key="room.id" class="trashRow">
@@ -65,10 +63,6 @@
           </div>
         </div></template
       >
-      <div
-        v-if="mode !== 'trash' && view === 'card' && visibleRooms.length"
-        class="roomGrid"
-      >
         <RoomCard
           v-for="room in visibleRooms"
           :key="room.roomKey || room.id"
@@ -84,10 +78,12 @@
         />
       </div>
       <RoomList
-        v-if="mode !== 'trash' && view === 'list' && visibleRooms.length"
+        v-if="mode !== 'trash' && view === 'list' && itemCount"
         :rooms="visibleRooms"
+        :folders="showFolders ? filteredFolders : []"
         :allow-delete="true"
         @open="openRoom"
+        @open-folder="openFolder"
         @favorite="favorite"
         @rename="renameRoom"
         @move="moveRoom"
@@ -223,8 +219,11 @@ export default {
     },
     pageDescription() {
       return this.folder
-        ? this.folder.roomCount + ' 个脑图'
+        ? this.itemCount + ' 个项目'
         : copy[this.mode][1]
+    },
+    itemCount() {
+      return this.visibleRooms.length + this.filteredFolders.length
     },
     showFolders() {
       return this.mode === 'files'
@@ -536,15 +535,10 @@ export default {
 .contentArea {
   min-height: 320px;
 }
-.folderGrid {
+.itemGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 12px;
-}
-.roomGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
 }
 .sectionTitle span {
   color: #9aa7a2;
