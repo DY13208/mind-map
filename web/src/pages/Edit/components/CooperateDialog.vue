@@ -141,15 +141,15 @@
             <div
               class="fileItem"
               v-for="item in fileList"
-              :key="item.room_key"
-              :class="{ current: connected && roomName === item.room_key }"
+              :key="item.roomKey"
+              :class="{ current: connected && roomName === item.roomKey }"
               @dblclick="openFile(item)"
             >
             <div class="fileMeta">
               <div class="fileTitle">
                 {{ item.title }}
                 <span
-                  v-if="connected && roomName === item.room_key"
+                  v-if="connected && roomName === item.roomKey"
                   class="currentTag"
                   >{{ $t('cooperate.currentRoom') }}</span
                 >
@@ -157,7 +157,7 @@
                   fileRoleText(item.role)
                 }}</span>
               </div>
-              <div class="fileTime">{{ formatTime(item.updated_at) }}</div>
+              <div class="fileTime">{{ formatTime(item.updatedAt) }}</div>
             </div>
             <div class="fileActions" @click.stop>
               <el-button type="text" @click="openFile(item)">{{
@@ -302,12 +302,12 @@ import { WebsocketProvider } from 'y-websocket'
 import { mapMutations, mapState } from 'vuex'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
 import { getCurrentUser } from '@/utils/auth'
-import { roomFromLocation } from '@/utils/roomLocation'
+import { buildInviteUrl, roomFromLocation } from '@/utils/roomLocation'
+import { normalizeRoomDto, requireRoomKey } from '@/services/roomDto'
+import roomService from '@/services/roomService'
 import {
   listFiles,
   createFile as createFileApi,
-  renameFile as renameFileApi,
-  deleteFile as deleteFileApi,
   getSaveStatus,
   beatPresence,
   leavePresence,
@@ -956,7 +956,7 @@ export default {
           this.leave({ silent: true })
         }
         const created = await createFileApi({ title })
-        this.roomName = created.room_key
+        this.roomName = requireRoomKey(created.room || created.file || created)
         this.syncRoomQuery({ clearFocus: true })
         await this.openSavedRoom({ silent: false, createIfMissing: true })
         this.loadFiles()
@@ -1635,9 +1635,10 @@ export default {
 
     copyInvite() {
       if (!this.roomName) return
-      const invite = `${getRuntimeConfig().appUrl}/#/?room=${encodeURIComponent(
-        this.roomName
-      )}`
+      const invite = buildInviteUrl(
+        this.roomName,
+        getRuntimeConfig().appUrl || window.location.origin
+      )
       const done = () => {
         this.$message.success(this.$t('cooperate.copied'))
       }
@@ -1736,7 +1737,9 @@ export default {
           offset
         })
         if (attempt !== this._filesAttempt) return
-        this.fileList = data.list || []
+        this.fileList = (data.list || [])
+          .map(item => normalizeRoomDto(item))
+          .filter(item => item.roomKey)
         this.fileTotal = Number(
           data.total != null ? data.total : this.fileList.length
         )
@@ -2197,21 +2200,43 @@ export default {
     },
 
     async openFile(item) {
-      if (!item || !item.room_key) return
-      if (this.connected && this.roomName === item.room_key) {
-        this.$message.success(this.$t('cooperate.openSuccess'))
+      let roomKey
+      try {
+        roomKey = requireRoomKey(item)
+      } catch (err) {
+        this.$message.error(err.code || err.message || 'INVALID_ROOM_KEY')
         return
       }
-      if (this.connected) {
+      if (this.roomName === roomKey) {
+        this.dialogVisible = false
+        return
+      }
+      this.dialogVisible = false
+      if (this.connected || this.connecting) {
         this.persistCurrentMapView()
         this.leave({ silent: true })
       }
-      this.roomName = item.room_key
-      this.syncRoomQuery({ clearFocus: true })
-      await this.openSavedRoom({ silent: false })
+      try {
+        await this.$router.push({
+          path: '/',
+          query: { room: roomKey }
+        })
+      } catch (err) {
+        if (err && err.name === 'NavigationDuplicated') return
+        this.$message.error(
+          (err && err.message) || this.$t('cooperate.connectFailed')
+        )
+      }
     },
 
     async renameSavedFile(item) {
+      let roomKey
+      try {
+        roomKey = requireRoomKey(item)
+      } catch (err) {
+        this.$message.error(err.code || err.message || 'INVALID_ROOM_KEY')
+        return
+      }
       try {
         const { value } = await this.$prompt(
           this.$t('cooperate.renameFile'),
@@ -2221,9 +2246,15 @@ export default {
             inputValidator: val => !!String(val || '').trim()
           }
         )
-        await renameFileApi(item.room_key, value)
+        const renamed = await roomService.renameRoom(roomKey, value)
+        const title = (renamed && renamed.title) || String(value).trim()
+        item.title = title
+        const idx = this.fileList.findIndex(file => file.roomKey === roomKey)
+        if (idx >= 0) this.$set(this.fileList[idx], 'title', title)
+        if (this.roomName === roomKey) {
+          this.$bus.$emit('room_title_updated', { roomKey, title })
+        }
         this.$message.success(this.$t('cooperate.renamed'))
-        this.loadFiles()
       } catch (err) {
         if (err === 'cancel' || err === 'close') return
         this.$message.error(err.message || this.$t('cooperate.connectFailed'))
@@ -2231,28 +2262,34 @@ export default {
     },
 
     async removeSavedFile(item) {
+      let roomKey
+      try {
+        roomKey = requireRoomKey(item)
+      } catch (err) {
+        this.$message.error(err.code || err.message || 'INVALID_ROOM_KEY')
+        return
+      }
       try {
         await this.$confirm(
           this.$t('cooperate.deleteConfirm', { title: item.title }),
           this.$t('cooperate.deleteFile'),
           { type: 'warning' }
         )
-        const deletedKey = item.room_key
-        await deleteFileApi(deletedKey)
-        if (this.roomName === deletedKey) {
+        await roomService.deleteRoom(roomKey)
+        this.fileList = this.fileList.filter(
+          file => file && file.roomKey !== roomKey
+        )
+        if (this.fileTotal > 0) this.fileTotal -= 1
+        this.$message.success(this.$t('cooperate.fileDeleted'))
+        if (this.roomName === roomKey) {
           if (this.connected || this.connecting) {
             this.leave({ silent: true })
           }
           this.roomName = ''
-          const query = { ...this.$route.query }
-          delete query.room
-          this.$router.replace({ query }).catch(() => {})
+          this.dialogVisible = false
+          await this.$router.push({ path: '/files' }).catch(() => {})
+          return
         }
-        this.fileList = this.fileList.filter(
-          file => file && file.room_key !== deletedKey
-        )
-        if (this.fileTotal > 0) this.fileTotal -= 1
-        this.$message.success(this.$t('cooperate.fileDeleted'))
         this.loadFiles()
       } catch (err) {
         if (err === 'cancel' || err === 'close') return

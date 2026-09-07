@@ -443,6 +443,7 @@ async function main() {
   assert.match(routerSrc, /path: 'trash'/)
   assert.match(routerSrc, /path: '\/spaces'/)
   assert.match(routerSrc, /name: 'Edit'/)
+  assert.match(routerSrc, /mode: 'history'/)
   assert.match(routerSrc, /beforeEnter/)
   assert.match(routerSrc, /path: '\/files'/)
   assert.doesNotMatch(routerSrc, /redirect: '\/files'/)

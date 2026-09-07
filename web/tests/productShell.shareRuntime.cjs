@@ -36,7 +36,7 @@ async function jsonFetch(cookie, pathname, options = {}) {
 }
 
 async function loginDev(page) {
-  await page.goto(ORIGIN + '/#/files', { waitUntil: 'domcontentloaded' })
+  await page.goto(ORIGIN + '/files', { waitUntil: 'domcontentloaded' })
   await page.locator('.authDevInput').waitFor({ timeout: 20000 })
   await page.locator('.authDevInput').fill(readEnv('AUTH_DEV_BYPASS_KEY'))
   await page.locator('.authDevForm button[type="submit"]').click()

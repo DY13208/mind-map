@@ -65,6 +65,7 @@ module.exports = {
     host: '0.0.0.0',
     port: 8081,
     disableHostCheck: true,
+    historyApiFallback: true,
     proxy: {
       '^/api/v3/': {
         target: 'http://ark.cn-beijing.volces.com',
