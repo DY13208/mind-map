@@ -9,7 +9,7 @@
     <span class="folderIcon"><i class="el-icon-folder"/></span
     ><span class="folderInfo"
       ><strong>{{ folder.name }}</strong
-      ><small>{{ folder.roomCount }} 个脑图 · {{ dateText }}</small></span
+      ><small>{{ itemCountText }}</small><small>{{ dateText }} 更新</small></span
     ><el-dropdown
       v-if="editable"
       trigger="click"
@@ -30,6 +30,10 @@ export default {
   name: 'FolderCard',
   props: { folder: Object, editable: { type: Boolean, default: true } },
   computed: {
+    itemCountText() {
+      const count = Number(this.folder.itemCount != null ? this.folder.itemCount : this.folder.roomCount) || 0
+      return count ? `${count} 个项目` : '空文件夹'
+    },
     dateText() {
       return new Date(this.folder.updatedAt).toLocaleDateString('zh-CN')
     }
@@ -41,24 +45,28 @@ export default {
   width: 100%;
   border: 1px solid #e3e9e6;
   background: white;
-  padding: 16px;
-  border-radius: 11px;
-  display: flex;
-  align-items: center;
+  min-height: 210px;
+  padding: 20px;
+  border-radius: var(--ui-radius-lg);
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  align-content: end;
   gap: 12px;
   cursor: pointer;
   text-align: left;
-  color: #243c33;
+  color: var(--ui-text);
+  transition: border-color var(--ui-duration) var(--ui-ease), box-shadow var(--ui-duration) var(--ui-ease), transform var(--ui-duration) var(--ui-ease);
   &:hover {
-    border-color: #b7d7ca;
-    box-shadow: 0 6px 20px rgba(28, 76, 59, 0.06);
+    border-color: var(--ui-border-strong);
+    box-shadow: var(--ui-shadow-hover);
+    transform: translateY(-1px);
   }
   .folderIcon {
-    width: 38px;
-    height: 38px;
-    background: #eef6f2;
-    color: #149067;
-    border-radius: 9px;
+    width: 48px;
+    height: 48px;
+    background: var(--ui-primary-soft);
+    color: var(--ui-primary);
+    border-radius: var(--ui-radius-lg);
     display: grid;
     place-items: center;
     font-size: 20px;
@@ -70,8 +78,9 @@ export default {
     flex: 1;
   }
   small {
-    color: #8b9893;
+    color: var(--ui-text-secondary);
     margin-top: 5px;
+    font-size: 12px;
   }
   .more {
     padding: 8px;

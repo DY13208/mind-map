@@ -153,7 +153,7 @@ import MouseAction from './MouseAction.vue'
 import CanvasToolbarActions from './CanvasToolbarActions.vue'
 import { langList } from '@/config'
 import i18n from '@/i18n'
-import { storeLang, getLang } from '@/api'
+import { storeLang, getLang, storeData } from '@/api'
 import { mapState, mapMutations } from 'vuex'
 import pkg from 'simple-mind-map/package.json'
 import Demonstrate from './Demonstrate.vue'
@@ -235,8 +235,36 @@ export default {
     },
 
     toggleDark() {
+      const isDark = !this.isDark
+      const theme = isDark ? 'classic' : 'default'
+      const customThemeConfig = {
+        ...this.mindMap.getCustomThemeConfig()
+      }
+
+      // The canvas background belongs to the mind-map theme rather than the
+      // surrounding app chrome. Drop only background overrides so the target
+      // light/dark theme can supply its matching canvas treatment while other
+      // user customisations remain intact.
+      ;[
+        'backgroundColor',
+        'backgroundImage',
+        'backgroundRepeat',
+        'backgroundPosition',
+        'backgroundSize'
+      ].forEach(key => {
+        delete customThemeConfig[key]
+      })
+
+      this.mindMap.setThemeConfig(customThemeConfig, true)
+      this.mindMap.setTheme(theme)
       this.setLocalConfig({
-        isDark: !this.isDark
+        isDark
+      })
+      storeData({
+        theme: {
+          template: theme,
+          config: customThemeConfig
+        }
       })
     },
 
