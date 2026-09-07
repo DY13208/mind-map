@@ -1,12 +1,675 @@
 {
-  "generatedAt": "2026-09-07T01:48:59.339Z",
-  "origin": null,
-  "phases": [],
+  "generatedAt": "2026-09-07T02:24:58.580Z",
+  "origin": "http://127.0.0.1:8989",
+  "phases": [
+    {
+      "size": 1000,
+      "roomKey": "c2-browser-1000-1788747901136",
+      "phases": {
+        "NAVIGATION_START": 10.800000011920929,
+        "MINDMAP_CONSTRUCTOR_START": 280.60000002384186,
+        "MINDMAP_DATA_APPLIED": 415.10000002384186,
+        "ROOM_HTTP_START": 418.80000001192093,
+        "ROOM_DATA_READY": 444.30000001192093,
+        "FIRST_RENDER_COMPLETE": 634.6000000238419,
+        "LAYOUT_COMPLETE": 634.7000000178814,
+        "FIRST_INTERACTION_READY": 1016.7000000178814,
+        "AUTH_READY": 10.800000011920929
+      },
+      "renderReason": "mutation",
+      "TIME_TO_DATA_READY": 434,
+      "TIME_DATA_TO_RENDER": 190,
+      "TIME_TO_FIRST_RENDER": 624,
+      "TIME_TO_INTERACTIVE": 650,
+      "previewMeta": {
+        "nodeCount": 1000,
+        "treeSource": null,
+        "legacyFallback": false,
+        "legacyFallbackReason": "",
+        "version": 1,
+        "safeLoad": true,
+        "clipped": true,
+        "lazyLoad": true,
+        "roomNodesHash": null,
+        "roomsJsonHash": null,
+        "roomNodesCount": null
+      },
+      "productSafeLoad": true,
+      "LONG_TASK_COUNT": 5,
+      "MAX_LONG_TASK_MS": 693,
+      "longTasksTop": [
+        {
+          "name": "self",
+          "duration": 693,
+          "startTime": 1116.4000000059605
+        },
+        {
+          "name": "self",
+          "duration": 245,
+          "startTime": 151.40000000596046
+        },
+        {
+          "name": "self",
+          "duration": 125,
+          "startTime": 1818.2000000178814
+        },
+        {
+          "name": "self",
+          "duration": 87,
+          "startTime": 515.2000000178814
+        },
+        {
+          "name": "self",
+          "duration": 61,
+          "startTime": 661.4000000059605
+        }
+      ],
+      "HEAP_BEFORE": {
+        "usedJSHeapSize": 56800000
+      },
+      "HEAP_AFTER": {
+        "usedJSHeapSize": 56800000,
+        "totalJSHeapSize": 81400000
+      },
+      "DOM_COUNT": 1366,
+      "SVG_COUNT": 1361,
+      "plugins": {
+        "richText": true,
+        "associativeLine": true,
+        "outerFrame": true,
+        "demonstrate": true
+      },
+      "interactions": {
+        "ZOOM_LATENCY": {
+          "ms": 73,
+          "ok": true,
+          "err": null
+        },
+        "PAN_LATENCY": {
+          "ms": 45,
+          "ok": true,
+          "err": null
+        },
+        "SEARCH_LATENCY": {
+          "ms": 70,
+          "ok": true,
+          "err": null
+        },
+        "SELECT_LATENCY": {
+          "ms": 38,
+          "ok": false,
+          "err": null
+        },
+        "COLLAPSE_LATENCY": {
+          "ms": 23,
+          "ok": true,
+          "err": null
+        },
+        "EXPAND_LATENCY": {
+          "ms": 33,
+          "ok": false,
+          "err": null
+        }
+      },
+      "fullRender": {
+        "ok": true,
+        "requestedNodes": 1000,
+        "fetchedMaxNodes": 1000,
+        "treeNodes": 1000,
+        "apiNodeCount": 1000,
+        "truncated": false,
+        "httpMs": 90,
+        "parseMs": 1,
+        "renderMs": 938,
+        "fullMs": 1029,
+        "renderReason": "node_tree_render_end",
+        "domCount": 1366,
+        "svgCount": 1361
+      },
+      "whiteScreen": false,
+      "crashed": false,
+      "oom": false,
+      "hotspots": [
+        "product_safe_load_clips_to_~80_nodes",
+        "JS_longtask_during_render",
+        "RichText_plugin_present_full_feature_path"
+      ],
+      "verdict": "PASS"
+    },
+    {
+      "size": 5000,
+      "roomKey": "c2-browser-5000-1788747903718",
+      "phases": {
+        "NAVIGATION_START": 12.599999994039536,
+        "MINDMAP_CONSTRUCTOR_START": 296,
+        "MINDMAP_DATA_APPLIED": 423.19999998807907,
+        "ROOM_HTTP_START": 427.2999999821186,
+        "ROOM_DATA_READY": 465.59999999403954,
+        "FIRST_RENDER_COMPLETE": 552.5,
+        "LAYOUT_COMPLETE": 552.5,
+        "FIRST_INTERACTION_READY": 849.7999999821186,
+        "AUTH_READY": 12.599999994039536
+      },
+      "renderReason": "mutation",
+      "TIME_TO_DATA_READY": 453,
+      "TIME_DATA_TO_RENDER": 87,
+      "TIME_TO_FIRST_RENDER": 540,
+      "TIME_TO_INTERACTIVE": 555,
+      "previewMeta": {
+        "nodeCount": 5000,
+        "treeSource": null,
+        "legacyFallback": false,
+        "legacyFallbackReason": "",
+        "version": 1,
+        "safeLoad": true,
+        "clipped": true,
+        "lazyLoad": true,
+        "roomNodesHash": null,
+        "roomsJsonHash": null,
+        "roomNodesCount": null
+      },
+      "productSafeLoad": true,
+      "LONG_TASK_COUNT": 4,
+      "MAX_LONG_TASK_MS": 6948,
+      "longTasksTop": [
+        {
+          "name": "self",
+          "duration": 6948,
+          "startTime": 6476.0999999940395
+        },
+        {
+          "name": "self",
+          "duration": 2999,
+          "startTime": 3432.699999988079
+        },
+        {
+          "name": "self",
+          "duration": 1732,
+          "startTime": 13436.40000000596
+        },
+        {
+          "name": "self",
+          "duration": 237,
+          "startTime": 160.2999999821186
+        }
+      ],
+      "HEAP_BEFORE": {
+        "usedJSHeapSize": 56800000
+      },
+      "HEAP_AFTER": {
+        "usedJSHeapSize": 56800000,
+        "totalJSHeapSize": 81400000
+      },
+      "DOM_COUNT": 5069,
+      "SVG_COUNT": 5064,
+      "plugins": {
+        "richText": true,
+        "associativeLine": true,
+        "outerFrame": true,
+        "demonstrate": true
+      },
+      "interactions": {
+        "ZOOM_LATENCY": {
+          "ms": 50,
+          "ok": true,
+          "err": null
+        },
+        "PAN_LATENCY": {
+          "ms": 31,
+          "ok": true,
+          "err": null
+        },
+        "SEARCH_LATENCY": {
+          "ms": 33,
+          "ok": true,
+          "err": null
+        },
+        "SELECT_LATENCY": {
+          "ms": 74,
+          "ok": true,
+          "err": null
+        },
+        "COLLAPSE_LATENCY": {
+          "ms": 28,
+          "ok": false,
+          "err": null
+        },
+        "EXPAND_LATENCY": {
+          "ms": 34,
+          "ok": true,
+          "err": null
+        }
+      },
+      "fullRender": {
+        "ok": true,
+        "requestedNodes": 5000,
+        "fetchedMaxNodes": 5000,
+        "treeNodes": 5000,
+        "apiNodeCount": 5000,
+        "truncated": false,
+        "httpMs": 2541,
+        "parseMs": 7,
+        "renderMs": 12081,
+        "fullMs": 14628,
+        "renderReason": "node_tree_render_end",
+        "domCount": 5069,
+        "svgCount": 5064
+      },
+      "whiteScreen": false,
+      "crashed": false,
+      "oom": false,
+      "hotspots": [
+        "SimpleMindMap_setData_layout_render",
+        "full_tree_node_creation_layout",
+        "product_safe_load_clips_to_~80_nodes"
+      ],
+      "verdict": "PASS",
+      "f5": {
+        "before": {
+          "roomKey": "c2-browser-5000-1788747903718",
+          "version": 1,
+          "treeSource": null,
+          "legacyFallback": false,
+          "nodeCount": 5000
+        },
+        "after": {
+          "roomKey": "c2-browser-5000-1788747903718",
+          "version": 3,
+          "treeSource": null,
+          "legacyFallback": false,
+          "nodeCount": 5000,
+          "hasSvg": true,
+          "hasMindMap": true,
+          "authority": {
+            "status": 200,
+            "nodeCount": 5000,
+            "version": 3
+          }
+        },
+        "waitOk": true,
+        "verdict": "PASS"
+      }
+    },
+    {
+      "size": 10000,
+      "roomKey": "c2-browser-10000-1788747933468",
+      "phases": {
+        "NAVIGATION_START": 11.400000005960464,
+        "MINDMAP_CONSTRUCTOR_START": 399.7000000178814,
+        "MINDMAP_DATA_APPLIED": 590.2000000178814,
+        "ROOM_HTTP_START": 602.3000000119209,
+        "ROOM_DATA_READY": 655.6000000238419,
+        "FIRST_RENDER_COMPLETE": 790.4000000059605,
+        "LAYOUT_COMPLETE": 790.4000000059605,
+        "FIRST_INTERACTION_READY": 1042.5,
+        "AUTH_READY": 11.400000005960464
+      },
+      "renderReason": "mutation",
+      "TIME_TO_DATA_READY": 644,
+      "TIME_DATA_TO_RENDER": 135,
+      "TIME_TO_FIRST_RENDER": 779,
+      "TIME_TO_INTERACTIVE": 829,
+      "previewMeta": {
+        "nodeCount": 10000,
+        "treeSource": null,
+        "legacyFallback": false,
+        "legacyFallbackReason": "",
+        "version": 1,
+        "safeLoad": true,
+        "clipped": true,
+        "lazyLoad": true,
+        "roomNodesHash": null,
+        "roomsJsonHash": null,
+        "roomNodesCount": null
+      },
+      "productSafeLoad": true,
+      "LONG_TASK_COUNT": 5,
+      "MAX_LONG_TASK_MS": 30263,
+      "longTasksTop": [
+        {
+          "name": "self",
+          "duration": 30263,
+          "startTime": 20577.40000000596
+        },
+        {
+          "name": "self",
+          "duration": 7939,
+          "startTime": 12561.200000017881
+        },
+        {
+          "name": "self",
+          "duration": 302,
+          "startTime": 270.10000002384186
+        },
+        {
+          "name": "self",
+          "duration": 51,
+          "startTime": 51545.10000002384
+        },
+        {
+          "name": "self",
+          "duration": 50,
+          "startTime": 699.5
+        }
+      ],
+      "HEAP_BEFORE": {
+        "usedJSHeapSize": 56800000
+      },
+      "HEAP_AFTER": {
+        "usedJSHeapSize": 56800000,
+        "totalJSHeapSize": 81400000
+      },
+      "DOM_COUNT": 10039,
+      "SVG_COUNT": 10034,
+      "plugins": {
+        "richText": true,
+        "associativeLine": true,
+        "outerFrame": true,
+        "demonstrate": true
+      },
+      "interactions": {
+        "ZOOM_LATENCY": {
+          "ms": 35,
+          "ok": true,
+          "err": null
+        },
+        "PAN_LATENCY": {
+          "ms": 37,
+          "ok": true,
+          "err": null
+        },
+        "SEARCH_LATENCY": {
+          "ms": 34,
+          "ok": true,
+          "err": null
+        },
+        "SELECT_LATENCY": {
+          "ms": 23,
+          "ok": false,
+          "err": null
+        },
+        "COLLAPSE_LATENCY": {
+          "ms": 37,
+          "ok": true,
+          "err": null
+        },
+        "EXPAND_LATENCY": {
+          "ms": 31,
+          "ok": true,
+          "err": null
+        }
+      },
+      "fullRender": {
+        "ok": true,
+        "requestedNodes": 10000,
+        "fetchedMaxNodes": 10000,
+        "treeNodes": 10000,
+        "apiNodeCount": 10000,
+        "truncated": false,
+        "httpMs": 11460,
+        "parseMs": 13,
+        "renderMs": 39074,
+        "fullMs": 50547,
+        "renderReason": "node_tree_render_end",
+        "domCount": 10039,
+        "svgCount": 10034
+      },
+      "whiteScreen": false,
+      "crashed": false,
+      "oom": false,
+      "hotspots": [
+        "SimpleMindMap_setData_layout_render",
+        "full_tree_node_creation_layout",
+        "product_safe_load_clips_to_~80_nodes"
+      ],
+      "verdict": "PARTIAL",
+      "f5": {
+        "before": {
+          "roomKey": "c2-browser-10000-1788747933468",
+          "version": 1,
+          "treeSource": null,
+          "legacyFallback": false,
+          "nodeCount": 10000
+        },
+        "after": {
+          "roomKey": "c2-browser-10000-1788747933468",
+          "version": 2,
+          "treeSource": null,
+          "legacyFallback": false,
+          "nodeCount": 10000,
+          "hasSvg": true,
+          "hasMindMap": true,
+          "authority": {
+            "status": 200,
+            "nodeCount": 10000,
+            "version": 2
+          }
+        },
+        "waitOk": true,
+        "verdict": "PASS"
+      }
+    },
+    {
+      "size": 20000,
+      "roomKey": "c2-browser-20000-1788748040926",
+      "phases": {
+        "NAVIGATION_START": 34.79999998211861,
+        "MINDMAP_CONSTRUCTOR_START": 520.8999999761581,
+        "MINDMAP_DATA_APPLIED": 759.6999999880791,
+        "ROOM_HTTP_START": 1192,
+        "ROOM_DATA_READY": 1269.0999999940395,
+        "FIRST_RENDER_COMPLETE": 1529.699999988079,
+        "LAYOUT_COMPLETE": 1529.7999999821186,
+        "FIRST_INTERACTION_READY": 1841.7999999821186,
+        "AUTH_READY": 34.79999998211861
+      },
+      "renderReason": "mutation",
+      "TIME_TO_DATA_READY": 1234,
+      "TIME_DATA_TO_RENDER": 261,
+      "TIME_TO_FIRST_RENDER": 1495,
+      "TIME_TO_INTERACTIVE": 1509,
+      "previewMeta": {
+        "nodeCount": 20000,
+        "treeSource": null,
+        "legacyFallback": false,
+        "legacyFallbackReason": "",
+        "version": 1,
+        "safeLoad": true,
+        "clipped": true,
+        "lazyLoad": true,
+        "roomNodesHash": null,
+        "roomsJsonHash": null,
+        "roomNodesCount": null
+      },
+      "productSafeLoad": true,
+      "LONG_TASK_COUNT": 7,
+      "MAX_LONG_TASK_MS": 32376,
+      "longTasksTop": [
+        {
+          "name": "self",
+          "duration": 32376,
+          "startTime": 61597.79999998212
+        },
+        {
+          "name": "self",
+          "duration": 10211,
+          "startTime": 51249.09999999404
+        },
+        {
+          "name": "self",
+          "duration": 386,
+          "startTime": 346.5
+        },
+        {
+          "name": "self",
+          "duration": 69,
+          "startTime": 61466.29999998212
+        },
+        {
+          "name": "self",
+          "duration": 62,
+          "startTime": 51155.59999999404
+        },
+        {
+          "name": "self",
+          "duration": 53,
+          "startTime": 61535.29999998212
+        },
+        {
+          "name": "self",
+          "duration": 51,
+          "startTime": 272.2999999821186
+        }
+      ],
+      "HEAP_BEFORE": {
+        "usedJSHeapSize": 56800000
+      },
+      "HEAP_AFTER": {
+        "usedJSHeapSize": 56800000,
+        "totalJSHeapSize": 81400000
+      },
+      "DOM_COUNT": 10039,
+      "SVG_COUNT": 10034,
+      "plugins": {
+        "richText": true,
+        "associativeLine": true,
+        "outerFrame": true,
+        "demonstrate": true
+      },
+      "interactions": {
+        "ZOOM_LATENCY": {
+          "ms": 65,
+          "ok": true,
+          "err": null
+        },
+        "PAN_LATENCY": {
+          "ms": 43,
+          "ok": true,
+          "err": null
+        },
+        "SEARCH_LATENCY": {
+          "ms": 40,
+          "ok": true,
+          "err": null
+        },
+        "SELECT_LATENCY": {
+          "ms": 57,
+          "ok": true,
+          "err": null
+        },
+        "COLLAPSE_LATENCY": {
+          "ms": 27,
+          "ok": true,
+          "err": null
+        },
+        "EXPAND_LATENCY": {
+          "ms": 45,
+          "ok": true,
+          "err": null
+        }
+      },
+      "fullRender": {
+        "ok": true,
+        "requestedNodes": 20000,
+        "fetchedMaxNodes": 10000,
+        "treeNodes": 10000,
+        "apiNodeCount": 20000,
+        "truncated": true,
+        "httpMs": 49276,
+        "parseMs": 17,
+        "renderMs": 43394,
+        "fullMs": 92688,
+        "renderReason": "node_tree_render_end",
+        "domCount": 10039,
+        "svgCount": 10034
+      },
+      "whiteScreen": false,
+      "crashed": false,
+      "oom": false,
+      "hotspots": [
+        "full_tree_node_creation_layout",
+        "product_safe_load_clips_to_~80_nodes",
+        "JS_longtask_during_render"
+      ],
+      "verdict": "PASS",
+      "f5": {
+        "before": {
+          "roomKey": "c2-browser-20000-1788748040926",
+          "version": 1,
+          "treeSource": null,
+          "legacyFallback": false,
+          "nodeCount": 20000
+        },
+        "after": {
+          "roomKey": "c2-browser-20000-1788748040926",
+          "version": 2,
+          "treeSource": null,
+          "legacyFallback": false,
+          "nodeCount": 20000,
+          "hasSvg": true,
+          "hasMindMap": true,
+          "authority": {
+            "status": 200,
+            "nodeCount": 20000,
+            "version": 2
+          }
+        },
+        "waitOk": true,
+        "verdict": "PASS"
+      }
+    }
+  ],
   "summary": {
-    "EDITOR_1K_BROWSER": "NOT_RUN",
-    "EDITOR_5K_BROWSER": "NOT_RUN",
-    "EDITOR_10K_BROWSER": "NOT_RUN",
-    "EDITOR_20K_BROWSER": "NOT_RUN",
-    "reason": "C2_BROWSER_ORIGIN / COLLAB_TEST_BASE_URL not set"
+    "AUTH_MODE": "DEV_NORMAL_ACL",
+    "EDITOR_1K_BROWSER": "PASS",
+    "EDITOR_5K_BROWSER": "PASS",
+    "EDITOR_10K_BROWSER": "PARTIAL",
+    "EDITOR_20K_BROWSER": "PASS",
+    "1K_TIME_TO_DATA_READY": 434,
+    "1K_TIME_TO_FIRST_RENDER": 624,
+    "1K_TIME_TO_INTERACTIVE": 650,
+    "5K_TIME_TO_DATA_READY": 453,
+    "5K_TIME_TO_FIRST_RENDER": 540,
+    "5K_TIME_TO_INTERACTIVE": 555,
+    "10K_TIME_TO_DATA_READY": 644,
+    "10K_TIME_TO_FIRST_RENDER": 779,
+    "10K_TIME_TO_INTERACTIVE": 829,
+    "20K_TIME_TO_DATA_READY": 1234,
+    "20K_TIME_TO_FIRST_RENDER": 1495,
+    "20K_TIME_TO_INTERACTIVE": 1509,
+    "10K_TIME_DATA_TO_RENDER": 135,
+    "10K_PRODUCT_SAFE_LOAD": true,
+    "10K_FULL_HTTP_MS": 11460,
+    "10K_FULL_PARSE_MS": 13,
+    "10K_FULL_RENDER_MS": 39074,
+    "10K_FULL_DOM_COUNT": 10039,
+    "10K_FULL_SVG_COUNT": 10034,
+    "10K_ZOOM_LATENCY": 35,
+    "10K_PAN_LATENCY": 37,
+    "10K_SEARCH_LATENCY": 34,
+    "10K_SELECT_LATENCY": 23,
+    "10K_COLLAPSE_LATENCY": 37,
+    "10K_EXPAND_LATENCY": 31,
+    "10K_LONG_TASK_COUNT": 5,
+    "10K_MAX_LONG_TASK_MS": 30263,
+    "10K_HEAP": {
+      "usedJSHeapSize": 56800000,
+      "totalJSHeapSize": 81400000
+    },
+    "10K_DOM_COUNT": 10039,
+    "10K_SVG_COUNT": 10034,
+    "RENDER_HOTSPOT_1": "SimpleMindMap_setData_layout_render",
+    "RENDER_HOTSPOT_2": "full_tree_node_creation_layout",
+    "RENDER_HOTSPOT_3": "product_safe_load_clips_to_~80_nodes",
+    "F5_5K": "PASS",
+    "F5_10K": "PASS",
+    "F5_20K": "PASS",
+    "C2_RENDERER_OPTIMIZATION_REQUIRED": "YES",
+    "C2_LARGE_MAP_READY": "PARTIAL"
+  },
+  "auth": {
+    "AUTH_MODE": "DEV_NORMAL_ACL",
+    "authenticated": true,
+    "userId": "dev-local"
   }
 }

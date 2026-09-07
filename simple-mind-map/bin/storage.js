@@ -11,6 +11,8 @@ const {
   nodesReadPreferEnabled,
   nodesTableAuthorityEnabled,
   canonicalizeNodes,
+  snapshotCanonicalForStorage,
+  takeEncodedRowsCache,
   pickAuthoritativeNodes,
   auditRoomNodesState,
   replaceRoomNodes,
@@ -703,9 +705,7 @@ async function writeRoomNodeRows(db, roomKey, nodes, version, options = {}) {
   if (!nodesDualWriteEnabled()) return { wrote: false, skipped: true }
   if (nodes == null) return { wrote: false, skipped: true }
   const encodedRows =
-    options.encodedRows ||
-    (nodes && nodes.__encodedRows) ||
-    null
+    options.encodedRows || takeEncodedRowsCache(nodes) || null
   const result = await replaceRoomNodes(db, roomKey, nodes, version, {
     ...options,
     ...(encodedRows ? { encodedRows } : {})
@@ -721,17 +721,8 @@ async function writeRoomNodeRows(db, roomKey, nodes, version, options = {}) {
 }
 
 function snapshotNodesForStorage(nodes) {
-  const canonical = canonicalizeNodes(nodes || {})
-  if (!canonical.ok) return nodes || {}
-  const out = canonical.nodes
-  if (canonical.encodedRows) {
-    Object.defineProperty(out, '__encodedRows', {
-      value: canonical.encodedRows,
-      enumerable: false,
-      configurable: true
-    })
-  }
-  return out
+  const snap = snapshotCanonicalForStorage(nodes)
+  return snap.ok ? snap.nodes : nodes || {}
 }
 
 async function upsertRoom(roomKey, title, options = {}) {
