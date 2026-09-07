@@ -1,7 +1,7 @@
 <template
   ><div class="memberList">
     <div v-for="member in members" :key="member.id" class="memberRow">
-      <el-avatar :size="36">{{ member.avatar }}</el-avatar>
+      <UserAvatar :person="member" :size="36" />
       <div class="identity">
         <strong>{{ member.name }}</strong
         ><span>{{ member.email }}</span
@@ -28,8 +28,11 @@
   </div></template
 >
 <script>
+import UserAvatar from '@/components/UserAvatar.vue'
+
 export default {
   name: 'TeamMemberList',
+  components: { UserAvatar },
   props: { members: Array },
   data: () => ({ roles: ['Editor', 'Viewer'] })
 }
@@ -59,9 +62,6 @@ export default {
   }
   .el-select {
     width: 105px;
-  }
-  /deep/ .el-avatar {
-    background: #158f68;
   }
 }
 </style>

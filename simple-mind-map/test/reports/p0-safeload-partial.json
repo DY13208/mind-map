@@ -1,0 +1,160 @@
+{
+  "origin": "http://127.0.0.1:8989",
+  "SAFE_LOAD_CHILDCOUNT_AUTHORITY": "room_nodes",
+  "SAFE_LOAD_CHILDCOUNT_QUERY_COUNT": 1,
+  "parents": {
+    "PARENT_5": {
+      "uid": "parent_5",
+      "SERVER_CHILD_COUNT": 5,
+      "CLIENT_CHILD_COUNT": 5,
+      "SAFE_LOAD_CHILD_COUNT": 5,
+      "CHILD_COUNT_META": 5,
+      "IN_SAFE_LOAD": true,
+      "EDITOR_FOUND": true,
+      "EDITOR_META": 5
+    },
+    "PARENT_20": {
+      "uid": "parent_20",
+      "SERVER_CHILD_COUNT": 20,
+      "CLIENT_CHILD_COUNT": 20,
+      "SAFE_LOAD_CHILD_COUNT": 20,
+      "CHILD_COUNT_META": 20,
+      "IN_SAFE_LOAD": true,
+      "EDITOR_FOUND": true,
+      "EDITOR_META": 20
+    },
+    "PARENT_50": {
+      "uid": "parent_50",
+      "SERVER_CHILD_COUNT": 50,
+      "CLIENT_CHILD_COUNT": 50,
+      "SAFE_LOAD_CHILD_COUNT": 48,
+      "CHILD_COUNT_META": 50,
+      "IN_SAFE_LOAD": true,
+      "CLIENT_BEFORE_FORCE": 50,
+      "EDITOR_META": 50,
+      "EDITOR_FOUND": true
+    },
+    "PARENT_100": {
+      "uid": "parent_100",
+      "SERVER_CHILD_COUNT": 100,
+      "CLIENT_CHILD_COUNT": 100,
+      "SAFE_LOAD_CHILD_COUNT": 0,
+      "CHILD_COUNT_META": 100,
+      "IN_SAFE_LOAD": true,
+      "EDITOR_FOUND": true,
+      "EDITOR_META": 100
+    }
+  },
+  "inserts": [
+    {
+      "parent": "PARENT_50",
+      "text": "TEST_CHILD_50_1788761156454",
+      "insertResult": {
+        "ok": true,
+        "newUid": "bdc7e485-fdc0-4ff5-975e-f27150d884ac",
+        "text": "TEST_CHILD_50_1788761156454",
+        "CLIENT_VISIBLE_CHILD_COUNT": 51,
+        "CLIENT_REQUESTED_INDEX": 50,
+        "BEFORE_HYDRATE_COUNT": 50,
+        "META_BEFORE": 50,
+        "NEEDS_BEFORE": false,
+        "AFTER_META": 51,
+        "NEW_INDEX_IN_CLIENT": 50
+      },
+      "SERVER_FULL_CHILD_COUNT": 51,
+      "SERVER_RESOLVED_SLOT": 50,
+      "PG_AFTER_INSERT": "PRESENT",
+      "PARTIAL_SIBLING_INDEX_MISMATCH": "NO"
+    }
+  ],
+  "f5": {
+    "NEW_NODE_IN_PG": "YES",
+    "NEW_NODE_IN_FULL_TREE": "YES",
+    "NEW_NODE_IN_SAFE_LOAD": "NO",
+    "NEW_NODE_IN_EDITOR_AFTER_HYDRATE": "YES",
+    "SAFE_P50_LOADED": 48,
+    "SAFE_P50_META": 52
+  },
+  "depth": {
+    "DEPTH_4_F5": "PASS",
+    "DEPTH_5_F5": "PASS",
+    "DEPTH_6_F5": "PASS",
+    "l5Meta": 1,
+    "l5Live": 1
+  },
+  "localRuns": {
+    "total": 10,
+    "pass": 10
+  },
+  "context": {
+    "ok": true,
+    "INSERT_CHILD_CONTEXT_COMPLETE": "PASS",
+    "INSERT_SIBLING_CONTEXT_COMPLETE": "PASS",
+    "MOVE_CONTEXT_COMPLETE": "PASS",
+    "REORDER_CONTEXT_COMPLETE": "PASS",
+    "HYDRATE_SINGLE_FLIGHT": "YES",
+    "details": {
+      "insertChild": {
+        "label": "INSERT_CHILD",
+        "pass": true,
+        "live": 50,
+        "meta": 50,
+        "stillNeeds": false
+      },
+      "insertSibling": {
+        "label": "INSERT_SIBLING",
+        "pass": true,
+        "live": 50,
+        "meta": 50,
+        "stillNeeds": false
+      },
+      "move": {
+        "label": "MOVE",
+        "pass": true,
+        "live": 50,
+        "meta": 50,
+        "stillNeeds": false
+      },
+      "reorder": {
+        "label": "REORDER",
+        "pass": true,
+        "live": 50,
+        "meta": 50,
+        "stillNeeds": false
+      }
+    }
+  },
+  "FREEZE_BREAK_REQUIRED": "NO",
+  "PHASE1_CLIENT_HYDRATE_FIX_SUFFICIENT": "YES",
+  "ANCHOR_PROTOCOL_REQUIRED": "NO",
+  "LOCAL_P0_FIXED": "YES",
+  "PRODUCTION_MANUAL_VERIFICATION_REQUIRED": "YES",
+  "REAL_PRODUCT_P0_FIXED": "PENDING_MANUAL_VERIFY",
+  "roomKey": "p0-safeload-1788761148458",
+  "seedNodeCount": 450,
+  "SAFE_LOAD_ACTIVE": true,
+  "previewTreeNodes": 80,
+  "EXPANDED_PARTIAL_PARENT_AUTO_HYDRATE": "PASS",
+  "HYDRATE_CHILD_UID_SET_MATCH": "PASS",
+  "P50_SAFE_LOADED_CHILDREN": 48,
+  "P50_AUTHORITATIVE_CHILD_COUNT": 50,
+  "P50_AFTER_HYDRATE_CHILDREN": 50,
+  "P100_SAFE_LOADED_CHILDREN": 0,
+  "P100_AUTHORITATIVE_CHILD_COUNT": 100,
+  "P100_AFTER_HYDRATE_CHILDREN": 100,
+  "INSERT_CHILD_CONTEXT_COMPLETE": "PASS",
+  "INSERT_SIBLING_CONTEXT_COMPLETE": "PASS",
+  "MOVE_CONTEXT_COMPLETE": "PASS",
+  "REORDER_CONTEXT_COMPLETE": "PASS",
+  "HYDRATE_SINGLE_FLIGHT": "YES",
+  "P50_BEFORE_HYDRATE": 50,
+  "P50_AFTER_HYDRATE": 51,
+  "P50_CLIENT_REQUESTED_INDEX": 50,
+  "P50_SERVER_RESOLVED_SLOT": 50,
+  "PARTIAL_SIBLING_INDEX_MISMATCH": "NO",
+  "DEPTH_4_F5": "PASS",
+  "DEPTH_5_F5": "PASS",
+  "DEPTH_6_F5": "PASS",
+  "LOCAL_PARTIAL_PARENT_RUNS": 10,
+  "LOCAL_PARTIAL_PARENT_PASS": "10/10"
+}

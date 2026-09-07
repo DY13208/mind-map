@@ -1,0 +1,5 @@
+
+> simple-mind-map@0.14.0-fix.3 test:collab:files
+> node ./test/fileSystem.test.js
+
+fileSystem.test.js ok

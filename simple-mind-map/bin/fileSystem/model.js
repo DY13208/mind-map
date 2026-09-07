@@ -73,7 +73,8 @@ function publicFile(row, access = {}) {
     folderId: row.folder_id || row.folderId || null,
     owner: {
       userId: row.owner_user_id || row.owner_id || (row.owner && row.owner.userId) || '',
-      name: row.owner_name || (row.owner && row.owner.name) || row.owner_id || ''
+      name: row.owner_name || (row.owner && row.owner.name) || row.owner_id || '',
+      avatar: row.owner_avatar || (row.owner && row.owner.avatar) || ''
     },
     role: access.role || row.role || null,
     createdAt: row.created_at || row.createdAt,
