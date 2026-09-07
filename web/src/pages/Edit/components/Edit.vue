@@ -235,10 +235,14 @@ export default {
         state.localConfig.useLeftKeySelectionRightKeyDrag,
       extraTextOnExport: state => state.extraTextOnExport,
       isDragOutlineTreeNode: state => state.isDragOutlineTreeNode,
-      enableAi: state => state.localConfig.enableAi
+      enableAi: state => state.localConfig.enableAi,
+      isDark: state => state.localConfig.isDark
     })
   },
   watch: {
+    isDark() {
+      this.syncCanvasDarkBackground()
+    },
     openNodeRichText() {
       if (this.openNodeRichText) {
         this.addRichTextPlugin()
@@ -449,6 +453,46 @@ export default {
       if (this.enableShowLoading) {
         this.enableShowLoading = false
         hideLoading()
+      }
+      this.syncCanvasDarkBackground()
+    },
+
+    // 深色模式只改画布背景的视觉呈现，不改主题模板/自定义配置，避免基础样式失效
+    isLikelyDarkColor(color) {
+      const hex = String(color || '').trim()
+      const match = hex.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)
+      if (!match) return false
+      let value = match[1]
+      if (value.length === 3) {
+        value = value
+          .split('')
+          .map(ch => ch + ch)
+          .join('')
+      }
+      const r = parseInt(value.slice(0, 2), 16)
+      const g = parseInt(value.slice(2, 4), 16)
+      const b = parseInt(value.slice(4, 6), 16)
+      return 0.299 * r + 0.587 * g + 0.114 * b < 140
+    },
+
+    syncCanvasDarkBackground() {
+      const mindMap = this.mindMap
+      if (!mindMap || !mindMap.el) return
+      const el = mindMap.el
+      const themeConfig = mindMap.themeConfig || {}
+      if (this.isDark && !this.isLikelyDarkColor(themeConfig.backgroundColor)) {
+        el.style.backgroundColor = '#262A2E'
+        el.style.backgroundImage = 'none'
+        return
+      }
+      el.style.backgroundColor = themeConfig.backgroundColor || ''
+      if (themeConfig.backgroundImage && themeConfig.backgroundImage !== 'none') {
+        el.style.backgroundImage = `url(${themeConfig.backgroundImage})`
+        el.style.backgroundRepeat = themeConfig.backgroundRepeat || ''
+        el.style.backgroundPosition = themeConfig.backgroundPosition || ''
+        el.style.backgroundSize = themeConfig.backgroundSize || ''
+      } else {
+        el.style.backgroundImage = 'none'
       }
     },
 
@@ -675,6 +719,7 @@ export default {
         const fullData = this.mindMap.getData(true)
         return { ...fullData }
       }
+      this.syncCanvasDarkBackground()
     },
 
     // 加载相关插件
