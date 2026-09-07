@@ -6,6 +6,14 @@ function nowIso() {
   return new Date().toISOString()
 }
 
+function effectiveRole(row) {
+  const roles = [row.direct_role, row.team_role, row.role]
+  if (roles.includes('owner')) return 'owner'
+  if (roles.includes('editor')) return 'editor'
+  if (roles.includes('viewer')) return 'viewer'
+  return row.role || ''
+}
+
 function createMemoryFileStore(seed = {}) {
   const rooms = new Map()
   const folders = new Map()
@@ -119,6 +127,7 @@ function createMemoryFileStore(seed = {}) {
         metadata: row.metadata || { ...DEFAULT_METADATA },
         folder_id: row.folder_id || null,
         owner_id: row.owner_id || '',
+        team_id: row.team_id || null,
         created_at: row.created_at || nowIso(),
         updated_at: row.updated_at || nowIso(),
         content_updated_at: row.content_updated_at || nowIso(),
@@ -147,13 +156,34 @@ function createMemoryFileStore(seed = {}) {
     },
     async insertMember(row) {
       bump()
-      members.push({
-        room_key: row.room_key,
-        user_id: row.user_id,
-        role: row.role,
-        created_at: nowIso(),
-        updated_at: nowIso()
-      })
+      const source = row.source || 'direct_share'
+      const current = members.find(
+        item => item.room_key === row.room_key && item.user_id === row.user_id
+      )
+      if (!current) {
+        members.push({
+          room_key: row.room_key,
+          user_id: row.user_id,
+          role: row.role,
+          direct_role: source === 'team' ? null : row.role,
+          team_role: source === 'team' ? row.role : null,
+          source,
+          source_team_id: row.source_team_id || null,
+          created_at: nowIso(),
+          updated_at: nowIso()
+        })
+      } else {
+        if (source === 'team') {
+          current.team_role = row.role
+          current.source_team_id = row.source_team_id || null
+        } else {
+          current.direct_role = row.role
+        }
+        current.role = effectiveRole(current)
+        current.source = current.direct_role ? 'direct_share' : 'team'
+        if (!current.team_role) current.source_team_id = null
+        current.updated_at = nowIso()
+      }
       return row
     },
     async listMembersForRooms(roomKeys) {

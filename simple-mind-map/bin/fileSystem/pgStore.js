@@ -79,11 +79,11 @@ function createPgFileStore(pool) {
       const res = await conn.query(
         `insert into rooms
            (room_key, title, cos_key, nodes, version, metadata, folder_id,
-            owner_id, created_at, updated_at, content_updated_at)
+           owner_id, team_id, created_at, updated_at, content_updated_at)
          values
-           ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,$8,now(),now(),now())
+           ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,$8,$9,now(),now(),now())
          returning room_key, title, cos_key, version, metadata, folder_id,
-                   owner_id, created_at, updated_at, content_updated_at,
+                   owner_id, team_id, created_at, updated_at, content_updated_at,
                    deleted_at, deleted_by, deleted_from_folder_id`,
         [
           row.room_key,
@@ -93,7 +93,8 @@ function createPgFileStore(pool) {
           Number(row.version || 0),
           JSON.stringify(row.metadata || DEFAULT_METADATA),
           row.folder_id || null,
-          row.owner_id || null
+          row.owner_id || null,
+          row.team_id || null
         ]
       )
       return res.rows[0]
@@ -116,12 +117,35 @@ function createPgFileStore(pool) {
       const conn = db || pool
       if (!db) queryCount += 1
       await conn.query(
-        `insert into room_members (room_key, user_id, role)
-         values ($1,$2,$3)
+        `insert into room_members
+           (room_key, user_id, role, direct_role, team_role, source, source_team_id)
+         values (
+           $1, $2, $3,
+           case when $4 = 'team' then null else $3 end,
+           case when $4 = 'team' then $3 else null end,
+           $4, $5
+         )
          on conflict (room_key, user_id) do update set
-           role = excluded.role,
+           direct_role = case when excluded.team_role is null then excluded.direct_role else room_members.direct_role end,
+           team_role = case when excluded.team_role is null then room_members.team_role else excluded.team_role end,
+           role = case
+             when coalesce(case when excluded.team_role is null then excluded.direct_role else room_members.direct_role end, '') = 'owner'
+               or coalesce(case when excluded.team_role is null then room_members.team_role else excluded.team_role end, '') = 'owner' then 'owner'
+             when coalesce(case when excluded.team_role is null then excluded.direct_role else room_members.direct_role end, '') = 'editor'
+               or coalesce(case when excluded.team_role is null then room_members.team_role else excluded.team_role end, '') = 'editor' then 'editor'
+             else 'viewer'
+           end,
+           source = case
+             when coalesce(case when excluded.team_role is null then excluded.direct_role else room_members.direct_role end, '') <> '' then 'direct_share'
+             else 'team'
+           end,
+           source_team_id = case
+             when excluded.team_role is not null then excluded.source_team_id
+             when room_members.team_role is not null then room_members.source_team_id
+             else null
+           end,
            updated_at = now()`,
-        [row.room_key, row.user_id, row.role]
+        [row.room_key, row.user_id, row.role, row.source || 'direct_share', row.source_team_id || null]
       )
       return row
     },

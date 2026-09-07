@@ -207,6 +207,9 @@ server.on('upgrade', async (request, socket, head) => {
 
 Promise.all([initSchema(), initAuth()])
   .then(async () => {
+    if (isAuthEnabled()) {
+      await require('./teamSpace').initCorpConstraints(getPool())
+    }
     attachPersistence()
     let bus = createEventBus({ pool: getPool() })
     try {

@@ -1701,6 +1701,8 @@ async function initSchemaOnce() {
   await historySchema.initHistorySchema(pool)
   const fileSystemSchema = require('./fileSystem/schema')
   await fileSystemSchema.initFileSystemSchema(pool)
+  const teamSpace = require('./teamSpace')
+  await teamSpace.initSchema(pool)
   const trashed = await pool.query(
     `select room_key from rooms where deleted_at is not null`
   )
