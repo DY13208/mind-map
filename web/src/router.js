@@ -143,6 +143,11 @@ const routes = [
         : { path: '/files', replace: true }
   },
   {
+    path: '/sop',
+    name: 'SopRegistry',
+    component: () => import(`./pages/SopRegistry/Index.vue`)
+  },
+  {
     path: '/doc/zh',
     component: () => import(`./pages/Doc.vue`)
   }

@@ -375,6 +375,7 @@ export default {
     openFileTip: '打开文件前请先导出当前编辑的文件，谨防内容丢失',
     ai: 'AI',
     flowExpand: '补齐',
+    sopRegistry: 'SOP台账',
     cooperate: '协同'
   },
   edit: {
