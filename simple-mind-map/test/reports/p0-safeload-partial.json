@@ -1,15 +1,15 @@
 {
   "origin": "http://127.0.0.1:8989",
-  "SAFE_LOAD_ACTIVE": true,
-  "PARTIAL_CHILDREN_DETECTED": "YES",
+  "SAFE_LOAD_CHILDCOUNT_AUTHORITY": "room_nodes",
+  "SAFE_LOAD_CHILDCOUNT_QUERY_COUNT": 1,
   "parents": {
     "PARENT_5": {
       "uid": "parent_5",
       "SERVER_CHILD_COUNT": 5,
       "CLIENT_CHILD_COUNT": 5,
       "SAFE_LOAD_CHILD_COUNT": 5,
-      "IN_SAFE_LOAD": true,
       "CHILD_COUNT_META": 5,
+      "IN_SAFE_LOAD": true,
       "EDITOR_FOUND": true,
       "EDITOR_META": 5
     },
@@ -18,515 +18,143 @@
       "SERVER_CHILD_COUNT": 20,
       "CLIENT_CHILD_COUNT": 20,
       "SAFE_LOAD_CHILD_COUNT": 20,
-      "IN_SAFE_LOAD": true,
       "CHILD_COUNT_META": 20,
+      "IN_SAFE_LOAD": true,
       "EDITOR_FOUND": true,
       "EDITOR_META": 20
     },
     "PARENT_50": {
       "uid": "parent_50",
       "SERVER_CHILD_COUNT": 50,
-      "CLIENT_CHILD_COUNT": 48,
+      "CLIENT_CHILD_COUNT": 50,
       "SAFE_LOAD_CHILD_COUNT": 48,
+      "CHILD_COUNT_META": 50,
       "IN_SAFE_LOAD": true,
-      "CHILD_COUNT_META": 48,
-      "EDITOR_FOUND": true,
-      "EDITOR_META": 48
+      "CLIENT_BEFORE_FORCE": 50,
+      "EDITOR_META": 50,
+      "EDITOR_FOUND": true
     },
     "PARENT_100": {
       "uid": "parent_100",
       "SERVER_CHILD_COUNT": 100,
       "CLIENT_CHILD_COUNT": 100,
       "SAFE_LOAD_CHILD_COUNT": 0,
+      "CHILD_COUNT_META": 100,
       "IN_SAFE_LOAD": true,
-      "CHILD_COUNT_META": 0,
       "EDITOR_FOUND": true,
       "EDITOR_META": 100
     }
   },
   "inserts": [
     {
-      "parent": "PARENT_5",
-      "parentUid": "parent_5",
-      "text": "TEST_CHILD_5_1788752696155",
-      "insertResult": {
-        "ok": true,
-        "newUid": "f74985ec-ecf0-4872-96c9-ccb86872e1d5",
-        "text": "TEST_CHILD_5_1788752696155",
-        "CLIENT_VISIBLE_CHILD_COUNT": 6,
-        "CLIENT_REQUESTED_INDEX": 5,
-        "CLIENT_BEFORE_COUNT": 6,
-        "BEFORE_HYDRATE_COUNT": 5,
-        "META_BEFORE": 5,
-        "NEW_INDEX_IN_CLIENT": 5,
-        "roomKey": "p0-safeload-1788752691373",
-        "origin": "http://127.0.0.1:8989"
-      },
-      "CLIENT_VISIBLE_CHILD_COUNT": 6,
-      "CLIENT_REQUESTED_INDEX": 5,
-      "SERVER_FULL_CHILD_COUNT": 6,
-      "SERVER_RESOLVED_SLOT": 5,
-      "PG_AFTER_INSERT": "PRESENT",
-      "pg": {
-        "uid": "f74985ec-ecf0-4872-96c9-ccb86872e1d5",
-        "parent_uid": "parent_5",
-        "position": "YVI0000000000PA7",
-        "node_version": "3",
-        "deleted_at": null
-      },
-      "operation": {
-        "type": "node.insert",
-        "version": "3",
-        "payloadIndex": 5,
-        "parentUid": "parent_5"
-      },
-      "PARTIAL_SIBLING_INDEX_MISMATCH": "NO",
-      "STALE_CHILD_COUNT_META": "NO"
-    },
-    {
-      "parent": "PARENT_20",
-      "parentUid": "parent_20",
-      "text": "TEST_CHILD_20_1788752697691",
-      "insertResult": {
-        "ok": true,
-        "newUid": "6863c67f-baf5-4135-89ee-165226453759",
-        "text": "TEST_CHILD_20_1788752697691",
-        "CLIENT_VISIBLE_CHILD_COUNT": 21,
-        "CLIENT_REQUESTED_INDEX": 20,
-        "CLIENT_BEFORE_COUNT": 21,
-        "BEFORE_HYDRATE_COUNT": 20,
-        "META_BEFORE": 20,
-        "NEW_INDEX_IN_CLIENT": 20,
-        "roomKey": "p0-safeload-1788752691373",
-        "origin": "http://127.0.0.1:8989"
-      },
-      "CLIENT_VISIBLE_CHILD_COUNT": 21,
-      "CLIENT_REQUESTED_INDEX": 20,
-      "SERVER_FULL_CHILD_COUNT": 21,
-      "SERVER_RESOLVED_SLOT": 20,
-      "PG_AFTER_INSERT": "PRESENT",
-      "pg": {
-        "uid": "6863c67f-baf5-4135-89ee-165226453759",
-        "parent_uid": "parent_20",
-        "position": "ZZZYEC23XR000000",
-        "node_version": "5",
-        "deleted_at": null
-      },
-      "operation": {
-        "type": "node.insert",
-        "version": "5",
-        "payloadIndex": 20,
-        "parentUid": "parent_20"
-      },
-      "PARTIAL_SIBLING_INDEX_MISMATCH": "NO",
-      "STALE_CHILD_COUNT_META": "NO"
-    },
-    {
       "parent": "PARENT_50",
-      "parentUid": "parent_50",
-      "text": "TEST_CHILD_50_1788752699232",
+      "text": "TEST_CHILD_50_1788761156454",
       "insertResult": {
         "ok": true,
-        "newUid": "f08adaa8-36a2-4ae2-833f-159490072800",
-        "text": "TEST_CHILD_50_1788752699232",
-        "CLIENT_VISIBLE_CHILD_COUNT": 49,
-        "CLIENT_REQUESTED_INDEX": 48,
-        "CLIENT_BEFORE_COUNT": 49,
-        "BEFORE_HYDRATE_COUNT": 48,
-        "META_BEFORE": 48,
-        "NEW_INDEX_IN_CLIENT": 48,
-        "roomKey": "p0-safeload-1788752691373",
-        "origin": "http://127.0.0.1:8989"
+        "newUid": "bdc7e485-fdc0-4ff5-975e-f27150d884ac",
+        "text": "TEST_CHILD_50_1788761156454",
+        "CLIENT_VISIBLE_CHILD_COUNT": 51,
+        "CLIENT_REQUESTED_INDEX": 50,
+        "BEFORE_HYDRATE_COUNT": 50,
+        "META_BEFORE": 50,
+        "NEEDS_BEFORE": false,
+        "AFTER_META": 51,
+        "NEW_INDEX_IN_CLIENT": 50
       },
-      "CLIENT_VISIBLE_CHILD_COUNT": 49,
-      "CLIENT_REQUESTED_INDEX": 48,
       "SERVER_FULL_CHILD_COUNT": 51,
-      "SERVER_RESOLVED_SLOT": 48,
+      "SERVER_RESOLVED_SLOT": 50,
       "PG_AFTER_INSERT": "PRESENT",
-      "pg": {
-        "uid": "f08adaa8-36a2-4ae2-833f-159490072800",
-        "parent_uid": "parent_50",
-        "position": "ZZZZZZZZZGIKTXW1",
-        "node_version": "7",
-        "deleted_at": null
-      },
-      "operation": {
-        "type": "node.insert",
-        "version": "7",
-        "payloadIndex": 48,
-        "parentUid": "parent_50"
-      },
-      "PARTIAL_SIBLING_INDEX_MISMATCH": "YES",
-      "STALE_CHILD_COUNT_META": "YES"
-    },
-    {
-      "parent": "PARENT_100",
-      "parentUid": "parent_100",
-      "text": "TEST_CHILD_100_1788752700772",
-      "insertResult": {
-        "ok": true,
-        "newUid": "f6387251-809f-41d5-94c7-a66fb986f2f6",
-        "text": "TEST_CHILD_100_1788752700772",
-        "CLIENT_VISIBLE_CHILD_COUNT": 101,
-        "CLIENT_REQUESTED_INDEX": 100,
-        "CLIENT_BEFORE_COUNT": 101,
-        "BEFORE_HYDRATE_COUNT": 100,
-        "META_BEFORE": 100,
-        "NEW_INDEX_IN_CLIENT": 100,
-        "roomKey": "p0-safeload-1788752691373",
-        "origin": "http://127.0.0.1:8989"
-      },
-      "CLIENT_VISIBLE_CHILD_COUNT": 101,
-      "CLIENT_REQUESTED_INDEX": 100,
-      "SERVER_FULL_CHILD_COUNT": 101,
-      "SERVER_RESOLVED_SLOT": 100,
-      "PG_AFTER_INSERT": "PRESENT",
-      "pg": {
-        "uid": "f6387251-809f-41d5-94c7-a66fb986f2f6",
-        "parent_uid": "parent_100",
-        "position": "ZTL12HTL12HTL11Z",
-        "node_version": "9",
-        "deleted_at": null
-      },
-      "operation": {
-        "type": "node.insert",
-        "version": "9",
-        "payloadIndex": 100,
-        "parentUid": "parent_100"
-      },
-      "PARTIAL_SIBLING_INDEX_MISMATCH": "NO",
-      "STALE_CHILD_COUNT_META": "NO"
+      "PARTIAL_SIBLING_INDEX_MISMATCH": "NO"
     }
   ],
   "f5": {
-    "focusParent": "PARENT_50",
-    "uid": "f08adaa8-36a2-4ae2-833f-159490072800",
     "NEW_NODE_IN_PG": "YES",
     "NEW_NODE_IN_FULL_TREE": "YES",
     "NEW_NODE_IN_SAFE_LOAD": "NO",
-    "NEW_NODE_IN_EDITOR": "NO",
-    "editorDetail": {
-      "found": false,
-      "clientKids": 46,
-      "reason": "missing_after_hydrate"
-    },
-    "PARTIAL_SIBLING_INDEX_MISMATCH": "YES"
+    "NEW_NODE_IN_EDITOR_AFTER_HYDRATE": "YES",
+    "SAFE_P50_LOADED": 48,
+    "SAFE_P50_META": 52
   },
-  "ROOT_CAUSE": "PARTIAL_SIBLING_INDEX_MISMATCH (safe_load clipped children + absolute index append)",
-  "FREEZE_BREAK_REQUIRED": "LIKELY YES only if node.insert gains anchor fields in Frozen Core; pure client hydrate-before-edit (A) can be NO",
-  "LOCAL_P0_FIXED": "NO",
-  "recommendation": {
-    "preferred": "C",
-    "summary": "Use sibling anchors (leftSiblingUid/rightSiblingUid or beforeUid/afterUid); server places against room_nodes full sibling set.",
-    "A": "Hydrate full direct children before edit — works but expensive for wide parents; does not fix safe_load F5 visibility alone.",
-    "B": "Replace absolute index with beforeUid/afterUid — same idea as C; protocol-shaped.",
-    "C": "Client sends anchors; server resolves fractional position from authority. Does not raise safe_load caps.",
-    "FREEZE_BREAK_REQUIRED": "LIKELY YES only if node.insert gains anchor fields in Frozen Core; pure client hydrate-before-edit (A) can be NO"
+  "depth": {
+    "DEPTH_4_F5": "PASS",
+    "DEPTH_5_F5": "PASS",
+    "DEPTH_6_F5": "PASS",
+    "l5Meta": 1,
+    "l5Live": 1
   },
-  "roomKey": "p0-safeload-1788752691373",
-  "seedNodeCount": 450,
-  "previewTreeNodes": 80,
-  "previewNodeCountField": 450,
-  "previewSample": [
-    {
-      "uid": "root",
-      "text": "SAFE_LOAD_P0_ROOT",
-      "kids": 1,
-      "childCount": 1
-    },
-    {
-      "uid": "a_l1",
-      "text": "L1",
-      "kids": 1,
-      "childCount": 1
-    },
-    {
-      "uid": "a_l2",
-      "text": "L2",
-      "kids": 4,
-      "childCount": 5
-    },
-    {
-      "uid": "parent_5",
-      "text": "PARENT_5",
-      "kids": 5,
-      "childCount": 5
-    },
-    {
-      "uid": "parent_5_c0",
-      "text": "PARENT_5_C0",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_5_c1",
-      "text": "PARENT_5_C1",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_5_c2",
-      "text": "PARENT_5_C2",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_5_c3",
-      "text": "PARENT_5_C3",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_5_c4",
-      "text": "PARENT_5_C4",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20",
-      "text": "PARENT_20",
-      "kids": 20,
-      "childCount": 20
-    },
-    {
-      "uid": "parent_20_c0",
-      "text": "PARENT_20_C0",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c1",
-      "text": "PARENT_20_C1",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c2",
-      "text": "PARENT_20_C2",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c3",
-      "text": "PARENT_20_C3",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c4",
-      "text": "PARENT_20_C4",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c5",
-      "text": "PARENT_20_C5",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c6",
-      "text": "PARENT_20_C6",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c7",
-      "text": "PARENT_20_C7",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c8",
-      "text": "PARENT_20_C8",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c9",
-      "text": "PARENT_20_C9",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c10",
-      "text": "PARENT_20_C10",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c11",
-      "text": "PARENT_20_C11",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c12",
-      "text": "PARENT_20_C12",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c13",
-      "text": "PARENT_20_C13",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c14",
-      "text": "PARENT_20_C14",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c15",
-      "text": "PARENT_20_C15",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c16",
-      "text": "PARENT_20_C16",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c17",
-      "text": "PARENT_20_C17",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c18",
-      "text": "PARENT_20_C18",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_20_c19",
-      "text": "PARENT_20_C19",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50",
-      "text": "PARENT_50",
-      "kids": 48,
-      "childCount": 48
-    },
-    {
-      "uid": "parent_50_c0",
-      "text": "PARENT_50_C0",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c1",
-      "text": "PARENT_50_C1",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c2",
-      "text": "PARENT_50_C2",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c3",
-      "text": "PARENT_50_C3",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c4",
-      "text": "PARENT_50_C4",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c5",
-      "text": "PARENT_50_C5",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c6",
-      "text": "PARENT_50_C6",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c7",
-      "text": "PARENT_50_C7",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c8",
-      "text": "PARENT_50_C8",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c9",
-      "text": "PARENT_50_C9",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c10",
-      "text": "PARENT_50_C10",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c11",
-      "text": "PARENT_50_C11",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c12",
-      "text": "PARENT_50_C12",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c13",
-      "text": "PARENT_50_C13",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c14",
-      "text": "PARENT_50_C14",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c15",
-      "text": "PARENT_50_C15",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c16",
-      "text": "PARENT_50_C16",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c17",
-      "text": "PARENT_50_C17",
-      "kids": 0,
-      "childCount": 0
-    },
-    {
-      "uid": "parent_50_c18",
-      "text": "PARENT_50_C18",
-      "kids": 0,
-      "childCount": 0
+  "localRuns": {
+    "total": 10,
+    "pass": 10
+  },
+  "context": {
+    "ok": true,
+    "INSERT_CHILD_CONTEXT_COMPLETE": "PASS",
+    "INSERT_SIBLING_CONTEXT_COMPLETE": "PASS",
+    "MOVE_CONTEXT_COMPLETE": "PASS",
+    "REORDER_CONTEXT_COMPLETE": "PASS",
+    "HYDRATE_SINGLE_FLIGHT": "YES",
+    "details": {
+      "insertChild": {
+        "label": "INSERT_CHILD",
+        "pass": true,
+        "live": 50,
+        "meta": 50,
+        "stillNeeds": false
+      },
+      "insertSibling": {
+        "label": "INSERT_SIBLING",
+        "pass": true,
+        "live": 50,
+        "meta": 50,
+        "stillNeeds": false
+      },
+      "move": {
+        "label": "MOVE",
+        "pass": true,
+        "live": 50,
+        "meta": 50,
+        "stillNeeds": false
+      },
+      "reorder": {
+        "label": "REORDER",
+        "pass": true,
+        "live": 50,
+        "meta": 50,
+        "stillNeeds": false
+      }
     }
-  ]
+  },
+  "FREEZE_BREAK_REQUIRED": "NO",
+  "PHASE1_CLIENT_HYDRATE_FIX_SUFFICIENT": "YES",
+  "ANCHOR_PROTOCOL_REQUIRED": "NO",
+  "LOCAL_P0_FIXED": "YES",
+  "PRODUCTION_MANUAL_VERIFICATION_REQUIRED": "YES",
+  "REAL_PRODUCT_P0_FIXED": "PENDING_MANUAL_VERIFY",
+  "roomKey": "p0-safeload-1788761148458",
+  "seedNodeCount": 450,
+  "SAFE_LOAD_ACTIVE": true,
+  "previewTreeNodes": 80,
+  "EXPANDED_PARTIAL_PARENT_AUTO_HYDRATE": "PASS",
+  "HYDRATE_CHILD_UID_SET_MATCH": "PASS",
+  "P50_SAFE_LOADED_CHILDREN": 48,
+  "P50_AUTHORITATIVE_CHILD_COUNT": 50,
+  "P50_AFTER_HYDRATE_CHILDREN": 50,
+  "P100_SAFE_LOADED_CHILDREN": 0,
+  "P100_AUTHORITATIVE_CHILD_COUNT": 100,
+  "P100_AFTER_HYDRATE_CHILDREN": 100,
+  "INSERT_CHILD_CONTEXT_COMPLETE": "PASS",
+  "INSERT_SIBLING_CONTEXT_COMPLETE": "PASS",
+  "MOVE_CONTEXT_COMPLETE": "PASS",
+  "REORDER_CONTEXT_COMPLETE": "PASS",
+  "HYDRATE_SINGLE_FLIGHT": "YES",
+  "P50_BEFORE_HYDRATE": 50,
+  "P50_AFTER_HYDRATE": 51,
+  "P50_CLIENT_REQUESTED_INDEX": 50,
+  "P50_SERVER_RESOLVED_SLOT": 50,
+  "PARTIAL_SIBLING_INDEX_MISMATCH": "NO",
+  "DEPTH_4_F5": "PASS",
+  "DEPTH_5_F5": "PASS",
+  "DEPTH_6_F5": "PASS",
+  "LOCAL_PARTIAL_PARENT_RUNS": 10,
+  "LOCAL_PARTIAL_PARENT_PASS": "10/10"
 }
