@@ -375,6 +375,29 @@ async function main() {
       }
     })
     assert.strictEqual(response.status, 200)
+
+    response = await request('/api/route-that-does-not-exist', {
+      headers: {
+        Authorization:
+          'Bearer integration-test-mcp-token-at-least-32-characters'
+      }
+    })
+    assert.strictEqual(response.status, 404)
+    assert.deepStrictEqual(await response.json(), {
+      error: 'not found',
+      code: 'not_found'
+    })
+
+    response = await request('/collab-v2')
+    assert.strictEqual(response.status, 404)
+    assert.strictEqual(
+      response.headers.get('content-type'),
+      'application/json; charset=utf-8'
+    )
+    assert.deepStrictEqual(await response.json(), {
+      error: 'not found',
+      code: 'not_found'
+    })
     await expectUnauthorizedWebSocket(
       `ws://127.0.0.1:${apiPort}/room-test`,
       appOrigin
