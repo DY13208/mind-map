@@ -581,7 +581,7 @@ export default {
     missingNode: '目標節點不存在，已打開導圖根節點',
     noPermission: '沒有訪問該導圖的權限',
     saved: '已插入子腦圖',
-    savedTip: '已插入子腦圖：節點應變為灰底卡片+紫色圖標，雙擊打開預覽（F2 可改名）',
+    savedTip: '已插入子腦圖：節點應變為灰底卡片+紫色圖標，雙擊打開編輯（F2 可改名）',
     applyFailed: '插入失敗，請重新選中節點後再試',
     removed: '已移除子腦圖',
     openFailed: '無法打開引用的導圖',
