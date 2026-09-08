@@ -637,3 +637,5 @@ export function searchUsers(q, limit = 20) {
   if (limit) params.set('limit', String(limit))
   return request(`/api/users?${params.toString()}`)
 }
+
+export { request as apiRequest }

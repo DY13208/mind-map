@@ -21,7 +21,9 @@ function loadRootEnv() {
       ) {
         value = value.slice(1, -1)
       }
-      if (process.env[key] === undefined) process.env[key] = value
+      // Prefer project .env over stale inherited shell exports
+      // (e.g. AUTH_ALLOWED_ORIGINS copied from another machine).
+      process.env[key] = value
     })
 }
 

@@ -999,6 +999,10 @@ async function handleApi(req, res) {
     return true
   }
 
+  if (await require('./nodeKnowledge').handleApi(req, res, { url, pathname })) {
+    return true
+  }
+
   if (require('./collabHistory/http').matchHistory(pathname)) {
     const handled = await require('./collabHistory').handleHistoryApi(req, res, { url })
     if (handled) return true

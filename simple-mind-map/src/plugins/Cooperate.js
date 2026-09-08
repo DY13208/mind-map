@@ -131,6 +131,10 @@ const NULLABLE_PATCH_KEYS = [
   'formula',
   'attachmentUrl',
   'attachmentName',
+  'attachmentId',
+  'attachmentStatus',
+  'attachmentError',
+  'attachmentExtractedText',
   'customLeft',
   'customTop'
 ]
@@ -3890,6 +3894,10 @@ class Cooperate {
       formula: next.formula,
       attachmentUrl: next.attachmentUrl,
       attachmentName: next.attachmentName,
+      attachmentId: next.attachmentId,
+      attachmentStatus: next.attachmentStatus,
+      attachmentError: next.attachmentError,
+      attachmentExtractedText: next.attachmentExtractedText,
       customLeft: next.customLeft,
       customTop: next.customTop
     }

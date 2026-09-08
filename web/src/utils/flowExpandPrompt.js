@@ -1,5 +1,6 @@
 import { formatGetNodeGeneralization } from 'simple-mind-map/src/utils/index'
 import { plainText, noteOf } from './flowSearch'
+import { collectNodeKnowledge, buildVisionContent } from './nodeKnowledge'
 
 const MAX_OUTLINE_NODES = 1200
 const MAX_PROMPT_CHARS = 120000
@@ -548,7 +549,7 @@ export const FLOW_EXPAND_SYSTEM = `你是良策思维导图流程补齐助手，
  * - 有 SOP 模板：重点投喂模板 + 目标节点
  * - 无 SOP：投喂尽量多的整图节点，让 AI 硬编
  */
-export function buildFlowExpandPrompt(mindMap, targetNode) {
+export function buildFlowExpandPrompt(mindMap, targetNode, options = {}) {
   const root = mindMap.renderer && mindMap.renderer.root
   const query = plainText(targetNode)
   const { sopNode, templateNode } = resolveSopTemplate(mindMap, targetNode)
@@ -561,6 +562,12 @@ export function buildFlowExpandPrompt(mindMap, targetNode) {
 
   const sections = []
   const facts = extractMapFillFacts(mindMap, targetNode)
+  const knowledge =
+    options.knowledge ||
+    collectNodeKnowledge(targetNode, {
+      mindMap,
+      extraSources: options.extraSources || []
+    })
 
   sections.push(
     [
@@ -578,6 +585,28 @@ export function buildFlowExpandPrompt(mindMap, targetNode) {
   )
 
   sections.push(formatFactsBlock(facts))
+
+  if (knowledge.text) {
+    const readyOcr = (knowledge.sources || []).filter(
+      s =>
+        s &&
+        (s.type === 'image' || s.type === 'attachment') &&
+        s.status === 'ready' &&
+        s.extractedText
+    )
+    const knowledgeBlock = [
+      '## 节点关联知识（含已解析附件/OCR，不含原始二进制）',
+      knowledge.text
+    ]
+    if (readyOcr.length) {
+      knowledgeBlock.push(
+        '',
+        '【重要】下列 OCR/附件正文是已识别的事实内容，请直接用于填写提供模块与数据字段；',
+        '禁止再生成“如何做 OCR / 如何复核识图”的流程模板。若正文含验证码、编号等，必须原样保留。'
+      )
+    }
+    sections.push(knowledgeBlock.join('\n'))
+  }
 
   // 父分支局部上下文（跳过 SOP 索引等无关兄弟分支）
   if (targetNode && targetNode.parent) {
@@ -693,6 +722,15 @@ export function buildFlowExpandPrompt(mindMap, targetNode) {
     hasTemplate: !!hasTemplate,
     templateLabel: hasTemplate ? plainText(templateNode) : '',
     sopLabel: sopNode ? plainText(sopNode) : '',
-    facts
+    facts,
+    knowledge
   }
+}
+
+export function buildFlowExpandUserContent(prompt, supportsVision) {
+  return buildVisionContent(
+    prompt.user,
+    prompt.knowledge && prompt.knowledge.images,
+    supportsVision
+  )
 }

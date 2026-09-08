@@ -169,15 +169,22 @@ const NODE_FEATURE_MATRIX = [
   },
   {
     feature: 'Attachment',
-    uiEntry: 'Toolbar attachment (commented out)',
+    uiEntry: 'Toolbar attachment + NodeAttachment upload',
     command: 'SET_NODE_ATTACHMENT',
-    fields: ['attachmentUrl', 'attachmentName'],
+    fields: [
+      'attachmentUrl',
+      'attachmentName',
+      'attachmentId',
+      'attachmentStatus',
+      'attachmentError',
+      'attachmentExtractedText'
+    ],
     operation: 'node.update',
-    pgField: 'room_nodes.data.attachmentUrl + attachmentName',
+    pgField: 'room_nodes.data.attachment*',
     remoteApply: 'applyHttpRemoteNodeFields patch-only',
     undoRedo: 'inverse attachment fields',
     refreshPersistence: false,
-    status: 'not enabled'
+    status: 'enabled'
   }
 ]
 

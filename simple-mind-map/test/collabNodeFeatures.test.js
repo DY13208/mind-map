@@ -75,8 +75,8 @@ async function update(store, payload, version) {
     'Attachment'
   ].forEach(name => assert.ok(names.includes(name), name))
   const attachment = NODE_FEATURE_MATRIX.find(item => item.feature === 'Attachment')
-  assert.strictEqual(attachment.status, 'not enabled')
-  NODE_FEATURE_MATRIX.filter(item => item.feature !== 'Attachment').forEach(item => {
+  assert.strictEqual(attachment.status, 'enabled')
+  NODE_FEATURE_MATRIX.forEach(item => {
     assert.strictEqual(item.operation.includes('map.replace'), false, item.feature)
     assert.strictEqual(item.pgField.includes('rooms.nodes'), false, item.feature)
   })
