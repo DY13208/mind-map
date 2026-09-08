@@ -71,9 +71,6 @@
       </div>
     </aside>
     <main class="productMain">
-      <div class="mockNotice" role="status">
-        文件、最近、收藏、回收站与团队空间已接入真实 API。
-      </div>
       <router-view />
     </main>
   </div>
@@ -113,6 +110,7 @@ export default {
     }
   },
   mounted() {
+    document.body.classList.remove('isDark')
     window.addEventListener('resize', this.updateAutoSidebar)
   },
   beforeDestroy() {
@@ -157,13 +155,6 @@ export default {
 </script>
 
 <style lang="less">
-.productShell .mockNotice {
-  padding: 10px 28px;
-  background: #edf4f1;
-  color: #647c71;
-  font-size: 12px;
-  line-height: 1.6;
-}
 .productShell .el-dialog {
   max-width: calc(100vw - 24px);
 }
@@ -348,8 +339,7 @@ export default {
 }
 .productShell .productPage {
   padding: 32px clamp(24px, 2.2vw, 44px) 60px;
-  max-width: 1600px;
-  margin: auto;
+  width: 100%;
 }
 .productShell .productHeader {
   display: flex;

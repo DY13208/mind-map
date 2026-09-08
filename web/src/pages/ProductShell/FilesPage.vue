@@ -6,6 +6,32 @@
         <h1>{{ pageTitle }}</h1>
         <p>{{ pageDescription }}</p>
       </div>
+      <div v-if="mode === 'files'" class="workspaceSwitcher">
+        <span>当前空间</span>
+        <el-select
+          :value="selectedTeamId"
+          :loading="teamsLoading"
+          aria-label="切换个人或团队脑图"
+          @change="changeWorkspace"
+        >
+          <el-option label="个人空间" value="" />
+          <el-option
+            v-for="team in teams"
+            :key="team.id"
+            :label="team.name"
+            :value="team.id"
+          />
+        </el-select>
+        <el-button
+          v-if="selectedTeam"
+          type="text"
+          @click="$router.push('/spaces/' + selectedTeam.id)"
+          >管理团队</el-button
+        >
+        <el-button v-else type="text" @click="$router.push('/spaces')"
+          >我的团队</el-button
+        >
+      </div>
     </div>
     <FileToolbar
       :search.sync="search"
@@ -13,7 +39,7 @@
       :sort.sync="sort"
       :view.sync="view"
       :show-create="mode === 'files' || mode === 'folder'"
-      :show-create-folder="mode === 'files'"
+      :show-create-folder="mode === 'files' && !isTeamView"
       :hide-opened-sort="isRealFilesMode"
       @create-room="createRoom"
       @create-folder="createFolder"
@@ -70,6 +96,7 @@
           :key="room.roomKey || room.id"
           :room="room"
           :allow-delete="!!room.canManage"
+          :allow-move-to-team="!isTeamView"
           @open="openRoom"
           @favorite="favorite"
           @rename="renameRoom"
@@ -85,6 +112,7 @@
         :rooms="visibleRooms"
         :folders="showFolders ? filteredFolders : []"
         :allow-delete="true"
+        :allow-move-to-team="!isTeamView"
         @open="openRoom"
         @open-folder="openFolder"
         @favorite="favorite"
@@ -239,12 +267,30 @@ export default {
       limit: savedPageSize(),
       page: 1,
       total: 0,
-      searchTimer: null
+      searchTimer: null,
+      teams: [],
+      teamsLoading: false
     }
   },
   computed: {
+    selectedTeamId() {
+      return this.mode === 'files'
+        ? String((this.$route.query && this.$route.query.team) || '')
+        : ''
+    },
+    selectedTeam() {
+      return this.teams.find(team => team.id === this.selectedTeamId) || null
+    },
+    isTeamView() {
+      return !!this.selectedTeamId && this.mode === 'files'
+    },
     isRealFilesMode() {
-      return this.mode === 'files' || this.mode === 'folder' || this.mode === 'shared'
+      return (
+        !this.isTeamView &&
+        (this.mode === 'files' ||
+          this.mode === 'folder' ||
+          this.mode === 'shared')
+      )
     },
     showPager() {
       // 无数据时不展示分页/加载更多；有数据时提供页码与每页数量调节。
@@ -256,9 +302,17 @@ export default {
         : null
     },
     pageTitle() {
+      if (this.isTeamView) {
+        return this.selectedTeam ? this.selectedTeam.name : '团队脑图'
+      }
       return this.folder ? this.folder.name : copy[this.mode][0]
     },
     pageDescription() {
+      if (this.isTeamView) {
+        return this.selectedTeam
+          ? `团队空间 · ${this.visibleRooms.length} 个脑图`
+          : '正在读取团队脑图'
+      }
       return this.folder
         ? this.displayCount + ' 个项目'
         : copy[this.mode][1]
@@ -273,7 +327,7 @@ export default {
       return this.itemCount
     },
     showFolders() {
-      return this.mode === 'files'
+      return this.mode === 'files' && !this.isTeamView
     },
     folderMap() {
       return Object.fromEntries(this.folders.map(folder => [folder.id, folder]))
@@ -288,7 +342,7 @@ export default {
     },
     visibleRooms() {
       const q = this.search.trim().toLowerCase()
-      return this.rooms.filter(room => {
+      const rooms = this.rooms.filter(room => {
         if (this.roleFilter && room.role !== String(this.roleFilter).toLowerCase()) {
           return false
         }
@@ -301,6 +355,19 @@ export default {
               .includes(q)
         )
       })
+      if (!this.isTeamView) return rooms
+      const direction = this.sort === 'title' ? 1 : -1
+      return rooms.slice().sort((left, right) => {
+        if (this.sort === 'title') {
+          return String(left.title || '').localeCompare(
+            String(right.title || ''),
+            'zh-CN'
+          )
+        }
+        return direction *
+          (new Date(left.updatedAt || 0).getTime() -
+            new Date(right.updatedAt || 0).getTime())
+      })
     },
     emptyTitle() {
       if (this.search || this.roleFilter) return '没有搜索结果'
@@ -310,7 +377,7 @@ export default {
           shared: '暂无共享脑图',
           trash: '回收站为空',
           folder: '这个文件夹暂无内容'
-        }[this.mode] || '还没有脑图'
+        }[this.mode] || (this.isTeamView ? '团队暂无脑图' : '还没有脑图')
       )
     },
     emptyDescription() {
@@ -320,7 +387,10 @@ export default {
           shared: '收到的共享脑图会显示在这里',
           trash: '删除的脑图会暂存在这里',
           folder: '移动或新建脑图到这个文件夹'
-        }[this.mode] || '创建第一张脑图开始工作'
+        }[this.mode] ||
+        (this.isTeamView
+          ? '在当前团队中创建第一张脑图'
+          : '创建第一张脑图开始工作')
       )
     }
   },
@@ -361,6 +431,13 @@ export default {
       this.page = 1
       this.load({ reset: true, keepPage: true })
     },
+    changeWorkspace(teamId) {
+      const team = String(teamId || '')
+      this.$router.push({
+        path: '/files',
+        query: team ? { team } : {}
+      })
+    },
     async load(options = {}) {
       const reset = options.reset !== false
       const request = ++this.requestId
@@ -372,7 +449,27 @@ export default {
       this.loading = reset
       this.error = ''
       try {
-        const folders = await folderService.listFolders()
+        if (mode === 'files') {
+          this.teamsLoading = true
+          try {
+            this.teams = await teamService.listSpaces()
+          } catch (error) {
+            this.teams = []
+            // 团队接口异常不能阻断个人文件；但用户正在访问某个团队时需要明确报错。
+            if (this.selectedTeamId) throw error
+          } finally {
+            this.teamsLoading = false
+          }
+          if (
+            this.selectedTeamId &&
+            !this.teams.some(team => team.id === this.selectedTeamId)
+          ) {
+            throw new Error('团队不存在、已删除或你已无权访问')
+          }
+        }
+        const folders = this.isTeamView
+          ? []
+          : await folderService.listFolders()
         if (request !== this.requestId) return
         this.folders = folders
         if (
@@ -400,7 +497,9 @@ export default {
           filters.limit = this.limit
           filters.offset = Math.max(0, (this.page - 1) * this.limit)
         }
-        const rooms = await roomService.listRooms(filters)
+        const rooms = this.isTeamView
+          ? await teamService.listRooms(this.selectedTeamId)
+          : await roomService.listRooms(filters)
         if (request !== this.requestId) return
         const list = rooms.list || rooms
         const total = Number(rooms.total != null ? rooms.total : list.length)
@@ -474,10 +573,15 @@ export default {
       if (this.busy) return
       this.busy = true
       try {
-        const created = await roomService.createRoom(
-          result.value.trim(),
-          this.folder ? this.folder.id : null
-        )
+        const created = this.isTeamView
+          ? await teamService.createRoom(
+              this.selectedTeamId,
+              result.value.trim()
+            )
+          : await roomService.createRoom(
+              result.value.trim(),
+              this.folder ? this.folder.id : null
+            )
         this.$message.success('脑图已创建')
         await this.$router.push({
           path: '/',
@@ -622,6 +726,20 @@ export default {
 </script>
 
 <style lang="less" scoped>
+.workspaceSwitcher {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--ui-text-secondary);
+  font-size: 13px;
+
+  .el-select {
+    width: 260px;
+    max-width: 38vw;
+  }
+}
 .contentArea {
   min-height: 320px;
 }
@@ -683,6 +801,18 @@ export default {
   span {
     color: #8a9893;
     font-size: 12px;
+  }
+}
+
+@media (max-width: 760px) {
+  .workspaceSwitcher {
+    width: 100%;
+    justify-content: flex-start;
+
+    .el-select {
+      width: 240px;
+      max-width: 70vw;
+    }
   }
 }
 </style>

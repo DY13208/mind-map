@@ -68,6 +68,10 @@ export default {
     loading.close()
     this.setBodyDark()
   },
+  beforeDestroy() {
+    // 深色主题只属于脑图编辑器，离开编辑页后不能污染产品外壳。
+    document.body.classList.remove('isDark')
+  },
   methods: {
     ...mapMutations(['setLocalConfig']),
 
