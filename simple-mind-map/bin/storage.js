@@ -1694,6 +1694,7 @@ async function initSchemaOnce() {
   tombstones.rows.forEach(row => deletedRooms.add(row.room_key))
   const roomAcl = require('./roomAcl')
   await roomAcl.initSchema(pool)
+  await require('./accessRequests').initSchema(pool)
   await roomAcl.migrateLegacyOwners(pool)
   const collabV2Schema = require('./collabV2/schema')
   await collabV2Schema.initCollabV2Schema(pool)

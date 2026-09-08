@@ -112,7 +112,9 @@ function publicFolder(row) {
     createdBy: row.created_by || row.createdBy || '',
     createdAt: row.created_at || row.createdAt,
     updatedAt: row.updated_at || row.updatedAt,
-    roomCount: Number(row.room_count != null ? row.room_count : row.roomCount || 0)
+    roomCount: Number(row.room_count != null ? row.room_count : row.roomCount || 0),
+    role: row.folder_role || row.role || (row.can_manage ? 'owner' : null),
+    canManage: row.can_manage != null ? !!row.can_manage : true
   }
 }
 

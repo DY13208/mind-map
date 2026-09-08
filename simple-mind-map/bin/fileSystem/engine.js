@@ -140,6 +140,16 @@ function createFileSystem(options = {}) {
           db
         )
       }
+      if (folderId && store.listFolderMembers) {
+        const inherited = await store.listFolderMembers(folderId)
+        for (const member of inherited) {
+          if (!member.user_id || member.user_id === userId) continue
+          await store.insertMember(
+            { room_key: roomKey, user_id: member.user_id, role: member.role },
+            db
+          )
+        }
+      }
       for (const member of teamMembers) {
         const memberId = roomAcl.normalizeUserId(member.userId || member.user_id)
         if (!memberId || memberId === userId) continue

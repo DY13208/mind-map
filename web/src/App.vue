@@ -80,7 +80,10 @@
         </div>
       </div>
     </div>
-    <router-view v-else></router-view>
+    <template v-else>
+      <router-view></router-view>
+      <AccessNotifications v-if="authState.authenticated" />
+    </template>
   </div>
 </template>
 
@@ -93,6 +96,7 @@ import {
   loadAuthState
 } from '@/utils/auth'
 import { mountWecomLoginPanel } from '@/utils/wecomLogin'
+import AccessNotifications from '@/components/AccessNotifications.vue'
 
 const PAGE_TITLE = '依然'
 const AUTH_BOOTSTRAP_MS = 45000
@@ -112,6 +116,7 @@ const authErrors = {
 
 export default {
   name: 'App',
+  components: { AccessNotifications },
   data() {
     return {
       authLoading: true,

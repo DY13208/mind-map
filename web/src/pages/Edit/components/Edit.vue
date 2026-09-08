@@ -642,9 +642,6 @@ export default {
             height: 30
           }
         },
-        expandBtnNumHandler: num => {
-          return num >= 100 ? '…' : num
-        },
         beforeDeleteNodeImg: () => {
           return new Promise(resolve => {
             this.$confirm(

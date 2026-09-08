@@ -17,6 +17,7 @@
       @click.native.stop
       ><span class="more"><i class="el-icon-more"/></span
       ><el-dropdown-menu slot="dropdown"
+        ><el-dropdown-item command="share">分享 / 权限</el-dropdown-item
         ><el-dropdown-item command="rename">重命名</el-dropdown-item
         ><el-dropdown-item command="delete" divided
           >删除</el-dropdown-item
