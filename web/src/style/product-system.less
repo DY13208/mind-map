@@ -1,4 +1,4 @@
-:root {
+.productShell {
   --ui-bg: #f7f9f8;
   --ui-surface: #ffffff;
   --ui-surface-muted: #f1f5f3;
@@ -25,26 +25,26 @@
   --ui-z-toast: 70;
 }
 
-button,
-[role='button'],
-a,
-input,
-select,
-textarea {
+.productShell button,
+.productShell [role='button'],
+.productShell a,
+.productShell input,
+.productShell select,
+.productShell textarea {
   &:focus-visible {
     outline: 2px solid var(--ui-focus);
     outline-offset: 2px;
   }
 }
 
-.el-button,
-.el-input__inner,
-.el-textarea__inner,
-.el-select .el-input__inner {
+.productShell .el-button,
+.productShell .el-input__inner,
+.productShell .el-textarea__inner,
+.productShell .el-select .el-input__inner {
   border-radius: var(--ui-radius-md);
 }
 
-.el-button--primary {
+.productShell .el-button--primary {
   background: var(--ui-primary);
   border-color: var(--ui-primary);
   &:hover,
@@ -54,7 +54,7 @@ textarea {
   }
 }
 
-.el-dialog {
+.productShell .el-dialog {
   border-radius: var(--ui-radius-lg);
   box-shadow: 0 20px 60px rgba(23, 38, 31, 0.16);
 }

@@ -22,61 +22,65 @@
       v-else-if="authState.enabled && !authState.authenticated"
     >
       <div class="authCard authCard--login">
-        <div class="authBrandBlock">
-          <div class="authBrandMark">依</div>
-          <h1 class="authBrand">依然中台</h1>
-        </div>
-        <p class="authSubtitle">企业微信扫码登录</p>
-        <div class="authError" v-if="authErrorMessage">{{ authErrorMessage }}</div>
-        <div class="authQrShell">
-          <div ref="qrMount" class="authQrMount"></div>
-          <div class="authQrOverlay" v-if="qrRefreshing">
-            <div class="authSpinner"></div>
+        <div class="authIntro">
+          <div class="authBrandBlock">
+            <div class="authBrandMark">依</div>
+            <h1 class="authBrand">依然中台</h1>
           </div>
-          <div class="authQrFailure" v-else-if="qrFailure">
-            <span>{{ qrFailure }}</span>
-            <button class="authButton authButton--small" @click="refreshLoginQr">
-              重试
-            </button>
-          </div>
+          <p class="authSubtitle">企业微信扫码登录</p>
+          <div class="authError" v-if="authErrorMessage">{{ authErrorMessage }}</div>
         </div>
-        <button
-          class="authRefresh"
-          @click="refreshLoginQr"
-          :disabled="qrRefreshing"
-          title="刷新二维码"
-        >
-          <span class="authRefreshIcon" :class="{ spinning: qrRefreshing }">↻</span>
-        </button>
-        <div class="authDevLogin" v-if="authState.devBypassAvailable">
+        <div class="authLoginPanel">
+          <div class="authQrShell">
+            <div ref="qrMount" class="authQrMount"></div>
+            <div class="authQrOverlay" v-if="qrRefreshing">
+              <div class="authSpinner"></div>
+            </div>
+            <div class="authQrFailure" v-else-if="qrFailure">
+              <span>{{ qrFailure }}</span>
+              <button class="authButton authButton--small" @click="refreshLoginQr">
+                重试
+              </button>
+            </div>
+          </div>
           <button
-            class="authDevToggle"
-            type="button"
-            @click="showDevLogin = !showDevLogin"
+            class="authRefresh"
+            @click="refreshLoginQr"
+            :disabled="qrRefreshing"
+            title="刷新二维码"
           >
-            {{ showDevLogin ? '收起开发者登录' : '开发者密钥登录' }}
+            <span class="authRefreshIcon" :class="{ spinning: qrRefreshing }">↻</span>
           </button>
-          <form
-            v-if="showDevLogin"
-            class="authDevForm"
-            @submit.prevent="submitDevLogin"
-          >
-            <input
-              v-model="devAuthKey"
-              class="authDevInput"
-              type="password"
-              autocomplete="off"
-              placeholder="输入 .env 中的 AUTH_DEV_BYPASS_KEY"
-            />
+          <div class="authDevLogin" v-if="authState.devBypassAvailable">
             <button
-              class="authButton authButton--small"
-              type="submit"
-              :disabled="devLoggingIn || !devAuthKey.trim()"
+              class="authDevToggle"
+              type="button"
+              @click="showDevLogin = !showDevLogin"
             >
-              {{ devLoggingIn ? '登录中…' : '进入' }}
+              {{ showDevLogin ? '收起开发者登录' : '开发者密钥登录' }}
             </button>
-            <p class="authDevError" v-if="devLoginError">{{ devLoginError }}</p>
-          </form>
+            <form
+              v-if="showDevLogin"
+              class="authDevForm"
+              @submit.prevent="submitDevLogin"
+            >
+              <input
+                v-model="devAuthKey"
+                class="authDevInput"
+                type="password"
+                autocomplete="off"
+                placeholder="输入 .env 中的 AUTH_DEV_BYPASS_KEY"
+              />
+              <button
+                class="authButton authButton--small"
+                type="submit"
+                :disabled="devLoggingIn || !devAuthKey.trim()"
+              >
+                {{ devLoggingIn ? '登录中…' : '进入' }}
+              </button>
+              <p class="authDevError" v-if="devLoginError">{{ devLoginError }}</p>
+            </form>
+          </div>
         </div>
       </div>
     </div>
@@ -369,6 +373,11 @@ body,
   }
 }
 
+.authIntro,
+.authLoginPanel {
+  min-width: 0;
+}
+
 .authBrandBlock {
   display: flex;
   flex-direction: column;
@@ -515,6 +524,60 @@ body,
   margin-top: 18px;
   padding-top: 16px;
   border-top: 1px solid rgba(15, 45, 35, 0.06);
+}
+
+@media (min-width: 1100px) and (min-height: 720px) {
+  .authCard--login {
+    width: calc(100vw - 96px);
+    max-width: 1120px;
+    min-height: 560px;
+    padding: 48px 64px;
+    display: grid;
+    grid-template-columns: minmax(320px, 1fr) 400px;
+    align-items: center;
+    gap: clamp(56px, 8vw, 128px);
+    text-align: left;
+  }
+
+  .authIntro {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .authBrandBlock {
+    align-items: flex-start;
+  }
+
+  .authBrandMark {
+    width: 72px;
+    height: 72px;
+    border-radius: 20px;
+    font-size: 34px;
+  }
+
+  .authBrand {
+    margin-top: 8px;
+    font-size: clamp(36px, 3vw, 48px);
+  }
+
+  .authSubtitle {
+    margin-top: 18px;
+    font-size: 18px;
+  }
+
+  .authError {
+    width: 100%;
+    margin-top: 24px;
+  }
+
+  .authLoginPanel {
+    text-align: center;
+  }
+
+  .authQrShell {
+    margin-top: 0;
+  }
 }
 
 .authDevToggle {

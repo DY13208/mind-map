@@ -35,7 +35,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 16px;
-  width: 300px;
+  width: 100%;
   box-sizing: border-box;
   background: #fff;
   border: 1px solid #e2e9e6;

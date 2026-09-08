@@ -24,6 +24,11 @@
           >
         </div>
         <div class="teamActions">
+          <el-button
+            icon="el-icon-files"
+            @click="openInFiles"
+            >在我的脑图查看</el-button
+          >
           <el-button type="primary" icon="el-icon-plus" @click="createRoom"
             >新建脑图</el-button
           >
@@ -235,6 +240,12 @@ export default {
     clearTimeout(this.contactSearchTimer)
   },
   methods: {
+    openInFiles() {
+      this.$router.push({
+        path: '/files',
+        query: { team: this.$route.params.id }
+      })
+    },
     async load() {
       const request = ++this.requestId
       const id = this.$route.params.id
@@ -432,7 +443,7 @@ export default {
 .roomGrid,
 .folderGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, 240px);
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 14px;
 }
 .folderGrid {
