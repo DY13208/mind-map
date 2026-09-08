@@ -8,6 +8,7 @@
   >
     <div
       class="mindMapContainer"
+      :class="{ isCanvasDarkFallback: useDarkCanvasFallback }"
       id="mindMapContainer"
       ref="mindMapContainer"
       data-testid="mindmap-canvas"
@@ -223,7 +224,8 @@ export default {
       pendingStoreData: null,
       prevImg: '',
       storeConfigTimer: null,
-      showDragMask: false
+      showDragMask: false,
+      useDarkCanvasFallback: false
     }
   },
   computed: {
@@ -338,7 +340,10 @@ export default {
     this.$bus.$off('hideLoading', this.handleForceHideLoading)
     this.$bus.$off('localStorageExceeded', this.onLocalStorageExceeded)
     window.removeEventListener('resize', this.handleResize)
-    if (this.mindMap) this.mindMap.destroy()
+    if (this.mindMap) {
+      this.unbindCanvasThemeEvents()
+      this.mindMap.destroy()
+    }
   },
   methods: {
     onLocalStorageExceeded() {
@@ -462,20 +467,43 @@ export default {
 
     // 深色模式只改画布背景的视觉呈现，不改主题模板/自定义配置，避免基础样式失效
     isLikelyDarkColor(color) {
-      const hex = String(color || '').trim()
-      const match = hex.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)
-      if (!match) return false
-      let value = match[1]
-      if (value.length === 3) {
-        value = value
-          .split('')
-          .map(ch => ch + ch)
-          .join('')
+      const value = String(color || '').trim()
+      const hexMatch = value.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)
+      let rgb = null
+      if (hexMatch) {
+        let hex = hexMatch[1]
+        if (hex.length === 3) {
+          hex = hex
+            .split('')
+            .map(ch => ch + ch)
+            .join('')
+        }
+        rgb = [
+          parseInt(hex.slice(0, 2), 16),
+          parseInt(hex.slice(2, 4), 16),
+          parseInt(hex.slice(4, 6), 16)
+        ]
+      } else {
+        const rgbMatch = value.match(
+          /^rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)/i
+        )
+        if (rgbMatch) {
+          rgb = rgbMatch.slice(1, 4).map(item => Number(item))
+        }
       }
-      const r = parseInt(value.slice(0, 2), 16)
-      const g = parseInt(value.slice(2, 4), 16)
-      const b = parseInt(value.slice(4, 6), 16)
+      if (!rgb) return false
+      const [r, g, b] = rgb
       return 0.299 * r + 0.587 * g + 0.114 * b < 140
+    },
+
+    setCanvasDarkFallback(enabled) {
+      this.useDarkCanvasFallback = !!enabled
+      const el = this.mindMap
+        ? this.mindMap.el
+        : this.$refs.mindMapContainer
+      if (el && el.classList) {
+        el.classList.toggle('isCanvasDarkFallback', !!enabled)
+      }
     },
 
     syncCanvasDarkBackground() {
@@ -483,11 +511,10 @@ export default {
       if (!mindMap || !mindMap.el) return
       const el = mindMap.el
       const themeConfig = mindMap.themeConfig || {}
-      if (this.isDark && !this.isLikelyDarkColor(themeConfig.backgroundColor)) {
-        el.style.backgroundColor = '#262A2E'
-        el.style.backgroundImage = 'none'
-        return
-      }
+      const useFallback =
+        this.isDark && !this.isLikelyDarkColor(themeConfig.backgroundColor)
+      this.setCanvasDarkFallback(useFallback)
+      if (useFallback) return
       el.style.backgroundColor = themeConfig.backgroundColor || ''
       if (themeConfig.backgroundImage && themeConfig.backgroundImage !== 'none') {
         el.style.backgroundImage = `url(${themeConfig.backgroundImage})`
@@ -497,6 +524,24 @@ export default {
       } else {
         el.style.backgroundImage = 'none'
       }
+    },
+
+    prepareInitialCanvasBackground() {
+      // 协作房间会先用默认主题创建画布，再异步恢复房间主题。先加深色兜底类，
+      // 避免初始化与刷新期间出现一帧白底。
+      this.setCanvasDarkFallback(this.isDark)
+    },
+
+    bindCanvasThemeEvents() {
+      if (!this.mindMap) return
+      this.mindMap.on('node_tree_render_start', this.syncCanvasDarkBackground)
+      this.mindMap.on('view_theme_change', this.syncCanvasDarkBackground)
+    },
+
+    unbindCanvasThemeEvents() {
+      if (!this.mindMap) return
+      this.mindMap.off('node_tree_render_start', this.syncCanvasDarkBackground)
+      this.mindMap.off('view_theme_change', this.syncCanvasDarkBackground)
     },
 
     // 获取思维导图数据，实际应该调接口获取
@@ -563,6 +608,7 @@ export default {
         theme = exampleData.theme
         view = null
       }
+      this.prepareInitialCanvasBackground()
       this.mindMap = new MindMap({
         el: this.$refs.mindMapContainer,
         data: root,
@@ -665,6 +711,7 @@ export default {
           })
         }
       })
+      this.bindCanvasThemeEvents()
       this.loadPlugins()
       this.mindMap.keyCommand.addShortcut('Control+s', () => {
         this.manualSave()
@@ -1128,6 +1175,13 @@ export default {
     top: 0px;
     width: 100%;
     height: 100%;
+
+    // 渲染器会在每次节点树重绘前重设行内背景。夜间模式用高优先级画布类
+    // 覆盖浅色主题，避免新增节点或刷新时闪出白色帧。
+    &.isCanvasDarkFallback {
+      background-color: #262a2e !important;
+      background-image: none !important;
+    }
   }
 }
 </style>

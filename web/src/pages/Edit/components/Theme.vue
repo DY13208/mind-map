@@ -30,7 +30,7 @@
 <script>
 import Sidebar from './Sidebar.vue'
 import { storeData } from '@/api'
-import { mapState, mapMutations } from 'vuex'
+import { mapState } from 'vuex'
 import themeImgMap from 'simple-mind-map-plugin-themes/themeImgMap'
 import themeList from 'simple-mind-map-plugin-themes/themeList'
 
@@ -101,11 +101,8 @@ export default {
     this.mindMap.off('view_theme_change', this.handleViewThemeChange)
   },
   methods: {
-    ...mapMutations(['setLocalConfig']),
-
     handleViewThemeChange() {
       this.theme = this.mindMap.getTheme()
-      this.handleDark()
     },
 
     initGroup() {
@@ -156,7 +153,6 @@ export default {
     useTheme(theme) {
       if (theme.value === this.theme) return
       this.theme = theme.value
-      this.handleDark()
       const customThemeConfig = this.mindMap.getCustomThemeConfig()
       const hasCustomThemeConfig = Object.keys(customThemeConfig).length > 0
       if (hasCustomThemeConfig) {
@@ -187,20 +183,6 @@ export default {
           template: theme.value,
           config
         }
-      })
-    },
-
-    handleDark() {
-      const extendThemeList = []
-      this.extendThemeGroupList.forEach(group => {
-        extendThemeList.push(...(group.list || []))
-      })
-      let target = [...this.themeList, ...extendThemeList].find(item => {
-        return item.value === this.theme
-      })
-      if (!target) return
-      this.setLocalConfig({
-        isDark: !!target.dark
       })
     }
   }

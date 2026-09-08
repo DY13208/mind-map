@@ -52,6 +52,9 @@ export default {
     }
   },
   async created() {
+    // activeSidebar 是全局运行态。离开编辑器再返回时必须从关闭状态开始，
+    // 否则触发条会预留侧栏宽度，而新创建的侧栏组件仍处于关闭状态。
+    this.setActiveSidebar('')
     this.initLocalConfig()
     const loading = this.$loading({
       lock: true,
@@ -71,9 +74,10 @@ export default {
   beforeDestroy() {
     // 深色主题只属于脑图编辑器，离开编辑页后不能污染产品外壳。
     document.body.classList.remove('isDark')
+    this.setActiveSidebar('')
   },
   methods: {
-    ...mapMutations(['setLocalConfig']),
+    ...mapMutations(['setLocalConfig', 'setActiveSidebar']),
 
     // 初始化本地配置
     initLocalConfig() {
