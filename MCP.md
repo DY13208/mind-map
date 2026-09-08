@@ -19,6 +19,7 @@ IP 由启动脚本探测，不要手写，也不要用 `127.0.0.1`（WorkBuddy �
 | `create_map` | 新建导图 |
 | `get_map` | `format=outline` 大纲（默认最多 800 节点）；`format=full` 树（超大图会截断，可用 `max_nodes`） |
 | `search_nodes` | 按文字搜节点 |
+| `query_nodes` | 按 UID、名称或完整路径定向读取节点、子树、链路或层级；超大结果用游标分页 |
 | `list_todos` | 列出待办，可选同时读取已完成 |
 | `prepare_todo` | 读取待办并匹配任意SOP的C/P |
 | `complete_todo` | 全部C通过后把任务移动到已完成 |
@@ -36,6 +37,27 @@ IP 由启动脚本探测，不要手写，也不要用 `127.0.0.1`（WorkBuddy �
 2. 把返回的 `share_url` 发给同事
 3. 同事打开链接，自动进入同一房间
 4. AI 继续 `add_node` / `update_node`，网页上立刻能看到
+
+### 定向读取大图
+
+不要为定位某个节点而把 `get_map` 的节点上限调大。只要问题涉及某节点、直属子节点、子树、链路或层级，AI 必须使用 `query_nodes`，不得先调用或回退到 `get_map`；`get_map` 仅用于用户明确要求整图概览。它只返回指定范围，`get_map` 原有默认 800、最大 5000 节点的行为不变。
+
+```text
+读取「项目 / 研发 / 排期」及其全部子节点：
+selector={ type: "path", segments: ["项目", "研发", "排期"] }
+scope="subtree"
+
+读取全图第 2 层：
+scope="level" level=2 level_mode="absolute"
+
+读取「研发」下第 1 层：
+selector={ type: "name", value: "研发" }
+scope="level" level=1 level_mode="relative"
+```
+
+名称默认严格匹配；同名节点会返回候选 UID 与路径，随后用 UID 重试。`match="fuzzy"` 也只返回候选，不会自动读错分支。单页最多 5000 节点、默认 800 节点，并额外受约 20 KiB 的结果预算约束；返回 `has_more=true` 时，将 `next_cursor` 原样传回继续读取。
+
+用户问某节点的“上下节点”时，不需要整图读取：先用 `path` 取上游链路；目标返回的 `parent_uid` 可继续用 `children` 读取同级节点；对目标本身用 `children` 读取直属下游，或用 `subtree` 读取全部下游。
 
 ---
 
