@@ -2,13 +2,27 @@
  * SOP 台账抽取冒烟（纯 Node，不依赖 Vue 打包）
  * 与 web/src/utils/sopRegistryPrompt.js 中 D_REGISTRY_RE / 抽取约定对齐
  */
-const D_REGISTRY_RE = /(D\d+)\s*[：:]\s*(.+)/
+const D_REGISTRY_RE = /^(D\d+)\s*[：:]\s*(.+)$/
 
 function cleanTitle(title) {
   return String(title || '')
     .replace(/[\s]*[|｜].*$/, '')
     .replace(/[\s]+$/g, '')
     .trim()
+}
+
+function matchDRegistryTitle(text) {
+  const trimmed = String(text || '')
+    .trim()
+    .replace(/^[-*•●]\s*/, '')
+    .replace(/^【\s*/, '')
+    .replace(/\s*】$/, '')
+  const m = trimmed.match(D_REGISTRY_RE)
+  if (!m) return null
+  const id = m[1].toUpperCase()
+  const title = cleanTitle(m[2])
+  if (!id || !title) return null
+  return { id, title }
 }
 
 function detectFrequency(text) {
@@ -31,11 +45,9 @@ function parseSample(rawText) {
   const lines = String(rawText || '').split(/\r?\n/)
   const sops = []
   lines.forEach((line, index) => {
-    const trimmed = line.trim().replace(/^[-*•]\s*/, '')
-    const m = trimmed.match(D_REGISTRY_RE)
-    if (!m) return
-    const id = m[1].toUpperCase()
-    const title = cleanTitle(m[2])
+    const matched = matchDRegistryTitle(line)
+    if (!matched) return
+    const { id, title } = matched
     const block = []
     const baseIndent = (line.match(/^(\s*)/) || ['', ''])[1].length
     for (let i = index; i < lines.length && i < index + 30; i++) {
@@ -108,6 +120,15 @@ assert(r1.sops[0].frequency.label === '未知', 'no frequency => 未知')
 assert(r1.sops[0].runs.length === 0, 'no runs')
 assert(r1.sops[0].deliverables.length === 0, 'no deliverables')
 
+// 标题须以 D数字：开头；正文含 D / 中间夹带 D1： 不算 SOP
+assert(!matchDRegistryTitle('Dashboard'), 'Dashboard 不是 SOP')
+assert(!matchDRegistryTitle('产品D线'), '产品D线 不是 SOP')
+assert(!matchDRegistryTitle('Do：待办'), 'Do：不是台账编号')
+assert(!matchDRegistryTitle('参考 D1：销售目标'), '正文夹带 D1：不算')
+assert(!matchDRegistryTitle('AD1：误匹配'), '前缀字母不算')
+assert(matchDRegistryTitle('D1：销售目标').id === 'D1', '标准 D1')
+assert(matchDRegistryTitle('【D2：采购目标】').title === '采购目标', '书名号可剥')
+
 const sample2 = `业务
 - D1：供应商准入
   - 频率：每月
@@ -116,6 +137,7 @@ const sample2 = `业务
 - D2：采购目标
   - 每周执行
   - 产出：采购计划.md`
+
 
 const r2 = parseSample(sample2)
 assert(r2.sops.length === 2, 'sample2 should find 2 sops')

@@ -1,5 +1,5 @@
 <template>
-  <div class="sopPage" :class="{ isDark: isDark }">
+  <div class="sopPage">
     <header class="sopHeader">
       <div class="left">
           <el-button size="mini" @click="goBack">{{
@@ -39,8 +39,9 @@
     </header>
 
     <p class="hint">
-      点击「运行」选择产物后入队，经 WorkBuddy 多会话并行执行（默认并发 2）；可同时跑多个
-      SOP。双击卡片可编辑导图 / 历史 / 产物。
+      只识别标题以「D数字：」开头的节点（如 D1：销售目标）。运行时若大纲含「AI发起通知 /
+      通知 / 知会」，会经 WorkBuddy 派发并写入导图待办树；标题含等待 / 确认 / 审批 /
+      阻塞则暂停，待办完成后再点「检查并继续」。
     </p>
     <div class="statusLine" v-if="statusText">{{ statusText }}</div>
     <div class="statusLine runStatus" v-if="sopQueueSummary">
@@ -131,8 +132,24 @@
               <span class="taskState">{{ sopJobStateLabel(job) }}</span>
               <span class="taskName">{{ job.sopId || 'SOP' }}：{{ job.sopTitle }}</span>
             </div>
-            <div class="taskItemStatus">{{ job.status }}</div>
+            <div class="taskItemStatus">{{ shortJobStatus(job) }}</div>
             <div class="taskItemActions" @click.stop>
+              <el-button
+                v-if="job.state === 'waiting_human'"
+                type="text"
+                size="mini"
+                @click="resumeSopJob(job.id)"
+              >
+                检查并继续
+              </el-button>
+              <el-button
+                v-if="job.state === 'waiting_data'"
+                type="text"
+                size="mini"
+                @click="openDataFillDialog(job.id)"
+              >
+                去补数
+              </el-button>
               <el-button
                 v-if="job.state === 'done'"
                 type="text"
@@ -142,7 +159,12 @@
                 看产物
               </el-button>
               <el-button
-                v-if="job.state === 'running' || job.state === 'queued'"
+                v-if="
+                  job.state === 'running' ||
+                    job.state === 'queued' ||
+                    job.state === 'waiting_human' ||
+                    job.state === 'waiting_data'
+                "
                 type="text"
                 size="mini"
                 @click="cancelSopJob(job.id)"
@@ -155,7 +177,24 @@
         <div class="taskDetail" v-if="selectedSopJob">
           <div class="liveHead">
             <strong>{{ selectedSopJob.sopTitle }}</strong>
-            <span>{{ selectedSopJob.status }}</span>
+            <span class="liveStatus">{{ shortJobStatus(selectedSopJob) }}</span>
+          </div>
+          <div
+            ref="dataFillBox"
+            class="dataFillCallout"
+            v-if="selectedSopJob.state === 'waiting_data'"
+          >
+            <div class="calloutMain">
+              <div class="calloutTitle">待补数 · 不是失败</div>
+              <p class="calloutHint">{{ shortDataFillHint }}</p>
+            </div>
+            <el-button
+              type="primary"
+              size="small"
+              @click="openDataFillDialog(selectedSopJob.id)"
+            >
+              填写并继续
+            </el-button>
           </div>
           <div class="ctxBox" v-if="selectedSopJob.context">
             <div class="ctxMeta">
@@ -270,11 +309,14 @@
           <span class="optHint">{{ opt.hint }}</span>
         </el-checkbox>
       </el-checkbox-group>
+      <p class="runOutputTip">
+        流程型 SOP（通知 / 招聘 / 审批）可不勾产物，直接执行；需要落盘文件时再勾选。
+      </p>
       <el-input
         v-model="runExtraNote"
         type="textarea"
         :rows="2"
-        placeholder="额外要求，例如：生成的 html 要简洁美观"
+        placeholder="额外要求，例如：我要招聘一个初级客服（流程型可不勾产物）"
         class="runExtra"
       ></el-input>
       <span slot="footer">
@@ -284,10 +326,57 @@
         <el-button
           type="primary"
           size="small"
-          :disabled="!runOutputIds.length"
           @click="confirmRunSop"
         >
           加入队列并开始
+        </el-button>
+      </span>
+    </el-dialog>
+
+    <el-dialog
+      title="补充缺失数据"
+      :visible.sync="dataFillDialogVisible"
+      width="640px"
+      top="8vh"
+      append-to-body
+      :close-on-click-modal="false"
+      custom-class="sopDataFillDialog"
+    >
+      <p class="fillDialogLead" v-if="dataFillJobTitle">
+        「{{ dataFillJobTitle }}」缺少关键数据，填完后继续执行。
+      </p>
+      <p class="fillDialogHint" v-if="shortDataFillHint">{{ shortDataFillHint }}</p>
+      <div class="fillDialogGrid">
+        <div class="fillDialogField" v-for="f in dataFillFields" :key="f.key">
+          <label>{{ f.label }}</label>
+          <el-input
+            v-model="f.value"
+            size="small"
+            clearable
+            placeholder="请填写"
+          ></el-input>
+        </div>
+      </div>
+      <div class="fillDialogExtra">
+        <label>其它补充说明（可选）</label>
+        <el-input
+          v-model="dataFillExtra"
+          type="textarea"
+          :rows="3"
+          placeholder="补充上下文、约束或链接等"
+        ></el-input>
+      </div>
+      <span slot="footer" class="fillDialogFooter">
+        <el-button size="small" @click="dataFillDialogVisible = false"
+          >取消</el-button
+        >
+        <el-button
+          type="primary"
+          size="small"
+          :loading="dataFillSubmitting"
+          @click="submitMissingDataAndResume"
+        >
+          提交并继续
         </el-button>
       </span>
     </el-dialog>
@@ -300,7 +389,7 @@
       append-to-body
       :close-on-click-modal="false"
       :destroy-on-close="false"
-      :custom-class="'sopMindDialog' + (isDark ? ' isDark' : '')"
+      :custom-class="'sopMindDialog'"
       @opened="onDialogOpened"
       @closed="onDialogClosed"
     >
@@ -471,7 +560,7 @@
 </template>
 
 <script>
-import { mapState, mapMutations } from 'vuex'
+import { mapMutations } from 'vuex'
 import { io } from 'socket.io-client'
 import MindMap from 'simple-mind-map'
 import Drag from 'simple-mind-map/src/plugins/Drag.js'
@@ -517,11 +606,12 @@ import {
   readLedgerFromNodeLike,
   formatMinuteStamp
 } from '@/utils/sopLedger'
-import { SOP_OUTPUT_PRESETS } from '@/utils/sopRun'
+import { SOP_OUTPUT_PRESETS, extractMissingDataNeeds } from '@/utils/sopRun'
 import {
-  createSopRunQueue,
+  getSharedSopRunQueue,
   resolveSopRunConcurrency
 } from '@/utils/sopRunQueue'
+import { areWaitingTodosDone } from '@/utils/sopNotify'
 import {
   fetchWorkbuddyModels,
   getWorkbuddyConfig,
@@ -607,8 +697,8 @@ export default {
       outputPresets: SOP_OUTPUT_PRESETS,
       runDialogVisible: false,
       runTarget: null,
-      runOutputIds: ['html'],
-      runExtraNote: '生成的 html 要简洁美观',
+      runOutputIds: [],
+      runExtraNote: '',
       runModel: 'deepseek-v4-flash',
       runModelsLoading: false,
       runCustomModels: WORKBUDDY_CUSTOM_MODEL_HINTS.slice(),
@@ -617,13 +707,22 @@ export default {
       sopQueueSnap: {
         pending: [],
         running: [],
+        waiting: [],
         recent: [],
         queuedCount: 0,
         runningCount: 0,
+        waitingCount: 0,
         total: 0,
         concurrency: 2
       },
       selectedSopJobId: '',
+      dataFillDialogVisible: false,
+      dataFillJobId: '',
+      dataFillJobTitle: '',
+      dataFillHintText: '',
+      dataFillFields: [],
+      dataFillExtra: '',
+      dataFillSubmitting: false,
       subtreeLoading: false,
       subtreeError: '',
       pendingRoot: null,
@@ -638,9 +737,6 @@ export default {
     }
   },
   computed: {
-    ...mapState({
-      isDark: state => state.localConfig.isDark
-    }),
     syncLabel() {
       if (this.subtreeLoading) return '加载中…'
       if (this.syncStatus === 'live') return '已协同同步'
@@ -659,19 +755,24 @@ export default {
     sopQueueSummary() {
       const s = this.sopQueueSnap || {}
       if (!s.total && !(s.recent && s.recent.length)) return ''
-      return `执行 ${s.runningCount || 0} · 排队 ${s.queuedCount || 0} · 并发 ${
-        s.concurrency || 2
-      }`
+      return `执行 ${s.runningCount || 0} · 等待 ${s.waitingCount || 0} · 排队 ${
+        s.queuedCount || 0
+      } · 并发 ${s.concurrency || 2}`
     },
     sopActiveJobCount() {
       return (
         (this.sopQueueSnap.runningCount || 0) +
-        (this.sopQueueSnap.queuedCount || 0)
+        (this.sopQueueSnap.queuedCount || 0) +
+        (this.sopQueueSnap.waitingCount || 0)
       )
     },
     sopTaskJobs() {
       const s = this.sopQueueSnap || {}
-      const active = [...(s.running || []), ...(s.pending || [])]
+      const active = [
+        ...(s.running || []),
+        ...(s.waiting || []),
+        ...(s.pending || [])
+      ]
       const activeIds = new Set(active.map(j => j.id))
       const recent = (s.recent || []).filter(j => !activeIds.has(j.id))
       return [...active, ...recent].slice(0, 20)
@@ -702,11 +803,29 @@ export default {
         return '等待 WorkBuddy 输出…'
       }
       return job.error || ''
+    },
+    shortDataFillHint() {
+      const n = (this.dataFillFields || []).length
+      const labels = (this.dataFillFields || [])
+        .map(f => f.label)
+        .filter(Boolean)
+        .slice(0, 8)
+      if (labels.length) {
+        return `需补充 ${n} 项：${labels.join('、')}`
+      }
+      const raw = String(this.dataFillHintText || '').trim()
+      if (!raw) return '模型缺少关键数据，请填写后继续。'
+      return raw.length > 80 ? raw.slice(0, 80) + '…' : raw
     }
   },
   watch: {
-    isDark() {
-      this.setBodyDark()
+    selectedSopJob: {
+      immediate: true,
+      handler(job) {
+        if (job && job.state === 'waiting_data' && !this.dataFillDialogVisible) {
+          this.prepareDataFillFields(job)
+        }
+      }
     },
     dialogTab(val) {
       if (val === 'map' && this.previewMindMap) {
@@ -733,36 +852,50 @@ export default {
   },
   async created() {
     this.initLocalConfig()
-    this.setBodyDark()
-    this.sopRunQueue = createSopRunQueue({
+    this._sopPageAlive = true
+    // 台账页固定浅色产品风格，避免跟随编辑器暗色把弹窗/输入框弄成黑底浅字
+    this._hadBodyDark = document.body.classList.contains('isDark')
+    document.body.classList.remove('isDark')
+    this.sopRunQueue = getSharedSopRunQueue({
       getConcurrency: () => resolveSopRunConcurrency(),
       onChange: snap => {
+        if (!this._sopPageAlive) return
         this.sopQueueSnap = snap
-        if (
-          this.selectedSopJobId &&
-          !snap.pending.some(j => j.id === this.selectedSopJobId) &&
-          !snap.running.some(j => j.id === this.selectedSopJobId) &&
-          !(snap.recent || []).some(j => j.id === this.selectedSopJobId)
-        ) {
-          /* keep id; getJob may still resolve from recent copy */
-        }
+        this.syncLedgersFromQueue(snap)
         this.scrollRunStream()
       }
     })
+    // 重新挂载 / 整页刷新后立刻同步已有任务（含 session 恢复的待补数）
+    if (this.sopRunQueue && this.sopRunQueue.getSnapshot) {
+      this.sopQueueSnap = this.sopRunQueue.getSnapshot()
+      const snap = this.sopQueueSnap
+      const prefer =
+        (snap.waiting || []).find(j => j.state === 'waiting_data') ||
+        (snap.waiting || [])[0] ||
+        (snap.running || [])[0] ||
+        (snap.pending || [])[0]
+      if (prefer && !this.selectedSopJobId) {
+        this.selectedSopJobId = prefer.id
+      }
+    }
     this.roomKey = roomFromLocation(this.$route) || ''
     await this.loadSpaces()
     if (this.roomKey) this.refreshRoomList()
     else this.statusText = '请选择空间'
   },
   beforeDestroy() {
+    this._sopPageAlive = false
     this.teardownPreview()
-    if (this.sopRunQueue) {
+    // 不 cancelAll：任务继续在单例队列里跑；只卸掉本页监听
+    if (this.sopRunQueue && this.sopRunQueue.setOnChange) {
       try {
-        this.sopRunQueue.cancelAll()
+        this.sopRunQueue.setOnChange(null)
       } catch (e) {
         /* ignore */
       }
     }
+    if (this._hadBodyDark) document.body.classList.add('isDark')
+    else document.body.classList.remove('isDark')
   },
   methods: {
     ...mapMutations(['setLocalConfig']),
@@ -774,11 +907,6 @@ export default {
           ...config
         })
       }
-    },
-    setBodyDark() {
-      this.isDark
-        ? document.body.classList.add('isDark')
-        : document.body.classList.remove('isDark')
     },
     goBack() {
       if (this.roomKey) {
@@ -1034,8 +1162,8 @@ export default {
         return
       }
       this.runTarget = item
-      this.runOutputIds = ['html']
-      this.runExtraNote = '生成的 html 要简洁美观'
+      this.runOutputIds = []
+      this.runExtraNote = ''
       this.runModel = getWorkbuddyConfig().model || 'deepseek-v4-flash'
       this.runDialogVisible = true
       this.loadRunModels()
@@ -1085,25 +1213,242 @@ export default {
       const state = this.sopCardJobState(item)
       if (state === 'running') return '运行中'
       if (state === 'queued') return '排队中'
+      if (state === 'waiting_human') return '等待人工'
+      if (state === 'waiting_data') return '待补数'
       return ''
     },
     sopJobStateLabel(job) {
       const map = {
         running: '运行中',
         queued: '排队',
+        waiting_human: '等待人工',
+        waiting_data: '待补数',
         done: '完成',
         error: '失败',
         cancelled: '已取消'
       }
       return map[job && job.state] || (job && job.state) || ''
     },
+    shortJobStatus(job) {
+      if (!job) return ''
+      if (job.state === 'waiting_data') {
+        const n = (job.missingFields && job.missingFields.length) ||
+          (this.selectedSopJobId === job.id && this.dataFillFields.length) ||
+          0
+        return n ? `待补数 · ${n} 项` : '待补数 · 点击填写后继续'
+      }
+      if (job.state === 'waiting_human') {
+        const n = (job.waitingTaskUids && job.waitingTaskUids.length) || 0
+        return n ? `等待人工待办 ${n} 条` : '等待人工确认'
+      }
+      const s = String(job.status || '').replace(/\s+/g, ' ').trim()
+      if (s.length > 48) return s.slice(0, 48) + '…'
+      return s
+    },
     selectSopJob(jobId) {
       this.selectedSopJobId = jobId
       this.scrollRunStream()
+      this.$nextTick(() => this.scrollDataFillIntoView())
+    },
+    prepareDataFillFields(job) {
+      if (!job) return
+      const isJunkField = f => {
+        const label = String((f && f.label) || '').trim()
+        if (!label || label.length > 16) return true
+        if (/[。；;！!？?\n]/.test(label)) return true
+        if (
+          /节点|uid|未完成|历史|运行|推进|阻塞|阻断|容器|待办|产物|大纲|台账|校验|房间|本次|本单|流程型|登记|拟稿|数据源|示例|仍缺/.test(
+            label
+          )
+        ) {
+          return true
+        }
+        return false
+      }
+      let fields =
+        (job.missingFields && job.missingFields.length
+          ? job.missingFields
+          : job.result && job.result.missingFields) || []
+      if (fields.length && fields.some(isJunkField)) {
+        fields = []
+      }
+      const reply =
+        job.streamText || (job.result && job.result.reply) || job.status || ''
+      const parsed = extractMissingDataNeeds(reply)
+      if (
+        (!fields.length || fields.length < 3) &&
+        parsed.fields &&
+        parsed.fields.length
+      ) {
+        fields = parsed.fields
+      }
+      this.dataFillHintText =
+        (parsed.summary && !/节点\*\*|未完成\*\*|uid/.test(parsed.summary)
+          ? parsed.summary
+          : '') ||
+        (job.missingSummary && !/节点\*\*|未完成\*\*|uid/.test(job.missingSummary)
+          ? job.missingSummary
+          : '') ||
+        (job.result &&
+        job.result.missingSummary &&
+        !/节点\*\*|未完成\*\*|uid/.test(job.result.missingSummary)
+          ? job.result.missingSummary
+          : '') ||
+        '模型缺少关键数据，请按字段填写后继续执行。'
+      if (!fields.length) {
+        fields = [
+          { key: 'f_company', label: '公司主体', value: '' },
+          { key: 'f_dept', label: '招聘部门', value: '' },
+          { key: 'f_gender', label: '性别要求', value: '' },
+          { key: 'f_count', label: '人数', value: '' },
+          { key: 'f_reason', label: '招聘原因', value: '' },
+          { key: 'f_jd', label: '岗位/JD', value: '' },
+          { key: 'f_level', label: '职级', value: '' },
+          { key: 'f_city', label: '城市', value: '' }
+        ]
+      }
+      this.dataFillFields = fields
+        .filter(f => !isJunkField(f))
+        .map((f, i) => {
+          let label = String(f.label || '')
+            .replace(/（.*?）|\(.*?\)/g, '')
+            .replace(/[（(][^）)]*$/, '')
+            .trim()
+          if (!label || label.length > 16) return null
+          return {
+            key: f.key || `f_${i + 1}`,
+            label,
+            value: ''
+          }
+        })
+        .filter(Boolean)
+      if (!this.dataFillFields.length) {
+        this.dataFillFields = [
+          { key: 'f_company', label: '公司主体', value: '' },
+          { key: 'f_dept', label: '招聘部门', value: '' },
+          { key: 'f_gender', label: '性别要求', value: '' },
+          { key: 'f_count', label: '人数', value: '' },
+          { key: 'f_reason', label: '招聘原因', value: '' },
+          { key: 'f_jd', label: '岗位/JD', value: '' },
+          { key: 'f_level', label: '职级', value: '' },
+          { key: 'f_city', label: '城市', value: '' }
+        ]
+      }
+    },
+    openDataFillDialog(jobId) {
+      const job =
+        (this.sopRunQueue && this.sopRunQueue.getJob(jobId)) ||
+        this.sopTaskJobs.find(j => j.id === jobId)
+      if (!job || job.state !== 'waiting_data') {
+        this.$message.warning('该任务不在待补数状态')
+        return
+      }
+      this.selectedSopJobId = jobId
+      this.dataFillJobId = jobId
+      this.dataFillJobTitle = `${job.sopId || 'SOP'}：${job.sopTitle || ''}`
+      this.dataFillExtra = ''
+      this.prepareDataFillFields(job)
+      this.dataFillDialogVisible = true
+    },
+    scrollDataFillIntoView() {
+      const el = this.$refs.dataFillBox
+      if (el && el.scrollIntoView) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      }
     },
     cancelSopJob(jobId) {
       if (!this.sopRunQueue) return
       this.sopRunQueue.cancel(jobId)
+    },
+    async submitMissingDataAndResume() {
+      if (!this.sopRunQueue) return
+      const jobId = this.dataFillJobId || (this.selectedSopJob && this.selectedSopJob.id)
+      const job = this.sopRunQueue.getJob(jobId) || this.selectedSopJob
+      if (!job || job.state !== 'waiting_data') {
+        this.$message.warning('该任务不在待补数状态')
+        return
+      }
+      const lines = (this.dataFillFields || [])
+        .map(f => {
+          const v = String(f.value || '').trim()
+          if (!v) return ''
+          return `${f.label}：${v}`
+        })
+        .filter(Boolean)
+      const extra = String(this.dataFillExtra || '').trim()
+      if (!lines.length && !extra) {
+        this.$message.warning('请至少填写一项缺失数据')
+        return
+      }
+      const append = [
+        '## 用户补充数据',
+        ...lines,
+        extra ? `其它说明：${extra}` : ''
+      ]
+        .filter(Boolean)
+        .join('\n')
+      this.dataFillSubmitting = true
+      try {
+        const res = this.sopRunQueue.resumeWaiting(job.id, {
+          extraNoteAppend: append
+        })
+        if (!res.ok) {
+          this.$message.warning(res.message || '无法继续')
+          return
+        }
+        this.dataFillExtra = ''
+        this.dataFillDialogVisible = false
+        this.$message.success('已提交补充数据，继续执行')
+      } finally {
+        this.dataFillSubmitting = false
+      }
+    },
+    async resumeSopJob(jobId) {
+      if (!this.sopRunQueue) return
+      const job = this.sopRunQueue.getJob(jobId)
+      if (!job || job.state !== 'waiting_human') {
+        this.$message.warning('该任务不在等待人工状态')
+        return
+      }
+      try {
+        const uids = job.waitingTaskUids || []
+        if (!uids.length) {
+          try {
+            await this.$confirm(
+              '未写入导图待办节点。若已人工处理完通知，可继续执行 SOP。',
+              '确认继续',
+              { type: 'warning' }
+            )
+          } catch (e) {
+            return
+          }
+        } else {
+          const check = await areWaitingTodosDone(
+            job.roomKey || this.roomKey,
+            uids
+          )
+          if (!check.done) {
+            const left = (check.pending || []).length
+            const miss = (check.missing || []).length
+            this.$message.warning(
+              left
+                ? `还有 ${left} 条阻塞待办未完成，请先在导图「待办」中完成`
+                : miss
+                  ? '待办节点已找不到，请确认是否被删除'
+                  : '阻塞待办尚未完成'
+            )
+            return
+          }
+        }
+        const res = this.sopRunQueue.resumeWaiting(jobId)
+        if (!res.ok) {
+          this.$message.warning(res.message || '无法继续')
+          return
+        }
+        this.$message.success('已继续执行 SOP')
+      } catch (err) {
+        this.$message.error((err && err.message) || '检查待办失败')
+      }
     },
     cancelAllSopJobs() {
       if (!this.sopRunQueue) return
@@ -1112,20 +1457,131 @@ export default {
     },
     applyJobLedgerToList(job, ledger) {
       if (!job || !ledger) return
-      const idx = this.sops.findIndex(
-        s =>
-          s.rowKey === job.sopRowKey ||
-          this.resolveSopUid(s) === job.sopUid
-      )
+      // 严格按节点 uid 归属，避免多任务回写串到别的 SOP 卡片
+      const idx = this.sops.findIndex(s => {
+        if (job.sopUid) {
+          if (this.resolveSopUid(s) === job.sopUid) return true
+          if (s.uids && s.uids.includes(job.sopUid)) return true
+          return false
+        }
+        return !!(job.sopRowKey && s.rowKey === job.sopRowKey)
+      })
       if (idx < 0) return
+      const scoped = this.scopeLedgerToSop(ledger, {
+        id: job.sopId,
+        uid: job.sopUid,
+        title: job.sopTitle
+      })
       const next = {
         ...this.sops[idx],
-        runs: ledger.runs,
-        deliverables: ledger.deliverables,
-        frequency: ledger.frequency,
-        sopLedger: ledger
+        runs: scoped.runs,
+        deliverables: scoped.deliverables,
+        frequency: scoped.frequency,
+        sopLedger: scoped
       }
       this.$set(this.sops, idx, next)
+    },
+    scopeLedgerToSop(ledger, sopMeta) {
+      const L = normalizeLedger(ledger)
+      const wantId = String((sopMeta && sopMeta.id) || '')
+        .trim()
+        .toUpperCase()
+      if (!wantId) return L
+      const titleKey = String((sopMeta && sopMeta.title) || '')
+        .replace(/\s+/g, '')
+        .slice(0, 12)
+      const keep = d => {
+        const blob = `${d.name || ''}\n${d.uri_or_path || ''}`
+        const fileId = (blob.match(/(?:^|[^A-Za-z0-9])(D\d+)(?=[^A-Za-z0-9]|$)/i) ||
+          [])[1]
+        if (fileId && fileId.toUpperCase() !== wantId) return false
+        if (d.sop_id && String(d.sop_id).toUpperCase() !== wantId) return false
+        if (d.sop_uid && sopMeta.uid && d.sop_uid !== sopMeta.uid) return false
+        // 有其它 D 编号痕迹且标题也对不上时丢掉
+        if (
+          fileId &&
+          titleKey &&
+          titleKey.length >= 2 &&
+          !blob.includes(titleKey) &&
+          fileId.toUpperCase() !== wantId
+        ) {
+          return false
+        }
+        return true
+      }
+      return normalizeLedger({
+        ...L,
+        deliverables: (L.deliverables || []).filter(keep)
+      })
+    },
+    syncLedgersFromQueue(snap) {
+      const jobs = [
+        ...((snap && snap.running) || []),
+        ...((snap && snap.waiting) || []),
+        ...((snap && snap.recent) || [])
+      ]
+      // 只回写已结束/等待且带 ledger 的任务；按 uid 精确落到对应卡片
+      jobs.forEach(job => {
+        if (
+          job &&
+          job.result &&
+          job.result.ledger &&
+          (job.state === 'done' ||
+            job.state === 'error' ||
+            job.state === 'cancelled' ||
+            job.state === 'waiting_human' ||
+            job.state === 'waiting_data')
+        ) {
+          this.applyJobLedgerToList(job, job.result.ledger)
+        }
+      })
+    },
+    /** 刷新列表时保留内存台账 + 队列已回写结果，避免「最近运行/产物」被刷空 */
+    mergeSopsPreservingRuns(fetched) {
+      const prevByUid = new Map()
+      const prevByRow = new Map()
+      ;(this.sops || []).forEach(s => {
+        const uid = this.resolveSopUid(s)
+        if (uid) prevByUid.set(uid, s)
+        if (s.rowKey) prevByRow.set(s.rowKey, s)
+        ;(s.uids || []).forEach(u => {
+          if (u && !prevByUid.has(u)) prevByUid.set(u, s)
+        })
+      })
+      const queueLedgers =
+        (this.sopRunQueue &&
+          this.sopRunQueue.collectLedgers &&
+          this.sopRunQueue.collectLedgers(this.roomKey)) ||
+        new Map()
+
+      return (fetched || []).map(item => {
+        const uid = this.resolveSopUid(item)
+        const prev =
+          (uid && prevByUid.get(uid)) ||
+          (item.rowKey && prevByRow.get(item.rowKey)) ||
+          null
+        let ledger = mergeLedgerSources(
+          item.sopLedger || item,
+          prev ? prev.sopLedger || prev : null
+        )
+        if (uid && queueLedgers.has(uid)) {
+          ledger = mergeLedgerSources(ledger, queueLedgers.get(uid))
+        }
+        if (item.uids) {
+          item.uids.forEach(u => {
+            if (queueLedgers.has(u)) {
+              ledger = mergeLedgerSources(ledger, queueLedgers.get(u))
+            }
+          })
+        }
+        return {
+          ...item,
+          runs: ledger.runs,
+          deliverables: ledger.deliverables,
+          frequency: ledger.frequency || item.frequency,
+          sopLedger: ledger
+        }
+      })
     },
     openJobDeliverables(job) {
       const item = this.sops.find(
@@ -1150,10 +1606,6 @@ export default {
     },
     confirmRunSop() {
       if (!this.runTarget || !this.roomKey || !this.sopRunQueue) return
-      if (!this.runOutputIds.length) {
-        this.$message.warning('请至少选择一种产物')
-        return
-      }
       if (this.runModel) {
         this.setLocalConfig({ workbuddyModel: this.runModel })
       }
@@ -1169,6 +1621,7 @@ export default {
         model: this.runModel,
         actor: this.userInfo.name || '台账',
         onSuccess: (result, job) => {
+          if (!this._sopPageAlive) return
           if (result && result.ledger) {
             this.applyJobLedgerToList(job, result.ledger)
           }
@@ -1189,6 +1642,7 @@ export default {
           }
         },
         onError: (err, msg) => {
+          if (!this._sopPageAlive) return
           if (err && err.ledger) {
             this.applyJobLedgerToList(
               {
@@ -1201,6 +1655,26 @@ export default {
           if (!(err && err.name === 'AbortError')) {
             this.$message.error(`「${sop.title}」：${msg}`)
           }
+        },
+        onWaiting: (result, job) => {
+          if (!this._sopPageAlive) return
+          if (result && result.ledger) {
+            this.applyJobLedgerToList(job, result.ledger)
+          }
+          this.selectedSopJobId = job.id
+          if (result && result.waitingData) {
+            this.$message.info(
+              `「${job.sopTitle}」缺少数据，请点击「去补数」填写后继续`
+            )
+            this.openDataFillDialog(job.id)
+            return
+          }
+          const n = (job.waitingTaskUids && job.waitingTaskUids.length) || 0
+          this.$message.warning(
+            `「${job.sopTitle}」已派发阻塞通知，请完成导图待办后点「检查并继续」${
+              n ? `（${n} 条）` : ''
+            }`
+          )
         }
       })
       if (!enqueued.ok) {
@@ -1574,11 +2048,15 @@ export default {
         const unique = dedupeSopsForRegistry(
           fillDefaultCpda({ sops: result.sops || [] }).sops
         )
-        this.sops = unique
+        // 合并内存/队列台账，避免刷新冲掉「最近运行」和任务面板对应展示
+        this.sops = this.mergeSopsPreservingRuns(unique)
         const space =
           (this.spaceOptions.find(s => s.room_key === roomKey) || {}).label ||
           roomKey
-        this.statusText = `「${space}」共 ${unique.length} 条 SOP`
+        this.statusText = `「${space}」共 ${this.sops.length} 条 SOP`
+        if (this.sopRunQueue && this.sopRunQueue.getSnapshot) {
+          this.sopQueueSnap = this.sopRunQueue.getSnapshot()
+        }
       } catch (err) {
         console.error('[sopRegistry page]', err)
         this.$message.error((err && err.message) || '读取失败')
@@ -1595,77 +2073,9 @@ export default {
 .sopPage {
   min-height: calc(100vh - 48px);
   padding: 20px 28px 36px;
-  background: transparent;
+  background: var(--ui-bg, #f7f9f8);
+  color: var(--ui-text, #17261f);
   box-sizing: border-box;
-
-  &.isDark {
-    background: transparent;
-    color: #e5eaf3;
-
-    .sopHeader h1 {
-      color: #e5eaf3;
-    }
-
-    .hint,
-    .statusLine,
-    .spaceLabel,
-    .emptyState {
-      color: #909399;
-    }
-
-    .sopCard {
-      background: #262a2e;
-      border-color: rgba(255, 255, 255, 0.08);
-
-      .cardTitle {
-        color: #e5eaf3;
-      }
-
-      .metaChip {
-        background: rgba(255, 255, 255, 0.06);
-        color: #c0c4cc;
-      }
-
-      .blockLabel {
-        color: #909399;
-      }
-
-      .blockBody {
-        color: #dcdfe6;
-      }
-    }
-
-    .sopTaskPanel {
-      background: #262a2e;
-      border-color: rgba(255, 255, 255, 0.08);
-
-      .taskPanelHead {
-        background: #1f2329;
-        border-bottom-color: rgba(255, 255, 255, 0.08);
-      }
-
-      .taskTitleRow strong {
-        color: #e5eaf3;
-      }
-
-      .taskList {
-        border-right-color: rgba(255, 255, 255, 0.08);
-      }
-
-      .taskItem {
-        border-bottom-color: rgba(255, 255, 255, 0.06);
-
-        &:hover,
-        &.active {
-          background: rgba(255, 255, 255, 0.04);
-        }
-      }
-
-      .taskName {
-        color: #e5eaf3;
-      }
-    }
-  }
 
   .sopHeader {
     display: flex;
@@ -1687,12 +2097,12 @@ export default {
       margin: 0;
       font-size: 20px;
       font-weight: 600;
-      color: #303133;
+      color: var(--ui-text, #17261f);
     }
 
     .spaceLabel {
       font-size: 13px;
-      color: #606266;
+      color: var(--ui-text-secondary, #66756e);
     }
 
     .spaceSelect {
@@ -1704,18 +2114,18 @@ export default {
   .statusLine {
     margin: 0 0 10px;
     font-size: 13px;
-    color: #909399;
+    color: var(--ui-text-muted, #7b8982);
     line-height: 1.5;
   }
 
   .runStatus {
-    color: #087854;
+    color: var(--ui-primary, #087854);
   }
 
   .emptyState {
     margin-top: 48px;
     text-align: center;
-    color: #909399;
+    color: var(--ui-text-muted, #7b8982);
     font-size: 14px;
   }
 
@@ -1728,9 +2138,9 @@ export default {
 
   .sopTaskPanel {
     margin-top: 20px;
-    border: 1px solid #ebeef5;
-    border-radius: 10px;
-    background: #fff;
+    border: 1px solid var(--ui-border, #e7ece9);
+    border-radius: var(--ui-radius-lg, 12px);
+    background: var(--ui-surface, #fff);
     overflow: hidden;
 
     .taskPanelHead {
@@ -1739,8 +2149,8 @@ export default {
       justify-content: space-between;
       gap: 12px;
       padding: 10px 14px;
-      border-bottom: 1px solid #ebeef5;
-      background: #f8faf9;
+      border-bottom: 1px solid var(--ui-border, #e7ece9);
+      background: var(--ui-surface-muted, #f1f5f3);
     }
 
     .taskTitleRow {
@@ -1751,7 +2161,7 @@ export default {
 
       strong {
         font-size: 14px;
-        color: #303133;
+        color: var(--ui-text, #17261f);
       }
     }
 
@@ -1763,8 +2173,8 @@ export default {
     .taskBody {
       display: grid;
       grid-template-columns: minmax(220px, 320px) 1fr;
-      min-height: 220px;
-      max-height: 420px;
+      min-height: 240px;
+      max-height: 520px;
     }
 
     .taskList {
@@ -1799,6 +2209,11 @@ export default {
 
       &.queued .taskState {
         color: #e6a23c;
+      }
+
+      &.waiting_data .taskState,
+      &.waiting_human .taskState {
+        color: #d48806;
       }
     }
 
@@ -1836,13 +2251,61 @@ export default {
     .taskDetail {
       padding: 12px 14px;
       overflow: auto;
+      min-height: 0;
 
       .liveHead {
         display: flex;
         justify-content: space-between;
         gap: 8px;
-        margin-bottom: 8px;
+        align-items: baseline;
+        margin-bottom: 10px;
         font-size: 13px;
+
+        strong {
+          flex: 0 1 auto;
+          color: #17261f;
+        }
+
+        .liveStatus {
+          flex: 1 1 auto;
+          text-align: right;
+          color: #80948c;
+          font-size: 12px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+      }
+
+      .dataFillCallout {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-bottom: 12px;
+        padding: 12px 14px;
+        border: 1px solid #f0d9a8;
+        border-radius: 10px;
+        background: linear-gradient(180deg, #fffaf0 0%, #fff7e8 100%);
+      }
+
+      .calloutMain {
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+
+      .calloutTitle {
+        font-size: 13px;
+        font-weight: 600;
+        color: #8a6116;
+        margin-bottom: 4px;
+      }
+
+      .calloutHint {
+        margin: 0;
+        font-size: 12px;
+        color: #a07830;
+        line-height: 1.45;
       }
 
       .ctxBox,
@@ -1857,7 +2320,18 @@ export default {
       }
 
       .streamText {
-        max-height: 180px;
+        max-height: 220px;
+        margin: 0;
+        padding: 10px;
+        overflow: auto;
+        background: #f3f7f5;
+        color: #24352d;
+        border: 1px solid #e7ece9;
+        border-radius: 8px;
+        font-size: 12px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
       }
     }
   }
@@ -1876,17 +2350,18 @@ export default {
   }
 
   .sopCard {
-    background: #fff;
-    border: 1px solid #ebeef5;
-    border-radius: 10px;
+    background: var(--ui-surface, #fff);
+    border: 1px solid var(--ui-border, #e7ece9);
+    border-radius: var(--ui-radius-lg, 12px);
     padding: 16px;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    box-shadow: 0 1px 2px rgba(23, 38, 31, 0.03);
     cursor: pointer;
     user-select: none;
-    transition: box-shadow 0.15s ease, transform 0.15s ease;
+    transition: box-shadow 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
 
     &:hover {
-      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+      border-color: var(--ui-border-strong, #cbd8d2);
+      box-shadow: var(--ui-shadow-hover, 0 6px 18px rgba(23, 38, 31, 0.07));
       transform: translateY(-1px);
     }
 
@@ -1921,13 +2396,23 @@ export default {
         background: #fdf6ec;
         color: #e6a23c;
       }
+
+      &.waiting_human {
+        background: #fef0f0;
+        color: #f56c6c;
+      }
+
+      &.waiting_data {
+        background: #fdf6ec;
+        color: #e6a23c;
+      }
     }
 
     .cardTitle {
       margin: 0;
       font-size: 16px;
       font-weight: 600;
-      color: #303133;
+      color: var(--ui-text, #17261f);
       line-height: 1.4;
       word-break: break-word;
       flex: 1;
@@ -1945,8 +2430,8 @@ export default {
       padding: 2px 8px;
       border-radius: 999px;
       font-size: 12px;
-      background: #f0f2f5;
-      color: #606266;
+      background: var(--ui-surface-muted, #f1f5f3);
+      color: var(--ui-text-secondary, #66756e);
     }
 
     .cardBlock {
@@ -1955,13 +2440,13 @@ export default {
 
     .blockLabel {
       font-size: 12px;
-      color: #909399;
+      color: var(--ui-text-muted, #7b8982);
       margin-bottom: 4px;
     }
 
     .blockBody {
       font-size: 13px;
-      color: #606266;
+      color: var(--ui-text-secondary, #66756e);
       line-height: 1.5;
       word-break: break-word;
     }
@@ -2134,25 +2619,6 @@ export default {
     color: #909399;
     z-index: 2;
   }
-
-  &.isDark {
-    background: #1f2329;
-
-    .el-dialog__title,
-    .syncBar {
-      color: #e5eaf3;
-    }
-
-    .mindWrap {
-      background: #1a1d21;
-      border-color: rgba(255, 255, 255, 0.08);
-    }
-
-    .ledgerList li {
-      border-bottom-color: rgba(255, 255, 255, 0.08);
-      color: #dcdfe6;
-    }
-  }
 }
 
 .sopRunDialog {
@@ -2213,13 +2679,108 @@ export default {
     margin-bottom: 8px;
   }
 
-  .runLivePanel {
-    margin-top: 12px;
-    border: 1px solid #dce7e1;
-    border-radius: 10px;
-    background: #f7faf8;
-    padding: 10px 12px 12px;
+  .runOutputTip {
+    margin: -4px 0 12px;
+    font-size: 12px;
+    color: #80948c;
+    line-height: 1.45;
   }
+
+  .dataFillHint {
+    margin: 0 0 12px;
+    font-size: 12px;
+    color: #a26b1c;
+    line-height: 1.45;
+  }
+
+  .dataFillField {
+    margin-bottom: 10px;
+
+    label {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 12px;
+      color: #606266;
+    }
+  }
+
+  .dataFillExtra {
+    margin-top: 4px;
+  }
+}
+
+.sopDataFillDialog {
+  .el-dialog__body {
+    max-height: 62vh;
+    overflow: auto;
+    padding-top: 12px;
+    padding-bottom: 8px;
+  }
+
+  .fillDialogLead {
+    margin: 0 0 8px;
+    font-size: 14px;
+    color: #24352d;
+    line-height: 1.5;
+  }
+
+  .fillDialogHint {
+    margin: 0 0 14px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: #f7faf8;
+    border: 1px solid #e7ece9;
+    font-size: 12px;
+    color: #5f7369;
+    line-height: 1.45;
+  }
+
+  .fillDialogGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 14px;
+    margin-bottom: 14px;
+  }
+
+  .fillDialogField {
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #3d4f46;
+    }
+  }
+
+  .fillDialogExtra {
+    margin-bottom: 4px;
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 12px;
+      color: #5f7369;
+    }
+  }
+
+  .fillDialogFooter {
+    display: inline-flex;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 640px) {
+  .sopDataFillDialog .fillDialogGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.runLivePanel {
+  margin-top: 12px;
+  border: 1px solid #dce7e1;
+  border-radius: 10px;
+  background: #f7faf8;
+  padding: 10px 12px 12px;
 
   .liveHead {
     display: flex;
@@ -2315,8 +2876,9 @@ export default {
     overflow: auto;
     margin: 0;
     padding: 10px;
-    background: #1a1d21;
-    color: #d7ebe1;
+    background: #f3f7f5;
+    color: #24352d;
+    border: 1px solid #e7ece9;
     border-radius: 8px;
     font-size: 12px;
     line-height: 1.55;
@@ -2374,4 +2936,81 @@ export default {
     background: #fff;
   }
 }
+
+/* 强制浅色弹窗：避免 body.isDark 全局样式把弹窗/输入框弄成黑底浅字 */
+body.isDark .sopRunDialog,
+.sopRunDialog,
+body.isDark .sopDataFillDialog,
+.sopDataFillDialog {
+  background: #fff !important;
+
+  .el-dialog__header,
+  .el-dialog__body,
+  .el-dialog__footer {
+    background: #fff !important;
+    color: #17261f;
+  }
+
+  .el-dialog__title,
+  .runDialogLead,
+  .runModelLabel,
+  .optLabel {
+    color: #17261f !important;
+  }
+
+  .optHint {
+    color: #7b8982 !important;
+  }
+
+  .el-input__inner,
+  .el-textarea__inner {
+    background: #fff !important;
+    color: #17261f !important;
+    border-color: #d5ddd8 !important;
+    caret-color: #17261f;
+
+    &::placeholder {
+      color: #98a59f !important;
+    }
+  }
+
+  .el-checkbox__label {
+    color: #17261f !important;
+  }
+
+  .el-button {
+    background-color: #fff !important;
+    color: #17261f !important;
+    border-color: #d5ddd8 !important;
+
+    &.el-button--primary {
+      background-color: var(--ui-primary, #087854) !important;
+      border-color: var(--ui-primary, #087854) !important;
+      color: #fff !important;
+    }
+  }
+}
+
+body.isDark .sopMindDialog,
+.sopMindDialog {
+  background: #fff !important;
+
+  .el-dialog__header,
+  .el-dialog__body {
+    background: #fff !important;
+    color: #17261f;
+  }
+
+  .el-dialog__title {
+    color: #17261f !important;
+  }
+
+  .el-input__inner,
+  .el-textarea__inner {
+    background: #fff !important;
+    color: #17261f !important;
+    border-color: #d5ddd8 !important;
+  }
+}
+
 </style>

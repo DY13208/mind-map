@@ -1453,6 +1453,72 @@ function completeTodo(obj, options = {}) {
   }
 }
 
+/**
+ * 在「待办 → 待办」下新建一条任务（供 AI 发起通知 / 派发）
+ */
+function createTodo(obj, options = {}) {
+  const next = clone(obj)
+  const branches = findTodoBranches(next)
+  const text = String(options.text || '').trim()
+  if (!text) throw new Error('缺少待办标题')
+  const uid = String(options.uid || '').trim() || createUid()
+  if (next[uid]) throw new Error('待办任务 uid 已存在')
+  const noteParts = [
+    String(options.note || '').trim(),
+    options.assignee ? `接收人：${options.assignee}` : '',
+    options.block ? '阻塞：是（完成前流程暂停）' : '阻塞：否（通知后继续）',
+    options.sop_id ? `来源SOP：${options.sop_id}` : '',
+    options.notify_key ? `通知键：${options.notify_key}` : ''
+  ].filter(Boolean)
+  const data = {
+    uid,
+    text,
+    expand: true,
+    note: noteParts.join('\n'),
+    aiNotify: {
+      block: !!options.block,
+      assignee: String(options.assignee || '').trim(),
+      sopId: String(options.sop_id || '').trim(),
+      sopUid: String(options.sop_uid || '').trim(),
+      notifyKey: String(options.notify_key || '').trim(),
+      createdAt: new Date().toISOString()
+    }
+  }
+  next[uid] = { data, children: [] }
+  const childTexts = Array.isArray(options.children) ? options.children : []
+  childTexts.forEach(child => {
+    const label =
+      typeof child === 'string'
+        ? child
+        : String((child && child.text) || '').trim()
+    if (!label) return
+    const cid = createUid()
+    next[cid] = {
+      data: {
+        uid: cid,
+        text: label,
+        expand: true,
+        note: (child && child.note) || ''
+      },
+      children: []
+    }
+    next[uid].children.push(cid)
+  })
+  next[branches.pending_uid].children = [
+    ...(next[branches.pending_uid].children || []),
+    uid
+  ]
+  updateCountInLabel(next, branches.pending_uid)
+  return {
+    obj: next,
+    task_uid: uid,
+    pending_uid: branches.pending_uid,
+    container_uid: branches.container_uid,
+    block: !!options.block,
+    task: subtreePayload(next, uid)
+  }
+}
+
 function normalizeProposalInput(input) {
   return {
     sop_uid: String(input.sop_uid || ''),
@@ -1584,6 +1650,7 @@ module.exports = {
   isWithinSop,
   isWithinSopOnDoc,
   prepareTodo,
+  createTodo,
   completeTodo,
   proposeSopImprovement,
   applySopImprovement,

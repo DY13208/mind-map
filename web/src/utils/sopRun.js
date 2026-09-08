@@ -10,6 +10,11 @@ import {
   normalizeLedger,
   isJunkDeliverable
 } from './sopLedger'
+import {
+  extractNotifyNodesFromOutline,
+  processNotifyNodes,
+  summarizeNotifyResults
+} from './sopNotify'
 
 /** 可选产物预设（运行前勾选） */
 export const SOP_OUTPUT_PRESETS = [
@@ -18,7 +23,7 @@ export const SOP_OUTPUT_PRESETS = [
     label: 'HTML 执行单',
     hint: '单页简洁美观，含 KPI / 表格 / 本周动作',
     prompt:
-      '生成一份简洁美观的单页 HTML 执行单，落到项目 output 目录，文件名带 YYYY-MM-DD_HHmm，并给出可打开的绝对路径'
+      '生成一份简洁美观的单页 HTML 执行单，落到项目 output 目录，文件名必须含本 SOP 编号与标题（如 D2_采购目标_YYYY-MM-DD_HHmm.html），并给出可打开的绝对路径'
   },
   {
     id: 'md',
@@ -112,16 +117,21 @@ function buildSystemPrompt() {
 硬性规则：
 1. 必须实际调用工具/MCP 去读数据、算数、写文件；禁止只根据大纲「口头完成」。
 2. 没有工具调用、没有生成真实文件路径，就不能说「已完成」。
-3. 按该 SOP 的步骤与检查项执行；HTML 要真正落盘（简洁美观：KPI 卡 + 表格 + 本周动作）。
-4. 文末必须有可解析的「产物清单」，且只列用户勾选的最终产物（绝对路径或可打开链接；文件名时间精确到分）：
+3. 只执行用户指定的那一个 SOP（编号+标题+uid），禁止顺带执行或改写其它 D 节点。
+4. 若用户消息已标明「已处理的通知」，不要重复派发；阻塞类通知由台账队列等待人工完成。
+5. 按该 SOP 的步骤与检查项执行；HTML 要真正落盘（简洁美观：KPI 卡 + 表格 + 本周动作）。
+5. 文末必须有可解析的「产物清单」，且只列用户勾选的最终产物（绝对路径或可打开链接；文件名时间精确到分）。
+6. 文件名必须包含本 SOP 编号（如 D2）与标题关键词，避免多任务并行时产物串台，例如：
+   D2_采购目标_2026-09-08_1022.html
+7. 产物清单格式：
 ## 产物清单
-- name: UN排产下单执行单_2026-09-07_1730.html
-  path: D:\\\\path\\\\to\\\\output\\\\UN排产下单执行单_2026-09-07_1730.html
-5. 禁止把过程数据、中间 JSON、MCP/工具临时路径、stdout、schema 片段、COS 临时对象写入产物清单。
-6. 最终文件请落到项目 output 目录；文件名带 YYYY-MM-DD_HHmm。
-7. 同时给出：是否完成、核心判断一句话、单页内容要点、数据来源。
-8. 不要修改 SOP 本体结构；过程日志不必写入导图。
-9. 缺关键数据时说明缺什么，仍尽量用已有数据给出可执行结论，但不要伪造文件。`
+- name: D2_采购目标_2026-09-08_1022.html
+  path: D:\\\\path\\\\to\\\\output\\\\D2_采购目标_2026-09-08_1022.html
+8. 禁止把过程数据、中间 JSON、MCP/工具临时路径、stdout、schema 片段、COS 临时对象写入产物清单。
+9. 最终文件请落到项目 output 目录；不要复用或改写其它 SOP 刚生成的文件。
+10. 同时给出：是否完成、核心判断一句话、单页内容要点、数据来源。
+11. 不要修改 SOP 本体结构；过程日志不必写入导图。
+12. 缺关键数据时说明缺什么，仍尽量用已有数据给出可执行结论，但不要伪造文件。`
 }
 
 function buildUserPrompt({ ctx, outputs, extraNote }) {
@@ -129,13 +139,40 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
     .map(o => `- ${o.label}：${o.prompt}`)
     .join('\n')
   const goal = [ctx.sopId, ctx.sopTitle].filter(Boolean).join('：')
+  const fileHint = suggestDeliverableFileStem(ctx.sopId, ctx.sopTitle)
+  const needFiles = !!(outputs && outputs.length)
+  if (!needFiles) {
+    return [
+      `请执行 SOP「${goal || ctx.sopTitle}」（流程型，不要求落盘产物文件）。`,
+      ctx.sopUid ? `节点 uid：${ctx.sopUid}` : '',
+      `房间：${ctx.roomKey}`,
+      '',
+      '【执行要求】',
+      '- 按大纲中的 AI / 人 / HRBP / 需求方 等步骤推进可自动部分；',
+      '- 遇到通知、知会、审批类步骤：说明对象与内容；若台账侧已派发待办则勿重复；',
+      '- 不要强行生成 HTML/Excel 等文件；文末可不写「产物清单」，改为「## 执行结果」；',
+      '- 说明：已完成哪些自动步骤、卡在哪个人工步骤、下一步建议。',
+      extraNote ? `\n## 额外要求\n${extraNote}` : '',
+      '',
+      '## SOP 子树 / 大纲上下文',
+      ctx.outline || '（未拉到大纲，请用房间 MCP/工具自行读取该 SOP）',
+      '',
+      '开始执行。完成后用中文结构化汇报（含 ## 执行结果）。'
+    ]
+      .filter(Boolean)
+      .join('\n')
+  }
   return [
     `请执行 SOP「${goal || ctx.sopTitle}」。`,
     ctx.sopUid ? `节点 uid：${ctx.sopUid}` : '',
     `房间：${ctx.roomKey}`,
     '',
+    '【归属约束】本次只服务上述 SOP；产物文件名必须以以下词干开头（后接 _YYYY-MM-DD_HHmm.扩展名）：',
+    fileHint,
+    '产物清单里禁止出现其它 D 编号（如别人的 D1/D3 执行单）。',
+    '',
     '## 需要输出的产物（只生成并回报这些；文末「产物清单」也只能列这些最终文件）',
-    selected || '- HTML 执行单：简洁美观',
+    selected,
     '',
     '注意：中间快照、_map_full/_map_outline、MCP 日志不要出现在产物清单里。',
     extraNote ? `\n## 额外要求\n${extraNote}` : '',
@@ -149,6 +186,72 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
     .join('\n')
 }
 
+/** 产物文件名词干：D2_采购目标 */
+export function suggestDeliverableFileStem(sopId, sopTitle) {
+  const id = String(sopId || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+  const title = String(sopTitle || '')
+    .replace(/[\\/:*?"<>|\s]+/g, '')
+    .slice(0, 24)
+  if (id && title) return `${id}_${title}`
+  if (id) return id
+  return title || 'SOP'
+}
+
+function sopIdFromText(text) {
+  // 不用 \b：文件名常为 D2_采购目标.html，下划线会吃掉词界
+  const m = String(text || '').match(/(?:^|[^A-Za-z0-9])(D\d+)(?=[^A-Za-z0-9]|$)/i)
+  return m ? m[1].toUpperCase() : ''
+}
+
+/**
+ * 多任务并行时按 SOP 编号/标题过滤产物，避免串台
+ */
+export function filterDeliverablesBySop(list, sopMeta = {}) {
+  const items = Array.isArray(list) ? list.slice() : []
+  if (!items.length) return items
+  const wantId = String(sopMeta.id || sopMeta.sopId || '')
+    .trim()
+    .toUpperCase()
+  const wantTitle = String(sopMeta.title || sopMeta.sopTitle || '')
+    .trim()
+  const titleKey = wantTitle.replace(/\s+/g, '').slice(0, 12)
+
+  const scoreMatch = item => {
+    const blob = `${(item && item.name) || ''}\n${(item && item.uri_or_path) || ''}`
+    let s = 0
+    const fileId = sopIdFromText(blob)
+    if (wantId) {
+      if (fileId === wantId) s += 100
+      else if (fileId && fileId !== wantId) s -= 200
+      if (new RegExp(wantId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(blob)) {
+        s += 40
+      }
+    }
+    if (titleKey && titleKey.length >= 2 && blob.includes(titleKey)) s += 60
+    if (/[\\/]output[\\/]/i.test(blob)) s += 10
+    return s
+  }
+
+  const ranked = items
+    .map(item => ({ item, score: scoreMatch(item) }))
+    .sort((a, b) => b.score - a.score)
+
+  // 有明确本 SOP 命中时，丢掉明显属于其它 D 编号的文件
+  const hasOwnHit = ranked.some(r => r.score >= 100)
+  const filtered = ranked
+    .filter(r => {
+      if (r.score < 0) return false
+      if (hasOwnHit && r.score < 40) return false
+      return true
+    })
+    .map(r => r.item)
+
+  return filtered.length ? filtered : items
+}
+
 /** 过程数据 / 工具噪声，不应进入用户可见产物 */
 export { isJunkDeliverable }
 
@@ -158,26 +261,40 @@ function deliverableExt(item) {
   return m ? m[1].toLowerCase() : ''
 }
 
-/** 只保留用户勾选的产物类型；每种类型最多 1 个（优先本地 output 落盘） */
-export function filterDeliverablesByOutputs(list, outputs = []) {
+/** 只保留用户勾选的产物类型；每种类型最多 1 个（优先本地 output 落盘 + 本 SOP 命中） */
+export function filterDeliverablesByOutputs(list, outputs = [], sopMeta = {}) {
   const ids = (outputs || []).map(o => o.id || o).filter(Boolean)
   const idSet = new Set(ids)
   const allowAll = !idSet.size
+  const scoped = filterDeliverablesBySop(list, sopMeta)
 
-  const typed = (list || []).filter(item => {
+  const typed = (scoped || []).filter(item => {
     if (isJunkDeliverable(item)) return false
     if (allowAll) return true
     const type = guessOutputId(item)
     return type && idSet.has(type)
   })
 
+  const wantId = String(sopMeta.id || sopMeta.sopId || '')
+    .trim()
+    .toUpperCase()
+  const titleKey = String(sopMeta.title || sopMeta.sopTitle || '')
+    .replace(/\s+/g, '')
+    .slice(0, 12)
+
   const score = item => {
     const uri = String((item && item.uri_or_path) || '')
+    const name = String((item && item.name) || '')
+    const blob = `${name}\n${uri}`
     let s = 0
     if (/[\\/]output[\\/]/i.test(uri)) s += 100
     if (/^[A-Za-z]:[\\/]/.test(uri)) s += 50
     if (/^https?:\/\//i.test(uri)) s += 10
     if (/\.(html?|xlsx?|md|csv)$/i.test(uri)) s += 20
+    const fileId = sopIdFromText(blob)
+    if (wantId && fileId === wantId) s += 80
+    if (wantId && fileId && fileId !== wantId) s -= 150
+    if (titleKey && titleKey.length >= 2 && blob.includes(titleKey)) s += 50
     return s
   }
 
@@ -199,7 +316,6 @@ export function filterDeliverablesByOutputs(list, outputs = []) {
     seen.add(key)
     out.push(item)
   })
-  // 未映射到预设类型的（allowAll）附在后面
   if (allowAll) {
     bestByType.forEach((item, key) => {
       if (ids.includes(key)) return
@@ -242,7 +358,12 @@ function cleanDeliverableName(name, uri) {
   return n || uri
 }
 
-export function extractDeliverablesFromReply(text, events = [], outputs = []) {
+export function extractDeliverablesFromReply(
+  text,
+  events = [],
+  outputs = [],
+  sopMeta = {}
+) {
   const out = []
   // 只用模型正文解析产物；工具事件里会有大量 MCP/过程路径噪声
   const reply = String(text || '')
@@ -260,7 +381,9 @@ export function extractDeliverablesFromReply(text, events = [], outputs = []) {
     out.push({
       name: name || uri.split(/[\\/]/).pop() || uri,
       uri_or_path: uri || name,
-      kind: item.kind || guessKind(uri || name)
+      kind: item.kind || guessKind(uri || name),
+      sop_id: sopMeta.id || sopMeta.sopId || '',
+      sop_uid: sopMeta.uid || sopMeta.sopUid || ''
     })
   }
 
@@ -310,7 +433,7 @@ export function extractDeliverablesFromReply(text, events = [], outputs = []) {
   }
 
   void events // 保留签名兼容，刻意不扫事件正文
-  return filterDeliverablesByOutputs(out, outputs).slice(0, 8)
+  return filterDeliverablesByOutputs(out, outputs, sopMeta).slice(0, 8)
 }
 
 function guessKind(uri) {
@@ -322,12 +445,198 @@ function guessKind(uri) {
 function inferRunResult(reply) {
   const t = String(reply || '')
   if (/疑似空跑|未真正执行|没有工具|未调用工具/.test(t)) return '疑似空跑'
-  if (/已完成|执行完成|全部完成|成功生成/.test(t) && !/未完成|失败无法/.test(t)) {
+  // 缺数据 / 待人工补数：优先于「失败」（避免「读取失败」被误判成整单失败）
+  if (isMissingDataReply(t)) return '待补数'
+  if (/已完成|执行完成|全部完成|成功生成/.test(t) && !/未完成|失败无法|待补/.test(t)) {
     return '完成'
   }
-  if (/失败|无法执行|中断|error/i.test(t)) return '失败'
-  if (/部分完成|待人工|缺数据/.test(t)) return '部分完成'
+  if (/部分完成|待人工|人工确认/.test(t)) return '部分完成'
+  // 硬失败：明确无法继续，且不是「缺数据等你填」
+  if (
+    /(?:^|[^\u4e00-\u9fff])(?:任务失败|执行失败|无法继续|中断退出)(?:[^\u4e00-\u9fff]|$)/.test(
+      t
+    ) ||
+    (/\berror\b/i.test(t) && !/缺|待补|人工|下一步|请提供/.test(t))
+  ) {
+    return '失败'
+  }
   return t.trim() ? '完成' : '未知'
+}
+
+/** 回复是否在要人工补数（而非整单失败） */
+export function isMissingDataReply(text) {
+  const t = String(text || '')
+  if (!t.trim()) return false
+  if (
+    /待补数|缺数据|缺少数据|数据缺失|请补充|请提供|待填写|需人工|人工确认|下一步建议|卡在|等待需求方|对齐并补全/.test(
+      t
+    )
+  ) {
+    return true
+  }
+  // 「读取…失败」但同时在列缺失项 / 下一步 → 仍算待补数
+  if (/读取.{0,20}失败|超时|无通路/.test(t) && /下一步|请|需|缺|人工/.test(t)) {
+    return true
+  }
+  return false
+}
+
+/**
+ * 从模型汇报里抽出待补字段（供台账表单预填）
+ * 只认「字段名列表」，不把状态叙述/事件流拆成表单项。
+ */
+export function extractMissingDataNeeds(reply) {
+  const text = String(reply || '')
+  const fields = []
+  const seen = new Set()
+
+  const isJunkLabel = name => {
+    const s = String(name || '').trim()
+    if (!s) return true
+    if (s.length > 16) return true
+    if (/[。；;！!？?\n]/.test(s)) return true
+    if (
+      /节点|uid|未完成|已完成|历史|运行|推进|阻塞|阻断|容器|待办|产物|大纲|台账|校验|房间|本次|本单|流程型|登记|拟稿|数据源|回复示例|示例|仍缺|缺少|字段/.test(
+        s
+      )
+    ) {
+      return true
+    }
+    if (/^\d+$/.test(s)) return true
+    return false
+  }
+
+  const push = label => {
+    let name = String(label || '')
+      .replace(/^[-*•\d.、）)\s]+/, '')
+      .replace(/[*`「」【】\[\]]/g, '')
+      .replace(/[：:=]\s*$/, '')
+      .replace(/（.*?）|\(.*?\)/g, '')
+      .replace(/[（(][^）)]*$/, '')
+      .replace(/^需求方[（(]?[^）)]*[）)]?[：:]?/, '')
+      .replace(/^(?:补齐|补充|提供|填写|对齐)[^：:]*[：:]?/, '')
+      .replace(/\s+/g, '')
+      .trim()
+    if (!name) return
+    // 「公司主体=XX」只取左边
+    if (/[=＝]/.test(name)) {
+      name = name.split(/[=＝]/)[0].trim()
+    }
+    if (isJunkLabel(name)) return
+    const key = name.toLowerCase()
+    if (seen.has(key)) return
+    seen.add(key)
+    fields.push({ key: `f_${fields.length + 1}`, label: name, value: '' })
+  }
+
+  const pushList = chunk => {
+    if (!chunk) return
+    String(chunk)
+      .split(/[、,，;；|/／\n]/)
+      .forEach(part => push(part))
+  }
+
+  // 1) 优先：显式「仍缺 N 个字段（A、B、C）」/「缺：A、B、C」/「补齐以下 N 项：…」
+  const listPatterns = [
+    /仍缺\s*\*?\*?(\d+)\s*个?\s*字段\*?\*?[（(：:\s]*([^）)\n]{2,200})/i,
+    /缺(?:少|失)?\s*\*?\*?(\d+)\s*个?\s*(?:字段|项)\*?\*?[（(：:\s]*([^）)\n]{2,200})/i,
+    /(?:补齐|补充|提供|填写)(?:以下)?\s*\d*\s*项?[：:\s]+([^\n。]{2,200})/i,
+    /关键(?:字段|信息)[：:\s]+([^\n。]{2,120})/i,
+    /回复示例[：:\s`]*([^`\n]{4,200})/i
+  ]
+  for (const re of listPatterns) {
+    const m = text.match(re)
+    if (!m) continue
+    const listPart = m[2] || m[1]
+    if (!listPart) continue
+    // 示例句「公司主体=XX；部门=XX」→ 只取键名
+    if (/[=＝]/.test(listPart)) {
+      listPart.split(/[;；、,，]/).forEach(seg => {
+        const left = String(seg).split(/[=＝]/)[0]
+        push(left)
+      })
+    } else {
+      pushList(listPart)
+    }
+    if (fields.length >= 3) break
+  }
+
+  // 2) 仅在「下一步建议 / 待补」小节里扫短字段名（不扫全文）
+  if (fields.length < 3) {
+    const section =
+      text.match(
+        /(?:#{1,4}\s*)?(?:[一二三四五六七八九十\d]+[、.．]\s*)?(?:下一步建议|待补数?|缺失字段|请补充|需提供)[^\n]*\n([\s\S]*?)(?=\n#{1,4}\s|\n--|\n【|$)/i
+      ) ||
+      text.match(
+        /(?:--\s*)?下一步建议[^\n]*\n([\s\S]*?)(?=\n--|\n#{1,4}|$)/i
+      )
+    const chunk = (section && section[1]) || ''
+    chunk.split(/\r?\n/).forEach(line => {
+      const t = line.trim()
+      if (!t || t.length > 80) return
+      const bullet = t.match(/^[-*•]\s*(.+)$/) || t.match(/^\d+[\.、．]\s*(.+)$/)
+      if (!bullet) return
+      const body = bullet[1].trim()
+      const listed = body.match(/(?:补齐|补充|提供|填写)[^：:]*[：:]\s*(.+)$/)
+      if (listed) {
+        pushList(listed[1])
+        return
+      }
+      // 小节里的短名才收；长叙述丢弃
+      if (body.length <= 16 && !/[。；]/.test(body)) push(body)
+    })
+  }
+
+  // 3) 已知招聘字段：文中点名才收（保底）
+  const common = [
+    ['公司主体', /公司主体/],
+    ['招聘部门', /招聘部门|用人部门/],
+    ['性别要求', /性别要求|性别/],
+    ['人数', /人数|编制|HC\b/i],
+    ['招聘原因', /招聘原因|增补原因/],
+    ['岗位/JD', /\bJD\b|岗位JD|职位描述/],
+    ['职级', /职级/],
+    ['城市', /城市|工作地/],
+    ['到岗时间', /到岗时间|入职时间/],
+    ['汇报对象', /汇报对象/],
+    ['薪资范围', /薪资范围|薪酬范围/]
+  ]
+  if (fields.length < 3) {
+    common.forEach(([label, re]) => {
+      if (re.test(text)) push(label)
+    })
+  }
+
+  // 仍抽不出干净字段时：给空表单用的标准 8 项（不拿叙述当 label）
+  const fallbackRecruit = [
+    '公司主体',
+    '招聘部门',
+    '性别要求',
+    '人数',
+    '招聘原因',
+    '岗位/JD',
+    '职级',
+    '城市'
+  ]
+  if (!fields.length && isMissingDataReply(text)) {
+    // 文中写了「仍缺 N 个字段」就用招聘保底；否则给一项「关键信息」
+    if (/仍缺|缺\s*\d+|字段|招聘|JD|部门/.test(text)) {
+      fallbackRecruit.forEach(push)
+    } else {
+      push('关键信息')
+    }
+  }
+
+  const clean = fields.slice(0, 12)
+  return {
+    needsData: isMissingDataReply(text) || clean.length > 0,
+    fields: clean,
+    summary: clean.length
+      ? `待补充 ${clean.length} 项：${clean.map(f => f.label).join('、')}`
+      : isMissingDataReply(text)
+        ? '模型反馈缺少关键数据，请补充后继续'
+        : ''
+  }
 }
 
 /** 判定是否像真执行：要有工具事件或真实产物路径；过短秒回视为空跑 */
@@ -335,7 +644,8 @@ export function assessSopExecution({
   reply,
   events,
   elapsedSec,
-  deliverables
+  deliverables,
+  requireFiles = true
 } = {}) {
   const evs = events || []
   const toolish = evs.filter(ev => {
@@ -351,6 +661,39 @@ export function assessSopExecution({
   const tooFast = Number(elapsedSec) > 0 && Number(elapsedSec) < 40
   const text = String(reply || '')
   const claimsDone = /已完成|执行完成|成功生成/.test(text)
+  const missing = extractMissingDataNeeds(text)
+
+  // 缺数据：不算失败，进入待补数
+  if (missing.needsData) {
+    return {
+      ok: true,
+      waitingData: true,
+      runResult: '待补数',
+      reason: missing.summary || '缺少关键数据，请补充后继续',
+      missingFields: missing.fields,
+      toolEvents: toolish.length,
+      realFiles: realFiles.length
+    }
+  }
+
+  // 流程型：不要求产物文件，有正文或工具事件即可
+  if (!requireFiles) {
+    if (!text.trim() && toolish.length === 0) {
+      return {
+        ok: false,
+        runResult: '未执行',
+        reason: '流程型任务无正文也无工具事件'
+      }
+    }
+    const result = inferRunResult(reply) || '完成'
+    return {
+      ok: result !== '失败',
+      runResult: result,
+      reason: result === '失败' ? '模型汇报执行失败' : '',
+      toolEvents: toolish.length,
+      realFiles: realFiles.length
+    }
+  }
 
   if (toolish.length === 0 && tooFast) {
     return {
@@ -373,10 +716,11 @@ export function assessSopExecution({
       reason: '没有工具事件也没有可打开的产物路径'
     }
   }
+  const result = inferRunResult(reply)
   return {
-    ok: true,
-    runResult: inferRunResult(reply),
-    reason: '',
+    ok: result !== '失败',
+    runResult: result,
+    reason: result === '失败' ? '模型汇报执行失败' : '',
     toolEvents: toolish.length,
     realFiles: realFiles.length
   }
@@ -397,7 +741,8 @@ export async function runSopWithWorkbuddy({
   onStatus,
   onDelta,
   onEventDetail,
-  onContext
+  onContext,
+  skipNotify = false
 } = {}) {
   const key = String(roomKey || '').trim()
   if (!key) throw new Error('请先选择空间')
@@ -407,9 +752,7 @@ export async function runSopWithWorkbuddy({
   const outputs = SOP_OUTPUT_PRESETS.filter(p =>
     (outputIds || []).includes(p.id)
   )
-  if (!outputs.length) {
-    throw new Error('请至少选择一种产物')
-  }
+  // 允许不选产物：流程型 SOP（通知/招聘/审批）只执行步骤与派发
 
   setStatus('检查 WorkBuddy…')
   const wb = await checkWorkbuddy()
@@ -419,7 +762,107 @@ export async function runSopWithWorkbuddy({
 
   setStatus('拉取 SOP 节点子树 / 大纲…')
   const ctx = await loadSopRunContext(key, sop)
-  const promptUser = buildUserPrompt({ ctx, outputs, extraNote })
+
+  // 先处理「AI发起通知」类节点：写入 CPDA 待办 + WorkBuddy 派发；阻塞则暂停主执行
+  const notifyNodes = skipNotify
+    ? []
+    : extractNotifyNodesFromOutline(ctx.outline)
+  let notifyResults = []
+  let notifySummary = summarizeNotifyResults([])
+  if (notifyNodes.length) {
+    setStatus(`发现 ${notifyNodes.length} 个通知节点，正在派发…`)
+    const earlyConversationId =
+      String(conversationIdInput || '').trim() ||
+      `sop-exec-${key}-${String(sop.id || sop.title)
+        .toLowerCase()
+        .replace(/[^\w\u4e00-\u9fff]+/g, '-')
+        .slice(0, 40)}-${Date.now().toString(36)}`
+    notifyResults = await processNotifyNodes({
+      roomKey: key,
+      nodes: notifyNodes,
+      sop: { ...sop, uid: ctx.sopUid || sop.uid },
+      conversationId: earlyConversationId,
+      onStatus: setStatus,
+      signal
+    })
+    notifySummary = summarizeNotifyResults(notifyResults)
+    if (onEventDetail) {
+      notifyResults.forEach(r => {
+        onEventDetail({
+          label: `${r.block ? '阻塞通知' : '知会通知'} → ${r.assignee}：${r.text}`,
+          at: Date.now(),
+          raw: r
+        })
+      })
+    }
+  if (notifySummary.hasBlocking) {
+      const waitStarted = Date.now()
+      setStatus(
+        `已派发阻塞通知 ${notifySummary.blocking.length} 条，等待导图待办完成后再继续`
+      )
+      const waitingLedger = normalizeLedger(
+        sop.sopLedger || {
+          frequency: sop.frequency,
+          runs: sop.runs,
+          deliverables: sop.deliverables
+        }
+      )
+      const waitingRunLedger = addRunToLedger(waitingLedger, {
+        at: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        result: '等待人工',
+        note: `阻塞通知 ${notifySummary.blocking.length} 条：${notifySummary.blocking
+          .map(b => b.text)
+          .join('；')}`,
+        actor: actor || 'WorkBuddy'
+      })
+      return {
+        ok: false,
+        waiting: true,
+        waitingHuman: true,
+        reply: notifyResults
+          .map(
+            r =>
+              `${r.block ? '[阻塞]' : '[知会]'} ${r.text} → ${r.assignee}${
+                r.taskUid ? `（待办 ${r.taskUid}）` : ''
+              }`
+          )
+          .join('\n'),
+        elapsedSec: Math.max(1, Math.round((Date.now() - waitStarted) / 1000)),
+        outputs,
+        deliverables: [],
+        ledger: waitingRunLedger,
+        runResult: '等待人工',
+        assessment: {
+          ok: false,
+          runResult: '等待人工',
+          reason: '存在阻塞类通知，需完成导图待办后再继续'
+        },
+        events: [],
+        context: ctx,
+        notifyResults,
+        waitingTaskUids: notifySummary.waitingTaskUids,
+        conversationId: earlyConversationId
+      }
+    }
+    setStatus(
+      `知会通知 ${notifySummary.continued.length} 条已派发，继续执行 SOP…`
+    )
+  }
+
+  const notifyExtra =
+    notifyResults.length && !notifySummary.hasBlocking
+      ? `\n\n## 已处理的通知（勿重复派发）\n${notifyResults
+          .map(
+            r =>
+              `- ${r.text} → ${r.assignee}${
+                r.taskUid ? `（导图待办 ${r.taskUid}）` : ''
+              }`
+          )
+          .join('\n')}`
+      : ''
+
+  const promptUser =
+    buildUserPrompt({ ctx, outputs, extraNote }) + notifyExtra
   const promptSystem = buildSystemPrompt()
   if (onContext) {
     onContext({
@@ -431,7 +874,8 @@ export async function runSopWithWorkbuddy({
       outlineChars: (ctx.outline || '').length,
       outlinePreview: String(ctx.outline || '').slice(0, 1200),
       userPromptChars: promptUser.length,
-      systemPromptChars: promptSystem.length
+      systemPromptChars: promptSystem.length,
+      notifyCount: notifyResults.length
     })
   }
   if (!ctx.outline) {
@@ -478,7 +922,20 @@ export async function runSopWithWorkbuddy({
   const reply = String((result && result.content) || '').trim()
   const elapsedSec = Math.max(1, Math.round((Date.now() - started) / 1000))
   const events = (result && result.events) || []
-  let deliverables = extractDeliverablesFromReply(reply, events, outputs)
+  const sopMeta = {
+    id: ctx.sopId || sop.id || '',
+    title: ctx.sopTitle || sop.title || '',
+    uid: ctx.sopUid || sop.uid || '',
+    sopId: ctx.sopId || sop.id || '',
+    sopTitle: ctx.sopTitle || sop.title || '',
+    sopUid: ctx.sopUid || sop.uid || ''
+  }
+  let deliverables = extractDeliverablesFromReply(
+    reply,
+    events,
+    outputs,
+    sopMeta
+  )
 
   // 通路通但正文为空：典型是 ACP 只吐 phase、模型没真正生成
   if (!reply) {
@@ -527,13 +984,16 @@ export async function runSopWithWorkbuddy({
     reply,
     events,
     elapsedSec,
-    deliverables
+    deliverables,
+    requireFiles: outputs.length > 0
   })
   const runResult = assessment.runResult
 
   setStatus(
     assessment.ok
-      ? `回写运行记录与产物…（${elapsedSec}s）`
+      ? outputs.length
+        ? `回写运行记录与产物…（${elapsedSec}s）`
+        : `回写运行记录…（${elapsedSec}s）`
       : `${assessment.reason || '执行异常'}，仍写入台账…`
   )
   let ledger = normalizeLedger(
@@ -559,7 +1019,9 @@ export async function runSopWithWorkbuddy({
       lastEvent ? `末状态:${lastEvent}` : '',
       deliverables.length
         ? `产物 ${deliverables.length} 个`
-        : `期望产物: ${outputs.map(o => o.label).join('、')}`,
+        : outputs.length
+          ? `期望产物: ${outputs.map(o => o.label).join('、')}`
+          : '流程型（无产物要求）',
       assessment.reason || brief
     ]
       .filter(Boolean)
@@ -572,6 +1034,8 @@ export async function runSopWithWorkbuddy({
     if (!uri || /待回填/.test(String((d && d.name) || ''))) return
     ledger = addDeliverableToLedger(ledger, {
       ...d,
+      sop_id: sopMeta.id,
+      sop_uid: sopMeta.uid,
       at: new Date().toISOString().slice(0, 16).replace('T', ' ')
     })
   })
@@ -591,18 +1055,25 @@ export async function runSopWithWorkbuddy({
   }
 
   setStatus(
-    assessment.ok
-      ? `执行完成（${elapsedSec}s）`
-      : `未确认真执行（${elapsedSec}s）：${assessment.reason || runResult}`
+    assessment.waitingData
+      ? `待补数：${assessment.reason || '请补充缺失数据后继续'}`
+      : assessment.ok
+        ? `执行完成（${elapsedSec}s）`
+        : `未确认真执行（${elapsedSec}s）：${assessment.reason || runResult}`
   )
   return {
     ok: assessment.ok && runResult !== '失败',
+    waitingData: !!assessment.waitingData,
+    missingFields: assessment.missingFields || [],
+    missingSummary: assessment.waitingData
+      ? assessment.reason || ''
+      : '',
     reply,
     elapsedSec,
     outputs,
     deliverables,
     ledger,
-    runResult,
+    runResult: assessment.waitingData ? '待补数' : runResult,
     assessment,
     events,
     context: ctx
