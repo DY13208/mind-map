@@ -5,6 +5,7 @@ const Y = require('yjs')
 const mindDoc = require('./mindDoc')
 const { applyNodeCommand, dataFields } = require('./roomCommands')
 const roomAcl = require('./roomAcl')
+const accessRequests = require('./accessRequests')
 const teamSpace = require('./teamSpace')
 const { isAuthEnabled } = require('./auth')
 const {
@@ -1151,6 +1152,51 @@ async function handleApi(req, res) {
     upsertWecomContact: user => require('./auth').upsertWecomUser(user)
   })
   if (teamHandled) return true
+
+  try {
+    if (pathname === '/api/access-requests' && req.method === 'POST') {
+      const item = await accessRequests.requestAccess(
+        getPool(),
+        req,
+        await readBody(req)
+      )
+      sendJson(res, 200, { ok: true, item })
+      return true
+    }
+    if (pathname === '/api/access-requests/mine' && req.method === 'GET') {
+      const item = await accessRequests.mine(
+        getPool(),
+        req,
+        url.searchParams.get('roomKey') || url.searchParams.get('room_key') || ''
+      )
+      sendJson(res, 200, { ok: true, item })
+      return true
+    }
+    if (pathname === '/api/notifications/access-requests' && req.method === 'GET') {
+      const list = await accessRequests.listInbox(getPool(), req)
+      sendJson(res, 200, { ok: true, list, total: list.length })
+      return true
+    }
+    const accessDecision = pathname.match(/^\/api\/access-requests\/([^/]+)$/)
+    if (accessDecision && req.method === 'PATCH') {
+      const body = await readBody(req)
+      const item = await accessRequests.decide(
+        getPool(),
+        req,
+        decodeURIComponent(accessDecision[1]),
+        body.decision
+      )
+      sendJson(res, 200, { ok: true, item })
+      return true
+    }
+  } catch (err) {
+    sendJson(res, err.statusCode || 400, {
+      ok: false,
+      code: err.code || 'ACCESS_REQUEST_ERROR',
+      error: err.message || '访问申请处理失败'
+    })
+    return true
+  }
 
   const roomAclHit = roomAcl.inferRoomAcl(pathname, req.method)
   if (roomAclHit) {

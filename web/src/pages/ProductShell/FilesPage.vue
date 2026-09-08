@@ -36,8 +36,10 @@
             v-for="item in filteredFolders"
             :key="item.id"
             :folder="item"
+            :editable="item.canManage !== false"
             @open="openFolder"
             @rename="renameFolder"
+            @share="shareFolder"
             @delete="deleteFolder"
           />
         </template>
@@ -130,6 +132,11 @@
       :room="activeRoom"
       @changed="() => load({ reset: true, keepPage: true })"
     />
+    <ShareFolderDialog
+      :visible.sync="folderShareVisible"
+      :folder="activeFolder"
+      @changed="() => load({ reset: true, keepPage: true })"
+    />
     <HistoryPanel
       :visible.sync="historyVisible"
       :room="activeRoom"
@@ -152,6 +159,7 @@ import RenameDialog from './components/RenameDialog.vue'
 import RoomCard from './components/RoomCard.vue'
 import RoomList from './components/RoomList.vue'
 import ShareRoomDialog from './components/ShareRoomDialog.vue'
+import ShareFolderDialog from './components/ShareFolderDialog.vue'
 const copy = {
   files: ['我的脑图', '管理你的文件夹与脑图'],
   recent: ['最近', '快速回到最近打开的脑图'],
@@ -191,7 +199,8 @@ export default {
     RenameDialog,
     RoomCard,
     RoomList,
-    ShareRoomDialog
+    ShareRoomDialog,
+    ShareFolderDialog
   },
   props: { mode: { type: String, default: 'files' } },
   data() {
@@ -212,6 +221,8 @@ export default {
       renameVisible: false,
       moveVisible: false,
       shareVisible: false,
+      folderShareVisible: false,
+      activeFolder: null,
       historyVisible: false,
       pageSizes: PAGE_SIZES,
       limit: savedPageSize(),
@@ -537,6 +548,10 @@ export default {
     shareRoom(room) {
       this.activeRoom = room
       this.shareVisible = true
+    },
+    shareFolder(folder) {
+      this.activeFolder = folder
+      this.folderShareVisible = true
     },
     historyRoom(room) {
       this.activeRoom = room

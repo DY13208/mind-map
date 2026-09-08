@@ -15,6 +15,13 @@ function folderItem(pathname) {
   return match ? decodeURIComponent(match[1]) : ''
 }
 
+function folderMembers(pathname) {
+  const match = String(pathname || '').match(/^\/api\/folders\/([^/]+)\/members(?:\/([^/]+))?$/)
+  return match
+    ? { id: decodeURIComponent(match[1]), userId: match[2] ? decodeURIComponent(match[2]) : '' }
+    : null
+}
+
 function fileMove(pathname) {
   const match = String(pathname || '').match(
     /^\/api\/(?:files|maps|rooms)\/([^/]+)\/move$/
@@ -99,6 +106,7 @@ async function handleFileSystemApi(req, res, options = {}) {
       namedCollection(pathname, 'favorites') ||
       namedCollection(pathname, 'trash') ||
       folderCollection(pathname) ||
+      folderMembers(pathname) ||
       folderItem(pathname) ||
       fileMove(pathname) ||
       fileInfo(pathname) ||
@@ -115,6 +123,60 @@ async function handleFileSystemApi(req, res, options = {}) {
   const bypass = !!actor.bypass || !isAuthEnabled()
 
   try {
+    const folderAcl = folderMembers(pathname)
+    if (folderAcl) {
+      const folder = await fs.store.getFolder(folderAcl.id)
+      if (!folder) throw Object.assign(new Error('文件夹不存在'), { code: 'FOLDER_NOT_FOUND', statusCode: 404 })
+      const canManage = bypass || folder.created_by === userId
+      if (!canManage && method !== 'GET') {
+        throw Object.assign(new Error('只有文件夹所有者可以设置权限'), { code: 'FORBIDDEN', statusCode: 403 })
+      }
+      if (method === 'GET' && !folderAcl.userId) {
+        const list = await fs.store.listFolderMembers(folderAcl.id)
+        sendJson(res, 200, { ok: true, list, canManage })
+        return true
+      }
+      if ((method === 'POST' || method === 'PATCH') && (!folderAcl.userId || method === 'PATCH')) {
+        const body = options.body || (await readBody(req))
+        const role = roomAcl.normalizeRole(body.role)
+        if (!['editor', 'viewer'].includes(role)) {
+          throw Object.assign(new Error('文件夹权限必须是可编辑或可查看'), { code: 'BAD_REQUEST', statusCode: 400 })
+        }
+        const requestedUser = folderAcl.userId || body.userId || body.user_id
+        const targetId = await roomAcl.resolveUserId(
+          fs.store,
+          requestedUser,
+          req.authUser && req.authUser.corpId
+        )
+        if (!targetId || targetId === folder.created_by) {
+          throw Object.assign(new Error('请选择其他企业成员'), { code: 'BAD_REQUEST', statusCode: 400 })
+        }
+        await fs.store.setFolderMember(folderAcl.id, targetId, role)
+        const roomKeys = await fs.store.roomKeysInFolder(folderAcl.id)
+        for (const roomKey of roomKeys) {
+          await roomAcl.setMember(fs.store, roomKey, targetId, role, userId,
+            req.authUser && req.authUser.corpId)
+        }
+        const list = await fs.store.listFolderMembers(folderAcl.id)
+        sendJson(res, 200, { ok: true, list })
+        return true
+      }
+      if (method === 'DELETE' && folderAcl.userId) {
+        const targetId = await roomAcl.resolveUserId(
+          fs.store,
+          folderAcl.userId,
+          req.authUser && req.authUser.corpId
+        )
+        await fs.store.removeFolderMember(folderAcl.id, targetId)
+        const roomKeys = await fs.store.roomKeysInFolder(folderAcl.id)
+        for (const roomKey of roomKeys) {
+          await roomAcl.removeMember(fs.store, roomKey, targetId,
+            req.authUser && req.authUser.corpId).catch(() => {})
+        }
+        sendJson(res, 200, { ok: true })
+        return true
+      }
+    }
     if (method === 'GET' && collectionPath(pathname)) {
       const sharedParam = String(
         url.searchParams.get('shared') || url.searchParams.get('scope') || ''

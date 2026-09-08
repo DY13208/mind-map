@@ -3,7 +3,12 @@
     class="container"
     :class="{ isDark: isDark, activeSidebar: activeSidebar }"
   >
-    <template v-if="show">
+    <AccessDeniedPanel
+      v-if="accessDenied"
+      :room-key="roomKey"
+      @back="$router.push('/files')"
+    />
+    <template v-else-if="show">
       <Toolbar v-if="!isZenMode"></Toolbar>
       <Edit></Edit>
     </template>
@@ -13,21 +18,28 @@
 <script>
 import Toolbar from './components/Toolbar.vue'
 import Edit from './components/Edit.vue'
+import AccessDeniedPanel from './components/AccessDeniedPanel.vue'
+import { productRequest } from '@/services/productHttp'
 import { mapState, mapMutations } from 'vuex'
 import { getLocalConfig } from '@/api'
 
 export default {
   name: 'EditPage',
   components: {
+    AccessDeniedPanel,
     Toolbar,
     Edit
   },
   data() {
     return {
-      show: false
+      show: false,
+      accessDenied: false
     }
   },
   computed: {
+    roomKey() {
+      return String((this.$route.query && this.$route.query.room) || '')
+    },
     ...mapState({
       isZenMode: state => state.localConfig.isZenMode,
       isDark: state => state.localConfig.isDark,
@@ -45,7 +57,14 @@ export default {
       lock: true,
       text: this.$t('other.loading')
     })
-    this.show = true
+    try {
+      await productRequest(`/api/files/${encodeURIComponent(this.roomKey)}/info`)
+    } catch (error) {
+      if (error && (error.statusCode === 403 || error.code === 'FORBIDDEN')) {
+        this.accessDenied = true
+      }
+    }
+    this.show = !this.accessDenied
     loading.close()
     this.setBodyDark()
   },
