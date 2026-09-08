@@ -1065,6 +1065,40 @@ function findTodoBranches(obj) {
   }
 }
 
+/** 没有标准待办树时，在根下自动创建「待办 → 待办 / 已完成」 */
+function ensureTodoBranches(obj) {
+  try {
+    return findTodoBranches(obj)
+  } catch (err) {
+    // create below
+  }
+  const rootUid = findRootUid(obj)
+  if (!rootUid || !obj[rootUid]) {
+    throw new Error('找不到根节点，无法创建待办容器')
+  }
+  const containerUid = createUid()
+  const pendingUid = createUid()
+  const completedUid = createUid()
+  obj[containerUid] = {
+    data: { uid: containerUid, text: '待办', expand: true },
+    children: [pendingUid, completedUid]
+  }
+  obj[pendingUid] = {
+    data: { uid: pendingUid, text: '待办（0）', expand: true },
+    children: []
+  }
+  obj[completedUid] = {
+    data: { uid: completedUid, text: '已完成（0）', expand: true },
+    children: []
+  }
+  obj[rootUid].children = [...(obj[rootUid].children || []), containerUid]
+  return {
+    container_uid: containerUid,
+    pending_uid: pendingUid,
+    completed_uid: completedUid
+  }
+}
+
 function subtreePayload(obj, uid) {
   const node = obj[uid]
   if (!node) return null
@@ -1462,7 +1496,7 @@ function completeTodo(obj, options = {}) {
  */
 function createTodo(obj, options = {}) {
   const next = clone(obj)
-  const branches = findTodoBranches(next)
+  const branches = ensureTodoBranches(next)
   const text = String(options.text || '').trim()
   if (!text) throw new Error('缺少待办标题')
   const uid = String(options.uid || '').trim() || createUid()
@@ -1649,6 +1683,7 @@ module.exports = {
   searchNodes,
   baseLabel,
   findTodoBranches,
+  ensureTodoBranches,
   listTodos,
   listSopCandidates,
   isWithinSop,

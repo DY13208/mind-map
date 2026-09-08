@@ -1001,6 +1001,56 @@ export default {
       return true
     },
 
+    /**
+     * 子脑图跳转后只展开到指定层级，避免大图全展开卡死。
+     * level=2：根 + 第 1 层展开，可见到第 2 层节点。
+     */
+    async applyMapRefShallowExpand(level = 2) {
+      const mm = this.mindMap
+      if (!mm || !mm.renderer) return
+      const target = Math.max(1, Number(level) || 2)
+      const renderer = mm.renderer
+      await new Promise(resolve => {
+        let settled = false
+        const finish = () => {
+          if (settled) return
+          settled = true
+          resolve()
+        }
+        try {
+          if (typeof renderer.hydrateThen === 'function') {
+            renderer.hydrateThen(
+              renderer.renderTree,
+              target,
+              { maxFetches: 24, concurrency: 2 },
+              () => {
+                try {
+                  renderer.applyExpandFlagsToLevel(target)
+                  mm.render()
+                } catch (err) {
+                  console.warn('[mapRef] shallow expand apply failed', err)
+                }
+                finish()
+              }
+            )
+            setTimeout(finish, 2500)
+            return
+          }
+          mm.execCommand('UNEXPAND_TO_LEVEL', target)
+        } catch (err) {
+          console.warn('[mapRef] shallow expand failed', err)
+        }
+        setTimeout(finish, 200)
+      })
+    },
+
+    clearShallowExpandQuery() {
+      if (!this.$route.query.shallowExpand) return
+      const query = { ...this.$route.query }
+      delete query.shallowExpand
+      this.$router.replace({ query }).catch(() => {})
+    },
+
     async restoreOpenedMapView() {
       const snap = loadMapView(this.roomName)
       if (!snap || !this.mindMap) return
@@ -1019,6 +1069,21 @@ export default {
       const gen = (this._mapOpenGen = (this._mapOpenGen || 0) + 1)
       await this.$nextTick()
       if (gen !== this._mapOpenGen) return
+      const shallow =
+        Number(this.$route.query.shallowExpand) ||
+        Number(this._pendingShallowExpand) ||
+        0
+      this._pendingShallowExpand = 0
+      if (shallow > 0) {
+        await this.applyMapRefShallowExpand(shallow)
+        this.clearShallowExpandQuery()
+        if (gen !== this._mapOpenGen) return
+        // 子脑图跳转：不恢复历史全展开视图，只按需定位 focus
+        if (this.$route.query.focus) {
+          await this.tryFocusFromQuery()
+        }
+        return
+      }
       if (this.$route.query.focus) {
         await this.tryFocusFromQuery()
         return
@@ -1032,8 +1097,8 @@ export default {
         this.$message.warning(this.$t('mapRef.openFailed'))
         return
       }
-      // 点击子脑图图标 → 只读预览弹窗；编辑走弹窗内「打开编辑」
-      this.$bus.$emit('showSubMapPreview', normalized)
+      // 点击子脑图图标 / 双击节点 → 直接打开编辑页（跳过预览弹窗）
+      await this.navigateToMapRef(normalized)
     },
 
     onNodeDblclickMapRef(node, _e, isInserting) {
@@ -1082,13 +1147,22 @@ export default {
       if (normalized.nodeId && info.nodeExists === false) {
         this.$message.warning(this.$t('mapRef.missingNode'))
       }
-      const query = { ...this.$route.query, room: normalized.mapId }
+      // 子脑图跳转默认只展开到 2 级，防止大图卡死
+      const shallowLevel = 2
+      this._pendingShallowExpand = shallowLevel
+      const query = {
+        ...this.$route.query,
+        room: normalized.mapId,
+        shallowExpand: String(shallowLevel)
+      }
       if (normalized.nodeId && info.nodeExists !== false) {
         query.focus = normalized.nodeId
       } else {
         delete query.focus
       }
       if (normalized.mapId === current) {
+        await this.applyMapRefShallowExpand(shallowLevel)
+        this._pendingShallowExpand = 0
         if (
           normalized.nodeId &&
           info.nodeExists !== false &&

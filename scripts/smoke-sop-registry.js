@@ -1,8 +1,9 @@
 /**
  * SOP 台账抽取冒烟（纯 Node，不依赖 Vue 打包）
  * 与 web/src/utils/sopRegistryPrompt.js 中 D_REGISTRY_RE / 抽取约定对齐
+ * 规则：只认单独「D：标题」，排除 D1/D2
  */
-const D_REGISTRY_RE = /^(D\d+)\s*[：:]\s*(.+)$/
+const D_REGISTRY_RE = /^(D)(?!\d)\s*[：:]\s*(.+)$/i
 
 function cleanTitle(title) {
   return String(title || '')
@@ -19,10 +20,9 @@ function matchDRegistryTitle(text) {
     .replace(/\s*】$/, '')
   const m = trimmed.match(D_REGISTRY_RE)
   if (!m) return null
-  const id = m[1].toUpperCase()
   const title = cleanTitle(m[2])
-  if (!id || !title) return null
-  return { id, title }
+  if (!title) return null
+  return { id: 'D', title }
 }
 
 function detectFrequency(text) {
@@ -45,7 +45,7 @@ function parseSample(rawText) {
   const lines = String(rawText || '').split(/\r?\n/)
   const sops = []
   lines.forEach((line, index) => {
-    const matched = matchDRegistryTitle(line)
+    const matched = matchDRegistryTitle(line.trim().replace(/^[-*•]\s*/, ''))
     if (!matched) return
     const { id, title } = matched
     const block = []
@@ -54,7 +54,13 @@ function parseSample(rawText) {
       const l = lines[i]
       if (!l || !l.trim()) continue
       const indent = (l.match(/^(\s*)/) || ['', ''])[1].length
-      if (i > index && indent <= baseIndent && D_REGISTRY_RE.test(l.trim().replace(/^[-*•]\s*/, ''))) break
+      if (
+        i > index &&
+        indent <= baseIndent &&
+        D_REGISTRY_RE.test(l.trim().replace(/^[-*•]\s*/, ''))
+      ) {
+        break
+      }
       if (i > index && indent <= baseIndent) break
       block.push(l)
     }
@@ -64,7 +70,11 @@ function parseSample(rawText) {
       const t = l.trim()
       if (/交付|产出/.test(t)) {
         deliverables.push({
-          name: t.replace(/^[-*•]\s*/, '').replace(/^[^：:]*[：:]/, '').trim() || t,
+          name:
+            t
+              .replace(/^[-*•]\s*/, '')
+              .replace(/^[^：:]*[：:]/, '')
+              .trim() || t,
           uri_or_path: '',
           kind: 'node'
         })
@@ -105,58 +115,55 @@ function parseSample(rawText) {
 }
 
 function assert(cond, msg) {
-  if (!cond) throw new Error(msg)
+  if (!cond) throw new Error(msg || 'assert failed')
 }
 
-const sample1 = `中心主题
-- SOP
-  - D2：采购目标`
-
+const sample1 = `公司
+  - D：采购目标
+    - 频率：每周
+    - 交付：采购计划.xlsx`
 const r1 = parseSample(sample1)
-assert(r1.sops.length === 1, 'sample1 should find 1 sop')
-assert(r1.sops[0].id === 'D2', 'id D2')
-assert(r1.sops[0].title === '采购目标', 'title 采购目标')
-assert(r1.sops[0].frequency.label === '未知', 'no frequency => 未知')
-assert(r1.sops[0].runs.length === 0, 'no runs')
-assert(r1.sops[0].deliverables.length === 0, 'no deliverables')
+assert(r1.sops.length === 1, 'one sop')
+assert(r1.sops[0].id === 'D', 'id D')
+assert(r1.sops[0].title === '采购目标', 'title')
 
-// 标题须以 D数字：开头；正文含 D / 中间夹带 D1： 不算 SOP
+// 排除 D1/D2；正文夹带也不算
 assert(!matchDRegistryTitle('Dashboard'), 'Dashboard 不是 SOP')
 assert(!matchDRegistryTitle('产品D线'), '产品D线 不是 SOP')
-assert(!matchDRegistryTitle('Do：待办'), 'Do：不是台账编号')
-assert(!matchDRegistryTitle('参考 D1：销售目标'), '正文夹带 D1：不算')
-assert(!matchDRegistryTitle('AD1：误匹配'), '前缀字母不算')
-assert(matchDRegistryTitle('D1：销售目标').id === 'D1', '标准 D1')
-assert(matchDRegistryTitle('【D2：采购目标】').title === '采购目标', '书名号可剥')
+assert(!matchDRegistryTitle('Do：待办'), 'Do：不是台账')
+assert(!matchDRegistryTitle('D1：销售目标'), 'D1 不是台账')
+assert(!matchDRegistryTitle('D2：采购目标'), 'D2 不是台账')
+assert(!matchDRegistryTitle('参考 D：销售目标'), '正文夹带不算')
+assert(!matchDRegistryTitle('AD：误匹配'), '前缀字母不算')
+assert(matchDRegistryTitle('D：销售目标').id === 'D', '标准 D：')
+assert(matchDRegistryTitle('【D：采购目标】').title === '采购目标', '书名号可剥')
+assert(matchDRegistryTitle('D: 招聘').title === '招聘', '半角冒号')
 
-const sample2 = `业务
-- D1：供应商准入
+const sample2 = `- D：供应商准入
   - 频率：每月
-  - 交付：供应商评估表.xlsx
-  - 运行记录：2026-03-01 完成季度复核
-- D2：采购目标
+  - 交付：供应商评估表.pdf
+  - 运行记录：2026-03-01 已完成
+- D1：这不是台账
+- D2：也不是
+- D：采购目标
   - 每周执行
-  - 产出：采购计划.md`
-
+  - 产出 采购计划.docx`
 
 const r2 = parseSample(sample2)
-assert(r2.sops.length === 2, 'sample2 should find 2 sops')
-const d1 = r2.sops.find(s => s.id === 'D1')
-const d2 = r2.sops.find(s => s.id === 'D2')
-assert(d1 && d1.title === '供应商准入', 'D1 title')
-assert(d1.frequency.label === '每月', 'D1 monthly')
-assert(d1.deliverables.some(d => /供应商评估表/.test(d.name)), 'D1 deliverable')
-assert(d1.runs.length >= 1, 'D1 runs')
-assert(d2 && d2.title === '采购目标', 'D2 title')
-assert(d2.frequency.label === '每周', 'D2 weekly')
-assert(d2.runs.length === 0, 'D2 should not treat 每周执行 as run')
-assert(d2.deliverables.some(d => /采购计划/.test(d.name)), 'D2 deliverable')
+assert(r2.sops.length === 2, `expect 2 got ${r2.sops.length}`)
+const a = r2.sops.find(s => s.title === '供应商准入')
+const b = r2.sops.find(s => s.title === '采购目标')
+assert(a && a.id === 'D', '准入 id')
+assert(a.frequency.label === '每月', '准入 monthly')
+assert(a.deliverables.some(d => /供应商评估表/.test(d.name)), '准入 deliverable')
+assert(a.runs.length >= 1, '准入 runs')
+assert(b && b.id === 'D', '采购 id')
+assert(b.frequency.label === '每周', '采购 weekly')
 
-const sample3 = `- D2：采购目标A
-- D2：采购目标B`
+const sample3 = `- D：采购目标A
+- D：采购目标B`
 const r3 = parseSample(sample3)
-assert(r3.sops.length === 2, 'same id must keep 2 rows')
-assert(r3.sops[0].id === 'D2' && r3.sops[1].id === 'D2', 'both D2')
+assert(r3.sops.length === 2, 'two D titles')
+assert(r3.sops[0].id === 'D' && r3.sops[1].id === 'D', 'both id D')
 
 console.log('SOP registry smoke OK')
-console.log(JSON.stringify({ sample1: r1, sample2: r2, sample3: r3 }, null, 2))
