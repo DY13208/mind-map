@@ -36,6 +36,9 @@ async function initHistorySchema(db) {
       hidden boolean not null default false
     )
   `)
+  await db.query(
+    `alter table room_versions add column if not exists hidden boolean not null default false`
+  )
   await db.query(`
     create index if not exists room_versions_room_created_idx
     on room_versions(room_key, created_at desc)

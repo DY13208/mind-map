@@ -340,7 +340,7 @@ const defaultBtnList = [
   'summary',
   'associativeLine',
   'formula',
-  // 'attachment',
+  'attachment',
   'outerFrame',
   'annotation',
   'flowExpand',

@@ -461,7 +461,7 @@ export default {
   },
   attachment: {
     deleteAttachment: '删除附件',
-    tip: '附件功能仅在客户端可用'
+    tip: '支持 txt/md/csv/pdf/docx/xlsx 与常见图片；上传后会解析文本供 AI 使用'
   },
   annotation: {
     mark: '标记',

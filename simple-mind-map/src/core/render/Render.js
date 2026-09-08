@@ -2454,11 +2454,22 @@ class Render {
   }
 
   //  设置节点附件
-  setNodeAttachment(node, url, name = '') {
-    this.setNodeDataRender(node, {
+  setNodeAttachment(node, url, name = '', meta = null) {
+    const patch = {
       attachmentUrl: url,
       attachmentName: name
-    })
+    }
+    if (meta && typeof meta === 'object') {
+      ;[
+        'attachmentId',
+        'attachmentStatus',
+        'attachmentError',
+        'attachmentExtractedText'
+      ].forEach(key => {
+        if (meta[key] != null) patch[key] = meta[key]
+      })
+    }
+    this.setNodeDataRender(node, patch)
   }
 
   //  设置节点标签

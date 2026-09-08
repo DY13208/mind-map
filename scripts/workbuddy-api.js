@@ -25,7 +25,11 @@ function resolveWorkbuddyDir(root) {
 function getWorkbuddyPaths() {
   const local =
     process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
-  const exe = path.join(local, 'Programs', 'WorkBuddy', 'WorkBuddy.exe')
+  const envExe = String(process.env.WORKBUDDY_EXE || '').trim()
+  const envCli = String(process.env.WORKBUDDY_CLI_SCRIPT || '').trim()
+  const exe =
+    (envExe && fs.existsSync(envExe) && envExe) ||
+    path.join(local, 'Programs', 'WorkBuddy', 'WorkBuddy.exe')
   const packedCli = path.join(
     local,
     'Programs',
@@ -46,25 +50,46 @@ function getWorkbuddyPaths() {
     'bin',
     'codebuddy'
   )
-  const cli = fs.existsSync(unpackedCli) ? unpackedCli : packedCli
+  const resolvedFromExe = resolveCliScript(exe)
+  const cli =
+    (envCli && fs.existsSync(envCli) && envCli) ||
+    (resolvedFromExe && fs.existsSync(resolvedFromExe) && resolvedFromExe) ||
+    (fs.existsSync(unpackedCli) ? unpackedCli : packedCli)
   return { exe, cli, local }
 }
 
 function checkWorkbuddyClient() {
+  const install = findWorkbuddyInstall()
+  if (install && fs.existsSync(install.exe)) {
+    const cli =
+      (process.env.WORKBUDDY_CLI_SCRIPT &&
+        fs.existsSync(process.env.WORKBUDDY_CLI_SCRIPT) &&
+        process.env.WORKBUDDY_CLI_SCRIPT) ||
+      install.cli
+    if (fs.existsSync(cli)) {
+      return { ok: true, exe: install.exe, cli }
+    }
+    return {
+      ok: false,
+      reason: `未找到 WorkBuddy CLI：${cli}`,
+      hint:
+        '请在 .env 设置 WORKBUDDY_CLI_SCRIPT，或重新安装 WorkBuddy 桌面客户端。'
+    }
+  }
   const { exe, cli } = getWorkbuddyPaths()
   if (!fs.existsSync(exe)) {
     return {
       ok: false,
       reason: `未找到 WorkBuddy 客户端：${exe}`,
       hint:
-        '请先安装并登录 WorkBuddy 桌面版（默认装到 %LOCALAPPDATA%\\Programs\\WorkBuddy），再重新运行启动脚本。'
+        '请先安装并登录 WorkBuddy，或在项目 .env 设置 WORKBUDDY_EXE=完整路径\\WorkBuddy.exe'
     }
   }
   if (!fs.existsSync(cli)) {
     return {
       ok: false,
       reason: `未找到 WorkBuddy CLI：${cli}`,
-      hint: 'WorkBuddy 可能未装完整，请重新安装桌面客户端后再试。'
+      hint: 'WorkBuddy 可能未装完整，请设置 WORKBUDDY_CLI_SCRIPT 或重新安装。'
     }
   }
   return { ok: true, exe, cli }
@@ -161,16 +186,19 @@ function discoverWorkbuddyFromCommonDirs() {
 }
 
 function findWorkbuddyInstall() {
+  const envCli = String(process.env.WORKBUDDY_CLI_SCRIPT || '').trim()
   const candidates = uniquePaths([
     process.env.WORKBUDDY_EXE,
     ...discoverWorkbuddyFromRegistry(),
     ...discoverWorkbuddyFromPath(),
-    ...discoverWorkbuddyFromCommonDirs()
+    ...discoverWorkbuddyFromCommonDirs(),
+    'D:\\WorkBuddy\\WorkBuddy.exe'
   ])
   for (const exe of candidates) {
-    if (fs.existsSync(exe)) {
-      return { exe, cli: resolveCliScript(exe) }
-    }
+    if (!fs.existsSync(exe)) continue
+    const cli =
+      (envCli && fs.existsSync(envCli) && envCli) || resolveCliScript(exe)
+    return { exe, cli }
   }
   return null
 }
@@ -389,14 +417,9 @@ async function ensureWorkbuddyApi({
 
   ensureEnvFile(dir, apiKey)
 
-  const install = findWorkbuddyInstall()
-  if (!install) {
-    return {
-      ok: false,
-      reason:
-        '未找到 WorkBuddy 客户端。请安装 WorkBuddy，或在 workbuddy_to_api/.env 中设置 WORKBUDDY_EXE',
-      dir
-    }
+  const install = {
+    exe: client.exe,
+    cli: client.cli
   }
 
   const args = [

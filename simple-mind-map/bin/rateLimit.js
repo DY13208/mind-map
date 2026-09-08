@@ -87,6 +87,12 @@ function bodyLimitForPath(pathname = '') {
   if (/\/replace$/.test(pathname) || /\/import/.test(pathname)) {
     return MAX_REPLACE_BODY_BYTES
   }
+  if (/\/attachments(?:\/|$)/.test(pathname) || /\/knowledge\/ensure$/.test(pathname)) {
+    return Math.max(
+      MAX_BODY_BYTES,
+      Number(process.env.NODE_KNOWLEDGE_MAX_BYTES || 5 * 1024 * 1024) + 512 * 1024
+    )
+  }
   return MAX_BODY_BYTES
 }
 

@@ -54,7 +54,11 @@ const COPY_DATA_KEYS = [
   'paddingY',
   'expand',
   'attachmentUrl',
-  'attachmentName'
+  'attachmentName',
+  'attachmentId',
+  'attachmentStatus',
+  'attachmentError',
+  'attachmentExtractedText'
 ]
 
 function clonePlain(value) {

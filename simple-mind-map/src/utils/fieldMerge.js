@@ -3,7 +3,14 @@ export const FV_KEY = '__fv'
 export const FIELD_GROUPS = {
   text: ['text', 'richText'],
   note: ['note'],
-  image: ['image', 'imageTitle', 'imageSize'],
+  image: [
+    'image',
+    'imageTitle',
+    'imageSize',
+    'imageOcrText',
+    'imageKnowledgeStatus',
+    'imageKnowledgeError'
+  ],
   icon: ['icon'],
   tag: ['tag'],
   hyperlink: ['hyperlink', 'hyperlinkTitle'],
@@ -18,7 +25,14 @@ export const FIELD_GROUPS = {
     'associativeLineStyle'
   ],
   formula: ['formula'],
-  attachment: ['attachmentUrl', 'attachmentName']
+  attachment: [
+    'attachmentUrl',
+    'attachmentName',
+    'attachmentId',
+    'attachmentStatus',
+    'attachmentError',
+    'attachmentExtractedText'
+  ]
 }
 
 export const ALL_PATCH_KEYS = [

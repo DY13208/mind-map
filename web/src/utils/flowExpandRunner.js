@@ -1,12 +1,15 @@
-import { streamChat } from '@/utils/workbuddyChat'
+import { streamChat, getWorkbuddyConfig } from '@/utils/workbuddyChat'
 import { plainText, isInvalidNodeData, findFlowAssignee } from '@/utils/flowSearch'
 import {
   buildFlowExpandPrompt,
+  buildFlowExpandUserContent,
   resolveSopTemplate,
   nodeUid
 } from '@/utils/flowExpandPrompt'
 import { parseMindmapChildren, describeParseMiss } from '@/utils/mindmapChildrenParse'
 import { dispatchTodo, appendTodoNote } from '@/utils/sendTodo'
+import { enrichNodeKnowledge } from '@/utils/nodeAttachmentApi'
+import { roomFromLocation } from '@/utils/roomLocation'
 
 const PLACEHOLDERS = [
   '',
@@ -38,6 +41,23 @@ const ADD_CHILDREN_TOOL = {
       required: ['children']
     }
   }
+}
+
+function supportsVisionModel(model) {
+  const value = String(model || '').toLowerCase()
+  // workbuddy_to_api currently flattens image_url blocks to plain text.
+  // Only send multimodal content when explicitly enabled AND model looks visual.
+  const runtime =
+    (typeof window !== 'undefined' && window.__MIND_MAP_RUNTIME__) || {}
+  if (!runtime.workbuddyVisionEnabled && !runtime.WORKBUDDY_VISION_ENABLED) {
+    return false
+  }
+  return (
+    value === 'auto' ||
+    /(gpt-(4o|4\.1|5)|claude-3|claude-4|gemini|qwen[\w.-]*(vl|vision)|glm-4v|doubao.*vision|vision)/.test(
+      value
+    )
+  )
 }
 
 function isPlaceholder(text) {
@@ -227,15 +247,53 @@ function ensureAssigneeInTrees(trees, assigneeName) {
   return trees
 }
 
+function dataOfNode(node) {
+  if (!node) return {}
+  if (node.getData) return node.getData() || {}
+  return (node.nodeData && node.nodeData.data) || node.data || {}
+}
+
+function hasKnowledgePayload(node) {
+  const data = dataOfNode(node)
+  return !!(
+    data.image ||
+    data.attachmentId ||
+    data.attachmentUrl ||
+    data.attachmentName ||
+    data.attachmentExtractedText ||
+    data.imageOcrText ||
+    data.imageExtractedText
+  )
+}
+
+function mediaLabel(data) {
+  if (!data) return '媒体节点'
+  if (data.imageTitle) return String(data.imageTitle).trim()
+  if (data.attachmentName) return String(data.attachmentName).trim()
+  if (data.image) return '节点图片'
+  if (data.attachmentId || data.attachmentUrl) return '节点附件'
+  return '媒体节点'
+}
+
 export function validateFlowExpandNode(node) {
   if (!node || node.isRoot) {
     return { ok: false, code: 'no_node', message: '请先在导图中选中一个节点' }
   }
   const text = plainText(node)
-  if (isPlaceholder(text) || isInvalidNodeData(text)) {
+  const data = dataOfNode(node)
+  const hasMedia = hasKnowledgePayload(node)
+  // Image/attachment-only nodes are valid even when the title is still a
+  // placeholder like「分支主题」— Flow Expand can use OCR/extracted text.
+  if (!hasMedia && (isPlaceholder(text) || isInvalidNodeData(text))) {
     return { ok: false, code: 'invalid_node', message: '请先填写有效的节点内容' }
   }
-  return { ok: true, label: text }
+  const label =
+    text && !isPlaceholder(text) && !isInvalidNodeData(text)
+      ? text
+      : hasMedia
+        ? mediaLabel(data)
+        : text
+  return { ok: true, label }
 }
 
 export async function runFlowExpandJob({
@@ -260,7 +318,66 @@ export async function runFlowExpandJob({
   let user
   let meta = {}
   try {
-    const prompt = buildFlowExpandPrompt(mindMap, node)
+    setStatus('正在解析节点图片/附件文本…')
+    const enriched = await enrichNodeKnowledge(mindMap, node, {
+      roomKey: roomFromLocation()
+    })
+    if (enriched.error) {
+      setStatus('附件解析暂不可用，继续使用已有文字上下文…')
+    } else if (enriched.remoteSources && enriched.remoteSources.length) {
+      const ready = enriched.remoteSources.filter(
+        s => s && s.status === 'ready' && s.extractedText
+      )
+      const failed = enriched.remoteSources.filter(
+        s => s && s.status === 'failed'
+      )
+      if (ready.length) {
+        setStatus(`已识别到 ${ready.length} 段图片/附件文字，正在组装提示词…`)
+        // Persist OCR text on the node so later expands skip re-upload.
+        try {
+          const patch = {}
+          ready.forEach(source => {
+            if (source.type === 'image' && source.extractedText) {
+              patch.imageOcrText = String(source.extractedText).slice(0, 2400)
+              patch.imageKnowledgeStatus = 'ready'
+              patch.imageKnowledgeError = ''
+            }
+            if (source.type === 'attachment' && source.extractedText) {
+              patch.attachmentExtractedText = String(source.extractedText).slice(
+                0,
+                2400
+              )
+              patch.attachmentStatus = 'ready'
+              if (source.attachmentId) patch.attachmentId = source.attachmentId
+            }
+          })
+          if (Object.keys(patch).length && node && node.setData) {
+            node.setData(patch)
+          } else if (
+            Object.keys(patch).length &&
+            mindMap &&
+            mindMap.renderer &&
+            mindMap.renderer.setNodeDataRender
+          ) {
+            mindMap.renderer.setNodeDataRender(node, patch)
+          }
+        } catch (persistErr) {
+          console.warn('[flowExpand] persist OCR text failed', persistErr)
+        }
+      } else if (failed.length) {
+        setStatus(
+          '图片/附件未能识别文字（' +
+            ((failed[0] && failed[0].error) || 'OCR 失败') +
+            '），将仅用节点标题继续…'
+        )
+      } else {
+        setStatus('已获取附件/OCR 文本，正在组装提示词…')
+      }
+    }
+    const prompt = buildFlowExpandPrompt(mindMap, node, {
+      knowledge: enriched.knowledge,
+      extraSources: enriched.remoteSources
+    })
     system = prompt.system
     user = prompt.user
     meta = prompt
@@ -270,6 +387,9 @@ export async function runFlowExpandJob({
       '读取导图失败：' + ((buildErr && buildErr.message) || '未知错误')
     )
   }
+  const useVision =
+    !!(meta.knowledge && meta.knowledge.images && meta.knowledge.images.length) &&
+    supportsVisionModel(getWorkbuddyConfig().model)
 
   setStatus(
     meta.hasTemplate
@@ -277,7 +397,7 @@ export async function runFlowExpandJob({
       : '未命中 SOP，WorkBuddy 正在根据导图内容硬编流程…'
   )
 
-  const callWb = async (compact = false) => {
+  const callWb = async (compact = false, includeImages = useVision) => {
     let usr = user
     if (compact) {
       usr = [
@@ -290,7 +410,13 @@ export async function runFlowExpandJob({
     return streamChat({
       messages: [
         { role: 'system', content: system },
-        { role: 'user', content: usr }
+        {
+          role: 'user',
+          content: buildFlowExpandUserContent(
+            { ...meta, user: usr },
+            includeImages
+          )
+        }
       ],
       stream: false,
       conversationId,
@@ -308,7 +434,17 @@ export async function runFlowExpandJob({
     })
   }
 
-  let result = await callWb(false)
+  let result
+  try {
+    result = await callWb(false)
+  } catch (err) {
+    // A proxy may advertise/route a visual model incorrectly. Fall back to
+    // text-only rather than making flow expansion unavailable.
+    if (!useVision) throw err
+    console.warn('[flowExpand] visual request failed; retrying text-only', err)
+    setStatus('图片读取不可用，正在以文字上下文重试…')
+    result = await callWb(false, false)
+  }
   let children = parseMindmapChildren(result)
   if (!children.length) {
     console.warn(

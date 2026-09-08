@@ -29,7 +29,9 @@ function loadRootEnv() {
       ) {
         value = value.slice(1, -1)
       }
-      if (process.env[key] === undefined) process.env[key] = value
+      // Launcher always prefers project .env so stale shell exports
+      // (e.g. AUTH_ALLOWED_ORIGINS from a previous machine) cannot stick.
+      process.env[key] = value
     })
 }
 
