@@ -8,3 +8,4 @@ utools/dist
 .mcp.json
 .playwright-cli/
 workbuddy_to_api/
+.codebuddy/models.json

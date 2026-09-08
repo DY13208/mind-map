@@ -1,4 +1,5 @@
 /* global module:readonly */
+
 const NODE_FEATURE_STRUCTURAL_KEYS = [
   'parentUid',
   'parent_uid',
@@ -96,7 +97,7 @@ const NODE_FEATURE_MATRIX = [
   {
     feature: 'Formula',
     uiEntry: 'Toolbar formula / FormulaSidebar',
-    command: 'INSERT_FORMULA â†’ SET_NODE_TEXT',
+    command: 'INSERT_FORMULA â†?SET_NODE_TEXT',
     fields: ['text', 'richText'],
     operation: 'node.update',
     pgField: 'room_nodes.data.text (ql-formula data-value LaTeX)',
@@ -107,7 +108,7 @@ const NODE_FEATURE_MATRIX = [
   },
   {
     feature: 'Painter',
-    uiEntry: 'Toolbar painter â†’ node_click',
+    uiEntry: 'Toolbar painter â†?node_click',
     command: 'SET_NODE_STYLES',
     fields: ['style keys only'],
     operation: 'node.update',

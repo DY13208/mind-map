@@ -6,8 +6,8 @@
     @keydown.enter.self="$emit('open', room)"
     @click="$emit('open', room)"
   >
-    <div class="roomPreview">
-      <i class="el-icon-share"></i
+    <div class="roomPreview" :style="previewStyle">
+      <div class="previewMap" aria-hidden="true"><span></span><i></i><i></i><i></i></div
       ><button
         class="favorite"
         :aria-label="room.favorite ? '取消收藏' : '收藏'"
@@ -28,7 +28,9 @@
           ><el-dropdown-menu slot="dropdown"
             ><el-dropdown-item command="open">打开</el-dropdown-item
             ><el-dropdown-item command="rename">重命名</el-dropdown-item
-            ><el-dropdown-item command="move">移动</el-dropdown-item
+            ><el-dropdown-item command="move">移动到文件夹</el-dropdown-item
+            ><el-dropdown-item v-if="allowMoveToTeam" command="moveToTeam"
+              >移至团队空间</el-dropdown-item
             ><el-dropdown-item command="favorite">{{
               room.favorite ? '取消收藏' : '收藏'
             }}</el-dropdown-item
@@ -42,7 +44,7 @@
       </div>
       <p><i class="el-icon-folder-opened"></i> {{ room.folderName }}</p>
       <p class="ownerLine">
-        Owner {{ room.owner.name }}
+        所有者 {{ room.owner.name }}
         <el-tag size="mini" type="info">{{ room.roleLabel || room.role }}</el-tag>
       </p>
       <div class="roomMeta">
@@ -66,8 +68,16 @@ import UserAvatar from '@/components/UserAvatar.vue'
 export default {
   name: 'RoomCard',
   components: { UserAvatar },
-  props: { room: Object, allowDelete: { type: Boolean, default: false } },
+  props: {
+    room: Object,
+    allowDelete: { type: Boolean, default: false },
+    allowMoveToTeam: { type: Boolean, default: true }
+  },
   computed: {
+    previewStyle() {
+      const url = this.room.previewUrl || this.room.thumbnailUrl || this.room.coverUrl
+      return url ? { backgroundImage: `url(${url})` } : {}
+    },
     dateText() {
       return new Date(this.room.updatedAt).toLocaleDateString('zh-CN')
     }
@@ -84,23 +94,37 @@ export default {
 .roomCard {
   background: white;
   border: 1px solid #e3e9e6;
-  border-radius: 13px;
+  border-radius: var(--ui-radius-lg);
   overflow: hidden;
   cursor: pointer;
-  transition: 0.16s ease;
+  transition: border-color var(--ui-duration) var(--ui-ease), box-shadow var(--ui-duration) var(--ui-ease), transform var(--ui-duration) var(--ui-ease);
   &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 10px 26px rgba(25, 70, 54, 0.08);
-    border-color: #bad7cc;
+    transform: translateY(-1px);
+    box-shadow: var(--ui-shadow-hover);
+    border-color: var(--ui-border-strong);
   }
   .roomPreview {
-    height: 118px;
-    background: #edf5f1;
+    height: 126px;
+    background: var(--ui-surface-muted);
+    background-position: center;
+    background-size: cover;
     display: grid;
     place-items: center;
-    color: #55a789;
-    font-size: 34px;
     position: relative;
+  }
+  .previewMap {
+    position: relative;
+    width: 120px;
+    height: 56px;
+    span, i { position: absolute; display: block; border: 1px solid #9ac8b6; background: #fff; border-radius: 4px; }
+    span { width: 44px; height: 20px; left: 38px; top: 18px; background: var(--ui-primary); border-color: var(--ui-primary); }
+    i { width: 27px; height: 14px; }
+    i:nth-child(2) { left: 0; top: 0; }
+    i:nth-child(3) { right: 0; top: 0; }
+    i:nth-child(4) { right: 0; bottom: 0; }
+    &::before, &::after { content: ''; position: absolute; height: 1px; background: #9ac8b6; width: 40px; top: 27px; }
+    &::before { left: 8px; transform: rotate(25deg); transform-origin: right; }
+    &::after { right: 8px; transform: rotate(-25deg); transform-origin: left; }
   }
   .favorite {
     position: absolute;

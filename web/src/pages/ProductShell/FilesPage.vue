@@ -27,22 +27,22 @@
       /><el-button @click="load">重试</el-button>
     </div>
     <div v-else v-loading="loading || busy" class="contentArea">
-      <template v-if="showFolders && filteredFolders.length"
-        ><h2 class="sectionTitle">文件夹</h2>
-        <div class="folderGrid">
+      <h2 class="sectionTitle" v-if="mode !== 'trash' && itemCount">
+        {{ folder ? '当前目录' : pageTitle }} <span>{{ displayCount }}</span>
+      </h2>
+      <div v-if="mode !== 'trash' && view === 'card' && itemCount" class="itemGrid">
+        <template v-if="showFolders">
           <FolderCard
             v-for="item in filteredFolders"
             :key="item.id"
             :folder="item"
+            :editable="item.canManage !== false"
             @open="openFolder"
             @rename="renameFolder"
+            @share="shareFolder"
             @delete="deleteFolder"
-          /></div
-      ></template>
-      <h2 class="sectionTitle" v-if="visibleRooms.length">
-        {{ mode === 'trash' ? '已删除' : '脑图' }}
-        <span>{{ visibleRooms.length }}</span>
-      </h2>
+          />
+        </template>
       <template v-if="mode === 'trash' && visibleRooms.length"
         ><div class="trashList">
           <div v-for="room in visibleRooms" :key="room.id" class="trashRow">
@@ -65,10 +65,6 @@
           </div>
         </div></template
       >
-      <div
-        v-if="mode !== 'trash' && view === 'card' && visibleRooms.length"
-        class="roomGrid"
-      >
         <RoomCard
           v-for="room in visibleRooms"
           :key="room.roomKey || room.id"
@@ -78,25 +74,39 @@
           @favorite="favorite"
           @rename="renameRoom"
           @move="moveRoom"
+          @move-to-team="moveToTeam"
           @share="shareRoom"
           @history="historyRoom"
           @delete="deleteRoom"
         />
       </div>
       <RoomList
-        v-if="mode !== 'trash' && view === 'list' && visibleRooms.length"
+        v-if="mode !== 'trash' && view === 'list' && itemCount"
         :rooms="visibleRooms"
+        :folders="showFolders ? filteredFolders : []"
         :allow-delete="true"
         @open="openRoom"
+        @open-folder="openFolder"
         @favorite="favorite"
         @rename="renameRoom"
         @move="moveRoom"
+        @move-to-team="moveToTeam"
         @share="shareRoom"
         @history="historyRoom"
         @delete="deleteRoom"
       />
-      <div v-if="hasMore" class="pager">
-        <el-button size="small" :loading="busy" @click="loadMore">加载更多</el-button>
+      <div v-if="showPager" class="pager">
+        <el-pagination
+          background
+          layout="total, sizes, prev, pager, next, jumper"
+          :current-page="page"
+          :page-size="limit"
+          :page-sizes="pageSizes"
+          :total="total"
+          :disabled="loading || busy"
+          @size-change="onPageSizeChange"
+          @current-change="onPageChange"
+        />
       </div>
       <EmptyState
         v-if="!loading && !visibleRooms.length && !filteredFolders.length"
@@ -119,15 +129,25 @@
       :folders="folders"
       @confirm="confirmMove"
     />
+    <MoveToTeamDialog
+      :visible.sync="moveToTeamVisible"
+      :room="activeRoom"
+      @confirm="confirmMoveToTeam"
+    />
     <ShareRoomDialog
       :visible.sync="shareVisible"
       :room="activeRoom"
-      @changed="load"
+      @changed="() => load({ reset: true, keepPage: true })"
+    />
+    <ShareFolderDialog
+      :visible.sync="folderShareVisible"
+      :folder="activeFolder"
+      @changed="() => load({ reset: true, keepPage: true })"
     />
     <HistoryPanel
       :visible.sync="historyVisible"
       :room="activeRoom"
-      @restored="load"
+      @restored="() => load({ reset: true, keepPage: true })"
     />
   </section>
 </template>
@@ -136,16 +156,19 @@
 import { userMessageFromError } from '@/services/apiError'
 import roomService from '@/services/roomService'
 import folderService from '@/services/folderService'
+import teamService from '@/services/teamService'
 import EmptyState from './components/EmptyState.vue'
 import FileToolbar from './components/FileToolbar.vue'
 import FolderBreadcrumb from './components/FolderBreadcrumb.vue'
 import FolderCard from './components/FolderCard.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import MoveToFolderDialog from './components/MoveToFolderDialog.vue'
+import MoveToTeamDialog from './components/MoveToTeamDialog.vue'
 import RenameDialog from './components/RenameDialog.vue'
 import RoomCard from './components/RoomCard.vue'
 import RoomList from './components/RoomList.vue'
 import ShareRoomDialog from './components/ShareRoomDialog.vue'
+import ShareFolderDialog from './components/ShareFolderDialog.vue'
 const copy = {
   files: ['我的脑图', '管理你的文件夹与脑图'],
   recent: ['最近', '快速回到最近打开的脑图'],
@@ -163,6 +186,16 @@ const savedView = () => {
     return 'card'
   }
 }
+const PAGE_SIZES = [10, 20, 50, 100]
+const PAGE_SIZE_KEY = 'product-shell-page-size'
+const savedPageSize = () => {
+  try {
+    const value = Number(localStorage.getItem(PAGE_SIZE_KEY))
+    return PAGE_SIZES.includes(value) ? value : 20
+  } catch (error) {
+    return 20
+  }
+}
 export default {
   name: 'FilesPage',
   components: {
@@ -172,10 +205,12 @@ export default {
     FolderCard,
     HistoryPanel,
     MoveToFolderDialog,
+    MoveToTeamDialog,
     RenameDialog,
     RoomCard,
     RoomList,
-    ShareRoomDialog
+    ShareRoomDialog,
+    ShareFolderDialog
   },
   props: { mode: { type: String, default: 'files' } },
   data() {
@@ -195,12 +230,15 @@ export default {
       renameKind: 'room',
       renameVisible: false,
       moveVisible: false,
+      moveToTeamVisible: false,
       shareVisible: false,
+      folderShareVisible: false,
+      activeFolder: null,
       historyVisible: false,
-      limit: 50,
-      offset: 0,
+      pageSizes: PAGE_SIZES,
+      limit: savedPageSize(),
+      page: 1,
       total: 0,
-      nextCursor: '',
       searchTimer: null
     }
   },
@@ -208,10 +246,9 @@ export default {
     isRealFilesMode() {
       return this.mode === 'files' || this.mode === 'folder' || this.mode === 'shared'
     },
-    hasMore() {
-      if (!this.isRealFilesMode) return false
-      if (this.nextCursor) return true
-      return this.rooms.length < Number(this.total || 0)
+    showPager() {
+      // 无数据时不展示分页/加载更多；有数据时提供页码与每页数量调节。
+      return this.isRealFilesMode && !this.loading && Number(this.total || 0) > 0
     },
     folder() {
       return this.mode === 'folder'
@@ -223,8 +260,17 @@ export default {
     },
     pageDescription() {
       return this.folder
-        ? this.folder.roomCount + ' 个脑图'
+        ? this.displayCount + ' 个项目'
         : copy[this.mode][1]
+    },
+    itemCount() {
+      return this.visibleRooms.length + this.filteredFolders.length
+    },
+    displayCount() {
+      if (this.isRealFilesMode && Number(this.total || 0) > 0) {
+        return Number(this.total)
+      }
+      return this.itemCount
     },
     showFolders() {
       return this.mode === 'files'
@@ -283,10 +329,15 @@ export default {
     search() {
       if (!this.isRealFilesMode) return
       clearTimeout(this.searchTimer)
-      this.searchTimer = setTimeout(() => this.load({ reset: true }), 300)
+      this.searchTimer = setTimeout(() => {
+        this.page = 1
+        this.load({ reset: true, keepPage: true })
+      }, 300)
     },
     sort() {
-      if (this.isRealFilesMode) this.load({ reset: true })
+      if (!this.isRealFilesMode) return
+      this.page = 1
+      this.load({ reset: true, keepPage: true })
     },
     view(value) {
       try {
@@ -307,18 +358,16 @@ export default {
       this.search = ''
       this.roleFilter = ''
       this.sort = this.mode === 'recent' ? 'lastOpenedAt' : 'updatedAt'
-      this.offset = 0
-      this.nextCursor = ''
-      this.load({ reset: true })
+      this.page = 1
+      this.load({ reset: true, keepPage: true })
     },
     async load(options = {}) {
       const reset = options.reset !== false
       const request = ++this.requestId
       const mode = this.mode
       const folderId = this.$route.params.id
-      if (reset) {
-        this.offset = 0
-        this.nextCursor = ''
+      if (reset && !options.keepPage) {
+        this.page = 1
       }
       this.loading = reset
       this.error = ''
@@ -338,22 +387,32 @@ export default {
           recent: mode === 'recent',
           foldersById: this.folderMap
         }
-        if (mode === 'folder') filters.folderId = folderId
+        if (mode === 'folder') {
+          filters.folderId = folderId
+        } else if (mode === 'files' && !this.search.trim()) {
+          // Root of 我的脑图: only rooms not in a folder (folder contents stay inside).
+          filters.folderId = null
+        }
         if (this.isRealFilesMode) {
           filters.q = this.search.trim()
           filters.sort = this.sort === 'lastOpenedAt' ? 'updatedAt' : this.sort
           filters.order = this.sort === 'title' ? 'asc' : 'desc'
           filters.limit = this.limit
-          filters.offset = reset ? 0 : this.offset
-          if (!reset && this.nextCursor) filters.cursor = this.nextCursor
+          filters.offset = Math.max(0, (this.page - 1) * this.limit)
         }
         const rooms = await roomService.listRooms(filters)
         if (request !== this.requestId) return
         const list = rooms.list || rooms
-        this.total = Number(rooms.total || list.length)
-        this.nextCursor = rooms.nextCursor || ''
-        this.offset = Number(rooms.offset || 0) + list.length
-        this.rooms = reset ? list : this.rooms.concat(list)
+        const total = Number(rooms.total != null ? rooms.total : list.length)
+        this.total = total
+        // 删到最后一页为空时，自动回到有效页。
+        const maxPage = Math.max(1, Math.ceil(total / this.limit) || 1)
+        if (this.isRealFilesMode && total > 0 && this.page > maxPage) {
+          this.page = maxPage
+          await this.load({ reset: true, keepPage: true })
+          return
+        }
+        this.rooms = list
       } catch (error) {
         if (request === this.requestId)
           this.error = userMessageFromError(error)
@@ -361,8 +420,20 @@ export default {
         if (request === this.requestId) this.loading = false
       }
     },
-    loadMore() {
-      return this.load({ reset: false })
+    onPageChange(page) {
+      this.page = Math.max(1, Number(page) || 1)
+      this.load({ reset: true, keepPage: true })
+    },
+    onPageSizeChange(size) {
+      const next = PAGE_SIZES.includes(Number(size)) ? Number(size) : 20
+      this.limit = next
+      this.page = 1
+      try {
+        localStorage.setItem(PAGE_SIZE_KEY, String(next))
+      } catch (error) {
+        /* preference is optional */
+      }
+      this.load({ reset: true, keepPage: true })
     },
     async perform(action, message) {
       if (this.busy) return
@@ -370,7 +441,7 @@ export default {
       try {
         await action()
         if (message) this.$message.success(message)
-        await this.load()
+        await this.load({ reset: true, keepPage: true })
       } catch (error) {
         this.$message.error(userMessageFromError(error))
       } finally {
@@ -485,9 +556,27 @@ export default {
         '移动成功'
       )
     },
+    moveToTeam(room) {
+      this.activeRoom = room
+      this.moveToTeamVisible = true
+    },
+    confirmMoveToTeam(teamId) {
+      return this.perform(
+        () =>
+          teamService.assignRoom(
+            teamId,
+            this.activeRoom.roomKey || this.activeRoom.id
+          ),
+        '已移入团队空间'
+      )
+    },
     shareRoom(room) {
       this.activeRoom = room
       this.shareVisible = true
+    },
+    shareFolder(folder) {
+      this.activeFolder = folder
+      this.folderShareVisible = true
     },
     historyRoom(room) {
       this.activeRoom = room
@@ -536,15 +625,10 @@ export default {
 .contentArea {
   min-height: 320px;
 }
-.folderGrid {
+.itemGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 12px;
-}
-.roomGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
 }
 .sectionTitle span {
   color: #9aa7a2;
@@ -559,6 +643,12 @@ export default {
   .el-alert {
     flex: 1;
   }
+}
+.pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 4px;
 }
 .trashList {
   background: white;

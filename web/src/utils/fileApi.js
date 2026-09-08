@@ -400,7 +400,7 @@ export function getFileOutline(roomKey, maxNodes = 5000) {
   )
 }
 
-/** 扁平化全部节点（底层 room 数据，不依赖画布展开） */
+/** 扁平化全部节点（底层 room 数据，不依赖画布展开�?*/
 export function getFileFlatNodes(roomKey) {
   return request(
     `/api/files/${encodeURIComponent(roomKey)}?format=nodes`
@@ -636,6 +636,24 @@ export function searchUsers(q, limit = 20) {
   if (q) params.set('q', q)
   if (limit) params.set('limit', String(limit))
   return request(`/api/users?${params.toString()}`)
+}
+
+/** 本地 output 产物预览 / 下载 URL */
+export function artifactLocalUrl(filePath, { download = false, name = '' } = {}) {
+  const params = new URLSearchParams()
+  const raw = String(filePath || '').trim()
+  if (raw) params.set('path', raw)
+  const base =
+    String(name || '').trim() ||
+    raw
+      .replace(/\\/g, '/')
+      .split('/')
+      .filter(Boolean)
+      .pop() ||
+    ''
+  if (base) params.set('name', base)
+  if (download) params.set('download', '1')
+  return `${apiBase()}/api/artifacts/local?${params.toString()}`
 }
 
 export { request as apiRequest }

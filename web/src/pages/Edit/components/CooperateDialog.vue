@@ -535,6 +535,8 @@ export default {
       USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)]
     this.$bus.$on('showCooperate', this.open)
     this.$bus.$on('map_ref_click', this.onMapRefClick)
+    this.$bus.$on('node_dblclick', this.onNodeDblclickMapRef)
+    this.$bus.$on('openMapRefEdit', this.navigateToMapRef)
     this.$bus.$on('showShareAcl', this.openShare)
     this._seenHttpChanges = new Map()
     this._unsubCollabStore = null
@@ -545,6 +547,8 @@ export default {
   beforeDestroy() {
     this.$bus.$off('showCooperate', this.open)
     this.$bus.$off('map_ref_click', this.onMapRefClick)
+    this.$bus.$off('node_dblclick', this.onNodeDblclickMapRef)
+    this.$bus.$off('openMapRefEdit', this.navigateToMapRef)
     this.$bus.$off('showShareAcl', this.openShare)
     if (this.mindMap) {
       this.mindMap.off('room_acl_denied', this.onAclDenied)
@@ -1023,6 +1027,23 @@ export default {
     },
 
     async onMapRefClick(_node, ref) {
+      const normalized = normalizeMapRef(ref)
+      if (!normalized) {
+        this.$message.warning(this.$t('mapRef.openFailed'))
+        return
+      }
+      // 点击子脑图图标 → 只读预览弹窗；编辑走弹窗内「打开编辑」
+      this.$bus.$emit('showSubMapPreview', normalized)
+    },
+
+    onNodeDblclickMapRef(node, _e, isInserting) {
+      if (isInserting || !node || typeof node.getData !== 'function') return
+      const ref = normalizeMapRef(node.getData('mapRef'))
+      if (!ref) return
+      this.onMapRefClick(node, ref)
+    },
+
+    async navigateToMapRef(ref) {
       const current = roomFromLocation(this.$route)
       this.persistCurrentMapView()
       let info
@@ -1030,7 +1051,12 @@ export default {
         info = await inspectMapRef(ref)
       } catch (err) {
         const msg = String((err && err.message) || '')
-        if (err && (err.code === 'FORBIDDEN' || err.statusCode === 403 || /403|permission/i.test(msg))) {
+        if (
+          err &&
+          (err.code === 'FORBIDDEN' ||
+            err.statusCode === 403 ||
+            /403|permission/i.test(msg))
+        ) {
           this.$message.warning(this.$t('mapRef.noPermission'))
           return
         }

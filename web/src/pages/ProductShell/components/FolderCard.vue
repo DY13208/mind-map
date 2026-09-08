@@ -6,23 +6,24 @@
     @keydown.enter.self="$emit('open', folder)"
     @click="$emit('open', folder)"
   >
-    <span class="folderIcon"><i class="el-icon-folder"/></span
-    ><span class="folderInfo"
+    <div class="folderPreview"><span class="folderIcon"><i class="el-icon-folder-opened"/></span></div>
+    <div class="folderBody"><span class="folderInfo"
       ><strong>{{ folder.name }}</strong
-      ><small>{{ folder.roomCount }} 个脑图 · {{ dateText }}</small></span
-    ><el-dropdown
+      ><small>{{ itemCountText }}</small><small>{{ dateText }} 更新</small></span>
+    <el-dropdown
       v-if="editable"
       trigger="click"
       @command="$emit($event, folder)"
       @click.native.stop
       ><span class="more"><i class="el-icon-more"/></span
       ><el-dropdown-menu slot="dropdown"
+        ><el-dropdown-item command="share">分享 / 权限</el-dropdown-item
         ><el-dropdown-item command="rename">重命名</el-dropdown-item
         ><el-dropdown-item command="delete" divided
           >删除</el-dropdown-item
         ></el-dropdown-menu
       ></el-dropdown
-    >
+    ></div>
   </article></template
 >
 <script>
@@ -30,6 +31,10 @@ export default {
   name: 'FolderCard',
   props: { folder: Object, editable: { type: Boolean, default: true } },
   computed: {
+    itemCountText() {
+      const count = Number(this.folder.itemCount != null ? this.folder.itemCount : this.folder.roomCount) || 0
+      return count ? `${count} 个项目` : '空文件夹'
+    },
     dateText() {
       return new Date(this.folder.updatedAt).toLocaleDateString('zh-CN')
     }
@@ -41,27 +46,43 @@ export default {
   width: 100%;
   border: 1px solid #e3e9e6;
   background: white;
-  padding: 16px;
-  border-radius: 11px;
+  min-height: 0;
+  padding: 0;
+  border-radius: var(--ui-radius-lg);
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
   cursor: pointer;
   text-align: left;
-  color: #243c33;
+  color: var(--ui-text);
+  transition: border-color var(--ui-duration) var(--ui-ease), box-shadow var(--ui-duration) var(--ui-ease), transform var(--ui-duration) var(--ui-ease);
   &:hover {
-    border-color: #b7d7ca;
-    box-shadow: 0 6px 20px rgba(28, 76, 59, 0.06);
+    border-color: var(--ui-border-strong);
+    box-shadow: var(--ui-shadow-hover);
+    transform: translateY(-1px);
   }
-  .folderIcon {
-    width: 38px;
-    height: 38px;
-    background: #eef6f2;
-    color: #149067;
-    border-radius: 9px;
+  .folderPreview {
+    height: 126px;
     display: grid;
     place-items: center;
-    font-size: 20px;
+    background: var(--ui-surface-muted);
+    border-bottom: 1px solid var(--ui-border);
+  }
+  .folderIcon {
+    width: 64px;
+    height: 52px;
+    background: var(--ui-primary-soft);
+    color: var(--ui-primary);
+    border-radius: var(--ui-radius-lg);
+    display: grid;
+    place-items: center;
+    font-size: 27px;
+  }
+  .folderBody {
+    min-height: 116px;
+    padding: 16px;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
   }
   .folderInfo {
     display: flex;
@@ -70,8 +91,9 @@ export default {
     flex: 1;
   }
   small {
-    color: #8b9893;
+    color: var(--ui-text-secondary);
     margin-top: 5px;
+    font-size: 12px;
   }
   .more {
     padding: 8px;

@@ -140,6 +140,16 @@ function createFileSystem(options = {}) {
           db
         )
       }
+      if (folderId && store.listFolderMembers) {
+        const inherited = await store.listFolderMembers(folderId)
+        for (const member of inherited) {
+          if (!member.user_id || member.user_id === userId) continue
+          await store.insertMember(
+            { room_key: roomKey, user_id: member.user_id, role: member.role },
+            db
+          )
+        }
+      }
       for (const member of teamMembers) {
         const memberId = roomAcl.normalizeUserId(member.userId || member.user_id)
         if (!memberId || memberId === userId) continue
@@ -215,6 +225,7 @@ function createFileSystem(options = {}) {
     const order = String(input.order || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc'
     const limit = Math.min(100, Math.max(1, Number(input.limit) || 20))
     const offset = Math.max(0, Number(input.offset) || 0)
+    const shared = !!input.shared
     if (store.kind === 'pg') {
       return listRoomsPg({
         userId,
@@ -226,7 +237,8 @@ function createFileSystem(options = {}) {
         order,
         limit,
         offset,
-        cursor: input.cursor
+        cursor: input.cursor,
+        shared
       })
     }
     store.resetQueryCount && store.resetQueryCount()
@@ -256,6 +268,14 @@ function createFileSystem(options = {}) {
     })
     if (!bypass) {
       rows = rows.filter(row => row.role || row.legacy_open)
+    }
+    if (input.shared) {
+      // 与我共享：当前用户是成员，但不是 owner（排除本人创建/拥有的脑图）。
+      rows = rows.filter(
+        row => row.role === 'editor' || row.role === 'viewer'
+      )
+    } else {
+      rows = rows.filter(row => !row.team_id)
     }
     rows = await overlayUserState(rows, userId)
     rows = applySort(rows, sort, order)
@@ -292,6 +312,10 @@ function createFileSystem(options = {}) {
         where += ` and r.folder_id = $${params.length}`
       }
     }
+    // Personal file browser excludes team-owned rooms; those live under /spaces.
+    if (kind === 'files' && !opts.shared) {
+      where += ' and r.team_id is null'
+    }
     let userParam = 0
     let stateParam = 0
     if (opts.userId) {
@@ -311,6 +335,13 @@ function createFileSystem(options = {}) {
               select 1 from room_members m where m.room_key = r.room_key
             )
           )`
+        } else if (opts.shared) {
+          where += ` and exists (
+            select 1 from room_members m
+            where m.room_key = r.room_key
+              and m.user_id = $${userParam}
+              and m.role in ('editor', 'viewer')
+          )`
         } else {
           where += ` and (
             exists (
@@ -322,7 +353,12 @@ function createFileSystem(options = {}) {
             )
           )`
         }
+      } else if (opts.shared) {
+        // bypass 时「与我共享」没有当前用户语义，返回空集。
+        where += ' and false'
       }
+    } else if (opts.shared) {
+      where += ' and false'
     }
     if (kind === 'recent') {
       where += stateParam ? ' and us.last_opened_at is not null' : ' and false'
