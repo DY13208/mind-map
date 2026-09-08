@@ -85,6 +85,18 @@ node scripts/launcher.js start    # 本地 Node 启动
 node scripts/launcher.js stop     # 停止本地 Node 服务
 ```
 
+### CodeGraph（可选）
+
+本地安装 CodeGraph 后，可在项目根目录初始化代码索引：
+
+```bash
+codegraph init .
+codegraph sync .
+codegraph status .
+```
+
+索引会自动排除 `dist-build/` 和 `dist-docker/`。`.codegraph/` 中的 SQLite 数据库和运行状态文件仅保存在本机，Git 只跟踪用于阻止这些数据误提交的 `.codegraph/.gitignore`；换机器或删除索引后可重新运行 `codegraph init .`。
+
 ---
 
 ## 对外端口
