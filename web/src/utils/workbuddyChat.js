@@ -292,7 +292,16 @@ export async function streamChat({
     }
     const piece = deltaText(json)
     if (piece) {
-      content += piece
+      // 代理偶发推「累计全文」而非增量；避免重复拼接成巨文
+      if (!content) {
+        content = piece
+      } else if (piece.startsWith(content)) {
+        content = piece
+      } else if (content.startsWith(piece)) {
+        // 忽略回退/重复短片
+      } else {
+        content += piece
+      }
       if (onDelta) onDelta(content)
     }
     const choice = json.choices && json.choices[0]

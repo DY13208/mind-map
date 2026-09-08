@@ -9,8 +9,8 @@ import {
 const MAX_OUTLINE_NODES = 2000
 const MAX_PROMPT_CHARS = 100000
 
-/** 匹配「D2：采购目标」类台账编号（须在标题开头；非 CPDA 的 Do；非正文里随便一个 D） */
-export const D_REGISTRY_RE = /^(D\d+)\s*[：:]\s*(.+)$/
+/** 匹配「D：采购目标」——单独字母 D + 冒号；排除 D1/D2 等编号 */
+export const D_REGISTRY_RE = /^(D)(?!\d)\s*[：:]\s*(.+)$/i
 
 /** 从节点标题识别 SOP：去掉首尾空白与项目符号后再匹配 */
 export function matchDRegistryTitle(text) {
@@ -21,24 +21,23 @@ export function matchDRegistryTitle(text) {
     .replace(/\s*】$/, '')
   const m = trimmed.match(D_REGISTRY_RE)
   if (!m) return null
-  const id = m[1].toUpperCase()
   const title = cleanTitle(m[2])
-  if (!id || !title) return null
-  return { id, title, raw: trimmed }
+  if (!title) return null
+  return { id: 'D', title, raw: trimmed }
 }
 
-export const SOP_REGISTRY_SYSTEM = `你是良策 SOP 台账助手。任务：从用户给出的思维导图/XMind 大纲或粘贴文本中，识别「D序号：标题」条目，整理成可管理的 SOP 清单，并补全台账字段与可选的 C/P 骨架。
+export const SOP_REGISTRY_SYSTEM = `你是良策 SOP 台账助手。任务：从用户给出的思维导图/XMind 大纲或粘贴文本中，识别「D：标题」条目，整理成可管理的 SOP 清单，并补全台账字段与可选的 C/P 骨架。
 
 【编号语义 — 必须遵守】
-- 「D1：…」「D2：采购目标」中的 D+数字 = SOP 台账编号（Registry ID）。
-- 这与执行协议 CPDA 中的「D = Do（用户待办指令）」不是同一含义。台账编号不要写成待办，也不要改写成「待办」节点。
-- CPDA 仍约定：SOP 业务目标下必须有 C（检查/验收）与 P（计划/步骤）；用户真正派活时才产生待办（Do）。
+- 台账 SOP 标题格式为单独字母「D：业务标题」（如「D：采购目标」「D: 招聘」）。
+- 「D1：…」「D2：…」是步骤/子项编号，不是台账 SOP，必须忽略。
+- 与 CPDA 一致：D = Do；不要把 D1/D2 当成台账编号。
 
 【抽取规则】
-1. 匹配行或节点标题：/^D\\d+\\s*[：:]/（全角/半角冒号均可）。
-2. 编号取 D 后数字前缀（如 D2）；标题取冒号后全文并 trim；忽略尾部纯装饰符号。
-3. 同一编号多次出现：合并为一条，保留最完整标题与路径；冲突字段列入 conflicts。
-4. 非 D序号 行可用作上下文（父路径=来源线索，子节点=步骤/交付候选），但不得把普通节点强行编号成 D*。
+1. 匹配行或节点标题：/^D(?!\\d)\\s*[：:]/（全角/半角冒号均可；D 后不得紧跟数字）。
+2. 编号固定为「D」；标题取冒号后全文并 trim；忽略尾部纯装饰符号。
+3. 同一标题多次出现：合并为一条，保留最完整路径；冲突字段列入 conflicts。
+4. 「D1：」「D2：」及普通节点只可作上下文，不得收入 sops。
 
 【台账字段】
 对每条 SOP 输出：
@@ -49,7 +48,7 @@ export const SOP_REGISTRY_SYSTEM = `你是良策 SOP 台账助手。任务：从
 - cpda：为目标名生成简洁 C（2～5 条可验收叶子）与 P（3～8 条可执行步骤）。若原文已有「C/检查/目标」「P/计划」子树，优先照抄并整理，禁止与原文矛盾的臆造。
 
 【禁止】
-- 禁止把台账 D编号 与 CPDA 的 Do 混用。
+- 禁止把「D1/D2」当成台账 SOP。
 - 禁止编造不存在的运行记录、文件路径、负责人、频率。
 - 禁止输出名为「SOP」的索引空壳当业务目标；业务目标用冒号后的标题（如「采购目标」）。
 - 禁止只做散文总结；必须给出可解析 JSON（可附简短说明，但 JSON 优先）。
@@ -58,7 +57,7 @@ export const SOP_REGISTRY_SYSTEM = `你是良策 SOP 台账助手。任务：从
 只输出一个 JSON 对象，字段：sops[]、conflicts[]、notes。不要 Markdown 围栏外的长文。
 JSON 中每条 sop 形状：
 {
-  "id": "D2",
+  "id": "D",
   "title": "采购目标",
   "source": { "type": "xmind|room|paste", "ref": "...", "path": "..." },
   "frequency": { "label": "每周|按需|未知", "cron_hint": null },
@@ -84,8 +83,8 @@ function cleanTitle(title) {
 }
 
 /**
- * 本地确定性抽取「D序号：标题」（不依赖 AI）
- * 同一编号多条全部保留，不按编号合并覆盖
+ * 本地确定性抽取「D：标题」（不依赖 AI）
+ * 同一标题多条全部保留，不按编号合并覆盖
  */
 export function parseDRegistryEntries(rawText, meta = {}) {
   const text = String(rawText || '')
@@ -295,7 +294,7 @@ export function buildSopRegistryUserPrompt({
     body = body.slice(0, MAX_PROMPT_CHARS) + '\n…(内容过长已截断)'
   }
   return [
-    '请从下列文本抽取全部「D序号：标题」SOP，并补全台账 JSON。',
+    '请从下列文本抽取全部「D：标题」SOP（排除 D1/D2），并补全台账 JSON。',
     '',
     '## 来源说明',
     `- type: ${sourceType}`,
@@ -459,8 +458,8 @@ function matchToRegistrySop(item, roomKey) {
 }
 
 /**
- * 从当前房间底层节点列出全部「D序号：标题」（不依赖画布展开）
- * 每个节点一条，编号相同也不合并覆盖
+ * 从当前房间底层节点列出全部「D：标题」（不依赖画布展开）
+ * 每个节点一条；排除 D1/D2 编号标题
  */
 export async function listRoomDRegistrySops(roomKey) {
   const key = String(roomKey || '').trim()
@@ -497,12 +496,12 @@ export async function listRoomDRegistrySops(roomKey) {
     console.warn('[sopRegistry] format=nodes failed, try search', err)
   }
 
-  // 兜底：按冒号检索候选，再用「标题开头 D数字：」严格过滤（禁止单字母 D 全文检索）
+  // 兜底：检索「D：/D:」候选，再用「单独 D：」严格过滤（禁止 D1/D2）
   if (!list.length) {
     try {
       const seenUid = new Set()
       const merged = []
-      for (const q of ['：', 'D1：', 'D2：']) {
+      for (const q of ['D：', 'D:', 'D ：', 'D :']) {
         const res = await searchFileAll(key, q)
         ;((res && res.matches) || []).forEach(item => {
           const uid = item && item.uid
@@ -587,7 +586,7 @@ function normalizeSopItem(item) {
       title = matched.title
     }
   }
-  if (!id || !/^D\d+$/.test(id)) return null
+  if (!id || id !== 'D') return null
   if (!title) title = id
 
   const freq = item.frequency || {}
