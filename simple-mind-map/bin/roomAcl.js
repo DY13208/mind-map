@@ -441,15 +441,16 @@ async function searchUsers(db, q, limit = 20, corpId = '') {
   const safeLimit = Math.min(50, Math.max(1, Number(limit) || 20))
   if (!query) return []
   try {
-    const params = ['%' + query.replace(/[%_\\]/g, ch => '\\' + ch) + '%', safeLimit]
-    const corpFilter = String(corpId || '').trim()
-      ? ' and corp_id = $3'
-      : ''
-    if (corpFilter) params.push(corpFilter.slice(0, 255))
+    const pattern =
+      '%' + query.replace(/[%_\\]/g, ch => '\\' + ch) + '%'
+    const params = [pattern, safeLimit]
+    const corp = String(corpId || '').trim().slice(0, 255)
+    const corpFilter = corp ? ' and corp_id = $3' : ''
+    if (corp) params.push(corp)
     const res = await db.query(
       `select user_id, wecom_userid, name, avatar
        from wecom_users
-       where (name ilike $1 or user_id ilike $1 or wecom_userid ilike $1)${corpFilter}
+       where (name ilike $1 escape '\\' or user_id ilike $1 escape '\\' or wecom_userid ilike $1 escape '\\')${corpFilter}
        order by last_login_at desc
        limit $2`,
       params
