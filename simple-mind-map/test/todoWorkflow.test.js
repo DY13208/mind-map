@@ -180,4 +180,28 @@ testRejectsChangedSop()
 testSopBoundaryAndDuplicateTitles()
 testSopImprovementRequiresConfirmation()
 
+function testCreateTodoUnderPending() {
+  const obj = fixture()
+  const created = mindDoc.createTodo(obj, {
+    text: 'AI发起通知：请确认排产',
+    assignee: '陈华俊',
+    block: true,
+    sop_id: 'D1',
+    children: [{ text: '详情：本周排产表' }]
+  })
+  assert.ok(created.task_uid)
+  assert.strictEqual(created.block, true)
+  assert.ok(created.obj[created.task_uid])
+  assert.ok(
+    created.obj.pending.children.includes(created.task_uid),
+    'task should be under pending'
+  )
+  assert.strictEqual(
+    created.obj[created.task_uid].data.text,
+    'AI发起通知：请确认排产'
+  )
+}
+
+testCreateTodoUnderPending()
+
 console.log('todo workflow tests passed')

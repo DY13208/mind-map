@@ -9,8 +9,23 @@ import {
 const MAX_OUTLINE_NODES = 2000
 const MAX_PROMPT_CHARS = 100000
 
-/** 匹配「D2：采购目标」类台账编号（非 CPDA 的 Do） */
-export const D_REGISTRY_RE = /(D\d+)\s*[：:]\s*(.+)/
+/** 匹配「D2：采购目标」类台账编号（须在标题开头；非 CPDA 的 Do；非正文里随便一个 D） */
+export const D_REGISTRY_RE = /^(D\d+)\s*[：:]\s*(.+)$/
+
+/** 从节点标题识别 SOP：去掉首尾空白与项目符号后再匹配 */
+export function matchDRegistryTitle(text) {
+  const trimmed = String(text || '')
+    .trim()
+    .replace(/^[-*•●]\s*/, '')
+    .replace(/^【\s*/, '')
+    .replace(/\s*】$/, '')
+  const m = trimmed.match(D_REGISTRY_RE)
+  if (!m) return null
+  const id = m[1].toUpperCase()
+  const title = cleanTitle(m[2])
+  if (!id || !title) return null
+  return { id, title, raw: trimmed }
+}
 
 export const SOP_REGISTRY_SYSTEM = `你是良策 SOP 台账助手。任务：从用户给出的思维导图/XMind 大纲或粘贴文本中，识别「D序号：标题」条目，整理成可管理的 SOP 清单，并补全台账字段与可选的 C/P 骨架。
 
@@ -79,11 +94,9 @@ export function parseDRegistryEntries(rawText, meta = {}) {
   const seenKeys = new Set()
 
   lines.forEach((line, index) => {
-    const trimmed = line.trim().replace(/^[-*•]\s*/, '')
-    const m = trimmed.match(D_REGISTRY_RE)
-    if (!m) return
-    const id = m[1].toUpperCase()
-    const title = cleanTitle(m[2])
+    const matched = matchDRegistryTitle(line.trim().replace(/^[-*•]\s*/, ''))
+    if (!matched) return
+    const { id, title } = matched
     if (!title) return
 
     const pathHint = inferPathFromIndent(lines, index)
@@ -152,7 +165,7 @@ function collectNearbyContext(lines, index) {
     const line = lines[i]
     if (!line || !line.trim()) continue
     const indent = (line.match(/^(\s*)/) || ['', ''])[1].length
-    if (indent <= baseIndent && D_REGISTRY_RE.test(line.trim().replace(/^[-*•]\s*/, ''))) {
+    if (indent <= baseIndent && matchDRegistryTitle(line.trim().replace(/^[-*•]\s*/, ''))) {
       break
     }
     if (indent <= baseIndent && i > index + 1) break
@@ -406,10 +419,9 @@ function pathToString(path) {
 
 function matchToRegistrySop(item, roomKey) {
   const raw = stripHtmlLocal((item && item.text) || '')
-  const m = raw.match(D_REGISTRY_RE)
-  if (!m) return null
-  const id = m[1].toUpperCase()
-  const title = cleanTitle(m[2])
+  const matched = matchDRegistryTitle(raw)
+  if (!matched) return null
+  const { id, title } = matched
   if (!title) return null
   const note = item.note ? String(item.note) : ''
   const noteClean = stripLedgerBlocksFromNote(note)
@@ -485,15 +497,25 @@ export async function listRoomDRegistrySops(roomKey) {
     console.warn('[sopRegistry] format=nodes failed, try search', err)
   }
 
-  // 兜底：房间检索含 D 的节点再过滤
+  // 兜底：按冒号检索候选，再用「标题开头 D数字：」严格过滤（禁止单字母 D 全文检索）
   if (!list.length) {
     try {
-      const res = await searchFileAll(key, 'D')
+      const seenUid = new Set()
+      const merged = []
+      for (const q of ['：', 'D1：', 'D2：']) {
+        const res = await searchFileAll(key, q)
+        ;((res && res.matches) || []).forEach(item => {
+          const uid = item && item.uid
+          if (uid && seenUid.has(uid)) return
+          if (uid) seenUid.add(uid)
+          merged.push(item)
+        })
+      }
       source = 'search'
       totalScanned = 0
-      ingest(res && res.matches)
+      ingest(merged)
     } catch (err) {
-      console.warn('[sopRegistry] search D failed', err)
+      console.warn('[sopRegistry] search D-registry failed', err)
     }
   }
 
@@ -559,10 +581,10 @@ function normalizeSopItem(item) {
   let id = String(item.id || '').trim().toUpperCase()
   let title = cleanTitle(item.title || '')
   if (!id && item.title) {
-    const m = String(item.title).match(D_REGISTRY_RE)
-    if (m) {
-      id = m[1].toUpperCase()
-      title = cleanTitle(m[2])
+    const matched = matchDRegistryTitle(item.title)
+    if (matched) {
+      id = matched.id
+      title = matched.title
     }
   }
   if (!id || !/^D\d+$/.test(id)) return null
@@ -791,11 +813,11 @@ export async function ensureSopCpdaInRoom(roomKey, sop) {
 
   const existingGoal = findFlatByText(nodes, t => {
     if (t === goalLabel || t === sop.title) return true
-    const m = t.match(D_REGISTRY_RE)
+    const matched = matchDRegistryTitle(t)
     return !!(
-      m &&
-      m[1].toUpperCase() === sop.id &&
-      cleanTitle(m[2]) === cleanTitle(sop.title)
+      matched &&
+      matched.id === sop.id &&
+      matched.title === cleanTitle(sop.title)
     )
   })
   if (existingGoal) {
@@ -931,11 +953,11 @@ export function applySopCpdaToMindMap(mindMap, sop) {
     findChildByTitle(
       sopRoot,
       t => {
-        const m = t.match(D_REGISTRY_RE)
+        const matched = matchDRegistryTitle(t)
         return !!(
-          m &&
-          m[1].toUpperCase() === sop.id &&
-          cleanTitle(m[2]) === cleanTitle(sop.title)
+          matched &&
+          matched.id === sop.id &&
+          matched.title === cleanTitle(sop.title)
         )
       }
     ) ||

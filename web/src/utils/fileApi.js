@@ -400,7 +400,7 @@ export function getFileOutline(roomKey, maxNodes = 5000) {
   )
 }
 
-/** 扁平化全部节点（底层 room 数据，不依赖画布展开�?*/
+/** 扁平化全部节点（底层 room 数据，不依赖画布展开） */
 export function getFileFlatNodes(roomKey) {
   return request(
     `/api/files/${encodeURIComponent(roomKey)}?format=nodes`
@@ -654,6 +654,21 @@ export function artifactLocalUrl(filePath, { download = false, name = '' } = {})
   if (base) params.set('name', base)
   if (download) params.set('download', '1')
   return `${apiBase()}/api/artifacts/local?${params.toString()}`
+}
+
+/** 列出房间 CPDA 待办树 */
+export function listRoomTodos(roomKey, { includeCompleted = false } = {}) {
+  const q = includeCompleted ? '?include_completed=true' : ''
+  return request(`/api/files/${encodeURIComponent(roomKey)}/todos${q}`)
+}
+
+/** 在「待办」下新建一条任务 */
+export function createRoomTodo(roomKey, body = {}) {
+  return request(`/api/files/${encodeURIComponent(roomKey)}/todos`, {
+    method: 'POST',
+    headers: operationHeaders(body),
+    body: JSON.stringify({ ...(body || {}), confirm_sop_change: true })
+  })
 }
 
 export { request as apiRequest }
