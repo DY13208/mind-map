@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "generatedAt": "2026-09-07T16:55:00+08:00",
-  "title": "Design System: 依然中台",
+  "title": "Design System: 良策",
   "extensions": {
     "colorMeta": {
       "primary": { "role": "primary", "displayName": "深松绿", "canonical": "#087854", "tonalRamp": ["#07251b", "#08402e", "#075e42", "#087854", "#2d9675", "#67b89c", "#a9d8c6", "#e8f4ef"] },

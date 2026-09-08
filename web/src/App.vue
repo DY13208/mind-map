@@ -5,7 +5,7 @@
     </div>
     <div class="authScreen" v-else-if="authFailure">
       <div class="authCard authCard--compact">
-        <h1 class="authBrand">依然中台</h1>
+        <h1 class="authBrand">良策</h1>
         <p class="authFailureText">{{ authFailure }}</p>
         <p class="authFailureCode" v-if="authFailureCode">{{ authFailureCode }}</p>
         <button
@@ -25,7 +25,7 @@
         <div class="authIntro">
           <div class="authBrandBlock">
             <div class="authBrandMark">依</div>
-            <h1 class="authBrand">依然中台</h1>
+            <h1 class="authBrand">良策</h1>
           </div>
           <p class="authSubtitle">企业微信扫码登录</p>
           <div class="authError" v-if="authErrorMessage">{{ authErrorMessage }}</div>

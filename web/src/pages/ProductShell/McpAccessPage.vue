@@ -3,7 +3,7 @@
     <div class="productHeader">
       <div>
         <h1>MCP 接入</h1>
-        <p>复制个人配置，让支持 MCP 的 AI 客户端连接依然中台</p>
+        <p>复制个人配置，让支持 MCP 的 AI 客户端连接良策</p>
       </div>
     </div>
 
