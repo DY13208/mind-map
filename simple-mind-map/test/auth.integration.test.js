@@ -120,8 +120,7 @@ async function main() {
         res.end(
           JSON.stringify({
             errcode: 60020,
-            errmsg:
-              'not allow to access from your ip, from ip: 203.0.113.8'
+            errmsg: 'not allow to access from your ip, from ip: 203.0.113.8'
           })
         )
         return
@@ -208,6 +207,9 @@ async function main() {
       devBypassAvailable: true
     })
 
+    response = await request('/api/mcp-config')
+    assert.strictEqual(response.status, 401)
+
     response = await request('/api/auth/dev-login', {
       method: 'POST',
       headers: {
@@ -239,6 +241,20 @@ async function main() {
     assert.strictEqual(devMe.authenticated, true)
     assert.strictEqual(devMe.user.name, '集成测试开发者')
 
+    response = await request('/api/mcp-config')
+    assert.strictEqual(response.status, 200)
+    const mcpConfig = await response.json()
+    assert.match(mcpConfig.token, /^mmcp_v1\./)
+    const { verifyMcpUserToken } = require('../bin/mcpUserToken')
+    assert.deepStrictEqual(
+      verifyMcpUserToken(
+        mcpConfig.token,
+        'integration-test-mcp-token-at-least-32-characters'
+      ),
+      { userId: 'dev-local' }
+    )
+    assert.strictEqual(response.headers.get('cache-control'), 'no-store')
+
     response = await request('/api/auth/logout', {
       method: 'POST',
       headers: { Origin: appOrigin }
@@ -261,10 +277,7 @@ async function main() {
     const qrChallenge = await response.json()
     assert.strictEqual(qrChallenge.expiresIn, 600)
     const embeddedLoginLocation = new URL(qrChallenge.loginUrl)
-    assert.strictEqual(
-      embeddedLoginLocation.pathname,
-      '/wwopen/sso/qrConnect'
-    )
+    assert.strictEqual(embeddedLoginLocation.pathname, '/wwopen/sso/qrConnect')
     assert.strictEqual(
       embeddedLoginLocation.searchParams.get('login_type'),
       'jssdk'
@@ -412,7 +425,10 @@ async function main() {
       })
     })
     assert.strictEqual(response.status, 200)
-    assert.strictEqual((await request('/api/auth/me').then(r => r.json())).authenticated, true)
+    assert.strictEqual(
+      (await request('/api/auth/me').then(r => r.json())).authenticated,
+      true
+    )
 
     // 子资源（<img>、<iframe> 等）发起的 GET 退出属于伪造请求，必须拒绝。
     for (const dest of ['image', 'script', 'iframe', 'empty']) {
@@ -431,7 +447,10 @@ async function main() {
     })
     assert.strictEqual(response.status, 302)
     assert.strictEqual(response.headers.get('location'), `${appOrigin}/files`)
-    assert.strictEqual((await request('/api/auth/me').then(r => r.json())).authenticated, false)
+    assert.strictEqual(
+      (await request('/api/auth/me').then(r => r.json())).authenticated,
+      false
+    )
 
     response = await request('/api/auth/dev-login', {
       method: 'POST',

@@ -45,6 +45,15 @@
         <router-link to="/sop" title="SOP台账" aria-label="SOP台账"
           ><i class="el-icon-notebook-2"></i>SOP台账</router-link
         >
+        <p class="navLabel navLabel--space">工具</p>
+        <router-link
+          to="/mcp-access"
+          title="获取 MCP 配置"
+          aria-label="获取 MCP 配置"
+        >
+          <i class="el-icon-connection" aria-hidden="true"></i>
+          <span>MCP 接入</span>
+        </router-link>
       </nav>
       <div class="sidebarFooter" v-if="profile">
         <div class="accountInfo" :title="`${profile.name}（${profile.id}）`">
@@ -249,9 +258,13 @@ export default {
     gap: 11px;
     padding: 0 12px;
     border-radius: 8px;
-      color: var(--ui-text-secondary);
+    color: var(--ui-text-secondary);
     text-decoration: none;
     font-size: 14px;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
     &:hover {
       background: var(--ui-surface-muted);
       color: var(--ui-primary);

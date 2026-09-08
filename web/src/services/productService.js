@@ -1,7 +1,9 @@
 import { getCurrentUser } from '../utils/auth'
+import { productRequest } from './productHttp'
 
 export default {
   backendStatus: 'REAL',
+  getMcpConfig: () => productRequest('/api/mcp-config'),
   getProfile: async () => {
     const user = getCurrentUser()
     if (!user || !user.id) {

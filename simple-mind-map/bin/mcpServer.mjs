@@ -7,6 +7,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
+import mcpUserToken from './mcpUserToken.js'
+
+const { bearerToken, verifyMcpUserToken } = mcpUserToken
 
 const API = (process.env.MIND_MAP_API || 'http://127.0.0.1:1234').replace(
   /\/$/,
@@ -29,13 +32,17 @@ function fail(err) {
   }
 }
 
-async function api(path, options = {}) {
-  const { timeoutMs = 25000, headers, ...rest } = options
+async function apiRequest(path, options = {}) {
+  const { timeoutMs = 25000, headers, authorization, ...rest } = options
   const res = await fetch(`${API}${path}`, {
     ...rest,
     headers: {
       'Content-Type': 'application/json',
-      ...(MCP_TOKEN ? { Authorization: `Bearer ${MCP_TOKEN}` } : {}),
+      ...(authorization
+        ? { Authorization: authorization }
+        : MCP_TOKEN
+        ? { Authorization: `Bearer ${MCP_TOKEN}` }
+        : {}),
       ...(headers || {})
     },
     signal: AbortSignal.timeout(timeoutMs)
@@ -47,7 +54,9 @@ async function api(path, options = {}) {
   return data
 }
 
-function createServer() {
+function createServer(authorization) {
+  const api = (path, options = {}) =>
+    apiRequest(path, { ...options, authorization })
   const server = new McpServer(
     {
       name: 'mind-map',
@@ -499,9 +508,10 @@ function createServer() {
 }
 
 function authorized(req) {
-  if (!MCP_TOKEN) return true
+  if (!MCP_TOKEN) return ''
   const header = String(req.headers.authorization || '')
-  return header === `Bearer ${MCP_TOKEN}`
+  if (header === `Bearer ${MCP_TOKEN}`) return header
+  return verifyMcpUserToken(bearerToken(header), MCP_TOKEN) ? header : null
 }
 
 function setCors(res) {
@@ -559,7 +569,8 @@ async function startHttp() {
       return
     }
 
-    if (!authorized(req)) {
+    const authorization = authorized(req)
+    if (authorization === null) {
       res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' })
       res.end(JSON.stringify({ error: 'unauthorized' }))
       return
@@ -580,7 +591,7 @@ async function startHttp() {
           transport.onclose = () => {
             if (transport.sessionId) transports.delete(transport.sessionId)
           }
-          const server = createServer()
+          const server = createServer(authorization)
           await server.connect(transport)
         }
         if (!transport) {

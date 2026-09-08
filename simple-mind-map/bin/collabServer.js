@@ -16,7 +16,11 @@ const {
   getPool,
   operationEvents
 } = require('./storage')
-const { createEventBus, createPostgresBus, setActiveEventBus } = require('./eventBus')
+const {
+  createEventBus,
+  createPostgresBus,
+  setActiveEventBus
+} = require('./eventBus')
 const { startOutboxPublisher } = require('./outbox')
 const {
   initAuth,
@@ -29,14 +33,44 @@ const {
   isAllowedOrigin
 } = require('./auth')
 const roomAcl = require('./roomAcl')
+const { issueMcpUserToken } = require('./mcpUserToken')
 const { setWsConnections, recordBroadcast } = require('./collabMetrics')
-const { attachCollabV2, shouldHandleUpgrade } = require('./collabV2/socketServer')
+const {
+  attachCollabV2,
+  shouldHandleUpgrade
+} = require('./collabV2/socketServer')
 const { isCollabV2Enabled } = require('./collabV2/flag')
 
 const host = process.env.HOST || '0.0.0.0'
 const port = Number(process.env.PORT || 1234)
 
 let openSockets = 0
+
+function handleMcpConfigApi(request, response, pathname) {
+  if (pathname !== '/api/mcp-config' || request.method !== 'GET') return false
+  const user = request.authUser
+  const secret = String(process.env.MCP_TOKEN || '').trim()
+  const allowed = user && user.id && !user.service
+  const token = allowed && secret ? issueMcpUserToken(user.id, secret) : ''
+  const status = token ? 200 : allowed ? 503 : 403
+  response.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store'
+  })
+  response.end(
+    JSON.stringify(
+      token
+        ? { token }
+        : allowed
+        ? {
+            error: 'MCP 服务密钥尚未配置',
+            code: 'mcp_token_missing'
+          }
+        : { error: '当前身份不能领取用户 MCP 配置', code: 'forbidden' }
+    )
+  )
+  return true
+}
 
 function trackSocket(conn) {
   openSockets += 1
@@ -63,6 +97,7 @@ const server = http.createServer(async (request, response) => {
       const authenticated = await requireAuthenticatedRequest(request, response)
       if (!authenticated) return
     }
+    if (handleMcpConfigApi(request, response, pathname)) return
     const handled = await handleApi(request, response)
     if (handled) return
   } catch (err) {
@@ -92,76 +127,77 @@ const wss = v2RuntimeOnly
       maxPayload: 120 * 1024 * 1024
     })
 
-if (wss) wss.on('connection', (conn, req) => {
-  trackSocket(conn)
-  let docName
-  try {
-    const raw = (req.url || '/').slice(1).split('?')[0]
-    docName = safeRoomKey(decodeURIComponent(raw || 'default'))
-    if (isDeletedRoom(docName)) throw new Error('room deleted')
-  } catch (err) {
-    conn.close(1008, 'invalid room name')
-    return
-  }
-  const baseRoom = roomAcl.presenceDocRoomKey(docName)
-  const wsAction = String(docName).endsWith('__presence') ? 'view' : 'edit'
-  const finishSetup = () => {
-    if (docs.has(docName) || String(docName).endsWith('__presence')) {
-      setupWSConnection(conn, req, { gc: true, docName })
-      return true
-    }
-    return false
-  }
-  const rejectForbidden = err => {
-    const code = err && err.statusCode === 404 ? 1008 : 1008
+if (wss)
+  wss.on('connection', (conn, req) => {
+    trackSocket(conn)
+    let docName
     try {
-      conn.close(code, (err && err.code) || 'forbidden')
-    } catch (e) {
-      // ignore
-    }
-  }
-  const authorizeThen = next => {
-    if (!isAuthEnabled()) {
-      next()
+      const raw = (req.url || '/').slice(1).split('?')[0]
+      docName = safeRoomKey(decodeURIComponent(raw || 'default'))
+      if (isDeletedRoom(docName)) throw new Error('room deleted')
+    } catch (err) {
+      conn.close(1008, 'invalid room name')
       return
     }
-    roomAcl
-      .assertRoomAccess(getPool(), req, baseRoom, wsAction)
-      .then(() => next())
-      .catch(rejectForbidden)
-  }
-  authorizeThen(() => {
-    if (finishSetup()) return
-    const socket = conn._socket
-    if (socket && typeof socket.pause === 'function') socket.pause()
-    const resume = () => {
-      if (socket && typeof socket.resume === 'function') socket.resume()
-    }
-    preloadRoom(docName)
-      .then(async payload => {
-        if (conn.readyState !== WebSocket.OPEN) return
-        if (!payload || payload.type === 'empty') {
-          const row = await getRoom(docName)
-          if (row) {
-            resume()
-            conn.close(1011, 'saved map missing content')
-            return
-          }
-        }
+    const baseRoom = roomAcl.presenceDocRoomKey(docName)
+    const wsAction = String(docName).endsWith('__presence') ? 'view' : 'edit'
+    const finishSetup = () => {
+      if (docs.has(docName) || String(docName).endsWith('__presence')) {
         setupWSConnection(conn, req, { gc: true, docName })
-        resume()
-      })
-      .catch(err => {
-        console.error('[persist] preload failed', docName, err.message)
-        resume()
-        try {
-          conn.close(1011, 'load failed')
-        } catch (e) {
-          // ignore
-        }
-      })
+        return true
+      }
+      return false
+    }
+    const rejectForbidden = err => {
+      const code = err && err.statusCode === 404 ? 1008 : 1008
+      try {
+        conn.close(code, (err && err.code) || 'forbidden')
+      } catch (e) {
+        // ignore
+      }
+    }
+    const authorizeThen = next => {
+      if (!isAuthEnabled()) {
+        next()
+        return
+      }
+      roomAcl
+        .assertRoomAccess(getPool(), req, baseRoom, wsAction)
+        .then(() => next())
+        .catch(rejectForbidden)
+    }
+    authorizeThen(() => {
+      if (finishSetup()) return
+      const socket = conn._socket
+      if (socket && typeof socket.pause === 'function') socket.pause()
+      const resume = () => {
+        if (socket && typeof socket.resume === 'function') socket.resume()
+      }
+      preloadRoom(docName)
+        .then(async payload => {
+          if (conn.readyState !== WebSocket.OPEN) return
+          if (!payload || payload.type === 'empty') {
+            const row = await getRoom(docName)
+            if (row) {
+              resume()
+              conn.close(1011, 'saved map missing content')
+              return
+            }
+          }
+          setupWSConnection(conn, req, { gc: true, docName })
+          resume()
+        })
+        .catch(err => {
+          console.error('[persist] preload failed', docName, err.message)
+          resume()
+          try {
+            conn.close(1011, 'load failed')
+          } catch (e) {
+            // ignore
+          }
+        })
+    })
   })
-})
 
 function rejectUpgrade(socket, status, message) {
   const body = String(message || 'Unauthorized')
@@ -215,7 +251,10 @@ Promise.all([initSchema(), initAuth()])
     try {
       if (typeof bus.start === 'function') await bus.start()
     } catch (err) {
-      console.error('[event-bus] start failed, falling back to postgres:', err.message)
+      console.error(
+        '[event-bus] start failed, falling back to postgres:',
+        err.message
+      )
       if (bus && bus.name === 'redis') {
         if (typeof bus.close === 'function') await bus.close().catch(() => {})
         bus = createPostgresBus(getPool())
@@ -237,7 +276,9 @@ Promise.all([initSchema(), initAuth()])
     })
     const outboxEnabled =
       !v2RuntimeOnly &&
-      !/^(0|false|off|no)$/i.test(String(process.env.COLLAB_OUTBOX_PUBLISHER || '1'))
+      !/^(0|false|off|no)$/i.test(
+        String(process.env.COLLAB_OUTBOX_PUBLISHER || '1')
+      )
     let publisher = null
     if (outboxEnabled) {
       publisher = startOutboxPublisher({ pool: getPool(), bus })
@@ -265,7 +306,9 @@ Promise.all([initSchema(), initAuth()])
       }
       console.log('Persistence: PostgreSQL rooms + COS mind-map/')
       console.log(
-        `Event bus: ${bus.name} (outbox publisher ${outboxEnabled ? 'on' : 'off'})`
+        `Event bus: ${bus.name} (outbox publisher ${
+          outboxEnabled ? 'on' : 'off'
+        })`
       )
     })
   })
