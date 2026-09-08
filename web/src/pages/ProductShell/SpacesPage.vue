@@ -3,7 +3,7 @@
     <div class="productHeader">
       <div>
         <h1>团队空间</h1>
-        <p>当前企业：{{ corpName || '企业微信企业' }} · 在企业内部协作</p>
+        <p>在企业内部创建团队、共享脑图与协作权限</p>
       </div>
       <el-button type="primary" icon="el-icon-plus" @click="createTeam"
         >新建团队</el-button

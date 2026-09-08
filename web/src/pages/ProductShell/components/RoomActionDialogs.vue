@@ -11,6 +11,11 @@
       :folders="folders"
       @confirm="move"
     />
+    <MoveToTeamDialog
+      :visible.sync="moveToTeamVisible"
+      :room="room"
+      @confirm="moveToTeam"
+    />
     <ShareRoomDialog
       :visible.sync="shareVisible"
       :room="room"
@@ -26,8 +31,10 @@
 import { userMessageFromError } from '@/services/apiError'
 import roomService from '@/services/roomService'
 import folderService from '@/services/folderService'
+import teamService from '@/services/teamService'
 import RenameDialog from './RenameDialog.vue'
 import MoveToFolderDialog from './MoveToFolderDialog.vue'
+import MoveToTeamDialog from './MoveToTeamDialog.vue'
 import ShareRoomDialog from './ShareRoomDialog.vue'
 import HistoryPanel from './HistoryPanel.vue'
 export default {
@@ -35,6 +42,7 @@ export default {
   components: {
     RenameDialog,
     MoveToFolderDialog,
+    MoveToTeamDialog,
     ShareRoomDialog,
     HistoryPanel
   },
@@ -43,6 +51,7 @@ export default {
     folders: [],
     renameVisible: false,
     moveVisible: false,
+    moveToTeamVisible: false,
     shareVisible: false,
     historyVisible: false,
     busy: false
@@ -64,6 +73,7 @@ export default {
           this.$message.error(userMessageFromError(error))
         }
       }
+      if (action === 'moveToTeam') this.moveToTeamVisible = true
       if (action === 'favorite')
         await this.perform(() =>
           roomService.toggleFavorite(this.roomKey(room)),
@@ -97,6 +107,12 @@ export default {
       return this.perform(
         () => roomService.moveRoom(this.roomKey(this.room), id),
         '移动成功'
+      )
+    },
+    moveToTeam(teamId) {
+      return this.perform(
+        () => teamService.assignRoom(teamId, this.roomKey(this.room)),
+        '已移入团队空间'
       )
     },
     async perform(action, message) {

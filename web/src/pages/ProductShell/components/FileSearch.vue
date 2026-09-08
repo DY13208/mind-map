@@ -4,7 +4,7 @@
     @input="$emit('input', $event)"
     clearable
     prefix-icon="el-icon-search"
-    placeholder="搜索脑图、Owner 或文件夹"
+    placeholder="搜索脑图、所有者或文件夹"
 /></template>
 <script>
 export default {

@@ -274,6 +274,8 @@ function createFileSystem(options = {}) {
       rows = rows.filter(
         row => row.role === 'editor' || row.role === 'viewer'
       )
+    } else {
+      rows = rows.filter(row => !row.team_id)
     }
     rows = await overlayUserState(rows, userId)
     rows = applySort(rows, sort, order)
@@ -309,6 +311,10 @@ function createFileSystem(options = {}) {
         params.push(opts.folderFilter)
         where += ` and r.folder_id = $${params.length}`
       }
+    }
+    // Personal file browser excludes team-owned rooms; those live under /spaces.
+    if (kind === 'files' && !opts.shared) {
+      where += ' and r.team_id is null'
     }
     let userParam = 0
     let stateParam = 0

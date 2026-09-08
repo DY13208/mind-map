@@ -74,6 +74,7 @@
           @favorite="favorite"
           @rename="renameRoom"
           @move="moveRoom"
+          @move-to-team="moveToTeam"
           @share="shareRoom"
           @history="historyRoom"
           @delete="deleteRoom"
@@ -89,6 +90,7 @@
         @favorite="favorite"
         @rename="renameRoom"
         @move="moveRoom"
+        @move-to-team="moveToTeam"
         @share="shareRoom"
         @history="historyRoom"
         @delete="deleteRoom"
@@ -127,6 +129,11 @@
       :folders="folders"
       @confirm="confirmMove"
     />
+    <MoveToTeamDialog
+      :visible.sync="moveToTeamVisible"
+      :room="activeRoom"
+      @confirm="confirmMoveToTeam"
+    />
     <ShareRoomDialog
       :visible.sync="shareVisible"
       :room="activeRoom"
@@ -149,12 +156,14 @@
 import { userMessageFromError } from '@/services/apiError'
 import roomService from '@/services/roomService'
 import folderService from '@/services/folderService'
+import teamService from '@/services/teamService'
 import EmptyState from './components/EmptyState.vue'
 import FileToolbar from './components/FileToolbar.vue'
 import FolderBreadcrumb from './components/FolderBreadcrumb.vue'
 import FolderCard from './components/FolderCard.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import MoveToFolderDialog from './components/MoveToFolderDialog.vue'
+import MoveToTeamDialog from './components/MoveToTeamDialog.vue'
 import RenameDialog from './components/RenameDialog.vue'
 import RoomCard from './components/RoomCard.vue'
 import RoomList from './components/RoomList.vue'
@@ -196,6 +205,7 @@ export default {
     FolderCard,
     HistoryPanel,
     MoveToFolderDialog,
+    MoveToTeamDialog,
     RenameDialog,
     RoomCard,
     RoomList,
@@ -220,6 +230,7 @@ export default {
       renameKind: 'room',
       renameVisible: false,
       moveVisible: false,
+      moveToTeamVisible: false,
       shareVisible: false,
       folderShareVisible: false,
       activeFolder: null,
@@ -543,6 +554,20 @@ export default {
             folderId
           ),
         '移动成功'
+      )
+    },
+    moveToTeam(room) {
+      this.activeRoom = room
+      this.moveToTeamVisible = true
+    },
+    confirmMoveToTeam(teamId) {
+      return this.perform(
+        () =>
+          teamService.assignRoom(
+            teamId,
+            this.activeRoom.roomKey || this.activeRoom.id
+          ),
+        '已移入团队空间'
       )
     },
     shareRoom(room) {
