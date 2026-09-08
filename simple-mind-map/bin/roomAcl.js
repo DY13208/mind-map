@@ -90,6 +90,9 @@ function inferRoomAcl(pathname, method) {
   if (rest === '/info' || rest.startsWith('/info')) {
     return { roomKey, action: 'view' }
   }
+  if (rest === '/card-preview' || rest.startsWith('/card-preview')) {
+    return { roomKey, action: 'view' }
+  }
   if (rest === '/favorite' || rest.startsWith('/favorite')) {
     return { roomKey, action: 'view' }
   }

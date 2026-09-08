@@ -36,6 +36,13 @@ function fileInfo(pathname) {
   return match ? decodeURIComponent(match[1]) : ''
 }
 
+function filePreview(pathname) {
+  const match = String(pathname || '').match(
+    /^\/api\/(?:files|maps|rooms)\/([^/]+)\/card-preview$/
+  )
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
 function fileFavorite(pathname) {
   const match = String(pathname || '').match(
     /^\/api\/(?:files|maps|rooms)\/([^/]+)\/favorite$/
@@ -110,6 +117,7 @@ async function handleFileSystemApi(req, res, options = {}) {
       folderItem(pathname) ||
       fileMove(pathname) ||
       fileInfo(pathname) ||
+      filePreview(pathname) ||
       fileFavorite(pathname) ||
       fileOpen(pathname) ||
       fileTrash(pathname) ||
@@ -326,6 +334,15 @@ async function handleFileSystemApi(req, res, options = {}) {
     if (infoKey && method === 'GET') {
       const file = await fs.getRoom(safeRoomKey(infoKey), { userId, bypass })
       sendJson(res, 200, { ok: true, viewingHistory: false, file })
+      return true
+    }
+    const previewKey = filePreview(pathname)
+    if (previewKey && method === 'GET') {
+      const preview = await fs.getRoomPreview(safeRoomKey(previewKey), {
+        userId,
+        bypass
+      })
+      sendJson(res, 200, { ok: true, preview })
       return true
     }
     const favKey = fileFavorite(pathname)

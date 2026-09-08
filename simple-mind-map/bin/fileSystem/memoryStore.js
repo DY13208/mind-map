@@ -395,6 +395,10 @@ function createMemoryFileStore(seed = {}) {
         if (item.startsWith(key + '\0')) userState.delete(item)
       })
       return true
+    },
+    async getPreviewNodes(roomKey) {
+      bump()
+      return cloneJson(nodes.get(String(roomKey || '')) || {})
     }
   }
 }
