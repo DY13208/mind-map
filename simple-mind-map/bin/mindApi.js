@@ -1893,27 +1893,80 @@ async function handleApi(req, res) {
   const todosMatch = pathname.match(/^\/api\/files\/([^/]+)\/todos$/)
   if (todosMatch) {
     const roomKey = decodeURIComponent(todosMatch[1])
-    const loaded = await loadMap(roomKey)
-    if (!loaded) {
-      sendJson(res, 404, { error: 'not found' })
-      return true
-    }
-    try {
-      if (req.method === 'GET') {
+    if (req.method === 'GET') {
+      const loaded = await loadMap(roomKey)
+      if (!loaded) {
+        sendJson(res, 404, { error: 'not found' })
+        return true
+      }
+      try {
         const result = mindDoc.listTodos(loaded.obj)
         const includeCompleted =
           url.searchParams.get('include_completed') === 'true'
         sendJson(res, 200, {
           room_key: roomKey,
+          container_uid: result.container_uid,
+          pending_uid: result.pending_uid,
+          completed_uid: result.completed_uid,
           pending: result.pending,
           completed: includeCompleted ? result.completed : undefined,
           pending_count: result.pending.length,
           completed_count: result.completed.length
         })
         return true
+      } catch (err) {
+        sendJson(res, 400, { error: err.message || 'bad request' })
+        return true
       }
-    } catch (err) {
-      sendJson(res, 400, { error: err.message || 'bad request' })
+    }
+    if (req.method === 'POST') {
+      const body = await readBody(req)
+      try {
+        const result = await withRoomMutation(roomKey, async () => {
+          const snapshot = await getRoomSnapshot(roomKey)
+          const live = getLiveObject(roomKey)
+          const base =
+            live && Object.keys(live).length
+              ? live
+              : (snapshot && snapshot.nodes) || {}
+          if (!snapshot && !Object.keys(base).length) throw new Error('not found')
+          const created = mindDoc.createTodo(base, body || {})
+          const command = normalizeCommand(req, roomKey, body, 'batch.apply', {
+            source: 'todo.create',
+            resnapshot: true
+          })
+          const committed = await executeSnapshotOperation(
+            req,
+            roomKey,
+            command,
+            created.obj,
+            {
+              source: 'todo.create',
+              eventType: 'batch.applied',
+              eventPayload: { taskUid: created.task_uid },
+              affectedUids: [created.task_uid].filter(Boolean),
+              result: { uid: created.task_uid }
+            }
+          )
+          return {
+            task_uid: created.task_uid,
+            pending_uid: created.pending_uid,
+            container_uid: created.container_uid,
+            block: created.block,
+            task: created.task,
+            version: Number(
+              (committed && committed.version) ||
+                (snapshot && snapshot.version) ||
+                0
+            )
+          }
+        })
+        sendJson(res, 200, { room_key: roomKey, ...result })
+      } catch (err) {
+        sendJson(res, err.message === 'not found' ? 404 : 400, {
+          error: err.message || 'bad request'
+        })
+      }
       return true
     }
   }

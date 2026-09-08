@@ -148,7 +148,9 @@ export function normalizeDeliverable(item) {
     uri_or_path: uri || name,
     kind,
     at: String(item.at || '').trim(),
-    createdAt: item.createdAt || new Date().toISOString()
+    createdAt: item.createdAt || new Date().toISOString(),
+    sop_id: String(item.sop_id || item.sopId || '').trim(),
+    sop_uid: String(item.sop_uid || item.sopUid || '').trim()
   }
 }
 
