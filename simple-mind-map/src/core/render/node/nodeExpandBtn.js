@@ -1,6 +1,16 @@
 import btnsSvg from '../../../svg/btns'
-import { SVG, Circle, G, Text } from '@svgdotjs/svg.js'
+import { SVG, G, Rect, Text } from '@svgdotjs/svg.js'
 import { isUndef } from '../../../utils'
+
+// Keep the count compact vertically while allowing larger values to stay legible.
+const getCountBadgeSize = (count, expandBtnSize) => {
+  const height = Math.max(14, Math.round(expandBtnSize * 0.75))
+  const width = Math.max(
+    height + 2,
+    String(count).length * 7 + 8
+  )
+  return { width, height }
+}
 
 // 创建展开收起按钮的内容节点
 function createExpandNodeContent() {
@@ -35,7 +45,8 @@ function createExpandNodeContent() {
   )
   this._closeExpandNode.x(0).y(-expandBtnSize / 2)
   // 填充节点
-  this._fillExpandNode = new Circle().size(expandBtnSize)
+  this._fillExpandNode = new Rect().size(expandBtnSize, expandBtnSize)
+  this._fillExpandNode.radius(expandBtnSize / 2)
   this._fillExpandNode.x(0).y(-expandBtnSize / 2)
 
   // 设置样式
@@ -89,9 +100,20 @@ function updateExpandBtnNode() {
             count = res
           }
         }
+        const { width, height } = getCountBadgeSize(count, this.expandBtnSize)
+        this._fillExpandNode
+          .size(width, height)
+          .radius(height / 2)
+          .x((this.expandBtnSize - width) / 2)
+          .y(-height / 2)
         node.text(String(count))
       } else {
         this._fillExpandNode.stroke('none')
+        this._fillExpandNode
+          .size(this.expandBtnSize, this.expandBtnSize)
+          .radius(this.expandBtnSize / 2)
+          .x(0)
+          .y(-this.expandBtnSize / 2)
       }
     }
     this._expandBtn.add(this._fillExpandNode).add(node)

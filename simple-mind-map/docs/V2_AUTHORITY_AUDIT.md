@@ -11,5 +11,3 @@
 `pickAuthoritativeNodes` 对已初始化 V2 表明确阻止 JSON fallback，并记录 `v2_room_nodes_authority`。仅表未初始化且存在旧 JSON 时允许一次性 `legacy_uninitialized` 迁移。未发现“已初始化 V2 正常打开却按 `rooms.nodes` 选树”的直接证据。
 
 `collabTreeAuthority.test.js` 已随修复后 Freeze 通过，验证内存/模拟存储层面的 authority 选择与 guard；真实浏览器 F5、PG warmup race 仍需集成验证。
-
-History `room_checkpoints` / `room_versions` remains a separate version authority, never a second live tree; file organization (`rooms.folder_id` / `folders`) is not tree authority.

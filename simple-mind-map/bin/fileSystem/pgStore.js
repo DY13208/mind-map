@@ -197,6 +197,41 @@ function createPgFileStore(pool) {
       )
       return res.rows[0] || null
     },
+    async listFolderMembers(id) {
+      queryCount += 1
+      const res = await pool.query(
+        `select fm.folder_id, fm.user_id, fm.role, fm.created_at, fm.updated_at,
+                coalesce(u.name, fm.user_id) as name, coalesce(u.avatar, '') as avatar,
+                coalesce(u.wecom_userid, fm.user_id) as wecom_userid
+         from folder_members fm left join wecom_users u on u.user_id = fm.user_id
+         where fm.folder_id = $1 order by fm.created_at asc`,
+        [id]
+      )
+      return res.rows
+    },
+    async setFolderMember(id, userId, role) {
+      queryCount += 1
+      const res = await pool.query(
+        `insert into folder_members(folder_id, user_id, role) values($1,$2,$3)
+         on conflict(folder_id, user_id) do update set role = excluded.role, updated_at = now()
+         returning *`,
+        [id, userId, role]
+      )
+      return res.rows[0]
+    },
+    async removeFolderMember(id, userId) {
+      queryCount += 1
+      await pool.query(`delete from folder_members where folder_id = $1 and user_id = $2`, [id, userId])
+      return true
+    },
+    async roomKeysInFolder(id) {
+      queryCount += 1
+      const res = await pool.query(
+        `select room_key from rooms where folder_id = $1 and deleted_at is null`,
+        [id]
+      )
+      return res.rows.map(row => row.room_key)
+    },
     async folderNameTaken(name, parentId, exceptId) {
       queryCount += 1
       const res = await pool.query(
@@ -241,6 +276,8 @@ function createPgFileStore(pool) {
       }
       const res = await pool.query(
         `select f.*,
+                (f.created_by = $1) as can_manage,
+                fm.role as folder_role,
                 (
                   select count(*)::int from rooms r
                   left join room_tombstones t on t.room_key = r.room_key
@@ -248,9 +285,11 @@ function createPgFileStore(pool) {
                     and r.deleted_at is null
                 ) as room_count
          from folders f
+         left join folder_members fm on fm.folder_id = f.id and fm.user_id = $1
          where f.deleted_at is null
            and (
              f.created_by = $1
+             or fm.user_id is not null
              or exists (
                select 1
                from rooms r2

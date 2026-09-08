@@ -57,6 +57,7 @@
     <NodeAttachment v-if="mindMap" :mindMap="mindMap"></NodeAttachment>
     <CooperateDialog :mindMap="mindMap"></CooperateDialog>
     <MapRefDialog></MapRefDialog>
+    <SubMapPreviewDialog></SubMapPreviewDialog>
     <div
       class="dragMask"
       v-if="showDragMask"
@@ -140,6 +141,8 @@ import NodeAutoExpand from './NodeAutoExpand.vue'
 import NodeAttachment from './NodeAttachment.vue'
 import CooperateDialog from './CooperateDialog.vue'
 import MapRefDialog from './MapRefDialog.vue'
+import SubMapPreviewDialog from './SubMapPreviewDialog.vue'
+import { normalizeMapRef } from '@/utils/mapRefNav'
 
 // 注册插件
 MindMap.usePlugin(MiniMap)
@@ -203,7 +206,8 @@ export default {
     NodeAutoExpand,
     NodeAttachment,
     CooperateDialog,
-    MapRefDialog
+    MapRefDialog,
+    SubMapPreviewDialog
   },
   data() {
     return {
@@ -234,10 +238,14 @@ export default {
         state.localConfig.useLeftKeySelectionRightKeyDrag,
       extraTextOnExport: state => state.extraTextOnExport,
       isDragOutlineTreeNode: state => state.isDragOutlineTreeNode,
-      enableAi: state => state.localConfig.enableAi
+      enableAi: state => state.localConfig.enableAi,
+      isDark: state => state.localConfig.isDark
     })
   },
   watch: {
+    isDark() {
+      this.syncCanvasDarkBackground()
+    },
     openNodeRichText() {
       if (this.openNodeRichText) {
         this.addRichTextPlugin()
@@ -290,6 +298,7 @@ export default {
         })
     }
     this.$bus.$on('execCommand', this.execCommand)
+    this.$bus.$on('applySubMapToNode', this.applySubMapToNode)
     this.$bus.$on('paddingChange', this.onPaddingChange)
     this.$bus.$on('export', this.export)
     this.$bus.$on('setData', this.setData)
@@ -316,6 +325,7 @@ export default {
     this.importPersistLock = false
     this.stopImportProgressPoll()
     this.$bus.$off('execCommand', this.execCommand)
+    this.$bus.$off('applySubMapToNode', this.applySubMapToNode)
     this.$bus.$off('paddingChange', this.onPaddingChange)
     this.$bus.$off('export', this.export)
     this.$bus.$off('setData', this.setData)
@@ -446,6 +456,46 @@ export default {
       if (this.enableShowLoading) {
         this.enableShowLoading = false
         hideLoading()
+      }
+      this.syncCanvasDarkBackground()
+    },
+
+    // 深色模式只改画布背景的视觉呈现，不改主题模板/自定义配置，避免基础样式失效
+    isLikelyDarkColor(color) {
+      const hex = String(color || '').trim()
+      const match = hex.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)
+      if (!match) return false
+      let value = match[1]
+      if (value.length === 3) {
+        value = value
+          .split('')
+          .map(ch => ch + ch)
+          .join('')
+      }
+      const r = parseInt(value.slice(0, 2), 16)
+      const g = parseInt(value.slice(2, 4), 16)
+      const b = parseInt(value.slice(4, 6), 16)
+      return 0.299 * r + 0.587 * g + 0.114 * b < 140
+    },
+
+    syncCanvasDarkBackground() {
+      const mindMap = this.mindMap
+      if (!mindMap || !mindMap.el) return
+      const el = mindMap.el
+      const themeConfig = mindMap.themeConfig || {}
+      if (this.isDark && !this.isLikelyDarkColor(themeConfig.backgroundColor)) {
+        el.style.backgroundColor = '#262A2E'
+        el.style.backgroundImage = 'none'
+        return
+      }
+      el.style.backgroundColor = themeConfig.backgroundColor || ''
+      if (themeConfig.backgroundImage && themeConfig.backgroundImage !== 'none') {
+        el.style.backgroundImage = `url(${themeConfig.backgroundImage})`
+        el.style.backgroundRepeat = themeConfig.backgroundRepeat || ''
+        el.style.backgroundPosition = themeConfig.backgroundPosition || ''
+        el.style.backgroundSize = themeConfig.backgroundSize || ''
+      } else {
+        el.style.backgroundImage = 'none'
       }
     },
 
@@ -595,9 +645,6 @@ export default {
             height: 30
           }
         },
-        expandBtnNumHandler: num => {
-          return num >= 100 ? '…' : num
-        },
         beforeDeleteNodeImg: () => {
           return new Promise(resolve => {
             this.$confirm(
@@ -672,6 +719,7 @@ export default {
         const fullData = this.mindMap.getData(true)
         return { ...fullData }
       }
+      this.syncCanvasDarkBackground()
     },
 
     // 加载相关插件
@@ -909,6 +957,82 @@ export default {
         this.mindMap.cooperate.ensureActiveSelection()
       }
       this.mindMap.execCommand(...args)
+    },
+
+    /** 原子写入子脑图引用 + 企业微信卡片样式 */
+    applySubMapToNode(payload) {
+      const result =
+        payload && payload.result && typeof payload.result === 'object'
+          ? payload.result
+          : { ok: false }
+      try {
+        if (!this.mindMap || !this.mindMap.renderer) {
+          result.ok = false
+          result.error = 'mindMap missing'
+          return result.ok
+        }
+        const ref = normalizeMapRef(
+          payload && (payload.mapRef || payload.ref)
+        )
+        if (!ref) {
+          result.ok = false
+          result.error = 'invalid mapRef'
+          return result.ok
+        }
+        let node = payload && payload.node
+        const uid =
+          (payload && payload.uid) ||
+          (node && node.getData && node.getData('uid')) ||
+          ''
+        if (uid && typeof this.mindMap.renderer.findNodeByUid === 'function') {
+          const live = this.mindMap.renderer.findNodeByUid(uid)
+          if (live) node = live
+        }
+        if (
+          !node &&
+          this.mindMap.renderer.activeNodeList &&
+          this.mindMap.renderer.activeNodeList[0]
+        ) {
+          node = this.mindMap.renderer.activeNodeList[0]
+        }
+        if (!node || typeof node.getData !== 'function') {
+          result.ok = false
+          result.error = 'node missing'
+          return result.ok
+        }
+        const text =
+          String(
+            (payload && payload.title) || ref.mapId || '子脑图'
+          ).trim() || '子脑图'
+        // 一次写入，避免多次 command 互相覆盖
+        this.mindMap.renderer.setNodeDataRender(node, {
+          mapRef: ref,
+          text,
+          richText: false,
+          resetRichText: true,
+          shape: 'roundedRectangle',
+          fillColor: '#F2F3F5',
+          borderColor: 'transparent',
+          borderWidth: 0,
+          color: '#1F2329',
+          fontSize: 14,
+          fontWeight: 'normal',
+          paddingX: 10,
+          paddingY: 8
+        })
+        // 再显式走 SET_NODE_MAP_REF，便于协同推送 mapRef 字段
+        this.mindMap.execCommand('SET_NODE_MAP_REF', node, ref)
+        const saved = normalizeMapRef(node.getData('mapRef'))
+        result.ok = !!saved
+        result.uid = node.getData('uid') || uid
+        if (!result.ok) result.error = 'mapRef not persisted'
+        return result.ok
+      } catch (err) {
+        console.error('[applySubMapToNode]', err)
+        result.ok = false
+        result.error = (err && err.message) || 'apply failed'
+        return result.ok
+      }
     },
 
     // 导出

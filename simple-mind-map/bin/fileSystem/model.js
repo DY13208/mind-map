@@ -12,7 +12,16 @@ function fsError(code, message, status) {
 }
 
 function normalizeTitle(title) {
-  return String(title || '').trim().slice(0, TITLE_MAX) || '未命名'
+  const plain = String(title || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, TITLE_MAX)
+  return plain || '未命名'
 }
 
 function normalizeFolderName(name) {
@@ -103,7 +112,9 @@ function publicFolder(row) {
     createdBy: row.created_by || row.createdBy || '',
     createdAt: row.created_at || row.createdAt,
     updatedAt: row.updated_at || row.updatedAt,
-    roomCount: Number(row.room_count != null ? row.room_count : row.roomCount || 0)
+    roomCount: Number(row.room_count != null ? row.room_count : row.roomCount || 0),
+    role: row.folder_role || row.role || (row.can_manage ? 'owner' : null),
+    canManage: row.can_manage != null ? !!row.can_manage : true
   }
 }
 

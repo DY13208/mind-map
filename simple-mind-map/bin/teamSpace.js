@@ -51,7 +51,8 @@ function dto(row) {
   return {
     id: row.id,
     corpId: row.corp_id,
-    corpName: row.corp_name || row.corp_id,
+    // Prefer a human corp name; never fall back to opaque corp_id in UI payloads.
+    corpName: row.corp_name || '',
     name: row.name,
     description: row.description || '',
     ownerId: row.owner_id,
@@ -337,13 +338,48 @@ async function listRooms(db, who, id) {
 }
 
 async function assignRoom(db, who, id, roomKey) {
+  const key = String(roomKey || '').trim()
+  if (!key) throw error(400, 'BAD_REQUEST', '缺少脑图标识')
   return transaction(db, async tx => {
     await getTeam(tx, who.corpId, id, who.userId)
-    const room = await tx.query(`select room_key from rooms where room_key = $1`, [roomKey])
-    if (!room.rows.length) throw error(404, 'ROOM_NOT_FOUND', '房间不存在')
-    await tx.query(`update rooms set team_id = $2, updated_at = now() where room_key = $1`, [roomKey, id])
-    const members = await tx.query(`select user_id from team_members where team_id = $1 and corp_id = $2`, [id, who.corpId])
-    for (const member of members.rows) await tx.query(`
+    const room = await tx.query(
+      `select room_key, owner_id, team_id, deleted_at from rooms where room_key = $1`,
+      [key]
+    )
+    if (!room.rows.length || room.rows[0].deleted_at) {
+      throw error(404, 'ROOM_NOT_FOUND', '脑图不存在')
+    }
+    const currentTeam = room.rows[0].team_id || null
+    if (currentTeam && currentTeam !== id) {
+      throw error(409, 'ROOM_ALREADY_IN_TEAM', '该脑图已属于其他团队')
+    }
+    if (currentTeam === id) return { roomKey: key, teamId: id }
+
+    const membership = await tx.query(
+      `select role, direct_role from room_members where room_key = $1 and user_id = $2`,
+      [key, who.userId]
+    )
+    const member = membership.rows[0]
+    const isOwner =
+      room.rows[0].owner_id === who.userId ||
+      (member &&
+        (member.direct_role === 'owner' || member.role === 'owner'))
+    if (!isOwner) {
+      throw error(403, 'FORBIDDEN', '只有脑图所有者可以将其移入团队空间')
+    }
+
+    await tx.query(
+      `update rooms set team_id = $2, updated_at = now() where room_key = $1`,
+      [key, id]
+    )
+    await tx.query(`update teams set updated_at = now() where id = $1`, [id])
+    const members = await tx.query(
+      `select user_id from team_members where team_id = $1 and corp_id = $2`,
+      [id, who.corpId]
+    )
+    for (const teamMember of members.rows) {
+      await tx.query(
+        `
       insert into room_members (room_key, user_id, role, direct_role, team_role, source, source_team_id) values ($1, $2, 'editor', null, 'editor', 'team', $3)
       on conflict (room_key, user_id) do update set
         team_role = excluded.team_role,
@@ -355,8 +391,11 @@ async function assignRoom(db, who, id, roomKey) {
         end,
         source = case when room_members.direct_role is not null then 'direct_share' else 'team' end,
         source_team_id = excluded.source_team_id,
-        updated_at = now()`, [roomKey, member.user_id, id])
-    return { roomKey, teamId: id }
+        updated_at = now()`,
+        [key, teamMember.user_id, id]
+      )
+    }
+    return { roomKey: key, teamId: id }
   })
 }
 
@@ -444,7 +483,17 @@ async function handleApi(req, res, options) {
     if (sub === 'members' && target && req.method === 'PATCH') { sendJson(res, 200, await updateMember(db, who, id, target, (await readBody(req)).role)); return true }
     if (sub === 'members' && target && req.method === 'DELETE') { sendJson(res, 200, await removeMember(db, who, id, target)); return true }
     if (sub === 'rooms' && req.method === 'GET') { const items = await listRooms(db, who, id); sendJson(res, 200, { items, list: items }); return true }
-    if (sub === 'rooms' && req.method === 'POST') { if (typeof createRoom !== 'function') throw error(501, 'TEAM_ROOM_UNAVAILABLE', '团队房间创建不可用'); sendJson(res, 201, await createRoom(req, who, id, await readBody(req))); return true }
+    if (sub === 'rooms' && req.method === 'POST') {
+      const body = await readBody(req)
+      const existingKey = String(body.roomKey || body.room_key || '').trim()
+      if (existingKey) {
+        sendJson(res, 200, await assignRoom(db, who, id, existingKey))
+        return true
+      }
+      if (typeof createRoom !== 'function') throw error(501, 'TEAM_ROOM_UNAVAILABLE', '团队房间创建不可用')
+      sendJson(res, 201, await createRoom(req, who, id, body))
+      return true
+    }
     return false
   } catch (err) {
     if (err && err.statusCode) { sendJson(res, err.statusCode, { ok: false, code: err.code || 'TEAM_ERROR', error: err.message }); return true }

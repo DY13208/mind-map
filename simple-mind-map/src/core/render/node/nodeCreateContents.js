@@ -247,9 +247,11 @@ function createRichTextNode(specifyText) {
       // 非富文本则改为富文本结构
       text = `<p>${text}</p>`
     }
-    // CRITICAL: never this.setData() here.
-    // setData → SET_NODE_DATA → addHistory() would snapshot the whole tree
-    // once per node during cold layout (O(n²) for large maps).
+    // resetRichText is render-time normalization. Going through setData here
+    // executes a command for every node and repeatedly schedules a full-tree
+    // history snapshot while a large tree is still being created (O(n^2)).
+    // Keep the normalized value on the authoritative node data; real user
+    // edits still use SET_NODE_TEXT and retain their normal history entry.
     if (!this.nodeData.data) this.nodeData.data = {}
     this.nodeData.data.text = text
   }
@@ -535,22 +537,24 @@ function createHyperlinkNode() {
 function createMapRefNode() {
   const ref = mapRefUtil.normalizeMapRef(this.getData('mapRef'))
   if (!ref) return
-  const iconSize = this.getNodeIconSize('hyperlinkIcon')
+  // 企业微信式文档图标（略大于普通链接标）
+  const iconSize = Math.max(18, this.getNodeIconSize('hyperlinkIcon') + 4)
   const node = new SVG().size(iconSize, iconSize)
   const title = ref.nodeId
-    ? `引用 ${ref.mapId} / ${ref.nodeId}`
-    : `引用 ${ref.mapId}`
+    ? `双击预览子脑图 ${ref.mapId} / ${ref.nodeId}`
+    : `双击预览子脑图 ${ref.mapId}`
   node.add(SVG(`<title>${title}</title>`))
   node.rect(iconSize, iconSize).fill({ color: 'transparent' })
   const iconNode = SVG(iconsSvg.mapRef).size(iconSize, iconSize)
-  this.style.iconNode(iconNode, '#409EFF')
   node.add(iconNode)
   node.css('cursor', 'pointer')
-  node.on('click', e => {
+  const emitOpen = e => {
     e.stopPropagation()
     e.preventDefault()
     this.mindMap.emit('map_ref_click', this, ref)
-  })
+  }
+  node.on('click', emitOpen)
+  node.on('dblclick', emitOpen)
   return {
     node,
     width: iconSize,

@@ -1,0 +1,71 @@
+:root {
+  --ui-bg: #f7f9f8;
+  --ui-surface: #ffffff;
+  --ui-surface-muted: #f1f5f3;
+  --ui-border: #e7ece9;
+  --ui-border-strong: #cbd8d2;
+  --ui-text: #17261f;
+  --ui-text-secondary: #66756e;
+  --ui-text-muted: #7b8982;
+  --ui-primary: #087854;
+  --ui-primary-hover: #066646;
+  --ui-primary-soft: #e8f4ef;
+  --ui-danger: #b8433a;
+  --ui-focus: #0a7e59;
+  --ui-radius-sm: 6px;
+  --ui-radius-md: 8px;
+  --ui-radius-lg: 12px;
+  --ui-shadow-hover: 0 6px 18px rgba(23, 38, 31, 0.07);
+  --ui-duration: 180ms;
+  --ui-ease: cubic-bezier(0.25, 1, 0.5, 1);
+  --ui-z-dropdown: 30;
+  --ui-z-sticky: 40;
+  --ui-z-backdrop: 50;
+  --ui-z-modal: 60;
+  --ui-z-toast: 70;
+}
+
+button,
+[role='button'],
+a,
+input,
+select,
+textarea {
+  &:focus-visible {
+    outline: 2px solid var(--ui-focus);
+    outline-offset: 2px;
+  }
+}
+
+.el-button,
+.el-input__inner,
+.el-textarea__inner,
+.el-select .el-input__inner {
+  border-radius: var(--ui-radius-md);
+}
+
+.el-button--primary {
+  background: var(--ui-primary);
+  border-color: var(--ui-primary);
+  &:hover,
+  &:focus {
+    background: var(--ui-primary-hover);
+    border-color: var(--ui-primary-hover);
+  }
+}
+
+.el-dialog {
+  border-radius: var(--ui-radius-lg);
+  box-shadow: 0 20px 60px rgba(23, 38, 31, 0.16);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

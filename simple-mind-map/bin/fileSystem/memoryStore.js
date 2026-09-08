@@ -18,6 +18,7 @@ function createMemoryFileStore(seed = {}) {
   const rooms = new Map()
   const folders = new Map()
   const members = []
+  const folderMembers = []
   const nodes = new Map()
   const operations = []
   const versions = []
@@ -59,6 +60,7 @@ function createMemoryFileStore(seed = {}) {
     rooms,
     folders,
     members,
+    folderMembers,
     nodes,
     operations,
     versions,
@@ -70,6 +72,7 @@ function createMemoryFileStore(seed = {}) {
         rooms: cloneJson([...rooms.entries()]),
         folders: cloneJson([...folders.entries()]),
         members: cloneJson(members),
+        folderMembers: cloneJson(folderMembers),
         nodes: cloneJson([...nodes.entries()]),
         operations: cloneJson(operations),
         versions: cloneJson(versions),
@@ -83,6 +86,7 @@ function createMemoryFileStore(seed = {}) {
         folders.clear()
         snap.folders.forEach(([key, value]) => folders.set(key, value))
         members.splice(0, members.length, ...snap.members)
+        folderMembers.splice(0, folderMembers.length, ...snap.folderMembers)
         nodes.clear()
         snap.nodes.forEach(([key, value]) => nodes.set(key, value))
         operations.splice(0, operations.length, ...snap.operations)
@@ -233,6 +237,28 @@ function createMemoryFileStore(seed = {}) {
       const row = folders.get(String(id || ''))
       if (!row || row.deleted_at) return null
       return cloneJson(row)
+    },
+    async listFolderMembers(id) {
+      bump()
+      return folderMembers.filter(item => item.folder_id === id).map(cloneJson)
+    },
+    async setFolderMember(id, userId, role) {
+      bump()
+      const current = folderMembers.find(item => item.folder_id === id && item.user_id === userId)
+      if (current) { current.role = role; current.updated_at = nowIso(); return cloneJson(current) }
+      const row = { folder_id: id, user_id: userId, role, created_at: nowIso(), updated_at: nowIso() }
+      folderMembers.push(row)
+      return cloneJson(row)
+    },
+    async removeFolderMember(id, userId) {
+      bump()
+      const index = folderMembers.findIndex(item => item.folder_id === id && item.user_id === userId)
+      if (index >= 0) folderMembers.splice(index, 1)
+      return true
+    },
+    async roomKeysInFolder(id) {
+      bump()
+      return [...rooms.values()].filter(item => item.folder_id === id && !item.deleted_at).map(item => item.room_key)
     },
     async folderNameTaken(name, parentId, exceptId) {
       bump()

@@ -18,10 +18,10 @@
     >
       <el-option label="全部角色" value="" />
       <el-option
-        v-for="role in ['Owner', 'Editor', 'Viewer']"
-        :key="role"
-        :label="role"
-        :value="role"
+        v-for="role in roleOptions"
+        :key="role.value"
+        :label="role.label"
+        :value="role.value"
       />
     </el-select>
     <el-button-group
@@ -35,19 +35,13 @@
         title="列表视图"
         @click="$emit('update:view', 'list')"
     /></el-button-group>
-    <el-button
-      v-if="showCreateFolder"
-      icon="el-icon-folder-add"
-      @click="$emit('create-folder')"
-      >新建文件夹</el-button
-    >
-    <el-button
-      v-if="showCreate"
-      type="primary"
-      icon="el-icon-plus"
-      @click="$emit('create-room')"
-      >新建脑图</el-button
-    >
+    <el-dropdown v-if="showCreate || showCreateFolder" trigger="click" @command="create">
+      <el-button type="primary" icon="el-icon-plus">新建 <i class="el-icon-arrow-down el-icon--right" /></el-button>
+      <el-dropdown-menu slot="dropdown">
+        <el-dropdown-item v-if="showCreate" command="room" icon="el-icon-document-add">新建脑图</el-dropdown-item>
+        <el-dropdown-item v-if="showCreateFolder" command="folder" icon="el-icon-folder-add">新建文件夹</el-dropdown-item>
+      </el-dropdown-menu>
+    </el-dropdown>
   </div>
 </template>
 <script>
@@ -64,6 +58,18 @@ export default {
     showCreate: { type: Boolean, default: true },
     showCreateFolder: { type: Boolean, default: true },
     hideOpenedSort: { type: Boolean, default: false }
+  },
+  data: () => ({
+    roleOptions: [
+      { value: 'Owner', label: '所有者' },
+      { value: 'Editor', label: '可编辑' },
+      { value: 'Viewer', label: '可查看' }
+    ]
+  }),
+  methods: {
+    create(command) {
+      this.$emit(command === 'folder' ? 'create-folder' : 'create-room')
+    }
   }
 }
 </script>
@@ -79,17 +85,15 @@ export default {
   .el-button + .el-button {
     margin-left: 0;
   }
-  background: white;
-  padding: 14px;
-  border: 1px solid #e4eae7;
-  border-radius: 12px;
+  padding: 0 0 18px;
+  border-bottom: 1px solid var(--ui-border);
   .toolbarSearch {
     flex: 1;
     min-width: 220px;
   }
   /deep/ .el-button--primary {
-    background: #0b8f64;
-    border-color: #0b8f64;
+    background: var(--ui-primary);
+    border-color: var(--ui-primary);
   }
 }
 </style>

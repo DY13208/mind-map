@@ -32,6 +32,7 @@
 >
 <script>
 import UserAvatar from '@/components/UserAvatar.vue'
+import { displayRole } from '@/services/roomDto'
 
 export default {
   name: 'TeamMemberList',
@@ -49,7 +50,7 @@ export default {
       return member.role === 'Owner' ? ['Owner'] : this.roomRoles
     },
     roleLabel(role) {
-      return this.variant === 'team' ? role : role
+      return displayRole(role)
     }
   }
 }

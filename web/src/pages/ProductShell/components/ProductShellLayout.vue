@@ -42,6 +42,9 @@
         <router-link to="/spaces" title="我的团队" aria-label="我的团队"
           ><i class="el-icon-office-building"></i>我的团队</router-link
         >
+        <router-link to="/sop" title="SOP台账" aria-label="SOP台账"
+          ><i class="el-icon-notebook-2"></i>SOP台账</router-link
+        >
       </nav>
       <div class="sidebarFooter" v-if="profile">
         <div class="accountInfo" :title="`${profile.name}（${profile.id}）`">
@@ -68,7 +71,7 @@
       </div>
     </aside>
     <main class="productMain">
-      <div class="mockNotice">
+      <div class="mockNotice" role="status">
         文件、最近、收藏、回收站与团队空间已接入真实 API。
       </div>
       <router-view />
@@ -183,8 +186,8 @@ export default {
 }
 .productShell {
   min-height: 100vh;
-  background: #f5f7f6;
-  color: #17362c;
+  background: var(--ui-bg);
+  color: var(--ui-text);
   display: flex;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     sans-serif;
@@ -215,10 +218,10 @@ export default {
   }
 }
 .productShell .productSidebar {
-  width: 224px;
-  background: #fff;
-  border-right: 1px solid #e7ece9;
-  padding: 22px 14px 18px;
+  width: 216px;
+  background: var(--ui-surface);
+  border-right: 1px solid var(--ui-border);
+  padding: 20px 12px 16px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -239,7 +242,7 @@ export default {
       display: grid;
       place-items: center;
       color: white;
-      background: #0b9366;
+      background: var(--ui-primary);
       font-size: 18px;
     }
   }
@@ -255,16 +258,16 @@ export default {
     gap: 11px;
     padding: 0 12px;
     border-radius: 8px;
-    color: #52665f;
+      color: var(--ui-text-secondary);
     text-decoration: none;
     font-size: 14px;
     &:hover {
-      background: #f3f8f6;
-      color: #087854;
+      background: var(--ui-surface-muted);
+      color: var(--ui-primary);
     }
     &.router-link-exact-active {
-      background: #eaf6f1;
-      color: #087854;
+      background: var(--ui-primary-soft);
+      color: var(--ui-primary);
       font-weight: 600;
     }
     i {
@@ -341,11 +344,11 @@ export default {
 .productShell .productMain {
   min-width: 0;
   flex: 1;
-  margin-left: 224px;
+  margin-left: 216px;
 }
 .productShell .productPage {
-  padding: 32px 38px 60px;
-  max-width: 1480px;
+  padding: 32px clamp(24px, 2.2vw, 44px) 60px;
+  max-width: 1600px;
   margin: auto;
 }
 .productShell .productHeader {
@@ -357,11 +360,12 @@ export default {
   h1 {
     margin: 0;
     font-size: 26px;
+    line-height: 1.25;
     letter-spacing: -0.4px;
   }
   p {
     margin: 7px 0 0;
-    color: #819089;
+    color: var(--ui-text-secondary);
     font-size: 13px;
   }
 }

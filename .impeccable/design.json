@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-07T16:55:00+08:00",
+  "title": "Design System: 依然中台",
+  "extensions": {
+    "colorMeta": {
+      "primary": { "role": "primary", "displayName": "深松绿", "canonical": "#087854", "tonalRamp": ["#07251b", "#08402e", "#075e42", "#087854", "#2d9675", "#67b89c", "#a9d8c6", "#e8f4ef"] },
+      "background": { "role": "neutral", "displayName": "工作台底色", "canonical": "#f7f9f8", "tonalRamp": ["#17261f", "#33433b", "#53635b", "#74837c", "#9ba7a1", "#c2cac6", "#e3e8e5", "#f7f9f8"] }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "页面标题", "purpose": "稳定的产品页面一级标题。" },
+      "body": { "displayName": "界面正文", "purpose": "高频操作与数据阅读。" }
+    },
+    "shadows": [
+      { "name": "hover", "value": "0 6px 18px rgba(23, 38, 31, 0.07)", "purpose": "可点击卡片悬停反馈。" },
+      { "name": "modal", "value": "0 20px 60px rgba(23, 38, 31, 0.16)", "purpose": "模态层。" }
+    ],
+    "motion": [
+      { "name": "standard", "value": "180ms cubic-bezier(0.25, 1, 0.5, 1)", "purpose": "Hover、Focus 与轻量状态变化。" }
+    ],
+    "breakpoints": [
+      { "name": "mobile", "value": "760px" },
+      { "name": "desktop", "value": "1366px" },
+      { "name": "wide", "value": "1920px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "每个页面唯一的主要操作。",
+      "html": "<button class=\"ds-primary\">新建</button>",
+      "css": ".ds-primary{border:1px solid #087854;border-radius:8px;background:#087854;color:#fff;padding:10px 16px;font:600 14px Inter,sans-serif;transition:background 180ms cubic-bezier(.25,1,.5,1)}.ds-primary:hover{background:#066646}.ds-primary:focus-visible{outline:2px solid #0a7e59;outline-offset:2px}"
+    },
+    {
+      "name": "Unified File Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "文件夹与脑图共用的内容容器。",
+      "html": "<article class=\"ds-file\"><div class=\"ds-preview\"></div><strong>产品方案</strong><span>12 个项目 · 今天更新</span></article>",
+      "css": ".ds-file{display:grid;gap:10px;padding:16px;border:1px solid #e7ece9;border-radius:12px;background:#fff;color:#17261f;font:14px Inter,sans-serif;transition:border-color 180ms,box-shadow 180ms}.ds-file:hover{border-color:#cbd8d2;box-shadow:0 6px 18px rgba(23,38,31,.07)}.ds-file:focus-visible{outline:2px solid #0a7e59;outline-offset:2px}.ds-preview{height:100px;border-radius:8px;background:#f1f5f3}.ds-file span{color:#66756e;font-size:12px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "安静的企业工作台",
+    "overview": "克制、清晰、可信的高密度生产力界面，视觉服务于查找、编辑、协作与管理。",
+    "keyCharacteristics": ["宽屏充分利用", "绿色克制", "平面优先", "文件系统统一"],
+    "rules": [
+      { "name": "克制绿色规则", "body": "绿色只用于主操作、选中、Focus 和状态强调。", "section": "colors" },
+      { "name": "静止平面规则", "body": "阴影只表达状态与浮层。", "section": "elevation" }
+    ],
+    "dos": ["使用统一 tokens 和组件状态。", "保证 WCAG 2.1 AA 与 reduced motion。"],
+    "donts": ["不要加入营销 Hero、大面积渐变、玻璃拟态或夸张动画。", "不要拆分文件夹和脑图为两个内容系统。"]
+  }
+}

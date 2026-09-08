@@ -56,8 +56,3 @@ npm run test:collab:v2:soak
 `COLLAB_V2_TEST_FREEZE_READY = NO`
 
 完整专项验收仍缺真实 PG/Realtime/F5 和浏览器资源泄漏实测证据。上轮把 P0 写成“唯一阻塞项”不够准确：它是当时已复现的代码阻塞，但未执行项目不能因此计为已验收。Node Freeze 已通过；完整验收暂不放行。
-## Merge notes
-
-本报告同时覆盖主分支新增的 History / File System 分层测试，以及 C4 的 created-UID 依赖隔离、阻塞队列让出事件循环和统计查询失败时的 ACK 结算；`FORBIDDEN` 仍按当前冻结策略停止自动 drain，独立 sibling 不自动发送。
-
-冻结权威仍以 `docs/COLLAB_V2_FROZEN.md` 为准；History、File System、Team Space 不改变 Collaboration V2 ACL 判定模型。

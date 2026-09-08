@@ -1,5 +1,6 @@
 const fs = require('fs')
 const http = require('http')
+const crypto = require('crypto')
 const os = require('os')
 const path = require('path')
 const { execSync, spawnSync } = require('child_process')
@@ -71,25 +72,25 @@ function checkWorkbuddyClient() {
     }
     return {
       ok: false,
-      reason: `未找到 WorkBuddy CLI：${cli}`,
+      reason: `未找�?WorkBuddy CLI�?{cli}`,
       hint:
-        '请在 .env 设置 WORKBUDDY_CLI_SCRIPT，或重新安装 WorkBuddy 桌面客户端。'
+        '请在 .env 设置 WORKBUDDY_CLI_SCRIPT，或重新安装 WorkBuddy 桌面客户端�?
     }
   }
   const { exe, cli } = getWorkbuddyPaths()
   if (!fs.existsSync(exe)) {
     return {
       ok: false,
-      reason: `未找到 WorkBuddy 客户端：${exe}`,
+      reason: `未找�?WorkBuddy 客户端：${exe}`,
       hint:
-        '请先安装并登录 WorkBuddy，或在项目 .env 设置 WORKBUDDY_EXE=完整路径\\WorkBuddy.exe'
+        '请先安装并登�?WorkBuddy，或在项�?.env 设置 WORKBUDDY_EXE=完整路径\\WorkBuddy.exe'
     }
   }
   if (!fs.existsSync(cli)) {
     return {
       ok: false,
-      reason: `未找到 WorkBuddy CLI：${cli}`,
-      hint: 'WorkBuddy 可能未装完整，请设置 WORKBUDDY_CLI_SCRIPT 或重新安装。'
+      reason: `未找�?WorkBuddy CLI�?{cli}`,
+      hint: 'WorkBuddy 可能未装完整，请设置 WORKBUDDY_CLI_SCRIPT 或重新安装�?
     }
   }
   return { ok: true, exe, cli }
@@ -180,9 +181,18 @@ function discoverWorkbuddyFromCommonDirs() {
     process.env.ProgramFiles,
     process.env['ProgramFiles(x86)'],
     'C:\\Program Files',
-    'C:\\Program Files (x86)'
+    'C:\\Program Files (x86)',
+    'D:\\workbuddy',
+    'C:\\workbuddy',
+    'D:\\Program Files',
+    'D:\\Programs'
   ])
-  return roots.map(root => path.join(root, 'WorkBuddy', 'WorkBuddy.exe'))
+  const results = []
+  for (const root of roots) {
+    results.push(path.join(root, 'WorkBuddy', 'WorkBuddy.exe'))
+    results.push(path.join(root, 'WorkBuddy.exe'))
+  }
+  return results
 }
 
 function findWorkbuddyInstall() {
@@ -258,6 +268,126 @@ function ensureEnvFile(dir, apiKey = DEFAULT_API_KEY) {
   }
 }
 
+/** �?workbuddy_to_api/.env 里的 WORKBUDDY_* 灌进 process.env（不覆盖已有值） */
+function hydrateWorkbuddyEnvFromDir(dir) {
+  const envFile = path.join(dir, '.env')
+  if (!fs.existsSync(envFile)) return
+  try {
+    fs.readFileSync(envFile, 'utf8')
+      .split(/\r?\n/)
+      .forEach(line => {
+        const text = line.trim()
+        if (!text || text.startsWith('#')) return
+        const i = text.indexOf('=')
+        if (i <= 0) return
+        const key = text.slice(0, i).trim()
+        let value = text.slice(i + 1).trim()
+        if (
+          (value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))
+        ) {
+          value = value.slice(1, -1)
+        }
+        if (!key.startsWith('WORKBUDDY_')) return
+        if (process.env[key] == null || process.env[key] === '') {
+          process.env[key] = value
+        }
+      })
+  } catch (e) {
+    // ignore
+  }
+}
+
+/**
+ * 从本�?WorkBuddy 自定义模型配置注�?DeepSeek / CodeBuddy 环境变量�?
+ * �?--serve 网关走自定义 API，而不是平台积分�?
+ */
+function hydrateCustomModelApiKeys() {
+  const home = process.env.USERPROFILE || process.env.HOME || ''
+  if (!home) return
+  const file = path.join(home, '.workbuddy', 'models.json')
+  if (!fs.existsSync(file)) return
+  let hit = null
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''))
+    const list = Array.isArray(raw) ? raw : raw.models || []
+    hit = list.find(
+      m =>
+        m &&
+        m.apiKey &&
+        !String(m.apiKey).startsWith('${') &&
+        (/deepseek/i.test(String(m.id || '')) ||
+          /deepseek/i.test(String(m.vendor || '')) ||
+          /deepseek\.com/i.test(String(m.url || '')))
+    )
+  } catch (e) {
+    return
+  }
+  if (!hit || !hit.apiKey) return
+
+  const apiKey = String(hit.apiKey)
+  if (!process.env.DEEPSEEK_API_KEY) process.env.DEEPSEEK_API_KEY = apiKey
+
+  // 官方推荐：用 CODEBUDDY_* 直连第三方模型，绕开平台额度
+  if (!process.env.CODEBUDDY_API_KEY) process.env.CODEBUDDY_API_KEY = apiKey
+  if (!process.env.CODEBUDDY_BASE_URL) {
+    let base = 'https://api.deepseek.com'
+    try {
+      if (hit.url) {
+        const u = new URL(String(hit.url))
+        base = `${u.protocol}//${u.host}`
+      }
+    } catch (e) {
+      /* keep default */
+    }
+    process.env.CODEBUDDY_BASE_URL = base
+  }
+  const modelId = String(hit.id || 'deepseek-v4-flash')
+  if (!process.env.CODEBUDDY_MODEL) process.env.CODEBUDDY_MODEL = modelId
+  if (!process.env.CODEBUDDY_BIG_SLOW_MODEL) {
+    process.env.CODEBUDDY_BIG_SLOW_MODEL = modelId
+  }
+  if (!process.env.CODEBUDDY_SMALL_FAST_MODEL) {
+    process.env.CODEBUDDY_SMALL_FAST_MODEL = modelId
+  }
+  if (!process.env.CODEBUDDY_CODE_SUBAGENT_MODEL) {
+    process.env.CODEBUDDY_CODE_SUBAGENT_MODEL = modelId
+  }
+  if (!process.env.WORKBUDDY_DEFAULT_MODEL) {
+    process.env.WORKBUDDY_DEFAULT_MODEL = modelId
+  }
+}
+
+function customModelEnvFingerprint() {
+  const parts = [
+    process.env.CODEBUDDY_BASE_URL || '',
+    process.env.CODEBUDDY_MODEL || '',
+    process.env.WORKBUDDY_DEFAULT_MODEL || '',
+    // 不落盘完�?key，只用尾缀判断是否换过密钥
+    String(process.env.CODEBUDDY_API_KEY || '').slice(-8)
+  ]
+  return crypto.createHash('sha1').update(parts.join('|')).digest('hex')
+}
+
+function readCustomModelEnvMarker(dir) {
+  const file = path.join(dir, 'runtime', 'custom-model.env.sha')
+  try {
+    return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim() : ''
+  } catch (e) {
+    return ''
+  }
+}
+
+function writeCustomModelEnvMarker(dir, fp) {
+  try {
+    const runtime = path.join(dir, 'runtime')
+    fs.mkdirSync(runtime, { recursive: true })
+    fs.writeFileSync(path.join(runtime, 'custom-model.env.sha'), fp, 'utf8')
+  } catch (e) {
+    // ignore
+  }
+}
+
 function readTailLog(filePath, maxLines = 30) {
   if (!fs.existsSync(filePath)) return ''
   try {
@@ -279,15 +409,15 @@ function diagnoseStartupFailure(dir) {
   if (/WorkBuddy executable not found/i.test(merged)) {
     const { exe } = getWorkbuddyPaths()
     return {
-      reason: `未找到 WorkBuddy 客户端（${exe}）`,
+      reason: `未找�?WorkBuddy 客户端（${exe}）`,
       hint:
-        '请先安装并登录 WorkBuddy 桌面版，再重新运行启动脚本。导图页面可正常打开，但「补齐流程」需要 WorkBuddy。'
+        '请先安装并登�?WorkBuddy 桌面版，再重新运行启动脚本。导图页面可正常打开，但「补齐流程」需�?WorkBuddy�?
     }
   }
   if (/WorkBuddy CLI script not found/i.test(merged)) {
     return {
       reason: 'WorkBuddy 安装不完整，缺少 CLI 组件',
-      hint: '请重新安装 WorkBuddy 桌面客户端后再试。'
+      hint: '请重新安�?WorkBuddy 桌面客户端后再试�?
     }
   }
   if (/FileNotFoundError/i.test(merged)) {
@@ -309,8 +439,8 @@ function diagnoseStartupFailure(dir) {
         .reverse()
         .find(line => line.trim() && !/^-+$/.test(line.trim())) || ''
     return {
-      reason: lastLine || '代理进程启动后立即退出',
-      hint: `详细日志：${errLog}`
+      reason: lastLine || '代理进程启动后立即退�?,
+      hint: `详细日志�?{errLog}`
     }
   }
   return {
@@ -368,7 +498,7 @@ async function ensureWorkbuddyApi({
     return {
       ok: false,
       skipped: true,
-      reason: 'WorkBuddy 代理仅支持 Windows（需本机安装 WorkBuddy 客户端）'
+      reason: 'WorkBuddy 代理仅支�?Windows（需本机安装 WorkBuddy 客户端）'
     }
   }
 
@@ -377,12 +507,30 @@ async function ensureWorkbuddyApi({
     mcpConfigPath || path.join(projectRoot, '.mcp.json')
   )
 
+  // 优先读已�?workbuddy_to_api/.env（例�?WORKBUDDY_EXE=D:\workbuddy\...�?
+  hydrateWorkbuddyEnvFromDir(resolveWorkbuddyDir(projectRoot))
+  hydrateCustomModelApiKeys()
+
+  const dirEarly = resolveWorkbuddyDir(projectRoot)
+  const envFp = customModelEnvFingerprint()
   if (await checkHealth(port)) {
-    return {
-      ok: true,
-      alreadyRunning: true,
-      port,
-      dir: resolveWorkbuddyDir(projectRoot)
+    const prevFp = readCustomModelEnvMarker(dirEarly)
+    // 自定义模型环境变了（或旧进程未写入标记）�?重启，避免仍走平台积�?
+    if (
+      process.env.CODEBUDDY_API_KEY &&
+      process.env.CODEBUDDY_BASE_URL &&
+      prevFp !== envFp
+    ) {
+      stopWorkbuddyApi({ root: projectRoot, apiKey })
+      await new Promise(r => setTimeout(r, 1200))
+    } else {
+      return {
+        ok: true,
+        alreadyRunning: true,
+        port,
+        dir: dirEarly,
+        exe: (findWorkbuddyInstall() || {}).exe
+      }
     }
   }
 
@@ -391,16 +539,28 @@ async function ensureWorkbuddyApi({
     return {
       ok: false,
       reason: '未检测到 Python 3.10+',
-      hint: '请安装 https://www.python.org/ 并勾选「Add python.exe to PATH」后重试。'
+      hint: '请安�?https://www.python.org/ 并勾选「Add python.exe to PATH」后重试�?
     }
   }
 
-  const client = checkWorkbuddyClient()
-  if (!client.ok) {
+  const install = findWorkbuddyInstall()
+  if (!install) {
+    const fallback = checkWorkbuddyClient()
     return {
       ok: false,
-      reason: client.reason,
-      hint: client.hint
+      reason:
+        (fallback && fallback.reason) ||
+        '未找�?WorkBuddy 客户端。请安装 WorkBuddy，或设置环境变量 WORKBUDDY_EXE',
+      hint:
+        (fallback && fallback.hint) ||
+        '也可�?workbuddy_to_api/.env 中设�?WORKBUDDY_EXE=你的 WorkBuddy.exe 路径'
+    }
+  }
+  if (!fs.existsSync(install.cli)) {
+    return {
+      ok: false,
+      reason: `未找�?WorkBuddy CLI�?{install.cli}`,
+      hint: 'WorkBuddy 可能未装完整，请重新安装桌面客户端后再试�?
     }
   }
 
@@ -410,16 +570,27 @@ async function ensureWorkbuddyApi({
   } catch (err) {
     return {
       ok: false,
-      reason: `无法获取 workbuddy_to_api：${err.message || err}`,
-      hint: '请确认已安装 Git，且网络可访问 GitHub。'
+      reason: `无法获取 workbuddy_to_api�?{err.message || err}`,
+      hint: '请确认已安装 Git，且网络可访�?GitHub�?
     }
   }
 
   ensureEnvFile(dir, apiKey)
+  hydrateWorkbuddyEnvFromDir(dir)
 
-  const install = {
-    exe: client.exe,
-    cli: client.cli
+  // 若启动时发现�?exe，写�?.env，方便下�?Start-Docker 自动找到
+  if (install.exe) {
+    try {
+      const envFile = path.join(dir, '.env')
+      let text = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : ''
+      if (!/^\s*WORKBUDDY_EXE\s*=/m.test(text)) {
+        text += `\nWORKBUDDY_EXE=${install.exe}\n`
+        if (install.cli) text += `WORKBUDDY_CLI_SCRIPT=${install.cli}\n`
+        fs.writeFileSync(envFile, text, 'utf8')
+      }
+    } catch (e) {
+      // ignore
+    }
   }
 
   const args = [
@@ -459,18 +630,21 @@ async function ensureWorkbuddyApi({
       ok: false,
       port,
       dir,
-      reason: diag.reason || '代理已拉起但 /health 未就绪',
+      reason: diag.reason || '代理已拉起但 /health 未就�?,
       hint:
         diag.hint ||
-        '请确认 WorkBuddy 已安装并登录；若刚装好，可等 1 分钟后重新运行启动脚本。',
+        '请确�?WorkBuddy 已安装并登录；若刚装好，可等 1 分钟后重新运行启动脚本�?,
       log: path.join(dir, 'runtime', 'proxy.err.log')
     }
   }
 
+  writeCustomModelEnvMarker(dir, envFp)
+
   return {
     ok: true,
     port,
-    dir
+    dir,
+    exe: install.exe
   }
 }
 
@@ -505,17 +679,17 @@ function formatWorkbuddyResult(wb) {
     lines.push(
       wb.alreadyRunning
         ? `WorkBuddy API 已在运行  http://127.0.0.1:${wb.port}`
-        : `WorkBuddy API 已启动  http://127.0.0.1:${wb.port}`
+        : `WorkBuddy API 已启�? http://127.0.0.1:${wb.port}`
     )
     return lines.join('\n')
   }
   if (wb.skipped) {
-    lines.push(`WorkBuddy API：${wb.reason}`)
+    lines.push(`WorkBuddy API�?{wb.reason}`)
     return lines.join('\n')
   }
   lines.push(`WorkBuddy API 未就绪：${wb.reason || '未知错误'}`)
-  if (wb.hint) lines.push(`  → ${wb.hint}`)
-  if (wb.log) lines.push(`  → 日志：${wb.log}`)
+  if (wb.hint) lines.push(`  �?${wb.hint}`)
+  if (wb.log) lines.push(`  �?日志�?{wb.log}`)
   return lines.join('\n')
 }
 

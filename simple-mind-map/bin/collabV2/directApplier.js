@@ -415,7 +415,9 @@ async function applyUpdate(store, op, version) {
           payload: { uid, patch: inversePatch }
         },
     event,
-    title: live.is_root && merged.data && merged.data.text ? merged.data.text : null
+    title: live.is_root && merged.data && merged.data.text
+      ? stripSearchHtml(merged.data.text).slice(0, 80) || null
+      : null
   }
 }
 
@@ -558,7 +560,11 @@ async function applyMeta(store, op, version) {
   const next = mergeMapMetadata(prev, patch)
   if (store.setMeta) store.setMeta(next)
   const title =
-    payload.title != null ? String(payload.title).trim().slice(0, 80) : next.title
+    payload.title != null
+      ? stripSearchHtml(payload.title).slice(0, 80) || null
+      : next.title
+      ? stripSearchHtml(next.title).slice(0, 80) || null
+      : null
   const inversePatch = {}
   Object.keys(patch).forEach(key => {
     inversePatch[key] = prev[key] === undefined ? null : prev[key]

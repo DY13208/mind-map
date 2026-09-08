@@ -546,9 +546,10 @@ class Base {
     let widthArr = []
     let totalGeneralizationNodeWidth = 0
     let loop = (node, width) => {
-      if (withGeneralization && node.checkHasGeneralization()) {
+      if (withGeneralization && node.checkHasVisibleGeneralization()) {
+        const size = node.getVisibleGeneralizationSize()
         totalGeneralizationNodeWidth +=
-          node._generalizationSubtreeWidth || node._generalizationNodeWidth
+          size.subtreeWidth || size.width || node._generalizationNodeWidth || 0
       }
       if (node.children.length) {
         width += node.width / 2
@@ -677,21 +678,21 @@ class Base {
 
   //  获取节点包括概要在内的宽度
   getNodeWidthWithGeneralization(node) {
+    if (!node.checkHasVisibleGeneralization()) return node.width
+    const size = node.getVisibleGeneralizationSize()
     return Math.max(
       node.width,
-      node.checkHasGeneralization()
-        ? node._generalizationSubtreeWidth || node._generalizationNodeWidth
-        : 0
+      size.subtreeWidth || size.width || node._generalizationNodeWidth || 0
     )
   }
 
   //  获取节点包括概要在内的高度
   getNodeHeightWithGeneralization(node) {
+    if (!node.checkHasVisibleGeneralization()) return node.height
+    const size = node.getVisibleGeneralizationSize()
     return Math.max(
       node.height,
-      node.checkHasGeneralization()
-        ? node._generalizationSubtreeHeight || node._generalizationNodeHeight
-        : 0
+      size.subtreeHeight || size.height || node._generalizationNodeHeight || 0
     )
   }
 
@@ -711,18 +712,22 @@ class Base {
       if (root.children && root.children.length > 0) {
         root.children.forEach(child => {
           let { left, right, top, bottom } = walk(child)
+          const visibleGen = child.checkHasVisibleGeneralization()
+          const genSize = visibleGen ? child.getVisibleGeneralizationSize() : null
           // 概要内容的宽度
-          let generalizationWidth =
-            child.checkHasGeneralization() && child.getData('expand')
-              ? (child._generalizationSubtreeWidth ||
-                  child._generalizationNodeWidth) + generalizationNodeMargin
-              : 0
+          let generalizationWidth = visibleGen
+            ? (genSize.subtreeWidth ||
+                genSize.width ||
+                child._generalizationNodeWidth ||
+                0) + generalizationNodeMargin
+            : 0
           // 概要内容的高度
-          let generalizationHeight =
-            child.checkHasGeneralization() && child.getData('expand')
-              ? (child._generalizationSubtreeHeight ||
-                  child._generalizationNodeHeight) + generalizationNodeMargin
-              : 0
+          let generalizationHeight = visibleGen
+            ? (genSize.subtreeHeight ||
+                genSize.height ||
+                child._generalizationNodeHeight ||
+                0) + generalizationNodeMargin
+            : 0
           if (left - (dir === 'h' ? generalizationWidth : 0) < _left) {
             _left = left - (dir === 'h' ? generalizationWidth : 0)
           }

@@ -1,6 +1,17 @@
 /* global module:readonly */
 
 function normalizeMapRef(value) {
+  if (value == null || value === '') return null
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    try {
+      value = JSON.parse(trimmed)
+    } catch (e) {
+      // 也可能直接是 mapId 字符串
+      return { mapId: trimmed, nodeId: null, type: 'map' }
+    }
+  }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const mapId = String(
     value.mapId || value.map_id || value.room_key || ''

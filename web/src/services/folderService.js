@@ -3,6 +3,7 @@ import { userMessageFromError } from './apiError'
 import { C3_SERVICE_STATUS_MATRIX } from './serviceStatus'
 import { normalizeFolderDto } from './roomDto'
 import roomService from './roomService'
+import { normalizeMemberDto } from './roomDto'
 
 export default {
   backendStatus: C3_SERVICE_STATUS_MATRIX.Folder,
@@ -52,5 +53,27 @@ export default {
       throw error
     }
   },
+  getMembers: async id => {
+    const data = await productRequest(`/api/folders/${encodeURIComponent(id)}/members`)
+    return { list: (data.list || []).map(normalizeMemberDto), canManage: !!data.canManage }
+  },
+  setMember: async (id, userId, role) => {
+    const data = await productRequest(`/api/folders/${encodeURIComponent(id)}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ userId, role })
+    })
+    return (data.list || []).map(normalizeMemberDto)
+  },
+  updateMember: async (id, userId, role) => {
+    const data = await productRequest(`/api/folders/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role })
+    })
+    return (data.list || []).map(normalizeMemberDto)
+  },
+  removeMember: (id, userId) => productRequest(
+    `/api/folders/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`,
+    { method: 'DELETE' }
+  ),
   moveRoom: (roomKey, folderId) => roomService.moveRoom(roomKey, folderId)
 }

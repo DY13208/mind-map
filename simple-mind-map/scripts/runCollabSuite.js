@@ -10,8 +10,6 @@ const suites = {
   freeze: [
     'test/collabV2.drain.test.js',
     'test/exportBackground.test.js',
-    'test/collabReliability.test.js',
-    'test/collabRoomRecovery.test.js',
     'test/collabV2.test.js',
     'test/collabV2.direct.test.js',
     'test/collabV2.features.test.js',
@@ -27,6 +25,8 @@ const suites = {
     'test/collabSpecialObjects.test.js',
     'test/collabPaste.test.js',
     'test/collabPasteUndo.test.js',
+    'test/collabReliability.test.js',
+    'test/collabRoomRecovery.test.js',
     'test/collabV2.wideSibling.persistence.test.js',
     'test/roomNodes.test.js',
     'test/roomAcl.test.js',

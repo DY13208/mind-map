@@ -1694,6 +1694,7 @@ async function initSchemaOnce() {
   tombstones.rows.forEach(row => deletedRooms.add(row.room_key))
   const roomAcl = require('./roomAcl')
   await roomAcl.initSchema(pool)
+  await require('./accessRequests').initSchema(pool)
   await roomAcl.migrateLegacyOwners(pool)
   const collabV2Schema = require('./collabV2/schema')
   await collabV2Schema.initCollabV2Schema(pool)
@@ -1888,7 +1889,14 @@ async function commitDirectRoomOperationOnce(client, roomKey, command, apply) {
     [
       roomKey,
       version,
-      applied.title ? String(applied.title).trim().slice(0, 80) : null,
+      applied.title
+        ? String(applied.title)
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 80) || null
+        : null,
       applied.metadata ? JSON.stringify(applied.metadata) : null
     ]
   )
@@ -2079,7 +2087,14 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
       roomKey,
       roomsJsonPayload,
       version,
-      applied.title ? String(applied.title).trim().slice(0, 80) : null
+      applied.title
+        ? String(applied.title)
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 80) || null
+        : null
     ]
   )
   const inserted = await client.query(
