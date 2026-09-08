@@ -6,9 +6,12 @@
     @keydown.enter.self="$emit('open', room)"
     @click="$emit('open', room)"
   >
-    <div class="roomPreview" :style="previewStyle">
-      <div class="previewMap" aria-hidden="true"><span></span><i></i><i></i><i></i></div
-      ><button
+    <div ref="preview" class="roomPreview" :style="previewStyle">
+      <MindMapPreview v-if="sketch" :sketch="sketch" />
+      <div v-else class="previewMap" aria-hidden="true">
+        <span></span><i></i><i></i><i></i>
+      </div>
+      <button
         class="favorite"
         :aria-label="room.favorite ? '取消收藏' : '收藏'"
         :class="{ active: room.favorite }"
@@ -64,14 +67,33 @@
 </template>
 <script>
 import UserAvatar from '@/components/UserAvatar.vue'
+import roomService from '@/services/roomService'
+import MindMapPreview from './MindMapPreview.vue'
+
+const previewCache = new Map()
+
+function cacheKey(room) {
+  return [
+    room.roomKey || room.id || '',
+    room.revision || 0,
+    room.contentUpdatedAt || room.updatedAt || ''
+  ].join('|')
+}
 
 export default {
   name: 'RoomCard',
-  components: { UserAvatar },
+  components: { UserAvatar, MindMapPreview },
   props: {
     room: Object,
     allowDelete: { type: Boolean, default: false },
     allowMoveToTeam: { type: Boolean, default: true }
+  },
+  data() {
+    return {
+      sketch: null,
+      observer: null,
+      loadingPreview: false
+    }
   },
   computed: {
     previewStyle() {
@@ -80,6 +102,81 @@ export default {
     },
     dateText() {
       return new Date(this.room.updatedAt).toLocaleDateString('zh-CN')
+    },
+    hasImageCover() {
+      return !!(this.room.previewUrl || this.room.thumbnailUrl || this.room.coverUrl)
+    }
+  },
+  watch: {
+    room: {
+      deep: false,
+      handler() {
+        this.sketch = null
+        this.hydrateFromCache()
+        this.observePreview()
+      }
+    }
+  },
+  mounted() {
+    this.hydrateFromCache()
+    this.observePreview()
+  },
+  beforeDestroy() {
+    this.disconnectObserver()
+  },
+  methods: {
+    hydrateFromCache() {
+      if (this.hasImageCover) return
+      const cached = previewCache.get(cacheKey(this.room))
+      if (cached) this.sketch = cached
+    },
+    disconnectObserver() {
+      if (this.observer) {
+        this.observer.disconnect()
+        this.observer = null
+      }
+    },
+    observePreview() {
+      this.disconnectObserver()
+      if (this.hasImageCover || this.sketch || typeof IntersectionObserver === 'undefined') {
+        if (!this.hasImageCover && !this.sketch) this.loadPreview()
+        return
+      }
+      this.observer = new IntersectionObserver(
+        entries => {
+          if (entries.some(entry => entry.isIntersecting)) {
+            this.disconnectObserver()
+            this.loadPreview()
+          }
+        },
+        { rootMargin: '120px' }
+      )
+      if (this.$refs.preview) this.observer.observe(this.$refs.preview)
+    },
+    async loadPreview() {
+      if (this.hasImageCover || this.loadingPreview || this.sketch) return
+      const key = this.room.roomKey || this.room.id
+      if (!key) return
+      this.loadingPreview = true
+      try {
+        const preview = await roomService.getCardPreview(key)
+        const sketch =
+          (preview && preview.sketch) || {
+            text: this.room.title || '未命名',
+            children: []
+          }
+        previewCache.set(cacheKey(this.room), sketch)
+        if ((this.room.roomKey || this.room.id) === key) {
+          this.sketch = sketch
+        }
+      } catch (error) {
+        this.sketch = {
+          text: this.room.title || '未命名',
+          children: []
+        }
+      } finally {
+        this.loadingPreview = false
+      }
     }
   }
 }
@@ -111,6 +208,7 @@ export default {
     display: grid;
     place-items: center;
     position: relative;
+    overflow: hidden;
   }
   .previewMap {
     position: relative;
@@ -137,6 +235,7 @@ export default {
     border-radius: 8px;
     color: #93a19c;
     cursor: pointer;
+    z-index: 1;
     &.active {
       color: #e6a23c;
     }

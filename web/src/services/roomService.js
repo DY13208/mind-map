@@ -200,5 +200,16 @@ export default {
       error.message = userMessageFromError(error)
       throw error
     }
+  },
+  getCardPreview: async roomKey => {
+    try {
+      const data = await productRequest(
+        `/api/files/${encodeURIComponent(roomKey)}/card-preview`
+      )
+      return (data && data.preview) || data || null
+    } catch (error) {
+      error.message = userMessageFromError(error)
+      throw error
+    }
   }
 }

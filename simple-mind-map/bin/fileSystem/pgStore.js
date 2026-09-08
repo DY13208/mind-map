@@ -411,6 +411,28 @@ function createPgFileStore(pool) {
         await db.query(`delete from rooms where room_key = $1`, [key])
       })
       return true
+    },
+    async getPreviewNodes(roomKey) {
+      queryCount += 1
+      const res = await pool.query(
+        `with recursive walk as (
+           select uid, parent_uid, position, data, is_root, deleted_at, 0 as depth
+           from room_nodes
+           where room_key = $1 and is_root and deleted_at is null
+           union all
+           select n.uid, n.parent_uid, n.position, n.data, n.is_root, n.deleted_at, w.depth + 1
+           from room_nodes n
+           inner join walk w
+             on n.room_key = $1 and n.parent_uid = w.uid and n.deleted_at is null
+           where w.depth < 2
+         )
+         select uid, parent_uid, position, data, is_root, deleted_at
+         from walk
+         order by depth, position, uid
+         limit 40`,
+        [String(roomKey || '')]
+      )
+      return res.rows
     }
   }
 }

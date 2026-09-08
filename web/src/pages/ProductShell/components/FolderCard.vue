@@ -6,24 +6,30 @@
     @keydown.enter.self="$emit('open', folder)"
     @click="$emit('open', folder)"
   >
-    <div class="folderPreview"><span class="folderIcon"><i class="el-icon-folder-opened"/></span></div>
-    <div class="folderBody"><span class="folderInfo"
-      ><strong>{{ folder.name }}</strong
-      ><small>{{ itemCountText }}</small><small>{{ dateText }} 更新</small></span>
-    <el-dropdown
-      v-if="editable"
-      trigger="click"
-      @command="$emit($event, folder)"
-      @click.native.stop
-      ><span class="more"><i class="el-icon-more"/></span
-      ><el-dropdown-menu slot="dropdown"
-        ><el-dropdown-item command="share">分享 / 权限</el-dropdown-item
-        ><el-dropdown-item command="rename">重命名</el-dropdown-item
-        ><el-dropdown-item command="delete" divided
-          >删除</el-dropdown-item
-        ></el-dropdown-menu
-      ></el-dropdown
-    ></div>
+    <div class="folderPreview">
+      <span class="folderIcon"><i class="el-icon-folder-opened"/></span>
+    </div>
+    <div class="folderBody">
+      <span class="folderInfo"
+        ><strong>{{ folder.name }}</strong
+        ><small>{{ itemCountText }}</small
+        ><small>{{ dateText }} 更新</small></span
+      >
+      <el-dropdown
+        v-if="editable"
+        trigger="click"
+        @command="$emit($event, folder)"
+        @click.native.stop
+        ><span class="more"><i class="el-icon-more"/></span
+        ><el-dropdown-menu slot="dropdown"
+          ><el-dropdown-item command="share">分享 / 权限</el-dropdown-item
+          ><el-dropdown-item command="rename">重命名</el-dropdown-item
+          ><el-dropdown-item command="delete" divided
+            >删除</el-dropdown-item
+          ></el-dropdown-menu
+        ></el-dropdown
+      >
+    </div>
   </article></template
 >
 <script>
@@ -32,7 +38,12 @@ export default {
   props: { folder: Object, editable: { type: Boolean, default: true } },
   computed: {
     itemCountText() {
-      const count = Number(this.folder.itemCount != null ? this.folder.itemCount : this.folder.roomCount) || 0
+      const count =
+        Number(
+          this.folder.itemCount != null
+            ? this.folder.itemCount
+            : this.folder.roomCount
+        ) || 0
       return count ? `${count} 个项目` : '空文件夹'
     },
     dateText() {
@@ -49,12 +60,17 @@ export default {
   min-height: 0;
   padding: 0;
   border-radius: var(--ui-radius-lg);
+
+  overflow: hidden;
+
   display: flex;
   flex-direction: column;
   cursor: pointer;
   text-align: left;
   color: var(--ui-text);
-  transition: border-color var(--ui-duration) var(--ui-ease), box-shadow var(--ui-duration) var(--ui-ease), transform var(--ui-duration) var(--ui-ease);
+  transition: border-color var(--ui-duration) var(--ui-ease),
+    box-shadow var(--ui-duration) var(--ui-ease),
+    transform var(--ui-duration) var(--ui-ease);
   &:hover {
     border-color: var(--ui-border-strong);
     box-shadow: var(--ui-shadow-hover);

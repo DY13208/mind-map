@@ -13,6 +13,10 @@ const {
   publicFolder,
   newFolderId
 } = require('./model')
+const {
+  buildPreviewSketch,
+  sketchFromPreviewRows
+} = require('./previewSketch')
 
 function createFileSystem(options = {}) {
   const store = options.store
@@ -831,6 +835,34 @@ function createFileSystem(options = {}) {
     return { ok: true, roomKey }
   }
 
+  async function getRoomPreview(roomKey, input = {}) {
+    const file = await getRoom(roomKey, input)
+    let sketch = { text: file.title || '未命名', children: [] }
+    try {
+      if (typeof store.getPreviewNodes === 'function') {
+        const previewNodes = await store.getPreviewNodes(roomKey)
+        if (Array.isArray(previewNodes)) {
+          sketch = sketchFromPreviewRows(previewNodes)
+        } else {
+          sketch = buildPreviewSketch(previewNodes)
+        }
+      } else if (typeof store.getNodes === 'function') {
+        sketch = buildPreviewSketch(await store.getNodes(roomKey))
+      }
+    } catch (err) {
+      // Fall back to title-only sketch so list cards still render.
+    }
+    if (!sketch || !sketch.text) {
+      sketch = { text: file.title || '未命名', children: [] }
+    }
+    return {
+      roomKey: file.roomKey,
+      revision: file.revision,
+      updatedAt: file.updatedAt || file.contentUpdatedAt || '',
+      sketch
+    }
+  }
+
   return {
     store,
     createRoom,
@@ -839,6 +871,7 @@ function createFileSystem(options = {}) {
     listFavorites,
     listTrash,
     getRoom,
+    getRoomPreview,
     renameRoom,
     moveRoom,
     setFavorite,
