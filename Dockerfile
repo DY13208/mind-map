@@ -55,6 +55,7 @@ ENV HOST=127.0.0.1 \
 
 RUN sed -i 's/\r$//' /app/start.sh \
   && chmod +x /app/start.sh \
+  && mkdir -p /app/output \
   && chmod -R a+rX /usr/share/nginx/html
 
 EXPOSE 80
