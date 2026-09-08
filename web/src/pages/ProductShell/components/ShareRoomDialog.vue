@@ -30,6 +30,7 @@
           <em>添加为{{ newRole === 'Editor' ? '可编辑' : '可查看' }}</em>
         </button>
       </div>
+      <p v-else-if="query && !searching" class="emptyHits">未找到匹配同事</p>
       <h4>已共享成员 <small>基于房间成员 ACL</small></h4>
       <TeamMemberList
         variant="room"
@@ -55,6 +56,7 @@ export default {
     query: '',
     newRole: 'Viewer',
     hits: [],
+    searching: false,
     searchTimer: null,
     members: [],
     loading: false,
@@ -79,6 +81,7 @@ export default {
       if (value) {
         this.query = ''
         this.hits = []
+        this.searching = false
         this.members = []
         this.load()
       }
@@ -115,15 +118,21 @@ export default {
     },
     searchUsers() {
       clearTimeout(this.searchTimer)
-      if (!this.query) { this.hits = []; return }
+      if (!this.query) { this.hits = []; this.searching = false; return }
       const query = this.query
+      this.searching = true
       this.searchTimer = setTimeout(async () => {
         try {
           const params = new URLSearchParams({ q: query, limit: '8' })
           const data = await productRequest(`/api/users?${params.toString()}`)
           if (this.query === query) this.hits = data.list || []
         } catch (error) {
-          this.hits = []
+          if (this.query === query) {
+            this.hits = []
+            this.$message.error(error.message || '搜索同事失败')
+          }
+        } finally {
+          if (this.query === query) this.searching = false
         }
       }, 250)
     },
@@ -161,6 +170,11 @@ export default {
   margin: 12px 0 22px;
 }
 .invite .el-select { width: 112px; flex: 0 0 auto; }
+.emptyHits {
+  margin: -10px 0 18px;
+  color: #7b8982;
+  font-size: 13px;
+}
 .userHits {
   margin: -14px 0 20px;
   border: 1px solid #e3e9e6;

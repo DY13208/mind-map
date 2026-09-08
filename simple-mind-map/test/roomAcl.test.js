@@ -319,10 +319,25 @@ async function testMultiSourceGrants() {
   assert.strictEqual((await roomAcl.getAccess(db, 'room-shared', 'member-1')).role, 'editor')
 }
 
+async function testSearchUsersPassesCorpId() {
+  let captured = null
+  const db = {
+    query: async (sql, params) => {
+      captured = { sql, params }
+      return { rows: [{ user_id: 'u1', wecom_userid: 'u1', name: '龙', avatar: '' }] }
+    }
+  }
+  const rows = await roomAcl.searchUsers(db, '龙', 8, 'corp-demo')
+  assert.strictEqual(rows.length, 1)
+  assert.ok(captured.sql.includes('corp_id = $3'))
+  assert.deepStrictEqual(captured.params, ['%龙%', 8, 'corp-demo'])
+}
+
 testNormalizeAndInfer()
 testRoleMatrix()
 testAccessAndMembers()
   .then(testMultiSourceGrants)
+  .then(testSearchUsersPassesCorpId)
   .then(() => {
     console.log('roomAcl tests passed')
   })

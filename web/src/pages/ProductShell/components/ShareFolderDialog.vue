@@ -11,6 +11,7 @@
           <span>{{ user.name || user.user_id }}</span><em>添加</em>
         </button>
       </div>
+      <p v-else-if="query && !searching" class="emptyHits">未找到匹配同事</p>
       <h4>已有权限成员</h4>
       <TeamMemberList variant="room" :members="members" @role="updateRole" @remove="remove" />
       <p v-if="!members.length && !loading" class="emptyMembers">暂未添加成员</p>
@@ -26,12 +27,12 @@ import TeamMemberList from './TeamMemberList.vue'
 export default {
   name: 'ShareFolderDialog', components: { TeamMemberList },
   props: { visible: Boolean, folder: Object },
-  data: () => ({ members: [], query: '', role: 'Viewer', hits: [], loading: false, busy: false, timer: null }),
+  data: () => ({ members: [], query: '', role: 'Viewer', hits: [], loading: false, busy: false, searching: false, timer: null }),
   computed: {
     shown: { get() { return this.visible }, set(value) { this.$emit('update:visible', value) } },
     folderId() { return (this.folder && this.folder.id) || '' }
   },
-  watch: { visible(value) { if (value) { this.query = ''; this.hits = []; this.load() } } },
+  watch: { visible(value) { if (value) { this.query = ''; this.hits = []; this.searching = false; this.load() } } },
   beforeDestroy() { clearTimeout(this.timer) },
   methods: {
     async load() {
@@ -42,13 +43,21 @@ export default {
     },
     search() {
       clearTimeout(this.timer)
-      if (!this.query) { this.hits = []; return }
+      if (!this.query) { this.hits = []; this.searching = false; return }
       const q = this.query
+      this.searching = true
       this.timer = setTimeout(async () => {
         try {
           const data = await productRequest(`/api/users?${new URLSearchParams({ q, limit: '8' })}`)
           if (this.query === q) this.hits = data.list || []
-        } catch (error) { this.hits = [] }
+        } catch (error) {
+          if (this.query === q) {
+            this.hits = []
+            this.$message.error(error.message || '搜索同事失败')
+          }
+        } finally {
+          if (this.query === q) this.searching = false
+        }
       }, 250)
     },
     async run(action) {
@@ -71,5 +80,6 @@ export default {
   button { width: 100%; padding: 10px 12px; border: 0; border-bottom: 1px solid #edf1ef; background: white; display: flex; justify-content: space-between; cursor: pointer; }
   button:hover { background: #f1f5f3; } button:last-child { border-bottom: 0; } em { color: #087854; font-style: normal; }
 }
+.emptyHits { margin: 8px 0 0; color: #7b8982; font-size: 13px; }
 h4 { margin: 20px 0 8px; }.emptyMembers { color: #7b8982; font-size: 13px; padding: 14px 0; }
 </style>
