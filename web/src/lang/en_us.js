@@ -603,7 +603,7 @@ export default {
     noPermission: 'You do not have access to this map',
     saved: 'Sub-map inserted',
     savedTip:
-      'Sub-map inserted: node should become a gray card with a purple icon; double-click to preview (F2 to rename)',
+      'Sub-map inserted: node should become a gray card with a purple icon; double-click to open editor (F2 to rename)',
     applyFailed: 'Insert failed; select the node and try again',
     removed: 'Sub-map removed',
     openFailed: 'Could not open the referenced map',

@@ -56,7 +56,6 @@
     <NodeAutoExpand v-if="mindMap" :mindMap="mindMap"></NodeAutoExpand>
     <CooperateDialog :mindMap="mindMap"></CooperateDialog>
     <MapRefDialog></MapRefDialog>
-    <SubMapPreviewDialog></SubMapPreviewDialog>
     <div
       class="dragMask"
       v-if="showDragMask"
@@ -139,7 +138,6 @@ import AiChat from './AiChat.vue'
 import NodeAutoExpand from './NodeAutoExpand.vue'
 import CooperateDialog from './CooperateDialog.vue'
 import MapRefDialog from './MapRefDialog.vue'
-import SubMapPreviewDialog from './SubMapPreviewDialog.vue'
 import { normalizeMapRef } from '@/utils/mapRefNav'
 
 // 注册插件
@@ -203,8 +201,7 @@ export default {
     AiChat,
     NodeAutoExpand,
     CooperateDialog,
-    MapRefDialog,
-    SubMapPreviewDialog
+    MapRefDialog
   },
   data() {
     return {

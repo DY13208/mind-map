@@ -72,6 +72,7 @@ function publicJob(job, extra = {}) {
     model: job.model,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
+    liveElapsedSec: job.liveElapsedSec || 0,
     waitingTaskUids: job.waitingTaskUids || [],
     notifyResults: job.notifyResults || [],
     missingFields: job.missingFields || [],
@@ -83,6 +84,19 @@ function publicJob(job, extra = {}) {
 function notifyCount(result) {
   return ((result && result.notifyResults) || []).filter(r => r && r.block)
     .length
+}
+
+/** 汇总通知代办人，便于状态栏一眼看到「发给谁」 */
+function formatNotifyAssignees(list) {
+  const names = []
+  const seen = new Set()
+  ;(list || []).forEach(r => {
+    const a = String((r && r.assignee) || '').trim()
+    if (!a || seen.has(a)) return
+    seen.add(a)
+    names.push(a)
+  })
+  return names.join('、')
 }
 
 const QUEUE_STORAGE_KEY = 'lc_sop_run_queue_v1'
@@ -393,7 +407,57 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
     const controller =
       typeof AbortController !== 'undefined' ? new AbortController() : null
     if (controller) controllers.set(job.id, controller)
+    let deltaEmitTimer = null
+    let heartbeatTimer = null
+    const flushDeltaEmit = () => {
+      if (deltaEmitTimer) {
+        clearTimeout(deltaEmitTimer)
+        deltaEmitTimer = null
+      }
+      emit()
+    }
+    const scheduleDeltaEmit = () => {
+      // 约每 150ms 刷一次 UI，避免每个 token 全量 snapshot；又不会憋到结束才出字
+      if (deltaEmitTimer) return
+      deltaEmitTimer = setTimeout(() => {
+        deltaEmitTimer = null
+        emit()
+      }, 150)
+    }
+    const appendProgress = line => {
+      const tip = String(line || '').trim()
+      if (!tip) return
+      const lines = String(job.progressText || '')
+        .split('\n')
+        .filter(Boolean)
+      if (lines[lines.length - 1] === tip) return
+      lines.push(tip)
+      job.progressText = lines.slice(-60).join('\n')
+    }
     try {
+      heartbeatTimer = setInterval(() => {
+        if (job.state !== 'running') return
+        const sec = Math.max(
+          1,
+          Math.round((Date.now() - (job.startedAt || Date.now())) / 1000)
+        )
+        job.liveElapsedSec = sec
+        // 无正文时用心跳刷新状态行，避免一直停在「等待输出」
+        if (!String(job.streamText || '').trim()) {
+          const beat = `…已运行 ${sec}s · ${job.status || '处理中'}`
+          const lines = String(job.progressText || '')
+            .split('\n')
+            .filter(Boolean)
+          if (/^…已运行\s+\d+s/.test(lines[lines.length - 1] || '')) {
+            lines[lines.length - 1] = beat
+          } else {
+            lines.push(beat)
+          }
+          job.progressText = lines.slice(-60).join('\n')
+        }
+        emit()
+      }, 2000)
+
       const result = await runSopWithWorkbuddy({
         roomKey: job.roomKey,
         sop: job.sop,
@@ -406,6 +470,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         skipNotify: !!job.skipNotifyOnResume,
         onStatus: text => {
           job.status = text
+          appendProgress(`› ${text}`)
           emit()
         },
         onContext: ctx => {
@@ -414,7 +479,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         },
         onDelta: text => {
           job.streamText = String(text || '')
-          emit()
+          scheduleDeltaEmit()
         },
         onEventDetail: ({ label, at, raw }) => {
           if (!label) return
@@ -425,24 +490,18 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
           if (job.eventLog.length > 80) {
             job.eventLog = job.eventLog.slice(-80)
           }
-          if (!job.streamText) {
-            const tip = `› ${label}`
-            const lines = String(job.progressText || '')
-              .split('\n')
-              .filter(Boolean)
-            if (lines[lines.length - 1] !== tip) {
-              lines.push(tip)
-              job.progressText = lines.slice(-40).join('\n')
-            }
+          if (!String(job.streamText || '').trim()) {
+            appendProgress(`› ${label}`)
             const snippet = toolResultSnippet(raw)
-            if (snippet) {
-              job.progressText =
-                (job.progressText ? job.progressText + '\n' : '') + snippet
-            }
+            if (snippet) appendProgress(snippet)
+          } else {
+            // 有正文时也把关键事件记进进度，避免只剩最终大段
+            appendProgress(`› ${label}`)
           }
           emit()
         }
       })
+      flushDeltaEmit()
       if (!job.streamText && result.reply) {
         job.streamText = result.reply
       }
@@ -470,11 +529,14 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         job.missingFields = result.missingFields || []
         job.missingSummary = result.missingSummary || ''
         job.skipNotifyOnResume = true
+        const notifyHint = formatNotifyAssignees(result.notifyResults)
         job.status = result.waitingData
-          ? `待补数：${result.missingSummary || '请补充缺失数据后继续'}`
+          ? `待补数：${result.missingSummary || '请补充缺失数据后继续'}${
+              notifyHint ? ` · 已通知 ${notifyHint}` : ''
+            }`
           : `等待人工完成 ${
               job.waitingTaskUids.length || notifyCount(result)
-            } 条阻塞待办后再继续`
+            } 条阻塞待办后再继续${notifyHint ? ` · 代办：${notifyHint}` : ''}`
         controllers.delete(job.id)
         running.delete(job.id)
         waiting.set(job.id, job)
@@ -483,8 +545,12 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         pump()
         return
       }
+      job.notifyResults = result.notifyResults || []
+      const notifyHintDone = formatNotifyAssignees(result.notifyResults)
       job.status = result.ok
-        ? `已完成（约 ${result.elapsedSec}s）`
+        ? `已完成（约 ${result.elapsedSec}s）${
+            notifyHintDone ? ` · 已通知 ${notifyHintDone}` : ''
+          }`
         : `结束：${(result.assessment && result.assessment.reason) || result.runResult || '未确认真执行'}`
       if (job.onSuccess) job.onSuccess(result, publicJob(job))
       finishJob(job, { ok: true })
@@ -517,6 +583,15 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       }
       if (job.onError) job.onError(err, msg)
       finishJob(job, { error: msg })
+    } finally {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer)
+        heartbeatTimer = null
+      }
+      if (deltaEmitTimer) {
+        clearTimeout(deltaEmitTimer)
+        deltaEmitTimer = null
+      }
     }
   }
 

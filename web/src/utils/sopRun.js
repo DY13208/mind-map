@@ -15,6 +15,7 @@ import {
   processNotifyNodes,
   summarizeNotifyResults
 } from './sopNotify'
+import { parseProvidedFieldLabels } from './sopSubmitMaterial'
 
 /** 可选产物预设（运行前勾选） */
 export const SOP_OUTPUT_PRESETS = [
@@ -152,6 +153,7 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
       '- 遇到通知、知会、审批类步骤：说明对象与内容；若台账侧已派发待办则勿重复；',
       '- 不要强行生成 HTML/Excel 等文件；文末可不写「产物清单」，改为「## 执行结果」；',
       '- 说明：已完成哪些自动步骤、卡在哪个人工步骤、下一步建议。',
+      '- 若下方已有「## 用户提交资料 / 用户补充数据」，视为需求方已提供；不得再要求用户重复填写这些字段；仅当大纲另有未覆盖的硬性必填时，才在「仍缺」里列出字段名。',
       extraNote ? `\n## 额外要求\n${extraNote}` : '',
       '',
       '## SOP 子树 / 大纲上下文',
@@ -483,26 +485,50 @@ export function isMissingDataReply(text) {
 
 /**
  * 从模型汇报里抽出待补字段（供台账表单预填）
- * 只认「字段名列表」，不把状态叙述/事件流拆成表单项。
+ * 只认「字段名列表」，不把状态叙述拆成表单项。
+ * @param {string} reply
+ * @param {{ alreadyProvided?: string[] }} [opts]
  */
-export function extractMissingDataNeeds(reply) {
+export function extractMissingDataNeeds(reply, opts = {}) {
   const text = String(reply || '')
+  const provided = opts.alreadyProvided || []
   const fields = []
   const seen = new Set()
 
   const isJunkLabel = name => {
-    const s = String(name || '').trim()
-    if (!s) return true
-    if (s.length > 16) return true
-    if (/[。；;！!？?\n]/.test(s)) return true
+    const s0 = String(name || '').trim()
+    if (!s0) return true
+    if (s0.length > 24) return true
+    if (/[。；;！!？?\n]/.test(s0)) return true
+    if (/[“”"']/.test(s0)) return true
+    // 状态叙述 / 能力说明，不是待填字段名
     if (
-      /节点|uid|未完成|已完成|历史|运行|推进|阻塞|阻断|容器|待办|产物|大纲|台账|校验|房间|本次|本单|流程型|登记|拟稿|数据源|回复示例|示例|仍缺|缺少|字段/.test(
-        s
+      /节点|uid|未完成|已完成|已消除|历史|运行|推进|阻塞|阻断|容器|待办|产物|大纲|台账|校验|房间|本次|本单|流程型|登记|拟稿|数据源|回复示例|示例|仍缺|缺少|字段|初稿|产出|发起|知会|账号|简历池|即时|并发|可即时|AI侧|Boss|直聘/.test(
+        s0
       )
     ) {
       return true
     }
-    if (/^\d+$/.test(s)) return true
+    if (/^(?:但|且|并|可|已|无|有|项)/.test(s0)) return true
+    if (/^(?:请|把|将|对|向|用)/.test(s0)) return true
+    // 像完整短句（含动词）而非字段名
+    if (
+      /(?:产出|发起|消除|生成|发布|登录|缺少|没有|无法)/.test(s0) &&
+      s0.length > 8
+    ) {
+      return true
+    }
+    if (/^\d+$/.test(s0)) return true
+    return false
+  }
+
+  /** 更像「字段名」：短名词，而非汇报句子 */
+  const looksLikeFieldName = name => {
+    const s0 = String(name || '').trim()
+    if (!s0 || isJunkLabel(s0)) return false
+    if (s0.length > 16) return false
+    // 允许：公司主体、带教导师、硬性要求、Boss账号
+    if (/^[A-Za-z0-9\u4e00-\u9fff/／_-]{2,16}$/.test(s0)) return true
     return false
   }
 
@@ -518,11 +544,20 @@ export function extractMissingDataNeeds(reply) {
       .replace(/\s+/g, '')
       .trim()
     if (!name) return
-    // 「公司主体=XX」只取左边
-    if (/[=＝]/.test(name)) {
-      name = name.split(/[=＝]/)[0].trim()
+    if (/[=＝]/.test(name)) name = name.split(/[=＝]/)[0].trim()
+    if (!looksLikeFieldName(name)) return
+    if (
+      provided.length &&
+      provided.some(p => {
+        const a = name.toLowerCase()
+        const b = String(p || '')
+          .replace(/\s+/g, '')
+          .toLowerCase()
+        return a === b || a.includes(b) || b.includes(a)
+      })
+    ) {
+      return
     }
-    if (isJunkLabel(name)) return
     const key = name.toLowerCase()
     if (seen.has(key)) return
     seen.add(key)
@@ -531,41 +566,44 @@ export function extractMissingDataNeeds(reply) {
 
   const pushList = chunk => {
     if (!chunk) return
-    String(chunk)
-      .split(/[、,，;；|/／\n]/)
-      .forEach(part => push(part))
+    // 只有短列表才按顿号拆；长叙述整段丢弃
+    const parts = String(chunk).split(/[、,，;；|/／\n]/)
+    if (parts.length >= 2 && parts.every(p => String(p).trim().length <= 16)) {
+      parts.forEach(part => push(part))
+      return
+    }
+    if (String(chunk).trim().length <= 16) push(chunk)
   }
 
-  // 1) 优先：显式「仍缺 N 个字段（A、B、C）」/「缺：A、B、C」/「补齐以下 N 项：…」
+  let fromExplicit = false
   const listPatterns = [
     /仍缺\s*\*?\*?(\d+)\s*个?\s*字段\*?\*?[（(：:\s]*([^）)\n]{2,200})/i,
     /缺(?:少|失)?\s*\*?\*?(\d+)\s*个?\s*(?:字段|项)\*?\*?[（(：:\s]*([^）)\n]{2,200})/i,
-    /(?:补齐|补充|提供|填写)(?:以下)?\s*\d*\s*项?[：:\s]+([^\n。]{2,200})/i,
-    /关键(?:字段|信息)[：:\s]+([^\n。]{2,120})/i,
-    /回复示例[：:\s`]*([^`\n]{4,200})/i
+    /(?:补齐|补充|提供|填写)(?:以下)?\s*\d+\s*项[：:\s]+([^\n。]{2,200})/i,
+    /关键(?:字段|信息)[：:\s]+([^\n。]{2,80})/i
   ]
   for (const re of listPatterns) {
     const m = text.match(re)
     if (!m) continue
     const listPart = m[2] || m[1]
     if (!listPart) continue
-    // 示例句「公司主体=XX；部门=XX」→ 只取键名
     if (/[=＝]/.test(listPart)) {
-      listPart.split(/[;；、,，]/).forEach(seg => {
-        const left = String(seg).split(/[=＝]/)[0]
-        push(left)
-      })
+      listPart.split(/[;；、,，]/).forEach(seg =>
+        push(String(seg).split(/[=＝]/)[0])
+      )
     } else {
       pushList(listPart)
     }
-    if (fields.length >= 3) break
+    if (fields.length >= 1) {
+      fromExplicit = true
+      break
+    }
   }
 
-  // 2) 仅在「下一步建议 / 待补」小节里扫短字段名（不扫全文）
-  if (fields.length < 3) {
+  if (fields.length < 2) {
     const section =
       text.match(
-        /(?:#{1,4}\s*)?(?:[一二三四五六七八九十\d]+[、.．]\s*)?(?:下一步建议|待补数?|缺失字段|请补充|需提供)[^\n]*\n([\s\S]*?)(?=\n#{1,4}\s|\n--|\n【|$)/i
+        /(?:#{1,4}\s*)?(?:[一二三四五六七八九十\d]+[、.．]\s*)?(?:下一步建议|待补数?|缺失字段|请补充|需提供|仍缺)[^\n]*\n([\s\S]*?)(?=\n#{1,4}\s|\n--|\n【|$)/i
       ) ||
       text.match(
         /(?:--\s*)?下一步建议[^\n]*\n([\s\S]*?)(?=\n--|\n#{1,4}|$)/i
@@ -573,69 +611,67 @@ export function extractMissingDataNeeds(reply) {
     const chunk = (section && section[1]) || ''
     chunk.split(/\r?\n/).forEach(line => {
       const t = line.trim()
-      if (!t || t.length > 80) return
-      const bullet = t.match(/^[-*•]\s*(.+)$/) || t.match(/^\d+[\.、．]\s*(.+)$/)
+      if (!t || t.length > 100) return
+      const bullet =
+        t.match(/^[-*•]\s*(.+)$/) || t.match(/^\d+[\.、．]\s*(.+)$/)
       if (!bullet) return
       const body = bullet[1].trim()
       const listed = body.match(/(?:补齐|补充|提供|填写)[^：:]*[：:]\s*(.+)$/)
       if (listed) {
         pushList(listed[1])
+        fromExplicit = true
         return
       }
-      // 小节里的短名才收；长叙述丢弃
-      if (body.length <= 16 && !/[。；]/.test(body)) push(body)
+      const short = body
+        .replace(/[（(][^）)]*[）)]/g, '')
+        .replace(/[：:].*$/, '')
+        .trim()
+      // 下一步里只收短字段名；长句/状态说明直接丢弃
+      if (
+        short.length >= 2 &&
+        short.length <= 16 &&
+        !/[。；、]/.test(short) &&
+        looksLikeFieldName(short)
+      ) {
+        push(short)
+        fromExplicit = true
+      }
     })
   }
 
-  // 3) 已知招聘字段：文中点名才收（保底）
-  const common = [
-    ['公司主体', /公司主体/],
-    ['招聘部门', /招聘部门|用人部门/],
-    ['性别要求', /性别要求|性别/],
-    ['人数', /人数|编制|HC\b/i],
-    ['招聘原因', /招聘原因|增补原因/],
-    ['岗位/JD', /\bJD\b|岗位JD|职位描述/],
-    ['职级', /职级/],
-    ['城市', /城市|工作地/],
-    ['到岗时间', /到岗时间|入职时间/],
-    ['汇报对象', /汇报对象/],
-    ['薪资范围', /薪资范围|薪酬范围/]
-  ]
-  if (fields.length < 3) {
-    common.forEach(([label, re]) => {
+  // 仅当模型明确在要用户补数时，才用关键词兜底；避免把「产出JD初稿」等叙述误当成字段
+  const asksUserFill =
+    /仍缺|待补|请补充|请提供|请填写|缺失字段|缺少以下|需提供|请先补/.test(text)
+  if (!fromExplicit && fields.length === 0 && asksUserFill) {
+    ;[
+      ['公司主体', /公司主体|公司全称/],
+      ['招聘部门', /招聘部门|用人部门/],
+      ['性别要求', /性别要求/],
+      ['人数', /(?:招聘)?人数|编制/],
+      ['招聘原因', /招聘原因/],
+      ['岗位/JD', /岗位\s*\/?\s*JD|岗位JD|JD\s*(?:全文|内容|信息)|缺少\s*JD/i],
+      ['职级', /职级/],
+      ['城市', /招聘城市|工作地|工作城市/]
+    ].forEach(([label, re]) => {
       if (re.test(text)) push(label)
     })
   }
 
-  // 仍抽不出干净字段时：给空表单用的标准 8 项（不拿叙述当 label）
-  const fallbackRecruit = [
-    '公司主体',
-    '招聘部门',
-    '性别要求',
-    '人数',
-    '招聘原因',
-    '岗位/JD',
-    '职级',
-    '城市'
-  ]
-  if (!fields.length && isMissingDataReply(text)) {
-    // 文中写了「仍缺 N 个字段」就用招聘保底；否则给一项「关键信息」
-    if (/仍缺|缺\s*\d+|字段|招聘|JD|部门/.test(text)) {
-      fallbackRecruit.forEach(push)
-    } else {
-      push('关键信息')
-    }
+  if (
+    !fields.length &&
+    !provided.length &&
+    /仍缺\s*\d+\s*个?\s*字段|请补充以下|缺失字段[：:]/.test(text)
+  ) {
+    push('关键信息')
   }
 
   const clean = fields.slice(0, 12)
   return {
-    needsData: isMissingDataReply(text) || clean.length > 0,
+    needsData: clean.length > 0,
     fields: clean,
     summary: clean.length
       ? `待补充 ${clean.length} 项：${clean.map(f => f.label).join('、')}`
-      : isMissingDataReply(text)
-        ? '模型反馈缺少关键数据，请补充后继续'
-        : ''
+      : ''
   }
 }
 
@@ -645,7 +681,8 @@ export function assessSopExecution({
   events,
   elapsedSec,
   deliverables,
-  requireFiles = true
+  requireFiles = true,
+  alreadyProvided = []
 } = {}) {
   const evs = events || []
   const toolish = evs.filter(ev => {
@@ -661,16 +698,17 @@ export function assessSopExecution({
   const tooFast = Number(elapsedSec) > 0 && Number(elapsedSec) < 40
   const text = String(reply || '')
   const claimsDone = /已完成|执行完成|成功生成/.test(text)
-  const missing = extractMissingDataNeeds(text)
+  const missing = extractMissingDataNeeds(text, { alreadyProvided })
 
-  // 缺数据：不算失败，进入待补数
-  if (missing.needsData) {
+  // 缺数据：不算失败，进入待补数（已提供过的字段不会再进表单）
+  if (missing.needsData && missing.fields.length) {
     return {
       ok: true,
       waitingData: true,
       runResult: '待补数',
       reason: missing.summary || '缺少关键数据，请补充后继续',
       missingFields: missing.fields,
+      missingSummary: missing.summary || '',
       toolEvents: toolish.length,
       realFiles: realFiles.length
     }
@@ -783,7 +821,12 @@ export async function runSopWithWorkbuddy({
       sop: { ...sop, uid: ctx.sopUid || sop.uid },
       conversationId: earlyConversationId,
       onStatus: setStatus,
-      signal
+      onDelta,
+      onEvent: (label, raw) => {
+        if (onEventDetail) onEventDetail({ label, raw, at: Date.now() })
+      },
+      signal,
+      extraNote
     })
     notifySummary = summarizeNotifyResults(notifyResults)
     if (onEventDetail) {
@@ -985,7 +1028,8 @@ export async function runSopWithWorkbuddy({
     events,
     elapsedSec,
     deliverables,
-    requireFiles: outputs.length > 0
+    requireFiles: outputs.length > 0,
+    alreadyProvided: parseProvidedFieldLabels(extraNote)
   })
   const runResult = assessment.runResult
 
@@ -1076,6 +1120,9 @@ export async function runSopWithWorkbuddy({
     runResult: assessment.waitingData ? '待补数' : runResult,
     assessment,
     events,
-    context: ctx
+    context: ctx,
+    // 无论是否待补数，都带回通知派发结果，便于界面展示「发给谁」
+    notifyResults,
+    waitingTaskUids: notifySummary.waitingTaskUids || []
   }
 }

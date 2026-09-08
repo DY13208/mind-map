@@ -1,21 +1,26 @@
 /**
- * SOP / 流程中的「AI发起通知」节点：
- * - 识别通知类标题
- * - 自动判断阻塞（等待/确认/审批/阻塞）或继续
+ * SOP / 流程中的「通知 / 提醒」类节点：
+ * - 识别通知、提醒、知会、抄送、催办等标题
+ * - 从标题或子节点解析「给谁」
+ * - 自动判断阻塞（等待/确认/审批）或继续
  * - WorkBuddy 派发 + 写入导图 CPDA 待办树
  */
 import { dispatchTodo } from './sendTodo'
 import { createRoomTodo, listRoomTodos } from './fileApi'
 
-/** 通知类节点（命中任一即可） */
+/** 通知 / 提醒类节点（命中任一即可） */
 export const NOTIFY_TITLE_RE =
-  /AI\s*发起\s*通知|发起通知|^通知\s*[：:]|知会|请通知|发送通知|^AI\s*[:：].*通知|抄送/i
+  /AI\s*发起\s*(?:通知|提醒)|发起(?:通知|提醒)|^(?:通知|提醒)\s*[：:]|知会|请(?:通知|提醒)|发送(?:通知|提醒)|催办|请催办|^AI\s*[:：].*(?:通知|提醒|催办|抄送)|抄送|(?:通知|提醒)对应的|(?:通知|提醒).{0,12}给/i
 
 /** 阻塞语义：发完后停住，等人完成待办再继续 */
-export const BLOCK_TITLE_RE = /等待|确认|审批|阻塞|签核|复核通过/i
+export const BLOCK_TITLE_RE = /等待|确认|审批|阻塞|签核|复核通过|务必完成/i
 
 /** 明确非阻塞（知会类） */
-export const CONTINUE_HINT_RE = /知会|抄送|仅通知|不阻塞|无需等待/i
+export const CONTINUE_HINT_RE = /知会|抄送|仅通知|仅提醒|不阻塞|无需等待|顺便告知/i
+
+/** 不像通知动作的长叙述（避免误伤） */
+const NOTIFY_EXCLUDE_RE =
+  /查询|生成JD|筛选简历|输出评价|内部评估|结合简历|预起草|成长计划/
 
 export function stripNodeText(text) {
   return String(text || '')
@@ -26,7 +31,21 @@ export function stripNodeText(text) {
 }
 
 export function isNotifyTitle(text) {
-  return NOTIFY_TITLE_RE.test(stripNodeText(text))
+  const t = stripNodeText(text)
+  if (!t) return false
+  if (NOTIFY_EXCLUDE_RE.test(t) && !/(?:通知|提醒|催办|知会|抄送)/.test(t.slice(0, 12))) {
+    return false
+  }
+  if (NOTIFY_TITLE_RE.test(t)) return true
+  // 短标题含「通知/提醒/催办」且像动作节点
+  if (
+    t.length <= 40 &&
+    /(?:通知|提醒|催办)/.test(t) &&
+    !NOTIFY_EXCLUDE_RE.test(t)
+  ) {
+    return true
+  }
+  return false
 }
 
 /**
@@ -43,7 +62,7 @@ export function shouldBlockNotify(text, contextText = '') {
 export function parseAssigneeFromText(text) {
   const raw = stripNodeText(text)
   const m = raw.match(
-    /^(?:代办人|待办人|接收人|负责人|通知人)\s*[：:]\s*(.+)$/
+    /^(?:代办人|待办人|接收人|负责人|通知人|提醒人|接收者)\s*[：:]\s*(.+)$/
   )
   if (!m) return ''
   return String(m[1] || '')
@@ -52,18 +71,128 @@ export function parseAssigneeFromText(text) {
 }
 
 /**
- * 从大纲文本抽取通知节点（按缩进父子关系取代办人 / 上下文）
+ * 从通知/提醒标题里拆出「给谁」
+ * 例：AI:通知对应的HRBP → HRBP
+ *     抄送副总、人事 → 副总、人事
+ *     …给:行政、人事、IT → 行政、人事、IT
+ * 注意：「提醒：行政准备工位」这类「提醒：任务内容」不把整句当接收人
+ */
+export function parseAssigneeFromNotifyTitle(text) {
+  const t = stripNodeText(text)
+  if (!t) return ''
+
+  let m = t.match(/给\s*[:：]\s*(.+)$/)
+  if (m) return cleanAssigneeList(m[1])
+
+  m = t.match(/抄送\s*[:：]?\s*(.+)$/)
+  if (m) return cleanAssigneeList(m[1])
+
+  m = t.match(/(?:通知|提醒|催办|知会)对应的\s*(.+)$/i)
+  if (m) return cleanAssigneeList(m[1])
+
+  // 通知HRBP / 提醒行政（角色紧跟动词、后面可有任务）
+  m = t.match(
+    /(?:通知|提醒|催办|知会)\s*(行政|人事|HRBP|IT|需求方|总经理|副总|负责人)((?:、|\/|,|，)[^：:]*)?/i
+  )
+  if (m) {
+    return cleanAssigneeList(m[2] ? `${m[1]}${m[2]}` : m[1])
+  }
+
+  return ''
+}
+
+function cleanAssigneeList(raw) {
+  return String(raw || '')
+    .replace(/[|｜].*$/, '')
+    .replace(/[（(][^）)]*[）)]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[、,，]/g, '、')
+    .replace(/^、|、$/g, '')
+    .trim()
+}
+
+const ROLE_ASSIGNEE_RE =
+  /^(?:行政|人事|HRBP|ITBP|IT|需求方|总经理|副总|负责人|部门负责人)(?:、(?:行政|人事|HRBP|ITBP|IT|需求方|总经理|副总|负责人|部门负责人))*$/i
+
+export function isRoleAssignee(name) {
+  const s = cleanAssigneeList(name)
+  return !s || ROLE_ASSIGNEE_RE.test(s)
+}
+
+/**
+ * 从运行前备注 / 提交资料里解析真实接收人
+ * 例：给黄炜龙发个代办、代办人：黄炜龙、接收人：张三、发给李四
+ */
+export function parseAssigneesFromExtraNote(note) {
+  const text = String(note || '').trim()
+  if (!text) return []
+  const found = []
+  const seen = new Set()
+  const push = raw => {
+    const cleaned = cleanAssigneeList(raw)
+    if (!cleaned || cleaned.length < 2 || cleaned.length > 40) return
+    // 跳过纯角色；多人用顿号拆开逐个收
+    cleaned.split('、').forEach(part => {
+      const p = cleanAssigneeList(part)
+      if (!p || p.length < 2 || p.length > 20) return
+      if (isRoleAssignee(p)) return
+      // 排除常见非人名噪声
+      if (/^(?:请|把|将|用|在|到|从|和|与|及|的|了|吗|呢|吧)/.test(p)) return
+      if (/资料|说明|约束|链接|补充|要求|产物|模型/.test(p)) return
+      const key = p.toLowerCase()
+      if (seen.has(key)) return
+      seen.add(key)
+      found.push(p)
+    })
+  }
+
+  const patterns = [
+    /(?:代办人|待办人|接收人|通知人|提醒人|接收者)\s*[：:]\s*([^\n；;]+)/gi,
+    /给\s*([^\s，,、：:\n]{2,20})\s*(?:发|送)\s*(?:个|一条|了)?\s*(?:代办|待办)/gi,
+    /(?:代办|待办)\s*(?:发给|给)\s*[：:]?\s*([^\n；;]+)/gi,
+    /发给\s*([^\s，,、：:\n]{2,20})/gi
+  ]
+  patterns.forEach(re => {
+    let m
+    const r = new RegExp(re.source, re.flags)
+    while ((m = r.exec(text))) {
+      push(m[1])
+    }
+  })
+  // 整段很短且像人名：直接当接收人（用户只填了「黄炜龙」）
+  if (!found.length) {
+    const compact = text.replace(/\s+/g, '')
+    if (/^[\u4e00-\u9fffA-Za-z·•]{2,12}$/.test(compact)) push(compact)
+  }
+  return found
+}
+
+/**
+ * 优先用运行前填写的真实人名，覆盖大纲里的 HRBP / 副总 等角色
+ */
+export function resolveNotifyAssignee(nodeAssignee, extraNote) {
+  const fromNote = parseAssigneesFromExtraNote(extraNote)
+  if (fromNote.length) return fromNote.join('、')
+  const fallback = cleanAssigneeList(nodeAssignee) || '负责人'
+  return fallback
+}
+
+/**
+ * 从大纲文本抽取通知/提醒节点（按缩进父子关系取代办人 / 上下文）
  */
 export function extractNotifyNodesFromOutline(outline) {
   const lines = String(outline || '').split(/\r?\n/)
   const items = []
   lines.forEach((line, index) => {
     const indent = (line.match(/^(\s*)/) || ['', ''])[1].length
-    const text = stripNodeText(line.replace(/^(\s*)/, '').replace(/^[-*•●]\s*/, ''))
+    const text = stripNodeText(
+      line.replace(/^(\s*)/, '').replace(/^[-*•●]\s*/, '')
+    )
     if (!text || !isNotifyTitle(text)) return
 
     const nearby = []
     let assignee = ''
+    // 子节点显式「代办人：」优先于标题启发式
     for (let i = index + 1; i < lines.length && i < index + 24; i++) {
       const l = lines[i]
       if (!l || !l.trim()) continue
@@ -77,15 +206,21 @@ export function extractNotifyNodesFromOutline(outline) {
         if (a) assignee = a
       }
     }
+    if (!assignee) {
+      assignee = parseAssigneeFromNotifyTitle(text)
+    }
     // 向上找同级/父级代办人
     if (!assignee) {
       for (let i = index - 1; i >= 0 && i >= index - 30; i--) {
         const l = lines[i]
         const ind = (l.match(/^(\s*)/) || ['', ''])[1].length
-        const t = stripNodeText(l.replace(/^(\s*)/, '').replace(/^[-*•●]\s*/, ''))
+        const t = stripNodeText(
+          l.replace(/^(\s*)/, '').replace(/^[-*•●]\s*/, '')
+        )
         if (!t) continue
         if (ind < indent) {
-          const a = parseAssigneeFromText(t)
+          const a =
+            parseAssigneeFromText(t) || parseAssigneeFromNotifyTitle(t)
           if (a) {
             assignee = a
             break
@@ -113,7 +248,10 @@ export function extractNotifyNodesFromOutline(outline) {
       nearby,
       contextText,
       notifyKey,
-      detail: nearby.filter(t => !parseAssigneeFromText(t)).slice(0, 8).join('；')
+      detail: nearby
+        .filter(t => !parseAssigneeFromText(t))
+        .slice(0, 8)
+        .join('；')
     })
   })
   return items
@@ -128,24 +266,41 @@ export async function processNotifyNodes({
   sop,
   conversationId,
   onStatus,
-  signal
+  onDelta,
+  onEvent,
+  signal,
+  extraNote = ''
 } = {}) {
   const list = Array.isArray(nodes) ? nodes : []
+  const overrideAssignees = parseAssigneesFromExtraNote(extraNote)
   const results = []
   for (let i = 0; i < list.length; i++) {
     const node = list[i]
+    const assignee = resolveNotifyAssignee(node.assignee, extraNote)
     if (onStatus) {
       onStatus(
-        `通知 ${i + 1}/${list.length}：${node.block ? '阻塞派发' : '知会派发'}「${
+        `${node.block ? '阻塞' : '知会'}派发 ${i + 1}/${list.length}：「${
           node.text
-        }」→ ${node.assignee}`
+        }」→ ${assignee}${
+          overrideAssignees.length && isRoleAssignee(node.assignee)
+            ? '（已用运行前填写的接收人）'
+            : ''
+        }`
       )
     }
-    const title = node.text
+    // 标题显式带代办人，导图待办树一眼能看出发给谁
+    const title = /代办|接收人/.test(node.text)
+      ? node.text
+      : `${node.text} → 代办：${assignee}`
     const note = [
+      `代办人：${assignee}`,
       node.detail || '',
-      `来源：${[sop && sop.id, sop && sop.title].filter(Boolean).join('：') || 'SOP'}`,
-      node.block ? '完成此待办后流程才会继续。' : '知会类通知，流程已继续执行。'
+      `来源：${
+        [sop && sop.id, sop && sop.title].filter(Boolean).join('：') || 'SOP'
+      }`,
+      node.block
+        ? '完成此待办后流程才会继续。'
+        : '知会/提醒类通知，流程已继续执行。'
     ]
       .filter(Boolean)
       .join('\n')
@@ -154,17 +309,21 @@ export async function processNotifyNodes({
     let cpdaOk = false
     let cpdaError = ''
     try {
+      const childNodes = [{ text: `代办人：${assignee}` }]
+      if (node.detail) {
+        childNodes.push({
+          text: `详情：${String(node.detail).slice(0, 200)}`
+        })
+      }
       const created = await createRoomTodo(roomKey, {
         text: title,
         note,
-        assignee: node.assignee,
+        assignee,
         block: !!node.block,
         sop_id: (sop && sop.id) || '',
         sop_uid: (sop && (sop.uid || (sop.uids && sop.uids[0]))) || '',
         notify_key: node.notifyKey,
-        children: node.detail
-          ? [{ text: `详情：${String(node.detail).slice(0, 200)}` }]
-          : []
+        children: childNodes
       })
       taskUid = (created && created.task_uid) || ''
       cpdaOk = !!taskUid
@@ -177,19 +336,32 @@ export async function processNotifyNodes({
     let dispatchOk = false
     try {
       const todo = await dispatchTodo({
-        assignee: { name: node.assignee },
+        assignee: { name: assignee },
         title,
         detail: note,
         context: [
           `房间：${roomKey}`,
-          node.block ? '模式：阻塞（需完成待办后继续）' : '模式：知会（不阻塞）',
-          cpdaOk ? `已写入导图待办 uid=${taskUid}` : `导图待办写入失败：${cpdaError}`,
-          '请用一两句话确认已向该负责人说明任务。'
+          `代办人（接收人）：${assignee}`,
+          node.block
+            ? '模式：阻塞（需完成待办后继续）'
+            : '模式：知会/提醒（不阻塞）',
+          cpdaOk
+            ? `已写入导图待办 uid=${taskUid}`
+            : `导图待办写入失败：${cpdaError}`,
+          '请用一两句话确认已向该负责人说明任务，并点名接收人。'
         ].join('\n'),
         conversationId: conversationId
           ? `${conversationId}-notify-${i}`
           : undefined,
-        signal
+        signal,
+        onEvent: (label, raw) => {
+          if (onEvent) onEvent(label, raw)
+        },
+        onDelta: text => {
+          if (onDelta) {
+            onDelta(`【通知派发 → ${assignee}】\n${String(text || '')}`)
+          }
+        }
       })
       dispatchReply = (todo && todo.content) || ''
       dispatchOk = !!(todo && todo.success)
@@ -200,6 +372,8 @@ export async function processNotifyNodes({
 
     results.push({
       ...node,
+      assignee,
+      displayTitle: title,
       taskUid,
       cpdaOk,
       cpdaError,
@@ -236,7 +410,6 @@ export async function areWaitingTodosDone(roomKey, taskUids) {
   )
   const stillPending = uids.filter(uid => pendingSet.has(uid))
   const doneUids = uids.filter(uid => completedSet.has(uid))
-  // 已不在待办且不在已完成：视为被删/挪走，不算完成
   const missing = uids.filter(
     uid => !pendingSet.has(uid) && !completedSet.has(uid)
   )
