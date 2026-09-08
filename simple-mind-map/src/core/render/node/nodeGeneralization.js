@@ -13,6 +13,77 @@ function checkHasGeneralization() {
   return this.formatGetGeneralization().length > 0
 }
 
+// 节点是否还有未展开/未挂载的子树（收起时右侧空括号会很丑）
+function nodeSubtreeIsCollapsed(node) {
+  if (!node) return false
+  const live = (node.children && node.children.length) || 0
+  const declared = Number(node.getData && node.getData('childCount')) || 0
+  const hasKids = live > 0 || declared > 0
+  if (!hasKids) return false
+  if (node.getData('expand') === false) return true
+  // 已标记展开但子节点尚未挂载（懒加载）
+  if (live === 0 && declared > 0) return true
+  return false
+}
+
+// 某条概要是否应展示：范围内有子树的节点都展开后才显示括号
+function shouldShowGeneralizationItem(owner, item) {
+  if (!owner || owner.getData('expand') === false) return false
+  const range = item && Array.isArray(item.range) ? item.range : null
+  if (range && range.length >= 2) {
+    const start = Number(range[0])
+    const end = Number(range[1])
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+      return false
+    }
+    const children = owner.children || []
+    if (!children.length || end >= children.length) return false
+    for (let i = start; i <= end; i++) {
+      if (nodeSubtreeIsCollapsed(children[i])) return false
+    }
+    return true
+  }
+  // 整体概要：所属节点自身子树需可见
+  return !nodeSubtreeIsCollapsed(owner)
+}
+
+// 是否存在当前应展示的概要（用于占位与布局）
+function checkHasVisibleGeneralization() {
+  if (!this.checkHasGeneralization() || this.getData('expand') === false) {
+    return false
+  }
+  return this.formatGetGeneralization().some(item =>
+    shouldShowGeneralizationItem(this, item)
+  )
+}
+
+// 当前可见概要占用的最大宽高
+function getVisibleGeneralizationSize() {
+  const empty = { width: 0, height: 0, subtreeWidth: 0, subtreeHeight: 0 }
+  if (!this.checkHasVisibleGeneralization()) return empty
+  const list = this.formatGetGeneralization()
+  let width = 0
+  let height = 0
+  let subtreeWidth = 0
+  let subtreeHeight = 0
+  list.forEach((data, index) => {
+    if (!shouldShowGeneralizationItem(this, data)) return
+    const cur = this._generalizationList[index]
+    if (!cur || !cur.generalizationNode) return
+    width = Math.max(width, cur.generalizationNode.width || 0)
+    height = Math.max(height, cur.generalizationNode.height || 0)
+    subtreeWidth = Math.max(
+      subtreeWidth,
+      cur.subtreeWidth || cur.generalizationNode.width || 0
+    )
+    subtreeHeight = Math.max(
+      subtreeHeight,
+      cur.subtreeHeight || cur.generalizationNode.height || 0
+    )
+  })
+  return { width, height, subtreeWidth, subtreeHeight }
+}
+
 //  检查是否存在自身的概要，非子节点区间
 function checkHasSelfGeneralization() {
   const list = this.formatGetGeneralization()
@@ -103,6 +174,8 @@ function createGeneralizationNode() {
       cur.generalizationNode,
       growDir
     )
+    cur.subtreeWidth = subtree.width
+    cur.subtreeHeight = subtree.height
     if (subtree.width > maxSubtreeWidth) maxSubtreeWidth = subtree.width
     if (subtree.height > maxSubtreeHeight) maxSubtreeHeight = subtree.height
     // 如果该概要为激活状态，那么加入激活节点列表
@@ -147,8 +220,20 @@ function renderGeneralization(forceRender) {
     this.removeGeneralization()
   }
   this.createGeneralizationNode()
-  this.renderer.layout.renderGeneralization(this._generalizationList)
-  this._generalizationList.forEach(item => {
+  const visible = []
+  this._generalizationList.forEach((item, index) => {
+    const data = list[index] || item
+    if (shouldShowGeneralizationItem(this, data)) {
+      visible.push(item)
+      if (item.generalizationLine) item.generalizationLine.show()
+      if (item.generalizationNode) item.generalizationNode.show()
+    } else {
+      if (item.generalizationLine) item.generalizationLine.hide()
+      if (item.generalizationNode) item.generalizationNode.hide()
+    }
+  })
+  this.renderer.layout.renderGeneralization(visible)
+  visible.forEach(item => {
     this.style.generalizationLine(item.generalizationLine)
     if (item.generalizationLine && item.generalizationLine.attr) {
       item.generalizationLine.attr('pointer-events', 'none')
@@ -242,7 +327,14 @@ function hideGeneralization() {
 //  显示概要节点
 function showGeneralization() {
   if (this.isGeneralization) return
-  this._generalizationList.forEach(item => {
+  const list = this.formatGetGeneralization()
+  this._generalizationList.forEach((item, index) => {
+    const data = list[index] || item
+    if (!shouldShowGeneralizationItem(this, data)) {
+      if (item.generalizationLine) item.generalizationLine.hide()
+      if (item.generalizationNode) item.generalizationNode.hide()
+      return
+    }
     if (item.generalizationLine) item.generalizationLine.show()
     if (item.generalizationNode) item.generalizationNode.show()
   })
@@ -296,6 +388,8 @@ function handleGeneralizationMouseleave() {
 export default {
   formatGetGeneralization,
   checkHasGeneralization,
+  checkHasVisibleGeneralization,
+  getVisibleGeneralizationSize,
   checkHasSelfGeneralization,
   getGeneralizationNodeIndex,
   createGeneralizationNode,

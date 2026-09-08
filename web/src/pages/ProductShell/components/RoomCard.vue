@@ -28,7 +28,9 @@
           ><el-dropdown-menu slot="dropdown"
             ><el-dropdown-item command="open">打开</el-dropdown-item
             ><el-dropdown-item command="rename">重命名</el-dropdown-item
-            ><el-dropdown-item command="move">移动</el-dropdown-item
+            ><el-dropdown-item command="move">移动到文件夹</el-dropdown-item
+            ><el-dropdown-item v-if="allowMoveToTeam" command="moveToTeam"
+              >移至团队空间</el-dropdown-item
             ><el-dropdown-item command="favorite">{{
               room.favorite ? '取消收藏' : '收藏'
             }}</el-dropdown-item
@@ -42,7 +44,7 @@
       </div>
       <p><i class="el-icon-folder-opened"></i> {{ room.folderName }}</p>
       <p class="ownerLine">
-        Owner {{ room.owner.name }}
+        所有者 {{ room.owner.name }}
         <el-tag size="mini" type="info">{{ room.roleLabel || room.role }}</el-tag>
       </p>
       <div class="roomMeta">
@@ -66,7 +68,11 @@ import UserAvatar from '@/components/UserAvatar.vue'
 export default {
   name: 'RoomCard',
   components: { UserAvatar },
-  props: { room: Object, allowDelete: { type: Boolean, default: false } },
+  props: {
+    room: Object,
+    allowDelete: { type: Boolean, default: false },
+    allowMoveToTeam: { type: Boolean, default: true }
+  },
   computed: {
     previewStyle() {
       const url = this.room.previewUrl || this.room.thumbnailUrl || this.room.coverUrl

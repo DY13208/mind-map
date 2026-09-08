@@ -205,6 +205,16 @@ const teamService = {
       return normalizeRoomDto(unwrapItem(data, ['room', 'file']))
     }),
 
+  assignRoom: (teamId, roomKey) =>
+    request(async () => {
+      const key = String(roomKey || '').trim()
+      if (!key) throw Object.assign(new Error('缺少脑图标识'), { code: 'BAD_REQUEST' })
+      return productRequest(`/api/teams/${encodeURIComponent(teamId)}/rooms`, {
+        method: 'POST',
+        body: JSON.stringify({ roomKey: key })
+      })
+    }),
+
   updateMemberRole: (spaceId, id, role) =>
     request(async () => {
       const normalizedRole = roleOf(role)

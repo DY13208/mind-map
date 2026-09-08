@@ -17,6 +17,17 @@ export function normalizeRole(role) {
 
 export function displayRole(role) {
   const raw = normalizeRole(role)
+  if (raw === 'owner') return '所有者'
+  if (raw === 'admin') return '管理员'
+  if (raw === 'member') return '成员'
+  if (raw === 'editor') return '可编辑'
+  if (raw === 'viewer') return '可查看'
+  return role || ''
+}
+
+/** Select / filter values kept in English Title Case for existing ProductShell contracts. */
+export function apiRole(role) {
+  const raw = normalizeRole(role)
   if (raw === 'owner') return 'Owner'
   if (raw === 'editor') return 'Editor'
   if (raw === 'viewer') return 'Viewer'
@@ -85,8 +96,7 @@ export function normalizeRoomDto(apiRoom = {}, extras = {}) {
       ? apiRoom.collaborators
       : [],
     role,
-    roleLabel:
-      role === 'owner' ? 'Owner' : role === 'editor' ? 'Editor' : role === 'viewer' ? 'Viewer' : role,
+    roleLabel: displayRole(role),
     favorite: !!(apiRoom.favorite || extras.favorite),
     lastOpenedAt: apiRoom.lastOpenedAt || apiRoom.last_opened_at || extras.lastOpenedAt || null,
     deletedAt: apiRoom.deletedAt || apiRoom.deleted_at || extras.deletedAt || null,
@@ -186,7 +196,8 @@ export function normalizeMemberDto(row = {}) {
     name,
     avatar: row.avatar || (name ? name.slice(0, 1) : '用'),
     email: row.email || userId,
-    role: displayRole(role),
+    role: apiRole(role),
+    roleLabel: displayRole(role),
     joinedAt: row.created_at || row.joinedAt || ''
   }
 }

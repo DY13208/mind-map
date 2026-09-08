@@ -17,10 +17,10 @@
         <div class="teamMark"><i class="el-icon-office-building" /></div>
         <div>
           <h1>{{ team.name }}</h1>
-          <p>{{ team.description }}</p>
+          <p v-if="team.description">{{ team.description }}</p>
           <span
-            >{{ team.corpName || '当前企业' }} · {{ team.role }} · 更新于
-            {{ format(team.updatedAt) }}</span
+            >{{ team.memberCount }} 位成员 · {{ team.roomCount }} 个脑图 ·
+            {{ roleLabel }} · 更新于 {{ format(team.updatedAt) }}</span
           >
         </div>
         <div class="teamActions">
@@ -54,6 +54,7 @@
               v-for="room in visibleRooms"
               :key="room.id"
               :room="room"
+              :allow-move-to-team="false"
               v-on="roomListeners"
             />
           </div>
@@ -178,6 +179,12 @@ export default {
     },
     canManage() {
       return this.team && ['owner', 'admin'].includes(this.team.role)
+    },
+    roleLabel() {
+      const role = this.team && this.team.role
+      if (role === 'owner') return '所有者'
+      if (role === 'admin') return '管理员'
+      return '成员'
     },
     visibleRooms() {
       return this.rooms.filter(room =>

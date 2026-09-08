@@ -18,10 +18,10 @@
     >
       <el-option label="全部角色" value="" />
       <el-option
-        v-for="role in ['Owner', 'Editor', 'Viewer']"
-        :key="role"
-        :label="role"
-        :value="role"
+        v-for="role in roleOptions"
+        :key="role.value"
+        :label="role.label"
+        :value="role.value"
       />
     </el-select>
     <el-button-group
@@ -59,6 +59,13 @@ export default {
     showCreateFolder: { type: Boolean, default: true },
     hideOpenedSort: { type: Boolean, default: false }
   },
+  data: () => ({
+    roleOptions: [
+      { value: 'Owner', label: '所有者' },
+      { value: 'Editor', label: '可编辑' },
+      { value: 'Viewer', label: '可查看' }
+    ]
+  }),
   methods: {
     create(command) {
       this.$emit(command === 'folder' ? 'create-folder' : 'create-room')

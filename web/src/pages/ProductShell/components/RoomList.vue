@@ -15,7 +15,7 @@
       min-width="120"
     /><el-table-column
       prop="owner.name"
-      label="Owner"
+      label="所有者"
       width="110"
     /><el-table-column
       prop="roleLabel"
@@ -54,7 +54,9 @@
           ><i class="el-icon-more" /><el-dropdown-menu slot="dropdown"
             ><el-dropdown-item command="open">打开</el-dropdown-item
             ><el-dropdown-item command="rename">重命名</el-dropdown-item
-            ><el-dropdown-item command="move">移动</el-dropdown-item
+            ><el-dropdown-item command="move">移动到文件夹</el-dropdown-item
+            ><el-dropdown-item v-if="allowMoveToTeam" command="moveToTeam"
+              >移至团队空间</el-dropdown-item
             ><el-dropdown-item command="share">分享</el-dropdown-item
             ><el-dropdown-item command="history">历史版本</el-dropdown-item
             ><el-dropdown-item v-if="allowDelete && scope.row.canManage" command="delete" divided
@@ -72,7 +74,12 @@ import UserAvatar from '@/components/UserAvatar.vue'
 export default {
   name: 'RoomList',
   components: { UserAvatar },
-  props: { rooms: Array, folders: { type: Array, default: () => [] }, allowDelete: { type: Boolean, default: false } },
+  props: {
+    rooms: Array,
+    folders: { type: Array, default: () => [] },
+    allowDelete: { type: Boolean, default: false },
+    allowMoveToTeam: { type: Boolean, default: true }
+  },
   computed: {
     items() {
       return this.folders.map(folder => ({ ...folder, __kind: 'folder', folderName: '—' })).concat(this.rooms.map(room => ({ ...room, __kind: 'room' })))
