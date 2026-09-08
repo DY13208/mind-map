@@ -3,6 +3,7 @@ const fs = require('fs')
 const path = require('path')
 const Y = require('yjs')
 const mindDoc = require('./mindDoc')
+const { queryLegacyNodes } = require('./nodeQuery')
 const { applyNodeCommand, dataFields } = require('./roomCommands')
 const roomAcl = require('./roomAcl')
 const accessRequests = require('./accessRequests')
@@ -59,7 +60,8 @@ const {
   archiveRoomOperations,
   archiveAllRoomOperations,
   purgeDeletedNodes,
-  searchRoomNodes
+  searchRoomNodes,
+  queryRoomNodes
 } = require('./storage')
 const { beatPresence, listPresence, leavePresence, getPresenceStatus } = require('./presence')
 const { applyCollabEvents } = require('./collabRecovery')
@@ -1836,6 +1838,40 @@ async function handleApi(req, res) {
       })
       return true
     }
+  }
+
+  const nodeQueryMatch = pathname.match(/^\/api\/files\/([^/]+)\/nodes\/query$/)
+  if (nodeQueryMatch && req.method === 'POST') {
+    const roomKey = decodeURIComponent(nodeQueryMatch[1])
+    try {
+      const body = await readBody(req)
+      let result
+      try {
+        result = await queryRoomNodes(roomKey, body || {})
+      } catch (err) {
+        if (!err || err.code !== 'NODE_TABLE_UNINITIALIZED') throw err
+        const loaded = await withSubtreeSnapshotSlot(() => loadSnapshot(roomKey))
+        if (!loaded) throw err
+        result = queryLegacyNodes(
+          loaded.obj,
+          roomKey,
+          Number((loaded.row && loaded.row.version) || 0),
+          body || {}
+        )
+      }
+      sendJson(res, 200, {
+        ...result,
+        ...publicAccess(req.roomAccess || (await attachRoomAccess(req, roomKey)))
+      })
+    } catch (err) {
+      sendJson(res, err.statusCode || 500, {
+        error: err.message || 'node query failed',
+        code: err.code || 'NODE_QUERY_ERROR',
+        ...(Array.isArray(err.candidates) ? { candidates: err.candidates } : {}),
+        ...(err.candidates_truncated ? { candidates_truncated: true } : {})
+      })
+    }
+    return true
   }
 
   const nodeMatch = pathname.match(

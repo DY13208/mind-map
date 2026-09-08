@@ -60,11 +60,11 @@ function createServer(authorization) {
   const server = new McpServer(
     {
       name: 'mind-map',
-      version: '1.1.0'
+      version: '1.2.0'
     },
     {
       instructions:
-        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps，只有一张图可直接使用，多张图必须让用户确认。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。工具返回 isError 表示没有写入，禁止声称已完成。'
+        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps，只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。工具返回 isError 表示没有写入，禁止声称已完成。'
     }
   )
 
@@ -104,7 +104,7 @@ function createServer(authorization) {
 
   server.tool(
     'get_map',
-    '读取一张导图。format=outline（默认）只返回大纲（每行带 uid，默认最多 800 个节点，超出请 search_nodes）；format=full 返回树，超大图会截断或改回 outline。日常先 outline。',
+    '仅在用户明确要求整图概览或完整大纲时读取整张导图。不得用它定位某个节点、读取直属子节点/子树/路径/层级；这些场景必须使用 query_nodes。format=outline 默认最多 800 节点；format=full 超大图会截断。',
     {
       room_key: z.string().describe('房间号'),
       format: z
@@ -152,6 +152,46 @@ function createServer(authorization) {
               room_key
             )}/search?q=${encodeURIComponent(query)}&limit=200`
           )
+        )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'query_nodes',
+    '所有定向阅读的首选且必用工具：某节点、直属子节点、子树、根到目标路径或指定层级都在此读取，不得改用 get_map。selector 用 uid、精确名称或完整路径数组定位；scope 可只读节点、直属子节点、目标子树、根到目标链路，或指定绝对/相对层级。名称 fuzzy 只返回候选，不会擅自选择。超大结果请使用 next_cursor 分页继续。不会修改导图。',
+    {
+      room_key: z.string().describe('房间号'),
+      selector: z
+        .object({
+          type: z.enum(['uid', 'name', 'path']).describe('定位方式'),
+          value: z.string().describe('uid 或节点名称；path 类型不使用').optional(),
+          segments: z.array(z.string()).describe('从根到目标的完整名称路径；仅 path 使用').optional(),
+          match: z.enum(['exact', 'fuzzy']).describe('名称匹配方式，默认 exact；fuzzy 只返回候选').optional()
+        })
+        .describe('目标节点。scope=level 且 level_mode=absolute 时省略')
+        .optional(),
+      scope: z
+        .enum(['self', 'children', 'subtree', 'path', 'level'])
+        .describe('self=目标自身；children=直属子节点；subtree=目标及后代；path=根到目标；level=层级节点'),
+      level: z.number().int().min(0).describe('scope=level 时必填；根或相对锚点为第 0 层').optional(),
+      level_mode: z
+        .enum(['absolute', 'relative'])
+        .describe('absolute=全图层级且不传 selector；relative=目标节点下的层级')
+        .optional(),
+      page_size: z.number().int().min(1).max(5000).describe('每页最多节点数，默认 800').optional(),
+      cursor: z.string().describe('上次返回的 next_cursor，用于继续读取').optional()
+    },
+    async ({ room_key, ...body }) => {
+      try {
+        return ok(
+          await api(`/api/files/${encodeURIComponent(room_key)}/nodes/query`, {
+            method: 'POST',
+            body: JSON.stringify(body),
+            timeoutMs: 25000
+          })
         )
       } catch (err) {
         return fail(err)

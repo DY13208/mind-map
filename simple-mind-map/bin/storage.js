@@ -28,6 +28,7 @@ const {
   canonicalTreeHash,
   migrateRoomNodesFromJson
 } = require('./roomNodes')
+const { queryRoomNodes } = require('./nodeQuery')
 const { isCollabV2Enabled, isCollabV2Trace } = require('./collabV2/flag')
 
 const pool = new Pool({
@@ -1623,11 +1624,71 @@ async function initSchemaOnce() {
       primary key (room_key, uid)
     )
   `)
+  // pg_trgm is an optional acceleration for explicit fuzzy queries.  A
+  // restricted production role may not be allowed to install extensions;
+  // that must not prevent the exact UID/name/path indexes from starting.
+  let pgTrgmAvailable = false
+  try {
+    await pool.query(`create extension if not exists pg_trgm`)
+    pgTrgmAvailable = true
+  } catch (err) {
+    const extension = await pool.query(
+      `select exists(select 1 from pg_extension where extname = 'pg_trgm') as installed`
+    )
+    pgTrgmAvailable = !!(extension.rows[0] && extension.rows[0].installed)
+    if (!pgTrgmAvailable) {
+      console.warn('[storage] pg_trgm unavailable; fuzzy node queries are disabled:', err.message)
+    }
+  }
+  await pool.query(`
+    alter table room_nodes
+    add column if not exists search_name text
+    generated always as (
+      btrim(
+        lower(
+          regexp_replace(
+            regexp_replace(
+              regexp_replace(coalesce(data ->> 'text', ''), '<[^>]+>', ' ', 'g'),
+              '&nbsp;',
+              ' ',
+              'gi'
+            ),
+            '[[:space:]]+',
+            ' ',
+            'g'
+          )
+        )
+      )
+    ) stored
+  `)
   await pool.query(`
     create index if not exists room_nodes_parent_position_idx
     on room_nodes(room_key, parent_uid, position)
     where deleted_at is null
   `)
+  await pool.query(`
+    create index if not exists room_nodes_room_search_name_idx
+    on room_nodes(room_key, search_name)
+    where deleted_at is null
+  `)
+  await pool.query(`
+    create index if not exists room_nodes_parent_search_name_position_idx
+    on room_nodes(room_key, parent_uid, search_name, position)
+    where deleted_at is null
+  `)
+  if (pgTrgmAvailable) {
+    try {
+      await pool.query(`
+        create index if not exists room_nodes_search_name_trgm_idx
+        on room_nodes using gin(search_name gin_trgm_ops)
+        where deleted_at is null
+      `)
+    } catch (err) {
+      // Exact queries remain safe; query_nodes checks for this index before it
+      // ever runs a fuzzy predicate, so it will not fall back to a full scan.
+      console.warn('[storage] pg_trgm index unavailable; fuzzy node queries are disabled:', err.message)
+    }
+  }
   await pool.query(`
     create unique index if not exists room_nodes_one_root_idx
     on room_nodes(room_key)
@@ -2457,6 +2518,7 @@ module.exports = {
   readRoomNodes: roomKey => readRoomNodes(pool, roomKey),
   searchRoomNodes: (roomKey, query, options) =>
     searchRoomNodes(pool, roomKey, query, options),
+  queryRoomNodes: (roomKey, query) => queryRoomNodes(pool, roomKey, query),
   replaceRoomNodes: (roomKey, nodes, version) =>
     replaceRoomNodes(pool, roomKey, nodes, version)
 }
