@@ -26,7 +26,7 @@
         />
       </button>
       <div class="productLogo" @click="$router.push('/files')">
-        <span>依</span><strong>依然中台</strong>
+        <span>良</span><strong>良策</strong>
       </div>
       <nav id="product-navigation" aria-label="产品导航">
         <p class="navLabel">文件</p>
