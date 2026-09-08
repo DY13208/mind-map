@@ -2,6 +2,7 @@ require('./loadEnv')
 
 const crypto = require('crypto')
 const { Pool } = require('pg')
+const { bearerToken, verifyMcpUserToken } = require('./mcpUserToken')
 
 const SESSION_COOKIE = 'mind_map_session'
 const OAUTH_BROWSER_COOKIE = 'mind_map_oauth_browser'
@@ -657,7 +658,9 @@ function createWecomResponseError(data, fallbackCode, fallbackMessage) {
   }
   return new AuthError(
     fallbackCode,
-    `${fallbackMessage}（${normalizedErrcode === null ? 'unknown' : normalizedErrcode}）`
+    `${fallbackMessage}（${
+      normalizedErrcode === null ? 'unknown' : normalizedErrcode
+    }）`
   )
 }
 
@@ -792,7 +795,8 @@ async function listWecomContacts(options = {}) {
   const data = await fetchJson(
     wecomUrl('/cgi-bin/user/list', {
       access_token: token,
-      department_id: Number.isFinite(departmentId) && departmentId > 0 ? departmentId : 1,
+      department_id:
+        Number.isFinite(departmentId) && departmentId > 0 ? departmentId : 1,
       fetch_child: 1
     }),
     { retries: 1 }
@@ -807,13 +811,17 @@ async function listWecomContacts(options = {}) {
       502
     )
   }
-  return (Array.isArray(data.userlist) ? data.userlist : []).map(item => ({
-    userId: String(item.userid || '').trim(),
-    name: String(item.name || item.userid || '').slice(0, 100),
-    avatar: String(item.avatar || '').slice(0, 1000),
-    position: String(item.position || '').slice(0, 100),
-    departments: Array.isArray(item.department) ? item.department.slice(0, 100) : []
-  })).filter(item => item.userId)
+  return (Array.isArray(data.userlist) ? data.userlist : [])
+    .map(item => ({
+      userId: String(item.userid || '').trim(),
+      name: String(item.name || item.userid || '').slice(0, 100),
+      avatar: String(item.avatar || '').slice(0, 1000),
+      position: String(item.position || '').slice(0, 100),
+      departments: Array.isArray(item.department)
+        ? item.department.slice(0, 100)
+        : []
+    }))
+    .filter(item => item.userId)
 }
 
 function wecomAvatarUrl(profile) {
@@ -882,7 +890,8 @@ async function consumeOAuthState(nonce, browserId) {
 async function upsertUser(user) {
   const corpId = user.corpId || config.corpId
   const wecomUserId = String(user.wecomUserId || user.id || '').trim()
-  if (!wecomUserId) throw new AuthError('invalid_user', '企业微信成员身份为空', 400)
+  if (!wecomUserId)
+    throw new AuthError('invalid_user', '企业微信成员身份为空', 400)
   const internalUserId = await resolveInternalUserId(corpId, wecomUserId)
   const result = await authPool.query(
     `insert into wecom_users
@@ -907,10 +916,23 @@ async function upsertUser(user) {
        updated_at = now(),
        last_login_at = now()
      returning user_id, corp_id, wecom_userid`,
-    [internalUserId, corpId, wecomUserId, user.name, user.avatar, user.position || '', JSON.stringify(user.departments)]
+    [
+      internalUserId,
+      corpId,
+      wecomUserId,
+      user.name,
+      user.avatar,
+      user.position || '',
+      JSON.stringify(user.departments)
+    ]
   )
   const row = result.rows[0]
-  return { ...user, id: row.user_id, corpId: row.corp_id, wecomUserId: row.wecom_userid }
+  return {
+    ...user,
+    id: row.user_id,
+    corpId: row.corp_id,
+    wecomUserId: row.wecom_userid
+  }
 }
 
 async function resolveInternalUserId(corpId, wecomUserId) {
@@ -1018,6 +1040,13 @@ async function authenticateWebsocketRequest(req) {
   if (safeEqualString(authorization, `Bearer ${config.mcpToken}`)) {
     return { id: 'mcp-service', name: 'MCP Service', service: true }
   }
+  const mcpUser = verifyMcpUserToken(
+    bearerToken(authorization),
+    config.mcpToken
+  )
+  if (mcpUser) {
+    return { id: mcpUser.userId, name: mcpUser.userId, mcp: true }
+  }
   if (!isAllowedOrigin(req)) {
     const err = new Error('Forbidden')
     err.statusCode = 403
@@ -1037,6 +1066,14 @@ async function requireAuthenticatedRequest(req, res) {
   const authorization = String(req.headers.authorization || '')
   if (safeEqualString(authorization, `Bearer ${config.mcpToken}`)) {
     req.authUser = { id: 'mcp-service', name: 'MCP Service', service: true }
+    return true
+  }
+  const mcpUser = verifyMcpUserToken(
+    bearerToken(authorization),
+    config.mcpToken
+  )
+  if (mcpUser) {
+    req.authUser = { id: mcpUser.userId, name: mcpUser.userId, mcp: true }
     return true
   }
   const method = String(req.method || 'GET').toUpperCase()
@@ -1337,7 +1374,13 @@ async function handleAuthApi(req, res) {
     }
     try {
       const identity = await createTestIdentity(body)
-      setCookie(res, req, SESSION_COOKIE, identity.token, config.sessionMaxSeconds)
+      setCookie(
+        res,
+        req,
+        SESSION_COOKIE,
+        identity.token,
+        config.sessionMaxSeconds
+      )
       sendJson(req, res, 200, identity)
     } catch (err) {
       sendJson(req, res, 500, {
@@ -1436,7 +1479,12 @@ async function createTestIdentity(options = {}) {
   }
   const stored = await upsertUser(user)
   const token = await createSession(stored.id)
-  return { userId: stored.id, wecomUserId: stored.wecomUserId, name: user.name, token }
+  return {
+    userId: stored.id,
+    wecomUserId: stored.wecomUserId,
+    name: user.name,
+    token
+  }
 }
 
 module.exports = {

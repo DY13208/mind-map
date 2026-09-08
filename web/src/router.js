@@ -104,6 +104,23 @@ const routes = [
     ]
   },
   {
+    path: '/mcp-access',
+    component: () =>
+      import(
+        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'
+      ),
+    children: [
+      {
+        path: '',
+        name: 'McpAccess',
+        component: () =>
+          import(
+            /* webpackChunkName: "product-shell" */ './pages/ProductShell/McpAccessPage.vue'
+          )
+      }
+    ]
+  },
+  {
     path: '/',
     name: 'Edit',
     component: () => import(`./pages/Edit/Index.vue`),
