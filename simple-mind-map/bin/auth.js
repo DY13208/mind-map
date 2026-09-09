@@ -15,6 +15,16 @@ let authPool = null
 let authInitialization = null
 let accessTokenCache = null
 let accessTokenRequest = null
+/** mobile → { userId, name?, avatar?, expiresAt } for AUTH_DEV_BYPASS_MOBILE */
+let devBypassMobileCache = null
+
+function normalizeMobileForWecom(mobile) {
+  let raw = String(mobile || '').trim().replace(/[\s-]/g, '')
+  if (raw.startsWith('+86') && raw.length === 14) raw = raw.slice(3)
+  else if (raw.startsWith('86') && raw.length === 13) raw = raw.slice(2)
+  if (!/^1\d{10}$/.test(raw)) return ''
+  return raw
+}
 
 class AuthError extends Error {
   constructor(code, message, status = 502) {
@@ -228,8 +238,17 @@ function readConfig(env = process.env) {
     String(env.AUTH_DEV_BYPASS_USER_ID || 'dev-local')
       .trim()
       .slice(0, 255) || 'dev-local'
+  const rawDevBypassMobile = String(env.AUTH_DEV_BYPASS_MOBILE || '').trim()
+  const devBypassMobile = rawDevBypassMobile
+    ? normalizeMobileForWecom(rawDevBypassMobile)
+    : ''
   if (devBypassKey && devBypassKey.length < 32) {
     throw new Error('AUTH_DEV_BYPASS_KEY 至少需要 32 个字符')
+  }
+  if (rawDevBypassMobile && !devBypassMobile) {
+    throw new Error(
+      'AUTH_DEV_BYPASS_MOBILE 须为 11 位国内手机号，可带 +86 / 86 前缀'
+    )
   }
 
   return {
@@ -250,6 +269,7 @@ function readConfig(env = process.env) {
     devBypassAllowPublic,
     devBypassUserName,
     devBypassUserId,
+    devBypassMobile,
     wecomApiBase: String(
       env.WECOM_API_BASE || 'https://qyapi.weixin.qq.com'
     ).replace(/\/$/, ''),
@@ -630,15 +650,25 @@ function delay(milliseconds) {
 
 async function fetchJson(url, options = {}) {
   const retries = Number(options.retries || 0)
+  const method = String(options.method || 'GET').toUpperCase()
+  const body =
+    options.body === undefined || options.body === null
+      ? undefined
+      : typeof options.body === 'string'
+        ? options.body
+        : JSON.stringify(options.body)
   let lastError
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 8000)
     try {
+      const headers = { Accept: 'application/json' }
+      if (body !== undefined) headers['Content-Type'] = 'application/json'
       const response = await fetch(url, {
-        method: 'GET',
+        method,
         signal: controller.signal,
-        headers: { Accept: 'application/json' }
+        headers,
+        body
       })
       if (!response.ok) {
         throw new AuthError(
@@ -756,6 +786,95 @@ async function getProfileResponse(userId, token) {
     }),
     { retries: 1 }
   )
+}
+
+async function getUserIdByMobileResponse(mobile, token) {
+  return fetchJson(
+    wecomUrl('/cgi-bin/user/getuserid', {
+      access_token: token
+    }),
+    {
+      method: 'POST',
+      body: { mobile },
+      retries: 1
+    }
+  )
+}
+
+/**
+ * Resolve WeCom userid from AUTH_DEV_BYPASS_MOBILE via user/getuserid.
+ * Cached briefly so repeated local logins do not hammer the API.
+ */
+async function resolveDevBypassIdentityByMobile(mobile) {
+  const normalized = normalizeMobileForWecom(mobile)
+  if (!normalized) {
+    throw new AuthError(
+      'invalid_dev_mobile',
+      'AUTH_DEV_BYPASS_MOBILE 须为 11 位国内手机号',
+      400
+    )
+  }
+  const now = Date.now()
+  if (
+    devBypassMobileCache &&
+    devBypassMobileCache.mobile === normalized &&
+    devBypassMobileCache.expiresAt > now
+  ) {
+    return {
+      id: devBypassMobileCache.userId,
+      name: devBypassMobileCache.name,
+      avatar: devBypassMobileCache.avatar || ''
+    }
+  }
+
+  let token = await getAccessToken()
+  let data = await getUserIdByMobileResponse(normalized, token)
+  if (WECOM_TOKEN_ERROR_CODES.has(Number(data && data.errcode))) {
+    token = await getAccessToken(true)
+    data = await getUserIdByMobileResponse(normalized, token)
+  }
+  if (!successfulWecomResponse(data)) {
+    throw createWecomResponseError(
+      data,
+      'wecom_mobile_lookup_failed',
+      '无法根据手机号查找企业微信成员'
+    )
+  }
+  const userId = String(data.userid || data.UserId || '').trim()
+  if (!userId || userId.length > 255) {
+    throw new AuthError(
+      'wecom_mobile_not_found',
+      '企业微信中未找到该手机号对应的成员，请确认通讯录已维护手机号且应用有通讯录权限',
+      404
+    )
+  }
+
+  let name = ''
+  let avatar = ''
+  try {
+    let profile = await getProfileResponse(userId, token)
+    if (WECOM_TOKEN_ERROR_CODES.has(Number(profile && profile.errcode))) {
+      token = await getAccessToken(true)
+      profile = await getProfileResponse(userId, token)
+    }
+    if (successfulWecomResponse(profile)) {
+      name = String(profile.name || '').slice(0, 100)
+      avatar = wecomAvatarUrl(profile)
+    }
+  } catch (err) {
+    console.warn(
+      '[auth] Dev bypass profile lookup failed; using resolved UserId only'
+    )
+  }
+
+  devBypassMobileCache = {
+    mobile: normalized,
+    userId,
+    name,
+    avatar,
+    expiresAt: now + 30 * 60 * 1000
+  }
+  return { id: userId, name, avatar }
 }
 
 async function exchangeWecomCode(code) {
@@ -1178,11 +1297,22 @@ function readJsonBody(req, limit = 4096) {
 }
 
 async function createDevBypassSession(req, res) {
+  let wecomUserId = config.devBypassUserId
+  let name = config.devBypassUserName
+  let avatar = ''
+  if (config.devBypassMobile) {
+    const resolved = await resolveDevBypassIdentityByMobile(
+      config.devBypassMobile
+    )
+    wecomUserId = resolved.id
+    if (resolved.name) name = resolved.name
+    avatar = resolved.avatar || ''
+  }
   const user = {
-    id: config.devBypassUserId,
+    id: wecomUserId,
     corpId: config.corpId,
-    name: config.devBypassUserName,
-    avatar: '',
+    name,
+    avatar,
     departments: []
   }
   const stored = await upsertUser(user)
@@ -1488,6 +1618,13 @@ async function handleAuthApi(req, res) {
       })
     } catch (err) {
       console.error('[auth] Dev bypass login failed:', err.message || err)
+      if (err instanceof AuthError) {
+        sendJson(req, res, err.status || 502, {
+          error: err.message,
+          code: err.code
+        })
+        return true
+      }
       sendJson(req, res, 502, {
         error: '开发者登录失败',
         code: 'auth_unavailable'
@@ -1580,6 +1717,7 @@ module.exports = {
     requestAppOrigin,
     logoutRedirectUrl,
     hostnamesEquivalent,
-    collisionInternalUserId
+    collisionInternalUserId,
+    normalizeMobileForWecom
   }
 }

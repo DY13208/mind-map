@@ -1,8 +1,14 @@
 /**
- * SOP 台账 → WorkBuddy 直接运行
- * 交互对齐 WorkBuddy 客户端：点运行 → 选产物 → 执行 SOP → 拿回报告/链接
+ * SOP 台账 → AI 后端直接运行（WorkBuddy / 小策，由设置与运行弹窗选择）
+ * 交互对齐：点运行 → 选产物 → 执行 SOP → 拿回报告/链接
  */
-import { checkWorkbuddy, streamChat } from './workbuddyChat'
+import {
+  AI_BACKEND_XIAOCE,
+  aiBackendLabel,
+  checkWorkbuddy,
+  getAiBackend,
+  streamChat
+} from './agentChat'
 import {
   addRunToLedger,
   addDeliverableToLedger,
@@ -112,7 +118,7 @@ export async function loadSopRunContext(roomKey, sop) {
 }
 
 function buildSystemPrompt() {
-  return `你是良策 SOP 执行助手（WorkBuddy）。用户会指定一个 SOP 节点并勾选需要的产物。
+  return `你是良策 SOP 执行助手（${aiBackendLabel()}）。用户会指定一个 SOP 节点并勾选需要的产物。
 这是真实执行任务，不是问答总结。
 
 硬性规则：
@@ -765,7 +771,7 @@ export function assessSopExecution({
 }
 
 /**
- * 运行 SOP：WorkBuddy Chat（与客户端「执行这个节点的 SOP」同类）
+ * 运行 SOP：当前 AI 后端 Chat（与客户端「执行这个节点的 SOP」同类）
  */
 export async function runSopWithWorkbuddy({
   roomKey,
@@ -792,16 +798,22 @@ export async function runSopWithWorkbuddy({
   )
   // 允许不选产物：流程型 SOP（通知/招聘/审批）只执行步骤与派发
 
-  setStatus('检查 WorkBuddy…')
+  const backend = getAiBackend()
+  const backendLabel = aiBackendLabel(backend)
+  setStatus(`检查 ${backendLabel}…`)
   const wb = await checkWorkbuddy()
   if (!wb.ok) {
-    throw new Error('WorkBuddy 未就绪，请确认本机已启动 WorkBuddy API 代理')
+    throw new Error(
+      backend === AI_BACKEND_XIAOCE
+        ? '小策未就绪，请确认已登录且企业/智能体配置可用'
+        : 'WorkBuddy 未就绪，请确认本机已启动 WorkBuddy API 代理'
+    )
   }
 
   setStatus('拉取 SOP 节点子树 / 大纲…')
   const ctx = await loadSopRunContext(key, sop)
 
-  // 先处理「AI发起通知」类节点：写入 CPDA 待办 + WorkBuddy 派发；阻塞则暂停主执行
+  // 先处理「AI发起通知」类节点：写入 CPDA 待办 + 当前后端企微派发；阻塞则暂停主执行
   const notifyNodes = skipNotify
     ? []
     : extractNotifyNodesFromOutline(ctx.outline)
@@ -856,7 +868,7 @@ export async function runSopWithWorkbuddy({
         note: `阻塞通知 ${notifySummary.blocking.length} 条：${notifySummary.blocking
           .map(b => b.text)
           .join('；')}`,
-        actor: actor || 'WorkBuddy'
+        actor: actor || backendLabel
       })
       return {
         ok: false,
@@ -941,12 +953,12 @@ export async function runSopWithWorkbuddy({
     })
   }
   if (!ctx.outline) {
-    setStatus('未拉到子树，仍把房间号/节点 uid 交给 WorkBuddy 自行读取…')
+    setStatus(`未拉到子树，仍把房间号/节点 uid 交给 ${backendLabel} 自行读取…`)
   } else {
     setStatus(
       `已打包上下文：节点 ${ctx.sopUid || '(无uid)'}，大纲 ${
         ctx.outline.length
-      } 字，正在流式调用 WorkBuddy…`
+      } 字，正在流式调用 ${backendLabel}…`
     )
   }
 
@@ -972,7 +984,7 @@ export async function runSopWithWorkbuddy({
     onEvent: (label, raw) => {
       if (label) {
         lastEvent = label
-        setStatus(`WorkBuddy：${label}`)
+        setStatus(`${backendLabel}：${label}`)
       }
       if (onEventDetail) onEventDetail({ label, raw, at: Date.now() })
     },
@@ -1005,8 +1017,10 @@ export async function runSopWithWorkbuddy({
       events.length > 0 &&
       events.every(ev => String((ev && ev.type) || '').includes('phase'))
     const reason = phaseOnly
-      ? `WorkBuddy 接口已通，但模型未产出正文（仅 ${events.length} 个 phase 事件，耗时 ${elapsedSec}s）。请在 WorkBuddy 客户端确认已登录且本月额度可用，再重试。`
-      : `WorkBuddy 返回空正文（耗时 ${elapsedSec}s，事件 ${events.length}）。接口连通但执行未成功。`
+      ? backend === AI_BACKEND_XIAOCE
+        ? `小策接口已通，但智能体未产出正文（仅 ${events.length} 个 phase 事件，耗时 ${elapsedSec}s）。请确认企业/智能体可用后重试。`
+        : `WorkBuddy 接口已通，但模型未产出正文（仅 ${events.length} 个 phase 事件，耗时 ${elapsedSec}s）。请在 WorkBuddy 客户端确认已登录且本月额度可用，再重试。`
+      : `${backendLabel} 返回空正文（耗时 ${elapsedSec}s，事件 ${events.length}）。接口连通但执行未成功。`
     setStatus(reason)
     const emptyLedger = normalizeLedger(
       sop.sopLedger || {
@@ -1019,7 +1033,7 @@ export async function runSopWithWorkbuddy({
       at: new Date().toISOString().slice(0, 16).replace('T', ' '),
       result: '接口空跑',
       note: reason,
-      actor: actor || 'WorkBuddy'
+      actor: actor || backendLabel
     })
     const uidEmpty = sop.uid || (sop.uids && sop.uids[0]) || ''
     if (uidEmpty) {
@@ -1089,7 +1103,7 @@ export async function runSopWithWorkbuddy({
     ]
       .filter(Boolean)
       .join(' · '),
-    actor: actor || 'WorkBuddy'
+    actor: actor || backendLabel
   })
   // 只有拿到真实路径才记产物；不要再用「待回填路径」冒充成功
   deliverables.forEach(d => {

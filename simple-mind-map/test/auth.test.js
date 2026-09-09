@@ -88,6 +88,27 @@ assert.throws(
     }),
   /AUTH_DEV_BYPASS_KEY/
 )
+assert.throws(
+  () =>
+    __test.readConfig({
+      ...process.env,
+      AUTH_DEV_BYPASS_MOBILE: '12345'
+    }),
+  /AUTH_DEV_BYPASS_MOBILE/
+)
+assert.strictEqual(__test.normalizeMobileForWecom('13800138000'), '13800138000')
+assert.strictEqual(__test.normalizeMobileForWecom('+8613800138000'), '13800138000')
+assert.strictEqual(__test.normalizeMobileForWecom('8613800138000'), '13800138000')
+assert.strictEqual(__test.normalizeMobileForWecom('138-0013-8000'), '13800138000')
+assert.strictEqual(__test.normalizeMobileForWecom('not-a-phone'), '')
+{
+  const withMobile = __test.readConfig({
+    ...process.env,
+    AUTH_DEV_BYPASS_KEY: 'yiran-dev-local-bypass-key-2026-stillgroup',
+    AUTH_DEV_BYPASS_MOBILE: '+86 138-0013-8000'
+  })
+  assert.strictEqual(withMobile.devBypassMobile, '13800138000')
+}
 
 assert.strictEqual(__test.isPrivateOrLocalHost('localhost'), true)
 assert.strictEqual(__test.isPrivateOrLocalHost('127.0.0.1:1234'), true)

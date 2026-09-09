@@ -3,7 +3,7 @@
  * - 识别通知、提醒、知会、抄送、催办等标题
  * - 从标题或子节点解析「给谁」
  * - 自动判断阻塞（等待/确认/审批）或继续
- * - WorkBuddy 派发 + 写入导图 CPDA 待办树
+ * - 当前 AI 后端派发企微待办 + 写入导图 CPDA 待办树
  */
 import { dispatchTodo } from './sendTodo'
 import { createRoomTodo, listRoomTodos } from './fileApi'
@@ -350,6 +350,8 @@ export async function processNotifyNodes({
     let dispatchReply = ''
     let dispatchOk = false
     let dispatchError = ''
+    let dispatchVia = ''
+    let dispatchBackendLabel = ''
     try {
       const todo = await dispatchTodo({
         assignee: { name: assignee },
@@ -372,11 +374,15 @@ export async function processNotifyNodes({
       dispatchReply = (todo && todo.content) || ''
       dispatchOk = !!(todo && todo.success)
       dispatchError = (todo && todo.error) || ''
+      dispatchVia = (todo && todo.via) || ''
+      dispatchBackendLabel =
+        (todo && todo.backendLabel) ||
+        (dispatchVia === 'xiaoce-wecom' ? '小策' : 'WorkBuddy')
       if (!dispatchOk && dispatchError) {
         dispatchReply = `${dispatchError}\n${dispatchReply}`.trim()
       }
     } catch (err) {
-      dispatchReply = (err && err.message) || 'WorkBuddy 派发失败'
+      dispatchReply = (err && err.message) || '企微派发失败'
       dispatchError = dispatchReply
       console.warn('[sopNotify] dispatchTodo failed', err)
     }
@@ -391,7 +397,9 @@ export async function processNotifyNodes({
       cpdaError,
       dispatchOk,
       dispatchReply,
-      dispatchError
+      dispatchError,
+      dispatchVia,
+      dispatchBackendLabel
     })
   }
   return results

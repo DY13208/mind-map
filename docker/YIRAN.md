@@ -88,6 +88,10 @@ root `.env` when missing and Compose injects it into both services. A missing
 binding returns `WECOM_NOT_BOUND`; the bridge never links users by name, phone,
 or email and never creates a Yiran user implicitly.
 
+Local developers: set `AUTH_DEV_BYPASS_MOBILE` to your WeCom directory mobile.
+Dev-login then resolves the real `wecom_userid` via WeCom API so Xiaoce SSO can
+match an existing binding. Do not rely on the default `AUTH_DEV_BYPASS_USER_ID=dev-local`.
+
 ## Verify
 
 ```bash

@@ -1,7 +1,11 @@
+import { isXiaoceBackend } from './agentChat'
+import { createXiaoceWecomTodo } from './xiaoceChat'
 import { getWorkbuddyConfig } from './workbuddyChat'
 
 /**
- * 通过本机 wecom-cli 发企业微信待办（与 WorkBuddy 客户端同一条路）。
+ * 发企业微信待办：
+ * - 小策：走 /yiran/api/wecom/todos/（通讯录匹配姓名）
+ * - WorkBuddy：走本机 wecom-cli /v1/wecom/todo
  * 不再经 LLM/ACP，避免模型空跑或去翻仓库。
  */
 export async function dispatchTodo({
@@ -27,6 +31,117 @@ export async function dispatchTodo({
     .trim()
     .slice(0, 2000)
 
+  if (isXiaoceBackend()) {
+    return dispatchTodoViaXiaoce({
+      assigneeName,
+      taskTitle,
+      description,
+      detail,
+      context,
+      onEvent,
+      onDelta,
+      signal
+    })
+  }
+
+  return dispatchTodoViaWorkbuddy({
+    assigneeName,
+    taskTitle,
+    description,
+    detail,
+    context,
+    onEvent,
+    onDelta,
+    signal,
+    conversationId,
+    model
+  })
+}
+
+async function dispatchTodoViaXiaoce({
+  assigneeName,
+  taskTitle,
+  description,
+  detail,
+  context,
+  onEvent,
+  onDelta,
+  signal
+}) {
+  if (onEvent) onEvent('xiaoce_wecom', { phase: 'preparing', assignee: assigneeName })
+  if (onDelta) onDelta(`正在通过小策给 ${assigneeName} 创建企微待办…\n`)
+  try {
+    const created = await createXiaoceWecomTodo({
+      assignee: assigneeName,
+      title: taskTitle,
+      description,
+      signal
+    })
+    const content = created.viaContact
+      ? String(created.detail || '').trim() ||
+        `企微待办已创建：${taskTitle}`
+      : `平台待办已创建（通讯录未命中企微联系人，未同步企微）：${taskTitle}`
+    if (onEvent) {
+      onEvent('xiaoce_wecom', {
+        phase: 'done',
+        todo_ids: created.ids,
+        syncStatus: created.syncStatus,
+        via: 'xiaoce-wecom'
+      })
+    }
+    if (onDelta) onDelta(`${content}\n`)
+    return {
+      assignee: assigneeName,
+      title: taskTitle,
+      userLine: `给${assigneeName}发个代办：${taskTitle}`,
+      content,
+      success: !!created.ok,
+      toolUsed: true,
+      via: 'xiaoce-wecom',
+      backendLabel: '小策',
+      todoId: (created.ids && created.ids[0]) || '',
+      error: '',
+      detail: detail || '',
+      context: context || ''
+    }
+  } catch (err) {
+    const message = (err && err.message) || String(err || '派发失败')
+    const notFound =
+      (err && (err.status === 404 || err.code === 'wecom_user_not_found')) ||
+      /找不到|not_found/i.test(message)
+    let errHint = message
+    if (notFound) {
+      errHint = `小策通讯录找不到「${assigneeName}」，请确认姓名。`
+    } else if (/wecom_not_configured|尚未配置企业微信/i.test(message)) {
+      errHint = '小策企业未配置企业微信 API，或当前账号无权读取通讯录。'
+    }
+    if (onDelta) onDelta(`${errHint}\n`)
+    return {
+      assignee: assigneeName,
+      title: taskTitle,
+      userLine: `给${assigneeName}发个代办：${taskTitle}`,
+      content: errHint,
+      success: false,
+      toolUsed: false,
+      via: 'xiaoce-wecom',
+      backendLabel: '小策',
+      error: errHint,
+      detail: detail || '',
+      context: context || ''
+    }
+  }
+}
+
+async function dispatchTodoViaWorkbuddy({
+  assigneeName,
+  taskTitle,
+  description,
+  detail,
+  context,
+  onEvent,
+  onDelta,
+  signal
+}) {
   if (onEvent) onEvent('wecom_cli', { phase: 'preparing', assignee: assigneeName })
   if (onDelta) onDelta(`正在通过 wecom-cli 给 ${assigneeName} 创建企微待办…\n`)
 
@@ -95,6 +210,7 @@ export async function dispatchTodo({
       success: false,
       toolUsed: false,
       via: 'wecom-cli',
+      backendLabel: 'WorkBuddy',
       error: errHint,
       detail: detail || '',
       context: context || ''
@@ -121,6 +237,7 @@ export async function dispatchTodo({
     success: !!(payload && payload.ok),
     toolUsed: true,
     via: 'wecom-cli',
+    backendLabel: 'WorkBuddy',
     todoId: (payload && payload.todo_id) || '',
     error: payload && payload.ok ? '' : content || '派发未确认成功',
     detail: detail || '',

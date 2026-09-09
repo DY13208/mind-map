@@ -23,6 +23,10 @@ export function isXiaoceBackend() {
   return getAiBackend() === AI_BACKEND_XIAOCE
 }
 
+export function aiBackendLabel(backend = getAiBackend()) {
+  return backend === AI_BACKEND_XIAOCE ? '小策' : 'WorkBuddy'
+}
+
 /**
  * Unified readiness check. Always returns `{ ok, backend, ... }`.
  */

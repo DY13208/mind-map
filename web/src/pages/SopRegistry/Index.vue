@@ -439,7 +439,7 @@
       custom-class="sopRunDialog"
     >
       <p class="runDialogLead" v-if="runTarget">
-        配置「{{ runTarget.id }}：{{ runTarget.title }}」后加入任务队列；可关闭本窗口，任务在后台并行执行（WorkBuddy 多会话）。
+        配置「{{ runTarget.id }}：{{ runTarget.title }}」后加入任务队列；可关闭本窗口，任务在后台并行执行。
       </p>
       <div class="runModelRow">
         <span class="runModelLabel">执行引擎</span>
@@ -959,12 +959,15 @@ export default {
         if (r.cpdaOk) parts.push(`导图待办 ${r.taskUid || '已写'}`)
         else if (r.cpdaError) parts.push(`导图失败：${r.cpdaError}`)
         else parts.push('导图待办未写入')
-        if (r.dispatchOk) parts.push('WorkBuddy 企微已派发')
+        const backendName =
+          r.dispatchBackendLabel ||
+          (r.dispatchVia === 'xiaoce-wecom' ? '小策' : 'WorkBuddy')
+        if (r.dispatchOk) parts.push(`${backendName} 企微已派发`)
         else if (r.dispatchError)
-          parts.push(`WorkBuddy 失败：${String(r.dispatchError).slice(0, 48)}`)
+          parts.push(`${backendName} 失败：${String(r.dispatchError).slice(0, 48)}`)
         else if (r.dispatchReply)
-          parts.push(`WorkBuddy：${String(r.dispatchReply).slice(0, 48)}`)
-        else parts.push('WorkBuddy 未确认')
+          parts.push(`${backendName}：${String(r.dispatchReply).slice(0, 48)}`)
+        else parts.push(`${backendName} 未确认`)
         return {
           kind: r.block ? '阻塞' : '知会',
           assignee,
@@ -993,7 +996,10 @@ export default {
       if (modelText) {
         parts.push(parts.length ? `\n—— 模型输出 ——\n${modelText}` : modelText)
       } else if (running && !progress) {
-        parts.push('等待 WorkBuddy 输出…（状态与工具事件会在此滚动更新）')
+        const backendName =
+          (job && job.backendLabel) ||
+          (job && job.backend === 'xiaoce' ? '小策' : 'WorkBuddy')
+        parts.push(`等待 ${backendName} 输出…（状态与工具事件会在此滚动更新）`)
       } else if (!running && job.error) {
         parts.push(job.error)
       }

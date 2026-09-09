@@ -91,19 +91,144 @@ async function getXiaoceAuthorization(force = false) {
 
 async function xiaoceFetch(path, options = {}, retry = true) {
   const auth = await getXiaoceAuthorization(false)
+  const headers = {
+    Accept: 'application/json',
+    ...(options.headers || {}),
+    Authorization: auth.authorization
+  }
+  if (
+    options.body != null &&
+    !headers['Content-Type'] &&
+    !headers['content-type']
+  ) {
+    headers['Content-Type'] = 'application/json; charset=utf-8'
+  }
   const response = await fetch(`${auth.baseUrl}${path}`, {
     ...options,
-    headers: { ...(options.headers || {}), Authorization: auth.authorization }
+    headers
   })
   if (response.status === 401 && retry) {
     ssoAccess = null
     const refreshed = await getXiaoceAuthorization(true)
     return fetch(`${refreshed.baseUrl}${path}`, {
       ...options,
-      headers: { ...(options.headers || {}), Authorization: refreshed.authorization }
+      headers: { ...headers, Authorization: refreshed.authorization }
     })
   }
   return response
+}
+
+function normalizePersonKey(name) {
+  return String(name || '')
+    .replace(/[^\u4e00-\u9fffA-Za-z0-9]/g, '')
+    .toLowerCase()
+}
+
+function personNameMatches(candidate, target) {
+  const a = normalizePersonKey(candidate)
+  const b = normalizePersonKey(target)
+  if (!a || !b) return false
+  return a === b || a.includes(b) || b.includes(a)
+}
+
+/**
+ * Create a WeCom-synced work todo via Xiaoce `/api/wecom/todos/`.
+ * Resolves assignee by display name against contacts, then platform members.
+ */
+export async function createXiaoceWecomTodo({
+  assignee,
+  title,
+  description,
+  signal
+} = {}) {
+  const assigneeName = String(assignee || '').trim()
+  const taskTitle = String(title || '待办').trim().slice(0, 200) || '待办'
+  const detail = String(description || '').trim().slice(0, 1000)
+
+  const contactsRes = await xiaoceFetch('/api/wecom/contacts/', {
+    cache: 'no-store',
+    signal
+  })
+  const contactsJson = await contactsRes.json().catch(() => ({}))
+  if (!contactsRes.ok) {
+    const msg =
+      contactsJson.detail ||
+      contactsJson.error ||
+      `读取企微通讯录失败（HTTP ${contactsRes.status}）`
+    const err = new Error(msg)
+    err.status = contactsRes.status
+    err.code = contactsJson.code || 'xiaoce_contacts_failed'
+    throw err
+  }
+  const contacts = Array.isArray(contactsJson.results) ? contactsJson.results : []
+  const contact = contacts.find(
+    item => item && item.available !== false && personNameMatches(item.name, assigneeName)
+  )
+
+  let body
+  if (contact && contact.contactId != null) {
+    body = {
+      title: taskTitle,
+      description: detail,
+      platformAssigneeIds: [],
+      wecomContactIds: [Number(contact.contactId)],
+      syncToWeCom: true
+    }
+  } else {
+    const membersRes = await xiaoceFetch('/api/wecom/todos/members/', {
+      cache: 'no-store',
+      signal
+    })
+    const membersJson = await membersRes.json().catch(() => ({}))
+    if (!membersRes.ok) {
+      throw new Error(
+        membersJson.detail ||
+          membersJson.error ||
+          `读取企业成员失败（HTTP ${membersRes.status}）`
+      )
+    }
+    const members = Array.isArray(membersJson.results) ? membersJson.results : []
+    const member = members.find(item => item && personNameMatches(item.name, assigneeName))
+    if (!member) {
+      const err = new Error(
+        `小策通讯录找不到「${assigneeName}」，请确认姓名与企业成员一致`
+      )
+      err.code = 'wecom_user_not_found'
+      err.status = 404
+      throw err
+    }
+    body = {
+      title: taskTitle,
+      description: detail,
+      platformAssigneeIds: [Number(member.id)],
+      wecomContactIds: [],
+      syncToWeCom: false
+    }
+  }
+
+  const createRes = await xiaoceFetch('/api/wecom/todos/', {
+    method: 'POST',
+    body: JSON.stringify(body),
+    signal
+  })
+  const created = await createRes.json().catch(() => ({}))
+  if (!createRes.ok) {
+    const msg =
+      (created && (created.detail || created.error)) ||
+      `创建待办失败（HTTP ${createRes.status}）`
+    const err = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+    err.status = createRes.status
+    err.code = created && created.code
+    throw err
+  }
+  return {
+    ok: true,
+    ids: created.ids || [],
+    syncStatus: created.syncStatus || '',
+    detail: created.detail || created.syncDetail || '待办已创建',
+    viaContact: !!(contact && contact.contactId != null),
+    matchedName: (contact && contact.name) || assigneeName
+  }
 }
 
 export async function fetchXiaoceOrganizations() {
