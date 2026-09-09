@@ -5,6 +5,7 @@ const {
   createMemoryFileStore,
   handleFileSystemApi
 } = require('../bin/fileSystem')
+const { DEFAULT_METADATA } = require('../bin/fileSystem/model')
 const { handleHistoryApi } = require('../bin/collabHistory/http')
 
 const OWNER = 'owner-1'
@@ -41,6 +42,10 @@ function mockRes() {
 }
 
 ;(async () => {
+  assert.deepStrictEqual(DEFAULT_METADATA, {
+    theme: 'classic4',
+    layout: 'logicalStructure'
+  })
   const { fs, store, historyCalls } = engineWith()
 
   const created = await fs.createRoom({ title: '  销售流程  ', userId: OWNER })
@@ -59,6 +64,10 @@ function mockRes() {
   assert.strictEqual(members[0].user_id, OWNER)
   assert.strictEqual(members[0].role, 'owner')
   assert.strictEqual(Number(store.rooms.get(created.room.roomKey).version), 0)
+  assert.deepStrictEqual(
+    store.rooms.get(created.room.roomKey).metadata,
+    DEFAULT_METADATA
+  )
 
   await fs.createRoom({ title: 'Alpha', userId: OWNER })
   await fs.createRoom({ title: 'Beta Map', userId: OWNER })

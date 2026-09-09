@@ -214,6 +214,8 @@ export default {
     closeMiniMap: 'Đóng bản đồ thu nhỏ',
     readonly: 'Chuyển sang chế độ chỉ đọc',
     edit: 'Chuyển sang chế độ chỉnh sửa',
+    switchToLight: 'Chuyển sang chế độ sáng',
+    switchToDark: 'Chuyển sang chế độ tối',
     backToRoot: 'Quay lại nút gốc',
     changeSourceCodeEdit: 'Chuyển sang chế độ chỉnh sửa mã nguồn',
     shortcutKeys: 'Phím tắt',

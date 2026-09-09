@@ -84,11 +84,22 @@
           <Scale :isDark="isDark" :mindMap="mindMap"></Scale>
         </div>
         <div class="item">
-          <div
-            class="btn iconfont"
-            :class="[isDark ? 'iconmoon_line' : 'iconlieri']"
-            @click="toggleDark"
-          ></div>
+          <el-tooltip
+            effect="dark"
+            :content="darkModeActionLabel"
+            placement="top"
+          >
+            <div
+              class="btn iconfont"
+              :class="[isDark ? 'iconmoon_line' : 'iconlieri']"
+              role="button"
+              tabindex="0"
+              :aria-label="darkModeActionLabel"
+              @click="toggleDark"
+              @keydown.enter.prevent="toggleDark"
+              @keydown.space.prevent="toggleDark"
+            ></div>
+          </el-tooltip>
         </div>
         <!-- <div class="item">
       <el-tooltip
@@ -186,7 +197,12 @@ export default {
       isReadonly: state => state.isReadonly,
       isDark: state => state.localConfig.isDark,
       roomCanEdit: state => state.roomCanEdit
-    })
+    }),
+    darkModeActionLabel() {
+      return this.isDark
+        ? this.$t('navigatorToolbar.switchToLight')
+        : this.$t('navigatorToolbar.switchToDark')
+    }
   },
   created() {
     this.lang = getLang()
