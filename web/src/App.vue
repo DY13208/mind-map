@@ -71,6 +71,22 @@
                 autocomplete="off"
                 placeholder="输入 .env 中的 AUTH_DEV_BYPASS_KEY"
               />
+              <input
+                v-model="devAuthMobile"
+                class="authDevInput"
+                type="tel"
+                inputmode="numeric"
+                autocomplete="tel"
+                :placeholder="
+                  authState.devBypassMobileHint
+                    ? `手机号（默认 ${authState.devBypassMobileHint}）`
+                    : '小策已绑定成员的企微手机号'
+                "
+              />
+              <p class="authDevHint">
+                换人调试直接改手机号即可，例如黄炜龙
+                <code>17388658096</code>。登录后身份以解析出的企微 userid 为准。
+              </p>
               <button
                 class="authButton authButton--small"
                 type="submit"
@@ -102,7 +118,7 @@ import {
 import { mountWecomLoginPanel } from '@/utils/wecomLogin'
 import AccessNotifications from '@/components/AccessNotifications.vue'
 
-const PAGE_TITLE = '依然'
+const PAGE_TITLE = '良策'
 const AUTH_BOOTSTRAP_MS = 45000
 const authErrors = {
   invalid_state: '登录状态校验失败，请重新扫码。',
@@ -142,6 +158,7 @@ export default {
       qrRefreshTimer: null,
       showDevLogin: false,
       devAuthKey: '',
+      devAuthMobile: '',
       devLoggingIn: false,
       devLoginError: ''
     }
@@ -304,7 +321,18 @@ export default {
       this.devLoggingIn = true
       this.devLoginError = ''
       try {
-        this.authState = await devLogin(key)
+        const result = await devLogin(key, this.devAuthMobile.trim())
+        this.authState = {
+          ...result,
+          enabled: true,
+          authenticated: true,
+          devBypassAvailable: true
+        }
+        const who =
+          (result.user &&
+            `${result.user.name || ''} (${result.user.wecomUserId || result.user.id})`) ||
+          ''
+        if (who) console.info(`[auth] logged in as ${who}`)
         this.clearQrRefreshTimer()
         this.destroyQrPanel()
       } catch (err) {
@@ -625,6 +653,20 @@ body,
   font-size: 12px;
   line-height: 1.4;
   text-align: left;
+}
+
+.authDevHint {
+  margin: 0;
+  color: #6b7c85;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: left;
+
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: #0f5c44;
+  }
 }
 
 .authSpinner {

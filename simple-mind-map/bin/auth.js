@@ -1271,6 +1271,12 @@ function publicUser(user) {
   }
 }
 
+function maskMobileHint(mobile) {
+  const normalized = normalizeMobileForWecom(mobile)
+  if (!normalized) return ''
+  return `${normalized.slice(0, 3)}****${normalized.slice(-4)}`
+}
+
 function readJsonBody(req, limit = 4096) {
   return new Promise((resolve, reject) => {
     let raw = ''
@@ -1296,17 +1302,27 @@ function readJsonBody(req, limit = 4096) {
   })
 }
 
-async function createDevBypassSession(req, res) {
+async function createDevBypassSession(req, res, options = {}) {
+  const rawOverride = String(options.mobile || '').trim()
+  const overrideMobile = normalizeMobileForWecom(rawOverride)
+  if (rawOverride && !overrideMobile) {
+    throw new AuthError(
+      'invalid_dev_mobile',
+      '手机号须为 11 位国内号码，可带 +86 / 86 前缀',
+      400
+    )
+  }
+  const mobile = overrideMobile || config.devBypassMobile
   let wecomUserId = config.devBypassUserId
   let name = config.devBypassUserName
   let avatar = ''
-  if (config.devBypassMobile) {
-    const resolved = await resolveDevBypassIdentityByMobile(
-      config.devBypassMobile
-    )
+  let resolvedMobile = ''
+  if (mobile) {
+    const resolved = await resolveDevBypassIdentityByMobile(mobile)
     wecomUserId = resolved.id
     if (resolved.name) name = resolved.name
     avatar = resolved.avatar || ''
+    resolvedMobile = mobile
   }
   const user = {
     id: wecomUserId,
@@ -1319,12 +1335,16 @@ async function createDevBypassSession(req, res) {
   const session = await createSession(stored.id)
   user.id = stored.id
   user.wecomUserId = stored.wecomUserId
+  user.corpId = stored.corpId || config.corpId
   setCookie(res, req, SESSION_COOKIE, session, config.sessionMaxSeconds)
   return {
     id: user.id,
+    corpId: user.corpId,
+    wecomUserId: user.wecomUserId,
     name: user.name,
     avatar: user.avatar,
-    departments: user.departments
+    departments: user.departments,
+    resolvedMobile: maskMobileHint(resolvedMobile)
   }
 }
 
@@ -1401,7 +1421,10 @@ async function handleAuthApi(req, res) {
     sendJson(req, res, 200, {
       enabled: config.enabled,
       loginPath: config.enabled ? '/api/auth/login' : null,
-      devBypassAvailable: isDevBypassAllowed(req)
+      devBypassAvailable: isDevBypassAllowed(req),
+      devBypassMobileHint: isDevBypassAllowed(req)
+        ? maskMobileHint(config.devBypassMobile)
+        : ''
     })
     return true
   }
@@ -1419,7 +1442,9 @@ async function handleAuthApi(req, res) {
     try {
       sendJson(req, res, 200, {
         assertion: issueYiranIdentityAssertion(user),
-        expiresIn: 90
+        expiresIn: 90,
+        wecomUserId: user.wecomUserId || user.id,
+        corpId: user.corpId || config.corpId
       })
     } catch (err) {
       sendJson(req, res, err.status || 500, {
@@ -1440,7 +1465,10 @@ async function handleAuthApi(req, res) {
       enabled: true,
       authenticated: !!user,
       user: user ? publicUser(user) : null,
-      devBypassAvailable: isDevBypassAllowed(req)
+      devBypassAvailable: isDevBypassAllowed(req),
+      devBypassMobileHint: isDevBypassAllowed(req)
+        ? maskMobileHint(config.devBypassMobile)
+        : ''
     })
     return true
   }
@@ -1611,10 +1639,13 @@ async function handleAuthApi(req, res) {
       return true
     }
     try {
-      const user = await createDevBypassSession(req, res)
+      const user = await createDevBypassSession(req, res, {
+        mobile: body.mobile
+      })
       sendJson(req, res, 200, {
         authenticated: true,
-        user: publicUser(user)
+        user: publicUser(user),
+        resolvedMobile: user.resolvedMobile || ''
       })
     } catch (err) {
       console.error('[auth] Dev bypass login failed:', err.message || err)

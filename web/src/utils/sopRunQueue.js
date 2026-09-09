@@ -118,6 +118,8 @@ function serializeJob(job) {
     extraNote: job.extraNote || '',
     model: job.model || '',
     actor: job.actor || '',
+    backend: job.backend || '',
+    backendLabel: job.backendLabel || '',
     state: job.state,
     status: job.status,
     streamText: String(job.streamText || '').slice(0, STREAM_PERSIST_MAX),
@@ -155,6 +157,8 @@ function hydrateJob(raw) {
     extraNote: raw.extraNote || '',
     model: raw.model || '',
     actor: raw.actor || '台账',
+    backend: raw.backend || '',
+    backendLabel: raw.backendLabel || '',
     state: raw.state || 'queued',
     status: raw.status || '',
     streamText: raw.streamText || '',
@@ -256,7 +260,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       savedAt: Date.now(),
       pending: pending.map(serializeJob),
       waiting: Array.from(waiting.values()).map(serializeJob),
-      // 仅用于刷新后标记中断并保留流式输出，不会续跑
+      // 刷新后会自动重新入队续跑
       running: Array.from(running.values())
         .filter(j => j.state === 'running')
         .map(serializeJob),
@@ -286,6 +290,23 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
     }, 400)
   }
 
+  // 刷新/关闭前立刻落盘，避免 400ms 防抖还没写完就丢状态
+  if (typeof window !== 'undefined') {
+    const flushPersist = () => {
+      try {
+        if (persistTimer) {
+          clearTimeout(persistTimer)
+          persistTimer = null
+        }
+        persistNow()
+      } catch (e) {
+        /* ignore */
+      }
+    }
+    window.addEventListener('pagehide', flushPersist)
+    window.addEventListener('beforeunload', flushPersist)
+  }
+
   const emit = () => {
     schedulePersist()
     if (changeHandler) changeHandler(snapshot())
@@ -293,7 +314,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
 
   let changeHandler = onChange
 
-  // 整页刷新后从 sessionStorage 恢复等待/排队任务（流式输出、待补数）
+  // 整页刷新后从 sessionStorage 恢复排队/等待，并把中断的 running 重新入队续跑
   const restored = readPersistedQueue()
   if (restored) {
     ;(restored.waiting || []).forEach(raw => {
@@ -318,15 +339,58 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       if (!job) return
       recent.push(publicJob(job))
     })
-    // 刷新前若有 running：请求已断，记为中断并保留流式输出
+    // 刷新前正在跑的任务：浏览器请求已断，自动重新入队续跑（不再标失败）
     ;(restored.running || []).forEach(raw => {
       const job = hydrateJob(raw)
-      if (!job) return
-      job.state = 'error'
-      job.error = '页面刷新导致执行中断（可重新点运行）'
-      job.status = job.error
-      job.finishedAt = Date.now()
-      recent.unshift(publicJob(job))
+      if (!job || !job.roomKey || !job.sopUid) return
+      const already =
+        pending.some(j => j.id === job.id) ||
+        waiting.has(job.id) ||
+        pending.some(
+          j => sopJobKey(j.roomKey, j.sopUid) === sopJobKey(job.roomKey, job.sopUid)
+        ) ||
+        Array.from(waiting.values()).some(
+          j => sopJobKey(j.roomKey, j.sopUid) === sopJobKey(job.roomKey, job.sopUid)
+        )
+      if (already) return
+      const prevStream = String(job.streamText || '').trim()
+      const prevProgress = String(job.progressText || '').trim()
+      if (prevStream || prevProgress) {
+        const keep = [
+          '—— 刷新前进度（续跑会重新执行） ——',
+          prevProgress,
+          prevStream ? prevStream.slice(0, 4000) : ''
+        ]
+          .filter(Boolean)
+          .join('\n')
+        job.progressText = keep.slice(0, 20000)
+      }
+      // 若刷新前已成功派发企微待办，续跑时跳过，避免重复发
+      const notifiedOk = (job.notifyResults || []).some(r => r && r.dispatchOk)
+      const progressHint = String(job.progressText || '')
+      const progressSaysDispatched =
+        /企微待办已派发|知会通知\s*\d+\s*条已派发|知会派发\s*\d+\//.test(
+          progressHint
+        )
+      if (notifiedOk || progressSaysDispatched) job.skipNotifyOnResume = true
+      job.state = 'queued'
+      // 企微代办类：刷新后若已派过就不要整段重跑模型
+      if (
+        job.skipNotifyOnResume &&
+        /企业微信|发.*代办|代办/.test(
+          String((job.sop && job.sop.title) || job.sopTitle || '')
+        )
+      ) {
+        job.status = '刷新后跳过重复派发…'
+      } else {
+        job.status = '刷新后自动续跑…'
+      }
+      job.error = ''
+      job.streamText = ''
+      job.result = null
+      job.finishedAt = 0
+      job.startedAt = 0
+      pending.unshift(job)
     })
     if (recent.length > 12) recent.length = 12
   }
@@ -478,6 +542,13 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         },
         onContext: ctx => {
           job.context = ctx
+          emit()
+        },
+        onNotifyResults: results => {
+          job.notifyResults = Array.isArray(results) ? results : []
+          if (job.notifyResults.some(r => r && r.dispatchOk)) {
+            job.skipNotifyOnResume = true
+          }
           emit()
         },
         onDelta: text => {

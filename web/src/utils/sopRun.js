@@ -18,6 +18,8 @@ import {
 } from './sopLedger'
 import {
   extractNotifyNodesFromOutline,
+  extractWecomTodoNotifyNodesFromOutline,
+  isWecomTodoOrientedSop,
   processNotifyNodes,
   summarizeNotifyResults
 } from './sopNotify'
@@ -688,7 +690,8 @@ export function assessSopExecution({
   elapsedSec,
   deliverables,
   requireFiles = true,
-  alreadyProvided = []
+  alreadyProvided = [],
+  notifyResults = []
 } = {}) {
   const evs = events || []
   const toolish = evs.filter(ev => {
@@ -701,6 +704,7 @@ export function assessSopExecution({
     if (/待回填/.test(name)) return false
     return /^(https?:\/\/|[A-Za-z]:\\|\/)/.test(uri) || /\.(html?|xlsx?|pdf|md|csv)$/i.test(uri)
   })
+  const dispatched = (notifyResults || []).filter(r => r && r.dispatchOk)
   const tooFast = Number(elapsedSec) > 0 && Number(elapsedSec) < 40
   const text = String(reply || '')
   const claimsDone = /已完成|执行完成|成功生成/.test(text)
@@ -720,9 +724,27 @@ export function assessSopExecution({
     }
   }
 
+  // 企微待办已直派成功：即使模型只回了预览/确认文案，也算真执行
+  if (dispatched.length && realFiles.length === 0) {
+    const names = dispatched
+      .map(r => String((r && r.assignee) || '').trim())
+      .filter(Boolean)
+      .join('、')
+    return {
+      ok: true,
+      runResult: '完成',
+      reason: names
+        ? `企微待办已派发 → ${names}`
+        : `企微待办已派发 ${dispatched.length} 条`,
+      toolEvents: toolish.length,
+      realFiles: 0,
+      notifyDispatched: dispatched.length
+    }
+  }
+
   // 流程型：不要求产物文件，有正文或工具事件即可
   if (!requireFiles) {
-    if (!text.trim() && toolish.length === 0) {
+    if (!text.trim() && toolish.length === 0 && !dispatched.length) {
       return {
         ok: false,
         runResult: '未执行',
@@ -754,6 +776,15 @@ export function assessSopExecution({
     }
   }
   if (realFiles.length === 0 && toolish.length === 0) {
+    // 小策常见：只给「确认创建企业微信待办」预览，未真正调用工具
+    if (/确认创建企业微信待办|创建待办预览|尚未执行任何写入/.test(text)) {
+      return {
+        ok: false,
+        runResult: '未真正派发',
+        reason:
+          '小策只返回了待办预览/确认文案，未实际写入企业微信。请改走台账直派，或在智能体侧关闭待办确认门禁'
+      }
+    }
     return {
       ok: false,
       runResult: '未拿到产物',
@@ -786,6 +817,7 @@ export async function runSopWithWorkbuddy({
   onDelta,
   onEventDetail,
   onContext,
+  onNotifyResults,
   skipNotify = false
 } = {}) {
   const key = String(roomKey || '').trim()
@@ -812,15 +844,89 @@ export async function runSopWithWorkbuddy({
 
   setStatus('拉取 SOP 节点子树 / 大纲…')
   const ctx = await loadSopRunContext(key, sop)
+  const wecomSop = isWecomTodoOrientedSop({
+    ...sop,
+    title: ctx.sopTitle || sop.title,
+    id: ctx.sopId || sop.id
+  })
 
-  // 先处理「AI发起通知」类节点：写入 CPDA 待办 + 当前后端企微派发；阻塞则暂停主执行
-  const notifyNodes = skipNotify
-    ? []
-    : extractNotifyNodesFromOutline(ctx.outline)
+  // 刷新续跑且此前已派发：企微代办 SOP 直接结束，避免再调模型重复发
+  if (skipNotify && wecomSop) {
+    const elapsedSec = 1
+    setStatus('刷新续跑：企微待办此前已派发，已跳过重复执行')
+    let ledger = normalizeLedger(
+      sop.sopLedger || {
+        frequency: sop.frequency,
+        runs: sop.runs,
+        deliverables: sop.deliverables
+      }
+    )
+    ledger = addRunToLedger(ledger, {
+      at: new Date().toISOString().slice(0, 16).replace('T', ' '),
+      result: '成功',
+      note: '刷新续跑跳过重复派发',
+      actor: actor || backendLabel
+    })
+    try {
+      const uid = ctx.sopUid || sop.uid || (sop.uids && sop.uids[0]) || ''
+      if (uid) {
+        await persistSopLedger(
+          key,
+          uid,
+          {
+            id: ctx.sopId || sop.id,
+            title: ctx.sopTitle || sop.title
+          },
+          ledger
+        )
+      }
+    } catch (e) {
+      /* ignore */
+    }
+    return {
+      ok: true,
+      reply: '刷新续跑：企微待办此前已派发，已跳过重复执行。',
+      elapsedSec,
+      outputs,
+      deliverables: [],
+      ledger,
+      runResult: '成功',
+      assessment: {
+        ok: true,
+        runResult: '成功',
+        reason: '跳过重复派发',
+        toolEvents: 0
+      },
+      events: [],
+      context: ctx,
+      notifyResults: [],
+      conversationId: String(conversationIdInput || '').trim()
+    }
+  }
+
+  // 企微代办 SOP：只用专用提取（含子节点），不要走通用「通知」扫描以免串台账噪声
+  let notifyNodes = []
+  if (!skipNotify) {
+    if (wecomSop) {
+      notifyNodes = extractWecomTodoNotifyNodesFromOutline(
+        ctx.outline,
+        {
+          ...sop,
+          id: ctx.sopId || sop.id,
+          title: ctx.sopTitle || sop.title,
+          uid: ctx.sopUid || sop.uid
+        },
+        extraNote
+      )
+    } else {
+      notifyNodes = extractNotifyNodesFromOutline(ctx.outline)
+    }
+  }
   let notifyResults = []
   let notifySummary = summarizeNotifyResults([])
+  const notifyStartedAt = Date.now()
   if (notifyNodes.length) {
-    setStatus(`发现 ${notifyNodes.length} 个通知节点，正在派发…`)
+    setStatus(`发现 ${notifyNodes.length} 个通知/代办节点，正在派发…`)
     const earlyConversationId =
       String(conversationIdInput || '').trim() ||
       `sop-exec-${key}-${String(sop.id || sop.title)
@@ -850,7 +956,89 @@ export async function runSopWithWorkbuddy({
         })
       })
     }
-  if (notifySummary.hasBlocking) {
+    // 立刻通知队列：刷新续跑时跳过重复派发
+    if (typeof onNotifyResults === 'function') {
+      try {
+        onNotifyResults(notifyResults)
+      } catch (e) {
+        /* ignore */
+      }
+    }
+
+    // 纯「发企微代办」SOP：直派成功后立刻结束，不再调模型（哪怕勾了产物）
+    const dispatchedOk = notifyResults.filter(r => r && r.dispatchOk)
+    if (dispatchedOk.length && wecomSop) {
+      const elapsedSec = Math.max(
+        1,
+        Math.round((Date.now() - notifyStartedAt) / 1000)
+      )
+      const reply = notifyResults
+        .map(r => {
+          const mark = r.dispatchOk ? '已派发' : '失败'
+          return `- ${mark} → ${r.assignee}：${r.wxTitle || r.text}${
+            r.dispatchReply ? `\n  ${String(r.dispatchReply).slice(0, 200)}` : ''
+          }${r.dispatchError ? `\n  错误：${r.dispatchError}` : ''}`
+        })
+        .join('\n')
+      const assessment = assessSopExecution({
+        reply: `## 执行结果\n企微待办直派完成。\n${reply}`,
+        events: [{ type: 'tool_result', label: 'wecom_todo_dispatch' }],
+        elapsedSec,
+        deliverables: [],
+        requireFiles: false,
+        notifyResults
+      })
+      setStatus(
+        assessment.ok
+          ? `企微待办已派发（${elapsedSec}s）`
+          : `${assessment.reason || '派发未确认'}，仍写入台账…`
+      )
+      let ledger = normalizeLedger(
+        sop.sopLedger || {
+          frequency: sop.frequency,
+          runs: sop.runs,
+          deliverables: sop.deliverables
+        }
+      )
+      ledger = addRunToLedger(ledger, {
+        at: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        result: assessment.runResult,
+        note: `企微直派 ${dispatchedOk.length}/${notifyResults.length} 条`,
+        actor: actor || backendLabel
+      })
+      try {
+        const uid = ctx.sopUid || sop.uid || (sop.uids && sop.uids[0]) || ''
+        if (uid) {
+          await persistSopLedger(
+            key,
+            uid,
+            {
+              id: ctx.sopId || sop.id,
+              title: ctx.sopTitle || sop.title
+            },
+            ledger
+          )
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      return {
+        ok: assessment.ok,
+        reply: `## 执行结果\n企微待办直派完成。\n${reply}`,
+        elapsedSec,
+        outputs,
+        deliverables: [],
+        ledger,
+        runResult: assessment.runResult,
+        assessment,
+        events: [{ type: 'tool_result', label: 'wecom_todo_dispatch' }],
+        context: ctx,
+        notifyResults,
+        conversationId: earlyConversationId
+      }
+    }
+
+    if (notifySummary.hasBlocking) {
       const waitStarted = Date.now()
       setStatus(
         `已派发阻塞通知 ${notifySummary.blocking.length} 条，等待导图待办完成后再继续`
@@ -1062,7 +1250,8 @@ export async function runSopWithWorkbuddy({
     elapsedSec,
     deliverables,
     requireFiles: outputs.length > 0,
-    alreadyProvided: parseProvidedFieldLabels(extraNote)
+    alreadyProvided: parseProvidedFieldLabels(extraNote),
+    notifyResults
   })
   const runResult = assessment.runResult
 
