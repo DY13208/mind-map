@@ -37,9 +37,16 @@ if not "%ec%"=="0" (
   exit /b %ec%
 )
 
+echo [start] WorkBuddy API proxy for wecom-cli fallback
+node scripts\workbuddy-api.js
+if errorlevel 1 (
+  echo [warning] WorkBuddy API is not ready. The page is available, but wecom-cli fallback will fail.
+)
+
 echo.
 echo [ok] Stack is up. Verify:
 echo   curl http://localhost:%MIND_MAP_PORT%/health
 echo   curl http://localhost:%MIND_MAP_PORT%/api/health
 echo   curl http://localhost:%MIND_MAP_PORT%/yiran/api/schema/
+echo   curl http://localhost:%MIND_MAP_PORT%/wb-api/health
 endlocal

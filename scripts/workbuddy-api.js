@@ -705,3 +705,23 @@ module.exports = {
   checkWorkbuddyClient,
   formatWorkbuddyResult
 }
+
+// 允许各类启动脚本复用同一套探测与拉起逻辑，避免 Docker 已启动但
+// 宿主机 :3000 代理缺失，最终由 Nginx 暴露成难读的 502 HTML。
+if (require.main === module) {
+  const projectRoot = path.resolve(__dirname, '..')
+  const port = Number(process.env.WORKBUDDY_PORT || DEFAULT_PORT) || DEFAULT_PORT
+  ensureWorkbuddyApi({
+    root: projectRoot,
+    port,
+    mcpConfigPath: path.join(projectRoot, '.mcp.json')
+  })
+    .then(result => {
+      console.log(formatWorkbuddyResult(result))
+      if (!result || !result.ok) process.exitCode = 1
+    })
+    .catch(err => {
+      console.error(`WorkBuddy API 启动失败：${(err && err.message) || err}`)
+      process.exitCode = 1
+    })
+}
