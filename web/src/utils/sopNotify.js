@@ -6,6 +6,7 @@
  * - 当前 AI 后端派发企微待办 + 写入导图 CPDA 待办树
  */
 import { dispatchTodo } from './sendTodo'
+import { normalizeWecomTodoTitle } from './wecomTodoTitle'
 import { createRoomTodo, listRoomTodos } from './fileApi'
 
 /** 通知 / 提醒类节点（命中任一即可） */
@@ -160,6 +161,8 @@ export function parseAssigneesFromExtraNote(note) {
     /给\s*([\u4e00-\u9fffA-Za-z·•]{2,12}?)(?:也|再|顺便|顺带)?(?:发个|发一条|发了)(?:代办|待办)/gi,
     // 「给杨晓东发代办」（无「个」），但不要吃「发送」的「发」
     /给\s*([\u4e00-\u9fffA-Za-z·•]{2,12}?)(?:也|再|顺便|顺带)?发(?!送)(?:代办|待办)/gi,
+    // 「给胡晓龙建一个测试待办」等创建式指令
+    /给\s*([\u4e00-\u9fffA-Za-z·•]{2,12}?)\s*(?:创建|新建|建(?:立)?|添加|安排)(?:一(?:个|条))?.{0,40}?(?:代办|待办)/gi,
     /(?:代办|待办)\s*(?:发给|给)\s*[：:]?\s*([^\n；;]+)/gi,
     /发给\s*([\u4e00-\u9fffA-Za-z·•]{2,12})/gi
   ]
@@ -193,14 +196,14 @@ export function resolveNotifyAssignee(nodeAssignee, extraNote) {
 
 /** SOP 标题本身就是「给某人发企微代办」这类动作 */
 export const WECOM_TODO_SOP_RE =
-  /企业微信.*(?:代办|待办)|(?:发送|创建|发个?|发一条).*(?:代办|待办)|给.+发.*(?:代办|待办)|(?:代办|待办).*(?:发给|给)/i
+  /企业微信.*(?:代办|待办)|(?:发送|创建|新建|建(?:立)?|添加|安排|发个?|发一条).*(?:代办|待办)|给.+(?:发|创建|新建|建(?:立)?|添加|安排).*(?:代办|待办)|(?:代办|待办).*(?:发给|给)/i
 
 /**
  * 单行是否像「给某人发企微代办」动作。
  * 必须含「给/发给 + 人 + 发/发送…代办」，避免「最近运行…待办预览」等台账噪声。
  */
 export const WECOM_TODO_LINE_RE =
-  /给\s*[\u4e00-\u9fffA-Za-z·•]{2,12}(?:也|再|顺便|顺带)?(?:发个|发一条|发了|发送|发(?!送)).{0,6}(?:代办|待办)|(?:使用)?(?:企业微信|企微).{0,20}给\s*[\u4e00-\u9fffA-Za-z·•]{2,12}.{0,12}(?:代办|待办)|(?:代办|待办)\s*(?:发给|给)\s*[\u4e00-\u9fffA-Za-z·•]{2,12}/i
+  /给\s*[\u4e00-\u9fffA-Za-z·•]{2,12}(?:也|再|顺便|顺带)?(?:发个|发一条|发了|发送|发(?!送)|创建|新建|建(?:立)?|添加|安排).{0,12}(?:代办|待办)|(?:使用)?(?:企业微信|企微).{0,20}给\s*[\u4e00-\u9fffA-Za-z·•]{2,12}.{0,12}(?:代办|待办)|(?:代办|待办)\s*(?:发给|给)\s*[\u4e00-\u9fffA-Za-z·•]{2,12}/i
 
 /** 大纲里的台账/状态行，绝不当成待办指令 */
 export function isWecomTodoNoiseLine(text) {
@@ -256,10 +259,15 @@ export function synthesizeWecomTodoNotifyNode(sop, extraNote = '') {
   const fromNote = parseAssigneesFromExtraNote(extraNote)
   const assignee = (fromNote[0] || fromTitle[0] || '').trim() || '负责人'
   const body = extractWecomTodoBody(title)
+  const todoTitle = normalizeWecomTodoTitle(body || title)
   return {
-    text: body || title,
+    // 从这一刻起，展示与派发都使用事项标题；原始指令只作为审计说明。
+    text: todoTitle || body,
+    todoTitle,
+    originalText: title,
     detail: [
       [sop && sop.id, sop && sop.title].filter(Boolean).join('：'),
+      `原始指令：${title}`,
       body ? `待办内容：${body}` : '',
       extraNote ? `备注：${String(extraNote).trim()}` : ''
     ]
@@ -320,10 +328,16 @@ export function extractWecomTodoNotifyNodesFromOutline(
       if (isTitleEcho && seen.has(`assignee:${who}`)) return
       seen.add(key)
       if (isTitleEcho) seen.add(`assignee:${who}`)
+      const taskText = isTitleEcho ? sopTitle || text : body || text
+      const todoTitle = normalizeWecomTodoTitle(taskText)
       nodes.push({
-        text: isTitleEcho ? sopTitle || text : body || text,
+        // 保留原始句用于说明，但不要让它成为待办卡片标题。
+        text: todoTitle,
+        todoTitle,
+        originalText: text,
         detail: [
           [sop && sop.id, sop && sop.title].filter(Boolean).join('：'),
+          text !== taskText ? `原始指令：${text}` : '',
           !isTitleEcho && text !== body ? `原文：${text}` : '',
           body && !isTitleEcho ? `待办内容：${body}` : '',
           extraNote ? `备注：${String(extraNote).trim()}` : ''
@@ -361,6 +375,8 @@ export function extractWecomTodoNotifyNodesFromOutline(
 
 /** 企微待办标题：短、干净，避免把整段 AI 节点文案塞进去 */
 export function buildWecomTodoTitle(node, sop, assignee) {
+  const structuredTitle = normalizeWecomTodoTitle(node && node.todoTitle)
+  if (structuredTitle) return structuredTitle
   const sopTitle = String((sop && sop.title) || '').trim() || 'SOP'
   let action = stripNodeText((node && node.text) || '')
     .replace(/^AI\s*[:：]\s*/i, '')
@@ -377,12 +393,8 @@ export function buildWecomTodoTitle(node, sop, assignee) {
     const body = extractWecomTodoBody(action)
     action = body && body !== sopTitle ? body : ''
   }
-  if (action.length > 28) action = action.slice(0, 28)
-  const who = cleanAssigneeList(assignee)
-  if (!action) {
-    return `${sopTitle}${who ? `（${who}）` : ''}`.slice(0, 72)
-  }
-  return `${sopTitle} · ${action}${who ? `（${who}）` : ''}`.slice(0, 72)
+  // 企微标题只保留可执行事项；SOP 名称、接收人和渠道信息都放到描述中。
+  return normalizeWecomTodoTitle(action || sopTitle)
 }
 
 /**
@@ -488,7 +500,7 @@ export async function processNotifyNodes({
     if (onStatus) {
       onStatus(
         `${node.block ? '阻塞' : '知会'}派发 ${i + 1}/${list.length}：「${
-          node.text
+          node.todoTitle || node.text
         }」→ ${assignee}${
           overrideAssignees.length && isRoleAssignee(node.assignee)
             ? '（已用运行前填写的接收人）'
@@ -496,13 +508,10 @@ export async function processNotifyNodes({
         }`
       )
     }
-    // 导图卡片标题可详细；发给企微的标题必须短，对齐客户端「给xx发代办：标题」
-    const mapTitle = /代办|接收人/.test(node.text)
-      ? node.text
-      : `${node.text} → 代办：${assignee}`
     const wxTitle = buildWecomTodoTitle(node, sop, assignee)
     const note = [
       `代办人：${assignee}`,
+      node.originalText ? `原始指令：${node.originalText}` : '',
       node.detail || '',
       `来源：${
         [sop && sop.id, sop && sop.title].filter(Boolean).join('：') || 'SOP'
@@ -513,6 +522,28 @@ export async function processNotifyNodes({
     ]
       .filter(Boolean)
       .join('\n')
+
+    if (!wxTitle) {
+      const error = '无法识别待办标题，已跳过创建。请在指令中填写“标题：具体事项”。'
+      if (onStatus) onStatus(error)
+      results.push({
+        ...node,
+        assignee,
+        displayTitle: '',
+        wxTitle: '',
+        taskUid: '',
+        cpdaOk: false,
+        cpdaError: error,
+        dispatchOk: false,
+        dispatchReply: error,
+        dispatchError: error,
+        dispatchVia: '',
+        dispatchBackendLabel: ''
+      })
+      continue
+    }
+    // 导图 CPDA 和企业微信共用同一个规范标题，原始指令进入 note，不再出现双标题。
+    const mapTitle = wxTitle
 
     let taskUid = ''
     let cpdaOk = false
@@ -550,6 +581,8 @@ export async function processNotifyNodes({
       const todo = await dispatchTodo({
         assignee: { name: assignee },
         title: wxTitle,
+        // 标题只传待办事项；派发人、来源和阻塞说明进入描述，供小策/企微查看。
+        detail: note,
         // 不把 SOP 上下文塞进聊天，避免模型跑偏去分析 JD
         conversationId: conversationId
           ? `${conversationId}-todo-${i}-${Date.now().toString(36)}`

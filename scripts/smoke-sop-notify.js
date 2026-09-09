@@ -9,23 +9,34 @@ const src = fs.readFileSync(
   path.join(__dirname, '../web/src/utils/sopNotify.js'),
   'utf8'
 )
+const titleSrc = fs.readFileSync(
+  path.join(__dirname, '../web/src/utils/wecomTodoTitle.js'),
+  'utf8'
+)
+const titleApi = new Function(
+  `${titleSrc.replace(/export /g, '')}\nreturn { normalizeWecomTodoTitle, prepareWecomTodoDraft };`
+)()
 // 去掉 import，只测纯函数
 const body = src
   .replace(/^import[\s\S]*?from\s+['"][^'"]+['"]\s*/gm, '')
   .replace(/export /g, '')
 
 const api = new Function(
+  'normalizeWecomTodoTitle',
   `${body}
   return {
     isNotifyTitle,
     shouldBlockNotify,
     parseAssigneeFromNotifyTitle,
     extractNotifyNodesFromOutline,
+    extractWecomTodoNotifyNodesFromOutline,
     parseAssigneesFromExtraNote,
     resolveNotifyAssignee,
-    isRoleAssignee
+    isRoleAssignee,
+    buildWecomTodoTitle,
+    isWecomTodoOrientedSop
   };`
-)()
+)(titleApi.normalizeWecomTodoTitle)
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg || 'assert failed')
@@ -112,6 +123,121 @@ assert(
 assert(
   api.resolveNotifyAssignee('HRBP', '') === 'HRBP',
   '无备注时保留角色'
+)
+assert(
+  api.parseAssigneesFromExtraNote('给胡晓龙建一个测试待办').join() ===
+    '胡晓龙',
+  '创建式指令解析接收人'
+)
+
+assert(
+  titleApi.normalizeWecomTodoTitle('给胡晓龙创建一个测试待办') === '测试待办',
+  '创建式派发指令只保留任务标题'
+)
+assert(
+  titleApi.normalizeWecomTodoTitle('给胡晓龙建一个测试待办') === '测试待办',
+  '口语建一个派发指令只保留任务标题'
+)
+assert(
+  titleApi.normalizeWecomTodoTitle(
+    '给胡炫创建待办，提醒他测试一下（负责人）'
+  ) === '测试',
+  '后置口语事项应去掉接收人、动作、语气词和负责人标记'
+)
+assert(
+  titleApi.normalizeWecomTodoTitle('麻烦给胡炫建个测试待办') === '测试待办',
+  '自然口语前缀不进入标题'
+)
+assert(
+  titleApi.normalizeWecomTodoTitle('给胡炫创建待办，内容是核对报价单') ===
+    '核对报价单',
+  '待办后的内容说明可作为标题'
+)
+assert(
+  titleApi.normalizeWecomTodoTitle('提醒胡炫处理测试待办') === '处理测试待办',
+  '提醒式指令去掉接收人但保留业务动作'
+)
+assert(
+  titleApi.normalizeWecomTodoTitle('请提醒胡炫确认报价') === '确认报价',
+  '确认等业务动词不能被过度清洗'
+)
+assert(
+  titleApi.normalizeWecomTodoTitle('安排线下复盘') === '安排线下复盘',
+  '普通事项中的线下不能被当成语气词截断'
+)
+assert(
+  titleApi.normalizeWecomTodoTitle('标题：给客户创建待办流程') ===
+    '给客户创建待办流程',
+  '显式标题应尊重用户原文'
+)
+assert(
+  !titleApi.prepareWecomTodoDraft({
+    title: '需要给胡炫建个任务，测试一下'
+  }).ok,
+  '命令式文本解析失败时应拒绝创建，不能原样发送'
+)
+assert(
+  !titleApi.prepareWecomTodoDraft({ title: '帮我给胡炫弄个事情' }).ok,
+  '模糊口语没有具体事项时应拒绝创建'
+)
+assert(
+  titleApi.normalizeWecomTodoTitle('给胡炫创建一个核对报价单的待办') ===
+    '核对报价单待办',
+  '事项与待办之间的结构助词不进入标题'
+)
+assert(
+  titleApi.normalizeWecomTodoTitle('标题：测试待办；请立即发送') === '测试待办',
+  '显式标题不带后续说明'
+)
+assert(
+  titleApi.normalizeWecomTodoTitle('处理：采购报价') === '采购报价',
+  '通用入口去掉处理前缀'
+)
+assert(
+  !titleApi.prepareWecomTodoDraft({ title: '给胡晓龙创建一个待办' }).ok,
+  '纯派发指令必须阻止创建，而不是降级成泛标题'
+)
+assert(
+  titleApi.prepareWecomTodoDraft({
+    title: '标题：核对报价单',
+    description: '给胡晓龙创建待办'
+  }).title === '核对报价单',
+  '描述中的派发指令不得污染标题'
+)
+assert(
+  api.buildWecomTodoTitle(
+    { text: '给胡晓龙建一个测试待办' },
+    { title: '给胡晓龙建一个测试待办' },
+    '胡晓龙'
+  ) === '测试待办',
+  'SOP 派发标题不含接收人和指令外壳'
+)
+assert(
+  api.isWecomTodoOrientedSop({ title: '给胡晓龙建一个测试待办' }),
+  '创建式 SOP 应走专用企微待办路径'
+)
+const creationNodes = api.extractWecomTodoNotifyNodesFromOutline(
+  '- 给胡晓龙建一个测试待办',
+  { title: '给胡晓龙建一个测试待办' }
+)
+assert(
+  creationNodes.length === 1 &&
+    creationNodes[0].assignee === '胡晓龙' &&
+    creationNodes[0].todoTitle === '测试待办' &&
+    creationNodes[0].text === '测试待办',
+  '创建式大纲应在解析阶段生成结构化标题，而不是保留原始指令'
+)
+const naturalNodes = api.extractWecomTodoNotifyNodesFromOutline(
+  '- 给胡炫创建待办，提醒他测试一下（负责人）',
+  { title: '给胡炫创建待办，提醒他测试一下（负责人）' }
+)
+assert(
+  naturalNodes.length === 1 &&
+    naturalNodes[0].assignee === '胡炫' &&
+    naturalNodes[0].todoTitle === '测试' &&
+    naturalNodes[0].text === '测试' &&
+    naturalNodes[0].originalText.includes('给胡炫创建待办'),
+  '自然语言节点必须结构化为接收人和事项，原句只能保留在审计说明'
 )
 
 console.log('sopNotify smoke OK', {
