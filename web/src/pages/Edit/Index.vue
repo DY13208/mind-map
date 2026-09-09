@@ -9,7 +9,10 @@
       @back="$router.push('/files')"
     />
     <template v-else-if="show">
-      <Toolbar v-if="!isZenMode"></Toolbar>
+      <Toolbar
+        v-if="!isZenMode"
+        :return-folder-id="returnFolderId"
+      ></Toolbar>
       <Edit></Edit>
     </template>
   </div>
@@ -33,7 +36,8 @@ export default {
   data() {
     return {
       show: false,
-      accessDenied: false
+      accessDenied: false,
+      returnFolderId: ''
     }
   },
   computed: {
@@ -61,7 +65,12 @@ export default {
       text: this.$t('other.loading')
     })
     try {
-      await productRequest(`/api/files/${encodeURIComponent(this.roomKey)}/info`)
+      const data = await productRequest(
+        `/api/files/${encodeURIComponent(this.roomKey)}/info`
+      )
+      const file = (data && (data.file || data.room)) || data || {}
+      const folderId = file.folderId || file.folder_id
+      this.returnFolderId = folderId ? String(folderId) : ''
     } catch (error) {
       if (error && (error.statusCode === 403 || error.code === 'FORBIDDEN')) {
         this.accessDenied = true
