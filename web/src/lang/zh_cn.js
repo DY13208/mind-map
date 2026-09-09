@@ -230,6 +230,8 @@ export default {
     closeMiniMap: '关闭小地图',
     readonly: '切换为只读模式',
     edit: '切换为编辑模式',
+    switchToLight: '切换到日间模式',
+    switchToDark: '切换到夜间模式',
     backToRoot: '回到根节点',
     changeSourceCodeEdit: '切换为源码编辑模式',
     shortcutKeys: '快捷键',

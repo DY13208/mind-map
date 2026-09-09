@@ -2,7 +2,10 @@ const { randomUUID } = require('crypto')
 
 const TITLE_MAX = 80
 const FOLDER_NAME_MAX = 80
-const DEFAULT_METADATA = { theme: 'classic', layout: 'mindMap' }
+// Keep the persisted default in sync with the editor placeholder/example data.
+// Otherwise a newly-created room first paints classic4/logicalStructure and then
+// jumps to classic/mindMap when collaboration metadata arrives.
+const DEFAULT_METADATA = { theme: 'classic4', layout: 'logicalStructure' }
 
 function fsError(code, message, status) {
   const err = new Error(message)
