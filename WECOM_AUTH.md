@@ -110,10 +110,12 @@ curl -fsS https://mindmap.example.com/api/auth/me
 - 必须同时启用 `WECOM_AUTH_ENABLED=true`；生产环境不要配置该密钥。
 - 如需在公网域名调试（不推荐），需额外设置 `AUTH_DEV_BYPASS_ALLOW_PUBLIC=true`。
 - 可选 `AUTH_DEV_BYPASS_USER_NAME`、`AUTH_DEV_BYPASS_USER_ID` 自定义模拟成员信息。
+- **对接小策时务必配置 `AUTH_DEV_BYPASS_MOBILE`**（企业微信通讯录手机号）。开发者登录会调用企微 `user/getuserid` 解析真实 `userid`，再走与扫码登录相同的小策 SSO。默认的 `dev-local` 在小策侧没有绑定，会报「该企业微信账号尚未绑定小策用户」。本配置只对齐身份，不会在小策新建用户；小策侧该成员须已是 `matched` 绑定。
 
 ```dotenv
 AUTH_DEV_BYPASS_KEY=请替换为至少32字符的随机串
 AUTH_DEV_BYPASS_USER_NAME=本地开发者
+AUTH_DEV_BYPASS_MOBILE=13800138000
 ```
 
 生成密钥示例：`openssl rand -hex 32`

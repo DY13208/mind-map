@@ -3,6 +3,7 @@
  * 形态对齐 flowExpandQueue，默认并发 2、上限 3
  */
 import { runSopWithWorkbuddy } from './sopRun'
+import { aiBackendLabel, getAiBackend } from './agentChat'
 import { getLocalConfig } from '@/api'
 
 let jobSeq = 0
@@ -70,6 +71,8 @@ function publicJob(job, extra = {}) {
     result: job.result,
     error: job.error,
     model: job.model,
+    backend: job.backend || '',
+    backendLabel: job.backendLabel || '',
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
     liveElapsedSec: job.liveElapsedSec || 0,
@@ -566,12 +569,15 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         return
       }
       const raw = (err && err.message) || String(err || '')
+      const backendLabel = aiBackendLabel(job.backend || getAiBackend())
       const msg =
         (err && err.status >= 500) ||
         /Failed to fetch|NetworkError|ECONNREFUSED|Bad Gateway|<!DOCTYPE html>/i.test(
           raw
         )
-          ? '连不上 WorkBuddy，请确认本机已启动 WorkBuddy API 代理'
+          ? job.backend === 'xiaoce' || /小策/.test(backendLabel)
+            ? '连不上小策，请确认 /yiran 网关与登录状态可用'
+            : '连不上 WorkBuddy，请确认本机已启动 WorkBuddy API 代理'
           : raw || 'SOP 执行失败'
       job.error = msg
       job.status = msg
@@ -646,6 +652,8 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         extraNote: extraNote || '',
         model: model || '',
         actor: actor || '台账',
+        backend: getAiBackend(),
+        backendLabel: aiBackendLabel(),
         state: 'queued',
         status: '排队中…',
         streamText: '',
