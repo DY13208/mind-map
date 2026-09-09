@@ -529,6 +529,11 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         job.missingFields = result.missingFields || []
         job.missingSummary = result.missingSummary || ''
         job.skipNotifyOnResume = true
+        // 若企微待办派发失败，恢复执行时允许再派一次
+        const notifyFailed = (result.notifyResults || []).some(
+          r => r && !r.dispatchOk
+        )
+        if (notifyFailed) job.skipNotifyOnResume = false
         const notifyHint = formatNotifyAssignees(result.notifyResults)
         job.status = result.waitingData
           ? `待补数：${result.missingSummary || '请补充缺失数据后继续'}${

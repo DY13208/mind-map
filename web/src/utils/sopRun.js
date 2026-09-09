@@ -892,17 +892,36 @@ export async function runSopWithWorkbuddy({
     )
   }
 
-  const notifyExtra =
-    notifyResults.length && !notifySummary.hasBlocking
-      ? `\n\n## 已处理的通知（勿重复派发）\n${notifyResults
-          .map(
-            r =>
-              `- ${r.text} → ${r.assignee}${
-                r.taskUid ? `（导图待办 ${r.taskUid}）` : ''
-              }`
-          )
-          .join('\n')}`
-      : ''
+  const notifyOk = notifyResults.filter(r => r && r.dispatchOk)
+  const notifyFail = notifyResults.filter(r => r && !r.dispatchOk)
+  const notifyExtraParts = []
+  if (notifyOk.length && !notifySummary.hasBlocking) {
+    notifyExtraParts.push(
+      `## 已成功派发企微待办（勿重复）\n${notifyOk
+        .map(
+          r =>
+            `- ${r.text} → ${r.assignee}${
+              r.taskUid ? `（导图待办 ${r.taskUid}）` : ''
+            }`
+        )
+        .join('\n')}`
+    )
+  }
+  if (notifyFail.length) {
+    notifyExtraParts.push(
+      `## 企微待办派发失败（导图节点可能已写，但企微未创建；不要声称已派发成功）\n${notifyFail
+        .map(
+          r =>
+            `- ${r.text} → ${r.assignee}：${
+              r.dispatchError || r.dispatchReply || '未知失败'
+            }`
+        )
+        .join('\n')}`
+    )
+  }
+  const notifyExtra = notifyExtraParts.length
+    ? `\n\n${notifyExtraParts.join('\n\n')}`
+    : ''
 
   const promptUser =
     buildUserPrompt({ ctx, outputs, extraNote }) + notifyExtra
