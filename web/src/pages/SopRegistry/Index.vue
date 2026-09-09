@@ -1097,14 +1097,18 @@ export default {
         this.scrollRunStream()
       }
     })
-    // 重新挂载 / 整页刷新后立刻同步已有任务（含 session 恢复的待补数）
+    // 重新挂载 / 整页刷新后立刻同步已有任务（含 session 恢复的排队/续跑/待补数）
     if (this.sopRunQueue && this.sopRunQueue.getSnapshot) {
       this.sopQueueSnap = this.sopRunQueue.getSnapshot()
       const snap = this.sopQueueSnap
+      this.syncLedgersFromQueue(snap)
       const prefer =
         (snap.waiting || []).find(j => j.state === 'waiting_data') ||
         (snap.waiting || [])[0] ||
         (snap.running || [])[0] ||
+        (snap.pending || []).find(
+          j => j && /刷新后自动续跑|刷新后恢复排队/.test(String(j.status || ''))
+        ) ||
         (snap.pending || [])[0]
       if (prefer && !this.selectedSopJobId) {
         this.selectedSopJobId = prefer.id

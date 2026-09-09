@@ -71,7 +71,15 @@ async function getXiaoceAuthorization(force = false) {
       if (exchangeResponse.status === 404 && token) {
         return { baseUrl, authorization: `Token ${token}` }
       }
-      const err = new Error(exchange.error || '小策账号关联失败')
+      const identityHint = ticket.wecomUserId
+        ? `（当前会话企微 userid=${ticket.wecomUserId}）`
+        : ''
+      const baseError = exchange.error || '小策账号关联失败'
+      const err = new Error(
+        exchange.code === 'WECOM_NOT_BOUND'
+          ? `${baseError}${identityHint}。换手机号后请退出并用新号码重新开发者登录；该 userid 须在小策已 matched 绑定`
+          : `${baseError}${identityHint}`
+      )
       err.status = exchangeResponse.status
       err.code = exchange.code || 'XIAOCE_SSO_FAILED'
       throw err
@@ -277,20 +285,78 @@ function waitForPoll(signal, delay = 800) {
   })
 }
 
-async function agentScopedChat({ message, signal, onDelta, conversationId, organizationId, agentId }) {
+export function extractWecomTodoConfirmPhrase(text) {
+  const m = String(text || '').match(/确认创建企业微信待办「[^」]+」/)
+  return m ? m[0].trim() : ''
+}
+
+export function isWecomTodoConfirmationPreview(text) {
+  const t = String(text || '')
+  return (
+    /创建待办预览|尚未执行任何写入|待确认/.test(t) &&
+    /确认创建企业微信待办/.test(t)
+  )
+}
+
+export function isWecomTodoCreateSuccess(text) {
+  const t = String(text || '')
+  if (isWecomTodoConfirmationPreview(t)) return false
+  return /创建待办成功|待办\s*ID|已完成|成功条目/.test(t)
+}
+
+async function ensureAgentSession({
+  organizationId,
+  agentId,
+  conversationId,
+  title,
+  signal
+}) {
   const sessionKey = `${organizationId}:${agentId}:${conversationId || 'default'}`
   let sessionId = agentSessions.get(sessionKey)
-  if (!sessionId) {
-    const created = await xiaoceFetch(`/api/council/agents/${encodeURIComponent(agentId)}/chat/sessions/`, {
+  if (sessionId) return { sessionKey, sessionId }
+  const created = await xiaoceFetch(
+    `/api/council/agents/${encodeURIComponent(agentId)}/chat/sessions/`,
+    {
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ organization_id: Number(organizationId), title: message.slice(0, 40) }),
+      body: JSON.stringify({
+        organization_id: Number(organizationId),
+        title: String(title || 'mind-map').slice(0, 40)
+      }),
       signal
-    })
-    const session = await created.json().catch(() => ({}))
-    if (!created.ok || !session.id) throw new Error(session.error || session.detail || `HTTP ${created.status}`)
-    sessionId = session.id
-    agentSessions.set(sessionKey, sessionId)
+    }
+  )
+  const session = await created.json().catch(() => ({}))
+  if (!created.ok || !session.id) {
+    throw new Error(session.error || session.detail || `HTTP ${created.status}`)
+  }
+  sessionId = session.id
+  agentSessions.set(sessionKey, sessionId)
+  return { sessionKey, sessionId }
+}
+
+async function postAgentMessageAndWait({
+  agentId,
+  sessionId,
+  message,
+  signal,
+  onDelta
+}) {
+  // 记录发送前最新助手消息，避免确认后仍读到旧的预览文案
+  let lastAssistantId = ''
+  try {
+    const beforeRes = await xiaoceFetch(
+      `/api/council/agents/${encodeURIComponent(agentId)}/chat/sessions/${encodeURIComponent(sessionId)}/`,
+      { cache: 'no-store', signal }
+    )
+    const before = await beforeRes.json().catch(() => ({}))
+    const beforeMessages = Array.isArray(before.messages) ? before.messages : []
+    const lastAssistant = [...beforeMessages]
+      .reverse()
+      .find(item => item && item.role === 'assistant')
+    lastAssistantId = (lastAssistant && lastAssistant.id) || ''
+  } catch (e) {
+    lastAssistantId = ''
   }
 
   const started = await xiaoceFetch(
@@ -303,7 +369,11 @@ async function agentScopedChat({ message, signal, onDelta, conversationId, organ
     }
   )
   const startedJson = await started.json().catch(() => ({}))
-  if (!started.ok) throw new Error(startedJson.error || startedJson.detail || `HTTP ${started.status}`)
+  if (!started.ok) {
+    throw new Error(
+      startedJson.error || startedJson.detail || `HTTP ${started.status}`
+    )
+  }
   const runId = startedJson.run && startedJson.run.id
   for (;;) {
     await waitForPoll(signal)
@@ -312,9 +382,18 @@ async function agentScopedChat({ message, signal, onDelta, conversationId, organ
       { cache: 'no-store', signal }
     )
     const session = await statusResponse.json().catch(() => ({}))
-    if (!statusResponse.ok) throw new Error(session.error || session.detail || `HTTP ${statusResponse.status}`)
+    if (!statusResponse.ok) {
+      throw new Error(session.error || session.detail || `HTTP ${statusResponse.status}`)
+    }
     const messages = Array.isArray(session.messages) ? session.messages : []
-    const reply = [...messages].reverse().find(item => item.role === 'assistant')
+    const reply = [...messages]
+      .reverse()
+      .find(
+        item =>
+          item &&
+          item.role === 'assistant' &&
+          (!lastAssistantId || String(item.id) !== String(lastAssistantId))
+      )
     if (!session.active_run && session.last_run_status === 'failed') {
       throw new Error('智能体执行失败，请稍后重试')
     }
@@ -323,11 +402,157 @@ async function agentScopedChat({ message, signal, onDelta, conversationId, organ
     }
     if (reply && (!runId || !session.active_run)) {
       if (onDelta && reply.content) onDelta(reply.content)
-      return { content: reply.content || '', toolCalls: [], eventToolCalls: [], events: [], conversationId: sessionId, raw: session }
+      return {
+        content: reply.content || '',
+        conversationId: sessionId,
+        raw: session
+      }
     }
     if (!session.active_run && session.last_run_status === 'completed') {
+      // 有时 completed 时 reply 过滤过严，回退取最后一条助手消息
+      const fallback = [...messages]
+        .reverse()
+        .find(item => item && item.role === 'assistant')
+      if (fallback && fallback.content) {
+        if (onDelta) onDelta(fallback.content)
+        return {
+          content: fallback.content || '',
+          conversationId: sessionId,
+          raw: session
+        }
+      }
       throw new Error('智能体执行完成但未返回内容')
     }
+  }
+}
+
+async function agentScopedChat({
+  message,
+  signal,
+  onDelta,
+  conversationId,
+  organizationId,
+  agentId,
+  autoConfirmWecomTodos = false
+}) {
+  const { sessionId } = await ensureAgentSession({
+    organizationId,
+    agentId,
+    conversationId,
+    title: message,
+    signal
+  })
+  let result = await postAgentMessageAndWait({
+    agentId,
+    sessionId,
+    message,
+    signal,
+    onDelta
+  })
+
+  // 与小策网页一致：待办预览确认门禁出现后，自动回完整确认句再执行写入
+  if (
+    autoConfirmWecomTodos &&
+    isWecomTodoConfirmationPreview(result.content)
+  ) {
+    const phrase = extractWecomTodoConfirmPhrase(result.content)
+    if (phrase) {
+      if (onDelta) onDelta(`\n—— 自动确认门禁 ——\n${phrase}\n`)
+      result = await postAgentMessageAndWait({
+        agentId,
+        sessionId,
+        message: phrase,
+        signal,
+        onDelta
+      })
+    }
+  }
+
+  return {
+    content: result.content || '',
+    toolCalls: [],
+    eventToolCalls: [],
+    events: isWecomTodoCreateSuccess(result.content)
+      ? [{ type: 'tool_result', label: 'wecom_todo_create' }]
+      : [],
+    conversationId: sessionId,
+    raw: result.raw
+  }
+}
+
+/**
+ * 走小策智能体官方企微待办链路（含确认门禁自动确认），与网页聊天一致。
+ */
+export async function createXiaoceWecomTodoViaAgent({
+  assignee,
+  title,
+  description,
+  signal,
+  onDelta,
+  conversationId
+} = {}) {
+  const {
+    organizationId: configuredOrganizationId,
+    agentId: configuredAgentId
+  } = getXiaoceConfig()
+  const organizationId = String(configuredOrganizationId || '').trim()
+  const agentId = String(configuredAgentId || '').trim()
+  if (!organizationId || !agentId) {
+    const err = new Error('请先在设置中选择小策所属企业和企业智能体')
+    err.code = 'XIAOCE_SCOPE_MISSING'
+    throw err
+  }
+  const assigneeName = String(assignee || '').trim() || '负责人'
+  const taskTitle = String(title || '待办').trim().slice(0, 80) || '待办'
+  const detail = String(description || '').trim().slice(0, 1000)
+  const message = [
+    `请立刻通过企业微信给「${assigneeName}」创建一条企微待办（官方企微待办，不是平台内部待办）。`,
+    `标题：${taskTitle}`,
+    detail ? `说明：${detail}` : '',
+    '若出现「创建待办预览 / 待确认」，请在本轮给出可复制的完整确认句；不要停在口头说明。'
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  const result = await agentScopedChat({
+    message,
+    signal,
+    onDelta,
+    conversationId:
+      conversationId ||
+      `wecom-todo-${Date.now().toString(36)}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}`,
+    organizationId,
+    agentId,
+    autoConfirmWecomTodos: true
+  })
+
+  if (isWecomTodoConfirmationPreview(result.content)) {
+    const err = new Error(
+      '小策待办仍停在确认门禁，自动确认未生效。请在小策网页确认智能体企微写权限可用。'
+    )
+    err.code = 'wecom_confirmation_pending'
+    throw err
+  }
+  if (!isWecomTodoCreateSuccess(result.content) && !/已创建|创建成功/.test(result.content)) {
+    const err = new Error(
+      String(result.content || '').trim().slice(0, 240) ||
+        '小策未确认企微待办已创建'
+    )
+    err.code = 'wecom_todo_unconfirmed'
+    throw err
+  }
+  return {
+    ok: true,
+    ids: [],
+    syncStatus: 'synced',
+    detail:
+      String(result.content || '').trim().slice(0, 400) ||
+      `企微待办已创建：${taskTitle}`,
+    viaContact: true,
+    matchedName: assigneeName,
+    via: 'xiaoce-agent'
   }
 }
 
@@ -397,7 +622,8 @@ export async function streamChat({
   messages,
   signal,
   onDelta,
-  conversationId
+  conversationId,
+  autoConfirmWecomTodos = true
 } = {}) {
   const {
     organizationId: configuredOrganizationId,
@@ -422,6 +648,7 @@ export async function streamChat({
     onDelta,
     conversationId,
     organizationId: scopedOrganizationId,
-    agentId: scopedAgentId
+    agentId: scopedAgentId,
+    autoConfirmWecomTodos
   })
 }

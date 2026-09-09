@@ -129,16 +129,22 @@ export function parseAssigneesFromExtraNote(note) {
   const found = []
   const seen = new Set()
   const push = raw => {
-    const cleaned = cleanAssigneeList(raw)
+    let cleaned = cleanAssigneeList(raw)
+    // 「给杨晓东也发」非贪婪失败时可能把「也」吃进名字
+    cleaned = cleaned.replace(/(?:也|再|顺便|顺带)$/g, '')
+    // 「给黄炜龙发送代办」被拆成「黄炜龙发」时去掉尾部动词残片
+    cleaned = cleaned.replace(/[发送]$/g, '')
     if (!cleaned || cleaned.length < 2 || cleaned.length > 40) return
     // 跳过纯角色；多人用顿号拆开逐个收
     cleaned.split('、').forEach(part => {
-      const p = cleanAssigneeList(part)
+      let p = cleanAssigneeList(part)
+        .replace(/(?:也|再|顺便|顺带)$/g, '')
+        .replace(/[发送]$/g, '')
       if (!p || p.length < 2 || p.length > 20) return
       if (isRoleAssignee(p)) return
       // 排除常见非人名噪声
       if (/^(?:请|把|将|用|在|到|从|和|与|及|的|了|吗|呢|吧)/.test(p)) return
-      if (/资料|说明|约束|链接|补充|要求|产物|模型/.test(p)) return
+      if (/资料|说明|约束|链接|补充|要求|产物|模型|负责人/.test(p)) return
       const key = p.toLowerCase()
       if (seen.has(key)) return
       seen.add(key)
@@ -148,9 +154,14 @@ export function parseAssigneesFromExtraNote(note) {
 
   const patterns = [
     /(?:代办人|待办人|接收人|通知人|提醒人|接收者)\s*[：:]\s*([^\n；;]+)/gi,
-    /给\s*([^\s，,、：:\n]{2,20})\s*(?:发|送)\s*(?:个|一条|了)?\s*(?:代办|待办)/gi,
+    // 「给黄炜龙发送代办」整词匹配，避免拆成「黄炜龙发」+「送代办」
+    /给\s*([\u4e00-\u9fffA-Za-z·•]{2,12})\s*发送(?:代办|待办)/gi,
+    // 「顺带给杨晓东也发个代办」
+    /给\s*([\u4e00-\u9fffA-Za-z·•]{2,12}?)(?:也|再|顺便|顺带)?(?:发个|发一条|发了)(?:代办|待办)/gi,
+    // 「给杨晓东发代办」（无「个」），但不要吃「发送」的「发」
+    /给\s*([\u4e00-\u9fffA-Za-z·•]{2,12}?)(?:也|再|顺便|顺带)?发(?!送)(?:代办|待办)/gi,
     /(?:代办|待办)\s*(?:发给|给)\s*[：:]?\s*([^\n；;]+)/gi,
-    /发给\s*([^\s，,、：:\n]{2,20})/gi
+    /发给\s*([\u4e00-\u9fffA-Za-z·•]{2,12})/gi
   ]
   patterns.forEach(re => {
     let m
@@ -168,13 +179,184 @@ export function parseAssigneesFromExtraNote(note) {
 }
 
 /**
- * 优先用运行前填写的真实人名，覆盖大纲里的 HRBP / 副总 等角色
+ * 优先用运行前填写的真实人名，覆盖大纲里的 HRBP / 副总 等角色。
+ * 若节点已是具体人名，不要用备注整表覆盖（多条子代办会串人）。
  */
 export function resolveNotifyAssignee(nodeAssignee, extraNote) {
   const fromNote = parseAssigneesFromExtraNote(extraNote)
-  if (fromNote.length) return fromNote.join('、')
+  if (fromNote.length && isRoleAssignee(nodeAssignee)) {
+    return fromNote.join('、')
+  }
   const fallback = cleanAssigneeList(nodeAssignee) || '负责人'
   return fallback
+}
+
+/** SOP 标题本身就是「给某人发企微代办」这类动作 */
+export const WECOM_TODO_SOP_RE =
+  /企业微信.*(?:代办|待办)|(?:发送|创建|发个?|发一条).*(?:代办|待办)|给.+发.*(?:代办|待办)|(?:代办|待办).*(?:发给|给)/i
+
+/**
+ * 单行是否像「给某人发企微代办」动作。
+ * 必须含「给/发给 + 人 + 发/发送…代办」，避免「最近运行…待办预览」等台账噪声。
+ */
+export const WECOM_TODO_LINE_RE =
+  /给\s*[\u4e00-\u9fffA-Za-z·•]{2,12}(?:也|再|顺便|顺带)?(?:发个|发一条|发了|发送|发(?!送)).{0,6}(?:代办|待办)|(?:使用)?(?:企业微信|企微).{0,20}给\s*[\u4e00-\u9fffA-Za-z·•]{2,12}.{0,12}(?:代办|待办)|(?:代办|待办)\s*(?:发给|给)\s*[\u4e00-\u9fffA-Za-z·•]{2,12}/i
+
+/** 大纲里的台账/状态行，绝不当成待办指令 */
+export function isWecomTodoNoiseLine(text) {
+  const t = stripNodeText(text)
+  if (!t) return true
+  if (
+    /^(?:最近运行|期望产物|耗时约|标题\s*[:：]|未真正|小策|WorkBuddy|刷新前|——|›|进度|模型输出|signal is aborted|已打包|使用模型|检查 |拉取 |发现 |知会)/i.test(
+      t
+    )
+  ) {
+    return true
+  }
+  if (/只返回了待办预览|确认门禁|未实际写入企业微信|可重新点运行|续跑会重新执行/.test(t)) {
+    return true
+  }
+  // 纯台账回写句，没有「给某人发」动作
+  if (/耗时约|期望产物|未真正派发/.test(t) && !/给\s*[\u4e00-\u9fff]{2,12}.{0,8}发/.test(t)) {
+    return true
+  }
+  return false
+}
+
+export function isWecomTodoOrientedSop(sop) {
+  const title = [sop && sop.id, sop && sop.title].filter(Boolean).join('：')
+  return WECOM_TODO_SOP_RE.test(String(title || ''))
+}
+
+/** 从「说… / ：…」里抽出待办正文 */
+export function extractWecomTodoBody(text) {
+  const t = stripNodeText(text)
+  if (!t) return ''
+  let m = t.match(/(?:代办|待办)\s*(?:说|内容)\s*[：:]\s*(.+)$/)
+  if (m) return stripNodeText(m[1]).slice(0, 200)
+  m = t.match(/(?:代办|待办)\s*说\s*(.+)$/)
+  if (m) return stripNodeText(m[1]).slice(0, 200)
+  // 「说你的胆子…」但排除「说明」
+  m = t.match(/说\s*[：:]?\s*(.+)$/)
+  if (m && !/说明/.test(t)) {
+    const body = stripNodeText(m[1])
+    if (body.length >= 2 && body.length <= 120 && !/^(?:明|一下)/.test(body)) {
+      return body
+    }
+  }
+  return ''
+}
+
+/**
+ * 从 SOP 标题 / 备注合成一条通知节点（大纲里没有「AI发起通知」时也能直派企微待办）
+ */
+export function synthesizeWecomTodoNotifyNode(sop, extraNote = '') {
+  const title = stripNodeText((sop && sop.title) || '') || '企微待办'
+  const fromTitle = parseAssigneesFromExtraNote(title)
+  const fromNote = parseAssigneesFromExtraNote(extraNote)
+  const assignee = (fromNote[0] || fromTitle[0] || '').trim() || '负责人'
+  const body = extractWecomTodoBody(title)
+  return {
+    text: body || title,
+    detail: [
+      [sop && sop.id, sop && sop.title].filter(Boolean).join('：'),
+      body ? `待办内容：${body}` : '',
+      extraNote ? `备注：${String(extraNote).trim()}` : ''
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    assignee,
+    block: false,
+    notifyKey: `wecom-todo:${String((sop && (sop.uid || sop.id)) || title).slice(0, 80)}`
+  }
+}
+
+/**
+ * 扫整棵 SOP 大纲：父节点 + 子节点里每一条「给某人发代办」都生成一条直派节点。
+ * 过滤台账噪声，同一接收人只保留一条「标题型」代办 + 各条有独立正文的子指令。
+ */
+export function extractWecomTodoNotifyNodesFromOutline(
+  outline,
+  sop,
+  extraNote = ''
+) {
+  const sopTitle = stripNodeText((sop && sop.title) || '')
+  const lines = String(outline || '')
+    .split(/\r?\n/)
+    .map(line =>
+      stripNodeText(line.replace(/^(\s*)/, '').replace(/^[-*•●]\s*/, ''))
+    )
+    .map(t => t.replace(/^(?:[A-Za-z]\d*\s*[:：]\s*|标题\s*[:：]\s*)/, ''))
+    .filter(Boolean)
+
+  const nodes = []
+  const seen = new Set()
+  const pushNode = (rawText, forceAssignee = '') => {
+    let text = stripNodeText(rawText)
+    text = text.replace(/^(?:[A-Za-z]\d*\s*[:：]\s*|标题\s*[:：]\s*)/, '')
+    if (!text || isWecomTodoNoiseLine(text)) return
+    if (!WECOM_TODO_LINE_RE.test(text)) return
+    const assignees = forceAssignee
+      ? [forceAssignee]
+      : parseAssigneesFromExtraNote(text)
+    if (!assignees.length) return // 解析不出人名就跳过，避免「负责人」乱发
+    const body = extractWecomTodoBody(text)
+    assignees.forEach(assignee => {
+      const who = cleanAssigneeList(assignee)
+        .replace(/(?:也|再|顺便|顺带)$/g, '')
+        .replace(/[发送]$/g, '')
+      if (!who || who === '负责人' || isRoleAssignee(who)) return
+      // 标题回声（父节点/标题行）按接收人去重；带独立正文的子指令按正文去重
+      const isTitleEcho =
+        !body ||
+        body === sopTitle ||
+        body === text ||
+        /给.+发.*(?:代办|待办)/.test(body)
+      const key = isTitleEcho
+        ? `assignee:${who}`
+        : `${who}::${String(body).slice(0, 80)}`
+      if (seen.has(key)) return
+      // 已有该人的标题型代办时，不再加另一条标题回声
+      if (isTitleEcho && seen.has(`assignee:${who}`)) return
+      seen.add(key)
+      if (isTitleEcho) seen.add(`assignee:${who}`)
+      nodes.push({
+        text: isTitleEcho ? sopTitle || text : body || text,
+        detail: [
+          [sop && sop.id, sop && sop.title].filter(Boolean).join('：'),
+          !isTitleEcho && text !== body ? `原文：${text}` : '',
+          body && !isTitleEcho ? `待办内容：${body}` : '',
+          extraNote ? `备注：${String(extraNote).trim()}` : ''
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        assignee: who,
+        block: false,
+        notifyKey: `wecom-todo:${who}:${String(body || text).slice(0, 48)}`
+      })
+    })
+  }
+
+  lines.forEach(line => pushNode(line))
+
+  // 大纲为空或没命中时，退回标题合成
+  if (!nodes.length) {
+    const one = synthesizeWecomTodoNotifyNode(sop, extraNote)
+    if (one && one.assignee && one.assignee !== '负责人') nodes.push(one)
+    else if (one) nodes.push(one)
+  }
+
+  // 运行备注里若还有大纲未覆盖的接收人，补一条（仅当备注本身像发代办）
+  const noteAssignees = parseAssigneesFromExtraNote(extraNote)
+  noteAssignees.forEach(who => {
+    if (seen.has(`assignee:${who}`) || [...seen].some(k => k.startsWith(`${who}::`))) {
+      return
+    }
+    if (!WECOM_TODO_LINE_RE.test(String(extraNote || '')) && nodes.length) return
+    pushNode(extraNote || `给${who}发送代办`, who)
+  })
+
+  return nodes
 }
 
 /** 企微待办标题：短、干净，避免把整段 AI 节点文案塞进去 */
@@ -185,9 +367,21 @@ export function buildWecomTodoTitle(node, sop, assignee) {
     .replace(/\s*[|｜].*$/, '')
     .replace(/\s*→\s*代办[：:].*$/, '')
     .trim()
+  // 父节点回声：不要「标题 · 标题」
+  if (
+    !action ||
+    action === sopTitle ||
+    action.includes(sopTitle) ||
+    /给.+发.*(?:代办|待办)/.test(action)
+  ) {
+    const body = extractWecomTodoBody(action)
+    action = body && body !== sopTitle ? body : ''
+  }
   if (action.length > 28) action = action.slice(0, 28)
-  if (!action) action = '流程知会'
   const who = cleanAssigneeList(assignee)
+  if (!action) {
+    return `${sopTitle}${who ? `（${who}）` : ''}`.slice(0, 72)
+  }
   return `${sopTitle} · ${action}${who ? `（${who}）` : ''}`.slice(0, 72)
 }
 

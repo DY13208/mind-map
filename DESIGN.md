@@ -1,5 +1,5 @@
 ---
-name: 依然中台
+name: 良策中台
 description: 面向企业长期协作的克制型脑图与文件工作台
 colors:
   primary: "#087854"
@@ -64,7 +64,7 @@ components:
     height: "40px"
 ---
 
-# Design System: 依然中台
+# Design System: 良策中台
 
 ## 1. Overview
 

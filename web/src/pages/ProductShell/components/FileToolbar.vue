@@ -35,10 +35,17 @@
         title="列表视图"
         @click="$emit('update:view', 'list')"
     /></el-button-group>
+    <el-button
+      v-if="showImport"
+      icon="el-icon-upload2"
+      @click="$emit('import')"
+      >导入</el-button
+    >
     <el-dropdown v-if="showCreate || showCreateFolder" trigger="click" @command="create">
       <el-button type="primary" icon="el-icon-plus">新建 <i class="el-icon-arrow-down el-icon--right" /></el-button>
       <el-dropdown-menu slot="dropdown">
         <el-dropdown-item v-if="showCreate" command="room" icon="el-icon-document-add">新建脑图</el-dropdown-item>
+        <el-dropdown-item v-if="showImport" command="import" icon="el-icon-upload2">导入脑图</el-dropdown-item>
         <el-dropdown-item v-if="showCreateFolder" command="folder" icon="el-icon-folder-add">新建文件夹</el-dropdown-item>
       </el-dropdown-menu>
     </el-dropdown>
@@ -57,6 +64,7 @@ export default {
     view: String,
     showCreate: { type: Boolean, default: true },
     showCreateFolder: { type: Boolean, default: true },
+    showImport: { type: Boolean, default: true },
     hideOpenedSort: { type: Boolean, default: false }
   },
   data: () => ({
@@ -68,7 +76,9 @@ export default {
   }),
   methods: {
     create(command) {
-      this.$emit(command === 'folder' ? 'create-folder' : 'create-room')
+      if (command === 'folder') this.$emit('create-folder')
+      else if (command === 'import') this.$emit('import')
+      else this.$emit('create-room')
     }
   }
 }

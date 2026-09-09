@@ -1,12 +1,14 @@
 import { isXiaoceBackend } from './agentChat'
-import { createXiaoceWecomTodo } from './xiaoceChat'
+import {
+  createXiaoceWecomTodo,
+  createXiaoceWecomTodoViaAgent
+} from './xiaoceChat'
 import { getWorkbuddyConfig } from './workbuddyChat'
 
 /**
  * 发企业微信待办：
- * - 小策：走 /yiran/api/wecom/todos/（通讯录匹配姓名）
+ * - 小策：优先走智能体官方企微链路（与网页一致，自动过确认门禁）；失败再退 REST
  * - WorkBuddy：走本机 wecom-cli /v1/wecom/todo
- * 不再经 LLM/ACP，避免模型空跑或去翻仓库。
  */
 export async function dispatchTodo({
   assignee,
@@ -40,7 +42,8 @@ export async function dispatchTodo({
       context,
       onEvent,
       onDelta,
-      signal
+      signal,
+      conversationId
     })
   }
 
@@ -66,10 +69,57 @@ async function dispatchTodoViaXiaoce({
   context,
   onEvent,
   onDelta,
-  signal
+  signal,
+  conversationId
 }) {
   if (onEvent) onEvent('xiaoce_wecom', { phase: 'preparing', assignee: assigneeName })
-  if (onDelta) onDelta(`正在通过小策给 ${assigneeName} 创建企微待办…\n`)
+  if (onDelta) {
+    onDelta(`正在通过小策智能体给 ${assigneeName} 创建企微待办（含自动确认）…\n`)
+  }
+
+  // 1) 与小策网页同一条官方企微链路（预览 → 自动确认 → 写入）
+  try {
+    const created = await createXiaoceWecomTodoViaAgent({
+      assignee: assigneeName,
+      title: taskTitle,
+      description,
+      signal,
+      onDelta,
+      conversationId
+    })
+    const content =
+      String(created.detail || '').trim() || `企微待办已创建：${taskTitle}`
+    if (onEvent) {
+      onEvent('xiaoce_wecom', {
+        phase: 'done',
+        via: 'xiaoce-agent',
+        syncStatus: created.syncStatus
+      })
+    }
+    if (onDelta) onDelta(`${content}\n`)
+    return {
+      assignee: assigneeName,
+      title: taskTitle,
+      userLine: `给${assigneeName}发个代办：${taskTitle}`,
+      content,
+      success: true,
+      toolUsed: true,
+      via: 'xiaoce-agent',
+      backendLabel: '小策',
+      todoId: '',
+      error: '',
+      detail: detail || '',
+      context: context || ''
+    }
+  } catch (agentErr) {
+    if (onDelta) {
+      onDelta(
+        `智能体链路未成功（${(agentErr && agentErr.message) || '未知错误'}），尝试 REST 直派…\n`
+      )
+    }
+  }
+
+  // 2) 退回平台待办 REST（可能仅平台待办、未必同步原生企微）
   try {
     const created = await createXiaoceWecomTodo({
       assignee: assigneeName,
@@ -114,6 +164,8 @@ async function dispatchTodoViaXiaoce({
       errHint = `小策通讯录找不到「${assigneeName}」，请确认姓名。`
     } else if (/wecom_not_configured|尚未配置企业微信/i.test(message)) {
       errHint = '小策企业未配置企业微信 API，或当前账号无权读取通讯录。'
+    } else if (/confirmation|确认门禁/i.test(message)) {
+      errHint = message
     }
     if (onDelta) onDelta(`${errHint}\n`)
     return {
@@ -123,7 +175,7 @@ async function dispatchTodoViaXiaoce({
       content: errHint,
       success: false,
       toolUsed: false,
-      via: 'xiaoce-wecom',
+      via: 'xiaoce-agent',
       backendLabel: '小策',
       error: errHint,
       detail: detail || '',

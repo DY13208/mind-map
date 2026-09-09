@@ -40,9 +40,11 @@
       :view.sync="view"
       :show-create="mode === 'files' || mode === 'folder'"
       :show-create-folder="mode === 'files' && !isTeamView"
+      :show-import="mode === 'files' || mode === 'folder'"
       :hide-opened-sort="isRealFilesMode"
       @create-room="createRoom"
       @create-folder="createFolder"
+      @import="openImport"
     />
     <div v-if="error" class="statePanel">
       <el-alert
@@ -177,6 +179,12 @@
       :room="activeRoom"
       @restored="() => load({ reset: true, keepPage: true })"
     />
+    <HomeImportDialog
+      :visible.sync="importVisible"
+      :folder-id="folder ? folder.id : null"
+      :team-id="selectedTeamId || null"
+      @imported="onImported"
+    />
   </section>
 </template>
 
@@ -197,6 +205,7 @@ import RoomCard from './components/RoomCard.vue'
 import RoomList from './components/RoomList.vue'
 import ShareRoomDialog from './components/ShareRoomDialog.vue'
 import ShareFolderDialog from './components/ShareFolderDialog.vue'
+import HomeImportDialog from './components/HomeImportDialog.vue'
 const copy = {
   files: ['我的脑图', '管理你的文件夹与脑图'],
   recent: ['最近', '快速回到最近打开的脑图'],
@@ -238,7 +247,8 @@ export default {
     RoomCard,
     RoomList,
     ShareRoomDialog,
-    ShareFolderDialog
+    ShareFolderDialog,
+    HomeImportDialog
   },
   props: { mode: { type: String, default: 'files' } },
   data() {
@@ -263,6 +273,7 @@ export default {
       folderShareVisible: false,
       activeFolder: null,
       historyVisible: false,
+      importVisible: false,
       pageSizes: PAGE_SIZES,
       limit: savedPageSize(),
       page: 1,
@@ -608,6 +619,22 @@ export default {
           () => folderService.createFolder(result.value.trim()),
           '文件夹已创建'
         )
+    },
+    openImport() {
+      this.importVisible = true
+    },
+    async onImported(result) {
+      await this.load({ reset: true, keepPage: true })
+      if (result && result.mode === 'folder' && result.folderId) {
+        this.$router.push('/files/folder/' + result.folderId)
+        return
+      }
+      if (result && result.mode === 'single' && result.room) {
+        const roomKey = result.room.roomKey || result.room.id
+        if (roomKey) {
+          await this.$router.push({ path: '/', query: { room: roomKey } })
+        }
+      }
     },
     renameRoom(room) {
       this.activeItem = room

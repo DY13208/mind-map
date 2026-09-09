@@ -170,7 +170,7 @@ export function storeDevAuthKey(key) {
   }
 }
 
-export async function devLogin(key) {
+export async function devLogin(key, mobile = '') {
   let response
   try {
     response = await fetchWithTimeout(
@@ -182,7 +182,10 @@ export async function devLogin(key) {
           Accept: 'application/json',
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ key })
+        body: JSON.stringify({
+          key,
+          mobile: String(mobile || '').trim()
+        })
       },
       AUTH_TIMEOUT_MS
     )
