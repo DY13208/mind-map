@@ -1,6 +1,7 @@
 import { getRuntimeConfig } from './runtimeConfig'
 import { getLocalConfig } from '@/api'
 import { getAuthApiUrl } from './auth'
+import { prepareWecomTodoDraft } from './wecomTodoTitle'
 
 let ssoAccess = null
 let ssoRequest = null
@@ -140,19 +141,13 @@ function personNameMatches(candidate, target) {
 }
 
 /**
- * Create a WeCom-synced work todo via Xiaoce `/api/wecom/todos/`.
- * Resolves assignee by display name against contacts, then platform members.
+ * 只读探测小策企微应用是否能访问指定成员。
+ *
+ * 这个检查必须发生在智能体写入前：智能体即使能启动，也可能因应用通讯录
+ * 权限不足而在写入阶段失败。调用方可据此改走已授权的 CLI 通道。
  */
-export async function createXiaoceWecomTodo({
-  assignee,
-  title,
-  description,
-  signal
-} = {}) {
+export async function probeXiaoceWecomRecipient({ assignee, signal } = {}) {
   const assigneeName = String(assignee || '').trim()
-  const taskTitle = String(title || '待办').trim().slice(0, 200) || '待办'
-  const detail = String(description || '').trim().slice(0, 1000)
-
   const contactsRes = await xiaoceFetch('/api/wecom/contacts/', {
     cache: 'no-store',
     signal
@@ -163,7 +158,7 @@ export async function createXiaoceWecomTodo({
       contactsJson.detail ||
       contactsJson.error ||
       `读取企微通讯录失败（HTTP ${contactsRes.status}）`
-    const err = new Error(msg)
+    const err = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
     err.status = contactsRes.status
     err.code = contactsJson.code || 'xiaoce_contacts_failed'
     throw err
@@ -172,6 +167,38 @@ export async function createXiaoceWecomTodo({
   const contact = contacts.find(
     item => item && item.available !== false && personNameMatches(item.name, assigneeName)
   )
+  return {
+    available: !!(contact && contact.contactId != null),
+    contact: contact || null,
+    assigneeName
+  }
+}
+
+/**
+ * Create a WeCom-synced work todo via Xiaoce `/api/wecom/todos/`.
+ * Resolves assignee by display name against contacts, then platform members.
+ */
+export async function createXiaoceWecomTodo({
+  assignee,
+  title,
+  description,
+  signal,
+  resolvedContact
+} = {}) {
+  const assigneeName = String(assignee || '').trim()
+  const draft = prepareWecomTodoDraft({ title, description, assignee: assigneeName })
+  if (!draft.ok) {
+    const err = new Error(draft.error)
+    err.code = draft.code
+    throw err
+  }
+  const taskTitle = draft.title
+  const detail = draft.description.slice(0, 1000)
+
+  const probe = resolvedContact
+    ? { available: true, contact: resolvedContact }
+    : await probeXiaoceWecomRecipient({ assignee: assigneeName, signal })
+  const contact = probe.contact
 
   let body
   if (contact && contact.contactId != null) {
@@ -301,6 +328,14 @@ export function isWecomTodoConfirmationPreview(text) {
 export function isWecomTodoCreateSuccess(text) {
   const t = String(text || '')
   if (isWecomTodoConfirmationPreview(t)) return false
+  // 不能因为“创建待办成功”等模型复述，就掩盖工具返回的权限拒绝。
+  if (
+    /没有读取该成员的权限|无权读取.*通讯录|WEWORK.*(?:NO_PERMISSION|FORBIDDEN)|权限不足|permission denied|forbidden/i.test(
+      t
+    )
+  ) {
+    return false
+  }
   return /创建待办成功|待办\s*ID|已完成|成功条目/.test(t)
 }
 
@@ -503,11 +538,18 @@ export async function createXiaoceWecomTodoViaAgent({
     throw err
   }
   const assigneeName = String(assignee || '').trim() || '负责人'
-  const taskTitle = String(title || '待办').trim().slice(0, 80) || '待办'
-  const detail = String(description || '').trim().slice(0, 1000)
+  const draft = prepareWecomTodoDraft({ title, description, assignee: assigneeName })
+  if (!draft.ok) {
+    const err = new Error(draft.error)
+    err.code = draft.code
+    throw err
+  }
+  const taskTitle = draft.title
+  const detail = draft.description.slice(0, 1000)
   const message = [
     `请立刻通过企业微信给「${assigneeName}」创建一条企微待办（官方企微待办，不是平台内部待办）。`,
     `标题：${taskTitle}`,
+    `待办标题必须精确为「${taskTitle}」；不得包含接收人、创建/发送动作、企业微信或说明。`,
     detail ? `说明：${detail}` : '',
     '若出现「创建待办预览 / 待确认」，请在本轮给出可复制的完整确认句；不要停在口头说明。'
   ]
@@ -533,6 +575,15 @@ export async function createXiaoceWecomTodoViaAgent({
       '小策待办仍停在确认门禁，自动确认未生效。请在小策网页确认智能体企微写权限可用。'
     )
     err.code = 'wecom_confirmation_pending'
+    throw err
+  }
+  if (
+    /没有读取该成员的权限|无权读取.*通讯录|WEWORK.*(?:NO_PERMISSION|FORBIDDEN)|权限不足|permission denied|forbidden/i.test(
+      String(result.content || '')
+    )
+  ) {
+    const err = new Error(String(result.content || '').trim().slice(0, 240))
+    err.code = 'WEWORK_NO_PERMISSION'
     throw err
   }
   if (!isWecomTodoCreateSuccess(result.content) && !/已创建|创建成功/.test(result.content)) {
