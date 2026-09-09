@@ -236,6 +236,8 @@ export default {
     closeMiniMap: 'Close mini map',
     readonly: 'Change to Readonly',
     edit: 'Change to edit',
+    switchToLight: 'Switch to light mode',
+    switchToDark: 'Switch to dark mode',
     backToRoot: 'Back to root node',
     changeSourceCodeEdit: 'Switch to source code editing mode',
     shortcutKeys: 'Shortcut keys',

@@ -358,6 +358,12 @@ export default {
     Import,
     ToolbarNodeBtnList
   },
+  props: {
+    returnFolderId: {
+      type: String,
+      default: ''
+    }
+  },
   data() {
     return {
       isMobile: isMobile(),
@@ -738,7 +744,11 @@ export default {
 
     // 返回 Product Shell 文件列表
     goToFiles() {
-      this.$router.push({ path: '/files' }).catch(() => {})
+      const folderId = String(this.returnFolderId || '').trim()
+      const destination = folderId
+        ? { name: 'FolderFiles', params: { id: folderId } }
+        : { name: 'Files' }
+      this.$router.push(destination).catch(() => {})
     },
 
     // 扫描本地文件夹

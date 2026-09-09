@@ -231,6 +231,8 @@ export default {
     closeMiniMap: '關閉小地圖',
     readonly: '切換為唯讀模式',
     edit: '切換為編輯模式',
+    switchToLight: '切換到日間模式',
+    switchToDark: '切換到夜間模式',
     backToRoot: '回到根節點',
     changeSourceCodeEdit: '切換為原始碼編輯模式',
     shortcutKeys: '快捷鍵',
