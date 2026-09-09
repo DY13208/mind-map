@@ -276,8 +276,34 @@
           >
         </div>
       </div>
+      <div class="row" v-if="localConfigs.enableAi">
+        <div class="rowItem">
+          <span class="name">AI 执行引擎</span>
+          <el-radio-group v-model="localConfigs.aiBackend" size="mini" @change="onAiBackendChange">
+            <el-radio-button :label="AI_BACKEND_WORKBUDDY">WorkBuddy</el-radio-button>
+            <el-radio-button :label="AI_BACKEND_XIAOCE">小策</el-radio-button>
+          </el-radio-group>
+        </div>
+      </div>
+      <div class="row" v-if="localConfigs.enableAi && localConfigs.aiBackend === AI_BACKEND_XIAOCE">
+        <div class="rowItem workbuddyModelRow">
+          <span class="name">小策企业</span>
+          <el-select v-model="localConfigs.xiaoceOrganizationId" size="mini" style="width: 220px" :loading="xiaoceScopeLoading" placeholder="选择企业" @change="onXiaoceOrganizationChange">
+            <el-option v-for="item in xiaoceOrganizations" :key="item.id" :label="item.name" :value="String(item.id)"></el-option>
+          </el-select>
+        </div>
+      </div>
+      <div class="row" v-if="localConfigs.enableAi && localConfigs.aiBackend === AI_BACKEND_XIAOCE">
+        <div class="rowItem workbuddyModelRow">
+          <span class="name">小策智能体</span>
+          <el-select v-model="localConfigs.xiaoceAgentId" size="mini" style="width: 220px" :loading="xiaoceScopeLoading" placeholder="选择智能体" @change="onXiaoceAgentChange">
+            <el-option v-for="item in xiaoceAgents" :key="item.id" :label="`${item.emoji || '🤖'} ${item.name}`" :value="String(item.id)"></el-option>
+          </el-select>
+          <el-button size="mini" :loading="xiaoceScopeLoading" @click="loadXiaoceScope(true)">刷新</el-button>
+        </div>
+      </div>
       <!-- WorkBuddy 模型 -->
-      <div class="row">
+      <div class="row" v-if="localConfigs.enableAi && localConfigs.aiBackend !== AI_BACKEND_XIAOCE">
         <div class="rowItem workbuddyModelRow">
           <span class="name">{{ $t('setting.workbuddyModel') }}</span>
           <el-select
@@ -469,8 +495,12 @@ import { mapState, mapMutations } from 'vuex'
 import Color from './Color.vue'
 import {
   fetchWorkbuddyModels,
-  checkWorkbuddy
-} from '@/utils/workbuddyChat'
+  checkWorkbuddyRaw,
+  fetchXiaoceOrganizations,
+  fetchXiaoceAgents,
+  AI_BACKEND_WORKBUDDY,
+  AI_BACKEND_XIAOCE
+} from '@/utils/agentChat'
 
 export default {
   components: {
@@ -522,7 +552,10 @@ export default {
         showNavigatorToolbar: true,
         enableDragImport: false,
         enableAi: false,
+        aiBackend: 'workbuddy',
         workbuddyModel: 'deepseek-v4-flash',
+        xiaoceOrganizationId: '',
+        xiaoceAgentId: '',
         flowExpandConcurrency: 2
       },
       workbuddyModelOptions: [
@@ -530,7 +563,12 @@ export default {
       ],
       workbuddyPlatformModels: [],
       workbuddyCustomModels: [],
-      workbuddyModelsLoading: false
+      workbuddyModelsLoading: false,
+      xiaoceOrganizations: [],
+      xiaoceAgents: [],
+      xiaoceScopeLoading: false,
+      AI_BACKEND_WORKBUDDY: 'workbuddy',
+      AI_BACKEND_XIAOCE: 'xiaoce'
     }
   },
   computed: {
@@ -547,7 +585,8 @@ export default {
         this.initConfig()
         this.initWatermark()
         this.initLoacalConfig()
-        this.loadWorkbuddyModels()
+        if (this.localConfigs.aiBackend === AI_BACKEND_XIAOCE) this.loadXiaoceScope()
+        else this.loadWorkbuddyModels()
       } else {
         this.$refs.sidebar.show = false
       }
@@ -682,6 +721,54 @@ export default {
       })
     },
 
+    onAiBackendChange(value) {
+      this.updateLocalConfig('aiBackend', value)
+      if (value === AI_BACKEND_XIAOCE) this.loadXiaoceScope(true)
+      else this.loadWorkbuddyModels(true)
+    },
+
+    async onXiaoceOrganizationChange(value) {
+      this.localConfigs.xiaoceOrganizationId = String(value || '')
+      this.localConfigs.xiaoceAgentId = ''
+      this.updateLocalConfig('xiaoceOrganizationId', this.localConfigs.xiaoceOrganizationId)
+      this.updateLocalConfig('xiaoceAgentId', '')
+      await this.loadXiaoceAgents(true)
+    },
+
+    onXiaoceAgentChange(value) {
+      this.localConfigs.xiaoceAgentId = String(value || '')
+      this.updateLocalConfig('xiaoceAgentId', this.localConfigs.xiaoceAgentId)
+    },
+
+    async loadXiaoceAgents(selectFallback = false) {
+      this.xiaoceAgents = this.localConfigs.xiaoceOrganizationId
+        ? await fetchXiaoceAgents(this.localConfigs.xiaoceOrganizationId)
+        : []
+      if (!this.xiaoceAgents.some(item => String(item.id) === String(this.localConfigs.xiaoceAgentId || ''))) {
+        const fallback = selectFallback && this.xiaoceAgents[0] ? String(this.xiaoceAgents[0].id) : ''
+        this.localConfigs.xiaoceAgentId = fallback
+        this.updateLocalConfig('xiaoceAgentId', fallback)
+      }
+    },
+
+    async loadXiaoceScope(showError = false) {
+      if (this.xiaoceScopeLoading) return
+      this.xiaoceScopeLoading = true
+      try {
+        this.xiaoceOrganizations = await fetchXiaoceOrganizations()
+        if (!this.xiaoceOrganizations.some(item => String(item.id) === String(this.localConfigs.xiaoceOrganizationId || ''))) {
+          const preferred = this.xiaoceOrganizations.find(item => item.isCurrent) || this.xiaoceOrganizations[0]
+          this.localConfigs.xiaoceOrganizationId = preferred ? String(preferred.id) : ''
+          this.updateLocalConfig('xiaoceOrganizationId', this.localConfigs.xiaoceOrganizationId)
+        }
+        await this.loadXiaoceAgents(true)
+      } catch (err) {
+        if (showError) this.$message.error(`小策配置加载失败：${err.message || '未知错误'}`)
+      } finally {
+        this.xiaoceScopeLoading = false
+      }
+    },
+
     workbuddyModelLabel(item) {
       if (!item) return ''
       if (item.custom) {
@@ -731,7 +818,7 @@ export default {
 
     async loadWorkbuddyModels(force = false) {
       if (this.workbuddyModelsLoading) return
-      const wb = await checkWorkbuddy()
+      const wb = await checkWorkbuddyRaw()
       if (!wb.ok) {
         if (force && this.$message) {
           this.$message.warning(this.$t('setting.workbuddyModelUnavailable'))

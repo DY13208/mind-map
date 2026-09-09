@@ -29,6 +29,41 @@ function enabledValue(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase())
 }
 
+function base64UrlJson(value) {
+  return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url')
+}
+
+function issueYiranIdentityAssertion(user, env = process.env) {
+  const secret = String(env.MIND_MAP_YIRAN_SSO_SECRET || '').trim()
+  if (secret.length < 32) {
+    throw new AuthError('yiran_sso_unavailable', '小策单点登录共享密钥未配置', 503)
+  }
+  const corpId = String(user && user.corpId || '').trim()
+  const wecomUserId = String(user && user.wecomUserId || '').trim()
+  if (!corpId || !wecomUserId) {
+    throw new AuthError('yiran_identity_missing', '当前账号缺少企业微信身份', 403)
+  }
+  const now = Math.floor(Date.now() / 1000)
+  const payload = {
+    v: 1,
+    typ: 'identity_assertion',
+    iss: 'mind-map',
+    aud: 'yiran',
+    sub: `wecom:${corpId}:${wecomUserId}`,
+    corp_id: corpId,
+    wecom_userid: wecomUserId,
+    iat: now,
+    exp: now + 90,
+    jti: crypto.randomBytes(24).toString('hex')
+  }
+  const encoded = base64UrlJson(payload)
+  const signature = crypto
+    .createHmac('sha256', secret)
+    .update(encoded, 'ascii')
+    .digest('base64url')
+  return `${encoded}.${signature}`
+}
+
 function required(env, key) {
   const value = String(env[key] || '').trim()
   if (!value) throw new Error(`启用企业微信登录时必须配置 ${key}`)
@@ -1241,6 +1276,30 @@ async function handleAuthApi(req, res) {
     return true
   }
 
+  if (pathname === '/api/auth/yiran-token' && req.method === 'POST') {
+    if (!isAllowedOrigin(req)) {
+      sendJson(req, res, 403, { error: '请求来源未获授权', code: 'origin_denied' })
+      return true
+    }
+    const user = await authenticateRequest(req)
+    if (!user) {
+      sendJson(req, res, 401, { error: '请先登录', code: 'unauthorized' })
+      return true
+    }
+    try {
+      sendJson(req, res, 200, {
+        assertion: issueYiranIdentityAssertion(user),
+        expiresIn: 90
+      })
+    } catch (err) {
+      sendJson(req, res, err.status || 500, {
+        error: err.message || '无法签发小策登录票据',
+        code: err.code || 'yiran_sso_failed'
+      })
+    }
+    return true
+  }
+
   if (pathname === '/api/auth/me' && req.method === 'GET') {
     if (!config.enabled) {
       sendJson(req, res, 200, { enabled: false, authenticated: false })
@@ -1513,6 +1572,7 @@ module.exports = {
     originsEquivalent,
     forwardedOrigin,
     isAllowedOriginFor,
+    issueYiranIdentityAssertion,
     wecomAvatarUrl,
     isLogoutRequestAllowed,
     isTopLevelNavigation,

@@ -442,6 +442,26 @@
         配置「{{ runTarget.id }}：{{ runTarget.title }}」后加入任务队列；可关闭本窗口，任务在后台并行执行（WorkBuddy 多会话）。
       </p>
       <div class="runModelRow">
+        <span class="runModelLabel">执行引擎</span>
+        <el-radio-group v-model="runBackend" size="small" @change="onRunBackendChange">
+          <el-radio-button :label="AI_BACKEND_WORKBUDDY">WorkBuddy</el-radio-button>
+          <el-radio-button :label="AI_BACKEND_XIAOCE">小策</el-radio-button>
+        </el-radio-group>
+      </div>
+      <div class="runModelRow" v-if="runBackend === AI_BACKEND_XIAOCE">
+        <span class="runModelLabel">企业</span>
+        <el-select v-model="runOrganizationId" size="small" :loading="runScopeLoading" placeholder="选择企业" class="runModelSelect" @change="onRunOrganizationChange">
+          <el-option v-for="item in runOrganizations" :key="item.id" :label="item.name" :value="String(item.id)"></el-option>
+        </el-select>
+        <el-button size="mini" :loading="runScopeLoading" @click="loadRunXiaoceScope(true)">刷新</el-button>
+      </div>
+      <div class="runModelRow" v-if="runBackend === AI_BACKEND_XIAOCE">
+        <span class="runModelLabel">智能体</span>
+        <el-select v-model="runAgentId" size="small" :loading="runScopeLoading" placeholder="选择智能体" class="runModelSelect">
+          <el-option v-for="item in runAgents" :key="item.id" :label="`${item.emoji || '🤖'} ${item.name}`" :value="String(item.id)"></el-option>
+        </el-select>
+      </div>
+      <div class="runModelRow" v-else>
         <span class="runModelLabel">模型</span>
         <el-select
           v-model="runModel"
@@ -691,8 +711,12 @@ import {
 import {
   fetchWorkbuddyModels,
   getWorkbuddyConfig,
-  WORKBUDDY_CUSTOM_MODEL_HINTS
-} from '@/utils/workbuddyChat'
+  WORKBUDDY_CUSTOM_MODEL_HINTS,
+  fetchXiaoceOrganizations,
+  fetchXiaoceAgents,
+  AI_BACKEND_WORKBUDDY,
+  AI_BACKEND_XIAOCE
+} from '@/utils/agentChat'
 
 MindMap.usePlugin(Drag)
   .usePlugin(Select)
@@ -782,6 +806,14 @@ export default {
       runSubmitLoading: false,
       runSubmitSource: '',
       runModel: 'deepseek-v4-flash',
+      runBackend: 'workbuddy',
+      runOrganizationId: '',
+      runAgentId: '',
+      runOrganizations: [],
+      runAgents: [],
+      runScopeLoading: false,
+      AI_BACKEND_WORKBUDDY: 'workbuddy',
+      AI_BACKEND_XIAOCE: 'xiaoce',
       runModelsLoading: false,
       runCustomModels: WORKBUDDY_CUSTOM_MODEL_HINTS.slice(),
       runPlatformModels: [],
@@ -1407,10 +1439,53 @@ export default {
       this.runSubmitFields = []
       this.runSubmitZones = []
       this.runSubmitSource = ''
+      const localConfig = getLocalConfig() || {}
+      this.runBackend = localConfig.aiBackend === AI_BACKEND_XIAOCE
+        ? AI_BACKEND_XIAOCE
+        : AI_BACKEND_WORKBUDDY
+      this.runOrganizationId = String(localConfig.xiaoceOrganizationId || '')
+      this.runAgentId = String(localConfig.xiaoceAgentId || '')
       this.runModel = getWorkbuddyConfig().model || 'deepseek-v4-flash'
       this.runDialogVisible = true
-      this.loadRunModels()
+      if (this.runBackend === AI_BACKEND_XIAOCE) this.loadRunXiaoceScope()
+      else this.loadRunModels()
       this.loadRunSubmitTemplate(item)
+    },
+    onRunBackendChange(value) {
+      this.setLocalConfig({ aiBackend: value })
+      if (value === AI_BACKEND_XIAOCE) this.loadRunXiaoceScope(true)
+      else this.loadRunModels()
+    },
+    async onRunOrganizationChange(value) {
+      this.runOrganizationId = String(value || '')
+      this.runAgentId = ''
+      await this.loadRunXiaoceAgents(true)
+    },
+    async loadRunXiaoceAgents(selectFallback = false) {
+      this.runAgents = this.runOrganizationId
+        ? await fetchXiaoceAgents(this.runOrganizationId)
+        : []
+      if (!this.runAgents.some(item => String(item.id) === this.runAgentId)) {
+        this.runAgentId = selectFallback && this.runAgents[0]
+          ? String(this.runAgents[0].id)
+          : ''
+      }
+    },
+    async loadRunXiaoceScope(showError = false) {
+      if (this.runScopeLoading) return
+      this.runScopeLoading = true
+      try {
+        this.runOrganizations = await fetchXiaoceOrganizations()
+        if (!this.runOrganizations.some(item => String(item.id) === this.runOrganizationId)) {
+          const preferred = this.runOrganizations.find(item => item.isCurrent) || this.runOrganizations[0]
+          this.runOrganizationId = preferred ? String(preferred.id) : ''
+        }
+        await this.loadRunXiaoceAgents(true)
+      } catch (err) {
+        if (showError) this.$message.error(`小策配置加载失败：${err.message || '未知错误'}`)
+      } finally {
+        this.runScopeLoading = false
+      }
     },
     async loadRunSubmitTemplate(item) {
       if (!item || !this.roomKey) return
@@ -1874,6 +1949,15 @@ export default {
         this.$message.info('资料模板加载中，请稍候')
         return
       }
+      if (this.runBackend === AI_BACKEND_XIAOCE && (!this.runOrganizationId || !this.runAgentId)) {
+        this.$message.warning('请先选择企业和智能体')
+        return
+      }
+      this.setLocalConfig({
+        aiBackend: this.runBackend,
+        xiaoceOrganizationId: this.runOrganizationId,
+        xiaoceAgentId: this.runAgentId
+      })
       if (this.runSubmitFields.length) {
         const missing = missingSubmitMaterialLabels(this.runSubmitFields)
         if (missing.length) {

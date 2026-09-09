@@ -5,10 +5,8 @@ simple-mind-map/dist
 simple-mind-map/types
 utools/dist
 .env
+.env.yiran
 .mcp.json
 .playwright-cli/
-workbuddy_to_api/runtime/
-workbuddy_to_api/**/__pycache__/
-workbuddy_to_api/**/*.pyc
-workbuddy_to_api/.env
+workbuddy_to_api/
 .codebuddy/models.json

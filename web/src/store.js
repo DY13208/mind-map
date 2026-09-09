@@ -26,6 +26,9 @@ const store = new Vuex.Store({
       enableAi: true,
       // WorkBuddy 模型：默认自定义 DeepSeek（不消耗平台积分）
       workbuddyModel: 'deepseek-v4-flash',
+      aiBackend: 'workbuddy',
+      xiaoceOrganizationId: '',
+      xiaoceAgentId: '',
       // 补齐并发数（与 WorkBuddy 多会话对齐，建议 1-3）
       flowExpandConcurrency: 2
     },

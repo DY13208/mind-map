@@ -42,7 +42,7 @@ COPY --from=deps /src/web/node_modules ./web/node_modules
 COPY --from=deps /src/simple-mind-map/node_modules ./simple-mind-map/node_modules
 COPY --from=build /out/web /usr/share/nginx/html
 COPY docker/runtime-config.js /usr/share/nginx/html/runtime-config.js
-COPY docker/nginx.conf /etc/nginx/nginx.conf
+COPY docker/nginx.conf /etc/nginx/nginx.conf.template
 COPY docker/start.sh /app/start.sh
 
 ENV HOST=127.0.0.1 \

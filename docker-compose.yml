@@ -57,6 +57,7 @@ services:
       COLLAB_RATE_LIMIT_GLOBAL: "8000"
       COLLAB_V2: "1"
       SOP_OUTPUT_DIR: /app/output
+      YIRAN_UPSTREAM: ${YIRAN_UPSTREAM:-http://host.docker.internal:18232}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
