@@ -4,6 +4,19 @@ set -eu
 STOP_FLAG=/tmp/gateway-stopping
 rm -f "$STOP_FLAG" /tmp/collab.pid /tmp/mcp.pid /tmp/ai.pid
 
+YIRAN_UPSTREAM=${YIRAN_UPSTREAM:-http://host.docker.internal:18232}
+case "$YIRAN_UPSTREAM" in
+  http://*|https://*) ;;
+  *) echo "[gateway] invalid YIRAN_UPSTREAM" >&2; exit 1 ;;
+esac
+case "$YIRAN_UPSTREAM" in
+  *";"*|*"{"*|*"}"*|*" "*) echo "[gateway] invalid YIRAN_UPSTREAM characters" >&2; exit 1 ;;
+esac
+YIRAN_UPSTREAM=${YIRAN_UPSTREAM%/}
+sed "s|__YIRAN_UPSTREAM__|$YIRAN_UPSTREAM|g" \
+  /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+echo "[gateway] Yiran upstream: $YIRAN_UPSTREAM"
+
 echo "[gateway] waiting for postgres ${PGHOST:-postgres}:${PGPORT:-5432}..."
 i=0
 while [ "$i" -lt 60 ]; do
