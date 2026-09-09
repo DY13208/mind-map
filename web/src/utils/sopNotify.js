@@ -177,6 +177,20 @@ export function resolveNotifyAssignee(nodeAssignee, extraNote) {
   return fallback
 }
 
+/** 企微待办标题：短、干净，避免把整段 AI 节点文案塞进去 */
+export function buildWecomTodoTitle(node, sop, assignee) {
+  const sopTitle = String((sop && sop.title) || '').trim() || 'SOP'
+  let action = stripNodeText((node && node.text) || '')
+    .replace(/^AI\s*[:：]\s*/i, '')
+    .replace(/\s*[|｜].*$/, '')
+    .replace(/\s*→\s*代办[：:].*$/, '')
+    .trim()
+  if (action.length > 28) action = action.slice(0, 28)
+  if (!action) action = '流程知会'
+  const who = cleanAssigneeList(assignee)
+  return `${sopTitle} · ${action}${who ? `（${who}）` : ''}`.slice(0, 72)
+}
+
 /**
  * 从大纲文本抽取通知/提醒节点（按缩进父子关系取代办人 / 上下文）
  */
@@ -288,10 +302,11 @@ export async function processNotifyNodes({
         }`
       )
     }
-    // 标题显式带代办人，导图待办树一眼能看出发给谁
-    const title = /代办|接收人/.test(node.text)
+    // 导图卡片标题可详细；发给企微的标题必须短，对齐客户端「给xx发代办：标题」
+    const mapTitle = /代办|接收人/.test(node.text)
       ? node.text
       : `${node.text} → 代办：${assignee}`
+    const wxTitle = buildWecomTodoTitle(node, sop, assignee)
     const note = [
       `代办人：${assignee}`,
       node.detail || '',
@@ -316,7 +331,7 @@ export async function processNotifyNodes({
         })
       }
       const created = await createRoomTodo(roomKey, {
-        text: title,
+        text: mapTitle,
         note,
         assignee,
         block: !!node.block,
@@ -334,51 +349,49 @@ export async function processNotifyNodes({
 
     let dispatchReply = ''
     let dispatchOk = false
+    let dispatchError = ''
     try {
       const todo = await dispatchTodo({
         assignee: { name: assignee },
-        title,
-        detail: note,
-        context: [
-          `房间：${roomKey}`,
-          `代办人（接收人）：${assignee}`,
-          node.block
-            ? '模式：阻塞（需完成待办后继续）'
-            : '模式：知会/提醒（不阻塞）',
-          cpdaOk
-            ? `已写入导图待办 uid=${taskUid}`
-            : `导图待办写入失败：${cpdaError}`,
-          '请用一两句话确认已向该负责人说明任务，并点名接收人。'
-        ].join('\n'),
+        title: wxTitle,
+        // 不把 SOP 上下文塞进聊天，避免模型跑偏去分析 JD
         conversationId: conversationId
-          ? `${conversationId}-notify-${i}`
+          ? `${conversationId}-todo-${i}-${Date.now().toString(36)}`
           : undefined,
+        model: 'auto',
         signal,
         onEvent: (label, raw) => {
           if (onEvent) onEvent(label, raw)
         },
         onDelta: text => {
           if (onDelta) {
-            onDelta(`【通知派发 → ${assignee}】\n${String(text || '')}`)
+            onDelta(`【企微待办 → ${assignee}】\n${String(text || '')}`)
           }
         }
       })
       dispatchReply = (todo && todo.content) || ''
       dispatchOk = !!(todo && todo.success)
+      dispatchError = (todo && todo.error) || ''
+      if (!dispatchOk && dispatchError) {
+        dispatchReply = `${dispatchError}\n${dispatchReply}`.trim()
+      }
     } catch (err) {
       dispatchReply = (err && err.message) || 'WorkBuddy 派发失败'
+      dispatchError = dispatchReply
       console.warn('[sopNotify] dispatchTodo failed', err)
     }
 
     results.push({
       ...node,
       assignee,
-      displayTitle: title,
+      displayTitle: mapTitle,
+      wxTitle,
       taskUid,
       cpdaOk,
       cpdaError,
       dispatchOk,
-      dispatchReply
+      dispatchReply,
+      dispatchError
     })
   }
   return results
