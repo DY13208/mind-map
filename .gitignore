@@ -7,5 +7,8 @@ utools/dist
 .env
 .mcp.json
 .playwright-cli/
-workbuddy_to_api/
+workbuddy_to_api/runtime/
+workbuddy_to_api/**/__pycache__/
+workbuddy_to_api/**/*.pyc
+workbuddy_to_api/.env
 .codebuddy/models.json
