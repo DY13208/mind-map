@@ -282,45 +282,69 @@
               暂无进行中的 SOP 任务；可点右上角「运行」发起。
             </div>
 
-            <div class="ledgerPane" v-loading="ledgerSaving">
-              <div class="sectionLabel">台账运行记录</div>
-              <div class="addForm">
-                <el-input
-                  v-model="runForm.at"
-                  size="small"
-                  placeholder="时间（如 2026-09-04 18:00）"
-                  class="formField"
-                ></el-input>
-                <el-input
-                  v-model="runForm.result"
-                  size="small"
-                  placeholder="结果（完成 / 失败…）"
-                  class="formField short"
-                ></el-input>
-                <el-input
-                  v-model="runForm.note"
-                  size="small"
-                  placeholder="备注"
-                  class="formField"
-                ></el-input>
-                <el-button
-                  type="primary"
-                  size="small"
-                  :disabled="!activeSopUid"
-                  @click="submitRun"
-                >
-                  追加运行
-                </el-button>
-              </div>
-              <ul class="ledgerList" v-if="activeLedger.runs.length">
-                <li v-for="r in activeLedger.runs" :key="r.id">
-                  <span class="liMain">{{
-                    [r.at, r.result, r.note].filter(Boolean).join(' · ')
-                  }}</span>
-                  <span class="liActor" v-if="r.actor">{{ r.actor }}</span>
-                </li>
-              </ul>
-              <div v-else class="paneEmpty">暂无运行记录</div>
+            <div class="ledgerPane historyLedger" v-loading="ledgerSaving">
+              <el-collapse v-model="historyLedgerOpen">
+                <el-collapse-item name="ledger">
+                  <template slot="title">
+                    <span class="sectionLabel inline"
+                      >台账运行记录（{{ activeLedger.runs.length }}）</span
+                    >
+                  </template>
+                  <div class="addForm">
+                    <el-input
+                      v-model="runForm.at"
+                      size="small"
+                      placeholder="时间（如 2026-09-04 18:00）"
+                      class="formField"
+                    ></el-input>
+                    <el-input
+                      v-model="runForm.result"
+                      size="small"
+                      placeholder="结果（完成 / 失败…）"
+                      class="formField short"
+                    ></el-input>
+                    <el-input
+                      v-model="runForm.note"
+                      size="small"
+                      placeholder="备注"
+                      class="formField"
+                    ></el-input>
+                    <el-button
+                      type="primary"
+                      size="small"
+                      :disabled="!activeSopUid"
+                      @click="submitRun"
+                    >
+                      追加运行
+                    </el-button>
+                  </div>
+                  <ul class="ledgerList" v-if="activeLedger.runs.length">
+                    <li
+                      v-for="r in visibleLedgerRuns"
+                      :key="r.id"
+                      :title="[r.at, r.result, r.note].filter(Boolean).join(' · ')"
+                    >
+                      <span class="liMain">{{ shortLedgerRunLabel(r) }}</span>
+                      <span class="liActor" v-if="r.actor">{{ r.actor }}</span>
+                    </li>
+                  </ul>
+                  <div
+                    v-if="activeLedger.runs.length > ledgerRunLimit"
+                    class="ledgerMore"
+                  >
+                    <el-button type="text" size="mini" @click="toggleLedgerRunLimit">
+                      {{
+                        ledgerRunExpanded
+                          ? '收起'
+                          : `展开全部 ${activeLedger.runs.length} 条`
+                      }}
+                    </el-button>
+                  </div>
+                  <div v-if="!activeLedger.runs.length" class="paneEmpty">
+                    暂无运行记录
+                  </div>
+                </el-collapse-item>
+              </el-collapse>
             </div>
           </div>
         </el-tab-pane>
@@ -735,6 +759,8 @@ export default {
       dialogVisible: false,
       dialogTitle: '',
       dialogTab: 'map',
+      historyLedgerOpen: [],
+      ledgerRunExpanded: false,
       activeSop: null,
       activeSopUid: '',
       activeLedger: {
@@ -865,6 +891,13 @@ export default {
       ).length
       return `本 SOP · 执行 ${running} · 等待 ${waiting} · 共 ${list.length}`
     },
+    ledgerRunLimit() {
+      return this.ledgerRunExpanded ? 200 : 6
+    },
+    visibleLedgerRuns() {
+      const runs = (this.activeLedger && this.activeLedger.runs) || []
+      return runs.slice(0, this.ledgerRunLimit)
+    },
     selectedSopJob() {
       const pool = this.detailMode ? this.detailSopTaskJobs : this.sopTaskJobs
       if (!this.selectedSopJobId) return pool[0] || null
@@ -894,9 +927,11 @@ export default {
         if (r.cpdaOk) parts.push(`导图待办 ${r.taskUid || '已写'}`)
         else if (r.cpdaError) parts.push(`导图失败：${r.cpdaError}`)
         else parts.push('导图待办未写入')
-        if (r.dispatchOk) parts.push('WorkBuddy 已派发')
+        if (r.dispatchOk) parts.push('WorkBuddy 企微已派发')
+        else if (r.dispatchError)
+          parts.push(`WorkBuddy 失败：${String(r.dispatchError).slice(0, 48)}`)
         else if (r.dispatchReply)
-          parts.push(`WorkBuddy：${String(r.dispatchReply).slice(0, 40)}`)
+          parts.push(`WorkBuddy：${String(r.dispatchReply).slice(0, 48)}`)
         else parts.push('WorkBuddy 未确认')
         return {
           kind: r.block ? '阻塞' : '知会',
@@ -1190,6 +1225,16 @@ export default {
         (item && item.deliverables) ||
         []
       return latestDeliverableText(dels)
+    },
+    shortLedgerRunLabel(r) {
+      const raw = [r && r.at, r && r.result, r && r.note]
+        .filter(Boolean)
+        .join(' · ')
+      if (raw.length <= 96) return raw
+      return raw.slice(0, 96) + '…'
+    },
+    toggleLedgerRunLimit() {
+      this.ledgerRunExpanded = !this.ledgerRunExpanded
     },
     isHttp(uri) {
       return /^https?:\/\//i.test(String(uri || ''))
@@ -2375,7 +2420,12 @@ export default {
   box-sizing: border-box;
 
   &.detailMode {
-    padding-bottom: 16px;
+    height: calc(100vh - 52px);
+    max-height: calc(100vh - 52px);
+    padding: 10px 16px 10px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
 
   .detailTitle {
@@ -2387,21 +2437,49 @@ export default {
   }
 
   .sopDetailPage {
-    margin-top: 8px;
+    margin-top: 4px;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
 
   .detailTabs {
     background: #fff;
     border-radius: 10px;
-    padding: 8px 12px 16px;
+    padding: 4px 12px 12px;
     border: 1px solid #e4eee9;
-    min-height: calc(100vh - 140px);
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+
+    /deep/ .el-tabs__header {
+      margin-bottom: 8px;
+      flex-shrink: 0;
+    }
+
+    /deep/ .el-tabs__content {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    /deep/ .el-tab-pane {
+      height: 100%;
+      overflow: hidden;
+    }
   }
 
   .historyPane {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+    height: 100%;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 10px;
+    overflow: hidden;
   }
 
   .sectionLabel {
@@ -2409,6 +2487,10 @@ export default {
     font-weight: 600;
     color: #17362c;
     margin-bottom: 8px;
+
+    &.inline {
+      margin: 0;
+    }
   }
 
   .paneEmpty.soft {
@@ -2423,6 +2505,10 @@ export default {
     border: 1px solid #e4eee9;
     border-radius: 8px;
     background: #fafcfb;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
 
   .mindWrap {
@@ -2432,12 +2518,54 @@ export default {
 
 .sopDetailPage {
   .mindWrap {
-    height: calc(100vh - 240px);
-    min-height: 480px;
+    height: calc(100vh - 220px);
+    min-height: 360px;
   }
 
-  .ledgerPane {
-    max-height: none;
+  .historyLedger {
+    min-height: 0;
+    max-height: 34vh;
+    overflow: auto;
+    border: 1px solid #e4eee9;
+    border-radius: 8px;
+    background: #fff;
+    padding: 0 8px;
+
+    /deep/ .el-collapse {
+      border: none;
+    }
+
+    /deep/ .el-collapse-item__header {
+      height: 40px;
+      line-height: 40px;
+      border-bottom: none;
+    }
+
+    /deep/ .el-collapse-item__wrap {
+      border-bottom: none;
+    }
+
+    /deep/ .el-collapse-item__content {
+      padding-bottom: 10px;
+    }
+
+    .ledgerList li {
+      padding: 6px 0;
+    }
+
+    .liMain {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .ledgerMore {
+      text-align: center;
+      padding-top: 4px;
+    }
   }
 }
 
@@ -2540,6 +2668,32 @@ export default {
       grid-template-columns: minmax(220px, 320px) 1fr;
       min-height: 240px;
       max-height: 520px;
+    }
+
+    &.embedded {
+      .taskPanelHead {
+        flex-shrink: 0;
+      }
+
+      .taskBody {
+        flex: 1;
+        min-height: 0;
+        max-height: none;
+      }
+
+      .taskDetail {
+        overflow: auto;
+        min-height: 0;
+      }
+
+      .eventList {
+        max-height: 100px;
+      }
+
+      .streamBox .streamText {
+        max-height: 180px;
+        min-height: 80px;
+      }
     }
 
     .taskList {
@@ -2881,9 +3035,14 @@ export default {
   }
 
   .ledgerPane {
-    min-height: 360px;
-    max-height: 68vh;
+    min-height: 200px;
+    max-height: 50vh;
     overflow: auto;
+  }
+
+  .historyLedger.ledgerPane {
+    min-height: 0;
+    max-height: 34vh;
   }
 
   .addForm {
