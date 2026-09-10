@@ -2,9 +2,26 @@
  * SOP 台账运行队列：复用 WorkBuddy 多会话（独立 conversationId）
  * 形态对齐 flowExpandQueue，默认并发 2、上限 3
  */
-import { runSopWithWorkbuddy } from './sopRun'
+import { runSopWithWorkbuddy, sanitizeNodeProgress } from './sopRun'
 import { aiBackendLabel, getAiBackend } from './agentChat'
+import { areWaitingWecomTodosDone } from './sopNotify'
 import { getLocalConfig } from '@/api'
+
+function resolveWaitingWecomTodos(job) {
+  if (Array.isArray(job.waitingWecomTodos) && job.waitingWecomTodos.length) {
+    return job.waitingWecomTodos
+  }
+  return (job.notifyResults || [])
+    .filter(r => r && r.block && r.dispatchOk && !r.skipped)
+    .map(r => ({
+      todoId: r.todoId || '',
+      title: r.wxTitle || r.text || r.title || '',
+      wxTitle: r.wxTitle || '',
+      assignee: r.assignee || '',
+      via: r.dispatchVia || '',
+      notifyKey: r.notifyKey || ''
+    }))
+}
 
 let jobSeq = 0
 
@@ -73,10 +90,17 @@ function publicJob(job, extra = {}) {
     model: job.model,
     backend: job.backend || '',
     backendLabel: job.backendLabel || '',
+    nodeProgress: Array.isArray(job.nodeProgress)
+      ? sanitizeNodeProgress(job.nodeProgress)
+      : [],
+    completedNotifyKeys: Array.isArray(job.completedNotifyKeys)
+      ? job.completedNotifyKeys.slice()
+      : [],
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
     liveElapsedSec: job.liveElapsedSec || 0,
     waitingTaskUids: job.waitingTaskUids || [],
+    waitingWecomTodos: job.waitingWecomTodos || [],
     notifyResults: job.notifyResults || [],
     missingFields: job.missingFields || [],
     missingSummary: job.missingSummary || '',
@@ -125,12 +149,21 @@ function serializeJob(job) {
     streamText: String(job.streamText || '').slice(0, STREAM_PERSIST_MAX),
     progressText: String(job.progressText || '').slice(0, 20000),
     eventLog: (job.eventLog || []).slice(-80),
+    nodeProgress: Array.isArray(job.nodeProgress)
+      ? job.nodeProgress.slice(0, 400)
+      : [],
+    completedNotifyKeys: Array.isArray(job.completedNotifyKeys)
+      ? job.completedNotifyKeys.slice(0, 200)
+      : [],
     context: job.context || null,
     result: job.result || null,
     error: job.error || '',
     startedAt: job.startedAt || 0,
     finishedAt: job.finishedAt || 0,
     waitingTaskUids: (job.waitingTaskUids || []).slice(),
+    waitingWecomTodos: Array.isArray(job.waitingWecomTodos)
+      ? job.waitingWecomTodos.slice()
+      : [],
     notifyResults: (job.notifyResults || []).slice(),
     missingFields: (job.missingFields || []).slice(),
     missingSummary: job.missingSummary || '',
@@ -164,12 +197,21 @@ function hydrateJob(raw) {
     streamText: raw.streamText || '',
     progressText: raw.progressText || '',
     eventLog: (raw.eventLog || []).slice(),
+    nodeProgress: Array.isArray(raw.nodeProgress)
+      ? sanitizeNodeProgress(raw.nodeProgress)
+      : [],
+    completedNotifyKeys: Array.isArray(raw.completedNotifyKeys)
+      ? raw.completedNotifyKeys.slice()
+      : [],
     context: raw.context || null,
     result: raw.result || null,
     error: raw.error || '',
     startedAt: raw.startedAt || 0,
     finishedAt: raw.finishedAt || 0,
     waitingTaskUids: (raw.waitingTaskUids || []).slice(),
+    waitingWecomTodos: Array.isArray(raw.waitingWecomTodos)
+      ? raw.waitingWecomTodos.slice()
+      : [],
     notifyResults: (raw.notifyResults || []).slice(),
     missingFields: (raw.missingFields || []).slice(),
     missingSummary: raw.missingSummary || '',
@@ -309,10 +351,64 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
 
   const emit = () => {
     schedulePersist()
-    if (changeHandler) changeHandler(snapshot())
+    const snap = snapshot()
+    changeListeners.forEach(fn => {
+      try {
+        fn(snap)
+      } catch (e) {
+        /* ignore listener error */
+      }
+    })
   }
 
-  let changeHandler = onChange
+  const changeListeners = new Set()
+  if (typeof onChange === 'function') changeListeners.add(onChange)
+
+  let waitPollTimer = null
+  let resumeWaitingImpl = null
+  const startWaitPoll = () => {
+    if (waitPollTimer) return
+    waitPollTimer = setInterval(async () => {
+      const waitingJobs = Array.from(waiting.values()).filter(j => {
+        if (j.state !== 'waiting_human') return false
+        return resolveWaitingWecomTodos(j).length > 0
+      })
+      if (!waitingJobs.length) {
+        clearInterval(waitPollTimer)
+        waitPollTimer = null
+        return
+      }
+      for (const job of waitingJobs) {
+        try {
+          const todos = resolveWaitingWecomTodos(job)
+          const check = await areWaitingWecomTodosDone(todos, {
+            backend: job.backend || getAiBackend()
+          })
+          const total = todos.length
+          job.status = `等待企微待办… 已完成 ${check.completed.length}/${total}（自动轮询）`
+          if (check.completed.length && Array.isArray(job.nodeProgress)) {
+            job.nodeProgress = job.nodeProgress.map(s =>
+              s.status === 'waiting'
+                ? {
+                    ...s,
+                    status: 'done',
+                    detail: '企微待办已完成',
+                    updatedAt: Date.now()
+                  }
+                : s
+            )
+          }
+          emit()
+          if (check.done && resumeWaitingImpl) {
+            resumeWaitingImpl(job.id)
+          }
+        } catch (e) {
+          job.status = `等待企微待办（轮询失败：${(e && e.message) || '网络错误'}）`
+          emit()
+        }
+      }
+    }, 15000)
+  }
 
   // 整页刷新后从 sessionStorage 恢复排队/等待，并把中断的 running 重新入队续跑
   const restored = readPersistedQueue()
@@ -327,6 +423,21 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       }
       waiting.set(job.id, job)
     })
+    // 恢复后若有 waiting_human，立刻开轮询
+    if (
+      Array.from(waiting.values()).some(
+        j =>
+          j.state === 'waiting_human' && resolveWaitingWecomTodos(j).length > 0
+      )
+    ) {
+      setTimeout(() => {
+        try {
+          startWaitPoll()
+        } catch (e) {
+          /* ignore */
+        }
+      }, 1200)
+    }
     ;(restored.pending || []).forEach(raw => {
       const job = hydrateJob(raw)
       if (!job) return
@@ -531,10 +642,15 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         outputIds: job.outputIds,
         extraNote: job.extraNote,
         model: job.model,
+        backend: job.backend || getAiBackend(),
         actor: job.actor,
         conversationId: job.id,
         signal: controller && controller.signal,
-        skipNotify: !!job.skipNotifyOnResume,
+        skipNotify: !!job.skipNotifyOnResume && !!(job.wecomOnlyFullyDone),
+        completedNotifyKeys: job.completedNotifyKeys || [],
+        priorNodeProgress: Array.isArray(job.nodeProgress)
+          ? job.nodeProgress.slice()
+          : [],
         onStatus: text => {
           job.status = text
           appendProgress(`› ${text}`)
@@ -542,6 +658,14 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         },
         onContext: ctx => {
           job.context = ctx
+          if (ctx && Array.isArray(ctx.steps) && !job.nodeProgress.length) {
+            job.nodeProgress = ctx.steps.slice()
+          }
+          emit()
+        },
+        onNodeProgress: steps => {
+          // 续跑时以 runner 合并后的进度为准，不再整表洗成灰
+          job.nodeProgress = Array.isArray(steps) ? steps.slice() : []
           emit()
         },
         onNotifyResults: results => {
@@ -599,28 +723,50 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       if (result.waitingHuman || result.waitingData) {
         job.state = result.waitingData ? 'waiting_data' : 'waiting_human'
         job.waitingTaskUids = result.waitingTaskUids || []
+        job.waitingWecomTodos = result.waitingWecomTodos || []
         job.notifyResults = result.notifyResults || []
         job.missingFields = result.missingFields || []
         job.missingSummary = result.missingSummary || ''
-        job.skipNotifyOnResume = true
+        if (Array.isArray(result.nodeProgress)) {
+          job.nodeProgress = sanitizeNodeProgress(result.nodeProgress)
+        }
+        if (Array.isArray(result.completedNotifyKeys)) {
+          job.completedNotifyKeys = result.completedNotifyKeys.slice()
+        } else {
+          const keys = (result.notifyResults || [])
+            .filter(r => r && r.notifyKey && (r.dispatchOk || r.cpdaOk || r.skipped))
+            .map(r => r.notifyKey)
+          job.completedNotifyKeys = Array.from(
+            new Set([...(job.completedNotifyKeys || []), ...keys])
+          )
+        }
+        // 阻塞等待时不要整段跳过通知；用 completedNotifyKeys 跳过已完成项
+        job.skipNotifyOnResume = false
         // 若企微待办派发失败，恢复执行时允许再派一次
         const notifyFailed = (result.notifyResults || []).some(
-          r => r && !r.dispatchOk
+          r => r && !r.dispatchOk && !r.cpdaOk && !r.skipped
         )
-        if (notifyFailed) job.skipNotifyOnResume = false
+        if (notifyFailed) {
+          /* keep keys only for successes */
+        }
         const notifyHint = formatNotifyAssignees(result.notifyResults)
+        const waitN =
+          (job.waitingWecomTodos && job.waitingWecomTodos.length) ||
+          job.waitingTaskUids.length ||
+          notifyCount(result)
         job.status = result.waitingData
           ? `待补数：${result.missingSummary || '请补充缺失数据后继续'}${
               notifyHint ? ` · 已通知 ${notifyHint}` : ''
             }`
-          : `等待人工完成 ${
-              job.waitingTaskUids.length || notifyCount(result)
-            } 条阻塞待办后再继续${notifyHint ? ` · 代办：${notifyHint}` : ''}`
+          : `等待企微待办完成 ${waitN} 条后再继续${
+              notifyHint ? ` · 代办：${notifyHint}` : ''
+            }（自动轮询中）`
         controllers.delete(job.id)
         running.delete(job.id)
         waiting.set(job.id, job)
         if (job.onWaiting) job.onWaiting(result, publicJob(job))
         emit()
+        startWaitPoll()
         pump()
         return
       }
@@ -648,7 +794,9 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         )
           ? job.backend === 'xiaoce' || /小策/.test(backendLabel)
             ? '连不上小策，请确认 /yiran 网关与登录状态可用'
-            : '连不上 WorkBuddy，请确认本机已启动 WorkBuddy API 代理'
+            : job.backend === 'openclaw' || /助理/.test(backendLabel)
+              ? '连不上助理（OpenClaw），请确认 Gateway / Bridge 已启动'
+              : '连不上 WorkBuddy，请确认本机已启动 WorkBuddy API 代理'
           : raw || 'SOP 执行失败'
       job.error = msg
       job.status = msg
@@ -685,6 +833,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       extraNote,
       model,
       actor,
+      backend,
       onSuccess,
       onError,
       onStart,
@@ -711,6 +860,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         sopCopy = { ...sop }
       }
       sopCopy.uid = sopUid
+      const useBackend = backend || getAiBackend()
       const job = {
         id: nextJobId(),
         roomKey: String(roomKey).trim(),
@@ -723,19 +873,22 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         extraNote: extraNote || '',
         model: model || '',
         actor: actor || '台账',
-        backend: getAiBackend(),
-        backendLabel: aiBackendLabel(),
+        backend: useBackend,
+        backendLabel: aiBackendLabel(useBackend),
         state: 'queued',
         status: '排队中…',
         streamText: '',
         progressText: '',
         eventLog: [],
+        nodeProgress: [],
+        completedNotifyKeys: [],
         context: null,
         result: null,
         error: '',
         startedAt: 0,
         finishedAt: 0,
         waitingTaskUids: [],
+        waitingWecomTodos: [],
         notifyResults: [],
         skipNotifyOnResume: false,
         onSuccess,
@@ -838,7 +991,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       return done || null
     },
 
-    /** 人工待办完成 / 补数后继续执行（跳过已派发的通知节点） */
+    /** 人工待办完成 / 补数后继续执行（按 completedNotifyKeys 跳过已派发项） */
     resumeWaiting(jobId, { extraNoteAppend = '' } = {}) {
       const job = waiting.get(jobId)
       if (!job) return { ok: false, message: '没有等待中的任务' }
@@ -847,8 +1000,16 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       job.state = 'queued'
       job.status = wasData
         ? '已补数，重新入队继续…'
-        : '待办已完成，重新入队继续…'
-      job.skipNotifyOnResume = true
+        : '待办已完成，继续后续节点…'
+      // 逐步续跑：不要整段 skipNotify；保留 completedNotifyKeys
+      job.skipNotifyOnResume = false
+      if (Array.isArray(job.nodeProgress)) {
+        job.nodeProgress = job.nodeProgress.map(s =>
+          s.status === 'waiting'
+            ? { ...s, status: 'done', detail: '企微待办已完成', updatedAt: Date.now() }
+            : s
+        )
+      }
       if (extraNoteAppend) {
         job.extraNote = [job.extraNote || '', extraNoteAppend]
           .filter(Boolean)
@@ -859,6 +1020,8 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       job.error = ''
       job.missingFields = []
       job.missingSummary = ''
+      job.waitingTaskUids = []
+      job.waitingWecomTodos = []
       pending.unshift(job)
       emit()
       pump()
@@ -872,8 +1035,24 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
     getSnapshot: snapshot,
 
     setOnChange(handler) {
-      changeHandler = handler
-      if (changeHandler) changeHandler(snapshot())
+      changeListeners.clear()
+      if (typeof handler === 'function') {
+        changeListeners.add(handler)
+        handler(snapshot())
+      }
+    },
+
+    subscribe(handler) {
+      if (typeof handler !== 'function') return () => {}
+      changeListeners.add(handler)
+      try {
+        handler(snapshot())
+      } catch (e) {
+        /* ignore */
+      }
+      return () => {
+        changeListeners.delete(handler)
+      }
     },
 
     /** 收集队列里已回写的台账，供刷新列表时合并，避免冲掉刚跑完的记录 */
@@ -912,6 +1091,8 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
     }, 0)
   }
   persistNow()
+
+  resumeWaitingImpl = api.resumeWaiting
 
   return api
 }
@@ -953,7 +1134,8 @@ export function getSharedSopRunQueue(options = {}) {
   if (!sharedSopRunQueue) {
     sharedSopRunQueue = createSopRunQueue(options)
   } else if (options.onChange) {
-    sharedSopRunQueue.setOnChange(options.onChange)
+    // 已有单例时追加监听，避免冲掉其它页面的 subscribe
+    sharedSopRunQueue.subscribe(options.onChange)
   }
   return sharedSopRunQueue
 }

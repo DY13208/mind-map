@@ -45,6 +45,12 @@
         <router-link to="/sop" title="SOP台账" aria-label="SOP台账"
           ><i class="el-icon-notebook-2"></i>SOP台账</router-link
         >
+        <router-link to="/sop-tasks" title="SOP任务" aria-label="SOP任务"
+          ><i class="el-icon-s-order"></i>任务</router-link
+        >
+        <router-link to="/assistant" title="助理" aria-label="助理"
+          ><i class="el-icon-chat-dot-round"></i>助理</router-link
+        >
         <p class="navLabel navLabel--space">工具</p>
         <router-link
           to="/mcp-access"

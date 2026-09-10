@@ -160,6 +160,40 @@ const routes = [
         : { path: '/files', replace: true }
   },
   {
+    path: '/assistant',
+    component: () =>
+      import(
+        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'
+      ),
+    children: [
+      {
+        path: '',
+        name: 'Assistant',
+        component: () =>
+          import(
+            /* webpackChunkName: "assistant" */ './pages/ProductShell/AssistantPage.vue'
+          )
+      }
+    ]
+  },
+  {
+    path: '/sop-tasks',
+    component: () =>
+      import(
+        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'
+      ),
+    children: [
+      {
+        path: '',
+        name: 'SopTasks',
+        component: () =>
+          import(
+            /* webpackChunkName: "sop-tasks" */ './pages/SopRegistry/SopTasksPage.vue'
+          )
+      }
+    ]
+  },
+  {
     path: '/sop',
     component: () =>
       import(
