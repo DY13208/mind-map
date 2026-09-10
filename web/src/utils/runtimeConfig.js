@@ -60,7 +60,12 @@ export function getRuntimeConfig() {
       appUrl: originHttp,
       workbuddyBase: runtime.workbuddyBase || '/wb-api',
       workbuddyKey: runtime.workbuddyKey || 'local',
-      workbuddyModel: runtime.workbuddyModel || 'deepseek-v4-flash'
+      workbuddyModel: runtime.workbuddyModel || 'deepseek-v4-flash',
+      openclawBase: runtime.openclawBase || '/openclaw-api',
+      openclawToken: runtime.openclawToken || '',
+      openclawModel: runtime.openclawModel || 'openclaw/default',
+      openclawControlUrl:
+        runtime.openclawControlUrl || 'http://127.0.0.1:18789/chat'
     }
   }
   return {
@@ -81,7 +86,12 @@ export function getRuntimeConfig() {
     appUrl: `${httpProtocol}//${runtime.host || host}:${webPort}`,
     workbuddyBase: runtime.workbuddyBase || '/wb-api',
     workbuddyKey: runtime.workbuddyKey || 'local',
-    workbuddyModel: runtime.workbuddyModel || 'deepseek-v4-flash'
+    workbuddyModel: runtime.workbuddyModel || 'deepseek-v4-flash',
+    openclawBase: runtime.openclawBase || '/openclaw-api',
+    openclawToken: runtime.openclawToken || '',
+    openclawModel: runtime.openclawModel || 'openclaw/default',
+    openclawControlUrl:
+      runtime.openclawControlUrl || 'http://127.0.0.1:18789/chat'
   }
 }
 

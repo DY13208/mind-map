@@ -1,12 +1,14 @@
 /**
- * SOP 台账 → AI 后端直接运行（WorkBuddy / 小策，由设置与运行弹窗选择）
+ * SOP 台账 → AI 后端直接运行（WorkBuddy / 小策 / 助理，由设置与运行弹窗选择）
  * 交互对齐：点运行 → 选产物 → 执行 SOP → 拿回报告/链接
  */
 import {
+  AI_BACKEND_OPENCLAW,
   AI_BACKEND_XIAOCE,
   aiBackendLabel,
   checkWorkbuddy,
   getAiBackend,
+  normalizeAiBackend,
   streamChat
 } from './agentChat'
 import {
@@ -19,6 +21,8 @@ import {
 import {
   extractNotifyNodesFromOutline,
   extractWecomTodoNotifyNodesFromOutline,
+  isManualGateTitle,
+  isNotifyTitle,
   isWecomTodoOrientedSop,
   processNotifyNodes,
   summarizeNotifyResults
@@ -61,6 +65,120 @@ function stripText(text) {
     .trim()
 }
 
+function normalizeStepTitle(text) {
+  return String(text || '')
+    .replace(/^AI\s*[:：]\s*/i, '')
+    .replace(/\s+/g, '')
+    .trim()
+}
+
+/** 节点标题匹配：要求足够重合，避免「需求方」「发offer」误伤后续步骤 */
+function matchStepByTitle(steps, tip) {
+  const list = Array.isArray(steps) ? steps : []
+  const raw = String(tip || '').trim()
+  if (!raw) return null
+  const norm = normalizeStepTitle(raw)
+  const exact = list.find(
+    s => s.title === raw || normalizeStepTitle(s.title) === norm
+  )
+  if (exact) return exact
+  // 短串完整包含于长串，且长度够接近，避免「发offer」「需求方」误中
+  const strong = list.find(s => {
+    const st = normalizeStepTitle(s.title)
+    if (!st || st.length < 6 || norm.length < 6) return false
+    const shorter = st.length <= norm.length ? st : norm
+    const longer = st.length <= norm.length ? norm : st
+    if (!longer.includes(shorter)) return false
+    return shorter.length * 2 >= longer.length
+  })
+  return strong || null
+}
+
+/**
+ * 纠正节点流错标：仅清理「等待人工」步骤之后的误标绿。
+ * 不要用 active 当游标，否则根节点 active 会把后面已完成步骤洗成灰。
+ */
+export function sanitizeNodeProgress(steps) {
+  const list = Array.isArray(steps) ? steps.map(s => ({ ...s })) : []
+  if (!list.length) return list
+  const cursor = list.findIndex(s => s && s.status === 'waiting')
+  if (cursor < 0) return list
+  return list.map((s, i) => {
+    if (i <= cursor) return s
+    if (
+      s.status === 'done' ||
+      s.status === 'skipped' ||
+      s.status === 'waiting' ||
+      s.status === 'active'
+    ) {
+      return {
+        ...s,
+        status: 'pending',
+        detail: '',
+        updatedAt: Date.now()
+      }
+    }
+    return s
+  })
+}
+
+/** 把历史节点状态合并到新拉的步骤表上，续跑时保持已走进度变绿 */
+export function mergeNodeProgress(freshSteps, priorSteps) {
+  const fresh = Array.isArray(freshSteps) ? freshSteps.map(s => ({ ...s })) : []
+  const prior = Array.isArray(priorSteps) ? priorSteps : []
+  if (!fresh.length) return prior.map(s => ({ ...s }))
+  if (!prior.length) return fresh
+
+  const byUid = new Map()
+  const byTitle = new Map()
+  prior.forEach(s => {
+    if (!s) return
+    if (s.uid) byUid.set(String(s.uid), s)
+    const nt = normalizeStepTitle(s.title)
+    if (nt) byTitle.set(nt, s)
+  })
+
+  let merged = fresh.map(s => {
+    const old =
+      (s.uid && byUid.get(String(s.uid))) ||
+      byTitle.get(normalizeStepTitle(s.title))
+    if (!old) return { ...s, status: s.status || 'pending' }
+    return {
+      ...s,
+      status: old.status || s.status || 'pending',
+      detail: old.detail || '',
+      events: Array.isArray(old.events) ? old.events.slice(-20) : [],
+      updatedAt: old.updatedAt || s.updatedAt || 0
+    }
+  })
+
+  // 续跑：waiting → done，并点亮下一个 pending
+  merged = merged.map(s =>
+    s.status === 'waiting'
+      ? {
+          ...s,
+          status: 'done',
+          detail: s.detail || '企微待办已完成',
+          updatedAt: Date.now()
+        }
+      : s
+  )
+
+  const hasActive = merged.some(s => s.status === 'active')
+  if (!hasActive) {
+    let lit = false
+    merged = merged.map(s => {
+      if (lit) return s
+      if (s.status === 'pending') {
+        lit = true
+        return { ...s, status: 'active', updatedAt: Date.now() }
+      }
+      return s
+    })
+  }
+  return merged
+}
+
 function treeToOutline(node, depth = 0, lines = [], limit = { n: 0, max: 400 }) {
   if (!node || limit.n >= limit.max) return lines
   limit.n += 1
@@ -77,12 +195,76 @@ function treeToOutline(node, depth = 0, lines = [], limit = { n: 0, max: 400 }) 
   return lines
 }
 
+function inferStepKind(title) {
+  const t = String(title || '')
+  if (/提交资料|提供资料|填写|补数|提交招聘/.test(t)) return 'submit'
+  if (isManualGateTitle(t)) return 'manual'
+  if (isNotifyTitle(t) || /通知|待办|企微|派发|发给|发送/.test(t)) return 'notify'
+  if (/^AI\s*[:：]|AI\s*(通知|发布|筛选|发起)/i.test(t)) return 'ai'
+  return 'step'
+}
+
+/** 节点流只保留可执行步骤，排除资料模板里的枚举叶子（初级/深圳…） */
+function isActionableSopStep(title, depth) {
+  const t = String(title || '').trim()
+  if (!t || t === '(空)') return false
+  if (isNotifyTitle(t) || isManualGateTitle(t)) return true
+  if (/^AI\s*[:：]|AI\s*(通知|发布|筛选|发起|初筛)/i.test(t)) return true
+  if (/提交资料|提供资料|提交招聘|需求方/.test(t)) return true
+  if (
+    /^(初级|中级|高级|经理级|经理级以上|全职|实习|兼职|深圳|北京|上海|广州|杭州|离职补|新增|男|女|不限)$/.test(
+      t
+    )
+  ) {
+    return false
+  }
+  // 深层级短标签多半是表单选项
+  if (depth >= 2 && t.length <= 10 && !/AI|通知|待办|发送|确认|审批/.test(t)) {
+    return false
+  }
+  // 资料字段名：有「要求/主体/岗位」等但不像动作
+  if (
+    depth >= 1 &&
+    /^(公司主体|招聘岗位|招聘部门|性别要求|职级|工作性质|招聘人数|招聘城市|招聘原因|试用期|硬性要求|成长计划)/.test(
+      t
+    )
+  ) {
+    return false
+  }
+  return depth <= 1
+}
+
+function treeToSteps(node, depth = 0, steps = [], limit = { n: 0, max: 400 }) {
+  if (!node || limit.n >= limit.max) return steps
+  limit.n += 1
+  const data = node.data || node
+  const title = stripText(data.text || node.text) || '(空)'
+  const uid = String(data.uid || node.uid || data.id || '').trim()
+  if (isActionableSopStep(title, depth)) {
+    steps.push({
+      uid: uid || `step-${steps.length}`,
+      title,
+      depth,
+      kind: inferStepKind(title),
+      status: 'pending',
+      detail: '',
+      events: [],
+      updatedAt: 0
+    })
+  }
+  ;(node.children || []).forEach(child =>
+    treeToSteps(child, depth + 1, steps, limit)
+  )
+  return steps
+}
+
 export async function loadSopRunContext(roomKey, sop) {
   const key = String(roomKey || '').trim()
   const uid = (sop && (sop.uid || (sop.uids && sop.uids[0]))) || ''
   const { getFileSubtree, getFileOutline } = await import('./fileApi')
 
   let outline = ''
+  let steps = []
   let source = 'none'
 
   if (uid) {
@@ -90,6 +272,7 @@ export async function loadSopRunContext(roomKey, sop) {
       const data = await getFileSubtree(key, uid, { deep: true, maxNodes: 800 })
       const tree = (data && data.tree) || data
       const lines = treeToOutline(tree)
+      steps = treeToSteps(tree)
       if (lines.length) {
         outline = lines.join('\n')
         source = 'subtree'
@@ -115,6 +298,7 @@ export async function loadSopRunContext(roomKey, sop) {
     sopTitle: (sop && sop.title) || '',
     sopUid: uid,
     outline: outline.slice(0, 80000),
+    steps,
     source
   }
 }
@@ -811,6 +995,7 @@ export async function runSopWithWorkbuddy({
   extraNote = '',
   actor = '台账',
   model,
+  backend: backendInput,
   signal,
   conversationId: conversationIdInput,
   onStatus,
@@ -818,7 +1003,10 @@ export async function runSopWithWorkbuddy({
   onEventDetail,
   onContext,
   onNotifyResults,
-  skipNotify = false
+  onNodeProgress,
+  skipNotify = false,
+  completedNotifyKeys = [],
+  priorNodeProgress = null
 } = {}) {
   const key = String(roomKey || '').trim()
   if (!key) throw new Error('请先选择空间')
@@ -830,20 +1018,78 @@ export async function runSopWithWorkbuddy({
   )
   // 允许不选产物：流程型 SOP（通知/招聘/审批）只执行步骤与派发
 
-  const backend = getAiBackend()
+  const backend = normalizeAiBackend(backendInput || getAiBackend())
   const backendLabel = aiBackendLabel(backend)
   setStatus(`检查 ${backendLabel}…`)
-  const wb = await checkWorkbuddy()
+  const wb = await checkWorkbuddy(backend)
   if (!wb.ok) {
     throw new Error(
       backend === AI_BACKEND_XIAOCE
         ? '小策未就绪，请确认已登录且企业/智能体配置可用'
-        : 'WorkBuddy 未就绪，请确认本机已启动 WorkBuddy API 代理'
+        : backend === AI_BACKEND_OPENCLAW
+          ? '助理（OpenClaw）未就绪，请先运行 Start-Docker 拉起 Gateway / Bridge'
+          : 'WorkBuddy 未就绪，请确认本机已启动 WorkBuddy API 代理'
     )
   }
 
   setStatus('拉取 SOP 节点子树 / 大纲…')
   const ctx = await loadSopRunContext(key, sop)
+  const freshSteps = Array.isArray(ctx.steps)
+    ? ctx.steps.map(s => ({ ...s }))
+    : []
+  const hasPrior =
+    Array.isArray(priorNodeProgress) && priorNodeProgress.length > 0
+  let nodeProgress = hasPrior
+    ? mergeNodeProgress(freshSteps, priorNodeProgress)
+    : freshSteps
+  const emitNodes = (patchUid, patch) => {
+    if (!nodeProgress.length) return
+    const now = Date.now()
+    if (patchUid) {
+      nodeProgress = nodeProgress.map(s => {
+        if (s.uid !== patchUid && s.title !== patchUid) return s
+        return {
+          ...s,
+          ...patch,
+          updatedAt: now,
+          events: patch.event
+            ? [...(s.events || []), patch.event].slice(-20)
+            : s.events || []
+        }
+      })
+    }
+    if (onNodeProgress) onNodeProgress(nodeProgress.slice())
+  }
+  if (nodeProgress.length) {
+    const hasMaterial = /##\s*用户提交资料/.test(String(extraNote || ''))
+    if (!hasPrior) {
+      // 首次运行：根节点 active；已填资料则提交类直接 done
+      nodeProgress = nodeProgress.map((s, idx) => {
+        let status = s.status
+        if (idx === 0) status = 'active'
+        if (
+          hasMaterial &&
+          (s.kind === 'submit' ||
+            /提交招聘需求|提交资料|提供资料|需求方\s*[:：]\s*提交/.test(s.title))
+        ) {
+          status = 'done'
+        }
+        return { ...s, status, updatedAt: Date.now() }
+      })
+    } else if (hasMaterial) {
+      // 续跑：只补标提交类，不重置其它进度
+      nodeProgress = nodeProgress.map(s => {
+        if (
+          s.kind === 'submit' ||
+          /提交招聘需求|提交资料|提供资料|需求方\s*[:：]\s*提交/.test(s.title)
+        ) {
+          return { ...s, status: 'done', updatedAt: Date.now() }
+        }
+        return s
+      })
+    }
+    if (onNodeProgress) onNodeProgress(nodeProgress.slice())
+  }
   const wecomSop = isWecomTodoOrientedSop({
     ...sop,
     title: ctx.sopTitle || sop.title,
@@ -906,6 +1152,7 @@ export async function runSopWithWorkbuddy({
 
   // 企微代办 SOP：只用专用提取（含子节点），不要走通用「通知」扫描以免串台账噪声
   let notifyNodes = []
+  const doneKeys = new Set((completedNotifyKeys || []).filter(Boolean))
   if (!skipNotify) {
     if (wecomSop) {
       notifyNodes = extractWecomTodoNotifyNodesFromOutline(
@@ -922,11 +1169,20 @@ export async function runSopWithWorkbuddy({
       notifyNodes = extractNotifyNodesFromOutline(ctx.outline)
     }
   }
+  // 已完成的通知键标绿（严格按标题匹配）
+  if (doneKeys.size && nodeProgress.length) {
+    notifyNodes.forEach(n => {
+      if (n && n.notifyKey && doneKeys.has(n.notifyKey)) {
+        const hit = matchStepByTitle(nodeProgress, n.text)
+        if (hit) emitNodes(hit.uid, { status: 'done', detail: '此前已完成' })
+      }
+    })
+  }
   let notifyResults = []
   let notifySummary = summarizeNotifyResults([])
   const notifyStartedAt = Date.now()
   if (notifyNodes.length) {
-    setStatus(`发现 ${notifyNodes.length} 个通知/代办节点，正在派发…`)
+    setStatus(`发现 ${notifyNodes.length} 个通知/代办节点，按顺序派发…`)
     const earlyConversationId =
       String(conversationIdInput || '').trim() ||
       `sop-exec-${key}-${String(sop.id || sop.title)
@@ -944,11 +1200,15 @@ export async function runSopWithWorkbuddy({
         if (onEventDetail) onEventDetail({ label, raw, at: Date.now() })
       },
       signal,
-      extraNote
+      extraNote,
+      skipKeys: Array.from(doneKeys),
+      stopOnFirstBlock: true,
+      backend
     })
     notifySummary = summarizeNotifyResults(notifyResults)
     if (onEventDetail) {
       notifyResults.forEach(r => {
+        if (r && r.skipped) return
         onEventDetail({
           label: `${r.block ? '阻塞通知' : '知会通知'} → ${r.assignee}：${r.text}`,
           at: Date.now(),
@@ -963,6 +1223,120 @@ export async function runSopWithWorkbuddy({
       } catch (e) {
         /* ignore */
       }
+    }
+    // 节点流：严格按标题匹配，禁止「随便找一个未完成通知」误标后续步骤
+    notifyResults.forEach(r => {
+      if (!r || r.skipped) return
+      const tip = String((r && (r.text || r.title)) || '')
+      const hit = matchStepByTitle(nodeProgress, tip)
+      if (hit) {
+        emitNodes(hit.uid, {
+          status:
+            r.block && (r.dispatchOk || r.cpdaOk)
+              ? 'waiting'
+              : r.dispatchOk || r.cpdaOk
+                ? 'done'
+                : 'failed',
+          detail: tip.slice(0, 200),
+          event: {
+            at: Date.now(),
+            label: r.dispatchOk || r.cpdaOk ? '已派发/已建待办' : '派发失败',
+            raw: r
+          }
+        })
+        // 当前命中步之前的进行中步骤一律收成绿，呈现「一路往下变绿」
+        const idx = nodeProgress.findIndex(
+          s => s.uid === hit.uid || s.title === hit.title
+        )
+        if (idx > 0) {
+          nodeProgress = nodeProgress.map((s, i) => {
+            if (i >= idx) return s
+            if (s.status === 'active' || s.status === 'pending') {
+              return {
+                ...s,
+                status: 'done',
+                detail: s.detail || '已推进',
+                updatedAt: Date.now()
+              }
+            }
+            return s
+          })
+          if (onNodeProgress) onNodeProgress(nodeProgress.slice())
+        }
+      }
+      if (r.notifyKey && (r.dispatchOk || r.cpdaOk || r.skipped)) {
+        doneKeys.add(r.notifyKey)
+      }
+    })
+    // 已跳过的历史通知也标绿
+    notifyNodes.forEach(n => {
+      if (!n || !n.notifyKey || !doneKeys.has(n.notifyKey)) return
+      if (notifyResults.some(r => r && r.notifyKey === n.notifyKey && !r.skipped)) {
+        return
+      }
+      const hit = matchStepByTitle(nodeProgress, n.text)
+      if (hit && hit.status !== 'done' && hit.status !== 'waiting') {
+        emitNodes(hit.uid, { status: 'done', detail: '此前已完成' })
+      }
+    })
+
+    // 阻塞通知企微派发失败：不要假装「等待人工」，直接失败提示
+    const failedBlocks = (notifySummary.dispatchFailed || []).filter(Boolean)
+    if (failedBlocks.length && !notifySummary.hasBlocking) {
+      const reason = failedBlocks
+        .map(
+          r =>
+            `${r.text || '通知'} → ${r.assignee}：${
+              r.dispatchError || r.dispatchReply || '企微派发失败'
+            }`
+        )
+        .join('；')
+        .replace(/<!DOCTYPE[\s\S]*$/i, 'WorkBuddy 502')
+        .slice(0, 400)
+      setStatus(`企微待办未发出：${reason}`)
+      const failLedger = addRunToLedger(
+        normalizeLedger(
+          sop.sopLedger || {
+            frequency: sop.frequency,
+            runs: sop.runs,
+            deliverables: sop.deliverables
+          }
+        ),
+        {
+          at: new Date().toISOString().slice(0, 16).replace('T', ' '),
+          result: '失败',
+          note: `企微派发失败：${reason}`,
+          actor: actor || backendLabel
+        }
+      )
+      const uidFail = ctx.sopUid || sop.uid || (sop.uids && sop.uids[0]) || ''
+      if (uidFail) {
+        try {
+          await persistSopLedger(
+            key,
+            uidFail,
+            {
+              id: ctx.sopId || sop.id,
+              title: ctx.sopTitle || sop.title
+            },
+            failLedger
+          )
+        } catch (e) {
+          /* ignore */
+        }
+      }
+      const hint =
+        backend === AI_BACKEND_OPENCLAW
+          ? '请确认助理 OpenClaw Gateway 已启动且企微工具可用后再重试'
+          : backend === AI_BACKEND_XIAOCE
+            ? '请确认小策企微链路可用后再重试'
+            : '请确认 WorkBuddy API 已启动后再重试'
+      const err = new Error(
+        `企微待办未发出（${failedBlocks.length} 条）。${reason}。${hint}。`
+      )
+      err.ledger = failLedger
+      err.notifyResults = notifyResults
+      throw err
     }
 
     // 纯「发企微代办」SOP：直派成功后立刻结束，不再调模型（哪怕勾了产物）
@@ -1041,7 +1415,7 @@ export async function runSopWithWorkbuddy({
     if (notifySummary.hasBlocking) {
       const waitStarted = Date.now()
       setStatus(
-        `已派发阻塞通知 ${notifySummary.blocking.length} 条，等待导图待办完成后再继续`
+        `已派发阻塞通知 ${notifySummary.blocking.length} 条，等待企业微信待办完成后再继续`
       )
       const waitingLedger = normalizeLedger(
         sop.sopLedger || {
@@ -1066,7 +1440,7 @@ export async function runSopWithWorkbuddy({
           .map(
             r =>
               `${r.block ? '[阻塞]' : '[知会]'} ${r.text} → ${r.assignee}${
-                r.taskUid ? `（待办 ${r.taskUid}）` : ''
+                r.todoId ? `（企微 ${r.todoId}）` : ''
               }`
           )
           .join('\n'),
@@ -1078,12 +1452,15 @@ export async function runSopWithWorkbuddy({
         assessment: {
           ok: false,
           runResult: '等待人工',
-          reason: '存在阻塞类通知，需完成导图待办后再继续'
+          reason: '存在阻塞类通知，需在企业微信完成待办后再继续'
         },
         events: [],
         context: ctx,
         notifyResults,
+        nodeProgress: sanitizeNodeProgress(nodeProgress),
+        completedNotifyKeys: Array.from(doneKeys),
         waitingTaskUids: notifySummary.waitingTaskUids,
+        waitingWecomTodos: notifySummary.waitingWecomTodos || [],
         conversationId: earlyConversationId
       }
     }
@@ -1101,7 +1478,7 @@ export async function runSopWithWorkbuddy({
         .map(
           r =>
             `- ${r.text} → ${r.assignee}${
-              r.taskUid ? `（导图待办 ${r.taskUid}）` : ''
+              r.todoId ? `（企微 ${r.todoId}）` : ''
             }`
         )
         .join('\n')}`
@@ -1137,7 +1514,8 @@ export async function runSopWithWorkbuddy({
       outlinePreview: String(ctx.outline || '').slice(0, 1200),
       userPromptChars: promptUser.length,
       systemPromptChars: promptSystem.length,
-      notifyCount: notifyResults.length
+      notifyCount: notifyResults.length,
+      steps: nodeProgress.slice()
     })
   }
   if (!ctx.outline) {
@@ -1160,7 +1538,12 @@ export async function runSopWithWorkbuddy({
 
   let lastEvent = ''
   if (model) setStatus(`使用模型：${model}`)
+  // 模型阶段：把第一个 pending 标 active
+  const nextPending = nodeProgress.find(s => s.status === 'pending')
+  if (nextPending) emitNodes(nextPending.uid, { status: 'active' })
+
   const result = await streamChat({
+    backend,
     messages: [
       { role: 'system', content: promptSystem },
       { role: 'user', content: promptUser }
@@ -1175,6 +1558,20 @@ export async function runSopWithWorkbuddy({
         setStatus(`${backendLabel}：${label}`)
       }
       if (onEventDetail) onEventDetail({ label, raw, at: Date.now() })
+      // 工具事件：只推进当前 waiting/active 的通知步，不乱标后面的节点
+      const name = String((raw && (raw.name || raw.toolName)) || label || '')
+      if (/wecom|todo|待办/i.test(name)) {
+        const hit =
+          nodeProgress.find(s => s.status === 'waiting' || s.status === 'active') ||
+          null
+        if (hit && (hit.kind === 'notify' || hit.kind === 'manual')) {
+          emitNodes(hit.uid, {
+            status: /result|done|end/i.test(String(label)) ? 'done' : 'active',
+            detail: String(label || '').slice(0, 120),
+            event: { at: Date.now(), label, raw }
+          })
+        }
+      }
     },
     onDelta: text => {
       if (onDelta) onDelta(text)
@@ -1207,7 +1604,9 @@ export async function runSopWithWorkbuddy({
     const reason = phaseOnly
       ? backend === AI_BACKEND_XIAOCE
         ? `小策接口已通，但智能体未产出正文（仅 ${events.length} 个 phase 事件，耗时 ${elapsedSec}s）。请确认企业/智能体可用后重试。`
-        : `WorkBuddy 接口已通，但模型未产出正文（仅 ${events.length} 个 phase 事件，耗时 ${elapsedSec}s）。请在 WorkBuddy 客户端确认已登录且本月额度可用，再重试。`
+        : backend === AI_BACKEND_OPENCLAW
+          ? `助理接口已通，但未产出正文（仅 ${events.length} 个事件，耗时 ${elapsedSec}s）。请确认 OpenClaw Gateway / Bridge 可用后重试。`
+          : `WorkBuddy 接口已通，但模型未产出正文（仅 ${events.length} 个 phase 事件，耗时 ${elapsedSec}s）。请在 WorkBuddy 客户端确认已登录且本月额度可用，再重试。`
       : `${backendLabel} 返回空正文（耗时 ${elapsedSec}s，事件 ${events.length}）。接口连通但执行未成功。`
     setStatus(reason)
     const emptyLedger = normalizeLedger(
@@ -1327,6 +1726,30 @@ export async function runSopWithWorkbuddy({
         ? `执行完成（${elapsedSec}s）`
         : `未确认真执行（${elapsedSec}s）：${assessment.reason || runResult}`
   )
+  if (nodeProgress.length) {
+    const finalStatus = assessment.waitingData
+      ? 'waiting'
+      : assessment.ok
+        ? 'done'
+        : 'failed'
+    nodeProgress = nodeProgress.map(s => {
+      if (s.status === 'done' || s.status === 'waiting') return s
+      if (s.status === 'active' || s.status === 'pending') {
+        return {
+          ...s,
+          status:
+            s.status === 'active'
+              ? finalStatus
+              : assessment.ok
+                ? 'skipped'
+                : 'pending',
+          updatedAt: Date.now()
+        }
+      }
+      return s
+    })
+    if (onNodeProgress) onNodeProgress(nodeProgress.slice())
+  }
   return {
     ok: assessment.ok && runResult !== '失败',
     waitingData: !!assessment.waitingData,
@@ -1343,8 +1766,10 @@ export async function runSopWithWorkbuddy({
     assessment,
     events,
     context: ctx,
+    nodeProgress,
     // 无论是否待补数，都带回通知派发结果，便于界面展示「发给谁」
     notifyResults,
-    waitingTaskUids: notifySummary.waitingTaskUids || []
+    waitingTaskUids: notifySummary.waitingTaskUids || [],
+    waitingWecomTodos: notifySummary.waitingWecomTodos || []
   }
 }

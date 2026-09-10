@@ -19,8 +19,6 @@ const publicPath =
     ? ''
     : './dist'
 
-const WebpackDynamicPublicPathPlugin = require('webpack-dynamic-public-path')
-
 module.exports = {
   publicPath,
   outputDir: '../dist',
@@ -33,13 +31,43 @@ module.exports = {
     config.plugins.delete('preload')
     // 移除 prefetch 插件
     config.plugins.delete('prefetch')
-    // 支持运行时设置public path
-    if (!isDev) {
-      config
-        .plugin('dynamicPublicPathPlugin')
-        .use(WebpackDynamicPublicPathPlugin, [
-          { externalPublicPath: 'window.externalPublicPath' }
-        ])
+    // 运行时 publicPath：只替换 webpack 的 `.p = "..."`，避免误伤 chunk 内其它 `"/"`
+    // （旧版 webpack-dynamic-public-path 会把 markdown-it 实体 "sol":"/"、vue-i18n 命名空间分隔符等换成 window.externalPublicPath）
+    if (!isDev && publicPath) {
+      const needle = JSON.stringify(String(publicPath))
+      const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const assignRe = new RegExp('(\\.p\\s*=\\s*)' + escaped)
+      config.plugin('safe-dynamic-public-path').use(
+        class SafeDynamicPublicPathPlugin {
+          apply(compiler) {
+            compiler.hooks.emit.tapAsync(
+              'SafeDynamicPublicPathPlugin',
+              (compilation, callback) => {
+                Object.keys(compilation.assets).forEach(name => {
+                  if (!/\.js$/i.test(name)) return
+                  const asset = compilation.assets[name]
+                  const raw = asset.source()
+                  const source = Buffer.isBuffer(raw)
+                    ? raw.toString('utf8')
+                    : raw
+                  if (typeof source !== 'string' || !assignRe.test(source)) {
+                    return
+                  }
+                  const next = source.replace(
+                    assignRe,
+                    '$1window.externalPublicPath'
+                  )
+                  compilation.assets[name] = {
+                    source: () => next,
+                    size: () => Buffer.byteLength(next, 'utf8')
+                  }
+                })
+                callback()
+              }
+            )
+          }
+        }
+      )
     }
     // 给插入html页面内的js和css添加hash参数
     if (!isLibrary) {
@@ -77,6 +105,22 @@ module.exports = {
         pathRewrite: { '^/wb-api': '' },
         timeout: 0,
         proxyTimeout: 3600000
+      },
+      '/openclaw-api': {
+        target: process.env.OPENCLAW_API || 'http://127.0.0.1:18789',
+        changeOrigin: true,
+        pathRewrite: { '^/openclaw-api': '' },
+        timeout: 0,
+        proxyTimeout: 3600000,
+        ws: true
+      },
+      '/openclaw-bridge': {
+        target: process.env.OPENCLAW_BRIDGE || 'http://127.0.0.1:18790',
+        changeOrigin: true,
+        pathRewrite: { '^/openclaw-bridge': '' },
+        timeout: 0,
+        proxyTimeout: 3600000,
+        ws: true
       },
       '/collab-v2': {
         target: process.env.COLLAB_API || 'http://127.0.0.1:1234',
