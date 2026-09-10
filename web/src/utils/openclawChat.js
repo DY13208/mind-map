@@ -61,31 +61,38 @@ export function saveOpenclawConfig({ token, baseUrl, model } = {}) {
   }
 }
 
-export async function checkOpenclawHealth() {
+async function checkOpenclawHealth() {
   const { baseUrl, token } = getOpenclawConfig()
   const headers = {}
   if (token) headers.Authorization = `Bearer ${token}`
-  try {
-    const res = await fetch(`${baseUrl}/health`, {
-      headers,
-      cache: 'no-store'
-    })
-    if (!res.ok) {
+  const paths = ['/healthz', '/health', '/startupz']
+  let last = { ok: false, status: 0, message: '无法连接 OpenClaw' }
+  for (const p of paths) {
+    try {
+      const res = await fetch(`${baseUrl}${p}`, {
+        headers,
+        cache: 'no-store'
+      })
+      if (res.ok) {
+        const json = await res.json().catch(() => ({}))
+        return { ok: true, status: res.status, data: json, path: p }
+      }
       const hint =
         res.status === 502 || res.status === 503 || res.status === 504
-          ? 'OpenClaw Gateway 未启动或代理连不上（默认 127.0.0.1:18789）'
+          ? 'OpenClaw Gateway 未启动（请运行 Start-Docker.bat，会自动拉起 Docker 龙虾容器）'
           : `HTTP ${res.status}`
-      return { ok: false, status: res.status, message: hint }
-    }
-    const json = await res.json().catch(() => ({}))
-    return { ok: true, status: res.status, data: json }
-  } catch (err) {
-    return {
-      ok: false,
-      status: 0,
-      message: (err && err.message) || '无法连接 OpenClaw'
+      last = { ok: false, status: res.status, message: hint }
+      // 404 换下一个探活路径；502 基本是容器没起来，不用继续试
+      if (res.status === 502 || res.status === 503 || res.status === 504) break
+    } catch (err) {
+      last = {
+        ok: false,
+        status: 0,
+        message: (err && err.message) || '无法连接 OpenClaw'
+      }
     }
   }
+  return last
 }
 
 export async function listOpenclawModels() {

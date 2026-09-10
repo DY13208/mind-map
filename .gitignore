@@ -8,6 +8,7 @@ utools/dist
 .env.yiran
 .mcp.json
 docker/runtime-config.local.js
+docker/openclaw/home/
 .playwright-cli/
 workbuddy_to_api/
 .codebuddy/models.json
