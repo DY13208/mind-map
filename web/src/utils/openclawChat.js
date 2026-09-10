@@ -1,6 +1,6 @@
 /**
  * 本机 OpenClaw Gateway（OpenAI 兼容）客户端。
- * 默认经 /openclaw-api 代理到宿主机 OpenClaw（默认 18791）
+ * 默认经 /openclaw-api 代理到宿主机 OpenClaw（默认 4623）
  */
 import { getRuntimeConfig } from './runtimeConfig'
 
@@ -43,7 +43,7 @@ export function getOpenclawConfig() {
     controlUrl: String(
       runtime.openclawControlUrl ||
         cfg.openclawControlUrl ||
-        'http://127.0.0.1:18791/chat'
+        'http://127.0.0.1:4623/chat'
     ),
     fromRuntime: !!runtimeToken
   }

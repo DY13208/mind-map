@@ -1011,7 +1011,7 @@ export default {
             this.errorText =
               '连不上 OpenClaw（HTTP ' +
               err.status +
-              '）。请先在本机启动 Gateway（默认端口 18791），再刷新本页。'
+              '）。请先在本机启动 Gateway（默认端口 4623），再刷新本页。'
           }
         }
       } finally {
