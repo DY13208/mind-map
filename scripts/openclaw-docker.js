@@ -209,6 +209,42 @@ function ensureOpenclawConfig(token, port = DEFAULT_PORT) {
   if (!cfg.agents.defaults.sandbox.mode) {
     cfg.agents.defaults.sandbox.mode = 'off'
   }
+
+  // Cognee 记忆插件：由 COGNEE_* env 驱动，merge 进已有配置（保留 UI 其它项）
+  try {
+    const { cogneeEnabled, cogneeOpenclawPluginConfig } = require('./cognee-docker')
+    if (cogneeEnabled()) {
+      const plugin = cogneeOpenclawPluginConfig()
+      if (plugin) {
+        cfg.plugins = cfg.plugins || {}
+        cfg.plugins.entries = cfg.plugins.entries || {}
+        const prev =
+          (cfg.plugins.entries['cognee-openclaw'] &&
+            cfg.plugins.entries['cognee-openclaw'].config) ||
+          {}
+        const nextConfig = {
+          ...prev,
+          ...plugin.config
+        }
+        // env 未给 key 时保留卷里已有 apiKey
+        if (!plugin.config.apiKey && prev.apiKey) {
+          nextConfig.apiKey = prev.apiKey
+        }
+        cfg.plugins.entries['cognee-openclaw'] = {
+          ...(cfg.plugins.entries['cognee-openclaw'] || {}),
+          ...plugin,
+          config: nextConfig
+        }
+        cfg.plugins.slots = cfg.plugins.slots || {}
+        if (!cfg.plugins.slots.memory) {
+          cfg.plugins.slots.memory = 'cognee-openclaw'
+        }
+      }
+    }
+  } catch (e) {
+    /* cognee 脚本缺失时忽略 */
+  }
+
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2) + '\n', 'utf8')
   return CONFIG_FILE
 }

@@ -12,9 +12,20 @@
         </button>
       </div>
       <p v-else-if="query && !searching" class="emptyHits">未找到匹配同事</p>
-      <h4>已有权限成员</h4>
-      <TeamMemberList variant="room" :members="members" @role="updateRole" @remove="remove" />
-      <p v-if="!members.length && !loading" class="emptyMembers">暂未添加成员</p>
+      <h4>已有权限成员 <small v-if="members.length">共 {{ members.length }} 人</small></h4>
+      <div class="memberPane">
+        <TeamMemberList variant="room" :members="pagedMembers" @role="updateRole" @remove="remove" />
+        <p v-if="!members.length && !loading" class="emptyMembers">暂未添加成员</p>
+      </div>
+      <el-pagination
+        v-if="members.length > pageSize"
+        class="memberPager"
+        small
+        layout="prev, pager, next, total"
+        :current-page.sync="page"
+        :page-size="pageSize"
+        :total="members.length"
+      />
     </div>
     <span slot="footer"><el-button @click="shown = false">完成</el-button></span>
   </el-dialog>
@@ -27,12 +38,41 @@ import TeamMemberList from './TeamMemberList.vue'
 export default {
   name: 'ShareFolderDialog', components: { TeamMemberList },
   props: { visible: Boolean, folder: Object },
-  data: () => ({ members: [], query: '', role: 'Viewer', hits: [], loading: false, busy: false, searching: false, timer: null }),
+  data: () => ({
+    members: [],
+    query: '',
+    role: 'Viewer',
+    hits: [],
+    loading: false,
+    busy: false,
+    searching: false,
+    timer: null,
+    page: 1,
+    pageSize: 5
+  }),
   computed: {
     shown: { get() { return this.visible }, set(value) { this.$emit('update:visible', value) } },
-    folderId() { return (this.folder && this.folder.id) || '' }
+    folderId() { return (this.folder && this.folder.id) || '' },
+    pagedMembers() {
+      const start = (this.page - 1) * this.pageSize
+      return this.members.slice(start, start + this.pageSize)
+    }
   },
-  watch: { visible(value) { if (value) { this.query = ''; this.hits = []; this.searching = false; this.load() } } },
+  watch: {
+    visible(value) {
+      if (value) {
+        this.query = ''
+        this.hits = []
+        this.searching = false
+        this.page = 1
+        this.load()
+      }
+    },
+    members() {
+      const maxPage = Math.max(1, Math.ceil(this.members.length / this.pageSize) || 1)
+      if (this.page > maxPage) this.page = maxPage
+    }
+  },
   beforeDestroy() { clearTimeout(this.timer) },
   methods: {
     async load() {
@@ -81,5 +121,17 @@ export default {
   button:hover { background: #f1f5f3; } button:last-child { border-bottom: 0; } em { color: #087854; font-style: normal; }
 }
 .emptyHits { margin: 8px 0 0; color: #7b8982; font-size: 13px; }
-h4 { margin: 20px 0 8px; }.emptyMembers { color: #7b8982; font-size: 13px; padding: 14px 0; }
+h4 {
+  margin: 20px 0 8px;
+  small { margin-left: 8px; color: #7b8982; font-weight: normal; font-size: 12px; }
+}
+.memberPane {
+  max-height: 320px;
+  overflow-y: auto;
+}
+.memberPager {
+  margin-top: 12px;
+  text-align: right;
+}
+.emptyMembers { color: #7b8982; font-size: 13px; padding: 14px 0; }
 </style>

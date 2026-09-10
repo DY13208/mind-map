@@ -101,6 +101,9 @@ services:
       OPENCLAW_GATEWAY_PORT: "18789"
       OPENCLAW_GATEWAY_BIND: lan
       TZ: ${OPENCLAW_TZ:-Asia/Shanghai}
+    extra_hosts:
+      # OpenClaw → 本机 Cognee（host.docker.internal:8320）
+      - "host.docker.internal:host-gateway"
     volumes:
       - mind-map-openclaw:/home/node/.openclaw
     ports:
