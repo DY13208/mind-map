@@ -9,6 +9,32 @@ const path = require('path')
 const http = require('http')
 const { spawn, spawnSync, execFileSync } = require('child_process')
 
+const ROOT_ENV_FILE = path.resolve(__dirname, '..', '.env')
+
+function loadRootEnv() {
+  if (!fs.existsSync(ROOT_ENV_FILE)) return
+  fs.readFileSync(ROOT_ENV_FILE, 'utf8')
+    .split(/\r?\n/)
+    .forEach(line => {
+      const text = line.trim()
+      if (!text || text.startsWith('#')) return
+      const index = text.indexOf('=')
+      if (index <= 0) return
+      const key = text.slice(0, index).trim()
+      let value = text.slice(index + 1).trim()
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1)
+      }
+      if (process.env[key] === undefined) process.env[key] = value
+    })
+}
+
+// 该脚本也支持用户直接执行，不能只依赖 docker-up.js 预先加载 .env。
+loadRootEnv()
+
 const DEFAULT_PORT = Number(process.env.OPENCLAW_PORT || 4623)
 const HEALTH_PATH = '/health'
 const DEFAULT_DISTROS = [

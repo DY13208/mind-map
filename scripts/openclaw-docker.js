@@ -18,6 +18,7 @@ const DEFAULT_PORT = Number(process.env.OPENCLAW_PORT || 4623)
 const CONTAINER_PORT = Number(process.env.OPENCLAW_GATEWAY_PORT || 18789)
 const DEFAULT_IMAGE =
   process.env.OPENCLAW_IMAGE || 'openclaw/openclaw:latest'
+const COGNEE_PLUGIN_ID = 'cognee-openclaw'
 
 function sleep(ms) {
   return new Promise(r => setTimeout(r, ms))
@@ -102,6 +103,51 @@ function readJsonFile(file) {
 function volumeName() {
   // compose 项目名默认是目录名 mind-map
   return process.env.OPENCLAW_VOLUME || 'mind-map_mind-map-openclaw'
+}
+
+/**
+ * Cognee 是安装在 OpenClaw 状态卷里的外部插件。若 memory slot 指向一个
+ * 不存在的插件，OpenClaw 会在网关监听前终止并被 Compose 无限重启。
+ */
+function cogneePluginInstalled() {
+  const r = spawnSync(
+    'docker',
+    [
+      'run',
+      '--rm',
+      '-v',
+      `${volumeName()}:/data`,
+      'alpine',
+      'sh',
+      '-c',
+      [
+        'test -f /data/extensions/cognee-openclaw/openclaw.plugin.json',
+        'test -f /data/extensions/cognee-openclaw/dist/index.js'
+      ].join(' && ')
+    ],
+    { cwd: ROOT, encoding: 'utf8', windowsHide: true }
+  )
+  return r.status === 0
+}
+
+function disableCogneePlugin(cfg) {
+  if (!cfg || !cfg.plugins) return false
+  let changed = false
+  if (
+    cfg.plugins.slots &&
+    cfg.plugins.slots.memory === COGNEE_PLUGIN_ID
+  ) {
+    delete cfg.plugins.slots.memory
+    changed = true
+  }
+  if (cfg.plugins.entries && cfg.plugins.entries[COGNEE_PLUGIN_ID]) {
+    const entry = cfg.plugins.entries[COGNEE_PLUGIN_ID]
+    if (entry.enabled !== false) {
+      entry.enabled = false
+      changed = true
+    }
+  }
+  return changed
 }
 
 /** 从命名卷拉出当前配置（保留 UI 里配过的 DeepSeek / 插件等） */
@@ -210,17 +256,18 @@ function ensureOpenclawConfig(token, port = DEFAULT_PORT) {
     cfg.agents.defaults.sandbox.mode = 'off'
   }
 
-  // Cognee 记忆插件：由 COGNEE_* env 驱动，merge 进已有配置（保留 UI 其它项）
+  // Cognee 是可选能力：插件未安装时清理失效引用，让 Gateway 先正常启动。
   try {
     const { cogneeEnabled, cogneeOpenclawPluginConfig } = require('./cognee-docker')
-    if (cogneeEnabled()) {
+    const pluginInstalled = cogneeEnabled() && cogneePluginInstalled()
+    if (pluginInstalled) {
       const plugin = cogneeOpenclawPluginConfig()
       if (plugin) {
         cfg.plugins = cfg.plugins || {}
         cfg.plugins.entries = cfg.plugins.entries || {}
         const prev =
-          (cfg.plugins.entries['cognee-openclaw'] &&
-            cfg.plugins.entries['cognee-openclaw'].config) ||
+          (cfg.plugins.entries[COGNEE_PLUGIN_ID] &&
+            cfg.plugins.entries[COGNEE_PLUGIN_ID].config) ||
           {}
         const nextConfig = {
           ...prev,
@@ -230,19 +277,20 @@ function ensureOpenclawConfig(token, port = DEFAULT_PORT) {
         if (!plugin.config.apiKey && prev.apiKey) {
           nextConfig.apiKey = prev.apiKey
         }
-        cfg.plugins.entries['cognee-openclaw'] = {
-          ...(cfg.plugins.entries['cognee-openclaw'] || {}),
+        cfg.plugins.entries[COGNEE_PLUGIN_ID] = {
+          ...(cfg.plugins.entries[COGNEE_PLUGIN_ID] || {}),
           ...plugin,
           config: nextConfig
         }
         cfg.plugins.slots = cfg.plugins.slots || {}
-        if (!cfg.plugins.slots.memory) {
-          cfg.plugins.slots.memory = 'cognee-openclaw'
-        }
+        cfg.plugins.slots.memory = COGNEE_PLUGIN_ID
       }
+    } else {
+      disableCogneePlugin(cfg)
     }
   } catch (e) {
-    /* cognee 脚本缺失时忽略 */
+    // 可选集成自身异常时也必须 fail-open，不能阻塞 Gateway。
+    disableCogneePlugin(cfg)
   }
 
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2) + '\n', 'utf8')
@@ -524,6 +572,8 @@ module.exports = {
   ensureOpenclawDockerGateway,
   ensureGatewayToken,
   ensureOpenclawConfig,
+  cogneePluginInstalled,
+  disableCogneePlugin,
   syncConfigIntoVolume,
   checkDockerGatewayHealth,
   DATA_DIR
