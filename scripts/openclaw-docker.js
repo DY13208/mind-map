@@ -150,7 +150,14 @@ function clearStaleLocks() {
       'alpine',
       'sh',
       '-c',
-      'rm -f /data/tmp/openclaw-1000/*.lock /data/tmp/openclaw-1000/*.lock.sqlite /data/tmp/openclaw-1000/*.pid 2>/dev/null; rm -rf /data/migration/* 2>/dev/null; true'
+      [
+        'rm -f /data/tmp/openclaw-1000/* 2>/dev/null || true',
+        'rm -rf /data/migration /data/tmp/openclaw-* 2>/dev/null || true',
+        'mkdir -p /data/tmp /data/migration',
+        // 残留的 generation/reindex 锁偶发也会卡住启动
+        'rm -f /data/agents/main/agent/*.lock /data/agents/main/agent/*.lock.sqlite 2>/dev/null || true',
+        'true'
+      ].join('; ')
     ],
     { cwd: ROOT, encoding: 'utf8', windowsHide: true }
   )
@@ -380,6 +387,8 @@ async function ensureOpenclawDockerGateway({
 
   compose(['rm', '-sf', 'openclaw-gateway'], env)
   clearStaleLocks()
+  // 给上一次崩溃留下的 migration lease 一点过期缓冲
+  await sleep(2000)
   ensureOpenclawConfig(token, port)
   const synced = syncConfigIntoVolume(token, port)
   if (!synced.ok) {
@@ -410,9 +419,39 @@ async function ensureOpenclawDockerGateway({
 
   const deadline = Date.now() + waitMs
   let health = { ok: false }
+  let migrationRetried = false
   while (Date.now() < deadline) {
     health = await checkDockerGatewayHealth(port)
     if (health.ok) break
+    const logs = compose(['logs', '--tail', '30', 'openclaw-gateway'])
+    const text = String(logs.stdout || logs.stderr || '')
+    if (
+      !migrationRetried &&
+      /startup migrations are already running/i.test(text)
+    ) {
+      migrationRetried = true
+      const m = text.match(
+        /retry after the other OpenClaw process finishes or after ([0-9T:\.\-Z]+)/i
+      )
+      let waitUntil = Date.now() + 15000
+      if (m && m[1]) {
+        const ts = Date.parse(m[1])
+        if (!Number.isNaN(ts)) waitUntil = Math.max(waitUntil, ts + 1000)
+      }
+      const sleepMs = Math.min(
+        Math.max(waitUntil - Date.now(), 2000),
+        Math.max(deadline - Date.now() - 5000, 2000)
+      )
+      compose(['rm', '-sf', 'openclaw-gateway'], env)
+      clearStaleLocks()
+      await sleep(sleepMs)
+      syncConfigIntoVolume(token, port)
+      compose(
+        ['up', '-d', '--pull', 'missing', '--no-deps', 'openclaw-gateway'],
+        env
+      )
+      continue
+    }
     await sleep(1500)
   }
 

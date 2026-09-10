@@ -138,6 +138,23 @@ function startDaemon() {
   return { ok: true, alreadyRunning: false, pid: child.pid }
 }
 
+function stopOpenclawWatchdog() {
+  const existing = readPid()
+  if (existing && isPidAlive(existing)) {
+    try {
+      process.kill(existing)
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  try {
+    fs.unlinkSync(PID_FILE)
+  } catch (e) {
+    /* ignore */
+  }
+  return { ok: true, stoppedPid: existing || 0 }
+}
+
 function ensureOpenclawWatchdog() {
   if (process.platform !== 'win32') {
     return { ok: false, skipped: true, reason: '仅 Windows' }
@@ -147,6 +164,7 @@ function ensureOpenclawWatchdog() {
 
 module.exports = {
   ensureOpenclawWatchdog,
+  stopOpenclawWatchdog,
   startDaemon,
   PID_FILE,
   LOG_FILE
