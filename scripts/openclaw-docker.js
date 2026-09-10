@@ -224,6 +224,57 @@ function serviceRunning() {
   return !!(r.status === 0 && String(r.stdout || '').trim())
 }
 
+function composeEnv(token, port) {
+  return {
+    OPENCLAW_GATEWAY_TOKEN: token,
+    OPENCLAW_PORT: String(port),
+    OPENCLAW_IMAGE: process.env.OPENCLAW_IMAGE || DEFAULT_IMAGE
+  }
+}
+
+function containerId() {
+  const r = compose(['ps', '-aq', 'openclaw-gateway'])
+  return r.status === 0 ? String(r.stdout || '').trim().split(/\r?\n/)[0] : ''
+}
+
+/**
+ * 把宿主机 openclaw.json 拷进命名卷（不用单文件 bind mount，避免 Windows EBUSY rename）。
+ * 须在 gateway 进程读配置前完成；create 后、start 前最稳。
+ */
+function syncConfigIntoVolume(token, port) {
+  const env = composeEnv(token, port)
+  // 确保容器已创建（不一定在跑），以便 docker cp 写入同一命名卷
+  let created = compose(['create', 'openclaw-gateway'], env)
+  if (created.status !== 0) {
+    created = compose(['up', '-d', '--no-start', 'openclaw-gateway'], env)
+  }
+  const id = containerId()
+  if (!id) {
+    return {
+      ok: false,
+      reason: '无法定位 openclaw-gateway 容器，配置未能写入卷',
+      detail: String(created.stderr || created.stdout || '')
+        .trim()
+        .slice(0, 400)
+    }
+  }
+  const cp = spawnSync(
+    'docker',
+    ['cp', CONFIG_FILE, `${id}:/home/node/.openclaw/openclaw.json`],
+    { cwd: ROOT, encoding: 'utf8', windowsHide: true }
+  )
+  if (cp.status !== 0) {
+    return {
+      ok: false,
+      reason: 'docker cp openclaw.json 失败',
+      detail: String(cp.stderr || cp.stdout || '')
+        .trim()
+        .slice(0, 400)
+    }
+  }
+  return { ok: true, containerId: id }
+}
+
 /**
  * 确保 Docker 版 OpenClaw Gateway 在跑。
  */
@@ -247,23 +298,25 @@ async function ensureOpenclawDockerGateway({
     upsertEnvKey('OPENCLAW_IMAGE', DEFAULT_IMAGE)
   }
 
+  const env = composeEnv(token, port)
   const liveBefore = await checkDockerGatewayHealth(port)
   let alreadyRunning = !!(liveBefore && liveBefore.ok && serviceRunning())
 
   if (!alreadyRunning) {
-    // 先停旧容器，清掉 /tmp 里的 crash-loop 计数；配置变更后也强制重建
-    compose(['rm', '-sf', 'openclaw-gateway'], {
-      OPENCLAW_GATEWAY_TOKEN: token,
-      OPENCLAW_PORT: String(port),
-      OPENCLAW_IMAGE: process.env.OPENCLAW_IMAGE || DEFAULT_IMAGE
-    })
-    const up = compose(
-      ['up', '-d', '--pull', 'missing', '--force-recreate', 'openclaw-gateway'],
-      {
-        OPENCLAW_GATEWAY_TOKEN: token,
-        OPENCLAW_PORT: String(port),
-        OPENCLAW_IMAGE: process.env.OPENCLAW_IMAGE || DEFAULT_IMAGE
+    compose(['rm', '-sf', 'openclaw-gateway'], env)
+    const synced = syncConfigIntoVolume(token, port)
+    if (!synced.ok) {
+      return {
+        ok: false,
+        mode: 'docker',
+        reason: synced.reason || '写入 OpenClaw 配置失败',
+        detail: synced.detail || '',
+        hint: '确认 Docker 正常，且 docker/openclaw/home/openclaw.json 可写'
       }
+    }
+    const up = compose(
+      ['up', '-d', '--pull', 'missing', '--no-deps', 'openclaw-gateway'],
+      env
     )
     if (up.status !== 0) {
       return {
@@ -277,22 +330,26 @@ async function ensureOpenclawDockerGateway({
           '请确认能拉取镜像（OPENCLAW_IMAGE，默认 openclaw/openclaw:latest），或先执行：docker pull openclaw/openclaw:latest'
       }
     }
-    // 命名卷首次启动时补齐 workspace 等目录
-    compose(
-      [
-        'exec',
-        '-T',
-        'openclaw-gateway',
-        'sh',
-        '-c',
-        'mkdir -p /home/node/.openclaw/workspace /home/node/.openclaw/agents /home/node/.openclaw/credentials /home/node/.openclaw/logs /home/node/.openclaw/tmp'
-      ],
-      {
-        OPENCLAW_GATEWAY_TOKEN: token,
-        OPENCLAW_PORT: String(port),
-        OPENCLAW_IMAGE: process.env.OPENCLAW_IMAGE || DEFAULT_IMAGE
-      }
-    )
+    // 启动后再覆盖一次配置并重启，避免首次 entrypoint 用空/残缺配置起不来
+    const id = containerId()
+    if (id) {
+      spawnSync(
+        'docker',
+        ['cp', CONFIG_FILE, `${id}:/home/node/.openclaw/openclaw.json`],
+        { cwd: ROOT, encoding: 'utf8', windowsHide: true }
+      )
+      compose(['restart', 'openclaw-gateway'], env)
+    }
+  } else {
+    // 已在跑也同步 token/mode，避免宿主机改 token 后容器仍用旧配置
+    const id = containerId()
+    if (id) {
+      spawnSync(
+        'docker',
+        ['cp', CONFIG_FILE, `${id}:/home/node/.openclaw/openclaw.json`],
+        { cwd: ROOT, encoding: 'utf8', windowsHide: true }
+      )
+    }
   }
 
   const deadline = Date.now() + waitMs
@@ -336,6 +393,7 @@ module.exports = {
   ensureOpenclawDockerGateway,
   ensureGatewayToken,
   ensureOpenclawConfig,
+  syncConfigIntoVolume,
   checkDockerGatewayHealth,
   DATA_DIR
 }

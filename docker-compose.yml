@@ -89,8 +89,9 @@ services:
     restart: unless-stopped
 
   # OpenClaw Gateway（龙虾）：助理页 / SOP 企微待办依赖；Start-Docker 一并拉起
-  # 状态目录用命名卷（避免 Windows bind mount 上 fstat ENOENT 导致 Gateway 起不来）
-  # 仅把 openclaw.json 从宿主机挂进去，方便 Start-Docker 写入 token
+  # 状态用命名卷。不要再 bind-mount 单个 openclaw.json：
+  # Windows 下 OpenClaw 会 rename 写配置，单文件挂载会 EBUSY。
+  # Token/配置由 scripts/openclaw-docker.js 经 docker cp 注入卷内。
   openclaw-gateway:
     image: ${OPENCLAW_IMAGE:-openclaw/openclaw:latest}
     environment:
@@ -104,7 +105,6 @@ services:
       TZ: ${OPENCLAW_TZ:-Asia/Shanghai}
     volumes:
       - mind-map-openclaw:/home/node/.openclaw
-#      - ./docker/openclaw/home/openclaw.json:/home/node/.openclaw/openclaw.json
     ports:
       - "127.0.0.1:${OPENCLAW_PORT:-4623}:18789"
     healthcheck:
