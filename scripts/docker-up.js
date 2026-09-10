@@ -150,6 +150,13 @@ async function up() {
     const token = ensureGatewayToken()
     ensureOpenclawConfig(token, Number(process.env.OPENCLAW_PORT || OC_PORT))
     if (!process.env.OPENCLAW_IMAGE) process.env.OPENCLAW_IMAGE = OC_IMAGE
+    // 把合并后的配置写入命名卷（compose up 前），避免容器用残缺配置启动
+    try {
+      const { syncConfigIntoVolume } = require('./openclaw-docker')
+      syncConfigIntoVolume(token, Number(process.env.OPENCLAW_PORT || OC_PORT))
+    } catch (e) {
+      /* 卷尚未创建时忽略，后面 ensure 会再写 */
+    }
     writeOpenclawRuntimeConfig({
       root: ROOT,
       token,
