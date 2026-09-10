@@ -104,7 +104,7 @@ services:
       TZ: ${OPENCLAW_TZ:-Asia/Shanghai}
     volumes:
       - mind-map-openclaw:/home/node/.openclaw
-      - ./docker/openclaw/home/openclaw.json:/home/node/.openclaw/openclaw.json
+#      - ./docker/openclaw/home/openclaw.json:/home/node/.openclaw/openclaw.json
     ports:
       - "127.0.0.1:${OPENCLAW_PORT:-4623}:18789"
     healthcheck:
