@@ -7,6 +7,17 @@ const {
   ensureWorkbuddyApi,
   formatWorkbuddyResult
 } = require('./workbuddy-api')
+const {
+  DEFAULT_PORT: OPENCLAW_PORT,
+  ensureOpenclawGateway,
+  formatOpenclawResult,
+  writeOpenclawRuntimeConfig
+} = require('./openclaw-gateway')
+const { ensureOpenclawWatchdog } = require('./openclaw-watchdog')
+const {
+  ensureOpenclawBridge,
+  formatBridgeResult
+} = require('./openclaw-bridge-ctl')
 
 const ROOT = path.resolve(__dirname, '..')
 const ENV_FILE = path.join(ROOT, '.env')
@@ -128,6 +139,8 @@ async function up() {
   }
   const host = process.env.PUBLIC_HOST || detectHost()
   const mcpUrl = writeMcpConfig(host)
+  // 先写占位 runtime，保证 compose 挂载文件存在；OpenClaw 就绪后再注入 Token
+  writeOpenclawRuntimeConfig({ root: ROOT, port: OPENCLAW_PORT })
   console.log('')
   console.log(`  主机 IP  ${host}`)
   console.log(`  对外只开放一个端口：${PORT}`)
@@ -147,22 +160,83 @@ async function up() {
     if (process.platform === 'win32') {
       console.log('')
       console.log('  正在启动本机 WorkBuddy API 代理（SOP 运行 / 补齐流程需要）...')
-      const wb = await ensureWorkbuddyApi({
-        root: ROOT,
-        port: WORKBUDDY_PORT,
-        mcpConfigPath: path.join(ROOT, '.mcp.json')
-      })
-      formatWorkbuddyResult(wb)
-        .split('\n')
-        .forEach(line => console.log(`  ${line}`))
-      if (wb && wb.ok) {
+      try {
+        const wb = await ensureWorkbuddyApi({
+          root: ROOT,
+          port: WORKBUDDY_PORT,
+          mcpConfigPath: path.join(ROOT, '.mcp.json')
+        })
+        formatWorkbuddyResult(wb)
+          .split('\n')
+          .forEach(line => console.log(`  ${line}`))
+        if (wb && wb.ok) {
+          console.log(
+            `  页面访问 /wb-api → http://127.0.0.1:${wb.port}（经 Docker 网关转发）`
+          )
+        }
+      } catch (err) {
         console.log(
-          `  页面访问 /wb-api → http://127.0.0.1:${wb.port}（经 Docker 网关转发）`
+          `  WorkBuddy API 启动异常：${(err && err.message) || err}`
         )
+      }
+
+      console.log('')
+      console.log('  正在启动本机 OpenClaw Gateway（助理页需要）...')
+      try {
+        const oc = await ensureOpenclawGateway({
+          port: OPENCLAW_PORT,
+          startTray: true
+        })
+        const runtime = writeOpenclawRuntimeConfig({
+          root: ROOT,
+          token: (oc && oc.token) || '',
+          model: process.env.OPENCLAW_MODEL || 'openclaw/default',
+          port: OPENCLAW_PORT
+        })
+        // 勿把 token 打到控制台
+        if (oc) {
+          const tokenForBridge = oc.token || ''
+          delete oc.token
+          oc.hasToken = !!(runtime && runtime.hasToken)
+          oc.runtimeWritten = true
+          const bridge = await ensureOpenclawBridge({
+            token: tokenForBridge,
+            distro: oc.distro
+          })
+          formatBridgeResult(bridge)
+            .split('\n')
+            .forEach(line => console.log(`  ${line}`))
+        }
+        formatOpenclawResult(oc)
+          .split('\n')
+          .forEach(line => console.log(`  ${line}`))
+        const wd = ensureOpenclawWatchdog()
+        if (wd && wd.ok) {
+          console.log(
+            wd.alreadyRunning
+              ? `  OpenClaw 看门狗已在运行（防 WSL 闲置掉线）`
+              : `  OpenClaw 看门狗已启动（防 WSL 闲置掉线）`
+          )
+        }
+        if (oc && oc.ok) {
+          console.log(
+            `  页面访问 /openclaw-api → http://127.0.0.1:${oc.port}（经 Docker 网关转发）`
+          )
+          console.log(`  助理页  http://${host}:${PORT}/assistant`)
+        } else {
+          console.log(
+            '  也可稍后手动执行：node scripts/openclaw-gateway.js'
+          )
+        }
+      } catch (err) {
+        console.log(
+          `  OpenClaw 启动异常：${(err && err.message) || err}`
+        )
+        console.log('  手动重试：node scripts/openclaw-gateway.js')
       }
     } else {
       console.log(
-        '  WorkBuddy API 需在 Windows 本机单独启动（SOP 运行 / 补齐依赖 WorkBuddy 客户端）。'
+        '  WorkBuddy API / OpenClaw Gateway 需在 Windows 本机单独启动。'
       )
     }
     console.log('')

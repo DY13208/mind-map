@@ -1,4 +1,10 @@
-import { isXiaoceBackend } from './agentChat'
+import {
+  AI_BACKEND_OPENCLAW,
+  AI_BACKEND_XIAOCE,
+  getAiBackend,
+  isXiaoceBackend,
+  normalizeAiBackend
+} from './agentChat'
 import {
   createXiaoceWecomTodo,
   createXiaoceWecomTodoViaAgent,
@@ -6,16 +12,22 @@ import {
 } from './xiaoceChat'
 import { prepareWecomTodoDraft } from './wecomTodoTitle'
 import { getWorkbuddyConfig } from './workbuddyChat'
+import { streamOpenclawGatewayWs } from './openclawGatewayWs'
+import { checkOpenclawHealth, streamOpenclawChat } from './openclawChat'
 
 let workbuddyTodoRouteCache = { available: false, expiresAt: 0 }
 
 /**
  * 发企业微信待办：
- * - 本机 CLI 健康时优先直派，避免先等待无权限的小策应用/智能体链路
- * - CLI 不可用时，小策模式再探测应用权限并尝试官方企微链路
- * - 任一首选链路出现明确的权限/连接拒绝时，切换另一条链路
+ * - 本机 CLI 健康时优先直派（小策模式），避免先等无权限的小策应用链路
+ * - CLI 不可用时，小策再走官方企微链路；助理走 OpenClaw；否则 WorkBuddy CLI
+ * - 任一首选链路出现明确权限/连接拒绝时，可切换另一条链路
+ *
+ * @param {object} opts
+ * @param {string} [opts.backend] 指定引擎（SOP 任务请传 job.backend）
  */
 export async function dispatchTodo({
+
   assignee,
   title,
   detail,
@@ -24,7 +36,8 @@ export async function dispatchTodo({
   onDelta,
   signal,
   conversationId,
-  model
+  model,
+  backend
 } = {}) {
   const assigneeName =
     String((assignee && assignee.name) || assignee || '负责人').trim() ||
@@ -42,7 +55,11 @@ export async function dispatchTodo({
   const taskTitle = draft.title
   const description = draft.description
 
-  const xiaoceMode = isXiaoceBackend()
+  const useBackend = normalizeAiBackend(backend || getAiBackend())
+  const xiaoceMode =
+    useBackend === AI_BACKEND_XIAOCE || isXiaoceBackend(useBackend)
+
+  // 小策：本机 CLI 可用时优先直派，避免无权限的应用链路空转
   if (xiaoceMode && (await isWorkbuddyTodoRouteAvailable({ signal }))) {
     if (onDelta) onDelta('已检测到可用的企业微信 CLI，优先直接创建待办…\n')
     const cliResult = await dispatchTodoViaWorkbuddy({
@@ -61,6 +78,20 @@ export async function dispatchTodo({
 
   if (xiaoceMode) {
     return dispatchTodoViaXiaoce({
+      assigneeName,
+      taskTitle,
+      description,
+      detail,
+      context,
+      onEvent,
+      onDelta,
+      signal,
+      conversationId
+    })
+  }
+
+  if (useBackend === AI_BACKEND_OPENCLAW) {
+    return dispatchTodoViaOpenclaw({
       assigneeName,
       taskTitle,
       description,
@@ -329,6 +360,188 @@ async function dispatchTodoViaWorkbuddyFallback({ reason, onDelta, ...args }) {
   }
 }
 
+async function dispatchTodoViaOpenclaw({
+  assigneeName,
+  taskTitle,
+  description,
+  detail,
+  context,
+  onEvent,
+  onDelta,
+  signal,
+  conversationId
+}) {
+  if (onEvent) onEvent('openclaw_wecom', { phase: 'preparing', assignee: assigneeName })
+  if (onDelta) {
+    onDelta(`正在通过助理（OpenClaw）给 ${assigneeName} 创建企微待办…\n`)
+  }
+
+  const health = await checkOpenclawHealth()
+  if (!health || !health.ok) {
+    const errHint =
+      (health && health.message) ||
+      '助理（OpenClaw）未就绪，请先运行 Start-Docker 或 node scripts/openclaw-gateway.js'
+    if (onDelta) onDelta(`${errHint}\n`)
+    return {
+      assignee: assigneeName,
+      title: taskTitle,
+      userLine: `给${assigneeName}发个代办：${taskTitle}`,
+      content: errHint,
+      success: false,
+      toolUsed: false,
+      via: 'openclaw-wecom',
+      backendLabel: '助理',
+      error: errHint,
+      detail: detail || '',
+      context: context || ''
+    }
+  }
+
+  const message = [
+    `请立刻用企业微信（wecom / 企微待办工具）给「${assigneeName}」创建一条待办。`,
+    `标题：${taskTitle}`,
+    description ? `说明：${description}` : '',
+    '要求：只做这一件事；创建成功后用一两句中文确认「已创建」，并尽量写出 todo_id=…；不要搜索本机文件，不要发别的待办。'
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  let content = ''
+  let sawWecomTool = false
+  let wecomToolOk = false
+  const convId =
+    conversationId ||
+    `openclaw-todo-${Date.now().toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`
+
+  try {
+    try {
+      await streamOpenclawGatewayWs({
+        message,
+        conversationId: convId,
+        signal,
+        onDelta: piece => {
+          const p = String(piece || '')
+          if (!p) return
+          content += p
+          if (onDelta) onDelta(p)
+        },
+        onTool: info => {
+          const name = String((info && info.name) || '')
+          const phase = String((info && info.phase) || '').toLowerCase()
+          if (/wecom|todo/i.test(name)) {
+            sawWecomTool = true
+            if (phase === 'result' || phase === 'done' || phase === 'end') {
+              wecomToolOk = true
+            }
+          }
+          if (onEvent) {
+            onEvent('openclaw_wecom', {
+              phase: phase || 'update',
+              name,
+              detail: (info && info.detail) || ''
+            })
+          }
+        }
+      })
+    } catch (wsErr) {
+      if (wsErr && wsErr.name === 'AbortError') throw wsErr
+      // Bridge 不可用时退 HTTP（通常无 tool 事件，靠正文判断）
+      const result = await streamOpenclawChat({
+        messages: [{ role: 'user', content: message }],
+        conversationId: convId,
+        signal,
+        onDelta: piece => {
+          const p = String(piece || '')
+          if (!p) return
+          content += p
+          if (onDelta) onDelta(p)
+        }
+      })
+      if (result && result.content && !content) content = String(result.content)
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') throw err
+    const errHint =
+      (err && err.message) || '助理派发企微待办失败'
+    if (onDelta) onDelta(`${errHint}\n`)
+    return {
+      assignee: assigneeName,
+      title: taskTitle,
+      userLine: `给${assigneeName}发个代办：${taskTitle}`,
+      content: errHint,
+      success: false,
+      toolUsed: sawWecomTool,
+      via: 'openclaw-wecom',
+      backendLabel: '助理',
+      error: errHint,
+      detail: detail || '',
+      context: context || ''
+    }
+  }
+
+  const text = String(content || '').trim()
+  const todoIdMatch = text.match(
+    /(?:todo[_ ]?id|待办\s*ID|待办id)\s*[=：:]\s*([A-Za-z0-9_-]{8,})/i
+  )
+  const todoId = (todoIdMatch && todoIdMatch[1]) || ''
+  const failed =
+    /失败|找不到|未授权|未配置|没有权限|无法|error|502|503/i.test(text) &&
+    !/已创建|创建成功|已发送|已派发|成功给/.test(text)
+  const success =
+    wecomToolOk ||
+    (!failed &&
+      (/已创建|创建成功|已发送|已派发|待办已|成功/.test(text) ||
+        (sawWecomTool && text.length > 0)))
+
+  if (!success) {
+    const errHint =
+      text.slice(0, 280) ||
+      '助理未确认企微待办已创建（请确认 OpenClaw 已配置企微工具）'
+    if (onDelta && !text) onDelta(`${errHint}\n`)
+    return {
+      assignee: assigneeName,
+      title: taskTitle,
+      userLine: `给${assigneeName}发个代办：${taskTitle}`,
+      content: errHint,
+      success: false,
+      toolUsed: sawWecomTool,
+      via: 'openclaw-wecom',
+      backendLabel: '助理',
+      todoId,
+      error: errHint,
+      detail: detail || '',
+      context: context || ''
+    }
+  }
+
+  const okText =
+    text.slice(0, 400) || `企微待办已创建：${taskTitle} → ${assigneeName}`
+  if (onEvent) {
+    onEvent('openclaw_wecom', {
+      phase: 'done',
+      via: 'openclaw-wecom',
+      todo_id: todoId
+    })
+  }
+  return {
+    assignee: assigneeName,
+    title: taskTitle,
+    userLine: `给${assigneeName}发个代办：${taskTitle}`,
+    content: okText,
+    success: true,
+    toolUsed: true,
+    via: 'openclaw-wecom',
+    backendLabel: '助理',
+    todoId,
+    error: '',
+    detail: detail || '',
+    context: context || ''
+  }
+}
+
+
 async function dispatchTodoViaWorkbuddy({
   assigneeName,
   taskTitle,
@@ -466,4 +679,151 @@ export function appendTodoNote(node, mindMap, { assignee, title, reply }) {
     .join('\n')
   const note = prev ? `${prev}\n\n${block}` : block
   mindMap.execCommand('SET_NODE_DATA', node, { note })
+}
+
+function parseDonePending(text) {
+  const t = String(text || '').trim()
+  if (!t) return null
+  if (/\bDONE\b|已完成|完成了|已办结|状态[：:]\s*0\b/i.test(t) && !/PENDING|未完成|进行中/i.test(t.slice(-80))) {
+    return true
+  }
+  if (/\bPENDING\b|未完成|进行中|状态[：:]\s*1\b/i.test(t)) return false
+  if (/已完成/.test(t) && !/未完成/.test(t)) return true
+  return null
+}
+
+async function checkOneWecomTodoViaWorkbuddy(item, signal) {
+  const todoId = String((item && item.todoId) || '').trim()
+  if (!todoId) return null
+  const { baseUrl, apiKey } = getWorkbuddyConfig()
+  const headers = {
+    'Content-Type': 'application/json; charset=utf-8',
+    Authorization: `Bearer ${apiKey}`
+  }
+  const tryParse = async res => {
+    const text = await res.text()
+    let json = null
+    try {
+      json = JSON.parse(text)
+    } catch (e) {
+      json = null
+    }
+    return { res, text, json }
+  }
+  const paths = [
+    () =>
+      fetch(`${baseUrl}/v1/wecom/todo/get`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ todo_id: todoId }),
+        signal
+      }),
+    () =>
+      fetch(`${baseUrl}/v1/wecom/todo/${encodeURIComponent(todoId)}`, {
+        method: 'GET',
+        headers,
+        signal
+      })
+  ]
+  for (const run of paths) {
+    try {
+      const { res, json } = await tryParse(await run())
+      if (!res.ok || !json) continue
+      const status =
+        json.status != null
+          ? json.status
+          : json.todo && json.todo.status != null
+            ? json.todo.status
+            : json.data && json.data.status
+      if (status === 0 || status === '0' || status === 'done' || status === 'completed') {
+        return true
+      }
+      if (status === 1 || status === '1' || status === 'pending' || status === 'open') {
+        return false
+      }
+      const hint = parseDonePending(JSON.stringify(json))
+      if (hint != null) return hint
+    } catch (e) {
+      /* try next */
+    }
+  }
+  return null
+}
+
+async function checkOneWecomTodoViaOpenclaw(item, signal) {
+  const title = String((item && (item.title || item.wxTitle)) || '').trim()
+  const assignee = String((item && item.assignee) || '').trim()
+  const todoId = String((item && item.todoId) || '').trim()
+  if (!title && !todoId) return null
+  const message = [
+    '请用企业微信待办工具查询下面这条待办是否已完成。',
+    todoId ? `todo_id：${todoId}` : '',
+    title ? `标题关键词：${title}` : '',
+    assignee ? `接收人：${assignee}` : '',
+    '优先 todo get；没有 id 就用 todo list 按标题/接收人定位。',
+    '最后一行只输出 DONE 或 PENDING，不要解释。'
+  ]
+    .filter(Boolean)
+    .join('\n')
+  let content = ''
+  try {
+    try {
+      await streamOpenclawGatewayWs({
+        message,
+        conversationId: `wecom-check-${Date.now().toString(36)}`,
+        signal,
+        onDelta: piece => {
+          content += String(piece || '')
+        }
+      })
+    } catch (wsErr) {
+      if (wsErr && wsErr.name === 'AbortError') throw wsErr
+      const result = await streamOpenclawChat({
+        messages: [{ role: 'user', content: message }],
+        conversationId: `wecom-check-${Date.now().toString(36)}`,
+        signal
+      })
+      if (result && result.content) content = String(result.content)
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') throw err
+    return null
+  }
+  return parseDonePending(content)
+}
+
+/**
+ * 检查阻塞企微待办是否已完成（不再看导图待办）
+ * @param {Array<{todoId?:string,title?:string,wxTitle?:string,assignee?:string,via?:string}>} items
+ * @param {{ backend?: string, signal?: AbortSignal }} [opts]
+ */
+export async function areWaitingWecomTodosDone(items, opts = {}) {
+  const list = (items || []).filter(Boolean)
+  if (!list.length) return { done: true, pending: [], completed: [], unknown: [] }
+  const backend = normalizeAiBackend(opts.backend || getAiBackend())
+  const pending = []
+  const completed = []
+  const unknown = []
+  for (const item of list) {
+    let done = null
+    if (backend === AI_BACKEND_OPENCLAW || /openclaw/i.test(String(item.via || ''))) {
+      done = await checkOneWecomTodoViaOpenclaw(item, opts.signal)
+      if (done == null) done = await checkOneWecomTodoViaWorkbuddy(item, opts.signal)
+    } else {
+      done = await checkOneWecomTodoViaWorkbuddy(item, opts.signal)
+      if (done == null) done = await checkOneWecomTodoViaOpenclaw(item, opts.signal)
+    }
+    const key =
+      item.todoId ||
+      `${item.assignee || ''}::${item.title || item.wxTitle || ''}`
+    if (done === true) completed.push(key)
+    else if (done === false) pending.push(key)
+    else unknown.push(key)
+  }
+  return {
+    done: pending.length === 0 && unknown.length === 0,
+    pending,
+    completed,
+    unknown
+  }
 }

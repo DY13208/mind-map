@@ -1,0 +1,15 @@
+{
+  "name": "openclaw-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@openclaw/gateway-client": "2026.9.3",
+    "@openclaw/gateway-protocol": "2026.9.3",
+    "ws": "8.21.3"
+  }
+}

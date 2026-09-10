@@ -7,6 +7,7 @@ utools/dist
 .env
 .env.yiran
 .mcp.json
+docker/runtime-config.local.js
 .playwright-cli/
 workbuddy_to_api/
 .codebuddy/models.json
