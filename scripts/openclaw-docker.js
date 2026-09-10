@@ -283,7 +283,9 @@ function ensureOpenclawConfig(token, port = DEFAULT_PORT) {
           config: nextConfig
         }
         cfg.plugins.slots = cfg.plugins.slots || {}
-        cfg.plugins.slots.memory = COGNEE_PLUGIN_ID
+        if (!cfg.plugins.slots.memory) {
+          cfg.plugins.slots.memory = COGNEE_PLUGIN_ID
+        }
       }
     } else {
       disableCogneePlugin(cfg)
