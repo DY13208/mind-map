@@ -107,7 +107,7 @@ module.exports = {
         proxyTimeout: 3600000
       },
       '/openclaw-api': {
-        target: process.env.OPENCLAW_API || 'http://127.0.0.1:18789',
+        target: process.env.OPENCLAW_API || 'http://127.0.0.1:18791',
         changeOrigin: true,
         pathRewrite: { '^/openclaw-api': '' },
         timeout: 0,

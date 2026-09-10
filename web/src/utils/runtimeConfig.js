@@ -65,7 +65,7 @@ export function getRuntimeConfig() {
       openclawToken: runtime.openclawToken || '',
       openclawModel: runtime.openclawModel || 'openclaw/default',
       openclawControlUrl:
-        runtime.openclawControlUrl || 'http://127.0.0.1:18789/chat'
+        runtime.openclawControlUrl || 'http://127.0.0.1:18791/chat'
     }
   }
   return {
@@ -91,7 +91,7 @@ export function getRuntimeConfig() {
     openclawToken: runtime.openclawToken || '',
     openclawModel: runtime.openclawModel || 'openclaw/default',
     openclawControlUrl:
-      runtime.openclawControlUrl || 'http://127.0.0.1:18789/chat'
+      runtime.openclawControlUrl || 'http://127.0.0.1:18791/chat'
   }
 }
 

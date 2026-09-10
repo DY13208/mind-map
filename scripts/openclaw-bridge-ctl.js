@@ -118,7 +118,9 @@ async function ensureOpenclawBridge({
     env: {
       ...process.env,
       OPENCLAW_BRIDGE_PORT: String(port),
-      OPENCLAW_GATEWAY_WS: process.env.OPENCLAW_GATEWAY_WS || 'ws://127.0.0.1:18789',
+      OPENCLAW_GATEWAY_WS:
+        process.env.OPENCLAW_GATEWAY_WS ||
+        `ws://127.0.0.1:${process.env.OPENCLAW_PORT || 18791}`,
       OPENCLAW_GATEWAY_TOKEN: useToken
     }
   })

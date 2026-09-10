@@ -12,7 +12,10 @@ const ROOT = path.resolve(__dirname, '..')
 const ENV_FILE = path.join(ROOT, '.env')
 const DATA_DIR = path.join(ROOT, 'docker', 'openclaw', 'home')
 const CONFIG_FILE = path.join(DATA_DIR, 'openclaw.json')
-const DEFAULT_PORT = Number(process.env.OPENCLAW_PORT || 18789)
+// 宿主机映射端口（避免与本机原生 OpenClaw Tray 的 18789 冲突）
+const DEFAULT_PORT = Number(process.env.OPENCLAW_PORT || 18791)
+// 容器内监听端口（compose / nginx 固定走这个）
+const CONTAINER_PORT = Number(process.env.OPENCLAW_GATEWAY_PORT || 18789)
 const DEFAULT_IMAGE =
   process.env.OPENCLAW_IMAGE || 'openclaw/openclaw:latest'
 
@@ -101,7 +104,8 @@ function ensureOpenclawConfig(token, port = DEFAULT_PORT) {
   cfg.gateway = cfg.gateway || {}
   cfg.gateway.mode = cfg.gateway.mode || 'local'
   cfg.gateway.bind = 'lan'
-  cfg.gateway.port = port
+  // 容器内始终监听 CONTAINER_PORT；host 侧用 OPENCLAW_PORT 映射进来
+  cfg.gateway.port = CONTAINER_PORT
   cfg.gateway.auth = cfg.gateway.auth || {}
   cfg.gateway.auth.mode = 'token'
   cfg.gateway.auth.token = token
@@ -114,6 +118,8 @@ function ensureOpenclawConfig(token, port = DEFAULT_PORT) {
   const origins = new Set([
     `http://127.0.0.1:${port}`,
     `http://localhost:${port}`,
+    `http://127.0.0.1:${CONTAINER_PORT}`,
+    `http://localhost:${CONTAINER_PORT}`,
     'http://127.0.0.1:8080',
     'http://localhost:8080',
     'http://127.0.0.1:8989',
@@ -325,6 +331,7 @@ async function ensureOpenclawDockerGateway({
 
 module.exports = {
   DEFAULT_PORT,
+  CONTAINER_PORT,
   DEFAULT_IMAGE,
   ensureOpenclawDockerGateway,
   ensureGatewayToken,

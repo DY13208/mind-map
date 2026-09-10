@@ -1,5 +1,5 @@
 /**
- * OpenClaw Gateway 看门狗：在 Windows 侧周期检查 18789，挂了就拉起 WSL + gateway。
+ * OpenClaw Gateway 看门狗：在 Windows 侧周期检查宿主机端口，挂了就拉起 Gateway。
  * 由 Start-Docker / openclaw-gateway 自动后台启动，避免 WSL 闲置退出导致 502。
  *
  * 用法：
