@@ -72,6 +72,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      openclaw-gateway:
+        condition: service_started
     healthcheck:
       test:
         [
@@ -86,5 +88,37 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  # OpenClaw Gateway（龙虾）：助理页 / SOP 企微待办依赖；Start-Docker 一并拉起
+  # 状态目录用命名卷（避免 Windows bind mount 上 fstat ENOENT 导致 Gateway 起不来）
+  # 仅把 openclaw.json 从宿主机挂进去，方便 Start-Docker 写入 token
+  openclaw-gateway:
+    image: ${OPENCLAW_IMAGE:-openclaw/openclaw:latest}
+    environment:
+      HOME: /home/node
+      OPENCLAW_STATE_DIR: /home/node/.openclaw
+      OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
+      OPENCLAW_WORKSPACE_DIR: /home/node/.openclaw/workspace
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
+      OPENCLAW_GATEWAY_PORT: "18789"
+      OPENCLAW_GATEWAY_BIND: lan
+      TZ: ${OPENCLAW_TZ:-Asia/Shanghai}
+    volumes:
+      - mind-map-openclaw:/home/node/.openclaw
+      - ./docker/openclaw/home/openclaw.json:/home/node/.openclaw/openclaw.json
+    ports:
+      - "127.0.0.1:${OPENCLAW_PORT:-18789}:18789"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:18789/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+
 volumes:
   mind-map-pg:
+  mind-map-openclaw:

@@ -139,15 +139,35 @@ async function up() {
   }
   const host = process.env.PUBLIC_HOST || detectHost()
   const mcpUrl = writeMcpConfig(host)
-  // 先写占位 runtime，保证 compose 挂载文件存在；OpenClaw 就绪后再注入 Token
-  writeOpenclawRuntimeConfig({ root: ROOT, port: OPENCLAW_PORT })
+  // 先写占位 runtime + OpenClaw Token/配置，保证 compose 能拉起龙虾容器
+  try {
+    const {
+      ensureGatewayToken,
+      ensureOpenclawConfig,
+      DEFAULT_PORT: OC_PORT,
+      DEFAULT_IMAGE: OC_IMAGE
+    } = require('./openclaw-docker')
+    const token = ensureGatewayToken()
+    ensureOpenclawConfig(token, Number(process.env.OPENCLAW_PORT || OC_PORT))
+    if (!process.env.OPENCLAW_IMAGE) process.env.OPENCLAW_IMAGE = OC_IMAGE
+    writeOpenclawRuntimeConfig({
+      root: ROOT,
+      token,
+      port: Number(process.env.OPENCLAW_PORT || OC_PORT)
+    })
+  } catch (err) {
+    writeOpenclawRuntimeConfig({ root: ROOT, port: OPENCLAW_PORT })
+    console.log(
+      `  OpenClaw 预配置跳过：${(err && err.message) || err}`
+    )
+  }
   console.log('')
   console.log(`  主机 IP  ${host}`)
   console.log(`  对外只开放一个端口：${PORT}`)
   console.log(`  页面     http://${host}:${PORT}`)
   console.log(`  MCP      ${mcpUrl}`)
   console.log('')
-  console.log('  正在重新构建并启动容器（会套用最新代码和 Nginx 配置，首次或改代码后会较慢）...')
+  console.log('  正在重新构建并启动容器（含 OpenClaw 龙虾网关，首次拉镜像会较慢）...')
   const child = compose(['up', '-d', '--build', '--force-recreate'], {
     PUBLIC_HOST: host,
     MIND_MAP_PORT: String(PORT),

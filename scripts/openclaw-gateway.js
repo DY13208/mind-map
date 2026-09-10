@@ -390,16 +390,48 @@ async function waitForHealth(port, timeoutMs = 45000) {
   return last
 }
 
+const {
+  ensureOpenclawDockerGateway
+} = require('./openclaw-docker')
+
 async function ensureOpenclawGateway({
   port = DEFAULT_PORT,
   startTray = true,
-  waitMs = Number(process.env.OPENCLAW_WAIT_MS || 45000)
+  waitMs = Number(process.env.OPENCLAW_WAIT_MS || 90000),
+  // docker（默认）| wsl | auto（Docker 失败再试 WSL）
+  preferDocker = String(process.env.OPENCLAW_MODE || 'docker').toLowerCase() !== 'wsl'
 } = {}) {
+  const mode = String(process.env.OPENCLAW_MODE || 'docker').toLowerCase()
+  // 默认走 Docker 龙虾网关；未装 WSL 时不要再去碰 WSL（否则会出现 WSL_E_DISTRO_NOT_FOUND）
+  if (preferDocker) {
+    try {
+      const docker = await ensureOpenclawDockerGateway({ port, waitMs })
+      if (docker && docker.ok) return docker
+      // 仅 OPENCLAW_MODE=auto 时回退 WSL；docker（默认）直接失败返回
+      if (mode !== 'auto') {
+        return docker
+      }
+      if (docker && !docker.ok) {
+        console.warn(
+          `[openclaw] Docker 网关未就绪：${docker.reason || ''}，尝试 WSL…`
+        )
+      }
+    } catch (err) {
+      if (mode !== 'auto') {
+        return {
+          ok: false,
+          mode: 'docker',
+          reason: (err && err.message) || String(err)
+        }
+      }
+    }
+  }
+
   if (process.platform !== 'win32') {
     return {
       ok: false,
       skipped: true,
-      reason: '仅 Windows 自动拉起 OpenClaw（WSL Gateway）'
+      reason: '非 Windows 且 Docker OpenClaw 未就绪'
     }
   }
 
@@ -536,11 +568,16 @@ function formatOpenclawResult(result) {
   if (!result) return ''
   const lines = []
   if (result.ok) {
+    const where =
+      result.mode === 'docker'
+        ? 'Docker 容器 openclaw-gateway'
+        : result.distro
+          ? `WSL: ${result.distro}`
+          : '本机'
     lines.push(
       result.alreadyRunning
-        ? `OpenClaw Gateway 已在运行  http://127.0.0.1:${result.port}`
-        : `OpenClaw Gateway 已启动  http://127.0.0.1:${result.port}` +
-            (result.distro ? `（WSL: ${result.distro}）` : '')
+        ? `OpenClaw Gateway 已在运行  http://127.0.0.1:${result.port}（${where}）`
+        : `OpenClaw Gateway 已启动  http://127.0.0.1:${result.port}（${where}）`
     )
     if (result.tray && result.tray.ok && !result.tray.alreadyRunning) {
       lines.push('OpenClaw Tray 已拉起')
