@@ -72,8 +72,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      openclaw-gateway:
-        condition: service_started
     healthcheck:
       test:
         [

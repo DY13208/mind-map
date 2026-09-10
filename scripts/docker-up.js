@@ -177,8 +177,14 @@ async function up() {
   process.env.OPENCLAW_PORT = String(openclawHostPort)
   console.log(`  OpenClaw 宿主机端口 ${openclawHostPort}（容器内 18789）`)
   console.log('')
-  console.log('  正在重新构建并启动容器（含 OpenClaw 龙虾网关，首次拉镜像会较慢）...')
-  // 先释放旧映射，避免 --force-recreate 时端口仍被旧容器占用
+  console.log('  正在重新构建并启动容器（OpenClaw 稍后单独拉起，避免迁移锁冲突）...')
+  // 停掉看门狗，避免和 compose / ensure 抢同一状态目录
+  try {
+    const { stopOpenclawWatchdog } = require('./openclaw-watchdog')
+    if (typeof stopOpenclawWatchdog === 'function') stopOpenclawWatchdog()
+  } catch (e) {
+    /* ignore */
+  }
   try {
     execSync('docker compose stop openclaw-gateway', {
       cwd: ROOT,
@@ -193,12 +199,25 @@ async function up() {
   } catch (e) {
     /* ignore */
   }
-  const child = compose(['up', '-d', '--build', '--force-recreate'], {
-    PUBLIC_HOST: host,
-    MIND_MAP_PORT: String(PORT),
-    PGPASSWORD: process.env.PGPASSWORD,
-    OPENCLAW_PORT: String(openclawHostPort)
-  })
+  // 不要在这里 --force-recreate openclaw-gateway：否则会与后面的 ensure 双重启动抢 migration 锁
+  const child = compose(
+    [
+      'up',
+      '-d',
+      '--build',
+      '--force-recreate',
+      '--no-deps',
+      'postgres',
+      'redis',
+      'app'
+    ],
+    {
+      PUBLIC_HOST: host,
+      MIND_MAP_PORT: String(PORT),
+      PGPASSWORD: process.env.PGPASSWORD,
+      OPENCLAW_PORT: String(openclawHostPort)
+    }
+  )
   child.on('exit', async code => {
     if (code) process.exit(code)
     console.log('')
