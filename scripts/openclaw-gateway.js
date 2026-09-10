@@ -1,6 +1,6 @@
 /**
  * 本机 OpenClaw Gateway 自动拉起（供 Start-Docker / docker-up 调用）。
- * Gateway 默认 Docker 映射宿主机 18791（容器内仍 18789）；也可 OPENCLAW_MODE=wsl。
+ * Gateway 默认 Docker 映射宿主机 4623（容器内仍 18789）；也可 OPENCLAW_MODE=wsl。
  * 启动时会自动开启 gateway.http.endpoints.chatCompletions（助理页依赖）。
  */
 const fs = require('fs')
@@ -9,7 +9,7 @@ const path = require('path')
 const http = require('http')
 const { spawn, spawnSync, execFileSync } = require('child_process')
 
-const DEFAULT_PORT = Number(process.env.OPENCLAW_PORT || 18791)
+const DEFAULT_PORT = Number(process.env.OPENCLAW_PORT || 4623)
 const HEALTH_PATH = '/health'
 const DEFAULT_DISTROS = [
   'OpenClawGateway',

@@ -58,8 +58,27 @@ function writePid(pid) {
   fs.writeFileSync(PID_FILE, String(pid), 'utf8')
 }
 
+function loadOpenclawPort() {
+  let fromFile = ''
+  try {
+    const envPath = path.join(ROOT, '.env')
+    if (fs.existsSync(envPath)) {
+      const m = fs
+        .readFileSync(envPath, 'utf8')
+        .split(/\r?\n/)
+        .map(l => l.trim())
+        .find(l => /^OPENCLAW_PORT\s*=/.test(l))
+      if (m) fromFile = m.slice(m.indexOf('=') + 1).trim().replace(/^['"]|['"]$/g, '')
+    }
+  } catch (e) {
+    /* ignore */
+  }
+  return Number(process.env.OPENCLAW_PORT || fromFile || DEFAULT_PORT || 4623)
+}
+
 async function tick() {
-  const port = DEFAULT_PORT
+  const port = loadOpenclawPort()
+  process.env.OPENCLAW_PORT = String(port)
   const health = await checkHealth(port)
   if (health.ok) return { ok: true, repaired: false }
 

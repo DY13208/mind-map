@@ -13,7 +13,7 @@ const ENV_FILE = path.join(ROOT, '.env')
 const DATA_DIR = path.join(ROOT, 'docker', 'openclaw', 'home')
 const CONFIG_FILE = path.join(DATA_DIR, 'openclaw.json')
 // 宿主机映射端口（避免与本机原生 OpenClaw Tray 的 18789 冲突）
-const DEFAULT_PORT = Number(process.env.OPENCLAW_PORT || 18791)
+const DEFAULT_PORT = Number(process.env.OPENCLAW_PORT || 4623)
 // 容器内监听端口（compose / nginx 固定走这个）
 const CONTAINER_PORT = Number(process.env.OPENCLAW_GATEWAY_PORT || 18789)
 const DEFAULT_IMAGE =

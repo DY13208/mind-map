@@ -20,7 +20,7 @@ import { GATEWAY_CLIENT_CAPS } from '@openclaw/gateway-protocol/client-info'
 const PORT = Number(process.env.OPENCLAW_BRIDGE_PORT || 18790)
 const GATEWAY_URL =
   process.env.OPENCLAW_GATEWAY_WS ||
-  `ws://127.0.0.1:${process.env.OPENCLAW_PORT || 18791}`
+  `ws://127.0.0.1:${process.env.OPENCLAW_PORT || 4623}`
 const TOKEN = String(process.env.OPENCLAW_GATEWAY_TOKEN || '').trim()
 
 if (!TOKEN) {

@@ -166,12 +166,31 @@ async function up() {
   console.log(`  对外只开放一个端口：${PORT}`)
   console.log(`  页面     http://${host}:${PORT}`)
   console.log(`  MCP      ${mcpUrl}`)
+  const openclawHostPort = Number(process.env.OPENCLAW_PORT || OPENCLAW_PORT || 4623)
+  process.env.OPENCLAW_PORT = String(openclawHostPort)
+  console.log(`  OpenClaw 宿主机端口 ${openclawHostPort}（容器内 18789）`)
   console.log('')
   console.log('  正在重新构建并启动容器（含 OpenClaw 龙虾网关，首次拉镜像会较慢）...')
+  // 先释放旧映射，避免 --force-recreate 时端口仍被旧容器占用
+  try {
+    execSync('docker compose stop openclaw-gateway', {
+      cwd: ROOT,
+      stdio: 'ignore',
+      env: process.env
+    })
+    execSync('docker compose rm -sf openclaw-gateway', {
+      cwd: ROOT,
+      stdio: 'ignore',
+      env: process.env
+    })
+  } catch (e) {
+    /* ignore */
+  }
   const child = compose(['up', '-d', '--build', '--force-recreate'], {
     PUBLIC_HOST: host,
     MIND_MAP_PORT: String(PORT),
-    PGPASSWORD: process.env.PGPASSWORD
+    PGPASSWORD: process.env.PGPASSWORD,
+    OPENCLAW_PORT: String(openclawHostPort)
   })
   child.on('exit', async code => {
     if (code) process.exit(code)
@@ -204,14 +223,14 @@ async function up() {
       console.log('  正在启动本机 OpenClaw Gateway（助理页需要）...')
       try {
         const oc = await ensureOpenclawGateway({
-          port: OPENCLAW_PORT,
+          port: openclawHostPort,
           startTray: true
         })
         const runtime = writeOpenclawRuntimeConfig({
           root: ROOT,
           token: (oc && oc.token) || '',
           model: process.env.OPENCLAW_MODEL || 'openclaw/default',
-          port: OPENCLAW_PORT
+          port: openclawHostPort
         })
         // 勿把 token 打到控制台
         if (oc) {
