@@ -246,6 +246,26 @@ async function up() {
       }
 
       console.log('')
+      console.log('  正在启动本机 Cognee（OpenClaw 记忆插件）...')
+      try {
+        const {
+          ensureCognee,
+          formatCogneeResult
+        } = require('./cognee-docker')
+        const cg = await ensureCognee()
+        formatCogneeResult(cg)
+          .split('\n')
+          .forEach(line => console.log(`  ${line}`))
+        if (cg && !cg.ok && !cg.skipped) {
+          console.log(
+            '  （Cognee 未就绪时 OpenClaw 仍会启动，但记忆插件可能不可用）'
+          )
+        }
+      } catch (err) {
+        console.log(`  Cognee 启动异常：${(err && err.message) || err}`)
+      }
+
+      console.log('')
       console.log('  正在启动本机 OpenClaw Gateway（助理页需要）...')
       try {
         const oc = await ensureOpenclawGateway({
