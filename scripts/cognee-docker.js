@@ -5,7 +5,7 @@
 const fs = require('fs')
 const path = require('path')
 const http = require('http')
-const { spawnSync, execSync } = require('child_process')
+const { spawn, spawnSync, execSync } = require('child_process')
 
 const ROOT = path.resolve(__dirname, '..')
 const DEFAULT_DIR = process.env.COGNEE_DIR || 'D:\\cognee'
@@ -18,8 +18,9 @@ function sleep(ms) {
 }
 
 function cogneeEnabled() {
-  const v = String(process.env.COGNEE_ENABLED || '1').trim().toLowerCase()
-  return v !== '0' && v !== 'false' && v !== 'off' && v !== 'no'
+  // 默认关闭：生产机通常没有 Cognee 镜像；本机开发在 .env 设 COGNEE_ENABLED=1
+  const v = String(process.env.COGNEE_ENABLED || '0').trim().toLowerCase()
+  return v === '1' || v === 'true' || v === 'on' || v === 'yes'
 }
 
 function resolveCogneeDir() {
@@ -104,7 +105,24 @@ function hasDocker() {
   }
 }
 
-function composeCognee(dir, args) {
+function containerRunning(name = 'cognee') {
+  try {
+    const out = execSync(
+      `docker inspect -f "{{.State.Running}} {{.State.Health.Status}}" ${name}`,
+      { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }
+    )
+      .trim()
+      .split(/\s+/)
+    return {
+      running: out[0] === 'true',
+      health: out[1] || ''
+    }
+  } catch (e) {
+    return { running: false, health: '' }
+  }
+}
+
+function composeCogneeSync(dir, args) {
   return spawnSync('docker', ['compose', ...args], {
     cwd: dir,
     encoding: 'utf8',
@@ -113,14 +131,40 @@ function composeCognee(dir, args) {
   })
 }
 
+/** 前台输出 docker compose 进度（拉取/构建可见） */
+function composeCogneeLive(dir, args) {
+  return new Promise(resolve => {
+    const child = spawn('docker', ['compose', ...args], {
+      cwd: dir,
+      env: process.env,
+      stdio: 'inherit',
+      shell: true,
+      windowsHide: false
+    })
+    child.on('error', err => {
+      resolve({ status: 1, error: err })
+    })
+    child.on('exit', code => {
+      resolve({ status: code == null ? 1 : code })
+    })
+  })
+}
+
 /**
  * 确保本机 Cognee API 在跑（docker compose up cognee）。
+ * 已健康则立刻返回；否则前台拉起（无镜像会拉取/构建，并实时打印进度）。
  */
 async function ensureCognee({
   dir = resolveCogneeDir(),
   port = DEFAULT_PORT,
-  waitMs = Number(process.env.COGNEE_WAIT_MS || 120000)
+  waitMs = Number(process.env.COGNEE_WAIT_MS || 180000),
+  onLog = null
 } = {}) {
+  const log = msg => {
+    if (typeof onLog === 'function') onLog(msg)
+    else console.log(msg)
+  }
+
   if (!cogneeEnabled()) {
     return { ok: true, skipped: true, reason: 'COGNEE_ENABLED 未开启' }
   }
@@ -142,6 +186,7 @@ async function ensureCognee({
     }
   }
 
+  log(`检查 Cognee 健康 ${hostHealthUrl(port)} …`)
   const live = await checkCogneeHealth(port)
   if (live.ok) {
     return {
@@ -154,18 +199,40 @@ async function ensureCognee({
     }
   }
 
-  const up = composeCognee(dir, ['up', '-d', 'cognee'])
-  if (up.status !== 0) {
-    return {
-      ok: false,
-      dir,
-      port,
-      reason: 'docker compose 启动 cognee 失败',
-      detail: String(up.stderr || up.stdout || '')
-        .trim()
-        .slice(0, 600),
-      hint: `请在 ${dir} 手动执行：docker compose up -d cognee`
+  const existing = containerRunning('cognee')
+  if (existing.running) {
+    log(`容器 cognee 已在运行（health=${existing.health || 'n/a'}），等待接口就绪…`)
+  } else {
+    log(`目录 ${dir}`)
+    log('启动 Cognee（无镜像会自动拉取/构建，下方为 Docker 实时输出）…')
+    // 允许构建与拉取；进度走 stdio inherit，不再静默卡住
+    const up = await composeCogneeLive(dir, [
+      'up',
+      '-d',
+      '--build',
+      'cognee'
+    ])
+    if (up.status !== 0) {
+      const again = await checkCogneeHealth(port)
+      if (again.ok) {
+        return {
+          ok: true,
+          alreadyRunning: true,
+          dir,
+          port,
+          url: DEFAULT_URL,
+          healthUrl: again.url
+        }
+      }
+      return {
+        ok: false,
+        dir,
+        port,
+        reason: 'docker compose 启动 cognee 失败',
+        hint: `请在 ${dir} 手动执行：docker compose up -d --build cognee`
+      }
     }
+    log('compose 已返回，等待 /health …')
   }
 
   const deadline = Date.now() + waitMs
@@ -173,11 +240,12 @@ async function ensureCognee({
   while (Date.now() < deadline) {
     health = await checkCogneeHealth(port)
     if (health.ok) break
+    log('等待 Cognee /health …')
     await sleep(2000)
   }
 
   if (!health.ok) {
-    const logs = composeCognee(dir, ['logs', '--tail', '40', 'cognee'])
+    const logs = composeCogneeSync(dir, ['logs', '--tail', '40', 'cognee'])
     return {
       ok: false,
       dir,

@@ -250,16 +250,23 @@ async function up() {
       try {
         const {
           ensureCognee,
-          formatCogneeResult
+          formatCogneeResult,
+          cogneeEnabled
         } = require('./cognee-docker')
-        const cg = await ensureCognee()
-        formatCogneeResult(cg)
-          .split('\n')
-          .forEach(line => console.log(`  ${line}`))
-        if (cg && !cg.ok && !cg.skipped) {
-          console.log(
-            '  （Cognee 未就绪时 OpenClaw 仍会启动，但记忆插件可能不可用）'
-          )
+        if (!cogneeEnabled()) {
+          console.log('  Cognee 已跳过（COGNEE_ENABLED 未开启）')
+        } else {
+          const cg = await ensureCognee({
+            onLog: msg => console.log(`  ${msg}`)
+          })
+          formatCogneeResult(cg)
+            .split('\n')
+            .forEach(line => console.log(`  ${line}`))
+          if (cg && !cg.ok && !cg.skipped) {
+            console.log(
+              '  （Cognee 未就绪时 OpenClaw 仍会启动，但记忆插件可能不可用）'
+            )
+          }
         }
       } catch (err) {
         console.log(`  Cognee 启动异常：${(err && err.message) || err}`)
