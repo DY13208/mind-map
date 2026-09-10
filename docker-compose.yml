@@ -63,6 +63,8 @@ services:
     volumes:
       # WorkBuddy 在宿主机写的 SOP 产物，供预览/下载
       - ./output:/app/output:ro
+      # Start-Docker 自动注入的 OpenClaw Token 等（gitignore）
+      - ./docker/runtime-config.local.js:/usr/share/nginx/html/runtime-config.js:ro
     ports:
       - "${MIND_MAP_PORT:-8080}:80"
     depends_on:

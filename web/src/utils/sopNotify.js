@@ -5,7 +5,7 @@
  * - 自动判断阻塞（等待/确认/审批）或继续
  * - 当前 AI 后端派发企微待办 + 写入导图 CPDA 待办树
  */
-import { dispatchTodo } from './sendTodo'
+import { dispatchTodo, areWaitingWecomTodosDone } from './sendTodo'
 import { createRoomTodo, listRoomTodos } from './fileApi'
 
 /** 通知 / 提醒类节点（命中任一即可） */
@@ -13,7 +13,18 @@ export const NOTIFY_TITLE_RE =
   /AI\s*发起\s*(?:通知|提醒)|发起(?:通知|提醒)|^(?:通知|提醒)\s*[：:]|知会|请(?:通知|提醒)|发送(?:通知|提醒)|催办|请催办|^AI\s*[:：].*(?:通知|提醒|催办|抄送)|抄送|(?:通知|提醒)对应的|(?:通知|提醒).{0,12}给/i
 
 /** 阻塞语义：发完后停住，等人完成待办再继续 */
-export const BLOCK_TITLE_RE = /等待|确认|审批|阻塞|签核|复核通过|务必完成/i
+export const BLOCK_TITLE_RE =
+  /等待|确认|审批|阻塞|签核|复核通过|务必完成|点击发送|点击.*发送|人工(?:完成|确认|处理)|手动(?:完成|发送)|手工/i
+
+/** 人工闸门：不自动往下跑，必须等人做完 */
+export const MANUAL_GATE_RE =
+  /点击发送|点击.*发送|请(?:人工|手动|手工)|人工(?:完成|确认|处理|发送)|手动(?:完成|发送)|待人工|等人完成/i
+
+export function isManualGateTitle(text) {
+  const t = stripNodeText(text)
+  if (!t || t.length > 80) return false
+  return MANUAL_GATE_RE.test(t)
+}
 
 /** 明确非阻塞（知会类） */
 export const CONTINUE_HINT_RE = /知会|抄送|仅通知|仅提醒|不阻塞|无需等待|顺便告知/i
@@ -396,7 +407,9 @@ export function extractNotifyNodesFromOutline(outline) {
     const text = stripNodeText(
       line.replace(/^(\s*)/, '').replace(/^[-*•●]\s*/, '')
     )
-    if (!text || !isNotifyTitle(text)) return
+    if (!text) return
+    const manualGate = isManualGateTitle(text)
+    if (!manualGate && !isNotifyTitle(text)) return
 
     const nearby = []
     let assignee = ''
@@ -446,13 +459,14 @@ export function extractNotifyNodesFromOutline(outline) {
     }
 
     const contextText = nearby.join('\n')
-    const block = shouldBlockNotify(text, contextText)
+    const block = manualGate || shouldBlockNotify(text, contextText)
     const notifyKey = `notify:${index}:${text.slice(0, 40)}`
     items.push({
       index,
       text,
-      assignee: assignee || '负责人',
+      assignee: assignee || (manualGate ? '执行人' : '负责人'),
       block,
+      manualGate: !!manualGate,
       nearby,
       contextText,
       notifyKey,
@@ -477,13 +491,28 @@ export async function processNotifyNodes({
   onDelta,
   onEvent,
   signal,
-  extraNote = ''
+  extraNote = '',
+  skipKeys = [],
+  stopOnFirstBlock = true,
+  backend = ''
 } = {}) {
   const list = Array.isArray(nodes) ? nodes : []
+  const skip = new Set((skipKeys || []).filter(Boolean))
   const overrideAssignees = parseAssigneesFromExtraNote(extraNote)
   const results = []
   for (let i = 0; i < list.length; i++) {
     const node = list[i]
+    if (node && node.notifyKey && skip.has(node.notifyKey)) {
+      results.push({
+        ...node,
+        skipped: true,
+        dispatchOk: true,
+        text: node.text,
+        assignee: node.assignee,
+        block: !!node.block
+      })
+      continue
+    }
     const assignee = resolveNotifyAssignee(node.assignee, extraNote)
     if (onStatus) {
       onStatus(
@@ -517,6 +546,7 @@ export async function processNotifyNodes({
     let taskUid = ''
     let cpdaOk = false
     let cpdaError = ''
+    // 不再把导图「待办」当作阻塞条件；可选写入仅作留痕，失败忽略
     try {
       const childNodes = [{ text: `代办人：${assignee}` }]
       if (node.detail) {
@@ -538,7 +568,7 @@ export async function processNotifyNodes({
       cpdaOk = !!taskUid
     } catch (err) {
       cpdaError = (err && err.message) || String(err || '写入待办失败')
-      console.warn('[sopNotify] createRoomTodo failed', err)
+      console.warn('[sopNotify] createRoomTodo failed (ignored for wait)', err)
     }
 
     let dispatchReply = ''
@@ -546,6 +576,7 @@ export async function processNotifyNodes({
     let dispatchError = ''
     let dispatchVia = ''
     let dispatchBackendLabel = ''
+    let todoId = ''
     try {
       const todo = await dispatchTodo({
         assignee: { name: assignee },
@@ -555,6 +586,7 @@ export async function processNotifyNodes({
           ? `${conversationId}-todo-${i}-${Date.now().toString(36)}`
           : undefined,
         model: 'auto',
+        backend,
         signal,
         onEvent: (label, raw) => {
           if (onEvent) onEvent(label, raw)
@@ -569,9 +601,14 @@ export async function processNotifyNodes({
       dispatchOk = !!(todo && todo.success)
       dispatchError = (todo && todo.error) || ''
       dispatchVia = (todo && todo.via) || ''
+      todoId = (todo && todo.todoId) || ''
       dispatchBackendLabel =
         (todo && todo.backendLabel) ||
-        (dispatchVia === 'xiaoce-wecom' ? '小策' : 'WorkBuddy')
+        (dispatchVia === 'xiaoce-wecom'
+          ? '小策'
+          : dispatchVia === 'openclaw-wecom'
+            ? '助理'
+            : 'WorkBuddy')
       if (!dispatchOk && dispatchError) {
         dispatchReply = `${dispatchError}\n${dispatchReply}`.trim()
       }
@@ -587,32 +624,57 @@ export async function processNotifyNodes({
       displayTitle: mapTitle,
       wxTitle,
       taskUid,
+      todoId,
       cpdaOk,
       cpdaError,
       dispatchOk,
-      dispatchReply,
       dispatchError,
+      dispatchReply,
       dispatchVia,
       dispatchBackendLabel
     })
+    // 逐步执行：企微派发成功后立刻停，等企微待办完成再继续
+    if (stopOnFirstBlock && node.block && dispatchOk) {
+      if (onStatus) {
+        onStatus(
+          `已停在阻塞步骤「${node.text}」，等待企业微信待办完成后继续`
+        )
+      }
+      break
+    }
   }
   return results
 }
 
 export function summarizeNotifyResults(results) {
   const list = Array.isArray(results) ? results : []
-  const blocking = list.filter(r => r.block)
-  const continued = list.filter(r => !r.block)
+  const blocking = list.filter(r => r.block && !r.skipped)
+  const continued = list.filter(r => !r.block && !r.skipped)
+  // 阻塞等待只认企微派发成功；导图待办不再作为条件
+  const waitingBlock = list.filter(r => r.block && !r.skipped && r.dispatchOk)
+  const dispatchFailed = list.filter(
+    r => r.block && !r.skipped && !r.dispatchOk
+  )
+  const waitingWecomTodos = waitingBlock.map(r => ({
+    todoId: r.todoId || '',
+    title: r.wxTitle || r.text || r.title || '',
+    wxTitle: r.wxTitle || '',
+    assignee: r.assignee || '',
+    via: r.dispatchVia || '',
+    notifyKey: r.notifyKey || ''
+  }))
   return {
     total: list.length,
     blocking,
     continued,
-    hasBlocking: blocking.length > 0,
-    waitingTaskUids: blocking.map(r => r.taskUid).filter(Boolean)
+    hasBlocking: waitingBlock.length > 0,
+    dispatchFailed,
+    waitingTaskUids: waitingBlock.map(r => r.taskUid).filter(Boolean),
+    waitingWecomTodos
   }
 }
 
-/** 检查阻塞待办是否都已进入「已完成」 */
+/** @deprecated 导图待办不再用于阻塞；保留兼容旧调用 */
 export async function areWaitingTodosDone(roomKey, taskUids) {
   const uids = (taskUids || []).filter(Boolean)
   if (!uids.length) return { done: true, pending: [], completed: [] }
@@ -635,3 +697,5 @@ export async function areWaitingTodosDone(roomKey, taskUids) {
     missing
   }
 }
+
+export { areWaitingWecomTodosDone }

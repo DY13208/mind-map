@@ -53,10 +53,6 @@
     </header>
 
     <template v-if="!detailMode">
-      <p class="hint">
-        只识别标题以单独「D：」开头的节点（如 D：销售目标）；D1/D2 等编号不计入台账。双击卡片进入导图 /
-        历史任务 / 产物；运行时若大纲含通知类节点会自动派发代办。
-      </p>
       <div class="statusLine" v-if="statusText">{{ statusText }}</div>
       <div class="statusLine runStatus" v-if="sopQueueSummary">
         {{ sopQueueSummary }}
@@ -95,19 +91,15 @@
             </div>
           </div>
           <div class="cardMeta">
-            <span class="metaChip">{{ item.id || 'SOP' }}</span>
-            <span class="metaChip">出现 {{ item.occurrenceCount || 1 }} 次</span>
-            <span class="metaChip">{{
-              (item.frequency && item.frequency.label) || '频率未知'
-            }}</span>
+            <span
+              class="metaChip"
+              v-for="(chip, idx) in sopCardMetaChips(item)"
+              :key="idx"
+              >{{ chip }}</span
+            >
           </div>
           <div class="cardBlock">
-            <div class="blockLabel">最近运行</div>
             <div class="blockBody">{{ latestRunLabel(item) }}</div>
-          </div>
-          <div class="cardBlock">
-            <div class="blockLabel">最新产物</div>
-            <div class="blockBody">{{ latestDelLabel(item) }}</div>
           </div>
         </article>
       </div>
@@ -132,154 +124,23 @@
         </el-tab-pane>
         <el-tab-pane label="历史任务" name="runs">
           <div class="historyPane">
-            <div class="sopTaskPanel embedded" v-if="detailSopTaskJobs.length">
-              <div class="taskPanelHead">
-                <div class="taskTitleRow">
-                  <strong>SOP 任务</strong>
-                  <span class="taskSummary">{{ detailTaskSummary }}</span>
-                </div>
-                <div class="taskHeadActions">
-                  <el-button
-                    size="mini"
-                    type="danger"
-                    plain
-                    :disabled="!detailActiveJobCount"
-                    @click="cancelAllSopJobs"
-                  >
-                    全部取消
-                  </el-button>
-                </div>
-              </div>
-              <div class="taskBody">
-                <ul class="taskList">
-                  <li
-                    v-for="job in detailSopTaskJobs"
-                    :key="job.id"
-                    class="taskItem"
-                    :class="{
-                      active: selectedSopJobId === job.id,
-                      [job.state]: true
-                    }"
-                    @click="selectSopJob(job.id)"
-                  >
-                    <div class="taskItemMain">
-                      <span class="taskState">{{ sopJobStateLabel(job) }}</span>
-                      <span class="taskName"
-                        >{{ job.sopId || 'SOP' }}：{{ job.sopTitle }}</span
-                      >
-                    </div>
-                    <div class="taskItemStatus">{{ shortJobStatus(job) }}</div>
-                    <div class="taskItemActions" @click.stop>
-                      <el-button
-                        v-if="job.state === 'waiting_human'"
-                        type="text"
-                        size="mini"
-                        @click="resumeSopJob(job.id)"
-                      >
-                        检查并继续
-                      </el-button>
-                      <el-button
-                        v-if="job.state === 'waiting_data'"
-                        type="text"
-                        size="mini"
-                        @click="openDataFillDialog(job.id)"
-                      >
-                        去补数
-                      </el-button>
-                      <el-button
-                        v-if="job.state === 'done'"
-                        type="text"
-                        size="mini"
-                        @click="dialogTab = 'dels'"
-                      >
-                        看产物
-                      </el-button>
-                      <el-button
-                        v-if="
-                          job.state === 'running' ||
-                            job.state === 'queued' ||
-                            job.state === 'waiting_human' ||
-                            job.state === 'waiting_data'
-                        "
-                        type="text"
-                        size="mini"
-                        @click="cancelSopJob(job.id)"
-                      >
-                        取消
-                      </el-button>
-                    </div>
-                  </li>
-                </ul>
-                <div class="taskDetail" v-if="selectedDetailJob">
-                  <div class="liveHead">
-                    <strong>{{ selectedDetailJob.sopTitle }}</strong>
-                    <span class="liveStatus">{{
-                      shortJobStatus(selectedDetailJob)
-                    }}</span>
-                  </div>
-                  <div
-                    ref="dataFillBox"
-                    class="dataFillCallout"
-                    v-if="selectedDetailJob.state === 'waiting_data'"
-                  >
-                    <div class="calloutMain">
-                      <div class="calloutTitle">待补数 · 不是失败</div>
-                      <p class="calloutHint">{{ shortDataFillHint }}</p>
-                    </div>
-                    <el-button
-                      type="primary"
-                      size="small"
-                      @click="openDataFillDialog(selectedDetailJob.id)"
-                    >
-                      填写并继续
-                    </el-button>
-                  </div>
-                  <div class="notifyBox" v-if="selectedNotifyRows.length">
-                    <div class="boxLabel">通知 / 代办派发</div>
-                    <ul class="notifyList">
-                      <li
-                        v-for="(n, i) in selectedNotifyRows"
-                        :key="i"
-                        :class="{ block: n.block, fail: n.failed }"
-                      >
-                        <div class="notifyMain">
-                          <span class="notifyKind">{{ n.kind }}</span>
-                          <span class="notifyTo">代办 → {{ n.assignee }}</span>
-                        </div>
-                        <div class="notifyText">{{ n.text }}</div>
-                        <div class="notifyMeta">{{ n.meta }}</div>
-                      </li>
-                    </ul>
-                  </div>
-                  <div
-                    class="eventBox"
-                    v-if="
-                      selectedDetailJob.eventLog &&
-                        selectedDetailJob.eventLog.length
-                    "
-                  >
-                    <div class="boxLabel">事件流</div>
-                    <ul class="eventList">
-                      <li
-                        v-for="(ev, i) in selectedDetailJob.eventLog"
-                        :key="i"
-                      >
-                        <span class="evTime">{{ ev.time }}</span>
-                        <span class="evLabel">{{ ev.label }}</span>
-                      </li>
-                    </ul>
-                  </div>
-                  <div class="streamBox">
-                    <div class="boxLabel">流式输出</div>
-                    <pre ref="runStreamPre" class="streamText">{{
-                      selectedJobStreamDisplay
-                    }}</pre>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <SopTaskBoard
+              v-if="detailSopTaskJobs.length"
+              embedded
+              title="SOP 任务"
+              :jobs="detailSopTaskJobs"
+              :selected-id="selectedSopJobId"
+              @select="selectSopJob"
+              @cancel="cancelSopJob"
+              @cancel-all="cancelAllSopJobs"
+              @resume="resumeSopJob"
+              @fill-data="openDataFillDialog"
+            />
             <div v-else class="paneEmpty soft">
               暂无进行中的 SOP 任务；可点右上角「运行」发起。
+              <el-button type="text" @click="$router.push('/sop-tasks')"
+                >打开多任务页</el-button
+              >
             </div>
 
             <div class="ledgerPane historyLedger" v-loading="ledgerSaving">
@@ -350,39 +211,6 @@
         </el-tab-pane>
         <el-tab-pane label="产物" name="dels">
           <div class="ledgerPane" v-loading="ledgerSaving">
-            <div class="addForm">
-              <el-input
-                v-model="delForm.name"
-                size="small"
-                placeholder="产物名称"
-                class="formField"
-              ></el-input>
-              <el-input
-                v-model="delForm.uri_or_path"
-                size="small"
-                placeholder="链接或 COS 路径"
-                class="formField wide"
-              ></el-input>
-              <el-select
-                v-model="delForm.kind"
-                size="small"
-                class="formField short"
-              >
-                <el-option label="链接" value="link"></el-option>
-                <el-option label="文件" value="file"></el-option>
-                <el-option label="COS" value="cos"></el-option>
-              </el-select>
-              <el-button size="mini" @click="fillCosHint">填路径提示</el-button>
-              <el-button
-                type="primary"
-                size="small"
-                :disabled="!activeSopUid"
-                @click="submitDeliverable"
-              >
-                追加产物
-              </el-button>
-            </div>
-            <p class="cosHint" v-if="cosHint">建议路径：{{ cosHint }}</p>
             <ul class="ledgerList" v-if="activeLedger.deliverables.length">
               <li v-for="d in activeLedger.deliverables" :key="d.id">
                 <span class="liMain">
@@ -446,6 +274,7 @@
         <el-radio-group v-model="runBackend" size="small" @change="onRunBackendChange">
           <el-radio-button :label="AI_BACKEND_WORKBUDDY">WorkBuddy</el-radio-button>
           <el-radio-button :label="AI_BACKEND_XIAOCE">小策</el-radio-button>
+          <el-radio-button :label="AI_BACKEND_OPENCLAW">助理</el-radio-button>
         </el-radio-group>
       </div>
       <div class="runModelRow" v-if="runBackend === AI_BACKEND_XIAOCE">
@@ -460,6 +289,33 @@
         <el-select v-model="runAgentId" size="small" :loading="runScopeLoading" placeholder="选择智能体" class="runModelSelect">
           <el-option v-for="item in runAgents" :key="item.id" :label="`${item.emoji || '🤖'} ${item.name}`" :value="String(item.id)"></el-option>
         </el-select>
+      </div>
+      <div class="runModelRow" v-else-if="runBackend === AI_BACKEND_OPENCLAW">
+        <span class="runModelLabel">模型</span>
+        <el-select
+          v-model="runModel"
+          size="small"
+          filterable
+          allow-create
+          default-first-option
+          :loading="runModelsLoading"
+          placeholder="选择助理模型"
+          class="runModelSelect"
+          @visible-change="onRunModelDropdown"
+        >
+          <el-option
+            v-for="item in runOpenclawModels"
+            :key="'oc-' + item.id"
+            :label="item.name || item.id"
+            :value="item.id"
+          ></el-option>
+        </el-select>
+        <el-button
+          size="mini"
+          :loading="runModelsLoading"
+          @click="loadRunModels(true)"
+          >刷新</el-button
+        >
       </div>
       <div class="runModelRow" v-else>
         <span class="runModelLabel">模型</span>
@@ -687,12 +543,9 @@ import {
 import {
   normalizeLedger,
   mergeLedgerSources,
-  latestRunText,
   latestDeliverableText,
   addRunToLedger,
-  addDeliverableToLedger,
   persistSopLedger,
-  suggestCosPath,
   readLedgerFromNodeLike,
   formatMinuteStamp
 } from '@/utils/sopLedger'
@@ -701,7 +554,7 @@ import {
   getSharedSopRunQueue,
   resolveSopRunConcurrency
 } from '@/utils/sopRunQueue'
-import { areWaitingTodosDone } from '@/utils/sopNotify'
+import { areWaitingWecomTodosDone } from '@/utils/sopNotify'
 import {
   extractSubmitMaterialFields,
   formatSubmitMaterialNote,
@@ -709,14 +562,20 @@ import {
   parseProvidedFieldLabels
 } from '@/utils/sopSubmitMaterial'
 import {
+  fetchAiModels,
   fetchWorkbuddyModels,
   getWorkbuddyConfig,
+  getOpenclawConfig,
+  saveOpenclawConfig,
   WORKBUDDY_CUSTOM_MODEL_HINTS,
   fetchXiaoceOrganizations,
   fetchXiaoceAgents,
   AI_BACKEND_WORKBUDDY,
-  AI_BACKEND_XIAOCE
+  AI_BACKEND_XIAOCE,
+  AI_BACKEND_OPENCLAW,
+  normalizeAiBackend
 } from '@/utils/agentChat'
+import SopTaskBoard from './components/SopTaskBoard.vue'
 
 MindMap.usePlugin(Drag)
   .usePlugin(Select)
@@ -772,6 +631,7 @@ function toMindMapTree(tree) {
 
 export default {
   name: 'SopRegistryPage',
+  components: { SopTaskBoard },
   data() {
     return {
       sops: [],
@@ -794,8 +654,6 @@ export default {
       },
       ledgerSaving: false,
       runForm: { at: '', result: '完成', note: '' },
-      delForm: { name: '', uri_or_path: '', kind: 'link' },
-      cosHint: '',
       outputPresets: SOP_OUTPUT_PRESETS,
       runDialogVisible: false,
       runTarget: null,
@@ -814,8 +672,12 @@ export default {
       runScopeLoading: false,
       AI_BACKEND_WORKBUDDY: 'workbuddy',
       AI_BACKEND_XIAOCE: 'xiaoce',
+      AI_BACKEND_OPENCLAW: 'openclaw',
       runModelsLoading: false,
       runCustomModels: WORKBUDDY_CUSTOM_MODEL_HINTS.slice(),
+      runOpenclawModels: [
+        { id: 'openclaw/default', name: 'openclaw/default' }
+      ],
       runPlatformModels: [],
       sopRunQueue: null,
       sopQueueSnap: {
@@ -961,7 +823,11 @@ export default {
         else parts.push('导图待办未写入')
         const backendName =
           r.dispatchBackendLabel ||
-          (r.dispatchVia === 'xiaoce-wecom' ? '小策' : 'WorkBuddy')
+          (r.dispatchVia === 'xiaoce-wecom'
+            ? '小策'
+            : r.dispatchVia === 'openclaw-wecom'
+              ? '助理'
+              : 'WorkBuddy')
         if (r.dispatchOk) parts.push(`${backendName} 企微已派发`)
         else if (r.dispatchError)
           parts.push(`${backendName} 失败：${String(r.dispatchError).slice(0, 48)}`)
@@ -998,7 +864,11 @@ export default {
       } else if (running && !progress) {
         const backendName =
           (job && job.backendLabel) ||
-          (job && job.backend === 'xiaoce' ? '小策' : 'WorkBuddy')
+          (job && job.backend === 'xiaoce'
+            ? '小策'
+            : job && job.backend === 'openclaw'
+              ? '助理'
+              : 'WorkBuddy')
         parts.push(`等待 ${backendName} 输出…（状态与工具事件会在此滚动更新）`)
       } else if (!running && job.error) {
         parts.push(job.error)
@@ -1089,14 +959,17 @@ export default {
     this._hadBodyDark = document.body.classList.contains('isDark')
     document.body.classList.remove('isDark')
     this.sopRunQueue = getSharedSopRunQueue({
-      getConcurrency: () => resolveSopRunConcurrency(),
-      onChange: snap => {
-        if (!this._sopPageAlive) return
-        this.sopQueueSnap = snap
-        this.syncLedgersFromQueue(snap)
-        this.scrollRunStream()
-      }
+      getConcurrency: () => resolveSopRunConcurrency()
     })
+    this._sopQueueUnsub =
+      this.sopRunQueue && this.sopRunQueue.subscribe
+        ? this.sopRunQueue.subscribe(snap => {
+            if (!this._sopPageAlive) return
+            this.sopQueueSnap = snap
+            this.syncLedgersFromQueue(snap)
+            this.scrollRunStream()
+          })
+        : null
     // 重新挂载 / 整页刷新后立刻同步已有任务（含 session 恢复的排队/续跑/待补数）
     if (this.sopRunQueue && this.sopRunQueue.getSnapshot) {
       this.sopQueueSnap = this.sopRunQueue.getSnapshot()
@@ -1127,12 +1000,13 @@ export default {
     this._sopPageAlive = false
     this.teardownPreview()
     // 不 cancelAll：任务继续在单例队列里跑；只卸掉本页监听
-    if (this.sopRunQueue && this.sopRunQueue.setOnChange) {
+    if (this._sopQueueUnsub) {
       try {
-        this.sopRunQueue.setOnChange(null)
+        this._sopQueueUnsub()
       } catch (e) {
         /* ignore */
       }
+      this._sopQueueUnsub = null
     }
     if (this._hadBodyDark) document.body.classList.add('isDark')
     else document.body.classList.remove('isDark')
@@ -1254,19 +1128,60 @@ export default {
         .filter(Boolean)
         .join('、')
     },
-    latestRunLabel(item) {
-      const runs =
+    sopLedgerRuns(item) {
+      return (
         (item && item.sopLedger && item.sopLedger.runs) ||
         (item && item.runs) ||
         []
-      return latestRunText(runs)
+      )
     },
-    latestDelLabel(item) {
-      const dels =
+    sopLedgerDeliverables(item) {
+      return (
         (item && item.sopLedger && item.sopLedger.deliverables) ||
         (item && item.deliverables) ||
         []
-      return latestDeliverableText(dels)
+      )
+    },
+    sopRunCount(item) {
+      return this.sopLedgerRuns(item).length
+    },
+    sopDeliverableCount(item) {
+      return this.sopLedgerDeliverables(item).length
+    },
+    sopJobsForItem(item) {
+      if (!item) return []
+      const uid = String(this.resolveSopUid(item) || '').trim()
+      const rowKey = String(item.rowKey || '').trim()
+      return (this.sopTaskJobs || []).filter(j => {
+        if (!j) return false
+        if (uid && String(j.sopUid || '') === uid) return true
+        if (rowKey && j.sopRowKey && j.sopRowKey === rowKey) return true
+        return false
+      })
+    },
+    sopSuccessRateLabel(item) {
+      const jobs = this.sopJobsForItem(item)
+      const done = jobs.filter(j => j.state === 'done').length
+      const failed = jobs.filter(j => j.state === 'error').length
+      const denom = done + failed
+      if (!denom) return '成功占比 —'
+      const pct = Math.round((done / denom) * 100)
+      return `成功占比 ${pct}%`
+    },
+    sopCardMetaChips(item) {
+      return [
+        `运行 ${this.sopRunCount(item)} 次`,
+        `产物 ${this.sopDeliverableCount(item)} 个`,
+        this.sopSuccessRateLabel(item)
+      ].slice(0, 3)
+    },
+    latestRunLabel(item) {
+      const runs = this.sopLedgerRuns(item)
+      if (!runs.length) return '暂无'
+      return String((runs[0] && runs[0].at) || '').trim() || '暂无'
+    },
+    latestDelLabel(item) {
+      return latestDeliverableText(this.sopLedgerDeliverables(item))
     },
     shortLedgerRunLabel(r) {
       const raw = [r && r.at, r && r.result, r && r.note]
@@ -1351,20 +1266,6 @@ export default {
     resetLedgerForms() {
       const at = formatMinuteStamp()
       this.runForm = { at, result: '完成', note: '' }
-      this.delForm = { name: '', uri_or_path: '', kind: 'file' }
-      this.cosHint = ''
-    },
-    fillCosHint() {
-      const hint = suggestCosPath(
-        this.roomKey,
-        (this.activeSop && this.activeSop.id) || 'SOP',
-        this.delForm.name || 'file'
-      )
-      this.cosHint = hint
-      if (!this.delForm.uri_or_path) {
-        this.delForm.uri_or_path = hint
-        this.delForm.kind = 'cos'
-      }
     },
     async saveActiveLedger() {
       if (!this.roomKey || !this.activeSopUid) {
@@ -1413,22 +1314,6 @@ export default {
         this.$message.error((err && err.message) || '保存失败')
       }
     },
-    async submitDeliverable() {
-      if (!this.delForm.name && !this.delForm.uri_or_path) {
-        this.$message.warning('请填写产物名称或路径')
-        return
-      }
-      try {
-        this.activeLedger = addDeliverableToLedger(
-          this.activeLedger,
-          this.delForm
-        )
-        await this.saveActiveLedger()
-        this.resetLedgerForms()
-      } catch (err) {
-        this.$message.error((err && err.message) || '保存失败')
-      }
-    },
     openRunDialog(item) {
       if (!this.roomKey) {
         this.$message.warning('请先选择空间')
@@ -1450,12 +1335,15 @@ export default {
       this.runSubmitZones = []
       this.runSubmitSource = ''
       const localConfig = getLocalConfig() || {}
-      this.runBackend = localConfig.aiBackend === AI_BACKEND_XIAOCE
-        ? AI_BACKEND_XIAOCE
-        : AI_BACKEND_WORKBUDDY
+      this.runBackend = normalizeAiBackend(localConfig.aiBackend)
       this.runOrganizationId = String(localConfig.xiaoceOrganizationId || '')
       this.runAgentId = String(localConfig.xiaoceAgentId || '')
-      this.runModel = getWorkbuddyConfig().model || 'deepseek-v4-flash'
+      if (this.runBackend === AI_BACKEND_OPENCLAW) {
+        this.runModel =
+          getOpenclawConfig().model || 'openclaw/default'
+      } else {
+        this.runModel = getWorkbuddyConfig().model || 'deepseek-v4-flash'
+      }
       this.runDialogVisible = true
       if (this.runBackend === AI_BACKEND_XIAOCE) this.loadRunXiaoceScope()
       else this.loadRunModels()
@@ -1463,8 +1351,16 @@ export default {
     },
     onRunBackendChange(value) {
       this.setLocalConfig({ aiBackend: value })
-      if (value === AI_BACKEND_XIAOCE) this.loadRunXiaoceScope(true)
-      else this.loadRunModels()
+      if (value === AI_BACKEND_XIAOCE) {
+        this.loadRunXiaoceScope(true)
+      } else if (value === AI_BACKEND_OPENCLAW) {
+        this.runModel =
+          getOpenclawConfig().model || 'openclaw/default'
+        this.loadRunModels(true)
+      } else {
+        this.runModel = getWorkbuddyConfig().model || 'deepseek-v4-flash'
+        this.loadRunModels()
+      }
     },
     async onRunOrganizationChange(value) {
       this.runOrganizationId = String(value || '')
@@ -1535,6 +1431,20 @@ export default {
       if (this.runModelsLoading) return
       this.runModelsLoading = true
       try {
+        if (this.runBackend === AI_BACKEND_OPENCLAW) {
+          const models = await fetchAiModels(AI_BACKEND_OPENCLAW)
+          this.runOpenclawModels =
+            models && models.length
+              ? models
+              : [{ id: 'openclaw/default', name: 'openclaw/default' }]
+          const ids = new Set(this.runOpenclawModels.map(m => m.id))
+          if (!ids.has(this.runModel)) {
+            this.runModel =
+              (this.runOpenclawModels[0] && this.runOpenclawModels[0].id) ||
+              'openclaw/default'
+          }
+          return
+        }
         const models = await fetchWorkbuddyModels()
         this.runCustomModels = models.filter(m => m.custom)
         this.runPlatformModels = models.filter(m => !m.custom)
@@ -1554,6 +1464,11 @@ export default {
           this.$message.warning(
             '模型列表加载失败：' + ((err && err.message) || '未知错误')
           )
+        }
+        if (this.runBackend === AI_BACKEND_OPENCLAW) {
+          this.runOpenclawModels = [
+            { id: 'openclaw/default', name: 'openclaw/default' }
+          ]
         }
       } finally {
         this.runModelsLoading = false
@@ -1596,8 +1511,11 @@ export default {
         return n ? `待补数 · ${n} 项` : '待补数 · 点击填写后继续'
       }
       if (job.state === 'waiting_human') {
-        const n = (job.waitingTaskUids && job.waitingTaskUids.length) || 0
-        return n ? `等待人工待办 ${n} 条` : '等待人工确认'
+        const n =
+          (job.waitingWecomTodos && job.waitingWecomTodos.length) ||
+          (job.waitingTaskUids && job.waitingTaskUids.length) ||
+          0
+        return n ? `等待企微待办 ${n} 条` : '等待企微待办确认'
       }
       const s = String(job.status || '').replace(/\s+/g, ' ').trim()
       if (s.length > 48) return s.slice(0, 48) + '…'
@@ -1763,11 +1681,22 @@ export default {
         return
       }
       try {
-        const uids = job.waitingTaskUids || []
-        if (!uids.length) {
+        const todos =
+          (job.waitingWecomTodos && job.waitingWecomTodos.length
+            ? job.waitingWecomTodos
+            : null) ||
+          (job.notifyResults || [])
+            .filter(r => r && r.block && r.dispatchOk && !r.skipped)
+            .map(r => ({
+              todoId: r.todoId || '',
+              title: r.wxTitle || r.text || r.title || '',
+              assignee: r.assignee || '',
+              via: r.dispatchVia || ''
+            }))
+        if (!todos.length) {
           try {
             await this.$confirm(
-              '未写入导图待办节点。若已人工处理完通知，可继续执行 SOP。',
+              '未记录企微待办信息。若你已在企业微信里完成，可继续执行 SOP。',
               '确认继续',
               { type: 'warning' }
             )
@@ -1775,21 +1704,29 @@ export default {
             return
           }
         } else {
-          const check = await areWaitingTodosDone(
-            job.roomKey || this.roomKey,
-            uids
-          )
+          const check = await areWaitingWecomTodosDone(todos, {
+            backend: (job && job.backend) || undefined
+          })
           if (!check.done) {
             const left = (check.pending || []).length
-            const miss = (check.missing || []).length
-            this.$message.warning(
-              left
-                ? `还有 ${left} 条阻塞待办未完成，请先在导图「待办」中完成`
-                : miss
-                  ? '待办节点已找不到，请确认是否被删除'
-                  : '阻塞待办尚未完成'
-            )
-            return
+            const unk = (check.unknown || []).length
+            if (left) {
+              this.$message.warning(
+                `还有 ${left} 条企微待办未完成，请先在企业微信点「已完成」`
+              )
+              return
+            }
+            if (unk) {
+              try {
+                await this.$confirm(
+                  '暂时查不到企微待办状态。若你已在企业微信完成，可强制继续。',
+                  '确认继续',
+                  { type: 'warning' }
+                )
+              } catch (e) {
+                return
+              }
+            }
           }
         }
         const res = this.sopRunQueue.resumeWaiting(jobId)
@@ -1799,7 +1736,7 @@ export default {
         }
         this.$message.success('已继续执行 SOP')
       } catch (err) {
-        this.$message.error((err && err.message) || '检查待办失败')
+        this.$message.error((err && err.message) || '检查企微待办失败')
       }
     },
     cancelAllSopJobs() {
@@ -1976,7 +1913,12 @@ export default {
         }
       }
       if (this.runModel) {
-        this.setLocalConfig({ workbuddyModel: this.runModel })
+        if (this.runBackend === AI_BACKEND_OPENCLAW) {
+          this.setLocalConfig({ openclawModel: this.runModel })
+          saveOpenclawConfig({ model: this.runModel })
+        } else {
+          this.setLocalConfig({ workbuddyModel: this.runModel })
+        }
       }
       const sop = {
         ...this.runTarget,
@@ -1992,6 +1934,7 @@ export default {
         outputIds: this.runOutputIds.slice(),
         extraNote: materialNote || this.runExtraNote,
         model: this.runModel,
+        backend: this.runBackend,
         actor: this.userInfo.name || '台账',
         onSuccess: (result, job) => {
           if (!this._sopPageAlive) return
@@ -2050,11 +1993,14 @@ export default {
             this.openDataFillDialog(job.id)
             return
           }
-          const n = (job.waitingTaskUids && job.waitingTaskUids.length) || 0
+          const n =
+            (job.waitingWecomTodos && job.waitingWecomTodos.length) ||
+            (job.waitingTaskUids && job.waitingTaskUids.length) ||
+            0
           this.$message.warning(
             `「${job.sopTitle}」已派发阻塞通知${
               who ? `，${who}` : ''
-            }，请完成导图待办后点「检查并继续」${n ? `（${n} 条）` : ''}`
+            }，请在企业微信完成待办后点「检查并继续」${n ? `（${n} 条）` : ''}`
           )
         }
       })
@@ -2697,7 +2643,6 @@ export default {
     }
   }
 
-  .hint,
   .statusLine {
     margin: 0 0 10px;
     font-size: 13px;
@@ -3159,13 +3104,6 @@ export default {
         min-width: 180px;
       }
     }
-  }
-
-  .cosHint {
-    margin: 0 0 10px;
-    font-size: 12px;
-    color: #909399;
-    word-break: break-all;
   }
 
   .ledgerList {
