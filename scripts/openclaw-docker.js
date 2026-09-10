@@ -91,18 +91,80 @@ function ensureDataDirs() {
   }
 }
 
+function readJsonFile(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'))
+  } catch (e) {
+    return null
+  }
+}
+
+function volumeName() {
+  // compose 项目名默认是目录名 mind-map
+  return process.env.OPENCLAW_VOLUME || 'mind-map_mind-map-openclaw'
+}
+
+/** 从命名卷拉出当前配置（保留 UI 里配过的 DeepSeek / 插件等） */
+function pullConfigFromVolume() {
+  ensureDataDirs()
+  const tmp = path.join(DATA_DIR, 'openclaw.volume.json')
+  try {
+    fs.unlinkSync(tmp)
+  } catch (e) {
+    /* ignore */
+  }
+  const r = spawnSync(
+    'docker',
+    [
+      'run',
+      '--rm',
+      '-v',
+      `${volumeName()}:/data`,
+      '-v',
+      `${DATA_DIR}:/out`,
+      'alpine',
+      'sh',
+      '-c',
+      'if [ -f /data/openclaw.json ]; then cp /data/openclaw.json /out/openclaw.volume.json; elif [ -f /data/openclaw.json.last-good ]; then cp /data/openclaw.json.last-good /out/openclaw.volume.json; fi'
+    ],
+    { cwd: ROOT, encoding: 'utf8', windowsHide: true }
+  )
+  if (r.status !== 0 || !fs.existsSync(tmp)) return null
+  const cfg = readJsonFile(tmp)
+  try {
+    fs.unlinkSync(tmp)
+  } catch (e) {
+    /* ignore */
+  }
+  return cfg && typeof cfg === 'object' ? cfg : null
+}
+
+function clearStaleLocks() {
+  spawnSync(
+    'docker',
+    [
+      'run',
+      '--rm',
+      '-v',
+      `${volumeName()}:/data`,
+      'alpine',
+      'sh',
+      '-c',
+      'rm -f /data/tmp/openclaw-1000/*.lock /data/tmp/openclaw-1000/*.lock.sqlite /data/tmp/openclaw-1000/*.pid 2>/dev/null; rm -rf /data/migration/* 2>/dev/null; true'
+    ],
+    { cwd: ROOT, encoding: 'utf8', windowsHide: true }
+  )
+}
+
 function ensureOpenclawConfig(token, port = DEFAULT_PORT) {
   ensureDataDirs()
-  let cfg = {}
-  if (fs.existsSync(CONFIG_FILE)) {
-    try {
-      cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'))
-    } catch (e) {
-      cfg = {}
-    }
-  }
+  // 优先用卷里已有完整配置，避免把 UI 配好的模型/插件盖成精简 stub（会触发 clobber + 迁移锁）
+  const fromVolume = pullConfigFromVolume()
+  let cfg = fromVolume || readJsonFile(CONFIG_FILE) || {}
+  if (!cfg || typeof cfg !== 'object') cfg = {}
+
   cfg.gateway = cfg.gateway || {}
-  cfg.gateway.mode = cfg.gateway.mode || 'local'
+  cfg.gateway.mode = 'local'
   cfg.gateway.bind = 'lan'
   // 容器内始终监听 CONTAINER_PORT；host 侧用 OPENCLAW_PORT 映射进来
   cfg.gateway.port = CONTAINER_PORT
@@ -116,6 +178,7 @@ function ensureOpenclawConfig(token, port = DEFAULT_PORT) {
     enabled: true
   }
   const origins = new Set([
+    ...((cfg.gateway.controlUi && cfg.gateway.controlUi.allowedOrigins) || []),
     `http://127.0.0.1:${port}`,
     `http://localhost:${port}`,
     `http://127.0.0.1:${CONTAINER_PORT}`,
@@ -291,64 +354,57 @@ async function ensureOpenclawDockerGateway({
   }
 
   const token = ensureGatewayToken()
-  ensureOpenclawConfig(token, port)
+  // 先停掉再合并配置，避免运行中 cp 触发 clobber / 迁移锁
+  const env = composeEnv(token, port)
+  const liveBefore = await checkDockerGatewayHealth(port)
+  let alreadyRunning = !!(liveBefore && liveBefore.ok && serviceRunning())
+
   upsertEnvKey('OPENCLAW_PORT', String(port))
   upsertEnvKey('OPENCLAW_MODE', 'docker')
   if (!String(process.env.OPENCLAW_IMAGE || '').trim()) {
     upsertEnvKey('OPENCLAW_IMAGE', DEFAULT_IMAGE)
   }
 
-  const env = composeEnv(token, port)
-  const liveBefore = await checkDockerGatewayHealth(port)
-  let alreadyRunning = !!(liveBefore && liveBefore.ok && serviceRunning())
+  if (alreadyRunning) {
+    return {
+      ok: true,
+      mode: 'docker',
+      alreadyRunning: true,
+      port,
+      hasToken: !!token,
+      token,
+      chatCompletions: { enabled: true, configOk: true, changed: false },
+      distro: 'docker'
+    }
+  }
 
-  if (!alreadyRunning) {
-    compose(['rm', '-sf', 'openclaw-gateway'], env)
-    const synced = syncConfigIntoVolume(token, port)
-    if (!synced.ok) {
-      return {
-        ok: false,
-        mode: 'docker',
-        reason: synced.reason || '写入 OpenClaw 配置失败',
-        detail: synced.detail || '',
-        hint: '确认 Docker 正常，且 docker/openclaw/home/openclaw.json 可写'
-      }
+  compose(['rm', '-sf', 'openclaw-gateway'], env)
+  clearStaleLocks()
+  ensureOpenclawConfig(token, port)
+  const synced = syncConfigIntoVolume(token, port)
+  if (!synced.ok) {
+    return {
+      ok: false,
+      mode: 'docker',
+      reason: synced.reason || '写入 OpenClaw 配置失败',
+      detail: synced.detail || '',
+      hint: '确认 Docker 正常，且 docker/openclaw/home/openclaw.json 可写'
     }
-    const up = compose(
-      ['up', '-d', '--pull', 'missing', '--no-deps', 'openclaw-gateway'],
-      env
-    )
-    if (up.status !== 0) {
-      return {
-        ok: false,
-        mode: 'docker',
-        reason: 'docker compose 启动 openclaw-gateway 失败',
-        detail: String(up.stderr || up.stdout || '')
-          .trim()
-          .slice(0, 600),
-        hint:
-          '请确认能拉取镜像（OPENCLAW_IMAGE，默认 openclaw/openclaw:latest），或先执行：docker pull openclaw/openclaw:latest'
-      }
-    }
-    // 启动后再覆盖一次配置并重启，避免首次 entrypoint 用空/残缺配置起不来
-    const id = containerId()
-    if (id) {
-      spawnSync(
-        'docker',
-        ['cp', CONFIG_FILE, `${id}:/home/node/.openclaw/openclaw.json`],
-        { cwd: ROOT, encoding: 'utf8', windowsHide: true }
-      )
-      compose(['restart', 'openclaw-gateway'], env)
-    }
-  } else {
-    // 已在跑也同步 token/mode，避免宿主机改 token 后容器仍用旧配置
-    const id = containerId()
-    if (id) {
-      spawnSync(
-        'docker',
-        ['cp', CONFIG_FILE, `${id}:/home/node/.openclaw/openclaw.json`],
-        { cwd: ROOT, encoding: 'utf8', windowsHide: true }
-      )
+  }
+  const up = compose(
+    ['up', '-d', '--pull', 'missing', '--no-deps', 'openclaw-gateway'],
+    env
+  )
+  if (up.status !== 0) {
+    return {
+      ok: false,
+      mode: 'docker',
+      reason: 'docker compose 启动 openclaw-gateway 失败',
+      detail: String(up.stderr || up.stdout || '')
+        .trim()
+        .slice(0, 600),
+      hint:
+        '请确认能拉取镜像（OPENCLAW_IMAGE，默认 openclaw/openclaw:latest），或先执行：docker pull openclaw/openclaw:latest'
     }
   }
 
@@ -377,7 +433,7 @@ async function ensureOpenclawDockerGateway({
   return {
     ok: true,
     mode: 'docker',
-    alreadyRunning,
+    alreadyRunning: false,
     port,
     hasToken: !!token,
     token,
