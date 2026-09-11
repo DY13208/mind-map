@@ -4,7 +4,7 @@ const MESSAGES = {
   FORBIDDEN: '没有权限执行该操作',
   ROOM_NOT_FOUND: '找不到该脑图',
   FOLDER_NOT_FOUND: '找不到该文件夹',
-  FOLDER_NOT_EMPTY: '该文件夹中还有脑图，请先移动脑图后再删除。',
+  FOLDER_NOT_EMPTY: '该文件夹中还有脑图或子文件夹，请先移动内容后再删除。',
   INVALID_MOVE: '无法移动到该位置',
   INVALID_FOLDER_NAME: '请输入有效的文件夹名称',
   FOLDER_NAME_CONFLICT: '已存在同名文件夹',

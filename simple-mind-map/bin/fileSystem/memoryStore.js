@@ -303,6 +303,12 @@ function createMemoryFileStore(seed = {}) {
         row => row.folder_id === id && isActiveRoom(row)
       ).length
     },
+    async countChildFolders(id) {
+      bump()
+      return [...folders.values()].filter(
+        row => !row.deleted_at && row.parent_id === id
+      ).length
+    },
     async deleteFolder(id) {
       bump()
       folders.delete(id)

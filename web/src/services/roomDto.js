@@ -151,7 +151,9 @@ export function normalizeFolderDto(apiFolder = {}) {
     parentId: normalizeFolderId(apiFolder.parentId),
     createdAt: apiFolder.createdAt || '',
     updatedAt: apiFolder.updatedAt || '',
-    roomCount: Number(apiFolder.roomCount || 0)
+    roomCount: Number(apiFolder.roomCount || 0),
+    role: apiFolder.role || null,
+    canManage: apiFolder.canManage !== false
   }
 }
 

@@ -16,11 +16,11 @@ export default {
       throw error
     }
   },
-  createFolder: async name => {
+  createFolder: async (name, parentId = null) => {
     try {
       const data = await productRequest('/api/folders', {
         method: 'POST',
-        body: JSON.stringify({ name })
+        body: JSON.stringify({ name, parentId })
       })
       return normalizeFolderDto(data.folder || data)
     } catch (error) {

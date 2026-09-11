@@ -538,17 +538,21 @@ function createFileSystem(options = {}) {
   async function createFolder(input = {}) {
     const name = normalizeFolderName(input.name)
     const parentId = parseFolderId(input.parentId || input.parent_id)
+    const userId = roomAcl.normalizeUserId(input.userId || '')
     if (parentId) {
-      throw fsError('INVALID_MOVE', 'first version only supports root folders', 400)
+      const parent = await assertFolderExists(parentId)
+      if (userId && parent.created_by && parent.created_by !== userId && !input.bypass) {
+        throw fsError('FORBIDDEN', '没有权限在该文件夹中创建子文件夹', 403)
+      }
     }
-    if (await store.folderNameTaken(name, null)) {
+    if (await store.folderNameTaken(name, parentId)) {
       throw fsError('FOLDER_NAME_CONFLICT', 'a folder with this name already exists', 409)
     }
     const row = await store.insertFolder({
       id: newFolderId(),
-      parent_id: null,
+      parent_id: parentId,
       name,
-      created_by: roomAcl.normalizeUserId(input.userId || '')
+      created_by: userId
     })
     return publicFolder({ ...row, room_count: 0 })
   }
@@ -611,8 +615,11 @@ function createFileSystem(options = {}) {
       throw fsError('FORBIDDEN', '没有权限执行该操作', 403)
     }
     const count = await store.countRoomsInFolder(id)
-    if (count > 0) {
-      throw fsError('FOLDER_NOT_EMPTY', 'folder still contains rooms', 409)
+    const childCount = store.countChildFolders
+      ? await store.countChildFolders(id)
+      : 0
+    if (count > 0 || childCount > 0) {
+      throw fsError('FOLDER_NOT_EMPTY', 'folder still contains items', 409)
     }
     await store.deleteFolder(id)
     return { ok: true, id }
