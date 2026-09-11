@@ -251,11 +251,7 @@ export default {
     },
 
     toggleDark() {
-      const nextDark = !this.isDark
-      this.$bus.$emit('before_toggle_appearance', nextDark)
-      this.setLocalConfig({
-        isDark: nextDark
-      })
+      this.$bus.$emit('toggle_appearance_mode', !this.isDark)
     },
 
     handleCommand(command) {

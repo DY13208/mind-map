@@ -106,7 +106,6 @@ export default {
 
     handleViewThemeChange() {
       this.theme = this.mindMap.getTheme()
-      this.syncDarkModeFromTheme()
     },
 
     initGroup() {
