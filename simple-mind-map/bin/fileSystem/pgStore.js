@@ -1,6 +1,7 @@
 const { randomUUID } = require('crypto')
 const { replaceRoomNodes, canonicalizeNodes, validateNodeGraph } = require('../roomNodes')
 const { DEFAULT_METADATA, normalizeTitle } = require('./model')
+const { sqlEffectiveRole, sqlPrimarySource } = require('../roomAcl')
 
 function createPgFileStore(pool) {
   let queryCount = 0
@@ -116,36 +117,58 @@ function createPgFileStore(pool) {
     async insertMember(row, db) {
       const conn = db || pool
       if (!db) queryCount += 1
+      const source = row.source || 'direct_share'
       await conn.query(
         `insert into room_members
-           (room_key, user_id, role, direct_role, team_role, source, source_team_id)
+           (room_key, user_id, role, direct_role, team_role, folder_role, source, source_team_id, source_folder_id)
          values (
            $1, $2, $3,
-           case when $4 = 'team' then null else $3 end,
+           case when $4 in ('team', 'folder') then null else $3 end,
            case when $4 = 'team' then $3 else null end,
-           $4, $5
+           case when $4 = 'folder' then $3 else null end,
+           $4, $5, $6
          )
          on conflict (room_key, user_id) do update set
-           direct_role = case when excluded.team_role is null then excluded.direct_role else room_members.direct_role end,
-           team_role = case when excluded.team_role is null then room_members.team_role else excluded.team_role end,
-           role = case
-             when coalesce(case when excluded.team_role is null then excluded.direct_role else room_members.direct_role end, '') = 'owner'
-               or coalesce(case when excluded.team_role is null then room_members.team_role else excluded.team_role end, '') = 'owner' then 'owner'
-             when coalesce(case when excluded.team_role is null then excluded.direct_role else room_members.direct_role end, '') = 'editor'
-               or coalesce(case when excluded.team_role is null then room_members.team_role else excluded.team_role end, '') = 'editor' then 'editor'
-             else 'viewer'
+           direct_role = case
+             when excluded.source in ('team', 'folder') then room_members.direct_role
+             else excluded.direct_role
            end,
-           source = case
-             when coalesce(case when excluded.team_role is null then excluded.direct_role else room_members.direct_role end, '') <> '' then 'direct_share'
-             else 'team'
+           team_role = case
+             when excluded.source = 'team' then excluded.team_role
+             else room_members.team_role
            end,
+           folder_role = case
+             when excluded.source = 'folder' then excluded.folder_role
+             else room_members.folder_role
+           end,
+           source_folder_id = case
+             when excluded.source = 'folder' then excluded.source_folder_id
+             else room_members.source_folder_id
+           end,
+           role = ${sqlEffectiveRole(
+             `case when excluded.source in ('team', 'folder') then room_members.direct_role else excluded.direct_role end`,
+             `case when excluded.source = 'team' then excluded.team_role else room_members.team_role end`,
+             `case when excluded.source = 'folder' then excluded.folder_role else room_members.folder_role end`
+           )},
+           source = ${sqlPrimarySource(
+             `case when excluded.source in ('team', 'folder') then room_members.direct_role else excluded.direct_role end`,
+             `case when excluded.source = 'team' then excluded.team_role else room_members.team_role end`,
+             `case when excluded.source = 'folder' then excluded.folder_role else room_members.folder_role end`
+           )},
            source_team_id = case
-             when excluded.team_role is not null then excluded.source_team_id
+             when excluded.source = 'team' then excluded.source_team_id
              when room_members.team_role is not null then room_members.source_team_id
              else null
            end,
            updated_at = now()`,
-        [row.room_key, row.user_id, row.role, row.source || 'direct_share', row.source_team_id || null]
+        [
+          row.room_key,
+          row.user_id,
+          row.role,
+          source,
+          row.source_team_id || null,
+          row.source_folder_id || null
+        ]
       )
       return row
     },
@@ -169,14 +192,15 @@ function createPgFileStore(pool) {
       )
       return res.rows[0] || null
     },
-    async updateFolder(roomKey, folderId) {
-      queryCount += 1
-      const before = await pool.query(
+    async updateFolder(roomKey, folderId, db) {
+      const conn = db || pool
+      if (!db) queryCount += 1
+      const before = await conn.query(
         `select version from rooms where room_key = $1`,
         [roomKey]
       )
-      const nodes = await this.getNodes(roomKey)
-      const res = await pool.query(
+      const nodes = await this.getNodes(roomKey, db)
+      const res = await conn.query(
         `update rooms set folder_id = $2, updated_at = now()
          where room_key = $1
          returning room_key, title, folder_id, owner_id, version,

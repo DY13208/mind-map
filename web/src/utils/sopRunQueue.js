@@ -6,6 +6,31 @@ import { runSopWithWorkbuddy, sanitizeNodeProgress } from './sopRun'
 import { aiBackendLabel, getAiBackend } from './agentChat'
 import { areWaitingWecomTodosDone } from './sopNotify'
 import { getLocalConfig } from '@/api'
+import { authorizeSopRun } from './fileApi'
+
+async function assertSopRunAuthorized(roomKey, sopUid) {
+  try {
+    const res = await authorizeSopRun(roomKey, sopUid)
+    if (res && res.ok === false) {
+      const err = new Error((res && res.error) || '没有权限运行 SOP')
+      err.status = 403
+      err.statusCode = 403
+      err.code = 'FORBIDDEN'
+      throw err
+    }
+    return res
+  } catch (err) {
+    const status = err && (err.status || err.statusCode)
+    if (status === 403) {
+      const denied = new Error('没有权限运行 SOP（需要编辑权限）')
+      denied.status = 403
+      denied.statusCode = 403
+      denied.code = 'FORBIDDEN'
+      throw denied
+    }
+    throw err
+  }
+}
 
 function resolveWaitingWecomTodos(job) {
   if (Array.isArray(job.waitingWecomTodos) && job.waitingWecomTodos.length) {
@@ -413,7 +438,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
   // 整页刷新后从 sessionStorage 恢复排队/等待，并把中断的 running 重新入队续跑
   const restored = readPersistedQueue()
   if (restored) {
-    ;(restored.waiting || []).forEach(raw => {
+    (restored.waiting || []).forEach(raw => {
       const job = hydrateJob(raw)
       if (!job) return
       if (job.state !== 'waiting_data' && job.state !== 'waiting_human') {
@@ -438,7 +463,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         }
       }, 1200)
     }
-    ;(restored.pending || []).forEach(raw => {
+    (restored.pending || []).forEach(raw => {
       const job = hydrateJob(raw)
       if (!job) return
       job.state = 'queued'
@@ -636,6 +661,9 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         emit()
       }, 2000)
 
+      // 真正执行外部调用前再校验一次（排队期间可能被降权）
+      await assertSopRunAuthorized(job.roomKey, job.sopUid)
+
       const result = await runSopWithWorkbuddy({
         roomKey: job.roomKey,
         sop: job.sop,
@@ -826,7 +854,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
   }
 
   const api = {
-    enqueue({
+    async enqueue({
       roomKey,
       sop,
       outputIds,
@@ -845,9 +873,18 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       if (!sop || !sop.title) {
         return { ok: false, message: '缺少 SOP' }
       }
-      const sopUid = sop.uid || (sop.uids && sop.uids[0]) || ''
+      const sopUid = sop.uid || ''
       if (!sopUid) {
         return { ok: false, message: '找不到该 SOP 对应的节点' }
+      }
+      try {
+        await assertSopRunAuthorized(roomKey, sopUid)
+      } catch (err) {
+        return {
+          ok: false,
+          message: (err && err.message) || '没有权限运行 SOP',
+          code: (err && err.code) || 'FORBIDDEN'
+        }
       }
       if (hasActive(roomKey, sopUid)) {
         return { ok: false, message: '该 SOP 已在运行、排队或等待人工中' }

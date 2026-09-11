@@ -211,7 +211,8 @@ function mockRes() {
   const nodesBefore = JSON.stringify(store.nodes.get(created.room.roomKey))
   const opsBefore = store.operations.length
   const moved = await fs.moveRoom(created.room.roomKey, folder.id, {
-    access: { canEdit: true, role: 'owner' }
+    access: { canEdit: true, role: 'owner' },
+    userId: OWNER
   })
   assert.strictEqual(moved.roomKey, created.room.roomKey)
   assert.strictEqual(moved.file.folderId, folder.id)
@@ -220,12 +221,14 @@ function mockRes() {
   assert.strictEqual(store.operations.length, opsBefore)
 
   const back = await fs.moveRoom(created.room.roomKey, 'root', {
-    access: { canEdit: true, role: 'owner' }
+    access: { canEdit: true, role: 'owner' },
+    userId: OWNER
   })
   assert.strictEqual(back.file.folderId, null)
 
   await fs.moveRoom(created.room.roomKey, folder.id, {
-    access: { canEdit: true, role: 'owner' }
+    access: { canEdit: true, role: 'owner' },
+    userId: OWNER
   })
   let notEmpty = ''
   try {
@@ -234,6 +237,56 @@ function mockRes() {
     notEmpty = err.code
   }
   assert.strictEqual(notEmpty, 'FOLDER_NOT_EMPTY')
+
+  // Folder ACL: move requires target-folder edit; folder_role sync on move-in/out
+  const aclFolder = await fs.createFolder({ name: 'acl-folder', userId: OWNER })
+  await store.setFolderMember(aclFolder.id, EDITOR, 'editor')
+  await store.setFolderMember(aclFolder.id, VIEWER, 'viewer')
+  const solo = await fs.createRoom({ title: 'solo-map', userId: OWNER })
+  await store.insertMember({
+    room_key: solo.room.roomKey,
+    user_id: EDITOR,
+    role: 'editor'
+  })
+  await assert.rejects(
+    fs.moveRoom(solo.room.roomKey, aclFolder.id, {
+      access: { canEdit: true, role: 'editor' },
+      userId: OTHER
+    }),
+    { code: 'FORBIDDEN', statusCode: 403 }
+  )
+  await fs.moveRoom(solo.room.roomKey, aclFolder.id, {
+    access: { canEdit: true, role: 'owner' },
+    userId: OWNER
+  })
+  const editorMem = store.members.find(
+    m => m.room_key === solo.room.roomKey && m.user_id === EDITOR
+  )
+  assert.strictEqual(editorMem.folder_role, 'editor')
+  assert.strictEqual(editorMem.direct_role, 'editor')
+  const viewerMem = store.members.find(
+    m => m.room_key === solo.room.roomKey && m.user_id === VIEWER
+  )
+  assert.strictEqual(viewerMem.folder_role, 'viewer')
+  assert.strictEqual(viewerMem.direct_role, null)
+  await fs.moveRoom(solo.room.roomKey, 'root', {
+    access: { canEdit: true, role: 'owner' },
+    userId: OWNER
+  })
+  assert.strictEqual(
+    store.members.find(m => m.room_key === solo.room.roomKey && m.user_id === VIEWER),
+    undefined
+  )
+  assert.strictEqual(
+    store.members.find(m => m.room_key === solo.room.roomKey && m.user_id === EDITOR)
+      .folder_role,
+    null
+  )
+  assert.strictEqual(
+    store.members.find(m => m.room_key === solo.room.roomKey && m.user_id === EDITOR)
+      .direct_role,
+    'editor'
+  )
 
   const oldRoom = await fs.createRoom({ title: 'legacy', userId: OWNER })
   assert.strictEqual(oldRoom.room.folderId, null)

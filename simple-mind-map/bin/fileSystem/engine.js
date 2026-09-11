@@ -149,7 +149,13 @@ function createFileSystem(options = {}) {
         for (const member of inherited) {
           if (!member.user_id || member.user_id === userId) continue
           await store.insertMember(
-            { room_key: roomKey, user_id: member.user_id, role: member.role },
+            {
+              room_key: roomKey,
+              user_id: member.user_id,
+              role: member.role,
+              source: 'folder',
+              source_folder_id: folderId
+            },
             db
           )
         }
@@ -508,16 +514,51 @@ function createFileSystem(options = {}) {
     }, access || {})
   }
 
+  async function assertFolderEditable(folderId, userId, bypass) {
+    if (!folderId || bypass || !userId) return
+    const folder = await assertFolderExists(folderId)
+    if (folder.created_by && folder.created_by === userId) return
+    const members = await store.listFolderMembers(folderId)
+    const mine = members.find(member => member.user_id === userId)
+    if (mine && mine.role === 'editor') return
+    throw fsError('FORBIDDEN', '没有目标文件夹的编辑权限', 403)
+  }
+
   async function moveRoom(roomKey, targetFolderId, input = {}) {
     const access = input.access
-    if (access && !access.canEdit && !access.bypass) {
+    const userId = roomAcl.normalizeUserId(input.userId || '')
+    const bypass = !!(input.bypass || (access && access.bypass))
+    if (access && !access.canEdit && !bypass) {
       throw fsError('FORBIDDEN', '没有权限执行该操作', 403)
     }
     const folderId = parseFolderId(targetFolderId)
-    if (folderId) await assertFolderExists(folderId)
+    if (folderId) {
+      await assertFolderExists(folderId)
+      await assertFolderEditable(folderId, userId, bypass)
+    }
     const before = await store.getRoom(roomKey)
     if (!before) throw fsError('ROOM_NOT_FOUND', 'room not found', 404)
-    const moved = await store.updateFolder(roomKey, folderId)
+    const fromFolderId = before.folder_id || null
+    const toFolderId = folderId || null
+
+    const runMove = async db => {
+      const conn = db || store
+      if (fromFolderId && String(fromFolderId) !== String(toFolderId || '')) {
+        await roomAcl.clearRoomFolderRoles(conn, roomKey)
+      }
+      const moved = await store.updateFolder(roomKey, folderId, conn !== store ? conn : undefined)
+      if (!moved || !moved.row) throw fsError('ROOM_NOT_FOUND', 'room not found', 404)
+      if (toFolderId && String(fromFolderId || '') !== String(toFolderId)) {
+        const members = await store.listFolderMembers(toFolderId)
+        await roomAcl.applyFolderRoles(conn, roomKey, toFolderId, members)
+      }
+      return moved
+    }
+
+    const moved =
+      typeof store.withTx === 'function'
+        ? await store.withTx(runMove)
+        : await runMove()
     if (!moved || !moved.row) throw fsError('ROOM_NOT_FOUND', 'room not found', 404)
     return {
       file: publicFile(

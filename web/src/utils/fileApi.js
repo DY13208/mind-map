@@ -238,8 +238,47 @@ export function listFiles(extra = {}) {
   if (extra.q) params.set('q', extra.q)
   if (extra.limit != null) params.set('limit', String(extra.limit))
   if (extra.offset != null) params.set('offset', String(extra.offset))
+  if (extra.cursor) params.set('cursor', String(extra.cursor))
   const query = params.toString()
   return request(`/api/files${query ? `?${query}` : ''}`)
+}
+
+/** 按游标拉完当前用户可访问的全部脑图（引擎单页上限 100） */
+export async function listAllAccessibleFiles(extra = {}) {
+  const pageSize = Math.min(100, Math.max(1, Number(extra.limit) || 100))
+  const all = []
+  let cursor = ''
+  let guard = 0
+  while (guard < 200) {
+    guard += 1
+    const data = await listFiles({
+      ...extra,
+      limit: pageSize,
+      ...(cursor ? { cursor } : { offset: cursor ? undefined : 0 })
+    })
+    const list = (data && data.list) || []
+    all.push(...list)
+    cursor = (data && data.nextCursor) || ''
+    if (!cursor || !list.length) {
+      return {
+        ok: true,
+        list: all,
+        total: (data && data.total) != null ? data.total : all.length,
+        limit: pageSize
+      }
+    }
+  }
+  return { ok: true, list: all, total: all.length, limit: pageSize }
+}
+
+export function authorizeSopRun(roomKey, uid = '') {
+  return request(
+    `/api/files/${encodeURIComponent(roomKey)}/sop-runs/authorize`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ uid: uid || undefined })
+    }
+  )
 }
 
 export function createFile(body = {}) {

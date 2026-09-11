@@ -116,11 +116,15 @@ async function initSchema(db) {
   await db.query(`alter table room_members add column if not exists source_team_id text`)
   await db.query(`alter table room_members add column if not exists direct_role text`)
   await db.query(`alter table room_members add column if not exists team_role text`)
+  await db.query(`alter table room_members add column if not exists folder_role text`)
+  await db.query(`alter table room_members add column if not exists source_folder_id text`)
   await db.query(`update room_members set source = 'direct_share' where source is null`)
   await db.query(`
     update room_members
     set direct_role = role
-    where direct_role is null and source = 'direct_share'
+    where direct_role is null
+      and folder_role is null
+      and source = 'direct_share'
   `)
   await db.query(`
     update room_members
@@ -128,6 +132,11 @@ async function initSchema(db) {
     where team_role is null and source = 'team'
   `)
   await db.query(`create index if not exists room_members_team_source_idx on room_members(source, source_team_id) where source = 'team'`)
+  await db.query(`
+    create index if not exists room_members_folder_source_idx
+    on room_members(source_folder_id)
+    where source_folder_id is not null
+  `)
 }
 
 async function ensureConstraint(db, name, statement) {
@@ -231,19 +240,22 @@ async function listMembers(db, who, id) {
 
 async function syncRoomMembers(db, id, userId) {
   await db.query(`
-    insert into room_members (room_key, user_id, role, direct_role, team_role, source, source_team_id)
-    select r.room_key, $2, 'editor', null, 'editor', 'team', $1 from rooms r
+    insert into room_members (room_key, user_id, role, direct_role, team_role, folder_role, source, source_team_id)
+    select r.room_key, $2, 'editor', null, 'editor', null, 'team', $1 from rooms r
     left join room_tombstones rt on rt.room_key = r.room_key
     where r.team_id = $1 and r.deleted_at is null and rt.room_key is null
     on conflict (room_key, user_id) do update set
       team_role = excluded.team_role,
       role = case
-        when room_members.direct_role = 'owner' or excluded.team_role = 'owner' then 'owner'
-        when room_members.direct_role = 'editor' or excluded.team_role = 'editor' then 'editor'
-        when room_members.direct_role = 'viewer' or excluded.team_role = 'viewer' then 'viewer'
-        else coalesce(room_members.direct_role, excluded.team_role)
+        when room_members.direct_role = 'owner' or excluded.team_role = 'owner' or room_members.folder_role = 'owner' then 'owner'
+        when room_members.direct_role = 'editor' or excluded.team_role = 'editor' or room_members.folder_role = 'editor' then 'editor'
+        when room_members.direct_role = 'viewer' or excluded.team_role = 'viewer' or room_members.folder_role = 'viewer' then 'viewer'
+        else coalesce(room_members.direct_role, excluded.team_role, room_members.folder_role)
       end,
-      source = case when room_members.direct_role is not null then 'direct_share' else 'team' end,
+      source = case
+        when room_members.direct_role is not null then 'direct_share'
+        else 'team'
+      end,
       source_team_id = excluded.source_team_id,
       updated_at = now()`, [id, userId])
 }
@@ -301,14 +313,25 @@ async function removeMember(db, who, id, target) {
     await tx.query(`
       update room_members
       set team_role = null,
-          role = direct_role,
-          source = 'direct_share',
+          role = case
+            when direct_role = 'owner' or folder_role = 'owner' then 'owner'
+            when direct_role = 'editor' or folder_role = 'editor' then 'editor'
+            when direct_role = 'viewer' or folder_role = 'viewer' then 'viewer'
+            else coalesce(direct_role, folder_role)
+          end,
+          source = case
+            when direct_role is not null then 'direct_share'
+            when folder_role is not null then 'folder'
+            else 'direct_share'
+          end,
           source_team_id = null,
           updated_at = now()
-      where source_team_id = $1 and user_id = $2 and direct_role is not null`, [id, targetId])
+      where source_team_id = $1 and user_id = $2
+        and (direct_role is not null or folder_role is not null)`, [id, targetId])
     await tx.query(`
       delete from room_members
-      where source_team_id = $1 and user_id = $2 and direct_role is null`, [id, targetId])
+      where source_team_id = $1 and user_id = $2
+        and direct_role is null and folder_role is null`, [id, targetId])
     return { ok: true, userId: target }
   })
 }
@@ -380,14 +403,14 @@ async function assignRoom(db, who, id, roomKey) {
     for (const teamMember of members.rows) {
       await tx.query(
         `
-      insert into room_members (room_key, user_id, role, direct_role, team_role, source, source_team_id) values ($1, $2, 'editor', null, 'editor', 'team', $3)
+      insert into room_members (room_key, user_id, role, direct_role, team_role, folder_role, source, source_team_id) values ($1, $2, 'editor', null, 'editor', null, 'team', $3)
       on conflict (room_key, user_id) do update set
         team_role = excluded.team_role,
         role = case
-          when room_members.direct_role = 'owner' or excluded.team_role = 'owner' then 'owner'
-          when room_members.direct_role = 'editor' or excluded.team_role = 'editor' then 'editor'
-          when room_members.direct_role = 'viewer' or excluded.team_role = 'viewer' then 'viewer'
-          else coalesce(room_members.direct_role, excluded.team_role)
+          when room_members.direct_role = 'owner' or excluded.team_role = 'owner' or room_members.folder_role = 'owner' then 'owner'
+          when room_members.direct_role = 'editor' or excluded.team_role = 'editor' or room_members.folder_role = 'editor' then 'editor'
+          when room_members.direct_role = 'viewer' or excluded.team_role = 'viewer' or room_members.folder_role = 'viewer' then 'viewer'
+          else coalesce(room_members.direct_role, excluded.team_role, room_members.folder_role)
         end,
         source = case when room_members.direct_role is not null then 'direct_share' else 'team' end,
         source_team_id = excluded.source_team_id,

@@ -7,7 +7,7 @@ function nowIso() {
 }
 
 function effectiveRole(row) {
-  const roles = [row.direct_role, row.team_role, row.role]
+  const roles = [row.direct_role, row.team_role, row.folder_role, row.role]
   if (roles.includes('owner')) return 'owner'
   if (roles.includes('editor')) return 'editor'
   if (roles.includes('viewer')) return 'viewer'
@@ -169,10 +169,12 @@ function createMemoryFileStore(seed = {}) {
           room_key: row.room_key,
           user_id: row.user_id,
           role: row.role,
-          direct_role: source === 'team' ? null : row.role,
+          direct_role: source === 'team' || source === 'folder' ? null : row.role,
           team_role: source === 'team' ? row.role : null,
+          folder_role: source === 'folder' ? row.role : null,
           source,
           source_team_id: row.source_team_id || null,
+          source_folder_id: row.source_folder_id || null,
           created_at: nowIso(),
           updated_at: nowIso()
         })
@@ -180,12 +182,20 @@ function createMemoryFileStore(seed = {}) {
         if (source === 'team') {
           current.team_role = row.role
           current.source_team_id = row.source_team_id || null
+        } else if (source === 'folder') {
+          current.folder_role = row.role
+          current.source_folder_id = row.source_folder_id || null
         } else {
           current.direct_role = row.role
         }
         current.role = effectiveRole(current)
-        current.source = current.direct_role ? 'direct_share' : 'team'
+        current.source = current.direct_role
+          ? 'direct_share'
+          : current.team_role
+            ? 'team'
+            : 'folder'
         if (!current.team_role) current.source_team_id = null
+        if (!current.folder_role) current.source_folder_id = null
         current.updated_at = nowIso()
       }
       return row

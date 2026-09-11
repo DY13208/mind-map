@@ -77,6 +77,10 @@ function testNormalizeAndInfer() {
     roomAcl.inferRoomAcl('/api/files/room-a/move', 'POST'),
     { roomKey: 'room-a', action: 'edit' }
   )
+  assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/room-a/sop-runs/authorize', 'POST'),
+    { roomKey: 'room-a', action: 'edit' }
+  )
   assert.strictEqual(roomAcl.roleAllows('viewer', 'edit'), false)
   assert.strictEqual(roomAcl.roleAllows('editor', 'edit'), true)
   assert.strictEqual(
@@ -166,18 +170,19 @@ function memoryDb() {
           if (!keepExisting) current.role = role
           if (isTeam) current.team_role = role
           else current.direct_role = role
-          current.role = current.direct_role === 'owner' || current.team_role === 'owner'
-            ? 'owner'
-            : current.direct_role === 'editor' || current.team_role === 'editor'
-              ? 'editor'
-              : current.direct_role || current.team_role || current.role
+          current.role = roomAcl.effectiveRole(
+            current.direct_role,
+            current.team_role,
+            current.folder_role
+          )
         } else {
           members.push({
             room_key: roomKey,
             user_id: userId,
             role,
             direct_role: isTeam ? null : role,
-            team_role: isTeam ? role : null
+            team_role: isTeam ? role : null,
+            folder_role: null
           })
         }
         const row = members.find(
@@ -200,7 +205,16 @@ function memoryDb() {
         )
         if (current) {
           current.direct_role = null
-          current.role = current.team_role
+          current.role = roomAcl.effectiveRole(
+            null,
+            current.team_role,
+            current.folder_role
+          )
+          current.source = current.team_role
+            ? 'team'
+            : current.folder_role
+              ? 'folder'
+              : 'direct_share'
         }
         return { rows: [] }
       }
@@ -337,10 +351,50 @@ async function testSearchUsersPassesCorpId() {
   assert.deepStrictEqual(captured.params, ['%龙%', 8, 'corp-demo'])
 }
 
+async function testFolderRoleSource() {
+  const db = memoryDb()
+  db.rooms.add('room-folder')
+  await roomAcl.ensureOwner(db, 'room-folder', 'owner')
+  await roomAcl.setMember(db, 'room-folder', 'bob', 'viewer')
+  await roomAcl.setFolderRole(db, 'room-folder', 'bob', 'editor', 'folder-1')
+  const bob = db.members.find(item => item.user_id === 'bob')
+  assert.strictEqual(bob.direct_role, 'viewer')
+  assert.strictEqual(bob.folder_role, 'editor')
+  assert.strictEqual(bob.role, 'editor')
+  assert.strictEqual((await roomAcl.getAccess(db, 'room-folder', 'bob')).role, 'editor')
+
+  await roomAcl.clearFolderRole(db, 'room-folder', 'bob')
+  const afterClear = db.members.find(item => item.user_id === 'bob')
+  assert.strictEqual(afterClear.folder_role, null)
+  assert.strictEqual(afterClear.direct_role, 'viewer')
+  assert.strictEqual(afterClear.role, 'viewer')
+
+  await roomAcl.setFolderRole(db, 'room-folder', 'carol', 'viewer', 'folder-1')
+  await roomAcl.clearFolderRole(db, 'room-folder', 'carol')
+  assert.strictEqual(
+    db.members.find(item => item.user_id === 'carol'),
+    undefined
+  )
+
+  await roomAcl.setFolderRole(db, 'room-folder', 'dave', 'editor', 'folder-1')
+  const daveHasFolder = db.members.find(item => item.user_id === 'dave')
+  assert.strictEqual(daveHasFolder.folder_role, 'editor')
+  await roomAcl.clearRoomFolderRoles(db, 'room-folder')
+  assert.strictEqual(
+    db.members.find(item => item.user_id === 'dave'),
+    undefined
+  )
+  assert.strictEqual(
+    (await roomAcl.getAccess(db, 'room-folder', 'bob')).role,
+    'viewer'
+  )
+}
+
 testNormalizeAndInfer()
 testRoleMatrix()
 testAccessAndMembers()
   .then(testMultiSourceGrants)
+  .then(testFolderRoleSource)
   .then(testSearchUsersPassesCorpId)
   .then(() => {
     console.log('roomAcl tests passed')
