@@ -96,7 +96,10 @@ function normalizeMember(row = {}) {
 
 function normalizeContact(row = {}) {
   const member = normalizeMember(row)
-  return { ...member, departmentId: row.departmentId || row.department_id || '' }
+  const departmentIds = (row.departments || row.departmentIds || row.department_ids || [])
+    .map(item => String(item && typeof item === 'object' ? item.id || item.departmentId || '' : item))
+    .filter(Boolean)
+  return { ...member, departmentIds, departmentId: String(row.departmentId || row.department_id || departmentIds[0] || '') }
 }
 
 function queryString(filters = {}) {
