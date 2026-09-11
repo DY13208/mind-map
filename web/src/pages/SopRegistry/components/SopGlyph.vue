@@ -177,6 +177,45 @@
         stroke-linejoin="round"
       />
     </g>
+    <g v-else-if="kind === 'chevron-left'">
+      <path
+        d="M14.5 6.5L9 12l5.5 5.5"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </g>
+    <g v-else-if="kind === 'panel-collapse'">
+      <path
+        d="M13.5 6.5L8 12l5.5 5.5"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M18 5.5V18.5"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+      />
+    </g>
+    <g v-else-if="kind === 'panel-expand'">
+      <path
+        d="M10.5 6.5L16 12l-5.5 5.5"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M6 5.5V18.5"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+      />
+    </g>
     <!-- default node -->
     <g v-else>
       <circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="1.6" />
