@@ -1,5 +1,5 @@
 <template>
-  <el-dialog :visible.sync="shown" custom-class="folderPermissionDialog" width="960px" :close-on-click-modal="false">
+  <el-dialog :visible.sync="shown" custom-class="folderPermissionDialog" width="960px" :close-on-click-modal="false" :show-close="false">
     <div v-loading="loading || busy">
       <header class="permissionHeader">
         <div class="folderIcon"><i class="el-icon-folder" /></div>
@@ -23,7 +23,7 @@
       <p v-else-if="query && !searching" class="emptyHits">未找到匹配同事</p>
       <div class="summaryBar">已有权限成员 <strong>{{ members.length }}</strong></div>
       <div class="memberPane">
-        <TeamMemberList variant="room" :members="pagedMembers" @role="updateRole" @remove="remove" />
+        <div v-for="member in pagedMembers" :key="member.id" class="permissionMemberRow"><div class="memberIdentity"><strong>{{ member.name || member.id }}</strong><small>{{ member.department || '成员' }}</small></div><span class="joinedAt">{{ member.joinedAt || '—' }}</span><el-select size="small" :value="member.role" :disabled="member.role === 'Owner'" @change="updateRole(member, $event)"><el-option label="可查看" value="Viewer" /><el-option label="可编辑" value="Editor" /><el-option label="可管理" value="Manager" /></el-select><el-button v-if="member.role !== 'Owner'" type="text" class="remove" @click="remove(member)">移除</el-button></div>
         <p v-if="!members.length && !loading" class="emptyMembers">暂未添加成员</p>
       </div>
       <el-pagination
@@ -80,9 +80,6 @@ export default {
         this.load()
       }
     },
-    async loadDepartments() { try { this.departmentOptions = await teamService.listDepartments() } catch (e) { this.departmentOptions = [] } },
-    filterDepartments(value, cb) { const q = String(value || '').toLowerCase(); cb(this.departmentOptions.filter(d => d.name.toLowerCase().includes(q))) },
-    selectDepartment(item) { this.selectedDepartment = item; this.departmentId = item.id; this.departmentName = item.name },
     members() {
       const maxPage = Math.max(1, Math.ceil(this.members.length / this.pageSize) || 1)
       if (this.page > maxPage) this.page = maxPage
@@ -90,6 +87,9 @@ export default {
   },
   beforeDestroy() { clearTimeout(this.timer) },
   methods: {
+    async loadDepartments() { try { this.departmentOptions = await teamService.listDepartments(); if (!this.departmentOptions.length) this.$message.info('当前通讯录没有可用部门') } catch (e) { this.departmentOptions = []; this.$message.error(e.message || '加载部门失败') } },
+    filterDepartments(value, cb) { const q = String(value || '').toLowerCase(); cb(this.departmentOptions.filter(d => d.name.toLowerCase().includes(q))) },
+    selectDepartment(item) { this.selectedDepartment = item; this.departmentId = item.id; this.departmentName = item.name },
     async load() {
       this.loading = true
       try { this.members = (await folderService.getMembers(this.folderId)).list }
