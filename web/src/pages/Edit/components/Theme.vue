@@ -30,9 +30,10 @@
 <script>
 import Sidebar from './Sidebar.vue'
 import { storeData } from '@/api'
-import { mapState } from 'vuex'
+import { mapState, mapMutations } from 'vuex'
 import themeImgMap from 'simple-mind-map-plugin-themes/themeImgMap'
 import themeList from 'simple-mind-map-plugin-themes/themeList'
+import { findThemeMeta } from '@/utils/themeAppearance'
 
 // 主题
 export default {
@@ -101,6 +102,8 @@ export default {
     this.mindMap.off('view_theme_change', this.handleViewThemeChange)
   },
   methods: {
+    ...mapMutations(['setLocalConfig']),
+
     handleViewThemeChange() {
       this.theme = this.mindMap.getTheme()
     },
@@ -153,6 +156,7 @@ export default {
     useTheme(theme) {
       if (theme.value === this.theme) return
       this.theme = theme.value
+      this.syncDarkModeFromTheme(theme)
       const customThemeConfig = this.mindMap.getCustomThemeConfig()
       const hasCustomThemeConfig = Object.keys(customThemeConfig).length > 0
       if (hasCustomThemeConfig) {
@@ -183,6 +187,19 @@ export default {
           template: theme.value,
           config
         }
+      })
+    },
+
+    // 主题自身的 dark 标记驱动界面日夜间，避免深色主题配浅色外壳。
+    syncDarkModeFromTheme(themeMeta) {
+      const target =
+        themeMeta ||
+        findThemeMeta(this.theme, this.extendThemeGroupList)
+      if (!target) return
+      const nextDark = !!target.dark
+      if (nextDark === this.isDark) return
+      this.setLocalConfig({
+        isDark: nextDark
       })
     }
   }

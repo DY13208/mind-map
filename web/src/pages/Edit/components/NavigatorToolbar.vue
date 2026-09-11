@@ -251,9 +251,7 @@ export default {
     },
 
     toggleDark() {
-      this.setLocalConfig({
-        isDark: !this.isDark
-      })
+      this.$bus.$emit('toggle_appearance_mode', !this.isDark)
     },
 
     handleCommand(command) {
