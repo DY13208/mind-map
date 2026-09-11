@@ -628,11 +628,15 @@ export function buildSopHierarchyTree(sops, flatNodes = []) {
     const isSop = sopUids.has(uid)
     // 空分支（无 SOP 后代）不展示：非 SOP 且无子节点则丢弃
     if (!isSop && !children.length) return null
+    const sopCount = isSop
+      ? 1 + children.reduce((sum, c) => sum + (c.sopCount || 0), 0)
+      : children.reduce((sum, c) => sum + (c.sopCount || 0), 0)
     return {
       uid,
       text: text || '(未命名)',
       isSop,
       sopUid: isSop ? uid : '',
+      sopCount,
       children
     }
   }
@@ -647,6 +651,104 @@ export function buildSopHierarchyTree(sops, flatNodes = []) {
     .filter(Boolean)
 
   return { roots, byUid: keep }
+}
+
+/**
+ * 将当前分支内的 SOP 收成「父 D 卡片 + 子任务」：
+ * 父卡片 = 父节点不是同批 SOP 的条目；子任务 = 直接挂在其下的 SOP。
+ */
+export function groupSopsIntoCards(sops) {
+  const list = (sops || []).filter(s => s && s.uid)
+  const byUid = new Map(list.map(s => [s.uid, s]))
+  const roots = list.filter(s => {
+    const parent = s.parentUid || ''
+    return !parent || !byUid.has(parent)
+  })
+  return roots.map((root, index) => {
+    const nested = list.filter(s => String(s.parentUid || '') === String(root.uid))
+    const subtasks = nested.length ? nested : root.subtasks || []
+    return {
+      ...root,
+      subtasks,
+      cardAccent: 'green',
+      displayTitle: formatSopDisplayTitle(root, 'D')
+    }
+  })
+}
+
+export function formatSopDisplayTitle(sop, forceLetter) {
+  const title = cleanTitle((sop && sop.title) || '') || '未命名'
+  const letter = forceLetter || 'D'
+  return `${letter}：${title}`
+}
+
+/** 子任务展示标题统一用小写 d： */
+export function formatSubtaskDisplayTitle(sop) {
+  return formatSopDisplayTitle(sop, 'd')
+}
+
+/**
+ * 从扁平节点补全子任务（当子节点尚未被抽成 SOP 时的兜底）。
+ * 不改变 D/D1/D2 抽取规则：仅展示 D 的非 D1/D2 直属子节点。
+ */
+export function attachFallbackSubtasks(sops, flatNodes = []) {
+  const sopUidSet = new Set((sops || []).map(s => s && s.uid).filter(Boolean))
+  const byUid = new Map()
+  ;(flatNodes || []).forEach(n => {
+    if (n && n.uid) byUid.set(n.uid, n)
+  })
+  return (sops || []).map(sop => {
+    if (!sop || !sop.uid) return sop
+    const node = byUid.get(sop.uid)
+    const childIds = (node && node.children) || []
+    const existingChildren = (sops || []).filter(
+      s => s && s.parentUid === sop.uid
+    )
+    if (existingChildren.length) {
+      return { ...sop, subtasks: existingChildren }
+    }
+    const fallback = childIds
+      .map(id => byUid.get(id))
+      .filter(Boolean)
+      .filter(child => {
+        if (sopUidSet.has(child.uid)) return false
+        const text = stripHtmlLocal(child.text || '')
+        // 排除 D1/D2 编号标题
+        if (/^D\d+\s*[：:]/i.test(text.trim())) return false
+        return true
+      })
+      .map(child => {
+        const text = stripHtmlLocal(child.text || '')
+        const matched = matchDRegistryTitle(text)
+        const title = (matched && matched.title) || text || '未命名'
+        const pathSegments = pathToSegments(child.path)
+        return {
+          id: 'D',
+          title,
+          uid: child.uid,
+          rowKey: child.uid,
+          parentUid: sop.uid,
+          pathSegments,
+          ancestorUids: [...(sop.ancestorUids || []), sop.uid],
+          source: {
+            type: 'room',
+            ref: (sop.source && sop.source.ref) || '',
+            path: pathSegments.join(' / ') || pathToString(child.path)
+          },
+          frequency: { label: '未知', cron_hint: null },
+          runs: [],
+          deliverables: [],
+          sopLedger: {
+            frequency: { label: '未知', cron_hint: null },
+            runs: [],
+            deliverables: []
+          },
+          cpda: { goal: title, C: [], P: [] },
+          isFallbackSubtask: true
+        }
+      })
+    return { ...sop, subtasks: fallback }
+  })
 }
 
 /** 规范化搜索词：忽略大小写、首尾空格、连续空白 */
