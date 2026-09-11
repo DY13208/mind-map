@@ -110,7 +110,7 @@ import { getData, getDataAsync, getConfig, storeData } from '@/api'
 import Navigator from './Navigator.vue'
 import NodeImgPreview from './NodeImgPreview.vue'
 import SidebarTrigger from './SidebarTrigger.vue'
-import { mapState } from 'vuex'
+import { mapState, mapMutations } from 'vuex'
 import icon from '@/config/icon'
 import Vue from 'vue'
 import Search from './Search.vue'
@@ -226,7 +226,9 @@ export default {
       useDarkCanvasFallback: false,
       adaptingAppearanceTheme: false,
       appearanceHeldDarkTheme: null,
-      appearanceHeldLightTheme: null
+      appearanceHeldLightTheme: null,
+      appearanceTransitioning: false,
+      appearanceTransitionTimer: null
     }
   },
   computed: {
@@ -248,6 +250,7 @@ export default {
   },
   watch: {
     isDark() {
+      if (this.appearanceTransitioning) return
       this.syncCanvasDarkBackground()
     },
     openNodeRichText() {
@@ -311,7 +314,7 @@ export default {
     this.$bus.$on('createAssociativeLine', this.handleCreateLineFromActiveNode)
     this.$bus.$on('startPainter', this.handleStartPainter)
     this.$bus.$on('localStorageExceeded', this.onLocalStorageExceeded)
-    this.$bus.$on('before_toggle_appearance', this.adaptThemeToAppearance)
+    this.$bus.$on('toggle_appearance_mode', this.handleToggleAppearanceMode)
     window.addEventListener('resize', this.handleResize)
   },
   beforeDestroy() {
@@ -326,6 +329,10 @@ export default {
     if (this.loadingSafetyTimer) {
       clearTimeout(this.loadingSafetyTimer)
       this.loadingSafetyTimer = null
+    }
+    if (this.appearanceTransitionTimer) {
+      clearTimeout(this.appearanceTransitionTimer)
+      this.appearanceTransitionTimer = null
     }
     this.importPersistLock = false
     this.stopImportProgressPoll()
@@ -342,7 +349,7 @@ export default {
     this.$bus.$off('showLoading', this.handleShowLoading)
     this.$bus.$off('hideLoading', this.handleForceHideLoading)
     this.$bus.$off('localStorageExceeded', this.onLocalStorageExceeded)
-    this.$bus.$off('before_toggle_appearance', this.adaptThemeToAppearance)
+    this.$bus.$off('toggle_appearance_mode', this.handleToggleAppearanceMode)
     window.removeEventListener('resize', this.handleResize)
     if (this.mindMap) {
       this.unbindCanvasThemeEvents()
@@ -350,6 +357,8 @@ export default {
     }
   },
   methods: {
+    ...mapMutations(['setLocalConfig']),
+
     onLocalStorageExceeded() {
       this.$notify({
         type: 'warning',
@@ -507,6 +516,92 @@ export default {
       )
     },
 
+    // 日间/夜间切换：先藏节点层，再同步 isDark 与主题模板，避免中间帧黑底黑字闪烁。
+    handleToggleAppearanceMode(nextDark) {
+      if (!this.mindMap || this.appearanceTransitioning) return
+      const wantDark = !!nextDark
+      if (wantDark === !!this.isDark) {
+        this.ensureAppearanceThemeAligned()
+        return
+      }
+
+      const current = this.mindMap.getTheme()
+      const resolved = resolveAppearanceTheme({
+        nextDark: wantDark,
+        currentTheme: current,
+        heldLightTheme: this.appearanceHeldLightTheme,
+        heldDarkTheme: this.appearanceHeldDarkTheme,
+        extendThemeGroupList: this.extendThemeGroupList
+      })
+      this.appearanceHeldLightTheme = resolved.heldLightTheme
+      this.appearanceHeldDarkTheme = resolved.heldDarkTheme
+
+      this.beginAppearanceTransition()
+      this.setLocalConfig({ isDark: wantDark })
+
+      if (resolved.changed) {
+        this.adaptingAppearanceTheme = true
+        this.mindMap.setTheme(resolved.theme, true)
+        const config = this.mindMap.getCustomThemeConfig
+          ? this.mindMap.getCustomThemeConfig()
+          : {}
+        storeData({
+          theme: {
+            template: resolved.theme,
+            config: config || {}
+          }
+        })
+        if (this.mindMapData && this.mindMapData.theme) {
+          this.mindMapData.theme.template = resolved.theme
+        }
+        this.mindMap.render(null, 'changeTheme')
+      } else {
+        this.syncCanvasDarkBackground()
+        this.endAppearanceTransition()
+      }
+    },
+
+    beginAppearanceTransition() {
+      this.appearanceTransitioning = true
+      this.setCanvasDarkFallback(false)
+      const el = this.mindMap && this.mindMap.el
+      if (el && el.classList) el.classList.add('isAppearanceTransitioning')
+      if (this.mindMap) {
+        this.mindMap.off(
+          'node_tree_render_end',
+          this.endAppearanceTransition
+        )
+        this.mindMap.on('node_tree_render_end', this.endAppearanceTransition)
+      }
+      if (this.appearanceTransitionTimer) {
+        clearTimeout(this.appearanceTransitionTimer)
+      }
+      this.appearanceTransitionTimer = setTimeout(() => {
+        this.endAppearanceTransition()
+      }, 800)
+    },
+
+    endAppearanceTransition() {
+      if (!this.appearanceTransitioning && !this.adaptingAppearanceTheme) {
+        return
+      }
+      if (this.appearanceTransitionTimer) {
+        clearTimeout(this.appearanceTransitionTimer)
+        this.appearanceTransitionTimer = null
+      }
+      if (this.mindMap) {
+        this.mindMap.off(
+          'node_tree_render_end',
+          this.endAppearanceTransition
+        )
+      }
+      this.adaptingAppearanceTheme = false
+      this.appearanceTransitioning = false
+      const el = this.mindMap && this.mindMap.el
+      if (el && el.classList) el.classList.remove('isAppearanceTransitioning')
+      this.syncCanvasDarkBackground()
+    },
+
     // 日间/夜间必须切换完整主题模板：只改画布底色会留下浅色主题的黑字，对比失效。
     adaptThemeToAppearance(nextDark) {
       if (!this.mindMap) return
@@ -570,8 +665,9 @@ export default {
       if (!mindMap || !mindMap.el) return
       const el = mindMap.el
       const themeConfig = mindMap.themeConfig || {}
-      // 兜底仅用于主题尚未切到深色模板的短暂瞬间；稳态依赖完整主题切换，避免黑底黑字。
+      // 过渡中禁止夜间兜底，避免“浅色主题已切换但 isDark 未稳”时出现黑底黑字闪帧。
       const useFallback =
+        !this.appearanceTransitioning &&
         this.isDark &&
         !this.isCurrentThemeDark() &&
         !this.isLikelyDarkColor(themeConfig.backgroundColor)
@@ -616,6 +712,7 @@ export default {
       if (!this.mindMap) return
       this.mindMap.off('node_tree_render_start', this.syncCanvasDarkBackground)
       this.mindMap.off('view_theme_change', this.onViewThemeChange)
+      this.mindMap.off('node_tree_render_end', this.endAppearanceTransition)
     },
 
     // 获取思维导图数据，实际应该调接口获取
@@ -1256,6 +1353,14 @@ export default {
     &.isCanvasDarkFallback {
       background-color: #262a2e !important;
       background-image: none !important;
+    }
+
+    // 日夜间切换时先隐藏节点层，等主题与文字色一次渲染完成再显示，避免白/黑字闪帧。
+    &.isAppearanceTransitioning {
+      > svg,
+      svg {
+        opacity: 0 !important;
+      }
     }
   }
 }
