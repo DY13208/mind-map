@@ -41,7 +41,7 @@
         <el-button
           size="mini"
           type="primary"
-          :disabled="!activeSop"
+          :disabled="!activeSop || !canEditSop"
           @click="openRunDialog(activeSop)"
         >
           运行
@@ -57,51 +57,116 @@
       <div class="statusLine runStatus" v-if="sopQueueSummary">
         {{ sopQueueSummary }}
       </div>
+      <div class="statusLine viewerHint" v-if="roomKey && roomRole && !canEditSop">
+        当前为只读权限（{{ roomRole }}）：可查看与搜索，无法运行或保存台账
+      </div>
 
       <div v-if="!roomKey" class="emptyState">请先选择空间</div>
-      <div v-else-if="!pullLoading && !sops.length" class="emptyState">
-        该空间未找到 SOP
-      </div>
-      <div v-else class="cardGrid">
-        <article
-          class="sopCard"
-          v-for="item in sops"
-          :key="item.rowKey"
-          title="双击打开导图 / 历史任务 / 产物"
-          @dblclick="openSubtree(item)"
+      <div v-else class="sopWorkspace">
+        <div class="sopToolbar">
+          <el-input
+            v-model="sopSearchQuery"
+            size="small"
+            clearable
+            prefix-icon="el-icon-search"
+            placeholder="搜索当前脑图 SOP 标题或路径"
+            class="sopSearch"
+            @input="onSopSearchInput"
+          />
+        </div>
+        <div
+          v-if="sopSearchQuery.trim() && !visibleSops.length"
+          class="emptyState searchEmpty"
         >
-          <div class="cardHead">
-            <h2 class="cardTitle">{{ item.title }}</h2>
-            <div class="cardActions">
-              <span
-                v-if="sopCardJobState(item)"
-                class="jobChip"
-                :class="sopCardJobState(item)"
-                >{{ sopCardJobLabel(item) }}</span
-              >
-              <el-button
-                type="primary"
-                size="mini"
-                :loading="sopCardJobState(item) === 'running'"
-                :disabled="!!sopCardJobState(item)"
-                @click.stop="openRunDialog(item)"
-              >
-                运行
-              </el-button>
+          未找到「{{ sopSearchQuery.trim() }}」相关 SOP
+          <el-button type="text" @click="clearSopSearch">清空搜索</el-button>
+        </div>
+        <div v-else-if="!pullLoading && !sops.length" class="emptyState">
+          该空间未找到 SOP
+        </div>
+        <div v-else class="sopSplit">
+          <aside class="sopTreePane" tabindex="0" @keydown="onTreeKeydown">
+            <div class="treeHead">层级</div>
+            <ul class="sopTree" role="tree">
+              <SopTreeNode
+                v-for="node in visibleTreeRoots"
+                :key="node.uid"
+                :node="node"
+                :depth="0"
+                :selected-uid="selectedTreeUid"
+                :expanded-map="treeExpanded"
+                :highlight="sopSearchNorm"
+                @toggle="toggleTreeNode"
+                @select="selectTreeNode"
+              />
+            </ul>
+          </aside>
+          <section class="sopCardPane">
+            <div class="cardPaneHead">
+              <span>{{ branchCardsLabel }}</span>
             </div>
-          </div>
-          <div class="cardMeta">
-            <span
-              class="metaChip"
-              v-for="(chip, idx) in sopCardMetaChips(item)"
-              :key="idx"
-              >{{ chip }}</span
-            >
-          </div>
-          <div class="cardBlock">
-            <div class="blockBody">{{ latestRunLabel(item) }}</div>
-          </div>
-        </article>
+            <div class="cardGrid" v-if="branchSops.length">
+              <article
+                class="sopCard"
+                v-for="item in branchSops"
+                :key="item.rowKey || item.uid"
+              >
+                <div class="cardHead">
+                  <h2
+                    class="cardTitle"
+                    v-html="highlightText(item.title, sopSearchNorm)"
+                  ></h2>
+                  <div class="cardActions">
+                    <span
+                      v-if="sopCardJobState(item)"
+                      class="jobChip"
+                      :class="sopCardJobState(item)"
+                      >{{ sopCardJobLabel(item) }}</span
+                    >
+                    <el-button
+                      type="primary"
+                      size="mini"
+                      :loading="sopCardJobState(item) === 'running'"
+                      :disabled="!canEditSop || !!sopCardJobState(item)"
+                      @click.stop="openRunDialog(item)"
+                    >
+                      运行
+                    </el-button>
+                  </div>
+                </div>
+                <div
+                  class="cardBreadcrumb"
+                  :title="sopBreadcrumb(item)"
+                  v-html="highlightText(sopBreadcrumb(item), sopSearchNorm)"
+                ></div>
+                <div class="cardMeta">
+                  <span
+                    class="metaChip"
+                    v-for="(chip, idx) in sopCardMetaChips(item)"
+                    :key="idx"
+                    >{{ chip }}</span
+                  >
+                </div>
+                <div class="cardBlock">
+                  <div class="blockBody">{{ latestRunLabel(item) }}</div>
+                </div>
+                <div class="cardFooter">
+                  <el-button type="text" size="mini" @click="openSubtree(item)">
+                    查看详情
+                  </el-button>
+                  <el-button
+                    type="text"
+                    size="mini"
+                    @click="locateSopInMap(item)"
+                  >
+                    定位脑图
+                  </el-button>
+                </div>
+              </article>
+            </div>
+            <div v-else class="paneEmpty soft">该分支下没有 D 阶段 SOP</div>
+          </section>
+        </div>
       </div>
     </template>
 
@@ -173,7 +238,7 @@
                     <el-button
                       type="primary"
                       size="small"
-                      :disabled="!activeSopUid"
+                      :disabled="!activeSopUid || !canEditSop"
                       @click="submitRun"
                     >
                       追加运行
@@ -520,7 +585,7 @@ import { getCurrentUser } from '@/utils/auth'
 import { roomFromLocation } from '@/utils/roomLocation'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
 import {
-  listFiles,
+  listAllAccessibleFiles,
   getFileSubtree,
   getFileExport,
   getFileNodes,
@@ -533,12 +598,16 @@ import {
   replaceFileTree,
   undoMapOperation,
   redoMapOperation,
-  artifactLocalUrl
+  artifactLocalUrl,
+  authorizeSopRun
 } from '@/utils/fileApi'
 import {
   listRoomDRegistrySops,
-  dedupeSopsForRegistry,
-  fillDefaultCpda
+  fillDefaultCpda,
+  buildSopHierarchyTree,
+  filterSopsBySearch,
+  filterHierarchyTreeForSearch,
+  normalizeSopSearchQuery
 } from '@/utils/sopRegistryPrompt'
 import {
   normalizeLedger,
@@ -576,6 +645,7 @@ import {
   normalizeAiBackend
 } from '@/utils/agentChat'
 import SopTaskBoard from './components/SopTaskBoard.vue'
+import SopTreeNode from './components/SopTreeNode.vue'
 
 MindMap.usePlugin(Drag)
   .usePlugin(Select)
@@ -631,10 +701,18 @@ function toMindMapTree(tree) {
 
 export default {
   name: 'SopRegistryPage',
-  components: { SopTaskBoard },
+  components: { SopTaskBoard, SopTreeNode },
   data() {
     return {
       sops: [],
+      flatNodes: [],
+      treeRoots: [],
+      treeExpanded: {},
+      selectedTreeUid: '',
+      sopSearchQuery: '',
+      roomRole: null,
+      canEditSop: true,
+      canManageSop: false,
       statusText: '',
       pullLoading: false,
       spacesLoading: false,
@@ -734,6 +812,35 @@ export default {
       return `执行 ${s.runningCount || 0} · 等待 ${s.waitingCount || 0} · 排队 ${
         s.queuedCount || 0
       } · 并发 ${s.concurrency || 2}`
+    },
+    sopSearchNorm() {
+      return normalizeSopSearchQuery(this.sopSearchQuery)
+    },
+    visibleSops() {
+      return filterSopsBySearch(this.sops, this.sopSearchQuery)
+    },
+    visibleTreeRoots() {
+      if (!this.sopSearchNorm) return this.treeRoots
+      return filterHierarchyTreeForSearch(
+        this.treeRoots,
+        this.visibleSops.map(s => s.uid).filter(Boolean)
+      )
+    },
+    branchSops() {
+      const list = this.visibleSops
+      if (this.sopSearchNorm) return list
+      const sel = String(this.selectedTreeUid || '').trim()
+      if (!sel) return list
+      return list.filter(sop => {
+        if (sop.uid === sel) return true
+        const ancestors = sop.ancestorUids || []
+        return ancestors.includes(sel)
+      })
+    },
+    branchCardsLabel() {
+      const n = this.branchSops.length
+      if (this.sopSearchNorm) return `匹配 ${n} 条 SOP`
+      return `当前分支 ${n} 条 SOP`
     },
     sopActiveJobCount() {
       return (
@@ -1063,13 +1170,16 @@ export default {
     async loadSpaces() {
       this.spacesLoading = true
       try {
-        const data = await listFiles({ limit: 200, offset: 0 })
+        const data = await listAllAccessibleFiles({ limit: 100 })
         const list = data.list || []
         this.spaceOptions = list
           .map(item => ({
             room_key: item.room_key || item.roomKey || '',
             title: item.title || item.name || '',
-            label: this.spaceOptionLabel(item)
+            label: this.spaceOptionLabel(item),
+            role: item.role || null,
+            canEdit: item.canEdit,
+            canManage: item.canManage
           }))
           .filter(item => item.room_key)
         if (
@@ -1303,6 +1413,10 @@ export default {
       }
     },
     async submitRun() {
+      if (!this.canEditSop) {
+        this.$message.warning('当前为只读权限，无法保存台账')
+        return
+      }
       try {
         this.activeLedger = addRunToLedger(this.activeLedger, {
           ...this.runForm,
@@ -1317,6 +1431,10 @@ export default {
     openRunDialog(item) {
       if (!this.roomKey) {
         this.$message.warning('请先选择空间')
+        return
+      }
+      if (!this.canEditSop) {
+        this.$message.warning('当前为只读权限，无法运行 SOP')
         return
       }
       if (this.sopCardJobState(item)) {
@@ -1890,8 +2008,12 @@ export default {
         if (el) el.scrollTop = el.scrollHeight
       })
     },
-    confirmRunSop() {
+    async confirmRunSop() {
       if (!this.runTarget || !this.roomKey || !this.sopRunQueue) return
+      if (!this.canEditSop) {
+        this.$message.warning('当前为只读权限，无法运行 SOP')
+        return
+      }
       if (this.runSubmitLoading) {
         this.$message.info('资料模板加载中，请稍候')
         return
@@ -1928,7 +2050,7 @@ export default {
         this.runSubmitFields,
         this.runExtraNote
       )
-      const enqueued = this.sopRunQueue.enqueue({
+      const enqueued = await this.sopRunQueue.enqueue({
         roomKey: this.roomKey,
         sop,
         outputIds: this.runOutputIds.slice(),
@@ -2035,11 +2157,184 @@ export default {
     },
     resolveSopUid(item) {
       if (!item) return ''
-      if (item.uid) return item.uid
-      if (item.uids && item.uids.length) return item.uids[0]
-      const fromSource =
-        item.sources && item.sources.map(s => s.uid).find(Boolean)
-      return fromSource || ''
+      return String(item.uid || '').trim()
+    },
+    escapeHtml(text) {
+      return String(text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+    },
+    highlightText(text, query) {
+      const raw = String(text || '')
+      const q = String(query || '').trim()
+      if (!q) return this.escapeHtml(raw)
+      const lower = raw.toLowerCase()
+      const needle = q.toLowerCase()
+      let out = ''
+      let i = 0
+      while (i < raw.length) {
+        const hit = lower.indexOf(needle, i)
+        if (hit < 0) {
+          out += this.escapeHtml(raw.slice(i))
+          break
+        }
+        out += this.escapeHtml(raw.slice(i, hit))
+        out += `<mark>${this.escapeHtml(raw.slice(hit, hit + needle.length))}</mark>`
+        i = hit + needle.length
+      }
+      return out
+    },
+    sopBreadcrumb(item) {
+      const segs = (item && item.pathSegments) || []
+      if (segs.length) return segs.join(' / ')
+      return (item && item.source && item.source.path) || ''
+    },
+    rebuildHierarchyTree() {
+      const built = buildSopHierarchyTree(this.sops, this.flatNodes)
+      this.treeRoots = built.roots || []
+      const expanded = { ...this.treeExpanded }
+      const walk = (nodes, depth) => {
+        (nodes || []).forEach(n => {
+          if (expanded[n.uid] == null) expanded[n.uid] = depth < 2
+          walk(n.children, depth + 1)
+        })
+      }
+      walk(this.treeRoots, 0)
+      this.treeExpanded = expanded
+      if (!this.selectedTreeUid && this.treeRoots[0]) {
+        this.selectedTreeUid = this.treeRoots[0].uid
+      } else if (
+        this.selectedTreeUid &&
+        this.treeRoots.length &&
+        !this.treeContainsUid(this.treeRoots, this.selectedTreeUid)
+      ) {
+        this.selectedTreeUid = this.treeRoots[0].uid
+      }
+    },
+    treeContainsUid(nodes, uid) {
+      for (const n of nodes || []) {
+        if (n.uid === uid) return true
+        if (this.treeContainsUid(n.children, uid)) return true
+      }
+      return false
+    },
+    toggleTreeNode(uid) {
+      const open = this.treeExpanded[uid] !== false
+      this.$set(this.treeExpanded, uid, !open)
+    },
+    selectTreeNode(node) {
+      if (!node) return
+      this.selectedTreeUid = node.uid
+    },
+    onSopSearchInput() {
+      if (this.sopSearchNorm) {
+        // 搜索时自动展开匹配路径（filterHierarchyTreeForSearch 已标 expanded）
+        const expandAll = nodes => {
+          (nodes || []).forEach(n => {
+            this.$set(this.treeExpanded, n.uid, true)
+            expandAll(n.children)
+          })
+        }
+        expandAll(this.visibleTreeRoots)
+      }
+    },
+    clearSopSearch() {
+      this.sopSearchQuery = ''
+    },
+    onTreeKeydown(e) {
+      const flat = []
+      const walk = nodes => {
+        (nodes || []).forEach(n => {
+          flat.push(n)
+          const open =
+            n.expanded || this.treeExpanded[n.uid] !== false
+          if (open && n.children && n.children.length) walk(n.children)
+        })
+      }
+      walk(this.visibleTreeRoots)
+      if (!flat.length) return
+      const idx = Math.max(
+        0,
+        flat.findIndex(n => n.uid === this.selectedTreeUid)
+      )
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        const next = flat[Math.min(flat.length - 1, idx + 1)]
+        if (next) this.selectedTreeUid = next.uid
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        const prev = flat[Math.max(0, idx - 1)]
+        if (prev) this.selectedTreeUid = prev.uid
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        const cur = flat[idx]
+        if (cur && cur.children && cur.children.length) {
+          this.$set(this.treeExpanded, cur.uid, true)
+        }
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        const cur = flat[idx]
+        if (cur) this.$set(this.treeExpanded, cur.uid, false)
+      } else if (e.key === 'Enter') {
+        e.preventDefault()
+        const cur = flat[idx]
+        const sop = this.sops.find(s => s.uid === (cur && cur.uid))
+        if (sop) this.openSubtree(sop)
+      }
+    },
+    async refreshRoomAccess() {
+      const roomKey = String(this.roomKey || '').trim()
+      if (!roomKey) {
+        this.roomRole = null
+        this.canEditSop = true
+        this.canManageSop = false
+        return
+      }
+      const fromList = this.spaceOptions.find(s => s.room_key === roomKey)
+      if (fromList && fromList.role) {
+        this.roomRole = fromList.role
+        this.canEditSop =
+          fromList.canEdit != null
+            ? !!fromList.canEdit
+            : fromList.role === 'owner' || fromList.role === 'editor'
+        this.canManageSop =
+          fromList.canManage != null
+            ? !!fromList.canManage
+            : fromList.role === 'owner'
+      }
+      try {
+        // 用授权接口探测 edit；viewer 得 403，但仍保留查看能力
+        await authorizeSopRun(roomKey, '')
+        this.canEditSop = true
+        if (!this.roomRole || this.roomRole === 'viewer') {
+          this.roomRole = this.roomRole === 'owner' ? 'owner' : 'editor'
+        }
+      } catch (err) {
+        if (err && (err.statusCode === 403 || err.code === 'FORBIDDEN')) {
+          this.canEditSop = false
+          this.canManageSop = false
+          if (!this.roomRole) this.roomRole = 'viewer'
+        }
+      }
+    },
+    async locateSopInMap(item) {
+      const uid = this.resolveSopUid(item)
+      if (!this.roomKey || !uid) {
+        this.$message.warning('无法定位该 SOP')
+        return
+      }
+      try {
+        await locateFileNode(this.roomKey, uid)
+      } catch (e) {
+        /* locate 可能仅返回坐标，失败时仍打开编辑页 */
+      }
+      const route = this.$router.resolve({
+        path: '/',
+        query: { room: this.roomKey, focusUid: uid }
+      })
+      window.open(route.href, '_blank')
     },
     useCollabV2() {
       return getRuntimeConfig().collabV2 !== false
@@ -2420,18 +2715,21 @@ export default {
       const roomKey = String(this.roomKey || '').trim()
       if (!roomKey) {
         this.sops = []
+        this.flatNodes = []
+        this.treeRoots = []
         this.statusText = '请选择空间'
         return
       }
       this.pullLoading = true
       this.statusText = '正在抽取 SOP…'
       try {
+        await this.refreshRoomAccess()
         const result = await listRoomDRegistrySops(roomKey)
-        const unique = dedupeSopsForRegistry(
-          fillDefaultCpda({ sops: result.sops || [] }).sops
-        )
-        // 合并内存/队列台账，避免刷新冲掉「最近运行」和任务面板对应展示
+        // 按节点 UID 分别展示，禁止按标题合并
+        const unique = fillDefaultCpda({ sops: result.sops || [] }).sops
+        this.flatNodes = result.flatNodes || []
         this.sops = this.mergeSopsPreservingRuns(unique)
+        this.rebuildHierarchyTree()
         const space =
           (this.spaceOptions.find(s => s.room_key === roomKey) || {}).label ||
           roomKey
@@ -2654,6 +2952,66 @@ export default {
     color: var(--ui-primary, #087854);
   }
 
+  .viewerHint {
+    color: #a15c00;
+  }
+
+  .sopWorkspace {
+    margin-top: 4px;
+  }
+
+  .sopToolbar {
+    margin-bottom: 12px;
+  }
+
+  .sopSearch {
+    max-width: 420px;
+  }
+
+  .searchEmpty {
+    margin-top: 28px;
+  }
+
+  .sopSplit {
+    display: grid;
+    grid-template-columns: minmax(220px, 300px) 1fr;
+    gap: 14px;
+    min-height: 420px;
+    align-items: start;
+  }
+
+  .sopTreePane {
+    border: 1px solid var(--ui-border, #e7ece9);
+    border-radius: 12px;
+    background: var(--ui-surface, #fff);
+    padding: 10px 8px 14px;
+    max-height: calc(100vh - 200px);
+    overflow: auto;
+    outline: none;
+  }
+
+  .treeHead {
+    font-size: 12px;
+    color: var(--ui-text-muted, #7b8982);
+    padding: 0 8px 8px;
+  }
+
+  .sopTree {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .sopCardPane {
+    min-width: 0;
+  }
+
+  .cardPaneHead {
+    font-size: 13px;
+    color: var(--ui-text-muted, #7b8982);
+    margin-bottom: 8px;
+  }
+
   .emptyState {
     margin-top: 48px;
     text-align: center;
@@ -2666,6 +3024,12 @@ export default {
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
     gap: 14px;
     margin-top: 8px;
+  }
+
+  .paneEmpty.soft {
+    padding: 28px 12px;
+    color: var(--ui-text-muted, #7b8982);
+    font-size: 13px;
   }
 
   .sopTaskPanel {
@@ -2914,7 +3278,6 @@ export default {
     border-radius: var(--ui-radius-lg, 12px);
     padding: 16px;
     box-shadow: 0 1px 2px rgba(23, 38, 31, 0.03);
-    cursor: pointer;
     user-select: none;
     transition: box-shadow 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
 
@@ -2922,6 +3285,32 @@ export default {
       border-color: var(--ui-border-strong, #cbd8d2);
       box-shadow: var(--ui-shadow-hover, 0 6px 18px rgba(23, 38, 31, 0.07));
       transform: translateY(-1px);
+    }
+
+    .cardBreadcrumb {
+      font-size: 12px;
+      color: var(--ui-text-muted, #7b8982);
+      line-height: 1.4;
+      margin: -4px 0 10px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .cardFooter {
+      display: flex;
+      gap: 4px;
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid var(--ui-border, #e7ece9);
+    }
+
+    /deep/ .cardTitle mark,
+    /deep/ .cardBreadcrumb mark {
+      background: #ffe08a;
+      color: inherit;
+      padding: 0 1px;
+      border-radius: 2px;
     }
 
     .cardHead {

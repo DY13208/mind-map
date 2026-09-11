@@ -325,7 +325,7 @@ export function outlineLinesFromNodeData(nodeData, depth, counter) {
       `${'  '.repeat(depth + 1)}（备注: ${String(note).slice(0, 120)}）`
     )
   }
-  ;(nodeData.children || []).forEach(child => {
+  (nodeData.children || []).forEach(child => {
     lines.push(...outlineLinesFromNodeData(child, depth + 1, counter))
   })
   return lines
@@ -416,7 +416,34 @@ function pathToString(path) {
   return stripHtmlLocal(path || '')
 }
 
-function matchToRegistrySop(item, roomKey) {
+function pathToSegments(path) {
+  if (Array.isArray(path)) {
+    return path
+      .map(p => stripHtmlLocal(typeof p === 'string' ? p : (p && p.text) || ''))
+      .filter(Boolean)
+  }
+  const raw = stripHtmlLocal(path || '')
+  if (!raw) return []
+  return raw
+    .split(/\s*\/\s*/)
+    .map(part => part.trim())
+    .filter(Boolean)
+}
+
+function ancestorUidsFromFlat(item, byUid) {
+  const out = []
+  let parent = item && (item.parent_uid || item.parentUid)
+  const seen = new Set()
+  while (parent && byUid && byUid.has(parent) && !seen.has(parent)) {
+    seen.add(parent)
+    out.unshift(parent)
+    const node = byUid.get(parent)
+    parent = node && (node.parent_uid || node.parentUid)
+  }
+  return out
+}
+
+function matchToRegistrySop(item, roomKey, byUid = null) {
   const raw = stripHtmlLocal((item && item.text) || '')
   const matched = matchDRegistryTitle(raw)
   if (!matched) return null
@@ -424,7 +451,10 @@ function matchToRegistrySop(item, roomKey) {
   if (!title) return null
   const note = item.note ? String(item.note) : ''
   const noteClean = stripLedgerBlocksFromNote(note)
-  const path = pathToString(item.path)
+  const pathSegments = pathToSegments(item.path)
+  const path = pathSegments.length ? pathSegments.join(' / ') : pathToString(item.path)
+  const parentUid = item.parent_uid || item.parentUid || ''
+  const ancestorUids = ancestorUidsFromFlat(item, byUid)
   const ctx = [raw, noteClean, path].join('\n')
   // 结构化台账优先；文本启发式只用清理后的备注，避免把 <!--SOP_LEDGER--> 再抽成运行记录
   const ledger = normalizeLedger(
@@ -440,6 +470,9 @@ function matchToRegistrySop(item, roomKey) {
     title,
     uid: item.uid || '',
     rowKey: item.uid || `room:${id}:${title}:${path}`,
+    parentUid,
+    pathSegments,
+    ancestorUids,
     source: {
       type: 'room',
       ref: roomKey || '当前房间',
@@ -459,12 +492,12 @@ function matchToRegistrySop(item, roomKey) {
 
 /**
  * 从当前房间底层节点列出全部「D：标题」（不依赖画布展开）
- * 每个节点一条；排除 D1/D2 编号标题
+ * 每个节点一条；排除 D1/D2 编号标题；身份 = roomKey + nodeUid
  */
 export async function listRoomDRegistrySops(roomKey) {
   const key = String(roomKey || '').trim()
   if (!key) {
-    return { sops: [], source: 'none', totalScanned: 0 }
+    return { sops: [], source: 'none', totalScanned: 0, flatNodes: [] }
   }
 
   const { searchFileAll, getFileFlatNodes } = await import('@/utils/fileApi')
@@ -472,16 +505,19 @@ export async function listRoomDRegistrySops(roomKey) {
   const list = []
   let totalScanned = 0
   let source = 'nodes'
+  let flatNodes = []
 
   const ingest = nodes => {
+    (nodes || []).forEach(item => {
+      if (item && item.uid) byUid.set(item.uid, item)
+    })
     ;(nodes || []).forEach(item => {
       totalScanned += 1
-      const sop = matchToRegistrySop(item, key)
+      const sop = matchToRegistrySop(item, key, byUid)
       if (!sop) return
       // 仅按 uid 去重（同一底层节点）；编号相同的不同节点全部保留
       if (sop.uid) {
-        if (byUid.has(sop.uid)) return
-        byUid.set(sop.uid, true)
+        if (list.some(row => row.uid === sop.uid)) return
       }
       list.push(sop)
     })
@@ -490,7 +526,8 @@ export async function listRoomDRegistrySops(roomKey) {
   // 主路径：底层扁平全量节点（不依赖画布展开）
   try {
     const flat = await getFileFlatNodes(key)
-    ingest((flat && flat.nodes) || [])
+    flatNodes = (flat && flat.nodes) || []
+    ingest(flatNodes)
     source = 'nodes'
   } catch (err) {
     console.warn('[sopRegistry] format=nodes failed, try search', err)
@@ -512,6 +549,7 @@ export async function listRoomDRegistrySops(roomKey) {
       }
       source = 'search'
       totalScanned = 0
+      flatNodes = merged
       ingest(merged)
     } catch (err) {
       console.warn('[sopRegistry] search D-registry failed', err)
@@ -519,16 +557,137 @@ export async function listRoomDRegistrySops(roomKey) {
   }
 
   const sops = list.sort((a, b) => {
-    const idCmp = a.id.localeCompare(b.id, undefined, { numeric: true })
-    if (idCmp !== 0) return idCmp
-    return String(a.source.path || '').localeCompare(String(b.source.path || ''))
+    const pathCmp = String(a.source.path || '').localeCompare(
+      String(b.source.path || '')
+    )
+    if (pathCmp !== 0) return pathCmp
+    return String(a.uid || '').localeCompare(String(b.uid || ''))
   })
   return {
     sops: fillDefaultCpda({ sops, conflicts: [], notes: '' }).sops,
     source,
     totalScanned,
-    roomKey: key
+    roomKey: key,
+    flatNodes
   }
+}
+
+/**
+ * 构造只含「D 节点及其祖先」的只读树，保持源脑图兄弟顺序。
+ * 返回 { roots, byUid }；roots 通常为源脑图根（或其可达祖先）。
+ */
+export function buildSopHierarchyTree(sops, flatNodes = []) {
+  const sopUids = new Set(
+    (sops || []).map(s => s && s.uid).filter(Boolean)
+  )
+  const byUid = new Map()
+  ;(flatNodes || []).forEach(node => {
+    if (node && node.uid) byUid.set(node.uid, node)
+  })
+
+  const keep = new Set()
+  sopUids.forEach(uid => {
+    keep.add(uid)
+    let parent = byUid.has(uid)
+      ? byUid.get(uid).parent_uid || byUid.get(uid).parentUid
+      : ''
+    const seen = new Set()
+    while (parent && byUid.has(parent) && !seen.has(parent)) {
+      seen.add(parent)
+      keep.add(parent)
+      const node = byUid.get(parent)
+      parent = node.parent_uid || node.parentUid || ''
+    }
+  })
+
+  if (!keep.size) {
+    return { roots: [], byUid: new Map() }
+  }
+
+  function orderedChildren(parentUid) {
+    const parent = parentUid ? byUid.get(parentUid) : null
+    const childIds = parent && Array.isArray(parent.children) ? parent.children : null
+    if (childIds && childIds.length) {
+      return childIds.filter(id => keep.has(id) && byUid.has(id))
+    }
+    return [...byUid.values()]
+      .filter(n => {
+        const p = n.parent_uid || n.parentUid || ''
+        return keep.has(n.uid) && String(p) === String(parentUid || '')
+      })
+      .map(n => n.uid)
+  }
+
+  function toTreeNode(uid) {
+    const node = byUid.get(uid)
+    if (!node) return null
+    const text = stripHtmlLocal(node.text || '')
+    const children = orderedChildren(uid)
+      .map(id => toTreeNode(id))
+      .filter(Boolean)
+    const isSop = sopUids.has(uid)
+    // 空分支（无 SOP 后代）不展示：非 SOP 且无子节点则丢弃
+    if (!isSop && !children.length) return null
+    return {
+      uid,
+      text: text || '(未命名)',
+      isSop,
+      sopUid: isSop ? uid : '',
+      children
+    }
+  }
+
+  const roots = [...byUid.values()]
+    .filter(n => {
+      if (!keep.has(n.uid)) return false
+      const p = n.parent_uid || n.parentUid
+      return !p || !keep.has(p) || !byUid.has(p)
+    })
+    .map(n => toTreeNode(n.uid))
+    .filter(Boolean)
+
+  return { roots, byUid: keep }
+}
+
+/** 规范化搜索词：忽略大小写、首尾空格、连续空白 */
+export function normalizeSopSearchQuery(q) {
+  return String(q || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+}
+
+/**
+ * 按标题 + 完整祖先路径过滤 SOP；返回匹配的 SOP 列表。
+ */
+export function filterSopsBySearch(sops, query) {
+  const q = normalizeSopSearchQuery(query)
+  if (!q) return sops || []
+  return (sops || []).filter(sop => {
+    const title = String((sop && sop.title) || '').toLowerCase()
+    const path = String(
+      (sop && sop.source && sop.source.path) ||
+        ((sop && sop.pathSegments) || []).join(' / ')
+    ).toLowerCase()
+    const hay = `${title} ${path}`.replace(/\s+/g, ' ')
+    return hay.includes(q)
+  })
+}
+
+/**
+ * 搜索态树：只保留匹配 SOP 及其祖先，并默认全部展开。
+ */
+export function filterHierarchyTreeForSearch(roots, matchedSopUids) {
+  const keep = new Set(matchedSopUids || [])
+  function walk(node) {
+    if (!node) return null
+    const kids = (node.children || []).map(walk).filter(Boolean)
+    if (keep.has(node.uid) || kids.length) {
+      return { ...node, children: kids, expanded: true }
+    }
+    return null
+  }
+  return (roots || []).map(walk).filter(Boolean)
 }
 
 /**

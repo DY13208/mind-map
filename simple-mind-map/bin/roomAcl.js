@@ -4,20 +4,48 @@ const ROLES = ['owner', 'editor', 'viewer']
 const ROLE_RANK = { owner: 3, editor: 2, viewer: 1 }
 const ACTION_RANK = { view: 1, edit: 2, manage: 3 }
 
-function effectiveRole(directRole, teamRole, legacyRole = '') {
-  const roles = [directRole, teamRole, legacyRole]
-    .map(normalizeRole)
-    .filter(Boolean)
+function effectiveRole(...roleValues) {
+  const roles = roleValues.map(normalizeRole).filter(Boolean)
   if (roles.includes('owner')) return 'owner'
   if (roles.includes('editor')) return 'editor'
   if (roles.includes('viewer')) return 'viewer'
   return ''
 }
 
-function sourceForRoles(directRole, teamRole) {
+function sourceForRoles(directRole, teamRole, folderRole) {
   if (normalizeRole(directRole)) return 'direct_share'
   if (normalizeRole(teamRole)) return 'team'
+  if (normalizeRole(folderRole)) return 'folder'
   return null
+}
+
+/** SQL CASE for max(direct, team, folder) — columns are trusted identifiers only. */
+function sqlEffectiveRole(directCol, teamCol, folderCol) {
+  return `case
+    when coalesce(${directCol}, '') = 'owner'
+      or coalesce(${teamCol}, '') = 'owner'
+      or coalesce(${folderCol}, '') = 'owner' then 'owner'
+    when coalesce(${directCol}, '') = 'editor'
+      or coalesce(${teamCol}, '') = 'editor'
+      or coalesce(${folderCol}, '') = 'editor' then 'editor'
+    when coalesce(${directCol}, '') = 'viewer'
+      or coalesce(${teamCol}, '') = 'viewer'
+      or coalesce(${folderCol}, '') = 'viewer' then 'viewer'
+    else coalesce(
+      nullif(${directCol}, ''),
+      nullif(${teamCol}, ''),
+      nullif(${folderCol}, '')
+    )
+  end`
+}
+
+function sqlPrimarySource(directCol, teamCol, folderCol) {
+  return `case
+    when ${directCol} is not null then 'direct_share'
+    when ${teamCol} is not null then 'team'
+    when ${folderCol} is not null then 'folder'
+    else 'direct_share'
+  end`
 }
 
 function aclError(status, code, message) {
@@ -85,6 +113,9 @@ function inferRoomAcl(pathname, method) {
     return { roomKey, action: 'edit' }
   }
   if (rest === '/move' || rest.startsWith('/move')) {
+    return { roomKey, action: 'edit' }
+  }
+  if (rest === '/sop-runs/authorize' || rest.startsWith('/sop-runs/')) {
     return { roomKey, action: 'edit' }
   }
   if (rest === '/nodes/query') {
@@ -159,8 +190,10 @@ async function initSchema(db) {
       role text not null,
       direct_role text,
       team_role text,
+      folder_role text,
       source text not null default 'direct_share',
       source_team_id text,
+      source_folder_id text,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       primary key (room_key, user_id),
@@ -176,15 +209,129 @@ async function initSchema(db) {
   await db.query(`alter table room_members add column if not exists source_team_id text`)
   await db.query(`alter table room_members add column if not exists direct_role text`)
   await db.query(`alter table room_members add column if not exists team_role text`)
+  await db.query(`alter table room_members add column if not exists folder_role text`)
+  await db.query(`alter table room_members add column if not exists source_folder_id text`)
   await db.query(`
     update room_members
     set direct_role = role
-    where direct_role is null and coalesce(source, 'direct_share') = 'direct_share'
+    where direct_role is null
+      and folder_role is null
+      and coalesce(source, 'direct_share') = 'direct_share'
   `)
   await db.query(`
     update room_members
     set team_role = role
     where team_role is null and source = 'team'
+  `)
+  await db.query(`
+    create index if not exists room_members_folder_source_idx
+    on room_members(source_folder_id)
+    where source_folder_id is not null
+  `)
+  await migrateFolderRoles(db)
+}
+
+/**
+ * Idempotent backfill: backup overlapping grants, migrate exact folder-inherited
+ * non-owner direct shares, then ensure current folder_members → folder_role.
+ */
+async function migrateFolderRoles(db) {
+  await db.query(`
+    create table if not exists room_members_folder_mig_backup (
+      room_key text not null,
+      user_id text not null,
+      role text,
+      direct_role text,
+      team_role text,
+      folder_role text,
+      source text,
+      source_team_id text,
+      source_folder_id text,
+      created_at timestamptz,
+      updated_at timestamptz,
+      folder_id text,
+      backed_up_at timestamptz not null default now(),
+      primary key (room_key, user_id)
+    )
+  `)
+  await db.query(`
+    insert into room_members_folder_mig_backup (
+      room_key, user_id, role, direct_role, team_role, folder_role, source,
+      source_team_id, source_folder_id, created_at, updated_at, folder_id
+    )
+    select
+      m.room_key,
+      m.user_id,
+      m.role,
+      m.direct_role,
+      m.team_role,
+      m.folder_role,
+      m.source,
+      m.source_team_id,
+      m.source_folder_id,
+      m.created_at,
+      m.updated_at,
+      r.folder_id::text
+    from room_members m
+    join rooms r on r.room_key = m.room_key
+    join folder_members fm
+      on fm.folder_id = r.folder_id and fm.user_id = m.user_id
+    where r.folder_id is not null
+      and r.deleted_at is null
+    on conflict (room_key, user_id) do nothing
+  `)
+  await db.query(`
+    update room_members m
+    set
+      folder_role = fm.role,
+      source_folder_id = r.folder_id::text,
+      direct_role = null,
+      role = ${sqlEffectiveRole('null::text', 'm.team_role', 'fm.role')},
+      source = ${sqlPrimarySource('null::text', 'm.team_role', 'fm.role')},
+      updated_at = now()
+    from rooms r
+    join folder_members fm on fm.folder_id = r.folder_id
+    where m.room_key = r.room_key
+      and fm.user_id = m.user_id
+      and r.folder_id is not null
+      and r.deleted_at is null
+      and m.role <> 'owner'
+      and coalesce(m.direct_role, '') <> 'owner'
+      and m.direct_role is not null
+      and m.direct_role = fm.role
+      and m.folder_role is null
+  `)
+  await db.query(`
+    insert into room_members (
+      room_key, user_id, role, direct_role, team_role, folder_role, source, source_folder_id
+    )
+    select
+      r.room_key,
+      fm.user_id,
+      fm.role,
+      null,
+      null,
+      fm.role,
+      'folder',
+      r.folder_id::text
+    from rooms r
+    join folder_members fm on fm.folder_id = r.folder_id
+    where r.folder_id is not null
+      and r.deleted_at is null
+    on conflict (room_key, user_id) do update set
+      folder_role = excluded.folder_role,
+      source_folder_id = excluded.source_folder_id,
+      role = ${sqlEffectiveRole(
+        'room_members.direct_role',
+        'room_members.team_role',
+        'excluded.folder_role'
+      )},
+      source = ${sqlPrimarySource(
+        'room_members.direct_role',
+        'room_members.team_role',
+        'excluded.folder_role'
+      )},
+      updated_at = now()
   `)
 }
 
@@ -412,8 +559,10 @@ async function listMembers(db, roomKey) {
          m.role,
          m.direct_role,
          m.team_role,
+         m.folder_role,
          m.source,
          m.source_team_id,
+         m.source_folder_id,
          m.created_at,
          m.updated_at,
          coalesce(u.name, m.user_id) as name,
@@ -430,7 +579,7 @@ async function listMembers(db, roomKey) {
   } catch (err) {
     if (err.code !== '42P01') throw err
     const res = await db.query(
-       `select user_id, user_id as wecom_userid, role, direct_role, team_role, source, source_team_id, created_at, updated_at, user_id as name, '' as avatar
+       `select user_id, user_id as wecom_userid, role, direct_role, team_role, folder_role, source, source_team_id, source_folder_id, created_at, updated_at, user_id as name, '' as avatar
        from room_members
        where room_key = $1
        order by
@@ -486,46 +635,47 @@ async function setMember(db, roomKey, targetUserId, role, actorUserId, corpId = 
   if (!uid) throw aclError(400, 'BAD_REQUEST', '缺少用户')
   if (!nextRole) throw aclError(400, 'BAD_REQUEST', '无效的权限角色')
   let memberRows = (
-    await db.query(`select user_id, role, direct_role, team_role from room_members where room_key = $1`, [
-      roomKey
-    ])
+    await db.query(
+      `select user_id, role, direct_role, team_role, folder_role from room_members where room_key = $1`,
+      [roomKey]
+    )
   ).rows
   if (!memberRows.length) {
     const actor = normalizeUserId(actorUserId) || uid
     await ensureOwner(db, roomKey, actor)
     memberRows = (
       await db.query(
-        `select user_id, role, direct_role, team_role from room_members where room_key = $1`,
+        `select user_id, role, direct_role, team_role, folder_role from room_members where room_key = $1`,
         [roomKey]
       )
     ).rows
   }
   const owners = memberRows.filter(row =>
-    effectiveRole(row.direct_role, row.team_role, row.role) === 'owner'
+    effectiveRole(row.direct_role, row.team_role, row.folder_role, row.role) === 'owner'
   )
   const current = memberRows.find(row => row.user_id === uid)
   if (
     current &&
-    effectiveRole(current.direct_role, current.team_role, current.role) === 'owner' &&
-    effectiveRole(nextRole, current.team_role) !== 'owner' &&
+    effectiveRole(current.direct_role, current.team_role, current.folder_role, current.role) ===
+      'owner' &&
+    effectiveRole(nextRole, current.team_role, current.folder_role) !== 'owner' &&
     owners.length <= 1
   ) {
     throw aclError(400, 'LAST_OWNER', '不能取消最后一个所有者')
   }
   const res = await db.query(
-    `insert into room_members (room_key, user_id, role, direct_role, team_role, source, source_team_id)
-     values ($1, $2, $3, $3, null, 'direct_share', null)
+    `insert into room_members (room_key, user_id, role, direct_role, team_role, folder_role, source, source_team_id, source_folder_id)
+     values ($1, $2, $3, $3, null, null, 'direct_share', null, null)
      on conflict (room_key, user_id) do update set
        direct_role = excluded.direct_role,
-       role = case
-         when excluded.direct_role = 'owner' or room_members.team_role = 'owner' then 'owner'
-         when excluded.direct_role = 'editor' or room_members.team_role = 'editor' then 'editor'
-         when excluded.direct_role = 'viewer' or room_members.team_role = 'viewer' then 'viewer'
-         else room_members.role
-       end,
+       role = ${sqlEffectiveRole(
+         'excluded.direct_role',
+         'room_members.team_role',
+         'room_members.folder_role'
+       )},
        source = 'direct_share',
        updated_at = now()
-     returning room_key, user_id, role, direct_role, team_role, source, source_team_id, created_at, updated_at`,
+     returning room_key, user_id, role, direct_role, team_role, folder_role, source, source_team_id, source_folder_id, created_at, updated_at`,
     [roomKey, uid, nextRole]
   )
   return res.rows[0]
@@ -535,7 +685,7 @@ async function removeMember(db, roomKey, targetUserId, corpId = '') {
   const uid = await resolveUserId(db, targetUserId, corpId)
   if (!uid) throw aclError(400, 'BAD_REQUEST', '缺少用户')
   const current = await db.query(
-    `select user_id, role, direct_role, team_role from room_members
+    `select user_id, role, direct_role, team_role, folder_role from room_members
       where room_key = $1 and user_id = $2`,
     [roomKey, uid]
   )
@@ -543,8 +693,16 @@ async function removeMember(db, roomKey, targetUserId, corpId = '') {
     throw aclError(404, 'NOT_FOUND', '成员不存在')
   }
   const currentRow = current.rows[0]
-  const nextRole = effectiveRole('', currentRow.team_role)
-  if (effectiveRole(currentRow.direct_role, currentRow.team_role, currentRow.role) === 'owner' && nextRole !== 'owner') {
+  const nextRole = effectiveRole('', currentRow.team_role, currentRow.folder_role)
+  if (
+    effectiveRole(
+      currentRow.direct_role,
+      currentRow.team_role,
+      currentRow.folder_role,
+      currentRow.role
+    ) === 'owner' &&
+    nextRole !== 'owner'
+  ) {
     const owners = await db.query(
        `select count(*)::int as total from room_members
         where room_key = $1 and role = 'owner' and user_id <> $2`,
@@ -554,13 +712,12 @@ async function removeMember(db, roomKey, targetUserId, corpId = '') {
       throw aclError(400, 'LAST_OWNER', '不能删除最后一个所有者')
     }
   }
-  if (currentRow.team_role) {
+  if (currentRow.team_role || currentRow.folder_role) {
     await db.query(
       `update room_members
        set direct_role = null,
-           role = team_role,
-           source = 'team',
-           source_team_id = source_team_id,
+           role = ${sqlEffectiveRole('null::text', 'team_role', 'folder_role')},
+           source = ${sqlPrimarySource('null::text', 'team_role', 'folder_role')},
            updated_at = now()
        where room_key = $1 and user_id = $2`,
       [roomKey, uid]
@@ -572,6 +729,188 @@ async function removeMember(db, roomKey, targetUserId, corpId = '') {
     )
   }
   return { ok: true, user_id: uid }
+}
+
+/**
+ * Set / update folder-inherited role only — never touches direct_role or team_role.
+ */
+async function setFolderRole(db, roomKey, targetUserId, role, folderId, corpId = '') {
+  const uid = await resolveUserId(db, targetUserId, corpId)
+  const nextRole = normalizeRole(role)
+  const folder = String(folderId || '').trim()
+  if (!uid) throw aclError(400, 'BAD_REQUEST', '缺少用户')
+  if (!nextRole || nextRole === 'owner') {
+    throw aclError(400, 'BAD_REQUEST', '文件夹权限必须是可编辑或可查看')
+  }
+  if (!folder) throw aclError(400, 'BAD_REQUEST', '缺少文件夹')
+  if (Array.isArray(db.members)) {
+    const key = String(roomKey || '')
+    let current = db.members.find(item => item.room_key === key && item.user_id === uid)
+    if (!current) {
+      current = {
+        room_key: key,
+        user_id: uid,
+        role: nextRole,
+        direct_role: null,
+        team_role: null,
+        folder_role: nextRole,
+        source: 'folder',
+        source_team_id: null,
+        source_folder_id: folder,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+      db.members.push(current)
+    } else {
+      current.folder_role = nextRole
+      current.source_folder_id = folder
+      current.role = effectiveRole(current.direct_role, current.team_role, current.folder_role)
+      current.source = sourceForRoles(
+        current.direct_role,
+        current.team_role,
+        current.folder_role
+      )
+      current.updated_at = new Date().toISOString()
+    }
+    return { ...current }
+  }
+  const res = await db.query(
+    `insert into room_members (
+       room_key, user_id, role, direct_role, team_role, folder_role, source, source_folder_id
+     ) values ($1, $2, $3, null, null, $3, 'folder', $4)
+     on conflict (room_key, user_id) do update set
+       folder_role = excluded.folder_role,
+       source_folder_id = excluded.source_folder_id,
+       role = ${sqlEffectiveRole(
+         'room_members.direct_role',
+         'room_members.team_role',
+         'excluded.folder_role'
+       )},
+       source = ${sqlPrimarySource(
+         'room_members.direct_role',
+         'room_members.team_role',
+         'excluded.folder_role'
+       )},
+       updated_at = now()
+     returning room_key, user_id, role, direct_role, team_role, folder_role, source, source_team_id, source_folder_id, created_at, updated_at`,
+    [roomKey, uid, nextRole, folder]
+  )
+  return res.rows[0]
+}
+
+/**
+ * Clear folder-inherited role only — keeps direct_share and team grants.
+ */
+async function clearFolderRole(db, roomKey, targetUserId, corpId = '') {
+  const uid = await resolveUserId(db, targetUserId, corpId)
+  if (!uid) throw aclError(400, 'BAD_REQUEST', '缺少用户')
+  if (Array.isArray(db.members)) {
+    const key = String(roomKey || '')
+    const idx = db.members.findIndex(item => item.room_key === key && item.user_id === uid)
+    if (idx < 0) return { ok: true, user_id: uid, removed: false }
+    const row = db.members[idx]
+    if (!row.folder_role) return { ok: true, user_id: uid, removed: false }
+    if (row.direct_role || row.team_role) {
+      row.folder_role = null
+      row.source_folder_id = null
+      row.role = effectiveRole(row.direct_role, row.team_role, null)
+      row.source = sourceForRoles(row.direct_role, row.team_role, null)
+      row.updated_at = new Date().toISOString()
+    } else {
+      db.members.splice(idx, 1)
+    }
+    return { ok: true, user_id: uid, removed: true }
+  }
+  const current = await db.query(
+    `select user_id, role, direct_role, team_role, folder_role from room_members
+      where room_key = $1 and user_id = $2`,
+    [roomKey, uid]
+  )
+  if (!current.rows.length) {
+    return { ok: true, user_id: uid, removed: false }
+  }
+  const row = current.rows[0]
+  if (!row.folder_role) {
+    return { ok: true, user_id: uid, removed: false }
+  }
+  if (row.direct_role || row.team_role) {
+    await db.query(
+      `update room_members
+       set folder_role = null,
+           source_folder_id = null,
+           role = ${sqlEffectiveRole('direct_role', 'team_role', 'null::text')},
+           source = ${sqlPrimarySource('direct_role', 'team_role', 'null::text')},
+           updated_at = now()
+       where room_key = $1 and user_id = $2`,
+      [roomKey, uid]
+    )
+  } else {
+    await db.query(
+      `delete from room_members where room_key = $1 and user_id = $2`,
+      [roomKey, uid]
+    )
+  }
+  return { ok: true, user_id: uid, removed: true }
+}
+
+/** Clear every folder_role on a room (used when leaving a folder). */
+async function clearRoomFolderRoles(db, roomKey) {
+  const key = String(roomKey || '')
+  if (!key) return { ok: true }
+  if (Array.isArray(db.members)) {
+    for (let i = db.members.length - 1; i >= 0; i--) {
+      const row = db.members[i]
+      if (row.room_key !== key || !row.folder_role) continue
+      if (row.direct_role || row.team_role) {
+        row.folder_role = null
+        row.source_folder_id = null
+        row.role = effectiveRole(row.direct_role, row.team_role, null)
+        row.source = sourceForRoles(row.direct_role, row.team_role, null)
+        row.updated_at = new Date().toISOString()
+      } else {
+        db.members.splice(i, 1)
+      }
+    }
+    return { ok: true }
+  }
+  await db.query(
+    `update room_members
+     set folder_role = null,
+         source_folder_id = null,
+         role = ${sqlEffectiveRole('direct_role', 'team_role', 'null::text')},
+         source = ${sqlPrimarySource('direct_role', 'team_role', 'null::text')},
+         updated_at = now()
+     where room_key = $1 and folder_role is not null`,
+    [key]
+  )
+  await db.query(
+    `delete from room_members
+     where room_key = $1
+       and direct_role is null
+       and team_role is null
+       and folder_role is null`,
+    [key]
+  )
+  return { ok: true }
+}
+
+/**
+ * Apply current folder_members as folder_role for one room (after move-in).
+ * members: [{ user_id, role }]
+ */
+async function applyFolderRoles(db, roomKey, folderId, members) {
+  const key = String(roomKey || '')
+  const folder = String(folderId || '').trim()
+  if (!key || !folder) return { ok: true, count: 0 }
+  let count = 0
+  for (const member of members || []) {
+    const uid = normalizeUserId(member.user_id || member.userId)
+    const role = normalizeRole(member.role)
+    if (!uid || !role || role === 'owner') continue
+    await setFolderRole(db, key, uid, role, folder)
+    count += 1
+  }
+  return { ok: true, count }
 }
 
 function readonlyCommandAllowed(name, data) {
@@ -601,6 +940,9 @@ module.exports = {
   normalizeUserId,
   normalizeRole,
   effectiveRole,
+  sourceForRoles,
+  sqlEffectiveRole,
+  sqlPrimarySource,
   normalizeActorId,
   actorFromReq,
   presenceDocRoomKey,
@@ -610,6 +952,7 @@ module.exports = {
   accessSummary,
   initSchema,
   migrateLegacyOwners,
+  migrateFolderRoles,
   getAccess,
   assertRoomAccess,
   ensureOwner,
@@ -619,6 +962,10 @@ module.exports = {
   resolveUserId,
   setMember,
   removeMember,
+  setFolderRole,
+  clearFolderRole,
+  clearRoomFolderRoles,
+  applyFolderRoles,
   readonlyCommandAllowed,
   aclError
 }

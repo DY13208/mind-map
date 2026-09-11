@@ -166,4 +166,29 @@ const r3 = parseSample(sample3)
 assert(r3.sops.length === 2, 'two D titles')
 assert(r3.sops[0].id === 'D' && r3.sops[1].id === 'D', 'both id D')
 
+// 同名不同路径：按 uid 分别保留（台账身份 = roomKey + nodeUid）
+const sameTitle = [
+  { id: 'D', title: '采购目标', uid: 'u1', pathSegments: ['根', '华东', 'D：采购目标'], ancestorUids: ['root', 'east'], source: { path: '根 / 华东 / D：采购目标' } },
+  { id: 'D', title: '采购目标', uid: 'u2', pathSegments: ['根', '华北', 'D：采购目标'], ancestorUids: ['root', 'north'], source: { path: '根 / 华北 / D：采购目标' } }
+]
+assert(sameTitle[0].uid !== sameTitle[1].uid, 'same title different uid')
+assert(sameTitle.length === 2, 'keep both same-title SOPs')
+
+function normalizeSopSearchQuery(q) {
+  return String(q || '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+function filterSopsBySearch(sops, query) {
+  const q = normalizeSopSearchQuery(query)
+  if (!q) return sops || []
+  return (sops || []).filter(sop => {
+    const title = String((sop && sop.title) || '').toLowerCase()
+    const path = String((sop && sop.source && sop.source.path) || '').toLowerCase()
+    return `${title} ${path}`.replace(/\s+/g, ' ').includes(q)
+  })
+}
+assert(filterSopsBySearch(sameTitle, '华东').length === 1, 'path search east')
+assert(filterSopsBySearch(sameTitle, '采购目标').length === 2, 'title search both')
+assert(filterSopsBySearch(sameTitle, '  华北  ').length === 1, 'trim/collapse search')
+assert(filterSopsBySearch(sameTitle, '不存在').length === 0, 'no match')
+
 console.log('SOP registry smoke OK')

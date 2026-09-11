@@ -33,6 +33,13 @@ function fileMove(pathname) {
   return match ? decodeURIComponent(match[1]) : ''
 }
 
+function fileSopAuthorize(pathname) {
+  const match = String(pathname || '').match(
+    /^\/api\/(?:files|maps|rooms)\/([^/]+)\/sop-runs\/authorize$/
+  )
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
 function fileInfo(pathname) {
   const match = String(pathname || '').match(
     /^\/api\/(?:files|maps|rooms)\/([^/]+)\/info$/
@@ -121,6 +128,7 @@ async function handleFileSystemApi(req, res, options = {}) {
       folderMembersBulk(pathname) ||
       folderItem(pathname) ||
       fileMove(pathname) ||
+      fileSopAuthorize(pathname) ||
       fileInfo(pathname) ||
       filePreview(pathname) ||
       fileFavorite(pathname) ||
@@ -163,7 +171,15 @@ async function handleFileSystemApi(req, res, options = {}) {
         for (const roomKey of await fs.store.roomKeysInFolder(bulkFolderId)) {
           const room = await fs.store.getRoom(roomKey)
           if (room && room.owner_id === row.user_id) continue
-          if (role !== 'manager') await roomAcl.setMember(fs.store, roomKey, row.user_id, role, userId, req.authUser && req.authUser.corpId)
+          if (role === 'manager') continue
+          await roomAcl.setFolderRole(
+            fs.store,
+            roomKey,
+            row.user_id,
+            role,
+            bulkFolderId,
+            req.authUser && req.authUser.corpId
+          )
         }
       }
       sendJson(res, 200, { ok: true, list: await fs.store.listFolderMembers(bulkFolderId), added: rows.length })
@@ -210,8 +226,15 @@ async function handleFileSystemApi(req, res, options = {}) {
         await fs.store.setFolderMember(folderAcl.id, targetId, role)
         const roomKeys = await fs.store.roomKeysInFolder(folderAcl.id)
         for (const roomKey of roomKeys) {
-          if (role !== 'manager') await roomAcl.setMember(fs.store, roomKey, targetId, role, userId,
-            req.authUser && req.authUser.corpId)
+          if (role === 'manager') continue
+          await roomAcl.setFolderRole(
+            fs.store,
+            roomKey,
+            targetId,
+            role,
+            folderAcl.id,
+            req.authUser && req.authUser.corpId
+          )
         }
         const list = await fs.store.listFolderMembers(folderAcl.id)
         sendJson(res, 200, { ok: true, list })
@@ -226,8 +249,14 @@ async function handleFileSystemApi(req, res, options = {}) {
         await fs.store.removeFolderMember(folderAcl.id, targetId)
         const roomKeys = await fs.store.roomKeysInFolder(folderAcl.id)
         for (const roomKey of roomKeys) {
-          await roomAcl.removeMember(fs.store, roomKey, targetId,
-            req.authUser && req.authUser.corpId).catch(() => {})
+          await roomAcl
+            .clearFolderRole(
+              fs.store,
+              roomKey,
+              targetId,
+              req.authUser && req.authUser.corpId
+            )
+            .catch(() => {})
         }
         sendJson(res, 200, { ok: true })
         return true
@@ -373,9 +402,25 @@ async function handleFileSystemApi(req, res, options = {}) {
       const result = await fs.moveRoom(
         safeRoomKey(moveKey),
         body.folderId || body.folder_id || body.targetFolderId,
-        { access, userId }
+        { access, userId, bypass }
       )
       sendJson(res, 200, { ok: true, file: result.file })
+      return true
+    }
+    const sopAuthKey = fileSopAuthorize(pathname)
+    if (sopAuthKey && method === 'POST') {
+      const body = options.body || (await readBody(req))
+      const roomKey = safeRoomKey(sopAuthKey)
+      const access = await roomAcl.assertRoomAccess(fs.store, req, roomKey, 'edit')
+      const uid = String((body && (body.uid || body.nodeUid || body.node_uid)) || '').trim()
+      sendJson(res, 200, {
+        ok: true,
+        roomKey,
+        uid: uid || null,
+        role: access.role,
+        canEdit: !!access.canEdit,
+        canManage: !!access.canManage
+      })
       return true
     }
     const infoKey = fileInfo(pathname)
