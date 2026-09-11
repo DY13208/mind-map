@@ -57,10 +57,22 @@ function createExpandNodeContent() {
   )
 }
 function sumNode(data = []) {
-  return data.reduce(
-    (total, cur) => total + this.sumNode(cur.children || []),
-    data.length
-  )
+  // Count the complete descendant tree, rather than only the immediate
+  // children shown in the renderer. This also works for plain nodeData
+  // objects, whose children are not MindMapNode instances.
+  return data.reduce((total, cur) => {
+    const renderedChildren = Array.isArray(cur && cur.children) ? cur.children : []
+    const rawChildren = Array.isArray(cur && cur.nodeData && cur.nodeData.children)
+      ? cur.nodeData.children
+      : []
+    const children = renderedChildren.length > 0 ? renderedChildren : rawChildren
+    const nested = sumNode(children)
+    // childCount is retained for collapsed/lazy branches whose descendants
+    // are not materialized locally yet. Use it at every level, not only root.
+    const knownChildren = Number(cur && cur.childCount) ||
+      Number(cur && cur.nodeData && cur.nodeData.childCount) || 0
+    return total + 1 + Math.max(nested, knownChildren)
+  }, 0)
 }
 //  创建或更新展开收缩按钮内容
 function updateExpandBtnNode() {
