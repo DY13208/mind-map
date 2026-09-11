@@ -126,7 +126,7 @@ import {
 } from '@/utils/importTree'
 import handleClipboardText from '@/utils/handleClipboardText'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
-import { isDarkThemeValue } from '@/utils/themeAppearance'
+import { isDarkThemeValue, resolveAppearanceTheme } from '@/utils/themeAppearance'
 import Scrollbar from './Scrollbar.vue'
 import exampleData from 'simple-mind-map/example/exampleData'
 import FormulaSidebar from './FormulaSidebar.vue'
@@ -507,29 +507,27 @@ export default {
       )
     },
 
-    // 日间/夜间切换时：深色主题需切到浅色模板，再切回夜间时恢复。
+    // 日间/夜间必须切换完整主题模板：只改画布底色会留下浅色主题的黑字，对比失效。
     adaptThemeToAppearance(nextDark) {
       if (!this.mindMap) return
       const current = this.mindMap.getTheme()
-      const currentIsDark = this.isCurrentThemeDark(current)
-      if (!nextDark) {
-        if (currentIsDark) {
-          this.appearanceHeldDarkTheme = current
-          const lightTheme = this.appearanceHeldLightTheme || 'default'
-          this.applyAppearanceTheme(lightTheme)
-        } else {
-          this.appearanceHeldLightTheme = current
-        }
-        return
-      }
-      if (this.appearanceHeldDarkTheme) {
-        const restore = this.appearanceHeldDarkTheme
-        this.appearanceHeldDarkTheme = null
-        if (!currentIsDark) this.appearanceHeldLightTheme = current
-        this.applyAppearanceTheme(restore)
-        return
-      }
-      if (!currentIsDark) this.appearanceHeldLightTheme = current
+      const resolved = resolveAppearanceTheme({
+        nextDark: !!nextDark,
+        currentTheme: current,
+        heldLightTheme: this.appearanceHeldLightTheme,
+        heldDarkTheme: this.appearanceHeldDarkTheme,
+        extendThemeGroupList: this.extendThemeGroupList
+      })
+      this.appearanceHeldLightTheme = resolved.heldLightTheme
+      this.appearanceHeldDarkTheme = resolved.heldDarkTheme
+      if (resolved.changed) this.applyAppearanceTheme(resolved.theme)
+    },
+
+    // 本地日夜间偏好与房间主题不一致时（例如浅色主题 + 夜间），启动后立刻对齐。
+    ensureAppearanceThemeAligned() {
+      if (!this.mindMap) return
+      this.adaptThemeToAppearance(!!this.isDark)
+      this.syncCanvasDarkBackground()
     },
 
     applyAppearanceTheme(template) {
@@ -572,8 +570,11 @@ export default {
       if (!mindMap || !mindMap.el) return
       const el = mindMap.el
       const themeConfig = mindMap.themeConfig || {}
+      // 兜底仅用于主题尚未切到深色模板的短暂瞬间；稳态依赖完整主题切换，避免黑底黑字。
       const useFallback =
-        this.isDark && !this.isLikelyDarkColor(themeConfig.backgroundColor)
+        this.isDark &&
+        !this.isCurrentThemeDark() &&
+        !this.isLikelyDarkColor(themeConfig.backgroundColor)
       this.setCanvasDarkFallback(useFallback)
       if (useFallback) return
       el.style.backgroundColor = themeConfig.backgroundColor || ''
@@ -597,10 +598,9 @@ export default {
       if (!this.adaptingAppearanceTheme && this.mindMap) {
         const current = this.mindMap.getTheme()
         if (this.isCurrentThemeDark(current)) {
-          this.appearanceHeldDarkTheme = null
+          this.appearanceHeldDarkTheme = current
         } else {
           this.appearanceHeldLightTheme = current
-          this.appearanceHeldDarkTheme = null
         }
       }
       this.syncCanvasDarkBackground()
@@ -786,6 +786,7 @@ export default {
         }
       })
       this.bindCanvasThemeEvents()
+      this.ensureAppearanceThemeAligned()
       this.loadPlugins()
       this.mindMap.keyCommand.addShortcut('Control+s', () => {
         this.manualSave()
