@@ -65,9 +65,10 @@ export default {
     return (data.list || []).map(normalizeMemberDto)
   },
   bulkSetMembers: async (id, payload) => {
-    const data = await productRequest(`/api/folders/${encodeURIComponent(id)}/members/bulk`, {
+    const request = productRequest(`/api/folders/${encodeURIComponent(id)}/members/bulk`, {
       method: 'POST', body: JSON.stringify(payload || {})
     })
+    const data = await Promise.race([request, new Promise((_, reject) => setTimeout(() => reject(new Error('批量授权请求超时，请稍后重试')), 20000))])
     return (data.list || []).map(normalizeMemberDto)
   },
   updateMember: async (id, userId, role) => {
