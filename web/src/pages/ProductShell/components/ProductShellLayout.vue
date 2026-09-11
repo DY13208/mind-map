@@ -14,42 +14,6 @@
         <div class="productLogo" @click="$router.push('/files')">
           <span>良</span><strong>良策</strong>
         </div>
-        <button
-          class="sidebarToggle"
-          type="button"
-          :title="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
-          :aria-label="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
-          :aria-expanded="String(!sidebarCollapsed)"
-          aria-controls="product-navigation"
-          data-testid="sidebar-toggle"
-          @click="setSidebarCollapsed(!sidebarCollapsed)"
-        >
-          <svg
-            class="sidebarToggleIcon"
-            viewBox="0 0 16 16"
-            width="16"
-            height="16"
-            aria-hidden="true"
-            focusable="false"
-          >
-            <rect
-              x="1.75"
-              y="2.25"
-              width="12.5"
-              height="11.5"
-              rx="1.5"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.25"
-            />
-            <path
-              d="M5.75 2.25v11.5"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.25"
-            />
-          </svg>
-        </button>
       </div>
       <nav id="product-navigation" aria-label="产品导航">
         <p class="navLabel">文件</p>
@@ -108,6 +72,42 @@
         </button>
       </div>
     </aside>
+    <button
+      class="sidebarToggle"
+      type="button"
+      :title="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
+      :aria-label="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
+      :aria-expanded="String(!sidebarCollapsed)"
+      aria-controls="product-navigation"
+      data-testid="sidebar-toggle"
+      @click="setSidebarCollapsed(!sidebarCollapsed)"
+    >
+      <svg
+        class="sidebarToggleIcon"
+        viewBox="0 0 16 16"
+        width="16"
+        height="16"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <rect
+          x="1.75"
+          y="2.25"
+          width="12.5"
+          height="11.5"
+          rx="1.5"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.25"
+        />
+        <path
+          d="M5.75 2.25v11.5"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.25"
+        />
+      </svg>
+    </button>
     <main class="productMain">
       <router-view />
     </main>
@@ -224,6 +224,39 @@ export default {
 .productShell .sidebarBackdrop {
   display: none;
 }
+.productShell .sidebarToggle {
+  position: fixed;
+  top: 22px;
+  left: calc(216px + 10px);
+  z-index: 11;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  background: var(--ui-surface);
+  color: #6b7c74;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(23, 38, 31, 0.06);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease,
+    left 0.2s ease;
+  &:hover {
+    background: var(--ui-surface-muted);
+    color: var(--ui-primary);
+    border-color: #c9ddd4;
+  }
+  &:active {
+    background: var(--ui-primary-soft);
+  }
+  &:focus-visible {
+    outline: 2px solid #087854;
+    outline-offset: 2px;
+  }
+}
+.productShell .sidebarToggleIcon {
+  display: block;
+}
 .productShell .productSidebar {
   width: 216px;
   background: var(--ui-surface);
@@ -238,8 +271,6 @@ export default {
   .sidebarHeader {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
     min-height: 40px;
     margin-bottom: 16px;
     padding: 0 4px 0 8px;
@@ -267,33 +298,6 @@ export default {
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-  }
-  .sidebarToggle {
-    width: 28px;
-    height: 28px;
-    flex: 0 0 auto;
-    display: grid;
-    place-items: center;
-    border: 0;
-    border-radius: 6px;
-    background: transparent;
-    color: #6b7c74;
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
-    &:hover {
-      background: var(--ui-surface-muted);
-      color: var(--ui-primary);
-    }
-    &:active {
-      background: var(--ui-primary-soft);
-    }
-    &:focus-visible {
-      outline: 2px solid #087854;
-      outline-offset: 2px;
-    }
-  }
-  .sidebarToggleIcon {
-    display: block;
   }
   nav {
     display: flex;
@@ -427,14 +431,14 @@ export default {
   color: #40564e;
 }
 .productShell--collapsed {
+  .sidebarToggle {
+    left: calc(72px + 10px);
+  }
   .productSidebar {
     width: 72px;
     padding-inline: 10px;
     .sidebarHeader {
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-start;
-      gap: 10px;
+      justify-content: center;
       margin-bottom: 18px;
       padding: 0;
     }
@@ -482,6 +486,12 @@ export default {
 @media (max-width: 760px) {
   .productShell .productMain {
     margin-left: 72px;
+  }
+  .productShell .sidebarToggle {
+    left: calc(72px + 10px);
+  }
+  .productShell:not(.productShell--collapsed) .sidebarToggle {
+    left: calc(216px + 10px);
   }
   .productShell .sidebarBackdrop {
     display: block;
