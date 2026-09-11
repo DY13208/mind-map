@@ -228,7 +228,9 @@ export default {
       appearanceHeldDarkTheme: null,
       appearanceHeldLightTheme: null,
       appearanceTransitioning: false,
-      appearanceTransitionTimer: null
+      appearanceTransitionTimer: null,
+      appearanceTransitionToken: null,
+      appearanceSnapshotEl: null
     }
   },
   computed: {
@@ -334,6 +336,8 @@ export default {
       clearTimeout(this.appearanceTransitionTimer)
       this.appearanceTransitionTimer = null
     }
+    this.appearanceTransitionToken = null
+    this.clearAppearanceSnapshot()
     this.importPersistLock = false
     this.stopImportProgressPoll()
     this.$bus.$off('execCommand', this.execCommand)
@@ -516,8 +520,8 @@ export default {
       )
     },
 
-    // 日间/夜间切换：先藏节点层，再同步 isDark 与主题模板，避免中间帧黑底黑字闪烁。
-    handleToggleAppearanceMode(nextDark) {
+    // 日间/夜间：优先用 View Transition 做画布交叉淡入；否则用快照淡出，避免纯色遮罩「闪一下」。
+    async handleToggleAppearanceMode(nextDark) {
       if (!this.mindMap || this.appearanceTransitioning) return
       const wantDark = !!nextDark
       if (wantDark === !!this.isDark) {
@@ -536,70 +540,169 @@ export default {
       this.appearanceHeldLightTheme = resolved.heldLightTheme
       this.appearanceHeldDarkTheme = resolved.heldDarkTheme
 
-      this.beginAppearanceTransition()
-      this.setLocalConfig({ isDark: wantDark })
-
-      if (resolved.changed) {
-        this.adaptingAppearanceTheme = true
-        this.mindMap.setTheme(resolved.theme, true)
-        const config = this.mindMap.getCustomThemeConfig
-          ? this.mindMap.getCustomThemeConfig()
-          : {}
-        storeData({
-          theme: {
-            template: resolved.theme,
-            config: config || {}
-          }
-        })
-        if (this.mindMapData && this.mindMapData.theme) {
-          this.mindMapData.theme.template = resolved.theme
-        }
-        this.mindMap.render(null, 'changeTheme')
-      } else {
-        this.syncCanvasDarkBackground()
-        this.endAppearanceTransition()
-      }
-    },
-
-    beginAppearanceTransition() {
       this.appearanceTransitioning = true
+      this.adaptingAppearanceTheme = true
       this.setCanvasDarkFallback(false)
-      const el = this.mindMap && this.mindMap.el
-      if (el && el.classList) el.classList.add('isAppearanceTransitioning')
-      if (this.mindMap) {
-        this.mindMap.off(
-          'node_tree_render_end',
-          this.endAppearanceTransition
-        )
-        this.mindMap.on('node_tree_render_end', this.endAppearanceTransition)
+
+      const el = this.mindMap.el
+      const token = Symbol('appearance')
+      this.appearanceTransitionToken = token
+      const reduceMotion =
+        typeof window !== 'undefined' &&
+        window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+      const runChange = async () => {
+        if (this.appearanceTransitionToken !== token || !this.mindMap) return
+        await this.applyAppearanceModeChange(wantDark, resolved)
+        await new Promise(resolve => {
+          requestAnimationFrame(() => requestAnimationFrame(resolve))
+        })
       }
-      if (this.appearanceTransitionTimer) {
-        clearTimeout(this.appearanceTransitionTimer)
+
+      try {
+        if (
+          !reduceMotion &&
+          el &&
+          typeof document.startViewTransition === 'function'
+        ) {
+          el.style.viewTransitionName = 'mind-map-appearance'
+          const transition = document.startViewTransition(() => runChange())
+          await transition.finished.catch(() => {})
+        } else if (!reduceMotion) {
+          this.showAppearanceSnapshot()
+          await runChange()
+          if (this.appearanceTransitionToken === token) {
+            await this.fadeOutAppearanceSnapshot()
+          }
+        } else {
+          await runChange()
+        }
+      } finally {
+        if (el) el.style.viewTransitionName = ''
+        this.clearAppearanceSnapshot()
+        if (el && el.classList) {
+          el.classList.remove('isAppearanceTransitioning')
+        }
+        this.adaptingAppearanceTheme = false
+        this.appearanceTransitioning = false
+        this.appearanceTransitionToken = null
+        this.syncCanvasDarkBackground()
       }
-      this.appearanceTransitionTimer = setTimeout(() => {
-        this.endAppearanceTransition()
-      }, 800)
     },
 
-    endAppearanceTransition() {
-      if (!this.appearanceTransitioning && !this.adaptingAppearanceTheme) {
-        return
-      }
-      if (this.appearanceTransitionTimer) {
-        clearTimeout(this.appearanceTransitionTimer)
-        this.appearanceTransitionTimer = null
-      }
-      if (this.mindMap) {
-        this.mindMap.off(
-          'node_tree_render_end',
-          this.endAppearanceTransition
-        )
-      }
-      this.adaptingAppearanceTheme = false
-      this.appearanceTransitioning = false
+    applyAppearanceModeChange(wantDark, resolved) {
+      return new Promise(resolve => {
+        if (!this.mindMap) {
+          resolve()
+          return
+        }
+
+        const finish = () => {
+          if (this.mindMap) {
+            this.mindMap.off('node_tree_render_end', finish)
+          }
+          if (this.appearanceTransitionTimer) {
+            clearTimeout(this.appearanceTransitionTimer)
+            this.appearanceTransitionTimer = null
+          }
+          resolve()
+        }
+
+        if (resolved.changed) {
+          this.mindMap.setTheme(resolved.theme, true)
+          if (typeof this.mindMap.initTheme === 'function') {
+            this.mindMap.initTheme()
+          }
+
+          const config = this.mindMap.getCustomThemeConfig
+            ? this.mindMap.getCustomThemeConfig()
+            : {}
+          storeData({
+            theme: {
+              template: resolved.theme,
+              config: config || {}
+            }
+          })
+          if (this.mindMapData && this.mindMapData.theme) {
+            this.mindMapData.theme.template = resolved.theme
+          }
+
+          this.setLocalConfig({ isDark: wantDark })
+          this.mindMap.off('node_tree_render_end', finish)
+          this.mindMap.on('node_tree_render_end', finish)
+          this.appearanceTransitionTimer = setTimeout(finish, 1200)
+          this.mindMap.render(null, 'changeTheme')
+          return
+        }
+
+        this.setLocalConfig({ isDark: wantDark })
+        this.syncCanvasDarkBackground()
+        resolve()
+      })
+    },
+
+    showAppearanceSnapshot() {
       const el = this.mindMap && this.mindMap.el
-      if (el && el.classList) el.classList.remove('isAppearanceTransitioning')
-      this.syncCanvasDarkBackground()
+      if (!el) return
+      this.clearAppearanceSnapshot()
+      const snap = el.cloneNode(true)
+      snap.removeAttribute('id')
+      snap.querySelectorAll('[id]').forEach(node => {
+        node.removeAttribute('id')
+      })
+      snap
+        .querySelectorAll('[data-appearance-snapshot]')
+        .forEach(node => node.remove())
+      Object.assign(snap.style, {
+        position: 'absolute',
+        left: '0',
+        top: '0',
+        right: '0',
+        bottom: '0',
+        width: '100%',
+        height: '100%',
+        zIndex: '2147483646',
+        pointerEvents: 'none',
+        margin: '0',
+        opacity: '1',
+        transition: 'none',
+        viewTransitionName: 'none'
+      })
+      snap.setAttribute('data-appearance-snapshot', '1')
+      snap.setAttribute('aria-hidden', 'true')
+      el.appendChild(snap)
+      this.appearanceSnapshotEl = snap
+    },
+
+    fadeOutAppearanceSnapshot() {
+      return new Promise(resolve => {
+        const snap = this.appearanceSnapshotEl
+        if (!snap) {
+          resolve()
+          return
+        }
+        let settled = false
+        const done = () => {
+          if (settled) return
+          settled = true
+          this.clearAppearanceSnapshot()
+          resolve()
+        }
+        snap.style.transition = 'opacity 0.16s ease'
+        void snap.offsetHeight
+        snap.style.opacity = '0'
+        snap.addEventListener('transitionend', done, { once: true })
+        setTimeout(done, 220)
+      })
+    },
+
+    clearAppearanceSnapshot() {
+      const snap = this.appearanceSnapshotEl
+      if (snap && snap.parentNode) {
+        snap.parentNode.removeChild(snap)
+      }
+      this.appearanceSnapshotEl = null
     },
 
     // 日间/夜间必须切换完整主题模板：只改画布底色会留下浅色主题的黑字，对比失效。
@@ -712,7 +815,6 @@ export default {
       if (!this.mindMap) return
       this.mindMap.off('node_tree_render_start', this.syncCanvasDarkBackground)
       this.mindMap.off('view_theme_change', this.onViewThemeChange)
-      this.mindMap.off('node_tree_render_end', this.endAppearanceTransition)
     },
 
     // 获取思维导图数据，实际应该调接口获取
@@ -1354,14 +1456,31 @@ export default {
       background-color: #262a2e !important;
       background-image: none !important;
     }
+  }
+}
+</style>
 
-    // 日夜间切换时先隐藏节点层，等主题与文字色一次渲染完成再显示，避免白/黑字闪帧。
-    &.isAppearanceTransitioning {
-      > svg,
-      svg {
-        opacity: 0 !important;
-      }
-    }
+<style lang="less">
+/* 日夜间画布交叉淡入（View Transition），保持短促以免感觉「闪一下」 */
+::view-transition-group(mind-map-appearance) {
+  animation-duration: 0.18s;
+  animation-timing-function: ease;
+}
+
+::view-transition-old(mind-map-appearance),
+::view-transition-new(mind-map-appearance) {
+  animation-duration: 0.18s;
+  animation-timing-function: ease;
+  mix-blend-mode: normal;
+  height: 100%;
+  object-fit: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(mind-map-appearance),
+  ::view-transition-old(mind-map-appearance),
+  ::view-transition-new(mind-map-appearance) {
+    animation: none !important;
   }
 }
 </style>
