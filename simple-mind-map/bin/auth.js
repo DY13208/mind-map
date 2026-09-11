@@ -978,6 +978,14 @@ async function listWecomContacts(options = {}) {
     .filter(item => item.userId)
 }
 
+async function listWecomDepartments() {
+  if (!config.enabled) throw new AuthError('wecom_contacts_unavailable', '企业微信登录未启用', 503)
+  const token = await getAccessToken()
+  const data = await fetchJson(wecomUrl('/cgi-bin/department/list', { access_token: token }), { retries: 1 })
+  if (!successfulWecomResponse(data)) throw new AuthError('wecom_contacts_failed', '企业微信部门读取失败', 502)
+  return (Array.isArray(data.department) ? data.department : []).map(item => ({ id: Number(item.id), name: String(item.name || ''), parentId: Number(item.parentid || 0), order: Number(item.order || 0) })).filter(item => item.id && item.name)
+}
+
 function wecomAvatarUrl(profile) {
   if (!profile || typeof profile !== 'object') return ''
   const candidates = [profile.avatar, profile.thumb_avatar, profile.thumbAvatar]
@@ -1725,6 +1733,7 @@ module.exports = {
   isAllowedOrigin,
   createTestIdentity,
   listWecomContacts,
+  listWecomDepartments,
   upsertWecomUser,
   resolveInternalUserId,
   __test: {

@@ -74,6 +74,16 @@ function sumNode(data = []) {
     return total + 1 + Math.max(nested, knownChildren)
   }, 0)
 }
+function findNodeData(root, uid) {
+  if (!root || !uid) return null
+  if (root.data && root.data.uid === uid) return root
+  const children = Array.isArray(root.children) ? root.children : []
+  for (const child of children) {
+    const found = findNodeData(child, uid)
+    if (found) return found
+  }
+  return null
+}
 //  创建或更新展开收缩按钮内容
 function updateExpandBtnNode() {
   let { expand } = this.getData()
@@ -103,7 +113,14 @@ function updateExpandBtnNode() {
           color: expandBtnStyle.strokeColor
         })
         // 计算子节点数量
-        let count = this.sumNode(this.nodeData.children || [])
+        const uid = this.getData('uid')
+        const fullRoot = this.mindMap && typeof this.mindMap.getData === 'function'
+          ? this.mindMap.getData()
+          : null
+        const fullNode = findNodeData(fullRoot, uid)
+        let count = this.sumNode(
+          (fullNode && fullNode.children) || this.nodeData.children || []
+        )
         const lazy = Number(this.getData('childCount')) || 0
         if (lazy > count) count = lazy
         if (typeof expandBtnNumHandler === 'function') {

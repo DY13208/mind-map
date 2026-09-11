@@ -144,10 +144,18 @@ async function handleFileSystemApi(req, res, options = {}) {
       const body = options.body || (await readBody(req))
       const role = roomAcl.normalizeRole(body.role)
       if (!['editor', 'viewer'].includes(role)) throw Object.assign(new Error('文件夹权限必须是可编辑或可查看'), { code: 'BAD_REQUEST', statusCode: 400 })
-      const params = []
+      const params = [req.authUser && req.authUser.corpId]
       let where = ['corp_id = $1']
-      params.push(req.authUser && req.authUser.corpId)
-      if (body.departmentId) { params.push(String(body.departmentId)); where.push(`departments::text like '%' || $${params.length} || '%'`) }
+      if (body.departmentId) {
+        const departments = await require('../auth').listWecomDepartments()
+        const selected = new Set([Number(body.departmentId)])
+        if (body.includeChildren !== false) {
+          let changed = true
+          while (changed) { changed = false; departments.forEach(d => { if (selected.has(Number(d.parentId)) && !selected.has(Number(d.id))) { selected.add(Number(d.id)); changed = true } }) }
+        }
+        params.push(Array.from(selected).map(String))
+        where.push(`departments ?| $${params.length}::text[]`)
+      }
       const rows = fs.store.kind === 'pg' ? (await fs.store.query(`select user_id from wecom_users where ${where.join(' and ')}`, params)).rows : []
       for (const row of rows) {
         if (!row.user_id || row.user_id === folder.created_by) continue
@@ -161,7 +169,10 @@ async function handleFileSystemApi(req, res, options = {}) {
     if (folderAcl) {
       const folder = await fs.store.getFolder(folderAcl.id)
       if (!folder) throw Object.assign(new Error('文件夹不存在'), { code: 'FOLDER_NOT_FOUND', statusCode: 404 })
-      const canManage = bypass || folder.created_by === userId
+      const folderMember = !bypass && userId && fs.store.listFolderMembers
+        ? (await fs.store.listFolderMembers(folderAcl.id)).find(item => item.user_id === userId)
+        : null
+      const canManage = bypass || folder.created_by === userId || (folderMember && folderMember.role === 'manager')
       if (!canManage && method !== 'GET') {
         throw Object.assign(new Error('只有文件夹所有者可以设置权限'), { code: 'FORBIDDEN', statusCode: 403 })
       }
@@ -172,8 +183,8 @@ async function handleFileSystemApi(req, res, options = {}) {
       }
       if ((method === 'POST' || method === 'PATCH') && (!folderAcl.userId || method === 'PATCH')) {
         const body = options.body || (await readBody(req))
-        const role = roomAcl.normalizeRole(body.role)
-        if (!['editor', 'viewer'].includes(role)) {
+        const role = String(body.role || '').trim().toLowerCase()
+        if (!['manager', 'editor', 'viewer'].includes(role)) {
           throw Object.assign(new Error('文件夹权限必须是可编辑或可查看'), { code: 'BAD_REQUEST', statusCode: 400 })
         }
         const requestedUser = folderAcl.userId || body.userId || body.user_id
@@ -184,6 +195,9 @@ async function handleFileSystemApi(req, res, options = {}) {
         )
         if (!targetId || targetId === folder.created_by) {
           throw Object.assign(new Error('请选择其他企业成员'), { code: 'BAD_REQUEST', statusCode: 400 })
+        }
+        if (folderMember && folderMember.role === 'manager' && role === 'manager') {
+          throw Object.assign(new Error('可管理权限只能由文件夹创建人授予'), { code: 'FORBIDDEN', statusCode: 403 })
         }
         await fs.store.setFolderMember(folderAcl.id, targetId, role)
         const roomKeys = await fs.store.roomKeysInFolder(folderAcl.id)
