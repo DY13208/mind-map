@@ -13,37 +13,73 @@
       </div>
       <div class="right">
         <span class="spaceLabel">目录</span>
-        <el-cascader
-          v-model="roomKey"
-          size="small"
-          :options="spaceDirectoryOptions"
-          :props="spaceDirectoryProps"
-          filterable
-          clearable
-          :show-all-levels="true"
-          separator=" / "
-          placeholder="选择文件夹 / 脑图"
-          class="spaceSelect"
+        <el-popover
+          v-model="spaceDirectoryVisible"
+          placement="bottom-end"
+          width="600"
+          trigger="click"
           popper-class="sopSpaceDirectoryDropdown"
-          :disabled="spacesLoading"
-          @change="onSpaceChange"
+          @show="syncSpaceDirectoryTree"
         >
-          <template slot-scope="{ data }">
-            <span class="spaceDirectoryOption">
-              <i
-                :class="data.kind === 'folder' ? 'el-icon-folder-opened' : 'el-icon-document'"
-                aria-hidden="true"
-              ></i>
-              <span class="spaceDirectoryName">{{ data.label }}</span>
-              <span v-if="data.kind === 'folder'" class="spaceDirectoryMeta">
-                {{ data.roomCount }} 个脑图
+          <div class="spaceDirectoryPicker" @keydown.esc.stop="spaceDirectoryVisible = false">
+            <el-input
+              v-model="spaceDirectoryQuery"
+              size="small"
+              clearable
+              prefix-icon="el-icon-search"
+              placeholder="搜索文件夹或脑图"
+              aria-label="搜索文件夹或脑图"
+            ></el-input>
+            <div v-if="spacesLoading" class="spaceDirectoryLoading">
+              正在加载目录…
+            </div>
+            <el-tree
+              v-else
+              ref="spaceDirectoryTree"
+              class="spaceDirectoryTree"
+              :data="spaceDirectoryOptions"
+              node-key="value"
+              :props="spaceDirectoryTreeProps"
+              :filter-node-method="filterSpaceDirectoryNode"
+              :expand-on-click-node="false"
+              :highlight-current="true"
+              empty-text="没有可访问的脑图"
+              @node-click="onSpaceDirectoryNodeClick"
+            >
+              <span
+                slot-scope="{ data }"
+                class="spaceDirectoryOption"
+                :title="spaceDirectoryOptionTitle(data)"
+              >
+                <i
+                  :class="data.kind === 'folder' ? 'el-icon-folder-opened' : 'el-icon-document'"
+                  aria-hidden="true"
+                ></i>
+                <span class="spaceDirectoryName">{{ data.label }}</span>
+                <span v-if="data.kind === 'folder'" class="spaceDirectoryMeta">
+                  {{ data.roomCount }} 个脑图
+                </span>
+                <span v-else class="spaceDirectoryMeta">
+                  {{ data.accessLabel }}<template v-if="data.ownerName"> · {{ data.ownerName }}</template>
+                </span>
               </span>
-              <span v-else class="spaceDirectoryMeta">
-                {{ data.accessLabel }}<template v-if="data.roomKey"> · {{ data.roomKey }}</template>
-              </span>
-            </span>
-          </template>
-        </el-cascader>
+            </el-tree>
+          </div>
+          <el-button
+            slot="reference"
+            size="small"
+            class="spaceSelect"
+            :class="{ isOpen: spaceDirectoryVisible }"
+            :loading="spacesLoading"
+            :disabled="spacesLoading"
+            aria-haspopup="tree"
+            :aria-expanded="String(spaceDirectoryVisible)"
+          >
+            <i class="el-icon-folder-opened" aria-hidden="true"></i>
+            <span class="spaceSelectText">{{ selectedSpaceDirectoryLabel }}</span>
+            <i class="el-icon-arrow-down spaceSelectCaret" aria-hidden="true"></i>
+          </el-button>
+        </el-popover>
         <el-button
           size="small"
           type="primary"
@@ -1003,12 +1039,11 @@ export default {
       roomKey: '',
       spaceOptions: [],
       folders: [],
-      spaceDirectoryProps: {
-        value: 'value',
-        label: 'label',
+      spaceDirectoryVisible: false,
+      spaceDirectoryQuery: '',
+      spaceDirectoryTreeProps: {
         children: 'children',
-        emitPath: false,
-        expandTrigger: 'click'
+        label: 'label'
       },
       dialogVisible: false,
       dialogTitle: '',
@@ -1100,6 +1135,13 @@ export default {
     },
     spaceDirectoryOptions() {
       return this.buildSpaceDirectoryOptions()
+    },
+    selectedSpaceDirectoryLabel() {
+      const room = String(this.roomKey || '').trim()
+      if (!room) return '选择文件夹 / 脑图'
+      const path = this.findSpaceDirectoryPath(room)
+      if (path.length) return path.map(item => item.label).join(' / ')
+      return room
     },
     sopQueueSummary() {
       const s = this.sopQueueSnap || {}
@@ -1346,6 +1388,12 @@ export default {
         }
       })
     },
+    spaceDirectoryQuery() {
+      this.$nextTick(() => {
+        const tree = this.$refs.spaceDirectoryTree
+        if (tree) tree.filter(this.spaceDirectoryQuery)
+      })
+    },
     '$route.query.room'(val) {
       const next = String(val || '').trim()
       if (next !== this.roomKey) {
@@ -1489,6 +1537,14 @@ export default {
       if (role === 'viewer' || (item && item.canEdit === false)) return '只读'
       return '可编辑'
     },
+    spaceOwnerName(item) {
+      const owner = (item && item.owner) || {}
+      return String(
+        owner.name ||
+          (item && (item.ownerName || item.owner_name)) ||
+          ''
+      ).trim()
+    },
     mapSpaceOption(item) {
       const room_key = item.room_key || item.roomKey || ''
       return {
@@ -1499,7 +1555,8 @@ export default {
         role: item.role || null,
         canEdit: item.canEdit,
         canManage: item.canManage,
-        accessLabel: this.spaceAccessLabel(item)
+        accessLabel: this.spaceAccessLabel(item),
+        ownerName: this.spaceOwnerName(item)
       }
     },
     ensureCurrentSpaceOption() {
@@ -1514,7 +1571,8 @@ export default {
         role: null,
         canEdit: false,
         canManage: false,
-        accessLabel: '权限校验中'
+        accessLabel: '权限校验中',
+        ownerName: ''
       })
     },
     mergeSpaceOptions(list, { reset = false } = {}) {
@@ -1567,7 +1625,8 @@ export default {
         roomKey: room.room_key,
         role: room.role,
         canEdit: room.canEdit,
-        accessLabel: room.accessLabel || this.spaceAccessLabel(room)
+        accessLabel: room.accessLabel || this.spaceAccessLabel(room),
+        ownerName: room.ownerName || this.spaceOwnerName(room)
       })
 
       const buildFolder = (folder, ancestors = new Set()) => {
@@ -1636,6 +1695,56 @@ export default {
       } finally {
         this.spacesLoading = false
       }
+    },
+    findSpaceDirectoryPath(value, nodes = this.spaceDirectoryOptions, path = []) {
+      const target = String(value || '').trim()
+      if (!target) return []
+      for (const node of nodes || []) {
+        const nextPath = path.concat(node)
+        if (String(node.value || '') === target) return nextPath
+        const found = this.findSpaceDirectoryPath(target, node.children || [], nextPath)
+        if (found.length) return found
+      }
+      return []
+    },
+    filterSpaceDirectoryNode(query, data) {
+      const keyword = String(query || '').trim().toLowerCase()
+      if (!keyword) return true
+      return [data && data.label, data && data.roomKey]
+        .filter(Boolean)
+        .some(value => String(value).toLowerCase().includes(keyword))
+    },
+    spaceDirectoryOptionTitle(data) {
+      const label = String((data && data.label) || '').trim()
+      const roomKey = String((data && data.roomKey) || '').trim()
+      if (!roomKey) return label
+      return `${label}\n脑图标识：${roomKey}`
+    },
+    syncSpaceDirectoryTree() {
+      this.$nextTick(() => {
+        const tree = this.$refs.spaceDirectoryTree
+        if (!tree) return
+        tree.filter(this.spaceDirectoryQuery)
+        const path = this.findSpaceDirectoryPath(this.roomKey)
+        path.slice(0, -1).forEach(item => {
+          const node = tree.getNode(item.value)
+          if (node) node.expand()
+        })
+        if (this.roomKey) tree.setCurrentKey(this.roomKey)
+      })
+    },
+    onSpaceDirectoryNodeClick(data, node) {
+      if (!data) return
+      if (data.kind === 'folder') {
+        if (node && node.expanded) node.collapse()
+        else if (node) node.expand()
+        return
+      }
+      const room = String(data.roomKey || data.value || '').trim()
+      if (!room) return
+      this.roomKey = room
+      this.spaceDirectoryVisible = false
+      this.onSpaceChange(room)
     },
     onSpaceChange(val) {
       const room = String(val || '').trim()
@@ -3530,6 +3639,33 @@ export default {
     .spaceSelect {
       width: 360px;
       max-width: 48vw;
+      min-width: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 8px;
+      overflow: hidden;
+
+      &.isOpen {
+        color: var(--sop-primary);
+        border-color: var(--sop-primary);
+        box-shadow: 0 0 0 3px rgba(8, 120, 84, 0.12);
+      }
+
+      /deep/ .spaceSelectText {
+        min-width: 0;
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-align: left;
+      }
+
+      /deep/ .spaceSelectCaret {
+        margin-left: auto;
+        color: #94a3b8;
+        flex-shrink: 0;
+      }
     }
 
     .openMapBtn {
@@ -5376,22 +5512,56 @@ body.isDark .sopMindDialog,
 }
 
 .sopSpaceDirectoryDropdown {
-  min-width: 520px;
+  padding: 10px;
+  width: 600px !important;
+  min-width: 0;
+  max-width: calc(100vw - 24px);
 
-  .el-cascader-menu {
-    min-width: 220px;
-    max-width: 300px;
+  .spaceDirectoryPicker {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 8px;
   }
 
-  .el-cascader-node {
-    height: 42px;
-    line-height: 42px;
+  .spaceDirectoryLoading {
+    min-height: 92px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #718078;
+    font-size: 13px;
+  }
+
+  .spaceDirectoryTree {
+    max-height: 58vh;
+    overflow: auto;
+    color: #25342d;
+  }
+
+  .el-tree-node__content {
+    min-height: 38px;
+    height: auto;
+    margin: 1px 0;
+    padding-right: 8px;
+    border-radius: 8px;
+  }
+
+  .el-tree-node__content:hover,
+  .el-tree-node.is-current > .el-tree-node__content {
+    background: #edf8f4;
+  }
+
+  .el-tree-node__expand-icon {
+    padding: 6px;
+    color: #809087;
   }
 
   .spaceDirectoryOption {
     width: 100%;
     min-width: 0;
-    display: inline-flex;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) minmax(0, 210px);
     align-items: center;
     gap: 8px;
   }
@@ -5410,18 +5580,28 @@ body.isDark .sopMindDialog,
   }
 
   .spaceDirectoryMeta {
-    margin-left: auto;
-    padding-left: 12px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     color: #8a9891;
     font-size: 12px;
     white-space: nowrap;
   }
 
-  .el-cascader-node.in-active-path,
-  .el-cascader-node.is-active,
-  .el-cascader-node.is-selectable.in-checked-path {
+  .el-tree-node.is-current > .el-tree-node__content .spaceDirectoryName {
     color: #087854;
     font-weight: 600;
+  }
+}
+
+@media (max-width: 640px) {
+  .sopSpaceDirectoryDropdown {
+    width: calc(100vw - 24px) !important;
+
+    .spaceDirectoryOption {
+      grid-template-columns: auto minmax(0, 1fr) minmax(0, 132px);
+      gap: 6px;
+    }
   }
 }
 
