@@ -126,6 +126,7 @@ import {
 } from '@/utils/importTree'
 import handleClipboardText from '@/utils/handleClipboardText'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
+import { isDarkThemeValue } from '@/utils/themeAppearance'
 import Scrollbar from './Scrollbar.vue'
 import exampleData from 'simple-mind-map/example/exampleData'
 import FormulaSidebar from './FormulaSidebar.vue'
@@ -222,7 +223,10 @@ export default {
       prevImg: '',
       storeConfigTimer: null,
       showDragMask: false,
-      useDarkCanvasFallback: false
+      useDarkCanvasFallback: false,
+      adaptingAppearanceTheme: false,
+      appearanceHeldDarkTheme: null,
+      appearanceHeldLightTheme: null
     }
   },
   computed: {
@@ -238,7 +242,8 @@ export default {
       extraTextOnExport: state => state.extraTextOnExport,
       isDragOutlineTreeNode: state => state.isDragOutlineTreeNode,
       enableAi: state => state.localConfig.enableAi,
-      isDark: state => state.localConfig.isDark
+      isDark: state => state.localConfig.isDark,
+      extendThemeGroupList: state => state.extendThemeGroupList
     })
   },
   watch: {
@@ -306,6 +311,7 @@ export default {
     this.$bus.$on('createAssociativeLine', this.handleCreateLineFromActiveNode)
     this.$bus.$on('startPainter', this.handleStartPainter)
     this.$bus.$on('localStorageExceeded', this.onLocalStorageExceeded)
+    this.$bus.$on('before_toggle_appearance', this.adaptThemeToAppearance)
     window.addEventListener('resize', this.handleResize)
   },
   beforeDestroy() {
@@ -336,6 +342,7 @@ export default {
     this.$bus.$off('showLoading', this.handleShowLoading)
     this.$bus.$off('hideLoading', this.handleForceHideLoading)
     this.$bus.$off('localStorageExceeded', this.onLocalStorageExceeded)
+    this.$bus.$off('before_toggle_appearance', this.adaptThemeToAppearance)
     window.removeEventListener('resize', this.handleResize)
     if (this.mindMap) {
       this.unbindCanvasThemeEvents()
@@ -493,6 +500,63 @@ export default {
       return 0.299 * r + 0.587 * g + 0.114 * b < 140
     },
 
+    isCurrentThemeDark(themeValue) {
+      return isDarkThemeValue(
+        themeValue || (this.mindMap && this.mindMap.getTheme()),
+        this.extendThemeGroupList
+      )
+    },
+
+    // 日间/夜间切换时：深色主题需切到浅色模板，再切回夜间时恢复。
+    adaptThemeToAppearance(nextDark) {
+      if (!this.mindMap) return
+      const current = this.mindMap.getTheme()
+      const currentIsDark = this.isCurrentThemeDark(current)
+      if (!nextDark) {
+        if (currentIsDark) {
+          this.appearanceHeldDarkTheme = current
+          const lightTheme = this.appearanceHeldLightTheme || 'default'
+          this.applyAppearanceTheme(lightTheme)
+        } else {
+          this.appearanceHeldLightTheme = current
+        }
+        return
+      }
+      if (this.appearanceHeldDarkTheme) {
+        const restore = this.appearanceHeldDarkTheme
+        this.appearanceHeldDarkTheme = null
+        if (!currentIsDark) this.appearanceHeldLightTheme = current
+        this.applyAppearanceTheme(restore)
+        return
+      }
+      if (!currentIsDark) this.appearanceHeldLightTheme = current
+    },
+
+    applyAppearanceTheme(template) {
+      if (!this.mindMap || !template) return
+      if (this.mindMap.getTheme() === template) return
+      this.adaptingAppearanceTheme = true
+      try {
+        this.mindMap.setTheme(template)
+        const config = this.mindMap.getCustomThemeConfig
+          ? this.mindMap.getCustomThemeConfig()
+          : {}
+        storeData({
+          theme: {
+            template,
+            config: config || {}
+          }
+        })
+        if (this.mindMapData && this.mindMapData.theme) {
+          this.mindMapData.theme.template = template
+        }
+      } finally {
+        this.$nextTick(() => {
+          this.adaptingAppearanceTheme = false
+        })
+      }
+    },
+
     setCanvasDarkFallback(enabled) {
       this.useDarkCanvasFallback = !!enabled
       const el = this.mindMap
@@ -529,16 +593,29 @@ export default {
       this.setCanvasDarkFallback(this.isDark)
     },
 
+    onViewThemeChange() {
+      if (!this.adaptingAppearanceTheme && this.mindMap) {
+        const current = this.mindMap.getTheme()
+        if (this.isCurrentThemeDark(current)) {
+          this.appearanceHeldDarkTheme = null
+        } else {
+          this.appearanceHeldLightTheme = current
+          this.appearanceHeldDarkTheme = null
+        }
+      }
+      this.syncCanvasDarkBackground()
+    },
+
     bindCanvasThemeEvents() {
       if (!this.mindMap) return
       this.mindMap.on('node_tree_render_start', this.syncCanvasDarkBackground)
-      this.mindMap.on('view_theme_change', this.syncCanvasDarkBackground)
+      this.mindMap.on('view_theme_change', this.onViewThemeChange)
     },
 
     unbindCanvasThemeEvents() {
       if (!this.mindMap) return
       this.mindMap.off('node_tree_render_start', this.syncCanvasDarkBackground)
-      this.mindMap.off('view_theme_change', this.syncCanvasDarkBackground)
+      this.mindMap.off('view_theme_change', this.onViewThemeChange)
     },
 
     // 获取思维导图数据，实际应该调接口获取
