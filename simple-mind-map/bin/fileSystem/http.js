@@ -21,6 +21,10 @@ function folderMembers(pathname) {
     ? { id: decodeURIComponent(match[1]), userId: match[2] ? decodeURIComponent(match[2]) : '' }
     : null
 }
+function folderMembersBulk(pathname) {
+  const match = String(pathname || '').match(/^\/api\/folders\/([^/]+)\/members\/bulk$/)
+  return match ? decodeURIComponent(match[1]) : ''
+}
 
 function fileMove(pathname) {
   const match = String(pathname || '').match(
@@ -114,6 +118,7 @@ async function handleFileSystemApi(req, res, options = {}) {
       namedCollection(pathname, 'trash') ||
       folderCollection(pathname) ||
       folderMembers(pathname) ||
+      folderMembersBulk(pathname) ||
       folderItem(pathname) ||
       fileMove(pathname) ||
       fileInfo(pathname) ||
@@ -131,6 +136,27 @@ async function handleFileSystemApi(req, res, options = {}) {
   const bypass = !!actor.bypass || !isAuthEnabled()
 
   try {
+    const bulkFolderId = folderMembersBulk(pathname)
+    if (bulkFolderId && method === 'POST') {
+      const folder = await fs.store.getFolder(bulkFolderId)
+      if (!folder) throw Object.assign(new Error('文件夹不存在'), { code: 'FOLDER_NOT_FOUND', statusCode: 404 })
+      if (!bypass && folder.created_by !== userId) throw Object.assign(new Error('只有文件夹所有者可以设置权限'), { code: 'FORBIDDEN', statusCode: 403 })
+      const body = options.body || (await readBody(req))
+      const role = roomAcl.normalizeRole(body.role)
+      if (!['editor', 'viewer'].includes(role)) throw Object.assign(new Error('文件夹权限必须是可编辑或可查看'), { code: 'BAD_REQUEST', statusCode: 400 })
+      const params = []
+      let where = ['corp_id = $1']
+      params.push(req.authUser && req.authUser.corpId)
+      if (body.departmentId) { params.push(String(body.departmentId)); where.push(`departments::text like '%' || $${params.length} || '%'`) }
+      const rows = fs.store.kind === 'pg' ? (await fs.store.query(`select user_id from wecom_users where ${where.join(' and ')}`, params)).rows : []
+      for (const row of rows) {
+        if (!row.user_id || row.user_id === folder.created_by) continue
+        await fs.store.setFolderMember(bulkFolderId, row.user_id, role)
+        for (const roomKey of await fs.store.roomKeysInFolder(bulkFolderId)) await roomAcl.setMember(fs.store, roomKey, row.user_id, role, userId, req.authUser && req.authUser.corpId)
+      }
+      sendJson(res, 200, { ok: true, list: await fs.store.listFolderMembers(bulkFolderId), added: rows.length })
+      return true
+    }
     const folderAcl = folderMembers(pathname)
     if (folderAcl) {
       const folder = await fs.store.getFolder(folderAcl.id)
