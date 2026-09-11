@@ -1,23 +1,31 @@
 <template>
   <div class="sopPage" :class="{ detailMode: detailMode }">
-    <header class="sopHeader">
+    <header class="sopHeader" v-if="!detailMode">
       <div class="left">
-        <el-button size="mini" @click="goBack">{{ headerBackLabel }}</el-button>
-        <h1 v-if="!detailMode">SOP 台账</h1>
-        <h1 v-else class="detailTitle">
-          {{ (activeSop && activeSop.title) || dialogTitle || 'SOP 详情' }}
-        </h1>
+        <el-button size="small" class="openMapBtn" @click="goBack">
+          <SopGlyph kind="map" size="md" />
+          <span>{{ headerBackLabel }}</span>
+        </el-button>
+        <div class="titleBlock">
+          <h1>SOP 台账</h1>
+          <p class="titleSub" v-if="statusText">{{ statusText }}</p>
+        </div>
       </div>
-      <div class="right" v-if="!detailMode">
+      <div class="right">
         <span class="spaceLabel">空间</span>
         <el-select
           v-model="roomKey"
           size="small"
           filterable
+          remote
           clearable
-          placeholder="选择抽取空间"
+          reserve-keyword
+          placeholder="搜索或选择空间"
           class="spaceSelect"
-          :loading="spacesLoading"
+          popper-class="sopSpaceSelectDropdown"
+          :loading="spacesLoading || spacesLoadingMore"
+          :remote-method="remoteSearchSpaces"
+          @visible-change="onSpaceSelectVisible"
           @change="onSpaceChange"
         >
           <el-option
@@ -28,32 +36,45 @@
           ></el-option>
         </el-select>
         <el-button
-          size="mini"
+          size="small"
           type="primary"
+          class="refreshBtn"
           :loading="pullLoading"
           :disabled="!roomKey"
           @click="refreshRoomList"
         >
-          刷新
+          <SopGlyph v-if="!pullLoading" kind="refresh" size="sm" />
+          <span>刷新</span>
         </el-button>
       </div>
-      <div class="right" v-else>
+    </header>
+    <header class="sopHeader" v-else>
+      <div class="left">
+        <el-button size="small" class="openMapBtn" @click="goBack">
+          {{ headerBackLabel }}
+        </el-button>
+        <h1 class="detailTitle">
+          {{ (activeSop && activeSop.title) || dialogTitle || 'SOP 详情' }}
+        </h1>
+      </div>
+      <div class="right">
         <el-button
-          size="mini"
+          size="small"
           type="primary"
+          class="refreshBtn"
           :disabled="!activeSop || !canEditSop"
           @click="openRunDialog(activeSop)"
         >
-          运行
+          <SopGlyph kind="play" size="sm" />
+          <span>运行</span>
         </el-button>
-        <el-button size="mini" :loading="subtreeLoading" @click="reloadDetail">
+        <el-button size="small" :loading="subtreeLoading" @click="reloadDetail">
           刷新导图
         </el-button>
       </div>
     </header>
 
     <template v-if="!detailMode">
-      <div class="statusLine" v-if="statusText">{{ statusText }}</div>
       <div class="statusLine runStatus" v-if="sopQueueSummary">
         {{ sopQueueSummary }}
       </div>
@@ -63,12 +84,12 @@
 
       <div v-if="!roomKey" class="emptyState">请先选择空间</div>
       <div v-else class="sopWorkspace">
-        <div class="sopToolbar">
+        <div class="sopSearchWrap">
+          <SopGlyph kind="search" size="md" class="searchGlyph" />
           <el-input
             v-model="sopSearchQuery"
-            size="small"
+            size="medium"
             clearable
-            prefix-icon="el-icon-search"
             placeholder="搜索当前脑图 SOP 标题或路径"
             class="sopSearch"
             @input="onSopSearchInput"
@@ -86,7 +107,10 @@
         </div>
         <div v-else class="sopSplit">
           <aside class="sopTreePane" tabindex="0" @keydown="onTreeKeydown">
-            <div class="treeHead">层级</div>
+            <div class="treeHead">
+              <span>脑图层级</span>
+              <SopGlyph kind="chevron-down" size="sm" class="treeHeadChevron" />
+            </div>
             <ul class="sopTree" role="tree">
               <SopTreeNode
                 v-for="node in visibleTreeRoots"
@@ -103,68 +127,279 @@
           </aside>
           <section class="sopCardPane">
             <div class="cardPaneHead">
-              <span>{{ branchCardsLabel }}</span>
+              <span class="branchLabel">{{ branchCardsLabel }}</span>
+              <div class="viewToggle">
+                <button
+                  type="button"
+                  class="viewBtn"
+                  :class="{ active: branchViewMode === 'card' }"
+                  @click="branchViewMode = 'card'"
+                >
+                  <SopGlyph kind="cards" size="sm" />
+                  <span>按卡片</span>
+                </button>
+                <button
+                  type="button"
+                  class="viewBtn"
+                  :class="{ active: branchViewMode === 'list' }"
+                  @click="branchViewMode = 'list'"
+                >
+                  <SopGlyph kind="list" size="sm" />
+                  <span>按列表</span>
+                </button>
+              </div>
             </div>
-            <div class="cardGrid" v-if="branchSops.length">
+
+            <div v-if="!branchCards.length" class="paneEmpty soft">
+              该分支下没有 D 阶段 SOP
+            </div>
+
+            <div v-else-if="branchViewMode === 'card'" class="dCardStack">
               <article
-                class="sopCard"
-                v-for="item in branchSops"
+                v-for="item in branchCards"
                 :key="item.rowKey || item.uid"
+                class="dCard green"
+                :class="{ collapsed: cardCollapsed[item.uid] }"
+                title="双击打开详情"
+                @dblclick="openSubtree(item)"
               >
-                <div class="cardHead">
-                  <h2
-                    class="cardTitle"
-                    v-html="highlightText(item.title, sopSearchNorm)"
-                  ></h2>
-                  <div class="cardActions">
+                <div class="dCardTop">
+                  <div class="dCardIcon green">
+                    <SopGlyph kind="D" size="xl" />
+                  </div>
+                  <div class="dCardMain">
+                    <div class="dCardTitleRow">
+                      <h2
+                        class="dCardTitle"
+                        v-html="highlightText(item.displayTitle || item.title, sopSearchNorm)"
+                      ></h2>
+                      <span
+                        v-if="(item.subtasks || []).length"
+                        class="autoRunTip"
+                      >
+                        运行父任务将自动执行 {{ item.subtasks.length }} 个子任务
+                        <SopGlyph kind="info" size="sm" />
+                      </span>
+                    </div>
+                    <div
+                      class="dCardPath"
+                      :title="sopBreadcrumb(item)"
+                      v-html="highlightText(sopFullPath(item), sopSearchNorm)"
+                    ></div>
+                    <div class="dCardMeta">
+                      <span class="metaChip accent">子任务 {{ (item.subtasks || []).length }}</span>
+                      <span class="metaChip">运行 {{ sopRunCount(item) }}次</span>
+                      <span class="metaChip">产物 {{ sopDeliverableCount(item) }}个</span>
+                      <span class="metaChip">{{ sopSuccessRateLabel(item) }}</span>
+                    </div>
+                  </div>
+                  <div class="dCardActions">
                     <span
                       v-if="sopCardJobState(item)"
                       class="jobChip"
                       :class="sopCardJobState(item)"
                       >{{ sopCardJobLabel(item) }}</span
                     >
-                    <el-button
-                      type="primary"
-                      size="mini"
-                      :loading="sopCardJobState(item) === 'running'"
+                    <button
+                      type="button"
+                      class="runBtn primary"
                       :disabled="!canEditSop || !!sopCardJobState(item)"
                       @click.stop="openRunDialog(item)"
                     >
-                      运行
-                    </el-button>
+                      <i v-if="sopCardJobState(item) === 'running'" class="el-icon-loading"></i>
+                      <SopGlyph v-else kind="play" size="sm" />
+                      <span>运行</span>
+                      <SopGlyph kind="chevron-down" size="sm" class="runCaret" />
+                    </button>
+                    <button
+                      v-if="(item.subtasks || []).length"
+                      type="button"
+                      class="collapseBtn"
+                      :title="cardCollapsed[item.uid] ? '展开子任务' : '收起子任务'"
+                      @click.stop="toggleCardCollapse(item.uid)"
+                    >
+                      <SopGlyph
+                        :kind="cardCollapsed[item.uid] ? 'chevron-down' : 'chevron-up'"
+                        size="md"
+                      />
+                    </button>
                   </div>
                 </div>
+
                 <div
-                  class="cardBreadcrumb"
-                  :title="sopBreadcrumb(item)"
-                  v-html="highlightText(sopBreadcrumb(item), sopSearchNorm)"
-                ></div>
-                <div class="cardMeta">
-                  <span
-                    class="metaChip"
-                    v-for="(chip, idx) in sopCardMetaChips(item)"
-                    :key="idx"
-                    >{{ chip }}</span
+                  v-if="(item.subtasks || []).length && !cardCollapsed[item.uid]"
+                  class="subtaskList"
+                >
+                  <div
+                    class="subtaskRow"
+                    v-for="(sub, sIdx) in item.subtasks"
+                    :key="sub.uid || sub.rowKey"
+                    :class="{ last: sIdx === item.subtasks.length - 1 }"
+                    title="双击打开详情"
+                    @dblclick.stop="openSubtree(sub)"
                   >
+                    <div class="subRail" aria-hidden="true"></div>
+                    <div class="subIcon">
+                      <SopGlyph kind="d" size="md" />
+                    </div>
+                    <div class="subMain">
+                      <div
+                        class="subTitle"
+                        v-html="
+                          highlightText(
+                            formatSubtaskTitle(sub),
+                            sopSearchNorm
+                          )
+                        "
+                      ></div>
+                      <div class="subDesc">{{ subtaskDesc(sub) }}</div>
+                    </div>
+                    <div class="subMeta">
+                      <span class="subState" :class="subtaskStateClass(sub)">
+                        <span class="dot"></span>{{ subtaskStateLabel(sub) }}
+                      </span>
+                      <span class="subStat">产物 {{ sopDeliverableCount(sub) }}</span>
+                      <span class="subStat">更新时间 {{ subtaskUpdatedAt(sub) }}</span>
+                    </div>
+                    <div class="subActions">
+                      <button type="button" class="linkBtn" @click.stop="openSubtree(sub)">
+                        查看详情
+                      </button>
+                      <button type="button" class="linkBtn" @click.stop="locateSopInMap(sub)">
+                        定位脑图
+                      </button>
+                      <button
+                        type="button"
+                        class="runBtn ghost"
+                        :disabled="!canEditSop || !!sopCardJobState(sub)"
+                        @click.stop="openRunDialog(sub)"
+                      >
+                        <i v-if="sopCardJobState(sub) === 'running'" class="el-icon-loading"></i>
+                        <SopGlyph v-else kind="play" size="sm" />
+                        <span>运行</span>
+                      </button>
+                      <el-dropdown
+                        trigger="click"
+                        @command="cmd => onSubtaskMenu(cmd, sub, item)"
+                      >
+                        <button type="button" class="moreBtn" @click.stop>
+                          <SopGlyph kind="more" size="md" />
+                        </button>
+                        <el-dropdown-menu slot="dropdown">
+                          <el-dropdown-item command="detail">查看详情</el-dropdown-item>
+                          <el-dropdown-item command="locate">定位脑图</el-dropdown-item>
+                          <el-dropdown-item
+                            v-if="canEditSop"
+                            command="run"
+                            :disabled="!!sopCardJobState(sub)"
+                          >
+                            运行
+                          </el-dropdown-item>
+                        </el-dropdown-menu>
+                      </el-dropdown>
+                    </div>
+                  </div>
                 </div>
-                <div class="cardBlock">
-                  <div class="blockBody">{{ latestRunLabel(item) }}</div>
-                </div>
-                <div class="cardFooter">
-                  <el-button type="text" size="mini" @click="openSubtree(item)">
+
+                <div v-else-if="!(item.subtasks || []).length" class="dCardFooter">
+                  <button type="button" class="linkBtn" @click.stop="openSubtree(item)">
                     查看详情
-                  </el-button>
-                  <el-button
-                    type="text"
-                    size="mini"
-                    @click="locateSopInMap(item)"
-                  >
+                  </button>
+                  <button type="button" class="linkBtn" @click.stop="locateSopInMap(item)">
                     定位脑图
-                  </el-button>
+                  </button>
                 </div>
               </article>
             </div>
-            <div v-else class="paneEmpty soft">该分支下没有 D 阶段 SOP</div>
+
+            <div v-else class="dListStack">
+              <div
+                class="dListGroup"
+                v-for="item in branchCards"
+                :key="'list-' + (item.rowKey || item.uid)"
+              >
+                <div
+                  class="dListParent"
+                  title="双击打开详情"
+                  @dblclick="openSubtree(item)"
+                >
+                  <div class="dCardIcon sm green">
+                    <SopGlyph kind="D" size="lg" />
+                  </div>
+                  <div class="listMain">
+                    <div
+                      class="listTitle"
+                      v-html="highlightText(item.displayTitle || item.title, sopSearchNorm)"
+                    ></div>
+                    <div class="listPath">{{ sopFullPath(item) }}</div>
+                  </div>
+                  <div class="listMeta">
+                    <span>子任务 {{ (item.subtasks || []).length }}</span>
+                    <span>运行 {{ sopRunCount(item) }}次</span>
+                    <span>产物 {{ sopDeliverableCount(item) }}个</span>
+                  </div>
+                  <div class="listActions">
+                    <button type="button" class="linkBtn" @click.stop="openSubtree(item)">
+                      查看详情
+                    </button>
+                    <button type="button" class="linkBtn" @click.stop="locateSopInMap(item)">
+                      定位脑图
+                    </button>
+                    <button
+                      type="button"
+                      class="runBtn primary"
+                      :disabled="!canEditSop || !!sopCardJobState(item)"
+                      @click.stop="openRunDialog(item)"
+                    >
+                      <SopGlyph kind="play" size="sm" />
+                      <span>运行</span>
+                    </button>
+                  </div>
+                </div>
+                <div
+                  class="dListChild"
+                  v-for="sub in item.subtasks || []"
+                  :key="'list-sub-' + (sub.uid || sub.rowKey)"
+                  title="双击打开详情"
+                  @dblclick.stop="openSubtree(sub)"
+                >
+                  <div class="subIcon">
+                    <SopGlyph kind="d" size="md" />
+                  </div>
+                  <div class="listMain">
+                    <div
+                      class="listTitle sub"
+                      v-html="highlightText(formatSubtaskTitle(sub), sopSearchNorm)"
+                    ></div>
+                    <div class="listPath">{{ subtaskDesc(sub) }}</div>
+                  </div>
+                  <div class="listMeta">
+                    <span class="subState" :class="subtaskStateClass(sub)">
+                      <span class="dot"></span>{{ subtaskStateLabel(sub) }}
+                    </span>
+                    <span>产物 {{ sopDeliverableCount(sub) }}</span>
+                    <span>{{ subtaskUpdatedAt(sub) }}</span>
+                  </div>
+                  <div class="listActions">
+                    <button type="button" class="linkBtn" @click.stop="openSubtree(sub)">
+                      查看详情
+                    </button>
+                    <button type="button" class="linkBtn" @click.stop="locateSopInMap(sub)">
+                      定位脑图
+                    </button>
+                    <button
+                      type="button"
+                      class="runBtn ghost"
+                      :disabled="!canEditSop || !!sopCardJobState(sub)"
+                      @click.stop="openRunDialog(sub)"
+                    >
+                      <SopGlyph kind="play" size="sm" />
+                      <span>运行</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </section>
         </div>
       </div>
@@ -585,7 +820,7 @@ import { getCurrentUser } from '@/utils/auth'
 import { roomFromLocation } from '@/utils/roomLocation'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
 import {
-  listAllAccessibleFiles,
+  listFiles,
   getFileSubtree,
   getFileExport,
   getFileNodes,
@@ -607,7 +842,11 @@ import {
   buildSopHierarchyTree,
   filterSopsBySearch,
   filterHierarchyTreeForSearch,
-  normalizeSopSearchQuery
+  normalizeSopSearchQuery,
+  groupSopsIntoCards,
+  attachFallbackSubtasks,
+  formatSubtaskDisplayTitle,
+  formatSopDisplayTitle
 } from '@/utils/sopRegistryPrompt'
 import {
   normalizeLedger,
@@ -646,6 +885,7 @@ import {
 } from '@/utils/agentChat'
 import SopTaskBoard from './components/SopTaskBoard.vue'
 import SopTreeNode from './components/SopTreeNode.vue'
+import SopGlyph from './components/SopGlyph.vue'
 
 MindMap.usePlugin(Drag)
   .usePlugin(Select)
@@ -677,20 +917,21 @@ function stripHtml(text) {
     .trim()
 }
 
-function toMindMapTree(tree) {
+function toMindMapTree(tree, depth = 0) {
   if (!tree) return null
   const data = (tree && tree.data) || {}
   const uid = data.uid || tree.uid || ''
   const rawText = stripHtml(data.text || tree.text || '')
   const note = data.note || tree.note || ''
   const children = (tree.children || [])
-    .map(child => toMindMapTree(child))
+    .map(child => toMindMapTree(child, depth + 1))
     .filter(Boolean)
   return {
     data: {
       ...data,
       text: rawText || '(空)',
-      expand: true,
+      // 仅展开浅层，避免详情页一次全展开布局卡顿
+      expand: depth < 2,
       ...(uid ? { uid } : {}),
       ...(note ? { note: String(note) } : {}),
       ...(data.sopLedger ? { sopLedger: data.sopLedger } : {})
@@ -701,7 +942,7 @@ function toMindMapTree(tree) {
 
 export default {
   name: 'SopRegistryPage',
-  components: { SopTaskBoard, SopTreeNode },
+  components: { SopTaskBoard, SopTreeNode, SopGlyph },
   data() {
     return {
       sops: [],
@@ -710,14 +951,21 @@ export default {
       treeExpanded: {},
       selectedTreeUid: '',
       sopSearchQuery: '',
+      branchViewMode: 'card',
+      cardCollapsed: {},
       roomRole: null,
       canEditSop: true,
       canManageSop: false,
       statusText: '',
       pullLoading: false,
       spacesLoading: false,
+      spacesLoadingMore: false,
       roomKey: '',
       spaceOptions: [],
+      spaceNextCursor: '',
+      spaceHasMore: false,
+      spaceSearchQ: '',
+      spacePageSize: 40,
       dialogVisible: false,
       dialogTitle: '',
       dialogTab: 'map',
@@ -837,10 +1085,22 @@ export default {
         return ancestors.includes(sel)
       })
     },
+    branchCards() {
+      return groupSopsIntoCards(this.branchSops)
+    },
+    branchSubtaskCount() {
+      return this.branchCards.reduce(
+        (sum, card) => sum + ((card.subtasks && card.subtasks.length) || 0),
+        0
+      )
+    },
     branchCardsLabel() {
-      const n = this.branchSops.length
-      if (this.sopSearchNorm) return `匹配 ${n} 条 SOP`
-      return `当前分支 ${n} 条 SOP`
+      const dCount = this.branchCards.length
+      const subCount = this.branchSubtaskCount
+      if (this.sopSearchNorm) {
+        return `匹配 ${dCount} 个 D / ${subCount} 个子任务`
+      }
+      return `当前分支 ${dCount} 个 D / ${subCount} 个子任务`
     },
     sopActiveJobCount() {
       return (
@@ -1017,19 +1277,27 @@ export default {
       }
     },
     dialogTab(val) {
-      if (val === 'map' && this.previewMindMap) {
-        this.$nextTick(() => {
-          try {
-            const view = this.previewMindMap && this.previewMindMap.view
-            if (view && typeof view.fit === 'function') view.fit()
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new Event('resize'))
-            }
-          } catch (e) {
-            /* ignore */
+      if (val !== 'map') return
+      this.$nextTick(() => {
+        if (
+          this.pendingRoot &&
+          !this.previewMindMap &&
+          !this.subtreeLoading &&
+          !this.subtreeError
+        ) {
+          this.mountPreviewMindMap(this.pendingRoot, this.pendingVersion)
+          return
+        }
+        try {
+          const view = this.previewMindMap && this.previewMindMap.view
+          if (view && typeof view.fit === 'function') view.fit()
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('resize'))
           }
-        })
-      }
+        } catch (e) {
+          /* ignore */
+        }
+      })
     },
     '$route.query.room'(val) {
       const next = String(val || '').trim()
@@ -1105,6 +1373,12 @@ export default {
   },
   beforeDestroy() {
     this._sopPageAlive = false
+    this._subtreeLoadToken = (this._subtreeLoadToken || 0) + 1
+    this.unbindSpaceDropdownScroll()
+    if (this._spaceSearchTimer) {
+      clearTimeout(this._spaceSearchTimer)
+      this._spaceSearchTimer = null
+    }
     this.teardownPreview()
     // 不 cancelAll：任务继续在单例队列里跑；只卸掉本页监听
     if (this._sopQueueUnsub) {
@@ -1167,44 +1441,135 @@ export default {
       if (title && title !== key) return `${title}（${key}）`
       return key || title || '未命名'
     },
-    async loadSpaces() {
-      this.spacesLoading = true
+    mapSpaceOption(item) {
+      const room_key = item.room_key || item.roomKey || ''
+      return {
+        room_key,
+        title: item.title || item.name || '',
+        label: this.spaceOptionLabel(item),
+        role: item.role || null,
+        canEdit: item.canEdit,
+        canManage: item.canManage
+      }
+    },
+    ensureCurrentSpaceOption() {
+      const key = String(this.roomKey || '').trim()
+      if (!key) return
+      if (this.spaceOptions.some(s => s.room_key === key)) return
+      this.spaceOptions.unshift({
+        room_key: key,
+        title: key,
+        label: key
+      })
+    },
+    mergeSpaceOptions(list, { reset = false } = {}) {
+      const mapped = (list || [])
+        .map(item => this.mapSpaceOption(item))
+        .filter(item => item.room_key)
+      if (reset) {
+        this.spaceOptions = mapped
+      } else {
+        const seen = new Set(this.spaceOptions.map(s => s.room_key))
+        const extra = mapped.filter(s => !seen.has(s.room_key))
+        if (extra.length) this.spaceOptions = this.spaceOptions.concat(extra)
+      }
+      this.ensureCurrentSpaceOption()
+    },
+    async fetchSpacesPage({ q = '', cursor = '', reset = false } = {}) {
+      const query = String(q || '').trim()
+      const isMore = !reset && !!cursor
+      if (isMore) {
+        if (this.spacesLoadingMore || !this.spaceHasMore) return
+        this.spacesLoadingMore = true
+      } else {
+        this.spacesLoading = true
+      }
+      const reqId = (this._spaceFetchId = (this._spaceFetchId || 0) + 1)
       try {
-        const data = await listAllAccessibleFiles({ limit: 100 })
-        const list = data.list || []
-        this.spaceOptions = list
-          .map(item => ({
-            room_key: item.room_key || item.roomKey || '',
-            title: item.title || item.name || '',
-            label: this.spaceOptionLabel(item),
-            role: item.role || null,
-            canEdit: item.canEdit,
-            canManage: item.canManage
-          }))
-          .filter(item => item.room_key)
-        if (
-          this.roomKey &&
-          !this.spaceOptions.some(s => s.room_key === this.roomKey)
-        ) {
-          this.spaceOptions.unshift({
-            room_key: this.roomKey,
-            title: this.roomKey,
-            label: this.roomKey
+        const data = await listFiles({
+          q: query || undefined,
+          limit: this.spacePageSize,
+          ...(cursor ? { cursor } : { offset: 0 })
+        })
+        if (reqId !== this._spaceFetchId) return
+        const list = (data && data.list) || []
+        const nextCursor = (data && data.nextCursor) || ''
+        this.mergeSpaceOptions(list, { reset: !isMore })
+        this.spaceNextCursor = nextCursor
+        this.spaceHasMore = !!(nextCursor && list.length)
+        this.spaceSearchQ = query
+      } catch (err) {
+        if (reqId !== this._spaceFetchId) return
+        if (!isMore) {
+          this.spaceOptions = []
+          this.ensureCurrentSpaceOption()
+          this.spaceNextCursor = ''
+          this.spaceHasMore = false
+        }
+      } finally {
+        if (reqId === this._spaceFetchId) {
+          this.spacesLoading = false
+          this.spacesLoadingMore = false
+        }
+      }
+    },
+    async loadSpaces() {
+      await this.fetchSpacesPage({ reset: true, q: '' })
+    },
+    remoteSearchSpaces(query) {
+      if (this._spaceSearchTimer) clearTimeout(this._spaceSearchTimer)
+      this._spaceSearchTimer = setTimeout(() => {
+        this.fetchSpacesPage({ q: query, reset: true })
+      }, 280)
+    },
+    onSpaceSelectVisible(visible) {
+      if (visible) {
+        this.$nextTick(() => this.bindSpaceDropdownScroll())
+        if (!this.spaceOptions.length && !this.spacesLoading) {
+          this.fetchSpacesPage({ reset: true, q: this.spaceSearchQ || '' })
+        }
+      } else {
+        this.unbindSpaceDropdownScroll()
+      }
+    },
+    bindSpaceDropdownScroll() {
+      this.unbindSpaceDropdownScroll()
+      const wrap =
+        document.querySelector(
+          '.sopSpaceSelectDropdown .el-select-dropdown__wrap'
+        ) ||
+        document.querySelector(
+          '.sopSpaceSelectDropdown .el-scrollbar__wrap'
+        )
+      if (!wrap) return
+      this._spaceDropdownWrap = wrap
+      this._onSpaceDropdownScroll = () => {
+        if (!this.spaceHasMore || this.spacesLoadingMore || this.spacesLoading) {
+          return
+        }
+        const remain =
+          wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight
+        if (remain < 48) {
+          this.fetchSpacesPage({
+            q: this.spaceSearchQ,
+            cursor: this.spaceNextCursor,
+            reset: false
           })
         }
-      } catch (err) {
-        this.spaceOptions = this.roomKey
-          ? [
-              {
-                room_key: this.roomKey,
-                title: this.roomKey,
-                label: this.roomKey
-              }
-            ]
-          : []
-      } finally {
-        this.spacesLoading = false
       }
+      wrap.addEventListener('scroll', this._onSpaceDropdownScroll, {
+        passive: true
+      })
+    },
+    unbindSpaceDropdownScroll() {
+      if (this._spaceDropdownWrap && this._onSpaceDropdownScroll) {
+        this._spaceDropdownWrap.removeEventListener(
+          'scroll',
+          this._onSpaceDropdownScroll
+        )
+      }
+      this._spaceDropdownWrap = null
+      this._onSpaceDropdownScroll = null
     },
     onSpaceChange(val) {
       const room = String(val || '').trim()
@@ -2191,12 +2556,68 @@ export default {
       if (segs.length) return segs.join(' / ')
       return (item && item.source && item.source.path) || ''
     },
+    sopFullPath(item) {
+      const path = this.sopBreadcrumb(item)
+      if (path) return path
+      return formatSopDisplayTitle(item, 'D')
+    },
+    formatSubtaskTitle(sub) {
+      return formatSubtaskDisplayTitle(sub)
+    },
+    subtaskDesc(sub) {
+      const path = this.sopBreadcrumb(sub)
+      if (!path) return '子任务'
+      const parts = path.split(' / ')
+      return parts.length > 1 ? parts.slice(0, -1).join(' / ') : path
+    },
+    subtaskStateLabel(sub) {
+      const job = this.sopCardJobState(sub)
+      if (job === 'running') return '运行中'
+      if (job === 'queued') return '排队中'
+      if (job === 'waiting_human' || job === 'waiting_data') return '等待中'
+      const runs = this.sopLedgerRuns(sub)
+      if (!runs.length) return '未运行'
+      const latest = runs[0]
+      const result = String((latest && latest.result) || '')
+      if (/失败|错误|error/i.test(result)) return '失败'
+      if (/完成|成功|ok/i.test(result)) return '已完成'
+      return result || '已运行'
+    },
+    subtaskStateClass(sub) {
+      const label = this.subtaskStateLabel(sub)
+      if (label === '未运行') return 'idle'
+      if (label === '运行中' || label === '排队中' || label === '等待中') {
+        return 'active'
+      }
+      if (label === '失败') return 'fail'
+      return 'done'
+    },
+    subtaskUpdatedAt(sub) {
+      const runs = this.sopLedgerRuns(sub)
+      const at = runs[0] && (runs[0].at || runs[0].createdAt)
+      if (at) return String(at).replace('T', ' ').slice(0, 16)
+      return '—'
+    },
+    toggleCardCollapse(uid) {
+      this.$set(this.cardCollapsed, uid, !this.cardCollapsed[uid])
+    },
+    onSubtaskMenu(cmd, sub) {
+      if (cmd === 'detail') this.openSubtree(sub)
+      else if (cmd === 'locate') this.locateSopInMap(sub)
+      else if (cmd === 'run') this.openRunDialog(sub)
+    },
     rebuildHierarchyTree() {
+      const withSubs = attachFallbackSubtasks(this.sops, this.flatNodes)
+      const byUid = new Map(withSubs.map(s => [s.uid, s]))
+      this.sops = this.sops.map(s => {
+        const next = byUid.get(s.uid)
+        return next ? { ...s, subtasks: next.subtasks || [] } : s
+      })
       const built = buildSopHierarchyTree(this.sops, this.flatNodes)
       this.treeRoots = built.roots || []
       const expanded = { ...this.treeExpanded }
       const walk = (nodes, depth) => {
-        (nodes || []).forEach(n => {
+        ;(nodes || []).forEach(n => {
           if (expanded[n.uid] == null) expanded[n.uid] = depth < 2
           walk(n.children, depth + 1)
         })
@@ -2508,6 +2929,12 @@ export default {
       this.teardownPreview()
       const el = this.$refs.mindMapContainer
       if (!el || !root) return
+      // 非导图 tab 时容器可能不可见，先缓存，切回再挂
+      if (this.dialogTab !== 'map') {
+        this.pendingRoot = root
+        this.pendingVersion = Number(version || 0)
+        return
+      }
       el.innerHTML = ''
       const theme = (exampleData && exampleData.theme) || {}
       this.previewMindMap = new MindMap({
@@ -2523,22 +2950,6 @@ export default {
         initRootNodePosition: ['center', 'center'],
         onlyOneEnableActiveNodeOnCooperate: true
       })
-      const cooperate = this.previewMindMap.cooperate
-      if (cooperate) {
-        if (typeof cooperate.setPreviewApplied === 'function') {
-          cooperate.setPreviewApplied(true)
-        }
-        this.enableHttpCollab(version)
-        if (typeof cooperate.markTreeUids === 'function') {
-          cooperate.markTreeUids(root)
-        }
-        if (typeof cooperate.seedPreviewHydration === 'function') {
-          cooperate.seedPreviewHydration(root)
-        }
-        if (typeof cooperate.setPreviewApplied === 'function') {
-          cooperate.setPreviewApplied(false)
-        }
-      }
       this.$nextTick(() => {
         try {
           if (this.previewMindMap && this.previewMindMap.view) {
@@ -2547,7 +2958,35 @@ export default {
         } catch (e) {
           /* ignore */
         }
-        this.connectCollabV2(version)
+        // 先出图，协同连接放到下一帧，减轻打开卡顿
+        const schedule =
+          typeof requestAnimationFrame === 'function'
+            ? cb => requestAnimationFrame(() => requestAnimationFrame(cb))
+            : cb => setTimeout(cb, 0)
+        schedule(() => {
+          if (!this.previewMindMap) return
+          try {
+            const cooperate = this.previewMindMap.cooperate
+            if (cooperate) {
+              if (typeof cooperate.setPreviewApplied === 'function') {
+                cooperate.setPreviewApplied(true)
+              }
+              this.enableHttpCollab(version)
+              if (typeof cooperate.markTreeUids === 'function') {
+                cooperate.markTreeUids(root)
+              }
+              if (typeof cooperate.seedPreviewHydration === 'function') {
+                cooperate.seedPreviewHydration(root)
+              }
+              if (typeof cooperate.setPreviewApplied === 'function') {
+                cooperate.setPreviewApplied(false)
+              }
+            }
+            this.connectCollabV2(version)
+          } catch (err) {
+            console.warn('[sopRegistry] deferred collab failed', err)
+          }
+        })
       })
     },
     onDialogOpened() {
@@ -2576,23 +3015,37 @@ export default {
         return
       }
       const tab = opts.tab || 'map'
+      const prevUid = String(
+        (this.$route.query && this.$route.query.sopUid) || ''
+      ).trim()
+      // 清掉旧详情状态，避免路由守卫误判跳过加载
+      if (prevUid !== uid) {
+        this._subtreeLoadToken = (this._subtreeLoadToken || 0) + 1
+        this.teardownPreview()
+        this.pendingRoot = null
+        this.subtreeError = ''
+        this.subtreeLoading = false
+      }
       this.dialogTab = tab
       this.dialogTitle = (item.title || 'SOP') + '（可编辑 · 协同同步）'
       this.activeSop = item
       this.activeSopUid = uid
       const room = String(this.roomKey || '').trim()
-      // 全页跳转：不再弹窗
+      // 只切路由，由 openDetailFromRoute 单路径加载，避免双请求卡顿
       await this.$router
         .push({
           path: '/sop',
           query: { room, sopUid: uid, tab }
         })
         .catch(() => {})
-      await this.loadSubtreeContent(item)
+      if (prevUid === uid) {
+        await this.loadSubtreeContent(item)
+      }
     },
     async loadSubtreeContent(item) {
       const uid = this.resolveSopUid(item)
       if (!uid || !this.roomKey) return
+      const loadToken = (this._subtreeLoadToken = (this._subtreeLoadToken || 0) + 1)
       this.activeSop = item
       this.activeSopUid = uid
       this.activeLedger = mergeLedgerSources(readLedgerFromNodeLike(item), {
@@ -2610,8 +3063,9 @@ export default {
       try {
         const data = await getFileSubtree(this.roomKey, uid, {
           deep: true,
-          maxNodes: 2000
+          maxNodes: 800
         })
+        if (loadToken !== this._subtreeLoadToken) return
         const tree = (data && data.tree) || data
         const root = toMindMapTree(tree)
         if (!root) {
@@ -2620,10 +3074,6 @@ export default {
         }
         const nodeData = (root && root.data) || {}
         if (nodeData.sopLedger || nodeData.note) {
-          const rawDels =
-            (nodeData.sopLedger && nodeData.sopLedger.deliverables) ||
-            item.deliverables ||
-            []
           this.activeLedger = mergeLedgerSources(
             readLedgerFromNodeLike(nodeData),
             {
@@ -2632,51 +3082,72 @@ export default {
               deliverables: item.deliverables
             }
           )
-          if (
-            Array.isArray(rawDels) &&
-            rawDels.length > this.activeLedger.deliverables.length
-          ) {
-            try {
-              await persistSopLedger(
-                this.roomKey,
-                this.activeSopUid,
-                {
-                  id: (item && item.id) || '',
-                  title: (item && item.title) || ''
-                },
-                this.activeLedger
-              )
-              const idx = this.sops.findIndex(
-                s =>
-                  this.resolveSopUid(s) === this.activeSopUid || s === item
-              )
-              if (idx >= 0) {
-                const next = {
-                  ...this.sops[idx],
-                  deliverables: this.activeLedger.deliverables,
-                  sopLedger: normalizeLedger(this.activeLedger)
-                }
-                this.$set(this.sops, idx, next)
-                this.activeSop = next
-              }
-            } catch (e) {
-              console.warn('[sopRegistry] clean junk deliverables failed', e)
-            }
-          }
         }
         this.pendingRoot = root
         this.pendingVersion = Number((data && data.version) || 0)
-        this.$nextTick(() => {
-          setTimeout(
-            () => this.mountPreviewMindMap(root, this.pendingVersion),
-            80
-          )
+        this.subtreeLoading = false
+        // 先让详情壳渲染，再分帧建图
+        await this.$nextTick()
+        if (loadToken !== this._subtreeLoadToken) return
+        const schedule =
+          typeof requestAnimationFrame === 'function'
+            ? cb => requestAnimationFrame(() => requestAnimationFrame(cb))
+            : cb => setTimeout(cb, 0)
+        schedule(() => {
+          if (loadToken !== this._subtreeLoadToken) return
+          if (this.dialogTab === 'map') {
+            this.mountPreviewMindMap(root, this.pendingVersion)
+          }
         })
+        // 清理脏产物放到后台，不阻塞打开
+        const rawDels =
+          (nodeData.sopLedger && nodeData.sopLedger.deliverables) ||
+          item.deliverables ||
+          []
+        if (
+          Array.isArray(rawDels) &&
+          rawDels.length > this.activeLedger.deliverables.length
+        ) {
+          setTimeout(() => {
+            if (loadToken !== this._subtreeLoadToken) return
+            persistSopLedger(
+              this.roomKey,
+              this.activeSopUid,
+              {
+                id: (item && item.id) || '',
+                title: (item && item.title) || ''
+              },
+              this.activeLedger
+            )
+              .then(() => {
+                if (loadToken !== this._subtreeLoadToken) return
+                const idx = this.sops.findIndex(
+                  s =>
+                    this.resolveSopUid(s) === this.activeSopUid || s === item
+                )
+                if (idx >= 0) {
+                  const next = {
+                    ...this.sops[idx],
+                    deliverables: this.activeLedger.deliverables,
+                    sopLedger: normalizeLedger(this.activeLedger)
+                  }
+                  this.$set(this.sops, idx, next)
+                  this.activeSop = next
+                }
+              })
+              .catch(e => {
+                console.warn('[sopRegistry] clean junk deliverables failed', e)
+              })
+          }, 0)
+        }
       } catch (err) {
+        if (loadToken !== this._subtreeLoadToken) return
         console.error('[sopRegistry subtree]', err)
         this.subtreeError = (err && err.message) || '加载子树失败'
       } finally {
-        this.subtreeLoading = false
+        if (loadToken === this._subtreeLoadToken) {
+          this.subtreeLoading = false
+        }
       }
     },
     async openDetailFromRoute() {
@@ -2690,25 +3161,35 @@ export default {
       if (tab === 'runs' || tab === 'dels' || tab === 'map') {
         this.dialogTab = tab
       }
+      if (this.subtreeLoading && this.activeSopUid === uid) return
       if (
+        this.previewMindMap &&
         this.activeSopUid === uid &&
-        (this.previewMindMap || this.subtreeLoading || this.pendingRoot)
+        this.activeSop &&
+        this.resolveSopUid(this.activeSop) === uid
       ) {
         return
       }
-      if (!this.sops.length) {
-        await this.refreshRoomList()
-      }
-      const item =
+      let item =
+        (this.activeSop && this.resolveSopUid(this.activeSop) === uid
+          ? this.activeSop
+          : null) ||
         this.sops.find(s => this.resolveSopUid(s) === uid) ||
-        ({
+        null
+      if (!item && !this.sops.length) {
+        await this.refreshRoomList()
+        item = this.sops.find(s => this.resolveSopUid(s) === uid) || null
+      }
+      if (!item) {
+        item = {
           uid,
           title: this.dialogTitle || 'SOP',
           id: 'D',
           frequency: null,
           runs: [],
           deliverables: []
-        })
+        }
+      }
       await this.loadSubtreeContent(item)
     },
     async refreshRoomList() {
@@ -2908,48 +3389,123 @@ export default {
 }
 
 .sopPage {
+  --sop-primary: #00896c;
+  --sop-primary-hover: #007a60;
+  --sop-primary-soft: #e8f7f2;
+  --sop-link: #2f6fed;
+  --sop-border: #e8ecef;
+  --sop-text: #1a2332;
+  --sop-muted: #8b95a5;
+
   .sopHeader {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
-    gap: 12px;
+    gap: 16px;
     flex-wrap: wrap;
-    margin-bottom: 8px;
+    margin-bottom: 14px;
 
     .left,
     .right {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
       flex-wrap: wrap;
+    }
+
+    .left {
+      align-items: flex-start;
+    }
+
+    .titleBlock {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding-top: 2px;
     }
 
     h1 {
       margin: 0;
-      font-size: 20px;
-      font-weight: 600;
-      color: var(--ui-text, #17261f);
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--sop-text);
+      line-height: 1.25;
+    }
+
+    .titleSub {
+      margin: 0;
+      font-size: 12px;
+      color: var(--sop-muted);
+      line-height: 1.4;
     }
 
     .spaceLabel {
       font-size: 13px;
-      color: var(--ui-text-secondary, #66756e);
+      color: #5c6b7a;
+      font-weight: 500;
     }
 
     .spaceSelect {
-      width: 280px;
+      width: 260px;
+    }
+
+    .openMapBtn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 32px;
+      padding: 0 12px;
+      border-radius: 8px;
+      border: 1px solid var(--sop-border);
+      background: #fff;
+      color: #334155;
+      font-size: 13px;
+      font-weight: 500;
+
+      /deep/ span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+    }
+
+    .refreshBtn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 32px;
+      padding: 0 14px;
+      border-radius: 8px;
+      border: none;
+      background: var(--sop-primary) !important;
+      border-color: var(--sop-primary) !important;
+      font-size: 13px;
+      font-weight: 600;
+
+      /deep/ span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      &:hover,
+      &:focus {
+        background: var(--sop-primary-hover) !important;
+        border-color: var(--sop-primary-hover) !important;
+      }
     }
   }
 
   .statusLine {
     margin: 0 0 10px;
     font-size: 13px;
-    color: var(--ui-text-muted, #7b8982);
+    color: var(--sop-muted);
     line-height: 1.5;
   }
 
   .runStatus {
-    color: var(--ui-primary, #087854);
+    color: var(--sop-primary);
   }
 
   .viewerHint {
@@ -2957,15 +3513,40 @@ export default {
   }
 
   .sopWorkspace {
-    margin-top: 4px;
+    margin-top: 0;
   }
 
-  .sopToolbar {
-    margin-bottom: 12px;
-  }
+  .sopSearchWrap {
+    position: relative;
+    margin-bottom: 14px;
 
-  .sopSearch {
-    max-width: 420px;
+    .searchGlyph {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 2;
+      color: #94a3b8;
+      pointer-events: none;
+    }
+
+    .sopSearch {
+      width: 100%;
+
+      /deep/ .el-input__inner {
+        height: 40px;
+        line-height: 40px;
+        padding-left: 38px;
+        border-radius: 10px;
+        border-color: var(--sop-border);
+        font-size: 14px;
+        background: #fff;
+
+        &:focus {
+          border-color: var(--sop-primary);
+        }
+      }
+    }
   }
 
   .searchEmpty {
@@ -2974,26 +3555,35 @@ export default {
 
   .sopSplit {
     display: grid;
-    grid-template-columns: minmax(220px, 300px) 1fr;
-    gap: 14px;
-    min-height: 420px;
-    align-items: start;
+    grid-template-columns: minmax(260px, 300px) 1fr;
+    gap: 16px;
+    min-height: 520px;
+    align-items: stretch;
   }
 
   .sopTreePane {
-    border: 1px solid var(--ui-border, #e7ece9);
+    border: 1px solid var(--sop-border);
     border-radius: 12px;
-    background: var(--ui-surface, #fff);
+    background: #fff;
     padding: 10px 8px 14px;
     max-height: calc(100vh - 200px);
     overflow: auto;
     outline: none;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
   }
 
   .treeHead {
-    font-size: 12px;
-    color: var(--ui-text-muted, #7b8982);
-    padding: 0 8px 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--sop-text);
+    padding: 6px 10px 12px;
+  }
+
+  .treeHeadChevron {
+    color: #94a3b8;
   }
 
   .sopTree {
@@ -3004,19 +3594,555 @@ export default {
 
   .sopCardPane {
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
   }
 
   .cardPaneHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .branchLabel {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--sop-text);
+  }
+
+  .viewToggle {
+    display: inline-flex;
+    gap: 6px;
+  }
+
+  .viewBtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--sop-border);
+    background: #fff;
     font-size: 13px;
-    color: var(--ui-text-muted, #7b8982);
-    margin-bottom: 8px;
+    color: #64748b;
+    padding: 6px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    height: 32px;
+    line-height: 1;
+    transition: all 0.15s ease;
+  }
+
+  .viewBtn.active {
+    background: var(--sop-primary);
+    border-color: var(--sop-primary);
+    color: #fff;
+    font-weight: 600;
   }
 
   .emptyState {
     margin-top: 48px;
     text-align: center;
-    color: var(--ui-text-muted, #7b8982);
+    color: var(--sop-muted);
     font-size: 14px;
+  }
+
+  .paneEmpty.soft {
+    padding: 36px 12px;
+    color: var(--sop-muted);
+    font-size: 13px;
+    text-align: center;
+    border: 1px dashed var(--sop-border);
+    border-radius: 12px;
+    background: #fafcfb;
+  }
+
+  .dCardStack {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .dCard {
+    background: #f0f9f7;
+    border: 1px solid #d9ebe6;
+    border-radius: 14px;
+    padding: 18px 18px 14px;
+    box-shadow: none;
+    cursor: pointer;
+
+    &.blue {
+      background: #f0f6ff;
+      border-color: #d7e4fb;
+    }
+
+    &.green {
+      background: #f0f9f7;
+      border-color: #d9ebe6;
+    }
+
+    &.collapsed {
+      padding-bottom: 16px;
+    }
+  }
+
+  .dCardTop {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .dCardIcon {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: rgba(0, 137, 108, 0.12);
+    color: var(--sop-primary);
+
+    /deep/ .sopGlyph {
+      color: inherit;
+    }
+
+    &.blue {
+      background: rgba(47, 111, 237, 0.12);
+      color: #2f6fed;
+    }
+
+    &.sm {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+    }
+  }
+
+  .dCardMain {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .dCardTitleRow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+    margin-bottom: 6px;
+  }
+
+  .dCardTitle {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--sop-text);
+    line-height: 1.35;
+  }
+
+  .autoRunTip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--sop-primary);
+    background: transparent;
+    border-radius: 0;
+    padding: 0;
+    font-weight: 500;
+  }
+
+  .dCard.blue .autoRunTip {
+    color: #2f6fed;
+  }
+
+  .dCardPath {
+    font-size: 12px;
+    color: var(--sop-muted);
+    line-height: 1.45;
+    margin-bottom: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .dCardMeta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .dCardMeta .metaChip {
+    font-size: 12px;
+    color: #5b6b63;
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(0, 0, 0, 0.04);
+    border-radius: 999px;
+    padding: 3px 10px;
+
+    &.accent {
+      color: var(--sop-primary);
+      background: rgba(0, 137, 108, 0.1);
+      border-color: transparent;
+      font-weight: 600;
+    }
+  }
+
+  .dCard.blue .dCardMeta .metaChip.accent {
+    color: #2f6fed;
+    background: rgba(47, 111, 237, 0.1);
+  }
+
+  .dCardActions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    padding-top: 2px;
+  }
+
+  .runBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    line-height: 1;
+    white-space: nowrap;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+
+    &:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    &.primary {
+      background: var(--sop-primary);
+      border: 1px solid var(--sop-primary);
+      color: #fff;
+
+      &:hover:not(:disabled) {
+        background: var(--sop-primary-hover);
+        border-color: var(--sop-primary-hover);
+      }
+
+      .runCaret {
+        margin-left: 2px;
+        opacity: 0.85;
+      }
+    }
+
+    &.ghost {
+      background: #fff;
+      border: 1px solid #b7dfd2;
+      color: var(--sop-primary);
+      height: 30px;
+      padding: 0 12px;
+      font-weight: 600;
+
+      &:hover:not(:disabled) {
+        background: var(--sop-primary-soft);
+        border-color: var(--sop-primary);
+      }
+    }
+  }
+
+  .collapseBtn,
+  .moreBtn {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--sop-border);
+    border-radius: 8px;
+    background: #fff;
+    color: #64748b;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .moreBtn {
+    border: 0;
+    background: transparent;
+    width: 28px;
+    height: 28px;
+  }
+
+  .linkBtn {
+    border: 0;
+    background: transparent;
+    color: var(--sop-link);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 0 4px;
+    cursor: pointer;
+    line-height: 1.4;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
+  .subtaskList {
+    margin-top: 14px;
+    padding: 4px 0 2px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: relative;
+  }
+
+  .subtaskRow {
+    position: relative;
+    display: grid;
+    grid-template-columns: 20px minmax(140px, 1.15fr) minmax(200px, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 12px 12px 12px 10px;
+    border-radius: 10px;
+    background: #fff;
+    border: 1px solid #e8ecef;
+  }
+
+  .subtaskRow:hover {
+    border-color: #d5dde6;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  }
+
+  .subRail {
+    position: absolute;
+    left: -16px;
+    top: -10px;
+    bottom: 50%;
+    width: 14px;
+    border-left: 1.5px solid #d0d7de;
+    border-bottom: 1.5px solid #d0d7de;
+    border-bottom-left-radius: 6px;
+    pointer-events: none;
+  }
+
+  .subIcon {
+    width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--sop-primary);
+  }
+
+  .subMain {
+    min-width: 0;
+  }
+
+  .subTitle {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--sop-text);
+  }
+
+  .subDesc {
+    font-size: 12px;
+    color: var(--sop-muted);
+    margin-top: 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .subMeta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+    font-size: 12px;
+    color: #6b7a73;
+  }
+
+  .subState {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #f3f4f6;
+
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    &.idle {
+      color: #8a9690;
+    }
+    &.active {
+      color: var(--sop-primary);
+      background: var(--sop-primary-soft);
+    }
+    &.done {
+      color: #2f6fed;
+      background: #eff4ff;
+    }
+    &.fail {
+      color: #b91c1c;
+      background: #fef2f2;
+    }
+  }
+
+  .subStat {
+    color: #8b95a5;
+  }
+
+  .subActions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+
+  .dCardFooter {
+    margin-top: 12px;
+    padding-top: 4px;
+    display: flex;
+    gap: 8px;
+  }
+
+  .dListStack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .dListGroup {
+    border: 1px solid var(--sop-border);
+    border-radius: 12px;
+    overflow: hidden;
+    background: #fff;
+  }
+
+  .dListParent,
+  .dListChild {
+    display: grid;
+    grid-template-columns: 40px minmax(160px, 1.4fr) minmax(180px, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 14px 16px;
+    cursor: pointer;
+  }
+
+  .dListParent {
+    background: #f0f9f7;
+    border-bottom: 1px solid #e8f0ed;
+  }
+
+  .dListChild {
+    background: #fff;
+    border-top: 1px solid #f1f4f2;
+    padding-left: 28px;
+  }
+
+  .listMain {
+    min-width: 0;
+  }
+
+  .listTitle {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--sop-text);
+
+    &.sub {
+      font-size: 13px;
+      font-weight: 600;
+    }
+  }
+
+  .listPath {
+    font-size: 12px;
+    color: var(--sop-muted);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .listMeta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    font-size: 12px;
+    color: #6b7a73;
+  }
+
+  .listActions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+
+  .jobChip {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #f3f4f6;
+    color: #64748b;
+
+    &.running,
+    &.queued {
+      color: var(--sop-primary);
+      background: var(--sop-primary-soft);
+    }
+  }
+
+  .dCardTitle /deep/ mark,
+  .dCardPath /deep/ mark,
+  .subTitle /deep/ mark,
+  .listTitle /deep/ mark {
+    background: #ffe08a;
+    color: inherit;
+    padding: 0 1px;
+    border-radius: 2px;
+  }
+
+  @media (max-width: 1100px) {
+    .subtaskRow {
+      grid-template-columns: 20px 1fr;
+      gap: 8px;
+    }
+
+    .subMeta,
+    .subActions {
+      grid-column: 2;
+      justify-content: flex-start;
+    }
+  }
+
+  @media (max-width: 960px) {
+    .sopSplit {
+      grid-template-columns: 1fr;
+    }
+
+    .sopTreePane {
+      max-height: 240px;
+    }
+
+    .dListParent,
+    .dListChild {
+      grid-template-columns: 1fr;
+      gap: 6px;
+    }
+
+    .subActions,
+    .listActions {
+      justify-content: flex-start;
+    }
   }
 
   .cardGrid {
@@ -3024,12 +4150,6 @@ export default {
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
     gap: 14px;
     margin-top: 8px;
-  }
-
-  .paneEmpty.soft {
-    padding: 28px 12px;
-    color: var(--ui-text-muted, #7b8982);
-    font-size: 13px;
   }
 
   .sopTaskPanel {
@@ -3278,6 +4398,7 @@ export default {
     border-radius: var(--ui-radius-lg, 12px);
     padding: 16px;
     box-shadow: 0 1px 2px rgba(23, 38, 31, 0.03);
+    cursor: pointer;
     user-select: none;
     transition: box-shadow 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
 
