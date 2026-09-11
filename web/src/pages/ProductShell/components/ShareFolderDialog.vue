@@ -6,6 +6,11 @@
         <el-input v-model.trim="query" prefix-icon="el-icon-search" placeholder="搜索同事姓名或账号" @input="search" />
         <el-select v-model="role"><el-option label="可查看" value="Viewer" /><el-option label="可编辑" value="Editor" /></el-select>
       </div>
+      <div class="folderBulkInvite">
+        <el-input v-model.trim="departmentId" placeholder="部门ID（含下属部门）" />
+        <el-button :loading="bulkLoading" @click="bulkAdd(departmentId)">添加部门</el-button>
+        <el-button :loading="bulkLoading" @click="bulkAdd('')">添加全公司</el-button>
+      </div>
       <div v-if="hits.length" class="folderHits">
         <button v-for="user in hits" :key="user.user_id" type="button" @click="add(user)">
           <span>{{ user.name || user.user_id }}</span><em>添加</em>
@@ -49,6 +54,7 @@ export default {
     timer: null,
     page: 1,
     pageSize: 5
+    ,departmentId: '', bulkLoading: false
   }),
   computed: {
     shown: { get() { return this.visible }, set(value) { this.$emit('update:visible', value) } },
@@ -107,6 +113,12 @@ export default {
       finally { this.busy = false }
     },
     add(user) { return this.run(async () => { await folderService.setMember(this.folderId, user.user_id, this.role); this.query = ''; this.hits = [] }) },
+    async bulkAdd(departmentId) {
+      this.bulkLoading = true
+      try { await folderService.bulkSetMembers(this.folderId, { departmentId: departmentId || undefined, role: this.role.toLowerCase() }); await this.load(); this.$message.success('批量权限已更新') }
+      catch (error) { this.$message.error(error.message || '批量添加失败') }
+      finally { this.bulkLoading = false }
+    },
     updateRole(member, role) { return this.run(() => folderService.updateMember(this.folderId, member.id, role)) },
     remove(member) { return this.run(() => folderService.removeMember(this.folderId, member.id)) }
   }

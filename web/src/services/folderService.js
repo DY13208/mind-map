@@ -64,6 +64,12 @@ export default {
     })
     return (data.list || []).map(normalizeMemberDto)
   },
+  bulkSetMembers: async (id, payload) => {
+    const data = await productRequest(`/api/folders/${encodeURIComponent(id)}/members/bulk`, {
+      method: 'POST', body: JSON.stringify(payload || {})
+    })
+    return (data.list || []).map(normalizeMemberDto)
+  },
   updateMember: async (id, userId, role) => {
     const data = await productRequest(`/api/folders/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, {
       method: 'PATCH',
