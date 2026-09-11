@@ -61,10 +61,22 @@ const transformXmind = async (content, files, handleMultiCanvas) => {
   const nodeTree = data.rootTopic
   const newTree = {}
   const waitLoadImageList = []
+  const readHyperlink = node => {
+    const candidates = [
+      node && node.href,
+      node && node.hyperlink,
+      node && node.hyperlink && node.hyperlink.url,
+      node && node.links && node.links[0] && (node.links[0].url || node.links[0].href)
+    ]
+    const value = candidates.find(item => typeof item === 'string' && /^https?:\/\//i.test(item))
+    return value || ''
+  }
   const walk = async (node, newNode) => {
     newNode.data = {
       // 节点内容
       text: isUndef(node.title) ? '' : node.title,
+      // Preserve the source branch state. Summaries follow their host node:
+      // hidden while it is collapsed and visible when it is expanded.
       expand: node.branch !== 'folded'
     }
     // 节点备注
@@ -73,8 +85,9 @@ const transformXmind = async (content, files, handleMultiCanvas) => {
       newNode.data.note = notesData ? notesData.content || '' : ''
     }
     // 超链接
-    if (node.href && /^https?:\/\//.test(node.href)) {
-      newNode.data.hyperlink = node.href
+    const hyperlink = readHyperlink(node)
+    if (hyperlink) {
+      newNode.data.hyperlink = hyperlink
     }
     // 标签
     if (node.labels && node.labels.length > 0) {
