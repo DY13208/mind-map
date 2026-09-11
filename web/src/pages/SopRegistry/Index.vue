@@ -12,29 +12,74 @@
         </div>
       </div>
       <div class="right">
-        <span class="spaceLabel">空间</span>
-        <el-select
-          v-model="roomKey"
-          size="small"
-          filterable
-          remote
-          clearable
-          reserve-keyword
-          placeholder="搜索或选择空间"
-          class="spaceSelect"
-          popper-class="sopSpaceSelectDropdown"
-          :loading="spacesLoading || spacesLoadingMore"
-          :remote-method="remoteSearchSpaces"
-          @visible-change="onSpaceSelectVisible"
-          @change="onSpaceChange"
+        <span class="spaceLabel">目录</span>
+        <el-popover
+          v-model="spaceDirectoryVisible"
+          placement="bottom-end"
+          width="600"
+          trigger="click"
+          popper-class="sopSpaceDirectoryDropdown"
+          @show="syncSpaceDirectoryTree"
         >
-          <el-option
-            v-for="item in spaceOptions"
-            :key="item.room_key"
-            :label="item.label"
-            :value="item.room_key"
-          ></el-option>
-        </el-select>
+          <div class="spaceDirectoryPicker" @keydown.esc.stop="spaceDirectoryVisible = false">
+            <el-input
+              v-model="spaceDirectoryQuery"
+              size="small"
+              clearable
+              prefix-icon="el-icon-search"
+              placeholder="搜索文件夹或脑图"
+              aria-label="搜索文件夹或脑图"
+            ></el-input>
+            <div v-if="spacesLoading" class="spaceDirectoryLoading">
+              正在加载目录…
+            </div>
+            <el-tree
+              v-else
+              ref="spaceDirectoryTree"
+              class="spaceDirectoryTree"
+              :data="spaceDirectoryOptions"
+              node-key="value"
+              :props="spaceDirectoryTreeProps"
+              :filter-node-method="filterSpaceDirectoryNode"
+              :expand-on-click-node="false"
+              :highlight-current="true"
+              empty-text="没有可访问的脑图"
+              @node-click="onSpaceDirectoryNodeClick"
+            >
+              <span
+                slot-scope="{ data }"
+                class="spaceDirectoryOption"
+                :title="spaceDirectoryOptionTitle(data)"
+              >
+                <i
+                  :class="data.kind === 'folder' ? 'el-icon-folder-opened' : 'el-icon-document'"
+                  aria-hidden="true"
+                ></i>
+                <span class="spaceDirectoryName">{{ data.label }}</span>
+                <span v-if="data.kind === 'folder'" class="spaceDirectoryMeta">
+                  {{ data.roomCount }} 个脑图
+                </span>
+                <span v-else class="spaceDirectoryMeta">
+                  {{ data.accessLabel }}<template v-if="data.ownerName"> · {{ data.ownerName }}</template>
+                </span>
+              </span>
+            </el-tree>
+          </div>
+          <el-button
+            slot="reference"
+            size="small"
+            class="spaceSelect"
+            :class="{ isOpen: spaceDirectoryVisible }"
+            :loading="spacesLoading"
+            :disabled="spacesLoading"
+            aria-haspopup="tree"
+            :aria-expanded="String(spaceDirectoryVisible)"
+          >
+            <i class="el-icon-folder-opened" aria-hidden="true"></i>
+            <span class="spaceSelectText">{{ selectedSpaceDirectoryLabel }}</span>
+            <i class="el-icon-arrow-down spaceSelectCaret" aria-hidden="true"></i>
+          </el-button>
+        </el-popover>
         <el-button
           size="small"
           type="primary"
@@ -105,11 +150,29 @@
         <div v-else-if="!pullLoading && !sops.length" class="emptyState">
           该空间未找到 SOP
         </div>
-        <div v-else class="sopSplit">
-          <aside class="sopTreePane" tabindex="0" @keydown="onTreeKeydown">
+        <div
+          v-else
+          class="sopSplit"
+          :class="{ treeCollapsed: treePaneCollapsed }"
+        >
+          <aside
+            v-show="!treePaneCollapsed"
+            class="sopTreePane"
+            tabindex="0"
+            @keydown="onTreeKeydown"
+          >
             <div class="treeHead">
               <span>脑图层级</span>
-              <SopGlyph kind="chevron-down" size="sm" class="treeHeadChevron" />
+              <button
+                type="button"
+                class="treeCollapseBtn"
+                title="收起脑图层级"
+                aria-label="收起脑图层级"
+                aria-expanded="true"
+                @click.stop="toggleTreePane"
+              >
+                <SopGlyph kind="panel-collapse" size="sm" />
+              </button>
             </div>
             <ul class="sopTree" role="tree">
               <SopTreeNode
@@ -127,7 +190,20 @@
           </aside>
           <section class="sopCardPane">
             <div class="cardPaneHead">
-              <span class="branchLabel">{{ branchCardsLabel }}</span>
+              <div class="branchHeadLeft">
+                <button
+                  v-if="treePaneCollapsed"
+                  type="button"
+                  class="treeCollapseBtn"
+                  title="展开脑图层级"
+                  aria-label="展开脑图层级"
+                  aria-expanded="false"
+                  @click.stop="toggleTreePane"
+                >
+                  <SopGlyph kind="panel-expand" size="sm" />
+                </button>
+                <span class="branchLabel">{{ branchCardsLabel }}</span>
+              </div>
               <div class="viewToggle">
                 <button
                   type="button"
@@ -820,7 +896,7 @@ import { getCurrentUser } from '@/utils/auth'
 import { roomFromLocation } from '@/utils/roomLocation'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
 import {
-  listFiles,
+  listAllAccessibleFiles,
   getFileSubtree,
   getFileExport,
   getFileNodes,
@@ -836,6 +912,7 @@ import {
   artifactLocalUrl,
   authorizeSopRun
 } from '@/utils/fileApi'
+import folderService from '@/services/folderService'
 import {
   listRoomDRegistrySops,
   fillDefaultCpda,
@@ -878,7 +955,6 @@ import {
   WORKBUDDY_CUSTOM_MODEL_HINTS,
   fetchXiaoceOrganizations,
   fetchXiaoceAgents,
-  AI_BACKEND_WORKBUDDY,
   AI_BACKEND_XIAOCE,
   AI_BACKEND_OPENCLAW,
   normalizeAiBackend
@@ -949,23 +1025,26 @@ export default {
       flatNodes: [],
       treeRoots: [],
       treeExpanded: {},
+      treePaneCollapsed: false,
       selectedTreeUid: '',
       sopSearchQuery: '',
       branchViewMode: 'card',
       cardCollapsed: {},
       roomRole: null,
-      canEditSop: true,
+      canEditSop: false,
       canManageSop: false,
       statusText: '',
       pullLoading: false,
       spacesLoading: false,
-      spacesLoadingMore: false,
       roomKey: '',
       spaceOptions: [],
-      spaceNextCursor: '',
-      spaceHasMore: false,
-      spaceSearchQ: '',
-      spacePageSize: 40,
+      folders: [],
+      spaceDirectoryVisible: false,
+      spaceDirectoryQuery: '',
+      spaceDirectoryTreeProps: {
+        children: 'children',
+        label: 'label'
+      },
       dialogVisible: false,
       dialogTitle: '',
       dialogTab: 'map',
@@ -1053,6 +1132,16 @@ export default {
         name: user.name || '用户',
         color: user.color || '#409EFF'
       }
+    },
+    spaceDirectoryOptions() {
+      return this.buildSpaceDirectoryOptions()
+    },
+    selectedSpaceDirectoryLabel() {
+      const room = String(this.roomKey || '').trim()
+      if (!room) return '选择文件夹 / 脑图'
+      const path = this.findSpaceDirectoryPath(room)
+      if (path.length) return path.map(item => item.label).join(' / ')
+      return room
     },
     sopQueueSummary() {
       const s = this.sopQueueSnap || {}
@@ -1299,6 +1388,12 @@ export default {
         }
       })
     },
+    spaceDirectoryQuery() {
+      this.$nextTick(() => {
+        const tree = this.$refs.spaceDirectoryTree
+        if (tree) tree.filter(this.spaceDirectoryQuery)
+      })
+    },
     '$route.query.room'(val) {
       const next = String(val || '').trim()
       if (next !== this.roomKey) {
@@ -1374,11 +1469,6 @@ export default {
   beforeDestroy() {
     this._sopPageAlive = false
     this._subtreeLoadToken = (this._subtreeLoadToken || 0) + 1
-    this.unbindSpaceDropdownScroll()
-    if (this._spaceSearchTimer) {
-      clearTimeout(this._spaceSearchTimer)
-      this._spaceSearchTimer = null
-    }
     this.teardownPreview()
     // 不 cancelAll：任务继续在单例队列里跑；只卸掉本页监听
     if (this._sopQueueUnsub) {
@@ -1438,8 +1528,22 @@ export default {
     spaceOptionLabel(item) {
       const key = item.room_key || item.roomKey || ''
       const title = item.title || item.name || ''
-      if (title && title !== key) return `${title}（${key}）`
+      if (title && title !== key) return title
       return key || title || '未命名'
+    },
+    spaceAccessLabel(item) {
+      const role = String((item && item.role) || '').toLowerCase()
+      if (role === 'owner') return '所有者'
+      if (role === 'viewer' || (item && item.canEdit === false)) return '只读'
+      return '可编辑'
+    },
+    spaceOwnerName(item) {
+      const owner = (item && item.owner) || {}
+      return String(
+        owner.name ||
+          (item && (item.ownerName || item.owner_name)) ||
+          ''
+      ).trim()
     },
     mapSpaceOption(item) {
       const room_key = item.room_key || item.roomKey || ''
@@ -1447,9 +1551,12 @@ export default {
         room_key,
         title: item.title || item.name || '',
         label: this.spaceOptionLabel(item),
+        folderId: item.folderId || item.folder_id || null,
         role: item.role || null,
         canEdit: item.canEdit,
-        canManage: item.canManage
+        canManage: item.canManage,
+        accessLabel: this.spaceAccessLabel(item),
+        ownerName: this.spaceOwnerName(item)
       }
     },
     ensureCurrentSpaceOption() {
@@ -1459,7 +1566,13 @@ export default {
       this.spaceOptions.unshift({
         room_key: key,
         title: key,
-        label: key
+        label: key,
+        folderId: null,
+        role: null,
+        canEdit: false,
+        canManage: false,
+        accessLabel: '权限校验中',
+        ownerName: ''
       })
     },
     mergeSpaceOptions(list, { reset = false } = {}) {
@@ -1475,101 +1588,163 @@ export default {
       }
       this.ensureCurrentSpaceOption()
     },
-    async fetchSpacesPage({ q = '', cursor = '', reset = false } = {}) {
-      const query = String(q || '').trim()
-      const isMore = !reset && !!cursor
-      if (isMore) {
-        if (this.spacesLoadingMore || !this.spaceHasMore) return
-        this.spacesLoadingMore = true
-      } else {
-        this.spacesLoading = true
+    buildSpaceDirectoryOptions() {
+      const folders = Array.isArray(this.folders) ? this.folders : []
+      const rooms = Array.isArray(this.spaceOptions) ? this.spaceOptions : []
+      const folderById = new Map()
+      folders.forEach(folder => {
+        if (folder && folder.id) folderById.set(String(folder.id), folder)
+      })
+
+      const childFolders = new Map()
+      folders.forEach(folder => {
+        if (!folder || !folder.id) return
+        const parentId = String(folder.parentId || folder.parent_id || '')
+        const key = parentId && folderById.has(parentId) ? parentId : ''
+        if (!childFolders.has(key)) childFolders.set(key, [])
+        childFolders.get(key).push(folder)
+      })
+
+      const roomsByFolder = new Map()
+      rooms.forEach(room => {
+        const rawFolderId = String(room.folderId || room.folder_id || '')
+        const folderId = rawFolderId && folderById.has(rawFolderId) ? rawFolderId : ''
+        if (!roomsByFolder.has(folderId)) roomsByFolder.set(folderId, [])
+        roomsByFolder.get(folderId).push(room)
+      })
+
+      const byName = (a, b) =>
+        String((a && (a.name || a.title || a.label)) || '').localeCompare(
+          String((b && (b.name || b.title || b.label)) || ''),
+          'zh-CN'
+        )
+      const toRoomOption = room => ({
+        value: room.room_key,
+        label: room.title || room.label || room.room_key,
+        kind: 'room',
+        roomKey: room.room_key,
+        role: room.role,
+        canEdit: room.canEdit,
+        accessLabel: room.accessLabel || this.spaceAccessLabel(room),
+        ownerName: room.ownerName || this.spaceOwnerName(room)
+      })
+
+      const buildFolder = (folder, ancestors = new Set()) => {
+        const id = String(folder.id)
+        if (ancestors.has(id)) return null
+        const nextAncestors = new Set(ancestors)
+        nextAncestors.add(id)
+        const folderChildren = (childFolders.get(id) || [])
+          .slice()
+          .sort(byName)
+          .map(child => buildFolder(child, nextAncestors))
+          .filter(Boolean)
+        const roomChildren = (roomsByFolder.get(id) || [])
+          .slice()
+          .sort(byName)
+          .map(toRoomOption)
+        const children = [...folderChildren, ...roomChildren]
+        if (!children.length) return null
+        const roomCount = children.reduce(
+          (sum, child) => sum + (child.kind === 'room' ? 1 : child.roomCount || 0),
+          0
+        )
+        return {
+          value: `folder:${id}`,
+          label: folder.name || '未命名文件夹',
+          kind: 'folder',
+          folderId: id,
+          roomCount,
+          children
+        }
       }
-      const reqId = (this._spaceFetchId = (this._spaceFetchId || 0) + 1)
-      try {
-        const data = await listFiles({
-          q: query || undefined,
-          limit: this.spacePageSize,
-          ...(cursor ? { cursor } : { offset: 0 })
+
+      const tree = (childFolders.get('') || [])
+        .slice()
+        .sort(byName)
+        .map(folder => buildFolder(folder))
+        .filter(Boolean)
+      const rootRooms = (roomsByFolder.get('') || [])
+        .slice()
+        .sort(byName)
+        .map(toRoomOption)
+      if (rootRooms.length) {
+        tree.push({
+          value: 'folder:ungrouped',
+          label: '未分组',
+          kind: 'folder',
+          roomCount: rootRooms.length,
+          children: rootRooms
         })
-        if (reqId !== this._spaceFetchId) return
-        const list = (data && data.list) || []
-        const nextCursor = (data && data.nextCursor) || ''
-        this.mergeSpaceOptions(list, { reset: !isMore })
-        this.spaceNextCursor = nextCursor
-        this.spaceHasMore = !!(nextCursor && list.length)
-        this.spaceSearchQ = query
-      } catch (err) {
-        if (reqId !== this._spaceFetchId) return
-        if (!isMore) {
-          this.spaceOptions = []
-          this.ensureCurrentSpaceOption()
-          this.spaceNextCursor = ''
-          this.spaceHasMore = false
-        }
-      } finally {
-        if (reqId === this._spaceFetchId) {
-          this.spacesLoading = false
-          this.spacesLoadingMore = false
-        }
       }
+      return tree
     },
     async loadSpaces() {
-      await this.fetchSpacesPage({ reset: true, q: '' })
-    },
-    remoteSearchSpaces(query) {
-      if (this._spaceSearchTimer) clearTimeout(this._spaceSearchTimer)
-      this._spaceSearchTimer = setTimeout(() => {
-        this.fetchSpacesPage({ q: query, reset: true })
-      }, 280)
-    },
-    onSpaceSelectVisible(visible) {
-      if (visible) {
-        this.$nextTick(() => this.bindSpaceDropdownScroll())
-        if (!this.spaceOptions.length && !this.spacesLoading) {
-          this.fetchSpacesPage({ reset: true, q: this.spaceSearchQ || '' })
-        }
-      } else {
-        this.unbindSpaceDropdownScroll()
+      this.spacesLoading = true
+      try {
+        const [data, folders] = await Promise.all([
+          listAllAccessibleFiles({ limit: 100 }),
+          folderService.listFolders().catch(() => [])
+        ])
+        this.folders = Array.isArray(folders) ? folders : []
+        this.mergeSpaceOptions((data && data.list) || [], { reset: true })
+      } catch (err) {
+        this.folders = []
+        this.spaceOptions = []
+        this.ensureCurrentSpaceOption()
+      } finally {
+        this.spacesLoading = false
       }
     },
-    bindSpaceDropdownScroll() {
-      this.unbindSpaceDropdownScroll()
-      const wrap =
-        document.querySelector(
-          '.sopSpaceSelectDropdown .el-select-dropdown__wrap'
-        ) ||
-        document.querySelector(
-          '.sopSpaceSelectDropdown .el-scrollbar__wrap'
-        )
-      if (!wrap) return
-      this._spaceDropdownWrap = wrap
-      this._onSpaceDropdownScroll = () => {
-        if (!this.spaceHasMore || this.spacesLoadingMore || this.spacesLoading) {
-          return
-        }
-        const remain =
-          wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight
-        if (remain < 48) {
-          this.fetchSpacesPage({
-            q: this.spaceSearchQ,
-            cursor: this.spaceNextCursor,
-            reset: false
-          })
-        }
+    findSpaceDirectoryPath(value, nodes = this.spaceDirectoryOptions, path = []) {
+      const target = String(value || '').trim()
+      if (!target) return []
+      for (const node of nodes || []) {
+        const nextPath = path.concat(node)
+        if (String(node.value || '') === target) return nextPath
+        const found = this.findSpaceDirectoryPath(target, node.children || [], nextPath)
+        if (found.length) return found
       }
-      wrap.addEventListener('scroll', this._onSpaceDropdownScroll, {
-        passive: true
+      return []
+    },
+    filterSpaceDirectoryNode(query, data) {
+      const keyword = String(query || '').trim().toLowerCase()
+      if (!keyword) return true
+      return [data && data.label, data && data.roomKey]
+        .filter(Boolean)
+        .some(value => String(value).toLowerCase().includes(keyword))
+    },
+    spaceDirectoryOptionTitle(data) {
+      const label = String((data && data.label) || '').trim()
+      const roomKey = String((data && data.roomKey) || '').trim()
+      if (!roomKey) return label
+      return `${label}\n脑图标识：${roomKey}`
+    },
+    syncSpaceDirectoryTree() {
+      this.$nextTick(() => {
+        const tree = this.$refs.spaceDirectoryTree
+        if (!tree) return
+        tree.filter(this.spaceDirectoryQuery)
+        const path = this.findSpaceDirectoryPath(this.roomKey)
+        path.slice(0, -1).forEach(item => {
+          const node = tree.getNode(item.value)
+          if (node) node.expand()
+        })
+        if (this.roomKey) tree.setCurrentKey(this.roomKey)
       })
     },
-    unbindSpaceDropdownScroll() {
-      if (this._spaceDropdownWrap && this._onSpaceDropdownScroll) {
-        this._spaceDropdownWrap.removeEventListener(
-          'scroll',
-          this._onSpaceDropdownScroll
-        )
+    onSpaceDirectoryNodeClick(data, node) {
+      if (!data) return
+      if (data.kind === 'folder') {
+        if (node && node.expanded) node.collapse()
+        else if (node) node.expand()
+        return
       }
-      this._spaceDropdownWrap = null
-      this._onSpaceDropdownScroll = null
+      const room = String(data.roomKey || data.value || '').trim()
+      if (!room) return
+      this.roomKey = room
+      this.spaceDirectoryVisible = false
+      this.onSpaceChange(room)
     },
     onSpaceChange(val) {
       const room = String(val || '').trim()
@@ -2617,7 +2792,7 @@ export default {
       this.treeRoots = built.roots || []
       const expanded = { ...this.treeExpanded }
       const walk = (nodes, depth) => {
-        ;(nodes || []).forEach(n => {
+        (nodes || []).forEach(n => {
           if (expanded[n.uid] == null) expanded[n.uid] = depth < 2
           walk(n.children, depth + 1)
         })
@@ -2644,6 +2819,9 @@ export default {
     toggleTreeNode(uid) {
       const open = this.treeExpanded[uid] !== false
       this.$set(this.treeExpanded, uid, !open)
+    },
+    toggleTreePane() {
+      this.treePaneCollapsed = !this.treePaneCollapsed
     },
     selectTreeNode(node) {
       if (!node) return
@@ -2709,7 +2887,7 @@ export default {
       const roomKey = String(this.roomKey || '').trim()
       if (!roomKey) {
         this.roomRole = null
-        this.canEditSop = true
+        this.canEditSop = false
         this.canManageSop = false
         return
       }
@@ -3238,6 +3416,17 @@ export default {
   color: var(--ui-text, #17261f);
   box-sizing: border-box;
 
+  /* 台账列表：整页不跟着滚，左右栏各自滚动 */
+  &:not(.detailMode) {
+    height: 100vh;
+    max-height: 100vh;
+    min-height: 0;
+    padding: 20px 28px 16px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
   &.detailMode {
     height: calc(100vh - 52px);
     max-height: calc(100vh - 52px);
@@ -3404,6 +3593,7 @@ export default {
     gap: 16px;
     flex-wrap: wrap;
     margin-bottom: 14px;
+    flex-shrink: 0;
 
     .left,
     .right {
@@ -3447,7 +3637,35 @@ export default {
     }
 
     .spaceSelect {
-      width: 260px;
+      width: 360px;
+      max-width: 48vw;
+      min-width: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 8px;
+      overflow: hidden;
+
+      &.isOpen {
+        color: var(--sop-primary);
+        border-color: var(--sop-primary);
+        box-shadow: 0 0 0 3px rgba(8, 120, 84, 0.12);
+      }
+
+      /deep/ .spaceSelectText {
+        min-width: 0;
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-align: left;
+      }
+
+      /deep/ .spaceSelectCaret {
+        margin-left: auto;
+        color: #94a3b8;
+        flex-shrink: 0;
+      }
     }
 
     .openMapBtn {
@@ -3502,6 +3720,7 @@ export default {
     font-size: 13px;
     color: var(--sop-muted);
     line-height: 1.5;
+    flex-shrink: 0;
   }
 
   .runStatus {
@@ -3514,11 +3733,16 @@ export default {
 
   .sopWorkspace {
     margin-top: 0;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
 
   .sopSearchWrap {
     position: relative;
     margin-bottom: 14px;
+    flex-shrink: 0;
 
     .searchGlyph {
       position: absolute;
@@ -3557,8 +3781,15 @@ export default {
     display: grid;
     grid-template-columns: minmax(260px, 300px) 1fr;
     gap: 16px;
-    min-height: 520px;
+    flex: 1;
+    min-height: 0;
     align-items: stretch;
+    overflow: hidden;
+
+    &.treeCollapsed {
+      grid-template-columns: 1fr;
+      gap: 0;
+    }
   }
 
   .sopTreePane {
@@ -3566,10 +3797,14 @@ export default {
     border-radius: 12px;
     background: #fff;
     padding: 10px 8px 14px;
-    max-height: calc(100vh - 200px);
-    overflow: auto;
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
+    overflow: hidden;
     outline: none;
     box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+    display: flex;
+    flex-direction: column;
   }
 
   .treeHead {
@@ -3580,23 +3815,52 @@ export default {
     font-weight: 700;
     color: var(--sop-text);
     padding: 6px 10px 12px;
+    flex-shrink: 0;
+    gap: 8px;
+    width: 100%;
+    box-sizing: border-box;
   }
 
-  .treeHeadChevron {
-    color: #94a3b8;
+  .treeCollapseBtn {
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--sop-border);
+    border-radius: 8px;
+    background: #fff;
+    color: #64748b;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    padding: 0;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+
+    &:hover {
+      color: var(--sop-primary);
+      border-color: #b7dfd2;
+      background: var(--sop-primary-soft);
+    }
   }
 
   .sopTree {
     list-style: none;
     margin: 0;
     padding: 0;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
   }
 
   .sopCardPane {
     min-width: 0;
+    min-height: 0;
+    height: 100%;
     display: flex;
     flex-direction: column;
     gap: 14px;
+    overflow: auto;
+    padding-right: 2px;
   }
 
   .cardPaneHead {
@@ -3604,6 +3868,19 @@ export default {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--ui-bg, #f7f9f8);
+    padding: 2px 0 8px;
+  }
+
+  .branchHeadLeft {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
   }
 
   .branchLabel {
@@ -3645,6 +3922,7 @@ export default {
     text-align: center;
     color: var(--sop-muted);
     font-size: 14px;
+    flex-shrink: 0;
   }
 
   .paneEmpty.soft {
@@ -4125,12 +4403,35 @@ export default {
   }
 
   @media (max-width: 960px) {
+    .sopHeader .right {
+      width: 100%;
+
+      .spaceSelect {
+        flex: 1;
+        width: auto;
+        max-width: none;
+        min-width: 240px;
+      }
+    }
+
     .sopSplit {
       grid-template-columns: 1fr;
+      overflow: auto;
+
+      &.treeCollapsed {
+        grid-template-columns: 1fr;
+      }
     }
 
     .sopTreePane {
+      height: auto;
       max-height: 240px;
+    }
+
+    .sopCardPane {
+      height: auto;
+      max-height: none;
+      overflow: visible;
     }
 
     .dListParent,
@@ -5207,6 +5508,100 @@ body.isDark .sopMindDialog,
     background: #fff !important;
     color: #17261f !important;
     border-color: #d5ddd8 !important;
+  }
+}
+
+.sopSpaceDirectoryDropdown {
+  padding: 10px;
+  width: 600px !important;
+  min-width: 0;
+  max-width: calc(100vw - 24px);
+
+  .spaceDirectoryPicker {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .spaceDirectoryLoading {
+    min-height: 92px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #718078;
+    font-size: 13px;
+  }
+
+  .spaceDirectoryTree {
+    max-height: 58vh;
+    overflow: auto;
+    color: #25342d;
+  }
+
+  .el-tree-node__content {
+    min-height: 38px;
+    height: auto;
+    margin: 1px 0;
+    padding-right: 8px;
+    border-radius: 8px;
+  }
+
+  .el-tree-node__content:hover,
+  .el-tree-node.is-current > .el-tree-node__content {
+    background: #edf8f4;
+  }
+
+  .el-tree-node__expand-icon {
+    padding: 6px;
+    color: #809087;
+  }
+
+  .spaceDirectoryOption {
+    width: 100%;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) minmax(0, 210px);
+    align-items: center;
+    gap: 8px;
+  }
+
+  .spaceDirectoryOption > i {
+    color: #718078;
+    flex-shrink: 0;
+  }
+
+  .spaceDirectoryName {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #25342d;
+  }
+
+  .spaceDirectoryMeta {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #8a9891;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .el-tree-node.is-current > .el-tree-node__content .spaceDirectoryName {
+    color: #087854;
+    font-weight: 600;
+  }
+}
+
+@media (max-width: 640px) {
+  .sopSpaceDirectoryDropdown {
+    width: calc(100vw - 24px) !important;
+
+    .spaceDirectoryOption {
+      grid-template-columns: auto minmax(0, 1fr) minmax(0, 132px);
+      gap: 6px;
+    }
   }
 }
 
