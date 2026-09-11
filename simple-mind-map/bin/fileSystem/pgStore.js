@@ -326,6 +326,15 @@ function createPgFileStore(pool) {
       )
       return Number((res.rows[0] && res.rows[0].n) || 0)
     },
+    async countChildFolders(id) {
+      queryCount += 1
+      const res = await pool.query(
+        `select count(*)::int as n from folders
+         where parent_id = $1 and deleted_at is null`,
+        [id]
+      )
+      return Number((res.rows[0] && res.rows[0].n) || 0)
+    },
     async deleteFolder(id) {
       queryCount += 1
       await pool.query(`delete from folders where id = $1`, [id])

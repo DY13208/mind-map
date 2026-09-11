@@ -17,6 +17,11 @@ async function initFileSystemSchema(db) {
     where deleted_at is null and parent_id is null
   `)
   await db.query(`
+    create unique index if not exists folders_parent_name_uniq
+    on folders (parent_id, lower(name))
+    where deleted_at is null and parent_id is not null
+  `)
+  await db.query(`
     create index if not exists folders_created_by_idx
     on folders (created_by)
     where deleted_at is null

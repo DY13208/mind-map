@@ -145,17 +145,31 @@ function mockRes() {
   const folders = await fs.listFolders({ userId: OWNER })
   assert.ok(folders.list.some(item => item.name === 'Q4'))
 
-  let nested = ''
+  const child = await fs.createFolder({
+    name: 'child',
+    parentId: folder.id,
+    userId: OWNER
+  })
+  assert.strictEqual(child.parentId, folder.id)
+  const grandchild = await fs.createFolder({
+    name: 'grandchild',
+    parentId: child.id,
+    userId: OWNER
+  })
+  assert.strictEqual(grandchild.parentId, child.id)
+  const nestedFolders = await fs.listFolders({ userId: OWNER })
+  assert.ok(nestedFolders.list.some(item => item.id === child.id))
+  assert.ok(nestedFolders.list.some(item => item.id === grandchild.id))
+
+  let childNotEmpty = ''
   try {
-    await fs.createFolder({
-      name: 'child',
-      parentId: folder.id,
-      userId: OWNER
-    })
+    await fs.deleteFolder(folder.id, { userId: OWNER })
   } catch (err) {
-    nested = err.code
+    childNotEmpty = err.code
   }
-  assert.strictEqual(nested, 'INVALID_MOVE')
+  assert.strictEqual(childNotEmpty, 'FOLDER_NOT_EMPTY')
+  await fs.deleteFolder(grandchild.id, { userId: OWNER })
+  await fs.deleteFolder(child.id, { userId: OWNER })
 
   const renamedFolder = await fs.renameFolder(folder.id, 'Q4 SOP', { userId: OWNER })
   assert.strictEqual(renamedFolder.name, 'Q4 SOP')

@@ -2,7 +2,7 @@
   <section class="productPage">
     <div class="productHeader">
       <div>
-        <FolderBreadcrumb v-if="folder" :folder="folder" />
+        <FolderBreadcrumb v-if="folder" :path="folderPath" />
         <h1>{{ pageTitle }}</h1>
         <p>{{ pageDescription }}</p>
       </div>
@@ -39,7 +39,7 @@
       :sort.sync="sort"
       :view.sync="view"
       :show-create="mode === 'files' || mode === 'folder'"
-      :show-create-folder="mode === 'files' && !isTeamView"
+      :show-create-folder="(mode === 'files' || mode === 'folder') && !isTeamView"
       :show-import="mode === 'files' || mode === 'folder'"
       :hide-opened-sort="isRealFilesMode"
       @create-room="createRoom"
@@ -333,20 +333,44 @@ export default {
     },
     displayCount() {
       if (this.isRealFilesMode && Number(this.total || 0) > 0) {
-        return Number(this.total)
+        return Number(this.total) + this.filteredFolders.length
       }
       return this.itemCount
     },
     showFolders() {
-      return this.mode === 'files' && !this.isTeamView
+      return (this.mode === 'files' || this.mode === 'folder') && !this.isTeamView
     },
     folderMap() {
       return Object.fromEntries(this.folders.map(folder => [folder.id, folder]))
     },
+    folderPath() {
+      const path = []
+      const visited = new Set()
+      let current = this.folder
+      while (current && !visited.has(current.id)) {
+        path.unshift(current)
+        visited.add(current.id)
+        current = current.parentId ? this.folderMap[current.parentId] : null
+      }
+      return path
+    },
+    currentParentId() {
+      return this.folder ? this.folder.id : null
+    },
+    childFolders() {
+      return this.folders
+        .filter(folder => (folder.parentId || null) === this.currentParentId)
+        .map(folder => ({
+          ...folder,
+          itemCount:
+            Number(folder.roomCount || 0) +
+            this.folders.filter(child => child.parentId === folder.id).length
+        }))
+    },
     filteredFolders() {
       const q = this.search.trim().toLowerCase()
       return this.showFolders && !this.roleFilter
-        ? this.folders.filter(
+        ? this.childFolders.filter(
             folder => !q || folder.name.toLowerCase().includes(q)
           )
         : []
@@ -606,7 +630,9 @@ export default {
     },
     async createFolder() {
       const result = await this.$prompt(
-        '当前仅支持一级文件夹，创建于根目录',
+        this.folder
+          ? `将在「${this.folder.name}」中创建子文件夹`
+          : '将在“我的脑图”根目录创建文件夹',
         '新建文件夹',
         {
           inputValidator: value =>
@@ -616,7 +642,11 @@ export default {
       ).catch(() => null)
       if (result)
         await this.perform(
-          () => folderService.createFolder(result.value.trim()),
+          () =>
+            folderService.createFolder(
+              result.value.trim(),
+              this.folder ? this.folder.id : null
+            ),
           '文件夹已创建'
         )
     },
@@ -662,7 +692,7 @@ export default {
       const confirmed = await this.$confirm(
         '删除文件夹「' +
           folder.name +
-          '」？若其中还有脑图，需要先把脑图移出后再删除。',
+          '」？若其中还有脑图或子文件夹，需要先将内容移出后再删除。',
         '删除文件夹'
       )
         .then(() => true)

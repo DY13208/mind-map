@@ -7,9 +7,9 @@
           ><i class="el-icon-folder-opened" /> 根目录</el-radio
         >
       </div>
-      <div class="folderOption" v-for="folder in folders" :key="folder.id">
+      <div class="folderOption" v-for="folder in folderOptions" :key="folder.id">
         <el-radio :label="folder.id"
-          ><i class="el-icon-folder" /> {{ folder.name }}</el-radio
+          ><i class="el-icon-folder" /> {{ folder.label }}</el-radio
         >
       </div></el-radio-group
     ><span slot="footer"
@@ -24,6 +24,30 @@ export default {
   props: { visible: Boolean, room: Object, folders: Array },
   data: () => ({ target: null }),
   computed: {
+    folderOptions() {
+      const byParent = this.folders.reduce((map, folder) => {
+        const key = folder.parentId || ''
+        if (!map[key]) map[key] = []
+        map[key].push(folder)
+        return map
+      }, {})
+      const result = []
+      const visit = (parentId, depth, visited) => {
+        const children = byParent[parentId || ''] || []
+        children.forEach(folder => {
+          if (visited.has(folder.id)) return
+          result.push({
+            ...folder,
+            label: `${'　'.repeat(depth)}${depth ? '└ ' : ''}${folder.name}`
+          })
+          const nextVisited = new Set(visited)
+          nextVisited.add(folder.id)
+          visit(folder.id, depth + 1, nextVisited)
+        })
+      }
+      visit(null, 0, new Set())
+      return result
+    },
     shown: {
       get() {
         return this.visible
