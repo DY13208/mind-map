@@ -22,6 +22,7 @@ export function displayRole(role) {
   if (raw === 'member') return '成员'
   if (raw === 'editor') return '可编辑'
   if (raw === 'viewer') return '可查看'
+  if (raw === 'manager') return '可管理'
   return role || ''
 }
 

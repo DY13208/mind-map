@@ -1151,6 +1151,7 @@ async function handleApi(req, res) {
     sendJson,
     createRoom: createTeamRoom,
     fetchWecomContacts: options => require('./auth').listWecomContacts(options),
+    fetchWecomDepartments: () => require('./auth').listWecomDepartments(),
     upsertWecomContact: user => require('./auth').upsertWecomUser(user)
   })
   if (teamHandled) return true

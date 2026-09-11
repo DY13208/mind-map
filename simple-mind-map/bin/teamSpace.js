@@ -457,11 +457,16 @@ async function handleApi(req, res, options) {
   const path = url.pathname
   const { db, readBody, sendJson, createRoom } = options
   try {
-    const relevant = path === '/api/teams' || path.startsWith('/api/teams/') || path === '/api/wecom/contacts'
+    const relevant = path === '/api/teams' || path.startsWith('/api/teams/') || path === '/api/wecom/contacts' || path === '/api/wecom/departments'
     if (!relevant) return false
     const who = identity(req)
     if (req.method === 'GET' && path === '/api/wecom/contacts') {
       sendJson(res, 200, await contacts(db, who, Object.fromEntries(url.searchParams), options.fetchWecomContacts, options.upsertWecomContact))
+      return true
+    }
+    if (req.method === 'GET' && path === '/api/wecom/departments') {
+      const list = typeof options.fetchWecomDepartments === 'function' ? await options.fetchWecomDepartments() : []
+      sendJson(res, 200, { ok: true, list })
       return true
     }
     if (path === '/api/teams' && req.method === 'GET') { const items = await listTeams(db, who); sendJson(res, 200, { items, list: items }); return true }

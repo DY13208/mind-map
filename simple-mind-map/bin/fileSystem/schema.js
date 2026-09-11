@@ -34,9 +34,11 @@ async function initFileSystemSchema(db) {
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       primary key (folder_id, user_id),
-      constraint folder_members_role_chk check (role in ('editor', 'viewer'))
+      constraint folder_members_role_chk check (role in ('manager', 'editor', 'viewer'))
     )
   `)
+  await db.query(`alter table folder_members drop constraint if exists folder_members_role_chk`)
+  await db.query(`alter table folder_members add constraint folder_members_role_chk check (role in ('manager', 'editor', 'viewer'))`)
   await db.query(`create index if not exists folder_members_user_idx on folder_members(user_id)`)
   await db.query(`
     alter table rooms add column if not exists folder_id uuid

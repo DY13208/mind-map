@@ -1,23 +1,27 @@
 <template>
-  <el-dialog :visible.sync="shown" :title="`文件夹权限「${folder ? folder.name : ''}」`" width="560px">
+  <el-dialog :visible.sync="shown" custom-class="folderPermissionDialog" width="960px" :close-on-click-modal="false">
     <div v-loading="loading || busy">
-      <p class="inheritTip">添加后，成员将获得此文件夹内现有及后续脑图的对应权限。</p>
-      <div class="folderInvite">
+      <header class="permissionHeader">
+        <div class="folderIcon"><i class="el-icon-folder" /></div>
+        <div><h2>文件夹权限「{{ folder ? folder.name : '' }}」</h2><p>添加后，成员将获得此文件夹内现有及后续脑图的对应权限。</p></div>
+        <button class="closeBtn" type="button" aria-label="关闭" @click="shown = false">×</button>
+      </header>
+      <section class="permissionSection"><div class="sectionTitle"><i class="el-icon-user" /><div><strong>添加成员</strong><span>搜索同事并设置权限</span></div></div><div class="folderInvite">
         <el-input v-model.trim="query" prefix-icon="el-icon-search" placeholder="搜索同事姓名或账号" @input="search" />
-        <el-select v-model="role"><el-option label="可查看" value="Viewer" /><el-option label="可编辑" value="Editor" /></el-select>
-      </div>
-      <div class="folderBulkInvite">
-        <el-input v-model.trim="departmentId" placeholder="部门ID（含下属部门）" />
+        <el-select v-model="role"><el-option label="可查看" value="Viewer" /><el-option label="可编辑" value="Editor" /><el-option label="可管理" value="Manager" /></el-select>
+        <el-button type="primary" :disabled="!hits.length" @click="add(hits[0])">＋ 添加成员</el-button></div></section>
+      <section class="permissionSection"><div class="sectionTitle"><i class="el-icon-office-building" /><div><strong>选择部门</strong><span>按部门批量添加权限</span></div></div><div class="folderBulkInvite">
+        <el-autocomplete v-model="departmentName" :fetch-suggestions="filterDepartments" value-key="name" placeholder="搜索或选择部门" @select="selectDepartment" />
         <el-button :loading="bulkLoading" @click="bulkAdd(departmentId)">添加部门</el-button>
         <el-button :loading="bulkLoading" @click="bulkAdd('')">添加全公司</el-button>
-      </div>
+      </div><div class="includeChildren"><el-checkbox v-model="includeChildren">包含下属部门</el-checkbox></div></section>
       <div v-if="hits.length" class="folderHits">
         <button v-for="user in hits" :key="user.user_id" type="button" @click="add(user)">
           <span>{{ user.name || user.user_id }}</span><em>添加</em>
         </button>
       </div>
       <p v-else-if="query && !searching" class="emptyHits">未找到匹配同事</p>
-      <h4>已有权限成员 <small v-if="members.length">共 {{ members.length }} 人</small></h4>
+      <div class="summaryBar">已有权限成员 <strong>{{ members.length }}</strong></div>
       <div class="memberPane">
         <TeamMemberList variant="room" :members="pagedMembers" @role="updateRole" @remove="remove" />
         <p v-if="!members.length && !loading" class="emptyMembers">暂未添加成员</p>
@@ -39,6 +43,7 @@
 <script>
 import folderService from '@/services/folderService'
 import { productRequest } from '@/services/productHttp'
+import teamService from '@/services/teamService'
 import TeamMemberList from './TeamMemberList.vue'
 export default {
   name: 'ShareFolderDialog', components: { TeamMemberList },
@@ -54,7 +59,7 @@ export default {
     timer: null,
     page: 1,
     pageSize: 5
-    ,departmentId: '', bulkLoading: false
+    ,departmentId: '', departmentName: '', departmentOptions: [], selectedDepartment: null, includeChildren: true, bulkLoading: false
   }),
   computed: {
     shown: { get() { return this.visible }, set(value) { this.$emit('update:visible', value) } },
@@ -71,9 +76,13 @@ export default {
         this.hits = []
         this.searching = false
         this.page = 1
+        this.departmentName = ''; this.selectedDepartment = null; this.loadDepartments()
         this.load()
       }
     },
+    async loadDepartments() { try { this.departmentOptions = await teamService.listDepartments() } catch (e) { this.departmentOptions = [] } },
+    filterDepartments(value, cb) { const q = String(value || '').toLowerCase(); cb(this.departmentOptions.filter(d => d.name.toLowerCase().includes(q))) },
+    selectDepartment(item) { this.selectedDepartment = item; this.departmentId = item.id; this.departmentName = item.name },
     members() {
       const maxPage = Math.max(1, Math.ceil(this.members.length / this.pageSize) || 1)
       if (this.page > maxPage) this.page = maxPage
@@ -115,7 +124,7 @@ export default {
     add(user) { return this.run(async () => { await folderService.setMember(this.folderId, user.user_id, this.role); this.query = ''; this.hits = [] }) },
     async bulkAdd(departmentId) {
       this.bulkLoading = true
-      try { await folderService.bulkSetMembers(this.folderId, { departmentId: departmentId || undefined, role: this.role.toLowerCase() }); await this.load(); this.$message.success('批量权限已更新') }
+      try { await folderService.bulkSetMembers(this.folderId, { departmentId: departmentId || undefined, includeChildren: this.includeChildren, role: this.role.toLowerCase() }); await this.load(); this.$message.success('批量权限已更新') }
       catch (error) { this.$message.error(error.message || '批量添加失败') }
       finally { this.bulkLoading = false }
     },
@@ -146,4 +155,11 @@ h4 {
   text-align: right;
 }
 .emptyMembers { color: #7b8982; font-size: 13px; padding: 14px 0; }
+.permissionSection { margin-top: 16px; padding: 16px; border: 1px solid #e7eaf0; border-radius: 12px; background: #fbfcfc; }
+.sectionTitle { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; color: #10966f; }
+.sectionTitle i { font-size: 18px; }.sectionTitle div { display:flex; flex-direction:column; }.sectionTitle strong { color:#172033; font-size:14px; }.sectionTitle span { color:#667085; font-size:12px; margin-top:3px; }
+.folderInvite, .folderBulkInvite { display:flex; gap:10px; align-items:center; }.folderInvite > .el-input, .folderBulkInvite > .el-input { flex:1; }.folderInvite .el-select { width:112px; }.includeChildren { margin-top:10px; }
+.summaryBar { padding: 20px 2px 12px; color:#667085; font-size:13px; border-bottom:1px solid #e7eaf0; }.summaryBar strong { margin-left:6px; color:#172033; font-size:18px; }
+.memberPane { max-height:~'min(380px, 40vh)'; overflow-y:auto; }.memberPane::-webkit-scrollbar { width:6px; }.memberPane::-webkit-scrollbar-thumb { background:#d8dfdc; border-radius:6px; }
+.permissionHeader { display:flex; align-items:flex-start; gap:12px; padding-bottom:20px; border-bottom:1px solid #e7eaf0; }.folderIcon { width:40px;height:40px;border-radius:10px;background:#f1faf6;color:#10966f;display:grid;place-items:center;font-size:20px; }.permissionHeader h2 { margin:0;font-size:20px;color:#172033; }.permissionHeader p { margin:6px 0 0;color:#667085;font-size:13px; }.closeBtn { margin-left:auto;border:0;background:transparent;color:#98a2b3;font-size:26px;cursor:pointer; }
 </style>

@@ -183,6 +183,10 @@ const teamService = {
         nextCursor: data.nextCursor || data.next_cursor || null
       }
     }),
+  listDepartments: () => request(async () => {
+    const data = await productRequest('/api/wecom/departments')
+    return unwrapList(data, ['departments']).map(item => ({ id: String(item.id), name: item.name, parentId: String(item.parentId || 0), order: Number(item.order || 0) }))
+  }),
 
   addMembers: (spaceId, wecomUserIds) =>
     request(async () => {
