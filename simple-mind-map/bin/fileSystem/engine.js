@@ -542,7 +542,11 @@ function createFileSystem(options = {}) {
     if (parentId) {
       const parent = await assertFolderExists(parentId)
       if (userId && parent.created_by && parent.created_by !== userId && !input.bypass) {
-        throw fsError('FORBIDDEN', '没有权限在该文件夹中创建子文件夹', 403)
+        const members = await store.listFolderMembers(parentId)
+        const canEdit = members.some(member => member.user_id === userId && member.role === 'editor')
+        if (!canEdit) {
+          throw fsError('FORBIDDEN', '没有权限在该文件夹中创建子文件夹', 403)
+        }
       }
     }
     if (await store.folderNameTaken(name, parentId)) {

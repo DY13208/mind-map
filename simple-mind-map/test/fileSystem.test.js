@@ -161,6 +161,39 @@ function mockRes() {
   assert.ok(nestedFolders.list.some(item => item.id === child.id))
   assert.ok(nestedFolders.list.some(item => item.id === grandchild.id))
 
+  // Folder editors may create children; file access alone does not grant this right.
+  const folderAccess = engineWith()
+  const sharedParent = await folderAccess.fs.createFolder({ name: 'shared-parent', userId: OWNER })
+  await folderAccess.store.setFolderMember(sharedParent.id, EDITOR, 'editor')
+  await folderAccess.store.setFolderMember(sharedParent.id, VIEWER, 'viewer')
+  const sharedChild = await folderAccess.fs.createFolder({
+    name: 'editor-child', parentId: sharedParent.id, userId: EDITOR
+  })
+  assert.strictEqual(sharedChild.parentId, sharedParent.id)
+  assert.strictEqual((await folderAccess.store.getFolder(sharedChild.id)).created_by, EDITOR)
+  assert.ok((await folderAccess.fs.listFolders({ userId: EDITOR })).list.some(item => item.id === sharedChild.id))
+  const sharedRoom = await folderAccess.fs.createRoom({
+    title: 'shared-file', folderId: sharedParent.id, userId: OWNER
+  })
+  await folderAccess.store.insertMember({ room_key: sharedRoom.room.roomKey, user_id: OTHER, role: 'editor' })
+  for (const userId of [VIEWER, OTHER]) {
+    await assert.rejects(
+      folderAccess.fs.createFolder({ name: 'denied-' + userId, parentId: sharedParent.id, userId }),
+      { code: 'FORBIDDEN', statusCode: 403 }
+    )
+  }
+  await folderAccess.store.setFolderMember(sharedParent.id, EDITOR, 'viewer')
+  await assert.rejects(
+    folderAccess.fs.createFolder({ name: 'downgraded-child', parentId: sharedParent.id, userId: EDITOR }),
+    { code: 'FORBIDDEN', statusCode: 403 }
+  )
+  await folderAccess.store.removeFolderMember(sharedParent.id, EDITOR)
+  await assert.rejects(
+    folderAccess.fs.createFolder({ name: 'revoked-child', parentId: sharedParent.id, userId: EDITOR }),
+    { code: 'FORBIDDEN', statusCode: 403 }
+  )
+  assert.strictEqual(await folderAccess.store.countChildFolders(sharedParent.id), 1)
+
   let childNotEmpty = ''
   try {
     await fs.deleteFolder(folder.id, { userId: OWNER })
