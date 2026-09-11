@@ -11,9 +11,70 @@
     />
     <aside class="productSidebar">
       <div class="sidebarHeader">
-        <div class="productLogo" @click="$router.push('/files')">
+        <div
+          v-if="!sidebarCollapsed"
+          class="productLogo"
+          @click="$router.push('/files')"
+        >
           <span>良</span><strong>良策</strong>
         </div>
+        <button
+          v-else
+          class="collapsedLogoTrigger"
+          type="button"
+          aria-label="打开侧边栏"
+          aria-expanded="false"
+          aria-controls="product-navigation"
+          data-testid="sidebar-toggle"
+          @click="setSidebarCollapsed(false)"
+        >
+          <span class="collapsedLogoMark" aria-hidden="true">良</span>
+          <svg
+            class="collapsedLogoOpenIcon"
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <path d="M9 3v18" />
+          </svg>
+          <span class="collapsedLogoTip" role="tooltip">打开侧边栏</span>
+        </button>
+        <button
+          v-if="!sidebarCollapsed"
+          class="sidebarToggle"
+          type="button"
+          title="关闭侧边栏"
+          aria-label="关闭侧边栏"
+          aria-expanded="true"
+          aria-controls="product-navigation"
+          data-testid="sidebar-toggle-close"
+          @click="setSidebarCollapsed(true)"
+        >
+          <svg
+            class="sidebarToggleIcon"
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <path d="M9 3v18" />
+          </svg>
+        </button>
       </div>
       <nav id="product-navigation" aria-label="产品导航">
         <p class="navLabel">文件</p>
@@ -72,42 +133,6 @@
         </button>
       </div>
     </aside>
-    <button
-      class="sidebarToggle"
-      type="button"
-      :title="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
-      :aria-label="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
-      :aria-expanded="String(!sidebarCollapsed)"
-      aria-controls="product-navigation"
-      data-testid="sidebar-toggle"
-      @click="setSidebarCollapsed(!sidebarCollapsed)"
-    >
-      <svg
-        class="sidebarToggleIcon"
-        viewBox="0 0 16 16"
-        width="16"
-        height="16"
-        aria-hidden="true"
-        focusable="false"
-      >
-        <rect
-          x="1.75"
-          y="2.25"
-          width="12.5"
-          height="11.5"
-          rx="1.5"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.25"
-        />
-        <path
-          d="M5.75 2.25v11.5"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.25"
-        />
-      </svg>
-    </button>
     <main class="productMain">
       <router-view />
     </main>
@@ -225,29 +250,24 @@ export default {
   display: none;
 }
 .productShell .sidebarToggle {
-  position: fixed;
-  top: 22px;
-  left: calc(216px + 10px);
-  z-index: 11;
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
   display: grid;
   place-items: center;
-  border: 1px solid var(--ui-border);
+  border: 0;
   border-radius: 8px;
-  background: var(--ui-surface);
-  color: #6b7c74;
+  background: transparent;
+  color: #5d5d5d;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(23, 38, 31, 0.06);
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease,
-    left 0.2s ease;
+  box-shadow: none;
+  transition: background 0.15s ease, color 0.15s ease;
   &:hover {
-    background: var(--ui-surface-muted);
-    color: var(--ui-primary);
-    border-color: #c9ddd4;
+    background: rgba(0, 0, 0, 0.06);
+    color: #0d0d0d;
   }
   &:active {
-    background: var(--ui-primary-soft);
+    background: rgba(0, 0, 0, 0.09);
   }
   &:focus-visible {
     outline: 2px solid #087854;
@@ -256,6 +276,74 @@ export default {
 }
 .productShell .sidebarToggleIcon {
   display: block;
+}
+.productShell .collapsedLogoTrigger {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  margin: 0 auto;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #5d5d5d;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+  .collapsedLogoMark {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    display: grid;
+    place-items: center;
+    color: white;
+    background: var(--ui-primary);
+    font-size: 18px;
+    line-height: 1;
+    transition: opacity 0.12s ease;
+  }
+  .collapsedLogoOpenIcon {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+  }
+  .collapsedLogoTip {
+    position: absolute;
+    left: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    white-space: nowrap;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: #0d0d0d;
+    color: #fff;
+    font-size: 12px;
+    line-height: 1.2;
+    opacity: 0;
+    pointer-events: none;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+    transition: opacity 0.12s ease;
+    z-index: 20;
+  }
+  &:hover,
+  &:focus,
+  &:focus-visible {
+    background: rgba(0, 0, 0, 0.06);
+    color: #0d0d0d;
+    .collapsedLogoMark {
+      opacity: 0;
+    }
+    .collapsedLogoOpenIcon,
+    .collapsedLogoTip {
+      opacity: 1;
+    }
+  }
+  &:focus-visible {
+    outline: 2px solid #087854;
+    outline-offset: 2px;
+  }
 }
 .productShell .productSidebar {
   width: 216px;
@@ -271,9 +359,11 @@ export default {
   .sidebarHeader {
     display: flex;
     align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     min-height: 40px;
     margin-bottom: 16px;
-    padding: 0 4px 0 8px;
+    padding: 0 0 0 8px;
   }
   .productLogo {
     display: flex;
@@ -431,24 +521,20 @@ export default {
   color: #40564e;
 }
 .productShell--collapsed {
-  .sidebarToggle {
-    left: calc(72px + 10px);
-  }
   .productSidebar {
     width: 72px;
     padding-inline: 10px;
     .sidebarHeader {
       justify-content: center;
+      align-items: center;
       margin-bottom: 18px;
       padding: 0;
+      overflow: visible;
     }
-    .productLogo {
-      padding: 0;
-      justify-content: center;
-      gap: 0;
-      strong {
-        display: none;
-      }
+    .collapsedLogoTrigger {
+      width: 40px;
+      height: 40px;
+      margin: 0;
     }
     .productLogo strong,
     a:not(.router-link-exact-active)::after,
@@ -457,9 +543,15 @@ export default {
     }
     a {
       justify-content: center;
+      align-items: center;
       padding: 0;
+      gap: 0;
       i {
         font-size: 20px;
+        margin: 0;
+      }
+      span {
+        display: none;
       }
     }
     .navLabel,
@@ -469,14 +561,19 @@ export default {
     }
     .sidebarFooter {
       padding-inline: 0;
+      gap: 8px;
     }
     .accountInfo {
       justify-content: center;
+      gap: 0;
     }
     .accountLogout {
-      width: 36px;
+      width: 40px;
+      height: 40px;
       margin-inline: auto;
       padding: 0;
+      gap: 0;
+      justify-content: center;
     }
   }
   .productMain {
@@ -486,12 +583,6 @@ export default {
 @media (max-width: 760px) {
   .productShell .productMain {
     margin-left: 72px;
-  }
-  .productShell .sidebarToggle {
-    left: calc(72px + 10px);
-  }
-  .productShell:not(.productShell--collapsed) .sidebarToggle {
-    left: calc(216px + 10px);
   }
   .productShell .sidebarBackdrop {
     display: block;
