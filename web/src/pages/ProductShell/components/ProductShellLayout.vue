@@ -10,23 +10,46 @@
       @click="setSidebarCollapsed(true)"
     />
     <aside class="productSidebar">
-      <button
-        class="sidebarToggle"
-        :title="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
-        :aria-label="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
-        :aria-expanded="String(!sidebarCollapsed)"
-        aria-controls="product-navigation"
-        @click="setSidebarCollapsed(!sidebarCollapsed)"
-      >
-        <i
-          :class="
-            sidebarCollapsed ? 'el-icon-arrow-right' : 'el-icon-arrow-left'
-          "
-          aria-hidden="true"
-        />
-      </button>
-      <div class="productLogo" @click="$router.push('/files')">
-        <span>良</span><strong>良策</strong>
+      <div class="sidebarHeader">
+        <div class="productLogo" @click="$router.push('/files')">
+          <span>良</span><strong>良策</strong>
+        </div>
+        <button
+          class="sidebarToggle"
+          type="button"
+          :title="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
+          :aria-label="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
+          :aria-expanded="String(!sidebarCollapsed)"
+          aria-controls="product-navigation"
+          data-testid="sidebar-toggle"
+          @click="setSidebarCollapsed(!sidebarCollapsed)"
+        >
+          <svg
+            class="sidebarToggleIcon"
+            viewBox="0 0 16 16"
+            width="16"
+            height="16"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <rect
+              x="1.75"
+              y="2.25"
+              width="12.5"
+              height="11.5"
+              rx="1.5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.25"
+            />
+            <path
+              d="M5.75 2.25v11.5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.25"
+            />
+          </svg>
+        </button>
       </div>
       <nav id="product-navigation" aria-label="产品导航">
         <p class="navLabel">文件</p>
@@ -201,44 +224,31 @@ export default {
 .productShell .sidebarBackdrop {
   display: none;
 }
-.productShell .sidebarToggle {
-  position: absolute;
-  top: 24px;
-  right: -14px;
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border: 1px solid #dce7e1;
-  border-radius: 50%;
-  background: #fff;
-  color: #52665f;
-  cursor: pointer;
-  &:hover {
-    background: #eaf6f1;
-    color: #087854;
-  }
-  &:focus-visible {
-    outline: 2px solid #087854;
-    outline-offset: 3px;
-  }
-}
 .productShell .productSidebar {
   width: 216px;
   background: var(--ui-surface);
   border-right: 1px solid var(--ui-border);
-  padding: 20px 12px 16px;
+  padding: 16px 12px 16px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   position: fixed;
   inset: 0 auto 0 0;
   z-index: 10;
+  .sidebarHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 40px;
+    margin-bottom: 16px;
+    padding: 0 4px 0 8px;
+  }
   .productLogo {
     display: flex;
     align-items: center;
     gap: 11px;
-    padding: 0 10px 24px;
+    min-width: 0;
     cursor: pointer;
     font-size: 17px;
     span {
@@ -250,7 +260,40 @@ export default {
       color: white;
       background: var(--ui-primary);
       font-size: 18px;
+      flex-shrink: 0;
     }
+    strong {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+  .sidebarToggle {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #6b7c74;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+    &:hover {
+      background: var(--ui-surface-muted);
+      color: var(--ui-primary);
+    }
+    &:active {
+      background: var(--ui-primary-soft);
+    }
+    &:focus-visible {
+      outline: 2px solid #087854;
+      outline-offset: 2px;
+    }
+  }
+  .sidebarToggleIcon {
+    display: block;
   }
   nav {
     display: flex;
@@ -387,21 +430,26 @@ export default {
   .productSidebar {
     width: 72px;
     padding-inline: 10px;
-    .productLogo strong,
-    a:not(.router-link-exact-active)::after,
-    a {
-      font-size: 0;
+    .sidebarHeader {
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 10px;
+      margin-bottom: 18px;
+      padding: 0;
     }
     .productLogo {
-      padding-inline: 0;
+      padding: 0;
       justify-content: center;
       gap: 0;
       strong {
         display: none;
       }
-      span {
-        flex-shrink: 0;
-      }
+    }
+    .productLogo strong,
+    a:not(.router-link-exact-active)::after,
+    a {
+      font-size: 0;
     }
     a {
       justify-content: center;
