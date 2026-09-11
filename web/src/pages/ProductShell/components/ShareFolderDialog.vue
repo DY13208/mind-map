@@ -23,7 +23,7 @@
       <p v-else-if="query && !searching" class="emptyHits">未找到匹配同事</p>
       <div class="summaryBar">已有权限成员 <strong>{{ members.length }}</strong></div>
       <div class="memberPane">
-        <div v-for="member in pagedMembers" :key="member.id" class="permissionMemberRow"><div class="memberIdentity"><strong>{{ member.name || member.id }}</strong><small>{{ member.department || '成员' }}</small></div><span class="joinedAt">{{ member.joinedAt || '—' }}</span><el-select size="small" :value="member.role" :disabled="member.role === 'Owner'" @change="updateRole(member, $event)"><el-option label="可查看" value="Viewer" /><el-option label="可编辑" value="Editor" /><el-option label="可管理" value="Manager" /></el-select><el-button v-if="member.role !== 'Owner'" type="text" class="remove" @click="remove(member)">移除</el-button></div>
+        <div v-for="member in pagedMembers" :key="member.id" class="permissionMemberRow"><div class="memberIdentity"><strong>{{ member.name || member.id }}</strong><small>{{ member.department || '成员' }}</small></div><span class="joinedAt">{{ member.joinedAt || '—' }}</span><el-select size="small" :value="member.role" :disabled="String(member.role).toLowerCase() === 'owner'" @change="updateRole(member, $event)"><el-option label="可查看" value="Viewer" /><el-option label="可编辑" value="Editor" /><el-option label="可管理" value="Manager" /></el-select><el-button v-if="String(member.role).toLowerCase() !== 'owner'" type="text" class="remove" @click="remove(member)">移除</el-button></div>
         <p v-if="!members.length && !loading" class="emptyMembers">暂未添加成员</p>
       </div>
       <el-pagination
@@ -161,5 +161,6 @@ h4 {
 .folderInvite, .folderBulkInvite { display:flex; gap:10px; align-items:center; }.folderInvite > .el-input, .folderBulkInvite > .el-input { flex:1; }.folderInvite .el-select { width:112px; }.includeChildren { margin-top:10px; }
 .summaryBar { padding: 20px 2px 12px; color:#667085; font-size:13px; border-bottom:1px solid #e7eaf0; }.summaryBar strong { margin-left:6px; color:#172033; font-size:18px; }
 .memberPane { max-height:~'min(380px, 40vh)'; overflow-y:auto; }.memberPane::-webkit-scrollbar { width:6px; }.memberPane::-webkit-scrollbar-thumb { background:#d8dfdc; border-radius:6px; }
+.permissionMemberRow { display:grid; grid-template-columns:minmax(240px,1fr) 180px 120px 60px; gap:14px; align-items:center; padding:12px 8px; border-bottom:1px solid #eef1ef; }.permissionMemberRow:hover { background:#f8faf9; }.memberIdentity { display:flex; flex-direction:column; }.memberIdentity strong { font-weight:600; }.memberIdentity small,.joinedAt { color:#98a2b3; font-size:12px; margin-top:3px; }
 .permissionHeader { display:flex; align-items:flex-start; gap:12px; padding-bottom:20px; border-bottom:1px solid #e7eaf0; }.folderIcon { width:40px;height:40px;border-radius:10px;background:#f1faf6;color:#10966f;display:grid;place-items:center;font-size:20px; }.permissionHeader h2 { margin:0;font-size:20px;color:#172033; }.permissionHeader p { margin:6px 0 0;color:#667085;font-size:13px; }.closeBtn { margin-left:auto;border:0;background:transparent;color:#98a2b3;font-size:26px;cursor:pointer; }
 </style>

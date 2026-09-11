@@ -142,8 +142,8 @@ async function handleFileSystemApi(req, res, options = {}) {
       if (!folder) throw Object.assign(new Error('文件夹不存在'), { code: 'FOLDER_NOT_FOUND', statusCode: 404 })
       if (!bypass && folder.created_by !== userId) throw Object.assign(new Error('只有文件夹所有者可以设置权限'), { code: 'FORBIDDEN', statusCode: 403 })
       const body = options.body || (await readBody(req))
-      const role = roomAcl.normalizeRole(body.role)
-      if (!['editor', 'viewer'].includes(role)) throw Object.assign(new Error('文件夹权限必须是可编辑或可查看'), { code: 'BAD_REQUEST', statusCode: 400 })
+      const role = String(body.role || '').trim().toLowerCase()
+      if (!['manager', 'editor', 'viewer'].includes(role)) throw Object.assign(new Error('文件夹权限必须是可管理、可编辑或可查看'), { code: 'BAD_REQUEST', statusCode: 400 })
       const params = [req.authUser && req.authUser.corpId]
       let where = ['corp_id = $1']
       if (body.departmentId) {
@@ -160,7 +160,11 @@ async function handleFileSystemApi(req, res, options = {}) {
       for (const row of rows) {
         if (!row.user_id || row.user_id === folder.created_by) continue
         await fs.store.setFolderMember(bulkFolderId, row.user_id, role)
-        for (const roomKey of await fs.store.roomKeysInFolder(bulkFolderId)) await roomAcl.setMember(fs.store, roomKey, row.user_id, role, userId, req.authUser && req.authUser.corpId)
+        for (const roomKey of await fs.store.roomKeysInFolder(bulkFolderId)) {
+          const room = await fs.store.getRoom(roomKey)
+          if (room && room.owner_id === row.user_id) continue
+          if (role !== 'manager') await roomAcl.setMember(fs.store, roomKey, row.user_id, role, userId, req.authUser && req.authUser.corpId)
+        }
       }
       sendJson(res, 200, { ok: true, list: await fs.store.listFolderMembers(bulkFolderId), added: rows.length })
       return true
@@ -199,10 +203,14 @@ async function handleFileSystemApi(req, res, options = {}) {
         if (folderMember && folderMember.role === 'manager' && role === 'manager') {
           throw Object.assign(new Error('可管理权限只能由文件夹创建人授予'), { code: 'FORBIDDEN', statusCode: 403 })
         }
+        const currentMember = (await fs.store.listFolderMembers(folderAcl.id)).find(item => item.user_id === targetId)
+        if (currentMember && currentMember.role === 'owner') {
+          throw Object.assign(new Error('文件夹所有者权限不能修改'), { code: 'FORBIDDEN', statusCode: 403 })
+        }
         await fs.store.setFolderMember(folderAcl.id, targetId, role)
         const roomKeys = await fs.store.roomKeysInFolder(folderAcl.id)
         for (const roomKey of roomKeys) {
-          await roomAcl.setMember(fs.store, roomKey, targetId, role, userId,
+          if (role !== 'manager') await roomAcl.setMember(fs.store, roomKey, targetId, role, userId,
             req.authUser && req.authUser.corpId)
         }
         const list = await fs.store.listFolderMembers(folderAcl.id)
