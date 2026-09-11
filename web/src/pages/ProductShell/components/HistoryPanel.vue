@@ -1,46 +1,54 @@
-<template
-  ><el-drawer
+<template>
+  <el-dialog
+    class="historyDialog"
     :visible.sync="shown"
-    :title="`历史版本 · ${room ? room.title : ''}`"
-    size="430px"
-    ><div class="historyBody" v-loading="loading">
-      <div v-if="error">
-        <el-alert :title="error" type="error" :closable="false" /><el-button
-          @click="load"
-          >重试</el-button
-        >
+    :title="'历史版本「' + (room ? room.title : '') + '」'"
+    width="560px"
+  >
+    <div class="historyBody" v-loading="loading">
+      <div v-if="error" class="historyError">
+        <el-alert :title="error" type="error" :closable="false" />
+        <el-button size="small" @click="load">重试</el-button>
       </div>
       <div v-if="canCreate" class="createRow">
         <el-button size="small" type="primary" plain @click="createManual"
           >创建手动版本</el-button
         >
+        <small>自动版本会在编辑保存后生成</small>
       </div>
-      <div v-for="item in versions" :key="item.versionId" class="versionItem">
-        <div class="versionHead">
-          <strong>{{ item.name || item.versionId }}</strong
-          ><el-tag
-            size="mini"
-            :type="item.type === 'AUTO' ? 'info' : 'success'"
-            >{{ item.type === 'AUTO' ? '自动' : '手动' }}</el-tag
-          >
-        </div>
-        <p v-if="item.description">{{ item.description }}</p>
-        <p v-if="item.summary">{{ item.summary }}</p>
-        <span
-          >{{ item.createdBy }} · {{ format(item.createdAt) }} · revision
-          {{ item.revision }}</span
+      <div v-if="versions.length" class="versionList" role="list">
+        <article
+          v-for="item in versions"
+          :key="item.versionId"
+          class="versionItem"
+          role="listitem"
         >
-        <div class="versionActions">
-          <el-button size="mini" @click="view(item)">查看</el-button
-          ><el-button
-            v-if="canRestore"
-            size="mini"
-            type="primary"
-            plain
-            @click="restore(item)"
-            >恢复</el-button
+          <div class="versionHead">
+            <strong>{{ item.name || item.versionId }}</strong>
+            <el-tag
+              size="mini"
+              :type="item.type === 'AUTO' ? 'info' : 'success'"
+              >{{ item.type === 'AUTO' ? '自动' : '手动' }}</el-tag
+            >
+          </div>
+          <p v-if="item.description">{{ item.description }}</p>
+          <p v-if="item.summary">{{ item.summary }}</p>
+          <span class="versionMeta"
+            >{{ item.createdBy }} · {{ format(item.createdAt) }} · revision
+            {{ item.revision }}</span
           >
-        </div>
+          <div class="versionActions">
+            <el-button size="mini" @click="view(item)">查看</el-button>
+            <el-button
+              v-if="canRestore"
+              size="mini"
+              type="primary"
+              plain
+              @click="restore(item)"
+              >恢复</el-button
+            >
+          </div>
+        </article>
       </div>
       <EmptyState
         v-if="!loading && !error && !versions.length"
@@ -48,10 +56,15 @@
         description="编辑脑图或创建手动版本后会显示在这里"
       />
     </div>
+    <span slot="footer">
+      <el-button @click="shown = false">关闭</el-button>
+    </span>
     <VersionDetailDialog
       :visible.sync="detailVisible"
-      :version="selected"/></el-drawer
-></template>
+      :version="selected"
+    />
+  </el-dialog>
+</template>
 <script>
 import { userMessageFromError } from '@/services/apiError'
 import historyService from '@/services/historyService'
@@ -170,25 +183,66 @@ export default {
 </script>
 <style lang="less" scoped>
 .historyBody {
-  padding: 0 22px 30px;
+  min-height: 160px;
+}
+.historyError {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 .createRow {
-  padding: 8px 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 16px;
+  small {
+    color: #80948a;
+    font-size: 12px;
+  }
+}
+.versionList {
+  max-height: 420px;
+  max-height: ~'min(52vh, 420px)';
+  overflow: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+  border: 1px solid #e3e9e6;
+  border-radius: 8px;
 }
 .versionItem {
-  border-bottom: 1px solid #e9eeeb;
-  padding: 17px 0;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid #edf1ef;
+  background: #fff;
+  &:last-child {
+    border-bottom: 0;
+  }
+  &:hover {
+    background: #f7faf8;
+  }
   p,
-  span {
+  .versionMeta {
     display: block;
     color: #73847d;
     font-size: 12px;
     margin: 6px 0 0;
+    line-height: 1.45;
   }
   .versionHead {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 10px;
+    strong {
+      color: #17261f;
+      font-size: 14px;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   }
   .versionActions {
     margin-top: 10px;
