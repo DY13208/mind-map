@@ -110,7 +110,7 @@ import { getData, getDataAsync, getConfig, storeData } from '@/api'
 import Navigator from './Navigator.vue'
 import NodeImgPreview from './NodeImgPreview.vue'
 import SidebarTrigger from './SidebarTrigger.vue'
-import { mapState } from 'vuex'
+import { mapState, mapMutations } from 'vuex'
 import icon from '@/config/icon'
 import Vue from 'vue'
 import Search from './Search.vue'
@@ -126,6 +126,7 @@ import {
 } from '@/utils/importTree'
 import handleClipboardText from '@/utils/handleClipboardText'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
+import { isDarkThemeValue, resolveAppearanceTheme } from '@/utils/themeAppearance'
 import Scrollbar from './Scrollbar.vue'
 import exampleData from 'simple-mind-map/example/exampleData'
 import FormulaSidebar from './FormulaSidebar.vue'
@@ -222,7 +223,14 @@ export default {
       prevImg: '',
       storeConfigTimer: null,
       showDragMask: false,
-      useDarkCanvasFallback: false
+      useDarkCanvasFallback: false,
+      adaptingAppearanceTheme: false,
+      appearanceHeldDarkTheme: null,
+      appearanceHeldLightTheme: null,
+      appearanceTransitioning: false,
+      appearanceTransitionTimer: null,
+      appearanceTransitionToken: null,
+      appearanceSnapshotEl: null
     }
   },
   computed: {
@@ -238,11 +246,13 @@ export default {
       extraTextOnExport: state => state.extraTextOnExport,
       isDragOutlineTreeNode: state => state.isDragOutlineTreeNode,
       enableAi: state => state.localConfig.enableAi,
-      isDark: state => state.localConfig.isDark
+      isDark: state => state.localConfig.isDark,
+      extendThemeGroupList: state => state.extendThemeGroupList
     })
   },
   watch: {
     isDark() {
+      if (this.appearanceTransitioning) return
       this.syncCanvasDarkBackground()
     },
     openNodeRichText() {
@@ -306,6 +316,7 @@ export default {
     this.$bus.$on('createAssociativeLine', this.handleCreateLineFromActiveNode)
     this.$bus.$on('startPainter', this.handleStartPainter)
     this.$bus.$on('localStorageExceeded', this.onLocalStorageExceeded)
+    this.$bus.$on('toggle_appearance_mode', this.handleToggleAppearanceMode)
     window.addEventListener('resize', this.handleResize)
   },
   beforeDestroy() {
@@ -321,6 +332,12 @@ export default {
       clearTimeout(this.loadingSafetyTimer)
       this.loadingSafetyTimer = null
     }
+    if (this.appearanceTransitionTimer) {
+      clearTimeout(this.appearanceTransitionTimer)
+      this.appearanceTransitionTimer = null
+    }
+    this.appearanceTransitionToken = null
+    this.clearAppearanceSnapshot()
     this.importPersistLock = false
     this.stopImportProgressPoll()
     this.$bus.$off('execCommand', this.execCommand)
@@ -336,6 +353,7 @@ export default {
     this.$bus.$off('showLoading', this.handleShowLoading)
     this.$bus.$off('hideLoading', this.handleForceHideLoading)
     this.$bus.$off('localStorageExceeded', this.onLocalStorageExceeded)
+    this.$bus.$off('toggle_appearance_mode', this.handleToggleAppearanceMode)
     window.removeEventListener('resize', this.handleResize)
     if (this.mindMap) {
       this.unbindCanvasThemeEvents()
@@ -343,6 +361,8 @@ export default {
     }
   },
   methods: {
+    ...mapMutations(['setLocalConfig']),
+
     onLocalStorageExceeded() {
       this.$notify({
         type: 'warning',
@@ -493,6 +513,246 @@ export default {
       return 0.299 * r + 0.587 * g + 0.114 * b < 140
     },
 
+    isCurrentThemeDark(themeValue) {
+      return isDarkThemeValue(
+        themeValue || (this.mindMap && this.mindMap.getTheme()),
+        this.extendThemeGroupList
+      )
+    },
+
+    // 日间/夜间：优先用 View Transition 做画布交叉淡入；否则用快照淡出，避免纯色遮罩「闪一下」。
+    async handleToggleAppearanceMode(nextDark) {
+      if (!this.mindMap || this.appearanceTransitioning) return
+      const wantDark = !!nextDark
+      if (wantDark === !!this.isDark) {
+        this.ensureAppearanceThemeAligned()
+        return
+      }
+
+      const current = this.mindMap.getTheme()
+      const resolved = resolveAppearanceTheme({
+        nextDark: wantDark,
+        currentTheme: current,
+        heldLightTheme: this.appearanceHeldLightTheme,
+        heldDarkTheme: this.appearanceHeldDarkTheme,
+        extendThemeGroupList: this.extendThemeGroupList
+      })
+      this.appearanceHeldLightTheme = resolved.heldLightTheme
+      this.appearanceHeldDarkTheme = resolved.heldDarkTheme
+
+      this.appearanceTransitioning = true
+      this.adaptingAppearanceTheme = true
+      this.setCanvasDarkFallback(false)
+
+      const el = this.mindMap.el
+      const token = Symbol('appearance')
+      this.appearanceTransitionToken = token
+      const reduceMotion =
+        typeof window !== 'undefined' &&
+        window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+      const runChange = async () => {
+        if (this.appearanceTransitionToken !== token || !this.mindMap) return
+        await this.applyAppearanceModeChange(wantDark, resolved)
+        await new Promise(resolve => {
+          requestAnimationFrame(() => requestAnimationFrame(resolve))
+        })
+      }
+
+      try {
+        if (
+          !reduceMotion &&
+          el &&
+          typeof document.startViewTransition === 'function'
+        ) {
+          el.style.viewTransitionName = 'mind-map-appearance'
+          const transition = document.startViewTransition(() => runChange())
+          await transition.finished.catch(() => {})
+        } else if (!reduceMotion) {
+          this.showAppearanceSnapshot()
+          await runChange()
+          if (this.appearanceTransitionToken === token) {
+            await this.fadeOutAppearanceSnapshot()
+          }
+        } else {
+          await runChange()
+        }
+      } finally {
+        if (el) el.style.viewTransitionName = ''
+        this.clearAppearanceSnapshot()
+        if (el && el.classList) {
+          el.classList.remove('isAppearanceTransitioning')
+        }
+        this.adaptingAppearanceTheme = false
+        this.appearanceTransitioning = false
+        this.appearanceTransitionToken = null
+        this.syncCanvasDarkBackground()
+      }
+    },
+
+    applyAppearanceModeChange(wantDark, resolved) {
+      return new Promise(resolve => {
+        if (!this.mindMap) {
+          resolve()
+          return
+        }
+
+        const finish = () => {
+          if (this.mindMap) {
+            this.mindMap.off('node_tree_render_end', finish)
+          }
+          if (this.appearanceTransitionTimer) {
+            clearTimeout(this.appearanceTransitionTimer)
+            this.appearanceTransitionTimer = null
+          }
+          resolve()
+        }
+
+        if (resolved.changed) {
+          this.mindMap.setTheme(resolved.theme, true)
+          if (typeof this.mindMap.initTheme === 'function') {
+            this.mindMap.initTheme()
+          }
+
+          const config = this.mindMap.getCustomThemeConfig
+            ? this.mindMap.getCustomThemeConfig()
+            : {}
+          storeData({
+            theme: {
+              template: resolved.theme,
+              config: config || {}
+            }
+          })
+          if (this.mindMapData && this.mindMapData.theme) {
+            this.mindMapData.theme.template = resolved.theme
+          }
+
+          this.setLocalConfig({ isDark: wantDark })
+          this.mindMap.off('node_tree_render_end', finish)
+          this.mindMap.on('node_tree_render_end', finish)
+          this.appearanceTransitionTimer = setTimeout(finish, 1200)
+          this.mindMap.render(null, 'changeTheme')
+          return
+        }
+
+        this.setLocalConfig({ isDark: wantDark })
+        this.syncCanvasDarkBackground()
+        resolve()
+      })
+    },
+
+    showAppearanceSnapshot() {
+      const el = this.mindMap && this.mindMap.el
+      if (!el) return
+      this.clearAppearanceSnapshot()
+      const snap = el.cloneNode(true)
+      snap.removeAttribute('id')
+      snap.querySelectorAll('[id]').forEach(node => {
+        node.removeAttribute('id')
+      })
+      snap
+        .querySelectorAll('[data-appearance-snapshot]')
+        .forEach(node => node.remove())
+      Object.assign(snap.style, {
+        position: 'absolute',
+        left: '0',
+        top: '0',
+        right: '0',
+        bottom: '0',
+        width: '100%',
+        height: '100%',
+        zIndex: '2147483646',
+        pointerEvents: 'none',
+        margin: '0',
+        opacity: '1',
+        transition: 'none',
+        viewTransitionName: 'none'
+      })
+      snap.setAttribute('data-appearance-snapshot', '1')
+      snap.setAttribute('aria-hidden', 'true')
+      el.appendChild(snap)
+      this.appearanceSnapshotEl = snap
+    },
+
+    fadeOutAppearanceSnapshot() {
+      return new Promise(resolve => {
+        const snap = this.appearanceSnapshotEl
+        if (!snap) {
+          resolve()
+          return
+        }
+        let settled = false
+        const done = () => {
+          if (settled) return
+          settled = true
+          this.clearAppearanceSnapshot()
+          resolve()
+        }
+        snap.style.transition = 'opacity 0.16s ease'
+        void snap.offsetHeight
+        snap.style.opacity = '0'
+        snap.addEventListener('transitionend', done, { once: true })
+        setTimeout(done, 220)
+      })
+    },
+
+    clearAppearanceSnapshot() {
+      const snap = this.appearanceSnapshotEl
+      if (snap && snap.parentNode) {
+        snap.parentNode.removeChild(snap)
+      }
+      this.appearanceSnapshotEl = null
+    },
+
+    // 日间/夜间必须切换完整主题模板：只改画布底色会留下浅色主题的黑字，对比失效。
+    adaptThemeToAppearance(nextDark) {
+      if (!this.mindMap) return
+      const current = this.mindMap.getTheme()
+      const resolved = resolveAppearanceTheme({
+        nextDark: !!nextDark,
+        currentTheme: current,
+        heldLightTheme: this.appearanceHeldLightTheme,
+        heldDarkTheme: this.appearanceHeldDarkTheme,
+        extendThemeGroupList: this.extendThemeGroupList
+      })
+      this.appearanceHeldLightTheme = resolved.heldLightTheme
+      this.appearanceHeldDarkTheme = resolved.heldDarkTheme
+      if (resolved.changed) this.applyAppearanceTheme(resolved.theme)
+    },
+
+    // 本地日夜间偏好与房间主题不一致时（例如浅色主题 + 夜间），启动后立刻对齐。
+    ensureAppearanceThemeAligned() {
+      if (!this.mindMap) return
+      this.adaptThemeToAppearance(!!this.isDark)
+      this.syncCanvasDarkBackground()
+    },
+
+    applyAppearanceTheme(template) {
+      if (!this.mindMap || !template) return
+      if (this.mindMap.getTheme() === template) return
+      this.adaptingAppearanceTheme = true
+      try {
+        this.mindMap.setTheme(template)
+        const config = this.mindMap.getCustomThemeConfig
+          ? this.mindMap.getCustomThemeConfig()
+          : {}
+        storeData({
+          theme: {
+            template,
+            config: config || {}
+          }
+        })
+        if (this.mindMapData && this.mindMapData.theme) {
+          this.mindMapData.theme.template = template
+        }
+      } finally {
+        this.$nextTick(() => {
+          this.adaptingAppearanceTheme = false
+        })
+      }
+    },
+
     setCanvasDarkFallback(enabled) {
       this.useDarkCanvasFallback = !!enabled
       const el = this.mindMap
@@ -508,8 +768,12 @@ export default {
       if (!mindMap || !mindMap.el) return
       const el = mindMap.el
       const themeConfig = mindMap.themeConfig || {}
+      // 过渡中禁止夜间兜底，避免“浅色主题已切换但 isDark 未稳”时出现黑底黑字闪帧。
       const useFallback =
-        this.isDark && !this.isLikelyDarkColor(themeConfig.backgroundColor)
+        !this.appearanceTransitioning &&
+        this.isDark &&
+        !this.isCurrentThemeDark() &&
+        !this.isLikelyDarkColor(themeConfig.backgroundColor)
       this.setCanvasDarkFallback(useFallback)
       if (useFallback) return
       el.style.backgroundColor = themeConfig.backgroundColor || ''
@@ -529,16 +793,28 @@ export default {
       this.setCanvasDarkFallback(this.isDark)
     },
 
+    onViewThemeChange() {
+      if (!this.adaptingAppearanceTheme && this.mindMap) {
+        const current = this.mindMap.getTheme()
+        if (this.isCurrentThemeDark(current)) {
+          this.appearanceHeldDarkTheme = current
+        } else {
+          this.appearanceHeldLightTheme = current
+        }
+      }
+      this.syncCanvasDarkBackground()
+    },
+
     bindCanvasThemeEvents() {
       if (!this.mindMap) return
       this.mindMap.on('node_tree_render_start', this.syncCanvasDarkBackground)
-      this.mindMap.on('view_theme_change', this.syncCanvasDarkBackground)
+      this.mindMap.on('view_theme_change', this.onViewThemeChange)
     },
 
     unbindCanvasThemeEvents() {
       if (!this.mindMap) return
       this.mindMap.off('node_tree_render_start', this.syncCanvasDarkBackground)
-      this.mindMap.off('view_theme_change', this.syncCanvasDarkBackground)
+      this.mindMap.off('view_theme_change', this.onViewThemeChange)
     },
 
     // 获取思维导图数据，实际应该调接口获取
@@ -709,6 +985,7 @@ export default {
         }
       })
       this.bindCanvasThemeEvents()
+      this.ensureAppearanceThemeAligned()
       this.loadPlugins()
       this.mindMap.keyCommand.addShortcut('Control+s', () => {
         this.manualSave()
@@ -1179,6 +1456,31 @@ export default {
       background-color: #262a2e !important;
       background-image: none !important;
     }
+  }
+}
+</style>
+
+<style lang="less">
+/* 日夜间画布交叉淡入（View Transition），保持短促以免感觉「闪一下」 */
+::view-transition-group(mind-map-appearance) {
+  animation-duration: 0.18s;
+  animation-timing-function: ease;
+}
+
+::view-transition-old(mind-map-appearance),
+::view-transition-new(mind-map-appearance) {
+  animation-duration: 0.18s;
+  animation-timing-function: ease;
+  mix-blend-mode: normal;
+  height: 100%;
+  object-fit: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(mind-map-appearance),
+  ::view-transition-old(mind-map-appearance),
+  ::view-transition-new(mind-map-appearance) {
+    animation: none !important;
   }
 }
 </style>
