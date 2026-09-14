@@ -580,7 +580,9 @@ function writeOpenclawRuntimeConfig({
     openclawToken: String(token || ''),
     openclawModel: String(model || 'openclaw/default'),
     openclawControlUrl: `http://127.0.0.1:${port}/chat`,
-    openclawBridgeWs: '/openclaw-bridge/ws'
+    openclawBridgeWs: '/openclaw-bridge/ws',
+    cogneeBase: '/cognee-api',
+    cogneeDataset: String(process.env.COGNEE_DATASET || 'liangce')
   }
   fs.writeFileSync(
     file,

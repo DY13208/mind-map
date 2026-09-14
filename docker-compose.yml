@@ -58,6 +58,9 @@ services:
       COLLAB_V2: "1"
       SOP_OUTPUT_DIR: /app/output
       YIRAN_UPSTREAM: ${YIRAN_UPSTREAM:-http://host.docker.internal:18232}
+      COGNEE_API: ${COGNEE_API:-http://192.168.0.204:8320}
+      COGNEE_API_KEY: ${COGNEE_API_KEY:-}
+      COGNEE_DATASET: ${COGNEE_DATASET:-liangce}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

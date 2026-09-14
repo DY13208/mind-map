@@ -449,6 +449,39 @@ function diagnoseStartupFailure(dir) {
   }
 }
 
+function clearStaleProxyState(dir) {
+  const stateFile = path.join(dir, 'runtime', 'proxy-state.json')
+  if (!fs.existsSync(stateFile)) return
+  let pid = 0
+  try {
+    pid = Number(JSON.parse(fs.readFileSync(stateFile, 'utf8')).pid) || 0
+  } catch (e) {
+    try {
+      fs.unlinkSync(stateFile)
+    } catch (err) {
+      /* ignore */
+    }
+    return
+  }
+  if (!pid) return
+  let isPython = false
+  try {
+    const out = execSync(
+      `powershell -NoProfile -Command "(Get-Process -Id ${pid} -ErrorAction Stop).ProcessName"`,
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+    )
+    isPython = /python/i.test(String(out || ''))
+  } catch (e) {
+    isPython = false
+  }
+  if (isPython) return
+  try {
+    fs.unlinkSync(stateFile)
+  } catch (e) {
+    /* ignore */
+  }
+}
+
 function checkHealth(port = DEFAULT_PORT, timeout = 1500) {
   return new Promise(resolve => {
     const req = http.get(`http://127.0.0.1:${port}/health`, res => {
@@ -513,6 +546,10 @@ async function ensureWorkbuddyApi({
 
   const dirEarly = resolveWorkbuddyDir(projectRoot)
   const envFp = customModelEnvFingerprint()
+  // 端口没在听，但状态文件里的 PID 可能已被别的进程复用（例如 Cursor）
+  if (!(await checkHealth(port))) {
+    clearStaleProxyState(dirEarly)
+  }
   if (await checkHealth(port)) {
     const prevFp = readCustomModelEnvMarker(dirEarly)
     // 自定义模型环境变了（或旧进程未写入标记）则重启，避免仍走平台积分

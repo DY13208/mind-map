@@ -108,6 +108,14 @@
           <i class="el-icon-connection" aria-hidden="true"></i>
           <span>MCP 接入</span>
         </router-link>
+        <router-link
+          to="/cognee"
+          title="Cognee 知识图谱"
+          aria-label="Cognee 知识图谱"
+        >
+          <i class="el-icon-search" aria-hidden="true"></i>
+          <span>Cognee</span>
+        </router-link>
       </nav>
       <div class="sidebarFooter" v-if="profile">
         <div class="accountInfo" :title="`${profile.name}（${profile.id}）`">
