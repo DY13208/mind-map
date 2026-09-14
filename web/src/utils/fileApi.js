@@ -699,6 +699,12 @@ export function searchUsers(q, limit = 20) {
 }
 
 /** 本地 output 产物预览 / 下载 URL */
+export function searchLocalArtifacts(query) {
+  const params = new URLSearchParams()
+  params.set('q', String(query || '').trim())
+  return request(`/api/artifacts/search?${params.toString()}`)
+}
+
 export function artifactLocalUrl(filePath, { download = false, name = '' } = {}) {
   const params = new URLSearchParams()
   const raw = String(filePath || '').trim()

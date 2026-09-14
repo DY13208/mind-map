@@ -57,6 +57,8 @@ services:
       COLLAB_RATE_LIMIT_GLOBAL: "8000"
       COLLAB_V2: "1"
       SOP_OUTPUT_DIR: /app/output
+      # OpenClaw 卷内产物（只读），供预览/下载
+      OPENCLAW_DATA_DIR: /openclaw-data
       YIRAN_UPSTREAM: ${YIRAN_UPSTREAM:-http://host.docker.internal:18232}
       COGNEE_API: ${COGNEE_API:-http://192.168.0.204:8320}
       COGNEE_API_KEY: ${COGNEE_API_KEY:-}
@@ -64,8 +66,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      # WorkBuddy 在宿主机写的 SOP 产物，供预览/下载
+      # WorkBuddy / OpenClaw 写到宿主机 output 的产物，供预览/下载
       - ./output:/app/output:ro
+      - mind-map-openclaw:/openclaw-data:ro
       # Start-Docker 自动注入的 OpenClaw Token 等（gitignore）
       - ./docker/runtime-config.local.js:/usr/share/nginx/html/runtime-config.js:ro
     ports:
@@ -117,6 +120,8 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - mind-map-openclaw:/home/node/.openclaw
+      # 新产物落到宿主机 output，与 app 的 /app/output 是同一份文件
+      - ./output:/home/node/.openclaw/workspace/output
     ports:
       - "127.0.0.1:${OPENCLAW_PORT:-4623}:18789"
     healthcheck:

@@ -883,6 +883,55 @@ async function handleApi(req, res) {
   const url = new URL(req.url, 'http://127.0.0.1')
   const pathname = url.pathname
 
+  // 按 SOP 标题/编号列出 output 目录里已有文件（台账漏记时仍可预览下载）
+  if (req.method === 'GET' && pathname === '/api/artifacts/search') {
+    const q = String(url.searchParams.get('q') || '').trim()
+    if (q.length < 2) {
+      sendJson(res, 200, { items: [] })
+      return true
+    }
+    const openclawData = String(process.env.OPENCLAW_DATA_DIR || '/openclaw-data').trim()
+    const roots = [
+      process.env.SOP_OUTPUT_DIR,
+      process.env.MIND_MAP_OUTPUT_DIR,
+      path.resolve(__dirname, '../..', 'output'),
+      path.resolve(process.cwd(), 'output'),
+      openclawData ? path.join(openclawData, 'workspace', 'output') : ''
+    ]
+      .filter(Boolean)
+      .map(p => path.resolve(String(p)))
+      .filter((p, i, arr) => arr.indexOf(p) === i)
+    const needle = q.replace(/\s+/g, '').toLowerCase()
+    const allowed = /\.(html?|xlsx?|docx?|pdf|md|csv)$/i
+    const items = []
+    const seen = new Set()
+    roots.forEach(root => {
+      let names = []
+      try {
+        if (!fs.existsSync(root)) return
+        names = fs.readdirSync(root)
+      } catch (e) {
+        return
+      }
+      names.forEach(name => {
+        if (!allowed.test(name)) return
+        if (!name.replace(/\s+/g, '').toLowerCase().includes(needle)) return
+        const full = path.join(root, name)
+        try {
+          if (!fs.statSync(full).isFile()) return
+        } catch (e) {
+          return
+        }
+        const key = name.toLowerCase()
+        if (seen.has(key)) return
+        seen.add(key)
+        items.push({ name, path: full })
+      })
+    })
+    sendJson(res, 200, { items: items.slice(0, 20) })
+    return true
+  }
+
   // 本地 SOP 产物预览 / 下载（仅允许项目 output 目录）
   if (req.method === 'GET' && pathname === '/api/artifacts/local') {
     const rawPath = String(url.searchParams.get('path') || '').trim()
@@ -904,12 +953,14 @@ async function handleApi(req, res) {
       return `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`
     }
 
+    const openclawData = String(process.env.OPENCLAW_DATA_DIR || '/openclaw-data').trim()
     const outputRoots = [
       process.env.SOP_OUTPUT_DIR,
       process.env.MIND_MAP_OUTPUT_DIR,
       path.resolve(__dirname, '../..', 'output'),
       path.resolve(process.cwd(), 'output'),
-      path.resolve(process.cwd(), '..', 'output')
+      path.resolve(process.cwd(), '..', 'output'),
+      openclawData ? path.join(openclawData, 'workspace', 'output') : ''
     ]
       .filter(Boolean)
       .map(p => path.resolve(String(p)))
@@ -973,11 +1024,24 @@ async function handleApi(req, res) {
       return null
     }
 
+    const rewriteOpenclawPath = input => {
+      const n = String(input || '').replace(/\\/g, '/')
+      const prefix = '/home/node/.openclaw/'
+      if (!n.startsWith(prefix) || !openclawData) return ''
+      return path.resolve(openclawData, n.slice(prefix.length))
+    }
+
     let target = null
     const fileName = basenameSafe(rawName) || basenameSafe(rawPath)
 
+    // 0) OpenClaw 容器内路径映射到挂进本容器的卷
+    if (rawPath) {
+      const mapped = rewriteOpenclawPath(rawPath)
+      if (mapped) target = tryFile(mapped)
+    }
+
     // 1) 优先按文件名在 output 目录查找（兼容宿主机 Windows 路径 + 容器 Linux）
-    if (fileName) target = findByName(fileName)
+    if (!target && fileName) target = findByName(fileName)
 
     // 2) Windows 路径映射到 WSL 后再试
     if (!target && rawPath) {
