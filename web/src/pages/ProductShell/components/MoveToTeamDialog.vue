@@ -1,7 +1,12 @@
 <template>
-  <el-dialog :visible.sync="shown" title="移至团队空间" width="460px">
+  <el-dialog :visible.sync="shown" :title="batchCount > 1 ? '批量移至团队空间' : '移至团队空间'" width="460px">
     <p class="hint">
-      将「{{ room ? room.title : '' }}」移入团队后，团队成员将获得对应协作权限。
+      <template v-if="batchCount > 1">
+        将 {{ batchCount }} 个脑图移入团队后，团队成员将获得对应协作权限。
+      </template>
+      <template v-else>
+        将「{{ room ? room.title : '' }}」移入团队后，团队成员将获得对应协作权限。
+      </template>
     </p>
     <div v-loading="loading">
       <el-radio-group v-model="target" class="teamOptions">
@@ -29,7 +34,11 @@ import teamService from '@/services/teamService'
 
 export default {
   name: 'MoveToTeamDialog',
-  props: { visible: Boolean, room: Object },
+  props: {
+    visible: Boolean,
+    room: Object,
+    batchCount: { type: Number, default: 0 }
+  },
   data: () => ({ teams: [], target: '', loading: false }),
   computed: {
     shown: {

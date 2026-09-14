@@ -36,6 +36,13 @@
         @click="$emit('update:view', 'list')"
     /></el-button-group>
     <el-button
+      v-if="showBatch"
+      :type="selectMode ? 'primary' : ''"
+      icon="el-icon-finished"
+      @click="$emit('toggle-select-mode')"
+      >{{ selectMode ? '多选中' : '多选' }}</el-button
+    >
+    <el-button
       v-if="showImport"
       icon="el-icon-upload2"
       @click="$emit('import')"
@@ -65,6 +72,8 @@ export default {
     showCreate: { type: Boolean, default: true },
     showCreateFolder: { type: Boolean, default: true },
     showImport: { type: Boolean, default: true },
+    showBatch: { type: Boolean, default: false },
+    selectMode: { type: Boolean, default: false },
     hideOpenedSort: { type: Boolean, default: false }
   },
   data: () => ({

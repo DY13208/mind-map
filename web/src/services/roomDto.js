@@ -150,6 +150,7 @@ export function normalizeFolderDto(apiFolder = {}) {
     id: String(apiFolder.id || ''),
     name: apiFolder.name || '',
     parentId: normalizeFolderId(apiFolder.parentId),
+    teamId: apiFolder.teamId || apiFolder.team_id || null,
     createdAt: apiFolder.createdAt || '',
     updatedAt: apiFolder.updatedAt || '',
     roomCount: Number(apiFolder.roomCount || 0),

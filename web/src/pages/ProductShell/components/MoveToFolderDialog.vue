@@ -1,6 +1,7 @@
 <template
-  ><el-dialog :visible.sync="shown" title="移动到文件夹" width="460px"
-    ><p class="current">当前：{{ room ? room.folderName : '-' }}</p>
+  ><el-dialog :visible.sync="shown" :title="batchCount > 1 ? '批量移动到文件夹' : '移动到文件夹'" width="460px"
+    ><p v-if="batchCount > 1" class="current">将移动 {{ batchCount }} 个脑图</p>
+    <p v-else class="current">当前：{{ room ? room.folderName : '-' }}</p>
     <el-radio-group v-model="target"
       ><div class="folderOption">
         <el-radio :label="null"
@@ -21,7 +22,12 @@
 <script>
 export default {
   name: 'MoveToFolderDialog',
-  props: { visible: Boolean, room: Object, folders: Array },
+  props: {
+    visible: Boolean,
+    room: Object,
+    folders: Array,
+    batchCount: { type: Number, default: 0 }
+  },
   data: () => ({ target: null }),
   computed: {
     folderOptions() {

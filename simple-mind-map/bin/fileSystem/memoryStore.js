@@ -270,14 +270,16 @@ function createMemoryFileStore(seed = {}) {
       bump()
       return [...rooms.values()].filter(item => item.folder_id === id && !item.deleted_at).map(item => item.room_key)
     },
-    async folderNameTaken(name, parentId, exceptId) {
+    async folderNameTaken(name, parentId, exceptId, teamId) {
       bump()
       const needle = String(name || '').trim().toLowerCase()
+      const team = teamId ? String(teamId) : null
       return [...folders.values()].some(
         item =>
           !item.deleted_at &&
           item.id !== exceptId &&
           (item.parent_id || null) === (parentId || null) &&
+          (item.team_id || null) === team &&
           String(item.name).trim().toLowerCase() === needle
       )
     },
@@ -288,6 +290,7 @@ function createMemoryFileStore(seed = {}) {
         parent_id: row.parent_id || null,
         name: row.name,
         created_by: row.created_by || '',
+        team_id: row.team_id || null,
         created_at: nowIso(),
         updated_at: nowIso(),
         deleted_at: null
@@ -295,9 +298,16 @@ function createMemoryFileStore(seed = {}) {
       folders.set(next.id, next)
       return cloneJson(next)
     },
-    async listFolders() {
+    async listFolders(opts = {}) {
       bump()
-      return [...folders.values()].filter(item => !item.deleted_at).map(cloneJson)
+      let rows = [...folders.values()].filter(item => !item.deleted_at)
+      if (opts.teamId !== undefined) {
+        const team = opts.teamId ? String(opts.teamId) : null
+        rows = rows.filter(item => (item.team_id || null) === team)
+      } else {
+        rows = rows.filter(item => !item.team_id)
+      }
+      return rows.map(cloneJson)
     },
     async updateFolderName(id, name) {
       bump()
