@@ -44,7 +44,7 @@ const {
   formatWorkbuddyResult
 } = require('./workbuddy-api')
 
-const WEB_PORT = 8081
+const WEB_PORT = 8989
 const COLLAB_PORT = 1234
 const AI_PORT = 3456
 const MCP_PORT = 3847

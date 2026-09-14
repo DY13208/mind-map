@@ -50,7 +50,15 @@ module.exports = {
   lintOnSave: false,
   productionSourceMap: false,
   filenameHashing: false,
-    transpileDependencies: ['yjs', 'lib0', 'quill', 'y-websocket', 'y-protocols', 'socket.io-client', 'engine.io-client'],
+  transpileDependencies: [
+    'yjs',
+    'lib0',
+    'quill',
+    'y-websocket',
+    'y-protocols',
+    'socket.io-client',
+    'engine.io-client'
+  ],
   chainWebpack: config => {
     // 移除 preload 插件
     config.plugins.delete('preload')
@@ -116,7 +124,7 @@ module.exports = {
   },
   devServer: {
     host: '0.0.0.0',
-    port: 8081,
+    port: 8989,
     disableHostCheck: true,
     historyApiFallback: true,
     proxy: {

@@ -1,0 +1,18 @@
+const express = require('../../web/node_modules/express')
+const http = require('http')
+const path = require('path')
+const app = express()
+const root = path.join(__dirname, 'build')
+app.use((req, res, next) => {
+  if (!/^\/(api|auth|workbuddy|openclaw|xiaoce)(\/|$)/.test(req.url) && !/\/runtime-config\.js/.test(req.url)) return next()
+  const upstream = http.request({ hostname: '127.0.0.1', port: 8989, path: req.url.replace(/^\/dist\//, '/'), method: req.method, headers: req.headers }, response => {
+    res.writeHead(response.statusCode, response.headers)
+    response.pipe(res)
+  })
+  upstream.on('error', () => res.status(502).end('Local backend unavailable'))
+  req.pipe(upstream)
+})
+app.use('/dist', express.static(root))
+app.use(express.static(root))
+app.get('*', (req, res) => res.sendFile(path.join(root, 'index.html')))
+app.listen(8991, '127.0.0.1', () => console.log('SOP preview http://127.0.0.1:8991'))

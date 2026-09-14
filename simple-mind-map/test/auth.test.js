@@ -222,7 +222,7 @@ assert.strictEqual(__test.wecomAvatarUrl(null), '')
 
 const logoutReq = {
   headers: {
-    origin: 'http://192.168.1.20:8081',
+    origin: 'http://192.168.1.20:8989',
     'sec-fetch-site': 'same-origin',
     host: '192.168.1.20:1234'
   }
@@ -247,13 +247,13 @@ assert.strictEqual(
     {
       headers: {
         host: '127.0.0.1:1234',
-        referer: 'http://127.0.0.1:8081/edit',
+        referer: 'http://127.0.0.1:8989/edit',
         'x-forwarded-proto': 'http'
       }
     },
     '/files'
   ),
-  'http://127.0.0.1:8081/files'
+  'http://127.0.0.1:8989/files'
 )
 
 assert.strictEqual(
@@ -261,13 +261,13 @@ assert.strictEqual(
     {
       headers: {
         host: '127.0.0.1:1234',
-        referer: 'http://localhost:8081/edit',
+        referer: 'http://localhost:8989/edit',
         'x-forwarded-proto': 'http'
       }
     },
     '/files'
   ),
-  'http://localhost:8081/files'
+  'http://localhost:8989/files'
 )
 assert.strictEqual(__test.hostnamesEquivalent('localhost', '127.0.0.1'), true)
 

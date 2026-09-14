@@ -649,117 +649,77 @@
     <el-dialog
       title="运行 SOP"
       :visible.sync="runDialogVisible"
-      width="640px"
+      width="744px"
       top="8vh"
       append-to-body
       :close-on-click-modal="false"
       custom-class="sopRunDialog"
     >
       <p class="runDialogLead" v-if="runTarget">
-        配置「{{ runTarget.id }}：{{ runTarget.title }}」后加入任务队列；可关闭本窗口，任务在后台并行执行。
+        将任务加入队列后可在后台并行执行；你可以关闭本窗口，稍后在任务中心查看进度。
       </p>
-      <div class="runModelRow">
-        <span class="runModelLabel">执行引擎</span>
-        <el-radio-group v-model="runBackend" size="small" @change="onRunBackendChange">
-          <el-radio-button :label="AI_BACKEND_WORKBUDDY">WorkBuddy</el-radio-button>
-          <el-radio-button :label="AI_BACKEND_XIAOCE">小策</el-radio-button>
-          <el-radio-button :label="AI_BACKEND_OPENCLAW">助理</el-radio-button>
-        </el-radio-group>
-      </div>
-      <div class="runModelRow" v-if="runBackend === AI_BACKEND_XIAOCE">
-        <span class="runModelLabel">企业</span>
-        <el-select v-model="runOrganizationId" size="small" :loading="runScopeLoading" placeholder="选择企业" class="runModelSelect" @change="onRunOrganizationChange">
-          <el-option v-for="item in runOrganizations" :key="item.id" :label="item.name" :value="String(item.id)"></el-option>
-        </el-select>
-        <el-button size="mini" :loading="runScopeLoading" @click="loadRunXiaoceScope(true)">刷新</el-button>
-      </div>
-      <div class="runModelRow" v-if="runBackend === AI_BACKEND_XIAOCE">
-        <span class="runModelLabel">智能体</span>
-        <el-select v-model="runAgentId" size="small" :loading="runScopeLoading" placeholder="选择智能体" class="runModelSelect">
-          <el-option v-for="item in runAgents" :key="item.id" :label="`${item.emoji || '🤖'} ${item.name}`" :value="String(item.id)"></el-option>
-        </el-select>
-      </div>
-      <div class="runModelRow" v-else-if="runBackend === AI_BACKEND_OPENCLAW">
-        <span class="runModelLabel">模型</span>
-        <el-select
-          v-model="runModel"
-          size="small"
-          filterable
-          allow-create
-          default-first-option
-          :loading="runModelsLoading"
-          placeholder="选择助理模型"
-          class="runModelSelect"
-          @visible-change="onRunModelDropdown"
-        >
-          <el-option
-            v-for="item in runOpenclawModels"
-            :key="'oc-' + item.id"
-            :label="item.name || item.id"
-            :value="item.id"
-          ></el-option>
-        </el-select>
-        <el-button
-          size="mini"
-          :loading="runModelsLoading"
-          @click="loadRunModels(true)"
-          >刷新</el-button
-        >
-      </div>
-      <div class="runModelRow" v-else>
-        <span class="runModelLabel">模型</span>
-        <el-select
-          v-model="runModel"
-          size="small"
-          filterable
-          :loading="runModelsLoading"
-          placeholder="选择 WorkBuddy 模型"
-          class="runModelSelect"
-          @visible-change="onRunModelDropdown"
-        >
-          <el-option-group
-            v-if="runCustomModels.length"
-            label="自定义模型（推荐，不耗积分）"
-          >
-            <el-option
-              v-for="item in runCustomModels"
-              :key="'c-' + item.id"
-              :label="item.name || item.id"
-              :value="item.id"
-            ></el-option>
-          </el-option-group>
-          <el-option-group
-            v-if="runPlatformModels.length"
-            label="平台模型"
-          >
-            <el-option
-              v-for="item in runPlatformModels"
-              :key="'p-' + item.id"
-              :label="item.name || item.id"
-              :value="item.id"
-            ></el-option>
-          </el-option-group>
-        </el-select>
-        <el-button
-          size="mini"
-          :loading="runModelsLoading"
-          @click="loadRunModels(true)"
-          >刷新</el-button
-        >
-      </div>
+      <section class="runExecutionPanel">
+        <h3>执行配置</h3>
+        <div class="runExecutionMain">
+          <label class="runExecutionField runEngineField">
+            <span>执行引擎</span>
+            <el-select v-model="runBackend" size="small" @change="onRunBackendChange">
+              <el-option label="WorkBuddy" :value="AI_BACKEND_WORKBUDDY"></el-option>
+              <el-option label="小策" :value="AI_BACKEND_XIAOCE"></el-option>
+              <el-option label="助理" :value="AI_BACKEND_OPENCLAW"></el-option>
+            </el-select>
+          </label>
+          <template v-if="runBackend === AI_BACKEND_OPENCLAW">
+            <label class="runExecutionField runModelField">
+              <span>模型</span>
+              <el-select v-model="runModel" size="small" filterable allow-create default-first-option :loading="runModelsLoading" placeholder="选择助理模型" @visible-change="onRunModelDropdown">
+                <el-option v-for="item in runOpenclawModels" :key="'oc-' + item.id" :label="item.name || item.id" :value="item.id"></el-option>
+              </el-select>
+            </label>
+            <el-button class="runRefreshButton" size="small" icon="el-icon-refresh" :loading="runModelsLoading" @click="loadRunModels(true)">刷新</el-button>
+          </template>
+          <template v-else-if="runBackend === AI_BACKEND_WORKBUDDY">
+            <label class="runExecutionField runModelField">
+              <span>模型</span>
+              <el-select v-model="runModel" size="small" filterable :loading="runModelsLoading" placeholder="选择 WorkBuddy 模型" @visible-change="onRunModelDropdown">
+                <el-option-group v-if="runCustomModels.length" label="自定义模型（推荐，不耗积分）">
+                  <el-option v-for="item in runCustomModels" :key="'c-' + item.id" :label="item.name || item.id" :value="item.id"></el-option>
+                </el-option-group>
+                <el-option-group v-if="runPlatformModels.length" label="平台模型">
+                  <el-option v-for="item in runPlatformModels" :key="'p-' + item.id" :label="item.name || item.id" :value="item.id"></el-option>
+                </el-option-group>
+              </el-select>
+            </label>
+            <el-button class="runRefreshButton" size="small" icon="el-icon-refresh" :loading="runModelsLoading" @click="loadRunModels(true)">刷新</el-button>
+          </template>
+        </div>
+        <div v-if="runBackend === AI_BACKEND_XIAOCE" class="runExecutionScope">
+          <label class="runExecutionField">
+            <span>企业</span>
+            <el-select v-model="runOrganizationId" size="small" :loading="runScopeLoading" placeholder="选择企业" @change="onRunOrganizationChange">
+              <el-option v-for="item in runOrganizations" :key="item.id" :label="item.name" :value="String(item.id)"></el-option>
+            </el-select>
+          </label>
+          <label class="runExecutionField">
+            <span>智能体</span>
+            <el-select v-model="runAgentId" size="small" :loading="runScopeLoading" placeholder="选择智能体">
+              <el-option v-for="item in runAgents" :key="item.id" :label="`${item.emoji || '🤖'} ${item.name}`" :value="String(item.id)"></el-option>
+            </el-select>
+          </label>
+          <el-button class="runRefreshButton" size="small" icon="el-icon-refresh" :loading="runScopeLoading" @click="loadRunXiaoceScope(true)">刷新</el-button>
+        </div>
+      </section>
+      <div class="runSectionTitle"><strong>输出内容</strong><span>可不选</span></div>
       <el-checkbox-group v-model="runOutputIds" class="outputChecks">
         <el-checkbox
           v-for="opt in outputPresets"
           :key="opt.id"
           :label="opt.id"
+          class="outputCheck"
         >
           <span class="optLabel">{{ opt.label }}</span>
-          <span class="optHint">{{ opt.hint }}</span>
         </el-checkbox>
       </el-checkbox-group>
-      <p class="runOutputTip">
-        流程型 SOP（通知 / 招聘 / 审批）可不勾产物，直接执行；需要落盘文件时再勾选。
-      </p>
       <div v-if="runSubmitLoading" class="runSubmitLoading">正在读取资料模板…</div>
       <div
         class="runSubmitBox"
@@ -788,18 +748,44 @@
           </div>
         </div>
       </div>
-      <el-input
-        v-model="runExtraNote"
-        type="textarea"
-        :rows="runSubmitFields.length ? 2 : 3"
-        :placeholder="
-          runSubmitFields.length
-            ? '其它补充说明（可选）。发代办可写：给张三发个代办 / 代办人：张三'
-            : '额外要求，例如：给黄炜龙发个代办；或：我要招聘一个初级客服'
-        "
-        class="runExtra"
-      ></el-input>
-      <span slot="footer">
+      <div class="runSectionTitle runComposeTitle"><strong>附件与补充说明</strong></div>
+      <div class="runComposeBox" @paste="onRunPaste">
+        <input ref="runAttachmentInput" class="runAttachmentInput" type="file" multiple
+          :accept="SOP_ATTACHMENT_ACCEPT" @change="onRunFilesPicked" />
+        <el-input
+          v-model="runExtraNote"
+          type="textarea"
+          :rows="3"
+          placeholder="可输入补充要求，也可直接粘贴文本、截图或文件"
+          aria-label="附件与补充说明"
+          class="runExtra"
+        ></el-input>
+        <span v-if="!runExtraNote" class="runComposeExample">例如：给黄炜龙发个代办；或：我要招聘一个初级客服</span>
+        <el-button class="runUploadButton" size="small" icon="el-icon-paperclip"
+          @click="$refs.runAttachmentInput.click()">上传文件</el-button>
+        <div class="runComposeToolbar">
+          <span class="runPasteIcons" aria-hidden="true">
+            <i class="el-icon-picture-outline"></i>
+            <i class="el-icon-document"></i>
+            <i class="el-icon-full-screen"></i>
+          </span>
+          <span class="runPasteHint">支持直接粘贴图片或文件（Ctrl+V）</span>
+          <span class="runNoteCount" aria-label="已输入字数">{{ runExtraNote.length }} 字</span>
+        </div>
+      </div>
+      <div v-if="runAttachments.length" class="runAttachmentList" aria-live="polite">
+        <span v-for="file in runAttachments" :key="file.key" class="runAttachmentTag"
+          :class="{ 'is-failed': file.status === 'failed' }" :title="file.error || file.name">
+          <i v-if="file.status === 'uploading'" class="el-icon-loading" aria-label="正在上传并解析"></i>
+          <i v-else-if="file.status === 'failed'" class="el-icon-warning-outline"></i>
+          <span v-else class="runFileBadge" :class="'runFileBadge--' + file.kind">{{ file.badge }}</span>
+          <span class="runFileName">{{ file.name }}</span>
+          <span v-if="file.status === 'failed'" class="runFileError">解析失败</span>
+          <button type="button" :aria-label="'删除附件 ' + file.name" @click="removeRunAttachment(file)"><i class="el-icon-close"></i></button>
+        </span>
+      </div>
+      <p class="runAttachmentTip">支持 PDF、Word、Excel、文本、图片，单个不超过 5 MB，最多 5 个。</p>
+      <span slot="footer" class="runDialogFooter">
         <el-button size="small" @click="runDialogVisible = false"
           >取消</el-button
         >
@@ -807,9 +793,10 @@
           type="primary"
           size="small"
           :loading="runSubmitLoading"
+          :disabled="runAttachments.some(file => file.status !== 'ready')"
           @click="confirmRunSop"
         >
-          {{ runSubmitFields.length ? '提交资料并开始' : '加入队列并开始' }}
+          加入队列并开始
         </el-button>
       </span>
     </el-dialog>
@@ -905,6 +892,7 @@ import Cooperate from 'simple-mind-map/src/plugins/Cooperate.js'
 import exampleData from 'simple-mind-map/example/exampleData'
 import { createCollaborationAdapter } from 'simple-mind-map/bin/collabV2/adapter'
 import { getLocalConfig } from '@/api'
+import { SOP_ATTACHMENT_ACCEPT, SOP_ATTACHMENT_LIMIT, validateSopAttachment, uploadSopAttachment, formatSopAttachmentNote } from '@/utils/sopRunAttachments'
 import { getCurrentUser } from '@/utils/auth'
 import { roomFromLocation } from '@/utils/roomLocation'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
@@ -1093,12 +1081,14 @@ export default {
       runTarget: null,
       runOutputIds: [],
       runExtraNote: '',
+      runAttachments: [],
+      SOP_ATTACHMENT_ACCEPT,
       runSubmitFields: [],
       runSubmitZones: [],
       runSubmitLoading: false,
       runSubmitSource: '',
-      runModel: 'deepseek-v4-flash',
-      runBackend: 'workbuddy',
+      runModel: 'openclaw/default',
+      runBackend: 'openclaw',
       runOrganizationId: '',
       runAgentId: '',
       runOrganizations: [],
@@ -2222,11 +2212,14 @@ export default {
       this.runTarget = item
       this.runOutputIds = []
       this.runExtraNote = ''
+      this.runAttachments = []
       this.runSubmitFields = []
       this.runSubmitZones = []
       this.runSubmitSource = ''
       const localConfig = getLocalConfig() || {}
-      this.runBackend = normalizeAiBackend(localConfig.aiBackend)
+      this.runBackend = normalizeAiBackend(
+        localConfig.aiBackend || AI_BACKEND_OPENCLAW
+      )
       this.runOrganizationId = String(localConfig.xiaoceOrganizationId || '')
       this.runAgentId = String(localConfig.xiaoceAgentId || '')
       if (this.runBackend === AI_BACKEND_OPENCLAW) {
@@ -2239,6 +2232,64 @@ export default {
       if (this.runBackend === AI_BACKEND_XIAOCE) this.loadRunXiaoceScope()
       else this.loadRunModels()
       this.loadRunSubmitTemplate(item)
+    },
+    onRunFilesPicked(event) {
+      const files = Array.from(event.target.files || [])
+      event.target.value = ''
+      this.addRunAttachments(files)
+    },
+    onRunPaste(event) {
+      const clipboard = event.clipboardData
+      if (!clipboard) return
+      const files = Array.from(clipboard.files || [])
+      if (!files.length) {
+        Array.from(clipboard.items || []).forEach(item => {
+          if (item.kind === 'file') {
+            const file = item.getAsFile()
+            if (file) files.push(file)
+          }
+        })
+      }
+      if (!files.length) return // Keep native text paste, including the caret/selection.
+      // Mixed text + files keeps native text insertion as well.
+      if (!clipboard.getData('text/plain')) event.preventDefault()
+      this.addRunAttachments(files)
+    },
+    addRunAttachments(files) {
+      const roomKey = this.roomKey
+      if (!roomKey) return this.$message.warning('请先选择空间')
+      for (const file of files) {
+        if (this.runAttachments.length >= SOP_ATTACHMENT_LIMIT) {
+          this.$message.warning('最多添加 5 个附件，请先删除不需要的文件')
+          break
+        }
+        const error = validateSopAttachment(file)
+        if (error) {
+          this.$message.warning(`${file.name}：${error}`)
+          continue
+        }
+        const ext = file.name.split('.').pop().toLowerCase()
+        const kind = ext === 'pdf' ? 'pdf' : /^(xlsx|csv)$/.test(ext) ? 'sheet' : /^(png|jpe?g|webp|gif)$/.test(ext) ? 'image' : 'document'
+        const item = {
+          key: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          name: file.name, kind,
+          badge: { pdf: 'PDF', sheet: 'X', image: '图', document: '文' }[kind],
+          status: 'uploading', error: '', attachmentId: '', extractedText: ''
+        }
+        this.runAttachments.push(item)
+        uploadSopAttachment(roomKey, file).then(attachment => {
+          if (!this.runAttachments.includes(item)) return
+          Object.assign(item, { status: 'ready', attachmentId: attachment.id, extractedText: attachment.extractedText })
+        }).catch(err => {
+          if (!this.runAttachments.includes(item)) return
+          item.status = 'failed'
+          item.error = (err && err.message) || '附件上传失败'
+          this.$message.error(`${item.name}：${item.error}`)
+        })
+      }
+    },
+    removeRunAttachment(file) {
+      this.runAttachments = this.runAttachments.filter(item => item !== file)
     },
     onRunBackendChange(value) {
       this.setLocalConfig({ aiBackend: value })
@@ -2880,9 +2931,13 @@ export default {
         ...this.runTarget,
         uid: this.resolveSopUid(this.runTarget)
       }
+      if (this.runAttachments.some(file => file.status !== 'ready')) {
+        this.$message.warning('请等待附件解析完成，或删除失败的附件后重试')
+        return
+      }
       const materialNote = formatSubmitMaterialNote(
         this.runSubmitFields,
-        this.runExtraNote
+        formatSopAttachmentNote(this.runExtraNote, this.runAttachments)
       )
       const enqueued = await this.sopRunQueue.enqueue({
         roomKey: this.roomKey,
@@ -5286,151 +5341,7 @@ export default {
   }
 }
 
-.sopRunDialog {
-  .runDialogLead {
-    margin: 0 0 14px;
-    font-size: 14px;
-    color: #303133;
-    line-height: 1.5;
-  }
 
-  .runModelRow {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 14px;
-
-    .runModelLabel {
-      flex: 0 0 auto;
-      font-size: 13px;
-      color: #606266;
-    }
-
-    .runModelSelect {
-      flex: 1 1 auto;
-      min-width: 0;
-    }
-  }
-
-  .outputChecks {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-bottom: 14px;
-
-    .el-checkbox {
-      display: flex;
-      align-items: flex-start;
-      margin-right: 0;
-      white-space: normal;
-      height: auto;
-    }
-
-    .optLabel {
-      font-weight: 600;
-      color: #17362c;
-    }
-
-    .optHint {
-      display: block;
-      margin-top: 2px;
-      font-size: 12px;
-      color: #909399;
-      font-weight: 400;
-    }
-  }
-
-  .runExtra {
-    margin-bottom: 8px;
-  }
-
-  .runOutputTip {
-    margin: -4px 0 12px;
-    font-size: 12px;
-    color: #80948c;
-    line-height: 1.45;
-  }
-
-  .runSubmitLoading {
-    margin: 0 0 12px;
-    padding: 10px 12px;
-    border-radius: 8px;
-    background: #f7faf8;
-    color: #5f7369;
-    font-size: 12px;
-  }
-
-  .runSubmitBox {
-    margin: 0 0 14px;
-    padding: 12px 14px;
-    border: 1px solid #d9ebe3;
-    border-radius: 10px;
-    background: linear-gradient(180deg, #f7fcf9 0%, #f3f9f6 100%);
-  }
-
-  .runSubmitHead {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 6px;
-
-    strong {
-      font-size: 13px;
-      color: #0f5c42;
-    }
-
-    span {
-      font-size: 12px;
-      color: #6f857b;
-    }
-  }
-
-  .runSubmitTip {
-    margin: 0 0 12px;
-    font-size: 12px;
-    color: #5f7369;
-    line-height: 1.45;
-  }
-
-  .runSubmitGrid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px 12px;
-  }
-
-  .runSubmitField {
-    label {
-      display: block;
-      margin-bottom: 4px;
-      font-size: 12px;
-      font-weight: 600;
-      color: #3d4f46;
-    }
-  }
-
-  .dataFillHint {
-    margin: 0 0 12px;
-    font-size: 12px;
-    color: #a26b1c;
-    line-height: 1.45;
-  }
-
-  .dataFillField {
-    margin-bottom: 10px;
-
-    label {
-      display: block;
-      margin-bottom: 4px;
-      font-size: 12px;
-      color: #606266;
-    }
-  }
-
-  .dataFillExtra {
-    margin-top: 4px;
-  }
-}
 
 .sopDataFillDialog {
   .el-dialog__body {
@@ -5448,7 +5359,7 @@ export default {
   }
 
   .fillDialogHint {
-    margin: 0 0 14px;
+    margin: 0 0 10px;
     padding: 8px 10px;
     border-radius: 8px;
     background: #f7faf8;
@@ -5731,8 +5642,6 @@ export default {
 }
 
 /* 强制浅色弹窗：避免 body.isDark 全局样式把弹窗/输入框弄成黑底浅字 */
-body.isDark .sopRunDialog,
-.sopRunDialog,
 body.isDark .sopDataFillDialog,
 .sopDataFillDialog {
   background: #fff !important;
@@ -5929,3 +5838,5 @@ body.isDark .sopMindDialog,
 }
 
 </style>
+
+<style lang="less" src="./sopRunDialog.less"></style>

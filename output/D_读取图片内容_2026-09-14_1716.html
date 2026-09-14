@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D：读取图片内容 · 执行单</title>
+<style>
+  :root {
+    --bg: #f4f6f9;
+    --card: #ffffff;
+    --ink: #1f2733;
+    --muted: #6b7280;
+    --line: #e5e9f0;
+    --brand: #7c3aed;
+    --brand-soft: #f3edff;
+    --ok: #16a34a;
+    --ok-soft: #e9f9ef;
+    --warn: #d97706;
+    --warn-soft: #fef4e6;
+    --danger: #dc2626;
+    --danger-soft: #fdeaea;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+    padding: 28px 18px 60px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header {
+    background: linear-gradient(135deg, #6d28d9, #8b5cf6);
+    color: #fff;
+    border-radius: 14px;
+    padding: 26px 28px;
+    margin-bottom: 20px;
+    box-shadow: 0 8px 24px rgba(109,40,217,.18);
+  }
+  header .tag {
+    display: inline-block; font-size: 12px; font-weight: 700;
+    letter-spacing: .5px; background: rgba(255,255,255,.2);
+    padding: 3px 10px; border-radius: 999px; margin-bottom: 10px;
+  }
+  header h1 { font-size: 24px; font-weight: 700; }
+  header .meta { margin-top: 12px; font-size: 13px; opacity: .92; display: flex; flex-wrap: wrap; gap: 16px; }
+  header .meta span { display: inline-flex; align-items: center; gap: 5px; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .kpi .label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .kpi .value { font-size: 22px; font-weight: 700; }
+  .kpi .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .kpi.pending .value { color: var(--muted); font-size: 16px; font-weight: 600; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; margin-bottom: 18px; }
+  .card h2 { font-size: 16px; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+  .card h2 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--brand); display: inline-block; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #f8fafc; color: var(--muted); font-weight: 600; font-size: 12px; }
+  tr:last-child td { border-bottom: none; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .badge.ok { background: var(--ok-soft); color: var(--ok); }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); }
+  .badge.danger { background: var(--danger-soft); color: var(--danger); }
+  .badge.info { background: var(--brand-soft); color: var(--brand); }
+  .rule { border-left: 4px solid var(--brand); background: var(--brand-soft); padding: 12px 16px; border-radius: 0 10px 10px 0; margin-bottom: 12px; }
+  .rule.warn { border-color: var(--warn); background: var(--warn-soft); }
+  .actions { list-style: none; }
+  .actions li { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px dashed var(--line); font-size: 14px; }
+  .actions li:last-child { border-bottom: none; }
+  .actions .box { flex: none; width: 18px; height: 18px; border: 2px solid #cbd5e1; border-radius: 5px; margin-top: 3px; }
+  .actions .owner { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .raw { font-family: "SFMono-Regular", Consolas, monospace; font-size: 12.5px; color: #475569; background: #f8fafc; border: 1px dashed var(--line); border-radius: 8px; padding: 12px 14px; white-space: pre-wrap; word-break: break-all; }
+  .note { font-size: 12.5px; color: var(--muted); background: #f8fafc; border: 1px dashed var(--line); border-radius: 8px; padding: 12px 14px; margin-top: 10px; }
+  .foot { text-align: center; color: var(--muted); font-size: 12px; margin-top: 22px; }
+  @media (max-width: 720px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <span class="tag">良策 SOP 执行单</span>
+    <h1>D：读取图片内容</h1>
+    <div class="meta">
+      <span>📌 节点 uid：0681e4da-e475-46f5-88ad-30f043207db3</span>
+      <span>🏠 房间：room-6b5wc9z3</span>
+      <span>🗓 生成时间：2026-09-14 17:16 (GMT+8)</span>
+    </div>
+  </header>
+
+  <!-- KPI 卡片 -->
+  <div class="kpis">
+    <div class="kpi">
+      <div class="label">图片类型</div>
+      <div class="value">群聊截图</div>
+      <div class="sub">即时通讯（IM）群会话</div>
+    </div>
+    <div class="kpi">
+      <div class="label">可识别消息</div>
+      <div class="value">约 4 条</div>
+      <div class="sub">含昵称/气泡/表情</div>
+    </div>
+    <div class="kpi">
+      <div class="label">识别完整度</div>
+      <div class="value" style="color:#d97706">部分</div>
+      <div class="sub">OCR 存在噪点与乱码</div>
+    </div>
+    <div class="kpi">
+      <div class="label">关键诉求</div>
+      <div class="value">1 条求助</div>
+      <div class="sub">「帮忙解…」类消息</div>
+    </div>
+  </div>
+
+  <!-- 识别结论 -->
+  <div class="card">
+    <h2><span class="dot"></span>核心结论</h2>
+    <div class="rule">
+      该图片是一张<strong>群聊对话截图</strong>：顶部为群名称，下方为多名成员的消息气泡，其中包含一条<strong>「有空的话还请帮忙解…」的求助类消息</strong>，以及若干简短回复（「有」等）和表情/图标。因原始 OCR 提取存在明显噪点，个别文字（尤其是群名与求助消息后半句、末尾字符串）需以原图人工复核。
+    </div>
+  </div>
+
+  <!-- 识别明细 -->
+  <div class="card">
+    <h2><span class="dot"></span>内容识别明细</h2>
+    <table>
+      <thead>
+        <tr><th style="width:26%">位置/要素</th><th style="width:38%">识别原文（OCR）</th><th>解读</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>群名称（顶部标题）</td>
+          <td class="raw" style="border:none;padding:0;background:none">四面护部-管理岗 AI 群 2</td>
+          <td>群聊标题，疑似「四面护部 · 管理岗 · AI 群 2」，部门/岗位分组群，需原图复核</td>
+        </tr>
+        <tr>
+          <td>成员消息 ①</td>
+          <td class="raw" style="border:none;padding:0;background:none">Y seman：专。06/15</td>
+          <td>昵称含「Y seman」（或「YesMan」类），正文「专」+ 日期 06/15，语义不完整</td>
+        </tr>
+        <tr>
+          <td>成员消息 ②（求助）</td>
+          <td class="raw" style="border:none;padding:0;background:none">sso：有空的话还请帮忙解刚网</td>
+          <td>核心诉求：<strong>「有空的话还请帮忙解…」</strong>，后半「刚网」疑为 OCR 噪点，可能为「解决一下 / 解封 / 解××」，需原图确认</td>
+        </tr>
+        <tr>
+          <td>成员消息 ③</td>
+          <td class="raw" style="border:none;padding:0;background:none">有</td>
+          <td>简短肯定回复，意为「有（空）/ 可以」</td>
+        </tr>
+        <tr>
+          <td>成员消息 ④</td>
+          <td class="raw" style="border:none;padding:0;background:none">黄炜龙 Noah74：ass</td>
+          <td>昵称「黄炜龙（Noah74）」，「ass」疑为表情/「好的」/语气词误读</td>
+        </tr>
+        <tr>
+          <td>其它元素</td>
+          <td class="raw" style="border:none;padding:0;background:none">© %- B88 0-6 / N38 lAneclARC/I PWV)</td>
+          <td>表情/图标、时间戳或代码/链接类乱码，无法确认真实含义</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 本周动作 -->
+  <div class="card">
+    <h2><span class="dot"></span>下一步动作清单</h2>
+    <ul class="actions">
+      <li><span class="box"></span>人工复核原图，确认群名「四面护部-管理岗 AI 群 2」及成员昵称<span class="owner">SOP 负责人</span></li>
+      <li><span class="box"></span>确认求助消息「有空的话还请帮忙解…」的完整表述、诉求对象与时效<span class="owner">发起人</span></li>
+      <li><span class="box"></span>若为待办/求助，明确责任人并跟进闭环<span class="owner">对应负责人</span></li>
+      <li><span class="box"></span>对末尾乱码字符串（N38 lAneclARC/I PWV)）判明是否为链接/代码，必要时核对来源<span class="owner">技术/安全</span></li>
+    </ul>
+    <div class="note">
+      ⚠️ <strong>数据说明</strong>：本次执行环境为文本模型（deepseek-v4-pro），未直接获得图片像素；图片内容来自请求中附带的 <strong>image.png（附件 ID：7494823749729fa1ac2532f4a1576577）</strong> 的 OCR 文本提取结果。由于 OCR 存在明显噪点，上表「识别原文」为原始提取，解读部分为基于上下文的最优推断，最终以原图人工复核为准。
+    </div>
+  </div>
+
+  <div class="foot">良策 SOP 执行助手 · D 节点（读取图片内容）· 2026-09-14 17:16</div>
+</div>
+</body>
+</html>
