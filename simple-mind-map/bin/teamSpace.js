@@ -392,7 +392,7 @@ async function assignRoom(db, who, id, roomKey) {
     }
 
     await tx.query(
-      `update rooms set team_id = $2, updated_at = now() where room_key = $1`,
+      `update rooms set team_id = $2, folder_id = null, updated_at = now() where room_key = $1`,
       [key, id]
     )
     await tx.query(`update teams set updated_at = now() where id = $1`, [id])
@@ -494,7 +494,7 @@ async function handleApi(req, res, options) {
     }
     if (path === '/api/teams' && req.method === 'GET') { const items = await listTeams(db, who); sendJson(res, 200, { items, list: items }); return true }
     if (path === '/api/teams' && req.method === 'POST') { sendJson(res, 201, await createTeam(db, who, await readBody(req))); return true }
-    const match = path.match(/^\/api\/teams\/([^/]+)(?:\/(members|rooms)(?:\/([^/]+))?)?$/)
+    const match = path.match(/^\/api\/teams\/([^/]+)(?:\/(members|rooms|folders)(?:\/([^/]+))?)?$/)
     if (!match) return false
     const id = teamId(decodeURIComponent(match[1])); const sub = match[2]; const target = match[3] ? decodeURIComponent(match[3]) : ''
     if (!sub && req.method === 'GET') { sendJson(res, 200, dto(await getTeam(db, who.corpId, id, who.userId))); return true }
@@ -521,6 +521,65 @@ async function handleApi(req, res, options) {
       if (typeof createRoom !== 'function') throw error(501, 'TEAM_ROOM_UNAVAILABLE', '团队房间创建不可用')
       sendJson(res, 201, await createRoom(req, who, id, body))
       return true
+    }
+    if (sub === 'folders') {
+      const fs = options.fileSystem || (typeof options.getFileSystem === 'function' ? options.getFileSystem() : null)
+      if (!fs || typeof fs.listFolders !== 'function') {
+        throw error(503, 'TEAM_FOLDER_UNAVAILABLE', '团队文件夹服务尚未就绪')
+      }
+      const team = await getTeam(db, who.corpId, id, who.userId)
+      const canManage = ['owner', 'admin'].includes(team.role)
+      if (req.method === 'GET' && !target) {
+        const listed = await fs.listFolders({
+          userId: who.userId,
+          teamId: id,
+          canManage,
+          bypass: true
+        })
+        sendJson(res, 200, { ok: true, items: listed.list, list: listed.list })
+        return true
+      }
+      if (req.method === 'POST' && !target) {
+        manager(team)
+        const body = await readBody(req)
+        const folder = await fs.createFolder({
+          name: body.name,
+          parentId: body.parentId || body.parent_id,
+          userId: who.userId,
+          teamId: id,
+          bypass: true
+        })
+        sendJson(res, 201, { ok: true, folder: { ...folder, canManage: true } })
+        return true
+      }
+      if (target && req.method === 'PATCH') {
+        manager(team)
+        const body = await readBody(req)
+        const existing = await fs.store.getFolder(target)
+        if (!existing || String(existing.team_id || '') !== String(id)) {
+          throw error(404, 'FOLDER_NOT_FOUND', '文件夹不存在')
+        }
+        const folder = await fs.renameFolder(target, body.name, {
+          userId: who.userId,
+          bypass: true,
+          canManage: true
+        })
+        sendJson(res, 200, { ok: true, folder: { ...folder, canManage: true } })
+        return true
+      }
+      if (target && req.method === 'DELETE') {
+        manager(team)
+        const existing = await fs.store.getFolder(target)
+        if (!existing || String(existing.team_id || '') !== String(id)) {
+          throw error(404, 'FOLDER_NOT_FOUND', '文件夹不存在')
+        }
+        const result = await fs.deleteFolder(target, {
+          userId: who.userId,
+          bypass: true
+        })
+        sendJson(res, 200, result)
+        return true
+      }
     }
     return false
   } catch (err) {

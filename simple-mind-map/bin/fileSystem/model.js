@@ -112,6 +112,7 @@ function publicFolder(row) {
     id: row.id,
     name: row.name,
     parentId: row.parent_id || row.parentId || null,
+    teamId: row.team_id || row.teamId || null,
     createdBy: row.created_by || row.createdBy || '',
     createdAt: row.created_at || row.createdAt,
     updatedAt: row.updated_at || row.updatedAt,

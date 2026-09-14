@@ -56,8 +56,12 @@
                 <i
                   v-if="data.kind !== 'more'"
                   :class="
-                    data.kind === 'folder'
-                      ? 'el-icon-folder-opened'
+                    data.kind === 'space'
+                      ? data.spaceType === 'personal'
+                        ? 'el-icon-user'
+                        : 'el-icon-office-building'
+                      : data.kind === 'folder'
+                        ? 'el-icon-folder-opened'
                       : data.kind === 'more'
                         ? 'el-icon-more'
                         : 'el-icon-document'
@@ -65,10 +69,10 @@
                   aria-hidden="true"
                 ></i>
                 <span class="spaceDirectoryName">{{ data.label }}</span>
-                <span v-if="data.kind === 'folder'" class="spaceDirectoryMeta">
+                <span v-if="data.kind === 'folder' || (data.kind === 'space' && data.roomCount != null)" class="spaceDirectoryMeta">
                   {{ data.roomCount }} 个脑图
                 </span>
-                <span v-else class="spaceDirectoryMeta">
+                <span v-else-if="data.kind !== 'space'" class="spaceDirectoryMeta">
                   {{ data.accessLabel }}<template v-if="data.ownerName"> · {{ data.ownerName }}</template>
                 </span>
               </span>
@@ -904,6 +908,7 @@ import { getLocalConfig } from '@/api'
 import { getCurrentUser } from '@/utils/auth'
 import { roomFromLocation } from '@/utils/roomLocation'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
+import teamService from '@/services/teamService'
 import {
   listFiles,
   getFileSubtree,
@@ -1055,6 +1060,8 @@ export default {
       roomKey: '',
       spaceOptions: [],
       folders: [],
+      ungroupedRoomCount: 0,
+      teamSpaces: [],
       spaceDirectorySearchResults: [],
       spaceDirectorySearchLoading: false,
       spaceDirectorySearchTimer: null,
@@ -1635,7 +1642,7 @@ export default {
       }
       this.ensureCurrentSpaceOption()
     },
-    buildSpaceDirectoryOptions() {
+    buildPersonalSpaceDirectoryOptions() {
       const folders = Array.isArray(this.folders) ? this.folders : []
       const folderById = new Map()
       folders.forEach(folder => {
@@ -1679,23 +1686,60 @@ export default {
         label: '未分组',
         kind: 'folder',
         folderId: null,
-        roomCount: null,
-        isLeaf: false,
+        roomCount: Number(this.ungroupedRoomCount || 0),
+        isLeaf: !Number(this.ungroupedRoomCount || 0),
         children: []
       })
       return tree
     },
+    buildSpaceDirectoryOptions() {
+      const spaces = [
+        {
+          value: 'space:personal',
+          label: '个人空间',
+          kind: 'space',
+          spaceType: 'personal',
+          roomCount: null,
+          isLeaf: false
+        }
+      ]
+      ;(this.teamSpaces || [])
+        .slice()
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN'))
+        .forEach(space => {
+          if (!space || !space.id) return
+          spaces.push({
+            value: `space:team:${space.id}`,
+            label: space.name || '未命名团队空间',
+            kind: 'space',
+            spaceType: 'team',
+            teamId: String(space.id),
+            roomCount: Number(space.roomCount || 0),
+            isLeaf: !Number(space.roomCount || 0)
+          })
+        })
+      return spaces
+    },
     async loadSpaces() {
       this.spacesLoading = true
       try {
-        const folders = await folderService.listFolders().catch(() => [])
+        const [folders, teamSpaces, ungroupedRooms] = await Promise.all([
+          folderService.listFolders().catch(() => []),
+          teamService.listSpaces().catch(() => []),
+          // 只读取一条记录以获得 total，不预加载未分组脑图列表。
+          listFiles({ folderId: null, limit: 1 }).catch(() => ({ total: 0 }))
+        ])
         this.folders = Array.isArray(folders) ? folders : []
+        this.teamSpaces = Array.isArray(teamSpaces) ? teamSpaces : []
+        this.ungroupedRoomCount = Number((ungroupedRooms && ungroupedRooms.total) || 0)
         this.$nextTick(() => {
           const tree = this.$refs.spaceDirectoryTree
           if (tree && tree.store) tree.store.setData(this.spaceDirectoryOptions)
         })
       } catch (err) {
         this.folders = []
+        this.ungroupedRoomCount = 0
+        this.teamSpaces = []
       } finally {
         this.spacesLoading = false
       }
@@ -1708,6 +1752,21 @@ export default {
       // 搜索结果同样经过懒加载树：仅在“搜索结果”根节点展开时，才把
       // 已由搜索接口返回的命中项注入树中。
       if (data.kind === 'search') return resolve(data.children || [])
+      if (data.kind === 'space') {
+        if (data.spaceType === 'personal') return resolve(this.buildPersonalSpaceDirectoryOptions())
+        if (data.spaceType === 'team') {
+          try {
+            const rooms = await teamService.listRooms(data.teamId)
+            return resolve((rooms || []).map(room => {
+              const option = this.mapSpaceOption(room)
+              return { ...option, value: option.room_key, kind: 'room', isLeaf: true, roomKey: option.room_key }
+            }))
+          } catch (err) {
+            this.$message.error('团队空间加载失败，请重试')
+            return resolve([])
+          }
+        }
+      }
       if (data.kind !== 'folder') return resolve([])
       try {
         const result = await listFiles({
@@ -1848,7 +1907,7 @@ export default {
         return
       }
       if (data.kind === 'search') return
-      if (data.kind === 'folder') {
+      if (data.kind === 'folder' || data.kind === 'space') {
         if (node && node.expanded) node.collapse()
         else if (node) node.expand()
         return

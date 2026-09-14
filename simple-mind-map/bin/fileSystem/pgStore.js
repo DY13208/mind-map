@@ -256,36 +256,66 @@ function createPgFileStore(pool) {
       )
       return res.rows.map(row => row.room_key)
     },
-    async folderNameTaken(name, parentId, exceptId) {
+    async folderNameTaken(name, parentId, exceptId, teamId) {
       queryCount += 1
+      const team = teamId ? String(teamId) : null
       const res = await pool.query(
         `select 1 from folders
          where deleted_at is null
            and parent_id is not distinct from $2
+           and team_id is not distinct from $4
            and lower(name) = lower($1)
            and ($3::uuid is null or id <> $3)
          limit 1`,
-        [name, parentId, exceptId || null]
+        [name, parentId, exceptId || null, team]
       )
       return !!res.rows[0]
     },
     async insertFolder(row) {
       queryCount += 1
       const res = await pool.query(
-        `insert into folders (id, parent_id, name, created_by)
-         values ($1,$2,$3,$4)
+        `insert into folders (id, parent_id, name, created_by, team_id)
+         values ($1,$2,$3,$4,$5)
          returning *`,
-        [row.id || randomUUID(), row.parent_id || null, row.name, row.created_by || '']
+        [
+          row.id || randomUUID(),
+          row.parent_id || null,
+          row.name,
+          row.created_by || '',
+          row.team_id || null
+        ]
       )
       return res.rows[0]
     },
     async listFolders(opts = {}) {
       const userId = opts.userId || ''
       const bypass = !!opts.bypass || !userId
+      const scoped = opts.teamId !== undefined
+      const teamId =
+        opts.teamId != null && opts.teamId !== ''
+          ? String(opts.teamId)
+          : null
       queryCount += 1
-      if (bypass) {
+
+      const teamClause = (params) => {
+        if (!scoped) {
+          // Personal browser: never surface team-owned folders.
+          return { sql: ' and f.team_id is null', params }
+        }
+        if (teamId) {
+          params.push(teamId)
+          return { sql: ` and f.team_id = $${params.length}`, params }
+        }
+        return { sql: ' and f.team_id is null', params }
+      }
+
+      if (bypass || teamId) {
+        // Team listing is membership-gated by the caller; return all folders in the team.
+        const params = []
+        const team = teamClause(params)
         const res = await pool.query(
           `select f.*,
+                  ${teamId ? 'true' : 'false'} as can_manage,
                   (
                     select count(*)::int from rooms r
                     left join room_tombstones t on t.room_key = r.room_key
@@ -293,11 +323,14 @@ function createPgFileStore(pool) {
                       and r.deleted_at is null
                   ) as room_count
            from folders f
-           where f.deleted_at is null
-           order by f.name asc`
+           where f.deleted_at is null${team.sql}
+           order by f.name asc`,
+          team.params
         )
         return res.rows
       }
+      const params = [userId]
+      const team = teamClause(params)
       const res = await pool.query(
         `select f.*,
                 (f.created_by = $1) as can_manage,
@@ -311,6 +344,7 @@ function createPgFileStore(pool) {
          from folders f
          left join folder_members fm on fm.folder_id = f.id and fm.user_id = $1
          where f.deleted_at is null
+           ${team.sql}
            and (
              f.created_by = $1
              or fm.user_id is not null
@@ -325,7 +359,7 @@ function createPgFileStore(pool) {
              )
            )
          order by f.name asc`,
-        [userId]
+        team.params
       )
       return res.rows
     },

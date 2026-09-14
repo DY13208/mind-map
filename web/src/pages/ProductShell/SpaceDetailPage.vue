@@ -29,6 +29,12 @@
             @click="openInFiles"
             >在我的脑图查看</el-button
           >
+          <el-button
+            v-if="canManage"
+            icon="el-icon-folder-add"
+            @click="createFolder"
+            >新建文件夹</el-button
+          >
           <el-button type="primary" icon="el-icon-plus" @click="createRoom"
             >新建脑图</el-button
           >
@@ -48,13 +54,32 @@
       </div>
       <el-tabs v-model="tab">
         <el-tab-pane label="脑图" name="rooms">
-          <p v-if="folderId">
+          <nav v-if="folderId" class="folderNav">
             <el-button type="text" @click="folderId = null"
               >全部团队脑图</el-button
             >
-            / {{ folderName }}
-          </p>
-          <div class="roomGrid">
+            <template v-for="(item, index) in folderPath">
+              <span :key="'sep-' + item.id" class="folderSep">/</span>
+              <el-button
+                :key="item.id"
+                type="text"
+                :disabled="index === folderPath.length - 1"
+                @click="openFolder(item)"
+                >{{ item.name }}</el-button
+              >
+            </template>
+          </nav>
+          <div v-if="childFolders.length" class="folderGrid">
+            <FolderCard
+              v-for="folder in childFolders"
+              :key="folder.id"
+              :folder="folder"
+              :editable="canManage"
+              :allow-share="false"
+              v-on="folderListeners"
+            />
+          </div>
+          <div v-if="visibleRooms.length" class="roomGrid">
             <RoomCard
               v-for="room in visibleRooms"
               :key="room.id"
@@ -64,9 +89,9 @@
             />
           </div>
           <EmptyState
-            v-if="!loading && !visibleRooms.length"
-            title="暂无脑图"
-            description="此团队或文件夹中暂无脑图"
+            v-if="!loading && !childFolders.length && !visibleRooms.length"
+            title="暂无内容"
+            description="此团队或文件夹中暂无脑图与文件夹"
           />
         </el-tab-pane>
         <el-tab-pane label="成员" name="members" lazy
@@ -82,7 +107,7 @@
         ></el-tab-pane>
       </el-tabs>
     </div>
-    <RoomActionDialogs ref="actions" @changed="load" />
+    <RoomActionDialogs ref="actions" :team-id="$route.params.id" @changed="load" />
     <el-dialog
       :visible.sync="contactDialogVisible"
       custom-class="teamMemberPickerDialog"
@@ -150,6 +175,7 @@
 <script>
 import teamService from '@/services/teamService'
 import RoomCard from './components/RoomCard.vue'
+import FolderCard from './components/FolderCard.vue'
 import TeamMemberList from './components/TeamMemberList.vue'
 import EmptyState from './components/EmptyState.vue'
 import RoomActionDialogs from './components/RoomActionDialogs.vue'
@@ -157,6 +183,7 @@ export default {
   name: 'SpaceDetailPage',
   components: {
     RoomCard,
+    FolderCard,
     TeamMemberList,
     EmptyState,
     RoomActionDialogs
@@ -168,7 +195,6 @@ export default {
     folders: [],
     tab: 'rooms',
     folderId: null,
-    folderQuery: '',
     loading: false,
     busy: false,
     error: '',
@@ -212,14 +238,36 @@ export default {
           : !room.folderId
       )
     },
-    visibleFolders() {
-      return this.folders.filter(folder =>
-        folder.name.includes(this.folderQuery.trim())
-      )
+    folderMap() {
+      return Object.fromEntries(this.folders.map(folder => [folder.id, folder]))
     },
-    folderName() {
-      const folder = this.folders.find(item => item.id === this.folderId)
-      return folder ? folder.name : '根目录'
+    folderPath() {
+      const path = []
+      const visited = new Set()
+      let current = this.folderId ? this.folderMap[this.folderId] : null
+      while (current && !visited.has(current.id)) {
+        path.unshift(current)
+        visited.add(current.id)
+        current = current.parentId ? this.folderMap[current.parentId] : null
+      }
+      return path
+    },
+    childFolders() {
+      return this.folders
+        .filter(folder => (folder.parentId || null) === (this.folderId || null))
+        .map(folder => ({
+          ...folder,
+          itemCount:
+            Number(folder.roomCount || 0) +
+            this.folders.filter(child => child.parentId === folder.id).length
+        }))
+    },
+    folderListeners() {
+      return {
+        open: this.openFolder,
+        rename: this.renameFolder,
+        delete: this.deleteFolder
+      }
     },
     roomListeners() {
       return Object.fromEntries(
@@ -266,13 +314,14 @@ export default {
       this.loading = true
       this.error = ''
       try {
-        const [team, rooms, members] = await Promise.all([
+        const [team, rooms, members, folders] = await Promise.all([
           teamService.getSpace(id),
           teamService.listRooms(id),
-          teamService.listMembers(id)
+          teamService.listMembers(id),
+          teamService.listFolders(id)
         ])
         if (request === this.requestId)
-          Object.assign(this, { team, rooms, members })
+          Object.assign(this, { team, rooms, members, folders })
       } catch (error) {
         if (request === this.requestId) this.error = error.message
       } finally {
@@ -295,6 +344,92 @@ export default {
         this.$message.success('脑图已创建')
       } catch (error) {
         if (error !== 'cancel' && error !== 'close') this.$message.error(error.message || '创建脑图失败')
+      }
+    },
+    async createFolder() {
+      if (!this.canManage) {
+        this.$message.error('只有团队所有者或管理员可以创建文件夹')
+        return
+      }
+      try {
+        const currentFolder = this.folderId ? this.folderMap[this.folderId] : null
+        const result = await this.$prompt(
+          currentFolder
+            ? `将在「${currentFolder.name}」中创建子文件夹`
+            : '将在当前团队根目录创建文件夹',
+          '新建文件夹',
+          {
+            inputValidator: value =>
+              (!!value && !!value.trim() && value.length <= 60) ||
+              '请输入 1 至 60 个字符'
+          }
+        )
+        this.busy = true
+        await teamService.createFolder(
+          this.$route.params.id,
+          result.value.trim(),
+          this.folderId
+        )
+        await this.load()
+        this.$message.success('文件夹已创建')
+      } catch (error) {
+        if (error !== 'cancel' && error !== 'close')
+          this.$message.error(error.message || '创建文件夹失败')
+      } finally {
+        this.busy = false
+      }
+    },
+    async renameFolder(folder) {
+      if (!this.canManage) {
+        this.$message.error('只有团队所有者或管理员可以重命名文件夹')
+        return
+      }
+      try {
+        const result = await this.$prompt('请输入新的文件夹名称', '重命名文件夹', {
+          inputValue: folder.name,
+          inputValidator: value =>
+            (!!value && !!value.trim() && value.length <= 60) ||
+            '请输入 1 至 60 个字符'
+        })
+        this.busy = true
+        await teamService.renameFolder(
+          this.$route.params.id,
+          folder.id,
+          result.value.trim()
+        )
+        await this.load()
+        this.$message.success('文件夹已重命名')
+      } catch (error) {
+        if (error !== 'cancel' && error !== 'close')
+          this.$message.error(error.message || '重命名失败')
+      } finally {
+        this.busy = false
+      }
+    },
+    async deleteFolder(folder) {
+      if (!this.canManage) {
+        this.$message.error('只有团队所有者或管理员可以删除文件夹')
+        return
+      }
+      const confirmed = await this.$confirm(
+        '删除文件夹「' +
+          folder.name +
+          '」？若其中还有脑图或子文件夹，需要先将内容移出后再删除。',
+        '删除文件夹'
+      )
+        .then(() => true)
+        .catch(() => false)
+      if (!confirmed) return
+      this.busy = true
+      try {
+        await teamService.deleteFolder(this.$route.params.id, folder.id)
+        if (this.folderId === folder.id) this.folderId = null
+        await this.load()
+        this.$message.success('文件夹已删除')
+      } catch (error) {
+        this.$message.error(error.message || '删除文件夹失败')
+      } finally {
+        this.busy = false
       }
     },
     async openContacts() {
@@ -459,6 +594,16 @@ export default {
     justify-content: flex-end;
   }
 }
+.folderNav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin: 0 0 12px;
+  .folderSep {
+    color: #83918c;
+  }
+}
 .roomGrid,
 .folderGrid {
   display: grid;
@@ -466,7 +611,7 @@ export default {
   gap: 14px;
 }
 .folderGrid {
-  margin-top: 16px;
+  margin-bottom: 14px;
 }
 .memberPanel {
   max-width: 720px;

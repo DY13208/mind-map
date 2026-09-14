@@ -854,10 +854,20 @@ async function createTeamRoom(req, who, teamId, body = {}) {
   if (!fs || typeof fs.createRoom !== 'function') {
     throw teamSpace.error(503, 'TEAM_ROOM_UNAVAILABLE', '团队房间服务尚未就绪')
   }
+  const folderId = body.folderId || body.folder_id || null
+  if (folderId && folderId !== 'root' && fs.store && typeof fs.store.getFolder === 'function') {
+    const folder = await fs.store.getFolder(String(folderId))
+    if (!folder) {
+      throw teamSpace.error(404, 'FOLDER_NOT_FOUND', '文件夹不存在')
+    }
+    if (String(folder.team_id || '') !== String(teamId)) {
+      throw teamSpace.error(400, 'FOLDER_TEAM_MISMATCH', '文件夹不属于当前团队')
+    }
+  }
   const created = await fs.createRoom({
     title: body.title,
     roomKey: body.room_key || body.roomKey,
-    folderId: body.folderId || body.folder_id,
+    folderId,
     userId: who.userId,
     teamId,
     teamMembers: members
@@ -1214,6 +1224,7 @@ async function handleApi(req, res) {
     readBody,
     sendJson,
     createRoom: createTeamRoom,
+    getFileSystem: () => require('./fileSystem').getFileSystem(),
     fetchWecomContacts: options => require('./auth').listWecomContacts(options),
     fetchWecomDepartments: () => require('./auth').listWecomDepartments(),
     upsertWecomContact: user => require('./auth').upsertWecomUser(user)
