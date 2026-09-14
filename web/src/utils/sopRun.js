@@ -456,7 +456,7 @@ function deliverableExt(item) {
   return m ? m[1].toLowerCase() : ''
 }
 
-/** 只保留用户勾选的产物类型；每种类型最多 1 个（优先本地 output 落盘 + 本 SOP 命中） */
+/** 只保留用户勾选的产物类型；同一路径去重，不同类型、不同日期的文件都保留 */
 export function filterDeliverablesByOutputs(list, outputs = [], sopMeta = {}) {
   const ids = (outputs || []).map(o => o.id || o).filter(Boolean)
   const idSet = new Set(ids)
@@ -466,60 +466,21 @@ export function filterDeliverablesByOutputs(list, outputs = [], sopMeta = {}) {
   const typed = (scoped || []).filter(item => {
     if (isJunkDeliverable(item)) return false
     if (allowAll) return true
+    const uri = String((item && item.uri_or_path) || '')
+    if (isShareDeliverableUri(uri)) return true
+    if (/[\\/]output[\\/]/i.test(uri)) return true
     const type = guessOutputId(item)
     return type && idSet.has(type)
   })
 
-  const wantId = String(sopMeta.id || sopMeta.sopId || '')
-    .trim()
-    .toUpperCase()
-  const titleKey = String(sopMeta.title || sopMeta.sopTitle || '')
-    .replace(/\s+/g, '')
-    .slice(0, 12)
-
-  const score = item => {
-    const uri = String((item && item.uri_or_path) || '')
-    const name = String((item && item.name) || '')
-    const blob = `${name}\n${uri}`
-    let s = 0
-    if (/[\\/]output[\\/]/i.test(uri)) s += 100
-    if (/^[A-Za-z]:[\\/]/.test(uri)) s += 50
-    if (/^https?:\/\//i.test(uri)) s += 10
-    if (/\.(html?|xlsx?|md|csv)$/i.test(uri)) s += 20
-    const fileId = sopIdFromText(blob)
-    if (wantId && fileId === wantId) s += 80
-    if (wantId && fileId && fileId !== wantId) s -= 150
-    if (titleKey && titleKey.length >= 2 && blob.includes(titleKey)) s += 50
-    return s
-  }
-
-  const bestByType = new Map()
-  typed.forEach(item => {
-    const type = guessOutputId(item) || '_other'
-    const prev = bestByType.get(type)
-    if (!prev || score(item) > score(prev)) bestByType.set(type, item)
-  })
-
-  const order = ids.length ? ids : Array.from(bestByType.keys())
-  const out = []
   const seen = new Set()
-  order.forEach(id => {
-    const item = bestByType.get(id)
-    if (!item) return
-    const key = `${item.name}|${item.uri_or_path}`
-    if (seen.has(key)) return
+  const out = []
+  typed.forEach(item => {
+    const key = `${item.name}|${item.uri_or_path}`.toLowerCase()
+    if (!key || seen.has(key)) return
     seen.add(key)
     out.push(item)
   })
-  if (allowAll) {
-    bestByType.forEach((item, key) => {
-      if (ids.includes(key)) return
-      const k = `${item.name}|${item.uri_or_path}`
-      if (seen.has(k)) return
-      seen.add(k)
-      out.push(item)
-    })
-  }
   return out
 }
 
@@ -716,7 +677,7 @@ export function extractDeliverablesFromReply(
       filtered.push(item)
     }
   })
-  return filtered.slice(0, 8)
+  return filtered.slice(0, 100)
 }
 
 function guessKind(uri) {
