@@ -360,6 +360,16 @@ async function dispatchTodoViaWorkbuddyFallback({ reason, onDelta, ...args }) {
   }
 }
 
+async function fallbackOpenclawTodoToCli(opts) {
+  if (opts.onDelta && opts.reason) opts.onDelta(`${opts.reason}\n`)
+  const result = await dispatchTodoViaWorkbuddy(opts)
+  return {
+    ...result,
+    backendLabel: '助理',
+    fallbackFrom: 'openclaw-wecom'
+  }
+}
+
 async function dispatchTodoViaOpenclaw({
   assigneeName,
   taskTitle,
@@ -463,6 +473,19 @@ async function dispatchTodoViaOpenclaw({
     }
   } catch (err) {
     if (err && err.name === 'AbortError') throw err
+    if (!sawWecomTool) {
+      return fallbackOpenclawTodoToCli({
+        assigneeName,
+        taskTitle,
+        description,
+        detail,
+        context,
+        onEvent,
+        onDelta,
+        signal,
+        reason: '助理未能创建企微待办，已改用本机企微接口'
+      })
+    }
     const errHint =
       (err && err.message) || '助理派发企微待办失败'
     if (onDelta) onDelta(`${errHint}\n`)
@@ -494,6 +517,20 @@ async function dispatchTodoViaOpenclaw({
     (!failed &&
       (/已创建|创建成功|已发送|已派发|待办已|成功/.test(text) ||
         (sawWecomTool && text.length > 0)))
+
+  if (!success && !sawWecomTool) {
+    return fallbackOpenclawTodoToCli({
+      assigneeName,
+      taskTitle,
+      description,
+      detail,
+      context,
+      onEvent,
+      onDelta,
+      signal,
+      reason: '助理未能确认企微待办，已改用本机企微接口创建'
+    })
+  }
 
   if (!success) {
     const errHint =

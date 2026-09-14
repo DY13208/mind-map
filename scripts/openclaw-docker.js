@@ -64,6 +64,91 @@ function upsertEnvKey(key, value) {
   fs.writeFileSync(ENV_FILE, next.join('\n').replace(/\n*$/, '\n'), 'utf8')
 }
 
+/**
+ * 本机 WorkBuddy 已配 DeepSeek 时，写入 .env，供 OpenClaw 容器注入。
+ * 不打印密钥。已有 DEEPSEEK_API_KEY 时不覆盖。
+ */
+function hydrateDeepseekApiKey() {
+  const existing = String(
+    process.env.DEEPSEEK_API_KEY || loadEnvFile().DEEPSEEK_API_KEY || ''
+  ).trim()
+  if (existing && !existing.startsWith('${')) {
+    process.env.DEEPSEEK_API_KEY = existing
+    return true
+  }
+  const home = process.env.USERPROFILE || process.env.HOME || ''
+  if (!home) return false
+  const file = path.join(home, '.workbuddy', 'models.json')
+  if (!fs.existsSync(file)) return false
+  let hit = null
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''))
+    const list = Array.isArray(raw) ? raw : raw.models || []
+    hit = list.find(
+      m =>
+        m &&
+        m.apiKey &&
+        !String(m.apiKey).startsWith('${') &&
+        (/deepseek/i.test(String(m.id || '')) ||
+          /deepseek/i.test(String(m.vendor || '')) ||
+          /deepseek\.com/i.test(String(m.url || '')))
+    )
+  } catch (e) {
+    return false
+  }
+  if (!hit || !hit.apiKey) return false
+  const apiKey = String(hit.apiKey).trim()
+  upsertEnvKey('DEEPSEEK_API_KEY', apiKey)
+  process.env.DEEPSEEK_API_KEY = apiKey
+  return true
+}
+
+function applyDeepseekModel(cfg) {
+  if (!hydrateDeepseekApiKey()) return cfg
+  cfg.models = cfg.models || {}
+  cfg.models.mode = cfg.models.mode || 'merge'
+  cfg.models.providers = cfg.models.providers || {}
+  const prev = cfg.models.providers.deepseek || {}
+  const models =
+    Array.isArray(prev.models) && prev.models.length
+      ? prev.models
+      : [
+          {
+            id: 'deepseek-v4-flash',
+            name: 'DeepSeek V4 Flash',
+            api: 'openai-completions',
+            input: ['text'],
+            contextWindow: 1000000,
+            maxTokens: 8192
+          }
+        ]
+  cfg.models.providers.deepseek = {
+    ...prev,
+    baseUrl: prev.baseUrl || 'https://api.deepseek.com/v1',
+    // 引用环境变量，避免把密钥写进可提交的配置
+    apiKey: '${DEEPSEEK_API_KEY}',
+    api: prev.api || 'openai-completions',
+    models
+  }
+  cfg.agents = cfg.agents || {}
+  cfg.agents.defaults = cfg.agents.defaults || {}
+  const current = cfg.agents.defaults.model
+  const primary =
+    typeof current === 'string'
+      ? current
+      : current && typeof current === 'object'
+        ? current.primary
+        : ''
+  const missingAuth = !primary || /^openai\//i.test(String(primary))
+  if (missingAuth) {
+    cfg.agents.defaults.model = {
+      ...(current && typeof current === 'object' ? current : {}),
+      primary: 'deepseek/deepseek-v4-flash'
+    }
+  }
+  return cfg
+}
+
 function ensureGatewayToken() {
   const fromEnv = String(
     process.env.OPENCLAW_GATEWAY_TOKEN || loadEnvFile().OPENCLAW_GATEWAY_TOKEN || ''
@@ -255,6 +340,7 @@ function ensureOpenclawConfig(token, port = DEFAULT_PORT) {
   if (!cfg.agents.defaults.sandbox.mode) {
     cfg.agents.defaults.sandbox.mode = 'off'
   }
+  applyDeepseekModel(cfg)
 
   // Cognee 是可选能力：插件未安装时清理失效引用，让 Gateway 先正常启动。
   try {
@@ -381,10 +467,12 @@ function serviceRunning() {
 }
 
 function composeEnv(token, port) {
+  hydrateDeepseekApiKey()
   return {
     OPENCLAW_GATEWAY_TOKEN: token,
     OPENCLAW_PORT: String(port),
-    OPENCLAW_IMAGE: process.env.OPENCLAW_IMAGE || DEFAULT_IMAGE
+    OPENCLAW_IMAGE: process.env.OPENCLAW_IMAGE || DEFAULT_IMAGE,
+    DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY || ''
   }
 }
 
