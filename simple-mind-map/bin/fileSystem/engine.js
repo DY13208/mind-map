@@ -120,7 +120,16 @@ function createFileSystem(options = {}) {
       throw fsError('ROOM_TRASHED', '房间已在回收站', 409)
     }
     if (existing) throw fsError('ROOM_ALREADY_EXISTS', '房间已存在', 409)
-    if (folderId) await assertFolderExists(folderId)
+    if (folderId) {
+      const folder = await assertFolderExists(folderId)
+      const folderTeamId = folder.team_id || null
+      if (teamId && folderTeamId !== teamId) {
+        throw fsError('FOLDER_TEAM_MISMATCH', '文件夹不属于当前团队', 400)
+      }
+      if (!teamId && folderTeamId) {
+        throw fsError('FOLDER_TEAM_MISMATCH', '不能将个人脑图放入团队文件夹', 400)
+      }
+    }
     const graph = defaultRootGraph(title)
     const created = await store.withTx(async db => {
       const row = await store.insertRoom(
@@ -528,6 +537,8 @@ function createFileSystem(options = {}) {
   async function assertFolderEditable(folderId, userId, bypass) {
     if (!folderId || bypass || !userId) return
     const folder = await assertFolderExists(folderId)
+    // Team folders are organized by team membership; room ACL still gates the move.
+    if (folder.team_id) return
     if (folder.created_by && folder.created_by === userId) return
     const members = await store.listFolderMembers(folderId)
     const mine = members.find(member => member.user_id === userId)
@@ -591,9 +602,22 @@ function createFileSystem(options = {}) {
     const name = normalizeFolderName(input.name)
     const parentId = parseFolderId(input.parentId || input.parent_id)
     const userId = roomAcl.normalizeUserId(input.userId || '')
+    const teamId = String(input.teamId || input.team_id || '').trim() || null
+    if (teamId && !input.bypass) {
+      throw fsError('FORBIDDEN', '没有权限创建团队文件夹', 403)
+    }
     if (parentId) {
       const parent = await assertFolderExists(parentId)
-      if (userId && parent.created_by && parent.created_by !== userId && !input.bypass) {
+      const parentTeamId = parent.team_id || null
+      if ((parentTeamId || null) !== (teamId || null)) {
+        throw fsError('FOLDER_TEAM_MISMATCH', '父文件夹不属于当前空间', 400)
+      }
+      if (teamId) {
+        // Team folder writes are gated by the team API (owner/admin + bypass).
+        if (!input.bypass) {
+          throw fsError('FORBIDDEN', '没有权限在该文件夹中创建子文件夹', 403)
+        }
+      } else if (userId && parent.created_by && parent.created_by !== userId && !input.bypass) {
         const members = await store.listFolderMembers(parentId)
         const canEdit = members.some(member => member.user_id === userId && member.role === 'editor')
         if (!canEdit) {
@@ -601,22 +625,31 @@ function createFileSystem(options = {}) {
         }
       }
     }
-    if (await store.folderNameTaken(name, parentId)) {
+    if (await store.folderNameTaken(name, parentId, null, teamId)) {
       throw fsError('FOLDER_NAME_CONFLICT', 'a folder with this name already exists', 409)
     }
     const row = await store.insertFolder({
       id: newFolderId(),
       parent_id: parentId,
       name,
-      created_by: userId
+      created_by: userId,
+      team_id: teamId
     })
-    return publicFolder({ ...row, room_count: 0 })
+    return publicFolder({ ...row, room_count: 0, can_manage: true })
   }
 
   async function listFolders(input = {}) {
     const userId = roomAcl.normalizeUserId(input.userId || '')
     const bypass = !!input.bypass || !userId
-    const rows = await store.listFolders({ userId, bypass })
+    const teamId =
+      input.teamId !== undefined || input.team_id !== undefined
+        ? String(input.teamId || input.team_id || '').trim() || null
+        : undefined
+    const rows = await store.listFolders({
+      userId,
+      bypass: bypass || !!teamId,
+      teamId
+    })
     let counts = {}
     if (store.kind === 'memory') counts = await store.roomCountsByFolder()
     // room_count 是存储层返回的直接脑图数。目录展示需要包含后代目录，
@@ -655,7 +688,7 @@ function createFileSystem(options = {}) {
     }
     foldersById.forEach((_, id) => countFolderTree(id))
     let accessibleFolderIds = null
-    if (!bypass && store.kind === 'memory') {
+    if (!bypass && !teamId && store.kind === 'memory') {
       const rooms = await store.listRooms({})
       const members = await store.listMembersForRooms(rooms.map(item => item.room_key))
       const mine = new Set(
@@ -669,15 +702,22 @@ function createFileSystem(options = {}) {
       })
     }
     const visible = rows.filter(row => {
-      if (bypass || store.kind === 'pg') return true
+      if (bypass || teamId || store.kind === 'pg') return true
       if (row.created_by === userId) return true
       return accessibleFolderIds && accessibleFolderIds.has(row.id)
     })
+    const canManageTeam = !!input.canManage
     return {
       list: visible.map(row =>
         publicFolder({
           ...row,
-          room_count: descendantCounts.get(String(row.id)) || 0
+          room_count: descendantCounts.get(String(row.id)) || 0,
+          can_manage:
+            teamId != null
+              ? canManageTeam
+              : row.can_manage != null
+                ? row.can_manage
+                : row.created_by === userId || bypass
         })
       )
     }
@@ -687,22 +727,33 @@ function createFileSystem(options = {}) {
     const folder = await store.getFolder(id)
     if (!folder) throw fsError('FOLDER_NOT_FOUND', 'folder not found', 404)
     const userId = roomAcl.normalizeUserId(input.userId || '')
-    if (userId && folder.created_by && folder.created_by !== userId && !input.bypass) {
+    const teamId = folder.team_id || null
+    if (teamId && !input.bypass) {
+      throw fsError('FORBIDDEN', '没有权限执行该操作', 403)
+    }
+    if (!teamId && userId && folder.created_by && folder.created_by !== userId && !input.bypass) {
       throw fsError('FORBIDDEN', '没有权限执行该操作', 403)
     }
     const nextName = normalizeFolderName(name)
-    if (await store.folderNameTaken(nextName, folder.parent_id || null, id)) {
+    if (await store.folderNameTaken(nextName, folder.parent_id || null, id, teamId)) {
       throw fsError('FOLDER_NAME_CONFLICT', 'a folder with this name already exists', 409)
     }
     const row = await store.updateFolderName(id, nextName)
-    return publicFolder(row)
+    return publicFolder({
+      ...row,
+      can_manage: input.canManage != null ? !!input.canManage : true
+    })
   }
 
   async function deleteFolder(id, input = {}) {
     const folder = await store.getFolder(id)
     if (!folder) throw fsError('FOLDER_NOT_FOUND', 'folder not found', 404)
     const userId = roomAcl.normalizeUserId(input.userId || '')
-    if (userId && folder.created_by && folder.created_by !== userId && !input.bypass) {
+    const teamId = folder.team_id || null
+    if (teamId && !input.bypass) {
+      throw fsError('FORBIDDEN', '没有权限执行该操作', 403)
+    }
+    if (!teamId && userId && folder.created_by && folder.created_by !== userId && !input.bypass) {
       throw fsError('FORBIDDEN', '没有权限执行该操作', 403)
     }
     const count = await store.countRoomsInFolder(id)

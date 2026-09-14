@@ -46,6 +46,9 @@ export default {
     ShareRoomDialog,
     HistoryPanel
   },
+  props: {
+    teamId: { type: [String, Number], default: null }
+  },
   data: () => ({
     room: null,
     folders: [],
@@ -67,7 +70,9 @@ export default {
       if (action === 'history') this.historyVisible = true
       if (action === 'move') {
         try {
-          this.folders = await folderService.listFolders()
+          this.folders = this.teamId
+            ? await teamService.listFolders(this.teamId)
+            : await folderService.listFolders()
           this.moveVisible = true
         } catch (error) {
           this.$message.error(userMessageFromError(error))

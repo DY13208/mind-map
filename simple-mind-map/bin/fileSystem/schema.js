@@ -11,15 +11,34 @@ async function initFileSystemSchema(db) {
       deleted_at timestamptz
     )
   `)
+  await db.query(`alter table folders add column if not exists team_id text`)
   await db.query(`
-    create unique index if not exists folders_root_name_uniq
+    create index if not exists folders_team_id_idx
+    on folders (team_id)
+    where deleted_at is null and team_id is not null
+  `)
+  // Personal and team folders must not share one global name namespace.
+  await db.query(`drop index if exists folders_root_name_uniq`)
+  await db.query(`drop index if exists folders_parent_name_uniq`)
+  await db.query(`
+    create unique index if not exists folders_personal_root_name_uniq
     on folders (lower(name))
-    where deleted_at is null and parent_id is null
+    where deleted_at is null and parent_id is null and team_id is null
   `)
   await db.query(`
-    create unique index if not exists folders_parent_name_uniq
+    create unique index if not exists folders_personal_parent_name_uniq
     on folders (parent_id, lower(name))
-    where deleted_at is null and parent_id is not null
+    where deleted_at is null and parent_id is not null and team_id is null
+  `)
+  await db.query(`
+    create unique index if not exists folders_team_root_name_uniq
+    on folders (team_id, lower(name))
+    where deleted_at is null and parent_id is null and team_id is not null
+  `)
+  await db.query(`
+    create unique index if not exists folders_team_parent_name_uniq
+    on folders (team_id, parent_id, lower(name))
+    where deleted_at is null and parent_id is not null and team_id is not null
   `)
   await db.query(`
     create index if not exists folders_created_by_idx

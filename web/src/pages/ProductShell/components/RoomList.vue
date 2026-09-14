@@ -1,9 +1,17 @@
 <template
   ><el-table
+    ref="table"
     :data="items"
     class="roomTable"
+    row-key="__key"
     @row-click="openItem"
-    ><el-table-column label="名称" min-width="220"
+    @selection-change="onSelectionChange"
+    ><el-table-column
+      v-if="selectMode"
+      type="selection"
+      width="48"
+      :selectable="rowSelectable"
+    /><el-table-column label="名称" min-width="220"
       ><template slot-scope="scope"
         ><div class="roomName">
           <i :class="scope.row.__kind === 'folder' ? 'el-icon-folder' : 'el-icon-document'" /><strong>{{ scope.row.title || scope.row.name }}</strong>
@@ -40,14 +48,14 @@
       ><template slot-scope="scope"
         ><el-button
           type="text"
-          v-if="scope.row.__kind !== 'folder'"
+          v-if="scope.row.__kind !== 'folder' && !selectMode"
           :icon="scope.row.favorite ? 'el-icon-star-on' : 'el-icon-star-off'"
           @click.stop="
             $emit('favorite', scope.row)
           "/></template></el-table-column
     ><el-table-column width="65"
       ><template slot-scope="scope"
-        ><el-dropdown v-if="scope.row.__kind !== 'folder'"
+        ><el-dropdown v-if="scope.row.__kind !== 'folder' && !selectMode"
           trigger="click"
           @command="$emit($event, scope.row)"
           @click.native.stop
@@ -78,16 +86,81 @@ export default {
     rooms: Array,
     folders: { type: Array, default: () => [] },
     allowDelete: { type: Boolean, default: false },
-    allowMoveToTeam: { type: Boolean, default: true }
+    allowMoveToTeam: { type: Boolean, default: true },
+    selectMode: { type: Boolean, default: false },
+    selectedRoomKeys: { type: Array, default: () => [] },
+    selectedFolderIds: { type: Array, default: () => [] },
+    canSelectFolder: { type: Function, default: () => true },
+    canSelectRoom: { type: Function, default: () => true }
   },
   computed: {
     items() {
-      return this.folders.map(folder => ({ ...folder, __kind: 'folder', folderName: '—' })).concat(this.rooms.map(room => ({ ...room, __kind: 'room' })))
+      return this.folders
+        .map(folder => ({
+          ...folder,
+          __kind: 'folder',
+          __key: 'folder:' + folder.id,
+          folderName: '—'
+        }))
+        .concat(
+          this.rooms.map(room => ({
+            ...room,
+            __kind: 'room',
+            __key: 'room:' + (room.roomKey || room.id)
+          }))
+        )
     }
   },
+  watch: {
+    selectMode(value) {
+      if (!value) this.clearTableSelection()
+      else this.syncTableSelection()
+    },
+    selectedRoomKeys: 'syncTableSelection',
+    selectedFolderIds: 'syncTableSelection',
+    items: 'syncTableSelection'
+  },
   methods: {
+    rowSelectable(row) {
+      return row.__kind === 'folder'
+        ? this.canSelectFolder(row)
+        : this.canSelectRoom(row)
+    },
     openItem(item) {
+      if (this.selectMode) return
       this.$emit(item.__kind === 'folder' ? 'open-folder' : 'open', item)
+    },
+    onSelectionChange(rows) {
+      if (!this.selectMode) return
+      const roomKeys = []
+      const folderIds = []
+      ;(rows || []).forEach(row => {
+        if (row.__kind === 'folder') folderIds.push(row.id)
+        else roomKeys.push(row.roomKey || row.id)
+      })
+      this.$emit('selection-change', { roomKeys, folderIds })
+    },
+    syncTableSelection() {
+      if (!this.selectMode || !this.$refs.table) return
+      this.$nextTick(() => {
+        const table = this.$refs.table
+        if (!table) return
+        table.clearSelection()
+        const roomSet = new Set(this.selectedRoomKeys.map(String))
+        const folderSet = new Set(this.selectedFolderIds.map(String))
+        this.items.forEach(row => {
+          const selected =
+            row.__kind === 'folder'
+              ? folderSet.has(String(row.id))
+              : roomSet.has(String(row.roomKey || row.id))
+          if (selected && this.rowSelectable(row)) {
+            table.toggleRowSelection(row, true)
+          }
+        })
+      })
+    },
+    clearTableSelection() {
+      if (this.$refs.table) this.$refs.table.clearSelection()
     },
     formatDate(value) {
       return new Date(value).toLocaleString('zh-CN', {
