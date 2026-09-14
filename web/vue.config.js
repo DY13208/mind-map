@@ -1,5 +1,30 @@
 const path = require('path')
+const fs = require('fs')
 const { execSync } = require('child_process')
+
+// 读取仓库根目录 .env（供 /cognee-api 等代理注入密钥）
+;(function loadRootEnv() {
+  const envFile = path.resolve(__dirname, '..', '.env')
+  if (!fs.existsSync(envFile)) return
+  fs.readFileSync(envFile, 'utf8')
+    .split(/\r?\n/)
+    .forEach(line => {
+      const text = line.trim()
+      if (!text || text.startsWith('#')) return
+      const index = text.indexOf('=')
+      if (index <= 0) return
+      const key = text.slice(0, index).trim()
+      let value = text.slice(index + 1).trim()
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1)
+      }
+      if (process.env[key] === undefined) process.env[key] = value
+    })
+})()
+
 try {
   process.env.VUE_APP_BUILD_COMMIT = execSync('git rev-parse --short HEAD', {
     cwd: path.resolve(__dirname, '..')
@@ -121,6 +146,17 @@ module.exports = {
         timeout: 0,
         proxyTimeout: 3600000,
         ws: true
+      },
+      '/cognee-api': {
+        target: process.env.COGNEE_API || 'http://192.168.0.204:8320',
+        changeOrigin: true,
+        pathRewrite: { '^/cognee-api': '' },
+        timeout: 0,
+        proxyTimeout: 3600000,
+        onProxyReq(proxyReq) {
+          const key = process.env.COGNEE_API_KEY || ''
+          if (key) proxyReq.setHeader('X-Api-Key', key)
+        }
       },
       '/collab-v2': {
         target: process.env.COLLAB_API || 'http://127.0.0.1:1234',

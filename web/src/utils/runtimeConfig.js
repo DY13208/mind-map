@@ -65,7 +65,9 @@ export function getRuntimeConfig() {
       openclawToken: runtime.openclawToken || '',
       openclawModel: runtime.openclawModel || 'openclaw/default',
       openclawControlUrl:
-        runtime.openclawControlUrl || 'http://127.0.0.1:4623/chat'
+        runtime.openclawControlUrl || 'http://127.0.0.1:4623/chat',
+      cogneeBase: runtime.cogneeBase || '/cognee-api',
+      cogneeDataset: runtime.cogneeDataset || 'liangce'
     }
   }
   return {
@@ -91,7 +93,9 @@ export function getRuntimeConfig() {
     openclawToken: runtime.openclawToken || '',
     openclawModel: runtime.openclawModel || 'openclaw/default',
     openclawControlUrl:
-      runtime.openclawControlUrl || 'http://127.0.0.1:4623/chat'
+      runtime.openclawControlUrl || 'http://127.0.0.1:4623/chat',
+    cogneeBase: runtime.cogneeBase || '/cognee-api',
+    cogneeDataset: runtime.cogneeDataset || 'liangce'
   }
 }
 

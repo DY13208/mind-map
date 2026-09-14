@@ -13,9 +13,27 @@ case "$YIRAN_UPSTREAM" in
   *";"*|*"{"*|*"}"*|*" "*) echo "[gateway] invalid YIRAN_UPSTREAM characters" >&2; exit 1 ;;
 esac
 YIRAN_UPSTREAM=${YIRAN_UPSTREAM%/}
-sed "s|__YIRAN_UPSTREAM__|$YIRAN_UPSTREAM|g" \
+
+COGNEE_UPSTREAM=${COGNEE_API:-${COGNEE_UPSTREAM:-http://192.168.0.204:8320}}
+case "$COGNEE_UPSTREAM" in
+  http://*|https://*) ;;
+  *) echo "[gateway] invalid COGNEE_UPSTREAM" >&2; exit 1 ;;
+esac
+case "$COGNEE_UPSTREAM" in
+  *";"*|*"{"*|*"}"*|*" "*) echo "[gateway] invalid COGNEE_UPSTREAM characters" >&2; exit 1 ;;
+esac
+COGNEE_UPSTREAM=${COGNEE_UPSTREAM%/}
+COGNEE_API_KEY=${COGNEE_API_KEY:-}
+case "$COGNEE_API_KEY" in
+  *";"*|*"|"*|*"{"*|*"}"*|*" "*) echo "[gateway] invalid COGNEE_API_KEY characters" >&2; exit 1 ;;
+esac
+
+sed -e "s|__YIRAN_UPSTREAM__|$YIRAN_UPSTREAM|g" \
+    -e "s|__COGNEE_UPSTREAM__|$COGNEE_UPSTREAM|g" \
+    -e "s|__COGNEE_API_KEY__|$COGNEE_API_KEY|g" \
   /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
 echo "[gateway] Yiran upstream: $YIRAN_UPSTREAM"
+echo "[gateway] Cognee upstream: $COGNEE_UPSTREAM"
 
 echo "[gateway] waiting for postgres ${PGHOST:-postgres}:${PGPORT:-5432}..."
 i=0

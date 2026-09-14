@@ -121,6 +121,23 @@ const routes = [
     ]
   },
   {
+    path: '/cognee',
+    component: () =>
+      import(
+        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'
+      ),
+    children: [
+      {
+        path: '',
+        name: 'CogneeAccess',
+        component: () =>
+          import(
+            /* webpackChunkName: "cognee" */ './pages/ProductShell/CogneeAccessPage.vue'
+          )
+      }
+    ]
+  },
+  {
     path: '/',
     name: 'Edit',
     component: () => import(`./pages/Edit/Index.vue`),

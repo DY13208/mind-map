@@ -61,7 +61,7 @@ export function saveOpenclawConfig({ token, baseUrl, model } = {}) {
   }
 }
 
-async function checkOpenclawHealth() {
+export async function checkOpenclawHealth() {
   const { baseUrl, token } = getOpenclawConfig()
   const headers = {}
   if (token) headers.Authorization = `Bearer ${token}`
