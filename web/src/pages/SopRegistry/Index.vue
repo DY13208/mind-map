@@ -585,7 +585,7 @@
             </div>
           </div>
         </el-tab-pane>
-        <el-tab-pane label="产物" name="dels">
+        <el-tab-pane :label="`产物（${visibleDeliverables.length}）`" name="dels">
           <div class="ledgerPane" v-loading="ledgerSaving">
             <ul class="ledgerList" v-if="visibleDeliverables.length">
               <li v-for="d in visibleDeliverables" :key="d.id">
@@ -1130,17 +1130,31 @@ export default {
       const fromLedger =
         (this.activeLedger && this.activeLedger.deliverables) || []
       const extra = this.scannedDeliverables || []
-      const seen = new Set(
-        fromLedger.map(d => String(d.name || d.uri_or_path || '').toLowerCase())
-      )
-      const merged = fromLedger.slice()
-      extra.forEach(d => {
-        const key = String(d.name || d.uri_or_path || '').toLowerCase()
+      const seen = new Set()
+      const merged = []
+      ;[...fromLedger, ...extra].forEach(d => {
+        const uri = String((d && d.uri_or_path) || '')
+          .replace(/\\/g, '/')
+          .replace(/\/+$/g, '')
+          .toLowerCase()
+        const name = String((d && d.name) || '')
+          .split(/[\\/]/)
+          .pop()
+          .toLowerCase()
+        const key = uri || name
         if (!key || seen.has(key)) return
         seen.add(key)
         merged.push(d)
       })
-      return merged
+      const sortKey = d => {
+        if (d && d.at) return String(d.at)
+        const n = Number(d && d.mtime)
+        if (n > 1e11) {
+          return new Date(n).toISOString().slice(0, 16).replace('T', ' ')
+        }
+        return ''
+      }
+      return merged.sort((a, b) => sortKey(b).localeCompare(sortKey(a)))
     },
     syncLabel() {
       if (this.subtreeLoading) return '加载中…'
@@ -1868,40 +1882,109 @@ export default {
     toggleLedgerRunLimit() {
       this.ledgerRunExpanded = !this.ledgerRunExpanded
     },
-    visibleDeliverables() {
-      const fromLedger =
-        (this.activeLedger && this.activeLedger.deliverables) || []
-      const extra = this.scannedDeliverables || []
-      const seen = new Set(
-        fromLedger.map(d => String(d.name || d.uri_or_path || '').toLowerCase())
-      )
-      const merged = fromLedger.slice()
-      extra.forEach(d => {
-        const key = String(d.name || d.uri_or_path || '').toLowerCase()
-        if (!key || seen.has(key)) return
-        seen.add(key)
-        merged.push(d)
-      })
-      return merged
-    },
     async refreshScannedArtifacts() {
-      const title = String((this.activeSop && this.activeSop.title) || '').trim()
-      if (title.length < 2) {
+      const sop = this.activeSop || {}
+      const queries = [sop.title, sop.id]
+        .map(v => String(v || '').trim())
+        .filter(v => v.length >= 2)
+      const uniq = Array.from(new Set(queries))
+      if (!uniq.length) {
         this.scannedDeliverables = []
         return
       }
       try {
-        const data = await searchLocalArtifacts(title)
-        const items = (data && (data.items || data.list)) || []
+        const batches = await Promise.all(
+          uniq.map(q => searchLocalArtifacts(q).catch(() => ({ items: [] })))
+        )
+        const titleKey = String(sop.title || '').replace(/\s+/g, '')
+        const wantId = String(sop.id || '').trim().toUpperCase()
+        const seen = new Set()
+        const items = []
+        batches.forEach(data => {
+          ;((data && (data.items || data.list)) || []).forEach(item => {
+            const blob = String(item.name || '')
+            const fileId = (
+              blob.match(/(?:^|[^A-Za-z0-9])(D\d+)(?=[^A-Za-z0-9]|$)/i) || []
+            )[1]
+            if (wantId && fileId && fileId.toUpperCase() !== wantId) return
+            const hitTitle =
+              titleKey.length >= 2 && blob.replace(/\s+/g, '').includes(titleKey)
+            const hitId = wantId && fileId && fileId.toUpperCase() === wantId
+            if (titleKey.length >= 2 && !hitTitle && !hitId) return
+            const key = String(item.path || item.name || '').toLowerCase()
+            if (!key || seen.has(key)) return
+            seen.add(key)
+            items.push(item)
+          })
+        })
         this.scannedDeliverables = items.map(item => ({
-          id: `scan_${item.name}`,
+          id: `scan_${item.path || item.name}`,
           name: item.name,
           uri_or_path: item.path || item.name,
-          kind: 'file'
+          kind: 'file',
+          mtime: item.mtime || 0
         }))
+        this.persistScannedDeliverables(items)
       } catch (e) {
         this.scannedDeliverables = []
       }
+    },
+    persistScannedDeliverables(items) {
+      if (!this.canEditSop || !this.roomKey || !this.activeSopUid) return
+      let ledger = normalizeLedger(this.activeLedger)
+      const known = new Set(
+        (ledger.deliverables || []).map(d =>
+          String(d.uri_or_path || '')
+            .replace(/\\/g, '/')
+            .toLowerCase()
+        )
+      )
+      let added = 0
+      ;(items || []).forEach(item => {
+        const uri = String(item.path || item.name || '')
+        const key = uri.replace(/\\/g, '/').toLowerCase()
+        if (!uri || known.has(key)) return
+        const n = Number(item.mtime)
+        const at =
+          n > 1e11
+            ? new Date(n).toISOString().slice(0, 16).replace('T', ' ')
+            : ''
+        ledger = addDeliverableToLedger(ledger, {
+          name: item.name,
+          uri_or_path: uri,
+          kind: 'file',
+          sop_id: (this.activeSop && this.activeSop.id) || '',
+          sop_uid: this.activeSopUid,
+          at
+        })
+        known.add(key)
+        added += 1
+      })
+      if (!added) return
+      this.activeLedger = ledger
+      const idx = this.sops.findIndex(
+        s => this.resolveSopUid(s) === this.activeSopUid || s === this.activeSop
+      )
+      if (idx >= 0) {
+        const next = {
+          ...this.sops[idx],
+          deliverables: ledger.deliverables,
+          sopLedger: ledger
+        }
+        this.$set(this.sops, idx, next)
+        this.activeSop = next
+      }
+      persistSopLedger(
+        this.roomKey,
+        this.activeSopUid,
+        {
+          id: (this.activeSop && this.activeSop.id) || '',
+          title: (this.activeSop && this.activeSop.title) || ''
+        },
+        ledger
+      ).catch(err => {
+        console.warn('[sopRegistry] persist scanned deliverables failed', err)
+      })
     },
     isHttp(uri) {
       return /^https?:\/\//i.test(String(uri || ''))
