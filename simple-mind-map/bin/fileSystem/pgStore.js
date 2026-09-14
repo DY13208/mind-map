@@ -369,21 +369,27 @@ function createPgFileStore(pool) {
       if (!db) queryCount += 1
       const favorite =
         patch.is_favorite == null ? null : !!patch.is_favorite
+      const hasViewState = Object.prototype.hasOwnProperty.call(
+        patch,
+        'view_state'
+      )
       const res = await conn.query(
         `insert into room_user_state
-           (room_key, user_id, is_favorite, last_opened_at, created_at, updated_at)
+           (room_key, user_id, is_favorite, last_opened_at, view_state, created_at, updated_at)
          values
-           ($1, $2, coalesce($3, false), $4, now(), now())
+           ($1, $2, coalesce($3, false), $4, coalesce($5::jsonb, '{}'::jsonb), now(), now())
          on conflict (room_key, user_id) do update set
            is_favorite = coalesce($3, room_user_state.is_favorite),
            last_opened_at = coalesce($4, room_user_state.last_opened_at),
+           view_state = coalesce($5::jsonb, room_user_state.view_state),
            updated_at = now()
          returning *`,
         [
           roomKey,
           userId,
           favorite,
-          patch.touch_opened ? new Date().toISOString() : patch.last_opened_at || null
+          patch.touch_opened ? new Date().toISOString() : patch.last_opened_at || null,
+          hasViewState ? JSON.stringify(patch.view_state || {}) : null
         ]
       )
       return res.rows[0]

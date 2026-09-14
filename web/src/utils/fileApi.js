@@ -382,6 +382,22 @@ export function getFileMeta(roomKey) {
   })
 }
 
+export function getPersonalViewState(roomKey) {
+  return request(`/api/files/${encodeURIComponent(roomKey)}/view-state`, {
+    timeoutMs: 8000,
+    priority: 'low'
+  })
+}
+
+export function savePersonalViewState(roomKey, state) {
+  return request(`/api/files/${encodeURIComponent(roomKey)}/view-state`, {
+    method: 'PATCH',
+    timeoutMs: 8000,
+    priority: 'low',
+    body: JSON.stringify({ state: state || {} })
+  })
+}
+
 export function recoverFileRoom(roomKey, body = {}) {
   return request(`/api/files/${encodeURIComponent(roomKey)}/recover`, {
     method: 'POST',

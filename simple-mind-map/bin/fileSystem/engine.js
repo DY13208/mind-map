@@ -853,6 +853,49 @@ function createFileSystem(options = {}) {
     return getRoom(roomKey, { userId: uid, bypass: input.bypass })
   }
 
+  function normalizeExpandState(value) {
+    const input = value && typeof value === 'object' && !Array.isArray(value)
+      ? value
+      : {}
+    const result = {}
+    Object.keys(input)
+      .slice(0, 20000)
+      .forEach(uid => {
+        const key = String(uid || '').trim().slice(0, 160)
+        if (key) result[key] = input[uid] !== false
+      })
+    return result
+  }
+
+  async function getUserViewState(roomKey, userId, input = {}) {
+    const uid = roomAcl.normalizeUserId(userId || input.userId || '')
+    if (!uid) throw fsError('unauthorized', '请先使用企业微信扫码登录', 401)
+    await getRoom(roomKey, { userId: uid, bypass: input.bypass })
+    if (store.kind === 'memory' && store.listUserState) {
+      const states = await store.listUserState(uid)
+      const found = states.find(item => item.room_key === roomKey)
+      return { expand: normalizeExpandState(found && found.view_state && found.view_state.expand) }
+    }
+    if (store.query) {
+      const res = await store.query(
+        `select view_state from room_user_state where room_key = $1 and user_id = $2`,
+        [roomKey, uid]
+      )
+      const viewState = (res.rows[0] && res.rows[0].view_state) || {}
+      return { expand: normalizeExpandState(viewState.expand) }
+    }
+    return { expand: {} }
+  }
+
+  async function setUserViewState(roomKey, userId, viewState, input = {}) {
+    const uid = roomAcl.normalizeUserId(userId || input.userId || '')
+    if (!uid) throw fsError('unauthorized', '请先使用企业微信扫码登录', 401)
+    await getRoom(roomKey, { userId: uid, bypass: input.bypass })
+    const normalized = { expand: normalizeExpandState(viewState && viewState.expand) }
+    await store.upsertUserState(roomKey, uid, { view_state: normalized })
+    return normalized
+  }
+
   function assertManage(access) {
     if (access && !access.canManage && !access.bypass) {
       throw fsError('FORBIDDEN', '没有权限执行该操作', 403)
@@ -974,6 +1017,8 @@ function createFileSystem(options = {}) {
     moveRoom,
     setFavorite,
     recordRoomOpened,
+    getUserViewState,
+    setUserViewState,
     trashRoom,
     restoreRoom,
     permanentDeleteRoom,
