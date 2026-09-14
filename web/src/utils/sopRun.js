@@ -16,7 +16,8 @@ import {
   addDeliverableToLedger,
   persistSopLedger,
   normalizeLedger,
-  isJunkDeliverable
+  isJunkDeliverable,
+  isShareDeliverableUri
 } from './sopLedger'
 import {
   extractNotifyNodesFromOutline,
@@ -532,7 +533,8 @@ function guessOutputId(item) {
   if (/^json$/i.test(ext)) return 'json'
   if (
     /^https?:\/\//i.test(uri) &&
-    /(执行单|报告|\.html?)/i.test(`${name} ${uri}`)
+    (isShareDeliverableUri(uri) ||
+      /(执行单|报告|\.html?)/i.test(`${name} ${uri}`))
   ) {
     return 'html'
   }
@@ -550,6 +552,75 @@ function cleanDeliverableName(name, uri) {
     if (base && /\.(html?|xlsx?|docx?|pdf|md|csv|json)$/i.test(base)) return base
   }
   return n || uri
+}
+
+function shareLinkName(uri) {
+  const u = String(uri || '')
+  if (/drive\.weixin\.qq\.com/i.test(u)) return '企微微盘分享'
+  if (/docs\.qq\.com|kdocs\.cn/i.test(u)) return '腾讯文档分享'
+  if (/feishu\.cn|larksuite\.com/i.test(u)) return '飞书分享'
+  if (/pan\.baidu\.com/i.test(u)) return '百度网盘分享'
+  return '分享链接'
+}
+
+function stripDeliverableToken(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^[`'"「【\[]+/, '')
+    .replace(/[`'"」】\],，。；;）)]+$/g, '')
+    .trim()
+}
+
+function parseDeliverableSection(chunk, push) {
+  const lines = String(chunk || '').split(/\r?\n/)
+  let pendingName = ''
+  let pendingPath = ''
+  const flush = () => {
+    const uri = stripDeliverableToken(pendingPath)
+    const name = stripDeliverableToken(pendingName)
+    if (uri) {
+      push({
+        name: name || uri.split(/[\\/]/).pop() || uri,
+        uri_or_path: uri,
+        kind: /^https?:\/\//i.test(uri) ? 'link' : 'file'
+      })
+    }
+    pendingName = ''
+    pendingPath = ''
+  }
+  lines.forEach(raw => {
+    const line = raw.replace(/^[-*•]\s*/, '').trim()
+    if (!line) {
+      flush()
+      return
+    }
+    const labeled = line.match(
+      /^(name|名称|path|路径|uri|url|链接|备用)\s*[:：]\s*(.+)$/i
+    )
+    if (labeled) {
+      const key = labeled[1]
+      const val = stripDeliverableToken(labeled[2])
+      if (/^(name|名称)$/i.test(key)) {
+        if (pendingName && pendingPath) flush()
+        pendingName = val
+      } else {
+        if (pendingPath) flush()
+        pendingPath = val
+      }
+      return
+    }
+    const file = line.match(
+      /([A-Za-z]:[\\/][^\s"'<>|]+|https?:\/\/\S+|[\w.\u4e00-\u9fff/\\-]+\.(html?|xlsx?|docx?|pdf|md|csv))/i
+    )
+    if (file) {
+      push({
+        name: line.replace(file[1], '').replace(/^[\s\-–—:：]+/, '') || file[1],
+        uri_or_path: stripDeliverableToken(file[1]),
+        kind: /^https?:\/\//i.test(file[1]) ? 'link' : 'file'
+      })
+    }
+  })
+  flush()
 }
 
 export function extractDeliverablesFromReply(
@@ -581,36 +652,32 @@ export function extractDeliverablesFromReply(
     })
   }
 
-  // 优先：结构化「产物清单」
-  const block = reply.match(/##\s*产物清单([\s\S]*?)(?=\n##\s|\n---|\s*$)/i)
-  if (block) {
-    const chunk = block[1]
-    const namePathPairs = chunk.matchAll(
-      /(?:name|名称)\s*[:：]\s*(.+?)(?:\n|\r).*?(?:path|路径|uri|url|链接)\s*[:：]\s*(.+?)(?:\n|\r|$)/gi
-    )
-    for (const m of namePathPairs) {
-      push({ name: m[1].trim(), uri_or_path: m[2].trim() })
-    }
-    const bullets = chunk.matchAll(/^[-*•]\s*(.+)$/gm)
-    for (const m of bullets) {
-      const line = m[1].trim()
-      const file = line.match(
-        /([A-Za-z]:\\[^\s"'<>]+|\/(?:[\w.\u4e00-\u9fff/-]+\/)+[^\s"'<>]+|https?:\/\/\S+|[\w.\u4e00-\u9fff/\\-]+\.(html?|xlsx?|docx?|pdf|md|csv))/i
-      )
-      if (file) {
-        push({
-          name:
-            line.replace(file[1], '').replace(/^[\s\-–—:：]+/, '') || file[1],
-          uri_or_path: file[1]
-        })
-      }
-    }
+  // 优先：结构化「产物清单」（支持 ## / **产物清单** / path 与 name 任意顺序）
+  const sectionRe =
+    /(?:^|\n)\s*(?:#{1,6}\s*|\*{1,2}\s*)?产物清单\s*\*{0,2}\s*[:：]?\s*\n([\s\S]*?)(?=\n\s*(?:#{1,6}\s|\*{2}[^*\n]+\*{2})|\n---|\s*$)/gi
+  let section
+  while ((section = sectionRe.exec(reply))) {
+    parseDeliverableSection(section[1], push)
+  }
+  if (!out.length) parseDeliverableSection(reply, push)
+
+  // 分享链接常写在清单外面（如「财务外链」），且没有文件扩展名
+  const shareRe =
+    /https?:\/\/(?:[\w.-]+\.)?(?:drive\.weixin\.qq\.com|docs\.qq\.com|kdocs\.cn|feishu\.cn|larksuite\.com|drive\.google\.com|pan\.baidu\.com|share\.weiyun\.com|yuque\.com|shimo\.im)[^\s)\]>`"'，,]+/gi
+  let share
+  while ((share = shareRe.exec(reply))) {
+    const uri = share[0].replace(/[，。；;）)]+$/g, '')
+    push({
+      name: shareLinkName(uri),
+      uri_or_path: uri,
+      kind: 'link'
+    })
   }
 
   // 清单为空时，才从正文（仍不含事件）兜底扫最终文件
-  if (!out.length) {
+  if (!out.some(item => item.kind !== 'link')) {
     const winPathRe =
-      /([A-Za-z]:\\[^\s"'<>|]+\.(html?|xlsx?|docx?|pdf|md|csv))/gi
+      /([A-Za-z]:[\\/][^\s"'<>|]+\.(html?|xlsx?|docx?|pdf|md|csv))/gi
     let m
     while ((m = winPathRe.exec(reply))) {
       push({ name: m[1].split(/[\\/]/).pop(), uri_or_path: m[1], kind: 'file' })
@@ -627,7 +694,20 @@ export function extractDeliverablesFromReply(
   }
 
   void events // 保留签名兼容，刻意不扫事件正文
-  return filterDeliverablesByOutputs(out, outputs, sopMeta).slice(0, 8)
+  const filtered = filterDeliverablesByOutputs(out, outputs, sopMeta)
+  const shares = out.filter(
+    item => item && isShareDeliverableUri(item.uri_or_path)
+  )
+  shares.forEach(item => {
+    if (
+      !filtered.some(
+        d => String(d.uri_or_path || '') === String(item.uri_or_path || '')
+      )
+    ) {
+      filtered.push(item)
+    }
+  })
+  return filtered.slice(0, 8)
 }
 
 function guessKind(uri) {
@@ -1542,6 +1622,7 @@ export async function runSopWithWorkbuddy({
   const nextPending = nodeProgress.find(s => s.status === 'pending')
   if (nextPending) emitNodes(nextPending.uid, { status: 'active' })
 
+  let streamAcc = ''
   const result = await streamChat({
     backend,
     messages: [
@@ -1574,6 +1655,14 @@ export async function runSopWithWorkbuddy({
       }
     },
     onDelta: text => {
+      const piece = String(text || '')
+      if (piece) {
+        if (!streamAcc) streamAcc = piece
+        else if (piece.startsWith(streamAcc)) streamAcc = piece
+        else if (!streamAcc.endsWith(piece) && !streamAcc.includes(piece)) {
+          streamAcc += piece
+        }
+      }
       if (onDelta) onDelta(text)
     }
   })
@@ -1589,8 +1678,9 @@ export async function runSopWithWorkbuddy({
     sopTitle: ctx.sopTitle || sop.title || '',
     sopUid: ctx.sopUid || sop.uid || ''
   }
+  const replyForArtifacts = [reply, streamAcc].filter(Boolean).join('\n')
   let deliverables = extractDeliverablesFromReply(
-    reply,
+    replyForArtifacts,
     events,
     outputs,
     sopMeta
