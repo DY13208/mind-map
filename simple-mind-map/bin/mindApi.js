@@ -935,10 +935,17 @@ async function handleApi(req, res) {
         const key = name.toLowerCase()
         if (seen.has(key)) return
         seen.add(key)
-        items.push({ name, path: full })
+        let mtime = 0
+        try {
+          mtime = fs.statSync(full).mtimeMs || 0
+        } catch (e) {
+          mtime = 0
+        }
+        items.push({ name, path: full, mtime })
       })
     })
-    sendJson(res, 200, { items: items.slice(0, 20) })
+    items.sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
+    sendJson(res, 200, { items: items.slice(0, 200) })
     return true
   }
 
