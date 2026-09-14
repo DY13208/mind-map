@@ -1,4 +1,5 @@
 const crypto = require('crypto')
+const { countGraphDescendants } = require('./descendantCounts')
 const {
   applyPositionsToTree,
   comparePositions,
@@ -850,25 +851,30 @@ function collectTreeUids(tree, out = []) {
 }
 
 /**
- * Stamp authoritative live direct-child totals from room_nodes.
+ * Stamp authoritative direct-child and full descendant totals from room_nodes.
  * childCount must NEVER equal clipped children.length.
- * Uses one grouped query (not N+1).
+ * Read only live UID/parent edges once, then count bottom-up without depth caps.
  */
 async function stampAuthoritativeChildCounts(db, roomKey, tree) {
   const uids = Array.from(new Set(collectTreeUids(tree)))
   if (!uids.length) return { queryCount: 0, stamped: 0 }
   const res = await db.query(
-    `select parent_uid, count(*)::int as n
+    `select uid, parent_uid
      from room_nodes
      where room_key = $1
-       and deleted_at is null
-       and parent_uid = any($2::text[])
-     group by parent_uid`,
-    [roomKey, uids]
+       and deleted_at is null`,
+    [roomKey]
   )
-  const totals = new Map()
+  const childrenByUid = new Map(res.rows.map(row => [row.uid, []]))
   res.rows.forEach(row => {
-    totals.set(String(row.parent_uid), Number(row.n) || 0)
+    if (childrenByUid.has(row.parent_uid)) {
+      childrenByUid.get(row.parent_uid).push(row.uid)
+    }
+  })
+  const descendants = countGraphDescendants(childrenByUid)
+  const totals = new Map()
+  childrenByUid.forEach((children, uid) => {
+    totals.set(uid, children.length)
   })
   let stamped = 0
   const walk = node => {
@@ -876,6 +882,7 @@ async function stampAuthoritativeChildCounts(db, roomKey, tree) {
     const uid = String(node.data.uid || '')
     const total = totals.has(uid) ? totals.get(uid) : 0
     node.data.childCount = total
+    node.data.descendantCount = descendants.get(uid) || 0
     stamped += 1
     const loaded = Array.isArray(node.children) ? node.children.length : 0
     if (total > loaded) node.data.hasMore = true
@@ -964,26 +971,15 @@ async function readRoomSubtree(db, roomKey, uid, options = {}) {
     [roomKey, resolved]
   )
   const total = Number((totalRes.rows[0] && totalRes.rows[0].total) || 0)
-  const childUids = kids.rows.map(row => row.uid)
-  const childCounts = {}
-  if (childUids.length) {
-    const gc = await db.query(
-      `select parent_uid, count(*)::int as n
-       from room_nodes
-       where room_key = $1 and parent_uid = any($2::text[]) and deleted_at is null
-       group by parent_uid`,
-      [roomKey, childUids]
-    )
-    gc.rows.forEach(row => {
-      childCounts[row.parent_uid] = Number(row.n || 0)
-    })
-  }
   const children = kids.rows.map(row =>
-    childStubFromRow(row, childCounts[row.uid] || 0, version)
+    childStubFromRow(row, 0, version)
   )
+  const countTree = { data: { uid: resolved }, children }
+  await stampAuthoritativeChildCounts(db, roomKey, countTree)
   return {
     uid: resolved,
     total,
+    descendantCount: countTree.data.descendantCount,
     offset,
     has_more: offset + children.length < total,
     children,

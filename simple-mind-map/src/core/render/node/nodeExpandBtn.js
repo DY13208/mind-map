@@ -1,6 +1,7 @@
 import btnsSvg from '../../../svg/btns'
 import { SVG, G, Rect, Text } from '@svgdotjs/svg.js'
 import { isUndef } from '../../../utils'
+import nodeDescendantCount from '../../../utils/nodeDescendantCount'
 
 // Keep the count compact vertically while allowing larger values to stay legible.
 const getCountBadgeSize = (count, expandBtnSize) => {
@@ -57,38 +58,19 @@ function createExpandNodeContent() {
   )
 }
 function sumNode(data = []) {
-  // Count the complete descendant tree, rather than only the immediate
-  // children shown in the renderer. This also works for plain nodeData
-  // objects, whose children are not MindMapNode instances.
-  return data.reduce((total, cur) => {
-    const renderedChildren = Array.isArray(cur && cur.children) ? cur.children : []
-    const rawChildren = Array.isArray(cur && cur.nodeData && cur.nodeData.children)
-      ? cur.nodeData.children
-      : []
-    const children = renderedChildren.length > 0 ? renderedChildren : rawChildren
-    const nested = sumNode(children)
-    // childCount is retained for collapsed/lazy branches whose descendants
-    // are not materialized locally yet. Use it at every level, not only root.
-    const knownChildren = Number(cur && cur.childCount) ||
-      Number(cur && cur.nodeData && cur.nodeData.childCount) || 0
-    return total + 1 + Math.max(nested, knownChildren)
-  }, 0)
-}
-function findNodeData(root, uid) {
-  if (!root || !uid) return null
-  if (root.data && root.data.uid === uid) return root
-  const children = Array.isArray(root.children) ? root.children : []
-  for (const child of children) {
-    const found = findNodeData(child, uid)
-    if (found) return found
-  }
-  return null
+  return nodeDescendantCount.countDescendants(data)
 }
 //  创建或更新展开收缩按钮内容
 function updateExpandBtnNode() {
   let { expand } = this.getData()
+  const descendantCount = expand === false && this.mindMap.opt.isShowExpandNum
+    ? nodeDescendantCount.getDescendantCount(this) : null
   // 如果本次和上次的展开状态一样则返回
-  if (expand === this._lastExpandBtnType) return
+  // Collapsed badges must also refresh when descendants change remotely.
+  // Keep unchanged SVG elements mounted so mouseover cannot interrupt a click.
+  if (expand === this._lastExpandBtnType &&
+    descendantCount === this._lastExpandBtnCount) return
+  this._lastExpandBtnCount = descendantCount
   if (this._expandBtn) {
     this._expandBtn.clear()
   }
@@ -113,16 +95,7 @@ function updateExpandBtnNode() {
           color: expandBtnStyle.strokeColor
         })
         // 计算子节点数量
-        const uid = this.getData('uid')
-        const fullRoot = this.mindMap && typeof this.mindMap.getData === 'function'
-          ? this.mindMap.getData()
-          : null
-        const fullNode = findNodeData(fullRoot, uid)
-        let count = this.sumNode(
-          (fullNode && fullNode.children) || this.nodeData.children || []
-        )
-        const lazy = Number(this.getData('childCount')) || 0
-        if (lazy > count) count = lazy
+        let count = descendantCount
         if (typeof expandBtnNumHandler === 'function') {
           const res = expandBtnNumHandler(count, this)
           if (!isUndef(res)) {

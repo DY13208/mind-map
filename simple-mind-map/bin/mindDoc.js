@@ -1,4 +1,5 @@
 const crypto = require('crypto')
+const { countObjectDescendants } = require('./descendantCounts')
 const { applyObjectToDoc: applyCollaborativeObject } = require('./collabYjs')
 
 function createUid() {
@@ -163,7 +164,7 @@ function stripHeavyFields(data) {
   return next
 }
 
-function stubChild(obj, uid) {
+function stubChild(obj, uid, counts) {
   const cur = obj[uid]
   if (!cur) return null
   const kids = cur.children || []
@@ -172,7 +173,8 @@ function stubChild(obj, uid) {
       ...stripHeavyFields(clone(cur.data || {})),
       uid,
       expand: false,
-      childCount: kids.length
+      childCount: kids.length,
+      descendantCount: counts ? counts.get(uid) || 0 : undefined
     },
     children: []
   }
@@ -282,10 +284,12 @@ function buildPreview(obj, options = {}) {
 
 function stampPreviewMeta(tree, obj, version) {
   const ver = Number(version) || 0
+  const counts = countObjectDescendants(obj)
   const walk = node => {
     if (!node || !node.data) return
     const uid = node.data.uid
     const kids = (uid && obj && obj[uid] && obj[uid].children) || []
+    node.data.descendantCount = counts.get(uid) || 0
     node.data.childCount = Array.isArray(kids)
       ? kids.length
       : Array.isArray(node.children)
@@ -308,12 +312,14 @@ function subtreeChildren(obj, uid, options = {}) {
     Math.max(1, Number(options.limit) || MAX_SUBTREE_CHILDREN)
   )
   const slice = childUids.slice(offset, offset + limit)
+  const counts = countObjectDescendants(obj)
   return {
     uid,
     total: childUids.length,
+    descendantCount: counts.get(uid) || 0,
     offset,
     has_more: offset + slice.length < childUids.length,
-    children: slice.map(id => stubChild(obj, id)).filter(Boolean)
+    children: slice.map(id => stubChild(obj, id, counts)).filter(Boolean)
   }
 }
 
@@ -385,6 +391,7 @@ function versionedSubtree(obj, uid, options = {}) {
 
 function nodesByUids(obj, uids) {
   const list = Array.isArray(uids) ? uids : []
+  const counts = countObjectDescendants(obj)
   return list
     .slice(0, MAX_NODE_FETCH)
     .map(uid => {
@@ -396,7 +403,8 @@ function nodesByUids(obj, uids) {
         isRoot: !!cur.isRoot,
         data: {
           ...stripHeavyFields(clone(cur.data || {})),
-          childCount: children.length
+          childCount: children.length,
+          descendantCount: counts.get(uid) || 0
         },
         children
       }
@@ -440,8 +448,9 @@ function locateNode(obj, ref) {
     current = parentOf[current]
   }
   const nodes = {}
+  const counts = countObjectDescendants(obj)
   ancestors.forEach(id => {
-    const stub = stubChild(obj, id)
+    const stub = stubChild(obj, id, counts)
     if (!stub) return
     if (obj[id] && obj[id].isRoot) stub.data.expand = true
     nodes[id] = stub
