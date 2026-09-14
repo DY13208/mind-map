@@ -236,6 +236,11 @@ function requestWithUploadProgress(path, options = {}) {
 export function listFiles(extra = {}) {
   const params = new URLSearchParams()
   if (extra.q) params.set('q', extra.q)
+  // `null` represents the root directory.  Keep the key in that case so the
+  // server can distinguish it from an unfiltered list request.
+  if (Object.prototype.hasOwnProperty.call(extra, 'folderId')) {
+    params.set('folderId', extra.folderId == null ? '' : String(extra.folderId))
+  }
   if (extra.limit != null) params.set('limit', String(extra.limit))
   if (extra.offset != null) params.set('offset', String(extra.offset))
   if (extra.cursor) params.set('cursor', String(extra.cursor))

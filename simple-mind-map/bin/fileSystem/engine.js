@@ -302,6 +302,13 @@ function createFileSystem(options = {}) {
 
   async function listRoomsPg(opts) {
     store.resetQueryCount && store.resetQueryCount()
+    // PG 查询使用 offset 分页。游标同时携带已读取数量，避免第二页仍以
+    // offset=0 查询而反复返回第一页；保留旧游标的兼容回退。
+    const cursor = decodeCursor(opts.cursor)
+    const cursorOffset = Number(cursor && cursor.offset)
+    const pageOffset = Number.isSafeInteger(cursorOffset) && cursorOffset >= 0
+      ? cursorOffset
+      : opts.offset
     const params = []
     const kind = opts.listKind || 'files'
     let where = 't.room_key is null'
@@ -400,7 +407,7 @@ function createFileSystem(options = {}) {
       params
     )
     const listParams = params.slice()
-    listParams.push(opts.limit, opts.offset)
+    listParams.push(opts.limit, pageOffset)
     const roleJoin = userParam
       ? `left join room_members my on my.room_key = r.room_key and my.user_id = $${userParam}`
       : ''
@@ -442,10 +449,14 @@ function createFileSystem(options = {}) {
       list: rows.map(row => withAccess(row, opts.userId, opts.bypass)),
       total: Number((countRes.rows[0] && countRes.rows[0].total) || 0),
       limit: opts.limit,
-      offset: opts.offset,
+      offset: pageOffset,
       nextCursor:
         rows.length === opts.limit && last
-          ? encodeCursor({ roomKey: last.room_key, sort: opts.sort })
+          ? encodeCursor({
+              roomKey: last.room_key,
+              sort: opts.sort,
+              offset: pageOffset + rows.length
+            })
           : null,
       queryCount: store.queryCount
     }
@@ -608,6 +619,41 @@ function createFileSystem(options = {}) {
     const rows = await store.listFolders({ userId, bypass })
     let counts = {}
     if (store.kind === 'memory') counts = await store.roomCountsByFolder()
+    // room_count 是存储层返回的直接脑图数。目录展示需要包含后代目录，
+    // 在此统一向上聚合，保证内存和 PG 存储的语义一致。
+    const foldersById = new Map()
+    const childrenByParent = new Map()
+    const directCounts = new Map()
+    rows.forEach(row => {
+      if (!row || !row.id) return
+      const id = String(row.id)
+      const parentId = row.parent_id || row.parentId
+      foldersById.set(id, row)
+      directCounts.set(
+        id,
+        Number(row.room_count != null ? row.room_count : counts[id] || 0)
+      )
+      if (parentId != null && parentId !== '') {
+        const key = String(parentId)
+        if (!childrenByParent.has(key)) childrenByParent.set(key, [])
+        childrenByParent.get(key).push(id)
+      }
+    })
+    const descendantCounts = new Map()
+    const countFolderTree = (id, visiting = new Set()) => {
+      if (descendantCounts.has(id)) return descendantCounts.get(id)
+      // 正常数据不会成环；保护异常数据，避免目录接口被单条坏记录阻塞。
+      if (visiting.has(id)) return 0
+      const nextVisiting = new Set(visiting)
+      nextVisiting.add(id)
+      const total = (directCounts.get(id) || 0) + (childrenByParent.get(id) || []).reduce(
+        (sum, childId) => sum + countFolderTree(childId, nextVisiting),
+        0
+      )
+      descendantCounts.set(id, total)
+      return total
+    }
+    foldersById.forEach((_, id) => countFolderTree(id))
     let accessibleFolderIds = null
     if (!bypass && store.kind === 'memory') {
       const rooms = await store.listRooms({})
@@ -631,7 +677,7 @@ function createFileSystem(options = {}) {
       list: visible.map(row =>
         publicFolder({
           ...row,
-          room_count: row.room_count != null ? row.room_count : counts[row.id] || 0
+          room_count: descendantCounts.get(String(row.id)) || 0
         })
       )
     }

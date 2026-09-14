@@ -27,7 +27,7 @@
               size="small"
               clearable
               prefix-icon="el-icon-search"
-              placeholder="搜索文件夹或脑图"
+              placeholder="搜索文件夹或脑图（脑图搜索最多显示 100 条）"
               aria-label="搜索文件夹或脑图"
             ></el-input>
             <div v-if="spacesLoading" class="spaceDirectoryLoading">
@@ -40,6 +40,8 @@
               :data="spaceDirectoryOptions"
               node-key="value"
               :props="spaceDirectoryTreeProps"
+              lazy
+              :load="loadSpaceDirectoryNode"
               :filter-node-method="filterSpaceDirectoryNode"
               :expand-on-click-node="false"
               :highlight-current="true"
@@ -48,11 +50,18 @@
             >
               <span
                 slot-scope="{ data }"
-                class="spaceDirectoryOption"
+                :class="['spaceDirectoryOption', `spaceDirectoryOption--${data.kind}`]"
                 :title="spaceDirectoryOptionTitle(data)"
               >
                 <i
-                  :class="data.kind === 'folder' ? 'el-icon-folder-opened' : 'el-icon-document'"
+                  v-if="data.kind !== 'more'"
+                  :class="
+                    data.kind === 'folder'
+                      ? 'el-icon-folder-opened'
+                      : data.kind === 'more'
+                        ? 'el-icon-more'
+                        : 'el-icon-document'
+                  "
                   aria-hidden="true"
                 ></i>
                 <span class="spaceDirectoryName">{{ data.label }}</span>
@@ -896,7 +905,7 @@ import { getCurrentUser } from '@/utils/auth'
 import { roomFromLocation } from '@/utils/roomLocation'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
 import {
-  listAllAccessibleFiles,
+  listFiles,
   getFileSubtree,
   getFileExport,
   getFileNodes,
@@ -1039,11 +1048,16 @@ export default {
       roomKey: '',
       spaceOptions: [],
       folders: [],
+      spaceDirectorySearchResults: [],
+      spaceDirectorySearchLoading: false,
+      spaceDirectorySearchTimer: null,
+      spaceDirectorySearchRequestId: 0,
       spaceDirectoryVisible: false,
       spaceDirectoryQuery: '',
       spaceDirectoryTreeProps: {
         children: 'children',
-        label: 'label'
+        label: 'label',
+        isLeaf: 'isLeaf'
       },
       dialogVisible: false,
       dialogTitle: '',
@@ -1134,6 +1148,17 @@ export default {
       }
     },
     spaceDirectoryOptions() {
+      if (this.spaceDirectoryQuery) {
+        return [
+          {
+            value: 'folder:search-results',
+            label: this.spaceDirectorySearchLoading ? '正在搜索…' : '搜索结果',
+            kind: 'search',
+            isLeaf: !this.spaceDirectorySearchResults.length,
+            children: this.spaceDirectorySearchResults
+          }
+        ]
+      }
       return this.buildSpaceDirectoryOptions()
     },
     selectedSpaceDirectoryLabel() {
@@ -1389,10 +1414,7 @@ export default {
       })
     },
     spaceDirectoryQuery() {
-      this.$nextTick(() => {
-        const tree = this.$refs.spaceDirectoryTree
-        if (tree) tree.filter(this.spaceDirectoryQuery)
-      })
+      this.scheduleSpaceDirectorySearch()
     },
     '$route.query.room'(val) {
       const next = String(val || '').trim()
@@ -1590,27 +1612,9 @@ export default {
     },
     buildSpaceDirectoryOptions() {
       const folders = Array.isArray(this.folders) ? this.folders : []
-      const rooms = Array.isArray(this.spaceOptions) ? this.spaceOptions : []
       const folderById = new Map()
       folders.forEach(folder => {
         if (folder && folder.id) folderById.set(String(folder.id), folder)
-      })
-
-      const childFolders = new Map()
-      folders.forEach(folder => {
-        if (!folder || !folder.id) return
-        const parentId = String(folder.parentId || folder.parent_id || '')
-        const key = parentId && folderById.has(parentId) ? parentId : ''
-        if (!childFolders.has(key)) childFolders.set(key, [])
-        childFolders.get(key).push(folder)
-      })
-
-      const roomsByFolder = new Map()
-      rooms.forEach(room => {
-        const rawFolderId = String(room.folderId || room.folder_id || '')
-        const folderId = rawFolderId && folderById.has(rawFolderId) ? rawFolderId : ''
-        if (!roomsByFolder.has(folderId)) roomsByFolder.set(folderId, [])
-        roomsByFolder.get(folderId).push(room)
       })
 
       const byName = (a, b) =>
@@ -1618,83 +1622,160 @@ export default {
           String((b && (b.name || b.title || b.label)) || ''),
           'zh-CN'
         )
-      const toRoomOption = room => ({
-        value: room.room_key,
-        label: room.title || room.label || room.room_key,
-        kind: 'room',
-        roomKey: room.room_key,
-        role: room.role,
-        canEdit: room.canEdit,
-        accessLabel: room.accessLabel || this.spaceAccessLabel(room),
-        ownerName: room.ownerName || this.spaceOwnerName(room)
-      })
-
-      const buildFolder = (folder, ancestors = new Set()) => {
+      const buildFolder = folder => {
         const id = String(folder.id)
-        if (ancestors.has(id)) return null
-        const nextAncestors = new Set(ancestors)
-        nextAncestors.add(id)
-        const folderChildren = (childFolders.get(id) || [])
-          .slice()
-          .sort(byName)
-          .map(child => buildFolder(child, nextAncestors))
-          .filter(Boolean)
-        const roomChildren = (roomsByFolder.get(id) || [])
-          .slice()
-          .sort(byName)
-          .map(toRoomOption)
-        const children = [...folderChildren, ...roomChildren]
-        if (!children.length) return null
-        const roomCount = children.reduce(
-          (sum, child) => sum + (child.kind === 'room' ? 1 : child.roomCount || 0),
-          0
+        const hasChildFolder = folders.some(
+          item => item && String(item.parentId || item.parent_id || '') === id
         )
         return {
           value: `folder:${id}`,
           label: folder.name || '未命名文件夹',
           kind: 'folder',
           folderId: id,
-          roomCount,
-          children
+          roomCount: Number(folder.roomCount || 0),
+          // Folder nodes are intentionally empty at first. Element UI invokes
+          // loadSpaceDirectoryNode only when the user expands one.
+          isLeaf: !hasChildFolder && !Number(folder.roomCount || 0)
         }
       }
 
-      const tree = (childFolders.get('') || [])
-        .slice()
-        .sort(byName)
-        .map(folder => buildFolder(folder))
-        .filter(Boolean)
-      const rootRooms = (roomsByFolder.get('') || [])
-        .slice()
-        .sort(byName)
-        .map(toRoomOption)
-      if (rootRooms.length) {
-        tree.push({
-          value: 'folder:ungrouped',
-          label: '未分组',
-          kind: 'folder',
-          roomCount: rootRooms.length,
-          children: rootRooms
+      const tree = folders
+        .filter(folder => {
+          const parentId = String((folder && (folder.parentId || folder.parent_id)) || '')
+          return !parentId || !folderById.has(parentId)
         })
-      }
+        .slice()
+        .sort(byName)
+        .map(buildFolder)
+      // The root is a virtual folder. Its rooms are fetched only after it is
+      // expanded, rather than during SOP page initialization.
+      tree.push({
+        value: 'folder:ungrouped',
+        label: '未分组',
+        kind: 'folder',
+        folderId: null,
+        roomCount: null,
+        isLeaf: false,
+        children: []
+      })
       return tree
     },
     async loadSpaces() {
       this.spacesLoading = true
       try {
-        const [data, folders] = await Promise.all([
-          listAllAccessibleFiles({ limit: 100 }),
-          folderService.listFolders().catch(() => [])
-        ])
+        const folders = await folderService.listFolders().catch(() => [])
         this.folders = Array.isArray(folders) ? folders : []
-        this.mergeSpaceOptions((data && data.list) || [], { reset: true })
+        this.$nextTick(() => {
+          const tree = this.$refs.spaceDirectoryTree
+          if (tree && tree.store) tree.store.setData(this.spaceDirectoryOptions)
+        })
       } catch (err) {
         this.folders = []
-        this.spaceOptions = []
-        this.ensureCurrentSpaceOption()
       } finally {
         this.spacesLoading = false
       }
+    },
+    async loadSpaceDirectoryNode(node, resolve) {
+      // Element UI calls `load` once for its invisible root node as well.
+      // Root data is supplied after the folder request has completed.
+      if (node && node.level === 0) return resolve(this.spaceDirectoryOptions)
+      const data = (node && node.data) || {}
+      // 搜索结果同样经过懒加载树：仅在“搜索结果”根节点展开时，才把
+      // 已由搜索接口返回的命中项注入树中。
+      if (data.kind === 'search') return resolve(data.children || [])
+      if (data.kind !== 'folder') return resolve([])
+      try {
+        const result = await listFiles({
+          folderId: data.folderId,
+          limit: 100
+        })
+        const folderId = String(data.folderId || '')
+        const folderChildren = data.folderId == null
+          ? []
+          : this.folders
+              .filter(item => item && String(item.parentId || item.parent_id || '') === folderId)
+              .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN'))
+              .map(folder => ({
+                value: `folder:${folder.id}`,
+                label: folder.name || '未命名文件夹',
+                kind: 'folder',
+                folderId: String(folder.id),
+                roomCount: Number(folder.roomCount || 0),
+                isLeaf: !Number(folder.roomCount || 0) && !this.folders.some(item => item && String(item.parentId || item.parent_id || '') === String(folder.id))
+              }))
+        const rooms = ((result && result.list) || []).map(this.mapSpaceOption)
+        // 同一目录的脑图排在子文件夹之前：展开子文件夹后，它自己的
+        // “加载更多”不会插进父目录的脑图列表中。
+        const roomNodes = rooms.map(room => ({
+          value: room.room_key,
+          label: room.title || room.label || room.room_key,
+          kind: 'room',
+          isLeaf: true,
+          roomKey: room.room_key,
+          role: room.role,
+          canEdit: room.canEdit,
+          accessLabel: room.accessLabel,
+          ownerName: room.ownerName
+        }))
+        const moreNode = result && result.nextCursor
+          ? [{
+              value: `more:${data.value}:${result.nextCursor}`,
+              label: '加载更多脑图',
+              kind: 'more',
+              isLeaf: true,
+              folderId: data.folderId,
+              cursor: result.nextCursor
+            }]
+          : []
+        // 分页操作紧跟本目录脑图，并在子文件夹之前，避免被误认为
+        // 是子层级的分页入口。
+        const children = roomNodes.concat(moreNode, folderChildren)
+        resolve(children)
+      } catch (err) {
+        this.$message.error('目录加载失败，请重试')
+        resolve([])
+      }
+    },
+    scheduleSpaceDirectorySearch() {
+      if (this.spaceDirectorySearchTimer) clearTimeout(this.spaceDirectorySearchTimer)
+      const requestId = ++this.spaceDirectorySearchRequestId
+      const keyword = String(this.spaceDirectoryQuery || '').trim()
+      if (!keyword) {
+        this.spaceDirectorySearchResults = []
+        this.spaceDirectorySearchLoading = false
+        this.refreshSpaceDirectorySearchTree()
+        return
+      }
+      this.spaceDirectorySearchLoading = true
+      this.spaceDirectorySearchTimer = setTimeout(async () => {
+        try {
+          const result = await listFiles({ q: keyword, limit: 100 })
+          if (requestId !== this.spaceDirectorySearchRequestId) return
+          this.spaceDirectorySearchResults = ((result && result.list) || []).map(room => {
+            const option = this.mapSpaceOption(room)
+            return { ...option, value: option.room_key, kind: 'room', isLeaf: true, roomKey: option.room_key }
+          })
+        } catch (err) {
+          if (requestId !== this.spaceDirectorySearchRequestId) return
+          this.spaceDirectorySearchResults = []
+        } finally {
+          if (requestId === this.spaceDirectorySearchRequestId) {
+            this.spaceDirectorySearchLoading = false
+            this.refreshSpaceDirectorySearchTree()
+          }
+        }
+      }, 250)
+    },
+    refreshSpaceDirectorySearchTree() {
+      this.$nextTick(() => {
+        const tree = this.$refs.spaceDirectoryTree
+        if (!tree || !tree.store) return
+        tree.store.setData(this.spaceDirectoryOptions)
+        if (!this.spaceDirectoryQuery) return
+        const results = tree.getNode('folder:search-results')
+        if (results && !results.isLeaf) results.expand()
+        tree.filter(this.spaceDirectoryQuery)
+      })
     },
     findSpaceDirectoryPath(value, nodes = this.spaceDirectoryOptions, path = []) {
       const target = String(value || '').trim()
@@ -1710,6 +1791,8 @@ export default {
     filterSpaceDirectoryNode(query, data) {
       const keyword = String(query || '').trim().toLowerCase()
       if (!keyword) return true
+      // 虚拟根节点仅承载命中项，不能因自身文案不匹配而把整组结果过滤掉。
+      if (data && data.kind === 'search') return true
       return [data && data.label, data && data.roomKey]
         .filter(Boolean)
         .some(value => String(value).toLowerCase().includes(keyword))
@@ -1735,6 +1818,11 @@ export default {
     },
     onSpaceDirectoryNodeClick(data, node) {
       if (!data) return
+      if (data.kind === 'more') {
+        this.loadMoreSpaceDirectoryRooms(data, node)
+        return
+      }
+      if (data.kind === 'search') return
       if (data.kind === 'folder') {
         if (node && node.expanded) node.collapse()
         else if (node) node.expand()
@@ -1745,6 +1833,31 @@ export default {
       this.roomKey = room
       this.spaceDirectoryVisible = false
       this.onSpaceChange(room)
+    },
+    async loadMoreSpaceDirectoryRooms(data, node) {
+      if (!node || node.loading) return
+      node.loading = true
+      try {
+        const result = await listFiles({ folderId: data.folderId, cursor: data.cursor, limit: 100 })
+        const parent = node.parent
+        let insertAt = parent.childNodes.indexOf(node)
+        parent.removeChild(node)
+        const rooms = ((result && result.list) || []).map(room => {
+          const option = this.mapSpaceOption(room)
+          return { ...option, value: option.room_key, kind: 'room', isLeaf: true, roomKey: option.room_key }
+        })
+        const next = result && result.nextCursor
+          ? [{ ...data, value: `more:${parent.data.value}:${result.nextCursor}`, cursor: result.nextCursor }]
+          : []
+        rooms.concat(next).forEach(item => {
+          parent.insertChild({ data: item }, insertAt)
+          insertAt += 1
+        })
+      } catch (err) {
+        this.$message.error('继续加载目录失败，请重试')
+      } finally {
+        node.loading = false
+      }
     },
     onSpaceChange(val) {
       const room = String(val || '').trim()
@@ -5557,6 +5670,13 @@ body.isDark .sopMindDialog,
     color: #809087;
   }
 
+  // Element UI 已依据 isLeaf 标记出叶节点；只隐藏该类节点预留的展开位，
+  // 不通过后代内容判断，从而不会误伤包含脑图的文件夹节点。
+  .el-tree-node__expand-icon.is-leaf {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
   .spaceDirectoryOption {
     width: 100%;
     min-width: 0;
@@ -5586,6 +5706,27 @@ body.isDark .sopMindDialog,
     color: #8a9891;
     font-size: 12px;
     white-space: nowrap;
+  }
+
+  // “加载更多”是列表的延续操作：与当前层级同宽、可轻松点击，
+  // 默认保持次级视觉，避免和文件夹或脑图节点争夺注意力。
+  .spaceDirectoryOption--more {
+    display: block;
+    margin: 0;
+    padding: 0 4px;
+    background: transparent;
+    color: #087854;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 38px;
+    cursor: pointer;
+    transition: color 160ms ease;
+  }
+
+  .el-tree-node__content:hover .spaceDirectoryOption--more,
+  .el-tree-node.is-current > .el-tree-node__content .spaceDirectoryOption--more {
+    color: #056747;
+    text-decoration: underline;
   }
 
   .el-tree-node.is-current > .el-tree-node__content .spaceDirectoryName {
