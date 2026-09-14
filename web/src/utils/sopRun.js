@@ -322,7 +322,7 @@ function buildSystemPrompt() {
 - name: D2_采购目标_2026-09-08_1022.html
   path: D:\\\\path\\\\to\\\\output\\\\D2_采购目标_2026-09-08_1022.html
 8. 禁止把过程数据、中间 JSON、MCP/工具临时路径、stdout、schema 片段、COS 临时对象写入产物清单。
-9. 最终文件请落到项目 output 目录；不要复用或改写其它 SOP 刚生成的文件。
+9. 最终文件必须写到 /home/node/.openclaw/workspace/output/（这是可预览的 output 目录）；不要写到别的临时目录，也不要复用其它 SOP 刚生成的文件。
 10. 同时给出：是否完成、核心判断一句话、单页内容要点、数据来源。
 11. 不要修改 SOP 本体结构；过程日志不必写入导图。
 12. 缺关键数据时说明缺什么，仍尽量用已有数据给出可执行结论，但不要伪造文件。`
@@ -589,7 +589,10 @@ function parseDeliverableSection(chunk, push) {
     pendingPath = ''
   }
   lines.forEach(raw => {
-    const line = raw.replace(/^[-*•]\s*/, '').trim()
+    const line = raw
+      .replace(/^[-*•]\s*/, '')
+      .replace(/\*\*/g, '')
+      .trim()
     if (!line) {
       flush()
       return
@@ -674,29 +677,35 @@ export function extractDeliverablesFromReply(
     })
   }
 
-  // 清单为空时，才从正文（仍不含事件）兜底扫最终文件
-  if (!out.some(item => item.kind !== 'link')) {
-    const winPathRe =
-      /([A-Za-z]:[\\/][^\s"'<>|]+\.(html?|xlsx?|docx?|pdf|md|csv))/gi
-    let m
-    while ((m = winPathRe.exec(reply))) {
-      push({ name: m[1].split(/[\\/]/).pop(), uri_or_path: m[1], kind: 'file' })
-    }
-    const urlRe =
-      /https?:\/\/[^\s)\]>`"'，,]+\.(html?|xlsx?|docx?|pdf|md|csv)(?:\?[^\s)\]>`"'，,]*)?/gi
-    while ((m = urlRe.exec(reply))) {
-      push({
-        name: m[0].split('/').pop().split('?')[0] || m[0],
-        uri_or_path: m[0],
-        kind: 'link'
-      })
-    }
+  // 始终扫绝对路径。OpenClaw 常把文件写在容器内 /home/node/.../output/
+  const absFileRe =
+    /([A-Za-z]:[\\/][^\s"'<>|]+\.(html?|xlsx?|docx?|pdf|md|csv)|\/(?:[\w.\u4e00-\u9fff-]+\/)+[^\s"'<>|/]+\.(html?|xlsx?|docx?|pdf|md|csv))/gi
+  let abs
+  while ((abs = absFileRe.exec(reply))) {
+    const uri = abs[1].replace(/[，。；;）)]+$/g, '')
+    if (!/[\\/]output[\\/]/i.test(uri)) continue
+    push({ name: uri.split(/[\\/]/).pop(), uri_or_path: uri, kind: 'file' })
+  }
+  const urlRe =
+    /https?:\/\/[^\s)\]>`"'，,]+\.(html?|xlsx?|docx?|pdf|md|csv)(?:\?[^\s)\]>`"'，,]*)?/gi
+  let urlHit
+  while ((urlHit = urlRe.exec(reply))) {
+    push({
+      name: urlHit[0].split('/').pop().split('?')[0] || urlHit[0],
+      uri_or_path: urlHit[0],
+      kind: 'link'
+    })
   }
 
   void events // 保留签名兼容，刻意不扫事件正文
   const filtered = filterDeliverablesByOutputs(out, outputs, sopMeta)
   const shares = out.filter(
-    item => item && isShareDeliverableUri(item.uri_or_path)
+    item =>
+      item &&
+      (isShareDeliverableUri(item.uri_or_path) ||
+        /[\\/]output[\\/][^\s"'<>|/]+\.(html?|xlsx?|docx?|pdf|md|csv)$/i.test(
+          item.uri_or_path || ''
+        ))
   )
   shares.forEach(item => {
     if (

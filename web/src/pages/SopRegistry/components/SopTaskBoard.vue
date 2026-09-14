@@ -526,6 +526,13 @@ export default {
   flex: 1;
   min-height: 280px;
   overflow: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
   padding: 14px 16px;
   background: #f7f8f9;
   border-radius: 12px;
@@ -557,6 +564,13 @@ export default {
     padding: 12px;
     border-radius: 10px;
     overflow: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  /deep/ pre::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
   }
   /deep/ code {
     font-family: Consolas, 'Courier New', monospace;
