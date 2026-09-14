@@ -76,38 +76,45 @@
           <span class="liveStatus">{{ shortStatus(selectedJob) }}</span>
         </div>
 
-        <!-- 上：执行过程（完成/等待/停止均保留） -->
-        <section class="execPanel">
-          <div class="sectionTitle">执行过程</div>
-          <div class="toolLine" v-if="latestToolHint">{{ latestToolHint }}</div>
-          <pre class="streamText">{{
-            selectedJob.streamText ||
-              selectedJob.progressText ||
-              '（等待输出…）'
-          }}</pre>
-        </section>
-
-        <!-- 下：节点流 -->
+        <!-- 上：节点流 -->
         <section class="nodePanel">
           <div class="sectionTitle">
             节点流
             <span class="hint">双击节点查看详情</span>
           </div>
-          <ul class="nodeFlow" v-if="nodeSteps.length">
-            <li
-              v-for="step in nodeSteps"
-              :key="step.uid"
-              class="nodeStep"
-              :class="[step.status, { selected: detailNode && detailNode.uid === step.uid }]"
-              :style="{ paddingLeft: 12 + (step.depth || 0) * 14 + 'px' }"
-              @dblclick="openNodeDetail(step)"
-            >
-              <span class="dot" aria-hidden="true"></span>
-              <span class="nodeTitle">{{ step.title }}</span>
-              <span class="nodeState">{{ stepStatusLabel(step.status) }}</span>
-            </li>
-          </ul>
+          <div class="flowScroll" v-if="nodeSteps.length">
+            <ol class="flowRail">
+              <li
+                v-for="(step, index) in nodeSteps"
+                :key="step.uid"
+                class="flowNode"
+                :class="[step.status, { selected: detailNode && detailNode.uid === step.uid }]"
+                :title="step.title"
+                @dblclick="openNodeDetail(step)"
+              >
+                <span class="flowLabel">{{ step.title }}</span>
+                <span class="flowTrack">
+                  <span
+                    class="flowLine before"
+                    :class="index === 0 ? 'hidden' : step.status"
+                  ></span>
+                  <span class="dot" aria-hidden="true"></span>
+                  <span
+                    class="flowLine after"
+                    :class="index === nodeSteps.length - 1 ? 'hidden' : step.status"
+                  ></span>
+                </span>
+              </li>
+            </ol>
+          </div>
           <div v-else class="nodeEmpty">暂无节点步骤（运行后根据 SOP 子树生成）</div>
+        </section>
+
+        <!-- 下：执行日志 -->
+        <section class="execPanel">
+          <div class="sectionTitle">执行过程</div>
+          <div class="toolLine" v-if="latestToolHint">{{ latestToolHint }}</div>
+          <div class="streamMd" v-html="renderedStream"></div>
         </section>
       </div>
       <div class="taskDetail empty" v-else>
@@ -141,6 +148,14 @@
 </template>
 
 <script>
+import MarkdownIt from 'markdown-it'
+
+const streamMd = new MarkdownIt({
+  html: false,
+  linkify: true,
+  breaks: true
+})
+
 export default {
   name: 'SopTaskBoard',
   props: {
@@ -196,6 +211,15 @@ export default {
       if (!log.length) return ''
       const last = log[log.length - 1]
       return last && last.label ? `最近：${last.label}` : ''
+    },
+    renderedStream() {
+      const text = String(
+        (this.selectedJob &&
+          (this.selectedJob.streamText || this.selectedJob.progressText)) ||
+          ''
+      ).trim()
+      if (!text) return '<p class="streamPlaceholder">（等待输出…）</p>'
+      return streamMd.render(text)
     }
   },
   methods: {
@@ -350,8 +374,8 @@ export default {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
-  padding: 12px 14px 20px;
+  overflow: hidden;
+  padding: 12px 14px 16px;
   &.empty {
     color: #999;
     align-items: center;
@@ -381,81 +405,169 @@ export default {
     font-size: 12px;
   }
 }
+.nodePanel {
+  flex: 0 0 auto;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eef0f2;
+}
+.flowScroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 2px 8px;
+}
+.flowRail {
+  display: flex;
+  align-items: flex-end;
+  list-style: none;
+  margin: 0;
+  padding: 0 8px 4px;
+  min-width: min-content;
+}
+.flowNode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 108px;
+  flex: 0 0 108px;
+  cursor: pointer;
+  user-select: none;
+  &.selected .flowLabel {
+    color: #1d4ed8;
+    font-weight: 600;
+  }
+}
+.flowLabel {
+  height: 36px;
+  margin-bottom: 8px;
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+  color: #374151;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.flowTrack {
+  position: relative;
+  width: 100%;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.flowLine {
+  position: absolute;
+  top: 7px;
+  height: 2px;
+  width: 50%;
+  background: #d1d5db;
+  &.before {
+    left: 0;
+  }
+  &.after {
+    right: 0;
+  }
+  &.hidden {
+    visibility: hidden;
+  }
+  &.done {
+    background: #16a34a;
+  }
+  &.active {
+    background: #2563eb;
+  }
+  &.waiting {
+    background: #d97706;
+  }
+  &.failed,
+  &.stopped {
+    background: #dc2626;
+  }
+}
+.flowNode .dot {
+  position: relative;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #d1d5db;
+  box-shadow: 0 0 0 3px #fff;
+}
+.flowNode.done .dot {
+  background: #16a34a;
+}
+.flowNode.active .dot {
+  background: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+}
+.flowNode.waiting .dot {
+  background: #d97706;
+}
+.flowNode.failed .dot,
+.flowNode.stopped .dot {
+  background: #dc2626;
+}
 .execPanel {
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #f0f0f0;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .toolLine {
   font-size: 12px;
   color: #666;
   margin-bottom: 6px;
+  flex-shrink: 0;
 }
-.streamText {
-  margin: 0;
-  max-height: 240px;
+.streamMd {
+  flex: 1;
+  min-height: 280px;
   overflow: auto;
-  padding: 10px 12px;
-  background: #f6f7f8;
-  border-radius: 10px;
-  font-size: 12px;
-  line-height: 1.55;
-  white-space: pre-wrap;
+  padding: 14px 16px;
+  background: #f7f8f9;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #1f2937;
   word-break: break-word;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-.nodeFlow {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.nodeStep {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  cursor: pointer;
-  user-select: none;
-  &:hover {
-    background: #f5f5f5;
+  /deep/ p {
+    margin: 0 0 0.75em;
   }
-  &.selected {
-    background: #eef2ff;
+  /deep/ p:last-child {
+    margin-bottom: 0;
   }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #d1d5db;
-    flex-shrink: 0;
+  /deep/ h1,
+  /deep/ h2,
+  /deep/ h3,
+  /deep/ h4 {
+    margin: 0.9em 0 0.4em;
+    font-size: 15px;
+    line-height: 1.4;
   }
-  &.active .dot {
-    background: #2563eb;
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+  /deep/ ul,
+  /deep/ ol {
+    margin: 0.3em 0 0.8em;
+    padding-left: 1.3em;
   }
-  &.done .dot {
-    background: #16a34a;
+  /deep/ pre {
+    background: #fff;
+    padding: 12px;
+    border-radius: 10px;
+    overflow: auto;
   }
-  &.waiting .dot {
-    background: #d97706;
-  }
-  &.failed .dot,
-  &.stopped .dot {
-    background: #dc2626;
-  }
-  .nodeTitle {
-    flex: 1;
+  /deep/ code {
+    font-family: Consolas, 'Courier New', monospace;
     font-size: 13px;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
-  .nodeState {
-    font-size: 12px;
-    color: #888;
-    flex-shrink: 0;
+  /deep/ a {
+    color: #087854;
+  }
+  /deep/ .streamPlaceholder {
+    margin: 0;
+    color: #9ca3af;
   }
 }
 .nodeEmpty {
