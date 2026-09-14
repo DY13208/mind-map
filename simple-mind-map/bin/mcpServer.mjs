@@ -18,6 +18,13 @@ const API = (process.env.MIND_MAP_API || 'http://127.0.0.1:1234').replace(
 const MCP_PORT = Number(process.env.MCP_PORT || 3847)
 const MCP_HOST = process.env.MCP_HOST || '0.0.0.0'
 const MCP_TOKEN = process.env.MCP_TOKEN || ''
+// Collab V2 requireClientId rejects empty clientId on all writes; MCP tools
+// historically only sent business fields. Stable per-process id keeps ops
+// attributable without forcing every tool payload to pass clientId.
+const MCP_CLIENT_ID =
+  String(process.env.MCP_CLIENT_ID || '')
+    .trim()
+    .slice(0, 160) || `mcp-${randomUUID()}`
 
 function ok(data) {
   return {
@@ -38,6 +45,7 @@ async function apiRequest(path, options = {}) {
     ...rest,
     headers: {
       'Content-Type': 'application/json',
+      'x-client-id': MCP_CLIENT_ID,
       ...(authorization
         ? { Authorization: authorization }
         : MCP_TOKEN
