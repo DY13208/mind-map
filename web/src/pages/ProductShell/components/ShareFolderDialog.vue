@@ -8,12 +8,13 @@
   >
     <div v-loading="loading || busy" class="permissionDialogBody">
       <header class="permissionHeader">
-        <div class="folderIcon"><i class="el-icon-folder" /></div>
+        <div :class="['resourceIcon', { room: isRoom }]">
+          <i :class="isRoom ? 'el-icon-document' : 'el-icon-folder'" />
+        </div>
         <div>
-          <h2>文件夹权限</h2>
+          <h2>{{ resourceTitle }}</h2>
           <p>
-            <strong>{{ folder ? folder.name : '' }}</strong> ·
-            权限将应用于文件夹内现有及后续脑图
+            <strong>{{ resourceName }}</strong> · {{ resourceDescription }}
           </p>
         </div>
         <button
@@ -166,7 +167,7 @@
               ><el-radio-button label="Editor"
                 ><strong>可编辑</strong
                 ><small>查看并编辑</small></el-radio-button
-              ><el-radio-button label="Manager"
+              ><el-radio-button v-if="!isRoom" label="Manager"
                 ><strong>可管理</strong
                 ><small>管理成员权限</small></el-radio-button
               ></el-radio-group
@@ -233,6 +234,7 @@
                   ><el-option label="可查看" value="Viewer"/><el-option
                     label="可编辑"
                     value="Editor"/><el-option
+                    v-if="!isRoom"
                     label="可管理"
                     value="Manager"/></el-select
                 ><button
@@ -263,7 +265,7 @@
     </div>
     <span slot="footer" class="permissionFooter"
       ><span class="footerHint"
-        ><i class="el-icon-success" /> 权限变更实时生效</span
+        ><i class="el-icon-success" /> {{ resourceLabel }}权限变更实时生效</span
       ><span
         ><el-button @click="shown = false">取消</el-button
         ><el-button
@@ -280,10 +282,20 @@
 
 <script>
 import folderService from '@/services/folderService'
+import shareService from '@/services/shareService'
 import teamService from '@/services/teamService'
 export default {
   name: 'ShareFolderDialog',
-  props: { visible: Boolean, folder: Object },
+  props: {
+    visible: Boolean,
+    folder: Object,
+    room: Object,
+    resourceType: {
+      type: String,
+      default: 'folder',
+      validator: value => ['folder', 'room'].includes(value)
+    }
+  },
   data: () => ({
     members: [],
     contacts: [],
@@ -292,6 +304,7 @@ export default {
     departmentTotals: {},
     loadedDepartmentIds: [],
     loadingDepartmentIds: [],
+    departmentLoadTasks: {},
     query: '',
     searchTimer: null,
     searching: false,
@@ -315,8 +328,30 @@ export default {
         this.$emit('update:visible', value)
       }
     },
-    folderId() {
-      return (this.folder && this.folder.id) || ''
+    isRoom() {
+      return this.resourceType === 'room'
+    },
+    resourceItem() {
+      return this.isRoom ? this.room : this.folder
+    },
+    resourceId() {
+      const item = this.resourceItem || {}
+      return this.isRoom ? item.roomKey || item.id || '' : item.id || ''
+    },
+    resourceName() {
+      const item = this.resourceItem || {}
+      return item.title || item.name || ''
+    },
+    resourceLabel() {
+      return this.isRoom ? '脑图' : '文件夹'
+    },
+    resourceTitle() {
+      return `${this.resourceLabel}权限`
+    },
+    resourceDescription() {
+      return this.isRoom
+        ? '权限仅应用于当前脑图'
+        : '权限将应用于文件夹内现有及后续脑图'
     },
     pagedMembers() {
       const start = (this.page - 1) * this.pageSize
@@ -380,7 +415,8 @@ export default {
           )
       const rows = []
       const walk = (parentId, level) => {
-        ;(this.childDepartmentMap[parentId] || [])
+        const departments = this.childDepartmentMap[parentId] || []
+        departments
           .slice()
           .sort((a, b) => a.order - b.order)
           .forEach(department => {
@@ -422,7 +458,8 @@ export default {
             hasChildren: true
           })
           if (this.expandedDepartments.includes(root.id)) {
-            ;(this.contactsByDepartment[root.id] || []).forEach(contact =>
+            const contacts = this.contactsByDepartment[root.id] || []
+            contacts.forEach(contact =>
               rows.push({
                 id: contact.userId || contact.id,
                 name: contact.name,
@@ -500,15 +537,16 @@ export default {
       this.departmentTotals = {}
       this.loadedDepartmentIds = []
       this.loadingDepartmentIds = []
+      this.departmentLoadTasks = {}
       this.expandedDepartments = []
+      if (this.isRoom && this.role === 'Manager') this.role = 'Viewer'
       this.loading = true
       try {
-        const [departments, memberResult] = await Promise.all([
+        const [departments] = await Promise.all([
           teamService.listDepartments(),
-          folderService.getMembers(this.folderId)
+          this.loadMembers()
         ])
         this.departmentOptions = departments
-        this.members = memberResult.list
       } catch (error) {
         this.$message.error(error.message || '加载权限数据失败')
       } finally {
@@ -524,46 +562,53 @@ export default {
     },
     async loadDepartmentContacts(id) {
       id = String(id)
-      if (
-        this.loadedDepartmentIds.includes(id) ||
-        this.loadingDepartmentIds.includes(id)
-      )
-        return
+      if (this.loadedDepartmentIds.includes(id)) return true
+      if (this.departmentLoadTasks[id]) return this.departmentLoadTasks[id]
       this.loadingDepartmentIds = this.loadingDepartmentIds.concat(id)
-      try {
-        const items = []
-        let offset = 0
-        let total = 0
-        let nextCursor = null
-        const limit = 100
-        while (offset < 1000) {
-          const result = await teamService.listContacts({
-            departmentId: id,
-            limit,
-            offset,
-            cursor: nextCursor
-          })
-          items.push(...result.list)
-          const reportedTotal = Number(result.total)
-          total = reportedTotal > 0 ? reportedTotal : items.length
-          nextCursor = result.nextCursor
-          offset += result.list.length
-          if (
-            !result.list.length ||
-            (!nextCursor && result.list.length < limit) ||
-            (reportedTotal > 0 && offset >= reportedTotal)
+      const task = (async () => {
+        try {
+          const items = []
+          let offset = 0
+          let total = 0
+          let nextCursor = null
+          const limit = 100
+          while (offset < 1000) {
+            const result = await teamService.listContacts({
+              departmentId: id,
+              limit,
+              offset,
+              cursor: nextCursor
+            })
+            items.push(...result.list)
+            const reportedTotal = Number(result.total)
+            total = reportedTotal > 0 ? reportedTotal : items.length
+            nextCursor = result.nextCursor
+            offset += result.list.length
+            if (
+              !result.list.length ||
+              (!nextCursor && result.list.length < limit) ||
+              (reportedTotal > 0 && offset >= reportedTotal)
+            )
+              break
+          }
+          this.cacheContacts(items)
+          this.$set(this.departmentTotals, id, total)
+          this.loadedDepartmentIds = this.loadedDepartmentIds.concat(id)
+          return true
+        } catch (error) {
+          this.$message.error(error.message || '加载部门成员失败')
+          return false
+        } finally {
+          this.loadingDepartmentIds = this.loadingDepartmentIds.filter(
+            item => item !== id
           )
-            break
         }
-        this.cacheContacts(items)
-        this.$set(this.departmentTotals, id, total)
-        this.loadedDepartmentIds = this.loadedDepartmentIds.concat(id)
-      } catch (error) {
-        this.$message.error(error.message || '加载部门成员失败')
+      })()
+      this.$set(this.departmentLoadTasks, id, task)
+      try {
+        return await task
       } finally {
-        this.loadingDepartmentIds = this.loadingDepartmentIds.filter(
-          item => item !== id
-        )
+        this.$delete(this.departmentLoadTasks, id)
       }
     },
     searchContacts() {
@@ -720,34 +765,87 @@ export default {
     async grantSelected() {
       this.busy = true
       try {
-        for (const id of this.selectedDepartmentIds)
-          await folderService.bulkSetMembers(this.folderId, {
-            departmentId: id,
-            includeChildren: this.includeChildren,
-            role: this.role.toLowerCase()
-          })
-        const departmentUsers = new Set(
-          this.selectedDepartmentIds.reduce(
-            (all, id) => all.concat(this.memberIdsForDepartment(id)),
-            []
-          )
-        )
-        for (const id of this.selectedUserIds.filter(
-          item => !departmentUsers.has(item)
-        ))
-          await folderService.setMember(this.folderId, id, this.role)
+        if (this.isRoom) await this.grantRoomSelection()
+        else await this.grantFolderSelection()
         await this.loadMembers()
         this.clearSelection()
         this.$emit('changed')
-        this.$message.success('文件夹权限已更新')
+        this.$message.success(`${this.resourceLabel}权限已更新`)
       } catch (error) {
+        try {
+          await this.loadMembers()
+        } catch (_) {
+          // Keep the original authorization error as the actionable message.
+        }
         this.$message.error(error.message || '授权失败，请稍后重试')
       } finally {
         this.busy = false
       }
     },
+    async grantFolderSelection() {
+      for (const id of this.selectedDepartmentIds)
+        await folderService.bulkSetMembers(this.resourceId, {
+          departmentId: id,
+          includeChildren: this.includeChildren,
+          role: this.role.toLowerCase()
+        })
+      const departmentUsers = new Set(
+        this.selectedDepartmentIds.reduce(
+          (all, id) => all.concat(this.memberIdsForDepartment(id)),
+          []
+        )
+      )
+      for (const id of this.selectedUserIds.filter(
+        item => !departmentUsers.has(item)
+      ))
+        await folderService.setMember(this.resourceId, id, this.role)
+    },
+    async grantRoomSelection() {
+      const departmentIds = Array.from(
+        new Set(
+          this.selectedDepartmentIds.reduce(
+            (all, id) => all.concat(this.descendantDepartmentIds(id)),
+            []
+          )
+        )
+      )
+      const loadResults = await Promise.all(
+        departmentIds.map(id => this.loadDepartmentContacts(id))
+      )
+      if (loadResults.some(result => result === false))
+        throw new Error('部分部门成员加载失败，请重试后再授权')
+
+      const departmentUsers = this.selectedDepartmentIds.reduce(
+        (all, id) => all.concat(this.memberIdsForDepartment(id)),
+        []
+      )
+      const ownerIds = new Set(
+        this.members
+          .filter(member => String(member.role).toLowerCase() === 'owner')
+          .map(member => String(member.id || member.userId))
+      )
+      const selectedIds = Array.from(
+        new Set(this.selectedUserIds.concat(departmentUsers).map(String))
+      )
+      const userIds = selectedIds.filter(id => !ownerIds.has(id))
+      if (!userIds.length) {
+        if (selectedIds.length)
+          throw new Error('所选成员已拥有所有者权限，无需重复授权')
+        throw new Error('所选部门暂无可授权成员')
+      }
+      for (let index = 0; index < userIds.length; index += 5)
+        await Promise.all(
+          userIds
+            .slice(index, index + 5)
+            .map(id =>
+              shareService.addMember(this.resourceId, id, this.role)
+            )
+        )
+    },
     async loadMembers() {
-      this.members = (await folderService.getMembers(this.folderId)).list
+      this.members = this.isRoom
+        ? await shareService.getMembers(this.resourceId)
+        : (await folderService.getMembers(this.resourceId)).list
     },
     async run(action) {
       this.busy = true
@@ -755,7 +853,7 @@ export default {
         await action()
         await this.loadMembers()
         this.$emit('changed')
-        this.$message.success('文件夹权限已更新')
+        this.$message.success(`${this.resourceLabel}权限已更新`)
       } catch (error) {
         this.$message.error(error.message || '更新权限失败')
       } finally {
@@ -764,12 +862,16 @@ export default {
     },
     updateRole(member, role) {
       return this.run(() =>
-        folderService.updateMember(this.folderId, member.id, role)
+        this.isRoom
+          ? shareService.updateMemberRole(this.resourceId, member.id, role)
+          : folderService.updateMember(this.resourceId, member.id, role)
       )
     },
     remove(member) {
       return this.run(() =>
-        folderService.removeMember(this.folderId, member.id)
+        this.isRoom
+          ? shareService.removeMember(this.resourceId, member.id)
+          : folderService.removeMember(this.resourceId, member.id)
       )
     }
   }
@@ -787,7 +889,7 @@ export default {
   padding-bottom: 14px;
   border-bottom: 1px solid #e7ece9;
 }
-.folderIcon {
+.resourceIcon {
   width: 36px;
   height: 36px;
   border-radius: 8px;
@@ -796,6 +898,10 @@ export default {
   display: grid;
   place-items: center;
   font-size: 18px;
+}
+.resourceIcon.room {
+  background: #edf2fb;
+  color: #3567a8;
 }
 .permissionHeader h2 {
   margin: 0;
