@@ -103,6 +103,12 @@ services:
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
       # 默认模型走 DeepSeek，避免无 OPENAI_API_KEY 时打 api.openai.com 得到 401
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+
+      # ===== Cognee =====
+      COGNEE_BASE_URL: ${COGNEE_URL:-http://host.docker.internal:8320}
+      COGNEE_PLUGIN_DATASET: liangce
+      COGNEE_API_KEY: ${COGNEE_API_KEY:-}
+
       OPENCLAW_GATEWAY_PORT: "18789"
       OPENCLAW_GATEWAY_BIND: lan
       TZ: ${OPENCLAW_TZ:-Asia/Shanghai}
