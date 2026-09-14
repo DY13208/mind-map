@@ -441,6 +441,44 @@ function mockRes() {
   assert.ok(ownerRecent.list.some(item => item.roomKey === owned.room.roomKey))
   assert.ok(!editorRecent.list.some(item => item.roomKey === owned.room.roomKey))
 
+  await c1.fs.setUserViewState(
+    owned.room.roomKey,
+    OWNER,
+    { expand: { a: true, b: false } }
+  )
+  const ownerView = await c1.fs.getUserViewState(owned.room.roomKey, OWNER)
+  const editorView = await c1.fs.getUserViewState(owned.room.roomKey, EDITOR)
+  assert.deepStrictEqual(ownerView.expand, { a: true, b: false })
+  assert.deepStrictEqual(editorView.expand, {})
+
+  const resSetView = mockRes()
+  await handleFileSystemApi(
+    {
+      method: 'PATCH',
+      url: `/api/files/${owned.room.roomKey}/view-state`,
+      authUser: { id: EDITOR }
+    },
+    resSetView,
+    { engine: c1.fs, body: { state: { expand: { child: true } } } }
+  )
+  assert.strictEqual(resSetView.code, 200)
+  const resGetView = mockRes()
+  await handleFileSystemApi(
+    {
+      method: 'GET',
+      url: `/api/files/${owned.room.roomKey}/view-state`,
+      authUser: { id: EDITOR }
+    },
+    resGetView,
+    { engine: c1.fs }
+  )
+  assert.strictEqual(resGetView.code, 200)
+  assert.deepStrictEqual(resGetView.body.state.expand, { child: true })
+  assert.deepStrictEqual(
+    (await c1.fs.getUserViewState(owned.room.roomKey, OWNER)).expand,
+    { a: true, b: false }
+  )
+
   let editorTrash = ''
   try {
     await c1.fs.trashRoom(owned.room.roomKey, {

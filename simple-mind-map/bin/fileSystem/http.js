@@ -68,6 +68,13 @@ function fileOpen(pathname) {
   return match ? decodeURIComponent(match[1]) : ''
 }
 
+function fileViewState(pathname) {
+  const match = String(pathname || '').match(
+    /^\/api\/(?:files|maps|rooms)\/([^/]+)\/view-state$/
+  )
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
 function fileTrash(pathname) {
   const match = String(pathname || '').match(
     /^\/api\/(?:files|maps|rooms)\/([^/]+)\/trash$/
@@ -133,6 +140,7 @@ async function handleFileSystemApi(req, res, options = {}) {
       filePreview(pathname) ||
       fileFavorite(pathname) ||
       fileOpen(pathname) ||
+      fileViewState(pathname) ||
       fileTrash(pathname) ||
       fileRestore(pathname) ||
       filePermanent(pathname))
@@ -450,6 +458,25 @@ async function handleFileSystemApi(req, res, options = {}) {
     if (openKey && method === 'POST') {
       const file = await fs.recordRoomOpened(safeRoomKey(openKey), userId, { bypass })
       sendJson(res, 200, { ok: true, file })
+      return true
+    }
+    const viewStateKey = fileViewState(pathname)
+    if (viewStateKey && method === 'GET') {
+      const state = await fs.getUserViewState(safeRoomKey(viewStateKey), userId, {
+        bypass
+      })
+      sendJson(res, 200, { ok: true, state })
+      return true
+    }
+    if (viewStateKey && (method === 'PATCH' || method === 'PUT')) {
+      const body = options.body || (await readBody(req))
+      const state = await fs.setUserViewState(
+        safeRoomKey(viewStateKey),
+        userId,
+        body && (body.state || body),
+        { bypass }
+      )
+      sendJson(res, 200, { ok: true, state })
       return true
     }
     const trashKey = fileTrash(pathname)

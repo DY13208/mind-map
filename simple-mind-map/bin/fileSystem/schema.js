@@ -92,10 +92,15 @@ async function initFileSystemSchema(db) {
       user_id text not null,
       is_favorite boolean not null default false,
       last_opened_at timestamptz,
+      view_state jsonb not null default '{}'::jsonb,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       primary key (room_key, user_id)
     )
+  `)
+  await db.query(`
+    alter table room_user_state
+    add column if not exists view_state jsonb not null default '{}'::jsonb
   `)
   await db.query(`
     create index if not exists room_user_state_user_opened_idx

@@ -349,6 +349,7 @@ function createMemoryFileStore(seed = {}) {
       const prev = userState.get(key) || {
         is_favorite: false,
         last_opened_at: null,
+        view_state: {},
         created_at: nowIso()
       }
       const next = {
@@ -359,6 +360,10 @@ function createMemoryFileStore(seed = {}) {
           patch.last_opened_at !== undefined
             ? patch.last_opened_at
             : prev.last_opened_at,
+        view_state:
+          patch.view_state !== undefined
+            ? cloneJson(patch.view_state || {})
+            : cloneJson(prev.view_state || {}),
         updated_at: nowIso()
       }
       if (patch.touch_opened) next.last_opened_at = nowIso()

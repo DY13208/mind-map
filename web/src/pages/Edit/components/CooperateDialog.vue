@@ -313,6 +313,8 @@ import {
   leavePresence,
   getFilePreview,
   getFileMeta,
+  getPersonalViewState,
+  savePersonalViewState,
   recoverFileRoom,
   getFileSubtree,
   getFileExport,
@@ -342,6 +344,12 @@ import {
   restoreMapView,
   saveMapView
 } from '@/utils/mapRefNav'
+import {
+  applyPersonalExpandState,
+  collectPersonalExpandState,
+  loadPersonalExpandState,
+  savePersonalExpandState
+} from '@/utils/personalExpandState'
 import { applyRoomAccess, fileRoleLabelKey, memberRoleLabelKey } from '@/utils/roomAcl'
 import { createCollaborationAdapter } from 'simple-mind-map/bin/collabV2/adapter'
 import { io } from 'socket.io-client'
@@ -455,7 +463,13 @@ export default {
       memberQuery: '',
       userHits: [],
       memberBusy: false,
-      collabV2Adapter: null
+      collabV2Adapter: null,
+      personalExpandState: null,
+      personalExpandRoomKey: '',
+      personalExpandRemoteTimer: null,
+      personalExpandApplying: false,
+      personalExpandOnCommand: null,
+      personalExpandOnRender: null
     }
   },
   computed: {
@@ -555,6 +569,7 @@ export default {
       this.mindMap.off('undo_conflict', this.onUndoConflict)
     }
     this.persistCurrentMapView()
+    this.unbindPersonalExpandState()
     this.stopSaveStatusPolling()
     this.clearReconnectNotice()
     this.unbindCollabStore()
@@ -975,6 +990,161 @@ export default {
       saveMapView(this.roomName, captureMapView(this.mindMap))
     },
 
+    bindPersonalExpandState() {
+      this.unbindPersonalExpandState()
+      if (!this.mindMap || !this.roomName) return
+      const roomKey = this.roomName
+      const userId = this.userId || 'local'
+      this.personalExpandRoomKey = roomKey
+      this.personalExpandState = loadPersonalExpandState(roomKey, userId)
+
+      const persist = () => {
+        if (!this.personalExpandState) return
+        savePersonalExpandState(roomKey, userId, this.personalExpandState)
+        clearTimeout(this.personalExpandRemoteTimer)
+        this.personalExpandRemoteTimer = setTimeout(() => {
+          this.personalExpandRemoteTimer = null
+          savePersonalViewState(roomKey, {
+            expand: this.personalExpandState || {}
+          }).catch(() => {})
+        }, 350)
+      }
+      const snapshotNow = () => {
+        if (!this.personalExpandState || !this.mindMap) return
+        this.personalExpandState = collectPersonalExpandState(
+          this.mindMap,
+          this.personalExpandState
+        )
+        persist()
+      }
+      this.personalExpandOnCommand = (name, ...args) => {
+        if (this.personalExpandApplying) return
+        if (name === 'SET_NODE_EXPAND') {
+          const node = args[0]
+          const uid =
+            node && node.getData && node.getData('uid')
+              ? node.getData('uid')
+              : node && node.data && node.data.uid
+          if (uid) {
+            this.$set(this.personalExpandState, uid, args[1] !== false)
+            persist()
+          }
+          return
+        }
+        if (
+          name === 'EXPAND_ALL' ||
+          name === 'UNEXPAND_ALL' ||
+          name === 'UNEXPAND_TO_LEVEL'
+        ) {
+          // 批量命令会在同一轮同步修改所有 expand 标志，必须先更新本地偏好，
+          // 否则 render_end 恢复旧状态会把“收起全部”立即覆盖掉。
+          snapshotNow()
+          return
+        }
+        if (
+          name === 'SET_NODE_DATA' &&
+          args[1] &&
+          Object.prototype.hasOwnProperty.call(args[1], 'expand')
+        ) {
+          const node = args[0]
+          const uid =
+            node && node.getData && node.getData('uid')
+              ? node.getData('uid')
+              : node && node.data && node.data.uid
+          if (uid) {
+            this.$set(this.personalExpandState, uid, args[1].expand !== false)
+            persist()
+          }
+        }
+      }
+      this.personalExpandOnRender = () => {
+        this.restorePersonalExpandState()
+      }
+      this.mindMap.on('afterExecCommand', this.personalExpandOnCommand)
+      this.mindMap.on('node_tree_render_end', this.personalExpandOnRender)
+      // setData 的首次渲染可能尚未开始，先尝试一次，后续由 render_end 补齐。
+      this.personalExpandOnRender()
+      getPersonalViewState(roomKey)
+        .then(result => {
+          if (this.personalExpandRoomKey !== roomKey) return
+          const remote =
+            result && result.state && result.state.expand
+              ? result.state.expand
+              : {}
+          this.personalExpandState = {
+            ...this.personalExpandState,
+            ...remote
+          }
+          savePersonalExpandState(roomKey, userId, this.personalExpandState)
+          this.restorePersonalExpandState()
+        })
+        .catch(() => {})
+    },
+
+    async restorePersonalExpandState() {
+      if (
+        this.personalExpandApplying ||
+        !this.personalExpandState ||
+        !Object.keys(this.personalExpandState).length ||
+        !this.mindMap
+      ) {
+        return
+      }
+      const roomKey = this.personalExpandRoomKey
+      this.personalExpandApplying = true
+      try {
+        const cooperate = this.mindMap.cooperate
+        for (let round = 0; round < 20; round += 1) {
+          if (!roomKey || this.personalExpandRoomKey !== roomKey) break
+          const changed = applyPersonalExpandState(
+            this.mindMap,
+            this.personalExpandState
+          )
+          if (changed) this.mindMap.render()
+          if (
+            !cooperate ||
+            typeof cooperate.hydrateExpandedPartialParents !== 'function'
+          ) {
+            break
+          }
+          const result = await cooperate.hydrateExpandedPartialParents()
+          if (!result || !result.hydrated) break
+        }
+      } finally {
+        this.personalExpandApplying = false
+      }
+    },
+
+    unbindPersonalExpandState() {
+      if (this.personalExpandRemoteTimer) {
+        clearTimeout(this.personalExpandRemoteTimer)
+        this.personalExpandRemoteTimer = null
+      }
+      if (this.personalExpandState && this.personalExpandRoomKey) {
+        savePersonalExpandState(
+          this.personalExpandRoomKey,
+          this.userId || 'local',
+          this.personalExpandState
+        )
+        savePersonalViewState(this.personalExpandRoomKey, {
+          expand: this.personalExpandState
+        }).catch(() => {})
+      }
+      if (this.mindMap) {
+        if (this.personalExpandOnCommand) {
+          this.mindMap.off('afterExecCommand', this.personalExpandOnCommand)
+        }
+        if (this.personalExpandOnRender) {
+          this.mindMap.off('node_tree_render_end', this.personalExpandOnRender)
+        }
+      }
+      this.personalExpandState = null
+      this.personalExpandRoomKey = ''
+      this.personalExpandOnCommand = null
+      this.personalExpandOnRender = null
+      this.personalExpandApplying = false
+    },
+
     async onRoomRouteChange() {
       const room = roomFromLocation(this.$route)
       if (!room) return
@@ -1373,6 +1543,7 @@ export default {
       this.clearReconnectNotice()
       this.unbindCollabStore()
       this.unbindProvider()
+      this.unbindPersonalExpandState()
       if (this.mindMap && this.mindMap.cooperate) {
         this.mindMap.cooperate.clearHttpCollab()
         this.mindMap.cooperate.disconnectProvider()
@@ -1864,6 +2035,7 @@ export default {
       this.httpCollab = true
       this.clearReconnectNotice()
       this.setCooperateStatus('connected')
+      if (!this.personalExpandRoomKey) this.bindPersonalExpandState()
       if (this.mindMap && this.mindMap.cooperate) {
         this.mindMap.cooperate.setUserInfo({
           id: this.userId,
@@ -2022,6 +2194,8 @@ export default {
             return result
           })
       })
+      // 展开状态是当前用户的视图偏好，不进入 HTTP/Yjs 协同数据。
+      this.bindPersonalExpandState()
       this.bindCollabStore()
     },
 
