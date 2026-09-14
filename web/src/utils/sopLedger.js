@@ -52,6 +52,13 @@ export function formatMinuteFileStamp(date = new Date()) {
   )}${pad(d.getMinutes())}`
 }
 
+/** 企微微盘 / 腾讯文档等分享链接，通常没有文件扩展名 */
+export function isShareDeliverableUri(uri) {
+  return /^https?:\/\/(?:[\w.-]+\.)?(?:drive\.weixin\.qq\.com|docs\.qq\.com|kdocs\.cn|feishu\.cn|larksuite\.com|drive\.google\.com|pan\.baidu\.com|share\.weiyun\.com|yuque\.com|shimo\.im)\b/i.test(
+    String(uri || '').trim()
+  )
+}
+
 export function isOpenableDeliverableUri(uri) {
   const u = String(uri || '').trim()
   return (
@@ -78,11 +85,12 @@ export function isJunkDeliverable(item) {
   if (/mcp[)）]|房间\s*$/i.test(name)) return true
   // 必须是可打开的绝对路径或 http(s)
   if (!isOpenableDeliverableUri(uri)) return true
-  // COS/临时对象链接：没有交付扩展名则丢弃
+  // COS/临时对象链接：没有交付扩展名则丢弃；分享链接除外
   if (
     /^https?:\/\//i.test(uri) &&
+    !isShareDeliverableUri(uri) &&
     !/\.(html?|xlsx?|docx?|pdf|md|csv)(\?|#|$)/i.test(uri) &&
-    !/(执行单|报告)/i.test(`${name} ${uri}`)
+    !/(执行单|报告|产物|下载)/i.test(`${name} ${uri}`)
   ) {
     return true
   }

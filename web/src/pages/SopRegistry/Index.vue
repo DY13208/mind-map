@@ -930,11 +930,17 @@ import {
   mergeLedgerSources,
   latestDeliverableText,
   addRunToLedger,
+  addDeliverableToLedger,
   persistSopLedger,
   readLedgerFromNodeLike,
   formatMinuteStamp
 } from '@/utils/sopLedger'
-import { SOP_OUTPUT_PRESETS, extractMissingDataNeeds, loadSopRunContext } from '@/utils/sopRun'
+import {
+  SOP_OUTPUT_PRESETS,
+  extractMissingDataNeeds,
+  extractDeliverablesFromReply,
+  loadSopRunContext
+} from '@/utils/sopRun'
 import {
   getSharedSopRunQueue,
   resolveSopRunConcurrency
@@ -2481,6 +2487,67 @@ export default {
         ) {
           this.applyJobLedgerToList(job, job.result.ledger)
         }
+      })
+      this.backfillDeliverablesFromJobs(jobs)
+    },
+    backfillDeliverablesFromJobs(jobs) {
+      ;(jobs || []).forEach(job => {
+        if (!job || !job.roomKey || !job.sopUid || job._deliverableBackfill) return
+        const text = [
+          job.result && job.result.reply,
+          job.streamText,
+          job.progressText
+        ]
+          .filter(Boolean)
+          .join('\n')
+        if (
+          !/(产物清单|drive\.weixin\.qq\.com|[A-Za-z]:[\\/][^\n]+\.(html?|xlsx?))/i.test(
+            text
+          )
+        ) {
+          return
+        }
+        const extracted = extractDeliverablesFromReply(text, [], [], {
+          id: job.sopId,
+          title: job.sopTitle,
+          uid: job.sopUid,
+          sopId: job.sopId,
+          sopTitle: job.sopTitle,
+          sopUid: job.sopUid
+        })
+        if (!extracted.length) return
+        let ledger = normalizeLedger((job.result && job.result.ledger) || {})
+        const known = new Set(
+          (ledger.deliverables || []).map(d => String(d.uri_or_path || ''))
+        )
+        let added = 0
+        extracted.forEach(d => {
+          const uri = String(d.uri_or_path || '')
+          if (!uri || known.has(uri)) return
+          ledger = addDeliverableToLedger(ledger, {
+            ...d,
+            sop_id: job.sopId,
+            sop_uid: job.sopUid
+          })
+          known.add(uri)
+          added += 1
+        })
+        if (!added) {
+          job._deliverableBackfill = true
+          return
+        }
+        job._deliverableBackfill = true
+        if (job.result) job.result.ledger = ledger
+        this.applyJobLedgerToList(job, ledger)
+        persistSopLedger(
+          job.roomKey,
+          job.sopUid,
+          { id: job.sopId || '', title: job.sopTitle || '' },
+          ledger
+        ).catch(err => {
+          job._deliverableBackfill = false
+          console.warn('[sopRegistry] backfill deliverables failed', err)
+        })
       })
     },
     /** 刷新列表时保留内存台账 + 队列已回写结果，避免「最近运行/产物」被刷空 */
