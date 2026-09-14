@@ -57,11 +57,11 @@ openssl rand -hex 32
 
 未登录时页面会直接加载企业微信内嵌二维码，不需要先点登录按钮。二维码对应的 OAuth `state` 有效期为 10 分钟，页面会在失效前 30 秒自动生成新二维码，同时保留手动刷新入口。`WECOM_QR_STYLE_URL` 使用企业微信官方 `href` 能力覆盖二维码样式，因此必须是公网可访问的 HTTPS CSS 地址；仓库中的 `web/public/wecom-login.css` 可用于隐藏二维码下方的应用名称。
 
-本地 Node 跨端口开发时，页面通常在 `8081`，认证 API 在 `1234`，因此需要显式设置，例如：
+本地 Node 跨端口开发时，页面通常在 `8989`，认证 API 在 `1234`，因此需要显式设置，例如：
 
 ```dotenv
 WECOM_REDIRECT_URI=http://192.168.1.20:1234/api/auth/wecom/callback
-AUTH_APP_ORIGIN=http://192.168.1.20:8081
+AUTH_APP_ORIGIN=http://192.168.1.20:8989
 AUTH_COOKIE_SECURE=false
 ```
 

@@ -27,7 +27,7 @@ export function getRuntimeConfig() {
   const loc = typeof window !== 'undefined' ? window.location : {}
   const host = loc.hostname || runtime.host || 'localhost'
   const sameOrigin = useSameOrigin(runtime, loc)
-  const webPort = Number(runtime.webPort || loc.port || 8081)
+  const webPort = Number(runtime.webPort || loc.port || 8989)
   const collabPort = Number(runtime.collabPort || 1234)
   const aiPort = Number(runtime.aiPort || 3456)
   const mcpPort = Number(runtime.mcpPort || 3847)

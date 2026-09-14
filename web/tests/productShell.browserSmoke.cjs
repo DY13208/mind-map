@@ -5,7 +5,7 @@ const { chromium } = require(
   path.resolve(__dirname, '../../simple-mind-map/node_modules/playwright')
 )
 
-const ORIGIN = 'http://127.0.0.1:8081'
+const ORIGIN = 'http://127.0.0.1:8989'
 const stamp = Date.now().toString(36)
 const FOLDER = 'C3SmokeFolder-' + stamp
 const ROOM = 'C3SmokeMap-' + stamp
