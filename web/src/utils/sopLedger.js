@@ -103,33 +103,37 @@ export function isJunkDeliverable(item) {
   return false
 }
 
-/** 若存在 output 下落盘文件，只保留这类最终产物 */
+/** 同一路径只留一条；不同文件、不同日期、分享链接都保留 */
 export function pruneDeliverables(list) {
   const cleaned = (Array.isArray(list) ? list : [])
     .map(normalizeDeliverable)
     .filter(Boolean)
     .filter(d => !/SOP_LEDGER/.test(`${d.name}${d.uri_or_path}`))
-  const preferred = cleaned.filter(isPreferredLocalDeliverable)
-  const source = preferred.length ? preferred : cleaned
-  // 同名只留一条（优先带绝对路径的）
-  const byBase = new Map()
-  source.forEach(item => {
-    const base = String(item.name || '')
+  const byKey = new Map()
+  cleaned.forEach(item => {
+    const uri = String(item.uri_or_path || '')
+      .replace(/\\/g, '/')
+      .replace(/\/+$/g, '')
+      .toLowerCase()
+    const name = String(item.name || '')
       .split(/[\\/]/)
       .pop()
       .toLowerCase()
-    const prev = byBase.get(base)
+    const key = uri || name
+    if (!key) return
+    const prev = byKey.get(key)
     if (!prev) {
-      byBase.set(base, item)
+      byKey.set(key, item)
       return
     }
     const score = d =>
       (isPreferredLocalDeliverable(d) ? 100 : 0) +
       (/^[A-Za-z]:[\\/]/.test(d.uri_or_path) ? 50 : 0) +
-      (/^https?:\/\//i.test(d.uri_or_path) ? 10 : 0)
-    if (score(item) > score(prev)) byBase.set(base, item)
+      (/^https?:\/\//i.test(d.uri_or_path) ? 10 : 0) +
+      (d.at ? 1 : 0)
+    if (score(item) >= score(prev)) byKey.set(key, item)
   })
-  return Array.from(byBase.values()).sort((a, b) =>
+  return Array.from(byKey.values()).sort((a, b) =>
     String(b.at || b.createdAt).localeCompare(String(a.at || a.createdAt))
   )
 }
@@ -284,7 +288,7 @@ export function buildLedgerNoteSummary(sopMeta, ledger) {
   const json = JSON.stringify({
     frequency: L.frequency,
     runs: L.runs.slice(0, 50),
-    deliverables: L.deliverables.slice(0, 50)
+    deliverables: L.deliverables.slice(0, 200)
   })
   lines.push(`${LEDGER_JSON_START}${json}${LEDGER_JSON_END}`)
   return lines.join('\n')
