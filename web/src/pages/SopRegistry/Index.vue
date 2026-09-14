@@ -587,8 +587,8 @@
         </el-tab-pane>
         <el-tab-pane label="产物" name="dels">
           <div class="ledgerPane" v-loading="ledgerSaving">
-            <ul class="ledgerList" v-if="activeLedger.deliverables.length">
-              <li v-for="d in activeLedger.deliverables" :key="d.id">
+            <ul class="ledgerList" v-if="visibleDeliverables.length">
+              <li v-for="d in visibleDeliverables" :key="d.id">
                 <span class="liMain">
                   <a
                     v-if="isHttp(d.uri_or_path)"
@@ -910,6 +910,7 @@ import {
   undoMapOperation,
   redoMapOperation,
   artifactLocalUrl,
+  searchLocalArtifacts,
   authorizeSopRun
 } from '@/utils/fileApi'
 import folderService from '@/services/folderService'
@@ -1064,6 +1065,7 @@ export default {
         deliverables: []
       },
       ledgerSaving: false,
+      scannedDeliverables: [],
       runForm: { at: '', result: '完成', note: '' },
       outputPresets: SOP_OUTPUT_PRESETS,
       runDialogVisible: false,
@@ -1124,6 +1126,22 @@ export default {
     }
   },
   computed: {
+    visibleDeliverables() {
+      const fromLedger =
+        (this.activeLedger && this.activeLedger.deliverables) || []
+      const extra = this.scannedDeliverables || []
+      const seen = new Set(
+        fromLedger.map(d => String(d.name || d.uri_or_path || '').toLowerCase())
+      )
+      const merged = fromLedger.slice()
+      extra.forEach(d => {
+        const key = String(d.name || d.uri_or_path || '').toLowerCase()
+        if (!key || seen.has(key)) return
+        seen.add(key)
+        merged.push(d)
+      })
+      return merged
+    },
     syncLabel() {
       if (this.subtreeLoading) return '加载中…'
       if (this.syncStatus === 'live') return '已协同同步'
@@ -1372,6 +1390,7 @@ export default {
       }
     },
     dialogTab(val) {
+      if (val === 'dels') this.refreshScannedArtifacts()
       if (val !== 'map') return
       this.$nextTick(() => {
         if (
@@ -1849,11 +1868,47 @@ export default {
     toggleLedgerRunLimit() {
       this.ledgerRunExpanded = !this.ledgerRunExpanded
     },
+    visibleDeliverables() {
+      const fromLedger =
+        (this.activeLedger && this.activeLedger.deliverables) || []
+      const extra = this.scannedDeliverables || []
+      const seen = new Set(
+        fromLedger.map(d => String(d.name || d.uri_or_path || '').toLowerCase())
+      )
+      const merged = fromLedger.slice()
+      extra.forEach(d => {
+        const key = String(d.name || d.uri_or_path || '').toLowerCase()
+        if (!key || seen.has(key)) return
+        seen.add(key)
+        merged.push(d)
+      })
+      return merged
+    },
+    async refreshScannedArtifacts() {
+      const title = String((this.activeSop && this.activeSop.title) || '').trim()
+      if (title.length < 2) {
+        this.scannedDeliverables = []
+        return
+      }
+      try {
+        const data = await searchLocalArtifacts(title)
+        const items = (data && (data.items || data.list)) || []
+        this.scannedDeliverables = items.map(item => ({
+          id: `scan_${item.name}`,
+          name: item.name,
+          uri_or_path: item.path || item.name,
+          kind: 'file'
+        }))
+      } catch (e) {
+        this.scannedDeliverables = []
+      }
+    },
     isHttp(uri) {
       return /^https?:\/\//i.test(String(uri || ''))
     },
     isLocalAbsPath(uri) {
-      return /^[A-Za-z]:[\\/]/.test(String(uri || ''))
+      const u = String(uri || '')
+      return /^[A-Za-z]:[\\/]/.test(u) || u.startsWith('/')
     },
     deliverableOpenUrl(d, { download = false } = {}) {
       const uri = String((d && d.uri_or_path) || '')
@@ -3331,6 +3386,7 @@ export default {
         this.pendingRoot = root
         this.pendingVersion = Number((data && data.version) || 0)
         this.subtreeLoading = false
+        this.refreshScannedArtifacts()
         // 先让详情壳渲染，再分帧建图
         await this.$nextTick()
         if (loadToken !== this._subtreeLoadToken) return
