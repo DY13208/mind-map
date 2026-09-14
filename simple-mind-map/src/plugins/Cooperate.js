@@ -4172,6 +4172,7 @@ class Cooperate {
                   (deep.tree.data && deep.tree.data.childCount) || count
                 ) || count,
               version: deep.version,
+              descendantCount: deep.tree.data && deep.tree.data.descendantCount,
               has_more: false
             }
           }
@@ -4183,6 +4184,9 @@ class Cooperate {
             Number(data.data.childCount) ||
             0
           data.data.hasMore = !!(result && result.has_more)
+          if (result && Number.isInteger(result.descendantCount)) {
+            data.data.descendantCount = result.descendantCount
+          }
           // Prefer server total; never shrink authoritative count to loaded length.
           if (total > 0) data.data.childCount = total
           if (result && result.version != null) {
@@ -4263,6 +4267,9 @@ class Cooperate {
     if (data.data) {
       data.data.hasMore = !!(result && result.has_more)
       data.data.childCount = (result && result.total) || count || 0
+      if (result && Number.isInteger(result.descendantCount)) {
+        data.data.descendantCount = result.descendantCount
+      }
       if (result && result.version != null) {
         data.data.subtreeVersion = Number(result.version) || 0
       }
@@ -6453,6 +6460,15 @@ class Cooperate {
             changed = true
           }
           if (treeNode.data) {
+            const descendantCount = item.data && item.data.descendantCount
+            if (Number.isInteger(descendantCount) && descendantCount >= 0 &&
+              treeNode.data.descendantCount !== descendantCount) {
+              treeNode.data.descendantCount = descendantCount
+              if (node && node.nodeData && node.nodeData.data) {
+                node.nodeData.data.descendantCount = descendantCount
+              }
+              changed = true
+            }
             const nextCount = Math.max(
               next.length,
               serverKids.length,

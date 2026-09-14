@@ -1,3 +1,5 @@
+import nodeDescendantCount from 'simple-mind-map/src/utils/nodeDescendantCount'
+
 const LARGE_NODE_THRESHOLD = 100
 const KEEP_EXPAND_DEPTH = 2
 const MAX_IMPORT_FANOUT = 48
@@ -121,6 +123,7 @@ export function stubImportedTree(root, options = {}) {
       ? node.data[OVERFLOW_KEY]
       : []
     const total = children.length + overflow.length
+    node.data.descendantCount = nodeDescendantCount.getDescendantCount(node)
     const prev = Number(node.data.childCount) || 0
     // Preserve PG-authoritative childCount from safe_load when larger.
     if (total || prev) node.data.childCount = Math.max(total, prev)
