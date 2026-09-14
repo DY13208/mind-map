@@ -1,11 +1,23 @@
 <template
   ><article
     class="folderCard"
+    :class="{ selected, selectable }"
     role="button"
     tabindex="0"
     @keydown.enter.self="$emit('open', folder)"
     @click="$emit('open', folder)"
   >
+    <label
+      v-if="selectable"
+      class="selectBox"
+      @click.stop
+    >
+      <el-checkbox
+        :value="selected"
+        :disabled="!canSelect"
+        @change="$emit('toggle-select', folder)"
+      />
+    </label>
     <div class="folderPreview">
       <span class="folderIcon"><i class="el-icon-folder-opened"/></span>
     </div>
@@ -22,7 +34,7 @@
         @click.native.stop
         ><span class="more"><i class="el-icon-more"/></span
         ><el-dropdown-menu slot="dropdown"
-          ><el-dropdown-item command="share">分享 / 权限</el-dropdown-item
+          ><el-dropdown-item v-if="allowShare" command="share">分享 / 权限</el-dropdown-item
           ><el-dropdown-item command="rename">重命名</el-dropdown-item
           ><el-dropdown-item command="delete" divided
             >删除</el-dropdown-item
@@ -35,7 +47,14 @@
 <script>
 export default {
   name: 'FolderCard',
-  props: { folder: Object, editable: { type: Boolean, default: true } },
+  props: {
+    folder: Object,
+    editable: { type: Boolean, default: true },
+    allowShare: { type: Boolean, default: true },
+    selectable: { type: Boolean, default: false },
+    selected: { type: Boolean, default: false },
+    canSelect: { type: Boolean, default: true }
+  },
   computed: {
     itemCountText() {
       const count =
@@ -60,9 +79,8 @@ export default {
   min-height: 0;
   padding: 0;
   border-radius: var(--ui-radius-lg);
-
   overflow: hidden;
-
+  position: relative;
   display: flex;
   flex-direction: column;
   cursor: pointer;
@@ -71,6 +89,21 @@ export default {
   transition: border-color var(--ui-duration) var(--ui-ease),
     box-shadow var(--ui-duration) var(--ui-ease),
     transform var(--ui-duration) var(--ui-ease);
+  &.selected {
+    border-color: var(--ui-primary);
+    box-shadow: 0 0 0 1px var(--ui-primary-soft);
+  }
+  .selectBox {
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    z-index: 2;
+    margin: 0;
+    padding: 4px;
+    background: rgba(255, 255, 255, 0.92);
+    border-radius: 8px;
+    cursor: pointer;
+  }
   &:hover {
     border-color: var(--ui-border-strong);
     box-shadow: var(--ui-shadow-hover);

@@ -1,7 +1,7 @@
 import { productRequest } from './productHttp'
 import { userMessageFromError } from './apiError'
 import { C3_SERVICE_STATUS_MATRIX } from './serviceStatus'
-import { folderIdForApi, normalizeRoomDto } from './roomDto'
+import { folderIdForApi, normalizeFolderDto, normalizeRoomDto } from './roomDto'
 import { validName } from './mockStore'
 
 const TEAM_ROLES = ['owner', 'admin', 'member']
@@ -202,6 +202,48 @@ const teamService = {
     }),
 
   listRooms: id => request(() => listRooms(id)),
+
+  listFolders: id =>
+    request(async () => {
+      const data = await productRequest(`/api/teams/${encodeURIComponent(id)}/folders`)
+      return unwrapList(data, ['folders', 'items']).map(normalizeFolderDto)
+    }),
+
+  createFolder: (teamId, name, parentId = null) =>
+    request(async () => {
+      const parent =
+        parentId == null || parentId === '' || parentId === 'root'
+          ? null
+          : String(parentId)
+      const data = await productRequest(`/api/teams/${encodeURIComponent(teamId)}/folders`, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: validName(name),
+          parentId: parent
+        })
+      })
+      return normalizeFolderDto(unwrapItem(data, ['folder']))
+    }),
+
+  renameFolder: (teamId, folderId, name) =>
+    request(async () => {
+      const data = await productRequest(
+        `/api/teams/${encodeURIComponent(teamId)}/folders/${encodeURIComponent(folderId)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ name: validName(name) })
+        }
+      )
+      return normalizeFolderDto(unwrapItem(data, ['folder']))
+    }),
+
+  deleteFolder: (teamId, folderId) =>
+    request(() =>
+      productRequest(
+        `/api/teams/${encodeURIComponent(teamId)}/folders/${encodeURIComponent(folderId)}`,
+        { method: 'DELETE' }
+      )
+    ),
 
   createRoom: (teamId, title, folderId = null) =>
     request(async () => {

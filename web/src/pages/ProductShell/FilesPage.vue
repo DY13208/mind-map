@@ -2,11 +2,16 @@
   <section class="productPage">
     <div class="productHeader">
       <div>
-        <FolderBreadcrumb v-if="folder" :path="folderPath" />
+        <FolderBreadcrumb
+          v-if="folder"
+          :path="folderPath"
+          :team-id="selectedTeamId"
+          :root-label="isTeamView && selectedTeam ? selectedTeam.name : '我的脑图'"
+        />
         <h1>{{ pageTitle }}</h1>
         <p>{{ pageDescription }}</p>
       </div>
-      <div v-if="mode === 'files'" class="workspaceSwitcher">
+      <div v-if="mode === 'files' || (mode === 'folder' && isTeamView)" class="workspaceSwitcher">
         <span>当前空间</span>
         <el-select
           :value="selectedTeamId"
@@ -39,12 +44,40 @@
       :sort.sync="sort"
       :view.sync="view"
       :show-create="mode === 'files' || mode === 'folder'"
-      :show-create-folder="(mode === 'files' || mode === 'folder') && !isTeamView"
+      :show-create-folder="
+        (mode === 'files' || mode === 'folder') &&
+          (!isTeamView || canManageTeam)
+      "
       :show-import="mode === 'files' || mode === 'folder'"
+      :show-batch="supportsBatchSelect"
+      :select-mode="selectMode"
       :hide-opened-sort="isRealFilesMode"
       @create-room="createRoom"
       @create-folder="createFolder"
       @import="openImport"
+      @toggle-select-mode="toggleSelectMode"
+    />
+    <BatchActionBar
+      v-if="selectMode"
+      :count="batchSelectionCount"
+      :all-selected="batchAllSelected"
+      :indeterminate="batchIndeterminate"
+      :show-move="batchShowMove"
+      :show-move-to-team="batchShowMoveToTeam"
+      :show-favorite="batchShowFavorite"
+      :show-delete="batchShowDelete"
+      :can-move="eligibleMoveRooms.length > 0"
+      :can-move-to-team="eligibleMoveToTeamRooms.length > 0"
+      :can-favorite="eligibleFavoriteRooms.length > 0"
+      :can-delete="eligibleDeleteRooms.length + eligibleDeleteFolders.length > 0"
+      :favorite-label="batchFavoriteLabel"
+      @select-all="selectAllVisible"
+      @clear="clearSelection"
+      @exit="exitSelectMode"
+      @move="openBatchMove"
+      @move-to-team="openBatchMoveToTeam"
+      @favorite="batchFavorite"
+      @delete="batchDelete"
     />
     <div v-if="error" class="statePanel">
       <el-alert
@@ -64,11 +97,16 @@
             v-for="item in filteredFolders"
             :key="item.id"
             :folder="item"
-            :editable="item.canManage !== false"
+            :editable="!selectMode && (isTeamView ? canManageTeam : item.canManage !== false)"
+            :allow-share="!isTeamView"
+            :selectable="selectMode"
+            :selected="isFolderSelected(item)"
+            :can-select="canSelectFolder(item)"
             @open="openFolder"
             @rename="renameFolder"
             @share="shareFolder"
             @delete="deleteFolder"
+            @toggle-select="toggleFolderSelect"
           />
         </template>
       <template v-if="mode === 'trash' && visibleRooms.length"
@@ -99,6 +137,9 @@
           :room="room"
           :allow-delete="!!room.canManage"
           :allow-move-to-team="!isTeamView"
+          :selectable="selectMode"
+          :selected="isRoomSelected(room)"
+          :can-select="canSelectRoom(room)"
           @open="openRoom"
           @favorite="favorite"
           @rename="renameRoom"
@@ -107,14 +148,21 @@
           @share="shareRoom"
           @history="historyRoom"
           @delete="deleteRoom"
+          @toggle-select="toggleRoomSelect"
         />
       </div>
       <RoomList
         v-if="mode !== 'trash' && view === 'list' && itemCount"
+        ref="roomList"
         :rooms="visibleRooms"
         :folders="showFolders ? filteredFolders : []"
         :allow-delete="true"
         :allow-move-to-team="!isTeamView"
+        :select-mode="selectMode"
+        :selected-room-keys="selectedRoomKeys"
+        :selected-folder-ids="selectedFolderIds"
+        :can-select-folder="canSelectFolder"
+        :can-select-room="canSelectRoom"
         @open="openRoom"
         @open-folder="openFolder"
         @favorite="favorite"
@@ -124,6 +172,7 @@
         @share="shareRoom"
         @history="historyRoom"
         @delete="deleteRoom"
+        @selection-change="onListSelectionChange"
       />
       <div v-if="showPager" class="pager">
         <el-pagination
@@ -157,11 +206,13 @@
       :visible.sync="moveVisible"
       :room="activeRoom"
       :folders="folders"
+      :batch-count="batchAction === 'move' ? eligibleMoveRooms.length : 0"
       @confirm="confirmMove"
     />
     <MoveToTeamDialog
       :visible.sync="moveToTeamVisible"
       :room="activeRoom"
+      :batch-count="batchAction === 'moveToTeam' ? eligibleMoveToTeamRooms.length : 0"
       @confirm="confirmMoveToTeam"
     />
     <ShareRoomDialog
@@ -206,6 +257,7 @@ import RoomList from './components/RoomList.vue'
 import ShareRoomDialog from './components/ShareRoomDialog.vue'
 import ShareFolderDialog from './components/ShareFolderDialog.vue'
 import HomeImportDialog from './components/HomeImportDialog.vue'
+import BatchActionBar from './components/BatchActionBar.vue'
 const copy = {
   files: ['我的脑图', '管理你的文件夹与脑图'],
   recent: ['最近', '快速回到最近打开的脑图'],
@@ -248,7 +300,8 @@ export default {
     RoomList,
     ShareRoomDialog,
     ShareFolderDialog,
-    HomeImportDialog
+    HomeImportDialog,
+    BatchActionBar
   },
   props: { mode: { type: String, default: 'files' } },
   data() {
@@ -280,12 +333,102 @@ export default {
       total: 0,
       searchTimer: null,
       teams: [],
-      teamsLoading: false
+      teamsLoading: false,
+      selectMode: false,
+      selectedRoomKeys: [],
+      selectedFolderIds: [],
+      batchAction: null
     }
   },
   computed: {
+    supportsBatchSelect() {
+      return this.mode === 'files' || this.mode === 'folder'
+    },
+    batchSelectionCount() {
+      return this.selectedRoomKeys.length + this.selectedFolderIds.length
+    },
+    selectedRoomsList() {
+      const keys = new Set(this.selectedRoomKeys.map(String))
+      return this.visibleRooms.filter(room =>
+        keys.has(String(room.roomKey || room.id))
+      )
+    },
+    selectedFoldersList() {
+      const ids = new Set(this.selectedFolderIds.map(String))
+      return this.filteredFolders.filter(folder => ids.has(String(folder.id)))
+    },
+    batchHasOnlyRooms() {
+      return (
+        this.selectedRoomKeys.length > 0 && this.selectedFolderIds.length === 0
+      )
+    },
+    batchHasOnlyFolders() {
+      return (
+        this.selectedFolderIds.length > 0 && this.selectedRoomKeys.length === 0
+      )
+    },
+    batchHasMixed() {
+      return this.selectedRoomKeys.length > 0 && this.selectedFolderIds.length > 0
+    },
+    eligibleMoveRooms() {
+      return this.selectedRoomsList.filter(room => room.canEdit !== false)
+    },
+    eligibleDeleteRooms() {
+      return this.selectedRoomsList.filter(room => room.canManage)
+    },
+    eligibleMoveToTeamRooms() {
+      if (this.isTeamView) return []
+      return this.selectedRoomsList.filter(room => room.canManage)
+    },
+    eligibleDeleteFolders() {
+      return this.selectedFoldersList.filter(folder =>
+        this.canSelectFolder(folder)
+      )
+    },
+    eligibleFavoriteRooms() {
+      return this.selectedRoomsList
+    },
+    batchShowMove() {
+      return this.batchHasOnlyRooms
+    },
+    batchShowMoveToTeam() {
+      return this.batchHasOnlyRooms && !this.isTeamView
+    },
+    batchShowFavorite() {
+      return this.batchHasOnlyRooms
+    },
+    batchShowDelete() {
+      return this.batchSelectionCount > 0
+    },
+    batchFavoriteLabel() {
+      const rooms = this.selectedRoomsList
+      if (!rooms.length) return '收藏'
+      const favoriteCount = rooms.filter(room => room.favorite).length
+      return favoriteCount > rooms.length / 2 ? '取消收藏' : '收藏'
+    },
+    selectableVisibleCount() {
+      let count = this.visibleRooms.filter(room => this.canSelectRoom(room)).length
+      if (this.showFolders) {
+        count += this.filteredFolders.filter(folder =>
+          this.canSelectFolder(folder)
+        ).length
+      }
+      return count
+    },
+    batchAllSelected() {
+      return (
+        this.selectableVisibleCount > 0 &&
+        this.batchSelectionCount === this.selectableVisibleCount
+      )
+    },
+    batchIndeterminate() {
+      return (
+        this.batchSelectionCount > 0 &&
+        this.batchSelectionCount < this.selectableVisibleCount
+      )
+    },
     selectedTeamId() {
-      return this.mode === 'files'
+      return this.mode === 'files' || this.mode === 'folder'
         ? String((this.$route.query && this.$route.query.team) || '')
         : ''
     },
@@ -293,7 +436,16 @@ export default {
       return this.teams.find(team => team.id === this.selectedTeamId) || null
     },
     isTeamView() {
-      return !!this.selectedTeamId && this.mode === 'files'
+      return (
+        !!this.selectedTeamId &&
+        (this.mode === 'files' || this.mode === 'folder')
+      )
+    },
+    canManageTeam() {
+      return !!(
+        this.selectedTeam &&
+        ['owner', 'admin'].includes(this.selectedTeam.role)
+      )
     },
     isRealFilesMode() {
       return (
@@ -338,7 +490,7 @@ export default {
       return this.itemCount
     },
     showFolders() {
-      return (this.mode === 'files' || this.mode === 'folder') && !this.isTeamView
+      return this.mode === 'files' || this.mode === 'folder'
     },
     folderMap() {
       return Object.fromEntries(this.folders.map(folder => [folder.id, folder]))
@@ -460,13 +612,203 @@ export default {
   },
   methods: {
     resetPage() {
+      this.clearSelection()
+      this.selectMode = false
       this.search = ''
       this.roleFilter = ''
       this.sort = this.mode === 'recent' ? 'lastOpenedAt' : 'updatedAt'
       this.page = 1
       this.load({ reset: true, keepPage: true })
     },
+    roomKey(room) {
+      return String((room && (room.roomKey || room.id)) || '')
+    },
+    canSelectRoom() {
+      return true
+    },
+    canSelectFolder(folder) {
+      return this.isTeamView
+        ? this.canManageTeam
+        : folder.canManage !== false
+    },
+    isRoomSelected(room) {
+      return this.selectedRoomKeys.includes(this.roomKey(room))
+    },
+    isFolderSelected(folder) {
+      return this.selectedFolderIds.includes(String(folder.id))
+    },
+    toggleSelectMode() {
+      if (this.selectMode) {
+        this.exitSelectMode()
+        return
+      }
+      this.selectMode = true
+    },
+    exitSelectMode() {
+      this.selectMode = false
+      this.clearSelection()
+      this.batchAction = null
+    },
+    clearSelection() {
+      this.selectedRoomKeys = []
+      this.selectedFolderIds = []
+      this.batchAction = null
+    },
+    toggleRoomSelect(room) {
+      const key = this.roomKey(room)
+      if (!key || !this.canSelectRoom(room)) return
+      if (this.isRoomSelected(room)) {
+        this.selectedRoomKeys = this.selectedRoomKeys.filter(item => item !== key)
+      } else {
+        this.selectedRoomKeys = this.selectedRoomKeys.concat(key)
+      }
+    },
+    toggleFolderSelect(folder) {
+      const id = String(folder.id)
+      if (!this.canSelectFolder(folder)) return
+      if (this.isFolderSelected(folder)) {
+        this.selectedFolderIds = this.selectedFolderIds.filter(item => item !== id)
+      } else {
+        this.selectedFolderIds = this.selectedFolderIds.concat(id)
+      }
+    },
+    onListSelectionChange({ roomKeys, folderIds }) {
+      this.selectedRoomKeys = roomKeys.map(String)
+      this.selectedFolderIds = folderIds.map(String)
+    },
+    selectAllVisible(checked) {
+      if (!checked) {
+        this.clearSelection()
+        return
+      }
+      this.selectedRoomKeys = this.visibleRooms
+        .filter(room => this.canSelectRoom(room))
+        .map(room => this.roomKey(room))
+      this.selectedFolderIds = this.showFolders
+        ? this.filteredFolders
+            .filter(folder => this.canSelectFolder(folder))
+            .map(folder => String(folder.id))
+        : []
+    },
+    async runBatchSerial(items, action) {
+      let ok = 0
+      let fail = 0
+      for (const item of items) {
+        try {
+          await action(item)
+          ok += 1
+        } catch (error) {
+          fail += 1
+        }
+      }
+      return { ok, fail }
+    },
+    summarizeBatchResult(ok, fail, verb) {
+      if (fail) {
+        this.$message.warning(`${verb} ${ok} 项，${fail} 项失败`)
+      } else {
+        this.$message.success(`${verb} ${ok} 项`)
+      }
+    },
+    openBatchMove() {
+      if (!this.eligibleMoveRooms.length) {
+        this.$message.warning('所选脑图均无法移动')
+        return
+      }
+      this.batchAction = 'move'
+      this.activeRoom = {
+        title: `已选 ${this.eligibleMoveRooms.length} 个脑图`,
+        folderName: '—'
+      }
+      this.moveVisible = true
+    },
+    openBatchMoveToTeam() {
+      if (!this.eligibleMoveToTeamRooms.length) {
+        this.$message.warning('所选脑图均无法移入团队（需为所有者）')
+        return
+      }
+      this.batchAction = 'moveToTeam'
+      this.activeRoom = {
+        title: `已选 ${this.eligibleMoveToTeamRooms.length} 个脑图`
+      }
+      this.moveToTeamVisible = true
+    },
+    async batchFavorite() {
+      const rooms = this.eligibleFavoriteRooms
+      if (!rooms.length) return
+      const unfavorite = this.batchFavoriteLabel === '取消收藏'
+      if (this.busy) return
+      this.busy = true
+      try {
+        const { ok, fail } = await this.runBatchSerial(rooms, room => {
+          const key = this.roomKey(room)
+          const shouldToggle =
+            unfavorite ? room.favorite : !room.favorite
+          return shouldToggle
+            ? roomService.toggleFavorite(key)
+            : Promise.resolve()
+        })
+        this.clearSelection()
+        await this.load({ reset: true, keepPage: true })
+        this.summarizeBatchResult(ok, fail, '已完成收藏')
+      } catch (error) {
+        this.$message.error(userMessageFromError(error))
+      } finally {
+        this.busy = false
+      }
+    },
+    async batchDelete() {
+      const rooms = this.eligibleDeleteRooms
+      const folders = this.eligibleDeleteFolders
+      const total = rooms.length + folders.length
+      if (!total) {
+        this.$message.warning('所选项目均无法删除')
+        return
+      }
+      const confirmed = await this.$confirm(
+        `删除 ${total} 个项目？脑图将移入回收站，空文件夹才会被删除。`,
+        '批量删除',
+        { type: 'warning' }
+      )
+        .then(() => true)
+        .catch(() => false)
+      if (!confirmed) return
+      if (this.busy) return
+      this.busy = true
+      try {
+        let ok = 0
+        let fail = 0
+        for (const room of rooms) {
+          try {
+            await roomService.deleteRoom(this.roomKey(room))
+            ok += 1
+          } catch (error) {
+            fail += 1
+          }
+        }
+        for (const folder of folders) {
+          try {
+            if (this.isTeamView) {
+              await teamService.deleteFolder(this.selectedTeamId, folder.id)
+            } else {
+              await folderService.deleteFolder(folder.id)
+            }
+            ok += 1
+          } catch (error) {
+            fail += 1
+          }
+        }
+        this.clearSelection()
+        await this.load({ reset: true, keepPage: true })
+        this.summarizeBatchResult(ok, fail, '已删除')
+      } catch (error) {
+        this.$message.error(userMessageFromError(error))
+      } finally {
+        this.busy = false
+      }
+    },
     changeWorkspace(teamId) {
+      this.exitSelectMode()
       const team = String(teamId || '')
       this.$router.push({
         path: '/files',
@@ -484,7 +826,7 @@ export default {
       this.loading = reset
       this.error = ''
       try {
-        if (mode === 'files') {
+        if (mode === 'files' || (mode === 'folder' && this.selectedTeamId)) {
           this.teamsLoading = true
           try {
             this.teams = await teamService.listSpaces()
@@ -503,7 +845,7 @@ export default {
           }
         }
         const folders = this.isTeamView
-          ? []
+          ? await teamService.listFolders(this.selectedTeamId)
           : await folderService.listFolders()
         if (request !== this.requestId) return
         this.folders = folders
@@ -532,10 +874,24 @@ export default {
           filters.limit = this.limit
           filters.offset = Math.max(0, (this.page - 1) * this.limit)
         }
-        const rooms = this.isTeamView
+        let rooms = this.isTeamView
           ? await teamService.listRooms(this.selectedTeamId)
           : await roomService.listRooms(filters)
         if (request !== this.requestId) return
+        if (this.isTeamView) {
+          const list = rooms.list || rooms
+          const q = this.search.trim().toLowerCase()
+          rooms = list.filter(room => {
+            if (mode === 'folder') {
+              if (String(room.folderId || '') !== String(folderId || '')) {
+                return false
+              }
+            } else if (!q && room.folderId) {
+              return false
+            }
+            return true
+          })
+        }
         const list = rooms.list || rooms
         const total = Number(rooms.total != null ? rooms.total : list.length)
         this.total = total
@@ -546,7 +902,14 @@ export default {
           await this.load({ reset: true, keepPage: true })
           return
         }
-        this.rooms = list
+        this.rooms = list.map(room => {
+          if (!this.isTeamView || room.folderName) return room
+          const folder = room.folderId ? this.folderMap[room.folderId] : null
+          return {
+            ...room,
+            folderName: folder ? folder.name : room.folderId ? '' : '根目录'
+          }
+        })
       } catch (error) {
         if (request === this.requestId)
           this.error = userMessageFromError(error)
@@ -583,7 +946,11 @@ export default {
       }
     },
     openFolder(folder) {
-      this.$router.push('/files/folder/' + folder.id)
+      const route = { path: '/files/folder/' + folder.id }
+      if (this.selectedTeamId) {
+        route.query = { team: this.selectedTeamId }
+      }
+      this.$router.push(route)
     },
     async openRoom(room) {
       try {
@@ -608,15 +975,14 @@ export default {
       if (this.busy) return
       this.busy = true
       try {
+        const folderId = this.folder ? this.folder.id : null
         const created = this.isTeamView
           ? await teamService.createRoom(
               this.selectedTeamId,
-              result.value.trim()
-            )
-          : await roomService.createRoom(
               result.value.trim(),
-              this.folder ? this.folder.id : null
+              folderId
             )
+          : await roomService.createRoom(result.value.trim(), folderId)
         this.$message.success('脑图已创建')
         await this.$router.push({
           path: '/',
@@ -629,10 +995,16 @@ export default {
       }
     },
     async createFolder() {
+      if (this.isTeamView && !this.canManageTeam) {
+        this.$message.error('只有团队所有者或管理员可以创建文件夹')
+        return
+      }
       const result = await this.$prompt(
         this.folder
           ? `将在「${this.folder.name}」中创建子文件夹`
-          : '将在“我的脑图”根目录创建文件夹',
+          : this.isTeamView
+            ? '将在当前团队根目录创建文件夹'
+            : '将在“我的脑图”根目录创建文件夹',
         '新建文件夹',
         {
           inputValidator: value =>
@@ -643,10 +1015,16 @@ export default {
       if (result)
         await this.perform(
           () =>
-            folderService.createFolder(
-              result.value.trim(),
-              this.folder ? this.folder.id : null
-            ),
+            this.isTeamView
+              ? teamService.createFolder(
+                  this.selectedTeamId,
+                  result.value.trim(),
+                  this.folder ? this.folder.id : null
+                )
+              : folderService.createFolder(
+                  result.value.trim(),
+                  this.folder ? this.folder.id : null
+                ),
           '文件夹已创建'
         )
     },
@@ -656,7 +1034,9 @@ export default {
     async onImported(result) {
       await this.load({ reset: true, keepPage: true })
       if (result && result.mode === 'folder' && result.folderId) {
-        this.$router.push('/files/folder/' + result.folderId)
+        const route = { path: '/files/folder/' + result.folderId }
+        if (this.selectedTeamId) route.query = { team: this.selectedTeamId }
+        this.$router.push(route)
         return
       }
       if (result && result.mode === 'single' && result.room) {
@@ -680,7 +1060,13 @@ export default {
       return this.perform(
         () =>
           this.renameKind === 'folder'
-            ? folderService.renameFolder(this.activeItem.id, name)
+            ? this.isTeamView
+              ? teamService.renameFolder(
+                  this.selectedTeamId,
+                  this.activeItem.id,
+                  name
+                )
+              : folderService.renameFolder(this.activeItem.id, name)
             : roomService.renameRoom(
                 this.activeItem.roomKey || this.activeItem.id,
                 name
@@ -689,6 +1075,10 @@ export default {
       )
     },
     async deleteFolder(folder) {
+      if (this.isTeamView && !this.canManageTeam) {
+        this.$message.error('只有团队所有者或管理员可以删除文件夹')
+        return
+      }
       const confirmed = await this.$confirm(
         '删除文件夹「' +
           folder.name +
@@ -699,15 +1089,39 @@ export default {
         .catch(() => false)
       if (confirmed)
         await this.perform(
-          () => folderService.deleteFolder(folder.id),
+          () =>
+            this.isTeamView
+              ? teamService.deleteFolder(this.selectedTeamId, folder.id)
+              : folderService.deleteFolder(folder.id),
           '文件夹已删除'
         )
     },
     moveRoom(room) {
+      this.batchAction = null
       this.activeRoom = room
       this.moveVisible = true
     },
-    confirmMove(folderId) {
+    async confirmMove(folderId) {
+      if (this.batchAction === 'move') {
+        const rooms = this.eligibleMoveRooms
+        if (!rooms.length) return
+        if (this.busy) return
+        this.busy = true
+        try {
+          const { ok, fail } = await this.runBatchSerial(rooms, room =>
+            roomService.moveRoom(this.roomKey(room), folderId)
+          )
+          this.batchAction = null
+          this.clearSelection()
+          await this.load({ reset: true, keepPage: true })
+          this.summarizeBatchResult(ok, fail, '已移动')
+        } catch (error) {
+          this.$message.error(userMessageFromError(error))
+        } finally {
+          this.busy = false
+        }
+        return
+      }
       return this.perform(
         () =>
           roomService.moveRoom(
@@ -718,10 +1132,31 @@ export default {
       )
     },
     moveToTeam(room) {
+      this.batchAction = null
       this.activeRoom = room
       this.moveToTeamVisible = true
     },
-    confirmMoveToTeam(teamId) {
+    async confirmMoveToTeam(teamId) {
+      if (this.batchAction === 'moveToTeam') {
+        const rooms = this.eligibleMoveToTeamRooms
+        if (!rooms.length || !teamId) return
+        if (this.busy) return
+        this.busy = true
+        try {
+          const { ok, fail } = await this.runBatchSerial(rooms, room =>
+            teamService.assignRoom(teamId, this.roomKey(room))
+          )
+          this.batchAction = null
+          this.clearSelection()
+          await this.load({ reset: true, keepPage: true })
+          this.summarizeBatchResult(ok, fail, '已移入团队')
+        } catch (error) {
+          this.$message.error(userMessageFromError(error))
+        } finally {
+          this.busy = false
+        }
+        return
+      }
       return this.perform(
         () =>
           teamService.assignRoom(
@@ -736,6 +1171,7 @@ export default {
       this.shareVisible = true
     },
     shareFolder(folder) {
+      if (this.isTeamView) return
       this.activeFolder = folder
       this.folderShareVisible = true
     },

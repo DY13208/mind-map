@@ -649,6 +649,77 @@ function mockRes() {
   )
   assert.ok(resTrashList.body.list.some(item => item.roomKey === httpRoom.room.roomKey))
 
+  // Team folders: isolated from personal list, require bypass to create, same-name OK across spaces.
+  const teamFs = engineWith()
+  const personalFolder = await teamFs.fs.createFolder({ name: 'SharedName', userId: OWNER })
+  await assert.rejects(
+    teamFs.fs.createFolder({ name: 'TeamOnly', userId: OWNER, teamId: 'team-1' }),
+    err => err.code === 'FORBIDDEN'
+  )
+  const teamFolder = await teamFs.fs.createFolder({
+    name: 'SharedName',
+    userId: OWNER,
+    teamId: 'team-1',
+    bypass: true
+  })
+  assert.strictEqual(teamFolder.teamId, 'team-1')
+  assert.notStrictEqual(teamFolder.id, personalFolder.id)
+  const personalOnly = await teamFs.fs.listFolders({ userId: OWNER })
+  assert.ok(personalOnly.list.every(item => !item.teamId))
+  assert.ok(personalOnly.list.some(item => item.id === personalFolder.id))
+  assert.ok(!personalOnly.list.some(item => item.id === teamFolder.id))
+  const teamListed = await teamFs.fs.listFolders({
+    userId: OWNER,
+    teamId: 'team-1',
+    canManage: true,
+    bypass: true
+  })
+  assert.ok(teamListed.list.some(item => item.id === teamFolder.id))
+  assert.ok(teamListed.list.every(item => item.teamId === 'team-1'))
+  assert.ok(teamListed.list.every(item => item.canManage === true))
+  const teamChild = await teamFs.fs.createFolder({
+    name: 'child',
+    parentId: teamFolder.id,
+    userId: OWNER,
+    teamId: 'team-1',
+    bypass: true
+  })
+  await assert.rejects(
+    teamFs.fs.createFolder({
+      name: 'bad-parent',
+      parentId: personalFolder.id,
+      userId: OWNER,
+      teamId: 'team-1',
+      bypass: true
+    }),
+    err => err.code === 'FOLDER_TEAM_MISMATCH'
+  )
+  const teamRoom = await teamFs.fs.createRoom({
+    title: 'in-team-folder',
+    userId: OWNER,
+    teamId: 'team-1',
+    folderId: teamFolder.id,
+    teamMembers: [{ userId: EDITOR }]
+  })
+  assert.strictEqual(teamRoom.room.folderId, teamFolder.id)
+  await assert.rejects(
+    teamFs.fs.createRoom({
+      title: 'wrong-folder',
+      userId: OWNER,
+      teamId: 'team-1',
+      folderId: personalFolder.id
+    }),
+    err => err.code === 'FOLDER_TEAM_MISMATCH'
+  )
+  await teamFs.fs.moveRoom(teamRoom.room.roomKey, teamChild.id, {
+    userId: EDITOR,
+    access: { canEdit: true, role: 'editor' }
+  })
+  assert.strictEqual(
+    (await teamFs.store.getRoom(teamRoom.room.roomKey)).folder_id,
+    teamChild.id
+  )
+
   console.log('fileSystem.test.js ok')
 })().catch(err => {
   console.error(err)

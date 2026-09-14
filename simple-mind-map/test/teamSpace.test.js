@@ -115,6 +115,109 @@ assert.notStrictEqual(
   assert.strictEqual(store.rooms.size, 0)
   assert.strictEqual(store.nodes.size, 0)
   assert.strictEqual(store.members.length, 0)
+
+  // Restore insertMember for folder/room assignment checks.
+  store.insertMember = insertMember
+  const teamFolder = await fs.createFolder({
+    name: '产品',
+    userId: 'alice',
+    teamId: created.id,
+    bypass: true
+  })
+  assert.strictEqual(teamFolder.teamId, created.id)
+  const listedFolders = await fs.listFolders({
+    userId: 'alice',
+    teamId: created.id,
+    canManage: true,
+    bypass: true
+  })
+  assert.ok(listedFolders.list.some(item => item.id === teamFolder.id))
+
+  // assignRoom clears personal folder_id when moving into a team.
+  const personal = await fs.createRoom({ title: '待迁移', userId: 'alice' })
+  const personalFolder = await fs.createFolder({ name: '个人夹', userId: 'alice' })
+  await fs.moveRoom(personal.room.roomKey, personalFolder.id, {
+    userId: 'alice',
+    access: { canEdit: true, canManage: true, role: 'owner' }
+  })
+  assert.strictEqual(
+    (await store.getRoom(personal.room.roomKey)).folder_id,
+    personalFolder.id
+  )
+  const assignDb = {
+    async connect() {
+      return {
+        query: async (sql, params) => assignDb.query(sql, params),
+        release() {}
+      }
+    },
+    async query(sql, params = []) {
+      const text = String(sql)
+      if (text.includes('begin') || text.includes('commit') || text.includes('rollback')) {
+        return { rows: [] }
+      }
+      if (text.includes('from teams t')) {
+        return {
+          rows: [{
+            id: created.id, corp_id: 'corp-a', name: '研发空间', description: '',
+            source_type: 'custom', owner_id: 'alice', role: 'owner',
+            member_count: 1, file_count: 1
+          }]
+        }
+      }
+      if (text.includes('select room_key, owner_id, team_id, deleted_at')) {
+        const room = store.rooms.get(params[0])
+        return {
+          rows: room
+            ? [{
+                room_key: room.room_key,
+                owner_id: room.owner_id,
+                team_id: room.team_id || null,
+                deleted_at: room.deleted_at || null
+              }]
+            : []
+        }
+      }
+      if (text.includes('select role, direct_role from room_members')) {
+        const member = store.members.find(
+          row => row.room_key === params[0] && row.user_id === params[1]
+        )
+        return {
+          rows: member
+            ? [{ role: member.role, direct_role: member.direct_role || member.role }]
+            : []
+        }
+      }
+      if (text.includes('update rooms set team_id') && text.includes('folder_id = null')) {
+        const room = store.rooms.get(params[0])
+        if (room) {
+          room.team_id = params[1]
+          room.folder_id = null
+        }
+        return { rows: [] }
+      }
+      if (text.includes('update teams set updated_at')) return { rows: [] }
+      if (text.includes('select user_id from team_members')) {
+        return { rows: [{ user_id: 'alice' }, { user_id: 'bob' }] }
+      }
+      if (text.includes('insert into room_members')) {
+        await store.insertMember({
+          room_key: params[0],
+          user_id: params[1],
+          role: 'editor',
+          source: 'team',
+          source_team_id: params[2]
+        })
+        return { rows: [] }
+      }
+      return { rows: [] }
+    }
+  }
+  const assigned = await teamSpace.assignRoom(assignDb, who, created.id, personal.room.roomKey)
+  assert.deepStrictEqual(assigned, { roomKey: personal.room.roomKey, teamId: created.id })
+  assert.strictEqual((await store.getRoom(personal.room.roomKey)).folder_id, null)
+  assert.strictEqual((await store.getRoom(personal.room.roomKey)).team_id, created.id)
+
   console.log('teamSpace tests passed')
 })().catch(err => {
   console.error(err)

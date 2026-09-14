@@ -1,17 +1,30 @@
 <template>
   <article
     class="roomCard"
+    :class="{ selected, selectable }"
     tabindex="0"
     :aria-label="`打开 ${room.title}`"
     @keydown.enter.self="$emit('open', room)"
     @click="$emit('open', room)"
   >
+    <label
+      v-if="selectable"
+      class="selectBox"
+      @click.stop
+    >
+      <el-checkbox
+        :value="selected"
+        :disabled="!canSelect"
+        @change="$emit('toggle-select', room)"
+      />
+    </label>
     <div ref="preview" class="roomPreview" :style="previewStyle">
       <MindMapPreview v-if="sketch" :sketch="sketch" />
       <div v-else class="previewMap" aria-hidden="true">
         <span></span><i></i><i></i><i></i>
       </div>
       <button
+        v-if="!selectable"
         class="favorite"
         :aria-label="room.favorite ? '取消收藏' : '收藏'"
         :class="{ active: room.favorite }"
@@ -86,7 +99,10 @@ export default {
   props: {
     room: Object,
     allowDelete: { type: Boolean, default: false },
-    allowMoveToTeam: { type: Boolean, default: true }
+    allowMoveToTeam: { type: Boolean, default: true },
+    selectable: { type: Boolean, default: false },
+    selected: { type: Boolean, default: false },
+    canSelect: { type: Boolean, default: true }
   },
   data() {
     return {
@@ -194,7 +210,23 @@ export default {
   border-radius: var(--ui-radius-lg);
   overflow: hidden;
   cursor: pointer;
+  position: relative;
   transition: border-color var(--ui-duration) var(--ui-ease), box-shadow var(--ui-duration) var(--ui-ease), transform var(--ui-duration) var(--ui-ease);
+  &.selected {
+    border-color: var(--ui-primary);
+    box-shadow: 0 0 0 1px var(--ui-primary-soft);
+  }
+  .selectBox {
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    z-index: 2;
+    margin: 0;
+    padding: 4px;
+    background: rgba(255, 255, 255, 0.92);
+    border-radius: 8px;
+    cursor: pointer;
+  }
   &:hover {
     transform: translateY(-1px);
     box-shadow: var(--ui-shadow-hover);
