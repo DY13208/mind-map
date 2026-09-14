@@ -175,6 +175,18 @@ function mockRes() {
   const sharedRoom = await folderAccess.fs.createRoom({
     title: 'shared-file', folderId: sharedParent.id, userId: OWNER
   })
+  await folderAccess.fs.createRoom({
+    title: 'shared-child-file', folderId: sharedChild.id, userId: OWNER
+  })
+  const folderCounts = await folderAccess.fs.listFolders({ userId: OWNER })
+  assert.strictEqual(
+    folderCounts.list.find(item => item.id === sharedParent.id).roomCount,
+    2
+  )
+  assert.strictEqual(
+    folderCounts.list.find(item => item.id === sharedChild.id).roomCount,
+    1
+  )
   await folderAccess.store.insertMember({ room_key: sharedRoom.room.roomKey, user_id: OTHER, role: 'editor' })
   for (const userId of [VIEWER, OTHER]) {
     await assert.rejects(
