@@ -292,13 +292,10 @@
                     <button
                       type="button"
                       class="runBtn primary"
-                      :disabled="!canEditSop || !!sopCardJobState(item)"
-                      @click.stop="openRunDialog(item)"
+                      @click.stop="openSubtree(item)"
                     >
-                      <i v-if="sopCardJobState(item) === 'running'" class="el-icon-loading"></i>
-                      <SopGlyph v-else kind="play" size="sm" />
-                      <span>运行</span>
-                      <SopGlyph kind="chevron-down" size="sm" class="runCaret" />
+                      <span>打开</span>
+                      <SopGlyph kind="chevron-right" size="sm" class="runCaret" />
                     </button>
                     <button
                       v-if="(item.subtasks || []).length"
@@ -360,16 +357,6 @@
                       <button type="button" class="linkBtn" @click.stop="locateSopInMap(sub)">
                         定位脑图
                       </button>
-                      <button
-                        type="button"
-                        class="runBtn ghost"
-                        :disabled="!canEditSop || !!sopCardJobState(sub)"
-                        @click.stop="openRunDialog(sub)"
-                      >
-                        <i v-if="sopCardJobState(sub) === 'running'" class="el-icon-loading"></i>
-                        <SopGlyph v-else kind="play" size="sm" />
-                        <span>运行</span>
-                      </button>
                       <el-dropdown
                         trigger="click"
                         @command="cmd => onSubtaskMenu(cmd, sub, item)"
@@ -380,13 +367,6 @@
                         <el-dropdown-menu slot="dropdown">
                           <el-dropdown-item command="detail">查看详情</el-dropdown-item>
                           <el-dropdown-item command="locate">定位脑图</el-dropdown-item>
-                          <el-dropdown-item
-                            v-if="canEditSop"
-                            command="run"
-                            :disabled="!!sopCardJobState(sub)"
-                          >
-                            运行
-                          </el-dropdown-item>
                         </el-dropdown-menu>
                       </el-dropdown>
                     </div>
@@ -440,11 +420,10 @@
                     <button
                       type="button"
                       class="runBtn primary"
-                      :disabled="!canEditSop || !!sopCardJobState(item)"
-                      @click.stop="openRunDialog(item)"
+                      @click.stop="openSubtree(item)"
                     >
-                      <SopGlyph kind="play" size="sm" />
-                      <span>运行</span>
+                      <span>打开</span>
+                      <SopGlyph kind="chevron-right" size="sm" class="runCaret" />
                     </button>
                   </div>
                 </div>
@@ -478,15 +457,6 @@
                     </button>
                     <button type="button" class="linkBtn" @click.stop="locateSopInMap(sub)">
                       定位脑图
-                    </button>
-                    <button
-                      type="button"
-                      class="runBtn ghost"
-                      :disabled="!canEditSop || !!sopCardJobState(sub)"
-                      @click.stop="openRunDialog(sub)"
-                    >
-                      <SopGlyph kind="play" size="sm" />
-                      <span>运行</span>
                     </button>
                   </div>
                 </div>
@@ -2654,7 +2624,6 @@ export default {
     onSubtaskMenu(cmd, sub) {
       if (cmd === 'detail') this.openSubtree(sub)
       else if (cmd === 'locate') this.locateSopInMap(sub)
-      else if (cmd === 'run') this.openRunDialog(sub)
     },
     rebuildHierarchyTree() {
       const withSubs = attachFallbackSubtasks(this.sops, this.flatNodes)
