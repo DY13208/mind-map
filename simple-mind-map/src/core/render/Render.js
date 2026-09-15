@@ -2460,7 +2460,7 @@ class Render {
       attachmentName: name
     }
     if (meta && typeof meta === 'object') {
-      ;[
+      [
         'attachmentId',
         'attachmentStatus',
         'attachmentError',
@@ -2625,7 +2625,7 @@ class Render {
 
   //  设置节点自定义位置
   setNodeCustomPosition(node, left = undefined, top = undefined) {
-    let nodeList = [node] || this.activeNodeList
+    const nodeList = formatDataToArray(node)
     nodeList.forEach(item => {
       this.mindMap.execCommand('SET_NODE_DATA', item, {
         customLeft: left,

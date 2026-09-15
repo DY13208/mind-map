@@ -11,7 +11,12 @@ import nodeCooperateMethods from './nodeCooperate'
 import quickCreateChildBtnMethods from './quickCreateChildBtn'
 import nodeLayoutMethods from './nodeLayout'
 import { CONSTANTS } from '../../../constants/constant'
-import { copyNodeTree, createUid, addXmlns } from '../../../utils/index'
+import {
+  copyNodeTree,
+  createUid,
+  addXmlns,
+  isUndef
+} from '../../../utils/index'
 
 //  节点类
 class MindMapNode {
@@ -61,8 +66,12 @@ class MindMapNode {
     // top
     this._top = opt.top || 0
     // 自定义位置
-    this.customLeft = opt.data.data.customLeft || undefined
-    this.customTop = opt.data.data.customTop || undefined
+    this.customLeft = isUndef(opt.data.data.customLeft)
+      ? undefined
+      : opt.data.data.customLeft
+    this.customTop = isUndef(opt.data.data.customTop)
+      ? undefined
+      : opt.data.data.customTop
     // 是否正在拖拽中
     this.isDrag = false
     // 父节点
@@ -174,7 +183,7 @@ class MindMapNode {
 
   // 支持自定义位置
   get left() {
-    return this.customLeft || this._left
+    return isUndef(this.customLeft) ? this._left : this.customLeft
   }
 
   set left(val) {
@@ -182,7 +191,7 @@ class MindMapNode {
   }
 
   get top() {
-    return this.customTop || this._top
+    return isUndef(this.customTop) ? this._top : this.customTop
   }
 
   set top(val) {
@@ -324,8 +333,10 @@ class MindMapNode {
     if (!ignoreUpdateCustomTextWidth) {
       this.customTextWidth = this.getData('customTextWidth') || undefined
     }
-    this.customLeft = this.getData('customLeft') || undefined
-    this.customTop = this.getData('customTop') || undefined
+    const customLeft = this.getData('customLeft')
+    const customTop = this.getData('customTop')
+    this.customLeft = isUndef(customLeft) ? undefined : customLeft
+    this.customTop = isUndef(customTop) ? undefined : customTop
     // 这里不要更新概要，不然即使概要没修改，每次也会重新渲染
     // this.updateGeneralization()
     this.createNodeData(recreateTypes)

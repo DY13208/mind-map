@@ -4,6 +4,7 @@
  */
 const fs = require('fs')
 const path = require('path')
+const os = require('os')
 const crypto = require('crypto')
 const http = require('http')
 const { spawnSync, execSync } = require('child_process')
@@ -11,7 +12,11 @@ const { spawnSync, execSync } = require('child_process')
 const ROOT = path.resolve(__dirname, '..')
 const ENV_FILE = path.join(ROOT, '.env')
 const DATA_DIR = path.join(ROOT, 'docker', 'openclaw', 'home')
-const CONFIG_FILE = path.join(DATA_DIR, 'openclaw.json')
+// 仅作单次注入的临时文件，绝不把含 token/MCP 凭据的配置落在 Git 工作区。
+const CONFIG_FILE = path.join(os.tmpdir(), 'mind-map-openclaw.inject.json')
+const PROTECTED_CONFIG_FILE = String(
+  process.env.OPENCLAW_CONFIG_SOURCE || loadEnvFile().OPENCLAW_CONFIG_SOURCE || ''
+).trim()
 // 宿主机映射端口（避免与本机原生 OpenClaw Tray 的 18789 冲突）
 const DEFAULT_PORT = Number(process.env.OPENCLAW_PORT || 4623)
 // 容器内监听端口（compose / nginx 固定走这个）
@@ -186,8 +191,10 @@ function readJsonFile(file) {
 }
 
 function volumeName() {
-  // compose 项目名默认是目录名 mind-map
-  return process.env.OPENCLAW_VOLUME || 'mind-map_mind-map-openclaw'
+  if (process.env.OPENCLAW_VOLUME) return process.env.OPENCLAW_VOLUME
+  const r = spawnSync('docker', ['compose','-f','docker-compose.yml','config','--volumes'], {cwd: ROOT, encoding:'utf8', windowsHide:true})
+  const hit = String(r.stdout || '').split(/\r?\n/).map(s=>s.trim()).find(s=>/openclaw$/.test(s))
+  return hit || 'mind-map_mind-map-openclaw'
 }
 
 /**
@@ -212,7 +219,8 @@ function cogneePluginInstalled() {
     ],
     { cwd: ROOT, encoding: 'utf8', windowsHide: true }
   )
-  return r.status === 0
+  if (r.error || r.status === null) return { ok: false, indeterminate: true }
+  return { ok: r.status === 0, indeterminate: r.status !== 0 && !!r.stderr }
 }
 
 function disableCogneePlugin(cfg) {
@@ -296,9 +304,17 @@ function clearStaleLocks() {
 
 function ensureOpenclawConfig(token, port = DEFAULT_PORT) {
   ensureDataDirs()
-  // 优先用卷里已有完整配置，避免把 UI 配好的模型/插件盖成精简 stub（会触发 clobber + 迁移锁）
+  // 卷内配置是运行时真相；仅在新卷上允许从仓库外的受保护位置注入。
+  // 不再读取 DATA_DIR/openclaw.json 作为回退，避免旧快照在重启时覆盖卷内修改。
   const fromVolume = pullConfigFromVolume()
-  let cfg = fromVolume || readJsonFile(CONFIG_FILE) || {}
+  if (!fromVolume && !PROTECTED_CONFIG_FILE) {
+    throw new Error('无法读取命名卷内 openclaw.json，已停止覆盖以保护现有配置')
+  }
+  const fromProtectedSource =
+    !fromVolume && PROTECTED_CONFIG_FILE
+      ? readJsonFile(path.resolve(PROTECTED_CONFIG_FILE))
+      : null
+  let cfg = fromVolume || fromProtectedSource || {}
   if (!cfg || typeof cfg !== 'object') cfg = {}
 
   cfg.gateway = cfg.gateway || {}
@@ -345,7 +361,8 @@ function ensureOpenclawConfig(token, port = DEFAULT_PORT) {
   // Cognee 是可选能力：插件未安装时清理失效引用，让 Gateway 先正常启动。
   try {
     const { cogneeEnabled, cogneeOpenclawPluginConfig } = require('./cognee-docker')
-    const pluginInstalled = cogneeEnabled() && cogneePluginInstalled()
+    const probe = cogneePluginInstalled()
+    const pluginInstalled = cogneeEnabled() && probe.ok
     if (pluginInstalled) {
       const plugin = cogneeOpenclawPluginConfig()
       if (plugin) {
@@ -373,13 +390,22 @@ function ensureOpenclawConfig(token, port = DEFAULT_PORT) {
           cfg.plugins.slots.memory = COGNEE_PLUGIN_ID
         }
       }
-    } else {
+    } else if (!probe.indeterminate) {
       disableCogneePlugin(cfg)
     }
   } catch (e) {
-    // 可选集成自身异常时也必须 fail-open，不能阻塞 Gateway。
-    disableCogneePlugin(cfg)
+    // 探测异常时保留原配置，禁止误删 slot。
   }
+
+  // 部署契约：无论旧快照或可选集成探测结果如何，都必须保持 Cognee 为 memory slot。
+  // 这里只覆盖这两个字段，插件的 hooks/config 及其余凭据配置原样保留。
+  cfg.plugins = cfg.plugins || {}
+  cfg.plugins.entries = cfg.plugins.entries || {}
+  cfg.plugins.entries[COGNEE_PLUGIN_ID] =
+    cfg.plugins.entries[COGNEE_PLUGIN_ID] || {}
+  cfg.plugins.entries[COGNEE_PLUGIN_ID].enabled = true
+  cfg.plugins.slots = cfg.plugins.slots || {}
+  cfg.plugins.slots.memory = COGNEE_PLUGIN_ID
 
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2) + '\n', 'utf8')
   return CONFIG_FILE
@@ -502,6 +528,12 @@ function syncConfigIntoVolume(token, port) {
         .slice(0, 400)
     }
   }
+  const backup = `${id}:/home/node/.openclaw/openclaw.json`
+  const backupPath = path.join(os.tmpdir(), `openclaw.json.bak.${Date.now()}`)
+  const saved = spawnSync('docker', ['cp', backup, backupPath], { cwd: ROOT, encoding: 'utf8', windowsHide: true })
+  if (saved.status !== 0) {
+    return { ok: false, reason: '覆盖前无法备份卷内 openclaw.json', detail: String(saved.stderr || '') }
+  }
   const cp = spawnSync(
     'docker',
     ['cp', CONFIG_FILE, `${id}:/home/node/.openclaw/openclaw.json`],
@@ -516,6 +548,13 @@ function syncConfigIntoVolume(token, port) {
         .slice(0, 400)
     }
   }
+  try {
+    fs.unlinkSync(CONFIG_FILE)
+  } catch (e) {
+    /* 临时注入文件将在下次写入时覆盖 */
+  }
+  // 复制前已由容器卷保留 last-good；复制后恢复运行用户权限，避免 root:root 配置。
+  spawnSync('docker', ['exec', id, 'sh', '-lc', 'chown node:node /home/node/.openclaw/openclaw.json 2>/dev/null || true; chmod 600 /home/node/.openclaw/openclaw.json'], { cwd: ROOT, encoding: 'utf8', windowsHide: true })
   return { ok: true, containerId: id }
 }
 
@@ -619,6 +658,7 @@ async function ensureOpenclawDockerGateway({
       compose(['rm', '-sf', 'openclaw-gateway'], env)
       clearStaleLocks()
       await sleep(sleepMs)
+      ensureOpenclawConfig(token, port)
       syncConfigIntoVolume(token, port)
       compose(
         ['up', '-d', '--pull', 'missing', '--no-deps', 'openclaw-gateway'],

@@ -67,7 +67,7 @@ async function extractXlsx(buffer) {
     }
     return clip(parts.join('\n\n'))
   } catch (err) {
-    if (err && err.code) throw err
+    if (err && /^XLSX_/.test(String(err.code || ''))) throw err
     // Fallback: sharedStrings only
     const zip = await JSZip.loadAsync(buffer)
     const shared = zip.file('xl/sharedStrings.xml')

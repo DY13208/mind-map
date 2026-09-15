@@ -61,6 +61,11 @@ class Drag extends Base {
     // 鼠标移动的距离距鼠标按下的位置距离多少以上才认为是拖动事件
     this.checkDragOffset = 10
     this.minOffset = 10
+    // Free-drag origins keyed by uid. Node instances may be replaced by a
+    // collaboration render while dragging, so identity and geometry are kept
+    // separately.
+    this.dragOriginPositions = new Map()
+    this.dragStartTransform = null
   }
 
   //  绑定事件
@@ -183,8 +188,38 @@ class Drag extends Base {
       }
     }
     let didMove = false
-    // 存在重叠子节点，则移动作为其子节点
-    if (this.overlapNode) {
+    const isMultiFreeDrag =
+      hadClone && enableFreeDrag && this.beingDragNodeList.length > 1
+    // 框选多个节点表示整组平移。不要根据矩形中心的碰撞结果修改父子
+    // 关系，否则节点会被错误重挂，原有连线也会随之乱连。
+    if (isMultiFreeDrag) {
+      const transform = this.dragStartTransform || this.drawTransform || { scaleX: 1, scaleY: 1 }
+      // 鼠标位移已经在屏幕坐标中，换算一次画布缩放即可；toPos 会再叠加
+      // 平移量，导致多选拖动出现跳跃和连线错位。
+      const deltaX = (e.clientX - this.mouseDownX) / (transform.scaleX || 1)
+      const deltaY = (e.clientY - this.mouseDownY) / (transform.scaleY || 1)
+      const renderer = this.mindMap.renderer
+      this.beingDragNodeList.forEach(originNode => {
+        const uid = originNode.getData('uid')
+        const start = this.dragOriginPositions.get(uid) || {
+          left: originNode.left,
+          top: originNode.top
+        }
+        const live =
+          renderer && typeof renderer.findNodeByUid === 'function'
+            ? renderer.findNodeByUid(uid) || originNode
+            : originNode
+        const left = start.left + deltaX
+        const top = start.top + deltaY
+        live.left = left
+        live.top = top
+        live.customLeft = left
+        live.customTop = top
+        this.mindMap.execCommand('SET_NODE_CUSTOM_POSITION', live, left, top)
+      })
+      this.mindMap.render()
+      didMove = true
+    } else if (this.overlapNode) {
       this.removeNodeActive(this.overlapNode)
       this.mindMap.execCommand(
         'MOVE_NODE_TO',
@@ -307,6 +342,7 @@ class Drag extends Base {
       let node = this.mousedownNode
       // 计算鼠标按下的位置距离节点左上角的距离
       this.drawTransform = this.mindMap.draw.transform()
+      this.dragStartTransform = { ...this.drawTransform }
       let { scaleX, scaleY, translateX, translateY } = this.drawTransform
       this.offsetX = this.mouseDownX - (node.left * scaleX + translateX)
       this.offsetY = this.mouseDownY - (node.top * scaleY + translateY)
@@ -326,6 +362,12 @@ class Drag extends Base {
         // 否则只拖拽按下的节点
         this.beingDragNodeList = [node]
       }
+      this.dragOriginPositions = new Map(
+        this.beingDragNodeList.map(item => [
+          item.getData('uid'),
+          { left: item.left, top: item.top }
+        ])
+      )
       // 拦截拖拽
       const { beforeDragStart } = this.mindMap.opt
       if (typeof beforeDragStart === 'function') {

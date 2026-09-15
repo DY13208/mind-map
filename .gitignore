@@ -9,6 +9,8 @@ utools/dist
 .mcp.json
 docker/runtime-config.local.js
 docker/openclaw/home/
+# OpenClaw 配置含 gateway token/MCP 凭据；只能从具名卷或 OPENCLAW_CONFIG_SOURCE 注入。
+docker/openclaw/home/openclaw.json
 .playwright-cli/
 workbuddy_to_api/
 .codebuddy/models.json
