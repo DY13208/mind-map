@@ -1,7 +1,7 @@
 const { safeRoomKey, sendJson, readBody, getPool } = require('../storage')
 const { bodyLimitForPath } = require('../rateLimit')
 const store = require('./store')
-const { MAX_BYTES } = require('./limits')
+const { MAX_BYTES, attachmentResponseHeaders } = require('./limits')
 const roomAcl = require('../roomAcl')
 
 function matchAttachments(pathname) {
@@ -73,12 +73,9 @@ async function handleApi(req, res, options = {}) {
         return true
       }
       const item = content.attachment
-      const encodedName = encodeURIComponent(item.fileName || 'attachment')
       res.writeHead(200, {
-        'Content-Type': item.mimeType || 'application/octet-stream',
+        ...attachmentResponseHeaders(item.fileName || 'attachment'),
         'Content-Length': content.buffer.length,
-        'Content-Disposition': `inline; filename*=UTF-8''${encodedName}`,
-        'X-Content-Type-Options': 'nosniff'
       })
       res.end(content.buffer)
       return true

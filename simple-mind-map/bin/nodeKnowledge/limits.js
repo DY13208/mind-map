@@ -89,6 +89,31 @@ function safeFileName(name) {
     .slice(0, MAX_FILENAME) || 'file'
 }
 
+// The upload MIME is client supplied and must not control how stored bytes are
+// served.  Use the allow-listed extension as the source of truth instead.
+function trustedMimeType(fileName) {
+  return MIME_BY_EXT[extOf(fileName)] || 'application/octet-stream'
+}
+
+function encodeContentDispositionFileName(fileName) {
+  return encodeURIComponent(fileName).replace(/[!'()*]/g, char =>
+    '%' + char.charCodeAt(0).toString(16).toUpperCase()
+  )
+}
+
+function attachmentResponseHeaders(fileName) {
+  const safeName = safeFileName(fileName || 'attachment')
+  const mimeType = trustedMimeType(safeName)
+  const inline = mimeType === 'application/pdf' || mimeType.startsWith('image/')
+  return {
+    // Stored text can be GBK/UTF-16. Do not falsely label its raw bytes UTF-8;
+    // the in-app preview decodes bytes explicitly and non-media files download.
+    'Content-Type': mimeType,
+    'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeContentDispositionFileName(safeName)}`,
+    'X-Content-Type-Options': 'nosniff'
+  }
+}
+
 module.exports = {
   MAX_BYTES,
   MAX_EXTRACT_CHARS,
@@ -101,5 +126,8 @@ module.exports = {
   normalizeMime,
   isAllowedFile,
   kindOf,
-  safeFileName
+  safeFileName,
+  trustedMimeType,
+  encodeContentDispositionFileName,
+  attachmentResponseHeaders
 }

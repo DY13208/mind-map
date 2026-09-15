@@ -57,7 +57,9 @@ module.exports = {
     'y-websocket',
     'y-protocols',
     'socket.io-client',
-    'engine.io-client'
+    'engine.io-client',
+    // docx-preview 0.4 发布包使用了可选链；webpack 4 需要经 Babel 转译。
+    'docx-preview'
   ],
   chainWebpack: config => {
     // 移除 preload 插件
@@ -118,7 +120,13 @@ module.exports = {
         'simple-mind-map': path.resolve(__dirname, '../simple-mind-map'),
         yjs: path.resolve(__dirname, './node_modules/yjs'),
         'y-webrtc': path.resolve(__dirname, './node_modules/y-webrtc'),
-        'y-websocket': path.resolve(__dirname, './node_modules/y-websocket')
+        'y-websocket': path.resolve(__dirname, './node_modules/y-websocket'),
+        // 本项目仍使用 webpack 4，不能解析 docx-preview 0.4 的 exports 字段。
+        // 显式指向其 CommonJS 构建产物，供附件预览按需加载。
+        'docx-preview$': path.resolve(
+          __dirname,
+          './node_modules/docx-preview/dist/docx-preview.js'
+        )
       }
     }
   },
