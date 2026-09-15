@@ -337,6 +337,38 @@ async function removeMember(db, who, id, target) {
   })
 }
 
+async function transferOwnership(db, who, id, target) {
+  return transaction(db, async tx => {
+    const team = await getTeam(tx, who.corpId, id, who.userId)
+    if (team.role !== 'owner') throw error(403, 'FORBIDDEN', '只有团队所有者可以转移所有权')
+    const targetId = await resolveMemberId(tx, who, target)
+    if (!targetId) throw error(400, 'BAD_REQUEST', '请选择新的所有者')
+    if (targetId === who.userId) throw error(400, 'BAD_REQUEST', '不能将所有权转移给自己')
+    const member = await tx.query(
+      `select user_id, role from team_members where team_id = $1 and corp_id = $2 and user_id = $3`,
+      [id, who.corpId, targetId]
+    )
+    if (!member.rows.length) {
+      throw error(400, 'TEAM_MEMBER_REQUIRED', '请先将对方加入团队，再转移所有权')
+    }
+    await tx.query(
+      `update teams set owner_id = $3, updated_at = now() where id = $1 and corp_id = $2 and deleted_at is null`,
+      [id, who.corpId, targetId]
+    )
+    await tx.query(
+      `update team_members set role = 'owner', updated_at = now()
+       where team_id = $1 and corp_id = $2 and user_id = $3`,
+      [id, who.corpId, targetId]
+    )
+    await tx.query(
+      `update team_members set role = 'admin', updated_at = now()
+       where team_id = $1 and corp_id = $2 and user_id = $3 and role = 'owner'`,
+      [id, who.corpId, who.userId]
+    )
+    return listMembers(tx, who, id)
+  })
+}
+
 async function listRooms(db, who, id) {
   await getTeam(db, who.corpId, id, who.userId)
   const result = await db.query(`
@@ -501,7 +533,10 @@ async function contacts(db, who, options = {}, fetchRemote, upsertContact) {
   const where = ['corp_id = $1']
   const query = String(options.q || options.search || '').trim()
   if (query) { params.push(`%${query.replace(/[%_\\]/g, ch => `\\${ch}`)}%`); where.push(`(name ilike $${params.length} escape '\\' or user_id ilike $${params.length} escape '\\' or wecom_userid ilike $${params.length} escape '\\')`) }
-  if (options.departmentId) { params.push(String(options.departmentId)); where.push(`departments::text ilike '%' || $${params.length} || '%'`) }
+  if (options.departmentId) {
+    params.push(String(options.departmentId))
+    where.push(`departments ? $${params.length}`)
+  }
   const count = await db.query(`select count(*)::int as total from wecom_users where ${where.join(' and ')}`, params)
   const page = params.concat([limit + 1, offset])
   const result = await db.query(`select user_id, wecom_userid, name, avatar, position, departments from wecom_users where ${where.join(' and ')} order by name, user_id limit $${page.length - 1} offset $${page.length}`, page)
@@ -528,7 +563,7 @@ async function handleApi(req, res, options) {
     }
     if (path === '/api/teams' && req.method === 'GET') { const items = await listTeams(db, who); sendJson(res, 200, { items, list: items }); return true }
     if (path === '/api/teams' && req.method === 'POST') { sendJson(res, 201, await createTeam(db, who, await readBody(req))); return true }
-    const match = path.match(/^\/api\/teams\/([^/]+)(?:\/(members|rooms|folders)(?:\/([^/]+))?)?$/)
+    const match = path.match(/^\/api\/teams\/([^/]+)(?:\/(members|rooms|folders|transfer-ownership)(?:\/([^/]+))?)?$/)
     if (!match) return false
     const id = teamId(decodeURIComponent(match[1])); const sub = match[2]; const target = match[3] ? decodeURIComponent(match[3]) : ''
     if (!sub && req.method === 'GET') { sendJson(res, 200, dto(await getTeam(db, who.corpId, id, who.userId))); return true }
@@ -539,6 +574,12 @@ async function handleApi(req, res, options) {
       if (!fields.length) throw error(400, 'INVALID_TEAM_UPDATE', '没有可更新字段')
       fields.push('updated_at = now()'); const updated = await db.query(`update teams set ${fields.join(', ')} where corp_id = $1 and id = $2 and deleted_at is null returning *`, params)
       sendJson(res, 200, dto({ ...updated.rows[0], role: team.role, member_count: team.member_count, file_count: team.file_count })); return true
+    }
+    if (sub === 'transfer-ownership' && req.method === 'POST' && !target) {
+      const body = await readBody(req)
+      const items = await transferOwnership(db, who, id, body.userId || body.user_id || body.wecomUserId)
+      sendJson(res, 200, { ok: true, items, list: items })
+      return true
     }
     if (sub === 'members' && req.method === 'GET' && !target) { const items = await listMembers(db, who, id); sendJson(res, 200, { items, list: items }); return true }
     if (sub === 'members' && req.method === 'POST' && !target) { const body = await readBody(req); const items = await addMembers(db, who, id, body.wecomUserIds); sendJson(res, 200, { items, list: items }); return true }
@@ -626,4 +667,4 @@ async function handleApi(req, res, options) {
   }
 }
 
-module.exports = { initSchema, initCorpConstraints, identity, getTeam, listTeams, createTeam, listMembers, addMembers, updateMember, removeMember, listRooms, assignRoom, assignFolder, creationMembers, contacts, handleApi, error }
+module.exports = { initSchema, initCorpConstraints, identity, getTeam, listTeams, createTeam, listMembers, addMembers, updateMember, removeMember, transferOwnership, listRooms, assignRoom, assignFolder, creationMembers, contacts, handleApi, error }

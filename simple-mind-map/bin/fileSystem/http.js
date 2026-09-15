@@ -2,6 +2,44 @@ const { sendJson, readBody, safeRoomKey } = require('../storage')
 const { isAuthEnabled } = require('../auth')
 const roomAcl = require('../roomAcl')
 
+async function listFolderMembersWithOwner(store, folderId) {
+  const folder = await store.getFolder(folderId)
+  const list = (await store.listFolderMembers(folderId)).map(row => ({ ...row }))
+  const ownerId = folder && folder.created_by
+  if (!ownerId) return list
+  const existing = list.find(item => item.user_id === ownerId)
+  if (existing) {
+    existing.role = 'owner'
+    return list
+  }
+  let name = ownerId
+  let avatar = ''
+  let wecomUserId = ownerId
+  if (typeof store.query === 'function') {
+    try {
+      const result = await store.query(
+        `select name, avatar, wecom_userid from wecom_users where user_id = $1 limit 1`,
+        [ownerId]
+      )
+      if (result.rows && result.rows[0]) {
+        name = result.rows[0].name || ownerId
+        avatar = result.rows[0].avatar || ''
+        wecomUserId = result.rows[0].wecom_userid || ownerId
+      }
+    } catch (_) {}
+  }
+  list.unshift({
+    folder_id: folderId,
+    user_id: ownerId,
+    role: 'owner',
+    name,
+    avatar,
+    wecom_userid: wecomUserId,
+    created_at: folder.created_at || null,
+    updated_at: folder.updated_at || null
+  })
+  return list
+}
 function collectionPath(pathname) {
   return /^\/api\/(?:files|maps|rooms)$/.test(String(pathname || ''))
 }
@@ -23,6 +61,13 @@ function folderMembers(pathname) {
 }
 function folderMembersBulk(pathname) {
   const match = String(pathname || '').match(/^\/api\/folders\/([^/]+)\/members\/bulk$/)
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
+function folderTransferOwnership(pathname) {
+  const match = String(pathname || '').match(
+    /^\/api\/folders\/([^/]+)\/transfer-ownership$/
+  )
   return match ? decodeURIComponent(match[1]) : ''
 }
 
@@ -133,6 +178,7 @@ async function handleFileSystemApi(req, res, options = {}) {
       folderCollection(pathname) ||
       folderMembers(pathname) ||
       folderMembersBulk(pathname) ||
+      folderTransferOwnership(pathname) ||
       folderItem(pathname) ||
       fileMove(pathname) ||
       fileSopAuthorize(pathname) ||
@@ -152,6 +198,57 @@ async function handleFileSystemApi(req, res, options = {}) {
   const bypass = !!actor.bypass || !isAuthEnabled()
 
   try {
+    const transferFolderId = folderTransferOwnership(pathname)
+    if (transferFolderId && method === 'POST') {
+      const folder = await fs.store.getFolder(transferFolderId)
+      if (!folder) {
+        throw Object.assign(new Error('文件夹不存在'), {
+          code: 'FOLDER_NOT_FOUND',
+          statusCode: 404
+        })
+      }
+      if (!bypass && folder.created_by !== userId) {
+        throw Object.assign(new Error('只有文件夹所有者可以转移所有权'), {
+          code: 'FORBIDDEN',
+          statusCode: 403
+        })
+      }
+      const body = options.body || (await readBody(req))
+      const targetId = await roomAcl.resolveUserId(
+        fs.store,
+        body.userId || body.user_id,
+        req.authUser && req.authUser.corpId
+      )
+      if (!targetId) {
+        throw Object.assign(new Error('请选择新的所有者'), {
+          code: 'BAD_REQUEST',
+          statusCode: 400
+        })
+      }
+      if (targetId === folder.created_by) {
+        throw Object.assign(new Error('不能将所有权转移给自己'), {
+          code: 'BAD_REQUEST',
+          statusCode: 400
+        })
+      }
+      const previousOwner = folder.created_by
+      if (typeof fs.store.updateFolderOwner === 'function') {
+        await fs.store.updateFolderOwner(transferFolderId, targetId)
+      } else {
+        await fs.store.query(
+          `update folders set created_by = $2, updated_at = now()
+           where id = $1 and deleted_at is null`,
+          [transferFolderId, targetId]
+        )
+      }
+      await fs.store.removeFolderMember(transferFolderId, targetId).catch(() => {})
+      if (previousOwner && previousOwner !== targetId) {
+        await fs.store.setFolderMember(transferFolderId, previousOwner, 'manager')
+      }
+      const list = await listFolderMembersWithOwner(fs.store, transferFolderId)
+      sendJson(res, 200, { ok: true, list, ownerId: targetId })
+      return true
+    }
     const bulkFolderId = folderMembersBulk(pathname)
     if (bulkFolderId && method === 'POST') {
       const folder = await fs.store.getFolder(bulkFolderId)
@@ -190,7 +287,11 @@ async function handleFileSystemApi(req, res, options = {}) {
           )
         }
       }
-      sendJson(res, 200, { ok: true, list: await fs.store.listFolderMembers(bulkFolderId), added: rows.length })
+      sendJson(res, 200, {
+        ok: true,
+        list: await listFolderMembersWithOwner(fs.store, bulkFolderId),
+        added: rows.length
+      })
       return true
     }
     const folderAcl = folderMembers(pathname)
@@ -205,8 +306,13 @@ async function handleFileSystemApi(req, res, options = {}) {
         throw Object.assign(new Error('只有文件夹所有者可以设置权限'), { code: 'FORBIDDEN', statusCode: 403 })
       }
       if (method === 'GET' && !folderAcl.userId) {
-        const list = await fs.store.listFolderMembers(folderAcl.id)
-        sendJson(res, 200, { ok: true, list, canManage })
+        const list = await listFolderMembersWithOwner(fs.store, folderAcl.id)
+        sendJson(res, 200, {
+          ok: true,
+          list,
+          canManage,
+          ownerId: folder.created_by || ''
+        })
         return true
       }
       if ((method === 'POST' || method === 'PATCH') && (!folderAcl.userId || method === 'PATCH')) {
@@ -244,7 +350,7 @@ async function handleFileSystemApi(req, res, options = {}) {
             req.authUser && req.authUser.corpId
           )
         }
-        const list = await fs.store.listFolderMembers(folderAcl.id)
+        const list = await listFolderMembersWithOwner(fs.store, folderAcl.id)
         sendJson(res, 200, { ok: true, list })
         return true
       }
