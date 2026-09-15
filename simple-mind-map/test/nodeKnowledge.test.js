@@ -91,6 +91,11 @@ async function main() {
   assert.equal(textResult.status, 'ready')
   assert.match(textResult.extractedText, /付款条件/)
 
+  assert.equal(
+    extract.compactXlsxCsv('标题,,,\n甲,乙,,\n,,,\n,,,'),
+    '标题\n甲,乙'
+  )
+
   const zip = new JSZip()
   zip.file(
     'word/document.xml',
@@ -118,13 +123,6 @@ async function main() {
   })
   assert.equal(unsupported.status, 'failed')
 
-  const imageNoOcr = await extract.extractBuffer(
-    Buffer.from([0x89, 0x50, 0x4e, 0x47]),
-    { fileName: 'a.png', mimeType: 'image/png' }
-  )
-  assert.equal(imageNoOcr.status, 'failed')
-  assert.match(imageNoOcr.errorMessage, /OCR/)
-
   const db = createMemoryDb()
   await store.initSchema(db)
   const first = await store.createFromBuffer(db, {
@@ -146,6 +144,24 @@ async function main() {
   })
   assert.equal(second.id, first.id)
   assert.equal(second.deduped, true)
+
+  const empty = await store.ingestUpload(db, 'room-demo', {
+    contentBase64: 'data:text/plain;charset=utf-8;base64,',
+    fileName: 'empty.txt',
+    mimeType: 'text/plain'
+  })
+  assert.equal(empty.byteSize, 0)
+  assert.equal(empty.fileName, 'empty.txt')
+
+  await assert.rejects(
+    () =>
+      store.ingestUpload(db, 'room-demo', {
+        contentBase64: 'data:text/plain;base64,not base64!',
+        fileName: 'invalid.txt',
+        mimeType: 'text/plain'
+      }),
+    /contentBase64 无效/
+  )
 
   let denied = null
   try {

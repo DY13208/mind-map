@@ -299,9 +299,25 @@ async function reextractStored(db, roomKey, id) {
 function decodeContentBase64(value) {
   const raw = String(value || '').trim()
   if (!raw) return null
-  const cleaned = raw.replace(/^data:[^;]+;base64,/i, '')
+  // FileReader emits a data URL. Text files may include a charset parameter
+  // and empty files legitimately have no payload after the comma.
+  const dataUrl = /^data:[^,]*;base64,/i.test(raw)
+  const cleaned = dataUrl ? raw.replace(/^data:[^,]*;base64,/i, '') : raw
+  if (
+    cleaned &&
+    !/^(?:[a-z0-9+/]{4})*(?:[a-z0-9+/]{2}==|[a-z0-9+/]{3}=)?$/i.test(
+      cleaned
+    )
+  ) {
+    const err = new Error('contentBase64 无效')
+    err.statusCode = 400
+    err.code = 'INVALID_BASE64'
+    throw err
+  }
   const buf = Buffer.from(cleaned, 'base64')
-  if (!buf.length) {
+  // An empty data URL represents a valid zero-byte attachment. Do not confuse
+  // it with an absent payload, which is handled by ingestUpload.
+  if (!buf.length && !dataUrl) {
     const err = new Error('contentBase64 无效')
     err.statusCode = 400
     err.code = 'INVALID_BASE64'

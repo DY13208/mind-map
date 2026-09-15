@@ -101,11 +101,50 @@ export async function uploadNodeAttachment(roomKey, body) {
   })
 }
 
+export async function getNodeAttachment(roomKey, attachmentId) {
+  return apiRequest(
+    `/api/files/${encodeURIComponent(roomKey)}/attachments/${encodeURIComponent(
+      attachmentId
+    )}`,
+    { method: 'GET' }
+  )
+}
+
 export function nodeAttachmentContentUrl(roomKey, attachmentId) {
   const base = String(getRuntimeConfig().collabApi || '').replace(/\/$/, '')
   return `${base}/api/files/${encodeURIComponent(
     roomKey
   )}/attachments/${encodeURIComponent(attachmentId)}/content`
+}
+
+export async function fetchNodeAttachmentContent(
+  roomKey,
+  attachmentId,
+  options = {}
+) {
+  const res = await fetch(nodeAttachmentContentUrl(roomKey, attachmentId), {
+    method: 'GET',
+    credentials: 'include',
+    cache: 'no-store',
+    headers: { Accept: 'application/octet-stream' },
+    signal: options.signal
+  })
+  if (!res.ok) {
+    let message = res.statusText || '附件读取失败'
+    try {
+      const data = await res.json()
+      message = data.error || message
+    } catch (err) {
+      // Keep the HTTP status text when the response is not JSON.
+    }
+    const error = new Error(message)
+    error.statusCode = res.status
+    throw error
+  }
+  return {
+    buffer: await res.arrayBuffer(),
+    contentType: res.headers.get('content-type') || ''
+  }
 }
 
 export async function ensureNodeKnowledgeRemote(roomKey, sources) {

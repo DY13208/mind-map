@@ -12,7 +12,7 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
 COPY web/package.json web/package-lock.json ./web/
 COPY simple-mind-map/package.json simple-mind-map/package-lock.json ./simple-mind-map/
 # vue-cli 在 devDependencies，前端构建必须装上。
-RUN cd web && npm ci --omit=optional
+RUN cd web && npm ci
 # 协作服务不需要测试工具，也不需要 y-leveldb/leveldown。
 RUN cd simple-mind-map && npm ci --omit=dev --omit=optional
 
