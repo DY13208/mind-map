@@ -141,6 +141,34 @@ async function putObject(cosKey, buffer, mimeType) {
   return true
 }
 
+async function getObjectBuffer(cosKey) {
+  if (!storeEnabled || !cosKey) {
+    const err = new Error('附件原文件未存储，无法查看或重新解析')
+    err.statusCode = 404
+    err.code = 'ATTACHMENT_CONTENT_MISSING'
+    throw err
+  }
+  const data = await cosCall('getObject', {
+    Bucket,
+    Region,
+    Key: cosKey
+  })
+  const body = data && data.Body
+  return Buffer.isBuffer(body) ? body : Buffer.from(body || '')
+}
+
+async function getContentById(db, roomKey, id) {
+  const row = await db.query(
+    `select * from node_attachments where room_key = $1 and id = $2 limit 1`,
+    [roomKey, id]
+  )
+  if (!row.rows[0]) return null
+  return {
+    attachment: rowToDto(row.rows[0]),
+    buffer: await getObjectBuffer(row.rows[0].cos_key)
+  }
+}
+
 async function updateExtraction(db, id, patch) {
   const res = await db.query(
     `update node_attachments set
@@ -227,7 +255,16 @@ async function createFromBuffer(db, options = {}) {
     ]
   )
 
-  const extracted = await extractBuffer(buffer, { fileName, mimeType })
+  let extracted
+  try {
+    extracted = await extractBuffer(buffer, { fileName, mimeType })
+  } catch (err) {
+    extracted = {
+      status: 'failed',
+      extractedText: '',
+      errorMessage: (err && err.message) || '附件解析失败'
+    }
+  }
   const saved = await updateExtraction(db, id, {
     status: extracted.status,
     errorMessage: extracted.errorMessage,
@@ -251,6 +288,12 @@ async function reextract(db, existing, buffer) {
     errorMessage: extracted.errorMessage,
     extractedText: extracted.extractedText
   })
+}
+
+async function reextractStored(db, roomKey, id) {
+  const content = await getContentById(db, roomKey, id)
+  if (!content) return null
+  return reextract(db, content.attachment, content.buffer)
 }
 
 function decodeContentBase64(value) {
@@ -385,6 +428,8 @@ module.exports = {
   getById,
   getByHash,
   listByIds,
+  getContentById,
+  reextractStored,
   createFromBuffer,
   ingestUpload,
   ensureSources,

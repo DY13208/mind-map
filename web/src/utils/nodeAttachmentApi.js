@@ -1,5 +1,6 @@
 import { apiRequest } from './fileApi'
 import { roomFromLocation } from './roomLocation'
+import { getRuntimeConfig } from './runtimeConfig'
 import { collectNodeKnowledge, knowledgeNeedsRemoteExtract } from './nodeKnowledge'
 
 const MAX_UPLOAD_CHARS = 1.6e6
@@ -98,6 +99,13 @@ export async function uploadNodeAttachment(roomKey, body) {
     body: JSON.stringify(body || {}),
     timeoutMs: 60000
   })
+}
+
+export function nodeAttachmentContentUrl(roomKey, attachmentId) {
+  const base = String(getRuntimeConfig().collabApi || '').replace(/\/$/, '')
+  return `${base}/api/files/${encodeURIComponent(
+    roomKey
+  )}/attachments/${encodeURIComponent(attachmentId)}/content`
 }
 
 export async function ensureNodeKnowledgeRemote(roomKey, sources) {

@@ -2,15 +2,17 @@ const { safeRoomKey, sendJson, readBody, getPool } = require('../storage')
 const { bodyLimitForPath } = require('../rateLimit')
 const store = require('./store')
 const { MAX_BYTES } = require('./limits')
+const roomAcl = require('../roomAcl')
 
 function matchAttachments(pathname) {
   const m = String(pathname || '').match(
-    /^\/api\/(?:files|maps|rooms)\/([^/]+)\/attachments(?:\/([^/]+))?$/
+    /^\/api\/(?:files|maps|rooms)\/([^/]+)\/attachments(?:\/([^/]+))?(?:\/(content))?$/
   )
   if (!m) return null
   return {
     roomKey: decodeURIComponent(m[1]),
-    id: m[2] ? decodeURIComponent(m[2]) : ''
+    id: m[2] ? decodeURIComponent(m[2]) : '',
+    content: m[3] === 'content'
   }
 }
 
@@ -36,6 +38,7 @@ async function handleApi(req, res, options = {}) {
   try {
     if (ensureHit && req.method === 'POST') {
       const roomKey = safeRoomKey(ensureHit.roomKey)
+      await roomAcl.assertRoomAccess(db, req, roomKey, 'edit')
       const body = await readBody(req, {
         maxBytes: Math.max(bodyLimitForPath(pathname), MAX_BYTES + 512 * 1024)
       })
@@ -47,6 +50,7 @@ async function handleApi(req, res, options = {}) {
 
     if (attachmentHit && !attachmentHit.id && req.method === 'POST') {
       const roomKey = safeRoomKey(attachmentHit.roomKey)
+      await roomAcl.assertRoomAccess(db, req, roomKey, 'edit')
       const body = await readBody(req, {
         maxBytes: Math.max(bodyLimitForPath(pathname), MAX_BYTES + 512 * 1024)
       })
@@ -55,8 +59,34 @@ async function handleApi(req, res, options = {}) {
       return true
     }
 
+    if (
+      attachmentHit &&
+      attachmentHit.id &&
+      attachmentHit.content &&
+      req.method === 'GET'
+    ) {
+      const roomKey = safeRoomKey(attachmentHit.roomKey)
+      await roomAcl.assertRoomAccess(db, req, roomKey, 'view')
+      const content = await store.getContentById(db, roomKey, attachmentHit.id)
+      if (!content) {
+        sendJson(res, 404, { ok: false, error: '附件不存在', code: 'NOT_FOUND' })
+        return true
+      }
+      const item = content.attachment
+      const encodedName = encodeURIComponent(item.fileName || 'attachment')
+      res.writeHead(200, {
+        'Content-Type': item.mimeType || 'application/octet-stream',
+        'Content-Length': content.buffer.length,
+        'Content-Disposition': `inline; filename*=UTF-8''${encodedName}`,
+        'X-Content-Type-Options': 'nosniff'
+      })
+      res.end(content.buffer)
+      return true
+    }
+
     if (attachmentHit && attachmentHit.id && req.method === 'GET') {
       const roomKey = safeRoomKey(attachmentHit.roomKey)
+      await roomAcl.assertRoomAccess(db, req, roomKey, 'view')
       const row = await store.getById(db, roomKey, attachmentHit.id)
       if (!row) {
         sendJson(res, 404, { ok: false, error: '附件不存在', code: 'NOT_FOUND' })
@@ -67,9 +97,9 @@ async function handleApi(req, res, options = {}) {
     }
 
     if (attachmentHit && attachmentHit.id && req.method === 'POST') {
-      // Re-fetch metadata only; re-extract requires content upload again.
       const roomKey = safeRoomKey(attachmentHit.roomKey)
-      const row = await store.getById(db, roomKey, attachmentHit.id)
+      await roomAcl.assertRoomAccess(db, req, roomKey, 'edit')
+      const row = await store.reextractStored(db, roomKey, attachmentHit.id)
       if (!row) {
         sendJson(res, 404, { ok: false, error: '附件不存在', code: 'NOT_FOUND' })
         return true
