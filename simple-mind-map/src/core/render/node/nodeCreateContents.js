@@ -705,8 +705,11 @@ function createNoteNode() {
 
 //  创建附件节点
 function createAttachmentNode() {
-  const { attachmentUrl, attachmentName } = this.getData()
-  if (!attachmentUrl) {
+  const { attachmentUrl, attachmentId, attachmentName } = this.getData()
+  // Server-managed attachments are identified by attachmentId and may not have
+  // a public URL (for example, objects stored with a private ACL). They still
+  // belong to the node and must render the attachment affordance.
+  if (!attachmentUrl && !attachmentId) {
     return
   }
   const iconSize = this.getNodeIconSize('attachmentIcon')

@@ -45,16 +45,18 @@ export default {
         this.$message.warning('请先进入协作房间后再上传附件')
         return
       }
-      this.pendingNodes = list
+      // Keep the selected identities. Collaboration renders may replace node
+      // instances while the file picker/upload is open.
+      this.pendingNodes = list.map(node => ({ uid: node.uid, node }))
       this.$refs.fileInput && this.$refs.fileInput.click()
     },
     async onFilePicked(event) {
       const file =
         event && event.target && event.target.files && event.target.files[0]
       if (event && event.target) event.target.value = ''
-      const nodes = this.pendingNodes.slice()
+      const pendingNodes = this.pendingNodes.slice()
       this.pendingNodes = []
-      if (!file || !nodes.length) return
+      if (!file || !pendingNodes.length) return
       if (file.size > MAX_LOCAL_BYTES) {
         this.$message.error(`文件过大（最多 ${MAX_LOCAL_BYTES} 字节）`)
         return
@@ -62,7 +64,7 @@ export default {
       const roomKey = roomFromLocation(this.$route)
       const mindMap =
         this.mindMap ||
-        (nodes[0] && nodes[0].mindMap) ||
+        (pendingNodes[0] && pendingNodes[0].node && pendingNodes[0].node.mindMap) ||
         null
       if (!mindMap || !roomKey) {
         this.$message.error('无法上传：缺少导图或房间')
@@ -78,12 +80,19 @@ export default {
           fileName: file.name,
           mimeType: file.type || 'application/octet-stream',
           contentBase64,
-          nodeUid: nodes[0] && nodes[0].uid,
+          nodeUid: pendingNodes[0] && pendingNodes[0].uid,
           sourceKind: 'attachment'
         })
         const attachment = (res && res.attachment) || {}
         const excerpt = String(attachment.extractedText || '').slice(0, 2400)
-        nodes.forEach(node => {
+        const renderer = mindMap.renderer
+        pendingNodes.forEach(item => {
+          const node =
+            (item.uid &&
+              renderer &&
+              typeof renderer.findNodeByUid === 'function' &&
+              renderer.findNodeByUid(item.uid)) ||
+            item.node
           mindMap.execCommand(
             'SET_NODE_ATTACHMENT',
             node,
@@ -98,7 +107,7 @@ export default {
           )
         })
         if (attachment.status === 'ready') {
-          this.$message.success('附件已解析，可被流程补齐使用')
+          this.$message.success('附件已添加到所选节点，并可被流程补齐使用')
         } else {
           this.$message.warning(
             attachment.errorMessage || '附件已保存，但内容解析失败'
