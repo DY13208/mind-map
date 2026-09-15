@@ -151,6 +151,51 @@ function formatNotifyAssignees(list) {
   return names.join('、')
 }
 
+/** 刷新后续跑时常见：页面/Bridge 尚未就绪、瞬时网络错误 */
+function isTransientResumeError(msg, err) {
+  const t = String(msg || (err && err.message) || '')
+  return (
+    (err && err.status >= 500) ||
+    (err && err.code === 'WORKBUDDY_EMPTY_CONTENT') ||
+    /Failed to fetch|NetworkError|ECONNREFUSED|Bad Gateway|连不上|未就绪|Gateway|Bridge|接口已通，但|返回空正文/i.test(
+      t
+    )
+  )
+}
+
+/** 刷新后把中断任务重新入队续跑（保留进度摘要，清掉补数/错误态） */
+function restoreJobForResume(job, statusText) {
+  const prevStream = String(job.streamText || '').trim()
+  const prevProgress = String(job.progressText || '').trim()
+  if (prevStream || prevProgress) {
+    const keep = [
+      '—— 刷新前进度（续跑会重新执行） ——',
+      prevProgress,
+      prevStream ? prevStream.slice(0, 4000) : ''
+    ]
+      .filter(Boolean)
+      .join('\n')
+    job.progressText = keep.slice(0, 20000)
+  }
+  const notifiedOk = (job.notifyResults || []).some(r => r && r.dispatchOk)
+  const progressHint = String(job.progressText || '')
+  const progressSaysDispatched =
+    /企微待办已派发|知会通知\s*\d+\s*条已派发|知会派发\s*\d+\//.test(progressHint)
+  if (notifiedOk || progressSaysDispatched) job.skipNotifyOnResume = true
+  job.state = 'queued'
+  job.status = statusText || '刷新后自动续跑…'
+  job.error = ''
+  job.streamText = ''
+  job.result = null
+  job.missingFields = []
+  job.missingSummary = ''
+  job.finishedAt = 0
+  job.startedAt = 0
+  job.resumeAfterRefresh = true
+  job.resumeRetryCount = job.resumeRetryCount || 0
+  return job
+}
+
 const QUEUE_STORAGE_KEY = 'lc_sop_run_queue_v1'
 const STREAM_PERSIST_MAX = 200000
 
@@ -441,10 +486,17 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
     (restored.waiting || []).forEach(raw => {
       const job = hydrateJob(raw)
       if (!job) return
-      if (job.state !== 'waiting_data' && job.state !== 'waiting_human') {
-        job.state = job.missingFields && job.missingFields.length
-          ? 'waiting_data'
-          : 'waiting_human'
+      // 补数已关闭：旧 waiting_data 不再挂起，刷新后自动续跑
+      if (
+        job.state === 'waiting_data' ||
+        (job.missingFields && job.missingFields.length && job.state !== 'waiting_human')
+      ) {
+        restoreJobForResume(job, '刷新后自动续跑…')
+        pending.unshift(job)
+        return
+      }
+      if (job.state !== 'waiting_human') {
+        job.state = 'waiting_human'
       }
       waiting.set(job.id, job)
     })
@@ -468,6 +520,8 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       if (!job) return
       job.state = 'queued'
       job.status = job.status || '刷新后恢复排队…'
+      job.resumeAfterRefresh = true
+      job.resumeRetryCount = job.resumeRetryCount || 0
       pending.push(job)
     })
     ;(restored.recent || []).forEach(raw => {
@@ -489,27 +543,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
           j => sopJobKey(j.roomKey, j.sopUid) === sopJobKey(job.roomKey, job.sopUid)
         )
       if (already) return
-      const prevStream = String(job.streamText || '').trim()
-      const prevProgress = String(job.progressText || '').trim()
-      if (prevStream || prevProgress) {
-        const keep = [
-          '—— 刷新前进度（续跑会重新执行） ——',
-          prevProgress,
-          prevStream ? prevStream.slice(0, 4000) : ''
-        ]
-          .filter(Boolean)
-          .join('\n')
-        job.progressText = keep.slice(0, 20000)
-      }
-      // 若刷新前已成功派发企微待办，续跑时跳过，避免重复发
-      const notifiedOk = (job.notifyResults || []).some(r => r && r.dispatchOk)
-      const progressHint = String(job.progressText || '')
-      const progressSaysDispatched =
-        /企微待办已派发|知会通知\s*\d+\s*条已派发|知会派发\s*\d+\//.test(
-          progressHint
-        )
-      if (notifiedOk || progressSaysDispatched) job.skipNotifyOnResume = true
-      job.state = 'queued'
+      restoreJobForResume(job, '刷新后自动续跑…')
       // 企微代办类：刷新后若已派过就不要整段重跑模型
       if (
         job.skipNotifyOnResume &&
@@ -518,14 +552,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         )
       ) {
         job.status = '刷新后跳过重复派发…'
-      } else {
-        job.status = '刷新后自动续跑…'
       }
-      job.error = ''
-      job.streamText = ''
-      job.result = null
-      job.finishedAt = 0
-      job.startedAt = 0
       pending.unshift(job)
     })
     if (recent.length > 12) recent.length = 12
@@ -731,6 +758,14 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       if (!job.streamText && result.reply) {
         job.streamText = result.reply
       }
+      if (result.waitingData && !result.waitingHuman) {
+        // 补数通路未打通：不挂起，按普通结束处理（须在写入 job.result 之前清掉）
+        result.waitingData = false
+        result.waiting = false
+        if (result.runResult === '待补数') result.runResult = '完成'
+        job.missingFields = []
+        job.missingSummary = ''
+      }
       job.result = {
         ok: result.ok,
         runResult: result.runResult,
@@ -748,13 +783,13 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
           (result.assessment && result.assessment.toolEvents) ||
           ((result.events && result.events.length) || 0)
       }
-      if (result.waitingHuman || result.waitingData) {
-        job.state = result.waitingData ? 'waiting_data' : 'waiting_human'
+      if (result.waitingHuman) {
+        job.state = 'waiting_human'
         job.waitingTaskUids = result.waitingTaskUids || []
         job.waitingWecomTodos = result.waitingWecomTodos || []
         job.notifyResults = result.notifyResults || []
-        job.missingFields = result.missingFields || []
-        job.missingSummary = result.missingSummary || ''
+        job.missingFields = []
+        job.missingSummary = ''
         if (Array.isArray(result.nodeProgress)) {
           job.nodeProgress = sanitizeNodeProgress(result.nodeProgress)
         }
@@ -782,13 +817,11 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
           (job.waitingWecomTodos && job.waitingWecomTodos.length) ||
           job.waitingTaskUids.length ||
           notifyCount(result)
-        job.status = result.waitingData
-          ? `待补数：${result.missingSummary || '请补充缺失数据后继续'}${
-              notifyHint ? ` · 已通知 ${notifyHint}` : ''
-            }`
-          : `等待企微待办完成 ${waitN} 条后再继续${
-              notifyHint ? ` · 代办：${notifyHint}` : ''
-            }（自动轮询中）`
+        job.status = `等待企微待办完成 ${waitN} 条后再继续${
+          notifyHint ? ` · 代办：${notifyHint}` : ''
+        }（自动轮询中）`
+        job.resumeAfterRefresh = false
+        job.resumeRetryCount = 0
         controllers.delete(job.id)
         running.delete(job.id)
         waiting.set(job.id, job)
@@ -805,6 +838,8 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
             notifyHintDone ? ` · 已通知 ${notifyHintDone}` : ''
           }`
         : `结束：${(result.assessment && result.assessment.reason) || result.runResult || '未确认真执行'}`
+      job.resumeAfterRefresh = false
+      job.resumeRetryCount = 0
       if (job.onSuccess) job.onSuccess(result, publicJob(job))
       finishJob(job, { ok: true })
     } catch (err) {
@@ -826,6 +861,22 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
               ? '连不上助理（OpenClaw），请确认 Gateway / Bridge 已启动'
               : '连不上 WorkBuddy，请确认本机已启动 WorkBuddy API 代理'
           : raw || 'SOP 执行失败'
+      if (
+        job.resumeAfterRefresh &&
+        isTransientResumeError(msg, err) &&
+        (job.resumeRetryCount || 0) < 4
+      ) {
+        job.resumeRetryCount = (job.resumeRetryCount || 0) + 1
+        job.state = 'queued'
+        job.status = `页面刚刷新，等待服务就绪后自动续跑 (${job.resumeRetryCount}/4)…`
+        job.error = ''
+        controllers.delete(job.id)
+        running.delete(job.id)
+        pending.unshift(job)
+        emit()
+        setTimeout(() => pump(), 1500 * job.resumeRetryCount)
+        return
+      }
       job.error = msg
       job.status = msg
       if (err && err.ledger) {
@@ -1117,7 +1168,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
     }
   }
 
-  // 恢复排队任务后继续泵；立刻落盘
+  // 恢复排队任务后继续泵；稍等页面与 Bridge/Gateway 就绪
   if (pending.length) {
     setTimeout(() => {
       try {
@@ -1125,7 +1176,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       } catch (e) {
         /* ignore */
       }
-    }, 0)
+    }, 1200)
   }
   persistNow()
 

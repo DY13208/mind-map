@@ -8,7 +8,6 @@
       @cancel="cancelJob"
       @cancel-all="cancelAll"
       @resume="resumeJob"
-      @fill-data="onFillData"
     />
   </div>
 </template>
@@ -77,10 +76,6 @@ export default {
     },
     resumeJob(id) {
       if (this.queue) this.queue.resumeWaiting(id)
-    },
-    onFillData(id) {
-      this.$message.info('请到 SOP 台账该任务详情中补数')
-      this.$router.push({ path: '/sop', query: { job: id } })
     }
   }
 }
