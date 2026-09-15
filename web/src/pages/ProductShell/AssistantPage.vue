@@ -111,17 +111,31 @@
           </div>
         </div>
         <div
-          v-if="sending && toolStatusLine"
-          class="toolProgress"
+          v-if="sending || toolLog.length"
+          class="execPanel"
         >
-          <span class="toolDot" aria-hidden="true"></span>
-          <span>{{ toolStatusLine }}</span>
-        </div>
-        <div
-          v-if="sending && !streamingPreview"
-          class="msgRow assistant"
-        >
-          <div class="bubble thinking">生成中…</div>
+          <div class="execHead">
+            <span class="execTitle">执行过程</span>
+            <span v-if="sending" class="execWait">{{ waitLabel }}</span>
+          </div>
+          <ul v-if="toolLog.length" class="execList">
+            <li
+              v-for="(row, i) in toolLog"
+              :key="row.key || i"
+              class="execItem"
+              :class="row.phase"
+            >
+              <span class="execDot" aria-hidden="true"></span>
+              <span class="execText">
+                <strong>{{ row.label }}</strong>
+                <em v-if="row.detail">{{ row.detail }}</em>
+              </span>
+            </li>
+          </ul>
+          <div v-else-if="sending" class="execThinking">
+            <span class="toolDot" aria-hidden="true"></span>
+            正在连接助理并等待输出…
+          </div>
         </div>
       </div>
 
@@ -399,7 +413,11 @@ export default {
       slashIndex: 0,
       pendingSop: null,
       toolEvents: [],
-      toolStatusLine: ''
+      toolLog: [],
+      toolStatusLine: '',
+      sendStartedAt: 0,
+      waitTick: 0,
+      waitTimer: null
     }
   },
   computed: {
@@ -421,6 +439,16 @@ export default {
       if (!msgs.length) return false
       const last = msgs[msgs.length - 1]
       return !!(last && last.role === 'assistant' && String(last.content || ''))
+    },
+    waitLabel() {
+      if (!this.sending || !this.sendStartedAt) return ''
+      const sec = Math.max(
+        0,
+        Math.floor((Date.now() - this.sendStartedAt) / 1000)
+      )
+      // waitTick 仅用于驱动每秒刷新
+      void this.waitTick
+      return sec > 0 ? `已等待 ${sec}s` : '处理中'
     },
     filteredSops() {
       const q = String(this.slashQuery || '')
@@ -467,6 +495,7 @@ export default {
   },
   beforeDestroy() {
     this.stop()
+    this.stopWaitTimer()
   },
   methods: {
     persist() {
@@ -762,29 +791,113 @@ export default {
     formatToolStatus(info) {
       const raw = String((info && info.name) || 'tool')
       const phase = String((info && info.phase) || '').toLowerCase()
-      // 忽略中间 update，避免刷屏
-      if (phase === 'update') return ''
+      const detail = String((info && info.detail) || '')
+        .replace(/\s+/g, ' ')
+        .trim()
       const map = {
         read: '读取文件',
         exec: '执行命令',
         process: '查看进程',
         write: '写入文件',
+        edit: '编辑文件',
+        apply_patch: '修改文件',
         memory_search: '搜索记忆',
         sessions_search: '搜索会话',
         wecom_mcp: '企业微信',
-        web_search: '联网搜索'
+        web_search: '联网搜索',
+        web_fetch: '抓取网页',
+        browser: '浏览器',
+        thinking: '思考',
+        python: '运行 Python',
+        shell: '执行脚本'
       }
       let label = map[raw]
       if (!label) {
         if (/todo/i.test(raw)) label = '待办'
+        else if (/python|\.py/i.test(raw + detail)) label = '运行 Python'
+        else if (/shell|bash|exec|cmd/i.test(raw)) label = '执行命令'
         else if (/^mcp/i.test(raw)) label = 'MCP 工具'
         else label = raw.replace(/^mcp[-_]+/i, '').slice(0, 28)
       }
-      if (phase === 'start') return `正在${label}…`
-      if (phase === 'result' || phase === 'end' || phase === 'done') {
-        return `${label}完成`
+      const script =
+        detail.match(
+          /([\w./\\-]+\.(?:py|js|ts|mjs|cjs|sh|ps1|bat|cmd|json|md|txt|html?|csv))\b/i
+        ) || detail.match(/(?:^|[\s`'"])((?:\.\/|\/|[A-Za-z]:\\)[^\s`'"]{3,80})/)
+      const shortDetail = script
+        ? script[1]
+        : detail
+          ? detail.length > 72
+            ? `${detail.slice(0, 72)}…`
+            : detail
+          : ''
+      if (phase === 'start' || phase === 'update') {
+        return shortDetail ? `正在${label} · ${shortDetail}` : `正在${label}…`
       }
-      return label
+      if (phase === 'result' || phase === 'end' || phase === 'done' || phase === 'ok') {
+        return shortDetail ? `${label}完成 · ${shortDetail}` : `${label}完成`
+      }
+      if (phase === 'error') {
+        return shortDetail ? `${label}失败 · ${shortDetail}` : `${label}失败`
+      }
+      return shortDetail ? `${label} · ${shortDetail}` : label
+    },
+    pushToolLog(info) {
+      const phase = String((info && info.phase) || '').toLowerCase()
+      // 中间 update 太多时合并到同名进行中条目
+      const name = String((info && info.name) || 'tool')
+      const label = this.formatToolStatus(info)
+      if (!label) return
+      const detail = String((info && info.detail) || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 120)
+      const last = this.toolLog[this.toolLog.length - 1]
+      if (
+        last &&
+        last.name === name &&
+        (phase === 'update' ||
+          (phase === last.phase && last.label === label) ||
+          (last.phase === 'start' && phase === 'start'))
+      ) {
+        this.$set(this.toolLog, this.toolLog.length - 1, {
+          ...last,
+          phase: phase || last.phase,
+          label,
+          detail: detail || last.detail,
+          at: Date.now()
+        })
+      } else {
+        this.toolLog.push({
+          key: `${Date.now()}_${this.toolLog.length}_${name}`,
+          name,
+          phase: phase || 'update',
+          label,
+          detail,
+          at: Date.now()
+        })
+      }
+      // 列表过长时只留最近 40 条
+      if (this.toolLog.length > 40) {
+        this.toolLog = this.toolLog.slice(-40)
+      }
+      this.toolStatusLine = label
+      this.scrollBottom()
+    },
+    startWaitTimer() {
+      this.stopWaitTimer()
+      this.sendStartedAt = Date.now()
+      this.waitTick = 0
+      this.waitTimer = setInterval(() => {
+        this.waitTick += 1
+      }, 1000)
+    },
+    stopWaitTimer() {
+      if (this.waitTimer) {
+        clearInterval(this.waitTimer)
+        this.waitTimer = null
+      }
+      this.sendStartedAt = 0
+      this.waitTick = 0
     },
     async buildSopPrompt(userText, sop) {
       const roomKey = (sop && sop.roomKey) || this.sopRoomKey
@@ -845,6 +958,7 @@ export default {
       }
       this.sending = false
       this.toolStatusLine = ''
+      this.stopWaitTimer()
     },
     async saveSettings() {
       this.saving = true
@@ -885,8 +999,10 @@ export default {
       chat.messages.push(assistant)
       this.sending = true
       this.toolEvents = []
+      this.toolLog = []
       this.toolStatusLine = ''
       this.errorText = ''
+      this.startWaitTimer()
       this.abort = typeof AbortController !== 'undefined' ? new AbortController() : null
 
       try {
@@ -913,10 +1029,7 @@ export default {
             const probe = line.trim()
             if (probe && isToolProgressNoise(probe)) {
               const info = parseToolProgressNoise(probe)
-              if (info && !assistant.content && !added) {
-                const status = this.formatToolStatus(info)
-                if (status) this.toolStatusLine = status
-              }
+              if (info) this.pushToolLog(info)
               continue
             }
             added += line + '\n'
@@ -925,10 +1038,7 @@ export default {
           if (lineBuf) {
             if (isToolProgressNoise(lineBuf)) {
               const info = parseToolProgressNoise(lineBuf)
-              if (info && !assistant.content && !added) {
-                const status = this.formatToolStatus(info)
-                if (status) this.toolStatusLine = status
-              }
+              if (info) this.pushToolLog(info)
             } else if (!looksLikePartialToolLine(lineBuf)) {
               added += lineBuf
               lineBuf = ''
@@ -940,32 +1050,32 @@ export default {
           }
           const next = String(assistant.content || '') + added
           this.$set(assistant, 'content', next)
-          if (next) this.toolStatusLine = ''
           chat.updatedAt = Date.now()
           this.scrollBottom()
         }
         try {
-          // 方案 3：Gateway WS（经 bridge）— 可带工具进度
+          // Gateway WS（经 bridge）— 可带工具进度
           await streamOpenclawGatewayWs({
             conversationId: chat.id,
             message: promptText,
             signal: this.abort && this.abort.signal,
             onDelta,
             onTool: info => {
-              const line = this.formatToolStatus(info)
-              if (!line) return
               this.toolEvents.push({
                 name: info.name || 'tool',
                 phase: info.phase || '',
                 detail: info.detail || ''
               })
-              // 尚无正文时才显示一行紧凑进度；有正文则以气泡流式为准
-              if (!assistant.content) this.toolStatusLine = line
-              this.scrollBottom()
+              this.pushToolLog(info)
             }
           })
         } catch (wsErr) {
           if (wsErr && wsErr.name === 'AbortError') throw wsErr
+          this.pushToolLog({
+            name: 'bridge',
+            phase: 'update',
+            detail: 'Bridge 不可用，改走 HTTP 流式'
+          })
           // Bridge 不可用时回退 HTTP SSE
           await streamOpenclawChat({
             conversationId: chat.id,
@@ -1018,6 +1128,7 @@ export default {
         this.sending = false
         this.toolEvents = []
         this.toolStatusLine = ''
+        this.stopWaitTimer()
         this.abort = null
         chat.updatedAt = Date.now()
         this.persist()
@@ -1263,6 +1374,95 @@ export default {
   gap: 8px;
   width: fit-content;
   max-width: calc(100% - 24px);
+}
+.execPanel {
+  max-width: 760px;
+  margin: 0 auto 18px;
+  padding: 12px 14px;
+  border: 1px solid #e8ecef;
+  border-radius: 14px;
+  background: #f8faf9;
+}
+.execHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.execTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a2332;
+}
+.execWait {
+  font-size: 12px;
+  color: #8b95a5;
+}
+.execList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow: auto;
+}
+.execItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid #e6ece9;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #374151;
+  &:last-child {
+    border-bottom: 0;
+  }
+  &.start .execDot,
+  &.update .execDot {
+    background: #2563eb;
+    animation: toolPulse 1s ease-in-out infinite;
+  }
+  &.result .execDot,
+  &.done .execDot,
+  &.end .execDot,
+  &.ok .execDot {
+    background: #16a34a;
+  }
+  &.error .execDot {
+    background: #dc2626;
+  }
+}
+.execDot {
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: #9ca3af;
+  flex-shrink: 0;
+}
+.execText {
+  min-width: 0;
+  strong {
+    font-weight: 600;
+    color: #1f2937;
+  }
+  em {
+    display: block;
+    margin-top: 2px;
+    font-style: normal;
+    font-size: 12px;
+    color: #6b7280;
+    word-break: break-all;
+  }
+}
+.execThinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #6b7280;
+  padding: 4px 0;
 }
 .toolDot {
   width: 6px;
