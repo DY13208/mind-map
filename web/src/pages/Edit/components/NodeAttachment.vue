@@ -10,10 +10,7 @@
 
 <script>
 import { roomFromLocation } from '@/utils/roomLocation'
-import {
-  nodeAttachmentContentUrl,
-  uploadNodeAttachment
-} from '@/utils/nodeAttachmentApi'
+import { uploadNodeAttachment } from '@/utils/nodeAttachmentApi'
 
 const MAX_LOCAL_BYTES = 5 * 1024 * 1024
 
@@ -32,27 +29,11 @@ export default {
   },
   created() {
     this.$bus.$on('selectAttachment', this.onSelectAttachment)
-    this.$bus.$on('node_attachmentClick', this.onAttachmentClick)
   },
   beforeDestroy() {
     this.$bus.$off('selectAttachment', this.onSelectAttachment)
-    this.$bus.$off('node_attachmentClick', this.onAttachmentClick)
   },
   methods: {
-    onAttachmentClick(node) {
-      const data = node && node.getData ? node.getData() : {}
-      if (data.attachmentId) {
-        const roomKey = roomFromLocation(this.$route)
-        if (!roomKey) return
-        window.open(
-          nodeAttachmentContentUrl(roomKey, data.attachmentId),
-          '_blank',
-          'noopener'
-        )
-        return
-      }
-      if (data.attachmentUrl) window.open(data.attachmentUrl, '_blank', 'noopener')
-    },
     onSelectAttachment(nodes) {
       const list = Array.isArray(nodes) ? nodes.filter(Boolean) : []
       if (!list.length) {

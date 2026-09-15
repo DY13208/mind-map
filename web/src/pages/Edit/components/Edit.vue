@@ -56,6 +56,7 @@
     <AiChat v-if="enableAi"></AiChat>
     <NodeAutoExpand v-if="mindMap" :mindMap="mindMap"></NodeAutoExpand>
     <NodeAttachment v-if="mindMap" :mindMap="mindMap"></NodeAttachment>
+    <NodeAttachmentPreview v-if="mindMap"></NodeAttachmentPreview>
     <CooperateDialog :mindMap="mindMap"></CooperateDialog>
     <MapRefDialog></MapRefDialog>
     <div
@@ -140,6 +141,7 @@ import AiCreate from './AiCreate.vue'
 import AiChat from './AiChat.vue'
 import NodeAutoExpand from './NodeAutoExpand.vue'
 import NodeAttachment from './NodeAttachment.vue'
+import NodeAttachmentPreview from './NodeAttachmentPreview.vue'
 import CooperateDialog from './CooperateDialog.vue'
 import MapRefDialog from './MapRefDialog.vue'
 import { normalizeMapRef } from '@/utils/mapRefNav'
@@ -205,6 +207,7 @@ export default {
     AiChat,
     NodeAutoExpand,
     NodeAttachment,
+    NodeAttachmentPreview,
     CooperateDialog,
     MapRefDialog
   },
