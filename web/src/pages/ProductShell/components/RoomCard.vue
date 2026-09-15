@@ -280,6 +280,7 @@ export default {
     align-items: center;
     h3 {
       flex: 1;
+      min-width: 0;
       margin: 0;
       font-size: 15px;
       overflow: hidden;
@@ -287,6 +288,7 @@ export default {
       white-space: nowrap;
     }
     .more {
+      flex: 0 0 auto;
       padding: 7px;
       color: #7f8d88;
     }

@@ -376,9 +376,10 @@ async function testFolderRoleSource() {
     undefined
   )
 
-  await roomAcl.setFolderRole(db, 'room-folder', 'dave', 'editor', 'folder-1')
+  await roomAcl.setFolderRole(db, 'room-folder', 'dave', 'manager', 'folder-1')
   const daveHasFolder = db.members.find(item => item.user_id === 'dave')
-  assert.strictEqual(daveHasFolder.folder_role, 'editor')
+  assert.strictEqual(daveHasFolder.folder_role, 'manager')
+  assert.strictEqual(daveHasFolder.role, 'editor')
   await roomAcl.clearRoomFolderRoles(db, 'room-folder')
   assert.strictEqual(
     db.members.find(item => item.user_id === 'dave'),

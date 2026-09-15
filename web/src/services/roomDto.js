@@ -30,6 +30,7 @@ export function displayRole(role) {
 export function apiRole(role) {
   const raw = normalizeRole(role)
   if (raw === 'owner') return 'Owner'
+  if (raw === 'manager') return 'Manager'
   if (raw === 'editor') return 'Editor'
   if (raw === 'viewer') return 'Viewer'
   return role || ''
