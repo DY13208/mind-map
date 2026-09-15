@@ -677,19 +677,26 @@ export function groupSopsIntoCards(sops) {
 }
 
 export function formatSopDisplayTitle(sop, forceLetter) {
-  const title = cleanTitle((sop && sop.title) || '') || '未命名'
-  const letter = forceLetter || 'D'
-  return `${letter}：${title}`
+  const raw = cleanTitle((sop && sop.title) || '') || '未命名'
+  const stripped = raw.replace(/^[Dd](?!\d)\s*[：:]\s*/, '') || raw
+  // 脑图步骤兜底成子任务时：保持原文，不伪造 D/d 前缀
+  if (sop && sop.isFallbackSubtask) return stripped
+  const letter = String(forceLetter || (sop && sop.id) || 'D').toUpperCase()
+  if (letter === 'D') return `D：${stripped}`
+  return stripped
 }
 
-/** 子任务展示标题统一用小写 d： */
+/** 子任务用脑图原文；仅标题本身是「D：」台账时才带 D 前缀 */
 export function formatSubtaskDisplayTitle(sop) {
-  return formatSopDisplayTitle(sop, 'd')
+  const raw = cleanTitle((sop && sop.title) || '') || '未命名'
+  const stripped = raw.replace(/^[Dd](?!\d)\s*[：:]\s*/, '') || raw
+  if (sop && sop.isFallbackSubtask) return stripped
+  if (matchDRegistryTitle(raw)) return `D：${stripped}`
+  return stripped
 }
 
 /**
- * 从扁平节点补全子任务（当子节点尚未被抽成 SOP 时的兜底）。
- * 不改变 D/D1/D2 抽取规则：仅展示 D 的非 D1/D2 直属子节点。
+ * 从扁平节点补全子任务：只挂真正的「D：」台账子节点，普通步骤不进列表。
  */
 export function attachFallbackSubtasks(sops, flatNodes = []) {
   const sopUidSet = new Set((sops || []).map(s => s && s.uid).filter(Boolean))
@@ -713,9 +720,8 @@ export function attachFallbackSubtasks(sops, flatNodes = []) {
       .filter(child => {
         if (sopUidSet.has(child.uid)) return false
         const text = stripHtmlLocal(child.text || '')
-        // 排除 D1/D2 编号标题
-        if (/^D\d+\s*[：:]/i.test(text.trim())) return false
-        return true
+        // 只有「D：标题」才进台账；D1/D2 与普通步骤一律不展示
+        return !!matchDRegistryTitle(text)
       })
       .map(child => {
         const text = stripHtmlLocal(child.text || '')

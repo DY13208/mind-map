@@ -325,7 +325,7 @@ function buildSystemPrompt() {
 9. 最终文件必须写到 /home/node/.openclaw/workspace/output/（这是可预览的 output 目录）；不要写到别的临时目录，也不要复用其它 SOP 刚生成的文件。
 10. 同时给出：是否完成、核心判断一句话、单页内容要点、数据来源。
 11. 不要修改 SOP 本体结构；过程日志不必写入导图。
-12. 缺关键数据时说明缺什么，仍尽量用已有数据给出可执行结论，但不要伪造文件。`
+12. 缺关键数据时在结论里写清限制与假设，仍尽量用已有数据给出可执行结论与产物；不要停下来要求用户在良策界面「补数」或粘贴外部系统链接。`
 }
 
 function buildUserPrompt({ ctx, outputs, extraNote }) {
@@ -346,7 +346,7 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
       '- 遇到通知、知会、审批类步骤：说明对象与内容；若台账侧已派发待办则勿重复；',
       '- 不要强行生成 HTML/Excel 等文件；文末可不写「产物清单」，改为「## 执行结果」；',
       '- 说明：已完成哪些自动步骤、卡在哪个人工步骤、下一步建议。',
-      '- 若下方已有「## 用户提交资料 / 用户补充数据」，视为需求方已提供；不得再要求用户重复填写这些字段；仅当大纲另有未覆盖的硬性必填时，才在「仍缺」里列出字段名。',
+      '- 若下方已有「## 用户提交资料」，直接使用；不要要求用户再在界面里补数或贴链接。',
       extraNote ? `\n## 额外要求\n${extraNote}` : '',
       '',
       '## SOP 子树 / 大纲上下文',
@@ -689,9 +689,12 @@ function guessKind(uri) {
 function inferRunResult(reply) {
   const t = String(reply || '')
   if (/疑似空跑|未真正执行|没有工具|未调用工具/.test(t)) return '疑似空跑'
-  // 缺数据 / 待人工补数：优先于「失败」（避免「读取失败」被误判成整单失败）
-  if (isMissingDataReply(t)) return '待补数'
-  if (/已完成|执行完成|全部完成|成功生成/.test(t) && !/未完成|失败无法|待补/.test(t)) {
+  // 缺数据：不再标成「待补数」中断态（补数入口已关闭）
+  if (isMissingDataReply(t)) {
+    if (/已完成|执行完成|成功生成|已派发/.test(t)) return '完成'
+    return '完成'
+  }
+  if (/已完成|执行完成|全部完成|成功生成/.test(t) && !/未完成|失败无法/.test(t)) {
     return '完成'
   }
   if (/部分完成|待人工|人工确认/.test(t)) return '部分完成'
@@ -944,19 +947,9 @@ export function assessSopExecution({
   const claimsDone = /已完成|执行完成|成功生成/.test(text)
   const missing = extractMissingDataNeeds(text, { alreadyProvided })
 
-  // 缺数据：不算失败，进入待补数（已提供过的字段不会再进表单）
-  if (missing.needsData && missing.fields.length) {
-    return {
-      ok: true,
-      waitingData: true,
-      runResult: '待补数',
-      reason: missing.summary || '缺少关键数据，请补充后继续',
-      missingFields: missing.fields,
-      missingSummary: missing.summary || '',
-      toolEvents: toolish.length,
-      realFiles: realFiles.length
-    }
-  }
+  // 吉客云等数据源未打通前：不中断执行要求「界面补数」。
+  // 缺数据只记在结论里，任务按正常评估继续（有产物/工具则完成，否则走下方规则）。
+  void missing
 
   // 企微待办已直派成功：即使模型只回了预览/确认文案，也算真执行
   if (dispatched.length && realFiles.length === 0) {
@@ -1780,18 +1773,12 @@ export async function runSopWithWorkbuddy({
   }
 
   setStatus(
-    assessment.waitingData
-      ? `待补数：${assessment.reason || '请补充缺失数据后继续'}`
-      : assessment.ok
-        ? `执行完成（${elapsedSec}s）`
-        : `未确认真执行（${elapsedSec}s）：${assessment.reason || runResult}`
+    assessment.ok
+      ? `执行完成（${elapsedSec}s）`
+      : `未确认真执行（${elapsedSec}s）：${assessment.reason || runResult}`
   )
   if (nodeProgress.length) {
-    const finalStatus = assessment.waitingData
-      ? 'waiting'
-      : assessment.ok
-        ? 'done'
-        : 'failed'
+    const finalStatus = assessment.ok ? 'done' : 'failed'
     nodeProgress = nodeProgress.map(s => {
       if (s.status === 'done' || s.status === 'waiting') return s
       if (s.status === 'active' || s.status === 'pending') {
@@ -1812,22 +1799,20 @@ export async function runSopWithWorkbuddy({
   }
   return {
     ok: assessment.ok && runResult !== '失败',
-    waitingData: !!assessment.waitingData,
-    missingFields: assessment.missingFields || [],
-    missingSummary: assessment.waitingData
-      ? assessment.reason || ''
-      : '',
+    waitingData: false,
+    missingFields: [],
+    missingSummary: '',
     reply,
     elapsedSec,
     outputs,
     deliverables,
     ledger,
-    runResult: assessment.waitingData ? '待补数' : runResult,
+    runResult,
     assessment,
     events,
     context: ctx,
     nodeProgress,
-    // 无论是否待补数，都带回通知派发结果，便于界面展示「发给谁」
+    // 带回通知派发结果，便于界面展示「发给谁」
     notifyResults,
     waitingTaskUids: notifySummary.waitingTaskUids || [],
     waitingWecomTodos: notifySummary.waitingWecomTodos || []

@@ -316,7 +316,10 @@
                   >
                     <div class="subRail" aria-hidden="true"></div>
                     <div class="subIcon">
-                      <SopGlyph kind="d" size="md" />
+                      <SopGlyph
+                        :kind="subtaskGlyphKind(sub)"
+                        size="md"
+                      />
                     </div>
                     <div class="subMain">
                       <div
@@ -440,7 +443,7 @@
                   @dblclick.stop="openSubtree(sub)"
                 >
                   <div class="subIcon">
-                    <SopGlyph kind="d" size="md" />
+                    <SopGlyph :kind="subtaskGlyphKind(sub)" size="md" />
                   </div>
                   <div class="listMain">
                     <div
@@ -483,6 +486,22 @@
 
     <div class="sopDetailPage" v-else>
       <el-tabs v-model="dialogTab" class="detailTabs">
+        <el-tab-pane label="记录" name="runs">
+          <div class="historyPane">
+            <SopTaskBoard
+              v-if="detailSopTaskJobs.length"
+              embedded
+              title="SOP 任务"
+              :jobs="detailSopTaskJobs"
+              :selected-id="selectedSopJobId"
+              @select="selectSopJob"
+              @cancel="cancelSopJob"
+              @cancel-all="cancelAllSopJobs"
+              @resume="resumeSopJob"
+            />
+            <div v-else class="paneEmpty soft">暂无任务</div>
+          </div>
+        </el-tab-pane>
         <el-tab-pane label="导图" name="map">
           <div class="syncBar">
             <span class="syncDot" :class="syncStatus"></span>
@@ -496,138 +515,6 @@
               ref="mindMapContainer"
               class="mindMapContainer"
             ></div>
-          </div>
-        </el-tab-pane>
-        <el-tab-pane label="历史任务" name="runs">
-          <div class="historyPane">
-            <SopTaskBoard
-              v-if="detailSopTaskJobs.length"
-              embedded
-              title="SOP 任务"
-              :jobs="detailSopTaskJobs"
-              :selected-id="selectedSopJobId"
-              @select="selectSopJob"
-              @cancel="cancelSopJob"
-              @cancel-all="cancelAllSopJobs"
-              @resume="resumeSopJob"
-              @fill-data="openDataFillDialog"
-            />
-            <div v-else class="paneEmpty soft">
-              暂无进行中的 SOP 任务；可点右上角「运行」发起。
-              <el-button type="text" @click="$router.push('/sop-tasks')"
-                >打开多任务页</el-button
-              >
-            </div>
-
-            <div class="ledgerPane historyLedger" v-loading="ledgerSaving">
-              <el-collapse v-model="historyLedgerOpen">
-                <el-collapse-item name="ledger">
-                  <template slot="title">
-                    <span class="sectionLabel inline"
-                      >台账运行记录（{{ activeLedger.runs.length }}）</span
-                    >
-                  </template>
-                  <div class="addForm">
-                    <el-input
-                      v-model="runForm.at"
-                      size="small"
-                      placeholder="时间（如 2026-09-04 18:00）"
-                      class="formField"
-                    ></el-input>
-                    <el-input
-                      v-model="runForm.result"
-                      size="small"
-                      placeholder="结果（完成 / 失败…）"
-                      class="formField short"
-                    ></el-input>
-                    <el-input
-                      v-model="runForm.note"
-                      size="small"
-                      placeholder="备注"
-                      class="formField"
-                    ></el-input>
-                    <el-button
-                      type="primary"
-                      size="small"
-                      :disabled="!activeSopUid || !canEditSop"
-                      @click="submitRun"
-                    >
-                      追加运行
-                    </el-button>
-                  </div>
-                  <ul class="ledgerList" v-if="activeLedger.runs.length">
-                    <li
-                      v-for="r in visibleLedgerRuns"
-                      :key="r.id"
-                      :title="[r.at, r.result, r.note].filter(Boolean).join(' · ')"
-                    >
-                      <span class="liMain">{{ shortLedgerRunLabel(r) }}</span>
-                      <span class="liActor" v-if="r.actor">{{ r.actor }}</span>
-                    </li>
-                  </ul>
-                  <div
-                    v-if="activeLedger.runs.length > ledgerRunLimit"
-                    class="ledgerMore"
-                  >
-                    <el-button type="text" size="mini" @click="toggleLedgerRunLimit">
-                      {{
-                        ledgerRunExpanded
-                          ? '收起'
-                          : `展开全部 ${activeLedger.runs.length} 条`
-                      }}
-                    </el-button>
-                  </div>
-                  <div v-if="!activeLedger.runs.length" class="paneEmpty">
-                    暂无运行记录
-                  </div>
-                </el-collapse-item>
-              </el-collapse>
-            </div>
-          </div>
-        </el-tab-pane>
-        <el-tab-pane :label="`产物（${visibleDeliverables.length}）`" name="dels">
-          <div class="ledgerPane" v-loading="ledgerSaving">
-            <ul class="ledgerList" v-if="visibleDeliverables.length">
-              <li v-for="d in visibleDeliverables" :key="d.id">
-                <span class="liMain">
-                  <a
-                    v-if="isHttp(d.uri_or_path)"
-                    :href="d.uri_or_path"
-                    target="_blank"
-                    rel="noopener"
-                    >{{ d.name }}</a
-                  >
-                  <template v-else>{{ d.name }}</template>
-                  <span
-                    class="liPath"
-                    v-if="d.uri_or_path && !isHttp(d.uri_or_path)"
-                  >
-                    {{ d.uri_or_path }}
-                  </span>
-                  <span class="liAt" v-if="d.at">{{ d.at }}</span>
-                </span>
-                <span class="liActions">
-                  <el-button
-                    v-if="canPreviewDeliverable(d)"
-                    type="text"
-                    size="mini"
-                    @click="previewDeliverable(d)"
-                  >
-                    预览
-                  </el-button>
-                  <el-button
-                    v-if="canDownloadDeliverable(d)"
-                    type="text"
-                    size="mini"
-                    @click="downloadDeliverable(d)"
-                  >
-                    下载
-                  </el-button>
-                  <span class="liKind">{{ d.kind }}</span>
-                </span>
-              </li>
-            </ul>
-            <div v-else class="paneEmpty">暂无产物</div>
           </div>
         </el-tab-pane>
       </el-tabs>
@@ -801,83 +688,6 @@
       </span>
     </el-dialog>
 
-    <el-dialog
-      title="补充缺失数据"
-      :visible.sync="dataFillDialogVisible"
-      width="640px"
-      top="8vh"
-      append-to-body
-      :close-on-click-modal="false"
-      custom-class="sopDataFillDialog"
-    >
-      <p class="fillDialogLead" v-if="dataFillJobTitle">
-        「{{ dataFillJobTitle }}」缺少关键数据，填完后继续执行。
-      </p>
-      <p class="fillDialogHint" v-if="shortDataFillHint">{{ shortDataFillHint }}</p>
-      <div class="fillDialogGrid">
-        <div class="fillDialogField" v-for="f in dataFillFields" :key="f.key">
-          <label>{{ f.label }}</label>
-          <el-input
-            v-model="f.value"
-            size="small"
-            clearable
-            placeholder="请填写"
-          ></el-input>
-        </div>
-      </div>
-      <div class="fillDialogExtra">
-        <label>其它补充说明（可选）</label>
-        <el-input
-          v-model="dataFillExtra"
-          type="textarea"
-          :rows="3"
-          placeholder="补充上下文、约束或链接等"
-        ></el-input>
-      </div>
-      <span slot="footer" class="fillDialogFooter">
-        <el-button size="small" @click="dataFillDialogVisible = false"
-          >取消</el-button
-        >
-        <el-button
-          type="primary"
-          size="small"
-          :loading="dataFillSubmitting"
-          @click="submitMissingDataAndResume"
-        >
-          提交并继续
-        </el-button>
-      </span>
-    </el-dialog>
-
-    <el-dialog
-      :title="artifactPreviewTitle"
-      :visible.sync="artifactPreviewVisible"
-      width="860px"
-      append-to-body
-      custom-class="artifactPreviewDialog"
-      @closed="onArtifactPreviewClosed"
-    >
-      <iframe
-        v-if="artifactPreviewUrl"
-        class="artifactPreviewFrame"
-        :src="artifactPreviewUrl"
-        title="产物预览"
-      ></iframe>
-      <div v-else class="paneEmpty">无法预览</div>
-      <span slot="footer" class="dialog-footer">
-        <el-button
-          v-if="artifactPreviewDownloadUrl"
-          type="primary"
-          size="small"
-          @click="openUrl(artifactPreviewDownloadUrl)"
-        >
-          下载
-        </el-button>
-        <el-button size="small" @click="artifactPreviewVisible = false"
-          >关闭</el-button
-        >
-      </span>
-    </el-dialog>
   </div>
 </template>
 
@@ -909,7 +719,6 @@ import {
   replaceFileTree,
   undoMapOperation,
   redoMapOperation,
-  artifactLocalUrl,
   searchLocalArtifacts,
   authorizeSopRun
 } from '@/utils/fileApi'
@@ -930,15 +739,12 @@ import {
   normalizeLedger,
   mergeLedgerSources,
   latestDeliverableText,
-  addRunToLedger,
   addDeliverableToLedger,
   persistSopLedger,
-  readLedgerFromNodeLike,
-  formatMinuteStamp
+  readLedgerFromNodeLike
 } from '@/utils/sopLedger'
 import {
   SOP_OUTPUT_PRESETS,
-  extractMissingDataNeeds,
   extractDeliverablesFromReply,
   loadSopRunContext
 } from '@/utils/sopRun'
@@ -950,8 +756,7 @@ import { areWaitingWecomTodosDone } from '@/utils/sopNotify'
 import {
   extractSubmitMaterialFields,
   formatSubmitMaterialNote,
-  missingSubmitMaterialLabels,
-  parseProvidedFieldLabels
+  missingSubmitMaterialLabels
 } from '@/utils/sopSubmitMaterial'
 import {
   fetchAiModels,
@@ -1054,9 +859,7 @@ export default {
       },
       dialogVisible: false,
       dialogTitle: '',
-      dialogTab: 'map',
-      historyLedgerOpen: [],
-      ledgerRunExpanded: false,
+      dialogTab: 'runs',
       activeSop: null,
       activeSopUid: '',
       activeLedger: {
@@ -1064,9 +867,7 @@ export default {
         runs: [],
         deliverables: []
       },
-      ledgerSaving: false,
       scannedDeliverables: [],
-      runForm: { at: '', result: '完成', note: '' },
       outputPresets: SOP_OUTPUT_PRESETS,
       runDialogVisible: false,
       runTarget: null,
@@ -1105,57 +906,16 @@ export default {
         concurrency: 2
       },
       selectedSopJobId: '',
-      dataFillDialogVisible: false,
-      dataFillJobId: '',
-      dataFillJobTitle: '',
-      dataFillHintText: '',
-      dataFillFields: [],
-      dataFillExtra: '',
-      dataFillSubmitting: false,
       subtreeLoading: false,
       subtreeError: '',
       pendingRoot: null,
       pendingVersion: 0,
       previewMindMap: null,
       collabV2Adapter: null,
-      syncStatus: 'idle',
-      artifactPreviewVisible: false,
-      artifactPreviewTitle: '产物预览',
-      artifactPreviewUrl: '',
-      artifactPreviewDownloadUrl: ''
+      syncStatus: 'idle'
     }
   },
   computed: {
-    visibleDeliverables() {
-      const fromLedger =
-        (this.activeLedger && this.activeLedger.deliverables) || []
-      const extra = this.scannedDeliverables || []
-      const seen = new Set()
-      const merged = []
-      ;[...fromLedger, ...extra].forEach(d => {
-        const uri = String((d && d.uri_or_path) || '')
-          .replace(/\\/g, '/')
-          .replace(/\/+$/g, '')
-          .toLowerCase()
-        const name = String((d && d.name) || '')
-          .split(/[\\/]/)
-          .pop()
-          .toLowerCase()
-        const key = uri || name
-        if (!key || seen.has(key)) return
-        seen.add(key)
-        merged.push(d)
-      })
-      const sortKey = d => {
-        if (d && d.at) return String(d.at)
-        const n = Number(d && d.mtime)
-        if (n > 1e11) {
-          return new Date(n).toISOString().slice(0, 16).replace('T', ' ')
-        }
-        return ''
-      }
-      return merged.sort((a, b) => sortKey(b).localeCompare(sortKey(a)))
-    },
     syncLabel() {
       if (this.subtreeLoading) return '加载中…'
       if (this.syncStatus === 'live') return '已协同同步'
@@ -1279,13 +1039,6 @@ export default {
       ).length
       return `本 SOP · 执行 ${running} · 等待 ${waiting} · 共 ${list.length}`
     },
-    ledgerRunLimit() {
-      return this.ledgerRunExpanded ? 200 : 6
-    },
-    visibleLedgerRuns() {
-      const runs = (this.activeLedger && this.activeLedger.runs) || []
-      return runs.slice(0, this.ledgerRunLimit)
-    },
     selectedSopJob() {
       const pool = this.detailMode ? this.detailSopTaskJobs : this.sopTaskJobs
       if (!this.selectedSopJobId) return pool[0] || null
@@ -1369,19 +1122,6 @@ export default {
       }
       return parts.filter(Boolean).join('\n')
     },
-    shortDataFillHint() {
-      const n = (this.dataFillFields || []).length
-      const labels = (this.dataFillFields || [])
-        .map(f => f.label)
-        .filter(Boolean)
-        .slice(0, 8)
-      if (labels.length) {
-        return `需补充 ${n} 项：${labels.join('、')}`
-      }
-      const raw = String(this.dataFillHintText || '').trim()
-      if (!raw) return '模型缺少关键数据，请填写后继续。'
-      return raw.length > 80 ? raw.slice(0, 80) + '…' : raw
-    },
     runSubmitZoneHint() {
       if (this.runSubmitSource === 'recruit_fallback') {
         return '招聘类保底模板（大纲未抽出字段）'
@@ -1395,16 +1135,7 @@ export default {
     }
   },
   watch: {
-    selectedSopJob: {
-      immediate: true,
-      handler(job) {
-        if (job && job.state === 'waiting_data' && !this.dataFillDialogVisible) {
-          this.prepareDataFillFields(job)
-        }
-      }
-    },
     dialogTab(val) {
-      if (val === 'dels') this.refreshScannedArtifacts()
       if (val !== 'map') return
       this.$nextTick(() => {
         if (
@@ -1455,7 +1186,7 @@ export default {
     },
     '$route.query.tab'(val) {
       if (!this.detailMode) return
-      const tab = String(val || 'map')
+      const tab = String(val || 'runs')
       if (tab === 'runs' || tab === 'dels' || tab === 'map') {
         this.dialogTab = tab
       }
@@ -1479,13 +1210,13 @@ export default {
             this.scrollRunStream()
           })
         : null
-    // 重新挂载 / 整页刷新后立刻同步已有任务（含 session 恢复的排队/续跑/待补数）
+    // 重新挂载 / 整页刷新后立刻同步已有任务（含 session 恢复的排队/续跑）
     if (this.sopRunQueue && this.sopRunQueue.getSnapshot) {
       this.sopQueueSnap = this.sopRunQueue.getSnapshot()
       const snap = this.sopQueueSnap
       this.syncLedgersFromQueue(snap)
       const prefer =
-        (snap.waiting || []).find(j => j.state === 'waiting_data') ||
+        (snap.waiting || []).find(j => j.state === 'waiting_human') ||
         (snap.waiting || [])[0] ||
         (snap.running || [])[0] ||
         (snap.pending || []).find(
@@ -1550,7 +1281,7 @@ export default {
       this.subtreeError = ''
       this.activeSop = null
       this.activeSopUid = ''
-      this.dialogTab = 'map'
+      this.dialogTab = 'runs'
       this.dialogVisible = false
       const room = String(this.roomKey || '').trim()
       this.$router
@@ -1792,7 +1523,7 @@ export default {
         this.activeSop = null
         this.activeSopUid = ''
         this.pendingRoot = null
-        this.dialogTab = 'map'
+        this.dialogTab = 'runs'
       }
       this.$router.replace({
         path: '/sop',
@@ -1864,23 +1595,8 @@ export default {
         this.sopSuccessRateLabel(item)
       ].slice(0, 3)
     },
-    latestRunLabel(item) {
-      const runs = this.sopLedgerRuns(item)
-      if (!runs.length) return '暂无'
-      return String((runs[0] && runs[0].at) || '').trim() || '暂无'
-    },
     latestDelLabel(item) {
       return latestDeliverableText(this.sopLedgerDeliverables(item))
-    },
-    shortLedgerRunLabel(r) {
-      const raw = [r && r.at, r && r.result, r && r.note]
-        .filter(Boolean)
-        .join(' · ')
-      if (raw.length <= 96) return raw
-      return raw.slice(0, 96) + '…'
-    },
-    toggleLedgerRunLimit() {
-      this.ledgerRunExpanded = !this.ledgerRunExpanded
     },
     async refreshScannedArtifacts() {
       const sop = this.activeSop || {}
@@ -1985,132 +1701,6 @@ export default {
       ).catch(err => {
         console.warn('[sopRegistry] persist scanned deliverables failed', err)
       })
-    },
-    isHttp(uri) {
-      return /^https?:\/\//i.test(String(uri || ''))
-    },
-    isLocalAbsPath(uri) {
-      const u = String(uri || '')
-      return /^[A-Za-z]:[\\/]/.test(u) || u.startsWith('/')
-    },
-    deliverableOpenUrl(d, { download = false } = {}) {
-      const uri = String((d && d.uri_or_path) || '')
-      const name = String((d && d.name) || '')
-      if (this.isHttp(uri)) return uri
-      if (this.isLocalAbsPath(uri) || /\.(html?|xlsx?|pdf|md|csv)$/i.test(name || uri)) {
-        return artifactLocalUrl(this.isLocalAbsPath(uri) ? uri : name || uri, {
-          download,
-          name: name || uri
-        })
-      }
-      return ''
-    },
-    canDownloadDeliverable(d) {
-      const uri = String((d && d.uri_or_path) || '')
-      const name = String((d && d.name) || '')
-      return (
-        this.isHttp(uri) ||
-        this.isLocalAbsPath(uri) ||
-        /\.(html?|xlsx?|pdf|md|csv)$/i.test(name || uri)
-      )
-    },
-    canPreviewDeliverable(d) {
-      const uri = String((d && d.uri_or_path) || '')
-      const name = String((d && d.name) || '')
-      if (this.isHttp(uri)) {
-        return (
-          /\.(html?|pdf|md|txt)(\?|#|$)/i.test(uri) ||
-          /执行单|报告/i.test(name)
-        )
-      }
-      if (this.isLocalAbsPath(uri)) {
-        return /\.(html?|pdf|md|txt)$/i.test(uri)
-      }
-      return /\.(html?|pdf|md|txt)$/i.test(name)
-    },
-    openUrl(url) {
-      if (!url) return
-      window.open(url, '_blank', 'noopener')
-    },
-    previewDeliverable(d) {
-      const url = this.deliverableOpenUrl(d, { download: false })
-      if (!url) {
-        this.$message.warning('无法预览该产物')
-        return
-      }
-      this.artifactPreviewTitle = (d && d.name) || '产物预览'
-      this.artifactPreviewUrl = url
-      this.artifactPreviewDownloadUrl = this.deliverableOpenUrl(d, {
-        download: true
-      })
-      this.artifactPreviewVisible = true
-    },
-    downloadDeliverable(d) {
-      const url = this.deliverableOpenUrl(d, { download: true })
-      if (!url) {
-        this.$message.warning('无法下载该产物')
-        return
-      }
-      this.openUrl(url)
-    },
-    onArtifactPreviewClosed() {
-      this.artifactPreviewUrl = ''
-      this.artifactPreviewDownloadUrl = ''
-    },
-    resetLedgerForms() {
-      const at = formatMinuteStamp()
-      this.runForm = { at, result: '完成', note: '' }
-    },
-    async saveActiveLedger() {
-      if (!this.roomKey || !this.activeSopUid) {
-        throw new Error('缺少房间或节点')
-      }
-      this.ledgerSaving = true
-      try {
-        await persistSopLedger(
-          this.roomKey,
-          this.activeSopUid,
-          {
-            id: (this.activeSop && this.activeSop.id) || '',
-            title: (this.activeSop && this.activeSop.title) || ''
-          },
-          this.activeLedger
-        )
-        // 同步回列表卡片
-        const idx = this.sops.findIndex(
-          s => this.resolveSopUid(s) === this.activeSopUid || s === this.activeSop
-        )
-        if (idx >= 0) {
-          const next = {
-            ...this.sops[idx],
-            runs: this.activeLedger.runs,
-            deliverables: this.activeLedger.deliverables,
-            frequency: this.activeLedger.frequency,
-            sopLedger: normalizeLedger(this.activeLedger)
-          }
-          this.$set(this.sops, idx, next)
-          this.activeSop = next
-        }
-        this.$message.success('已写入节点台账')
-      } finally {
-        this.ledgerSaving = false
-      }
-    },
-    async submitRun() {
-      if (!this.canEditSop) {
-        this.$message.warning('当前为只读权限，无法保存台账')
-        return
-      }
-      try {
-        this.activeLedger = addRunToLedger(this.activeLedger, {
-          ...this.runForm,
-          actor: this.userInfo.name
-        })
-        await this.saveActiveLedger()
-        this.resetLedgerForms()
-      } catch (err) {
-        this.$message.error((err && err.message) || '保存失败')
-      }
     },
     openRunDialog(item) {
       if (!this.roomKey) {
@@ -2282,14 +1872,16 @@ export default {
         this.roomKey,
         this.resolveSopUid(item)
       )
-      return (job && job.state) || ''
+      const state = (job && job.state) || ''
+      // 补数已关闭：不展示、不阻塞运行
+      if (state === 'waiting_data') return ''
+      return state
     },
     sopCardJobLabel(item) {
       const state = this.sopCardJobState(item)
       if (state === 'running') return '运行中'
       if (state === 'queued') return '排队中'
       if (state === 'waiting_human') return '等待人工'
-      if (state === 'waiting_data') return '待补数'
       return ''
     },
     sopJobStateLabel(job) {
@@ -2297,7 +1889,6 @@ export default {
         running: '运行中',
         queued: '排队',
         waiting_human: '等待人工',
-        waiting_data: '待补数',
         done: '完成',
         error: '失败',
         cancelled: '已取消'
@@ -2306,12 +1897,6 @@ export default {
     },
     shortJobStatus(job) {
       if (!job) return ''
-      if (job.state === 'waiting_data') {
-        const n = (job.missingFields && job.missingFields.length) ||
-          (this.selectedSopJobId === job.id && this.dataFillFields.length) ||
-          0
-        return n ? `待补数 · ${n} 项` : '待补数 · 点击填写后继续'
-      }
       if (job.state === 'waiting_human') {
         const n =
           (job.waitingWecomTodos && job.waitingWecomTodos.length) ||
@@ -2326,154 +1911,10 @@ export default {
     selectSopJob(jobId) {
       this.selectedSopJobId = jobId
       this.scrollRunStream()
-      this.$nextTick(() => this.scrollDataFillIntoView())
-    },
-    prepareDataFillFields(job) {
-      if (!job) return
-      const provided = parseProvidedFieldLabels(job.extraNote || '')
-      const isJunkField = f => {
-        const label = String((f && f.label) || '').trim()
-        if (!label || label.length > 24) return true
-        if (/[。；;！!？?\n“”"']/.test(label)) return true
-        if (
-          /节点|uid|未完成|已完成|已消除|历史|运行|推进|阻塞|阻断|容器|待办|产物|大纲|台账|校验|房间|本次|本单|流程型|登记|拟稿|数据源|示例|仍缺|缺少|字段|初稿|产出|发起|知会|账号|简历池|即时|并发|可即时|AI侧|Boss|直聘/.test(
-            label
-          )
-        ) {
-          return true
-        }
-        if (/^(?:但|且|并|可|已|无|有|项)/.test(label)) return true
-        if (
-          /(?:产出|发起|消除|生成|发布|登录|缺少|没有|无法)/.test(label) &&
-          label.length > 8
-        ) {
-          return true
-        }
-        return false
-      }
-      let fields =
-        (job.missingFields && job.missingFields.length
-          ? job.missingFields
-          : job.result && job.result.missingFields) || []
-      fields = (fields || []).filter(f => !isJunkField(f))
-      const reply =
-        job.streamText || (job.result && job.result.reply) || job.status || ''
-      const parsed = extractMissingDataNeeds(reply, {
-        alreadyProvided: provided
-      })
-      // 优先用模型明确仍缺项；仅当库内字段空/过少时才用解析结果
-      if (!fields.length && parsed.fields && parsed.fields.length) {
-        fields = parsed.fields
-      } else if (fields.length && provided.length) {
-        fields = fields.filter(
-          f =>
-            !provided.some(p => {
-              const a = String(f.label || '')
-                .replace(/\s+/g, '')
-                .toLowerCase()
-              const b = String(p || '')
-                .replace(/\s+/g, '')
-                .toLowerCase()
-              return a === b || a.includes(b) || b.includes(a)
-            })
-        )
-      }
-      this.dataFillFields = fields
-        .filter(f => !isJunkField(f))
-        .map((f, i) => {
-          let label = String(f.label || '')
-            .replace(/（.*?）|\(.*?\)/g, '')
-            .replace(/[（(][^）)]*$/, '')
-            .trim()
-          if (!label || label.length > 24) return null
-          if (!/^[A-Za-z0-9\u4e00-\u9fff/／_-]{2,16}$/.test(label)) return null
-          return {
-            key: f.key || `f_${i + 1}`,
-            label,
-            value: ''
-          }
-        })
-        .filter(Boolean)
-      this.dataFillHintText =
-        (parsed.summary && parsed.fields && parsed.fields.length
-          ? parsed.summary
-          : '') ||
-        (this.dataFillFields.length &&
-        job.missingSummary &&
-        !/节点\*\*|未完成\*\*|uid|已消除|AI侧|简历池/.test(job.missingSummary)
-          ? job.missingSummary
-          : '') ||
-        (this.dataFillFields.length
-          ? '模型缺少关键数据，请按字段填写后继续执行。'
-          : '未识别到可填写的字段（多为状态说明，不是待补数据）。')
-    },
-    openDataFillDialog(jobId) {
-      const job =
-        (this.sopRunQueue && this.sopRunQueue.getJob(jobId)) ||
-        this.sopTaskJobs.find(j => j.id === jobId)
-      if (!job || job.state !== 'waiting_data') {
-        this.$message.warning('该任务不在待补数状态')
-        return
-      }
-      this.selectedSopJobId = jobId
-      this.dataFillJobId = jobId
-      this.dataFillJobTitle = `${job.sopId || 'SOP'}：${job.sopTitle || ''}`
-      this.dataFillExtra = ''
-      this.prepareDataFillFields(job)
-      this.dataFillDialogVisible = true
-    },
-    scrollDataFillIntoView() {
-      const el = this.$refs.dataFillBox
-      if (el && el.scrollIntoView) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-      }
     },
     cancelSopJob(jobId) {
       if (!this.sopRunQueue) return
       this.sopRunQueue.cancel(jobId)
-    },
-    async submitMissingDataAndResume() {
-      if (!this.sopRunQueue) return
-      const jobId = this.dataFillJobId || (this.selectedSopJob && this.selectedSopJob.id)
-      const job = this.sopRunQueue.getJob(jobId) || this.selectedSopJob
-      if (!job || job.state !== 'waiting_data') {
-        this.$message.warning('该任务不在待补数状态')
-        return
-      }
-      const lines = (this.dataFillFields || [])
-        .map(f => {
-          const v = String(f.value || '').trim()
-          if (!v) return ''
-          return `${f.label}：${v}`
-        })
-        .filter(Boolean)
-      const extra = String(this.dataFillExtra || '').trim()
-      if (!lines.length && !extra) {
-        this.$message.warning('请至少填写一项缺失数据')
-        return
-      }
-      const append = [
-        '## 用户补充数据',
-        ...lines,
-        extra ? `其它说明：${extra}` : ''
-      ]
-        .filter(Boolean)
-        .join('\n')
-      this.dataFillSubmitting = true
-      try {
-        const res = this.sopRunQueue.resumeWaiting(job.id, {
-          extraNoteAppend: append
-        })
-        if (!res.ok) {
-          this.$message.warning(res.message || '无法继续')
-          return
-        }
-        this.dataFillExtra = ''
-        this.dataFillDialogVisible = false
-        this.$message.success('已提交补充数据，继续执行')
-      } finally {
-        this.dataFillSubmitting = false
-      }
     },
     async resumeSopJob(jobId) {
       if (!this.sopRunQueue) return
@@ -2852,12 +2293,7 @@ export default {
           const uniq = [...new Set(assignees)]
           const who = uniq.length ? `代办发给：${uniq.join('、')}` : ''
           if (result && result.waitingData) {
-            this.$message.info(
-              `「${job.sopTitle}」缺少数据，请点击「去补数」填写后继续${
-                who ? `（${who}）` : ''
-              }`
-            )
-            this.openDataFillDialog(job.id)
+            // 补数已关闭：不弹补数窗、不提示「去补数」
             return
           }
           const n =
@@ -2891,7 +2327,7 @@ export default {
           })
           .catch(() => {})
       } else if (this.runTarget) {
-        // 从台账列表运行：直接进入该 SOP 详情的「历史任务」
+        // 从台账列表运行：直接进入该 SOP 详情的「记录」
         this.openSubtree(this.runTarget, { tab: 'runs' })
       }
       this.$message.success(
@@ -2944,6 +2380,13 @@ export default {
     formatSubtaskTitle(sub) {
       return formatSubtaskDisplayTitle(sub)
     },
+    subtaskGlyphKind(sub) {
+      if (sub && sub.isFallbackSubtask) return 'node'
+      const title = String((sub && sub.title) || '')
+      if (/^[Dd](?!\d)\s*[：:]/.test(title.trim())) return 'D'
+      if (String((sub && sub.id) || '').toUpperCase() === 'D') return 'D'
+      return 'node'
+    },
     subtaskDesc(sub) {
       const path = this.sopBreadcrumb(sub)
       if (!path) return '子任务'
@@ -2954,7 +2397,7 @@ export default {
       const job = this.sopCardJobState(sub)
       if (job === 'running') return '运行中'
       if (job === 'queued') return '排队中'
-      if (job === 'waiting_human' || job === 'waiting_data') return '等待中'
+      if (job === 'waiting_human') return '等待中'
       const runs = this.sopLedgerRuns(sub)
       if (!runs.length) return '未运行'
       const latest = runs[0]
@@ -3397,7 +2840,7 @@ export default {
         this.$message.warning('找不到该 SOP 对应的节点')
         return
       }
-      const tab = opts.tab || 'map'
+      const tab = opts.tab || 'runs'
       const prevUid = String(
         (this.$route.query && this.$route.query.sopUid) || ''
       ).trim()
@@ -3436,7 +2879,6 @@ export default {
         runs: item.runs,
         deliverables: item.deliverables
       })
-      this.resetLedgerForms()
       this.dialogVisible = false
       this.subtreeLoading = true
       this.subtreeError = ''
@@ -3540,7 +2982,7 @@ export default {
       ).trim()
       if (!uid || !this.roomKey) return
       const tab = String(
-        (this.$route.query && this.$route.query.tab) || 'map'
+        (this.$route.query && this.$route.query.tab) || 'runs'
       )
       if (tab === 'runs' || tab === 'dels' || tab === 'map') {
         this.dialogTab = tab
@@ -3734,52 +3176,6 @@ export default {
   .mindWrap {
     height: calc(100vh - 220px);
     min-height: 360px;
-  }
-
-  .historyLedger {
-    min-height: 0;
-    max-height: 34vh;
-    overflow: auto;
-    border: 1px solid #e4eee9;
-    border-radius: 8px;
-    background: #fff;
-    padding: 0 8px;
-
-    /deep/ .el-collapse {
-      border: none;
-    }
-
-    /deep/ .el-collapse-item__header {
-      height: 40px;
-      line-height: 40px;
-      border-bottom: none;
-    }
-
-    /deep/ .el-collapse-item__wrap {
-      border-bottom: none;
-    }
-
-    /deep/ .el-collapse-item__content {
-      padding-bottom: 10px;
-    }
-
-    .ledgerList li {
-      padding: 6px 0;
-    }
-
-    .liMain {
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-      font-size: 12px;
-      line-height: 1.4;
-    }
-
-    .ledgerMore {
-      text-align: center;
-      padding-top: 4px;
-    }
   }
 }
 
@@ -5090,95 +4486,6 @@ export default {
     height: 100%;
   }
 
-  .ledgerPane {
-    min-height: 200px;
-    max-height: 50vh;
-    overflow: auto;
-  }
-
-  .historyLedger.ledgerPane {
-    min-height: 0;
-    max-height: 34vh;
-  }
-
-  .addForm {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-    margin-bottom: 12px;
-
-    .formField {
-      width: 180px;
-
-      &.short {
-        width: 110px;
-      }
-
-      &.wide {
-        width: 280px;
-        flex: 1;
-        min-width: 180px;
-      }
-    }
-  }
-
-  .ledgerList {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-
-    li {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 10px 0;
-      border-bottom: 1px solid #ebeef5;
-      font-size: 13px;
-      color: #606266;
-    }
-
-    .liMain {
-      flex: 1;
-      word-break: break-word;
-      line-height: 1.5;
-
-      a {
-        color: #409eff;
-      }
-    }
-
-    .liPath,
-    .liAt,
-    .liActor,
-    .liKind {
-      flex-shrink: 0;
-      font-size: 12px;
-      color: #909399;
-    }
-
-    .liPath {
-      display: block;
-      margin-top: 4px;
-      word-break: break-all;
-    }
-
-    .liAt {
-      display: inline-block;
-      margin-top: 4px;
-      margin-right: 8px;
-      color: #a0a4ab;
-    }
-
-    .liActions {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      flex-shrink: 0;
-    }
-  }
-
   .paneEmpty {
     padding: 48px 0;
     text-align: center;
@@ -5627,20 +4934,6 @@ export default {
 </style>
 
 <style lang="less">
-.artifactPreviewDialog {
-  .el-dialog__body {
-    padding: 8px 16px 0;
-  }
-
-  .artifactPreviewFrame {
-    width: 100%;
-    height: 70vh;
-    border: 1px solid #ebeef5;
-    border-radius: 8px;
-    background: #fff;
-  }
-}
-
 /* 强制浅色弹窗：避免 body.isDark 全局样式把弹窗/输入框弄成黑底浅字 */
 body.isDark .sopRunDialog,
 .sopRunDialog,
