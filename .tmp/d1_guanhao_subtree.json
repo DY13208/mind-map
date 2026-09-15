@@ -1,0 +1,19 @@
+{
+ "data": {
+  "uid": "5751cf4a-3127-4826-b343-dbc2b22702f0",
+  "text": "D1：官号运营",
+  "expand": true,
+  "generalization": []
+ },
+ "children": [
+  {
+   "data": {
+    "uid": "876bb639-054c-463f-93a8-01e94512df17",
+    "text": "品牌运作",
+    "expand": true,
+    "generalization": []
+   },
+   "children": []
+  }
+ ]
+}

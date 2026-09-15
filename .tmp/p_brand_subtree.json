@@ -1,0 +1,212 @@
+{
+ "data": {
+  "uid": "b251a152-bbe9-457b-bf61-5b3b52dfe7f5",
+  "__fv": {
+   "text": 11
+  },
+  "text": "<p>P：品牌营销</p>",
+  "expand": false,
+  "richText": true,
+  "generalization": []
+ },
+ "children": [
+  {
+   "data": {
+    "uid": "5751cf4a-3127-4826-b343-dbc2b22702f0",
+    "text": "D1：官号运营",
+    "expand": true,
+    "generalization": []
+   },
+   "children": [
+    {
+     "data": {
+      "uid": "876bb639-054c-463f-93a8-01e94512df17",
+      "text": "品牌运作",
+      "expand": true,
+      "generalization": []
+     },
+     "children": []
+    }
+   ]
+  },
+  {
+   "data": {
+    "uid": "5127463b-d3a0-4031-9ff2-f6db1b715537",
+    "text": "D2：博主合作",
+    "expand": true,
+    "generalization": []
+   },
+   "children": [
+    {
+     "data": {
+      "uid": "568ba98f-5621-4fd8-970c-8637e15ea9c2",
+      "text": "林培培",
+      "expand": true,
+      "generalization": []
+     },
+     "children": []
+    }
+   ]
+  },
+  {
+   "data": {
+    "uid": "125e6951-8093-443b-93a7-1d8de0eefa76",
+    "text": "D3：品牌营销活动",
+    "expand": true,
+    "generalization": []
+   },
+   "children": [
+    {
+     "data": {
+      "uid": "2a08549a-5b4d-443c-a8a1-cd9ac61d45d2",
+      "text": "陈华俊",
+      "expand": true,
+      "generalization": []
+     },
+     "children": [
+      {
+       "data": {
+        "uid": "90f2f613-9223-4ec6-940e-a7282b45ea87",
+        "text": "A1：全年品牌营销规划",
+        "expand": true,
+        "generalization": []
+       },
+       "children": [
+        {
+         "data": {
+          "uid": "67e113ce-17d1-4cb0-a97c-d6d484965479",
+          "text": "1：参考历史营销节奏和品牌信息，制定全年品牌营销规划",
+          "expand": true,
+          "generalization": []
+         },
+         "children": [
+          {
+           "data": {
+            "uid": "07f14dfd-861c-4394-917d-fbffa9690f93",
+            "text": "品牌营销节奏",
+            "expand": true,
+            "generalization": []
+           },
+           "children": []
+          },
+          {
+           "data": {
+            "uid": "f26140b8-cc4b-4248-85f2-5b6cc5a6aeef",
+            "text": "电商营销节奏",
+            "expand": true,
+            "generalization": []
+           },
+           "children": []
+          },
+          {
+           "data": {
+            "uid": "dd5cc825-bc9b-4544-8451-e7e8f284dfe5",
+            "text": "线下营销节奏",
+            "expand": true,
+            "generalization": []
+           },
+           "children": []
+          }
+         ]
+        },
+        {
+         "data": {
+          "uid": "3008cd1c-a64a-485e-bcc2-f7657965f41d",
+          "text": "2：全年大事件规划",
+          "expand": true,
+          "generalization": []
+         },
+         "children": [
+          {
+           "data": {
+            "uid": "79c2dd03-68f5-4d00-a5c4-006e33e36050",
+            "text": "明星代言",
+            "expand": true,
+            "generalization": []
+           },
+           "children": []
+          },
+          {
+           "data": {
+            "uid": "e3e05951-b0fa-491c-b620-5708e665fbd1",
+            "text": "重要节点活动",
+            "expand": true,
+            "generalization": []
+           },
+           "children": []
+          }
+         ]
+        },
+        {
+         "data": {
+          "uid": "3fdd24fe-d303-4980-aee4-2ba5b771b654",
+          "text": "3：根据采购目标，制定全年营销预算",
+          "expand": true,
+          "generalization": []
+         },
+         "children": []
+        },
+        {
+         "data": {
+          "uid": "6e78935f-3eed-403e-bfd6-872e4ac65085",
+          "text": "4：分配具体事件和渠道预算",
+          "expand": true,
+          "generalization": []
+         },
+         "children": []
+        },
+        {
+         "data": {
+          "uid": "69566b08-f5ee-47b4-a0ba-692ebe17e87a",
+          "text": "5：跟进预算消耗进度",
+          "expand": true,
+          "generalization": []
+         },
+         "children": []
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "data": {
+    "uid": "872223c5-b820-4862-961b-69252f4d0246",
+    "text": "D4：达播规划",
+    "expand": true,
+    "generalization": []
+   },
+   "children": [
+    {
+     "data": {
+      "uid": "be28fe43-4970-494e-a202-527aaff6ee58",
+      "text": "黄锦",
+      "expand": true,
+      "generalization": []
+     },
+     "children": []
+    }
+   ]
+  },
+  {
+   "data": {
+    "uid": "17f9a47e-412f-4108-b648-d7a512002d64",
+    "text": "D5：PR推广",
+    "expand": true,
+    "generalization": []
+   },
+   "children": [
+    {
+     "data": {
+      "uid": "a4094b21-2b3f-4efc-8403-a15c9c82df9d",
+      "text": "品牌运作",
+      "expand": true,
+      "generalization": []
+     },
+     "children": []
+    }
+   ]
+  }
+ ]
+}
