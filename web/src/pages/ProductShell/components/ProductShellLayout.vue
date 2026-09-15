@@ -364,6 +364,8 @@ export default {
   position: fixed;
   inset: 0 auto 0 0;
   z-index: 10;
+  min-height: 0;
+  overflow: hidden;
   .sidebarHeader {
     display: flex;
     align-items: center;
@@ -372,6 +374,7 @@ export default {
     min-height: 40px;
     margin-bottom: 16px;
     padding: 0 0 0 8px;
+    flex-shrink: 0;
   }
   .productLogo {
     display: flex;
@@ -401,9 +404,17 @@ export default {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable;
   }
   a {
     height: 40px;
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: 11px;
@@ -433,12 +444,14 @@ export default {
     margin: 6px 12px 7px;
     color: #9aa7a2;
     font-size: 12px;
+    flex-shrink: 0;
     &--space {
       margin-top: 22px;
     }
   }
   .sidebarFooter {
-    margin-top: auto;
+    flex-shrink: 0;
+    margin-top: 0;
     padding: 10px 10px 2px;
     border-top: 1px solid #eef1ef;
   }
@@ -602,6 +615,21 @@ export default {
   }
   .productShell .productPage {
     padding: 24px 16px 40px;
+  }
+}
+@media (max-height: 720px) {
+  .productShell .productSidebar {
+    padding-top: 12px;
+    padding-bottom: 12px;
+    .sidebarHeader {
+      margin-bottom: 10px;
+    }
+    .navLabel--space {
+      margin-top: 12px;
+    }
+    a {
+      height: 36px;
+    }
   }
 }
 </style>
