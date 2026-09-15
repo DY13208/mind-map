@@ -49,6 +49,16 @@ async function extractDocx(buffer) {
   return clip(stripXml(xml))
 }
 
+function compactXlsxCsv(csv) {
+  return String(csv || '')
+    .split(/\r?\n/)
+    .map(line => line.replace(/(?:,\s*)+$/, ''))
+    // XLSX uses the formatted worksheet range. Rows that only contain empty
+    // cells otherwise become `,,,` and make a readable preview look broken.
+    .filter(line => line.replace(/[\s,]/g, '').length > 0)
+    .join('\n')
+}
+
 async function extractXlsx(buffer) {
   try {
     const XLSX = require('xlsx')
@@ -57,7 +67,7 @@ async function extractXlsx(buffer) {
     workbook.SheetNames.slice(0, 10).forEach(name => {
       const sheet = workbook.Sheets[name]
       if (!sheet) return
-      const csv = XLSX.utils.sheet_to_csv(sheet)
+      const csv = compactXlsxCsv(XLSX.utils.sheet_to_csv(sheet))
       if (csv && csv.trim()) parts.push(`# ${name}\n${csv.trim()}`)
     })
     if (!parts.length) {
@@ -311,6 +321,7 @@ module.exports = {
   extractXlsx,
   extractPdfText,
   extractBuffer,
+  compactXlsxCsv,
   ocrViaHttp,
   ocrViaTesseract,
   ocrImage
