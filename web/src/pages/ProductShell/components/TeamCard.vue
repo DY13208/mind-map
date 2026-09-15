@@ -6,7 +6,7 @@
       <p v-if="team.description" class="desc">{{ team.description }}</p>
       <span class="stats">{{ team.memberCount }} 位成员 · {{ team.roomCount }} 个脑图</span>
       <p class="meta">
-        {{ sourceLabel }} · 所有者 {{ team.owner || '—' }} · {{ updatedText }}
+        {{ sourceLabel }} · 创建者 {{ team.owner || '—' }} · {{ updatedText }}
       </p>
     </div>
     <i class="el-icon-arrow-right arrow" />

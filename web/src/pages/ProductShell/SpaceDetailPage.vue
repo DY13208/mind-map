@@ -20,7 +20,8 @@
           <p v-if="team.description">{{ team.description }}</p>
           <span
             >{{ team.memberCount }} 位成员 · {{ team.roomCount }} 个脑图 ·
-            {{ roleLabel }} · 更新于 {{ format(team.updatedAt) }}</span
+            创建者 {{ team.owner || '—' }} · {{ roleLabel }} · 更新于
+            {{ format(team.updatedAt) }}</span
           >
         </div>
         <div class="teamActions">
@@ -39,10 +40,10 @@
             >新建脑图</el-button
           >
           <el-button
-            icon="el-icon-user"
+            icon="el-icon-share"
             :disabled="!canManage"
-            @click="openContacts"
-            >添加成员</el-button
+            @click="openShare"
+            >分享 / 权限</el-button
           >
           <el-button
             icon="el-icon-setting"
@@ -108,58 +109,11 @@
       </el-tabs>
     </div>
     <RoomActionDialogs ref="actions" :team-id="$route.params.id" @changed="load" />
-    <el-dialog
-      :visible.sync="contactDialogVisible"
-      custom-class="teamMemberPickerDialog"
-      width="900px"
-      :close-on-click-modal="false"
-      :show-close="false"
-    >
-      <div v-loading="contactLoading || busy" class="memberPickerShell">
-        <header class="memberPickerHeader">
-          <div class="memberPickerIcon"><i class="el-icon-user" /></div>
-          <div>
-            <h2>添加团队成员</h2>
-            <p>从企业微信通讯录选择成员加入「{{ team ? team.name : '' }}」</p>
-          </div>
-          <button class="memberPickerClose" type="button" aria-label="关闭" @click="contactDialogVisible = false">×</button>
-        </header>
-        <div class="memberPickerWorkspace">
-          <section class="contactPickerPane" aria-label="企业微信成员">
-            <div class="pickerPaneHeader">
-              <div><h3>选择成员</h3><span>{{ contactTotal || contacts.length }} 位可选成员</span></div>
-              <span v-if="contactHasMore" class="pickerHint">滚动加载</span>
-            </div>
-            <div class="contactSearch"><el-input v-model.trim="contactQuery" clearable prefix-icon="el-icon-search" placeholder="搜索姓名或部门" @input="loadContacts" /></div>
-            <el-checkbox-group
-              v-model="selectedContactIds"
-              class="contactList"
-              role="list"
-              tabindex="0"
-              @scroll.native="handleContactScroll"
-            >
-              <label v-for="contact in contacts" :key="contact.id" class="contactRow">
-                <el-checkbox :label="contact.wecomUserId || contact.id" />
-                <el-avatar :size="34" :src="contact.avatarUrl || ''">{{ contact.avatar }}</el-avatar>
-                <span class="contactIdentity"><strong>{{ contact.name }}</strong><small>{{ contact.department || '未填写部门' }} · {{ contact.position || '未填写职位' }}</small></span>
-              </label>
-              <div v-if="contactLoadingMore" class="contactLoadState" role="status"><i class="el-icon-loading" /> 正在加载更多成员…</div>
-              <button v-else-if="contactHasMore" type="button" class="contactLoadMore" @click="loadMoreContacts">加载更多成员</button>
-              <p v-else-if="contacts.length" class="contactLoadState">已显示全部 {{ contactTotal || contacts.length }} 位成员</p>
-            </el-checkbox-group>
-            <EmptyState v-if="!contactLoading && !contacts.length" title="没有匹配的企业微信成员" />
-          </section>
-          <aside class="memberPickerSummary" aria-label="已选成员">
-            <div class="pickerPaneHeader"><div><h3>已选成员</h3><span>{{ selectedContactIds.length }} 位</span></div><button v-if="selectedContactIds.length" type="button" @click="selectedContactIds = []">清空</button></div>
-            <div v-if="selectedContacts.length" class="selectedContactList">
-              <div v-for="contact in selectedContacts" :key="contact.wecomUserId || contact.id" class="selectedContactRow"><el-avatar :size="30" :src="contact.avatarUrl || ''">{{ contact.avatar }}</el-avatar><span><strong>{{ contact.name }}</strong><small>{{ contact.department || '企业微信成员' }}</small></span><button type="button" aria-label="移除" @click="removeSelectedContact(contact)">×</button></div>
-            </div>
-            <div v-else class="selectedContactEmpty"><i class="el-icon-user" /><span>从左侧选择要加入团队的成员</span></div>
-          </aside>
-        </div>
-      </div>
-      <span slot="footer" class="memberPickerFooter"><span><i class="el-icon-success" /> 选择后统一添加</span><span><el-button @click="contactDialogVisible = false">取消</el-button><el-button type="primary" :disabled="!selectedContactIds.length" :loading="busy" @click="addMembers">添加成员</el-button></span></span>
-    </el-dialog>
+    <ShareTeamDialog
+      :visible.sync="shareVisible"
+      :team="team"
+      @changed="load"
+    />
     <el-dialog title="团队设置" :visible.sync="settingsVisible" width="520px">
       <el-form label-width="80px" @submit.native.prevent="saveSettings">
         <el-form-item label="团队名称"><el-input v-model="settingsForm.name" maxlength="60" /></el-form-item>
@@ -179,6 +133,7 @@ import FolderCard from './components/FolderCard.vue'
 import TeamMemberList from './components/TeamMemberList.vue'
 import EmptyState from './components/EmptyState.vue'
 import RoomActionDialogs from './components/RoomActionDialogs.vue'
+import ShareTeamDialog from './components/ShareTeamDialog.vue'
 export default {
   name: 'SpaceDetailPage',
   components: {
@@ -186,7 +141,8 @@ export default {
     FolderCard,
     TeamMemberList,
     EmptyState,
-    RoomActionDialogs
+    RoomActionDialogs,
+    ShareTeamDialog
   },
   data: () => ({
     team: null,
@@ -199,37 +155,19 @@ export default {
     busy: false,
     error: '',
     requestId: 0,
-    contactDialogVisible: false,
-    contactLoading: false,
-    contactLoadingMore: false,
-    contactQuery: '',
-    contacts: [],
-    contactOffset: 0,
-    contactNextCursor: null,
-    contactTotal: 0,
-    contactRequestId: 0,
-    contactSearchTimer: null,
-    selectedContactIds: [],
+    shareVisible: false,
     settingsVisible: false,
     settingsForm: { name: '', description: '' }
   }),
   computed: {
-    contactHasMore() {
-      if (this.contactNextCursor) return true
-      return this.contactTotal > this.contactOffset
-    },
-    selectedContacts() {
-      const selected = new Set(this.selectedContactIds.map(String))
-      return this.contacts.filter(contact => selected.has(String(contact.wecomUserId || contact.id)))
-    },
     canManage() {
       return this.team && ['owner', 'admin'].includes(this.team.role)
     },
     roleLabel() {
       const role = this.team && this.team.role
-      if (role === 'owner') return '所有者'
-      if (role === 'admin') return '管理员'
-      return '成员'
+      if (role === 'owner') return '我是所有者'
+      if (role === 'admin') return '我是管理员'
+      return '我是成员'
     },
     visibleRooms() {
       return this.rooms.filter(room =>
@@ -298,8 +236,6 @@ export default {
   },
   beforeDestroy() {
     this.requestId++
-    this.contactRequestId++
-    clearTimeout(this.contactSearchTimer)
   },
   methods: {
     openInFiles() {
@@ -307,6 +243,10 @@ export default {
         path: '/files',
         query: { team: this.$route.params.id }
       })
+    },
+    openShare() {
+      if (!this.canManage) return
+      this.shareVisible = true
     },
     async load() {
       const request = ++this.requestId
@@ -432,77 +372,6 @@ export default {
         this.busy = false
       }
     },
-    async openContacts() {
-      this.contactDialogVisible = true
-      this.contactQuery = ''
-      this.selectedContactIds = []
-      await this.fetchContacts({ reset: true })
-    },
-    loadContacts() {
-      clearTimeout(this.contactSearchTimer)
-      this.contactSearchTimer = setTimeout(() => this.fetchContacts({ reset: true }), 250)
-    },
-    async fetchContacts({ reset = false } = {}) {
-      if (!this.contactDialogVisible) return
-      if (!reset && (this.contactLoading || this.contactLoadingMore)) return
-      const request = ++this.contactRequestId
-      if (reset) {
-        this.contactOffset = 0
-        this.contactNextCursor = null
-        this.contactTotal = 0
-        this.contactLoading = true
-      } else {
-        this.contactLoadingMore = true
-      }
-      try {
-        const result = await teamService.listContacts({
-          search: this.contactQuery,
-          limit: 50,
-          offset: reset ? 0 : this.contactOffset,
-          cursor: reset ? null : this.contactNextCursor
-        })
-        if (request !== this.contactRequestId) return
-        const existing = new Set(this.members.map(member => member.wecomUserId || member.userId || member.id))
-        const incoming = result.list.filter(contact => !existing.has(contact.wecomUserId || contact.id))
-        const selected = this.contacts.filter(contact => this.selectedContactIds.includes(contact.wecomUserId || contact.id))
-        const merged = reset ? selected.concat(incoming) : this.contacts.concat(incoming)
-        this.contacts = Array.from(new Map(merged.map(contact => [contact.wecomUserId || contact.id, contact])).values())
-        this.contactOffset = (reset ? 0 : this.contactOffset) + result.list.length
-        this.contactNextCursor = result.nextCursor
-        this.contactTotal = result.total
-      } catch (error) {
-        this.$message.error(error.message)
-      } finally {
-        if (request === this.contactRequestId) {
-          this.contactLoading = false
-          this.contactLoadingMore = false
-        }
-      }
-    },
-    loadMoreContacts() {
-      if (this.contactHasMore) this.fetchContacts()
-    },
-    removeSelectedContact(contact) {
-      const id = contact.wecomUserId || contact.id
-      this.selectedContactIds = this.selectedContactIds.filter(item => String(item) !== String(id))
-    },
-    handleContactScroll(event) {
-      const el = event.target
-      if (el.scrollHeight - el.scrollTop - el.clientHeight < 72) this.loadMoreContacts()
-    },
-    async addMembers() {
-      this.busy = true
-      try {
-        await teamService.addMembers(this.$route.params.id, this.selectedContactIds)
-        this.contactDialogVisible = false
-        await this.load()
-        this.$message.success('成员已添加')
-      } catch (error) {
-        this.$message.error(error.message)
-      } finally {
-        this.busy = false
-      }
-    },
     openSettings() {
       this.settingsForm = { name: this.team.name, description: this.team.description || '' }
       this.settingsVisible = true
@@ -620,176 +489,8 @@ export default {
   padding: 12px 20px;
   border-radius: 12px;
 }
-.contactList {
-  flex: 1;
-  min-height: 0;
-  max-height: none;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  margin: 0;
-  padding: 6px 12px;
-  scrollbar-gutter: stable;
-}
-.contactLoadMore {
-  width: 100%;
-  min-height: 40px;
-  border: 0;
-  background: transparent;
-  color: var(--ui-primary);
-  cursor: pointer;
-  font-size: 13px;
-  &:hover { background: var(--ui-primary-soft); }
-}
-.contactLoadState {
-  margin: 0;
-  padding: 12px;
-  color: var(--ui-text-secondary);
-  text-align: center;
-  font-size: 12px;
-}
-.contactRow {
-  min-height: 54px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-bottom: 1px solid #eef1ef;
-  cursor: pointer;
-  .contactIdentity {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    strong { font-size: 13px; }
-    small { color: #83918c; }
-  }
-}
-.memberPickerShell {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  height: 100%;
-  color: var(--ui-text);
-}
-.memberPickerHeader {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--ui-border);
-  h2 { margin: 0; font-size: 18px; }
-  p { margin: 3px 0 0; color: var(--ui-text-secondary); font-size: 12px; }
-}
-.memberPickerIcon {
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  border-radius: var(--ui-radius-md);
-  background: var(--ui-primary-soft);
-  color: var(--ui-primary);
-  font-size: 18px;
-}
-.memberPickerClose {
-  margin-left: auto;
-  width: 32px;
-  height: 32px;
-  border: 0;
-  border-radius: var(--ui-radius-sm);
-  background: transparent;
-  color: var(--ui-text-secondary);
-  font-size: 24px;
-  cursor: pointer;
-  &:hover { background: var(--ui-surface-muted); color: var(--ui-text); }
-}
-.memberPickerWorkspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1.12fr) minmax(280px, .88fr);
-  flex: 1;
-  min-height: 0;
-  height: ~'min(560px, 68vh)';
-  margin-top: 14px;
-  overflow: hidden;
-  border: 1px solid var(--ui-border-strong);
-  border-radius: var(--ui-radius-md);
-}
-.contactPickerPane,
-.memberPickerSummary {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.contactPickerPane { border-right: 1px solid var(--ui-border); background: #fbfcfc; }
-.memberPickerSummary { overflow-y: auto; background: var(--ui-surface); }
-.pickerPaneHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--ui-border);
-  background: var(--ui-surface);
-  h3 { margin: 0; font-size: 13px; }
-  span { color: var(--ui-text-muted); font-size: 12px; }
-  button { border: 0; background: transparent; color: var(--ui-primary); font-size: 12px; cursor: pointer; }
-  .pickerHint { color: var(--ui-text-muted); }
-}
-.contactSearch { padding: 10px 12px; border-bottom: 1px solid var(--ui-border); }
-.selectedContactList { padding: 6px 12px; }
-.selectedContactRow {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-height: 48px;
-  border-bottom: 1px solid #edf1ef;
-  span { min-width: 0; flex: 1; }
-  strong, small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  strong { font-size: 13px; font-weight: 500; }
-  small { margin-top: 3px; color: var(--ui-text-muted); font-size: 11px; }
-  button { border: 0; background: transparent; color: var(--ui-danger); font-size: 16px; cursor: pointer; }
-}
-.selectedContactEmpty {
-  display: grid;
-  place-items: center;
-  align-content: center;
-  gap: 8px;
-  flex: 1;
-  min-height: 140px;
-  color: var(--ui-text-muted);
-  font-size: 12px;
-  i { color: #9caaa3; font-size: 22px; }
-}
-.memberPickerFooter {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--ui-text-secondary);
-  font-size: 12px;
-  i { color: var(--ui-primary); }
-}
-@media (max-width: 900px) {
-  .memberPickerWorkspace {
-    display: flex;
-    flex-direction: column;
-    height: calc(96vh - 170px);
-    min-height: 0;
-    overflow-y: auto;
-  }
-  .contactPickerPane { flex: 0 0 360px; min-height: 360px; border-right: 0; border-bottom: 1px solid var(--ui-border); }
-  .memberPickerSummary { flex: 0 0 auto; min-height: 220px; overflow: visible; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .memberPickerShell *, .memberPickerShell *::before, .memberPickerShell *::after { transition-duration: .01ms !important; }
-}
 @media (max-width: 760px) {
   .teamHero { align-items: flex-start; flex-wrap: wrap; }
   .teamHero .teamActions { margin-left: 0; width: 100%; justify-content: flex-start; }
 }
-</style>
-<style lang="less">
-.teamMemberPickerDialog { display: flex; flex-direction: column; width: ~'min(900px, calc(100vw - 32px))' !important; max-height: 96vh; margin: 2vh auto 0 !important; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 60px rgba(23, 38, 31, .16); }
-.teamMemberPickerDialog .el-dialog__header { display: none; }
-.teamMemberPickerDialog .el-dialog__body { flex: 1; min-height: 0; padding: 16px 18px 0; overflow: hidden; }
-.teamMemberPickerDialog .el-dialog__footer { flex: 0 0 auto; padding: 10px 18px 14px; border-top: 1px solid #e7ece9; background: #fff; }
-@media (max-width: 900px) { .teamMemberPickerDialog .el-dialog__body { overflow-y: auto; } .teamMemberPickerDialog .memberPickerShell { height: auto; } }
 </style>

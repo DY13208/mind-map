@@ -108,12 +108,33 @@ function publicFile(row, access = {}) {
 
 function publicFolder(row) {
   if (!row) return null
+  const createdById = String(row.created_by || row.createdBy || '')
+  const createdByName = String(
+    row.created_by_name ||
+      row.createdByName ||
+      (row.createdBy && row.createdBy.name) ||
+      createdById ||
+      ''
+  )
+  const createdByAvatar = String(
+    row.created_by_avatar ||
+      row.createdByAvatar ||
+      (row.createdBy && row.createdBy.avatar) ||
+      ''
+  )
+  const createdBy = {
+    id: createdById,
+    userId: createdById,
+    name: createdByName,
+    avatar: createdByAvatar || (createdByName ? createdByName.slice(0, 1) : '')
+  }
   return {
     id: row.id,
     name: row.name,
     parentId: row.parent_id || row.parentId || null,
     teamId: row.team_id || row.teamId || null,
-    createdBy: row.created_by || row.createdBy || '',
+    createdBy,
+    owner: createdBy,
     createdAt: row.created_at || row.createdAt,
     updatedAt: row.updated_at || row.updatedAt,
     roomCount: Number(row.room_count != null ? row.room_count : row.roomCount || 0),

@@ -23,7 +23,7 @@
       min-width="120"
     /><el-table-column
       prop="owner.name"
-      label="所有者"
+      label="创建者"
       width="110"
     /><el-table-column
       prop="roleLabel"

@@ -25,6 +25,7 @@
       <span class="folderInfo"
         ><strong :title="folder.name">{{ folder.name }}</strong
         ><small>{{ itemCountText }}</small
+        ><small>创建者 {{ creatorName }}</small
         ><small>{{ dateText }} 更新</small></span
       >
       <el-dropdown
@@ -67,6 +68,11 @@ export default {
     },
     dateText() {
       return new Date(this.folder.updatedAt).toLocaleDateString('zh-CN')
+    },
+    creatorName() {
+      const owner = (this.folder && (this.folder.owner || this.folder.createdBy)) || {}
+      if (typeof owner === 'string') return owner || '—'
+      return owner.name || owner.userId || owner.id || '—'
     }
   }
 }

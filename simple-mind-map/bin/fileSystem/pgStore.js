@@ -316,6 +316,8 @@ function createPgFileStore(pool) {
         const res = await pool.query(
           `select f.*,
                   ${teamId ? 'true' : 'false'} as can_manage,
+                  coalesce(cu.name, f.created_by, '') as created_by_name,
+                  coalesce(cu.avatar, '') as created_by_avatar,
                   (
                     select count(*)::int from rooms r
                     left join room_tombstones t on t.room_key = r.room_key
@@ -323,6 +325,7 @@ function createPgFileStore(pool) {
                       and r.deleted_at is null
                   ) as room_count
            from folders f
+           left join wecom_users cu on cu.user_id = f.created_by
            where f.deleted_at is null${team.sql}
            order by f.name asc`,
           team.params
@@ -335,6 +338,8 @@ function createPgFileStore(pool) {
         `select f.*,
                 (f.created_by = $1) as can_manage,
                 fm.role as folder_role,
+                coalesce(cu.name, f.created_by, '') as created_by_name,
+                coalesce(cu.avatar, '') as created_by_avatar,
                 (
                   select count(*)::int from rooms r
                   left join room_tombstones t on t.room_key = r.room_key
@@ -343,6 +348,7 @@ function createPgFileStore(pool) {
                 ) as room_count
          from folders f
          left join folder_members fm on fm.folder_id = f.id and fm.user_id = $1
+         left join wecom_users cu on cu.user_id = f.created_by
          where f.deleted_at is null
            ${team.sql}
            and (

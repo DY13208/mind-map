@@ -147,11 +147,42 @@ export function requireRoomKey(input) {
 }
 
 export function normalizeFolderDto(apiFolder = {}) {
+  const createdBySrc = apiFolder.createdBy || apiFolder.owner || {}
+  const createdById = String(
+    (typeof createdBySrc === 'string'
+      ? createdBySrc
+      : createdBySrc.userId || createdBySrc.user_id || createdBySrc.id) ||
+      apiFolder.created_by ||
+      ''
+  )
+  const createdByName = String(
+    (typeof createdBySrc === 'string'
+      ? createdBySrc
+      : createdBySrc.name) ||
+      apiFolder.createdByName ||
+      apiFolder.created_by_name ||
+      createdById ||
+      ''
+  )
+  const createdByAvatar = String(
+    (typeof createdBySrc === 'object' && createdBySrc.avatar) ||
+      apiFolder.createdByAvatar ||
+      apiFolder.created_by_avatar ||
+      (createdByName ? createdByName.slice(0, 1) : '')
+  )
+  const createdBy = {
+    id: createdById,
+    userId: createdById,
+    name: createdByName,
+    avatar: createdByAvatar
+  }
   return {
     id: String(apiFolder.id || ''),
     name: apiFolder.name || '',
     parentId: normalizeFolderId(apiFolder.parentId),
     teamId: apiFolder.teamId || apiFolder.team_id || null,
+    createdBy,
+    owner: createdBy,
     createdAt: apiFolder.createdAt || '',
     updatedAt: apiFolder.updatedAt || '',
     roomCount: Number(apiFolder.roomCount || 0),
