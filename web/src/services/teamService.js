@@ -264,6 +264,12 @@ const teamService = {
       })
     }),
 
+  assignFolder: (teamId, folderId) =>
+    request(() => productRequest(`/api/teams/${encodeURIComponent(teamId)}/folders`, {
+      method: 'POST',
+      body: JSON.stringify({ folderId })
+    })),
+
   updateMemberRole: (spaceId, id, role) =>
     request(async () => {
       const normalizedRole = roleOf(role)

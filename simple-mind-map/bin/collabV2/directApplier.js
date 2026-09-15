@@ -286,11 +286,30 @@ async function applyMove(store, op, version, live) {
   if (parent.uid === uid) throw cycleError()
   if (await store.isDescendant(uid, parent.uid)) throw cycleError()
   const oldParent = live.parent_uid
-  const stamp = await placeAmongSiblings(
+  let index = payload.index
+  let restoredStamp = null
+  // Move inverses store the original fractional ordering key, not an index.
+  // Resolve it against the current siblings so undo/redo restores the slot
+  // instead of appending every node (especially in a reversed move batch).
+  if (index == null && isValidPosition(payload.position)) {
+    const siblings = (await store.listChildren(parent.uid)).filter(
+      item => item.uid !== uid
+    )
+    const slot = siblings.findIndex(item => item.position >= payload.position)
+    index = slot < 0 ? siblings.length : slot
+    if (!siblings.some(item => item.position === payload.position)) {
+      restoredStamp = {
+        position: payload.position,
+        index,
+        reindexed: false
+      }
+    }
+  }
+  const stamp = restoredStamp || await placeAmongSiblings(
     store,
     parent.uid,
     uid,
-    payload.index,
+    index,
     version
   )
   await store.updateLocation(

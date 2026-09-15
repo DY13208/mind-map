@@ -63,7 +63,7 @@
             ><el-dropdown-item command="open">打开</el-dropdown-item
             ><el-dropdown-item command="rename">重命名</el-dropdown-item
             ><el-dropdown-item command="move">移动到文件夹</el-dropdown-item
-            ><el-dropdown-item v-if="allowMoveToTeam" command="moveToTeam"
+            ><el-dropdown-item v-if="allowMoveToTeam" command="move-to-team"
               >移至团队空间</el-dropdown-item
             ><el-dropdown-item command="share">分享</el-dropdown-item
             ><el-dropdown-item command="history">历史版本</el-dropdown-item
@@ -71,7 +71,12 @@
               >删除</el-dropdown-item
             ></el-dropdown-menu
           ></el-dropdown
-        ></template
+        ><el-dropdown v-if="scope.row.__kind === 'folder' && !selectMode && scope.row.canManage !== false"
+          trigger="click" @command="$emit($event, scope.row)" @click.native.stop>
+          <i class="el-icon-more" /><el-dropdown-menu slot="dropdown">
+            <el-dropdown-item v-if="allowMoveToTeam" command="move-folder-to-team">移至团队空间</el-dropdown-item>
+          </el-dropdown-menu>
+        </el-dropdown></template
       ></el-table-column
     ></el-table
   ></template

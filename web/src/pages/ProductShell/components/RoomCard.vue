@@ -45,7 +45,7 @@
             ><el-dropdown-item command="open">打开</el-dropdown-item
             ><el-dropdown-item command="rename">重命名</el-dropdown-item
             ><el-dropdown-item command="move">移动到文件夹</el-dropdown-item
-            ><el-dropdown-item v-if="allowMoveToTeam" command="moveToTeam"
+            ><el-dropdown-item v-if="allowMoveToTeam" command="move-to-team"
               >移至团队空间</el-dropdown-item
             ><el-dropdown-item command="favorite">{{
               room.favorite ? '取消收藏' : '收藏'

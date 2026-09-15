@@ -78,7 +78,7 @@ export default {
           this.$message.error(userMessageFromError(error))
         }
       }
-      if (action === 'moveToTeam') this.moveToTeamVisible = true
+      if (action === 'moveToTeam' || action === 'move-to-team') this.moveToTeamVisible = true
       if (action === 'favorite')
         await this.perform(() =>
           roomService.toggleFavorite(this.roomKey(room)),

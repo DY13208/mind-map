@@ -165,7 +165,7 @@ assert.notStrictEqual(
           }]
         }
       }
-      if (text.includes('select room_key, owner_id, team_id, deleted_at')) {
+      if (text.includes('select room_key, owner_id, team_id, folder_id, deleted_at')) {
         const room = store.rooms.get(params[0])
         return {
           rows: room
@@ -173,6 +173,7 @@ assert.notStrictEqual(
                 room_key: room.room_key,
                 owner_id: room.owner_id,
                 team_id: room.team_id || null,
+                folder_id: room.folder_id || null,
                 deleted_at: room.deleted_at || null
               }]
             : []
@@ -217,6 +218,26 @@ assert.notStrictEqual(
   assert.deepStrictEqual(assigned, { roomKey: personal.room.roomKey, teamId: created.id })
   assert.strictEqual((await store.getRoom(personal.room.roomKey)).folder_id, null)
   assert.strictEqual((await store.getRoom(personal.room.roomKey)).team_id, created.id)
+
+  const folderCalls = []
+  const folderDb = {
+    query: async (sql, params = []) => {
+      folderCalls.push({ sql, params })
+      if (sql.includes('from teams t')) return { rows: [{ id: created.id, role: 'owner' }] }
+      if (sql.includes('with recursive subtree')) return { rows: [
+        { id: 'root', created_by: 'alice', team_id: null },
+        { id: 'child', parent_id: 'root', created_by: 'alice', team_id: null }
+      ] }
+      if (sql.includes('select room_key, folder_id')) return { rows: [] }
+      return { rows: [] }
+    }
+  }
+  const movedFolder = await teamSpace.assignFolder(folderDb, who, created.id, 'root')
+  assert.strictEqual(movedFolder.folderCount, 2)
+  const folderUpdate = folderCalls.find(call => call.sql.includes('update folders'))
+  assert.deepStrictEqual(folderUpdate.params, [['root', 'child'], created.id, 'root'])
+  assert(folderUpdate.sql.includes('else parent_id end'), 'retain child hierarchy')
+  await assert.rejects(teamSpace.assignFolder(folderDb, { ...who, userId: 'bob' }, created.id, 'root'), err => err.code === 'FORBIDDEN')
 
   console.log('teamSpace tests passed')
 })().catch(err => {

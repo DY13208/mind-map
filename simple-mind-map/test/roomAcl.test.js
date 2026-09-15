@@ -391,11 +391,30 @@ async function testFolderRoleSource() {
   )
 }
 
+async function testClearRoomFolderRolesSqlOrder() {
+  const calls = []
+  await roomAcl.clearRoomFolderRoles({
+    query: async (sql, params) => {
+      calls.push({ sql, params })
+      return { rows: [] }
+    }
+  }, 'room-folder')
+  assert.strictEqual(calls.length, 2)
+  assert.match(calls[0].sql, /delete from room_members/)
+  assert.match(calls[0].sql, /folder_role is not null/)
+  assert.match(calls[0].sql, /direct_role is null/)
+  assert.match(calls[0].sql, /team_role is null/)
+  assert.match(calls[1].sql, /update room_members/)
+  assert.match(calls[1].sql, /direct_role is not null or team_role is not null/)
+  calls.forEach(call => assert.deepStrictEqual(call.params, ['room-folder']))
+}
+
 testNormalizeAndInfer()
 testRoleMatrix()
 testAccessAndMembers()
   .then(testMultiSourceGrants)
   .then(testFolderRoleSource)
+  .then(testClearRoomFolderRolesSqlOrder)
   .then(testSearchUsersPassesCorpId)
   .then(() => {
     console.log('roomAcl tests passed')
