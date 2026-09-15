@@ -168,6 +168,13 @@ function ensureGatewayToken() {
   return token
 }
 
+function rotateGatewayToken() {
+  const token = crypto.randomBytes(24).toString('hex')
+  upsertEnvKey('OPENCLAW_GATEWAY_TOKEN', token)
+  process.env.OPENCLAW_GATEWAY_TOKEN = token
+  return token
+}
+
 function ensureDataDirs() {
   const dirs = [
     DATA_DIR,
@@ -192,9 +199,43 @@ function readJsonFile(file) {
 
 function volumeName() {
   if (process.env.OPENCLAW_VOLUME) return process.env.OPENCLAW_VOLUME
-  const r = spawnSync('docker', ['compose','-f','docker-compose.yml','config','--volumes'], {cwd: ROOT, encoding:'utf8', windowsHide:true})
-  const hit = String(r.stdout || '').split(/\r?\n/).map(s=>s.trim()).find(s=>/openclaw$/.test(s))
-  return hit || 'mind-map_mind-map-openclaw'
+  const inspected = spawnSync(
+    'docker',
+    ['inspect', 'mind-map-openclaw-gateway-1', '--format', '{{range .Mounts}}{{if eq .Destination "/home/node/.openclaw"}}{{.Name}}{{end}}{{end}}'],
+    { cwd: ROOT, encoding: 'utf8', windowsHide: true }
+  )
+  const mounted = String(inspected.stdout || '').trim()
+  if (mounted) return mounted
+
+  const listed = spawnSync(
+    'docker',
+    ['compose', '-f', 'docker-compose.yml', 'config', '--volumes'],
+    { cwd: ROOT, encoding: 'utf8', windowsHide: true }
+  )
+  const logical = String(listed.stdout || '')
+    .split(/\r?\n/)
+    .map(s => s.trim())
+    .find(s => /openclaw$/.test(s))
+  if (!logical) return 'mind-map_mind-map-openclaw'
+
+  // `compose config --volumes` returns the logical key, while Docker stores
+  // the default-scoped volume with the Compose project prefix. Resolve the
+  // real volume before probing or copying its contents.
+  const candidates = [
+    `${process.env.COMPOSE_PROJECT_NAME || path.basename(ROOT)}_${logical}`,
+    `mind-map_${logical}`,
+    logical
+  ]
+  for (const candidate of candidates) {
+    const probe = spawnSync('docker', ['volume', 'inspect', candidate], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      windowsHide: true,
+      stdio: ['ignore', 'ignore', 'ignore']
+    })
+    if (probe.status === 0) return candidate
+  }
+  return candidates[1]
 }
 
 /**
@@ -701,6 +742,7 @@ module.exports = {
   DEFAULT_IMAGE,
   ensureOpenclawDockerGateway,
   ensureGatewayToken,
+  rotateGatewayToken,
   ensureOpenclawConfig,
   cogneePluginInstalled,
   disableCogneePlugin,
@@ -710,6 +752,7 @@ module.exports = {
 }
 
 if (require.main === module) {
+  if (process.argv.includes('--rotate-token')) rotateGatewayToken()
   ensureOpenclawDockerGateway()
     .then(r => {
       const token = r && r.token
