@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D1：刘欢：招聘 · 执行单 2026-09-08 14:29</title>
+<style>
+  :root{--ink:#1f2733;--sub:#6b7686;--line:#e5e9f0;--bg:#f4f6fa;--card:#fff;
+    --brand:#1d3a8f;--brand2:#2f6bff;--warn-bg:#fff7e8;--warn-bd:#f2c66d;--warn-tx:#8a5a00;
+    --red:#d64545;--green:#1e9e6a;--amber:#c98a12;--blue:#2f6bff}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;line-height:1.55;padding:28px 16px}
+  .page{max-width:980px;margin:0 auto}
+  .head{background:linear-gradient(135deg,var(--brand) 0%,var(--brand2) 100%);border-radius:16px;padding:22px 26px;color:#fff;box-shadow:0 8px 24px rgba(29,58,143,.18)}
+  .head .tags{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  .tag{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);padding:2px 10px;border-radius:999px;font-size:12px}
+  .head h1{font-size:24px;font-weight:700;letter-spacing:.5px}
+  .head .sub{margin-top:6px;font-size:13px;opacity:.92;display:flex;flex-wrap:wrap;gap:4px 16px}
+  .alert{margin-top:16px;background:var(--warn-bg);border:1px solid var(--warn-bd);border-left:5px solid var(--amber);border-radius:10px;padding:14px 16px;font-size:14px;color:var(--warn-tx)}
+  .alert b{color:#6b4a00}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-top:16px;box-shadow:0 2px 6px rgba(20,30,60,.04)}
+  .sec-title{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:700;margin-bottom:14px}
+  .sec-title .no{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:var(--brand);color:#fff;font-size:13px;flex:none}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 14px 12px;border-top:3px solid var(--brand2)}
+  .kpi .k{font-size:12px;color:var(--sub)}
+  .kpi .v{font-size:20px;font-weight:700;margin-top:4px;letter-spacing:.3px}
+  .kpi .s{font-size:11px;color:var(--sub);margin-top:4px}
+  .v.pending{color:var(--amber)}.v.calc{color:var(--brand)}.v.na{color:var(--red)}.v.ok{color:var(--green)}
+  .tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+  .tbl th{background:#eef1f7;color:#39414f;text-align:left;padding:9px 10px;font-weight:600;border:1px solid var(--line);white-space:nowrap}
+  .tbl td{padding:9px 10px;border:1px solid var(--line);vertical-align:top}
+  .tbl tr:nth-child(even) td{background:#fafbfd}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+  .dot.red{background:var(--red)}.dot.green{background:var(--green)}.dot.amber{background:var(--amber)}.dot.blue{background:var(--blue)}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+  .pill.warn{background:#fdeaea;color:var(--red)}.pill.ok{background:#e6f6ef;color:var(--green)}.pill.wait{background:#fff4de;color:var(--amber)}
+  ol.acts{list-style:none;counter-reset:act}
+  ol.acts li{counter-increment:act;position:relative;padding:10px 10px 10px 46px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:#fcfdff}
+  ol.acts li::before{content:counter(act);position:absolute;left:12px;top:11px;width:24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  ol.acts b{color:var(--brand)}
+  .who{color:var(--brand2);font-weight:600}
+  .dl{display:inline-block;margin-left:6px;background:#eef2ff;color:var(--brand);border-radius:6px;padding:0 7px;font-size:12px;font-weight:600}
+  .foot{margin-top:16px;font-size:12px;color:var(--sub);background:#eef1f7;border-radius:10px;padding:12px 16px;line-height:1.7}
+  .note-tip{font-size:12px;color:var(--sub);margin-top:8px;border-top:1px dashed var(--line);padding-top:8px}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+  @media (max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <div class="tags">
+      <span class="tag">良策 SOP · 执行单</span>
+      <span class="tag">D1：刘欢：招聘</span>
+      <span class="tag">房间 room-6ngabasn「招聘sop」</span>
+      <span class="tag">导图 v17</span>
+    </div>
+    <h1>D1：刘欢：招聘 — 执行单（需求提交阻塞 · 待补数据）</h1>
+    <div class="sub">
+      <span>需求方：刘欢（节点标题内嵌）</span>
+      <span>归属：中心主题 → D1：刘欢：招聘</span>
+      <span>trace：tr-1a07ea85cac-f7875dd7</span>
+      <span>生成时间：2026-09-08 14:29</span>
+    </div>
+  </div>
+
+  <div class="alert">
+    <b>⚠️ 执行状态：未完成 —— 卡在「需求方:提交招聘需求」，等待补齐 12 项招聘需求数据</b> —— 实时读取导图（v17，2026-09-08 06:28:57Z = 本地 14:28 更新）：D1：刘欢：招聘 下 14 个主环节节点齐全，但「需求方:提交招聘需求」（uid c8f71bed）下的 <b>公司主体 / 招聘岗位 / 招聘部门 / 性别要求 / 职级 / 工作性质 / 招聘人数 / 招聘城市 / 招聘原因 / 试用期带教导师 / 新人试用期成长计划表 / 硬性要求 12 项字段全部为空叶子</b>；全图 note=0、hyperlink=0、数值=0（逐节点核查），list_todos 返回「找不到同时包含『待办』和『已完成』的待办容器」。缺 HRBP 人选、缺现成 JD / 对标岗位、缺简历池 → <b>本单不伪造任何招聘信息</b>，先输出「阻塞核查 + 可引用判定口径（导图原文）+ 补齐后 14 环节顺序执行预案 + 本周动作」，待刘欢回填需求即转可执行。
+  </div>
+
+  <section>
+    <div class="sec-title"><span class="no">K</span>关键指标看板</div>
+    <div class="kpis">
+      <div class="kpi"><div class="k">节点定位</div><div class="v calc">招聘SOP · D1</div><div class="s">房间 room-6ngabasn「招聘sop」中心主题下唯一招聘 SOP 树；需求方刘欢，55 节点全部为模板字段</div></div>
+      <div class="kpi"><div class="k">需求字段完成度</div><div class="v na">0 / 12</div><div class="s">公司主体/岗位/部门/性别/职级/工作性质/人数/城市/原因/带教导师/成长计划/硬性要求 —— 全空，第 1 环节即阻塞</div></div>
+      <div class="kpi"><div class="k">流程主环节进度</div><div class="v na">0 / 14</div><div class="s">全部「未开始/阻塞」；候选人/简历/面试/笔试数据 = 0</div></div>
+      <div class="kpi"><div class="k">数据源 / 待办就绪</div><div class="v na">0 就绪</div><div class="s">全图 note=0、hyperlink=0；无「待办/已完成」容器；无 HRBP 人选、无 JD</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">1</span>SOP 主链路执行检查表（导图实际内容核查）</div>
+    <table class="tbl">
+      <thead><tr><th style="width:150px">环节</th><th>导图节点 / 规则（mind-map MCP 取数）</th><th style="width:180px">状态</th></tr></thead>
+      <tbody>
+        <tr><td><b>① 需求方:提交招聘需求</b><br><span style="color:var(--sub);font-size:12px">c8f71bed</span></td><td>必须由需求方（刘欢）先填 12 项字段：公司主体 f3c1ff56 / 招聘岗位 ac9d69b4 / 招聘部门 a9478fa6 / 性别要求 83d1c778 / 职级 bab03b8d / 工作性质 7c8fa96f / 招聘人数 8559d86c / 招聘城市 c22a0007 / 招聘原因 7ec73e8c / 试用期带教导师 0cdea8d1 / 新人试用期成长计划表 25dd65bb / 硬性要求 dd4f864d。当前 12 项 <b>全部为空叶子</b>。</td><td><span class="pill warn"><span class="dot red"></span>阻塞 · 0/12</span></td></tr>
+        <tr><td><b>② AI:通知对应的HRBP</b><br><span style="color:var(--sub);font-size:12px">f1e51339</span></td><td>需先确定本单 HRBP 人选；全图检索「HRBP」仅命中本 SOP 3 个步骤标题，<b>无具体人选</b>。</td><td><span class="pill warn"><span class="dot red"></span>未开始 · 缺目标</span></td></tr>
+        <tr><td><b>③ AI:发布boss直聘JD</b><br><span style="color:var(--sub);font-size:12px">2adf0845</span></td><td>分支：有现成 JD →「点击发送」(1a676707)；无现成 JD → AI 查对标公司同类岗位并结合需求生成 JD (2eccf7d8)。当前无 JD、无需求 → <b>分支未定</b>。</td><td><span class="pill warn"><span class="dot red"></span>未开始</span></td></tr>
+        <tr><td><b>④ AI:初步筛选简历</b><br><span style="color:var(--sub);font-size:12px">50d26cab</span></td><td>前置为 JD 发布后收简历；当前 <b>简历池 = 0</b>。</td><td><span class="pill warn"><span class="dot red"></span>未开始</span></td></tr>
+        <tr><td><b>⑤ HRBP:初步了解</b><br><span style="color:var(--sub);font-size:12px">1070e7fa</span></td><td>由 HRBP 对初筛候选人电话/线上初聊；无候选人可执行。</td><td><span class="pill warn"><span class="dot red"></span>未开始</span></td></tr>
+        <tr><td><b>⑥ 需求方:二次筛选简历</b><br><span style="color:var(--sub);font-size:12px">ef233acf</span></td><td>需求方对 HRBP 初聊后的简历做二次筛选；无简历可执行。</td><td><span class="pill warn"><span class="dot red"></span>未开始</span></td></tr>
+        <tr><td><b>⑦ AI:邀约</b><br><span style="color:var(--sub);font-size:12px">c50d9c2f</span></td><td>确定需求方日程 (aedffe1a) →「新增待办（同时附上简历）行政、需求人」(38d5b7f9)；房间当前无待办容器，需在有候选人与日程后建待办。</td><td><span class="pill warn"><span class="dot red"></span>未开始</span></td></tr>
+        <tr><td><b>⑧ 人:面试、输出评价</b><br><span style="color:var(--sub);font-size:12px">53d47ab9</span></td><td>需求方一面 (d96830fa) → HR 二面 (abbbf64a) → 总经理/副总终面 (1fe15b57)；无候选人可安排。</td><td><span class="pill warn"><span class="dot red"></span>未开始</span></td></tr>
+        <tr><td><b>⑨ AI:推送笔试题</b><br><span style="color:var(--sub);font-size:12px">d7c4ceca</span></td><td>面试环节后推送笔试题；题目库/候选人皆无。</td><td><span class="pill warn"><span class="dot red"></span>未开始</span></td></tr>
+        <tr><td><b>⑩ 人:内部评估</b><br><span style="color:var(--sub);font-size:12px">7dcf76d6</span></td><td>AI 结合简历/面试/笔试分析 → 定 职级 (0e087498) / 薪资 (7909e392) / 薪资体系 (a78d92a9)；需候选人全流程数据。</td><td><span class="pill warn"><span class="dot red"></span>未开始</span></td></tr>
+        <tr><td><b>⑪ 面试官:评五维分</b><br><span style="color:var(--sub);font-size:12px">9a40f269</span></td><td>面试官对候选人五维打分；无候选人。</td><td><span class="pill warn"><span class="dot red"></span>未开始</span></td></tr>
+        <tr><td><b>⑫ HRBP:谈薪、确认入职时间</b><br><span style="color:var(--sub);font-size:12px">364b4296</span></td><td>HRBP 与候选人谈薪并确认入职时间；无候选人。</td><td><span class="pill warn"><span class="dot red"></span>未开始</span></td></tr>
+        <tr><td><b>⑬ AI:总经理审批、抄送副总、人事</b><br><span style="color:var(--sub);font-size:12px">d8562a0a</span></td><td>审批原则 (9cecd675)：<b>默认同意</b>；年龄&gt;42 岁 (1e3e1757) 或 学历低于高中 (23bdf583) → <b>拒绝</b>；通过后抄送副总、人事。规则可引用，无候选人可审批。</td><td><span class="pill wait"><span class="dot amber"></span>规则就绪 · 无对象</span></td></tr>
+        <tr><td><b>⑭ AI:发offer、自动推送入职时间</b><br><span style="color:var(--sub);font-size:12px">ee237acb</span></td><td>Offer 必含：职级 (8ee7158b) / 薪资 (1bdf8ebf) / 薪资体系 (a4bef37f) / 岗位 (0bdb2806) / 入职时间 (99432976)；自动推送 行政、人事、IT、需求方。无候选人可发。</td><td><span class="pill wait"><span class="dot amber"></span>规则就绪 · 无对象</span></td></tr>
+      </tbody>
+    </table>
+    <div class="note-tip">结论：14 个主环节中 12 个「未开始/阻塞」、2 个仅「判定规则可引用（无对象）」；阻塞根因唯一且前置 —— 第 ① 环节需求数据 0/12。补齐需求后本单即可沿 ②→⑭ 顺序推进勾检。</div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">2</span>可引用判定口径（导图原文 · 无数据缺口即可直接用）</div>
+    <table class="tbl">
+      <thead><tr><th style="width:170px">口径</th><th>默认值 / 规则（出处节点 uid）</th><th style="width:150px">状态</th></tr></thead>
+      <tbody>
+        <tr><td><b>招聘城市</b></td><td>默认 <b>深圳</b>（fa7af7ac，挂在 c22a0007 下）——需求方未指定则按深圳。</td><td><span class="pill ok"><span class="dot green"></span>可引用</span></td></tr>
+        <tr><td><b>工作性质</b></td><td>默认 <b>全职</b>（6dc5c90f，挂在 7c8fa96f 下）；可选 实习生（dcf2420b）。</td><td><span class="pill ok"><span class="dot green"></span>可引用</span></td></tr>
+        <tr><td><b>职级选项</b></td><td>初级（82da28c2）/ 中级（d4510769）/ 高级（ee60d81d）/ 经理级以上（a46564f6）。</td><td><span class="pill ok"><span class="dot green"></span>可引用</span></td></tr>
+        <tr><td><b>招聘原因选项</b></td><td>离职、替补（d3de0da6）/ 新增（12103707）。</td><td><span class="pill ok"><span class="dot green"></span>可引用</span></td></tr>
+        <tr><td><b>总经理审批原则</b></td><td><b>默认同意</b>；仅两类拒绝：年龄 &gt; 42 岁、学历低于高中；通过后抄送副总、人事（9cecd675 子树，1e3e1757 / 23bdf583）。</td><td><span class="pill ok"><span class="dot green"></span>可引用</span></td></tr>
+        <tr><td><b>Offer 必含字段</b></td><td>职级 / 薪资 / 薪资体系 / 岗位 / 入职时间（ee237acb 下 5 个字段节点），推送对象：行政、人事、IT、需求方。</td><td><span class="pill ok"><span class="dot green"></span>可引用</span></td></tr>
+        <tr><td><b>面试链路</b></td><td>需求方一面 → HR 二面 → 总经理/副总终面；面试后 AI 推送笔试题；面试官评五维分。</td><td><span class="pill ok"><span class="dot green"></span>可引用</span></td></tr>
+      </tbody>
+    </table>
+    <div class="note-tip">上表均为导图原文节点（可引用为默认口径），但 <b>不能替代需求方对 12 项字段的实际指定</b>——尤其公司主体、招聘岗位、招聘部门、招聘人数、职级、硬性要求 6 项必填，不得用默认值代填。</div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">3</span>本周动作（2026-09-08 ～ 09-13）</div>
+    <ol class="acts">
+      <li><span class="who">刘欢（需求方）</span> 于<b>周三（2026-09-09）前</b><span class="dl">截止 09-09</span><br>在导图「需求方:提交招聘需求」（c8f71bed）下补齐 <b>12 项字段</b>；其中必填 ≥6 项：公司主体 / 招聘岗位 / 招聘部门 / 招聘人数 / 职级 / 硬性要求，其余建议一并填（性别要求 / 工作性质 / 招聘城市 / 招聘原因 / 试用期带教导师 / 新人试用期成长计划表）。文本回贴或授权 WorkBuddy 代写入节点 note。</li>
+      <li><span class="who">刘欢 / 人事</span> 于<b>周四（2026-09-10）前</b><span class="dl">截止 09-10</span><br>确认 <b>本单 HRBP 人选</b>（②环节目标）与 <b>JD 口径</b>：有现成 JD → 走「点击发送」（1a676707）；无现成 JD → 提供 2–3 家对标公司同类岗位信息，供 AI 生成 JD（2eccf7d8）。</li>
+      <li><span class="who">WorkBuddy</span> 需求数据到位后<b>当日按 ②→⑭ 顺序执行并逐环节勾检</b><span class="dl">数据齐触发</span><br>通知 HRBP → 发布/生成 Boss直聘 JD → 简历初筛 → HRBP 初步了解 → 需求方二次筛选 → 邀约（新增待办并附简历给行政、需求人）→ 三面 → 推笔试题 → 内部评估（职级/薪资/薪资体系）→ 五维分 → 谈薪确认入职 → 总经理审批（默认同意，年龄&gt;42 或学历&lt;高中拒绝，抄送副总/人事）→ 发 offer 并推送行政/人事/IT/需求方；完成后回填本单 KPI。</li>
+      <li><span class="who">刘欢（需求方）</span> <b>防挂空单</b>：若 2026-09-13 前需求仍未补齐，请明确答复「继续等待」或「关闭该节点」，避免本单虚假启动。<span class="dl">截止 09-13</span></li>
+    </ol>
+  </section>
+
+  <div class="foot">
+    <b>数据来源：</b>mind-map MCP —— get_map(room_key: room-6ngabasn「招聘sop」, format: outline / full，实时 <b>version 17</b>，内容更新 2026-09-08 06:28:57Z = 本地 14:28，本地生成 14:29)、search_nodes(room_key: room-6ngabasn，query: 招聘需求 / 刘欢 / HRBP / 简历 / offer / 深圳 / 入职 —— 命中项均为 SOP 模板标题、note 全空)、list_todos(room_key: room-6ngabasn，返回「找不到同时包含待办和已完成的待办容器」)。实时共享链接：<a href="http://192.168.1.114:8989/?room=room-6ngabasn">http://192.168.1.114:8989/?room=room-6ngabasn</a><br>
+    <b>SOP 对象：</b>D1：刘欢：招聘 节点 uid e57da57e-2950-4e32-adfb-9d48cb9e309e（trace tr-1a07ea85cac-f7875dd7）；父链 中心主题(cc81ab99) → D1；下辖 需求方:提交招聘需求(c8f71bed) 及 ②–⑭ 共 14 主环节。<br>
+    <b>口径出处（导图原文 / 真值）：</b>① 默认城市深圳、默认全职、职级 4 档、招聘原因 2 档、审批原则（默认同意；年龄&gt;42 / 学历&lt;高中拒绝；抄送副总、人事）、Offer 5 必含字段并推送行政/人事/IT/需求方、面试三面链路 —— 均为导图节点原文（v17）；② 12 项需求字段节点存在但无任何填写值（0/12）；③ 房间无待办容器，邀约环节的「新增待办（附简历）行政、需求人」需后续创建。<br>
+    <b>缺口说明：</b>本次执行 <b>未完成</b>——阻塞于第 ① 环节：公司主体/岗位/部门/性别/职级/工作性质/人数/城市/原因/带教导师/成长计划/硬性要求 12 项全空；且缺 HRBP 人选、缺现成 JD / 对标岗位、缺简历池；全图 note=0 / hyperlink=0 / 数值=0。所需招聘真值需需求方（刘欢）在导图或对话中提供，WorkBuddy 无法匿名获取亦<b>不伪造任何招聘信息</b>；第 2 节默认口径可先行引用，但 6 项必填字段不得代填。<br>
+    <b>生成：</b>WorkBuddy 良策 SOP 执行助手 · 2026-09-08 14:29
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D4：达播规划 · 执行单 2026-09-08</title>
+<style>
+  :root{
+    --ink:#1f2733; --sub:#6b7686; --line:#e5e9f0;
+    --bg:#f4f6fa; --card:#ffffff;
+    --brand:#123c63; --brand2:#3b82f6;
+    --warn-bg:#fff7e8; --warn-bd:#f2c66d; --warn-tx:#8a5a00;
+    --red:#d64545; --green:#1e9e6a; --amber:#c98a12; --blue:#2f6bff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;line-height:1.55;padding:28px 16px}
+  .page{max-width:980px;margin:0 auto}
+  .head{background:linear-gradient(135deg,var(--brand) 0%,var(--brand2) 100%);border-radius:16px;padding:22px 26px;color:#fff;box-shadow:0 8px 24px rgba(18,60,99,.20)}
+  .head .tags{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  .tag{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);padding:2px 10px;border-radius:999px;font-size:12px}
+  .head h1{font-size:23px;font-weight:700;letter-spacing:.5px}
+  .head .sub{margin-top:6px;font-size:13px;opacity:.93;display:flex;flex-wrap:wrap;gap:4px 16px}
+  .alert{margin-top:16px;background:var(--warn-bg);border:1px solid var(--warn-bd);border-left:5px solid var(--amber);border-radius:10px;padding:14px 16px;font-size:14px;color:var(--warn-tx)}
+  .alert b{color:#6b4a00}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-top:16px;box-shadow:0 2px 6px rgba(20,30,60,.04)}
+  .sec-title{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:700;margin-bottom:14px}
+  .sec-title .no{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:var(--brand);color:#fff;font-size:13px;flex:none}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 14px 12px;border-top:3px solid var(--brand2)}
+  .kpi .k{font-size:12px;color:var(--sub)}
+  .kpi .v{font-size:22px;font-weight:700;margin-top:4px;letter-spacing:.3px}
+  .kpi .s{font-size:11px;color:var(--sub);margin-top:4px}
+  .v.pending{color:var(--amber)} .v.calc{color:var(--brand)} .v.na{color:var(--red)} .v.ok{color:var(--green)}
+  .tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+  .tbl th{background:#edf2f8;color:#263a52;text-align:left;padding:9px 10px;font-weight:600;border:1px solid var(--line);white-space:nowrap}
+  .tbl td{padding:9px 10px;border:1px solid var(--line);vertical-align:top}
+  .tbl tr:nth-child(even) td{background:#fafbfe}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+  .dot.red{background:var(--red)} .dot.green{background:var(--green)} .dot.amber{background:var(--amber)} .dot.blue{background:var(--blue)}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+  .pill.warn{background:#fdeaea;color:var(--red)}
+  .pill.ok{background:#e6f6ef;color:var(--green)}
+  .pill.wait{background:#fff4de;color:var(--amber)}
+  .pill.info{background:#e9f0fd;color:var(--blue)}
+  ol.acts{list-style:none;counter-reset:act}
+  ol.acts li{counter-increment:act;position:relative;padding:10px 10px 10px 46px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:#fcfdff}
+  ol.acts li::before{content:counter(act);position:absolute;left:12px;top:11px;width:24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  ol.acts b{color:var(--brand)}
+  .who{color:var(--brand2);font-weight:600}
+  .dl{display:inline-block;margin-left:6px;background:#e9f0fd;color:var(--brand);border-radius:6px;padding:0 7px;font-size:12px;font-weight:600}
+  .foot{margin-top:16px;font-size:12px;color:var(--sub);background:#edeff4;border-radius:10px;padding:12px 16px;line-height:1.7}
+  .foot code{background:#dfe3ea;padding:0 4px;border-radius:4px}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+  @media (max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <div class="tags">
+      <span class="tag">良策 SOP · 执行单</span>
+      <span class="tag">D4：达播规划</span>
+      <span class="tag">房间 room-bpapl7vv</span>
+      <span class="tag">P：品牌营销</span>
+    </div>
+    <h1>D4：达播规划 — 执行单（P：品牌营销 · UNOVE 柔诺伊）</h1>
+    <div class="sub">
+      <span>归属：P：品牌营销 → D4：达播规划 → 黄锦</span>
+      <span>责任执行人：黄锦</span>
+      <span>品牌：UNOVE 柔诺伊 · 个护</span>
+      <span>生成时间：2026-09-08 10:07</span>
+    </div>
+  </div>
+
+  <div class="alert">
+    <b>⚠️ 执行状态：骨架待补全（本单为「取数启动 + 流程倒排」，无伪造数据）</b> —— 实时读取导图（v44 / 475 节点）：D4：达播规划 下仅有 1 个<b>空子节点「黄锦」</b>，无 SOP 步骤、无检查项、无 KPI 字段、无数据表外链；交叉核对主图 room-t1p1lisl「unove」v208 的 P5 品牌营销 → D4：达播规划 → 黄锦 为<b>同构空骨架</b>。全图搜索「达人/坑位/带货/排期」无规划数据，仅命中天猫渠道侧执行流程「A1：达播」与直播组店铺账号节点。因此本单<b>不虚构任何达人名单、档期排期、坑产与 GMV 目标</b>，本周动作聚焦「黄锦定口径 → 补导图骨架 → 回填平台后台真数据」，数据齐后一键升级为正式达播规划总表。
+  </div>
+
+  <section>
+    <div class="sec-title"><span class="no">K</span>关键指标看板</div>
+    <div class="kpis">
+      <div class="kpi"><div class="k">导图内 SOP 流程步骤</div><div class="v pending">0 步</div><div class="s">D4 下仅空节点「黄锦」，无步骤/检查项（实时 v44 核查；unove v208 同构）</div></div>
+      <div class="kpi"><div class="k">达播渠道覆盖（导图定义）</div><div class="v ok">3 平台</div><div class="s">达播 = 抖音 + 快手 + 小红书（赠品体系/控价节点原文口径）；黄锦同时为 P：渠道运营 抖音/快手/小红书 三节点执行人</div></div>
+      <div class="kpi"><div class="k">直播组店铺账号（真值盘点）</div><div class="v calc">4 个</div><div class="s">抖音官旗 13CHAN10132 · 抖音个护旗舰 13CHAN10029 · 快手旗舰 13CHAN10033 · 小红书旗舰 13CHAN10041</div></div>
+      <div class="kpi"><div class="k">数据源就绪度</div><div class="v na">0 / 待建</div><div class="s">本分支无外链数据表；达人排期/坑产/佣金/GMV 需抖音、快手、小红书后台及达播合同 OFFER 登录取数</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">1</span>SOP 步骤与检查项执行情况（导图现状核查）</div>
+    <table class="tbl">
+      <thead>
+        <tr><th style="width:170px">核查项</th><th>实时结果（mind-map MCP 取数）</th><th style="width:150px">状态</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><b>节点位置</b></td><td>根「C:陈华俊:UN项目利润分」→ P：品牌营销（uid b251a152）→ <b>D4：达播规划（uid 872223c5-b820-4862-961b-69252f4d0246）</b> → 子节点「黄锦」（uid be28fe43，叶子空节点）。同父级：D1 官号运营(品牌运作)、D2 博主合作(林培培)、D3 品牌营销活动(陈华俊)、D5 PR推广(品牌运作)；其中仅 D3 → 陈华俊 → A1 全年品牌营销规划 有 5 步内容，其余同为空骨架。</td><td><span class="pill ok"><span class="dot green"></span>已核查</span></td></tr>
+        <tr><td><b>流程步骤 / 检查项</b></td><td>D4 节点无 1/2/3… 步骤、无 generalization 概要、无 note（含 SOP 台账）、无 hyperlink —— 导图未定义「达播规划该怎么做」。交叉核对 room-t1p1lisl「unove」v208 的 D4：达播规划（uid 539af922）同为「→ 黄锦」空骨架。</td><td><span class="pill warn"><span class="dot red"></span>待补全</span></td></tr>
+        <tr><td><b>达播定义与账号（真值）</b></td><td>P：品牌资产·控价体系「达播价格(有赠品)」；赠品体系「达播定义为抖音、快手、小红书」；新品控价「官旗1价 / 达播1价 / 分销1价 ≤3 段位」。直播组店铺账号：抖音官方旗舰店 13CHAN10132、抖音个人护理旗舰店 13CHAN10029、快手旗舰店 13CHAN10033、小红书旗舰店 13CHAN10041。</td><td><span class="pill ok"><span class="dot green"></span>口径已存在</span></td></tr>
+        <tr><td><b>规划数据（达人/排期/坑产/GMV）</b></td><td>全图搜索「达人/坑位/带货」= 0 命中；「直播/排期」仅命中渠道侧执行流程节点与店铺账号；无 2026 达播 GMV 目标、坑产、费率、档期日历等任何数值；无 doc.weixin / 在线表外链。</td><td><span class="pill warn"><span class="dot red"></span>待建</span></td></tr>
+        <tr><td><b>下游引用（真实）</b></td><td>P：品牌战略「根据P品牌营销生成年度营销预算」「完成营销端复盘」均含「达播」子节点 —— 达播规划成果是年度营销预算与营销端复盘的数据输入；P：渠道运营 天猫 P3 → D3：直播运营 → A1：达播（商务BD → 提交合同和OFFER → 确认排期和上播 → 上播跟进 → 下播后复盘）为渠道侧可复用的执行流程。</td><td><span class="pill info"><span class="dot blue"></span>引用点存在</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">2</span>建议补全的达播规划骨架（待黄锦确认，非导图原文）</div>
+    <table class="tbl">
+      <thead><tr><th style="width:150px">模块</th><th>建议内容（参照同分支 D3：A1 全年规划结构 + 天猫 A1：达播 5 步流程起草）</th><th style="width:150px">当前状态</th></tr></thead>
+      <tbody>
+        <tr><td><b><span class="dot amber"></span>1 口径与渠道范围</b></td><td>确认 D4「达播规划」= 品牌营销级年度达播规划（目标/节奏/预算），与 P：渠道运营 抖音/快手/小红书 店铺运营、天猫 D3 直播运营的分工边界。登记直播组店铺账号（4 个，见 KPI 卡）为达播统计口径主体。</td><td><span class="pill wait">待确认</span></td></tr>
+        <tr><td><b><span class="dot blue"></span>2 年度目标与节奏</b></td><td>建议产出：2026 达播 GMV 目标、坑产与综合费率目标、场次预算；对齐 D3：A1 全年规划（品牌/电商/线下营销节奏 + 明星代言/重要节点活动），输出达播档期日历，避免与大促/代言节奏脱节。</td><td><span class="pill wait">待黄锦回填</span></td></tr>
+        <tr><td><b><span class="dot green"></span>3 达人矩阵与排期</b></td><td>按导图赠品分层「头部 / 中腰部和垂类 / 纯佣」建达人清单：达人 × 平台 × 档期 × Offer/佣金 × 预期坑产；排期表对齐渠道侧「确认排期和上播」节点落地。</td><td><span class="pill wait">待建表</span></td></tr>
+        <tr><td><b><span class="dot blue"></span>4 货盘/价格/赠品规则</b></td><td>按导图口径执行：控价 6 档中「达播价格(有赠品)」；新品 ≤3 段位（官旗1价/达播1价/分销1价，首发期 3 个月以天猫官旗为主）；赠品按 头部/中腰部垂类/纯佣 分层发放。</td><td><span class="pill info"><span class="dot blue"></span>规则已就绪</span></td></tr>
+        <tr><td><b><span class="dot amber"></span>5 跟进与复盘</b></td><td>复用渠道侧流程：商务BD → 提交合同和OFFER → 确认排期和上播 → 上播跟进 → 下播复盘；按月沉淀进入 P：品牌战略「营销端复盘」，按年支撑「年度营销预算」修正 —— 下游节点已存在，只差达播侧数据供给。</td><td><span class="pill info"><span class="dot blue"></span>下游已就绪</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">3</span>本周动作（2026-09-07 ～ 09-13）</div>
+    <ol class="acts">
+      <li><span class="who">黄锦</span> 于<b>周二（09-08）前</b><span class="dl">截止 09-08</span><br>确认 D4「达播规划」口径与产物范围：a) 品牌级年度达播规划（目标+节奏+预算）；b) 或仅达播档期/执行排期。回贴给 WorkBuddy 后立即在导图 D4：达播规划 下补规划步骤骨架（参照 D3：A1 5 步结构）。</li>
+      <li><span class="who">黄锦</span> 于<b>周三（09-09）前</b><span class="dl">截止 09-09</span><br>回贴<b>达播统计口径与账号清单</b>：直播组 4 店铺（抖音官旗 13CHAN10132、抖音个护旗舰 13CHAN10029、快手旗舰 13CHAN10033、小红书旗舰 13CHAN10041）+ 各平台后台取数权限归属，确定是否新建达播数据表（建议企业微信文档，参照 GMV 分支口径）。</li>
+      <li><span class="who">黄锦</span> 于<b>周四（09-10）前</b><span class="dl">截止 09-10</span><br>提供 ≥1 组真数据样板：<b>2026 达播年度目标</b>（GMV/坑产/综合费率/场次）或<b>最近一个完整月实绩</b>，WorkBuddy 据此立 KPI 卡与「达播 × 目标 × 排期 × 复盘」总表字段口径。</li>
+      <li><span class="who">WorkBuddy</span> 数据齐后<b>当天更新本单</b><br>生成正式达播规划执行总表（达人/排期/目标/复盘），并把 D4 规划骨架与检查项写入导图，替换本单「待补全」占位。</li>
+      <li><span class="who">陈华俊</span> 于<b>周五（09-11）前兜底</b><span class="dl">截止 09-11</span><br>明确 D4 品牌营销「达播规划」与 P：渠道运营（抖音/快手/小红书 黄锦 名下、天猫 D3 直播运营 A1：达播）的分工边界，避免品牌与渠道两套达播口径重复取数；未确认前不虚构任何达播规划数据启动。</li>
+    </ol>
+  </section>
+
+  <div class="foot">
+    <b>数据来源：</b>mind-map MCP —— get_map(room-bpapl7vv「C:陈华俊:UN项目利润分」, full，实时 version 44 / 475 节点，更新于 2026-09-08 10:04 本地)、search_nodes(达播/直播/排期/黄锦/坑位/带货)、list_todos（无待办容器）；交叉核对 get_map(room-t1p1lisl「unove」v208, outline) —— P5 品牌营销 → D4：达播规划（uid 539af922）→ 黄锦 为同构空骨架。<br>
+    <b>可引用口径（导图原文/真值）：</b>① 直播组店铺账号：抖音 UNOVE 柔诺伊官方旗舰店 13CHAN10132、抖音 UNOVE 柔诺伊个人护理旗舰店 13CHAN10029、快手 UNOVE 柔诺伊旗舰店 13CHAN10033、小红书 UNOVE 柔诺伊旗舰店 13CHAN10041；② 定义：赠品体系「达播定义为抖音、快手、小红书」，控价 6 档含「达播价格(有赠品)」，新品「原则不做超过 3 个控价段位，即官旗 1 个价格、达播 1 个价格、分销 1 个价格」；③ 同父级参照：D3 品牌营销活动 → 陈华俊 → A1 全年品牌营销规划 5 步（参考历史节奏制定全年规划 → 品牌/电商/线下营销节奏；全年大事件 → 明星代言/重要节点活动；根据采购目标制定全年营销预算；分配事件和渠道预算；跟进预算消耗进度）；④ 渠道侧流程：P：渠道运营 天猫 P3 天猫运营 D3 直播运营 → A1：达播（商务BD → 提交合同和OFFER → 确认排期和上播 → 上播跟进 → 下播后复盘）；⑤ 下游：P：品牌战略「根据P品牌营销生成年度营销预算（含达播）」「完成营销端复盘（含达播）」、P：渠道运营 抖音/快手/小红书 责任人均为黄锦。<br>
+    <b>缺口说明：</b>D4：达播规划 在导图内为纯骨架（1 个空子节点「黄锦」），无 SOP 步骤、无检查项、无 KPI、无达人/排期/坑产/GMV 数值、无数据表外链；本会话无法匿名登录抖音/快手/小红书等达播后台与 OFFER 合同系统取数，分支未提供企业微信文档授权 —— 本单未包含任何虚构的达播规划数据，KPI 卡第 2/3 项为导图真实盘点，第 1/4 项为待补全缺口。<br>
+    <b>生成：</b>WorkBuddy 良策 SOP 执行助手 · 2026-09-08 10:07
+  </div>
+
+</div>
+</body>
+</html>

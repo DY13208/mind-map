@@ -1,0 +1,165 @@
+# -*- coding: utf-8 -*-
+import datetime
+now = datetime.datetime.now()
+stamp = now.strftime("%Y-%m-%d_%H%M")
+disp = now.strftime("%Y-%m-%d %H:%M")
+fn = "output/D5_PR推广执行单_" + stamp + ".html"
+
+from datetime import timedelta
+fri = now.date() + timedelta(days=3)   # 2026-09-11
+mon = now.date() + timedelta(days=6)   # 2026-09-14
+friday = fri.strftime("%m-%d")
+friday_full = fri.strftime("%Y-%m-%d")
+monday = mon.strftime("%m-%d")
+
+css = """
+  :root{--ink:#1f2733;--sub:#6b7686;--line:#e5e9f0;--bg:#f4f6fa;--card:#fff;
+    --brand:#1d3a8f;--brand2:#2f6bff;--warn-bg:#fff7e8;--warn-bd:#f2c66d;--warn-tx:#8a5a00;
+    --red:#d64545;--green:#1e9e6a;--amber:#c98a12;--blue:#2f6bff}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;line-height:1.55;padding:28px 16px}
+  .page{max-width:980px;margin:0 auto}
+  .head{background:linear-gradient(135deg,var(--brand) 0%,var(--brand2) 100%);border-radius:16px;padding:22px 26px;color:#fff;box-shadow:0 8px 24px rgba(29,58,143,.18)}
+  .head .tags{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  .tag{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);padding:2px 10px;border-radius:999px;font-size:12px}
+  .head h1{font-size:24px;font-weight:700;letter-spacing:.5px}
+  .head .sub{margin-top:6px;font-size:13px;opacity:.92;display:flex;flex-wrap:wrap;gap:4px 16px}
+  .alert{margin-top:16px;background:var(--warn-bg);border:1px solid var(--warn-bd);border-left:5px solid var(--amber);border-radius:10px;padding:14px 16px;font-size:14px;color:var(--warn-tx)}
+  .alert b{color:#6b4a00}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-top:16px;box-shadow:0 2px 6px rgba(20,30,60,.04)}
+  .sec-title{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:700;margin-bottom:14px}
+  .sec-title .no{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:var(--brand);color:#fff;font-size:13px;flex:none}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 14px 12px;border-top:3px solid var(--brand2)}
+  .kpi .k{font-size:12px;color:var(--sub)}
+  .kpi .v{font-size:21px;font-weight:700;margin-top:4px;letter-spacing:.3px}
+  .kpi .s{font-size:11px;color:var(--sub);margin-top:4px}
+  .v.pending{color:var(--amber)}.v.calc{color:var(--brand)}.v.na{color:var(--red)}.v.ok{color:var(--green)}
+  .tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+  .tbl th{background:#eef1f7;color:#39414f;text-align:left;padding:9px 10px;font-weight:600;border:1px solid var(--line);white-space:nowrap}
+  .tbl td{padding:9px 10px;border:1px solid var(--line);vertical-align:top}
+  .tbl tr:nth-child(even) td{background:#fafbfd}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+  .dot.red{background:var(--red)}.dot.green{background:var(--green)}.dot.amber{background:var(--amber)}.dot.blue{background:var(--blue)}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+  .pill.warn{background:#fdeaea;color:var(--red)}.pill.ok{background:#e6f6ef;color:var(--green)}.pill.wait{background:#fff4de;color:var(--amber)}
+  ol.acts{list-style:none;counter-reset:act}
+  ol.acts li{counter-increment:act;position:relative;padding:10px 10px 10px 46px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:#fcfdff}
+  ol.acts li::before{content:counter(act);position:absolute;left:12px;top:11px;width:24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  ol.acts b{color:var(--brand)}
+  .who{color:var(--brand2);font-weight:600}
+  .dl{display:inline-block;margin-left:6px;background:#eef2ff;color:var(--brand);border-radius:6px;padding:0 7px;font-size:12px;font-weight:600}
+  .foot{margin-top:16px;font-size:12px;color:var(--sub);background:#eef1f7;border-radius:10px;padding:12px 16px;line-height:1.7}
+  .note-tip{font-size:12px;color:var(--sub);margin-top:8px}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+  @media (max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}}
+"""
+
+html = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D5：PR推广 · 执行单 __DISP__</title>
+<style>""" + css + """</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <div class="tags">
+      <span class="tag">良策 SOP · 执行单</span>
+      <span class="tag">D5：PR推广</span>
+      <span class="tag">房间 room-bpapl7vv</span>
+      <span class="tag">导图 v37 · 475 节点</span>
+    </div>
+    <h1>D5：PR推广 — 执行单</h1>
+    <div class="sub">
+      <span>归属：P：品牌营销（D1 官号运营 / D2 博主合作 / D3 品牌营销活动 / D4 达播规划 / D5 PR推广 五线之一）</span>
+      <span>负责：品牌运作</span>
+      <span>生成时间：__DISP__</span>
+    </div>
+  </div>
+
+  <div class="alert">
+    <b>⚠️ 执行状态：待细化（导图为骨架节点，SOP 明细未展开）</b> —— 经 get_map / search_nodes 核查：D5：PR推广（uid 17f9a47e-412f-4108-b648-d7a512002d64）在导图 v37 中<b>仅含 1 个子节点「品牌运作」</b>，无任何步骤、检查项、交付物、外链数据表或预算口径；同层 D3 已用「A1：全年品牌营销规划 → 1~5」展开，而 D5 尚未展开。因此本单<b>不伪造任何 PR 排期、媒体清单或预算数字</b>，先输出「现状核查 + 建议执行框架 + 待补清单」，待 D5 在导图展开或品牌运作提供口径后即可转为可执行状态。
+  </div>
+
+  <section>
+    <div class="sec-title"><span class="no">K</span>关键指标看板</div>
+    <div class="kpis">
+      <div class="kpi"><div class="k">节点定位</div><div class="v calc">D5 / 5 线</div><div class="s">P：品牌营销共 5 条 D 工作线，PR推广为其中之一</div></div>
+      <div class="kpi"><div class="k">子节点 / 负责人</div><div class="v ok">1 个</div><div class="s">「品牌运作」负责（与 D1 官号运营同一负责口径）</div></div>
+      <div class="kpi"><div class="k">SOP 步骤与检查项</div><div class="v na">0 项</div><div class="s">导图未展开；无步骤/检查项/交付物可勾检</div></div>
+      <div class="kpi"><div class="k">预算 &amp; 复盘口径</div><div class="v pending">未单列</div><div class="s">年度营销预算/复盘仅 明星代言·达播·博主·节点活动 4 项，无 PR 线</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">1</span>SOP 步骤与检查项执行情况（导图口径核查）</div>
+    <table class="tbl">
+      <thead><tr><th style="width:170px">核查项</th><th>导图实际内容</th><th style="width:150px">状态</th></tr></thead>
+      <tbody>
+        <tr><td><b>节点归属</b></td><td>D5：PR推广（uid 17f9a47e…）隶属「P：品牌营销」（uid b251a152…），与 D1 官号运营 / D2 博主合作 / D3 品牌营销活动 / D4 达播规划 平级。</td><td><span class="pill ok"><span class="dot green"></span>已确认</span></td></tr>
+        <tr><td><b>负责人 / 分工</b></td><td>D5 下仅 1 个叶子子节点「品牌运作」（uid a4094b21…），无备注、无任务拆解；D1 官号运营下亦挂同名「品牌运作」节点。</td><td><span class="pill wait"><span class="dot amber"></span>仅负责人</span></td></tr>
+        <tr><td><b>步骤与检查项</b></td><td>未展开：导图中查无 PR/公关/媒体/稿件/发布等子步骤（search_nodes：PR 仅命中 D5 本体；公关 / 媒体 / 稿件 0 命中）。</td><td><span class="pill warn"><span class="dot red"></span>未定义</span></td></tr>
+        <tr><td><b>数据表 / 外链</b></td><td>D5 及其子树无 hyperlink、无 note、无数值；房间 list_todos 提示无「待办 / 已完成」容器。</td><td><span class="pill warn"><span class="dot red"></span>无数据源</span></td></tr>
+        <tr><td><b>预算 &amp; 复盘衔接</b></td><td>「根据P品牌营销生成年度营销预算」仅列 明星代言 / 达播 / 博主合作 / 重要节点活动 4 项；品牌营销端年度复盘亦仅 4 项 —— PR 线均未单列。</td><td><span class="pill wait"><span class="dot amber"></span>待补充</span></td></tr>
+        <tr><td><b>可参照模板</b></td><td>同层 D3 已按「A1：全年品牌营销规划 → 1 参考历史节奏制定全年规划 / 2 全年大事件（明星代言·节点）/ 3 按采购目标定预算 / 4 分配事件与渠道预算 / 5 跟进预算消耗」展开，可作 D5 展开范式。</td><td><span class="pill wait"><span class="dot amber"></span>待建步骤</span></td></tr>
+      </tbody>
+    </table>
+    <div class="note-tip">结论：D5 目前是「只挂了负责人、没有 SOP 内容」的骨架节点 —— 本次无法按步骤勾检，核心产出为下文「建议执行框架 + 待补清单」。</div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">2</span>PR推广 建议执行框架（供展开 D5 使用 · 非导图原文）</div>
+    <table class="tbl">
+      <thead><tr><th style="width:110px">阶段</th><th>建议动作与检查项</th><th style="width:210px">协同 / 依赖（导图事实）</th><th style="width:110px">状态</th></tr></thead>
+      <tbody>
+        <tr><td><b>0 边界定义</b></td><td>明确 PR推广 口径（媒体公关传播：媒体关系 / 新闻稿 / 权威与品牌背书 / 口碑舆情），与 D1 官号、D2 博主、D3 活动、D4 达播的内容与投放边界切分，避免重复触达同一批 KOL / 媒体。</td><td>D1–D4 负责口径：品牌运作 / 林培培 / 陈华俊 / 黄锦</td><td><span class="pill wait"><span class="dot amber"></span>待确认</span></td></tr>
+        <tr><td><b>1 规划</b></td><td>参照 D3 范式：结合品牌信息与历史 PR 节奏，制定全年 PR 主题与节奏（媒体发稿 / 产品测评 / 品牌背书 / 节点借势），并入年度营销 TIMELINE。</td><td>P：品牌战略 → 年度规划 → 年度营销 TIMELINE</td><td><span class="pill warn"><span class="dot red"></span>待建</span></td></tr>
+        <tr><td><b>2 预算</b></td><td>为 PR 线单列年度预算（当前「年度营销预算」4 项中无 PR），拆分到媒体 / 公关活动 / 素材制作。</td><td>年度营销预算（155b73b0）需补 PR 项</td><td><span class="pill warn"><span class="dot red"></span>待补数</span></td></tr>
+        <tr><td><b>3 资源清单</b></td><td>建立媒体 / 背书资源清单（美妆时尚 / 生活方式 / 行业媒体、权威背书来源）；明星官宣等大事件 PR 与 D3 明星代言节点联动。</td><td>D3 明星代言 / 重要节点活动；D2 博主合作资源</td><td><span class="pill warn"><span class="dot red"></span>无清单</span></td></tr>
+        <tr><td><b>4 素材支撑</b></td><td>PR 稿件与物料使用品牌视觉素材（主 KV / 产品图 / 模特图 / 场景图 / 短视频，多为 1 年两次更新）与备案功效卖点库，口径以天猫官旗控价 / 卖点为准。</td><td>P：品牌资产（视觉体系 · 产品资料）</td><td><span class="pill wait"><span class="dot amber"></span>可调用</span></td></tr>
+        <tr><td><b>5 执行与复盘</b></td><td>按排期执行（媒体发稿 / 测评 / 背书露出），跟踪声量与正向口碑；PR 数据并入品牌营销端年度复盘，与销售 / 采购目标联动看转化。</td><td>P：品牌营销年度复盘（ee76578c 4 项，需加 PR）</td><td><span class="pill warn"><span class="dot red"></span>待建</span></td></tr>
+      </tbody>
+    </table>
+    <div class="note-tip">品牌事实锚点（来自导图，可作 PR 传播主线素材）：韩国 No.1 护发品牌技术背书 +「科学修护 + 香氛体验」双支点；目标 25–35 岁一二线都市白领 / 新中产（女性为主）；价格带 ¥79–169 中高端；公司定位含「规模化战略品牌 / 方法论试验场 / 公司信誉凭证」。</div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">3</span>本周动作</div>
+    <ol class="acts">
+      <li><span class="who">品牌运作</span> 于<b>周五（__FRIDAY_FULL__）前</b><span class="dl">截止 __FRIDAY__</span><br>确认 PR推广 的口径与范围（是否 = 媒体公关传播线），并明确与 D1 官号 / D2 博主 / D3 活动 / D4 达播的边界 —— 这是展开 D5 的第一步。</li>
+      <li><span class="who">品牌运作（参照 D3）</span> 于<b>下周一（__MONDAY_FULL__）前</b><span class="dl">截止 __MONDAY__</span><br>在导图 D5：PR推广 下按 D3 范式补充 SOP 步骤（规划 → 大事件 / 排期 → 预算 → 分配 → 跟进复盘）；可自行在导图新增，或将步骤文本回贴给 WorkBuddy 代建（add_node）。</li>
+      <li><span class="who">品牌运作</span> 提供 PR 年度预算金额与媒体 / 背书资源清单（或授权企业微信文档），供 WorkBuddy 落成 PR 排期与预算表。<br><span style="color:var(--sub);font-size:12px">当前「年度营销预算」仅 明星代言 / 达播 / 博主 / 重要节点活动 4 项，需补 PR 线。</span></li>
+      <li><span class="who">WorkBuddy</span> 在 D5 展开或数据到位后<b>更新本单</b>：将第 2 节「建议框架」逐条转为勾检状态，并输出 PR 排期表 / 预算分配 / 复盘口径。</li>
+      <li><span class="who">品牌运作</span> 同步 D2 博主合作（林培培）与 D3 明星代言 / 节点活动排期，避免 PR 发稿与博主 / 达播内容在时段与话题上重复投放。</li>
+    </ol>
+  </section>
+
+  <div class="foot">
+    <b>数据来源：</b>mind-map MCP —— get_map(room-bpapl7vv「C:陈华俊:UN项目利润分」, v37 / full 475 节点, updated 2026-09-08 09:56 +08)、search_nodes(room-bpapl7vv, 查询：PR推广 / PR / 公关 / 媒体 / 稿件 / 发布 / 种草 / KOL)、list_todos。<br>
+    <b>SOP 对象：</b>D5：PR推广 节点 uid 17f9a47e-412f-4108-b648-d7a512002d64；父节点 P：品牌营销 uid b251a152-bbe9-457b-bf61-5b3b52dfe7f5；子节点 品牌运作 uid a4094b21-2b3f-4efc-8403-a15c9c82df9d。<br>
+    <b>口径出处：</b>导图「P：品牌战略 → 品牌定位 / 品牌资产 / 年度规划（年度营销预算 · 复盘）」节点文本；D3「A1：全年品牌营销规划」作为展开范式；「预算 / 复盘单列 4 项中无 PR」为事实核查结果。<br>
+    <b>缺口说明：</b>D5 在导图为骨架节点：0 步骤、0 检查项、0 外链数据；无 PR 排期 / 媒体清单 / 预算数字 —— 本单不含任何伪造数值；第 2 节为「建议执行框架（非导图原文）」，待 D5 展开或品牌运作补口径后转可执行。<br>
+    <b>生成：</b>WorkBuddy 良策 SOP 执行助手 · __DISP__
+  </div>
+
+</div>
+</body>
+</html>
+"""
+
+html = (html.replace("__DISP__", disp)
+           .replace("__FRIDAY__", friday)
+           .replace("__FRIDAY_FULL__", friday_full)
+           .replace("__MONDAY__", monday)
+           .replace("__MONDAY_FULL__", mon.strftime("%Y-%m-%d")))
+
+with open(fn, "w", encoding="utf-8") as f:
+    f.write(html)
+print("written:", fn)
+print("bytes:", len(html.encode("utf-8")))
+print("stamp:", stamp)

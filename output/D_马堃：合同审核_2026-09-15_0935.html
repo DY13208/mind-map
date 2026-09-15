@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D 马堃：合同审核 · 执行单</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --ink: #1a1d24; --muted: #6b7280;
+    --line: #e5e7eb; --brand: #2563eb; --brand-soft: #eff6ff;
+    --good: #16a34a; --good-soft: #f0fdf4; --warn: #d97706; --warn-soft: #fffbeb;
+    --bad: #dc2626; --bad-soft: #fef2f2;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.6; padding: 24px 16px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header.top { margin-bottom: 20px; }
+  .eyebrow { font-size: 12px; letter-spacing: .08em; color: var(--brand); font-weight: 700; text-transform: uppercase; }
+  h1 { font-size: 24px; margin: 4px 0 6px; }
+  .meta { font-size: 13px; color: var(--muted); }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 18px 0; }
+  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .kpi .label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .kpi .val { font-size: 22px; font-weight: 700; }
+  .kpi .unit { font-size: 13px; color: var(--muted); font-weight: 500; margin-left: 2px; }
+  .kpi .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .kpi.primary { background: var(--brand-soft); border-color: #bfdbfe; }
+  .kpi.primary .val { color: var(--brand); }
+
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  h2 { font-size: 15px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  h2 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--brand); display: inline-block; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #fafafa; color: var(--muted); font-weight: 600; font-size: 12.5px; }
+  tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.total { font-weight: 700; background: #fafafa; }
+  .pct { color: var(--brand); font-weight: 600; }
+
+  .actions { list-style: none; }
+  .actions li { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px dashed var(--line); font-size: 13.5px; }
+  .actions li:last-child { border-bottom: none; }
+  .actions .idx { flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; background: var(--brand); color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; font-weight: 600; }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+  .badge.ok { background: var(--good-soft); color: var(--good); }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); }
+  .badge.bad { background: var(--bad-soft); color: var(--bad); }
+
+  .note { background: var(--warn-soft); border: 1px solid #fde68a; border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #92400e; }
+  .note b { color: #78350f; }
+  .note + .note { margin-top: 10px; }
+  .branch { display: flex; gap: 14px; }
+  .branch .col { flex: 1; border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .branch .col.keep { background: var(--good-soft); border-color: #bbf7d0; }
+  .branch .col.over { background: var(--warn-soft); border-color: #fde68a; }
+  .branch h3 { font-size: 13.5px; margin-bottom: 8px; }
+  .branch p { font-size: 13px; color: #444; }
+  footer { font-size: 12px; color: var(--muted); text-align: center; margin-top: 18px; }
+  @media (max-width: 720px) { .kpis { grid-template-columns: repeat(2, 1fr); } .branch { flex-direction: column; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="eyebrow">SOP 执行单 · 节点 D</div>
+    <h1>马堃：合同审核</h1>
+    <div class="meta">
+      节点 uid：<b>e014a51f-a28b-4b4a-bbde-06bac6000714</b>　|　
+      房间：<b>room-ij5d8t3c</b>　|　
+      生成时间：<b>2026-09-15 09:35</b>
+    </div>
+  </header>
+
+  <div class="kpis">
+    <div class="kpi primary">
+      <div class="label">合同风险总分（直播推广 7 项）</div>
+      <div class="val">21<span class="unit">/35（60%）</span></div>
+      <div class="sub">中等偏高风险，甲方（依然电商）多处让利</div>
+    </div>
+    <div class="kpi">
+      <div class="label">要点平均得分</div>
+      <div class="val">3.0<span class="unit">/5</span></div>
+      <div class="sub">品牌经销 / 分销分支不适用，仅评直播推广</div>
+    </div>
+    <div class="kpi">
+      <div class="label">高风险要点（≤2 分）</div>
+      <div class="val">3<span class="unit">项</span></div>
+      <div class="sub">付款节点·销量承诺·违约责任</div>
+    </div>
+    <div class="kpi">
+      <div class="label">待补关键条款 / 占位符</div>
+      <div class="val">5<span class="unit">处</span></div>
+      <div class="sub">分成比例·违约金·保证金·订购单·委托书</div>
+    </div>
+  </div>
+
+  <section>
+    <h2><span class="dot"></span>一、直播推广要点评分表（甲方：依然电商 / 乙方：星拍档）</h2>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:88px">要点</th>
+          <th>合同约定（摘要）</th>
+          <th style="width:64px" class="num">评分</th>
+          <th style="width:150px">判定</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>费用模式</td>
+          <td>固定费用（坑位费＋素材使用费）＋浮动分成（销售收入 20~30% CPS）</td>
+          <td class="num">4 分</td>
+          <td><span class="badge ok">固定+佣金</span></td>
+        </tr>
+        <tr>
+          <td>付款节点</td>
+          <td>第 4.1 条：固定费须在直播之日前 2 日付清，否则乙方可暂停履行</td>
+          <td class="num">2 分</td>
+          <td><span class="badge bad">预付全部固定费</span></td>
+        </tr>
+        <tr>
+          <td>销量承诺</td>
+          <td>仅约定单链接直播时长≥3 分钟，无最低 ROI / GMV 保证，无退款补偿机制</td>
+          <td class="num">2 分</td>
+          <td><span class="badge bad">无效果兜底</span></td>
+        </tr>
+        <tr>
+          <td>内容合规</td>
+          <td>甲方担商品信息 / 销售页面 / 宣传物料合规（5.7、5.8）；乙方担直播方式合法合规（5.9）</td>
+          <td class="num">4 分</td>
+          <td><span class="badge ok">双方有义务</span></td>
+        </tr>
+        <tr>
+          <td>产权归属</td>
+          <td>第 6 条：直播素材（图 / 文 / 视频 / 录音）知识产权归乙方，甲方使用须事先书面许可</td>
+          <td class="num">4 分</td>
+          <td><span class="badge warn">素材归服务方</span></td>
+        </tr>
+        <tr>
+          <td>保价机制</td>
+          <td>附件一第 6 条：自直播之日起 90 天内到手价为直播平台最低价</td>
+          <td class="num">3 分</td>
+          <td><span class="badge warn">保价 90 天（超 60）</span></td>
+        </tr>
+        <tr>
+          <td>违约责任</td>
+          <td>甲方违约金重（50 万/次、超期每日 5 万、乙方可解除且已收费不退）；乙方违约责任缺失</td>
+          <td class="num">2 分</td>
+          <td><span class="badge bad">服务方违约缺失</span></td>
+        </tr>
+        <tr class="total">
+          <td colspan="2">合计（满分 35）</td>
+          <td class="num">21 分</td>
+          <td><span class="badge warn">中等偏高风险</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>二、本周动作</h2>
+    <ul class="actions">
+      <li><span class="idx">1</span><div><b>需求方</b>：与星拍档确认并锁定「分成比例」上限（建议 ≤20%）与坑位费金额，修正正文【2030】% 与附件 230% 的笔误/占位符。</div></li>
+      <li><span class="idx">2</span><div><b>需求方 / 法务</b>：补充乙方（星拍档）违约责任条款——建议≥合同金额 30% 的违约金＋明确解除权，并要求「未达最低 ROI/GMV 时退款或补偿」机制。</div></li>
+      <li><span class="idx">3</span><div><b>需求方</b>：将保价期由 90 天争取缩短至 ≤60 天，并明确保价范围口径（建议「各平台官方旗舰店最优」而非全平台最优）。</div></li>
+      <li><span class="idx">4</span><div><b>马堃（复审）</b>：核对附件一《订购单》（坑位费金额、直播日期、店铺链接、结算方式勾选）与附件二《品牌方委托书》（受托方）空白字段，确认与主合同一致后定稿。</div></li>
+      <li><span class="idx">5</span><div><b>需求方</b>：完成星拍档背调（工商信息 / 征信 / 涉诉 / 主播胡可资质）后回填复核——当前无数据源，待人工补充。</div></li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="note">
+      <b>数据缺口：</b>① 业务方背调三项（征信 / 公司规模 / 涉诉情况）无数据源——<b>web_search 被禁用</b>，通讯录 <b>contact_users_search 未命中「星拍档」</b>（外部公司，0 条结果），本次背调结论待人工补，不伪造明细；② 合同正文与附件多处关键数值为<b>占位符/笔误未定稿</b>（分成比例【2030】%、违约金【5010】万、保证金【5】万、订购单坑位费与日期、委托书受托方），评分按现行文本口径，定稿后需复核。
+    </div>
+    <div class="note">
+      <b>评审口径说明：</b>本合同为「直播服务合同」，甲方（依然电商）委托乙方（星拍档）做直播推广，故仅适用 SOP「直播推广」分支评分；「品牌经销」「分销」分支与本合同场景不匹配，不计分。评分以甲方（依然电商）利益为立场。
+    </div>
+  </section>
+
+  <footer>D 马堃：合同审核 · 执行单 · 生成于 2026-09-15 09:35</footer>
+</div>
+</body>
+</html>

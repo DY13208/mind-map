@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D2：推广工具 · 天猫执行单 2026-09-08</title>
+<style>
+  :root{
+    --ink:#1f2733; --sub:#6b7686; --line:#e5e9f0;
+    --bg:#f4f6fa; --card:#ffffff;
+    --brand:#1d3a8f; --brand2:#2f6bff;
+    --warn-bg:#fff7e8; --warn-bd:#f2c66d; --warn-tx:#8a5a00;
+    --red:#d64545; --green:#1e9e6a; --amber:#c98a12; --blue:#2f6bff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;line-height:1.55;padding:28px 16px}
+  .page{max-width:980px;margin:0 auto}
+  .head{background:linear-gradient(135deg,var(--brand) 0%,var(--brand2) 100%);border-radius:16px;padding:22px 26px;color:#fff;box-shadow:0 8px 24px rgba(29,58,143,.18)}
+  .head .tags{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  .tag{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);padding:2px 10px;border-radius:999px;font-size:12px}
+  .head h1{font-size:24px;font-weight:700;letter-spacing:.5px}
+  .head .sub{margin-top:6px;font-size:13px;opacity:.92;display:flex;flex-wrap:wrap;gap:4px 16px}
+  .alert{margin-top:16px;background:var(--warn-bg);border:1px solid var(--warn-bd);border-left:5px solid var(--amber);border-radius:10px;padding:14px 16px;font-size:14px;color:var(--warn-tx)}
+  .alert b{color:#6b4a00}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-top:16px;box-shadow:0 2px 6px rgba(20,30,60,.04)}
+  .sec-title{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:700;margin-bottom:14px}
+  .sec-title .no{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:var(--brand);color:#fff;font-size:13px;flex:none}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 14px 12px;border-top:3px solid var(--brand2)}
+  .kpi .k{font-size:12px;color:var(--sub)}
+  .kpi .v{font-size:22px;font-weight:700;margin-top:4px;letter-spacing:.3px}
+  .kpi .s{font-size:11px;color:var(--sub);margin-top:4px}
+  .v.pending{color:var(--amber)} .v.calc{color:var(--brand)} .v.na{color:var(--red)} .v.ok{color:var(--green)}
+  .tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+  .tbl th{background:#eef1f7;color:#39414f;text-align:left;padding:9px 10px;font-weight:600;border:1px solid var(--line);white-space:nowrap}
+  .tbl td{padding:9px 10px;border:1px solid var(--line);vertical-align:top}
+  .tbl tr:nth-child(even) td{background:#fafbfd}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+  .dot.red{background:var(--red)} .dot.green{background:var(--green)} .dot.amber{background:var(--amber)} .dot.blue{background:var(--blue)}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600}
+  .pill.warn{background:#fdeaea;color:var(--red)}
+  .pill.ok{background:#e6f6ef;color:var(--green)}
+  .pill.wait{background:#fff4de;color:var(--amber)}
+  ol.acts{list-style:none;counter-reset:act}
+  ol.acts li{counter-increment:act;position:relative;padding:10px 10px 10px 46px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:#fcfdff}
+  ol.acts li::before{content:counter(act);position:absolute;left:12px;top:11px;width:24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  ol.acts b{color:var(--brand)}
+  .who{color:var(--brand2);font-weight:600}
+  .dl{display:inline-block;margin-left:6px;background:#eef2ff;color:var(--brand);border-radius:6px;padding:0 7px;font-size:12px;font-weight:600}
+  .foot{margin-top:16px;font-size:12px;color:var(--sub);background:#eef1f7;border-radius:10px;padding:12px 16px;line-height:1.7}
+  .foot code{background:#e2e7f1;padding:0 4px;border-radius:4px}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+  @media (max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <div class="tags">
+      <span class="tag">良策 SOP · 执行单</span>
+      <span class="tag">D2：推广工具</span>
+      <span class="tag">房间 room-bpapl7vv</span>
+      <span class="tag">导图 v56 · 475 节点</span>
+    </div>
+    <h1>D2：推广工具 — 执行单（天猫 · 站内推广）</h1>
+    <div class="sub">
+      <span>归属：P：渠道运营 → 天猫 → 周中昱 → P4：天猫站内推广</span>
+      <span>责任人：周中昱</span>
+      <span>工具：万相台无界 / 淘宝客</span>
+      <span>生成时间：2026-09-08 10:21</span>
+    </div>
+  </div>
+
+  <div class="alert">
+    <b>⚠️ 执行状态：部分完成（骨架核查 + 口径就绪；执行数据待取数）</b> —— D2 为执行型 SOP：在万相台无界按「关键词 / 人群 / 短视频 / 全店推广」四类计划投放，按 <b>7 天效果（加购成本 / 点击率 / ROI）</b>淘汰低效计划与素材，再新建计划持续测试。导图 D2 全子树为<b>纯流程骨架</b>：无任何数值、无后台数据源外链；各计划实时消耗/加购/点击率/ROI 仅存于<b>万相台无界与生意参谋后台（需登录）</b>，本会话无法匿名读取 —— <b>本单不伪造任何计划消耗与效果数字</b>。可引用的真实规则：上游 D1（费比 15%–20%、加购成本 &lt;10 元）作为新计划目标线；淘汰判定采用导图「相对平均」口径。
+  </div>
+
+  <section>
+    <div class="sec-title"><span class="no">K</span>关键指标看板</div>
+    <div class="kpis">
+      <div class="kpi"><div class="k">无界广告计划类型</div><div class="v ok">4 类</div><div class="s">关键词 / 人群 / 短视频 / 全店推广（导图已定）</div></div>
+      <div class="kpi"><div class="k">7 天效果数据</div><div class="v pending">待取数</div><div class="s">消耗 / 加购 / 点击率 / ROI · 无界后台需登录</div></div>
+      <div class="kpi"><div class="k">推广费比目标（上游 D1）</div><div class="v ok">15%–20%</div><div class="s">导图固化：费比 15%–20%</div></div>
+      <div class="kpi"><div class="k">加购成本目标（上游 D1）</div><div class="v ok">&lt;10 元/次</div><div class="s">导图固化：加购成本小于 10 元</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">1</span>SOP 步骤与检查项执行情况</div>
+    <table class="tbl">
+      <thead>
+        <tr><th style="width:190px">步骤</th><th>检查项（导图口径）</th><th style="width:170px">状态</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><b>A1 · 1 按营销计划设置广告计划</b><br><span style="color:var(--sub);font-size:12px">节点 cb24fb3d</span></td>
+          <td>以「营销计划」= 上游 <b>D1 推广计划和预算</b>（费比 15%–20%、加购成本&lt;10元）为基准，在万相台无界分别建立四类计划：<b>关键词计划 / 人群计划 / 短视频 / 全店推广</b>，预算占比按爆款保关键词+人群、新素材测试走短视频/全店。</td>
+          <td><span class="pill wait"><span class="dot amber"></span>待执行</span><br><span style="font-size:12px;color:var(--sub)">需登录无界后台建计划</span></td>
+        </tr>
+        <tr>
+          <td><b>A1 · 2 设计并发布推广素材</b><br><span style="font-size:12px;color:var(--sub)">节点 d25bfc33</span></td>
+          <td>为各计划准备并发布<b>图片 &amp; 短视频</b>素材；素材承接品牌视觉体系（P品牌战略→视觉体系，主KV/产品图/短视频，刘子龙）与产品卖点（对齐大贸备案功效），避免素材与计划人群错配。</td>
+          <td><span class="pill wait"><span class="dot amber"></span>待执行</span><br><span style="font-size:12px;color:var(--sub)">素材库在品牌侧</span></td>
+        </tr>
+        <tr>
+          <td><b>A1 · 3 按 7 天效果淘汰计划与素材</b><br><span style="font-size:12px;color:var(--sub)">节点 999266d9</span></td>
+          <td>每 7 天取各计划效果，按淘汰标准三维判定（加购成本 / 点击率 / ROI，详见第 2 节），关停超线计划并替换素材，保留达标计划。</td>
+          <td><span class="pill wait"><span class="dot amber"></span>规则就绪 · 数据待取数</span><br><span style="font-size:12px;color:var(--sub)">需后台 7 天窗口数据</span></td>
+        </tr>
+        <tr>
+          <td><b>A1 · 4 继续新建计划，测试数据</b><br><span style="font-size:12px;color:var(--sub)">节点 15a66533</span></td>
+          <td>淘汰后滚动新建计划补充测试：关键词/人群拓词拓人群、短视频/全店上新素材，持续积累 AB 测试数据，形成「建计划→测素材→7天淘汰→再建」循环。</td>
+          <td><span class="pill wait"><span class="dot amber"></span>滚动待执行</span><br><span style="font-size:12px;color:var(--sub)">随 1/2 步启动</span></td>
+        </tr>
+        <tr>
+          <td><b>A2 · 淘宝客</b><br><span style="font-size:12px;color:var(--sub)">节点 076208e7</span></td>
+          <td>导图内 A2 为<b>叶子节点，无子步骤/细则/外链</b>：需负责人补充淘宝客推广方式（通用计划/定向计划/鹊桥活动）、佣金率与考核口径后登记执行。</td>
+          <td><span class="pill wait"><span class="dot amber"></span>骨架 · 细则待补</span><br><span style="font-size:12px;color:var(--sub)">无步骤无数据</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">2</span>7 天淘汰判定口径（导图「淘汰标准」原文）</div>
+    <table class="tbl">
+      <thead><tr><th style="width:130px">判定维度</th><th>淘汰规则（导图口径）</th><th style="width:220px">目标线 / 数据源</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="dot red"></span><b>加购成本</b></td>
+          <td>高于<b>所有计划平均加购成本</b> → 淘汰该计划 / 素材。</td>
+          <td>目标线 &lt;10 元/次（上游 D1）；数据：无界-计划报表-加购成本</td>
+        </tr>
+        <tr>
+          <td><span class="dot amber"></span><b>点击率</b></td>
+          <td>低于<b>行业平均点击率</b>，<b>或</b> 低于<b>所有计划平均点击率</b> → 淘汰（二者满足其一即触发）。</td>
+          <td>行业均值口径待确认：生意参谋-行业（洗护发类目）；数据：无界/直通车-点击率</td>
+        </tr>
+        <tr>
+          <td><span class="dot red"></span><b>ROI</b></td>
+          <td><b>7 天 ROI</b> 低于<b>所有计划平均 ROI</b> → 淘汰。</td>
+          <td>以「全计划平均」为基准线（相对口径）；数据：无界计划报表-成交 ROI</td>
+        </tr>
+        <tr>
+          <td><span class="dot blue"></span><b>执行节奏</b></td>
+          <td colspan="2">每周固定日（建议周一）取近 7 天窗口 → 计算「所有计划平均」基准 → 标记超线计划/素材 → 关停或换素材 → 保留达标并加预算；与 D1 预算复盘（费比 15%–20%）联动。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">3</span>本周动作</div>
+    <ol class="acts">
+      <li><span class="who">周中昱</span> 于<b>周三（09-09）前</b><span class="dl">截止 09-09</span><br>登录万相台无界，导出/截图当前各计划（关键词 / 人群 / 短视频 / 全店推广）近 7 天：花费、加购成本、点击率、ROI，回贴给 WorkBuddy，用于计算「所有计划平均」基准并输出淘汰清单。</li>
+      <li><span class="who">WorkBuddy</span> 数据到位后<b>当天计算</b><span class="dl">待取数</span><br>按导图口径算三维平均线（加购成本均值 / 点击率均值 / 7 天 ROI 均值），对照行业点击率，输出「应淘汰计划与素材 + 保留计划加预算建议」清单。</li>
+      <li><span class="who">周中昱</span> 确认 <b>行业平均点击率取值口径</b><span class="dl">建议 09-10</span><br>明确生意参谋行业均值（类目=洗护发，时间=近 7 天）作为点击率淘汰基准，避免用错口径误杀新计划。</li>
+      <li><span class="who">周中昱</span> 若当前<b>无投放中计划</b>，先在无界新建测试组<br>按 D1 目标线（费比内、加购&lt;10 元）新建至少 1 组：关键词计划（核心爆款词）+ 人群计划（拉新/复购人群），素材引用品牌视觉素材库，跑 7 天后进淘汰判定。</li>
+      <li><span class="who">周中昱</span> 补齐 <b>淘宝客（A2）细则</b><span class="dl">截止 09-12</span><br>导图 A2 为叶子无细则：确认淘宝客推广方式（通用/定向/鹊桥活动）、佣金率与数据回传口径后登记，纳入本执行单后续版本。</li>
+    </ol>
+  </section>
+
+  <div class="foot">
+    <b>数据来源：</b>mind-map MCP —— get_map(room-bpapl7vv「C:陈华俊:UN项目利润分」v56 / full 475 节点)、get_map(outline)、search_nodes（实时确认目标节点与版本）；目标节点 uid 123b16fc-71d3-4de1-a170-362060d523de（P4：天猫站内推广 f93182fc → D2：推广工具）；A1 无界 13cb82af → 步骤 1/2/3/4（cb24fb3d / d25bfc33 / 999266d9 / 15a66533）及四类计划（2e9c660c / 692068f7 / 8a9bbcfa / 573f74f0）；淘汰标准 5f81130e → 加购成本 e9db7b8c / 点击率 e41693e6 / ROI ee09556d；A2 淘宝客 076208e7。<br>
+    <b>口径出处：</b>导图 D2 淘汰标准分支（高于/低于「所有计划平均」+「行业平均点击率」的判定规则）；上游 D1 推广计划和预算（费比 15%–20% 节点 af5d79d9、加购成本&lt;10 元节点 086e9ca8）；「营销计划」= 同分支 D1 执行单（2026-09-08 10:18 已产出）。<br>
+    <b>缺口说明：</b>D2 子树无任何数值/后台外链；无界实时消耗与 7 天效果（加购成本/点击率/ROI）仅存于万相台无界与生意参谋后台（需登录，本会话匿名不可读）；行业平均点击率取值口径待负责人确认 —— 本单不含任何伪造计划效果数字，执行数据以「待取数」呈现，规则阈值可直接引用。<br>
+    <b>生成：</b>WorkBuddy 良策 SOP 执行助手 · 2026-09-08 10:21
+  </div>
+
+</div>
+</body>
+</html>
