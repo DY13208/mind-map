@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D1：活动运营 · 天猫执行单 2026-09-08</title>
+<style>
+  :root{
+    --ink:#1f2733; --sub:#6b7686; --line:#e5e9f0;
+    --bg:#f4f6fa; --card:#ffffff;
+    --brand:#8a3d12; --brand2:#f2792b;
+    --warn-bg:#fff7e8; --warn-bd:#f2c66d; --warn-tx:#8a5a00;
+    --red:#d64545; --green:#1e9e6a; --amber:#c98a12; --blue:#2f6bff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;line-height:1.55;padding:28px 16px}
+  .page{max-width:980px;margin:0 auto}
+  .head{background:linear-gradient(135deg,var(--brand) 0%,var(--brand2) 100%);border-radius:16px;padding:22px 26px;color:#fff;box-shadow:0 8px 24px rgba(138,61,18,.18)}
+  .head .tags{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  .tag{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);padding:2px 10px;border-radius:999px;font-size:12px}
+  .head h1{font-size:24px;font-weight:700;letter-spacing:.5px}
+  .head .sub{margin-top:6px;font-size:13px;opacity:.92;display:flex;flex-wrap:wrap;gap:4px 16px}
+  .alert{margin-top:16px;background:var(--warn-bg);border:1px solid var(--warn-bd);border-left:5px solid var(--amber);border-radius:10px;padding:14px 16px;font-size:14px;color:var(--warn-tx)}
+  .alert b{color:#6b4a00}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-top:16px;box-shadow:0 2px 6px rgba(20,30,60,.04)}
+  .sec-title{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:700;margin-bottom:14px}
+  .sec-title .no{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:var(--brand);color:#fff;font-size:13px;flex:none}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 14px 12px;border-top:3px solid var(--brand2)}
+  .kpi .k{font-size:12px;color:var(--sub)}
+  .kpi .v{font-size:22px;font-weight:700;margin-top:4px;letter-spacing:.3px}
+  .kpi .s{font-size:11px;color:var(--sub);margin-top:4px}
+  .v.pending{color:var(--amber)} .v.calc{color:var(--brand)} .v.na{color:var(--red)} .v.ok{color:var(--green)}
+  .tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+  .tbl th{background:#f6efe8;color:#46352a;text-align:left;padding:9px 10px;font-weight:600;border:1px solid var(--line);white-space:nowrap}
+  .tbl td{padding:9px 10px;border:1px solid var(--line);vertical-align:top}
+  .tbl tr:nth-child(even) td{background:#fdfaf8}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+  .dot.red{background:var(--red)} .dot.green{background:var(--green)} .dot.amber{background:var(--amber)} .dot.blue{background:var(--blue)}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+  .pill.warn{background:#fdeaea;color:var(--red)}
+  .pill.ok{background:#e6f6ef;color:var(--green)}
+  .pill.wait{background:#fff4de;color:var(--amber)}
+  ol.acts{list-style:none;counter-reset:act}
+  ol.acts li{counter-increment:act;position:relative;padding:10px 10px 10px 46px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:#fcfdff}
+  ol.acts li::before{content:counter(act);position:absolute;left:12px;top:11px;width:24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  ol.acts b{color:var(--brand)}
+  .who{color:var(--brand2);font-weight:600}
+  .dl{display:inline-block;margin-left:6px;background:#fdefe6;color:var(--brand);border-radius:6px;padding:0 7px;font-size:12px;font-weight:600}
+  .foot{margin-top:16px;font-size:12px;color:var(--sub);background:#f0ebe6;border-radius:10px;padding:12px 16px;line-height:1.7}
+  .foot code{background:#e7ded5;padding:0 4px;border-radius:4px}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+  @media (max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <div class="tags">
+      <span class="tag">良策 SOP · 执行单</span>
+      <span class="tag">D1：活动运营</span>
+      <span class="tag">房间 room-bpapl7vv</span>
+      <span class="tag">P3：天猫运营</span>
+    </div>
+    <h1>D1：活动运营 — 执行单（天猫 · UNOVE 柔诺伊官方旗舰店）</h1>
+    <div class="sub">
+      <span>归属：P：渠道运营 → 天猫 → P3：天猫运营 → D1</span>
+      <span>责任人：周中昱</span>
+      <span>渠道属性：核心直营 · 个护部</span>
+      <span>店铺编码：13CHAN10030（天猫国际 13CHAN10039）</span>
+      <span>生成时间：2026-09-08 09:59</span>
+    </div>
+  </div>
+
+  <div class="alert">
+    <b>⚠️ 执行状态：进行中（报名档期待取数）</b> —— 导图 D1 分支给出了标准流程（7 步）与四类活动（A1 平台大促 / A2 百亿补贴 / A3 淘金币 / A4 U先试用），但<b>导图内没有任何活动档期、报名状态、价格或补贴金额</b>，本会话也无法匿名登录天猫/千牛后台取数。因此本单<b>未伪造任何档期与金额</b>：KPI 以「SOP 口径值 + 待取数」呈现，本周动作聚焦于「把后台真数据取回来」的倒排动作，待数据齐后即可一键转成正式档期总表。
+  </div>
+
+  <section>
+    <div class="sec-title"><span class="no">K</span>关键指标看板</div>
+    <div class="kpis">
+      <div class="kpi"><div class="k">覆盖活动类型（本单范围）</div><div class="v ok">4 / 4</div><div class="s">A1 平台大促 · A2 百亿补贴 · A3 淘金币 · A4 U先试用（导图口径）</div></div>
+      <div class="kpi"><div class="k">SOP 标准步骤</div><div class="v calc">7 步</div><div class="s">①确认排期 → ⑦结束恢复；步骤⑥上线含 4 项检查（导图概要）</div></div>
+      <div class="kpi"><div class="k">当期档期 / 报名状态</div><div class="v pending">待取数</div><div class="s">来源：天猫营销活动中心 + 百亿补贴/淘金币/U先试用后台（需登录）</div></div>
+      <div class="kpi"><div class="k">活动价控价基准（可引用）</div><div class="v calc">¥79–169</div><div class="s">官旗 13CHAN10030 为官网指导价，常规品 6 档控价、官旗档含赠品（导图口径）</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">1</span>SOP 步骤与检查项执行情况</div>
+    <table class="tbl">
+      <thead>
+        <tr><th style="width:170px">步骤</th><th>检查项 / 动作内容（导图概要口径）</th><th style="width:210px">状态 · 责任</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><b>1 确认平台活动节奏排期</b></td><td>到天猫「营销活动中心」拉取 9–10 月平台大促报名日历（确认 9 月中下旬、国庆档及双11蓄水报名窗口），先定节奏再排动作。</td><td><span class="pill wait"><span class="dot amber"></span>待取数</span><br><span style="font-size:12px;color:var(--sub)">周中昱取数 · 截止 09-09</span></td></tr>
+        <tr><td><b>2 报名活动</b></td><td>按档期为报名活动选品（主推款/新品）；对照 6 档控价，避免活动价击穿官旗指导价与赠品档。</td><td><span class="pill wait"><span class="dot amber"></span>待排期确认后执行</span><br><span style="font-size:12px;color:var(--sub)">周中昱 · 截止 09-11</span></td></tr>
+        <tr><td><b>3 活动主图和赠品权益设置</b></td><td>主图/利益点按档期更换；赠品权益以导图「赠品体系（以天猫/天猫国际/达播为主）」为口径，官旗常规品按「有赠品」档执行。</td><td><span class="pill wait"><span class="dot amber"></span>待执行</span><br><span style="font-size:12px;color:var(--sub)">周中昱 · 倒排于档期前 2 日</span></td></tr>
+        <tr><td><b>4 客服话术确认</b></td><td>确认活动价/赠品/发货时效话术同步客服（售前+售后），避免客诉。</td><td><span class="pill wait"><span class="dot amber"></span>待执行</span><br><span style="font-size:12px;color:var(--sub)">周中昱 · 上线前 1 日</span></td></tr>
+        <tr><td><b>5 检查定时设置</b></td><td>检查活动价、优惠券/津贴、赠品、上下架定时是否全部就位且无冲突。</td><td><span class="pill wait"><span class="dot amber"></span>待执行</span><br><span style="font-size:12px;color:var(--sub)">周中昱 · 上线前夜</span></td></tr>
+        <tr><td><b>6 活动上线（含 4 项检查）</b></td><td>①前端画面（主图/详情/价格展示）②价格设置（到手价与控价一致）③赠品设置（赠品与库存绑定）④监控库存，防止超卖和下架。</td><td><span class="pill wait"><span class="dot amber"></span>待执行</span><br><span style="font-size:12px;color:var(--sub)">周中昱上线检查 · WorkBuddy 提供检查清单</span></td></tr>
+        <tr><td><b>7 活动结束和前端恢复检查</b></td><td>档期结束后恢复日常价/主图/赠品，复核页面无残留利益点，避免价格违规。</td><td><span class="pill wait"><span class="dot amber"></span>待执行</span><br><span style="font-size:12px;color:var(--sub)">周中昱 · 档期结束后当日</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">2</span>四类活动清单与取数检查点</div>
+    <table class="tbl">
+      <thead><tr><th style="width:130px">活动类型</th><th>后台入口 / 关键检查点（通用机制，以平台当期规则为准）</th><th style="width:150px">当前状态</th></tr></thead>
+      <tbody>
+        <tr><td><b><span class="dot red"></span>A1 平台大促</b></td><td>千牛 → 营销活动中心 → 官方活动报名。检查：9–10 月可报名档期、报名商品池、活动价与 6 档控价是否冲突、预售/现货节奏、大促库存深度。</td><td><span class="pill wait">待确认</span><br><span style="font-size:12px;color:var(--sub)">需登录后台</span></td></tr>
+        <tr><td><b><span class="dot amber"></span>A2 百亿补贴</b></td><td>营销活动中心 → 百亿补贴/品牌补贴提报。检查：可提报 SKU 与坑位、补贴后到手价是否低于控价（如需破价走特批）、补贴库存与成本核销。</td><td><span class="pill wait">待确认</span><br><span style="font-size:12px;color:var(--sub)">需登录后台</span></td></tr>
+        <tr><td><b><span class="dot blue"></span>A3 淘金币</b></td><td>淘金币商家后台/频道报名。检查：金币抵扣比例设置、是否与平台大促叠加、金币价下的到手价与控价一致性、主图金币标。</td><td><span class="pill wait">待确认</span><br><span style="font-size:12px;color:var(--sub)">需登录后台</span></td></tr>
+        <tr><td><b><span class="dot green"></span>A4 U先试用</b></td><td>U先试用招商/试用活动报名。检查：试用商品与份数、成本承担、试用后链路（加购/复购承接）、是否配合新品或主推款节奏。</td><td><span class="pill wait">待确认</span><br><span style="font-size:12px;color:var(--sub)">需登录后台</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">3</span>本周动作（2026-09-07 ～ 09-13）</div>
+    <ol class="acts">
+      <li><span class="who">周中昱</span> 于<b>周三（09-09）前</b><span class="dl">截止 09-09</span><br>登录千牛「营销活动中心」，将 <b>9–10 月平台大促报名日历 / 可报名活动</b>截图回贴给 WorkBuddy（重点：9 月中下旬与国庆档、双11 蓄水报名是否已开启），WorkBuddy 据此汇总成「档期 × 报名截止」表。</li>
+      <li><span class="who">周中昱</span> 于<b>周四（09-10）前</b><span class="dl">截止 09-10</span><br>分别截图 <b>A2 百亿补贴、A3 淘金币、A4 U先试用</b>后台报名/商品池状态：是否在报名期、可提报 SKU、补贴或抵扣额度；连同 A1 大促可选商品池一并回贴。</li>
+      <li><span class="who">周中昱</span> 于<b>周五（09-11）前</b><span class="dl">截止 09-11</span><br>对已确认可报名的档期完成 <b>步骤 2 报名选品</b>：主推款 + 新品组合，逐档对照 6 档控价（官旗=官网指导价、有赠品档），破价项单独标注待品牌确认。</li>
+      <li><span class="who">WorkBuddy</span> 数据齐后<b>当天更新本单</b><br>生成「活动档期 × SKU × 报名价 × 赠品 × 报名状态」总表，并按每档期倒排步骤 3–5 日期（主图/赠品权益 → 客服话术 → 定时设置），再产出步骤 6 上线四查与步骤 7 恢复检查清单。</li>
+      <li><span class="who">周中昱</span> 于<b>周五（09-11）前兜底</b><span class="dl">截止 09-11</span><br>若平台后台（含手机千牛截图）仍无法提供任何档期信息，请明确答复「继续等待」或「线下按模板填表」，避免本单虚假启动；未确认前不执行任何价格/页面改动。</li>
+    </ol>
+  </section>
+
+  <div class="foot">
+    <b>数据来源：</b>mind-map MCP —— get_map(room-bpapl7vv「C:陈华俊:UN项目利润分」, outline + full 共 475 节点)、search_nodes、list_todos（无待办容器）。SOP 节点 uid 1afc091f-d3a1-4e83-a049-4055bbad9b5a，其「概要」给出 7 步流程与上线 4 项检查；子节点 A1–A4 为四类活动叶子节点。<br>
+    <b>可引用口径（导图原文）：</b>个护部天猫 UNOVE 柔诺伊官方旗舰店 13CHAN10030（核心直营）；天猫国际 13CHAN10039；价格带 ¥79–¥169 属洗护中高端；常规品控价 6 档（官旗为官网指导价、官旗/达播档有赠品、直供/线下/C店无赠品）；赠品体系以天猫/天猫国际/达播为主；新品控价不超过 3 段（官旗 1 + 达播 1 + 分销 1）。<br>
+    <b>缺口说明：</b>D1 分支在导图内无任何活动档期/报名状态/价格/补贴数值，亦无企业微信或后台文档外链；天猫平台后台（营销活动中心、百亿补贴、淘金币、U先试用）需登录且本会话无法匿名读取 —— 本单不含任何伪造的活动档期与金额，KPI 第 1/2/4 项为导图口径真实值，第 3 项待后台取数。<br>
+    <b>生成：</b>WorkBuddy 良策 SOP 执行助手 · 2026-09-08 09:59
+  </div>
+
+</div>
+</body>
+</html>

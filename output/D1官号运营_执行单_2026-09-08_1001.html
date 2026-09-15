@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D1：官号运营 · 执行单 2026-09-08</title>
+<style>
+  :root{
+    --ink:#1f2733; --sub:#6b7686; --line:#e5e9f0;
+    --bg:#f4f6fa; --card:#ffffff;
+    --brand:#1d3a8f; --brand2:#2f6bff;
+    --warn-bg:#fff7e8; --warn-bd:#f2c66d; --warn-tx:#8a5a00;
+    --red:#d64545; --green:#1e9e6a; --amber:#c98a12; --blue:#2f6bff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;line-height:1.55;padding:28px 16px}
+  .page{max-width:980px;margin:0 auto}
+  .head{background:linear-gradient(135deg,var(--brand) 0%,var(--brand2) 100%);border-radius:16px;padding:22px 26px;color:#fff;box-shadow:0 8px 24px rgba(29,58,143,.18)}
+  .head .tags{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  .tag{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);padding:2px 10px;border-radius:999px;font-size:12px}
+  .head h1{font-size:24px;font-weight:700;letter-spacing:.5px}
+  .head .sub{margin-top:6px;font-size:13px;opacity:.92;display:flex;flex-wrap:wrap;gap:4px 16px}
+  .alert{margin-top:16px;background:var(--warn-bg);border:1px solid var(--warn-bd);border-left:5px solid var(--amber);border-radius:10px;padding:14px 16px;font-size:14px;color:var(--warn-tx)}
+  .alert b{color:#6b4a00}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-top:16px;box-shadow:0 2px 6px rgba(20,30,60,.04)}
+  .sec-title{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:700;margin-bottom:14px}
+  .sec-title .no{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:var(--brand);color:#fff;font-size:13px;flex:none}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 14px 12px;border-top:3px solid var(--brand2)}
+  .kpi .k{font-size:12px;color:var(--sub)}
+  .kpi .v{font-size:22px;font-weight:700;margin-top:4px;letter-spacing:.3px}
+  .kpi .s{font-size:11px;color:var(--sub);margin-top:4px}
+  .v.pending{color:var(--amber)} .v.calc{color:var(--brand)} .v.na{color:var(--red)} .v.ok{color:var(--green)}
+  .tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+  .tbl th{background:#eef1f7;color:#39414f;text-align:left;padding:9px 10px;font-weight:600;border:1px solid var(--line);white-space:nowrap}
+  .tbl td{padding:9px 10px;border:1px solid var(--line);vertical-align:top}
+  .tbl tr:nth-child(even) td{background:#fafbfd}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+  .dot.red{background:var(--red)} .dot.green{background:var(--green)} .dot.amber{background:var(--amber)} .dot.blue{background:var(--blue)}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+  .pill.warn{background:#fdeaea;color:var(--red)}
+  .pill.ok{background:#e6f6ef;color:var(--green)}
+  .pill.wait{background:#fff4de;color:var(--amber)}
+  .pill.info{background:#eef2ff;color:var(--brand)}
+  ol.acts{list-style:none;counter-reset:act}
+  ol.acts li{counter-increment:act;position:relative;padding:10px 10px 10px 46px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:#fcfdff}
+  ol.acts li::before{content:counter(act);position:absolute;left:12px;top:11px;width:24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  ol.acts b{color:var(--brand)}
+  .who{color:var(--brand2);font-weight:600}
+  .dl{display:inline-block;margin-left:6px;background:#eef2ff;color:var(--brand);border-radius:6px;padding:0 7px;font-size:12px;font-weight:600}
+  .src{font-size:12px;color:var(--sub)}
+  .foot{margin-top:16px;font-size:12px;color:var(--sub);background:#eef1f7;border-radius:10px;padding:12px 16px;line-height:1.7}
+  .foot b{color:#39414f}
+  .foot code{background:#e2e7f1;padding:0 4px;border-radius:4px}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+  @media (max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <div class="tags">
+      <span class="tag">良策 SOP · 执行单</span>
+      <span class="tag">D1：官号运营</span>
+      <span class="tag">房间 room-bpapl7vv</span>
+      <span class="tag">导图 v41</span>
+    </div>
+    <h1>D1：官号运营 — 执行单</h1>
+    <div class="sub">
+      <span>归属：P：品牌营销 → D1：官号运营</span>
+      <span>承接：品牌运作（与 D5：PR推广 同承接方）</span>
+      <span>生成时间：2026-09-08 10:01</span>
+    </div>
+  </div>
+
+  <div class="alert">
+    <b>⚠️ 执行状态：未完成（SOP 步骤 / 检查项在导图中缺失）</b> —— D1：官号运营 子树仅含子节点「品牌运作」，无 C 检查项、无 P 执行计划、无 A 动作步骤、无备注与数据表链接。本单<b>不伪造任何官号清单、KPI 目标或内容排期</b>；下方「本周动作」为基于同图既有范本与 CPDA 约定给出的<b>可执行补全建议</b>，待「品牌运作」补全 SOP 本体后即可重跑并完成判定。
+  </div>
+
+  <section>
+    <div class="sec-title"><span class="no">K</span>关键指标看板</div>
+    <div class="kpis">
+      <div class="kpi"><div class="k">SOP 就绪度（C 检查 / P 计划 / A 动作）</div><div class="v na">0 / 3</div><div class="s">导图内三类要素均缺，无法按步骤验收</div></div>
+      <div class="kpi"><div class="k">D1 节点子项</div><div class="v calc">1</div><div class="s">仅「品牌运作」（承接方/范围），无内容子节点</div></div>
+      <div class="kpi"><div class="k">检查项通过</div><div class="v pending">0 / 0</div><div class="s">无既定检查项 → 本次不做完成判定</div></div>
+      <div class="kpi"><div class="k">本周可执行动作</div><div class="v ok">4</div><div class="s">补全 SOP 本体 + 确认官号口径（见下方动作）</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">1</span>SOP 结构与检查项执行情况</div>
+    <table class="tbl">
+      <thead>
+        <tr><th style="width:170px">检查维度</th><th>导图实际内容（读取结果）</th><th style="width:150px">状态</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><b>节点定位</b></td>
+          <td>根「C:陈华俊:UN项目利润分」→ <b>P：品牌营销</b> → <b>D1：官号运营</b>（uid 5751cf4a-3127-4826-b343-dbc2b22702f0）；子树仅子节点「品牌运作」（uid 876bb639）。</td>
+          <td><span class="pill ok"><span class="dot green"></span>已定位</span><br><span class="src">版本 v41</span></td>
+        </tr>
+        <tr>
+          <td><b>C 检查项</b></td>
+          <td>D1 下无「C：」验收/检查标准子节点；无完成标准文字。</td>
+          <td><span class="pill warn"><span class="dot red"></span>缺失</span></td>
+        </tr>
+        <tr>
+          <td><b>P 执行计划</b></td>
+          <td>D1 下无计划步骤节点；无内容日历、发布频率、审核流程等。</td>
+          <td><span class="pill warn"><span class="dot red"></span>缺失</span></td>
+        </tr>
+        <tr>
+          <td><b>A 动作 / 步骤</b></td>
+          <td>无 A1/A2 动作节点与编号步骤（对照同图范本 D3：品牌营销活动 已有「A1：全年品牌营销规划」及 1–5 步细化，D1 尚未建设）。</td>
+          <td><span class="pill warn"><span class="dot red"></span>缺失</span></td>
+        </tr>
+        <tr>
+          <td><b>承接方</b></td>
+          <td>子节点「品牌运作」为承接方/范围标记；同一承接方同时挂 D5：PR推广（uid a4094b21），两线需防排期撞车。</td>
+          <td><span class="pill ok"><span class="dot green"></span>已读取</span></td>
+        </tr>
+        <tr>
+          <td><b>数据 / 台账</b></td>
+          <td>导图内无官号账号清单、内容日历、粉丝/互动 KPI 或外部表格链接；节点 note 为空。</td>
+          <td><span class="pill warn"><span class="dot red"></span>缺失</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">2</span>判定口径（来自导图结构与 MCP SOP 约定）</div>
+    <table class="tbl">
+      <thead><tr><th style="width:200px">项目</th><th>口径 / 说明</th></tr></thead>
+      <tbody>
+        <tr><td>本节点层级含义</td><td>「D1：官号运营」属 D（待办/执行项），挂在顶层 <b>P：品牌营销</b> 之下。同图范本 D3：品牌营销活动 的成熟写法为：承接人 → A1 计划 → 1/2/3… 编号步骤（如「1：参考历史营销节奏…」「5：跟进预算消耗进度」），说明该图 SOP 的正文书写结构。</td></tr>
+        <tr><td>P：品牌营销 全景</td><td>同父级共 5 个 D 板块：D1 官号运营 / D2 博主合作（林培培）/ D3 品牌营销活动（陈华俊）/ D4 达播规划（黄锦）/ D5 PR推广（品牌运作）。官号运营与 PR 推广同承接方，建议内容与节奏相互对齐。</td></tr>
+        <tr><td>C / P / A 定义</td><td>按 mind-map MCP 服务器约定：SOP 的 <b>C</b> 是检查/验收标准，<b>P</b> 是执行计划，用户输入待办是 <b>D</b>，AI/WorkBuddy 负责 <b>A</b>。本单因 C/P 缺失，按规则不得判定「已完成」。</td></tr>
+        <tr><td>官号口径候选（待确认）</td><td>结合同组织其他房间样例，「官号」通常指品牌社媒官方号（小红书官号/抖音号/公众号等）的笔记文案、素材加工、发文排期、评论区与舆情监控、数据周报。此为参照口径，<b>非本房间导图明文</b>，须由「品牌运作」确认 UNOVE 官号范围。</td></tr>
+        <tr><td>可作盘点起点的账号数据</td><td>导图「P：品牌目标 → 渠道定义和统计维度」含 UNOVE 各平台店铺/渠道代码（天猫 13CHAN10030/10039、抖音 13CHAN10132/10029、快手 13CHAN10033、小红书 13CHAN10041 等）。注意：此为<b>销售店铺口径</b>，是否等同官号口径需人工核对，不可直接照搬为社媒官号清单。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">3</span>本周动作（补全 SOP 本体 → 再执行）</div>
+    <ol class="acts">
+      <li><span class="who">品牌运作</span> 于<b>周三（09-09）前</b><span class="dl">截止 09-09</span><br>在导图 D1：官号运营 下补全 SOP 本体：新增「C 检查项 / P 执行计划 / A 动作」节点，覆盖至少：①官号账号清单（平台+账号+负责人+权限保管）②发布频率与内容日历 ③发布前审核流程 ④评论区互动与舆情监控 ⑤数据周报口径。或将以上内容直接贴回给 WorkBuddy，由 AI 结构化写入导图。</li>
+      <li><span class="who">品牌运作</span> 于<b>周四（09-10）前</b><span class="dl">截止 09-10</span><br>回复确认本单「官号」范围口径：是品牌社媒官方号（小红书/抖音/公众号…）还是含电商店铺号；并提供 UNOVE 当前实际运营的官号清单链接或截图。</li>
+      <li><span class="who">WorkBuddy</span> 收到口径与清单后<b>24 小时内重跑</b><br>生成：官号台账表 + 内容日历 + 数据口径，并据此重出正式执行单（KPI 卡 + 步骤/检查项 + 周动作），完成 C 逐项验收。</li>
+      <li><span class="who">品牌运作</span> 于<b>周五（09-11）前</b><span class="dl">截止 09-11</span><br>若本周仍无法提供官号清单/口径，明确答复「继续等待」或「先关闭本单」，避免本单虚假启动。</li>
+    </ol>
+  </section>
+
+  <div class="foot">
+    <b>数据来源：</b>mind-map MCP —— get_map(room-bpapl7vv「C:陈华俊:UN项目利润分」, v41 / 475 节点)、search_nodes；目标节点 D1：官号运营 uid 5751cf4a-3127-4826-b343-dbc2b22702f0，父节点 P：品牌营销 uid b251a152-bbe9-457b-bf61-5b3b52dfe7f5。<br>
+    <b>交叉核验：</b>room-t1p1lisl「unove」(v208) 内同名 D1：官号运营 亦为同款空模板（仅「品牌运作」子节点）；room-xp4ivjxm 含 WEV 等品牌官号运营的日/周 C/D/P 样例，仅作参照、非本单 SOP 内容。<br>
+    <b>口径出处：</b>mind-map MCP instructions 对 SOP 的 C（检查）/P（计划）/D（待办）/A（动作）定义；同图范本 D3：品牌营销活动 的 A1 计划结构。<br>
+    <b>缺口说明：</b>D1 子树无 C/P/A 节点、无备注、无台账链接，故本单不含任何伪造的官号账号、KPI 或排期；店铺/渠道代码取自导图「P：品牌目标→渠道定义和统计维度」，属销售店铺口径，仅作盘点起点提示。导图版本在读取期间由 v37 变化至 v41，判定基于 v41 快照。<br>
+    <b>生成：</b>WorkBuddy 良策 SOP 执行助手 · 2026-09-08 10:01
+  </div>
+
+</div>
+</body>
+</html>

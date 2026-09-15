@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D1：GMV目标达成进度 · 天猫执行单 2026-09-08 1051</title>
+<style>
+  :root{
+    --ink:#1f2733; --sub:#6b7686; --line:#e5e9f0;
+    --bg:#f4f6fa; --card:#ffffff;
+    --brand:#1d3a8f; --brand2:#2f6bff;
+    --warn-bg:#fff7e8; --warn-bd:#f2c66d; --warn-tx:#8a5a00;
+    --red:#d64545; --green:#1e9e6a; --amber:#c98a12; --blue:#2f6bff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;line-height:1.55;padding:28px 16px}
+  .page{max-width:980px;margin:0 auto}
+  .head{background:linear-gradient(135deg,var(--brand) 0%,var(--brand2) 100%);border-radius:16px;padding:22px 26px;color:#fff;box-shadow:0 8px 24px rgba(29,58,143,.18)}
+  .head .tags{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  .tag{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);padding:2px 10px;border-radius:999px;font-size:12px}
+  .head h1{font-size:24px;font-weight:700;letter-spacing:.5px}
+  .head .sub{margin-top:6px;font-size:13px;opacity:.92;display:flex;flex-wrap:wrap;gap:4px 16px}
+  .alert{margin-top:16px;background:var(--warn-bg);border:1px solid var(--warn-bd);border-left:5px solid var(--amber);border-radius:10px;padding:14px 16px;font-size:14px;color:var(--warn-tx)}
+  .alert b{color:#6b4a00}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-top:16px;box-shadow:0 2px 6px rgba(20,30,60,.04)}
+  .sec-title{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:700;margin-bottom:14px}
+  .sec-title .no{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:var(--brand);color:#fff;font-size:13px;flex:none}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 14px 12px;border-top:3px solid var(--brand2)}
+  .kpi .k{font-size:12px;color:var(--sub)}
+  .kpi .v{font-size:22px;font-weight:700;margin-top:4px;letter-spacing:.3px}
+  .kpi .s{font-size:11px;color:var(--sub);margin-top:4px}
+  .v.pending{color:var(--amber)} .v.calc{color:var(--brand)} .v.na{color:var(--red)}
+  .tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+  .tbl th{background:#eef1f7;color:#39414f;text-align:left;padding:9px 10px;font-weight:600;border:1px solid var(--line);white-space:nowrap}
+  .tbl td{padding:9px 10px;border:1px solid var(--line);vertical-align:top}
+  .tbl tr:nth-child(even) td{background:#fafbfd}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+  .dot.red{background:var(--red)} .dot.green{background:var(--green)} .dot.amber{background:var(--amber)} .dot.blue{background:var(--blue)}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600}
+  .pill.warn{background:#fdeaea;color:var(--red)}
+  .pill.ok{background:#e6f6ef;color:var(--green)}
+  .pill.wait{background:#fff4de;color:var(--amber)}
+  ol.acts{list-style:none;counter-reset:act}
+  ol.acts li{counter-increment:act;position:relative;padding:10px 10px 10px 46px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:#fcfdff}
+  ol.acts li::before{content:counter(act);position:absolute;left:12px;top:11px;width:24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  ol.acts b{color:var(--brand)}
+  .who{color:var(--brand2);font-weight:600}
+  .dl{display:inline-block;margin-left:6px;background:#eef2ff;color:var(--brand);border-radius:6px;padding:0 7px;font-size:12px;font-weight:600}
+  .foot{margin-top:16px;font-size:12px;color:var(--sub);background:#eef1f7;border-radius:10px;padding:12px 16px;line-height:1.7}
+  .foot code{background:#e2e7f1;padding:0 4px;border-radius:4px}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+  @media (max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <div class="tags">
+      <span class="tag">良策 SOP · 执行单</span>
+      <span class="tag">D1：GMV目标达成进度</span>
+      <span class="tag">房间 room-bpapl7vv</span>
+      <span class="tag">导图 v66 · 节点 subtree v35</span>
+    </div>
+    <h1>D1：GMV目标达成进度 — 执行单（天猫）</h1>
+    <div class="sub">
+      <span>归属：P：渠道运营 → 天猫 → 周中昱 → P1：渠道目标</span>
+      <span>责任人：周中昱</span>
+      <span>渠道定位：核心直营渠道（个护部）</span>
+      <span>生成时间：2026-09-08 10:51</span>
+    </div>
+  </div>
+
+  <div class="alert">
+    <b>⚠️ 执行状态：未完成（关键数据待取数）</b> —— 本轮已实测：SOP 挂接的两张数据表「2026年渠道目标」「销售日报表」均为企业微信文档外链，匿名访问仅返回「企业微信文档」登录占位页，无内嵌数据；导图（v66/475+ 节点）内亦无任何 GMV/目标数值。因此<b>不伪造任何销售额或目标值</b>，KPI 与达成率暂以「待取数/无法计算」呈现；时间进度为可算参考线。待数据到位即可一键重算并输出红/黄/绿结论。
+  </div>
+
+  <section>
+    <div class="sec-title"><span class="no">K</span>关键指标看板</div>
+    <div class="kpis">
+      <div class="kpi"><div class="k">2026 天猫 GMV 目标</div><div class="v pending">待取数</div><div class="s">来源：「2026年渠道目标」企业微信文档</div></div>
+      <div class="kpi"><div class="k">天猫累计 GMV（截至 09-07）</div><div class="v pending">待取数</div><div class="s">来源：「销售日报表」智能表格</div></div>
+      <div class="kpi"><div class="k">目标达成率</div><div class="v na">无法计算</div><div class="s">= 累计 GMV ÷ 年度目标，缺两表数据</div></div>
+      <div class="kpi"><div class="k">时间进度参考线（可算值）</div><div class="v calc">68.8%</div><div class="s">2026-01-01→09-08 已过 251/365 天，仅作达成率对比基准</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">1</span>SOP 步骤与检查项执行情况</div>
+    <table class="tbl">
+      <thead>
+        <tr><th style="width:150px">步骤</th><th>检查项（导图口径）</th><th style="width:200px">状态</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><b>1 目标确认</b><br><span style="color:var(--sub);font-size:12px">uid 37e135c6</span></td>
+          <td>「2026年渠道目标」确认天猫 GMV 目标与实收目标。导图规则（P：制定GMV目标）：每季度第一天更新表格；全年总目标确定后不可修改；据此计算渠道 GMV 销售进度与目标完成率。</td>
+          <td><span class="pill wait"><span class="dot amber"></span>待取数</span><br><span style="font-size:12px;color:var(--sub)">企业微信文档需登录</span></td>
+        </tr>
+        <tr>
+          <td><b>2 销售进度登记</b><br><span style="color:var(--sub);font-size:12px">uid 62a6f190</span></td>
+          <td>「销售日报表」以日维度登记天猫 GMV/销售额（D：每天更新表格：销售日报表），需登记至昨日 2026-09-07；用于滚动累计与达成率计算。</td>
+          <td><span class="pill wait"><span class="dot amber"></span>待取数</span><br><span style="font-size:12px;color:var(--sub)">智能表格需登录</span></td>
+        </tr>
+        <tr>
+          <td><b>结论判定</b></td>
+          <td>达成率（累计 GMV ÷ 2026 目标）与时间进度 68.8% 对比 → 进度内保持销售 / 进度外启动销售促进计划；并输出缺口金额。</td>
+          <td><span class="pill warn"><span class="dot red"></span>暂不能判定</span><br><span style="font-size:12px;color:var(--sub)">缺两表数据</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">2</span>判定口径（来源：P：跟踪渠道GMV目标完成进度 / P：渠道定位和目标设定逻辑）</div>
+    <table class="tbl">
+      <thead><tr><th style="width:220px">场景 / 规则</th><th>执行口径</th></tr></thead>
+      <tbody>
+        <tr><td><span class="dot green"></span>目标完成进度内</td><td>保持销售；确保库存周转健康（设库存预警），结合外部信息（不可抗力事件等）做好备货预案。</td></tr>
+        <tr><td><span class="dot red"></span>目标完成进度外</td><td>启动「销售促进计划」：以核心直营渠道和核心分销渠道为主要销售贡献，优先寻找销售占比大的渠道来提升销售。</td></tr>
+        <tr><td>渠道增长原则</td><td>核心直营 / 核心分销：年目标按比例<b>高增长</b>；正常直营 / 正常分销：按比例增长（低于核心直营）；豁免：观察期直营渠道、小红书。</td></tr>
+        <tr><td>本单渠道定位</td><td>天猫 = <b>核心直营渠道</b>（个护部）：个护部天猫 UNOVE 柔诺伊官方旗舰店 13CHAN10030、个护部天猫 UNOVE 海外旗舰店 13CHAN10039（天猫国际）；负责人周中昱。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">3</span>本周动作</div>
+    <ol class="acts">
+      <li><span class="who">周中昱</span> 于<b>周三（09-09）前</b><span class="dl">截止 09-09</span><br>在已登录企业微信的浏览器打开「<a href="https://doc.weixin.qq.com/sheet/e3_AbUAJQbFAEECNv1FFKAuoTra7QEAT?scode=ALwAJwfTAAgJkia7KyAbUAJQbFAEE&tab=BB08J2" target="_blank">2026年渠道目标</a>」，将「天猫」行的 GMV 目标 / 实收目标以截图或文本回贴给 WorkBuddy（或将文档权限调整为“企业内可阅读”）。</li>
+      <li><span class="who">周中昱</span> 每日确认「<a href="https://doc.weixin.qq.com/smartsheet/s3_AMwAoQZzAMECNeNTdk449SHW301Jo?scode=ALwAJwfTAAgd4JAMaWAMwAoQZzAME&tab=taDIvD&viewId=vO3teT" target="_blank">销售日报表</a>」登记至<b>昨日（09-07）</b>，含天猫店铺日 GMV；将最近数据回贴或授权 WorkBuddy 读取。</li>
+      <li><span class="who">WorkBuddy</span> 数据齐后<b>当天重算</b>：天猫累计 GMV、达成率 = 累计 ÷ 年度目标，并与时间进度 68.8% 对比，输出红 / 黄 / 绿结论与缺口金额，更新本单。</li>
+      <li><span class="who">按结论分支</span> 执行：进度内 → 保持销售 + 库存健康预警/备货预案；进度外 → 启动销售促进计划（先拉核心直营天猫，再放大销售占比大的渠道）。</li>
+      <li><span class="who">周中昱</span> 于<b>周五（09-11）前</b><span class="dl">截止 09-11</span><br>若两文档仍未授权读取，明确答复「继续等待」或「更换取数方式」（如生意参谋/吉客云导出），避免本单虚假启动。</li>
+    </ol>
+  </section>
+
+  <div class="foot">
+    <b>数据来源：</b>mind-map MCP（192.168.1.114:8989）—— get_map(room-bpapl7vv「C:陈华俊:UN项目利润分」, outline+full, v66)、search_nodes、list_todos；SOP 节点 uid e2c2721c-da11-465d-be71-8482ceb57c4b（subtree v35，trace tr-1a07eb5dd2a-8d506282），子节点「1 目标确认→2026年渠道目标(0c2c7364)」「2 销售进度登记→销售日报表(fdb3a888)」，两子节点挂企业微信文档外链；口径来自「P：品牌目标→制定GMV目标」「P：跟踪渠道GMV目标完成进度」「P：渠道定位和目标设定逻辑」节点。<br>
+    <b>口径出处：</b>导图内渠道/店铺/增长率规则文本均为规则性内容；唯一金额类信息为产品价格带 ¥79–169（非 GMV 数据），未发现任何 GMV/目标数值节点。<br>
+    <b>缺口说明：</b>两张数据表为企业微信文档（doc.weixin.qq.com），本轮实测匿名访问仅返回「企业微信文档」登录占位页、无内嵌数据；导图内无 GMV/目标数值；本地仓库无表格副本 —— 本单不含任何伪造数值。时间进度 68.8% 由 2026-01-01→09-08（第 251/365 天）实测计算。<br>
+    <b>生成：</b>WorkBuddy 良策 SOP 执行助手 · 2026-09-08 10:51
+  </div>
+
+</div>
+</body>
+</html>

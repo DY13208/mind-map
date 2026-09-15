@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D4：会员运营 · 执行单 2026-09-08 10:04</title>
+<style>
+  :root{--ink:#1f2733;--sub:#6b7686;--line:#e5e9f0;--bg:#f4f6fa;--card:#fff;
+    --brand:#1d3a8f;--brand2:#2f6bff;--warn-bg:#fff7e8;--warn-bd:#f2c66d;--warn-tx:#8a5a00;
+    --red:#d64545;--green:#1e9e6a;--amber:#c98a12;--blue:#2f6bff}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;line-height:1.55;padding:28px 16px}
+  .page{max-width:980px;margin:0 auto}
+  .head{background:linear-gradient(135deg,var(--brand) 0%,var(--brand2) 100%);border-radius:16px;padding:22px 26px;color:#fff;box-shadow:0 8px 24px rgba(29,58,143,.18)}
+  .head .tags{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  .tag{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);padding:2px 10px;border-radius:999px;font-size:12px}
+  .head h1{font-size:24px;font-weight:700;letter-spacing:.5px}
+  .head .sub{margin-top:6px;font-size:13px;opacity:.92;display:flex;flex-wrap:wrap;gap:4px 16px}
+  .alert{margin-top:16px;background:var(--warn-bg);border:1px solid var(--warn-bd);border-left:5px solid var(--amber);border-radius:10px;padding:14px 16px;font-size:14px;color:var(--warn-tx)}
+  .alert b{color:#6b4a00}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-top:16px;box-shadow:0 2px 6px rgba(20,30,60,.04)}
+  .sec-title{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:700;margin-bottom:14px}
+  .sec-title .no{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:var(--brand);color:#fff;font-size:13px;flex:none}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 14px 12px;border-top:3px solid var(--brand2)}
+  .kpi .k{font-size:12px;color:var(--sub)}
+  .kpi .v{font-size:20px;font-weight:700;margin-top:4px;letter-spacing:.3px}
+  .kpi .s{font-size:11px;color:var(--sub);margin-top:4px}
+  .v.pending{color:var(--amber)}.v.calc{color:var(--brand)}.v.na{color:var(--red)}.v.ok{color:var(--green)}
+  .tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+  .tbl th{background:#eef1f7;color:#39414f;text-align:left;padding:9px 10px;font-weight:600;border:1px solid var(--line);white-space:nowrap}
+  .tbl td{padding:9px 10px;border:1px solid var(--line);vertical-align:top}
+  .tbl tr:nth-child(even) td{background:#fafbfd}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+  .dot.red{background:var(--red)}.dot.green{background:var(--green)}.dot.amber{background:var(--amber)}.dot.blue{background:var(--blue)}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+  .pill.warn{background:#fdeaea;color:var(--red)}.pill.ok{background:#e6f6ef;color:var(--green)}.pill.wait{background:#fff4de;color:var(--amber)}
+  .tree{font-size:13.5px;line-height:1.9}
+  .tree .lv1{font-weight:700;color:var(--brand)}
+  .tree .lv2{color:var(--ink);font-weight:600}
+  .tree .lv3{color:#46505f}
+  .tree .leaf{color:var(--sub)}
+  ol.acts{list-style:none;counter-reset:act}
+  ol.acts li{counter-increment:act;position:relative;padding:10px 10px 10px 46px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:#fcfdff}
+  ol.acts li::before{content:counter(act);position:absolute;left:12px;top:11px;width:24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  ol.acts b{color:var(--brand)}
+  .who{color:var(--brand2);font-weight:600}
+  .dl{display:inline-block;margin-left:6px;background:#eef2ff;color:var(--brand);border-radius:6px;padding:0 7px;font-size:12px;font-weight:600}
+  .foot{margin-top:16px;font-size:12px;color:var(--sub);background:#eef1f7;border-radius:10px;padding:12px 16px;line-height:1.7}
+  .note-tip{font-size:12px;color:var(--sub);margin-top:8px}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+  @media (max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <div class="tags">
+      <span class="tag">良策 SOP · 执行单</span>
+      <span class="tag">D4：会员运营</span>
+      <span class="tag">房间 room-bpapl7vv</span>
+      <span class="tag">导图 v42 · 521 节点</span>
+    </div>
+    <h1>D4：会员运营 — 执行单</h1>
+    <div class="sub">
+      <span>归属：P：渠道运营 → 天猫 → 周中昱 → P3：天猫运营（D1 活动运营 / D2 货品运营 / D3 直播运营 / D4 会员运营 四线之一）</span>
+      <span>负责：周中昱</span>
+      <span>生成时间：2026-09-08 10:04</span>
+    </div>
+  </div>
+
+  <div class="alert">
+    <b>⚠️ 执行状态：结构已展开、执行数据待补</b> —— 经 get_map / search_nodes / list_todos 核查：D4：会员运营（uid eebf5d8b-70c5-44b0-ada2-69a53006381d）已按「A1 新会员规划 / A2 会员复购」展开 4 个叶子检查项；但整棵子树<b>无任何 note 数值、无外链会员数据表</b>（导图 21 个外链均为销售日报 / 渠道目标 / 排产 / 备案等，与会员无关），房间亦无「待办 / 已完成」容器。会员经营所需数值（新增 / 存量会员、入会转化、复购率、权益兑换与核销等）通常来自天猫生意参谋 / CRM / 会员台账，导图当前未挂接。因此本单<b>不伪造任何会员数值</b>，先输出「结构核查 + 四叶子执行框架 + 本周动作」，待周中昱补口径后即可转可执行并回填 KPI。
+  </div>
+
+  <section>
+    <div class="sec-title"><span class="no">K</span>关键指标看板</div>
+    <div class="kpis">
+      <div class="kpi"><div class="k">节点定位</div><div class="v calc">P3·D4 / 4 线</div><div class="s">渠道运营→天猫→周中昱→P3 天猫运营，会员运营为 D1–D4 工作线之一</div></div>
+      <div class="kpi"><div class="k">SOP 结构</div><div class="v ok">2 组 · 4 叶子</div><div class="s">A1 新会员规划 + A2 会员复购，共 4 个叶子检查项（导图已展开）</div></div>
+      <div class="kpi"><div class="k">负责人</div><div class="v calc">周中昱</div><div class="s">P3 天猫运营负责人；P：用户运营 D1 会员&amp;粉丝运营亦挂周中昱（A1 仅占位）</div></div>
+      <div class="kpi"><div class="k">执行数据 / 外链</div><div class="v na">0 项</div><div class="s">D4 子树无 note 数值、无外链；无会员台账 / 数据源可勾检 → 待补</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">1</span>SOP 结构与检查项执行情况（导图口径核查）</div>
+    <table class="tbl">
+      <thead><tr><th style="width:150px">核查项</th><th>导图实际内容</th><th style="width:150px">状态</th></tr></thead>
+      <tbody>
+        <tr><td><b>节点归属</b></td><td>D4：会员运营（uid eebf5d8b…）隶属「P：渠道运营 → 天猫 → 周中昱 → P3：天猫运营」（P3 uid 37e23a44…），与 D1 活动运营 / D2 货品运营 / D3 直播运营 平级。</td><td><span class="pill ok"><span class="dot green"></span>已确认</span></td></tr>
+        <tr><td><b>负责人 / 分工</b></td><td>P3 天猫运营整体挂周中昱；D4 无独立备注。另 P：用户运营 → D1：会员&amp;粉丝运营 亦由周中昱负责，但其下仅「A1」占位节点、未展开 —— 与 D4 存在口径重叠风险。</td><td><span class="pill wait"><span class="dot amber"></span>仅负责人</span></td></tr>
+        <tr><td><b>A1：新会员规划</b></td><td>1：新会员招揽提升规划（uid c7770b23…）／ 2：新会员权益（uid 603f68a7…）—— 均为叶子，无备注、无数值、无外链。</td><td><span class="pill wait"><span class="dot amber"></span>已建·待数据</span></td></tr>
+        <tr><td><b>A2：会员复购</b></td><td>1：会员登记和兑换权益（uid 5b648218…）／ 2：会员营销活动（uid 9e13e3dc…）—— 均为叶子，无备注、无数值、无外链。</td><td><span class="pill wait"><span class="dot amber"></span>已建·待数据</span></td></tr>
+        <tr><td><b>数据表 / 外链</b></td><td>D4 子树 hyperlink = 0、note = 0；导图 21 个外链均为销售日报表 / 渠道目标 / 排产 / 采购 / 备案等，<b>无任何会员数据表</b>；list_todos 返回无待办容器。</td><td><span class="pill warn"><span class="dot red"></span>无数据源</span></td></tr>
+        <tr><td><b>年度计划衔接</b></td><td>「P：品牌战略 → 年度规划 → 根据P用户运营生成年度用户运营计划」节点存在（子项：天猫会员&amp;粉丝），但无数值、无展开 —— 会员运营的年度目标口径同样待补。</td><td><span class="pill warn"><span class="dot red"></span>待补口径</span></td></tr>
+      </tbody>
+    </table>
+    <div class="note-tip">结论：D4 是「4 条叶子检查项已搭好、但没有挂任何执行数据 / 台账 / 数值」的半成品 SOP —— 本次无法勾检实际会员结果，核心产出为下文「四叶子执行框架 + 本周动作」。</div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">2</span>四叶子执行框架（建议口径 · 非导图原文）</div>
+    <table class="tbl">
+      <thead><tr><th style="width:130px">叶子检查项</th><th>建议登记 / 执行内容</th><th style="width:200px">关联导图事实</th><th style="width:110px">状态</th></tr></thead>
+      <tbody>
+        <tr><td><b>A1-1 新会员招揽提升规划</b></td><td>明确招揽抓手与节奏：店铺入会引导 / 老带新裂变 / 大促前拉新 / 付费会员承接；登记目标（新增入会人数、入会转化率）与每周跟进。</td><td>P3 D1 活动运营含 平台大促 / 百亿补贴 / 淘金币 / U先试用，可作拉新节点</td><td><span class="pill wait"><span class="dot amber"></span>待确认</span></td></tr>
+        <tr><td><b>A1-2 新会员权益</b></td><td>登记新会员礼包 / 首购券 / 会员价 / 积分获取规则；标注权益成本与预算衔接（避免与控价体系冲突）。</td><td>D2 货品运营含「检查文案符合大贸备案要求」外链，权益文案需同口径</td><td><span class="pill wait"><span class="dot amber"></span>待确认</span></td></tr>
+        <tr><td><b>A2-1 会员登记和兑换权益</b></td><td>建立会员登记台账（会员 / 等级 / 积分），记录权益兑换与核销、生日礼 / 等级礼发放；口径需与天猫 CRM / 会员中心一致。</td><td>导图内无会员台账表 → 需新建或挂接企业微信表</td><td><span class="pill warn"><span class="dot red"></span>无台账</span></td></tr>
+        <tr><td><b>A2-2 会员营销活动</b></td><td>登记会员日 / 复购券 / 沉睡唤醒等活动的排期、预算与复盘（复购率、活动 ROI），与 D1 活动运营的大促节奏对齐。</td><td>P3 D1 活动运营（平台大促等）为节奏锚点；年度用户运营计划节点可承接目标</td><td><span class="pill warn"><span class="dot red"></span>待建</span></td></tr>
+      </tbody>
+    </table>
+    <div class="note-tip">导图内 D4 叶子为纯文本标题（无明细），上表为「按叶子标题展开的建议执行口径」—— 供周中昱确认 / 修订后回贴导图，非导图原文。</div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">3</span>本周动作</div>
+    <ol class="acts">
+      <li><span class="who">周中昱</span> 于<b>周五（2026-09-11）前</b><span class="dl">截止 09-11</span><br>确认会员经营数值的数据源口径（天猫生意参谋会员模块 / CRM / 会员台账表），把表链接或口径回贴到导图 D4 叶子、或授权企业微信文档 —— WorkBuddy 才能落数值 KPI（入会人数、复购率等）。</li>
+      <li><span class="who">周中昱</span> 于<b>周五（2026-09-11）前</b><span class="dl">截止 09-11</span><br>把第 2 节「四叶子执行框架」逐条确认为实际规则（入会礼 / 券、会员价、积分、复购券、会员日频次），文本回贴给 WorkBuddy 代写入导图节点 note（update_node），或自行在导图补充。</li>
+      <li><span class="who">周中昱</span> 对齐 P：用户运营 → D1：会员&amp;粉丝运营（A1 占位、同挂周中昱）<span class="dl">截止 09-14</span><br>明确两处会员运营的分工或合并口径：D4（天猫 P3 视角）与用户运营 D1（会员&amp;粉丝视角）避免双线重复，确定唯一目标与数据源。</li>
+      <li><span class="who">周中昱（与 D1 活动运营节奏联动）</span> 于<b>下周一（2026-09-14）前</b><span class="dl">截止 09-14</span><br>把会员营销活动（A2-2）挂靠下半年平台大促 / 店播 / 达播节点，排出会员活动日历（拉新 → 复购 → 唤醒）初稿。</li>
+      <li><span class="who">WorkBuddy</span> 在数据源或口径到位后<b>更新本单</b>：将 4 叶子逐条转为勾检状态，回填 KPI 卡数值，并把会员台账 / 活动表落成可打开的表格产物。</li>
+    </ol>
+  </section>
+
+  <div class="foot">
+    <b>数据来源：</b>mind-map MCP —— get_map(room-bpapl7vv「C:陈华俊:UN项目利润分」, v42 / full 521 节点, 2026-09-08 10:03 +08)、search_nodes(room-bpapl7vv, 查询：会员)、list_todos(room-bpapl7vv)。<br>
+    <b>SOP 对象：</b>D4：会员运营 节点 uid eebf5d8b-70c5-44b0-ada2-69a53006381d；父链 P：渠道运营(68e3d349…) → 天猫(2249480b…) → 周中昱(00837958…) → P3：天猫运营(37e23a44…)；A1：新会员规划 uid cf763369…，A2：会员复购 uid 47790f0f…。<br>
+    <b>口径出处：</b>P3 天猫运营 D1–D4 工作线及 D4 下 A1/A2 与 4 叶子为导图原文；P：用户运营 → D1 会员&amp;粉丝运营（周中昱 / A1 占位）、D2 客服运营（林佩珊）；P：品牌战略 → 年度规划 →「根据P用户运营生成年度用户运营计划」（天猫会员&amp;粉丝）节点存在但无数值。<br>
+    <b>缺口说明：</b>会员数值类数据（新增 / 存量会员、入会转化、复购率、权益兑换核销、活动 ROI）在导图未挂接、无外链会员表 —— 本单不含任何伪造数值；第 2 节为「建议执行口径（非导图原文）」，待周中昱确认数据源与规则后转可执行并回填 KPI。<br>
+    <b>生成：</b>WorkBuddy 良策 SOP 执行助手 · 2026-09-08 10:04
+  </div>
+
+</div>
+</body>
+</html>

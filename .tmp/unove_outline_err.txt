@@ -1,0 +1,38 @@
+Traceback (most recent call last):
+  File "D:\liangce\mind-map\.tmp\wb_mcp.py", line 87, in call
+    obj = _post(body_obj)
+  File "D:\liangce\mind-map\.tmp\wb_mcp.py", line 36, in _post
+    with urllib.request.urlopen(req, timeout=120) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\yr\miniconda3\Lib\urllib\request.py", line 189, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\yr\miniconda3\Lib\urllib\request.py", line 495, in open
+    response = meth(req, response)
+  File "C:\Users\yr\miniconda3\Lib\urllib\request.py", line 604, in http_response
+    response = self.parent.error(
+        'http', request, response, code, msg, hdrs)
+  File "C:\Users\yr\miniconda3\Lib\urllib\request.py", line 533, in error
+    return self._call_chain(*args)
+           ~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\yr\miniconda3\Lib\urllib\request.py", line 466, in _call_chain
+    result = func(*args)
+  File "C:\Users\yr\miniconda3\Lib\urllib\request.py", line 613, in http_error_default
+    raise HTTPError(req.full_url, code, msg, hdrs, fp)
+urllib.error.HTTPError: HTTP Error 404: Not Found
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\liangce\mind-map\.tmp\wb_mcp.py", line 125, in <module>
+    res = call(method, params)
+  File "D:\liangce\mind-map\.tmp\wb_mcp.py", line 91, in call
+    _init()
+    ~~~~~^^
+  File "D:\liangce\mind-map\.tmp\wb_mcp.py", line 70, in _init
+    _post({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\liangce\mind-map\.tmp\wb_mcp.py", line 26, in _post
+    req_id = body_obj["id"]
+             ~~~~~~~~^^^^^^
+KeyError: 'id'

@@ -1,0 +1,13 @@
+HTTP/1.1 200 OK
+Server: nginx/1.22.1
+Date: Tue, 08 Sep 2026 01:52:43 GMT
+Content-Type: text/event-stream
+Content-Length: 981
+Connection: keep-alive
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Methods: GET,POST,DELETE,OPTIONS
+Access-Control-Allow-Headers: Content-Type, Authorization, mcp-session-id, MCP-Protocol-Version
+Access-Control-Expose-Headers: mcp-session-id
+cache-control: no-cache, no-transform
+mcp-session-id: 97b33f98-8648-4405-84d9-e6af34215e4d
+
