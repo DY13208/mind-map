@@ -8,8 +8,16 @@
   >
     <div v-loading="loading || busy" class="permissionDialogBody">
       <header class="permissionHeader">
-        <div :class="['resourceIcon', { room: isRoom }]">
-          <i :class="isRoom ? 'el-icon-document' : 'el-icon-folder'" />
+        <div :class="['resourceIcon', { room: isRoom, team: isTeam }]">
+          <i
+            :class="
+              isTeam
+                ? 'el-icon-office-building'
+                : isRoom
+                ? 'el-icon-document'
+                : 'el-icon-folder'
+            "
+          />
         </div>
         <div>
           <h2>{{ resourceTitle }}</h2>
@@ -160,18 +168,15 @@
           </section>
           <section class="detailSection">
             <h3>权限级别</h3>
-            <el-radio-group v-model="role" class="roleOptions"
-              ><el-radio-button label="Viewer"
-                ><strong>可查看</strong
-                ><small>仅查看内容</small></el-radio-button
-              ><el-radio-button label="Editor"
-                ><strong>可编辑</strong
-                ><small>查看并编辑</small></el-radio-button
-              ><el-radio-button v-if="!isRoom" label="Manager"
-                ><strong>可管理</strong
-                ><small>管理成员权限</small></el-radio-button
-              ></el-radio-group
-            >
+            <el-radio-group v-model="role" class="roleOptions">
+              <el-radio-button
+                v-for="option in roleOptions"
+                :key="option.value"
+                :label="option.value"
+                ><strong>{{ option.title }}</strong
+                ><small>{{ option.caption }}</small></el-radio-button
+              >
+            </el-radio-group>
           </section>
           <section class="detailSection previewSection">
             <h3>应用设置</h3>
@@ -229,16 +234,15 @@
                 ><el-select
                   size="mini"
                   :value="member.role"
-                  :disabled="String(member.role).toLowerCase() === 'owner'"
+                  :disabled="isOwnerRole(member.role)"
                   @change="updateRole(member, $event)"
-                  ><el-option label="可查看" value="Viewer"/><el-option
-                    label="可编辑"
-                    value="Editor"/><el-option
-                    v-if="!isRoom"
-                    label="可管理"
-                    value="Manager"/></el-select
+                  ><el-option
+                    v-for="option in memberRoleSelectOptions"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"/></el-select
                 ><button
-                  v-if="String(member.role).toLowerCase() !== 'owner'"
+                  v-if="!isOwnerRole(member.role)"
                   class="removeBtn"
                   type="button"
                   @click="remove(member)"
@@ -290,10 +294,11 @@ export default {
     visible: Boolean,
     folder: Object,
     room: Object,
+    team: Object,
     resourceType: {
       type: String,
       default: 'folder',
-      validator: value => ['folder', 'room'].includes(value)
+      validator: value => ['folder', 'room', 'team'].includes(value)
     }
   },
   data: () => ({
@@ -331,27 +336,72 @@ export default {
     isRoom() {
       return this.resourceType === 'room'
     },
+    isTeam() {
+      return this.resourceType === 'team'
+    },
     resourceItem() {
+      if (this.isTeam) return this.team
       return this.isRoom ? this.room : this.folder
     },
     resourceId() {
       const item = this.resourceItem || {}
-      return this.isRoom ? item.roomKey || item.id || '' : item.id || ''
+      if (this.isRoom) return item.roomKey || item.id || ''
+      return item.id || ''
     },
     resourceName() {
       const item = this.resourceItem || {}
       return item.title || item.name || ''
     },
     resourceLabel() {
+      if (this.isTeam) return '团队'
       return this.isRoom ? '脑图' : '文件夹'
     },
     resourceTitle() {
       return `${this.resourceLabel}权限`
     },
     resourceDescription() {
+      if (this.isTeam) return '权限将应用于整个团队空间与成员协作'
       return this.isRoom
         ? '权限仅应用于当前脑图'
         : '权限将应用于文件夹内现有及后续脑图'
+    },
+    roleOptions() {
+      if (this.isTeam) {
+        return [
+          { value: 'member', title: '成员', caption: '参与团队协作' },
+          { value: 'admin', title: '管理员', caption: '管理成员与内容' }
+        ]
+      }
+      const options = [
+        { value: 'Viewer', title: '可查看', caption: '仅查看内容' },
+        { value: 'Editor', title: '可编辑', caption: '查看并编辑' }
+      ]
+      if (!this.isRoom) {
+        options.push({
+          value: 'Manager',
+          title: '可管理',
+          caption: '管理成员权限'
+        })
+      }
+      return options
+    },
+    memberRoleSelectOptions() {
+      if (this.isTeam) {
+        return [
+          { value: 'member', label: '成员' },
+          { value: 'admin', label: '管理员' },
+          { value: 'owner', label: '所有者' }
+        ]
+      }
+      const options = [
+        { value: 'Viewer', label: '可查看' },
+        { value: 'Editor', label: '可编辑' }
+      ]
+      if (!this.isRoom) options.push({ value: 'Manager', label: '可管理' })
+      return options
+    },
+    defaultRole() {
+      return this.isTeam ? 'member' : 'Viewer'
     },
     pagedMembers() {
       const start = (this.page - 1) * this.pageSize
@@ -539,7 +589,7 @@ export default {
       this.loadingDepartmentIds = []
       this.departmentLoadTasks = {}
       this.expandedDepartments = []
-      if (this.isRoom && this.role === 'Manager') this.role = 'Viewer'
+      this.role = this.defaultRole
       this.loading = true
       try {
         const [departments] = await Promise.all([
@@ -756,16 +806,29 @@ export default {
     avatarText(item) {
       return String((item && item.name) || '企').slice(0, 1)
     },
+    isOwnerRole(role) {
+      return String(role || '').toLowerCase() === 'owner'
+    },
     roleLabel(role) {
       return (
-        { Viewer: '可查看', Editor: '可编辑', Manager: '可管理' }[role] ||
-        '可查看'
+        {
+          Viewer: '可查看',
+          Editor: '可编辑',
+          Manager: '可管理',
+          member: '成员',
+          admin: '管理员',
+          owner: '所有者',
+          Member: '成员',
+          Admin: '管理员',
+          Owner: '所有者'
+        }[role] || (this.isTeam ? '成员' : '可查看')
       )
     },
     async grantSelected() {
       this.busy = true
       try {
-        if (this.isRoom) await this.grantRoomSelection()
+        if (this.isTeam) await this.grantTeamSelection()
+        else if (this.isRoom) await this.grantRoomSelection()
         else await this.grantFolderSelection()
         await this.loadMembers()
         this.clearSelection()
@@ -842,7 +905,78 @@ export default {
             )
         )
     },
+    async grantTeamSelection() {
+      const departmentIds = Array.from(
+        new Set(
+          this.selectedDepartmentIds.reduce(
+            (all, id) => all.concat(this.descendantDepartmentIds(id)),
+            []
+          )
+        )
+      )
+      const loadResults = await Promise.all(
+        departmentIds.map(id => this.loadDepartmentContacts(id))
+      )
+      if (loadResults.some(result => result === false))
+        throw new Error('部分部门成员加载失败，请重试后再授权')
+
+      const departmentUsers = this.selectedDepartmentIds.reduce(
+        (all, id) => all.concat(this.memberIdsForDepartment(id)),
+        []
+      )
+      const ownerIds = new Set(
+        this.members
+          .filter(member => this.isOwnerRole(member.role || member.teamRole))
+          .map(member =>
+            String(member.wecomUserId || member.userId || member.id)
+          )
+      )
+      const selectedIds = Array.from(
+        new Set(this.selectedUserIds.concat(departmentUsers).map(String))
+      )
+      const userIds = selectedIds.filter(id => !ownerIds.has(id))
+      if (!userIds.length) {
+        if (selectedIds.length)
+          throw new Error('所选成员已是团队所有者，无需重复授权')
+        throw new Error('所选部门暂无可授权成员')
+      }
+
+      const existingByWecom = new Map(
+        this.members.map(member => [
+          String(member.wecomUserId || member.userId || member.id),
+          member
+        ])
+      )
+      const toAdd = userIds.filter(id => !existingByWecom.has(id))
+      if (toAdd.length) await teamService.addMembers(this.resourceId, toAdd)
+
+      if (this.role === 'admin') {
+        await this.loadMembers()
+        const refreshed = new Map(
+          this.members.map(member => [
+            String(member.wecomUserId || member.userId || member.id),
+            member
+          ])
+        )
+        for (const id of userIds) {
+          const member = refreshed.get(id)
+          if (!member || this.isOwnerRole(member.role || member.teamRole))
+            continue
+          if (String(member.role || member.teamRole).toLowerCase() === 'admin')
+            continue
+          await teamService.updateMemberRole(
+            this.resourceId,
+            member.id,
+            'admin'
+          )
+        }
+      }
+    },
     async loadMembers() {
+      if (this.isTeam) {
+        this.members = await teamService.listMembers(this.resourceId)
+        return
+      }
       this.members = this.isRoom
         ? await shareService.getMembers(this.resourceId)
         : (await folderService.getMembers(this.resourceId)).list
@@ -861,18 +995,26 @@ export default {
       }
     },
     updateRole(member, role) {
-      return this.run(() =>
-        this.isRoom
+      return this.run(() => {
+        if (this.isTeam)
+          return teamService.updateMemberRole(
+            this.resourceId,
+            member.id,
+            role
+          )
+        return this.isRoom
           ? shareService.updateMemberRole(this.resourceId, member.id, role)
           : folderService.updateMember(this.resourceId, member.id, role)
-      )
+      })
     },
     remove(member) {
-      return this.run(() =>
-        this.isRoom
+      return this.run(() => {
+        if (this.isTeam)
+          return teamService.removeMember(this.resourceId, member.id)
+        return this.isRoom
           ? shareService.removeMember(this.resourceId, member.id)
           : folderService.removeMember(this.resourceId, member.id)
-      )
+      })
     }
   }
 }
@@ -902,6 +1044,10 @@ export default {
 .resourceIcon.room {
   background: #edf2fb;
   color: #3567a8;
+}
+.resourceIcon.team {
+  background: #eef6f1;
+  color: #0c9065;
 }
 .permissionHeader h2 {
   margin: 0;

@@ -60,7 +60,7 @@
       </div>
       <p><i class="el-icon-folder-opened"></i> {{ room.folderName }}</p>
       <p class="ownerLine">
-        所有者 {{ room.owner.name }}
+        创建者 {{ room.owner.name }}
         <el-tag size="mini" type="info">{{ room.roleLabel || room.role }}</el-tag>
       </p>
       <div class="roomMeta">
