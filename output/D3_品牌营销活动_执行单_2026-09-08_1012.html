@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D3：品牌营销活动 · 执行单 2026-09-08</title>
+<style>
+  :root{
+    --ink:#1f2733; --sub:#6b7686; --line:#e5e9f0;
+    --bg:#f4f6fa; --card:#ffffff;
+    --brand:#123c63; --brand2:#3b82f6;
+    --warn-bg:#fff7e8; --warn-bd:#f2c66d; --warn-tx:#8a5a00;
+    --red:#d64545; --green:#1e9e6a; --amber:#c98a12; --blue:#2f6bff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;line-height:1.55;padding:28px 16px}
+  .page{max-width:980px;margin:0 auto}
+  .head{background:linear-gradient(135deg,var(--brand) 0%,var(--brand2) 100%);border-radius:16px;padding:22px 26px;color:#fff;box-shadow:0 8px 24px rgba(18,60,99,.20)}
+  .head .tags{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  .tag{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);padding:2px 10px;border-radius:999px;font-size:12px}
+  .head h1{font-size:23px;font-weight:700;letter-spacing:.5px}
+  .head .sub{margin-top:6px;font-size:13px;opacity:.93;display:flex;flex-wrap:wrap;gap:4px 16px}
+  .alert{margin-top:16px;background:var(--warn-bg);border:1px solid var(--warn-bd);border-left:5px solid var(--amber);border-radius:10px;padding:14px 16px;font-size:14px;color:var(--warn-tx)}
+  .alert b{color:#6b4a00}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-top:16px;box-shadow:0 2px 6px rgba(20,30,60,.04)}
+  .sec-title{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:700;margin-bottom:14px}
+  .sec-title .no{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:var(--brand);color:#fff;font-size:13px;flex:none}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 14px 12px;border-top:3px solid var(--brand2)}
+  .kpi .k{font-size:12px;color:var(--sub)}
+  .kpi .v{font-size:22px;font-weight:700;margin-top:4px;letter-spacing:.3px}
+  .kpi .s{font-size:11px;color:var(--sub);margin-top:4px}
+  .v.pending{color:var(--amber)} .v.calc{color:var(--brand)} .v.na{color:var(--red)} .v.ok{color:var(--green)}
+  .tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+  .tbl th{background:#edf2f8;color:#263a52;text-align:left;padding:9px 10px;font-weight:600;border:1px solid var(--line);white-space:nowrap}
+  .tbl td{padding:9px 10px;border:1px solid var(--line);vertical-align:top}
+  .tbl tr:nth-child(even) td{background:#fafbfe}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+  .dot.red{background:var(--red)} .dot.green{background:var(--green)} .dot.amber{background:var(--amber)} .dot.blue{background:var(--blue)}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+  .pill.warn{background:#fdeaea;color:var(--red)}
+  .pill.ok{background:#e6f6ef;color:var(--green)}
+  .pill.wait{background:#fff4de;color:var(--amber)}
+  .pill.info{background:#e9f0fd;color:var(--blue)}
+  ol.acts{list-style:none;counter-reset:act}
+  ol.acts li{counter-increment:act;position:relative;padding:10px 10px 10px 46px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:#fcfdff}
+  ol.acts li::before{content:counter(act);position:absolute;left:12px;top:11px;width:24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  ol.acts b{color:var(--brand)}
+  .who{color:var(--brand2);font-weight:600}
+  .dl{display:inline-block;margin-left:6px;background:#e9f0fd;color:var(--brand);border-radius:6px;padding:0 7px;font-size:12px;font-weight:600}
+  .foot{margin-top:16px;font-size:12px;color:var(--sub);background:#edeff4;border-radius:10px;padding:12px 16px;line-height:1.7}
+  .foot code{background:#dfe3ea;padding:0 4px;border-radius:4px}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+  @media (max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <div class="tags">
+      <span class="tag">良策 SOP · 执行单</span>
+      <span class="tag">D3：品牌营销活动</span>
+      <span class="tag">房间 room-bpapl7vv</span>
+      <span class="tag">P：品牌营销</span>
+    </div>
+    <h1>D3：品牌营销活动 — 执行单（P：品牌营销 · UNOVE 柔诺伊）</h1>
+    <div class="sub">
+      <span>归属：P：品牌营销 → D3：品牌营销活动 → 陈华俊 → A1：全年品牌营销规划</span>
+      <span>责任执行人：陈华俊</span>
+      <span>品牌：UNOVE 柔诺伊 · 个护</span>
+      <span>生成时间：2026-09-08 10:12</span>
+    </div>
+  </div>
+
+  <div class="alert">
+    <b>⚠️ 执行状态：骨架已定义 · 数据待回填（本单无伪造数字）</b> —— 实时读取导图（v50 / 475 节点）：D3 → 陈华俊 → <b>A1：全年品牌营销规划 5 步结构完整</b>（①制定全年规划→品牌/电商/线下节奏；②全年大事件→明星代言/重要节点活动；③根据采购目标制定全年营销预算；④分配事件和渠道预算；⑤跟进预算消耗进度），但五步节点<b>均无 note、无检查项、无数据表外链、无任何数值</b>；房间无「待办+已完成」容器，1–5 步进度无法在导图内自动勾选跟踪。预算唯一可引用口径：P：品牌目标「制定采购目标→品牌采购任务要求：按目前销售渠道一般 <b>100% 增长</b>」；下游「根据P品牌营销生成年度营销预算」预算对象 = 明星代言 / 达播 / 博主合作 / 重要节点活动。历史营销节奏、代言/大事件档期、采购目标金额、预算总额与消耗进度均在导图外（企业微信文档/采购跟踪表，登录墙），因此本单<b>不虚构任何预算金额与档期</b>，本周动作聚焦「回填五步真值 → 数据到齐后升级正式规划总表」。
+  </div>
+
+  <section>
+    <div class="sec-title"><span class="no">K</span>关键指标看板</div>
+    <div class="kpis">
+      <div class="kpi"><div class="k">A1 全年规划步骤（导图定义）</div><div class="v ok">5 步</div><div class="s">实时 v50 核查 1–5 步齐全，结构完整；但无检查项/数值/外链，属「流程骨架就绪」</div></div>
+      <div class="kpi"><div class="k">营销节奏覆盖（步骤①对象）</div><div class="v calc">3 类</div><div class="s">品牌营销节奏 / 电商营销节奏 / 线下营销节奏（导图子节点原文，内容待回填）</div></div>
+      <div class="kpi"><div class="k">预算分配对象（下游引用）</div><div class="v calc">4 类</div><div class="s">明星代言 · 达播 · 博主合作 · 重要节点活动（P：品牌战略「年度营销预算」子项）</div></div>
+      <div class="kpi"><div class="k">规划数据就绪度</div><div class="v na">0 / 待取数</div><div class="s">历史节奏、采购目标金额、代言/活动档期、预算总额与消耗进度均无真值；仅「按目前渠道一般 100% 增长」口径可引用</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">1</span>SOP 步骤与检查项执行情况（导图现状核查）</div>
+    <table class="tbl">
+      <thead>
+        <tr><th style="width:160px">核查项</th><th>实时结果（mind-map MCP 取数）</th><th style="width:140px">状态</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><b>节点位置</b></td><td>根「C:陈华俊:UN项目利润分」→ P：品牌营销（uid b251a152）→ <b>D3：品牌营销活动（uid 125e6951-8093-443b-93a7-1d8de0eefa76）</b> → 陈华俊（uid 2a08549a）→ A1：全年品牌营销规划（uid 90f2f613）。同父级：D1 官号运营(品牌运作)、D2 博主合作(林培培)、D4 达播规划(黄锦)、D5 PR推广(品牌运作)。</td><td><span class="pill ok"><span class="dot green"></span>已核查</span></td></tr>
+        <tr><td><b>流程步骤 / 检查项</b></td><td>A1 下五步齐全：①参考历史营销节奏和品牌信息制定全年规划（子叶：品牌营销节奏/电商营销节奏/线下营销节奏）→ ②全年大事件规划（子叶：明星代言/重要节点活动）→ ③根据采购目标制定全年营销预算 → ④分配具体事件和渠道预算 → ⑤跟进预算消耗进度。但步骤节点均无 note、无检查项/KPI 字段、无 hyperlink、无数值 —— 仅流程规则，无落地数据。</td><td><span class="pill wait"><span class="dot amber"></span>骨架在·数据缺</span></td></tr>
+        <tr><td><b>预算依据口径（第③步）</b></td><td>P：品牌目标 → P：制定采购目标 → 「品牌采购任务要求：通过书面沟通确认品牌采购要求，按照目前的销售渠道，一般是 100% 增长」——口径可引用；2026 采购量/金额具体数值在采购跟踪表（企业微信文档，匿名登录墙），导图内无值。</td><td><span class="pill info"><span class="dot blue"></span>口径在·数值待取</span></td></tr>
+        <tr><td><b>规划数据（历史/大事件/预算）</b></td><td>全图搜索「预算/营销规划/代言/大事件」：预算命中均为流程节点（A1 步骤、P：品牌战略「年度营销预算」、天猫 D1 推广计划和预算），无任何金额/档期/人选数值；历史节奏与代言节点为空叶子；本分支无 doc.weixin / 在线表外链。</td><td><span class="pill warn"><span class="dot red"></span>待取数</span></td></tr>
+        <tr><td><b>下游引用与跟踪容器</b></td><td>P：品牌战略 → P：年度规划 → 「根据P品牌营销生成年度营销预算」子项 = 明星代言 / 达播 / 博主合作 / 重要节点活动（即 D3 第②④步的输出去向）；「完成营销端复盘」为第⑤步消耗跟进的归口。房间 list_todos 返回「找不到同时包含『待办』和『已完成』的待办容器」→ 五步进度无法在导图内勾选跟踪。</td><td><span class="pill info"><span class="dot blue"></span>引用点存在</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">2</span>A1 五步执行倒排（数据缺口 → 输入 → 产出）</div>
+    <table class="tbl">
+      <thead><tr><th style="width:170px">SOP 步骤</th><th>所需输入（真值）</th><th style="width:150px">当前状态</th></tr></thead>
+      <tbody>
+        <tr><td><b>① 制定全年品牌营销规划</b></td><td>历史营销节奏数据：2025 及往年品牌/电商/线下 campaign 日历或最近 12 个月实绩；品牌信息资产（可引用 P：品牌定位真值：价格带 ¥79–¥169，洗护类目中高端区间）。产出：三类节奏日历 + 全年规划文档。</td><td><span class="pill wait"><span class="dot red"></span>待取数</span></td></tr>
+        <tr><td><b>② 全年大事件规划</b></td><td>明星代言（人选方向/档期/预算区间）、重要节点活动（年度大促 618/双11/新品首发/线下快闪等清单）。产出：大事件日历。</td><td><span class="pill wait"><span class="dot red"></span>待补全</span></td></tr>
+        <tr><td><b>③ 制定全年营销预算</b></td><td>2026 采购目标数值（口径 = 按目前销售渠道一般 100% 增长；数值来源采购跟踪表/与品牌书面沟通确认）。产出：全年营销预算总额与测算假设。</td><td><span class="pill info"><span class="dot blue"></span>口径在·数值待取</span></td></tr>
+        <tr><td><b>④ 分配事件和渠道预算</b></td><td>预算总额 + 分配对象：明星代言/达播/博主合作/重要节点活动（下游「年度营销预算」口径），并落到品牌/电商/线下三类节奏渠道；渠道侧可参照天猫站内推广「退后费比 15%–20%」的表达方式（非 D3 预算口径）。产出：事件 × 渠道预算分配表。</td><td><span class="pill wait"><span class="dot red"></span>待制定</span></td></tr>
+        <tr><td><b>⑤ 跟进预算消耗进度</b></td><td>预算基线 + 月度实际消耗（对接财务/营销端复盘，归口 P：品牌战略「完成营销端复盘」）。产出：消耗进度台账与超支预警。</td><td><span class="pill wait"><span class="dot red"></span>待建台账</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">3</span>本周动作（2026-09-07 ～ 09-13）</div>
+    <ol class="acts">
+      <li><span class="who">陈华俊</span> 于<b>周二（09-08）前</b><span class="dl">截止 09-08</span><br>确认 D3 产物口径：本单按「全年营销规划总表（节奏日历 + 大事件 + 预算分配 + 消耗台账）四段」倒排；如只需其中某段（例如仅先做第③步预算），请回贴说明，WorkBuddy 随即为 A1 五步补「检查项 / KPI 字段」定义（不改导图结构）。</li>
+      <li><span class="who">陈华俊</span> 于<b>周三（09-09）前</b><span class="dl">截止 09-09</span><br>回贴<b>历史营销节奏真值</b>：2025 年品牌 / 电商 / 线下 campaign 日历或最近 12 个月活动实绩（可授权企业微信文档或直接贴表）→ 作为第①步「全年规划」输入。</li>
+      <li><span class="who">陈华俊</span> 于<b>周四（09-10）前</b><span class="dl">截止 09-10</span><br>回贴<b>2026 采购目标数值</b>：按口径（= 目前渠道一般 100% 增长）测算的采购金额 / 数量，来源采购跟踪表 → 作为第③步「全年营销预算」基数。</li>
+      <li><span class="who">陈华俊</span> 于<b>周五（09-11）前</b><span class="dl">截止 09-11</span><br>给<b>大事件意向清单</b>：明星代言（人选方向 / 预算区间 / 期望档期）+ 重要节点活动（大促 / 新品首发 / 线下活动）→ WorkBuddy 起草「全年大事件 × 渠道预算分配表」草稿（支撑第②④步）。</li>
+      <li><span class="who">WorkBuddy</span> 数据到齐后<b>当天</b><br>把本单升级为正式 <b>D3 全年品牌营销规划执行总表</b>（KPI：全年预算总额 / 分事件预算 / 费比 / 消耗进度列，含第⑤步消耗台账模板），全程不写入导图、不伪造数字。</li>
+    </ol>
+  </section>
+
+  <div class="foot">
+    <b>数据来源：</b>mind-map MCP —— get_map(room-bpapl7vv「C:陈华俊:UN项目利润分」, full，实时 version 50 / 475 节点，更新于 2026-09-08 10:09 本地)、search_nodes(预算 / 营销规划 / 代言 / 大事件 / 采购目标)、list_todos（房间无待办容器）。<br>
+    <b>可引用口径（导图原文/真值）：</b>① P：品牌目标 → P：制定采购目标 → 「品牌采购任务要求：通过书面沟通确认品牌采购要求，按照目前的销售渠道，一般是 100% 增长」；② P：品牌战略 → P：年度规划 → 「根据P品牌营销生成年度营销预算」子项 = 明星代言 / 达播 / 博主合作 / 重要节点活动；③ P：品牌定位 → 价格带 ¥79 – ¥169（洗护类目中高端区间，品牌信息可引用）；④ 天猫 P4「D1：推广计划和预算 → A1：站内推广计划 → 2：设定推广费比和 ROI 要求：退后费比 15%–20%」（渠道侧费比表达参照，非 D3 品牌营销预算口径）；⑤ 步骤子节点原文：节奏 = 品牌营销节奏 / 电商营销节奏 / 线下营销节奏；大事件 = 明星代言 / 重要节点活动。<br>
+    <b>缺口说明：</b>D3 / 陈华俊 / A1 及五步节点均无 note、无检查项、无 hyperlink、无数值；历史营销节奏、代言与大事件档期费用、2026 采购目标金额、全年预算总额与消耗进度均不在导图内；相关数据源（采购跟踪表等企业微信文档）匿名访问为登录墙；房间无待办容器，无法自动跟踪五步完成状态 —— 本单未包含任何虚构预算/档期数字，KPI 卡第 1–3 项为导图结构盘点，第 4 项为数据缺口标识。<br>
+    <b>生成：</b>WorkBuddy 良策 SOP 执行助手 · 2026-09-08 10:12
+  </div>
+
+</div>
+</body>
+</html>

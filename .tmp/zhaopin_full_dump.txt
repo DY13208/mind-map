@@ -1,0 +1,110 @@
+- <p>中心主题</p> [cc81ab99-bf6c-4572-93bb-653f341d7993]
+  D: {"__fv": {"text": 5}, "richText": true}
+  - <p>D1:刘欢：招聘</p> [e57da57e-2950-4e32-adfb-9d48cb9e309e]
+    D: {"__fv": {"text": 12, "field:traceId": 7}, "traceId": "tr-1a07ea85cac-f7875dd7", "richText": true}
+    - <p>需求方:提交招聘需求</p> [c8f71bed-374d-4465-a559-1f9899a7f662]
+      D: {"__fv": {"text": 12}, "richText": true}
+      - <p>公司主体</p> [f3c1ff56-2043-4f1f-9af1-66eff7306ba9]
+        D: {"__fv": {"text": 12}, "richText": true}
+      - <p>招聘岗位</p> [ac9d69b4-2d34-42a5-aa1e-8de1a64a7cbd]
+        D: {"__fv": {"text": 12}, "richText": true}
+      - <p>招聘部门</p> [a9478fa6-3f70-4535-a485-7bef1cfa3426]
+        D: {"__fv": {"text": 12}, "richText": true}
+      - <p>性别要求</p> [83d1c778-7f7f-438b-9283-7519f3eb8467]
+        D: {"__fv": {"text": 12}, "richText": true}
+      - <p>职级</p> [bab03b8d-54ee-4db4-9ac6-423313a6aac5]
+        D: {"__fv": {"text": 12}, "richText": true}
+        - <p>初级</p> [82da28c2-7809-4e2c-acc7-3573e30a7607]
+          D: {"__fv": {"text": 12}, "richText": true}
+        - <p>中级</p> [d4510769-6ec1-4c41-b561-dfc17a9a56a0]
+          D: {"__fv": {"text": 12}, "richText": true}
+        - <p>高级</p> [ee60d81d-ec75-48dc-b4ef-76ceb1bf5794]
+          D: {"__fv": {"text": 12}, "richText": true}
+        - <p>经理级以上</p> [a46564f6-7b8b-4afb-9676-63b6e402d5fd]
+          D: {"__fv": {"text": 12}, "richText": true}
+      - <p>工作性质</p> [7c8fa96f-f782-4250-8905-57167ac384fa]
+        D: {"__fv": {"text": 12}, "richText": true}
+        - <p>默认:全职</p> [6dc5c90f-34b6-4082-b8e4-0acfe7f3ea70]
+          D: {"__fv": {"text": 12}, "richText": true}
+        - <p>实习生</p> [dcf2420b-aa30-459d-8a99-1d2a5563fabf]
+          D: {"__fv": {"text": 12}, "richText": true}
+      - <p>招聘人数</p> [8559d86c-9e44-4775-a4af-40ecd4b57b06]
+        D: {"__fv": {"text": 12}, "richText": true}
+      - <p>招聘城市</p> [c22a0007-8b30-4ffd-90ef-6114f1ca1a14]
+        D: {"__fv": {"text": 12}, "richText": true}
+        - <p>默认:深圳</p> [fa7af7ac-ecf2-4451-b3b6-bbbbae351137]
+          D: {"__fv": {"text": 12}, "richText": true}
+      - <p>招聘原因</p> [7ec73e8c-17d3-44b5-9f00-770d3e614888]
+        D: {"__fv": {"text": 12}, "richText": true}
+        - <p>离职、替补</p> [d3de0da6-70c8-43eb-b9c6-5e86721f680d]
+          D: {"__fv": {"text": 12}, "richText": true}
+        - <p>新增</p> [12103707-84fe-4349-bc27-eec4d21b27e0]
+          D: {"__fv": {"text": 12}, "richText": true}
+      - <p>试用期带教导师</p> [0cdea8d1-b8df-4c3b-ba0d-95d772541333]
+        D: {"__fv": {"text": 12}, "richText": true}
+      - <p>新人试用期成长计划表</p> [25dd65bb-9a72-4152-a303-a1c233c5ac9f]
+        D: {"__fv": {"text": 12}, "richText": true}
+      - <p>硬性要求</p> [dd4f864d-c987-49db-ac22-41265f3d8866]
+        D: {"__fv": {"text": 12}, "richText": true}
+    - <p>AI:通知对应的HRBP</p> [f1e51339-8942-443d-bce1-d6efe2bcb988]
+      D: {"__fv": {"text": 12}, "richText": true}
+    - <p>AI:发布boss直聘JD</p> [2adf0845-3b89-469f-a627-de94d2b42874]
+      D: {"__fv": {"text": 12}, "richText": true}
+      - <p>如果有现成的JD，点击发送</p> [1a676707-d586-42f1-a2a7-7f1b3864c411]
+        D: {"__fv": {"text": 12}, "richText": true}
+      - <p>如果没有，AI查询对应其他公司类似岗位并结合招聘需求生成JD</p> [2eccf7d8-58ab-4e99-924c-8057db56b85b]
+        D: {"__fv": {"text": 12}, "richText": true}
+    - <p>AI:初步筛选简历</p> [50d26cab-1b90-44ee-98a6-b47382e58392]
+      D: {"__fv": {"text": 12}, "richText": true}
+    - <p>HRBP:初步了解</p> [1070e7fa-dc6c-4ef6-a8b9-0b6f99bdeab4]
+      D: {"__fv": {"text": 12}, "richText": true}
+    - <p>需求方:二次筛选简历</p> [ef233acf-2556-43ea-acf5-921bbd412fcc]
+      D: {"__fv": {"text": 12}, "richText": true}
+    - <p>AI:邀约</p> [c50d9c2f-5dd2-4846-90a4-4c712c5379de]
+      D: {"__fv": {"text": 12}, "richText": true}
+      - <p>确定对应需求方日程情况</p> [aedffe1a-d601-41e6-ad45-f29d444e5910]
+        D: {"__fv": {"text": 12}, "richText": true}
+        - <p>新增待办(同时附上简历)行政、需求人</p> [38d5b7f9-86b0-4ea2-a36e-30315c3d84e0]
+          D: {"__fv": {"text": 12}, "richText": true}
+    - <p>人:面试、输出评价</p> [53d47ab9-bcbc-44a8-9ec5-1b2f517f4819]
+      D: {"__fv": {"text": 12}, "richText": true}
+      - <p>需求方一面</p> [d96830fa-2ac3-4831-8c85-8fd3824ac4d0]
+        D: {"__fv": {"text": 12}, "richText": true}
+      - <p>HR二面</p> [abbbf64a-9e9d-4b64-9499-459a7cf4fab5]
+        D: {"__fv": {"text": 12}, "richText": true}
+      - <p>总经理/副总终面</p> [1fe15b57-6d62-4eba-b459-3d14f18b0737]
+        D: {"__fv": {"text": 12}, "richText": true}
+    - <p>AI:推送笔试题</p> [d7c4ceca-d833-48ea-873d-0ecaf0949a09]
+      D: {"__fv": {"text": 12}, "richText": true}
+    - <p>人:内部评估(AI结合简历、面试情况、笔试情况分析)</p> [7dcf76d6-2fa3-4733-a80e-f24881c26e99]
+      D: {"__fv": {"text": 12}, "richText": true}
+      - <p>职级</p> [0e087498-a5c2-4457-bdad-2282124b3511]
+        D: {"__fv": {"text": 12}, "richText": true}
+      - <p>薪资</p> [7909e392-da77-4ad2-8c76-18a442adc8fb]
+        D: {"__fv": {"text": 12}, "richText": true}
+      - <p>薪资体系</p> [a78d92a9-ffbf-4880-8625-e78206d67298]
+        D: {"__fv": {"text": 12}, "richText": true}
+    - <p>面试官:评五维分</p> [9a40f269-5f97-459e-8c7b-ba58e6ad8d67]
+      D: {"__fv": {"text": 12}, "richText": true}
+    - <p>HRBP:谈薪、确认入职时间</p> [364b4296-3345-4314-a2c0-5ed939956ab6]
+      D: {"__fv": {"text": 12}, "richText": true}
+    - <p>AI:总经理审批、抄送副总、人事</p> [d8562a0a-4f6e-498d-a502-2b66190714d4]
+      D: {"__fv": {"text": 12}, "richText": true}
+      - <p>总经理审批原则:默认同意、以下情况拒绝</p> [9cecd675-bed3-4f8e-a03f-eb5dc7788300]
+        D: {"__fv": {"text": 12}, "richText": true}
+        - <p>年龄大于42岁</p> [1e3e1757-c556-4bbf-9ae0-6c2f03c2375f]
+          D: {"__fv": {"text": 12}, "richText": true}
+        - <p>学历低于高中</p> [23bdf583-ec83-47ab-827c-ee0bd884aba7]
+          D: {"__fv": {"text": 12}, "richText": true}
+    - <p>AI:发offer、自动推送入职时间给:行政、人事、IT、需求方</p> [ee237acb-b3d2-41e9-86ea-6ebbbba4cf02]
+      D: {"__fv": {"text": 12}, "richText": true}
+      - <p>职级</p> [8ee7158b-271c-4773-95f8-9a1b15799da3]
+        D: {"__fv": {"text": 12}, "richText": true}
+      - <p>薪资</p> [1bdf8ebf-b422-4381-bd82-4266c0104817]
+        D: {"__fv": {"text": 12}, "richText": true}
+      - <p>薪资体系</p> [a4bef37f-1c08-441e-abdc-cc4a204e52f3]
+        D: {"__fv": {"text": 12}, "richText": true}
+      - <p>岗位</p> [0bdb2806-da2b-4630-9b8f-196b16d408b4]
+        D: {"__fv": {"text": 12}, "richText": true}
+      - <p>入职时间</p> [99432976-8986-4582-a122-0a70b667562b]
+        D: {"__fv": {"text": 12}, "richText": true}

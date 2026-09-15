@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D：分配渠道采购任务 · 执行单</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --ink: #1a1d24; --muted: #6b7280;
+    --line: #e5e7eb; --brand: #2563eb; --brand-soft: #eff6ff;
+    --good: #16a34a; --good-soft: #f0fdf4; --warn: #d97706; --warn-soft: #fffbeb;
+    --bad: #dc2626; --bad-soft: #fef2f2;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.6; padding: 24px 16px; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header.top { margin-bottom: 20px; }
+  .eyebrow { font-size: 12px; letter-spacing: .08em; color: var(--brand); font-weight: 700; text-transform: uppercase; }
+  h1 { font-size: 24px; margin: 4px 0 6px; }
+  .meta { font-size: 13px; color: var(--muted); }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 18px 0; }
+  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .kpi .label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .kpi .val { font-size: 22px; font-weight: 700; }
+  .kpi .unit { font-size: 13px; color: var(--muted); font-weight: 500; margin-left: 2px; }
+  .kpi .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .kpi.primary { background: var(--brand-soft); border-color: #bfdbfe; }
+  .kpi.primary .val { color: var(--brand); }
+  .kpi.warn .val { color: var(--warn); }
+
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  h2 { font-size: 15px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  h2 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--brand); display: inline-block; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #fafafa; color: var(--muted); font-weight: 600; font-size: 12.5px; }
+  tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #f1f5f9; border-radius: 4px; padding: 1px 6px; color: #0f4c81; word-break: break-all; }
+
+  .actions { list-style: none; }
+  .actions li { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px dashed var(--line); font-size: 13.5px; }
+  .actions li:last-child { border-bottom: none; }
+  .actions .idx { flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; background: var(--brand); color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; font-weight: 600; }
+  .actions .owner { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+  .badge.ok { background: var(--good-soft); color: var(--good); }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); }
+  .badge.bad { background: var(--bad-soft); color: var(--bad); }
+  .badge.info { background: var(--brand-soft); color: var(--brand); }
+
+  .note { background: var(--warn-soft); border: 1px solid #fde68a; border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #92400e; }
+  .note b { color: #78350f; }
+
+  .branch { display: flex; gap: 14px; }
+  .branch .col { flex: 1; border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .branch .col.keep { background: var(--good-soft); border-color: #bbf7d0; }
+  .branch .col.over { background: var(--warn-soft); border-color: #fde68a; }
+  .branch h3 { font-size: 13.5px; margin-bottom: 8px; }
+  .branch p, .branch li { font-size: 13px; color: #444; }
+  .branch ul { margin-left: 16px; }
+
+  footer { font-size: 12px; color: var(--muted); text-align: center; margin-top: 18px; line-height: 1.9; }
+  footer b { color: #5b6674; }
+  @media (max-width: 720px) { .kpis { grid-template-columns: repeat(2, 1fr); } .branch { flex-direction: column; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="eyebrow">SOP 执行单 · 节点 D</div>
+    <h1>分配渠道采购任务</h1>
+    <div class="meta">
+      节点 uid：<b>54074fcf-fa75-49d8-87af-8bb14757fdfd</b>　|　
+      房间：<b>room-t68xa5ui</b>　|　
+      生成时间：<b>2026-09-14 17:53 (GMT+8)</b>
+    </div>
+  </header>
+
+  <!-- KPI 卡 -->
+  <div class="kpis">
+    <div class="kpi warn">
+      <div class="label">直连数据源接入</div>
+      <div class="val">0 / 3</div>
+      <div class="sub">ERP 吉客云、天猫生意参谋、抖音电商罗盘 均非 MCP</div>
+    </div>
+    <div class="kpi">
+      <div class="label">采购/排产文件定位</div>
+      <div class="val">4<span class="unit">个</span></div>
+      <div class="sub">采购跟踪表、BY26全渠道目标&排产、年度采购盘点、线下重点渠道跟进表</div>
+    </div>
+    <div class="kpi primary">
+      <div class="label">承接渠道口径</div>
+      <div class="val">17<span class="unit">店铺编码</span></div>
+      <div class="sub">核心直营 6 / 正常直营 5 / 观察期 1 / 核心分销 3 / 正常分销 2</div>
+    </div>
+    <div class="kpi warn">
+      <div class="label">可读采购数值</div>
+      <div class="val">0<span class="unit">条</span></div>
+      <div class="sub">在线表格读取 850002；仅微盘二进制文件可下载</div>
+    </div>
+  </div>
+
+  <section>
+    <h2><span class="dot"></span>一、数据源实测结论</h2>
+    <table>
+      <thead>
+        <tr><th>SOP 数据源</th><th>实测结果</th><th>状态</th><th>缺口说明</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>ERP 吉客云 · 销售单明细账 / 分仓库存查询</td>
+          <td>无对应 MCP 工具，不可达</td>
+          <td><span class="badge bad">不可达</span></td>
+          <td>历史销售 / 分仓库存数值取不到</td>
+        </tr>
+        <tr>
+          <td>店铺后台 · 天猫生意参谋 / 抖音电商罗盘</td>
+          <td>无对应 MCP 工具，不可达</td>
+          <td><span class="badge bad">不可达</span></td>
+          <td>店铺维度销量 / 流量数据取不到</td>
+        </tr>
+        <tr>
+          <td>【UNOVE】采购跟踪表</td>
+          <td>微盘已定位（sheet，更新 2026-09-14 16:01），内容读取 850002 未授权</td>
+          <td><span class="badge warn">定位但不可读</span></td>
+          <td>采购完成进度数值取不到</td>
+        </tr>
+        <tr>
+          <td>UNOVE BY26全渠道目标&排产</td>
+          <td>微盘已定位（sheet，更新 2026-08-25），内容读取 850002 未授权</td>
+          <td><span class="badge warn">定位但不可读</span></td>
+          <td>大贸排产表数值取不到</td>
+        </tr>
+        <tr>
+          <td>UNOVE-2026年年度采购盘点.xlsx</td>
+          <td>微盘二进制文件<b>可下载</b>（67,772 字节，含 3 张工作表），但为 2026-07-13 历史快照</td>
+          <td><span class="badge ok">可下载</span></td>
+          <td>非实时采购跟踪，仅作参考</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>二、采购 / 排产文件定位清单（微盘，已核到 docid）</h2>
+    <table>
+      <thead>
+        <tr><th>文件</th><th>类型</th><th>更新日期</th><th>docid / 路径</th><th>状态</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>【UNOVE】采购跟踪表</td>
+          <td>sheet</td>
+          <td>2026-09-14 16:01</td>
+          <td><code>e3_ABMAWwZlADUO3PmqB0kSGS7r10hCb</code><br><span style="color:#6b7280">全员/渠道部/直供组/…/卢耿虹</span></td>
+          <td><span class="badge warn">读取 850002</span></td>
+        </tr>
+        <tr>
+          <td>UNOVE BY26全渠道目标&排产</td>
+          <td>sheet</td>
+          <td>2026-08-25</td>
+          <td><code>e3_AbUAJQbFAEECNv1FFKAuoTra7QEAT</code><br><span style="color:#6b7280">全员/个护部/…/BY26目标</span></td>
+          <td><span class="badge warn">读取 850002</span></td>
+        </tr>
+        <tr>
+          <td>UNOVE-2026年年度采购盘点.xlsx</td>
+          <td>file</td>
+          <td>2026-07-13</td>
+          <td><code>fiLxVXwC_XJ5WCCD31uBbmAyNNa-…</code><br><span style="color:#6b7280">全员/个护部/…/UN大贸260315</span></td>
+          <td><span class="badge ok">已下载</span></td>
+        </tr>
+        <tr>
+          <td>UNOVE线下重点渠道跟进表</td>
+          <td>sheet</td>
+          <td>2026-06-29</td>
+          <td><code>e3_AccAigYxAP8CNbeLDBn2mRHm7P1gn</code><br><span style="color:#6b7280">全员/渠道部/线下组</span></td>
+          <td><span class="badge warn">读取 850002</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>三、分配口径（承上游「历史GMV数据汇总分析」17 渠道）</h2>
+    <table>
+      <thead>
+        <tr><th>渠道定位</th><th>渠道数</th><th>采购分配基调</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="badge info">核心直营渠道</span></td><td>6</td><td>按比例高增长 → 采购优先保障、备货水位最高</td></tr>
+        <tr><td><span class="badge info">正常直营渠道</span></td><td>5</td><td>按比例增长 → 按目标节奏滚动采购</td></tr>
+        <tr><td><span class="badge warn">观察期直营渠道（豁免）</span></td><td>1</td><td>不强制增长 → 保守补货、控库存</td></tr>
+        <tr><td><span class="badge info">核心分销渠道</span></td><td>3</td><td>按比例高增长 → 保障大贸供货</td></tr>
+        <tr><td><span class="badge info">正常分销渠道</span></td><td>2</td><td>按比例增长 → 按回款/实收节奏分配</td></tr>
+      </tbody>
+    </table>
+    <div class="note" style="margin-top:12px">
+      <b>口径说明：</b>分配比例需按品牌要求<b>人工分配</b>（SOP 未给固定百分比），本次不填推测增速；渠道编码为唯一识别（渠道/店铺改名不影响统计）。
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>四、决策分支（进度内 / 进度外）</h2>
+    <div class="branch">
+      <div class="col keep">
+        <h3>✅ 目标完成进度内</h3>
+        <p>保持现有采购节奏，不放大、不缩量，按「BY26全渠道目标&排产」滚动执行。</p>
+      </div>
+      <div class="col over">
+        <h3>⚠️ 目标完成进度外</h3>
+        <ul>
+          <li><b>品牌侧</b>：按月完成品牌最低采购要求，补齐缺口，避免断货 / 违约。</li>
+          <li><b>渠道侧</b>：制定库存消耗计划，对高库存 / 低周转渠道做去化（促销 / 调拨 / 退货），控制资金占用。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>五、本周动作</h2>
+    <ul class="actions">
+      <li><span class="idx">1</span><div>开通 / 登录 ERP 吉客云，导出「销售单明细账」与「分仓库存」，刷新各品牌/渠道历史销售与库存基线</div><span class="owner">品牌 / 渠道 BP</span></li>
+      <li><span class="idx">2</span><div>同步天猫生意参谋、抖音电商罗盘后台数据，补齐店铺维度销量</div><span class="owner">渠道运营</span></li>
+      <li><span class="idx">3</span><div>为企业微信「文档」授权（消除 850002），使采购跟踪表 / BY26全渠道目标&排产可读，回填采购完成率</div><span class="owner">机器人创建者</span></li>
+      <li><span class="idx">4</span><div>按 17 渠道定位，将采购任务分配至各渠道/店铺，核心渠道优先保障备货</div><span class="owner">采销</span></li>
+      <li><span class="idx">5</span><div>对进度外品牌锁定「最低采购要求」排入月度采购计划</div><span class="owner">品牌侧</span></li>
+      <li><span class="idx">6</span><div>对高库存 / 低周转渠道制定库存消耗计划（促销 / 调拨 / 退货）</div><span class="owner">渠道侧</span></li>
+      <li><span class="idx">7</span><div>汇总结论，形成「分配渠道采购任务」清单并分派责任人</div><span class="owner">SOP 负责人</span></li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="note">
+      <b>数据缺口：</b>① ERP 吉客云、天猫生意参谋、抖音电商罗盘<b>非 MCP 工具，不可达</b>，历史销售/库存/店铺销量数值取不到；② 采购跟踪表、BY26全渠道目标&排产、线下重点渠道跟进表均为企业微信<b>在线表格（sheet）</b>，<code>doc_search</code> 与 <code>sheet_get</code> 实测返回 <b>850002 未授权</b>，采购完成进度数值不可读；③ 微盘<b>二进制文件可下载</b>（已成功下载「年度采购盘点.xlsx」，3 张工作表），但为 2026-07 历史快照，非实时跟踪。<br>
+      <b>未伪造声明：</b>本次未填入任何推测的销售 / 库存 / 采购数字；KPI 中「0 / 3、4 个、17 渠道、0 条」均为可核验的实测计数。数据源授权后即可回填实际数值并据「进度内 / 进度外」分支输出采购分配结论。
+    </div>
+  </section>
+
+  <footer>
+    <b>数据来源：</b>微盘 MCP（disk_files_search 命中采购跟踪表/排产表/采购盘点等 4 个文件，err 0）；文档 MCP（doc_search / sheet_get 实测 850002 未授权）；微盘文件下载（disk_files_download 成功取到 xlsx 二进制）。<br>
+    <b>承接上游：</b>output 目录「D_历史GMV数据汇总分析_2026-09-14_1704.html」提供 17 渠道编码与渠道定位口径；「D_库存周转_执行单_2026-09-14_1653.html」提供库存周转监控口径。<br>
+    本执行单未修改 SOP 本体结构 · 数值待回填，未做任何推测填充。
+  </footer>
+</div>
+</body>
+</html>

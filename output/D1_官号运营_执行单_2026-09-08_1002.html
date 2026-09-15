@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D1：官号运营 · 执行单 2026-09-08</title>
+<style>
+  :root{
+    --ink:#1f2733; --sub:#6b7686; --line:#e5e9f0;
+    --bg:#f4f6fa; --card:#ffffff;
+    --brand:#123c63; --brand2:#3b82f6;
+    --warn-bg:#fff7e8; --warn-bd:#f2c66d; --warn-tx:#8a5a00;
+    --red:#d64545; --green:#1e9e6a; --amber:#c98a12; --blue:#2f6bff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;line-height:1.55;padding:28px 16px}
+  .page{max-width:980px;margin:0 auto}
+  .head{background:linear-gradient(135deg,var(--brand) 0%,var(--brand2) 100%);border-radius:16px;padding:22px 26px;color:#fff;box-shadow:0 8px 24px rgba(18,60,99,.20)}
+  .head .tags{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  .tag{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);padding:2px 10px;border-radius:999px;font-size:12px}
+  .head h1{font-size:23px;font-weight:700;letter-spacing:.5px}
+  .head .sub{margin-top:6px;font-size:13px;opacity:.93;display:flex;flex-wrap:wrap;gap:4px 16px}
+  .alert{margin-top:16px;background:var(--warn-bg);border:1px solid var(--warn-bd);border-left:5px solid var(--amber);border-radius:10px;padding:14px 16px;font-size:14px;color:var(--warn-tx)}
+  .alert b{color:#6b4a00}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-top:16px;box-shadow:0 2px 6px rgba(20,30,60,.04)}
+  .sec-title{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:700;margin-bottom:14px}
+  .sec-title .no{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:var(--brand);color:#fff;font-size:13px;flex:none}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 14px 12px;border-top:3px solid var(--brand2)}
+  .kpi .k{font-size:12px;color:var(--sub)}
+  .kpi .v{font-size:22px;font-weight:700;margin-top:4px;letter-spacing:.3px}
+  .kpi .s{font-size:11px;color:var(--sub);margin-top:4px}
+  .v.pending{color:var(--amber)} .v.calc{color:var(--brand)} .v.na{color:var(--red)} .v.ok{color:var(--green)}
+  .tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+  .tbl th{background:#edf2f8;color:#263a52;text-align:left;padding:9px 10px;font-weight:600;border:1px solid var(--line);white-space:nowrap}
+  .tbl td{padding:9px 10px;border:1px solid var(--line);vertical-align:top}
+  .tbl tr:nth-child(even) td{background:#fafbfe}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+  .dot.red{background:var(--red)} .dot.green{background:var(--green)} .dot.amber{background:var(--amber)} .dot.blue{background:var(--blue)}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+  .pill.warn{background:#fdeaea;color:var(--red)}
+  .pill.ok{background:#e6f6ef;color:var(--green)}
+  .pill.wait{background:#fff4de;color:var(--amber)}
+  .pill.info{background:#e9f0fd;color:var(--blue)}
+  ol.acts{list-style:none;counter-reset:act}
+  ol.acts li{counter-increment:act;position:relative;padding:10px 10px 10px 46px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:#fcfdff}
+  ol.acts li::before{content:counter(act);position:absolute;left:12px;top:11px;width:24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  ol.acts b{color:var(--brand)}
+  .who{color:var(--brand2);font-weight:600}
+  .dl{display:inline-block;margin-left:6px;background:#e9f0fd;color:var(--brand);border-radius:6px;padding:0 7px;font-size:12px;font-weight:600}
+  .foot{margin-top:16px;font-size:12px;color:var(--sub);background:#edeff4;border-radius:10px;padding:12px 16px;line-height:1.7}
+  .foot code{background:#dfe3ea;padding:0 4px;border-radius:4px}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+  @media (max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <div class="tags">
+      <span class="tag">良策 SOP · 执行单</span>
+      <span class="tag">D1：官号运营</span>
+      <span class="tag">房间 room-bpapl7vv</span>
+      <span class="tag">P：品牌营销</span>
+    </div>
+    <h1>D1：官号运营 — 执行单（P：品牌营销 · UNOVE 柔诺伊）</h1>
+    <div class="sub">
+      <span>归属：P：品牌营销 → D1：官号运营 → 品牌运作</span>
+      <span>责任单元：品牌运作（待确认执行人）</span>
+      <span>品牌：UNOVE 柔诺伊 · 个护</span>
+      <span>生成时间：2026-09-08 10:02</span>
+    </div>
+  </div>
+
+  <div class="alert">
+    <b>⚠️ 执行状态：骨架待补全（本单为「取数启动 + 流程倒排」，无伪造数据）</b> —— 实时读取导图（v41）：D1：官号运营 下仅 1 个<b>空子节点「品牌运作」</b>，全文搜索 官号/公众号/视频号/微博/账号 均为 0 命中；该分支<b>没有流程步骤、检查项、KPI 字段，也没有数据表外链</b>（不同于 GMV/活动运营分支挂了 doc.weixin 表）。因此本单不虚构任何官号 KPI/粉丝/内容数据，本周动作聚焦「确认官号口径 → 补全导图骨架 → 回填后台真数据」，数据齐后一键升级为正式官号运营总表。
+  </div>
+
+  <section>
+    <div class="sec-title"><span class="no">K</span>关键指标看板</div>
+    <div class="kpis">
+      <div class="kpi"><div class="k">导图内 SOP 流程步骤</div><div class="v pending">0 步</div><div class="s">D1 下仅空节点「品牌运作」，无步骤/检查项（实时 v41 核查）</div></div>
+      <div class="kpi"><div class="k">导图可见 UNOVE 官方触点</div><div class="v ok">4 个</div><div class="s">天猫官旗 13CHAN10030 · 抖音官旗 13CHAN10132 · 抖音个护 13CHAN10029 · 小红书旗舰 13CHAN10041</div></div>
+      <div class="kpi"><div class="k">责任单元 / 归属</div><div class="v calc">品牌运作</div><div class="s">房间主陈华俊；参照 D2 林培培 / D3 陈华俊 / D4 黄锦 的挂人方式，D1 挂「品牌运作」</div></div>
+      <div class="kpi"><div class="k">数据源就绪度</div><div class="v na">0 / 待建</div><div class="s">本分支无外链数据表；各平台官号后台（抖音/小红书/天猫内容等）需登录取数</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">1</span>SOP 步骤与检查项执行情况（导图现状核查）</div>
+    <table class="tbl">
+      <thead>
+        <tr><th style="width:170px">核查项</th><th>实时结果（mind-map MCP 取数）</th><th style="width:150px">状态</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><b>节点位置</b></td><td>根「C:陈华俊:UN项目利润分」→ P：品牌营销（uid b251a152）→ <b>D1：官号运营（uid 5751cf4a）</b> → 子节点「品牌运作」（uid 876bb639，叶子空节点）。同父级：D2 博主合作(林培培)、D3 品牌营销活动(陈华俊)、D4 达播规划(黄锦)、D5 PR推广(品牌运作)。</td><td><span class="pill ok"><span class="dot green"></span>已核查</span></td></tr>
+        <tr><td><b>流程步骤</b></td><td>导图内无 1/2/3… 步骤节点、无「概要」说明、无 note、无 hyperlink —— SOP 本体未写「官号运营该怎么做」。</td><td><span class="pill warn"><span class="dot red"></span>待补全</span></td></tr>
+        <tr><td><b>官号清单</b></td><td>全图搜索「官号/公众号/视频号/微博/账号」= 0 命中；「小红书/抖音」命中均为<b>官方店铺节点</b>（直播组 13CHAN10029/10041/10132，个护部 13CHAN10030），无内容官号台账。</td><td><span class="pill warn"><span class="dot red"></span>待补全</span></td></tr>
+        <tr><td><b>KPI / 数据表</b></td><td>无粉丝量、曝光、互动、引流成交等任何数值；无 doc.weixin / 在线表外链（本分支不像 GMV 分支挂了企业微信表）。</td><td><span class="pill warn"><span class="dot red"></span>待建</span></td></tr>
+        <tr><td><b>下游引用（真实）</b></td><td>P：品牌战略下「根据P品牌营销生成年度营销TIMELINE / 年度营销预算」「根据P品牌营销，获取数据和结论，完成营销端复盘」——官号运营成果是年度 TIMELINE/预算与营销端复盘的数据输入之一。</td><td><span class="pill info"><span class="dot blue"></span>引用点存在</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">2</span>建议补全的运营骨架（待品牌运作确认，非导图原文）</div>
+    <table class="tbl">
+      <thead><tr><th style="width:140px">模块</th><th>建议内容（参照同分支 D3：A1 全年规划 5 步结构起草）</th><th style="width:150px">当前状态</th></tr></thead>
+      <tbody>
+        <tr><td><b><span class="dot amber"></span>1 口径与官号清单</b></td><td>先定义「官号」范围：a) 内容官号（小红书/抖音/视频号/公众号 等品牌内容账号）；b) 或官方店铺（天猫/抖音/小红书官旗）内容位运营。逐号登记：平台、账号名、主页链接、运营责任人。</td><td><span class="pill wait">待确认</span></td></tr>
+        <tr><td><b><span class="dot blue"></span>2 责任人挂靠</b></td><td>参照 D2/D3/D4 挂人方式，把 D1 的「品牌运作」落到具体执行人（预计与直播组/个护部协同：抖音/小红书店均在直播组名下）。</td><td><span class="pill wait">待确认</span></td></tr>
+        <tr><td><b><span class="dot green"></span>3 KPI 与数据表</b></td><td>建议口径：粉丝/涨粉、曝光(阅读/播放)、互动(赞藏评/转发)、主页引流成交。建一张官号周报/月报表（企业微信文档），逐号回填后台数据。</td><td><span class="pill wait">待建表</span></td></tr>
+        <tr><td><b><span class="dot blue"></span>4 内容节奏联动</b></td><td>对齐 D3：A1 输出的「品牌营销节奏/电商营销节奏/线下营销节奏」与「全年大事件(明星代言/重要节点活动)」，输出各官号内容日历，避免与大促/代言节奏脱节。</td><td><span class="pill wait">待 D3 输出后联动</span></td></tr>
+        <tr><td><b><span class="dot amber"></span>5 复盘机制</b></td><td>官号数据按月进入 P：品牌战略「营销端复盘」，按年支撑「年度营销TIMELINE/预算」修正——节点已存在，只差官号侧数据供给。</td><td><span class="pill info"><span class="dot blue"></span>下游已就绪</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">3</span>本周动作（2026-09-07 ～ 09-13）</div>
+    <ol class="acts">
+      <li><span class="who">品牌运作（陈华俊确认）</span> 于<b>周二（09-08）前</b><span class="dl">截止 09-08</span><br>确认 D1「官号运营」口径：指<b>内容官号</b>还是<b>官方店铺内容位</b>，并指定具体执行人（建议从直播组/品牌运作中落人，参照 D2–D4 挂人方式）。回贴给 WorkBuddy 后立即在导图 D1 下补责任人节点。</li>
+      <li><span class="who">品牌运作</span> 于<b>周三（09-09）前</b><span class="dl">截止 09-09</span><br>回贴<b>官号台账</b>：平台 × 账号名 × 主页链接 × 责任人（首批建议盘点导图内 4 个官方触点：天猫官旗 13CHAN10030、抖音官旗 13CHAN10132、抖音个护 13CHAN10029、小红书旗舰 13CHAN10041）。</li>
+      <li><span class="who">品牌运作</span> 于<b>周四（09-10）前</b><span class="dl">截止 09-10</span><br>提供 1–2 个样板官号<b>近 30 天后台数据</b>（粉丝/曝光/互动/涨粉/主页引流成交），WorkBuddy 据此定 KPI 卡与周报表字段口径。</li>
+      <li><span class="who">WorkBuddy</span> 数据齐后<b>当天更新本单</b><br>生成「官号 × KPI × 近30天/本周」总表 + 按 D3 营销节奏排的内容日历初稿，替换本单「待补全」占位。</li>
+      <li><span class="who">陈华俊</span> 于<b>周五（09-11）前兜底</b><span class="dl">截止 09-11</span><br>若「官号运营」实指官方店铺运营，请明确其与 P：渠道运营（天猫/抖音店铺 GMV、活动运营）的分工边界，避免两套口径重复取数；未确认前不虚构任何官号数据启动。</li>
+    </ol>
+  </section>
+
+  <div class="foot">
+    <b>数据来源：</b>mind-map MCP —— get_map(room-bpapl7vv「C:陈华俊:UN项目利润分」, full，实时 version 41 / 475 节点)、search_nodes(官号/公众号/视频号/微博/账号/小红书/抖音/内容)、list_todos（无待办容器）；交叉比对 room-t1p1lisl「unove」v208，P5 品牌营销下 D1：官号运营 → 品牌运作 为同构骨架。<br>
+    <b>可引用口径（导图原文/真值）：</b>① 官方触点：个护部天猫 UNOVE 柔诺伊官方旗舰店 13CHAN10030、直播组抖音 UNOVE 柔诺伊官方旗舰店 13CHAN10132、直播组抖音 UNOVE 柔诺伊个人护理旗舰店 13CHAN10029、直播组小红书 UNOVE 柔诺伊旗舰店 13CHAN10041；② 同分支结构：D3：品牌营销活动 → 陈华俊 → A1 全年品牌营销规划（①参考历史营销节奏和品牌信息制定全年规划→品牌/电商/线下营销节奏 ②全年大事件规划→明星代言/重要节点活动 ③根据采购目标制定全年营销预算 ④分配事件和渠道预算 ⑤跟进预算消耗进度）；③ 下游：P：品牌战略「根据P品牌营销生成年度营销TIMELINE/预算」「完成营销端复盘」。<br>
+    <b>缺口说明：</b>D1：官号运营 在导图内为纯骨架（1 个空子节点），无 SOP 步骤、无检查项、无 KPI、无官号清单、无数据表外链；本会话无法匿名登录抖音/小红书/天猫等官号后台取数，本分支亦未提供企业微信文档授权 —— 本单未包含任何虚构的官号运营数据，KPI 卡第 2/3 项为导图真实盘点，第 1/4 项为待补全缺口。<br>
+    <b>生成：</b>WorkBuddy 良策 SOP 执行助手 · 2026-09-08 10:02
+  </div>
+
+</div>
+</body>
+</html>
