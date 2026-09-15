@@ -102,17 +102,34 @@ function extractAssistantDelta(payload) {
 
 function extractToolInfo(payload) {
   const data = (payload && (payload.data || payload)) || {}
+  const args = data.args || data.arguments || data.input || {}
+  const argHint =
+    (args &&
+      (args.command ||
+        args.cmd ||
+        args.path ||
+        args.file ||
+        args.script ||
+        args.filename ||
+        args.target ||
+        args.query ||
+        args.url)) ||
+    ''
+  const detail = String(
+    data.detail ||
+      data.summary ||
+      data.label ||
+      data.argsPreview ||
+      data.error ||
+      argHint ||
+      ''
+  )
+    .replace(/\s+/g, ' ')
+    .trim()
   return {
     name: String(data.name || data.toolName || data.tool || 'tool'),
     phase: String(data.phase || data.status || data.state || 'update'),
-    detail: String(
-      data.detail ||
-        data.summary ||
-        data.label ||
-        data.argsPreview ||
-        data.error ||
-        ''
-    ).slice(0, 500)
+    detail: detail.slice(0, 500)
   }
 }
 
