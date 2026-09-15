@@ -109,6 +109,9 @@ function inferRoomAcl(pathname, method) {
   if (rest === '/members' || rest.startsWith('/members/')) {
     return { roomKey, action: verb === 'GET' ? 'view' : 'manage' }
   }
+  if (rest === '/transfer-ownership') {
+    return { roomKey, action: 'manage' }
+  }
   if (rest === '/presence' || rest.startsWith('/presence/')) {
     return { roomKey, action: 'view' }
   }
@@ -636,6 +639,116 @@ async function resolveUserId(db, value, corpId = '') {
   return result.rows[0] ? result.rows[0].user_id : uid
 }
 
+async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId = '') {
+  const key = String(roomKey || '').trim()
+  const actor = normalizeUserId(actorUserId)
+  const target = await resolveUserId(db, targetUserId, corpId)
+  if (!key) throw aclError(400, 'BAD_REQUEST', '缺少脑图标识')
+  if (!actor) throw aclError(401, 'UNAUTHORIZED', '请先登录')
+  if (!target) throw aclError(400, 'BAD_REQUEST', '请选择新的所有者')
+  if (actor === target) throw aclError(400, 'BAD_REQUEST', '不能将所有权转移给自己')
+
+  const run = async conn => {
+    const room = await conn.query(
+      `select room_key, owner_id from rooms where room_key = $1 and deleted_at is null`,
+      [key]
+    )
+    if (!room.rows.length) throw aclError(404, 'NOT_FOUND', '脑图不存在')
+
+    let memberRows = (
+      await conn.query(
+        `select user_id, role, direct_role, team_role, folder_role from room_members where room_key = $1`,
+        [key]
+      )
+    ).rows
+    if (!memberRows.length) {
+      await ensureOwner(conn, key, actor)
+      memberRows = (
+        await conn.query(
+          `select user_id, role, direct_role, team_role, folder_role from room_members where room_key = $1`,
+          [key]
+        )
+      ).rows
+    }
+
+    const actorRow = memberRows.find(row => row.user_id === actor)
+    const actorIsOwner =
+      (actorRow &&
+        effectiveRole(
+          actorRow.direct_role,
+          actorRow.team_role,
+          actorRow.folder_role,
+          actorRow.role
+        ) === 'owner') ||
+      room.rows[0].owner_id === actor
+    if (!actorIsOwner) {
+      throw aclError(403, 'FORBIDDEN', '只有所有者可以转移所有权')
+    }
+
+    await conn.query(
+      `update rooms set owner_id = $2, updated_at = now() where room_key = $1`,
+      [key, target]
+    )
+
+    await conn.query(
+      `insert into room_members (room_key, user_id, role, direct_role, team_role, folder_role, source, source_team_id, source_folder_id)
+       values ($1, $2, 'owner', 'owner', null, null, 'direct_share', null, null)
+       on conflict (room_key, user_id) do update set
+         direct_role = 'owner',
+         role = 'owner',
+         source = 'direct_share',
+         updated_at = now()`,
+      [key, target]
+    )
+
+    const previousOwners = memberRows.filter(
+      row =>
+        row.user_id !== target &&
+        effectiveRole(
+          row.direct_role,
+          row.team_role,
+          row.folder_role,
+          row.role
+        ) === 'owner'
+    )
+    for (const previous of previousOwners) {
+      await conn.query(
+        `update room_members
+         set direct_role = 'editor',
+             role = ${sqlEffectiveRole(
+               `'editor'`,
+               'team_role',
+               'folder_role'
+             )},
+             source = 'direct_share',
+             updated_at = now()
+         where room_key = $1 and user_id = $2`,
+        [key, previous.user_id]
+      )
+    }
+
+    return listMembers(conn, key)
+  }
+
+  if (typeof db.connect === 'function') {
+    const client = await db.connect()
+    try {
+      await client.query('begin')
+      const list = await run(client)
+      await client.query('commit')
+      return list
+    } catch (err) {
+      try {
+        await client.query('rollback')
+      } catch (_) {}
+      throw err
+    } finally {
+      client.release()
+    }
+  }
+  return run(db)
+}
+
 async function setMember(db, roomKey, targetUserId, role, actorUserId, corpId = '') {
   const uid = await resolveUserId(db, targetUserId, corpId)
   const nextRole = normalizeRole(role)
@@ -971,6 +1084,7 @@ module.exports = {
   searchUsers,
   resolveUserId,
   setMember,
+  transferOwnership,
   removeMember,
   setFolderRole,
   clearFolderRole,

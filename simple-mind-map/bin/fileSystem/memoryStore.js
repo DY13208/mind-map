@@ -317,6 +317,14 @@ function createMemoryFileStore(seed = {}) {
       row.updated_at = nowIso()
       return cloneJson(row)
     },
+    async updateFolderOwner(id, ownerId) {
+      bump()
+      const row = folders.get(id)
+      if (!row || row.deleted_at) return null
+      row.created_by = ownerId
+      row.updated_at = nowIso()
+      return cloneJson(row)
+    },
     async countRoomsInFolder(id) {
       bump()
       return [...rooms.values()].filter(

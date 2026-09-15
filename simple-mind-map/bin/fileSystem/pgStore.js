@@ -379,6 +379,16 @@ function createPgFileStore(pool) {
       )
       return res.rows[0] || null
     },
+    async updateFolderOwner(id, ownerId) {
+      queryCount += 1
+      const res = await pool.query(
+        `update folders set created_by = $2, updated_at = now()
+         where id = $1 and deleted_at is null
+         returning *`,
+        [id, ownerId]
+      )
+      return res.rows[0] || null
+    },
     async countRoomsInFolder(id) {
       queryCount += 1
       const res = await pool.query(

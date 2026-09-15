@@ -78,6 +78,16 @@ export default {
     })
     return (data.list || []).map(normalizeMemberDto)
   },
+  transferOwnership: async (id, userId) => {
+    const data = await productRequest(
+      `/api/folders/${encodeURIComponent(id)}/transfer-ownership`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId })
+      }
+    )
+    return (data.list || []).map(normalizeMemberDto)
+  },
   removeMember: (id, userId) => productRequest(
     `/api/folders/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`,
     { method: 'DELETE' }
