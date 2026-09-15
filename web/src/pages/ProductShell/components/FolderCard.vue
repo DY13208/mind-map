@@ -23,7 +23,7 @@
     </div>
     <div class="folderBody">
       <span class="folderInfo"
-        ><strong>{{ folder.name }}</strong
+        ><strong :title="folder.name">{{ folder.name }}</strong
         ><small>{{ itemCountText }}</small
         ><small>{{ dateText }} 更新</small></span
       >
@@ -138,6 +138,12 @@ export default {
     flex-direction: column;
     min-width: 0;
     flex: 1;
+    > strong {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   }
   small {
     color: var(--ui-text-secondary);
@@ -145,6 +151,7 @@ export default {
     font-size: 12px;
   }
   .more {
+    flex: 0 0 auto;
     padding: 8px;
     color: #73817c;
   }

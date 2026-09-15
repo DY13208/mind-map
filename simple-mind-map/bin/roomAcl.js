@@ -1,6 +1,7 @@
 const { isAuthEnabled } = require('./auth')
 
 const ROLES = ['owner', 'editor', 'viewer']
+const FOLDER_ROLES = ['manager', 'editor', 'viewer']
 const ROLE_RANK = { owner: 3, editor: 2, viewer: 1 }
 const ACTION_RANK = { view: 1, edit: 2, manage: 3 }
 
@@ -8,6 +9,7 @@ function effectiveRole(...roleValues) {
   const roles = roleValues.map(normalizeRole).filter(Boolean)
   if (roles.includes('owner')) return 'owner'
   if (roles.includes('editor')) return 'editor'
+  if (roleValues.map(normalizeFolderRole).includes('manager')) return 'editor'
   if (roles.includes('viewer')) return 'viewer'
   return ''
 }
@@ -15,7 +17,7 @@ function effectiveRole(...roleValues) {
 function sourceForRoles(directRole, teamRole, folderRole) {
   if (normalizeRole(directRole)) return 'direct_share'
   if (normalizeRole(teamRole)) return 'team'
-  if (normalizeRole(folderRole)) return 'folder'
+  if (normalizeFolderRole(folderRole)) return 'folder'
   return null
 }
 
@@ -27,7 +29,7 @@ function sqlEffectiveRole(directCol, teamCol, folderCol) {
       or coalesce(${folderCol}, '') = 'owner' then 'owner'
     when coalesce(${directCol}, '') = 'editor'
       or coalesce(${teamCol}, '') = 'editor'
-      or coalesce(${folderCol}, '') = 'editor' then 'editor'
+      or coalesce(${folderCol}, '') in ('editor', 'manager') then 'editor'
     when coalesce(${directCol}, '') = 'viewer'
       or coalesce(${teamCol}, '') = 'viewer'
       or coalesce(${folderCol}, '') = 'viewer' then 'viewer'
@@ -65,6 +67,11 @@ function normalizeUserId(value) {
 function normalizeRole(value) {
   const role = String(value || '').trim().toLowerCase()
   return ROLES.includes(role) ? role : ''
+}
+
+function normalizeFolderRole(value) {
+  const role = String(value || '').trim().toLowerCase()
+  return FOLDER_ROLES.includes(role) ? role : ''
 }
 
 function actorFromReq(req) {
@@ -308,7 +315,7 @@ async function migrateFolderRoles(db) {
     select
       r.room_key,
       fm.user_id,
-      fm.role,
+      ${sqlEffectiveRole('null::text', 'null::text', 'fm.role')},
       null,
       null,
       fm.role,
@@ -736,7 +743,7 @@ async function removeMember(db, roomKey, targetUserId, corpId = '') {
  */
 async function setFolderRole(db, roomKey, targetUserId, role, folderId, corpId = '') {
   const uid = await resolveUserId(db, targetUserId, corpId)
-  const nextRole = normalizeRole(role)
+  const nextRole = normalizeFolderRole(role)
   const folder = String(folderId || '').trim()
   if (!uid) throw aclError(400, 'BAD_REQUEST', '缺少用户')
   if (!nextRole || nextRole === 'owner') {
@@ -750,7 +757,7 @@ async function setFolderRole(db, roomKey, targetUserId, role, folderId, corpId =
       current = {
         room_key: key,
         user_id: uid,
-        role: nextRole,
+        role: effectiveRole(null, null, nextRole),
         direct_role: null,
         team_role: null,
         folder_role: nextRole,
@@ -777,7 +784,7 @@ async function setFolderRole(db, roomKey, targetUserId, role, folderId, corpId =
   const res = await db.query(
     `insert into room_members (
        room_key, user_id, role, direct_role, team_role, folder_role, source, source_folder_id
-     ) values ($1, $2, $3, null, null, $3, 'folder', $4)
+     ) values ($1, $2, ${sqlEffectiveRole('null::text', 'null::text', '$3')}, null, null, $3, 'folder', $4)
      on conflict (room_key, user_id) do update set
        folder_role = excluded.folder_role,
        source_folder_id = excluded.source_folder_id,

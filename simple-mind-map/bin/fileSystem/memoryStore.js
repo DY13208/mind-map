@@ -9,7 +9,7 @@ function nowIso() {
 function effectiveRole(row) {
   const roles = [row.direct_role, row.team_role, row.folder_role, row.role]
   if (roles.includes('owner')) return 'owner'
-  if (roles.includes('editor')) return 'editor'
+  if (roles.includes('editor') || roles.includes('manager')) return 'editor'
   if (roles.includes('viewer')) return 'viewer'
   return row.role || ''
 }

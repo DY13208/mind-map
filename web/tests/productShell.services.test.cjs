@@ -29,6 +29,7 @@ const { C3_SERVICE_STATUS_MATRIX } = load(
   path.join(root, 'services/serviceStatus')
 )
 const { setProductHttp } = load(path.join(root, 'services/productHttp'))
+const { apiRole, normalizeMemberDto } = load(path.join(root, 'services/roomDto'))
 
 const requests = []
 setProductHttp(async (url, options = {}) => {
@@ -50,6 +51,8 @@ setProductHttp(async (url, options = {}) => {
 })
 
 async function main() {
+  assert.equal(apiRole('manager'), 'Manager')
+  assert.equal(normalizeMemberDto({ id: 'u-manager', role: 'manager' }).role, 'Manager')
   assert.equal(C3_SERVICE_STATUS_MATRIX.Room, 'REAL')
   assert.equal(C3_SERVICE_STATUS_MATRIX.Folder, 'REAL')
   assert.equal(C3_SERVICE_STATUS_MATRIX.History, 'REAL')
