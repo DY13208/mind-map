@@ -880,6 +880,16 @@ async function clearRoomFolderRoles(db, roomKey) {
     }
     return { ok: true }
   }
+  // Remove folder-only grants before recomputing role: their remaining role
+  // would be null, which violates room_members.role's NOT NULL constraint.
+  await db.query(
+    `delete from room_members
+     where room_key = $1
+       and folder_role is not null
+       and direct_role is null
+       and team_role is null`,
+    [key]
+  )
   await db.query(
     `update room_members
      set folder_role = null,
@@ -887,15 +897,8 @@ async function clearRoomFolderRoles(db, roomKey) {
          role = ${sqlEffectiveRole('direct_role', 'team_role', 'null::text')},
          source = ${sqlPrimarySource('direct_role', 'team_role', 'null::text')},
          updated_at = now()
-     where room_key = $1 and folder_role is not null`,
-    [key]
-  )
-  await db.query(
-    `delete from room_members
-     where room_key = $1
-       and direct_role is null
-       and team_role is null
-       and folder_role is null`,
+     where room_key = $1 and folder_role is not null
+       and (direct_role is not null or team_role is not null)`,
     [key]
   )
   return { ok: true }

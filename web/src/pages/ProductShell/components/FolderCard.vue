@@ -37,6 +37,7 @@
         ><el-dropdown-menu slot="dropdown"
           ><el-dropdown-item v-if="allowShare" command="share">分享 / 权限</el-dropdown-item
           ><el-dropdown-item command="rename">重命名</el-dropdown-item
+          ><el-dropdown-item v-if="allowMoveToTeam" command="move-to-team">移至团队空间</el-dropdown-item
           ><el-dropdown-item command="delete" divided
             >删除</el-dropdown-item
           ></el-dropdown-menu
@@ -52,6 +53,7 @@ export default {
     folder: Object,
     editable: { type: Boolean, default: true },
     allowShare: { type: Boolean, default: true },
+    allowMoveToTeam: { type: Boolean, default: false },
     selectable: { type: Boolean, default: false },
     selected: { type: Boolean, default: false },
     canSelect: { type: Boolean, default: true }

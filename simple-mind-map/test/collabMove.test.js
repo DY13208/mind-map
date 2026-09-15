@@ -272,6 +272,72 @@ function seedBush(count) {
   assert.strictEqual(dragState.clone, null)
 
   const engine = createEngine()
+  // A multi-node drag is one batch; undo must restore both original slots,
+  // not append the nodes to their previous parent in reverse order.
+  const batchRoom = 'multi-move-undo-slots'
+  const batchAccess = { userId: 'batch-user', role: 'editor', canEdit: true }
+  engine.getRoom(batchRoom)
+  for (const [uid, parent] of [
+    ['P', 'root'], ['Q', 'root'],
+    ['A', 'P'], ['B', 'P'], ['C', 'P'], ['D', 'P']
+  ]) {
+    await engine.submit({
+      roomKey: batchRoom, opId: randomUUID(), clientId: 'batch-client',
+      type: 'node.insert', payload: { uid, parent, text: uid }
+    }, batchAccess)
+  }
+  const batchMove = await engine.submit({
+    roomKey: batchRoom, opId: randomUUID(), clientId: 'batch-client',
+    type: 'node.batch', payload: { ops: [
+      { type: 'node.move', payload: { uid: 'B', parent: 'Q', index: 0 } },
+      { type: 'node.move', payload: { uid: 'C', parent: 'Q', index: 1 } }
+    ] }
+  }, batchAccess)
+  assert.deepStrictEqual(kids(engine, batchRoom, 'Q'), ['B', 'C'])
+  await engine.submit({
+    roomKey: batchRoom, opId: randomUUID(), clientId: 'batch-client',
+    type: 'operation.undo', payload: { targetOperationId: batchMove.operation.opId }
+  }, batchAccess)
+  assert.deepStrictEqual(kids(engine, batchRoom, 'P'), ['A', 'B', 'C', 'D'])
+  assert.deepStrictEqual(kids(engine, batchRoom, 'Q'), [])
+  await engine.submit({
+    roomKey: batchRoom, opId: randomUUID(), clientId: 'batch-client',
+    type: 'operation.redo', payload: { targetOperationId: batchMove.operation.opId }
+  }, batchAccess)
+  assert.deepStrictEqual(kids(engine, batchRoom, 'P'), ['A', 'D'])
+  assert.deepStrictEqual(kids(engine, batchRoom, 'Q'), ['B', 'C'])
+  const reorderRoom = 'multi-reorder-undo-slots'
+  engine.getRoom(reorderRoom)
+  for (const uid of ['A', 'B', 'C', 'D']) {
+    await engine.submit({
+      roomKey: reorderRoom, opId: randomUUID(), clientId: 'batch-client',
+      type: 'node.insert', payload: { uid, parent: 'root', text: uid }
+    }, batchAccess)
+  }
+  const originalPositions = {}
+  for (const uid of ['B', 'C']) {
+    originalPositions[uid] = (await engine.getRoom(reorderRoom).store.getLive(uid)).position
+  }
+  const reordered = await engine.submit({
+    roomKey: reorderRoom, opId: randomUUID(), clientId: 'batch-client',
+    type: 'node.batch', payload: { ops: [
+      { type: 'node.move', payload: { uid: 'B', parent: 'root', index: 3 } },
+      { type: 'node.move', payload: { uid: 'C', parent: 'root', index: 3 } }
+    ] }
+  }, batchAccess)
+  assert.deepStrictEqual(kids(engine, reorderRoom, 'root'), ['A', 'D', 'B', 'C'])
+  await engine.submit({
+    roomKey: reorderRoom, opId: randomUUID(), clientId: 'batch-client',
+    type: 'operation.undo', payload: { targetOperationId: reordered.operation.opId }
+  }, batchAccess)
+  assert.deepStrictEqual(kids(engine, reorderRoom, 'root'), ['A', 'B', 'C', 'D'])
+  for (const uid of ['B', 'C']) {
+    assert.strictEqual(
+      (await engine.getRoom(reorderRoom).store.getLive(uid)).position,
+      originalPositions[uid],
+      'undo restores the original ordering key for ' + uid
+    )
+  }
   const roomKey = 'move-lifecycle'
   engine.getRoom(roomKey)
   const access = { userId: 'A', role: 'editor', canEdit: true }

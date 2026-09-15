@@ -99,12 +99,14 @@
             :folder="item"
             :editable="!selectMode && (isTeamView ? canManageTeam : item.canManage !== false)"
             :allow-share="!isTeamView"
+            :allow-move-to-team="!isTeamView"
             :selectable="selectMode"
             :selected="isFolderSelected(item)"
             :can-select="canSelectFolder(item)"
             @open="openFolder"
             @rename="renameFolder"
             @share="shareFolder"
+            @move-to-team="moveFolderToTeam"
             @delete="deleteFolder"
             @toggle-select="toggleFolderSelect"
           />
@@ -165,6 +167,7 @@
         :can-select-room="canSelectRoom"
         @open="openRoom"
         @open-folder="openFolder"
+        @move-folder-to-team="moveFolderToTeam"
         @favorite="favorite"
         @rename="renameRoom"
         @move="moveRoom"
@@ -213,6 +216,7 @@
       :visible.sync="moveToTeamVisible"
       :room="activeRoom"
       :batch-count="batchAction === 'moveToTeam' ? eligibleMoveToTeamRooms.length : 0"
+      :is-folder="!batchAction && !!activeFolder"
       @confirm="confirmMoveToTeam"
     />
     <ShareRoomDialog
@@ -1133,10 +1137,21 @@ export default {
     },
     moveToTeam(room) {
       this.batchAction = null
+      this.activeFolder = null
       this.activeRoom = room
       this.moveToTeamVisible = true
     },
+    moveFolderToTeam(folder) {
+      this.batchAction = null
+      this.activeFolder = folder
+      this.activeRoom = { title: folder.name }
+      this.moveToTeamVisible = true
+    },
     async confirmMoveToTeam(teamId) {
+      if (!this.batchAction && this.activeFolder) {
+        const folder = this.activeFolder
+        return this.perform(() => teamService.assignFolder(teamId, folder.id), '文件夹及内容已移入团队空间')
+      }
       if (this.batchAction === 'moveToTeam') {
         const rooms = this.eligibleMoveToTeamRooms
         if (!rooms.length || !teamId) return

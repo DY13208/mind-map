@@ -5,7 +5,7 @@
         将 {{ batchCount }} 个脑图移入团队后，团队成员将获得对应协作权限。
       </template>
       <template v-else>
-        将「{{ room ? room.title : '' }}」移入团队后，团队成员将获得对应协作权限。
+        将「{{ room ? room.title : '' }}」{{ isFolder ? '及其子文件夹、脑图' : '' }}移入团队后，团队成员将获得对应协作权限。
       </template>
     </p>
     <div v-loading="loading">
@@ -37,6 +37,7 @@ export default {
   props: {
     visible: Boolean,
     room: Object,
+    isFolder: Boolean,
     batchCount: { type: Number, default: 0 }
   },
   data: () => ({ teams: [], target: '', loading: false }),

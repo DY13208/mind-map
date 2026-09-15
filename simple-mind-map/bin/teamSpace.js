@@ -1,4 +1,5 @@
 const crypto = require('crypto')
+const roomAcl = require('./roomAcl')
 
 const ROLES = ['owner', 'admin', 'member']
 
@@ -366,7 +367,7 @@ async function assignRoom(db, who, id, roomKey) {
   return transaction(db, async tx => {
     await getTeam(tx, who.corpId, id, who.userId)
     const room = await tx.query(
-      `select room_key, owner_id, team_id, deleted_at from rooms where room_key = $1`,
+      `select room_key, owner_id, team_id, folder_id, deleted_at from rooms where room_key = $1 for update`,
       [key]
     )
     if (!room.rows.length || room.rows[0].deleted_at) {
@@ -391,6 +392,7 @@ async function assignRoom(db, who, id, roomKey) {
       throw error(403, 'FORBIDDEN', '只有脑图所有者可以将其移入团队空间')
     }
 
+    if (room.rows[0].folder_id) await roomAcl.clearRoomFolderRoles(tx, key)
     await tx.query(
       `update rooms set team_id = $2, folder_id = null, updated_at = now() where room_key = $1`,
       [key, id]
@@ -419,6 +421,38 @@ async function assignRoom(db, who, id, roomKey) {
       )
     }
     return { roomKey: key, teamId: id }
+  })
+}
+
+async function assignFolder(db, who, id, folderId) {
+  const root = String(folderId || '').trim()
+  if (!root) throw error(400, 'BAD_REQUEST', '缺少文件夹标识')
+  return transaction(db, async tx => {
+    manager(await getTeam(tx, who.corpId, id, who.userId))
+    const folders = await tx.query(`
+      with recursive subtree as (
+        select id from folders where id = $1 and deleted_at is null
+        union
+        select f.id from folders f join subtree s on f.parent_id = s.id
+        where f.deleted_at is null
+      )
+      select f.* from folders f where f.id in (select id from subtree) for update`, [root])
+    if (!folders.rows.length) throw error(404, 'FOLDER_NOT_FOUND', '文件夹不存在')
+    for (const folder of folders.rows) {
+      if (folder.team_id) throw error(409, 'FOLDER_ALREADY_IN_TEAM', '文件夹已属于团队空间')
+      if (folder.created_by !== who.userId) throw error(403, 'FORBIDDEN', '只有文件夹所有者可以移入团队空间')
+    }
+    const ids = folders.rows.map(folder => folder.id)
+    const rooms = await tx.query('select room_key, folder_id from rooms where folder_id = any($1::uuid[]) and deleted_at is null for update', [ids])
+    for (const room of rooms.rows) {
+      await assignRoom(tx, who, id, room.room_key)
+      // assignRoom moves individual files to the team root; retain hierarchy here.
+      await tx.query('update rooms set folder_id = $2 where room_key = $1', [room.room_key, room.folder_id])
+    }
+    await tx.query(`update folders set team_id = $2,
+      parent_id = case when id = $3 then null else parent_id end,
+      updated_at = now() where id = any($1::uuid[])`, [ids, id, root])
+    return { ok: true, folderId: root, teamId: id, folderCount: ids.length, roomCount: rooms.rows.length }
   })
 }
 
@@ -542,6 +576,10 @@ async function handleApi(req, res, options) {
       if (req.method === 'POST' && !target) {
         manager(team)
         const body = await readBody(req)
+        if (body.folderId || body.folder_id) {
+          sendJson(res, 200, await assignFolder(db, who, id, body.folderId || body.folder_id))
+          return true
+        }
         const folder = await fs.createFolder({
           name: body.name,
           parentId: body.parentId || body.parent_id,
@@ -588,4 +626,4 @@ async function handleApi(req, res, options) {
   }
 }
 
-module.exports = { initSchema, initCorpConstraints, identity, getTeam, listTeams, createTeam, listMembers, addMembers, updateMember, removeMember, listRooms, assignRoom, creationMembers, contacts, handleApi, error }
+module.exports = { initSchema, initCorpConstraints, identity, getTeam, listTeams, createTeam, listMembers, addMembers, updateMember, removeMember, listRooms, assignRoom, assignFolder, creationMembers, contacts, handleApi, error }
