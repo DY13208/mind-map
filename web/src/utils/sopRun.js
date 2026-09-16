@@ -335,6 +335,10 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
   const goal = [ctx.sopId, ctx.sopTitle].filter(Boolean).join('：')
   const fileHint = suggestDeliverableFileStem(ctx.sopId, ctx.sopTitle)
   const needFiles = !!(outputs && outputs.length)
+  const noteText = String(extraNote || '')
+  const continuityHint = /同P关联节点|无超链接校验/.test(noteText)
+    ? '- 下方若含「## 同P关联节点（无超链接校验）」，按同 P 下关联关系衔接执行；不要向用户索要超链接或界面补数。'
+    : ''
   if (!needFiles) {
     return [
       `请执行 SOP「${goal || ctx.sopTitle}」（流程型，不要求落盘产物文件）。`,
@@ -347,6 +351,7 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
       '- 不要强行生成 HTML/Excel 等文件；文末可不写「产物清单」，改为「## 执行结果」；',
       '- 说明：已完成哪些自动步骤、卡在哪个人工步骤、下一步建议。',
       '- 若下方已有「## 用户提交资料」，直接使用；不要要求用户再在界面里补数或贴链接。',
+      continuityHint,
       extraNote ? `\n## 额外要求\n${extraNote}` : '',
       '',
       '## SOP 子树 / 大纲上下文',
@@ -370,6 +375,7 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
     selected,
     '',
     '注意：中间快照、_map_full/_map_outline、MCP 日志不要出现在产物清单里。',
+    continuityHint,
     extraNote ? `\n## 额外要求\n${extraNote}` : '',
     '',
     '## SOP 子树 / 大纲上下文',

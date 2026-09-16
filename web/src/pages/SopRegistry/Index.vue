@@ -721,6 +721,10 @@ import {
   loadSopRunContext
 } from '@/utils/sopRun'
 import {
+  assessNoHyperlinkContinuity,
+  formatContinuityExtraNote
+} from '@/utils/sopFlowContinuity'
+import {
   getSharedSopRunQueue,
   resolveSopRunConcurrency
 } from '@/utils/sopRunQueue'
@@ -852,6 +856,7 @@ export default {
       runTarget: null,
       runOutputIds: [],
       runExtraNote: '',
+      runContinuityNote: '',
       runAttachments: [],
       SOP_ATTACHMENT_ACCEPT,
       runSubmitFields: [],
@@ -1834,7 +1839,7 @@ export default {
         console.warn('[sopRegistry] persist scanned deliverables failed', err)
       })
     },
-    openRunDialog(item) {
+    async openRunDialog(item) {
       if (!this.roomKey) {
         this.$message.warning('请先选择空间')
         return
@@ -1852,6 +1857,33 @@ export default {
         if (job) this.selectSopJob(job.id)
         return
       }
+
+      const sopUid = this.resolveSopUid(item)
+      const sopForCheck = { ...item, uid: sopUid }
+      const assessment = assessNoHyperlinkContinuity(
+        sopForCheck,
+        this.flatNodes || []
+      )
+      this.runContinuityNote = ''
+      if (assessment.needsCheck) {
+        const title =
+          assessment.level === 'block'
+            ? '无超链接：结构风险较大'
+            : '无超链接：请确认流畅与同 P 衔接'
+        try {
+          await this.$confirm(assessment.summary || '本 SOP 无超链接，是否继续运行？', title, {
+            confirmButtonText: '仍要运行',
+            cancelButtonText: '取消',
+            type: assessment.level === 'block' ? 'error' : 'warning',
+            distinguishCancelAndClose: true,
+            customClass: 'sopContinuityConfirm'
+          })
+          this.runContinuityNote = formatContinuityExtraNote(assessment)
+        } catch (e) {
+          return
+        }
+      }
+
       this.runTarget = item
       this.runOutputIds = []
       this.runExtraNote = ''
@@ -2433,11 +2465,15 @@ export default {
         this.runSubmitFields,
         formatSopAttachmentNote(this.runExtraNote, this.runAttachments)
       )
+      const continuityNote = String(this.runContinuityNote || '').trim()
+      const mergedExtra = [materialNote || this.runExtraNote, continuityNote]
+        .filter(Boolean)
+        .join('\n\n')
       const enqueued = await this.sopRunQueue.enqueue({
         roomKey: this.roomKey,
         sop,
         outputIds: this.runOutputIds.slice(),
-        extraNote: materialNote || this.runExtraNote,
+        extraNote: mergedExtra,
         model: this.runModel,
         backend: this.runBackend,
         actor: this.userInfo.name || '台账',
@@ -2510,6 +2546,7 @@ export default {
       }
       this.selectedSopJobId = enqueued.job.id
       this.runDialogVisible = false
+      this.runContinuityNote = ''
       if (this.detailMode) {
         this.dialogTab = 'runs'
         this.$router
