@@ -313,6 +313,11 @@ export async function loadSopRunContext(roomKey, sop) {
     outline: outline.slice(0, 80000),
     steps,
     source,
+    businessFingerprint: String(
+      (sop && sop.businessFingerprint) ||
+        (sop && sop.runtimeMaterial && sop.runtimeMaterial.businessFingerprint) ||
+        ''
+    ),
     material:
       sop && sop.runtimeMaterial && sop.runtimeMaterial.source === 'runtime_tree'
         ? sop.runtimeMaterial
@@ -1595,6 +1600,7 @@ export async function runSopWithWorkbuddy({
       outlineSource: ctx.source,
       outlineChars: (ctx.outline || '').length,
       outlinePreview: String(ctx.outline || '').slice(0, 1200),
+      businessFingerprint: ctx.businessFingerprint || '',
       userPromptChars: promptUser.length,
       systemPromptChars: promptSystem.length,
       notifyCount: notifyResults.length,

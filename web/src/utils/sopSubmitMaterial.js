@@ -382,6 +382,47 @@ export function missingSubmitMaterialLabels(fields) {
     .map(f => f.label)
 }
 
+function normalizeFingerprintPart(value) {
+  return String(value == null ? '' : value)
+    .normalize('NFKC')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s\u3000]+/g, '')
+    .replace(/[，、]/g, ',')
+    .replace(/[：]/g, ':')
+    .replace(/[；]/g, ';')
+}
+
+function fingerprintHash(text) {
+  let hash = 0x811c9dc5
+  const input = String(text || '')
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+/**
+ * 当前脑图业务资料版本。字段顺序和纯格式变化不改变指纹；
+ * 任一值或「已填/未填」状态变化都会产生新批次。
+ */
+export function buildRuntimeMaterialFingerprint(material) {
+  if (!material || material.source !== 'runtime_tree') return ''
+  const rows = []
+  ;(material.providedFields || []).forEach(field => {
+    const label = normalizeFingerprintPart(field && field.label)
+    if (!label) return
+    rows.push(`p:${label}=${normalizeFingerprintPart(field && field.value)}`)
+  })
+  ;(material.missingFields || []).forEach(label => {
+    const normalized = normalizeFingerprintPart(label)
+    if (normalized) rows.push(`m:${normalized}`)
+  })
+  rows.sort()
+  return rows.length ? `runtime-v1-${fingerprintHash(rows.join('|'))}` : ''
+}
+
 export function parseProvidedFieldLabels(extraNote) {
   const text = String(extraNote || '')
   const labels = []
