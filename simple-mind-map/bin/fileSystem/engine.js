@@ -955,6 +955,22 @@ function createFileSystem(options = {}) {
     return result
   }
 
+  function normalizeUserViewState(value, partial = false) {
+    const input = value && typeof value === 'object' ? value : {}
+    const result = {}
+    if (!partial || Object.prototype.hasOwnProperty.call(input, 'expand')) {
+      result.expand = normalizeExpandState(input.expand)
+    }
+    if (typeof input.theme === 'string' && input.theme.length <= 160) result.theme = input.theme
+    if (typeof input.layout === 'string' && input.layout.length <= 160) result.layout = input.layout
+    if (input.themeConfig && typeof input.themeConfig === 'object' && !Array.isArray(input.themeConfig)) {
+      const json = JSON.stringify(input.themeConfig)
+      if (json.length > 200000) throw fsError('INVALID_VIEW_STATE', '主题配置过大', 400)
+      result.themeConfig = JSON.parse(json)
+    }
+    return result
+  }
+
   async function getUserViewState(roomKey, userId, input = {}) {
     const uid = roomAcl.normalizeUserId(userId || input.userId || '')
     if (!uid) throw fsError('unauthorized', '请先使用企业微信扫码登录', 401)
@@ -962,7 +978,7 @@ function createFileSystem(options = {}) {
     if (store.kind === 'memory' && store.listUserState) {
       const states = await store.listUserState(uid)
       const found = states.find(item => item.room_key === roomKey)
-      return { expand: normalizeExpandState(found && found.view_state && found.view_state.expand) }
+      return normalizeUserViewState(found && found.view_state)
     }
     if (store.query) {
       const res = await store.query(
@@ -970,7 +986,7 @@ function createFileSystem(options = {}) {
         [roomKey, uid]
       )
       const viewState = (res.rows[0] && res.rows[0].view_state) || {}
-      return { expand: normalizeExpandState(viewState.expand) }
+      return normalizeUserViewState(viewState)
     }
     return { expand: {} }
   }
@@ -979,7 +995,7 @@ function createFileSystem(options = {}) {
     const uid = roomAcl.normalizeUserId(userId || input.userId || '')
     if (!uid) throw fsError('unauthorized', '请先使用企业微信扫码登录', 401)
     await getRoom(roomKey, { userId: uid, bypass: input.bypass })
-    const normalized = { expand: normalizeExpandState(viewState && viewState.expand) }
+    const normalized = normalizeUserViewState(viewState, true)
     await store.upsertUserState(roomKey, uid, { view_state: normalized })
     return normalized
   }

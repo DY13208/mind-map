@@ -446,7 +446,7 @@ function createPgFileStore(pool) {
          on conflict (room_key, user_id) do update set
            is_favorite = coalesce($3, room_user_state.is_favorite),
            last_opened_at = coalesce($4, room_user_state.last_opened_at),
-           view_state = coalesce($5::jsonb, room_user_state.view_state),
+           view_state = room_user_state.view_state || coalesce($5::jsonb, '{}'::jsonb),
            updated_at = now()
          returning *`,
         [

@@ -450,6 +450,24 @@ function mockRes() {
   const editorView = await c1.fs.getUserViewState(owned.room.roomKey, EDITOR)
   assert.deepStrictEqual(ownerView.expand, { a: true, b: false })
   assert.deepStrictEqual(editorView.expand, {})
+  await c1.fs.setUserViewState(owned.room.roomKey, OWNER, {
+    theme: 'dark', themeConfig: { backgroundColor: '#101010' }, layout: 'mindMap'
+  })
+  await c1.fs.setUserViewState(owned.room.roomKey, EDITOR, {
+    theme: 'classic4', layout: 'logicalStructure'
+  })
+  const personalOwner = await c1.fs.getUserViewState(owned.room.roomKey, OWNER)
+  const personalEditor = await c1.fs.getUserViewState(owned.room.roomKey, EDITOR)
+  assert.deepStrictEqual(personalOwner.expand, { a: true, b: false })
+  assert.strictEqual(personalOwner.theme, 'dark')
+  assert.strictEqual(personalEditor.theme, 'classic4')
+  assert.strictEqual(personalOwner.layout, 'mindMap')
+  assert.strictEqual(personalEditor.layout, 'logicalStructure')
+  await c1.fs.setUserViewState(owned.room.roomKey, OWNER, { expand: { a: false } })
+  assert.strictEqual((await c1.fs.getUserViewState(owned.room.roomKey, OWNER)).theme, 'dark')
+  await assert.rejects(c1.fs.setUserViewState(owned.room.roomKey, OTHER, { theme: 'dark' }))
+  await c1.fs.setUserViewState(owned.room.roomKey, OWNER, { expand: { a: true, b: false } })
+
 
   const resSetView = mockRes()
   await handleFileSystemApi(
