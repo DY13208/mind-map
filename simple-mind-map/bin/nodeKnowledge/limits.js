@@ -168,14 +168,9 @@ function attachmentResponseHeaders(fileName) {
   const headers = {
     // Stored text can be GBK/UTF-16. Do not falsely label its raw bytes UTF-8;
     // the in-app preview decodes bytes explicitly and non-media files download.
-    'Content-Type': mimeType,
+    'Content-Type': isHtml ? 'text/html; charset=utf-8' : mimeType,
     'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeContentDispositionFileName(safeName)}`,
     'X-Content-Type-Options': 'nosniff'
-  }
-  if (isHtml) {
-    // Open HTML as a top-level page without giving it the app origin.
-    headers['Content-Security-Policy'] =
-      'sandbox allow-downloads allow-popups allow-popups-to-escape-sandbox allow-forms'
   }
   return headers
 }
