@@ -504,6 +504,7 @@
     </div>
 
     <el-dialog
+      v-if="false"
       title="运行 SOP"
       :visible.sync="runDialogVisible"
       width="744px"
@@ -658,6 +659,16 @@
       </span>
     </el-dialog>
 
+    <SopRunDialog
+      :visible.sync="runDialogVisible"
+      :room-key="roomKey"
+      :target="runTarget"
+      :actor="userInfo.name || '台账'"
+      @enqueued="onSharedRunEnqueued"
+      @finished="onSharedRunFinished"
+      @waiting="onSharedRunWaiting"
+    />
+
   </div>
 </template>
 
@@ -746,6 +757,7 @@ import {
 import SopTaskBoard from './components/SopTaskBoard.vue'
 import SopTreeNode from './components/SopTreeNode.vue'
 import SopGlyph from './components/SopGlyph.vue'
+import SopRunDialog from './components/SopRunDialog.vue'
 
 MindMap.usePlugin(Drag)
   .usePlugin(Select)
@@ -802,7 +814,7 @@ function toMindMapTree(tree, depth = 0) {
 
 export default {
   name: 'SopRegistryPage',
-  components: { SopTaskBoard, SopTreeNode, SopGlyph },
+  components: { SopTaskBoard, SopTreeNode, SopGlyph, SopRunDialog },
   data() {
     return {
       sops: [],
@@ -1833,6 +1845,40 @@ export default {
       ).catch(err => {
         console.warn('[sopRegistry] persist scanned deliverables failed', err)
       })
+    },
+    onSharedRunEnqueued(job) {
+      if (job) this.selectedSopJobId = job.id
+      if (this.detailMode) {
+        this.dialogTab = 'runs'
+        this.$router
+          .replace({
+            path: '/sop',
+            query: {
+              ...this.$route.query,
+              room: this.roomKey,
+              sopUid: this.activeSopUid,
+              tab: 'runs'
+            }
+          })
+          .catch(() => {})
+      } else if (this.runTarget) {
+        this.openSubtree(this.runTarget, { tab: 'runs' })
+      }
+    },
+    onSharedRunFinished({ outcome, job }) {
+      if (outcome && outcome.ledger) this.applyJobLedgerToList(job, outcome.ledger)
+      if (outcome && outcome.ok) {
+        this.$message.success(
+          `「${job.sopTitle}」完成（约 ${outcome.elapsedSec || 0}s，产物 ${
+            (outcome.deliverables && outcome.deliverables.length) || 0
+          } 个）`
+        )
+      }
+    },
+    onSharedRunWaiting({ outcome, job }) {
+      if (outcome && outcome.ledger) this.applyJobLedgerToList(job, outcome.ledger)
+      this.selectedSopJobId = job.id
+      if (this.detailMode) this.dialogTab = 'runs'
     },
     openRunDialog(item) {
       if (!this.roomKey) {
