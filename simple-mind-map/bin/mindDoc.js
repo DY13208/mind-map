@@ -536,19 +536,21 @@ function nodePath(obj, uid, parentOf) {
 
 function flattenNodes(obj) {
   const parentOf = buildParentMap(obj)
-  return Object.keys(obj).map(uid => ({
-    uid,
-    text: stripHtml(obj[uid].data && obj[uid].data.text),
-    note: obj[uid].data && obj[uid].data.note ? String(obj[uid].data.note) : '',
-    sopLedger:
-      obj[uid].data && obj[uid].data.sopLedger
-        ? obj[uid].data.sopLedger
-        : null,
-    isRoot: !!obj[uid].isRoot,
-    parent_uid: parentOf[uid] || null,
-    children: obj[uid].children || [],
-    path: nodePath(obj, uid, parentOf)
-  }))
+  return Object.keys(obj).map(uid => {
+    const data = (obj[uid] && obj[uid].data) || {}
+    return {
+      uid,
+      text: stripHtml(data.text),
+      note: data.note ? String(data.note) : '',
+      hyperlink: data.hyperlink ? String(data.hyperlink) : '',
+      hyperlinkTitle: data.hyperlinkTitle ? String(data.hyperlinkTitle) : '',
+      sopLedger: data.sopLedger ? data.sopLedger : null,
+      isRoot: !!obj[uid].isRoot,
+      parent_uid: parentOf[uid] || null,
+      children: obj[uid].children || [],
+      path: nodePath(obj, uid, parentOf)
+    }
+  })
 }
 
 function toOutline(obj, options = {}) {

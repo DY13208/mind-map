@@ -400,6 +400,7 @@ function ensureOpenclawConfig(token, port = DEFAULT_PORT) {
   applyDeepseekModel(cfg)
 
   // Cognee 是可选能力：插件未安装时清理失效引用，让 Gateway 先正常启动。
+  let cogneeActive = false
   try {
     const { cogneeEnabled, cogneeOpenclawPluginConfig } = require('./cognee-docker')
     const probe = cogneePluginInstalled()
@@ -430,6 +431,7 @@ function ensureOpenclawConfig(token, port = DEFAULT_PORT) {
         if (!cfg.plugins.slots.memory) {
           cfg.plugins.slots.memory = COGNEE_PLUGIN_ID
         }
+        cogneeActive = true
       }
     } else if (!probe.indeterminate) {
       disableCogneePlugin(cfg)
@@ -438,15 +440,16 @@ function ensureOpenclawConfig(token, port = DEFAULT_PORT) {
     // 探测异常时保留原配置，禁止误删 slot。
   }
 
-  // 部署契约：无论旧快照或可选集成探测结果如何，都必须保持 Cognee 为 memory slot。
-  // 这里只覆盖这两个字段，插件的 hooks/config 及其余凭据配置原样保留。
-  cfg.plugins = cfg.plugins || {}
-  cfg.plugins.entries = cfg.plugins.entries || {}
-  cfg.plugins.entries[COGNEE_PLUGIN_ID] =
-    cfg.plugins.entries[COGNEE_PLUGIN_ID] || {}
-  cfg.plugins.entries[COGNEE_PLUGIN_ID].enabled = true
-  cfg.plugins.slots = cfg.plugins.slots || {}
-  cfg.plugins.slots.memory = COGNEE_PLUGIN_ID
+  // 仅当插件确实在卷内时，才强制启用 Cognee memory slot；否则 Gateway 会因插件缺失崩溃重启。
+  if (cogneeActive) {
+    cfg.plugins = cfg.plugins || {}
+    cfg.plugins.entries = cfg.plugins.entries || {}
+    cfg.plugins.entries[COGNEE_PLUGIN_ID] =
+      cfg.plugins.entries[COGNEE_PLUGIN_ID] || {}
+    cfg.plugins.entries[COGNEE_PLUGIN_ID].enabled = true
+    cfg.plugins.slots = cfg.plugins.slots || {}
+    cfg.plugins.slots.memory = COGNEE_PLUGIN_ID
+  }
 
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2) + '\n', 'utf8')
   return CONFIG_FILE
