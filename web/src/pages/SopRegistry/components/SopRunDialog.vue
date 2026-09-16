@@ -65,12 +65,21 @@
         <div v-for="field in submitFields" :key="field.key" class="runSubmitField"><label>{{ field.label }}</label><el-input v-model="field.value" size="small" clearable :placeholder="field.hint || '请填写'" /></div>
       </div>
     </div>
-    <div class="runSectionTitle"><strong>附件与补充说明</strong></div>
+    <div class="runSectionTitle runComposeTitle"><strong>附件与补充说明</strong></div>
     <div class="runComposeBox" @paste="onPaste">
       <input ref="attachmentInput" class="runAttachmentInput" type="file" multiple :accept="attachmentAccept" @change="onFilesPicked" />
-      <el-input v-model="extraNote" type="textarea" :rows="3" placeholder="可输入补充要求，也可直接粘贴文本、截图或文件" />
-      <el-button size="small" icon="el-icon-paperclip" @click="$refs.attachmentInput.click()">上传文件</el-button>
-      <div class="runComposeToolbar"><span>支持直接粘贴图片或文件（Ctrl+V）</span><span>{{ extraNote.length }} 字</span></div>
+      <input ref="imageInput" class="runAttachmentInput" type="file" multiple accept="image/*" @change="onFilesPicked" />
+      <el-input ref="noteInput" v-model="extraNote" class="runExtra" type="textarea" :rows="3" placeholder="可输入补充要求，也可直接粘贴文本、截图或文件" aria-label="附件与补充说明" />
+      <span v-if="!extraNote" class="runComposeExample">例如：给黄炜龙发个代办；或：我要招聘一个初级客服</span>
+      <div class="runComposeToolbar">
+        <div class="runPasteIcons">
+          <button type="button" title="上传图片" aria-label="上传图片" @click="$refs.imageInput.click()"><i class="el-icon-picture-outline" /></button>
+          <button type="button" title="上传文件" aria-label="上传文件" @click="$refs.attachmentInput.click()"><i class="el-icon-document" /></button>
+          <button type="button" title="聚焦输入框，可使用 Ctrl+V 粘贴截图或文件" aria-label="聚焦输入框以粘贴" @click="$refs.noteInput.focus()"><i class="el-icon-full-screen" /></button>
+        </div>
+        <span class="runPasteHint">支持直接粘贴图片或文件（Ctrl+V）</span>
+        <span class="runNoteCount" aria-label="已输入字数">{{ extraNote.length }} 字</span>
+      </div>
     </div>
     <div v-if="attachments.length" class="runAttachmentList">
       <span v-for="file in attachments" :key="file.key" class="runAttachmentTag" :class="{ 'is-failed': file.status === 'failed' }">
@@ -79,7 +88,7 @@
       </span>
     </div>
     <p class="runAttachmentTip">支持 PDF、Word、Excel、文本、图片，单个不超过 5 MB，最多 5 个。</p>
-    <span slot="footer">
+    <span slot="footer" class="runDialogFooter">
       <el-button size="small" @click="close">取消</el-button>
       <el-button type="primary" size="small" :loading="submitLoading || enqueueing" :disabled="attachments.some(file => file.status !== 'ready')" @click="confirm">加入队列并开始</el-button>
     </span>
@@ -187,23 +196,4 @@ export default {
 }
 </script>
 
-<style lang="less">
-.sopRunDialog {
-  .runExecutionPanel, .runSubmitBox, .runComposeBox { border: 1px solid #dfe8e3; border-radius: 10px; padding: 14px; margin-bottom: 16px; }
-  .runExecutionMain { display: flex; align-items: flex-end; gap: 12px; }
-  .runExecutionField { display: flex; flex-direction: column; gap: 6px; min-width: 180px; }
-  .runModelField { flex: 1; }
-  .runSectionTitle, .runSubmitHead, .runComposeToolbar { display: flex; justify-content: space-between; margin: 12px 0 8px; }
-  .outputChecks { display: flex; gap: 12px; flex-wrap: wrap; }
-  .runSubmitGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .runSubmitField { display: flex; flex-direction: column; gap: 5px; }
-  .runAttachmentInput { display: none; }
-  .runComposeBox { position: relative; }
-  .runComposeBox .el-button { margin-top: 8px; }
-  .runComposeToolbar { color: #74817a; font-size: 12px; }
-  .runAttachmentList { display: flex; flex-wrap: wrap; gap: 8px; }
-  .runAttachmentTag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; background: #f2f7f4; }
-  .runAttachmentTag button { border: 0; background: transparent; cursor: pointer; }
-  .runAttachmentTip, .runSubmitTip, .runDialogLead { color: #66746c; font-size: 13px; }
-}
-</style>
+<style lang="less" src="../sopRunDialog.less"></style>

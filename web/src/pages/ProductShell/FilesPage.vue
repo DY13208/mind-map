@@ -245,6 +245,7 @@
 
 <script>
 import { userMessageFromError } from '@/services/apiError'
+import { isNavigationFailure, NavigationFailureType } from 'vue-router'
 import roomService from '@/services/roomService'
 import folderService from '@/services/folderService'
 import teamService from '@/services/teamService'
@@ -312,6 +313,7 @@ export default {
     return {
       loading: false,
       busy: false,
+      openingRoom: false,
       requestId: 0,
       error: '',
       rooms: [],
@@ -957,15 +959,26 @@ export default {
       this.$router.push(route)
     },
     async openRoom(room) {
+      if (this.openingRoom) return
+      this.openingRoom = true
+      const sourceRoute = this.$route
       try {
         const roomKey = room.roomKey || room.id
         await roomService.markOpened(roomKey)
+        // A slow recent-open request must not undo the user's later navigation.
+        if (this._isDestroyed || this.$route !== sourceRoute) return
         await this.$router.push({
           path: '/',
           query: { room: roomKey }
         })
       } catch (error) {
+        if (
+          isNavigationFailure(error, NavigationFailureType.cancelled) ||
+          isNavigationFailure(error, NavigationFailureType.duplicated)
+        ) return
         this.$message.error(userMessageFromError(error))
+      } finally {
+        this.openingRoom = false
       }
     },
     async createRoom() {

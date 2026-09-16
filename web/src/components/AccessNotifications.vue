@@ -1,5 +1,5 @@
 <template>
-  <el-popover v-model="visible" placement="bottom-end" width="380" trigger="click" @show="markAnnouncementsSeen">
+  <el-popover v-model="visible" placement="right-end" width="380" trigger="click" @show="markAnnouncementsSeen">
     <div class="accessInbox">
       <el-tabs v-model="activeTab">
         <el-tab-pane label="更新公告" name="announcements">
@@ -25,9 +25,10 @@
         </el-tab-pane>
       </el-tabs>
     </div>
-    <el-badge slot="reference" :value="items.length + unreadCount" :hidden="!items.length && !unreadCount" class="notificationBadge">
+    <el-badge slot="reference" :value="items.length + unreadCount" :hidden="!items.length && !unreadCount" class="notificationBadge" :class="{ 'notificationBadge--collapsed': collapsed }">
       <button class="notificationButton" type="button" title="消息中心" aria-label="消息中心">
         <i class="el-icon-bell" />
+        <span v-if="!collapsed">消息中心</span>
       </button>
     </el-badge>
   </el-popover>
@@ -40,6 +41,7 @@ import { getCurrentUser } from '@/utils/auth'
 
 export default {
   name: 'AccessNotifications',
+  props: { collapsed: { type: Boolean, default: false } },
   data: () => ({ items: [], timer: null, busy: false, visible: false, activeTab: 'announcements', announcements, seenIds: [], storageKey: '' }),
   computed: {
     unreadCount() { return this.announcements.filter(item => !this.seenIds.includes(item.id)).length }
@@ -98,16 +100,21 @@ export default {
 </script>
 
 <style lang="less" scoped>
-.notificationBadge { position: fixed; top: 18px; right: 22px; z-index: 1200; }
+.notificationBadge { display: block; margin: 8px 0; }
+.notificationBadge--collapsed .notificationButton { justify-content: center; padding: 0; }
 .notificationButton {
-  width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid #dfe8e3;
-  border-radius: 10px; background: #fff; color: #52665f; cursor: pointer; font-size: 17px;
-  box-shadow: 0 4px 14px rgba(23, 38, 31, 0.08);
-  &:hover { border-color: #a9c9bb; color: #087854; }
+  width: 100%; min-height: 40px; display: flex; align-items: center; gap: 12px;
+  padding: 0 12px; border: 0; border-radius: 8px; background: transparent;
+  color: #52665f; cursor: pointer; font-size: 14px; text-align: left;
+  i { font-size: 18px; flex-shrink: 0; }
+  &:hover { background: #e8f4ef; color: #087854; }
   &:focus-visible { outline: 2px solid #087854; outline-offset: 2px; }
 }
 .accessInbox {
   max-height: 60vh; overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar { display: none; }
   .announcementRow { padding: 12px 0; border-bottom: 1px solid #edf1ef; }
   .announcementHead { display: flex; justify-content: space-between; gap: 12px; }
   time { color: #66756e; font-size: 12px; flex-shrink: 0; }
