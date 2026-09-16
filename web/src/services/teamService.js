@@ -280,6 +280,18 @@ const teamService = {
       return normalizeMember(unwrapItem(data, ['member']))
     }),
 
+  transferOwnership: (spaceId, userId) =>
+    request(async () => {
+      const data = await productRequest(
+        `/api/teams/${encodeURIComponent(spaceId)}/transfer-ownership`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ userId: String(userId || '').trim() })
+        }
+      )
+      return unwrapList(data, ['members', 'items']).map(normalizeMember)
+    }),
+
   removeMember: (spaceId, id) =>
     request(() => productRequest(`/api/teams/${encodeURIComponent(spaceId)}/members/${encodeURIComponent(id)}`, { method: 'DELETE' }))
 }

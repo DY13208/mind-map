@@ -109,7 +109,8 @@ function hasDocker() {
 }
 
 function compose(args, extraEnv) {
-  return spawn('docker', ['compose', ...args], {
+  require('./wiki-env').ensureWikiEnv()
+  return spawn('docker', ['compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.wiki.yml', ...args], {
     cwd: ROOT,
     stdio: 'inherit',
     shell: true,
@@ -209,7 +210,10 @@ async function up() {
       '--no-deps',
       'postgres',
       'redis',
-      'app'
+      'app',
+      'docmost-db',
+      'docmost-redis',
+      'docmost'
     ],
     {
       PUBLIC_HOST: host,
@@ -220,6 +224,12 @@ async function up() {
   )
   child.on('exit', async code => {
     if (code) process.exit(code)
+    const runtimeBuild = compose(['build', 'openwiki-runtime'])
+    runtimeBuild.on('exit', runtimeCode => {
+      if (runtimeCode) console.error('[Wiki] OpenWiki build failed; retry docker compose -f docker-compose.yml -f docker-compose.wiki.yml build openwiki-runtime')
+      else console.log('[Wiki] OpenWiki runtime ready (run on demand)')
+    })
+    console.log(`  Docmost: ${process.env.DOCMOST_APP_URL || 'http://localhost:' + (process.env.DOCMOST_PORT || 3040)}`)
     console.log('')
     console.log('  已启动。浏览器打开上面的页面地址。')
     if (process.platform === 'win32') {
