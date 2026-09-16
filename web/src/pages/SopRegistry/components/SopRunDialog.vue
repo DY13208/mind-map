@@ -10,7 +10,7 @@
     @close="close"
   >
     <p v-if="target" class="runDialogLead">
-      将任务加入队列后可在后台并行执行；你可以关闭本窗口，稍后在任务中心查看进度。
+      将任务加入队列后可在后台并行执行；你可以关闭本窗口，稍后在 SOP 台账详情的「记录」中查看进度。
     </p>
     <section class="runExecutionPanel">
       <h3>执行配置</h3>
