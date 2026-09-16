@@ -450,6 +450,24 @@ function mockRes() {
   const editorView = await c1.fs.getUserViewState(owned.room.roomKey, EDITOR)
   assert.deepStrictEqual(ownerView.expand, { a: true, b: false })
   assert.deepStrictEqual(editorView.expand, {})
+  await c1.fs.setUserViewState(owned.room.roomKey, OWNER, {
+    theme: 'dark', themeConfig: { backgroundColor: '#101010' }, layout: 'mindMap'
+  })
+  await c1.fs.setUserViewState(owned.room.roomKey, EDITOR, {
+    theme: 'classic4', layout: 'logicalStructure'
+  })
+  const personalOwner = await c1.fs.getUserViewState(owned.room.roomKey, OWNER)
+  const personalEditor = await c1.fs.getUserViewState(owned.room.roomKey, EDITOR)
+  assert.deepStrictEqual(personalOwner.expand, { a: true, b: false })
+  assert.strictEqual(personalOwner.theme, 'dark')
+  assert.strictEqual(personalEditor.theme, 'classic4')
+  assert.strictEqual(personalOwner.layout, 'mindMap')
+  assert.strictEqual(personalEditor.layout, 'logicalStructure')
+  await c1.fs.setUserViewState(owned.room.roomKey, OWNER, { expand: { a: false } })
+  assert.strictEqual((await c1.fs.getUserViewState(owned.room.roomKey, OWNER)).theme, 'dark')
+  await assert.rejects(c1.fs.setUserViewState(owned.room.roomKey, OTHER, { theme: 'dark' }))
+  await c1.fs.setUserViewState(owned.room.roomKey, OWNER, { expand: { a: true, b: false } })
+
 
   const resSetView = mockRes()
   await handleFileSystemApi(
@@ -719,6 +737,95 @@ function mockRes() {
     (await teamFs.store.getRoom(teamRoom.room.roomKey)).folder_id,
     teamChild.id
   )
+
+  // Manager inherits room access; createRoom maps manager → folder_role/editor
+  const mgrFs = engineWith()
+  const mgrFolder = await mgrFs.fs.createFolder({ name: 'mgr-folder', userId: OWNER })
+  await mgrFs.store.setFolderMember(mgrFolder.id, EDITOR, 'manager')
+  const mgrOwned = await mgrFs.fs.createRoom({
+    title: 'mgr-owned',
+    folderId: mgrFolder.id,
+    userId: OWNER
+  })
+  const mgrMem = mgrFs.store.members.find(
+    item => item.room_key === mgrOwned.room.roomKey && item.user_id === EDITOR
+  )
+  assert.ok(mgrMem, 'manager must inherit folder room access')
+  assert.strictEqual(mgrMem.folder_role, 'manager')
+  assert.strictEqual(mgrMem.role, 'editor')
+  await mgrFs.fs.moveRoom(mgrOwned.room.roomKey, 'root', {
+    access: { canEdit: true, role: 'owner' },
+    userId: OWNER
+  })
+  await mgrFs.fs.moveRoom(mgrOwned.room.roomKey, mgrFolder.id, {
+    access: { canEdit: true, role: 'owner' },
+    userId: OWNER
+  })
+  const afterMove = mgrFs.store.members.find(
+    item => item.room_key === mgrOwned.room.roomKey && item.user_id === EDITOR
+  )
+  assert.strictEqual(afterMove.folder_role, 'manager')
+  assert.strictEqual(afterMove.role, 'editor')
+  const mgrChild = await mgrFs.fs.createFolder({
+    name: 'mgr-child',
+    parentId: mgrFolder.id,
+    userId: EDITOR
+  })
+  assert.strictEqual(mgrChild.parentId, mgrFolder.id)
+
+  // Personal rooms cannot be moved into team folders
+  const mismatchFs = engineWith()
+  const personal = await mismatchFs.fs.createRoom({ title: 'personal-only', userId: OWNER })
+  const teamOnlyFolder = await mismatchFs.fs.createFolder({
+    name: 'team-only',
+    userId: OWNER,
+    teamId: 'team-x',
+    bypass: true
+  })
+  await assert.rejects(
+    mismatchFs.fs.moveRoom(personal.room.roomKey, teamOnlyFolder.id, {
+      access: { canEdit: true, role: 'owner' },
+      userId: OWNER
+    }),
+    err => err.code === 'FOLDER_TEAM_MISMATCH'
+  )
+
+  // Folder ownership transfer updates created_by + room ownership
+  const xfer = engineWith()
+  const xferFolder = await xfer.fs.createFolder({ name: 'xfer-root', userId: OWNER })
+  const xferChild = await xfer.fs.createFolder({
+    name: 'xfer-child',
+    parentId: xferFolder.id,
+    userId: OWNER
+  })
+  const xferRoom = await xfer.fs.createRoom({
+    title: 'xfer-room',
+    folderId: xferFolder.id,
+    userId: OWNER
+  })
+  await xfer.store.setFolderMember(xferFolder.id, EDITOR, 'editor')
+  const xferRes = mockRes()
+  const handled = await handleFileSystemApi(
+    {
+      method: 'POST',
+      url: `/api/folders/${xferFolder.id}/transfer-ownership`,
+      authUser: { id: OWNER }
+    },
+    xferRes,
+    {
+      engine: xfer.fs,
+      body: { userId: EDITOR }
+    }
+  )
+  assert.strictEqual(handled, true)
+  assert.strictEqual(xferRes.code, 200)
+  assert.strictEqual((await xfer.store.getFolder(xferFolder.id)).created_by, EDITOR)
+  assert.strictEqual((await xfer.store.getFolder(xferChild.id)).created_by, EDITOR)
+  assert.strictEqual((await xfer.store.getRoom(xferRoom.room.roomKey)).owner_id, EDITOR)
+  const oldOwnerMem = xfer.store.folderMembers.find(
+    item => item.folder_id === xferFolder.id && item.user_id === OWNER
+  )
+  assert.strictEqual(oldOwnerMem.role, 'manager')
 
   console.log('fileSystem.test.js ok')
 })().catch(err => {

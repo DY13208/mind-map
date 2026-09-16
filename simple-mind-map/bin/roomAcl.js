@@ -58,10 +58,12 @@ function aclError(status, code, message) {
 }
 
 function normalizeUserId(value) {
-  return String(value || '')
+  const raw = String(value || '')
     .trim()
-    .replace(/^wecom:/i, '')
     .slice(0, 160)
+  // Collision ids are `wecom:<48 hex>` and must stay intact across team/room ACL.
+  if (/^wecom:[a-f0-9]{48}$/i.test(raw)) return raw
+  return raw.replace(/^wecom:/i, '')
 }
 
 function normalizeRole(value) {
@@ -108,6 +110,9 @@ function inferRoomAcl(pathname, method) {
   if (FILE_COLLECTION_KEYS.has(roomKey) && !rest) return null
   if (rest === '/members' || rest.startsWith('/members/')) {
     return { roomKey, action: verb === 'GET' ? 'view' : 'manage' }
+  }
+  if (rest === '/transfer-ownership') {
+    return { roomKey, action: 'manage' }
   }
   if (rest === '/presence' || rest.startsWith('/presence/')) {
     return { roomKey, action: 'view' }
@@ -169,7 +174,8 @@ function roleAllows(role, action, options = {}) {
   if (options.bypass) return true
   const need = ACTION_RANK[action] || ACTION_RANK.view
   if (options.legacyOpen) {
-    return need <= ACTION_RANK.manage
+    // Legacy open rooms are editable by any signed-in user, but not trashable.
+    return need <= ACTION_RANK.edit
   }
   const have = ROLE_RANK[role] || 0
   return have >= need
@@ -627,6 +633,7 @@ async function searchUsers(db, q, limit = 20, corpId = '') {
 async function resolveUserId(db, value, corpId = '') {
   const uid = normalizeUserId(value)
   if (!uid || !corpId) return uid
+  if (!db || typeof db.query !== 'function') return uid
   const result = await db.query(
     `select user_id from wecom_users
      where corp_id = $1 and (wecom_userid = $2 or user_id = $2)
@@ -634,6 +641,218 @@ async function resolveUserId(db, value, corpId = '') {
     [corpId, uid]
   )
   return result.rows[0] ? result.rows[0].user_id : uid
+}
+
+async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId = '') {
+  const key = String(roomKey || '').trim()
+  const actor = normalizeUserId(actorUserId)
+  const target = await resolveUserId(db, targetUserId, corpId)
+  if (!key) throw aclError(400, 'BAD_REQUEST', '缺少脑图标识')
+  if (!actor) throw aclError(401, 'UNAUTHORIZED', '请先登录')
+  if (!target) throw aclError(400, 'BAD_REQUEST', '请选择新的所有者')
+  if (actor === target) throw aclError(400, 'BAD_REQUEST', '不能将所有权转移给自己')
+
+  if (Array.isArray(db.members)) {
+    const room =
+      (db.rooms && typeof db.rooms.get === 'function' && db.rooms.get(key)) ||
+      (Array.isArray(db.rooms) && db.rooms.find(item => item.room_key === key)) ||
+      null
+    if (!room || room.deleted_at) throw aclError(404, 'NOT_FOUND', '脑图不存在')
+    let memberRows = db.members.filter(item => item.room_key === key)
+    if (!memberRows.length) {
+      db.members.push({
+        room_key: key,
+        user_id: actor,
+        role: 'owner',
+        direct_role: 'owner',
+        team_role: null,
+        folder_role: null,
+        source: 'direct_share',
+        source_team_id: null,
+        source_folder_id: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      memberRows = db.members.filter(item => item.room_key === key)
+    }
+    const actorRow = memberRows.find(row => row.user_id === actor)
+    const actorIsOwner =
+      (actorRow &&
+        effectiveRole(
+          actorRow.direct_role,
+          actorRow.team_role,
+          actorRow.folder_role,
+          actorRow.role
+        ) === 'owner') ||
+      room.owner_id === actor
+    if (!actorIsOwner) {
+      throw aclError(403, 'FORBIDDEN', '只有所有者可以转移所有权')
+    }
+    room.owner_id = target
+    room.updated_at = new Date().toISOString()
+    let targetRow = db.members.find(
+      item => item.room_key === key && item.user_id === target
+    )
+    if (!targetRow) {
+      targetRow = {
+        room_key: key,
+        user_id: target,
+        role: 'owner',
+        direct_role: 'owner',
+        team_role: null,
+        folder_role: null,
+        source: 'direct_share',
+        source_team_id: null,
+        source_folder_id: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+      db.members.push(targetRow)
+    } else {
+      targetRow.direct_role = 'owner'
+      targetRow.role = 'owner'
+      targetRow.source = 'direct_share'
+      targetRow.updated_at = new Date().toISOString()
+    }
+    for (const previous of memberRows) {
+      if (previous.user_id === target) continue
+      if (
+        effectiveRole(
+          previous.direct_role,
+          previous.team_role,
+          previous.folder_role,
+          previous.role
+        ) !== 'owner'
+      ) {
+        continue
+      }
+      previous.direct_role = 'editor'
+      previous.role = effectiveRole(
+        previous.direct_role,
+        previous.team_role,
+        previous.folder_role
+      )
+      previous.source = 'direct_share'
+      previous.updated_at = new Date().toISOString()
+    }
+    return db.members
+      .filter(item => item.room_key === key)
+      .map(item => ({
+        user_id: item.user_id,
+        wecom_userid: item.user_id,
+        role: item.role,
+        direct_role: item.direct_role,
+        team_role: item.team_role,
+        folder_role: item.folder_role,
+        source: item.source,
+        source_team_id: item.source_team_id,
+        source_folder_id: item.source_folder_id,
+        created_at: item.created_at,
+        updated_at: item.updated_at,
+        name: item.user_id,
+        avatar: ''
+      }))
+  }
+
+  const run = async conn => {
+    const room = await conn.query(
+      `select room_key, owner_id from rooms where room_key = $1 and deleted_at is null`,
+      [key]
+    )
+    if (!room.rows.length) throw aclError(404, 'NOT_FOUND', '脑图不存在')
+
+    let memberRows = (
+      await conn.query(
+        `select user_id, role, direct_role, team_role, folder_role from room_members where room_key = $1`,
+        [key]
+      )
+    ).rows
+    if (!memberRows.length) {
+      await ensureOwner(conn, key, actor)
+      memberRows = (
+        await conn.query(
+          `select user_id, role, direct_role, team_role, folder_role from room_members where room_key = $1`,
+          [key]
+        )
+      ).rows
+    }
+
+    const actorRow = memberRows.find(row => row.user_id === actor)
+    const actorIsOwner =
+      (actorRow &&
+        effectiveRole(
+          actorRow.direct_role,
+          actorRow.team_role,
+          actorRow.folder_role,
+          actorRow.role
+        ) === 'owner') ||
+      room.rows[0].owner_id === actor
+    if (!actorIsOwner) {
+      throw aclError(403, 'FORBIDDEN', '只有所有者可以转移所有权')
+    }
+
+    await conn.query(
+      `update rooms set owner_id = $2, updated_at = now() where room_key = $1`,
+      [key, target]
+    )
+
+    await conn.query(
+      `insert into room_members (room_key, user_id, role, direct_role, team_role, folder_role, source, source_team_id, source_folder_id)
+       values ($1, $2, 'owner', 'owner', null, null, 'direct_share', null, null)
+       on conflict (room_key, user_id) do update set
+         direct_role = 'owner',
+         role = 'owner',
+         source = 'direct_share',
+         updated_at = now()`,
+      [key, target]
+    )
+
+    const previousOwners = memberRows.filter(
+      row =>
+        row.user_id !== target &&
+        effectiveRole(
+          row.direct_role,
+          row.team_role,
+          row.folder_role,
+          row.role
+        ) === 'owner'
+    )
+    for (const previous of previousOwners) {
+      await conn.query(
+        `update room_members
+         set direct_role = 'editor',
+             role = ${sqlEffectiveRole(
+               `'editor'`,
+               'team_role',
+               'folder_role'
+             )},
+             source = 'direct_share',
+             updated_at = now()
+         where room_key = $1 and user_id = $2`,
+        [key, previous.user_id]
+      )
+    }
+
+    return listMembers(conn, key)
+  }
+
+  if (typeof db.connect === 'function') {
+    const client = await db.connect()
+    try {
+      await client.query('begin')
+      const list = await run(client)
+      await client.query('commit')
+      return list
+    } catch (err) {
+      try {
+        await client.query('rollback')
+      } catch (_) {}
+      throw err
+    } finally {
+      client.release()
+    }
+  }
+  return run(db)
 }
 
 async function setMember(db, roomKey, targetUserId, role, actorUserId, corpId = '') {
@@ -915,8 +1134,8 @@ async function applyFolderRoles(db, roomKey, folderId, members) {
   let count = 0
   for (const member of members || []) {
     const uid = normalizeUserId(member.user_id || member.userId)
-    const role = normalizeRole(member.role)
-    if (!uid || !role || role === 'owner') continue
+    const role = normalizeFolderRole(member.role)
+    if (!uid || !role) continue
     await setFolderRole(db, key, uid, role, folder)
     count += 1
   }
@@ -971,6 +1190,7 @@ module.exports = {
   searchUsers,
   resolveUserId,
   setMember,
+  transferOwnership,
   removeMember,
   setFolderRole,
   clearFolderRole,

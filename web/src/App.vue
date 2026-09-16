@@ -102,7 +102,7 @@
     </div>
     <template v-else>
       <router-view></router-view>
-      <AccessNotifications v-if="authState.authenticated" />
+      <AccessNotifications v-if="authState.authenticated" :key="authState.user && authState.user.id" />
     </template>
   </div>
 </template>

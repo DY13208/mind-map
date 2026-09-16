@@ -554,6 +554,7 @@ function isDeletedRoom(roomKey) {
 function noteRoomTrashed(roomKey) {
   const key = String(roomKey || '')
   if (key) trashedRooms.add(key)
+  if (key) setImmediate(() => operationEvents.emit('roomDeleted', { roomKey: key }))
 }
 
 function noteRoomRestored(roomKey) {
@@ -778,6 +779,16 @@ async function upsertRoom(roomKey, title, options = {}) {
           `update rooms set nodes = $2::jsonb where room_key = $1`,
           [roomKey, JSON.stringify(snapshot)]
         )
+      }
+      if (overwriteTable && require('./knowledge').enabled()) {
+        // Isolate optional legacy tracking failures from the original save.
+        await client.query('SAVEPOINT knowledge_legacy')
+        try { await require('./knowledge/sourceChanges').recordLegacySave(client, roomKey) }
+        catch (err) {
+          await client.query('ROLLBACK TO SAVEPOINT knowledge_legacy')
+          console.error('[KnowledgeCompiler] legacy tracking failed:', err.message)
+        }
+        await client.query('RELEASE SAVEPOINT knowledge_legacy')
       }
     }
     await client.query('commit')
@@ -2311,6 +2322,7 @@ async function removeRoom(roomKey) {
      on conflict (room_key) do update set deleted_at = now()`,
     [roomKey]
   )
+  setImmediate(() => operationEvents.emit('roomDeleted', { roomKey }))
   const timer = saveTimers.get(roomKey)
   if (timer) {
     clearTimeout(timer)
