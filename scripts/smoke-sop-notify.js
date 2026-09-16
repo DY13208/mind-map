@@ -19,6 +19,7 @@ const titleApi = new Function(
 // 去掉 import，只测纯函数
 const body = src
   .replace(/^import[\s\S]*?from\s+['"][^'"]+['"]\s*/gm, '')
+  .replace(/^export\s*\{[^}]+\}\s*$/gm, '')
   .replace(/export /g, '')
 
 const api = new Function(
@@ -34,13 +35,19 @@ const api = new Function(
     resolveNotifyAssignee,
     isRoleAssignee,
     buildWecomTodoTitle,
-    isWecomTodoOrientedSop
+    isWecomTodoOrientedSop,
+    isWecomTodoNoiseLine,
+    buildNotifyIdempotencyKey,
+    canonicalizeNotifyAssignee
   };`
 )(titleApi.normalizeWecomTodoTitle)
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg || 'assert failed')
 }
+
+// 模拟本地测试部署，验证角色别名最终归一到同一 userid。
+global.window = { location: { hostname: 'localhost' } }
 
 assert(api.isNotifyTitle('AI发起通知：排产确认'), 'AI发起通知')
 assert(api.isNotifyTitle('知会：本周目标'), '知会')
@@ -51,6 +58,30 @@ assert(api.isNotifyTitle('请提醒HRBP跟进'), '请提醒')
 assert(api.isNotifyTitle('催办：供应商回传合同'), '催办')
 assert(api.isNotifyTitle('AI:总经理审批、抄送副总、人事'), '抄送')
 assert(!api.isNotifyTitle('D：销售目标'), '普通 SOP 不是通知')
+assert(
+  api.isWecomTodoNoiseLine(
+    '最近运行: 2026-09-15 07:05 失败 企微派发失败：如果有现成的JD'
+  ),
+  '历史运行失败文本必须过滤'
+)
+assert(
+  !api.isWecomTodoNoiseLine('如果有现成的JD，点击发送'),
+  '合法业务节点不能被过滤'
+)
+const stableKeyBase = {
+  roomKey: 'room-3tt0u5fe',
+  sop: { uid: 'd-flow-uid' },
+  node: { sourceNodePath: 'AI:通知对应的HRBP' }
+}
+assert(
+  api.buildNotifyIdempotencyKey({ ...stableKeyBase, assignee: 'HRBP' }) ===
+    api.buildNotifyIdempotencyKey({ ...stableKeyBase, assignee: '单丙申Eric' }),
+  '本地角色名与单丙申Eric必须归一到同一幂等键'
+)
+assert(
+  api.canonicalizeNotifyAssignee('副总、人事') === 'shanbingshen',
+  '多个本地测试角色不得重复创建给同一人'
+)
 assert(
   !api.isNotifyTitle('如果没有，AI查询对应其他公司类似岗位并结合招聘需求生成JD'),
   '长叙述不应当通知'
@@ -121,8 +152,8 @@ assert(
   '运行前备注覆盖角色'
 )
 assert(
-  api.resolveNotifyAssignee('HRBP', '') === 'HRBP',
-  '无备注时保留角色'
+  api.resolveNotifyAssignee('HRBP', '') === '单丙申Eric',
+  '本地测试环境无备注时将 HRBP 映射为单丙申Eric'
 )
 assert(
   api.parseAssigneesFromExtraNote('给胡晓龙建一个测试待办').join() ===
