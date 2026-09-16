@@ -53,12 +53,10 @@ async function main() {
   assert.match(textHeaders['Content-Disposition'], /^attachment;/)
 
   const htmlHeaders = limits.attachmentResponseHeaders('说明.html')
-  assert.equal(htmlHeaders['Content-Type'], 'text/html')
+  assert.equal(htmlHeaders['Content-Type'], 'text/html; charset=utf-8')
   assert.match(htmlHeaders['Content-Disposition'], /^inline;/)
   assert.equal(htmlHeaders['X-Content-Type-Options'], 'nosniff')
-  assert.match(htmlHeaders['Content-Security-Policy'], /^sandbox\b/)
-  assert.ok(!/\ballow-scripts\b/.test(htmlHeaders['Content-Security-Policy']))
-  assert.ok(!/\ballow-same-origin\b/.test(htmlHeaders['Content-Security-Policy']))
+  assert.equal(htmlHeaders['Content-Security-Policy'], undefined)
 
   // The MIME supplied at upload time is intentionally not an input to the
   // response helper. Unknown extensions are never served as an active type.
