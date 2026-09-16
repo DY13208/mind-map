@@ -64,5 +64,20 @@ export default {
       throw error
     }
   },
+  transferOwnership: async (roomKey, userId) => {
+    try {
+      const data = await productRequest(
+        `/api/files/${encodeURIComponent(roomKey)}/transfer-ownership`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ userId: String(userId || '').trim() })
+        }
+      )
+      return (data.list || []).map(normalizeMemberDto)
+    } catch (error) {
+      error.message = userMessageFromError(error)
+      throw error
+    }
+  },
   displayRole
 }
