@@ -108,6 +108,7 @@ const server = http.createServer(async (request, response) => {
       const handledTus = await require('./nodeKnowledge').handleApi(request, response)
       if (handledTus) return
     }
+    if (await require('./knowledge').handleApi(request, response, pathname)) return
     const handled = await handleApi(request, response)
     if (handled) return
   } catch (err) {
@@ -303,6 +304,9 @@ Promise.all([initSchema(), initAuth()])
       )
     }
     const { startOperationsArchiver } = require('./storage')
+    await require('./knowledge').start({ pool: getPool(), operationEvents, bus }).catch(err => {
+      console.error('[KnowledgeCompiler] startup failed (collaboration continues):', err.message)
+    })
     startOperationsArchiver()
     const v2 = attachCollabV2(server)
     server.listen(port, host, () => {

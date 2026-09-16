@@ -256,6 +256,21 @@ function createPgFileStore(pool) {
       )
       return res.rows.map(row => row.room_key)
     },
+    async listFolderSubtreeIds(id) {
+      queryCount += 1
+      const res = await pool.query(
+        `with recursive subtree as (
+           select id from folders where id = $1 and deleted_at is null
+           union
+           select f.id from folders f
+           join subtree s on f.parent_id = s.id
+           where f.deleted_at is null
+         )
+         select id from subtree`,
+        [id]
+      )
+      return res.rows.map(row => row.id)
+    },
     async folderNameTaken(name, parentId, exceptId, teamId) {
       queryCount += 1
       const team = teamId ? String(teamId) : null
@@ -336,7 +351,7 @@ function createPgFileStore(pool) {
       const team = teamClause(params)
       const res = await pool.query(
         `select f.*,
-                (f.created_by = $1) as can_manage,
+                (f.created_by = $1 or fm.role = 'manager') as can_manage,
                 fm.role as folder_role,
                 coalesce(cu.name, f.created_by, '') as created_by_name,
                 coalesce(cu.avatar, '') as created_by_avatar,
@@ -376,6 +391,16 @@ function createPgFileStore(pool) {
          where id = $1 and deleted_at is null
          returning *`,
         [id, name]
+      )
+      return res.rows[0] || null
+    },
+    async updateFolderOwner(id, ownerId) {
+      queryCount += 1
+      const res = await pool.query(
+        `update folders set created_by = $2, updated_at = now()
+         where id = $1 and deleted_at is null
+         returning *`,
+        [id, ownerId]
       )
       return res.rows[0] || null
     },
@@ -421,7 +446,7 @@ function createPgFileStore(pool) {
          on conflict (room_key, user_id) do update set
            is_favorite = coalesce($3, room_user_state.is_favorite),
            last_opened_at = coalesce($4, room_user_state.last_opened_at),
-           view_state = coalesce($5::jsonb, room_user_state.view_state),
+           view_state = room_user_state.view_state || coalesce($5::jsonb, '{}'::jsonb),
            updated_at = now()
          returning *`,
         [

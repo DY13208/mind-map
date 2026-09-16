@@ -2637,6 +2637,8 @@ class Cooperate {
   applyRemoteMapMeta(payload = {}, options = {}) {
     if (!this.mindMap || this.isApplyingRemote) return
     const hydrate = !!options.hydrate
+    // 主题和布局属于个人视图；旧共享 metadata 仅用于首次加载的默认值。
+    if (this.httpCollabMode && !hydrate) return
     const patch = hydrate
       ? hydrateSharedMetadata(payload)
       : {
@@ -2807,12 +2809,7 @@ class Cooperate {
 
   onThemeChange(theme) {
     if (!this.httpCollabMode || this.isApplyingRemote) return
-    this.submitMapMeta({
-      theme,
-      themeConfig: this.mindMap.getCustomThemeConfig
-        ? this.mindMap.getCustomThemeConfig()
-        : undefined
-    })
+    // 个人主题由 view-state 保存，不再发布 map.meta.update。
   }
 
   onLayoutChange(layout) {
@@ -2827,7 +2824,7 @@ class Cooperate {
         this.mindMap.renderer && this.mindMap.renderer._layoutSwitchCount
     })
     if (!this.httpCollabMode) return
-    this.submitMapMeta({ layout })
+    // 个人布局由 view-state 保存，不再发布 map.meta.update。
   }
 
   wrapSearchReplace() {

@@ -350,6 +350,7 @@ import {
   loadPersonalExpandState,
   savePersonalExpandState
 } from '@/utils/personalExpandState'
+import { bindPersonalAppearance } from '@/utils/personalAppearance'
 import { applyRoomAccess, fileRoleLabelKey, memberRoleLabelKey } from '@/utils/roomAcl'
 import { createCollaborationAdapter } from 'simple-mind-map/bin/collabV2/adapter'
 import { io } from 'socket.io-client'
@@ -997,6 +998,9 @@ export default {
       const userId = this.userId || 'local'
       this.personalExpandRoomKey = roomKey
       this.personalExpandState = loadPersonalExpandState(roomKey, userId)
+      this.stopPersonalAppearance = bindPersonalAppearance(
+        this.mindMap, roomKey, userId, getPersonalViewState, savePersonalViewState
+      )
 
       const persist = () => {
         if (!this.personalExpandState) return
@@ -1116,6 +1120,8 @@ export default {
     },
 
     unbindPersonalExpandState() {
+      if (this.stopPersonalAppearance) this.stopPersonalAppearance()
+      this.stopPersonalAppearance = null
       if (this.personalExpandRemoteTimer) {
         clearTimeout(this.personalExpandRemoteTimer)
         this.personalExpandRemoteTimer = null

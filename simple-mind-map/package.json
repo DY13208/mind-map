@@ -16,6 +16,7 @@
     "url": "https://github.com/wanglin2/mind-map"
   },
   "scripts": {
+    "test:knowledge:pg": "node ./test/knowledge.pg.test.js",
     "lint": "eslint src/",
     "format": "prettier --write .",
     "types": "npx -p typescript tsc index.js --declaration --allowJs --emitDeclarationOnly --outDir types --target es2017 --skipLibCheck & node ./bin/createPluginsTypeFiles.js",
@@ -86,6 +87,7 @@
     "socket.io-client": "^4.8.3",
     "tern": "^0.24.3",
     "tesseract.js": "^5.1.1",
+    "turndown": "7.2.2",
     "uuid": "^9.0.0",
     "ws": "^7.5.9",
     "xlsx": "^0.18.5",

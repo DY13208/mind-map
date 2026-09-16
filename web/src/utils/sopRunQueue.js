@@ -797,7 +797,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
           job.completedNotifyKeys = result.completedNotifyKeys.slice()
         } else {
           const keys = (result.notifyResults || [])
-            .filter(r => r && r.notifyKey && (r.dispatchOk || r.cpdaOk || r.skipped))
+            .filter(r => r && r.notifyKey && r.dispatchOk)
             .map(r => r.notifyKey)
           job.completedNotifyKeys = Array.from(
             new Set([...(job.completedNotifyKeys || []), ...keys])
