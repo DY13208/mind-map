@@ -139,7 +139,7 @@
         class="toolbarBtn"
         data-testid="generalization"
         :class="{
-          disabled: activeNodes.length <= 0 || hasRoot || hasGeneralization
+          disabled: !canAddGeneralization
         }"
         @click="$bus.$emit('execCommand', 'ADD_GENERALIZATION')"
       >
@@ -274,6 +274,11 @@ export default {
           return node.isGeneralization
         }) !== -1
       )
+    },
+    canAddGeneralization() {
+      return this.activeNodes.some(node => {
+        return node && !node.isRoot && !node.isGeneralization
+      })
     },
     annotationRightHasBtn() {
       const index = this.list.findIndex(item => {

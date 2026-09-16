@@ -1,14 +1,22 @@
 const crypto = require('crypto')
+const fs = require('fs')
 const COS = require('cos-nodejs-sdk-v5')
 const {
   MAX_BYTES,
+  COS_SLICE_BYTES,
+  EXTRACT_WAIT_MAX_BYTES,
+  EXTRACT_CONCURRENCY,
   isAllowedFile,
   normalizeMime,
   safeFileName,
   kindOf
 } = require('./limits')
+const pLimit = require('p-limit')
 const { extractBuffer } = require('./extract')
 const { fetchSafeUrl } = require('./ssrf')
+const binary = require('./binary')
+
+const extractLimit = pLimit(EXTRACT_CONCURRENCY)
 
 const cos = new COS({
   SecretId: process.env.TENCENT_COS_SECRET_ID,
@@ -35,6 +43,18 @@ function attachmentCosKey(roomKey, contentHash) {
 
 function hashBuffer(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex')
+}
+
+async function hashFile(filePath) {
+  const hash = crypto.createHash('sha256')
+  const stream = fs.createReadStream(filePath)
+  for await (const chunk of stream) hash.update(chunk)
+  return hash.digest('hex')
+}
+
+async function statSize(filePath) {
+  const stat = await fs.promises.stat(filePath)
+  return Number(stat.size || 0)
 }
 
 function newId() {
@@ -141,6 +161,20 @@ async function putObject(cosKey, buffer, mimeType) {
   return true
 }
 
+async function putObjectFromFile(cosKey, filePath, mimeType) {
+  if (!storeEnabled) return false
+  await cosCall('uploadFile', {
+    Bucket,
+    Region,
+    Key: cosKey,
+    FilePath: filePath,
+    SliceSize: COS_SLICE_BYTES,
+    ContentType: mimeType || 'application/octet-stream',
+    ACL: acl
+  })
+  return true
+}
+
 async function getObjectBuffer(cosKey) {
   if (!storeEnabled || !cosKey) {
     const err = new Error('附件原文件未存储，无法查看或重新解析')
@@ -190,20 +224,28 @@ async function updateExtraction(db, id, patch) {
   return rowToDto(res.rows[0])
 }
 
+async function loadBuffer(options = {}) {
+  if (Buffer.isBuffer(options.buffer)) return options.buffer
+  if (options.filePath) return fs.promises.readFile(options.filePath)
+  const err = new Error('缺少 roomKey 或文件内容')
+  err.statusCode = 400
+  err.code = 'INVALID_UPLOAD'
+  throw err
+}
+
 async function createFromBuffer(db, options = {}) {
   const roomKey = String(options.roomKey || '').trim()
-  const buffer = options.buffer
-  if (!roomKey || !Buffer.isBuffer(buffer)) {
+  const filePath = options.filePath
+  const hasBuffer = Buffer.isBuffer(options.buffer)
+  if (!roomKey || (!hasBuffer && !filePath)) {
     const err = new Error('缺少 roomKey 或文件内容')
     err.statusCode = 400
     err.code = 'INVALID_UPLOAD'
     throw err
   }
-  if (buffer.length > MAX_BYTES) {
-    const err = new Error(`文件过大（最多 ${MAX_BYTES} 字节）`)
-    err.statusCode = 413
-    err.code = 'FILE_TOO_LARGE'
-    throw err
+  const byteSize = hasBuffer ? options.buffer.length : await statSize(filePath)
+  if (byteSize > MAX_BYTES) {
+    throw binary.fileTooLargeError(MAX_BYTES)
   }
   const fileName = safeFileName(options.fileName || 'file')
   const mimeType = normalizeMime(options.mimeType, fileName)
@@ -214,14 +256,14 @@ async function createFromBuffer(db, options = {}) {
     throw err
   }
 
-  const contentHash = hashBuffer(buffer)
+  const contentHash = hasBuffer
+    ? hashBuffer(options.buffer)
+    : await hashFile(filePath)
   const existing = await getByHash(db, roomKey, contentHash)
   if (existing) {
-    // Dedup: re-extract only when previous attempt failed and force is set.
-    if (
-      options.forceExtract &&
-      existing.status === 'failed'
-    ) {
+    if (options.cleanupFile) await binary.unlinkQuiet(filePath)
+    if (options.forceExtract && existing.status === 'failed') {
+      const buffer = await loadBuffer(options)
       return reextract(db, existing, buffer)
     }
     return { ...existing, deduped: true }
@@ -231,46 +273,99 @@ async function createFromBuffer(db, options = {}) {
   const cosKey = attachmentCosKey(roomKey, contentHash)
   let storedKey = null
   try {
-    if (await putObject(cosKey, buffer, mimeType)) storedKey = cosKey
+    const uploaded = filePath
+      ? await putObjectFromFile(cosKey, filePath, mimeType)
+      : await putObject(cosKey, options.buffer, mimeType)
+    if (uploaded) storedKey = cosKey
   } catch (err) {
     console.warn('[nodeKnowledge] cos put failed', err && err.message)
   }
 
-  await db.query(
-    `insert into node_attachments (
+  try {
+    await db.query(
+      `insert into node_attachments (
        id, room_key, node_uid, content_hash, file_name, mime_type, byte_size,
        cos_key, status, source_kind, created_by
      ) values ($1,$2,$3,$4,$5,$6,$7,$8,'processing',$9,$10)`,
-    [
-      id,
-      roomKey,
-      String(options.nodeUid || '').slice(0, 120),
-      contentHash,
-      fileName,
-      mimeType,
-      buffer.length,
-      storedKey,
-      options.sourceKind || 'attachment',
-      String(options.createdBy || '').slice(0, 160)
-    ]
-  )
-
-  let extracted
-  try {
-    extracted = await extractBuffer(buffer, { fileName, mimeType })
+      [
+        id,
+        roomKey,
+        String(options.nodeUid || '').slice(0, 120),
+        contentHash,
+        fileName,
+        mimeType,
+        byteSize,
+        storedKey,
+        options.sourceKind || 'attachment',
+        String(options.createdBy || '').slice(0, 160)
+      ]
+    )
   } catch (err) {
-    extracted = {
-      status: 'failed',
-      extractedText: '',
-      errorMessage: (err && err.message) || '附件解析失败'
+    if (String(err && err.code) === '23505') {
+      if (options.cleanupFile) await binary.unlinkQuiet(filePath)
+      const raced = await getByHash(db, roomKey, contentHash)
+      if (raced) return { ...raced, deduped: true }
+    }
+    throw err
+  }
+
+  const waitExtract =
+    options.waitExtract != null
+      ? !!options.waitExtract
+      : byteSize <= EXTRACT_WAIT_MAX_BYTES
+
+  const runExtract = async () => {
+    try {
+      const buffer = await loadBuffer(options)
+      let extracted
+      try {
+        extracted = await extractBuffer(buffer, { fileName, mimeType })
+      } catch (err) {
+        extracted = {
+          status: 'failed',
+          extractedText: '',
+          errorMessage: (err && err.message) || '附件解析失败'
+        }
+      }
+      return updateExtraction(db, id, {
+        status: extracted.status,
+        errorMessage: extracted.errorMessage,
+        extractedText: extracted.extractedText
+      })
+    } finally {
+      if (options.cleanupFile) await binary.unlinkQuiet(filePath)
     }
   }
-  const saved = await updateExtraction(db, id, {
-    status: extracted.status,
-    errorMessage: extracted.errorMessage,
-    extractedText: extracted.extractedText
+
+  if (waitExtract) {
+    const saved = await extractLimit(() => runExtract())
+    return {
+      ...saved,
+      deduped: false,
+      kind: kindOf(fileName, mimeType)
+    }
+  }
+
+  extractLimit(() => runExtract()).catch(err => {
+    console.warn('[nodeKnowledge] background extract failed', err && err.message)
   })
-  return { ...saved, deduped: false, kind: extracted.kind || kindOf(fileName, mimeType) }
+  return {
+    id,
+    roomKey,
+    nodeUid: String(options.nodeUid || '').slice(0, 120),
+    contentHash,
+    fileName,
+    mimeType,
+    byteSize,
+    status: 'processing',
+    errorMessage: '',
+    extractedText: '',
+    extractedChars: 0,
+    sourceKind: options.sourceKind || 'attachment',
+    createdBy: String(options.createdBy || '').slice(0, 160),
+    deduped: false,
+    kind: kindOf(fileName, mimeType)
+  }
 }
 
 async function reextract(db, existing, buffer) {
@@ -361,6 +456,28 @@ async function ingestUpload(db, roomKey, body, actor = {}) {
   })
 }
 
+async function ingestBinaryRequest(db, roomKey, req, actor = {}) {
+  const meta = binary.metaFromHeaders(req)
+  const received = await binary.receiveBinaryToTempFile(req, MAX_BYTES)
+  try {
+    return await createFromBuffer(db, {
+      roomKey,
+      filePath: received.filePath,
+      fileName: meta.fileName,
+      mimeType: meta.mimeType,
+      nodeUid: meta.nodeUid,
+      sourceKind: meta.sourceKind,
+      createdBy: actor.id || '',
+      forceExtract: meta.forceExtract,
+      cleanupFile: true,
+      waitExtract: received.byteSize <= EXTRACT_WAIT_MAX_BYTES
+    })
+  } catch (err) {
+    await binary.unlinkQuiet(received.filePath)
+    throw err
+  }
+}
+
 async function ensureSources(db, roomKey, sources, actor = {}) {
   const results = []
   for (const source of sources || []) {
@@ -448,6 +565,7 @@ module.exports = {
   reextractStored,
   createFromBuffer,
   ingestUpload,
+  ingestBinaryRequest,
   ensureSources,
   hashBuffer,
   MAX_BYTES,

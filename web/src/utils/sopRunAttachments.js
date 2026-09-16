@@ -1,12 +1,12 @@
 import { uploadNodeAttachment } from './nodeAttachmentApi'
 
-export const SOP_ATTACHMENT_ACCEPT = '.pdf,.docx,.xlsx,.csv,.txt,.md,.markdown,.log,.json,.png,.jpg,.jpeg,.webp,.gif'
+export const SOP_ATTACHMENT_ACCEPT = '.pdf,.docx,.xlsx,.csv,.txt,.md,.markdown,.log,.json,.html,.htm,.png,.jpg,.jpeg,.webp,.gif'
 export const SOP_ATTACHMENT_LIMIT = 5
 const MAX_BYTES = 5 * 1024 * 1024
 
 export function validateSopAttachment(file) {
-  if (!/\.(pdf|docx|xlsx|csv|txt|md|markdown|log|json|png|jpe?g|webp|gif)$/i.test(file.name)) {
-    return '请选择 PDF、Word（.docx）、Excel（.xlsx）、文本或图片文件'
+  if (!/\.(pdf|docx|xlsx|csv|txt|md|markdown|log|json|html?|png|jpe?g|webp|gif)$/i.test(file.name)) {
+    return '请选择 PDF、Word（.docx）、Excel（.xlsx）、HTML、文本或图片文件'
   }
   if (file.size > MAX_BYTES) return '单个附件不能超过 5 MB'
   if (!file.size) return '不能上传空文件'
@@ -14,17 +14,10 @@ export function validateSopAttachment(file) {
 }
 
 export async function uploadSopAttachment(roomKey, file) {
-  const contentBase64 = await new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(new Error('读取附件失败，请重新选择'))
-    reader.onabort = () => reject(new Error('附件读取已取消'))
-    reader.readAsDataURL(file)
-  })
   const response = await uploadNodeAttachment(roomKey, {
+    file,
     fileName: file.name,
     mimeType: file.type || 'application/octet-stream',
-    contentBase64,
     sourceKind: 'attachment'
   })
   const attachment = response && response.attachment

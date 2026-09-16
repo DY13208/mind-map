@@ -71,10 +71,22 @@ async function main() {
   assert.equal(limits.isAllowedFile('a.pdf', 'application/pdf'), true)
   assert.equal(limits.isAllowedFile('a.docx', ''), true)
   assert.equal(limits.isAllowedFile('a.xlsx', ''), true)
+  assert.equal(limits.isAllowedFile('a.xlsm', ''), true)
+  assert.equal(limits.isAllowedFile('a.ods', ''), true)
+  assert.equal(limits.isAllowedFile('a.pptx', ''), true)
+  assert.equal(limits.isAllowedFile('a.doc', ''), true)
   assert.equal(limits.isAllowedFile('a.png', 'image/png'), true)
+  assert.equal(limits.isAllowedFile('a.html', ''), true)
+  assert.equal(limits.isAllowedFile('a.htm', 'text/html'), true)
   assert.equal(limits.isAllowedFile('a.exe', 'application/octet-stream'), false)
   assert.equal(limits.kindOf('x.md', ''), 'text')
+  assert.equal(limits.kindOf('x.html', ''), 'html')
+  assert.equal(limits.kindOf('page.htm', 'text/html'), 'html')
   assert.equal(limits.kindOf('x.pdf', ''), 'pdf')
+  assert.equal(limits.kindOf('x.xlsm', ''), 'xlsx')
+  assert.equal(limits.kindOf('x.ods', ''), 'xlsx')
+  assert.equal(limits.kindOf('x.pptx', ''), 'pptx')
+  assert.equal(limits.kindOf('x.doc', ''), 'doc')
 
   assert.throws(() => ssrf.assertSafeHttpUrl('file:///etc/passwd'), /http/)
   assert.throws(() => ssrf.assertSafeHttpUrl('http://127.0.0.1/a'), /本地|私网/)
@@ -91,10 +103,36 @@ async function main() {
   assert.equal(textResult.status, 'ready')
   assert.match(textResult.extractedText, /付款条件/)
 
+  const html = await extract.extractBuffer(
+    Buffer.from(
+      '<html><head><style>p{color:red}</style></head><body><h1>采购说明</h1><script>alert(1)</script><p>验收后 30 天付款</p></body></html>',
+      'utf8'
+    ),
+    { fileName: '说明.html', mimeType: 'text/html' }
+  )
+  assert.equal(html.status, 'ready')
+  assert.equal(html.kind, 'html')
+  assert.match(html.extractedText, /采购说明/)
+  assert.match(html.extractedText, /验收后 30 天付款/)
+  assert.ok(!html.extractedText.includes('alert'))
+  assert.ok(!html.extractedText.includes('color:red'))
+
   assert.equal(
     extract.compactXlsxCsv('标题,,,\n甲,乙,,\n,,,\n,,,'),
     '标题\n甲,乙'
   )
+
+  const pptxZip = new JSZip()
+  pptxZip.file('ppt/slides/slide1.xml', '<a:p><a:r><a:t>项目进展</a:t></a:r></a:p>')
+  const pptx = await extract.extractBuffer(
+    await pptxZip.generateAsync({ type: 'nodebuffer' }),
+    { fileName: '汇报.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }
+  )
+  assert.equal(pptx.status, 'ready')
+  assert.match(pptx.extractedText, /项目进展/)
+  const doc = await extract.extractBuffer(Buffer.from('legacy'), { fileName: '旧文档.doc', mimeType: 'application/msword' })
+  assert.equal(doc.status, 'failed')
+  assert.match(doc.errorMessage, /暂不支持文本解析/)
 
   const zip = new JSZip()
   zip.file(
@@ -165,17 +203,57 @@ async function main() {
 
   let denied = null
   try {
-    await store.createFromBuffer(db, {
-      roomKey: 'room-demo',
-      buffer: Buffer.alloc(limits.MAX_BYTES + 10),
-      fileName: 'big.txt',
-      mimeType: 'text/plain'
-    })
+    const { Readable } = require('stream')
+    const bigReq = Readable.from([])
+    bigReq.headers = {
+      'content-type': 'application/octet-stream',
+      'content-length': String(limits.MAX_BYTES + 1),
+      'x-mind-file-name': 'big.txt'
+    }
+    bigReq.destroy = function destroy() {}
+    await store.ingestBinaryRequest(db, 'room-demo', bigReq, {})
   } catch (err) {
     denied = err
   }
   assert.ok(denied)
   assert.equal(denied.code, 'FILE_TOO_LARGE')
+  assert.equal(limits.DEFAULT_MAX_BYTES, 200 * 1024 * 1024)
+  assert.equal(limits.parseByteLimit('', 12), 12)
+  assert.equal(limits.parseByteLimit('4096', 12), 4096)
+
+  const fs = require('fs')
+  const os = require('os')
+  const path = require('path')
+  const tmp = path.join(os.tmpdir(), `mm-att-test-${Date.now()}.txt`)
+  fs.writeFileSync(tmp, 'from disk file', 'utf8')
+  const fromFile = await store.createFromBuffer(db, {
+    roomKey: 'room-demo',
+    filePath: tmp,
+    fileName: 'from-file.txt',
+    mimeType: 'text/plain',
+    cleanupFile: true
+  })
+  assert.equal(fromFile.status, 'ready')
+  assert.match(fromFile.extractedText, /from disk file/)
+  assert.equal(fs.existsSync(tmp), false)
+
+  const { Readable } = require('stream')
+  const payload = Buffer.from('streamed attachment text', 'utf8')
+  const req = Readable.from([payload])
+  req.headers = {
+    'content-type': 'application/octet-stream',
+    'content-length': String(payload.length),
+    'x-mind-file-name': encodeURIComponent('stream.txt'),
+    'x-mind-mime-type': 'text/plain',
+    'x-mind-node-uid': 'node-1'
+  }
+  const streamed = await store.ingestBinaryRequest(db, 'room-stream', req, {
+    id: 'tester'
+  })
+  assert.equal(streamed.status, 'ready')
+  assert.equal(streamed.deduped, false)
+  assert.equal(streamed.fileName, 'stream.txt')
+  assert.match(streamed.extractedText, /streamed attachment/)
 
   const ensured = await store.ensureSources(db, 'room-demo', [
     { attachmentId: first.id, name: 'a.txt' },

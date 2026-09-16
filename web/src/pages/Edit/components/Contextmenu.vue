@@ -32,8 +32,9 @@
       </div>
       <div
         class="item"
-        @click="exec('ADD_GENERALIZATION')"
-        :class="{ disabled: insertNodeBtnDisabled }"
+        data-testid="insert-summary"
+        @click="exec('ADD_GENERALIZATION', insertSummaryBtnDisabled)"
+        :class="{ disabled: insertSummaryBtnDisabled }"
       >
         <span class="name">{{ $t('contextmenu.insertSummary') }}</span>
         <span class="desc">Ctrl + G</span>
@@ -215,7 +216,8 @@ export default {
       numberType: '',
       numberLevel: '',
       subItemsShowLeft: false,
-      isNodeMousedown: false
+      isNodeMousedown: false,
+      selectedNodes: []
     }
   },
   computed: {
@@ -263,6 +265,14 @@ export default {
     },
     insertNodeBtnDisabled() {
       return !this.node || this.node.isRoot || this.node.isGeneralization
+    },
+    insertSummaryBtnDisabled() {
+      const nodes = this.selectedNodes.length
+        ? this.selectedNodes
+        : this.node
+          ? [this.node]
+          : []
+      return !nodes.some(node => node && !node.isRoot && !node.isGeneralization)
     },
     upNodeBtnDisabled() {
       if (!this.node || this.node.isRoot || this.node.isGeneralization) {
@@ -314,6 +324,7 @@ export default {
   },
   created() {
     this.$bus.$on('node_contextmenu', this.show)
+    this.$bus.$on('multi_select_end', this.onMultiSelectEnd)
     this.$bus.$on('node_click', this.hide)
     this.$bus.$on('draw_click', this.hide)
     this.$bus.$on('expand_btn_click', this.hide)
@@ -324,6 +335,7 @@ export default {
   },
   beforeDestroy() {
     this.$bus.$off('node_contextmenu', this.show)
+    this.$bus.$off('multi_select_end', this.onMultiSelectEnd)
     this.$bus.$off('node_click', this.hide)
     this.$bus.$off('draw_click', this.hide)
     this.$bus.$off('expand_btn_click', this.hide)
@@ -353,7 +365,8 @@ export default {
       this.type = 'node'
       this.isShow = true
       this.node = node
-      const number = this.node.getData('number')
+      this.selectedNodes = this.collectSelectedNodes(node)
+      const number = this.node && this.node.getData && this.node.getData('number')
       if (number) {
         this.numberType = number.type || 1
         this.numberLevel = number.level === '' ? 1 : number.level
@@ -363,6 +376,96 @@ export default {
         this.left = x
         this.top = y
       })
+    },
+
+    onMultiSelectEnd(payload) {
+      const nodes = (payload && payload.nodes) || []
+      if (nodes.length <= 1) return
+      const anchor =
+        nodes.find(item => item && !item.isRoot && !item.isGeneralization) ||
+        nodes[0]
+      this.type = 'node'
+      this.isShow = true
+      this.node = anchor
+      this.selectedNodes = nodes.slice()
+      this.$nextTick(() => {
+        const { x, y } = this.getShowPosition(
+          (payload.clientX || 0) + 10,
+          (payload.clientY || 0) + 10
+        )
+        this.left = x
+        this.top = y
+      })
+    },
+
+    nodeUid(node) {
+      if (!node) return ''
+      return (node.getData && node.getData('uid')) || node.uid || ''
+    },
+
+    collectSelectedNodes(node) {
+      const renderer = this.mindMap && this.mindMap.renderer
+      const active = (renderer && renderer.activeNodeList) || []
+      const select = this.mindMap && this.mindMap.select
+      const cached =
+        select && typeof select.getMultiSelectCache === 'function'
+          ? select.getMultiSelectCache()
+          : []
+      const uid = this.nodeUid(node)
+      if (
+        cached.length > 1 &&
+        cached.some(item => this.nodeUid(item) === uid)
+      ) {
+        return cached.slice()
+      }
+      if (active.length > 1) {
+        return active.slice()
+      }
+      return node ? [node] : []
+    },
+
+    restoreSelectedNodes() {
+      const live = this.resolveLiveSelectedNodes()
+      const renderer = this.mindMap && this.mindMap.renderer
+      if (!renderer || live.length <= 1) return live
+      if (typeof renderer.clearActiveNodeList === 'function') {
+        renderer.clearActiveNodeList()
+      }
+      live.forEach(item => {
+        if (item && typeof renderer.addNodeToActiveList === 'function') {
+          renderer.addNodeToActiveList(item, true)
+        }
+      })
+      if (typeof renderer.emitNodeActiveEvent === 'function') {
+        renderer.emitNodeActiveEvent()
+      }
+      return live
+    },
+
+    resolveLiveSelectedNodes() {
+      const renderer = this.mindMap && this.mindMap.renderer
+      const find =
+        renderer && typeof renderer.findNodeByUid === 'function'
+          ? renderer.findNodeByUid.bind(renderer)
+          : null
+      const cached =
+        this.mindMap &&
+        this.mindMap.select &&
+        typeof this.mindMap.select.getMultiSelectCache === 'function'
+          ? this.mindMap.select.getMultiSelectCache()
+          : []
+      const raw = this.selectedNodes.length
+        ? this.selectedNodes
+        : this.node
+          ? [this.node]
+          : []
+      const source = raw.length > 1 ? raw : cached.length > 1 ? cached : raw
+      return source
+        .map(item => {
+          const uid = this.nodeUid(item)
+          return (uid && find && find(uid)) || item
+        })
+        .filter(item => item && typeof item.getData === 'function')
     },
 
     onNodeMousedown() {
@@ -400,17 +503,31 @@ export default {
       }
       if (this.isNodeMousedown) {
         this.isNodeMousedown = false
+        this.isMousedown = false
         return
       }
       this.isMousedown = false
-      if (
+      const moved =
         Math.abs(this.mosuedownX - e.clientX) > 3 ||
         Math.abs(this.mosuedownY - e.clientY) > 3
-      ) {
+      if (moved) {
+        const cached = this.getCachedMultiNodes()
+        // 右键框选结束后马上要点「插入概要」，不能把刚弹出的菜单关掉
+        if (cached.length > 1) {
+          return
+        }
         this.hide()
         return
       }
       this.show2(e)
+    },
+
+    getCachedMultiNodes() {
+      const select = this.mindMap && this.mindMap.select
+      if (select && typeof select.getMultiSelectCache === 'function') {
+        return select.getMultiSelectCache() || []
+      }
+      return []
     },
 
     // 画布右键显示
@@ -431,6 +548,7 @@ export default {
       this.top = -9999
       this.type = ''
       this.node = ''
+      this.selectedNodes = []
       this.numberType = ''
       this.numberLevel = ''
     },
@@ -441,6 +559,17 @@ export default {
         return
       }
       switch (key) {
+        case 'ADD_GENERALIZATION': {
+          const nodes = this.resolveLiveSelectedNodes()
+          this.$bus.$emit(
+            'execCommand',
+            'ADD_GENERALIZATION',
+            null,
+            true,
+            nodes
+          )
+          break
+        }
         case 'COPY_NODE':
           this.mindMap.renderer.copy()
           break

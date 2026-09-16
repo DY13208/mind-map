@@ -22,6 +22,7 @@ const {
   setActiveEventBus
 } = require('./eventBus')
 const { startOutboxPublisher } = require('./outbox')
+const { isTusPath } = require('./nodeKnowledge')
 const {
   initAuth,
   isAuthEnabled,
@@ -85,7 +86,8 @@ function trackSocket(conn) {
 const server = http.createServer(async (request, response) => {
   try {
     const pathname = new URL(request.url, 'http://127.0.0.1').pathname
-    if (request.method === 'OPTIONS' && pathname.startsWith('/api/')) {
+    const tusRequest = isTusPath(pathname)
+    if (request.method === 'OPTIONS' && pathname.startsWith('/api/') && !tusRequest) {
       applyCorsHeaders(request, response)
       response.writeHead(isAllowedOrigin(request) ? 204 : 403)
       response.end()
@@ -93,11 +95,19 @@ const server = http.createServer(async (request, response) => {
     }
     const authHandled = await handleAuthApi(request, response)
     if (authHandled) return
-    if (pathname.startsWith('/api/') && pathname !== '/api/health') {
+    if (
+      pathname.startsWith('/api/') &&
+      pathname !== '/api/health' &&
+      !(tusRequest && request.method === 'OPTIONS')
+    ) {
       const authenticated = await requireAuthenticatedRequest(request, response)
       if (!authenticated) return
     }
     if (handleMcpConfigApi(request, response, pathname)) return
+    if (tusRequest) {
+      const handledTus = await require('./nodeKnowledge').handleApi(request, response)
+      if (handledTus) return
+    }
     const handled = await handleApi(request, response)
     if (handled) return
   } catch (err) {

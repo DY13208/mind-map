@@ -8,9 +8,11 @@ module.exports = {
   initSchema: store.initSchema,
   handleApi: http.handleApi,
   ingestUpload: store.ingestUpload,
+  ingestBinaryRequest: store.ingestBinaryRequest,
   ensureSources: store.ensureSources,
   getById: store.getById,
   extractBuffer: extract.extractBuffer,
   limits,
-  ssrf
+  ssrf,
+  isTusPath: http.isTusPath
 }

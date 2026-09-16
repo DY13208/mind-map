@@ -197,6 +197,7 @@ export const nodeDataNoStylePropList = [
   'attachmentUrl',
   'attachmentName',
   'attachmentId',
+  'attachmentMimeType',
   'attachmentStatus',
   'attachmentError',
   'attachmentExtractedText',
