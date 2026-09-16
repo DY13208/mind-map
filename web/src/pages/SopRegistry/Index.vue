@@ -610,7 +610,9 @@
       <div class="runComposeBox" @paste="onRunPaste">
         <input ref="runAttachmentInput" class="runAttachmentInput" type="file" multiple
           :accept="SOP_ATTACHMENT_ACCEPT" @change="onRunFilesPicked" />
+        <input ref="runImageInput" class="runAttachmentInput" type="file" multiple accept="image/*" @change="onRunFilesPicked" />
         <el-input
+          ref="runNoteInput"
           v-model="runExtraNote"
           type="textarea"
           :rows="3"
@@ -619,14 +621,12 @@
           class="runExtra"
         ></el-input>
         <span v-if="!runExtraNote" class="runComposeExample">例如：给黄炜龙发个代办；或：我要招聘一个初级客服</span>
-        <el-button class="runUploadButton" size="small" icon="el-icon-paperclip"
-          @click="$refs.runAttachmentInput.click()">上传文件</el-button>
         <div class="runComposeToolbar">
-          <span class="runPasteIcons" aria-hidden="true">
-            <i class="el-icon-picture-outline"></i>
-            <i class="el-icon-document"></i>
-            <i class="el-icon-full-screen"></i>
-          </span>
+          <div class="runPasteIcons">
+            <button type="button" title="上传图片" aria-label="上传图片" @click="$refs.runImageInput.click()"><i class="el-icon-picture-outline"></i></button>
+            <button type="button" title="上传文件" aria-label="上传文件" @click="$refs.runAttachmentInput.click()"><i class="el-icon-document"></i></button>
+            <button type="button" title="聚焦输入框，可使用 Ctrl+V 粘贴截图或文件" aria-label="聚焦输入框以粘贴" @click="$refs.runNoteInput.focus()"><i class="el-icon-full-screen"></i></button>
+          </div>
           <span class="runPasteHint">支持直接粘贴图片或文件（Ctrl+V）</span>
           <span class="runNoteCount" aria-label="已输入字数">{{ runExtraNote.length }} 字</span>
         </div>

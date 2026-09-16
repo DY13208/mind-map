@@ -114,6 +114,7 @@
           <span>Cognee</span>
         </router-link>
       </nav>
+      <AccessNotifications v-if="profile" :key="profile.id" :collapsed="sidebarCollapsed" class="sidebarNotifications" />
       <div class="sidebarFooter" v-if="profile">
         <div class="accountInfo" :title="`${profile.name}（${profile.id}）`">
           <UserAvatar :person="profile" size="small" fallback="依" />
@@ -148,6 +149,7 @@
 import productService from '@/services/productService'
 import { logoutAndRedirect } from '@/utils/auth'
 import UserAvatar from '@/components/UserAvatar.vue'
+import AccessNotifications from '@/components/AccessNotifications.vue'
 const SIDEBAR_PREFERENCE_KEY = 'product-shell-sidebar-collapsed'
 const isSmallScreen = () => window.matchMedia('(max-width: 760px)').matches
 const readSidebarPreference = () => {
@@ -160,7 +162,7 @@ const readSidebarPreference = () => {
 }
 export default {
   name: 'ProductShellLayout',
-  components: { UserAvatar },
+  components: { UserAvatar, AccessNotifications },
   data() {
     const preference = readSidebarPreference()
     return {
@@ -452,6 +454,7 @@ export default {
     padding: 10px 10px 2px;
     border-top: 1px solid #eef1ef;
   }
+  .sidebarNotifications { flex-shrink: 0; }
   .accountInfo {
     display: flex;
     gap: 10px;

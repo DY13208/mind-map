@@ -58,16 +58,18 @@ body.isDark .sopRunDialog {
   .runComposeBox { position: relative; border: 1px dashed #ccd7e9; border-radius: 7px; background: #fbfcff; }
   .runComposeBox:focus-within { border-color: #7ca1df; box-shadow: 0 0 0 2px rgba(55, 111, 206, .08); }
   .runAttachmentInput { display: none; }
-  .runExtra { display: block; padding: 15px 145px 0 24px; box-sizing: border-box; }
+  .runExtra { display: block; padding: 15px 24px 0; box-sizing: border-box; }
   .runExtra .el-textarea__inner { width: 100%; min-height: 78px !important; padding: 3px 0; border: 0; border-radius: 0; background: transparent; color: var(--run-ink); caret-color: var(--run-ink); font: 14px/25px Inter, 'PingFang SC', 'Microsoft YaHei', sans-serif; resize: vertical; box-shadow: none; }
   .runExtra .el-textarea__inner::placeholder { color: #657694; }
   .runExtra .el-textarea__inner:focus { border: 0; box-shadow: none; }
-  .runComposeExample { position: absolute; top: 50px; right: 145px; left: 24px; color: #6e7e97; font-size: 13px; line-height: 21px; pointer-events: none; }
+  .runComposeExample { position: absolute; top: 50px; right: 24px; left: 24px; color: #6e7e97; font-size: 13px; line-height: 21px; pointer-events: none; }
   .runUploadButton { position: absolute; top: 16px; right: 16px; height: 42px; padding: 0 16px; font-size: 14px; }
   .runUploadButton > i { font-size: 20px; vertical-align: -2px; }
   .runComposeToolbar { display: flex; align-items: center; gap: 14px; min-height: 50px; padding: 0 16px 8px 24px; }
   .runPasteIcons { display: inline-flex; flex-shrink: 0; gap: 12px; }
-  .runPasteIcons i { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 38px; border-radius: 8px; background: #edf1f7; color: #14213d; font-size: 21px; }
+  .runPasteIcons button { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 38px; padding: 0; border: 0; border-radius: 8px; background: #edf1f7; color: #14213d; cursor: pointer; }
+  .runPasteIcons button:hover { background: #e2e9f4; }
+  .runPasteIcons i { font-size: 21px; }
   .runPasteHint { padding-left: 14px; border-left: 1px solid var(--run-border); color: var(--run-muted); font-size: 12px; line-height: 20px; }
   .runNoteCount { margin-left: auto; flex-shrink: 0; color: var(--run-muted); font-size: 13px; }
   .runAttachmentList { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
@@ -117,7 +119,8 @@ body.isDark .sopRunDialog {
     .runComposeExample { display: none; }
     .runUploadButton { position: static; margin: 0 14px 10px; }
     .runComposeToolbar { padding: 0 14px 8px; gap: 8px; min-height: 36px; }
-    .runPasteIcons { display: none; }
+    .runPasteIcons { gap: 6px; }
+    .runPasteIcons button { width: 32px; height: 34px; }
     .runPasteHint { padding: 0; border: 0; font-size: 11px; }
     .runNoteCount { font-size: 11px; }
     .runFileName { max-width: 150px; }
