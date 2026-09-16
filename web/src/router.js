@@ -195,20 +195,7 @@ const routes = [
   },
   {
     path: '/sop-tasks',
-    component: () =>
-      import(
-        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'
-      ),
-    children: [
-      {
-        path: '',
-        name: 'SopTasks',
-        component: () =>
-          import(
-            /* webpackChunkName: "sop-tasks" */ './pages/SopRegistry/SopTasksPage.vue'
-          )
-      }
-    ]
+    redirect: '/sop'
   },
   {
     path: '/sop',
