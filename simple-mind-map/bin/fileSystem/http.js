@@ -232,18 +232,52 @@ async function handleFileSystemApi(req, res, options = {}) {
         })
       }
       const previousOwner = folder.created_by
-      if (typeof fs.store.updateFolderOwner === 'function') {
-        await fs.store.updateFolderOwner(transferFolderId, targetId)
-      } else {
-        await fs.store.query(
-          `update folders set created_by = $2, updated_at = now()
-           where id = $1 and deleted_at is null`,
-          [transferFolderId, targetId]
-        )
+      const folderIds =
+        typeof fs.store.listFolderSubtreeIds === 'function'
+          ? await fs.store.listFolderSubtreeIds(transferFolderId)
+          : [transferFolderId]
+      for (const id of folderIds) {
+        if (typeof fs.store.updateFolderOwner === 'function') {
+          await fs.store.updateFolderOwner(id, targetId)
+        } else {
+          await fs.store.query(
+            `update folders set created_by = $2, updated_at = now()
+             where id = $1 and deleted_at is null`,
+            [id, targetId]
+          )
+        }
+        await fs.store.removeFolderMember(id, targetId).catch(() => {})
+        if (previousOwner && previousOwner !== targetId) {
+          await fs.store.setFolderMember(id, previousOwner, 'manager')
+        }
       }
-      await fs.store.removeFolderMember(transferFolderId, targetId).catch(() => {})
-      if (previousOwner && previousOwner !== targetId) {
-        await fs.store.setFolderMember(transferFolderId, previousOwner, 'manager')
+      const roomKeys = []
+      for (const id of folderIds) {
+        const keys = await fs.store.roomKeysInFolder(id)
+        roomKeys.push(...keys)
+      }
+      for (const roomKey of Array.from(new Set(roomKeys))) {
+        const room = await fs.store.getRoom(roomKey)
+        if (!room) continue
+        if (previousOwner && room.owner_id === previousOwner) {
+          await roomAcl.transferOwnership(
+            fs.store,
+            roomKey,
+            targetId,
+            previousOwner,
+            req.authUser && req.authUser.corpId
+          )
+          continue
+        }
+        if (room.owner_id === targetId) continue
+        await roomAcl.setFolderRole(
+          fs.store,
+          roomKey,
+          targetId,
+          'manager',
+          room.folder_id || transferFolderId,
+          req.authUser && req.authUser.corpId
+        )
       }
       const list = await listFolderMembersWithOwner(fs.store, transferFolderId)
       sendJson(res, 200, { ok: true, list, ownerId: targetId })
@@ -267,7 +301,10 @@ async function handleFileSystemApi(req, res, options = {}) {
           while (changed) { changed = false; departments.forEach(d => { if (selected.has(Number(d.parentId)) && !selected.has(Number(d.id))) { selected.add(Number(d.id)); changed = true } }) }
         }
         params.push(Array.from(selected).map(String))
-        where.push(`departments ?| $${params.length}::text[]`)
+        where.push(`exists (
+          select 1 from jsonb_array_elements(coalesce(departments, '[]'::jsonb)) elem
+          where btrim(elem::text, '"') = any($${params.length}::text[])
+        )`)
       }
       const rows = fs.store.kind === 'pg' ? (await fs.store.query(`select user_id from wecom_users where ${where.join(' and ')}`, params)).rows : []
       for (const row of rows) {
@@ -276,7 +313,6 @@ async function handleFileSystemApi(req, res, options = {}) {
         for (const roomKey of await fs.store.roomKeysInFolder(bulkFolderId)) {
           const room = await fs.store.getRoom(roomKey)
           if (room && room.owner_id === row.user_id) continue
-          if (role === 'manager') continue
           await roomAcl.setFolderRole(
             fs.store,
             roomKey,
@@ -340,7 +376,6 @@ async function handleFileSystemApi(req, res, options = {}) {
         await fs.store.setFolderMember(folderAcl.id, targetId, role)
         const roomKeys = await fs.store.roomKeysInFolder(folderAcl.id)
         for (const roomKey of roomKeys) {
-          if (role === 'manager') continue
           await roomAcl.setFolderRole(
             fs.store,
             roomKey,

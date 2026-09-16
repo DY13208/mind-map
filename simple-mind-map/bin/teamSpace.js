@@ -535,7 +535,10 @@ async function contacts(db, who, options = {}, fetchRemote, upsertContact) {
   if (query) { params.push(`%${query.replace(/[%_\\]/g, ch => `\\${ch}`)}%`); where.push(`(name ilike $${params.length} escape '\\' or user_id ilike $${params.length} escape '\\' or wecom_userid ilike $${params.length} escape '\\')`) }
   if (options.departmentId) {
     params.push(String(options.departmentId))
-    where.push(`departments ? $${params.length}`)
+    where.push(`exists (
+      select 1 from jsonb_array_elements(coalesce(departments, '[]'::jsonb)) elem
+      where btrim(elem::text, '"') = $${params.length}
+    )`)
   }
   const count = await db.query(`select count(*)::int as total from wecom_users where ${where.join(' and ')}`, params)
   const page = params.concat([limit + 1, offset])

@@ -270,6 +270,22 @@ function createMemoryFileStore(seed = {}) {
       bump()
       return [...rooms.values()].filter(item => item.folder_id === id && !item.deleted_at).map(item => item.room_key)
     },
+    async listFolderSubtreeIds(id) {
+      bump()
+      const root = String(id || '')
+      const ids = []
+      if (!root || !folders.get(root) || folders.get(root).deleted_at) return ids
+      const queue = [root]
+      while (queue.length) {
+        const current = queue.shift()
+        if (ids.includes(current)) continue
+        ids.push(current)
+        for (const row of folders.values()) {
+          if (!row.deleted_at && row.parent_id === current) queue.push(row.id)
+        }
+      }
+      return ids
+    },
     async folderNameTaken(name, parentId, exceptId, teamId) {
       bump()
       const needle = String(name || '').trim().toLowerCase()
