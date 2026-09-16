@@ -108,6 +108,7 @@
                 v-if="row.type === 'department'"
                 class="departmentMemberToggle"
                 :value="areDepartmentMembersSelected(row.id)"
+                :disabled="loadingDepartmentIds.includes(String(row.id))"
                 @change="toggleDepartmentMembers(row.id, $event)"
                 >勾选全部成员</el-checkbox
               ><span
@@ -216,10 +217,19 @@
           <section class="detailSection existingSection">
             <div class="detailTitle">
               <h3>已有权限</h3>
-              <span>{{ members.length }} 人</span>
+              <span>{{ filteredMembers.length }} 人</span>
+            </div>
+            <div class="existingSearch">
+              <el-input
+                v-model.trim="memberQuery"
+                size="mini"
+                prefix-icon="el-icon-search"
+                clearable
+                placeholder="搜索已有权限成员"
+              />
             </div>
             <div class="existingList">
-              <div v-if="members.length" class="existingHead">
+              <div v-if="filteredMembers.length" class="existingHead">
                 <span>对象</span><span>权限</span><span>操作</span>
               </div>
               <div
@@ -231,18 +241,33 @@
                 ><span class="existingIdentity"
                   ><strong>{{ member.name || member.id }}</strong
                   ><small>{{ member.department || '成员' }}</small></span
+                ><span
+                  v-if="isOwnerRole(member.role)"
+                  class="ownerRoleLabel"
+                  >所有者</span
                 ><el-select
+                  v-else
                   size="mini"
                   :value="member.role"
-                  :disabled="isOwnerRole(member.role)"
                   @change="updateRole(member, $event)"
                   ><el-option
                     v-for="option in memberRoleSelectOptions"
                     :key="option.value"
                     :label="option.label"
                     :value="option.value"/></el-select
-                ><button
-                  v-if="!isOwnerRole(member.role)"
+                ><template v-if="isOwnerRole(member.role)">
+                  <button
+                    v-if="canTransferOwnership"
+                    class="transferBtn"
+                    type="button"
+                    @click="openTransferDialog(member)"
+                  >
+                    转移所有权
+                  </button>
+                  <span v-else class="ownerBadge">所有者</span>
+                </template>
+                <button
+                  v-else
                   class="removeBtn"
                   type="button"
                   @click="remove(member)"
@@ -250,23 +275,68 @@
                   移除
                 </button>
               </div>
-              <p v-if="!members.length && !loading" class="existingEmpty">
-                暂未添加成员
+              <p v-if="!filteredMembers.length && !loading" class="existingEmpty">
+                {{
+                  memberQuery
+                    ? '未找到匹配的已有权限成员'
+                    : '暂未添加成员'
+                }}
               </p>
             </div>
             <el-pagination
-              v-if="members.length > pageSize"
+              v-if="filteredMembers.length > pageSize"
               class="memberPager"
               small
               layout="prev, pager, next"
               :current-page.sync="page"
               :page-size="pageSize"
-              :total="members.length"
+              :total="filteredMembers.length"
             />
           </section>
         </aside>
       </div>
     </div>
+    <el-dialog
+      :visible.sync="transferVisible"
+      append-to-body
+      width="420px"
+      title="转移所有权"
+      custom-class="ownershipTransferDialog"
+      :close-on-click-modal="false"
+    >
+      <p class="transferHint">
+        将「{{ resourceName }}」的所有者权限转移给其他成员。转移后你将保留管理/编辑权限，但不再是所有者。
+      </p>
+      <el-select
+        v-model="transferTargetId"
+        filterable
+        clearable
+        placeholder="选择新的所有者"
+        style="width: 100%"
+      >
+        <el-option
+          v-for="candidate in transferCandidates"
+          :key="candidate.id"
+          :label="candidate.name || candidate.id"
+          :value="String(candidate.id)"
+        >
+          <span>{{ candidate.name || candidate.id }}</span>
+          <small style="float: right; color: #909399">{{
+            roleLabel(candidate.role)
+          }}</small>
+        </el-option>
+      </el-select>
+      <span slot="footer">
+        <el-button @click="transferVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :disabled="!transferTargetId"
+          :loading="busy"
+          @click="confirmTransferOwnership"
+          >确认转移</el-button
+        >
+      </span>
+    </el-dialog>
     <span slot="footer" class="permissionFooter"
       ><span class="footerHint"
         ><i class="el-icon-success" /> {{ resourceLabel }}权限变更实时生效</span
@@ -288,6 +358,7 @@
 import folderService from '@/services/folderService'
 import shareService from '@/services/shareService'
 import teamService from '@/services/teamService'
+import { getCurrentUser } from '@/utils/auth'
 export default {
   name: 'ShareFolderDialog',
   props: {
@@ -311,6 +382,7 @@ export default {
     loadingDepartmentIds: [],
     departmentLoadTasks: {},
     query: '',
+    memberQuery: '',
     searchTimer: null,
     searching: false,
     role: 'Viewer',
@@ -322,7 +394,9 @@ export default {
     selectedDepartmentIds: [],
     selectedUserIds: [],
     autoSelectMembers: true,
-    includeChildren: true
+    includeChildren: true,
+    transferVisible: false,
+    transferTargetId: ''
   }),
   computed: {
     shown: {
@@ -389,8 +463,7 @@ export default {
       if (this.isTeam) {
         return [
           { value: 'member', label: '成员' },
-          { value: 'admin', label: '管理员' },
-          { value: 'owner', label: '所有者' }
+          { value: 'admin', label: '管理员' }
         ]
       }
       const options = [
@@ -403,9 +476,42 @@ export default {
     defaultRole() {
       return this.isTeam ? 'member' : 'Viewer'
     },
+    currentUserId() {
+      const user = getCurrentUser() || {}
+      return String(user.id || user.userId || '').trim()
+    },
+    filteredMembers() {
+      const term = this.memberQuery.trim().toLowerCase()
+      if (!term) return this.members
+      return this.members.filter(member =>
+        [
+          member.name,
+          member.id,
+          member.userId,
+          member.wecomUserId,
+          member.department,
+          member.email,
+          member.position
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(term)
+      )
+    },
     pagedMembers() {
       const start = (this.page - 1) * this.pageSize
-      return this.members.slice(start, start + this.pageSize)
+      return this.filteredMembers.slice(start, start + this.pageSize)
+    },
+    transferCandidates() {
+      return this.members.filter(member => !this.isOwnerRole(member.role))
+    },
+    canTransferOwnership() {
+      if (!this.currentUserId) return false
+      return this.members.some(
+        member =>
+          this.isOwnerRole(member.role) && this.isCurrentUserMember(member)
+      )
     },
     departmentMap() {
       return this.departmentOptions.reduce((map, item) => {
@@ -569,9 +675,28 @@ export default {
     query() {
       this.searchContacts()
     },
-    members() {
-      const max = Math.max(1, Math.ceil(this.members.length / this.pageSize))
+    memberQuery() {
+      this.page = 1
+    },
+    filteredMembers() {
+      const max = Math.max(
+        1,
+        Math.ceil(this.filteredMembers.length / this.pageSize) || 1
+      )
       if (this.page > max) this.page = max
+    },
+    autoSelectMembers(value) {
+      if (!value) return
+      this.selectedDepartmentIds.forEach(id => {
+        this.toggleDepartmentMembers(id, true)
+      })
+    },
+    includeChildren() {
+      this.selectedDepartmentIds.forEach(id => {
+        if (this.areDepartmentMembersSelected(id) || this.autoSelectMembers) {
+          this.toggleDepartmentMembers(id, true)
+        }
+      })
     }
   },
   beforeDestroy() {
@@ -580,6 +705,7 @@ export default {
   methods: {
     async resetAndLoad() {
       this.query = ''
+      this.memberQuery = ''
       this.page = 1
       this.clearSelection()
       this.contacts = []
@@ -589,6 +715,8 @@ export default {
       this.loadingDepartmentIds = []
       this.departmentLoadTasks = {}
       this.expandedDepartments = []
+      this.transferVisible = false
+      this.transferTargetId = ''
       this.role = this.defaultRole
       this.loading = true
       try {
@@ -710,6 +838,13 @@ export default {
         })
       return ids
     },
+    async ensureDepartmentTreeLoaded(id) {
+      const ids = this.descendantDepartmentIds(id)
+      const results = await Promise.all(
+        ids.map(departmentId => this.loadDepartmentContacts(departmentId))
+      )
+      return results.every(result => result !== false)
+    },
     memberIdsForDepartment(id) {
       const ids = this.descendantDepartmentIds(id)
       return this.contacts
@@ -733,27 +868,42 @@ export default {
       return '展开加载成员'
     },
     areDepartmentMembersSelected(id) {
-      if (
-        this.autoSelectMembers &&
-        this.selectedDepartmentIds.includes(String(id))
-      )
-        return true
       const ids = this.memberIdsForDepartment(id)
       return (
         ids.length > 0 && ids.every(item => this.selectedUserIds.includes(item))
       )
     },
     async toggleDepartmentMembers(id, checked) {
-      if (!this.loadedDepartmentIds.includes(String(id)))
-        await this.loadDepartmentContacts(id)
+      const loaded = await this.ensureDepartmentTreeLoaded(id)
+      if (!loaded) return
       const ids = this.memberIdsForDepartment(id)
+      if (checked && !ids.length) {
+        this.$message.warning('该部门暂无可选成员')
+        return
+      }
       this.selectedUserIds = checked
         ? Array.from(new Set(this.selectedUserIds.concat(ids)))
         : this.selectedUserIds.filter(item => !ids.includes(item))
     },
+    async toggleRow(row, checked) {
+      if (row.type === 'department') {
+        const departmentId = String(row.id)
+        this.selectedDepartmentIds = checked
+          ? Array.from(new Set(this.selectedDepartmentIds.concat(departmentId)))
+          : this.selectedDepartmentIds.filter(id => id !== departmentId)
+        if (this.autoSelectMembers) {
+          await this.toggleDepartmentMembers(departmentId, checked)
+        }
+        return
+      }
+      const id = String(row.id)
+      this.selectedUserIds = checked
+        ? Array.from(new Set(this.selectedUserIds.concat(id)))
+        : this.selectedUserIds.filter(item => item !== id)
+    },
     isRowSelected(row) {
       return row.type === 'department'
-        ? this.selectedDepartmentIds.includes(row.id)
+        ? this.selectedDepartmentIds.includes(String(row.id))
         : this.selectedUserIds.includes(String(row.id)) ||
             this.inheritedByDepartment(row)
     },
@@ -770,22 +920,10 @@ export default {
       const count = ids.filter(item => this.selectedUserIds.includes(item))
         .length
       return (
-        !this.selectedDepartmentIds.includes(id) &&
+        !this.selectedDepartmentIds.includes(String(id)) &&
         count > 0 &&
         count < ids.length
       )
-    },
-    toggleRow(row, checked) {
-      if (row.type === 'department') {
-        this.selectedDepartmentIds = checked
-          ? Array.from(new Set(this.selectedDepartmentIds.concat(row.id)))
-          : this.selectedDepartmentIds.filter(id => id !== row.id)
-      } else {
-        const id = String(row.id)
-        this.selectedUserIds = checked
-          ? Array.from(new Set(this.selectedUserIds.concat(id)))
-          : this.selectedUserIds.filter(item => item !== id)
-      }
     },
     departmentSelectionCaption(id) {
       const count = this.departmentTotals[String(id)]
@@ -809,6 +947,14 @@ export default {
     isOwnerRole(role) {
       return String(role || '').toLowerCase() === 'owner'
     },
+    isCurrentUserMember(member) {
+      const me = this.currentUserId
+      if (!me || !member) return false
+      return [member.id, member.userId, member.wecomUserId]
+        .filter(Boolean)
+        .map(String)
+        .includes(me)
+    },
     roleLabel(role) {
       return (
         {
@@ -823,6 +969,47 @@ export default {
           Owner: '所有者'
         }[role] || (this.isTeam ? '成员' : '可查看')
       )
+    },
+    openTransferDialog(member) {
+      if (!this.transferCandidates.length) {
+        this.$message.warning('请先添加其他成员，再转移所有权')
+        return
+      }
+      this.transferTargetId =
+        member && !this.isOwnerRole(member.role)
+          ? String(member.id || member.userId || '')
+          : ''
+      this.transferVisible = true
+    },
+    async confirmTransferOwnership() {
+      if (!this.transferTargetId) return
+      this.busy = true
+      try {
+        if (this.isTeam) {
+          this.members = await teamService.transferOwnership(
+            this.resourceId,
+            this.transferTargetId
+          )
+        } else if (this.isRoom) {
+          this.members = await shareService.transferOwnership(
+            this.resourceId,
+            this.transferTargetId
+          )
+        } else {
+          this.members = await folderService.transferOwnership(
+            this.resourceId,
+            this.transferTargetId
+          )
+        }
+        this.transferVisible = false
+        this.transferTargetId = ''
+        this.$emit('changed')
+        this.$message.success(`${this.resourceLabel}所有权已转移`)
+      } catch (error) {
+        this.$message.error(error.message || '转移所有权失败')
+      } finally {
+        this.busy = false
+      }
     },
     async grantSelected() {
       this.busy = true
@@ -846,12 +1033,14 @@ export default {
       }
     },
     async grantFolderSelection() {
-      for (const id of this.selectedDepartmentIds)
+      for (const id of this.selectedDepartmentIds) {
+        await this.ensureDepartmentTreeLoaded(id)
         await folderService.bulkSetMembers(this.resourceId, {
           departmentId: id,
           includeChildren: this.includeChildren,
           role: this.role.toLowerCase()
         })
+      }
       const departmentUsers = new Set(
         this.selectedDepartmentIds.reduce(
           (all, id) => all.concat(this.memberIdsForDepartment(id)),
@@ -977,9 +1166,30 @@ export default {
         this.members = await teamService.listMembers(this.resourceId)
         return
       }
-      this.members = this.isRoom
-        ? await shareService.getMembers(this.resourceId)
-        : (await folderService.getMembers(this.resourceId)).list
+      if (this.isRoom) {
+        this.members = await shareService.getMembers(this.resourceId)
+        return
+      }
+      const result = await folderService.getMembers(this.resourceId)
+      const list = (result.list || []).slice()
+      const owner = (this.folder && (this.folder.owner || this.folder.createdBy)) || {}
+      const ownerId = String(
+        owner.id || owner.userId || (this.folder && this.folder.createdById) || ''
+      )
+      if (
+        ownerId &&
+        !list.some(member => String(member.id || member.userId) === ownerId)
+      ) {
+        list.unshift({
+          id: ownerId,
+          userId: ownerId,
+          name: owner.name || ownerId,
+          avatar: owner.avatar || '',
+          role: 'Owner',
+          department: '所有者'
+        })
+      }
+      this.members = list
     },
     async run(action) {
       this.busy = true
@@ -1393,6 +1603,9 @@ export default {
 .existingSection {
   border-bottom: 0;
 }
+.existingSearch {
+  margin: 8px 0 0;
+}
 .existingList {
   margin-top: 8px;
 }
@@ -1425,12 +1638,39 @@ export default {
   color: #7b8982;
   font-size: 11px;
 }
+.transferBtn,
 .removeBtn {
   border: 0;
   background: transparent;
-  color: #9a514b;
   font-size: 11px;
   cursor: pointer;
+  white-space: nowrap;
+}
+.transferBtn {
+  color: #087854;
+}
+.transferBtn:hover {
+  color: #066646;
+}
+.removeBtn {
+  color: #9a514b;
+}
+.ownerBadge {
+  color: #7b8982;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.ownerRoleLabel {
+  width: 86px;
+  color: #334b41;
+  font-size: 12px;
+  font-weight: 500;
+}
+.transferHint {
+  margin: 0 0 14px;
+  color: #52665f;
+  font-size: 13px;
+  line-height: 1.5;
 }
 .existingEmpty {
   text-align: center;
