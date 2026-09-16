@@ -218,14 +218,40 @@ export default {
   }
   .selectBox {
     position: absolute;
-    left: 10px;
-    top: 10px;
+    left: 4px;
+    top: 4px;
     z-index: 2;
     margin: 0;
-    padding: 4px;
-    background: rgba(255, 255, 255, 0.92);
-    border-radius: 8px;
+    padding: 0;
+    line-height: 0;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
     cursor: pointer;
+    /deep/ .el-checkbox {
+      margin: 0;
+    }
+    /deep/ .el-checkbox__inner {
+      width: 15px;
+      height: 15px;
+      background-color: transparent;
+      border: 1.5px solid #5f746c;
+      border-radius: 3px;
+      box-shadow: none;
+    }
+    /deep/ .el-checkbox__inner::after {
+      left: 4px;
+      top: 1px;
+    }
+    /deep/ .el-checkbox__input.is-checked .el-checkbox__inner,
+    /deep/ .el-checkbox__input.is-indeterminate .el-checkbox__inner {
+      background-color: var(--ui-primary);
+      border-color: var(--ui-primary);
+    }
+  }
+  &.selectable .roomPreview {
+    padding: 18px 8px 8px 20px;
+    box-sizing: border-box;
   }
   &:hover {
     transform: translateY(-1px);
