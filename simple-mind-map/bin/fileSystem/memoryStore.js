@@ -396,7 +396,7 @@ function createMemoryFileStore(seed = {}) {
             : prev.last_opened_at,
         view_state:
           patch.view_state !== undefined
-            ? cloneJson(patch.view_state || {})
+            ? cloneJson({ ...(prev.view_state || {}), ...(patch.view_state || {}) })
             : cloneJson(prev.view_state || {}),
         updated_at: nowIso()
       }

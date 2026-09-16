@@ -395,6 +395,7 @@ class MindMap {
     // 计算改变了的配置
     const changedConfig = getObjectChangedProps(this.themeConfig, config)
     this.opt.themeConfig = config
+    this.emit('view_theme_config_change', config)
     if (!notRender) {
       // 检查改变的是否是节点大小无关的主题属性
       const res = checkIsNodeSizeIndependenceConfig(changedConfig)
