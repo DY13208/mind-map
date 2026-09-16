@@ -300,7 +300,7 @@ export default {
           },
           onWaiting: (result, job) => {
             this.$message.warning(
-              `「${job.sopTitle}」正在等待人工处理，请在任务中心查看`
+              `「${job.sopTitle}」正在等待人工处理，请在 SOP 台账详情的「记录」中查看`
             )
           }
         })
