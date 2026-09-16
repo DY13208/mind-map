@@ -57,6 +57,9 @@ services:
       COLLAB_RATE_LIMIT_GLOBAL: "8000"
       COLLAB_V2: "1"
       SOP_OUTPUT_DIR: /app/output
+      KNOWLEDGE_COMPILER_ENABLED: ${KNOWLEDGE_COMPILER_ENABLED:-true}
+      KNOWLEDGE_SYNC_INTERVAL: ${KNOWLEDGE_SYNC_INTERVAL:-300}
+      KNOWLEDGE_OUTPUT_DIR: /app/knowledge
       # OpenClaw 卷内产物（只读），供预览/下载
       OPENCLAW_DATA_DIR: /openclaw-data
       YIRAN_UPSTREAM: ${YIRAN_UPSTREAM:-http://host.docker.internal:18232}
@@ -67,6 +70,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       # WorkBuddy / OpenClaw 写到宿主机 output 的产物，供预览/下载
+      - ./knowledge:/app/knowledge
       - ./output:/app/output:ro
       - mind-map-openclaw:/openclaw-data:ro
       # Start-Docker 自动注入的 OpenClaw Token 等（gitignore）
