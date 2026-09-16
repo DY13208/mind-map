@@ -563,8 +563,16 @@ export async function listRoomDRegistrySops(roomKey) {
     if (pathCmp !== 0) return pathCmp
     return String(a.uid || '').localeCompare(String(b.uid || ''))
   })
+  const filled = fillDefaultCpda({ sops, conflicts: [], notes: '' }).sops
+  let enriched = filled
+  try {
+    const { enrichSopsWithContinuityMeta } = await import('./sopFlowContinuity')
+    enriched = enrichSopsWithContinuityMeta(filled, flatNodes)
+  } catch (err) {
+    console.warn('[sopRegistry] continuity enrich failed', err)
+  }
   return {
-    sops: fillDefaultCpda({ sops, conflicts: [], notes: '' }).sops,
+    sops: enriched,
     source,
     totalScanned,
     roomKey: key,
