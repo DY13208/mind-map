@@ -24,7 +24,7 @@ async function main() {
     './nodeAttachmentApi': { uploadNodeAttachment: async (...args) => { request = args; return response } }
   })
   const { validateSopAttachment, uploadSopAttachment, formatSopAttachmentNote } = helpers
-  for (const name of ['spec.pdf', '文档.docx', '表格.xlsx', 'image.PNG', 'note.txt']) {
+  for (const name of ['spec.pdf', '文档.docx', '表格.xlsx', 'image.PNG', 'note.txt', '说明.html', 'page.htm']) {
     assert.equal(validateSopAttachment({ name, size: 100 }), '')
   }
   assert.ok(validateSopAttachment({ name: 'tool.exe', size: 100 }))
@@ -34,7 +34,8 @@ async function main() {
   await uploadSopAttachment('test-room', { name: 'spec.txt', type: 'text/plain' })
   assert.equal(request[0], 'test-room')
   assert.equal(request[1].fileName, 'spec.txt')
-  assert.match(request[1].contentBase64, /^data:text\/plain;base64,/)
+  assert.equal(request[1].file.name, 'spec.txt')
+  assert.equal(request[1].contentBase64, undefined)
   response = { attachment: { id: 'att-2', status: 'failed', errorMessage: 'OCR failed' } }
   await assert.rejects(uploadSopAttachment('test-room', { name: 'image.png' }), /OCR failed/)
   response = { attachment: { id: 'att-3', status: 'ready', extractedText: '' } }

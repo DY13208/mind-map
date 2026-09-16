@@ -2392,14 +2392,15 @@ async function handleApi(req, res) {
     isAllowedOrigin
   } = require('./auth')
   applyCorsHeaders(req, res)
-  if (req.method === 'OPTIONS') {
+  const path = String((req.url || '').split('?')[0] || '')
+  // tus OPTIONS 必须交给 @tus/server，返回 Tus-Resumable / Tus-Extension。
+  if (req.method === 'OPTIONS' && !require('./nodeKnowledge').isTusPath(path)) {
     res.writeHead(isAllowedOrigin(req) ? 204 : 403)
     res.end()
     return true
   }
   const mindApi = require('./mindApi')
   const started = Date.now()
-  const path = String((req.url || '').split('?')[0] || '')
   try {
     return await mindApi.handleApi(req, res)
   } catch (err) {

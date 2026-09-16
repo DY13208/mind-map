@@ -2462,9 +2462,11 @@ class Render {
     if (meta && typeof meta === 'object') {
       [
         'attachmentId',
+        'attachmentMimeType',
         'attachmentStatus',
         'attachmentError',
-        'attachmentExtractedText'
+        'attachmentExtractedText',
+        'attachmentProgress'
       ].forEach(key => {
         if (meta[key] != null) patch[key] = meta[key]
       })
@@ -2491,12 +2493,48 @@ class Render {
   }
 
   //  添加节点概要
-  addGeneralization(data, openEdit = true) {
-    if (this.activeNodeList.length <= 0) {
+  addGeneralization(data, openEdit = true, appointNodes = []) {
+    appointNodes = formatDataToArray(appointNodes)
+    const resolveLive = list => {
+      const find =
+        typeof this.findNodeByUid === 'function'
+          ? this.findNodeByUid.bind(this)
+          : null
+      return (list || [])
+        .map(node => {
+          if (!node) return null
+          const uid = (node.getData && node.getData('uid')) || node.uid
+          return (uid && find && find(uid)) || node
+        })
+        .filter(node => node && typeof node.getData === 'function')
+    }
+    let source = resolveLive(
+      appointNodes.length > 0 ? appointNodes : this.activeNodeList
+    )
+    if (source.length <= 1) {
+      const select = this.mindMap.select
+      const cached = resolveLive(
+        select && typeof select.getMultiSelectCache === 'function'
+          ? select.getMultiSelectCache()
+          : []
+      )
+      const current = source[0]
+      if (
+        cached.length > 1 &&
+        (!current ||
+          (select &&
+            typeof select.isNodeInList === 'function' &&
+            select.isNodeInList(cached, current)))
+      ) {
+        source = cached
+      }
+    }
+    if (source.length <= 0) {
       return
     }
-    const nodeList = this.activeNodeList.filter(node => {
+    const nodeList = source.filter(node => {
       return (
+        node &&
         !node.isRoot &&
         !node.isGeneralization &&
         !node.checkHasSelfGeneralization()

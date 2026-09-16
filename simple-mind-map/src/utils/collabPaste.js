@@ -56,6 +56,7 @@ const COPY_DATA_KEYS = [
   'attachmentUrl',
   'attachmentName',
   'attachmentId',
+  'attachmentMimeType',
   'attachmentStatus',
   'attachmentError',
   'attachmentExtractedText'

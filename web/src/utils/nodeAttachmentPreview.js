@@ -1,5 +1,6 @@
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif)$/i
 const TEXT_EXT = /\.(txt|log|csv)$/i
+const HTML_EXT = /\.html?$/i
 
 export function attachmentPreviewKind(fileName, mimeType = '') {
   const name = String(fileName || '')
@@ -8,13 +9,124 @@ export function attachmentPreviewKind(fileName, mimeType = '') {
     return 'image'
   }
   if (/\.pdf$/i.test(name) || mime === 'application/pdf') return 'pdf'
+  if (HTML_EXT.test(name) || mime === 'text/html' || mime === 'application/xhtml+xml') {
+    return 'html'
+  }
   if (/\.(md|markdown)$/i.test(name) || mime === 'text/markdown') return 'markdown'
   if (/\.json$/i.test(name) || mime === 'application/json') return 'json'
-  if (/\.(docx|xlsx)$/i.test(name) || /wordprocessingml|spreadsheetml/.test(mime)) {
+  if (/\.(docx|xls|xlsx|xlsm|ods)$/i.test(name) || /wordprocessingml|spreadsheetml|ms-excel|opendocument\.spreadsheet/.test(mime)) {
     return 'office'
   }
+  if (/\.pptx$/i.test(name) || /presentationml/.test(mime)) return 'presentation'
   if (TEXT_EXT.test(name) || /^text\//.test(mime)) return 'text'
   return 'unsupported'
+}
+
+export function isHtmlAttachment(fileName, mimeType, url) {
+  if (attachmentPreviewKind(fileName, mimeType) === 'html') return true
+  return /\.html?([?#]|$)/i.test(String(url || ''))
+}
+
+export const WORKBOOK_PREVIEW_MAX_ROWS = 500
+export const WORKBOOK_PREVIEW_MAX_COLS = 40
+export const WORKBOOK_PREVIEW_MAX_SHEETS = 10
+
+const SPREADSHEET_EXT = /\.(xls|xlsx|xlsm|ods)$/i
+const SPREADSHEET_MIME = /spreadsheetml|ms-excel|opendocument\.spreadsheet/
+const SKIP_ZIP_ENTRY = /^(xl\/(media|drawings|charts|embeddings)\/)/i
+const SKIP_ZIP_EXT = /\.(png|jpe?g|gif|emf|wmf|tif|tiff|bmp|wdp|svg)$/i
+
+function attachmentStatusOf(data) {
+  return String((data && (data.attachmentStatus || data.status)) || '')
+    .trim()
+    .toLowerCase()
+}
+
+export function isAttachmentBusy(data) {
+  const status = attachmentStatusOf(data)
+  return (
+    status === 'uploading' || status === 'pending' || status === 'processing'
+  )
+}
+
+export function isAttachmentPreviewReady(data) {
+  if (!data || isAttachmentBusy(data)) return false
+  if (attachmentStatusOf(data) === 'failed') return false
+  return !!(data.attachmentId || data.id || data.attachmentUrl)
+}
+
+export function attachmentBusyMessage(data) {
+  const status = attachmentStatusOf(data)
+  if (status === 'uploading') return '正在上传，请稍候'
+  if (status === 'pending' || status === 'processing') return '正在处理，请稍候'
+  if (status === 'failed') {
+    return (
+      (data && (data.attachmentError || data.errorMessage)) ||
+      '处理失败'
+    )
+  }
+  return '还不能打开'
+}
+
+export function isSpreadsheetAttachment(fileName, mimeType = '') {
+  const name = String(fileName || '')
+  const mime = String(mimeType || '').toLowerCase()
+  return SPREADSHEET_EXT.test(name) || SPREADSHEET_MIME.test(mime)
+}
+
+export function isZipBuffer(value) {
+  const bytes = asBytes(value)
+  return bytes.length > 4 && bytes[0] === 0x50 && bytes[1] === 0x4b
+}
+
+export async function slimSpreadsheetZip(buffer, JSZip) {
+  const bytes = asBytes(buffer)
+  if (!isZipBuffer(bytes) || !JSZip) return bytes
+  const zip = await JSZip.loadAsync(bytes)
+  let removed = 0
+  Object.keys(zip.files).forEach(name => {
+    if (SKIP_ZIP_ENTRY.test(name) || SKIP_ZIP_EXT.test(name)) {
+      zip.remove(name)
+      removed += 1
+    }
+  })
+  if (!removed) return bytes
+  return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' })
+}
+
+export function workbookSheetsFromXlsx(XLSX, workbook) {
+  const names = (workbook && workbook.SheetNames) || []
+  return names
+    .slice(0, WORKBOOK_PREVIEW_MAX_SHEETS)
+    .map(name => {
+      const values = XLSX.utils.sheet_to_json(workbook.Sheets[name], {
+        header: 1,
+        raw: false,
+        defval: '',
+        blankrows: false
+      })
+      const rows = values
+        .map(row => {
+          const cells = Array.isArray(row) ? row.map(value => String(value || '')) : []
+          let last = cells.length - 1
+          while (last >= 0 && !cells[last].trim()) last -= 1
+          return cells.slice(0, last + 1)
+        })
+        .filter(row => row.some(cell => cell.trim()))
+      const columnCount = Math.min(
+        WORKBOOK_PREVIEW_MAX_COLS,
+        rows.reduce((max, row) => Math.max(max, row.length), 0)
+      )
+      return {
+        name,
+        rows: rows
+          .slice(0, WORKBOOK_PREVIEW_MAX_ROWS)
+          .map(row => row.slice(0, columnCount)),
+        columnCount,
+        truncated: rows.length > WORKBOOK_PREVIEW_MAX_ROWS
+      }
+    })
+    .filter(sheet => sheet.rows.length)
 }
 
 function asBytes(value) {
@@ -101,7 +213,7 @@ export function formatAttachmentText(value, kind) {
 
 export function formatOfficePreviewText(value, fileName) {
   const text = String(value || '')
-  if (!/\.xlsx$/i.test(String(fileName || ''))) return text
+  if (!/\.(xls|xlsx|xlsm|ods)$/i.test(String(fileName || ''))) return text
   return text
     .split(/\r?\n/)
     .map(line => line.replace(/(?:,\s*)+$/, ''))

@@ -49,6 +49,23 @@ async function extractDocx(buffer) {
   return clip(stripXml(xml))
 }
 
+function extractHtml(buffer) {
+  const raw = decodeTextBuffer(buffer)
+  const text = String(raw || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+  return clip(text)
+}
+
 function compactXlsxCsv(csv) {
   return String(csv || '')
     .split(/\r?\n/)
@@ -93,6 +110,29 @@ async function extractXlsx(buffer) {
     const xml = await shared.async('string')
     return clip(stripXml(xml).replace(/\n{3,}/g, '\n\n'))
   }
+}
+
+async function extractPptx(buffer) {
+  const JSZip = require('jszip')
+  const zip = await JSZip.loadAsync(buffer)
+  const slideNames = Object.keys(zip.files)
+    .filter(name => /^ppt\/slides\/slide\d+\.xml$/i.test(name))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+  const slides = []
+  for (const name of slideNames) {
+    const xml = await zip.file(name).async('string')
+    const text = Array.from(xml.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/gi))
+      .map(match => match[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'))
+      .join('')
+      .trim()
+    if (text) slides.push(text)
+  }
+  if (!slides.length) {
+    const err = new Error('PPTX 无可提取文本')
+    err.code = 'PPTX_EMPTY'
+    throw err
+  }
+  return slides.map((text, index) => `第 ${index + 1} 页\n${text}`).join('\n\n')
 }
 
 function extractPdfText(buffer) {
@@ -241,6 +281,14 @@ async function extractBuffer(buffer, options = {}) {
       errorMessage: ''
     }
   }
+  if (kind === 'html') {
+    return {
+      kind,
+      status: 'ready',
+      extractedText: extractHtml(buffer),
+      errorMessage: ''
+    }
+  }
   if (kind === 'docx') {
     return {
       kind,
@@ -256,6 +304,16 @@ async function extractBuffer(buffer, options = {}) {
       extractedText: await extractXlsx(buffer),
       errorMessage: ''
     }
+  }
+  if (kind === 'pptx') {
+    try {
+      return { kind, status: 'ready', extractedText: await extractPptx(buffer), errorMessage: '' }
+    } catch (err) {
+      return { kind, status: 'failed', extractedText: '', errorMessage: err.message || 'PPTX 解析失败' }
+    }
+  }
+  if (kind === 'doc') {
+    return { kind, status: 'failed', extractedText: '', errorMessage: 'DOC 格式已保存，但暂不支持文本解析，请下载后使用本地 Office 打开' }
   }
   if (kind === 'pdf') {
     try {
@@ -317,8 +375,10 @@ async function extractBuffer(buffer, options = {}) {
 module.exports = {
   clip,
   decodeTextBuffer,
+  extractHtml,
   extractDocx,
   extractXlsx,
+  extractPptx,
   extractPdfText,
   extractBuffer,
   compactXlsxCsv,

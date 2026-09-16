@@ -2,8 +2,155 @@ import { apiRequest } from './fileApi'
 import { roomFromLocation } from './roomLocation'
 import { getRuntimeConfig } from './runtimeConfig'
 import { collectNodeKnowledge, knowledgeNeedsRemoteExtract } from './nodeKnowledge'
+import { Upload } from 'tus-js-client'
+import { enqueueAttachmentUpload } from './attachmentUploadQueue'
 
 const MAX_UPLOAD_CHARS = 1.6e6
+export const DEFAULT_MAX_ATTACHMENT_BYTES = 200 * 1024 * 1024
+export const TUS_CHUNK_BYTES = 8 * 1024 * 1024
+
+export function maxAttachmentBytes() {
+  const runtime =
+    (typeof window !== 'undefined' && window.__MIND_MAP_RUNTIME__) || {}
+  const n = Number(runtime.attachmentMaxBytes)
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_MAX_ATTACHMENT_BYTES
+}
+
+export function formatAttachmentMaxMb(bytes = maxAttachmentBytes()) {
+  return Math.max(1, Math.round(Number(bytes) / (1024 * 1024)))
+}
+
+export function attachmentUploadTimeoutMs(byteSize) {
+  const mb = Math.max(0, Number(byteSize) || 0) / (1024 * 1024)
+  return Math.min(
+    15 * 60 * 1000,
+    Math.max(120000, Math.round(15000 + mb * 6000))
+  )
+}
+
+function isBinaryFilePayload(body) {
+  const file = body && body.file
+  if (!file || typeof file !== 'object') return false
+  if (body.contentBase64 || body.sourceUrl) return false
+  return typeof file.size === 'number'
+}
+
+export function attachmentFingerprint(roomKey, file) {
+  return [
+    'mind-att',
+    String(roomKey || ''),
+    String((file && file.name) || ''),
+    String((file && file.size) || 0),
+    String((file && file.lastModified) || 0)
+  ].join('-')
+}
+
+function tusEndpoint() {
+  const base = String(getRuntimeConfig().collabApi || '').replace(/\/$/, '')
+  return `${base}/api/attachments/resumable`
+}
+
+function headerValue(res, name) {
+  if (!res || typeof res.getHeader !== 'function') return ''
+  return String(res.getHeader(name) || res.getHeader(name.toLowerCase()) || '')
+}
+
+async function fetchTusResult(uploadUrl) {
+  const url = String(uploadUrl || '').replace(/\/$/, '') + '/result'
+  const res = await fetch(url, {
+    method: 'GET',
+    credentials: 'include',
+    cache: 'no-store'
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const err = new Error(data.error || res.statusText || '读取续传结果失败')
+    err.statusCode = res.status
+    if (data.code) err.code = data.code
+    throw err
+  }
+  return data
+}
+
+function uploadResumableAttachment(roomKey, body) {
+  const file = body.file
+  const fileName = body.fileName || file.name || 'file'
+  const mimeType = body.mimeType || file.type || 'application/octet-stream'
+  return enqueueAttachmentUpload(
+    () =>
+      new Promise((resolve, reject) => {
+        let attachmentId = ''
+        const upload = new Upload(file, {
+          endpoint: tusEndpoint(),
+          chunkSize: TUS_CHUNK_BYTES,
+          retryDelays: [0, 1000, 3000, 5000, 10000],
+          storeFingerprintForResuming: true,
+          removeFingerprintOnSuccess: false,
+          metadata: {
+            filename: fileName,
+            filetype: mimeType,
+            roomKey: String(roomKey || ''),
+            nodeUid: String(body.nodeUid || ''),
+            sourceKind: String(body.sourceKind || 'attachment'),
+            ...(body.forceExtract ? { forceExtract: '1' } : {})
+          },
+          fingerprint() {
+            return Promise.resolve(attachmentFingerprint(roomKey, file))
+          },
+          onBeforeRequest(req) {
+            const xhr = req && req.getUnderlyingObject && req.getUnderlyingObject()
+            if (xhr) xhr.withCredentials = true
+          },
+          onProgress(bytesUploaded, bytesTotal) {
+            if (typeof body.onUploadProgress !== 'function') return
+            const total = Number(bytesTotal) || file.size || 0
+            const loaded = Number(bytesUploaded) || 0
+            body.onUploadProgress({
+              loaded,
+              total,
+              percent: total ? Math.round((loaded / total) * 100) : 0
+            })
+          },
+          onAfterResponse(req, res) {
+            const id = headerValue(res, 'X-Mind-Attachment-Id')
+            if (id) attachmentId = id
+          },
+          onError(err) {
+            reject(err || new Error('附件上传失败'))
+          },
+          async onSuccess() {
+            try {
+              if (typeof body.onUploadProgress === 'function') {
+                body.onUploadProgress({
+                  loaded: file.size,
+                  total: file.size,
+                  percent: 100
+                })
+              }
+              if (attachmentId) {
+                const data = await getNodeAttachment(roomKey, attachmentId)
+                resolve(data)
+                return
+              }
+              const data = await fetchTusResult(upload.url)
+              resolve(data)
+            } catch (err) {
+              reject(err)
+            }
+          }
+        })
+        upload
+          .findPreviousUploads()
+          .then(previous => {
+            if (previous && previous.length) {
+              upload.resumeFromPreviousUpload(previous[0])
+            }
+            upload.start()
+          })
+          .catch(reject)
+      })
+  )
+}
 
 function dataOf(node) {
   if (!node) return {}
@@ -94,6 +241,9 @@ export function buildEnsureSources(node, mindMap) {
 }
 
 export async function uploadNodeAttachment(roomKey, body) {
+  if (isBinaryFilePayload(body)) {
+    return uploadResumableAttachment(roomKey, body)
+  }
   return apiRequest(`/api/files/${encodeURIComponent(roomKey)}/attachments`, {
     method: 'POST',
     body: JSON.stringify(body || {}),
@@ -108,6 +258,35 @@ export async function getNodeAttachment(roomKey, attachmentId) {
     )}`,
     { method: 'GET' }
   )
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+export async function waitForAttachmentReady(
+  roomKey,
+  attachmentId,
+  options = {}
+) {
+  const intervalMs = Math.max(400, Number(options.intervalMs) || 1500)
+  const timeoutMs = Math.max(intervalMs, Number(options.timeoutMs) || 15 * 60 * 1000)
+  const started = Date.now()
+  let last = null
+  while (Date.now() - started <= timeoutMs) {
+    if (options.signal && options.signal.aborted) {
+      const err = new Error('aborted')
+      err.name = 'AbortError'
+      throw err
+    }
+    const data = await getNodeAttachment(roomKey, attachmentId)
+    last = (data && data.attachment) || null
+    if (typeof options.onUpdate === 'function') options.onUpdate(last)
+    const status = String((last && last.status) || '')
+    if (status === 'ready' || status === 'failed') return last
+    await delay(intervalMs)
+  }
+  return last
 }
 
 export function nodeAttachmentContentUrl(roomKey, attachmentId) {
