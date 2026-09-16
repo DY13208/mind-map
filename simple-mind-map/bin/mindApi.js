@@ -1860,6 +1860,35 @@ async function handleApi(req, res) {
     return true
   }
 
+  const transferOwnershipMatch = pathname.match(
+    /^\/api\/files\/([^/]+)\/transfer-ownership$/
+  )
+  if (transferOwnershipMatch && req.method === 'POST') {
+    const roomKey = decodeURIComponent(transferOwnershipMatch[1])
+    try {
+      const body = await readBody(req)
+      const list = await roomAcl.transferOwnership(
+        getPool(),
+        roomKey,
+        body.user_id || body.userId,
+        roomAcl.actorFromReq(req).id,
+        req.authUser && req.authUser.corpId
+      )
+      sendJson(res, 200, {
+        ok: true,
+        room_key: roomKey,
+        list
+      })
+      return true
+    } catch (err) {
+      sendJson(res, err.statusCode || 400, {
+        error: err.message || 'bad request',
+        code: err.code || 'ACL_ERROR'
+      })
+      return true
+    }
+  }
+
   const membersMatch = pathname.match(
     /^\/api\/files\/([^/]+)\/members(?:\/([^/]+))?$/
   )

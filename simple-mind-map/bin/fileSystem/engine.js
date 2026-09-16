@@ -129,6 +129,9 @@ function createFileSystem(options = {}) {
       if (!teamId && folderTeamId) {
         throw fsError('FOLDER_TEAM_MISMATCH', '不能将个人脑图放入团队文件夹', 400)
       }
+      if (!input.bypass) {
+        await assertFolderEditable(folderId, userId, false)
+      }
     }
     const graph = defaultRootGraph(title)
     const created = await store.withTx(async db => {
@@ -155,17 +158,18 @@ function createFileSystem(options = {}) {
       }
       if (folderId && store.listFolderMembers) {
         const inherited = await store.listFolderMembers(folderId)
+        const aclDb =
+          db && (typeof db.query === 'function' || Array.isArray(db.members))
+            ? db
+            : store
         for (const member of inherited) {
           if (!member.user_id || member.user_id === userId) continue
-          await store.insertMember(
-            {
-              room_key: roomKey,
-              user_id: member.user_id,
-              role: member.role,
-              source: 'folder',
-              source_folder_id: folderId
-            },
-            db
+          await roomAcl.setFolderRole(
+            aclDb,
+            roomKey,
+            member.user_id,
+            member.role,
+            folderId
           )
         }
       }
@@ -534,15 +538,29 @@ function createFileSystem(options = {}) {
     }, access || {})
   }
 
+  function folderMemberCanWrite(role) {
+    const value = String(role || '').trim().toLowerCase()
+    return value === 'editor' || value === 'manager'
+  }
+
   async function assertFolderEditable(folderId, userId, bypass) {
     if (!folderId || bypass || !userId) return
     const folder = await assertFolderExists(folderId)
     // Team folders are organized by team membership; room ACL still gates the move.
+    // Callers must still enforce FOLDER_TEAM_MISMATCH so personal rooms cannot enter team folders.
     if (folder.team_id) return
     if (folder.created_by && folder.created_by === userId) return
     const members = await store.listFolderMembers(folderId)
     const mine = members.find(member => member.user_id === userId)
-    if (mine && mine.role === 'editor') return
+    if (mine && folderMemberCanWrite(mine.role)) return
+    // Ancestor owners can still write into descendant folders created by collaborators.
+    let parentId = folder.parent_id
+    while (parentId) {
+      const parent = await store.getFolder(parentId)
+      if (!parent || parent.deleted_at) break
+      if (parent.created_by && parent.created_by === userId) return
+      parentId = parent.parent_id
+    }
     throw fsError('FORBIDDEN', '没有目标文件夹的编辑权限', 403)
   }
 
@@ -554,12 +572,23 @@ function createFileSystem(options = {}) {
       throw fsError('FORBIDDEN', '没有权限执行该操作', 403)
     }
     const folderId = parseFolderId(targetFolderId)
-    if (folderId) {
-      await assertFolderExists(folderId)
-      await assertFolderEditable(folderId, userId, bypass)
-    }
     const before = await store.getRoom(roomKey)
     if (!before) throw fsError('ROOM_NOT_FOUND', 'room not found', 404)
+    if (folderId) {
+      const folder = await assertFolderExists(folderId)
+      const roomTeamId = before.team_id || null
+      const folderTeamId = folder.team_id || null
+      if ((roomTeamId || null) !== (folderTeamId || null)) {
+        throw fsError(
+          'FOLDER_TEAM_MISMATCH',
+          roomTeamId
+            ? '不能将团队脑图移入个人文件夹'
+            : '不能将个人脑图移入团队文件夹，请先移入团队空间',
+          400
+        )
+      }
+      await assertFolderEditable(folderId, userId, bypass)
+    }
     const fromFolderId = before.folder_id || null
     const toFolderId = folderId || null
 
@@ -619,7 +648,9 @@ function createFileSystem(options = {}) {
         }
       } else if (userId && parent.created_by && parent.created_by !== userId && !input.bypass) {
         const members = await store.listFolderMembers(parentId)
-        const canEdit = members.some(member => member.user_id === userId && member.role === 'editor')
+        const canEdit = members.some(
+          member => member.user_id === userId && folderMemberCanWrite(member.role)
+        )
         if (!canEdit) {
           throw fsError('FORBIDDEN', '没有权限在该文件夹中创建子文件夹', 403)
         }
@@ -732,7 +763,13 @@ function createFileSystem(options = {}) {
       throw fsError('FORBIDDEN', '没有权限执行该操作', 403)
     }
     if (!teamId && userId && folder.created_by && folder.created_by !== userId && !input.bypass) {
-      throw fsError('FORBIDDEN', '没有权限执行该操作', 403)
+      const members = await store.listFolderMembers(id)
+      const canManage = members.some(
+        member => member.user_id === userId && member.role === 'manager'
+      )
+      if (!canManage) {
+        throw fsError('FORBIDDEN', '没有权限执行该操作', 403)
+      }
     }
     const nextName = normalizeFolderName(name)
     if (await store.folderNameTaken(nextName, folder.parent_id || null, id, teamId)) {

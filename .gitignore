@@ -5,6 +5,8 @@ simple-mind-map/dist
 simple-mind-map/types
 utools/dist
 .env
+.secrets/
+/knowledge/
 .env.yiran
 .mcp.json
 docker/runtime-config.local.js
