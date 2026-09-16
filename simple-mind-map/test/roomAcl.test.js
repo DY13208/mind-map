@@ -3,6 +3,8 @@ const roomAcl = require('../bin/roomAcl')
 
 function testNormalizeAndInfer() {
   assert.strictEqual(roomAcl.normalizeUserId('wecom:zhangsan'), 'zhangsan')
+  const collisionId = 'wecom:' + 'ab'.repeat(24)
+  assert.strictEqual(roomAcl.normalizeUserId(collisionId), collisionId)
   assert.strictEqual(roomAcl.normalizeRole('Owner'), 'owner')
   assert.strictEqual(roomAcl.normalizeRole('guest'), '')
 
@@ -101,6 +103,7 @@ function testRoleMatrix() {
   assert.strictEqual(roomAcl.roleAllows('editor', 'manage'), false)
   assert.strictEqual(roomAcl.roleAllows('owner', 'manage'), true)
   assert.strictEqual(roomAcl.roleAllows(null, 'edit', { legacyOpen: true }), true)
+  assert.strictEqual(roomAcl.roleAllows(null, 'manage', { legacyOpen: true }), false)
   assert.strictEqual(roomAcl.roleAllows(null, 'view', { bypass: true }), true)
   assert.strictEqual(roomAcl.roleAllows(null, 'view'), false)
   const restoreHit = roomAcl.inferRoomAcl('/api/files/room-a/versions/v1/restore', 'POST')
