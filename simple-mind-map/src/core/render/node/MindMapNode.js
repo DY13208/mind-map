@@ -352,6 +352,11 @@ class MindMapNode {
   bindGroupEvent() {
     // 单击事件，选中节点
     this.group.on('click', e => {
+      // 右键会在部分环境触发 click，不能把多选收成当前节点，也不能关掉刚打开的菜单
+      if (e.which === 3 || e.button === 2) {
+        e.stopPropagation()
+        return
+      }
       this.mindMap.emit('node_click', this, e)
       if (this.isMultipleChoice) {
         e.stopPropagation()
@@ -456,23 +461,66 @@ class MindMapNode {
       }
       e.stopPropagation()
       e.preventDefault()
-      // 如果是多选节点结束，那么不要触发右键菜单事件
+      const activeList = this.renderer.activeNodeList || []
+      const cached =
+        (this.mindMap.select &&
+          typeof this.mindMap.select.getMultiSelectCache === 'function' &&
+          this.mindMap.select.getMultiSelectCache()) ||
+        []
+      const inCachedMulti =
+        cached.length > 1 &&
+        this.mindMap.select &&
+        typeof this.mindMap.select.isNodeInList === 'function' &&
+        this.mindMap.select.isNodeInList(cached, this)
+      // 框选结束时如果已经多选，仍打开菜单，方便直接加概要
       if (
         this.mindMap.select &&
         !useLeftKeySelectionRightKeyDrag &&
-        this.mindMap.select.hasSelectRange()
+        this.mindMap.select.hasSelectRange() &&
+        activeList.length <= 1 &&
+        !inCachedMulti
       ) {
         return
       }
-      // 如果有且只有当前节点激活了，那么不需要重新激活
-      if (
-        !(this.getData('isActive') && this.renderer.activeNodeList.length === 1)
-      ) {
-        this.renderer.clearActiveNodeList()
+      if (inCachedMulti) {
+        if (!(activeList.length > 1 && this.isInActiveList())) {
+          this.restoreMultiSelect(cached)
+        }
+      } else if (activeList.length > 1 && this.isInActiveList()) {
+        // 右键已选中的节点时保持多选
+      } else if (!this.getData('isActive')) {
         this.active(e)
       }
       this.mindMap.emit('node_contextmenu', e, this)
     })
+  }
+
+  isInActiveList() {
+    const list = this.renderer.activeNodeList || []
+    const uid = (this.getData && this.getData('uid')) || this.uid
+    return list.some(item => {
+      if (item === this) return true
+      const itemUid = (item.getData && item.getData('uid')) || item.uid
+      return !!(uid && itemUid && uid === itemUid)
+    })
+  }
+
+  restoreMultiSelect(list) {
+    const renderer = this.renderer
+    if (!renderer || !Array.isArray(list) || list.length <= 1) return
+    const findByUid =
+      renderer.findNodeByUid && renderer.findNodeByUid.bind(renderer)
+    renderer.clearActiveNodeList()
+    list.forEach(item => {
+      const uid = (item && item.getData && item.getData('uid')) || (item && item.uid)
+      const live = (uid && findByUid && findByUid(uid)) || item
+      if (live && typeof renderer.addNodeToActiveList === 'function') {
+        renderer.addNodeToActiveList(live, true)
+      }
+    })
+    if (typeof renderer.emitNodeActiveEvent === 'function') {
+      renderer.emitNodeActiveEvent()
+    }
   }
 
   //  激活节点
@@ -483,6 +531,12 @@ class MindMapNode {
     e && e.stopPropagation()
     if (this.getData('isActive')) {
       return
+    }
+    if (
+      this.mindMap.select &&
+      typeof this.mindMap.select.clearMultiSelectCache === 'function'
+    ) {
+      this.mindMap.select.clearMultiSelectCache()
     }
     this.mindMap.emit('before_node_active', this, this.renderer.activeNodeList)
     this.renderer.clearActiveNodeList()

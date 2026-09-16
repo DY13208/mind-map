@@ -846,6 +846,7 @@ const NODE_DATA_PATCH_KEYS = [
   'attachmentUrl',
   'attachmentName',
   'attachmentId',
+  'attachmentMimeType',
   'attachmentStatus',
   'attachmentError',
   'attachmentExtractedText',

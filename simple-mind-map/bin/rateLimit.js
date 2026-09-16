@@ -1,3 +1,7 @@
+const {
+  MAX_BYTES: ATTACHMENT_MAX_BYTES
+} = require('./nodeKnowledge/limits')
+
 const WINDOW_MS = Math.max(
   1000,
   Number(process.env.COLLAB_RATE_WINDOW_MS || 10000)
@@ -87,11 +91,18 @@ function bodyLimitForPath(pathname = '') {
   if (/\/replace$/.test(pathname) || /\/import/.test(pathname)) {
     return MAX_REPLACE_BODY_BYTES
   }
-  if (/\/attachments(?:\/|$)/.test(pathname) || /\/knowledge\/ensure$/.test(pathname)) {
-    return Math.max(
-      MAX_BODY_BYTES,
-      Number(process.env.NODE_KNOWLEDGE_MAX_BYTES || 5 * 1024 * 1024) + 512 * 1024
+  if (/\/knowledge\/ensure$/.test(pathname)) {
+    const jsonCap = Math.min(
+      32 * 1024 * 1024,
+      Math.ceil((ATTACHMENT_MAX_BYTES * 4) / 3) + 512 * 1024
     )
+    return Math.max(MAX_BODY_BYTES, jsonCap)
+  }
+  if (/\/attachments\/resumable(?:\/|$)/.test(pathname)) {
+    return 16 * 1024 * 1024
+  }
+  if (/\/attachments(?:\/|$)/.test(pathname)) {
+    return Math.max(MAX_BODY_BYTES, ATTACHMENT_MAX_BYTES + 1024 * 1024)
   }
   return MAX_BODY_BYTES
 }
@@ -112,6 +123,7 @@ function getRateLimitStatus() {
     roomsTracked,
     maxBodyBytes: MAX_BODY_BYTES,
     maxReplaceBodyBytes: MAX_REPLACE_BODY_BYTES,
+    maxAttachmentBytes: ATTACHMENT_MAX_BYTES,
     maxBatchOps: MAX_BATCH_OPS,
     maxPatchKeys: MAX_PATCH_KEYS
   }

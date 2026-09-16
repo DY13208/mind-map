@@ -32,7 +32,10 @@
         ref="markdownViewer"
         class="markdownPreview customScrollbar"
       ></div>
-      <section v-else-if="kind === 'office'" class="officePreviewCanvas">
+      <section
+        v-else-if="kind === 'office' || kind === 'presentation'"
+        class="officePreviewCanvas"
+      >
         <template v-if="workbookSheets.length">
           <header class="workbookHeader">
             <div>
@@ -88,12 +91,15 @@
           </div>
         </template>
         <div v-else-if="isDocxFile" ref="docxViewer" class="docxPreview customScrollbar"></div>
-        <div v-else class="documentPreviewCanvas">
+        <div v-else-if="kind === 'presentation'" class="documentPreviewCanvas">
           <header class="documentCanvasHeader">
-            <span class="canvasEyebrow">文档内容</span>
-            <span>服务端已提取的可读文本</span>
+            <span class="canvasEyebrow">演示文稿</span>
+            <span>幻灯片文本</span>
           </header>
           <pre class="textPreview customScrollbar">{{ previewText }}</pre>
+        </div>
+        <div v-else-if="!loading && isSpreadsheetFile" class="previewState">
+          无法预览该表格，请下载后查看
         </div>
       </section>
       <pre
@@ -156,12 +162,18 @@ import '@toast-ui/editor/dist/toastui-editor-viewer.css'
 import { roomFromLocation } from '@/utils/roomLocation'
 import {
   fetchNodeAttachmentContent,
-  getNodeAttachment
+  getNodeAttachment,
+  nodeAttachmentContentUrl
 } from '@/utils/nodeAttachmentApi'
 import {
   attachmentPreviewKind,
   formatAttachmentText,
-  formatOfficePreviewText,
+  attachmentBusyMessage,
+  isAttachmentBusy,
+  isHtmlAttachment,
+  isSpreadsheetAttachment,
+  slimSpreadsheetZip,
+  workbookSheetsFromXlsx,
   safeMarkdownSource
 } from '@/utils/nodeAttachmentPreview'
 
@@ -171,7 +183,9 @@ const MIME_BY_EXT = {
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
   '.gif': 'image/gif',
-  '.pdf': 'application/pdf'
+  '.pdf': 'application/pdf',
+  '.html': 'text/html',
+  '.htm': 'text/html'
 }
 
 function previewMimeType(fileName, kind) {
@@ -180,6 +194,7 @@ function previewMimeType(fileName, kind) {
   if (ext) return MIME_BY_EXT[ext]
   if (kind === 'image') return 'image/*'
   if (kind === 'pdf') return 'application/pdf'
+  if (kind === 'html') return 'text/html'
   return 'application/octet-stream'
 }
 
@@ -229,6 +244,12 @@ export default {
       return /\.docx$/i.test(
         String((this.attachment && this.attachment.fileName) || this.title || '')
       )
+    },
+    isSpreadsheetFile() {
+      return isSpreadsheetAttachment(
+        (this.attachment && this.attachment.fileName) || this.title,
+        this.attachment && this.attachment.mimeType
+      )
     }
   },
   created() {
@@ -246,11 +267,47 @@ export default {
   methods: {
     onAttachmentClick(node) {
       const data = node && node.getData ? node.getData() || {} : {}
+      if (isAttachmentBusy(data) || (data.attachmentStatus === 'failed' && !data.attachmentId)) {
+        if (this.$message) this.$message.info(attachmentBusyMessage(data))
+        return
+      }
       if (data.attachmentId) {
+        if (
+          isHtmlAttachment(
+            data.attachmentName,
+            data.attachmentMimeType,
+            data.attachmentUrl
+          )
+        ) {
+          this.openHtmlInNewPage(data)
+          return
+        }
         this.openStoredAttachment(data)
       } else if (data.attachmentUrl) {
+        if (isHtmlAttachment(data.attachmentName, data.attachmentMimeType, data.attachmentUrl)) {
+          this.openUrlInNewPage(data.attachmentUrl)
+          return
+        }
         this.openExternalAttachment(data)
       }
+    },
+    openUrlInNewPage(url) {
+      const href = String(url || '')
+      if (!href) return
+      const opened = window.open(href, '_blank', 'noopener')
+      if (!opened && this.$message) {
+        this.$message.warning('浏览器拦截了新窗口，请允许弹出窗口后重试')
+      }
+    },
+    openHtmlInNewPage(data) {
+      const roomKey = roomFromLocation(this.$route)
+      if (!roomKey) {
+        if (this.$message) this.$message.warning('请先进入协作房间后再打开网页附件')
+        return
+      }
+      const attachmentId = data && (data.attachmentId || data.id)
+      if (!attachmentId) return
+      this.openUrlInNewPage(nodeAttachmentContentUrl(roomKey, attachmentId))
     },
     resetPreview() {
       this.requestId += 1
@@ -292,12 +349,25 @@ export default {
       this.resetPreview()
       this.visible = true
       this.title = String(data.attachmentName || '附件预览')
+      this.attachmentId = data.attachmentId || ''
+      this.kind = attachmentPreviewKind(data.attachmentName, data.attachmentMimeType)
+      const localText = String(data.attachmentExtractedText || '').trim()
+      if (
+        localText &&
+        (this.kind === 'presentation' ||
+          this.kind === 'text' ||
+          this.kind === 'json' ||
+          this.kind === 'markdown')
+      ) {
+        this.previewText = localText
+        this.loading = false
+      }
       if (!roomKey) {
         this.error = '请先进入协作房间后再预览附件'
         return
       }
       const requestId = this.requestId
-      this.loading = true
+      if (!this.previewText) this.loading = true
       try {
         const result = await getNodeAttachment(roomKey, data.attachmentId)
         if (requestId !== this.requestId) return
@@ -306,37 +376,46 @@ export default {
         this.attachment = attachment
         this.title = String(attachment.fileName || data.attachmentName || '附件预览')
         this.kind = attachmentPreviewKind(attachment.fileName, attachment.mimeType)
+        if (isAttachmentBusy(attachment) && !this.previewText) {
+          this.error = attachmentBusyMessage(attachment.status ? attachment : data)
+          return
+        }
+        if (isAttachmentBusy(attachment) && this.previewText) {
+          this.loading = false
+          return
+        }
+        if (this.kind === 'html') {
+          this.visible = false
+          this.openHtmlInNewPage({
+            attachmentId: this.attachmentId
+          })
+          return
+        }
         if (this.kind === 'office') {
+          this.controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+          const content = await fetchNodeAttachmentContent(roomKey, this.attachmentId, {
+            signal: this.controller && this.controller.signal
+          })
+          if (requestId !== this.requestId) return
           if (/\.docx$/i.test(attachment.fileName || '')) {
-            this.controller = typeof AbortController !== 'undefined' ? new AbortController() : null
-            const content = await fetchNodeAttachmentContent(roomKey, this.attachmentId, {
-              signal: this.controller && this.controller.signal
-            })
-            if (requestId !== this.requestId) return
             this.sourceBlob = new Blob([content.buffer], {
               type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
             })
             await this.renderDocxPreview(this.sourceBlob, requestId)
             return
           }
-          this.previewText = formatOfficePreviewText(
-            attachment.extractedText,
-            attachment.fileName
-          )
+          this.sourceBlob = new Blob([content.buffer], {
+            type: /\.xlsm$/i.test(attachment.fileName || '')
+              ? 'application/vnd.ms-excel.sheet.macroenabled.12'
+              : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          })
+          await this.loadWorkbookCanvas(content.buffer)
+          return
+        }
+        if (this.kind === 'presentation') {
+          this.previewText = String(attachment.extractedText || this.previewText || '')
           if (!this.previewText.trim()) {
-            this.error = attachment.errorMessage || '该文件未生成可读内容预览，请下载后查看'
-            return
-          }
-          if (/\.xlsx$/i.test(attachment.fileName || '')) {
-            this.controller = typeof AbortController !== 'undefined' ? new AbortController() : null
-            const content = await fetchNodeAttachmentContent(roomKey, this.attachmentId, {
-              signal: this.controller && this.controller.signal
-            })
-            if (requestId !== this.requestId) return
-            this.sourceBlob = new Blob([content.buffer], {
-              type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            })
-            await this.loadWorkbookCanvas(content.buffer)
+            this.error = attachment.errorMessage || '该演示文稿未生成可读文本，请下载后查看'
           }
           return
         }
@@ -360,7 +439,7 @@ export default {
         }
       } catch (err) {
         if (err && err.name === 'AbortError') return
-        if (requestId === this.requestId) {
+        if (requestId === this.requestId && !this.previewText) {
           this.error = (err && err.message) || '附件预览加载失败'
         }
       } finally {
@@ -421,40 +500,29 @@ export default {
     },
     async loadWorkbookCanvas(buffer) {
       try {
-        const module = await import('xlsx')
-        const XLSX = module.default || module
-        const workbook = XLSX.read(buffer, { type: 'array', raw: false })
-        const sheets = workbook.SheetNames.slice(0, 10).map(name => {
-          const values = XLSX.utils.sheet_to_json(workbook.Sheets[name], {
-            header: 1,
-            raw: false,
-            defval: '',
-            blankrows: false
-          })
-          const rows = values
-            .map(row => {
-              const cells = Array.isArray(row) ? row.map(value => String(value || '')) : []
-              let last = cells.length - 1
-              while (last >= 0 && !cells[last].trim()) last -= 1
-              return cells.slice(0, last + 1)
-            })
-            .filter(row => row.some(cell => cell.trim()))
-          const columnCount = Math.min(
-            40,
-            rows.reduce((max, row) => Math.max(max, row.length), 0)
-          )
-          return {
-            name,
-            rows: rows.slice(0, 500).map(row => row.slice(0, columnCount)),
-            columnCount,
-            truncated: rows.length > 500
-          }
-        }).filter(sheet => sheet.rows.length)
+        const [xlsxModule, zipModule] = await Promise.all([
+          import('xlsx'),
+          import('jszip')
+        ])
+        const XLSX = xlsxModule.default || xlsxModule
+        const JSZip = zipModule.default || zipModule
+        const slim = await slimSpreadsheetZip(buffer, JSZip)
+        const workbook = XLSX.read(slim, {
+          type: 'array',
+          raw: false,
+          cellStyles: false,
+          cellHTML: false,
+          sheetRows: 501
+        })
+        const sheets = workbookSheetsFromXlsx(XLSX, workbook)
         this.workbookSheets = sheets
         this.activeSheetName = (sheets[0] && sheets[0].name) || ''
+        if (!sheets.length) {
+          this.error = '无法预览该表格，请下载后查看'
+        }
       } catch (err) {
-        // Keep the already extracted text readable when a workbook is malformed.
         this.workbookSheets = []
+        this.error = '无法预览该表格，请下载后查看'
       }
     },
     spreadsheetColumnName(index) {
@@ -823,16 +891,24 @@ export default {
   background: #fff;
 }
 
-.externalPreviewWrap {
-  background: #fff;
-}
-
 .externalPreviewHint {
   margin: 0;
   padding: 10px 16px;
   color: #909399;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.externalPreviewWrap {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.externalPreviewWrap .documentPreviewFrame {
+  flex: 1;
+  min-height: 0;
 }
 
 .dialogResizeHandle {
