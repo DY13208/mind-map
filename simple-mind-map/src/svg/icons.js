@@ -1,4 +1,5 @@
 import { mergerIconList } from '../utils'
+import { getAttachmentFileType } from '../utils/attachmentFileType'
 
 // 超链接图标
 const hyperlink =
@@ -11,6 +12,23 @@ const note =
 // 附件图标
 const attachment =
   '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 1024 1024" width="128" height="128"><path d="M516.373333 375.978667l136.576-136.576a147.797333 147.797333 0 0 1 208.853334-0.021334 147.690667 147.690667 0 0 1-0.042667 208.832l-204.8 204.778667v0.021333l-153.621333 153.6c-85.973333 85.973333-225.28 85.973333-311.253334 0.021334-85.994667-85.973333-85.973333-225.216 0.149334-311.36L431.146667 256.362667a21.333333 21.333333 0 0 0-30.165334-30.165334L162.069333 465.066667c-102.805333 102.826667-102.826667 269.056-0.149333 371.733333 102.613333 102.613333 268.970667 102.613333 371.584 0l153.6-153.642667h0.021333l0.021334-0.021333 204.778666-204.778667c74.325333-74.325333 74.346667-194.858667 0.021334-269.184-74.24-74.24-194.88-74.24-269.162667 0.042667l-136.576 136.554667-187.626667 187.626666a117.845333 117.845333 0 0 0-0.106666 166.826667 118.037333 118.037333 0 0 0 166.826666-0.106667l255.850667-255.829333a21.333333 21.333333 0 0 0-30.165333-30.165333L435.136 669.973333a75.370667 75.370667 0 0 1-106.496 0.106667 75.178667 75.178667 0 0 1 0.128-106.496l187.605333-187.605333z" ></path></svg>'
+
+// 附件类型图标。保持单色，以便节点主题和 attachmentIcon.style.color 能统一接管颜色。
+const attachmentFileIcons = {
+  pdf: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 2.5h9l5 5v14H5zM14 2.5v5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M7.5 16.5h9M7.5 13h6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  word: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 2.5h9l5 5v14H5zM14 2.5v5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M7.5 13.5l1.5 4 1.5-3 1.5 3 1.5-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  presentation: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 2.5h9l5 5v14H5zM14 2.5v5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><rect x="7.5" y="11" width="9" height="5.5" rx=".7" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M9.5 15l1.8-1.7 1.6 1.3 1.5-1.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  spreadsheet: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 2.5h9l5 5v14H5zM14 2.5v5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 12h8M8 15.5h8M11 10.5v7M14 10.5v7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  image: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="M5 18l5.5-5 3.5 3 2-2 3 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  html: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 2.5h9l5 5v14H5zM14 2.5v5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="14.6" r="3.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8.4 14.6h7.2M12 11c1.1 1.2 1.65 2.4 1.65 3.6S13.1 17.6 12 18.8c-1.1-1.2-1.65-2.4-1.65-3.6S10.9 12.2 12 11z" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
+  text: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 2.5h9l5 5v14H5zM14 2.5v5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 12h8M8 15.5h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  archive: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 4v16M12 8h.01M12 12h.01M12 16h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+}
+
+const getAttachmentFileIcon = (fileName, mimeType = '') => {
+  const type = getAttachmentFileType(fileName, mimeType)
+  return attachmentFileIcons[type] || attachment
+}
 
 // 节点icon
 export const nodeIconList = [
@@ -311,6 +329,8 @@ export default {
   hyperlink,
   note,
   attachment,
+  attachmentFileIcons,
+  getAttachmentFileIcon,
   mapRef,
   nodeIconList,
   getNodeIconListIcon

@@ -595,10 +595,14 @@ function applyCorsHeaders(req, res, options = {}) {
   } else if (!config.enabled) {
     res.setHeader('Access-Control-Allow-Origin', '*')
   }
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS')
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS,HEAD')
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, mcp-session-id'
+    'Content-Type, Authorization, mcp-session-id, x-client-id, X-Mind-File-Name, X-Mind-Mime-Type, X-Mind-Node-Uid, X-Mind-Source-Kind, X-Mind-Force-Extract, Tus-Resumable, Upload-Length, Upload-Offset, Upload-Metadata, Upload-Defer-Length, Upload-Concat'
+  )
+  res.setHeader(
+    'Access-Control-Expose-Headers',
+    'Location, Tus-Resumable, Upload-Offset, Upload-Length, Upload-Metadata, Tus-Version, Tus-Max-Size, Tus-Extension, X-Mind-Attachment-Id'
   )
 }
 

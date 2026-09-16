@@ -29,6 +29,7 @@ export const FIELD_GROUPS = {
     'attachmentUrl',
     'attachmentName',
     'attachmentId',
+    'attachmentMimeType',
     'attachmentStatus',
     'attachmentError',
     'attachmentExtractedText'

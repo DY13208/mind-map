@@ -14,6 +14,8 @@ class Select {
     this.mouseMoveY = 0
     this.isSelecting = false
     this.cacheActiveList = []
+    this.lastMultiSelectList = []
+    this.lastMultiSelectUids = []
     this.autoMove = new AutoMove(mindMap)
     this.bindEvent()
   }
@@ -23,12 +25,15 @@ class Select {
     this.onMousedown = this.onMousedown.bind(this)
     this.onMousemove = this.onMousemove.bind(this)
     this.onMouseup = this.onMouseup.bind(this)
-    this.checkInNodes = throttle(this.checkInNodes, 300, this)
+    this.checkInNodesRaw = this.checkInNodes.bind(this)
+    this.checkInNodes = throttle(this.checkInNodesRaw, 300, this)
 
+    this.onNodeActive = this.onNodeActive.bind(this)
     this.mindMap.on('mousedown', this.onMousedown)
     this.mindMap.on('mousemove', this.onMousemove)
     this.mindMap.on('mouseup', this.onMouseup)
     this.mindMap.on('node_mouseup', this.onMouseup)
+    this.mindMap.on('node_active', this.onNodeActive)
   }
 
   // 解绑事件
@@ -37,6 +42,7 @@ class Select {
     this.mindMap.off('mousemove', this.onMousemove)
     this.mindMap.off('mouseup', this.onMouseup)
     this.mindMap.off('node_mouseup', this.onMouseup)
+    this.mindMap.off('node_active', this.onNodeActive)
   }
 
   // 鼠标按下
@@ -126,15 +132,80 @@ class Select {
     if (!this.isMousedown) {
       return
     }
+    const didSelect = this.isSelecting
+    // 节流会丢掉松开前最后一次检测，这里立刻提交选区，否则右键菜单拿到的还是空选中
+    if (typeof this.checkInNodesRaw === 'function') {
+      this.checkInNodesRaw()
+    }
     this.checkTriggerNodeActiveEvent()
+    this.rememberMultiSelect()
     this.autoMove.clearAutoMoveTimer()
     this.isMousedown = false
     this.cacheActiveList = []
     if (this.rect) this.rect.remove()
     this.rect = null
-    setTimeout(() => {
-      this.isSelecting = false
-    }, 0)
+    this.isSelecting = false
+    if (didSelect && this.lastMultiSelectUids.length > 1) {
+      const pos = (this.mindMap.event && this.mindMap.event.mousemovePos) || {}
+      this.mindMap.emit('multi_select_end', {
+        clientX: pos.x,
+        clientY: pos.y,
+        uids: this.lastMultiSelectUids.slice(),
+        nodes: this.getMultiSelectCache()
+      })
+    }
+  }
+
+  onNodeActive(node, nodeList) {
+    if (Array.isArray(nodeList) && nodeList.length > 1) {
+      this.lastMultiSelectList = nodeList.slice()
+      this.lastMultiSelectUids = nodeList
+        .map(item => this.getNodeUid(item))
+        .filter(Boolean)
+    }
+  }
+
+  rememberMultiSelect() {
+    const list =
+      (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
+    if (list.length > 1) {
+      this.lastMultiSelectList = list.slice()
+      this.lastMultiSelectUids = list
+        .map(node => this.getNodeUid(node))
+        .filter(Boolean)
+    }
+  }
+
+  clearMultiSelectCache() {
+    this.lastMultiSelectList = []
+    this.lastMultiSelectUids = []
+  }
+
+  getNodeUid(node) {
+    if (!node) return ''
+    return (node.getData && node.getData('uid')) || node.uid || ''
+  }
+
+  isNodeInList(list, node) {
+    const uid = this.getNodeUid(node)
+    if (!uid) return false
+    return (list || []).some(item => this.getNodeUid(item) === uid)
+  }
+
+  getMultiSelectCache() {
+    const renderer = this.mindMap && this.mindMap.renderer
+    const uids = this.lastMultiSelectUids || []
+    if (
+      uids.length > 1 &&
+      renderer &&
+      typeof renderer.findNodeByUid === 'function'
+    ) {
+      const live = uids
+        .map(uid => renderer.findNodeByUid(uid))
+        .filter(Boolean)
+      if (live.length > 1) return live
+    }
+    return (this.lastMultiSelectList || []).filter(Boolean)
   }
 
   // 如果激活节点改变了，那么触发事件
@@ -216,6 +287,7 @@ class Select {
         })
       }
     })
+    this.rememberMultiSelect()
   }
 
   // 是否存在选区

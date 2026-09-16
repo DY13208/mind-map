@@ -225,6 +225,7 @@ function requestWithUploadProgress(path, options = {}) {
       }
       const error = new Error(data.error || xhr.statusText || 'request failed')
       if (data.code) error.code = data.code
+      error.statusCode = xhr.status
       reject(error)
     }
     xhr.onerror = () => reject(new Error('网络错误，请稍后重试'))

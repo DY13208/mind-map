@@ -41,9 +41,24 @@ async function main() {
   )
   assert.match(docxHeaders['Content-Disposition'], /^attachment;/)
 
+  const xlsmHeaders = limits.attachmentResponseHeaders('财务模型.xlsm')
+  assert.equal(
+    xlsmHeaders['Content-Type'],
+    'application/vnd.ms-excel.sheet.macroenabled.12'
+  )
+  assert.match(xlsmHeaders['Content-Disposition'], /^attachment;/)
+
   const textHeaders = limits.attachmentResponseHeaders('说明.txt')
   assert.equal(textHeaders['Content-Type'], 'text/plain')
   assert.match(textHeaders['Content-Disposition'], /^attachment;/)
+
+  const htmlHeaders = limits.attachmentResponseHeaders('说明.html')
+  assert.equal(htmlHeaders['Content-Type'], 'text/html')
+  assert.match(htmlHeaders['Content-Disposition'], /^inline;/)
+  assert.equal(htmlHeaders['X-Content-Type-Options'], 'nosniff')
+  assert.match(htmlHeaders['Content-Security-Policy'], /^sandbox\b/)
+  assert.ok(!/\ballow-scripts\b/.test(htmlHeaders['Content-Security-Policy']))
+  assert.ok(!/\ballow-same-origin\b/.test(htmlHeaders['Content-Security-Policy']))
 
   // The MIME supplied at upload time is intentionally not an input to the
   // response helper. Unknown extensions are never served as an active type.
@@ -114,6 +129,45 @@ async function main() {
     )
     assert.equal(missing.statusCode, 404)
     assert.equal(JSON.parse(missing.body).code, 'NOT_FOUND')
+
+    assert.equal(
+      httpApi.isBinaryAttachmentUpload({
+        method: 'POST',
+        headers: { 'content-type': 'application/json' }
+      }),
+      false
+    )
+    assert.equal(
+      httpApi.isBinaryAttachmentUpload({
+        method: 'POST',
+        headers: {
+          'content-type': 'application/octet-stream',
+          'x-mind-file-name': encodeURIComponent('合同.pdf')
+        }
+      }),
+      true
+    )
+
+    roomAcl.assertRoomAccess = async () => {}
+    const tooBig = createResponse()
+    const { Readable } = require('stream')
+    const bigReq = Readable.from([Buffer.from('x')])
+    bigReq.method = 'POST'
+    bigReq.url = '/api/files/room-demo/attachments'
+    bigReq.headers = {
+      'content-type': 'application/octet-stream',
+      'content-length': String(limits.MAX_BYTES + 1),
+      'x-mind-file-name': encodeURIComponent('big.bin')
+    }
+    bigReq.destroy = function destroy() {
+      this.destroyed = true
+    }
+    await httpApi.handleApi(bigReq, tooBig, {
+      pathname: '/api/files/room-demo/attachments',
+      db: {}
+    })
+    assert.equal(tooBig.statusCode, 413)
+    assert.equal(JSON.parse(tooBig.body).code, 'FILE_TOO_LARGE')
   } finally {
     roomAcl.assertRoomAccess = originalAssertRoomAccess
     store.getContentById = originalGetContentById

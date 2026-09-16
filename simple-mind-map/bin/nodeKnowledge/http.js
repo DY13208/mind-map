@@ -2,7 +2,15 @@ const { safeRoomKey, sendJson, readBody, getPool } = require('../storage')
 const { bodyLimitForPath } = require('../rateLimit')
 const store = require('./store')
 const { MAX_BYTES, attachmentResponseHeaders } = require('./limits')
+const binary = require('./binary')
+const tus = require('./tus')
 const roomAcl = require('../roomAcl')
+
+// 旧版 JSON/base64 仍保留给知识补齐。二进制附件按原文件大小限制。
+const MAX_JSON_UPLOAD_BODY_BYTES = Math.min(
+  32 * 1024 * 1024,
+  Math.ceil((MAX_BYTES * 4) / 3) + 512 * 1024
+)
 
 function matchAttachments(pathname) {
   const m = String(pathname || '').match(
@@ -28,6 +36,24 @@ async function handleApi(req, res, options = {}) {
   const pathname =
     options.pathname ||
     String((req.url || '').split('?')[0] || '')
+  if (tus.isTusPath(pathname)) {
+    try {
+      return await tus.handleTus(req, res, {
+        pathname,
+        db: options.db || getPool(),
+        hit: tus.matchTus(pathname)
+      })
+    } catch (err) {
+      if (!res.headersSent) {
+        sendJson(res, err.statusCode || err.status_code || 400, {
+          ok: false,
+          error: err.message || 'node knowledge error',
+          code: err.code || 'NODE_KNOWLEDGE_ERROR'
+        })
+      }
+      return true
+    }
+  }
   const attachmentHit = matchAttachments(pathname)
   const ensureHit = matchEnsure(pathname)
   if (!attachmentHit && !ensureHit) return false
@@ -40,7 +66,7 @@ async function handleApi(req, res, options = {}) {
       const roomKey = safeRoomKey(ensureHit.roomKey)
       await roomAcl.assertRoomAccess(db, req, roomKey, 'edit')
       const body = await readBody(req, {
-        maxBytes: Math.max(bodyLimitForPath(pathname), MAX_BYTES + 512 * 1024)
+        maxBytes: Math.max(bodyLimitForPath(pathname), MAX_JSON_UPLOAD_BODY_BYTES)
       })
       const sources = Array.isArray(body.sources) ? body.sources.slice(0, 12) : []
       const results = await store.ensureSources(db, roomKey, sources, actor)
@@ -51,10 +77,19 @@ async function handleApi(req, res, options = {}) {
     if (attachmentHit && !attachmentHit.id && req.method === 'POST') {
       const roomKey = safeRoomKey(attachmentHit.roomKey)
       await roomAcl.assertRoomAccess(db, req, roomKey, 'edit')
-      const body = await readBody(req, {
-        maxBytes: Math.max(bodyLimitForPath(pathname), MAX_BYTES + 512 * 1024)
-      })
-      const saved = await store.ingestUpload(db, roomKey, body || {}, actor)
+      const saved = binary.isBinaryAttachmentUpload(req)
+        ? await store.ingestBinaryRequest(db, roomKey, req, actor)
+        : await store.ingestUpload(
+            db,
+            roomKey,
+            (await readBody(req, {
+              maxBytes: Math.max(
+                bodyLimitForPath(pathname),
+                MAX_JSON_UPLOAD_BODY_BYTES
+              )
+            })) || {},
+            actor
+          )
       sendJson(res, saved.deduped ? 200 : 201, { ok: true, attachment: saved })
       return true
     }
@@ -120,5 +155,8 @@ async function handleApi(req, res, options = {}) {
 module.exports = {
   handleApi,
   matchAttachments,
-  matchEnsure
+  matchEnsure,
+  isBinaryAttachmentUpload: binary.isBinaryAttachmentUpload,
+  isTusPath: tus.isTusPath,
+  matchTus: tus.matchTus
 }

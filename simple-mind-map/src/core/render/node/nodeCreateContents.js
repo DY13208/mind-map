@@ -9,10 +9,14 @@ import {
   getNodeRichTextStyles,
   measureText as measureTextCanvas
 } from '../../../utils'
-import { Image as SVGImage, SVG, A, G, Rect, Text } from '@svgdotjs/svg.js'
+import { Image as SVGImage, SVG, A, G, Rect, Text, Circle } from '@svgdotjs/svg.js'
 import iconsSvg from '../../../svg/icons'
 import { noneRichTextNodeLineHeight } from '../../../constants/constant'
 import mapRefUtil from '../../../utils/mapRef'
+import {
+  hasAttachmentIcon,
+  attachmentIconViewState
+} from '../../../utils/attachmentIconState'
 
 // 测量svg文本宽高
 const measureText = (text, style) => {
@@ -703,27 +707,183 @@ function createNoteNode() {
   }
 }
 
+let attachmentIconStyleInjected = false
+
+function ensureAttachmentIconStyle() {
+  if (attachmentIconStyleInjected || typeof document === 'undefined') return
+  const head = document.head
+  if (!head) return
+  attachmentIconStyleInjected = true
+  const style = document.createElement('style')
+  style.setAttribute('data-smm-attachment-icon', '1')
+  style.textContent = `
+.smm-attachment-progress.is-busy {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: smm-attachment-spin 0.85s linear infinite;
+}
+@keyframes smm-attachment-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .smm-attachment-progress.is-busy { animation: none; }
+}
+`
+  head.appendChild(style)
+}
+
+function applyAttachmentIconVisual(view, data) {
+  if (!view) return
+  const state = attachmentIconViewState(data)
+  const phases = ['uploading', 'processing', 'ready', 'failed']
+  phases.forEach(phase => {
+    view.root[state.phase === phase ? 'addClass' : 'removeClass'](`is-${phase}`)
+  })
+  view.root.attr({
+    'data-smm-attachment-state': state.phase,
+    'data-smm-attachment-preview': state.previewable ? 'ready' : 'blocked',
+    cursor: state.previewable || state.phase === 'failed' ? 'pointer' : 'progress'
+  })
+  if (view.icon) view.icon.opacity(state.iconOpacity)
+  if (view.titleNode) {
+    const titleEl = view.titleNode.node || view.titleNode
+    if (titleEl) titleEl.textContent = state.title
+  }
+  const circumference = 2 * Math.PI * view.radius
+  if (state.progressMode === 'none') {
+    view.progress.hide()
+  } else {
+    view.progress.show()
+    view.arc.stroke({ color: state.progressColor, linecap: 'round' })
+    if (state.progressMode === 'determinate') {
+      view.progress.removeClass('is-busy')
+      view.arc.attr({
+        'stroke-dasharray': String(circumference),
+        'stroke-dashoffset': String(
+          circumference * (1 - state.percent / 100)
+        )
+      })
+    } else {
+      view.progress.addClass('is-busy')
+      view.arc.attr({
+        'stroke-dasharray': `${circumference * 0.28} ${circumference}`,
+        'stroke-dashoffset': '0'
+      })
+    }
+  }
+  if (view.percentText) {
+    if (state.showPercent) {
+      view.percentText.show()
+      view.percentText.text(String(state.percent))
+      view.percentText.fill(state.progressColor)
+    } else {
+      view.percentText.hide()
+    }
+  }
+  if (state.badge) {
+    view.badge.show()
+    view.badgeCircle.fill({ color: state.badge.color })
+  } else {
+    view.badge.hide()
+  }
+}
+
 //  创建附件节点
 function createAttachmentNode() {
-  const { attachmentUrl, attachmentId, attachmentName } = this.getData()
+  const data = this.getData() || {}
+  const { attachmentName, attachmentMimeType } = data
   // Server-managed attachments are identified by attachmentId and may not have
-  // a public URL (for example, objects stored with a private ACL). They still
-  // belong to the node and must render the attachment affordance.
-  if (!attachmentUrl && !attachmentId) {
+  // a public URL (for example, objects stored with a private ACL). Uploading
+  // placeholders also render so progress can sit on the same icon.
+  if (!hasAttachmentIcon(data)) {
     return
   }
+  ensureAttachmentIconStyle()
   const iconSize = this.getNodeIconSize('attachmentIcon')
   const { icon, style } = this.mindMap.opt.attachmentIcon
-  const node = new SVG().attr('cursor', 'pointer').size(iconSize, iconSize)
-  if (attachmentName) {
-    node.add(SVG(`<title>${attachmentName}</title>`))
-  }
+  const node = new SVG().size(iconSize, iconSize)
+  node.addClass('smm-attachment-icon')
+  const titleNode = SVG(`<title></title>`)
+  node.add(titleNode)
   // 透明的层，用来作为鼠标区域
   node.add(new Rect().size(iconSize, iconSize).fill({ color: 'transparent' }))
-  // 备注图标
-  const iconNode = SVG(icon || iconsSvg.attachment).size(iconSize, iconSize)
+  // 自定义图标优先；未自定义时根据附件名称使用相应的文件类型图标。
+  const useBuiltInFileIcon = !icon
+  const iconNode = SVG(
+    icon || iconsSvg.getAttachmentFileIcon(attachmentName, attachmentMimeType)
+  ).size(iconSize, iconSize)
   this.style.iconNode(iconNode, style.color)
+  // 内置文件类型图标由描边构成；只为它补充描边颜色，避免改变用户自定义 SVG 的表现。
+  if (useBuiltInFileIcon) {
+    const iconColor = style.color || this.style.merge('color')
+    iconNode.attr({ color: iconColor, stroke: iconColor })
+  }
   node.add(iconNode)
+
+  const stroke = Math.max(2, iconSize * 0.16)
+  const radius = Math.max(3, (iconSize - stroke) / 2)
+  const cx = iconSize / 2
+  const cy = iconSize / 2
+  const progress = new G().addClass('smm-attachment-progress')
+  const track = new Circle()
+    .radius(radius)
+    .cx(cx)
+    .cy(cy)
+    .fill('none')
+    .stroke({ color: 'rgba(15, 23, 42, 0.16)', width: stroke })
+  const arc = new Circle()
+    .radius(radius)
+    .cx(cx)
+    .cy(cy)
+    .fill('none')
+    .stroke({ color: '#1677ff', width: stroke, linecap: 'round' })
+  arc.attr({
+    transform: `rotate(-90 ${cx} ${cy})`
+  })
+  progress.add(track).add(arc)
+  node.add(progress)
+
+  const percentText = new Text()
+    .text('')
+    .fill('#1677ff')
+  percentText.font({
+    size: Math.max(8, Math.round(iconSize * 0.42)),
+    family: 'ui-sans-serif, system-ui, sans-serif',
+    anchor: 'middle',
+    weight: 700
+  })
+  percentText.attr({
+    x: cx,
+    y: cy,
+    'dominant-baseline': 'central',
+    'pointer-events': 'none'
+  })
+  percentText.addClass('smm-attachment-percent')
+  node.add(percentText)
+
+  const badgeSize = Math.max(6, Math.round(iconSize * 0.38))
+  const badge = new G().addClass('smm-attachment-badge')
+  const badgeCircle = new Circle()
+    .radius(badgeSize / 2)
+    .cx(iconSize - badgeSize / 2 + 1)
+    .cy(iconSize - badgeSize / 2 + 1)
+    .stroke({ color: '#fff', width: 1.2 })
+  badge.add(badgeCircle)
+  node.add(badge)
+
+  const view = {
+    root: node,
+    icon: iconNode,
+    titleNode,
+    progress,
+    arc,
+    percentText,
+    badge,
+    badgeCircle,
+    radius
+  }
+  applyAttachmentIconVisual(view, data)
+
   node.on('click', e => {
     this.mindMap.emit('node_attachmentClick', this, e, node)
   })
@@ -733,8 +893,15 @@ function createAttachmentNode() {
   return {
     node,
     width: iconSize,
-    height: iconSize
+    height: iconSize,
+    view
   }
+}
+
+function updateAttachmentIconState() {
+  const view = this._attachmentData && this._attachmentData.view
+  if (!view) return
+  applyAttachmentIconVisual(view, this.getData() || {})
 }
 
 // 获取节点图标大小
@@ -797,6 +964,7 @@ export default {
   createTagNode,
   createNoteNode,
   createAttachmentNode,
+  updateAttachmentIconState,
   getNoteContentPosition,
   getNodeIconSize,
   measureCustomNodeContentSize,
