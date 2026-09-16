@@ -273,6 +273,89 @@ export function extractSubmitMaterialFields(outline, { sopTitle = '' } = {}) {
   }
 }
 
+function treeNodeText(node) {
+  const data = (node && node.data) || node || {}
+  return stripText(data.text || node.text || '')
+}
+
+function findSubmitZoneNode(node) {
+  if (!node) return null
+  if (isSubmitMaterialZone(treeNodeText(node))) return node
+  for (const child of node.children || []) {
+    const found = findSubmitZoneNode(child)
+    if (found) return found
+  }
+  return null
+}
+
+function selectedChildValue(children) {
+  const list = (children || []).filter(Boolean)
+  if (!list.length) return ''
+
+  // 单值字段在脑图里采用「字段 -> 值」结构。
+  if (list.length === 1) {
+    const only = treeNodeText(list[0])
+    const defaultValue = parseDefaultValue(only)
+    return defaultValue || only
+  }
+
+  // 枚举字段采用「候选项 -> 同名子节点」标记当前选中项。
+  for (const option of list) {
+    const optionText = treeNodeText(option)
+    const defaultValue = parseDefaultValue(optionText)
+    if (defaultValue) return defaultValue
+    const normalized = optionText.replace(/^默认\s*[：:]\s*/, '').trim()
+    const marked = (option.children || []).some(child => {
+      const childText = treeNodeText(child)
+      return childText === normalized || childText === optionText
+    })
+    if (marked) return normalized
+  }
+  return ''
+}
+
+/**
+ * 从实时脑图树读取提交资料。
+ * 支持：字段：值、字段 -> 单值、默认：值、候选项 -> 同名子节点（选中标记）。
+ */
+export function extractSubmitMaterialFieldsFromTree(
+  tree,
+  { sopTitle = '' } = {}
+) {
+  const zone = findSubmitZoneNode(tree)
+  if (!zone) {
+    return extractSubmitMaterialFields('', { sopTitle })
+  }
+  const fields = []
+  const seen = new Set()
+  ;(zone.children || []).forEach((fieldNode, index) => {
+    const text = treeNodeText(fieldNode)
+    const label = fieldLabelOf(text)
+    if (!label || SKIP_LABEL_RE.test(label) || seen.has(label)) return
+    seen.add(label)
+    const inlineValue = hasFilledValue(text) ? fieldHintOf(text) : ''
+    const value = inlineValue || selectedChildValue(fieldNode.children)
+    const choices = (fieldNode.children || [])
+      .map(treeNodeText)
+      .map(item => item.replace(/^默认\s*[：:]\s*/, '').trim())
+      .filter(Boolean)
+    fields.push({
+      key: `rt_${index + 1}`,
+      label,
+      hint: choices.join(' / ') || `请填写${label}`,
+      value: String(value || '').trim()
+    })
+  })
+  if (!fields.length) {
+    return extractSubmitMaterialFields('', { sopTitle })
+  }
+  return {
+    zones: [treeNodeText(zone)],
+    fields: fields.slice(0, 16),
+    source: 'runtime_tree'
+  }
+}
+
 export function needsSubmitMaterialBeforeRun(outline, sopTitle) {
   const r = extractSubmitMaterialFields(outline, { sopTitle })
   return r.fields.length > 0
@@ -297,6 +380,47 @@ export function missingSubmitMaterialLabels(fields) {
   return (fields || [])
     .filter(f => !String(f.value || '').trim())
     .map(f => f.label)
+}
+
+function normalizeFingerprintPart(value) {
+  return String(value == null ? '' : value)
+    .normalize('NFKC')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s\u3000]+/g, '')
+    .replace(/[，、]/g, ',')
+    .replace(/[：]/g, ':')
+    .replace(/[；]/g, ';')
+}
+
+function fingerprintHash(text) {
+  let hash = 0x811c9dc5
+  const input = String(text || '')
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+/**
+ * 当前脑图业务资料版本。字段顺序和纯格式变化不改变指纹；
+ * 任一值或「已填/未填」状态变化都会产生新批次。
+ */
+export function buildRuntimeMaterialFingerprint(material) {
+  if (!material || material.source !== 'runtime_tree') return ''
+  const rows = []
+  ;(material.providedFields || []).forEach(field => {
+    const label = normalizeFingerprintPart(field && field.label)
+    if (!label) return
+    rows.push(`p:${label}=${normalizeFingerprintPart(field && field.value)}`)
+  })
+  ;(material.missingFields || []).forEach(label => {
+    const normalized = normalizeFingerprintPart(label)
+    if (normalized) rows.push(`m:${normalized}`)
+  })
+  rows.sort()
+  return rows.length ? `runtime-v1-${fingerprintHash(rows.join('|'))}` : ''
 }
 
 export function parseProvidedFieldLabels(extraNote) {
