@@ -268,7 +268,19 @@ export async function loadSopRunContext(roomKey, sop) {
   let steps = []
   let source = 'none'
 
-  if (uid) {
+  // 从脑图工具栏直接运行时，优先使用点击“运行”那一刻的画布快照，
+  // 避免协同保存尚未落库时读到旧的表单字段。
+  const runtimeTree = sop && sop.runtimeTree
+  if (runtimeTree) {
+    const lines = treeToOutline(runtimeTree)
+    steps = treeToSteps(runtimeTree)
+    if (lines.length) {
+      outline = lines.join('\n')
+      source = 'runtime_tree'
+    }
+  }
+
+  if (!outline && uid) {
     try {
       const data = await getFileSubtree(key, uid, { deep: true, maxNodes: 800 })
       const tree = (data && data.tree) || data
@@ -300,7 +312,11 @@ export async function loadSopRunContext(roomKey, sop) {
     sopUid: uid,
     outline: outline.slice(0, 80000),
     steps,
-    source
+    source,
+    material:
+      sop && sop.runtimeMaterial && sop.runtimeMaterial.source === 'runtime_tree'
+        ? sop.runtimeMaterial
+        : null
   }
 }
 
@@ -325,7 +341,10 @@ function buildSystemPrompt() {
 9. 最终文件必须写到 /home/node/.openclaw/workspace/output/（这是可预览的 output 目录）；不要写到别的临时目录，也不要复用其它 SOP 刚生成的文件。
 10. 同时给出：是否完成、核心判断一句话、单页内容要点、数据来源。
 11. 不要修改 SOP 本体结构；过程日志不必写入导图。
-12. 缺关键数据时在结论里写清限制与假设，仍尽量用已有数据给出可执行结论与产物；不要停下来要求用户在良策界面「补数」或粘贴外部系统链接。`
+12. 缺关键数据时在结论里写清限制与假设，仍尽量用本次当前脑图已有数据给出可执行结论；不要停下来要求用户粘贴外部系统链接。
+13. 若上下文标明数据源为「runtime_tree / 当前脑图」，它是本次业务字段的唯一事实来源；未填写字段必须写「未填写」或「无法确认」。
+14. 严禁从 Git、历史 HTML、旧产物、旧运行记录、memory、台账备注或旧待办正文恢复、继承或推断本次业务字段；历史状态只可用于核实是否已派发通知，避免重复操作。
+15. 当前资料不完整时，不得声称「字段齐全」「12/12 已完成」「需求已完整提交」，只能完成不依赖缺失字段的自动步骤。`
 }
 
 function buildUserPrompt({ ctx, outputs, extraNote }) {
@@ -335,6 +354,15 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
   const goal = [ctx.sopId, ctx.sopTitle].filter(Boolean).join('：')
   const fileHint = suggestDeliverableFileStem(ctx.sopId, ctx.sopTitle)
   const needFiles = !!(outputs && outputs.length)
+  const runtimeSourceBoundary =
+    ctx.source === 'runtime_tree'
+      ? [
+          '【本次数据源硬性边界】',
+          '- 下方「当前脑图已填写资料 / 未填写字段」及实时大纲是本次业务输入的唯一来源；',
+          '- 禁止从 Git、历史文件、旧运行、memory、台账备注或旧待办正文补填业务字段；',
+          '- 空字段必须保持未填写，只允许用历史状态做通知去重核验。'
+        ].join('\n')
+      : ''
   if (!needFiles) {
     return [
       `请执行 SOP「${goal || ctx.sopTitle}」（流程型，不要求落盘产物文件）。`,
@@ -347,6 +375,7 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
       '- 不要强行生成 HTML/Excel 等文件；文末可不写「产物清单」，改为「## 执行结果」；',
       '- 说明：已完成哪些自动步骤、卡在哪个人工步骤、下一步建议。',
       '- 若下方已有「## 用户提交资料」，直接使用；不要要求用户再在界面里补数或贴链接。',
+      runtimeSourceBoundary,
       extraNote ? `\n## 额外要求\n${extraNote}` : '',
       '',
       '## SOP 子树 / 大纲上下文',
@@ -370,6 +399,7 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
     selected,
     '',
     '注意：中间快照、_map_full/_map_outline、MCP 日志不要出现在产物清单里。',
+    runtimeSourceBoundary,
     extraNote ? `\n## 额外要求\n${extraNote}` : '',
     '',
     '## SOP 子树 / 大纲上下文',
@@ -1307,7 +1337,9 @@ export async function runSopWithWorkbuddy({
           if (onNodeProgress) onNodeProgress(nodeProgress.slice())
         }
       }
-      if (r.notifyKey && (r.dispatchOk || r.cpdaOk || r.skipped)) {
+      // 只有企微已成功派发（包含幂等跳过）才记完成；
+      // CPDA 留痕成功但企微失败时必须允许重试。
+      if (r.notifyKey && r.dispatchOk) {
         doneKeys.add(r.notifyKey)
       }
     })
@@ -1513,8 +1545,16 @@ export async function runSopWithWorkbuddy({
   }
 
   const notifyOk = notifyResults.filter(r => r && r.dispatchOk)
-  const notifyFail = notifyResults.filter(r => r && !r.dispatchOk)
+  const notifyFail = notifyResults.filter(r => r && !r.skipped && !r.dispatchOk)
   const notifyExtraParts = []
+  if (notifyResults.length) {
+    notifyExtraParts.push(
+      `## 企微派发边界（必须遵守）\n` +
+        `本次所有通知/待办已由 SOP 队列统一处理。` +
+        `后续模型阶段严禁调用 create_todo/创建待办/发送待办类工具，` +
+        `不得因标题、备注或历史记录差异重新派发；只允许使用只读接口核验状态。`
+    )
+  }
   if (notifyOk.length && !notifySummary.hasBlocking) {
     notifyExtraParts.push(
       `## 已成功派发企微待办（勿重复）\n${notifyOk

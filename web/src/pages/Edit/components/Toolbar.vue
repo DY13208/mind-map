@@ -224,6 +224,21 @@
             <span class="text">{{ $t('toolbar.sopRegistry') }}</span>
           </div>
           <div
+            class="toolbarBtn sopRunBtn"
+            data-testid="run-selected-sop"
+            :class="{ disabled: !canRunSop }"
+            :title="
+              canRunSop
+                ? `运行：${runSopTitle}`
+                : '请先选择 D：标题 节点'
+            "
+            @click="runSelectedSop"
+            v-if="!isReadonly"
+          >
+            <span class="icon el-icon-video-play"></span>
+            <span class="text">运行</span>
+          </div>
+          <div
             class="toolbarBtn"
             @click="$bus.$emit('showExport')"
             style="margin-right: 0"
@@ -360,6 +375,14 @@ export default {
   },
   props: {
     returnFolderId: {
+      type: String,
+      default: ''
+    },
+    canRunSop: {
+      type: Boolean,
+      default: false
+    },
+    runSopTitle: {
       type: String,
       default: ''
     }
@@ -572,6 +595,14 @@ export default {
         path: '/sop',
         query: room ? { room } : {}
       })
+    },
+
+    runSelectedSop() {
+      if (!this.canRunSop) {
+        this.$message.warning('请先选择 D：标题 节点')
+        return
+      }
+      this.$emit('run-sop')
     },
 
     syncDisplayedSaveChip(next) {
@@ -1221,6 +1252,10 @@ export default {
         color: #bcbcbc;
         cursor: not-allowed;
         pointer-events: none;
+      }
+
+      &.sopRunBtn.disabled {
+        pointer-events: auto;
       }
 
       .icon {

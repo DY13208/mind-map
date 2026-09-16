@@ -123,6 +123,85 @@ function cleanAssigneeList(raw) {
     .trim()
 }
 
+function applyLocalTestAssigneeAliases(raw) {
+  const cleaned = cleanAssigneeList(raw)
+  if (!cleaned || typeof window === 'undefined') return cleaned
+  const hostname = String(window.location && window.location.hostname).toLowerCase()
+  if (hostname !== 'localhost' && hostname !== '127.0.0.1') return cleaned
+  const aliases = {
+    HRBP: '单丙申Eric',
+    副总: '单丙申Eric',
+    人事: '单丙申Eric',
+    执行人: '单丙申Eric'
+  }
+  const mapped = cleaned
+    .split('、')
+    .map(name => aliases[name] || name)
+    .filter(Boolean)
+  return [...new Set(mapped)].join('、')
+}
+
+const DISPATCHED_NOTIFY_STORAGE_KEY = 'sop.wecom.dispatched.v1'
+const IN_FLIGHT_NOTIFY_KEYS = new Set()
+
+function normalizeNotifyIdentityText(text) {
+  return stripNodeText(text)
+    .replace(/【SOP台账】/gi, '')
+    .replace(/^(?:[A-Za-z]\d*\s*[:：]\s*)/, '')
+    .replace(/\s+/g, '')
+    .toLowerCase()
+    .slice(0, 120)
+}
+
+/** 本地测试映射后，用企微 userid 作为统一接收人身份。 */
+export function canonicalizeNotifyAssignee(raw) {
+  const mapped = applyLocalTestAssigneeAliases(raw)
+  const names = cleanAssigneeList(mapped)
+    .split('、')
+    .filter(Boolean)
+    .map(name => (name === '单丙申Eric' ? 'shanbingshen' : name.toLowerCase()))
+  return [...new Set(names)].sort().join(',')
+}
+
+/** 稳定幂等键：不包含行号、时间、运行备注和展示标题。 */
+export function buildNotifyIdempotencyKey({ roomKey, sop, node, assignee } = {}) {
+  const sopUid = String(
+    (sop && (sop.uid || (sop.uids && sop.uids[0]) || sop.id)) || 'sop'
+  ).trim()
+  const sourceNode = String(
+    (node && (node.sourceNodeUid || node.sourceNodePath)) ||
+      (node && (node.originalText || node.text || node.todoTitle)) ||
+      'notify'
+  )
+  return [
+    'wecom-notify-v2',
+    String(roomKey || 'room').trim(),
+    sopUid,
+    normalizeNotifyIdentityText(sourceNode),
+    canonicalizeNotifyAssignee(assignee)
+  ].join(':')
+}
+
+function readDispatchedNotifyKeys() {
+  if (typeof window === 'undefined' || !window.localStorage) return new Set()
+  try {
+    const list = JSON.parse(window.localStorage.getItem(DISPATCHED_NOTIFY_STORAGE_KEY) || '[]')
+    return new Set(Array.isArray(list) ? list.filter(Boolean) : [])
+  } catch (e) {
+    return new Set()
+  }
+}
+
+function persistDispatchedNotifyKey(key) {
+  if (!key || typeof window === 'undefined' || !window.localStorage) return
+  try {
+    const keys = [...readDispatchedNotifyKeys(), key].slice(-500)
+    window.localStorage.setItem(DISPATCHED_NOTIFY_STORAGE_KEY, JSON.stringify(keys))
+  } catch (e) {
+    /* localStorage 不可用时仍由队列 completedNotifyKeys 去重 */
+  }
+}
+
 const ROLE_ASSIGNEE_RE =
   /^(?:行政|人事|HRBP|ITBP|IT|需求方|总经理|副总|负责人|部门负责人)(?:、(?:行政|人事|HRBP|ITBP|IT|需求方|总经理|副总|负责人|部门负责人))*$/i
 
@@ -199,10 +278,10 @@ export function parseAssigneesFromExtraNote(note) {
 export function resolveNotifyAssignee(nodeAssignee, extraNote) {
   const fromNote = parseAssigneesFromExtraNote(extraNote)
   if (fromNote.length && isRoleAssignee(nodeAssignee)) {
-    return fromNote.join('、')
+    return applyLocalTestAssigneeAliases(fromNote.join('、'))
   }
   const fallback = cleanAssigneeList(nodeAssignee) || '负责人'
-  return fallback
+  return applyLocalTestAssigneeAliases(fallback)
 }
 
 /** SOP 标题本身就是「给某人发企微代办」这类动作 */
@@ -221,10 +300,13 @@ export function isWecomTodoNoiseLine(text) {
   const t = stripNodeText(text)
   if (!t) return true
   if (
-    /^(?:最近运行|期望产物|耗时约|标题\s*[:：]|未真正|小策|WorkBuddy|刷新前|——|›|进度|模型输出|signal is aborted|已打包|使用模型|检查 |拉取 |发现 |知会)/i.test(
+    /^(?:最近运行|最新产物|台账备注|任务状态|运行状态|运行失败|企微派发失败|派发失败|期望产物|耗时约|标题\s*[:：]|未真正|小策|WorkBuddy|刷新前|——|›|进度|模型输出|signal is aborted|已打包|使用模型|检查 |拉取 |发现 |知会)/i.test(
       t
     )
   ) {
+    return true
+  }
+  if (/(?:^|[\s：:])(?:运行失败|企微派发失败|派发失败)(?:[\s：:]|$)/i.test(t)) {
     return true
   }
   if (/只返回了待办预览|确认门禁|未实际写入企业微信|可重新点运行|续跑会重新执行/.test(t)) {
@@ -286,6 +368,8 @@ export function synthesizeWecomTodoNotifyNode(sop, extraNote = '') {
       .join('\n'),
     assignee,
     block: false,
+    sourceSopUid: String((sop && (sop.uid || sop.id)) || ''),
+    sourceNodePath: normalizeNotifyIdentityText(title),
     notifyKey: `wecom-todo:${String((sop && (sop.uid || sop.id)) || title).slice(0, 80)}`
   }
 }
@@ -346,6 +430,8 @@ export function extractWecomTodoNotifyNodesFromOutline(
         text: todoTitle,
         todoTitle,
         originalText: text,
+        sourceSopUid: String((sop && (sop.uid || sop.id)) || ''),
+        sourceNodePath: normalizeNotifyIdentityText(text),
         detail: [
           [sop && sop.id, sop && sop.title].filter(Boolean).join('：'),
           text !== taskText ? `原始指令：${text}` : '',
@@ -419,7 +505,7 @@ export function extractNotifyNodesFromOutline(outline) {
     const text = stripNodeText(
       line.replace(/^(\s*)/, '').replace(/^[-*•●]\s*/, '')
     )
-    if (!text) return
+    if (!text || isWecomTodoNoiseLine(text)) return
     const manualGate = isManualGateTitle(text)
     if (!manualGate && !isNotifyTitle(text)) return
 
@@ -482,6 +568,7 @@ export function extractNotifyNodesFromOutline(outline) {
       nearby,
       contextText,
       notifyKey,
+      sourceNodePath: normalizeNotifyIdentityText(text),
       detail: nearby
         .filter(t => !parseAssigneeFromText(t))
         .slice(0, 8)
@@ -510,22 +597,75 @@ export async function processNotifyNodes({
 } = {}) {
   const list = Array.isArray(nodes) ? nodes : []
   const skip = new Set((skipKeys || []).filter(Boolean))
+  const persisted = readDispatchedNotifyKeys()
+  const seenThisRun = new Set()
   const overrideAssignees = parseAssigneesFromExtraNote(extraNote)
   const results = []
   for (let i = 0; i < list.length; i++) {
-    const node = list[i]
-    if (node && node.notifyKey && skip.has(node.notifyKey)) {
+    const originalNode = list[i] || {}
+    const assignee = resolveNotifyAssignee(originalNode.assignee, extraNote)
+    const idempotencyKey = buildNotifyIdempotencyKey({
+      roomKey,
+      sop,
+      node: originalNode,
+      assignee
+    })
+    const node = {
+      ...originalNode,
+      sourceSopUid: String(
+        originalNode.sourceSopUid || (sop && (sop.uid || sop.id)) || ''
+      ),
+      sourceNodePath:
+        originalNode.sourceNodePath ||
+        normalizeNotifyIdentityText(
+          originalNode.originalText || originalNode.text || originalNode.todoTitle
+        ),
+      canonicalAssignee: canonicalizeNotifyAssignee(assignee),
+      idempotencyKey,
+      // v2 之后队列续跑也使用稳定键。
+      notifyKey: idempotencyKey
+    }
+    const noiseText = [node.originalText, node.text, node.todoTitle]
+      .filter(Boolean)
+      .join('\n')
+    if (isWecomTodoNoiseLine(noiseText)) {
+      if (onStatus) onStatus('已忽略台账/运行状态文本，未创建企微待办')
       results.push({
         ...node,
+        assignee,
         skipped: true,
-        dispatchOk: true,
-        text: node.text,
-        assignee: node.assignee,
-        block: !!node.block
+        duplicate: false,
+        noise: true,
+        dispatchOk: false,
+        skipReason: '已忽略台账/运行状态文本'
       })
       continue
     }
-    const assignee = resolveNotifyAssignee(node.assignee, extraNote)
+    const legacyKey = originalNode.notifyKey
+    const duplicate =
+      seenThisRun.has(idempotencyKey) ||
+      persisted.has(idempotencyKey) ||
+      IN_FLIGHT_NOTIFY_KEYS.has(idempotencyKey) ||
+      skip.has(idempotencyKey) ||
+      (legacyKey && skip.has(legacyKey))
+    if (duplicate) {
+      if (onStatus) {
+        onStatus(`此前已派发「${originalNode.todoTitle || originalNode.text || '通知'}」，已跳过重复通知`)
+      }
+      results.push({
+        ...node,
+        skipped: true,
+        duplicate: true,
+        dispatchOk: true,
+        text: node.text,
+        assignee,
+        block: !!node.block,
+        skipReason: '此前已派发，已跳过重复通知'
+      })
+      continue
+    }
+    seenThisRun.add(idempotencyKey)
+    IN_FLIGHT_NOTIFY_KEYS.add(idempotencyKey)
     if (onStatus) {
       onStatus(
         `${node.block ? '阻塞' : '知会'}派发 ${i + 1}/${list.length}：「${
@@ -569,6 +709,7 @@ export async function processNotifyNodes({
         dispatchVia: '',
         dispatchBackendLabel: ''
       })
+      IN_FLIGHT_NOTIFY_KEYS.delete(idempotencyKey)
       continue
     }
     // 导图 CPDA 和企业微信共用同一个规范标题，原始指令进入 note，不再出现双标题。
@@ -649,6 +790,12 @@ export async function processNotifyNodes({
       dispatchReply = (err && err.message) || '企微派发失败'
       dispatchError = dispatchReply
       console.warn('[sopNotify] dispatchTodo failed', err)
+    }
+
+    IN_FLIGHT_NOTIFY_KEYS.delete(idempotencyKey)
+    if (dispatchOk) {
+      persistDispatchedNotifyKey(idempotencyKey)
+      persisted.add(idempotencyKey)
     }
 
     results.push({
