@@ -36,6 +36,7 @@ import {
   resolveSopRunConcurrency
 } from '@/utils/sopRunQueue'
 import {
+  buildRuntimeMaterialFingerprint,
   extractSubmitMaterialFieldsFromTree,
   isSubmitMaterialZone
 } from '@/utils/sopSubmitMaterial'
@@ -182,11 +183,13 @@ export default {
       const missingFields = (parsed.fields || [])
         .filter(field => !String(field.value || '').trim())
         .map(field => field.label)
-      return {
+      const material = {
         source: 'runtime_tree',
         providedFields,
         missingFields
       }
+      material.businessFingerprint = buildRuntimeMaterialFingerprint(material)
+      return material
     },
 
     formatRuntimeMaterialNote(material) {
@@ -267,6 +270,8 @@ export default {
         parentDTitle: target.parentDTitle,
         runtimeTree,
         runtimeMaterial,
+        businessFingerprint:
+          (runtimeMaterial && runtimeMaterial.businessFingerprint) || '',
         source: { type: 'room', ref: this.roomKey }
       }
       this.sopRunSubmitting = true

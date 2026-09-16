@@ -82,6 +82,17 @@ assert(
   api.canonicalizeNotifyAssignee('副总、人事') === 'shanbingshen',
   '多个本地测试角色不得重复创建给同一人'
 )
+const batchKeyA = api.buildNotifyIdempotencyKey({
+  ...stableKeyBase,
+  sop: { ...stableKeyBase.sop, businessFingerprint: 'runtime-v1-a' },
+  assignee: 'HRBP'
+})
+const batchKeyB = api.buildNotifyIdempotencyKey({
+  ...stableKeyBase,
+  sop: { ...stableKeyBase.sop, businessFingerprint: 'runtime-v1-b' },
+  assignee: 'HRBP'
+})
+assert(batchKeyA !== batchKeyB, '招聘资料批次变化必须允许重新通知')
 assert(
   !api.isNotifyTitle('如果没有，AI查询对应其他公司类似岗位并结合招聘需求生成JD'),
   '长叙述不应当通知'

@@ -173,13 +173,20 @@ export function buildNotifyIdempotencyKey({ roomKey, sop, node, assignee } = {})
       (node && (node.originalText || node.text || node.todoTitle)) ||
       'notify'
   )
-  return [
-    'wecom-notify-v2',
+  const businessFingerprint = String(
+    (sop && sop.businessFingerprint) ||
+      (sop && sop.runtimeMaterial && sop.runtimeMaterial.businessFingerprint) ||
+      ''
+  ).trim()
+  const parts = [
+    businessFingerprint ? 'wecom-notify-v3' : 'wecom-notify-v2',
     String(roomKey || 'room').trim(),
     sopUid,
     normalizeNotifyIdentityText(sourceNode),
     canonicalizeNotifyAssignee(assignee)
-  ].join(':')
+  ]
+  if (businessFingerprint) parts.push(businessFingerprint)
+  return parts.join(':')
 }
 
 function readDispatchedNotifyKeys() {
@@ -649,8 +656,15 @@ export async function processNotifyNodes({
       skip.has(idempotencyKey) ||
       (legacyKey && skip.has(legacyKey))
     if (duplicate) {
+      const duplicateMessage = idempotencyKey.startsWith('wecom-notify-v3:')
+        ? '当前招聘批次已通知，跳过重复派发'
+        : '此前已派发，已跳过重复通知'
       if (onStatus) {
-        onStatus(`此前已派发「${originalNode.todoTitle || originalNode.text || '通知'}」，已跳过重复通知`)
+        onStatus(
+          `${duplicateMessage}：「${
+            originalNode.todoTitle || originalNode.text || '通知'
+          }」`
+        )
       }
       results.push({
         ...node,
@@ -660,12 +674,20 @@ export async function processNotifyNodes({
         text: node.text,
         assignee,
         block: !!node.block,
-        skipReason: '此前已派发，已跳过重复通知'
+        skipReason: duplicateMessage
       })
       continue
     }
     seenThisRun.add(idempotencyKey)
     IN_FLIGHT_NOTIFY_KEYS.add(idempotencyKey)
+    const businessFingerprint = String(
+      (sop && sop.businessFingerprint) ||
+        (sop && sop.runtimeMaterial && sop.runtimeMaterial.businessFingerprint) ||
+        ''
+    ).trim()
+    if (businessFingerprint && onStatus) {
+      onStatus('检测到当前招聘资料批次，按新批次派发')
+    }
     if (onStatus) {
       onStatus(
         `${node.block ? '阻塞' : '知会'}派发 ${i + 1}/${list.length}：「${
