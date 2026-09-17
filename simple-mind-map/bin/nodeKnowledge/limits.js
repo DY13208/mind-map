@@ -14,6 +14,12 @@ const MAX_EXTRACT_CHARS = Math.max(
   Number(process.env.NODE_KNOWLEDGE_MAX_EXTRACT_CHARS || 20000)
 )
 const MAX_FILENAME = 180
+// Attachment text is handed to MCP clients in slices so a single response
+// cannot blow past their output budget.
+const DEFAULT_TEXT_SLICE_CHARS = 4000
+const MAX_TEXT_SLICE_CHARS = 20000
+const DEFAULT_LIST_LIMIT = 50
+const MAX_LIST_LIMIT = 200
 const COS_SLICE_BYTES = 8 * 1024 * 1024
 const EXTRACT_WAIT_MAX_BYTES = Math.max(
   64 * 1024,
@@ -181,6 +187,10 @@ module.exports = {
   MAX_BYTES,
   MAX_EXTRACT_CHARS,
   MAX_FILENAME,
+  DEFAULT_TEXT_SLICE_CHARS,
+  MAX_TEXT_SLICE_CHARS,
+  DEFAULT_LIST_LIMIT,
+  MAX_LIST_LIMIT,
   COS_SLICE_BYTES,
   EXTRACT_WAIT_MAX_BYTES,
   FILE_NAME_HEADER,

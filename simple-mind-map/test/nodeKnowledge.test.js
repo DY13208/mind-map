@@ -267,7 +267,201 @@ async function main() {
   assert.match(ensured[0].extractedText, /hello knowledge/)
   assert.equal(ensured[1].status, 'failed')
 
+  await testListMetaAndTextSlice()
+
   console.log('nodeKnowledge extract/store tests passed')
+}
+
+// A room-scoped stand-in for PostgreSQL that implements just enough of
+// char_length/substr to exercise the metadata and text-slice readers.
+function createReadDb(options = {}) {
+  const attachments = options.attachments || []
+  const nodeAttachmentIds = options.nodeAttachmentIds || null
+  const calls = []
+  return {
+    calls,
+    async query(sql, params = []) {
+      const text = String(sql).replace(/\s+/g, ' ').trim()
+      calls.push({ text, params })
+      if (text.includes('from room_nodes')) {
+        if (!nodeAttachmentIds) {
+          const err = new Error('relation "room_nodes" does not exist')
+          err.code = '42P01'
+          throw err
+        }
+        return { rows: (nodeAttachmentIds[params[1]] || []).map(id => ({ id })) }
+      }
+      const idFilters = params.filter(value => Array.isArray(value))
+      const rows = attachments
+        .filter(row => row.room_key === params[0])
+        .filter(row => {
+          if (!text.includes('a.node_uid =')) return true
+          const allowed = idFilters[0] || []
+          return row.node_uid === params[1] || allowed.includes(row.id)
+        })
+        .filter(row => {
+          if (!text.includes('and a.id = any(')) return true
+          const explicit = idFilters[idFilters.length - 1] || []
+          return explicit.includes(row.id)
+        })
+        .filter(row => !text.includes('a.id = $2') || row.id === params[1])
+        .map(row => {
+          const projected = { ...row }
+          delete projected.extracted_text
+          projected.extracted_chars = String(row.extracted_text || '').length
+          if (text.includes('substr(a.extracted_text')) {
+            projected.text_slice = String(row.extracted_text || '').substr(
+              Number(params[2]),
+              Number(params[3])
+            )
+          }
+          return projected
+        })
+      return { rows }
+    }
+  }
+}
+
+async function testListMetaAndTextSlice() {
+  const attachments = [
+    {
+      id: 'att-shared',
+      room_key: 'room-demo',
+      // Deduped upload: the row only remembers the first node that used it.
+      node_uid: 'node-1',
+      file_name: '合同.pdf',
+      mime_type: 'application/pdf',
+      status: 'ready',
+      error_message: '',
+      byte_size: 1024,
+      source_kind: 'attachment',
+      extracted_text: '甲乙丙丁戊己庚辛'
+    },
+    {
+      id: 'att-other',
+      room_key: 'room-demo',
+      node_uid: 'node-9',
+      file_name: '旧合同.doc',
+      mime_type: 'application/msword',
+      status: 'failed',
+      error_message: '暂不支持文本解析',
+      byte_size: 512,
+      source_kind: 'attachment',
+      extracted_text: ''
+    },
+    {
+      id: 'att-elsewhere',
+      room_key: 'room-other',
+      node_uid: 'node-1',
+      file_name: '别人的.pdf',
+      mime_type: 'application/pdf',
+      status: 'ready',
+      error_message: '',
+      byte_size: 32,
+      source_kind: 'attachment',
+      extracted_text: 'x'
+    }
+  ]
+
+  const all = await store.listMeta(createReadDb({ attachments }), 'room-demo')
+  assert.deepEqual(
+    all.map(item => item.id),
+    ['att-shared', 'att-other']
+  )
+  // Length is reported, the text itself never leaves the database.
+  assert.equal(all[0].extractedChars, 8)
+  assert.equal(all[0].extractedText, undefined)
+
+  // Node 2 reuses the deduped row, so the node's own attachmentId has to be
+  // what surfaces it.
+  const reused = await store.listMeta(
+    createReadDb({
+      attachments,
+      nodeAttachmentIds: { 'node-2': ['att-shared'] }
+    }),
+    'room-demo',
+    { nodeUid: 'node-2' }
+  )
+  assert.deepEqual(
+    reused.map(item => item.id),
+    ['att-shared']
+  )
+
+  // Rooms predating the room_nodes migration still match on the attachment side.
+  const legacy = await store.listMeta(createReadDb({ attachments }), 'room-demo', {
+    nodeUid: 'node-1'
+  })
+  assert.deepEqual(
+    legacy.map(item => item.id),
+    ['att-shared']
+  )
+
+  const byId = await store.listMeta(createReadDb({ attachments }), 'room-demo', {
+    ids: ['att-other', 'att-elsewhere']
+  })
+  assert.deepEqual(
+    byId.map(item => item.id),
+    ['att-other']
+  )
+
+  const limited = createReadDb({ attachments })
+  await store.listMeta(limited, 'room-demo', { limit: 9999 })
+  assert.equal(limited.calls[0].params.at(-1), limits.MAX_LIST_LIMIT)
+  const defaulted = createReadDb({ attachments })
+  await store.listMeta(defaulted, 'room-demo', { limit: 0 })
+  assert.equal(defaulted.calls[0].params.at(-1), limits.DEFAULT_LIST_LIMIT)
+
+  const head = await store.getTextSlice(
+    createReadDb({ attachments }),
+    'room-demo',
+    'att-shared',
+    { limit: 3 }
+  )
+  assert.equal(head.text, '甲乙丙')
+  assert.equal(head.offset, 0)
+  assert.equal(head.total_chars, 8)
+  assert.equal(head.has_more, true)
+  assert.equal(head.next_offset, 3)
+
+  const tail = await store.getTextSlice(
+    createReadDb({ attachments }),
+    'room-demo',
+    'att-shared',
+    { offset: head.next_offset, limit: 3000 }
+  )
+  assert.equal(tail.text, '丁戊己庚辛')
+  assert.equal(tail.has_more, false)
+  assert.equal(tail.next_offset, null)
+
+  // A failed extraction reads as empty text plus its status and message.
+  const failed = await store.getTextSlice(
+    createReadDb({ attachments }),
+    'room-demo',
+    'att-other'
+  )
+  assert.equal(failed.text, '')
+  assert.equal(failed.total_chars, 0)
+  assert.equal(failed.has_more, false)
+  assert.equal(failed.attachment.status, 'failed')
+  assert.match(failed.attachment.errorMessage, /暂不支持/)
+
+  // Cross-room reads and unknown ids resolve to nothing.
+  assert.equal(
+    await store.getTextSlice(
+      createReadDb({ attachments }),
+      'room-demo',
+      'att-elsewhere'
+    ),
+    null
+  )
+
+  const clamped = createReadDb({ attachments })
+  await store.getTextSlice(clamped, 'room-demo', 'att-shared', {
+    offset: -5,
+    limit: 999999
+  })
+  assert.equal(clamped.calls[0].params[2], 0)
+  assert.equal(clamped.calls[0].params[3], limits.MAX_TEXT_SLICE_CHARS)
 }
 
 main().catch(err => {
