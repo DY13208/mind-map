@@ -406,10 +406,6 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
           '- 空字段必须保持未填写，只允许用历史状态做通知去重核验。'
         ].join('\n')
       : ''
-  const noteText = String(extraNote || '')
-  const continuityHint = /同P关联节点|无超链接校验/.test(noteText)
-    ? '- 下方若含「## 同P关联节点（无超链接校验）」，按同 P 下关联关系衔接执行；不要向用户索要超链接或界面补数。'
-    : ''
   if (!needFiles) {
     return [
       `请执行 SOP「${goal || ctx.sopTitle}」（流程型，不要求落盘产物文件）。`,
@@ -424,7 +420,6 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
       '- 若下方已有「## 用户提交资料」，直接使用；不要要求用户再在界面里补数或贴链接。',
       '- 执行按本 SOP 步骤做；步骤里的历史推算必须做；勿因别的 D 未跑完而停；做完后再写「脑图诊断（全图）」。',
       runtimeSourceBoundary,
-      continuityHint,
       extraNote ? `\n## 额外要求\n${extraNote}` : '',
       '',
       rulesBlock,
@@ -451,7 +446,6 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
     '注意：中间快照、_map_full/_map_outline、MCP 日志不要出现在产物清单里。',
     '【两段式】执行按本 SOP 步骤依次做（步骤里写的历史推算必须做）；勿因别的 D 未跑完而停。做完后再写「## 脑图诊断（全图）」。禁止空壳目标表冒充完成。',
     runtimeSourceBoundary,
-    continuityHint,
     extraNote ? `\n## 额外要求\n${extraNote}` : '',
     '',
     rulesBlock,
