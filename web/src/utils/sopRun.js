@@ -615,7 +615,7 @@ function parseDeliverableSection(chunk, push) {
       return
     }
     const file = line.match(
-      /([A-Za-z]:[\\/][^\s"'<>|]+|https?:\/\/\S+|[\w.\u4e00-\u9fff/\\-]+\.(html?|xlsx?|docx?|pdf|md|csv))/i
+      /([A-Za-z]:[\\/][^\s"'<>|]+|https?:\/\/\S+|[\w.\u4e00-\u9fff/\\-]+\.(html?|xlsx?|docx?|pdf|md|csv|json))/i
     )
     if (file) {
       push({
@@ -681,7 +681,7 @@ export function extractDeliverablesFromReply(
 
   // 始终扫绝对路径。OpenClaw 常把文件写在容器内 /home/node/.../output/
   const absFileRe =
-    /([A-Za-z]:[\\/][^\s"'<>|]+\.(html?|xlsx?|docx?|pdf|md|csv)|\/(?:[\w.\u4e00-\u9fff-]+\/)+[^\s"'<>|/]+\.(html?|xlsx?|docx?|pdf|md|csv))/gi
+    /([A-Za-z]:[\\/][^\s"'<>|]+\.(html?|xlsx?|docx?|pdf|md|csv|json)|\/(?:[\w.\u4e00-\u9fff-]+\/)+[^\s"'<>|/]+\.(html?|xlsx?|docx?|pdf|md|csv|json))/gi
   let abs
   while ((abs = absFileRe.exec(reply))) {
     const uri = abs[1].replace(/[，。；;）)]+$/g, '')
@@ -689,7 +689,7 @@ export function extractDeliverablesFromReply(
     push({ name: uri.split(/[\\/]/).pop(), uri_or_path: uri, kind: 'file' })
   }
   const urlRe =
-    /https?:\/\/[^\s)\]>`"'，,]+\.(html?|xlsx?|docx?|pdf|md|csv)(?:\?[^\s)\]>`"'，,]*)?/gi
+    /https?:\/\/[^\s)\]>`"'，,]+\.(html?|xlsx?|docx?|pdf|md|csv|json)(?:\?[^\s)\]>`"'，,]*)?/gi
   let urlHit
   while ((urlHit = urlRe.exec(reply))) {
     push({
@@ -705,7 +705,7 @@ export function extractDeliverablesFromReply(
     item =>
       item &&
       (isShareDeliverableUri(item.uri_or_path) ||
-        /[\\/]output[\\/][^\s"'<>|/]+\.(html?|xlsx?|docx?|pdf|md|csv)$/i.test(
+        /[\\/]output[\\/][^\s"'<>|/]+\.(html?|xlsx?|docx?|pdf|md|csv|json)$/i.test(
           item.uri_or_path || ''
         ))
   )
@@ -980,7 +980,7 @@ export function assessSopExecution({
     const uri = String((d && d.uri_or_path) || '')
     const name = String((d && d.name) || '')
     if (/待回填/.test(name)) return false
-    return /^(https?:\/\/|[A-Za-z]:\\|\/)/.test(uri) || /\.(html?|xlsx?|pdf|md|csv)$/i.test(uri)
+    return /^(https?:\/\/|[A-Za-z]:\\|\/)/.test(uri) || /\.(html?|xlsx?|pdf|md|csv|json)$/i.test(uri)
   })
   const dispatched = (notifyResults || []).filter(r => r && r.dispatchOk)
   const tooFast = Number(elapsedSec) > 0 && Number(elapsedSec) < 40

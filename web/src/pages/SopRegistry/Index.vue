@@ -481,6 +481,7 @@
               @cancel="cancelSopJob"
               @cancel-all="cancelAllSopJobs"
               @resume="resumeSopJob"
+              @artifact-optimized="onArtifactOptimized"
             />
             <div v-else class="paneEmpty soft">暂无任务</div>
           </div>
@@ -2257,6 +2258,66 @@ export default {
       if (!this.sopRunQueue) return
       this.sopRunQueue.cancelAll()
       this.$message.info('已取消全部 SOP 任务')
+    },
+    async onArtifactOptimized(payload) {
+      const { jobId, source, deliverable, instruction, resolve, reject } =
+        payload || {}
+      try {
+        const job =
+          this.sopTaskJobs.find(item => item && item.id === jobId) ||
+          (this.sopRunQueue && this.sopRunQueue.getJob(jobId))
+        if (!job || !deliverable) throw new Error('找不到对应的 SOP 任务')
+
+        let ledger = normalizeLedger(
+          (job.result && job.result.ledger) || this.activeLedger
+        )
+        ledger = addDeliverableToLedger(ledger, {
+          ...deliverable,
+          sop_id: job.sopId || '',
+          sop_uid: job.sopUid || '',
+          derived_from:
+            (source && (source.id || source.uri_or_path || source.name)) || '',
+          optimization_instruction: instruction || ''
+        })
+
+        const runDeliverables = Array.isArray(
+          job.result && job.result.deliverables
+        )
+          ? job.result.deliverables.slice()
+          : []
+        const newPath = String(deliverable.uri_or_path || '').toLowerCase()
+        if (
+          !runDeliverables.some(
+            item =>
+              String((item && item.uri_or_path) || '').toLowerCase() === newPath
+          )
+        ) {
+          runDeliverables.push({
+            ...deliverable,
+            derived_from:
+              (source && (source.id || source.uri_or_path || source.name)) || '',
+            optimization_instruction: instruction || ''
+          })
+        }
+        if (!job.result) this.$set(job, 'result', {})
+        this.$set(job.result, 'deliverables', runDeliverables)
+        this.$set(job.result, 'ledger', ledger)
+        this.activeLedger = ledger
+        this.applyJobLedgerToList(job, ledger)
+        await persistSopLedger(
+          job.roomKey || this.roomKey,
+          job.sopUid || this.activeSopUid,
+          { id: job.sopId || '', title: job.sopTitle || '' },
+          ledger
+        )
+        if (this.sopRunQueue && this.sopRunQueue.updateJobLedger) {
+          this.sopRunQueue.updateJobLedger(jobId, ledger, runDeliverables)
+        }
+        if (resolve) resolve(deliverable)
+      } catch (error) {
+        if (reject) reject(error)
+        else throw error
+      }
     },
     applyJobLedgerToList(job, ledger) {
       if (!job || !ledger) return

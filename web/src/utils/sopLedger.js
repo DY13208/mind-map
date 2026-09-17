@@ -70,7 +70,7 @@ export function isOpenableDeliverableUri(uri) {
 
 export function isPreferredLocalDeliverable(item) {
   const uri = String((item && item.uri_or_path) || '').trim()
-  return /[\\/]output[\\/][^\\/]+\.(html?|xlsx?|docx?|pdf|md|csv)$/i.test(uri)
+  return /[\\/]output[\\/][^\\/]+\.(html?|xlsx?|docx?|pdf|md|csv|json)$/i.test(uri)
 }
 
 export function isJunkDeliverable(item) {
@@ -89,14 +89,14 @@ export function isJunkDeliverable(item) {
   if (
     /^https?:\/\//i.test(uri) &&
     !isShareDeliverableUri(uri) &&
-    !/\.(html?|xlsx?|docx?|pdf|md|csv)(\?|#|$)/i.test(uri) &&
+    !/\.(html?|xlsx?|docx?|pdf|md|csv|json)(\?|#|$)/i.test(uri) &&
     !/(执行单|报告|产物|下载)/i.test(`${name} ${uri}`)
   ) {
     return true
   }
   if (
     /(?:^|[\\/])mcp(?:[\\/]|$)|\/stdout/i.test(uri) &&
-    !/\.(html?|xlsx?|docx?|pdf|md|csv)(\?|#|$)/i.test(uri)
+    !/\.(html?|xlsx?|docx?|pdf|md|csv|json)(\?|#|$)/i.test(uri)
   ) {
     return true
   }
@@ -162,7 +162,18 @@ export function normalizeDeliverable(item) {
     at: String(item.at || '').trim(),
     createdAt: item.createdAt || new Date().toISOString(),
     sop_id: String(item.sop_id || item.sopId || '').trim(),
-    sop_uid: String(item.sop_uid || item.sopUid || '').trim()
+    sop_uid: String(item.sop_uid || item.sopUid || '').trim(),
+    derived_from: String(item.derived_from || item.derivedFrom || '').trim(),
+    optimization_instruction: String(
+      item.optimization_instruction || item.optimizationInstruction || ''
+    ).trim(),
+    optimization_version:
+      Number(item.optimization_version || item.optimizationVersion || 0) > 0
+        ? Number(item.optimization_version || item.optimizationVersion)
+        : 0,
+    optimization_root: String(
+      item.optimization_root || item.optimizationRoot || ''
+    ).trim()
   }
 }
 
