@@ -109,9 +109,23 @@
               <li
                 v-for="d in jobDeliverables"
                 :key="d.id || d.uri_or_path || d.name"
+                :class="{ derived: !!d.derived_from }"
               >
-                <span class="artifactName" :title="d.name">{{ d.name }}</span>
+                <span class="artifactName" :title="d.name">
+                  {{ d.name }}
+                  <span v-if="d.derived_from" class="artifactDerivedMark">优化版</span>
+                </span>
                 <span class="artifactActions">
+                  <el-button
+                    v-if="isOptimizableFormat(d)"
+                    type="text"
+                    size="mini"
+                    :disabled="artifactOptimizeBusy || !!optimizeUnavailableReason(d)"
+                    :title="optimizeUnavailableReason(d)"
+                    @click="openArtifactOptimizer(d)"
+                  >
+                    优化产物内容
+                  </el-button>
                   <el-button
                     v-if="canPreviewDeliverable(d)"
                     type="text"
@@ -175,6 +189,79 @@
     </el-drawer>
 
     <el-dialog
+      title="优化产物内容"
+      :visible.sync="artifactOptimizeVisible"
+      width="760px"
+      append-to-body
+      custom-class="artifactOptimizeDialog"
+      :close-on-click-modal="!artifactOptimizeBusy"
+      :before-close="beforeCloseArtifactOptimizer"
+    >
+      <div class="optimizeSource">
+        <span>源产物</span>
+        <strong>{{ artifactOptimizeSource && artifactOptimizeSource.name }}</strong>
+      </div>
+      <div ref="optimizeMessages" class="optimizeMessages">
+        <div v-if="!artifactOptimizeMessages.length" class="optimizeEmpty">
+          告诉助理你希望如何修改这个产物。可以连续讨论，确认后再生成新文件。
+        </div>
+        <div
+          v-for="(message, index) in artifactOptimizeMessages"
+          :key="index"
+          class="optimizeMessage"
+          :class="message.role"
+        >
+          <div class="optimizeRole">{{ message.role === 'user' ? '你' : '助理' }}</div>
+          <div class="optimizeBubble">{{ message.content }}</div>
+        </div>
+      </div>
+      <el-input
+        v-model="artifactOptimizeInput"
+        type="textarea"
+        :rows="3"
+        maxlength="2000"
+        show-word-limit
+        :disabled="artifactOptimizeBusy"
+        placeholder="例如：把页面改成蓝色商务风，并突出季度增长趋势"
+        @keydown.native.ctrl.enter="sendArtifactOptimizeMessage"
+      />
+      <div class="optimizeComposerActions">
+        <span class="optimizeHint">Ctrl + Enter 发送</span>
+        <el-button
+          size="small"
+          :disabled="artifactOptimizeBusy || !artifactOptimizeInput.trim()"
+          @click="sendArtifactOptimizeMessage"
+        >发送</el-button>
+        <el-button
+          v-if="artifactOptimizeChatting"
+          size="small"
+          type="danger"
+          plain
+          @click="stopArtifactOptimization"
+        >停止</el-button>
+      </div>
+      <div v-if="artifactOptimizeError" class="optimizeError">
+        {{ artifactOptimizeError }}
+      </div>
+      <span slot="footer" class="optimizeFooter">
+        <el-button
+          size="small"
+          :disabled="artifactOptimizeBusy || !artifactOptimizeMessages.length"
+          @click="clearArtifactOptimization"
+        >清空对话</el-button>
+        <span class="optimizeFooterSpacer"></span>
+        <el-button size="small" :disabled="artifactOptimizeBusy" @click="closeArtifactOptimizer">取消</el-button>
+        <el-button
+          type="primary"
+          size="small"
+          :loading="artifactOptimizeGenerating"
+          :disabled="!canGenerateOptimizedArtifact"
+          @click="generateOptimizedArtifact"
+        >生成优化产物</el-button>
+      </span>
+    </el-dialog>
+
+    <el-dialog
       :title="artifactPreviewTitle"
       :visible.sync="artifactPreviewVisible"
       width="860px"
@@ -182,8 +269,13 @@
       custom-class="artifactPreviewDialog"
       @closed="onArtifactPreviewClosed"
     >
+      <div
+        v-if="artifactPreviewHtml"
+        class="artifactSpreadsheetPreview"
+        v-html="artifactPreviewHtml"
+      ></div>
       <iframe
-        v-if="artifactPreviewUrl"
+        v-else-if="artifactPreviewUrl"
         class="artifactPreviewFrame"
         :src="artifactPreviewUrl"
         title="产物预览"
@@ -208,8 +300,10 @@
 
 <script>
 import MarkdownIt from 'markdown-it'
+import * as XLSX from 'xlsx'
 import { extractDeliverablesFromReply } from '@/utils/sopRun'
 import { artifactLocalUrl } from '@/utils/fileApi'
+import { AI_BACKEND_OPENCLAW, streamChat } from '@/utils/agentChat'
 
 const streamMd = new MarkdownIt({
   html: false,
@@ -238,6 +332,20 @@ function streamTextOf(job) {
   ).trim()
 }
 
+function sourceKey(item) {
+  return String(item && (item.id || item.uri_or_path || item.name) || '').trim()
+}
+
+function stableArtifactKey(item) {
+  return String(item && (item.uri_or_path || item.id || item.name) || '').trim()
+}
+
+function transcriptText(messages) {
+  return (messages || [])
+    .map(item => `${item.role === 'user' ? '用户' : '助理'}：${item.content}`)
+    .join('\n\n')
+}
+
 export default {
   name: 'SopTaskBoard',
   props: {
@@ -253,7 +361,16 @@ export default {
       artifactPreviewVisible: false,
       artifactPreviewTitle: '产物预览',
       artifactPreviewUrl: '',
-      artifactPreviewDownloadUrl: ''
+      artifactPreviewHtml: '',
+      artifactPreviewDownloadUrl: '',
+      artifactOptimizeVisible: false,
+      artifactOptimizeSource: null,
+      artifactOptimizeMessages: [],
+      artifactOptimizeInput: '',
+      artifactOptimizeChatting: false,
+      artifactOptimizeGenerating: false,
+      artifactOptimizeError: '',
+      artifactOptimizeController: null
     }
   },
   computed: {
@@ -303,7 +420,19 @@ export default {
       return streamMd.render(text)
     },
     jobDeliverables() {
-      return this.deliverablesForJob(this.selectedJob)
+      return this.orderDerivedDeliverables(this.deliverablesForJob(this.selectedJob))
+    },
+    artifactOptimizeBusy() {
+      return this.artifactOptimizeChatting || this.artifactOptimizeGenerating
+    },
+    canGenerateOptimizedArtifact() {
+      return (
+        !this.artifactOptimizeBusy &&
+        this.artifactOptimizeSource &&
+        this.artifactOptimizeMessages.some(
+          item => item.role === 'user' && String(item.content || '').trim()
+        )
+      )
     }
   },
   methods: {
@@ -335,7 +464,16 @@ export default {
           name,
           uri_or_path: uri || name,
           kind: item.kind || 'file',
-          at: item.at || ''
+          at: item.at || '',
+          createdAt: item.createdAt || '',
+          derived_from: item.derived_from || item.derivedFrom || '',
+          optimization_instruction:
+            item.optimization_instruction || item.optimizationInstruction || '',
+          optimization_version: Number(
+            item.optimization_version || item.optimizationVersion || 0
+          ) || 0,
+          optimization_root:
+            item.optimization_root || item.optimizationRoot || ''
         })
       }
       const runDels =
@@ -349,6 +487,47 @@ export default {
         sopTitle: job.sopTitle,
         sopUid: job.sopUid
       }).forEach(push)
+      // 旧版本曾把 SOP 台账的全部历史产物写进单次任务。
+      // 一旦存在优化链，只展示参与本次优化的源文件及其派生版本。
+      const derived = out.filter(item => item.derived_from)
+      if (!derived.length) return out
+      const included = new Set(derived.map(item => sourceKey(item)))
+      let changed = true
+      while (changed) {
+        changed = false
+        out.forEach(item => {
+          if (!included.has(sourceKey(item))) return
+          const parent = String(item.derived_from || '').trim()
+          if (parent && !included.has(parent)) {
+            included.add(parent)
+            changed = true
+          }
+        })
+      }
+      derived.forEach(item => included.add(String(item.derived_from || '').trim()))
+      return out.filter(item => included.has(sourceKey(item)))
+    },
+    orderDerivedDeliverables(items) {
+      const list = Array.isArray(items) ? items : []
+      const keyOf = item =>
+        String(item && (item.id || item.uri_or_path || item.name) || '').trim()
+      const children = new Map()
+      const roots = []
+      list.forEach(item => {
+        const parent = String((item && item.derived_from) || '').trim()
+        if (!parent || !list.some(candidate => keyOf(candidate) === parent)) {
+          roots.push(item)
+          return
+        }
+        if (!children.has(parent)) children.set(parent, [])
+        children.get(parent).push(item)
+      })
+      const out = []
+      const append = item => {
+        out.push(item)
+        ;(children.get(keyOf(item)) || []).forEach(append)
+      }
+      roots.forEach(append)
       return out
     },
     stateLabel(job) {
@@ -420,7 +599,7 @@ export default {
       if (this.isHttp(uri)) return uri
       if (
         this.isLocalAbsPath(uri) ||
-        /\.(html?|xlsx?|docx?|pdf|md|csv)$/i.test(name || uri)
+        /\.(html?|xlsx?|docx?|pdf|md|csv|json)$/i.test(name || uri)
       ) {
         return artifactLocalUrl(this.isLocalAbsPath(uri) ? uri : name || uri, {
           download,
@@ -435,30 +614,359 @@ export default {
       return (
         this.isHttp(uri) ||
         this.isLocalAbsPath(uri) ||
-        /\.(html?|xlsx?|docx?|pdf|md|csv)$/i.test(name || uri)
+        /\.(html?|xlsx?|docx?|pdf|md|csv|json)$/i.test(name || uri)
       )
+    },
+    isOptimizableFormat(d) {
+      const uri = String((d && d.uri_or_path) || '')
+      const name = String((d && d.name) || '')
+      return /\.(html?|xlsx?|docx?|pdf|md|csv|json)(?:\?|#|$)/i.test(name || uri)
+    },
+    optimizeUnavailableReason(d) {
+      if (!this.selectedJob || this.selectedJob.state !== 'done') {
+        return '任务完成后才可优化产物'
+      }
+      if (this.isHttp(d && d.uri_or_path)) return '远程产物暂不支持直接优化'
+      if (!this.isOptimizableFormat(d)) return '该文件格式暂不支持优化'
+      return ''
+    },
+    async openArtifactOptimizer(d) {
+      const unavailable = this.optimizeUnavailableReason(d)
+      if (unavailable) {
+        this.$message.warning(unavailable)
+        return
+      }
+      try {
+        await this.verifyGeneratedDeliverable(d)
+      } catch (error) {
+        this.$message.error('源文件不存在或当前无法读取')
+        return
+      }
+      this.artifactOptimizeSource = { ...d }
+      this.artifactOptimizeMessages = []
+      this.artifactOptimizeInput = ''
+      this.artifactOptimizeError = ''
+      this.artifactOptimizeVisible = true
+    },
+    optimizerConversationId(mode = 'chat') {
+      const jobId = String((this.selectedJob && this.selectedJob.id) || 'job')
+      const source = sourceKey(this.artifactOptimizeSource)
+        .replace(/[^\w.-]+/g, '-')
+        .slice(-60)
+      return `sop-artifact-${mode}-${jobId}-${source}`
+    },
+    scrollOptimizeMessages() {
+      this.$nextTick(() => {
+        const el = this.$refs.optimizeMessages
+        if (el) el.scrollTop = el.scrollHeight
+      })
+    },
+    async sendArtifactOptimizeMessage() {
+      const input = String(this.artifactOptimizeInput || '').trim()
+      if (!input || this.artifactOptimizeBusy || !this.artifactOptimizeSource)
+        return
+      this.artifactOptimizeMessages.push({ role: 'user', content: input })
+      this.artifactOptimizeInput = ''
+      this.artifactOptimizeError = ''
+      this.artifactOptimizeChatting = true
+      const assistant = { role: 'assistant', content: '' }
+      this.artifactOptimizeMessages.push(assistant)
+      this.artifactOptimizeController = new AbortController()
+      this.scrollOptimizeMessages()
+      try {
+        const source = this.artifactOptimizeSource
+        const prompt = [
+          '你是 SOP 产物优化顾问。现在只讨论修改方案，不得调用工具、不得读写或生成文件。',
+          `源产物：${source.name || source.uri_or_path}`,
+          '结合以下完整对话，回应用户最新要求；需要时主动指出冲突或提出具体建议。',
+          transcriptText(this.artifactOptimizeMessages.filter(item => item !== assistant))
+        ].join('\n\n')
+        const result = await streamChat({
+          backend: AI_BACKEND_OPENCLAW,
+          model: 'openclaw/default',
+          conversationId: this.optimizerConversationId('chat'),
+          messages: [{ role: 'user', content: prompt }],
+          signal: this.artifactOptimizeController.signal,
+          onDelta: text => {
+            assistant.content = String(text || '')
+            this.$forceUpdate()
+            this.scrollOptimizeMessages()
+          }
+        })
+        assistant.content = String((result && result.content) || assistant.content).trim()
+        if (!assistant.content) assistant.content = '已记录。你可以继续补充，或生成优化产物。'
+      } catch (error) {
+        if (error && error.name === 'AbortError') {
+          if (!assistant.content) assistant.content = '已停止本轮回复。'
+        } else {
+          this.artifactOptimizeError =
+            (error && error.message) || '助理回复失败，请稍后重试'
+          if (!assistant.content) this.artifactOptimizeMessages.pop()
+        }
+      } finally {
+        this.artifactOptimizeChatting = false
+        this.artifactOptimizeController = null
+        this.scrollOptimizeMessages()
+      }
+    },
+    stopArtifactOptimization() {
+      if (this.artifactOptimizeController) this.artifactOptimizeController.abort()
+    },
+    clearArtifactOptimization() {
+      this.artifactOptimizeMessages = []
+      this.artifactOptimizeInput = ''
+      this.artifactOptimizeError = ''
+    },
+    beforeCloseArtifactOptimizer(done) {
+      if (this.artifactOptimizeBusy) {
+        this.$message.info('请先停止当前生成')
+        return
+      }
+      done()
+    },
+    closeArtifactOptimizer() {
+      if (!this.artifactOptimizeBusy) this.artifactOptimizeVisible = false
+    },
+    async verifyGeneratedDeliverable(deliverable) {
+      const url = artifactLocalUrl(deliverable.uri_or_path, {
+        name: deliverable.name
+      })
+      const response = await fetch(url, { credentials: 'include', cache: 'no-store' })
+      if (!response.ok) throw new Error('优化文件未实际生成，请调整要求后重试')
+      if (response.body && response.body.cancel) response.body.cancel().catch(() => {})
+    },
+    resolveOptimizationRoot(source) {
+      const items = this.jobDeliverables || []
+      const bySourceKey = new Map(items.map(item => [sourceKey(item), item]))
+      const byStableKey = new Map(items.map(item => [stableArtifactKey(item), item]))
+      const declaredRoot = String(
+        (source && (source.optimization_root || source.optimizationRoot)) || ''
+      ).trim()
+      if (declaredRoot && byStableKey.has(declaredRoot)) {
+        return byStableKey.get(declaredRoot)
+      }
+      let current = source
+      const visited = new Set()
+      while (current) {
+        const currentKey = sourceKey(current)
+        if (!currentKey || visited.has(currentKey)) break
+        visited.add(currentKey)
+        const parentKey = String(current.derived_from || '').trim()
+        const parent = parentKey && bySourceKey.get(parentKey)
+        if (!parent) break
+        current = parent
+      }
+      return current || source
+    },
+    optimizationRootFor(item) {
+      const explicit = String(
+        (item && (item.optimization_root || item.optimizationRoot)) || ''
+      ).trim()
+      if (explicit) return explicit
+      return stableArtifactKey(this.resolveOptimizationRoot(item))
+    },
+    optimizationVersionPlan(source) {
+      const root = this.resolveOptimizationRoot(source)
+      const rootKey = stableArtifactKey(root)
+      const rootSourceKey = sourceKey(root)
+      const descendants = (this.jobDeliverables || []).filter(item => {
+        if (sourceKey(item) === rootSourceKey) return false
+        return this.optimizationRootFor(item) === rootKey
+      })
+      const explicitVersions = descendants.map(item => {
+        const metadataVersion = Number(
+          item.optimization_version || item.optimizationVersion || 0
+        )
+        if (metadataVersion > 0) return metadataVersion
+        const match = String(item.name || '').match(/_优化V(\d+)(?=\.[^.]+$)/i)
+        return match ? Number(match[1]) : 0
+      })
+      const nextVersion =
+        Math.max(descendants.length, 0, ...explicitVersions) + 1
+      const rootName = String(root.name || root.uri_or_path || source.name || '产物')
+        .split(/[\\/]/)
+        .pop()
+      const extHit = rootName.match(/(\.[A-Za-z0-9]+)$/)
+      const extension = extHit ? extHit[1].toLowerCase() : '.html'
+      const baseName = rootName
+        .replace(/\.[^.]+$/, '')
+        .replace(/(?:_优化(?:V\d+|_?\d{8}_\d{6})?)+$/i, '')
+        .replace(/[\\/:*?"<>|]/g, '_')
+        .slice(0, 100)
+      return { root, rootKey, baseName, extension, nextVersion }
+    },
+    async artifactNameExists(name) {
+      try {
+        const response = await fetch(artifactLocalUrl(name, { name }), {
+          credentials: 'include',
+          cache: 'no-store'
+        })
+        if (response.body && response.body.cancel) response.body.cancel().catch(() => {})
+        return response.ok
+      } catch (_) {
+        return false
+      }
+    },
+    async nextOptimizationTarget(source) {
+      const plan = this.optimizationVersionPlan(source)
+      let version = plan.nextVersion
+      for (let attempts = 0; attempts < 100; attempts += 1, version += 1) {
+        const name = `${plan.baseName}_优化V${version}${plan.extension}`
+        if (!(await this.artifactNameExists(name))) {
+          return { ...plan, version, name }
+        }
+      }
+      throw new Error('无法分配新的优化版本号，请清理重名文件后重试')
+    },
+    async persistOptimizedDeliverable(deliverable, instruction) {
+      return new Promise((resolve, reject) => {
+        this.$emit('artifact-optimized', {
+          jobId: this.selectedJob && this.selectedJob.id,
+          source: this.artifactOptimizeSource,
+          deliverable,
+          instruction,
+          resolve,
+          reject
+        })
+      })
+    },
+    async generateOptimizedArtifact() {
+      if (!this.canGenerateOptimizedArtifact) return
+      this.artifactOptimizeGenerating = true
+      this.artifactOptimizeError = ''
+      this.artifactOptimizeController = new AbortController()
+      try {
+        const source = this.artifactOptimizeSource
+        const sourcePath = String(source.uri_or_path || source.name || '').trim()
+        const target = await this.nextOptimizationTarget(source)
+        const conversation = transcriptText(this.artifactOptimizeMessages)
+        const prompt = [
+          '你正在执行一次独立的 SOP 产物优化任务，不得重新运行 SOP，不得创建企微待办或发送任何通知。',
+          `SOP：${this.jobTitle(this.selectedJob)}`,
+          `源文件：${sourcePath}`,
+          `必须使用的精确新文件名：${target.name}`,
+          '请读取源文件，严格按下面的对话要求修改。绝对禁止覆盖、移动、删除源文件。',
+          `必须保持源文件格式，并且只生成 /home/node/.openclaw/workspace/output/${target.name} 这一个文件。`,
+          '不得自行修改文件名，不得附加时间戳，不得生成任何辅助文件。',
+          '完成后只报告实际生成的新文件，并在末尾严格输出：',
+          '## 产物清单',
+          '- name: 实际文件名',
+          '  path: /home/node/.openclaw/workspace/output/实际文件名',
+          '',
+          '优化对话：',
+          conversation
+        ].join('\n')
+        let reply = ''
+        const result = await streamChat({
+          backend: AI_BACKEND_OPENCLAW,
+          model: 'openclaw/default',
+          conversationId: `${this.optimizerConversationId('generate')}-${Date.now()}`,
+          messages: [{ role: 'user', content: prompt }],
+          signal: this.artifactOptimizeController.signal,
+          onDelta: text => {
+            reply = String(text || '')
+          }
+        })
+        reply = String((result && result.content) || reply).trim()
+        const generated = extractDeliverablesFromReply(reply, [], [], {
+          id: this.selectedJob.sopId,
+          title: this.selectedJob.sopTitle,
+          uid: this.selectedJob.sopUid
+        }).filter(item => sourceKey(item) !== sourceKey(source))
+        if (generated.length !== 1) {
+          throw new Error(
+            generated.length
+              ? '助理生成了多个文件，请明确只保留一个优化产物后重试'
+              : '助理未返回有效的优化文件，请调整要求后重试'
+          )
+        }
+        const actualName = String(
+          generated[0].name || generated[0].uri_or_path || ''
+        )
+          .split(/[\\/]/)
+          .pop()
+        if (actualName !== target.name) {
+          throw new Error(
+            `助理未按指定名称生成文件（应为 ${target.name}），本次未写入台账，请重试`
+          )
+        }
+        const deliverable = {
+          ...generated[0],
+          id: `opt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          derived_from: sourceKey(source),
+          optimization_instruction: conversation,
+          optimization_version: target.version,
+          optimization_root: target.rootKey,
+          createdAt: new Date().toISOString(),
+          at: new Date().toISOString().slice(0, 16).replace('T', ' ')
+        }
+        await this.verifyGeneratedDeliverable(deliverable)
+        await this.persistOptimizedDeliverable(deliverable, conversation)
+        this.$message.success('优化产物已生成，并追加在原产物下方')
+        this.artifactOptimizeVisible = false
+      } catch (error) {
+        if (error && error.name === 'AbortError') {
+          this.artifactOptimizeError = '已停止生成，未新增产物'
+        } else {
+          this.artifactOptimizeError =
+            (error && error.message) || '生成优化产物失败，请稍后重试'
+        }
+      } finally {
+        this.artifactOptimizeGenerating = false
+        this.artifactOptimizeController = null
+      }
     },
     canPreviewDeliverable(d) {
       const uri = String((d && d.uri_or_path) || '')
       const name = String((d && d.name) || '')
       if (this.isHttp(uri)) {
         return (
-          /\.(html?|pdf|md|txt)(\?|#|$)/i.test(uri) || /执行单|报告/i.test(name)
+          /\.(html?|pdf|md|txt|json|xlsx?)(\?|#|$)/i.test(uri) ||
+          /执行单|报告/i.test(name)
         )
       }
       if (this.isLocalAbsPath(uri)) {
-        return /\.(html?|pdf|md|txt)$/i.test(uri)
+        return /\.(html?|pdf|md|txt|json|xlsx?)$/i.test(uri)
       }
-      return /\.(html?|pdf|md|txt)$/i.test(name)
+      return /\.(html?|pdf|md|txt|json|xlsx?)$/i.test(name)
     },
     openUrl(url) {
       if (!url) return
       window.open(url, '_blank', 'noopener')
     },
-    previewDeliverable(d) {
+    async previewDeliverable(d) {
       const url = this.deliverableOpenUrl(d, { download: false })
       if (!url) return
       this.artifactPreviewTitle = (d && d.name) || '产物预览'
+      this.artifactPreviewHtml = ''
+      if (/\.xlsx?$/i.test(String((d && (d.name || d.uri_or_path)) || ''))) {
+        try {
+          const response = await fetch(url, {
+            credentials: 'include',
+            cache: 'no-store'
+          })
+          if (!response.ok) throw new Error('读取 Excel 失败')
+          const workbook = XLSX.read(await response.arrayBuffer(), {
+            type: 'array'
+          })
+          this.artifactPreviewHtml = workbook.SheetNames.map(sheetName => {
+            const title = String(sheetName)
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+            return `<section class="sheetPreview"><h3>${title}</h3>${XLSX.utils.sheet_to_html(
+              workbook.Sheets[sheetName]
+            )}</section>`
+          }).join('')
+          this.artifactPreviewDownloadUrl = this.deliverableOpenUrl(d, {
+            download: true
+          })
+          this.artifactPreviewVisible = true
+        } catch (error) {
+          this.$message.error((error && error.message) || 'Excel 预览失败')
+        }
+        return
+      }
       this.artifactPreviewUrl = url
       this.artifactPreviewDownloadUrl = this.deliverableOpenUrl(d, {
         download: true
@@ -472,6 +980,7 @@ export default {
     },
     onArtifactPreviewClosed() {
       this.artifactPreviewUrl = ''
+      this.artifactPreviewHtml = ''
       this.artifactPreviewDownloadUrl = ''
     }
   }
@@ -865,6 +1374,17 @@ export default {
     }
   }
 }
+.artifactDerivedMark {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #dff4eb;
+  color: #087854;
+  font-size: 11px;
+  line-height: 16px;
+  vertical-align: 1px;
+}
 .artifactName {
   flex: 1;
   min-width: 0;
@@ -889,6 +1409,106 @@ export default {
   text-align: center;
   color: #9ca3af;
 }
+.optimizeSource {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f3faf7;
+  color: #64748b;
+  font-size: 13px;
+  strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #1f2937;
+  }
+}
+.optimizeMessages {
+  height: 300px;
+  margin-bottom: 12px;
+  padding: 12px;
+  overflow-y: auto;
+  border: 1px solid #e5e9ed;
+  border-radius: 10px;
+  background: #f8faf9;
+}
+.optimizeEmpty {
+  padding: 90px 30px;
+  color: #94a3b8;
+  text-align: center;
+  line-height: 1.7;
+}
+.optimizeMessage {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-bottom: 14px;
+  &.user {
+    align-items: flex-end;
+    .optimizeBubble {
+      background: #087854;
+      color: #fff;
+    }
+  }
+}
+.optimizeRole {
+  margin-bottom: 4px;
+  color: #94a3b8;
+  font-size: 11px;
+}
+.optimizeBubble {
+  max-width: 86%;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+.optimizeComposerActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.optimizeHint {
+  margin-right: auto;
+  color: #94a3b8;
+  font-size: 12px;
+}
+.optimizeError {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fff1f0;
+  color: #c2413b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.optimizeFooter {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.optimizeFooterSpacer {
+  flex: 1;
+}
+/deep/ .artifactOptimizeDialog {
+  .el-dialog__body {
+    padding: 16px 20px 8px;
+  }
+  .el-dialog__footer {
+    padding-top: 10px;
+  }
+}
 /deep/ .artifactPreviewDialog {
   .el-dialog__body {
     padding: 0 12px 12px;
@@ -900,6 +1520,46 @@ export default {
   border: 1px solid #e8ecef;
   border-radius: 8px;
   background: #fff;
+}
+.artifactSpreadsheetPreview {
+  height: 62vh;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #e8ecef;
+  border-radius: 8px;
+  background: #fff;
+  /deep/ .sheetPreview {
+    margin-bottom: 24px;
+  }
+  /deep/ .sheetPreview h3 {
+    position: sticky;
+    top: -12px;
+    z-index: 2;
+    margin: -12px -12px 10px;
+    padding: 10px 12px;
+    background: #f3faf7;
+    color: #087854;
+    font-size: 14px;
+  }
+  /deep/ table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+    color: #1f2937;
+    font-size: 12px;
+  }
+  /deep/ td,
+  /deep/ th {
+    min-width: 90px;
+    padding: 7px 9px;
+    border: 1px solid #dce4e0;
+    white-space: nowrap;
+  }
+  /deep/ tr:first-child td,
+  /deep/ th {
+    background: #f7f9f8;
+    font-weight: 600;
+  }
 }
 .nodeDetailBody {
   padding: 0 8px 16px;
