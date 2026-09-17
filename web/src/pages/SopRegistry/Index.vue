@@ -482,6 +482,7 @@
               @cancel-all="cancelAllSopJobs"
               @resume="resumeSopJob"
               @artifact-optimized="onArtifactOptimized"
+              @continue-partial="continuePartialSopJob"
             />
             <div v-else class="paneEmpty soft">暂无任务</div>
           </div>
@@ -579,6 +580,13 @@
           <span class="optLabel">{{ opt.label }}</span>
         </el-checkbox>
       </el-checkbox-group>
+      <p class="runOutputRulesTip">
+        运行会按内置「输出规则」写业务可读汇报（结论 / 交付 / 发现 / 改脑图建议）；勾选类别仅在规则表已定义时强制版式。
+        <a :href="outputRulesUrls.xmind" download="SOP输出规则.xmind">下载规则脑图</a>
+        <button type="button" class="runOutputRulesLink" :disabled="cloningOutputRules" @click="cloneOutputRulesMap">
+          {{ cloningOutputRules ? '正在复制…' : '复制到我的空间' }}
+        </button>
+      </p>
       <div v-if="runSubmitLoading" class="runSubmitLoading">正在读取资料模板…</div>
       <div
         class="runSubmitBox"
@@ -733,6 +741,10 @@ import {
   loadSopRunContext
 } from '@/utils/sopRun'
 import {
+  getSopOutputRulesTemplateUrls,
+  cloneSopOutputRulesTemplate
+} from '@/utils/sopOutputRulesTemplate'
+import {
   assessNoHyperlinkContinuity,
   formatContinuityExtraNote
 } from '@/utils/sopFlowContinuity'
@@ -865,6 +877,8 @@ export default {
       },
       scannedDeliverables: [],
       outputPresets: SOP_OUTPUT_PRESETS,
+      outputRulesUrls: getSopOutputRulesTemplateUrls(),
+      cloningOutputRules: false,
       runDialogVisible: false,
       runTarget: null,
       runOutputIds: [],
@@ -2254,6 +2268,126 @@ export default {
         this.$message.error((err && err.message) || '检查企微待办失败')
       }
     },
+    async continuePartialSopJob(jobId) {
+      if (!this.sopRunQueue || !this.roomKey) return
+      if (!this.canEditSop) {
+        this.$message.warning('当前为只读权限，无法续跑')
+        return
+      }
+      const job = this.sopRunQueue.getJob(jobId)
+      const rr = (job && job.result && job.result.runResult) || ''
+      if (
+        !job ||
+        (job.state !== 'partial' && rr !== '部分完成')
+      ) {
+        this.$message.warning('只能对「部分完成」的任务续跑')
+        return
+      }
+      const sop =
+        this.activeSop ||
+        this.sops.find(
+          s =>
+            this.resolveSopUid(s) === job.sopUid ||
+            (s.uids && s.uids.includes(job.sopUid))
+        )
+      if (!sop || !sop.title) {
+        this.$message.warning('找不到该 SOP，请从台账详情里续跑')
+        return
+      }
+      const steps = Array.isArray(job.nodeProgress) ? job.nodeProgress : []
+      const unfinished = steps.filter(s =>
+        ['pending', 'active', 'failed'].includes(String(s.status || ''))
+      )
+      const dels =
+        (job.result && job.result.deliverables) || job.deliverables || []
+      const delLines = dels
+        .map(d => `- ${(d && d.name) || ''}：${(d && d.uri_or_path) || ''}`)
+        .filter(line => !/：\s*$/.test(line))
+        .join('\n')
+      const note = [
+        '## 断点续跑',
+        '上一轮结果是部分完成。已标 done 的步骤不要重做；只推进未完成步骤，并覆盖更新同一份 HTML。',
+        unfinished.length
+          ? `未完成步骤：\n${unfinished
+              .map(
+                s =>
+                  `- ${s.title}${s.detail ? `（${s.detail}）` : ''}`
+              )
+              .join('\n')}`
+          : '请从节点流第一个未完成步骤继续。',
+        delLines ? `上一轮产物：\n${delLines}` : '',
+        '若「跟踪渠道GMV目标完成进度」缺 GMV 实际/完成率：先把分配与下发做完；缺数项标待接入并写清缺哪两列，不要整单假完成。'
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+      try {
+        await this.$confirm(
+          unfinished.length
+            ? `将从未完成的 ${unfinished.length} 个步骤续跑。跟踪步若仍缺实际 GMV，可能仍会部分完成。`
+            : '将按上一轮进度续跑本 SOP。',
+          '断点续跑',
+          { type: 'info', confirmButtonText: '开始续跑' }
+        )
+      } catch (e) {
+        return
+      }
+      const enqueued = await this.sopRunQueue.enqueue({
+        roomKey: this.roomKey,
+        sop: {
+          ...sop,
+          uid: this.resolveSopUid(sop) || job.sopUid
+        },
+        outputIds: (job.outputIds && job.outputIds.length
+          ? job.outputIds
+          : ['html']
+        ).slice(),
+        extraNote: note,
+        model: job.model || this.runModel,
+        backend: job.backend || this.runBackend,
+        actor: this.userInfo.name || '台账',
+        priorNodeProgress: steps,
+        completedNotifyKeys: job.completedNotifyKeys || [],
+        onSuccess: (result, j) => {
+          if (!this._sopPageAlive) return
+          if (result && result.ledger) {
+            this.applyJobLedgerToList(j, result.ledger)
+          }
+          const partial = result && result.runResult === '部分完成'
+          if (result && result.ok && !partial) {
+            this.$message.success(
+              `「${j.sopTitle}」续跑完成（约 ${result.elapsedSec}s）`
+            )
+          } else if (partial) {
+            this.$message.warning(
+              `「${j.sopTitle}」仍部分完成：${
+                (result.assessment && result.assessment.reason) ||
+                '还有步骤缺数据'
+              }`
+            )
+          } else {
+            this.$message.warning(
+              `「${j.sopTitle}」：${
+                (result && result.assessment && result.assessment.reason) ||
+                (result && result.runResult) ||
+                '未确认真执行'
+              }`
+            )
+          }
+        },
+        onError: (err, msg) => {
+          if (!this._sopPageAlive) return
+          this.$message.error(msg || (err && err.message) || '续跑失败')
+        }
+      })
+      if (!enqueued.ok) {
+        this.$message.warning(enqueued.message || '入队失败')
+        return
+      }
+      if (enqueued.job && enqueued.job.id) {
+        this.selectedSopJobId = enqueued.job.id
+      }
+      this.$message.success('已入队续跑')
+    },
     cancelAllSopJobs() {
       if (!this.sopRunQueue) return
       this.sopRunQueue.cancelAll()
@@ -2520,6 +2654,23 @@ export default {
       }
       this.openSubtree(item, { tab: 'dels' })
     },
+    async cloneOutputRulesMap() {
+      if (this.cloningOutputRules) return
+      this.cloningOutputRules = true
+      try {
+        const created = await cloneSopOutputRulesTemplate()
+        this.$message.success(`已复制「${created.title}」到我的空间`)
+        if (created.roomKey && this.$router) {
+          this.$router
+            .push({ path: '/', query: { room: created.roomKey } })
+            .catch(() => {})
+        }
+      } catch (err) {
+        this.$message.error((err && err.message) || '复制输出规则脑图失败')
+      } finally {
+        this.cloningOutputRules = false
+      }
+    },
     scrollRunStream() {
       this.$nextTick(() => {
         const el = this.$refs.runStreamPre
@@ -2590,11 +2741,21 @@ export default {
             this.applyJobLedgerToList(job, result.ledger)
           }
           if (result && result.ok) {
-            this.$message.success(
-              `「${job.sopTitle}」完成（约 ${result.elapsedSec}s，产物 ${
-                (result.deliverables && result.deliverables.length) || 0
-              } 个）`
-            )
+            const partial = result.runResult === '部分完成'
+            if (partial) {
+              this.$message.warning(
+                `「${job.sopTitle}」部分完成（约 ${result.elapsedSec}s）：${
+                  (result.assessment && result.assessment.reason) ||
+                  '后半步骤未跑完或产物空壳'
+                }`
+              )
+            } else {
+              this.$message.success(
+                `「${job.sopTitle}」完成（约 ${result.elapsedSec}s，产物 ${
+                  (result.deliverables && result.deliverables.length) || 0
+                } 个）`
+              )
+            }
           } else {
             const reason =
               (result &&
@@ -2743,7 +2904,8 @@ export default {
       if (!runs.length) return '未运行'
       const latest = runs[0]
       const result = String((latest && latest.result) || '')
-      if (/失败|错误|error/i.test(result)) return '失败'
+      if (/失败|错误|error|疑似空跑|未拿到|未真正/i.test(result)) return '失败'
+      if (/部分完成/.test(result)) return '部分完成'
       if (/完成|成功|ok/i.test(result)) return '已完成'
       return result || '已运行'
     },
@@ -2754,6 +2916,7 @@ export default {
         return 'active'
       }
       if (label === '失败') return 'fail'
+      if (label === '部分完成') return 'partial'
       return 'done'
     },
     subtaskUpdatedAt(sub) {
@@ -4209,6 +4372,10 @@ export default {
     &.done {
       color: #2f6fed;
       background: #eff4ff;
+    }
+    &.partial {
+      color: #b45309;
+      background: #fff7ed;
     }
     &.fail {
       color: #b91c1c;
