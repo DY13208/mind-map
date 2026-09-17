@@ -153,6 +153,58 @@ function compose(args, extraEnv) {
   })
 }
 
+
+function submoduleDirLooksReady(dir) {
+  // 有 package.json 或非空 apps/ 即视为已检出，避免每次 up 都打 GitHub
+  if (fs.existsSync(path.join(dir, 'package.json'))) return true
+  try {
+    const apps = path.join(dir, 'apps')
+    return fs.existsSync(apps) && fs.readdirSync(apps).length > 0
+  } catch (e) {
+    return false
+  }
+}
+
+function ensureGitSubmodules() {
+  const docmostDir = path.join(ROOT, 'integrations', 'docmost')
+  if (submoduleDirLooksReady(docmostDir)) {
+    console.log('  子模块 integrations/docmost 已就绪')
+    return true
+  }
+  if (!fs.existsSync(path.join(ROOT, '.gitmodules'))) {
+    console.log('  未找到 .gitmodules，跳过子模块初始化')
+    return false
+  }
+  try {
+    execSync('git --version', { stdio: 'ignore' })
+  } catch (e) {
+    console.warn(
+      '  警告：未检测到 git，无法自动拉取 integrations/docmost。请先安装 git，或手动执行：git submodule update --init --recursive'
+    )
+    return false
+  }
+  console.log('  正在初始化 git 子模块 integrations/docmost ...')
+  try {
+    execSync('git submodule update --init --recursive -- integrations/docmost', {
+      cwd: ROOT,
+      stdio: 'inherit',
+      env: process.env
+    })
+  } catch (e) {
+    console.warn(
+      '  警告：子模块拉取失败（生产 Wiki 默认用官方镜像，不阻塞启动）。可稍后手动：git submodule update --init --recursive'
+    )
+    console.warn('  原因：' + ((e && e.message) || e))
+    return false
+  }
+  if (submoduleDirLooksReady(docmostDir)) {
+    console.log('  子模块 integrations/docmost 已拉取到本地')
+    return true
+  }
+  console.warn('  警告：子模块命令已执行，但 integrations/docmost 仍像空目录，请检查网络/权限')
+  return false
+}
+
 function ensureEnv() {
   if (!fs.existsSync(ENV_FILE)) {
     console.error('缺少项目根目录 .env，请先复制 .env.example')
@@ -166,6 +218,7 @@ function ensureEnv() {
 
 async function up() {
   ensureEnv()
+  ensureGitSubmodules()
   if (!hasDocker()) {
     console.error('未检测到 Docker。请先安装 Docker Desktop 并保持运行。')
     process.exit(1)
@@ -174,8 +227,11 @@ async function up() {
   const wikiPort = Number(process.env.DOCMOST_PORT || 3040)
   // 侧栏 Wiki 新窗口地址：优先用根目录 .env 的 DOCMOST_APP_URL；
   // 未配置时默认本机 IP，避免 127.0.0.1 / localhost 与页面 IP 不一致导致跨域。
+  // prefer PUBLIC_HOST for wiki: 有 PUBLIC_HOST 时优先域名，避免侧栏跳到局域网 IP
   if (!String(process.env.DOCMOST_APP_URL || '').trim()) {
-    process.env.DOCMOST_APP_URL = `http://${host}:${wikiPort}`
+    const publicHost = String(process.env.PUBLIC_HOST || '').trim()
+    const wikiHost = publicHost || host
+    process.env.DOCMOST_APP_URL = `http://${wikiHost}:${wikiPort}`
   } else {
     process.env.DOCMOST_APP_URL = String(process.env.DOCMOST_APP_URL)
       .trim()

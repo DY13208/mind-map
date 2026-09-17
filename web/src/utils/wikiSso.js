@@ -1,12 +1,44 @@
 import { getAuthApiUrl } from './auth'
 import { getRuntimeConfig } from './runtimeConfig'
 
+function isPrivateOrLocalHost(hostname) {
+  const host = String(hostname || '').toLowerCase()
+  if (!host || host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+    return true
+  }
+  if (/^10\./.test(host) || /^192\.168\./.test(host)) return true
+  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) return true
+  return false
+}
+
 function defaultWikiBaseFromPage() {
   if (typeof window === 'undefined' || !window.location) {
     return 'http://127.0.0.1:3040'
   }
   const { protocol, hostname } = window.location
   return `${protocol}//${hostname}:3040`
+}
+
+/** 页面用域名访问时，避免被服务端下发的局域网 IP 盖掉 */
+function resolveWikiBase(serverAppUrl) {
+  const fallback = getWikiAppUrl()
+  const server = String(serverAppUrl || '').replace(/\/$/, '')
+  if (!server) return fallback
+  try {
+    const url = new URL(server)
+    if (
+      typeof window !== 'undefined' &&
+      window.location &&
+      !isPrivateOrLocalHost(window.location.hostname) &&
+      isPrivateOrLocalHost(url.hostname)
+    ) {
+      const port = url.port || '3040'
+      return `${window.location.protocol}//${window.location.hostname}:${port}`
+    }
+  } catch (_) {
+    return fallback
+  }
+  return server
 }
 
 export function getWikiAppUrl() {
@@ -55,7 +87,7 @@ export async function openWikiWithSso(options = {}) {
     if (!response.ok || !data.assertion) {
       throw new Error(data.error || '无法取得 Wiki 登录票据')
     }
-    const base = String(data.appUrl || getWikiAppUrl()).replace(/\/$/, '')
+    const base = resolveWikiBase(data.appUrl)
     const exchange =
       data.exchangeUrl || `${base}/api/auth/mind-map/exchange`
     const url = new URL(exchange)
