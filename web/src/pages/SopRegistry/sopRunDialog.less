@@ -42,7 +42,7 @@ body.isDark .sopRunDialog {
   .runSectionTitle { display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px; line-height: 24px; }
   .runSectionTitle strong { color: #101b32; font-size: 16px; font-weight: 600; }
   .runSectionTitle > span { color: var(--run-muted); font-size: 14px; }
-  .outputChecks { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 26px; }
+  .outputChecks { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }
   .outputChecks .el-checkbox { display: inline-flex; align-items: center; min-height: 42px; box-sizing: border-box; margin: 0; padding: 0 15px; border: 1px solid var(--run-border); border-radius: 7px; background: #fff; white-space: nowrap; }
   .outputChecks .el-checkbox:hover { border-color: #aac6f4; }
   .outputChecks .el-checkbox.is-checked { border-color: #a9c9ff; background: #eaf2ff; }
@@ -53,6 +53,26 @@ body.isDark .sopRunDialog {
   .outputChecks .optLabel { color: inherit; font-weight: 500; }
   .outputChecks .is-checked .el-checkbox__label { color: #0867ff; }
   .outputChecks .el-checkbox:focus-within { outline: 2px solid #518ce7; outline-offset: 2px; }
+  .runOutputRulesTip {
+    margin: 0 0 22px;
+    color: var(--run-muted);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .runOutputRulesTip a,
+  .runOutputRulesLink {
+    color: #0867ff;
+    margin-left: 8px;
+    font-size: 12px;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .runOutputRulesTip a:hover,
+  .runOutputRulesLink:hover { text-decoration: underline; }
+  .runOutputRulesLink:disabled { opacity: .55; cursor: not-allowed; }
 
   .runComposeTitle { margin-bottom: 8px; }
   .runComposeBox { position: relative; border: 1px dashed #ccd7e9; border-radius: 7px; background: #fbfcff; }
