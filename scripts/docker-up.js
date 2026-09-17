@@ -1,4 +1,5 @@
 const fs = require('fs')
+const crypto = require('crypto')
 const os = require('os')
 const path = require('path')
 const { spawn, execSync } = require('child_process')
@@ -165,6 +166,125 @@ function submoduleDirLooksReady(dir) {
   }
 }
 
+
+function listDocmostSourceFiles(rootDir) {
+  const skipDir = new Set([
+    '.git',
+    'node_modules',
+    'dist',
+    'build',
+    '.nx',
+    'coverage',
+    '.turbo',
+    'tmp',
+    'temp'
+  ])
+  const out = []
+  function walk(dir) {
+    let entries
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch (_) {
+      return
+    }
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name)
+      if (ent.isDirectory()) {
+        if (skipDir.has(ent.name)) continue
+        walk(full)
+        continue
+      }
+      if (!ent.isFile()) continue
+      // 忽略本机环境文件，避免 .env 变动触发无意义 rebuild
+      if (ent.name === '.env' || ent.name.endsWith('.env.local')) continue
+      out.push(full)
+    }
+  }
+  walk(rootDir)
+  out.sort()
+  return out
+}
+
+function hashDocmostSources() {
+  const docmostDir = path.join(ROOT, 'integrations', 'docmost')
+  const hash = crypto.createHash('sha256')
+  const files = listDocmostSourceFiles(docmostDir)
+  for (const filePath of files) {
+    const rel = path.relative(docmostDir, filePath).replace(/\\/g, '/')
+    const st = fs.statSync(filePath)
+    hash.update(rel)
+    hash.update('\0')
+    hash.update(String(st.size))
+    hash.update('\0')
+    hash.update(String(Math.floor(st.mtimeMs)))
+    hash.update('\0')
+    // 小文件读内容，大文件只记 size+mtime，兼顾速度和准确性
+    if (st.size <= 512 * 1024) {
+      hash.update(fs.readFileSync(filePath))
+    }
+    hash.update('\n')
+  }
+  hash.update('image=mind-map-docmost\n')
+  hash.update('version=' + String(process.env.DOCMOST_VERSION || '0.96.0') + '\n')
+  return hash.digest('hex')
+}
+
+function docmostImageExists(tag) {
+  try {
+    execSync('docker image inspect ' + JSON.stringify(tag), { stdio: 'ignore' })
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+function ensureDocmostBuilt(extraEnv) {
+  const docmostDir = path.join(ROOT, 'integrations', 'docmost')
+  const dockerfile = path.join(docmostDir, 'Dockerfile')
+  if (!fs.existsSync(dockerfile)) {
+    console.error('缺少 integrations/docmost/Dockerfile。请确认已拉取完整仓库源码后再启动。')
+    process.exit(1)
+  }
+
+  const version = String(process.env.DOCMOST_VERSION || '0.96.0')
+  const imageTag = 'mind-map-docmost:' + version
+  const stampDir = path.join(ROOT, '.docker-build-stamps')
+  const stampFile = path.join(stampDir, 'docmost.sha')
+  const currentHash = hashDocmostSources()
+  const force =
+    process.env.DOCMOST_FORCE_BUILD === '1' ||
+    process.env.DOCMOST_FORCE_BUILD === 'true'
+  let previousHash = ''
+  try {
+    previousHash = fs.readFileSync(stampFile, 'utf8').trim()
+  } catch (_) {}
+
+  const imageOk = docmostImageExists(imageTag)
+  const unchanged = !force && imageOk && previousHash && previousHash === currentHash
+
+  if (unchanged) {
+    console.log('  Docmost 镜像已是最新（源码无变化，跳过 rebuild）: ' + imageTag)
+    return false
+  }
+
+  if (force) console.log('  DOCMOST_FORCE_BUILD=1，强制重建 Docmost 镜像...')
+  else if (!imageOk) console.log('  未找到镜像 ' + imageTag + '，开始 build Docmost...')
+  else console.log('  检测到 integrations/docmost 源码有变化，开始 rebuild Docmost...')
+
+  // 同步 build，便于启动脚本判断成败
+  execSync('docker compose -f docker-compose.yml -f docker-compose.wiki.yml build docmost', {
+    cwd: ROOT,
+    stdio: 'inherit',
+    env: { ...process.env, ...(extraEnv || {}) },
+    shell: true
+  })
+
+  fs.mkdirSync(stampDir, { recursive: true })
+  fs.writeFileSync(stampFile, currentHash + '\n', 'utf8')
+  console.log('  Docmost 镜像已更新: ' + imageTag)
+  return true
+}
+
 function ensureGitSubmodules() {
   // docmost 已是主仓库普通目录，不再走 submodule；启动前只检查源码是否齐全
   const docmostDir = path.join(ROOT, 'integrations', 'docmost')
@@ -195,6 +315,7 @@ async function up() {
     console.error('未检测到 Docker。请先安装 Docker Desktop 并保持运行。')
     process.exit(1)
   }
+  ensureDocmostBuilt()
   const host = process.env.PUBLIC_HOST || detectHost()
   const wikiPort = Number(process.env.DOCMOST_PORT || 3040)
   // 侧栏 Wiki 新窗口地址：优先用根目录 .env 的 DOCMOST_APP_URL；
@@ -282,7 +403,6 @@ async function up() {
     [
       'up',
       '-d',
-      '--build',
       '--force-recreate',
       '--no-deps',
       'postgres',
