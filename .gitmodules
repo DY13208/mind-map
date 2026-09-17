@@ -1,3 +1,0 @@
-[submodule "integrations/docmost"]
-	path = integrations/docmost
-	url = https://github.com/docmost/docmost.git
