@@ -4,7 +4,7 @@
     v-if="isShow"
     ref="contextmenuRef"
     :style="{ left: left + 'px', top: top + 'px' }"
-    :class="{ isDark: isDark }"
+    :class="{ isDark: isDark, nodeMenu: type === 'node' }"
   >
     <template v-if="type === 'node'">
       <div
@@ -24,7 +24,7 @@
       </div>
       <div
         class="item"
-        @click="exec('INSERT_PARENT_NODE')"
+        @click="exec('INSERT_PARENT_NODE', insertNodeBtnDisabled)"
         :class="{ disabled: insertNodeBtnDisabled }"
       >
         <span class="name">{{ $t('contextmenu.insertParentNode') }}</span>
@@ -42,7 +42,7 @@
       <div class="splitLine"></div>
       <div
         class="item"
-        @click="exec('UP_NODE')"
+        @click="exec('UP_NODE', upNodeBtnDisabled)"
         :class="{ disabled: upNodeBtnDisabled }"
       >
         <span class="name">{{ $t('contextmenu.moveUpNode') }}</span>
@@ -50,7 +50,7 @@
       </div>
       <div
         class="item"
-        @click="exec('DOWN_NODE')"
+        @click="exec('DOWN_NODE', downNodeBtnDisabled)"
         :class="{ disabled: downNodeBtnDisabled }"
       >
         <span class="name">{{ $t('contextmenu.moveDownNode') }}</span>
@@ -74,7 +74,7 @@
       <div class="splitLine"></div>
       <div
         class="item"
-        @click="exec('COPY_NODE')"
+        @click="exec('COPY_NODE', isGeneralization)"
         :class="{ disabled: isGeneralization }"
       >
         <span class="name">{{ $t('contextmenu.copyNode') }}</span>
@@ -82,7 +82,7 @@
       </div>
       <div
         class="item"
-        @click="exec('CUT_NODE')"
+        @click="exec('CUT_NODE', isGeneralization)"
         :class="{ disabled: isGeneralization }"
       >
         <span class="name">{{ $t('contextmenu.cutNode') }}</span>
@@ -297,7 +297,7 @@ export default {
       return isLast
     },
     isGeneralization() {
-      return this.node.isGeneralization
+      return !!(this.node && this.node.isGeneralization)
     },
     hasHyperlink() {
       return !!this.node.getData('hyperlink')
@@ -332,6 +332,7 @@ export default {
     this.$bus.$on('mouseup', this.onMouseup)
     this.$bus.$on('translate', this.hide)
     this.$bus.$on('node_mousedown', this.onNodeMousedown)
+    this.$bus.$on('node_mouseup', this.onNodeMouseup)
   },
   beforeDestroy() {
     this.$bus.$off('node_contextmenu', this.show)
@@ -343,6 +344,7 @@ export default {
     this.$bus.$off('mouseup', this.onMouseup)
     this.$bus.$off('translate', this.hide)
     this.$bus.$off('node_mousedown', this.onNodeMousedown)
+    this.$bus.$off('node_mouseup', this.onNodeMouseup)
   },
   methods: {
     ...mapMutations(['setLocalConfig']),
@@ -357,7 +359,7 @@ export default {
       if (y + rect.height > window.innerHeight) {
         y = window.innerHeight - rect.height - 10
       }
-      return { x, y }
+      return { x: Math.max(10, x), y: Math.max(10, y) }
     },
 
     // 节点右键显示
@@ -372,6 +374,7 @@ export default {
         this.numberLevel = number.level === '' ? 1 : number.level
       }
       this.$nextTick(() => {
+        if (!this.isShow || !this.$refs.contextmenuRef) return
         const { x, y } = this.getShowPosition(e.clientX + 10, e.clientY + 10)
         this.left = x
         this.top = y
@@ -389,6 +392,7 @@ export default {
       this.node = anchor
       this.selectedNodes = nodes.slice()
       this.$nextTick(() => {
+        if (!this.isShow || !this.$refs.contextmenuRef) return
         const { x, y } = this.getShowPosition(
           (payload.clientX || 0) + 10,
           (payload.clientY || 0) + 10
@@ -418,7 +422,7 @@ export default {
       ) {
         return cached.slice()
       }
-      if (active.length > 1) {
+      if (active.length > 1 && active.some(item => this.nodeUid(item) === uid)) {
         return active.slice()
       }
       return node ? [node] : []
@@ -448,28 +452,28 @@ export default {
         renderer && typeof renderer.findNodeByUid === 'function'
           ? renderer.findNodeByUid.bind(renderer)
           : null
-      const cached =
-        this.mindMap &&
-        this.mindMap.select &&
-        typeof this.mindMap.select.getMultiSelectCache === 'function'
-          ? this.mindMap.select.getMultiSelectCache()
-          : []
       const raw = this.selectedNodes.length
         ? this.selectedNodes
         : this.node
           ? [this.node]
           : []
-      const source = raw.length > 1 ? raw : cached.length > 1 ? cached : raw
-      return source
+      // 菜单打开时的选区就是操作目标，不能在执行时换成之前的框选缓存。
+      return raw
         .map(item => {
           const uid = this.nodeUid(item)
-          return (uid && find && find(uid)) || item
+          return uid && find ? find(uid) : item
         })
         .filter(item => item && typeof item.getData === 'function')
     },
 
     onNodeMousedown() {
       this.isNodeMousedown = true
+    },
+
+    onNodeMouseup() {
+      // 非根节点会阻止 mouseup 冒泡，不能只等画布的 mouseup 清理状态。
+      this.isNodeMousedown = false
+      this.isMousedown = false
     },
 
     openMapRef() {
@@ -498,11 +502,12 @@ export default {
 
     // 鼠标松开事件
     onMouseup(e) {
+      const isNodeMousedown = this.isNodeMousedown
+      this.isNodeMousedown = false
       if (!this.isMousedown) {
         return
       }
-      if (this.isNodeMousedown) {
-        this.isNodeMousedown = false
+      if (isNodeMousedown) {
         this.isMousedown = false
         return
       }
@@ -532,9 +537,11 @@ export default {
 
     // 画布右键显示
     show2(e) {
+      this.hide()
       this.type = 'svg'
       this.isShow = true
       this.$nextTick(() => {
+        if (!this.isShow || !this.$refs.contextmenuRef) return
         const { x, y } = this.getShowPosition(e.clientX + 10, e.clientY + 10)
         this.left = x
         this.top = y
@@ -561,6 +568,10 @@ export default {
       switch (key) {
         case 'ADD_GENERALIZATION': {
           const nodes = this.resolveLiveSelectedNodes()
+          if (!nodes.length) {
+            this.hide()
+            return
+          }
           this.$bus.$emit(
             'execCommand',
             'ADD_GENERALIZATION',
@@ -605,10 +616,11 @@ export default {
             this.node
           )
           break
-        case 'UNEXPAND_ALL':
+        case 'UNEXPAND_ALL': {
           const uid = this.node ? this.node.uid : ''
           this.$bus.$emit('execCommand', key, !uid, uid)
           break
+        }
         case 'EXPAND_ALL':
           this.$bus.$emit('execCommand', key, this.node ? this.node.uid : '')
           break
@@ -670,17 +682,18 @@ export default {
             data = await this.getExportData()
             str = transformToTxt(data)
             break
-          case 'png':
+          case 'png': {
             const png = await this.mindMap.export('png', false)
             const blob = await imgToDataUrl(png, true)
-            setImgToClipboard(blob)
+            await setImgToClipboard(blob)
             break
+          }
           default:
             break
         }
         if (str) {
           if (this.enableCopyToClipboardApi) {
-            setDataToClipboard(str)
+            await setDataToClipboard(str)
           } else {
             copy(str)
           }
@@ -716,6 +729,13 @@ export default {
 }
 .contextmenuContainer {
   position: fixed;
+  max-width: calc(100vw - 20px);
+  max-height: calc(100vh - 20px);
+  box-sizing: border-box;
+  // 只有节点菜单需要滚动；画布菜单保留可溢出的子菜单。
+  &.nodeMenu {
+    overflow-y: auto;
+  }
   font-size: 14px;
   font-family: PingFangSC-Regular, PingFang SC;
   font-weight: 400;

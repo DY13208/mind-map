@@ -849,10 +849,15 @@ class Render {
         if (node._generalizationList && node._generalizationList.length > 0) {
           node._generalizationList.forEach(item => {
             const addTree = gNode => {
+              if (!gNode) return
               if (!gNode.getData('isActive')) {
                 this.addNodeToActiveList(gNode)
               }
-              (gNode.children || []).forEach(addTree)
+              ;(gNode.children || []).forEach(addTree)
+              // 概要子树里的节点还能再挂概要
+              ;(gNode._generalizationList || []).forEach(sub => {
+                addTree(sub && sub.generalizationNode)
+              })
             }
             addTree(item.generalizationNode)
           })
@@ -2132,7 +2137,21 @@ class Render {
   nodeHasChildren(node) {
     if (!node) return false
     if (node.children && node.children.length > 0) return true
-    return Number(node.data && node.data.childCount) > 0
+    const data = node.data || node
+    return Number(data.childCount) > 0
+  }
+
+  getExpandTreeData(node) {
+    return node && (node.data || node)
+  }
+
+  // 概要数据也是一棵可展开的虚拟子树。展开/收起命令遍历原始树时，
+  // 需要把它们作为当前节点的附加孩子纳入，否则从概要节点触发的
+  // “展开/收起所有下级”会退回根节点或漏掉概要子节点。
+  getGeneralizationTrees(node) {
+    const list = node && node.data && node.data.generalization
+    if (!list) return []
+    return (Array.isArray(list) ? list : [list]).filter(Boolean)
   }
 
   applyExpandFlagsToLevel(level) {
@@ -2199,8 +2218,9 @@ class Render {
   collectCollapsedFrontier(root) {
     const out = []
     const visit = (node, parentExpanded) => {
-      if (!node || !node.data) return
-      const expanded = node.data.expand !== false
+      if (!node) return
+      const data = this.getExpandTreeData(node)
+      const expanded = data.expand !== false
       if (parentExpanded && this.nodeHasChildren(node) && !expanded) {
         out.push(node)
         return
@@ -2208,14 +2228,16 @@ class Render {
       if (!expanded) return
       const kids = node.children || []
       for (let i = 0; i < kids.length; i++) visit(kids[i], true)
+      this.getGeneralizationTrees(node).forEach(item => visit(item, true))
     }
     if (!root) return out
-    if (root.data && root.data.expand === false) {
+    if (this.getExpandTreeData(root).expand === false) {
       if (this.nodeHasChildren(root)) out.push(root)
       return out
     }
     const kids = root.children || []
     for (let i = 0; i < kids.length; i++) visit(kids[i], true)
+    this.getGeneralizationTrees(root).forEach(item => visit(item, true))
     return out
   }
 
@@ -2223,8 +2245,12 @@ class Render {
     const cooperate = this.mindMap.cooperate
     if (!cooperate || typeof cooperate.hydrateNodeData !== 'function') return
     const stubs = (nodes || []).filter(node => {
+      // 概要条目是原始 generalization 数据，不是协同层的普通节点记录，
+      // 不能把它交给只接受 node.data 的懒加载接口。
+      if (!node || !node.data) return false
       const live = node.children && node.children.length
-      const count = Number(node.data && node.data.childCount) || 0
+      const data = this.getExpandTreeData(node)
+      const count = Number(data && data.childCount) || 0
       return count > live
     })
     if (!stubs.length) return
@@ -2272,22 +2298,30 @@ class Render {
     if (!uid || !this.renderTree) return this.renderTree
     const cooperate = this.mindMap.cooperate
     if (cooperate && typeof cooperate.findTreeNode === 'function') {
-      return cooperate.findTreeNode(this.renderTree, uid) || this.renderTree
+      const found = cooperate.findTreeNode(this.renderTree, uid)
+      if (found) return found
     }
     let found = null
-    walk(this.renderTree, null, node => {
-      if (node.data && node.data.uid === uid) {
+    const visit = node => {
+      if (!node || found) return
+      const data = this.getExpandTreeData(node)
+      if (data && data.uid === uid) {
         found = node
-        return true
+        return
       }
-    })
-    return found || this.renderTree
+      ;(node.children || []).forEach(visit)
+      this.getGeneralizationTrees(node).forEach(visit)
+    }
+    visit(this.renderTree)
+    // 指定目标不存在时不要误把整图当作起点。
+    return found
   }
 
   async expandSubtreeProgressive(start, token) {
     if (!start) return
-    if (start.data && start.data.expand === false && this.nodeHasChildren(start)) {
-      start.data.expand = true
+    const startData = this.getExpandTreeData(start)
+    if (startData && startData.expand === false && this.nodeHasChildren(start)) {
+      startData.expand = true
       this.mindMap.emit('personal_expand_change')
       await this.waitForRender()
     }
@@ -2326,7 +2360,7 @@ class Render {
         if (!slice.length) {
           const node = frontier[i++]
           if (!node) break
-          node.data.expand = true
+          this.getExpandTreeData(node).expand = true
           painted += (node.children && node.children.length) || 0
           this.mindMap.emit('personal_expand_change')
           await this.waitForRender()
@@ -2334,7 +2368,7 @@ class Render {
           continue
         }
         slice.forEach(node => {
-          node.data.expand = true
+          this.getExpandTreeData(node).expand = true
         })
         painted += willShow
         this.mindMap.emit('personal_expand_change')
@@ -2351,17 +2385,21 @@ class Render {
 
     const _walk = (node, isRoot, enableUnExpand) => {
       // 如果该节点为目标节点，那么修改允许展开的标志
-      if (!enableUnExpand && node.data.uid === uid) {
+      const data = this.getExpandTreeData(node)
+      if (!enableUnExpand && data && data.uid === uid) {
         enableUnExpand = true
       }
       if (enableUnExpand && !isRoot && this.nodeHasChildren(node)) {
-        node.data.expand = false
+        data.expand = false
       }
       if (node.children && node.children.length > 0) {
         node.children.forEach(child => {
           _walk(child, false, enableUnExpand)
         })
       }
+      this.getGeneralizationTrees(node).forEach(item => {
+        _walk(item, false, enableUnExpand)
+      })
     }
     _walk(this.renderTree, true, !uid)
     this.mindMap.emit('personal_expand_change')
@@ -2852,15 +2890,19 @@ class Render {
         res = node
         return true
       }
-      // 概要节点及其子树
+      // 概要节点及其子树（子树里的节点还能再挂概要）
       let isGeneralization = false
       const findInTree = gNode => {
+        if (!gNode) return false
         if (gNode.getData('uid') === uid) {
           res = gNode
           isGeneralization = true
           return true
         }
-        return (gNode.children || []).some(findInTree)
+        if ((gNode.children || []).some(findInTree)) return true
+        return (gNode._generalizationList || []).some(item =>
+          findInTree(item && item.generalizationNode)
+        )
       }
       ;(node._generalizationList || []).forEach(item => {
         if (!isGeneralization) findInTree(item.generalizationNode)
