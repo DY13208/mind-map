@@ -14,14 +14,22 @@ const MAX_JSON_UPLOAD_BODY_BYTES = Math.min(
 
 function matchAttachments(pathname) {
   const m = String(pathname || '').match(
-    /^\/api\/(?:files|maps|rooms)\/([^/]+)\/attachments(?:\/([^/]+))?(?:\/(content))?$/
+    /^\/api\/(?:files|maps|rooms)\/([^/]+)\/attachments(?:\/([^/]+))?(?:\/(content|text))?$/
   )
   if (!m) return null
   return {
     roomKey: decodeURIComponent(m[1]),
     id: m[2] ? decodeURIComponent(m[2]) : '',
-    content: m[3] === 'content'
+    sub: m[3] || ''
   }
+}
+
+function searchParamsOf(req, options) {
+  if (options && options.url && options.url.searchParams) {
+    return options.url.searchParams
+  }
+  const query = String((req && req.url) || '').split('?')[1] || ''
+  return new URLSearchParams(query)
 }
 
 function matchEnsure(pathname) {
@@ -94,10 +102,52 @@ async function handleApi(req, res, options = {}) {
       return true
     }
 
+    if (attachmentHit && !attachmentHit.id && req.method === 'GET') {
+      const roomKey = safeRoomKey(attachmentHit.roomKey)
+      await roomAcl.assertRoomAccess(db, req, roomKey, 'view')
+      const params = searchParamsOf(req, options)
+      const list = await store.listMeta(db, roomKey, {
+        nodeUid: params.get('node_uid') || params.get('nodeUid') || '',
+        ids: String(params.get('ids') || '')
+          .split(',')
+          .map(id => id.trim())
+          .filter(Boolean),
+        limit: params.get('limit')
+      })
+      sendJson(res, 200, {
+        ok: true,
+        room_key: roomKey,
+        attachments: list,
+        total: list.length
+      })
+      return true
+    }
+
     if (
       attachmentHit &&
       attachmentHit.id &&
-      attachmentHit.content &&
+      attachmentHit.sub === 'text' &&
+      req.method === 'GET'
+    ) {
+      const roomKey = safeRoomKey(attachmentHit.roomKey)
+      await roomAcl.assertRoomAccess(db, req, roomKey, 'view')
+      const params = searchParamsOf(req, options)
+      const slice = await store.getTextSlice(db, roomKey, attachmentHit.id, {
+        offset: params.get('offset'),
+        limit: params.get('limit')
+      })
+      if (!slice) {
+        sendJson(res, 404, { ok: false, error: '附件不存在', code: 'NOT_FOUND' })
+        return true
+      }
+      sendJson(res, 200, { ok: true, room_key: roomKey, ...slice })
+      return true
+    }
+
+    if (
+      attachmentHit &&
+      attachmentHit.id &&
+      attachmentHit.sub === 'content' &&
       req.method === 'GET'
     ) {
       const roomKey = safeRoomKey(attachmentHit.roomKey)
@@ -116,7 +166,12 @@ async function handleApi(req, res, options = {}) {
       return true
     }
 
-    if (attachmentHit && attachmentHit.id && req.method === 'GET') {
+    if (
+      attachmentHit &&
+      attachmentHit.id &&
+      !attachmentHit.sub &&
+      req.method === 'GET'
+    ) {
       const roomKey = safeRoomKey(attachmentHit.roomKey)
       await roomAcl.assertRoomAccess(db, req, roomKey, 'view')
       const row = await store.getById(db, roomKey, attachmentHit.id)
@@ -128,7 +183,12 @@ async function handleApi(req, res, options = {}) {
       return true
     }
 
-    if (attachmentHit && attachmentHit.id && req.method === 'POST') {
+    if (
+      attachmentHit &&
+      attachmentHit.id &&
+      !attachmentHit.sub &&
+      req.method === 'POST'
+    ) {
       const roomKey = safeRoomKey(attachmentHit.roomKey)
       await roomAcl.assertRoomAccess(db, req, roomKey, 'edit')
       const row = await store.reextractStored(db, roomKey, attachmentHit.id)

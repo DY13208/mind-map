@@ -58,6 +58,8 @@
     "test:collab:invalidation": "node ./test/httpInvalidation.integration.test.js",
     "test:collab:operations": "node ./test/roomOperations.integration.test.js",
     "test:collab:node-query": "node ./test/nodeQuery.test.js && node ./test/nodeQuery.pg.test.js",
+    "test:attachment:read": "node ./test/nodeKnowledge.test.js && node ./test/nodeKnowledge.http.test.js",
+    "test:attachment:read:pg": "node ./test/nodeAttachmentRead.pg.test.js",
     "test:collab:restart": "node ./test/collabRestart.integration.test.js",
     "test:collab:outbox": "node ./test/outbox.integration.test.js",
     "test:collab:multi-instance": "node ./test/multiInstance.integration.test.js",

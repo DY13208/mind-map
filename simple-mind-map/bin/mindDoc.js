@@ -553,6 +553,21 @@ function flattenNodes(obj) {
   })
 }
 
+// The outline is often the only thing a model sees, so a node carrying an
+// attachment has to advertise the id needed to read its text.
+function attachmentMark(data) {
+  const info = data || {}
+  const id = String(info.attachmentId || '').trim()
+  const name = stripHtml(info.attachmentName) || ''
+  if (!id && !name && !info.attachmentUrl) return ''
+  const parts = [name || '附件']
+  if (id) parts.push(`att:${id}`)
+  else if (info.attachmentUrl) parts.push('外部链接')
+  const status = String(info.attachmentStatus || '').trim()
+  if (status && status !== 'ready') parts.push(status)
+  return `  (附件 ${parts.join(' ')})`
+}
+
 function toOutline(obj, options = {}) {
   const maxNodes = Number(options.maxNodes) > 0 ? Number(options.maxNodes) : 0
   const rootUid = findRootUid(obj)
@@ -570,7 +585,7 @@ function toOutline(obj, options = {}) {
     count += 1
     const text = stripHtml(node.data && node.data.text) || '(无标题)'
     const prefix = depth === 0 ? '# ' : `${'  '.repeat(depth - 1)}- `
-    lines.push(`${prefix}${text}  [${uid}]`)
+    lines.push(`${prefix}${text}  [${uid}]${attachmentMark(node.data)}`)
     ;(node.children || []).forEach(child => walk(child, depth + 1))
   }
   walk(rootUid, 0)
