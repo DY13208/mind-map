@@ -21,3 +21,7 @@ workbuddy_to_api/
 .env.*bak
 .env.broken*
 
+
+# local docker rebuild fingerprints
+.docker-build-stamps/
+
