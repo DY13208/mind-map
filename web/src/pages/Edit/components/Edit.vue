@@ -1039,6 +1039,7 @@ export default {
         'exit_demonstrate',
         'node_note_dblclick',
         'node_mousedown',
+        'node_mouseup',
         'map_ref_click',
         'multi_select_end'
       ].forEach(event => {

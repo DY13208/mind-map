@@ -204,6 +204,10 @@ class Select {
         .map(uid => renderer.findNodeByUid(uid))
         .filter(Boolean)
       if (live.length > 1) return live
+      // 渲染重建后旧实例可能仍留在 lastMultiSelectList 中。
+      // 不能把这些已脱离画布的节点交给右键菜单，否则菜单会把当前
+      // 右键节点误判为旧多选上下文，尤其容易发生在概要重渲染之后。
+      return []
     }
     return (this.lastMultiSelectList || []).filter(Boolean)
   }
@@ -278,14 +282,22 @@ class Select {
       }
     }
 
+    // 概要节点挂在所属节点上，不在普通 children 树里；其下的子树也要参与
+    // 框选，否则“概要后节点”永远选不中。概要子树里的节点还能再挂概要，所以
+    // 这里需要递归。
+    const checkGeneralizations = node => {
+      ;(node._generalizationList || []).forEach(item => {
+        const gNode = item && item.generalizationNode
+        if (!gNode) return
+        bfsWalk(gNode, child => {
+          check(child)
+          checkGeneralizations(child)
+        })
+      })
+    }
     bfsWalk(this.mindMap.renderer.root, node => {
       check(node)
-      // 概要节点
-      if (node._generalizationList && node._generalizationList.length > 0) {
-        node._generalizationList.forEach(item => {
-          check(item.generalizationNode)
-        })
-      }
+      checkGeneralizations(node)
     })
     this.rememberMultiSelect()
   }
