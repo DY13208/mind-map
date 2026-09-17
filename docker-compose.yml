@@ -80,6 +80,8 @@ services:
       DOCMOST_DATABASE_URL: ${DOCMOST_DATABASE_URL:-}
       DOCMOST_APP_SECRET: ${DOCMOST_APP_SECRET:-}
       DOCMOST_SSO_SECRET: ${DOCMOST_SSO_SECRET:-}
+      DOCMOST_INTERNAL_URL: ${DOCMOST_INTERNAL_URL:-http://docmost:3000}
+      DOCMOST_SYNC_ENABLED: ${DOCMOST_SYNC_ENABLED:-true}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
