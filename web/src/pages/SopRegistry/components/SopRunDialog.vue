@@ -57,6 +57,11 @@
     <el-checkbox-group v-model="outputIds" class="outputChecks">
       <el-checkbox v-for="opt in outputPresets" :key="opt.id" :label="opt.id" class="outputCheck"><span>{{ opt.label }}</span></el-checkbox>
     </el-checkbox-group>
+    <p class="runOutputRulesTip">
+      运行会按内置「输出规则」写业务可读汇报（结论 / 交付 / 发现 / 改脑图建议）；勾选的 HTML 等仅在规则表已定义时强制版式。
+      <a :href="outputRulesUrls.xmind" download="SOP输出规则.xmind">下载规则脑图</a>
+      <button type="button" class="runOutputRulesLink" :disabled="cloningRules" @click="cloneOutputRules">{{ cloningRules ? '正在复制…' : '复制到我的空间' }}</button>
+    </p>
     <div v-if="submitLoading" class="runSubmitLoading">正在读取资料模板…</div>
     <div v-else-if="submitFields.length" class="runSubmitBox">
       <div class="runSubmitHead"><strong>先填写资料再执行</strong><span v-if="submitZoneHint">{{ submitZoneHint }}</span></div>
@@ -99,6 +104,7 @@
 import { mapMutations } from 'vuex'
 import { getLocalConfig } from '@/api'
 import { SOP_OUTPUT_PRESETS, loadSopRunContext } from '@/utils/sopRun'
+import { getSopOutputRulesTemplateUrls, cloneSopOutputRulesTemplate } from '@/utils/sopOutputRulesTemplate'
 import { getSharedSopRunQueue, resolveSopRunConcurrency } from '@/utils/sopRunQueue'
 import { SOP_ATTACHMENT_ACCEPT, SOP_ATTACHMENT_LIMIT, validateSopAttachment, uploadSopAttachment, formatSopAttachmentNote } from '@/utils/sopRunAttachments'
 import { extractSubmitMaterialFields, formatSubmitMaterialNote, missingSubmitMaterialLabels } from '@/utils/sopSubmitMaterial'
@@ -115,6 +121,7 @@ export default {
   data() {
     return {
       outputPresets: SOP_OUTPUT_PRESETS, outputIds: [], extraNote: '', attachments: [], attachmentAccept: SOP_ATTACHMENT_ACCEPT,
+      outputRulesUrls: getSopOutputRulesTemplateUrls(), cloningRules: false,
       submitFields: [], submitZones: [], submitSource: '', submitLoading: false, enqueueing: false,
       backend: 'openclaw', model: 'openclaw/default', modelsLoading: false,
       customModels: WORKBUDDY_CUSTOM_MODEL_HINTS.slice(), platformModels: [], openclawModels: [{ id: 'openclaw/default', name: 'openclaw/default' }],
@@ -138,6 +145,22 @@ export default {
   methods: {
     ...mapMutations(['setLocalConfig']),
     close() { this.$emit('update:visible', false); this.$emit('close') },
+    async cloneOutputRules() {
+      if (this.cloningRules) return
+      this.cloningRules = true
+      try {
+        const created = await cloneSopOutputRulesTemplate()
+        this.$message.success(`已复制「${created.title}」到我的空间`)
+        const key = created.roomKey
+        if (key && this.$router) {
+          this.$router.push({ path: '/', query: { room: key } }).catch(() => {})
+        }
+      } catch (err) {
+        this.$message.error((err && err.message) || '复制输出规则脑图失败')
+      } finally {
+        this.cloningRules = false
+      }
+    },
     open() {
       if (!this.target || !this.roomKey) return this.close()
       const active = this.queue.findActiveBySop(this.roomKey, this.target.uid)

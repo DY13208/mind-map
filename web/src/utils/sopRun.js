@@ -29,35 +29,45 @@ import {
   summarizeNotifyResults
 } from './sopNotify'
 import { parseProvidedFieldLabels } from './sopSubmitMaterial'
+import {
+  formatOutputRulesBlock,
+  SOP_OUTPUT_RULES_META
+} from './sopOutputRules'
+import { artifactLocalUrl } from './fileApi'
 
-/** 可选产物预设（运行前勾选） */
+/** 可选产物预设（运行前勾选）；版式细则见内置「输出规则脑图」 */
 export const SOP_OUTPUT_PRESETS = [
   {
     id: 'html',
     label: 'HTML 执行单',
-    hint: '单页简洁美观，含 KPI / 表格 / 本周动作',
+    hint: '遵守内置规则 · 多图少字的方案执行单',
     prompt:
-      '生成一份简洁美观的单页 HTML 执行单，落到项目 output 目录，文件名必须含本 SOP 编号与标题（如 D2_采购目标_YYYY-MM-DD_HHmm.html），并给出可打开的绝对路径'
+      '生成本 SOP 方案 HTML：步骤若要求「根据历史制定目标」，主图与表格必须给出目标金额（勿用店铺数空壳冒充）；缺基数才标待接入且勿整单称完成；落到 output 并给绝对路径'
   },
   {
     id: 'md',
     label: 'Markdown 摘要',
-    hint: '核心判断 + 动作清单',
-    prompt: '输出 Markdown 摘要：核心判断一句话、关键结论、本周动作'
+    hint: '遵守内置输出规则 · Markdown',
+    prompt:
+      '输出 Markdown 摘要，严格遵守「输出规则脑图」中 Markdown 类别：核心判断一句话、关键结论、本周动作'
   },
   {
     id: 'xlsx',
     label: 'Excel / 表格',
-    hint: '排产、下单或核对表',
-    prompt: '如需表格数据，产出 Excel/CSV 并给出路径或链接'
+    hint: '遵守内置输出规则 · Excel',
+    prompt:
+      '如需表格数据，产出 Excel/CSV 并给出路径或链接；严格遵守「输出规则脑图」中 Excel 类别'
   },
   {
     id: 'json',
     label: '结构化 JSON',
-    hint: '便于二次消费',
-    prompt: '额外给出结构化 JSON（结论、KPI、动作、数据源）'
+    hint: '遵守内置输出规则 · JSON',
+    prompt:
+      '额外给出结构化 JSON（结论、KPI、动作、数据源、nodeSuggestions）；严格遵守「输出规则脑图」中 JSON 类别'
   }
 ]
+
+export { SOP_OUTPUT_RULES_META }
 
 function stripText(text) {
   return String(text || '')
@@ -267,6 +277,7 @@ export async function loadSopRunContext(roomKey, sop) {
   let outline = ''
   let steps = []
   let source = 'none'
+  let fullOutline = ''
 
   // 从脑图工具栏直接运行时，优先使用点击“运行”那一刻的画布快照，
   // 避免协同保存尚未落库时读到旧的表单字段。
@@ -295,13 +306,25 @@ export async function loadSopRunContext(roomKey, sop) {
     }
   }
 
-  if (!outline) {
-    try {
-      const res = await getFileOutline(key, 2000)
-      outline = (res && res.outline) || ''
+  // 全图大纲：每次运行都尽量拉全量，供「全节点融入分析 / 节点优化建议」
+  try {
+    const res = await getFileOutline(key, 10000)
+    fullOutline = (res && res.outline) || ''
+    if (!outline) {
+      outline = fullOutline
       source = 'outline'
-    } catch (err) {
-      console.warn('[sopRun] outline failed', err)
+    }
+  } catch (err) {
+    console.warn('[sopRun] full outline failed', err)
+    if (!outline) {
+      try {
+        const res = await getFileOutline(key, 2000)
+        outline = (res && res.outline) || ''
+        fullOutline = outline
+        source = 'outline'
+      } catch (err2) {
+        console.warn('[sopRun] outline failed', err2)
+      }
     }
   }
 
@@ -311,6 +334,7 @@ export async function loadSopRunContext(roomKey, sop) {
     sopTitle: (sop && sop.title) || '',
     sopUid: uid,
     outline: outline.slice(0, 80000),
+    fullOutline: String(fullOutline || outline || '').slice(0, 120000),
     steps,
     source,
     businessFingerprint: String(
@@ -331,25 +355,37 @@ function buildSystemPrompt() {
 
 硬性规则：
 1. 必须实际调用工具/MCP 去读数据、算数、写文件；禁止只根据大纲「口头完成」。
-2. 没有工具调用、没有生成真实文件路径，就不能说「已完成」。
-3. 只执行用户指定的那一个 SOP（编号+标题+uid），禁止顺带执行或改写其它 D 节点。
+2. 没有工具调用、没有生成真实文件路径，就不能说「已完成」（流程型、未勾选产物时除外）。
+3. 只执行用户指定的那一个 SOP（编号+标题），禁止顺带执行或改写其它 D 节点。
 4. 若用户消息已标明「已处理的通知」，不要重复派发；阻塞类通知由台账队列等待人工完成。
-5. 按该 SOP 的步骤与检查项执行；HTML 要真正落盘（简洁美观：KPI 卡 + 表格 + 本周动作）。
-5. 文末必须有可解析的「产物清单」，且只列用户勾选的最终产物（绝对路径或可打开链接；文件名时间精确到分）。
-6. 文件名必须包含本 SOP 编号（如 D2）与标题关键词，避免多任务并行时产物串台，例如：
-   D2_采购目标_2026-09-08_1022.html
-7. 产物清单格式：
-## 产物清单
-- name: D2_采购目标_2026-09-08_1022.html
-  path: D:\\\\path\\\\to\\\\output\\\\D2_采购目标_2026-09-08_1022.html
-8. 禁止把过程数据、中间 JSON、MCP/工具临时路径、stdout、schema 片段、COS 临时对象写入产物清单。
-9. 最终文件必须写到 /home/node/.openclaw/workspace/output/（这是可预览的 output 目录）；不要写到别的临时目录，也不要复用其它 SOP 刚生成的文件。
-10. 同时给出：是否完成、核心判断一句话、单页内容要点、数据来源。
-11. 不要修改 SOP 本体结构；过程日志不必写入导图。
-12. 缺关键数据时在结论里写清限制与假设，仍尽量用本次当前脑图已有数据给出可执行结论；不要停下来要求用户粘贴外部系统链接。
-13. 若上下文标明数据源为「runtime_tree / 当前脑图」，它是本次业务字段的唯一事实来源；未填写字段必须写「未填写」或「无法确认」。
-14. 严禁从 Git、历史 HTML、旧产物、旧运行记录、memory、台账备注或旧待办正文恢复、继承或推断本次业务字段；历史状态只可用于核实是否已派发通知，避免重复操作。
-15. 当前资料不完整时，不得声称「字段齐全」「12/12 已完成」「需求已完整提交」，只能完成不依赖缺失字段的自动步骤。`
+5. 【执行阶段】按本 SOP 子树步骤依次执行；步骤标题要求的输入（如「根据历史GMV制定目标」）必须尽量算出目标数字写进产物，这不是可忽略的上游。
+6. 「不必考虑上游」= 不要因别的 D 节点没跑完而停手；绝不等于可以跳过本步骤的历史推算、交出全是「待接入」的空壳还声称完成。
+7. 【诊断阶段】执行后再开「## 脑图诊断（全图）」：顺畅度/补充/纠错。诊断与执行剥离。
+8. 若勾选 HTML：真正落盘；主图必须对上步骤意图（制定目标→画目标金额图，不是店铺数结构图）。
+9. 汇报短中文，结构固定：一句话结论 / 本次交付 / 关键发现 / 脑图诊断（全图）。未做完的步骤要写明，禁止整单假「完成」。
+10. 若勾选落盘产物，文末「## 产物清单」仅系统用。
+11. 文件名含 SOP 编号与标题；写到 /home/node/.openclaw/workspace/output/。
+12. 不要改 SOP 本体；改图建议只写在脑图诊断。
+13. 禁止用无关 Git 提交、别的 SOP 旧执行单、memory 闲聊编造业务数。本 SOP/本脑图里的历史 GMV、渠道定位、趋势若存在，制定目标时必须用，算出目标金额；不得借口「不能推断」交出全「待接入」空壳。
+14. 资料不完整时：缺哪标哪，对应步骤写未完成；不得声称字段齐全或整单完成。`
+}
+
+function buildFullMapOutlineBlock(ctx) {
+  const full = String((ctx && ctx.fullOutline) || '').trim()
+  const sopOutline = String((ctx && ctx.outline) || '').trim()
+  if (full && sopOutline && full !== sopOutline) {
+    return [
+      '## 本 SOP 子树（执行依据：按步骤做；步骤要求的历史推算必须做）',
+      sopOutline,
+      '',
+      '## 当前脑图全量大纲（仅用于执行完成后的「脑图诊断」：顺畅度 / 需补充 / 需纠错）',
+      full
+    ].join('\n')
+  }
+  return [
+    '## SOP 子树 / 大纲（执行依据；诊断若无全图则在此基础上判断）',
+    sopOutline || full || '（未拉到大纲，请用房间 MCP/工具自行读取该 SOP；诊断时再读全图）'
+  ].join('\n')
 }
 
 function buildUserPrompt({ ctx, outputs, extraNote }) {
@@ -359,6 +395,8 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
   const goal = [ctx.sopId, ctx.sopTitle].filter(Boolean).join('：')
   const fileHint = suggestDeliverableFileStem(ctx.sopId, ctx.sopTitle)
   const needFiles = !!(outputs && outputs.length)
+  const rulesBlock = formatOutputRulesBlock(outputs || [])
+  const mapBlock = buildFullMapOutlineBlock(ctx)
   const runtimeSourceBoundary =
     ctx.source === 'runtime_tree'
       ? [
@@ -381,17 +419,19 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
       '【执行要求】',
       '- 按大纲中的 AI / 人 / HRBP / 需求方 等步骤推进可自动部分；',
       '- 遇到通知、知会、审批类步骤：说明对象与内容；若台账侧已派发待办则勿重复；',
-      '- 不要强行生成 HTML/Excel 等文件；文末可不写「产物清单」，改为「## 执行结果」；',
-      '- 说明：已完成哪些自动步骤、卡在哪个人工步骤、下一步建议。',
+      '- 不要强行生成 HTML/Excel 等文件；可不写「产物清单」。',
+      '- 说明：做成了什么、卡在哪个人工步骤、业务上接下来做什么。',
       '- 若下方已有「## 用户提交资料」，直接使用；不要要求用户再在界面里补数或贴链接。',
+      '- 执行按本 SOP 步骤做；步骤里的历史推算必须做；勿因别的 D 未跑完而停；做完后再写「脑图诊断（全图）」。',
       runtimeSourceBoundary,
       continuityHint,
       extraNote ? `\n## 额外要求\n${extraNote}` : '',
       '',
-      '## SOP 子树 / 大纲上下文',
-      ctx.outline || '（未拉到大纲，请用房间 MCP/工具自行读取该 SOP）',
+      rulesBlock,
       '',
-      '开始执行。完成后用中文结构化汇报（含 ## 执行结果）。'
+      mapBlock,
+      '',
+      '开始执行。先只跑本 SOP；汇报结构：结论→交付→发现→脑图诊断（全图）→（可选）产物清单。'
     ]
       .filter(Boolean)
       .join('\n')
@@ -409,14 +449,16 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
     selected,
     '',
     '注意：中间快照、_map_full/_map_outline、MCP 日志不要出现在产物清单里。',
+    '【两段式】执行按本 SOP 步骤依次做（步骤里写的历史推算必须做）；勿因别的 D 未跑完而停。做完后再写「## 脑图诊断（全图）」。禁止空壳目标表冒充完成。',
     runtimeSourceBoundary,
     continuityHint,
     extraNote ? `\n## 额外要求\n${extraNote}` : '',
     '',
-    '## SOP 子树 / 大纲上下文',
-    ctx.outline || '（未拉到大纲，请用房间 MCP/工具自行读取该 SOP）',
+    rulesBlock,
     '',
-    '开始执行。完成后用中文结构化汇报，文末必须有「## 产物清单」。'
+    mapBlock,
+    '',
+    '开始执行。先出本节点方案/产物（多图少字）；再剥离输出脑图诊断；最后附「## 产物清单」。'
   ]
     .filter(Boolean)
     .join('\n')
@@ -730,15 +772,22 @@ function guessKind(uri) {
 function inferRunResult(reply) {
   const t = String(reply || '')
   if (/疑似空跑|未真正执行|没有工具|未调用工具/.test(t)) return '疑似空跑'
+  if (/空壳|仅骨架|未制定目标|步骤未完成|未执行到/.test(t)) return '部分完成'
   // 缺数据：不再标成「待补数」中断态（补数入口已关闭）
   if (isMissingDataReply(t)) {
-    if (/已完成|执行完成|成功生成|已派发/.test(t)) return '完成'
+    if (/部分完成|未完成|卡在|阻塞/.test(t)) return '部分完成'
+    if (/已完成|执行完成|成功生成|已派发/.test(t) && !/待接入|骨架/.test(t)) {
+      return '完成'
+    }
+    return '部分完成'
+  }
+  if (
+    /已完成|执行完成|全部完成|成功生成/.test(t) &&
+    !/未完成|失败无法|部分完成|待接入/.test(t)
+  ) {
     return '完成'
   }
-  if (/已完成|执行完成|全部完成|成功生成/.test(t) && !/未完成|失败无法/.test(t)) {
-    return '完成'
-  }
-  if (/部分完成|待人工|人工确认/.test(t)) return '部分完成'
+  if (/部分完成|待人工|人工确认|未做完|卡在第/.test(t)) return '部分完成'
   // 硬失败：明确无法继续，且不是「缺数据等你填」
   if (
     /(?:^|[^\u4e00-\u9fff])(?:任务失败|执行失败|无法继续|中断退出)(?:[^\u4e00-\u9fff]|$)/.test(
@@ -749,6 +798,56 @@ function inferRunResult(reply) {
     return '失败'
   }
   return t.trim() ? '完成' : '未知'
+}
+
+/** 产物是否像「全待接入空壳」；peekText 可传入已读到的 HTML 正文 */
+export function isHollowTargetDeliverable(
+  reply,
+  deliverables = [],
+  peekText = ''
+) {
+  const text = String(reply || '')
+  const names = (deliverables || [])
+    .map(d => `${(d && d.name) || ''} ${(d && d.uri_or_path) || ''}`)
+    .join('\n')
+  const blob = `${text}\n${names}\n${String(peekText || '')}`
+  const hollowHint =
+    /目标分配台账（骨架）|金额列待接入|金额轴待接入|全是待接入|仅骨架|空壳/.test(
+      blob
+    )
+  const pendingCount = (blob.match(/待接入/g) || []).length
+  const pendingHeavy =
+    pendingCount >= 4 && /制定.*目标|GMV目标|实收目标|目标金额/.test(blob)
+  // 目标制定类产物：金额格大量「待接入」且几乎没有真实金额数字
+  const looksTargetSop =
+    /制定.*目标|GMV目标|实收目标|目标分配/.test(blob) ||
+    /制定.*目标|GMV/.test(names)
+  const hasRealAmount =
+    /(¥|￥)\s*[\d,]+|[\d,]{2,}\s*万|gmv\s*[:=]\s*[\d.]+/i.test(blob)
+  const hollowByAmountGap =
+    looksTargetSop && pendingCount >= 6 && !hasRealAmount
+  return hollowHint || pendingHeavy || hollowByAmountGap
+}
+
+/** 尝试读取本地 HTML 产物正文，用于空壳判定（失败则返回空串） */
+export async function peekDeliverableText(deliverables = []) {
+  const items = Array.isArray(deliverables) ? deliverables : []
+  const chunks = []
+  for (const d of items) {
+    const uri = String((d && d.uri_or_path) || '').trim()
+    const name = String((d && d.name) || '').trim()
+    if (!/\.html?/i.test(`${uri} ${name}`)) continue
+    try {
+      const url = artifactLocalUrl(uri || name, { name: name || uri })
+      const res = await fetch(url)
+      if (!res || !res.ok) continue
+      const text = await res.text()
+      if (text) chunks.push(String(text).slice(0, 120000))
+    } catch (_) {
+      /* 读不到就不挡后续判定 */
+    }
+  }
+  return chunks.join('\n')
 }
 
 /** 回复是否在要人工补数（而非整单失败） */
@@ -969,12 +1068,14 @@ export function assessSopExecution({
   deliverables,
   requireFiles = true,
   alreadyProvided = [],
-  notifyResults = []
+  notifyResults = [],
+  nodeProgress = [],
+  peekText = ''
 } = {}) {
   const evs = events || []
   const toolish = evs.filter(ev => {
     const type = String((ev && ev.type) || '')
-    return /tool_call|tool_result|phase|plan/.test(type)
+    return /tool_call|tool_result|phase|plan|openclaw\.tool/.test(type)
   })
   const realFiles = (deliverables || []).filter(d => {
     const uri = String((d && d.uri_or_path) || '')
@@ -985,11 +1086,27 @@ export function assessSopExecution({
   const dispatched = (notifyResults || []).filter(r => r && r.dispatchOk)
   const tooFast = Number(elapsedSec) > 0 && Number(elapsedSec) < 40
   const text = String(reply || '')
-  const claimsDone = /已完成|执行完成|成功生成/.test(text)
+  const claimsDone = /已完成|执行完成|成功生成|整单完成/.test(text)
   const missing = extractMissingDataNeeds(text, { alreadyProvided })
+  const steps = Array.isArray(nodeProgress) ? nodeProgress : []
+  const pendingAuto = steps.filter(
+    s =>
+      s &&
+      (s.status === 'pending' || s.status === 'active') &&
+      s.kind !== 'notify' &&
+      s.kind !== 'manual' &&
+      !isManualGateTitle(s.title)
+  )
+  const hollow = isHollowTargetDeliverable(text, realFiles, peekText)
+  // 非空壳且（有目标金额 或 非目标类 SOP）：视为产物已实质交付
+  const targetLike = /制定|目标|GMV|实收/.test(
+    text + realFiles.map(d => d.name).join('')
+  )
+  const hasRealAmount = /(¥|￥)\s*[\d,]+|[\d,]{2,}\s*万|目标.*=\s*[\d.]+/i.test(
+    `${text}\n${peekText}`
+  )
+  const substantial = !hollow && realFiles.length > 0 && (!targetLike || hasRealAmount)
 
-  // 吉客云等数据源未打通前：不中断执行要求「界面补数」。
-  // 缺数据只记在结论里，任务按正常评估继续（有产物/工具则完成，否则走下方规则）。
   void missing
 
   // 企微待办已直派成功：即使模型只回了预览/确认文案，也算真执行
@@ -1020,6 +1137,16 @@ export function assessSopExecution({
       }
     }
     const result = inferRunResult(reply) || '完成'
+    if (pendingAuto.length > 1) {
+      return {
+        ok: true,
+        runResult: '部分完成',
+        reason: `节点流仍有 ${pendingAuto.length} 个步骤未执行完`,
+        toolEvents: toolish.length,
+        realFiles: realFiles.length,
+        pendingSteps: pendingAuto.length
+      }
+    }
     return {
       ok: result !== '失败',
       runResult: result,
@@ -1044,7 +1171,6 @@ export function assessSopExecution({
     }
   }
   if (realFiles.length === 0 && toolish.length === 0) {
-    // 小策常见：只给「确认创建企业微信待办」预览，未真正调用工具
     if (/确认创建企业微信待办|创建待办预览|尚未执行任何写入/.test(text)) {
       return {
         ok: false,
@@ -1059,13 +1185,55 @@ export function assessSopExecution({
       reason: '没有工具事件也没有可打开的产物路径'
     }
   }
+
+  // 有文件但像「制定目标」空壳：不能算完成
+  if (hollow && /制定|目标|GMV|实收/.test(text + realFiles.map(d => d.name).join(''))) {
+    return {
+      ok: true,
+      runResult: '部分完成',
+      reason:
+        '产物像空壳（金额多为待接入/骨架），本 SOP「制定目标」步骤未真正给出目标数字',
+      toolEvents: toolish.length,
+      realFiles: realFiles.length,
+      hollow: true
+    }
+  }
+
+  // 节点流后半仍灰，且产物未证明后半已交付 → 部分完成（与灰点一致）
+  if (pendingAuto.length > 1 && !substantial) {
+    return {
+      ok: true,
+      runResult: '部分完成',
+      reason: `节点流仍有 ${pendingAuto.length} 个步骤未点亮，产物也未证明后半步骤已交付`,
+      toolEvents: toolish.length,
+      realFiles: realFiles.length,
+      pendingSteps: pendingAuto.length
+    }
+  }
+
   const result = inferRunResult(reply)
+  const doneOk = result !== '失败' && result !== '部分完成' && !hollow
   return {
     ok: result !== '失败',
-    runResult: result,
-    reason: result === '失败' ? '模型汇报执行失败' : '',
+    runResult:
+      result === '完成' && hollow
+        ? '部分完成'
+        : doneOk && pendingAuto.length > 1 && substantial
+          ? '完成'
+          : result === '完成' && pendingAuto.length > 1 && !substantial
+            ? '部分完成'
+            : result,
+    reason:
+      result === '失败'
+        ? '模型汇报执行失败'
+        : hollow
+          ? '产物偏空壳，按部分完成计'
+          : doneOk && pendingAuto.length > 1 && substantial
+            ? '产物已实质交付，节点流将补点亮'
+            : '',
     toolEvents: toolish.length,
-    realFiles: realFiles.length
+    realFiles: realFiles.length,
+    lightUpPending: !!(doneOk && substantial && pendingAuto.length > 1)
   }
 }
 
@@ -1748,6 +1916,12 @@ export async function runSopWithWorkbuddy({
     throw err
   }
 
+  let peekText = ''
+  try {
+    peekText = await peekDeliverableText(deliverables)
+  } catch (_) {
+    peekText = ''
+  }
   const assessment = assessSopExecution({
     reply,
     events,
@@ -1755,16 +1929,21 @@ export async function runSopWithWorkbuddy({
     deliverables,
     requireFiles: outputs.length > 0,
     alreadyProvided: parseProvidedFieldLabels(extraNote),
-    notifyResults
+    notifyResults,
+    nodeProgress,
+    peekText
   })
   const runResult = assessment.runResult
+  const partial = runResult === '部分完成'
 
   setStatus(
-    assessment.ok
-      ? outputs.length
-        ? `回写运行记录与产物…（${elapsedSec}s）`
-        : `回写运行记录…（${elapsedSec}s）`
-      : `${assessment.reason || '执行异常'}，仍写入台账…`
+    !assessment.ok
+      ? `${assessment.reason || '执行异常'}，仍写入台账…`
+      : partial
+        ? `部分完成，回写台账…（${elapsedSec}s）`
+        : outputs.length
+          ? `回写运行记录与产物…（${elapsedSec}s）`
+          : `回写运行记录…（${elapsedSec}s）`
   )
   let ledger = normalizeLedger(
     sop.sopLedger || {
@@ -1825,23 +2004,40 @@ export async function runSopWithWorkbuddy({
   }
 
   setStatus(
-    assessment.ok
-      ? `执行完成（${elapsedSec}s）`
-      : `未确认真执行（${elapsedSec}s）：${assessment.reason || runResult}`
+    !assessment.ok
+      ? `未确认真执行（${elapsedSec}s）：${assessment.reason || runResult}`
+      : partial
+        ? `部分完成（${elapsedSec}s）：${assessment.reason || '后半步骤未跑完或产物空壳'}`
+        : `执行完成（${elapsedSec}s）`
   )
   if (nodeProgress.length) {
-    const finalStatus = assessment.ok ? 'done' : 'failed'
+    const fullyDone = assessment.ok && runResult === '完成'
+    const lightUp = fullyDone || assessment.lightUpPending
     nodeProgress = nodeProgress.map(s => {
       if (s.status === 'done' || s.status === 'waiting') return s
-      if (s.status === 'active' || s.status === 'pending') {
+      if (s.status === 'active') {
         return {
           ...s,
-          status:
-            s.status === 'active'
-              ? finalStatus
-              : assessment.ok
-                ? 'skipped'
-                : 'pending',
+          status: lightUp ? 'done' : assessment.ok ? 'active' : 'failed',
+          detail: lightUp
+            ? s.detail || ''
+            : assessment.reason || s.detail || '本步未完全交付',
+          updatedAt: Date.now()
+        }
+      }
+      // pending：仅当产物实质完成才补点亮；否则保留灰点与「部分完成」一致
+      if (s.status === 'pending') {
+        if (lightUp && s.kind !== 'notify' && s.kind !== 'manual' && !isManualGateTitle(s.title)) {
+          return {
+            ...s,
+            status: 'done',
+            detail: s.detail || '已随产物一并交付',
+            updatedAt: Date.now()
+          }
+        }
+        return {
+          ...s,
+          detail: fullyDone ? s.detail || '' : '尚未执行到此步骤',
           updatedAt: Date.now()
         }
       }
