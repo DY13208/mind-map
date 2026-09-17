@@ -9,6 +9,11 @@ function versionsFrom(data) {
   )
 }
 
+function newIdempotencyKey() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
+  return 'restore-' + Date.now() + '-' + Math.random().toString(16).slice(2)
+}
+
 export default {
   backendStatus: C3_SERVICE_STATUS_MATRIX.History,
   listVersions: async (roomKey, query = {}) => {
@@ -17,6 +22,9 @@ export default {
       if (query.limit != null) params.set('limit', String(query.limit))
       if (query.cursor) params.set('cursor', query.cursor)
       if (query.type) params.set('type', query.type)
+      if (query.from) params.set('from', query.from)
+      if (query.to) params.set('to', query.to)
+      if (query.createdBy) params.set('createdBy', query.createdBy)
       const qs = params.toString()
       const data = await productRequest(
         `/api/files/${encodeURIComponent(roomKey)}/versions${
@@ -26,6 +34,7 @@ export default {
       const list = versionsFrom(data)
       return Object.assign(list, {
         list,
+        nextCursor: data.nextCursor || null,
         currentRevision: Number(data.currentRevision || 0),
         earliestAvailableRevision: Number(data.earliestAvailableRevision || 0),
         viewingHistory: true
@@ -43,8 +52,7 @@ export default {
           method: 'POST',
           body: JSON.stringify({
             name: payload.name,
-            description: payload.description || '',
-            revision: payload.revision
+            description: payload.description || ''
           })
         }
       )
@@ -67,12 +75,13 @@ export default {
       throw error
     }
   },
-  getVersionTree: async (roomKey, versionId) => {
+  getVersionTree: async (roomKey, versionId, options = {}) => {
     try {
       const data = await productRequest(
         `/api/files/${encodeURIComponent(roomKey)}/versions/${encodeURIComponent(
           versionId
-        )}/tree`
+        )}/tree`,
+        { signal: options.signal, timeoutMs: options.timeoutMs || 30000 }
       )
       return {
         ...data,
@@ -81,20 +90,24 @@ export default {
         version: normalizeVersionDto(data.version || {})
       }
     } catch (error) {
+      if (error && error.name === 'AbortError') throw error
       error.message = userMessageFromError(error)
       throw error
     }
   },
   restoreVersion: async (roomKey, versionId, expectedCurrentRevision) => {
     try {
+      const key = newIdempotencyKey()
       return await productRequest(
         `/api/files/${encodeURIComponent(roomKey)}/versions/${encodeURIComponent(
           versionId
         )}/restore`,
         {
           method: 'POST',
+          headers: { 'Idempotency-Key': key },
           body: JSON.stringify({
-            expectedCurrentRevision: Number(expectedCurrentRevision)
+            expectedCurrentRevision: Number(expectedCurrentRevision),
+            idempotencyKey: key
           })
         }
       )

@@ -206,6 +206,15 @@
           </div>
           <div
             class="toolbarBtn"
+            data-testid="history-versions"
+            v-if="$route.query.room"
+            @click="$emit('open-history')"
+          >
+            <span class="icon el-icon-time"></span>
+            <span class="text">历史版本</span>
+          </div>
+          <div
+            class="toolbarBtn"
             data-testid="back-to-files"
             title="返回首页"
             v-if="$route.query.room"

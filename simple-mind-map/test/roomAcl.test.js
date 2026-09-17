@@ -110,6 +110,8 @@ function testRoleMatrix() {
   assert.strictEqual(restoreHit.action, 'manage')
   assert.strictEqual(roomAcl.roleAllows('editor', restoreHit.action), false)
   assert.strictEqual(roomAcl.roleAllows('owner', restoreHit.action), true)
+  const hideHit = roomAcl.inferRoomAcl('/api/files/room-a/versions/v1/hide', 'POST')
+  assert.strictEqual(hideHit.action, 'manage')
   const versionWrite = roomAcl.inferRoomAcl('/api/files/room-a/versions', 'POST')
   assert.strictEqual(versionWrite.action, 'edit')
   assert.strictEqual(roomAcl.roleAllows('viewer', versionWrite.action), false)

@@ -15,8 +15,15 @@
         :can-run-sop="!!selectedSopTarget"
         :run-sop-title="selectedSopTarget ? selectedSopTarget.displayTitle : ''"
         @run-sop="runSelectedSop"
+        @open-history="historyVisible = true"
       ></Toolbar>
       <Edit></Edit>
+      <HistoryPanel
+        :visible.sync="historyVisible"
+        :room="historyRoom"
+        :wait-for-commit="true"
+        @restored="onHistoryRestored"
+      />
     </template>
   </div>
 </template>
@@ -25,7 +32,9 @@
 import Toolbar from './components/Toolbar.vue'
 import Edit from './components/Edit.vue'
 import AccessDeniedPanel from './components/AccessDeniedPanel.vue'
+import HistoryPanel from '../ProductShell/components/HistoryPanel.vue'
 import { productRequest } from '@/services/productHttp'
+import { normalizeRoomDto } from '@/services/roomDto'
 import { mapState, mapMutations } from 'vuex'
 import { getLocalConfig } from '@/api'
 import { matchDRegistryTitle } from '@/utils/sopRegistryPrompt'
@@ -46,7 +55,8 @@ export default {
   components: {
     AccessDeniedPanel,
     Toolbar,
-    Edit
+    Edit,
+    HistoryPanel
   },
   data() {
     return {
@@ -55,7 +65,9 @@ export default {
       returnFolderId: '',
       selectedSopTarget: null,
       sopRunQueue: null,
-      sopRunSubmitting: false
+      sopRunSubmitting: false,
+      historyVisible: false,
+      historyRoom: null
     }
   },
   computed: {
@@ -97,6 +109,11 @@ export default {
       const file = (data && (data.file || data.room)) || data || {}
       const folderId = file.folderId || file.folder_id
       this.returnFolderId = folderId ? String(folderId) : ''
+      this.historyRoom = normalizeRoomDto({
+        ...file,
+        roomKey: this.roomKey,
+        title: file.title || file.name || '脑图'
+      })
     } catch (error) {
       if (error && (error.statusCode === 403 || error.code === 'FORBIDDEN')) {
         this.accessDenied = true
@@ -130,6 +147,10 @@ export default {
       this.isDark
         ? document.body.classList.add('isDark')
         : document.body.classList.remove('isDark')
+    },
+
+    onHistoryRestored() {
+      this.$bus.$emit('history-restored')
     },
 
     nodeTitle(node) {

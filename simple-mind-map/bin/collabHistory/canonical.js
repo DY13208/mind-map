@@ -62,6 +62,28 @@ function nodeCount(tree) {
   return Object.keys(tree || {}).length
 }
 
+function toNestedMindMap(graph) {
+  const nodes = graph && typeof graph === 'object' ? graph : {}
+  const rootUid =
+    Object.keys(nodes).find(uid => nodes[uid] && nodes[uid].isRoot) ||
+    Object.keys(nodes)[0]
+  if (!rootUid) {
+    return { data: { uid: 'root', text: '未命名' }, children: [] }
+  }
+  const seen = new Set()
+  function walk(uid) {
+    if (!uid || seen.has(uid) || !nodes[uid]) return null
+    seen.add(uid)
+    const node = nodes[uid]
+    const children = (node.children || []).map(walk).filter(Boolean)
+    return {
+      data: { ...(node.data || {}), uid },
+      children
+    }
+  }
+  return walk(rootUid)
+}
+
 function assertTreeValid(tree) {
   const check = validateNodeGraph(tree)
   if (!check.ok) {
@@ -82,5 +104,6 @@ module.exports = {
   historyChecksum,
   canonicalTreeHash,
   nodeCount,
+  toNestedMindMap,
   assertTreeValid
 }

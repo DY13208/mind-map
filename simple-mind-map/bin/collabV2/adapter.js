@@ -1515,6 +1515,11 @@ function createCollaborationAdapter(options = {}) {
         await outbox.update(op.opId, { status: 'retryable', error: err.message })
         return { ahead: true, err }
       }
+      if (err.code === 'STALE_AFTER_VERSION_RESTORE') {
+        await quarantinePendingAfterRestore(outbox, state.clientId, state.roomKey)
+        await refreshOutboxCounts()
+        return { stale: true, err }
+      }
       if (err.code === 'STALE_BASE' || err.code === 'VERSION_CONFLICT' || err.code === 'REVISION_GAP') {
         await outbox.update(op.opId, { status: 'retryable', error: err.message })
         return { stale: true, err }
