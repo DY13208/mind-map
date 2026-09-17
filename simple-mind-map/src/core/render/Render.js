@@ -2249,7 +2249,8 @@ class Render {
   //  展开所有
   expandAllNode(uid = '') {
     if (!this.renderTree) return
-    const token = (this._expandAllToken || 0) + 1
+    const token = (this._expandOperationId || 0) + 1
+    this._expandOperationId = token
     this._expandAllToken = token
     const command = this.mindMap.command
     if (command) command.pause()
@@ -2287,6 +2288,7 @@ class Render {
     if (!start) return
     if (start.data && start.data.expand === false && this.nodeHasChildren(start)) {
       start.data.expand = true
+      this.mindMap.emit('personal_expand_change')
       await this.waitForRender()
     }
     let painted = 0
@@ -2326,6 +2328,7 @@ class Render {
           if (!node) break
           node.data.expand = true
           painted += (node.children && node.children.length) || 0
+          this.mindMap.emit('personal_expand_change')
           await this.waitForRender()
           if (painted >= EXPAND_ALL_MAX_NODES) return
           continue
@@ -2334,6 +2337,7 @@ class Render {
           node.data.expand = true
         })
         painted += willShow
+        this.mindMap.emit('personal_expand_change')
         await this.waitForRender()
       }
     }
@@ -2343,6 +2347,7 @@ class Render {
   unexpandAllNode(isSetRootNodeCenter = true, uid = '') {
     if (!this.renderTree) return
     this._expandAllToken = 0
+    this._expandOperationId = (this._expandOperationId || 0) + 1
 
     const _walk = (node, isRoot, enableUnExpand) => {
       // 如果该节点为目标节点，那么修改允许展开的标志
@@ -2359,6 +2364,7 @@ class Render {
       }
     }
     _walk(this.renderTree, true, !uid)
+    this.mindMap.emit('personal_expand_change')
 
     this.mindMap.render(() => {
       if (isSetRootNodeCenter) {
@@ -2371,8 +2377,13 @@ class Render {
   expandToLevel(level) {
     if (!this.renderTree) return
     const target = Number(level) || 0
+    const token = (this._expandOperationId || 0) + 1
+    this._expandOperationId = token
+    this._expandAllToken = 0
     this.hydrateThen(this.renderTree, target, { maxFetches: 40, concurrency: 2 }, () => {
+      if (this._expandOperationId !== token) return
       this.applyExpandFlagsToLevel(target)
+      this.mindMap.emit('personal_expand_change')
       this.mindMap.render()
     })
   }
