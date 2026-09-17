@@ -470,7 +470,8 @@ export default {
       personalExpandRemoteTimer: null,
       personalExpandApplying: false,
       personalExpandOnCommand: null,
-      personalExpandOnRender: null
+      personalExpandOnRender: null,
+      personalExpandOnChange: null
     }
   },
   computed: {
@@ -1002,7 +1003,9 @@ export default {
         this.mindMap, roomKey, userId, getPersonalViewState, savePersonalViewState
       )
 
+      let locallyChanged = false
       const persist = () => {
+        locallyChanged = true
         if (!this.personalExpandState) return
         savePersonalExpandState(roomKey, userId, this.personalExpandState)
         clearTimeout(this.personalExpandRemoteTimer)
@@ -1022,7 +1025,6 @@ export default {
         persist()
       }
       this.personalExpandOnCommand = (name, ...args) => {
-        if (this.personalExpandApplying) return
         if (name === 'SET_NODE_EXPAND') {
           const node = args[0]
           const uid =
@@ -1040,8 +1042,8 @@ export default {
           name === 'UNEXPAND_ALL' ||
           name === 'UNEXPAND_TO_LEVEL'
         ) {
-          // 批量命令会在同一轮同步修改所有 expand 标志，必须先更新本地偏好，
-          // 否则 render_end 恢复旧状态会把“收起全部”立即覆盖掉。
+          // 记录当前命令；异步批量操作后续通过 personal_expand_change
+          // 在每次渲染前保存实际状态，避免恢复旧偏好导致回弹。
           snapshotNow()
           return
         }
@@ -1061,6 +1063,8 @@ export default {
           }
         }
       }
+      this.personalExpandOnChange = snapshotNow
+      this.mindMap.on('personal_expand_change', this.personalExpandOnChange)
       this.personalExpandOnRender = () => {
         this.restorePersonalExpandState()
       }
@@ -1070,7 +1074,7 @@ export default {
       this.personalExpandOnRender()
       getPersonalViewState(roomKey)
         .then(result => {
-          if (this.personalExpandRoomKey !== roomKey) return
+          if (this.personalExpandRoomKey !== roomKey || locallyChanged) return
           const remote =
             result && result.state && result.state.expand
               ? result.state.expand
@@ -1137,6 +1141,9 @@ export default {
         }).catch(() => {})
       }
       if (this.mindMap) {
+        if (this.personalExpandOnChange) {
+          this.mindMap.off('personal_expand_change', this.personalExpandOnChange)
+        }
         if (this.personalExpandOnCommand) {
           this.mindMap.off('afterExecCommand', this.personalExpandOnCommand)
         }
@@ -1146,6 +1153,7 @@ export default {
       }
       this.personalExpandState = null
       this.personalExpandRoomKey = ''
+      this.personalExpandOnChange = null
       this.personalExpandOnCommand = null
       this.personalExpandOnRender = null
       this.personalExpandApplying = false
