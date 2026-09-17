@@ -12,6 +12,7 @@ function method(name, next) {
 }
 const progressive = method('async expandSubtreeProgressive', 'unexpandAllNode')
 const collapse = method('unexpandAllNode', 'expandToLevel')
+const findStart = method('findExpandStartNode', 'async expandSubtreeProgressive')
 const level = method('expandToLevel', 'toggleActiveExpand')
 // Same limits as the actual renderer; exercise all async batches.
 vm.runInContext('const EXPAND_ALL_MAX_ROUNDS=24, EXPAND_ALL_MAX_NODES=200, EXPAND_ALL_BATCH=6, EXPAND_ALL_PER_FRAME=48', sandbox)
@@ -24,9 +25,23 @@ function fixture() {
   const leaf = { data: { uid: 'leaf' }, children: [] }
   const deep = { data: { uid: 'deep', expand: false }, children: [leaf] }
   const branch = { data: { uid: 'branch', expand: false }, children: [deep] }
-  const root = { data: { uid: 'root', expand: true }, children: [branch] }
+  const summaryGrandchild = { data: { uid: 'summary-grandchild' }, children: [] }
+  const summaryChild = {
+    data: { uid: 'summary-child', expand: true },
+    children: [summaryGrandchild]
+  }
+  const summary = { uid: 'summary', expand: true, children: [summaryChild] }
+  const root = {
+    data: { uid: 'root', expand: true, generalization: [summary] },
+    children: [branch]
+  }
   let saved
   const renderer = { renderTree: root, _expandAllToken: 1, _expandOperationId: 1,
+    getExpandTreeData: node => node.data || node,
+    getGeneralizationTrees(node) {
+      const list = node.data && node.data.generalization
+      return list ? (Array.isArray(list) ? list : [list]) : []
+    },
     nodeHasChildren: node => node.children.length > 0,
     collectCollapsedFrontier(node) {
       if (node.data.expand === false && node.children.length) return [node]
@@ -41,16 +56,24 @@ function fixture() {
     render() { sandbox.apply(mindMap, saved) }
   }
   saved = sandbox.collect(mindMap)
-  return { renderer, branch, deep }
+  return { renderer, branch, deep, summary, summaryChild, summaryGrandchild }
 }
 async function main() {
   let f = fixture()
+  assert.strictEqual(findStart.call(f.renderer, 'summary'), f.summary,
+    'expand all must target the stored summary object')
+  assert.strictEqual(findStart.call(f.renderer, 'missing'), null,
+    'missing expand target must not fall back to the whole tree')
   await progressive.call(f.renderer, f.renderer.renderTree, 1)
   assert.strictEqual(f.branch.data.expand, true, 'render restoration must keep each expanded batch')
   assert.strictEqual(f.deep.data.expand, true, 'nested async batch must stay expanded')
   collapse.call(f.renderer, false)
   assert.strictEqual(f.branch.data.expand, false)
   assert.strictEqual(f.deep.data.expand, false)
+  assert.strictEqual(f.summary.expand, false, 'collapse all must include summaries')
+  assert.strictEqual(f.summaryChild.data.expand, false,
+    'collapse all must include summary descendants')
+  assert.strictEqual(f.summaryGrandchild.data.expand, undefined)
   f.renderer.hydrateThen = (root, target, options, after) => { f.finish = after }
   level.call(f.renderer, 2)
   f.finish()

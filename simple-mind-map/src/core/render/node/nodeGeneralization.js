@@ -106,8 +106,10 @@ function getGeneralizationNodeIndex(node) {
 }
 
 //  创建概要节点
+// 概要节点自身也可以拥有概要（概要下的子节点再加概要），所以这里不再排除
+// isGeneralization。递归由数据决定，不存在无限展开。
 function createGeneralizationNode() {
-  if (this.isGeneralization || !this.checkHasGeneralization()) {
+  if (!this.checkHasGeneralization()) {
     return
   }
   let maxWidth = 0
@@ -159,6 +161,9 @@ function createGeneralizationNode() {
           children: item.children
         })
       cur.generalizationNode.layerIndex = this.layerIndex + 1
+      // 复用实例时同步它自己的概要，否则下面测量子树尺寸时拿到的是上一轮的
+      // 嵌套概要大小，主树预留空间会不够。
+      cur.generalizationNode.updateGeneralization()
     }
     delete item.inserting
     // 关联所属节点
@@ -191,7 +196,6 @@ function createGeneralizationNode() {
 
 //  更新概要节点
 function updateGeneralization() {
-  if (this.isGeneralization) return
   const nextSig = collabGeneralization.generalizationSignature(
     this.getData('generalization')
   )
@@ -209,7 +213,6 @@ function updateGeneralization() {
 
 //  渲染概要节点
 function renderGeneralization(forceRender) {
-  if (this.isGeneralization) return
   this.updateGeneralizationData()
   const list = this.formatGetGeneralization()
   if (list.length <= 0 || this.getData('expand') === false) {
@@ -291,9 +294,8 @@ function updateGeneralizationData() {
 
 //  删除概要节点
 function removeGeneralization() {
-  if (this.isGeneralization) return
   this._generalizationList.forEach(item => {
-    item.generalizationNode.style.onRemove()
+    if (item.generalizationNode) item.generalizationNode.style.onRemove()
     if (item.generalizationLine) {
       item.generalizationLine.remove()
       item.generalizationLine = null
@@ -308,7 +310,9 @@ function removeGeneralization() {
   this._generalizationList = []
   this._generalizationSig = ''
   // hack修复当激活一个节点时创建概要，然后立即激活创建的概要节点后会重复创建概要节点并且无法删除的问题
-  if (this.generalizationBelongNode) {
+  // 概要节点自身的 group 也带着 generalization_<所属节点uid> 类名，
+  // 这里如果对概要节点执行，会把它自己从画布上删掉。
+  if (!this.isGeneralization && this.generalizationBelongNode) {
     this.nodeDraw
       .find('.generalization_' + this.generalizationBelongNode.uid)
       .remove()
@@ -317,7 +321,6 @@ function removeGeneralization() {
 
 //  隐藏概要节点
 function hideGeneralization() {
-  if (this.isGeneralization) return
   this._generalizationList.forEach(item => {
     if (item.generalizationLine) item.generalizationLine.hide()
     if (item.generalizationNode) item.generalizationNode.hide()
@@ -326,7 +329,6 @@ function hideGeneralization() {
 
 //  显示概要节点
 function showGeneralization() {
-  if (this.isGeneralization) return
   const list = this.formatGetGeneralization()
   this._generalizationList.forEach((item, index) => {
     const data = list[index] || item
