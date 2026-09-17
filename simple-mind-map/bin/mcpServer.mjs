@@ -72,7 +72,7 @@ function createServer(authorization) {
     },
     {
       instructions:
-        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps，只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。工具返回 isError 表示没有写入，禁止声称已完成。'
+        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps，只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。附件：节点 data 出现 attachmentId 或大纲里出现「(附件 … att:<id>)」标记时，说明该节点挂着文件，其正文必须用 read_attachment 读取；节点上的 attachmentExtractedText 只是截断预览，不得据此下结论，has_more=true 时按 next_offset 续读到 false。要先了解一张图有哪些附件用 list_attachments。附件 status 不是 ready 时如实说明状态和 error_message，不得编造附件内容。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。工具返回 isError 表示没有写入，禁止声称已完成。'
     }
   )
 
@@ -200,6 +200,82 @@ function createServer(authorization) {
             body: JSON.stringify(body),
             timeoutMs: 25000
           })
+        )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'list_attachments',
+    '列出导图里的附件及其解析状态，只返回元数据不返回正文。传 node_uid 只看该节点的附件。附件正文用 read_attachment 读取。不会修改导图。',
+    {
+      room_key: z.string().describe('房间号'),
+      node_uid: z
+        .string()
+        .describe('只列出该节点的附件；省略则列出整张导图的附件')
+        .optional(),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(200)
+        .describe('最多返回条数，默认 50')
+        .optional()
+    },
+    async ({ room_key, node_uid, limit }) => {
+      try {
+        const qs = new URLSearchParams()
+        if (node_uid) qs.set('node_uid', node_uid)
+        if (limit) qs.set('limit', String(limit))
+        const suffix = qs.toString() ? `?${qs.toString()}` : ''
+        return ok(
+          await api(
+            `/api/files/${encodeURIComponent(room_key)}/attachments${suffix}`
+          )
+        )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'read_attachment',
+    '读取附件正文（服务端已提取的文本，含 PDF/Word/Excel/PPT 和图片 OCR 结果）。节点 data 里的 attachmentExtractedText 只是截断预览，需要完整内容时必须用本工具。has_more=true 时用返回的 next_offset 继续读，直到 false。status 不是 ready 表示尚未解析成功，按 status 和 error_message 说明情况，不要凭空编造附件内容。不会修改导图。',
+    {
+      room_key: z.string().describe('房间号'),
+      attachment_id: z
+        .string()
+        .describe('附件 id，来自节点 data.attachmentId、大纲附件标记或 list_attachments'),
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .describe('从第几个字符开始读，默认 0；续读时传上次的 next_offset')
+        .optional(),
+      length: z
+        .number()
+        .int()
+        .min(1)
+        .max(20000)
+        .describe('本次最多读取字符数，默认 4000')
+        .optional()
+    },
+    async ({ room_key, attachment_id, offset, length }) => {
+      try {
+        const qs = new URLSearchParams()
+        if (offset) qs.set('offset', String(offset))
+        if (length) qs.set('limit', String(length))
+        const suffix = qs.toString() ? `?${qs.toString()}` : ''
+        return ok(
+          await api(
+            `/api/files/${encodeURIComponent(
+              room_key
+            )}/attachments/${encodeURIComponent(attachment_id)}/text${suffix}`,
+            { timeoutMs: 25000 }
+          )
         )
       } catch (err) {
         return fail(err)

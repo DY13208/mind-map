@@ -20,6 +20,8 @@ IP 由启动脚本探测，不要手写，也不要用 `127.0.0.1`（WorkBuddy �
 | `get_map` | `format=outline` 大纲（默认最多 800 节点）；`format=full` 树（超大图会截断，可用 `max_nodes`） |
 | `search_nodes` | 按文字搜节点 |
 | `query_nodes` | 按 UID、名称或完整路径定向读取节点、子树、链路或层级；超大结果用游标分页 |
+| `list_attachments` | 列出导图（或指定节点）的附件及解析状态，只返回元数据 |
+| `read_attachment` | 读取附件正文（服务端已提取的文本，含 PDF/Word/Excel/PPT 与图片 OCR），按字符分页 |
 | `list_todos` | 列出待办，可选同时读取已完成 |
 | `prepare_todo` | 读取待办并匹配任意SOP的C/P |
 | `complete_todo` | 全部C通过后把任务移动到已完成 |
@@ -58,6 +60,51 @@ scope="level" level=1 level_mode="relative"
 名称默认严格匹配；同名节点会返回候选 UID 与路径，随后用 UID 重试。`match="fuzzy"` 也只返回候选，不会自动读错分支。单页最多 5000 节点、默认 800 节点，并额外受约 20 KiB 的结果预算约束；返回 `has_more=true` 时，将 `next_cursor` 原样传回继续读取。
 
 用户问某节点的“上下节点”时，不需要整图读取：先用 `path` 取上游链路；目标返回的 `parent_uid` 可继续用 `children` 读取同级节点；对目标本身用 `children` 读取直属下游，或用 `subtree` 读取全部下游。
+
+### 读取附件内容
+
+节点挂了文件时，后端已经把可解析格式的正文提取好存下来了（PDF、Word、Excel、PPT、纯文本/Markdown/HTML，图片走 OCR）。AI 有两条线索能发现附件：
+
+- `query_nodes` 返回的节点 `data` 里带 `attachmentId` / `attachmentName` / `attachmentStatus`
+- `get_map format=outline` 的大纲行尾会带 `(附件 合同.pdf att:<id>)` 标记
+
+节点上的 `attachmentExtractedText` 只是截断预览，要完整内容必须用 `read_attachment`：
+
+```text
+先看有哪些附件：
+list_attachments room_key="demo"                  // 整张导图
+list_attachments room_key="demo" node_uid="<uid>" // 只看某个节点
+
+再读正文：
+read_attachment room_key="demo" attachment_id="<id>"
+read_attachment room_key="demo" attachment_id="<id>" offset=4000 length=4000
+```
+
+`read_attachment` 返回：
+
+```json
+{
+  "ok": true,
+  "room_key": "demo",
+  "attachment": {
+    "id": "a1b2c3",
+    "fileName": "合同.pdf",
+    "mimeType": "application/pdf",
+    "status": "ready",
+    "extractedChars": 9000
+  },
+  "text": "……本次读取的正文片段……",
+  "offset": 0,
+  "length": 4000,
+  "total_chars": 9000,
+  "has_more": true,
+  "next_offset": 4000
+}
+```
+
+默认单次 4000 字符、最多 20000 字符。`has_more=true` 时把 `next_offset` 当成下一次的 `offset` 继续读，直到 `has_more=false`。
+
+`status` 不是 `ready` 时不会有正文：`processing` 表示大文件仍在后台解析，稍后重试；`failed` 会给出 `errorMessage`（例如老式 `.doc` 不支持解析，需要人工下载打开）。这两种情况都应如实告知用户，不要编造附件内容。原始文件本身不经 MCP 返回，人类可在网页上预览或下载。
 
 ---
 

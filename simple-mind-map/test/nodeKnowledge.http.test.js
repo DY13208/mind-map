@@ -68,6 +68,8 @@ async function main() {
 
   const originalAssertRoomAccess = roomAcl.assertRoomAccess
   const originalGetContentById = store.getContentById
+  const originalListMeta = store.listMeta
+  const originalGetTextSlice = store.getTextSlice
   const accessCalls = []
   try {
     roomAcl.assertRoomAccess = async (db, req, roomKey, action) => {
@@ -166,9 +168,152 @@ async function main() {
     })
     assert.equal(tooBig.statusCode, 413)
     assert.equal(JSON.parse(tooBig.body).code, 'FILE_TOO_LARGE')
+
+    // Attachment listing: metadata only, never the extracted text itself.
+    accessCalls.length = 0
+    roomAcl.assertRoomAccess = async (db, req, roomKey, action) => {
+      accessCalls.push({ roomKey, action })
+    }
+    const listArgs = []
+    store.listMeta = async (db, roomKey, options) => {
+      listArgs.push({ roomKey, options })
+      return [
+        {
+          id: 'att-1',
+          fileName: '合同.pdf',
+          mimeType: 'application/pdf',
+          status: 'ready',
+          extractedChars: 9000
+        }
+      ]
+    }
+    const listed = createResponse()
+    await httpApi.handleApi(
+      {
+        method: 'GET',
+        url: '/api/files/room-demo/attachments?node_uid=node-9&limit=5'
+      },
+      listed,
+      { pathname: '/api/files/room-demo/attachments', db: {} }
+    )
+    assert.equal(listed.statusCode, 200)
+    const listBody = JSON.parse(listed.body)
+    assert.equal(listBody.ok, true)
+    assert.equal(listBody.room_key, 'room-demo')
+    assert.equal(listBody.total, 1)
+    assert.equal(listBody.attachments[0].id, 'att-1')
+    assert.equal(listBody.attachments[0].extractedText, undefined)
+    assert.deepEqual(listArgs, [
+      { roomKey: 'room-demo', options: { nodeUid: 'node-9', ids: [], limit: '5' } }
+    ])
+    assert.deepEqual(accessCalls, [{ roomKey: 'room-demo', action: 'view' }])
+
+    // Text slices carry the paging cursor the MCP tool hands back as offset.
+    const sliceArgs = []
+    store.getTextSlice = async (db, roomKey, id, options) => {
+      sliceArgs.push({ roomKey, id, options })
+      return {
+        attachment: { id, fileName: '合同.pdf', status: 'ready', extractedChars: 9000 },
+        text: '第二段正文',
+        offset: 4000,
+        length: 5,
+        total_chars: 9000,
+        has_more: true,
+        next_offset: 4005
+      }
+    }
+    const sliced = createResponse()
+    await httpApi.handleApi(
+      {
+        method: 'GET',
+        url: '/api/files/room-demo/attachments/att-1/text?offset=4000&limit=4000'
+      },
+      sliced,
+      { pathname: '/api/files/room-demo/attachments/att-1/text', db: {} }
+    )
+    assert.equal(sliced.statusCode, 200)
+    const sliceBody = JSON.parse(sliced.body)
+    assert.equal(sliceBody.text, '第二段正文')
+    assert.equal(sliceBody.has_more, true)
+    assert.equal(sliceBody.next_offset, 4005)
+    assert.equal(sliceBody.total_chars, 9000)
+    assert.deepEqual(sliceArgs, [
+      {
+        roomKey: 'room-demo',
+        id: 'att-1',
+        options: { offset: '4000', limit: '4000' }
+      }
+    ])
+
+    // A failed extraction must surface its status instead of looking empty.
+    store.getTextSlice = async () => ({
+      attachment: {
+        id: 'att-doc',
+        fileName: '旧合同.doc',
+        status: 'failed',
+        errorMessage: '暂不支持解析 .doc，请下载后本地打开',
+        extractedChars: 0
+      },
+      text: '',
+      offset: 0,
+      length: 0,
+      total_chars: 0,
+      has_more: false,
+      next_offset: null
+    })
+    const failedSlice = createResponse()
+    await httpApi.handleApi(
+      { method: 'GET', url: '/api/files/room-demo/attachments/att-doc/text' },
+      failedSlice,
+      { pathname: '/api/files/room-demo/attachments/att-doc/text', db: {} }
+    )
+    const failedBody = JSON.parse(failedSlice.body)
+    assert.equal(failedSlice.statusCode, 200)
+    assert.equal(failedBody.attachment.status, 'failed')
+    assert.match(failedBody.attachment.errorMessage, /不支持解析/)
+    assert.equal(failedBody.has_more, false)
+
+    store.getTextSlice = async () => null
+    const missingSlice = createResponse()
+    await httpApi.handleApi(
+      { method: 'GET', url: '/api/files/room-demo/attachments/nope/text' },
+      missingSlice,
+      { pathname: '/api/files/room-demo/attachments/nope/text', db: {} }
+    )
+    assert.equal(missingSlice.statusCode, 404)
+    assert.equal(JSON.parse(missingSlice.body).code, 'NOT_FOUND')
+
+    // Both new reads are gated by the same room ACL as the binary content read.
+    roomAcl.assertRoomAccess = async () => {
+      const error = new Error('无权访问附件')
+      error.statusCode = 403
+      error.code = 'FORBIDDEN'
+      throw error
+    }
+    store.listMeta = async () => {
+      throw new Error('ACL denial must happen before listing attachments')
+    }
+    store.getTextSlice = async () => {
+      throw new Error('ACL denial must happen before reading text')
+    }
+    for (const pathname of [
+      '/api/files/room-demo/attachments',
+      '/api/files/room-demo/attachments/att-1/text'
+    ]) {
+      const denied = createResponse()
+      await httpApi.handleApi(
+        { method: 'GET', url: pathname },
+        denied,
+        { pathname, db: {} }
+      )
+      assert.equal(denied.statusCode, 403, pathname)
+      assert.equal(JSON.parse(denied.body).code, 'FORBIDDEN', pathname)
+    }
   } finally {
     roomAcl.assertRoomAccess = originalAssertRoomAccess
     store.getContentById = originalGetContentById
+    store.listMeta = originalListMeta
+    store.getTextSlice = originalGetTextSlice
   }
 
   console.log('nodeKnowledge HTTP attachment tests passed')
