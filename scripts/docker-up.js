@@ -166,43 +166,15 @@ function submoduleDirLooksReady(dir) {
 }
 
 function ensureGitSubmodules() {
+  // docmost 已是主仓库普通目录，不再走 submodule；启动前只检查源码是否齐全
   const docmostDir = path.join(ROOT, 'integrations', 'docmost')
-  if (submoduleDirLooksReady(docmostDir)) {
-    console.log('  子模块 integrations/docmost 已就绪')
-    return true
+  const dockerfile = path.join(docmostDir, 'Dockerfile')
+  if (!fs.existsSync(dockerfile)) {
+    console.error('缺少 integrations/docmost/Dockerfile。请确认已拉取完整仓库源码后再启动。')
+    process.exit(1)
   }
-  if (!fs.existsSync(path.join(ROOT, '.gitmodules'))) {
-    console.log('  未找到 .gitmodules，跳过子模块初始化')
-    return false
-  }
-  try {
-    execSync('git --version', { stdio: 'ignore' })
-  } catch (e) {
-    console.warn(
-      '  警告：未检测到 git，无法自动拉取 integrations/docmost。请先安装 git，或手动执行：git submodule update --init --recursive'
-    )
-    return false
-  }
-  console.log('  正在初始化 git 子模块 integrations/docmost ...')
-  try {
-    execSync('git submodule update --init --recursive -- integrations/docmost', {
-      cwd: ROOT,
-      stdio: 'inherit',
-      env: process.env
-    })
-  } catch (e) {
-    console.warn(
-      '  警告：子模块拉取失败（生产 Wiki 默认用官方镜像，不阻塞启动）。可稍后手动：git submodule update --init --recursive'
-    )
-    console.warn('  原因：' + ((e && e.message) || e))
-    return false
-  }
-  if (submoduleDirLooksReady(docmostDir)) {
-    console.log('  子模块 integrations/docmost 已拉取到本地')
-    return true
-  }
-  console.warn('  警告：子模块命令已执行，但 integrations/docmost 仍像空目录，请检查网络/权限')
-  return false
+  console.log('  本地 Docmost 源码已就绪（integrations/docmost）')
+  return true
 }
 
 function ensureEnv() {
