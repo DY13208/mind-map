@@ -1594,6 +1594,9 @@ async function initSchemaOnce() {
   await pool.query(`
     alter table rooms add column if not exists metadata jsonb
   `)
+  await pool.query(`
+    alter table rooms add column if not exists restore_epoch_revision bigint not null default 0
+  `)
   // Serves the collaboration room list without a full-table sort as the number
   // of saved rooms grows.  The primary key already covers single-room reads.
   await pool.query(`
@@ -1888,10 +1891,37 @@ async function commitDirectRoomOperation(roomKey, command, apply) {
   })
 }
 
+function rejectIfStaleAfterRestore(room, command) {
+  const epoch = Number(room.restore_epoch_revision || 0)
+  if (!epoch) return
+  const type = String(command.type || '')
+  const reason =
+    (command.payload && (command.payload.reason || command.payload.fullTreeReason)) ||
+    ''
+  if (type === 'map.replace' && reason === 'VERSION_RESTORE') return
+  const base =
+    command.baseVersion != null && command.baseVersion !== undefined
+      ? Number(command.baseVersion)
+      : NaN
+  if (!Number.isFinite(base) || base < epoch) {
+    const err = new Error('pending operation is stale after VERSION_RESTORE')
+    err.statusCode = 409
+    err.code = 'STALE_AFTER_VERSION_RESTORE'
+    err.currentVersion = Number(room.version || 0)
+    err.details = {
+      restoreEpochRevision: epoch,
+      baseRevision: Number.isFinite(base) ? base : null,
+      roomCurrentRevision: Number(room.version || 0)
+    }
+    throw err
+  }
+}
+
 async function commitDirectRoomOperationOnce(client, roomKey, command, apply) {
   await client.query('begin')
   const roomResult = await client.query(
-    `select room_key, title, version, updated_at, metadata
+    `select room_key, title, version, updated_at, metadata,
+            coalesce(restore_epoch_revision, 0) as restore_epoch_revision
      from rooms where room_key = $1 for update`,
     [roomKey]
   )
@@ -1937,6 +1967,7 @@ async function commitDirectRoomOperationOnce(client, roomKey, command, apply) {
     }
     throw err
   }
+  rejectIfStaleAfterRestore(room, command)
   const applied = await apply({
     client,
     room,
@@ -2045,7 +2076,8 @@ async function commitDirectRoomOperationOnce(client, roomKey, command, apply) {
 async function commitRoomOperationOnce(client, roomKey, command, apply) {
   await client.query('begin')
   const roomResult = await client.query(
-    `select room_key, title, nodes, version, updated_at
+    `select room_key, title, nodes, version, updated_at,
+            coalesce(restore_epoch_revision, 0) as restore_epoch_revision
      from rooms where room_key = $1 for update`,
     [roomKey]
   )
@@ -2091,6 +2123,7 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
     }
     throw err
   }
+  rejectIfStaleAfterRestore(room, command)
   const json = nodesFromJson(room.nodes) || {}
   const table = await readRoomNodes(client, roomKey)
   const picked = pickAuthoritativeNodes(json, table, currentVersion, {

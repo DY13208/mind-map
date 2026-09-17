@@ -1,4 +1,4 @@
-# History API (C1 backend, C3 UI later)
+# History API
 
 Base: collab HTTP (same host as `/api/files`). ACL via existing room membership.
 
@@ -13,16 +13,20 @@ List/detail **never** return the full tree.
 `GET /api/files/:roomKey/versions`  
 Aliases: `/api/maps/:roomKey/versions`, `/api/rooms/:roomKey/versions`
 
-Query: `limit`, `cursor`, `type`, `createdBy`, `from`, `to`
+Query: `limit` (default 20), `cursor`, `type`, `createdBy`, `from`, `to`
+
+Pagination is `(created_at desc, id desc)`. `nextCursor` is opaque.
 
 ```json
 {
   "ok": true,
   "viewingHistory": true,
+  "readOnly": true,
   "earliestAvailableRevision": 654,
   "currentRevision": 654,
   "completeFromRevision": 654,
   "historyStartRevision": 654,
+  "nextCursor": null,
   "versions": [
     {
       "versionId": "uuid",
@@ -30,18 +34,25 @@ Query: `limit`, `cursor`, `type`, `createdBy`, `from`, `to`
       "checkpointRevision": 400,
       "name": "上线前",
       "type": "MANUAL",
-      "createdBy": "user-id",
+      "createdBy": "张三",
+      "createdById": "user-id",
       "createdAt": "2026-09-04T00:00:00.000Z",
       "description": "",
       "source": "manual",
-      "readOnly": true
+      "sourceKind": "manual",
+      "editors": [{ "userId": "user-id", "name": "张三" }],
+      "summary": { "kind": "edits", "inserted": 1, "updated": 2, "deleted": 0, "moved": 0 },
+      "summaryStatus": "ready",
+      "summaryText": "新增 1 · 修改 2 · 删除 0 · 移动 0",
+      "availability": "readable",
+      "readOnly": true,
+      "capabilities": { "canRestore": true, "canCreate": true }
     }
-  ],
-  "nextCursor": null
+  ]
 }
 ```
 
-ACL: view.
+Legacy snapshots may have `"revision": null`. ACL: view.
 
 ---
 
@@ -50,10 +61,10 @@ ACL: view.
 `POST /api/files/:roomKey/versions`
 
 ```json
-{ "name": "2026 Q4 SOP", "description": "上线前", "revision": 1000 }
+{ "name": "2026 Q4 SOP", "description": "上线前" }
 ```
 
-`revision` optional (default current). Type default `MANUAL`.
+Only `name` / `description` are accepted. Type is always `MANUAL` at the current live revision. `type` / `revision` in the body are ignored.
 
 ACL: edit (Owner / Editor). Viewer 403.
 
@@ -63,7 +74,7 @@ ACL: edit (Owner / Editor). Viewer 403.
 
 `GET /api/files/:roomKey/versions/:versionId`
 
-Metadata only (no tree).
+Metadata only (no tree). Hidden or cross-room id → 404.
 
 ACL: view.
 
@@ -83,21 +94,11 @@ ACL: view.
   "metadata": { "theme": "classic", "layout": "mindMap" },
   "tree": {},
   "checksum": "hex",
-  "summary": {
-    "inserted": 4,
-    "updated": 12,
-    "deleted": 2,
-    "moved": 1,
-    "restored": 0,
-    "metadataChanged": true,
-    "replaced": false
-  }
+  "summary": { "kind": "edits", "inserted": 4, "updated": 12, "deleted": 2, "moved": 1 }
 }
 ```
 
-Summary is computed from the **operation range**, not a 20k tree diff.
-
-ACL: view. Must not mutate `room_nodes`.
+Summary comes from the stored version row, not a live 20k-node diff. Incomplete logs → user-facing “不完整 / 资源不可用 / 加载失败”. ACL: view. Must not mutate `room_nodes`.
 
 ---
 
@@ -105,12 +106,16 @@ ACL: view. Must not mutate `room_nodes`.
 
 `POST /api/files/:roomKey/versions/:versionId/restore`
 
+Headers: `Idempotency-Key` (also accepted as `idempotencyKey` in the body).
+
 ```json
 {
   "expectedCurrentRevision": 1000,
   "name": "optional restore label"
 }
 ```
+
+The restore **target is only** `:versionId`. `targetRevision` / `type` in the body are ignored.
 
 Response:
 
@@ -126,11 +131,11 @@ Response:
 }
 ```
 
-ACL: **Owner only** (`manage`). Editor/Viewer 403.
+ACL: **Owner only** (`manage`). Editor/Viewer 403. Folder manager cannot restore.
 
-`expectedCurrentRevision` should be the client’s live revision. Mismatch → `RESTORE_CONFLICT` (409).
+`expectedCurrentRevision` should be the client’s live revision. Mismatch → `RESTORE_CONFLICT` (409). Same idempotency key retries return the first result.
 
-Clients apply existing `map.replaced` + `VERSION_RESTORE` allowlist (`applyAuthoritativeTreeReplace`). Pending local ops are quarantined as `STALE_AFTER_VERSION_RESTORE`.
+Clients apply existing `map.replaced` + `VERSION_RESTORE`. Pending local ops with `baseRevision < restore_epoch_revision` are rejected as `STALE_AFTER_VERSION_RESTORE` and quarantined, not auto-replayed.
 
 ---
 
@@ -138,19 +143,4 @@ Clients apply existing `map.replaced` + `VERSION_RESTORE` allowlist (`applyAutho
 
 `POST /api/files/:roomKey/versions/:versionId/hide`
 
-Marks the version hidden. Does **not** delete `room_operations`.
-
-ACL: Owner.
-
----
-
-## Errors
-
-| Code | HTTP |
-|---|---|
-| `FORBIDDEN` | 403 |
-| `VERSION_NOT_FOUND` | 404 |
-| `RESTORE_CONFLICT` / `VERSION_CONFLICT` | 409 |
-| `CHECKPOINT_CORRUPTED` | 409 |
-| `HISTORY_REVISION_UNAVAILABLE` | 409 |
-| `INVALID_HISTORY_TREE` | 400 |
+ACL: manage. Subsequent get/tree/restore → 404. No hide UI in this phase.

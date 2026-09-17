@@ -324,6 +324,14 @@ function attachCollabV2(httpServer, options = {}) {
           roomKey,
           peers: presence.list(roomKey)
         })
+        if (
+          typeof options.onRoomIdle === 'function' &&
+          presence.list(roomKey).length === 0
+        ) {
+          Promise.resolve(options.onRoomIdle(roomKey)).catch(err => {
+            console.error('[history] room idle flush', err && err.message)
+          })
+        }
       })
     })
   })
