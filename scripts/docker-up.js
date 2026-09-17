@@ -13,7 +13,7 @@ const {
   formatOpenclawResult,
   writeOpenclawRuntimeConfig
 } = require('./openclaw-gateway')
-const { ensureOpenclawWatchdog } = require('./openclaw-watchdog')
+const { ensureOpenclawWatchdog, stopOpenclawWatchdog } = require('./openclaw-watchdog')
 const {
   ensureOpenclawBridge,
   formatBridgeResult
@@ -83,12 +83,20 @@ function detectHost() {
 
 function writeMcpConfig(host) {
   const url = `http://${host}:${PORT}/mcp`
+  // 与 scripts/launcher.js 的 mcpServerEntry 保持一致：设了 MCP_TOKEN 就必须
+  // 带上 Authorization，否则网关一律 401，导图 MCP 在 WorkBuddy 里连不上。
+  const entry = {
+    type: 'http',
+    url
+  }
+  if (process.env.MCP_TOKEN) {
+    entry.headers = {
+      Authorization: `Bearer ${process.env.MCP_TOKEN}`
+    }
+  }
   const config = {
     mcpServers: {
-      'mind-map': {
-        type: 'http',
-        url
-      }
+      'mind-map': entry
     }
   }
   fs.writeFileSync(
@@ -108,8 +116,32 @@ function hasDocker() {
   }
 }
 
+function loadWikiSecretsIntoEnv() {
+  const file = path.join(ROOT, '.secrets', 'wiki.env')
+  if (!fs.existsSync(file)) return
+  const text = fs.readFileSync(file, 'utf8')
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eq = trimmed.indexOf('=')
+    if (eq <= 0) continue
+    const key = trimmed.slice(0, eq).trim()
+    const value = trimmed.slice(eq + 1).trim()
+    if (!key) continue
+    if (key === 'DATABASE_URL' && !process.env.DOCMOST_DATABASE_URL) {
+      process.env.DOCMOST_DATABASE_URL = value
+    }
+    if (key === 'APP_SECRET') {
+      if (!process.env.DOCMOST_APP_SECRET) process.env.DOCMOST_APP_SECRET = value
+      if (!process.env.DOCMOST_SSO_SECRET) process.env.DOCMOST_SSO_SECRET = value
+    }
+    if (!(key in process.env)) process.env[key] = value
+  }
+}
+
 function compose(args, extraEnv) {
   require('./wiki-env').ensureWikiEnv()
+  loadWikiSecretsIntoEnv()
   return spawn('docker', ['compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.wiki.yml', ...args], {
     cwd: ROOT,
     stdio: 'inherit',
@@ -213,7 +245,8 @@ async function up() {
       'app',
       'docmost-db',
       'docmost-redis',
-      'docmost'
+      'docmost',
+      'wiki-gateway'
     ],
     {
       PUBLIC_HOST: host,
@@ -312,13 +345,25 @@ async function up() {
         formatOpenclawResult(oc)
           .split('\n')
           .forEach(line => console.log(`  ${line}`))
-        const wd = ensureOpenclawWatchdog()
-        if (wd && wd.ok) {
-          console.log(
-            wd.alreadyRunning
-              ? `  OpenClaw 看门狗已在运行（防 WSL 闲置掉线）`
-              : `  OpenClaw 看门狗已启动（防 WSL 闲置掉线）`
-          )
+        // 看门狗的职责是「防止已就绪的 Gateway 掉线」，不是「反复重试拉起一个
+        // 起不来的 Gateway」。Gateway 没起来还启动看门狗，会让它每 20s 重试一次
+        // （每次都要 docker run 探针容器），在 Windows 上表现为命令行窗口不停闪现。
+        if (oc && oc.ok) {
+          const wd = ensureOpenclawWatchdog()
+          if (wd && wd.ok) {
+            console.log(
+              wd.alreadyRunning
+                ? `  OpenClaw 看门狗已在运行（防 WSL 闲置掉线）`
+                : `  OpenClaw 看门狗已启动（防 WSL 闲置掉线）`
+            )
+          }
+        } else {
+          const stopped = stopOpenclawWatchdog()
+          if (stopped && stopped.stoppedPid) {
+            console.log(
+              '  已停止残留的 OpenClaw 看门狗（Gateway 未就绪，避免每 20s 反复重试）'
+            )
+          }
         }
         if (oc && oc.ok) {
           console.log(
