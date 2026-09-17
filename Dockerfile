@@ -29,10 +29,19 @@ ENV NODE_OPTIONS=--openssl-legacy-provider
 RUN npx vue-cli-service build --dest /out/web
 
 FROM node:20-bookworm-slim
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends nginx ca-certificates \
-  && rm -rf /var/lib/apt/lists/* \
-  && mkdir -p /usr/share/nginx/html /var/log/nginx /var/cache/nginx /tmp
+# 构建容器不会继承宿主机的 Clash 代理，而 deb.debian.org 在国内经常解析到
+# 被墙的 Fastly 节点（表现为 apt-get update 卡几百秒后 Connection failed）。
+# 这里默认换成阿里云镜像源，保证构建可复现；需要时用
+# --build-arg DEBIAN_MIRROR=deb.debian.org 覆盖回官方源。
+ARG DEBIAN_MIRROR=mirrors.aliyun.com
+RUN set -eux; \
+  for f in /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list; do \
+    if [ -f "$f" ]; then sed -i "s|deb.debian.org|${DEBIAN_MIRROR}|g" "$f"; fi; \
+  done; \
+  apt-get update -o Acquire::Retries=3; \
+  apt-get install -y --no-install-recommends nginx ca-certificates; \
+  rm -rf /var/lib/apt/lists/*; \
+  mkdir -p /usr/share/nginx/html /var/log/nginx /var/cache/nginx /tmp
 
 WORKDIR /app
 COPY web/scripts ./web/scripts

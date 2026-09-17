@@ -479,10 +479,19 @@ async function setHost({ interactive = true } = {}) {
   return host
 }
 
+// 仓库里带的 runtime-config.js 可能记录着别台机器的 IP，若它已不落在本机网卡上，
+// 直接沿用会让协同连接指向不存在的地址，因此这里重新探测一次。
+function currentLanHas(address) {
+  return listLanIPs().some(item => item.address === address)
+}
+
 async function startAll({ pickIp = false } = {}) {
+  const saved = readSavedHost()
   const host = pickIp
     ? await setHost({ interactive: true })
-    : readSavedHost() || (await setHost({ interactive: false }))
+    : saved && currentLanHas(saved)
+      ? saved
+      : await setHost({ interactive: false })
   writeRuntimeConfig(host)
   ensureDeps()
   log(paint(c.yellow, '  正在停止旧进程...'))
