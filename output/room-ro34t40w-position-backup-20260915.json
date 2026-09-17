@@ -1,9 +1,0 @@
-{
-  "roomKey": "room-ro34t40w",
-  "nodes": [
-    {"uid":"3d957cdf-76e2-4139-8568-acfc95e86732","parentUid":"16887c2e-e71b-43cb-b998-7e9823dbf2bb","customLeft":1553,"customTop":635.8333333333333},
-    {"uid":"fe65e81c-3615-403b-aeaf-99672aebb533","parentUid":"2855080b-a00b-413f-9953-f844f983d91a","customLeft":1348.3333333333335,"customTop":830.5},
-    {"uid":"16887c2e-e71b-43cb-b998-7e9823dbf2bb","parentUid":"2855080b-a00b-413f-9953-f844f983d91a","customLeft":1300.3333333333335,"customTop":544.8333333333333},
-    {"uid":"c061f1bc-e236-498b-806c-0bc39727fa80","parentUid":"fe65e81c-3615-403b-aeaf-99672aebb533","customLeft":1608,"customTop":789.1666666666667}
-  ]
-}

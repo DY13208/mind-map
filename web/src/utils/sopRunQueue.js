@@ -1079,6 +1079,27 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       return done || null
     },
 
+    /** 产物二次优化后，同步任务快照；不重新执行 SOP。 */
+    updateJobLedger(jobId, ledger, jobDeliverables) {
+      const job =
+        pending.find(item => item.id === jobId) ||
+        waiting.get(jobId) ||
+        running.get(jobId) ||
+        recent.find(item => item.id === jobId)
+      if (!job || !ledger) return null
+      job.result = {
+        ...(job.result || {}),
+        deliverables: Array.isArray(jobDeliverables)
+          ? jobDeliverables.slice()
+          : Array.isArray(job.result && job.result.deliverables)
+            ? job.result.deliverables.slice()
+          : [],
+        ledger
+      }
+      emit()
+      return publicJob(job)
+    },
+
     /** 人工待办完成 / 补数后继续执行（按 completedNotifyKeys 跳过已派发项） */
     resumeWaiting(jobId, { extraNoteAppend = '' } = {}) {
       const job = waiting.get(jobId)
