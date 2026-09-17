@@ -113,6 +113,16 @@
           <i class="el-icon-search" aria-hidden="true"></i>
           <span>Cognee</span>
         </router-link>
+        <a
+          href="#"
+          title="Wiki 知识库"
+          aria-label="Wiki 知识库"
+          data-testid="nav-wiki"
+          @click.prevent="openWiki"
+        >
+          <i class="el-icon-reading" aria-hidden="true"></i>
+          <span>Wiki</span>
+        </a>
       </nav>
       <AccessNotifications v-if="profile" :key="profile.id" :collapsed="sidebarCollapsed" class="sidebarNotifications" />
       <div class="sidebarFooter" v-if="profile">
@@ -148,6 +158,7 @@
 <script>
 import productService from '@/services/productService'
 import { logoutAndRedirect } from '@/utils/auth'
+import { openWikiWithSso } from '@/utils/wikiSso'
 import UserAvatar from '@/components/UserAvatar.vue'
 import AccessNotifications from '@/components/AccessNotifications.vue'
 const SIDEBAR_PREFERENCE_KEY = 'product-shell-sidebar-collapsed'
@@ -203,6 +214,16 @@ export default {
       }
       this.loggingOut = true
       await logoutAndRedirect('/')
+    },
+    async openWiki() {
+      try {
+        await openWikiWithSso({ target: '_blank' })
+      } catch (error) {
+        const message =
+          (error && error.message) || '打开 Wiki 失败，请稍后重试'
+        if (this.$message) this.$message.error(message)
+        else window.alert(message)
+      }
     },
     setSidebarCollapsed(collapsed) {
       this.sidebarCollapsed = collapsed
