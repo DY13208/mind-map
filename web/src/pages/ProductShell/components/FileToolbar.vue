@@ -98,8 +98,13 @@ export default {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   .el-select {
     width: 128px;
+    max-width: 100%;
   }
   .el-button + .el-button {
     margin-left: 0;
@@ -107,12 +112,21 @@ export default {
   padding: 0 0 18px;
   border-bottom: 1px solid var(--ui-border);
   .toolbarSearch {
-    flex: 1;
-    min-width: 220px;
+    flex: 1 1 180px;
+    min-width: 0;
+    max-width: 100%;
   }
   /deep/ .el-button--primary {
     background: var(--ui-primary);
     border-color: var(--ui-primary);
+  }
+}
+@media (max-width: 760px) {
+  .fileToolbar {
+    .el-select {
+      width: calc(50% - 5px);
+      min-width: 120px;
+    }
   }
 }
 </style>
