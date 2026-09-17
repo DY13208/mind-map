@@ -247,6 +247,10 @@ export default {
 }
 .productShell {
   min-height: 100vh;
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
   background: var(--ui-bg);
   color: var(--ui-text);
   display: flex;
@@ -332,7 +336,7 @@ export default {
     pointer-events: none;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
     transition: opacity 0.12s ease;
-    z-index: 20;
+    z-index: 30;
   }
   &:hover,
   &:focus,
@@ -354,6 +358,8 @@ export default {
 }
 .productShell .productSidebar {
   width: 216px;
+  height: 100vh;
+  height: 100dvh;
   background: var(--ui-surface);
   border-right: 1px solid var(--ui-border);
   padding: 16px 12px 16px;
@@ -512,21 +518,34 @@ export default {
 .productShell .productMain {
   min-width: 0;
   flex: 1;
+  width: calc(100% - 216px);
+  max-width: calc(100% - 216px);
   margin-left: 216px;
+  overflow-x: hidden;
 }
 .productShell .productPage {
-  padding: 32px clamp(24px, 2.2vw, 44px) 60px;
+  padding: 32px clamp(16px, 2.2vw, 44px) 60px;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 .productShell .productHeader {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 20px;
+  flex-wrap: wrap;
+  gap: 16px 20px;
   margin-bottom: 24px;
+  min-width: 0;
+  > div {
+    min-width: 0;
+    max-width: 100%;
+  }
   h1 {
     margin: 0;
-    font-size: 26px;
+    font-size: clamp(22px, 2.4vw, 26px);
     line-height: 1.25;
     letter-spacing: -0.4px;
   }
@@ -543,8 +562,22 @@ export default {
 }
 .productShell--collapsed {
   .productSidebar {
-    width: 72px;
-    padding-inline: 10px;
+    --rail-size: 72px;
+    --rail-item: 40px;
+    width: var(--rail-size);
+    padding-inline: 0;
+    align-items: center;
+    /* Tip paints past the rail; height stays viewport-bound via fixed inset + flex */
+    overflow: visible;
+    .sidebarHeader,
+    nav,
+    .sidebarNotifications,
+    .sidebarFooter {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
     .sidebarHeader {
       justify-content: center;
       align-items: center;
@@ -553,9 +586,24 @@ export default {
       overflow: visible;
     }
     .collapsedLogoTrigger {
-      width: 40px;
-      height: 40px;
+      width: var(--rail-item);
+      height: var(--rail-item);
       margin: 0;
+      overflow: visible;
+    }
+    nav {
+      overflow-x: hidden;
+      overflow-y: auto;
+      scrollbar-gutter: auto;
+      align-items: center;
+      /* Keep icons on the rail center line; wheel/trackpad still scroll */
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      &::-webkit-scrollbar {
+        display: none;
+        width: 0;
+        height: 0;
+      }
     }
     .productLogo strong,
     a:not(.router-link-exact-active)::after,
@@ -563,6 +611,9 @@ export default {
       font-size: 0;
     }
     a {
+      width: var(--rail-item);
+      height: var(--rail-item);
+      margin-inline: auto;
       justify-content: center;
       align-items: center;
       padding: 0;
@@ -580,17 +631,32 @@ export default {
     .accountLogoutText {
       display: none;
     }
+    .sidebarNotifications {
+      width: 100%;
+      .notificationBadge,
+      .notificationButton {
+        width: var(--rail-item);
+        margin-inline: auto;
+      }
+      .notificationButton {
+        min-height: var(--rail-item);
+        padding: 0;
+        justify-content: center;
+      }
+    }
     .sidebarFooter {
       padding-inline: 0;
       gap: 8px;
+      align-items: center;
     }
     .accountInfo {
       justify-content: center;
       gap: 0;
+      width: var(--rail-item);
     }
     .accountLogout {
-      width: 40px;
-      height: 40px;
+      width: var(--rail-item);
+      height: var(--rail-item);
       margin-inline: auto;
       padding: 0;
       gap: 0;
@@ -599,22 +665,33 @@ export default {
   }
   .productMain {
     margin-left: 72px;
+    width: calc(100% - 72px);
+    max-width: calc(100% - 72px);
   }
 }
 @media (max-width: 760px) {
   .productShell .productMain {
     margin-left: 72px;
+    width: calc(100% - 72px);
+    max-width: calc(100% - 72px);
   }
   .productShell .sidebarBackdrop {
     display: block;
     position: fixed;
-    inset: 0 0 0 224px;
+    inset: 0 0 0 72px;
     background: rgba(23, 54, 44, 0.18);
     border: 0;
     z-index: 9;
   }
+  .productShell:not(.productShell--collapsed) .sidebarBackdrop {
+    inset: 0 0 0 216px;
+  }
   .productShell .productPage {
     padding: 24px 16px 40px;
+  }
+  .productShell .productHeader {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 @media (max-height: 720px) {
@@ -630,6 +707,11 @@ export default {
     a {
       height: 36px;
     }
+  }
+  .productShell--collapsed .productSidebar a,
+  .productShell--collapsed .productSidebar .collapsedLogoTrigger,
+  .productShell--collapsed .productSidebar .accountLogout {
+    height: var(--rail-item);
   }
 }
 </style>

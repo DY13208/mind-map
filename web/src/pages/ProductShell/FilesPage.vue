@@ -1253,12 +1253,14 @@ export default {
   justify-content: flex-end;
   gap: 10px;
   flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
   color: var(--ui-text-secondary);
   font-size: 13px;
 
   .el-select {
     width: 260px;
-    max-width: 38vw;
+    max-width: 100%;
   }
 }
 .contentArea {
@@ -1268,6 +1270,14 @@ export default {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 16px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+@media (max-width: 560px) {
+  .itemGrid {
+    grid-template-columns: 1fr;
+  }
 }
 .sectionTitle span {
   color: #9aa7a2;
