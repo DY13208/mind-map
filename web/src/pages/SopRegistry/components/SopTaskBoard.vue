@@ -38,6 +38,14 @@
               继续
             </el-button>
             <el-button
+              v-if="canContinuePartial(job)"
+              type="text"
+              size="mini"
+              @click="$emit('continue-partial', job.id)"
+            >
+              续跑
+            </el-button>
+            <el-button
               v-if="isCancellable(job)"
               type="text"
               size="mini"
@@ -352,11 +360,17 @@ export default {
       return out
     },
     stateLabel(job) {
+      const runResult =
+        (job && job.result && job.result.runResult) ||
+        (job && job.runResult) ||
+        ''
+      if (runResult === '部分完成' || job.state === 'partial') return '部分完成'
       const map = {
         queued: '排队',
         running: '运行',
         waiting_human: '等待',
         done: '完成',
+        partial: '部分完成',
         error: '失败',
         cancelled: '停止'
       }
@@ -369,6 +383,14 @@ export default {
     },
     isCancellable(job) {
       return ['running', 'queued', 'waiting_human'].includes(job.state)
+    },
+    canContinuePartial(job) {
+      if (!job) return false
+      if (job.state === 'partial') return true
+      const rr =
+        (job.result && job.result.runResult) || job.runResult || ''
+      if (rr !== '部分完成') return false
+      return ['done', 'partial', 'error'].includes(String(job.state || ''))
     },
     stepStatusLabel(status) {
       const map = {
@@ -548,6 +570,9 @@ export default {
   &.done .taskState {
     color: #16a34a;
   }
+  &.partial .taskState {
+    color: #d97706;
+  }
   &.error .taskState,
   &.cancelled .taskState {
     color: #dc2626;
@@ -641,6 +666,9 @@ export default {
   }
   &.done {
     color: #16a34a;
+  }
+  &.partial {
+    color: #d97706;
   }
   &.error,
   &.cancelled {
