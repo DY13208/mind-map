@@ -171,6 +171,17 @@ async function up() {
     process.exit(1)
   }
   const host = process.env.PUBLIC_HOST || detectHost()
+  const wikiPort = Number(process.env.DOCMOST_PORT || 3040)
+  // 侧栏 Wiki 新窗口地址：优先用根目录 .env 的 DOCMOST_APP_URL；
+  // 未配置时默认本机 IP，避免 127.0.0.1 / localhost 与页面 IP 不一致导致跨域。
+  if (!String(process.env.DOCMOST_APP_URL || '').trim()) {
+    process.env.DOCMOST_APP_URL = `http://${host}:${wikiPort}`
+  } else {
+    process.env.DOCMOST_APP_URL = String(process.env.DOCMOST_APP_URL)
+      .trim()
+      .replace(/\/$/, '')
+  }
+  const wikiAppUrl = process.env.DOCMOST_APP_URL
   const mcpUrl = writeMcpConfig(host)
   // 先写占位 runtime + OpenClaw Token/配置，保证 compose 能拉起龙虾容器
   try {
@@ -193,10 +204,15 @@ async function up() {
     writeOpenclawRuntimeConfig({
       root: ROOT,
       token,
-      port: Number(process.env.OPENCLAW_PORT || OC_PORT)
+      port: Number(process.env.OPENCLAW_PORT || OC_PORT),
+      wikiBase: wikiAppUrl
     })
   } catch (err) {
-    writeOpenclawRuntimeConfig({ root: ROOT, port: OPENCLAW_PORT })
+    writeOpenclawRuntimeConfig({
+      root: ROOT,
+      port: OPENCLAW_PORT,
+      wikiBase: wikiAppUrl
+    })
     console.log(
       `  OpenClaw 预配置跳过：${(err && err.message) || err}`
     )
@@ -206,6 +222,7 @@ async function up() {
   console.log(`  对外只开放一个端口：${PORT}`)
   console.log(`  页面     http://${host}:${PORT}`)
   console.log(`  MCP      ${mcpUrl}`)
+  console.log(`  Wiki     ${wikiAppUrl}`)
   const openclawHostPort = Number(process.env.OPENCLAW_PORT || OPENCLAW_PORT || 4623)
   process.env.OPENCLAW_PORT = String(openclawHostPort)
   console.log(`  OpenClaw 宿主机端口 ${openclawHostPort}（容器内 18789）`)
@@ -252,7 +269,9 @@ async function up() {
       PUBLIC_HOST: host,
       MIND_MAP_PORT: String(PORT),
       PGPASSWORD: process.env.PGPASSWORD,
-      OPENCLAW_PORT: String(openclawHostPort)
+      OPENCLAW_PORT: String(openclawHostPort),
+      DOCMOST_APP_URL: wikiAppUrl,
+      DOCMOST_PORT: String(wikiPort)
     }
   )
   child.on('exit', async code => {
@@ -262,7 +281,7 @@ async function up() {
       if (runtimeCode) console.error('[Wiki] OpenWiki build failed; retry docker compose -f docker-compose.yml -f docker-compose.wiki.yml build openwiki-runtime')
       else console.log('[Wiki] OpenWiki runtime ready (run on demand)')
     })
-    console.log(`  Docmost: ${process.env.DOCMOST_APP_URL || 'http://localhost:' + (process.env.DOCMOST_PORT || 3040)}`)
+    console.log(`  Docmost: ${wikiAppUrl}`)
     console.log('')
     console.log('  已启动。浏览器打开上面的页面地址。')
     if (process.platform === 'win32') {
@@ -326,7 +345,8 @@ async function up() {
           root: ROOT,
           token: (oc && oc.token) || '',
           model: process.env.OPENCLAW_MODEL || 'openclaw/default',
-          port: openclawHostPort
+          port: openclawHostPort,
+          wikiBase: wikiAppUrl
         })
         // 勿把 token 打到控制台
         if (oc) {

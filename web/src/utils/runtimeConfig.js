@@ -68,7 +68,7 @@ export function getRuntimeConfig() {
         runtime.openclawControlUrl || 'http://127.0.0.1:4623/chat',
       cogneeBase: runtime.cogneeBase || '/cognee-api',
       cogneeDataset: runtime.cogneeDataset || 'liangce',
-      wikiBase: runtime.wikiBase || 'http://localhost:3040'
+      wikiBase: runtime.wikiBase || ''
     }
   }
   return {
@@ -97,7 +97,7 @@ export function getRuntimeConfig() {
       runtime.openclawControlUrl || 'http://127.0.0.1:4623/chat',
     cogneeBase: runtime.cogneeBase || '/cognee-api',
     cogneeDataset: runtime.cogneeDataset || 'liangce',
-    wikiBase: runtime.wikiBase || 'http://localhost:3040'
+    wikiBase: runtime.wikiBase || ''
   }
 }
 
