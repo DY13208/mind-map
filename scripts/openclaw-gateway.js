@@ -567,12 +567,20 @@ function writeOpenclawRuntimeConfig({
   root,
   token = '',
   model = 'openclaw/default',
-  port = DEFAULT_PORT
+  port = DEFAULT_PORT,
+  wikiBase = ''
 } = {}) {
   const projectRoot = path.resolve(root || path.join(__dirname, '..'))
   const file = path.join(projectRoot, 'docker', 'runtime-config.local.js')
   const dir = path.dirname(file)
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+  const resolvedWikiBase = String(
+    wikiBase ||
+      process.env.DOCMOST_APP_URL ||
+      ''
+  )
+    .trim()
+    .replace(/\/$/, '')
   const config = {
     gateway: true,
     publicPath: '/',
@@ -584,12 +592,13 @@ function writeOpenclawRuntimeConfig({
     cogneeBase: '/cognee-api',
     cogneeDataset: String(process.env.COGNEE_DATASET || 'liangce')
   }
+  if (resolvedWikiBase) config.wikiBase = resolvedWikiBase
   fs.writeFileSync(
     file,
     'window.__MIND_MAP_RUNTIME__ = ' + JSON.stringify(config, null, 2) + '\n',
     'utf8'
   )
-  return { file, hasToken: !!config.openclawToken }
+  return { file, hasToken: !!config.openclawToken, wikiBase: resolvedWikiBase }
 }
 
 function formatOpenclawResult(result) {
