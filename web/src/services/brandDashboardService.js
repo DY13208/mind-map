@@ -28,6 +28,22 @@ export async function createDashboard(payload = {}) {
   return (data && data.dashboard) || null
 }
 
+export async function updateDashboard(id, payload = {}) {
+  const body = {
+    title: String(payload.title || '').trim(),
+    level: payload.level || '',
+    fileName: payload.fileName || '',
+    contentBase64: payload.contentBase64 || '',
+    sourceUrl: payload.sourceUrl || ''
+  }
+  const data = await productRequest(`/api/dashboards/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+    timeoutMs: 60000
+  })
+  return (data && data.dashboard) || null
+}
+
 export function dashboardContentUrl(id) {
   const base = String(getRuntimeConfig().collabApi || '').replace(/\/$/, '')
   return `${base}/api/dashboards/${encodeURIComponent(id)}/content`
@@ -44,6 +60,7 @@ export async function deleteDashboard(id) {
 export default {
   listBrandDashboards,
   createDashboard,
+  updateDashboard,
   dashboardContentUrl,
   deleteDashboard
 }
