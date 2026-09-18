@@ -132,7 +132,7 @@
       </div>
     </header>
 
-    <template v-if="!detailMode">
+    <div v-if="!detailMode" key="sop-list" class="sopListBody">
       <div class="statusLine runStatus" v-if="sopQueueSummary">
         {{ sopQueueSummary }}
       </div>
@@ -465,9 +465,9 @@
           </section>
         </div>
       </div>
-    </template>
+    </div>
 
-    <div class="sopDetailPage" v-else>
+    <div v-else key="sop-detail" class="sopDetailPage">
       <el-tabs v-model="dialogTab" class="detailTabs">
         <el-tab-pane label="记录" name="runs">
           <div class="historyPane">
@@ -1351,6 +1351,13 @@ export default {
           /* refreshRoomList 内部已提示 */
         }
       }
+      this.$nextTick(() => {
+        try {
+          window.dispatchEvent(new Event('resize'))
+        } catch (e) {
+          /* ignore */
+        }
+      })
     },
     reloadDetail() {
       if (this.activeSop) this.loadSubtreeContent(this.activeSop)
@@ -3732,9 +3739,9 @@ export default {
 
   /* 台账列表：整页不跟着滚，左右栏各自滚动 */
   &:not(.detailMode) {
-    height: 100vh;
-    max-height: 100vh;
-    min-height: 0;
+    height: 100%;
+    min-height: 100vh;
+    max-height: none;
     padding: 20px 28px 16px;
     overflow: hidden;
     display: flex;
@@ -3748,6 +3755,14 @@ export default {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+  }
+
+  .sopListBody {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
 
   .detailTitle {
@@ -4002,7 +4017,7 @@ export default {
   .sopWorkspace {
     margin-top: 0;
     flex: 1;
-    min-height: 0;
+    min-height: 240px;
     display: flex;
     flex-direction: column;
   }
