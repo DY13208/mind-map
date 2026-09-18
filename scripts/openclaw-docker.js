@@ -639,6 +639,65 @@ function containerId() {
  * 把宿主机 openclaw.json 拷进命名卷（不用单文件 bind mount，避免 Windows EBUSY rename）。
  * 须在 gateway 进程读配置前完成；create 后、start 前最稳。
  */
+
+/**
+ * 把仓库内 liangce-ingress 插件同步进 OpenClaw 命名卷。
+ * Start-Docker 会把 plugins.load.paths 写进 openclaw.json；若卷里没有插件文件，
+ * Gateway 会直接拒启（plugin path not found）。Git pull 不会更新命名卷，必须在此拷贝。
+ */
+function syncLiangceIngressIntoVolume(containerId) {
+  const hostDir = path.join(ROOT, 'integrations', 'openclaw', 'liangce-ingress')
+  const marker = path.join(hostDir, 'openclaw.plugin.json')
+  if (!fs.existsSync(marker)) {
+    return {
+      ok: false,
+      reason: '仓库缺少 integrations/openclaw/liangce-ingress（请先 git pull）'
+    }
+  }
+  if (!containerId) {
+    return { ok: false, reason: '无 openclaw-gateway 容器，无法同步 liangce-ingress' }
+  }
+  spawnSync(
+    'docker',
+    [
+      'exec',
+      containerId,
+      'sh',
+      '-lc',
+      'mkdir -p /home/node/.openclaw/extensions/liangce-ingress && chown -R node:node /home/node/.openclaw/extensions || true'
+    ],
+    { cwd: ROOT, encoding: 'utf8', windowsHide: true }
+  )
+  const cp = spawnSync(
+    'docker',
+    [
+      'cp',
+      hostDir + '/.',
+      containerId + ':/home/node/.openclaw/extensions/liangce-ingress/'
+    ],
+    { cwd: ROOT, encoding: 'utf8', windowsHide: true }
+  )
+  if (cp.status !== 0) {
+    return {
+      ok: false,
+      reason: 'docker cp liangce-ingress 失败',
+      detail: String(cp.stderr || cp.stdout || '').trim().slice(0, 400)
+    }
+  }
+  spawnSync(
+    'docker',
+    [
+      'exec',
+      containerId,
+      'sh',
+      '-lc',
+      'chown -R node:node /home/node/.openclaw/extensions/liangce-ingress 2>/dev/null || true'
+    ],
+    { cwd: ROOT, encoding: 'utf8', windowsHide: true }
+  )
+  return { ok: true }
+}
+
 function syncConfigIntoVolume(token, port) {
   const env = composeEnv(token, port)
   // 确保容器已创建（不一定在跑），以便 docker cp 写入同一命名卷
@@ -683,7 +742,16 @@ function syncConfigIntoVolume(token, port) {
   }
   // 复制前已由容器卷保留 last-good；复制后恢复运行用户权限，避免 root:root 配置。
   spawnSync('docker', ['exec', id, 'sh', '-lc', 'chown node:node /home/node/.openclaw/openclaw.json 2>/dev/null || true; chmod 600 /home/node/.openclaw/openclaw.json'], { cwd: ROOT, encoding: 'utf8', windowsHide: true })
-  return { ok: true, containerId: id }
+  const pluginSync = syncLiangceIngressIntoVolume(id)
+  if (!pluginSync.ok) {
+    return {
+      ok: false,
+      reason: pluginSync.reason || '同步 liangce-ingress 失败',
+      detail: pluginSync.detail || '',
+      containerId: id
+    }
+  }
+  return { ok: true, containerId: id, liangceIngressSynced: true }
 }
 
 /**
