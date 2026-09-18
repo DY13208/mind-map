@@ -1058,7 +1058,8 @@ export default {
       return [...active, ...recent].slice(0, 50)
     },
     detailMode() {
-      return !!(this.activeSopUid || (this.$route.query && this.$route.query.sopUid))
+      // 以路由为准，避免 leaveDetail 先清本地 uid、路由仍带 sopUid 时详情页空壳
+      return !!(this.$route.query && this.$route.query.sopUid)
     },
     headerBackLabel() {
       if (this.detailMode) return '返回SOP台账'
@@ -1324,23 +1325,32 @@ export default {
       }
       this.$router.push({ path: '/files' })
     },
-    leaveDetail() {
+    async leaveDetail() {
       this.teardownPreview()
       this.pendingRoot = null
       this.pendingVersion = 0
       this.subtreeError = ''
-      this.activeSop = null
-      this.activeSopUid = ''
       this.dialogTab = 'runs'
       this.dialogVisible = false
       const room = String(this.roomKey || '').trim()
-      this.$router
-        .replace({
+      // 先清路由再清本地，保证 detailMode 立刻切回列表，避免空白详情
+      try {
+        await this.$router.replace({
           path: '/sop',
           query: room ? { room } : {}
         })
-        .catch(() => {})
-      if (room) this.refreshRoomList()
+      } catch (e) {
+        /* ignore navigation dup */
+      }
+      this.activeSop = null
+      this.activeSopUid = ''
+      if (room) {
+        try {
+          await this.refreshRoomList()
+        } catch (e) {
+          /* refreshRoomList 内部已提示 */
+        }
+      }
     },
     reloadDetail() {
       if (this.activeSop) this.loadSubtreeContent(this.activeSop)
@@ -1956,20 +1966,13 @@ export default {
       this.runSubmitZones = []
       this.runSubmitSource = ''
       const localConfig = getLocalConfig() || {}
-      this.runBackend = normalizeAiBackend(
-        localConfig.aiBackend || AI_BACKEND_OPENCLAW
-      )
-      this.runOrganizationId = String(localConfig.xiaoceOrganizationId || '')
-      this.runAgentId = String(localConfig.xiaoceAgentId || '')
-      if (this.runBackend === AI_BACKEND_OPENCLAW) {
-        this.runModel =
-          getOpenclawConfig().model || 'openclaw/default'
-      } else {
-        this.runModel = getWorkbuddyConfig().model || 'deepseek-v4-flash'
-      }
+      this.runBackend = AI_BACKEND_OPENCLAW
+      this.setLocalConfig({ aiBackend: AI_BACKEND_OPENCLAW })
+      this.runOrganizationId = ''
+      this.runAgentId = ''
+      this.runModel = getOpenclawConfig().model || 'openclaw/default'
       this.runDialogVisible = true
-      if (this.runBackend === AI_BACKEND_XIAOCE) this.loadRunXiaoceScope()
-      else this.loadRunModels()
+      this.loadRunModels()
       this.loadRunSubmitTemplate(item)
     },
     onRunFilesPicked(event) {
@@ -2030,18 +2033,11 @@ export default {
     removeRunAttachment(file) {
       this.runAttachments = this.runAttachments.filter(item => item !== file)
     },
-    onRunBackendChange(value) {
-      this.setLocalConfig({ aiBackend: value })
-      if (value === AI_BACKEND_XIAOCE) {
-        this.loadRunXiaoceScope(true)
-      } else if (value === AI_BACKEND_OPENCLAW) {
-        this.runModel =
-          getOpenclawConfig().model || 'openclaw/default'
-        this.loadRunModels(true)
-      } else {
-        this.runModel = getWorkbuddyConfig().model || 'deepseek-v4-flash'
-        this.loadRunModels()
-      }
+    onRunBackendChange(_value) {
+      this.runBackend = AI_BACKEND_OPENCLAW
+      this.setLocalConfig({ aiBackend: AI_BACKEND_OPENCLAW })
+      this.runModel = getOpenclawConfig().model || 'openclaw/default'
+      this.loadRunModels(true)
     },
     async onRunOrganizationChange(value) {
       this.runOrganizationId = String(value || '')
@@ -2847,14 +2843,9 @@ export default {
         this.$message.info('资料模板加载中，请稍候')
         return
       }
-      if (this.runBackend === AI_BACKEND_XIAOCE && (!this.runOrganizationId || !this.runAgentId)) {
-        this.$message.warning('请先选择企业和智能体')
-        return
-      }
+      this.runBackend = AI_BACKEND_OPENCLAW
       this.setLocalConfig({
-        aiBackend: this.runBackend,
-        xiaoceOrganizationId: this.runOrganizationId,
-        xiaoceAgentId: this.runAgentId
+        aiBackend: AI_BACKEND_OPENCLAW
       })
       if (this.runSubmitFields.length) {
         const missing = missingSubmitMaterialLabels(this.runSubmitFields)
@@ -2864,12 +2855,8 @@ export default {
         }
       }
       if (this.runModel) {
-        if (this.runBackend === AI_BACKEND_OPENCLAW) {
-          this.setLocalConfig({ openclawModel: this.runModel })
-          saveOpenclawConfig({ model: this.runModel })
-        } else {
-          this.setLocalConfig({ workbuddyModel: this.runModel })
-        }
+        this.setLocalConfig({ openclawModel: this.runModel })
+        saveOpenclawConfig({ model: this.runModel })
       }
       const sop = {
         ...this.runTarget,

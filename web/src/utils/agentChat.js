@@ -1,7 +1,3 @@
-import { getLocalConfig } from '@/api'
-import { getRuntimeConfig } from './runtimeConfig'
-import * as workbuddy from './workbuddyChat'
-import * as xiaoce from './xiaoceChat'
 import {
   checkOpenclawHealth,
   getOpenclawConfig,
@@ -10,93 +6,62 @@ import {
 } from './openclawChat'
 import { streamOpenclawGatewayWs } from './openclawGatewayWs'
 
+/** @deprecated 仅兼容旧配置；执行统一走 OpenClaw */
 export const AI_BACKEND_WORKBUDDY = 'workbuddy'
+/** @deprecated 仅兼容旧配置；执行统一走 OpenClaw */
 export const AI_BACKEND_XIAOCE = 'xiaoce'
 export const AI_BACKEND_OPENCLAW = 'openclaw'
 
-export function normalizeAiBackend(raw) {
-  const v = String(raw || '')
-    .trim()
-    .toLowerCase()
-  if (v === AI_BACKEND_XIAOCE) return AI_BACKEND_XIAOCE
-  if (v === AI_BACKEND_OPENCLAW || v === 'assistant' || v === '龙虾') {
-    return AI_BACKEND_OPENCLAW
-  }
-  return AI_BACKEND_WORKBUDDY
+/**
+ * 统一归一化为助理（OpenClaw）。
+ * WorkBuddy / 小策执行路径已下线，不再占用本机代理内存。
+ */
+export function normalizeAiBackend(_raw) {
+  return AI_BACKEND_OPENCLAW
 }
 
 export function getAiBackend() {
-  const runtime =
-    (typeof window !== 'undefined' && window.__MIND_MAP_RUNTIME__) || {}
-  const cfg = getRuntimeConfig()
-  const saved = getLocalConfig() || {}
-  return normalizeAiBackend(
-    runtime.aiBackend || cfg.aiBackend || saved.aiBackend || AI_BACKEND_WORKBUDDY
-  )
+  return AI_BACKEND_OPENCLAW
 }
 
-export function isXiaoceBackend(backend = getAiBackend()) {
-  return normalizeAiBackend(backend) === AI_BACKEND_XIAOCE
+export function isXiaoceBackend() {
+  return false
 }
 
-export function isOpenclawBackend(backend = getAiBackend()) {
-  return normalizeAiBackend(backend) === AI_BACKEND_OPENCLAW
+export function isOpenclawBackend() {
+  return true
 }
 
-export function aiBackendLabel(backend = getAiBackend()) {
-  const b = normalizeAiBackend(backend)
-  if (b === AI_BACKEND_XIAOCE) return '小策'
-  if (b === AI_BACKEND_OPENCLAW) return '助理'
-  return 'WorkBuddy'
+export function aiBackendLabel(_backend) {
+  return '助理'
 }
 
 /**
  * Unified readiness check. Always returns `{ ok, backend, ... }`.
- * @param {string} [backend] 指定引擎（多任务按 job.backend）
  */
-export async function checkAiBackend(backend) {
-  const b = normalizeAiBackend(backend || getAiBackend())
-  if (b === AI_BACKEND_XIAOCE) {
-    const ok = await xiaoce.checkXiaoce()
-    return { ok: !!ok, backend: AI_BACKEND_XIAOCE }
-  }
-  if (b === AI_BACKEND_OPENCLAW) {
-    const h = await checkOpenclawHealth()
-    return {
-      ok: !!(h && h.ok),
-      backend: AI_BACKEND_OPENCLAW,
-      status: h && h.status,
-      data: h && h.data,
-      error: h && h.message
-    }
-  }
-  const wb = await workbuddy.checkWorkbuddy()
+export async function checkAiBackend(_backend) {
+  const h = await checkOpenclawHealth()
   return {
-    ok: !!(wb && wb.ok),
-    backend: AI_BACKEND_WORKBUDDY,
-    status: wb && wb.status,
-    data: wb && wb.data,
-    error: wb && wb.error
+    ok: !!(h && h.ok),
+    backend: AI_BACKEND_OPENCLAW,
+    status: h && h.status,
+    data: h && h.data,
+    error: h && h.message
   }
 }
 
-export async function fetchAiModels(backend) {
-  const b = normalizeAiBackend(backend || getAiBackend())
-  if (b === AI_BACKEND_XIAOCE) return xiaoce.fetchXiaoceModels()
-  if (b === AI_BACKEND_OPENCLAW) {
-    const list = await listOpenclawModels()
-    return (list || []).map(m => ({
-      id: m.id || m.name,
-      name: m.name || m.id,
-      custom: true
-    }))
-  }
-  return workbuddy.fetchWorkbuddyModels()
+export async function fetchAiModels(_backend) {
+  const list = await listOpenclawModels()
+  return (list || []).map(m => ({
+    id: m.id || m.name,
+    name: m.name || m.id,
+    custom: true
+  }))
 }
 
 /**
  * OpenClaw：优先 Gateway Bridge WS（带 tool），失败回退 HTTP SSE。
- * onDelta 传累计全文，对齐 WorkBuddy 队列消费方式。
+ * onDelta 传累计全文，对齐队列消费方式。
  */
 async function streamOpenclawUnified({
   messages,
@@ -150,7 +115,6 @@ async function streamOpenclawUnified({
     return { content, events, toolCalls: [], eventToolCalls: [] }
   } catch (wsErr) {
     if (wsErr && wsErr.name === 'AbortError') throw wsErr
-    // Bridge 不可用时回退 HTTP
     const result = await streamOpenclawChat({
       messages,
       conversationId,
@@ -168,16 +132,13 @@ async function streamOpenclawUnified({
 }
 
 export function streamChat(options = {}) {
-  const b = normalizeAiBackend(options.backend || getAiBackend())
-  if (b === AI_BACKEND_XIAOCE) return xiaoce.streamChat(options)
-  if (b === AI_BACKEND_OPENCLAW) return streamOpenclawUnified(options)
-  return workbuddy.streamChat(options)
+  return streamOpenclawUnified(options)
 }
 
-// Prefer checkAiBackend for new code. Alias keeps SOP / toolbar working while
-// switching backends (returns unified `{ ok }`).
+// Prefer checkAiBackend for new code. Alias keeps SOP / toolbar working.
 export const checkWorkbuddy = checkAiBackend
 
+// 保留旧导出，避免零散 import 报错；执行不再走这些实现。
 export {
   getWorkbuddyConfig,
   fetchWorkbuddyModels,
