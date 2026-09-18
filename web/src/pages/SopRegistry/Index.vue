@@ -738,7 +738,8 @@ import {
 import {
   SOP_OUTPUT_PRESETS,
   extractDeliverablesFromReply,
-  loadSopRunContext
+  loadSopRunContext,
+  jobNeedsWecomResume
 } from '@/utils/sopRun'
 import {
   getSopOutputRulesTemplateUrls,
@@ -1024,7 +1025,7 @@ export default {
       ]
       const activeIds = new Set(active.map(j => j.id))
       const recent = (s.recent || []).filter(j => !activeIds.has(j.id))
-      return [...active, ...recent].slice(0, 20)
+      return [...active, ...recent].slice(0, 50)
     },
     detailMode() {
       return !!(this.activeSopUid || (this.$route.query && this.$route.query.sopUid))
@@ -2252,6 +2253,12 @@ export default {
         this.$message.warning('只能对「部分完成」的任务续跑')
         return
       }
+      if (!jobNeedsWecomResume(job)) {
+        this.$message.warning(
+          '本任务无需企微待办衔接，请重新点「打开」一次跑完全部自动步骤；续跑仅用于待办后继续'
+        )
+        return
+      }
       const sop =
         this.activeSop ||
         this.sops.find(
@@ -2274,8 +2281,9 @@ export default {
         .filter(line => !/：\s*$/.test(line))
         .join('\n')
       const note = [
-        '## 断点续跑',
-        '上一轮结果是部分完成。已标 done 的步骤不要重做；只推进未完成步骤，并覆盖更新同一份 HTML。',
+        '## 断点续跑（企微待办后继续）',
+        '上一轮因企微待办/人工确认未完成而部分完成。已标 done 的步骤不要重做；只推进未完成步骤。',
+        '产物必须新建一份带当前时间戳的文件（词干_YYYY-MM-DD_HHmm.扩展名），禁止覆盖旧文件；本轮产物清单须保留上一轮全部路径并追加新文件。',
         unfinished.length
           ? `未完成步骤：\n${unfinished
               .map(
@@ -2284,7 +2292,9 @@ export default {
               )
               .join('\n')}`
           : '请从节点流第一个未完成步骤继续。',
-        delLines ? `上一轮产物：\n${delLines}` : '',
+        delLines
+          ? `上一轮产物（须全部保留，勿覆盖）：\n${delLines}`
+          : '',
         '若「跟踪渠道GMV目标完成进度」缺 GMV 实际/完成率：先把分配与下发做完；缺数项标待接入并写清缺哪两列，不要整单假完成。'
       ]
         .filter(Boolean)
@@ -2292,8 +2302,8 @@ export default {
       try {
         await this.$confirm(
           unfinished.length
-            ? `将从未完成的 ${unfinished.length} 个步骤续跑。跟踪步若仍缺实际 GMV，可能仍会部分完成。`
-            : '将按上一轮进度续跑本 SOP。',
+            ? `待办衔接后续跑未完成的 ${unfinished.length} 个步骤。本轮将保留旧产物并追加新文件。`
+            : '将按上一轮进度续跑本 SOP（保留全部历史产物）。',
           '断点续跑',
           { type: 'info', confirmButtonText: '开始续跑' }
         )
@@ -2316,6 +2326,7 @@ export default {
         actor: this.userInfo.name || '台账',
         priorNodeProgress: steps,
         completedNotifyKeys: job.completedNotifyKeys || [],
+        priorDeliverables: dels,
         onSuccess: (result, j) => {
           if (!this._sopPageAlive) return
           if (result && result.ledger) {
