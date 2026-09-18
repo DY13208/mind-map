@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "completedAt": "2026-09-18T04:01:36.422Z",
+  "modeId": "personal",
+  "modeName": "Personal",
+  "templateId": "personal",
+  "templateName": "Personal",
+  "wikiGoal": "Phase 2A contract test: synthesize durable wiki pages from Mind Map MCP and Canonical knowledge for test rooms ow-p2a-room-a and ow-p2a-room-b only. Keep pages short. Preserve source markers.",
+  "ingestionSchedule": {
+    "cron": "0 3 * * *",
+    "timezone": "Asia/Shanghai"
+  },
+  "sources": {
+    "custom-mcp": {
+      "enabled": true,
+      "ingestionGoal": "Read Mind Map MCP tools and extract facts for ow-p2a-room-a / ow-p2a-room-b if available."
+    }
+  },
+  "sourceInstances": [
+    {
+      "id": "custom-mcp-1",
+      "connectorId": "custom-mcp",
+      "name": "Mind Map MCP",
+      "enabled": true,
+      "ingestionGoal": "Prefer query_nodes/search_nodes for rooms ow-p2a-room-a and ow-p2a-room-b."
+    }
+  ]
+}

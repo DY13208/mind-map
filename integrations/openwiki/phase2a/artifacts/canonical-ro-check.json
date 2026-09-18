@@ -1,0 +1,18 @@
+{
+  "roomB_unchanged": true,
+  "roomA_diff": {
+    "branches/hiring-sop.md": {
+      "before": "9ebb50c5bcb4cf30b45611bfd43cdf23ba0e8eddff8a7eda89db0e38e5b472d6",
+      "after": null
+    },
+    "manifest.json": {
+      "before": "693e9d01090f68eeb44f642427f2fb044a90138682433dcd8e2eb6eeeb3ed3ee",
+      "after": null
+    },
+    "README.md": {
+      "before": "2ab37b56961284ba2206253eb0566b4d53b331e0797eacb69d56c0877be8cdd1",
+      "after": null
+    }
+  },
+  "roomB_diff": {}
+}

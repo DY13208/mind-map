@@ -1,0 +1,1984 @@
+total 4
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 .
+drwxr-xr-x 1 root root 4096 Sep 18 04:06 ..
+drwx------ 1 root root 4096 Sep 18 03:51 .transactions
+drwx------ 1 root root 4096 Sep 16 01:31 .verification
+drwx------ 1 root root 4096 Sep 17 09:16 acl-a6123641
+drwx------ 1 root root 4096 Sep 17 09:16 acl-c7ead1c7
+drwx------ 1 root root 4096 Sep 17 09:16 auth-me-31e5f113
+drwx------ 1 root root 4096 Sep 17 09:16 c2-browser-1000-1788746518683
+drwx------ 1 root root 4096 Sep 17 09:16 c2-browser-1000-1788746547684
+drwx------ 1 root root 4096 Sep 17 09:16 c2-browser-1000-1788746835406
+drwx------ 1 root root 4096 Sep 17 09:16 c2-browser-1000-1788747289827
+drwx------ 1 root root 4096 Sep 17 09:16 c2-browser-1000-1788747901136
+drwx------ 1 root root 4096 Sep 17 09:16 c2-browser-1000-1788761405584
+drwx------ 1 root root 4096 Sep 17 09:16 c2-browser-10000-1788746886428
+drwx------ 1 root root 4096 Sep 17 09:16 c2-browser-10000-1788747304964
+drwx------ 1 root root 4096 Sep 17 09:17 c2-browser-10000-1788747933468
+drwx------ 1 root root 4096 Sep 17 09:17 c2-browser-10000-1788761472060
+drwx------ 1 root root 4096 Sep 18 03:40 c2-browser-20000-1788746951529
+drwx------ 1 root root 4096 Sep 16 01:39 c2-browser-20000-1788747349766
+drwx------ 1 root root 4096 Sep 18 03:33 c2-browser-20000-1788748040926
+drwx------ 1 root root 4096 Sep 18 03:34 c2-browser-20000-1788761566040
+drwx------ 1 root root 4096 Sep 18 03:02 c2-browser-5000-1788746548904
+drwx------ 1 root root 4096 Sep 18 03:02 c2-browser-5000-1788746836724
+drwx------ 1 root root 4096 Sep 18 03:02 c2-browser-5000-1788747291308
+drwx------ 1 root root 4096 Sep 18 03:02 c2-browser-5000-1788747903718
+drwx------ 1 root root 4096 Sep 18 03:02 c2-browser-5000-1788761408598
+drwx------ 1 root root 4096 Sep 18 03:02 c2-profile-1000-1788763543032
+drwx------ 1 root root 4096 Sep 18 03:02 c2-profile-1000-1788764159350
+drwx------ 1 root root 4096 Sep 18 03:02 c2-profile-1000-1788764369215
+drwx------ 1 root root 4096 Sep 18 03:02 c2-profile-1000-1788764665084
+drwx------ 1 root root 4096 Sep 18 03:03 c2-profile-10000-1788763609972
+drwx------ 1 root root 4096 Sep 18 03:03 c2-profile-10000-1788764187409
+drwx------ 1 root root 4096 Sep 18 03:03 c2-profile-10000-1788764407103
+drwx------ 1 root root 4096 Sep 18 03:03 c2-profile-10000-1788764407156
+drwx------ 1 root root 4096 Sep 18 03:03 c2-profile-10000-1788764689226
+drwx------ 1 root root 4096 Sep 18 03:03 c2-profile-10000-1788764780684
+drwx------ 1 root root 4096 Sep 18 03:04 c2-profile-5000-1788763583090
+drwx------ 1 root root 4096 Sep 18 03:04 c2-profile-5000-1788764165932
+drwx------ 1 root root 4096 Sep 18 03:04 c2-profile-5000-1788764670059
+drwx------ 1 root root 4096 Sep 18 03:04 debug-ui-1788233712765
+drwx------ 1 root root 4096 Sep 18 03:04 debug-ui-fixed-1788233953366
+drwx------ 1 root root 4096 Sep 18 03:04 e2e-06a32602
+drwx------ 1 root root 4096 Sep 18 03:04 e2e-0c6c3d61
+drwx------ 1 root root 4096 Sep 18 03:04 e2e-0d3ea8a7
+drwx------ 1 root root 4096 Sep 18 03:04 e2e-0eb373be
+drwx------ 1 root root 4096 Sep 18 03:04 e2e-160a13b3
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-16dd3e73
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-1e145488
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-2630ad8f
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-2668b66d
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-26bd0464
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-2f9ba846
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-2fd48596
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-31ec0f0e
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-343e0d22
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-3b51eb0f
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-4aa799da
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-4d6b666f
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-4e77ccdb
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-505f8891
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-5275d65c
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-53f55f5a
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-549ba709
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-5cb00efb
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-5f916e34
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-617d9b9f
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-6187c83c
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-6b483d2c
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-6d169d98
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-6ed066ba
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-729c5925
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-7d8dba3f
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-7dc30d3f
+drwx------ 1 root root 4096 Sep 18 03:05 e2e-825fa72c
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-8cf154de
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-93a9c4d1
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-94287fef
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-96836598
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-9767d63a
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-9949be55
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-9a602554
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-a01cf26e
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-a073525c
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-a0cf28bd
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-aa05dc70
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-aae09b89
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-adccfc8c
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-af87d742
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-b7ddc0f6
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-b9e6d728
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-c490b662
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-cb88ecb7
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-cd81caf6
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-cf23f1f3
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-d48b64c6
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-dba7ae4e
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-ddde34bd
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-ded35b26
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-e1a0a535
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-e2ef3b55
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-ee7e7dbd
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-f44c0b86
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-f73885c6
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-f7786dff
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-faa1e270
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-fb5fd3d1
+drwx------ 1 root root 4096 Sep 18 03:06 e2e-ff50de50
+drwx------ 1 root root 4096 Sep 18 03:06 fault-after-1c58a538-cb99-4fe9-bfa5-b433aadd6491
+drwx------ 1 root root 4096 Sep 18 03:06 fault-after-2cfe7fc6-e747-494a-ac21-0c33dbbf750d
+drwx------ 1 root root 4096 Sep 18 03:06 fault-after-2d656d26-6f86-41a0-9a28-8d48f95f9115
+drwx------ 1 root root 4096 Sep 18 03:06 fault-after-3a0368b7-5845-4762-8ee2-a4ece3b002b4
+drwx------ 1 root root 4096 Sep 18 03:06 fault-after-79d0f739-768e-4710-8a1c-42ff8c0b1d12
+drwx------ 1 root root 4096 Sep 18 03:06 fault-after-816a33fa-616a-4244-acd9-4e69a473e2ce
+drwx------ 1 root root 4096 Sep 18 03:06 fault-after-869d1b22-25e1-4fb4-85fc-32bb17f230fa
+drwx------ 1 root root 4096 Sep 18 03:06 fault-after-8eb5217d-f79f-4fc2-b99d-000e84c48376
+drwx------ 1 root root 4096 Sep 18 03:06 fault-after-90bae6e3-a8b9-485a-a336-8ee0d044992d
+drwx------ 1 root root 4096 Sep 18 03:06 fault-after-9bede29c-3618-4051-9467-592e7594ac57
+drwx------ 1 root root 4096 Sep 18 03:06 multi-1220870d-e627-417c-8583-749525d8ec56
+drwx------ 1 root root 4096 Sep 18 03:06 multi-90f90396-2843-4bac-9812-1bddb930db0e
+drwx------ 1 root root 4096 Sep 18 03:06 multi-c54864dd-9032-4be8-b8b2-9dfb4e50e1d5
+drwx------ 1 root root 4096 Sep 18 03:06 multi-c7db81d4-e17e-4fac-9e8a-7f6b6b79fd7d
+drwx------ 1 root root 4096 Sep 18 03:06 outbox-1c75004a-48d2-4d82-8000-eec942cbd25b
+drwx------ 1 root root 4096 Sep 18 03:06 outbox-7fd7a6ab-ac78-42e4-9303-43d4b550cd5a
+drwx------ 1 root root 4096 Sep 18 03:06 outbox-81e4a17b-9d16-4f18-856a-cff919bc8cd2
+drwx------ 1 root root 4096 Sep 18 03:06 outbox-b3631565-c66d-4c56-85b0-bfac518c80b4
+drwx------ 1 root root 4096 Sep 18 03:06 outbox-e2321166-563c-4d1f-8d50-79a16e256319
+drwx------ 1 root root 4096 Sep 18 03:06 outbox-eceff54a-0414-4497-89d6-ba1bb3541f10
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ow-p2a-room-a
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ow-p2a-room-b
+drwx------ 1 root root 4096 Sep 18 03:06 p0-persist-100-canonical-append-8dafb3f8-ec16-4449-8996-bbee68976d5c
+drwx------ 1 root root 4096 Sep 18 03:06 p0-persist-100-canonical-first-63efa18b-f22c-430a-9552-5cdb5a0617ae
+drwx------ 1 root root 4096 Sep 18 03:06 p0-persist-100-canonical-last-a3882241-8a7a-400e-b92e-a458939d3226
+drwx------ 1 root root 4096 Sep 18 03:06 p0-persist-100-canonical-middle-609249de-77ab-426b-a9bf-27651168e35a
+drwx------ 1 root root 4096 Sep 18 03:06 p0-persist-100-duplicate-append-cbbc3015-94ac-4ae5-abdf-5de4efb989e5
+drwx------ 1 root root 4096 Sep 18 03:06 p0-persist-100-duplicate-first-26aee9d9-38f6-4e68-9f54-3a44a9c63518
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-100-duplicate-last-ed0e464a-507b-4745-acc3-59a3ec4fc1a0
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-100-duplicate-middle-425f9659-1363-4644-b535-319afabaff11
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-100-empty-append-ee7916d1-e2be-4441-a647-ca54a039b58d
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-100-empty-first-8c86a26b-8cd2-4219-8d00-772f31c35ec5
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-100-empty-last-deb673ad-1ee3-49c1-87b4-7478e0749027
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-100-empty-middle-a207ca60-e4d3-4639-a9eb-8537a6929303
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-100-padded-append-8d12216f-c956-4337-9209-0f424265f8d4
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-100-padded-first-3f732010-024c-40b5-b94d-1b5d022a9a6c
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-100-padded-last-03469408-7a0e-46c4-838a-f7146d9e507a
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-100-padded-middle-4d8e3d7d-996f-4508-afaa-4a576b120c3b
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-20-canonical-append-78f14d9b-9457-4935-b84d-e35d03404cb3
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-20-canonical-first-2025f805-202d-4294-aa41-ec1af41cde8a
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-20-canonical-last-80b9c21b-f860-4fc8-a098-c4e7dade78ac
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-20-canonical-middle-2b5ffd8a-16b5-473f-89e0-8aac2a742aed
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-20-duplicate-append-99756a3d-cb68-467b-b5d9-f82c1bfa4337
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-20-duplicate-first-9c04096e-9a80-4e03-8383-c9a45af0efbb
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-20-duplicate-last-2e05c056-ef13-4627-b166-bffb83792139
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-20-duplicate-middle-530d8197-420d-43cf-a82c-51572abe42e7
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-20-empty-append-f2e10846-e321-40df-bf4c-7ea1c03e0a44
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-20-empty-first-58e872da-c292-4929-9d64-dc938d66a3e8
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-20-empty-last-f5c6644d-a701-4f32-aef1-5c6e115cd62d
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-20-empty-middle-e143c7d4-cb32-4a35-987d-2058238e1e3d
+drwx------ 1 root root 4096 Sep 18 03:07 p0-persist-20-padded-append-98f73d3f-ae7b-4ad4-befb-4834d2f07919
+drwx------ 1 root root 4096 Sep 18 03:08 p0-persist-20-padded-first-a2a9e672-be09-41ce-b3ff-d6da00e1ccbd
+drwx------ 1 root root 4096 Sep 18 03:08 p0-persist-20-padded-last-358d00fa-3b9f-4404-890f-85ff15649200
+drwx------ 1 root root 4096 Sep 18 03:08 p0-persist-20-padded-middle-698888e4-e48e-43fb-81df-af75dc646e11
+drwx------ 1 root root 4096 Sep 18 03:08 p0-persist-200-canonical-append-053b9a76-d14c-472c-836d-440420b02981
+drwx------ 1 root root 4096 Sep 18 03:08 p0-persist-200-canonical-first-9ec43e1f-2362-4333-8c60-8ae38ae83946
+drwx------ 1 root root 4096 Sep 18 03:08 p0-persist-200-canonical-last-dae3b695-79a6-43b0-a479-b247c05bb0f3
+drwx------ 1 root root 4096 Sep 18 03:08 p0-persist-200-canonical-middle-ff8ccded-4b0c-46c8-90f0-63c1ebf0b50d
+drwx------ 1 root root 4096 Sep 18 03:08 p0-persist-200-duplicate-append-2020eae2-0640-475d-9f6d-55606131852b
+drwx------ 1 root root 4096 Sep 18 03:08 p0-persist-200-duplicate-first-5169bc94-ffb9-485f-a28c-5f7294eb41a7
+drwx------ 1 root root 4096 Sep 18 03:09 p0-persist-200-duplicate-last-f1e61437-5cf2-4487-a485-054cfd48177a
+drwx------ 1 root root 4096 Sep 18 03:09 p0-persist-200-duplicate-middle-9a21b1ab-2e9f-4afb-89eb-7400354895f8
+drwx------ 1 root root 4096 Sep 18 03:09 p0-persist-200-empty-append-5681c241-f4a5-440b-9a7c-9a2a3cde6276
+drwx------ 1 root root 4096 Sep 18 03:09 p0-persist-200-empty-first-c88cf5b6-306f-4b8b-b3c0-412a48032381
+drwx------ 1 root root 4096 Sep 18 03:09 p0-persist-200-empty-last-8168dd5f-a714-4198-92e4-e697cf3760c2
+drwx------ 1 root root 4096 Sep 18 03:09 p0-persist-200-empty-middle-bbf89863-cb73-49dd-bc73-e173f475cabe
+drwx------ 1 root root 4096 Sep 18 03:09 p0-persist-200-padded-append-516d8611-bebc-46b6-9564-579885cb61d3
+drwx------ 1 root root 4096 Sep 18 03:09 p0-persist-200-padded-first-4a8fbea8-b8e0-4cca-93ec-cc7bab7d1574
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-200-padded-last-f1aacdb5-2927-471c-ade7-8d9bef76734d
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-200-padded-middle-85b75e6e-7565-4613-9a72-17b35ff469e3
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-canonical-append-2175eaca-bac2-4f6b-aee0-7a79fc27a463
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-canonical-append-5bf85547-e929-4006-9d52-e52061583bd3
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-canonical-first-532554ed-63f2-40b0-9455-c8760b003c00
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-canonical-first-dab50a9c-551b-4709-b3bd-2b7d5f6d7b87
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-canonical-last-144ad81d-c6ea-4914-940f-e93f9b9f6157
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-canonical-last-d5a17ba3-7908-4b2a-b2e5-46b6527fe1ed
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-canonical-middle-5c866f98-e5f1-4968-bc9e-cddaf1ade0ce
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-canonical-middle-840fc99c-b71a-450d-bc8a-c26ba82916b3
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-duplicate-append-31a83123-43e3-4055-81cb-eb1ffef401fd
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-duplicate-append-b2924602-4945-46c6-a48b-421d2c86d07c
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-duplicate-first-07936715-e985-4d47-ae86-1667aa58957b
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-duplicate-first-ca271008-26cb-449f-952e-72dd7af624f8
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-duplicate-last-02e5c71e-9544-4708-b970-a10ffe2c95ff
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-duplicate-last-6dfc357c-72f1-45ba-a4d6-2645188ebe88
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-duplicate-middle-15eb8cb6-316c-4cbc-a8df-0986fbd6cecc
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-duplicate-middle-a21dca9f-d2ab-4055-8e00-b24b7934d585
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-empty-append-40b993d6-0e6c-4200-9b0a-33f414c3e0f8
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-empty-append-8bbb2ec5-6ffb-44a6-874d-a375fb6bf3ff
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-empty-first-e30c9c94-e6db-424c-b79d-89ce2d29c9b9
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-empty-last-7afb0c51-0ec7-4df7-b0fe-1dc11f871b39
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-empty-middle-62fb8736-25ca-439b-b4ce-bd8007e2c31f
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-empty-middle-ce9da497-aa75-40ed-ba9e-02fa1de594ae
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-padded-append-b5e455e4-d695-4476-890e-1c4beeb93412
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-padded-append-e29ed1a1-ee63-450e-8822-7697d663bb75
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-padded-first-46f65715-bb38-448d-bf6b-f75c5b4a9291
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-padded-first-b6d1001d-1cf4-425d-8161-a347101904d4
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-padded-last-016cf765-25c8-4014-99b8-9d05b15a1b65
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-padded-last-b631fe57-fabd-42d6-82b1-09841efb1fc7
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-padded-middle-1d1e88c6-27b2-431c-aa3c-ea653a89feca
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-5-padded-middle-9b13a4f1-ee37-4bb9-9771-c4ad09659dc1
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-50-canonical-append-cb71726c-28de-42c9-a4cb-501f8e3a2c8b
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-50-canonical-first-c2033575-a67a-4041-9af7-f528d0ae4aed
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-50-canonical-last-9c3d305d-7053-4997-958b-0da1db702e48
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-50-canonical-middle-805f0ae8-d409-45c1-8631-9f06bd8479aa
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-50-duplicate-append-0b179839-f83e-4e52-bac7-852ecf04fcbe
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-50-duplicate-first-60169f65-471b-41c4-a2b1-e042d1d5a4b4
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-50-duplicate-last-ec77fc5c-79c2-41f4-bf6f-c6ed7b6ec499
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-50-duplicate-middle-76acc089-f7a3-4edf-9a8a-cd2cbf3aee79
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-50-empty-append-7a0bd8fe-1f4d-4414-9181-e8540effa097
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-50-empty-first-08a3c657-a857-4a59-9da0-d1e00a06abc0
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-50-empty-last-57d99954-7874-42c2-bf2d-f7a791cf84fa
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-50-empty-middle-880ff833-e7fa-41d6-8794-5c07d90048e6
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-50-padded-append-7c951560-3650-4ae3-a6dc-3f803f09ed58
+drwx------ 1 root root 4096 Sep 18 03:10 p0-persist-50-padded-first-f091dc86-558a-410a-9b63-ff389f719a50
+drwx------ 1 root root 4096 Sep 18 03:11 p0-persist-50-padded-last-54fedd83-bfba-4c26-8894-bb38d5367d6c
+drwx------ 1 root root 4096 Sep 18 03:11 p0-persist-50-padded-middle-2848a72a-055b-4f78-bb4b-c167ae3395b7
+drwx------ 1 root root 4096 Sep 18 03:11 p0-persist-500-canonical-append-97db3af5-6aaa-4cd0-b40b-4a3dbd916532
+drwx------ 1 root root 4096 Sep 18 03:11 p0-persist-500-canonical-first-9c495402-7c1f-4a6e-b77c-c55efd172c42
+drwx------ 1 root root 4096 Sep 18 03:12 p0-persist-500-canonical-last-a65aa5ab-bd0b-41c1-9b79-3e251bac3452
+drwx------ 1 root root 4096 Sep 18 03:12 p0-persist-500-canonical-middle-e5f17402-b7f9-4c41-9580-f09266f85015
+drwx------ 1 root root 4096 Sep 18 03:12 p0-persist-500-duplicate-append-6c7811c6-0481-43a3-9dce-5a0c8c47b650
+drwx------ 1 root root 4096 Sep 18 03:13 p0-persist-500-duplicate-first-61528886-c722-41e3-993d-8c4c59d39d55
+drwx------ 1 root root 4096 Sep 18 03:13 p0-persist-500-duplicate-last-f267661f-f167-4fd9-8239-d41963979d5f
+drwx------ 1 root root 4096 Sep 18 03:14 p0-persist-500-duplicate-middle-d7b83bf0-bc20-4226-9036-a7b056a11309
+drwx------ 1 root root 4096 Sep 18 03:14 p0-persist-500-empty-append-ef713b43-24b3-484a-a13a-505e1f91ac5a
+drwx------ 1 root root 4096 Sep 18 03:14 p0-persist-500-empty-first-522552f2-3166-48d7-816b-df019513eae5
+drwx------ 1 root root 4096 Sep 18 03:15 p0-persist-500-empty-last-58b006d3-57ae-4e88-a7c9-2d12e4d6e81c
+drwx------ 1 root root 4096 Sep 18 03:15 p0-persist-500-empty-middle-a8cfacd6-da3e-4496-b243-2d62dca5840a
+drwx------ 1 root root 4096 Sep 18 03:16 p0-persist-500-padded-append-22ec4b54-e3bc-4a50-ba20-d90358ba7130
+drwx------ 1 root root 4096 Sep 18 03:16 p0-persist-500-padded-first-3aeaa68f-ea90-4a6a-8efb-eaa85fc04ecb
+drwx------ 1 root root 4096 Sep 18 03:16 p0-persist-500-padded-last-a6185bc6-6b28-4a1f-8851-0f64ab9abb37
+drwx------ 1 root root 4096 Sep 18 03:17 p0-persist-500-padded-middle-ea2cc673-46e7-4b76-b3ae-51a754ca1bb0
+drwx------ 1 root root 4096 Sep 18 03:17 p0-persist-source-copy-3f6c5c6c-b7fa-4872-b817-6b1cabf81302
+drwx------ 1 root root 4096 Sep 18 03:17 p0-persist-source-copy-516e2de0-1e14-4d27-8b4f-86b6539c2f94
+drwx------ 1 root root 4096 Sep 18 03:18 p0-persist-source-copy-662203e9-fc17-43f6-afa4-7e3d95a1562b
+drwx------ 1 root root 4096 Sep 18 03:18 p0-persist-source-copy-ff32d775-46c7-450f-a763-e8e89a5f6a3b
+drwx------ 1 root root 4096 Sep 18 03:18 p0-safeload-1788752181455
+drwx------ 1 root root 4096 Sep 18 03:18 p0-safeload-1788752453478
+drwx------ 1 root root 4096 Sep 18 03:18 p0-safeload-1788752519070
+drwx------ 1 root root 4096 Sep 18 03:18 p0-safeload-1788752587229
+drwx------ 1 root root 4096 Sep 18 03:18 p0-safeload-1788752615523
+drwx------ 1 root root 4096 Sep 18 03:18 p0-safeload-1788752691373
+drwx------ 1 root root 4096 Sep 18 03:18 p0-safeload-1788760576323
+drwx------ 1 root root 4096 Sep 18 03:18 p0-safeload-1788760640374
+drwx------ 1 root root 4096 Sep 18 03:18 p0-safeload-1788760769818
+drwx------ 1 root root 4096 Sep 18 03:18 p0-safeload-1788760812637
+drwx------ 1 root root 4096 Sep 18 03:18 p0-safeload-1788760871074
+drwx------ 1 root root 4096 Sep 18 03:18 p0-safeload-1788760962796
+drwx------ 1 root root 4096 Sep 18 03:18 p0-safeload-1788761045158
+drwx------ 1 root root 4096 Sep 18 03:18 p0-safeload-1788761148458
+drwx------ 1 root root 4096 Sep 18 03:18 perf-c4566b28-7839-4668-8644-a6ef29f1efea
+drwx------ 1 root root 4096 Sep 18 03:18 persist-261227cf-109d-42bf-9019-f5d097b90e21
+drwx------ 1 root root 4096 Sep 18 03:18 persist-54d0d27a-ae02-4ea5-b5f1-ecedca6302e9
+drwx------ 1 root root 4096 Sep 18 03:18 persist-f570fadb-2691-4b2b-af95-ff46f5962ea9
+drwx------ 1 root root 4096 Sep 18 03:18 pg-acl-1788402858719
+drwx------ 1 root root 4096 Sep 18 03:18 pg-acl-1788508918379
+drwx------ 1 root root 4096 Sep 18 03:18 pg-bench-1000-1788399105727
+drwx------ 1 root root 4096 Sep 18 03:18 pg-bench-1000-1788399700142
+drwx------ 1 root root 4096 Sep 18 03:18 pg-bench-1000-1788400115378
+drwx------ 1 root root 4096 Sep 18 03:18 pg-bench-1000-1788400141555
+drwx------ 1 root root 4096 Sep 18 03:18 pg-bench-1000-1788400777967
+drwx------ 1 root root 4096 Sep 18 03:19 pg-bench-10000-1788399721627
+drwx------ 1 root root 4096 Sep 18 03:19 pg-bench-10000-1788400144076
+drwx------ 1 root root 4096 Sep 18 03:19 pg-bench-10000-1788400779133
+drwx------ 1 root root 4096 Sep 16 01:47 pg-bench-20000-1788400145730
+drwx------ 1 root root 4096 Sep 16 01:47 pg-bench-20000-1788400780028
+drwx------ 1 root root 4096 Sep 18 03:29 pg-bench-5000-1788399117784
+drwx------ 1 root root 4096 Sep 18 03:29 pg-bench-5000-1788399709547
+drwx------ 1 root root 4096 Sep 18 03:29 pg-bench-5000-1788400142622
+drwx------ 1 root root 4096 Sep 18 03:30 pg-bench-5000-1788400778497
+drwx------ 1 root root 4096 Sep 18 03:30 pg-five-1788400192830
+drwx------ 1 root root 4096 Sep 18 03:30 pg-five-1788400230958
+drwx------ 1 root root 4096 Sep 18 03:30 pg-five-1788400498908
+drwx------ 1 root root 4096 Sep 18 03:30 pg-idb-1788403015630
+drwx------ 1 root root 4096 Sep 18 03:30 pg-soak-1788400547696
+drwx------ 1 root root 4096 Sep 18 03:30 redis-bus-9c397248-de06-4789-af79-4f872cfc32ca
+drwx------ 1 root root 4096 Sep 18 03:30 redis-bus-ddc7a6f5-d8fa-47ae-9cfd-8c54775919c2
+drwx------ 1 root root 4096 Sep 18 03:30 redis-bus-fa924704-156d-41ac-b690-9d87844334d0
+drwx------ 1 root root 4096 Sep 18 03:30 ref-target-fffceb9b
+drwx------ 1 root root 4096 Sep 18 02:18 room-2e5pafbk
+drwx------ 1 root root 4096 Sep 18 03:51 room-2yaz570x
+drwx------ 1 root root 4096 Sep 18 02:09 room-32lyc9
+drwx------ 1 root root 4096 Sep 17 09:35 room-4xwz4po7
+drwx------ 1 root root 4096 Sep 17 09:35 room-6b5wc9z3
+drwx------ 1 root root 4096 Sep 17 09:35 room-6qz3mqmc
+drwx------ 1 root root 4096 Sep 17 09:35 room-9mndp8zz
+drwx------ 1 root root 4096 Sep 17 09:35 room-aeqcd93o
+drwx------ 1 root root 4096 Sep 17 09:35 room-b4z0nz
+drwx------ 1 root root 4096 Sep 17 09:35 room-bnfzxb05
+drwx------ 1 root root 4096 Sep 17 09:35 room-cf838h8d
+drwx------ 1 root root 4096 Sep 17 09:35 room-d2pbrzkc
+drwx------ 1 root root 4096 Sep 17 09:35 room-dlcubtll
+drwx------ 1 root root 4096 Sep 17 09:35 room-g0sijwcs
+drwx------ 1 root root 4096 Sep 17 09:35 room-lo1vw2c8
+drwx------ 1 root root 4096 Sep 17 09:35 room-lslexi
+drwx------ 1 root root 4096 Sep 17 09:22 room-pcn07z54
+drwx------ 1 root root 4096 Sep 17 09:22 room-qd1txmdt
+drwx------ 1 root root 4096 Sep 17 09:22 room-ro34t40w
+drwx------ 1 root root 4096 Sep 18 01:23 room-sa69z20y
+drwx------ 1 root root 4096 Sep 17 09:22 room-v9lzar4b
+drwx------ 1 root root 4096 Sep 17 09:22 room-vewikxbg
+drwx------ 1 root root 4096 Sep 17 09:22 room-vybh2lxq
+drwx------ 1 root root 4096 Sep 17 09:22 room-x5fvhg0u
+drwx------ 1 root root 4096 Sep 17 09:22 room-xp4ivjxm
+drwx------ 1 root root 4096 Sep 17 09:22 sync-mtiqmeca
+drwx------ 1 root root 4096 Sep 17 09:22 v2-same-user-1788417674743
+drwx------ 1 root root 4096 Sep 17 09:22 v2-socket-1788398109648
+drwx------ 1 root root 4096 Sep 17 09:22 v2-socket-1788399105801
+drwx------ 1 root root 4096 Sep 17 09:22 v2-socket-1788400735779
+drwx------ 1 root root 4096 Sep 17 09:22 v2-socket-1788403062169
+drwx------ 1 root root 4096 Sep 17 09:22 v2-socket-1788417674058
+===
+--- /knowledge/acl-a6123641/
+total 8
+drwx------ 1 root root 4096 Sep 17 09:16 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:39 README.md
+drwx------ 1 root root 4096 Sep 16 01:39 branches
+-rw------- 1 root root 4164 Sep 17 09:16 manifest.json
+--- /knowledge/acl-c7ead1c7/
+total 8
+drwx------ 1 root root 4096 Sep 17 09:16 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:39 README.md
+drwx------ 1 root root 4096 Sep 16 01:39 branches
+-rw------- 1 root root 4164 Sep 17 09:16 manifest.json
+--- /knowledge/auth-me-31e5f113/
+total 8
+drwx------ 1 root root 4096 Sep 17 09:16 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  441 Sep 16 01:39 README.md
+drwx------ 1 root root 4096 Sep 16 01:39 branches
+-rw------- 1 root root 4176 Sep 17 09:16 manifest.json
+--- /knowledge/c2-browser-1000-1788746518683/
+total 4
+drwx------ 1 root root 4096 Sep 17 09:16 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  365 Sep 16 01:39 README.md
+drwx------ 1 root root 4096 Sep 16 01:39 branches
+-rw------- 1 root root 1609 Sep 17 09:16 manifest.json
+--- /knowledge/c2-browser-1000-1788746547684/
+total 192
+drwx------ 1 root root   4096 Sep 17 09:16 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 193013 Sep 17 09:16 manifest.json
+--- /knowledge/c2-browser-1000-1788746835406/
+total 192
+drwx------ 1 root root   4096 Sep 17 09:16 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 193013 Sep 17 09:16 manifest.json
+--- /knowledge/c2-browser-1000-1788747289827/
+total 192
+drwx------ 1 root root   4096 Sep 17 09:16 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 193013 Sep 17 09:16 manifest.json
+--- /knowledge/c2-browser-1000-1788747901136/
+total 192
+drwx------ 1 root root   4096 Sep 17 09:16 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 193013 Sep 17 09:16 manifest.json
+--- /knowledge/c2-browser-1000-1788761405584/
+total 192
+drwx------ 1 root root   4096 Sep 17 09:16 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 193013 Sep 17 09:16 manifest.json
+--- /knowledge/c2-browser-10000-1788746886428/
+total 1888
+drwx------ 1 root root    4096 Sep 17 09:16 .
+drwxrwxrwx 1 root root    4096 Sep 18 04:01 ..
+-rw------- 1 root root     383 Sep 16 01:39 README.md
+drwx------ 1 root root    4096 Sep 16 01:39 branches
+-rw------- 1 root root 1932012 Sep 17 09:16 manifest.json
+--- /knowledge/c2-browser-10000-1788747304964/
+total 1888
+drwx------ 1 root root    4096 Sep 17 09:16 .
+drwxrwxrwx 1 root root    4096 Sep 18 04:01 ..
+-rw------- 1 root root     383 Sep 16 01:39 README.md
+drwx------ 1 root root    4096 Sep 16 01:39 branches
+-rw------- 1 root root 1932012 Sep 17 09:16 manifest.json
+--- /knowledge/c2-browser-10000-1788747933468/
+total 1888
+drwx------ 1 root root    4096 Sep 17 09:17 .
+drwxrwxrwx 1 root root    4096 Sep 18 04:01 ..
+-rw------- 1 root root     383 Sep 16 01:39 README.md
+drwx------ 1 root root    4096 Sep 16 01:39 branches
+-rw------- 1 root root 1932012 Sep 17 09:17 manifest.json
+--- /knowledge/c2-browser-10000-1788761472060/
+total 1888
+drwx------ 1 root root    4096 Sep 17 09:17 .
+drwxrwxrwx 1 root root    4096 Sep 18 04:01 ..
+-rw------- 1 root root     383 Sep 16 01:39 README.md
+drwx------ 1 root root    4096 Sep 16 01:39 branches
+-rw------- 1 root root 1932012 Sep 17 09:17 manifest.json
+--- /knowledge/c2-browser-20000-1788746951529/
+total 3792
+drwx------ 1 root root    4096 Sep 18 03:40 .
+drwxrwxrwx 1 root root    4096 Sep 18 04:01 ..
+-rw------- 1 root root     383 Sep 16 01:39 README.md
+drwx------ 1 root root    4096 Sep 16 01:39 branches
+-rw------- 1 root root 3882011 Sep 18 03:40 manifest.json
+--- /knowledge/c2-browser-20000-1788747349766/
+total 3792
+drwx------ 1 root root    4096 Sep 16 01:39 .
+drwxrwxrwx 1 root root    4096 Sep 18 04:01 ..
+-rw------- 1 root root     383 Sep 16 01:39 README.md
+drwx------ 1 root root    4096 Sep 16 01:39 branches
+-rw------- 1 root root 3881112 Sep 16 01:39 manifest.json
+--- /knowledge/c2-browser-20000-1788748040926/
+total 3792
+drwx------ 1 root root    4096 Sep 18 03:33 .
+drwxrwxrwx 1 root root    4096 Sep 18 04:01 ..
+-rw------- 1 root root     383 Sep 16 01:39 README.md
+drwx------ 1 root root    4096 Sep 16 01:39 branches
+-rw------- 1 root root 3882011 Sep 18 03:33 manifest.json
+--- /knowledge/c2-browser-20000-1788761566040/
+total 3792
+drwx------ 1 root root    4096 Sep 18 03:34 .
+drwxrwxrwx 1 root root    4096 Sep 18 04:01 ..
+-rw------- 1 root root     383 Sep 16 01:39 README.md
+drwx------ 1 root root    4096 Sep 16 01:39 branches
+-rw------- 1 root root 3882011 Sep 18 03:34 manifest.json
+--- /knowledge/c2-browser-5000-1788746548904/
+total 944
+drwx------ 1 root root   4096 Sep 18 03:02 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 965012 Sep 18 03:02 manifest.json
+--- /knowledge/c2-browser-5000-1788746836724/
+total 944
+drwx------ 1 root root   4096 Sep 18 03:02 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 965012 Sep 18 03:02 manifest.json
+--- /knowledge/c2-browser-5000-1788747291308/
+total 944
+drwx------ 1 root root   4096 Sep 18 03:02 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 965012 Sep 18 03:02 manifest.json
+--- /knowledge/c2-browser-5000-1788747903718/
+total 944
+drwx------ 1 root root   4096 Sep 18 03:02 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 965012 Sep 18 03:02 manifest.json
+--- /knowledge/c2-browser-5000-1788761408598/
+total 944
+drwx------ 1 root root   4096 Sep 18 03:02 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 965012 Sep 18 03:02 manifest.json
+--- /knowledge/c2-profile-1000-1788763543032/
+total 192
+drwx------ 1 root root   4096 Sep 18 03:02 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 193013 Sep 18 03:02 manifest.json
+--- /knowledge/c2-profile-1000-1788764159350/
+total 192
+drwx------ 1 root root   4096 Sep 18 03:02 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 193013 Sep 18 03:02 manifest.json
+--- /knowledge/c2-profile-1000-1788764369215/
+total 192
+drwx------ 1 root root   4096 Sep 18 03:02 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 193013 Sep 18 03:02 manifest.json
+--- /knowledge/c2-profile-1000-1788764665084/
+total 192
+drwx------ 1 root root   4096 Sep 18 03:02 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 193013 Sep 18 03:02 manifest.json
+--- /knowledge/c2-profile-10000-1788763609972/
+total 1888
+drwx------ 1 root root    4096 Sep 18 03:03 .
+drwxrwxrwx 1 root root    4096 Sep 18 04:01 ..
+-rw------- 1 root root     383 Sep 16 01:39 README.md
+drwx------ 1 root root    4096 Sep 16 01:39 branches
+-rw------- 1 root root 1932012 Sep 18 03:03 manifest.json
+--- /knowledge/c2-profile-10000-1788764187409/
+total 1888
+drwx------ 1 root root    4096 Sep 18 03:03 .
+drwxrwxrwx 1 root root    4096 Sep 18 04:01 ..
+-rw------- 1 root root     383 Sep 16 01:39 README.md
+drwx------ 1 root root    4096 Sep 16 01:39 branches
+-rw------- 1 root root 1932012 Sep 18 03:03 manifest.json
+--- /knowledge/c2-profile-10000-1788764407103/
+total 1888
+drwx------ 1 root root    4096 Sep 18 03:03 .
+drwxrwxrwx 1 root root    4096 Sep 18 04:01 ..
+-rw------- 1 root root     383 Sep 16 01:39 README.md
+drwx------ 1 root root    4096 Sep 16 01:39 branches
+-rw------- 1 root root 1932012 Sep 18 03:03 manifest.json
+--- /knowledge/c2-profile-10000-1788764407156/
+total 1888
+drwx------ 1 root root    4096 Sep 18 03:03 .
+drwxrwxrwx 1 root root    4096 Sep 18 04:01 ..
+-rw------- 1 root root     383 Sep 16 01:39 README.md
+drwx------ 1 root root    4096 Sep 16 01:39 branches
+-rw------- 1 root root 1932012 Sep 18 03:03 manifest.json
+--- /knowledge/c2-profile-10000-1788764689226/
+total 1888
+drwx------ 1 root root    4096 Sep 18 03:03 .
+drwxrwxrwx 1 root root    4096 Sep 18 04:01 ..
+-rw------- 1 root root     383 Sep 16 01:39 README.md
+drwx------ 1 root root    4096 Sep 16 01:39 branches
+-rw------- 1 root root 1932012 Sep 18 03:03 manifest.json
+--- /knowledge/c2-profile-10000-1788764780684/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:03 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   1052 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 160113 Sep 18 03:03 manifest.json
+--- /knowledge/c2-profile-5000-1788763583090/
+total 944
+drwx------ 1 root root   4096 Sep 18 03:04 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 965012 Sep 18 03:04 manifest.json
+--- /knowledge/c2-profile-5000-1788764165932/
+total 944
+drwx------ 1 root root   4096 Sep 18 03:04 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 965012 Sep 18 03:04 manifest.json
+--- /knowledge/c2-profile-5000-1788764670059/
+total 944
+drwx------ 1 root root   4096 Sep 18 03:04 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root    382 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:39 branches
+-rw------- 1 root root 965012 Sep 18 03:04 manifest.json
+--- /knowledge/debug-ui-1788233712765/
+total 364
+drwx------ 1 root root   4096 Sep 18 03:04 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14533 Sep 16 01:39 README.md
+drwx------ 1 root root   4096 Sep 16 01:40 branches
+-rw------- 1 root root 356338 Sep 18 03:04 manifest.json
+--- /knowledge/debug-ui-fixed-1788233953366/
+total 368
+drwx------ 1 root root   4096 Sep 18 03:04 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14539 Sep 16 01:40 README.md
+drwx------ 1 root root   4096 Sep 16 01:40 branches
+-rw------- 1 root root 356356 Sep 18 03:04 manifest.json
+--- /knowledge/e2e-06a32602/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:04 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:40 README.md
+drwx------ 1 root root 4096 Sep 16 01:40 branches
+-rw------- 1 root root 4164 Sep 18 03:04 manifest.json
+--- /knowledge/e2e-0c6c3d61/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:04 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:40 README.md
+drwx------ 1 root root 4096 Sep 16 01:40 branches
+-rw------- 1 root root 4164 Sep 18 03:04 manifest.json
+--- /knowledge/e2e-0d3ea8a7/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:04 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:40 README.md
+drwx------ 1 root root 4096 Sep 16 01:40 branches
+-rw------- 1 root root 4164 Sep 18 03:04 manifest.json
+--- /knowledge/e2e-0eb373be/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:04 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:40 README.md
+drwx------ 1 root root 4096 Sep 16 01:40 branches
+-rw------- 1 root root 4164 Sep 18 03:04 manifest.json
+--- /knowledge/e2e-160a13b3/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:04 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  443 Sep 16 01:40 README.md
+drwx------ 1 root root 4096 Sep 16 01:40 branches
+-rw------- 1 root root 4174 Sep 18 03:04 manifest.json
+--- /knowledge/e2e-16dd3e73/
+total 304
+drwx------ 1 root root   4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  12387 Sep 16 01:40 README.md
+drwx------ 1 root root   4096 Sep 16 01:40 branches
+-rw------- 1 root root 293030 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-1e145488/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:40 README.md
+drwx------ 1 root root 4096 Sep 16 01:40 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-2630ad8f/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-2668b66d/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-26bd0464/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  439 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4170 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-2f9ba846/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  443 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4174 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-2fd48596/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-31ec0f0e/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-343e0d22/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-3b51eb0f/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-4aa799da/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  501 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 5150 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-4d6b666f/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-4e77ccdb/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-505f8891/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-5275d65c/
+total 128
+drwx------ 1 root root   4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5145 Sep 16 01:41 README.md
+drwx------ 1 root root   4096 Sep 16 01:41 branches
+-rw------- 1 root root 120713 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-53f55f5a/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4392 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-549ba709/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4657 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-5cb00efb/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-5f916e34/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4392 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-617d9b9f/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-6187c83c/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-6b483d2c/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-6d169d98/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-6ed066ba/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  403 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 3371 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-729c5925/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-7d8dba3f/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-7dc30d3f/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  443 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4174 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-825fa72c/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:05 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:05 manifest.json
+--- /knowledge/e2e-8cf154de/
+total 1000
+drwx------ 1 root root   4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  41416 Sep 16 01:41 README.md
+drwx------ 1 root root   4096 Sep 16 01:41 branches
+-rw------- 1 root root 976815 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-93a9c4d1/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-94287fef/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  501 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 5150 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-96836598/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-9767d63a/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-9949be55/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-9a602554/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-a01cf26e/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-a073525c/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-a0cf28bd/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-aa05dc70/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-aae09b89/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  501 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 5150 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-adccfc8c/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-af87d742/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-b7ddc0f6/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-b9e6d728/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  501 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 5150 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-c490b662/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-cb88ecb7/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-cd81caf6/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  501 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 5150 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-cf23f1f3/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  443 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4174 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-d48b64c6/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-dba7ae4e/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-ddde34bd/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-ded35b26/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-e1a0a535/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-e2ef3b55/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-ee7e7dbd/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-f44c0b86/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-f73885c6/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-f7786dff/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-faa1e270/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-fb5fd3d1/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  410 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 3378 Sep 18 03:06 manifest.json
+--- /knowledge/e2e-ff50de50/
+total 8
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  433 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 4164 Sep 18 03:06 manifest.json
+--- /knowledge/fault-after-1c58a538-cb99-4fe9-bfa5-b433aadd6491/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  414 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 2515 Sep 18 03:06 manifest.json
+--- /knowledge/fault-after-2cfe7fc6-e747-494a-ac21-0c33dbbf750d/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  414 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 2515 Sep 18 03:06 manifest.json
+--- /knowledge/fault-after-2d656d26-6f86-41a0-9a28-8d48f95f9115/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  414 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 2515 Sep 18 03:06 manifest.json
+--- /knowledge/fault-after-3a0368b7-5845-4762-8ee2-a4ece3b002b4/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  414 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 2515 Sep 18 03:06 manifest.json
+--- /knowledge/fault-after-79d0f739-768e-4710-8a1c-42ff8c0b1d12/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  414 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 2515 Sep 18 03:06 manifest.json
+--- /knowledge/fault-after-816a33fa-616a-4244-acd9-4e69a473e2ce/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  414 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 2515 Sep 18 03:06 manifest.json
+--- /knowledge/fault-after-869d1b22-25e1-4fb4-85fc-32bb17f230fa/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  414 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 2515 Sep 18 03:06 manifest.json
+--- /knowledge/fault-after-8eb5217d-f79f-4fc2-b99d-000e84c48376/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  414 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 2515 Sep 18 03:06 manifest.json
+--- /knowledge/fault-after-90bae6e3-a8b9-485a-a336-8ee0d044992d/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  414 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 2515 Sep 18 03:06 manifest.json
+--- /knowledge/fault-after-9bede29c-3618-4051-9467-592e7594ac57/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  414 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 2515 Sep 18 03:06 manifest.json
+--- /knowledge/multi-1220870d-e627-417c-8583-749525d8ec56/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  535 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 6310 Sep 18 03:06 manifest.json
+--- /knowledge/multi-90f90396-2843-4bac-9812-1bddb930db0e/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  535 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 6310 Sep 18 03:06 manifest.json
+--- /knowledge/multi-c54864dd-9032-4be8-b8b2-9dfb4e50e1d5/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  535 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 6310 Sep 18 03:06 manifest.json
+--- /knowledge/multi-c7db81d4-e17e-4fac-9e8a-7f6b6b79fd7d/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  535 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 6310 Sep 18 03:06 manifest.json
+--- /knowledge/outbox-1c75004a-48d2-4d82-8000-eec942cbd25b/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  408 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 2505 Sep 18 03:06 manifest.json
+--- /knowledge/outbox-7fd7a6ab-ac78-42e4-9303-43d4b550cd5a/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  408 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 2505 Sep 18 03:06 manifest.json
+--- /knowledge/outbox-81e4a17b-9d16-4f18-856a-cff919bc8cd2/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  408 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 2505 Sep 18 03:06 manifest.json
+--- /knowledge/outbox-b3631565-c66d-4c56-85b0-bfac518c80b4/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  408 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 2505 Sep 18 03:06 manifest.json
+--- /knowledge/outbox-e2321166-563c-4d1f-8d50-79a16e256319/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  408 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 2505 Sep 18 03:06 manifest.json
+--- /knowledge/outbox-eceff54a-0414-4497-89d6-ba1bb3541f10/
+total 4
+drwx------ 1 root root 4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  409 Sep 16 01:41 README.md
+drwx------ 1 root root 4096 Sep 16 01:41 branches
+-rw------- 1 root root 2510 Sep 18 03:06 manifest.json
+--- /knowledge/ow-p2a-room-a/
+total 4
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rwxrwxrwx 1 root root  123 Sep 18 04:01 README.md
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 branches
+-rwxrwxrwx 1 root root 1194 Sep 18 04:01 manifest.json
+--- /knowledge/ow-p2a-room-b/
+total 4
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rwxrwxrwx 1 root root  123 Sep 18 04:01 README.md
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 branches
+-rwxrwxrwx 1 root root 1194 Sep 18 04:01 manifest.json
+--- /knowledge/p0-persist-100-canonical-append-8dafb3f8-ec16-4449-8996-bbee68976d5c/
+total 84
+drwx------ 1 root root  4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  3172 Sep 16 01:41 README.md
+drwx------ 1 root root  4096 Sep 16 01:41 branches
+-rw------- 1 root root 80661 Sep 18 03:06 manifest.json
+--- /knowledge/p0-persist-100-canonical-first-63efa18b-f22c-430a-9552-5cdb5a0617ae/
+total 84
+drwx------ 1 root root  4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  3170 Sep 16 01:41 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 80657 Sep 18 03:06 manifest.json
+--- /knowledge/p0-persist-100-canonical-last-a3882241-8a7a-400e-b92e-a458939d3226/
+total 84
+drwx------ 1 root root  4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  3168 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 80653 Sep 18 03:06 manifest.json
+--- /knowledge/p0-persist-100-canonical-middle-609249de-77ab-426b-a9bf-27651168e35a/
+total 84
+drwx------ 1 root root  4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  3172 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 80661 Sep 18 03:06 manifest.json
+--- /knowledge/p0-persist-100-duplicate-append-cbbc3015-94ac-4ae5-abdf-5de4efb989e5/
+total 84
+drwx------ 1 root root  4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  3172 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 80661 Sep 18 03:06 manifest.json
+--- /knowledge/p0-persist-100-duplicate-first-26aee9d9-38f6-4e68-9f54-3a44a9c63518/
+total 84
+drwx------ 1 root root  4096 Sep 18 03:06 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  3170 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 80657 Sep 18 03:06 manifest.json
+--- /knowledge/p0-persist-100-duplicate-last-ed0e464a-507b-4745-acc3-59a3ec4fc1a0/
+total 84
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  3168 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 80653 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-100-duplicate-middle-425f9659-1363-4644-b535-319afabaff11/
+total 84
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  3172 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 80661 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-100-empty-append-ee7916d1-e2be-4441-a647-ca54a039b58d/
+total 84
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  3164 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 80645 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-100-empty-first-8c86a26b-8cd2-4219-8d00-772f31c35ec5/
+total 84
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  3162 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 80641 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-100-empty-last-deb673ad-1ee3-49c1-87b4-7478e0749027/
+total 84
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  3160 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 80637 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-100-empty-middle-a207ca60-e4d3-4639-a9eb-8537a6929303/
+total 84
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  3164 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 80645 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-100-padded-append-8d12216f-c956-4337-9209-0f424265f8d4/
+total 84
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  3166 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 80649 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-100-padded-first-3f732010-024c-40b5-b94d-1b5d022a9a6c/
+total 84
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  3164 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 80645 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-100-padded-last-03469408-7a0e-46c4-838a-f7146d9e507a/
+total 84
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  3162 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 80641 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-100-padded-middle-4d8e3d7d-996f-4508-afaa-4a576b120c3b/
+total 84
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  3166 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 80649 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-20-canonical-append-78f14d9b-9457-4935-b84d-e35d03404cb3/
+total 24
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1010 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 18257 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-20-canonical-first-2025f805-202d-4294-aa41-ec1af41cde8a/
+total 24
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1008 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 18253 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-20-canonical-last-80b9c21b-f860-4fc8-a098-c4e7dade78ac/
+total 24
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1006 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 18249 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-20-canonical-middle-2b5ffd8a-16b5-473f-89e0-8aac2a742aed/
+total 24
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1010 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 18257 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-20-duplicate-append-99756a3d-cb68-467b-b5d9-f82c1bfa4337/
+total 24
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1010 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 18257 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-20-duplicate-first-9c04096e-9a80-4e03-8383-c9a45af0efbb/
+total 24
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1008 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 18253 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-20-duplicate-last-2e05c056-ef13-4627-b166-bffb83792139/
+total 24
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1006 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 18249 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-20-duplicate-middle-530d8197-420d-43cf-a82c-51572abe42e7/
+total 24
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1010 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 18257 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-20-empty-append-f2e10846-e321-40df-bf4c-7ea1c03e0a44/
+total 24
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1002 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 18241 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-20-empty-first-58e872da-c292-4929-9d64-dc938d66a3e8/
+total 24
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1000 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 18237 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-20-empty-last-f5c6644d-a701-4f32-aef1-5c6e115cd62d/
+total 24
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root   998 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 18233 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-20-empty-middle-e143c7d4-cb32-4a35-987d-2058238e1e3d/
+total 24
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1002 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 18241 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-20-padded-append-98f73d3f-ae7b-4ad4-befb-4834d2f07919/
+total 24
+drwx------ 1 root root  4096 Sep 18 03:07 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1004 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 18245 Sep 18 03:07 manifest.json
+--- /knowledge/p0-persist-20-padded-first-a2a9e672-be09-41ce-b3ff-d6da00e1ccbd/
+total 24
+drwx------ 1 root root  4096 Sep 18 03:08 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1002 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 18241 Sep 18 03:08 manifest.json
+--- /knowledge/p0-persist-20-padded-last-358d00fa-3b9f-4404-890f-85ff15649200/
+total 24
+drwx------ 1 root root  4096 Sep 18 03:08 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1000 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 18237 Sep 18 03:08 manifest.json
+--- /knowledge/p0-persist-20-padded-middle-698888e4-e48e-43fb-81df-af75dc646e11/
+total 24
+drwx------ 1 root root  4096 Sep 18 03:08 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1004 Sep 16 01:42 README.md
+drwx------ 1 root root  4096 Sep 16 01:42 branches
+-rw------- 1 root root 18245 Sep 18 03:08 manifest.json
+--- /knowledge/p0-persist-200-canonical-append-053b9a76-d14c-472c-836d-440420b02981/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:08 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5972 Sep 16 01:42 README.md
+drwx------ 1 root root   4096 Sep 16 01:42 branches
+-rw------- 1 root root 159261 Sep 18 03:08 manifest.json
+--- /knowledge/p0-persist-200-canonical-first-9ec43e1f-2362-4333-8c60-8ae38ae83946/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:08 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5970 Sep 16 01:42 README.md
+drwx------ 1 root root   4096 Sep 16 01:42 branches
+-rw------- 1 root root 159257 Sep 18 03:08 manifest.json
+--- /knowledge/p0-persist-200-canonical-last-dae3b695-79a6-43b0-a479-b247c05bb0f3/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:08 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5968 Sep 16 01:42 README.md
+drwx------ 1 root root   4096 Sep 16 01:42 branches
+-rw------- 1 root root 159253 Sep 18 03:08 manifest.json
+--- /knowledge/p0-persist-200-canonical-middle-ff8ccded-4b0c-46c8-90f0-63c1ebf0b50d/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:08 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5972 Sep 16 01:42 README.md
+drwx------ 1 root root   4096 Sep 16 01:42 branches
+-rw------- 1 root root 159261 Sep 18 03:08 manifest.json
+--- /knowledge/p0-persist-200-duplicate-append-2020eae2-0640-475d-9f6d-55606131852b/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:08 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5972 Sep 16 01:43 README.md
+drwx------ 1 root root   4096 Sep 16 01:43 branches
+-rw------- 1 root root 159261 Sep 18 03:08 manifest.json
+--- /knowledge/p0-persist-200-duplicate-first-5169bc94-ffb9-485f-a28c-5f7294eb41a7/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:08 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5970 Sep 16 01:43 README.md
+drwx------ 1 root root   4096 Sep 16 01:43 branches
+-rw------- 1 root root 159257 Sep 18 03:08 manifest.json
+--- /knowledge/p0-persist-200-duplicate-last-f1e61437-5cf2-4487-a485-054cfd48177a/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:09 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5968 Sep 16 01:43 README.md
+drwx------ 1 root root   4096 Sep 16 01:43 branches
+-rw------- 1 root root 159253 Sep 18 03:09 manifest.json
+--- /knowledge/p0-persist-200-duplicate-middle-9a21b1ab-2e9f-4afb-89eb-7400354895f8/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:09 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5972 Sep 16 01:43 README.md
+drwx------ 1 root root   4096 Sep 16 01:43 branches
+-rw------- 1 root root 159261 Sep 18 03:09 manifest.json
+--- /knowledge/p0-persist-200-empty-append-5681c241-f4a5-440b-9a7c-9a2a3cde6276/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:09 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5964 Sep 16 01:43 README.md
+drwx------ 1 root root   4096 Sep 16 01:43 branches
+-rw------- 1 root root 159245 Sep 18 03:09 manifest.json
+--- /knowledge/p0-persist-200-empty-first-c88cf5b6-306f-4b8b-b3c0-412a48032381/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:09 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5962 Sep 16 01:43 README.md
+drwx------ 1 root root   4096 Sep 16 01:43 branches
+-rw------- 1 root root 159241 Sep 18 03:09 manifest.json
+--- /knowledge/p0-persist-200-empty-last-8168dd5f-a714-4198-92e4-e697cf3760c2/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:09 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5960 Sep 16 01:43 README.md
+drwx------ 1 root root   4096 Sep 16 01:43 branches
+-rw------- 1 root root 159237 Sep 18 03:09 manifest.json
+--- /knowledge/p0-persist-200-empty-middle-bbf89863-cb73-49dd-bc73-e173f475cabe/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:09 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5964 Sep 16 01:43 README.md
+drwx------ 1 root root   4096 Sep 16 01:43 branches
+-rw------- 1 root root 159245 Sep 18 03:09 manifest.json
+--- /knowledge/p0-persist-200-padded-append-516d8611-bebc-46b6-9564-579885cb61d3/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:09 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5966 Sep 16 01:43 README.md
+drwx------ 1 root root   4096 Sep 16 01:43 branches
+-rw------- 1 root root 159249 Sep 18 03:09 manifest.json
+--- /knowledge/p0-persist-200-padded-first-4a8fbea8-b8e0-4cca-93ec-cc7bab7d1574/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:09 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5964 Sep 16 01:43 README.md
+drwx------ 1 root root   4096 Sep 16 01:43 branches
+-rw------- 1 root root 159245 Sep 18 03:09 manifest.json
+--- /knowledge/p0-persist-200-padded-last-f1aacdb5-2927-471c-ade7-8d9bef76734d/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5962 Sep 16 01:43 README.md
+drwx------ 1 root root   4096 Sep 16 01:43 branches
+-rw------- 1 root root 159241 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-200-padded-middle-85b75e6e-7565-4613-9a72-17b35ff469e3/
+total 164
+drwx------ 1 root root   4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root   5966 Sep 16 01:43 README.md
+drwx------ 1 root root   4096 Sep 16 01:43 branches
+-rw------- 1 root root 159249 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-canonical-append-2175eaca-bac2-4f6b-aee0-7a79fc27a463/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  608 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6583 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-canonical-append-5bf85547-e929-4006-9d52-e52061583bd3/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  608 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6583 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-canonical-first-532554ed-63f2-40b0-9455-c8760b003c00/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  606 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6579 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-canonical-first-dab50a9c-551b-4709-b3bd-2b7d5f6d7b87/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  606 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6579 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-canonical-last-144ad81d-c6ea-4914-940f-e93f9b9f6157/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  604 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6575 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-canonical-last-d5a17ba3-7908-4b2a-b2e5-46b6527fe1ed/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  604 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6575 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-canonical-middle-5c866f98-e5f1-4968-bc9e-cddaf1ade0ce/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  608 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6583 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-canonical-middle-840fc99c-b71a-450d-bc8a-c26ba82916b3/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  608 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6583 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-duplicate-append-31a83123-43e3-4055-81cb-eb1ffef401fd/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  608 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6583 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-duplicate-append-b2924602-4945-46c6-a48b-421d2c86d07c/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  608 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6583 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-duplicate-first-07936715-e985-4d47-ae86-1667aa58957b/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  606 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6579 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-duplicate-first-ca271008-26cb-449f-952e-72dd7af624f8/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  606 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6579 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-duplicate-last-02e5c71e-9544-4708-b970-a10ffe2c95ff/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  604 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6575 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-duplicate-last-6dfc357c-72f1-45ba-a4d6-2645188ebe88/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  604 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6575 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-duplicate-middle-15eb8cb6-316c-4cbc-a8df-0986fbd6cecc/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  608 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6583 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-duplicate-middle-a21dca9f-d2ab-4055-8e00-b24b7934d585/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  608 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6583 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-empty-append-40b993d6-0e6c-4200-9b0a-33f414c3e0f8/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  600 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6567 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-empty-append-8bbb2ec5-6ffb-44a6-874d-a375fb6bf3ff/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  600 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6567 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-empty-first-e30c9c94-e6db-424c-b79d-89ce2d29c9b9/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  598 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6563 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-empty-last-7afb0c51-0ec7-4df7-b0fe-1dc11f871b39/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  596 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6559 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-empty-middle-62fb8736-25ca-439b-b4ce-bd8007e2c31f/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  600 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6567 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-empty-middle-ce9da497-aa75-40ed-ba9e-02fa1de594ae/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  600 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6567 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-padded-append-b5e455e4-d695-4476-890e-1c4beeb93412/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  602 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6571 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-padded-append-e29ed1a1-ee63-450e-8822-7697d663bb75/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  602 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6571 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-padded-first-46f65715-bb38-448d-bf6b-f75c5b4a9291/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  600 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6567 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-padded-first-b6d1001d-1cf4-425d-8161-a347101904d4/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  600 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6567 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-padded-last-016cf765-25c8-4014-99b8-9d05b15a1b65/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  598 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6563 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-padded-last-b631fe57-fabd-42d6-82b1-09841efb1fc7/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  598 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6563 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-padded-middle-1d1e88c6-27b2-431c-aa3c-ea653a89feca/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  602 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6571 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-5-padded-middle-9b13a4f1-ee37-4bb9-9771-c4ad09659dc1/
+total 12
+drwx------ 1 root root 4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root 4096 Sep 18 04:01 ..
+-rw------- 1 root root  602 Sep 16 01:43 README.md
+drwx------ 1 root root 4096 Sep 16 01:43 branches
+-rw------- 1 root root 6571 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-50-canonical-append-cb71726c-28de-42c9-a4cb-501f8e3a2c8b/
+total 48
+drwx------ 1 root root  4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1820 Sep 16 01:43 README.md
+drwx------ 1 root root  4096 Sep 16 01:43 branches
+-rw------- 1 root root 41657 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-50-canonical-first-c2033575-a67a-4041-9af7-f528d0ae4aed/
+total 48
+drwx------ 1 root root  4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1818 Sep 16 01:43 README.md
+drwx------ 1 root root  4096 Sep 16 01:43 branches
+-rw------- 1 root root 41653 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-50-canonical-last-9c3d305d-7053-4997-958b-0da1db702e48/
+total 48
+drwx------ 1 root root  4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1816 Sep 16 01:43 README.md
+drwx------ 1 root root  4096 Sep 16 01:44 branches
+-rw------- 1 root root 41649 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-50-canonical-middle-805f0ae8-d409-45c1-8631-9f06bd8479aa/
+total 48
+drwx------ 1 root root  4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1820 Sep 16 01:44 README.md
+drwx------ 1 root root  4096 Sep 16 01:44 branches
+-rw------- 1 root root 41657 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-50-duplicate-append-0b179839-f83e-4e52-bac7-852ecf04fcbe/
+total 48
+drwx------ 1 root root  4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1820 Sep 16 01:44 README.md
+drwx------ 1 root root  4096 Sep 16 01:44 branches
+-rw------- 1 root root 41657 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-50-duplicate-first-60169f65-471b-41c4-a2b1-e042d1d5a4b4/
+total 48
+drwx------ 1 root root  4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1818 Sep 16 01:44 README.md
+drwx------ 1 root root  4096 Sep 16 01:44 branches
+-rw------- 1 root root 41653 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-50-duplicate-last-ec77fc5c-79c2-41f4-bf6f-c6ed7b6ec499/
+total 48
+drwx------ 1 root root  4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1816 Sep 16 01:44 README.md
+drwx------ 1 root root  4096 Sep 16 01:44 branches
+-rw------- 1 root root 41649 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-50-duplicate-middle-76acc089-f7a3-4edf-9a8a-cd2cbf3aee79/
+total 48
+drwx------ 1 root root  4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1820 Sep 16 01:44 README.md
+drwx------ 1 root root  4096 Sep 16 01:44 branches
+-rw------- 1 root root 41657 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-50-empty-append-7a0bd8fe-1f4d-4414-9181-e8540effa097/
+total 48
+drwx------ 1 root root  4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1812 Sep 16 01:44 README.md
+drwx------ 1 root root  4096 Sep 16 01:44 branches
+-rw------- 1 root root 41641 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-50-empty-first-08a3c657-a857-4a59-9da0-d1e00a06abc0/
+total 48
+drwx------ 1 root root  4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1810 Sep 16 01:44 README.md
+drwx------ 1 root root  4096 Sep 16 01:44 branches
+-rw------- 1 root root 41637 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-50-empty-last-57d99954-7874-42c2-bf2d-f7a791cf84fa/
+total 48
+drwx------ 1 root root  4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1808 Sep 16 01:44 README.md
+drwx------ 1 root root  4096 Sep 16 01:44 branches
+-rw------- 1 root root 41633 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-50-empty-middle-880ff833-e7fa-41d6-8794-5c07d90048e6/
+total 48
+drwx------ 1 root root  4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1812 Sep 16 01:44 README.md
+drwx------ 1 root root  4096 Sep 16 01:44 branches
+-rw------- 1 root root 41641 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-50-padded-append-7c951560-3650-4ae3-a6dc-3f803f09ed58/
+total 48
+drwx------ 1 root root  4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1818 Sep 16 01:44 README.md
+drwx------ 1 root root  4096 Sep 16 01:44 branches
+-rw------- 1 root root 41653 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-50-padded-first-f091dc86-558a-410a-9b63-ff389f719a50/
+total 48
+drwx------ 1 root root  4096 Sep 18 03:10 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1812 Sep 16 01:44 README.md
+drwx------ 1 root root  4096 Sep 16 01:44 branches
+-rw------- 1 root root 41641 Sep 18 03:10 manifest.json
+--- /knowledge/p0-persist-50-padded-last-54fedd83-bfba-4c26-8894-bb38d5367d6c/
+total 48
+drwx------ 1 root root  4096 Sep 18 03:11 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1810 Sep 16 01:44 README.md
+drwx------ 1 root root  4096 Sep 16 01:44 branches
+-rw------- 1 root root 41637 Sep 18 03:11 manifest.json
+--- /knowledge/p0-persist-50-padded-middle-2848a72a-055b-4f78-bb4b-c167ae3395b7/
+total 48
+drwx------ 1 root root  4096 Sep 18 03:11 .
+drwxrwxrwx 1 root root  4096 Sep 18 04:01 ..
+-rw------- 1 root root  1814 Sep 16 01:44 README.md
+drwx------ 1 root root  4096 Sep 16 01:44 branches
+-rw------- 1 root root 41645 Sep 18 03:11 manifest.json
+--- /knowledge/p0-persist-500-canonical-append-97db3af5-6aaa-4cd0-b40b-4a3dbd916532/
+total 404
+drwx------ 1 root root   4096 Sep 18 03:11 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14372 Sep 16 01:44 README.md
+drwx------ 1 root root   4096 Sep 16 01:44 branches
+-rw------- 1 root root 395061 Sep 18 03:11 manifest.json
+--- /knowledge/p0-persist-500-canonical-first-9c495402-7c1f-4a6e-b77c-c55efd172c42/
+total 404
+drwx------ 1 root root   4096 Sep 18 03:11 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14370 Sep 16 01:44 README.md
+drwx------ 1 root root   4096 Sep 16 01:44 branches
+-rw------- 1 root root 395057 Sep 18 03:11 manifest.json
+--- /knowledge/p0-persist-500-canonical-last-a65aa5ab-bd0b-41c1-9b79-3e251bac3452/
+total 404
+drwx------ 1 root root   4096 Sep 18 03:12 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14368 Sep 16 01:44 README.md
+drwx------ 1 root root   4096 Sep 16 01:44 branches
+-rw------- 1 root root 395053 Sep 18 03:12 manifest.json
+--- /knowledge/p0-persist-500-canonical-middle-e5f17402-b7f9-4c41-9580-f09266f85015/
+total 404
+drwx------ 1 root root   4096 Sep 18 03:12 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14372 Sep 16 01:44 README.md
+drwx------ 1 root root   4096 Sep 16 01:44 branches
+-rw------- 1 root root 395061 Sep 18 03:12 manifest.json
+--- /knowledge/p0-persist-500-duplicate-append-6c7811c6-0481-43a3-9dce-5a0c8c47b650/
+total 404
+drwx------ 1 root root   4096 Sep 18 03:12 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14372 Sep 16 01:44 README.md
+drwx------ 1 root root   4096 Sep 16 01:45 branches
+-rw------- 1 root root 395061 Sep 18 03:12 manifest.json
+--- /knowledge/p0-persist-500-duplicate-first-61528886-c722-41e3-993d-8c4c59d39d55/
+total 404
+drwx------ 1 root root   4096 Sep 18 03:13 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14370 Sep 16 01:45 README.md
+drwx------ 1 root root   4096 Sep 16 01:45 branches
+-rw------- 1 root root 395057 Sep 18 03:13 manifest.json
+--- /knowledge/p0-persist-500-duplicate-last-f267661f-f167-4fd9-8239-d41963979d5f/
+total 404
+drwx------ 1 root root   4096 Sep 18 03:13 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14368 Sep 16 01:45 README.md
+drwx------ 1 root root   4096 Sep 16 01:45 branches
+-rw------- 1 root root 395053 Sep 18 03:13 manifest.json
+--- /knowledge/p0-persist-500-duplicate-middle-d7b83bf0-bc20-4226-9036-a7b056a11309/
+total 404
+drwx------ 1 root root   4096 Sep 18 03:14 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14372 Sep 16 01:45 README.md
+drwx------ 1 root root   4096 Sep 16 01:45 branches
+-rw------- 1 root root 395061 Sep 18 03:14 manifest.json
+--- /knowledge/p0-persist-500-empty-append-ef713b43-24b3-484a-a13a-505e1f91ac5a/
+total 404
+drwx------ 1 root root   4096 Sep 18 03:14 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14364 Sep 16 01:45 README.md
+drwx------ 1 root root   4096 Sep 16 01:45 branches
+-rw------- 1 root root 395045 Sep 18 03:14 manifest.json
+--- /knowledge/p0-persist-500-empty-first-522552f2-3166-48d7-816b-df019513eae5/
+total 404
+drwx------ 1 root root   4096 Sep 18 03:14 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14362 Sep 16 01:45 README.md
+drwx------ 1 root root   4096 Sep 16 01:46 branches
+-rw------- 1 root root 395041 Sep 18 03:14 manifest.json
+--- /knowledge/p0-persist-500-empty-last-58b006d3-57ae-4e88-a7c9-2d12e4d6e81c/
+total 404
+drwx------ 1 root root   4096 Sep 18 03:15 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14429 Sep 16 01:46 README.md
+drwx------ 1 root root   4096 Sep 16 01:46 branches
+-rw------- 1 root root 396014 Sep 18 03:15 manifest.json
+--- /knowledge/p0-persist-500-empty-middle-a8cfacd6-da3e-4496-b243-2d62dca5840a/
+total 404
+drwx------ 1 root root   4096 Sep 18 03:15 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14364 Sep 16 01:46 README.md
+drwx------ 1 root root   4096 Sep 16 01:46 branches
+-rw------- 1 root root 395045 Sep 18 03:15 manifest.json
+--- /knowledge/p0-persist-500-padded-append-22ec4b54-e3bc-4a50-ba20-d90358ba7130/
+total 404
+drwx------ 1 root root   4096 Sep 18 03:16 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14366 Sep 16 01:46 README.md
+drwx------ 1 root root   4096 Sep 16 01:46 branches
+-rw------- 1 root root 395049 Sep 18 03:16 manifest.json
+--- /knowledge/p0-persist-500-padded-first-3aeaa68f-ea90-4a6a-8efb-eaa85fc04ecb/
+total 404
+drwx------ 1 root root   4096 Sep 18 03:16 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14364 Sep 16 01:46 README.md
+drwx------ 1 root root   4096 Sep 16 01:46 branches
+-rw------- 1 root root 395045 Sep 18 03:16 manifest.json
+--- /knowledge/p0-persist-500-padded-last-a6185bc6-6b28-4a1f-8851-0f64ab9abb37/
+total 404
+drwx------ 1 root root   4096 Sep 18 03:16 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14362 Sep 16 01:46 README.md
+drwx------ 1 root root   4096 Sep 16 01:47 branches
+-rw------- 1 root root 395041 Sep 18 03:16 manifest.json
+--- /knowledge/p0-persist-500-padded-middle-ea2cc673-46e7-4b76-b3ae-51a754ca1bb0/
+total 404
+drwx------ 1 root root   4096 Sep 18 03:17 .
+drwxrwxrwx 1 root root   4096 Sep 18 04:01 ..
+-rw------- 1 root root  14366 Sep 16 01:47 README.md
+drwx------ 1 root root   4096 Sep 16 01:47 branches
+-rw------- 1 root root 395049 Sep 18 03:17 manifest.json
+--- /knowledge/p0-persist-source-copy-3f6c5c6c-b7fa-4872-b817-6b1cabf81302/
+total 3456
+drwx------ 1 root root    4096 Sep 18 03:17 .
+drwxrwxrwx 1 root root    4096 Sep 18 04:01 ..
+-rw------- 1 root root     688 Sep 16 01:47 README.md
+drwx------ 1 root root    4096 Sep 16 01:47 branches
+-rw------- 1 root root 3532437 Sep 18 03:17 manifest.json
+--- /knowledge/p0-persist-source-copy-516e2de0-1e14-4d27-8b4f-86b6539c2f94/
+total 3456
+drwx------ 1 root root    4096 Sep 18 03:17 .
+drwxrwxrwx 1 root root    4096 Sep 18 04:01 ..
+-rw------- 1 root root     688 Sep 16 01:47 README.md
+drwx------ 1 root root    4096 Sep 16 01:47 branches
+-rw------- 1 root root 3531465 Sep 18 03:17 manifest.json
+--- /knowledge/p0-persist-source-copy-662203e9-fc1
+
+... Output truncated at 100000 bytes.
+[Command succeeded with exit code 0]
+[Output was truncated due to size limits]

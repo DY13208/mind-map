@@ -1,0 +1,26 @@
+{
+  "machineOwned": true,
+  "version": 1,
+  "strategy": "first_level_uid",
+  "nodes": {},
+  "lastCompiledVersion": 1,
+  "lastSourceRevision": 1,
+  "sourceHash": "2ab37b56961284ba2206253eb0566b4d53b331e0797eacb69d56c0877be8cdd1",
+  "publicationId": "de4595f0-a8aa-4ab0-b51c-44ae2919dfbf",
+  "syncVersion": 1,
+  "exportContract": 1,
+  "downstream": {},
+  "roomId": "ow-p2a-room-a",
+  "sourceUpdatedAt": "2026-09-18T04:01:04.1124944Z",
+  "documents": {
+    "branches/hiring-sop.md": {
+      "fileHash": "9ebb50c5bcb4cf30b45611bfd43cdf23ba0e8eddff8a7eda89db0e38e5b472d6",
+      "bytes": 118
+    },
+    "README.md": {
+      "fileHash": "2ab37b56961284ba2206253eb0566b4d53b331e0797eacb69d56c0877be8cdd1",
+      "bytes": 123
+    }
+  },
+  "lastCompiledAt": "2026-09-18T04:01:04.1155023Z"
+}
