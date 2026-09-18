@@ -1,4 +1,5 @@
 const fs = require('fs')
+const crypto = require('crypto')
 const os = require('os')
 const path = require('path')
 const { spawn, execSync } = require('child_process')
@@ -13,7 +14,7 @@ const {
   formatOpenclawResult,
   writeOpenclawRuntimeConfig
 } = require('./openclaw-gateway')
-const { ensureOpenclawWatchdog } = require('./openclaw-watchdog')
+const { ensureOpenclawWatchdog, stopOpenclawWatchdog } = require('./openclaw-watchdog')
 const {
   ensureOpenclawBridge,
   formatBridgeResult
@@ -83,12 +84,20 @@ function detectHost() {
 
 function writeMcpConfig(host) {
   const url = `http://${host}:${PORT}/mcp`
+  // 与 scripts/launcher.js 的 mcpServerEntry 保持一致：设了 MCP_TOKEN 就必须
+  // 带上 Authorization，否则网关一律 401，导图 MCP 在 WorkBuddy 里连不上。
+  const entry = {
+    type: 'http',
+    url
+  }
+  if (process.env.MCP_TOKEN) {
+    entry.headers = {
+      Authorization: `Bearer ${process.env.MCP_TOKEN}`
+    }
+  }
   const config = {
     mcpServers: {
-      'mind-map': {
-        type: 'http',
-        url
-      }
+      'mind-map': entry
     }
   }
   fs.writeFileSync(
@@ -108,8 +117,32 @@ function hasDocker() {
   }
 }
 
+function loadWikiSecretsIntoEnv() {
+  const file = path.join(ROOT, '.secrets', 'wiki.env')
+  if (!fs.existsSync(file)) return
+  const text = fs.readFileSync(file, 'utf8')
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eq = trimmed.indexOf('=')
+    if (eq <= 0) continue
+    const key = trimmed.slice(0, eq).trim()
+    const value = trimmed.slice(eq + 1).trim()
+    if (!key) continue
+    if (key === 'DATABASE_URL' && !process.env.DOCMOST_DATABASE_URL) {
+      process.env.DOCMOST_DATABASE_URL = value
+    }
+    if (key === 'APP_SECRET') {
+      if (!process.env.DOCMOST_APP_SECRET) process.env.DOCMOST_APP_SECRET = value
+      if (!process.env.DOCMOST_SSO_SECRET) process.env.DOCMOST_SSO_SECRET = value
+    }
+    if (!(key in process.env)) process.env[key] = value
+  }
+}
+
 function compose(args, extraEnv) {
   require('./wiki-env').ensureWikiEnv()
+  loadWikiSecretsIntoEnv()
   return spawn('docker', ['compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.wiki.yml', ...args], {
     cwd: ROOT,
     stdio: 'inherit',
@@ -119,6 +152,149 @@ function compose(args, extraEnv) {
       ...extraEnv
     }
   })
+}
+
+
+function submoduleDirLooksReady(dir) {
+  // 有 package.json 或非空 apps/ 即视为已检出，避免每次 up 都打 GitHub
+  if (fs.existsSync(path.join(dir, 'package.json'))) return true
+  try {
+    const apps = path.join(dir, 'apps')
+    return fs.existsSync(apps) && fs.readdirSync(apps).length > 0
+  } catch (e) {
+    return false
+  }
+}
+
+
+function listDocmostSourceFiles(rootDir) {
+  const skipDir = new Set([
+    '.git',
+    'node_modules',
+    'dist',
+    'build',
+    '.nx',
+    'coverage',
+    '.turbo',
+    'tmp',
+    'temp'
+  ])
+  const out = []
+  function walk(dir) {
+    let entries
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch (_) {
+      return
+    }
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name)
+      if (ent.isDirectory()) {
+        if (skipDir.has(ent.name)) continue
+        walk(full)
+        continue
+      }
+      if (!ent.isFile()) continue
+      // 忽略本机环境文件，避免 .env 变动触发无意义 rebuild
+      if (ent.name === '.env' || ent.name.endsWith('.env.local')) continue
+      out.push(full)
+    }
+  }
+  walk(rootDir)
+  out.sort()
+  return out
+}
+
+function hashDocmostSources() {
+  const docmostDir = path.join(ROOT, 'integrations', 'docmost')
+  const hash = crypto.createHash('sha256')
+  const files = listDocmostSourceFiles(docmostDir)
+  for (const filePath of files) {
+    const rel = path.relative(docmostDir, filePath).replace(/\\/g, '/')
+    const st = fs.statSync(filePath)
+    hash.update(rel)
+    hash.update('\0')
+    hash.update(String(st.size))
+    hash.update('\0')
+    hash.update(String(Math.floor(st.mtimeMs)))
+    hash.update('\0')
+    // 小文件读内容，大文件只记 size+mtime，兼顾速度和准确性
+    if (st.size <= 512 * 1024) {
+      hash.update(fs.readFileSync(filePath))
+    }
+    hash.update('\n')
+  }
+  hash.update('image=mind-map-docmost\n')
+  hash.update('version=' + String(process.env.DOCMOST_VERSION || '0.96.0') + '\n')
+  return hash.digest('hex')
+}
+
+function docmostImageExists(tag) {
+  try {
+    execSync('docker image inspect ' + JSON.stringify(tag), { stdio: 'ignore' })
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+function ensureDocmostBuilt(extraEnv) {
+  const docmostDir = path.join(ROOT, 'integrations', 'docmost')
+  const dockerfile = path.join(docmostDir, 'Dockerfile')
+  if (!fs.existsSync(dockerfile)) {
+    console.error('缺少 integrations/docmost/Dockerfile。请确认已拉取完整仓库源码后再启动。')
+    process.exit(1)
+  }
+
+  const version = String(process.env.DOCMOST_VERSION || '0.96.0')
+  const imageTag = 'mind-map-docmost:' + version
+  const stampDir = path.join(ROOT, '.docker-build-stamps')
+  const stampFile = path.join(stampDir, 'docmost.sha')
+  const currentHash = hashDocmostSources()
+  const force =
+    process.env.DOCMOST_FORCE_BUILD === '1' ||
+    process.env.DOCMOST_FORCE_BUILD === 'true'
+  let previousHash = ''
+  try {
+    previousHash = fs.readFileSync(stampFile, 'utf8').trim()
+  } catch (_) {}
+
+  const imageOk = docmostImageExists(imageTag)
+  const unchanged = !force && imageOk && previousHash && previousHash === currentHash
+
+  if (unchanged) {
+    console.log('  Docmost 镜像已是最新（源码无变化，跳过 rebuild）: ' + imageTag)
+    return false
+  }
+
+  if (force) console.log('  DOCMOST_FORCE_BUILD=1，强制重建 Docmost 镜像...')
+  else if (!imageOk) console.log('  未找到镜像 ' + imageTag + '，开始 build Docmost...')
+  else console.log('  检测到 integrations/docmost 源码有变化，开始 rebuild Docmost...')
+
+  // 同步 build，便于启动脚本判断成败
+  execSync('docker compose -f docker-compose.yml -f docker-compose.wiki.yml build docmost', {
+    cwd: ROOT,
+    stdio: 'inherit',
+    env: { ...process.env, ...(extraEnv || {}) },
+    shell: true
+  })
+
+  fs.mkdirSync(stampDir, { recursive: true })
+  fs.writeFileSync(stampFile, currentHash + '\n', 'utf8')
+  console.log('  Docmost 镜像已更新: ' + imageTag)
+  return true
+}
+
+function ensureGitSubmodules() {
+  // docmost 已是主仓库普通目录，不再走 submodule；启动前只检查源码是否齐全
+  const docmostDir = path.join(ROOT, 'integrations', 'docmost')
+  const dockerfile = path.join(docmostDir, 'Dockerfile')
+  if (!fs.existsSync(dockerfile)) {
+    console.error('缺少 integrations/docmost/Dockerfile。请确认已拉取完整仓库源码后再启动。')
+    process.exit(1)
+  }
+  console.log('  本地 Docmost 源码已就绪（integrations/docmost）')
+  return true
 }
 
 function ensureEnv() {
@@ -134,11 +310,27 @@ function ensureEnv() {
 
 async function up() {
   ensureEnv()
+  ensureGitSubmodules()
   if (!hasDocker()) {
     console.error('未检测到 Docker。请先安装 Docker Desktop 并保持运行。')
     process.exit(1)
   }
+  ensureDocmostBuilt()
   const host = process.env.PUBLIC_HOST || detectHost()
+  const wikiPort = Number(process.env.DOCMOST_PORT || 3040)
+  // 侧栏 Wiki 新窗口地址：优先用根目录 .env 的 DOCMOST_APP_URL；
+  // 未配置时默认本机 IP，避免 127.0.0.1 / localhost 与页面 IP 不一致导致跨域。
+  // prefer PUBLIC_HOST for wiki: 有 PUBLIC_HOST 时优先域名，避免侧栏跳到局域网 IP
+  if (!String(process.env.DOCMOST_APP_URL || '').trim()) {
+    const publicHost = String(process.env.PUBLIC_HOST || '').trim()
+    const wikiHost = publicHost || host
+    process.env.DOCMOST_APP_URL = `http://${wikiHost}:${wikiPort}`
+  } else {
+    process.env.DOCMOST_APP_URL = String(process.env.DOCMOST_APP_URL)
+      .trim()
+      .replace(/\/$/, '')
+  }
+  const wikiAppUrl = process.env.DOCMOST_APP_URL
   const mcpUrl = writeMcpConfig(host)
   // 先写占位 runtime + OpenClaw Token/配置，保证 compose 能拉起龙虾容器
   try {
@@ -161,10 +353,15 @@ async function up() {
     writeOpenclawRuntimeConfig({
       root: ROOT,
       token,
-      port: Number(process.env.OPENCLAW_PORT || OC_PORT)
+      port: Number(process.env.OPENCLAW_PORT || OC_PORT),
+      wikiBase: wikiAppUrl
     })
   } catch (err) {
-    writeOpenclawRuntimeConfig({ root: ROOT, port: OPENCLAW_PORT })
+    writeOpenclawRuntimeConfig({
+      root: ROOT,
+      port: OPENCLAW_PORT,
+      wikiBase: wikiAppUrl
+    })
     console.log(
       `  OpenClaw 预配置跳过：${(err && err.message) || err}`
     )
@@ -174,6 +371,7 @@ async function up() {
   console.log(`  对外只开放一个端口：${PORT}`)
   console.log(`  页面     http://${host}:${PORT}`)
   console.log(`  MCP      ${mcpUrl}`)
+  console.log(`  Wiki     ${wikiAppUrl}`)
   const openclawHostPort = Number(process.env.OPENCLAW_PORT || OPENCLAW_PORT || 4623)
   process.env.OPENCLAW_PORT = String(openclawHostPort)
   console.log(`  OpenClaw 宿主机端口 ${openclawHostPort}（容器内 18789）`)
@@ -205,7 +403,6 @@ async function up() {
     [
       'up',
       '-d',
-      '--build',
       '--force-recreate',
       '--no-deps',
       'postgres',
@@ -213,13 +410,16 @@ async function up() {
       'app',
       'docmost-db',
       'docmost-redis',
-      'docmost'
+      'docmost',
+      'wiki-gateway'
     ],
     {
       PUBLIC_HOST: host,
       MIND_MAP_PORT: String(PORT),
       PGPASSWORD: process.env.PGPASSWORD,
-      OPENCLAW_PORT: String(openclawHostPort)
+      OPENCLAW_PORT: String(openclawHostPort),
+      DOCMOST_APP_URL: wikiAppUrl,
+      DOCMOST_PORT: String(wikiPort)
     }
   )
   child.on('exit', async code => {
@@ -229,7 +429,7 @@ async function up() {
       if (runtimeCode) console.error('[Wiki] OpenWiki build failed; retry docker compose -f docker-compose.yml -f docker-compose.wiki.yml build openwiki-runtime')
       else console.log('[Wiki] OpenWiki runtime ready (run on demand)')
     })
-    console.log(`  Docmost: ${process.env.DOCMOST_APP_URL || 'http://localhost:' + (process.env.DOCMOST_PORT || 3040)}`)
+    console.log(`  Docmost: ${wikiAppUrl}`)
     console.log('')
     console.log('  已启动。浏览器打开上面的页面地址。')
     if (process.platform === 'win32') {
@@ -293,7 +493,8 @@ async function up() {
           root: ROOT,
           token: (oc && oc.token) || '',
           model: process.env.OPENCLAW_MODEL || 'openclaw/default',
-          port: openclawHostPort
+          port: openclawHostPort,
+          wikiBase: wikiAppUrl
         })
         // 勿把 token 打到控制台
         if (oc) {
@@ -312,13 +513,25 @@ async function up() {
         formatOpenclawResult(oc)
           .split('\n')
           .forEach(line => console.log(`  ${line}`))
-        const wd = ensureOpenclawWatchdog()
-        if (wd && wd.ok) {
-          console.log(
-            wd.alreadyRunning
-              ? `  OpenClaw 看门狗已在运行（防 WSL 闲置掉线）`
-              : `  OpenClaw 看门狗已启动（防 WSL 闲置掉线）`
-          )
+        // 看门狗的职责是「防止已就绪的 Gateway 掉线」，不是「反复重试拉起一个
+        // 起不来的 Gateway」。Gateway 没起来还启动看门狗，会让它每 20s 重试一次
+        // （每次都要 docker run 探针容器），在 Windows 上表现为命令行窗口不停闪现。
+        if (oc && oc.ok) {
+          const wd = ensureOpenclawWatchdog()
+          if (wd && wd.ok) {
+            console.log(
+              wd.alreadyRunning
+                ? `  OpenClaw 看门狗已在运行（防 WSL 闲置掉线）`
+                : `  OpenClaw 看门狗已启动（防 WSL 闲置掉线）`
+            )
+          }
+        } else {
+          const stopped = stopOpenclawWatchdog()
+          if (stopped && stopped.stoppedPid) {
+            console.log(
+              '  已停止残留的 OpenClaw 看门狗（Gateway 未就绪，避免每 20s 反复重试）'
+            )
+          }
         }
         if (oc && oc.ok) {
           console.log(

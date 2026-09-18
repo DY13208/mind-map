@@ -305,11 +305,19 @@
       :close-on-click-modal="false"
     >
       <p class="transferHint">
-        将「{{ resourceName }}」的所有者权限转移给其他成员。转移后你将保留管理/编辑权限，但不再是所有者。
+        将「{{ resourceName }}」的所有者权限转移给{{ isTeam ? '其他团队成员' : '其他企业成员' }}。转移后你将保留管理/编辑权限，但不再是所有者。
       </p>
+      <el-input
+        v-model="transferQuery"
+        clearable
+        prefix-icon="el-icon-search"
+        :placeholder="isTeam ? '搜索团队成员姓名或账号' : '搜索企业成员姓名或账号'"
+        style="margin-bottom: 12px"
+        @input="searchTransferCandidates"
+      />
       <el-select
         v-model="transferTargetId"
-        filterable
+        :loading="transferSearching"
         clearable
         placeholder="选择新的所有者"
         style="width: 100%"
@@ -322,10 +330,17 @@
         >
           <span>{{ candidate.name || candidate.id }}</span>
           <small style="float: right; color: #909399">{{
-            roleLabel(candidate.role)
+            candidate.transferContact ? '企业成员' : roleLabel(candidate.role)
           }}</small>
         </el-option>
       </el-select>
+      <el-button
+        v-if="transferNextCursor"
+        type="text"
+        :loading="transferSearching"
+        @click="loadTransferContacts(true)"
+      >加载更多成员</el-button>
+      <p v-if="isTeam" class="transferHint">只能转移给已加入团队的成员。</p>
       <span slot="footer">
         <el-button @click="transferVisible = false">取消</el-button>
         <el-button
@@ -396,7 +411,13 @@ export default {
     autoSelectMembers: true,
     includeChildren: true,
     transferVisible: false,
-    transferTargetId: ''
+    transferTargetId: '',
+    transferQuery: '',
+    transferContacts: [],
+    transferNextCursor: null,
+    transferSearching: false,
+    transferSearchTimer: null,
+    transferSearchVersion: 0
   }),
   computed: {
     shown: {
@@ -504,7 +525,22 @@ export default {
       return this.filteredMembers.slice(start, start + this.pageSize)
     },
     transferCandidates() {
-      return this.members.filter(member => !this.isOwnerRole(member.role))
+      const term = this.transferQuery.trim().toLowerCase()
+      const candidates = new Map()
+      const owners = new Set(this.members.filter(member => this.isOwnerRole(member.role))
+        .map(member => String(member.id || member.userId || '')))
+      const source = this.isTeam ? this.members : [
+        ...this.members,
+        ...this.transferContacts.map(contact => ({ ...contact, transferContact: true }))
+      ]
+      source.forEach(member => {
+        const id = String(member.id || member.userId || '')
+        if (!id || owners.has(id) || this.isCurrentUserMember(member)) return
+        if (term && ![member.name, id, member.wecomUserId].some(value =>
+          String(value || '').toLowerCase().includes(term))) return
+        if (!candidates.has(id)) candidates.set(id, { ...member, id })
+      })
+      return Array.from(candidates.values())
     },
     canTransferOwnership() {
       if (!this.currentUserId) return false
@@ -701,6 +737,8 @@ export default {
   },
   beforeDestroy() {
     clearTimeout(this.searchTimer)
+    clearTimeout(this.transferSearchTimer)
+    this.transferSearchVersion += 1
   },
   methods: {
     async resetAndLoad() {
@@ -971,7 +1009,12 @@ export default {
       )
     },
     openTransferDialog(member) {
-      if (!this.transferCandidates.length) {
+      this.transferQuery = ''
+      this.transferContacts = []
+      this.transferNextCursor = null
+      this.transferSearchVersion += 1
+      clearTimeout(this.transferSearchTimer)
+      if (this.isTeam && !this.transferCandidates.length) {
         this.$message.warning('请先添加其他成员，再转移所有权')
         return
       }
@@ -980,6 +1023,37 @@ export default {
           ? String(member.id || member.userId || '')
           : ''
       this.transferVisible = true
+      if (!this.isTeam) this.loadTransferContacts()
+    },
+    searchTransferCandidates() {
+      clearTimeout(this.transferSearchTimer)
+      this.transferSearchVersion += 1
+      this.transferContacts = []
+      this.transferNextCursor = null
+      this.transferSearching = false
+      if (this.isTeam) return
+      this.transferSearchTimer = setTimeout(() => this.loadTransferContacts(), 250)
+    },
+    async loadTransferContacts(append = false) {
+      if (append && (!this.transferNextCursor || this.transferSearching)) return
+      const version = ++this.transferSearchVersion
+      const resourceId = this.resourceId
+      this.transferSearching = true
+      try {
+        const result = await teamService.listContacts({
+          search: this.transferQuery.trim(),
+          limit: 100,
+          offset: append ? Number(this.transferNextCursor) : 0
+        })
+        if (version !== this.transferSearchVersion || resourceId !== this.resourceId || !this.transferVisible) return
+        this.transferContacts = append ? [...this.transferContacts, ...result.list] : result.list
+        this.transferNextCursor = result.nextCursor
+      } catch (error) {
+        if (version === this.transferSearchVersion && this.transferVisible)
+          this.$message.error(error.message || '搜索成员失败')
+      } finally {
+        if (version === this.transferSearchVersion) this.transferSearching = false
+      }
     },
     async confirmTransferOwnership() {
       if (!this.transferTargetId) return

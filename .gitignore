@@ -16,3 +16,12 @@ docker/openclaw/home/openclaw.json
 .playwright-cli/
 workbuddy_to_api/
 .codebuddy/models.json
+
+# local env backups (never commit)
+.env.*bak
+.env.broken*
+
+
+# local docker rebuild fingerprints
+.docker-build-stamps/
+

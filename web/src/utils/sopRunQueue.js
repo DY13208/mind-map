@@ -129,6 +129,7 @@ function publicJob(job, extra = {}) {
     notifyResults: job.notifyResults || [],
     missingFields: job.missingFields || [],
     missingSummary: job.missingSummary || '',
+    outputIds: Array.isArray(job.outputIds) ? job.outputIds.slice() : [],
     ...extra
   }
 }
@@ -620,6 +621,20 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       pump()
       return
     }
+    if (outcome && outcome.partial) {
+      job.state = 'partial'
+      job.status = job.status || '部分完成'
+      emit()
+      pushRecent(job)
+      const timerPartial = setTimeout(() => {
+        finishing.delete(job.id)
+        running.delete(job.id)
+        emit()
+        pump()
+      }, 1500)
+      finishing.set(job.id, timerPartial)
+      return
+    }
     job.state = 'done'
     job.status = job.status || '已完成'
     emit()
@@ -833,15 +848,22 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       }
       job.notifyResults = result.notifyResults || []
       const notifyHintDone = formatNotifyAssignees(result.notifyResults)
-      job.status = result.ok
-        ? `已完成（约 ${result.elapsedSec}s）${
-            notifyHintDone ? ` · 已通知 ${notifyHintDone}` : ''
-          }`
-        : `结束：${(result.assessment && result.assessment.reason) || result.runResult || '未确认真执行'}`
+      const partialDone = result.runResult === '部分完成'
+      job.status = !result.ok
+        ? `结束：${(result.assessment && result.assessment.reason) || result.runResult || '未确认真执行'}`
+        : partialDone
+          ? `部分完成（约 ${result.elapsedSec}s）${
+              (result.assessment && result.assessment.reason)
+                ? ` · ${String(result.assessment.reason).slice(0, 48)}`
+                : ''
+            }`
+          : `已完成（约 ${result.elapsedSec}s）${
+              notifyHintDone ? ` · 已通知 ${notifyHintDone}` : ''
+            }`
       job.resumeAfterRefresh = false
       job.resumeRetryCount = 0
       if (job.onSuccess) job.onSuccess(result, publicJob(job))
-      finishJob(job, { ok: true })
+      finishJob(job, { ok: true, partial: partialDone })
     } catch (err) {
       if (err && err.name === 'AbortError') {
         if (job.onError) job.onError(err, '已取消')
@@ -916,7 +938,9 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       onSuccess,
       onError,
       onStart,
-      onWaiting
+      onWaiting,
+      priorNodeProgress = null,
+      completedNotifyKeys = null
     }) {
       if (!roomKey) {
         return { ok: false, message: '请先选择空间' }
@@ -968,8 +992,12 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         streamText: '',
         progressText: '',
         eventLog: [],
-        nodeProgress: [],
-        completedNotifyKeys: [],
+        nodeProgress: Array.isArray(priorNodeProgress)
+          ? sanitizeNodeProgress(priorNodeProgress)
+          : [],
+        completedNotifyKeys: Array.isArray(completedNotifyKeys)
+          ? completedNotifyKeys.slice()
+          : [],
         context: null,
         result: null,
         error: '',

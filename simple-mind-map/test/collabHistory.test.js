@@ -498,6 +498,251 @@ function mockRes() {
   assert.strictEqual(listRes.body.currentRevision, 654)
   assert.strictEqual(listRes.body.completeFromRevision, 654)
 
+  const flow = engineWith({
+    checkpointEvery: 100000,
+    autoVersionOnCheckpoint: false,
+    autoVersionIdleMs: 1,
+    autoVersionMinMs: 60 * 60 * 1000
+  })
+  const boot = await flow.engine.ensureHistoryBaseline(ROOM)
+  assert.strictEqual(boot.reason, 'ROOM_INITIAL')
+  const initialList = await flow.engine.listVersions(ROOM, { limit: 20 })
+  assert.ok(initialList.versions.some(row => row.source_kind === 'room_initial'))
+  await commit(flow.engine, {
+    type: 'node.insert',
+    payload: { uid: 'idle-a', parent: 'root', text: 'idle' }
+  })
+  await commit(flow.engine, {
+    type: 'node.update',
+    payload: { uid: 'idle-a', text: 'idle-2' }
+  })
+  const autosBefore = (await flow.engine.listVersions(ROOM, { type: 'AUTO' })).versions
+    .length
+  const due = await flow.engine.processDueAutoJobs(Date.now() + 50)
+  assert.ok(due.length >= 1)
+  const autosAfter = await flow.engine.listVersions(ROOM, { type: 'AUTO' })
+  assert.ok(autosAfter.versions.length > autosBefore)
+  assert.ok(
+    autosAfter.versions.some(row => row.summary_status === 'ready' || row.summary)
+  )
+
+  const sameAuto = await flow.engine.createVersion(ROOM, {
+    type: 'AUTO',
+    revision: due[0].revision,
+    name: 'dup',
+    createdBy: 'u1'
+  })
+  assert.strictEqual(sameAuto.id, due[0].id)
+
+  const snap = engineWith({
+    checkpointEvery: 100000,
+    autoVersionOnCheckpoint: false,
+    autoVersionIdleMs: 60 * 60 * 1000,
+    autoVersionMinMs: 60 * 60 * 1000
+  })
+  await snap.engine.ensureHistoryBaseline(ROOM)
+  await commit(snap.engine, {
+    type: 'node.insert',
+    payload: { uid: 'now-a', parent: 'root', text: 'now' }
+  })
+  const beforeOpen = await snap.engine.listVersions(ROOM, { limit: 20 })
+  assert.ok(
+    !beforeOpen.versions.some(
+      row => String(row.type).toUpperCase() === 'AUTO' && Number(row.revision) > 0
+    )
+  )
+  const openRes = mockRes()
+  await handleHistoryApi(
+    {
+      method: 'GET',
+      url: `/api/files/${ROOM}/versions`,
+      roomAccess: { userId: 'u1', canEdit: true, canManage: true }
+    },
+    openRes,
+    { engine: snap.engine }
+  )
+  assert.strictEqual(openRes.code, 200)
+  assert.ok(
+    (openRes.body.versions || []).some(
+      row => String(row.type).toUpperCase() === 'AUTO' && Number(row.revision) > 0
+    ),
+    'opening history should snapshot current edits'
+  )
+  const openAgain = mockRes()
+  await handleHistoryApi(
+    {
+      method: 'GET',
+      url: `/api/files/${ROOM}/versions`,
+      roomAccess: { userId: 'u1', canEdit: true }
+    },
+    openAgain,
+    { engine: snap.engine }
+  )
+  const flushedAutos = (openAgain.body.versions || []).filter(
+    row => String(row.type).toUpperCase() === 'AUTO' && Number(row.revision) > 0
+  )
+  assert.strictEqual(flushedAutos.length, 1)
+
+  for (let i = 0; i < 21; i++) {
+    await flow.engine.createVersion(ROOM, {
+      name: 'page-' + i,
+      type: 'MANUAL',
+      createdBy: 'u1'
+    })
+  }
+  const page1 = await flow.engine.listVersions(ROOM, { limit: 20 })
+  assert.strictEqual(page1.versions.length, 20)
+  assert.ok(page1.nextCursor)
+  const page2 = await flow.engine.listVersions(ROOM, {
+    limit: 20,
+    cursor: page1.nextCursor
+  })
+  assert.ok(page2.versions.length >= 1)
+  assert.notStrictEqual(page2.versions[0].id, page1.versions[0].id)
+
+  const hidden = await flow.engine.createVersion(ROOM, {
+    name: 'hidden-one',
+    type: 'MANUAL',
+    createdBy: 'u1'
+  })
+  await flow.engine.hideVersion(ROOM, hidden.id, 'owner-1')
+  assert.strictEqual(await flow.engine.getVersion(ROOM, hidden.id), null)
+  const hideRes = mockRes()
+  await handleHistoryApi(
+    {
+      method: 'GET',
+      url: `/api/files/${ROOM}/versions/${hidden.id}/tree`,
+      roomAccess: { userId: 'viewer', canView: true }
+    },
+    hideRes,
+    { engine: flow.engine }
+  )
+  assert.strictEqual(hideRes.code, 404)
+
+  const target = (await flow.engine.listVersions(ROOM, { type: 'MANUAL', limit: 1 }))
+    .versions[0]
+  const liveNow = await flow.store.getLiveState(ROOM)
+  const key = 'idem-' + randomUUID()
+  const firstRestore = await flow.engine.restoreVersion(ROOM, {
+    versionId: target.id,
+    expectedCurrentRevision: liveNow.revision,
+    userId: 'owner-1',
+    idempotencyKey: key
+  })
+  const secondRestore = await flow.engine.restoreVersion(ROOM, {
+    versionId: target.id,
+    expectedCurrentRevision: 0,
+    userId: 'owner-1',
+    idempotencyKey: key
+  })
+  assert.strictEqual(firstRestore.newRevision, secondRestore.newRevision)
+  assert.strictEqual(
+    Number((await flow.store.getLiveState(ROOM)).restoreEpochRevision),
+    firstRestore.newRevision
+  )
+
+  const createRes = mockRes()
+  await handleHistoryApi(
+    {
+      method: 'POST',
+      url: `/api/files/${ROOM}/versions`,
+      roomAccess: { userId: 'editor', canEdit: true }
+    },
+    createRes,
+    {
+      engine: flow.engine,
+      body: { name: 'manual-now', type: 'AUTO', revision: 0 }
+    }
+  )
+  assert.strictEqual(createRes.code, 201)
+  assert.strictEqual(createRes.body.version.type, 'MANUAL')
+  assert.notStrictEqual(createRes.body.version.revision, 0)
+  assert.ok(createRes.body.version.capabilities)
+  assert.ok(createRes.body.version.summaryText)
+
+  let gapCode = ''
+  try {
+    await replayOperations(
+      { root: { isRoot: true, data: { uid: 'root', text: 'Root' }, children: [] } },
+      {},
+      [
+        { version: 1, operation_type: 'node.insert', payload: { uid: 'z', parent: 'root', text: 'Z' } },
+        { version: 3, operation_type: 'node.update', payload: { uid: 'z', text: 'Z2' } }
+      ],
+      { requireContinuous: true, fromRevision: 0 }
+    )
+  } catch (err) {
+    gapCode = err.code
+  }
+  assert.strictEqual(gapCode, 'HISTORY_OPS_GAP')
+
+  let unsupported = ''
+  try {
+    await replayOperations(
+      { root: { isRoot: true, data: { uid: 'root', text: 'Root' }, children: [] } },
+      {},
+      [{ version: 1, operation_type: 'node.explode', payload: {} }],
+      { requireContinuous: true, fromRevision: 0 }
+    )
+  } catch (err) {
+    unsupported = err.code
+  }
+  assert.strictEqual(unsupported, 'HISTORY_REPLAY_UNSUPPORTED')
+
+  const preview = await flow.engine.getVersionTree(ROOM, target.id)
+  assert.ok(preview.tree)
+  assert.ok(preview.readOnly)
+  const previewAgain = await flow.engine.getVersionTree(ROOM, target.id)
+  assert.strictEqual(previewAgain.checksum, preview.checksum)
+  assert.ok(flow.engine.treeCache.size >= 1)
+
+  await flow.store.upsertAutoJob({
+    room_key: ROOM,
+    last_revision: 1,
+    due_at: new Date(Date.now() - 1000).toISOString(),
+    editors: ['a']
+  })
+  const claimed = await flow.store.claimDueAutoJobs(Date.now(), 8, 'w1', 5)
+  assert.ok(claimed.length >= 1)
+  await flow.store.upsertAutoJob({
+    room_key: ROOM,
+    last_revision: 99,
+    due_at: new Date(Date.now() + 1000).toISOString(),
+    editors: ['b']
+  })
+  await flow.store.completeAutoJob(ROOM, 1)
+  const leftover = await flow.store.claimDueAutoJobs(Date.now() + 5000, 8, 'w2', 5)
+  assert.ok(leftover.some(job => Number(job.last_revision) === 99))
+
+  const roomA = engineWith()
+  const roomB = engineWith()
+  roomB.store.roomOf(ROOM + '-b')
+  const aLive = await roomA.store.getLiveState(ROOM)
+  const bKey = ROOM + '-b'
+  await roomB.store.setLiveState(bKey, {
+    revision: 0,
+    nodes: aLive.nodes,
+    metadata: aLive.metadata
+  })
+  await roomA.engine.ensureHistoryBaseline(ROOM)
+  await roomB.engine.ensureHistoryBaseline(bKey)
+  const aVer = await roomA.engine.createVersion(ROOM, { name: 'a', type: 'MANUAL' })
+  const bVer = await roomB.engine.createVersion(bKey, { name: 'b', type: 'MANUAL' })
+  const [ra, rb] = await Promise.all([
+    roomA.engine.restoreVersion(ROOM, {
+      versionId: aVer.id,
+      expectedCurrentRevision: (await roomA.store.getLiveState(ROOM)).revision,
+      userId: 'o'
+    }),
+    roomB.engine.restoreVersion(bKey, {
+      versionId: bVer.id,
+      expectedCurrentRevision: (await roomB.store.getLiveState(bKey)).revision,
+      userId: 'o'
+    })
+  ])
+  assert.ok(ra.newRevision)
+  assert.ok(rb.newRevision)
+
   console.log('collabHistory.test.js ok')
 })().catch(err => {
   console.error(err)

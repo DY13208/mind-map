@@ -567,12 +567,20 @@ function writeOpenclawRuntimeConfig({
   root,
   token = '',
   model = 'openclaw/default',
-  port = DEFAULT_PORT
+  port = DEFAULT_PORT,
+  wikiBase = ''
 } = {}) {
   const projectRoot = path.resolve(root || path.join(__dirname, '..'))
   const file = path.join(projectRoot, 'docker', 'runtime-config.local.js')
   const dir = path.dirname(file)
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+  const resolvedWikiBase = String(
+    wikiBase ||
+      process.env.DOCMOST_APP_URL ||
+      ''
+  )
+    .trim()
+    .replace(/\/$/, '')
   const config = {
     gateway: true,
     publicPath: '/',
@@ -584,12 +592,13 @@ function writeOpenclawRuntimeConfig({
     cogneeBase: '/cognee-api',
     cogneeDataset: String(process.env.COGNEE_DATASET || 'liangce')
   }
+  if (resolvedWikiBase) config.wikiBase = resolvedWikiBase
   fs.writeFileSync(
     file,
     'window.__MIND_MAP_RUNTIME__ = ' + JSON.stringify(config, null, 2) + '\n',
     'utf8'
   )
-  return { file, hasToken: !!config.openclawToken }
+  return { file, hasToken: !!config.openclawToken, wikiBase: resolvedWikiBase }
 }
 
 function formatOpenclawResult(result) {
@@ -673,14 +682,23 @@ if (require.main === module) {
       }
       console.log(formatOpenclawResult(r) || JSON.stringify(r, null, 2))
       try {
-        const { ensureOpenclawWatchdog } = require('./openclaw-watchdog')
-        const wd = ensureOpenclawWatchdog()
-        if (wd && wd.ok) {
-          console.log(
-            wd.alreadyRunning
-              ? 'OpenClaw 看门狗已在运行'
-              : 'OpenClaw 看门狗已启动（防 502）'
-          )
+        // 同 docker-up.js：Gateway 没起来就不要启动看门狗，否则它会每 20s
+        // 重试拉起一次（每次 docker run 探针），Windows 上命令行窗口会不停闪现。
+        const { ensureOpenclawWatchdog, stopOpenclawWatchdog } = require('./openclaw-watchdog')
+        if (r && r.ok) {
+          const wd = ensureOpenclawWatchdog()
+          if (wd && wd.ok) {
+            console.log(
+              wd.alreadyRunning
+                ? 'OpenClaw 看门狗已在运行'
+                : 'OpenClaw 看门狗已启动（防 502）'
+            )
+          }
+        } else {
+          const stopped = stopOpenclawWatchdog()
+          if (stopped && stopped.stoppedPid) {
+            console.log('已停止残留的 OpenClaw 看门狗（Gateway 未就绪）')
+          }
         }
       } catch (e) {
         /* ignore */

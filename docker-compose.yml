@@ -35,6 +35,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # 构建容器不继承宿主机的 Clash 代理，容器直连对大流量会被掐断
+      # （apt-get 装 nginx 必失败）。在 .env 里配 BUILD_HTTP_PROXY 即可透传，
+      # 留空则不使用代理（适合能直连 Debian 源的网络环境）。
+      args:
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
+        NO_PROXY: ${BUILD_NO_PROXY:-localhost,127.0.0.1,postgres,redis}
     env_file:
       - .env
     environment:
@@ -56,6 +63,8 @@ services:
       COLLAB_RATE_LIMIT_PER_ROOM: "800"
       COLLAB_RATE_LIMIT_GLOBAL: "8000"
       COLLAB_V2: "1"
+      TZ: Asia/Shanghai
+      HISTORY_DISPLAY_TZ: Asia/Shanghai
       SOP_OUTPUT_DIR: /app/output
       KNOWLEDGE_COMPILER_ENABLED: ${KNOWLEDGE_COMPILER_ENABLED:-true}
       KNOWLEDGE_SYNC_INTERVAL: ${KNOWLEDGE_SYNC_INTERVAL:-300}
@@ -66,6 +75,13 @@ services:
       COGNEE_API: ${COGNEE_API:-http://192.168.0.204:8320}
       COGNEE_API_KEY: ${COGNEE_API_KEY:-}
       COGNEE_DATASET: ${COGNEE_DATASET:-liangce}
+      # Docmost / Wiki SSO（由 scripts/docker-up.js 从 .secrets/wiki.env 注入）
+      DOCMOST_APP_URL: ${DOCMOST_APP_URL:-http://localhost:3040}
+      DOCMOST_DATABASE_URL: ${DOCMOST_DATABASE_URL:-}
+      DOCMOST_APP_SECRET: ${DOCMOST_APP_SECRET:-}
+      DOCMOST_SSO_SECRET: ${DOCMOST_SSO_SECRET:-}
+      DOCMOST_INTERNAL_URL: ${DOCMOST_INTERNAL_URL:-http://docmost:3000}
+      DOCMOST_SYNC_ENABLED: ${DOCMOST_SYNC_ENABLED:-true}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

@@ -1467,6 +1467,17 @@ async function handleAuthApi(req, res) {
     return true
   }
 
+  if (
+    await require('./wikiSso').handleWikiSsoApi(req, res, {
+      authenticateRequest,
+      sendJson,
+      isAllowedOrigin,
+      applyCorsHeaders
+    })
+  ) {
+    return true
+  }
+
   if (pathname === '/api/auth/me' && req.method === 'GET') {
     if (!config.enabled) {
       sendJson(req, res, 200, { enabled: false, authenticated: false })

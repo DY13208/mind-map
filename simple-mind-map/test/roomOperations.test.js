@@ -590,6 +590,7 @@ testRedoRequiresUndoAndBlocksDoubleRedo()
 testRestoreAndHistoricalReplay()
 testConcurrentSiblingInsertsGetDistinctPositions()
 testNodeReorderSameParent()
+testOutlineExposesAttachments()
 testPreviewTimings()
 testPreviewLiveTreeCapped()
 
@@ -640,5 +641,35 @@ function testNodeReorderSameParent() {
     }
   )
   assert.strictEqual(replayed.root.children[0], 'c')
+}
+
+function testOutlineExposesAttachments() {
+  const outline = mindDoc.toOutline({
+    root: node('root', 'Root', ['a', 'b', 'c', 'd']),
+    a: node('a', '合同', [], {
+      attachmentId: 'att-1',
+      attachmentName: '<b>合同</b>.pdf',
+      attachmentStatus: 'ready',
+      attachmentExtractedText: '截断预览'
+    }),
+    b: node('b', '扫描件', [], {
+      attachmentId: 'att-2',
+      attachmentName: '扫描件.png',
+      attachmentStatus: 'processing'
+    }),
+    c: node('c', '外链', [], {
+      attachmentUrl: 'https://example.com/file.pdf',
+      attachmentName: '旧附件.pdf'
+    }),
+    d: node('d', '普通节点')
+  })
+  const lines = outline.split('\n')
+  // A ready attachment advertises the id read_attachment needs, and the file
+  // name is stripped of markup like every other outline label.
+  assert.ok(/- 合同 {2}\[a] {2}\(附件 合同\.pdf att:att-1\)$/.test(lines[1]), lines[1])
+  assert.ok(/\(附件 扫描件\.png att:att-2 processing\)$/.test(lines[2]), lines[2])
+  assert.ok(/\(附件 旧附件\.pdf 外部链接\)$/.test(lines[3]), lines[3])
+  assert.strictEqual(lines[4].includes('附件'), false, lines[4])
+  assert.strictEqual(outline.includes('截断预览'), false)
 }
 console.log('room operation tests passed')

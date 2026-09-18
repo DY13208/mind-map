@@ -6,6 +6,10 @@ const {
   COS_SLICE_BYTES,
   EXTRACT_WAIT_MAX_BYTES,
   EXTRACT_CONCURRENCY,
+  DEFAULT_TEXT_SLICE_CHARS,
+  MAX_TEXT_SLICE_CHARS,
+  DEFAULT_LIST_LIMIT,
+  MAX_LIST_LIMIT,
   isAllowedFile,
   normalizeMime,
   safeFileName,
@@ -146,6 +150,123 @@ async function listByIds(db, roomKey, ids) {
     [roomKey, list]
   )
   return res.rows.map(rowToDto)
+}
+
+// extracted_text can hold tens of thousands of characters per row, so metadata
+// reads select its length instead of its value.
+const META_COLUMNS = [
+  'id',
+  'room_key',
+  'node_uid',
+  'content_hash',
+  'file_name',
+  'mime_type',
+  'byte_size',
+  'status',
+  'error_message',
+  'source_kind',
+  'created_by',
+  'created_at',
+  'updated_at'
+]
+  .map(column => `a.${column}`)
+  .join(', ')
+
+function rowToMetaDto(row) {
+  const dto = rowToDto(row)
+  if (!dto) return null
+  delete dto.extractedText
+  return dto
+}
+
+function clampInt(value, fallback, max) {
+  const n = Math.floor(Number(value))
+  if (!Number.isFinite(n) || n <= 0) return fallback
+  return Math.min(n, max)
+}
+
+// A file uploaded twice inside one room is deduped onto a single row whose
+// node_uid only records the first node, so the node's own attachmentId has to
+// be consulted as well.
+async function attachmentIdsOnNode(db, roomKey, nodeUid) {
+  try {
+    const res = await db.query(
+      `select data->>'attachmentId' as id
+       from room_nodes
+       where room_key = $1 and uid = $2 and deleted_at is null`,
+      [roomKey, nodeUid]
+    )
+    return res.rows.map(row => String(row.id || '')).filter(Boolean)
+  } catch (err) {
+    // Rooms predating the room_nodes migration only have the attachment side.
+    if (err && (err.code === '42P01' || err.code === '42703')) return []
+    throw err
+  }
+}
+
+async function listMeta(db, roomKey, options = {}) {
+  const nodeUid = String(options.nodeUid || '').trim()
+  const ids = (options.ids || [])
+    .map(id => String(id || '').trim())
+    .filter(Boolean)
+    .slice(0, MAX_LIST_LIMIT)
+  const limit = clampInt(options.limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT)
+  const params = [roomKey]
+  const where = ['a.room_key = $1']
+  if (nodeUid) {
+    params.push(nodeUid)
+    const uidParam = `$${params.length}`
+    params.push(await attachmentIdsOnNode(db, roomKey, nodeUid))
+    where.push(`(a.node_uid = ${uidParam} or a.id = any($${params.length}::text[]))`)
+  }
+  if (ids.length) {
+    params.push(ids)
+    where.push(`a.id = any($${params.length}::text[])`)
+  }
+  params.push(limit)
+  const res = await db.query(
+    `select ${META_COLUMNS}, char_length(a.extracted_text) as extracted_chars
+     from node_attachments a
+     where ${where.join(' and ')}
+     order by a.updated_at desc, a.id
+     limit $${params.length}`,
+    params
+  )
+  return res.rows.map(rowToMetaDto)
+}
+
+async function getTextSlice(db, roomKey, id, options = {}) {
+  const rawOffset = Math.floor(Number(options.offset))
+  const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? rawOffset : 0
+  const limit = clampInt(
+    options.limit,
+    DEFAULT_TEXT_SLICE_CHARS,
+    MAX_TEXT_SLICE_CHARS
+  )
+  const res = await db.query(
+    `select ${META_COLUMNS}, char_length(a.extracted_text) as extracted_chars,
+            substr(a.extracted_text, $3 + 1, $4) as text_slice
+     from node_attachments a
+     where a.room_key = $1 and a.id = $2
+     limit 1`,
+    [roomKey, id, offset, limit]
+  )
+  const row = res.rows[0]
+  if (!row) return null
+  const attachment = rowToMetaDto(row)
+  const totalChars = attachment.extractedChars
+  const text = String(row.text_slice || '')
+  const nextOffset = offset + text.length
+  const hasMore = nextOffset < totalChars
+  return {
+    attachment,
+    text,
+    offset,
+    length: text.length,
+    total_chars: totalChars,
+    has_more: hasMore,
+    next_offset: hasMore ? nextOffset : null
+  }
 }
 
 async function putObject(cosKey, buffer, mimeType) {
@@ -561,6 +682,8 @@ module.exports = {
   getById,
   getByHash,
   listByIds,
+  listMeta,
+  getTextSlice,
   getContentById,
   reextractStored,
   createFromBuffer,

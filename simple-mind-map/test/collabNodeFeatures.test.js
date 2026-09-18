@@ -17,7 +17,8 @@ const {
   isCollabImageKey,
   shouldPreserveRichHtml,
   normalizeAppliedUpdatePayload,
-  recreateTypesFromPatch
+  recreateTypesFromPatch,
+  needsGeometryRefresh
 } = require('../src/utils/collabNodeFeatures')
 
 async function seed(store) {
@@ -75,7 +76,7 @@ async function update(store, payload, version) {
     'Attachment'
   ].forEach(name => assert.ok(names.includes(name), name))
   const attachment = NODE_FEATURE_MATRIX.find(item => item.feature === 'Attachment')
-  assert.strictEqual(attachment.status, 'enabled')
+  assert.strictEqual(attachment.status, 'fixed')
   NODE_FEATURE_MATRIX.forEach(item => {
     assert.strictEqual(item.operation.includes('map.replace'), false, item.feature)
     assert.strictEqual(item.pgField.includes('rooms.nodes'), false, item.feature)
@@ -426,6 +427,19 @@ async function update(store, payload, version) {
   assert.strictEqual(applied.uid, 'n1')
   assert.deepStrictEqual(applied.patch.tag, ['A', 'B'])
   assert.deepStrictEqual(recreateTypesFromPatch(applied.patch), ['tag'])
+
+  assert.deepStrictEqual(recreateTypesFromPatch({ attachmentId: 'att-1' }), ['attachment'])
+  assert.deepStrictEqual(
+    recreateTypesFromPatch({
+      attachmentId: 'att-1',
+      attachmentName: 'a.pdf',
+      attachmentUrl: '',
+      attachmentStatus: 'ready'
+    }),
+    ['attachment']
+  )
+  assert.strictEqual(needsGeometryRefresh({ attachmentId: 'att-1' }), true)
+  assert.strictEqual(needsGeometryRefresh({ attachmentName: 'a.pdf' }), true)
 
   ;['hyperlink', 'image', 'mapRef', 'shape'].forEach(key => {
     const restored = mergeNodeDataLww({ text: 'x' }, { [key]: key === 'shape' ? 'diamond' : { v: 1 } }, 40)

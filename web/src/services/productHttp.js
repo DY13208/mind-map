@@ -21,7 +21,8 @@ export async function productRequest(path, options = {}) {
         ...(options.headers || {})
       },
       method: options.method || 'GET',
-      body: options.body
+      body: options.body,
+      signal: options.signal
     },
     timeoutMs
   ).catch(err => {
