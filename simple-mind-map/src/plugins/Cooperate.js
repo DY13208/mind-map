@@ -6600,41 +6600,26 @@ class Cooperate {
   async revealUid(uid) {
     if (!uid) return null
     const renderer = this.mindMap.renderer
-    let target = renderer.findNodeByUid(uid)
-    if (target) {
-      this.mindMap.execCommand('GO_TARGET_NODE', uid)
-      return target
-    }
-    if (!this.httpFetchLocate) return null
-    const located = await this.httpFetchLocate(uid)
-    if (!located || !located.ancestors) return null
-    this.httpHydrating = true
-    try {
-      for (let i = 0; i < located.ancestors.length; i++) {
-        const id = located.ancestors[i]
-        let node = renderer.findNodeByUid(id)
-        if (!node && i > 0) {
-          const parent = renderer.findNodeByUid(located.ancestors[i - 1])
-          const stub = located.nodes && located.nodes[id]
-          if (parent && stub) {
-            this.mergeHttpChildren(parent.nodeData, [stub])
-            if (this._origSetNodeExpand) this._origSetNodeExpand(parent, true)
-            this.mindMap.render()
-            node = renderer.findNodeByUid(id)
-          }
-        }
-        if (node) {
-          await this.hydrateFromHttp(node)
-          if (this._origSetNodeExpand) this._origSetNodeExpand(node, true)
-          this.mindMap.render()
-        }
+    if (!renderer.findNodeByUid(uid) && !this.findTreeNode(renderer.renderTree, uid)) {
+      this.httpHydrating = true
+      try {
+        // Hydrate the data path: collapsed ancestors have no rendered instance.
+        await this.ensureHttpNodePath(uid)
+        this.mindMap.emit('personal_expand_change')
+        await new Promise(resolve => this.mindMap.render(resolve))
+      } finally {
+        this.httpHydrating = false
+        this.flushPendingHttpRefresh()
       }
-    } finally {
-      this.httpHydrating = false
-      this.flushPendingHttpRefresh()
     }
-    target = renderer.findNodeByUid(uid)
-    if (target) this.mindMap.execCommand('GO_TARGET_NODE', uid)
+    // Wait for every ancestor to be expanded and laid out before resolving UID.
+    await new Promise(resolve => renderer.expandToNodeUid(uid, resolve))
+    const target = renderer.findNodeByUid(uid)
+    if (target) {
+      await new Promise(resolve => {
+        this.mindMap.execCommand('GO_TARGET_NODE', uid, resolve)
+      })
+    }
     return target
   }
 

@@ -2,6 +2,7 @@ const path = require('path')
 const store = require('../manifestStore')
 const { readCanonical } = require('./canonicalInput')
 const client = require('./docmostClient')
+const mappingStore = require('../docmostMappingStore')
 
 const ROLE_MAP = {
   owner: 'admin',
@@ -366,6 +367,8 @@ async function sync(roomId, options = {}) {
     process.env.KNOWLEDGE_OUTPUT_DIR ||
     path.resolve(__dirname, '../../../../knowledge')
 
+  await mappingStore.ensureSchema(mindPool)
+
   const room = await loadRoomMeta(mindPool, roomId)
   if (!room) return { roomId, skipped: true, reason: 'room missing' }
 
@@ -384,132 +387,265 @@ async function sync(roomId, options = {}) {
   const previousRaw =
     (canonical.manifest.downstream && canonical.manifest.downstream.docmost) ||
     {}
-  // Space changed (e.g. personal slug fix): drop stale pageIds from other spaces
   const previous =
     previousRaw.spaceId && previousRaw.spaceId !== space.spaceId
       ? {}
       : previousRaw
-  const pages = { ...(previous.pages || {}) }
-  const docsByFile = new Map(
-    canonical.documents.map(doc => [doc.file, doc])
+
+  const force = !!options.force
+  const warnings = []
+  const pages = {}
+  const versionTag = String(
+    canonical.manifest.lastCompiledVersion ||
+      canonical.manifest.lastSourceRevision ||
+      ''
   )
 
-  const sameVersion =
-    previous.lastPushedVersion === canonical.manifest.lastCompiledVersion &&
-    previous.spaceId &&
-    Object.keys(previous.pages || {}).length === canonical.documents.length &&
-    canonical.documents.every(doc => {
-      const prev = previous.pages && previous.pages[doc.file]
-      return prev && prev.pageId && prev.contentHash === doc.fileHash
-    })
-  if (sameVersion && !options.force) {
-    // Content unchanged; still refresh ACL on demand
-    if (options.syncMembers !== false) {
-      const members = await loadRoomMembers(mindPool, roomId)
-      await syncMembers(auth, previous.spaceId, members, env)
-    }
-    return {
+  async function syncStandardDoc(doc, { parentPageId, titleBase, pageLinks }) {
+    const topicKey = mappingStore.topicKeyFromCanonicalPath(doc.file)
+    const title = mappingStore.standardTitle(titleBase)
+    let standard = await mappingStore.getMapping(mindPool, {
       roomId,
-      status: 'synced',
-      skippedContent: true,
-      spaceId: previous.spaceId,
-      spaceKind: previous.spaceKind,
-      pages: Object.keys(previous.pages || {}).length
+      topicKey,
+      slot: 'standard'
+    })
+
+    const legacyPageId =
+      previous.pages &&
+      previous.pages[doc.file] &&
+      previous.pages[doc.file].pageId
+
+    // Legacy migration: keep old mixed page as human; never replace it with Canonical
+    if (!standard && legacyPageId) {
+      const human = await mappingStore.getMapping(mindPool, {
+        roomId,
+        topicKey,
+        slot: 'human'
+      })
+      if (!human) {
+        await mappingStore.upsertMapping(mindPool, {
+          roomId,
+          topicKey,
+          slot: 'human',
+          owner: 'human',
+          canonicalPath: doc.file,
+          docmostSpaceId: space.spaceId,
+          docmostPageId: legacyPageId,
+          contentHash:
+            (previous.pages[doc.file] && previous.pages[doc.file].contentHash) ||
+            '',
+          lastSyncedVersion: '',
+          title:
+            (previous.pages[doc.file] && previous.pages[doc.file].title) ||
+            titleBase
+        })
+        warnings.push({
+          code: 'LEGACY_PAGE_PRESERVED_AS_HUMAN',
+          topicKey,
+          pageId: legacyPageId
+        })
+        console.warn(
+          '[DocmostSync][room=' +
+            roomId +
+            '] legacy page preserved as human slot: topic=' +
+            topicKey +
+            ' page=' +
+            legacyPageId
+        )
+      }
+      standard = null
     }
+
+    const marker = mappingStore.ownershipMarker({
+      roomId,
+      topicKey,
+      slot: 'standard',
+      owner: 'mindmap'
+    })
+    const body = toDocmostMarkdown(doc.text, { pageLinks, env })
+    const markdown = marker + body
+    const contentHash = String(doc.fileHash || '')
+
+    if (standard) {
+      const guard = mappingStore.assertReplaceAllowed(standard, {
+        topicKey,
+        expectedPageId: standard.docmost_page_id
+      })
+      if (!guard.ok) {
+        warnings.push({
+          code: 'OWNERSHIP_GUARD_BLOCKED_REPLACE',
+          topicKey,
+          reason: guard.reason,
+          mappingPageId: standard.docmost_page_id
+        })
+        console.error(
+          '[DocmostSync][room=' +
+            roomId +
+            '] ownership guard blocked replace: topic=' +
+            topicKey +
+            ' reason=' +
+            guard.reason +
+            ' — creating a new standard page instead'
+        )
+        standard = null
+      } else if (
+        !force &&
+        standard.content_hash === contentHash &&
+        standard.title === title &&
+        standard.docmost_space_id === space.spaceId
+      ) {
+        pages[doc.file] = {
+          pageId: standard.docmost_page_id,
+          contentHash: standard.content_hash,
+          title: standard.title,
+          parentPageId: parentPageId || null,
+          slot: 'standard',
+          owner: 'mindmap',
+          topicKey
+        }
+        return standard.docmost_page_id
+      }
+    }
+
+    if (standard && standard.docmost_page_id) {
+      const pageId = await upsertPage(auth, {
+        spaceId: space.spaceId,
+        pageId: standard.docmost_page_id,
+        parentPageId: parentPageId || undefined,
+        title,
+        markdown,
+        env
+      })
+      const row = await mappingStore.upsertMapping(mindPool, {
+        roomId,
+        topicKey,
+        slot: 'standard',
+        owner: 'mindmap',
+        canonicalPath: doc.file,
+        docmostSpaceId: space.spaceId,
+        docmostPageId: pageId,
+        contentHash,
+        lastSyncedVersion: versionTag,
+        title
+      })
+      pages[doc.file] = {
+        pageId: row.docmost_page_id,
+        contentHash: row.content_hash,
+        title: row.title,
+        parentPageId: parentPageId || null,
+        slot: 'standard',
+        owner: 'mindmap',
+        topicKey
+      }
+      return pageId
+    }
+
+    // Create brand-new standard page (never reuse human/ai/legacy page ids)
+    const pageId = await upsertPage(auth, {
+      spaceId: space.spaceId,
+      pageId: null,
+      parentPageId: parentPageId || undefined,
+      title,
+      markdown,
+      env
+    })
+    const row = await mappingStore.upsertMapping(mindPool, {
+      roomId,
+      topicKey,
+      slot: 'standard',
+      owner: 'mindmap',
+      canonicalPath: doc.file,
+      docmostSpaceId: space.spaceId,
+      docmostPageId: pageId,
+      contentHash,
+      lastSyncedVersion: versionTag,
+      title
+    })
+    pages[doc.file] = {
+      pageId: row.docmost_page_id,
+      contentHash: row.content_hash,
+      title: row.title,
+      parentPageId: parentPageId || null,
+      slot: 'standard',
+      owner: 'mindmap',
+      topicKey
+    }
+    return pageId
   }
 
+  const docsByFile = new Map(canonical.documents.map(doc => [doc.file, doc]))
   const branchDocs = canonical.documents.filter(doc => doc.file !== 'README.md')
-  const force = !!options.force
-
-  // Root page first (clean Markdown; branch links filled in a second pass)
   const readme = docsByFile.get('README.md')
+  let rootPageId = null
+
   if (readme) {
-    const title = String(
+    const titleBase =
       room.title && room.title !== '未命名'
         ? room.title
         : titleFromMarkdown(readme.text, roomId)
-    ).slice(0, 200)
-    const prev = pages['README.md'] || {}
-    if (force || !prev.pageId || prev.contentHash !== readme.fileHash || prev.title !== title) {
-      const pageId = await upsertPage(auth, {
-        spaceId: space.spaceId,
-        pageId: prev.pageId,
-        title,
-        markdown: toDocmostMarkdown(readme.text, { env }),
-        env
-      })
-      pages['README.md'] = {
-        pageId,
-        contentHash: readme.fileHash,
-        title,
-        parentPageId: null
-      }
-    }
+    rootPageId = await syncStandardDoc(readme, {
+      parentPageId: null,
+      titleBase,
+      pageLinks: null
+    })
   }
 
-  const rootPageId = pages['README.md'] && pages['README.md'].pageId
-
-  // Branch pages under root — upload cleaned Markdown only
   for (const doc of branchDocs) {
-    const title = titleFromMarkdown(
+    const titleBase = titleFromMarkdown(
       doc.text,
       doc.file.replace(/^branches\//, '').replace(/\.md$/, '')
     )
-    const prev = pages[doc.file] || {}
-    if (
-      !force &&
-      prev.pageId &&
-      prev.contentHash === doc.fileHash &&
-      prev.title === title &&
-      prev.parentPageId === rootPageId
-    ) {
-      continue
-    }
-    // Stale page under wrong parent: recreate so hierarchy is correct
-    const recreate =
-      prev.pageId && rootPageId && prev.parentPageId && prev.parentPageId !== rootPageId
-    if (recreate) {
-      await deletePage(auth, prev.pageId, env)
-      prev.pageId = null
-    }
-    const pageId = await upsertPage(auth, {
-      spaceId: space.spaceId,
-      pageId: prev.pageId,
+    await syncStandardDoc(doc, {
       parentPageId: rootPageId || undefined,
-      title,
-      markdown: toDocmostMarkdown(doc.text, { env }),
-      env
+      titleBase,
+      pageLinks: null
     })
-    pages[doc.file] = {
-      pageId,
-      contentHash: doc.fileHash,
-      title,
-      parentPageId: rootPageId || null
-    }
   }
 
-  // Second pass: rewrite README links to Docmost page paths
+  // Second pass: rewrite README branch links to Docmost standard page paths
   if (readme && pages['README.md'] && pages['README.md'].pageId) {
     const pageLinks = new Map()
     for (const [file, meta] of Object.entries(pages)) {
       if (file !== 'README.md' && meta && meta.pageId) {
-        pageLinks.set(file, `/p/${meta.pageId}`)
+        pageLinks.set(file, '/p/' + meta.pageId)
       }
     }
-    await upsertPage(auth, {
-      spaceId: space.spaceId,
-      pageId: pages['README.md'].pageId,
-      title: pages['README.md'].title,
-      markdown: toDocmostMarkdown(readme.text, { pageLinks, env }),
-      env
+    const titleBase =
+      room.title && room.title !== '未命名'
+        ? room.title
+        : titleFromMarkdown(readme.text, roomId)
+    await syncStandardDoc(readme, {
+      parentPageId: null,
+      titleBase,
+      pageLinks
     })
   }
 
-  // Delete pages for removed files
-  for (const file of Object.keys(pages)) {
-    if (docsByFile.has(file)) continue
-    await deletePage(auth, pages[file].pageId, env)
-    delete pages[file]
+  // Removed canonical docs: archive STANDARD only; keep human/ai pages
+  const mapped = await mappingStore.listRoomMappings(mindPool, roomId)
+  for (const row of mapped) {
+    if (row.slot !== 'standard') continue
+    const stillThere = canonical.documents.some(
+      doc =>
+        mappingStore.topicKeyFromCanonicalPath(doc.file) === row.topic_key
+    )
+    if (stillThere) continue
+    warnings.push({
+      code: 'STANDARD_ARCHIVED_CANONICAL_REMOVED',
+      topicKey: row.topic_key,
+      pageId: row.docmost_page_id
+    })
+    console.warn(
+      '[DocmostSync][room=' +
+        roomId +
+        '] archiving standard page (canonical removed): topic=' +
+        row.topic_key
+    )
+    await deletePage(auth, row.docmost_page_id, env)
+    await mappingStore.softDeleteStandardByTopic(mindPool, {
+      roomId,
+      topicKey: row.topic_key
+    })
   }
 
   const downstream = {
@@ -518,9 +654,11 @@ async function sync(roomId, options = {}) {
     spaceKind: space.kind,
     rootPageId: pages['README.md'] ? pages['README.md'].pageId : null,
     pages,
+    ownershipVersion: 1,
     lastPushedVersion: canonical.manifest.lastCompiledVersion,
     lastPushedSourceRevision: canonical.manifest.lastSourceRevision,
-    lastPushedAt: new Date().toISOString()
+    lastPushedAt: new Date().toISOString(),
+    warnings
   }
   await writeDownstream(outputDir, roomId, downstream)
 
@@ -529,11 +667,14 @@ async function sync(roomId, options = {}) {
     status: 'synced',
     spaceId: space.spaceId,
     spaceKind: space.kind,
-    pages: Object.keys(pages).length
+    pages: Object.keys(pages).length,
+    syncedVersion: versionTag,
+    warnings
   }
 }
 
 module.exports = {
+  mappingStore,
   health,
   sync,
   syncEnabled,

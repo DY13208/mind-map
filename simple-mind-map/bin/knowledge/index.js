@@ -2,12 +2,12 @@ const path = require('path')
 const { KnowledgeCompiler } = require('./compiler')
 const { startScheduler } = require('./scheduler')
 const { affectedUids } = require('./changeTracker')
+const docmostMappingStore = require('./docmostMappingStore')
+const docmostSyncCoordinator = require('./docmostSyncCoordinator')
 
 let compiler = null
 let scheduler = null
 let sourceClient = null
-let syncQueue = Promise.resolve()
-const syncPending = new Set()
 
 function enabled() {
   return /^(true|1|yes|on)$/i.test(
@@ -19,34 +19,67 @@ function docmostSyncEnabled() {
   return require('./adapters/docmostAdapter').syncEnabled()
 }
 
-function enqueueDocmostSync(roomId, pool) {
+function enqueueDocmostSync(roomId, pool, reason) {
   if (!docmostSyncEnabled()) return
   const key = String(roomId || '')
-  if (!key || syncPending.has(key)) return
-  syncPending.add(key)
-  syncQueue = syncQueue
-    .then(async () => {
-      try {
-        const result = await require('./adapters/docmostAdapter').sync(key, {
-          pool,
-          outputDir: compiler && compiler.outputDir
-        })
-        if (result && !result.skipped) {
-          console.log(
-            `[DocmostSync][room=${key}] space=${result.spaceId} kind=${result.spaceKind} pages=${result.pages}`
-          )
-        } else if (result && result.skipped) {
-          console.log(`[DocmostSync][room=${key}] skipped: ${result.reason}`)
-        }
-      } catch (err) {
-        console.error(
-          `[DocmostSync][room=${key}] failed: ${(err && err.message) || err}`
+  if (!key) return
+  docmostSyncCoordinator
+    .requestSync(key, {
+      pool,
+      outputDir: compiler && compiler.outputDir,
+      reason: reason || 'compile'
+    })
+    .then(result => {
+      if (!result || result.skipped) return
+      if (result.accepted && result.coalesced) {
+        console.log(
+          '[DocmostSync][room=' + key + '] coalesced (rerun scheduled)'
         )
-      } finally {
-        syncPending.delete(key)
       }
     })
-    .catch(() => {})
+    .catch(err => {
+      console.error(
+        '[DocmostSync][room=' +
+          key +
+          '] enqueue failed: ' +
+          ((err && err.message) || err)
+      )
+    })
+}
+
+// Awaited path for API / recovery — same coordinator, never bypass Adapter.sync
+async function syncDocmostViaCoordinator(roomId, pool, reason) {
+  if (!docmostSyncEnabled()) {
+    const err = new Error('DOCMOST_SYNC_ENABLED off')
+    err.code = 'DOCMOST_SYNC_DISABLED'
+    err.statusCode = 503
+    throw err
+  }
+  const result = await docmostSyncCoordinator.requestSyncAndWait(roomId, {
+    pool,
+    outputDir: compiler && compiler.outputDir,
+    reason: reason || 'api'
+  })
+  if (result && !result.skipped) {
+    console.log(
+      '[DocmostSync][room=' +
+        roomId +
+        '] space=' +
+        result.spaceId +
+        ' kind=' +
+        result.spaceKind +
+        ' pages=' +
+        result.pages +
+        (result.warnings && result.warnings.length
+          ? ' warnings=' + result.warnings.length
+          : '')
+    )
+  } else if (result && result.skipped) {
+    console.log(
+      '[DocmostSync][room=' + roomId + '] skipped: ' + result.reason
+    )
+  }
+  return result
 }
 
 function maybeSyncAfterCompile(result, pool) {
@@ -55,6 +88,7 @@ function maybeSyncAfterCompile(result, pool) {
 }
 
 async function start(options) {
+  
   if (!enabled()) {
     await options.pool.query(
       'drop trigger if exists knowledge_attachment_change on node_attachments'
@@ -63,6 +97,7 @@ async function start(options) {
     return
   }
   await require('./sourceChanges').initSchema(options.pool)
+  await docmostMappingStore.ensureSchema(options.pool)
   compiler = new KnowledgeCompiler({
     pool: options.pool,
     outputDir:
@@ -195,10 +230,11 @@ async function handleApi(req, res, pathname) {
       }
       // Ensure canonical is fresh, then push
       await compiler.compile(roomId, { force: false })
-      const result = await require('./adapters/docmostAdapter').sync(roomId, {
-        pool: storage.getPool(),
-        outputDir: compiler.outputDir
-      })
+      const result = await syncDocmostViaCoordinator(
+        roomId,
+        storage.getPool(),
+        'api'
+      )
       storage.sendJson(res, 200, result)
       return true
     }
@@ -211,11 +247,12 @@ async function handleApi(req, res, pathname) {
   return true
 }
 
-module.exports = {
-  start,
+module.exports = {start,
   enabled,
   handleApi,
   getCompiler: () => compiler,
   getScheduler: () => scheduler,
-  enqueueDocmostSync
+  enqueueDocmostSync,
+  syncDocmostViaCoordinator,
+  docmostSyncCoordinator
 }
