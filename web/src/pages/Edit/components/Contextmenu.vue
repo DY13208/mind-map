@@ -200,6 +200,18 @@ export default {
   props: {
     mindMap: {
       type: Object
+    },
+    editable: {
+      type: Boolean,
+      default: true
+    },
+    commandExecutor: {
+      type: Function,
+      default: null
+    },
+    beforeCommand: {
+      type: Function,
+      default: null
     }
   },
   data() {
@@ -476,13 +488,15 @@ export default {
       this.isMousedown = false
     },
 
-    openMapRef() {
+    async openMapRef() {
+      if (!(await this.canExecuteCommand('SET_NODE_MAP_REF'))) return
       const node = this.node
       this.hide()
       this.$bus.$emit('showMapRef', node)
     },
 
-    clearMapRef() {
+    async clearMapRef() {
+      if (!(await this.canExecuteCommand('REMOVE_MAP_REF'))) return
       if (this.node && typeof this.node.setMapRef === 'function') {
         this.node.setMapRef(null)
       }
@@ -561,8 +575,46 @@ export default {
     },
 
     // 执行命令
-    exec(key, disabled, ...args) {
-      if (disabled) {
+    isMutationCommand(key) {
+      return ![
+        'COPY_NODE',
+        'RETURN_CENTER',
+        'FIT_CANVAS',
+        'UNEXPAND_ALL',
+        'EXPAND_ALL',
+        'UNEXPAND_TO_LEVEL',
+        'EXPORT_CUR_NODE_TO_PNG',
+        'TOGGLE_ZEN_MODE'
+      ].includes(key)
+    },
+
+    async canExecuteCommand(key) {
+      if (!this.editable && this.isMutationCommand(key)) {
+        this.$message.warning('当前为只读权限，无法修改导图')
+        return false
+      }
+      if (typeof this.beforeCommand !== 'function') return true
+      try {
+        const result = await this.beforeCommand({
+          key,
+          node: this.node,
+          selectedNodes: this.resolveLiveSelectedNodes()
+        })
+        return result !== false
+      } catch (err) {
+        return false
+      }
+    },
+
+    runCommand(key, ...args) {
+      if (typeof this.commandExecutor === 'function') {
+        return this.commandExecutor(key, ...args)
+      }
+      this.$bus.$emit('execCommand', key, ...args)
+    },
+
+    async exec(key, disabled, ...args) {
+      if (disabled || !(await this.canExecuteCommand(key))) {
         return
       }
       switch (key) {
@@ -572,13 +624,7 @@ export default {
             this.hide()
             return
           }
-          this.$bus.$emit(
-            'execCommand',
-            'ADD_GENERALIZATION',
-            null,
-            true,
-            nodes
-          )
+          this.runCommand('ADD_GENERALIZATION', null, true, nodes)
           break
         }
         case 'COPY_NODE':
@@ -618,14 +664,14 @@ export default {
           break
         case 'UNEXPAND_ALL': {
           const uid = this.node ? this.node.uid : ''
-          this.$bus.$emit('execCommand', key, !uid, uid)
+          this.runCommand(key, !uid, uid)
           break
         }
         case 'EXPAND_ALL':
-          this.$bus.$emit('execCommand', key, this.node ? this.node.uid : '')
+          this.runCommand(key, this.node ? this.node.uid : '')
           break
         default:
-          this.$bus.$emit('execCommand', key, ...args)
+          this.runCommand(key, ...args)
           break
       }
       this.hide()
@@ -706,7 +752,8 @@ export default {
     },
 
     // AI续写
-    aiCreate() {
+    async aiCreate() {
+      if (!(await this.canExecuteCommand('AI_CREATE_PART'))) return
       this.$bus.$emit('ai_create_part', this.node)
       this.hide()
     }

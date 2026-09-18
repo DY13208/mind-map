@@ -624,6 +624,18 @@ export function addFileNode(roomKey, body) {
   })
 }
 
+export function saveSopOutputRules(roomKey, sopUid, rules) {
+  return request(
+    `/api/files/${encodeURIComponent(roomKey)}/sop/${encodeURIComponent(
+      sopUid
+    )}/output-rules`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ rules: Array.isArray(rules) ? rules : [] })
+    }
+  )
+}
+
 export function patchFileNode(roomKey, uid, body) {
   const payload = { ...(body || {}), confirm_sop_change: true }
   return request(

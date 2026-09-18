@@ -209,9 +209,17 @@
         <span>源产物</span>
         <strong>{{ artifactOptimizeSource && artifactOptimizeSource.name }}</strong>
       </div>
+      <div v-if="artifactOptimizeRulesLoading" class="optimizeRulesStatus">
+        <i class="el-icon-loading"></i> 正在读取脑图输入规则…
+      </div>
+      <div v-else-if="artifactOptimizeSavedRules.length" class="optimizeRulesStatus loaded">
+        已加载 {{ artifactOptimizeSavedRules.length }} 条脑图规则，生成时会自动应用
+      </div>
       <div ref="optimizeMessages" class="optimizeMessages">
         <div v-if="!artifactOptimizeMessages.length" class="optimizeEmpty">
-          告诉助理你希望如何修改这个产物。可以连续讨论，确认后再生成新文件。
+          {{ artifactOptimizeSavedRules.length
+            ? '已加载脑图规则，可直接生成；也可以继续补充新的优化要求。'
+            : '告诉助理你希望如何修改这个产物。可以连续讨论，确认后再生成新文件。' }}
         </div>
         <div
           v-for="(message, index) in artifactOptimizeMessages"
@@ -311,7 +319,18 @@ import MarkdownIt from 'markdown-it'
 import * as XLSX from 'xlsx'
 import { extractDeliverablesFromReply, jobNeedsWecomResume } from '@/utils/sopRun'
 import { artifactLocalUrl } from '@/utils/fileApi'
+import { extractDeliverablesFromReply } from '@/utils/sopRun'
+import {
+  artifactLocalUrl,
+  getFileSubtree,
+  saveSopOutputRules
+} from '@/utils/fileApi'
 import { AI_BACKEND_OPENCLAW, streamChat } from '@/utils/agentChat'
+import {
+  extractOutputRulesFromTree,
+  formatOutputRulesPrompt,
+  uniqueOutputRules
+} from '@/utils/sopOutputRules'
 
 const streamMd = new MarkdownIt({
   html: false,
@@ -360,7 +379,10 @@ export default {
     jobs: { type: Array, default: () => [] },
     selectedId: { type: String, default: '' },
     embedded: { type: Boolean, default: false },
-    title: { type: String, default: 'SOP 任务' }
+    title: { type: String, default: 'SOP 任务' },
+    roomKey: { type: String, default: '' },
+    sopUid: { type: String, default: '' },
+    ledgerDeliverables: { type: Array, default: () => [] }
   },
   data() {
     return {
@@ -378,7 +400,9 @@ export default {
       artifactOptimizeChatting: false,
       artifactOptimizeGenerating: false,
       artifactOptimizeError: '',
-      artifactOptimizeController: null
+      artifactOptimizeController: null,
+      artifactOptimizeSavedRules: [],
+      artifactOptimizeRulesLoading: false
     }
   },
   computed: {
@@ -436,10 +460,12 @@ export default {
     canGenerateOptimizedArtifact() {
       return (
         !this.artifactOptimizeBusy &&
+        !this.artifactOptimizeRulesLoading &&
         this.artifactOptimizeSource &&
-        this.artifactOptimizeMessages.some(
-          item => item.role === 'user' && String(item.content || '').trim()
-        )
+        (this.artifactOptimizeSavedRules.length > 0 ||
+          this.artifactOptimizeMessages.some(
+            item => item.role === 'user' && String(item.content || '').trim()
+          ))
       )
     }
   },
@@ -481,7 +507,10 @@ export default {
             item.optimization_version || item.optimizationVersion || 0
           ) || 0,
           optimization_root:
-            item.optimization_root || item.optimizationRoot || ''
+            item.optimization_root || item.optimizationRoot || '',
+          output_rules: uniqueOutputRules(
+            item.output_rules || item.outputRules || []
+          )
         })
       }
       const runDels =
@@ -671,7 +700,69 @@ export default {
       this.artifactOptimizeMessages = []
       this.artifactOptimizeInput = ''
       this.artifactOptimizeError = ''
+      this.artifactOptimizeSavedRules = []
       this.artifactOptimizeVisible = true
+      this.loadArtifactOptimizeRules()
+    },
+    selectedSopLocation() {
+      const firstValid = values => {
+        for (const value of values) {
+          const text = String(value == null ? '' : value).trim()
+          if (text && !/^(?:null|undefined)$/i.test(text)) return text
+        }
+        return ''
+      }
+      const query = (this.$route && this.$route.query) || {}
+      return {
+        // The detail route identifies the currently opened SOP. Prefer it over
+        // legacy jobs where missing ids were serialized as the string "null".
+        roomKey: firstValid([
+          this.roomKey,
+          query.room,
+          this.selectedJob && this.selectedJob.roomKey
+        ]),
+        sopUid: firstValid([
+          this.sopUid,
+          query.sopUid,
+          this.selectedJob && this.selectedJob.sopUid
+        ])
+      }
+    },
+    async fetchCurrentSopTree(location) {
+      const { roomKey, sopUid } = location || this.selectedSopLocation()
+      if (!roomKey || !sopUid) return null
+      const data = await getFileSubtree(roomKey, sopUid, {
+        deep: true,
+        maxNodes: 800,
+        priority: 'high'
+      })
+      return (data && data.tree) || data
+    },
+    async loadArtifactOptimizeRules() {
+      this.artifactOptimizeRulesLoading = true
+      try {
+        const tree = await this.fetchCurrentSopTree()
+        this.artifactOptimizeSavedRules = extractOutputRulesFromTree(tree)
+      } catch (error) {
+        this.artifactOptimizeSavedRules = []
+        this.artifactOptimizeError = '暂时无法读取脑图输入规则；仍可输入新要求后生成'
+      } finally {
+        this.artifactOptimizeRulesLoading = false
+      }
+    },
+    currentUserOutputRules() {
+      return uniqueOutputRules(
+        this.artifactOptimizeMessages
+          .filter(item => item.role === 'user')
+          .map(item => item.content)
+      )
+    },
+    effectiveOptimizationInstruction() {
+      const saved = formatOutputRulesPrompt(this.artifactOptimizeSavedRules)
+      const conversation = transcriptText(this.artifactOptimizeMessages)
+      return [saved, conversation ? `## 本轮优化对话\n${conversation}` : '']
+        .filter(Boolean)
+        .join('\n\n')
     },
     optimizerConversationId(mode = 'chat') {
       const jobId = String((this.selectedJob && this.selectedJob.id) || 'job')
@@ -700,9 +791,11 @@ export default {
       this.scrollOptimizeMessages()
       try {
         const source = this.artifactOptimizeSource
+        const savedRules = formatOutputRulesPrompt(this.artifactOptimizeSavedRules)
         const prompt = [
           '你是 SOP 产物优化顾问。现在只讨论修改方案，不得调用工具、不得读写或生成文件。',
           `源产物：${source.name || source.uri_or_path}`,
+          savedRules,
           '结合以下完整对话，回应用户最新要求；需要时主动指出冲突或提出具体建议。',
           transcriptText(this.artifactOptimizeMessages.filter(item => item !== assistant))
         ].join('\n\n')
@@ -843,6 +936,17 @@ export default {
       }
       throw new Error('无法分配新的优化版本号，请清理重名文件后重试')
     },
+    async saveCurrentOutputRules(location, rules) {
+      const incoming = uniqueOutputRules(rules || this.currentUserOutputRules())
+      if (!incoming.length) return { added: 0 }
+      const { roomKey, sopUid } = location || this.selectedSopLocation()
+      if (!roomKey || !sopUid) throw new Error('缺少脑图房间或 SOP 节点信息')
+      const result = await saveSopOutputRules(roomKey, sopUid, incoming)
+      this.artifactOptimizeSavedRules = uniqueOutputRules(
+        (result && result.rules) || incoming
+      )
+      return { added: Number((result && result.added) || 0) }
+    },
     async persistOptimizedDeliverable(deliverable, instruction) {
       return new Promise((resolve, reject) => {
         this.$emit('artifact-optimized', {
@@ -862,9 +966,11 @@ export default {
       this.artifactOptimizeController = new AbortController()
       try {
         const source = this.artifactOptimizeSource
+        const sopLocation = this.selectedSopLocation()
+        const newOutputRules = this.currentUserOutputRules()
         const sourcePath = String(source.uri_or_path || source.name || '').trim()
         const target = await this.nextOptimizationTarget(source)
-        const conversation = transcriptText(this.artifactOptimizeMessages)
+        const effectiveInstruction = this.effectiveOptimizationInstruction()
         const prompt = [
           '你正在执行一次独立的 SOP 产物优化任务，不得重新运行 SOP，不得创建企微待办或发送任何通知。',
           `SOP：${this.jobTitle(this.selectedJob)}`,
@@ -879,7 +985,7 @@ export default {
           '  path: /home/node/.openclaw/workspace/output/实际文件名',
           '',
           '优化对话：',
-          conversation
+          effectiveInstruction
         ].join('\n')
         let reply = ''
         const result = await streamChat({
@@ -919,15 +1025,41 @@ export default {
           ...generated[0],
           id: `opt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
           derived_from: sourceKey(source),
-          optimization_instruction: conversation,
+          optimization_instruction: effectiveInstruction,
           optimization_version: target.version,
           optimization_root: target.rootKey,
+          output_rules: uniqueOutputRules([
+            ...this.artifactOptimizeSavedRules,
+            ...newOutputRules
+          ]),
           createdAt: new Date().toISOString(),
           at: new Date().toISOString().slice(0, 16).replace('T', ' ')
         }
         await this.verifyGeneratedDeliverable(deliverable)
-        await this.persistOptimizedDeliverable(deliverable, conversation)
-        this.$message.success('优化产物已生成，并追加在原产物下方')
+        let savedRules = { added: 0 }
+        let ruleSaveError = null
+        try {
+          savedRules = await this.saveCurrentOutputRules(
+            sopLocation,
+            newOutputRules
+          )
+        } catch (saveError) {
+          ruleSaveError = saveError
+        }
+        await this.persistOptimizedDeliverable(deliverable, effectiveInstruction)
+        if (!ruleSaveError) {
+          this.$message.success(
+            savedRules.added
+              ? `优化产物已生成，并保存 ${savedRules.added} 条输入规则到脑图`
+              : '优化产物已生成，并追加在原产物下方'
+          )
+        } else {
+          this.$message.warning(
+            `产物已生成，但输入规则保存失败：${
+              (ruleSaveError && ruleSaveError.message) || '请检查脑图编辑权限'
+            }`
+          )
+        }
         this.artifactOptimizeVisible = false
       } catch (error) {
         if (error && error.name === 'AbortError') {
@@ -1456,6 +1588,18 @@ export default {
     text-overflow: ellipsis;
     white-space: nowrap;
     color: #1f2937;
+  }
+}
+.optimizeRulesStatus {
+  margin: -2px 0 12px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  &.loaded {
+    background: #ecf8f3;
+    color: #087854;
   }
 }
 .optimizeMessages {

@@ -477,6 +477,9 @@
               title="SOP 任务"
               :jobs="detailSopTaskJobs"
               :selected-id="selectedSopJobId"
+              :room-key="roomKey"
+              :sop-uid="activeSopUid"
+              :ledger-deliverables="activeLedger.deliverables"
               @select="selectSopJob"
               @cancel="cancelSopJob"
               @cancel-all="cancelAllSopJobs"
@@ -678,6 +681,20 @@
       @waiting="onSharedRunWaiting"
     />
 
+    <Contextmenu
+      v-if="previewMindMap"
+      :mind-map="previewMindMap"
+      :editable="canEditSop"
+      :command-executor="execPreviewCommand"
+      :before-command="beforePreviewCommand"
+    />
+    <MapRefDialog v-if="previewMindMap" />
+    <SopMapAiContinue
+      v-if="previewMindMap"
+      :mind-map="previewMindMap"
+      :editable="canEditSop"
+    />
+
   </div>
 </template>
 
@@ -689,6 +706,7 @@ import Drag from 'simple-mind-map/src/plugins/Drag.js'
 import Select from 'simple-mind-map/src/plugins/Select.js'
 import TouchEvent from 'simple-mind-map/src/plugins/TouchEvent.js'
 import Cooperate from 'simple-mind-map/src/plugins/Cooperate.js'
+import Export from 'simple-mind-map/src/plugins/Export.js'
 import exampleData from 'simple-mind-map/example/exampleData'
 import { createCollaborationAdapter } from 'simple-mind-map/bin/collabV2/adapter'
 import { getLocalConfig } from '@/api'
@@ -772,10 +790,14 @@ import SopTaskBoard from './components/SopTaskBoard.vue'
 import SopTreeNode from './components/SopTreeNode.vue'
 import SopGlyph from './components/SopGlyph.vue'
 import SopRunDialog from './components/SopRunDialog.vue'
+import Contextmenu from '@/pages/Edit/components/Contextmenu.vue'
+import MapRefDialog from '@/pages/Edit/components/MapRefDialog.vue'
+import SopMapAiContinue from './components/SopMapAiContinue.vue'
 
 MindMap.usePlugin(Drag)
   .usePlugin(Select)
   .usePlugin(TouchEvent)
+  .usePlugin(Export)
   .usePlugin(Cooperate)
 
 const V2_CLIENT_KEY = 'mind-map-collab-v2-client'
@@ -828,7 +850,15 @@ function toMindMapTree(tree, depth = 0) {
 
 export default {
   name: 'SopRegistryPage',
-  components: { SopTaskBoard, SopTreeNode, SopGlyph, SopRunDialog },
+  components: {
+    SopTaskBoard,
+    SopTreeNode,
+    SopGlyph,
+    SopRunDialog,
+    Contextmenu,
+    MapRefDialog,
+    SopMapAiContinue
+  },
   data() {
     return {
       sops: [],
@@ -1211,6 +1241,7 @@ export default {
   },
   async created() {
     this.initLocalConfig()
+    this.$bus.$on('applySubMapToNode', this.applyPreviewSubMap)
     this._sopPageAlive = true
     // 台账页固定浅色产品风格，避免跟随编辑器暗色把弹窗/输入框弄成黑底浅字
     this._hadBodyDark = document.body.classList.contains('isDark')
@@ -1257,6 +1288,8 @@ export default {
     this._sopPageAlive = false
     this._subtreeLoadToken = (this._subtreeLoadToken || 0) + 1
     this.teardownPreview()
+    clearTimeout(this._previewRootValidationTimer)
+    this.$bus.$off('applySubMapToNode', this.applyPreviewSubMap)
     // 不 cancelAll：任务继续在单例队列里跑；只卸掉本页监听
     if (this._sopQueueUnsub) {
       try {
@@ -2433,6 +2466,153 @@ export default {
         else throw error
       }
     },
+    previewNodeText(node) {
+      return stripHtml(node && node.getData ? node.getData('text') : '')
+    },
+    previewNodeUid(node) {
+      return String(
+        (node && node.getData && node.getData('uid')) ||
+          (node && node.uid) ||
+          ''
+      ).trim()
+    },
+    countPreviewDescendants(node) {
+      let total = 0
+      const walk = current => {
+        ;(current && current.children ? current.children : []).forEach(child => {
+          total += 1
+          walk(child)
+        })
+      }
+      walk(node)
+      return total
+    },
+    async beforePreviewCommand({ key, node, selectedNodes }) {
+      const mutations = [
+        'INSERT_NODE', 'INSERT_CHILD_NODE', 'INSERT_PARENT_NODE',
+        'ADD_GENERALIZATION', 'UP_NODE', 'DOWN_NODE', 'REMOVE_NODE',
+        'REMOVE_CURRENT_NODE', 'CUT_NODE', 'PASTE_NODE',
+        'REMOVE_HYPERLINK', 'REMOVE_NOTE', 'REMOVE_CUSTOM_STYLES',
+        'REMOVE_MAP_REF', 'SET_NODE_MAP_REF', 'AI_CREATE_PART'
+      ]
+      if (mutations.includes(key) && !this.canEditSop) {
+        this.$message.warning('当前为只读权限，无法修改导图')
+        return false
+      }
+      if (key !== 'REMOVE_NODE' && key !== 'REMOVE_CURRENT_NODE') return true
+      const nodes = (selectedNodes && selectedNodes.length ? selectedNodes : [node]).filter(Boolean)
+      const deletingRoot = nodes.some(item => this.previewNodeUid(item) === String(this.activeSopUid || ''))
+      const rulesRoot = nodes.find(item => this.previewNodeText(item) === '输入规则')
+      try {
+        if (deletingRoot) {
+          await this.$confirm(
+            '删除当前 D 根节点后，该 SOP 将从台账中移除，当前详情也会关闭。确定继续吗？',
+            '删除整个 SOP',
+            { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' }
+          )
+          this._previewDeleteRootMode = key
+        } else if (rulesRoot) {
+          const count = this.countPreviewDescendants(rulesRoot)
+          const message = key === 'REMOVE_CURRENT_NODE'
+            ? `将删除“输入规则”节点，并保留其下 ${count} 条节点，确定继续吗？`
+            : `将同时删除“输入规则”下的 ${count} 条节点，确定继续吗？`
+          await this.$confirm(
+            message,
+            '删除输入规则',
+            { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' }
+          )
+        }
+        return true
+      } catch (err) {
+        return false
+      }
+    },
+    async execPreviewCommand(...args) {
+      if (!this.previewMindMap) return
+      const name = args[0]
+      if (
+        this._previewDeleteRootMode &&
+        (name === 'REMOVE_NODE' || name === 'REMOVE_CURRENT_NODE')
+      ) {
+        const mode = this._previewDeleteRootMode
+        this._previewDeleteRootMode = ''
+        try {
+          await deleteFileNode(this.roomKey, this.activeSopUid, {
+            keepChildren: mode === 'REMOVE_CURRENT_NODE'
+          })
+          this.leaveInvalidSopDetail()
+        } catch (err) {
+          this.$message.error((err && err.message) || '删除 SOP 节点失败')
+          await this.reloadDetail()
+        }
+        return
+      }
+      const needsSelection = [
+        'ADD_GENERALIZATION', 'INSERT_NODE', 'INSERT_CHILD_NODE',
+        'INSERT_PARENT_NODE', 'REMOVE_NODE', 'REMOVE_CURRENT_NODE'
+      ]
+      const cooperate = this.previewMindMap.cooperate
+      if (
+        needsSelection.includes(name) && cooperate &&
+        typeof cooperate.ensureActiveSelection === 'function'
+      ) {
+        cooperate.ensureActiveSelection()
+      }
+      this.previewMindMap.execCommand(...args)
+    },
+    applyPreviewSubMap(payload) {
+      const result = payload && payload.result
+      try {
+        if (!this.canEditSop || !this.previewMindMap) throw new Error('当前为只读权限')
+        let node = payload && payload.node
+        const uid = String((payload && payload.uid) || '').trim()
+        if (!node && uid && this.previewMindMap.renderer) {
+          node = this.previewMindMap.renderer.findNodeByUid(uid)
+        }
+        if (!node || typeof node.getData !== 'function') throw new Error('找不到目标节点')
+        const ref = payload && payload.mapRef
+        const text = String((payload && payload.title) || (ref && ref.mapId) || '子脑图').trim()
+        this.previewMindMap.renderer.setNodeDataRender(node, {
+          mapRef: ref,
+          text,
+          richText: false,
+          resetRichText: true,
+          shape: 'roundedRectangle'
+        })
+        this.previewMindMap.execCommand('SET_NODE_MAP_REF', node, ref)
+        if (result) {
+          result.ok = true
+          result.uid = this.previewNodeUid(node)
+        }
+        return true
+      } catch (err) {
+        if (result) {
+          result.ok = false
+          result.error = (err && err.message) || '保存失败'
+        }
+        return false
+      }
+    },
+    schedulePreviewRootValidation() {
+      clearTimeout(this._previewRootValidationTimer)
+      this._previewRootValidationTimer = setTimeout(this.validatePreviewRoot, 700)
+    },
+    async validatePreviewRoot() {
+      if (!this.roomKey || !this.activeSopUid) return
+      try {
+        const data = await getFileSubtree(this.roomKey, this.activeSopUid, { deep: false, maxNodes: 1 })
+        const tree = (data && data.tree) || data
+        const title = stripHtml((tree && tree.data && tree.data.text) || (tree && tree.text) || '')
+        if (!/^D\s*[：:]\s*\S+/.test(title)) this.leaveInvalidSopDetail()
+      } catch (err) {
+        this.leaveInvalidSopDetail()
+      }
+    },
+    leaveInvalidSopDetail() {
+      this.$message.success('SOP 节点已变更，已返回台账列表')
+      this.leaveDetail()
+      this.$nextTick(() => this.refreshRoomList())
+    },
     applyJobLedgerToList(job, ledger) {
       if (!job || !ledger) return
       // 严格按节点 uid 归属，避免多任务回写串到别的 SOP 卡片
@@ -3245,7 +3425,7 @@ export default {
         el,
         data: root,
         fit: true,
-        readonly: false,
+        readonly: !this.canEditSop,
         layout: (exampleData && exampleData.layout) || 'logicalStructure',
         theme: theme.template || 'default',
         themeConfig: theme.config || {},
@@ -3253,6 +3433,27 @@ export default {
         enableFreeDrag: false,
         initRootNodePosition: ['center', 'center'],
         onlyOneEnableActiveNodeOnCooperate: true
+      })
+      ;[
+        'node_active',
+        'node_contextmenu',
+        'node_click',
+        'node_dblclick',
+        'draw_click',
+        'expand_btn_click',
+        'svg_mousedown',
+        'mouseup',
+        'translate',
+        'node_mousedown',
+        'multi_select_end'
+      ].forEach(event => {
+        this.previewMindMap.on(event, (...args) => this.$bus.$emit(event, ...args))
+      })
+      this.previewMindMap.on('hide_text_edit', () => {
+        this.schedulePreviewRootValidation()
+      })
+      this.previewMindMap.on('room_acl_denied', err => {
+        this.$message.error((err && err.message) || '没有权限修改导图')
       })
       this.$nextTick(() => {
         try {

@@ -1986,6 +1986,118 @@ async function handleApi(req, res) {
     return true
   }
 
+  const outputRulesMatch = pathname.match(
+    /^\/api\/files\/([^/]+)\/sop\/([^/]+)\/output-rules$/
+  )
+  if (outputRulesMatch && req.method === 'POST') {
+    const roomKey = decodeURIComponent(outputRulesMatch[1])
+    const sopUid = decodeURIComponent(outputRulesMatch[2])
+    const normalizeRule = value =>
+      mindDoc
+        .stripHtml(String(value || ''))
+        .replace(/[，,]/g, ',')
+        .replace(/[：:]/g, ':')
+        .replace(/[；;]/g, ';')
+        .replace(/[。. ]+$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase()
+    try {
+      const body = await readBody(req)
+      const incoming = []
+      const incomingKeys = new Set()
+      ;(Array.isArray(body.rules) ? body.rules : []).forEach(value => {
+        const text = mindDoc.stripHtml(String(value || '')).replace(/\s+/g, ' ').trim()
+        const key = normalizeRule(text)
+        if (!text || !key || incomingKeys.has(key)) return
+        incomingKeys.add(key)
+        incoming.push(text)
+      })
+      if (!incoming.length) {
+        sendJson(res, 200, { ok: true, added: 0, rules: [] })
+        return true
+      }
+      const pool = getPool()
+      const sopRow = await pool.query(
+        `SELECT uid FROM room_nodes
+          WHERE room_key = $1 AND uid = $2 AND deleted_at IS NULL
+          LIMIT 1`,
+        [roomKey, sopUid]
+      )
+      if (!sopRow.rows.length) {
+        const err = new Error(`SOP 节点不存在: ${sopUid}`)
+        err.statusCode = 404
+        err.code = 'SOP_NODE_NOT_FOUND'
+        throw err
+      }
+      const children = await pool.query(
+        `SELECT uid, data FROM room_nodes
+          WHERE room_key = $1 AND parent_uid = $2 AND deleted_at IS NULL`,
+        [roomKey, sopUid]
+      )
+      let branch = children.rows.find(
+        row => mindDoc.stripHtml((row.data && row.data.text) || '').trim() === '输入规则'
+      )
+      if (!branch) {
+        const command = normalizeCommand(
+          req,
+          roomKey,
+          { operationId: crypto.randomUUID() },
+          'node.insert',
+          {
+            parentUid: sopUid,
+            text: '输入规则',
+            confirm_sop_change: true
+          }
+        )
+        const committed = await executeOperation(req, roomKey, command)
+        branch = { uid: committed.result && committed.result.uid }
+      }
+      if (!branch || !branch.uid) throw new Error('创建“输入规则”分支失败')
+      const existingRows = await pool.query(
+        `SELECT data FROM room_nodes
+          WHERE room_key = $1 AND parent_uid = $2 AND deleted_at IS NULL`,
+        [roomKey, branch.uid]
+      )
+      const saved = existingRows.rows
+        .map(row => mindDoc.stripHtml((row.data && row.data.text) || '').trim())
+        .filter(Boolean)
+      const known = new Set(saved.map(normalizeRule))
+      let added = 0
+      for (const rule of incoming) {
+        const key = normalizeRule(rule)
+        if (known.has(key)) continue
+        const command = normalizeCommand(
+          req,
+          roomKey,
+          { operationId: crypto.randomUUID() },
+          'node.insert',
+          {
+            parentUid: branch.uid,
+            text: rule,
+            confirm_sop_change: true
+          }
+        )
+        await executeOperation(req, roomKey, command)
+        known.add(key)
+        saved.push(rule)
+        added += 1
+      }
+      sendJson(res, 200, {
+        ok: true,
+        branch_uid: branch.uid,
+        added,
+        rules: saved
+      })
+    } catch (err) {
+      sendJson(res, err.statusCode || 500, {
+        error: err.message || '保存输入规则失败',
+        code: err.code || 'OUTPUT_RULES_SAVE_ERROR'
+      })
+    }
+    return true
+  }
+
   const nodeMatch = pathname.match(
     /^\/api\/files\/([^/]+)\/nodes(?:\/([^/]+))?$/
   )
@@ -2025,7 +2137,8 @@ async function handleApi(req, res) {
       if (req.method === 'POST' && !nodeRef) {
         const body = await readBody(req)
         const command = normalizeCommand(req, roomKey, body, 'node.insert', {
-          parentUid: body.parent || body.parent_uid || 'root',
+          parentUid:
+            body.parent || body.parent_uid || body.parentUid || 'root',
           uid: body.uid,
           text: body.text,
           note: body.note,
