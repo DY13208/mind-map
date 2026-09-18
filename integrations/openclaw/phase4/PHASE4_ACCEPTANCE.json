@@ -1,0 +1,357 @@
+{
+  "phase": 4,
+  "startedAt": "2026-09-18T08:12:04.595Z",
+  "sections": [
+    {
+      "id": 1,
+      "title": "knowledge-mcp non-root + cap_drop + no-new-privileges",
+      "critical": true,
+      "pass": false,
+      "ms": 847,
+      "error": "Command failed: docker compose exec -T knowledge-mcp awk '/^Uid:/{print $2}' /proc/1/status\nawk: 1: unexpected character '''\nawk: line 2: missing } near end of file\n"
+    },
+    {
+      "id": 2,
+      "title": "OpenClaw image pinned to 2026.9.3",
+      "critical": true,
+      "pass": true,
+      "ms": 146,
+      "detail": {
+        "image": "ghcr.io/openclaw/openclaw:2026.9.3"
+      }
+    },
+    {
+      "id": 3,
+      "title": "plugins.allow contains liangce-ingress+cognee; memory slot unchanged",
+      "critical": true,
+      "pass": true,
+      "ms": 262,
+      "detail": {
+        "allowCount": 16,
+        "memory": "cognee-openclaw",
+        "allow": [
+          "anthropic",
+          "browser",
+          "canvas",
+          "cognee-openclaw",
+          "cua-computer",
+          "device-pair",
+          "file-transfer",
+          "geolocation",
+          "liangce-ingress",
+          "linux-node",
+          "memory-core",
+          "ollama",
+          "openai",
+          "talk-voice",
+          "xai",
+          "deepseek"
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "title": "/health and /ready",
+      "critical": true,
+      "pass": true,
+      "ms": 88,
+      "detail": {
+        "health": {
+          "ok": true,
+          "service": "mind-map-knowledge-mcp",
+          "version": "0.4.0",
+          "jwtConfigured": true
+        },
+        "ready": {
+          "ok": true,
+          "version": "0.4.0",
+          "checks": {
+            "aclDb": {
+              "ok": true
+            },
+            "jobStore": {
+              "ok": true
+            }
+          },
+          "circuits": {
+            "canonical": {
+              "name": "canonical",
+              "failures": 0,
+              "open": false,
+              "openUntil": null
+            },
+            "docmost": {
+              "name": "docmost",
+              "failures": 0,
+              "open": false,
+              "openUntil": null
+            },
+            "openwiki": {
+              "name": "openwiki",
+              "failures": 0,
+              "open": false,
+              "openUntil": null
+            },
+            "aclDb": {
+              "name": "aclDb",
+              "failures": 0,
+              "open": false,
+              "openUntil": null
+            }
+          },
+          "limits": {
+            "maxQueryLen": 500,
+            "maxWriteChars": 200000,
+            "maxSearchResults": 50,
+            "maxBodyBytes": 1000000
+          },
+          "replicasPolicy": "single"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "JWT fail-closed (no/bad/iss/aud/exp/sub)",
+      "critical": true,
+      "pass": true,
+      "ms": 128,
+      "detail": {
+        "denied": [
+          "no_token",
+          "bad_sig",
+          "bad_iss",
+          "bad_aud",
+          "expired",
+          "missing_sub"
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "title": "cross-room ACL deny + same-room allow",
+      "critical": true,
+      "pass": false,
+      "ms": 43,
+      "error": "A read B should deny"
+    },
+    {
+      "id": 7,
+      "title": "live ACL revoke without restart",
+      "critical": true,
+      "pass": false,
+      "ms": 1954,
+      "error": "after revoke must deny: []"
+    },
+    {
+      "id": 8,
+      "title": "viewer deny AI write + refresh",
+      "critical": true,
+      "pass": true,
+      "ms": 38,
+      "detail": {}
+    },
+    {
+      "id": 9,
+      "title": "AI ownership guard (fake owner/slot ignored)",
+      "critical": true,
+      "pass": true,
+      "ms": 694,
+      "detail": {
+        "parsed": {
+          "status": "ok",
+          "created": false,
+          "result": {
+            "source": "docmost",
+            "authority": "ai-derived",
+            "roomId": "room-2yaz570x",
+            "topicKey": "phase4-ai-topic",
+            "title": "phase4-ai-topic · AI 整理",
+            "uri": "docmost://page/01a0b391-abcb-7439-a027-58944cdbbc4d",
+            "snippet": "> **AI 整理内容**（机读维护，下次刷新可能整页替换）\n> 基于当前标准知识与已授权资料生成；需要长期保留请移到 human 团队经验页。\n# P4\n1789719128109",
+            "body": "> **AI 整理内容**（机读维护，下次刷新可能整页替换）\n> 基于当前标准知识与已授权资料生成；需要长期保留请移到 human 团队经验页。\n# P4\n1789719128109",
+            "version": "ai-1789719128796",
+            "updatedAt": "2026-09-18T08:12:08.797Z",
+            "owner": "ai",
+            "pageType": "ai",
+            "derived": true
+          },
+          "audit": {
+            "operation": "ai_update",
+            "targetSlot": "ai",
+            "docmostPageId": "01a0b391-abcb-7439-a027-58944cdbbc4d",
+            "beforeHash": "2d82bcbea25720272da5b943903cc6e0fc638a668ed6a47c4d261bf0c0a20b88",
+            "afterHash": "427e8bb649baecacb2daba89141b533d179fd8bfd4d300c9432a45a6a46fc389",
+            "topicKey": "phase4-ai-topic",
+            "durationMs": 669
+          }
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "path traversal deny on canonical_read / openwiki_read",
+      "critical": true,
+      "pass": true,
+      "ms": 40,
+      "detail": {}
+    },
+    {
+      "id": 11,
+      "title": "payload limit rejects oversized write",
+      "critical": true,
+      "pass": true,
+      "ms": 22,
+      "detail": {}
+    },
+    {
+      "id": 12,
+      "title": "durable OpenWiki job enqueue + status",
+      "critical": true,
+      "pass": true,
+      "ms": 587,
+      "detail": {
+        "tables": "knowledge_openwiki_jobs",
+        "jobId": "2ac50f05-06b4-4064-92fd-dd29b84e511c",
+        "status": {
+          "jobId": "2ac50f05-06b4-4064-92fd-dd29b84e511c",
+          "roomId": "room-2yaz570x",
+          "requesterUserId": "phase3-user-a",
+          "status": "running",
+          "queuedAt": "2026-09-18T08:11:04.146Z",
+          "startedAt": "2026-09-18T08:12:09.417Z",
+          "finishedAt": null,
+          "outputHash": null,
+          "docmostPublishStatus": "pending",
+          "error": null,
+          "result": null
+        }
+      }
+    },
+    {
+      "id": 13,
+      "title": "openwiki_retry_publish tool registered",
+      "critical": false,
+      "pass": true,
+      "ms": 6,
+      "detail": {
+        "names": [
+          "canonical_list",
+          "canonical_read",
+          "docmost_search",
+          "docmost_get",
+          "docmost_ai_get",
+          "docmost_ai_upsert",
+          "openwiki_search",
+          "openwiki_read",
+          "openwiki_status",
+          "openwiki_refresh",
+          "openwiki_refresh_status",
+          "openwiki_retry_publish"
+        ]
+      }
+    },
+    {
+      "id": 14,
+      "title": "audit log present",
+      "critical": true,
+      "pass": true,
+      "ms": 499,
+      "detail": {
+        "audit": "27255 /data/audit/knowledge-mcp.jsonl"
+      }
+    },
+    {
+      "id": 15,
+      "title": "Cognee memory slot regression",
+      "critical": true,
+      "pass": true,
+      "ms": 328,
+      "detail": {
+        "memory": "cognee-openclaw"
+      }
+    },
+    {
+      "id": 16,
+      "title": "restart knowledge-mcp recovers healthy",
+      "critical": true,
+      "pass": false,
+      "ms": 10024,
+      "error": "Command failed: docker compose exec -T knowledge-mcp awk '/^Uid:/{print $2}' /proc/1/status\nawk: 1: unexpected character '''\nawk: line 2: missing } near end of file\n"
+    },
+    {
+      "id": 17,
+      "title": "required secrets configured (presence)",
+      "critical": true,
+      "pass": true,
+      "ms": 362,
+      "detail": {
+        "keys": [
+          "KNOWLEDGE_MCP_JWT_ISS=***",
+          "KNOWLEDGE_MCP_JWT_TTL_SEC=***",
+          "PGPASSWORD=***",
+          "KNOWLEDGE_MCP_JWT_AUD=***",
+          "DOCMOST_APP_SECRET=***",
+          "KNOWLEDGE_MCP_JWT_SECRET=***"
+        ]
+      }
+    }
+  ],
+  "criticalFails": [
+    {
+      "id": 1,
+      "title": "knowledge-mcp non-root + cap_drop + no-new-privileges",
+      "error": "Command failed: docker compose exec -T knowledge-mcp awk '/^Uid:/{print $2}' /proc/1/status\nawk: 1: unexpected character '''\nawk: line 2: missing } near end of file\n"
+    },
+    {
+      "id": 6,
+      "title": "cross-room ACL deny + same-room allow",
+      "error": "A read B should deny"
+    },
+    {
+      "id": 7,
+      "title": "live ACL revoke without restart",
+      "error": "after revoke must deny: []"
+    },
+    {
+      "id": 16,
+      "title": "restart knowledge-mcp recovers healthy",
+      "error": "Command failed: docker compose exec -T knowledge-mcp awk '/^Uid:/{print $2}' /proc/1/status\nawk: 1: unexpected character '''\nawk: line 2: missing } near end of file\n"
+    }
+  ],
+  "pluginsAllowWidth": 16,
+  "pluginsAllowMinimal": false,
+  "finishedAt": "2026-09-18T08:12:20.672Z",
+  "summary": {
+    "total": 17,
+    "passed": 13,
+    "failed": 4,
+    "criticalFailed": 4,
+    "softFailed": 0,
+    "pluginsAllowWidth": 16,
+    "pluginsAllowMinimal": false
+  },
+  "verdict": "Phase 4 = BLOCKED",
+  "productionReady": null,
+  "blockers": [
+    {
+      "id": 1,
+      "title": "knowledge-mcp non-root + cap_drop + no-new-privileges",
+      "error": "Command failed: docker compose exec -T knowledge-mcp awk '/^Uid:/{print $2}' /proc/1/status\nawk: 1: unexpected character '''\nawk: line 2: missing } near end of file\n"
+    },
+    {
+      "id": 6,
+      "title": "cross-room ACL deny + same-room allow",
+      "error": "A read B should deny"
+    },
+    {
+      "id": 7,
+      "title": "live ACL revoke without restart",
+      "error": "after revoke must deny: []"
+    },
+    {
+      "id": 16,
+      "title": "restart knowledge-mcp recovers healthy",
+      "error": "Command failed: docker compose exec -T knowledge-mcp awk '/^Uid:/{print $2}' /proc/1/status\nawk: 1: unexpected character '''\nawk: line 2: missing } near end of file\n"
+    }
+  ]
+}
