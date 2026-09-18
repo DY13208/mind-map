@@ -1,4 +1,4 @@
-name: mind-map
+﻿name: mind-map
 
 services:
   postgres:
@@ -35,9 +35,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      # 构建容器不继承宿主机的 Clash 代理，容器直连对大流量会被掐断
-      # （apt-get 装 nginx 必失败）。在 .env 里配 BUILD_HTTP_PROXY 即可透传，
-      # 留空则不使用代理（适合能直连 Debian 源的网络环境）。
+      # 鏋勫缓瀹瑰櫒涓嶇户鎵垮涓绘満鐨?Clash 浠ｇ悊锛屽鍣ㄧ洿杩炲澶ф祦閲忎細琚帎鏂?
+      # 锛坅pt-get 瑁?nginx 蹇呭け璐ワ級銆傚湪 .env 閲岄厤 BUILD_HTTP_PROXY 鍗冲彲閫忎紶锛?
+      # 鐣欑┖鍒欎笉浣跨敤浠ｇ悊锛堥€傚悎鑳界洿杩?Debian 婧愮殑缃戠粶鐜锛夈€?
       args:
         HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
         HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
@@ -69,13 +69,13 @@ services:
       KNOWLEDGE_COMPILER_ENABLED: ${KNOWLEDGE_COMPILER_ENABLED:-true}
       KNOWLEDGE_SYNC_INTERVAL: ${KNOWLEDGE_SYNC_INTERVAL:-300}
       KNOWLEDGE_OUTPUT_DIR: /app/knowledge
-      # OpenClaw 卷内产物（只读），供预览/下载
+      # OpenClaw 鍗峰唴浜х墿锛堝彧璇伙級锛屼緵棰勮/涓嬭浇
       OPENCLAW_DATA_DIR: /openclaw-data
       YIRAN_UPSTREAM: ${YIRAN_UPSTREAM:-http://host.docker.internal:18232}
       COGNEE_API: ${COGNEE_API:-http://192.168.0.204:8320}
       COGNEE_API_KEY: ${COGNEE_API_KEY:-}
       COGNEE_DATASET: ${COGNEE_DATASET:-liangce}
-      # Docmost / Wiki SSO（由 scripts/docker-up.js 从 .secrets/wiki.env 注入）
+      # Docmost / Wiki SSO锛堢敱 scripts/docker-up.js 浠?.secrets/wiki.env 娉ㄥ叆锛?
       DOCMOST_APP_URL: ${DOCMOST_APP_URL:-http://localhost:3040}
       DOCMOST_DATABASE_URL: ${DOCMOST_DATABASE_URL:-}
       DOCMOST_APP_SECRET: ${DOCMOST_APP_SECRET:-}
@@ -85,11 +85,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      # WorkBuddy / OpenClaw 写到宿主机 output 的产物，供预览/下载
+      # WorkBuddy / OpenClaw 鍐欏埌瀹夸富鏈?output 鐨勪骇鐗╋紝渚涢瑙?涓嬭浇
       - ./knowledge:/app/knowledge
       - ./output:/app/output:ro
       - mind-map-openclaw:/openclaw-data:ro
-      # Start-Docker 自动注入的 OpenClaw Token 等（gitignore）
+      # Start-Docker 鑷姩娉ㄥ叆鐨?OpenClaw Token 绛夛紙gitignore锛?
       - ./docker/runtime-config.local.js:/usr/share/nginx/html/runtime-config.js:ro
     ports:
       - "${MIND_MAP_PORT:-8080}:80"
@@ -112,10 +112,10 @@ services:
       start_period: 15s
     restart: unless-stopped
 
-  # OpenClaw Gateway（龙虾）：助理页 / SOP 企微待办依赖；Start-Docker 一并拉起
-  # 状态用命名卷。不要再 bind-mount 单个 openclaw.json：
-  # Windows 下 OpenClaw 会 rename 写配置，单文件挂载会 EBUSY。
-  # Token/配置由 scripts/openclaw-docker.js 经 docker cp 注入卷内。
+  # OpenClaw Gateway锛堥緳铏撅級锛氬姪鐞嗛〉 / SOP 浼佸井寰呭姙渚濊禆锛汼tart-Docker 涓€骞舵媺璧?
+  # 鐘舵€佺敤鍛藉悕鍗枫€備笉瑕佸啀 bind-mount 鍗曚釜 openclaw.json锛?
+  # Windows 涓?OpenClaw 浼?rename 鍐欓厤缃紝鍗曟枃浠舵寕杞戒細 EBUSY銆?
+  # Token/閰嶇疆鐢?scripts/openclaw-docker.js 缁?docker cp 娉ㄥ叆鍗峰唴銆?
   openclaw-gateway:
     image: ${OPENCLAW_IMAGE:-openclaw/openclaw:latest}
     environment:
@@ -124,7 +124,7 @@ services:
       OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
       OPENCLAW_WORKSPACE_DIR: /home/node/.openclaw/workspace
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
-      # 默认模型走 DeepSeek，避免无 OPENAI_API_KEY 时打 api.openai.com 得到 401
+      # 榛樿妯″瀷璧?DeepSeek锛岄伩鍏嶆棤 OPENAI_API_KEY 鏃舵墦 api.openai.com 寰楀埌 401
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
 
       # ===== Cognee =====
@@ -136,11 +136,11 @@ services:
       OPENCLAW_GATEWAY_BIND: lan
       TZ: ${OPENCLAW_TZ:-Asia/Shanghai}
     extra_hosts:
-      # OpenClaw → 本机 Cognee（host.docker.internal:8320）
+      # OpenClaw 鈫?鏈満 Cognee锛坔ost.docker.internal:8320锛?
       - "host.docker.internal:host-gateway"
     volumes:
       - mind-map-openclaw:/home/node/.openclaw
-      # 新产物落到宿主机 output，与 app 的 /app/output 是同一份文件
+      # 鏂颁骇鐗╄惤鍒板涓绘満 output锛屼笌 app 鐨?/app/output 鏄悓涓€浠芥枃浠?
       - ./output:/home/node/.openclaw/workspace/output
     ports:
       - "127.0.0.1:${OPENCLAW_PORT:-4623}:18789"
@@ -156,6 +156,55 @@ services:
       start_period: 40s
     restart: unless-stopped
 
+  # Phase 2B 鈥?read-only Knowledge MCP (image COPY; no host source bind)
+  knowledge-mcp:
+    user: "0:0"
+    build:
+      context: ./integrations/knowledge-mcp
+      dockerfile: Dockerfile
+    image: mind-map-knowledge-mcp:0.3.0
+    environment:
+      KNOWLEDGE_MCP_PORT: "18792"
+      KNOWLEDGE_MCP_JWT_SECRET: ${KNOWLEDGE_MCP_JWT_SECRET}
+      KNOWLEDGE_MCP_JWT_ISS: openclaw-liangce
+      KNOWLEDGE_MCP_JWT_AUD: knowledge-mcp
+      KNOWLEDGE_MCP_JWT_TTL_SEC: ${KNOWLEDGE_MCP_JWT_TTL_SEC:-180}
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${PGUSER:-postgres}
+      PGPASSWORD: ${PGPASSWORD:-mindmap}
+      PGDATABASE: ${PGDATABASE:-mind_map}
+      KNOWLEDGE_ROOT: /data/knowledge
+      OPENWIKI_ROOMS_ROOT: /data/openwiki/rooms
+      OPENWIKI_JOBS_ROOT: /data/openwiki/jobs
+      OPENWIKI_GLOBAL_CONCURRENCY: ${OPENWIKI_GLOBAL_CONCURRENCY:-2}
+      DOCMOST_DATABASE_URL: ${DOCMOST_DATABASE_URL:-}
+      DOCMOST_APP_SECRET: ${DOCMOST_APP_SECRET:-}
+      DOCMOST_INTERNAL_URL: ${DOCMOST_INTERNAL_URL:-http://docmost:3000}
+      KNOWLEDGE_MCP_AUDIT_LOG: /data/audit/knowledge-mcp.jsonl
+    volumes:
+      - ./knowledge:/data/knowledge:ro
+      - ./data/openwiki/rooms:/data/openwiki/rooms
+      - ./data/openwiki/jobs:/data/openwiki/jobs
+      - knowledge-mcp-audit:/data/audit
+    expose:
+      - "18792"
+    ports:
+      - "127.0.0.1:${KNOWLEDGE_MCP_PORT:-18792}:18792"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:18792/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+
 volumes:
   mind-map-pg:
   mind-map-openclaw:
+  knowledge-mcp-audit:
+

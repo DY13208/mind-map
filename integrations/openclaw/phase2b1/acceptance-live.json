@@ -1,0 +1,109 @@
+{
+  "cogneeBefore": "cognee-openclaw",
+  "gateway": {
+    "inspect": "healthy 0",
+    "healthy": true
+  },
+  "steps": {
+    "whoAmI_A": {
+      "status": 200,
+      "requesterSenderId": "liangce:user-A-test",
+      "reply": "{\n  \"probe\": \"liangce-who_am_i\",\n  \"requesterSenderId\": \"liangce:user-A-test\",\n  \"agentAccountId\": \"default\",\n  \"sessionKey\": \"agent:main:main\",\n  \"messageChannel\": null\n}",
+      "pass": true
+    },
+    "whoAmI_B": {
+      "status": 200,
+      "requesterSenderId": "liangce:user-B-test",
+      "reply": "{\n  \"probe\": \"liangce-who_am_i\",\n  \"requesterSenderId\": \"liangce:user-B-test\",\n  \"agentAccountId\": \"default\",\n  \"sessionKey\": \"agent:main:main\",\n  \"messageChannel\": null\n}",
+      "pass": true
+    },
+    "dualConversation": {
+      "a1": "liangce:user-A-test",
+      "a2": "liangce:user-A-test",
+      "pass": true
+    },
+    "mcpResolver_A": {
+      "inboundRequester": "liangce:user-A-test",
+      "reply": "{\"probe\":\"identity-mcp-who_am_i\",\"requesterSenderId\":\"liangce:user-A-test\"}",
+      "resolverEntries": [],
+      "hits": {
+        "hits": [
+          {
+            "at": 1789713541270,
+            "method": "tools/call",
+            "sender": "liangce:user-A-test"
+          },
+          {
+            "at": 1789713543072,
+            "method": "tools/call",
+            "sender": "liangce:user-A-test"
+          },
+          {
+            "at": 1789713545257,
+            "method": "notifications/cancelled",
+            "sender": "liangce:user-B-test"
+          },
+          {
+            "at": 1789713551415,
+            "method": "tools/call",
+            "sender": "liangce:user-B-test"
+          }
+        ]
+      },
+      "pass": true
+    },
+    "mcpResolver_B": {
+      "inboundRequester": "liangce:user-B-test",
+      "reply": "{\"probe\":\"identity-mcp-who_am_i\",\"requesterSenderId\":\"liangce:user-B-test\"}",
+      "resolverEntries": [],
+      "pass": true
+    },
+    "concurrent": {
+      "results": [
+        {
+          "tag": "A1",
+          "requesterSenderId": "liangce:user-A-test",
+          "status": 200,
+          "replyHasExpected": true
+        },
+        {
+          "tag": "A2",
+          "requesterSenderId": "liangce:user-A-test",
+          "status": 200,
+          "replyHasExpected": true
+        },
+        {
+          "tag": "B1",
+          "requesterSenderId": "liangce:user-B-test",
+          "status": 200,
+          "replyHasExpected": true
+        }
+      ],
+      "resolverLog": {
+        "ok": true,
+        "log": []
+      },
+      "pass": true
+    },
+    "failClosed": {
+      "body": {
+        "withoutRequester": null,
+        "expect": null,
+        "pass": true
+      },
+      "pass": true
+    },
+    "forgeReject": {
+      "status": 400,
+      "json": {
+        "error": "client-supplied identity fields are not accepted",
+        "code": "identity_forge_rejected"
+      },
+      "pass": true
+    }
+  },
+  "cogneeAfter": "cognee-openclaw",
+  "cogneePass": true,
+  "liangceEnabled": true,
+  "identityMcpConfigured": true
+}

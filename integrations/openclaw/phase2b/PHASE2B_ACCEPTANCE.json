@@ -1,0 +1,71 @@
+{
+  "knowledgeMcpHealth": {
+    "ok": true,
+    "service": "mind-map-knowledge-mcp",
+    "jwtConfigured": true
+  },
+  "gateway": "healthy 0",
+  "cogneeSlot": "cognee-openclaw",
+  "pluginsAllow": [
+    "anthropic",
+    "browser",
+    "canvas",
+    "cognee-openclaw",
+    "cua-computer",
+    "device-pair",
+    "file-transfer",
+    "geolocation",
+    "liangce-ingress",
+    "linux-node",
+    "memory-core",
+    "ollama",
+    "openai",
+    "talk-voice",
+    "xai",
+    "deepseek"
+  ],
+  "mcpServers": [
+    "knowledge-mcp"
+  ],
+  "canonicalHashUnchanged": true,
+  "openwikiIsolationPass": true,
+  "acl": {
+    "A_rooms": [
+      "room-2yaz570x"
+    ],
+    "B_rooms": [
+      "room-6b5wc9z3"
+    ],
+    "C_rooms": [
+      "room-2yaz570x",
+      "room-6b5wc9z3"
+    ],
+    "A_only_A": true,
+    "B_only_B": true,
+    "C_has_both": true,
+    "A_read_B_denied": true,
+    "A_read_A_ok": true,
+    "A_openwiki_no_B": true,
+    "B_openwiki_no_A": true
+  },
+  "noTokenRejected": true,
+  "concurrent": [
+    {
+      "user": "A",
+      "err": false,
+      "room": "room-2yaz570x"
+    },
+    {
+      "user": "B",
+      "err": false,
+      "room": "room-6b5wc9z3"
+    },
+    {
+      "user": "C",
+      "err": false,
+      "room": "room-2yaz570x"
+    }
+  ],
+  "aclPass": true,
+  "phase2bPass": true
+}

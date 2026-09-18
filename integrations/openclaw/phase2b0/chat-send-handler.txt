@@ -1,0 +1,232 @@
+﻿		resolveCurrentUserProfileDisplay
+	}) : void 0;
+	const projected = projectedMessage ? augmentChatHistoryWithCanvasBlocks([projectedMessage])[0] : void 0;
+	if (!projected) {
+		respond(true, {
+			ok: false,
+			unavailableReason: "not_visible"
+		});
+		return;
+	}
+	respond(true, {
+		ok: true,
+		message: projected
+	});
+} };
+//#endregion
+//#region src/gateway/server-methods/chat-send-external-entry.ts
+const externalAuthorityAdmission = {
+	resolve: (params) => {
+		const authority = resolveGatewayChatCronCreatorAuthorityAdmission({
+			runId: params.runId,
+			resolvedSessionKey: params.sessionKey,
+			spawnedBy: params.spawnedBy,
+			client: params.client,
+			inputProvenance: params.inputProvenance,
+			hasExplicitOrigin: params.hasExplicitOrigin,
+			hasRestoredCronContinuation: params.hasRestoredCronContinuation,
+			isIncognito: params.isIncognitoEntry || isIncognitoSessionKey(params.sessionKey),
+			isReconnectResume: params.isReconnectResume,
+			isSystemGenerated: params.isSystemGenerated,
+			turnKind: params.turnKind,
+			isDirectExternalUser: true
+		});
+		return authority ? createCronCreatorAuthorityCapability(authority.runId, authority.callerOrigin, authority.controlUiAdmin) : void 0;
+	},
+	run: (capability, run, signal) => runWithCronCreatorAuthorityCapability(capability, run, signal)
+};
+/** Authenticated external chat entry; internal re-entry must call handleChatSend directly. */
+function handleDirectExternalChatSend(options, onAdmissionOwned) {
+	return handleChatSend(options, onAdmissionOwned, externalAuthorityAdmission);
+}
+//#endregion
+//#region src/gateway/server-methods/chat.ts
+const chatHandlers = {
+	...chatHistoryHandlers,
+	...chatMessageGetHandlers,
+	"chat.toolTitles": async ({ params, respond }) => {
+		if (!assertValidParams(params, validateChatToolTitlesParams, "chat.toolTitles", respond)) return;
+		respond(true, {
+			titles: {},
+			disabled: true
+		});
+	},
+	"chat.send": handleDirectExternalChatSend,
+	"chat.inject": async ({ params, respond, context }) => {
+		if (!assertValidParams(params, validateChatInjectParams, "chat.inject", respond)) return;
+		const p = params;
+		const rawSessionKey = p.sessionKey;
+		const agentIdOverride = normalizeOptionalChatText(p.agentId);
+		const requestedAgent = resolveRequestedSessionAgentId(context.getRuntimeConfig(), rawSessionKey, agentIdOverride);
+		if (!requestedAgent.ok) {
+			respond(false, void 0, requestedAgent.error);
+			return;
+		}
+		const sessionLoadOptions = { agentId: requestedAgent.agentId };
+		const { cfg, storePath, entry, canonicalKey: sessionKey } = loadGatewaySessionEntry(rawSessionKey, sessionLoadOptions);
+		const selectedAgent = validateChatSelectedAgent({
+			cfg,
+			requestedSessionKey: rawSessionKey,
+			explicitAgentId: agentIdOverride
+		});
+		if (!selectedAgent.ok) {
+			respond(false, void 0, errorShape(ErrorCodes.INVALID_REQUEST, selectedAgent.error));
+			return;
+		}
+		const sessionId = entry?.sessionId;
+		if (!sessionId || !storePath) {
+			respond(false, void 0, errorShape(ErrorCodes.INVALID_REQUEST, "session not found"));
+			return;
+		}
+		const agentId = resolveSessionAgentId({
+			sessionKey,
+			config: cfg,
+			agentId: selectedAgent.agentId
+		});
+		let appended;
+		try {
+			const admission = await beginSessionWorkAdmission({
+				scope: storePath,
+				identities: [sessionKey, sessionId],
+				assertAllowed: () => {
+					const latestEntry = loadGatewaySessionEntry(rawSessionKey, sessionLoadOptions).entry;
+					if (!latestEntry) throw new Error(`Session "${sessionKey}" was deleted while starting work. Retry.`);
+					if (latestEntry.sessionId !== sessionId) throw new Error(`Session "${sessionKey}" changed while starting work. Retry.`);
+					const archivedError = resolveSessionWorkStartError(sessionKey, latestEntry);
+					if (archivedError) throw new Error(archivedError);
+				}
+			});
+			try {
+				appended = await admission.run(async () => await appendAssistantTranscriptMessage({
+					sessionKey,
+					message: p.message,
+					label: p.label,
+					sessionId,
+					storePath,
+					agentId,
+					createIfMissing: true,
+					cfg
+				}));
+			} finally {
+				admission.release();
+			}
+		} catch (err) {
+			respond(false, void 0, errorShape(ErrorCodes.INVALID_REQUEST, formatForLog(err)));
+			return;
+		}
+		if (!appended.ok || !appended.messageId || !appended.message) {
+			respond(false, void 0, errorShape(ErrorCodes.UNAVAILABLE, `failed to write transcript: ${appended.error ?? "unknown error"}`));
+			return;
+		}
+		const message = projectChatDisplayMessage(appended.message, { maxChars: resolveEffectiveChatHistoryMaxChars(cfg) });
+		const chatPayload = {
+			runId: `inject-${appended.messageId}`,
+			sessionKey,
+			...agentId ? { agentId } : {},
+			seq: 0,
+			state: "final",
+			message
+		};
+		context.broadcast("chat", chatPayload, { sessionKeys: resolveGlobalAwareNodeChatDeliveryKeys({
+			cfg,
+			sessionKey,
+			agentId
+		}) });
+		sendGlobalAwareNodeChatPayload({
+			context,
+			sessionKey,
+			agentId,
+			event: "chat",
+			payload: chatPayload
+		});
+		respond(true, {
+			ok: true,
+			messageId: appended.messageId
+		});
+	}
+};
+//#endregion
+export { readChatHistoryPage as a, CHAT_HISTORY_MAX_SINGLE_MESSAGE_BYTES as c, enrichChatHistoryCompactionMarkers as i, replaceOversizedChatHistoryMessages as l, handleDirectExternalChatSend as n, resolveChatHistoryNextOffset as o, capChatHistoryAroundMessage as r, shouldReplayOldestChatHistoryRecord as s, chatHandlers as t, reportOmittedChatHistory as u };
+
+==== handler file requester ====
+25:import { t as ADMIN_SCOPE } from "./operator-scopes-Dw7Gu2cA.mjs";
+94:import { _ as resolveChatSendCallerContext, a as resolveCreatorSandbox, f as resolveOperatorSessionCreation, h as gatewayClientSessionCreator, m as gatewayClientSenderFields, t as authorizeGatewaySessionCreation } from "./operator-role-policy-MgiU_R4c.mjs";
+163:	if (parseAgentSessionKey(params.sessionKey)) return [params.sessionKey];
+164:	const unscopedOwnerAgentId = tryResolveSessionCompatibilityOwnerAgentId(params.cfg, params.sessionKey);
+166:	if (!selectedAgentId) return [params.sessionKey];
+168:	const keys = [`agent:${scopedAgentId}:${params.sessionKey}`];
+169:	if (unscopedOwnerAgentId && normalizeAgentId(unscopedOwnerAgentId) === normalizeAgentId(scopedAgentId)) keys.push(params.sessionKey);
+175:		sessionKey: params.sessionKey,
+182:		sessionKey: params.sessionKey,
+189:	const payloadAgentId = parseAgentSessionKey(params.sessionKey) ? void 0 : params.agentId;
+213:		sessionKey: params.sessionKey,
+224:		sessionKeys: resolveChatSessionKeys({
+226:			sessionKey: params.sessionKey,
+232:		sessionKey: params.sessionKey,
+256:				params.sessionKey,
+278:	const payloadAgentId = parseAgentSessionKey(params.payload.sessionKey) ? void 0 : params.payload.agentId;
+284:	params.context.broadcast("chat.side_result", payload, { sessionKeys: resolveChatSessionKeys({
+286:		sessionKey: params.payload.sessionKey,
+291:		sessionKey: params.payload.sessionKey,
+383:	if (parseAgentSessionKey(params.sessionKey) || !params.agentId) return params.sessionKey;
+386:		sessionKey: params.sessionKey,
+388:	}) ?? params.sessionKey;
+408:	if (params.sessionKey.length > 512) return {
+412:	const sessionScopeParts = (parseAgentSessionKey(params.sessionKey)?.rest ?? params.sessionKey).split(":", 3).filter(Boolean);
+437:function isAcpSessionKey(sessionKey) {
+438:	return Boolean(sessionKey?.split(":").includes("acp"));
+550:				sessionKey: params.persistedSessionKey,
+575:	return Boolean(entry?.sessionId && params.sessionKey !== "global" && entry.status !== "running" && entry.abortedLastRun !== true && entry.archivedAt === void 0 && entry.initializationPending !== true && entry.pendingFinalDelivery === void 0 && (entry.agentHarnessId === void 0 || entry.agentHarnessId === "openclaw") && entry.pluginOwnerId === void 0 && entry.spawnedBy === void 0 && entry.subagentRole === void 0 && (entry.spawnDepth ?? 0) === 0 && entry.acp === void 0 && entry.cronRunContinuation === void 0 && !isSubagentSessionKey(params.sessionKey) && !isCronSessionKey(params.sessionKey) && !isAcpSessionKey$1(params.sessionKey) && !isAgentHarnessSessionKey(params.sessionKey) && (params.requestedSessionId === void 0 || params.requestedSessionId === entry.sessionId));
+578:	if (findRestartRecoveryUnsafeChatAdmissionHook(resolveSessionDispatchKind(params.sessionKey, params.entry)) !== void 0 || listActiveEmbeddedRunSessionIds().includes(params.sessionId) || replyRunRegistry.isActive(resolveChatSendActiveScopeKey({
+579:		sessionKey: params.sessionKey,
+582:	for (const active of params.context.chatAbortControllers.values()) if ((active.sessionKey === params.sessionKey || active.sessionId === params.sessionId) && resolveChatRunOwnerAgentId({
+584:		sessionKey: active.sessionKey,
+587:	for (const queued of params.context.chatQueuedTurns?.values() ?? []) if ((queued.sessionKey === params.sessionKey || queued.sessionId === params.sessionId) && resolveChatRunOwnerAgentId({
+589:		sessionKey: queued.sessionKey,
+607:		resetType: resolveSessionResetType({ sessionKey: params.sessionKey }),
+609:		sessionKey: params.sessionKey,
+650:		sessionKey: params.sessionKey,
+682:			sessionKey: params.sessionKey,
+702:		params.sessionKey
+711:		sessionKey: params.sessionKey,
+717:			identities: [params.sessionKey, params.admittedSessionId],
+722:				const titleEntry = loadGatewaySessionEntry(params.sessionKey, params.sessionLoadOptions).entry;
+729:					sessionKey: params.sessionKey,
+734:					sessionKey: params.sessionKey,
+782:	const { agentId, clientRunId, sessionKey } = params.session;
+797:			sessionKey,
+804:	params.context.removeChatRun(clientRunId, clientRunId, sessionKey);
+831:		sessionKey,
+840:	const { agentId, backingSessionId, cfg, clientRunId, now, rawSessionKey, sessionKey } = session;
+868:					sessionKey,
+914:				sessionKey,
+948:					sessionKey,
+969:			context.removeChatRun(clientRunId, clientRunId, sessionKey);
+973:		context.removeChatRun(clientRunId, clientRunId, sessionKey);
+981:				canonicalKey: sessionKey,
+983:				defaultAgentId: tryResolveSessionCompatibilityOwnerAgentId(cfg, sessionKey)
+986:					sessionKey,
+1002:					sessionKey,
+1074:			sessionKey: params.sessionKey,
+1182:	const { agentId, cfg, clientRunId, entry, sessionKey, storePath } = session;
+1192:		sessionKey,
+1205:			sessionKey,
+1216:			sessionKey,
+1225:		sessionKey,
+1256:		sessionKey
+1281:			sessionKey,
+1288:			sessionKey,
+1303:	return payload.trustedLocalMedia === true;
+1312:		sessionKey: params.sessionKey,
+1433:	if (payload.trustedLocalMedia !== true) return null;
+1611:		const current = loadGatewaySessionEntry(session.sessionKey, sessionLoadOptions);
+1616:			sessionKey: session.sessionKey,
+1662:		const sessionKey = transcript?.sessionKey ?? session.sessionKey;
+1667:			sessionKey,
+1673:		const { storePath: latestStorePath, entry: latestEntry } = loadGatewaySessionEntry(sessionKey, {
+1686:			sessionKey,
+1705:			sessionKey,
+1711:			if (transcript && loadGatewaySessionEntry(sessionKey, {
+1774:			sessionKey,
+1887:		...source.trustedLocalMedia === true || target.trustedLocalMedia === true ? { trustedLocalMedia: true } : {},
+

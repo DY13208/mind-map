@@ -1,0 +1,111 @@
+{
+  "concurrent": {
+    "A1": {
+      "requester": "liangce:user-A-test",
+      "reply": "{\n  \"probe\": \"liangce-who_am_i\",\n  \"requesterSenderId\": \"liangce:user-A-test\",\n  \"agentAccountId\": \"default\",\n  \"sessionKey\": \"agent:main:main\",\n  \"messageChannel\": null\n}",
+      "probe": {
+        "url": "http://host.docker.internal:18791/mcp",
+        "headers": {
+          "x-requester-sender-id": "liangce:user-A-test"
+        }
+      }
+    },
+    "A2": {
+      "requester": "liangce:user-A-test",
+      "reply": "{\n  \"probe\": \"liangce-who_am_i\",\n  \"requesterSenderId\": \"liangce:user-A-test\",\n  \"agentAccountId\": \"default\",\n  \"sessionKey\": \"agent:main:main\",\n  \"messageChannel\": null\n}",
+      "probe": {
+        "url": "http://host.docker.internal:18791/mcp",
+        "headers": {
+          "x-requester-sender-id": "liangce:user-A-test"
+        }
+      }
+    },
+    "B1": {
+      "requester": "liangce:user-B-test",
+      "reply": "{\n  \"probe\": \"liangce-who_am_i\",\n  \"requesterSenderId\": \"liangce:user-B-test\",\n  \"agentAccountId\": \"default\",\n  \"sessionKey\": \"agent:main:main\",\n  \"messageChannel\": null\n}",
+      "probe": {
+        "url": "http://host.docker.internal:18791/mcp",
+        "headers": {
+          "x-requester-sender-id": "liangce:user-B-test"
+        }
+      }
+    },
+    "pass": true
+  },
+  "resolverStatus": {
+    "ok": true,
+    "resolverApiPresent": true,
+    "lastResolverSender": "liangce:user-B-test",
+    "logCount": 5,
+    "apiKeys": []
+  },
+  "resolverLog": {
+    "ok": true,
+    "log": [
+      {
+        "requesterSenderId": "liangce:user-A-test",
+        "agentAccountId": "default",
+        "messageChannel": "liangce",
+        "at": 1789713925138
+      },
+      {
+        "requesterSenderId": "liangce:user-A-test",
+        "agentAccountId": "default",
+        "messageChannel": "liangce",
+        "at": 1789713933902
+      },
+      {
+        "requesterSenderId": "liangce:user-A-test",
+        "agentAccountId": "default",
+        "messageChannel": "liangce",
+        "at": 1789713939962
+      },
+      {
+        "requesterSenderId": "liangce:user-B-test",
+        "agentAccountId": "default",
+        "messageChannel": "liangce",
+        "at": 1789713940171
+      },
+      {
+        "requesterSenderId": "liangce:user-B-test",
+        "agentAccountId": "default",
+        "messageChannel": "liangce",
+        "at": 1789713944912
+      }
+    ]
+  },
+  "mcpHits": {
+    "hits": [
+      {
+        "at": 1789713925196,
+        "method": "initialize",
+        "sender": "liangce:user-A-test"
+      },
+      {
+        "at": 1789713925239,
+        "method": "notifications/initialized",
+        "sender": "liangce:user-A-test"
+      },
+      {
+        "at": 1789713925266,
+        "method": "tools/list",
+        "sender": "liangce:user-A-test"
+      },
+      {
+        "at": 1789713940188,
+        "method": "initialize",
+        "sender": "liangce:user-B-test"
+      },
+      {
+        "at": 1789713940204,
+        "method": "notifications/initialized",
+        "sender": "liangce:user-B-test"
+      },
+      {
+        "at": 1789713940225,
+        "method": "tools/list",
+        "sender": "liangce:user-B-test"
+      }
+    ]
+  }
+}

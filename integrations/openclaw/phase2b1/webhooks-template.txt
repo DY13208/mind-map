@@ -1,0 +1,140 @@
+﻿=== webhooks index ===
+53 /app/extensions/webhooks/index.ts
+// Webhooks plugin entrypoint registers its OpenClaw integration.
+import { definePluginEntry, type OpenClawPluginApi } from "./api.js";
+import { resolveWebhooksPluginConfig } from "./src/config.js";
+import { createTaskFlowWebhookRequestHandler, type TaskFlowWebhookTarget } from "./src/http.js";
+
+function registerWebhookRoutes(api: OpenClawPluginApi): void {
+  const routes = resolveWebhooksPluginConfig({
+    pluginConfig: api.pluginConfig,
+  });
+  if (routes.length === 0) {
+    return;
+  }
+
+  const targetsByPath = new Map<string, TaskFlowWebhookTarget[]>();
+  const handler = createTaskFlowWebhookRequestHandler({
+    cfg: api.config,
+    targetsByPath,
+  });
+
+  for (const route of routes) {
+    const taskFlow = api.runtime.tasks.managedFlows.bindSession({
+      sessionKey: route.sessionKey,
+    });
+    const target: TaskFlowWebhookTarget = {
+      routeId: route.routeId,
+      path: route.path,
+      secretInput: route.secret,
+      defaultControllerId: route.controllerId,
+      taskFlow,
+    };
+    targetsByPath.set(target.path, [...(targetsByPath.get(target.path) ?? []), target]);
+    api.registerHttpRoute({
+      path: target.path,
+      auth: "plugin",
+      match: "exact",
+      replaceExisting: true,
+      handler,
+    });
+    api.logger.info?.(
+      `[webhooks] registered route ${route.routeId} on ${route.path} for session ${route.sessionKey}`,
+    );
+  }
+}
+
+export default definePluginEntry({
+  id: "webhooks",
+  name: "Webhooks",
+  description:
+    "Authenticated inbound webhooks that bind external automation to OpenClaw TaskFlows.",
+  register(api: OpenClawPluginApi) {
+    registerWebhookRoutes(api);
+  },
+});
+
+
+=== webhooks package/plugin json ===
+{
+  "id": "webhooks",
+  "activation": {
+    "onStartup": true
+  },
+  "name": "Webhooks",
+  "description": "Authenticated inbound webhooks that bind external automation to OpenClaw TaskFlows.",
+  "configContracts": {
+    "secretInputs": {
+      "paths": [
+        {
+          "path": "routes.*.secret",
+          "expected": "string",
+          "ownerKind": "route"
+        }
+      ]
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "$defs": {
+      "secretRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": ["env", "file", "exec", "store"]
+          },
+          "provider": { "type": "string" },
+          "id": { "type": "string" }
+        },
+        "required": ["source", "provider", "id"]
+      },
+      "secretInput": {
+        "anyOf": [{ "type": "string", "minLength": 1 }, { "$ref": "#/$defs/secretRef" }]
+      },
+      "route": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "path": { "type": "string", "minLength": 1 },
+          "sessionKey": { "type": "string", "minLength": 1 },
+          "secret": { "$ref": "#/$defs/secretInput" },
+          "controllerId": { "type": "string", "minLength": 1 },
+          "description": { "type": "string" }
+        },
+        "required": ["sessionKey", "secret"]
+      }
+    },
+    "properties": {
+      "routes": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/$defs/route"
+        }
+      }
+    }
+  }
+}
+---
+{
+  "name": "@openclaw/webhooks",
+  "version": "2026.9.3",
+  "private": true,
+  "description": "OpenClaw webhook bridge plugin",
+  "type": "module",
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  }
+}
+

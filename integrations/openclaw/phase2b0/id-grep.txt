@@ -1,0 +1,175 @@
+﻿
+
+======== scripts/openclaw-bridge/server.mjs ========
+LEN 10916
+    2:  * OpenClaw Gateway bridge for 鑹瓥鍔╃悊椤?
+    6:  *   鈫?{ type:'chat', id, conversationId, message }
+   16: import { GatewayClient } from '@openclaw/gateway-client'
+   17: import { PROTOCOL_VERSION } from '@openclaw/gateway-protocol/version'
+   18: import { GATEWAY_CLIENT_CAPS } from '@openclaw/gateway-protocol/client-info'
+   20: const PORT = Number(process.env.OPENCLAW_BRIDGE_PORT || 18790)
+   22:   process.env.OPENCLAW_GATEWAY_WS ||
+   23:   `ws://127.0.0.1:${process.env.OPENCLAW_PORT || 4623}`
+   24: const TOKEN = String(process.env.OPENCLAW_GATEWAY_TOKEN || '').trim()
+   26: if (!TOKEN) {
+   27:   console.error('[openclaw-bridge] missing OPENCLAW_GATEWAY_TOKEN')
+   31: /** @type {import('@openclaw/gateway-client').GatewayClient | null} */
+  201:   if (name === 'chat' || name === 'chat.delta' || name === 'session.message') {
+  237:     token: TOKEN,
+  246:       console.log('[openclaw-bridge] gateway hello-ok')
+  253:         '[openclaw-bridge] connect error',
+  260:       console.warn('[openclaw-bridge] gateway closed')
+  275:   const conversationId = String(msg.conversationId || randomUUID())
+  287:       message: (err && err.message) || '鏃犳硶杩炴帴 OpenClaw Gateway'
+  292:   const sessionKey = `main:liangce:${conversationId}`
+  298:         sessionKey,
+  332:           sessionKey,
+  390:   console.log(`[openclaw-bridge] listening ws://127.0.0.1:${PORT}/ws`)
+  395:       '[openclaw-bridge] initial gateway connect failed (will retry on chat):',
+
+
+======== web/src/utils/openclawChat.js ========
+LEN 7284
+    2:  * 鏈満 OpenClaw Gateway锛圤penAI 鍏煎锛夊鎴风銆?    3:  * 榛樿缁?/openclaw-api 浠ｇ悊鍒板涓绘満 OpenClaw锛堥粯璁?4623锛?    7: const TOKEN_KEY = 'openclaw.gatewayToken'
+    8: const BASE_KEY = 'openclaw.baseUrl'
+    9: const MODEL_KEY = 'openclaw.model'
+   11: export function getOpenclawConfig() {
+   15:   let token = ''
+   19:     token = localStorage.getItem(TOKEN_KEY) || ''
+   25:   // Start-Docker 娉ㄥ叆鐨?runtime Token 浼樺厛锛岄伩鍏嶆棫 localStorage 鎸′綇鑷姩閰嶇疆
+   26:   const runtimeToken = String(
+   27:     runtime.openclawToken || cfg.openclawToken || ''
+   31:       runtime.openclawBase ||
+   32:         cfg.openclawBase ||
+   34:         '/openclaw-api'
+   36:     token: String(runtimeToken || token || '').trim(),
+   38:       runtime.openclawModel ||
+   39:         cfg.openclawModel ||
+   41:         'openclaw/default'
+   44:       runtime.openclawControlUrl ||
+   45:         cfg.openclawControlUrl ||
+   48:     fromRuntime: !!runtimeToken
+   52: export function saveOpenclawConfig({ token, baseUrl, model } = {}) {
+   54:     if (token != null) localStorage.setItem(TOKEN_KEY, String(token))
+   64: export async function checkOpenclawHealth() {
+   65:   const { baseUrl, token } = getOpenclawConfig()
+   66:   const headers = {}
+   67:   if (token) headers.Authorization = `Bearer ${token}`
+   69:   let last = { ok: false, status: 0, message: '鏃犳硶杩炴帴 OpenClaw' }
+   73:         headers,
+   82:           ? 'OpenClaw Gateway 鏈惎鍔紙璇疯繍琛?Start-Docker.bat锛屼細鑷姩鎷夎捣 Docker 榫欒櫨瀹瑰櫒锛?
+   91:         message: (err && err.message) || '鏃犳硶杩炴帴 OpenClaw'
+   98: export async function listOpenclawModels() {
+   99:   const { baseUrl, token } = getOpenclawConfig()
+  100:   const headers = {}
+  101:   if (token) headers.Authorization = `Bearer ${token}`
+  103:     headers,
+  117:  * 娴佸紡鑱婂ぉ銆備細璇濈敤 user=conv:xxx 淇濇寔 OpenClaw session銆?  119: export async function streamOpenclawChat({
+  121:   conversationId,
+  126:   const cfg = getOpenclawConfig()
+  127:   const useModel = String(model || cfg.model || 'openclaw/default').trim()
+  128:   const headers = {
+  132:   if (cfg.token) headers.Authorization = `Bearer ${cfg.token}`
+  139:   if (conversationId) {
+  140:     body.user = `conv:${conversationId}`
+  145:     headers,
+  165:   const contentType = String(res.headers.get('content-type') || '')
+
+
+======== web/src/utils/openclawGatewayWs.js ========
+LEN 6299
+    2:  * 娴忚鍣ㄤ晶锛氱粡鍚屾簮 /openclaw-bridge/ws 杩炶壇绛?bridge锛屽啀鐢?bridge 璧伴緳铏?Gateway WS銆?   38: function resolveBridgeWsUrl() {
+   41:   if (runtime.openclawBridgeWs) {
+   42:     const v = String(runtime.openclawBridgeWs)
+   51:   return `${proto}//${window.location.host}/openclaw-bridge/ws`
+   57:  * @param {string} [opts.conversationId]
+   63: export function streamOpenclawGatewayWs(opts = {}) {
+   66:     conversationId,
+   72:   const url = resolveBridgeWsUrl()
+  155:           conversationId: conversationId || chatId,
+  204:         finish(new Error(msg.message || 'OpenClaw bridge error'))
+  208:       finish(new Error('鏃犳硶杩炴帴 OpenClaw Bridge锛堣纭 Start-Docker 宸叉媺璧凤級'))
+  223: export function getOpenclawBridgeWsUrl() {
+  224:   return resolveBridgeWsUrl()
+
+
+======== web/src/utils/wecomLogin.js ========
+LEN 1443
+    1: const WECOM_SDK_URL =
+    2:   'https://wwcdn.weixin.qq.com/node/open/js/wecom-jssdk-2.3.4.js'
+    6: export function loadWecomSdk() {
+   13:       script.src = WECOM_SDK_URL
+   29: export async function mountWecomLoginPanel(mountEl, challenge, handlers = {}) {
+   30:   const ww = await loadWecomSdk()
+   36:       agentid: challenge.agentId,
+
+
+======== web/src/pages/ProductShell/AssistantPage.vue ========
+LEN 44926
+   10:           v-for="c in conversations"
+   18:           <span class="chatMeta">{{ formatTime(c.updatedAt) }}</span>
+   20:         <p v-if="!conversations.length" class="emptySide">杩樻病鏈夊璇?/p>
+   32:           OpenClaw 鍘熺増
+   38:       <header class="mainHead">
+   63:       </header>
+   70:         <p>宸叉帴鍏ユ湰鏈?OpenClaw Gateway锛屽璇濅細璧颁綘鐨勬湰鍦板姪鎵嬨€?/p>
+  191:               placeholder="鍙戠粰 OpenClaw鈥?杈撳叆 / 鎼滅储骞惰皟鐢?SOP"
+  222:       title="OpenClaw 杩炴帴"
+  229:           <el-input v-model="form.baseUrl" placeholder="/openclaw-api"></el-input>
+  231:         <el-form-item label="Bearer Token锛坓ateway.auth.token锛?>
+  233:             v-model="form.token"
+  236:             placeholder="鏈満 OpenClaw 缃戝叧浠ょ墝"
+  240:           <el-input v-model="form.model" placeholder="openclaw/default"></el-input>
+  244:         姝ｅ父鎯呭喌鍙屽嚮 Start-Docker.bat 浼氳嚜鍔ㄥ啓鍏?Token锛屾棤闇€鎵嬪伐閰嶇疆銆?  245:         浠呭綋鑷姩娉ㄥ叆澶辫触鏃讹紝鍐嶅～鍐欐湰鏈?OpenClaw 鐨?gateway.auth.token銆?  260:   getOpenclawConfig,
+  261:   saveOpenclawConfig,
+  262:   checkOpenclawHealth,
+  263:   listOpenclawModels,
+  264:   streamOpenclawChat
+  265: } from '@/utils/openclawChat'
+  266: import { streamOpenclawGatewayWs } from '@/utils/openclawGatewayWs'
+  269: import { loadSopRunContext } from '@/utils/sopRun'
+  271: const STORE_KEY = 'openclaw.conversations.v1'
+  336:       conversations: Array.isArray(raw.conversations) ? raw.conversations : [],
+  340:     return { conversations: [], activeId: '' }
+  349:         conversations: state.conversations,
+  381:     const cfg = getOpenclawConfig()
+  384:       conversations: store.conversations,
+  390:       models: [{ id: 'openclaw/default', name: 'openclaw/default' }],
+  391:       model: cfg.model || 'openclaw/default',
+  397:         token: cfg.token,
+  403:         '妫€鏌ヤ竴涓嬫湰鏈?OpenClaw 鐘舵€?,
+  425:       if (this.health.ok) return 'OpenClaw 鍦ㄧ嚎'
+  429:       return this.conversations.find(c => c.id === this.activeId) || null
+  475:     const cfg = getOpenclawConfig()
+  477:     if (cfg.fromRuntime && cfg.token) {
+  478:       saveOpenclawConfig({
+  479:         token: cfg.token,
+  483:       this.form.token = cfg.token
+  491:     if (!this.activeId && this.conversations.length) {
+  492:       this.activeId = this.conversations[0].id
+  503:         conversations: this.conversations,
+  525:       this.health = await checkOpenclawHealth()
+  529:         const list = await listOpenclawModels()
+  543:             'OpenClaw 鍦ㄧ嚎锛屼絾鏈惎鐢?/v1/chat/completions銆傝寮€鍚悗閲嶅惎 Gateway锛屾垨浣跨敤銆孫penClaw 鍘熺増銆嶃€?
+  548:       saveOpenclawConfig({ model: this.model })
+  552:       this.conversations.unshift({
+  805:         sessions_search: '鎼滅储浼氳瘽',
+  806:         wecom_mcp: '浼佷笟寰俊',
+  906:         ctx = await loadSopRunContext(roomKey, sop)
+  908:         console.warn('[assistant] sop context failed', err)
+  966:         saveOpenclawConfig(this.form)
+  972:           this.$message.success('宸茶繛鎺?OpenClaw')
+ 1057:           // Gateway WS锛堢粡 bridge锛夆€?鍙甫宸ュ叿杩涘害
+ 1058:           await streamOpenclawGatewayWs({
+ 1059:             conversationId: chat.id,
+ 1075:             name: 'bridge',
+ 1077:             detail: 'Bridge 涓嶅彲鐢紝鏀硅蛋 HTTP 娴佸紡'
+ 1079:           // Bridge 涓嶅彲鐢ㄦ椂鍥為€€ HTTP SSE
+ 1080:           await streamOpenclawChat({
+ 1081:             conversationId: chat.id,
+ 1112:               '鏈惎鐢?OpenClaw Chat Completions锛?v1/chat/completions锛夈€傝寮€鍚悗閲嶅惎锛屾垨鎵撳紑銆孫penClaw 鍘熺増銆嶃€?
+ 1115:               '閴存潈澶辫触銆傝閲嶆柊杩愯 Start-Docker.bat 鑷姩娉ㄥ叆 Token锛屾垨鐐广€岃繛鎺ヨ缃€嶆墜鍔ㄥ～鍐欍€?
+ 1116:             if (!getOpenclawConfig().token) this.showSettings = true
+ 1122:               '杩炰笉涓?OpenClaw锛圚TTP ' +
+ 1213:   .chatMeta {
+ 1698:     .chatMeta,

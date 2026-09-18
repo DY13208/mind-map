@@ -60,6 +60,38 @@ function resolveBridgeWsUrl() {
  * @param {(info: {name:string,phase:string,detail:string}) => void} [opts.onTool]
  * @param {(info: {ok:boolean}) => void} [opts.onStatus]
  */
+
+async function fetchOpenclawHandoff(conversationId) {
+  const headers = { 'Content-Type': 'application/json' }
+  try {
+    const token =
+      (typeof localStorage !== 'undefined' &&
+        (localStorage.getItem('authToken') ||
+          localStorage.getItem('token') ||
+          localStorage.getItem('mindmap.authToken'))) ||
+      ''
+    if (token) headers.Authorization = 'Bearer ' + token
+  } catch (_) {}
+  const res = await fetch('/api/openclaw/handoff', {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+    body: JSON.stringify({ conversationId: conversationId || '' }),
+    cache: 'no-store'
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const err = new Error(
+      (json && (json.error || json.message)) ||
+        '获取 OpenClaw handoff 失败 HTTP ' + res.status
+    )
+    err.code = (json && json.code) || 'openclaw_handoff_http'
+    err.status = res.status
+    throw err
+  }
+  return json
+}
+
 export function streamOpenclawGatewayWs(opts = {}) {
   const {
     message,
@@ -147,13 +179,28 @@ export function streamOpenclawGatewayWs(opts = {}) {
       signal.addEventListener('abort', onAbort, { once: true })
     }
 
-    ws.onopen = () => {
+    ws.onopen = async () => {
+      let handoff = opts.handoff || ''
+      try {
+        if (!handoff) {
+          const issued = await fetchOpenclawHandoff(conversationId || chatId)
+          handoff = issued.handoff || issued.token || ''
+        }
+      } catch (err) {
+        finish(err)
+        return
+      }
+      if (!handoff) {
+        finish(new Error('缺少 Signed Handoff'))
+        return
+      }
       ws.send(
         JSON.stringify({
           type: 'chat',
           id: chatId,
           conversationId: conversationId || chatId,
-          message: String(message || '')
+          message: String(message || ''),
+          handoff
         })
       )
     }

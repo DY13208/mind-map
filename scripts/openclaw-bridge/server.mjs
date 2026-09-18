@@ -28,6 +28,36 @@ if (!TOKEN) {
   process.exit(1)
 }
 
+const GATEWAY_HTTP =
+  process.env.OPENCLAW_GATEWAY_HTTP ||
+  `http://127.0.0.1:${process.env.OPENCLAW_PORT || 4623}`
+const REQUIRE_HANDOFF = String(process.env.OPENCLAW_REQUIRE_HANDOFF || '1') !== '0'
+
+/** Phase 2B-1: identity path — Gateway token is transport only; identity from verified handoff. */
+async function postLiangceInbound({ handoff, message, conversationId, messageId }) {
+  const url = `${GATEWAY_HTTP.replace(/\/$/, '')}/liangce/inbound`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${TOKEN}`
+    },
+    body: JSON.stringify({ handoff, message, conversationId, messageId })
+  })
+  const text = await res.text()
+  let json
+  try { json = text ? JSON.parse(text) : {} } catch { json = { raw: text } }
+  if (!res.ok) {
+    const err = new Error(json.error || json.message || `liangce inbound HTTP ${res.status}`)
+    err.code = json.code || 'liangce_inbound_http'
+    err.status = res.status
+    err.body = json
+    throw err
+  }
+  return json
+}
+
+
 /** @type {import('@openclaw/gateway-client').GatewayClient | null} */
 let gateway = null
 let gatewayReady = false
@@ -274,10 +304,54 @@ async function handleChat(ws, msg) {
   const chatId = String(msg.id || randomUUID())
   const conversationId = String(msg.conversationId || randomUUID())
   const message = String(msg.message || '').trim()
+  const handoff = String(msg.handoff || msg.handoffToken || '').trim()
   if (!message) {
     sendBrowser(ws, { type: 'error', id: chatId, message: '空消息' })
     return
   }
+  if (REQUIRE_HANDOFF && !handoff) {
+    sendBrowser(ws, {
+      type: 'error',
+      id: chatId,
+      message: '缺少 Signed Handoff（请先 POST /api/openclaw/handoff）',
+      code: 'openclaw_handoff_required'
+    })
+    return
+  }
+
+  if (handoff) {
+    try {
+      const json = await postLiangceInbound({
+        handoff,
+        message,
+        conversationId,
+        messageId: chatId
+      })
+      const reply = String(
+        json.reply ||
+          (Array.isArray(json.replies) ? json.replies.join('\n') : '') ||
+          ''
+      )
+      if (reply) sendBrowser(ws, { type: 'delta', id: chatId, text: reply })
+      sendBrowser(ws, {
+        type: 'done',
+        id: chatId,
+        text: reply,
+        requesterSenderId: json.requesterSenderId || null,
+        userId: json.userId || null
+      })
+      return
+    } catch (err) {
+      sendBrowser(ws, {
+        type: 'error',
+        id: chatId,
+        message: (err && err.message) || 'liangce inbound failed',
+        code: (err && err.code) || 'liangce_inbound_failed'
+      })
+      return
+    }
+  }
+
   try {
     await ensureGateway()
   } catch (err) {
@@ -291,7 +365,6 @@ async function handleChat(ws, msg) {
 
   const sessionKey = `main:liangce:${conversationId}`
   try {
-    // 优先 chat.send（Control UI 同源）
     const result = await gateway.request(
       'chat.send',
       {
@@ -307,32 +380,19 @@ async function handleChat(ws, msg) {
         ''
     )
     if (runId) {
-      runs.set(runId, {
-        browserWs: ws,
-        chatId,
-        text: '',
-        seq: 0
-      })
+      runs.set(runId, { browserWs: ws, chatId, text: '', seq: 0 })
     } else {
-      // 同步返回正文的兜底
       const text = extractAssistantDelta(result) || String(result || '')
-      if (text) {
-        sendBrowser(ws, { type: 'delta', id: chatId, text })
-      }
+      if (text) sendBrowser(ws, { type: 'delta', id: chatId, text })
       sendBrowser(ws, { type: 'done', id: chatId, text })
     }
   } catch (err) {
-    // chat.send 不可用时回退 agent
     try {
       const runId = randomUUID()
       runs.set(runId, { browserWs: ws, chatId, text: '', seq: 0 })
       await gateway.request(
         'agent',
-        {
-          sessionKey,
-          message,
-          runId
-        },
+        { sessionKey, message, runId },
         { timeoutMs: 120000 }
       )
     } catch (err2) {

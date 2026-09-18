@@ -1,0 +1,12 @@
+{
+  "a": {
+    "tag": "conv:p2b0-userA-1789709987642",
+    "status": 200,
+    "body": "{\"id\":\"chatcmpl_1e4a2391-4510-4e50-8036-d4f8f57c9c40\",\"object\":\"chat.completion\",\"created\":1789709989,\"model\":\"openclaw/default\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"ACK_A\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":29650,\"completion_tokens\":33,\"total_tokens\":29683,\"prompt_tokens_details\":{\"cached_tokens\":2432},\"completion_tokens_details\":{\"reasoning_tokens\":30}}}"
+  },
+  "b": {
+    "tag": "conv:p2b0-userB-1789709987643",
+    "status": 200,
+    "body": "{\"id\":\"chatcmpl_9b0184dc-4aee-4a01-8078-aea48f86c652\",\"object\":\"chat.completion\",\"created\":1789709989,\"model\":\"openclaw/default\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"ACK_B\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":29649,\"completion_tokens\":31,\"total_tokens\":29680,\"prompt_tokens_details\":{\"cached_tokens\":2432},\"completion_tokens_details\":{\"reasoning_tokens\":28}}}"
+  }
+}

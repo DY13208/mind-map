@@ -1,0 +1,166 @@
+﻿
+####
+/app/docs/plugins/hooks.md:310:| `message_received`          | Observe       | Observe inbound content, sender, thread, and metadata                      |
+/app/docs/plugins/hooks.md:1073:- `message_received`: observe inbound content, sender, `threadId`,
+/app/docs/plugins/sdk-channel-plugins.md:8:  - You need to understand the ChannelPlugin adapter surface
+/app/docs/plugins/sdk-channel-plugins.md:46:Expose a `message` adapter with `defineChannelMessageAdapter` from
+/app/docs/plugins/sdk-channel-plugins.md:503:supports generic current-conversation bindings. `createChatChannelPlugin(...)`
+/app/docs/plugins/sdk-channel-plugins.md:520:`ChannelPlugin["conversationBindings"]` contract exported by
+/app/docs/plugins/sdk-channel-plugins.md:568:`ChannelPlugin.approvals` was removed; put approval delivery/native/render/auth
+/app/docs/plugins/sdk-channel-plugins.md:1069:    The `ChannelPlugin` interface has many optional adapter surfaces. Start with
+/app/docs/plugins/sdk-channel-plugins.md:1071:    them. `createChatChannelPlugin` defaults omitted capabilities to direct
+/app/docs/plugins/sdk-channel-plugins.md:1093:      createChatChannelPlugin,
+/app/docs/plugins/sdk-channel-plugins.md:1094:      createChannelPluginBase,
+/app/docs/plugins/sdk-channel-plugins.md:1121:    export const acmeChatPlugin = createChatChannelPlugin<ResolvedAccount>({
+/app/docs/plugins/sdk-channel-plugins.md:1122:      base: createChannelPluginBase({
+/app/docs/plugins/sdk-channel-plugins.md:1231:    <Accordion title="What createChatChannelPlugin does for you">
+/app/docs/plugins/sdk-channel-plugins.md:1303:    import { defineChannelPluginEntry } from "openclaw/plugin-sdk/channel-core";
+/app/docs/plugins/sdk-channel-plugins.md:1306:    export default defineChannelPluginEntry({
+/app/docs/plugins/sdk-channel-plugins.md:1339:    `defineChannelPluginEntry` handles the registration-mode split automatically.
+/app/docs/plugins/sdk-channel-plugins.md:1455:鈹溾攢鈹€ index.ts                  # defineChannelPluginEntry
+/app/docs/plugins/sdk-channel-plugins.md:1460:    鈹溾攢鈹€ channel.ts            # ChannelPlugin via createChatChannelPlugin
+/app/docs/plugins/building-plugins.md:162:    `defineChannelPluginEntry` from `openclaw/plugin-sdk/core` instead.
+/app/docs/plugins/building-plugins.md:378:<Check>Entry point uses `defineChannelPluginEntry` or `definePluginEntry`</Check>
+/app/docs/plugins/sdk-migration.md:213:`ChannelPlugin.lifecycle.detectLegacyStateMigrations` remain supported through
+/app/docs/plugins/sdk-migration.md:509:    - `ChannelPlugin.approvals` has been removed from the public
+/app/docs/plugins/sdk-channel-outbound.md:88:  defineChannelMessageAdapter,
+/app/docs/plugins/sdk-channel-outbound.md:92:export const demoMessageAdapter = defineChannelMessageAdapter({
+/app/docs/plugins/sdk-setup.md:112:Channel plugins should define setup fields once in runtime code with `defineChannelSetupContract(...)` and publish the matching serializable projection under `openclaw.channel.setup.fields`. The runtime definition infers the plugin-local input type, parses both guided and non-interactive values, and keeps channel-specific keys out of core types. Package metadata lets `openclaw channels add <channel-id> --help` and `openclaw channels add --channel <channel-id> --help` discover only the selected channel's options without loading the plugin.
+/app/docs/plugins/sdk-setup.md:115:import { defineChannelSetupContract } from "openclaw/plugin-sdk/channel-setup";
+/app/docs/plugins/sdk-setup.md:117:export const setupContract = defineChannelSetupContract({
+/app/docs/plugins/sdk-setup.md:345:import { myChannelPlugin } from "./src/channel.js";
+/app/docs/plugins/sdk-setup.md:347:export default defineSetupPluginEntry(myChannelPlugin);
+/app/docs/plugins/sdk-setup.md:449:For a plugin-owned root layout, also declare `openclaw.setupFeatures.configPromotion: "preserve-root"` in `package.json`. Doctor reads this static declaration for installed and bundled plugins, including disabled plugins, without executing their runtime. Omitting the declaration or using `false` does not opt out of promotion. The runtime declaration belongs on the adapter passed to `defineChannelSetupContract`, and covers shared CLI, declarative wizard, and policy-writer promotion. It does not change helpers that explicitly migrate a base name; use a selected-account writer when the root remains an implicit identity. Buzz is an example of this layout.
+/app/docs/plugins/sdk-setup.md:526:Channel plugins can provide interactive setup wizards for `openclaw onboard`. The wizard is a `ChannelSetupWizard` object on the `ChannelPlugin`:
+/app/docs/plugins/sdk-setup.md:644:- [SDK entry points](/plugins/sdk-entrypoints) 鈥?`definePluginEntry` and `defineChannelPluginEntry`
+/app/docs/plugins/architecture.md:51:| Channel / messaging    | `api.registerChannel(...)`                       | `matrix`, `msteams`                                         |
+/app/docs/plugins/sdk-runtime.md:92:    export default defineChannelPluginEntry({
+/app/docs/plugins/sdk-overview.md:53:import { defineChannelPluginEntry } from "openclaw/plugin-sdk/channel-core";
+/app/docs/plugins/sdk-overview.md:128:| `api.registerChannel(...)`                       | Messaging channel                                                                 |
+/app/docs/plugins/sdk-overview.md:963:    `definePluginEntry` and `defineChannelPluginEntry` options.
+/app/docs/plugins/sdk-subpaths.md:55:| `plugin-sdk/core`                   | `defineChannelPluginEntry`, `createChatChannelPlugin`, `createChannelPluginBase`, `defineSetupPluginEntry`, `buildChannelConfigSchema`, `buildJsonChannelConfigSchema`, `resolveTailscalePublishedHost` |
+/app/docs/plugins/sdk-subpaths.md:132:    | `plugin-sdk/channel-core` | `defineChannelPluginEntry`, `defineSetupPluginEntry`, `createChatChannelPlugin`, `createChannelPluginBase`, `createChannelConfigUiHints` |
+/app/docs/plugins/sdk-subpaths.md:134:    | `plugin-sdk/channel-setup` | `defineChannelSetupContract`, channel-owned setup field/input types, `createOptionalChannelSetupSurface`, `createOptionalChannelSetupAdapter`, `createOptionalChannelSetupWizard`, plus `DEFAULT_ACCOUNT_ID`, `createTopLevelChannelDmPolicy`, `setSetupChannelEnabled`, `splitSetupEntries` |
+/app/docs/plugins/sdk-subpaths.md:137:    | `plugin-sdk/setup-runtime` | `defineChannelSetupContract`, `createSetupTranslator`, `createPatchedAccountSetupAdapter`, `createEnvPatchedAccountSetupAdapter`, `createSetupInputPresenceValidator`, `noteChannelLookupFailure`, `noteChannelLookupSummary`, `promptResolvedAllowFrom`, `splitSetupEntries`, `createAllowlistSetupWizardProxy`, `createDelegatedSetupWizardProxy` |
+/app/docs/plugins/sdk-entrypoints.md:2:summary: "Reference for defineToolPlugin, definePluginEntry, defineChannelPluginEntry, and defineSetupPluginEntry"
+/app/docs/plugins/sdk-entrypoints.md:6:  - You need the exact type signature of defineToolPlugin, definePluginEntry, or defineChannelPluginEntry
+/app/docs/plugins/sdk-entrypoints.md:13:`defineChannelPluginEntry`, `defineSetupPluginEntry`.
+/app/docs/plugins/sdk-entrypoints.md:407:## `defineChannelPluginEntry`
+/app/docs/plugins/sdk-entrypoints.md:412:calls `api.registerChannel({ plugin })`, exposes an optional root-help CLI
+/app/docs/plugins/sdk-entrypoints.md:417:import { defineChannelPluginEntry } from "openclaw/plugin-sdk/channel-core";
+/app/docs/plugins/sdk-entrypoints.md:419:export default defineChannelPluginEntry({
+/app/docs/plugins/sdk-entrypoints.md:423:  plugin: myChannelPlugin,
+/app/docs/plugins/sdk-entrypoints.md:442:| `plugin`               | `ChannelPlugin`                                                  | Yes      | -                   |
+/app/docs/plugins/sdk-entrypoints.md:462:  skips `registerChannel`/`setRuntime` entirely and calls the full-runtime
+/app/docs/plugins/sdk-entrypoints.md:519:export default defineSetupPluginEntry(myChannelPlugin);
+/app/docs/plugins/sdk-entrypoints.md:565:    exportName: "myChannelPlugin",
+/app/docs/plugins/sdk-entrypoints.md:603
+
+####
+/app/docs/plugins/sdk-overview.md:393:    // ctx.requesterSenderId is host-trusted; never invent sender identity here.
+/app/docs/plugins/sdk-overview.md:394:    const token = await lookupUserToken(ctx.requesterSenderId);
+/app/docs/plugins/sdk-overview.md:408:- Resolver context carries trusted host identity only (`requesterSenderId`,
+/app/docs/plugins/sdk-overview.md:420:- Runs without a trusted `requesterSenderId` (cron, subagent, heartbeat, public
+/app/docs/plugins/architecture.md:213:- trusted inbound `requesterSenderId`
+
+
+####
+a2a.md
+access-groups.md
+ambient-room-events.md
+bot-loop-protection.md
+broadcast-groups.md
+buzz.md
+channel-routing.md
+clickclack.md
+discord-activities.md
+discord.md
+feishu.md
+googlechat.md
+group-messages.md
+groups.md
+imessage-from-bluebubbles.md
+imessage.md
+index.md
+irc.md
+line.md
+location.md
+matrix-migration.md
+matrix-presentation.md
+matrix-push-rules.md
+matrix.md
+mattermost.md
+msteams.md
+nextcloud-talk.md
+nostr.md
+pairing.md
+qa-channel.md
+qqbot.md
+raft.md
+reef.md
+signal.md
+slack
+slack.md
+sms.md
+synology-chat.md
+telegram.md
+tlon.md
+troubleshooting.md
+twitch.md
+wechat.md
+wecom.md
+whatsapp.md
+yuanbao.md
+zalo.md
+zaloclawbot.md
+zalouser.md
+adding-capabilities.md
+admin-http-rpc.md
+architecture-internals.md
+architecture.md
+beam.md
+building-plugins.md
+bundles.md
+cli-backend-plugins.md
+codex-computer-use.md
+codex-harness
+
+
+####
+/app/docs/channels/a2a.md:9:The A2A channel plugin connects OpenClaw to other agents through the Linux Foundation [Agent2Agent protocol](https://a2a-protocol.org). External agents discover the gateway through a public Agent Card and submit authenticated text tasks using the A2A 1.0 JSON-RPC binding. OpenClaw can also send messages to configured peer agents.
+/app/docs/channels/a2a.md:174:While an exec approval is pending, the original task stays working. After the operator decides, that same agent run receives the result and completes the task through its original reply path. An inbound peer does not need an outbound `url` to receive that completion through `GetTask`.
+/app/docs/channels/bot-loop-protection.md:12:The guard is enforced by the core inbound reply runner. Each supporting channel maps its inbound event into generic facts: account or scope, conversation id, sender bot id, and receiver bot id. Core tracks the participant pair in both directions (A to B and B to A count as the same pair), applies a sliding-window budget, and suppresses the pair during a cooldown after the budget is exceeded.
+/app/docs/channels/bot-loop-protection.md:117:Channels that do not expose a reliable inbound bot identity keep using their normal self-message and access-policy filters. They should not opt into this guard until they can identify both participants in the bot pair.
+/app/docs/channels/broadcast-groups.md:17:Broadcast groups run **multiple agents** on the same inbound message. Each agent processes the message in its own isolated session and posts its own reply, so one WhatsApp number can host a team of specialized agents in a single group chat or DM.
+/app/docs/channels/buzz.md:10:Buzz is an official channel plugin that connects OpenClaw agents to team rooms
+/app/docs/channels/buzz.md:29:The current plugin supports group rooms, Markdown text, and inbound structured
+/app/docs/channels/buzz.md:399:This changes delivery only: inbound thread context and session identity remain
+/app/docs/channels/buzz.md:627:4. Test outbound and inbound messages.
+/app/docs/channels/channel-routing.md:17:- **Channel**: a channel plugin such as `discord`, `googlechat`, `imessage`, `irc`, `line`, `signal`, `slack`, `telegram`, or `whatsapp`. `webchat` is the internal WebChat UI channel and is not a configurable outbound channel.
+/app/docs/channels/channel-routing.md:75:- The inbound DM sender does not match that pinned owner.
+/app/docs/channels/channel-routing.md:77:In that mismatch case, OpenClaw still records inbound session metadata, but it
+/app/docs/channels/channel-routing.md:80:## Guarded inbound recording
+/app/docs/channels/channel-routing.md:82:Channel plugins can mark an inbound session record as `createIfMissing: false`
+/app/docs/channels/channel-routing.md:89:Routing picks **one agent** for each inbound message:
+/app/docs/channels/channel-routing.md:128:- `bindings`: map inbound channels/accounts/peers to agents.
+/app/docs/channels/clickclack.md:122:| `allowFrom`             | `["*"]`             | User-id allowlist for inbound DMs and channel messages.                                                               |
+/app/docs/channels/clickclack.md:126:| `agentId`               | route default       | Pin this account's inbound messages to one agent.                                                                     |
+/app/docs/channels/clickclack.md:302:- `replyMode: "agent"` (default) dispatches inbound messages through the normal agent pipeline, including session recording and tool policy.
+/app/docs/channels/clickclack.md:485:OpenClaw inbound turns, even when their author bot is explicitly allowed.
+/app/docs/channels/clickclack.md:568:- No inbound replies: confirm the token has realtime read access. The bot always ignores its own messages; other bot messages are denied by default, and when `allowBots` is enabled the sender bot ID must also be listed explicitly in `allowFrom`.
+/app/docs/channels/discord.md:310:- Reply routing is deterministic: Discord inbound replies back to Discord.
+/app/docs/channels/discord.md:346:OpenClaw supports Discord components v2 containers for agent messages. Use the message tool with a `components` payload. Interaction results route back to the agent as normal inbound messages and follow the existing Discord `replyToMode` settings.
+/app/docs/channels/discord.md:719:    - `batched`: attaches it only when the inbound event was a debounced batch of multiple messages 鈥?useful when you want native replies mainly for ambiguous bursty chats, not every single-message turn
+/app/docs/channels/discord.md:960:    `ackReaction` sends an acknowledgement emoji while OpenClaw processes an inbound message.
+/app/docs/channels/discord.md:979:    The default scope (`"group-mentions"`) does not fire ack reactions in direct messages or ambient room events. To get an ack reaction on inbound Discord DMs and quiet room events, set `messages.ackReactionScope` to `"all"`.
+/app/docs/channels/discord.md:1854:    OpenClaw also ships shared [bot loop protection](/channels/bot-loop-protection). Whenever `allowBots` lets bot-authored messages reach dispatch, Discord maps the inbound event to `(account, channel, bot pair)` facts and the generic pair guard suppresses the pair after it crosses the configured event budget. The guard prevents runaway two-bot loops that previously had to be stopped by Discord rate limits; it does not affect single-bot deployments or one-shot bot replies that stay under the budget.
+/app/docs/channels/discord.md:1974:    Route inbound messages to agents.
+/app/docs/channels/group-messages.md:84:- Check gateway logs (run with `--verbose`) for `inbound web message` entries showing `from: <groupJid>` and the sender-labeled body.
+/app/docs/channels/groups.md:59:Plugin-owned conversation bindings are the exception. Once a plugin binds a thread and claims the inbound turn, the plugin's returned reply is the visible binding response; it does not need `message(action=send)`. That reply is plugin runtime output, not private model final text.
+/app/docs/channels/groups.md:120:Set it per channel (`channels.<channel>.contextVisibility`), per account (`channels.<channel>.accounts.<accountId>.contextVisibility`), or globally (`channels.defaults.contextVisibility`). Channels that fetch supplemental context (Discord, Feishu, iMessage, Matrix, Mattermost, Microsoft Teams, QQBot, Signal, Slack, Telegram, WhatsApp) apply the policy when building inbound context; unknown policy combinations fail closed and omit the context.
+/app/docs/channels/groups.md:307:    - Signal: `groupAllowFrom` can match either the inbound Signal group id or the sender phone/UUID.
+/app/docs/channels/groups.md:588:Group inbound payloads set:
+/app/docs/channels/imessage-from-bluebubbles.md:40:- Live inbound messages come from `imsg watch` / `watch.subscribe`, which follows `chat.db` filesystem events with a polling fallback.
+/app/docs/channels/imessage-from-bluebubbles.md:104:| _(implicit)_                                               | `channels.imessage.remoteHost`            | Messages Mac as `host` or `user@host`; explicit config wins, while simple transparent SSH wrappers are auto-detected once per process. Enables inbound attachment fetches and owner-only outbound staging over strict SSH/SCP. Cleanup is best-effort; failure warns and can leave owner-only residue. |
+/app/docs/channels/imessage-from-bluebubbles.md:111:| `channels.bluebubbles.includeAttachments`                  | `channels.imessage.includeAttachments`    | Same shape, same off-by-default. If attachments flowed on BlueBubbles, set this explicitly 鈥?inbound photos/media are silently dropped (no `Inbound message` log line) until you do.                                                                                                                   |
+/app/docs/channels/imessage-from-bluebubbles.md:212:iMessage recovers messages missed while the gateway was down: on startup it replays from the last dispatched rowid via `imsg wa
