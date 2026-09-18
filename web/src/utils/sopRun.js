@@ -30,6 +30,8 @@ import {
 } from './sopNotify'
 import { parseProvidedFieldLabels } from './sopSubmitMaterial'
 import {
+  extractOutputRulesFromTree,
+  formatOutputRulesPrompt,
   formatOutputRulesBlock,
   SOP_OUTPUT_RULES_META
 } from './sopOutputRules'
@@ -284,11 +286,13 @@ export async function loadSopRunContext(roomKey, sop) {
   let steps = []
   let source = 'none'
   let fullOutline = ''
+  let sourceTree = null
 
   // 从脑图工具栏直接运行时，优先使用点击“运行”那一刻的画布快照，
   // 避免协同保存尚未落库时读到旧的表单字段。
   const runtimeTree = sop && sop.runtimeTree
   if (runtimeTree) {
+    sourceTree = runtimeTree
     const lines = treeToOutline(runtimeTree)
     steps = treeToSteps(runtimeTree)
     if (lines.length) {
@@ -301,6 +305,7 @@ export async function loadSopRunContext(roomKey, sop) {
     try {
       const data = await getFileSubtree(key, uid, { deep: true, maxNodes: 800 })
       const tree = (data && data.tree) || data
+      sourceTree = tree
       const lines = treeToOutline(tree)
       steps = treeToSteps(tree)
       if (lines.length) {
@@ -343,6 +348,8 @@ export async function loadSopRunContext(roomKey, sop) {
     fullOutline: String(fullOutline || outline || '').slice(0, 120000),
     steps,
     source,
+    outputRules: extractOutputRulesFromTree(sourceTree),
+    outputRulesSource: sourceTree ? source : 'none',
     businessFingerprint: String(
       (sop && sop.businessFingerprint) ||
         (sop && sop.runtimeMaterial && sop.runtimeMaterial.businessFingerprint) ||
@@ -404,6 +411,7 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
   const fileHint = suggestDeliverableFileStem(ctx.sopId, ctx.sopTitle)
   const needFiles = !!(outputs && outputs.length)
   const rulesBlock = formatOutputRulesBlock(outputs || [])
+  const savedRulesBlock = formatOutputRulesPrompt(ctx.outputRules)
   const mapBlock = buildFullMapOutlineBlock(ctx)
   const runtimeSourceBoundary =
     ctx.source === 'runtime_tree'
@@ -428,9 +436,9 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
       '- 若下方已有「## 用户提交资料」，直接使用；不要要求用户再在界面里补数或贴链接。',
       '- 执行按本 SOP 步骤做；步骤里的历史推算必须做；勿因别的 D 未跑完而停；做完后再写「脑图诊断（全图）」。',
       runtimeSourceBoundary,
-      extraNote ? `\n## 额外要求\n${extraNote}` : '',
-      '',
       rulesBlock,
+      savedRulesBlock,
+      extraNote ? `\n## 额外要求（优先于已保存规则）\n${extraNote}` : '',
       '',
       mapBlock,
       '',
@@ -456,9 +464,9 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
     '注意：中间快照、_map_full/_map_outline、MCP 日志不要出现在产物清单里。',
     '【两段式】执行按本 SOP 步骤依次做（步骤里写的历史推算必须做）；勿因别的 D 未跑完而停。做完后再写「## 脑图诊断（全图）」。禁止空壳目标表冒充完成。',
     runtimeSourceBoundary,
-    extraNote ? `\n## 额外要求\n${extraNote}` : '',
-    '',
     rulesBlock,
+    savedRulesBlock,
+    extraNote ? `\n## 额外要求（优先于已保存规则）\n${extraNote}` : '',
     '',
     mapBlock,
     '',

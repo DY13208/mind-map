@@ -130,8 +130,16 @@ export function pruneDeliverables(list) {
       (isPreferredLocalDeliverable(d) ? 100 : 0) +
       (/^[A-Za-z]:[\\/]/.test(d.uri_or_path) ? 50 : 0) +
       (/^https?:\/\//i.test(d.uri_or_path) ? 10 : 0) +
+      (d.derived_from ? 8 : 0) +
+      (d.optimization_instruction ? 6 : 0) +
+      (Array.isArray(d.output_rules) && d.output_rules.length ? 4 : 0) +
+      (d.optimization_version ? 2 : 0) +
+      (d.optimization_root ? 2 : 0) +
       (d.at ? 1 : 0)
-    if (score(item) >= score(prev)) byKey.set(key, item)
+    // For the same physical file, keep the richer optimization metadata.
+    // A later scanner entry often only contains name/path and must not erase
+    // derived_from or the conversation needed to restore output rules.
+    if (score(item) > score(prev)) byKey.set(key, item)
   })
   return Array.from(byKey.values()).sort((a, b) =>
     String(b.at || b.createdAt).localeCompare(String(a.at || a.createdAt))
@@ -173,7 +181,17 @@ export function normalizeDeliverable(item) {
         : 0,
     optimization_root: String(
       item.optimization_root || item.optimizationRoot || ''
-    ).trim()
+    ).trim(),
+    output_rules: Array.from(
+      new Set(
+        (Array.isArray(item.output_rules || item.outputRules)
+          ? item.output_rules || item.outputRules
+          : []
+        )
+          .map(rule => String(rule || '').replace(/\s+/g, ' ').trim())
+          .filter(Boolean)
+      )
+    )
   }
 }
 
