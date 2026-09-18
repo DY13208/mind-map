@@ -1,4 +1,4 @@
-﻿name: mind-map
+name: mind-map
 
 services:
   postgres:
@@ -117,7 +117,7 @@ services:
   # Windows 涓?OpenClaw 浼?rename 鍐欓厤缃紝鍗曟枃浠舵寕杞戒細 EBUSY銆?
   # Token/閰嶇疆鐢?scripts/openclaw-docker.js 缁?docker cp 娉ㄥ叆鍗峰唴銆?
   openclaw-gateway:
-    image: ${OPENCLAW_IMAGE:-openclaw/openclaw:latest}
+    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:2026.9.3}
     environment:
       HOME: /home/node
       OPENCLAW_STATE_DIR: /home/node/.openclaw
@@ -158,17 +158,19 @@ services:
 
   # Phase 2B 鈥?read-only Knowledge MCP (image COPY; no host source bind)
   knowledge-mcp:
-    user: "0:0"
+    # Phase 4: entrypoint starts as root briefly to chown mounts, then gosu -> node (non-root)
+    # Do NOT force user: "0:0" — that defeated Dockerfile non-root.
     build:
       context: ./integrations/knowledge-mcp
       dockerfile: Dockerfile
-    image: mind-map-knowledge-mcp:0.3.0
+    image: mind-map-knowledge-mcp:0.4.0
     environment:
       KNOWLEDGE_MCP_PORT: "18792"
       KNOWLEDGE_MCP_JWT_SECRET: ${KNOWLEDGE_MCP_JWT_SECRET}
       KNOWLEDGE_MCP_JWT_ISS: openclaw-liangce
       KNOWLEDGE_MCP_JWT_AUD: knowledge-mcp
       KNOWLEDGE_MCP_JWT_TTL_SEC: ${KNOWLEDGE_MCP_JWT_TTL_SEC:-180}
+      KNOWLEDGE_MCP_REPLICAS_POLICY: ${KNOWLEDGE_MCP_REPLICAS_POLICY:-single}
       PGHOST: postgres
       PGPORT: "5432"
       PGUSER: ${PGUSER:-postgres}
@@ -187,6 +189,8 @@ services:
       - ./data/openwiki/rooms:/data/openwiki/rooms
       - ./data/openwiki/jobs:/data/openwiki/jobs
       - knowledge-mcp-audit:/data/audit
+    tmpfs:
+      - /tmp
     expose:
       - "18792"
     ports:
@@ -194,12 +198,22 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:18792/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 15s
+      start_period: 20s
     restart: unless-stopped
 
 
