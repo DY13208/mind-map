@@ -318,8 +318,6 @@
 import MarkdownIt from 'markdown-it'
 import * as XLSX from 'xlsx'
 import { extractDeliverablesFromReply, jobNeedsWecomResume } from '@/utils/sopRun'
-import { artifactLocalUrl } from '@/utils/fileApi'
-import { extractDeliverablesFromReply } from '@/utils/sopRun'
 import {
   artifactLocalUrl,
   getFileSubtree,
