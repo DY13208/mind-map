@@ -3,11 +3,7 @@ const crypto = require('crypto')
 const os = require('os')
 const path = require('path')
 const { spawn, execSync } = require('child_process')
-const {
-  DEFAULT_PORT: WORKBUDDY_PORT,
-  ensureWorkbuddyApi,
-  formatWorkbuddyResult
-} = require('./workbuddy-api')
+const { stopWorkbuddyApi } = require('./workbuddy-api')
 const {
   DEFAULT_PORT: OPENCLAW_PORT,
   ensureOpenclawGateway,
@@ -434,24 +430,17 @@ async function up() {
     console.log('  已启动。浏览器打开上面的页面地址。')
     if (process.platform === 'win32') {
       console.log('')
-      console.log('  正在启动本机 WorkBuddy API 代理（SOP 运行 / 补齐流程需要）...')
+      console.log('  跳过 WorkBuddy / 小策执行代理（SOP 已统一走助理 OpenClaw）...')
       try {
-        const wb = await ensureWorkbuddyApi({
-          root: ROOT,
-          port: WORKBUDDY_PORT,
-          mcpConfigPath: path.join(ROOT, '.mcp.json')
-        })
-        formatWorkbuddyResult(wb)
-          .split('\n')
-          .forEach(line => console.log(`  ${line}`))
-        if (wb && wb.ok) {
-          console.log(
-            `  页面访问 /wb-api → http://127.0.0.1:${wb.port}（经 Docker 网关转发）`
-          )
+        const stopped = stopWorkbuddyApi({ root: ROOT })
+        if (stopped) {
+          console.log('  已停止本机残留的 WorkBuddy API，释放内存')
+        } else {
+          console.log('  未检测到 WorkBuddy API 进程')
         }
       } catch (err) {
         console.log(
-          `  WorkBuddy API 启动异常：${(err && err.message) || err}`
+          `  停止 WorkBuddy API 时忽略：${(err && err.message) || err}`
         )
       }
 
@@ -551,11 +540,11 @@ async function up() {
       }
     } else {
       console.log(
-        '  WorkBuddy API / OpenClaw Gateway 需在 Windows 本机单独启动。'
+        '  OpenClaw Gateway 需在 Windows 本机单独启动（node scripts/openclaw-gateway.js）。'
       )
     }
     console.log('')
-    console.log('  WorkBuddy 把 .mcp.json 里的 url 配上即可，不要再用 3847。')
+    console.log('  SOP / AI 执行统一走助理（OpenClaw），不再拉起 WorkBuddy / 小策代理。')
     console.log('  停止：node scripts/docker-up.js down')
   })
 }

@@ -39,9 +39,7 @@ loadRootEnv()
 
 const {
   DEFAULT_PORT: WORKBUDDY_PORT,
-  ensureWorkbuddyApi,
-  stopWorkbuddyApi,
-  formatWorkbuddyResult
+  stopWorkbuddyApi
 } = require('./workbuddy-api')
 
 const WEB_PORT = 8989
@@ -402,25 +400,15 @@ function printUrls(host) {
   log(`  协同    ${paint(c.green, `ws://${host}:${COLLAB_PORT}`)}`)
   log(`  AI      ${paint(c.green, `http://${host}:${AI_PORT}`)}`)
   log(`  MCP     ${paint(c.green, mcp.url)}`)
-  log(
-    `  WorkBuddy API  ${paint(c.green, `http://127.0.0.1:${WORKBUDDY_PORT}`)}  ${paint(c.dim, '(页面走 /wb-api)')}`
-  )
   log('')
-  log(paint(c.bold, '  WorkBuddy 配置（地址由启动脚本按当前主机 IP 写入）'))
-  log(
-    JSON.stringify({ mcpServers: { 'mind-map': mcp } }, null, 2)
-      .split(/\r?\n/)
-      .map(line => '  ' + line)
-      .join('\n')
-  )
-  log('')
-  log(paint(c.dim, '  已写入项目 .mcp.json。局域网同事打开页面地址即可协同。'))
+  log(paint(c.bold, '  助理（OpenClaw）'))
   log(
     paint(
       c.dim,
-      '  WorkBuddy 代理会随启动台自动拉起（需本机安装并登录 WorkBuddy + Python 3.10+）。'
+      '  SOP / AI 执行统一走 OpenClaw；不再启动 WorkBuddy / 小策代理。'
     )
   )
+  log(paint(c.dim, '  已写入项目 .mcp.json。局域网同事打开页面地址即可协同。'))
   log(paint(c.dim, '  关闭本窗口或按 Ctrl+C 会停止全部服务。'))
   log('')
 }
@@ -503,18 +491,8 @@ async function startAll({ pickIp = false } = {}) {
     log(paint(c.red, '  未启动数据库时，协同端口 1234 起不来。页面仍会打开，但加入房间会失败。'))
   }
 
-  log(paint(c.yellow, '  正在启动 WorkBuddy API 代理...'))
-  const wb = await ensureWorkbuddyApi({
-    root: ROOT,
-    port: WORKBUDDY_PORT,
-    mcpConfigPath: path.join(ROOT, '.mcp.json')
-  })
-  formatWorkbuddyResult(wb)
-    .split('\n')
-    .forEach(line => {
-      const color = wb.ok ? c.green : wb.skipped ? c.yellow : c.red
-      log(paint(color, `  ${line}`))
-    })
+  log(paint(c.yellow, '  跳过 WorkBuddy / 小策执行代理（统一走助理 OpenClaw）...'))
+  stopWorkbuddyApi({ root: ROOT })
 
   log(paint(c.yellow, '  正在启动全部服务（含协同 1234）...'))
   startProcess(
@@ -640,7 +618,7 @@ function printMenu(host) {
   log('')
   log(`  ${paint(c.cyan, '[1]')}  获取本机 IP 并设为使用地址`)
   log(
-    `  ${paint(c.cyan, '[2]')}  启动全部服务（页面 / 协同 / AI / MCP / WorkBuddy API）`
+    `  ${paint(c.cyan, '[2]')}  启动全部服务（页面 / 协同 / AI / MCP）`
   )
   log(`  ${paint(c.cyan, '[3]')}  一键：设 IP + 启动全部服务  ${paint(c.dim, '← 回车默认，含协同')}`)
   log(`  ${paint(c.cyan, '[4]')}  停止全部服务`)
