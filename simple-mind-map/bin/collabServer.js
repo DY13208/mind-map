@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 
 require('./loadEnv')
 const http = require('http')
@@ -104,6 +104,12 @@ const server = http.createServer(async (request, response) => {
       if (!authenticated) return
     }
     if (handleMcpConfigApi(request, response, pathname)) return
+    {
+      const { handleOpenclawHandoffApi } = require('./openclawHandoffApi')
+      if (await handleOpenclawHandoffApi(request, response, pathname, request.authUser || null)) {
+        return
+      }
+    }
     if (tusRequest) {
       const handledTus = await require('./nodeKnowledge').handleApi(request, response)
       if (handledTus) return

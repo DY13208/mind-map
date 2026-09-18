@@ -1,0 +1,7 @@
+﻿{
+  "id": "phase2b0-identity-probe",
+  "name": "Phase2B-0 Identity Probe",
+  "description": "Experimental who_am_i tool for requester identity probe. Not for production.",
+  "enabledByDefault": false,
+  "contracts": { "tools": ["who_am_i"] }
+}

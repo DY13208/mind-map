@@ -1,0 +1,8 @@
+{
+  "memory": "cognee-openclaw",
+  "liangce": true,
+  "secret": true,
+  "identityMcp": "http://host.docker.internal:18791/mcp",
+  "allow": null,
+  "pass": true
+}

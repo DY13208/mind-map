@@ -1,0 +1,5 @@
+﻿/home/node/.openclaw/agents/main/agent/openclaw-agent.sqlite-wal
+/home/node/.openclaw/state/openclaw.sqlite-wal
+
+==== sessions json keys mentioning p2b0 ====
+

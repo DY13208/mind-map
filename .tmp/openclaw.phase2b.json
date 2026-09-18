@@ -1,0 +1,151 @@
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "port": 18789,
+    "auth": {
+      "mode": "token",
+      "token": "b37cc297e6b7d270db06a6b9340e2f1ed9c2dd30c414a3fb"
+    },
+    "http": {
+      "endpoints": {
+        "chatCompletions": {
+          "enabled": true
+        }
+      }
+    },
+    "controlUi": {
+      "allowedOrigins": [
+        "http://127.0.0.1:4623",
+        "http://localhost:4623",
+        "http://127.0.0.1:18789",
+        "http://localhost:18789",
+        "http://127.0.0.1:8080",
+        "http://localhost:8080",
+        "http://127.0.0.1:8989",
+        "http://localhost:8989"
+      ]
+    }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "/home/node/.openclaw/workspace",
+      "sandbox": {
+        "mode": "off"
+      },
+      "models": {
+        "deepseek/deepseek-v4-pro": {
+          "alias": "DeepSeek"
+        }
+      },
+      "model": {
+        "primary": "deepseek/deepseek-v4-flash"
+      }
+    },
+    "entries": {
+      "main": {
+        "models": {
+          "deepseek/deepseek-v4-pro": {
+            "agentRuntime": {
+              "id": "openclaw"
+            }
+          }
+        },
+        "model": "deepseek/deepseek-v4-pro@deepseek:setup-3a826776-3e1d-4e6a-9a20-35801ea002a8"
+      }
+    }
+  },
+  "plugins": {
+    "entries": {
+      "deepseek": {
+        "enabled": true
+      },
+      "cognee-openclaw": {
+        "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        },
+        "config": {
+          "baseUrl": "http://host.docker.internal:8320",
+          "apiKey": "031d9af627daa6751a91df4bc49edf2161bbef4d51a4a523da8a8895158aef43",
+          "datasetName": "liangce"
+        }
+      },
+      "liangce-ingress": {
+        "enabled": true,
+        "config": {
+          "handoffSecret": "cc19b31f9420b4d88cc2de64930eb93353a7c0b5c7460c226863edef4e3b1753"
+        }
+      }
+    },
+    "slots": {
+      "memory": "cognee-openclaw"
+    },
+    "load": {
+      "paths": [
+        "/home/node/.openclaw/extensions/liangce-ingress"
+      ]
+    },
+    "allow": [
+      "anthropic",
+      "browser",
+      "canvas",
+      "cognee-openclaw",
+      "cua-computer",
+      "device-pair",
+      "file-transfer",
+      "geolocation",
+      "liangce-ingress",
+      "linux-node",
+      "memory-core",
+      "ollama",
+      "openai",
+      "talk-voice",
+      "xai",
+      "deepseek"
+    ]
+  },
+  "auth": {
+    "profiles": {
+      "deepseek:setup-3a826776-3e1d-4e6a-9a20-35801ea002a8": {
+        "provider": "deepseek",
+        "mode": "api_key"
+      }
+    }
+  },
+  "models": {
+    "providers": {
+      "deepseek": {
+        "baseUrl": "https://api.deepseek.com",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "deepseek-v4-flash",
+            "name": "DeepSeek V4 Flash",
+            "api": "openai-completions",
+            "input": [
+              "text"
+            ],
+            "contextWindow": 1000000,
+            "maxTokens": 8192
+          }
+        ],
+        "apiKey": "${DEEPSEEK_API_KEY}"
+      }
+    },
+    "mode": "merge"
+  },
+  "meta": {
+    "migrations": {
+      "modelPolicyAllowlist": true
+    },
+    "lastTouchedVersion": "2026.9.3"
+  },
+  "mcp": {
+    "servers": {
+      "knowledge-mcp": {
+        "url": "http://knowledge-mcp:18792/mcp"
+      }
+    }
+  }
+}

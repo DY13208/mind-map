@@ -1,0 +1,388 @@
+﻿=== sdk-overview MCP resolver ===
+rejection cleanup before releasing the in-flight slot.
+
+#### Post-ack webhook work
+
+Webhook routes that acknowledge a request before processing finishes must move
+that detached work onto its own tracked admission root:
+
+```typescript
+import { runDetachedWebhookWork } from "openclaw/plugin-sdk/webhook-request-guards";
+
+void runDetachedWebhookWork(() => processWebhookEvent(event)).catch((error) => {
+  runtime.error?.(`webhook dispatch failed: ${String(error)}`);
+});
+```
+
+Call `runDetachedWebhookWork(...)` synchronously while the HTTP request is still
+admitted. The helper reserves an independent root immediately, then starts the
+callback in the next microtask so the request handler can write its
+acknowledgement first. The returned promise adopts the callback result; callers
+still own rejection handling. This keeps post-ack queue work accepted and makes
+restart or suspension drains wait for it. Handlers that await all processing
+before returning do not need this helper.
+
+#### Requester-scoped MCP connections
+
+Keep the MCP server **identity** static (name, tool filter) in `mcp.servers`, a
+native plugin's `mcpServers` manifest field, or a bundle manifest. Optionally register a connection resolver so each trusted
+message requester gets their own transport:
+
+```ts
+api.registerMcpServerConnectionResolver({
+  serverName: "user-email",
+  resolve: async (ctx) => {
+    // ctx.requesterSenderId is host-trusted; never invent sender identity here.
+    const token = await lookupUserToken(ctx.requesterSenderId);
+    if (!token) {
+      return null; // omit this server for the current run
+    }
+    return {
+      url: "https://mcp.example.com/email",
+      headers: { Authorization: `Bearer ${token}` },
+    };
+  },
+});
+```
+
+Contract notes:
+
+- Resolver context carries trusted host identity only (`requesterSenderId`,
+  optional `agentAccountId` / `messageChannel`). Future trusted fields (for
+  example cron/subagent user context) can be added additively.
+- One plugin owns one server name: a duplicate
+  `registerMcpServerConnectionResolver` for the same `serverName` from another
+  plugin is rejected with an error diagnostic (first registration wins), so
+  connection ownership never depends on plugin load order.
+- Tool names are derived from the full declared server set so partial resolution
+  never changes safe server names between requesters or turns. Core does not
+  verify that different requester endpoints serve identical tool schemas; a
+  resolver must point every requester at the same logical service, or tool
+  schemas (and prompt-cache stability) diverge per requester.
+- Runs without a trusted `requesterSenderId` (cron, subagent, heartbeat, public
+  gateway) never materialize requester-scoped servers. There is no shared
+  fallback connection.
+- `resolve` is bounded at 10 seconds per server; a timeout or throw omits that
+  server for the run without failing static MCP.
+- Resolved connections are revalidated at most every 5 minutes per requester:
+  rotation rebuilds the transport with fresh credentials, and a `null` result
+  revokes it (the cached runtime is disposed even mid-session). A revoked or
+  rotated credential can therefore stay in use for up to 5 minutes.
+- Resolved `headers` are never logged or persisted; core keeps only an ephemeral
+  in-memory keyed digest (process-local HMAC) to detect credential rotation, and
+  registers resolved header/URL credential values with the log/debug-capture
+  redaction registry.
+- Requester-scoped servers do not mint MCP App views: a view outlives the
+  requester-authenticated run and the gateway view boundary has no requester
+  identity, so app previews stay fail-closed for these servers. Tool results
+  are unaffected.
+- Static servers without a resolver keep the existing session-scoped lifecycle.
+- **Harness delivery rule:** requester-scoped servers never enter harness-native
+  MCP client config (Codex thread `mcp_servers`, CLI `-c mcp_servers=鈥, or any
+  other session-shared MCP projection). Harnesses deliver them as run-scoped
+  tools instead:
+  - Embedded runner: session MCP runtime + bundle tools (static + scoped).
+  - Codex app-server: dynamic tools via
+    `materializeRequesterScopedMcpToolsForHarnessRun` (scoped-only; static
+    servers stay on Codex's native MCP client).
+- Scoped tool **specs** are session-stable after the first successful resolve in
+  that session, so shared-thread harnesses (Codex) do not rotate threads when
+  senders change. Before any requester resolves, no scoped specs are advertised.
+- Unauthenticated requesters on a shared-thread harness still see the advertised
+  scoped tools; calling one returns a clean not-connected tool error for that
+
+=== architecture trusted requester ===
+- the plan API reports reason labels so diagnostics can distinguish explicit hints from ownership fallback
+
+<Warning>
+Do not treat `activation` as a lifecycle hook or a replacement for `register(...)`. It is metadata used to narrow loading. Prefer ownership fields when they already describe the relationship; use `activation` only for extra planner hints.
+</Warning>
+
+### Channel plugins and the shared message tool
+
+Channel plugins do not need to register a separate send/edit/react tool for normal chat actions. OpenClaw keeps one shared `message` tool in core, and channel plugins own the channel-specific discovery and execution behind it.
+
+The current boundary is:
+
+- core owns the shared `message` tool host, prompt wiring, session/thread bookkeeping, and execution dispatch
+- channel plugins own scoped action discovery, capability discovery, and any channel-specific schema fragments
+- channel plugins own provider-specific session conversation grammar, such as how conversation ids encode thread ids or inherit from parent conversations
+- channel plugins execute the final action through their action adapter
+
+For channel plugins, the SDK surface is `ChannelMessageActionAdapter.describeMessageTool(...)`. That unified discovery call lets a plugin return its visible actions, capabilities, and schema contributions together so those pieces do not drift apart.
+
+Message action names use a deliberately closed, core-owned vocabulary so every transport can render every action. Plugins add action names through a core PR; runtime registration is intentionally unsupported.
+
+When a channel-specific message-tool param carries a media source such as a local path or remote media URL, the plugin should also return `mediaSourceParams` from `describeMessageTool(...)`. Core uses that explicit list to apply sandbox path normalization and outbound media-access hints without hardcoding plugin-owned param names. Prefer action-scoped maps there, not one channel-wide flat list, so a profile-only media param does not get normalized on unrelated actions like `send`.
+
+Core passes runtime scope into that discovery step. Important fields include:
+
+- `accountId`
+- `currentChannelId`
+- `chatType` (`direct`, `group`, or `channel` when the inbound route establishes it)
+- `currentThreadTs`
+- `currentMessageId`
+- `sessionKey`
+- `sessionId`
+- `agentId`
+- trusted inbound `requesterSenderId`
+
+That matters for context-sensitive plugins. A channel can hide or expose message actions based on the active account, current room/thread/message, authoritative conversation type, or trusted requester identity without hardcoding channel-specific branches in the core `message` tool. Treat `chatType` as discovery scope supplied by the current inbound route, not something to infer again from an opaque channel id; it is absent when that route did not establish the conversation type.
+
+This is why embedded-runner routing changes are still plugin work: the runner is responsible for forwarding the current chat/session identity into the plugin discovery boundary so the shared `message` tool exposes the right channel-owned surface for the current turn.
+
+For channel-owned execution helpers, channel plugins should keep the execution runtime inside their own plugin modules. Core no longer owns the Discord, Slack, Telegram, or WhatsApp message-action runtimes under `src/agents/tools`. We do not publish separate `plugin-sdk/*-action-runtime` subpaths, and those plugins should import their own local runtime code directly from their plugin-owned modules.
+
+The same boundary applies to provider-named SDK seams in general: core should not import channel-specific convenience barrels for Discord, Signal, Slack, WhatsApp, or similar plugins. If core needs a behavior, either consume the bundled plugin's own `api.ts` / `runtime-api.ts` barrel or promote the need into a narrow generic capability in the shared SDK.
+
+Bundled plugins follow the same rule. A bundled plugin's `runtime-api.ts` should not re-export its own branded `openclaw/plugin-sdk/<plugin-id>` facade. Those branded facades remain compatibility shims for external plugins and older consumers, but bundled plugins should use local exports plus narrow generic SDK subpaths such as `openclaw/plugin-sdk/channel-policy`, `openclaw/plugin-sdk/runtime-store`, or `openclaw/plugin-sdk/webhook-ingress`. New code should not add plugin-id-specific SDK facades unless the compatibility boundary for an existing external ecosystem requires it.
+
+For polls specifically, there are two execution paths:
+
+- `outbound.sendPoll` is the shared baseline for channels that fit the common poll model
+- `actions.handleAction("poll")` is the preferred path for channel-specific poll semantics or extra poll parameters
+
+Core now defers shared poll parsing until after plugin poll dispatch declines the action, so plugin-owned poll handlers can accept channel-specific poll fields without being blocked by the generic poll parser first.
+
+See [Plugin architecture internals](/plugins/architecture-internals) for the full startup sequence.
+
+## Capability ownership model
+
+OpenClaw treats a native plugin as the ownership boundary for a **company** or a **feature**, not as a grab bag of unrelated integrations.
+
+That means:
+
+- a company plugin should usually own all of that company's OpenClaw-facing surfaces
+- a feature plugin should usually own the full feature surface it introduces
+- channels should consume shared core capabilities instead of re-implementing provider behavior ad hoc
+
+<AccordionGroup>
+  <Accordion title="Vendor multi-capability">
+    `google` owns text inference, CLI backend, embeddings, speech, realtime voice, media understanding, image/music/video generation, and web search. `openai` owns text inference, embeddings, speech, realtime transcription, realtime voice, media understanding, image/video generation. `minimax` owns text inference plus media understanding, speech, image/music/video generation, and web search.
+  </Accordion>
+  <Accordion title="Vendor single-capability">
+    `arcee` and `chutes` own text inference only; `microsoft` owns speech only. A vendor plugin can stay this narrow until it needs to cover more of that vendor's surface.
+  </Accordion>
+
+=== building-plugins requesterSenderId ===
+244-## Registering tools
+245-
+246-Tools can be required or optional. Required tools are always available when the
+247-plugin is enabled. Optional tools need explicit user opt-in before OpenClaw
+248-loads the owning plugin runtime.
+249-
+250-Tool factories receive trusted runtime context, including `deliveryContext`,
+251-`nativeChannelId` for the active platform conversation when available, and
+252:`requesterSenderId`. A factory can use
+253-`toolContext.delivery?.send({ text, mediaUrl })` to send text or media to the
+254-current conversation. The property is unavailable outside an active channel
+255-turn or when the channel uses Gateway-owned delivery. OpenClaw binds the route,
+256-account, thread, and media access policy; the capability expires when the turn
+257-ends.
+258-
+259-```typescript
+260-register(api) {
+
+=== mcp manager resolve snippet ===
+		sweepIdleRuntimes,
+		reserveRuntimeSlot,
+		releaseEmptyRuntimeSlot,
+		disposeRuntime,
+		ensureIdleSweepTimer,
+		disposeRuntimeKeyNow,
+		disposeManagedRuntimes,
+		rememberAdvertisedScopedCatalog,
+		getAdvertisedScopedCatalog,
+		reconcileAdvertisedScopedCatalogConfig
+	};
+}
+//#endregion
+//#region src/agents/agent-bundle-mcp-manager.ts
+/** Session MCP runtime manager: acquisition and requester-scoped install orchestration. */
+const sessionMcpRuntimeLoader = createLazyImportLoader(() => import("./agents/agent-bundle-mcp-runtime.js"));
+const createSessionMcpRuntimeLazy = async (params) => {
+	return (await sessionMcpRuntimeLoader.load()).createSessionMcpRuntime(params);
+};
+function createSessionMcpRuntimeManager(opts = {}) {
+	const store = createSessionMcpRuntimeManagerStore(opts, createSessionMcpRuntimeLazy);
+	const lifecycle = createSessionMcpRuntimeManagerLifecycle(store);
+	const install = createSessionMcpRuntimeManagerInstall(lifecycle);
+	const leaseRuntime = (runtime) => ({
+		runtime,
+		releaseLease: runtime.acquireLease?.() ?? (() => {})
+	});
+	const acquireCurrent = (scope, acquire) => async function current(params) {
+		const senderId = normalizeOptionalString(params.requesterSenderId);
+		const requester = senderId ? {
+			senderId,
+			runtimeKey: buildMcpRequesterRuntimeCacheKey({
+				...params,
+				requesterSenderId: senderId
+			})
+		} : void 0;
+		const runtimeKeys = requester ? [requester.runtimeKey] : [];
+		if (scope === "full" || !requester) runtimeKeys.push(params.sessionId);
+		const priorDisposal = store.disposalInFlight;
+		const priorSessionWork = store.runtimeWorkChains.get(params.sessionId);
+		const input = {
+			...params,
+			requester
+		};
+		let publication = store.configReload;
+		let acquired;
+		try {
+			return await lifecycle.runExclusiveOnRuntimeKeys(runtimeKeys, async () => {
+				await Promise.all([priorDisposal, priorSessionWork].filter((work) => work !== void 0));
+				for (;;) {
+					const next = store.configReload;
+					if (next && next !== publication) Object.assign(input, {
+						cfg: next.cfg,
+						manifestRegistry: next.manifestRegistry
+					});
+					publication = next;
+					const previous = acquired;
+					acquired = await acquire(input);
+					previous?.releaseLease();
+					if (!store.configReload || store.configReload === publication) return acquired;
+				}
+			});
+		} catch (error) {
+			acquired?.releaseLease();
+			acquired = void 0;
+			throw error;
+		} finally {
+			if (!acquired) await manager.completeDeferredRetirement(params.sessionId);
+		}
+	};
+	const prepareAcquisition = (params) => {
+		const fullConfig = loadSessionMcpConfig({
+			...params,
+			logDiagnostics: false
+		});
+		const partition = partitionMcpServersByConnectionScope(fullConfig.loaded.mcpServers);
+		const safeServerNamesByServer = assignSafeServerNames(Object.keys(fullConfig.loaded.mcpServers));
+		const advertisedCatalogConfigFingerprint = loadSessionMcpConfig({
+			...params,
+			loaded: fullConfig.loaded,
+			logDiagnostics: false,
+			redactConnectionServerNames: new Set(partition.requesterScopedServerNames),
+			safeServerNamesByServer
+		}).fingerprint;
+		lifecycle.reconcileAdvertisedScopedCatalogConfig(params.sessionId, advertisedCatalogConfigFingerprint, params.requester !== void 0 && partition.requesterScopedServerNames.length > 0);
+		return {
+			fullConfig,
+			...partition,
+			safeServerNamesByServer,
+			requester: params.requester,
+			advertisedCatalogConfigFingerprint
+		};
+	};
+	const materializeRequesterScopedRuntime = async (params) => {
+		const oauthRequesterNameSet = new Set(params.oauthRequesterServerNames);
+		const resolverRequesterNameSet = new Set(params.resolverRequesterServerNames);
+		const agentAccountId = normalizeOptionalString(params.agentAccountId);
+		const messageChannel = normalizeOptionalString(params.messageChannel);
+		const fullScopedFingerprint = loadSessionMcpConfig({
+			...params,
+			logDiagnostics: false,
+			includeServerNames: params.scopedNameSet,
+			redactConnectionServerNames: resolverRequesterNameSet
+		}).fingerprint;
+		const runtime = await install.resolveAndInstallRequesterRuntime({
+			...params,
+			fullScopedFingerprint,
+			oauthRequesterNameSet,
+			agentAccountId,
+			messageChannel,
+			requesterScope: {
+				requesterSenderId: params.requesterSenderId,
+				...agentAccountId ? { agentAccountId } : {},
+				...messageChannel ? { messageChannel } : {}
+			}
+		});
+		return runtime ? leaseRuntime(runtime) : void 0;
+	};
+	const manager = {
+		acquire: acquireCurrent("full", async (params) => {
+			const configReloadAtAdmission = store.configReload;
+			if (params.sessionKey) store.sessionIdBySessionKey.set(params.sessionKey, params.sessionId);
+			const { fullConfig, staticServers, requesterScopedServerNames, oauthRequesterServerNames, resolverRequesterServerNames, safeServerNamesByServer, requester } = prepareAcquisition(params);
+			const leases = [];
+			try {
+				const staticLease = leaseRuntime(await install.getOrCreateRuntimeEntry({
+					...params,
+					runtimeKey: params.sessionId,
+					configReloadAtAdmission,
+					excludeServerNames: new Set(requesterScopedServerNames),
+					safeServerNamesByServer
+				}));
+				leases.push(staticLease);
+				if (requesterScopedServerNames.length === 0) return staticLease;
+				const parts = Object.keys(staticServers).length > 0 ? [staticLease.runtime] : [];
+				const scopedNameSet = new Set(requesterScopedServerNames);
+				if (requester) {
+					const lease = await materializeRequesterScopedRuntime({
+						...params,
+						configReloadAtAdmission,
+						mcpServers: fullConfig.loaded.mcpServers,
+						oauthRequesterServerNames,
+						resolverRequesterServerNames,
+						scopedNameSet,
+						safeServerNamesByServer,
+						requesterSenderId: requester.senderId,
+						runtimeKey: requester.runtimeKey
+					});
+					if (lease) {
+						leases.push(lease);
+						parts.push(lease.runtime);
+					}
+				}
+				return {
+					runtime: parts.length === 0 ? staticLease.runtime : createCombinedSessionMcpRuntime({
+						sessionId: params.sessionId,
+						sessionKey: params.sessionKey,
+						workspaceDir: params.workspaceDir,
+						agentDir: params.agentDir,
+						parts
+					}),
+					releaseLease: () => leases.forEach((lease) => lease.releaseLease())
+				};
+			} catch (error) {
+				leases.forEach((lease) => lease.releaseLease());
+				throw error;
+			}
+		}),
+		acquireRequesterScoped: acquireCurrent("requester", async (params) => {
+			const configReloadAtAdmission = store.configReload;
+			const { fullConfig, requesterScopedServerNames, oauthRequesterServerNames, resolverRequesterServerNames, safeServerNamesByServer, requester, advertisedCatalogConfigFingerprint } = prepareAcquisition(params);
+			if (!requester) return;
+			if (params.sessionKey) store.sessionIdBySessionKey.set(params.sessionKey, params.sessionId);
+			if (requesterScopedServerNames.length === 0) return;
+			const scopedNameSet = new Set(requesterScopedServerNames);
+			const lease = await materializeRequesterScopedRuntime({
+				...params,
+				configReloadAtAdmission,
+				mcpServers: fullConfig.loaded.mcpServers,
+				oauthRequesterServerNames,
+				resolverRequesterServerNames,
+				scopedNameSet,
+				safeServerNamesByServer,
+				requesterSenderId: requester.senderId,
+				runtimeKey: requester.runtimeKey
+			});
+			if (!lease) return;
+			return {
+				...lease,
+				advertisedCatalogConfigFingerprint
+			};
+		}),
+		rememberAdvertisedScopedCatalog: lifecycle.rememberAdvertisedScopedCatalog,
+		getAdvertisedScopedCatalog: lifecycle.getAdvertisedScopedCatalog,
+		bindSessionKey(sessionKey, sessionId) {
+			store.sessionIdBySessionKey.set(sessionKey, sessionId);
+		},
+		resolveSessionId(sessionKey) {
+			return store.sessionIdBySessionKey.get(sessionKey);
+		},
+		peekSession(params) {
+

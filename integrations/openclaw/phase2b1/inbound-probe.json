@@ -1,0 +1,45 @@
+{
+  "who": {
+    "status": 200,
+    "json": {
+      "ok": true,
+      "requesterSenderId": "liangce:user-A-test",
+      "userId": "user-A-test",
+      "conversationId": "conv-who",
+      "messageId": "41bdbc07-688f-4f35-b020-6c730f9d1761",
+      "reply": "I can't do that — there is no `who_am_i` tool available to me. My toolset doesn't include it, so there's no JSON result to return, and I won't invent an identity.\n\nIf you want my actual identity info, the real tools for that are `session_status` (model/session) or `github_identity_status` (GitHub account).",
+      "replies": [
+        "I can't do that — there is no `who_am_i` tool available to me. My toolset doesn't include it, so there's no JSON result to return, and I won't invent an identity.\n\nIf you want my actual identity info, the real tools for that are `session_status` (model/session) or `github_identity_status` (GitHub account)."
+      ],
+      "resolverLastSender": null
+    }
+  },
+  "concurrent": [
+    {
+      "tag": "A1",
+      "status": 200,
+      "requesterSenderId": "liangce:user-A-test",
+      "reply": "A1:user-A-test",
+      "userId": "user-A-test",
+      "conversationId": "conv-A1c"
+    },
+    {
+      "tag": "A2",
+      "status": 200,
+      "requesterSenderId": "liangce:user-A-test",
+      "reply": "A2:user-A-test",
+      "userId": "user-A-test",
+      "conversationId": "conv-A2c"
+    },
+    {
+      "tag": "B1",
+      "status": 200,
+      "requesterSenderId": "liangce:user-B-test",
+      "reply": "B1:user-B-test",
+      "userId": "user-B-test",
+      "conversationId": "conv-B1c"
+    }
+  ],
+  "memorySlot": "cognee-openclaw",
+  "at": "2026-09-18T06:19:25.498Z"
+}

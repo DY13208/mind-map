@@ -1,0 +1,7 @@
+﻿=== operator-role gatewayClientSenderFields ===
+/app/dist/operator-role-policy-MgiU_R4c.mjs:32:function gatewayClientSenderFields(client) {
+/app/dist/operator-role-policy-MgiU_R4c.mjs:198:export { resolveChatSendCallerContext as _, resolveCreatorSandbox as a, resolveOperatorRolePolicyForAssignment as c, resolveAgentRunSessionCreation as d, resolveOperatorSessionCreation as f, isGatewayClientProfilePending as g, gatewayClientSessionCreator as h, operatorSessionCap as i, resolveOperatorRolePolicyForProfile as l, gatewayClientSenderFields as m, hasOperatorBoundary as n, resolveGatewayOperatorRoleActor as o, authenticatedProfileUnavailableError as p, invalidateOperatorRolePolicy as r, resolveOperatorRolePolicy as s, authorizeGatewaySessionCreation as t, resolveSandboxedSessionCreation as u, bumpGatewayAccessRevision as v, readGatewayAccessRevision as y };
+
+file /app/dist/operator-role-policy-COI36WcH.mjs
+
+

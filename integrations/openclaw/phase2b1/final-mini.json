@@ -1,0 +1,36 @@
+{
+  "health": "healthy|0",
+  "memorySlot": "cognee-openclaw",
+  "A": {
+    "status": 200,
+    "requester": "liangce:user-A-test",
+    "replyHas": true
+  },
+  "B": {
+    "status": 200,
+    "requester": "liangce:user-B-test",
+    "replyHas": true
+  },
+  "forge": {
+    "status": 400,
+    "code": "client-supplied identity fields are not accepted"
+  },
+  "noHandoff": {
+    "status": 400,
+    "body": {
+      "error": "handoff, message, conversationId required"
+    }
+  },
+  "failClosed": {
+    "withoutRequester": null,
+    "expect": null,
+    "pass": true
+  },
+  "resolverStatus": {
+    "ok": true,
+    "resolverApiPresent": true,
+    "lastResolverSender": "liangce:user-B-test",
+    "logCount": 4,
+    "apiKeys": []
+  }
+}

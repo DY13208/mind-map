@@ -1,0 +1,129 @@
+{
+  "cases": [
+    {
+      "name": "tools_list_includes_phase3",
+      "pass": true,
+      "ms": 98
+    },
+    {
+      "name": "A_upsert_roomA_PASS",
+      "pass": true,
+      "ms": 2093
+    },
+    {
+      "name": "A_upsert_roomB_DENY",
+      "pass": true,
+      "ms": 10
+    },
+    {
+      "name": "B_upsert_roomB_PASS",
+      "pass": true,
+      "ms": 146
+    },
+    {
+      "name": "B_upsert_roomA_DENY",
+      "pass": true,
+      "ms": 22
+    },
+    {
+      "name": "viewer_upsert_DENY",
+      "pass": true,
+      "ms": 14
+    },
+    {
+      "name": "fake_owner_ignored",
+      "pass": true,
+      "ms": 272
+    },
+    {
+      "name": "no_token_DENY",
+      "pass": true,
+      "ms": 20
+    },
+    {
+      "name": "viewer_refresh_DENY",
+      "pass": true,
+      "ms": 9
+    },
+    {
+      "name": "editor_refresh_PASS",
+      "pass": true,
+      "ms": 99
+    },
+    {
+      "name": "refresh_coalesce",
+      "pass": true,
+      "ms": 73
+    },
+    {
+      "name": "poll_refresh_status",
+      "pass": true,
+      "ms": 1623
+    },
+    {
+      "name": "polluted_mapping_DENY",
+      "pass": true,
+      "ms": 742
+    },
+    {
+      "name": "standard_human_untouched",
+      "pass": true,
+      "ms": 1045
+    }
+  ],
+  "startedAt": "2026-09-18T07:42:04.783Z",
+  "refreshJobId": "9b9f0954-537d-47f5-bd57-0a0a260d9d1f",
+  "refreshFinal": {
+    "jobId": "9b9f0954-537d-47f5-bd57-0a0a260d9d1f",
+    "roomId": "room-2yaz570x",
+    "requesterUserId": "phase3-user-a",
+    "status": "succeeded",
+    "openwikiStatus": "generated",
+    "docmostPublishStatus": "ok",
+    "createdAt": "2026-09-18T07:42:07.563Z",
+    "startedAt": "2026-09-18T07:42:07.583Z",
+    "finishedAt": "2026-09-18T07:42:09.140Z",
+    "error": null,
+    "outputHash": "1c46a13c32c05dc38d434e48381f3b2ce050e068a444883fbdcda6d07dde172a|9fb7fa112340d9848978bd29e9366dc2a31b460dd4394150d05be713f7f2eb3e|9196312e69a44a9fb0b4f335e0cf5fbdafc6760fd713c73abb4d51fb97623d8b|5996a5463ecba02cb0e163acf644eea6be893df644db30c923b7ce40e9eeea9c|e1622a3cf156a1ea1279371e4a24a399212131dd0a9c94edae5a5d87808e1f4a|8b35401f1c641892d4ef44dac2a015954d2a92942a883b900634ffffee26e127",
+    "publish": {
+      "published": [
+        {
+          "topicKey": "openwiki:README",
+          "pageId": "01a0b377-3198-79b2-84bd-d6298d8f90e1",
+          "hash": "1c46a13c32c05dc38d434e48381f3b2ce050e068a444883fbdcda6d07dde172a"
+        },
+        {
+          "topicKey": "openwiki:branches/04655d24-cb10-4ff5-9a46-f9e768475fc2",
+          "pageId": "01a0b377-3231-72f6-9f9e-787fc7a1da16",
+          "hash": "9fb7fa112340d9848978bd29e9366dc2a31b460dd4394150d05be713f7f2eb3e"
+        },
+        {
+          "topicKey": "openwiki:branches/7e3aac59-4a3c-4e17-8d75-14357b80ff40",
+          "pageId": "01a0b377-3322-7160-8c06-d60627869724",
+          "hash": "9196312e69a44a9fb0b4f335e0cf5fbdafc6760fd713c73abb4d51fb97623d8b"
+        },
+        {
+          "topicKey": "openwiki:branches/8ec88f39-9a70-40cc-9aac-52ae0500f50e",
+          "pageId": "01a0b377-33c2-70c9-84f7-71b0130d439a",
+          "hash": "5996a5463ecba02cb0e163acf644eea6be893df644db30c923b7ce40e9eeea9c"
+        },
+        {
+          "topicKey": "openwiki:branches/9bea1fe8-9716-4e6a-b009-60e1d541a39e",
+          "pageId": "01a0b377-340b-7c7b-84ba-5ad48b4e87d4",
+          "hash": "e1622a3cf156a1ea1279371e4a24a399212131dd0a9c94edae5a5d87808e1f4a"
+        },
+        {
+          "topicKey": "openwiki:branches/e15ca6e8-a0e0-4da0-94ab-37d42fc6ed96",
+          "pageId": "01a0b377-3476-7baa-90ff-cca8cac76d4a",
+          "hash": "8b35401f1c641892d4ef44dac2a015954d2a92942a883b900634ffffee26e127"
+        }
+      ],
+      "failures": [],
+      "outputHash": "1c46a13c32c05dc38d434e48381f3b2ce050e068a444883fbdcda6d07dde172a|9fb7fa112340d9848978bd29e9366dc2a31b460dd4394150d05be713f7f2eb3e|9196312e69a44a9fb0b4f335e0cf5fbdafc6760fd713c73abb4d51fb97623d8b|5996a5463ecba02cb0e163acf644eea6be893df644db30c923b7ce40e9eeea9c|e1622a3cf156a1ea1279371e4a24a399212131dd0a9c94edae5a5d87808e1f4a|8b35401f1c641892d4ef44dac2a015954d2a92942a883b900634ffffee26e127"
+    }
+  },
+  "finishedAt": "2026-09-18T07:42:11.065Z",
+  "passed": 14,
+  "failed": 0,
+  "verdict": "PASS"
+}

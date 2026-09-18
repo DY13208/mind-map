@@ -1,0 +1,29 @@
+{
+  "id": "liangce-ingress",
+  "name": "Liangce Trusted Ingress",
+  "description": "Phase 2B-1 Signed Handoff ingress + identity-mcp resolver probe",
+  "contracts": {
+    "tools": [
+      "who_am_i"
+    ]
+  },
+  "mcpServers": {
+    "knowledge-mcp": {
+      "url": "http://knowledge-mcp:18792/mcp"
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "handoffSecret": {
+        "type": "string",
+        "minLength": 32
+      },
+      "knowledgeMcpJwtSecret": {
+        "type": "string",
+        "minLength": 32
+      }
+    }
+  }
+}

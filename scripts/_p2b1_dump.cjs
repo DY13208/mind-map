@@ -1,0 +1,6 @@
+﻿const fs=require('fs')
+const b=fs.readFileSync('scripts/openclaw-bridge/server.mjs','utf8')
+const i=b.indexOf('async function handleChat')
+console.log(b.slice(i, i+900))
+console.log('==== helpers head ====')
+console.log(b.slice(0, 1200))

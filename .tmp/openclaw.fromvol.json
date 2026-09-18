@@ -1,0 +1,137 @@
+﻿docker : time="2026-09-18T14:10:31+08:00" level=warning msg="Found orphan containers ([mind-map-wiki-gateway-1 mind-map
+-docmost-1 mind-map-docmost-db-1 mind-map-docmost-redis-1 mind-map-yiran-1]) for this project. If you removed or rename
+d this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+所在位置 C:\Users\YiRan\AppData\Local\Temp\ps-script-5275f6b9-4760-466d-9e04-b027d9b57545.ps1:110 字符: 8
++ $cfg = docker compose run --rm --no-deps --entrypoint cat openclaw-ga ...
++        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (time="2026-09-1...o clean it up.":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Container mind-map-openclaw-gateway-run-927bb1571cea Creating 
+ Container mind-map-openclaw-gateway-run-927bb1571cea Created 
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "port": 18789,
+    "auth": {
+      "mode": "token",
+      "token": "b37cc297e6b7d270db06a6b9340e2f1ed9c2dd30c414a3fb"
+    },
+    "http": {
+      "endpoints": {
+        "chatCompletions": {
+          "enabled": true
+        }
+      }
+    },
+    "controlUi": {
+      "allowedOrigins": [
+        "http://127.0.0.1:4623",
+        "http://localhost:4623",
+        "http://127.0.0.1:18789",
+        "http://localhost:18789",
+        "http://127.0.0.1:8080",
+        "http://localhost:8080",
+        "http://127.0.0.1:8989",
+        "http://localhost:8989"
+      ]
+    }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "/home/node/.openclaw/workspace",
+      "sandbox": {
+        "mode": "off"
+      },
+      "models": {
+        "deepseek/deepseek-v4-pro": {
+          "alias": "DeepSeek"
+        }
+      },
+      "model": {
+        "primary": "deepseek/deepseek-v4-flash"
+      }
+    },
+    "entries": {
+      "main": {
+        "models": {
+          "deepseek/deepseek-v4-pro": {
+            "agentRuntime": {
+              "id": "openclaw"
+            }
+          }
+        },
+        "model": "deepseek/deepseek-v4-pro@deepseek:setup-3a826776-3e1d-4e6a-9a20-35801ea002a8"
+      }
+    }
+  },
+  "plugins": {
+    "entries": {
+      "deepseek": {
+        "enabled": true
+      },
+      "cognee-openclaw": {
+        "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        },
+        "config": {
+          "baseUrl": "http://host.docker.internal:8320",
+          "apiKey": "031d9af627daa6751a91df4bc49edf2161bbef4d51a4a523da8a8895158aef43",
+          "datasetName": "liangce"
+        }
+      },
+      "liangce-ingress": {
+        "enabled": true,
+        "config": {
+          "handoffSecret": "cc19b31f9420b4d88cc2de64930eb93353a7c0b5c7460c226863edef4e3b1753"
+        }
+      }
+    },
+    "slots": {
+      "memory": "cognee-openclaw"
+    },
+    "load": {
+      "paths": [
+        "/home/node/.openclaw/extensions/liangce-ingress"
+      ]
+    }
+  },
+  "auth": {
+    "profiles": {
+      "deepseek:setup-3a826776-3e1d-4e6a-9a20-35801ea002a8": {
+        "provider": "deepseek",
+        "mode": "api_key"
+      }
+    }
+  },
+  "models": {
+    "providers": {
+      "deepseek": {
+        "baseUrl": "https://api.deepseek.com",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "deepseek-v4-flash",
+            "name": "DeepSeek V4 Flash",
+            "api": "openai-completions",
+            "input": [
+              "text"
+            ],
+            "contextWindow": 1000000,
+            "maxTokens": 8192
+          }
+        ],
+        "apiKey": "${DEEPSEEK_API_KEY}"
+      }
+    },
+    "mode": "merge"
+  },
+  "meta": {
+    "migrations": {
+      "modelPolicyAllowlist": true
+    },
+    "lastTouchedVersion": "2026.9.3"
+  }
+}
