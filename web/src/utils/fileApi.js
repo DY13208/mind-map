@@ -557,7 +557,7 @@ export function getMapSnapshot(roomKey, extra = {}) {
   )
 }
 
-function operationHeaders(body = {}) {
+export function operationHeaders(body = {}) {
   const operationId =
     body.operationId || body.operation_id || createOperationId()
   if (!body.operationId && !body.operation_id) {
