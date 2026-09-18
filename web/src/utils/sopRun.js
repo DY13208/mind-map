@@ -866,8 +866,11 @@ export function isHollowTargetDeliverable(
     .map(d => `${(d && d.name) || ''} ${(d && d.uri_or_path) || ''}`)
     .join('\n')
   const blob = `${text}\n${names}\n${String(peekText || '')}`
+  // 已写出可辨认目标金额：不以叙述里「此前空壳 / 跟踪待接入」误判当前产物
+  if (evidenceHasRealAmount(blob)) return false
+  // 「空壳」须像当前态（勿匹配「此前只能交出空壳」这类回顾）
   const hollowHint =
-    /目标分配台账（骨架）|金额列待接入|金额轴待接入|全是待接入|仅骨架|空壳/.test(
+    /目标分配台账（骨架）|金额列待接入|金额轴待接入|全是待接入|仅骨架|(?:交出|像|仍是|还是|产物|台账).{0,6}空壳|空壳(?:产物|台账|目标表)/.test(
       blob
     )
   const pendingCount = (blob.match(/待接入/g) || []).length
@@ -877,12 +880,7 @@ export function isHollowTargetDeliverable(
   const looksTargetSop =
     /制定.*目标|GMV目标|实收目标|目标分配/.test(blob) ||
     /制定.*目标|GMV/.test(names)
-  const hasRealAmount =
-    /(¥|￥)\s*[\d,]+|[\d,]{2,}(?:\.\d+)?\s*万|[\d]{4,}(?:\.\d+)?万|gmv\s*[:=]\s*[\d.]+/i.test(
-      blob
-    )
-  const hollowByAmountGap =
-    looksTargetSop && pendingCount >= 6 && !hasRealAmount
+  const hollowByAmountGap = looksTargetSop && pendingCount >= 6
   return hollowHint || pendingHeavy || hollowByAmountGap
 }
 
@@ -926,7 +924,7 @@ export async function peekDeliverableText(deliverables = []) {
 
 /** 正文/产物里是否出现可辨认的目标金额 */
 function evidenceHasRealAmount(blob) {
-  return /(¥|￥)\s*[\d,]+|[\d,]{2,}(?:\.\d+)?\s*万|[\d]{4,}(?:\.\d+)?万|目标\s*[:=：]\s*[\d.]+|gmv\s*[:=]\s*[\d.]+/i.test(
+  return /(¥|￥)\s*[\d,]+(?:\.\d+)?|[\d,]{2,}(?:\.\d+)?\s*万(?:元|元人民币)?|[\d]{4,}(?:\.\d+)?万|[\d,]{2,}(?:\.\d+)?\s*(?:百万|亿)|(?:Sell\s*Out|实收|GMV|目标)\s*[：:=\s]\s*[\d,]{2,}(?:\.\d+)?|目标\s*[:=：]\s*[\d,.]+|gmv\s*[:=]\s*[\d.]+/i.test(
     String(blob || '')
   )
 }
@@ -1268,20 +1266,7 @@ export function assessSopExecution({
     }
   }
 
-  // 有文件但像「制定目标」空壳：不能算完成
-  if (hollow && /制定|目标|GMV|实收/.test(text + realFiles.map(d => d.name).join(''))) {
-    return {
-      ok: true,
-      runResult: '部分完成',
-      reason:
-        '产物像空壳（金额多为待接入/骨架），本 SOP「制定目标」步骤未真正给出目标数字',
-      toolEvents: toolish.length,
-      realFiles: realFiles.length,
-      hollow: true
-    }
-  }
-
-  // 产物已实质交付（含目标金额）：以产物为准，不被模型口头「部分完成」拖成灰点
+  // 产物已实质交付（含目标金额）：以产物为准，不被模型口头「部分完成」或回顾「空壳」拖灰
   if (substantial) {
     return {
       ok: true,
@@ -1293,6 +1278,23 @@ export function assessSopExecution({
       toolEvents: toolish.length,
       realFiles: realFiles.length,
       lightUpPending: true
+    }
+  }
+
+  // 有文件但像「制定目标」空壳（且未检出真实金额）：不能算完成
+  if (
+    hollow &&
+    !hasRealAmount &&
+    /制定|目标|GMV|实收/.test(text + realFiles.map(d => d.name).join(''))
+  ) {
+    return {
+      ok: true,
+      runResult: '部分完成',
+      reason:
+        '产物像空壳（金额多为待接入/骨架），本 SOP「制定目标」步骤未真正给出目标数字',
+      toolEvents: toolish.length,
+      realFiles: realFiles.length,
+      hollow: true
     }
   }
 
