@@ -267,7 +267,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, '0.0.0.0', async () => {
   try {
     await jobStore.ensureSchema();
-    await jobStore.reclaimStaleRunning();
+    await jobStore.reclaimStaleRunning(0);
     console.log('[knowledge-mcp] job schema ready');
   } catch (e) {
     console.error('[knowledge-mcp] job schema init failed', String(e.message || e));

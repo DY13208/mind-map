@@ -1,0 +1,10 @@
+2026-09-18T10:56:26.250Z boot
+2026-09-18T10:56:26.253Z docker begin
+2026-09-18T10:56:29.342Z docker end status=0 signal=null error=undefined
+2026-09-18T10:56:29.342Z after dockerCompose sync line
+2026-09-18T10:56:29.343Z async start
+2026-09-18T10:56:29.343Z sync end of file
+2026-09-18T10:56:29.344Z microtask
+2026-09-18T10:56:30.351Z timeout 1s fired
+2026-09-18T10:56:31.346Z async after 2s
+2026-09-18T10:56:32.346Z timeout 3s fired

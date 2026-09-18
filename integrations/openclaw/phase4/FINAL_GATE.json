@@ -1,29 +1,35 @@
 {
   "phase": "4-final-gate",
-  "startedAt": "2026-09-18T09:56:26.520Z",
+  "startedAt": "2026-09-18T11:01:03.012Z",
   "gates": [
     {
       "id": 1,
       "title": "ACL DB unavailable fail-closed",
       "critical": true,
-      "pass": false,
-      "ms": 17572,
-      "error": "fetch failed"
+      "pass": true,
+      "ms": 12552,
+      "detail": {
+        "denied": true,
+        "mode": "PGHOST_blackhole"
+      }
     },
     {
       "id": 2,
       "title": "Single-source fault degraded (not fake empty)",
       "critical": true,
-      "pass": false,
-      "ms": 736,
-      "error": "Command failed: docker compose exec -T knowledge-mcp sh -lc \"if [ -d /data/knowledge ]; then mv /data/knowledge /data/knowledge.__fg_bak; fi\"\nmv: cannot move '/data/knowledge' to '/data/knowledge.__fg_bak': Read-only file system\n"
+      "pass": true,
+      "ms": 8267,
+      "detail": {
+        "ok": true,
+        "mode": "KNOWLEDGE_ROOT_override"
+      }
     },
     {
       "id": 3,
       "title": "timeout / circuit / rate limits",
       "critical": true,
       "pass": true,
-      "ms": 48,
+      "ms": 50,
       "detail": {
         "ok": true
       }
@@ -32,16 +38,19 @@
       "id": 4,
       "title": "kill mid-refresh then reconcile",
       "critical": true,
-      "pass": false,
-      "ms": 7366,
-      "error": "stuck running: {\"jobId\":\"0a3e63ee-5acb-4520-839f-b31dea2d204e\",\"roomId\":\"room-2yaz570x\",\"requesterUserId\":\"phase3-user-a\",\"status\":\"running\",\"queuedAt\":\"2026-09-18T09:45:00.633Z\",\"startedAt\":\"2026-09-18T09:56:44.959Z\",\"finishedAt\":null,\"outputHash\":null,\"docmostPublishStatus\":\"pending\",\"error\":null,\"result\":null}"
+      "pass": true,
+      "ms": 5713,
+      "detail": {
+        "jobId": "d5159cca-b3a3-454a-8244-a6e142e7f0b5",
+        "status": "failed"
+      }
     },
     {
       "id": 5,
       "title": "retry_publish is publish-only",
       "critical": true,
       "pass": true,
-      "ms": 11,
+      "ms": 49,
       "detail": {
         "tools": [
           "openwiki_search",
@@ -58,7 +67,7 @@
       "title": "single-instance replicas=1",
       "critical": true,
       "pass": true,
-      "ms": 12,
+      "ms": 7,
       "detail": {
         "replicas": 1,
         "policy": "single"
@@ -69,11 +78,11 @@
       "title": "mapping/job backup smoke",
       "critical": true,
       "pass": true,
-      "ms": 2574,
+      "ms": 1325,
       "detail": {
         "mappings": "20",
-        "jobs": "2",
-        "bytes": 10033
+        "jobs": "3",
+        "bytes": 10305
       }
     },
     {
@@ -81,7 +90,7 @@
       "title": "Assistant ACL E2E API A allow / B deny",
       "critical": true,
       "pass": true,
-      "ms": 188,
+      "ms": 90,
       "detail": {
         "ui": "api_acl_verified"
       }
@@ -91,7 +100,7 @@
       "title": "Ownership regression AI upsert keeps standard/human",
       "critical": true,
       "pass": true,
-      "ms": 3044,
+      "ms": 2090,
       "detail": {
         "unchanged": true
       }
@@ -101,7 +110,7 @@
       "title": "Cognee slot + plugin present",
       "critical": true,
       "pass": true,
-      "ms": 240,
+      "ms": 193,
       "detail": {
         "memorySlot": "cognee-openclaw"
       }
@@ -111,7 +120,7 @@
       "title": "Cleanup FG probe users",
       "critical": true,
       "pass": true,
-      "ms": 482,
+      "ms": 387,
       "detail": {
         "cleaned": true
       }
@@ -127,30 +136,14 @@
       }
     }
   ],
-  "blockers": [
-    {
-      "id": 1,
-      "title": "ACL DB unavailable fail-closed",
-      "error": "fetch failed"
-    },
-    {
-      "id": 2,
-      "title": "Single-source fault degraded (not fake empty)",
-      "error": "Command failed: docker compose exec -T knowledge-mcp sh -lc \"if [ -d /data/knowledge ]; then mv /data/knowledge /data/knowledge.__fg_bak; fi\"\nmv: cannot move '/data/knowledge' to '/data/knowledge.__fg_bak': Read-only file system\n"
-    },
-    {
-      "id": 4,
-      "title": "kill mid-refresh then reconcile",
-      "error": "stuck running: {\"jobId\":\"0a3e63ee-5acb-4520-839f-b31dea2d204e\",\"roomId\":\"room-2yaz570x\",\"requesterUserId\":\"phase3-user-a\",\"status\":\"running\",\"queuedAt\":\"2026-09-18T09:45:00.633Z\",\"startedAt\":\"2026-09-18T09:56:44.959Z\",\"finishedAt\":null,\"outputHash\":null,\"docmostPublishStatus\":\"pending\",\"error\":null,\"result\":null}"
-    }
-  ],
-  "finishedAt": "2026-09-18T09:56:58.801Z",
+  "blockers": [],
+  "finishedAt": "2026-09-18T11:01:33.740Z",
   "summary": {
     "total": 12,
-    "passed": 9,
-    "failed": 3,
-    "criticalFailed": 3
+    "passed": 12,
+    "failed": 0,
+    "criticalFailed": 0
   },
-  "verdict": "Phase 4 Final Gate = BLOCKED",
-  "productionReady": null
+  "verdict": "Phase 4 = PASS",
+  "productionReady": "Liangce Knowledge System V1 = PRODUCTION READY"
 }

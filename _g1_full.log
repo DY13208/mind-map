@@ -1,0 +1,3 @@
+2026-09-18T10:57:06.248Z start
+2026-09-18T10:57:06.251Z RUN docker compose up -d --force-recreate knowledge-mcp {"PGHOST":"203.0.113.1"}
+2026-09-18T10:57:09.228Z DONE status=0

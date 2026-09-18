@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict VPmKCQTtHX5VHKHXmJupKGu9njjRqPLMmRZCGaLh7VHuBD67T2ctd1zmJaHdGHE
+\restrict ouY3g56dHP8FoBPJy3bRhJslawHpePmCjb1p6iFmTCTI86pSVV0dVHB4MOaQoYp
 
 -- Dumped from database version 16.14
 -- Dumped by pg_dump version 16.14
@@ -35,9 +35,9 @@ COPY public.knowledge_docmost_mappings (id, room_id, topic_key, slot, owner, can
 12	room-6b5wc9z3	README	standard	mindmap	README.md	01a0aeac-881d-799a-9e6d-e902b4a54bd9	\N			room-B standard seed	2026-09-18 07:39:12.348145+00	2026-09-18 07:39:12.348145+00	\N
 13	room-2yaz570x	phase3-ai-topic	ai	ai		01a0aeac-881d-799a-9e6d-e902b4a54bd9	01a0b376-b1ce-7179-a33d-6faab55d28dd	ceaa20c8d55e428752f60b598bf89f31aafe3aa2d21f10d30cfe6ddcd5170843	ai-1789717327450	Phase3 AI	2026-09-18 07:41:35.804351+00	2026-09-18 07:42:07.450895+00	\N
 15	room-6b5wc9z3	phase3-ai-topic	ai	ai		01a0aeac-881d-799a-9e6d-e902b4a54bd9	01a0b377-2d01-750e-bdd2-e390a4a2cf7d	7961369acad33728b2afb391bb35684d7e31f2df0cbe189866536be341e86bdc	ai-1789717327140	phase3-ai-topic · AI 整理	2026-09-18 07:42:07.14104+00	2026-09-18 07:42:07.14104+00	\N
-23	room-2yaz570x	README	ai	ai		01a0aeac-881d-799a-9e6d-e902b4a54bd9	01a0b377-39f1-7f96-8fb1-4646f4ad2a87	929064cbc88222d99504cf5567092e35eae45d35ee8aa4d447d09e8e960f2b90	ai-1789717330500	README · AI 整理	2026-09-18 07:42:10.501032+00	2026-09-18 07:42:10.501032+00	\N
 20	room-2yaz570x	openwiki:branches/8ec88f39-9a70-40cc-9aac-52ae0500f50e	ai	ai		01a0aeac-881d-799a-9e6d-e902b4a54bd9	01a0b377-33c2-70c9-84f7-71b0130d439a	fed117ce84fd1071c93605d7a1c74c1f9575a7fc69bf53ee2573d46a05902924	ai-1789724702585	8ec88f39-9a70-40cc-9aac-52ae0500f50e · AI 整理	2026-09-18 07:42:08.848722+00	2026-09-18 09:45:02.586338+00	\N
 21	room-2yaz570x	openwiki:branches/9bea1fe8-9716-4e6a-b009-60e1d541a39e	ai	ai		01a0aeac-881d-799a-9e6d-e902b4a54bd9	01a0b377-340b-7c7b-84ba-5ad48b4e87d4	ae9c7a35decd27f395a204ff249f2682ba055500f649ae72e17260bf0e9b05ec	ai-1789724702795	9bea1fe8-9716-4e6a-b009-60e1d541a39e · AI 整理	2026-09-18 07:42:08.922461+00	2026-09-18 09:45:02.795991+00	\N
+23	room-2yaz570x	README	ai	ai		01a0aeac-881d-799a-9e6d-e902b4a54bd9	01a0b377-39f1-7f96-8fb1-4646f4ad2a87	ef95e3c7725e7f9cda5a5321367e6df341510312953043f95adcb69e5fee2fb2	ai-1789725417377	README · AI 整理	2026-09-18 07:42:10.501032+00	2026-09-18 09:56:57.379804+00	\N
 22	room-2yaz570x	openwiki:branches/e15ca6e8-a0e0-4da0-94ab-37d42fc6ed96	ai	ai		01a0aeac-881d-799a-9e6d-e902b4a54bd9	01a0b377-3476-7baa-90ff-cca8cac76d4a	9f608a54c0684bbc3954f87886d9f3fc006845e345cb87933eae95d5f10a5c25	ai-1789719131640	e15ca6e8-a0e0-4da0-94ab-37d42fc6ed96 · AI 整理	2026-09-18 07:42:09.105397+00	2026-09-18 08:12:11.641004+00	\N
 24	room-2yaz570x	phase4-ai-topic	ai	ai		01a0aeac-881d-799a-9e6d-e902b4a54bd9	01a0b391-abcb-7439-a027-58944cdbbc4d	8ae5d7bc890219c25dbef679efd3fa85ef5f4f620daeec3163af830e4ced31ee	ai-1789724700007	phase4-ai-topic · AI 整理	2026-09-18 08:11:03.600825+00	2026-09-18 09:45:00.010027+00	\N
 17	room-2yaz570x	openwiki:README	ai	ai		01a0aeac-881d-799a-9e6d-e902b4a54bd9	01a0b377-3198-79b2-84bd-d6298d8f90e1	365aeb03d615577c9d265823b32089b3cc38254546a09a04ea302e659d3916b8	ai-1789724701551	README · AI 整理	2026-09-18 07:42:08.30062+00	2026-09-18 09:45:01.551624+00	\N
@@ -52,7 +52,8 @@ COPY public.knowledge_docmost_mappings (id, room_id, topic_key, slot, owner, can
 
 COPY public.knowledge_openwiki_jobs (job_id, room_id, requester_user_id, status, queued_at, started_at, finished_at, output_hash, docmost_publish_status, error, result_json, lock_token, updated_at) FROM stdin;
 2ac50f05-06b4-4064-92fd-dd29b84e511c	room-2yaz570x	phase3-user-a	succeeded	2026-09-18 08:11:04.14603+00	2026-09-18 08:12:09.417+00	2026-09-18 08:12:11.676+00	1c46a13c32c05dc38d434e48381f3b2ce050e068a444883fbdcda6d07dde172a|9fb7fa112340d9848978bd29e9366dc2a31b460dd4394150d05be713f7f2eb3e|9196312e69a44a9fb0b4f335e0cf5fbdafc6760fd713c73abb4d51fb97623d8b|5996a5463ecba02cb0e163acf644eea6be893df644db30c923b7ce40e9eeea9c|e1622a3cf156a1ea1279371e4a24a399212131dd0a9c94edae5a5d87808e1f4a|8b35401f1c641892d4ef44dac2a015954d2a92942a883b900634ffffee26e127	ok	\N	{"failures": [], "published": [{"hash": "1c46a13c32c05dc38d434e48381f3b2ce050e068a444883fbdcda6d07dde172a", "pageId": "01a0b377-3198-79b2-84bd-d6298d8f90e1", "topicKey": "openwiki:README"}, {"hash": "9fb7fa112340d9848978bd29e9366dc2a31b460dd4394150d05be713f7f2eb3e", "pageId": "01a0b377-3231-72f6-9f9e-787fc7a1da16", "topicKey": "openwiki:branches/04655d24-cb10-4ff5-9a46-f9e768475fc2"}, {"hash": "9196312e69a44a9fb0b4f335e0cf5fbdafc6760fd713c73abb4d51fb97623d8b", "pageId": "01a0b377-3322-7160-8c06-d60627869724", "topicKey": "openwiki:branches/7e3aac59-4a3c-4e17-8d75-14357b80ff40"}, {"hash": "5996a5463ecba02cb0e163acf644eea6be893df644db30c923b7ce40e9eeea9c", "pageId": "01a0b377-33c2-70c9-84f7-71b0130d439a", "topicKey": "openwiki:branches/8ec88f39-9a70-40cc-9aac-52ae0500f50e"}, {"hash": "e1622a3cf156a1ea1279371e4a24a399212131dd0a9c94edae5a5d87808e1f4a", "pageId": "01a0b377-340b-7c7b-84ba-5ad48b4e87d4", "topicKey": "openwiki:branches/9bea1fe8-9716-4e6a-b009-60e1d541a39e"}, {"hash": "8b35401f1c641892d4ef44dac2a015954d2a92942a883b900634ffffee26e127", "pageId": "01a0b377-3476-7baa-90ff-cca8cac76d4a", "topicKey": "openwiki:branches/e15ca6e8-a0e0-4da0-94ab-37d42fc6ed96"}], "outputHash": "1c46a13c32c05dc38d434e48381f3b2ce050e068a444883fbdcda6d07dde172a|9fb7fa112340d9848978bd29e9366dc2a31b460dd4394150d05be713f7f2eb3e|9196312e69a44a9fb0b4f335e0cf5fbdafc6760fd713c73abb4d51fb97623d8b|5996a5463ecba02cb0e163acf644eea6be893df644db30c923b7ce40e9eeea9c|e1622a3cf156a1ea1279371e4a24a399212131dd0a9c94edae5a5d87808e1f4a|8b35401f1c641892d4ef44dac2a015954d2a92942a883b900634ffffee26e127"}	\N	2026-09-18 08:12:11.677846+00
-0a3e63ee-5acb-4520-839f-b31dea2d204e	room-2yaz570x	phase3-user-a	running	2026-09-18 09:45:00.633168+00	2026-09-18 09:56:44.959+00	\N	\N	pending	\N	\N	\N	2026-09-18 09:56:44.960253+00
+0a3e63ee-5acb-4520-839f-b31dea2d204e	room-2yaz570x	phase3-user-a	failed	2026-09-18 09:45:00.633168+00	2026-09-18 09:56:44.959+00	2026-09-18 10:22:11.669278+00	\N	pending	| reclaimed_stale_running	\N	\N	2026-09-18 10:22:11.669278+00
+d5159cca-b3a3-454a-8244-a6e142e7f0b5	room-2yaz570x	phase3-user-a	failed	2026-09-18 11:01:24.290643+00	2026-09-18 11:01:24.297+00	2026-09-18 11:01:24.433+00	\N	skipped	openwiki_cli_failed	\N	\N	2026-09-18 11:01:24.433872+00
 \.
 
 
@@ -60,11 +61,11 @@ COPY public.knowledge_openwiki_jobs (job_id, room_id, requester_user_id, status,
 -- Name: knowledge_docmost_mappings_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('public.knowledge_docmost_mappings_id_seq', 38, true);
+SELECT pg_catalog.setval('public.knowledge_docmost_mappings_id_seq', 39, true);
 
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict VPmKCQTtHX5VHKHXmJupKGu9njjRqPLMmRZCGaLh7VHuBD67T2ctd1zmJaHdGHE
+\unrestrict ouY3g56dHP8FoBPJy3bRhJslawHpePmCjb1p6iFmTCTI86pSVV0dVHB4MOaQoYp
