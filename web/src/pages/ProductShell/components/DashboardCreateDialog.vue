@@ -18,7 +18,13 @@
           <el-option label="项目级" value="project" />
         </el-select>
       </el-form-item>
-      <el-form-item label="数据看板 HTML">
+      <el-form-item label="看板来源">
+        <el-radio-group v-model="sourceType">
+          <el-radio label="html">上传 HTML 文件</el-radio>
+          <el-radio label="url">在线链接</el-radio>
+        </el-radio-group>
+      </el-form-item>
+      <el-form-item v-if="sourceType === 'html'" label="数据看板 HTML">
         <el-upload
           drag
           accept=".html,.htm"
@@ -38,6 +44,16 @@
             仅支持单个 .html 文件，上传后即在数据看板中显示。
           </div>
         </el-upload>
+      </el-form-item>
+      <el-form-item v-else label="看板链接">
+        <el-input
+          v-model="sourceUrl"
+          clearable
+          placeholder="https://example.com/dashboard"
+        />
+        <div class="uploadTip">
+          支持 http/https 链接，创建后将在数据看板中嵌入显示该链接页面。
+        </div>
       </el-form-item>
     </el-form>
     <div slot="footer">
@@ -75,6 +91,8 @@ export default {
     return {
       title: '',
       level: 'group',
+      sourceType: 'html',
+      sourceUrl: '',
       file: null,
       fileList: [],
       submitting: false
@@ -102,19 +120,31 @@ export default {
         if (this.$message) this.$message.warning('请填写看板名称')
         return
       }
-      if (!this.file) {
-        if (this.$message) this.$message.warning('请上传数据看板 HTML 文件')
-        return
-      }
-      this.submitting = true
-      try {
-        const contentBase64 = await readAsBase64(this.file)
-        await brandDashboardService.createDashboard({
+      let payload = null
+      if (this.sourceType === 'url') {
+        const sourceUrl = this.sourceUrl.trim()
+        if (!/^https?:\/\//i.test(sourceUrl)) {
+          if (this.$message) {
+            this.$message.warning('请填写以 http(s):// 开头的看板链接')
+          }
+          return
+        }
+        payload = { title, level: this.level, sourceUrl }
+      } else {
+        if (!this.file) {
+          if (this.$message) this.$message.warning('请上传数据看板 HTML 文件')
+          return
+        }
+        payload = {
           title,
           level: this.level,
           fileName: this.file.name,
-          contentBase64
-        })
+          contentBase64: await readAsBase64(this.file)
+        }
+      }
+      this.submitting = true
+      try {
+        await brandDashboardService.createDashboard(payload)
         if (this.$message) this.$message.success(`已创建看板「${title}」`)
         this.$emit('update:visible', false)
         this.$emit('done')
@@ -129,6 +159,8 @@ export default {
     reset() {
       this.title = ''
       this.level = 'group'
+      this.sourceType = 'html'
+      this.sourceUrl = ''
       this.file = null
       this.fileList = []
       this.submitting = false

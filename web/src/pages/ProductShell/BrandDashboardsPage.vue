@@ -19,7 +19,7 @@
           :key="activeDashboard.id"
           :src="contentUrl(activeDashboard)"
           :title="activeDashboard.title"
-          sandbox="allow-scripts allow-forms allow-popups allow-downloads"
+          :sandbox="iframeSandbox(activeDashboard, 'allow-scripts allow-forms allow-popups allow-downloads')"
         />
         <div v-else-if="!loading" class="dashboardMissing">
           <i class="el-icon-warning-outline" />
@@ -73,7 +73,7 @@
             />
           </el-button-group>
           <el-button
-            v-if="!deleteMode"
+            v-if="!deleteMode && canDeleteAny"
             size="small"
             icon="el-icon-delete"
             @click="enterDeleteMode"
@@ -114,12 +114,26 @@
             :key="group.level"
             class="dashboardSection"
           >
-            <div class="sectionTitle">
+            <div
+              class="sectionTitle"
+              :class="{ 'is-collapsed': isCollapsed(group.level) }"
+              role="button"
+              tabindex="0"
+              :aria-expanded="!isCollapsed(group.level)"
+              :aria-label="`${isCollapsed(group.level) ? '展开' : '收起'}${group.label}`"
+              @click="toggleCollapse(group.level)"
+              @keydown.enter="toggleCollapse(group.level)"
+            >
               <span class="sectionEmoji">{{ group.emoji }}</span>
               <h2>{{ group.label }}</h2>
               <p>{{ group.desc }}</p>
-              <span class="sectionCount">共 {{ group.items.length }} 个看板</span>
+              <span class="sectionCount">共 {{ group.total }} 个看板</span>
+              <i
+                class="sectionCaret"
+                :class="isCollapsed(group.level) ? 'el-icon-arrow-right' : 'el-icon-arrow-down'"
+              />
             </div>
+            <div v-show="!isCollapsed(group.level)" class="sectionBody">
             <div v-if="view === 'grid'" class="dashboardGrid">
               <article
                 v-for="item in group.items"
@@ -137,7 +151,7 @@
                     :title="`${item.title} 缩略预览`"
                     loading="lazy"
                     tabindex="-1"
-                    sandbox="allow-scripts allow-forms"
+                    :sandbox="iframeSandbox(item, 'allow-scripts allow-forms')"
                   />
                   <span v-if="deleteMode" class="selectMark" :class="{ 'is-on': isSelected(item.id) }">
                     <i :class="isSelected(item.id) ? 'el-icon-check' : ''" />
@@ -223,7 +237,7 @@
                         :title="`${item.title} 预览`"
                         loading="lazy"
                         tabindex="-1"
-                        sandbox="allow-scripts allow-forms"
+                        :sandbox="iframeSandbox(item, 'allow-scripts allow-forms')"
                       />
                     </div>
                   </div>
@@ -258,6 +272,18 @@
                   <span>{{ item.healthSummary }}</span>
                 </div>
               </article>
+            </div>
+            <div v-if="group.total > pageSize" class="sectionPager">
+              <el-pagination
+                small
+                background
+                layout="total, prev, pager, next"
+                :current-page="group.page"
+                :page-size="pageSize"
+                :total="group.total"
+                @current-change="p => setPage(group.level, p)"
+              />
+            </div>
             </div>
           </section>
         </template>
@@ -328,6 +354,9 @@ export default {
       deleteMode: false,
       deleteSelection: [],
       deleting: false,
+      pageSize: 9,
+      pageByLevel: {},
+      collapsedLevels: [],
       levelOptions: [
         { label: '全部层级', value: 'all' },
         { label: '集团级', value: 'group' },
@@ -340,11 +369,14 @@ export default {
     isDetail() {
       return !!this.$route.params.id
     },
+    canDeleteAny() {
+      return this.dashboards.some(item => item.canDelete)
+    },
     activeDashboard() {
       const id = String(this.$route.params.id || '')
       return this.dashboards.find(item => String(item.id) === id) || null
     },
-    visibleSections() {
+    matchedSorted() {
       const keyword = this.search.trim().toLowerCase()
       const matched = this.dashboards.filter(item => {
         if (this.levelFilter !== 'all' && item.level !== this.levelFilter) {
@@ -362,11 +394,22 @@ export default {
           String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')),
         name: (a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN')
       }
-      const sorted = matched.slice().sort(sorters[this.sortBy] || sorters.updated)
-      return LEVEL_META.map(meta => ({
-        ...meta,
-        items: sorted.filter(item => (item.level || 'group') === meta.level)
-      })).filter(group => group.items.length)
+      return matched.slice().sort(sorters[this.sortBy] || sorters.updated)
+    },
+    visibleSections() {
+      return LEVEL_META.map(meta => {
+        const all = this.matchedSorted.filter(
+          item => (item.level || 'group') === meta.level
+        )
+        const maxPage = Math.max(1, Math.ceil(all.length / this.pageSize))
+        const page = Math.min(Math.max(1, this.pageByLevel[meta.level] || 1), maxPage)
+        return {
+          ...meta,
+          total: all.length,
+          page,
+          items: all.slice((page - 1) * this.pageSize, page * this.pageSize)
+        }
+      }).filter(group => group.total > 0)
     }
   },
   watch: {
@@ -378,6 +421,15 @@ export default {
       this.searchTimer = setTimeout(() => {
         this.search = value
       }, 250)
+    },
+    search() {
+      this.pageByLevel = {}
+    },
+    levelFilter() {
+      this.pageByLevel = {}
+    },
+    sortBy() {
+      this.pageByLevel = {}
     }
   },
   created() {
@@ -406,7 +458,15 @@ export default {
       }
     },
     contentUrl(item) {
+      if (item && item.sourceType === 'url' && item.sourceUrl) {
+        return item.sourceUrl
+      }
       return brandDashboardService.dashboardContentUrl(item.id)
+    },
+    iframeSandbox(item, htmlSandbox) {
+      return item && item.sourceType === 'url' && item.sourceUrl
+        ? 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads'
+        : htmlSandbox
     },
     openDashboard(item) {
       if (!item) return
@@ -429,6 +489,10 @@ export default {
     onCardClick(item) {
       if (!item) return
       if (this.deleteMode) {
+        if (!item.canDelete) {
+          if (this.$message) this.$message.warning('只能删除自己创建的看板')
+          return
+        }
         this.toggleSelection(item.id)
         return
       }
@@ -464,6 +528,17 @@ export default {
     },
     backToList() {
       this.$router.push({ name: 'BrandDashboards' })
+    },
+    setPage(level, page) {
+      this.$set(this.pageByLevel, level, page)
+    },
+    isCollapsed(level) {
+      return this.collapsedLevels.includes(level)
+    },
+    toggleCollapse(level) {
+      const index = this.collapsedLevels.indexOf(level)
+      if (index >= 0) this.collapsedLevels.splice(index, 1)
+      else this.collapsedLevels.push(level)
     },
     levelLabel(level) {
       if (level === 'department') return '部门级'
@@ -523,12 +598,19 @@ export default {
 .dashboardCard.is-selected, .listCard.is-selected { border-color: var(--ui-primary); box-shadow: 0 0 0 2px rgba(0, 153, 102, .18); }
 .statePanel { display: grid; gap: 12px; justify-items: start; }
 .dashboardContent { min-height: 260px; }
+.sectionPager { display: flex; justify-content: center; margin: 14px 0 2px; }
 .dashboardSection { margin-bottom: 26px; }
-.sectionTitle { display: flex; align-items: center; gap: 10px; margin: 0 4px 10px;
+.sectionTitle { display: flex; align-items: center; gap: 10px; margin: 0 4px 10px; cursor: pointer; user-select: none; border-radius: 8px; padding: 4px 8px;
+  &:hover { background: var(--ui-surface-muted); }
+  &:focus-visible { outline: 2px solid var(--ui-primary); outline-offset: 2px; }
   .sectionEmoji { font-size: 22px; }
   h2 { margin: 0; font-size: 18px; color: var(--ui-text); }
   p { margin: 0; color: var(--ui-text-secondary); font-size: 13px; }
   .sectionCount { margin-left: auto; color: var(--ui-text-secondary); font-size: 13px; }
+  .sectionCaret { flex: 0 0 auto; color: var(--ui-text-secondary); font-size: 14px; }
+  &.is-collapsed { margin-bottom: 4px;
+    p { color: #a9b6b1; }
+  }
 }
 .dashboardGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 18px; }
 .dashboardCard { min-width: 0; border: 1px solid var(--ui-border); border-radius: var(--ui-radius-lg); overflow: hidden; background: var(--ui-surface); cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s;
