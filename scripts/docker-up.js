@@ -410,6 +410,69 @@ function ensureEnv() {
   }
 }
 
+
+function listKnowledgeMcpSourceFiles() {
+  const rootDir = path.join(ROOT, 'integrations', 'knowledge-mcp')
+  const out = []
+  if (!fs.existsSync(rootDir)) return out
+  function walk(dir) {
+    for (const name of fs.readdirSync(dir)) {
+      if (name === 'node_modules' || name === '.git') continue
+      const full = path.join(dir, name)
+      const st = fs.statSync(full)
+      if (st.isDirectory()) walk(full)
+      else out.push(full)
+    }
+  }
+  walk(rootDir)
+  // Also rebuild when compose service definition changes
+  const composeFile = path.join(ROOT, 'docker-compose.yml')
+  if (fs.existsSync(composeFile)) out.push(composeFile)
+  return out.sort()
+}
+
+function hashKnowledgeMcpSources() {
+  const crypto = require('crypto')
+  const h = crypto.createHash('sha256')
+  for (const f of listKnowledgeMcpSourceFiles()) {
+    h.update(f)
+    h.update('\0')
+    h.update(fs.readFileSync(f))
+    h.update('\0')
+  }
+  return h.digest('hex')
+}
+
+function knowledgeMcpImageExists(tag) {
+  try {
+    execSync('docker image inspect ' + tag, { stdio: 'ignore' })
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+function ensureKnowledgeMcpBuilt(extraEnv) {
+  const imageTag = 'mind-map-knowledge-mcp:0.4.0'
+  const stampPath = path.join(ROOT, 'docker', '.knowledge-mcp-src.sha')
+  const hash = hashKnowledgeMcpSources()
+  const prev = fs.existsSync(stampPath) ? fs.readFileSync(stampPath, 'utf8').trim() : ''
+  if (prev === hash && knowledgeMcpImageExists(imageTag)) {
+    console.log('  knowledge-mcp image up to date (skip rebuild)')
+    return false
+  }
+  console.log('  building knowledge-mcp...')
+  execSync('docker compose -f docker-compose.yml build knowledge-mcp', {
+    cwd: ROOT,
+    stdio: 'inherit',
+    env: { ...process.env, ...(extraEnv || {}) },
+    windowsHide: true
+  })
+  fs.mkdirSync(path.dirname(stampPath), { recursive: true })
+  fs.writeFileSync(stampPath, hash + '\n', 'utf8')
+  return true
+}
+
 async function up() {
   ensureEnv()
   ensureGitSubmodules()
@@ -419,6 +482,7 @@ async function up() {
   }
   ensureDocmostBuilt()
   ensureAppBuilt()
+  ensureKnowledgeMcpBuilt()
   const host = process.env.PUBLIC_HOST || detectHost()
   const wikiPort = Number(process.env.DOCMOST_PORT || 3040)
   // 侧栏 Wiki 新窗口地址：优先用根目录 .env 的 DOCMOST_APP_URL；
@@ -514,7 +578,8 @@ async function up() {
       'docmost-db',
       'docmost-redis',
       'docmost',
-      'wiki-gateway'
+      'wiki-gateway',
+      'knowledge-mcp'
     ],
     {
       PUBLIC_HOST: host,

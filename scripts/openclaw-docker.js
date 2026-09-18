@@ -651,23 +651,44 @@ function syncLiangceIngressIntoVolume(containerId) {
   if (!fs.existsSync(marker)) {
     return {
       ok: false,
-      reason: '仓库缺少 integrations/openclaw/liangce-ingress（请先 git pull）'
+      reason: 'missing integrations/openclaw/liangce-ingress (git pull first)'
     }
   }
   if (!containerId) {
-    return { ok: false, reason: '无 openclaw-gateway 容器，无法同步 liangce-ingress' }
+    return { ok: false, reason: 'no openclaw-gateway container; cannot sync liangce-ingress' }
   }
-  spawnSync(
+
+  // Prefer volumes-from alpine so mkdir works even when gateway is crash-looping
+  // (docker exec fails on restarting containers; docker cp needs parent dirs).
+  const mkdir = spawnSync(
     'docker',
     [
-      'exec',
+      'run',
+      '--rm',
+      '--volumes-from',
       containerId,
+      'alpine:3.20',
       'sh',
-      '-lc',
-      'mkdir -p /home/node/.openclaw/extensions/liangce-ingress && chown -R node:node /home/node/.openclaw/extensions || true'
+      '-c',
+      'mkdir -p /home/node/.openclaw/extensions/liangce-ingress && chown -R 1000:1000 /home/node/.openclaw/extensions || true'
     ],
     { cwd: ROOT, encoding: 'utf8', windowsHide: true }
   )
+  if (mkdir.status !== 0) {
+    // Fallback: try exec (container created but not yet restarting)
+    spawnSync(
+      'docker',
+      [
+        'exec',
+        containerId,
+        'sh',
+        '-lc',
+        'mkdir -p /home/node/.openclaw/extensions/liangce-ingress || true'
+      ],
+      { cwd: ROOT, encoding: 'utf8', windowsHide: true }
+    )
+  }
+
   const cp = spawnSync(
     'docker',
     [
@@ -680,18 +701,21 @@ function syncLiangceIngressIntoVolume(containerId) {
   if (cp.status !== 0) {
     return {
       ok: false,
-      reason: 'docker cp liangce-ingress 失败',
-      detail: String(cp.stderr || cp.stdout || '').trim().slice(0, 400)
+      reason: 'docker cp liangce-ingress failed',
+      detail: String(cp.stderr || cp.stdout || mkdir.stderr || '').trim().slice(0, 400)
     }
   }
   spawnSync(
     'docker',
     [
-      'exec',
+      'run',
+      '--rm',
+      '--volumes-from',
       containerId,
+      'alpine:3.20',
       'sh',
-      '-lc',
-      'chown -R node:node /home/node/.openclaw/extensions/liangce-ingress 2>/dev/null || true'
+      '-c',
+      'chown -R 1000:1000 /home/node/.openclaw/extensions/liangce-ingress 2>/dev/null || true'
     ],
     { cwd: ROOT, encoding: 'utf8', windowsHide: true }
   )
