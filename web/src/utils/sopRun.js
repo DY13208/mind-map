@@ -29,6 +29,11 @@ import {
   summarizeNotifyResults
 } from './sopNotify'
 import { parseProvidedFieldLabels } from './sopSubmitMaterial'
+import {
+  extractOutputRulesFromTree,
+  formatOutputRulesPrompt,
+  OUTPUT_RULES_NODE_TITLE
+} from './sopOutputRules'
 
 /** 可选产物预设（运行前勾选） */
 export const SOP_OUTPUT_PRESETS = [
@@ -185,6 +190,7 @@ function treeToOutline(node, depth = 0, lines = [], limit = { n: 0, max: 400 }) 
   limit.n += 1
   const data = node.data || node
   const title = stripText(data.text || node.text) || '(空)'
+  if (depth > 0 && title === OUTPUT_RULES_NODE_TITLE) return lines
   lines.push(`${'  '.repeat(depth)}- ${title}`)
   const note = data.note || node.note
   if (note) {
@@ -240,6 +246,7 @@ function treeToSteps(node, depth = 0, steps = [], limit = { n: 0, max: 400 }) {
   limit.n += 1
   const data = node.data || node
   const title = stripText(data.text || node.text) || '(空)'
+  if (depth > 0 && title === OUTPUT_RULES_NODE_TITLE) return steps
   const uid = String(data.uid || node.uid || data.id || '').trim()
   if (isActionableSopStep(title, depth)) {
     steps.push({
@@ -267,11 +274,13 @@ export async function loadSopRunContext(roomKey, sop) {
   let outline = ''
   let steps = []
   let source = 'none'
+  let sourceTree = null
 
   // 从脑图工具栏直接运行时，优先使用点击“运行”那一刻的画布快照，
   // 避免协同保存尚未落库时读到旧的表单字段。
   const runtimeTree = sop && sop.runtimeTree
   if (runtimeTree) {
+    sourceTree = runtimeTree
     const lines = treeToOutline(runtimeTree)
     steps = treeToSteps(runtimeTree)
     if (lines.length) {
@@ -284,6 +293,7 @@ export async function loadSopRunContext(roomKey, sop) {
     try {
       const data = await getFileSubtree(key, uid, { deep: true, maxNodes: 800 })
       const tree = (data && data.tree) || data
+      sourceTree = tree
       const lines = treeToOutline(tree)
       steps = treeToSteps(tree)
       if (lines.length) {
@@ -313,6 +323,8 @@ export async function loadSopRunContext(roomKey, sop) {
     outline: outline.slice(0, 80000),
     steps,
     source,
+    outputRules: extractOutputRulesFromTree(sourceTree),
+    outputRulesSource: sourceTree ? source : 'none',
     businessFingerprint: String(
       (sop && sop.businessFingerprint) ||
         (sop && sop.runtimeMaterial && sop.runtimeMaterial.businessFingerprint) ||
@@ -349,7 +361,8 @@ function buildSystemPrompt() {
 12. 缺关键数据时在结论里写清限制与假设，仍尽量用本次当前脑图已有数据给出可执行结论；不要停下来要求用户粘贴外部系统链接。
 13. 若上下文标明数据源为「runtime_tree / 当前脑图」，它是本次业务字段的唯一事实来源；未填写字段必须写「未填写」或「无法确认」。
 14. 严禁从 Git、历史 HTML、旧产物、旧运行记录、memory、台账备注或旧待办正文恢复、继承或推断本次业务字段；历史状态只可用于核实是否已派发通知，避免重复操作。
-15. 当前资料不完整时，不得声称「字段齐全」「12/12 已完成」「需求已完整提交」，只能完成不依赖缺失字段的自动步骤。`
+15. 当前资料不完整时，不得声称「字段齐全」「12/12 已完成」「需求已完整提交」，只能完成不依赖缺失字段的自动步骤。
+16. 若上下文包含「脑图已保存的输出规则」，必须应用于最终文件产物；这些规则不是业务数据，不得改变流程、业务字段、通知或审批行为。`
 }
 
 function buildUserPrompt({ ctx, outputs, extraNote }) {
@@ -369,6 +382,7 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
         ].join('\n')
       : ''
   const noteText = String(extraNote || '')
+  const outputRulesText = formatOutputRulesPrompt(ctx.outputRules)
   const continuityHint = /同P关联节点|无超链接校验/.test(noteText)
     ? '- 下方若含「## 同P关联节点（无超链接校验）」，按同 P 下关联关系衔接执行；不要向用户索要超链接或界面补数。'
     : ''
@@ -385,6 +399,7 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
       '- 说明：已完成哪些自动步骤、卡在哪个人工步骤、下一步建议。',
       '- 若下方已有「## 用户提交资料」，直接使用；不要要求用户再在界面里补数或贴链接。',
       runtimeSourceBoundary,
+      outputRulesText,
       continuityHint,
       extraNote ? `\n## 额外要求\n${extraNote}` : '',
       '',
@@ -410,6 +425,7 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
     '',
     '注意：中间快照、_map_full/_map_outline、MCP 日志不要出现在产物清单里。',
     runtimeSourceBoundary,
+    outputRulesText,
     continuityHint,
     extraNote ? `\n## 额外要求\n${extraNote}` : '',
     '',
