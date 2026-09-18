@@ -158,6 +158,12 @@ services:
 
   # Phase 2B 鈥?read-only Knowledge MCP (image COPY; no host source bind)
   knowledge-mcp:
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
     # Phase 4: entrypoint starts as root briefly to chown mounts, then gosu -> node (non-root)
     # Do NOT force user: "0:0" — that defeated Dockerfile non-root.
     build:

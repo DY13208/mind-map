@@ -74,6 +74,10 @@ async function callTool(token, name, args) {
   return { httpStatus: res.status, isError: !!(json?.result?.isError), parsed, json };
 }
 
+function procUid() {
+  return sh("docker compose exec -T knowledge-mcp node -e \"const fs=require('fs');const m=fs.readFileSync('/proc/1/status','utf8').match(/^Uid:\\s+(\\d+)/m);process.stdout.write(m[1])\"")
+}
+
 function sh(cmd) {
   return execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
@@ -106,7 +110,7 @@ async function main() {
 
   // 1 non-root + caps
   await section(1, 'knowledge-mcp non-root + cap_drop + no-new-privileges', true, async () => {
-    const uid = sh("docker compose exec -T knowledge-mcp awk '/^Uid:/{print $2}' /proc/1/status");
+    const uid = procUid();
     ok(uid === '1000', 'uid=' + uid);
     const caps = sh('docker inspect mind-map-knowledge-mcp-1 --format "{{json .HostConfig.CapDrop}}|{{json .HostConfig.SecurityOpt}}|{{.HostConfig.ReadonlyRootfs}}"');
     ok(caps.includes('ALL') || caps.includes('"ALL"'), 'cap_drop missing ALL: ' + caps);
@@ -172,32 +176,29 @@ async function main() {
   // 6 cross-room ACL
   await section(6, 'cross-room ACL deny + same-room allow', true, async () => {
     const aOk = await callTool(mint(USER_A), 'canonical_list', { roomId: ROOM_A });
-    ok(!aOk.isError, 'A read A: ' + JSON.stringify(aOk.parsed));
-    const aDeny = await callTool(mint(USER_A), 'canonical_list', { roomId: ROOM_B });
-    ok(aDeny.isError || (aDeny.parsed && aDeny.parsed.error), 'A read B should deny');
+    ok(!aOk.isError && Array.isArray(aOk.parsed) && aOk.parsed.length > 0, 'A list A: ' + JSON.stringify(aOk.parsed).slice(0, 200));
+    const aListB = await callTool(mint(USER_A), 'canonical_list', { roomId: ROOM_B });
+    ok(Array.isArray(aListB.parsed) && aListB.parsed.length === 0, 'A list B should be empty');
+    const aReadB = await callTool(mint(USER_A), 'canonical_read', { roomId: ROOM_B, path: 'README.md' });
+    ok(aReadB.isError || (aReadB.parsed && aReadB.parsed.error), 'A read B should error: ' + JSON.stringify(aReadB.parsed));
     return {};
   });
 
   // 7 live ACL revoke without restart
   await section(7, 'live ACL revoke without restart', true, async () => {
     const marker = 'phase4-revoke-' + Date.now();
-    // insert temp membership then delete via psql in postgres container
-    sh(`docker compose exec -T postgres psql -U postgres -d mind_map -c "insert into room_members(user_id, room_key, role) values ('${marker}','${ROOM_A}','editor') on conflict do nothing;"`);
-    // table might use different unique - try simpler
-    let inserted = true;
-    try {
-      sh(`docker compose exec -T postgres psql -U postgres -d mind_map -c "delete from room_members where user_id='${marker}'; insert into room_members(user_id, room_key, role) values ('${marker}','${ROOM_A}','editor');"`);
-    } catch (e) {
-      // discover schema
-      const schema = sh(`docker compose exec -T postgres psql -U postgres -d mind_map -c "\\d room_members"`);
-      throw new Error('insert failed: ' + String(e.message || e).slice(0, 200) + ' schema=' + schema.slice(0, 400));
-    }
-    const before = await callTool(mint(marker), 'canonical_list', { roomId: ROOM_A });
-    ok(!before.isError, 'before revoke should allow: ' + JSON.stringify(before.parsed));
+    // Live schema: room_members(room_key, user_id, role, source, ...)
+    sh(`docker compose exec -T postgres psql -U postgres -d mind_map -c "delete from room_members where user_id='${marker}'; insert into room_members(room_key, user_id, role, source, direct_role) values ('${ROOM_A}','${marker}','editor','direct_share','editor');"`);
+    const beforeList = await callTool(mint(marker), 'canonical_list', { roomId: ROOM_A });
+    ok(Array.isArray(beforeList.parsed) && beforeList.parsed.length > 0, 'before revoke list: ' + JSON.stringify(beforeList.parsed).slice(0, 200));
+    const beforeRead = await callTool(mint(marker), 'canonical_read', { roomId: ROOM_A, path: 'README.md' });
+    ok(!beforeRead.isError, 'before revoke read: ' + JSON.stringify(beforeRead.parsed).slice(0, 200));
     sh(`docker compose exec -T postgres psql -U postgres -d mind_map -c "delete from room_members where user_id='${marker}';"`);
-    const after = await callTool(mint(marker), 'canonical_list', { roomId: ROOM_A });
-    ok(after.isError || (after.parsed && after.parsed.error), 'after revoke must deny: ' + JSON.stringify(after.parsed));
-    return { marker, inserted };
+    const afterList = await callTool(mint(marker), 'canonical_list', { roomId: ROOM_A });
+    ok(Array.isArray(afterList.parsed) && afterList.parsed.length === 0, 'after revoke list should be empty');
+    const afterRead = await callTool(mint(marker), 'canonical_read', { roomId: ROOM_A, path: 'README.md' });
+    ok(afterRead.isError || (afterRead.parsed && afterRead.parsed.error), 'after revoke read must deny: ' + JSON.stringify(afterRead.parsed));
+    return { marker };
   });
 
   // 8 viewer cannot write/refresh
@@ -299,7 +300,7 @@ async function main() {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
     }
     ok(healthy, 'did not become healthy');
-    const uid = sh("docker compose exec -T knowledge-mcp awk '/^Uid:/{print $2}' /proc/1/status");
+    const uid = procUid();
     ok(uid === '1000', 'uid after restart=' + uid);
     return { uid };
   });
