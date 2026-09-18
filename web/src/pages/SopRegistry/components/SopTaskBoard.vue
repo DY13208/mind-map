@@ -309,7 +309,7 @@
 <script>
 import MarkdownIt from 'markdown-it'
 import * as XLSX from 'xlsx'
-import { extractDeliverablesFromReply } from '@/utils/sopRun'
+import { extractDeliverablesFromReply, jobNeedsWecomResume } from '@/utils/sopRun'
 import { artifactLocalUrl } from '@/utils/fileApi'
 import { AI_BACKEND_OPENCLAW, streamChat } from '@/utils/agentChat'
 
@@ -487,6 +487,7 @@ export default {
       const runDels =
         (job.result && job.result.deliverables) || job.deliverables || []
       runDels.forEach(push)
+      ;(job.priorDeliverables || []).forEach(push)
       extractDeliverablesFromReply(streamTextOf(job), [], [], {
         id: job.sopId,
         title: job.sopTitle,
@@ -565,6 +566,8 @@ export default {
     },
     canContinuePartial(job) {
       if (!job) return false
+      // 无企微待办/人工确认衔接：不提供续跑，应重新「打开」一次跑完
+      if (!jobNeedsWecomResume(job)) return false
       if (job.state === 'partial') return true
       const rr =
         (job.result && job.result.runResult) || job.runResult || ''

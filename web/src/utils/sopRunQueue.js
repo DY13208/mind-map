@@ -2,7 +2,7 @@
  * SOP 台账运行队列：复用 WorkBuddy 多会话（独立 conversationId）
  * 形态对齐 flowExpandQueue，默认并发 2、上限 3
  */
-import { runSopWithWorkbuddy, sanitizeNodeProgress } from './sopRun'
+import { runSopWithWorkbuddy, sanitizeNodeProgress, mergeDeliverableLists } from './sopRun'
 import { aiBackendLabel, getAiBackend } from './agentChat'
 import { areWaitingWecomTodosDone } from './sopNotify'
 import { getLocalConfig } from '@/api'
@@ -121,6 +121,9 @@ function publicJob(job, extra = {}) {
     completedNotifyKeys: Array.isArray(job.completedNotifyKeys)
       ? job.completedNotifyKeys.slice()
       : [],
+    priorDeliverables: Array.isArray(job.priorDeliverables)
+      ? job.priorDeliverables.slice()
+      : [],
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
     liveElapsedSec: job.liveElapsedSec || 0,
@@ -199,6 +202,8 @@ function restoreJobForResume(job, statusText) {
 
 const QUEUE_STORAGE_KEY = 'lc_sop_run_queue_v1'
 const STREAM_PERSIST_MAX = 200000
+/** 侧栏「SOP 任务」保留的已完成/失败历史条数 */
+const RECENT_JOB_LIMIT = 50
 
 function serializeJob(job) {
   return {
@@ -225,6 +230,9 @@ function serializeJob(job) {
       : [],
     completedNotifyKeys: Array.isArray(job.completedNotifyKeys)
       ? job.completedNotifyKeys.slice(0, 200)
+      : [],
+    priorDeliverables: Array.isArray(job.priorDeliverables)
+      ? job.priorDeliverables.slice(0, 80)
       : [],
     context: job.context || null,
     result: job.result || null,
@@ -273,6 +281,9 @@ function hydrateJob(raw) {
       : [],
     completedNotifyKeys: Array.isArray(raw.completedNotifyKeys)
       ? raw.completedNotifyKeys.slice()
+      : [],
+    priorDeliverables: Array.isArray(raw.priorDeliverables)
+      ? raw.priorDeliverables.slice()
       : [],
     context: raw.context || null,
     result: raw.result || null,
@@ -377,7 +388,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       running: Array.from(running.values())
         .filter(j => j.state === 'running')
         .map(serializeJob),
-      recent: recent.slice(0, 12).map(j => {
+      recent: recent.slice(0, RECENT_JOB_LIMIT).map(j => {
         if (j && j.sop) return serializeJob(j)
         // recent 里已是 publicJob，补一个最小 sop 以便恢复展示
         return serializeJob(
@@ -556,7 +567,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       }
       pending.unshift(job)
     })
-    if (recent.length > 12) recent.length = 12
+    if (recent.length > RECENT_JOB_LIMIT) recent.length = RECENT_JOB_LIMIT
   }
 
   const hasActive = (roomKey, sopUid) => {
@@ -581,7 +592,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
 
   const pushRecent = job => {
     recent.unshift(publicJob(job))
-    if (recent.length > 12) recent.length = 12
+    if (recent.length > RECENT_JOB_LIMIT) recent.length = RECENT_JOB_LIMIT
   }
 
   const pump = () => {
@@ -781,12 +792,17 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
         job.missingFields = []
         job.missingSummary = ''
       }
+      const mergedDeliverables = mergeDeliverableLists(
+        job.priorDeliverables,
+        result.deliverables || []
+      )
+      result.deliverables = mergedDeliverables
       job.result = {
         ok: result.ok,
         runResult: result.runResult,
         elapsedSec: result.elapsedSec,
         reply: result.reply,
-        deliverables: result.deliverables || [],
+        deliverables: mergedDeliverables,
         ledger: result.ledger,
         assessment: result.assessment,
         waiting: !!result.waitingHuman || !!result.waitingData,
@@ -940,7 +956,8 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       onStart,
       onWaiting,
       priorNodeProgress = null,
-      completedNotifyKeys = null
+      completedNotifyKeys = null,
+      priorDeliverables = null
     }) {
       if (!roomKey) {
         return { ok: false, message: '请先选择空间' }
@@ -997,6 +1014,9 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
           : [],
         completedNotifyKeys: Array.isArray(completedNotifyKeys)
           ? completedNotifyKeys.slice()
+          : [],
+        priorDeliverables: Array.isArray(priorDeliverables)
+          ? priorDeliverables.slice()
           : [],
         context: null,
         result: null,
