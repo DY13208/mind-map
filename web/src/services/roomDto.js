@@ -198,23 +198,35 @@ export function normalizeVersionDto(apiVersion = {}, extras = {}) {
   const type = String(apiVersion.type || '').toUpperCase()
   const summary = apiVersion.summary
   const summaryText =
-    typeof summary === 'string'
+    apiVersion.summaryText ||
+    (typeof summary === 'string'
       ? summary
+      : summary && summary.kind && summary.kind !== 'edits'
+      ? ''
       : summary
-      ? `新增 ${summary.inserted || 0} · 更新 ${summary.updated || 0} · 删除 ${
+      ? `新增 ${summary.inserted || 0} · 修改 ${summary.updated || 0} · 删除 ${
           summary.deleted || 0
         }`
-      : ''
+      : '')
   return {
     id: versionId,
     versionId,
-    revision: Number(apiVersion.revision || 0),
+    revision:
+      apiVersion.revision == null || apiVersion.revision === ''
+        ? null
+        : Number(apiVersion.revision),
     name: apiVersion.name || '',
     type,
     createdBy: apiVersion.createdBy || apiVersion.created_by || '',
     createdAt: apiVersion.createdAt || apiVersion.created_at || '',
     description: apiVersion.description || '',
-    summary: summaryText,
+    summary: summaryText || apiVersion.summaryText || '',
+    summaryText: summaryText || apiVersion.summaryText || '',
+    summaryStatus: apiVersion.summaryStatus || apiVersion.summary_status || '',
+    editors: apiVersion.editors || [],
+    availability: apiVersion.availability || 'readable',
+    sourceKind: apiVersion.sourceKind || apiVersion.source_kind || '',
+    capabilities: apiVersion.capabilities || {},
     operator: apiVersion.createdBy || apiVersion.operator || '',
     version: apiVersion.name || ('R' + Number(apiVersion.revision || 0)),
     readOnly: true,

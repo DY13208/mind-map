@@ -97,7 +97,7 @@ const NODE_FEATURE_MATRIX = [
   {
     feature: 'Formula',
     uiEntry: 'Toolbar formula / FormulaSidebar',
-    command: 'INSERT_FORMULA â†?SET_NODE_TEXT',
+    command: 'INSERT_FORMULA ï¿½?SET_NODE_TEXT',
     fields: ['text', 'richText'],
     operation: 'node.update',
     pgField: 'room_nodes.data.text (ql-formula data-value LaTeX)',
@@ -108,7 +108,7 @@ const NODE_FEATURE_MATRIX = [
   },
   {
     feature: 'Painter',
-    uiEntry: 'Toolbar painter â†?node_click',
+    uiEntry: 'Toolbar painter ï¿½?node_click',
     command: 'SET_NODE_STYLES',
     fields: ['style keys only'],
     operation: 'node.update',
@@ -184,8 +184,8 @@ const NODE_FEATURE_MATRIX = [
     pgField: 'room_nodes.data.attachment*',
     remoteApply: 'applyHttpRemoteNodeFields patch-only',
     undoRedo: 'inverse attachment fields',
-    refreshPersistence: false,
-    status: 'enabled'
+    refreshPersistence: true,
+    status: 'fixed'
   }
 ]
 
@@ -367,6 +367,12 @@ const FEATURE_RECREATE_KEYS = {
   hyperlink: ['hyperlink'],
   hyperlinkTitle: ['hyperlink'],
   mapRef: ['mapRef'],
+  attachmentUrl: ['attachment'],
+  attachmentName: ['attachment'],
+  attachmentId: ['attachment'],
+  attachmentStatus: ['attachment'],
+  attachmentError: ['attachment'],
+  attachmentExtractedText: ['attachment'],
   formula: ['text'],
   shape: ['text'],
   fillColor: ['text'],
@@ -388,6 +394,12 @@ const GEOMETRY_KEYS = {
   hyperlink: true,
   hyperlinkTitle: true,
   mapRef: true,
+  attachmentUrl: true,
+  attachmentName: true,
+  attachmentId: true,
+  attachmentStatus: true,
+  attachmentError: true,
+  attachmentExtractedText: true,
   note: true,
   shape: true,
   fontSize: true,

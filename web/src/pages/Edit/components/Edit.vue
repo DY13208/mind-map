@@ -320,6 +320,7 @@ export default {
     this.$bus.$on('startPainter', this.handleStartPainter)
     this.$bus.$on('localStorageExceeded', this.onLocalStorageExceeded)
     this.$bus.$on('toggle_appearance_mode', this.handleToggleAppearanceMode)
+    this.$bus.$on('history-restored', this.onHistoryRestored)
     window.addEventListener('resize', this.handleResize)
   },
   beforeDestroy() {
@@ -357,6 +358,7 @@ export default {
     this.$bus.$off('hideLoading', this.handleForceHideLoading)
     this.$bus.$off('localStorageExceeded', this.onLocalStorageExceeded)
     this.$bus.$off('toggle_appearance_mode', this.handleToggleAppearanceMode)
+    this.$bus.$off('history-restored', this.onHistoryRestored)
     window.removeEventListener('resize', this.handleResize)
     if (this.mindMap) {
       this.unbindCanvasThemeEvents()
@@ -365,6 +367,21 @@ export default {
   },
   methods: {
     ...mapMutations(['setLocalConfig']),
+
+    onHistoryRestored(restored) {
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (
+        cooperate &&
+        cooperate.httpCollabMode &&
+        typeof cooperate.recoverHttpCollab === 'function'
+      ) {
+        const target = Number(
+          (restored && restored.newRevision) ||
+            (cooperate.lastAppliedVersion || 0) + 1
+        )
+        cooperate.recoverHttpCollab(target).catch(() => {})
+      }
+    },
 
     onLocalStorageExceeded() {
       this.$notify({
@@ -1022,6 +1039,7 @@ export default {
         'exit_demonstrate',
         'node_note_dblclick',
         'node_mousedown',
+        'node_mouseup',
         'map_ref_click',
         'multi_select_end'
       ].forEach(event => {

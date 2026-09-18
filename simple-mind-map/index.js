@@ -111,7 +111,7 @@ class MindMap {
     // 注册插件
     MindMap.pluginList
       .filter(plugin => {
-        return plugin.preload
+        return plugin.preload && this.pluginAllowed(plugin)
       })
       .forEach(plugin => {
         this.initPlugin(plugin)
@@ -148,7 +148,7 @@ class MindMap {
     // 注册插件
     MindMap.pluginList
       .filter(plugin => {
-        return !plugin.preload
+        return !plugin.preload && this.pluginAllowed(plugin)
       })
       .forEach(plugin => {
         this.initPlugin(plugin)
@@ -164,6 +164,14 @@ class MindMap {
     if (this.opt.addHistoryOnInit && this.opt.data) {
       this.command.addHistory()
     }
+  }
+
+  pluginAllowed(plugin) {
+    if (this.opt && this.opt.initPlugins === false) return false
+    const disabled = this.opt && this.opt.disabledPlugins
+    if (!Array.isArray(disabled) || !disabled.length) return true
+    const name = (plugin && (plugin.instanceName || plugin.name)) || ''
+    return disabled.indexOf(name) === -1
   }
 
   //  配置参数处理

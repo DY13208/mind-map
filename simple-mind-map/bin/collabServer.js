@@ -277,6 +277,7 @@ Promise.all([initSchema(), initAuth()])
     }
     const history = require('./collabHistory')
     history.createServerHistoryEngine(getPool())
+    history.startHistoryWorkers()
     require('./fileSystem').createServerFileSystem(getPool(), {
       history: require('./collabHistory').getHistoryEngine()
     })
@@ -308,7 +309,15 @@ Promise.all([initSchema(), initAuth()])
       console.error('[KnowledgeCompiler] startup failed (collaboration continues):', err.message)
     })
     startOperationsArchiver()
-    const v2 = attachCollabV2(server)
+    const v2 = attachCollabV2(server, {
+      onRoomIdle(roomKey) {
+        const engine = history.getHistoryEngine()
+        if (!engine || typeof engine.flushPendingAutoVersion !== 'function') {
+          return
+        }
+        return engine.flushPendingAutoVersion(roomKey, { source: 'room_idle' })
+      }
+    })
     server.listen(port, host, () => {
       console.log(`Collab server running at ws://${host}:${port}`)
       console.log(`Collab HTTP API: http://${host}:${port}/api/files`)

@@ -390,6 +390,13 @@ class Base {
   // 为概要节点创建子树实例
   createGeneralizationChildNodes(gNode) {
     if (!gNode) return
+    // 概要节点的子树可能在概要节点仍存在时被重新构建（例如直接在
+    // 概要后新增子节点）。仅重置 children 会遗留旧 SVG group；这些
+    // group 仍挂在共享 nodeDraw 上并继续接收右键事件，导致事件落到
+    // 已脱离当前概要树的旧节点实例。
+    ;(gNode.children || []).forEach(child => {
+      if (child && typeof child.remove === 'function') child.remove()
+    })
     gNode.children = []
     const tree = gNode.nodeData
     if (!tree.children) tree.children = []
@@ -445,6 +452,27 @@ class Base {
     delete tree._node
   }
 
+  // 概要子树里某个节点自身概要额外占用的尺寸（嵌套概要）
+  getNestedGeneralizationExtent(node, dir = 'h') {
+    if (
+      !node ||
+      typeof node.checkHasVisibleGeneralization !== 'function' ||
+      !node.checkHasVisibleGeneralization()
+    ) {
+      return 0
+    }
+    const size = node.getVisibleGeneralizationSize()
+    const { generalizationNodeMargin } = this.mindMap.themeConfig
+    const extent =
+      dir === 'v'
+        ? size.subtreeHeight ||
+          size.height ||
+          node._generalizationNodeHeight ||
+          0
+        : size.subtreeWidth || size.width || node._generalizationNodeWidth || 0
+    return extent ? extent + generalizationNodeMargin : 0
+  }
+
   // 测量概要子树宽高
   measureGeneralizationTree(node, dir = 'h') {
     if (!node) return { width: 0, height: 0 }
@@ -457,30 +485,45 @@ class Base {
     }
     const marginX = this.getMarginX(node.layerIndex + 1)
     const marginY = this.getMarginY(node.layerIndex + 1)
+    // 概要子树里的节点还能再挂概要，这些嵌套概要也要占位，否则会和右侧内容重叠
     if (dir === 'v') {
       let stackW = 0
       let maxH = 0
       node.children.forEach(child => {
         const size = this.measureGeneralizationTree(child, dir)
         stackW += size.width
-        maxH = Math.max(maxH, size.height)
+        maxH = Math.max(
+          maxH,
+          size.height + this.getNestedGeneralizationExtent(child, dir)
+        )
       })
       stackW += (node.children.length + 1) * marginY
       return {
         width: Math.max(node.width, stackW),
-        height: node.height + marginX + maxH
+        height:
+          node.height +
+          marginX +
+          maxH +
+          this.getNestedGeneralizationExtent(node, dir)
       }
     }
     let extraW = 0
     let extraH = 0
     node.children.forEach(child => {
       const size = this.measureGeneralizationTree(child, dir)
-      extraW = Math.max(extraW, size.width)
+      extraW = Math.max(
+        extraW,
+        size.width + this.getNestedGeneralizationExtent(child, dir)
+      )
       extraH += size.height
     })
     extraH += (node.children.length + 1) * marginY
     return {
-      width: node.width + marginX + extraW,
+      width:
+        node.width +
+        marginX +
+        extraW +
+        this.getNestedGeneralizationExtent(node, dir),
       height: Math.max(node.height, extraH)
     }
   }

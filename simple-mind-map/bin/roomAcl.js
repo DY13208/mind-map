@@ -363,6 +363,7 @@ async function migrateLegacyOwners(db) {
         o.room_key,
         regexp_replace(o.actor_id, '^wecom:', '', 'i') as user_id
       from room_operations o
+      join rooms r on r.room_key = o.room_key
       left join room_tombstones t on t.room_key = o.room_key
       where t.room_key is null
         and o.actor_id is not null
@@ -385,6 +386,7 @@ async function migrateLegacyOwners(db) {
       regexp_replace(o.actor_id, '^wecom:', '', 'i') as user_id,
        'editor', 'editor', 'direct_share'
     from room_operations o
+    join rooms r on r.room_key = o.room_key
     left join room_tombstones t on t.room_key = o.room_key
     where t.room_key is null
       and o.actor_id is not null

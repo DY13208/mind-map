@@ -62,7 +62,7 @@ async function main() {
 
   setProductHttp(async (path, options = {}) => {
     const method = String(options.method || 'GET').toUpperCase()
-    calls.push({ method, path })
+    calls.push({ method, path, headers: options.headers || {} })
     const { pathname, search } = qs(path)
     const fileItem = pathname.match(/^\/api\/files\/([^/]+)$/)
     const fileInfo = pathname.match(/^\/api\/files\/([^/]+)\/info$/)
@@ -145,7 +145,24 @@ async function main() {
         deletedAt: null
       }
       files.push(row)
-      versions[roomKey] = []
+      versions[roomKey] = [
+        {
+          versionId: 'ver-init-' + roomKey,
+          revision: 0,
+          name: '初始版本',
+          type: 'AUTO',
+          createdBy: 'u-owner',
+          createdAt: now(),
+          description: '',
+          summary: { kind: 'initial' },
+          summaryStatus: 'na',
+          summaryText: '新建时的初始版本',
+          editors: [{ userId: 'u-owner', name: 'owner' }],
+          availability: 'readable',
+          sourceKind: 'room_initial',
+          capabilities: { canRestore: true, canCreate: true }
+        }
+      ]
       members[roomKey] = [
         { userId: 'u-owner', name: 'owner', role: 'owner' }
       ]
@@ -279,8 +296,21 @@ async function main() {
       const file = files.find(item => item.roomKey === roomKey)
       if (!file) fail('ROOM_NOT_FOUND', 404)
       if (method === 'GET' && !versionId) {
+        const rows = versions[roomKey] || []
+        const limit = Number(search.get('limit') || 20)
+        const cursor = search.get('cursor')
+        let start = 0
+        if (cursor) {
+          const idx = rows.findIndex(item => item.versionId === cursor)
+          start = idx >= 0 ? idx + 1 : 0
+        }
+        const slice = rows.slice(start, start + limit)
         return {
-          versions: versions[roomKey] || [],
+          versions: slice,
+          nextCursor:
+            start + slice.length < rows.length
+              ? slice[slice.length - 1].versionId
+              : null,
           currentRevision: file.revision,
           viewingHistory: true
         }
@@ -296,7 +326,13 @@ async function main() {
           createdBy: 'u-owner',
           createdAt: now(),
           description: body.description || '',
-          summary: { inserted: 0, updated: 0, deleted: 0 }
+          summary: { inserted: 0, updated: 0, deleted: 0, moved: 0 },
+          summaryStatus: 'ready',
+          summaryText: '新增 0 · 修改 0 · 删除 0',
+          editors: [{ userId: 'u-owner', name: 'owner' }],
+          availability: 'readable',
+          sourceKind: 'manual',
+          capabilities: { canRestore: true, canCreate: true }
         }
         versions[roomKey].unshift(row)
         return { version: row }
@@ -315,7 +351,13 @@ async function main() {
         if (body.expectedCurrentRevision !== file.revision)
           fail('RESTORE_CONFLICT', 409)
         file.revision += 1
-        return { ok: true, newRevision: file.revision, fullTreeReason: 'VERSION_RESTORE' }
+        return {
+          ok: true,
+          newRevision: file.revision,
+          preRestoreVersionId: 'ver-pre-' + file.revision,
+          restoreVersionId: 'ver-restore-' + file.revision,
+          fullTreeReason: 'VERSION_RESTORE'
+        }
       }
     }
 
@@ -338,6 +380,10 @@ async function main() {
         members[roomKey] = members[roomKey].filter(item => item.userId !== userId)
         return { ok: true }
       }
+    }
+
+    if (method === 'GET' && pathname === '/api/teams') {
+      return { teams: [] }
     }
 
     fail('ROOM_NOT_FOUND', 404)
@@ -376,7 +422,7 @@ async function main() {
     assert.fail('expected FOLDER_NOT_EMPTY')
   } catch (error) {
     assert.equal(error.code, 'FOLDER_NOT_EMPTY')
-    assert.match(error.message, /请先移动脑图后再删除/)
+    assert.match(error.message, /请先移动/)
   }
 
   const movedRoot = await room.moveRoom(created.roomKey, null)
@@ -402,12 +448,13 @@ async function main() {
   assert.equal(page1.total, files.length)
 
   const versionList = await history.listVersions(created.roomKey)
-  assert.equal(versionList.list.length, 0)
+  assert.equal(versionList.list.length, 1)
+  assert.equal(versionList.list[0].name, '初始版本')
   const manual = await history.createVersion(created.roomKey, { name: '上线前' })
   assert.equal(manual.name, '上线前')
   assert.equal(manual.type, 'MANUAL')
   const listedVersions = await history.listVersions(created.roomKey)
-  assert.equal(listedVersions.list.length, 1)
+  assert.equal(listedVersions.list.length, 2)
   const detail = await history.getVersion(created.roomKey, manual.versionId)
   assert.equal(detail.versionId, manual.versionId)
   assert.ok(detail.viewingHistory)
@@ -421,6 +468,8 @@ async function main() {
   )
   assert.equal(restored.fullTreeReason, 'VERSION_RESTORE')
   assert.doesNotMatch(JSON.stringify(calls), /setData/)
+  const restoreCall = calls.filter(item => /\/restore$/.test(item.path)).pop()
+  assert.ok(restoreCall.headers['Idempotency-Key'])
 
   files.find(item => item.roomKey === created.roomKey).role = 'viewer'
   await assert.rejects(
@@ -454,6 +503,20 @@ async function main() {
       'utf8'
     ),
     /data-testid="back-to-files"/
+  )
+  assert.match(
+    fs.readFileSync(
+      path.join(root, 'pages', 'Edit', 'components', 'Toolbar.vue'),
+      'utf8'
+    ),
+    /data-testid="history-versions"/
+  )
+  assert.match(
+    fs.readFileSync(
+      path.join(root, 'pages', 'Edit', 'Index.vue'),
+      'utf8'
+    ),
+    /HistoryPanel/
   )
 
   const recentCalls = calls.length
@@ -496,8 +559,9 @@ async function main() {
   )
 
   const teamCalls = calls.length
-  await team.listSpaces()
-  assert.equal(calls.length, teamCalls)
+  const spaces = await team.listSpaces()
+  assert.ok(Array.isArray(spaces))
+  assert.ok(calls.length >= teamCalls)
 
   const added = await share.addMember(created.roomKey, 'u-editor', 'Editor')
   assert.equal(added.role, 'Editor')

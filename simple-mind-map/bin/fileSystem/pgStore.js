@@ -498,6 +498,9 @@ function createPgFileStore(pool) {
     async purgeRoom(roomKey) {
       const key = String(roomKey || '')
       await this.withTx(async db => {
+        await db.query(`delete from room_restore_idempotency where room_key = $1`, [key])
+        await db.query(`delete from room_history_auto_jobs where room_key = $1`, [key])
+        await db.query(`delete from room_version_legacy_map where room_key = $1`, [key])
         await db.query(`delete from room_history_audit where room_key = $1`, [key])
         await db.query(`delete from room_versions where room_key = $1`, [key])
         await db.query(`delete from room_checkpoints where room_key = $1`, [key])
