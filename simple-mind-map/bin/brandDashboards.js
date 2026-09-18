@@ -206,6 +206,93 @@ async function createDashboard(req, res, context, actor) {
   })
 }
 
+async function updateDashboard(req, res, context, actor, id) {
+  const db = context.db
+  let body = {}
+  if (context.readBody) {
+    try {
+      body =
+        (await context.readBody(req, { maxBytes: 12 * 1024 * 1024 })) || {}
+    } catch (error) {
+      if (error && error.statusCode) throw error
+      body = {}
+    }
+  }
+  await initSchema(db)
+  const row = await getDashboard(db, id)
+  if (!row) {
+    context.sendJson(res, 404, {
+      ok: false,
+      code: 'DASHBOARD_NOT_FOUND',
+      error: '数据看板不存在或已被删除'
+    })
+    return
+  }
+  if (row.owner_id !== actor.id) {
+    context.sendJson(res, 403, {
+      ok: false,
+      code: 'FORBIDDEN',
+      error: '只能编辑自己创建的看板'
+    })
+    return
+  }
+  const rawUrl = String(body.sourceUrl || '').trim()
+  const sourceUrl = normalizeSourceUrl(rawUrl)
+  if (rawUrl && !sourceUrl) {
+    context.sendJson(res, 400, {
+      ok: false,
+      code: 'INVALID_SOURCE_URL',
+      error: '看板链接无效，需为 http/https 地址'
+    })
+    return
+  }
+  let html = row.html_content
+  let sourceType = row.source_type
+  let storedUrl = row.source_url
+  let fileName = row.file_name
+  const base64 = String(body.contentBase64 || '')
+  if (sourceUrl) {
+    sourceType = 'url'
+    storedUrl = sourceUrl
+    html = ''
+    fileName = String(body.fileName || '').trim() || new URL(sourceUrl).host
+  } else if (base64) {
+    let decoded = ''
+    try {
+      decoded = Buffer.from(base64, 'base64').toString('utf8')
+    } catch (error) {
+      decoded = ''
+    }
+    if (!decoded || Buffer.byteLength(decoded, 'utf8') > MAX_HTML_BYTES) {
+      context.sendJson(res, 400, {
+        ok: false,
+        code: 'INVALID_CONTENT',
+        error: 'HTML 内容无效或过大'
+      })
+      return
+    }
+    html = decoded
+    sourceType = 'html'
+    storedUrl = ''
+    fileName =
+      String(body.fileName || '').trim() || fileName || '数据看板.html'
+  }
+  const title = String(body.title || '').trim() || row.title
+  const level = body.level ? normalizeLevel(body.level) : normalizeLevel(row.level)
+  const result = await db.query(
+    `update brand_dashboards
+     set title = $1, level = $2, file_name = $3, html_content = $4,
+         source_type = $5, source_url = $6, updated_at = now()
+     where id = $7
+     returning id, owner_id, title, level, file_name, html_content, source_type, source_url, created_at, updated_at`,
+    [title, level, fileName, html, sourceType, storedUrl, id]
+  )
+  context.sendJson(res, 200, {
+    ok: true,
+    dashboard: rowToDashboard(result.rows[0], actor.id)
+  })
+}
+
 async function sendDashboardContent(req, res, context, actor, id) {
   const row = await getDashboard(context.db, id)
   if (!row) {
@@ -274,7 +361,11 @@ async function handleApi(req, res, context = {}) {
     url.pathname.match(/^\/api\/dashboards\/([^/]+)\/content$/)
   const deleteMatch =
     req.method === 'DELETE' && url.pathname.match(/^\/api\/dashboards\/([^/]+)$/)
-  if (!isList && !isCreate && !contentMatch && !deleteMatch) return false
+  const updateMatch =
+    req.method === 'PATCH' && url.pathname.match(/^\/api\/dashboards\/([^/]+)$/)
+  if (!isList && !isCreate && !contentMatch && !deleteMatch && !updateMatch) {
+    return false
+  }
   const actor = require('./roomAcl').actorFromReq(req)
   if (!actor.id) {
     context.sendJson(res, 401, { ok: false, code: 'UNAUTHORIZED', error: '请先登录' })
@@ -300,6 +391,18 @@ async function handleApi(req, res, context = {}) {
         ok: false,
         code: error.code || 'DASHBOARD_DELETE_FAILED',
         error: error.message || '删除数据看板失败'
+      })
+    }
+    return true
+  }
+  if (updateMatch) {
+    try {
+      await updateDashboard(req, res, context, actor, decodeURIComponent(updateMatch[1]))
+    } catch (error) {
+      context.sendJson(res, error.statusCode || 500, {
+        ok: false,
+        code: error.code || 'DASHBOARD_UPDATE_FAILED',
+        error: error.message || '修改数据看板失败'
       })
     }
     return true
