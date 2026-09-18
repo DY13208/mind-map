@@ -565,6 +565,15 @@ async function up() {
   } catch (e) {
     /* ignore */
   }
+  // `--force-recreate` 只会替换容器，不会重建镜像；前端源码更新后若跳过
+  // build，Nginx 仍会继续提供旧 bundle，表现为“已重启但页面未变”。
+  // 单独构建 app，避免无源码变动时也重新构建耗时很长的 Docmost 镜像。
+  execSync('docker compose -f docker-compose.yml -f docker-compose.wiki.yml build app', {
+    cwd: ROOT,
+    stdio: 'inherit',
+    env: process.env,
+    shell: true
+  })
   // 不要在这里 --force-recreate openclaw-gateway：否则会与后面的 ensure 双重启动抢 migration 锁
   const child = compose(
     [

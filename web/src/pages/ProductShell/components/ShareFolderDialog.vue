@@ -217,7 +217,19 @@
           <section class="detailSection existingSection">
             <div class="detailTitle">
               <h3>已有权限</h3>
-              <span>{{ filteredMembers.length }} 人</span>
+              <div class="existingMeta">
+                <span class="memberCount">{{ filteredMembers.length }} 人</span>
+                <el-select
+                  v-model="pageSize"
+                  class="memberPageSize"
+                  size="mini"
+                  aria-label="每页显示人数"
+                >
+                  <el-option :value="10" label="10 条/页" />
+                  <el-option :value="20" label="20 条/页" />
+                  <el-option :value="50" label="50 条/页" />
+                </el-select>
+              </div>
             </div>
             <div class="existingSearch">
               <el-input
@@ -362,7 +374,7 @@
           :disabled="!selectionCount"
           :loading="busy"
           @click="grantSelected"
-          >保存授权</el-button
+          >{{ busy ? '正在保存授权…' : '保存授权' }}</el-button
         ></span
       ></span
     >
@@ -404,7 +416,7 @@ export default {
     loading: false,
     busy: false,
     page: 1,
-    pageSize: 4,
+    pageSize: 10,
     expandedDepartments: [],
     selectedDepartmentIds: [],
     selectedUserIds: [],
@@ -712,6 +724,9 @@ export default {
       this.searchContacts()
     },
     memberQuery() {
+      this.page = 1
+    },
+    pageSize() {
       this.page = 1
     },
     filteredMembers() {
@@ -1107,24 +1122,12 @@ export default {
       }
     },
     async grantFolderSelection() {
-      for (const id of this.selectedDepartmentIds) {
-        await this.ensureDepartmentTreeLoaded(id)
-        await folderService.bulkSetMembers(this.resourceId, {
-          departmentId: id,
-          includeChildren: this.includeChildren,
-          role: this.role.toLowerCase()
-        })
-      }
-      const departmentUsers = new Set(
-        this.selectedDepartmentIds.reduce(
-          (all, id) => all.concat(this.memberIdsForDepartment(id)),
-          []
-        )
-      )
-      for (const id of this.selectedUserIds.filter(
-        item => !departmentUsers.has(item)
-      ))
-        await folderService.setMember(this.resourceId, id, this.role)
+      await folderService.bulkSetMembers(this.resourceId, {
+        departmentIds: this.selectedDepartmentIds,
+        userIds: this.selectedUserIds,
+        includeChildren: this.includeChildren,
+        role: this.role.toLowerCase()
+      })
     },
     async grantRoomSelection() {
       const departmentIds = Array.from(
@@ -1546,6 +1549,28 @@ export default {
 .detailTitle > span {
   color: #7b8982;
   font-size: 12px;
+}
+.existingMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.memberCount {
+  color: #7b8982;
+  font-size: 12px;
+}
+.memberPageSize {
+  width: 76px;
+}
+.memberPageSize /deep/ .el-input__inner {
+  height: 24px;
+  padding: 0 20px 0 7px;
+  color: #60706b;
+  font-size: 12px;
+  line-height: 24px;
+}
+.memberPageSize /deep/ .el-input__suffix {
+  right: 3px;
 }
 .selectedSection {
   min-height: 118px;

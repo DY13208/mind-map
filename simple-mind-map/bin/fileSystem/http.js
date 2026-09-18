@@ -292,41 +292,83 @@ async function handleFileSystemApi(req, res, options = {}) {
       const role = String(body.role || '').trim().toLowerCase()
       if (!['manager', 'editor', 'viewer'].includes(role)) throw Object.assign(new Error('文件夹权限必须是可管理、可编辑或可查看'), { code: 'BAD_REQUEST', statusCode: 400 })
       const params = [req.authUser && req.authUser.corpId]
-      let where = ['corp_id = $1']
-      if (body.departmentId) {
+      const targetClauses = []
+      const requestedDepartmentIds = Array.from(
+        new Set(
+          (Array.isArray(body.departmentIds) ? body.departmentIds : [body.departmentId])
+            .map(value => Number(value))
+            .filter(Number.isFinite)
+        )
+      )
+      if (requestedDepartmentIds.length) {
         const departments = await require('../auth').listWecomDepartments()
-        const selected = new Set([Number(body.departmentId)])
+        const selected = new Set(requestedDepartmentIds)
         if (body.includeChildren !== false) {
           let changed = true
           while (changed) { changed = false; departments.forEach(d => { if (selected.has(Number(d.parentId)) && !selected.has(Number(d.id))) { selected.add(Number(d.id)); changed = true } }) }
         }
         params.push(Array.from(selected).map(String))
-        where.push(`exists (
+        targetClauses.push(`exists (
           select 1 from jsonb_array_elements(coalesce(departments, '[]'::jsonb)) elem
           where btrim(elem::text, '"') = any($${params.length}::text[])
         )`)
       }
-      const rows = fs.store.kind === 'pg' ? (await fs.store.query(`select user_id from wecom_users where ${where.join(' and ')}`, params)).rows : []
-      for (const row of rows) {
-        if (!row.user_id || row.user_id === folder.created_by) continue
-        await fs.store.setFolderMember(bulkFolderId, row.user_id, role)
-        for (const roomKey of await fs.store.roomKeysInFolder(bulkFolderId)) {
-          const room = await fs.store.getRoom(roomKey)
-          if (room && room.owner_id === row.user_id) continue
-          await roomAcl.setFolderRole(
-            fs.store,
-            roomKey,
-            row.user_id,
-            role,
-            bulkFolderId,
-            req.authUser && req.authUser.corpId
+      const requestedUserIds = Array.from(
+        new Set((Array.isArray(body.userIds) ? body.userIds : []).map(value => String(value || '').trim()).filter(Boolean))
+      )
+      if (requestedUserIds.length) {
+        params.push(requestedUserIds)
+        targetClauses.push(`(user_id = any($${params.length}::text[]) or wecom_userid = any($${params.length}::text[]))`)
+      }
+      if (!targetClauses.length) {
+        throw Object.assign(new Error('请至少选择一个部门或成员'), { code: 'BAD_REQUEST', statusCode: 400 })
+      }
+      const rows = fs.store.kind === 'pg'
+        ? (await fs.store.query(
+          `select distinct user_id from wecom_users where corp_id = $1 and (${targetClauses.join(' or ')})`,
+          params
+        )).rows
+        : []
+      const userIds = rows
+        .map(row => String(row.user_id || '').trim())
+        .filter(id => id && id !== folder.created_by)
+      if (fs.store.kind === 'pg' && userIds.length) {
+        await fs.store.withTx(async db => {
+          await db.query(
+            `insert into folder_members(folder_id, user_id, role)
+             select $1, user_id, $3 from unnest($2::text[]) as target(user_id)
+             on conflict(folder_id, user_id) do update set role = excluded.role, updated_at = now()`,
+            [bulkFolderId, userIds, role]
           )
-        }
+          await db.query(
+            `with target_users as (
+               select unnest($2::text[]) as user_id
+             ), folder_rooms as (
+               select room_key, owner_id from rooms
+               where folder_id = $1 and deleted_at is null
+             )
+             insert into room_members (
+               room_key, user_id, role, direct_role, team_role, folder_role, source, source_folder_id
+             )
+             select room_key, user_id,
+               ${roomAcl.sqlEffectiveRole('null::text', 'null::text', '$3')},
+               null, null, $3, 'folder', $1
+             from folder_rooms cross join target_users
+             where coalesce(owner_id, '') <> user_id
+             on conflict(room_key, user_id) do update set
+               folder_role = excluded.folder_role,
+               source_folder_id = excluded.source_folder_id,
+               role = ${roomAcl.sqlEffectiveRole('room_members.direct_role', 'room_members.team_role', 'excluded.folder_role')},
+               source = ${roomAcl.sqlPrimarySource('room_members.direct_role', 'room_members.team_role', 'excluded.folder_role')},
+               updated_at = now()`,
+            [bulkFolderId, userIds, role]
+          )
+        })
       }
       sendJson(res, 200, {
         ok: true,
         list: await listFolderMembersWithOwner(fs.store, bulkFolderId),
-        added: rows.length
+        added: userIds.length
       })
       return true
     }

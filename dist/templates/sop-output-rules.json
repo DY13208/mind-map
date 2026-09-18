@@ -1,0 +1,261 @@
+{
+  "root": {
+    "data": {
+      "text": "SOP 输出规则（全员内置）",
+      "uid": "uid_73e036c7b3be",
+      "expand": true,
+      "note": "版本 2026-09-17 · 与 sopOutputRules.js 同步"
+    },
+    "children": [
+      {
+        "data": {
+          "text": "使用说明",
+          "uid": "uid_cf00dfcb6b3d",
+          "expand": true
+        },
+        "children": [
+          {
+            "data": {
+              "text": "全员共用：所有 SOP 运行自动加载本规则",
+              "uid": "uid_f3222c01df0c",
+              "expand": true
+            },
+            "children": []
+          },
+          {
+            "data": {
+              "text": "通用规则：每次运行都遵守",
+              "uid": "uid_b43d4d6bae43",
+              "expand": true
+            },
+            "children": []
+          },
+          {
+            "data": {
+              "text": "分类规则：仅当规则表存在该类别且本次勾选对应产物时生效",
+              "uid": "uid_9eaeb92605e1",
+              "expand": true
+            },
+            "children": []
+          },
+          {
+            "data": {
+              "text": "不存在的类别：不强制、不臆造约束",
+              "uid": "uid_50e8122bc170",
+              "expand": true
+            },
+            "children": []
+          },
+          {
+            "data": {
+              "text": "维护：改 web/src/utils/sopOutputRules.js 后同步本脑图",
+              "uid": "uid_1e6981143c74",
+              "expand": true
+            },
+            "children": []
+          }
+        ]
+      },
+      {
+        "data": {
+          "text": "通用分析与节点优化",
+          "uid": "uid_9713673060da",
+          "expand": true,
+          "note": "每次运行必遵：\n1. 全节点融入分析（全量大纲 + 本 SOP 子树）\n2. 结论来自节点证据，禁止编造\n3. 缺失写「待接入/暂无数据/未填写」，禁止用 0 顶替\n4. 口径不可混加\n5. 数字可核对\n6. 文末必须有「## 节点优化建议」（P0/P1/P2 + 证据 + 改法）\n7. 单模块出错不导致整页失败"
+        },
+        "children": [
+          {
+            "data": {
+              "text": "全节点融入分析",
+              "uid": "uid_d5696921a655",
+              "expand": true,
+              "note": "每次运行必遵：\n1. 全节点融入分析（全量大纲 + 本 SOP 子树）\n2. 结论来自节点证据，禁止编造\n3. 缺失写「待接入/暂无数据/未填写」，禁止用 0 顶替\n4. 口径不可混加\n5. 数字可核对\n6. 文末必须有「## 节点优化建议」（P0/P1/P2 + 证据 + 改法）\n7. 单模块出错不导致整页失败"
+            },
+            "children": []
+          },
+          {
+            "data": {
+              "text": "文末固定输出「## 节点优化建议」",
+              "uid": "uid_cb9d1329200b",
+              "expand": true
+            },
+            "children": []
+          },
+          {
+            "data": {
+              "text": "P0 必须补 / P1 建议优化 / P2 提升项",
+              "uid": "uid_1bc86aa249e9",
+              "expand": true
+            },
+            "children": []
+          },
+          {
+            "data": {
+              "text": "每条建议含：问题 + 证据节点 + 具体改法",
+              "uid": "uid_7b1b40cea132",
+              "expand": true
+            },
+            "children": []
+          }
+        ]
+      },
+      {
+        "data": {
+          "text": "分类规则",
+          "uid": "uid_262279abeb5f",
+          "expand": true,
+          "note": "仅列出的类别会被强制遵守；删除某类别 = 该类不再约束运行输出。"
+        },
+        "children": [
+          {
+            "data": {
+              "text": "HTML",
+              "uid": "uid_3d397ba8bd27",
+              "expand": true,
+              "note": "单文件 HTML；CSS/JS 内联；window.DASHBOARD_DATA 集中数据；\nDesign Tokens 与 8 段页面结构见产品内置规则；\n结论来自数据；进度条必须写清长度含义。"
+            },
+            "children": [
+              {
+                "data": {
+                  "text": "单文件内联 / DASHBOARD_DATA",
+                  "uid": "uid_72f634f3830a",
+                  "expand": true
+                },
+                "children": []
+              },
+              {
+                "data": {
+                  "text": "Design Tokens（色板/字体/数字样式）",
+                  "uid": "uid_58633519d9d2",
+                  "expand": true
+                },
+                "children": []
+              },
+              {
+                "data": {
+                  "text": "结构顺序：顶栏→工具栏→指标→主图→排名→明细→口径→页脚",
+                  "uid": "uid_af1cbe2f0fa1",
+                  "expand": true
+                },
+                "children": []
+              },
+              {
+                "data": {
+                  "text": "禁止装饰 Hero / 外链 / absolute 布局",
+                  "uid": "uid_9c8203f0b18e",
+                  "expand": true
+                },
+                "children": []
+              }
+            ]
+          },
+          {
+            "data": {
+              "text": "Markdown",
+              "uid": "uid_5f5db0851dbd",
+              "expand": true
+            },
+            "children": [
+              {
+                "data": {
+                  "text": "核心判断 → 关键结论 → 本周动作 → 风险/缺口",
+                  "uid": "uid_8bf098e17be2",
+                  "expand": true
+                },
+                "children": []
+              },
+              {
+                "data": {
+                  "text": "结论可回溯到大纲节点",
+                  "uid": "uid_42089fe862f1",
+                  "expand": true
+                },
+                "children": []
+              }
+            ]
+          },
+          {
+            "data": {
+              "text": "Excel",
+              "uid": "uid_74a06886c442",
+              "expand": true
+            },
+            "children": [
+              {
+                "data": {
+                  "text": "表头与口径说明",
+                  "uid": "uid_43513d9b7321",
+                  "expand": true
+                },
+                "children": []
+              },
+              {
+                "data": {
+                  "text": "分项可核对；不可相加分表或备注",
+                  "uid": "uid_4118901da94c",
+                  "expand": true
+                },
+                "children": []
+              }
+            ]
+          },
+          {
+            "data": {
+              "text": "JSON",
+              "uid": "uid_3bcb074a0388",
+              "expand": true
+            },
+            "children": [
+              {
+                "data": {
+                  "text": "结论 / KPI / 动作 / 数据源 / nodeSuggestions",
+                  "uid": "uid_6c8f5c553bfc",
+                  "expand": true
+                },
+                "children": []
+              },
+              {
+                "data": {
+                  "text": "缺失用 null 或 meta.missing，禁止 0 伪装",
+                  "uid": "uid_e17802adc3bb",
+                  "expand": true
+                },
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "data": {
+          "text": "参考样例",
+          "uid": "uid_44805d22c247",
+          "expand": true
+        },
+        "children": [
+          {
+            "data": {
+              "text": "诊断报告式分析：结构总览 → 缺陷清单 → 优化建议",
+              "uid": "uid_4563a5effce1",
+              "expand": true
+            },
+            "children": []
+          },
+          {
+            "data": {
+              "text": "经营看板 HTML 生成规范（Design Tokens + 8 段结构）",
+              "uid": "uid_79a1274c37c3",
+              "expand": true
+            },
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  "theme": {
+    "template": "default"
+  },
+  "layout": "logicalStructure",
+  "view": {}
+}
