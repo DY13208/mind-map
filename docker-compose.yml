@@ -177,12 +177,12 @@ services:
       KNOWLEDGE_MCP_JWT_AUD: knowledge-mcp
       KNOWLEDGE_MCP_JWT_TTL_SEC: ${KNOWLEDGE_MCP_JWT_TTL_SEC:-180}
       KNOWLEDGE_MCP_REPLICAS_POLICY: ${KNOWLEDGE_MCP_REPLICAS_POLICY:-single}
-      PGHOST: postgres
+      PGHOST: ${PGHOST:-postgres}
       PGPORT: "5432"
       PGUSER: ${PGUSER:-postgres}
       PGPASSWORD: ${PGPASSWORD:-mindmap}
       PGDATABASE: ${PGDATABASE:-mind_map}
-      KNOWLEDGE_ROOT: /data/knowledge
+      KNOWLEDGE_ROOT: ${KNOWLEDGE_ROOT:-/data/knowledge}
       OPENWIKI_ROOMS_ROOT: /data/openwiki/rooms
       OPENWIKI_JOBS_ROOT: /data/openwiki/jobs
       OPENWIKI_GLOBAL_CONCURRENCY: ${OPENWIKI_GLOBAL_CONCURRENCY:-2}

@@ -1,0 +1,8 @@
+2026-09-18T10:55:21.734Z start
+2026-09-18T10:55:21.738Z docker up -d --force-recreate knowledge-mcp {"PGHOST":"203.0.113.1"}
+2026-09-18T10:55:24.731Z docker status=0 err=p-knowledge-mcp-1 Recreated 
+ Container mind-map-postgres-1 Waiting 
+ Container mind-map-postgres-1 Healthy 
+ Container mind-map-knowledge-mcp-1 Starting 
+ Container mind-map-knowledge-mcp-1 Started 
+

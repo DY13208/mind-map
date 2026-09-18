@@ -119,21 +119,27 @@ async function updateJob(jobId, fields, env = process.env) {
 
 async function reclaimStaleRunning(maxAgeMs = 15 * 60 * 1000, env = process.env) {
   const db = getPool(env);
-  const secs = Math.max(1, Math.floor(Number(maxAgeMs) / 1000));
-  const { rows } = await db.query(
-    `update knowledge_openwiki_jobs
-        set status='failed',
-            error=trim(both from coalesce(error,'') || ' | reclaimed_stale_running'),
-            finished_at=now(),
-            updated_at=now()
-      where status in ('running','publishing')
-        and updated_at < now() - make_interval(secs => $1::int)
-      returning job_id, room_id`,
-    [secs],
-  );
+  const ageMs = Number(maxAgeMs);
+  const secs = Number.isFinite(ageMs) ? Math.max(0, Math.floor(ageMs / 1000)) : Math.floor((15 * 60 * 1000) / 1000);
+  const sql = secs === 0
+    ? `update knowledge_openwiki_jobs
+          set status='failed',
+              error=trim(both from coalesce(error,'') || ' | reclaimed_stale_running'),
+              finished_at=now(),
+              updated_at=now()
+        where status in ('running','publishing')
+        returning job_id, room_id`
+    : `update knowledge_openwiki_jobs
+          set status='failed',
+              error=trim(both from coalesce(error,'') || ' | reclaimed_stale_running'),
+              finished_at=now(),
+              updated_at=now()
+        where status in ('running','publishing')
+          and updated_at < now() - make_interval(secs => $1::int)
+        returning job_id, room_id`;
+  const { rows } = secs === 0 ? await db.query(sql) : await db.query(sql, [secs]);
   return rows;
 }
-
 function rowToJob(row) {
   if (!row) return null;
   return {

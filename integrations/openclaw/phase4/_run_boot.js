@@ -11,102 +11,6 @@ const OUT = __dirname;
 const ROOM_A = 'room-2yaz570x';
 const USER_A = 'phase3-user-a';
 const USER_B = 'phase3-user-b';
-
-const http = require('http');
-const { URL } = require('url');
-
-function shEnv(cmd, extraEnv) {
-  const r = spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', cmd], {
-    windowsHide: true,
-    encoding: 'utf8',
-    env: Object.assign({}, process.env, extraEnv || {}),
-  });
-  if (r.status) throw new Error((r.stderr || r.stdout || cmd).toString().slice(0, 500));
-  return String(r.stdout || '').trim();
-}
-function shAllowEnv(cmd, extraEnv) {
-  return spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', cmd], {
-    windowsHide: true,
-    encoding: 'utf8',
-    env: Object.assign({}, process.env, extraEnv || {}),
-  });
-}
-function httpJson(method, urlPath, opts) {
-  opts = opts || {};
-  return new Promise(function(resolve, reject) {
-    const u = new URL(urlPath, BASE);
-    const payload = opts.body ? JSON.stringify(opts.body) : null;
-    const headers = { Accept: 'application/json' };
-    if (opts.token) headers.Authorization = 'Bearer ' + opts.token;
-    if (payload) {
-      headers['Content-Type'] = 'application/json';
-      headers['Content-Length'] = Buffer.byteLength(payload);
-    }
-    const req = http.request({
-      protocol: u.protocol,
-      hostname: u.hostname,
-      port: u.port,
-      path: u.pathname + u.search,
-      method: method || 'GET',
-      headers: headers,
-      timeout: opts.timeoutMs || 20000,
-    }, function(res) {
-      let buf = '';
-      res.setEncoding('utf8');
-      res.on('data', function(c){ buf += c; });
-      res.on('end', function() {
-        let json = null;
-        try { json = buf ? JSON.parse(buf) : null; } catch (e) { json = { raw: buf }; }
-        resolve({ status: res.statusCode, json: json });
-      });
-    });
-    req.on('error', reject);
-    req.on('timeout', function(){ req.destroy(); reject(new Error('http timeout')); });
-    if (payload) req.write(payload);
-    req.end();
-  });
-}
-async function waitHealth(ms) {
-  const end = Date.now() + (ms || 60000);
-  while (Date.now() < end) {
-    try {
-      const r = await httpJson('GET', '/health', { timeoutMs: 3000 });
-      if (r.status === 200 && r.json && (r.json.ok === true || r.json.service)) return r.json;
-    } catch (e) {}
-    await new Promise(function(r){ setTimeout(r, 1000); });
-  }
-  throw new Error('health timeout');
-}
-async function waitReady(ms) {
-  const end = Date.now() + (ms || 60000);
-  while (Date.now() < end) {
-    try {
-      const r = await httpJson('GET', '/ready', { timeoutMs: 3000 });
-      if (r.status === 200 && r.json && r.json.ok) return r.json;
-    } catch (e) {}
-    await new Promise(function(r){ setTimeout(r, 1000); });
-  }
-  throw new Error('ready timeout');
-}
-async function callTool(token, name, args) {
-  try {
-    const r = await httpJson('POST', '/mcp', {
-      token: token,
-      timeoutMs: 20000,
-      body: { jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name: name, arguments: args || {} } },
-    });
-    const json = r.json;
-    const text = json && json.result && json.result.content && json.result.content[0] && json.result.content[0].text;
-    let parsed = null;
-    try { parsed = text ? JSON.parse(text) : (json && (json.error || json.result || json)); } catch (e) { parsed = { raw: text, json: json }; }
-    const isError = !!(json && ((json.result && json.result.isError) || json.error));
-    return { httpStatus: r.status, isError: isError, parsed: parsed, json: json };
-  } catch (e) {
-    return { httpStatus: 0, isError: true, parsed: { error: 'fetch_failed', message: String(e && e.message || e) }, json: null };
-  }
-}
-
-
 if (!SECRET) throw new Error('KNOWLEDGE_MCP_JWT_SECRET required');
 function mint(userId) {
   return signToken({ userId: userId, secret: SECRET, ttlSec: 600, iss: ISS, aud: AUD, actorType: 'user' }).token;
@@ -118,10 +22,64 @@ function shAllow(cmd) {
   const r = spawnSync(cmd, { shell: true, encoding: 'utf8' });
   return { status: r.status, out: String(r.stdout || ''), err: String(r.stderr || '') };
 }
+function shEnv(cmd, extraEnv) {
+  const r = spawnSync(cmd, { shell: true, encoding: 'utf8', env: Object.assign({}, process.env, extraEnv || {}) });
+  if (r.status) throw new Error((r.stderr || r.stdout || cmd).toString().slice(0, 500));
+  return String(r.stdout || '').trim();
+}
+function shAllowEnv(cmd, extraEnv) {
+  const r = spawnSync(cmd, { shell: true, encoding: 'utf8', env: Object.assign({}, process.env, extraEnv || {}) });
+  return { status: r.status, out: String(r.stdout || ''), err: String(r.stderr || '') };
+}
+async function callTool(token, name, args) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = 'Bearer ' + token;
+  let res;
+  try {
+    res = await fetch(BASE + '/mcp', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name: name, arguments: args || {} } }),
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch (e) {
+    return { httpStatus: 0, isError: true, parsed: { error: 'fetch_failed', message: String(e && e.message || e) }, json: null };
+  }
+  const json = await res.json();
+  const text = json && json.result && json.result.content && json.result.content[0] && json.result.content[0].text;
+  let parsed = null;
+  try { parsed = text ? JSON.parse(text) : (json.error || json.result || json); } catch (e) { parsed = { raw: text, json: json }; }
+  const isError = !!(json && ((json.result && json.result.isError) || json.error));
+  return { httpStatus: res.status, isError: isError, parsed: parsed, json: json };
+}
 function ok(cond, msg) { if (!cond) throw new Error(msg); }
+async function waitReady(ms) {
+  const end = Date.now() + (ms || 60000);
+  while (Date.now() < end) {
+    try { const j = await (await fetch(BASE + '/ready')).json(); if (j && j.ok) return j; } catch (e) {}
+    await new Promise(function(r){ setTimeout(r, 1000); });
+  }
+  throw new Error('ready timeout');
+}
+async function waitHealth(ms) {
+  const end = Date.now() + (ms || 60000);
+  while (Date.now() < end) {
+    try {
+      const res = await fetch(BASE + '/health', { signal: AbortSignal.timeout(3000) });
+      if (res.ok) {
+        const j = await res.json();
+        if (j && (j.ok === true || j.status === 'ok' || j.service)) return j;
+      }
+    } catch (e) {}
+    await new Promise(function(r){ setTimeout(r, 1000); });
+  }
+  throw new Error('health timeout');
+}
 async function main() {
+  console.log('MAIN_ENTER');
   const report = { phase: '4-final-gate', startedAt: new Date().toISOString(), gates: [], blockers: [] };
   async function gate(id, title, critical, fn) {
+      console.log('GATE_ENTER', id, title);
     const t0 = Date.now();
     try {
       const detail = await fn();
@@ -136,28 +94,32 @@ async function main() {
   }
 
   await gate(1, 'ACL DB unavailable fail-closed', true, async function() {
+  // Recreate with blackhole PGHOST so pool fails fast (3s) → acl_unavailable; HTTP stays up.
+  const restoreHost = process.env.PGHOST || 'postgres';
   try {
     shEnv('docker compose up -d --force-recreate knowledge-mcp', { PGHOST: '203.0.113.1' });
-    await waitHealth(180000);
+    await waitHealth(120000);
     await new Promise(function(r){ setTimeout(r, 1500); });
     const r = await callTool(mint(USER_A), 'canonical_list', { roomId: ROOM_A });
     const body = JSON.stringify(r.parsed);
-    const denied = r.isError || /acl_unavailable|unavailable/i.test(body);
+    const denied = r.isError || /acl_unavailable|unavailable|fetch_failed/i.test(body);
     const fakeAllow = Array.isArray(r.parsed) && !r.isError;
     ok(denied && !fakeAllow, 'expected fail-closed, got ' + body.slice(0, 400));
     return { denied: true, mode: 'PGHOST_blackhole' };
   } finally {
-    shAllowEnv('docker compose up -d --force-recreate knowledge-mcp', { PGHOST: 'postgres', KNOWLEDGE_ROOT: '/data/knowledge' });
-    await waitHealth(180000);
-    await waitReady(180000);
+    shAllowEnv('docker compose up -d --force-recreate knowledge-mcp', { PGHOST: restoreHost });
+    await waitReady(120000);
   }
 });
 
 await gate(2, 'Single-source fault degraded (not fake empty)', true, async function() {
+  // :ro bind + read_only — override KNOWLEDGE_ROOT. Use /health (ready still needs DB only).
+  const missing = '/data/knowledge.__fg_missing';
+  const restore = process.env.KNOWLEDGE_ROOT || '/data/knowledge';
   try {
-    shEnv('docker compose up -d --force-recreate knowledge-mcp', { KNOWLEDGE_ROOT: '/data/knowledge.__fg_missing', PGHOST: 'postgres' });
-    await waitHealth(180000);
-    await waitReady(180000);
+    shEnv('docker compose up -d --force-recreate knowledge-mcp', { KNOWLEDGE_ROOT: missing, PGHOST: process.env.PGHOST || 'postgres' });
+    await waitHealth(120000);
+    await waitReady(120000);
     const r = await callTool(mint(USER_A), 'canonical_list', { roomId: ROOM_A });
     const body = JSON.stringify(r.parsed);
     const errish = r.isError || /source_unavailable|unavailable/i.test(body);
@@ -167,9 +129,8 @@ await gate(2, 'Single-source fault degraded (not fake empty)', true, async funct
     ok(!d.isError || (d.parsed && d.parsed.code !== 'acl_unavailable'), 'docmost still callable');
     return { ok: true, mode: 'KNOWLEDGE_ROOT_override' };
   } finally {
-    shAllowEnv('docker compose up -d --force-recreate knowledge-mcp', { KNOWLEDGE_ROOT: '/data/knowledge', PGHOST: 'postgres' });
-    await waitHealth(180000);
-    await waitReady(180000);
+    shAllowEnv('docker compose up -d --force-recreate knowledge-mcp', { KNOWLEDGE_ROOT: restore, PGHOST: process.env.PGHOST || 'postgres' });
+    await waitReady(120000);
   }
 });
 
@@ -348,4 +309,4 @@ await gate(5, 'retry_publish is publish-only', true, async function() {
   if (report.productionReady) console.log(report.productionReady);
   process.exit(criticalFailed.length ? 2 : 0);
 }
-main().catch(function(e){ console.error(e); process.exit(1); });
+console.log('CALLING_MAIN'); main().catch(function(e){ console.error(e); process.exit(1); });

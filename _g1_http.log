@@ -1,0 +1,7 @@
+2026-09-18T10:59:09.419Z enter
+2026-09-18T10:59:09.423Z RUN
+2026-09-18T10:59:12.434Z DONE 0
+2026-09-18T10:59:12.435Z before-http
+2026-09-18T10:59:14.446Z after-delay
+2026-09-18T10:59:14.460Z http ok 200 {"ok":true,"service":"mind-map-knowledge-mcp","version":"0.4.0","jwtConfigured":true}
+2026-09-18T10:59:14.461Z done
