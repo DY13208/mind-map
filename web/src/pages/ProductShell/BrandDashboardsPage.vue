@@ -72,14 +72,7 @@
               @click="view = 'list'"
             />
           </el-button-group>
-          <el-button
-            v-if="!deleteMode && canDeleteAny"
-            size="small"
-            icon="el-icon-delete"
-            @click="enterDeleteMode"
-            >删除看板</el-button
-          >
-          <template v-else>
+          <template v-if="deleteMode">
             <el-button
               size="small"
               type="danger"
@@ -90,6 +83,25 @@
               >确认删除 ({{ deleteSelection.length }})</el-button
             >
             <el-button size="small" @click="exitDeleteMode">取消</el-button>
+          </template>
+          <template v-else-if="editMode">
+            <el-button size="small" @click="exitEditMode">取消</el-button>
+          </template>
+          <template v-else>
+            <el-button
+              v-if="canManageAny"
+              size="small"
+              icon="el-icon-delete"
+              @click="enterDeleteMode"
+              >删除看板</el-button
+            >
+            <el-button
+              v-if="canManageAny"
+              size="small"
+              icon="el-icon-edit"
+              @click="enterEditMode"
+              >编辑看板</el-button
+            >
           </template>
           <el-button
             size="small"
@@ -102,6 +114,9 @@
       </div>
       <div v-if="deleteMode" class="deleteHint">
         删除模式：点击看板进行勾选，再点击「确认删除」完成删除；点「取消」退出。
+      </div>
+      <div v-else-if="editMode" class="deleteHint deleteHint--edit">
+        编辑模式：点击看板重新上传 HTML 或修改链接；点「取消」退出。
       </div>
       <div v-if="error" class="statePanel">
         <el-alert type="error" :title="error" :closable="false" show-icon />
@@ -304,6 +319,11 @@
         :visible.sync="createDialogVisible"
         @done="load"
       />
+      <DashboardEditDialog
+        :visible.sync="editDialogVisible"
+        :dashboard="editTarget"
+        @done="load"
+      />
     </template>
   </section>
 </template>
@@ -313,6 +333,7 @@ import { userMessageFromError } from '@/services/apiError'
 import brandDashboardService from '@/services/brandDashboardService'
 import EmptyState from './components/EmptyState.vue'
 import DashboardCreateDialog from './components/DashboardCreateDialog.vue'
+import DashboardEditDialog from './components/DashboardEditDialog.vue'
 
 const LEVEL_META = [
   {
@@ -337,7 +358,7 @@ const LEVEL_META = [
 
 export default {
   name: 'BrandDashboardsPage',
-  components: { EmptyState, DashboardCreateDialog },
+  components: { EmptyState, DashboardCreateDialog, DashboardEditDialog },
   data() {
     return {
       loading: false,
@@ -354,6 +375,9 @@ export default {
       deleteMode: false,
       deleteSelection: [],
       deleting: false,
+      editMode: false,
+      editDialogVisible: false,
+      editTarget: null,
       pageSize: 9,
       pageByLevel: {},
       collapsedLevels: [],
@@ -369,7 +393,7 @@ export default {
     isDetail() {
       return !!this.$route.params.id
     },
-    canDeleteAny() {
+    canManageAny() {
       return this.dashboards.some(item => item.canDelete)
     },
     activeDashboard() {
@@ -481,10 +505,24 @@ export default {
     enterDeleteMode() {
       this.deleteSelection = []
       this.deleteMode = true
+      this.editMode = false
     },
     exitDeleteMode() {
       this.deleteMode = false
       this.deleteSelection = []
+    },
+    enterEditMode() {
+      this.editMode = true
+      this.deleteMode = false
+      this.deleteSelection = []
+    },
+    exitEditMode() {
+      this.editMode = false
+    },
+    openEdit(item) {
+      this.editTarget = item
+      this.editDialogVisible = true
+      this.editMode = false
     },
     onCardClick(item) {
       if (!item) return
@@ -494,6 +532,14 @@ export default {
           return
         }
         this.toggleSelection(item.id)
+        return
+      }
+      if (this.editMode) {
+        if (!item.canDelete) {
+          if (this.$message) this.$message.warning('只能编辑自己创建的看板')
+          return
+        }
+        this.openEdit(item)
         return
       }
       this.openDashboard(item)
@@ -588,7 +634,9 @@ export default {
   .toolbarControl { width: 110px; }
   .el-button.is-active { background: var(--ui-primary); border-color: var(--ui-primary); color: #fff; }
 }
-.deleteHint { margin: -10px 0 14px; padding: 8px 12px; border: 1px solid #ffd6d6; border-radius: 8px; background: #fff5f5; color: #c0392b; font-size: 12px; }
+.deleteHint { margin: -10px 0 14px; padding: 8px 12px; border: 1px solid #ffd6d6; border-radius: 8px; background: #fff5f5; color: #c0392b; font-size: 12px;
+  &--edit { border-color: #cfe3ff; background: #f4f9ff; color: #1667c9; }
+}
 .selectMark { position: absolute; top: 10px; left: 10px; z-index: 2; width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; background: rgba(0, 0, 0, .35); display: grid; place-items: center; color: #fff; font-size: 13px;
   &.is-on { background: var(--ui-primary); border-color: var(--ui-primary); }
   &--row { position: static; flex: 0 0 auto; width: 18px; height: 18px; font-size: 11px; border-width: 1px; border-color: #c3ced8; background: #eef2f5; color: #7c899d;
