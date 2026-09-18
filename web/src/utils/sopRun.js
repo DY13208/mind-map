@@ -211,8 +211,14 @@ function inferStepKind(title) {
   if (/提交资料|提供资料|填写|补数|提交招聘/.test(t)) return 'submit'
   if (isManualGateTitle(t)) return 'manual'
   if (isNotifyTitle(t) || /通知|待办|企微|派发|发给|发送/.test(t)) return 'notify'
+  // 跟踪/监控类：常缺实际数，不应单独把整单卡成「部分完成」
+  if (/跟踪|监控|完成进度|进度跟踪/.test(t)) return 'monitor'
   if (/^AI\s*[:：]|AI\s*(通知|发布|筛选|发起)/i.test(t)) return 'ai'
   return 'step'
+}
+
+export function isMonitorStepTitle(title) {
+  return inferStepKind(title) === 'monitor'
 }
 
 /** 节点流只保留可执行步骤，排除资料模板里的枚举叶子（初级/深圳…） */
@@ -364,10 +370,12 @@ function buildSystemPrompt() {
 8. 若勾选 HTML：真正落盘；主图必须对上步骤意图（制定目标→画目标金额图，不是店铺数结构图）。
 9. 汇报短中文，结构固定：一句话结论 / 本次交付 / 关键发现 / 脑图诊断（全图）。未做完的步骤要写明，禁止整单假「完成」。
 10. 若勾选落盘产物，文末「## 产物清单」仅系统用。
-11. 文件名含 SOP 编号与标题；写到 /home/node/.openclaw/workspace/output/。
+11. 文件名含 SOP 编号与标题；写到 /home/node/.openclaw/workspace/output/；每次运行新建带当前时间戳的文件，禁止覆盖历史产物。
 12. 不要改 SOP 本体；改图建议只写在脑图诊断。
 13. 禁止用无关 Git 提交、别的 SOP 旧执行单、memory 闲聊编造业务数。本 SOP/本脑图里的历史 GMV、渠道定位、趋势若存在，制定目标时必须用，算出目标金额；不得借口「不能推断」交出全「待接入」空壳。
-14. 资料不完整时：缺哪标哪，对应步骤写未完成；不得声称字段齐全或整单完成。`
+14. 资料不完整时：缺哪标哪，对应步骤写未完成；不得声称字段齐全或整单完成。
+15. 【一次跑完】本 SOP 没有企微待办/人工确认步骤时，必须一次做完全部可自动步骤并落盘完整产物；禁止半途停下等用户「续跑」。
+16. 「跟踪进度」类步骤若缺实际 GMV/完成率：在产物里标待接入并写清缺哪两列即可，不得因此跳过「制定目标 / B2B 实收 / 分配下发」，也不得只因跟踪步缺数就把整单口头写成「部分完成」。`
 }
 
 function buildFullMapOutlineBlock(ctx) {
@@ -438,6 +446,8 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
     '',
     '【归属约束】本次只服务上述 SOP；产物文件名必须以以下词干开头（后接 _YYYY-MM-DD_HHmm.扩展名）：',
     fileHint,
+    '每次运行/续跑都必须新建带当前时间戳的文件；禁止覆盖、改写或复用已有产物路径。',
+    '无企微待办/人工确认步骤时，必须一次跑完本 SOP 全部可自动步骤；禁止故意半途停下等用户续跑。',
     '产物清单里禁止出现其它 D 编号（如别人的 D1/D3 执行单）。',
     '',
     '## 需要输出的产物（只生成并回报这些；文末「产物清单」也只能列这些最终文件）',
@@ -531,6 +541,57 @@ function deliverableExt(item) {
   const blob = `${(item && item.name) || ''}\n${(item && item.uri_or_path) || ''}`
   const m = blob.match(/\.(html?|xlsx?|docx?|pdf|md|csv|json)(?=(\?|#|$|[\s"'<>]))/i)
   return m ? m[1].toLowerCase() : ''
+}
+
+/**
+ * 合并多轮产物列表：按 uri/name 去重，保留全部历史文件（新的在前）。
+ */
+export function mergeDeliverableLists(...lists) {
+  const seen = new Set()
+  const out = []
+  lists.forEach(list => {
+    ;(Array.isArray(list) ? list : []).forEach(item => {
+      if (!item) return
+      const uri = String(item.uri_or_path || '')
+        .trim()
+        .replace(/\\/g, '/')
+        .toLowerCase()
+      const name = String(item.name || '')
+        .trim()
+        .toLowerCase()
+      const key = uri || name
+      if (!key || seen.has(key)) return
+      seen.add(key)
+      out.push(item)
+    })
+  })
+  return out
+}
+
+/**
+ * 是否需要「续跑」：仅当有企微待办 / 人工确认衔接时才应续跑。
+ * 纯自动步骤半途停下应重新点「打开」一次跑完，不提供续跑。
+ */
+export function jobNeedsWecomResume(job) {
+  if (!job) return false
+  if ((job.waitingWecomTodos || []).length) return true
+  if ((job.completedNotifyKeys || []).length) return true
+  if (
+    (job.notifyResults || []).some(
+      r => r && (r.dispatchOk || r.notifyKey || r.block)
+    )
+  ) {
+    return true
+  }
+  const steps = Array.isArray(job.nodeProgress) ? job.nodeProgress : []
+  return steps.some(s => {
+    if (!s) return false
+    const st = String(s.status || '')
+    if (!['pending', 'active', 'waiting', 'failed'].includes(st)) return false
+    const kind = String(s.kind || '')
+    if (kind === 'notify' || kind === 'manual') return true
+    return /待办|知会|审批|确认|通知|企微/.test(String(s.title || ''))
+  })
 }
 
 /** 只保留用户勾选的产物类型；同一路径去重，不同类型、不同日期的文件都保留 */
@@ -817,7 +878,9 @@ export function isHollowTargetDeliverable(
     /制定.*目标|GMV目标|实收目标|目标分配/.test(blob) ||
     /制定.*目标|GMV/.test(names)
   const hasRealAmount =
-    /(¥|￥)\s*[\d,]+|[\d,]{2,}\s*万|gmv\s*[:=]\s*[\d.]+/i.test(blob)
+    /(¥|￥)\s*[\d,]+|[\d,]{2,}(?:\.\d+)?\s*万|[\d]{4,}(?:\.\d+)?万|gmv\s*[:=]\s*[\d.]+/i.test(
+      blob
+    )
   const hollowByAmountGap =
     looksTargetSop && pendingCount >= 6 && !hasRealAmount
   return hollowHint || pendingHeavy || hollowByAmountGap
@@ -831,17 +894,41 @@ export async function peekDeliverableText(deliverables = []) {
     const uri = String((d && d.uri_or_path) || '').trim()
     const name = String((d && d.name) || '').trim()
     if (!/\.html?/i.test(`${uri} ${name}`)) continue
-    try {
-      const url = artifactLocalUrl(uri || name, { name: name || uri })
-      const res = await fetch(url)
-      if (!res || !res.ok) continue
-      const text = await res.text()
-      if (text) chunks.push(String(text).slice(0, 120000))
-    } catch (_) {
-      /* 读不到就不挡后续判定 */
+    const base =
+      name ||
+      uri
+        .replace(/\\/g, '/')
+        .split('/')
+        .filter(Boolean)
+        .pop() ||
+      ''
+    const candidates = [
+      artifactLocalUrl(uri || name, { name: base }),
+      // 容器绝对路径常读不到时，退化为只按文件名在 output 目录查找
+      base ? artifactLocalUrl('', { name: base }) : ''
+    ].filter(Boolean)
+    for (const url of candidates) {
+      try {
+        const res = await fetch(url)
+        if (!res || !res.ok) continue
+        const text = await res.text()
+        if (text && text.length > 80 && !/artifact not found/i.test(text)) {
+          chunks.push(String(text).slice(0, 120000))
+          break
+        }
+      } catch (_) {
+        /* 读不到就不挡后续判定 */
+      }
     }
   }
   return chunks.join('\n')
+}
+
+/** 正文/产物里是否出现可辨认的目标金额 */
+function evidenceHasRealAmount(blob) {
+  return /(¥|￥)\s*[\d,]+|[\d,]{2,}(?:\.\d+)?\s*万|[\d]{4,}(?:\.\d+)?万|目标\s*[:=：]\s*[\d.]+|gmv\s*[:=]\s*[\d.]+/i.test(
+    String(blob || '')
+  )
 }
 
 /** 回复是否在要人工补数（而非整单失败） */
@@ -1089,16 +1176,17 @@ export function assessSopExecution({
       (s.status === 'pending' || s.status === 'active') &&
       s.kind !== 'notify' &&
       s.kind !== 'manual' &&
-      !isManualGateTitle(s.title)
+      s.kind !== 'monitor' &&
+      !isManualGateTitle(s.title) &&
+      !isMonitorStepTitle(s.title)
   )
   const hollow = isHollowTargetDeliverable(text, realFiles, peekText)
   // 非空壳且（有目标金额 或 非目标类 SOP）：视为产物已实质交付
   const targetLike = /制定|目标|GMV|实收/.test(
     text + realFiles.map(d => d.name).join('')
   )
-  const hasRealAmount = /(¥|￥)\s*[\d,]+|[\d,]{2,}\s*万|目标.*=\s*[\d.]+/i.test(
-    `${text}\n${peekText}`
-  )
+  const amountBlob = `${text}\n${peekText}`
+  const hasRealAmount = evidenceHasRealAmount(amountBlob)
   const substantial = !hollow && realFiles.length > 0 && (!targetLike || hasRealAmount)
 
   void missing
@@ -1190,6 +1278,21 @@ export function assessSopExecution({
       toolEvents: toolish.length,
       realFiles: realFiles.length,
       hollow: true
+    }
+  }
+
+  // 产物已实质交付（含目标金额）：以产物为准，不被模型口头「部分完成」拖成灰点
+  if (substantial) {
+    return {
+      ok: true,
+      runResult: '完成',
+      reason:
+        pendingAuto.length > 0
+          ? '产物已实质交付（含目标金额），节点流将补点亮；跟踪类缺实际数可标待接入'
+          : '产物已实质交付',
+      toolEvents: toolish.length,
+      realFiles: realFiles.length,
+      lightUpPending: true
     }
   }
 
