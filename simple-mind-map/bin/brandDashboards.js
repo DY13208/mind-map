@@ -1,0 +1,280 @@
+const { randomUUID } = require('crypto')
+
+const LEVELS = ['group', 'department', 'project']
+const MAX_HTML_BYTES = 8 * 1024 * 1024
+
+function stripHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&times;|&#215;/gi, '×')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function healthSummary(value) {
+  const text = stripHtml(value)
+  if (!text) return ''
+  const match = text.match(
+    /品牌健康分\s*[：:]\s*[^\s=，,；;。]{1,24}\s*=\s*财务分\s*[^\s×xX*＋+=，,；;。]{1,24}\s*[×xX*]\s*[^\s＋+=，,；;。]{1,16}\s*[+＋]\s*运营分\s*[^\s×xX*＋+=，,；;。]{1,24}\s*[×xX*]\s*[^\s，,；;。]{1,16}/i
+  )
+  return match
+    ? match[0]
+        .replace(/\s+/g, ' ')
+        .replace(/品牌健康分\s*([：:])\s*/i, '品牌健康分$1')
+        .trim()
+    : ''
+}
+
+function normalizeLevel(value) {
+  const level = String(value || '').trim()
+  return LEVELS.includes(level) ? level : 'group'
+}
+
+function iso(value) {
+  if (!value) return null
+  return value instanceof Date ? value.toISOString() : value
+}
+
+function rowToDashboard(row) {
+  const title = String(row.title || '').trim() || '未命名看板'
+  const summary = healthSummary(row.html_content)
+  return {
+    id: row.id,
+    title,
+    level: normalizeLevel(row.level),
+    fileName: row.file_name || '数据看板.html',
+    status: 'ready',
+    errorMessage: '',
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+    projectName: title,
+    healthSummary: summary,
+    summaryMissing: !summary
+  }
+}
+
+async function initSchema(db) {
+  await db.query(`
+    create table if not exists brand_dashboards (
+      id text primary key,
+      owner_id text not null,
+      title text not null default '',
+      level text not null default 'group',
+      file_name text not null default '',
+      html_content text not null default '',
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      constraint brand_dashboards_level_chk
+        check (level in ('group', 'department', 'project'))
+    )`)
+  await db.query(
+    `create index if not exists brand_dashboards_owner_updated_idx
+     on brand_dashboards(owner_id, updated_at desc)`
+  )
+}
+
+async function listDashboards(db, actorId) {
+  await initSchema(db)
+  const result = await db.query(
+    `select id, title, level, file_name, html_content, created_at, updated_at
+     from brand_dashboards
+     where owner_id = $1
+     order by updated_at desc`,
+    [actorId]
+  )
+  return result.rows.map(rowToDashboard)
+}
+
+async function getDashboard(db, actorId, id) {
+  await initSchema(db)
+  const result = await db.query(
+    `select id, title, level, file_name, html_content, created_at, updated_at
+     from brand_dashboards
+     where id = $1 and owner_id = $2
+     limit 1`,
+    [id, actorId]
+  )
+  return result.rows[0] || null
+}
+
+async function createDashboard(req, res, context, actor) {
+  const db = context.db
+  let body = {}
+  if (context.readBody) {
+    try {
+      body =
+        (await context.readBody(req, { maxBytes: 12 * 1024 * 1024 })) || {}
+    } catch (error) {
+      if (error && error.statusCode) throw error
+      body = {}
+    }
+  }
+  const title = String(body.title || '').trim()
+  if (!title) {
+    context.sendJson(res, 400, {
+      ok: false,
+      code: 'MISSING_TITLE',
+      error: '请填写看板名称'
+    })
+    return
+  }
+  const base64 = String(body.contentBase64 || '')
+  if (!base64) {
+    context.sendJson(res, 400, {
+      ok: false,
+      code: 'MISSING_CONTENT',
+      error: '请上传数据看板 HTML 文件'
+    })
+    return
+  }
+  let html = ''
+  try {
+    html = Buffer.from(base64, 'base64').toString('utf8')
+  } catch (error) {
+    html = ''
+  }
+  if (!html || Buffer.byteLength(html, 'utf8') > MAX_HTML_BYTES) {
+    context.sendJson(res, 400, {
+      ok: false,
+      code: 'INVALID_CONTENT',
+      error: 'HTML 内容无效或过大'
+    })
+    return
+  }
+  await initSchema(db)
+  const id = randomUUID()
+  const result = await db.query(
+    `insert into brand_dashboards (id, owner_id, title, level, file_name, html_content)
+     values ($1, $2, $3, $4, $5, $6)
+     returning id, title, level, file_name, html_content, created_at, updated_at`,
+    [
+      id,
+      actor.id,
+      title,
+      normalizeLevel(body.level),
+      String(body.fileName || '').trim() || '数据看板.html',
+      html
+    ]
+  )
+  context.sendJson(res, 201, { ok: true, dashboard: rowToDashboard(result.rows[0]) })
+}
+
+async function sendDashboardContent(req, res, context, actor, id) {
+  const row = await getDashboard(context.db, actor.id, id)
+  if (!row) {
+    context.sendJson(res, 404, {
+      ok: false,
+      code: 'DASHBOARD_NOT_FOUND',
+      error: '数据看板不存在或已被删除'
+    })
+    return
+  }
+  res.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store'
+  })
+  res.end(row.html_content || '')
+}
+
+async function deleteDashboard(req, res, context, actor, id) {
+  await initSchema(context.db)
+  const result = await context.db.query(
+    `delete from brand_dashboards where id = $1 and owner_id = $2`,
+    [id, actor.id]
+  )
+  if (!result.rowCount) {
+    context.sendJson(res, 404, {
+      ok: false,
+      code: 'DASHBOARD_NOT_FOUND',
+      error: '数据看板不存在或已被删除'
+    })
+    return
+  }
+  context.sendJson(res, 200, { ok: true, deleted: result.rowCount })
+}
+
+async function handleApi(req, res, context = {}) {
+  const url = context.url || new URL(req.url, 'http://127.0.0.1')
+  const isList = req.method === 'GET' && url.pathname === '/api/dashboards'
+  const isCreate = req.method === 'POST' && url.pathname === '/api/dashboards'
+  const contentMatch =
+    req.method === 'GET' &&
+    url.pathname.match(/^\/api\/dashboards\/([^/]+)\/content$/)
+  const deleteMatch =
+    req.method === 'DELETE' && url.pathname.match(/^\/api\/dashboards\/([^/]+)$/)
+  if (!isList && !isCreate && !contentMatch && !deleteMatch) return false
+  const actor = require('./roomAcl').actorFromReq(req)
+  if (!actor.id) {
+    context.sendJson(res, 401, { ok: false, code: 'UNAUTHORIZED', error: '请先登录' })
+    return true
+  }
+  if (isCreate) {
+    try {
+      await createDashboard(req, res, context, actor)
+    } catch (error) {
+      context.sendJson(res, error.statusCode || 500, {
+        ok: false,
+        code: error.code || 'DASHBOARD_CREATE_FAILED',
+        error: error.message || '创建数据看板失败'
+      })
+    }
+    return true
+  }
+  if (deleteMatch) {
+    try {
+      await deleteDashboard(req, res, context, actor, decodeURIComponent(deleteMatch[1]))
+    } catch (error) {
+      context.sendJson(res, error.statusCode || 500, {
+        ok: false,
+        code: error.code || 'DASHBOARD_DELETE_FAILED',
+        error: error.message || '删除数据看板失败'
+      })
+    }
+    return true
+  }
+  if (contentMatch) {
+    try {
+      await sendDashboardContent(
+        req,
+        res,
+        context,
+        actor,
+        decodeURIComponent(contentMatch[1])
+      )
+    } catch (error) {
+      context.sendJson(res, error.statusCode || 500, {
+        ok: false,
+        code: error.code || 'DASHBOARD_CONTENT_FAILED',
+        error: error.message || '读取数据看板内容失败'
+      })
+    }
+    return true
+  }
+  try {
+    const list = await listDashboards(context.db, actor.id)
+    context.sendJson(res, 200, { ok: true, list, total: list.length })
+  } catch (error) {
+    context.sendJson(res, error.statusCode || 500, {
+      ok: false,
+      code: error.code || 'DASHBOARD_LIST_FAILED',
+      error: error.message || '读取数据看板失败'
+    })
+  }
+  return true
+}
+
+module.exports = {
+  LEVELS,
+  stripHtml,
+  healthSummary,
+  normalizeLevel,
+  rowToDashboard,
+  initSchema,
+  listDashboards,
+  getDashboard,
+  handleApi
+}
