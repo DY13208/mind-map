@@ -567,6 +567,7 @@ function syncConfigIntoVolume(token, port) {
     return {
       ok: false,
       reason: '无法定位 openclaw-gateway 容器，配置未能写入卷',
+
       detail: String(created.stderr || created.stdout || '')
         .trim()
         .slice(0, 400)
@@ -602,6 +603,19 @@ function syncConfigIntoVolume(token, port) {
   return { ok: true, containerId: id }
 }
 
+/** Start-Docker：把仓库 SOP 规则 / inject/workspace 注入 OpenClaw workspace */
+async function injectOpenclawWorkspaceFromRepo(opts = {}) {
+  try {
+    const { injectOpenclawWorkspace } = require('./openclaw-inject-workspace')
+    return await injectOpenclawWorkspace(opts)
+  } catch (err) {
+    return {
+      ok: false,
+      reason: (err && err.message) || String(err)
+    }
+  }
+}
+
 /**
  * 确保 Docker 版 OpenClaw Gateway 在跑。
  */
@@ -630,6 +644,14 @@ async function ensureOpenclawDockerGateway({
   }
 
   if (alreadyRunning) {
+    const injected = await injectOpenclawWorkspaceFromRepo({ quiet: false })
+    if (injected && !injected.ok) {
+      console.log(
+        `  OpenClaw workspace 注入跳过：${injected.reason || '未知'}${
+          injected.detail ? `（${injected.detail}）` : ''
+        }`
+      )
+    }
     return {
       ok: true,
       mode: 'docker',
@@ -638,7 +660,8 @@ async function ensureOpenclawDockerGateway({
       hasToken: !!token,
       token,
       chatCompletions: { enabled: true, configOk: true, changed: false },
-      distro: 'docker'
+      distro: 'docker',
+      workspaceInject: injected
     }
   }
 
@@ -735,7 +758,8 @@ async function ensureOpenclawDockerGateway({
     hasToken: !!token,
     token,
     chatCompletions: { enabled: true, configOk: true, changed: false },
-    distro: 'docker'
+    distro: 'docker',
+    workspaceInject: await injectOpenclawWorkspaceFromRepo({ quiet: false })
   }
 }
 
@@ -750,6 +774,7 @@ module.exports = {
   cogneePluginInstalled,
   disableCogneePlugin,
   syncConfigIntoVolume,
+  injectOpenclawWorkspaceFromRepo,
   checkDockerGatewayHealth,
   DATA_DIR
 }
