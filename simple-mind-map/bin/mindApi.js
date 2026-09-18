@@ -1238,6 +1238,17 @@ async function handleApi(req, res) {
   })
   if (teamHandled) return true
 
+  if (
+    await require('./brandDashboards').handleApi(req, res, {
+      url,
+      db: getPool(),
+      sendJson,
+      readBody
+    })
+  ) {
+    return true
+  }
+
   try {
     if (pathname === '/api/access-requests' && req.method === 'POST') {
       const item = await accessRequests.requestAccess(

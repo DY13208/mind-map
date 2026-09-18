@@ -182,6 +182,7 @@ export default {
       profile: null,
       fileNav: [
         { path: '/files/recent', label: '最近', icon: 'el-icon-time' },
+        { path: '/dashboards', label: '数据看板', icon: 'el-icon-data-analysis' },
         { path: '/files', label: '我的脑图', icon: 'el-icon-files' },
         { path: '/files/favorites', label: '收藏', icon: 'el-icon-star-off' },
         { path: '/files/shared', label: '与我共享', icon: 'el-icon-user' },
