@@ -53,6 +53,11 @@ function walkFiles(dir, base = '') {
 }
 
 async function canonicalList(userId, { roomId } = {}, env = process.env) {
+  const rootCheck = knowledgeRoot(env);
+  try { fs.accessSync(rootCheck, fs.constants.R_OK); } catch (e) {
+    const err = new Error('source_unavailable:canonical');
+    err.code = 'source_unavailable'; err.source = 'canonical'; throw err;
+  }
   const allowed = await listReadableRooms(userId, env);
   const allow = new Set(allowed.map((a) => a.roomId));
   const rooms = roomId ? [String(roomId)] : [...allow];

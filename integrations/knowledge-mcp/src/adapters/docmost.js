@@ -32,6 +32,7 @@ function mapRow(row) {
 }
 
 async function docmostSearch(userId, { roomId, query } = {}, env = process.env) {
+  try {
   const allowed = await listReadableRooms(userId, env);
   const ids = roomId
     ? allowed.filter((a) => a.roomId === String(roomId)).map((a) => a.roomId)
@@ -48,6 +49,11 @@ async function docmostSearch(userId, { roomId, query } = {}, env = process.env) 
   sql += ' order by room_id, topic_key, slot limit 200';
   const { rows } = await db.query(sql, params);
   return rows.map(mapRow);
+  } catch (e) {
+    if (e && (e.code === 'not_found' || e.code === 'acl_unavailable' || e.code === 'forbidden_write' || e.code === 'source_unavailable')) throw e;
+    const err = new Error('source_unavailable:docmost');
+    err.code = 'source_unavailable'; err.source = 'docmost'; err.cause = e; throw err;
+  }
 }
 
 async function docmostGet(userId, { roomId, topicKey, slot, pageId } = {}, env = process.env) {

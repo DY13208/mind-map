@@ -1,0 +1,156 @@
+{
+  "phase": "4-final-gate",
+  "startedAt": "2026-09-18T09:56:26.520Z",
+  "gates": [
+    {
+      "id": 1,
+      "title": "ACL DB unavailable fail-closed",
+      "critical": true,
+      "pass": false,
+      "ms": 17572,
+      "error": "fetch failed"
+    },
+    {
+      "id": 2,
+      "title": "Single-source fault degraded (not fake empty)",
+      "critical": true,
+      "pass": false,
+      "ms": 736,
+      "error": "Command failed: docker compose exec -T knowledge-mcp sh -lc \"if [ -d /data/knowledge ]; then mv /data/knowledge /data/knowledge.__fg_bak; fi\"\nmv: cannot move '/data/knowledge' to '/data/knowledge.__fg_bak': Read-only file system\n"
+    },
+    {
+      "id": 3,
+      "title": "timeout / circuit / rate limits",
+      "critical": true,
+      "pass": true,
+      "ms": 48,
+      "detail": {
+        "ok": true
+      }
+    },
+    {
+      "id": 4,
+      "title": "kill mid-refresh then reconcile",
+      "critical": true,
+      "pass": false,
+      "ms": 7366,
+      "error": "stuck running: {\"jobId\":\"0a3e63ee-5acb-4520-839f-b31dea2d204e\",\"roomId\":\"room-2yaz570x\",\"requesterUserId\":\"phase3-user-a\",\"status\":\"running\",\"queuedAt\":\"2026-09-18T09:45:00.633Z\",\"startedAt\":\"2026-09-18T09:56:44.959Z\",\"finishedAt\":null,\"outputHash\":null,\"docmostPublishStatus\":\"pending\",\"error\":null,\"result\":null}"
+    },
+    {
+      "id": 5,
+      "title": "retry_publish is publish-only",
+      "critical": true,
+      "pass": true,
+      "ms": 11,
+      "detail": {
+        "tools": [
+          "openwiki_search",
+          "openwiki_read",
+          "openwiki_status",
+          "openwiki_refresh",
+          "openwiki_refresh_status",
+          "openwiki_retry_publish"
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "title": "single-instance replicas=1",
+      "critical": true,
+      "pass": true,
+      "ms": 12,
+      "detail": {
+        "replicas": 1,
+        "policy": "single"
+      }
+    },
+    {
+      "id": 7,
+      "title": "mapping/job backup smoke",
+      "critical": true,
+      "pass": true,
+      "ms": 2574,
+      "detail": {
+        "mappings": "20",
+        "jobs": "2",
+        "bytes": 10033
+      }
+    },
+    {
+      "id": 8,
+      "title": "Assistant ACL E2E API A allow / B deny",
+      "critical": true,
+      "pass": true,
+      "ms": 188,
+      "detail": {
+        "ui": "api_acl_verified"
+      }
+    },
+    {
+      "id": 9,
+      "title": "Ownership regression AI upsert keeps standard/human",
+      "critical": true,
+      "pass": true,
+      "ms": 3044,
+      "detail": {
+        "unchanged": true
+      }
+    },
+    {
+      "id": 10,
+      "title": "Cognee slot + plugin present",
+      "critical": true,
+      "pass": true,
+      "ms": 240,
+      "detail": {
+        "memorySlot": "cognee-openclaw"
+      }
+    },
+    {
+      "id": 11,
+      "title": "Cleanup FG probe users",
+      "critical": true,
+      "pass": true,
+      "ms": 482,
+      "detail": {
+        "cleaned": true
+      }
+    },
+    {
+      "id": 12,
+      "title": "Runbook coverage",
+      "critical": true,
+      "pass": true,
+      "ms": 2,
+      "detail": {
+        "bytes": 3134
+      }
+    }
+  ],
+  "blockers": [
+    {
+      "id": 1,
+      "title": "ACL DB unavailable fail-closed",
+      "error": "fetch failed"
+    },
+    {
+      "id": 2,
+      "title": "Single-source fault degraded (not fake empty)",
+      "error": "Command failed: docker compose exec -T knowledge-mcp sh -lc \"if [ -d /data/knowledge ]; then mv /data/knowledge /data/knowledge.__fg_bak; fi\"\nmv: cannot move '/data/knowledge' to '/data/knowledge.__fg_bak': Read-only file system\n"
+    },
+    {
+      "id": 4,
+      "title": "kill mid-refresh then reconcile",
+      "error": "stuck running: {\"jobId\":\"0a3e63ee-5acb-4520-839f-b31dea2d204e\",\"roomId\":\"room-2yaz570x\",\"requesterUserId\":\"phase3-user-a\",\"status\":\"running\",\"queuedAt\":\"2026-09-18T09:45:00.633Z\",\"startedAt\":\"2026-09-18T09:56:44.959Z\",\"finishedAt\":null,\"outputHash\":null,\"docmostPublishStatus\":\"pending\",\"error\":null,\"result\":null}"
+    }
+  ],
+  "finishedAt": "2026-09-18T09:56:58.801Z",
+  "summary": {
+    "total": 12,
+    "passed": 9,
+    "failed": 3,
+    "criticalFailed": 3
+  },
+  "verdict": "Phase 4 Final Gate = BLOCKED",
+  "productionReady": null
+}

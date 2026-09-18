@@ -41,6 +41,11 @@ async function openwikiStatus(userId, { roomId } = {}, env = process.env) {
 }
 
 async function openwikiSearch(userId, { roomId, query } = {}, env = process.env) {
+  const root = process.env.OPENWIKI_ROOMS_ROOT || '/data/openwiki/rooms';
+  try { require('fs').accessSync(root, require('fs').constants.R_OK); } catch (e) {
+    const err = new Error('source_unavailable:openwiki');
+    err.code = 'source_unavailable'; err.source = 'openwiki'; throw err;
+  }
   const allowed = await listReadableRooms(userId, env);
   const allowSet = new Set(allowed.map((a) => a.roomId));
   const rooms = roomId ? [String(roomId)] : [...allowSet];
