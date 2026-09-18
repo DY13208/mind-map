@@ -34,12 +34,24 @@ function normalizeLevel(value) {
   return LEVELS.includes(level) ? level : 'group'
 }
 
+function normalizeSourceUrl(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  try {
+    const parsed = new URL(raw)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return ''
+    return parsed.toString()
+  } catch (error) {
+    return ''
+  }
+}
+
 function iso(value) {
   if (!value) return null
   return value instanceof Date ? value.toISOString() : value
 }
 
-function rowToDashboard(row) {
+function rowToDashboard(row, actorId) {
   const title = String(row.title || '').trim() || '未命名看板'
   const summary = healthSummary(row.html_content)
   return {
@@ -47,6 +59,9 @@ function rowToDashboard(row) {
     title,
     level: normalizeLevel(row.level),
     fileName: row.file_name || '数据看板.html',
+    sourceType: row.source_type === 'url' ? 'url' : 'html',
+    sourceUrl: row.source_url || '',
+    canDelete: !!actorId && row.owner_id === actorId,
     status: 'ready',
     errorMessage: '',
     createdAt: iso(row.created_at),
@@ -75,28 +90,34 @@ async function initSchema(db) {
     `create index if not exists brand_dashboards_owner_updated_idx
      on brand_dashboards(owner_id, updated_at desc)`
   )
+  await db.query(
+    `alter table brand_dashboards
+     add column if not exists source_type text not null default 'html'`
+  )
+  await db.query(
+    `alter table brand_dashboards
+     add column if not exists source_url text not null default ''`
+  )
 }
 
 async function listDashboards(db, actorId) {
   await initSchema(db)
   const result = await db.query(
-    `select id, title, level, file_name, html_content, created_at, updated_at
+    `select id, owner_id, title, level, file_name, html_content, source_type, source_url, created_at, updated_at
      from brand_dashboards
-     where owner_id = $1
-     order by updated_at desc`,
-    [actorId]
+     order by updated_at desc`
   )
-  return result.rows.map(rowToDashboard)
+  return result.rows.map(row => rowToDashboard(row, actorId))
 }
 
-async function getDashboard(db, actorId, id) {
+async function getDashboard(db, id) {
   await initSchema(db)
   const result = await db.query(
-    `select id, title, level, file_name, html_content, created_at, updated_at
+    `select id, owner_id, title, level, file_name, html_content, source_type, source_url, created_at, updated_at
      from brand_dashboards
-     where id = $1 and owner_id = $2
+     where id = $1
      limit 1`,
-    [id, actorId]
+    [id]
   )
   return result.rows[0] || null
 }
@@ -122,55 +143,85 @@ async function createDashboard(req, res, context, actor) {
     })
     return
   }
+  const rawUrl = String(body.sourceUrl || '').trim()
+  const sourceUrl = normalizeSourceUrl(rawUrl)
+  if (rawUrl && !sourceUrl) {
+    context.sendJson(res, 400, {
+      ok: false,
+      code: 'INVALID_SOURCE_URL',
+      error: '看板链接无效，需为 http/https 地址'
+    })
+    return
+  }
   const base64 = String(body.contentBase64 || '')
-  if (!base64) {
+  let html = ''
+  let fileName = String(body.fileName || '').trim()
+  let sourceType = 'html'
+  if (sourceUrl) {
+    sourceType = 'url'
+    if (!fileName) fileName = new URL(sourceUrl).host
+  } else if (base64) {
+    try {
+      html = Buffer.from(base64, 'base64').toString('utf8')
+    } catch (error) {
+      html = ''
+    }
+    if (!html || Buffer.byteLength(html, 'utf8') > MAX_HTML_BYTES) {
+      context.sendJson(res, 400, {
+        ok: false,
+        code: 'INVALID_CONTENT',
+        error: 'HTML 内容无效或过大'
+      })
+      return
+    }
+  } else {
     context.sendJson(res, 400, {
       ok: false,
       code: 'MISSING_CONTENT',
-      error: '请上传数据看板 HTML 文件'
+      error: '请上传数据看板 HTML 文件或填写看板链接'
     })
     return
   }
-  let html = ''
-  try {
-    html = Buffer.from(base64, 'base64').toString('utf8')
-  } catch (error) {
-    html = ''
-  }
-  if (!html || Buffer.byteLength(html, 'utf8') > MAX_HTML_BYTES) {
-    context.sendJson(res, 400, {
-      ok: false,
-      code: 'INVALID_CONTENT',
-      error: 'HTML 内容无效或过大'
-    })
-    return
-  }
+  if (!fileName) fileName = '数据看板.html'
   await initSchema(db)
   const id = randomUUID()
   const result = await db.query(
-    `insert into brand_dashboards (id, owner_id, title, level, file_name, html_content)
-     values ($1, $2, $3, $4, $5, $6)
-     returning id, title, level, file_name, html_content, created_at, updated_at`,
+    `insert into brand_dashboards (id, owner_id, title, level, file_name, html_content, source_type, source_url)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)
+     returning id, title, level, file_name, html_content, source_type, source_url, created_at, updated_at`,
     [
       id,
       actor.id,
       title,
       normalizeLevel(body.level),
-      String(body.fileName || '').trim() || '数据看板.html',
-      html
+      fileName,
+      html,
+      sourceType,
+      sourceUrl
     ]
   )
-  context.sendJson(res, 201, { ok: true, dashboard: rowToDashboard(result.rows[0]) })
+  context.sendJson(res, 201, {
+    ok: true,
+    dashboard: rowToDashboard(result.rows[0], actor.id)
+  })
 }
 
 async function sendDashboardContent(req, res, context, actor, id) {
-  const row = await getDashboard(context.db, actor.id, id)
+  const row = await getDashboard(context.db, id)
   if (!row) {
     context.sendJson(res, 404, {
       ok: false,
       code: 'DASHBOARD_NOT_FOUND',
       error: '数据看板不存在或已被删除'
     })
+    return
+  }
+  if (row.source_type === 'url' && row.source_url) {
+    res.writeHead(302, {
+      Location: row.source_url,
+      'Cache-Control': 'no-store'
+    })
+    res.end()
     return
   }
   res.writeHead(200, {
@@ -182,9 +233,26 @@ async function sendDashboardContent(req, res, context, actor, id) {
 
 async function deleteDashboard(req, res, context, actor, id) {
   await initSchema(context.db)
+  const row = await getDashboard(context.db, id)
+  if (!row) {
+    context.sendJson(res, 404, {
+      ok: false,
+      code: 'DASHBOARD_NOT_FOUND',
+      error: '数据看板不存在或已被删除'
+    })
+    return
+  }
+  if (row.owner_id !== actor.id) {
+    context.sendJson(res, 403, {
+      ok: false,
+      code: 'FORBIDDEN',
+      error: '只能删除自己创建的看板'
+    })
+    return
+  }
   const result = await context.db.query(
-    `delete from brand_dashboards where id = $1 and owner_id = $2`,
-    [id, actor.id]
+    `delete from brand_dashboards where id = $1`,
+    [id]
   )
   if (!result.rowCount) {
     context.sendJson(res, 404, {
@@ -272,6 +340,7 @@ module.exports = {
   stripHtml,
   healthSummary,
   normalizeLevel,
+  normalizeSourceUrl,
   rowToDashboard,
   initSchema,
   listDashboards,

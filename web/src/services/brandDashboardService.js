@@ -17,7 +17,8 @@ export async function createDashboard(payload = {}) {
     title: String(payload.title || '').trim(),
     level: payload.level || 'group',
     fileName: payload.fileName || '',
-    contentBase64: payload.contentBase64 || ''
+    contentBase64: payload.contentBase64 || '',
+    sourceUrl: payload.sourceUrl || ''
   }
   const data = await productRequest('/api/dashboards', {
     method: 'POST',
