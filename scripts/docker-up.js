@@ -225,6 +225,77 @@ function hashDocmostSources() {
   return hash.digest('hex')
 }
 
+function listAppSourceFiles() {
+  const skipDir = new Set([
+    '.git',
+    'node_modules',
+    'dist',
+    'dist-build',
+    'dist-docker',
+    'build',
+    'coverage',
+    '.cache',
+    '.turbo',
+    'tmp',
+    'temp',
+    'output'
+  ])
+  const roots = [
+    'Dockerfile',
+    'copy.js',
+    path.join('docker', 'nginx.conf'),
+    path.join('docker', 'start.sh'),
+    path.join('docker', 'runtime-config.js'),
+    'web',
+    'simple-mind-map'
+  ]
+  const out = []
+  function walk(dir) {
+    let entries
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch (_) {
+      return
+    }
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name)
+      if (ent.isDirectory()) {
+        if (skipDir.has(ent.name)) continue
+        walk(full)
+      } else if (ent.isFile()) {
+        if (ent.name === '.env' || ent.name.endsWith('.env.local')) continue
+        out.push(full)
+      }
+    }
+  }
+  roots.forEach(relative => {
+    const full = path.join(ROOT, relative)
+    if (fs.existsSync(full) && fs.statSync(full).isDirectory()) walk(full)
+    else if (fs.existsSync(full)) out.push(full)
+  })
+  out.sort()
+  return out
+}
+
+function hashAppSources() {
+  const hash = crypto.createHash('sha256')
+  const files = listAppSourceFiles()
+  for (const filePath of files) {
+    const rel = path.relative(ROOT, filePath).replace(/\\/g, '/')
+    const st = fs.statSync(filePath)
+    hash.update(rel)
+    hash.update('\0')
+    hash.update(String(st.size))
+    hash.update('\0')
+    hash.update(String(Math.floor(st.mtimeMs)))
+    hash.update('\0')
+    if (st.size <= 512 * 1024) hash.update(fs.readFileSync(filePath))
+    hash.update('\n')
+  }
+  hash.update('image=mind-map-app\n')
+  return hash.digest('hex')
+}
+
 function docmostImageExists(tag) {
   try {
     execSync('docker image inspect ' + JSON.stringify(tag), { stdio: 'ignore' })
@@ -232,6 +303,41 @@ function docmostImageExists(tag) {
   } catch (_) {
     return false
   }
+}
+
+function ensureAppBuilt(extraEnv) {
+  const stampDir = path.join(ROOT, '.docker-build-stamps')
+  const stampFile = path.join(stampDir, 'app.sha')
+  const currentHash = hashAppSources()
+  const force =
+    process.env.APP_FORCE_BUILD === '1' ||
+    process.env.APP_FORCE_BUILD === 'true'
+  let previousHash = ''
+  try {
+    previousHash = fs.readFileSync(stampFile, 'utf8').trim()
+  } catch (_) {}
+
+  const imageOk = docmostImageExists('mind-map-app:latest')
+  const unchanged = !force && imageOk && previousHash && previousHash === currentHash
+  if (unchanged) {
+    console.log('  前端 app 镜像已是最新（源码无变化，跳过 rebuild）')
+    return false
+  }
+
+  if (force) console.log('  APP_FORCE_BUILD=1，强制重建前端 app 镜像...')
+  else if (!imageOk) console.log('  未找到 mind-map-app:latest，开始 build 前端 app...')
+  else console.log('  检测到前端源码有变化，开始 rebuild app...')
+
+  execSync('docker compose -f docker-compose.yml -f docker-compose.wiki.yml build app', {
+    cwd: ROOT,
+    stdio: 'inherit',
+    env: { ...process.env, ...(extraEnv || {}) },
+    shell: true
+  })
+  fs.mkdirSync(stampDir, { recursive: true })
+  fs.writeFileSync(stampFile, currentHash + '\n', 'utf8')
+  console.log('  前端 app 镜像已更新')
+  return true
 }
 
 function ensureDocmostBuilt(extraEnv) {
@@ -312,6 +418,7 @@ async function up() {
     process.exit(1)
   }
   ensureDocmostBuilt()
+  ensureAppBuilt()
   const host = process.env.PUBLIC_HOST || detectHost()
   const wikiPort = Number(process.env.DOCMOST_PORT || 3040)
   // 侧栏 Wiki 新窗口地址：优先用根目录 .env 的 DOCMOST_APP_URL；

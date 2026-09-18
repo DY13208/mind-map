@@ -1,0 +1,37 @@
+{
+  "enabled": true,
+  "transport": {
+    "type": "stdio",
+    "command": "node",
+    "args": [
+      "/runtime/canonical-mcp.cjs"
+    ]
+  },
+  "allowedTools": [
+    "list_knowledge",
+    "read_knowledge"
+  ],
+  "readOnlyOperations": [
+    {
+      "type": "tool",
+      "name": "list_knowledge",
+      "args": {}
+    },
+    {
+      "type": "tool",
+      "name": "read_knowledge",
+      "args": {
+        "roomId": "ow-p2a-room-a",
+        "file": "README.md"
+      }
+    },
+    {
+      "type": "tool",
+      "name": "read_knowledge",
+      "args": {
+        "roomId": "ow-p2a-room-a",
+        "file": "branches/hiring-sop.md"
+      }
+    }
+  ]
+}

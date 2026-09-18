@@ -1,0 +1,12 @@
+{
+  "ow-p2a-room-a": {
+    "branches/hiring-sop.md": "9ebb50c5bcb4cf30b45611bfd43cdf23ba0e8eddff8a7eda89db0e38e5b472d6",
+    "manifest.json": "693e9d01090f68eeb44f642427f2fb044a90138682433dcd8e2eb6eeeb3ed3ee",
+    "README.md": "2ab37b56961284ba2206253eb0566b4d53b331e0797eacb69d56c0877be8cdd1"
+  },
+  "ow-p2a-room-b": {
+    "branches/hiring-sop.md": "de49362fc633736df95207a79733b2fa5921a98069d19c11fffeafadc01afed1",
+    "manifest.json": "0e9af17f1ddccd2b68bb042bc787062af6597a5512026c2a50fe63b89c786488",
+    "README.md": "56090042dc74042fa9e07126163131c9afe62ab7161d86937e757a39f0fe1efb"
+  }
+}

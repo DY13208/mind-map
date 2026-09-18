@@ -66,6 +66,8 @@ node scripts/docker-up.js        # 探测 IP、构建、启动
 node scripts/docker-up.js down   # 停止
 ```
 
+启动脚本会比较前端源码与 `.docker-build-stamps/app.sha`，只有源码变化、镜像不存在时才重建前端 `app`；需要强制重建时设置 `APP_FORCE_BUILD=1`。
+
 ### MCP 配置
 
 WorkBuddy 用同一个端口的 MCP：`http://主机IP:8080/mcp`，启动脚本会写入 `.mcp.json`。防火墙只放行 `8080`。
