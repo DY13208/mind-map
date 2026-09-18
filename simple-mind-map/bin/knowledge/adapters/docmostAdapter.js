@@ -38,10 +38,26 @@ function titleFromMarkdown(text, fallback) {
 }
 
 /**
+ * Public mind-map origin for links that must work from Docmost (different host/port).
+ * Prefer AUTH_APP_ORIGIN so Wiki attachment links hit the real 良策入口, not Docmost.
+ */
+function mindMapPublicBase(env = process.env) {
+  const origin = String(
+    env.AUTH_APP_ORIGIN || env.MIND_MAP_PUBLIC_URL || ''
+  )
+    .trim()
+    .replace(/\/$/, '')
+  if (origin && /^https?:\/\//i.test(origin)) return origin
+  const host = String(env.PUBLIC_HOST || '127.0.0.1').trim() || '127.0.0.1'
+  const port = Number(env.WEB_PORT || env.MIND_MAP_PORT || 8989) || 8989
+  return `http://${host}:${port}`
+}
+
+/**
  * Canonical knowledge MD keeps machine metadata (YAML frontmatter, node anchors,
  * hash comments, relative .md branch links). Docmost should receive clean Markdown.
  */
-function toDocmostMarkdown(text, { pageLinks = null } = {}) {
+function toDocmostMarkdown(text, { pageLinks = null, env = process.env } = {}) {
   let body = String(text || '').replace(/\r\n?/g, '\n')
   // Drop YAML frontmatter
   body = body.replace(/^---\n[\s\S]*?\n---\n+/, '')
@@ -57,6 +73,12 @@ function toDocmostMarkdown(text, { pageLinks = null } = {}) {
       if (link) return `[${label}](${link})`
       return label
     }
+  )
+  // Attachment / file APIs are served by mind-map, not Docmost — make absolute
+  const appBase = mindMapPublicBase(env)
+  body = body.replace(
+    /\]\((\/api\/(?:files|maps|rooms)\/[^)\s]+)\)/g,
+    `](${appBase}$1)`
   )
   // Collapse excess blank lines left by stripped markers
   body = body.replace(/\n{3,}/g, '\n\n').trim()
@@ -413,7 +435,7 @@ async function sync(roomId, options = {}) {
         spaceId: space.spaceId,
         pageId: prev.pageId,
         title,
-        markdown: toDocmostMarkdown(readme.text),
+        markdown: toDocmostMarkdown(readme.text, { env }),
         env
       })
       pages['README.md'] = {
@@ -455,7 +477,7 @@ async function sync(roomId, options = {}) {
       pageId: prev.pageId,
       parentPageId: rootPageId || undefined,
       title,
-      markdown: toDocmostMarkdown(doc.text),
+      markdown: toDocmostMarkdown(doc.text, { env }),
       env
     })
     pages[doc.file] = {
@@ -478,7 +500,7 @@ async function sync(roomId, options = {}) {
       spaceId: space.spaceId,
       pageId: pages['README.md'].pageId,
       title: pages['README.md'].title,
-      markdown: toDocmostMarkdown(readme.text, { pageLinks }),
+      markdown: toDocmostMarkdown(readme.text, { pageLinks, env }),
       env
     })
   }
@@ -518,5 +540,6 @@ module.exports = {
   readCanonical,
   mapRole,
   toDocmostMarkdown,
-  __test: { titleFromMarkdown, ensureSpace, toDocmostMarkdown }
+  mindMapPublicBase,
+  __test: { titleFromMarkdown, ensureSpace, toDocmostMarkdown, mindMapPublicBase }
 }
