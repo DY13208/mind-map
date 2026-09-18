@@ -17,40 +17,15 @@
       <div class="runExecutionMain">
         <label class="runExecutionField runEngineField">
           <span>执行引擎</span>
-          <el-select v-model="backend" size="small" @change="onBackendChange">
-            <el-option label="WorkBuddy" value="workbuddy" />
-            <el-option label="小策" :value="AI_BACKEND_XIAOCE" />
-            <el-option label="助理" :value="AI_BACKEND_OPENCLAW" />
+          <el-input size="small" value="助理（OpenClaw）" disabled />
+        </label>
+        <label class="runExecutionField runModelField">
+          <span>模型</span>
+          <el-select v-model="model" size="small" filterable allow-create default-first-option :loading="modelsLoading" placeholder="选择助理模型" @visible-change="onModelDropdown">
+            <el-option v-for="item in openclawModels" :key="item.id" :label="item.name || item.id" :value="item.id" />
           </el-select>
         </label>
-        <template v-if="backend === AI_BACKEND_OPENCLAW">
-          <label class="runExecutionField runModelField">
-            <span>模型</span>
-            <el-select v-model="model" size="small" filterable allow-create default-first-option :loading="modelsLoading" placeholder="选择助理模型" @visible-change="onModelDropdown">
-              <el-option v-for="item in openclawModels" :key="item.id" :label="item.name || item.id" :value="item.id" />
-            </el-select>
-          </label>
-          <el-button class="runRefreshButton" size="small" icon="el-icon-refresh" :loading="modelsLoading" @click="loadModels(true)">刷新</el-button>
-        </template>
-        <template v-else-if="backend === 'workbuddy'">
-          <label class="runExecutionField runModelField">
-            <span>模型</span>
-            <el-select v-model="model" size="small" filterable :loading="modelsLoading" placeholder="选择 WorkBuddy 模型" @visible-change="onModelDropdown">
-              <el-option-group v-if="customModels.length" label="自定义模型（推荐，不耗积分）">
-                <el-option v-for="item in customModels" :key="'c-' + item.id" :label="item.name || item.id" :value="item.id" />
-              </el-option-group>
-              <el-option-group v-if="platformModels.length" label="平台模型">
-                <el-option v-for="item in platformModels" :key="'p-' + item.id" :label="item.name || item.id" :value="item.id" />
-              </el-option-group>
-            </el-select>
-          </label>
-          <el-button class="runRefreshButton" size="small" icon="el-icon-refresh" :loading="modelsLoading" @click="loadModels(true)">刷新</el-button>
-        </template>
-      </div>
-      <div v-if="backend === AI_BACKEND_XIAOCE" class="runExecutionMain">
-        <label class="runExecutionField"><span>企业</span><el-select v-model="organizationId" size="small" :loading="scopeLoading" placeholder="选择企业" @change="onOrganizationChange"><el-option v-for="item in organizations" :key="item.id" :label="item.name" :value="String(item.id)" /></el-select></label>
-        <label class="runExecutionField"><span>智能体</span><el-select v-model="agentId" size="small" :loading="scopeLoading" placeholder="选择智能体"><el-option v-for="item in agents" :key="item.id" :label="`${item.emoji || '🤖'} ${item.name}`" :value="String(item.id)" /></el-select></label>
-        <el-button class="runRefreshButton" size="small" icon="el-icon-refresh" :loading="scopeLoading" @click="loadXiaoceScope(true)">刷新</el-button>
+        <el-button class="runRefreshButton" size="small" icon="el-icon-refresh" :loading="modelsLoading" @click="loadModels(true)">刷新</el-button>
       </div>
     </section>
     <div class="runSectionTitle"><strong>输出内容</strong><span>可不选</span></div>
@@ -102,13 +77,12 @@
 
 <script>
 import { mapMutations } from 'vuex'
-import { getLocalConfig } from '@/api'
 import { SOP_OUTPUT_PRESETS, loadSopRunContext } from '@/utils/sopRun'
 import { getSopOutputRulesTemplateUrls, cloneSopOutputRulesTemplate } from '@/utils/sopOutputRulesTemplate'
 import { getSharedSopRunQueue, resolveSopRunConcurrency } from '@/utils/sopRunQueue'
 import { SOP_ATTACHMENT_ACCEPT, SOP_ATTACHMENT_LIMIT, validateSopAttachment, uploadSopAttachment, formatSopAttachmentNote } from '@/utils/sopRunAttachments'
 import { extractSubmitMaterialFields, formatSubmitMaterialNote, missingSubmitMaterialLabels } from '@/utils/sopSubmitMaterial'
-import { fetchAiModels, fetchWorkbuddyModels, getWorkbuddyConfig, getOpenclawConfig, saveOpenclawConfig, WORKBUDDY_CUSTOM_MODEL_HINTS, fetchXiaoceOrganizations, fetchXiaoceAgents, AI_BACKEND_XIAOCE, AI_BACKEND_OPENCLAW, normalizeAiBackend } from '@/utils/agentChat'
+import { fetchAiModels, getOpenclawConfig, saveOpenclawConfig, AI_BACKEND_OPENCLAW } from '@/utils/agentChat'
 
 export default {
   name: 'SopRunDialog',
@@ -120,13 +94,24 @@ export default {
   },
   data() {
     return {
-      outputPresets: SOP_OUTPUT_PRESETS, outputIds: [], extraNote: '', attachments: [], attachmentAccept: SOP_ATTACHMENT_ACCEPT,
-      outputRulesUrls: getSopOutputRulesTemplateUrls(), cloningRules: false,
-      submitFields: [], submitZones: [], submitSource: '', submitLoading: false, enqueueing: false,
-      backend: 'openclaw', model: 'openclaw/default', modelsLoading: false,
-      customModels: WORKBUDDY_CUSTOM_MODEL_HINTS.slice(), platformModels: [], openclawModels: [{ id: 'openclaw/default', name: 'openclaw/default' }],
-      organizationId: '', agentId: '', organizations: [], agents: [], scopeLoading: false,
-      AI_BACKEND_XIAOCE, AI_BACKEND_OPENCLAW, queue: null
+      outputPresets: SOP_OUTPUT_PRESETS,
+      outputIds: [],
+      extraNote: '',
+      attachments: [],
+      attachmentAccept: SOP_ATTACHMENT_ACCEPT,
+      outputRulesUrls: getSopOutputRulesTemplateUrls(),
+      cloningRules: false,
+      submitFields: [],
+      submitZones: [],
+      submitSource: '',
+      submitLoading: false,
+      enqueueing: false,
+      backend: AI_BACKEND_OPENCLAW,
+      model: 'openclaw/default',
+      modelsLoading: false,
+      openclawModels: [{ id: 'openclaw/default', name: 'openclaw/default' }],
+      AI_BACKEND_OPENCLAW,
+      queue: null
     }
   },
   computed: {
@@ -137,14 +122,21 @@ export default {
     }
   },
   watch: {
-    visible(value) { if (value) this.open() }
+    visible(value) {
+      if (value) this.open()
+    }
   },
   created() {
-    this.queue = getSharedSopRunQueue({ getConcurrency: () => resolveSopRunConcurrency() })
+    this.queue = getSharedSopRunQueue({
+      getConcurrency: () => resolveSopRunConcurrency()
+    })
   },
   methods: {
     ...mapMutations(['setLocalConfig']),
-    close() { this.$emit('update:visible', false); this.$emit('close') },
+    close() {
+      this.$emit('update:visible', false)
+      this.$emit('close')
+    },
     async cloneOutputRules() {
       if (this.cloningRules) return
       this.cloningRules = true
@@ -164,56 +156,183 @@ export default {
     open() {
       if (!this.target || !this.roomKey) return this.close()
       const active = this.queue.findActiveBySop(this.roomKey, this.target.uid)
-      if (active && active.state !== 'waiting_data') { this.$message.info('该 SOP 已在运行或排队中'); this.close(); return }
-      this.outputIds = []; this.extraNote = ''; this.attachments = []; this.submitFields = []; this.submitZones = []; this.submitSource = ''
-      const config = getLocalConfig() || {}
-      this.backend = normalizeAiBackend(config.aiBackend || AI_BACKEND_OPENCLAW)
-      this.organizationId = String(config.xiaoceOrganizationId || ''); this.agentId = String(config.xiaoceAgentId || '')
-      this.model = this.backend === AI_BACKEND_OPENCLAW ? (getOpenclawConfig().model || 'openclaw/default') : (getWorkbuddyConfig().model || 'deepseek-v4-flash')
-      if (this.backend === AI_BACKEND_XIAOCE) this.loadXiaoceScope(); else this.loadModels()
+      if (active && active.state !== 'waiting_data') {
+        this.$message.info('该 SOP 已在运行或排队中')
+        this.close()
+        return
+      }
+      this.outputIds = []
+      this.extraNote = ''
+      this.attachments = []
+      this.submitFields = []
+      this.submitZones = []
+      this.submitSource = ''
+      this.backend = AI_BACKEND_OPENCLAW
+      this.setLocalConfig({ aiBackend: AI_BACKEND_OPENCLAW })
+      this.model = getOpenclawConfig().model || 'openclaw/default'
+      this.loadModels()
       this.loadSubmitTemplate()
     },
-    onFilesPicked(event) { const files = Array.from(event.target.files || []); event.target.value = ''; this.addAttachments(files) },
-    onPaste(event) { const cb = event.clipboardData; if (!cb) return; const files = Array.from(cb.files || []); if (!files.length) Array.from(cb.items || []).forEach(i => { if (i.kind === 'file') { const f = i.getAsFile(); if (f) files.push(f) } }); if (!files.length) return; if (!cb.getData('text/plain')) event.preventDefault(); this.addAttachments(files) },
+    onFilesPicked(event) {
+      const files = Array.from(event.target.files || [])
+      event.target.value = ''
+      this.addAttachments(files)
+    },
+    onPaste(event) {
+      const cb = event.clipboardData
+      if (!cb) return
+      const files = Array.from(cb.files || [])
+      if (!files.length) {
+        Array.from(cb.items || []).forEach(i => {
+          if (i.kind === 'file') {
+            const f = i.getAsFile()
+            if (f) files.push(f)
+          }
+        })
+      }
+      if (!files.length) return
+      if (!cb.getData('text/plain')) event.preventDefault()
+      this.addAttachments(files)
+    },
     addAttachments(files) {
       for (const file of files) {
-        if (this.attachments.length >= SOP_ATTACHMENT_LIMIT) { this.$message.warning('最多添加 5 个附件，请先删除不需要的文件'); break }
-        const error = validateSopAttachment(file); if (error) { this.$message.warning(`${file.name}：${error}`); continue }
-        const ext = String(file.name || '').split('.').pop().toLowerCase()
-        const kind = ext === 'pdf' ? 'pdf' : /^(xlsx|csv)$/.test(ext) ? 'sheet' : /^(png|jpe?g|webp|gif)$/.test(ext) ? 'image' : 'document'
-        const item = { key: `${Date.now()}-${Math.random()}`, name: file.name, kind, badge: { pdf: 'PDF', sheet: 'X', image: '图', document: '文' }[kind], status: 'uploading', error: '', attachmentId: '', extractedText: '' }
+        if (this.attachments.length >= SOP_ATTACHMENT_LIMIT) {
+          this.$message.warning('最多添加 5 个附件，请先删除不需要的文件')
+          break
+        }
+        const error = validateSopAttachment(file)
+        if (error) {
+          this.$message.warning(`${file.name}：${error}`)
+          continue
+        }
+        const ext = String(file.name || '')
+          .split('.')
+          .pop()
+          .toLowerCase()
+        const kind =
+          ext === 'pdf'
+            ? 'pdf'
+            : /^(xlsx|csv)$/.test(ext)
+              ? 'sheet'
+              : /^(png|jpe?g|webp|gif)$/.test(ext)
+                ? 'image'
+                : 'document'
+        const item = {
+          key: `${Date.now()}-${Math.random()}`,
+          name: file.name,
+          kind,
+          badge: { pdf: 'PDF', sheet: 'X', image: '图', document: '文' }[kind],
+          status: 'uploading',
+          error: '',
+          attachmentId: '',
+          extractedText: ''
+        }
         this.attachments.push(item)
-        uploadSopAttachment(this.roomKey, file).then(a => { if (this.attachments.includes(item)) Object.assign(item, { status: 'ready', attachmentId: a.id, extractedText: a.extractedText }) }).catch(err => { if (!this.attachments.includes(item)) return; item.status = 'failed'; item.error = err.message || '附件上传失败'; this.$message.error(`${item.name}：${item.error}`) })
+        uploadSopAttachment(this.roomKey, file)
+          .then(a => {
+            if (this.attachments.includes(item)) {
+              Object.assign(item, {
+                status: 'ready',
+                attachmentId: a.id,
+                extractedText: a.extractedText
+              })
+            }
+          })
+          .catch(err => {
+            if (!this.attachments.includes(item)) return
+            item.status = 'failed'
+            item.error = err.message || '附件上传失败'
+            this.$message.error(`${item.name}：${item.error}`)
+          })
       }
     },
-    removeAttachment(file) { this.attachments = this.attachments.filter(item => item !== file) },
-    onBackendChange(value) { this.setLocalConfig({ aiBackend: value }); if (value === AI_BACKEND_XIAOCE) this.loadXiaoceScope(true); else { this.model = value === AI_BACKEND_OPENCLAW ? (getOpenclawConfig().model || 'openclaw/default') : (getWorkbuddyConfig().model || 'deepseek-v4-flash'); this.loadModels(true) } },
-    async onOrganizationChange(value) { this.organizationId = String(value || ''); this.agentId = ''; await this.loadXiaoceAgents(true) },
-    async loadXiaoceAgents(fallback) { this.agents = this.organizationId ? await fetchXiaoceAgents(this.organizationId) : []; if (!this.agents.some(i => String(i.id) === this.agentId)) this.agentId = fallback && this.agents[0] ? String(this.agents[0].id) : '' },
-    async loadXiaoceScope(showError) { if (this.scopeLoading) return; this.scopeLoading = true; try { this.organizations = await fetchXiaoceOrganizations(); if (!this.organizations.some(i => String(i.id) === this.organizationId)) { const p = this.organizations.find(i => i.isCurrent) || this.organizations[0]; this.organizationId = p ? String(p.id) : '' } await this.loadXiaoceAgents(true) } catch (err) { if (showError) this.$message.error(`小策配置加载失败：${err.message || '未知错误'}`) } finally { this.scopeLoading = false } },
-    async loadSubmitTemplate() { this.submitLoading = true; try { const ctx = await loadSopRunContext(this.roomKey, this.target); const parsed = extractSubmitMaterialFields(ctx.outline || '', { sopTitle: this.target.title || this.target.id || '' }); this.submitFields = (parsed.fields || []).map(f => ({ ...f, hint: f.hint || `请填写${f.label}`, value: f.value || '' })); this.submitZones = parsed.zones || []; this.submitSource = parsed.source || '' } catch (err) { console.warn('[sopRunDialog] load submit template failed', err) } finally { this.submitLoading = false } },
-    onModelDropdown(value) { if (value && !this.platformModels.length) this.loadModels() },
-    async loadModels(force) { if (this.modelsLoading) return; this.modelsLoading = true; try { if (this.backend === AI_BACKEND_OPENCLAW) { const list = await fetchAiModels(AI_BACKEND_OPENCLAW); this.openclawModels = list && list.length ? list : [{ id: 'openclaw/default', name: 'openclaw/default' }]; if (!this.openclawModels.some(i => i.id === this.model)) this.model = this.openclawModels[0].id } else { const list = (await fetchWorkbuddyModels()) || []; this.customModels = list.filter(i => i.custom); this.platformModels = list.filter(i => !i.custom); if (!this.customModels.length) this.customModels = WORKBUDDY_CUSTOM_MODEL_HINTS.slice(); const all = [...this.customModels, ...this.platformModels]; if (!all.some(i => i.id === this.model)) this.model = all[0] ? all[0].id : 'deepseek-v4-flash' } } catch (err) { if (force) this.$message.warning(`模型列表加载失败：${err.message || '未知错误'}`) } finally { this.modelsLoading = false } },
+    removeAttachment(file) {
+      this.attachments = this.attachments.filter(item => item !== file)
+    },
+    async loadSubmitTemplate() {
+      this.submitLoading = true
+      try {
+        const ctx = await loadSopRunContext(this.roomKey, this.target)
+        const parsed = extractSubmitMaterialFields(ctx.outline || '', {
+          sopTitle: this.target.title || this.target.id || ''
+        })
+        this.submitFields = (parsed.fields || []).map(f => ({
+          ...f,
+          hint: f.hint || `请填写${f.label}`,
+          value: f.value || ''
+        }))
+        this.submitZones = parsed.zones || []
+        this.submitSource = parsed.source || ''
+      } catch (err) {
+        console.warn('[sopRunDialog] load submit template failed', err)
+      } finally {
+        this.submitLoading = false
+      }
+    },
+    onModelDropdown(value) {
+      if (value) this.loadModels()
+    },
+    async loadModels(force) {
+      if (this.modelsLoading) return
+      this.modelsLoading = true
+      try {
+        const list = await fetchAiModels(AI_BACKEND_OPENCLAW)
+        this.openclawModels =
+          list && list.length
+            ? list
+            : [{ id: 'openclaw/default', name: 'openclaw/default' }]
+        if (!this.openclawModels.some(i => i.id === this.model)) {
+          this.model = this.openclawModels[0].id
+        }
+      } catch (err) {
+        if (force) {
+          this.$message.warning(`模型列表加载失败：${err.message || '未知错误'}`)
+        }
+      } finally {
+        this.modelsLoading = false
+      }
+    },
     async confirm() {
       if (this.submitLoading || this.enqueueing) return
-      if (this.backend === AI_BACKEND_XIAOCE && (!this.organizationId || !this.agentId)) return this.$message.warning('请先选择企业和智能体')
-      const missing = missingSubmitMaterialLabels(this.submitFields); if (missing.length) return this.$message.warning(`请先填写：${missing.slice(0, 5).join('、')}`)
-      if (this.attachments.some(f => f.status !== 'ready')) return this.$message.warning('请等待附件解析完成，或删除失败的附件后重试')
-      this.setLocalConfig({ aiBackend: this.backend, xiaoceOrganizationId: this.organizationId, xiaoceAgentId: this.agentId })
-      if (this.backend === AI_BACKEND_OPENCLAW) saveOpenclawConfig({ model: this.model }); else this.setLocalConfig({ workbuddyModel: this.model })
-      const note = formatSubmitMaterialNote(this.submitFields, formatSopAttachmentNote(this.extraNote, this.attachments))
+      const missing = missingSubmitMaterialLabels(this.submitFields)
+      if (missing.length) {
+        return this.$message.warning(`请先填写：${missing.slice(0, 5).join('、')}`)
+      }
+      if (this.attachments.some(f => f.status !== 'ready')) {
+        return this.$message.warning('请等待附件解析完成，或删除失败的附件后重试')
+      }
+      this.setLocalConfig({ aiBackend: AI_BACKEND_OPENCLAW })
+      saveOpenclawConfig({ model: this.model })
+      const note = formatSubmitMaterialNote(
+        this.submitFields,
+        formatSopAttachmentNote(this.extraNote, this.attachments)
+      )
       this.enqueueing = true
       try {
-        const result = await this.queue.enqueue({ roomKey: this.roomKey, sop: this.target, outputIds: this.outputIds.slice(), extraNote: note || this.extraNote, model: this.model, backend: this.backend, actor: this.actor,
+        const result = await this.queue.enqueue({
+          roomKey: this.roomKey,
+          sop: this.target,
+          outputIds: this.outputIds.slice(),
+          extraNote: note || this.extraNote,
+          model: this.model,
+          backend: AI_BACKEND_OPENCLAW,
+          actor: this.actor,
           onSuccess: (outcome, job) => this.$emit('finished', { outcome, job }),
-          onError: (error, message) => { if (!(error && error.name === 'AbortError')) this.$message.error(`「${this.target.title}」：${message}`); this.$emit('failed', { error, message }) },
+          onError: (error, message) => {
+            if (!(error && error.name === 'AbortError')) {
+              this.$message.error(`「${this.target.title}」：${message}`)
+            }
+            this.$emit('failed', { error, message })
+          },
           onWaiting: (outcome, job) => this.$emit('waiting', { outcome, job })
         })
         if (!result.ok) return this.$message.warning(result.message || '入队失败')
         this.$message.success(`已加入队列：${this.target.title}`)
         this.$emit('enqueued', result.job)
         this.close()
-      } finally { this.enqueueing = false }
+      } finally {
+        this.enqueueing = false
+      }
     }
   }
 }

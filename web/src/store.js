@@ -24,12 +24,12 @@ const store = new Vuex.Store({
       isDark: false,
       // 是否开启AI功能
       enableAi: true,
-      // WorkBuddy 模型：默认自定义 DeepSeek（不消耗平台积分）
+      // WorkBuddy 模型字段保留兼容旧本地配置；执行已统一走助理（OpenClaw）
       workbuddyModel: 'deepseek-v4-flash',
-      aiBackend: 'workbuddy',
+      aiBackend: 'openclaw',
       xiaoceOrganizationId: '',
       xiaoceAgentId: '',
-      // 补齐并发数（与 WorkBuddy 多会话对齐，建议 1-3）
+      // SOP / 补齐并发数
       flowExpandConcurrency: 2
     },
     activeSidebar: '', // 当前显示的侧边栏

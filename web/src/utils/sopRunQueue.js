@@ -3,7 +3,7 @@
  * 形态对齐 flowExpandQueue，默认并发 2、上限 3
  */
 import { runSopWithWorkbuddy, sanitizeNodeProgress, mergeDeliverableLists } from './sopRun'
-import { aiBackendLabel, getAiBackend } from './agentChat'
+import { aiBackendLabel, getAiBackend, checkAiBackend } from './agentChat'
 import { areWaitingWecomTodosDone } from './sopNotify'
 import { getLocalConfig } from '@/api'
 import { authorizeSopRun } from './fileApi'
@@ -161,10 +161,26 @@ function isTransientResumeError(msg, err) {
   return (
     (err && err.status >= 500) ||
     (err && err.code === 'WORKBUDDY_EMPTY_CONTENT') ||
-    /Failed to fetch|NetworkError|ECONNREFUSED|Bad Gateway|连不上|未就绪|Gateway|Bridge|接口已通，但|返回空正文/i.test(
+    (err && err.name === 'NetworkError') ||
+    /Failed to fetch|NetworkError|network error|ECONNREFUSED|Bad Gateway|连不上|未就绪|Gateway|Bridge|接口已通，但|返回空正文|无法连接|连接已关闭/i.test(
       t
     )
   )
+}
+
+async function waitForAiBackendReady({ attempts = 8, gapMs = 1200 } = {}) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const h = await checkAiBackend()
+      if (h && h.ok) return { ok: true, attempt: i + 1 }
+    } catch (e) {
+      /* keep trying */
+    }
+    if (i < attempts - 1) {
+      await new Promise(r => setTimeout(r, gapMs * (i + 1)))
+    }
+  }
+  return { ok: false }
 }
 
 /** 刷新后把中断任务重新入队续跑（保留进度摘要，清掉补数/错误态） */
@@ -717,6 +733,27 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       // 真正执行外部调用前再校验一次（排队期间可能被降权）
       await assertSopRunAuthorized(job.roomKey, job.sopUid)
 
+      // 刷新后续跑：先等助理就绪，避免 Bridge 未起就报 NetworkError
+      if (job.resumeAfterRefresh) {
+        job.status = '页面刷新后等待助理就绪…'
+        emit()
+        const ready = await waitForAiBackendReady({ attempts: 8, gapMs: 1000 })
+        if (!ready.ok) {
+          const interruptMsg =
+            '页面刷新时助理未就绪，已中断本次执行；请重新点「打开」运行'
+          job.error = interruptMsg
+          job.status = interruptMsg
+          job.resumeAfterRefresh = false
+          if (job.onError) {
+            job.onError(new Error(interruptMsg), interruptMsg)
+          }
+          finishJob(job, { error: interruptMsg })
+          return
+        }
+        job.status = '助理已就绪，继续执行…'
+        emit()
+      }
+
       const result = await runSopWithWorkbuddy({
         roomKey: job.roomKey,
         sop: job.sop,
@@ -888,17 +925,16 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       }
       const raw = (err && err.message) || String(err || '')
       const backendLabel = aiBackendLabel(job.backend || getAiBackend())
-      const msg =
+      const isNet =
         (err && err.status >= 500) ||
-        /Failed to fetch|NetworkError|ECONNREFUSED|Bad Gateway|<!DOCTYPE html>/i.test(
+        (err && err.name === 'NetworkError') ||
+        /Failed to fetch|NetworkError|network error|ECONNREFUSED|Bad Gateway|<!DOCTYPE html>|无法连接|连接已关闭/i.test(
           raw
         )
-          ? job.backend === 'xiaoce' || /小策/.test(backendLabel)
-            ? '连不上小策，请确认 /yiran 网关与登录状态可用'
-            : job.backend === 'openclaw' || /助理/.test(backendLabel)
-              ? '连不上助理（OpenClaw），请确认 Gateway / Bridge 已启动'
-              : '连不上 WorkBuddy，请确认本机已启动 WorkBuddy API 代理'
-          : raw || 'SOP 执行失败'
+      const msg = isNet
+        ? '连不上助理（OpenClaw），请确认 Gateway / Bridge 已启动后再运行'
+        : raw || 'SOP 执行失败'
+      void backendLabel
       if (
         job.resumeAfterRefresh &&
         isTransientResumeError(msg, err) &&
@@ -1237,7 +1273,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
     }
   }
 
-  // 恢复排队任务后继续泵；稍等页面与 Bridge/Gateway 就绪
+  // 恢复排队任务后继续泵；多等一会儿让 Bridge/Gateway 就绪，减少刷新 NetworkError
   if (pending.length) {
     setTimeout(() => {
       try {
@@ -1245,7 +1281,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       } catch (e) {
         /* ignore */
       }
-    }, 1200)
+    }, 2800)
   }
   persistNow()
 

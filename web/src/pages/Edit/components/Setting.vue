@@ -279,13 +279,11 @@
       <div class="row" v-if="localConfigs.enableAi">
         <div class="rowItem">
           <span class="name">AI 执行引擎</span>
-          <el-radio-group v-model="localConfigs.aiBackend" size="mini" @change="onAiBackendChange">
-            <el-radio-button :label="AI_BACKEND_WORKBUDDY">WorkBuddy</el-radio-button>
-            <el-radio-button :label="AI_BACKEND_XIAOCE">小策</el-radio-button>
-          </el-radio-group>
+          <span class="value">助理（OpenClaw）</span>
         </div>
       </div>
-      <div class="row" v-if="localConfigs.enableAi && localConfigs.aiBackend === AI_BACKEND_XIAOCE">
+      <!-- WorkBuddy / 小策执行已下线；模型由助理 Gateway 配置 -->
+      <div class="row" v-if="false && localConfigs.enableAi && localConfigs.aiBackend === AI_BACKEND_XIAOCE">
         <div class="rowItem workbuddyModelRow">
           <span class="name">小策企业</span>
           <el-select v-model="localConfigs.xiaoceOrganizationId" size="mini" style="width: 220px" :loading="xiaoceScopeLoading" placeholder="选择企业" @change="onXiaoceOrganizationChange">
@@ -293,7 +291,7 @@
           </el-select>
         </div>
       </div>
-      <div class="row" v-if="localConfigs.enableAi && localConfigs.aiBackend === AI_BACKEND_XIAOCE">
+      <div class="row" v-if="false && localConfigs.enableAi && localConfigs.aiBackend === AI_BACKEND_XIAOCE">
         <div class="rowItem workbuddyModelRow">
           <span class="name">小策智能体</span>
           <el-select v-model="localConfigs.xiaoceAgentId" size="mini" style="width: 220px" :loading="xiaoceScopeLoading" placeholder="选择智能体" @change="onXiaoceAgentChange">
@@ -303,7 +301,7 @@
         </div>
       </div>
       <!-- WorkBuddy 模型 -->
-      <div class="row" v-if="localConfigs.enableAi && localConfigs.aiBackend !== AI_BACKEND_XIAOCE">
+      <div class="row" v-if="false && localConfigs.enableAi && localConfigs.aiBackend !== AI_BACKEND_XIAOCE">
         <div class="rowItem workbuddyModelRow">
           <span class="name">{{ $t('setting.workbuddyModel') }}</span>
           <el-select
@@ -552,7 +550,7 @@ export default {
         showNavigatorToolbar: true,
         enableDragImport: false,
         enableAi: false,
-        aiBackend: 'workbuddy',
+        aiBackend: 'openclaw',
         workbuddyModel: 'deepseek-v4-flash',
         xiaoceOrganizationId: '',
         xiaoceAgentId: '',
@@ -585,7 +583,10 @@ export default {
         this.initConfig()
         this.initWatermark()
         this.initLoacalConfig()
-        if (this.localConfigs.aiBackend === AI_BACKEND_XIAOCE) this.loadXiaoceScope()
+        this.localConfigs.aiBackend = 'openclaw'
+        this.updateLocalConfig('aiBackend', 'openclaw')
+        // WorkBuddy / 小策执行已下线
+        if (false && this.localConfigs.aiBackend === AI_BACKEND_XIAOCE) this.loadXiaoceScope()
         else this.loadWorkbuddyModels()
       } else {
         this.$refs.sidebar.show = false
