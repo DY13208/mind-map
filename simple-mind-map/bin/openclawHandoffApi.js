@@ -1,4 +1,4 @@
-﻿/**
+/**
  * POST /api/openclaw/handoff
  * Authenticated Mind Map user → short-lived Signed Handoff for OpenClaw Liangce ingress.
  */

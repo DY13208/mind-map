@@ -1,4 +1,4 @@
-﻿/**
+/**
  * OpenClaw Liangce trusted identity handoff (Phase 2B-1).
  * Proves "this turn is from this logged-in Mind Map user".
  * Does NOT carry ACL/roles/room scopes.
