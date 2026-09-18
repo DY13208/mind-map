@@ -2875,6 +2875,8 @@ class Render {
       }
     }
     if (needRender) {
+      // Save navigation-driven expansion before render restores personal state.
+      this.mindMap.emit('personal_expand_change')
       this.mindMap.render(callback)
     } else {
       callback()
