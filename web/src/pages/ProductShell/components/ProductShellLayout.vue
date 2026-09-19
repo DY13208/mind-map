@@ -181,7 +181,6 @@ export default {
       hasSidebarPreference: preference !== null,
       profile: null,
       fileNav: [
-        { path: '/dashboards', label: '看板', icon: 'el-icon-data-analysis' },
         { path: '/files', label: '脑图', icon: 'el-icon-files' },
         { path: '/files/favorites', label: '收藏', icon: 'el-icon-star-off' },
         { path: '/files/shared', label: '共享', icon: 'el-icon-user' },

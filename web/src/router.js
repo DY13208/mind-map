@@ -17,28 +17,11 @@ const roomPathRedirect = to => ({
 const routes = [
   {
     path: '/dashboards',
-    component: () =>
-      import(
-        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'
-      ),
-    children: [
-      {
-        path: '',
-        name: 'BrandDashboards',
-        component: () =>
-          import(
-            /* webpackChunkName: "product-shell" */ './pages/ProductShell/BrandDashboardsPage.vue'
-          )
-      },
-      {
-        path: ':id',
-        name: 'BrandDashboardDetail',
-        component: () =>
-          import(
-            /* webpackChunkName: "product-shell" */ './pages/ProductShell/BrandDashboardsPage.vue'
-          )
-      }
-    ]
+    redirect: '/files'
+  },
+  {
+    path: '/dashboards/:id',
+    redirect: '/files'
   },
   {
     path: '/files',
