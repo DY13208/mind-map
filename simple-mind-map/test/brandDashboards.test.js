@@ -4,8 +4,28 @@ const {
   normalizeLevel,
   normalizeSourceUrl,
   rowToDashboard,
-  safeFileName
+  safeFileName,
+  ensureCharsetMeta
 } = require('../bin/brandDashboards')
+
+assert.equal(ensureCharsetMeta(''), '')
+assert.equal(
+  ensureCharsetMeta('<html><head><meta charset="utf-8"></head></html>'),
+  '<html><head><meta charset="utf-8"></head></html>'
+)
+assert.equal(
+  ensureCharsetMeta('<html><head><title>x</title></head></html>'),
+  '<html><head><meta charset="utf-8"><title>x</title></head></html>'
+)
+assert.equal(
+  ensureCharsetMeta('<!DOCTYPE html><html lang="zh-CN"><div>hi</div></html>'),
+  '<!DOCTYPE html><html lang="zh-CN"><meta charset="utf-8"><div>hi</div></html>'
+)
+assert.equal(ensureCharsetMeta('<div>hi</div>'), '<meta charset="utf-8"><div>hi</div>')
+assert.equal(
+  ensureCharsetMeta('﻿<div>hi</div>'),
+  '﻿<div>hi</div>'
+)
 
 assert.equal(safeFileName('my board.html', '数据看板.html'), 'my board.html')
 assert.equal(safeFileName('a/b\\c:d*e?f"g<h>i|j.html', 'f.html'), 'a_b_c_d_e_f_g_h_i_j.html')
