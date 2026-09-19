@@ -1,6 +1,11 @@
 import Vue from 'vue'
 import VueRouter from 'vue-router'
-import { migrateLegacyHashUrl } from './utils/roomLocation'
+import {
+  consumeSkipMyMapsRedirect,
+  getLastRoom,
+  migrateLegacyHashUrl,
+  rememberLastRoom
+} from './utils/roomLocation'
 
 Vue.use(VueRouter)
 
@@ -175,6 +180,7 @@ const routes = [
         next({ path: '/files', replace: true })
         return
       }
+      rememberLastRoom(room)
       next()
     }
   },
@@ -251,6 +257,32 @@ const routes = [
 const router = new VueRouter({
   mode: 'history',
   routes
+})
+
+// 全局兜底：直接打开 /my-maps 时也能跳回最近房间
+router.beforeEach((to, from, next) => {
+  if (!to.path.startsWith('/my-maps')) {
+    next()
+    return
+  }
+  if (consumeSkipMyMapsRedirect()) {
+    next()
+    return
+  }
+  const last = getLastRoom()
+  if (!last) {
+    next()
+    return
+  }
+  if (to.query && to.query.room === last) {
+    next()
+    return
+  }
+  next({
+    path: '/',
+    query: { ...to.query, room: last },
+    replace: true
+  })
 })
 
 export default router

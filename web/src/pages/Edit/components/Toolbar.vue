@@ -321,6 +321,7 @@ import { getData } from '../../../api'
 import ToolbarNodeBtnList from './ToolbarNodeBtnList.vue'
 import { throttle, isMobile } from 'simple-mind-map/src/utils/index'
 import { stringifyJsonOffMainThread } from '@/utils/importTree'
+import { navigateToMyMaps } from '@/utils/roomLocation'
 
 // 工具栏
 let fileHandle = null
@@ -728,7 +729,7 @@ export default {
     },
 
     goToMyMaps() {
-      this.$router.push({ path: '/my-maps' }).catch(() => {})
+      navigateToMyMaps(this.$router)
     },
 
     // 扫描本地文件夹
