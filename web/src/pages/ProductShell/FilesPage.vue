@@ -1,42 +1,12 @@
 <template>
   <section class="productPage">
-    <div class="productHeader">
-      <div>
-        <FolderBreadcrumb
-          v-if="folder"
-          :path="folderPath"
-          :team-id="selectedTeamId"
-          :root-label="isTeamView && selectedTeam ? selectedTeam.name : '我的脑图'"
-        />
-        <h1>{{ pageTitle }}</h1>
-        <p>{{ pageDescription }}</p>
-      </div>
-      <div v-if="mode === 'files' || (mode === 'folder' && isTeamView)" class="workspaceSwitcher">
-        <span>当前空间</span>
-        <el-select
-          :value="selectedTeamId"
-          :loading="teamsLoading"
-          aria-label="切换个人或团队脑图"
-          @change="changeWorkspace"
-        >
-          <el-option label="个人空间" value="" />
-          <el-option
-            v-for="team in teams"
-            :key="team.id"
-            :label="team.name"
-            :value="team.id"
-          />
-        </el-select>
-        <el-button
-          v-if="selectedTeam"
-          type="text"
-          @click="$router.push('/spaces/' + selectedTeam.id)"
-          >管理团队</el-button
-        >
-        <el-button v-else type="text" @click="$router.push('/spaces')"
-          >我的团队</el-button
-        >
-      </div>
+    <div v-if="folder" class="productHeader productHeader--breadcrumb">
+      <FolderBreadcrumb
+        :path="folderPath"
+        :team-id="selectedTeamId"
+        :base-path="filesBasePath"
+        :root-label="isTeamView && selectedTeam ? selectedTeam.name : '脑图'"
+      />
     </div>
     <FileToolbar
       :search.sync="search"
@@ -88,9 +58,6 @@
       /><el-button @click="load">重试</el-button>
     </div>
     <div v-else v-loading="loading || busy" class="contentArea">
-      <h2 class="sectionTitle" v-if="mode !== 'trash' && itemCount">
-        {{ folder ? '当前目录' : pageTitle }} <span>{{ displayCount }}</span>
-      </h2>
       <div v-if="mode !== 'trash' && view === 'card' && itemCount" class="itemGrid">
         <template v-if="showFolders">
           <FolderCard
@@ -264,7 +231,7 @@ import ShareFolderDialog from './components/ShareFolderDialog.vue'
 import HomeImportDialog from './components/HomeImportDialog.vue'
 import BatchActionBar from './components/BatchActionBar.vue'
 const copy = {
-  files: ['我的脑图', '管理你的文件夹与脑图'],
+  files: ['脑图', '管理你的文件夹与脑图'],
   recent: ['最近', '快速回到最近打开的脑图'],
   favorites: ['收藏', '集中查看重要脑图'],
   shared: ['与我共享', '根据成员角色展示与你共享的脑图'],
@@ -446,6 +413,9 @@ export default {
         !!this.selectedTeamId &&
         (this.mode === 'files' || this.mode === 'folder')
       )
+    },
+    filesBasePath() {
+      return this.$route.path.startsWith('/my-maps') ? '/my-maps' : '/files'
     },
     canManageTeam() {
       return !!(
@@ -817,7 +787,7 @@ export default {
       this.exitSelectMode()
       const team = String(teamId || '')
       this.$router.push({
-        path: '/files',
+        path: this.filesBasePath,
         query: team ? { team } : {}
       })
     },
@@ -952,7 +922,7 @@ export default {
       }
     },
     openFolder(folder) {
-      const route = { path: '/files/folder/' + folder.id }
+      const route = { path: `${this.filesBasePath}/folder/` + folder.id }
       if (this.selectedTeamId) {
         route.query = { team: this.selectedTeamId }
       }
@@ -1021,7 +991,7 @@ export default {
           ? `将在「${this.folder.name}」中创建子文件夹`
           : this.isTeamView
             ? '将在当前团队根目录创建文件夹'
-            : '将在“我的脑图”根目录创建文件夹',
+            : '将在“脑图”根目录创建文件夹',
         '新建文件夹',
         {
           inputValidator: value =>
@@ -1051,7 +1021,7 @@ export default {
     async onImported(result) {
       await this.load({ reset: true, keepPage: true })
       if (result && result.mode === 'folder' && result.folderId) {
-        const route = { path: '/files/folder/' + result.folderId }
+        const route = { path: `${this.filesBasePath}/folder/` + result.folderId }
         if (this.selectedTeamId) route.query = { team: this.selectedTeamId }
         this.$router.push(route)
         return
@@ -1251,7 +1221,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 6px;
   flex-wrap: wrap;
   min-width: 0;
   max-width: 100%;
@@ -1259,8 +1229,18 @@ export default {
   font-size: 13px;
 
   .el-select {
-    width: 260px;
+    width: 200px;
     max-width: 100%;
+  }
+
+  .workspaceIconBtn {
+    padding: 8px;
+    margin: 0;
+    font-size: 18px;
+    color: var(--ui-text-secondary);
+    &:hover {
+      color: var(--ui-primary);
+    }
   }
 }
 .contentArea {

@@ -28,7 +28,7 @@
           <el-button
             icon="el-icon-files"
             @click="openInFiles"
-            >在我的脑图查看</el-button
+            >在脑图查看</el-button
           >
           <el-button
             v-if="canManage"
