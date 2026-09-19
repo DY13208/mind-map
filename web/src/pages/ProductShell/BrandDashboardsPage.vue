@@ -6,7 +6,6 @@
           <el-button icon="el-icon-arrow-left" @click="backToList"
             >返回数据看板</el-button
           >
-          <h1>{{ activeDashboard ? activeDashboard.title : '数据看板' }}</h1>
         </div>
       </div>
       <div v-if="error" class="statePanel">
@@ -72,37 +71,6 @@
               @click="view = 'list'"
             />
           </el-button-group>
-          <template v-if="deleteMode">
-            <el-button
-              size="small"
-              type="danger"
-              icon="el-icon-delete"
-              :disabled="!deleteSelection.length"
-              :loading="deleting"
-              @click="confirmDelete"
-              >确认删除 ({{ deleteSelection.length }})</el-button
-            >
-            <el-button size="small" @click="exitDeleteMode">取消</el-button>
-          </template>
-          <template v-else-if="editMode">
-            <el-button size="small" @click="exitEditMode">取消</el-button>
-          </template>
-          <template v-else>
-            <el-button
-              v-if="canManageAny"
-              size="small"
-              icon="el-icon-delete"
-              @click="enterDeleteMode"
-              >删除看板</el-button
-            >
-            <el-button
-              v-if="canManageAny"
-              size="small"
-              icon="el-icon-edit"
-              @click="enterEditMode"
-              >编辑看板</el-button
-            >
-          </template>
           <el-button
             size="small"
             type="primary"
@@ -111,12 +79,6 @@
             >新建看板</el-button
           >
         </div>
-      </div>
-      <div v-if="deleteMode" class="deleteHint">
-        删除模式：点击看板进行勾选，再点击「确认删除」完成删除；点「取消」退出。
-      </div>
-      <div v-else-if="editMode" class="deleteHint deleteHint--edit">
-        编辑模式：点击看板重新上传 HTML 或修改链接；点「取消」退出。
       </div>
       <div v-if="error" class="statePanel">
         <el-alert type="error" :title="error" :closable="false" show-icon />
@@ -154,12 +116,52 @@
                 v-for="item in group.items"
                 :key="item.id"
                 class="dashboardCard"
-                :class="{ 'is-selected': isSelected(item.id) }"
                 tabindex="0"
                 :aria-label="`查看 ${item.title}`"
                 @click="onCardClick(item)"
                 @keydown.enter="onCardClick(item)"
               >
+                <div class="hoverActions">
+                  <button
+                    v-if="item.canDelete"
+                    type="button"
+                    class="hoverBtn"
+                    title="编辑"
+                    aria-label="编辑"
+                    @click.stop="openEdit(item)"
+                  >
+                    <i class="el-icon-edit" />
+                  </button>
+                  <button
+                    type="button"
+                    class="hoverBtn"
+                    title="下载"
+                    aria-label="下载"
+                    :disabled="downloading"
+                    @click.stop="downloadDashboard(item)"
+                  >
+                    <i class="el-icon-download" />
+                  </button>
+                  <button
+                    type="button"
+                    class="hoverBtn"
+                    title="在新页面打开"
+                    aria-label="在新页面打开"
+                    @click.stop="openInNewTab(item)"
+                  >
+                    <i class="el-icon-top-right" />
+                  </button>
+                  <button
+                    v-if="item.canDelete"
+                    type="button"
+                    class="hoverBtn hoverBtn--danger"
+                    title="删除"
+                    aria-label="删除"
+                    @click.stop="askDelete(item)"
+                  >
+                    <i class="el-icon-delete" />
+                  </button>
+                </div>
                 <div class="dashboardPreview">
                   <iframe
                     :src="contentUrl(item)"
@@ -168,9 +170,6 @@
                     tabindex="-1"
                     :sandbox="iframeSandbox(item, 'allow-scripts allow-forms')"
                   />
-                  <span v-if="deleteMode" class="selectMark" :class="{ 'is-on': isSelected(item.id) }">
-                    <i :class="isSelected(item.id) ? 'el-icon-check' : ''" />
-                  </span>
                 </div>
                 <div class="dashboardBody">
                   <div class="dashboardTitleRow">
@@ -187,41 +186,68 @@
                 v-for="item in group.items"
                 :key="item.id"
                 class="listCard"
-                :class="{ 'is-selected': isSelected(item.id) }"
                 tabindex="0"
                 :aria-label="`查看 ${item.title}`"
                 @click="onCardClick(item)"
                 @keydown.enter="onCardClick(item)"
               >
-                <div class="listHead">
-                  <span v-if="deleteMode" class="selectMark selectMark--row" :class="{ 'is-on': isSelected(item.id) }">
-                    <i :class="isSelected(item.id) ? 'el-icon-check' : ''" />
-                  </span>
-                  <h2 :title="item.title">{{ item.title }}</h2>
-                  <span class="levelBadge" :class="`levelBadge--${item.level}`">{{
-                    levelLabel(item.level)
-                  }}</span>
-                  <span class="listStatus"
-                    ><i class="rowDot" :class="dotClass(item)" />{{
-                      statusLabel(item)
-                    }}</span
-                  >
+                <div class="hoverActions">
                   <button
-                    class="listMore"
+                    v-if="item.canDelete"
                     type="button"
-                    aria-label="更多操作"
-                    @click.stop
+                    class="hoverBtn"
+                    title="编辑"
+                    aria-label="编辑"
+                    @click.stop="openEdit(item)"
                   >
-                    ···
+                    <i class="el-icon-edit" />
+                  </button>
+                  <button
+                    type="button"
+                    class="hoverBtn"
+                    title="下载"
+                    aria-label="下载"
+                    :disabled="downloading"
+                    @click.stop="downloadDashboard(item)"
+                  >
+                    <i class="el-icon-download" />
+                  </button>
+                  <button
+                    type="button"
+                    class="hoverBtn"
+                    title="在新页面打开"
+                    aria-label="在新页面打开"
+                    @click.stop="openInNewTab(item)"
+                  >
+                    <i class="el-icon-top-right" />
+                  </button>
+                  <button
+                    v-if="item.canDelete"
+                    type="button"
+                    class="hoverBtn hoverBtn--danger"
+                    title="删除"
+                    aria-label="删除"
+                    @click.stop="askDelete(item)"
+                  >
+                    <i class="el-icon-delete" />
                   </button>
                 </div>
-                <div class="listMeta">
-                  <span :title="item.fileName"
-                    ><i class="el-icon-document" />{{ item.fileName }}</span
-                  >
-                  <span
-                    ><i class="el-icon-time" />{{ formatDate(item.updatedAt) }}</span
-                  >
+                <div class="listMain">
+                  <div class="listId">
+                    <h2 :title="item.title">{{ item.title }}</h2>
+                    <span class="levelBadge" :class="`levelBadge--${item.level}`">{{
+                      levelLabel(item.level)
+                    }}</span>
+                    <span class="listStatus"
+                      ><i class="rowDot" :class="dotClass(item)" />{{
+                        statusLabel(item)
+                      }}</span
+                    >
+                  </div>
+                  <div v-if="item.healthSummary" class="healthChip">
+                    <i class="el-icon-data-line" />
+                    <span>{{ summaryChip(item) }}</span>
+                  </div>
                 </div>
                 <div class="listMetrics">
                   <div class="metric">
@@ -243,48 +269,38 @@
                     </div>
                   </div>
                 </div>
-                <div class="listVisual">
-                  <div class="panel">
-                    <div class="panelTitle">看板预览</div>
-                    <div class="panelBody">
-                      <iframe
-                        :src="contentUrl(item)"
-                        :title="`${item.title} 预览`"
-                        loading="lazy"
-                        tabindex="-1"
-                        :sandbox="iframeSandbox(item, 'allow-scripts allow-forms')"
-                      />
-                    </div>
-                  </div>
-                  <div class="panel">
-                    <div class="panelTitle">看板信息</div>
-                    <div class="infoList">
-                      <div class="infoRow">
-                        <span class="infoKey">层级</span
-                        ><span class="infoVal">{{ levelLabel(item.level) }}</span>
-                      </div>
-                      <div class="infoRow">
-                        <span class="infoKey">状态</span
-                        ><span class="infoVal">{{ statusLabel(item) }}</span>
-                      </div>
-                      <div class="infoRow">
-                        <span class="infoKey">文件</span
-                        ><span class="infoVal" :title="item.fileName">{{
-                          item.fileName
-                        }}</span>
-                      </div>
-                      <div class="infoRow">
-                        <span class="infoKey">更新</span
-                        ><span class="infoVal">{{
-                          formatDate(item.updatedAt)
-                        }}</span>
-                      </div>
-                    </div>
+                <div class="listPreviewCard">
+                  <div class="miniTitle">看板预览</div>
+                  <div class="listPreview">
+                    <iframe
+                      :src="contentUrl(item)"
+                      :title="`${item.title} 预览`"
+                      loading="lazy"
+                      tabindex="-1"
+                      :sandbox="iframeSandbox(item, 'allow-scripts allow-forms')"
+                    />
                   </div>
                 </div>
-                <div v-if="item.healthSummary" class="listScore">
-                  <i class="el-icon-data-line" />
-                  <span>{{ item.healthSummary }}</span>
+                <div class="listInfoCard">
+                  <div class="miniTitle">看板信息</div>
+                  <div class="infoRow">
+                    <span class="infoKey">层级</span>
+                    <span class="infoVal">{{ levelLabel(item.level) }}</span>
+                  </div>
+                  <div class="infoRow">
+                    <span class="infoKey">状态</span>
+                    <span class="infoVal">{{ statusLabel(item) }}</span>
+                  </div>
+                  <div class="infoRow">
+                    <span class="infoKey">文件</span>
+                    <span class="infoVal" :title="item.fileName">{{
+                      item.fileName
+                    }}</span>
+                  </div>
+                  <div class="infoRow">
+                    <span class="infoKey">更新</span>
+                    <span class="infoVal">{{ formatDate(item.updatedAt) }}</span>
+                  </div>
                 </div>
               </article>
             </div>
@@ -315,11 +331,11 @@
           @action="openCreate"
         />
       </div>
-      <DashboardCreateDialog
+      <DashboardFormDialog
         :visible.sync="createDialogVisible"
         @done="load"
       />
-      <DashboardEditDialog
+      <DashboardFormDialog
         :visible.sync="editDialogVisible"
         :dashboard="editTarget"
         @done="load"
@@ -332,8 +348,7 @@
 import { userMessageFromError } from '@/services/apiError'
 import brandDashboardService from '@/services/brandDashboardService'
 import EmptyState from './components/EmptyState.vue'
-import DashboardCreateDialog from './components/DashboardCreateDialog.vue'
-import DashboardEditDialog from './components/DashboardEditDialog.vue'
+import DashboardFormDialog from './components/DashboardFormDialog.vue'
 
 const LEVEL_META = [
   {
@@ -358,7 +373,7 @@ const LEVEL_META = [
 
 export default {
   name: 'BrandDashboardsPage',
-  components: { EmptyState, DashboardCreateDialog, DashboardEditDialog },
+  components: { EmptyState, DashboardFormDialog },
   data() {
     return {
       loading: false,
@@ -372,10 +387,8 @@ export default {
       sortBy: 'updated',
       view: 'grid',
       createDialogVisible: false,
-      deleteMode: false,
-      deleteSelection: [],
       deleting: false,
-      editMode: false,
+      downloading: false,
       editDialogVisible: false,
       editTarget: null,
       pageSize: 9,
@@ -392,9 +405,6 @@ export default {
   computed: {
     isDetail() {
       return !!this.$route.params.id
-    },
-    canManageAny() {
-      return this.dashboards.some(item => item.canDelete)
     },
     activeDashboard() {
       const id = String(this.$route.params.id || '')
@@ -502,67 +512,76 @@ export default {
     openCreate() {
       this.createDialogVisible = true
     },
-    enterDeleteMode() {
-      this.deleteSelection = []
-      this.deleteMode = true
-      this.editMode = false
-    },
-    exitDeleteMode() {
-      this.deleteMode = false
-      this.deleteSelection = []
-    },
-    enterEditMode() {
-      this.editMode = true
-      this.deleteMode = false
-      this.deleteSelection = []
-    },
-    exitEditMode() {
-      this.editMode = false
-    },
     openEdit(item) {
       this.editTarget = item
       this.editDialogVisible = true
-      this.editMode = false
+    },
+    async downloadDashboard(item) {
+      if (!item || this.downloading) return
+      this.downloading = true
+      try {
+        const response = await fetch(
+          brandDashboardService.dashboardDownloadUrl(item.id),
+          { credentials: 'include' }
+        )
+        if (!response.ok) {
+          let message = '下载数据看板失败'
+          try {
+            const data = await response.json()
+            if (data && data.error) message = data.error
+          } catch (error) {
+            // ignore parse failure
+          }
+          throw new Error(message)
+        }
+        const blob = await response.blob()
+        const url = URL.createObjectURL(blob)
+        const anchor = document.createElement('a')
+        anchor.href = url
+        anchor.download = item.fileName || '数据看板.html'
+        document.body.appendChild(anchor)
+        anchor.click()
+        anchor.remove()
+        URL.revokeObjectURL(url)
+        if (this.$message) this.$message.success(`已开始下载「${item.title}」`)
+      } catch (error) {
+        if (this.$message) {
+          this.$message.error(
+            userMessageFromError(error) || '下载数据看板失败'
+          )
+        }
+      } finally {
+        this.downloading = false
+      }
     },
     onCardClick(item) {
       if (!item) return
-      if (this.deleteMode) {
-        if (!item.canDelete) {
-          if (this.$message) this.$message.warning('只能删除自己创建的看板')
-          return
-        }
-        this.toggleSelection(item.id)
-        return
-      }
-      if (this.editMode) {
-        if (!item.canDelete) {
-          if (this.$message) this.$message.warning('只能编辑自己创建的看板')
-          return
-        }
-        this.openEdit(item)
-        return
-      }
       this.openDashboard(item)
     },
-    isSelected(id) {
-      return this.deleteSelection.includes(id)
+    openInNewTab(item) {
+      if (!item) return
+      window.open(this.contentUrl(item), '_blank', 'noopener')
     },
-    toggleSelection(id) {
-      const index = this.deleteSelection.indexOf(id)
-      if (index >= 0) this.deleteSelection.splice(index, 1)
-      else this.deleteSelection.push(id)
-    },
-    async confirmDelete() {
-      if (!this.deleteSelection.length || this.deleting) return
+    async askDelete(item) {
+      if (!item || this.deleting) return
+      try {
+        await this.$confirm(
+          `确定删除看板「${item.title}」吗？删除后不可恢复。`,
+          '删除看板',
+          {
+            type: 'warning',
+            confirmButtonText: '删除',
+            cancelButtonText: '取消',
+            confirmButtonClass: 'el-button--danger'
+          }
+        )
+      } catch (error) {
+        return
+      }
       this.deleting = true
       try {
-        for (const id of this.deleteSelection.slice()) {
-          await brandDashboardService.deleteDashboard(id)
-        }
-        if (this.$message) {
-          this.$message.success(`已删除 ${this.deleteSelection.length} 个看板`)
-        }
-        this.exitDeleteMode()
+        await brandDashboardService.deleteDashboard(item.id)
+        if (this.$message) this.$message.success(`已删除看板「${item.title}」`)
         await this.load()
       } catch (error) {
         if (this.$message) {
@@ -607,6 +626,12 @@ export default {
       const match = text.match(patterns[kind] || patterns.health)
       return match ? match[1] : '--'
     },
+    summaryChip(item) {
+      return `品牌健康分：${this.scorePart(item, 'health')} · 财务分 ${this.scorePart(
+        item,
+        'fin'
+      )} · 运营分 ${this.scorePart(item, 'ops')}`
+    },
     dotClass() {
       return 'is-ok'
     },
@@ -627,23 +652,21 @@ export default {
 .dashboardHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 22px; flex-wrap: wrap;
   h1 { margin: 0; font-size: 24px; color: var(--ui-text); }
   p { margin: 7px 0 0; color: var(--ui-text-secondary); font-size: 13px; }
-  &--detail { flex-wrap: nowrap; p { display: none; } h1 { margin-top: 16px; } }
+  &--detail { flex-wrap: nowrap; p { display: none; } }
 }
 .dashboardToolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   .toolbarSearch { width: 240px; }
   .toolbarControl { width: 110px; }
   .el-button.is-active { background: var(--ui-primary); border-color: var(--ui-primary); color: #fff; }
 }
-.deleteHint { margin: -10px 0 14px; padding: 8px 12px; border: 1px solid #ffd6d6; border-radius: 8px; background: #fff5f5; color: #c0392b; font-size: 12px;
-  &--edit { border-color: #cfe3ff; background: #f4f9ff; color: #1667c9; }
+.hoverActions { position: absolute; top: 10px; right: 12px; z-index: 3; display: flex; gap: 8px; opacity: 0; transform: translateY(-2px); transition: opacity .15s ease, transform .15s ease; pointer-events: none; }
+.dashboardCard:hover .hoverActions, .dashboardCard:focus-within .hoverActions,
+.listCard:hover .hoverActions, .listCard:focus-within .hoverActions { opacity: 1; transform: none; pointer-events: auto; }
+.hoverBtn { width: 30px; height: 30px; border: 1px solid rgba(17,24,39,.08); border-radius: 8px; background: rgba(255,255,255,.94); color: #4b5563; display: grid; place-items: center; cursor: pointer; font-size: 14px; box-shadow: 0 2px 8px rgba(17,24,39,.12); transition: color .15s ease, border-color .15s ease;
+  &:hover { color: #1677ff; border-color: #1677ff; }
+  &--danger:hover { color: #ff4d4f; border-color: #ff4d4f; }
 }
-.selectMark { position: absolute; top: 10px; left: 10px; z-index: 2; width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; background: rgba(0, 0, 0, .35); display: grid; place-items: center; color: #fff; font-size: 13px;
-  &.is-on { background: var(--ui-primary); border-color: var(--ui-primary); }
-  &--row { position: static; flex: 0 0 auto; width: 18px; height: 18px; font-size: 11px; border-width: 1px; border-color: #c3ced8; background: #eef2f5; color: #7c899d;
-    &.is-on { background: var(--ui-primary); border-color: var(--ui-primary); color: #fff; }
-  }
-}
-.dashboardCard.is-selected, .listCard.is-selected { border-color: var(--ui-primary); box-shadow: 0 0 0 2px rgba(0, 153, 102, .18); }
+@media (hover: none) { .hoverActions { opacity: 1; transform: none; pointer-events: auto; } }
 .statePanel { display: grid; gap: 12px; justify-items: start; }
 .dashboardContent { min-height: 260px; }
 .sectionPager { display: flex; justify-content: center; margin: 14px 0 2px; }
@@ -661,7 +684,7 @@ export default {
   }
 }
 .dashboardGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 18px; }
-.dashboardCard { min-width: 0; border: 1px solid var(--ui-border); border-radius: var(--ui-radius-lg); overflow: hidden; background: var(--ui-surface); cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s;
+.dashboardCard { position: relative; min-width: 0; border: 1px solid var(--ui-border); border-radius: var(--ui-radius-lg); overflow: hidden; background: var(--ui-surface); cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s;
   &:hover, &:focus-visible { border-color: var(--ui-border-strong); box-shadow: var(--ui-shadow-hover); transform: translateY(-1px); outline: none; }
 }
 .dashboardPreview { height: 220px; overflow: hidden; position: relative; background: var(--ui-surface-muted);
@@ -676,40 +699,35 @@ export default {
   &--project { background: #e8f8ef; color: #08955d; }
 }
 .dashboardList { display: grid; gap: 14px; }
-.listCard { display: grid; grid-template-columns: 220px minmax(0, 1fr) minmax(0, 1.2fr); gap: 12px; padding: 10px 12px 9px; border: 1px solid var(--ui-border); border-radius: 9px; background: var(--ui-surface); cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s;
-  &:hover, &:focus-visible { border-color: var(--ui-border-strong); box-shadow: var(--ui-shadow-hover); transform: translateY(-1px); outline: none; }
+.listCard { position: relative; display: grid; grid-template-columns: 210px minmax(350px, 1.1fr) 300px 250px; gap: 14px; padding: 14px; border: 1px solid #e6ece9; border-radius: 16px; background: #fff; box-shadow: 0 2px 10px rgba(20, 45, 35, .05); cursor: pointer; transition: .2s ease;
+  &:hover, &:focus-visible { transform: translateY(-1px); box-shadow: 0 12px 32px rgba(20, 45, 35, .08); border-color: #dfe8e3; outline: none; }
 }
-.listHead { grid-column: 1; grid-row: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
-  h2 { margin: 0; font-size: 17px; font-weight: 800; color: var(--ui-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.listMain { min-width: 0; display: flex; flex-direction: column; justify-content: flex-start; gap: 18px; min-height: 146px; padding: 8px 4px 4px 0; }
+.listId { display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  h2 { margin: 0; font-size: 18px; font-weight: 800; color: var(--ui-text); }
+  .levelBadge { height: 24px; display: inline-flex; align-items: center; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }
 }
-.listMore { margin-left: auto; border: 0; background: none; color: #59708e; font-weight: 700; font-size: 14px; line-height: 1; padding: 0 2px; cursor: pointer; }
-.listStatus { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ui-text-secondary); white-space: nowrap; }
-.rowDot { width: 9px; height: 9px; border-radius: 50%; background: #00a66f; flex: 0 0 auto; }
-.listMeta { grid-column: 1; grid-row: 2; display: flex; gap: 18px; color: #70809a; font-size: 12px; margin-top: 7px;
-  span { display: flex; align-items: center; gap: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-}
-.listMetrics { grid-column: 2; grid-row: 1 / 3; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; align-content: start; }
-.metric { min-width: 0; background: linear-gradient(135deg, #f2f8f6, #eef5f4); border-radius: 7px; padding: 9px 12px; min-height: 57px;
-  .metricLabel { font-size: 12px; color: #50627d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .metricValue { margin-top: 3px; font-size: 21px; font-weight: 800; color: var(--ui-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    &--text { font-size: 13px; font-weight: 600; }
-  }
-}
-.listVisual { grid-column: 3; grid-row: 1 / 4; display: grid; grid-template-columns: 1.1fr 1fr; gap: 8px;
-  .panel { min-width: 0; height: 128px; border: 1px solid #edf1f2; border-radius: 7px; padding: 7px 9px; background: #fff; overflow: hidden; display: flex; flex-direction: column; }
-  .panelTitle { font-size: 12px; font-weight: 700; color: #425570; margin-bottom: 4px; }
-  .panelBody { position: relative; flex: 1; min-height: 0; border-radius: 5px; overflow: hidden; background: var(--ui-surface-muted);
-    iframe { width: 1600px; height: 900px; border: 0; transform: scale(.13); transform-origin: left top; pointer-events: none; background: #fff; }
-  }
-  .infoList { flex: 1; display: flex; flex-direction: column; gap: 5px; }
-  .infoRow { display: flex; align-items: center; gap: 8px; font-size: 11px; min-width: 0; }
-  .infoKey { flex: 0 0 auto; color: #8b98ad; }
-  .infoVal { flex: 1; min-width: 0; color: #253750; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-}
-.listScore { grid-column: 1 / 3; grid-row: 3; display: flex; align-items: center; gap: 9px; height: 31px; margin-top: 8px; padding: 0 10px; border-radius: 7px; background: linear-gradient(90deg, #eaf8f3, #f2faf8); color: #344a64; font-size: 12px;
-  i { color: #00a06b; font-size: 15px; flex: 0 0 auto; }
+.listStatus { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #607269; white-space: nowrap; }
+.rowDot { width: 8px; height: 8px; border-radius: 50%; background: #13a77a; flex: 0 0 auto; }
+.healthChip { margin-top: auto; display: inline-flex; align-items: center; gap: 7px; padding: 8px 10px; border-radius: 9px; background: #f4fbf8; color: #417466; font-size: 12px; max-width: 100%;
+  i { color: #0f8a63; font-size: 14px; flex: 0 0 auto; }
   span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
+.listMetrics { min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; align-content: center; }
+.metric { min-width: 0; background: linear-gradient(180deg, #f4faf7, #edf6f2); border: 1px solid #e4f0ea; border-radius: 11px; padding: 13px 12px; min-height: 82px;
+  .metricLabel { font-size: 12px; color: #678078; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .metricValue { font-size: 22px; line-height: 1; font-weight: 800; color: var(--ui-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    &--text { font-size: 16px; }
+  }
+}
+.listPreviewCard, .listInfoCard { min-width: 0; border: 1px solid #e6ece9; border-radius: 12px; background: #fff; padding: 11px; min-height: 146px; display: flex; flex-direction: column; }
+.miniTitle { font-size: 12px; font-weight: 800; color: #42564d; margin-bottom: 9px; }
+.listPreview { height: 102px; border: 1px solid #e7eee9; border-radius: 9px; overflow: hidden; background: #f8fbf9;
+  iframe { width: 1600px; height: 900px; border: 0; transform: scale(.1725); transform-origin: left top; pointer-events: none; background: #fff; }
+}
+.infoRow { display: grid; grid-template-columns: 48px 1fr; gap: 8px; margin: 7px 0; font-size: 12px; min-width: 0; }
+.infoKey { color: #8b9a93; }
+.infoVal { color: #43564e; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dashboardDetail { height: calc(100vh - 170px); min-height: 520px; border: 1px solid var(--ui-border); border-radius: var(--ui-radius-lg); overflow: hidden; background: #fff;
   iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
 }
@@ -717,6 +735,15 @@ export default {
   i { font-size: 42px; color: #8db7a7; }
   strong { margin: 0; color: var(--ui-text); }
   span { margin: 0; }
+}
+@media (max-width: 1280px) {
+  .listCard { grid-template-columns: 185px minmax(360px, 1fr) 280px; }
+  .listInfoCard { display: none; }
+  .listPreview iframe { transform: scale(.16); }
+}
+@media (max-width: 980px) {
+  .listCard { grid-template-columns: 1fr; }
+  .listPreviewCard { display: none; }
 }
 @media (max-width: 760px) {
   .dashboardPage { padding: 18px 14px 28px; }
@@ -726,9 +753,8 @@ export default {
   .dashboardPreview { height: 180px; }
   .dashboardDetail { height: calc(100vh - 220px); min-height: 420px; }
   .listCard { display: flex; flex-direction: column; gap: 10px; }
-  .listHead, .listMeta, .listMetrics, .listVisual, .listScore { grid-column: auto; grid-row: auto; }
+  .listMain { min-height: auto; padding: 0; }
   .listMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .listVisual .panel { height: 120px; }
   .sectionTitle p { display: none; }
 }
 </style>
