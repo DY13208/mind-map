@@ -3,6 +3,7 @@ import VueRouter from 'vue-router'
 import {
   consumeSkipMyMapsRedirect,
   getLastRoom,
+  isMyMapsRootPath,
   migrateLegacyHashUrl,
   rememberLastRoom
 } from './utils/roomLocation'
@@ -284,9 +285,9 @@ const router = new VueRouter({
   routes
 })
 
-// 全局兜底：直接打开 /my-maps 时也能跳回最近房间
+// 仅 /my-maps 根路径回跳最近房间；/my-maps/folder/... 保持文件夹浏览
 router.beforeEach((to, from, next) => {
-  if (!to.path.startsWith('/my-maps')) {
+  if (!isMyMapsRootPath(to.path)) {
     next()
     return
   }
