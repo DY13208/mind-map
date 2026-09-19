@@ -2324,6 +2324,8 @@ export default {
           : ['html']
         ).slice(),
         extraNote: note,
+        refMaps: Array.isArray(job.refMaps) ? job.refMaps.slice() : [],
+        refMapsNote: job.refMapsNote || '',
         model: job.model || this.runModel,
         backend: job.backend || this.runBackend,
         actor: this.userInfo.name || '台账',

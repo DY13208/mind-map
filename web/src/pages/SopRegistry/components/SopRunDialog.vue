@@ -37,6 +37,57 @@
       <a :href="outputRulesUrls.xmind" download="SOP输出规则.xmind">下载规则脑图</a>
       <button type="button" class="runOutputRulesLink" :disabled="cloningRules" @click="cloneOutputRules">{{ cloningRules ? '正在复制…' : '复制到我的空间' }}</button>
     </p>
+    <div class="runSectionTitle">
+      <strong>引用辅助决策</strong>
+      <span>可选 · 最多 {{ refMapLimit }} 张整图</span>
+    </div>
+    <div class="runRefMapsBox">
+      <el-select
+        v-model="refMapKeys"
+        class="runRefMapsSelect"
+        size="small"
+        multiple
+        filterable
+        clearable
+        collapse-tags
+        :multiple-limit="refMapLimit"
+        :loading="refMapsLoading"
+        placeholder="选择脑图作为决策参考（如「输出规则」）"
+        @visible-change="onRefMapsDropdown"
+      >
+        <el-option
+          v-for="item in refMapOptions"
+          :key="item.roomKey"
+          :label="item.title"
+          :value="item.roomKey"
+        >
+          <span class="runRefMapOptTitle">{{ item.title }}</span>
+          <span class="runRefMapOptKey">{{ item.roomKey }}</span>
+        </el-option>
+      </el-select>
+      <el-button
+        class="runRefMapsRefresh"
+        size="small"
+        icon="el-icon-refresh"
+        :loading="refMapsLoading"
+        @click="loadRefMapOptions(true)"
+      >
+        刷新
+      </el-button>
+    </div>
+    <div v-if="selectedRefMaps.length" class="runRefMapTags">
+      <span
+        v-for="item in selectedRefMaps"
+        :key="item.roomKey"
+        class="runRefMapTag"
+      >
+        <span class="runRefMapTagTitle">{{ item.title }}</span>
+        <button type="button" :aria-label="'移除 ' + item.title" @click="removeRefMap(item.roomKey)">
+          <i class="el-icon-close" />
+        </button>
+      </span>
+    </div>
+    <p class="runRefMapsTip">入队时会拉取所选脑图大纲写入提示词，仅作参考，不覆盖本 SOP 步骤与内置输出规则。</p>
     <div v-if="submitLoading" class="runSubmitLoading">正在读取资料模板…</div>
     <div v-else-if="submitFields.length" class="runSubmitBox">
       <div class="runSubmitHead"><strong>先填写资料再执行</strong><span v-if="submitZoneHint">{{ submitZoneHint }}</span></div>
@@ -83,6 +134,13 @@ import { getSharedSopRunQueue, resolveSopRunConcurrency } from '@/utils/sopRunQu
 import { SOP_ATTACHMENT_ACCEPT, SOP_ATTACHMENT_LIMIT, validateSopAttachment, uploadSopAttachment, formatSopAttachmentNote } from '@/utils/sopRunAttachments'
 import { extractSubmitMaterialFields, formatSubmitMaterialNote, missingSubmitMaterialLabels } from '@/utils/sopSubmitMaterial'
 import { fetchAiModels, getOpenclawConfig, saveOpenclawConfig, AI_BACKEND_OPENCLAW } from '@/utils/agentChat'
+import {
+  SOP_REF_MAP_LIMIT,
+  listRefMapCandidates,
+  loadRefMapOutlines,
+  formatRefMapsPromptBlock,
+  toRefMapsMeta
+} from '@/utils/sopRunRefMaps'
 
 export default {
   name: 'SopRunDialog',
@@ -111,7 +169,12 @@ export default {
       modelsLoading: false,
       openclawModels: [{ id: 'openclaw/default', name: 'openclaw/default' }],
       AI_BACKEND_OPENCLAW,
-      queue: null
+      queue: null,
+      refMapLimit: SOP_REF_MAP_LIMIT,
+      refMapKeys: [],
+      refMapOptions: [],
+      refMapsLoading: false,
+      refMapsLoadedOnce: false
     }
   },
   computed: {
@@ -119,6 +182,14 @@ export default {
       if (this.submitSource === 'recruit_fallback') return '招聘类保底模板（大纲未抽出字段）'
       if (this.submitSource === 'outline_zone_empty') return '大纲有「提交资料」区，请按实际要求填写'
       return this.submitZones.length ? `来自：${this.submitZones.slice(0, 2).join(' / ')}` : ''
+    },
+    selectedRefMaps() {
+      const byKey = new Map(
+        (this.refMapOptions || []).map(item => [item.roomKey, item])
+      )
+      return (this.refMapKeys || [])
+        .map(key => byKey.get(key) || { roomKey: key, title: key })
+        .filter(Boolean)
     }
   },
   watch: {
@@ -167,11 +238,41 @@ export default {
       this.submitFields = []
       this.submitZones = []
       this.submitSource = ''
+      this.refMapKeys = []
       this.backend = AI_BACKEND_OPENCLAW
       this.setLocalConfig({ aiBackend: AI_BACKEND_OPENCLAW })
       this.model = getOpenclawConfig().model || 'openclaw/default'
       this.loadModels()
       this.loadSubmitTemplate()
+      this.loadRefMapOptions()
+    },
+    onRefMapsDropdown(open) {
+      if (open) this.loadRefMapOptions()
+    },
+    removeRefMap(roomKey) {
+      const key = String(roomKey || '').trim()
+      this.refMapKeys = (this.refMapKeys || []).filter(k => k !== key)
+    },
+    async loadRefMapOptions(force) {
+      if (this.refMapsLoading) return
+      if (this.refMapsLoadedOnce && !force && this.refMapOptions.length) return
+      this.refMapsLoading = true
+      try {
+        this.refMapOptions = await listRefMapCandidates({
+          excludeRoomKey: this.roomKey
+        })
+        this.refMapsLoadedOnce = true
+        const valid = new Set(this.refMapOptions.map(i => i.roomKey))
+        this.refMapKeys = (this.refMapKeys || []).filter(k => valid.has(k))
+      } catch (err) {
+        if (force) {
+          this.$message.warning(
+            `脑图列表加载失败：${(err && err.message) || '未知错误'}`
+          )
+        }
+      } finally {
+        this.refMapsLoading = false
+      }
     },
     onFilesPicked(event) {
       const files = Array.from(event.target.files || [])
@@ -309,11 +410,34 @@ export default {
       )
       this.enqueueing = true
       try {
+        let refMapsNote = ''
+        let refMapsMeta = []
+        if (this.selectedRefMaps.length) {
+          const loaded = await loadRefMapOutlines(this.selectedRefMaps)
+          const failed = loaded.filter(r => r.error || !r.outline)
+          const ok = loaded.filter(r => r.outline && !r.error)
+          if (failed.length) {
+            const names = failed
+              .map(r => r.title || r.roomKey)
+              .slice(0, 3)
+              .join('、')
+            this.$message.warning(
+              `有 ${failed.length} 张引用脑图未能读取大纲（${names}），将仅使用可读的引用`
+            )
+          }
+          refMapsNote = formatRefMapsPromptBlock(ok)
+          refMapsMeta = toRefMapsMeta(loaded)
+          if (this.selectedRefMaps.length && !ok.length) {
+            this.$message.warning('所选引用脑图均无法读取，将不带引用继续入队')
+          }
+        }
         const result = await this.queue.enqueue({
           roomKey: this.roomKey,
           sop: this.target,
           outputIds: this.outputIds.slice(),
           extraNote: note || this.extraNote,
+          refMaps: refMapsMeta,
+          refMapsNote,
           model: this.model,
           backend: AI_BACKEND_OPENCLAW,
           actor: this.actor,

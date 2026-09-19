@@ -398,7 +398,7 @@ function buildFullMapOutlineBlock(ctx) {
   ].join('\n')
 }
 
-function buildUserPrompt({ ctx, outputs, extraNote }) {
+function buildUserPrompt({ ctx, outputs, extraNote, refMapsNote }) {
   const selected = (outputs || [])
     .map(o => `- ${o.label}：${o.prompt}`)
     .join('\n')
@@ -407,6 +407,7 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
   const needFiles = !!(outputs && outputs.length)
   const rulesBlock = formatOutputRulesBlock(outputs || [])
   const mapBlock = buildFullMapOutlineBlock(ctx)
+  const refBlock = String(refMapsNote || '').trim()
   const runtimeSourceBoundary =
     ctx.source === 'runtime_tree'
       ? [
@@ -431,6 +432,7 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
       '- 执行按本 SOP 步骤做；步骤里的历史推算必须做；勿因别的 D 未跑完而停；做完后再写「脑图诊断（全图）」。',
       runtimeSourceBoundary,
       extraNote ? `\n## 额外要求\n${extraNote}` : '',
+      refBlock ? `\n${refBlock}` : '',
       '',
       rulesBlock,
       '',
@@ -459,6 +461,7 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
     '【两段式】执行按本 SOP 步骤依次做（步骤里写的历史推算必须做）；勿因别的 D 未跑完而停。做完后再写「## 脑图诊断（全图）」。禁止空壳目标表冒充完成。',
     runtimeSourceBoundary,
     extraNote ? `\n## 额外要求\n${extraNote}` : '',
+    refBlock ? `\n${refBlock}` : '',
     '',
     rulesBlock,
     '',
@@ -1346,6 +1349,7 @@ export async function runSopWithWorkbuddy({
   sop,
   outputIds = ['html'],
   extraNote = '',
+  refMapsNote = '',
   actor = '台账',
   model,
   backend: backendInput,
@@ -1864,7 +1868,7 @@ export async function runSopWithWorkbuddy({
     : ''
 
   const promptUser =
-    buildUserPrompt({ ctx, outputs, extraNote }) + notifyExtra
+    buildUserPrompt({ ctx, outputs, extraNote, refMapsNote }) + notifyExtra
   const promptSystem = buildSystemPrompt()
   if (onContext) {
     onContext({
@@ -1878,6 +1882,7 @@ export async function runSopWithWorkbuddy({
       businessFingerprint: ctx.businessFingerprint || '',
       userPromptChars: promptUser.length,
       systemPromptChars: promptSystem.length,
+      refMapsChars: String(refMapsNote || '').length,
       notifyCount: notifyResults.length,
       steps: nodeProgress.slice()
     })
