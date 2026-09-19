@@ -97,7 +97,7 @@ services:
       # Start-Docker 鑷姩娉ㄥ叆鐨?OpenClaw Token 绛夛紙gitignore锛?
       - ./docker/runtime-config.local.js:/usr/share/nginx/html/runtime-config.js:ro
     ports:
-      - "${MIND_MAP_PORT:-8080}:80"
+      - "${MIND_MAP_HTTP_PORT:-8990}:80"
     depends_on:
       postgres:
         condition: service_healthy
@@ -234,6 +234,27 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+
+  # ===== 公网 TLS 终止（唯一对外入口）=====
+  # 路由器只把公网 8989 转到本机，所以 8989 必须是 HTTPS。
+  # 宿主 8989 -> 容器 443(TLS)，再反代到 app:80（明文，只走 docker 内网）。
+  # 证书放 certs/，已在 .gitignore 排除，私钥不入库。
+  tls:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./docker/tls/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    ports:
+      - "${MIND_MAP_PORT:-8989}:443"
+    depends_on:
+      - app
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --no-check-certificate --spider -T 3 https://127.0.0.1/ ; c=$$?; [ $$c -eq 0 ] || [ $$c -eq 8 ]"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
 
 volumes:
   mind-map-pg:
