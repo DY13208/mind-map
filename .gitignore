@@ -32,4 +32,4 @@ workbuddy_to_api/
 output/*.html
 output/*.xlsx
 output/*.csv
-output/*.json
+output/*.jsonoutput/*.py
