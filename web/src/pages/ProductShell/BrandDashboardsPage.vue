@@ -538,7 +538,7 @@ export default {
         const url = URL.createObjectURL(blob)
         const anchor = document.createElement('a')
         anchor.href = url
-        anchor.download = item.fileName || '数据看板.html'
+        anchor.download = this.downloadFileName(item)
         document.body.appendChild(anchor)
         anchor.click()
         anchor.remove()
@@ -553,6 +553,12 @@ export default {
       } finally {
         this.downloading = false
       }
+    },
+    downloadFileName(item) {
+      let name = String((item && item.fileName) || '').trim()
+      if (!name) name = `${(item && item.title) || '数据看板'}.html`
+      if (!/\.html?$/i.test(name)) name += '.html'
+      return name
     },
     onCardClick(item) {
       if (!item) return
