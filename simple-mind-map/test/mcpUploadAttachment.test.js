@@ -14,7 +14,9 @@ async function main() {
   const { resolveAttachmentUploadInput, remapAttachmentFilePath } = await load()
 
   assert.equal(
-    remapAttachmentFilePath('C:\\Users\\YiRan\\WorkBuddy\\a\\b.pdf'),
+    remapAttachmentFilePath('C:\\Users\\demo\\WorkBuddy\\a\\b.pdf', {
+      WORKBUDDY_HOST_DIR: 'C:/Users/demo/WorkBuddy'
+    }),
     '/workbuddy/a/b.pdf'
   )
   assert.equal(
