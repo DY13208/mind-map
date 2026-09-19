@@ -405,7 +405,7 @@ function buildFullMapOutlineBlock(ctx) {
   ].join('\n')
 }
 
-function buildUserPrompt({ ctx, outputs, extraNote }) {
+function buildUserPrompt({ ctx, outputs, extraNote, refMapsNote }) {
   const selected = (outputs || [])
     .map(o => `- ${o.label}：${o.prompt}`)
     .join('\n')
@@ -415,6 +415,7 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
   const rulesBlock = formatOutputRulesBlock(outputs || [])
   const savedRulesBlock = formatOutputRulesPrompt(ctx.outputRules)
   const mapBlock = buildFullMapOutlineBlock(ctx)
+  const refBlock = String(refMapsNote || '').trim()
   const runtimeSourceBoundary =
     ctx.source === 'runtime_tree'
       ? [
@@ -438,6 +439,9 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
       '- 若下方已有「## 用户提交资料」，直接使用；不要要求用户再在界面里补数或贴链接。',
       '- 执行按本 SOP 步骤做；步骤里的历史推算必须做；勿因别的 D 未跑完而停；做完后再写「脑图诊断（全图）」。',
       runtimeSourceBoundary,
+      extraNote ? `\n## 额外要求\n${extraNote}` : '',
+      refBlock ? `\n${refBlock}` : '',
+      '',
       rulesBlock,
       savedRulesBlock,
       extraNote ? `\n## 额外要求（优先于已保存规则）\n${extraNote}` : '',
@@ -466,6 +470,9 @@ function buildUserPrompt({ ctx, outputs, extraNote }) {
     '注意：中间快照、_map_full/_map_outline、MCP 日志不要出现在产物清单里。',
     '【两段式】执行按本 SOP 步骤依次做（步骤里写的历史推算必须做）；勿因别的 D 未跑完而停。做完后再写「## 脑图诊断（全图）」。禁止空壳目标表冒充完成。',
     runtimeSourceBoundary,
+    extraNote ? `\n## 额外要求\n${extraNote}` : '',
+    refBlock ? `\n${refBlock}` : '',
+    '',
     rulesBlock,
     savedRulesBlock,
     extraNote ? `\n## 额外要求（优先于已保存规则）\n${extraNote}` : '',
@@ -1354,6 +1361,7 @@ export async function runSopWithWorkbuddy({
   sop,
   outputIds = ['html'],
   extraNote = '',
+  refMapsNote = '',
   actor = '台账',
   model,
   backend: backendInput,
@@ -1872,7 +1880,7 @@ export async function runSopWithWorkbuddy({
     : ''
 
   const promptUser =
-    buildUserPrompt({ ctx, outputs, extraNote }) + notifyExtra
+    buildUserPrompt({ ctx, outputs, extraNote, refMapsNote }) + notifyExtra
   const promptSystem = buildSystemPrompt()
   if (onContext) {
     onContext({
@@ -1886,6 +1894,7 @@ export async function runSopWithWorkbuddy({
       businessFingerprint: ctx.businessFingerprint || '',
       userPromptChars: promptUser.length,
       systemPromptChars: promptSystem.length,
+      refMapsChars: String(refMapsNote || '').length,
       notifyCount: notifyResults.length,
       steps: nodeProgress.slice()
     })
