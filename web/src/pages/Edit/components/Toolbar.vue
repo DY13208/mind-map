@@ -215,37 +215,13 @@
           </div>
           <div
             class="toolbarBtn"
-            data-testid="back-to-files"
-            title="返回首页"
+            data-testid="back-to-my-maps"
+            title="返回脑图"
             v-if="$route.query.room"
-            @click="goToFiles"
+            @click="goToMyMaps"
           >
             <span class="icon el-icon-back"></span>
-            <span class="text">返回首页</span>
-          </div>
-          <div
-            class="toolbarBtn"
-            data-testid="sop-registry"
-            @click="openSopRegistry"
-            v-if="!isReadonly"
-          >
-            <span class="icon iconfont icongaikuozonglan"></span>
-            <span class="text">{{ $t('toolbar.sopRegistry') }}</span>
-          </div>
-          <div
-            class="toolbarBtn sopRunBtn"
-            data-testid="run-selected-sop"
-            :class="{ disabled: !canRunSop }"
-            :title="
-              canRunSop
-                ? `运行：${runSopTitle}`
-                : '请先选择 D：标题 节点'
-            "
-            @click="runSelectedSop"
-            v-if="!isReadonly"
-          >
-            <span class="icon el-icon-video-play"></span>
-            <span class="text">运行</span>
+            <span class="text">脑图</span>
           </div>
           <div
             class="toolbarBtn"
@@ -345,7 +321,6 @@ import { getData } from '../../../api'
 import ToolbarNodeBtnList from './ToolbarNodeBtnList.vue'
 import { throttle, isMobile } from 'simple-mind-map/src/utils/index'
 import { stringifyJsonOffMainThread } from '@/utils/importTree'
-import { roomFromLocation } from '@/utils/roomLocation'
 
 // 工具栏
 let fileHandle = null
@@ -381,20 +356,6 @@ export default {
     Export,
     Import,
     ToolbarNodeBtnList
-  },
-  props: {
-    returnFolderId: {
-      type: String,
-      default: ''
-    },
-    canRunSop: {
-      type: Boolean,
-      default: false
-    },
-    runSopTitle: {
-      type: String,
-      default: ''
-    }
   },
   data() {
     return {
@@ -598,22 +559,6 @@ export default {
       }
     },
 
-    openSopRegistry() {
-      const room = roomFromLocation(this.$route) || ''
-      this.$router.push({
-        path: '/sop',
-        query: room ? { room } : {}
-      })
-    },
-
-    runSelectedSop() {
-      if (!this.canRunSop) {
-        this.$message.warning('请先选择 D：标题 节点')
-        return
-      }
-      this.$emit('run-sop')
-    },
-
     syncDisplayedSaveChip(next) {
       const chip = next || 'offline'
       if (this.saveChipTimer) {
@@ -782,13 +727,8 @@ export default {
       }
     },
 
-    // 返回 Product Shell 文件列表
-    goToFiles() {
-      const folderId = String(this.returnFolderId || '').trim()
-      const destination = folderId
-        ? { name: 'FolderFiles', params: { id: folderId } }
-        : { name: 'Files' }
-      this.$router.push(destination).catch(() => {})
+    goToMyMaps() {
+      this.$router.push({ path: '/my-maps' }).catch(() => {})
     },
 
     // 扫描本地文件夹
@@ -1261,10 +1201,6 @@ export default {
         color: #bcbcbc;
         cursor: not-allowed;
         pointer-events: none;
-      }
-
-      &.sopRunBtn.disabled {
-        pointer-events: auto;
       }
 
       .icon {
