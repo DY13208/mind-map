@@ -274,13 +274,20 @@ wiki_read    pageId=<页面id> format=html
 
 ### 接入 WorkBuddy
 
-签发令牌（默认取 `.env` 的 `AUTH_DEV_BYPASS_USER_ID` 作为身份）：
+**推荐**：打开产品壳 [MCP 接入](/mcp-access)，登录后点「复制完整配置」。会同时得到：
+
+- `mind-map` → `http://<当前域名>/mcp`（导图）
+- `mind-map-wiki` → `http://<当前域名>/knowledge-mcp/mcp`（Wiki 全库只读，经 Nginx 反代，无需再开 18792）
+
+Wiki 令牌由当前登录账号签发，权限与 Wiki 网页一致；账号需先在侧栏 Wiki 完成一次单点登录以建立 Docmost 身份映射。
+
+手动签发（调试用，默认取 `.env` 的 `AUTH_DEV_BYPASS_USER_ID`）：
 
 ```bash
 node scripts/wiki-mcp-token.js dev-local
 ```
 
-配进 `~/.workbuddy/mcp.json`：
+配进 `~/.workbuddy/mcp.json`（直连 18792 时）：
 
 ```json
 {
@@ -294,7 +301,7 @@ node scripts/wiki-mcp-token.js dev-local
 }
 ```
 
-令牌由 `.env` 的 `KNOWLEDGE_MCP_JWT_SECRET` 签发，`iss`/`aud` 必须与服务端 `KNOWLEDGE_MCP_JWT_ISS`/`KNOWLEDGE_MCP_JWT_AUD` 一致。TTL 取 `KNOWLEDGE_MCP_JWT_TTL_SEC`；WorkBuddy 用的是静态头部，TTL 需足够长（本项目设为 90 天），到期后重新跑签发命令换 token。
+令牌由 `.env` 的 `KNOWLEDGE_MCP_JWT_SECRET` 签发，`iss`/`aud` 必须与服务端 `KNOWLEDGE_MCP_JWT_ISS`/`KNOWLEDGE_MCP_JWT_AUD` 一致。TTL 取 `KNOWLEDGE_MCP_JWT_TTL_SEC`；WorkBuddy 用的是静态头部，TTL 需足够长（本项目设为 90 天），到期后重新在 MCP 接入页复制配置或跑签发命令换 token。
 
 ### 相关变量
 
@@ -305,3 +312,59 @@ node scripts/wiki-mcp-token.js dev-local
 | `KNOWLEDGE_WIKI_FALLBACK_USER_ID` | 可选。调用者无 Wiki 账号时回落到固定用户；不设则不回落 |
 | `KNOWLEDGE_WIKI_MAX_BODY` | `wiki_read` 正文上限，默认 120000 |
 | `KNOWLEDGE_WIKI_SEARCH_LIMIT` / `_MAX_LIMIT` | 搜索默认条数 / 上限，默认 20 / 50 |
+| `KNOWLEDGE_MCP_BIND` | knowledge-mcp 的端口监听地址。默认 `127.0.0.1`（仅同机）；跨机访问设为 `0.0.0.0`，**必须同时配防火墙来源限制** |
+
+---
+
+## 7. 跨机访问（服务机与 WorkBuddy 不在同一台）
+
+默认 knowledge-mcp 只绑 `127.0.0.1`，导图 MCP（8989）绑 `0.0.0.0`——**两者策略不同，不要照搬**。照搬的典型症状是
+`streamableHttp connect failed ... ECONNREFUSED <局域网IP>:18792`（令牌完全正确也连不上，因为那个地址上没有监听）。
+
+### 同一局域网（推荐做法）
+
+**核心权衡：不要上 TLS 反向代理。** 自签证书会被 MCP 客户端拒绝，除非公司有内网 CA 签发可信证书。同网段用「绑定 + 防火墙白名单 + 缩短令牌有效期」更实际。
+
+服务机 B：
+
+```bash
+# 1. 放开绑定
+#    .env 里改：KNOWLEDGE_MCP_BIND=0.0.0.0
+#    然后重建（改端口必须 recreate，restart 无效）
+node scripts/docker-up.js up
+
+# 2. 放行防火墙（管理员 PowerShell）——务必限定来源，不要 Any
+New-NetFirewallRule -DisplayName "mind-map knowledge-mcp 18792" `
+  -Direction Inbound -Protocol TCP -LocalPort 18792 `
+  -Action Allow -RemoteAddress 192.168.1.0/24
+
+# 3. 在 B 上签令牌（需要 B 的 .env 里有同一个 KNOWLEDGE_MCP_JWT_SECRET）
+node scripts/wiki-mcp-token.js dev-local
+```
+
+客户机 A：
+
+```json
+"mind-map-wiki": {
+  "type": "http",
+  "url": "http://<B的IP>:18792/mcp",
+  "headers": { "Authorization": "Bearer <上面的 token>" }
+}
+```
+
+验证顺序：B 上 `curl http://127.0.0.1:18792/health` → B 上 `curl http://<B的IP>:18792/health`（能通说明绑定+防火墙都对了）→ A 上 `curl http://<B的IP>:18792/health` → 最后在 WorkBuddy 里点信任并真调一次 `wiki_search`。
+
+### 迁移注意
+
+- **`.env` 与 `.secrets/wiki.env` 必须一起带走**，否则签发与校验密钥不一致 → 工具报 `unauthorized`。
+- Wiki 数据在 Docker volume（`docmost-db` / `docmost-storage`）里，不迁卷就只有空站。
+- 跨机后建议把 `KNOWLEDGE_MCP_JWT_TTL_SEC` 从 90 天降到 7–30 天，到期重签。
+- **3040（Wiki 网页）、15432 / 16379（Postgres / Redis）不要跨机开放**，Wiki 只从 3040 网关进。
+
+### 安全边界（务必知悉）
+
+令牌是**静态 bearer、走明文 HTTP**。跨机暴露后，同网段任何拿到该 token 的人都能按对应账号权限读**整个 Wiki 正文**。因此：
+
+- 防火墙 `-RemoteAddress` 必须限定到具体客户机或受控网段；
+- 不要把 18792 暴露到公网；异地访问改用 SSH 隧道（`ssh -N -L 18792:127.0.0.1:18792 user@B`）或 Tailscale / WireGuard，此时服务端可保持 `127.0.0.1` 不暴露；
+- 服务侧已有 JWT 校验、限流（每用户 60 次/分钟）与审计日志（`/data/audit/knowledge-mcp.jsonl`），出问题可回溯。
