@@ -121,46 +121,40 @@
                 @click="onCardClick(item)"
                 @keydown.enter="onCardClick(item)"
               >
-                <div class="hoverActions">
-                  <button
-                    v-if="item.canDelete"
-                    type="button"
-                    class="hoverBtn"
-                    title="编辑"
-                    aria-label="编辑"
-                    @click.stop="openEdit(item)"
-                  >
-                    <i class="el-icon-edit" />
-                  </button>
-                  <button
-                    type="button"
-                    class="hoverBtn"
-                    title="下载"
-                    aria-label="下载"
-                    :disabled="downloading"
-                    @click.stop="downloadDashboard(item)"
-                  >
-                    <i class="el-icon-download" />
-                  </button>
-                  <button
-                    type="button"
-                    class="hoverBtn"
-                    title="在新页面打开"
-                    aria-label="在新页面打开"
-                    @click.stop="openInNewTab(item)"
-                  >
-                    <i class="el-icon-top-right" />
-                  </button>
-                  <button
-                    v-if="item.canDelete"
-                    type="button"
-                    class="hoverBtn hoverBtn--danger"
-                    title="删除"
-                    aria-label="删除"
-                    @click.stop="askDelete(item)"
-                  >
-                    <i class="el-icon-delete" />
-                  </button>
+                <div class="dashboardActions" @click.stop @keydown.stop>
+                  <el-dropdown trigger="click" placement="bottom-end">
+                    <button
+                      type="button"
+                      class="dashboardMoreBtn"
+                      title="更多操作"
+                      :aria-label="`${item.title}：更多操作`"
+                    >
+                      <i class="el-icon-more" aria-hidden="true" />
+                    </button>
+                    <el-dropdown-menu slot="dropdown" class="dashboardActionMenu">
+                      <el-dropdown-item
+                        v-if="item.canDelete"
+                        icon="el-icon-edit"
+                        @click.native.stop="openEdit(item)"
+                      >编辑</el-dropdown-item>
+                      <el-dropdown-item
+                        icon="el-icon-download"
+                        :disabled="downloading"
+                        @click.native.stop="downloadDashboard(item)"
+                      >下载</el-dropdown-item>
+                      <el-dropdown-item
+                        icon="el-icon-top-right"
+                        @click.native.stop="openInNewTab(item)"
+                      >在新页面打开</el-dropdown-item>
+                      <el-dropdown-item
+                        v-if="item.canDelete"
+                        divided
+                        icon="el-icon-delete"
+                        class="dashboardActionMenu__danger"
+                        @click.native.stop="askDelete(item)"
+                      >删除</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </el-dropdown>
                 </div>
                 <div class="dashboardPreview">
                   <iframe
@@ -191,46 +185,40 @@
                 @click="onCardClick(item)"
                 @keydown.enter="onCardClick(item)"
               >
-                <div class="hoverActions">
-                  <button
-                    v-if="item.canDelete"
-                    type="button"
-                    class="hoverBtn"
-                    title="编辑"
-                    aria-label="编辑"
-                    @click.stop="openEdit(item)"
-                  >
-                    <i class="el-icon-edit" />
-                  </button>
-                  <button
-                    type="button"
-                    class="hoverBtn"
-                    title="下载"
-                    aria-label="下载"
-                    :disabled="downloading"
-                    @click.stop="downloadDashboard(item)"
-                  >
-                    <i class="el-icon-download" />
-                  </button>
-                  <button
-                    type="button"
-                    class="hoverBtn"
-                    title="在新页面打开"
-                    aria-label="在新页面打开"
-                    @click.stop="openInNewTab(item)"
-                  >
-                    <i class="el-icon-top-right" />
-                  </button>
-                  <button
-                    v-if="item.canDelete"
-                    type="button"
-                    class="hoverBtn hoverBtn--danger"
-                    title="删除"
-                    aria-label="删除"
-                    @click.stop="askDelete(item)"
-                  >
-                    <i class="el-icon-delete" />
-                  </button>
+                <div class="dashboardActions" @click.stop @keydown.stop>
+                  <el-dropdown trigger="click" placement="bottom-end">
+                    <button
+                      type="button"
+                      class="dashboardMoreBtn"
+                      title="更多操作"
+                      :aria-label="`${item.title}：更多操作`"
+                    >
+                      <i class="el-icon-more" aria-hidden="true" />
+                    </button>
+                    <el-dropdown-menu slot="dropdown" class="dashboardActionMenu">
+                      <el-dropdown-item
+                        v-if="item.canDelete"
+                        icon="el-icon-edit"
+                        @click.native.stop="openEdit(item)"
+                      >编辑</el-dropdown-item>
+                      <el-dropdown-item
+                        icon="el-icon-download"
+                        :disabled="downloading"
+                        @click.native.stop="downloadDashboard(item)"
+                      >下载</el-dropdown-item>
+                      <el-dropdown-item
+                        icon="el-icon-top-right"
+                        @click.native.stop="openInNewTab(item)"
+                      >在新页面打开</el-dropdown-item>
+                      <el-dropdown-item
+                        v-if="item.canDelete"
+                        divided
+                        icon="el-icon-delete"
+                        class="dashboardActionMenu__danger"
+                        @click.native.stop="askDelete(item)"
+                      >删除</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </el-dropdown>
                 </div>
                 <div class="listMain">
                   <div class="listId">
@@ -665,14 +653,18 @@ export default {
   .toolbarControl { width: 110px; }
   .el-button.is-active { background: var(--ui-primary); border-color: var(--ui-primary); color: #fff; }
 }
-.hoverActions { position: absolute; top: 10px; right: 12px; z-index: 3; display: flex; gap: 8px; opacity: 0; transform: translateY(-2px); transition: opacity .15s ease, transform .15s ease; pointer-events: none; }
-.dashboardCard:hover .hoverActions, .dashboardCard:focus-within .hoverActions,
-.listCard:hover .hoverActions, .listCard:focus-within .hoverActions { opacity: 1; transform: none; pointer-events: auto; }
-.hoverBtn { width: 30px; height: 30px; border: 1px solid rgba(17,24,39,.08); border-radius: 8px; background: rgba(255,255,255,.94); color: #4b5563; display: grid; place-items: center; cursor: pointer; font-size: 14px; box-shadow: 0 2px 8px rgba(17,24,39,.12); transition: color .15s ease, border-color .15s ease;
-  &:hover { color: #1677ff; border-color: #1677ff; }
-  &--danger:hover { color: #ff4d4f; border-color: #ff4d4f; }
+.dashboardActions { position: absolute; top: 10px; right: 12px; z-index: 3; opacity: 0; pointer-events: none; }
+.dashboardCard:hover .dashboardActions, .dashboardCard:focus-within .dashboardActions,
+.listCard:hover .dashboardActions, .listCard:focus-within .dashboardActions { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .dashboardActions { opacity: 1; pointer-events: auto; } }
+.dashboardMoreBtn { width: 36px; height: 36px; border: 1px solid var(--ui-border); border-radius: 8px; background: var(--ui-surface, #fff); color: var(--ui-text-secondary); display: grid; place-items: center; cursor: pointer; font-size: 18px;
+  &:hover { color: var(--ui-primary); border-color: var(--ui-primary); }
+  &:focus-visible { outline: 2px solid var(--ui-primary); outline-offset: 2px; }
 }
-@media (hover: none) { .hoverActions { opacity: 1; transform: none; pointer-events: auto; } }
+.dashboardActionMenu { min-width: 156px; }
+.dashboardActionMenu__danger { color: #c03639;
+  &:hover, &:focus { color: #c03639; background: #fff1f0; }
+}
 .statePanel { display: grid; gap: 12px; justify-items: start; }
 .dashboardContent { min-height: 260px; }
 .sectionPager { display: flex; justify-content: center; margin: 14px 0 2px; }
