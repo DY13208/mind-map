@@ -60,6 +60,9 @@ test('collapsed render removes old outgoing connectors but keeps the incoming ed
 for (const command of ['moveNodeTo', 'insertBefore', 'insertAfter']) {
   test(command + ' clears old connectors before the deferred render without changing siblings', () => {
     const a = node('a')
+    a.customLeft = 100
+    a.customTop = 200
+    a.setData({ customLeft: 100, customTop: 200 })
     const sibling = node('sibling')
     const old = node('old', [a, sibling])
     const b = node('b')
@@ -80,6 +83,10 @@ for (const command of ['moveNodeTo', 'insertBefore', 'insertAfter']) {
     renderer[command](a, command === 'moveNodeTo' ? target : b)
     assert.equal(renderCalls, 1)
     assert.equal(a.parent, target)
+    assert.equal(a.customLeft, undefined)
+    assert.equal(a.customTop, undefined)
+    assert.equal(a.getData('customLeft'), null)
+    assert.equal(a.getData('customTop'), null)
     assert.deepEqual(old.children, [sibling])
     assert.deepEqual(old.nodeData.children, [sibling.nodeData])
     assert.equal(target.children.indexOf(a), command === 'insertBefore' ? 0 : 1)
