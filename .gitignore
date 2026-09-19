@@ -37,3 +37,6 @@ output/*.json
 .backup-tls/
 certs/
 output/*.py
+
+# MCP 默认挂载目录（无 WORKBUDDY_HOST_DIR 时用）
+/data/workbuddy/
