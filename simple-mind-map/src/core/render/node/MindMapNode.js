@@ -895,6 +895,9 @@ class MindMapNode {
   //  连线
   renderLine(deep = false) {
     if (this.getData('expand') === false) {
+      // A move can change the old parent's expand state before the next paint.
+      // Its outgoing connectors must not survive the collapsed render pass.
+      this.removeLine()
       return
     }
     let childrenLen = this.getChildrenLength()

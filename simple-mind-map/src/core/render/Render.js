@@ -1125,14 +1125,19 @@ class Render {
     if (this.activeNodeList.length <= 0 && appointNodes.length <= 0) {
       return
     }
-    const list = appointNodes.length > 0 ? appointNodes : this.activeNodeList
+    // Rendering and lazy hydration can replace node instances. Always insert
+    // into the current tree, and never fall back to a removed node's data.
+    const list = (appointNodes.length > 0 ? appointNodes : this.activeNodeList)
+      .map(node => node && this.findNodeByUid(node.getData('uid')))
+      .filter(Boolean)
+    if (!list.length) return
     if (
       this.runAfterHydrate(
         list,
         () =>
           this.insertChildNode(
             openEdit,
-            appointNodes,
+            list,
             appointData,
             appointChildren
           ),
@@ -1771,6 +1776,8 @@ class Render {
       if (nodeIndex === -1) {
         return
       }
+      // Invalidate old connectors before asynchronous layout reuses the nodes.
+      nodeParent.removeLine()
       nodeBorthers.splice(nodeIndex, 1)
       nodeParent.nodeData.children.splice(nodeIndex, 1)
 
@@ -2017,6 +2024,7 @@ class Render {
     nodeList.forEach(item => {
       this.removeNodeFromActiveList(item)
       const fromParent = item.parent
+      if (fromParent) fromParent.removeLine()
       removeFromParentNodeData(item)
       if (fromParent && Array.isArray(fromParent.children)) {
         const idx = getNodeIndexInNodeList(item, fromParent.children)
