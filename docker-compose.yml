@@ -82,6 +82,11 @@ services:
       DOCMOST_SSO_SECRET: ${DOCMOST_SSO_SECRET:-}
       DOCMOST_INTERNAL_URL: ${DOCMOST_INTERNAL_URL:-http://docmost:3000}
       DOCMOST_SYNC_ENABLED: ${DOCMOST_SYNC_ENABLED:-true}
+      # Knowledge MCP（Wiki）：MCP 接入页签发 wikiToken 用
+      KNOWLEDGE_MCP_JWT_SECRET: ${KNOWLEDGE_MCP_JWT_SECRET:-}
+      KNOWLEDGE_MCP_JWT_ISS: ${KNOWLEDGE_MCP_JWT_ISS:-openclaw-liangce}
+      KNOWLEDGE_MCP_JWT_AUD: ${KNOWLEDGE_MCP_JWT_AUD:-knowledge-mcp}
+      KNOWLEDGE_MCP_JWT_TTL_SEC: ${KNOWLEDGE_MCP_JWT_TTL_SEC:-7776000}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -97,6 +102,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      knowledge-mcp:
         condition: service_healthy
     healthcheck:
       test:
@@ -202,7 +209,10 @@ services:
     expose:
       - "18792"
     ports:
-      - "127.0.0.1:${KNOWLEDGE_MCP_PORT:-18792}:18792"
+      # 默认只绑回环（WorkBuddy 与服务同机时的正确写法）。
+      # 服务在另一台机器上时，在 .env 里设 KNOWLEDGE_MCP_BIND=0.0.0.0，
+      # 并配合防火墙来源限制或 TLS 反向代理，不要直接裸露。
+      - "${KNOWLEDGE_MCP_BIND:-127.0.0.1}:${KNOWLEDGE_MCP_PORT:-18792}:18792"
     depends_on:
       postgres:
         condition: service_healthy
