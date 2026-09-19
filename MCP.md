@@ -231,8 +231,77 @@ Cursor stdio 仍用 `.cursor/mcp.json`，协同接口走本机 `127.0.0.1:1234`�
 **connect ECONNREFUSED**  
 容器或 MCP 没起来。先 `启动-Docker.bat`，再在 WorkBuddy 里点重连。不要用 `127.0.0.1`，不要再用 `:3847`（Docker 模式下是 `:8080/mcp`）。
 
+**`mind-map-knowledge-mcp-1` 反复重启，日志刷 `exec /usr/local/bin/docker-entrypoint.sh: no such file or directory`**（2026-09-19）  
+入口脚本被检出成 CRLF，shebang 变成 `#!/bin/sh\r`，Linux 找不到这个解释器。已修复：脚本转 LF，并在 Dockerfile 里加 `sed -i 's/\r$//'` 兜底。仅 `docker restart` 不生效，必须 **重新 build**。
+
+**知识库服务启动正常，但工具报 `wiki_unconfigured`**（2026-09-19）  
+说明容器里缺 `DOCMOST_DATABASE_URL` 或 `DOCMOST_APP_SECRET`。这两个由 `scripts/docker-up.js` 从 `.secrets/wiki.env` 注入；手工 `docker compose up` 时要先把它们导出到环境变量，否则为空。用 `docker exec ... printenv DOCMOST_APP_SECRET` 确认。
+
+**知识库服务能启动，但 ACL 类工具（`docmost_search`、`canonical_*`）连不上库**（2026-09-19）  
+容器内 `PGHOST` 必须是 `postgres`。根 `.env` 的 `PGHOST=127.0.0.1` 是给宿主机工具用的，compose 里已按 `app` 服务的写法写死为 `postgres`；若改回 `${PGHOST:-postgres}` 会被 `.env` 覆盖。用 `curl http://127.0.0.1:18792/ready` 看 `checks.aclDb`。
+
 **WorkBuddy 里看不到工具**  
 HTTP 模式只配 `url`，不要配 `command`。用启动脚本打印的地址。
 
 **网页上没同步**  
 人必须打开同一 `share_url`（带 `?room=`）。
+
+---
+
+## 6. Wiki（知识库）全库读取
+
+`docmost_search` / `docmost_get` 只能读到「已映射到房间槽位」的页面。要**按账号权限搜索、读取整个 Wiki**，用知识库服务（`integrations/knowledge-mcp`，端口 `18792`）的另外四个工具。
+
+### 权限模型
+
+不借权：调用者身份（mind-map 用户 id）映射到对应 Docmost 账号，以**该账号自己的会话**调用 Docmost 官方接口，空间成员与页面限制全部由 Docmost 判定。浏览器里打不开的页面，这里同样读不到。
+
+映射规则：`scim_external_id = mind-map:<用户id>`，或邮箱 `<用户id>@users.mind-map.local`（与 Wiki 单点登录同一套）。账号没有对应 Wiki 用户时返回 `wiki_identity_unmapped`，先在 Wiki 页面完成一次单点登录即可。
+
+### 工具
+
+```text
+wiki_spaces                 # 可读空间列表
+wiki_search  query=品牌      # 全库全文搜索（支持中文）
+wiki_search  query=品牌 spaceId=<空间id>
+wiki_tree    spaceId=<空间id>          # 空间页面树
+wiki_tree    pageId=<页面id>           # 某页面下的子树
+wiki_read    pageId=<页面id>           # 正文，默认 markdown
+wiki_read    pageId=<页面id> format=html
+```
+
+`wiki_search` 返回的 `text` 是**接口返回的摘要**，不是完整正文；要全文必须再调 `wiki_read`。`wiki_read` 正文超 `KNOWLEDGE_WIKI_MAX_BODY`（默认 120000 字符）会截断并置 `truncated=true`。
+
+### 接入 WorkBuddy
+
+签发令牌（默认取 `.env` 的 `AUTH_DEV_BYPASS_USER_ID` 作为身份）：
+
+```bash
+node scripts/wiki-mcp-token.js dev-local
+```
+
+配进 `~/.workbuddy/mcp.json`：
+
+```json
+{
+  "mcpServers": {
+    "mind-map-wiki": {
+      "type": "http",
+      "url": "http://127.0.0.1:18792/mcp",
+      "headers": { "Authorization": "Bearer <上面命令输出的 token>" }
+    }
+  }
+}
+```
+
+令牌由 `.env` 的 `KNOWLEDGE_MCP_JWT_SECRET` 签发，`iss`/`aud` 必须与服务端 `KNOWLEDGE_MCP_JWT_ISS`/`KNOWLEDGE_MCP_JWT_AUD` 一致。TTL 取 `KNOWLEDGE_MCP_JWT_TTL_SEC`；WorkBuddy 用的是静态头部，TTL 需足够长（本项目设为 90 天），到期后重新跑签发命令换 token。
+
+### 相关变量
+
+| 变量 | 作用 |
+| --- | --- |
+| `DOCMOST_DATABASE_URL` / `DOCMOST_APP_SECRET` | 由 `scripts/docker-up.js` 从 `.secrets/wiki.env` 注入 |
+| `DOCMOST_INTERNAL_URL` | 容器内 Docmost 地址，默认 `http://docmost:3000` |
+| `KNOWLEDGE_WIKI_FALLBACK_USER_ID` | 可选。调用者无 Wiki 账号时回落到固定用户；不设则不回落 |
+| `KNOWLEDGE_WIKI_MAX_BODY` | `wiki_read` 正文上限，默认 120000 |
+| `KNOWLEDGE_WIKI_SEARCH_LIMIT` / `_MAX_LIMIT` | 搜索默认条数 / 上限，默认 20 / 50 |

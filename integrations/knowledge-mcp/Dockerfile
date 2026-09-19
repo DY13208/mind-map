@@ -14,7 +14,10 @@ RUN npm ci --omit=dev
 
 COPY --chown=node:node src ./src
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
+# Guard against CRLF checkouts on Windows hosts: a trailing \r in the shebang
+# makes the container die with "exec ... no such file or directory".
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
+  && chmod 755 /usr/local/bin/docker-entrypoint.sh
 
 ENV NODE_ENV=production
 ENV KNOWLEDGE_MCP_PORT=18792

@@ -8,6 +8,7 @@ const { canonicalList, canonicalRead } = require('./adapters/canonical');
 const { docmostSearch, docmostGet } = require('./adapters/docmost');
 const { openwikiSearch, openwikiRead, openwikiStatus } = require('./adapters/openwiki');
 const { docmostAiGet, docmostAiUpsert } = require('./adapters/docmostAi');
+const { wikiSpaces, wikiSearch, wikiTree, wikiRead } = require('./adapters/wiki');
 const {
   openwikiRefresh,
   openwikiRefreshStatus,
@@ -19,7 +20,7 @@ const jobStore = require('./jobs/jobStore');
 
 const PORT = Number(process.env.KNOWLEDGE_MCP_PORT || 18792);
 const JWT_SECRET = process.env.KNOWLEDGE_MCP_JWT_SECRET || '';
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const rateLimiter = createRateLimiter({
   windowMs: Number(process.env.KNOWLEDGE_MCP_RATE_WINDOW_MS || 60000),
   maxPerUser: Number(process.env.KNOWLEDGE_MCP_RATE_MAX_PER_USER || 60),
@@ -40,6 +41,10 @@ const TOOLS = [
   { name: 'openwiki_refresh', description: 'Enqueue room-scoped OpenWiki refresh (editor+).', inputSchema: { type: 'object', properties: { roomId: { type: 'string' } }, required: ['roomId'] } },
   { name: 'openwiki_refresh_status', description: 'Get OpenWiki refresh job status.', inputSchema: { type: 'object', properties: { jobId: { type: 'string' }, roomId: { type: 'string' } } } },
   { name: 'openwiki_retry_publish', description: 'Retry Docmost AI publish without regenerating OpenWiki.', inputSchema: { type: 'object', properties: { jobId: { type: 'string' } }, required: ['jobId'] } },
+  { name: 'wiki_spaces', description: 'List every Wiki (Docmost) space the calling account can read.', inputSchema: { type: 'object', properties: {} } },
+  { name: 'wiki_search', description: 'Full-text search the whole Wiki, scoped to the pages the calling account may read.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, spaceId: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] } },
+  { name: 'wiki_tree', description: 'Page tree of a Wiki space, or of the subtree under a page.', inputSchema: { type: 'object', properties: { spaceId: { type: 'string' }, pageId: { type: 'string' } } } },
+  { name: 'wiki_read', description: 'Read one Wiki page body (markdown or html); Docmost enforces view permission.', inputSchema: { type: 'object', properties: { pageId: { type: 'string' }, format: { type: 'string', enum: ['markdown', 'html'] } }, required: ['pageId'] } },
 ];
 
 function sendJson(res, status, body) {
@@ -136,6 +141,10 @@ async function callTool(userId, name, args) {
     case 'openwiki_refresh': return openwikiRefresh(userId, args || {});
     case 'openwiki_refresh_status': return openwikiRefreshStatus(userId, args || {});
     case 'openwiki_retry_publish': return openwikiRetryPublish(userId, args || {});
+    case 'wiki_spaces': return wikiSpaces(userId);
+    case 'wiki_search': return wikiSearch(userId, args || {});
+    case 'wiki_tree': return wikiTree(userId, args || {});
+    case 'wiki_read': return wikiRead(userId, args || {});
     default: {
       const e = new Error('unknown_tool');
       e.code = 'unknown_tool';
