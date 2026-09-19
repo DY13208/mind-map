@@ -32,4 +32,8 @@ workbuddy_to_api/
 output/*.html
 output/*.xlsx
 output/*.csv
-output/*.jsonoutput/*.py
+output/*.json
+
+.backup-tls/
+certs/
+output/*.py
