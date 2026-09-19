@@ -175,7 +175,10 @@ export function computeLocalPath(
   const children = tree[parentPageId] || [];
 
   for (const page of children) {
-    const title = encodeURIComponent(getSafePageTitle(page.title));
+    // Must match zip entry names in export.service (folder.file / folder.folder),
+    // which use getSafePageTitle without encodeURIComponent. Encoding here made
+    // markdown links like C%EF%BC%9A... while files were C：..., so clicks failed.
+    const title = getSafePageTitle(page.title);
     const localPath = `${currentPath}${title}`;
     slugIdToPath[page.slugId] = `${localPath}${getExportExtension(format)}`;
 
