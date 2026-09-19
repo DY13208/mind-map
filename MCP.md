@@ -115,8 +115,9 @@ WorkBuddy / AI 生成 PDF、Markdown 等产物后，应调用 `upload_attachment
 
 ```text
 本机可读路径（推荐）：
-upload_attachment room_key="demo" node="<uid>" file_path="C:/Users/YiRan/WorkBuddy/.../报告.pdf"
-# Docker 内会映射到 /workbuddy/... ；OpenClaw output 映射到 /app/output/...
+upload_attachment room_key="demo" node="<uid>" file_path="${WORKBUDDY_HOST_DIR}/.../报告.pdf"
+# 容器内映射到 /workbuddy/... ；OpenClaw output 映射到 /app/output/...
+# WORKBUDDY_HOST_DIR 在 .env 配置（本机 WorkBuddy 目录或服务器路径；默认 ./data/workbuddy）
 
 或传文件内容：
 upload_attachment room_key="demo" node="<uid>" file_name="报告.pdf" content_base64="<...>"
