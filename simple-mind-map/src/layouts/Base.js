@@ -139,10 +139,17 @@ class Base {
       }
     })
     const uid = data.data.uid
+    const structureSnapshot = JSON.stringify([
+      layerIndex,
+      (data.children || []).map(child => child.data && child.data.uid)
+    ])
     let newNode = null
     // 数据上保存了节点引用，那么直接复用节点
     if (data && data._node && !this.renderer.reRender) {
       newNode = data._node
+      // A hydrated tree can retain the renderer reference while replacing the
+      // data object. Commands and geometry must use this tree's current data.
+      newNode.nodeData = newNode.handleData(data)
       // 节点层级改变了
       const isLayerTypeChange = this.checkIsLayerTypeChange(
         newNode.layerIndex,
@@ -173,6 +180,7 @@ class Base {
       // 重新计算节点大小和布局
       if (
         isResizeSource ||
+        newNode._sizeStructureSnapshot !== structureSnapshot ||
         isNodeDataChange ||
         isLayerTypeChange ||
         (newNode.getData('resetRichText') && // 自定义节点内容可以直接忽略resetRichText
@@ -224,6 +232,7 @@ class Base {
       // 重新计算节点大小和布局
       if (
         isResizeSource ||
+        newNode._sizeStructureSnapshot !== structureSnapshot ||
         isNodeDataChange ||
         isLayerTypeChange ||
         (newNode.getData('resetRichText') &&
@@ -255,6 +264,7 @@ class Base {
       // 数据关联实际节点
       data._node = newNode
     }
+    newNode._sizeStructureSnapshot = structureSnapshot
     // 如果该节点数据是已激活状态，那么添加到激活节点列表里
     if (data.data.isActive) {
       this.renderer.addNodeToActiveList(newNode)
@@ -861,6 +871,36 @@ class Base {
         : 0
     if (live > 0) return live
     return Number(node.getData && node.getData('childCount')) || 0
+  }
+
+  // Free-positioned nodes may sit on the opposite side of their layout direction.
+  // Connect facing edges instead of drawing through either node's text.
+  renderReversedHorizontalLine(node, child, line, style, lineStyle, isLeft) {
+    const childIsLeft = child.left + child.width <= node.left
+    const childIsRight = child.left >= node.left + node.width
+    if (!(isLeft ? childIsRight : childIsLeft)) return false
+
+    const { nodeUseLineStyle, lineRadius } = this.mindMap.themeConfig
+    const x1 = childIsLeft ? node.left : node.left + node.width
+    const x2 = childIsLeft ? child.left + child.width : child.left
+    const y1 = node.top + node.height * (nodeUseLineStyle && !node.isRoot ? 1 : 0.5)
+    const y2 = child.top + child.height * (nodeUseLineStyle ? 1 : 0.5)
+    const mid = (x1 + x2) / 2
+    let path
+    if (lineStyle === 'direct') {
+      path = `M ${x1},${y1} L ${x2},${y2}`
+    } else if (lineStyle === 'curve') {
+      path = this.cubicBezierPath(x1, y1, x2, y2)
+    } else if (Math.abs(x2 - x1) < lineRadius * 2 || Math.abs(y2 - y1) < lineRadius) {
+      path = `M ${x1},${y1} L ${mid},${y1} L ${mid},${y2} L ${x2},${y2}`
+    } else {
+      path = this.createFoldLine([[x1, y1], [mid, y1], [mid, y2], [x2, y2]])
+    }
+    if (nodeUseLineStyle) {
+      path += ` L ${childIsLeft ? child.left : child.left + child.width},${y2}`
+    }
+    this.setLineStyle(style, line, path, child)
+    return true
   }
 
   // 设置连线样式

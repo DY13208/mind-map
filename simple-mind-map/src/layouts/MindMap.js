@@ -236,6 +236,9 @@ class MindMap extends Base {
     let s1 = (marginX - expandBtnSize) * 0.6
     let nodeUseLineStyle = this.mindMap.themeConfig.nodeUseLineStyle
     node.children.forEach((item, index) => {
+      if (this.renderReversedHorizontalLine(
+        node, item, lines[index], style, 'straight', item.dir === CONSTANTS.LAYOUT_GROW_DIR.LEFT
+      )) return
       let x1 = 0
       let _s = 0
       // 节点使用横线风格，需要额外渲染横线
@@ -278,6 +281,9 @@ class MindMap extends Base {
     }
     const { nodeUseLineStyle } = this.mindMap.themeConfig
     node.children.forEach((item, index) => {
+      if (this.renderReversedHorizontalLine(
+        node, item, lines[index], style, 'direct', item.dir === CONSTANTS.LAYOUT_GROW_DIR.LEFT
+      )) return
       if (node.layerIndex === 0) {
         expandBtnSize = 0
       }
@@ -323,6 +329,9 @@ class MindMap extends Base {
       rootLineStartPositionKeepSameInCurve
     } = this.mindMap.themeConfig
     node.children.forEach((item, index) => {
+      if (this.renderReversedHorizontalLine(
+        node, item, lines[index], style, 'curve', item.dir === CONSTANTS.LAYOUT_GROW_DIR.LEFT
+      )) return
       if (node.layerIndex === 0) {
         expandBtnSize = 0
       }

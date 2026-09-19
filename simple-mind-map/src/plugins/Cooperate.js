@@ -2246,8 +2246,21 @@ class Cooperate {
       const usedNative = this.applyNativeMoveCommand(node, nextParent, plan)
       if (!usedNative || !this.nodeDataHasChild(nextParent, uid)) {
         this.applyMoveNodeData(node, nextParent, payload.index)
+        if (typeof renderer.resetMovedNodePosition === 'function') {
+          renderer.resetMovedNodePosition(node)
+        }
         if (typeof this.mindMap.render === 'function') this.mindMap.render()
       }
+      // Move events can carry restored coordinates when undoing a move.
+      const positionData = { ...(payload.data || {}), ...(payload.patch || {}) }
+      const positionPatch = {}
+      ;['customLeft', 'customTop'].forEach(key => {
+        if (Object.prototype.hasOwnProperty.call(positionData, key)) {
+          positionPatch[key] = positionData[key]
+          node[key] = positionData[key] == null ? undefined : positionData[key]
+        }
+      })
+      if (Object.keys(positionPatch).length) node.setData(positionPatch)
       const syncChildCount = parent => {
         if (!parent || typeof parent.getData !== 'function') return
         const liveKids = ((parent.nodeData && parent.nodeData.children) || []).length
@@ -2259,12 +2272,18 @@ class Cooperate {
       syncChildCount(nextParent)
       this.cleanupDragArtifacts()
       await this.waitForMoveRender()
-      if (oldParent && typeof oldParent.renderLine === 'function') {
-        oldParent.renderLine(true)
-      }
-      if (nextParent && typeof nextParent.renderLine === 'function') {
-        nextParent.renderLine(true)
-      }
+      // Rendering may replace both parent instances. Repainting a detached
+      // instance recreates its old connectors in the shared SVG line layer.
+      const parentUids = new Set([
+        oldParentUid,
+        parentUid || (nextParent.getData && nextParent.getData('uid'))
+      ])
+      parentUids.forEach(parentId => {
+        const liveParent = parentId && renderer.findNodeByUid(parentId)
+        if (liveParent && typeof liveParent.renderLine === 'function') {
+          liveParent.renderLine(true)
+        }
+      })
       this.restoreActiveUids(activeUids)
     } catch (err) {
       v2Trace('remote.apply.move.err', { uid, message: err && err.message })
@@ -5880,6 +5899,11 @@ class Cooperate {
     this._v2MoveActive = true
     try {
       this.applyMoveNodeData(node, parent, origin.index)
+      if (origin.position) {
+        node.setData(origin.position)
+        node.customLeft = origin.position.customLeft == null ? undefined : origin.position.customLeft
+        node.customTop = origin.position.customTop == null ? undefined : origin.position.customTop
+      }
       if (typeof this.mindMap.render === 'function') this.mindMap.render()
     } finally {
       this.isApplyingRemote = false
@@ -5925,13 +5949,16 @@ class Cooperate {
         index: item.index,
         oldParentUid: origin && origin.parent,
         oldIndex: origin && origin.index,
+        patch: { customLeft: null, customTop: null },
         kind
       }
       const send = this.collabV2Adapter
         ? this.submitV2('node.move', payload)
         : this.httpPatchNode(item.uid, {
             parent: item.parent,
-            index: item.index
+            index: item.index,
+            customLeft: null,
+            customTop: null
           })
       return send
         .then(result => {
@@ -5966,6 +5993,7 @@ class Cooperate {
             parentUid: item.parent,
             newParentUid: item.parent,
             index: item.index,
+            patch: { customLeft: null, customTop: null },
             oldParentUid: originByUid.get(item.uid) && originByUid.get(item.uid).parent,
             oldIndex: originByUid.get(item.uid) && originByUid.get(item.uid).index,
             kind:

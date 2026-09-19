@@ -48,6 +48,10 @@ function snapshotMoveOrigins(args = []) {
         uid,
         parent,
         index: index < 0 ? 0 : index,
+        position: {
+          customLeft: typeof node.getData === 'function' ? node.getData('customLeft') : undefined,
+          customTop: typeof node.getData === 'function' ? node.getData('customTop') : undefined
+        },
         node
       }
     })
