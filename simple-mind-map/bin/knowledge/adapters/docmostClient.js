@@ -253,6 +253,19 @@ async function findSpaceBySlug(db, workspaceId, slug) {
   return row || null
 }
 
+async function findPageSlugId(db, pageId) {
+  if (!db || !pageId) return null
+  const row = (
+    await db.query(
+      `select slug_id from pages
+        where id = $1 and deleted_at is null
+        limit 1`,
+      [pageId]
+    )
+  ).rows[0]
+  return row && row.slug_id ? String(row.slug_id) : null
+}
+
 module.exports = {
   cfg,
   sanitizeSlug,
@@ -261,5 +274,6 @@ module.exports = {
   request,
   ensureSyncAuth,
   ensureUser,
-  findSpaceBySlug
+  findSpaceBySlug,
+  findPageSlugId
 }
