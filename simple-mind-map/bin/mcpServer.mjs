@@ -76,7 +76,7 @@ function createServer(authorization) {
     },
     {
       instructions:
-        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps，只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。附件：节点 data 出现 attachmentId 或大纲里出现「(附件 … att:<id>)」标记时，说明该节点挂着文件，其正文必须用 read_attachment 读取；节点上的 attachmentExtractedText 只是截断预览，不得据此下结论，has_more=true 时按 next_offset 续读到 false。要先了解一张图有哪些附件用 list_attachments。生成或拿到产物文件后，必须用 upload_attachment 挂到对应节点，让人类可在网页点击查看/下载；优先 file_path（本机可读）或 content_base64，也可用 source_url。支持 txt/md/csv/pdf/docx/xlsx/html 与常见图片。附件 status 不是 ready 时如实说明状态和 error_message，不得编造附件内容。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。工具返回 isError 表示没有写入，禁止声称已完成。'
+        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps，只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。附件（与网页工具栏「附件」同一套能力）：生成或拿到产物后必须调用 upload_attachment 挂到目标节点，节点会出现可点击的回形针图标；禁止只把本机路径、挂载说明、「请拖到节点」写进 text/note；禁止用 update_node 的 note 代替挂载。upload_attachment 优先 file_path（WorkBuddy 目录或 ./output），否则 content_base64 / source_url。已有附件用 list_attachments / read_attachment；attachmentExtractedText 只是截断预览。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。工具返回 isError 表示没有写入，禁止声称已完成。'
     }
   )
 
@@ -289,7 +289,7 @@ function createServer(authorization) {
 
   server.tool(
     'upload_attachment',
-    '把文件挂到指定节点上，人类可在网页点击附件图标查看/下载。生成产物后应调用本工具，不要只写本地路径让用户手动拖拽。提供 file_path（MCP 进程可读的本机路径）、content_base64 或 source_url 之一。支持 txt/md/csv/pdf/docx/xlsx/html 与常见图片。上传成功后会写入节点 attachmentId 等字段。成功返回 attachment 与 content_url。',
+    '与网页工具栏「附件」相同：上传文件并挂到节点，节点出现可点击回形针，人类可直接预览/下载。产物必须用本工具，禁止把路径或「请拖到节点」写进 note/text。提供 file_path（WorkBuddy 目录或仓库 output）、content_base64 或 source_url 之一。支持 txt/md/csv/pdf/docx/xlsx/html 与常见图片。成功返回 attachment.id 与 content_url。',
     {
       room_key: z.string().describe('房间号'),
       node: z
@@ -330,8 +330,22 @@ function createServer(authorization) {
       confirm_sop_change
     }) => {
       try {
+        // Resolve title/path → uid (same as toolbar targeting a node)
+        let nodeUid = String(node || '').trim()
+        try {
+          const located = await api(
+            `/api/files/${encodeURIComponent(
+              room_key
+            )}/locate?uid=${encodeURIComponent(nodeUid)}`,
+            { timeoutMs: 15000 }
+          )
+          if (located && located.uid) nodeUid = located.uid
+        } catch (e) {
+          // Fall through; PATCH/update will resolve or fail clearly
+        }
+
         const resolved = await resolveAttachmentUploadInput({
-          node,
+          node: nodeUid,
           file_name,
           mime_type,
           file_path,
@@ -340,7 +354,7 @@ function createServer(authorization) {
         })
         const uploadBody = {
           fileName: resolved.fileName,
-          nodeUid: resolved.nodeUid,
+          nodeUid: resolved.nodeUid || nodeUid,
           sourceKind: 'attachment'
         }
         if (resolved.mimeType) uploadBody.mimeType = resolved.mimeType
@@ -362,20 +376,41 @@ function createServer(authorization) {
           throw new Error('上传成功但未返回 attachment.id')
         }
 
+        // Same node fields as toolbar SET_NODE_ATTACHMENT
         const patch = attachmentMetaForNode(attachment)
-        const nodeResult = await api(
-          `/api/files/${encodeURIComponent(room_key)}/nodes/${encodeURIComponent(
-            node
-          )}`,
-          {
-            method: 'PATCH',
-            body: JSON.stringify({
-              ...patch,
-              confirm_sop_change: confirm_sop_change === true
-            }),
-            timeoutMs: 30000
+        let nodeResult = null
+        let lastErr = null
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            nodeResult = await api(
+              `/api/files/${encodeURIComponent(
+                room_key
+              )}/nodes/${encodeURIComponent(nodeUid)}`,
+              {
+                method: 'PATCH',
+                body: JSON.stringify({
+                  ...patch,
+                  confirm_sop_change: confirm_sop_change === true
+                }),
+                timeoutMs: 30000
+              }
+            )
+            lastErr = null
+            break
+          } catch (err) {
+            lastErr = err
+            const msg = String((err && err.message) || '')
+            if (
+              /正在保存整图|REPLACE_IN_PROGRESS|请稍候/.test(msg) &&
+              attempt < 2
+            ) {
+              await new Promise(r => setTimeout(r, 400 * (attempt + 1)))
+              continue
+            }
+            throw err
           }
-        )
+        }
+        if (lastErr) throw lastErr
 
         const contentUrl = `/api/files/${encodeURIComponent(
           room_key
@@ -385,15 +420,17 @@ function createServer(authorization) {
           ok: true,
           room_key,
           attachment,
+          node_uid: nodeUid,
           node: nodeResult,
           content_url: contentUrl,
+          toolbar_equivalent: true,
           message:
             attachment.status === 'ready'
-              ? '已挂载，可在网页点击节点附件图标查看'
+              ? '已按工具栏「附件」方式挂载，可在网页点击节点回形针查看'
               : attachment.status === 'processing' ||
                 attachment.status === 'pending'
-              ? '已挂载，服务端仍在解析正文；网页可先下载原件'
-              : '已挂载，但解析未成功；网页仍可下载原件'
+              ? '已挂载（回形针可见），服务端仍在解析正文；可先点击下载原件'
+              : '已挂载（回形针可见），解析未成功；仍可点击下载原件'
         })
       } catch (err) {
         return fail(err)
@@ -598,7 +635,7 @@ function createServer(authorization) {
 
   server.tool(
     'update_node',
-    '修改节点文字或备注。node 优先用 get_map outline 里的 uid；也可用完整标题、部分文字或 根/父/子 路径。成功只返回 uid。工具报错即未写入。',
+    '修改节点文字或备注。禁止用 note/text 写本机文件路径或挂载说明来代替附件；挂文件必须用 upload_attachment（等同工具栏「附件」）。node 优先用 uid；也可用完整标题、部分文字或 根/父/子 路径。成功只返回 uid。工具报错即未写入。',
     {
       room_key: z.string().describe('房间号'),
       node: z.string().describe('节点 uid 或文字路径'),

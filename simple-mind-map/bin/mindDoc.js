@@ -865,6 +865,7 @@ const NODE_DATA_PATCH_KEYS = [
   'attachmentStatus',
   'attachmentError',
   'attachmentExtractedText',
+  'attachmentProgress',
   'color',
   'fillColor',
   'fontFamily',
