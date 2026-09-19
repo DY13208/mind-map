@@ -363,6 +363,8 @@ export default {
     saveAs: 'Save as',
     import: 'Import',
     export: 'Export',
+    refresh: 'Refresh',
+    refreshSavingTip: 'The local file is being saved. Please refresh again shortly.',
     shortcutKey: 'Shortcut key',
     associativeLine: 'Associative line',
     painter: 'Painter',
