@@ -245,6 +245,13 @@ async function main() {
     assert.strictEqual(response.status, 200)
     const mcpConfig = await response.json()
     assert.match(mcpConfig.token, /^mmcp_v1\./)
+    assert.strictEqual(mcpConfig.wikiMcpPath, '/knowledge-mcp/mcp')
+    assert.strictEqual(typeof mcpConfig.wikiConfigured, 'boolean')
+    if (mcpConfig.wikiConfigured) {
+      assert.match(mcpConfig.wikiToken, /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/)
+    } else {
+      assert.strictEqual(mcpConfig.wikiToken, '')
+    }
     const { verifyMcpUserToken } = require('../bin/mcpUserToken')
     assert.deepStrictEqual(
       verifyMcpUserToken(
