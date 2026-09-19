@@ -1794,6 +1794,7 @@ class Render {
       existBorthers.splice(existIndex, 0, item)
       existParent.nodeData.children.splice(existIndex, 0, item.nodeData)
       item.parent = existParent
+      this.resetMovedNodePosition(item)
     })
     this.mindMap.render()
   }
@@ -2039,9 +2040,17 @@ class Render {
         toNode.children.push(item)
       }
       item.parent = toNode
+      this.resetMovedNodePosition(item)
     })
     this.emitNodeActiveEvent()
     this.mindMap.render()
+  }
+
+  // Structural moves follow sibling order instead of the old absolute position.
+  resetMovedNodePosition(node) {
+    node.customLeft = undefined
+    node.customTop = undefined
+    node.setData({ customLeft: null, customTop: null })
   }
 
   //   粘贴节点到节点
