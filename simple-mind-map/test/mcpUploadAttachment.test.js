@@ -11,7 +11,20 @@ async function load() {
 }
 
 async function main() {
-  const { resolveAttachmentUploadInput } = await load()
+  const { resolveAttachmentUploadInput, remapAttachmentFilePath } = await load()
+
+  assert.equal(
+    remapAttachmentFilePath('C:\\Users\\YiRan\\WorkBuddy\\a\\b.pdf'),
+    '/workbuddy/a/b.pdf'
+  )
+  assert.equal(
+    remapAttachmentFilePath('/home/node/.openclaw/workspace/output/x.md'),
+    '/app/output/x.md'
+  )
+  assert.equal(
+    remapAttachmentFilePath('D:/良策0010/output/report.pdf'),
+    '/app/output/report.pdf'
+  )
 
   await assert.rejects(
     () => resolveAttachmentUploadInput({}),
@@ -24,7 +37,10 @@ async function main() {
   })
   assert.equal(fromUrl.nodeUid, 'n1')
   assert.equal(fromUrl.fileName, '报告.pdf')
-  assert.equal(fromUrl.sourceUrl, 'https://example.com/files/%E6%8A%A5%E5%91%8A.pdf')
+  assert.equal(
+    fromUrl.sourceUrl,
+    'https://example.com/files/%E6%8A%A5%E5%91%8A.pdf'
+  )
   assert.equal(fromUrl.contentBase64, undefined)
 
   const fromB64 = await resolveAttachmentUploadInput({

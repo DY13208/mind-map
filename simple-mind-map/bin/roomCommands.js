@@ -174,7 +174,9 @@ function applyNodeCommand(ydoc, command, options = {}) {
     }
   }
   if (command.type === 'node.update' || command.type === 'node.move') {
-    const uid = payload.uid
+    const resolvedUid = mindDoc.resolveNode(before, payload.uid)
+    const uid = resolvedUid || payload.uid
+    if (resolvedUid && payload.uid !== resolvedUid) payload.uid = resolvedUid
     const moving =
       payload.parentUid !== undefined ||
       payload.parent_uid !== undefined ||

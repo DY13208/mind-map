@@ -109,11 +109,14 @@ read_attachment room_key="demo" attachment_id="<id>" offset=4000 length=4000
 
 ### 挂载附件（产物可点击查看）
 
-WorkBuddy / AI 生成 PDF、Markdown 等产物后，应调用 `upload_attachment` 挂到目标节点，**不要**只把文件写到本机再让用户手动拖拽。
+WorkBuddy / AI 生成 PDF、Markdown 等产物后，应调用 `upload_attachment`（与网页工具栏「附件」同一套后端），挂到目标节点后会出现**可点击回形针**。
+
+**禁止**只把本机路径、「请拖到节点」、「附件仅客户端可用」写进 `note`/`text`。
 
 ```text
-本机可读路径（推荐，MCP 与 WorkBuddy 同机或共享卷时）：
-upload_attachment room_key="demo" node="<uid>" file_path="D:/output/报告.pdf"
+本机可读路径（推荐）：
+upload_attachment room_key="demo" node="<uid>" file_path="C:/Users/YiRan/WorkBuddy/.../报告.pdf"
+# Docker 内会映射到 /workbuddy/... ；OpenClaw output 映射到 /app/output/...
 
 或传文件内容：
 upload_attachment room_key="demo" node="<uid>" file_name="报告.pdf" content_base64="<...>"
