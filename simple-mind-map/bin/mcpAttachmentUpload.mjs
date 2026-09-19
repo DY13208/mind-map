@@ -54,12 +54,7 @@ export function remapAttachmentFilePath(filePath, env = process.env) {
   const mount = (
     String(env.WORKBUDDY_MOUNT || '/workbuddy').trim() || '/workbuddy'
   ).replace(/\/+$/, '')
-  const hostCandidates = [
-    env.WORKBUDDY_HOST_DIR,
-    env.WORKBUDDY_DATA_DIR,
-    'C:/Users/YiRan/WorkBuddy',
-    'C:\\Users\\YiRan\\WorkBuddy'
-  ]
+  const hostCandidates = [env.WORKBUDDY_HOST_DIR, env.WORKBUDDY_DATA_DIR]
     .map(item => String(item || '').trim())
     .filter(Boolean)
 
