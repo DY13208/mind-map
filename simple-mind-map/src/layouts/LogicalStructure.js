@@ -192,6 +192,9 @@ class LogicalStructure extends Base {
     }
     let nodeUseLineStyle = this.mindMap.themeConfig.nodeUseLineStyle
     node.children.forEach((item, index) => {
+      if (this.renderReversedHorizontalLine(
+        node, item, lines[index], style, 'straight', this.isUseLeft
+      )) return
       let x1
       if (this.isUseLeft) {
         x1 = node.layerIndex === 0 ? left : left - expandBtnSize
@@ -229,6 +232,9 @@ class LogicalStructure extends Base {
     }
     const { nodeUseLineStyle } = this.mindMap.themeConfig
     node.children.forEach((item, index) => {
+      if (this.renderReversedHorizontalLine(
+        node, item, lines[index], style, 'direct', this.isUseLeft
+      )) return
       if (node.layerIndex === 0) {
         expandBtnSize = 0
       }
@@ -265,6 +271,9 @@ class LogicalStructure extends Base {
       rootLineKeepSameInCurve
     } = this.mindMap.themeConfig
     node.children.forEach((item, index) => {
+      if (this.renderReversedHorizontalLine(
+        node, item, lines[index], style, 'curve', this.isUseLeft
+      )) return
       if (node.layerIndex === 0) {
         expandBtnSize = 0
       }

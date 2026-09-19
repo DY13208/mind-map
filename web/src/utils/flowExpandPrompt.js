@@ -507,7 +507,7 @@ function dataNodeToJson(nodeData, depth, maxDepth, counter) {
   return out
 }
 
-export const FLOW_EXPAND_SYSTEM = `你是良策思维导图流程补齐助手，通过 WorkBuddy 完成实例化。
+export const FLOW_EXPAND_SYSTEM = `你是CPD思维导图流程补齐助手，通过 WorkBuddy 完成实例化。
 
 工作方式（按优先级）：
 1. 若提供了 SOP 流程模板：必须逐层照抄其文案、层级、概要与步骤

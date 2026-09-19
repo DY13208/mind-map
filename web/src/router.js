@@ -104,6 +104,34 @@ const routes = [
     ]
   },
   {
+    path: '/my-maps',
+    component: () =>
+      import(
+        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'
+      ),
+    meta: { hideSidebar: true },
+    children: [
+      {
+        path: '',
+        name: 'MyMaps',
+        component: () =>
+          import(
+            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'
+          ),
+        props: { mode: 'files' }
+      },
+      {
+        path: 'folder/:id',
+        name: 'MyMapsFolder',
+        component: () =>
+          import(
+            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'
+          ),
+        props: { mode: 'folder' }
+      }
+    ]
+  },
+  {
     path: '/spaces',
     component: () =>
       import(
