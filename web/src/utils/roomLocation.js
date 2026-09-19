@@ -91,6 +91,13 @@ export function consumeSkipMyMapsRedirect() {
   }
 }
 
+/** 仅 /my-maps 根路径（不含 /folder/...）才回跳上次房间 */
+export function isMyMapsRootPath(pathname) {
+  const raw = String(pathname || '').split('?')[0] || ''
+  const normalized = raw.replace(/\/+$/, '') || '/'
+  return normalized === '/my-maps'
+}
+
 /** 编辑页返回脑图列表（跳过「回房间」重定向） */
 export function navigateToMyMaps(router) {
   armSkipMyMapsRedirect()
