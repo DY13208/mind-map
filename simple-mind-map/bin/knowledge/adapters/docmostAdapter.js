@@ -55,6 +55,24 @@ function mindMapPublicBase(env = process.env) {
 }
 
 /**
+ * Docmost resolves /p/:pageSlug via extractPageSlugId (last "-" segment = slugId).
+ * UUID page ids break clicks and export link rewrite — always use slugId.
+ */
+function buildDocmostPagePath(spaceSlug, slugId, title) {
+  const id = String(slugId || '').trim()
+  if (!id) return null
+  const titleSlug =
+    String(title || 'untitled')
+      .slice(0, 70)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'untitled'
+  const pageSlug = `${titleSlug}-${id}`
+  const space = String(spaceSlug || '').trim()
+  return space ? `/s/${space}/p/${pageSlug}` : `/p/${pageSlug}`
+}
+
+/**
  * Canonical knowledge MD keeps machine metadata (YAML frontmatter, node anchors,
  * hash comments, relative .md branch links). Docmost should receive clean Markdown.
  */
@@ -267,10 +285,19 @@ async function syncMembers(auth, spaceId, members, env) {
   }
 }
 
+async function resolveSlugId(env, pageId, fromApi) {
+  const fromRes =
+    (fromApi && (fromApi.slugId || fromApi.slug_id)) ||
+    null
+  if (fromRes) return String(fromRes)
+  const db = client.getPool(env)
+  return (await client.findPageSlugId(db, pageId)) || null
+}
+
 async function upsertPage(auth, { spaceId, pageId, parentPageId, title, markdown, env }) {
   if (pageId) {
     try {
-      await client.request('/api/pages/update', {
+      const updated = await client.request('/api/pages/update', {
         cookie: auth.cookie,
         body: {
           pageId,
@@ -281,7 +308,8 @@ async function upsertPage(auth, { spaceId, pageId, parentPageId, title, markdown
         },
         env
       })
-      return pageId
+      const slugId = await resolveSlugId(env, pageId, updated)
+      return { pageId, slugId }
     } catch (err) {
       // Stale mapping: recreate under current space
       if (err.status !== 404 && !/not found/i.test(String(err.message || ''))) throw err
@@ -300,7 +328,10 @@ async function upsertPage(auth, { spaceId, pageId, parentPageId, title, markdown
       },
       env
     })
-    return created && created.id
+    const id = created && created.id
+    if (!id) return { pageId: null, slugId: null }
+    const slugId = await resolveSlugId(env, id, created)
+    return { pageId: id, slugId }
   } catch (err) {
     // Parent missing/stale: fall back to space root
     if (parentPageId && /parent page not found/i.test(String(err.message || ''))) {
@@ -314,7 +345,10 @@ async function upsertPage(auth, { spaceId, pageId, parentPageId, title, markdown
         },
         env
       })
-      return created && created.id
+      const id = created && created.id
+      if (!id) return { pageId: null, slugId: null }
+      const slugId = await resolveSlugId(env, id, created)
+      return { pageId: id, slugId }
     }
     throw err
   }
@@ -393,6 +427,7 @@ async function sync(roomId, options = {}) {
       : previousRaw
 
   const force = !!options.force
+  const db = client.getPool(env)
   const warnings = []
   const pages = {}
   const versionTag = String(
@@ -490,12 +525,15 @@ async function sync(roomId, options = {}) {
         standard = null
       } else if (
         !force &&
+        // The second pass must refresh links even when canonical text is unchanged.
+        !pageLinks &&
         standard.content_hash === contentHash &&
         standard.title === title &&
         standard.docmost_space_id === space.spaceId
       ) {
         pages[doc.file] = {
           pageId: standard.docmost_page_id,
+          slugId: await client.findPageSlugId(db, standard.docmost_page_id),
           contentHash: standard.content_hash,
           title: standard.title,
           parentPageId: parentPageId || null,
@@ -508,7 +546,7 @@ async function sync(roomId, options = {}) {
     }
 
     if (standard && standard.docmost_page_id) {
-      const pageId = await upsertPage(auth, {
+      const { pageId, slugId } = await upsertPage(auth, {
         spaceId: space.spaceId,
         pageId: standard.docmost_page_id,
         parentPageId: parentPageId || undefined,
@@ -530,6 +568,7 @@ async function sync(roomId, options = {}) {
       })
       pages[doc.file] = {
         pageId: row.docmost_page_id,
+        slugId,
         contentHash: row.content_hash,
         title: row.title,
         parentPageId: parentPageId || null,
@@ -541,7 +580,7 @@ async function sync(roomId, options = {}) {
     }
 
     // Create brand-new standard page (never reuse human/ai/legacy page ids)
-    const pageId = await upsertPage(auth, {
+    const { pageId, slugId } = await upsertPage(auth, {
       spaceId: space.spaceId,
       pageId: null,
       parentPageId: parentPageId || undefined,
@@ -563,6 +602,7 @@ async function sync(roomId, options = {}) {
     })
     pages[doc.file] = {
       pageId: row.docmost_page_id,
+      slugId,
       contentHash: row.content_hash,
       title: row.title,
       parentPageId: parentPageId || null,
@@ -606,9 +646,14 @@ async function sync(roomId, options = {}) {
   if (readme && pages['README.md'] && pages['README.md'].pageId) {
     const pageLinks = new Map()
     for (const [file, meta] of Object.entries(pages)) {
-      if (file !== 'README.md' && meta && meta.pageId) {
-        pageLinks.set(file, '/p/' + meta.pageId)
+      if (file === 'README.md' || !meta || !meta.pageId) continue
+      let slugId = meta.slugId
+      if (!slugId) {
+        slugId = await client.findPageSlugId(db, meta.pageId)
+        if (slugId) pages[file] = { ...meta, slugId }
       }
+      const href = buildDocmostPagePath(space.slug, slugId, meta.title)
+      if (href) pageLinks.set(file, href)
     }
     const titleBase =
       room.title && room.title !== '未命名'
@@ -682,5 +727,12 @@ module.exports = {
   mapRole,
   toDocmostMarkdown,
   mindMapPublicBase,
-  __test: { titleFromMarkdown, ensureSpace, toDocmostMarkdown, mindMapPublicBase }
+  buildDocmostPagePath,
+  __test: {
+    titleFromMarkdown,
+    ensureSpace,
+    toDocmostMarkdown,
+    mindMapPublicBase,
+    buildDocmostPagePath
+  }
 }
