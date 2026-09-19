@@ -25,3 +25,11 @@ workbuddy_to_api/
 # local docker rebuild fingerprints
 .docker-build-stamps/
 
+.tmp/
+**/__pycache__/
+*.pyc
+
+output/*.html
+output/*.xlsx
+output/*.csv
+output/*.json
