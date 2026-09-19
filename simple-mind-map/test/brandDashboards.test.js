@@ -3,8 +3,14 @@ const {
   healthSummary,
   normalizeLevel,
   normalizeSourceUrl,
-  rowToDashboard
+  rowToDashboard,
+  safeFileName
 } = require('../bin/brandDashboards')
+
+assert.equal(safeFileName('my board.html', '数据看板.html'), 'my board.html')
+assert.equal(safeFileName('a/b\\c:d*e?f"g<h>i|j.html', 'f.html'), 'a_b_c_d_e_f_g_h_i_j.html')
+assert.equal(safeFileName('', '数据看板.html'), '数据看板.html')
+assert.equal(safeFileName('   ', '数据看板.html'), '数据看板.html')
 
 assert.equal(
   healthSummary(
@@ -81,6 +87,24 @@ assert.equal(linked.sourceType, 'url')
 assert.equal(linked.sourceUrl, 'https://laundryou-dashboard.app.workbuddy.host/')
 assert.equal(linked.fileName, 'laundryou-dashboard.app.workbuddy.host')
 assert.equal(linked.healthSummary, '')
+
+const linkedWithSummary = rowToDashboard({
+  id: 'dash-5',
+  title: '在线看板',
+  level: 'department',
+  file_name: 'laundryou-dashboard.app.workbuddy.host',
+  html_content: '',
+  source_type: 'url',
+  source_url: 'https://laundryou-dashboard.app.workbuddy.host/',
+  health_summary: '品牌健康分：76.3 = 财务分 66 × 60% + 运营分 91.8 × 40%',
+  created_at: null,
+  updated_at: null
+})
+assert.equal(
+  linkedWithSummary.healthSummary,
+  '品牌健康分：76.3 = 财务分 66 × 60% + 运营分 91.8 × 40%'
+)
+assert.equal(linkedWithSummary.summaryMissing, false)
 
 const bare = rowToDashboard({
   id: 'dash-2',

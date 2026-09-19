@@ -49,6 +49,11 @@ export function dashboardContentUrl(id) {
   return `${base}/api/dashboards/${encodeURIComponent(id)}/content`
 }
 
+export function dashboardDownloadUrl(id) {
+  const base = String(getRuntimeConfig().collabApi || '').replace(/\/$/, '')
+  return `${base}/api/dashboards/${encodeURIComponent(id)}/download`
+}
+
 export async function deleteDashboard(id) {
   const data = await productRequest(`/api/dashboards/${encodeURIComponent(id)}`, {
     method: 'DELETE',
@@ -62,5 +67,6 @@ export default {
   createDashboard,
   updateDashboard,
   dashboardContentUrl,
+  dashboardDownloadUrl,
   deleteDashboard
 }
