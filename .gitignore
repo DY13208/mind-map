@@ -25,3 +25,7 @@ workbuddy_to_api/
 # local docker rebuild fingerprints
 .docker-build-stamps/
 
+
+# MCP 默认挂载目录（无 WORKBUDDY_HOST_DIR 时用）
+/data/workbuddy/
+
