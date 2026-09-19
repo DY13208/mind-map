@@ -6,7 +6,7 @@
     <AccessDeniedPanel
       v-if="accessDenied"
       :room-key="roomKey"
-      @back="$router.push('/my-maps')"
+      @back="goToMyMaps"
     />
     <template v-else-if="show">
       <Toolbar
@@ -33,6 +33,7 @@ import { productRequest } from '@/services/productHttp'
 import { normalizeRoomDto } from '@/services/roomDto'
 import { mapState, mapMutations } from 'vuex'
 import { getLocalConfig } from '@/api'
+import { navigateToMyMaps } from '@/utils/roomLocation'
 
 export default {
   name: 'EditPage',
@@ -120,6 +121,10 @@ export default {
 
     onHistoryRestored() {
       this.$bus.$emit('history-restored')
+    },
+
+    goToMyMaps() {
+      navigateToMyMaps(this.$router)
     }
   }
 }
