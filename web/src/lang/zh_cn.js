@@ -356,6 +356,8 @@ export default {
     saveAs: '另存为',
     import: '导入',
     export: '导出',
+    refresh: '刷新',
+    refreshSavingTip: '本地文件正在保存，请稍后再刷新',
     shortcutKey: '快捷键',
     associativeLine: '关联线',
     painter: '格式刷',
