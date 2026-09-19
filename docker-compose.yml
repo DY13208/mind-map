@@ -82,12 +82,17 @@ services:
       DOCMOST_SSO_SECRET: ${DOCMOST_SSO_SECRET:-}
       DOCMOST_INTERNAL_URL: ${DOCMOST_INTERNAL_URL:-http://docmost:3000}
       DOCMOST_SYNC_ENABLED: ${DOCMOST_SYNC_ENABLED:-true}
+      # MCP upload_attachment：映射宿主机 WorkBuddy 目录
+      WORKBUDDY_MOUNT: /workbuddy
+      WORKBUDDY_HOST_DIR: ${WORKBUDDY_HOST_DIR:-C:/Users/YiRan/WorkBuddy}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       # WorkBuddy / OpenClaw 写到宿主机 output 的产物，供预览/下载
       - ./knowledge:/app/knowledge
       - ./output:/app/output:ro
+      # WorkBuddy 本机产物目录，供 MCP upload_attachment 读 file_path
+      - ${WORKBUDDY_HOST_DIR:-C:/Users/YiRan/WorkBuddy}:/workbuddy:ro
       - mind-map-openclaw:/openclaw-data:ro
       # Start-Docker 自动注入的 OpenClaw Token 等（gitignore）
       - ./docker/runtime-config.local.js:/usr/share/nginx/html/runtime-config.js:ro

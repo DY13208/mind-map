@@ -32,7 +32,8 @@ export const FIELD_GROUPS = {
     'attachmentMimeType',
     'attachmentStatus',
     'attachmentError',
-    'attachmentExtractedText'
+    'attachmentExtractedText',
+    'attachmentProgress'
   ]
 }
 
