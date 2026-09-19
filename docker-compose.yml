@@ -169,7 +169,7 @@ services:
     build:
       context: ./integrations/knowledge-mcp
       dockerfile: Dockerfile
-    image: mind-map-knowledge-mcp:0.4.0
+    image: mind-map-knowledge-mcp:0.5.0
     environment:
       KNOWLEDGE_MCP_PORT: "18792"
       KNOWLEDGE_MCP_JWT_SECRET: ${KNOWLEDGE_MCP_JWT_SECRET}
@@ -177,7 +177,9 @@ services:
       KNOWLEDGE_MCP_JWT_AUD: knowledge-mcp
       KNOWLEDGE_MCP_JWT_TTL_SEC: ${KNOWLEDGE_MCP_JWT_TTL_SEC:-180}
       KNOWLEDGE_MCP_REPLICAS_POLICY: ${KNOWLEDGE_MCP_REPLICAS_POLICY:-single}
-      PGHOST: ${PGHOST:-postgres}
+      # Hardcoded like the `app` service: the host .env sets PGHOST=127.0.0.1 for
+      # host-side tooling, which is meaningless inside the compose network.
+      PGHOST: postgres
       PGPORT: "5432"
       PGUSER: ${PGUSER:-postgres}
       PGPASSWORD: ${PGPASSWORD:-mindmap}
