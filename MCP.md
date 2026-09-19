@@ -22,6 +22,7 @@ IP 由启动脚本探测，不要手写，也不要用 `127.0.0.1`（WorkBuddy �
 | `query_nodes` | 按 UID、名称或完整路径定向读取节点、子树、链路或层级；超大结果用游标分页 |
 | `list_attachments` | 列出导图（或指定节点）的附件及解析状态，只返回元数据 |
 | `read_attachment` | 读取附件正文（服务端已提取的文本，含 PDF/Word/Excel/PPT 与图片 OCR），按字符分页 |
+| `upload_attachment` | 把文件挂到指定节点；网页可点击附件图标查看/下载 |
 | `list_todos` | 列出待办，可选同时读取已完成 |
 | `prepare_todo` | 读取待办并匹配任意SOP的C/P |
 | `complete_todo` | 全部C通过后把任务移动到已完成 |
@@ -105,6 +106,23 @@ read_attachment room_key="demo" attachment_id="<id>" offset=4000 length=4000
 默认单次 4000 字符、最多 20000 字符。`has_more=true` 时把 `next_offset` 当成下一次的 `offset` 继续读，直到 `has_more=false`。
 
 `status` 不是 `ready` 时不会有正文：`processing` 表示大文件仍在后台解析，稍后重试；`failed` 会给出 `errorMessage`（例如老式 `.doc` 不支持解析，需要人工下载打开）。这两种情况都应如实告知用户，不要编造附件内容。原始文件本身不经 MCP 返回，人类可在网页上预览或下载。
+
+### 挂载附件（产物可点击查看）
+
+WorkBuddy / AI 生成 PDF、Markdown 等产物后，应调用 `upload_attachment` 挂到目标节点，**不要**只把文件写到本机再让用户手动拖拽。
+
+```text
+本机可读路径（推荐，MCP 与 WorkBuddy 同机或共享卷时）：
+upload_attachment room_key="demo" node="<uid>" file_path="D:/output/报告.pdf"
+
+或传文件内容：
+upload_attachment room_key="demo" node="<uid>" file_name="报告.pdf" content_base64="<...>"
+
+或可下载 URL：
+upload_attachment room_key="demo" node="<uid>" source_url="https://..."
+```
+
+成功后节点会带上 `attachmentId`，网页上出现附件图标，点击即可查看/下载。支持 txt/md/csv/pdf/docx/xlsx/html 与常见图片；单文件建议不超过约 24MB。
 
 ---
 
