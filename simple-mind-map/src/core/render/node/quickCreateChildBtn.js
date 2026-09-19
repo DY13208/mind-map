@@ -12,7 +12,9 @@ function showQuickCreateChildBtn() {
   if (this.getChildrenLength() > 0) return
   // 创建按钮
   if (this._quickCreateChildBtn) {
-    this.group.add(this._quickCreateChildBtn)
+    if (this._quickCreateChildBtn.parent() !== this.group) {
+      this.group.add(this._quickCreateChildBtn)
+    }
   } else {
     const { quickCreateChildBtnIcon, expandBtnStyle, expandBtnSize } =
       this.mindMap.opt
@@ -43,13 +45,18 @@ function showQuickCreateChildBtn() {
     this._quickCreateChildBtn.add(fillNode).add(iconNode)
     this._quickCreateChildBtn.on('click', e => {
       e.stopPropagation()
-      this.mindMap.emit('quick_create_btn_click', this)
+      const node = this.renderer.findNodeByUid(this.getData('uid'))
+      if (!node) return
+      this.mindMap.emit('quick_create_btn_click', node)
       const { customQuickCreateChildBtnClick } = this.mindMap.opt
       if (typeof customQuickCreateChildBtnClick === 'function') {
-        customQuickCreateChildBtnClick(this)
+        customQuickCreateChildBtnClick(node)
         return
       }
-      this.mindMap.execCommand('INSERT_CHILD_NODE', true, [this])
+      this.mindMap.execCommand('INSERT_CHILD_NODE', true, [node])
+    })
+    this._quickCreateChildBtn.on('mousedown', e => {
+      e.stopPropagation()
     })
     this._quickCreateChildBtn.on('dblclick', e => {
       e.stopPropagation()

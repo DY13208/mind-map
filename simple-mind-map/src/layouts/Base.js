@@ -863,6 +863,36 @@ class Base {
     return Number(node.getData && node.getData('childCount')) || 0
   }
 
+  // Free-positioned nodes may sit on the opposite side of their layout direction.
+  // Connect facing edges instead of drawing through either node's text.
+  renderReversedHorizontalLine(node, child, line, style, lineStyle, isLeft) {
+    const childIsLeft = child.left + child.width <= node.left
+    const childIsRight = child.left >= node.left + node.width
+    if (!(isLeft ? childIsRight : childIsLeft)) return false
+
+    const { nodeUseLineStyle, lineRadius } = this.mindMap.themeConfig
+    const x1 = childIsLeft ? node.left : node.left + node.width
+    const x2 = childIsLeft ? child.left + child.width : child.left
+    const y1 = node.top + node.height * (nodeUseLineStyle && !node.isRoot ? 1 : 0.5)
+    const y2 = child.top + child.height * (nodeUseLineStyle ? 1 : 0.5)
+    const mid = (x1 + x2) / 2
+    let path
+    if (lineStyle === 'direct') {
+      path = `M ${x1},${y1} L ${x2},${y2}`
+    } else if (lineStyle === 'curve') {
+      path = this.cubicBezierPath(x1, y1, x2, y2)
+    } else if (Math.abs(x2 - x1) < lineRadius * 2 || Math.abs(y2 - y1) < lineRadius) {
+      path = `M ${x1},${y1} L ${mid},${y1} L ${mid},${y2} L ${x2},${y2}`
+    } else {
+      path = this.createFoldLine([[x1, y1], [mid, y1], [mid, y2], [x2, y2]])
+    }
+    if (nodeUseLineStyle) {
+      path += ` L ${childIsLeft ? child.left : child.left + child.width},${y2}`
+    }
+    this.setLineStyle(style, line, path, child)
+    return true
+  }
+
   // 设置连线样式
   setLineStyle(style, line, path, childNode) {
     line.plot(this.transformPath(path))
