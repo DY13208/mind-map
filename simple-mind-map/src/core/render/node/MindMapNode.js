@@ -345,6 +345,8 @@ class MindMapNode {
     const changed = this.width !== width || this.height !== height
     this.width = width
     this.height = height
+    // Compare against the data used to measure, not a later selection repaint.
+    this.nodeDataSnapshot = JSON.stringify(this.getData())
     return changed
   }
 
@@ -555,6 +557,10 @@ class MindMapNode {
     if (!this.group) {
       return
     }
+    this.group.attr({
+      'data-node-uid': this.getData('uid'),
+      'data-parent-uid': this.parent ? this.parent.getData('uid') : ''
+    })
     this.updateNodeActiveClass()
     const {
       alwaysShowExpandBtn,
@@ -607,7 +613,6 @@ class MindMapNode {
     // 更新节点位置
     const t = this.group.transform()
     // 保存一份当前节点数据快照
-    this.nodeDataSnapshot = readonly ? '' : JSON.stringify(this.getData())
     // 节点位置变化才更新，因为即使值没有变化属性设置操作也是耗时的
     if (this.left !== t.translateX || this.top !== t.translateY) {
       this.group.translate(this.left - t.translateX, this.top - t.translateY)
@@ -785,9 +790,6 @@ class MindMapNode {
   // 销毁节点，不但会从画布删除，而且原节点直接置空，后续无法再插回画布
   destroy() {
     this.removeLine()
-    if (this.parent) {
-      this.parent.removeLine()
-    }
     if (!this.group) return
     if (this.emptyUser) {
       this.emptyUser()
@@ -894,13 +896,22 @@ class MindMapNode {
 
   //  连线
   renderLine(deep = false) {
+    // Late collaboration callbacks may still hold a retired instance.
+    const cache = this.renderer && this.renderer.nodeCache
+    const uid = this.getData('uid')
+    if (cache && cache[uid] && cache[uid] !== this) {
+      this.removeLine()
+      return
+    }
     if (this.getData('expand') === false) {
       // A move can change the old parent's expand state before the next paint.
       // Its outgoing connectors must not survive the collapsed render pass.
       this.removeLine()
       return
     }
-    let childrenLen = this.getChildrenLength()
+    // Allocate exactly the slots the layout will draw. Lazy data can contain
+    // more children than this render pass, leaving an old path in unused slots.
+    let childrenLen = this.children.length
     // 切换为鱼骨结构时，清空根节点和二级节点的连线
     if (this.mindMap.renderer.layout.nodeIsRemoveAllLines) {
       if (this.mindMap.renderer.layout.nodeIsRemoveAllLines(this)) {
@@ -929,6 +940,9 @@ class MindMapNode {
       },
       this.style.getStyle('lineStyle', true)
     )
+    this._lines.forEach(line => {
+      if (typeof line.addClass === 'function') line.addClass('smm-tree-connector')
+    })
     // 子级的连线也需要更新
     if (deep && this.children && this.children.length > 0) {
       this.children.forEach(item => {

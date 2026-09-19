@@ -5,7 +5,7 @@
     </div>
     <div class="authScreen" v-else-if="authFailure">
       <div class="authCard authCard--compact">
-        <h1 class="authBrand">良策</h1>
+        <h1 class="authBrand">CPD</h1>
         <p class="authFailureText">{{ authFailure }}</p>
         <p class="authFailureCode" v-if="authFailureCode">{{ authFailureCode }}</p>
         <button
@@ -25,7 +25,7 @@
         <div class="authIntro">
           <div class="authBrandBlock">
             <div class="authBrandMark">依</div>
-            <h1 class="authBrand">良策</h1>
+            <h1 class="authBrand">CPD</h1>
           </div>
           <p class="authSubtitle">企业微信扫码登录</p>
           <div class="authError" v-if="authErrorMessage">{{ authErrorMessage }}</div>
@@ -116,7 +116,7 @@ import {
 } from '@/utils/auth'
 import { mountWecomLoginPanel } from '@/utils/wecomLogin'
 
-const PAGE_TITLE = '良策'
+const PAGE_TITLE = 'CPD'
 const AUTH_BOOTSTRAP_MS = 45000
 const authErrors = {
   invalid_state: '登录状态校验失败，请重新扫码。',

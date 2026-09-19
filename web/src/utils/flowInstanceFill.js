@@ -156,7 +156,7 @@ export function applyLocalFacts(trees, facts) {
 }
 
 export function buildFillDataPrompt({ query, trees, facts, templateLabel }) {
-  const system = `你是良策思维导图数据填写助手。
+  const system = `你是CPD思维导图数据填写助手。
 
 用户已有一份从 SOP 克隆的固定子节点树。你的任务 ONLY 是为「模块/提供」下的数据项填写具体值。
 

@@ -363,7 +363,7 @@ export async function loadSopRunContext(roomKey, sop) {
 }
 
 function buildSystemPrompt() {
-  return `你是良策 SOP 执行助手（${aiBackendLabel()}）。用户会指定一个 SOP 节点并勾选需要的产物。
+  return `你是CPD SOP 执行助手（${aiBackendLabel()}）。用户会指定一个 SOP 节点并勾选需要的产物。
 这是真实执行任务，不是问答总结。
 
 硬性规则：

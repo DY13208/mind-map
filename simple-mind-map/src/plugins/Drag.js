@@ -133,6 +133,19 @@ class Drag extends Base {
     }
     const { autoMoveWhenMouseInEdgeOnDrag, enableFreeDrag, beforeDragEnd } =
       this.mindMap.opt
+    // Hover detection is throttled by 300ms. Resolve the actual release point
+    // synchronously, otherwise a fast drop can become an unintended free drag.
+    let droppedOnDescendant = false
+    if (this.isDragging && this.drawTransform && this.clone) {
+      const { x, y } = this.mindMap.toPos(e.clientX, e.clientY)
+      this.mouseMoveX = x
+      this.mouseMoveY = y
+      droppedOnDescendant = this.isPointOverDraggedDescendant(x, y)
+      if (!droppedOnDescendant) {
+        this.onMove(x, y, e)
+        Drag.prototype.checkOverlapNode.call(this)
+      }
+    }
     // 停止自动移动
     if (autoMoveWhenMouseInEdgeOnDrag && this.mindMap.select) {
       this.autoMove.clearAutoMoveTimer()
@@ -144,6 +157,10 @@ class Drag extends Base {
       node.showChildren()
       node.endDrag()
     })
+    if (droppedOnDescendant) {
+      this.reset()
+      return
+    }
     const draggedUids = (this.beingDragNodeList || [])
       .map(node => node && node.getData && node.getData('uid'))
       .filter(Boolean)
@@ -1335,6 +1352,24 @@ class Drag extends Base {
   }
 
   // 检查某个节点是否在被拖拽节点内
+  isPointOverDraggedDescendant(x, y) {
+    const stack = this.beingDragNodeList.flatMap(node =>
+      node.getData('expand') === false ? [] : node.children || []
+    )
+    const seen = new Set()
+    while (stack.length) {
+      const node = stack.pop()
+      if (!node || seen.has(node)) continue
+      seen.add(node)
+      const rect = this.getNodeRect(node)
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+        return true
+      }
+      if (node.getData('expand') !== false) stack.push(...(node.children || []))
+    }
+    return false
+  }
+
   checkIsInBeingDragNodeList(node) {
     return !!this.beingDragNodeList.find(item => {
       return item.uid === node.uid || item.isAncestor(node)
