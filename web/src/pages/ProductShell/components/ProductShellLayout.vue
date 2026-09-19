@@ -16,7 +16,7 @@
           class="productLogo"
           @click="$router.push('/files')"
         >
-          <span>良</span><strong>良策</strong>
+          <span>C</span><strong>CPD</strong>
         </div>
         <button
           v-else
@@ -28,7 +28,7 @@
           data-testid="sidebar-toggle"
           @click="setSidebarCollapsed(false)"
         >
-          <span class="collapsedLogoMark" aria-hidden="true">良</span>
+          <span class="collapsedLogoMark" aria-hidden="true">C</span>
           <svg
             class="collapsedLogoOpenIcon"
             viewBox="0 0 24 24"

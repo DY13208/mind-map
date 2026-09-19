@@ -93,3 +93,96 @@ for (const command of ['moveNodeTo', 'insertBefore', 'insertAfter']) {
     assert.equal(target.nodeData.children.indexOf(a.nodeData), command === 'insertBefore' ? 0 : 1)
   })
 }
+
+test('retiring an old node does not erase its live parents connectors', () => {
+  const parent = node('parent')
+  const old = node('old')
+  old.parent = parent
+  const liveLine = connector(parent)
+  const oldLine = connector(old)
+  old.destroy()
+  assert.equal(oldLine.removed, true)
+  assert.equal(liveLine.removed, false)
+})
+
+test('a replaced node cannot recreate connectors from a delayed callback', () => {
+  const old = node('parent', [node('child')])
+  const oldLine = connector(old)
+  old.renderer = { nodeCache: { parent: node('parent') } }
+  old.renderLine(true)
+  assert.equal(oldLine.removed, true)
+  assert.equal(old._lines.length, 0)
+})
+
+test('unused connector slots are removed when lazy data and visible children differ', () => {
+  const parent = node('parent', [node('visible')])
+  parent.nodeData.children.push({ data: { uid: 'lazy' }, children: [] })
+  const keep = connector(parent)
+  const stale = connector(parent)
+  const layout = { renderLine(n, lines) { assert.equal(lines.length, n.children.length) } }
+  parent.renderer = { nodeCache: { parent }, layout }
+  parent.mindMap = { renderer: parent.renderer }
+  parent.style = { getStyle: () => 'straight' }
+  parent.renderLine()
+  assert.equal(stale.removed, true)
+  assert.equal(keep.removed, false)
+})
+
+for (const command of ['insertBefore', 'insertAfter']) {
+  test(command + ' uses UIDs when lazy data order differs from rendered siblings', () => {
+    const a = node('a')
+    const other = node('other')
+    const old = node('old', [a, other])
+    const unloaded = { data: { uid: 'unloaded' }, children: [] }
+    old.nodeData.children.unshift(unloaded)
+    const b = node('b')
+    const target = node('target', [b])
+    const targetUnloaded = { data: { uid: 'target-unloaded' }, children: [] }
+    target.nodeData.children.unshift(targetUnloaded)
+    const renderer = Object.assign(Object.create(Render.prototype), {
+      runAfterHydrate: () => false, mindMap: { render() {} }
+    })
+    renderer[command](a, b)
+    assert.deepEqual(old.nodeData.children.map(n => n.data.uid), ['unloaded', 'other'])
+    assert.deepEqual(target.nodeData.children.map(n => n.data.uid), command === 'insertBefore'
+      ? ['target-unloaded', 'a', 'b'] : ['target-unloaded', 'b', 'a'])
+  })
+}
+
+for (const command of ['moveNodeTo', 'insertBefore', 'insertAfter']) {
+  test(command + ' rejects moving an ancestor into its descendant without touching lines or order', () => {
+    const b = node('b')
+    const middle = node('middle', [b])
+    const a = node('a', [middle])
+    const root = node('root', [a])
+    const line = connector(root)
+    const renderer = Object.assign(Object.create(Render.prototype), {
+      runAfterHydrate: () => { throw new Error('invalid move must not hydrate') },
+      mindMap: { render() { throw new Error('invalid move must not render') } }
+    })
+    renderer[command](a, b)
+    assert.equal(a.parent, root)
+    assert.deepEqual(root.children, [a])
+    assert.deepEqual(a.children, [middle])
+    assert.equal(line.removed, false)
+  })
+}
+
+test('normal render cleanup removes only orphan node groups and tree connectors', () => {
+  const artifact = (className) => ({ removed: false, hasClass: name => name === className, remove() { this.removed = true } })
+  const liveGroup = artifact('smm-node'), oldGroup = artifact('smm-node')
+  const summaryGroup = artifact('smm-node'), summaryChildGroup = artifact('smm-node')
+  const liveLine = artifact('smm-tree-connector'), oldLine = artifact('smm-tree-connector')
+  const summaryLine = artifact('generalization'), otherOverlay = artifact('other')
+  const renderer = Object.assign(Object.create(Render.prototype), {
+    nodeCache: { a: { group: liveGroup, _lines: [liveLine], _generalizationList: [
+      { generalizationNode: { group: summaryGroup, children: [{ group: summaryChildGroup }] } }
+    ] } },
+    mindMap: { nodeDraw: { children: () => [liveGroup, oldGroup, summaryGroup, summaryChildGroup, otherOverlay] },
+      lineDraw: { children: () => [liveLine, oldLine, summaryLine] } }
+  })
+  renderer.sweepOrphanNodeGroups()
+  assert.equal(oldGroup.removed, true)
+  assert.equal(oldLine.removed, true)
+  for (const item of [liveGroup, summaryGroup, summaryChildGroup, otherOverlay, liveLine, summaryLine]) assert.equal(item.removed, false)
+})

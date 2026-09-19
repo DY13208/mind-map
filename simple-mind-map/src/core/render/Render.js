@@ -194,16 +194,18 @@ class Render {
     const draw = this.mindMap && this.mindMap.nodeDraw
     if (!draw || typeof draw.children !== 'function') return
     const live = new Set()
+    const liveLines = new Set()
+    const seen = new Set()
+    const collect = node => {
+      if (!node || seen.has(node)) return
+      seen.add(node)
+      if (node.group) live.add(node.group)
+      ;(node._lines || []).forEach(line => liveLines.add(line))
+      ;(node.children || []).forEach(collect)
+      ;(node._generalizationList || []).forEach(item => collect(item.generalizationNode))
+    }
     Object.keys(this.nodeCache || {}).forEach(uid => {
-      const node = this.nodeCache[uid]
-      if (node && node.group) live.add(node.group)
-      ;(node && node._generalizationList ? node._generalizationList : []).forEach(
-        item => {
-          if (item && item.generalizationNode && item.generalizationNode.group) {
-            live.add(item.generalizationNode.group)
-          }
-        }
-      )
+      collect(this.nodeCache[uid])
     })
     const kids = draw.children()
     const list = kids && typeof kids.each === 'function' ? [] : Array.from(kids || [])
@@ -217,6 +219,12 @@ class Render {
       }
       if (typeof child.remove === 'function') child.remove()
     })
+    const lineDraw = this.mindMap.lineDraw
+    if (lineDraw && typeof lineDraw.children === 'function') {
+      Array.from(lineDraw.children()).forEach(line => {
+        if (line.hasClass('smm-tree-connector') && !liveLines.has(line)) line.remove()
+      })
+    }
   }
 
   // 重新设置思维导图数据
@@ -724,9 +732,9 @@ class Render {
             this.render()
             return
           }
+          this.sweepOrphanNodeGroups()
           if (isLayoutSwitch) {
             this.restoreActiveUids(activeUids)
-            this.sweepOrphanNodeGroups()
             this._lastRenderWasLayoutSwitch = true
             inspectLayoutRenderer(
               this.mindMap,
@@ -1756,6 +1764,7 @@ class Render {
     nodeList = nodeList.filter(item => {
       return !item.isRoot
     })
+    if (!exist || this.isInvalidMoveTarget(nodeList, exist.parent)) return
     if (
       this.runAfterHydrate(
         [exist && exist.parent].filter(Boolean),
@@ -1773,26 +1782,42 @@ class Render {
       let nodeParent = item.parent
       let nodeBorthers = nodeParent.children
       let nodeIndex = getNodeIndexInNodeList(item, nodeBorthers)
-      if (nodeIndex === -1) {
+      const uid = item.getData('uid')
+      const dataIndex = nodeParent.nodeData.children.findIndex(
+        child => child.data.uid === uid
+      )
+      const existParent = exist.parent
+      if (item === exist || !existParent || nodeIndex === -1 || dataIndex === -1) {
+        return
+      }
+      const anchorUid = exist.getData('uid')
+      if (
+        uid === anchorUid ||
+        getNodeIndexInNodeList(exist, existParent.children) === -1 ||
+        !existParent.nodeData.children.some(child => child.data.uid === anchorUid)
+      ) {
         return
       }
       // Invalidate old connectors before asynchronous layout reuses the nodes.
       nodeParent.removeLine()
       nodeBorthers.splice(nodeIndex, 1)
-      nodeParent.nodeData.children.splice(nodeIndex, 1)
+      nodeParent.nodeData.children.splice(dataIndex, 1)
 
       // 目标节点
-      let existParent = exist.parent
       let existBorthers = existParent.children
       let existIndex = getNodeIndexInNodeList(exist, existBorthers)
+      let targetDataIndex = existParent.nodeData.children.findIndex(
+        child => child.data.uid === anchorUid
+      )
       if (existIndex === -1) {
         return
       }
       if (dir === 'after') {
         existIndex++
+        targetDataIndex++
       }
       existBorthers.splice(existIndex, 0, item)
-      existParent.nodeData.children.splice(existIndex, 0, item.nodeData)
+      existParent.nodeData.children.splice(targetDataIndex, 0, item.nodeData)
       item.parent = existParent
       this.resetMovedNodePosition(item)
     })
@@ -2013,6 +2038,7 @@ class Render {
     nodeList = nodeList.filter(item => {
       return !item.isRoot
     })
+    if (this.isInvalidMoveTarget(nodeList, toNode)) return
     if (
       this.runAfterHydrate(
         [toNode].filter(Boolean),
@@ -2044,6 +2070,25 @@ class Render {
     })
     this.emitNodeActiveEvent()
     this.mindMap.render()
+  }
+
+  // Validate against data descendants as well as rendered nodes (lazy children
+  // need not have a rendered instance yet). Reject the entire multi-node move.
+  isInvalidMoveTarget(nodes, target) {
+    if (!target) return true
+    const targetUid = target.getData('uid')
+    return nodes.some(node => {
+      const stack = [node.nodeData]
+      const seen = new Set()
+      while (stack.length) {
+        const current = stack.pop()
+        if (!current || seen.has(current)) continue
+        seen.add(current)
+        if (current.data && current.data.uid === targetUid) return true
+        stack.push(...(current.children || []))
+      }
+      return false
+    })
   }
 
   // Structural moves follow sibling order instead of the old absolute position.
