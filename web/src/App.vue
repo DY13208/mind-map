@@ -60,21 +60,6 @@
           </div>
           <div class="authActions">
             <button
-              v-if="authState.wecomEnabled"
-              class="authButton"
-              type="button"
-              :disabled="wecomClientRedirecting"
-              @click="startWecomClientLogin"
-            >
-              {{
-                wecomClientRedirecting
-                  ? '正在进入企业微信…'
-                  : isWecomClient
-                    ? '重新使用企业微信登录'
-                    : '在企业微信客户端打开'
-              }}
-            </button>
-            <button
               v-if="authState.oneIdEnabled"
               class="authButton authButton--secondary"
               type="button"
