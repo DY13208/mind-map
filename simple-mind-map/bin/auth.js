@@ -253,6 +253,7 @@ function readConfig(env = process.env) {
       ),
       redirectUri: redirect.toString(),
       scopes: Array.from(new Set(scopes)),
+      loginReady: enabledValue(env.ONEID_LOGIN_READY),
       autoLogin: enabledValue(env.ONEID_AUTO_LOGIN)
     }
   }
@@ -755,6 +756,7 @@ function shouldAutoLoginOneId() {
   return Boolean(
     config.oneIdEnabled &&
       config.oneId &&
+      config.oneId.loginReady &&
       config.oneId.autoLogin &&
       !config.wecomEnabled
   )
@@ -1761,6 +1763,7 @@ async function handleAuthApi(req, res) {
       enabled: config.enabled,
       wecomEnabled: Boolean(config.wecomEnabled),
       oneIdEnabled: Boolean(config.oneIdEnabled),
+      oneIdLoginReady: Boolean(config.oneId && config.oneId.loginReady),
       oneIdAutoLogin: shouldAutoLoginOneId(),
       loginPath: config.wecomEnabled ? '/api/auth/login' : null,
       wecomClientLoginPath: config.wecomEnabled
@@ -1822,6 +1825,7 @@ async function handleAuthApi(req, res) {
       enabled: true,
       wecomEnabled: Boolean(config.wecomEnabled),
       oneIdEnabled: Boolean(config.oneIdEnabled),
+      oneIdLoginReady: Boolean(config.oneId && config.oneId.loginReady),
       oneIdAutoLogin: shouldAutoLoginOneId(),
       authenticated: !!user,
       user: user ? publicUser(user) : null,
@@ -1876,6 +1880,13 @@ async function handleAuthApi(req, res) {
       sendJson(req, res, 404, {
         error: 'OneID 单点登录未启用',
         code: 'oneid_disabled'
+      })
+      return true
+    }
+    if (!config.oneId || !config.oneId.loginReady) {
+      sendJson(req, res, 503, {
+        error: 'WorkBuddy 单点登录认证源尚未上架',
+        code: 'oneid_not_ready'
       })
       return true
     }

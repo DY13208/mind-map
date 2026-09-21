@@ -21,6 +21,7 @@ CPD 支持通过腾讯 OneID 的 OIDC 授权码模式建立现有 `mind_map_sess
 
 ```dotenv
 ONEID_AUTH_ENABLED=true
+ONEID_LOGIN_READY=false
 ONEID_AUTO_LOGIN=false
 ONEID_CLIENT_ID=替换为应用Client-ID
 ONEID_CLIENT_SECRET=替换为应用Client-Secret
@@ -31,6 +32,8 @@ ONEID_USERINFO_ENDPOINT=https://oauth2.account.tencent.com/authz/oidc/v2/替换�
 ONEID_REDIRECT_URI=https://xx.stillgroup.net:8989/api/auth/oneid/callback
 ONEID_SCOPES=openid profile mobile
 ```
+
+服务商代开发应用处于“开发中”时保持 `ONEID_LOGIN_READY=false`，页面会将 WorkBuddy 入口显示为不可点击的配置中状态，避免用户进入 OneID 错误页。收到应用上架通知并在 OneID 启用认证源后，将该值改为 `true` 并重启服务，无需再次修改前端代码。
 
 生产环境同时设置：
 
