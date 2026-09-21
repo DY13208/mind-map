@@ -338,7 +338,10 @@ export default {
         if (
           this.authState.wecomEnabled &&
           this.isWecomClient &&
-          !this.authErrorCode &&
+          // 从普通浏览器唤起企业微信桌面端后，首次 OAuth 回调会进入新的
+          // WebView Cookie 上下文。此时保留严格的浏览器绑定，并在桌面端
+          // 自动重建一次挑战；比放宽 state 校验更安全，也避免用户手动重试。
+          (!this.authErrorCode || this.authErrorCode === 'invalid_state') &&
           !this.hasAttemptedWecomClientAutoLogin()
         ) {
           this.startWecomClientLogin()
