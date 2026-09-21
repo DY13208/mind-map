@@ -8,7 +8,14 @@ const { canonicalList, canonicalRead } = require('./adapters/canonical');
 const { docmostSearch, docmostGet } = require('./adapters/docmost');
 const { openwikiSearch, openwikiRead, openwikiStatus } = require('./adapters/openwiki');
 const { docmostAiGet, docmostAiUpsert } = require('./adapters/docmostAi');
-const { wikiSpaces, wikiSearch, wikiTree, wikiRead } = require('./adapters/wiki');
+const {
+  wikiSpaces,
+  wikiSearch,
+  wikiTree,
+  wikiRead,
+  wikiCreate,
+  wikiUpdate,
+} = require('./adapters/wiki');
 const {
   openwikiRefresh,
   openwikiRefreshStatus,
@@ -20,7 +27,7 @@ const jobStore = require('./jobs/jobStore');
 
 const PORT = Number(process.env.KNOWLEDGE_MCP_PORT || 18792);
 const JWT_SECRET = process.env.KNOWLEDGE_MCP_JWT_SECRET || '';
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 const rateLimiter = createRateLimiter({
   windowMs: Number(process.env.KNOWLEDGE_MCP_RATE_WINDOW_MS || 60000),
   maxPerUser: Number(process.env.KNOWLEDGE_MCP_RATE_MAX_PER_USER || 60),
@@ -45,6 +52,8 @@ const TOOLS = [
   { name: 'wiki_search', description: 'Full-text search the whole Wiki, scoped to the pages the calling account may read.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, spaceId: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] } },
   { name: 'wiki_tree', description: 'Page tree of a Wiki space, or of the subtree under a page.', inputSchema: { type: 'object', properties: { spaceId: { type: 'string' }, pageId: { type: 'string' } } } },
   { name: 'wiki_read', description: 'Read one Wiki page body (markdown or html); Docmost enforces view permission.', inputSchema: { type: 'object', properties: { pageId: { type: 'string' }, format: { type: 'string', enum: ['markdown', 'html'] } }, required: ['pageId'] } },
+  { name: 'wiki_create', description: 'Create a Wiki page (markdown by default); Docmost enforces create/edit permission for the calling account.', inputSchema: { type: 'object', properties: { spaceId: { type: 'string' }, title: { type: 'string' }, content: { type: 'string' }, parentPageId: { type: 'string' }, format: { type: 'string', enum: ['markdown', 'html', 'json'] } }, required: ['spaceId'] } },
+  { name: 'wiki_update', description: 'Update a Wiki page title and/or body; Docmost enforces edit permission. operation=replace|append|prepend when content is set.', inputSchema: { type: 'object', properties: { pageId: { type: 'string' }, title: { type: 'string' }, content: { type: 'string' }, format: { type: 'string', enum: ['markdown', 'html', 'json'] }, operation: { type: 'string', enum: ['replace', 'append', 'prepend'] } }, required: ['pageId'] } },
 ];
 
 function sendJson(res, status, body) {
@@ -95,8 +104,19 @@ function authUser(req) {
     secret: JWT_SECRET,
     iss: process.env.KNOWLEDGE_MCP_JWT_ISS || 'openclaw-liangce',
     aud: process.env.KNOWLEDGE_MCP_JWT_AUD || 'knowledge-mcp',
+    // Same env as app issuer (knowledgeMcpToken.js). TTL=0 skips exp check.
+    ttlSec: process.env.KNOWLEDGE_MCP_JWT_TTL_SEC,
   });
   return String(payload.sub);
+}
+
+// 写入体积：content 可能是 ProseMirror 对象（format=json），String(obj) 只会得到
+// "[object Object]"，必须按序列化后的长度算，否则大 payload 会绕过限制。
+function payloadSize(content) {
+  if (content == null) return 0;
+  return typeof content === 'object'
+    ? JSON.stringify(content).length
+    : String(content).length;
 }
 
 function validateArgs(name, args) {
@@ -106,7 +126,11 @@ function validateArgs(name, args) {
     e.code = 'query_too_long';
     throw e;
   }
-  if (name === 'docmost_ai_upsert' && a.content != null && String(a.content).length > limits.maxWriteChars) {
+  if (
+    (name === 'docmost_ai_upsert' || name === 'wiki_create' || name === 'wiki_update') &&
+    a.content != null &&
+    payloadSize(a.content) > limits.maxWriteChars
+  ) {
     const e = new Error('content_too_large');
     e.code = 'content_too_large';
     throw e;
@@ -151,6 +175,8 @@ async function callTool(userId, name, args) {
     case 'wiki_search': return wikiSearch(userId, args || {});
     case 'wiki_tree': return wikiTree(userId, args || {});
     case 'wiki_read': return wikiRead(userId, args || {});
+    case 'wiki_create': return wikiCreate(userId, args || {});
+    case 'wiki_update': return wikiUpdate(userId, args || {});
     default: {
       const e = new Error('unknown_tool');
       e.code = 'unknown_tool';

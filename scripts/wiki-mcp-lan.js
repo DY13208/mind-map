@@ -80,21 +80,34 @@ if (!secret) {
   process.exit(1);
 }
 const userId = flag('--user') || env.AUTH_DEV_BYPASS_USER_ID || 'dev-local';
-const ttlSec = Number(flag('--ttl') || env.KNOWLEDGE_MCP_JWT_TTL_SEC || 180);
+function parseJwtTtlSec(raw, defaultTtl = 180) {
+  if (raw === undefined || raw === null) return defaultTtl;
+  const text = String(raw).trim();
+  if (text === '') return defaultTtl;
+  const n = Number(text);
+  if (!Number.isFinite(n) || n < 0) return defaultTtl;
+  return Math.floor(n);
+}
+const ttlSec = parseJwtTtlSec(
+  flag('--ttl') != null ? flag('--ttl') : env.KNOWLEDGE_MCP_JWT_TTL_SEC,
+  180
+);
 
 const b64 = (v) => Buffer.from(JSON.stringify(v), 'utf8').toString('base64url');
 const now = Math.floor(Date.now() / 1000);
-const data = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({
+const payload = {
   sub: String(userId),
   actorType: 'user',
   iss: env.KNOWLEDGE_MCP_JWT_ISS || 'openclaw-liangce',
   aud: env.KNOWLEDGE_MCP_JWT_AUD || 'knowledge-mcp',
   iat: now,
-  exp: now + ttlSec,
   jti: crypto.randomUUID(),
-})}`;
+};
+if (ttlSec > 0) payload.exp = now + ttlSec;
+const data = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64(payload)}`;
 const token = `${data}.${crypto.createHmac('sha256', secret).update(data).digest('base64url')}`;
-const expiresAt = new Date((now + ttlSec) * 1000).toISOString();
+const expiresAt =
+  ttlSec > 0 ? new Date((now + ttlSec) * 1000).toISOString() : null;
 
 // --- 可选：把绑定改为 0.0.0.0 ---
 const enableLan = args.includes('--enable-lan');
@@ -166,7 +179,9 @@ console.log('=== 4) 客户机：粘进 ~/.workbuddy/mcp.json 的 mcpServers ==='
 console.log(JSON.stringify({ mcpServers: snippet }, null, 2));
 console.log('');
 console.log(
-  `令牌：sub=${userId}，${ttlSec}s 后到期（${expiresAt}）。跨机建议 TTL 用 7–30 天。`,
+  ttlSec > 0
+    ? `令牌：sub=${userId}，${ttlSec}s 后到期（${expiresAt}）。跨机建议 TTL 用 7–30 天。`
+    : `令牌：sub=${userId}，永久 Token（无 exp）。`,
 );
 console.log('客户机粘好后，在「连接器管理 → 自定义连接器」点「信任 / 重新连接」。');
 console.log('');

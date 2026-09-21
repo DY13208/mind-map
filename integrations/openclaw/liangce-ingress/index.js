@@ -19,7 +19,14 @@ function mintKnowledgeJwt(userId, api) {
       ''
   ).trim();
   if (!secret) return null;
-  const ttl = Number(api.pluginConfig?.knowledgeMcpJwtTtlSec || process.env.KNOWLEDGE_MCP_JWT_TTL_SEC || 180);
+  const rawTtl =
+    api.pluginConfig?.knowledgeMcpJwtTtlSec ??
+    process.env.KNOWLEDGE_MCP_JWT_TTL_SEC;
+  let ttl = 180;
+  if (rawTtl !== undefined && rawTtl !== null && String(rawTtl).trim() !== '') {
+    const n = Number(rawTtl);
+    if (Number.isFinite(n) && n >= 0) ttl = Math.floor(n);
+  }
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: 'HS256', typ: 'JWT' };
   const payload = {
@@ -28,9 +35,9 @@ function mintKnowledgeJwt(userId, api) {
     iss: String(api.pluginConfig?.knowledgeMcpJwtIss || process.env.KNOWLEDGE_MCP_JWT_ISS || 'openclaw-liangce'),
     aud: String(api.pluginConfig?.knowledgeMcpJwtAud || process.env.KNOWLEDGE_MCP_JWT_AUD || 'knowledge-mcp'),
     iat: now,
-    exp: now + ttl,
     jti: randomUUID(),
   };
+  if (ttl > 0) payload.exp = now + ttl;
   const data = `${b64urlJson(header)}.${b64urlJson(payload)}`;
   const sig = createHmac('sha256', secret).update(data).digest('base64url');
   return `${data}.${sig}`;
