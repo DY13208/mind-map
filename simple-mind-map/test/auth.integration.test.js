@@ -113,10 +113,14 @@ async function main() {
         assert.strictEqual(form.get('client_id'), 'oneid-integration-client')
         assert.strictEqual(form.get('client_secret'), 'oneid-integration-secret')
         assert.strictEqual(form.get('grant_type'), 'authorization_code')
-        assert.strictEqual(form.get('code'), 'oneid-valid-code')
+        const code = form.get('code')
+        assert(['oneid-valid-code', 'oneid-unmapped-code'].includes(code))
         res.end(
           JSON.stringify({
-            access_token: 'oneid-access-token',
+            access_token:
+              code === 'oneid-unmapped-code'
+                ? 'oneid-unmapped-access-token'
+                : 'oneid-access-token',
             token_type: 'Bearer',
             expires_in: 1800
           })
@@ -125,6 +129,17 @@ async function main() {
       return
     }
     if (url.pathname === '/oidc/userinfo') {
+      if (req.headers.authorization === 'Bearer oneid-unmapped-access-token') {
+        res.end(
+          JSON.stringify({
+            sub: 'oneid-unmapped-member',
+            name: '未映射成员',
+            preferred_username: 'missing-user',
+            mobile: '13900139000'
+          })
+        )
+        return
+      }
       assert.strictEqual(req.headers.authorization, 'Bearer oneid-access-token')
       res.end(
         JSON.stringify({
@@ -164,6 +179,12 @@ async function main() {
       return
     }
     if (url.pathname === '/cgi-bin/user/get') {
+      if (url.searchParams.get('userid') === 'missing-user') {
+        res.end(
+          JSON.stringify({ errcode: 60111, errmsg: 'userid not found' })
+        )
+        return
+      }
       res.end(
         JSON.stringify({
           errcode: 0,
@@ -176,7 +197,21 @@ async function main() {
       return
     }
     if (url.pathname === '/cgi-bin/user/getuserid' && req.method === 'POST') {
-      res.end(JSON.stringify({ errcode: 0, userid: 'zhangsan' }))
+      let raw = ''
+      req.on('data', chunk => {
+        raw += chunk
+      })
+      req.on('end', () => {
+        const body = JSON.parse(raw || '{}')
+        if (body.mobile === '13900139000') {
+          res.end(
+            JSON.stringify({ errcode: 60103, errmsg: 'mobile not found' })
+          )
+          return
+        }
+        assert.strictEqual(body.mobile, '13800138000')
+        res.end(JSON.stringify({ errcode: 0, userid: 'zhangsan' }))
+      })
       return
     }
     res.statusCode = 404
@@ -393,6 +428,27 @@ async function main() {
       headers: { Origin: appOrigin }
     })
     assert.strictEqual(response.status, 204)
+
+    response = await request(
+      '/api/auth/oneid/login?return_to=%2Ffiles%3Ffrom%3Dworkbuddy'
+    )
+    assert.strictEqual(response.status, 302)
+    const unmappedLoginLocation = new URL(response.headers.get('location'))
+    const unmappedState = unmappedLoginLocation.searchParams.get('state')
+    assert(unmappedState)
+    response = await request(
+      `/api/auth/oneid/callback?code=oneid-unmapped-code&state=${encodeURIComponent(
+        unmappedState
+      )}`
+    )
+    assert.strictEqual(response.status, 302)
+    const unmappedCallbackLocation = new URL(response.headers.get('location'))
+    assert.strictEqual(
+      unmappedCallbackLocation.searchParams.get('auth_error'),
+      'oneid_account_not_linked'
+    )
+    response = await request('/api/auth/me')
+    assert.strictEqual((await response.json()).authenticated, false)
 
     response = await request('/api/auth/qr?return_to=%2F%3Froom%3Ddemo')
     assert.strictEqual(response.status, 200)

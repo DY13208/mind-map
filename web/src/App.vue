@@ -155,6 +155,8 @@ const authErrors = {
   oneid_missing_code: 'OneID 未返回有效授权码，请重新登录。',
   oneid_token_failed: 'OneID 登录票据交换失败，请稍后重试。',
   oneid_identity_failed: 'OneID 未返回有效成员身份，请联系管理员。',
+  oneid_account_not_linked:
+    'WorkBuddy 账号未匹配到现有企业微信成员。为避免产生第二套账号，已阻止登录，请联系管理员核对成员手机号。',
   oneid_invalid_response: 'OneID 返回的数据不完整，请稍后重试。',
   oneid_http_error: 'OneID 登录服务响应异常，请稍后重试。',
   oneid_timeout: 'OneID 响应超时，请稍后重试。',
