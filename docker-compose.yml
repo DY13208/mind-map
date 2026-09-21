@@ -53,7 +53,7 @@ services:
       REDIS_URL: redis://redis:6379
       COLLAB_EVENT_BUS: redis
       PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
-      WEB_PORT: ${MIND_MAP_PORT:-8080}
+      WEB_PORT: ${MIND_MAP_HTTP_PORT:-8990}
       GATEWAY: "1"
       HOST: "127.0.0.1"
       PORT: "1234"

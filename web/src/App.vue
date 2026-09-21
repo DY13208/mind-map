@@ -27,11 +27,28 @@
             <div class="authBrandMark">依</div>
             <h1 class="authBrand">CPD</h1>
           </div>
-          <p class="authSubtitle">企业微信扫码登录</p>
+          <p class="authSubtitle">{{ authLoginSubtitle }}</p>
           <div class="authError" v-if="authErrorMessage">{{ authErrorMessage }}</div>
         </div>
         <div class="authLoginPanel">
-          <div class="authQrShell">
+          <div class="authOneId" v-if="authState.oneIdEnabled">
+            <button
+              class="authButton authOneIdButton"
+              type="button"
+              :disabled="oneIdRedirecting"
+              @click="startOneIdLogin"
+            >
+              {{ oneIdRedirecting ? '正在进入 WorkBuddy…' : 'WorkBuddy / OneID 单点登录' }}
+            </button>
+            <p class="authOneIdHint">已登录 WorkBuddy 时可直接进入，无需再次扫码</p>
+          </div>
+          <div
+            class="authLoginDivider"
+            v-if="authState.oneIdEnabled && authState.wecomEnabled"
+          >
+            <span>或使用企业微信扫码</span>
+          </div>
+          <div class="authQrShell" v-if="authState.wecomEnabled">
             <div ref="qrMount" class="authQrMount"></div>
             <div class="authQrOverlay" v-if="qrRefreshing">
               <div class="authSpinner"></div>
@@ -44,6 +61,7 @@
             </div>
           </div>
           <button
+            v-if="authState.wecomEnabled"
             class="authRefresh"
             @click="refreshLoginQr"
             :disabled="qrRefreshing"
@@ -108,11 +126,15 @@
 
 <script>
 import {
+  clearOneIdAutoLoginAttempt,
   createLoginQr,
   devLogin,
   getAuthApiUrl,
+  getOneIdLoginUrl,
   getStoredDevAuthKey,
-  loadAuthState
+  loadAuthState,
+  markOneIdAutoLoginAttempted,
+  ONEID_AUTO_ATTEMPT_KEY
 } from '@/utils/auth'
 import { mountWecomLoginPanel } from '@/utils/wecomLogin'
 
@@ -129,6 +151,16 @@ const authErrors = {
   wecom_token_failed: '企业微信应用配置无效，请联系管理员。',
   wecom_timeout: '企业微信响应超时，请稍后重试。',
   wecom_unavailable: '企业微信服务暂不可用，请稍后重试。',
+  oneid_access_denied: 'WorkBuddy 单点登录未完成，可重试或使用企业微信扫码。',
+  oneid_missing_code: 'OneID 未返回有效授权码，请重新登录。',
+  oneid_token_failed: 'OneID 登录票据交换失败，请稍后重试。',
+  oneid_identity_failed: 'OneID 未返回有效成员身份，请联系管理员。',
+  oneid_account_not_linked:
+    'WorkBuddy 账号未匹配到现有企业微信成员。为避免产生第二套账号，已阻止登录，请联系管理员核对成员手机号。',
+  oneid_invalid_response: 'OneID 返回的数据不完整，请稍后重试。',
+  oneid_http_error: 'OneID 登录服务响应异常，请稍后重试。',
+  oneid_timeout: 'OneID 响应超时，请稍后重试。',
+  oneid_unavailable: 'OneID 服务暂不可用，可使用企业微信扫码。',
   auth_unavailable: '认证服务暂不可用，请稍后重试。'
 }
 
@@ -143,6 +175,9 @@ export default {
       authRetrying: false,
       authState: {
         enabled: false,
+        wecomEnabled: false,
+        oneIdEnabled: false,
+        oneIdAutoLogin: false,
         authenticated: false,
         user: null,
         devBypassAvailable: false
@@ -153,6 +188,7 @@ export default {
       qrRefreshing: false,
       qrFailure: '',
       qrRefreshTimer: null,
+      oneIdRedirecting: false,
       showDevLogin: false,
       devAuthKey: '',
       devAuthMobile: '',
@@ -163,6 +199,14 @@ export default {
   computed: {
     authErrorMessage() {
       return authErrors[this.authErrorCode] || ''
+    },
+    authLoginSubtitle() {
+      if (this.authState.oneIdEnabled && this.authState.wecomEnabled) {
+        return 'WorkBuddy 单点登录 / 企业微信扫码登录'
+      }
+      return this.authState.oneIdEnabled
+        ? 'WorkBuddy 单点登录'
+        : '企业微信扫码登录'
     }
   },
   watch: {
@@ -231,6 +275,9 @@ export default {
           }
         }, AUTH_BOOTSTRAP_MS)
         this.authState = await loadAuthState()
+        if (this.authState.authenticated) {
+          clearOneIdAutoLoginAttempt()
+        }
         this.authRetryAttempt = 0
       } catch (err) {
         const code =
@@ -258,10 +305,32 @@ export default {
         !this.authState.authenticated
       ) {
         document.title = PAGE_TITLE
+        if (
+          this.authState.oneIdEnabled &&
+          this.authState.oneIdAutoLogin &&
+          !this.authErrorCode &&
+          !this.hasAttemptedOneIdAutoLogin()
+        ) {
+          this.startOneIdLogin()
+          return
+        }
         // 扫码始终是主登录方式：内网访问时后端会开放开发者密钥，但那只是附加入口，
         // 不能因此不加载二维码，否则内网用户会看到一个空白的登录框。
-        await this.refreshLoginQr()
+        if (this.authState.wecomEnabled) await this.refreshLoginQr()
       }
+    },
+    hasAttemptedOneIdAutoLogin() {
+      try {
+        return window.sessionStorage.getItem(ONEID_AUTO_ATTEMPT_KEY) === '1'
+      } catch (err) {
+        return true
+      }
+    },
+    startOneIdLogin() {
+      if (!this.authState.oneIdEnabled || this.oneIdRedirecting) return
+      this.oneIdRedirecting = true
+      markOneIdAutoLoginAttempted()
+      window.location.assign(getOneIdLoginUrl())
     },
     clearQrRefreshTimer() {
       if (!this.qrRefreshTimer) return
@@ -453,6 +522,44 @@ body,
   color: #b4473c;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.authOneId {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.authOneIdButton {
+  width: 100%;
+  max-width: 322px;
+}
+
+.authOneIdHint {
+  margin: 0;
+  color: #6b7c74;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.authLoginDivider {
+  width: 322px;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px auto 0;
+  color: #849189;
+  font-size: 12px;
+
+  &::before,
+  &::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(15, 45, 35, 0.09);
+  }
 }
 
 .authQrShell {

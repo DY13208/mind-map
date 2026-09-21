@@ -418,8 +418,39 @@ async function testClearRoomFolderRolesSqlOrder() {
   calls.forEach(call => assert.deepStrictEqual(call.params, ['room-folder']))
 }
 
+function testSuperAdminActor() {
+  const prev = process.env.MIND_MAP_SUPER_ADMIN_IDS
+  process.env.MIND_MAP_SUPER_ADMIN_IDS = 'alice, wecom:bob'
+  try {
+    assert.deepStrictEqual(roomAcl.parseSuperAdminIds(), ['alice', 'bob'])
+    assert.strictEqual(
+      roomAcl.isSuperAdminUser({ id: 'alice', wecomUserId: 'alice' }),
+      true
+    )
+    assert.strictEqual(
+      roomAcl.isSuperAdminUser({ id: 'carol', wecomUserId: 'bob' }),
+      true
+    )
+    assert.strictEqual(
+      roomAcl.isSuperAdminUser({ id: 'dave', wecomUserId: 'dave' }),
+      false
+    )
+    const actor = roomAcl.actorFromReq({
+      authUser: { id: 'alice', wecomUserId: 'alice', name: 'Alice' }
+    })
+    // Auth may be disabled in unit tests → bypass already true; still mark superAdmin.
+    assert.strictEqual(actor.superAdmin, true)
+    assert.strictEqual(actor.bypass, true)
+    assert.strictEqual(actor.id, 'alice')
+  } finally {
+    if (prev === undefined) delete process.env.MIND_MAP_SUPER_ADMIN_IDS
+    else process.env.MIND_MAP_SUPER_ADMIN_IDS = prev
+  }
+}
+
 testNormalizeAndInfer()
 testRoleMatrix()
+testSuperAdminActor()
 testAccessAndMembers()
   .then(testMultiSourceGrants)
   .then(testFolderRoleSource)

@@ -169,32 +169,43 @@ function createHistoryEngine(options = {}) {
         : { min: null, max: null, count: 0 }
       const pigeon = pigeonholeCompleteFromGenesis(live.revision, stats)
       if (pigeon && Number(live.revision) > 0) {
-        const ops = await tx.listOperations(roomKey, 0, live.revision)
-        const replayed = await replayOperations(genesisEmptyTree(), {}, ops, {
-          requireContinuous: true,
-          fromRevision: 0
-        })
-        const tree = toBusinessTree(replayed.tree)
-        const metadata = canonicalMetadata(replayed.metadata)
-        const liveTree = toBusinessTree(live.nodes)
-        const liveMeta = canonicalMetadata(live.metadata)
-        if (historyChecksum(tree, metadata) === historyChecksum(liveTree, liveMeta)) {
-          const checkpoint = await tx.insertCheckpoint({
-            id: randomUUID(),
-            room_key: roomKey,
-            revision: 0,
-            tree_snapshot: toBusinessTree(genesisEmptyTree()),
-            metadata_snapshot: {},
-            created_at: new Date().toISOString(),
-            created_by: input.createdBy || '',
-            reason: 'ROOM_INITIAL',
-            operation_count: 0,
-            snapshot_version: config.snapshotVersion,
-            checksum: historyChecksum(toBusinessTree(genesisEmptyTree()), {}),
-            node_count: nodeCount(toBusinessTree(genesisEmptyTree()))
+        try {
+          const ops = await tx.listOperations(roomKey, 0, live.revision)
+          const replayed = await replayOperations(genesisEmptyTree(), {}, ops, {
+            requireContinuous: true,
+            fromRevision: 0
           })
-          await createInitialVersion(tx, roomKey, { revision: 0 }, input.createdBy)
-          return checkpoint
+          const tree = toBusinessTree(replayed.tree)
+          const metadata = canonicalMetadata(replayed.metadata)
+          const liveTree = toBusinessTree(live.nodes)
+          const liveMeta = canonicalMetadata(live.metadata)
+          if (historyChecksum(tree, metadata) === historyChecksum(liveTree, liveMeta)) {
+            const checkpoint = await tx.insertCheckpoint({
+              id: randomUUID(),
+              room_key: roomKey,
+              revision: 0,
+              tree_snapshot: toBusinessTree(genesisEmptyTree()),
+              metadata_snapshot: {},
+              created_at: new Date().toISOString(),
+              created_by: input.createdBy || '',
+              reason: 'ROOM_INITIAL',
+              operation_count: 0,
+              snapshot_version: config.snapshotVersion,
+              checksum: historyChecksum(toBusinessTree(genesisEmptyTree()), {}),
+              node_count: nodeCount(toBusinessTree(genesisEmptyTree()))
+            })
+            await createInitialVersion(tx, roomKey, { revision: 0 }, input.createdBy)
+            return checkpoint
+          }
+        } catch (error) {
+          // Older rooms can have a continuous operation sequence that predates
+          // Collab V2's replay assumptions. Keep the current durable tree as
+          // the history baseline instead of making the entire history view fail.
+          console.warn(
+            '[history] cannot replay room genesis; bootstrapping current state',
+            roomKey,
+            error && error.code ? error.code : error && error.message
+          )
         }
       }
       const reason =

@@ -18,6 +18,10 @@ IP 由启动脚本探测，不要手写，也不要用 `127.0.0.1`（WorkBuddy �
 | `list_maps` | 列出房间，含给人类打开的 `share_url` |
 | `create_map` | 新建导图 |
 | `get_map` | `format=outline` 大纲（默认最多 800 节点）；`format=full` 树（超大图会截断，可用 `max_nodes`） |
+| `list_versions` | 列出历史版本及新增、修改、删除、移动计数，支持分页和筛选 |
+| `get_version` | 读取单个历史版本的元数据和变更计数，不返回脑图内容 |
+| `create_version` | 为当前导图创建手动版本，需要编辑权限 |
+| `restore_version` | 用户明确确认后回滚版本，需要管理权限和当前修订号 |
 | `search_nodes` | 按文字搜节点 |
 | `query_nodes` | 按 UID、名称或完整路径定向读取节点、子树、链路或层级；超大结果用游标分页 |
 | `list_attachments` | 列出导图（或指定节点）的附件及解析状态，只返回元数据 |
@@ -40,6 +44,21 @@ IP 由启动脚本探测，不要手写，也不要用 `127.0.0.1`（WorkBuddy �
 2. 把返回的 `share_url` 发给同事
 3. 同事打开链接，自动进入同一房间
 4. AI 继续 `add_node` / `update_node`，网页上立刻能看到
+
+### 历史版本
+
+历史版本工具只向 AI 返回版本名称、类型、创建人、创建时间、可用状态，以及
+`inserted`、`updated`、`deleted`、`moved` 四项变更计数，不返回历史脑图正文。
+
+查询和回滚按以下顺序进行：
+
+1. `list_versions` 查询版本列表，并保存返回的 `currentRevision`
+2. `get_version` 读取目标版本详情和变更摘要
+3. AI 向用户展示目标版本信息并取得明确确认
+4. `restore_version` 传入目标 `version_id`、`expected_current_revision` 和 `confirm=true`
+
+`restore_version` 需要房间管理权限。出现 `RESTORE_CONFLICT` 表示确认后脑图又有新修改，
+AI 必须重新查询、重新展示并再次取得确认，不能自动重试。系统会在回滚前自动创建备份版本。
 
 ### 定向读取大图
 

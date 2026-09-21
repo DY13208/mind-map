@@ -1,5 +1,6 @@
 const assert = require('assert')
 
+process.env.MIND_MAP_SKIP_ROOT_ENV = '1'
 Object.assign(process.env, {
   WECOM_AUTH_ENABLED: 'true',
   WECOM_CORP_ID: 'wwcorp123456',
@@ -55,6 +56,50 @@ assert.strictEqual(embeddedLoginUrl.searchParams.get('login_type'), 'jssdk')
 assert.deepStrictEqual(__test.readConfig({ WECOM_AUTH_ENABLED: 'false' }), {
   enabled: false
 })
+const oneIdOnlyConfig = __test.readConfig({
+  ...process.env,
+  WECOM_AUTH_ENABLED: 'false',
+  ONEID_AUTH_ENABLED: 'true',
+  ONEID_CLIENT_ID: 'oneid-client',
+  ONEID_CLIENT_SECRET: 'oneid-secret',
+  ONEID_ISSUER: 'https://oauth2.account.tencent.com/issuer',
+  ONEID_AUTHORIZATION_ENDPOINT:
+    'https://oauth2.account.tencent.com/issuer/authorize',
+  ONEID_TOKEN_ENDPOINT: 'https://oauth2.account.tencent.com/issuer/token',
+  ONEID_USERINFO_ENDPOINT:
+    'https://oauth2.account.tencent.com/issuer/userinfo',
+  ONEID_REDIRECT_URI:
+    'https://mindmap.example.com/api/auth/oneid/callback',
+  ONEID_AUTO_LOGIN: 'true'
+})
+assert.strictEqual(oneIdOnlyConfig.enabled, true)
+assert.strictEqual(oneIdOnlyConfig.wecomEnabled, false)
+assert.strictEqual(oneIdOnlyConfig.oneIdEnabled, true)
+assert.strictEqual(oneIdOnlyConfig.oneId.autoLogin, true)
+assert.deepStrictEqual(oneIdOnlyConfig.oneId.scopes, [
+  'openid',
+  'profile',
+  'mobile'
+])
+assert.throws(
+  () =>
+    __test.readConfig({
+      ...process.env,
+      WECOM_AUTH_ENABLED: 'false',
+      ONEID_AUTH_ENABLED: 'true',
+      ONEID_CLIENT_ID: 'oneid-client',
+      ONEID_CLIENT_SECRET: 'oneid-secret',
+      ONEID_ISSUER: 'http://oauth2.account.tencent.com/issuer',
+      ONEID_AUTHORIZATION_ENDPOINT:
+        'https://oauth2.account.tencent.com/issuer/authorize',
+      ONEID_TOKEN_ENDPOINT: 'https://oauth2.account.tencent.com/issuer/token',
+      ONEID_USERINFO_ENDPOINT:
+        'https://oauth2.account.tencent.com/issuer/userinfo',
+      ONEID_REDIRECT_URI:
+        'https://mindmap.example.com/api/auth/oneid/callback'
+    }),
+  /必须使用 HTTPS/
+)
 assert.throws(
   () =>
     __test.readConfig({
