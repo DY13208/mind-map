@@ -53,6 +53,12 @@ function sendJson(res, status, body) {
   res.end(data);
 }
 
+function externalOrigin(req) {
+  const proto = String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  return new URL(`${proto}://${host}`).origin;
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -237,6 +243,15 @@ async function readiness() {
 }
 
 const server = http.createServer(async (req, res) => {
+  if (req.url === '/.well-known/oauth-protected-resource') {
+    const origin = externalOrigin(req);
+    return sendJson(res, 200, {
+      resource: `${origin}/knowledge-mcp/mcp`,
+      authorization_servers: [origin],
+      bearer_methods_supported: ['header'],
+      scopes_supported: ['mind-map-wiki'],
+    });
+  }
   if (req.url === '/health') {
     return sendJson(res, 200, {
       ok: true,
@@ -257,6 +272,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'method_not_allowed' });
     try {
+      // Authenticate the complete MCP session, including initialize and tools/list.
+      // OAuth clients only start discovery after the resource first returns 401.
+      authUser(req);
       const raw = await readBody(req);
       const rpc = raw ? JSON.parse(raw) : {};
       const result = await handleRpc(req, rpc);
@@ -266,7 +284,12 @@ const server = http.createServer(async (req, res) => {
       }
       return sendJson(res, 200, { jsonrpc: '2.0', id: rpc.id, result });
     } catch (e) {
-      const code = e.code === 'payload_too_large' ? 413 : 400;
+      const authError = ['unauthorized', 'expired', 'invalid_token', 'bad_signature'].includes(e.code);
+      const code = authError ? 401 : e.code === 'payload_too_large' ? 413 : 400;
+      if (authError) {
+        const origin = externalOrigin(req);
+        res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${origin}/knowledge-mcp/.well-known/oauth-protected-resource"`);
+      }
       return sendJson(res, code, { error: e.code || String(e.message || e) });
     }
   }
