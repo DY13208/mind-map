@@ -13,12 +13,15 @@ CPD 支持通过腾讯 OneID 的 OIDC 授权码模式建立现有 `mind_map_sess
 
 登录回调必须和 `.env` 的 `ONEID_REDIRECT_URI` 完全一致。Scope 至少需要 `openid profile mobile`；`mobile` 用于把 OneID 成员安全映射回现有企业微信 userid。企业微信登录同时启用时，映射不到现有成员会直接拒绝登录，绝不会自动创建第二套 CPD 账号。
 
+应用的 Scope 配置只是决定授权后可返回哪些成员字段，不能替代企业登录方式。若授权页提示“未配置登录方式”，请先在 OneID 管理后台进入 **登录 → 认证源**，配置并启用企业微信等实际认证源；只把 Scope 改成 `openid` 不会解决该提示，而且会失去手机号映射能力，可能导致无法确认与企业微信是否为同一账号。
+
 ## 环境变量
 
 从 OneID 应用详情复制 Client ID、Client Secret 和端点信息到仓库根目录 `.env`：
 
 ```dotenv
 ONEID_AUTH_ENABLED=true
+ONEID_LOGIN_READY=false
 ONEID_AUTO_LOGIN=false
 ONEID_CLIENT_ID=替换为应用Client-ID
 ONEID_CLIENT_SECRET=替换为应用Client-Secret
@@ -29,6 +32,8 @@ ONEID_USERINFO_ENDPOINT=https://oauth2.account.tencent.com/authz/oidc/v2/替换�
 ONEID_REDIRECT_URI=https://xx.stillgroup.net:8989/api/auth/oneid/callback
 ONEID_SCOPES=openid profile mobile
 ```
+
+服务商代开发应用处于“开发中”时保持 `ONEID_LOGIN_READY=false`，页面会将 WorkBuddy 入口显示为不可点击的配置中状态，避免用户进入 OneID 错误页。收到应用上架通知并在 OneID 启用认证源后，将该值改为 `true` 并重启服务，无需再次修改前端代码。
 
 生产环境同时设置：
 
