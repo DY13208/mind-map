@@ -1,4 +1,6 @@
 const assert = require('assert')
+const fs = require('fs')
+const path = require('path')
 const { randomUUID } = require('crypto')
 const { applyCollabEvent } = require('../bin/collabRecovery')
 const { createEngine } = require('../bin/collabV2/engine')
@@ -77,6 +79,43 @@ function seed() {
   assert.ok(Array.isArray(gen) && gen[0] && gen[0].uid === 'g1', 'delete 概要 inverse restores same uid')
   assert.notStrictEqual(remove.operation.inversePayload.type, 'node.insert')
   assert.notStrictEqual(remove.operation.inversePayload.type, 'node.restore')
+
+  const cooperateSrc = fs.readFileSync(
+    path.join(__dirname, '../src/plugins/Cooperate.js'),
+    'utf8'
+  )
+  assert.ok(
+    cooperateSrc.includes('async flushPendingForReload'),
+    'reload flushes pending collab edits'
+  )
+  assert.ok(
+    cooperateSrc.includes('commitOpenTextEdit'),
+    'reload commits the open text editor'
+  )
+  assert.ok(
+    cooperateSrc.includes('waitForOutboxDurable'),
+    'reload waits until outbox.put is durable'
+  )
+  const adapterSrc = fs.readFileSync(
+    path.join(__dirname, '../bin/collabV2/adapter.js'),
+    'utf8'
+  )
+  assert.ok(
+    adapterSrc.includes('async function waitForOutboxDurable'),
+    'adapter exposes waitForOutboxDurable'
+  )
+  const toolbarSrc = fs.readFileSync(
+    path.join(__dirname, '../../web/src/pages/Edit/components/Toolbar.vue'),
+    'utf8'
+  )
+  assert.ok(
+    /async refreshPage\(\)/.test(toolbarSrc),
+    'toolbar refresh waits before location.reload'
+  )
+  assert.ok(
+    toolbarSrc.includes('prepare_reload'),
+    'toolbar refresh asks the editor to flush first'
+  )
 
   console.log('collabV2.productFix.test.js ok')
 })().catch(err => {

@@ -358,6 +358,7 @@ export default {
     export: '导出',
     refresh: '刷新',
     refreshSavingTip: '本地文件正在保存，请稍后再刷新',
+    refreshFlushingTip: '正在保存更改…',
     shortcutKey: '快捷键',
     associativeLine: '关联线',
     painter: '格式刷',

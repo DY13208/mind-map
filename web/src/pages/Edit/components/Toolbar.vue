@@ -225,10 +225,14 @@
           </div>
           <div
             class="toolbarBtn"
+            :class="{ disabled: refreshing }"
             data-testid="refresh"
             @click="refreshPage"
           >
-            <span class="icon el-icon-refresh"></span>
+            <span
+              class="icon"
+              :class="refreshing ? 'el-icon-loading' : 'el-icon-refresh'"
+            ></span>
             <span class="text">{{ $t('toolbar.refresh') }}</span>
           </div>
           <div
@@ -382,6 +386,8 @@ export default {
       rootDirName: '',
       fileTreeExpand: true,
       waitingWriteToLocalFile: false,
+      pendingLocalFileContent: null,
+      refreshing: false,
       nodeToolbarCollapsed: false,
       fileToolbarCollapsed: false,
       diagCopied: false,
@@ -675,6 +681,7 @@ export default {
 
     // 监听本地文件读写
     onWriteLocalFile(content) {
+      this.pendingLocalFileContent = content
       clearTimeout(this.timer)
       if (fileHandle && this.isHandleLocalFile) {
         this.waitingWriteToLocalFile = true
@@ -740,10 +747,45 @@ export default {
       navigateToMyMaps(this.$router)
     },
 
-    refreshPage() {
-      if (this.waitingWriteToLocalFile) {
-        this.$message.warning(this.$t('toolbar.refreshSavingTip'))
-        return
+    prepareReload() {
+      return new Promise(resolve => {
+        let settled = false
+        const finish = result => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          resolve(result || { ok: true })
+        }
+        const timer = setTimeout(() => finish({ ok: true, timeout: true }), 5000)
+        this.$bus.$emit('prepare_reload', finish)
+      })
+    },
+
+    async flushLocalFileNow() {
+      if (!fileHandle || !this.isHandleLocalFile) return
+      clearTimeout(this.timer)
+      this.timer = null
+      if (this.pendingLocalFileContent) {
+        await this.writeLocalFile(this.pendingLocalFileContent)
+      }
+    },
+
+    async refreshPage() {
+      if (this.refreshing) return
+      this.refreshing = true
+      try {
+        if (this.collabSaveChip === 'saving' || this.collabPendingCount > 0) {
+          this.$message.info(this.$t('toolbar.refreshFlushingTip'))
+        }
+        await this.prepareReload()
+        await this.flushLocalFileNow()
+        if (this.waitingWriteToLocalFile) {
+          this.$message.warning(this.$t('toolbar.refreshSavingTip'))
+          this.refreshing = false
+          return
+        }
+      } catch (err) {
+        console.warn('[toolbar] prepare reload failed', err)
       }
       window.location.reload()
     },

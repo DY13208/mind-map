@@ -365,6 +365,7 @@ export default {
     export: 'Export',
     refresh: 'Refresh',
     refreshSavingTip: 'The local file is being saved. Please refresh again shortly.',
+    refreshFlushingTip: 'Saving changes…',
     shortcutKey: 'Shortcut key',
     associativeLine: 'Associative line',
     painter: 'Painter',

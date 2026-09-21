@@ -1762,6 +1762,30 @@ function createCollaborationAdapter(options = {}) {
     return kickDrain()
   }
 
+  async function waitForOutboxDurable(options = {}) {
+    const timeoutMs = Math.max(0, Number(options.timeoutMs) || 4000)
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      const current = enqueueGate
+      const remain = Math.max(0, deadline - Date.now())
+      let timedOut = false
+      let timer = null
+      await Promise.race([
+        Promise.resolve(current),
+        new Promise(resolve => {
+          timer = setTimeout(() => {
+            timedOut = true
+            resolve()
+          }, remain)
+        })
+      ])
+      if (timer) clearTimeout(timer)
+      if (timedOut) return { ok: true, timeout: true }
+      if (enqueueGate === current) return { ok: true, timeout: false }
+    }
+    return { ok: true, timeout: true }
+  }
+
   async function undo() {
     const last = state.undoStack[state.undoStack.length - 1]
     undoTrace('adapter.undo', {
@@ -1973,6 +1997,7 @@ function createCollaborationAdapter(options = {}) {
     subscribe,
     getStatus,
     retryPending,
+    waitForOutboxDurable,
     dropPendingInsertsForUid,
     outbox,
     getClientId: () => state.clientId,
