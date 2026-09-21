@@ -30,9 +30,12 @@ services:
     image: nginx:1.27-alpine
     ports:
       # 绑定所有网卡，便于用本机局域网 IP 访问（与 DOCMOST_APP_URL 一致，避免跨域）
-      - '${DOCMOST_PORT:-3040}:80'
+      - '${DOCMOST_PORT:-3040}:443'
+      # 局域网/本机排障用的明文入口；不在路由器转发列表里，公网访问不到
+      - '${DOCMOST_HTTP_PORT:-3041}:80'
     volumes:
       - ./docker/wiki-gateway.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
     depends_on:
       docmost:
         condition: service_healthy
