@@ -1200,6 +1200,13 @@ async function exchangeOneIdCode(code) {
   }
 
   const mapped = await resolveOneIdWecomIdentity(claims)
+  if (config.wecomEnabled && !mapped) {
+    throw new AuthError(
+      'oneid_account_not_linked',
+      'OneID 成员无法匹配到现有企业微信账号，已阻止创建第二套账号',
+      403
+    )
+  }
   const fallbackId = `oneid:${sha256(`${config.oneId.issuer}:${subject}`).slice(
     0,
     48
