@@ -340,6 +340,8 @@ export default {
     saveAs: 'Lưu thành',
     import: 'Nhập',
     export: 'Xuất',
+    refresh: 'Làm mới',
+    refreshSavingTip: 'Tệp cục bộ đang được lưu. Vui lòng làm mới lại sau ít phút.',
     shortcutKey: 'Phím tắt',
     associativeLine: 'Đường liên kết',
     painter: 'Bút vẽ',

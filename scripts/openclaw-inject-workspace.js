@@ -131,6 +131,7 @@ function defaultAgentsSnippet(version) {
     '- **禁止**把整页做成「GMV 达成进度执行单」壳；禁止「目标金额已填、进度状态列整列红待接入」。',
     '- 「跟踪进度」缺实际数：只对「累计实际 / 完成率」等缺数字段标「待接入」；有日销等替代口径须先算完成率。',
     '- 产物落到 `/home/node/.openclaw/workspace/output/`（宿主机 `./output`）；每次新建带时间戳文件，禁止覆盖历史产物。',
+    '- **附件挂载**：产物必须 MCP `upload_attachment` 挂到节点（等同工具栏「附件」），禁止只写路径或「请拖到节点」到 note。',
     '',
     MARK_END,
     ''

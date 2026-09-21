@@ -357,6 +357,8 @@ export default {
     saveAs: '另存新檔',
     import: '匯入',
     export: '匯出',
+    refresh: '重新整理',
+    refreshSavingTip: '本機檔案正在儲存，請稍後再重新整理',
     shortcutKey: '快速鍵',
     associativeLine: '關聯線',
     painter: '格式刷',

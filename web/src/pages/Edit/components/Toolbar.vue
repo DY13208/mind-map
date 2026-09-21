@@ -225,6 +225,14 @@
           </div>
           <div
             class="toolbarBtn"
+            data-testid="refresh"
+            @click="refreshPage"
+          >
+            <span class="icon el-icon-refresh"></span>
+            <span class="text">{{ $t('toolbar.refresh') }}</span>
+          </div>
+          <div
+            class="toolbarBtn"
             @click="$bus.$emit('showExport')"
             style="margin-right: 0"
           >
@@ -730,6 +738,14 @@ export default {
 
     goToMyMaps() {
       navigateToMyMaps(this.$router)
+    },
+
+    refreshPage() {
+      if (this.waitingWriteToLocalFile) {
+        this.$message.warning(this.$t('toolbar.refreshSavingTip'))
+        return
+      }
+      window.location.reload()
     },
 
     // 扫描本地文件夹
