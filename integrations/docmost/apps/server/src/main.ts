@@ -23,6 +23,9 @@ async function bootstrap() {
     AppModule,
     new FastifyAdapter({
       trustProxy: true,
+      // Fastify 默认 bodyLimit 为 1 MiB，整页替换（pages/update, format=json）
+      // 送的是完整 ProseMirror 文档，大页面（如「公司模型」约 144 万字符）会被 413 拒绝。
+      bodyLimit: Number(process.env.DOCMOST_BODY_LIMIT || 16 * 1024 * 1024),
       routerOptions: {
         maxParamLength: 1000,
         ignoreTrailingSlash: true,

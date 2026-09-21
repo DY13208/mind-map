@@ -482,6 +482,7 @@ class Cooperate {
     this.httpTextTimer = null
     this.httpTextFlushing = false
     this.httpTextFlushQueued = false
+    this.httpTextFlushPromise = null
     this.httpStructureTimer = null
     this.httpInsertPromise = null
     this.httpInsertRescan = false
@@ -1319,6 +1320,54 @@ class Cooperate {
     const pending = this.pendingLocalData
     this.pendingLocalData = null
     if (pending && this.ymap) this.flushLocalDataChange(pending)
+  }
+
+  commitOpenTextEdit() {
+    const editor =
+      this.mindMap &&
+      this.mindMap.renderer &&
+      this.mindMap.renderer.textEdit
+    if (editor && typeof editor.hideEditTextBox === 'function') {
+      editor.hideEditTextBox()
+    }
+  }
+
+  async flushPendingForReload(options = {}) {
+    const timeoutMs = Math.max(0, Number(options.timeoutMs) || 4000)
+    this.commitOpenTextEdit()
+    this.flushLocalNow()
+    clearTimeout(this.httpTextTimer)
+    this.httpTextTimer = null
+    clearTimeout(this.httpStructureTimer)
+    this.httpStructureTimer = null
+    if (this._v2InsertRetryTimer) {
+      clearTimeout(this._v2InsertRetryTimer)
+      this._v2InsertRetryTimer = null
+      this._v2InsertFromCommand = true
+    }
+    const work = (async () => {
+      if (this.httpCollabMode) {
+        await Promise.resolve(this.flushHttpTextNow()).catch(() => {})
+        if (
+          this._v2InsertFromCommand ||
+          this.httpInsertPromise ||
+          !this.collabV2Adapter
+        ) {
+          await Promise.resolve(this.flushHttpInsert()).catch(() => {})
+        }
+      }
+      const adapter = this.collabV2Adapter
+      if (adapter && typeof adapter.waitForOutboxDurable === 'function') {
+        return adapter.waitForOutboxDurable({ timeoutMs })
+      }
+      return { ok: true }
+    })()
+    return Promise.race([
+      work,
+      new Promise(resolve =>
+        setTimeout(() => resolve({ ok: true, timeout: true }), timeoutMs)
+      )
+    ])
   }
 
   flushLocalDataChange(data) {
@@ -5289,19 +5338,28 @@ class Cooperate {
 
   async flushHttpTextNow() {
     if (this.httpReplacing || !this.httpPatchNode) return
-    if (this.httpTextFlushing) {
+    if (this.httpTextFlushPromise) {
       this.httpTextFlushQueued = true
+      await this.httpTextFlushPromise
+      if (this.httpTextFlushQueued && !this.httpTextFlushPromise) {
+        return this.flushHttpTextNow()
+      }
       return
     }
     this.httpTextFlushing = true
-    try {
-      do {
-        this.httpTextFlushQueued = false
-        await this.flushHttpTextOnce()
-      } while (this.httpTextFlushQueued)
-    } finally {
-      this.httpTextFlushing = false
-    }
+    const run = (async () => {
+      try {
+        do {
+          this.httpTextFlushQueued = false
+          await this.flushHttpTextOnce()
+        } while (this.httpTextFlushQueued)
+      } finally {
+        this.httpTextFlushing = false
+        this.httpTextFlushPromise = null
+      }
+    })()
+    this.httpTextFlushPromise = run
+    return run
   }
 
   async flushHttpTextOnce() {

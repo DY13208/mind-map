@@ -25,7 +25,7 @@
           <div>
             <strong>你的个人 MCP 配置</strong>
             <p>
-              一份配置同时接入导图 MCP 与 Wiki 全库只读。Authorization
+              一份配置同时接入导图 MCP 与 Wiki 全库读写。Authorization
               与当前账号绑定，AI 访问时仍遵循你的脑图、团队与 Wiki 权限。
             </p>
           </div>

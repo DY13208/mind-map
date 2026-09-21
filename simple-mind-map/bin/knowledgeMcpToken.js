@@ -6,7 +6,8 @@ function b64urlJson(value) {
 
 /**
  * Issue a Knowledge MCP (Wiki) JWT for the logged-in mind-map user.
- * Same shape as scripts/wiki-mcp-token.js / knowledge-mcp auth.
+ * Deterministic static token (v2): no exp; invalidated only by rotating
+ * KNOWLEDGE_MCP_JWT_SECRET. Same verify path as knowledge-mcp auth.
  */
 function issueKnowledgeMcpToken(userId, env = process.env) {
   const secret = String(env.KNOWLEDGE_MCP_JWT_SECRET || '').trim()

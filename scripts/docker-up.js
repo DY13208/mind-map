@@ -453,7 +453,7 @@ function knowledgeMcpImageExists(tag) {
 }
 
 function ensureKnowledgeMcpBuilt(extraEnv) {
-  const imageTag = 'mind-map-knowledge-mcp:0.4.0'
+  const imageTag = 'mind-map-knowledge-mcp:0.6.0'
   const stampPath = path.join(ROOT, 'docker', '.knowledge-mcp-src.sha')
   const hash = hashKnowledgeMcpSources()
   const prev = fs.existsSync(stampPath) ? fs.readFileSync(stampPath, 'utf8').trim() : ''

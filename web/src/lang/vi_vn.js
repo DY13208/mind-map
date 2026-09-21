@@ -342,6 +342,7 @@ export default {
     export: 'Xuất',
     refresh: 'Làm mới',
     refreshSavingTip: 'Tệp cục bộ đang được lưu. Vui lòng làm mới lại sau ít phút.',
+    refreshFlushingTip: 'Đang lưu thay đổi…',
     shortcutKey: 'Phím tắt',
     associativeLine: 'Đường liên kết',
     painter: 'Bút vẽ',

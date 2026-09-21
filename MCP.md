@@ -289,13 +289,13 @@ HTTP 模式只配 `url`，不要配 `command`。用启动脚本打印的地址�
 
 ---
 
-## 6. Wiki（知识库）全库读取
+## 6. Wiki（知识库）全库读写
 
-`docmost_search` / `docmost_get` 只能读到「已映射到房间槽位」的页面。要**按账号权限搜索、读取整个 Wiki**，用知识库服务（`integrations/knowledge-mcp`，端口 `18792`）的另外四个工具。
+`docmost_search` / `docmost_get` 只能读到「已映射到房间槽位」的页面。要**按账号权限搜索、读取、写入整个 Wiki**，用知识库服务（`integrations/knowledge-mcp`，端口 `18792`）的 Wiki 工具。
 
 ### 权限模型
 
-不借权：调用者身份（mind-map 用户 id）映射到对应 Docmost 账号，以**该账号自己的会话**调用 Docmost 官方接口，空间成员与页面限制全部由 Docmost 判定。浏览器里打不开的页面，这里同样读不到。
+不借权：调用者身份（mind-map 用户 id）映射到对应 Docmost 账号，以**该账号自己的会话**调用 Docmost 官方接口，空间成员与页面限制全部由 Docmost 判定。浏览器里打不开或不能编辑的页面，这里同样读不到 / 写不了。
 
 映射规则：`scim_external_id = mind-map:<用户id>`，或邮箱 `<用户id>@users.mind-map.local`（与 Wiki 单点登录同一套）。账号没有对应 Wiki 用户时返回 `wiki_identity_unmapped`，先在 Wiki 页面完成一次单点登录即可。
 
@@ -309,16 +309,25 @@ wiki_tree    spaceId=<空间id>          # 空间页面树
 wiki_tree    pageId=<页面id>           # 某页面下的子树
 wiki_read    pageId=<页面id>           # 正文，默认 markdown
 wiki_read    pageId=<页面id> format=html
+wiki_create  spaceId=<空间id> title=标题 content=正文
+wiki_create  spaceId=<空间id> parentPageId=<父页id> title=子页 content=正文
+wiki_update  pageId=<页面id> content=新正文          # 默认 replace
+wiki_update  pageId=<页面id> title=新标题
+wiki_update  pageId=<页面id> content=追加 operation=append
 ```
 
 `wiki_search` 返回的 `text` 是**接口返回的摘要**，不是完整正文；要全文必须再调 `wiki_read`。`wiki_read` 正文超 `KNOWLEDGE_WIKI_MAX_BODY`（默认 120000 字符）会截断并置 `truncated=true`。
+
+`wiki_create` / `wiki_update` 的 `content` 超 `KNOWLEDGE_MCP_MAX_WRITE_CHARS`（默认 200000）会拒绝并返回 `content_too_large`。正文默认 `format=markdown`；`wiki_update` 在带 `content` 时可设 `operation=replace|append|prepend`（默认 `replace`）。写操作会记入审计日志（`docmostPageId` / `beforeHash` / `afterHash`）。
+
+注意：脑图同步维护的 **standard** 槽位页若被 `wiki_update` 改写，下次同步可能被覆盖；长期手写内容优先放 human 页或独立非映射页。
 
 ### 接入 WorkBuddy
 
 **推荐**：打开产品壳 [MCP 接入](/mcp-access)，登录后点「复制完整配置」。会同时得到：
 
 - `mind-map` → `http://<当前域名>/mcp`（导图）
-- `mind-map-wiki` → `http://<当前域名>/knowledge-mcp/mcp`（Wiki 全库只读，经 Nginx 反代，无需再开 18792）
+- `mind-map-wiki` → `http://<当前域名>/knowledge-mcp/mcp`（Wiki 全库读写，经 Nginx 反代，无需再开 18792）
 
 Wiki 令牌由当前登录账号签发，权限与 Wiki 网页一致；账号需先在侧栏 Wiki 完成一次单点登录以建立 Docmost 身份映射。
 
@@ -342,7 +351,7 @@ node scripts/wiki-mcp-token.js dev-local
 }
 ```
 
-令牌由 `.env` 的 `KNOWLEDGE_MCP_JWT_SECRET` 签发，`iss`/`aud` 必须与服务端 `KNOWLEDGE_MCP_JWT_ISS`/`KNOWLEDGE_MCP_JWT_AUD` 一致。TTL 取 `KNOWLEDGE_MCP_JWT_TTL_SEC`；WorkBuddy 用的是静态头部，TTL 需足够长（本项目设为 90 天），到期后重新在 MCP 接入页复制配置或跑签发命令换 token。
+令牌由 `.env` 的 `KNOWLEDGE_MCP_JWT_SECRET` 签发，`iss`/`aud` 必须与服务端 `KNOWLEDGE_MCP_JWT_ISS`/`KNOWLEDGE_MCP_JWT_AUD` 一致。TTL 取 `KNOWLEDGE_MCP_JWT_TTL_SEC`（未设置时默认 90 天）；`TTL=0` 时签发永久 Token（JWT 不写 `exp`，校验端跳过过期检查）。WorkBuddy 用的是静态头部，到期后（或改为永久后）需重新在 MCP 接入页复制配置或跑签发命令换 token。
 
 ### 相关变量
 
@@ -352,6 +361,7 @@ node scripts/wiki-mcp-token.js dev-local
 | `DOCMOST_INTERNAL_URL` | 容器内 Docmost 地址，默认 `http://docmost:3000` |
 | `KNOWLEDGE_WIKI_FALLBACK_USER_ID` | 可选。调用者无 Wiki 账号时回落到固定用户；不设则不回落 |
 | `KNOWLEDGE_WIKI_MAX_BODY` | `wiki_read` 正文上限，默认 120000 |
+| `KNOWLEDGE_MCP_MAX_WRITE_CHARS` | `wiki_create` / `wiki_update` / `docmost_ai_upsert` 写入正文上限，默认 200000 |
 | `KNOWLEDGE_WIKI_SEARCH_LIMIT` / `_MAX_LIMIT` | 搜索默认条数 / 上限，默认 20 / 50 |
 | `KNOWLEDGE_MCP_BIND` | knowledge-mcp 的端口监听地址。默认 `127.0.0.1`（仅同机）；跨机访问设为 `0.0.0.0`，**必须同时配防火墙来源限制** |
 

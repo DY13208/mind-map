@@ -645,6 +645,71 @@ async function testOfflineOutboxRefresh() {
   assert.strictEqual(nodeText(engine, roomKey, 'offline-n'), 'from-refresh')
 }
 
+async function testWaitForOutboxDurableBeforeAck() {
+  const roomKey = 'room-durable-reload'
+  const engine = createEngine()
+  const hub = createHub(engine)
+  const inner = createOutbox({ memory: true })
+  let releasePut
+  let putEntered
+  const putGate = new Promise(resolve => {
+    releasePut = resolve
+  })
+  const enteredPut = new Promise(resolve => {
+    putEntered = resolve
+  })
+  const box = {
+    driver: 'memory',
+    put: async op => {
+      putEntered()
+      await putGate
+      return inner.put(op)
+    },
+    get: (...args) => inner.get(...args),
+    remove: (...args) => inner.remove(...args),
+    list: (...args) => inner.list(...args),
+    update: (...args) => inner.update(...args),
+    clear: (...args) => inner.clear(...args)
+  }
+  const client = await makeClient(hub, {
+    roomKey,
+    userId: 'A',
+    outbox: box
+  })
+  assert.strictEqual(typeof client.adapter.waitForOutboxDurable, 'function')
+  const idle = await client.adapter.waitForOutboxDurable({ timeoutMs: 200 })
+  assert.strictEqual(idle.ok, true)
+  assert.strictEqual(idle.timeout, false)
+
+  const submitP = client.adapter.submitOperation({
+    type: 'node.insert',
+    payload: { uid: 'durable-n', parent: 'root', text: 'kept-on-reload' },
+    roomKey
+  })
+  await enteredPut
+  let durableDone = false
+  const durableP = client.adapter.waitForOutboxDurable({ timeoutMs: 2000 }).then(result => {
+    durableDone = true
+    return result
+  })
+  await wait(20)
+  assert.strictEqual(
+    durableDone,
+    false,
+    'reload flush must wait until outbox.put finishes'
+  )
+  const listedBefore = await inner.list(client.adapter.getClientId(), roomKey)
+  assert.strictEqual(listedBefore.length, 0)
+  releasePut()
+  const durable = await durableP
+  assert.strictEqual(durable.ok, true)
+  assert.strictEqual(durable.timeout, false)
+  const listedAfter = await inner.list(client.adapter.getClientId(), roomKey)
+  assert.ok(listedAfter.length >= 1, 'op is durable in outbox before ack')
+  await submitP
+  assert.strictEqual(nodeText(engine, roomKey, 'durable-n'), 'kept-on-reload')
+}
+
 async function testUndoRedoConflictAndRestore() {
   const roomKey = 'room-undo'
   const engine = createEngine()
@@ -1638,6 +1703,7 @@ async function main() {
     ['AckLossReconnectGapUndoTabs', testAckLossReconnectGapUndoTabs],
     ['ViewerAndDemote', testViewerAndDemote],
     ['OfflineOutboxRefresh', testOfflineOutboxRefresh],
+    ['WaitForOutboxDurableBeforeAck', testWaitForOutboxDurableBeforeAck],
     ['UndoRedoConflictAndRestore', testUndoRedoConflictAndRestore],
     ['GapPagination', testGapPagination],
     ['SaveStateFromSocketOutboxAck', testSaveStateFromSocketOutboxAck],
