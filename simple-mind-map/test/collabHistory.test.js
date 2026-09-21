@@ -439,6 +439,65 @@ function mockRes() {
   }
   assert.strictEqual(restoreUnavailable, 'HISTORY_REVISION_UNAVAILABLE')
 
+  // A legacy room can have continuous revision numbers while its earliest
+  // operation still references nodes that existed before Collab V2 logging.
+  // It must open history from a current-state bootstrap instead of failing.
+  const incompatibleReplayStore = createMemoryHistoryStore({
+    room: {
+      roomKey: ROOM,
+      revision: 2,
+      nodes: {
+        root: {
+          isRoot: true,
+          data: { uid: 'root', text: 'Root' },
+          children: ['legacy']
+        },
+        legacy: {
+          data: { uid: 'legacy', text: 'Current legacy node' },
+          children: []
+        }
+      },
+      metadata: { theme: 'classic' }
+    }
+  })
+  incompatibleReplayStore.ops.push(
+    {
+      room_key: ROOM,
+      version: 1,
+      operation_id: 'legacy-update-1',
+      operation_type: 'node.update',
+      payload: { uid: 'legacy', text: 'Older text' }
+    },
+    {
+      room_key: ROOM,
+      version: 2,
+      operation_id: 'legacy-update-2',
+      operation_type: 'node.update',
+      payload: { uid: 'legacy', text: 'Current legacy node' }
+    }
+  )
+  const incompatibleReplayEngine = createHistoryEngine({
+    store: incompatibleReplayStore,
+    config: { checkpointEvery: 100000, autoVersionOnCheckpoint: false }
+  })
+  const incompatibleBaseline = await incompatibleReplayEngine.ensureHistoryBaseline(ROOM)
+  assert.strictEqual(incompatibleBaseline.reason, 'HISTORY_BOOTSTRAP')
+  assert.strictEqual(Number(incompatibleBaseline.revision), 2)
+  const incompatibleCurrent = await incompatibleReplayEngine.getRoomStateAtRevision(ROOM, 2)
+  assert.strictEqual(incompatibleCurrent.tree.legacy.data.text, 'Current legacy node')
+  const incompatibleOpen = mockRes()
+  await handleHistoryApi(
+    {
+      method: 'GET',
+      url: `/api/files/${ROOM}/versions`,
+      roomAccess: { userId: 'u1', canEdit: true }
+    },
+    incompatibleOpen,
+    { engine: incompatibleReplayEngine }
+  )
+  assert.strictEqual(incompatibleOpen.code, 200)
+  assert.ok((incompatibleOpen.body.versions || []).length > 0)
+
   const concurrentStore = createMemoryHistoryStore({
     room: {
       roomKey: ROOM,
