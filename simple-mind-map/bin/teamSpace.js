@@ -13,22 +13,28 @@ function error(statusCode, code, message) {
 function identity(req) {
   const user = req && req.authUser
   if (!user || user.service || !user.id) {
-    throw error(401, 'unauthorized', '请先使用企业微信扫码登录')
+    throw error(401, 'unauthorized', 'Ã¨Â¯Â·Ã¥ÂÂÃ¤Â½Â¿Ã§ÂÂ¨Ã¤Â¼ÂÃ¤Â¸ÂÃ¥Â¾Â®Ã¤Â¿Â¡Ã¦ÂÂ«Ã§Â ÂÃ§ÂÂ»Ã¥Â½Â')
   }
   const corpId = String(user.corpId || '').trim()
-  if (!corpId) throw error(401, 'wecom_identity_required', '缺少企业微信企业身份')
-  return { corpId, userId: String(user.id).trim(), wecomUserId: String(user.wecomUserId || user.id).trim() }
+  if (!corpId) throw error(401, 'wecom_identity_required', 'Ã§Â¼ÂºÃ¥Â°ÂÃ¤Â¼ÂÃ¤Â¸ÂÃ¥Â¾Â®Ã¤Â¿Â¡Ã¤Â¼ÂÃ¤Â¸ÂÃ¨ÂºÂ«Ã¤Â»Â½')
+  const actor = roomAcl.actorFromReq(req)
+  return {
+    corpId,
+    userId: String(user.id).trim(),
+    wecomUserId: String(user.wecomUserId || user.id).trim(),
+    superAdmin: !!actor.superAdmin
+  }
 }
 
 function teamId(value) {
   const id = String(value || '').trim()
-  if (!/^[A-Za-z0-9_-]{1,100}$/.test(id)) throw error(400, 'INVALID_TEAM_ID', '团队标识无效')
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(id)) throw error(400, 'INVALID_TEAM_ID', 'Ã¥ÂÂ¢Ã©ÂÂÃ¦Â ÂÃ¨Â¯ÂÃ¦ÂÂ Ã¦ÂÂ')
   return id
 }
 
 function name(value) {
   const result = String(value || '').trim().slice(0, 100)
-  if (!result) throw error(400, 'INVALID_TEAM_NAME', '团队名称不能为空')
+  if (!result) throw error(400, 'INVALID_TEAM_NAME', 'Ã¥ÂÂ¢Ã©ÂÂÃ¥ÂÂÃ§Â§Â°Ã¤Â¸ÂÃ¨ÂÂ½Ã¤Â¸ÂºÃ§Â©Âº')
   return result
 }
 
@@ -183,38 +189,69 @@ async function initCorpConstraints(db) {
   )
 }
 
-async function getTeam(db, corpId, id, userId) {
-  const result = await db.query(`
+async function getTeam(db, corpId, id, userId, options = {}) {
+  const superAdmin = !!(options && options.superAdmin)
+  const result = await db.query(
+    superAdmin
+      ? `
+    select t.*, coalesce(m.role, 'owner') as role, coalesce(owner.name, t.owner_id) as owner_name,
+      (select count(*)::int from team_members tm where tm.team_id = t.id) as member_count,
+      (select count(*)::int from rooms r left join room_tombstones rt on rt.room_key = r.room_key
+       where r.team_id = t.id and r.deleted_at is null and rt.room_key is null) as file_count
+    from teams t
+    left join team_members m on m.team_id = t.id and m.user_id = $3 and m.corp_id = $1
+    left join wecom_users owner on owner.user_id = t.owner_id and owner.corp_id = t.corp_id
+    where t.id = $2 and t.corp_id = $1 and t.deleted_at is null`
+      : `
     select t.*, m.role, coalesce(owner.name, t.owner_id) as owner_name,
       (select count(*)::int from team_members tm where tm.team_id = t.id) as member_count,
       (select count(*)::int from rooms r left join room_tombstones rt on rt.room_key = r.room_key
        where r.team_id = t.id and r.deleted_at is null and rt.room_key is null) as file_count
     from teams t join team_members m on m.team_id = t.id and m.user_id = $3 and m.corp_id = $1
     left join wecom_users owner on owner.user_id = t.owner_id and owner.corp_id = t.corp_id
-    where t.id = $2 and t.corp_id = $1 and t.deleted_at is null`, [corpId, id, userId])
-  if (!result.rows.length) throw error(404, 'TEAM_NOT_FOUND', '团队不存在')
+    where t.id = $2 and t.corp_id = $1 and t.deleted_at is null`,
+    [corpId, id, userId]
+  )
+  if (!result.rows.length) throw error(404, 'TEAM_NOT_FOUND', 'Ã¥ÂÂ¢Ã©ÂÂÃ¤Â¸ÂÃ¥Â­ÂÃ¥ÂÂ¨')
   return result.rows[0]
 }
 
 function manager(team) {
-  if (!team || !['owner', 'admin'].includes(team.role)) throw error(403, 'FORBIDDEN', '只有团队所有者或管理员可以执行该操作')
+  if (!team || !['owner', 'admin'].includes(team.role)) throw error(403, 'FORBIDDEN', 'Ã¥ÂÂªÃ¦ÂÂÃ¥ÂÂ¢Ã©ÂÂÃ¦ÂÂÃ¦ÂÂÃ¨ÂÂÃ¦ÂÂÃ§Â®Â¡Ã§ÂÂÃ¥ÂÂÃ¥ÂÂ¯Ã¤Â»Â¥Ã¦ÂÂ§Ã¨Â¡ÂÃ¨Â¯Â¥Ã¦ÂÂÃ¤Â½Â')
+}
+
+function teamAccessOpts(who) {
+  return { superAdmin: !!(who && who.superAdmin) }
 }
 
 async function listTeams(db, who) {
-  const result = await db.query(`
+  const result = await db.query(
+    who.superAdmin
+      ? `
+    select t.*, coalesce(m.role, 'owner') as role, coalesce(owner.name, t.owner_id) as owner_name,
+      (select count(*)::int from team_members tm where tm.team_id = t.id) as member_count,
+      (select count(*)::int from rooms r left join room_tombstones rt on rt.room_key = r.room_key
+       where r.team_id = t.id and r.deleted_at is null and rt.room_key is null) as file_count
+    from teams t
+    left join team_members m on m.team_id = t.id and m.user_id = $2 and m.corp_id = $1
+    left join wecom_users owner on owner.user_id = t.owner_id and owner.corp_id = t.corp_id
+    where t.corp_id = $1 and t.deleted_at is null order by t.updated_at desc`
+      : `
     select t.*, m.role, coalesce(owner.name, t.owner_id) as owner_name,
       (select count(*)::int from team_members tm where tm.team_id = t.id) as member_count,
       (select count(*)::int from rooms r left join room_tombstones rt on rt.room_key = r.room_key
        where r.team_id = t.id and r.deleted_at is null and rt.room_key is null) as file_count
     from teams t join team_members m on m.team_id = t.id and m.user_id = $2 and m.corp_id = $1
     left join wecom_users owner on owner.user_id = t.owner_id and owner.corp_id = t.corp_id
-    where t.corp_id = $1 and t.deleted_at is null order by t.updated_at desc`, [who.corpId, who.userId])
+    where t.corp_id = $1 and t.deleted_at is null order by t.updated_at desc`,
+    [who.corpId, who.userId]
+  )
   return result.rows.map(dto)
 }
 
 async function createTeam(db, who, body = {}) {
   const sourceType = String(body.sourceType || 'custom').toLowerCase()
-  if (!['custom', 'custom_team'].includes(sourceType)) throw error(400, 'INVALID_SOURCE_TYPE', '当前只支持 CUSTOM_TEAM')
+  if (!['custom', 'custom_team'].includes(sourceType)) throw error(400, 'INVALID_SOURCE_TYPE', 'Ã¥Â½ÂÃ¥ÂÂÃ¥ÂÂªÃ¦ÂÂ¯Ã¦ÂÂ CUSTOM_TEAM')
   const id = `team-${crypto.randomUUID()}`
   return transaction(db, async tx => {
     const result = await tx.query(`
@@ -227,7 +264,7 @@ async function createTeam(db, who, body = {}) {
 }
 
 async function listMembers(db, who, id) {
-  await getTeam(db, who.corpId, id, who.userId)
+  await getTeam(db, who.corpId, id, who.userId, teamAccessOpts(who))
   const result = await db.query(`
     select tm.user_id, coalesce(nullif(tm.wecom_userid, ''), u.wecom_userid, tm.user_id) as wecom_userid,
       tm.role, tm.joined_at, coalesce(u.name, tm.user_id) as name,
@@ -273,13 +310,13 @@ async function resolveMemberId(db, who, value) {
 
 async function addMembers(db, who, id, ids) {
   const values = Array.from(new Set((Array.isArray(ids) ? ids : []).map(value => String(value || '').trim()).filter(Boolean))).slice(0, 100)
-  if (!values.length) throw error(400, 'INVALID_MEMBERS', '请选择企业微信成员')
+  if (!values.length) throw error(400, 'INVALID_MEMBERS', 'Ã¨Â¯Â·Ã©ÂÂÃ¦ÂÂ©Ã¤Â¼ÂÃ¤Â¸ÂÃ¥Â¾Â®Ã¤Â¿Â¡Ã¦ÂÂÃ¥ÂÂ')
   return transaction(db, async tx => {
-    const team = await getTeam(tx, who.corpId, id, who.userId)
+    const team = await getTeam(tx, who.corpId, id, who.userId, teamAccessOpts(who))
     manager(team)
     const contactsResult = await tx.query(`select user_id, wecom_userid from wecom_users where corp_id = $1 and wecom_userid = any($2::text[])`, [who.corpId, values])
     const found = new Map(contactsResult.rows.map(row => [row.wecom_userid || row.user_id, row.user_id]))
-    if (values.some(value => !found.has(value))) throw error(400, 'WECOM_MEMBER_NOT_FOUND', '只能添加当前企业微信通讯录成员')
+    if (values.some(value => !found.has(value))) throw error(400, 'WECOM_MEMBER_NOT_FOUND', 'Ã¥ÂÂªÃ¨ÂÂ½Ã¦Â·Â»Ã¥ÂÂ Ã¥Â½ÂÃ¥ÂÂÃ¤Â¼ÂÃ¤Â¸ÂÃ¥Â¾Â®Ã¤Â¿Â¡Ã©ÂÂÃ¨Â®Â¯Ã¥Â½ÂÃ¦ÂÂÃ¥ÂÂ')
     for (const wecomUserId of values) {
       const userId = found.get(wecomUserId)
       await tx.query(`
@@ -293,24 +330,24 @@ async function addMembers(db, who, id, ids) {
 }
 
 async function updateMember(db, who, id, target, role) {
-  const team = await getTeam(db, who.corpId, id, who.userId)
+  const team = await getTeam(db, who.corpId, id, who.userId, teamAccessOpts(who))
   manager(team)
   const targetId = await resolveMemberId(db, who, target)
   const next = String(role || '').toLowerCase()
-  if (!['admin', 'member'].includes(next)) throw error(400, 'INVALID_TEAM_ROLE', '角色必须是 admin 或 member')
+  if (!['admin', 'member'].includes(next)) throw error(400, 'INVALID_TEAM_ROLE', 'Ã¨Â§ÂÃ¨ÂÂ²Ã¥Â¿ÂÃ©Â¡Â»Ã¦ÂÂ¯ admin Ã¦ÂÂ member')
   const result = await db.query(`update team_members set role = $4, updated_at = now() where team_id = $1 and corp_id = $2 and user_id = $3 and role <> 'owner' returning user_id`, [id, who.corpId, targetId, next])
-  if (!result.rows.length) throw error(404, 'TEAM_MEMBER_NOT_FOUND', '团队成员不存在或不能修改所有者')
+  if (!result.rows.length) throw error(404, 'TEAM_MEMBER_NOT_FOUND', 'Ã¥ÂÂ¢Ã©ÂÂÃ¦ÂÂÃ¥ÂÂÃ¤Â¸ÂÃ¥Â­ÂÃ¥ÂÂ¨Ã¦ÂÂÃ¤Â¸ÂÃ¨ÂÂ½Ã¤Â¿Â®Ã¦ÂÂ¹Ã¦ÂÂÃ¦ÂÂÃ¨ÂÂ')
   const members = await listMembers(db, who, id)
   return members.find(member => member.id === target) || members
 }
 
 async function removeMember(db, who, id, target) {
   return transaction(db, async tx => {
-    const team = await getTeam(tx, who.corpId, id, who.userId)
+    const team = await getTeam(tx, who.corpId, id, who.userId, teamAccessOpts(who))
     manager(team)
     const targetId = await resolveMemberId(tx, who, target)
     const result = await tx.query(`delete from team_members where team_id = $1 and corp_id = $2 and user_id = $3 and role <> 'owner' returning user_id`, [id, who.corpId, targetId])
-    if (!result.rows.length) throw error(404, 'TEAM_MEMBER_NOT_FOUND', '团队成员不存在或不能移除所有者')
+    if (!result.rows.length) throw error(404, 'TEAM_MEMBER_NOT_FOUND', 'Ã¥ÂÂ¢Ã©ÂÂÃ¦ÂÂÃ¥ÂÂÃ¤Â¸ÂÃ¥Â­ÂÃ¥ÂÂ¨Ã¦ÂÂÃ¤Â¸ÂÃ¨ÂÂ½Ã§Â§Â»Ã©ÂÂ¤Ã¦ÂÂÃ¦ÂÂÃ¨ÂÂ')
     await tx.query(`
       update room_members
       set team_role = null,
@@ -339,17 +376,17 @@ async function removeMember(db, who, id, target) {
 
 async function transferOwnership(db, who, id, target) {
   return transaction(db, async tx => {
-    const team = await getTeam(tx, who.corpId, id, who.userId)
-    if (team.role !== 'owner') throw error(403, 'FORBIDDEN', '只有团队所有者可以转移所有权')
+    const team = await getTeam(tx, who.corpId, id, who.userId, teamAccessOpts(who))
+    if (team.role !== 'owner') throw error(403, 'FORBIDDEN', 'Ã¥ÂÂªÃ¦ÂÂÃ¥ÂÂ¢Ã©ÂÂÃ¦ÂÂÃ¦ÂÂÃ¨ÂÂÃ¥ÂÂ¯Ã¤Â»Â¥Ã¨Â½Â¬Ã§Â§Â»Ã¦ÂÂÃ¦ÂÂÃ¦ÂÂ')
     const targetId = await resolveMemberId(tx, who, target)
-    if (!targetId) throw error(400, 'BAD_REQUEST', '请选择新的所有者')
-    if (targetId === who.userId) throw error(400, 'BAD_REQUEST', '不能将所有权转移给自己')
+    if (!targetId) throw error(400, 'BAD_REQUEST', 'Ã¨Â¯Â·Ã©ÂÂÃ¦ÂÂ©Ã¦ÂÂ°Ã§ÂÂÃ¦ÂÂÃ¦ÂÂÃ¨ÂÂ')
+    if (targetId === who.userId) throw error(400, 'BAD_REQUEST', 'Ã¤Â¸ÂÃ¨ÂÂ½Ã¥Â°ÂÃ¦ÂÂÃ¦ÂÂÃ¦ÂÂÃ¨Â½Â¬Ã§Â§Â»Ã§Â»ÂÃ¨ÂÂªÃ¥Â·Â±')
     const member = await tx.query(
       `select user_id, role from team_members where team_id = $1 and corp_id = $2 and user_id = $3`,
       [id, who.corpId, targetId]
     )
     if (!member.rows.length) {
-      throw error(400, 'TEAM_MEMBER_REQUIRED', '请先将对方加入团队，再转移所有权')
+      throw error(400, 'TEAM_MEMBER_REQUIRED', 'Ã¨Â¯Â·Ã¥ÂÂÃ¥Â°ÂÃ¥Â¯Â¹Ã¦ÂÂ¹Ã¥ÂÂ Ã¥ÂÂ¥Ã¥ÂÂ¢Ã©ÂÂÃ¯Â¼ÂÃ¥ÂÂÃ¨Â½Â¬Ã§Â§Â»Ã¦ÂÂÃ¦ÂÂÃ¦ÂÂ')
     }
     await tx.query(
       `update teams set owner_id = $3, updated_at = now() where id = $1 and corp_id = $2 and deleted_at is null`,
@@ -370,7 +407,7 @@ async function transferOwnership(db, who, id, target) {
 }
 
 async function listRooms(db, who, id) {
-  await getTeam(db, who.corpId, id, who.userId)
+  await getTeam(db, who.corpId, id, who.userId, teamAccessOpts(who))
   const result = await db.query(`
     select r.room_key, r.title, r.folder_id, r.owner_id, r.created_at, r.updated_at,
       m.role, coalesce(state.is_favorite, false) as is_favorite,
@@ -395,19 +432,19 @@ async function listRooms(db, who, id) {
 
 async function assignRoom(db, who, id, roomKey) {
   const key = String(roomKey || '').trim()
-  if (!key) throw error(400, 'BAD_REQUEST', '缺少脑图标识')
+  if (!key) throw error(400, 'BAD_REQUEST', 'Ã§Â¼ÂºÃ¥Â°ÂÃ¨ÂÂÃ¥ÂÂ¾Ã¦Â ÂÃ¨Â¯Â')
   return transaction(db, async tx => {
-    await getTeam(tx, who.corpId, id, who.userId)
+    await getTeam(tx, who.corpId, id, who.userId, teamAccessOpts(who))
     const room = await tx.query(
       `select room_key, owner_id, team_id, folder_id, deleted_at from rooms where room_key = $1 for update`,
       [key]
     )
     if (!room.rows.length || room.rows[0].deleted_at) {
-      throw error(404, 'ROOM_NOT_FOUND', '脑图不存在')
+      throw error(404, 'ROOM_NOT_FOUND', 'Ã¨ÂÂÃ¥ÂÂ¾Ã¤Â¸ÂÃ¥Â­ÂÃ¥ÂÂ¨')
     }
     const currentTeam = room.rows[0].team_id || null
     if (currentTeam && currentTeam !== id) {
-      throw error(409, 'ROOM_ALREADY_IN_TEAM', '该脑图已属于其他团队')
+      throw error(409, 'ROOM_ALREADY_IN_TEAM', 'Ã¨Â¯Â¥Ã¨ÂÂÃ¥ÂÂ¾Ã¥Â·Â²Ã¥Â±ÂÃ¤ÂºÂÃ¥ÂÂ¶Ã¤Â»ÂÃ¥ÂÂ¢Ã©ÂÂ')
     }
     if (currentTeam === id) return { roomKey: key, teamId: id }
 
@@ -421,7 +458,7 @@ async function assignRoom(db, who, id, roomKey) {
       (member &&
         (member.direct_role === 'owner' || member.role === 'owner'))
     if (!isOwner) {
-      throw error(403, 'FORBIDDEN', '只有脑图所有者可以将其移入团队空间')
+      throw error(403, 'FORBIDDEN', 'Ã¥ÂÂªÃ¦ÂÂÃ¨ÂÂÃ¥ÂÂ¾Ã¦ÂÂÃ¦ÂÂÃ¨ÂÂÃ¥ÂÂ¯Ã¤Â»Â¥Ã¥Â°ÂÃ¥ÂÂ¶Ã§Â§Â»Ã¥ÂÂ¥Ã¥ÂÂ¢Ã©ÂÂÃ§Â©ÂºÃ©ÂÂ´')
     }
 
     if (room.rows[0].folder_id) await roomAcl.clearRoomFolderRoles(tx, key)
@@ -458,9 +495,9 @@ async function assignRoom(db, who, id, roomKey) {
 
 async function assignFolder(db, who, id, folderId) {
   const root = String(folderId || '').trim()
-  if (!root) throw error(400, 'BAD_REQUEST', '缺少文件夹标识')
+  if (!root) throw error(400, 'BAD_REQUEST', 'Ã§Â¼ÂºÃ¥Â°ÂÃ¦ÂÂÃ¤Â»Â¶Ã¥Â¤Â¹Ã¦Â ÂÃ¨Â¯Â')
   return transaction(db, async tx => {
-    manager(await getTeam(tx, who.corpId, id, who.userId))
+    manager(await getTeam(tx, who.corpId, id, who.userId, teamAccessOpts(who)))
     const folders = await tx.query(`
       with recursive subtree as (
         select id from folders where id = $1 and deleted_at is null
@@ -469,10 +506,10 @@ async function assignFolder(db, who, id, folderId) {
         where f.deleted_at is null
       )
       select f.* from folders f where f.id in (select id from subtree) for update`, [root])
-    if (!folders.rows.length) throw error(404, 'FOLDER_NOT_FOUND', '文件夹不存在')
+    if (!folders.rows.length) throw error(404, 'FOLDER_NOT_FOUND', 'Ã¦ÂÂÃ¤Â»Â¶Ã¥Â¤Â¹Ã¤Â¸ÂÃ¥Â­ÂÃ¥ÂÂ¨')
     for (const folder of folders.rows) {
-      if (folder.team_id) throw error(409, 'FOLDER_ALREADY_IN_TEAM', '文件夹已属于团队空间')
-      if (folder.created_by !== who.userId) throw error(403, 'FORBIDDEN', '只有文件夹所有者可以移入团队空间')
+      if (folder.team_id) throw error(409, 'FOLDER_ALREADY_IN_TEAM', 'Ã¦ÂÂÃ¤Â»Â¶Ã¥Â¤Â¹Ã¥Â·Â²Ã¥Â±ÂÃ¤ÂºÂÃ¥ÂÂ¢Ã©ÂÂÃ§Â©ÂºÃ©ÂÂ´')
+      if (folder.created_by !== who.userId) throw error(403, 'FORBIDDEN', 'Ã¥ÂÂªÃ¦ÂÂÃ¦ÂÂÃ¤Â»Â¶Ã¥Â¤Â¹Ã¦ÂÂÃ¦ÂÂÃ¨ÂÂÃ¥ÂÂ¯Ã¤Â»Â¥Ã§Â§Â»Ã¥ÂÂ¥Ã¥ÂÂ¢Ã©ÂÂÃ§Â©ÂºÃ©ÂÂ´')
     }
     const ids = folders.rows.map(folder => folder.id)
     const rooms = await tx.query('select room_key, folder_id from rooms where folder_id = any($1::uuid[]) and deleted_at is null for update', [ids])
@@ -489,7 +526,7 @@ async function assignFolder(db, who, id, folderId) {
 }
 
 async function creationMembers(db, who, id) {
-  await getTeam(db, who.corpId, id, who.userId)
+  await getTeam(db, who.corpId, id, who.userId, teamAccessOpts(who))
   const result = await db.query(
     `select user_id, wecom_userid, role from team_members where team_id = $1 and corp_id = $2`,
     [id, who.corpId]
@@ -569,12 +606,12 @@ async function handleApi(req, res, options) {
     const match = path.match(/^\/api\/teams\/([^/]+)(?:\/(members|rooms|folders|transfer-ownership)(?:\/([^/]+))?)?$/)
     if (!match) return false
     const id = teamId(decodeURIComponent(match[1])); const sub = match[2]; const target = match[3] ? decodeURIComponent(match[3]) : ''
-    if (!sub && req.method === 'GET') { sendJson(res, 200, dto(await getTeam(db, who.corpId, id, who.userId))); return true }
+    if (!sub && req.method === 'GET') { sendJson(res, 200, dto(await getTeam(db, who.corpId, id, who.userId, teamAccessOpts(who)))); return true }
     if (!sub && req.method === 'PATCH') {
-      const team = await getTeam(db, who.corpId, id, who.userId); manager(team); const body = await readBody(req); const fields = []; const params = [who.corpId, id]
+      const team = await getTeam(db, who.corpId, id, who.userId, teamAccessOpts(who)); manager(team); const body = await readBody(req); const fields = []; const params = [who.corpId, id]
       if (body.name !== undefined) { fields.push(`name = $${params.length + 1}`); params.push(name(body.name)) }
       if (body.description !== undefined) { fields.push(`description = $${params.length + 1}`); params.push(String(body.description || '').trim().slice(0, 500)) }
-      if (!fields.length) throw error(400, 'INVALID_TEAM_UPDATE', '没有可更新字段')
+      if (!fields.length) throw error(400, 'INVALID_TEAM_UPDATE', 'Ã¦Â²Â¡Ã¦ÂÂÃ¥ÂÂ¯Ã¦ÂÂ´Ã¦ÂÂ°Ã¥Â­ÂÃ¦Â®Âµ')
       fields.push('updated_at = now()'); const updated = await db.query(`update teams set ${fields.join(', ')} where corp_id = $1 and id = $2 and deleted_at is null returning *`, params)
       sendJson(res, 200, dto({ ...updated.rows[0], role: team.role, member_count: team.member_count, file_count: team.file_count })); return true
     }
@@ -596,16 +633,16 @@ async function handleApi(req, res, options) {
         sendJson(res, 200, await assignRoom(db, who, id, existingKey))
         return true
       }
-      if (typeof createRoom !== 'function') throw error(501, 'TEAM_ROOM_UNAVAILABLE', '团队房间创建不可用')
+      if (typeof createRoom !== 'function') throw error(501, 'TEAM_ROOM_UNAVAILABLE', 'Ã¥ÂÂ¢Ã©ÂÂÃ¦ÂÂ¿Ã©ÂÂ´Ã¥ÂÂÃ¥Â»ÂºÃ¤Â¸ÂÃ¥ÂÂ¯Ã§ÂÂ¨')
       sendJson(res, 201, await createRoom(req, who, id, body))
       return true
     }
     if (sub === 'folders') {
       const fs = options.fileSystem || (typeof options.getFileSystem === 'function' ? options.getFileSystem() : null)
       if (!fs || typeof fs.listFolders !== 'function') {
-        throw error(503, 'TEAM_FOLDER_UNAVAILABLE', '团队文件夹服务尚未就绪')
+        throw error(503, 'TEAM_FOLDER_UNAVAILABLE', 'Ã¥ÂÂ¢Ã©ÂÂÃ¦ÂÂÃ¤Â»Â¶Ã¥Â¤Â¹Ã¦ÂÂÃ¥ÂÂ¡Ã¥Â°ÂÃ¦ÂÂªÃ¥Â°Â±Ã§Â»Âª')
       }
-      const team = await getTeam(db, who.corpId, id, who.userId)
+      const team = await getTeam(db, who.corpId, id, who.userId, teamAccessOpts(who))
       const canManage = ['owner', 'admin'].includes(team.role)
       if (req.method === 'GET' && !target) {
         const listed = await fs.listFolders({
@@ -639,7 +676,7 @@ async function handleApi(req, res, options) {
         const body = await readBody(req)
         const existing = await fs.store.getFolder(target)
         if (!existing || String(existing.team_id || '') !== String(id)) {
-          throw error(404, 'FOLDER_NOT_FOUND', '文件夹不存在')
+          throw error(404, 'FOLDER_NOT_FOUND', 'Ã¦ÂÂÃ¤Â»Â¶Ã¥Â¤Â¹Ã¤Â¸ÂÃ¥Â­ÂÃ¥ÂÂ¨')
         }
         const folder = await fs.renameFolder(target, body.name, {
           userId: who.userId,
@@ -653,7 +690,7 @@ async function handleApi(req, res, options) {
         manager(team)
         const existing = await fs.store.getFolder(target)
         if (!existing || String(existing.team_id || '') !== String(id)) {
-          throw error(404, 'FOLDER_NOT_FOUND', '文件夹不存在')
+          throw error(404, 'FOLDER_NOT_FOUND', 'Ã¦ÂÂÃ¤Â»Â¶Ã¥Â¤Â¹Ã¤Â¸ÂÃ¥Â­ÂÃ¥ÂÂ¨')
         }
         const result = await fs.deleteFolder(target, {
           userId: who.userId,

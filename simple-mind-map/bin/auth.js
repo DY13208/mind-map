@@ -1569,6 +1569,7 @@ function redirect(res, location) {
 }
 
 function publicUser(user) {
+  const roomAcl = require('./roomAcl')
   return {
     id: user.id,
     corpId: user.corpId,
@@ -1576,7 +1577,8 @@ function publicUser(user) {
     name: user.name,
     avatar: user.avatar,
     departments: user.departments,
-    expiresAt: user.expiresAt
+    expiresAt: user.expiresAt,
+    superAdmin: roomAcl.isSuperAdminUser(user)
   }
 }
 
