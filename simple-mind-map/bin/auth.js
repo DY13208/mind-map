@@ -732,6 +732,34 @@ function buildWecomLoginUrl(state, options = {}) {
   return url.toString()
 }
 
+// 企业微信客户端内使用网页授权，可直接复用客户端登录态获取成员 UserId，
+// 与 PC 浏览器的 qrConnect 扫码登录是两条不同的官方流程。
+function buildWecomClientLoginUrl(state) {
+  if (!config.wecomEnabled) {
+    throw new AuthError('wecom_disabled', '企业微信登录未启用', 404)
+  }
+  const url = new URL('https://open.weixin.qq.com/connect/oauth2/authorize')
+  url.searchParams.set('appid', config.corpId)
+  url.searchParams.set('redirect_uri', config.redirectUri)
+  url.searchParams.set('response_type', 'code')
+  url.searchParams.set('scope', 'snsapi_base')
+  url.searchParams.set('state', state)
+  url.searchParams.set('agentid', config.agentId)
+  url.hash = 'wechat_redirect'
+  return url.toString()
+}
+
+function shouldAutoLoginOneId() {
+  // 企业微信和 OneID 同时开启时，以稳定可用的企业微信登录为默认入口。
+  // OneID 仍可手动选择，但绝不能因租户尚未配置登录方式而劫持整个登录页。
+  return Boolean(
+    config.oneIdEnabled &&
+      config.oneId &&
+      config.oneId.autoLogin &&
+      !config.wecomEnabled
+  )
+}
+
 function buildOneIdLoginUrl(state) {
   if (!config.oneIdEnabled || !config.oneId) {
     throw new AuthError('oneid_disabled', 'OneID 单点登录未启用', 404)
@@ -1733,8 +1761,11 @@ async function handleAuthApi(req, res) {
       enabled: config.enabled,
       wecomEnabled: Boolean(config.wecomEnabled),
       oneIdEnabled: Boolean(config.oneIdEnabled),
-      oneIdAutoLogin: Boolean(config.oneId && config.oneId.autoLogin),
+      oneIdAutoLogin: shouldAutoLoginOneId(),
       loginPath: config.wecomEnabled ? '/api/auth/login' : null,
+      wecomClientLoginPath: config.wecomEnabled
+        ? '/api/auth/wecom/client-login'
+        : null,
       oneIdLoginPath: config.oneIdEnabled ? '/api/auth/oneid/login' : null,
       devBypassAvailable: isDevBypassAllowed(req),
       devBypassMobileHint: isDevBypassAllowed(req)
@@ -1791,7 +1822,7 @@ async function handleAuthApi(req, res) {
       enabled: true,
       wecomEnabled: Boolean(config.wecomEnabled),
       oneIdEnabled: Boolean(config.oneIdEnabled),
-      oneIdAutoLogin: Boolean(config.oneId && config.oneId.autoLogin),
+      oneIdAutoLogin: shouldAutoLoginOneId(),
       authenticated: !!user,
       user: user ? publicUser(user) : null,
       devBypassAvailable: isDevBypassAllowed(req),
@@ -1928,6 +1959,27 @@ async function handleAuthApi(req, res) {
       redirectUri: config.redirectUri,
       state
     })
+    return true
+  }
+
+  if (
+    pathname === '/api/auth/wecom/client-login' &&
+    req.method === 'GET'
+  ) {
+    if (!config.wecomEnabled) {
+      sendJson(req, res, 404, {
+        error: '企业微信登录未启用',
+        code: 'wecom_disabled'
+      })
+      return true
+    }
+    const state = await createOAuthChallenge(
+      req,
+      res,
+      url.searchParams.get('return_to'),
+      OAUTH_PROVIDER_WECOM
+    )
+    redirect(res, buildWecomClientLoginUrl(state))
     return true
   }
 
@@ -2156,6 +2208,7 @@ module.exports = {
     signValue,
     verifySignedValue,
     buildWecomLoginUrl,
+    buildWecomClientLoginUrl,
     buildOneIdLoginUrl,
     oneIdClaims,
     createWecomResponseError,

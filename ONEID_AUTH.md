@@ -19,7 +19,7 @@ CPD 支持通过腾讯 OneID 的 OIDC 授权码模式建立现有 `mind_map_sess
 
 ```dotenv
 ONEID_AUTH_ENABLED=true
-ONEID_AUTO_LOGIN=true
+ONEID_AUTO_LOGIN=false
 ONEID_CLIENT_ID=替换为应用Client-ID
 ONEID_CLIENT_SECRET=替换为应用Client-Secret
 ONEID_ISSUER=https://oauth2.account.tencent.com/authz/oidc/v2/替换为租户ID
@@ -37,7 +37,9 @@ AUTH_APP_ORIGIN=https://xx.stillgroup.net:8989
 AUTH_COOKIE_SECURE=true
 ```
 
-`ONEID_AUTO_LOGIN=true` 时，未登录的新浏览器标签页会先跳转 OneID。用户已从 WorkBuddy 建立 OneID 登录态时会直接返回 CPD；取消、超时或配置错误时，本标签页只尝试一次，然后显示企业微信二维码和手动 OneID 登录按钮，避免重定向循环。
+企业微信与 OneID 同时启用时必须保持 `ONEID_AUTO_LOGIN=false`，让稳定可用的企业微信登录作为默认入口，OneID 仅作为手动选择。即使旧生产环境误留了 `ONEID_AUTO_LOGIN=true`，后端也会在企业微信启用时把有效值强制视为 `false`，避免 OneID 尚未配置登录方式时劫持整个登录页。
+
+只有完全关闭企业微信、把 OneID 作为唯一身份源时，才建议设置 `ONEID_AUTO_LOGIN=true`。此时未登录的新浏览器标签页会先跳转 OneID；取消、超时或配置错误时，本标签页只尝试一次，避免重定向循环。
 
 ## 安全与验收
 

@@ -288,9 +288,22 @@ async function main() {
       enabled: true,
       wecomEnabled: true,
       oneIdEnabled: true,
-      oneIdAutoLogin: true,
+      oneIdAutoLogin: false,
       authenticated: false,
       user: null,
+      devBypassAvailable: true,
+      devBypassMobileHint: ''
+    })
+
+    response = await request('/api/auth/config')
+    assert.deepStrictEqual(await response.json(), {
+      enabled: true,
+      wecomEnabled: true,
+      oneIdEnabled: true,
+      oneIdAutoLogin: false,
+      loginPath: '/api/auth/login',
+      wecomClientLoginPath: '/api/auth/wecom/client-login',
+      oneIdLoginPath: '/api/auth/oneid/login',
       devBypassAvailable: true,
       devBypassMobileHint: ''
     })
@@ -362,7 +375,7 @@ async function main() {
       enabled: true,
       wecomEnabled: true,
       oneIdEnabled: true,
-      oneIdAutoLogin: true,
+      oneIdAutoLogin: false,
       authenticated: false,
       user: null,
       devBypassAvailable: true,
@@ -371,6 +384,54 @@ async function main() {
 
     response = await request('/api/files')
     assert.strictEqual(response.status, 401)
+
+    response = await request(
+      '/api/auth/wecom/client-login?return_to=%2Ffiles%3Ffrom%3Dwecom'
+    )
+    assert.strictEqual(response.status, 302)
+    const clientLoginLocation = new URL(response.headers.get('location'))
+    assert.strictEqual(clientLoginLocation.origin, 'https://open.weixin.qq.com')
+    assert.strictEqual(
+      clientLoginLocation.pathname,
+      '/connect/oauth2/authorize'
+    )
+    assert.strictEqual(
+      clientLoginLocation.searchParams.get('appid'),
+      'wwintegrationtest'
+    )
+    assert.strictEqual(
+      clientLoginLocation.searchParams.get('agentid'),
+      '1000002'
+    )
+    assert.strictEqual(
+      clientLoginLocation.searchParams.get('scope'),
+      'snsapi_base'
+    )
+    assert.strictEqual(clientLoginLocation.hash, '#wechat_redirect')
+    const clientState = clientLoginLocation.searchParams.get('state')
+    assert(clientState)
+
+    response = await request(
+      `/api/auth/wecom/callback?code=valid-code&state=${encodeURIComponent(
+        clientState
+      )}`
+    )
+    assert.strictEqual(response.status, 302)
+    assert.strictEqual(
+      response.headers.get('location'),
+      `${appOrigin}/files?from=wecom`
+    )
+    response = await request('/api/auth/me')
+    const clientWecomMe = await response.json()
+    assert.strictEqual(clientWecomMe.authenticated, true)
+    assert.strictEqual(clientWecomMe.user.wecomUserId, 'zhangsan')
+    const clientWecomInternalUserId = clientWecomMe.user.id
+
+    response = await request('/api/auth/logout', {
+      method: 'POST',
+      headers: { Origin: appOrigin }
+    })
+    assert.strictEqual(response.status, 204)
 
     response = await request(
       '/api/auth/oneid/login?return_to=%2Ffiles%3Ffrom%3Dworkbuddy'
@@ -416,6 +477,7 @@ async function main() {
     assert.strictEqual(oneIdMe.user.wecomUserId, 'zhangsan')
     assert.strictEqual(oneIdMe.user.name, '张三')
     const mappedOneIdInternalUserId = oneIdMe.user.id
+    assert.strictEqual(mappedOneIdInternalUserId, clientWecomInternalUserId)
     assert.strictEqual(
       oneIdMe.user.avatar,
       'https://example.test/oneid-avatar.png'
