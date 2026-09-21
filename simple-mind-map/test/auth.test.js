@@ -53,6 +53,20 @@ const embeddedLoginUrl = new URL(
 )
 assert.strictEqual(embeddedLoginUrl.searchParams.get('login_type'), 'jssdk')
 
+const clientLoginUrl = new URL(__test.buildWecomClientLoginUrl(signed))
+assert.strictEqual(clientLoginUrl.origin, 'https://open.weixin.qq.com')
+assert.strictEqual(clientLoginUrl.pathname, '/connect/oauth2/authorize')
+assert.strictEqual(clientLoginUrl.searchParams.get('appid'), 'wwcorp123456')
+assert.strictEqual(clientLoginUrl.searchParams.get('agentid'), '1000002')
+assert.strictEqual(clientLoginUrl.searchParams.get('scope'), 'snsapi_base')
+assert.strictEqual(clientLoginUrl.searchParams.get('response_type'), 'code')
+assert.strictEqual(clientLoginUrl.searchParams.get('state'), signed)
+assert.strictEqual(
+  clientLoginUrl.searchParams.get('redirect_uri'),
+  'https://mindmap.example.com/api/auth/wecom/callback'
+)
+assert.strictEqual(clientLoginUrl.hash, '#wechat_redirect')
+
 assert.deepStrictEqual(__test.readConfig({ WECOM_AUTH_ENABLED: 'false' }), {
   enabled: false
 })

@@ -31,21 +31,28 @@
           <div class="authError" v-if="authErrorMessage">{{ authErrorMessage }}</div>
         </div>
         <div class="authLoginPanel">
-          <div class="authOneId" v-if="authState.oneIdEnabled">
+          <div class="authOneId" v-if="authState.wecomEnabled">
             <button
               class="authButton authOneIdButton"
               type="button"
-              :disabled="oneIdRedirecting"
-              @click="startOneIdLogin"
+              :disabled="wecomClientRedirecting"
+              @click="startWecomClientLogin"
             >
-              {{ oneIdRedirecting ? '正在进入 WorkBuddy…' : 'WorkBuddy / OneID 单点登录' }}
+              {{
+                wecomClientRedirecting
+                  ? '正在进入企业微信…'
+                  : '企业微信客户端免扫码登录'
+              }}
             </button>
-            <p class="authOneIdHint">已登录 WorkBuddy 时可直接进入，无需再次扫码</p>
+            <p class="authOneIdHint">
+              {{
+                isWecomClient
+                  ? '正在使用当前企业微信成员身份登录'
+                  : '已在企业微信客户端登录时，可直接进入'
+              }}
+            </p>
           </div>
-          <div
-            class="authLoginDivider"
-            v-if="authState.oneIdEnabled && authState.wecomEnabled"
-          >
+          <div class="authLoginDivider" v-if="authState.wecomEnabled">
             <span>或使用企业微信扫码</span>
           </div>
           <div class="authQrShell" v-if="authState.wecomEnabled">
@@ -69,6 +76,20 @@
           >
             <span class="authRefreshIcon" :class="{ spinning: qrRefreshing }">↻</span>
           </button>
+          <div class="authLoginDivider" v-if="authState.oneIdEnabled">
+            <span>其他登录方式</span>
+          </div>
+          <div class="authOneId" v-if="authState.oneIdEnabled">
+            <button
+              class="authButton authOneIdButton"
+              type="button"
+              :disabled="oneIdRedirecting"
+              @click="startOneIdLogin"
+            >
+              {{ oneIdRedirecting ? '正在进入 WorkBuddy…' : 'WorkBuddy / OneID 单点登录' }}
+            </button>
+            <p class="authOneIdHint">需先在 OneID 平台配置可用登录方式</p>
+          </div>
           <div class="authDevLogin" v-if="authState.devBypassAvailable">
             <button
               class="authDevToggle"
@@ -127,19 +148,25 @@
 <script>
 import {
   clearOneIdAutoLoginAttempt,
+  clearWecomClientAutoLoginAttempt,
   createLoginQr,
   devLogin,
   getAuthApiUrl,
   getOneIdLoginUrl,
   getStoredDevAuthKey,
+  getWecomClientLoginUrl,
   loadAuthState,
   markOneIdAutoLoginAttempted,
-  ONEID_AUTO_ATTEMPT_KEY
+  markWecomClientAutoLoginAttempted,
+  ONEID_AUTO_ATTEMPT_KEY,
+  WECOM_CLIENT_AUTO_ATTEMPT_KEY
 } from '@/utils/auth'
 import { mountWecomLoginPanel } from '@/utils/wecomLogin'
 
 const PAGE_TITLE = 'CPD'
 const AUTH_BOOTSTRAP_MS = 45000
+const isWecomClientEnvironment = () =>
+  /\bwxwork\b/i.test(String(window.navigator.userAgent || ''))
 const authErrors = {
   invalid_state: '登录状态校验失败，请重新扫码。',
   expired_state: '二维码已过期，请重新扫码。',
@@ -188,6 +215,8 @@ export default {
       qrRefreshing: false,
       qrFailure: '',
       qrRefreshTimer: null,
+      isWecomClient: isWecomClientEnvironment(),
+      wecomClientRedirecting: false,
       oneIdRedirecting: false,
       showDevLogin: false,
       devAuthKey: '',
@@ -202,7 +231,7 @@ export default {
     },
     authLoginSubtitle() {
       if (this.authState.oneIdEnabled && this.authState.wecomEnabled) {
-        return 'WorkBuddy 单点登录 / 企业微信扫码登录'
+        return '企业微信登录 / WorkBuddy 单点登录'
       }
       return this.authState.oneIdEnabled
         ? 'WorkBuddy 单点登录'
@@ -277,6 +306,7 @@ export default {
         this.authState = await loadAuthState()
         if (this.authState.authenticated) {
           clearOneIdAutoLoginAttempt()
+          clearWecomClientAutoLoginAttempt()
         }
         this.authRetryAttempt = 0
       } catch (err) {
@@ -306,6 +336,15 @@ export default {
       ) {
         document.title = PAGE_TITLE
         if (
+          this.authState.wecomEnabled &&
+          this.isWecomClient &&
+          !this.authErrorCode &&
+          !this.hasAttemptedWecomClientAutoLogin()
+        ) {
+          this.startWecomClientLogin()
+          return
+        }
+        if (
           this.authState.oneIdEnabled &&
           this.authState.oneIdAutoLogin &&
           !this.authErrorCode &&
@@ -325,6 +364,21 @@ export default {
       } catch (err) {
         return true
       }
+    },
+    hasAttemptedWecomClientAutoLogin() {
+      try {
+        return (
+          window.sessionStorage.getItem(WECOM_CLIENT_AUTO_ATTEMPT_KEY) === '1'
+        )
+      } catch (err) {
+        return true
+      }
+    },
+    startWecomClientLogin() {
+      if (!this.authState.wecomEnabled || this.wecomClientRedirecting) return
+      this.wecomClientRedirecting = true
+      markWecomClientAutoLoginAttempted()
+      window.location.assign(getWecomClientLoginUrl())
     },
     startOneIdLogin() {
       if (!this.authState.oneIdEnabled || this.oneIdRedirecting) return
