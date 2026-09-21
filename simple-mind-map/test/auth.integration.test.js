@@ -103,6 +103,40 @@ async function main() {
   const wecomServer = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1')
     res.setHeader('Content-Type', 'application/json')
+    if (url.pathname === '/oidc/token' && req.method === 'POST') {
+      let raw = ''
+      req.on('data', chunk => {
+        raw += chunk
+      })
+      req.on('end', () => {
+        const form = new URLSearchParams(raw)
+        assert.strictEqual(form.get('client_id'), 'oneid-integration-client')
+        assert.strictEqual(form.get('client_secret'), 'oneid-integration-secret')
+        assert.strictEqual(form.get('grant_type'), 'authorization_code')
+        assert.strictEqual(form.get('code'), 'oneid-valid-code')
+        res.end(
+          JSON.stringify({
+            access_token: 'oneid-access-token',
+            token_type: 'Bearer',
+            expires_in: 1800
+          })
+        )
+      })
+      return
+    }
+    if (url.pathname === '/oidc/userinfo') {
+      assert.strictEqual(req.headers.authorization, 'Bearer oneid-access-token')
+      res.end(
+        JSON.stringify({
+          sub: 'oneid-zhangsan',
+          name: '张三',
+          preferred_username: 'zhangsan',
+          mobile: '13800138000',
+          picture: 'https://example.test/oneid-avatar.png'
+        })
+      )
+      return
+    }
     if (url.pathname === '/cgi-bin/gettoken') {
       tokenCalls += 1
       res.end(
@@ -141,6 +175,10 @@ async function main() {
       )
       return
     }
+    if (url.pathname === '/cgi-bin/user/getuserid' && req.method === 'POST') {
+      res.end(JSON.stringify({ errcode: 0, userid: 'zhangsan' }))
+      return
+    }
     res.statusCode = 404
     res.end(JSON.stringify({ errcode: 404 }))
   })
@@ -155,6 +193,7 @@ async function main() {
     cwd: require('path').resolve(__dirname, '..'),
     env: {
       ...process.env,
+      MIND_MAP_SKIP_ROOT_ENV: '1',
       HOST: '127.0.0.1',
       PORT: String(apiPort),
       // 这里校验的是 v1 升级握手上的鉴权；v2 的 socket 鉴权由 collabV2.acl 集成测试覆盖。
@@ -174,6 +213,16 @@ async function main() {
       AUTH_DEV_BYPASS_USER_NAME: '集成测试开发者',
       WECOM_API_BASE: `http://127.0.0.1:${wecomPort}`,
       WECOM_SSO_BASE: `http://127.0.0.1:${wecomPort}`,
+      ONEID_AUTH_ENABLED: 'true',
+      ONEID_AUTO_LOGIN: 'true',
+      ONEID_CLIENT_ID: 'oneid-integration-client',
+      ONEID_CLIENT_SECRET: 'oneid-integration-secret',
+      ONEID_ISSUER: `http://127.0.0.1:${wecomPort}/oidc`,
+      ONEID_AUTHORIZATION_ENDPOINT: `http://127.0.0.1:${wecomPort}/oidc/authorize`,
+      ONEID_TOKEN_ENDPOINT: `http://127.0.0.1:${wecomPort}/oidc/token`,
+      ONEID_USERINFO_ENDPOINT: `http://127.0.0.1:${wecomPort}/oidc/userinfo`,
+      ONEID_REDIRECT_URI: `${apiBase}/api/auth/oneid/callback`,
+      ONEID_SCOPES: 'openid profile mobile',
       TENCENT_COS_SECRET_ID: '',
       TENCENT_COS_SECRET_KEY: '',
       TENCENT_COS_BUCKET: 'unused-in-auth-test',
@@ -202,9 +251,13 @@ async function main() {
     let response = await request('/api/auth/me')
     assert.deepStrictEqual(await response.json(), {
       enabled: true,
+      wecomEnabled: true,
+      oneIdEnabled: true,
+      oneIdAutoLogin: true,
       authenticated: false,
       user: null,
-      devBypassAvailable: true
+      devBypassAvailable: true,
+      devBypassMobileHint: ''
     })
 
     response = await request('/api/mcp-config')
@@ -233,8 +286,9 @@ async function main() {
     assert.strictEqual(response.status, 200)
     const devLogin = await response.json()
     assert.strictEqual(devLogin.authenticated, true)
-    assert.strictEqual(devLogin.user.id, 'dev-local')
+    assert.strictEqual(devLogin.user.wecomUserId, 'dev-local')
     assert.strictEqual(devLogin.user.name, '集成测试开发者')
+    const devInternalUserId = devLogin.user.id
 
     response = await request('/api/auth/me')
     const devMe = await response.json()
@@ -258,7 +312,7 @@ async function main() {
         mcpConfig.token,
         'integration-test-mcp-token-at-least-32-characters'
       ),
-      { userId: 'dev-local' }
+      { userId: devInternalUserId }
     )
     assert.strictEqual(response.headers.get('cache-control'), 'no-store')
 
@@ -271,13 +325,74 @@ async function main() {
     response = await request('/api/auth/me')
     assert.deepStrictEqual(await response.json(), {
       enabled: true,
+      wecomEnabled: true,
+      oneIdEnabled: true,
+      oneIdAutoLogin: true,
       authenticated: false,
       user: null,
-      devBypassAvailable: true
+      devBypassAvailable: true,
+      devBypassMobileHint: ''
     })
 
     response = await request('/api/files')
     assert.strictEqual(response.status, 401)
+
+    response = await request(
+      '/api/auth/oneid/login?return_to=%2Ffiles%3Ffrom%3Dworkbuddy'
+    )
+    assert.strictEqual(response.status, 302)
+    const oneIdLoginLocation = new URL(response.headers.get('location'))
+    assert.strictEqual(oneIdLoginLocation.pathname, '/oidc/authorize')
+    assert.strictEqual(
+      oneIdLoginLocation.searchParams.get('client_id'),
+      'oneid-integration-client'
+    )
+    assert.strictEqual(oneIdLoginLocation.searchParams.get('response_type'), 'code')
+    assert.strictEqual(
+      oneIdLoginLocation.searchParams.get('scope'),
+      'openid profile mobile'
+    )
+    const oneIdState = oneIdLoginLocation.searchParams.get('state')
+    assert(oneIdState)
+
+    response = await request(
+      `/api/auth/wecom/callback?code=valid-code&state=${encodeURIComponent(
+        oneIdState
+      )}`
+    )
+    assert.strictEqual(
+      new URL(response.headers.get('location')).searchParams.get('auth_error'),
+      'invalid_state'
+    )
+
+    response = await request(
+      `/api/auth/oneid/callback?code=oneid-valid-code&state=${encodeURIComponent(
+        oneIdState
+      )}`
+    )
+    assert.strictEqual(response.status, 302)
+    assert.strictEqual(
+      response.headers.get('location'),
+      `${appOrigin}/files?from=workbuddy`
+    )
+    response = await request('/api/auth/me')
+    const oneIdMe = await response.json()
+    assert.strictEqual(oneIdMe.authenticated, true)
+    assert.strictEqual(oneIdMe.user.wecomUserId, 'zhangsan')
+    assert.strictEqual(oneIdMe.user.name, '张三')
+    const mappedOneIdInternalUserId = oneIdMe.user.id
+    assert.strictEqual(
+      oneIdMe.user.avatar,
+      'https://example.test/oneid-avatar.png'
+    )
+    response = await request('/api/files')
+    assert.strictEqual(response.status, 200)
+
+    response = await request('/api/auth/logout', {
+      method: 'POST',
+      headers: { Origin: appOrigin }
+    })
+    assert.strictEqual(response.status, 204)
 
     response = await request('/api/auth/qr?return_to=%2F%3Froom%3Ddemo')
     assert.strictEqual(response.status, 200)
@@ -334,7 +449,8 @@ async function main() {
     response = await request('/api/auth/me')
     const me = await response.json()
     assert.strictEqual(me.authenticated, true)
-    assert.strictEqual(me.user.id, 'zhangsan')
+    assert.strictEqual(me.user.id, mappedOneIdInternalUserId)
+    assert.strictEqual(me.user.wecomUserId, 'zhangsan')
     assert.strictEqual(me.user.name, '张三')
     assert.strictEqual(me.user.avatar, 'https://example.test/avatar.png')
     assert.deepStrictEqual(me.user.departments, [1, 2])

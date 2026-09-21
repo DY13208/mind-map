@@ -47,7 +47,7 @@ Docker 与开发启动的完整端口列表见 [PORTS.md](./PORTS.md)。
 
 数据库和对象存储配置写在项目根目录的 `.env`（和启动脚本同一级）。可先复制 `.env.example`。COS 密钥仍用你现在的；Postgres 在 Docker 里自带，不必再另行配置。
 
-如需限制为企业成员访问，可启用企业微信扫码单点登录。完整的后台配置、环境变量和验收步骤见 [WECOM_AUTH.md](./WECOM_AUTH.md)。
+如需限制为企业成员访问，可启用企业微信扫码登录，或接入 WorkBuddy / 腾讯 OneID 单点登录。配置与验收步骤分别见 [WECOM_AUTH.md](./WECOM_AUTH.md) 和 [ONEID_AUTH.md](./ONEID_AUTH.md)。
 
 ---
 
