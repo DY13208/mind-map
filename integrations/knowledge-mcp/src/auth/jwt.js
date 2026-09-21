@@ -55,8 +55,9 @@ function verifyToken(token, {
   const now = Math.floor(Date.now() / 1000);
   if (payload.iss !== iss) { const e = new Error('bad_iss'); e.code = 'bad_iss'; throw e; }
   if (payload.aud !== aud) { const e = new Error('bad_aud'); e.code = 'bad_aud'; throw e; }
-  if (!payload.exp || now > Number(payload.exp)) { const e = new Error('expired'); e.code = 'expired'; throw e; }
-  if (!payload.iat || Number(payload.iat) > now + 60) { const e = new Error('bad_iat'); e.code = 'bad_iat'; throw e; }
+  const isStaticToken = payload.v === 2 && payload.tokenUse === 'static';
+  if (!isStaticToken && (!payload.exp || now > Number(payload.exp))) { const e = new Error('expired'); e.code = 'expired'; throw e; }
+  if (!isStaticToken && (!payload.iat || Number(payload.iat) > now + 60)) { const e = new Error('bad_iat'); e.code = 'bad_iat'; throw e; }
   if (!allowedActorTypes.includes(String(payload.actorType || ''))) {
     const e = new Error('bad_actor'); e.code = 'bad_actor'; throw e;
   }

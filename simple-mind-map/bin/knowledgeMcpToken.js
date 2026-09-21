@@ -13,19 +13,16 @@ function issueKnowledgeMcpToken(userId, env = process.env) {
   const uid = String(userId || '').trim().slice(0, 160)
   if (!secret || !uid) return ''
 
-  const ttlSec = Number(env.KNOWLEDGE_MCP_JWT_TTL_SEC || 7776000)
   const iss = String(env.KNOWLEDGE_MCP_JWT_ISS || 'openclaw-liangce').trim()
   const aud = String(env.KNOWLEDGE_MCP_JWT_AUD || 'knowledge-mcp').trim()
-  const now = Math.floor(Date.now() / 1000)
   const header = { alg: 'HS256', typ: 'JWT' }
   const payload = {
+    v: 2,
     sub: uid,
     actorType: 'user',
     iss,
     aud,
-    iat: now,
-    exp: now + (Number.isFinite(ttlSec) && ttlSec > 0 ? ttlSec : 7776000),
-    jti: crypto.randomUUID()
+    tokenUse: 'static'
   }
   const data = `${b64urlJson(header)}.${b64urlJson(payload)}`
   const sig = crypto.createHmac('sha256', secret).update(data).digest('base64url')
