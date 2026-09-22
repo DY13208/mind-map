@@ -103,6 +103,47 @@ async function main() {
   const wecomServer = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1')
     res.setHeader('Content-Type', 'application/json')
+    if (url.pathname === '/workbuddy/token' && req.method === 'POST') {
+      let raw = ''
+      req.on('data', chunk => {
+        raw += chunk
+      })
+      req.on('end', () => {
+        const form = new URLSearchParams(raw)
+        assert.strictEqual(form.get('client_id'), 'workbuddy-integration-client')
+        assert.strictEqual(
+          form.get('client_secret'),
+          'workbuddy-integration-secret'
+        )
+        assert.strictEqual(form.get('grant_type'), 'authorization_code')
+        assert.strictEqual(form.get('code'), 'workbuddy-valid-code')
+        res.end(
+          JSON.stringify({
+            access_token: 'workbuddy-access-token',
+            token_type: 'Bearer',
+            expires_in: 1800,
+            openid: 'workbuddy-zhangsan'
+          })
+        )
+      })
+      return
+    }
+    if (url.pathname === '/workbuddy/userinfo' && req.method === 'POST') {
+      assert.strictEqual(
+        req.headers.authorization,
+        'Bearer workbuddy-access-token'
+      )
+      res.end(
+        JSON.stringify({
+          sub: 'workbuddy-zhangsan',
+          name: '张三',
+          preferred_username: 'zhangsan',
+          mobile: '13800138000',
+          picture: 'https://example.test/workbuddy-avatar.png'
+        })
+      )
+      return
+    }
     if (url.pathname === '/oidc/token' && req.method === 'POST') {
       let raw = ''
       req.on('data', chunk => {
@@ -259,6 +300,15 @@ async function main() {
       ONEID_USERINFO_ENDPOINT: `http://127.0.0.1:${wecomPort}/oidc/userinfo`,
       ONEID_REDIRECT_URI: `${apiBase}/api/auth/oneid/callback`,
       ONEID_SCOPES: 'openid profile mobile',
+      WORKBUDDY_AUTH_ENABLED: 'true',
+      WORKBUDDY_AUTO_LOGIN: 'true',
+      WORKBUDDY_CLIENT_ID: 'workbuddy-integration-client',
+      WORKBUDDY_CLIENT_SECRET: 'workbuddy-integration-secret',
+      WORKBUDDY_AUTHORIZATION_ENDPOINT: `http://127.0.0.1:${wecomPort}/workbuddy/authorize`,
+      WORKBUDDY_TOKEN_ENDPOINT: `http://127.0.0.1:${wecomPort}/workbuddy/token`,
+      WORKBUDDY_USERINFO_ENDPOINT: `http://127.0.0.1:${wecomPort}/workbuddy/userinfo`,
+      WORKBUDDY_REDIRECT_URI: `${apiBase}/oauth/callback`,
+      WORKBUDDY_SCOPES: 'openid',
       TENCENT_COS_SECRET_ID: '',
       TENCENT_COS_SECRET_KEY: '',
       TENCENT_COS_BUCKET: 'unused-in-auth-test',
@@ -291,6 +341,9 @@ async function main() {
       oneIdEnabled: true,
       oneIdLoginReady: true,
       oneIdAutoLogin: false,
+      workbuddyEnabled: true,
+      workbuddyLoginReady: true,
+      workbuddyAutoLogin: true,
       authenticated: false,
       user: null,
       devBypassAvailable: true,
@@ -304,9 +357,13 @@ async function main() {
       oneIdEnabled: true,
       oneIdLoginReady: true,
       oneIdAutoLogin: false,
+      workbuddyEnabled: true,
+      workbuddyLoginReady: true,
+      workbuddyAutoLogin: true,
       loginPath: '/api/auth/login',
       wecomClientLoginPath: '/api/auth/wecom/client-login',
       oneIdLoginPath: '/api/auth/oneid/login',
+      workbuddyLoginPath: '/api/auth/workbuddy/login',
       devBypassAvailable: true,
       devBypassMobileHint: ''
     })
@@ -380,6 +437,9 @@ async function main() {
       oneIdEnabled: true,
       oneIdLoginReady: true,
       oneIdAutoLogin: false,
+      workbuddyEnabled: true,
+      workbuddyLoginReady: true,
+      workbuddyAutoLogin: true,
       authenticated: false,
       user: null,
       devBypassAvailable: true,
@@ -430,6 +490,58 @@ async function main() {
     assert.strictEqual(clientWecomMe.authenticated, true)
     assert.strictEqual(clientWecomMe.user.wecomUserId, 'zhangsan')
     const clientWecomInternalUserId = clientWecomMe.user.id
+
+    response = await request('/api/auth/logout', {
+      method: 'POST',
+      headers: { Origin: appOrigin }
+    })
+    assert.strictEqual(response.status, 204)
+
+    response = await request(
+      '/api/auth/workbuddy/login?return_to=%2Ffiles%3Ffrom%3Dworkbuddy-oauth'
+    )
+    assert.strictEqual(response.status, 302)
+    const workBuddyLoginLocation = new URL(response.headers.get('location'))
+    assert.strictEqual(workBuddyLoginLocation.pathname, '/workbuddy/authorize')
+    assert.strictEqual(
+      workBuddyLoginLocation.searchParams.get('client_id'),
+      'workbuddy-integration-client'
+    )
+    assert.strictEqual(
+      workBuddyLoginLocation.searchParams.get('redirect_uri'),
+      `${apiBase}/oauth/callback`
+    )
+    assert.strictEqual(
+      workBuddyLoginLocation.searchParams.get('response_type'),
+      'code'
+    )
+    assert.strictEqual(
+      workBuddyLoginLocation.searchParams.get('response_mode'),
+      'query'
+    )
+    assert.strictEqual(workBuddyLoginLocation.searchParams.get('scope'), 'openid')
+    const workBuddyState = workBuddyLoginLocation.searchParams.get('state')
+    assert(workBuddyState)
+
+    response = await request(
+      `/oauth/callback?code=workbuddy-valid-code&state=${encodeURIComponent(
+        workBuddyState
+      )}`
+    )
+    assert.strictEqual(response.status, 302)
+    assert.strictEqual(
+      response.headers.get('location'),
+      `${appOrigin}/files?from=workbuddy-oauth`
+    )
+    response = await request('/api/auth/me')
+    const workBuddyMe = await response.json()
+    assert.strictEqual(workBuddyMe.authenticated, true)
+    assert.strictEqual(workBuddyMe.user.wecomUserId, 'zhangsan')
+    assert.strictEqual(workBuddyMe.user.id, clientWecomInternalUserId)
+    assert.strictEqual(
+      workBuddyMe.user.avatar,
+      'https://example.test/workbuddy-avatar.png'
+    )
 
     response = await request('/api/auth/logout', {
       method: 'POST',

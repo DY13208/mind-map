@@ -3,6 +3,8 @@ import { getRuntimeConfig } from './runtimeConfig'
 
 const AUTH_TIMEOUT_MS = 30000
 export const ONEID_AUTO_ATTEMPT_KEY = 'mind_map_oneid_auto_attempted'
+export const WORKBUDDY_AUTO_ATTEMPT_KEY =
+  'mind_map_workbuddy_auto_attempted'
 export const WECOM_CLIENT_AUTO_ATTEMPT_KEY =
   'mind_map_wecom_client_auto_attempted'
 
@@ -92,6 +94,12 @@ export function getOneIdLoginUrl() {
   return url.toString()
 }
 
+export function getWorkBuddyLoginUrl() {
+  const url = new URL(getAuthApiUrl('/api/auth/workbuddy/login'))
+  url.searchParams.set('return_to', currentReturnTo())
+  return url.toString()
+}
+
 export function getWecomClientLoginUrl() {
   const url = new URL(getAuthApiUrl('/api/auth/wecom/client-login'))
   url.searchParams.set('return_to', currentReturnTo())
@@ -109,6 +117,22 @@ export function markOneIdAutoLoginAttempted() {
 export function clearOneIdAutoLoginAttempt() {
   try {
     window.sessionStorage.removeItem(ONEID_AUTO_ATTEMPT_KEY)
+  } catch (err) {
+    // sessionStorage 不可用不影响已建立的登录会话。
+  }
+}
+
+export function markWorkBuddyAutoLoginAttempted() {
+  try {
+    window.sessionStorage.setItem(WORKBUDDY_AUTO_ATTEMPT_KEY, '1')
+  } catch (err) {
+    // sessionStorage 不可用时仍允许标准 OAuth 跳转/退出。
+  }
+}
+
+export function clearWorkBuddyAutoLoginAttempt() {
+  try {
+    window.sessionStorage.removeItem(WORKBUDDY_AUTO_ATTEMPT_KEY)
   } catch (err) {
     // sessionStorage 不可用不影响已建立的登录会话。
   }
