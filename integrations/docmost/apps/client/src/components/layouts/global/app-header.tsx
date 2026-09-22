@@ -1,7 +1,6 @@
 import {
   ActionIcon,
   Badge,
-  Box,
   Group,
   Text,
   Tooltip,
@@ -84,22 +83,14 @@ export function AppHeader() {
             />
           </Tooltip>
 
-          <Link to="/home" className={classes.brand} aria-label="Docmost">
-            <Box hiddenFrom="sm" className={classes.brandIcon}>
-              <img
-                src="/icons/favicon-32x32.png"
-                alt="Docmost"
-                width={22}
-                height={22}
-              />
-            </Box>
+          <Link to="/home" className={classes.brand} aria-label="Wiki">
             <Text
               size="lg"
               fw={600}
               style={{ userSelect: "none" }}
               visibleFrom="sm"
             >
-              Docmost
+              Wiki
             </Text>
           </Link>
 
