@@ -324,6 +324,65 @@ async function getContentById(db, roomKey, id) {
   }
 }
 
+async function deleteObject(cosKey) {
+  if (!storeEnabled || !cosKey) return false
+  await cosCall('deleteObject', {
+    Bucket,
+    Region,
+    Key: cosKey
+  })
+  return true
+}
+
+// Attachments are deduplicated per room. When a node replaces its attachment,
+// only remove the shared record if no other live node references it. Deleting
+// the row also makes a late async extractor's conditional update a no-op.
+async function removeById(db, roomKey, id, options = {}) {
+  const nodeUid = String(options.nodeUid || '').trim()
+  const existing = await db.query(
+    `select * from node_attachments where room_key = $1 and id = $2 limit 1`,
+    [roomKey, id]
+  )
+  const row = existing.rows[0]
+  if (!row) return null
+
+  if (nodeUid) {
+    try {
+      const references = await db.query(
+        `select count(*)::integer as count
+         from room_nodes
+         where room_key = $1
+           and deleted_at is null
+           and uid <> $2
+           and data->>'attachmentId' = $3`,
+        [roomKey, nodeUid, id]
+      )
+      if (Number(references.rows[0] && references.rows[0].count) > 0) {
+        return { ...rowToDto(row), deleted: false, shared: true }
+      }
+    } catch (err) {
+      // Legacy rooms without room_nodes still support replacement. Their
+      // attachment linkage lives only in the room snapshot.
+      if (!err || (err.code !== '42P01' && err.code !== '42703')) throw err
+    }
+  }
+
+  const removed = await db.query(
+    `delete from node_attachments where room_key = $1 and id = $2 returning *`,
+    [roomKey, id]
+  )
+  const deleted = removed.rows[0]
+  if (!deleted) return null
+  try {
+    await deleteObject(deleted.cos_key)
+  } catch (err) {
+    // The database record is authoritative. A failed object cleanup only
+    // leaves an inaccessible orphan and must not resurrect a cancelled task.
+    console.warn('[nodeKnowledge] cos delete failed', err && err.message)
+  }
+  return { ...rowToDto(deleted), deleted: true, shared: false }
+}
+
 async function updateExtraction(db, id, patch) {
   const res = await db.query(
     `update node_attachments set
@@ -685,6 +744,7 @@ module.exports = {
   listMeta,
   getTextSlice,
   getContentById,
+  removeById,
   reextractStored,
   createFromBuffer,
   ingestUpload,

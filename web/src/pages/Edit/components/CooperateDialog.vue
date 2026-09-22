@@ -305,6 +305,7 @@ import { getCurrentUser } from '@/utils/auth'
 import { buildInviteUrl, roomFromLocation } from '@/utils/roomLocation'
 import { normalizeRoomDto, requireRoomKey } from '@/services/roomDto'
 import roomService from '@/services/roomService'
+import historyService from '@/services/historyService'
 import {
   listFiles,
   createFile as createFileApi,
@@ -2198,6 +2199,7 @@ export default {
           this.notifyHttpMutation(patchFileNode(roomKey, uid, body)),
         addNode: body =>
           this.notifyHttpMutation(addFileNode(roomKey, body)),
+        flushHistoryVersion: () => historyService.flushAutoVersion(roomKey),
         deleteNode: (uid, options) =>
           this.notifyHttpMutation(deleteFileNode(roomKey, uid, options)),
         replaceTree: (tree, extra) =>

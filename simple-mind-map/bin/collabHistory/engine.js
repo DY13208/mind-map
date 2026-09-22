@@ -41,6 +41,69 @@ function dedicatedSummary(kind) {
   return { kind, inserted: 0, updated: 0, deleted: 0, moved: 0, restored: 0 }
 }
 
+const SUMMARY_ALGORITHM_VERSION = 2
+const OPERATION_ENVELOPE_KEYS = new Set([
+  'uid',
+  'expected',
+  'baseRevision',
+  'traceId',
+  'clientSeq'
+])
+
+function nodeUpdateData(operation) {
+  const payload = (operation && operation.payload) || operation || {}
+  return payload.patch || payload.data || payload
+}
+
+function businessUpdateKeys(operation) {
+  return Object.keys(nodeUpdateData(operation)).filter(
+    key => !OPERATION_ENVELOPE_KEYS.has(key)
+  )
+}
+
+function plainRichText(value) {
+  return String(value == null ? '' : value)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p\s*>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s*/g, '\n')
+    .trim()
+}
+
+function isEquivalentRichTextNormalization(operation, inverse) {
+  const keys = businessUpdateKeys(operation)
+  if (!keys.length || !keys.every(key => key === 'text' || key === 'richText')) return false
+  const next = nodeUpdateData(operation)
+  const previous = nodeUpdateData(inverse)
+  if (next.richText !== true || previous.richText === true) return false
+  if (!Object.prototype.hasOwnProperty.call(next, 'text')) return false
+  if (!Object.prototype.hasOwnProperty.call(previous, 'text')) return false
+  return plainRichText(next.text) === plainRichText(previous.text)
+}
+
+function shouldCountNodeUpdate(operation, inverse) {
+  const keys = businessUpdateKeys(operation)
+  if (!keys.length || keys.every(key => key === 'childCount')) return false
+  return !isEquivalentRichTextNormalization(operation, inverse)
+}
+
+function batchInverseFor(child, inverseOps, index) {
+  const uid = nodeUpdateData(child).uid
+  if (uid) {
+    const matched = inverseOps.find(item => nodeUpdateData(item).uid === uid)
+    if (matched) return matched
+  }
+  return inverseOps[inverseOps.length - 1 - index] || null
+}
+
 function createHistoryEngine(options = {}) {
   const store = options.store
   const config = historyConfig(options.config || {})
@@ -371,7 +434,9 @@ function createHistoryEngine(options = {}) {
     ops.forEach(op => {
       const type = String(op.operation_type || op.type || '')
       if (type === 'node.insert') summary.inserted += 1
-      else if (type === 'node.update') summary.updated += 1
+      else if (type === 'node.update') {
+        if (shouldCountNodeUpdate(op, op.inverse_payload)) summary.updated += 1
+      }
       else if (type === 'node.delete') summary.deleted += 1
       else if (type === 'node.move' || type === 'node.reorder') summary.moved += 1
       else if (type === 'node.restore') summary.restored += 1
@@ -380,10 +445,17 @@ function createHistoryEngine(options = {}) {
       } else if (type === 'map.replace') summary.replaced = true
       else if (type === 'node.batch') {
         const inner = (op.payload && op.payload.ops) || []
-        inner.forEach(child => {
+        const inverseOps =
+          (op.inverse_payload && op.inverse_payload.payload && op.inverse_payload.payload.ops) ||
+          []
+        inner.forEach((child, index) => {
           const ct = String(child.type || '')
           if (ct === 'node.insert') summary.inserted += 1
-          else if (ct === 'node.update') summary.updated += 1
+          else if (ct === 'node.update') {
+            if (shouldCountNodeUpdate(child, batchInverseFor(child, inverseOps, index))) {
+              summary.updated += 1
+            }
+          }
           else if (ct === 'node.delete') summary.deleted += 1
           else if (ct === 'node.move') summary.moved += 1
         })
@@ -419,7 +491,10 @@ function createHistoryEngine(options = {}) {
     try {
       const prev = await tx.previousVisibleVersion(roomKey, row)
       const from = prev && prev.revision != null ? Number(prev.revision) : 0
-      const summary = await summarizeRange(roomKey, from, Number(row.revision), tx)
+      const summary = {
+        ...(await summarizeRange(roomKey, from, Number(row.revision), tx)),
+        algorithmVersion: SUMMARY_ALGORITHM_VERSION
+      }
       if (tx.updateVersionMeta) {
         await tx.updateVersionMeta(roomKey, row.id, {
           summary,
@@ -940,7 +1015,17 @@ function createHistoryEngine(options = {}) {
     await ensureHistoryBaseline(roomKey)
     const listed = await store.listVersions(roomKey, query)
     const coverage = await getHistoryCoverage(roomKey)
-    const versions = await hydrateEditors(listed.versions || [])
+    const refreshed = await Promise.all(
+      (listed.versions || []).map(row => {
+        const summary = row.summary || {}
+        const needsRefresh =
+          row.summary_status === 'pending' ||
+          (row.summary_status === 'ready' &&
+            Number(summary.algorithmVersion || 0) < SUMMARY_ALGORITHM_VERSION)
+        return needsRefresh ? persistSummary(store, roomKey, row) : row
+      })
+    )
+    const versions = await hydrateEditors(refreshed)
     return { ...listed, versions, ...coverage }
   }
 
@@ -983,8 +1068,10 @@ function createHistoryEngine(options = {}) {
     versionChecksums.set(cacheKey, checksum)
     const hit = treeCache.get(cacheKey, checksum)
     if (hit) return hit
+    const summaryIsCurrent =
+      row.summary && Number(row.summary.algorithmVersion || 0) >= SUMMARY_ALGORITHM_VERSION
     const summary =
-      row.summary_status === 'ready' || row.summary_status === 'na'
+      row.summary_status === 'na' || (row.summary_status === 'ready' && summaryIsCurrent)
         ? row.summary
         : await persistSummary(store, roomKey, row).then(item => item.summary)
     const payload = {

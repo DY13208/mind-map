@@ -62,6 +62,17 @@ export default {
       throw error
     }
   },
+  flushAutoVersion: async roomKey => {
+    try {
+      const data = await productRequest(`/api/files/${encodeURIComponent(roomKey)}/versions/auto-flush`, {
+        method: 'POST', body: JSON.stringify({})
+      })
+      return data.version ? normalizeVersionDto(data.version) : null
+    } catch (error) {
+      error.message = userMessageFromError(error)
+      throw error
+    }
+  },
   getVersion: async (roomKey, versionId) => {
     try {
       const data = await productRequest(

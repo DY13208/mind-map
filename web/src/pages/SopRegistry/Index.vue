@@ -715,6 +715,7 @@ import { getCurrentUser } from '@/utils/auth'
 import { roomFromLocation } from '@/utils/roomLocation'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
 import teamService from '@/services/teamService'
+import historyService from '@/services/historyService'
 import {
   listFiles,
   getFileSubtree,
@@ -3295,6 +3296,7 @@ export default {
             ...(body || {}),
             confirm_sop_change: true
           }),
+        flushHistoryVersion: () => historyService.flushAutoVersion(roomKey),
         deleteNode: (uid, options) =>
           deleteFileNode(roomKey, uid, {
             ...(options || {}),
