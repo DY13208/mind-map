@@ -90,8 +90,7 @@ services:
       KNOWLEDGE_MCP_JWT_ISS: ${KNOWLEDGE_MCP_JWT_ISS:-openclaw-liangce}
       KNOWLEDGE_MCP_JWT_AUD: ${KNOWLEDGE_MCP_JWT_AUD:-knowledge-mcp}
       KNOWLEDGE_MCP_JWT_TTL_SEC: ${KNOWLEDGE_MCP_JWT_TTL_SEC:-7776000}
-      # MCP upload_attachment：映射宿主机 WorkBuddy 目录
-      # MCP upload_attachment: host WorkBuddy output directory (see .env WORKBUDDY_HOST_DIR)
+      # MCP upload_attachment：宿主机 WorkBuddy 产物目录（见 .env WORKBUDDY_HOST_DIR）
       WORKBUDDY_MOUNT: /workbuddy
       WORKBUDDY_HOST_DIR: ${WORKBUDDY_HOST_DIR:-./data/workbuddy}
     extra_hosts:

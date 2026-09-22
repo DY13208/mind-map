@@ -311,3 +311,13 @@ export const getLocalConfig = () => {
   }
   return null
 }
+
+// 旧版本把左键拖动画布写进了本地配置。只迁移一次，之后仍尊重用户切换。
+export const withRightDragDefault = config => {
+  if (!config || config.rightDragDefaultApplied) return config
+  return {
+    ...config,
+    useLeftKeySelectionRightKeyDrag: true,
+    rightDragDefaultApplied: true
+  }
+}

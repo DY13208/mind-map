@@ -237,6 +237,20 @@
           </div>
           <div
             class="toolbarBtn"
+            data-testid="run-workbuddy-job"
+            :class="{ disabled: isReadonly }"
+            title="把任务派发到本机或局域网其他电脑的 WorkBuddy"
+            @click="openWorkbuddyJobDialog"
+            v-if="!isReadonly"
+          >
+            <span
+              class="icon"
+              :class="jobDispatching ? 'el-icon-loading' : 'el-icon-video-play'"
+            ></span>
+            <span class="text">运行</span>
+          </div>
+          <div
+            class="toolbarBtn"
             @click="$bus.$emit('showExport')"
             style="margin-right: 0"
           >
@@ -308,6 +322,157 @@
         </div>
       </div>
     </div>
+    <el-dialog
+      title="运行 · 派发 WorkBuddy 任务"
+      :visible.sync="jobDialogVisible"
+      width="580px"
+      custom-class="workbuddyJobDialog"
+      append-to-body
+      @closed="onJobDialogClosed"
+    >
+      <div class="jobForm" :class="{ isDark: isDark }">
+        <div class="jobField">
+          <label class="jobLabel">执行主机</label>
+          <el-select
+            v-model="jobHostKey"
+            size="small"
+            style="width: 100%"
+            placeholder="选择执行任务的电脑"
+            :loading="jobHostsLoading"
+            @change="onJobHostChange"
+          >
+            <el-option
+              v-for="item in jobHosts"
+              :key="item.key"
+              :label="item.label + (item.online ? '' : '（离线）')"
+              :value="item.key"
+              :disabled="!item.online"
+            ></el-option>
+          </el-select>
+          <p class="jobHint" v-if="jobHostsLoading">正在读取主机列表…</p>
+          <p class="jobHint warn" v-else-if="jobHostsError">
+            {{ jobHostsError }}
+          </p>
+          <p class="jobHint" v-else-if="!jobHosts.length">
+            没发现可用主机。本机请先运行 test1.py，其他电脑用
+            <code>--lan --hub</code> 登记到通讯页。
+          </p>
+        </div>
+        <div class="jobField">
+          <label class="jobLabel">目标任务（产物落在它的工作目录）</label>
+          <el-select
+            v-model="jobGateway"
+            size="small"
+            style="width: 100%"
+            placeholder="选择该主机上正在运行的 WorkBuddy 任务"
+            :loading="jobGatewaysLoading"
+          >
+          <el-option
+            v-for="item in jobGateways"
+            :key="item.url"
+            :label="jobGatewayLabel(item)"
+            :value="item.url"
+          ></el-option>
+          </el-select>
+          <p class="jobHint warn" v-if="jobGatewaysError">
+            {{ jobGatewaysError }}
+          </p>
+        </div>
+        <div class="jobField">
+          <label class="jobLabel">任务内容</label>
+          <el-input
+            v-model="jobPrompt"
+            type="textarea"
+            :rows="6"
+            placeholder="描述要在这台电脑上执行的任务"
+          ></el-input>
+        </div>
+        <div class="jobStatus" v-if="jobStatus">
+          <span :class="jobStatusType">{{ jobStatus }}</span>
+          <el-button v-if="jobPolling" type="text" size="mini" @click="stopJob"
+            >停止</el-button
+          >
+          <el-button
+            v-if="jobCurrentId && !jobPolling"
+            type="text"
+            size="mini"
+            :loading="jobFullLoading"
+            @click="loadJobFullText"
+            >{{ jobFullChars ? '重新取全文' : '取全文' }}</el-button
+          >
+          <el-button
+            v-if="jobResult"
+            type="text"
+            size="mini"
+            @click="copyJobResult"
+            >{{ jobCopied ? '已复制' : '复制' }}</el-button
+          >
+        </div>
+          <pre class="jobResult" v-if="jobResult">{{ jobResult }}</pre>
+          <p class="jobHint" v-if="jobFullChars">
+            完整回答 {{ jobFullChars }} 字{{
+              jobFullSource === 'transcript' ? '（取自执行记录）' : ''
+            }}，上方框内可滚动查看。
+          </p>
+          <div class="jobField">
+          <div class="jobHistoryHead">
+            <label class="jobLabel" style="margin: 0"
+              >运行历史（这台主机的后台任务）</label
+            >
+            <el-button
+              type="text"
+              size="mini"
+              :loading="jobHistoryLoading"
+              @click="loadJobHistory"
+              >刷新</el-button
+            >
+          </div>
+          <div class="jobHistory" v-if="jobHistory.length">
+            <div
+              class="jobHistoryRow"
+              :class="{ active: item.id === jobCurrentId }"
+              v-for="item in jobHistory"
+              :key="item.id"
+            >
+              <span class="hDot" :class="jobStateClass(item)"></span>
+              <span class="hName" :title="item.intent || ''">{{
+                item.name || '(未命名)'
+              }}</span>
+              <span class="hMeta"
+                >{{ jobStateText(item) }} · {{ jobTimeText(item) }}</span
+              >
+              <el-button type="text" size="mini" @click="viewJob(item)"
+                >看结果</el-button
+              >
+              <el-button
+                v-if="isJobRunning(item)"
+                type="text"
+                size="mini"
+                @click="stopJobById(item.id)"
+                >停止</el-button
+              >
+            </div>
+          </div>
+          <p class="jobHint" v-else>
+            {{ jobHistoryError || '这台主机的这个任务下还没有派发记录。' }}
+          </p>
+        </div>
+      </div>
+      <span slot="footer">
+        <el-button size="small" @click="refreshJobHosts">刷新主机</el-button>
+        <el-button size="small" @click="jobDialogVisible = false"
+          >关闭</el-button
+        >
+        <el-button
+          size="small"
+          type="primary"
+          :loading="jobDispatching"
+          :disabled="!jobCanDispatch"
+          @click="runWorkbuddyJob"
+          >派发</el-button
+        >
+      </span>
+    </el-dialog>
     <NodeImage></NodeImage>
     <NodeHyperlink></NodeHyperlink>
     <NodeIcon></NodeIcon>
@@ -334,6 +499,19 @@ import ToolbarNodeBtnList from './ToolbarNodeBtnList.vue'
 import { throttle, isMobile } from 'simple-mind-map/src/utils/index'
 import { stringifyJsonOffMainThread } from '@/utils/importTree'
 import { navigateToMyMaps } from '@/utils/roomLocation'
+import { getTextFromHtml } from 'simple-mind-map/src/utils'
+import {
+  resolveJobHosts,
+  listHostGateways,
+  listHostJobs,
+  stopHostJob,
+  fetchJobTranscript,
+  describeEmptyGateways,
+  dispatchWorkbuddyJob
+} from '@/utils/workbuddyJobBridge'
+
+const JOB_POLL_INTERVAL = 2500
+const JOB_RUNNING_STATES = ['working', 'busy', 'active', 'running', 'pending']
 
 // 工具栏
 let fileHandle = null
@@ -392,7 +570,32 @@ export default {
       fileToolbarCollapsed: false,
       diagCopied: false,
       displayedSaveChip: 'offline',
-      saveChipTimer: null
+      saveChipTimer: null,
+      jobDispatching: false,
+      jobDialogVisible: false,
+      jobHosts: [],
+      jobHostsLoading: false,
+      jobHostsError: '',
+      jobHostKey: '',
+      jobGateways: [],
+      jobGatewaysLoading: false,
+      jobGatewaysError: '',
+      jobGateway: '',
+      jobPrompt: '',
+      jobStatus: '',
+      jobStatusType: 'jobOk',
+      jobResult: '',
+      jobCurrentId: '',
+      jobPollTimer: null,
+      jobFullText: '',
+      jobFullChars: 0,
+      jobFullSource: '',
+      jobFullLoading: false,
+      jobCopied: false,
+      jobHistory: [],
+      jobHistoryLoading: false,
+      jobHistoryError: '',
+      activeNodes: []
     }
   },
   computed: {
@@ -514,6 +717,25 @@ export default {
         })
       }
       return res
+    },
+
+    jobSelectedHost() {
+      return this.jobHosts.find(item => item.key === this.jobHostKey) || null
+    },
+
+    jobPolling() {
+      return this.jobPollTimer != null
+    },
+
+    jobCanDispatch() {
+      const host = this.jobSelectedHost
+      return (
+        !this.jobDispatching &&
+        !!host &&
+        host.online &&
+        !!this.jobGateway &&
+        !!String(this.jobPrompt || '').trim()
+      )
     }
   },
   watch: {
@@ -541,6 +763,7 @@ export default {
       'set_canvas_toolbars_collapsed',
       this.setCanvasToolbarsCollapsed
     )
+    this.$bus.$on('node_active', this.onNodeActive)
   },
   mounted() {
     this.computeToolbarShow()
@@ -555,11 +778,13 @@ export default {
       clearTimeout(this.saveChipTimer)
       this.saveChipTimer = null
     }
+    this.stopJobPoll()
     this.$bus.$off('write_local_file', this.onWriteLocalFile)
     this.$bus.$off(
       'set_canvas_toolbars_collapsed',
       this.setCanvasToolbarsCollapsed
     )
+    this.$bus.$off('node_active', this.onNodeActive)
     window.removeEventListener('resize', this.computeToolbarShowThrottle)
     this.$bus.$off('lang_change', this.computeToolbarShowThrottle)
     window.removeEventListener('beforeunload', this.onUnload)
@@ -571,6 +796,369 @@ export default {
       this.fileToolbarCollapsed = collapsed
       if (collapsed) {
         this.popoverShow = false
+      }
+    },
+
+    onNodeActive(_node, activeNodeList) {
+      this.activeNodes = Array.isArray(activeNodeList) ? [...activeNodeList] : []
+    },
+
+    nodePlainTitle(node) {
+      if (!node || typeof node.getData !== 'function') return ''
+      return getTextFromHtml(node.getData('text') || '').trim()
+    },
+
+    buildDefaultJobPrompt() {
+      const selected = this.activeNodes[0]
+      const title = this.nodePlainTitle(selected)
+      const room = String(
+        (this.$route.query && this.$route.query.room) || ''
+      ).trim()
+      if (title) {
+        return [
+          `请基于当前脑图选中节点执行任务。`,
+          room ? `房间：${room}` : '',
+          `节点：${title}`,
+          ``,
+          `请结合该节点上下文完成分析或落地动作，并给出可执行结论。`
+        ]
+          .filter(Boolean)
+          .join('\n')
+      }
+      return room
+        ? `请分析并执行脑图房间「${room}」相关任务，给出可执行结论。`
+        : '请分析当前脑图并给出可执行结论。'
+    },
+
+    openWorkbuddyJobDialog() {
+      if (this.isReadonly) return
+      this.jobStatus = ''
+      this.jobStatusType = 'jobOk'
+      this.jobResult = ''
+      this.jobCurrentId = ''
+      this.resetJobFullText()
+      this.jobPrompt = this.buildDefaultJobPrompt()
+      this.jobDialogVisible = true
+      this.refreshJobHosts()
+    },
+
+    resetJobFullText() {
+      this.jobFullText = ''
+      this.jobFullChars = 0
+      this.jobFullSource = ''
+      this.jobCopied = false
+    },
+
+    onJobDialogClosed() {
+      this.stopJobPoll()
+    },
+
+    async refreshJobHosts() {
+      this.jobHostsLoading = true
+      this.jobHostsError = ''
+      try {
+        const res = await resolveJobHosts()
+        this.jobHosts = res.hosts || []
+        this.jobHostsError = res.error || ''
+        const keep = this.jobHosts.some(item => item.key === this.jobHostKey)
+        if (!keep) {
+          const preferred =
+            res.defaultHost ||
+            this.jobHosts.find(item => item.online) ||
+            this.jobHosts[0]
+          this.jobHostKey = preferred ? preferred.key : ''
+        }
+      } catch (err) {
+        this.jobHosts = []
+        this.jobHostsError = (err && err.message) || '读取主机列表失败'
+      } finally {
+        this.jobHostsLoading = false
+      }
+      await this.loadJobGateways()
+    },
+
+    onJobHostChange() {
+      this.jobStatus = ''
+      this.jobResult = ''
+      this.jobCurrentId = ''
+      this.resetJobFullText()
+      this.loadJobGateways()
+    },
+
+    jobGatewayLabel(item) {
+      const name = item.title || item.url || 'WorkBuddy'
+      const parts = [name]
+      if (item.cwd) parts.push(item.cwd)
+      if (item.internal) parts.push('内部主机')
+      return parts.join(' · ')
+    },
+
+    async loadJobGateways() {
+      const host = this.jobSelectedHost
+      this.jobGateways = []
+      this.jobGateway = ''
+      this.jobGatewaysError = ''
+      if (!host) return
+      this.jobGatewaysLoading = true
+      try {
+        const res = await listHostGateways(host)
+        if (!res.ok) {
+          this.jobGatewaysError = res.error || '读取失败'
+          return
+        }
+        this.jobGateways = res.gateways || []
+        if (this.jobGateways.length) {
+          this.jobGateway = this.jobGateways[0].url
+        } else {
+          this.jobGatewaysError = describeEmptyGateways(res.diag)
+        }
+      } finally {
+        this.jobGatewaysLoading = false
+      }
+      await this.loadJobHistory()
+    },
+
+    /** 那台主机上的后台任务记录（含以前派发的） */
+    async loadJobHistory() {
+      const host = this.jobSelectedHost
+      this.jobHistory = []
+      this.jobHistoryError = ''
+      if (!host) return
+      this.jobHistoryLoading = true
+      try {
+        const res = await listHostJobs({ host, gateway: this.jobGateway })
+        if (!res.ok) {
+          this.jobHistoryError = res.error || '拿不到运行记录'
+          return
+        }
+        this.jobHistory = (res.jobs || [])
+          .slice()
+          .sort(
+            (a, b) =>
+              (b.updatedAt || b.startedAt || 0) -
+              (a.updatedAt || a.startedAt || 0)
+          )
+          .slice(0, 20)
+      } finally {
+        this.jobHistoryLoading = false
+      }
+    },
+
+    isJobRunning(item) {
+      const state = item.state || item.status || ''
+      return JOB_RUNNING_STATES.indexOf(state) !== -1 || item.alive === true
+    },
+
+    jobStateText(item) {
+      const state = item.state || item.status || '?'
+      const map = {
+        done: '已完成',
+        completed: '已完成',
+        working: '执行中',
+        running: '执行中',
+        busy: '执行中',
+        active: '执行中',
+        pending: '排队中',
+        failed: '失败',
+        stopped: '已停止'
+      }
+      return map[state] || state
+    },
+
+    jobStateClass(item) {
+      const state = item.state || item.status || ''
+      return 's-' + (state || 'unknown')
+    },
+
+    jobTimeText(item) {
+      const ts = item.updatedAt || item.startedAt
+      if (!ts) return ''
+      const d = new Date(ts)
+      return `${String(d.getHours()).padStart(2, '0')}:${String(
+        d.getMinutes()
+      ).padStart(2, '0')}`
+    },
+
+    async viewJob(item) {
+      if (!item || !item.id) return
+      this.jobCurrentId = item.id
+      this.jobResult = String(item.detail || '')
+        .replace(/^result:\s*/i, '')
+        .trim()
+      this.resetJobFullText()
+      if (this.isJobRunning(item)) {
+        this.startJobPoll()
+      } else {
+        this.loadJobFullText()
+      }
+    },
+
+    async runWorkbuddyJob() {
+      if (this.jobDispatching) return
+      const host = this.jobSelectedHost
+      if (!host) {
+        this.$message.warning('请先选择执行主机')
+        return
+      }
+      const prompt = String(this.jobPrompt || '').trim()
+      if (!prompt) {
+        this.$message.warning('请填写任务内容')
+        return
+      }
+      if (!this.jobGateway) {
+        this.$message.warning('请先选择该主机上的 WorkBuddy 任务')
+        return
+      }
+      this.jobDispatching = true
+      this.jobStatus = `正在派发到 ${host.label} …`
+      this.jobStatusType = 'jobWait'
+      this.jobResult = ''
+      try {
+        const result = await dispatchWorkbuddyJob({
+          host,
+          gateway: this.jobGateway,
+          prompt,
+          name: '脑图运行'
+        })
+        if (!result.ok) {
+          const errText =
+            typeof result.error === 'string'
+              ? result.error
+              : JSON.stringify(result.error || result)
+          this.jobStatus = `派发失败：${errText}`
+          this.jobStatusType = 'jobErr'
+          this.$message.error(`派发失败：${errText}`)
+          return
+        }
+        const jobId =
+          (result.job && (result.job.id || result.job.jobId)) || ''
+        this.jobCurrentId = jobId
+        const cwd =
+          result.gatewayCwd ||
+          (this.jobGateways.find(item => item.url === this.jobGateway) || {})
+            .cwd ||
+          '对应工作区'
+        this.jobStatus = `已派发到 ${host.label}${
+          result.via === 'hub' ? '（经主服务转发）' : ''
+        }${jobId ? ` · ${jobId}` : ''}，产物落在：${cwd}`
+        this.jobStatusType = 'jobOk'
+        this.$message.success(`已派发到 ${host.label}`)
+        this.startJobPoll()
+        this.loadJobHistory()
+      } catch (err) {
+        this.jobStatus = `派发失败：${(err && err.message) || '未知错误'}`
+        this.jobStatusType = 'jobErr'
+      } finally {
+        this.jobDispatching = false
+      }
+    },
+
+    startJobPoll() {
+      this.stopJobPoll()
+      this.pollJob()
+      this.jobPollTimer = setInterval(() => this.pollJob(), JOB_POLL_INTERVAL)
+    },
+
+    stopJobPoll() {
+      if (this.jobPollTimer) {
+        clearInterval(this.jobPollTimer)
+        this.jobPollTimer = null
+      }
+    },
+
+    async pollJob() {
+      const host = this.jobSelectedHost
+      if (!host || !this.jobCurrentId) return
+      const res = await listHostJobs({ host, gateway: this.jobGateway })
+      if (!res.ok) return
+      const cur = (res.jobs || []).find(item => item.id === this.jobCurrentId)
+      if (!cur) return
+      const state = cur.state || cur.status || ''
+      const detail = String(cur.detail || '').replace(/^result:\s*/i, '')
+      const running =
+        JOB_RUNNING_STATES.indexOf(state) !== -1 || cur.alive === true
+      if (running) {
+        this.jobStatus = `执行中（${state || 'working'}）`
+        this.jobStatusType = 'jobWait'
+        this.jobResult = detail
+        return
+      }
+      this.stopJobPoll()
+      if (state === 'failed' || state === 'stopped') {
+        this.jobStatus = state === 'failed' ? '执行失败' : '已停止'
+        this.jobStatusType = 'jobErr'
+      } else {
+        this.jobStatus = `已完成（${state || 'done'}）`
+        this.jobStatusType = 'jobOk'
+      }
+      // detail 只有一行摘要，全文另外取
+      this.jobResult = detail || '没有文字结果'
+      this.loadJobFullText()
+      this.loadJobHistory()
+    },
+
+    async loadJobFullText() {
+      const host = this.jobSelectedHost
+      if (!host || !this.jobCurrentId) return
+      this.jobFullLoading = true
+      try {
+        const res = await fetchJobTranscript({
+          host,
+          jobId: this.jobCurrentId
+        })
+        if (!res.ok) return
+        this.jobFullText = res.text || ''
+        this.jobFullChars = res.chars || this.jobFullText.length
+        this.jobFullSource = res.source || ''
+        if (this.jobFullText) this.jobResult = this.jobFullText
+      } finally {
+        this.jobFullLoading = false
+      }
+    },
+
+    copyJobResult() {
+      const text = this.jobResult || this.jobFullText
+      if (!text) return
+      const done = () => {
+        this.jobCopied = true
+        setTimeout(() => {
+          this.jobCopied = false
+        }, 1500)
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard
+          .writeText(text)
+          .then(done)
+          .catch(() => {
+            this.fallbackCopyDiag(text)
+            done()
+          })
+        return
+      }
+      this.fallbackCopyDiag(text)
+      done()
+    },
+
+    async stopJob() {
+      return this.stopJobById(this.jobCurrentId)
+    },
+
+    async stopJobById(jobId) {
+      const host = this.jobSelectedHost
+      if (!host || !jobId) return
+      const res = await stopHostJob({
+        host,
+        gateway: this.jobGateway,
+        id: jobId
+      })
+      if (res.ok) {
+        if (jobId === this.jobCurrentId) {
+          this.jobStatus = '已请求停止'
+          this.jobStatusType = 'jobWait'
+        }
+        this.loadJobHistory()
+      } else {
+        this.$message.error(res.error || '停止失败')
       }
     },
 
@@ -1427,6 +2015,170 @@ export default {
   }
   .diagCopy {
     margin-top: 10px;
+  }
+}
+
+.workbuddyJobDialog {
+  .jobField {
+    margin-bottom: 14px;
+  }
+  .jobLabel {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 13px;
+    color: #606266;
+  }
+  .jobHint {
+    margin: 6px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #909399;
+    &.warn {
+      color: #e6a23c;
+    }
+  }
+  .jobStatus {
+    margin-top: 4px;
+    font-size: 13px;
+    line-height: 1.6;
+    word-break: break-all;
+  }
+  .jobOk {
+    color: #67c23a;
+  }
+  .jobWait {
+    color: #e6a23c;
+  }
+  .jobErr {
+    color: #f56c6c;
+  }
+  .jobResult {
+    max-height: 320px;
+    margin: 8px 0 0;
+    padding: 10px;
+    overflow: auto;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: #f5f7fa;
+    border-radius: 4px;
+  }
+  code {
+    padding: 1px 4px;
+    font-size: 12px;
+    background: #f5f7fa;
+    border-radius: 3px;
+  }
+
+  .jobHistoryHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .jobHistory {
+    max-height: 168px;
+    overflow: auto;
+    border: 1px solid #ebeef5;
+    border-radius: 4px;
+  }
+  .jobHistoryRow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    font-size: 12px;
+    border-top: 1px solid #ebeef5;
+    &.active {
+      background: #f5f7fa;
+    }
+    &:first-child {
+      border-top: 0;
+    }
+  }
+  .jobHistoryRow .hDot {
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #c0c4cc;
+    &.s-done,
+    &.s-completed {
+      background: #67c23a;
+    }
+    &.s-working,
+    &.s-running,
+    &.s-busy,
+    &.s-active,
+    &.s-pending {
+      background: #e6a23c;
+    }
+    &.s-failed {
+      background: #f56c6c;
+    }
+  }
+  .jobHistoryRow .hName {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #303133;
+  }
+  .jobHistoryRow .hMeta {
+    flex: 0 0 auto;
+    color: #909399;
+  }
+
+  .jobForm.isDark {
+    .jobLabel {
+      color: hsla(0, 0%, 100%, 0.9);
+    }
+    .jobHint {
+      color: hsla(0, 0%, 100%, 0.45);
+      &.warn {
+        color: #e0a94f;
+      }
+    }
+    .jobResult,
+    code {
+      color: hsla(0, 0%, 100%, 0.85);
+      background: #1e2226;
+    }
+    .jobHistory {
+      border-color: #3a3a37;
+    }
+    .jobHistoryRow {
+      border-top-color: #3a3a37;
+      &.active {
+        background: rgba(255, 255, 255, 0.06);
+      }
+    }
+    .jobHistoryRow .hName {
+      color: hsla(0, 0%, 100%, 0.85);
+    }
+    .jobHistoryRow .hMeta {
+      color: hsla(0, 0%, 100%, 0.45);
+    }
+    .jobOk {
+      color: #7bc99a;
+    }
+    .jobWait {
+      color: #e0a94f;
+    }
+    .jobErr {
+      color: #e08a8a;
+    }
+  }
+}
+
+.el-dialog__wrapper .workbuddyJobDialog .el-dialog__body {
+  padding-top: 12px;
+}
+
+.el-dialog__wrapper .workbuddyJobDialog {
+  .el-textarea__inner {
+    font-family: inherit;
   }
 }
 </style>

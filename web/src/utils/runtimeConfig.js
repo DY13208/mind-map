@@ -61,6 +61,9 @@ export function getRuntimeConfig() {
       workbuddyBase: runtime.workbuddyBase || '/wb-api',
       workbuddyKey: runtime.workbuddyKey || 'local',
       workbuddyModel: runtime.workbuddyModel || 'deepseek-v4-flash',
+      workbuddyJobBridge:
+        runtime.workbuddyJobBridge || 'http://127.0.0.1:8799',
+      workbuddyJobHub: runtime.workbuddyJobHub || '',
       openclawBase: runtime.openclawBase || '/openclaw-api',
       openclawToken: runtime.openclawToken || '',
       openclawModel: runtime.openclawModel || 'openclaw/default',
@@ -90,6 +93,9 @@ export function getRuntimeConfig() {
     workbuddyBase: runtime.workbuddyBase || '/wb-api',
     workbuddyKey: runtime.workbuddyKey || 'local',
     workbuddyModel: runtime.workbuddyModel || 'deepseek-v4-flash',
+    workbuddyJobBridge:
+      runtime.workbuddyJobBridge || 'http://127.0.0.1:8799',
+    workbuddyJobHub: runtime.workbuddyJobHub || '',
     openclawBase: runtime.openclawBase || '/openclaw-api',
     openclawToken: runtime.openclawToken || '',
     openclawModel: runtime.openclawModel || 'openclaw/default',
