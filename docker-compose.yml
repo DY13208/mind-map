@@ -10,7 +10,7 @@ services:
     volumes:
       - mind-map-pg:/var/lib/postgresql/data
     ports:
-      - "127.0.0.1:${PGPORT:-15432}:5432"
+      - "${PGBIND:-127.0.0.1}:${PGPORT:-15432}:5432"
     expose:
       - "5432"
     healthcheck:
