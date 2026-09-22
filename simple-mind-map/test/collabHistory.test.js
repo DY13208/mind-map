@@ -170,6 +170,52 @@ function mockRes() {
   )
   assert.ok(restoreReplay.tree.d)
 
+  const undoReplayRows = [
+    {
+      version: 1,
+      operation_id: 'history-update-root',
+      actor_id: 'u1',
+      operation_type: 'node.update',
+      payload: { uid: 'root', text: 'History changed' },
+      inverse_payload: {
+        type: 'node.update',
+        payload: { uid: 'root', text: 'Root' }
+      }
+    },
+    {
+      version: 2,
+      operation_id: 'history-undo-a',
+      actor_id: 'u1',
+      operation_type: 'operation.undo',
+      payload: { targetOperationId: 'history-update-root' }
+    },
+    {
+      version: 3,
+      operation_id: 'history-redo-a',
+      actor_id: 'u1',
+      operation_type: 'operation.redo',
+      payload: { targetOperationId: 'history-update-root' }
+    }
+  ]
+  const undoneReplay = await replayOperations(
+    {
+      root: { isRoot: true, data: { uid: 'root', text: 'Root' }, children: [] }
+    },
+    {},
+    undoReplayRows.slice(0, 2),
+    { requireContinuous: true, fromRevision: 0 }
+  )
+  assert.strictEqual(undoneReplay.tree.root.data.text, 'Root')
+  const redoneReplay = await replayOperations(
+    {
+      root: { isRoot: true, data: { uid: 'root', text: 'Root' }, children: [] }
+    },
+    {},
+    undoReplayRows,
+    { requireContinuous: true, fromRevision: 0 }
+  )
+  assert.strictEqual(redoneReplay.tree.root.data.text, 'History changed')
+
   const importTree = {
     data: { uid: 'root', text: 'Imported' },
     children: [{ data: { uid: 'x', text: 'X', generalization: [{ uid: 'g1', text: '概要' }] }, children: [] }]
