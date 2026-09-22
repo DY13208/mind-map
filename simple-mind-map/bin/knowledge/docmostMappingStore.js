@@ -38,6 +38,13 @@ async function ensureSchema(db) {
       on knowledge_docmost_mappings(docmost_page_id)
       where deleted_at is null and docmost_page_id is not null;
   `)
+  // Phase 2 Wiki→Mindmap sync state (additive; safe on existing DBs)
+  await db.query(`
+    alter table knowledge_docmost_mappings
+      add column if not exists last_sync_source text not null default '';
+    alter table knowledge_docmost_mappings
+      add column if not exists mindmap_hash text not null default '';
+  `)
 }
 
 function assertSlot(slot) {
@@ -56,6 +63,18 @@ async function getMapping(db, { roomId, topicKey, slot }) {
       where room_id = $1 and topic_key = $2 and slot = $3 and deleted_at is null
       limit 1`,
     [String(roomId), String(topicKey), slot]
+  )
+  return rows[0] || null
+}
+
+async function getMappingByPageId(db, pageId) {
+  const id = String(pageId || '').trim()
+  if (!id) return null
+  const { rows } = await db.query(
+    `select * from knowledge_docmost_mappings
+      where docmost_page_id = $1 and deleted_at is null
+      limit 1`,
+    [id]
   )
   return rows[0] || null
 }
@@ -80,8 +99,9 @@ async function upsertMapping(db, row) {
     `insert into knowledge_docmost_mappings (
         room_id, topic_key, slot, owner, canonical_path,
         docmost_space_id, docmost_page_id, content_hash,
-        last_synced_version, title, updated_at, deleted_at
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now(), null)
+        last_synced_version, title, last_sync_source, mindmap_hash,
+        updated_at, deleted_at
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now(), null)
       on conflict (room_id, topic_key, slot) do update set
         owner = excluded.owner,
         canonical_path = excluded.canonical_path,
@@ -90,6 +110,8 @@ async function upsertMapping(db, row) {
         content_hash = excluded.content_hash,
         last_synced_version = excluded.last_synced_version,
         title = excluded.title,
+        last_sync_source = coalesce(nullif(excluded.last_sync_source, ''), knowledge_docmost_mappings.last_sync_source),
+        mindmap_hash = coalesce(nullif(excluded.mindmap_hash, ''), knowledge_docmost_mappings.mindmap_hash),
         updated_at = now(),
         deleted_at = null
       returning *`,
@@ -103,10 +125,72 @@ async function upsertMapping(db, row) {
       row.docmostPageId || null,
       String(row.contentHash || ''),
       String(row.lastSyncedVersion || ''),
-      String(row.title || '')
+      String(row.title || ''),
+      String(row.lastSyncSource || ''),
+      String(row.mindmapHash || '')
     ]
   )
   return rows[0]
+}
+
+/**
+ * Persist Wiki↔Mindmap sync state after a successful reverse sync.
+ * content_hash = wiki markdown hash; mindmap_hash = subtree semantic hash.
+ */
+async function recordWikiMindmapSyncState(db, {
+  roomId,
+  topicKey,
+  slot,
+  wikiContentHash,
+  mindmapHash,
+  lastSyncSource = 'wiki',
+  title
+}) {
+  assertSlot(slot)
+  const { rows } = await db.query(
+    `update knowledge_docmost_mappings
+        set content_hash = $4,
+            mindmap_hash = $5,
+            last_sync_source = $6,
+            last_synced_version = $5,
+            title = coalesce(nullif($7, ''), title),
+            updated_at = now()
+      where room_id = $1 and topic_key = $2 and slot = $3 and deleted_at is null
+      returning *`,
+    [
+      String(roomId),
+      String(topicKey),
+      slot,
+      String(wikiContentHash || ''),
+      String(mindmapHash || ''),
+      String(lastSyncSource || 'wiki'),
+      title == null ? '' : String(title)
+    ]
+  )
+  return rows[0] || null
+}
+
+/**
+ * Align last_synced_version without rewriting Docmost page content.
+ * Used when content_hash already matches canonical but compile version advanced.
+ */
+async function bumpLastSyncedVersion(
+  db,
+  { roomId, topicKey, slot = 'standard', lastSyncedVersion }
+) {
+  assertSlot(slot)
+  const version = String(lastSyncedVersion || '')
+  const { rows } = await db.query(
+    `update knowledge_docmost_mappings
+        set last_synced_version = $4,
+            updated_at = now()
+      where room_id = $1 and topic_key = $2 and slot = $3
+        and deleted_at is null
+        and last_synced_version is distinct from $4
+      returning *`,
+    [String(roomId), String(topicKey), slot, version]
+  )
+  return rows[0] || null
 }
 
 async function softDeleteMapping(db, { roomId, topicKey, slot }) {
@@ -190,8 +274,11 @@ module.exports = {
   OWNERS,
   ensureSchema,
   getMapping,
+  getMappingByPageId,
   listRoomMappings,
   upsertMapping,
+  recordWikiMindmapSyncState,
+  bumpLastSyncedVersion,
   softDeleteMapping,
   softDeleteStandardByTopic,
   assertReplaceAllowed,

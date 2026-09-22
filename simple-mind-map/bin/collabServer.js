@@ -115,6 +115,7 @@ const server = http.createServer(async (request, response) => {
     if (
       pathname.startsWith('/api/') &&
       pathname !== '/api/health' &&
+      pathname !== '/api/knowledge/wiki-page-saved' &&
       !(tusRequest && request.method === 'OPTIONS')
     ) {
       const authenticated = await requireAuthenticatedRequest(request, response)
