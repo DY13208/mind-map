@@ -45,8 +45,10 @@ services:
     env_file:
       - .env
     environment:
-      PGHOST: postgres
-      PGPORT: "5432"
+      # 默认使用 Compose 内的 PostgreSQL；部署到既有数据库时可在 .env
+      # 设置 APP_PGHOST / APP_PGPORT，避免与宿主机侧 PGHOST / PGPORT 混淆。
+      PGHOST: ${APP_PGHOST:-postgres}
+      PGPORT: ${APP_PGPORT:-5432}
       PGDATABASE: ${PGDATABASE:-mind_map}
       PGUSER: ${PGUSER:-postgres}
       PGPASSWORD: ${PGPASSWORD:-mindmap}

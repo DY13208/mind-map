@@ -327,8 +327,11 @@ async function applyCommittedLive(roomKey, command, committed) {
   return committed
 }
 
-async function executeOperation(req, roomKey, command) {
-  await roomAcl.assertRoomAccess(getPool(), req, roomKey, 'edit')
+/**
+ * Trusted in-process mutation (caller already enforced ACL).
+ * Used by Wiki→Mindmap sync — same commit path as HTTP node APIs.
+ */
+async function executeTrustedOperation(roomKey, command) {
   assertRoomWritable(roomKey)
   assertRateLimit(roomKey)
   if (command.type === 'node.update' || command.type === 'node.move') {
@@ -377,6 +380,28 @@ async function executeOperation(req, roomKey, command) {
       duplicate: !!committed.duplicate,
       durationMs
     })
+    return live || committed
+  } catch (err) {
+    recordOperation({
+      mapId: roomKey,
+      version: 0,
+      ok: false,
+      duplicate: false,
+      durationMs: Date.now() - started
+    })
+    throw err
+  }
+}
+
+async function executeOperation(req, roomKey, command) {
+  await roomAcl.assertRoomAccess(getPool(), req, roomKey, 'edit')
+  const started = Date.now()
+  try {
+    const committed = await executeTrustedOperation(roomKey, command)
+    const version = Number(
+      (committed.operation && committed.operation.version) || 0
+    )
+    const durationMs = Date.now() - started
     logCollab('operation.commit', {
       mapId: roomKey,
       operationId: command.operationId,
@@ -386,7 +411,7 @@ async function executeOperation(req, roomKey, command) {
       duplicate: !!committed.duplicate,
       code: command.type
     })
-    return live
+    return committed
   } catch (err) {
     const durationMs = Date.now() - started
     recordOperation({
@@ -3020,4 +3045,4 @@ async function handleApi(req, res) {
   return false
 }
 
-module.exports = { handleApi }
+module.exports = { handleApi, executeTrustedOperation }

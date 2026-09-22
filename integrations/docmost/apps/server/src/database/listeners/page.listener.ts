@@ -38,13 +38,22 @@ export class PageListener {
     const { pageIds } = event;
 
     await this.searchQueue.add(QueueJob.PAGE_UPDATED, { pageIds });
+
+    // Fire-and-forget: never block Wiki save / search indexing on Mindmap sync.
+    void this.notifyMindMapWikiSaved(pageIds).catch((err) => {
+      this.logger.warn(
+        `Wiki→Mindmap notify failed: ${err?.message || err}`,
+      );
+    });
   }
 
   @OnEvent(EventName.PAGE_DELETED)
   async handlePageDeleted(event: PageEvent) {
     const { pageIds, workspaceId } = event;
     if (this.isTypesense()) {
-      await this.searchQueue.add(QueueJob.PAGE_DELETED, { pageIds });
+      await this.searchQueue.add(QueueJob.PAGE_DELETED, {
+        pageIds,
+      });
     }
 
     await this.aiQueue.add(QueueJob.PAGE_DELETED, { pageIds, workspaceId });
@@ -55,7 +64,9 @@ export class PageListener {
     const { pageIds, workspaceId } = event;
 
     if (this.isTypesense()) {
-      await this.searchQueue.add(QueueJob.PAGE_SOFT_DELETED, { pageIds });
+      await this.searchQueue.add(QueueJob.PAGE_SOFT_DELETED, {
+        pageIds,
+      });
     }
 
     await this.aiQueue.add(QueueJob.PAGE_SOFT_DELETED, {
@@ -68,7 +79,9 @@ export class PageListener {
   async handlePageRestored(event: PageEvent) {
     const { pageIds, workspaceId } = event;
     if (this.isTypesense()) {
-      await this.searchQueue.add(QueueJob.PAGE_RESTORED, { pageIds });
+      await this.searchQueue.add(QueueJob.PAGE_RESTORED, {
+        pageIds,
+      });
     }
 
     await this.aiQueue.add(QueueJob.PAGE_RESTORED, { pageIds, workspaceId });
@@ -76,5 +89,72 @@ export class PageListener {
 
   isTypesense(): boolean {
     return this.environmentService.getSearchDriver() === 'typesense';
+  }
+
+  /** Coalesce PAGE_UPDATED storms (collab autosave / Mindmap→Wiki) per page. */
+  private readonly pendingNotifyIds = new Set<string>();
+  private notifyTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly NOTIFY_DEBOUNCE_MS = 2000;
+
+  /**
+   * Notify mind-map that Wiki pages were saved. Async enqueue only —
+   * must not await Mindmap sync completion.
+   *
+   * Debounced: collab + Mindmap→Wiki standard writes can emit dozens of
+   * PAGE_UPDATED/sec; without coalesce this saturates Docmost CPU and
+   * makes Wiki open/navigate feel stuck.
+   */
+  private async notifyMindMapWikiSaved(pageIds: string[]): Promise<void> {
+    if (!this.environmentService.isWikiMindmapAutoSyncEnabled()) return;
+    const ids = (pageIds || []).map(String).filter(Boolean);
+    if (!ids.length) return;
+    for (const id of ids) this.pendingNotifyIds.add(id);
+    if (this.notifyTimer) return;
+    this.notifyTimer = setTimeout(() => {
+      this.notifyTimer = null;
+      const batch = Array.from(this.pendingNotifyIds);
+      this.pendingNotifyIds.clear();
+      void this.flushMindMapWikiSaved(batch).catch((err) => {
+        this.logger.warn(
+          `Wiki→Mindmap notify flush failed: ${err?.message || err}`,
+        );
+      });
+    }, PageListener.NOTIFY_DEBOUNCE_MS);
+  }
+
+  private async flushMindMapWikiSaved(pageIds: string[]): Promise<void> {
+    const base = this.environmentService.getMindMapInternalUrl();
+    const secret = this.environmentService.getWikiMindmapHookSecret();
+    if (!base || !secret) {
+      this.logger.debug(
+        'Wiki→Mindmap hook skipped (MIND_MAP_INTERNAL_URL / WIKI_MINDMAP_HOOK_SECRET unset)',
+      );
+      return;
+    }
+    if (!pageIds.length) return;
+
+    const url = `${base}/api/knowledge/wiki-page-saved`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'X-Wiki-Mindmap-Hook-Secret': secret,
+        },
+        body: JSON.stringify({ page_ids: pageIds }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        this.logger.warn(
+          `Wiki→Mindmap hook HTTP ${res.status}: ${text.slice(0, 200)}`,
+        );
+      }
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }
