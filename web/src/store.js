@@ -12,8 +12,10 @@ const store = new Vuex.Store({
       isZenMode: false, // 是否是禅模式
       // 是否开启节点富文本
       openNodeRichText: true,
-      // 鼠标行为
-      useLeftKeySelectionRightKeyDrag: false,
+      // 鼠标行为：左键框选，右键拖动画布
+      useLeftKeySelectionRightKeyDrag: true,
+      // 已把右键拖动写成默认；旧本地配置只迁移一次
+      rightDragDefaultApplied: true,
       // 是否显示滚动条
       isShowScrollbar: false,
       // 是否显示小地图
