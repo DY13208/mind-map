@@ -39,7 +39,7 @@ Docker 与开发启动的完整端口列表见 [PORTS.md](./PORTS.md)。
 
 ## 📋 环境要求
 
-- **操作系统：** Windows
+- **操作系统：** Windows、macOS
 - **容器化：** 日常运行推荐 [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - **本地开发：** [Node.js](https://nodejs.org/)（建议 18+）
 - **数据库：** PostgreSQL（Docker 中自带）
@@ -47,7 +47,7 @@ Docker 与开发启动的完整端口列表见 [PORTS.md](./PORTS.md)。
 
 数据库和对象存储配置写在项目根目录的 `.env`（和启动脚本同一级）。可先复制 `.env.example`。COS 密钥仍用你现在的；Postgres 在 Docker 里自带，不必再另行配置。
 
-如需限制为企业成员访问，可启用企业微信扫码单点登录。完整的后台配置、环境变量和验收步骤见 [WECOM_AUTH.md](./WECOM_AUTH.md)。
+如需限制为企业成员访问，可启用企业微信扫码登录，或接入 WorkBuddy / 腾讯 OneID 单点登录。配置与验收步骤分别见 [WECOM_AUTH.md](./WECOM_AUTH.md) 和 [ONEID_AUTH.md](./ONEID_AUTH.md)。
 
 ---
 
@@ -78,7 +78,8 @@ WorkBuddy 用同一个端口的 MCP：`http://主机IP:8080/mcp`，启动脚本�
 
 ## 💻 本地开发启动
 
-需要本机已装 Node.js。双击 `启动.bat`。
+需要本机已装 Node.js。Windows 双击 `启动.bat`，macOS 双击
+`启动.command`。macOS 第一次运行若被系统拦截，可在 Finder 中右键脚本并选择“打开”。
 
 ### 菜单选项
 
@@ -91,7 +92,8 @@ WorkBuddy 用同一个端口的 MCP：`http://主机IP:8080/mcp`，启动脚本�
 | `5` | Docker 一键启动（只对外开一个端口） |
 | `6` | 停止 Docker |
 
-关掉启动窗口，或双击 `停止.bat`，本地 Node 服务会一起停掉。Docker 用 `启动-Docker.bat down` 或菜单 `[6]`。
+关掉启动窗口，或双击 Windows 的 `停止.bat` / macOS 的 `停止.command`，
+本地 Node 服务会一起停掉。Docker 用 `启动-Docker.bat down` 或菜单 `[6]`。
 
 ### 命令行启动
 

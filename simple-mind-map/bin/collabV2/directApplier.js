@@ -426,7 +426,8 @@ async function applyUpdate(store, op, version) {
             uid,
             parentUid: live.parent_uid,
             parent: live.parent_uid,
-            position: live.position
+            position: live.position,
+            patch: inversePatch
           }
         }
       : {

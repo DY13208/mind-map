@@ -3,7 +3,7 @@
     <div class="productHeader">
       <div>
         <h1>MCP 接入</h1>
-        <p>复制个人配置，让支持 MCP 的 AI 客户端连接良策</p>
+        <p>复制个人配置，让支持 MCP 的 AI 客户端连接CPD</p>
       </div>
     </div>
 
@@ -25,8 +25,8 @@
           <div>
             <strong>你的个人 MCP 配置</strong>
             <p>
-              Authorization 与当前账号绑定。AI
-              通过此配置访问时，仍遵循你的脑图和团队权限。
+              一份配置同时接入导图 MCP 与 Wiki 全库读写。Authorization
+              与当前账号绑定，AI 访问时仍遵循你的脑图、团队与 Wiki 权限。
             </p>
           </div>
         </div>
@@ -35,7 +35,10 @@
           <div class="mcpSectionHead">
             <div>
               <h2 id="mcp-config-title">完整配置</h2>
-              <p>复制后粘贴到客户端的 MCP 配置文件中</p>
+              <p>
+                复制后粘贴到客户端的 MCP 配置文件中（含
+                <code>mind-map</code> 与 <code>mind-map-wiki</code>）
+              </p>
             </div>
             <el-button
               type="primary"
@@ -48,19 +51,51 @@
             >
           </div>
           <pre tabindex="0"><code>{{ configText }}</code></pre>
+          <el-alert
+            v-if="token && !wikiConfigured"
+            class="mcpWikiWarn"
+            type="warning"
+            :closable="false"
+            show-icon
+            title="Wiki MCP 未就绪"
+          >
+            未配置 KNOWLEDGE_MCP_JWT_SECRET 或签发失败。导图 MCP 仍可用；Wiki
+            工具需在 .env 配置密钥并确保 knowledge-mcp 容器运行。
+          </el-alert>
         </section>
 
         <section aria-labelledby="mcp-address-title">
           <div class="mcpSectionHead mcpSectionHead--compact">
             <div>
               <h2 id="mcp-address-title">服务地址</h2>
-              <p>地址会根据当前访问域名自动生成</p>
+              <p>导图与 Wiki 均走当前访问域名（Wiki 经 /knowledge-mcp 反代）</p>
             </div>
-            <el-button icon="el-icon-link" @click="copyText(mcpUrl, 'url')">
-              {{ copied === 'url' ? '已复制' : '复制地址' }}
-            </el-button>
           </div>
-          <div class="mcpUrl" :title="mcpUrl">{{ mcpUrl }}</div>
+          <div class="mcpUrlRow">
+            <div class="mcpUrlBlock">
+              <span>导图 MCP</span>
+              <div class="mcpUrl" :title="mcpUrl">{{ mcpUrl }}</div>
+              <el-button
+                size="mini"
+                icon="el-icon-link"
+                @click="copyText(mcpUrl, 'url')"
+              >
+                {{ copied === 'url' ? '已复制' : '复制' }}
+              </el-button>
+            </div>
+            <div class="mcpUrlBlock">
+              <span>Wiki MCP</span>
+              <div class="mcpUrl" :title="wikiMcpUrl">{{ wikiMcpUrl }}</div>
+              <el-button
+                size="mini"
+                icon="el-icon-link"
+                :disabled="!wikiConfigured"
+                @click="copyText(wikiMcpUrl, 'wikiUrl')"
+              >
+                {{ copied === 'wikiUrl' ? '已复制' : '复制' }}
+              </el-button>
+            </div>
+          </div>
         </section>
 
         <div class="mcpSecurityNote" role="note">
@@ -88,6 +123,9 @@ export default {
     return {
       mcpUrl: getRuntimeConfig().mcpUrl,
       token: '',
+      wikiToken: '',
+      wikiMcpPath: '/knowledge-mcp/mcp',
+      wikiConfigured: false,
       loading: false,
       error: '',
       copied: '',
@@ -95,21 +133,34 @@ export default {
     }
   },
   computed: {
+    wikiMcpUrl() {
+      if (typeof window === 'undefined' || !window.location) {
+        return this.wikiMcpPath
+      }
+      return `${window.location.origin}${this.wikiMcpPath}`
+    },
     configText() {
-      return JSON.stringify(
-        {
-          'mind-map': {
-            type: 'http',
-            url: this.mcpUrl,
-            disabled: false,
-            headers: {
-              Authorization: `Bearer ${this.token}`
-            }
+      const servers = {
+        'mind-map': {
+          type: 'http',
+          url: this.mcpUrl,
+          disabled: false,
+          headers: {
+            Authorization: `Bearer ${this.token}`
           }
-        },
-        null,
-        2
-      )
+        }
+      }
+      if (this.wikiConfigured && this.wikiToken) {
+        servers['mind-map-wiki'] = {
+          type: 'http',
+          url: this.wikiMcpUrl,
+          disabled: false,
+          headers: {
+            Authorization: `Bearer ${this.wikiToken}`
+          }
+        }
+      }
+      return JSON.stringify(servers, null, 2)
     }
   },
   created() {
@@ -126,9 +177,18 @@ export default {
       try {
         const data = await productService.getMcpConfig()
         this.token = String((data && data.token) || '')
+        this.wikiToken = String((data && data.wikiToken) || '')
+        this.wikiMcpPath = String(
+          (data && data.wikiMcpPath) || '/knowledge-mcp/mcp'
+        )
+        this.wikiConfigured = Boolean(
+          data && data.wikiConfigured && this.wikiToken
+        )
         if (!this.token) throw new Error('MCP 服务未返回可用密钥')
       } catch (error) {
         this.token = ''
+        this.wikiToken = ''
+        this.wikiConfigured = false
         this.error = userMessageFromError(error)
       } finally {
         this.loading = false
@@ -151,9 +211,13 @@ export default {
           if (!copied) throw new Error('copy failed')
         }
         this.copied = kind
-        this.$message.success(
-          kind === 'config' ? 'MCP 配置已复制' : 'MCP 地址已复制'
-        )
+        const msg =
+          kind === 'config'
+            ? 'MCP 配置已复制'
+            : kind === 'wikiUrl'
+            ? 'Wiki MCP 地址已复制'
+            : 'MCP 地址已复制'
+        this.$message.success(msg)
         clearTimeout(this.copyTimer)
         this.copyTimer = setTimeout(() => {
           this.copied = ''
@@ -254,6 +318,26 @@ pre {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.mcpUrlRow {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr 1fr;
+}
+.mcpUrlBlock {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  > span {
+    color: var(--ui-text-secondary);
+    font-size: 12px;
+  }
+  .el-button {
+    justify-self: start;
+  }
+}
+.mcpWikiWarn {
+  margin-top: 12px;
+}
 .mcpSecurityNote {
   display: flex;
   align-items: flex-start;
@@ -295,6 +379,9 @@ pre {
   }
   .mcpAccessContent section {
     padding: 16px;
+  }
+  .mcpUrlRow {
+    grid-template-columns: 1fr;
   }
 }
 </style>

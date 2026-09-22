@@ -46,9 +46,28 @@ async function withAclDb(fn) {
   }
 }
 
+function isSuperAdmin(userId, env = process.env) {
+  const allow = String(env.MIND_MAP_SUPER_ADMIN_IDS || '')
+    .split(/[,;\s]+/)
+    .map((item) => String(item || '').trim().replace(/^wecom:/i, ''))
+    .filter(Boolean);
+  if (!allow.length) return false;
+  const id = String(userId || '').trim().replace(/^wecom:/i, '');
+  return !!id && allow.includes(id);
+}
+
 async function listReadableRooms(userId, env = process.env) {
   return withAclDb(async () => {
     const db = getPool(env);
+    if (isSuperAdmin(userId, env)) {
+      const { rows } = await db.query(
+        `select room_key as "roomId", 'owner'::text as role
+           from rooms r
+           left join room_tombstones t on t.room_key = r.room_key
+          where t.room_key is null and r.deleted_at is null`,
+      );
+      return rows;
+    }
     const { rows } = await db.query(
       `select room_key as "roomId", role
          from room_members
@@ -61,6 +80,9 @@ async function listReadableRooms(userId, env = process.env) {
 
 async function getMembership(userId, roomId, env = process.env) {
   return withAclDb(async () => {
+    if (isSuperAdmin(userId, env)) {
+      return { roomId: String(roomId), role: 'owner' };
+    }
     const db = getPool(env);
     const { rows } = await db.query(
       `select room_key as "roomId", role
@@ -128,6 +150,7 @@ module.exports = {
   assertCanRead,
   assertCanWrite,
   assertCanRefresh,
+  isSuperAdmin,
   READ_ROLES,
   WRITE_ROLES,
   REFRESH_ROLES,

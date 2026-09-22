@@ -1,4 +1,109 @@
 const ROOM_PATH_RE = /^\/room(?:-([a-zA-Z0-9._-]+)|\/([a-zA-Z0-9._-]+))\/?$/
+const LAST_ROOM_STORAGE_KEY = 'cpd:lastRoom'
+const SESSION_STORAGE_KEY = 'SIMPLE_MIND_MAP_SESSION'
+const SOP_ROOM_STORAGE_KEY = 'assistant.sopRoom'
+const SKIP_MY_MAPS_REDIRECT_KEY = 'cpd:skipMyMapsRedirect'
+
+export function rememberLastRoom(roomKey) {
+  const key = String(roomKey || '').trim()
+  if (!key) return
+  try {
+    if (typeof localStorage === 'undefined') return
+    localStorage.setItem(LAST_ROOM_STORAGE_KEY, key)
+    // 与协作会话对齐，避免只写新 key 时旧环境读不到
+    try {
+      const raw = localStorage.getItem(SESSION_STORAGE_KEY)
+      const prev = raw ? JSON.parse(raw) : {}
+      localStorage.setItem(
+        SESSION_STORAGE_KEY,
+        JSON.stringify({
+          ...(prev && typeof prev === 'object' ? prev : {}),
+          backend: 'collab',
+          room: key,
+          at: Date.now()
+        })
+      )
+    } catch (e) {
+      /* ignore parse */
+    }
+  } catch (e) {
+    /* ignore quota / private mode */
+  }
+}
+
+function roomFromSessionStorage() {
+  try {
+    if (typeof localStorage === 'undefined') return ''
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY)
+    if (!raw) return ''
+    const session = JSON.parse(raw)
+    const room = session && session.room
+    return room ? String(room).trim() : ''
+  } catch (e) {
+    return ''
+  }
+}
+
+export function getLastRoom() {
+  try {
+    if (typeof localStorage === 'undefined') return ''
+    const fromKey = String(
+      localStorage.getItem(LAST_ROOM_STORAGE_KEY) || ''
+    ).trim()
+    if (fromKey) return fromKey
+    const fromSession = roomFromSessionStorage()
+    if (fromSession) return fromSession
+    return String(localStorage.getItem(SOP_ROOM_STORAGE_KEY) || '').trim()
+  } catch (e) {
+    return ''
+  }
+}
+
+export function clearLastRoom() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(LAST_ROOM_STORAGE_KEY)
+    }
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+/** 编辑页点返回时：本次进入 /my-maps 不跳回房间 */
+export function armSkipMyMapsRedirect() {
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem(SKIP_MY_MAPS_REDIRECT_KEY, '1')
+    }
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+export function consumeSkipMyMapsRedirect() {
+  try {
+    if (typeof sessionStorage === 'undefined') return false
+    const skip = sessionStorage.getItem(SKIP_MY_MAPS_REDIRECT_KEY) === '1'
+    if (skip) sessionStorage.removeItem(SKIP_MY_MAPS_REDIRECT_KEY)
+    return skip
+  } catch (e) {
+    return false
+  }
+}
+
+/** 仅 /my-maps 根路径（不含 /folder/...）才回跳上次房间 */
+export function isMyMapsRootPath(pathname) {
+  const raw = String(pathname || '').split('?')[0] || ''
+  const normalized = raw.replace(/\/+$/, '') || '/'
+  return normalized === '/my-maps'
+}
+
+/** 编辑页返回脑图列表（跳过「回房间」重定向） */
+export function navigateToMyMaps(router) {
+  armSkipMyMapsRedirect()
+  if (!router || typeof router.push !== 'function') return Promise.resolve()
+  return router.push({ path: '/my-maps' }).catch(() => {})
+}
 
 export function roomFromHashPath(hashOrPath) {
   const raw = String(hashOrPath || '').replace(/^#/, '')

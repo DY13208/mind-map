@@ -1,15 +1,15 @@
 # 企业微信扫码单点登录
 
-本项目使用企业微信自建应用的 OAuth 扫码登录。登录启用后，文件 API、AI 转发和协同 WebSocket 都要求有效会话；健康检查和 MCP 保持独立，MCP 继续使用 `MCP_TOKEN`。
+本项目使用企业微信自建应用 OAuth：普通浏览器显示扫码登录，企业微信客户端内使用网页授权直接复用当前成员登录态，不再要求成员再次扫码。登录启用后，文件 API、AI 转发和协同 WebSocket 都要求有效会话；健康检查和 MCP 保持独立，MCP 继续使用 `MCP_TOKEN`。
 
-企业微信官方参考：[构造扫码登录链接](https://developer.work.weixin.qq.com/document/path/91019)、[获取访问用户身份](https://developer.work.weixin.qq.com/document/path/91023)、[获取 access_token](https://developer.work.weixin.qq.com/document/path/91039)。
+企业微信官方参考：[构造扫码登录链接](https://developer.work.weixin.qq.com/document/path/91019)、[网页授权登录](https://developer.work.weixin.qq.com/document/path/91022)、[获取访问用户身份](https://developer.work.weixin.qq.com/document/path/91023)、[获取 access_token](https://developer.work.weixin.qq.com/document/path/91039)。
 
 ## 1. 企业微信管理后台
 
 1. 进入 **应用管理**，创建或选择一个自建应用，记录 `AgentId` 和 `Secret`。
 2. 将允许使用思维导图的成员或部门加入该应用的可见范围。
 3. 在该应用中开启 **企业微信授权登录**，设置授权回调域。
-4. 回调域只填域名和端口，不包含协议与路径，并且必须与实际访问地址完全一致。
+4. 为支持企业微信客户端免扫码，在应用的 **网页授权及 JS-SDK** 中设置可信域名。回调域/可信域只填域名和端口，不包含协议与路径，并且必须与实际访问地址完全一致。
 5. 在应用的 **企业可信 IP** 中加入部署服务器访问企业微信 API 时使用的固定出口 IP。注意它可能与用户访问网站的公网入口 IP 不同。
 
 例如外部回调地址是：
@@ -25,6 +25,14 @@ mindmap.example.com
 ```
 
 如果实际使用非标准端口，例如 `https://mindmap.example.com:8443`，后台也必须填写 `mindmap.example.com:8443`。不支持通配域名。
+
+当前部署使用 `http://xx.stillgroup.net:8989` 时，授权回调域和“网页授权及 JS-SDK”可信域都填写：
+
+```text
+xx.stillgroup.net:8989
+```
+
+完整回调地址仍为 `http://xx.stillgroup.net:8989/api/auth/wecom/callback`。不要把协议或 `/api/auth/wecom/callback` 路径填入域名字段。
 
 ## 2. 项目配置
 
@@ -55,7 +63,11 @@ openssl rand -hex 32
 
 `AUTH_APP_ORIGIN` 是用户实际打开网页的源，只能包含协议、域名和可选端口。Docker 网关和页面同域时可以留空，程序会从 `WECOM_REDIRECT_URI` 推导。
 
-未登录时页面会直接加载企业微信内嵌二维码，不需要先点登录按钮。二维码对应的 OAuth `state` 有效期为 10 分钟，页面会在失效前 30 秒自动生成新二维码，同时保留手动刷新入口。`WECOM_QR_STYLE_URL` 使用企业微信官方 `href` 能力覆盖二维码样式，因此必须是公网可访问的 HTTPS CSS 地址；仓库中的 `web/public/wecom-login.css` 可用于隐藏二维码下方的应用名称。
+未登录时会根据运行环境选择入口：企业微信客户端内自动进入网页授权并复用当前企业微信成员身份；普通浏览器直接加载企业微信内嵌二维码，不需要先点登录按钮。网页授权和二维码共用同一个一次性、浏览器绑定的 OAuth `state` 与同一回调处理，因此最终建立的是同一种 CPD 会话。
+
+从普通浏览器唤起企业微信桌面端时，首次回调可能进入新的 WebView Cookie 上下文。页面会在桌面端自动重建一次浏览器绑定的授权挑战并继续登录，不需要用户再次点击或扫码；自动恢复每个标签页最多一次，连续失败时停止重试并显示错误，避免重定向循环。服务端不会为了兼容跨客户端跳转而放宽 `state` 的一次性消费和浏览器绑定。
+
+二维码对应的 OAuth `state` 有效期为 10 分钟，页面会在失效前 30 秒自动生成新二维码，同时保留手动刷新入口。`WECOM_QR_STYLE_URL` 使用企业微信官方 `href` 能力覆盖二维码样式，因此必须是公网可访问的 HTTPS CSS 地址；仓库中的 `web/public/wecom-login.css` 可用于隐藏二维码下方的应用名称。
 
 本地 Node 跨端口开发时，页面通常在 `8989`，认证 API 在 `1234`，因此需要显式设置，例如：
 
@@ -90,6 +102,7 @@ curl -fsS https://mindmap.example.com/api/auth/me
 - 未登录的 `/api/auth/me` 返回 `authenticated: false`；
 - 未登录直接访问 `/api/files` 返回 HTTP 401；
 - 浏览器打开页面后直接显示企业微信登录二维码，扫码确认后回到原页面；
+- 在企业微信客户端中打开页面时直接复用当前成员身份，不再显示二维码要求再次扫描；
 - 点击“刷新二维码”会生成新的二维码；持续停留时会在二维码失效前自动更新；
 - 再次刷新不要求重复扫码，协同连接和文件列表正常；
 - 点击右上角“退出”后，文件 API 和协同连接重新变为未授权。

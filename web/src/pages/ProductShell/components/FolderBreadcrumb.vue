@@ -15,18 +15,19 @@ export default {
   props: {
     path: { type: Array, default: () => [] },
     teamId: { type: String, default: '' },
-    rootLabel: { type: String, default: '我的脑图' }
+    rootLabel: { type: String, default: '脑图' },
+    basePath: { type: String, default: '/files' }
   },
   computed: {
     rootLink() {
       return this.teamId
-        ? { path: '/files', query: { team: this.teamId } }
-        : { path: '/files' }
+        ? { path: this.basePath, query: { team: this.teamId } }
+        : { path: this.basePath }
     }
   },
   methods: {
     folderLink(id) {
-      const route = { path: '/files/folder/' + id }
+      const route = { path: `${this.basePath}/folder/` + id }
       if (this.teamId) route.query = { team: this.teamId }
       return route
     }

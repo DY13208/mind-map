@@ -453,10 +453,19 @@ function knowledgeMcpImageExists(tag) {
 }
 
 function ensureKnowledgeMcpBuilt(extraEnv) {
-  const imageTag = 'mind-map-knowledge-mcp:0.4.0'
-  const stampPath = path.join(ROOT, 'docker', '.knowledge-mcp-src.sha')
+  const imageTag = 'mind-map-knowledge-mcp:0.6.0'
+  const stampDir = path.join(ROOT, '.docker-build-stamps')
+  const stampPath = path.join(stampDir, 'knowledge-mcp.sha')
+  const legacyStampPath = path.join(ROOT, 'docker', '.knowledge-mcp-src.sha')
   const hash = hashKnowledgeMcpSources()
-  const prev = fs.existsSync(stampPath) ? fs.readFileSync(stampPath, 'utf8').trim() : ''
+  let prev = ''
+  try {
+    prev = fs.readFileSync(stampPath, 'utf8').trim()
+  } catch (_) {
+    try {
+      prev = fs.readFileSync(legacyStampPath, 'utf8').trim()
+    } catch (_) {}
+  }
   if (prev === hash && knowledgeMcpImageExists(imageTag)) {
     console.log('  knowledge-mcp image up to date (skip rebuild)')
     return false
@@ -468,8 +477,11 @@ function ensureKnowledgeMcpBuilt(extraEnv) {
     env: { ...process.env, ...(extraEnv || {}) },
     windowsHide: true
   })
-  fs.mkdirSync(path.dirname(stampPath), { recursive: true })
+  fs.mkdirSync(stampDir, { recursive: true })
   fs.writeFileSync(stampPath, hash + '\n', 'utf8')
+  try {
+    if (fs.existsSync(legacyStampPath)) fs.unlinkSync(legacyStampPath)
+  } catch (_) {}
   return true
 }
 

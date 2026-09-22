@@ -4,13 +4,14 @@ const net = require('net')
 const http = require('http')
 const path = require('path')
 const readline = require('readline')
-const { spawn, execSync } = require('child_process')
+const { spawn, execSync, execFileSync } = require('child_process')
 
 const ROOT = path.resolve(__dirname, '..')
 const WEB_DIR = path.join(ROOT, 'web')
 const LIB_DIR = path.join(ROOT, 'simple-mind-map')
 const CONFIG_FILE = path.join(WEB_DIR, 'public', 'runtime-config.js')
 const ENV_FILE = path.join(ROOT, '.env')
+const LAUNCHER_PID_FILE = path.join(ROOT, '.tmp', 'launcher.pid')
 
 function loadRootEnv() {
   if (!fs.existsSync(ENV_FILE)) return
@@ -192,10 +193,23 @@ function writeRuntimeConfig(host) {
 }
 
 function pidsOnPort(port) {
-  if (process.platform !== 'win32') {
-    return []
-  }
   try {
+    if (process.platform !== 'win32') {
+      const out = execFileSync(
+        'lsof',
+        ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'],
+        { encoding: 'utf8' }
+      )
+      return [
+        ...new Set(
+          out
+            .split(/\r?\n/)
+            .map(line => line.trim())
+            .filter(pid => /^\d+$/.test(pid))
+        )
+      ]
+    }
+
     const out = execSync('netstat -ano', { encoding: 'utf8' })
     const pids = new Set()
     out.split(/\r?\n/).forEach(line => {
@@ -217,7 +231,13 @@ function killPort(port) {
   const pids = pidsOnPort(port)
   pids.forEach(pid => {
     try {
-      execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' })
+      if (process.platform === 'win32') {
+        execFileSync('taskkill', ['/PID', pid, '/T', '/F'], {
+          stdio: 'ignore'
+        })
+      } else {
+        process.kill(Number(pid), 'SIGTERM')
+      }
     } catch (e) {
       // ignore
     }
@@ -225,7 +245,46 @@ function killPort(port) {
   return pids.length
 }
 
-function stopAll() {
+function stopSavedLauncher() {
+  if (!fs.existsSync(LAUNCHER_PID_FILE)) return false
+  const pid = Number(fs.readFileSync(LAUNCHER_PID_FILE, 'utf8').trim())
+  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return false
+  try {
+    if (process.platform === 'win32') {
+      execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+        stdio: 'ignore'
+      })
+    } else {
+      process.kill(pid, 'SIGTERM')
+    }
+    return true
+  } catch (e) {
+    return false
+  } finally {
+    try {
+      fs.unlinkSync(LAUNCHER_PID_FILE)
+    } catch (e) {
+      // ignore
+    }
+  }
+}
+
+function writeLauncherPid() {
+  fs.mkdirSync(path.dirname(LAUNCHER_PID_FILE), { recursive: true })
+  fs.writeFileSync(LAUNCHER_PID_FILE, `${process.pid}\n`, 'utf8')
+}
+
+function clearLauncherPid() {
+  try {
+    const pid = Number(fs.readFileSync(LAUNCHER_PID_FILE, 'utf8').trim())
+    if (pid === process.pid) fs.unlinkSync(LAUNCHER_PID_FILE)
+  } catch (e) {
+    // ignore
+  }
+}
+
+function stopAll({ stopLauncher = true } = {}) {
+  if (stopLauncher) stopSavedLauncher()
   stopWorkbuddyApi({ root: ROOT })
   ;[WEB_PORT, COLLAB_PORT, AI_PORT, MCP_PORT, WORKBUDDY_PORT].forEach(port => {
     const n = killPort(port)
@@ -285,19 +344,29 @@ async function ensurePostgres() {
 function ensureDeps() {
   const targets = [
     { dir: WEB_DIR, name: 'web' },
-    {
-      dir: LIB_DIR,
-      name: 'simple-mind-map',
-      extra: ['pg', 'cos-nodejs-sdk-v5']
-    }
+    { dir: LIB_DIR, name: 'simple-mind-map' }
   ]
   targets.forEach(item => {
-    const hasModules = fs.existsSync(path.join(item.dir, 'node_modules'))
-    const missingExtra = (item.extra || []).some(
-      name => !fs.existsSync(path.join(item.dir, 'node_modules', name))
+    const packageJson = JSON.parse(
+      fs.readFileSync(path.join(item.dir, 'package.json'), 'utf8')
     )
-    if (hasModules && !missingExtra) return
-    log(paint(c.yellow, `  正在安装 ${item.name} 依赖...`))
+    const dependencies = {
+      ...(packageJson.dependencies || {}),
+      ...(packageJson.devDependencies || {})
+    }
+    const missing = Object.keys(dependencies).filter(
+      name =>
+        !fs.existsSync(
+          path.join(item.dir, 'node_modules', ...name.split('/'), 'package.json')
+        )
+    )
+    if (!missing.length) return
+    log(
+      paint(
+        c.yellow,
+        `  ${item.name} 缺少 ${missing.length} 个依赖，正在安装...`
+      )
+    )
     execSync('npm install', { cwd: item.dir, stdio: 'inherit' })
   })
 }
@@ -344,6 +413,7 @@ function startProcess(
       stableTimer = setTimeout(() => {
         restarts = 0
       }, 30000)
+      stableTimer.unref()
     }
     child.on('exit', code => {
       const idx = children.indexOf(child)
@@ -485,6 +555,7 @@ async function startAll({ pickIp = false } = {}) {
   log(paint(c.yellow, '  正在停止旧进程...'))
   stopAll()
   await new Promise(resolve => setTimeout(resolve, 800))
+  writeLauncherPid()
 
   const dbOk = await ensurePostgres()
   if (!dbOk) {
@@ -577,7 +648,8 @@ async function startAll({ pickIp = false } = {}) {
           // ignore
         }
       })
-      stopAll()
+      stopAll({ stopLauncher: false })
+      clearLauncherPid()
       resolve()
     }
     process.on('SIGINT', quit)

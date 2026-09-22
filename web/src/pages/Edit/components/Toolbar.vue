@@ -215,37 +215,25 @@
           </div>
           <div
             class="toolbarBtn"
-            data-testid="back-to-files"
-            title="返回首页"
+            data-testid="back-to-my-maps"
+            title="返回脑图"
             v-if="$route.query.room"
-            @click="goToFiles"
+            @click="goToMyMaps"
           >
             <span class="icon el-icon-back"></span>
-            <span class="text">返回首页</span>
+            <span class="text">脑图</span>
           </div>
           <div
             class="toolbarBtn"
-            data-testid="sop-registry"
-            @click="openSopRegistry"
-            v-if="!isReadonly"
+            :class="{ disabled: refreshing }"
+            data-testid="refresh"
+            @click="refreshPage"
           >
-            <span class="icon iconfont icongaikuozonglan"></span>
-            <span class="text">{{ $t('toolbar.sopRegistry') }}</span>
-          </div>
-          <div
-            class="toolbarBtn sopRunBtn"
-            data-testid="run-selected-sop"
-            :class="{ disabled: !canRunSop }"
-            :title="
-              canRunSop
-                ? `运行：${runSopTitle}`
-                : '请先选择 D：标题 节点'
-            "
-            @click="runSelectedSop"
-            v-if="!isReadonly"
-          >
-            <span class="icon el-icon-video-play"></span>
-            <span class="text">运行</span>
+            <span
+              class="icon"
+              :class="refreshing ? 'el-icon-loading' : 'el-icon-refresh'"
+            ></span>
+            <span class="text">{{ $t('toolbar.refresh') }}</span>
           </div>
           <div
             class="toolbarBtn"
@@ -345,7 +333,7 @@ import { getData } from '../../../api'
 import ToolbarNodeBtnList from './ToolbarNodeBtnList.vue'
 import { throttle, isMobile } from 'simple-mind-map/src/utils/index'
 import { stringifyJsonOffMainThread } from '@/utils/importTree'
-import { roomFromLocation } from '@/utils/roomLocation'
+import { navigateToMyMaps } from '@/utils/roomLocation'
 
 // 工具栏
 let fileHandle = null
@@ -382,20 +370,6 @@ export default {
     Import,
     ToolbarNodeBtnList
   },
-  props: {
-    returnFolderId: {
-      type: String,
-      default: ''
-    },
-    canRunSop: {
-      type: Boolean,
-      default: false
-    },
-    runSopTitle: {
-      type: String,
-      default: ''
-    }
-  },
   data() {
     return {
       isMobile: isMobile(),
@@ -412,6 +386,8 @@ export default {
       rootDirName: '',
       fileTreeExpand: true,
       waitingWriteToLocalFile: false,
+      pendingLocalFileContent: null,
+      refreshing: false,
       nodeToolbarCollapsed: false,
       fileToolbarCollapsed: false,
       diagCopied: false,
@@ -598,22 +574,6 @@ export default {
       }
     },
 
-    openSopRegistry() {
-      const room = roomFromLocation(this.$route) || ''
-      this.$router.push({
-        path: '/sop',
-        query: room ? { room } : {}
-      })
-    },
-
-    runSelectedSop() {
-      if (!this.canRunSop) {
-        this.$message.warning('请先选择 D：标题 节点')
-        return
-      }
-      this.$emit('run-sop')
-    },
-
     syncDisplayedSaveChip(next) {
       const chip = next || 'offline'
       if (this.saveChipTimer) {
@@ -721,6 +681,7 @@ export default {
 
     // 监听本地文件读写
     onWriteLocalFile(content) {
+      this.pendingLocalFileContent = content
       clearTimeout(this.timer)
       if (fileHandle && this.isHandleLocalFile) {
         this.waitingWriteToLocalFile = true
@@ -782,13 +743,51 @@ export default {
       }
     },
 
-    // 返回 Product Shell 文件列表
-    goToFiles() {
-      const folderId = String(this.returnFolderId || '').trim()
-      const destination = folderId
-        ? { name: 'FolderFiles', params: { id: folderId } }
-        : { name: 'Files' }
-      this.$router.push(destination).catch(() => {})
+    goToMyMaps() {
+      navigateToMyMaps(this.$router)
+    },
+
+    prepareReload() {
+      return new Promise(resolve => {
+        let settled = false
+        const finish = result => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          resolve(result || { ok: true })
+        }
+        const timer = setTimeout(() => finish({ ok: true, timeout: true }), 5000)
+        this.$bus.$emit('prepare_reload', finish)
+      })
+    },
+
+    async flushLocalFileNow() {
+      if (!fileHandle || !this.isHandleLocalFile) return
+      clearTimeout(this.timer)
+      this.timer = null
+      if (this.pendingLocalFileContent) {
+        await this.writeLocalFile(this.pendingLocalFileContent)
+      }
+    },
+
+    async refreshPage() {
+      if (this.refreshing) return
+      this.refreshing = true
+      try {
+        if (this.collabSaveChip === 'saving' || this.collabPendingCount > 0) {
+          this.$message.info(this.$t('toolbar.refreshFlushingTip'))
+        }
+        await this.prepareReload()
+        await this.flushLocalFileNow()
+        if (this.waitingWriteToLocalFile) {
+          this.$message.warning(this.$t('toolbar.refreshSavingTip'))
+          this.refreshing = false
+          return
+        }
+      } catch (err) {
+        console.warn('[toolbar] prepare reload failed', err)
+      }
+      window.location.reload()
     },
 
     // 扫描本地文件夹
@@ -1261,10 +1260,6 @@ export default {
         color: #bcbcbc;
         cursor: not-allowed;
         pointer-events: none;
-      }
-
-      &.sopRunBtn.disabled {
-        pointer-events: auto;
       }
 
       .icon {

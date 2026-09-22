@@ -24,4 +24,20 @@ workbuddy_to_api/
 
 # local docker rebuild fingerprints
 .docker-build-stamps/
+docker/.knowledge-mcp-src.sha
 
+.tmp/
+**/__pycache__/
+*.pyc
+
+output/*.html
+output/*.xlsx
+output/*.csv
+output/*.json
+
+.backup-tls/
+certs/
+output/*.py
+
+# MCP WorkBuddy host directory when WORKBUDDY_HOST_DIR is configured.
+/data/workbuddy/

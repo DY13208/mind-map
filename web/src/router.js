@@ -1,6 +1,12 @@
 import Vue from 'vue'
 import VueRouter from 'vue-router'
-import { migrateLegacyHashUrl } from './utils/roomLocation'
+import {
+  consumeSkipMyMapsRedirect,
+  getLastRoom,
+  isMyMapsRootPath,
+  migrateLegacyHashUrl,
+  rememberLastRoom
+} from './utils/roomLocation'
 
 Vue.use(VueRouter)
 
@@ -87,6 +93,34 @@ const routes = [
     ]
   },
   {
+    path: '/my-maps',
+    component: () =>
+      import(
+        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'
+      ),
+    meta: { hideSidebar: true },
+    children: [
+      {
+        path: '',
+        name: 'MyMaps',
+        component: () =>
+          import(
+            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'
+          ),
+        props: { mode: 'files' }
+      },
+      {
+        path: 'folder/:id',
+        name: 'MyMapsFolder',
+        component: () =>
+          import(
+            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'
+          ),
+        props: { mode: 'folder' }
+      }
+    ]
+  },
+  {
     path: '/spaces',
     component: () =>
       import(
@@ -155,6 +189,7 @@ const routes = [
         next({ path: '/files', replace: true })
         return
       }
+      rememberLastRoom(room)
       next()
     }
   },
@@ -231,6 +266,32 @@ const routes = [
 const router = new VueRouter({
   mode: 'history',
   routes
+})
+
+// 仅 /my-maps 根路径回跳最近房间；/my-maps/folder/... 保持文件夹浏览
+router.beforeEach((to, from, next) => {
+  if (!isMyMapsRootPath(to.path)) {
+    next()
+    return
+  }
+  if (consumeSkipMyMapsRedirect()) {
+    next()
+    return
+  }
+  const last = getLastRoom()
+  if (!last) {
+    next()
+    return
+  }
+  if (to.query && to.query.room === last) {
+    next()
+    return
+  }
+  next({
+    path: '/',
+    query: { ...to.query, room: last },
+    replace: true
+  })
 })
 
 export default router

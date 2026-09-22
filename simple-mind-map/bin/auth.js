@@ -10,6 +10,8 @@ const OAUTH_STATE_TTL_SECONDS = 10 * 60
 const TOKEN_REFRESH_MARGIN_SECONDS = 5 * 60
 const WECOM_TOKEN_ERROR_CODES = new Set([40014, 42001])
 const WECOM_IP_DENIED_ERROR_CODE = 60020
+const OAUTH_PROVIDER_WECOM = 'wecom'
+const OAUTH_PROVIDER_ONEID = 'oneid'
 
 let authPool = null
 let authInitialization = null
@@ -76,7 +78,7 @@ function issueYiranIdentityAssertion(user, env = process.env) {
 
 function required(env, key) {
   const value = String(env[key] || '').trim()
-  if (!value) throw new Error(`启用企业微信登录时必须配置 ${key}`)
+  if (!value) throw new Error(`启用登录时必须配置 ${key}`)
   return value
 }
 
@@ -122,6 +124,26 @@ function optionalHttpsUrl(value, key) {
   return url.toString()
 }
 
+function oauthEndpoint(value, key) {
+  const input = String(value || '').trim()
+  let url
+  try {
+    url = new URL(input)
+  } catch (err) {
+    throw new Error(`${key} 必须是完整的 http(s) 地址`)
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error(`${key} 仅支持 http 或 https`)
+  }
+  if (url.protocol !== 'https:' && !isPrivateOrLocalHost(url.hostname)) {
+    throw new Error(`${key} 在非本机环境必须使用 HTTPS`)
+  }
+  if (url.username || url.password || url.hash) {
+    throw new Error(`${key} 不能包含账号、密码或锚点`)
+  }
+  return url.toString()
+}
+
 function isPrivateOrLocalHost(value) {
   const hostname = String(value || '')
     .trim()
@@ -156,48 +178,100 @@ function isDevBypassAllowed(req) {
 }
 
 function readConfig(env = process.env) {
-  const enabled = enabledValue(env.WECOM_AUTH_ENABLED)
+  const wecomEnabled = enabledValue(env.WECOM_AUTH_ENABLED)
+  const oneIdEnabled = enabledValue(env.ONEID_AUTH_ENABLED)
+  const enabled = wecomEnabled || oneIdEnabled
   if (!enabled) return { enabled: false }
 
-  const corpId = required(env, 'WECOM_CORP_ID')
-  const agentId = required(env, 'WECOM_AGENT_ID')
-  const secret = required(env, 'WECOM_SECRET')
+  let corpId = ''
+  let agentId = ''
+  let secret = ''
+  let callback = null
+  if (wecomEnabled) {
+    corpId = required(env, 'WECOM_CORP_ID')
+    agentId = required(env, 'WECOM_AGENT_ID')
+    secret = required(env, 'WECOM_SECRET')
+    const redirectUri = required(env, 'WECOM_REDIRECT_URI')
+
+    if (!/^ww[a-zA-Z0-9_-]+$/.test(corpId)) {
+      throw new Error('WECOM_CORP_ID 格式不正确，应为企业微信 CorpID')
+    }
+    if (!/^\d+$/.test(agentId)) {
+      throw new Error('WECOM_AGENT_ID 必须是数字')
+    }
+    try {
+      callback = new URL(redirectUri)
+    } catch (err) {
+      throw new Error('WECOM_REDIRECT_URI 必须是完整的 http(s) 地址')
+    }
+    if (!['http:', 'https:'].includes(callback.protocol)) {
+      throw new Error('WECOM_REDIRECT_URI 仅支持 http 或 https')
+    }
+    if (callback.pathname !== '/api/auth/wecom/callback') {
+      throw new Error('WECOM_REDIRECT_URI 路径必须是 /api/auth/wecom/callback')
+    }
+    if (callback.search || callback.hash) {
+      throw new Error('WECOM_REDIRECT_URI 不能包含查询参数或锚点')
+    }
+  }
+
+  let oneId = null
+  if (oneIdEnabled) {
+    const redirectUri = oauthEndpoint(
+      required(env, 'ONEID_REDIRECT_URI'),
+      'ONEID_REDIRECT_URI'
+    )
+    const redirect = new URL(redirectUri)
+    if (redirect.pathname !== '/api/auth/oneid/callback') {
+      throw new Error('ONEID_REDIRECT_URI 路径必须是 /api/auth/oneid/callback')
+    }
+    if (redirect.search || redirect.hash) {
+      throw new Error('ONEID_REDIRECT_URI 不能包含查询参数或锚点')
+    }
+    const issuer = oauthEndpoint(required(env, 'ONEID_ISSUER'), 'ONEID_ISSUER')
+      .replace(/\/$/, '')
+    const scopes = String(env.ONEID_SCOPES || 'openid profile mobile')
+      .split(/\s+/)
+      .map(value => value.trim())
+      .filter(Boolean)
+    if (!scopes.includes('openid')) scopes.unshift('openid')
+    oneId = {
+      clientId: required(env, 'ONEID_CLIENT_ID'),
+      clientSecret: required(env, 'ONEID_CLIENT_SECRET'),
+      issuer,
+      authorizationEndpoint: oauthEndpoint(
+        required(env, 'ONEID_AUTHORIZATION_ENDPOINT'),
+        'ONEID_AUTHORIZATION_ENDPOINT'
+      ),
+      tokenEndpoint: oauthEndpoint(
+        required(env, 'ONEID_TOKEN_ENDPOINT'),
+        'ONEID_TOKEN_ENDPOINT'
+      ),
+      userinfoEndpoint: oauthEndpoint(
+        required(env, 'ONEID_USERINFO_ENDPOINT'),
+        'ONEID_USERINFO_ENDPOINT'
+      ),
+      redirectUri: redirect.toString(),
+      scopes: Array.from(new Set(scopes)),
+      loginReady: enabledValue(env.ONEID_LOGIN_READY),
+      autoLogin: enabledValue(env.ONEID_AUTO_LOGIN)
+    }
+  }
+
   const sessionSecret = required(env, 'AUTH_SESSION_SECRET')
   const mcpToken = required(env, 'MCP_TOKEN')
-  const redirectUri = required(env, 'WECOM_REDIRECT_URI')
-
-  if (!/^ww[a-zA-Z0-9_-]+$/.test(corpId)) {
-    throw new Error('WECOM_CORP_ID 格式不正确，应为企业微信 CorpID')
-  }
-  if (!/^\d+$/.test(agentId)) {
-    throw new Error('WECOM_AGENT_ID 必须是数字')
-  }
   if (sessionSecret.length < 32) {
     throw new Error('AUTH_SESSION_SECRET 至少需要 32 个字符')
   }
   if (mcpToken.length < 32) {
-    throw new Error('启用企业微信登录时 MCP_TOKEN 至少需要 32 个字符')
-  }
-
-  let callback
-  try {
-    callback = new URL(redirectUri)
-  } catch (err) {
-    throw new Error('WECOM_REDIRECT_URI 必须是完整的 http(s) 地址')
-  }
-  if (!['http:', 'https:'].includes(callback.protocol)) {
-    throw new Error('WECOM_REDIRECT_URI 仅支持 http 或 https')
-  }
-  if (callback.pathname !== '/api/auth/wecom/callback') {
-    throw new Error('WECOM_REDIRECT_URI 路径必须是 /api/auth/wecom/callback')
-  }
-  if (callback.search || callback.hash) {
-    throw new Error('WECOM_REDIRECT_URI 不能包含查询参数或锚点')
+    throw new Error('启用登录时 MCP_TOKEN 至少需要 32 个字符')
   }
 
   const appOrigin = env.AUTH_APP_ORIGIN
     ? parseOrigin(env.AUTH_APP_ORIGIN, 'AUTH_APP_ORIGIN')
-    : callback.origin
+    : oneId
+      ? new URL(oneId.redirectUri).origin
+      : callback.origin
   const allowedOrigins = String(env.AUTH_ALLOWED_ORIGINS || '')
     .split(',')
     .map(value => value.trim())
@@ -253,12 +327,15 @@ function readConfig(env = process.env) {
 
   return {
     enabled: true,
+    wecomEnabled,
+    oneIdEnabled,
+    oneId,
     corpId,
     agentId,
     secret,
     sessionSecret,
     mcpToken,
-    redirectUri: callback.toString(),
+    redirectUri: callback ? callback.toString() : '',
     appOrigin,
     allowedOrigins,
     qrStyleUrl,
@@ -362,11 +439,16 @@ async function initAuth() {
       create table if not exists auth_oauth_states (
         nonce_hash text primary key,
         browser_hash text not null,
+        provider text not null default 'wecom',
         return_to text not null default '/',
         created_at timestamptz not null default now(),
         expires_at timestamptz not null
       )
     `)
+    await authPool.query(
+      `alter table auth_oauth_states
+       add column if not exists provider text not null default 'wecom'`
+    )
     await authPool.query(`
       create index if not exists auth_oauth_states_expires_at_idx
       on auth_oauth_states(expires_at)
@@ -637,6 +719,9 @@ function appRedirectUrl(returnTo = '/', error = '') {
 }
 
 function buildWecomLoginUrl(state, options = {}) {
+  if (!config.wecomEnabled) {
+    throw new AuthError('wecom_disabled', '企业微信登录未启用', 404)
+  }
   const url = new URL('/wwopen/sso/qrConnect', config.wecomSsoBase)
   url.searchParams.set('appid', config.corpId)
   url.searchParams.set('agentid', config.agentId)
@@ -645,6 +730,48 @@ function buildWecomLoginUrl(state, options = {}) {
   url.searchParams.set('lang', 'zh')
   if (options.embedded) url.searchParams.set('login_type', 'jssdk')
   if (config.qrStyleUrl) url.searchParams.set('href', config.qrStyleUrl)
+  return url.toString()
+}
+
+// 企业微信客户端内使用网页授权，可直接复用客户端登录态获取成员 UserId，
+// 与 PC 浏览器的 qrConnect 扫码登录是两条不同的官方流程。
+function buildWecomClientLoginUrl(state) {
+  if (!config.wecomEnabled) {
+    throw new AuthError('wecom_disabled', '企业微信登录未启用', 404)
+  }
+  const url = new URL('https://open.weixin.qq.com/connect/oauth2/authorize')
+  url.searchParams.set('appid', config.corpId)
+  url.searchParams.set('redirect_uri', config.redirectUri)
+  url.searchParams.set('response_type', 'code')
+  url.searchParams.set('scope', 'snsapi_base')
+  url.searchParams.set('state', state)
+  url.searchParams.set('agentid', config.agentId)
+  url.hash = 'wechat_redirect'
+  return url.toString()
+}
+
+function shouldAutoLoginOneId() {
+  // 企业微信和 OneID 同时开启时，以稳定可用的企业微信登录为默认入口。
+  // OneID 仍可手动选择，但绝不能因租户尚未配置登录方式而劫持整个登录页。
+  return Boolean(
+    config.oneIdEnabled &&
+      config.oneId &&
+      config.oneId.loginReady &&
+      config.oneId.autoLogin &&
+      !config.wecomEnabled
+  )
+}
+
+function buildOneIdLoginUrl(state) {
+  if (!config.oneIdEnabled || !config.oneId) {
+    throw new AuthError('oneid_disabled', 'OneID 单点登录未启用', 404)
+  }
+  const url = new URL(config.oneId.authorizationEndpoint)
+  url.searchParams.set('client_id', config.oneId.clientId)
+  url.searchParams.set('response_type', 'code')
+  url.searchParams.set('redirect_uri', config.oneId.redirectUri)
+  url.searchParams.set('scope', config.oneId.scopes.join(' '))
+  url.searchParams.set('state', state)
   return url.toString()
 }
 
@@ -734,6 +861,9 @@ function createWecomResponseError(data, fallbackCode, fallbackMessage) {
 }
 
 async function getAccessToken(forceRefresh = false) {
+  if (!config.wecomEnabled) {
+    throw new AuthError('wecom_disabled', '企业微信登录未启用', 503)
+  }
   const now = Date.now()
   if (!forceRefresh && accessTokenCache && accessTokenCache.expiresAt > now) {
     return accessTokenCache.value
@@ -944,8 +1074,196 @@ async function exchangeWecomCode(code) {
   }
 }
 
+async function fetchOneIdJson(url, options = {}) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 8000)
+  try {
+    const response = await fetch(url, {
+      method: options.method || 'GET',
+      headers: {
+        Accept: 'application/json',
+        ...(options.headers || {})
+      },
+      body: options.body,
+      signal: controller.signal
+    })
+    const text = await response.text()
+    let data = {}
+    try {
+      data = text ? JSON.parse(text) : {}
+    } catch (err) {
+      throw new AuthError(
+        'oneid_invalid_response',
+        'OneID 返回了无效响应',
+        502
+      )
+    }
+    if (!response.ok) {
+      throw new AuthError(
+        'oneid_http_error',
+        `OneID 接口返回 HTTP ${response.status}`,
+        502
+      )
+    }
+    return data
+  } catch (err) {
+    if (err && err.name === 'AbortError') {
+      throw new AuthError('oneid_timeout', 'OneID 接口请求超时', 504)
+    }
+    if (err instanceof AuthError) throw err
+    throw new AuthError('oneid_unavailable', 'OneID 服务暂不可用', 502)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function oneIdClaims(data) {
+  if (!data || typeof data !== 'object') return {}
+  if (data.data && data.data.user && typeof data.data.user === 'object') {
+    return data.data.user
+  }
+  if (data.data && typeof data.data === 'object') return data.data
+  return data
+}
+
+function safeProfileImage(value) {
+  const input = String(value || '').trim()
+  return /^https?:\/\//i.test(input) ? input.slice(0, 1000) : ''
+}
+
+async function resolveOneIdWecomIdentity(claims) {
+  if (!config.wecomEnabled) return null
+  const mobile = normalizeMobileForWecom(
+    claims.mobile || claims.phone_number || claims.phoneNumber
+  )
+  if (mobile) {
+    try {
+      const resolved = await resolveDevBypassIdentityByMobile(mobile)
+      if (resolved && resolved.id) {
+        return {
+          id: resolved.id,
+          name: resolved.name || '',
+          avatar: resolved.avatar || '',
+          position: '',
+          departments: []
+        }
+      }
+    } catch (err) {
+      console.warn('[auth] OneID mobile could not be mapped to WeCom userid')
+    }
+  }
+
+  const username = String(
+    claims.preferred_username || claims.username || ''
+  ).trim()
+  if (!/^[a-zA-Z0-9_.@-]{1,64}$/.test(username)) return null
+  try {
+    let token = await getAccessToken()
+    let profile = await getProfileResponse(username, token)
+    if (WECOM_TOKEN_ERROR_CODES.has(Number(profile && profile.errcode))) {
+      token = await getAccessToken(true)
+      profile = await getProfileResponse(username, token)
+    }
+    if (!successfulWecomResponse(profile)) return null
+    const userId = String(profile.userid || username).trim()
+    if (!userId || userId.length > 255) return null
+    return {
+      id: userId,
+      name: String(profile.name || '').slice(0, 100),
+      avatar: wecomAvatarUrl(profile),
+      position: String(profile.position || '').slice(0, 100),
+      departments: Array.isArray(profile.department)
+        ? profile.department.slice(0, 100)
+        : []
+    }
+  } catch (err) {
+    console.warn('[auth] OneID username could not be mapped to WeCom userid')
+    return null
+  }
+}
+
+async function exchangeOneIdCode(code) {
+  if (!config.oneIdEnabled || !config.oneId) {
+    throw new AuthError('oneid_disabled', 'OneID 单点登录未启用', 404)
+  }
+  const authCode = String(code || '')
+  if (!authCode || authCode.length > 2048) {
+    throw new AuthError('oneid_missing_code', 'OneID 未返回有效授权码', 400)
+  }
+
+  const form = new URLSearchParams({
+    client_id: config.oneId.clientId,
+    client_secret: config.oneId.clientSecret,
+    grant_type: 'authorization_code',
+    code: authCode,
+    redirect_uri: config.oneId.redirectUri
+  })
+  const rawToken = await fetchOneIdJson(config.oneId.tokenEndpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form.toString()
+  })
+  const token = rawToken && rawToken.data && typeof rawToken.data === 'object'
+    ? rawToken.data
+    : rawToken
+  if (!token || token.error || !token.access_token) {
+    throw new AuthError(
+      'oneid_token_failed',
+      'OneID 授权码交换失败',
+      502
+    )
+  }
+
+  const rawProfile = await fetchOneIdJson(config.oneId.userinfoEndpoint, {
+    headers: { Authorization: `Bearer ${token.access_token}` }
+  })
+  const claims = oneIdClaims(rawProfile)
+  const subject = String(
+    claims.sub || claims.union_id || claims.unionId || ''
+  ).trim()
+  if (!subject || subject.length > 512) {
+    throw new AuthError(
+      'oneid_identity_failed',
+      'OneID 未返回稳定的用户身份',
+      502
+    )
+  }
+
+  const mapped = await resolveOneIdWecomIdentity(claims)
+  if (config.wecomEnabled && !mapped) {
+    throw new AuthError(
+      'oneid_account_not_linked',
+      'OneID 成员无法匹配到现有企业微信账号，已阻止创建第二套账号',
+      403
+    )
+  }
+  const fallbackId = `oneid:${sha256(`${config.oneId.issuer}:${subject}`).slice(
+    0,
+    48
+  )}`
+  const fallbackCorpId = `oneid:${sha256(config.oneId.issuer).slice(0, 32)}`
+  return {
+    id: mapped ? mapped.id : fallbackId,
+    corpId: mapped ? config.corpId : fallbackCorpId,
+    name: String(
+      claims.name ||
+        claims.preferred_username ||
+        (mapped && mapped.name) ||
+        'OneID 用户'
+    ).slice(0, 100),
+    avatar:
+      safeProfileImage(claims.picture || claims.avatar) ||
+      (mapped && mapped.avatar) ||
+      '',
+    position: String((mapped && mapped.position) || '').slice(0, 100),
+    departments: mapped && Array.isArray(mapped.departments)
+      ? mapped.departments
+      : []
+  }
+}
+
 async function listWecomContacts(options = {}) {
-  if (!config.enabled) {
+  if (!config.wecomEnabled) {
     throw new AuthError('wecom_contacts_unavailable', '企业微信登录未启用', 503)
   }
   const departmentId = Number(options.departmentId || 1)
@@ -983,7 +1301,7 @@ async function listWecomContacts(options = {}) {
 }
 
 async function listWecomDepartments() {
-  if (!config.enabled) throw new AuthError('wecom_contacts_unavailable', '企业微信登录未启用', 503)
+  if (!config.wecomEnabled) throw new AuthError('wecom_contacts_unavailable', '企业微信登录未启用', 503)
   const token = await getAccessToken()
   const data = await fetchJson(wecomUrl('/cgi-bin/department/list', { access_token: token }), { retries: 1 })
   if (!successfulWecomResponse(data)) throw new AuthError('wecom_contacts_failed', '企业微信部门读取失败', 502)
@@ -1000,7 +1318,7 @@ function wecomAvatarUrl(profile) {
   return ''
 }
 
-async function storeOAuthState(nonce, browserId, returnTo) {
+async function storeOAuthState(nonce, browserId, returnTo, provider) {
   await initAuth()
   await authPool.query(
     'delete from auth_oauth_states where expires_at <= now()'
@@ -1011,18 +1329,24 @@ async function storeOAuthState(nonce, browserId, returnTo) {
   )
   await authPool.query(
     `insert into auth_oauth_states
-       (nonce_hash, browser_hash, return_to, expires_at)
-     values ($1, $2, $3, now() + ($4::double precision * interval '1 second'))`,
+       (nonce_hash, browser_hash, provider, return_to, expires_at)
+     values ($1, $2, $3, $4, now() + ($5::double precision * interval '1 second'))`,
     [
       sha256(nonce),
       sha256(browserId),
+      provider,
       safeReturnTo(returnTo),
       OAUTH_STATE_TTL_SECONDS
     ]
   )
 }
 
-async function createOAuthChallenge(req, res, returnTo) {
+async function createOAuthChallenge(
+  req,
+  res,
+  returnTo,
+  provider = OAUTH_PROVIDER_WECOM
+) {
   const cookies = parseCookies(req)
   let browserId = verifySignedValue(
     'oauth-browser',
@@ -1038,17 +1362,20 @@ async function createOAuthChallenge(req, res, returnTo) {
   )
 
   const nonce = randomToken()
-  await storeOAuthState(nonce, browserId, returnTo)
-  return signValue('oauth-state', nonce)
+  await storeOAuthState(nonce, browserId, returnTo, provider)
+  return signValue(`oauth-state:${provider}`, nonce)
 }
 
-async function consumeOAuthState(nonce, browserId) {
+async function consumeOAuthState(nonce, browserId, provider) {
   await initAuth()
   const result = await authPool.query(
     `delete from auth_oauth_states
-     where nonce_hash = $1 and browser_hash = $2 and expires_at > now()
+     where nonce_hash = $1
+       and browser_hash = $2
+       and provider = $3
+       and expires_at > now()
      returning return_to`,
-    [sha256(nonce), sha256(browserId)]
+    [sha256(nonce), sha256(browserId), provider]
   )
   return result.rows[0] ? safeReturnTo(result.rows[0].return_to) : null
 }
@@ -1272,6 +1599,7 @@ function redirect(res, location) {
 }
 
 function publicUser(user) {
+  const roomAcl = require('./roomAcl')
   return {
     id: user.id,
     corpId: user.corpId,
@@ -1279,7 +1607,8 @@ function publicUser(user) {
     name: user.name,
     avatar: user.avatar,
     departments: user.departments,
-    expiresAt: user.expiresAt
+    expiresAt: user.expiresAt,
+    superAdmin: roomAcl.isSuperAdminUser(user)
   }
 }
 
@@ -1432,7 +1761,15 @@ async function handleAuthApi(req, res) {
   if (pathname === '/api/auth/config' && req.method === 'GET') {
     sendJson(req, res, 200, {
       enabled: config.enabled,
-      loginPath: config.enabled ? '/api/auth/login' : null,
+      wecomEnabled: Boolean(config.wecomEnabled),
+      oneIdEnabled: Boolean(config.oneIdEnabled),
+      oneIdLoginReady: Boolean(config.oneId && config.oneId.loginReady),
+      oneIdAutoLogin: shouldAutoLoginOneId(),
+      loginPath: config.wecomEnabled ? '/api/auth/login' : null,
+      wecomClientLoginPath: config.wecomEnabled
+        ? '/api/auth/wecom/client-login'
+        : null,
+      oneIdLoginPath: config.oneIdEnabled ? '/api/auth/oneid/login' : null,
       devBypassAvailable: isDevBypassAllowed(req),
       devBypassMobileHint: isDevBypassAllowed(req)
         ? maskMobileHint(config.devBypassMobile)
@@ -1486,6 +1823,10 @@ async function handleAuthApi(req, res) {
     const user = await authenticateRequest(req)
     sendJson(req, res, 200, {
       enabled: true,
+      wecomEnabled: Boolean(config.wecomEnabled),
+      oneIdEnabled: Boolean(config.oneIdEnabled),
+      oneIdLoginReady: Boolean(config.oneId && config.oneId.loginReady),
+      oneIdAutoLogin: shouldAutoLoginOneId(),
       authenticated: !!user,
       user: user ? publicUser(user) : null,
       devBypassAvailable: isDevBypassAllowed(req),
@@ -1534,11 +1875,92 @@ async function handleAuthApi(req, res) {
     return true
   }
 
-  if (pathname === '/api/auth/qr' && req.method === 'GET') {
+  if (pathname === '/api/auth/oneid/login' && req.method === 'GET') {
+    if (!config.oneIdEnabled) {
+      sendJson(req, res, 404, {
+        error: 'OneID 单点登录未启用',
+        code: 'oneid_disabled'
+      })
+      return true
+    }
+    if (!config.oneId || !config.oneId.loginReady) {
+      sendJson(req, res, 503, {
+        error: 'WorkBuddy 单点登录认证源尚未上架',
+        code: 'oneid_not_ready'
+      })
+      return true
+    }
     const state = await createOAuthChallenge(
       req,
       res,
-      url.searchParams.get('return_to')
+      url.searchParams.get('return_to'),
+      OAUTH_PROVIDER_ONEID
+    )
+    redirect(res, buildOneIdLoginUrl(state))
+    return true
+  }
+
+  if (pathname === '/api/auth/oneid/callback' && req.method === 'GET') {
+    let returnTo = '/'
+    try {
+      const nonce = verifySignedValue(
+        `oauth-state:${OAUTH_PROVIDER_ONEID}`,
+        url.searchParams.get('state')
+      )
+      const browserId = verifySignedValue(
+        'oauth-browser',
+        parseCookies(req)[OAUTH_BROWSER_COOKIE]
+      )
+      if (!nonce || !browserId) {
+        throw new AuthError('invalid_state', 'OneID 登录状态校验失败', 400)
+      }
+      const consumedReturnTo = await consumeOAuthState(
+        nonce,
+        browserId,
+        OAUTH_PROVIDER_ONEID
+      )
+      if (!consumedReturnTo) {
+        throw new AuthError(
+          'expired_state',
+          'OneID 登录状态已过期，请重新登录',
+          400
+        )
+      }
+      returnTo = consumedReturnTo
+      if (url.searchParams.get('error')) {
+        throw new AuthError(
+          'oneid_access_denied',
+          'OneID 登录未完成',
+          401
+        )
+      }
+      const user = await exchangeOneIdCode(url.searchParams.get('code'))
+      const stored = await upsertUser(user)
+      const session = await createSession(stored.id)
+      setCookie(res, req, SESSION_COOKIE, session, config.sessionMaxSeconds)
+      redirect(res, appRedirectUrl(returnTo))
+    } catch (err) {
+      const code = err instanceof AuthError ? err.code : 'oneid_unavailable'
+      const message = err && err.message ? err.message : 'unknown error'
+      console.error(`[auth] OneID callback failed: code=${code}; ${message}`)
+      redirect(res, appRedirectUrl(returnTo, code))
+    }
+    return true
+  }
+
+  if (pathname === '/api/auth/qr' && req.method === 'GET') {
+    if (!config.wecomEnabled) {
+      sendJson(req, res, 404, {
+        error: '企业微信登录未启用',
+        code: 'wecom_disabled'
+      })
+      return true
+    }
+    const state = await createOAuthChallenge(
+      req,
+      res,
+      url.searchParams.get('return_to'),
+      OAUTH_PROVIDER_WECOM
     )
     sendJson(req, res, 200, {
       loginUrl: buildWecomLoginUrl(state, { embedded: true }),
@@ -1551,21 +1973,57 @@ async function handleAuthApi(req, res) {
     return true
   }
 
-  if (pathname === '/api/auth/login' && req.method === 'GET') {
+  if (
+    pathname === '/api/auth/wecom/client-login' &&
+    req.method === 'GET'
+  ) {
+    if (!config.wecomEnabled) {
+      sendJson(req, res, 404, {
+        error: '企业微信登录未启用',
+        code: 'wecom_disabled'
+      })
+      return true
+    }
     const state = await createOAuthChallenge(
       req,
       res,
-      url.searchParams.get('return_to')
+      url.searchParams.get('return_to'),
+      OAUTH_PROVIDER_WECOM
+    )
+    redirect(res, buildWecomClientLoginUrl(state))
+    return true
+  }
+
+  if (pathname === '/api/auth/login' && req.method === 'GET') {
+    if (!config.wecomEnabled) {
+      sendJson(req, res, 404, {
+        error: '企业微信登录未启用',
+        code: 'wecom_disabled'
+      })
+      return true
+    }
+    const state = await createOAuthChallenge(
+      req,
+      res,
+      url.searchParams.get('return_to'),
+      OAUTH_PROVIDER_WECOM
     )
     redirect(res, buildWecomLoginUrl(state))
     return true
   }
 
   if (pathname === '/api/auth/wecom/callback' && req.method === 'GET') {
+    if (!config.wecomEnabled) {
+      sendJson(req, res, 404, {
+        error: '企业微信登录未启用',
+        code: 'wecom_disabled'
+      })
+      return true
+    }
     let returnTo = '/'
     try {
       const nonce = verifySignedValue(
-        'oauth-state',
+        `oauth-state:${OAUTH_PROVIDER_WECOM}`,
         url.searchParams.get('state')
       )
       const browserId = verifySignedValue(
@@ -1575,7 +2033,11 @@ async function handleAuthApi(req, res) {
       if (!nonce || !browserId) {
         throw new AuthError('invalid_state', '登录状态校验失败', 400)
       }
-      const consumedReturnTo = await consumeOAuthState(nonce, browserId)
+      const consumedReturnTo = await consumeOAuthState(
+        nonce,
+        browserId,
+        OAUTH_PROVIDER_WECOM
+      )
       if (!consumedReturnTo) {
         throw new AuthError(
           'expired_state',
@@ -1757,6 +2219,9 @@ module.exports = {
     signValue,
     verifySignedValue,
     buildWecomLoginUrl,
+    buildWecomClientLoginUrl,
+    buildOneIdLoginUrl,
+    oneIdClaims,
     createWecomResponseError,
     isPrivateOrLocalHost,
     isDevBypassAllowed,

@@ -8,6 +8,10 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import mcpUserToken from './mcpUserToken.js'
+import {
+  attachmentMetaForNode,
+  resolveAttachmentUploadInput
+} from './mcpAttachmentUpload.mjs'
 
 const { bearerToken, verifyMcpUserToken } = mcpUserToken
 
@@ -39,9 +43,67 @@ function fail(err) {
   }
 }
 
-async function apiRequest(path, options = {}) {
+function historyFail(err) {
+  return {
+    isError: true,
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          ok: false,
+          code: err.code || 'HISTORY_ERROR',
+          error: err.message || String(err),
+          statusCode: err.statusCode || 0
+        })
+      }
+    ]
+  }
+}
+
+function historySummary(summary = {}) {
+  return {
+    inserted: Number(summary.inserted || 0),
+    updated: Number(summary.updated || 0),
+    deleted: Number(summary.deleted || 0),
+    moved: Number(summary.moved || 0)
+  }
+}
+
+function historyVersion(version = {}) {
+  return {
+    versionId: version.versionId || '',
+    revision: version.revision == null ? null : Number(version.revision),
+    checkpointRevision: Number(version.checkpointRevision || 0),
+    name: version.name || '',
+    type: version.type || '',
+    createdBy: version.createdBy || '',
+    createdById: version.createdById || '',
+    createdAt: version.createdAt || '',
+    description: version.description || '',
+    source: version.source || '',
+    sourceKind: version.sourceKind || '',
+    editors: Array.isArray(version.editors) ? version.editors : [],
+    summary: historySummary(version.summary),
+    summaryStatus: version.summaryStatus || 'pending',
+    summaryText: version.summaryText || '',
+    availability: version.availability || 'readable',
+    readOnly: version.readOnly !== false,
+    capabilities: version.capabilities || {}
+  }
+}
+
+function historyCoverage(data = {}) {
+  return {
+    earliestAvailableRevision: Number(data.earliestAvailableRevision || 0),
+    currentRevision: Number(data.currentRevision || 0),
+    completeFromRevision: Number(data.completeFromRevision || 0),
+    historyStartRevision: Number(data.historyStartRevision || 0)
+  }
+}
+
+async function apiRequest(pathName, options = {}) {
   const { timeoutMs = 25000, headers, authorization, ...rest } = options
-  const res = await fetch(`${API}${path}`, {
+  const res = await fetch(`${API}${pathName}`, {
     ...rest,
     headers: {
       'Content-Type': 'application/json',
@@ -49,30 +111,60 @@ async function apiRequest(path, options = {}) {
       ...(authorization
         ? { Authorization: authorization }
         : MCP_TOKEN
-        ? { Authorization: `Bearer ${MCP_TOKEN}` }
-        : {}),
+          ? { Authorization: `Bearer ${MCP_TOKEN}` }
+          : {}),
       ...(headers || {})
     },
     signal: AbortSignal.timeout(timeoutMs)
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error(data.error || res.statusText || `HTTP ${res.status}`)
+    const error = new Error(
+      data.error || res.statusText || `HTTP ${res.status}`
+    )
+    error.code = data.code || `HTTP_${res.status}`
+    error.statusCode = res.status
+    throw error
   }
   return data
 }
 
 function createServer(authorization) {
-  const api = (path, options = {}) =>
-    apiRequest(path, { ...options, authorization })
+  const api = (pathName, options = {}) =>
+    apiRequest(pathName, { ...options, authorization })
+  const currentMapRevision = async roomKey => {
+    const data = await api(
+      `/api/files/${encodeURIComponent(roomKey)}?format=meta`
+    )
+    const revision = Number(
+      data.currentRevision != null
+        ? data.currentRevision
+        : data.revision != null
+          ? data.revision
+          : data.version
+    )
+    if (!Number.isSafeInteger(revision) || revision < 0) {
+      const err = new Error('无法获取导图当前修订号')
+      err.code = 'REVISION_UNAVAILABLE'
+      throw err
+    }
+    return revision
+  }
+  const writeMap = async (roomKey, pathName, method, body) => {
+    const baseVersion = await currentMapRevision(roomKey)
+    return api(pathName, {
+      method,
+      body: JSON.stringify({ ...body, baseVersion })
+    })
+  }
   const server = new McpServer(
     {
       name: 'mind-map',
-      version: '1.2.0'
+      version: '1.3.0'
     },
     {
       instructions:
-        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps，只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。附件：节点 data 出现 attachmentId 或大纲里出现「(附件 … att:<id>)」标记时，说明该节点挂着文件，其正文必须用 read_attachment 读取；节点上的 attachmentExtractedText 只是截断预览，不得据此下结论，has_more=true 时按 next_offset 续读到 false。要先了解一张图有哪些附件用 list_attachments。附件 status 不是 ready 时如实说明状态和 error_message，不得编造附件内容。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。工具返回 isError 表示没有写入，禁止声称已完成。'
+        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps，只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。历史版本只提供元数据和新增、修改、删除、移动计数，不提供历史脑图正文。回滚必须依次调用 list_versions、get_version，向用户展示目标版本和变更摘要并获得明确确认，再用列表返回的 currentRevision 调用 restore_version；RESTORE_CONFLICT 后必须重新查询并再次确认，禁止自动重试。附件（与网页工具栏「附件」同一套能力）：生成或拿到产物后必须调用 upload_attachment 挂到目标节点，节点会出现可点击回形针图标；禁止只把本机路径、挂载说明、「请拖到节点」写进 text/note；禁止用 update_node 的 note 代替挂载。upload_attachment 优先 file_path（WorkBuddy 目录或 ./output），否则 content_base64 / source_url。已有附件用 list_attachments / read_attachment；attachmentExtractedText 只是截断预览。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。工具返回 isError 表示没有写入，禁止声称已完成。'
     }
   )
 
@@ -141,6 +233,149 @@ function createServer(authorization) {
         )
       } catch (err) {
         return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'list_versions',
+    '列出导图历史版本，只返回版本元数据和新增、修改、删除、移动计数，不返回历史脑图内容。回滚时必须使用本工具返回的 versionId 和 currentRevision。',
+    {
+      room_key: z.string().min(1).describe('房间号'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .describe('每页数量，默认20，最大100')
+        .optional(),
+      cursor: z.string().min(1).describe('上一页返回的分页游标').optional(),
+      type: z
+        .enum(['AUTO', 'MANUAL', 'IMPORT', 'PRE_RESTORE', 'RESTORE', 'LEGACY'])
+        .describe('版本类型筛选')
+        .optional(),
+      created_by: z.string().min(1).describe('创建人用户ID筛选').optional(),
+      from: z.string().min(1).describe('创建时间起点，ISO 8601').optional(),
+      to: z.string().min(1).describe('创建时间终点，ISO 8601').optional()
+    },
+    async ({ room_key, limit, cursor, type, created_by, from, to }) => {
+      try {
+        const params = new URLSearchParams()
+        if (limit != null) params.set('limit', String(limit))
+        if (cursor) params.set('cursor', cursor)
+        if (type) params.set('type', type)
+        if (created_by) params.set('createdBy', created_by)
+        if (from) params.set('from', from)
+        if (to) params.set('to', to)
+        const query = params.toString()
+        const data = await api(
+          `/api/files/${encodeURIComponent(room_key)}/versions${query ? `?${query}` : ''}`
+        )
+        return ok({
+          ok: true,
+          versions: (data.versions || []).map(historyVersion),
+          nextCursor: data.nextCursor || null,
+          ...historyCoverage(data)
+        })
+      } catch (err) {
+        return historyFail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'get_version',
+    '读取一个历史版本的元数据和新增、修改、删除、移动计数，不返回该版本的脑图内容。',
+    {
+      room_key: z.string().min(1).describe('房间号'),
+      version_id: z.string().min(1).describe('list_versions 返回的版本ID')
+    },
+    async ({ room_key, version_id }) => {
+      try {
+        const data = await api(
+          `/api/files/${encodeURIComponent(room_key)}/versions/${encodeURIComponent(version_id)}`
+        )
+        return ok({
+          ok: true,
+          version: historyVersion(data.version || {}),
+          ...historyCoverage(data)
+        })
+      } catch (err) {
+        return historyFail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'create_version',
+    '为当前导图创建一个手动历史版本，需要房间编辑权限。返回版本元数据和变更计数，不返回脑图内容。',
+    {
+      room_key: z.string().min(1).describe('房间号'),
+      name: z.string().trim().min(1).describe('版本名称'),
+      description: z.string().describe('可选版本说明').optional()
+    },
+    async ({ room_key, name, description }) => {
+      try {
+        const data = await api(
+          `/api/files/${encodeURIComponent(room_key)}/versions`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ name, description: description || '' })
+          }
+        )
+        return ok({
+          ok: true,
+          version: historyVersion(data.version || {}),
+          ...historyCoverage(data)
+        })
+      } catch (err) {
+        return historyFail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'restore_version',
+    '将导图回滚到指定历史版本，需要管理权限。调用前必须先用 list_versions 和 get_version 展示目标版本及变更摘要，取得用户明确确认；confirm 必须为 true。发生 RESTORE_CONFLICT 时重新查询并再次确认，禁止自动重试。',
+    {
+      room_key: z.string().min(1).describe('房间号'),
+      version_id: z.string().min(1).describe('已向用户确认的目标版本ID'),
+      expected_current_revision: z
+        .number()
+        .int()
+        .nonnegative()
+        .describe('list_versions 返回的 currentRevision'),
+      confirm: z.literal(true).describe('已获得用户明确回滚确认，必须为 true')
+    },
+    async ({ room_key, version_id, expected_current_revision }) => {
+      const idempotencyKey = randomUUID()
+      try {
+        const data = await api(
+          `/api/files/${encodeURIComponent(room_key)}/versions/${encodeURIComponent(
+            version_id
+          )}/restore`,
+          {
+            method: 'POST',
+            headers: { 'Idempotency-Key': idempotencyKey },
+            body: JSON.stringify({
+              expectedCurrentRevision: expected_current_revision,
+              clientId: MCP_CLIENT_ID,
+              idempotencyKey
+            })
+          }
+        )
+        return ok({
+          ok: true,
+          fromRevision: Number(data.fromRevision),
+          targetRevision:
+            data.targetRevision == null ? null : Number(data.targetRevision),
+          newRevision: Number(data.newRevision),
+          preRestoreVersionId: data.preRestoreVersionId || '',
+          restoreVersionId: data.restoreVersionId || '',
+          ...historyCoverage(data)
+        })
+      } catch (err) {
+        return historyFail(err)
       }
     }
   )
@@ -277,6 +512,157 @@ function createServer(authorization) {
             { timeoutMs: 25000 }
           )
         )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'upload_attachment',
+    '与网页工具栏「附件」相同：上传文件并挂到节点，节点出现可点击回形针，人类可直接预览/下载。产物必须用本工具，禁止把路径或「请拖到节点」写进 note/text。提供 file_path（WorkBuddy 目录或仓库 output）、content_base64 或 source_url 之一。支持 txt/md/csv/pdf/docx/xlsx/html 与常见图片。成功返回 attachment.id 与 content_url。',
+    {
+      room_key: z.string().describe('房间号'),
+      node: z
+        .string()
+        .describe('要挂载的节点 uid，或完整标题/路径（与 update_node 相同）'),
+      file_name: z
+        .string()
+        .describe('文件名（含扩展名）；file_path 时可省略，默认取路径末段')
+        .optional(),
+      mime_type: z.string().describe('可选 MIME，缺省按扩展名推断').optional(),
+      file_path: z
+        .string()
+        .describe(
+          'MCP 进程可读的本机绝对/相对路径；与 content_base64、source_url 三选一'
+        )
+        .optional(),
+      content_base64: z
+        .string()
+        .describe('文件内容的 base64；与 file_path、source_url 三选一')
+        .optional(),
+      source_url: z
+        .string()
+        .describe('可下载的 http(s) URL；与 file_path、content_base64 三选一')
+        .optional(),
+      confirm_sop_change: z
+        .boolean()
+        .describe('目标节点属于 SOP 时，必须先获用户确认并传 true')
+        .optional()
+    },
+    async ({
+      room_key,
+      node,
+      file_name,
+      mime_type,
+      file_path,
+      content_base64,
+      source_url,
+      confirm_sop_change
+    }) => {
+      try {
+        // Resolve title/path → uid (same as toolbar targeting a node)
+        let nodeUid = String(node || '').trim()
+        try {
+          const located = await api(
+            `/api/files/${encodeURIComponent(
+              room_key
+            )}/locate?uid=${encodeURIComponent(nodeUid)}`,
+            { timeoutMs: 15000 }
+          )
+          if (located && located.uid) nodeUid = located.uid
+        } catch (e) {
+          // Fall through; PATCH/update will resolve or fail clearly
+        }
+
+        const resolved = await resolveAttachmentUploadInput({
+          node: nodeUid,
+          file_name,
+          mime_type,
+          file_path,
+          content_base64,
+          source_url
+        })
+        const uploadBody = {
+          fileName: resolved.fileName,
+          nodeUid: resolved.nodeUid || nodeUid,
+          sourceKind: 'attachment'
+        }
+        if (resolved.mimeType) uploadBody.mimeType = resolved.mimeType
+        if (resolved.contentBase64) {
+          uploadBody.contentBase64 = resolved.contentBase64
+        }
+        if (resolved.sourceUrl) uploadBody.sourceUrl = resolved.sourceUrl
+
+        const uploaded = await api(
+          `/api/files/${encodeURIComponent(room_key)}/attachments`,
+          {
+            method: 'POST',
+            body: JSON.stringify(uploadBody),
+            timeoutMs: 120000
+          }
+        )
+        const attachment = (uploaded && uploaded.attachment) || uploaded || {}
+        if (!attachment.id) {
+          throw new Error('上传成功但未返回 attachment.id')
+        }
+
+        // Same node fields as toolbar SET_NODE_ATTACHMENT
+        const patch = attachmentMetaForNode(attachment)
+        let nodeResult = null
+        let lastErr = null
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            nodeResult = await api(
+              `/api/files/${encodeURIComponent(
+                room_key
+              )}/nodes/${encodeURIComponent(nodeUid)}`,
+              {
+                method: 'PATCH',
+                body: JSON.stringify({
+                  ...patch,
+                  confirm_sop_change: confirm_sop_change === true
+                }),
+                timeoutMs: 30000
+              }
+            )
+            lastErr = null
+            break
+          } catch (err) {
+            lastErr = err
+            const msg = String((err && err.message) || '')
+            if (
+              /正在保存整图|REPLACE_IN_PROGRESS|请稍候/.test(msg) &&
+              attempt < 2
+            ) {
+              await new Promise(r => setTimeout(r, 400 * (attempt + 1)))
+              continue
+            }
+            throw err
+          }
+        }
+        if (lastErr) throw lastErr
+
+        const contentUrl = `/api/files/${encodeURIComponent(
+          room_key
+        )}/attachments/${encodeURIComponent(attachment.id)}/content`
+
+        return ok({
+          ok: true,
+          room_key,
+          attachment,
+          node_uid: nodeUid,
+          node: nodeResult,
+          content_url: contentUrl,
+          toolbar_equivalent: true,
+          message:
+            attachment.status === 'ready'
+              ? '已按工具栏「附件」方式挂载，可在网页点击节点回形针查看'
+              : attachment.status === 'processing' ||
+                attachment.status === 'pending'
+              ? '已挂载（回形针可见），服务端仍在解析正文；可先点击下载原件'
+              : '已挂载（回形针可见），解析未成功；仍可点击下载原件'
+        })
       } catch (err) {
         return fail(err)
       }
@@ -462,15 +848,17 @@ function createServer(authorization) {
     async ({ room_key, text, parent, note, confirm_sop_change }) => {
       try {
         return ok(
-          await api(`/api/files/${encodeURIComponent(room_key)}/nodes`, {
-            method: 'POST',
-            body: JSON.stringify({
+          await writeMap(
+            room_key,
+            `/api/files/${encodeURIComponent(room_key)}/nodes`,
+            'POST',
+            {
               text,
               parent: parent || 'root',
               note,
               confirm_sop_change
-            })
-          })
+            }
+          )
         )
       } catch (err) {
         return fail(err)
@@ -480,7 +868,7 @@ function createServer(authorization) {
 
   server.tool(
     'update_node',
-    '修改节点文字或备注。node 优先用 get_map outline 里的 uid；也可用完整标题、部分文字或 根/父/子 路径。成功只返回 uid。工具报错即未写入。',
+    '修改节点文字或备注。禁止用 note/text 写本机文件路径或挂载说明来代替附件；挂文件必须用 upload_attachment（等同工具栏「附件」）。node 优先用 uid；也可用完整标题、部分文字或 根/父/子 路径。成功只返回 uid。工具报错即未写入。',
     {
       room_key: z.string().describe('房间号'),
       node: z.string().describe('节点 uid 或文字路径'),
@@ -494,14 +882,13 @@ function createServer(authorization) {
     async ({ room_key, node, text, note, confirm_sop_change }) => {
       try {
         return ok(
-          await api(
+          await writeMap(
+            room_key,
             `/api/files/${encodeURIComponent(
               room_key
             )}/nodes/${encodeURIComponent(node)}`,
-            {
-              method: 'PATCH',
-              body: JSON.stringify({ text, note, confirm_sop_change })
-            }
+            'PATCH',
+            { text, note, confirm_sop_change }
           )
         )
       } catch (err) {
@@ -524,14 +911,13 @@ function createServer(authorization) {
     async ({ room_key, node, confirm_sop_change }) => {
       try {
         return ok(
-          await api(
+          await writeMap(
+            room_key,
             `/api/files/${encodeURIComponent(
               room_key
             )}/nodes/${encodeURIComponent(node)}`,
-            {
-              method: 'DELETE',
-              body: JSON.stringify({ confirm_sop_change })
-            }
+            'DELETE',
+            { confirm_sop_change }
           )
         )
       } catch (err) {
@@ -555,10 +941,12 @@ function createServer(authorization) {
     async ({ room_key, title, tree, confirm_sop_change }) => {
       try {
         return ok(
-          await api(`/api/files/${encodeURIComponent(room_key)}/replace`, {
-            method: 'POST',
-            body: JSON.stringify({ title, tree, confirm_sop_change })
-          })
+          await writeMap(
+            room_key,
+            `/api/files/${encodeURIComponent(room_key)}/replace`,
+            'POST',
+            { title, tree, confirm_sop_change }
+          )
         )
       } catch (err) {
         return fail(err)
@@ -576,10 +964,12 @@ function createServer(authorization) {
     async ({ room_key, title }) => {
       try {
         return ok(
-          await api(`/api/files/${encodeURIComponent(room_key)}`, {
-            method: 'PATCH',
-            body: JSON.stringify({ title })
-          })
+          await writeMap(
+            room_key,
+            `/api/files/${encodeURIComponent(room_key)}`,
+            'PATCH',
+            { title }
+          )
         )
       } catch (err) {
         return fail(err)

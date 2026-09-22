@@ -18,10 +18,15 @@ IP 由启动脚本探测，不要手写，也不要用 `127.0.0.1`（WorkBuddy �
 | `list_maps` | 列出房间，含给人类打开的 `share_url` |
 | `create_map` | 新建导图 |
 | `get_map` | `format=outline` 大纲（默认最多 800 节点）；`format=full` 树（超大图会截断，可用 `max_nodes`） |
+| `list_versions` | 列出历史版本及新增、修改、删除、移动计数，支持分页和筛选 |
+| `get_version` | 读取单个历史版本的元数据和变更计数，不返回脑图内容 |
+| `create_version` | 为当前导图创建手动版本，需要编辑权限 |
+| `restore_version` | 用户明确确认后回滚版本，需要管理权限和当前修订号 |
 | `search_nodes` | 按文字搜节点 |
 | `query_nodes` | 按 UID、名称或完整路径定向读取节点、子树、链路或层级；超大结果用游标分页 |
 | `list_attachments` | 列出导图（或指定节点）的附件及解析状态，只返回元数据 |
 | `read_attachment` | 读取附件正文（服务端已提取的文本，含 PDF/Word/Excel/PPT 与图片 OCR），按字符分页 |
+| `upload_attachment` | 把文件挂到指定节点；网页可点击附件图标查看/下载 |
 | `list_todos` | 列出待办，可选同时读取已完成 |
 | `prepare_todo` | 读取待办并匹配任意SOP的C/P |
 | `complete_todo` | 全部C通过后把任务移动到已完成 |
@@ -39,6 +44,21 @@ IP 由启动脚本探测，不要手写，也不要用 `127.0.0.1`（WorkBuddy �
 2. 把返回的 `share_url` 发给同事
 3. 同事打开链接，自动进入同一房间
 4. AI 继续 `add_node` / `update_node`，网页上立刻能看到
+
+### 历史版本
+
+历史版本工具只向 AI 返回版本名称、类型、创建人、创建时间、可用状态，以及
+`inserted`、`updated`、`deleted`、`moved` 四项变更计数，不返回历史脑图正文。
+
+查询和回滚按以下顺序进行：
+
+1. `list_versions` 查询版本列表，并保存返回的 `currentRevision`
+2. `get_version` 读取目标版本详情和变更摘要
+3. AI 向用户展示目标版本信息并取得明确确认
+4. `restore_version` 传入目标 `version_id`、`expected_current_revision` 和 `confirm=true`
+
+`restore_version` 需要房间管理权限。出现 `RESTORE_CONFLICT` 表示确认后脑图又有新修改，
+AI 必须重新查询、重新展示并再次取得确认，不能自动重试。系统会在回滚前自动创建备份版本。
 
 ### 定向读取大图
 
@@ -105,6 +125,27 @@ read_attachment room_key="demo" attachment_id="<id>" offset=4000 length=4000
 默认单次 4000 字符、最多 20000 字符。`has_more=true` 时把 `next_offset` 当成下一次的 `offset` 继续读，直到 `has_more=false`。
 
 `status` 不是 `ready` 时不会有正文：`processing` 表示大文件仍在后台解析，稍后重试；`failed` 会给出 `errorMessage`（例如老式 `.doc` 不支持解析，需要人工下载打开）。这两种情况都应如实告知用户，不要编造附件内容。原始文件本身不经 MCP 返回，人类可在网页上预览或下载。
+
+### 挂载附件（产物可点击查看）
+
+WorkBuddy / AI 生成 PDF、Markdown 等产物后，应调用 `upload_attachment`（与网页工具栏「附件」同一套后端），挂到目标节点后会出现**可点击回形针**。
+
+**禁止**只把本机路径、「请拖到节点」、「附件仅客户端可用」写进 `note`/`text`。
+
+```text
+本机可读路径（推荐）：
+upload_attachment room_key="demo" node="<uid>" file_path="${WORKBUDDY_HOST_DIR}/.../报告.pdf"
+# 容器内映射到 /workbuddy/... ；OpenClaw output 映射到 /app/output/...
+# WORKBUDDY_HOST_DIR 在 .env 配置（本机 WorkBuddy 目录或服务器路径；默认 ./data/workbuddy）
+
+或传文件内容：
+upload_attachment room_key="demo" node="<uid>" file_name="报告.pdf" content_base64="<...>"
+
+或可下载 URL：
+upload_attachment room_key="demo" node="<uid>" source_url="https://..."
+```
+
+成功后节点会带上 `attachmentId`，网页上出现附件图标，点击即可查看/下载。支持 txt/md/csv/pdf/docx/xlsx/html 与常见图片；单文件建议不超过约 24MB。
 
 ---
 
@@ -231,8 +272,150 @@ Cursor stdio 仍用 `.cursor/mcp.json`，协同接口走本机 `127.0.0.1:1234`�
 **connect ECONNREFUSED**  
 容器或 MCP 没起来。先 `启动-Docker.bat`，再在 WorkBuddy 里点重连。不要用 `127.0.0.1`，不要再用 `:3847`（Docker 模式下是 `:8080/mcp`）。
 
+**`mind-map-knowledge-mcp-1` 反复重启，日志刷 `exec /usr/local/bin/docker-entrypoint.sh: no such file or directory`**（2026-09-19）  
+入口脚本被检出成 CRLF，shebang 变成 `#!/bin/sh\r`，Linux 找不到这个解释器。已修复：脚本转 LF，并在 Dockerfile 里加 `sed -i 's/\r$//'` 兜底。仅 `docker restart` 不生效，必须 **重新 build**。
+
+**知识库服务启动正常，但工具报 `wiki_unconfigured`**（2026-09-19）  
+说明容器里缺 `DOCMOST_DATABASE_URL` 或 `DOCMOST_APP_SECRET`。这两个由 `scripts/docker-up.js` 从 `.secrets/wiki.env` 注入；手工 `docker compose up` 时要先把它们导出到环境变量，否则为空。用 `docker exec ... printenv DOCMOST_APP_SECRET` 确认。
+
+**知识库服务能启动，但 ACL 类工具（`docmost_search`、`canonical_*`）连不上库**（2026-09-19）  
+容器内 `PGHOST` 必须是 `postgres`。根 `.env` 的 `PGHOST=127.0.0.1` 是给宿主机工具用的，compose 里已按 `app` 服务的写法写死为 `postgres`；若改回 `${PGHOST:-postgres}` 会被 `.env` 覆盖。用 `curl http://127.0.0.1:18792/ready` 看 `checks.aclDb`。
+
 **WorkBuddy 里看不到工具**  
 HTTP 模式只配 `url`，不要配 `command`。用启动脚本打印的地址。
 
 **网页上没同步**  
 人必须打开同一 `share_url`（带 `?room=`）。
+
+---
+
+## 6. Wiki（知识库）全库读写
+
+`docmost_search` / `docmost_get` 只能读到「已映射到房间槽位」的页面。要**按账号权限搜索、读取、写入整个 Wiki**，用知识库服务（`integrations/knowledge-mcp`，端口 `18792`）的 Wiki 工具。
+
+### 权限模型
+
+不借权：调用者身份（mind-map 用户 id）映射到对应 Docmost 账号，以**该账号自己的会话**调用 Docmost 官方接口，空间成员与页面限制全部由 Docmost 判定。浏览器里打不开或不能编辑的页面，这里同样读不到 / 写不了。
+
+映射规则：`scim_external_id = mind-map:<用户id>`，或邮箱 `<用户id>@users.mind-map.local`（与 Wiki 单点登录同一套）。账号没有对应 Wiki 用户时返回 `wiki_identity_unmapped`，先在 Wiki 页面完成一次单点登录即可。
+
+### 工具
+
+```text
+wiki_spaces                 # 可读空间列表
+wiki_search  query=品牌      # 全库全文搜索（支持中文）
+wiki_search  query=品牌 spaceId=<空间id>
+wiki_tree    spaceId=<空间id>          # 空间页面树
+wiki_tree    pageId=<页面id>           # 某页面下的子树
+wiki_read    pageId=<页面id>           # 正文，默认 markdown
+wiki_read    pageId=<页面id> format=html
+wiki_create  spaceId=<空间id> title=标题 content=正文
+wiki_create  spaceId=<空间id> parentPageId=<父页id> title=子页 content=正文
+wiki_update  pageId=<页面id> content=新正文          # 默认 replace
+wiki_update  pageId=<页面id> title=新标题
+wiki_update  pageId=<页面id> content=追加 operation=append
+```
+
+`wiki_search` 返回的 `text` 是**接口返回的摘要**，不是完整正文；要全文必须再调 `wiki_read`。`wiki_read` 正文超 `KNOWLEDGE_WIKI_MAX_BODY`（默认 120000 字符）会截断并置 `truncated=true`。
+
+`wiki_create` / `wiki_update` 的 `content` 超 `KNOWLEDGE_MCP_MAX_WRITE_CHARS`（默认 200000）会拒绝并返回 `content_too_large`。正文默认 `format=markdown`；`wiki_update` 在带 `content` 时可设 `operation=replace|append|prepend`（默认 `replace`）。写操作会记入审计日志（`docmostPageId` / `beforeHash` / `afterHash`）。
+
+注意：脑图同步维护的 **standard** 槽位页若被 `wiki_update` 改写，下次同步可能被覆盖；长期手写内容优先放 human 页或独立非映射页。
+
+### 接入 WorkBuddy
+
+**推荐**：打开产品壳 [MCP 接入](/mcp-access)，登录后点「复制完整配置」。会同时得到：
+
+- `mind-map` → `http://<当前域名>/mcp`（导图）
+- `mind-map-wiki` → `http://<当前域名>/knowledge-mcp/mcp`（Wiki 全库读写，经 Nginx 反代，无需再开 18792）
+
+Wiki 令牌由当前登录账号签发，权限与 Wiki 网页一致；账号需先在侧栏 Wiki 完成一次单点登录以建立 Docmost 身份映射。
+
+手动签发（调试用，默认取 `.env` 的 `AUTH_DEV_BYPASS_USER_ID`）：
+
+```bash
+node scripts/wiki-mcp-token.js dev-local
+```
+
+配进 `~/.workbuddy/mcp.json`（直连 18792 时）：
+
+```json
+{
+  "mcpServers": {
+    "mind-map-wiki": {
+      "type": "http",
+      "url": "http://127.0.0.1:18792/mcp",
+      "headers": { "Authorization": "Bearer <上面命令输出的 token>" }
+    }
+  }
+}
+```
+
+令牌由 `.env` 的 `KNOWLEDGE_MCP_JWT_SECRET` 签发，`iss`/`aud` 必须与服务端 `KNOWLEDGE_MCP_JWT_ISS`/`KNOWLEDGE_MCP_JWT_AUD` 一致。TTL 取 `KNOWLEDGE_MCP_JWT_TTL_SEC`（未设置时默认 90 天）；`TTL=0` 时签发永久 Token（JWT 不写 `exp`，校验端跳过过期检查）。WorkBuddy 用的是静态头部，到期后（或改为永久后）需重新在 MCP 接入页复制配置或跑签发命令换 token。
+
+### 相关变量
+
+| 变量 | 作用 |
+| --- | --- |
+| `DOCMOST_DATABASE_URL` / `DOCMOST_APP_SECRET` | 由 `scripts/docker-up.js` 从 `.secrets/wiki.env` 注入 |
+| `DOCMOST_INTERNAL_URL` | 容器内 Docmost 地址，默认 `http://docmost:3000` |
+| `KNOWLEDGE_WIKI_FALLBACK_USER_ID` | 可选。调用者无 Wiki 账号时回落到固定用户；不设则不回落 |
+| `KNOWLEDGE_WIKI_MAX_BODY` | `wiki_read` 正文上限，默认 120000 |
+| `KNOWLEDGE_MCP_MAX_WRITE_CHARS` | `wiki_create` / `wiki_update` / `docmost_ai_upsert` 写入正文上限，默认 200000 |
+| `KNOWLEDGE_WIKI_SEARCH_LIMIT` / `_MAX_LIMIT` | 搜索默认条数 / 上限，默认 20 / 50 |
+| `KNOWLEDGE_MCP_BIND` | knowledge-mcp 的端口监听地址。默认 `127.0.0.1`（仅同机）；跨机访问设为 `0.0.0.0`，**必须同时配防火墙来源限制** |
+
+---
+
+## 7. 跨机访问（服务机与 WorkBuddy 不在同一台）
+
+默认 knowledge-mcp 只绑 `127.0.0.1`，导图 MCP（8989）绑 `0.0.0.0`——**两者策略不同，不要照搬**。照搬的典型症状是
+`streamableHttp connect failed ... ECONNREFUSED <局域网IP>:18792`（令牌完全正确也连不上，因为那个地址上没有监听）。
+
+### 同一局域网（推荐做法）
+
+**核心权衡：不要上 TLS 反向代理。** 自签证书会被 MCP 客户端拒绝，除非公司有内网 CA 签发可信证书。同网段用「绑定 + 防火墙白名单 + 缩短令牌有效期」更实际。
+
+服务机 B：
+
+```bash
+# 1. 放开绑定
+#    .env 里改：KNOWLEDGE_MCP_BIND=0.0.0.0
+#    然后重建（改端口必须 recreate，restart 无效）
+node scripts/docker-up.js up
+
+# 2. 放行防火墙（管理员 PowerShell）——务必限定来源，不要 Any
+New-NetFirewallRule -DisplayName "mind-map knowledge-mcp 18792" `
+  -Direction Inbound -Protocol TCP -LocalPort 18792 `
+  -Action Allow -RemoteAddress 192.168.1.0/24
+
+# 3. 在 B 上签令牌（需要 B 的 .env 里有同一个 KNOWLEDGE_MCP_JWT_SECRET）
+node scripts/wiki-mcp-token.js dev-local
+```
+
+客户机 A：
+
+```json
+"mind-map-wiki": {
+  "type": "http",
+  "url": "http://<B的IP>:18792/mcp",
+  "headers": { "Authorization": "Bearer <上面的 token>" }
+}
+```
+
+验证顺序：B 上 `curl http://127.0.0.1:18792/health` → B 上 `curl http://<B的IP>:18792/health`（能通说明绑定+防火墙都对了）→ A 上 `curl http://<B的IP>:18792/health` → 最后在 WorkBuddy 里点信任并真调一次 `wiki_search`。
+
+### 迁移注意
+
+- **`.env` 与 `.secrets/wiki.env` 必须一起带走**，否则签发与校验密钥不一致 → 工具报 `unauthorized`。
+- Wiki 数据在 Docker volume（`docmost-db` / `docmost-storage`）里，不迁卷就只有空站。
+- 跨机后建议把 `KNOWLEDGE_MCP_JWT_TTL_SEC` 从 90 天降到 7–30 天，到期重签。
+- **3040（Wiki 网页）、15432 / 16379（Postgres / Redis）不要跨机开放**，Wiki 只从 3040 网关进。
+
+### 安全边界（务必知悉）
+
+令牌是**静态 bearer、走明文 HTTP**。跨机暴露后，同网段任何拿到该 token 的人都能按对应账号权限读**整个 Wiki 正文**。因此：
+
+- 防火墙 `-RemoteAddress` 必须限定到具体客户机或受控网段；
+- 不要把 18792 暴露到公网；异地访问改用 SSH 隧道（`ssh -N -L 18792:127.0.0.1:18792 user@B`）或 Tailscale / WireGuard，此时服务端可保持 `127.0.0.1` 不暴露；
+- 服务侧已有 JWT 校验、限流（每用户 60 次/分钟）与审计日志（`/data/audit/knowledge-mcp.jsonl`），出问题可回溯。

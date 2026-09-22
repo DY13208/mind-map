@@ -9,6 +9,14 @@ const { docmostSearch, docmostGet } = require('./adapters/docmost');
 const { openwikiSearch, openwikiRead, openwikiStatus } = require('./adapters/openwiki');
 const { docmostAiGet, docmostAiUpsert } = require('./adapters/docmostAi');
 const {
+  wikiSpaces,
+  wikiSearch,
+  wikiTree,
+  wikiRead,
+  wikiCreate,
+  wikiUpdate,
+} = require('./adapters/wiki');
+const {
   openwikiRefresh,
   openwikiRefreshStatus,
   openwikiRetryPublish,
@@ -19,7 +27,7 @@ const jobStore = require('./jobs/jobStore');
 
 const PORT = Number(process.env.KNOWLEDGE_MCP_PORT || 18792);
 const JWT_SECRET = process.env.KNOWLEDGE_MCP_JWT_SECRET || '';
-const VERSION = '0.4.0';
+const VERSION = '0.6.0';
 const rateLimiter = createRateLimiter({
   windowMs: Number(process.env.KNOWLEDGE_MCP_RATE_WINDOW_MS || 60000),
   maxPerUser: Number(process.env.KNOWLEDGE_MCP_RATE_MAX_PER_USER || 60),
@@ -40,12 +48,24 @@ const TOOLS = [
   { name: 'openwiki_refresh', description: 'Enqueue room-scoped OpenWiki refresh (editor+).', inputSchema: { type: 'object', properties: { roomId: { type: 'string' } }, required: ['roomId'] } },
   { name: 'openwiki_refresh_status', description: 'Get OpenWiki refresh job status.', inputSchema: { type: 'object', properties: { jobId: { type: 'string' }, roomId: { type: 'string' } } } },
   { name: 'openwiki_retry_publish', description: 'Retry Docmost AI publish without regenerating OpenWiki.', inputSchema: { type: 'object', properties: { jobId: { type: 'string' } }, required: ['jobId'] } },
+  { name: 'wiki_spaces', description: 'List every Wiki (Docmost) space the calling account can read.', inputSchema: { type: 'object', properties: {} } },
+  { name: 'wiki_search', description: 'Full-text search the whole Wiki, scoped to the pages the calling account may read.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, spaceId: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] } },
+  { name: 'wiki_tree', description: 'Page tree of a Wiki space, or of the subtree under a page.', inputSchema: { type: 'object', properties: { spaceId: { type: 'string' }, pageId: { type: 'string' } } } },
+  { name: 'wiki_read', description: 'Read one Wiki page body (markdown or html); Docmost enforces view permission.', inputSchema: { type: 'object', properties: { pageId: { type: 'string' }, format: { type: 'string', enum: ['markdown', 'html'] } }, required: ['pageId'] } },
+  { name: 'wiki_create', description: 'Create a Wiki page (markdown by default); Docmost enforces create/edit permission for the calling account.', inputSchema: { type: 'object', properties: { spaceId: { type: 'string' }, title: { type: 'string' }, content: { type: 'string' }, parentPageId: { type: 'string' }, format: { type: 'string', enum: ['markdown', 'html', 'json'] } }, required: ['spaceId'] } },
+  { name: 'wiki_update', description: 'Update a Wiki page title and/or body; Docmost enforces edit permission. operation=replace|append|prepend when content is set.', inputSchema: { type: 'object', properties: { pageId: { type: 'string' }, title: { type: 'string' }, content: { type: 'string' }, format: { type: 'string', enum: ['markdown', 'html', 'json'] }, operation: { type: 'string', enum: ['replace', 'append', 'prepend'] } }, required: ['pageId'] } },
 ];
 
 function sendJson(res, status, body) {
   const data = JSON.stringify(body);
   res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) });
   res.end(data);
+}
+
+function externalOrigin(req) {
+  const proto = String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  return new URL(`${proto}://${host}`).origin;
 }
 
 function readBody(req) {
@@ -84,8 +104,19 @@ function authUser(req) {
     secret: JWT_SECRET,
     iss: process.env.KNOWLEDGE_MCP_JWT_ISS || 'openclaw-liangce',
     aud: process.env.KNOWLEDGE_MCP_JWT_AUD || 'knowledge-mcp',
+    // Same env as app issuer (knowledgeMcpToken.js). TTL=0 skips exp check.
+    ttlSec: process.env.KNOWLEDGE_MCP_JWT_TTL_SEC,
   });
   return String(payload.sub);
+}
+
+// 写入体积：content 可能是 ProseMirror 对象（format=json），String(obj) 只会得到
+// "[object Object]"，必须按序列化后的长度算，否则大 payload 会绕过限制。
+function payloadSize(content) {
+  if (content == null) return 0;
+  return typeof content === 'object'
+    ? JSON.stringify(content).length
+    : String(content).length;
 }
 
 function validateArgs(name, args) {
@@ -95,7 +126,11 @@ function validateArgs(name, args) {
     e.code = 'query_too_long';
     throw e;
   }
-  if (name === 'docmost_ai_upsert' && a.content != null && String(a.content).length > limits.maxWriteChars) {
+  if (
+    (name === 'docmost_ai_upsert' || name === 'wiki_create' || name === 'wiki_update') &&
+    a.content != null &&
+    payloadSize(a.content) > limits.maxWriteChars
+  ) {
     const e = new Error('content_too_large');
     e.code = 'content_too_large';
     throw e;
@@ -136,6 +171,12 @@ async function callTool(userId, name, args) {
     case 'openwiki_refresh': return openwikiRefresh(userId, args || {});
     case 'openwiki_refresh_status': return openwikiRefreshStatus(userId, args || {});
     case 'openwiki_retry_publish': return openwikiRetryPublish(userId, args || {});
+    case 'wiki_spaces': return wikiSpaces(userId);
+    case 'wiki_search': return wikiSearch(userId, args || {});
+    case 'wiki_tree': return wikiTree(userId, args || {});
+    case 'wiki_read': return wikiRead(userId, args || {});
+    case 'wiki_create': return wikiCreate(userId, args || {});
+    case 'wiki_update': return wikiUpdate(userId, args || {});
     default: {
       const e = new Error('unknown_tool');
       e.code = 'unknown_tool';
@@ -228,6 +269,15 @@ async function readiness() {
 }
 
 const server = http.createServer(async (req, res) => {
+  if (req.url === '/.well-known/oauth-protected-resource') {
+    const origin = externalOrigin(req);
+    return sendJson(res, 200, {
+      resource: `${origin}/knowledge-mcp/mcp`,
+      authorization_servers: [origin],
+      bearer_methods_supported: ['header'],
+      scopes_supported: ['mind-map-wiki'],
+    });
+  }
   if (req.url === '/health') {
     return sendJson(res, 200, {
       ok: true,
@@ -248,6 +298,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'method_not_allowed' });
     try {
+      // Authenticate the complete MCP session, including initialize and tools/list.
+      // OAuth clients only start discovery after the resource first returns 401.
+      authUser(req);
       const raw = await readBody(req);
       const rpc = raw ? JSON.parse(raw) : {};
       const result = await handleRpc(req, rpc);
@@ -257,7 +310,12 @@ const server = http.createServer(async (req, res) => {
       }
       return sendJson(res, 200, { jsonrpc: '2.0', id: rpc.id, result });
     } catch (e) {
-      const code = e.code === 'payload_too_large' ? 413 : 400;
+      const authError = ['unauthorized', 'expired', 'invalid_token', 'bad_signature'].includes(e.code);
+      const code = authError ? 401 : e.code === 'payload_too_large' ? 413 : 400;
+      if (authError) {
+        const origin = externalOrigin(req);
+        res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${origin}/knowledge-mcp/.well-known/oauth-protected-resource"`);
+      }
       return sendJson(res, code, { error: e.code || String(e.message || e) });
     }
   }

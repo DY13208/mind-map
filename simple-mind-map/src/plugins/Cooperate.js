@@ -482,6 +482,7 @@ class Cooperate {
     this.httpTextTimer = null
     this.httpTextFlushing = false
     this.httpTextFlushQueued = false
+    this.httpTextFlushPromise = null
     this.httpStructureTimer = null
     this.httpInsertPromise = null
     this.httpInsertRescan = false
@@ -1319,6 +1320,54 @@ class Cooperate {
     const pending = this.pendingLocalData
     this.pendingLocalData = null
     if (pending && this.ymap) this.flushLocalDataChange(pending)
+  }
+
+  commitOpenTextEdit() {
+    const editor =
+      this.mindMap &&
+      this.mindMap.renderer &&
+      this.mindMap.renderer.textEdit
+    if (editor && typeof editor.hideEditTextBox === 'function') {
+      editor.hideEditTextBox()
+    }
+  }
+
+  async flushPendingForReload(options = {}) {
+    const timeoutMs = Math.max(0, Number(options.timeoutMs) || 4000)
+    this.commitOpenTextEdit()
+    this.flushLocalNow()
+    clearTimeout(this.httpTextTimer)
+    this.httpTextTimer = null
+    clearTimeout(this.httpStructureTimer)
+    this.httpStructureTimer = null
+    if (this._v2InsertRetryTimer) {
+      clearTimeout(this._v2InsertRetryTimer)
+      this._v2InsertRetryTimer = null
+      this._v2InsertFromCommand = true
+    }
+    const work = (async () => {
+      if (this.httpCollabMode) {
+        await Promise.resolve(this.flushHttpTextNow()).catch(() => {})
+        if (
+          this._v2InsertFromCommand ||
+          this.httpInsertPromise ||
+          !this.collabV2Adapter
+        ) {
+          await Promise.resolve(this.flushHttpInsert()).catch(() => {})
+        }
+      }
+      const adapter = this.collabV2Adapter
+      if (adapter && typeof adapter.waitForOutboxDurable === 'function') {
+        return adapter.waitForOutboxDurable({ timeoutMs })
+      }
+      return { ok: true }
+    })()
+    return Promise.race([
+      work,
+      new Promise(resolve =>
+        setTimeout(() => resolve({ ok: true, timeout: true }), timeoutMs)
+      )
+    ])
   }
 
   flushLocalDataChange(data) {
@@ -2246,8 +2295,21 @@ class Cooperate {
       const usedNative = this.applyNativeMoveCommand(node, nextParent, plan)
       if (!usedNative || !this.nodeDataHasChild(nextParent, uid)) {
         this.applyMoveNodeData(node, nextParent, payload.index)
+        if (typeof renderer.resetMovedNodePosition === 'function') {
+          renderer.resetMovedNodePosition(node)
+        }
         if (typeof this.mindMap.render === 'function') this.mindMap.render()
       }
+      // Move events can carry restored coordinates when undoing a move.
+      const positionData = { ...(payload.data || {}), ...(payload.patch || {}) }
+      const positionPatch = {}
+      ;['customLeft', 'customTop'].forEach(key => {
+        if (Object.prototype.hasOwnProperty.call(positionData, key)) {
+          positionPatch[key] = positionData[key]
+          node[key] = positionData[key] == null ? undefined : positionData[key]
+        }
+      })
+      if (Object.keys(positionPatch).length) node.setData(positionPatch)
       const syncChildCount = parent => {
         if (!parent || typeof parent.getData !== 'function') return
         const liveKids = ((parent.nodeData && parent.nodeData.children) || []).length
@@ -2259,12 +2321,18 @@ class Cooperate {
       syncChildCount(nextParent)
       this.cleanupDragArtifacts()
       await this.waitForMoveRender()
-      if (oldParent && typeof oldParent.renderLine === 'function') {
-        oldParent.renderLine(true)
-      }
-      if (nextParent && typeof nextParent.renderLine === 'function') {
-        nextParent.renderLine(true)
-      }
+      // Rendering may replace both parent instances. Repainting a detached
+      // instance recreates its old connectors in the shared SVG line layer.
+      const parentUids = new Set([
+        oldParentUid,
+        parentUid || (nextParent.getData && nextParent.getData('uid'))
+      ])
+      parentUids.forEach(parentId => {
+        const liveParent = parentId && renderer.findNodeByUid(parentId)
+        if (liveParent && typeof liveParent.renderLine === 'function') {
+          liveParent.renderLine(true)
+        }
+      })
       this.restoreActiveUids(activeUids)
     } catch (err) {
       v2Trace('remote.apply.move.err', { uid, message: err && err.message })
@@ -5270,19 +5338,28 @@ class Cooperate {
 
   async flushHttpTextNow() {
     if (this.httpReplacing || !this.httpPatchNode) return
-    if (this.httpTextFlushing) {
+    if (this.httpTextFlushPromise) {
       this.httpTextFlushQueued = true
+      await this.httpTextFlushPromise
+      if (this.httpTextFlushQueued && !this.httpTextFlushPromise) {
+        return this.flushHttpTextNow()
+      }
       return
     }
     this.httpTextFlushing = true
-    try {
-      do {
-        this.httpTextFlushQueued = false
-        await this.flushHttpTextOnce()
-      } while (this.httpTextFlushQueued)
-    } finally {
-      this.httpTextFlushing = false
-    }
+    const run = (async () => {
+      try {
+        do {
+          this.httpTextFlushQueued = false
+          await this.flushHttpTextOnce()
+        } while (this.httpTextFlushQueued)
+      } finally {
+        this.httpTextFlushing = false
+        this.httpTextFlushPromise = null
+      }
+    })()
+    this.httpTextFlushPromise = run
+    return run
   }
 
   async flushHttpTextOnce() {
@@ -5880,6 +5957,11 @@ class Cooperate {
     this._v2MoveActive = true
     try {
       this.applyMoveNodeData(node, parent, origin.index)
+      if (origin.position) {
+        node.setData(origin.position)
+        node.customLeft = origin.position.customLeft == null ? undefined : origin.position.customLeft
+        node.customTop = origin.position.customTop == null ? undefined : origin.position.customTop
+      }
       if (typeof this.mindMap.render === 'function') this.mindMap.render()
     } finally {
       this.isApplyingRemote = false
@@ -5925,13 +6007,16 @@ class Cooperate {
         index: item.index,
         oldParentUid: origin && origin.parent,
         oldIndex: origin && origin.index,
+        patch: { customLeft: null, customTop: null },
         kind
       }
       const send = this.collabV2Adapter
         ? this.submitV2('node.move', payload)
         : this.httpPatchNode(item.uid, {
             parent: item.parent,
-            index: item.index
+            index: item.index,
+            customLeft: null,
+            customTop: null
           })
       return send
         .then(result => {
@@ -5966,6 +6051,7 @@ class Cooperate {
             parentUid: item.parent,
             newParentUid: item.parent,
             index: item.index,
+            patch: { customLeft: null, customTop: null },
             oldParentUid: originByUid.get(item.uid) && originByUid.get(item.uid).parent,
             oldIndex: originByUid.get(item.uid) && originByUid.get(item.uid).index,
             kind:

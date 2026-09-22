@@ -26,7 +26,7 @@ export function matchDRegistryTitle(text) {
   return { id: 'D', title, raw: trimmed }
 }
 
-export const SOP_REGISTRY_SYSTEM = `你是良策 SOP 台账助手。任务：从用户给出的思维导图/XMind 大纲或粘贴文本中，识别「D：标题」条目，整理成可管理的 SOP 清单，并补全台账字段与可选的 C/P 骨架。
+export const SOP_REGISTRY_SYSTEM = `你是CPD SOP 台账助手。任务：从用户给出的思维导图/XMind 大纲或粘贴文本中，识别「D：标题」条目，整理成可管理的 SOP 清单，并补全台账字段与可选的 C/P 骨架。
 
 【编号语义 — 必须遵守】
 - 台账 SOP 标题格式为单独字母「D：业务标题」（如「D：采购目标」「D: 招聘」）。

@@ -1,22 +1,25 @@
 <template>
   <div
     class="productShell"
-    :class="{ 'productShell--collapsed': sidebarCollapsed }"
+    :class="{
+      'productShell--collapsed': !hideSidebar && sidebarCollapsed,
+      'productShell--solo': hideSidebar
+    }"
   >
     <button
-      v-if="!sidebarCollapsed"
+      v-if="!hideSidebar && !sidebarCollapsed"
       class="sidebarBackdrop"
       aria-label="关闭展开的侧栏"
       @click="setSidebarCollapsed(true)"
     />
-    <aside class="productSidebar">
+    <aside v-if="!hideSidebar" class="productSidebar">
       <div class="sidebarHeader">
         <div
           v-if="!sidebarCollapsed"
           class="productLogo"
           @click="$router.push('/files')"
         >
-          <span>良</span><strong>良策</strong>
+          <span>C</span><strong>CPD</strong>
         </div>
         <button
           v-else
@@ -28,7 +31,7 @@
           data-testid="sidebar-toggle"
           @click="setSidebarCollapsed(false)"
         >
-          <span class="collapsedLogoMark" aria-hidden="true">良</span>
+          <span class="collapsedLogoMark" aria-hidden="true">C</span>
           <svg
             class="collapsedLogoOpenIcon"
             viewBox="0 0 24 24"
@@ -181,12 +184,20 @@ export default {
       hasSidebarPreference: preference !== null,
       profile: null,
       fileNav: [
+        { path: '/files/recent', label: '最近', icon: 'el-icon-time' },
         { path: '/files', label: '脑图', icon: 'el-icon-files' },
         { path: '/files/favorites', label: '收藏', icon: 'el-icon-star-off' },
         { path: '/files/shared', label: '共享', icon: 'el-icon-user' },
         { path: '/files/trash', label: '回收站', icon: 'el-icon-delete' }
       ],
       loggingOut: false
+    }
+  },
+  computed: {
+    hideSidebar() {
+      return this.$route.matched.some(
+        record => record.meta && record.meta.hideSidebar
+      )
     }
   },
   mounted() {
@@ -732,6 +743,17 @@ export default {
   .productShell--collapsed .productSidebar .collapsedLogoTrigger,
   .productShell--collapsed .productSidebar .accountLogout {
     height: var(--rail-item);
+  }
+}
+.productShell--solo {
+  .productSidebar,
+  .sidebarBackdrop {
+    display: none !important;
+  }
+  .productMain {
+    margin-left: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
   }
 }
 </style>

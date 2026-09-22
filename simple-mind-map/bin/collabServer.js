@@ -35,6 +35,11 @@ const {
 } = require('./auth')
 const roomAcl = require('./roomAcl')
 const { issueMcpUserToken } = require('./mcpUserToken')
+const { handleMcpOAuth } = require('./mcpOAuth')
+const {
+  issueKnowledgeMcpToken,
+  knowledgeMcpConfigured
+} = require('./knowledgeMcpToken')
 const { setWsConnections, recordBroadcast } = require('./collabMetrics')
 const {
   attachCollabV2,
@@ -53,6 +58,10 @@ function handleMcpConfigApi(request, response, pathname) {
   const secret = String(process.env.MCP_TOKEN || '').trim()
   const allowed = user && user.id && !user.service
   const token = allowed && secret ? issueMcpUserToken(user.id, secret) : ''
+  const wikiToken =
+    allowed && knowledgeMcpConfigured()
+      ? issueKnowledgeMcpToken(user.id)
+      : ''
   const status = token ? 200 : allowed ? 503 : 403
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -61,7 +70,14 @@ function handleMcpConfigApi(request, response, pathname) {
   response.end(
     JSON.stringify(
       token
-        ? { token }
+        ? {
+            token,
+            // Same-origin proxy (nginx → knowledge-mcp). Client builds absolute
+            // URL from the page origin so localhost / LAN both work.
+            wikiMcpPath: '/knowledge-mcp/mcp',
+            wikiToken,
+            wikiConfigured: Boolean(wikiToken)
+          }
         : allowed
         ? {
             error: 'MCP 服务密钥尚未配置',
@@ -87,6 +103,7 @@ const server = http.createServer(async (request, response) => {
   try {
     const pathname = new URL(request.url, 'http://127.0.0.1').pathname
     const tusRequest = isTusPath(pathname)
+    if (await handleMcpOAuth(request, response, { authenticateRequest })) return
     if (request.method === 'OPTIONS' && pathname.startsWith('/api/') && !tusRequest) {
       applyCorsHeaders(request, response)
       response.writeHead(isAllowedOrigin(request) ? 204 : 403)
