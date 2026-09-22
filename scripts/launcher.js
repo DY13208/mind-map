@@ -136,6 +136,12 @@ function writeJson(file, data) {
   fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n', 'utf8')
 }
 
+// 本机任务桥同时也是 MCP 服务（HTTP /mcp），地址固定走回环：每台电脑连自己的桥接。
+function bridgeMcpEntry() {
+  const port = String(process.env.WORKBUDDY_JOB_BRIDGE_PORT || '8799')
+  return { type: 'streamable-http', url: `http://127.0.0.1:${port}/mcp` }
+}
+
 function mergeUserMcp(file, host) {
   if (!fs.existsSync(path.dirname(file))) return false
   let data = { mcpServers: {} }
@@ -153,6 +159,10 @@ function mergeUserMcp(file, host) {
     ...(data.mcpServers['mind-map'] || {}),
     ...mcpServerEntry(host)
   }
+  data.mcpServers['workbuddy-bridge'] = {
+    ...(data.mcpServers['workbuddy-bridge'] || {}),
+    ...bridgeMcpEntry()
+  }
   writeJson(file, data)
   return true
 }
@@ -161,7 +171,8 @@ function writeMcpConfig(host) {
   const entry = mcpServerEntry(host)
   writeJson(path.join(ROOT, '.mcp.json'), {
     mcpServers: {
-      'mind-map': entry
+      'mind-map': entry,
+      'workbuddy-bridge': bridgeMcpEntry()
     }
   })
   const home = os.homedir()
@@ -182,7 +193,10 @@ function writeRuntimeConfig(host) {
     webPort: WEB_PORT,
     collabPort: COLLAB_PORT,
     aiPort: AI_PORT,
-    mcpPort: MCP_PORT
+    mcpPort: MCP_PORT,
+    // 主服务（通讯页 comm.py）地址：脑图「运行」用它列出局域网其他主机。
+    // 留空时页面按 http://<页面host>:5000 兜底。
+    workbuddyJobHub: String(process.env.WORKBUDDY_JOB_BRIDGE_HUB || '').trim()
   }
   const content =
     'window.__MIND_MAP_RUNTIME__ = ' + JSON.stringify(config, null, 2) + '\n'
@@ -475,12 +489,138 @@ function printUrls(host) {
   log(
     paint(
       c.dim,
-      '  SOP / AI 执行统一走 OpenClaw；不再启动 WorkBuddy / 小策代理。'
+      '  SOP / AI 执行统一走 OpenClaw；不再启动 WorkBuddy / 小策 Chat 代理。'
+    )
+  )
+  log(
+    paint(
+      c.dim,
+      '  脑图「运行」按 test1.py 协议派发：可选本机或局域网其他主机，'
+    )
+  )
+  log(
+    paint(
+      c.dim,
+      '  任务桥同时是 MCP 服务：' + bridgeMcpEntry().url + '（已写进 .mcp.json）'
+    )
+  )
+  log(
+    paint(
+      c.dim,
+      '  主机列表来自通讯页 comm.py（默认 http://' +
+        host +
+        ':5000/api/peers）。'
     )
   )
   log(paint(c.dim, '  已写入项目 .mcp.json。局域网同事打开页面地址即可协同。'))
   log(paint(c.dim, '  关闭本窗口或按 Ctrl+C 会停止全部服务。'))
   log('')
+}
+
+function resolvePythonCmd() {
+  const candidates = ['python', 'py', 'python3']
+  for (const cmd of candidates) {
+    try {
+      execSync(`${cmd} --version`, { stdio: 'ignore' })
+      return cmd
+    } catch (_) {
+      // try next
+    }
+  }
+  return null
+}
+
+function resolveWorkbuddyJobBridgeScript() {
+  const fromEnv = String(process.env.WORKBUDDY_JOB_BRIDGE_SCRIPT || '').trim()
+  const candidates = [
+    fromEnv,
+    path.join(ROOT, 'scripts', 'workbuddy-job-bridge.py'),
+    'D:\\test\\workbuddy\\test1.py',
+    path.join('D:', 'test', 'workbuddy', 'test1.py')
+  ].filter(Boolean)
+  for (const file of candidates) {
+    try {
+      if (fs.existsSync(file)) return file
+    } catch (_) {
+      // ignore
+    }
+  }
+  return null
+}
+
+function isOff(value) {
+  return /^(0|false|off|no)$/i.test(String(value || ''))
+}
+
+function startWorkbuddyJobBridge(host) {
+  if (isOff(process.env.WORKBUDDY_JOB_BRIDGE || '1')) {
+    log(paint(c.dim, '  已跳过本机 WorkBuddy 任务桥（WORKBUDDY_JOB_BRIDGE=0）'))
+    return
+  }
+  const script = resolveWorkbuddyJobBridgeScript()
+  if (!script) {
+    log(
+      paint(
+        c.yellow,
+        '  未找到任务桥脚本（D:\\test\\workbuddy\\test1.py），脑图「运行」将不可用'
+      )
+    )
+    return
+  }
+  const py = resolvePythonCmd()
+  if (!py) {
+    log(paint(c.yellow, '  未找到 python，无法启动本机 WorkBuddy 任务桥'))
+    return
+  }
+  const port = String(process.env.WORKBUDDY_JOB_BRIDGE_PORT || '8799')
+  // 8799 上已经有桥接（多半是计划任务 / run_bridge.bat 起的），不要再起一个：
+  // 否则第二个进程绑不上端口会一直重启刷日志。
+  const holders = pidsOnPort(port)
+  if (holders.length) {
+    log(
+      paint(
+        c.dim,
+        `  ${port} 端口已有任务桥在跑（pid ${holders.join('、')}），跳过启动`
+      )
+    )
+    return
+  }
+  // 默认开 --lan：这台「主服务」要能被局域网其他主机和通讯页按 IP 调用。
+  const lan = !isOff(process.env.WORKBUDDY_JOB_BRIDGE_LAN || '1')
+  const hub = String(process.env.WORKBUDDY_JOB_BRIDGE_HUB || '').trim()
+  // 跨源白名单：本机/局域网页面的来源 + 部署在服务器上的脑图域名。
+  // 部署换了域名就改 WORKBUDDY_JOB_BRIDGE_ALLOW_ORIGIN（逗号分隔，支持 *.domain）。
+  const origins =
+    String(process.env.WORKBUDDY_JOB_BRIDGE_ALLOW_ORIGIN || '').trim() ||
+    [
+      '*.stillgroup.net',
+      `http://127.0.0.1:${WEB_PORT}`,
+      `http://localhost:${WEB_PORT}`,
+      host ? `http://${host}:${WEB_PORT}` : ''
+    ]
+      .filter(Boolean)
+      .join(',')
+
+  const args = [script, '--port', port, '--allow-origin', origins]
+  if (lan) {
+    args.push('--lan')
+  } else {
+    args.push('--host', '127.0.0.1')
+  }
+  if (hub) args.push('--hub', hub)
+
+  log(
+    paint(
+      c.yellow,
+      `  正在启动 WorkBuddy 任务桥（${port}${lan ? ' · 局域网可达' : ' · 仅本机'}）...`
+    )
+  )
+  startProcess('WB任务桥', py, args, path.dirname(script), c.cyan, {}, {
+    restart: true
+  })
+  if (lan && host) {
+    log(paint(c.dim, `  其他主机的桥接：test1.py --lan --hub http://${host}:5000`))
+  }
 }
 
 function ask(question) {
@@ -562,8 +702,11 @@ async function startAll({ pickIp = false } = {}) {
     log(paint(c.red, '  未启动数据库时，协同端口 1234 起不来。页面仍会打开，但加入房间会失败。'))
   }
 
-  log(paint(c.yellow, '  跳过 WorkBuddy / 小策执行代理（统一走助理 OpenClaw）...'))
+  log(paint(c.yellow, '  跳过 WorkBuddy / 小策 Chat 代理（统一走助理 OpenClaw）...'))
   stopWorkbuddyApi({ root: ROOT })
+
+  // 本机任务桥：脑图「运行」→ 派发到桌面版 WorkBuddy /api/v1/jobs（test1.py）
+  startWorkbuddyJobBridge(host)
 
   log(paint(c.yellow, '  正在启动全部服务（含协同 1234）...'))
   startProcess(
