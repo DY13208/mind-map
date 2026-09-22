@@ -8,6 +8,12 @@
  *   node scripts/wiki-contract-node-insert.js --elements <要素.json>            # 预演（默认不写）
  *   node scripts/wiki-contract-node-insert.js --elements <要素.json> --apply    # 真正写入
  *
+ * 读 content 的两种方式：
+ *   默认            —— 本机 Docker psql 读 pages.content（要求 MCP 端点=本机库）
+ *   --content-from-mcp —— 走 MCP wiki_read format=json 读整页（0.6.1+）。
+ *      用于写线上端点：读与写走同一个 MCP，天然同源，不再依赖本机库。
+ *      要求服务端 KNOWLEDGE_WIKI_MAX_BODY ≥ 页面 JSON 长度（145 万字符页面设 2000000）。
+ *
  * 要素.json 格式：
  *   {
  *     "contract": "胡可直播业务合同（still0730）",
@@ -39,6 +45,7 @@ const CONTRACT_ANCHOR = '合同';
 const args = process.argv.slice(2);
 const arg = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
 const APPLY = args.includes('--apply');
+const FROM_MCP = args.includes('--content-from-mcp');
 const ELEMENTS_FILE = arg('--elements');
 const PAGE_TITLE = arg('--page-title', DEFAULT_PAGE_TITLE);
 
@@ -54,17 +61,22 @@ if (!spec.elements || typeof spec.elements !== 'object') die('要素文件缺少
 
 // ---------- MCP 客户端 ----------
 function mcpClient() {
-  const entry = require('./wiki-endpoint').readEntry();
-  if (!entry || !entry.headers || !entry.headers.Authorization) {
-    die('mcp.json 里没有 mind-map-wiki 的 Authorization');
-  }
+  const ep2 = require('./wiki-endpoint');
+  const cliToken = arg('--token');           // 本地测试可显式传 token（默认取 mcp.json）
+  const entry = ep2.readEntry();
+  let auth = null;
+  if (cliToken) auth = 'Bearer ' + cliToken;
+  else if (entry && entry.headers && entry.headers.Authorization) auth = entry.headers.Authorization;
+  else die('mcp.json 里没有 mind-map-wiki 的 Authorization');
   const headers = {
-    Authorization: entry.headers.Authorization,
+    Authorization: auth,
     'Content-Type': 'application/json',
     Accept: 'application/json, text/event-stream',
   };
+  // --url 覆盖端点（配合 --token 用于本地测试；默认 mcp.json 的地址）
+  const url = arg('--url') || MCP_URL;
   const call = async (p) => {
-    const res = await fetch(MCP_URL, { method: 'POST', headers, body: JSON.stringify(p) });
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(p) });
     const sid = res.headers.get('mcp-session-id');
     if (sid) headers['mcp-session-id'] = sid;
     const text = await res.text();
@@ -161,32 +173,46 @@ function stripIds(n) {
   if (!page) die(`未找到 Wiki 页面「${PAGE_TITLE}」`);
   log('页面：%s (%s)', page.title, page.pageId);
 
-  // 2) 读全文（markdown 用于人读校验；content 用于改写）
-  const doc = await client.tool('wiki_read', { pageId: page.pageId });
-  if (doc.truncated) log('⚠ 该页 wiki_read 被截断（%d 字符），要素校验以库里的 content 为准', doc.bodyChars);
-
-  // 3) 备份 content
-  //    ★ 关键护栏：content 是用「本机 Docker 的 psql」读的，而写入走 MCP_URL。
-  //      两者若指向不同的 Docmost，就会「读A写B」——2026-09-21 事故正是如此。
-  //      这里强制确认 page.pageId 在本机库里真实存在，否则拒绝继续。
+  // 2) 读全文并备份 content
   const backupDir = path.join(ROOT, 'tmp', 'wiki-backup');
   fs.mkdirSync(backupDir, { recursive: true });
-  const probe = psql(`select count(*) from pages where id::text='${page.pageId}';`).trim();
-  if (probe !== '1') {
-    die([
-      '页面来源校验失败：MCP 端返回的 pageId 在本机 Docmost 库里不存在。',
-      `  MCP 端点        : ${MCP_URL}`,
-      `  MCP 返回 pageId : ${page.pageId}`,
-      `  本机库命中条数  : ${probe}`,
-      '',
-      '  说明 MCP 端点与你本机 Docker 里的 Docmost 不是同一套数据。',
-      '  脚本用本机 psql 读 content、却会用 MCP 写回，属于「读A写B」，已中止。',
-      '  处理：把 mcp.json 的 mind-map-wiki.url 改回本机回环地址，',
-      '        或改用能读到目标库的 DOCMOST_DB_CONTAINER。',
-    ].join('\n'));
+  let raw;
+  if (FROM_MCP) {
+    // ★ 读写同源模式：content 与写入都走同一个 MCP 端点，适用于线上等远端部署。
+    //   需要 knowledge-mcp 0.6.1+（wiki_read format=json），且服务端
+    //   KNOWLEDGE_WIKI_MAX_BODY ≥ 页面 JSON 长度。
+    const doc = await client.tool('wiki_read', { pageId: page.pageId, format: 'json' });
+    if (doc.truncated) {
+      die([
+        `整页 JSON 被截断：真实 ${doc.bodyChars} 字符，服务端只回 ${doc.body.length} 字符。`,
+        '  处理：调大服务端 KNOWLEDGE_WIKI_MAX_BODY（145 万字符页面建议 2000000）并重启 knowledge-mcp。',
+      ].join('\n'));
+    }
+    raw = doc.body;
+    log('content 经 MCP 读取（读写同源）：%d 字符', raw.length);
+  } else {
+    const doc = await client.tool('wiki_read', { pageId: page.pageId });
+    if (doc.truncated) log('⚠ 该页 wiki_read 被截断（%d 字符），要素校验以库里的 content 为准', doc.bodyChars);
+    //    ★ 关键护栏：content 是用「本机 Docker 的 psql」读的，而写入走 MCP_URL。
+    //      两者若指向不同的 Docmost，就会「读A写B」——2026-09-21 事故正是如此。
+    //      这里强制确认 page.pageId 在本机库里真实存在，否则拒绝继续。
+    const probe = psql(`select count(*) from pages where id::text='${page.pageId}';`).trim();
+    if (probe !== '1') {
+      die([
+        '页面来源校验失败：MCP 端返回的 pageId 在本机 Docmost 库里不存在。',
+        `  MCP 端点        : ${MCP_URL}`,
+        `  MCP 返回 pageId : ${page.pageId}`,
+        `  本机库命中条数  : ${probe}`,
+        '',
+        '  说明 MCP 端点与你本机 Docker 里的 Docmost 不是同一套数据。',
+        '  脚本用本机 psql 读 content、却会用 MCP 写回，属于「读A写B」，已中止。',
+        '  处理：加 --content-from-mcp 改为读写同源（推荐，写线上时必用），',
+        '        或把 mcp.json 的 url 改回本机回环地址。',
+      ].join('\n'));
+    }
+    raw = psql(`select content from pages where id::text='${page.pageId}';`).trim();
+    if (!raw) die('读不到 pages.content');
   }
-  const raw = psql(`select content from pages where id::text='${page.pageId}';`).trim();
-  if (!raw) die('读不到 pages.content');
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const backupFile = path.join(backupDir, `${PAGE_TITLE}-${stamp}.json`);
   fs.writeFileSync(backupFile, raw, 'utf8');
@@ -262,11 +288,21 @@ function stripIds(n) {
   const res = await client.tool('wiki_update', { pageId: page.pageId, format: 'json', operation: 'replace', content: tree });
   log('写入返回 status=%s audit=%s', res.status, JSON.stringify(res.audit || {}));
 
-  // 10) 三点验证
-  const row = psql(`select (content::text like '%${spec.contract}%')::text || '|' || (coalesce(text_content,'') like '%${spec.contract}%')::text || '|' || (tsv is not null)::text from pages where id::text='${page.pageId}';`).trim();
-  const [c1, c2v, c3] = row.split('|');
-  log('验证：content=%s text_content=%s tsv存在=%s', c1, c2v, c3);
-  if (c1 !== 'true' || c2v !== 'true') die('写入后校验未通过，请用备份回滚：' + backupFile);
+  // 10) 写入后验证
+  if (FROM_MCP) {
+    // MCP 模式：搜索索引命中 + 回读 JSON 确认（线上库本机 psql 够不着）
+    const s = await client.tool('wiki_search', { query: spec.contract, limit: 5 });
+    const hit = (s.items || []).find((i) => i.pageId === page.pageId);
+    const re = await client.tool('wiki_read', { pageId: page.pageId, format: 'json' });
+    const inBody = re.body.includes(spec.contract);
+    log('验证：搜索索引=%s 回读含合同名=%s', hit ? '命中' : '未命中', inBody);
+    if (!hit || !inBody) die('写入后校验未通过，请用备份回滚：' + backupFile);
+  } else {
+    const row = psql(`select (content::text like '%${spec.contract}%')::text || '|' || (coalesce(text_content,'') like '%${spec.contract}%')::text || '|' || (tsv is not null)::text from pages where id::text='${page.pageId}';`).trim();
+    const [c1, c2v, c3] = row.split('|');
+    log('验证：content=%s text_content=%s tsv存在=%s', c1, c2v, c3);
+    if (c1 !== 'true' || c2v !== 'true') die('写入后校验未通过，请用备份回滚：' + backupFile);
+  }
 
   log('');
   log('✓ 已插入「%s」到 %s / %s', spec.contract, spec.category, PAGE_TITLE);

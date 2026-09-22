@@ -1,4 +1,4 @@
-# 给线上部署补上 Wiki 写工具（knowledge-mcp 0.5.0 → 0.6.0）
+# 给线上部署补上 Wiki 写工具（knowledge-mcp 0.5.0 → 0.6.0 → 0.6.1）
 
 > 结论先说：**线上缺的不是「补一个工具」，而是整个 `0.6.0` 镜像没发布出去。**
 > 写工具（`wiki_create` / `wiki_update`）只存在于本地未提交的工作区改动里，
@@ -195,3 +195,54 @@ wiki_read    pageId=<上一步返回的 pageId>
    `mind-map-wiki.url` 为准；回退本机或解析出回环地址都会打醒目告警。
 2. `scripts/wiki-contract-node-insert.js` 的页面来源校验 —— 写入前先验证
    「MCP 返回的 pageId 在本机 Docmost 库里存在」，不匹配即中止（读 A 写 B 防护）。
+
+---
+
+## 7. 0.6.1：跨机安全写入（读写同源，2026-09-22 增补）
+
+0.6.0 只解决了「线上有写工具」，但插入脚本的读通道仍是**本机 psql**——
+写线上时依然是「读 A（本机库）写 B（线上）」。0.6.1 从根上修掉：
+
+- `wiki_read` 新增 `format=json`：直接返回 Docmost 存储的 ProseMirror content
+  原文（`/api/pages/info` 对 json 透传，不渲染）。
+- `wiki-contract-node-insert.js --content-from-mcp`：整页 content 改走 MCP 读取，
+  读与写同一端点，天然同源，**写线上不再依赖本机 Docker**。
+
+### 线上部署 0.6.1
+
+```bash
+# 1) 本地：提交推送（0.6.1 = wiki_read json + 大页面限制已进 compose）
+git add -A && git commit -m "feat: knowledge-mcp 0.6.1 wiki_read format=json；跨机读写同源" && git push
+
+# 2) 线上服务器
+cd <部署目录> && git pull
+
+#    .env 追加（公司模型整页 JSON 约 131 万字符，默认 120000/200000/1000000 全不够）
+KNOWLEDGE_WIKI_MAX_BODY=2000000        # wiki_read 整页读取上限
+KNOWLEDGE_MCP_MAX_WRITE_CHARS=3000000  # wiki_update 整页写回上限
+KNOWLEDGE_MCP_MAX_BODY_BYTES=8000000   # 请求体上限（JSON 转义后体积膨胀）
+
+#    .env 确认已有（线上能读 Wiki 即已具备）：
+#    DOCMOST_DATABASE_URL=postgresql://…@docmost-db:5432/docmost
+#    DOCMOST_APP_SECRET=…
+
+docker compose -f docker-compose.yml build knowledge-mcp
+docker compose -f docker-compose.yml up -d knowledge-mcp
+
+# 3) 任意机器验收
+node scripts/wiki-write-check.js https://xx.stillgroup.net:8989/knowledge-mcp/mcp --expect 18
+```
+
+### 写线上合同（全部在本机执行）
+
+```bash
+node scripts/wiki-contract-node-insert.js --elements data/contracts/huke-still0730.json           # 预演
+node scripts/wiki-contract-node-insert.js --elements data/contracts/huke-still0730.json --apply   # 写入
+```
+
+端点/令牌自动取 mcp.json。脚本流程：MCP 读整页 JSON（130 万字符）→ 备份到
+`tmp/wiki-backup/` → 定位「合同 → 直播推广」→ 要素名强校验 → 查重 → 纯新增校验
+→ `wiki_update`（format=json）→ 搜索索引命中 + 回读复核。
+
+本机自测可用 `--url http://127.0.0.1:18792/mcp --token <本地签发的token>`，
+token 用 `node scripts/wiki-mcp-token.js dev-local --ttl 3600` 签。
