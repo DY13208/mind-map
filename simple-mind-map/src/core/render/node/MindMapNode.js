@@ -412,6 +412,10 @@ class MindMapNode {
         ](this, true)
         this.renderer.emitNodeActiveEvent(isActive ? null : this)
       }
+      if (e.which === 3) {
+        this._rightDownX = e.clientX
+        this._rightDownY = e.clientY
+      }
       this.mindMap.emit('node_mousedown', this, e)
     })
     this.group.on('mouseup', e => {
@@ -463,6 +467,16 @@ class MindMapNode {
       }
       e.stopPropagation()
       e.preventDefault()
+      // 只忽略这次右键自己拖动了画布的情况。不能拿上一次左键框选的按下位置来比，
+      // 否则框选后再点右键会被当成拖动，菜单打不开。
+      if (
+        useLeftKeySelectionRightKeyDrag &&
+        this._rightDownX != null &&
+        (Math.abs(e.clientX - this._rightDownX) > 5 ||
+          Math.abs(e.clientY - this._rightDownY) > 5)
+      ) {
+        return
+      }
       const activeList = this.renderer.activeNodeList || []
       const cached =
         (this.mindMap.select &&

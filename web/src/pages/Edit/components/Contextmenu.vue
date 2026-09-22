@@ -393,25 +393,47 @@ export default {
       })
     },
 
+    isRightDragMode() {
+      return !!(
+        this.mindMap &&
+        this.mindMap.opt &&
+        this.mindMap.opt.useLeftKeySelectionRightKeyDrag
+      )
+    },
+
     onMultiSelectEnd(payload) {
       const nodes = (payload && payload.nodes) || []
       if (nodes.length <= 1) return
+      // 左键框选、右键拖动时，框选结束不要立刻弹菜单，等用户再点右键。
+      if (this.isRightDragMode()) return
+      this.showSelectionMenu(nodes, payload.clientX, payload.clientY)
+    },
+
+    showSelectionMenu(nodes, clientX, clientY) {
+      const list = nodes || []
+      if (list.length <= 1) return false
       const anchor =
-        nodes.find(item => item && !item.isRoot && !item.isGeneralization) ||
-        nodes[0]
+        list.find(item => item && !item.isRoot && !item.isGeneralization) ||
+        list[0]
       this.type = 'node'
       this.isShow = true
       this.node = anchor
-      this.selectedNodes = nodes.slice()
+      this.selectedNodes = list.slice()
+      const number = anchor && anchor.getData && anchor.getData('number')
+      if (number) {
+        this.numberType = number.type || 1
+        this.numberLevel = number.level === '' ? 1 : number.level
+      }
       this.$nextTick(() => {
         if (!this.isShow || !this.$refs.contextmenuRef) return
         const { x, y } = this.getShowPosition(
-          (payload.clientX || 0) + 10,
-          (payload.clientY || 0) + 10
+          (clientX || 0) + 10,
+          (clientY || 0) + 10
         )
         this.left = x
         this.top = y
       })
+      return true
     },
 
     nodeUid(node) {
@@ -529,13 +551,27 @@ export default {
       const moved =
         Math.abs(this.mosuedownX - e.clientX) > 3 ||
         Math.abs(this.mosuedownY - e.clientY) > 3
-      if (moved) {
+      const draggedCanvas =
+        this.isRightDragMode() &&
+        (Math.abs(this.mosuedownX - e.clientX) > 8 ||
+          Math.abs(this.mosuedownY - e.clientY) > 8)
+      if (draggedCanvas) {
+        this.hide()
+        return
+      }
+      if (moved && !this.isRightDragMode()) {
         const cached = this.getCachedMultiNodes()
-        // 右键框选结束后马上要点「插入概要」，不能把刚弹出的菜单关掉
+        // 右键框选结束后菜单已经打开，拖动松开时不要把它关掉。
         if (cached.length > 1) {
           return
         }
         this.hide()
+        return
+      }
+      if (
+        this.isRightDragMode() &&
+        this.showSelectionMenu(this.getCachedMultiNodes(), e.clientX, e.clientY)
+      ) {
         return
       }
       this.show2(e)
