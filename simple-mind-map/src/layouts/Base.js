@@ -186,8 +186,10 @@ class Base {
         (newNode.getData('resetRichText') && // 自定义节点内容可以直接忽略resetRichText
           !newNode.isUseCustomNodeContent()) ||
         newNode.getData('needUpdate') ||
+        newNode._forceMeasure ||
         isNodeInnerFixChange
       ) {
+        newNode._forceMeasure = false
         newNode.getSize()
         newNode.needLayout = true
       }
@@ -238,8 +240,10 @@ class Base {
         (newNode.getData('resetRichText') &&
           !newNode.isUseCustomNodeContent()) ||
         newNode.getData('needUpdate') ||
+        newNode._forceMeasure ||
         isNodeInnerFixChange
       ) {
+        newNode._forceMeasure = false
         newNode.getSize()
         newNode.needLayout = true
       }

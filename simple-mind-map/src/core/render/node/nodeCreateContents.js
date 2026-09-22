@@ -111,6 +111,28 @@ const getRichTextMeasureCache = mindMap => {
   return mindMap.commonCaches.richTextMeasureCache
 }
 
+// Canvas width can be a few pixels smaller than the real glyphs, so a line
+// that "fits" still wraps in the node and overlaps the sibling below.
+const readRichTextDomBox = (mindMap, el) => {
+  if (!mindMap || !mindMap.el || !el) return null
+  let host = mindMap.commonCaches.measureRichtextNodeTextSizeEl
+  if (!host) {
+    host = document.createElement('div')
+    host.style.position = 'fixed'
+    host.style.left = '-99999px'
+    host.style.top = '0'
+    mindMap.el.appendChild(host)
+    mindMap.commonCaches.measureRichtextNodeTextSizeEl = host
+  }
+  host.appendChild(el)
+  const rect = el.getBoundingClientRect()
+  host.removeChild(el)
+  return {
+    width: rect.width,
+    height: rect.height
+  }
+}
+
 // 标签默认的样式
 const defaultTagStyle = {
   radius: 3, // 标签矩形的圆角大小
@@ -352,8 +374,19 @@ function createRichTextNode(specifyText) {
       el.style.width = this.customTextWidth + 'px'
     }
     const p = document.createElement('p')
+    p.style.margin = '0'
+    p.style.padding = '0'
+    p.style.lineHeight = '1.2'
     p.textContent = plainForDom
     el.appendChild(p)
+    if (width >= textAutoWrapWidth * 0.6) {
+      const domBox = readRichTextDomBox(this.mindMap, el)
+      if (domBox && domBox.height > height + 1) {
+        width = Math.min(Math.ceil(domBox.width) || width, textAutoWrapWidth)
+        height = Math.ceil(domBox.height)
+        measureCache.set(measureKey, { width, height })
+      }
+    }
   } else {
     if (!this.mindMap.commonCaches.measureRichtextNodeTextSizeEl) {
       this.mindMap.commonCaches.measureRichtextNodeTextSizeEl =
