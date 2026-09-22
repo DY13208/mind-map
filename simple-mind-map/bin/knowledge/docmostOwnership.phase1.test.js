@@ -10,7 +10,11 @@ function createMemoryPool() {
   return {
     async query(sql, params = []) {
       const q = String(sql).replace(/\s+/g, ' ').trim().toLowerCase()
-      if (q.startsWith('create table') || q.startsWith('create index')) {
+      if (
+        q.startsWith('create table') ||
+        q.startsWith('create index') ||
+        q.startsWith('alter table')
+      ) {
         return { rows: [] }
       }
       if (q.startsWith('select') && q.includes('from knowledge_docmost_mappings')) {
@@ -38,7 +42,9 @@ function createMemoryPool() {
           pageId,
           contentHash,
           lastSyncedVersion,
-          title
+          title,
+          lastSyncSource = '',
+          mindmapHash = ''
         ] = params
         const existing = rows.find(
           r =>
@@ -55,6 +61,9 @@ function createMemoryPool() {
             content_hash: contentHash,
             last_synced_version: lastSyncedVersion,
             title,
+            last_sync_source:
+              lastSyncSource || existing.last_sync_source || '',
+            mindmap_hash: mindmapHash || existing.mindmap_hash || '',
             updated_at: new Date().toISOString(),
             deleted_at: null
           })
@@ -72,6 +81,8 @@ function createMemoryPool() {
           content_hash: contentHash,
           last_synced_version: lastSyncedVersion,
           title,
+          last_sync_source: lastSyncSource || '',
+          mindmap_hash: mindmapHash || '',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           deleted_at: null
