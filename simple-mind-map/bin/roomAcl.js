@@ -76,21 +76,68 @@ function normalizeFolderRole(value) {
   return FOLDER_ROLES.includes(role) ? role : ''
 }
 
-function actorFromReq(req) {
+/**
+ * Comma/space/semicolon-separated internal user ids or WeCom userids.
+ * Example: MIND_MAP_SUPER_ADMIN_IDS=zhangsan,lisi
+ */
+function parseSuperAdminIds(env = process.env) {
+  return String(env.MIND_MAP_SUPER_ADMIN_IDS || '')
+    .split(/[,;\s]+/)
+    .map(item => normalizeUserId(item))
+    .filter(Boolean)
+}
+
+function isSuperAdminUser(user, env = process.env) {
+  if (!user) return false
+  const allow = parseSuperAdminIds(env)
+  if (!allow.length) return false
+  const candidates = [
+    normalizeUserId(user.id),
+    normalizeUserId(user.wecomUserId),
+    normalizeUserId(user.wecom_userid)
+  ].filter(Boolean)
+  return candidates.some(id => allow.includes(id))
+}
+
+function actorFromReq(req, env = process.env) {
   const user = req && req.authUser
   if (req && req.forceAcl) {
-    return { id: normalizeUserId(user && user.id), bypass: false, service: false }
-  }
-  if (!isAuthEnabled()) {
-    return { id: normalizeUserId(user && user.id), bypass: true, service: false }
+    return {
+      id: normalizeUserId(user && user.id),
+      bypass: false,
+      service: false,
+      superAdmin: false
+    }
   }
   if (!user) {
-    return { id: '', bypass: false, service: false }
+    if (!isAuthEnabled()) {
+      return { id: '', bypass: true, service: false, superAdmin: false }
+    }
+    return { id: '', bypass: false, service: false, superAdmin: false }
   }
   if (user.service) {
-    return { id: normalizeUserId(user.id || 'mcp-service'), bypass: true, service: true }
+    return {
+      id: normalizeUserId(user.id || 'mcp-service'),
+      bypass: true,
+      service: true,
+      superAdmin: false
+    }
   }
-  return { id: normalizeUserId(user.id), bypass: false, service: false }
+  const superAdmin = isSuperAdminUser(user, env)
+  if (!isAuthEnabled()) {
+    return {
+      id: normalizeUserId(user.id),
+      bypass: true,
+      service: false,
+      superAdmin
+    }
+  }
+  return {
+    id: normalizeUserId(user.id),
+    bypass: superAdmin,
+    service: false,
+    superAdmin
+  }
 }
 
 function presenceDocRoomKey(docName) {
@@ -454,10 +501,16 @@ async function assertRoomAccess(db, req, roomKey, action) {
         userId: actor.id
       }
     }
+    const summary = accessSummary(access.role || 'owner', {
+      bypass: true,
+      legacyOpen: access.legacyOpen
+    })
     return {
-      ...accessSummary(access.role, { bypass: true, legacyOpen: access.legacyOpen }),
       ...access,
-      userId: actor.id
+      ...summary,
+      role: summary.role || 'owner',
+      userId: actor.id,
+      superAdmin: !!actor.superAdmin
     }
   }
   if (!actor.id) {
@@ -1175,6 +1228,8 @@ module.exports = {
   sqlEffectiveRole,
   sqlPrimarySource,
   normalizeActorId,
+  parseSuperAdminIds,
+  isSuperAdminUser,
   actorFromReq,
   presenceDocRoomKey,
   inferRoomAcl,

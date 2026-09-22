@@ -321,6 +321,7 @@ export default {
     this.$bus.$on('localStorageExceeded', this.onLocalStorageExceeded)
     this.$bus.$on('toggle_appearance_mode', this.handleToggleAppearanceMode)
     this.$bus.$on('history-restored', this.onHistoryRestored)
+    this.$bus.$on('prepare_reload', this.prepareReload)
     window.addEventListener('resize', this.handleResize)
   },
   beforeDestroy() {
@@ -359,6 +360,7 @@ export default {
     this.$bus.$off('localStorageExceeded', this.onLocalStorageExceeded)
     this.$bus.$off('toggle_appearance_mode', this.handleToggleAppearanceMode)
     this.$bus.$off('history-restored', this.onHistoryRestored)
+    this.$bus.$off('prepare_reload', this.prepareReload)
     window.removeEventListener('resize', this.handleResize)
     if (this.mindMap) {
       this.unbindCanvasThemeEvents()
@@ -878,7 +880,35 @@ export default {
         this.storeDataTimer = null
       }
       this.pendingStoreData = null
-      storeData(this.mindMap.getData(true))
+      if (this.mindMap) storeData(this.mindMap.getData(true))
+    },
+
+    commitOpenTextEdit() {
+      const editor =
+        this.mindMap &&
+        this.mindMap.renderer &&
+        this.mindMap.renderer.textEdit
+      if (editor && typeof editor.hideEditTextBox === 'function') {
+        editor.hideEditTextBox()
+      }
+    },
+
+    async prepareReload(done) {
+      try {
+        this.commitOpenTextEdit()
+        this.manualSave()
+        if (this.storeConfigTimer) {
+          clearTimeout(this.storeConfigTimer)
+          this.storeConfigTimer = null
+        }
+        const cooperate = this.mindMap && this.mindMap.cooperate
+        if (cooperate && typeof cooperate.flushPendingForReload === 'function') {
+          await cooperate.flushPendingForReload({ timeoutMs: 4000 })
+        }
+        if (typeof done === 'function') done({ ok: true })
+      } catch (err) {
+        if (typeof done === 'function') done({ ok: false, error: err })
+      }
     },
 
     // 初始化

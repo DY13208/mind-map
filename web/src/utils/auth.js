@@ -2,6 +2,11 @@ import { FetchTimeoutError, fetchWithTimeout } from './fetchWithTimeout'
 import { getRuntimeConfig } from './runtimeConfig'
 
 const AUTH_TIMEOUT_MS = 30000
+export const ONEID_AUTO_ATTEMPT_KEY = 'mind_map_oneid_auto_attempted'
+export const WORKBUDDY_AUTO_ATTEMPT_KEY =
+  'mind_map_workbuddy_auto_attempted'
+export const WECOM_CLIENT_AUTO_ATTEMPT_KEY =
+  'mind_map_wecom_client_auto_attempted'
 
 let currentUser = null
 
@@ -83,6 +88,72 @@ export function getLoginUrl() {
   return url.toString()
 }
 
+export function getOneIdLoginUrl() {
+  const url = new URL(getAuthApiUrl('/api/auth/oneid/login'))
+  url.searchParams.set('return_to', currentReturnTo())
+  return url.toString()
+}
+
+export function getWorkBuddyLoginUrl() {
+  const url = new URL(getAuthApiUrl('/api/auth/workbuddy/login'))
+  url.searchParams.set('return_to', currentReturnTo())
+  return url.toString()
+}
+
+export function getWecomClientLoginUrl() {
+  const url = new URL(getAuthApiUrl('/api/auth/wecom/client-login'))
+  url.searchParams.set('return_to', currentReturnTo())
+  return url.toString()
+}
+
+export function markOneIdAutoLoginAttempted() {
+  try {
+    window.sessionStorage.setItem(ONEID_AUTO_ATTEMPT_KEY, '1')
+  } catch (err) {
+    // sessionStorage 不可用时仍允许标准 OIDC 跳转/退出。
+  }
+}
+
+export function clearOneIdAutoLoginAttempt() {
+  try {
+    window.sessionStorage.removeItem(ONEID_AUTO_ATTEMPT_KEY)
+  } catch (err) {
+    // sessionStorage 不可用不影响已建立的登录会话。
+  }
+}
+
+export function markWorkBuddyAutoLoginAttempted() {
+  try {
+    window.sessionStorage.setItem(WORKBUDDY_AUTO_ATTEMPT_KEY, '1')
+  } catch (err) {
+    // sessionStorage 不可用时仍允许标准 OAuth 跳转/退出。
+  }
+}
+
+export function clearWorkBuddyAutoLoginAttempt() {
+  try {
+    window.sessionStorage.removeItem(WORKBUDDY_AUTO_ATTEMPT_KEY)
+  } catch (err) {
+    // sessionStorage 不可用不影响已建立的登录会话。
+  }
+}
+
+export function markWecomClientAutoLoginAttempted() {
+  try {
+    window.sessionStorage.setItem(WECOM_CLIENT_AUTO_ATTEMPT_KEY, '1')
+  } catch (err) {
+    // sessionStorage 不可用时仍允许企业微信网页授权跳转。
+  }
+}
+
+export function clearWecomClientAutoLoginAttempt() {
+  try {
+    window.sessionStorage.removeItem(WECOM_CLIENT_AUTO_ATTEMPT_KEY)
+  } catch (err) {
+    // sessionStorage 不可用不影响已建立的登录会话。
+  }
+}
+
 export async function createLoginQr() {
   const url = new URL(getAuthApiUrl('/api/auth/qr'))
   url.searchParams.set('return_to', currentReturnTo())
@@ -121,6 +192,10 @@ export function getLogoutNavigationUrl(returnTo) {
 // 永远不抛异常：返回服务端是否确认退出，让调用方决定是否走兜底跳转。
 // 退出按钮卡在「退出中…」出不来，比退出失败更让人困惑。
 export async function logout() {
+  // 用户主动退出后，本标签页不能立刻再次触发 OneID 自动登录。
+  markOneIdAutoLoginAttempted()
+  // 企业微信客户端内也要尊重主动退出，不能立即静默登录回来。
+  markWecomClientAutoLoginAttempted()
   let confirmed = false
   try {
     const response = await fetchWithTimeout(

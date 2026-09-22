@@ -1,5 +1,6 @@
 const assert = require('assert')
 
+process.env.MIND_MAP_SKIP_ROOT_ENV = '1'
 Object.assign(process.env, {
   WECOM_AUTH_ENABLED: 'true',
   WECOM_CORP_ID: 'wwcorp123456',
@@ -52,9 +53,133 @@ const embeddedLoginUrl = new URL(
 )
 assert.strictEqual(embeddedLoginUrl.searchParams.get('login_type'), 'jssdk')
 
+const clientLoginUrl = new URL(__test.buildWecomClientLoginUrl(signed))
+assert.strictEqual(clientLoginUrl.origin, 'https://open.weixin.qq.com')
+assert.strictEqual(clientLoginUrl.pathname, '/connect/oauth2/authorize')
+assert.strictEqual(clientLoginUrl.searchParams.get('appid'), 'wwcorp123456')
+assert.strictEqual(clientLoginUrl.searchParams.get('agentid'), '1000002')
+assert.strictEqual(clientLoginUrl.searchParams.get('scope'), 'snsapi_base')
+assert.strictEqual(clientLoginUrl.searchParams.get('response_type'), 'code')
+assert.strictEqual(clientLoginUrl.searchParams.get('state'), signed)
+assert.strictEqual(
+  clientLoginUrl.searchParams.get('redirect_uri'),
+  'https://mindmap.example.com/api/auth/wecom/callback'
+)
+assert.strictEqual(clientLoginUrl.hash, '#wechat_redirect')
+
 assert.deepStrictEqual(__test.readConfig({ WECOM_AUTH_ENABLED: 'false' }), {
   enabled: false
 })
+const oneIdOnlyConfig = __test.readConfig({
+  ...process.env,
+  WECOM_AUTH_ENABLED: 'false',
+  ONEID_AUTH_ENABLED: 'true',
+  ONEID_CLIENT_ID: 'oneid-client',
+  ONEID_CLIENT_SECRET: 'oneid-secret',
+  ONEID_ISSUER: 'https://oauth2.account.tencent.com/issuer',
+  ONEID_AUTHORIZATION_ENDPOINT:
+    'https://oauth2.account.tencent.com/issuer/authorize',
+  ONEID_TOKEN_ENDPOINT: 'https://oauth2.account.tencent.com/issuer/token',
+  ONEID_USERINFO_ENDPOINT:
+    'https://oauth2.account.tencent.com/issuer/userinfo',
+  ONEID_REDIRECT_URI:
+    'https://mindmap.example.com/api/auth/oneid/callback',
+  ONEID_LOGIN_READY: 'true',
+  ONEID_AUTO_LOGIN: 'true'
+})
+assert.strictEqual(oneIdOnlyConfig.enabled, true)
+assert.strictEqual(oneIdOnlyConfig.wecomEnabled, false)
+assert.strictEqual(oneIdOnlyConfig.oneIdEnabled, true)
+assert.strictEqual(oneIdOnlyConfig.oneId.loginReady, true)
+assert.strictEqual(oneIdOnlyConfig.oneId.autoLogin, true)
+assert.deepStrictEqual(oneIdOnlyConfig.oneId.scopes, [
+  'openid',
+  'profile',
+  'mobile'
+])
+const pendingOneIdConfig = __test.readConfig({
+  ...process.env,
+  WECOM_AUTH_ENABLED: 'false',
+  ONEID_AUTH_ENABLED: 'true',
+  ONEID_CLIENT_ID: 'oneid-client',
+  ONEID_CLIENT_SECRET: 'oneid-secret',
+  ONEID_ISSUER: 'https://oauth2.account.tencent.com/issuer',
+  ONEID_AUTHORIZATION_ENDPOINT:
+    'https://oauth2.account.tencent.com/issuer/authorize',
+  ONEID_TOKEN_ENDPOINT: 'https://oauth2.account.tencent.com/issuer/token',
+  ONEID_USERINFO_ENDPOINT:
+    'https://oauth2.account.tencent.com/issuer/userinfo',
+  ONEID_REDIRECT_URI:
+    'https://mindmap.example.com/api/auth/oneid/callback',
+  ONEID_LOGIN_READY: 'false',
+  ONEID_AUTO_LOGIN: 'true'
+})
+assert.strictEqual(pendingOneIdConfig.oneId.loginReady, false)
+const workBuddyConfig = __test.readConfig({
+  ...process.env,
+  WECOM_AUTH_ENABLED: 'false',
+  WORKBUDDY_AUTH_ENABLED: 'true',
+  WORKBUDDY_CLIENT_ID: 'workbuddy-client',
+  WORKBUDDY_CLIENT_SECRET: 'workbuddy-secret',
+  WORKBUDDY_REDIRECT_URI: 'https://mindmap.example.com/oauth/callback',
+  WORKBUDDY_AUTO_LOGIN: 'true'
+})
+assert.strictEqual(workBuddyConfig.enabled, true)
+assert.strictEqual(workBuddyConfig.workbuddyEnabled, true)
+assert.strictEqual(workBuddyConfig.workbuddy.autoLogin, true)
+assert.deepStrictEqual(workBuddyConfig.workbuddy.scopes, ['openid'])
+assert.strictEqual(
+  workBuddyConfig.workbuddy.authorizationEndpoint,
+  'https://www.workbuddy.cn/oauth2'
+)
+assert.strictEqual(
+  workBuddyConfig.workbuddy.tokenEndpoint,
+  'https://www.workbuddy.cn/oauth2/token'
+)
+assert.strictEqual(
+  workBuddyConfig.workbuddy.userinfoEndpoint,
+  'https://www.workbuddy.cn/oauth2/userinfo'
+)
+assert.deepStrictEqual(
+  __test.workBuddyClaims({ data: { userInfo: { sub: 'member-1' } } }),
+  { sub: 'member-1' }
+)
+assert.strictEqual(
+  __test.workBuddySubject({ openid: 'workbuddy-openid' }),
+  'workbuddy-openid'
+)
+assert.throws(
+  () =>
+    __test.readConfig({
+      ...process.env,
+      WECOM_AUTH_ENABLED: 'false',
+      WORKBUDDY_AUTH_ENABLED: 'true',
+      WORKBUDDY_CLIENT_ID: 'workbuddy-client',
+      WORKBUDDY_CLIENT_SECRET: 'workbuddy-secret',
+      WORKBUDDY_REDIRECT_URI:
+        'https://mindmap.example.com/api/auth/workbuddy/callback'
+    }),
+  /路径必须是 \/oauth\/callback/
+)
+assert.throws(
+  () =>
+    __test.readConfig({
+      ...process.env,
+      WECOM_AUTH_ENABLED: 'false',
+      ONEID_AUTH_ENABLED: 'true',
+      ONEID_CLIENT_ID: 'oneid-client',
+      ONEID_CLIENT_SECRET: 'oneid-secret',
+      ONEID_ISSUER: 'http://oauth2.account.tencent.com/issuer',
+      ONEID_AUTHORIZATION_ENDPOINT:
+        'https://oauth2.account.tencent.com/issuer/authorize',
+      ONEID_TOKEN_ENDPOINT: 'https://oauth2.account.tencent.com/issuer/token',
+      ONEID_USERINFO_ENDPOINT:
+        'https://oauth2.account.tencent.com/issuer/userinfo',
+      ONEID_REDIRECT_URI:
+        'https://mindmap.example.com/api/auth/oneid/callback'
+    }),
+  /必须使用 HTTPS/
+)
 assert.throws(
   () =>
     __test.readConfig({

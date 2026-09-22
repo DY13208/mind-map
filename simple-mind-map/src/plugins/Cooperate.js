@@ -451,6 +451,7 @@ class Cooperate {
     this.httpFetchLocate = null
     this.httpPatchNode = null
     this.httpAddNode = null
+    this.httpFlushHistoryVersion = null
     this.httpDeleteNode = null
     this.httpReplaceTree = null
     this.httpUndoOperation = null
@@ -482,6 +483,7 @@ class Cooperate {
     this.httpTextTimer = null
     this.httpTextFlushing = false
     this.httpTextFlushQueued = false
+    this.httpTextFlushPromise = null
     this.httpStructureTimer = null
     this.httpInsertPromise = null
     this.httpInsertRescan = false
@@ -1321,6 +1323,54 @@ class Cooperate {
     if (pending && this.ymap) this.flushLocalDataChange(pending)
   }
 
+  commitOpenTextEdit() {
+    const editor =
+      this.mindMap &&
+      this.mindMap.renderer &&
+      this.mindMap.renderer.textEdit
+    if (editor && typeof editor.hideEditTextBox === 'function') {
+      editor.hideEditTextBox()
+    }
+  }
+
+  async flushPendingForReload(options = {}) {
+    const timeoutMs = Math.max(0, Number(options.timeoutMs) || 4000)
+    this.commitOpenTextEdit()
+    this.flushLocalNow()
+    clearTimeout(this.httpTextTimer)
+    this.httpTextTimer = null
+    clearTimeout(this.httpStructureTimer)
+    this.httpStructureTimer = null
+    if (this._v2InsertRetryTimer) {
+      clearTimeout(this._v2InsertRetryTimer)
+      this._v2InsertRetryTimer = null
+      this._v2InsertFromCommand = true
+    }
+    const work = (async () => {
+      if (this.httpCollabMode) {
+        await Promise.resolve(this.flushHttpTextNow()).catch(() => {})
+        if (
+          this._v2InsertFromCommand ||
+          this.httpInsertPromise ||
+          !this.collabV2Adapter
+        ) {
+          await Promise.resolve(this.flushHttpInsert()).catch(() => {})
+        }
+      }
+      const adapter = this.collabV2Adapter
+      if (adapter && typeof adapter.waitForOutboxDurable === 'function') {
+        return adapter.waitForOutboxDurable({ timeoutMs })
+      }
+      return { ok: true }
+    })()
+    return Promise.race([
+      work,
+      new Promise(resolve =>
+        setTimeout(() => resolve({ ok: true, timeout: true }), timeoutMs)
+      )
+    ])
+  }
+
   flushLocalDataChange(data) {
     const res = transformTreeDataToObject(data)
     this.updateChanges(res)
@@ -1626,6 +1676,7 @@ class Cooperate {
     if (config.fetchLocate) this.httpFetchLocate = config.fetchLocate
     if (config.patchNode) this.httpPatchNode = config.patchNode
     if (config.addNode) this.httpAddNode = config.addNode
+    if (config.flushHistoryVersion) this.httpFlushHistoryVersion = config.flushHistoryVersion
     if (config.deleteNode) this.httpDeleteNode = config.deleteNode
     if (config.replaceTree) this.httpReplaceTree = config.replaceTree
     if (config.undoOperation) this.httpUndoOperation = config.undoOperation
@@ -3097,6 +3148,9 @@ class Cooperate {
 
   wrapHttpMutators(config = {}) {
     if (this.collabV2Adapter) {
+      if (typeof config.flushHistoryVersion === 'function') {
+        this.httpFlushHistoryVersion = config.flushHistoryVersion
+      }
       this.httpPatchNode = (uid, body) => {
         const next = { ...(body || {}), uid }
         const guarded = collabNodeFeatures.guardFeatureStructuralMutation(next)
@@ -3230,6 +3284,7 @@ class Cooperate {
     this.httpFetchLocate = null
     this.httpPatchNode = null
     this.httpAddNode = null
+    this.httpFlushHistoryVersion = null
     this.httpDeleteNode = null
     this.httpReplaceTree = null
     this.httpUndoOperation = null
@@ -5289,19 +5344,30 @@ class Cooperate {
 
   async flushHttpTextNow() {
     if (this.httpReplacing || !this.httpPatchNode) return
-    if (this.httpTextFlushing) {
+    if (this.httpTextFlushPromise) {
       this.httpTextFlushQueued = true
-      return
+      const didFlush = await this.httpTextFlushPromise
+      if (this.httpTextFlushQueued && !this.httpTextFlushPromise) {
+        return this.flushHttpTextNow()
+      }
+      return !!didFlush
     }
     this.httpTextFlushing = true
-    try {
-      do {
-        this.httpTextFlushQueued = false
-        await this.flushHttpTextOnce()
-      } while (this.httpTextFlushQueued)
-    } finally {
-      this.httpTextFlushing = false
-    }
+    const run = (async () => {
+      let didFlush = false
+      try {
+        do {
+          this.httpTextFlushQueued = false
+          didFlush = (await this.flushHttpTextOnce()) || didFlush
+        } while (this.httpTextFlushQueued)
+        return didFlush
+      } finally {
+        this.httpTextFlushing = false
+        this.httpTextFlushPromise = null
+      }
+    })()
+    this.httpTextFlushPromise = run
+    return run
   }
 
   async flushHttpTextOnce() {
@@ -5310,7 +5376,7 @@ class Cooperate {
     const pending = settling
       ? this.collectActivePendingText()
       : this.collectNodesWithPendingText()
-    if (settling && !pending.length) return
+    if (settling && !pending.length) return false
     const jobs = []
     const items = []
     let droppedGhosts = false
@@ -5344,16 +5410,19 @@ class Cooperate {
             snap: item.snap
           }
         })
+        return true
       } catch (err) {
         console.error('[mind-map] batch style/text sync failed', err)
       }
-      return
+      return false
     }
+    let succeeded = false
     items.forEach(item => {
       const { uid, node, full, delta, snap } = item
       jobs.push(() =>
         this.httpPatchNode(uid, delta)
           .then(() => {
+            succeeded = true
             this.lastPushed[uid] = {
               text: full.text,
               note: full.note,
@@ -5384,6 +5453,7 @@ class Cooperate {
     if (droppedGhosts && !skipGhostRefresh) {
       this.refreshVisibleFromHttp('', { force: true }).catch(() => {})
     }
+    return succeeded
   }
 
   snapshotV2InsertCollect() {
@@ -5624,7 +5694,6 @@ class Cooperate {
       this.collabV2Adapter && fromCommand && Array.isArray(opts.preRecords)
         ? opts.preRecords.slice()
         : []
-    await this.flushHttpTextNow()
     if (!records.length && this.collabV2Adapter && fromCommand) {
       records = this.collectV2CommandInsertRecords(opts)
     }
@@ -5660,6 +5729,16 @@ class Cooperate {
       }
       return true
     })
+    if (records.length) {
+      const flushed = await this.flushHttpTextNow()
+      if (flushed && this.httpFlushHistoryVersion) {
+        try {
+          await this.httpFlushHistoryVersion()
+        } catch (err) {
+          console.error('[mind-map] history boundary flush failed', err)
+        }
+      }
+    }
     v2Trace('local.insert.flush', {
       count: records.length,
       uids: records.map(row => row.uid)

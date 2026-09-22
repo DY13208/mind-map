@@ -1767,6 +1767,10 @@ async function initSchemaOnce() {
   `)
   const tombstones = await pool.query('select room_key from room_tombstones')
   tombstones.rows.forEach(row => deletedRooms.add(row.room_key))
+  // Room ACL migrates folder-derived roles, so the folder tables and the
+  // rooms.folder_id column must exist before that migration runs on a fresh DB.
+  const fileSystemSchema = require('./fileSystem/schema')
+  await fileSystemSchema.initFileSystemSchema(pool)
   const roomAcl = require('./roomAcl')
   await roomAcl.initSchema(pool)
   await require('./accessRequests').initSchema(pool)
@@ -1775,8 +1779,6 @@ async function initSchemaOnce() {
   await collabV2Schema.initCollabV2Schema(pool)
   const historySchema = require('./collabHistory/schema')
   await historySchema.initHistorySchema(pool)
-  const fileSystemSchema = require('./fileSystem/schema')
-  await fileSystemSchema.initFileSystemSchema(pool)
   const teamSpace = require('./teamSpace')
   await teamSpace.initSchema(pool)
   const nodeKnowledge = require('./nodeKnowledge')

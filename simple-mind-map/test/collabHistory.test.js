@@ -238,6 +238,63 @@ function mockRes() {
   assert.strictEqual(summary.metadataChanged, true)
   assert.strictEqual(summary.replaced, true)
 
+  // 结构补水（childCount）和“普通文本 -> 等价富文本”的自动规范化不是用户修改。
+  const classification = engineWith()
+  await classification.store.appendOperation({
+    room_key: ROOM,
+    version: 1,
+    operation_id: randomUUID(),
+    operation_type: 'node.update',
+    payload: { uid: 'a', childCount: 1 },
+    inverse_payload: { payload: { uid: 'a', childCount: 0 } }
+  })
+  await classification.store.appendOperation({
+    room_key: ROOM,
+    version: 2,
+    operation_id: randomUUID(),
+    operation_type: 'node.batch',
+    payload: {
+      ops: [
+        {
+          type: 'node.update',
+          payload: { uid: 'a', text: '<p>A</p>', richText: true }
+        },
+        { type: 'node.update', payload: { uid: 'b', text: '<p>B2</p>', richText: true } }
+      ]
+    },
+    inverse_payload: {
+      payload: {
+        ops: [
+          { type: 'node.update', payload: { uid: 'b', text: 'B', richText: null } },
+          { type: 'node.update', payload: { uid: 'a', text: 'A', richText: null } }
+        ]
+      }
+    }
+  })
+  const classified = await classification.engine.summarizeRange(ROOM, 0, 2)
+  assert.strictEqual(classified.updated, 1)
+
+  // 已生成的旧摘要会在列表读取时使用新规则重新计算并回写。
+  await classification.store.setLiveState(ROOM, {
+    revision: 2,
+    nodes: (await classification.store.getLiveState(ROOM)).nodes,
+    metadata: (await classification.store.getLiveState(ROOM)).metadata
+  })
+  const legacySummary = await classification.engine.createVersion(ROOM, {
+    revision: 2,
+    type: 'AUTO',
+    name: '旧统计版本',
+    skipEnsure: true
+  })
+  await classification.store.updateVersionMeta(ROOM, legacySummary.id, {
+    summary: { kind: 'edits', inserted: 0, updated: 5, deleted: 0, moved: 0 },
+    summary_status: 'ready'
+  })
+  const refreshedList = await classification.engine.listVersions(ROOM, { limit: 10 })
+  const refreshed = refreshedList.versions.find(row => row.id === legacySummary.id)
+  assert.strictEqual(refreshed.summary.updated, 1)
+  assert.strictEqual(refreshed.summary.algorithmVersion, 2)
+
   const currentBefore = await store.getLiveState(ROOM)
   const targetRev = 3
   const restored = await engine.restoreVersion(ROOM, {
@@ -438,6 +495,65 @@ function mockRes() {
     restoreUnavailable = err.code
   }
   assert.strictEqual(restoreUnavailable, 'HISTORY_REVISION_UNAVAILABLE')
+
+  // A legacy room can have continuous revision numbers while its earliest
+  // operation still references nodes that existed before Collab V2 logging.
+  // It must open history from a current-state bootstrap instead of failing.
+  const incompatibleReplayStore = createMemoryHistoryStore({
+    room: {
+      roomKey: ROOM,
+      revision: 2,
+      nodes: {
+        root: {
+          isRoot: true,
+          data: { uid: 'root', text: 'Root' },
+          children: ['legacy']
+        },
+        legacy: {
+          data: { uid: 'legacy', text: 'Current legacy node' },
+          children: []
+        }
+      },
+      metadata: { theme: 'classic' }
+    }
+  })
+  incompatibleReplayStore.ops.push(
+    {
+      room_key: ROOM,
+      version: 1,
+      operation_id: 'legacy-update-1',
+      operation_type: 'node.update',
+      payload: { uid: 'legacy', text: 'Older text' }
+    },
+    {
+      room_key: ROOM,
+      version: 2,
+      operation_id: 'legacy-update-2',
+      operation_type: 'node.update',
+      payload: { uid: 'legacy', text: 'Current legacy node' }
+    }
+  )
+  const incompatibleReplayEngine = createHistoryEngine({
+    store: incompatibleReplayStore,
+    config: { checkpointEvery: 100000, autoVersionOnCheckpoint: false }
+  })
+  const incompatibleBaseline = await incompatibleReplayEngine.ensureHistoryBaseline(ROOM)
+  assert.strictEqual(incompatibleBaseline.reason, 'HISTORY_BOOTSTRAP')
+  assert.strictEqual(Number(incompatibleBaseline.revision), 2)
+  const incompatibleCurrent = await incompatibleReplayEngine.getRoomStateAtRevision(ROOM, 2)
+  assert.strictEqual(incompatibleCurrent.tree.legacy.data.text, 'Current legacy node')
+  const incompatibleOpen = mockRes()
+  await handleHistoryApi(
+    {
+      method: 'GET',
+      url: `/api/files/${ROOM}/versions`,
+      roomAccess: { userId: 'u1', canEdit: true }
+    },
+    incompatibleOpen,
+    { engine: incompatibleReplayEngine }
+  )
+  assert.strictEqual(incompatibleOpen.code, 200)
+  assert.ok((incompatibleOpen.body.versions || []).length > 0)
 
   const concurrentStore = createMemoryHistoryStore({
     room: {
@@ -742,6 +858,35 @@ function mockRes() {
   ])
   assert.ok(ra.newRevision)
   assert.ok(rb.newRevision)
+
+  // A successful pre-insert history flush is a hard summary boundary: pending
+  // edits remain visible in their own AUTO version instead of being reported
+  // as modifications alongside the following node creation.
+  const boundary = engineWith()
+  await boundary.engine.ensureHistoryBaseline(ROOM)
+  await commit(boundary.engine, {
+    type: 'node.update',
+    payload: { uid: 'root', text: 'Root updated before insert' }
+  })
+  const updates = await boundary.engine.flushPendingAutoVersion(ROOM, {
+    userId: 'u1',
+    source: 'pre_insert'
+  })
+  assert.strictEqual(updates.summary.updated, 1)
+  assert.strictEqual(updates.summary.inserted, 0)
+  // previousVisibleVersion uses creation order for same-revision manual
+  // snapshots; ensure this follow-up AUTO version has a later timestamp.
+  await new Promise(resolve => setTimeout(resolve, 20))
+  await commit(boundary.engine, {
+    type: 'node.insert',
+    payload: { uid: 'boundary-node', parent: 'root', text: 'New node' }
+  })
+  const inserts = await boundary.engine.flushPendingAutoVersion(ROOM, {
+    userId: 'u1',
+    source: 'history_open'
+  })
+  assert.strictEqual(inserts.summary.inserted, 1)
+  assert.strictEqual(inserts.summary.updated, 0)
 
   console.log('collabHistory.test.js ok')
 })().catch(err => {

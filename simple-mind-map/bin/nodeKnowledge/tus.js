@@ -95,7 +95,10 @@ async function ingestFinishedUpload(req, upload) {
     sourceKind: meta(upload, 'sourceKind') || 'attachment',
     createdBy: (node.authUser && node.authUser.id) || '',
     forceExtract: /^(1|true|yes)$/i.test(meta(upload, 'forceExtract')),
-    cleanupFile: false
+    cleanupFile: false,
+    // The toolbar uses TUS. Return its attachment id before extraction so the
+    // UI can replace/cancel a slow OCR or document parse.
+    waitExtract: false
   })
   await writeResult(upload.id, saved)
   return saved

@@ -1,13 +1,13 @@
 'use strict';
 /**
- * Whole-Wiki (Docmost) search / browse / read for the calling user.
+ * Whole-Wiki (Docmost) search / browse / read / write for the calling user.
  *
- * Authority model: we never search the Wiki with an elevated identity.
+ * Authority model: we never touch the Wiki with an elevated identity.
  * The mind-map user id (JWT `sub`) is mapped to its Docmost user, a normal
  * Docmost session is created for THAT user, and every request goes through
  * Docmost's own HTTP API so Docmost enforces space membership and page
- * restrictions. Whatever the account cannot open in the browser, it cannot
- * read here either.
+ * restrictions. Whatever the account cannot open or edit in the browser,
+ * it cannot open or edit here either.
  */
 const crypto = require('crypto');
 const { Pool } = require('pg');
@@ -30,6 +30,9 @@ function cfg(env = process.env) {
     defaultSearchLimit: Number(env.KNOWLEDGE_WIKI_SEARCH_LIMIT || 20),
     maxSearchLimit: Number(env.KNOWLEDGE_WIKI_SEARCH_MAX_LIMIT || 50),
     maxTreePages: Number(env.KNOWLEDGE_WIKI_MAX_TREE_PAGES || 2000),
+    // 用于把新建/更新的页面拼成给人点开的链接
+    publicUrl: String(env.DOCMOST_PUBLIC_URL || 'http://localhost:3040').replace(/\/$/, ''),
+    maxWriteChars: Number(env.KNOWLEDGE_WIKI_MAX_WRITE_CHARS || 200000),
   };
 }
 
@@ -145,7 +148,7 @@ async function cookieForUser(userId, env = process.env) {
   const session = (
     await db.query(
       `insert into user_sessions (user_id, workspace_id, device_name, expires_at)
-       values ($1, $2, 'knowledge-mcp-wiki-read', now() + interval '12 hours')
+       values ($1, $2, 'knowledge-mcp-wiki', now() + interval '12 hours')
        returning id`,
       [user.id, user.workspace_id],
     )
@@ -296,7 +299,10 @@ async function wikiTree(userId, { spaceId, pageId } = {}, env = process.env) {
 async function wikiRead(userId, { pageId, format } = {}, env = process.env) {
   const c = cfg(env);
   if (!pageId) throw fail('missing_params', 'missing_params: 需要 pageId');
-  const wantFormat = format === 'html' ? 'html' : 'markdown';
+  // format=json 返回 Docmost 存储的 ProseMirror content 原文（/api/pages/info
+  // 对非 json 格式才做渲染，json 时直接透传 page.content）。
+  // 用途：跨机改页面前先取整页 JSON 树，读写走同一端点（防「读A写B」）。
+  const wantFormat = format === 'html' ? 'html' : format === 'json' ? 'json' : 'markdown';
   const page = await docmostApi(
     userId,
     '/api/pages/info',
@@ -317,4 +323,144 @@ async function wikiRead(userId, { pageId, format } = {}, env = process.env) {
   };
 }
 
-module.exports = { wikiSpaces, wikiSearch, wikiTree, wikiRead };
+function normaliseContentFormat(format) {
+  const f = String(format || 'markdown').toLowerCase();
+  if (f === 'html' || f === 'json' || f === 'markdown') return f;
+  throw fail('invalid_format', 'invalid_format: format 仅支持 markdown / html / json');
+}
+
+function normaliseWriteOperation(operation) {
+  const op = String(operation || 'replace').toLowerCase();
+  if (op === 'append' || op === 'prepend' || op === 'replace') return op;
+  throw fail('invalid_operation', 'invalid_operation: operation 仅支持 replace / append / prepend');
+}
+
+function contentHash(text) {
+  return crypto.createHash('sha256').update(String(text || ''), 'utf8').digest('hex');
+}
+
+/**
+ * Docmost 的 `format: json` 要求 content 是 ProseMirror 对象本身；
+ * `parseProsemirrorContent` 对 json 分支是 `prosemirrorJson = content`，传字符串会
+ * `jsonToNode(string)` 失败并报 Invalid content format。所以 json 格式必须原样透传对象。
+ */
+function normaliseContentPayload(content, wantFormat) {
+  if (content == null) return undefined;
+  if (wantFormat === 'json') {
+    if (typeof content === 'string') {
+      // 允许调用方传 JSON 字符串，这里解析成对象再透传
+      try {
+        return JSON.parse(content);
+      } catch (e) {
+        throw fail('invalid_content', 'invalid_content: format=json 时 content 必须是对象或合法 JSON 字符串');
+      }
+    }
+    return content;
+  }
+  return typeof content === 'string' ? content : String(content);
+}
+
+function payloadLength(content) {
+  if (content == null) return 0;
+  return typeof content === 'object' ? JSON.stringify(content).length : String(content).length;
+}
+
+/**
+ * Create a Wiki page under the calling account's edit permission.
+ * Docmost enforces Create-on-space or Edit-on-parent.
+ */
+async function wikiCreate(
+  userId,
+  { spaceId, title, content, parentPageId, format } = {},
+  env = process.env,
+) {
+  if (!spaceId) throw fail('missing_params', 'missing_params: 需要 spaceId');
+  const wantFormat = normaliseContentFormat(format);
+  const body = {
+    spaceId: String(spaceId),
+    title: title != null ? String(title) : undefined,
+    parentPageId: parentPageId ? String(parentPageId) : undefined,
+  };
+  if (content != null) {
+    body.content = normaliseContentPayload(content, wantFormat);
+    body.format = wantFormat;
+  }
+  const page = await docmostApi(userId, '/api/pages/create', body, env);
+  const pageId = page && (page.id || page.pageId);
+  if (!pageId) throw fail('wiki_http_error', 'wiki_http_error: create 未返回 pageId');
+  const after = content != null ? contentHash(JSON.stringify(body.content)) : null;
+  return {
+    status: 'created',
+    ...summarisePage(page),
+    pageId,
+    slugId: page.slugId || page.slug_id || null,
+    permissions: page.permissions || null,
+    audit: {
+      operation: 'create',
+      docmostPageId: pageId,
+      afterHash: after,
+    },
+  };
+}
+
+/**
+ * Update an existing Wiki page (title and/or body).
+ * Docmost enforces edit permission on the target page.
+ */
+async function wikiUpdate(
+  userId,
+  { pageId, title, content, format, operation } = {},
+  env = process.env,
+) {
+  if (!pageId) throw fail('missing_params', 'missing_params: 需要 pageId');
+  const hasTitle = title != null;
+  const hasContent = content != null;
+  if (!hasTitle && !hasContent) {
+    throw fail('missing_params', 'missing_params: 需要 title 或 content 至少一项');
+  }
+
+  let beforeHash = null;
+  try {
+    const before = await wikiRead(userId, { pageId: String(pageId), format: 'markdown' }, env);
+    beforeHash = contentHash(before && before.body);
+  } catch {
+    // Best-effort; update may still succeed if read fails for other reasons.
+  }
+
+  const body = { pageId: String(pageId) };
+  if (hasTitle) body.title = String(title);
+  let writeOp = null;
+  if (hasContent) {
+    const wantFormat = normaliseContentFormat(format);
+    body.content = normaliseContentPayload(content, wantFormat);
+    body.format = wantFormat;
+    writeOp = normaliseWriteOperation(operation);
+    body.operation = writeOp;
+  }
+
+  const page = await docmostApi(userId, '/api/pages/update', body, env);
+  const id = (page && (page.id || page.pageId)) || String(pageId);
+  const afterHash = hasContent ? contentHash(JSON.stringify(body.content)) : beforeHash;
+  return {
+    status: 'updated',
+    ...summarisePage(page || { id, title }),
+    pageId: id,
+    slugId: (page && (page.slugId || page.slug_id)) || null,
+    permissions: (page && page.permissions) || null,
+    audit: {
+      operation: writeOp || 'rename',
+      docmostPageId: id,
+      beforeHash,
+      afterHash,
+    },
+  };
+}
+
+module.exports = {
+  wikiSpaces,
+  wikiSearch,
+  wikiTree,
+  wikiRead,
+  wikiCreate,
+  wikiUpdate,
+};

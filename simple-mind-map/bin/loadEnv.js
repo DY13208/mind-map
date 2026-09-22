@@ -5,6 +5,9 @@ const ROOT = path.resolve(__dirname, '../..')
 const ENV_FILE = path.join(ROOT, '.env')
 
 function loadRootEnv() {
+  if (/^(1|true|yes)$/i.test(String(process.env.MIND_MAP_SKIP_ROOT_ENV || ''))) {
+    return
+  }
   if (!fs.existsSync(ENV_FILE)) return
   fs.readFileSync(ENV_FILE, 'utf8')
     .split(/\r?\n/)

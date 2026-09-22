@@ -27,11 +27,15 @@
             <div class="authBrandMark">依</div>
             <h1 class="authBrand">CPD</h1>
           </div>
-          <p class="authSubtitle">企业微信扫码登录</p>
+          <p class="authSubtitle">{{ authLoginSubtitle }}</p>
           <div class="authError" v-if="authErrorMessage">{{ authErrorMessage }}</div>
         </div>
         <div class="authLoginPanel">
-          <div class="authQrShell">
+          <div class="authQrHeading" v-if="authState.wecomEnabled">
+            <strong>企业微信扫码登录</strong>
+            <span>使用企业微信扫描二维码</span>
+          </div>
+          <div class="authQrShell" v-if="authState.wecomEnabled">
             <div ref="qrMount" class="authQrMount"></div>
             <div class="authQrOverlay" v-if="qrRefreshing">
               <div class="authSpinner"></div>
@@ -43,14 +47,40 @@
               </button>
             </div>
           </div>
-          <button
-            class="authRefresh"
-            @click="refreshLoginQr"
-            :disabled="qrRefreshing"
-            title="刷新二维码"
+          <div class="authQrTools" v-if="authState.wecomEnabled">
+            <button
+              class="authRefresh"
+              @click="refreshLoginQr"
+              :disabled="qrRefreshing"
+              title="刷新二维码"
+            >
+              <span class="authRefreshIcon" :class="{ spinning: qrRefreshing }">↻</span>
+              {{ qrRefreshing ? '刷新中' : '刷新二维码' }}
+            </button>
+          </div>
+          <div class="authActions">
+            <button
+              v-if="authState.workbuddyEnabled"
+              class="authButton authButton--secondary"
+              type="button"
+              :disabled="workbuddyRedirecting || !authState.workbuddyLoginReady"
+              @click="startWorkBuddyLogin"
+            >
+              {{
+                !authState.workbuddyLoginReady
+                  ? 'WorkBuddy 单点登录配置中'
+                  : workbuddyRedirecting
+                    ? '正在进入 WorkBuddy…'
+                    : 'WorkBuddy 单点登录'
+              }}
+            </button>
+          </div>
+          <p
+            class="authOneIdHint"
+            v-if="authState.workbuddyEnabled && !authState.workbuddyLoginReady"
           >
-            <span class="authRefreshIcon" :class="{ spinning: qrRefreshing }">↻</span>
-          </button>
+            OAuth 应用配置完成后开放
+          </p>
           <div class="authDevLogin" v-if="authState.devBypassAvailable">
             <button
               class="authDevToggle"
@@ -108,16 +138,26 @@
 
 <script>
 import {
+  clearWorkBuddyAutoLoginAttempt,
+  clearWecomClientAutoLoginAttempt,
   createLoginQr,
   devLogin,
   getAuthApiUrl,
+  getWorkBuddyLoginUrl,
   getStoredDevAuthKey,
-  loadAuthState
+  getWecomClientLoginUrl,
+  loadAuthState,
+  markWorkBuddyAutoLoginAttempted,
+  markWecomClientAutoLoginAttempted,
+  WORKBUDDY_AUTO_ATTEMPT_KEY,
+  WECOM_CLIENT_AUTO_ATTEMPT_KEY
 } from '@/utils/auth'
 import { mountWecomLoginPanel } from '@/utils/wecomLogin'
 
 const PAGE_TITLE = 'CPD'
 const AUTH_BOOTSTRAP_MS = 45000
+const isWecomClientEnvironment = () =>
+  /\bwxwork\b/i.test(String(window.navigator.userAgent || ''))
 const authErrors = {
   invalid_state: '登录状态校验失败，请重新扫码。',
   expired_state: '二维码已过期，请重新扫码。',
@@ -129,6 +169,30 @@ const authErrors = {
   wecom_token_failed: '企业微信应用配置无效，请联系管理员。',
   wecom_timeout: '企业微信响应超时，请稍后重试。',
   wecom_unavailable: '企业微信服务暂不可用，请稍后重试。',
+  oneid_access_denied: 'WorkBuddy 单点登录未完成，可重试或使用企业微信扫码。',
+  oneid_missing_code: 'OneID 未返回有效授权码，请重新登录。',
+  oneid_token_failed: 'OneID 登录票据交换失败，请稍后重试。',
+  oneid_identity_failed: 'OneID 未返回有效成员身份，请联系管理员。',
+  oneid_account_not_linked:
+    'WorkBuddy 账号未匹配到现有企业微信成员。为避免产生第二套账号，已阻止登录，请联系管理员核对成员手机号。',
+  oneid_invalid_response: 'OneID 返回的数据不完整，请稍后重试。',
+  oneid_http_error: 'OneID 登录服务响应异常，请稍后重试。',
+  oneid_timeout: 'OneID 响应超时，请稍后重试。',
+  oneid_unavailable: 'OneID 服务暂不可用，可使用企业微信扫码。',
+  workbuddy_access_denied:
+    'WorkBuddy 单点登录未完成，可重试或使用企业微信扫码。',
+  workbuddy_missing_code: 'WorkBuddy 未返回有效授权码，请重新登录。',
+  workbuddy_token_failed: 'WorkBuddy 登录票据交换失败，请稍后重试。',
+  workbuddy_identity_failed:
+    'WorkBuddy 未返回有效成员身份，请联系管理员。',
+  workbuddy_account_not_linked:
+    'WorkBuddy 账号未匹配到现有企业微信成员。为避免产生第二套账号，已阻止登录，请联系管理员核对成员信息。',
+  workbuddy_identity_conflict:
+    '该 WorkBuddy 账号已绑定其他成员，已拒绝变更绑定。',
+  workbuddy_invalid_response: 'WorkBuddy 返回的数据不完整，请稍后重试。',
+  workbuddy_http_error: 'WorkBuddy 登录服务响应异常，请稍后重试。',
+  workbuddy_timeout: 'WorkBuddy 响应超时，请稍后重试。',
+  workbuddy_unavailable: 'WorkBuddy 服务暂不可用，可使用企业微信扫码。',
   auth_unavailable: '认证服务暂不可用，请稍后重试。'
 }
 
@@ -143,6 +207,13 @@ export default {
       authRetrying: false,
       authState: {
         enabled: false,
+        wecomEnabled: false,
+        oneIdEnabled: false,
+        oneIdLoginReady: false,
+        oneIdAutoLogin: false,
+        workbuddyEnabled: false,
+        workbuddyLoginReady: false,
+        workbuddyAutoLogin: false,
         authenticated: false,
         user: null,
         devBypassAvailable: false
@@ -153,6 +224,9 @@ export default {
       qrRefreshing: false,
       qrFailure: '',
       qrRefreshTimer: null,
+      isWecomClient: isWecomClientEnvironment(),
+      wecomClientRedirecting: false,
+      workbuddyRedirecting: false,
       showDevLogin: false,
       devAuthKey: '',
       devAuthMobile: '',
@@ -163,6 +237,10 @@ export default {
   computed: {
     authErrorMessage() {
       return authErrors[this.authErrorCode] || ''
+    },
+    authLoginSubtitle() {
+      if (this.authState.wecomEnabled) return '企业微信安全登录'
+      return 'WorkBuddy 单点登录'
     }
   },
   watch: {
@@ -231,6 +309,10 @@ export default {
           }
         }, AUTH_BOOTSTRAP_MS)
         this.authState = await loadAuthState()
+        if (this.authState.authenticated) {
+          clearWorkBuddyAutoLoginAttempt()
+          clearWecomClientAutoLoginAttempt()
+        }
         this.authRetryAttempt = 0
       } catch (err) {
         const code =
@@ -258,10 +340,67 @@ export default {
         !this.authState.authenticated
       ) {
         document.title = PAGE_TITLE
+        if (
+          this.authState.wecomEnabled &&
+          this.isWecomClient &&
+          // 从普通浏览器唤起企业微信桌面端后，首次 OAuth 回调会进入新的
+          // WebView Cookie 上下文。此时保留严格的浏览器绑定，并在桌面端
+          // 自动重建一次挑战；比放宽 state 校验更安全，也避免用户手动重试。
+          (!this.authErrorCode || this.authErrorCode === 'invalid_state') &&
+          !this.hasAttemptedWecomClientAutoLogin()
+        ) {
+          this.startWecomClientLogin()
+          return
+        }
+        if (
+          this.authState.workbuddyEnabled &&
+          this.authState.workbuddyLoginReady &&
+          this.authState.workbuddyAutoLogin &&
+          !this.authErrorCode &&
+          !this.hasAttemptedWorkBuddyAutoLogin()
+        ) {
+          this.startWorkBuddyLogin()
+          return
+        }
         // 扫码始终是主登录方式：内网访问时后端会开放开发者密钥，但那只是附加入口，
         // 不能因此不加载二维码，否则内网用户会看到一个空白的登录框。
-        await this.refreshLoginQr()
+        if (this.authState.wecomEnabled) await this.refreshLoginQr()
       }
+    },
+    hasAttemptedWorkBuddyAutoLogin() {
+      try {
+        return (
+          window.sessionStorage.getItem(WORKBUDDY_AUTO_ATTEMPT_KEY) === '1'
+        )
+      } catch (err) {
+        return true
+      }
+    },
+    hasAttemptedWecomClientAutoLogin() {
+      try {
+        return (
+          window.sessionStorage.getItem(WECOM_CLIENT_AUTO_ATTEMPT_KEY) === '1'
+        )
+      } catch (err) {
+        return true
+      }
+    },
+    startWecomClientLogin() {
+      if (!this.authState.wecomEnabled || this.wecomClientRedirecting) return
+      this.wecomClientRedirecting = true
+      markWecomClientAutoLoginAttempted()
+      window.location.assign(getWecomClientLoginUrl())
+    },
+    startWorkBuddyLogin() {
+      if (
+        !this.authState.workbuddyEnabled ||
+        !this.authState.workbuddyLoginReady ||
+        this.workbuddyRedirecting
+      )
+        return
+      this.workbuddyRedirecting = true
+      markWorkBuddyAutoLoginAttempted()
+      window.location.assign(getWorkBuddyLoginUrl())
     },
     clearQrRefreshTimer() {
       if (!this.qrRefreshTimer) return
@@ -359,15 +498,14 @@ body,
 }
 
 .authScreen {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: clamp(16px, 3vw, 32px);
   background:
-    radial-gradient(circle at 15% 20%, rgba(16, 122, 87, 0.14), transparent 34%),
-    radial-gradient(circle at 85% 10%, rgba(64, 158, 255, 0.08), transparent 28%),
-    linear-gradient(160deg, #f7faf9 0%, #eef3f1 48%, #e9f0ec 100%);
+    radial-gradient(circle at 18% 16%, rgba(15, 157, 104, 0.08), transparent 30%),
+    linear-gradient(155deg, #f7f9f8 0%, #edf3f0 100%);
 
   &--loading {
     .authSpinner {
@@ -380,13 +518,13 @@ body,
 .authCard {
   width: 380px;
   max-width: 100%;
-  padding: 36px 32px 28px;
-  border: 1px solid rgba(15, 45, 35, 0.06);
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.96);
+  padding: 32px;
+  border: 1px solid rgba(15, 45, 35, 0.08);
+  border-radius: 16px;
+  background: #fbfcfb;
   box-shadow:
-    0 24px 60px rgba(22, 52, 41, 0.1),
-    0 2px 8px rgba(22, 52, 41, 0.04);
+    0 22px 54px rgba(22, 52, 41, 0.09),
+    0 2px 6px rgba(22, 52, 41, 0.03);
   text-align: center;
 
   &--compact {
@@ -394,7 +532,7 @@ body,
   }
 
   &--login {
-    width: 400px;
+    width: 414px;
   }
 }
 
@@ -403,37 +541,41 @@ body,
   min-width: 0;
 }
 
-.authBrandBlock {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
+.authIntro {
+  margin-bottom: 24px;
 }
 
-.authBrandMark {
-  width: 52px;
-  height: 52px;
+.authBrandBlock {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 16px;
-  background: linear-gradient(145deg, #0f9d68, #0a7a52);
+  gap: 10px;
+}
+
+.authBrandMark {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: #0a855b;
   color: #fff;
-  font-size: 24px;
+  font-size: 21px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  box-shadow: 0 10px 24px rgba(10, 122, 82, 0.28);
+  box-shadow: 0 8px 20px rgba(10, 122, 82, 0.2);
 }
 
 .authBrand {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   color: #102820;
 }
 
 .authSubtitle {
-  margin-top: 8px;
+  margin-top: 10px;
   color: #6b7c74;
   font-size: 14px;
 }
@@ -455,17 +597,56 @@ body,
   line-height: 1.5;
 }
 
+.authQrHeading {
+  width: 322px;
+  max-width: 100%;
+  margin: 0 auto 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+
+  strong {
+    color: #17352b;
+    font-size: 15px;
+    font-weight: 650;
+  }
+
+  span {
+    color: #7b8983;
+    font-size: 12px;
+  }
+}
+
+.authOneIdHint {
+  margin: 8px auto 0;
+  width: 322px;
+  max-width: 100%;
+  color: #6b7c74;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.authActions {
+  width: 322px;
+  max-width: 100%;
+  display: grid;
+  gap: 8px;
+  margin: 14px auto 0;
+}
+
 .authQrShell {
   position: relative;
   // 企业微信 small 登录面板固定为 320 × 380，外层再预留 1px 边框。
   width: 322px;
   height: 382px;
   max-width: 100%;
-  margin: 22px auto 0;
+  margin: 0 auto;
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: 12px;
   background: #fff;
-  border: 1px solid rgba(15, 45, 35, 0.06);
+  border: 1px solid rgba(15, 45, 35, 0.08);
 }
 
 .authQrMount {
@@ -497,20 +678,28 @@ body,
   font-size: 13px;
 }
 
+.authQrTools {
+  width: 322px;
+  max-width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  margin: 8px auto 0;
+}
+
 .authRefresh {
-  margin-top: 16px;
-  width: 36px;
-  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 4px;
   border: 0;
-  border-radius: 50%;
-  background: rgba(15, 157, 104, 0.08);
+  background: transparent;
   color: #0a7a52;
+  font-size: 12px;
   cursor: pointer;
-  transition: background 0.18s ease, transform 0.18s ease;
+  transition: color 0.18s ease, opacity 0.18s ease;
 
   &:hover:not(:disabled) {
-    background: rgba(15, 157, 104, 0.14);
-    transform: rotate(-20deg);
+    color: #075f40;
   }
 
   &:disabled {
@@ -521,7 +710,7 @@ body,
 
 .authRefreshIcon {
   display: inline-block;
-  font-size: 18px;
+  font-size: 15px;
   line-height: 1;
 
   &.spinning {
@@ -530,16 +719,48 @@ body,
 }
 
 .authButton {
-  padding: 11px 18px;
-  border: 0;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 1px solid #0a855b;
   border-radius: 10px;
-  background: linear-gradient(145deg, #0f9d68, #0a7a52);
+  background: #0a855b;
   color: #fff;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.12s ease;
+
+  &:hover:not(:disabled) {
+    border-color: #076e4a;
+    background: #076e4a;
+  }
+
+  &:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+
+  &:disabled {
+    border-color: #dfe7e3;
+    background: #edf2ef;
+    color: #7b8983;
+    cursor: not-allowed;
+  }
+
+  &--secondary {
+    border-color: #cddbd5;
+    background: #fff;
+    color: #315c4d;
+
+    &:hover:not(:disabled) {
+      border-color: #8fb3a4;
+      background: #f3f7f5;
+    }
+  }
 
   &--small {
+    width: auto;
+    min-height: 36px;
     padding: 8px 14px;
     font-size: 13px;
   }
@@ -551,16 +772,15 @@ body,
   border-top: 1px solid rgba(15, 45, 35, 0.06);
 }
 
-@media (min-width: 1100px) and (min-height: 720px) {
+@media (min-width: 900px) and (min-height: 680px) {
   .authCard--login {
-    width: calc(100vw - 96px);
-    max-width: 1120px;
-    min-height: 560px;
-    padding: 48px 64px;
+    width: 760px;
+    padding: 38px 44px;
     display: grid;
-    grid-template-columns: minmax(320px, 1fr) 400px;
+    grid-template-columns: 250px 322px;
     align-items: center;
-    gap: clamp(56px, 8vw, 128px);
+    justify-content: space-between;
+    gap: 48px;
     text-align: left;
   }
 
@@ -568,27 +788,17 @@ body,
     display: flex;
     flex-direction: column;
     align-items: flex-start;
+    margin-bottom: 0;
   }
 
   .authBrandBlock {
-    align-items: flex-start;
-  }
-
-  .authBrandMark {
-    width: 72px;
-    height: 72px;
-    border-radius: 20px;
-    font-size: 34px;
-  }
-
-  .authBrand {
-    margin-top: 8px;
-    font-size: clamp(36px, 3vw, 48px);
+    justify-content: flex-start;
+    align-items: center;
   }
 
   .authSubtitle {
-    margin-top: 18px;
-    font-size: 18px;
+    margin-top: 14px;
+    font-size: 16px;
   }
 
   .authError {
@@ -600,9 +810,6 @@ body,
     text-align: center;
   }
 
-  .authQrShell {
-    margin-top: 0;
-  }
 }
 
 .authDevToggle {

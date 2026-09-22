@@ -187,6 +187,26 @@ async function handleApi(req, res, options = {}) {
       attachmentHit &&
       attachmentHit.id &&
       !attachmentHit.sub &&
+      req.method === 'DELETE'
+    ) {
+      const roomKey = safeRoomKey(attachmentHit.roomKey)
+      await roomAcl.assertRoomAccess(db, req, roomKey, 'edit')
+      const params = searchParamsOf(req, options)
+      const removed = await store.removeById(db, roomKey, attachmentHit.id, {
+        nodeUid: params.get('node_uid') || params.get('nodeUid') || ''
+      })
+      if (!removed) {
+        sendJson(res, 404, { ok: false, error: '附件不存在', code: 'NOT_FOUND' })
+        return true
+      }
+      sendJson(res, 200, { ok: true, attachment: removed })
+      return true
+    }
+
+    if (
+      attachmentHit &&
+      attachmentHit.id &&
+      !attachmentHit.sub &&
       req.method === 'POST'
     ) {
       const roomKey = safeRoomKey(attachmentHit.roomKey)

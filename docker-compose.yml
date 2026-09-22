@@ -53,7 +53,7 @@ services:
       REDIS_URL: redis://redis:6379
       COLLAB_EVENT_BUS: redis
       PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
-      WEB_PORT: ${MIND_MAP_PORT:-8080}
+      WEB_PORT: ${MIND_MAP_HTTP_PORT:-8990}
       GATEWAY: "1"
       HOST: "127.0.0.1"
       PORT: "1234"
@@ -182,7 +182,7 @@ services:
     build:
       context: ./integrations/knowledge-mcp
       dockerfile: Dockerfile
-    image: mind-map-knowledge-mcp:0.5.0
+    image: mind-map-knowledge-mcp:0.6.1
     environment:
       KNOWLEDGE_MCP_PORT: "18792"
       KNOWLEDGE_MCP_JWT_SECRET: ${KNOWLEDGE_MCP_JWT_SECRET}
@@ -198,6 +198,10 @@ services:
       PGPASSWORD: ${PGPASSWORD:-mindmap}
       PGDATABASE: ${PGDATABASE:-mind_map}
       KNOWLEDGE_ROOT: ${KNOWLEDGE_ROOT:-/data/knowledge}
+      # 大页面支持：整页 ProseMirror JSON 可达数 MB（公司模型约 144 万字符）。
+      KNOWLEDGE_WIKI_MAX_BODY: ${KNOWLEDGE_WIKI_MAX_BODY:-120000}
+      KNOWLEDGE_MCP_MAX_WRITE_CHARS: ${KNOWLEDGE_MCP_MAX_WRITE_CHARS:-200000}
+      KNOWLEDGE_MCP_MAX_BODY_BYTES: ${KNOWLEDGE_MCP_MAX_BODY_BYTES:-1000000}
       OPENWIKI_ROOMS_ROOT: /data/openwiki/rooms
       OPENWIKI_JOBS_ROOT: /data/openwiki/jobs
       OPENWIKI_GLOBAL_CONCURRENCY: ${OPENWIKI_GLOBAL_CONCURRENCY:-2}

@@ -16,6 +16,7 @@
     "url": "https://github.com/wanglin2/mind-map"
   },
   "scripts": {
+    "test:mcp:history": "node ./test/mcpHistory.test.js",
     "test:knowledge:pg": "node ./test/knowledge.pg.test.js",
     "lint": "eslint src/",
     "format": "prettier --write .",

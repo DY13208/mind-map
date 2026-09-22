@@ -36,6 +36,13 @@ function createMemoryDb() {
         rows.set(`hash:${row.room_key}:${row.content_hash}`, row)
         return { rows: [row] }
       }
+      if (text.startsWith('delete from node_attachments')) {
+        const row = rows.get(params[1])
+        if (!row || row.room_key !== params[0]) return { rows: [] }
+        rows.delete(row.id)
+        rows.delete(`hash:${row.room_key}:${row.content_hash}`)
+        return { rows: [row] }
+      }
       if (text.includes('update node_attachments set')) {
         const row = rows.get(params[0])
         if (!row) return { rows: [] }
@@ -183,6 +190,18 @@ async function main() {
   assert.equal(second.id, first.id)
   assert.equal(second.deduped, true)
 
+  const removed = await store.removeById(db, 'room-demo', first.id, {
+    nodeUid: 'node-1'
+  })
+  assert.equal(removed.deleted, true)
+  const replacement = await store.createFromBuffer(db, {
+    roomKey: 'room-demo',
+    buffer: Buffer.from('hello knowledge', 'utf8'),
+    fileName: 'a.txt',
+    mimeType: 'text/plain'
+  })
+  assert.notEqual(replacement.id, first.id)
+
   const empty = await store.ingestUpload(db, 'room-demo', {
     contentBase64: 'data:text/plain;charset=utf-8;base64,',
     fileName: 'empty.txt',
@@ -256,7 +275,7 @@ async function main() {
   assert.match(streamed.extractedText, /streamed attachment/)
 
   const ensured = await store.ensureSources(db, 'room-demo', [
-    { attachmentId: first.id, name: 'a.txt' },
+    { attachmentId: replacement.id, name: 'a.txt' },
     {
       type: 'attachment',
       name: 'missing.pdf',

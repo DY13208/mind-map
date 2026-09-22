@@ -268,7 +268,11 @@ export default {
     onAttachmentClick(node) {
       const data = node && node.getData ? node.getData() || {} : {}
       if (isAttachmentBusy(data) || (data.attachmentStatus === 'failed' && !data.attachmentId)) {
-        if (this.$message) this.$message.info(attachmentBusyMessage(data))
+        this.$bus.$emit('manageNodeAttachment', node)
+        return
+      }
+      if (data.attachmentStatus === 'failed' && data.attachmentId) {
+        this.$bus.$emit('manageNodeAttachment', node)
         return
       }
       if (data.attachmentId) {
