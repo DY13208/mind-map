@@ -1,9 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { EventName } from '../../common/events/event.contants';
-import { InjectQueue } from '@nestjs/bullmq';
-import { QueueJob, QueueName } from '../../integrations/queue/constants';
-import { Queue } from 'bullmq';
 import { EnvironmentService } from '../../integrations/environment/environment.service';
 
 export class PageEvent {
@@ -11,33 +8,24 @@ export class PageEvent {
   workspaceId: string;
 }
 
+/**
+ * 2026-09-22: search/ai queue producers removed.
+ * Both queues had no consumer in this fork (search uses PostgreSQL
+ * full-text search directly; the AI/embeddings module does not exist),
+ * so every job enqueued here accumulated forever (1.5M+ dead jobs).
+ */
 @Injectable()
 export class PageListener {
   private readonly logger = new Logger(PageListener.name);
 
-  constructor(
-    private readonly environmentService: EnvironmentService,
-    @InjectQueue(QueueName.SEARCH_QUEUE) private searchQueue: Queue,
-    @InjectQueue(QueueName.AI_QUEUE) private aiQueue: Queue,
-  ) {}
+  constructor(private readonly environmentService: EnvironmentService) {}
 
   @OnEvent(EventName.PAGE_CREATED)
-  async handlePageCreated(event: PageEvent) {
-    const { pageIds, workspaceId } = event;
-    if (this.isTypesense()) {
-      await this.searchQueue.add(QueueJob.PAGE_CREATED, {
-        pageIds,
-      });
-    }
-
-    await this.aiQueue.add(QueueJob.PAGE_CREATED, { pageIds, workspaceId });
-  }
+  async handlePageCreated(_event: PageEvent) {}
 
   @OnEvent(EventName.PAGE_UPDATED)
   async handlePageUpdated(event: PageEvent) {
     const { pageIds } = event;
-
-    await this.searchQueue.add(QueueJob.PAGE_UPDATED, { pageIds });
 
     // Fire-and-forget: never block Wiki save / search indexing on Mindmap sync.
     void this.notifyMindMapWikiSaved(pageIds).catch((err) => {
@@ -48,48 +36,13 @@ export class PageListener {
   }
 
   @OnEvent(EventName.PAGE_DELETED)
-  async handlePageDeleted(event: PageEvent) {
-    const { pageIds, workspaceId } = event;
-    if (this.isTypesense()) {
-      await this.searchQueue.add(QueueJob.PAGE_DELETED, {
-        pageIds,
-      });
-    }
-
-    await this.aiQueue.add(QueueJob.PAGE_DELETED, { pageIds, workspaceId });
-  }
+  async handlePageDeleted(_event: PageEvent) {}
 
   @OnEvent(EventName.PAGE_SOFT_DELETED)
-  async handlePageSoftDeleted(event: PageEvent) {
-    const { pageIds, workspaceId } = event;
-
-    if (this.isTypesense()) {
-      await this.searchQueue.add(QueueJob.PAGE_SOFT_DELETED, {
-        pageIds,
-      });
-    }
-
-    await this.aiQueue.add(QueueJob.PAGE_SOFT_DELETED, {
-      pageIds,
-      workspaceId,
-    });
-  }
+  async handlePageSoftDeleted(_event: PageEvent) {}
 
   @OnEvent(EventName.PAGE_RESTORED)
-  async handlePageRestored(event: PageEvent) {
-    const { pageIds, workspaceId } = event;
-    if (this.isTypesense()) {
-      await this.searchQueue.add(QueueJob.PAGE_RESTORED, {
-        pageIds,
-      });
-    }
-
-    await this.aiQueue.add(QueueJob.PAGE_RESTORED, { pageIds, workspaceId });
-  }
-
-  isTypesense(): boolean {
-    return this.environmentService.getSearchDriver() === 'typesense';
-  }
+  async handlePageRestored(_event: PageEvent) {}
 
   /** Coalesce PAGE_UPDATED storms (collab autosave / Mindmap→Wiki) per page. */
   private readonly pendingNotifyIds = new Set<string>();

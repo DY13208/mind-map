@@ -59,22 +59,9 @@ import { GeneralQueueProcessor } from './processors/general-queue.processor';
         attempts: 1,
       },
     }),
-    BullModule.registerQueue({
-      name: QueueName.SEARCH_QUEUE,
-      defaultJobOptions: {
-        removeOnComplete: true,
-        removeOnFail: true,
-        attempts: 2,
-      },
-    }),
-    BullModule.registerQueue({
-      name: QueueName.AI_QUEUE,
-      defaultJobOptions: {
-        removeOnComplete: true,
-        removeOnFail: true,
-        attempts: 1,
-      },
-    }),
+    // 2026-09-22: SEARCH_QUEUE / AI_QUEUE registrations removed.
+    // Dead queues in this fork: producers deleted, no @Processor exists,
+    // and every enqueued job accumulated forever (1.5M+ jobs / 552MB redis).
     BullModule.registerQueue({
       name: QueueName.HISTORY_QUEUE,
       defaultJobOptions: {
