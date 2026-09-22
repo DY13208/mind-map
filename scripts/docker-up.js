@@ -453,7 +453,7 @@ function knowledgeMcpImageExists(tag) {
 }
 
 function ensureKnowledgeMcpBuilt(extraEnv) {
-  const imageTag = 'mind-map-knowledge-mcp:0.6.0'
+  const imageTag = 'mind-map-knowledge-mcp:0.6.1'
   const stampDir = path.join(ROOT, '.docker-build-stamps')
   const stampPath = path.join(stampDir, 'knowledge-mcp.sha')
   const legacyStampPath = path.join(ROOT, 'docker', '.knowledge-mcp-src.sha')

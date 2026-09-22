@@ -183,7 +183,7 @@ services:
     build:
       context: ./integrations/knowledge-mcp
       dockerfile: Dockerfile
-    image: mind-map-knowledge-mcp:0.6.0
+    image: mind-map-knowledge-mcp:0.6.1
     environment:
       KNOWLEDGE_MCP_PORT: "18792"
       KNOWLEDGE_MCP_JWT_SECRET: ${KNOWLEDGE_MCP_JWT_SECRET}
