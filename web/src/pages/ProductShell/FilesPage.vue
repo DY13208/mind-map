@@ -111,6 +111,7 @@
           :can-select="canSelectRoom(room)"
           @open="openRoom"
           @favorite="favorite"
+          @duplicate="duplicateRoom"
           @rename="renameRoom"
           @move="moveRoom"
           @move-to-team="moveToTeam"
@@ -140,6 +141,7 @@
         @move-folder-to-team="moveFolderToTeam"
         @delete-folder="deleteFolder"
         @favorite="favorite"
+        @duplicate="duplicateRoom"
         @rename="renameRoom"
         @move="moveRoom"
         @move-to-team="moveToTeam"
@@ -220,6 +222,7 @@ import { isNavigationFailure, NavigationFailureType } from 'vue-router'
 import roomService from '@/services/roomService'
 import folderService from '@/services/folderService'
 import teamService from '@/services/teamService'
+import { getFileExport, replaceFileTree } from '@/utils/fileApi'
 import EmptyState from './components/EmptyState.vue'
 import FileToolbar from './components/FileToolbar.vue'
 import FolderBreadcrumb from './components/FolderBreadcrumb.vue'
@@ -1186,6 +1189,44 @@ export default {
         () => roomService.toggleFavorite(room.roomKey || room.id),
         room.favorite ? '已取消收藏' : '已收藏'
       )
+    },
+    async duplicateRoom(room) {
+      if (this.busy) return
+      const sourceRoomKey = this.roomKey(room)
+      if (!sourceRoomKey) {
+        this.$message.error('缺少脑图标识，无法创建副本')
+        return
+      }
+      const sourceTitle = String(room.title || '未命名脑图').trim() || '未命名脑图'
+      const title = `${sourceTitle}--副本`
+      this.busy = true
+      try {
+        const source = await getFileExport(sourceRoomKey, 10000)
+        if (!source || source.truncated || !source.tree) {
+          throw new Error('脑图内容过大，暂不支持创建完整副本')
+        }
+        const folderId = this.folder ? this.folder.id : null
+        const created = this.isTeamView
+          ? await teamService.createRoom(this.selectedTeamId, title, folderId)
+          : await roomService.createRoom(title, folderId)
+        const createdRoomKey = this.roomKey(created)
+        if (!createdRoomKey) throw new Error('创建副本未返回脑图标识')
+        try {
+          await replaceFileTree(createdRoomKey, source.tree, {
+            allowFullTree: true,
+            source: 'duplicate'
+          })
+        } catch (error) {
+          await roomService.deleteRoom(createdRoomKey).catch(() => {})
+          throw error
+        }
+        await this.load({ reset: true, keepPage: true })
+        this.$message.success(`已创建副本「${title}」`)
+      } catch (error) {
+        this.$message.error(userMessageFromError(error))
+      } finally {
+        this.busy = false
+      }
     },
     deleteRoom(room) {
       return this.perform(

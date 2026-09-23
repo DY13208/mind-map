@@ -447,9 +447,12 @@ export function getFileSubtree(roomKey, uid, options = {}) {
   return job
 }
 
-export function getFileExport(roomKey) {
+export function getFileExport(roomKey, maxNodes = 10000) {
+  const limit = Math.min(10000, Math.max(0, Number(maxNodes) || 0))
   return request(
-    `/api/files/${encodeURIComponent(roomKey)}?format=full&max_nodes=10000`
+    `/api/files/${encodeURIComponent(roomKey)}?format=full${
+      limit ? `&max_nodes=${limit}` : ''
+    }`
   )
 }
 

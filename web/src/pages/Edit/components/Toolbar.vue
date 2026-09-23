@@ -229,10 +229,12 @@
             data-testid="refresh"
             @click="refreshPage"
           >
-            <span
-              class="icon"
-              :class="refreshing ? 'el-icon-loading' : 'el-icon-refresh'"
-            ></span>
+            <span class="icon">
+              <i
+                class="refreshIcon"
+                :class="refreshing ? 'el-icon-loading' : 'el-icon-refresh'"
+              ></i>
+            </span>
             <span class="text">{{ $t('toolbar.refresh') }}</span>
           </div>
           <div
@@ -1860,6 +1862,11 @@ export default {
         flex-direction: column;
         text-align: center;
         padding: 0 5px;
+
+        .refreshIcon {
+          display: inline-block;
+          line-height: 1;
+        }
       }
 
       .text {
