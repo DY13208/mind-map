@@ -71,10 +71,13 @@
               >删除</el-dropdown-item
             ></el-dropdown-menu
           ></el-dropdown
-        ><el-dropdown v-if="scope.row.__kind === 'folder' && !selectMode && scope.row.canManage !== false"
+        ><el-dropdown v-if="scope.row.__kind === 'folder' && !selectMode"
           trigger="click" @command="$emit($event, scope.row)" @click.native.stop>
           <i class="el-icon-more" /><el-dropdown-menu slot="dropdown">
+            <el-dropdown-item v-if="allowShare" command="share-folder">分享 / 权限</el-dropdown-item>
+            <el-dropdown-item v-if="scope.row.canManage !== false" command="rename-folder">重命名</el-dropdown-item>
             <el-dropdown-item v-if="allowMoveToTeam" command="move-folder-to-team">移至团队空间</el-dropdown-item>
+            <el-dropdown-item v-if="allowDelete && scope.row.canManage !== false" command="delete-folder" divided>删除</el-dropdown-item>
           </el-dropdown-menu>
         </el-dropdown></template
       ></el-table-column
@@ -91,6 +94,7 @@ export default {
     rooms: Array,
     folders: { type: Array, default: () => [] },
     allowDelete: { type: Boolean, default: false },
+    allowShare: { type: Boolean, default: true },
     allowMoveToTeam: { type: Boolean, default: true },
     selectMode: { type: Boolean, default: false },
     selectedRoomKeys: { type: Array, default: () => [] },

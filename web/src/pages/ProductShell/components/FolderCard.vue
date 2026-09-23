@@ -29,16 +29,15 @@
         ><small>{{ dateText }} 更新</small></span
       >
       <el-dropdown
-        v-if="editable"
         trigger="click"
         @command="$emit($event, folder)"
         @click.native.stop
         ><span class="more"><i class="el-icon-more"/></span
         ><el-dropdown-menu slot="dropdown"
           ><el-dropdown-item v-if="allowShare" command="share">分享 / 权限</el-dropdown-item
-          ><el-dropdown-item command="rename">重命名</el-dropdown-item
+          ><el-dropdown-item v-if="editable" command="rename">重命名</el-dropdown-item
           ><el-dropdown-item v-if="allowMoveToTeam" command="move-to-team">移至团队空间</el-dropdown-item
-          ><el-dropdown-item command="delete" divided
+          ><el-dropdown-item v-if="editable" command="delete" divided
             >删除</el-dropdown-item
           ></el-dropdown-menu
         ></el-dropdown
