@@ -115,6 +115,52 @@ const pendingOneIdConfig = __test.readConfig({
   ONEID_AUTO_LOGIN: 'true'
 })
 assert.strictEqual(pendingOneIdConfig.oneId.loginReady, false)
+const workBuddyConfig = __test.readConfig({
+  ...process.env,
+  WECOM_AUTH_ENABLED: 'false',
+  WORKBUDDY_AUTH_ENABLED: 'true',
+  WORKBUDDY_CLIENT_ID: 'workbuddy-client',
+  WORKBUDDY_CLIENT_SECRET: 'workbuddy-secret',
+  WORKBUDDY_REDIRECT_URI: 'https://mindmap.example.com/oauth/callback',
+  WORKBUDDY_AUTO_LOGIN: 'true'
+})
+assert.strictEqual(workBuddyConfig.enabled, true)
+assert.strictEqual(workBuddyConfig.workbuddyEnabled, true)
+assert.strictEqual(workBuddyConfig.workbuddy.autoLogin, true)
+assert.deepStrictEqual(workBuddyConfig.workbuddy.scopes, ['openid'])
+assert.strictEqual(
+  workBuddyConfig.workbuddy.authorizationEndpoint,
+  'https://www.workbuddy.cn/oauth2'
+)
+assert.strictEqual(
+  workBuddyConfig.workbuddy.tokenEndpoint,
+  'https://www.workbuddy.cn/oauth2/token'
+)
+assert.strictEqual(
+  workBuddyConfig.workbuddy.userinfoEndpoint,
+  'https://www.workbuddy.cn/oauth2/userinfo'
+)
+assert.deepStrictEqual(
+  __test.workBuddyClaims({ data: { userInfo: { sub: 'member-1' } } }),
+  { sub: 'member-1' }
+)
+assert.strictEqual(
+  __test.workBuddySubject({ openid: 'workbuddy-openid' }),
+  'workbuddy-openid'
+)
+assert.throws(
+  () =>
+    __test.readConfig({
+      ...process.env,
+      WECOM_AUTH_ENABLED: 'false',
+      WORKBUDDY_AUTH_ENABLED: 'true',
+      WORKBUDDY_CLIENT_ID: 'workbuddy-client',
+      WORKBUDDY_CLIENT_SECRET: 'workbuddy-secret',
+      WORKBUDDY_REDIRECT_URI:
+        'https://mindmap.example.com/api/auth/workbuddy/callback'
+    }),
+  /路径必须是 \/oauth\/callback/
+)
 assert.throws(
   () =>
     __test.readConfig({

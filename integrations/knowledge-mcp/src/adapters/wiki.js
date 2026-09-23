@@ -299,7 +299,10 @@ async function wikiTree(userId, { spaceId, pageId } = {}, env = process.env) {
 async function wikiRead(userId, { pageId, format } = {}, env = process.env) {
   const c = cfg(env);
   if (!pageId) throw fail('missing_params', 'missing_params: 需要 pageId');
-  const wantFormat = format === 'html' ? 'html' : 'markdown';
+  // format=json 返回 Docmost 存储的 ProseMirror content 原文（/api/pages/info
+  // 对非 json 格式才做渲染，json 时直接透传 page.content）。
+  // 用途：跨机改页面前先取整页 JSON 树，读写走同一端点（防「读A写B」）。
+  const wantFormat = format === 'html' ? 'html' : format === 'json' ? 'json' : 'markdown';
   const page = await docmostApi(
     userId,
     '/api/pages/info',

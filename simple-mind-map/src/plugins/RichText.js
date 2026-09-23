@@ -102,6 +102,12 @@ class RichText {
         user-select: none;
       }
 
+      .smm-richtext-node-wrap p {
+        margin: 0;
+        padding: 0;
+        line-height: 1.2;
+      }
+
       .ql-editor .ql-align-left, 
       .smm-richtext-node-wrap .ql-align-left {
         text-align: left;

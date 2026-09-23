@@ -200,8 +200,28 @@ class Drag extends Base {
       }
     }
     let didMove = false
+    const requestSyncPaint = () => {
+      if (this.mindMap.renderer) this.mindMap.renderer._syncPaintOnce = true
+    }
+    const markRemeasure = node => {
+      if (!node) return
+      const family =
+        node.parent && node.parent.children && node.parent.children.length
+          ? node.parent.children
+          : node.children || []
+      family.forEach(item => {
+        if (item) item._forceMeasure = true
+      })
+      node._forceMeasure = true
+      ;(node.children || []).forEach(child => {
+        if (child) child._forceMeasure = true
+      })
+    }
     // 存在重叠子节点，则移动作为其子节点
     if (this.overlapNode) {
+      requestSyncPaint()
+      markRemeasure(this.overlapNode)
+      ;(this.beingDragNodeList || []).forEach(markRemeasure)
       this.removeNodeActive(this.overlapNode)
       this.mindMap.execCommand(
         'MOVE_NODE_TO',
@@ -210,6 +230,9 @@ class Drag extends Base {
       )
       didMove = true
     } else if (this.prevNode) {
+      requestSyncPaint()
+      markRemeasure(this.prevNode)
+      ;(this.beingDragNodeList || []).forEach(markRemeasure)
       // 存在前一个相邻节点，作为其下一个兄弟节点
       this.removeNodeActive(this.prevNode)
       this.mindMap.execCommand(
@@ -219,6 +242,9 @@ class Drag extends Base {
       )
       didMove = true
     } else if (this.nextNode) {
+      requestSyncPaint()
+      markRemeasure(this.nextNode)
+      ;(this.beingDragNodeList || []).forEach(markRemeasure)
       // 存在下一个相邻节点，作为其前一个兄弟节点
       this.removeNodeActive(this.nextNode)
       this.mindMap.execCommand(
@@ -836,6 +862,25 @@ class Drag extends Base {
     }
   }
 
+  // 获取“作为子节点”在父节点生长方向上的命中走廊宽度
+  getChildDropCorridor(node) {
+    const layout = this.mindMap.renderer && this.mindMap.renderer.layout
+    const marginX =
+      layout && typeof layout.getMarginX === 'function'
+        ? layout.getMarginX(node.layerIndex + 1)
+        : this.minOffset * 2
+    const dragNode = this.beingDragNodeList && this.beingDragNodeList[0]
+    const dragNodeWidth = dragNode && Number(dragNode.width)
+    const previewWidth = Math.max(
+      this.placeholderWidth,
+      Number.isFinite(dragNodeWidth) ? Math.min(dragNodeWidth, 120) : 0
+    )
+    return Math.max(
+      collabPaste.generalizationCorridorPx(node),
+      marginX + previewWidth
+    )
+  }
+
   // 垂直方向比较
   // isReverse：是否反向
   handleVerticalCheck(node, checkList, isReverse = false) {
@@ -859,10 +904,19 @@ class Drag extends Base {
     if (isReverse) {
       checkList = checkList.reverse()
     }
-    let oneFourthHeight = nodeRect.originHeight / 4
+    // The leading/trailing quarter of the node is an explicit sibling insertion
+    // target. Previously it was only used when there was no gap to a sibling;
+    // last nodes therefore had a very small target *outside* the node and were
+    // usually interpreted as "move into this node" instead of "move after it".
+    // Use screen-space dimensions here because mouseMoveY and nodeRect.top/bottom
+    // are also in screen space (this also keeps the hit area correct when zoomed).
+    let oneFourthHeight = (nodeRect.bottom - nodeRect.top) / 4
     let { prevBrotherOffset, nextBrotherOffset } =
       this.getNodeDistanceToSiblingNode(checkList, node, nodeRect, 'v')
-    const corridor = collabPaste.generalizationCorridorPx(node)
+    // 逻辑结构/思维导图的子节点位于目标节点左右侧。把目标节点到
+    // 下一层预期位置之间也纳入命中区，拖到右侧（左向分支为左侧）时
+    // 即可识别为“作为子节点”，并渲染子节点占位提示。
+    const corridor = this.getChildDropCorridor(node)
     const { scaleX } = this.drawTransform
     const hitLeft = nodeRect.left - (dir === LEFT ? corridor * scaleX : 0)
     const hitRight = nodeRect.right + (dir === LEFT ? 0 : corridor * scaleX)
@@ -874,18 +928,14 @@ class Drag extends Base {
         !this.nextNode &&
         !node.isRoot
       ) {
+        // 节点下/上四分之一区域和相邻间隙共同作为“之后/之前”的命中区。
+        // 这样末尾节点也能直接在节点边缘命中，并立即显示插入占位提示。
         let checkIsPrevNode =
-          nextBrotherOffset > 0 // 距离下一个兄弟节点的距离大于0
-            ? mouseMoveY > nodeRect.bottom &&
-              mouseMoveY <= nodeRect.bottom + nextBrotherOffset // 那么在当前节点外底部判断
-            : mouseMoveY >= nodeRect.bottom - oneFourthHeight &&
-              mouseMoveY <= nodeRect.bottom // 否则在当前节点内底部1/4区间判断
+          mouseMoveY >= nodeRect.bottom - oneFourthHeight &&
+          mouseMoveY <= nodeRect.bottom + nextBrotherOffset
         let checkIsNextNode =
-          prevBrotherOffset > 0 // 距离上一个兄弟节点的距离大于0
-            ? mouseMoveY < nodeRect.top &&
-              mouseMoveY >= nodeRect.top - prevBrotherOffset // 那么在当前节点外底部判断
-            : mouseMoveY >= nodeRect.top &&
-              mouseMoveY <= nodeRect.top + oneFourthHeight
+          mouseMoveY >= nodeRect.top - prevBrotherOffset &&
+          mouseMoveY <= nodeRect.top + oneFourthHeight
 
         const { scaleY } = this.drawTransform
         let x =
@@ -1005,7 +1055,9 @@ class Drag extends Base {
     let mouseMoveX = this.mouseMoveX
     let mouseMoveY = this.mouseMoveY
     let nodeRect = this.getNodeRect(node)
-    let oneFourthWidth = nodeRect.originWidth / 4
+    // Keep horizontal layouts consistent with vertical mind-map branches and
+    // calculate the edge hit area in screen space so zoom does not shrink it.
+    let oneFourthWidth = (nodeRect.right - nodeRect.left) / 4
     let { prevBrotherOffset, nextBrotherOffset } =
       this.getNodeDistanceToSiblingNode(checkList, node, nodeRect, 'h')
     const corridorY = collabPaste.generalizationCorridorPx(node)
@@ -1021,17 +1073,11 @@ class Drag extends Base {
         !node.isRoot
       ) {
         let checkIsPrevNode =
-          nextBrotherOffset > 0 // 距离下一个兄弟节点的距离大于0
-            ? mouseMoveX < nodeRect.right + nextBrotherOffset &&
-              mouseMoveX >= nodeRect.right // 那么在当前节点外底部判断
-            : mouseMoveX <= nodeRect.right &&
-              mouseMoveX >= nodeRect.right - oneFourthWidth // 否则在当前节点内底部1/4区间判断
+          mouseMoveX >= nodeRect.right - oneFourthWidth &&
+          mouseMoveX <= nodeRect.right + nextBrotherOffset
         let checkIsNextNode =
-          prevBrotherOffset > 0 // 距离上一个兄弟节点的距离大于0
-            ? mouseMoveX > nodeRect.left - prevBrotherOffset &&
-              mouseMoveX <= nodeRect.left // 那么在当前节点外底部判断
-            : mouseMoveX <= nodeRect.left + oneFourthWidth &&
-              mouseMoveX >= nodeRect.left
+          mouseMoveX >= nodeRect.left - prevBrotherOffset &&
+          mouseMoveX <= nodeRect.left + oneFourthWidth
         const { scaleX } = this.drawTransform
         const layerIndex = node.layerIndex
         let y = nodeRect.originTop

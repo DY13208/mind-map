@@ -12,6 +12,7 @@
 import { roomFromLocation } from '@/utils/roomLocation'
 import {
   getNodeAttachment,
+  deleteNodeAttachment,
   uploadNodeAttachment,
   waitForAttachmentReady,
   maxAttachmentBytes,
@@ -34,12 +35,14 @@ export default {
   },
   created() {
     this.$bus.$on('selectAttachment', this.onSelectAttachment)
+    this.$bus.$on('manageNodeAttachment', this.onManageAttachment)
   },
   mounted() {
     this.hydrateExistingAttachments()
   },
   beforeDestroy() {
     this.$bus.$off('selectAttachment', this.onSelectAttachment)
+    this.$bus.$off('manageNodeAttachment', this.onManageAttachment)
     Object.keys(this.inflight).forEach(uid => this.abortInflight(uid))
   },
   methods: {
@@ -277,6 +280,47 @@ export default {
       // instances while the file picker/upload is open.
       this.pendingNodes = list.map(node => ({ uid: node.uid, node }))
       this.$refs.fileInput && this.$refs.fileInput.click()
+    },
+    async onManageAttachment(item) {
+      const node = this.resolveNode(item)
+      const data = (node && node.getData && node.getData()) || {}
+      const attachmentId = String(data.attachmentId || '')
+      const uid = String(data.uid || (node && node.uid) || '')
+      const status = String(data.attachmentStatus || '').toLowerCase()
+      if (!node || !attachmentId || !['pending', 'processing', 'failed'].includes(status)) {
+        return
+      }
+      const roomKey = roomFromLocation(this.$route)
+      if (!roomKey) return
+      const busy = status === 'pending' || status === 'processing'
+      try {
+        await this.$confirm(
+          busy
+            ? '将停止等待当前附件解析、移除该附件，并选择新文件重新上传。已开始的服务端解析结果不会再写回节点。'
+            : '将移除解析失败的附件，并选择新文件重新上传。',
+          busy ? '终止解析并重新上传' : '重新上传附件',
+          {
+            confirmButtonText: busy ? '终止并选择文件' : '移除并选择文件',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }
+        )
+      } catch (err) {
+        return
+      }
+      try {
+        const result = await deleteNodeAttachment(roomKey, attachmentId, uid)
+        this.abortInflight(uid)
+        this.restoreSnapshot(node, null)
+        this.pendingNodes = [{ uid, node }]
+        this.$refs.fileInput && this.$refs.fileInput.click()
+        const attachment = result && result.attachment
+        if (attachment && attachment.shared) {
+          this.$message.info('该附件仍被其他节点使用，已仅从当前节点移除')
+        }
+      } catch (err) {
+        this.$message.error((err && err.message) || '移除附件失败')
+      }
     },
     async onFilePicked(event) {
       const file =

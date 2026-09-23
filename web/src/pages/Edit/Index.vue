@@ -32,7 +32,7 @@ import HistoryPanel from '../ProductShell/components/HistoryPanel.vue'
 import { productRequest } from '@/services/productHttp'
 import { normalizeRoomDto } from '@/services/roomDto'
 import { mapState, mapMutations } from 'vuex'
-import { getLocalConfig } from '@/api'
+import { getLocalConfig, withRightDragDefault } from '@/api'
 import { navigateToMyMaps } from '@/utils/roomLocation'
 
 export default {
@@ -104,7 +104,7 @@ export default {
 
     // 初始化本地配置
     initLocalConfig() {
-      let config = getLocalConfig()
+      let config = withRightDragDefault(getLocalConfig())
       if (config) {
         this.setLocalConfig({
           ...this.$store.state.localConfig,

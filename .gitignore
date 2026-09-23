@@ -39,5 +39,5 @@ output/*.json
 certs/
 output/*.py
 
-# MCP WorkBuddy host directory when WORKBUDDY_HOST_DIR is configured.
+# MCP 默认挂载目录（无 WORKBUDDY_HOST_DIR 时用）
 /data/workbuddy/

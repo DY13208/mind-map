@@ -170,6 +170,52 @@ function mockRes() {
   )
   assert.ok(restoreReplay.tree.d)
 
+  const undoReplayRows = [
+    {
+      version: 1,
+      operation_id: 'history-update-root',
+      actor_id: 'u1',
+      operation_type: 'node.update',
+      payload: { uid: 'root', text: 'History changed' },
+      inverse_payload: {
+        type: 'node.update',
+        payload: { uid: 'root', text: 'Root' }
+      }
+    },
+    {
+      version: 2,
+      operation_id: 'history-undo-a',
+      actor_id: 'u1',
+      operation_type: 'operation.undo',
+      payload: { targetOperationId: 'history-update-root' }
+    },
+    {
+      version: 3,
+      operation_id: 'history-redo-a',
+      actor_id: 'u1',
+      operation_type: 'operation.redo',
+      payload: { targetOperationId: 'history-update-root' }
+    }
+  ]
+  const undoneReplay = await replayOperations(
+    {
+      root: { isRoot: true, data: { uid: 'root', text: 'Root' }, children: [] }
+    },
+    {},
+    undoReplayRows.slice(0, 2),
+    { requireContinuous: true, fromRevision: 0 }
+  )
+  assert.strictEqual(undoneReplay.tree.root.data.text, 'Root')
+  const redoneReplay = await replayOperations(
+    {
+      root: { isRoot: true, data: { uid: 'root', text: 'Root' }, children: [] }
+    },
+    {},
+    undoReplayRows,
+    { requireContinuous: true, fromRevision: 0 }
+  )
+  assert.strictEqual(redoneReplay.tree.root.data.text, 'History changed')
+
   const importTree = {
     data: { uid: 'root', text: 'Imported' },
     children: [{ data: { uid: 'x', text: 'X', generalization: [{ uid: 'g1', text: '概要' }] }, children: [] }]
@@ -237,6 +283,63 @@ function mockRes() {
   assert.ok(summary.moved >= 1)
   assert.strictEqual(summary.metadataChanged, true)
   assert.strictEqual(summary.replaced, true)
+
+  // 结构补水（childCount）和“普通文本 -> 等价富文本”的自动规范化不是用户修改。
+  const classification = engineWith()
+  await classification.store.appendOperation({
+    room_key: ROOM,
+    version: 1,
+    operation_id: randomUUID(),
+    operation_type: 'node.update',
+    payload: { uid: 'a', childCount: 1 },
+    inverse_payload: { payload: { uid: 'a', childCount: 0 } }
+  })
+  await classification.store.appendOperation({
+    room_key: ROOM,
+    version: 2,
+    operation_id: randomUUID(),
+    operation_type: 'node.batch',
+    payload: {
+      ops: [
+        {
+          type: 'node.update',
+          payload: { uid: 'a', text: '<p>A</p>', richText: true }
+        },
+        { type: 'node.update', payload: { uid: 'b', text: '<p>B2</p>', richText: true } }
+      ]
+    },
+    inverse_payload: {
+      payload: {
+        ops: [
+          { type: 'node.update', payload: { uid: 'b', text: 'B', richText: null } },
+          { type: 'node.update', payload: { uid: 'a', text: 'A', richText: null } }
+        ]
+      }
+    }
+  })
+  const classified = await classification.engine.summarizeRange(ROOM, 0, 2)
+  assert.strictEqual(classified.updated, 1)
+
+  // 已生成的旧摘要会在列表读取时使用新规则重新计算并回写。
+  await classification.store.setLiveState(ROOM, {
+    revision: 2,
+    nodes: (await classification.store.getLiveState(ROOM)).nodes,
+    metadata: (await classification.store.getLiveState(ROOM)).metadata
+  })
+  const legacySummary = await classification.engine.createVersion(ROOM, {
+    revision: 2,
+    type: 'AUTO',
+    name: '旧统计版本',
+    skipEnsure: true
+  })
+  await classification.store.updateVersionMeta(ROOM, legacySummary.id, {
+    summary: { kind: 'edits', inserted: 0, updated: 5, deleted: 0, moved: 0 },
+    summary_status: 'ready'
+  })
+  const refreshedList = await classification.engine.listVersions(ROOM, { limit: 10 })
+  const refreshed = refreshedList.versions.find(row => row.id === legacySummary.id)
+  assert.strictEqual(refreshed.summary.updated, 1)
+  assert.strictEqual(refreshed.summary.algorithmVersion, 2)
 
   const currentBefore = await store.getLiveState(ROOM)
   const targetRev = 3
@@ -801,6 +904,35 @@ function mockRes() {
   ])
   assert.ok(ra.newRevision)
   assert.ok(rb.newRevision)
+
+  // A successful pre-insert history flush is a hard summary boundary: pending
+  // edits remain visible in their own AUTO version instead of being reported
+  // as modifications alongside the following node creation.
+  const boundary = engineWith()
+  await boundary.engine.ensureHistoryBaseline(ROOM)
+  await commit(boundary.engine, {
+    type: 'node.update',
+    payload: { uid: 'root', text: 'Root updated before insert' }
+  })
+  const updates = await boundary.engine.flushPendingAutoVersion(ROOM, {
+    userId: 'u1',
+    source: 'pre_insert'
+  })
+  assert.strictEqual(updates.summary.updated, 1)
+  assert.strictEqual(updates.summary.inserted, 0)
+  // previousVisibleVersion uses creation order for same-revision manual
+  // snapshots; ensure this follow-up AUTO version has a later timestamp.
+  await new Promise(resolve => setTimeout(resolve, 20))
+  await commit(boundary.engine, {
+    type: 'node.insert',
+    payload: { uid: 'boundary-node', parent: 'root', text: 'New node' }
+  })
+  const inserts = await boundary.engine.flushPendingAutoVersion(ROOM, {
+    userId: 'u1',
+    source: 'history_open'
+  })
+  assert.strictEqual(inserts.summary.inserted, 1)
+  assert.strictEqual(inserts.summary.updated, 0)
 
   console.log('collabHistory.test.js ok')
 })().catch(err => {

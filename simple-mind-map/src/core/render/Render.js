@@ -586,6 +586,10 @@ class Render {
     let isTrueClick = true
     // 是否是左键多选节点，右键拖动画布
     const { useLeftKeySelectionRightKeyDrag } = this.mindMap.opt
+    // 右键拖动模式下，右键是打开已框选节点的菜单，不能把选区清掉。
+    if (useLeftKeySelectionRightKeyDrag && eventType === 'contextmenu') {
+      return
+    }
     // 如果鼠标按下和松开的距离较大，则不认为是点击事件
     if (
       eventType === 'contextmenu'
@@ -671,6 +675,14 @@ class Render {
     }, 0)
   }
 
+  // 更新的渲染已经接管画布时，把这次中断的渲染让出去，避免位置一直停在重叠的旧布局上
+  finishSupersededRender() {
+    this.isRendering = false
+    if (!this.hasWaitRendering) return
+    this.hasWaitRendering = false
+    this.render()
+  }
+
   // 真正的渲染
   _render() {
     // 切换主题时，被收起的节点需要添加样式复位的标注
@@ -683,6 +695,8 @@ class Render {
       this.hasWaitRendering = true
       return
     }
+    const syncPaint = !!this._syncPaintOnce
+    this._syncPaintOnce = false
     this.isRendering = true
     const renderGeneration = this._renderGeneration
     const isLayoutSwitch = this.checkHasRenderSource(CONSTANTS.CHANGE_LAYOUT)
@@ -710,7 +724,10 @@ class Render {
     // 计算布局
     this.root = null
     this.layout.doLayout(root => {
-      if (renderGeneration !== this._renderGeneration) return
+      if (renderGeneration !== this._renderGeneration) {
+        this.finishSupersededRender()
+        return
+      }
       const stale = destroyStaleLayoutNodes(this.lastNodeCache, this.nodeCache)
       stale.destroyed.forEach(uid => {
         const prev = this.lastNodeCache[uid]
@@ -722,10 +739,13 @@ class Render {
       // Layout switch must paint synchronously so an in-flight performance
       // pass cannot leave the previous structure on the canvas.
       const asyncPaint =
-        !!this.mindMap.opt.openPerformance && !isLayoutSwitch
+        !!this.mindMap.opt.openPerformance && !isLayoutSwitch && !syncPaint
       this.root.render(
         () => {
-          if (renderGeneration !== this._renderGeneration) return
+          if (renderGeneration !== this._renderGeneration) {
+            this.finishSupersededRender()
+            return
+          }
           this.isRendering = false
           if (this.hasWaitRendering) {
             this.hasWaitRendering = false

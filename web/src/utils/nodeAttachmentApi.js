@@ -260,6 +260,18 @@ export async function getNodeAttachment(roomKey, attachmentId) {
   )
 }
 
+export async function deleteNodeAttachment(roomKey, attachmentId, nodeUid = '') {
+  const query = nodeUid
+    ? `?node_uid=${encodeURIComponent(String(nodeUid))}`
+    : ''
+  return apiRequest(
+    `/api/files/${encodeURIComponent(roomKey)}/attachments/${encodeURIComponent(
+      attachmentId
+    )}${query}`,
+    { method: 'DELETE' }
+  )
+}
+
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }

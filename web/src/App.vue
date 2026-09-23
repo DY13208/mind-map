@@ -60,16 +60,16 @@
           </div>
           <div class="authActions">
             <button
-              v-if="authState.oneIdEnabled"
+              v-if="authState.workbuddyEnabled"
               class="authButton authButton--secondary"
               type="button"
-              :disabled="oneIdRedirecting || !authState.oneIdLoginReady"
-              @click="startOneIdLogin"
+              :disabled="workbuddyRedirecting || !authState.workbuddyLoginReady"
+              @click="startWorkBuddyLogin"
             >
               {{
-                !authState.oneIdLoginReady
+                !authState.workbuddyLoginReady
                   ? 'WorkBuddy 单点登录配置中'
-                  : oneIdRedirecting
+                  : workbuddyRedirecting
                     ? '正在进入 WorkBuddy…'
                     : 'WorkBuddy 单点登录'
               }}
@@ -77,9 +77,9 @@
           </div>
           <p
             class="authOneIdHint"
-            v-if="authState.oneIdEnabled && !authState.oneIdLoginReady"
+            v-if="authState.workbuddyEnabled && !authState.workbuddyLoginReady"
           >
-            企业认证源上架后开放
+            OAuth 应用配置完成后开放
           </p>
           <div class="authDevLogin" v-if="authState.devBypassAvailable">
             <button
@@ -138,18 +138,18 @@
 
 <script>
 import {
-  clearOneIdAutoLoginAttempt,
+  clearWorkBuddyAutoLoginAttempt,
   clearWecomClientAutoLoginAttempt,
   createLoginQr,
   devLogin,
   getAuthApiUrl,
-  getOneIdLoginUrl,
+  getWorkBuddyLoginUrl,
   getStoredDevAuthKey,
   getWecomClientLoginUrl,
   loadAuthState,
-  markOneIdAutoLoginAttempted,
+  markWorkBuddyAutoLoginAttempted,
   markWecomClientAutoLoginAttempted,
-  ONEID_AUTO_ATTEMPT_KEY,
+  WORKBUDDY_AUTO_ATTEMPT_KEY,
   WECOM_CLIENT_AUTO_ATTEMPT_KEY
 } from '@/utils/auth'
 import { mountWecomLoginPanel } from '@/utils/wecomLogin'
@@ -179,6 +179,20 @@ const authErrors = {
   oneid_http_error: 'OneID 登录服务响应异常，请稍后重试。',
   oneid_timeout: 'OneID 响应超时，请稍后重试。',
   oneid_unavailable: 'OneID 服务暂不可用，可使用企业微信扫码。',
+  workbuddy_access_denied:
+    'WorkBuddy 单点登录未完成，可重试或使用企业微信扫码。',
+  workbuddy_missing_code: 'WorkBuddy 未返回有效授权码，请重新登录。',
+  workbuddy_token_failed: 'WorkBuddy 登录票据交换失败，请稍后重试。',
+  workbuddy_identity_failed:
+    'WorkBuddy 未返回有效成员身份，请联系管理员。',
+  workbuddy_account_not_linked:
+    'WorkBuddy 账号未匹配到现有企业微信成员。为避免产生第二套账号，已阻止登录，请联系管理员核对成员信息。',
+  workbuddy_identity_conflict:
+    '该 WorkBuddy 账号已绑定其他成员，已拒绝变更绑定。',
+  workbuddy_invalid_response: 'WorkBuddy 返回的数据不完整，请稍后重试。',
+  workbuddy_http_error: 'WorkBuddy 登录服务响应异常，请稍后重试。',
+  workbuddy_timeout: 'WorkBuddy 响应超时，请稍后重试。',
+  workbuddy_unavailable: 'WorkBuddy 服务暂不可用，可使用企业微信扫码。',
   auth_unavailable: '认证服务暂不可用，请稍后重试。'
 }
 
@@ -197,6 +211,9 @@ export default {
         oneIdEnabled: false,
         oneIdLoginReady: false,
         oneIdAutoLogin: false,
+        workbuddyEnabled: false,
+        workbuddyLoginReady: false,
+        workbuddyAutoLogin: false,
         authenticated: false,
         user: null,
         devBypassAvailable: false
@@ -209,7 +226,7 @@ export default {
       qrRefreshTimer: null,
       isWecomClient: isWecomClientEnvironment(),
       wecomClientRedirecting: false,
-      oneIdRedirecting: false,
+      workbuddyRedirecting: false,
       showDevLogin: false,
       devAuthKey: '',
       devAuthMobile: '',
@@ -293,7 +310,7 @@ export default {
         }, AUTH_BOOTSTRAP_MS)
         this.authState = await loadAuthState()
         if (this.authState.authenticated) {
-          clearOneIdAutoLoginAttempt()
+          clearWorkBuddyAutoLoginAttempt()
           clearWecomClientAutoLoginAttempt()
         }
         this.authRetryAttempt = 0
@@ -336,13 +353,13 @@ export default {
           return
         }
         if (
-          this.authState.oneIdEnabled &&
-          this.authState.oneIdLoginReady &&
-          this.authState.oneIdAutoLogin &&
+          this.authState.workbuddyEnabled &&
+          this.authState.workbuddyLoginReady &&
+          this.authState.workbuddyAutoLogin &&
           !this.authErrorCode &&
-          !this.hasAttemptedOneIdAutoLogin()
+          !this.hasAttemptedWorkBuddyAutoLogin()
         ) {
-          this.startOneIdLogin()
+          this.startWorkBuddyLogin()
           return
         }
         // 扫码始终是主登录方式：内网访问时后端会开放开发者密钥，但那只是附加入口，
@@ -350,9 +367,11 @@ export default {
         if (this.authState.wecomEnabled) await this.refreshLoginQr()
       }
     },
-    hasAttemptedOneIdAutoLogin() {
+    hasAttemptedWorkBuddyAutoLogin() {
       try {
-        return window.sessionStorage.getItem(ONEID_AUTO_ATTEMPT_KEY) === '1'
+        return (
+          window.sessionStorage.getItem(WORKBUDDY_AUTO_ATTEMPT_KEY) === '1'
+        )
       } catch (err) {
         return true
       }
@@ -372,16 +391,16 @@ export default {
       markWecomClientAutoLoginAttempted()
       window.location.assign(getWecomClientLoginUrl())
     },
-    startOneIdLogin() {
+    startWorkBuddyLogin() {
       if (
-        !this.authState.oneIdEnabled ||
-        !this.authState.oneIdLoginReady ||
-        this.oneIdRedirecting
+        !this.authState.workbuddyEnabled ||
+        !this.authState.workbuddyLoginReady ||
+        this.workbuddyRedirecting
       )
         return
-      this.oneIdRedirecting = true
-      markOneIdAutoLoginAttempted()
-      window.location.assign(getOneIdLoginUrl())
+      this.workbuddyRedirecting = true
+      markWorkBuddyAutoLoginAttempted()
+      window.location.assign(getWorkBuddyLoginUrl())
     },
     clearQrRefreshTimer() {
       if (!this.qrRefreshTimer) return

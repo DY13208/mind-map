@@ -160,6 +160,12 @@ async function handleHistoryApi(req, res, options = {}) {
       })
       return true
     }
+    if (method === 'POST' && versionId === 'auto-flush' && !tail) {
+      const row = await engine.flushPendingAutoVersion(roomKey, { userId, source: 'pre_insert' })
+      const coverage = await engine.getHistoryCoverage(roomKey)
+      sendJson(res, 200, { ok: true, flushed: !!row, version: row ? publicVersion(row, access) : null, ...publicCoverage(coverage) })
+      return true
+    }
     if (method === 'GET' && versionId && !tail) {
       const row = await engine.getVersion(roomKey, versionId)
       if (!row) {

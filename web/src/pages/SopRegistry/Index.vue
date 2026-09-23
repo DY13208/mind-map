@@ -709,12 +709,13 @@ import Cooperate from 'simple-mind-map/src/plugins/Cooperate.js'
 import Export from 'simple-mind-map/src/plugins/Export.js'
 import exampleData from 'simple-mind-map/example/exampleData'
 import { createCollaborationAdapter } from 'simple-mind-map/bin/collabV2/adapter'
-import { getLocalConfig } from '@/api'
+import { getLocalConfig, withRightDragDefault } from '@/api'
 import { SOP_ATTACHMENT_ACCEPT, SOP_ATTACHMENT_LIMIT, validateSopAttachment, uploadSopAttachment, formatSopAttachmentNote } from '@/utils/sopRunAttachments'
 import { getCurrentUser } from '@/utils/auth'
 import { roomFromLocation } from '@/utils/roomLocation'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
 import teamService from '@/services/teamService'
+import historyService from '@/services/historyService'
 import {
   listFiles,
   getFileSubtree,
@@ -1306,7 +1307,7 @@ export default {
   methods: {
     ...mapMutations(['setLocalConfig']),
     initLocalConfig() {
-      const config = getLocalConfig()
+      const config = withRightDragDefault(getLocalConfig())
       if (config) {
         this.setLocalConfig({
           ...this.$store.state.localConfig,
@@ -3295,6 +3296,7 @@ export default {
             ...(body || {}),
             confirm_sop_change: true
           }),
+        flushHistoryVersion: () => historyService.flushAutoVersion(roomKey),
         deleteNode: (uid, options) =>
           deleteFileNode(roomKey, uid, {
             ...(options || {}),

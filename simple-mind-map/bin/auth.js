@@ -12,6 +12,7 @@ const WECOM_TOKEN_ERROR_CODES = new Set([40014, 42001])
 const WECOM_IP_DENIED_ERROR_CODE = 60020
 const OAUTH_PROVIDER_WECOM = 'wecom'
 const OAUTH_PROVIDER_ONEID = 'oneid'
+const OAUTH_PROVIDER_WORKBUDDY = 'workbuddy'
 
 let authPool = null
 let authInitialization = null
@@ -180,7 +181,8 @@ function isDevBypassAllowed(req) {
 function readConfig(env = process.env) {
   const wecomEnabled = enabledValue(env.WECOM_AUTH_ENABLED)
   const oneIdEnabled = enabledValue(env.ONEID_AUTH_ENABLED)
-  const enabled = wecomEnabled || oneIdEnabled
+  const workbuddyEnabled = enabledValue(env.WORKBUDDY_AUTH_ENABLED)
+  const enabled = wecomEnabled || oneIdEnabled || workbuddyEnabled
   if (!enabled) return { enabled: false }
 
   let corpId = ''
@@ -258,6 +260,48 @@ function readConfig(env = process.env) {
     }
   }
 
+  let workbuddy = null
+  if (workbuddyEnabled) {
+    const redirectUri = oauthEndpoint(
+      required(env, 'WORKBUDDY_REDIRECT_URI'),
+      'WORKBUDDY_REDIRECT_URI'
+    )
+    const redirect = new URL(redirectUri)
+    if (redirect.pathname !== '/oauth/callback') {
+      throw new Error('WORKBUDDY_REDIRECT_URI 路径必须是 /oauth/callback')
+    }
+    if (redirect.search || redirect.hash) {
+      throw new Error('WORKBUDDY_REDIRECT_URI 不能包含查询参数或锚点')
+    }
+    const scopes = String(env.WORKBUDDY_SCOPES || 'openid')
+      .split(/\s+/)
+      .map(value => value.trim())
+      .filter(Boolean)
+    if (!scopes.includes('openid')) scopes.unshift('openid')
+    workbuddy = {
+      clientId: required(env, 'WORKBUDDY_CLIENT_ID'),
+      clientSecret: required(env, 'WORKBUDDY_CLIENT_SECRET'),
+      authorizationEndpoint: oauthEndpoint(
+        env.WORKBUDDY_AUTHORIZATION_ENDPOINT ||
+          'https://www.workbuddy.cn/oauth2',
+        'WORKBUDDY_AUTHORIZATION_ENDPOINT'
+      ),
+      tokenEndpoint: oauthEndpoint(
+        env.WORKBUDDY_TOKEN_ENDPOINT ||
+          'https://www.workbuddy.cn/oauth2/token',
+        'WORKBUDDY_TOKEN_ENDPOINT'
+      ),
+      userinfoEndpoint: oauthEndpoint(
+        env.WORKBUDDY_USERINFO_ENDPOINT ||
+          'https://www.workbuddy.cn/oauth2/userinfo',
+        'WORKBUDDY_USERINFO_ENDPOINT'
+      ),
+      redirectUri: redirect.toString(),
+      scopes: Array.from(new Set(scopes)),
+      autoLogin: enabledValue(env.WORKBUDDY_AUTO_LOGIN)
+    }
+  }
+
   const sessionSecret = required(env, 'AUTH_SESSION_SECRET')
   const mcpToken = required(env, 'MCP_TOKEN')
   if (sessionSecret.length < 32) {
@@ -269,9 +313,11 @@ function readConfig(env = process.env) {
 
   const appOrigin = env.AUTH_APP_ORIGIN
     ? parseOrigin(env.AUTH_APP_ORIGIN, 'AUTH_APP_ORIGIN')
-    : oneId
-      ? new URL(oneId.redirectUri).origin
-      : callback.origin
+    : workbuddy
+      ? new URL(workbuddy.redirectUri).origin
+      : oneId
+        ? new URL(oneId.redirectUri).origin
+        : callback.origin
   const allowedOrigins = String(env.AUTH_ALLOWED_ORIGINS || '')
     .split(',')
     .map(value => value.trim())
@@ -330,6 +376,8 @@ function readConfig(env = process.env) {
     wecomEnabled,
     oneIdEnabled,
     oneId,
+    workbuddyEnabled,
+    workbuddy,
     corpId,
     agentId,
     secret,
@@ -452,6 +500,20 @@ async function initAuth() {
     await authPool.query(`
       create index if not exists auth_oauth_states_expires_at_idx
       on auth_oauth_states(expires_at)
+    `)
+    await authPool.query(`
+      create table if not exists auth_external_identities (
+        provider text not null,
+        subject_hash text not null,
+        user_id text not null references wecom_users(user_id) on delete cascade,
+        created_at timestamptz not null default now(),
+        last_login_at timestamptz not null default now(),
+        primary key (provider, subject_hash)
+      )
+    `)
+    await authPool.query(`
+      create index if not exists auth_external_identities_user_id_idx
+      on auth_external_identities(user_id)
     `)
     await authPool.query(
       `delete from auth_sessions
@@ -772,6 +834,32 @@ function buildOneIdLoginUrl(state) {
   url.searchParams.set('redirect_uri', config.oneId.redirectUri)
   url.searchParams.set('scope', config.oneId.scopes.join(' '))
   url.searchParams.set('state', state)
+  return url.toString()
+}
+
+function shouldAutoLoginWorkBuddy() {
+  return Boolean(
+    config.workbuddyEnabled &&
+      config.workbuddy &&
+      config.workbuddy.autoLogin
+  )
+}
+
+function buildWorkBuddyLoginUrl(state) {
+  if (!config.workbuddyEnabled || !config.workbuddy) {
+    throw new AuthError(
+      'workbuddy_disabled',
+      'WorkBuddy 单点登录未启用',
+      404
+    )
+  }
+  const url = new URL(config.workbuddy.authorizationEndpoint)
+  url.searchParams.set('client_id', config.workbuddy.clientId)
+  url.searchParams.set('response_type', 'code')
+  url.searchParams.set('redirect_uri', config.workbuddy.redirectUri)
+  url.searchParams.set('scope', config.workbuddy.scopes.join(' '))
+  url.searchParams.set('state', state)
+  url.searchParams.set('response_mode', 'query')
   return url.toString()
 }
 
@@ -1131,10 +1219,14 @@ function safeProfileImage(value) {
   return /^https?:\/\//i.test(input) ? input.slice(0, 1000) : ''
 }
 
-async function resolveOneIdWecomIdentity(claims) {
+async function resolveOAuthWecomIdentity(claims, providerName = 'OAuth') {
   if (!config.wecomEnabled) return null
   const mobile = normalizeMobileForWecom(
-    claims.mobile || claims.phone_number || claims.phoneNumber
+    claims.mobile ||
+      claims.phone_number ||
+      claims.phoneNumber ||
+      claims.phone ||
+      claims.telephone
   )
   if (mobile) {
     try {
@@ -1149,12 +1241,20 @@ async function resolveOneIdWecomIdentity(claims) {
         }
       }
     } catch (err) {
-      console.warn('[auth] OneID mobile could not be mapped to WeCom userid')
+      console.warn(
+        `[auth] ${providerName} mobile could not be mapped to WeCom userid`
+      )
     }
   }
 
   const username = String(
-    claims.preferred_username || claims.username || ''
+    claims.wecom_userid ||
+      claims.wecomUserId ||
+      claims.userid ||
+      claims.user_id ||
+      claims.preferred_username ||
+      claims.username ||
+      ''
   ).trim()
   if (!/^[a-zA-Z0-9_.@-]{1,64}$/.test(username)) return null
   try {
@@ -1177,7 +1277,9 @@ async function resolveOneIdWecomIdentity(claims) {
         : []
     }
   } catch (err) {
-    console.warn('[auth] OneID username could not be mapped to WeCom userid')
+    console.warn(
+      `[auth] ${providerName} username could not be mapped to WeCom userid`
+    )
     return null
   }
 }
@@ -1229,7 +1331,7 @@ async function exchangeOneIdCode(code) {
     )
   }
 
-  const mapped = await resolveOneIdWecomIdentity(claims)
+  const mapped = await resolveOAuthWecomIdentity(claims, 'OneID')
   if (config.wecomEnabled && !mapped) {
     throw new AuthError(
       'oneid_account_not_linked',
@@ -1259,6 +1361,190 @@ async function exchangeOneIdCode(code) {
     departments: mapped && Array.isArray(mapped.departments)
       ? mapped.departments
       : []
+  }
+}
+
+async function fetchWorkBuddyJson(url, options = {}) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 8000)
+  try {
+    const response = await fetch(url, {
+      method: options.method || 'GET',
+      headers: {
+        Accept: 'application/json',
+        ...(options.headers || {})
+      },
+      body: options.body,
+      signal: controller.signal
+    })
+    const text = await response.text()
+    let data = {}
+    try {
+      data = text ? JSON.parse(text) : {}
+    } catch (err) {
+      throw new AuthError(
+        'workbuddy_invalid_response',
+        'WorkBuddy 返回了无效响应',
+        502
+      )
+    }
+    if (!response.ok) {
+      throw new AuthError(
+        'workbuddy_http_error',
+        `WorkBuddy 接口返回 HTTP ${response.status}`,
+        502
+      )
+    }
+    return data
+  } catch (err) {
+    if (err && err.name === 'AbortError') {
+      throw new AuthError(
+        'workbuddy_timeout',
+        'WorkBuddy 接口请求超时',
+        504
+      )
+    }
+    if (err instanceof AuthError) throw err
+    throw new AuthError(
+      'workbuddy_unavailable',
+      'WorkBuddy 服务暂不可用',
+      502
+    )
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function workBuddyClaims(data) {
+  if (!data || typeof data !== 'object') return {}
+  if (data.data && data.data.userInfo && typeof data.data.userInfo === 'object') {
+    return data.data.userInfo
+  }
+  if (data.data && data.data.user && typeof data.data.user === 'object') {
+    return data.data.user
+  }
+  if (data.userInfo && typeof data.userInfo === 'object') return data.userInfo
+  if (data.user && typeof data.user === 'object') return data.user
+  if (data.data && typeof data.data === 'object') return data.data
+  return data
+}
+
+function workBuddySubject(claims) {
+  return String(
+    claims.sub ||
+      claims.openid ||
+      claims.open_id ||
+      claims.openId ||
+      claims.uid ||
+      claims.userId ||
+      ''
+  ).trim()
+}
+
+async function exchangeWorkBuddyCode(code) {
+  if (!config.workbuddyEnabled || !config.workbuddy) {
+    throw new AuthError(
+      'workbuddy_disabled',
+      'WorkBuddy 单点登录未启用',
+      404
+    )
+  }
+  const authCode = String(code || '')
+  if (!authCode || authCode.length > 2048) {
+    throw new AuthError(
+      'workbuddy_missing_code',
+      'WorkBuddy 未返回有效授权码',
+      400
+    )
+  }
+
+  const form = new URLSearchParams({
+    client_id: config.workbuddy.clientId,
+    client_secret: config.workbuddy.clientSecret,
+    grant_type: 'authorization_code',
+    code: authCode,
+    redirect_uri: config.workbuddy.redirectUri
+  })
+  const rawToken = await fetchWorkBuddyJson(config.workbuddy.tokenEndpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form.toString()
+  })
+  const token = rawToken && rawToken.data && typeof rawToken.data === 'object'
+    ? rawToken.data
+    : rawToken
+  if (!token || token.error || !token.access_token) {
+    throw new AuthError(
+      'workbuddy_token_failed',
+      'WorkBuddy 授权码交换失败',
+      502
+    )
+  }
+
+  const rawProfile = await fetchWorkBuddyJson(
+    config.workbuddy.userinfoEndpoint,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token.access_token}`,
+        'Content-Type': 'application/json'
+      },
+      body: '{}'
+    }
+  )
+  const claims = workBuddyClaims(rawProfile)
+  const subject = workBuddySubject(claims)
+  if (!subject || subject.length > 512) {
+    throw new AuthError(
+      'workbuddy_identity_failed',
+      'WorkBuddy 未返回稳定的用户身份',
+      502
+    )
+  }
+
+  const linked = await findExternalIdentity(
+    OAUTH_PROVIDER_WORKBUDDY,
+    subject
+  )
+  const mapped = linked ||
+    (await resolveOAuthWecomIdentity(claims, 'WorkBuddy'))
+  if (config.wecomEnabled && !mapped) {
+    throw new AuthError(
+      'workbuddy_account_not_linked',
+      'WorkBuddy 账号无法匹配到现有企业微信账号，已阻止创建第二套账号',
+      403
+    )
+  }
+
+  const fallbackId = `workbuddy:${sha256(subject).slice(0, 48)}`
+  const fallbackCorpId = `workbuddy:${sha256(config.workbuddy.clientId).slice(
+    0,
+    32
+  )}`
+  return {
+    id: mapped ? mapped.id : fallbackId,
+    corpId: mapped ? mapped.corpId || config.corpId : fallbackCorpId,
+    name: String(
+      claims.name ||
+        claims.display_name ||
+        claims.displayName ||
+        claims.preferred_username ||
+        claims.username ||
+        (mapped && mapped.name) ||
+        'WorkBuddy 用户'
+    ).slice(0, 100),
+    avatar:
+      safeProfileImage(
+        claims.picture || claims.avatar || claims.avatar_url || claims.avatarUrl
+      ) ||
+      (mapped && mapped.avatar) ||
+      '',
+    position: String((mapped && mapped.position) || '').slice(0, 100),
+    departments: mapped && Array.isArray(mapped.departments)
+      ? mapped.departments
+      : [],
+    externalProvider: OAUTH_PROVIDER_WORKBUDDY,
+    externalSubject: subject
   }
 }
 
@@ -1378,6 +1664,55 @@ async function consumeOAuthState(nonce, browserId, provider) {
     [sha256(nonce), sha256(browserId), provider]
   )
   return result.rows[0] ? safeReturnTo(result.rows[0].return_to) : null
+}
+
+async function findExternalIdentity(provider, subject) {
+  await initAuth()
+  const result = await authPool.query(
+    `select member.user_id, member.corp_id, member.wecom_userid,
+            member.name, member.avatar, member.position, member.departments
+     from auth_external_identities identity
+     join wecom_users member on member.user_id = identity.user_id
+     where identity.provider = $1 and identity.subject_hash = $2
+     limit 1`,
+    [provider, sha256(subject)]
+  )
+  const row = result.rows[0]
+  if (!row) return null
+  return {
+    id: row.wecom_userid || row.user_id,
+    corpId: row.corp_id,
+    wecomUserId: row.wecom_userid || row.user_id,
+    name: row.name,
+    avatar: row.avatar,
+    position: row.position,
+    departments: Array.isArray(row.departments) ? row.departments : []
+  }
+}
+
+async function linkExternalIdentity(provider, subject, userId) {
+  await initAuth()
+  await authPool.query(
+    `insert into auth_external_identities
+       (provider, subject_hash, user_id, last_login_at)
+     values ($1, $2, $3, now())
+     on conflict (provider, subject_hash) do update set
+       last_login_at = now()
+     where auth_external_identities.user_id = excluded.user_id`,
+    [provider, sha256(subject), userId]
+  )
+  const result = await authPool.query(
+    `select user_id from auth_external_identities
+     where provider = $1 and subject_hash = $2`,
+    [provider, sha256(subject)]
+  )
+  if (!result.rows[0] || result.rows[0].user_id !== userId) {
+    throw new AuthError(
+      'workbuddy_identity_conflict',
+      'WorkBuddy 账号已绑定到其他成员，已拒绝变更绑定',
+      409
+    )
+  }
 }
 
 async function upsertUser(user) {
@@ -1745,7 +2080,9 @@ async function performLogout(req, res) {
 async function handleAuthApi(req, res) {
   const url = new URL(req.url, 'http://127.0.0.1')
   const pathname = url.pathname
-  if (!pathname.startsWith('/api/auth/')) return false
+  if (!pathname.startsWith('/api/auth/') && pathname !== '/oauth/callback') {
+    return false
+  }
 
   applyCorsHeaders(req, res)
   if (req.method === 'OPTIONS') {
@@ -1765,11 +2102,19 @@ async function handleAuthApi(req, res) {
       oneIdEnabled: Boolean(config.oneIdEnabled),
       oneIdLoginReady: Boolean(config.oneId && config.oneId.loginReady),
       oneIdAutoLogin: shouldAutoLoginOneId(),
+      workbuddyEnabled: Boolean(config.workbuddyEnabled),
+      workbuddyLoginReady: Boolean(
+        config.workbuddyEnabled && config.workbuddy
+      ),
+      workbuddyAutoLogin: shouldAutoLoginWorkBuddy(),
       loginPath: config.wecomEnabled ? '/api/auth/login' : null,
       wecomClientLoginPath: config.wecomEnabled
         ? '/api/auth/wecom/client-login'
         : null,
       oneIdLoginPath: config.oneIdEnabled ? '/api/auth/oneid/login' : null,
+      workbuddyLoginPath: config.workbuddyEnabled
+        ? '/api/auth/workbuddy/login'
+        : null,
       devBypassAvailable: isDevBypassAllowed(req),
       devBypassMobileHint: isDevBypassAllowed(req)
         ? maskMobileHint(config.devBypassMobile)
@@ -1827,6 +2172,11 @@ async function handleAuthApi(req, res) {
       oneIdEnabled: Boolean(config.oneIdEnabled),
       oneIdLoginReady: Boolean(config.oneId && config.oneId.loginReady),
       oneIdAutoLogin: shouldAutoLoginOneId(),
+      workbuddyEnabled: Boolean(config.workbuddyEnabled),
+      workbuddyLoginReady: Boolean(
+        config.workbuddyEnabled && config.workbuddy
+      ),
+      workbuddyAutoLogin: shouldAutoLoginWorkBuddy(),
       authenticated: !!user,
       user: user ? publicUser(user) : null,
       devBypassAvailable: isDevBypassAllowed(req),
@@ -1872,6 +2222,84 @@ async function handleAuthApi(req, res) {
       error: '企业微信登录未启用',
       code: 'auth_disabled'
     })
+    return true
+  }
+
+  if (pathname === '/api/auth/workbuddy/login' && req.method === 'GET') {
+    if (!config.workbuddyEnabled || !config.workbuddy) {
+      sendJson(req, res, 404, {
+        error: 'WorkBuddy 单点登录未启用',
+        code: 'workbuddy_disabled'
+      })
+      return true
+    }
+    const state = await createOAuthChallenge(
+      req,
+      res,
+      url.searchParams.get('return_to'),
+      OAUTH_PROVIDER_WORKBUDDY
+    )
+    redirect(res, buildWorkBuddyLoginUrl(state))
+    return true
+  }
+
+  if (pathname === '/oauth/callback' && req.method === 'GET') {
+    let returnTo = '/'
+    try {
+      const nonce = verifySignedValue(
+        `oauth-state:${OAUTH_PROVIDER_WORKBUDDY}`,
+        url.searchParams.get('state')
+      )
+      const browserId = verifySignedValue(
+        'oauth-browser',
+        parseCookies(req)[OAUTH_BROWSER_COOKIE]
+      )
+      if (!nonce || !browserId) {
+        throw new AuthError(
+          'invalid_state',
+          'WorkBuddy 登录状态校验失败',
+          400
+        )
+      }
+      const consumedReturnTo = await consumeOAuthState(
+        nonce,
+        browserId,
+        OAUTH_PROVIDER_WORKBUDDY
+      )
+      if (!consumedReturnTo) {
+        throw new AuthError(
+          'expired_state',
+          'WorkBuddy 登录状态已过期，请重新登录',
+          400
+        )
+      }
+      returnTo = consumedReturnTo
+      if (url.searchParams.get('error')) {
+        throw new AuthError(
+          'workbuddy_access_denied',
+          'WorkBuddy 登录未完成',
+          401
+        )
+      }
+      const user = await exchangeWorkBuddyCode(url.searchParams.get('code'))
+      const stored = await upsertUser(user)
+      await linkExternalIdentity(
+        user.externalProvider,
+        user.externalSubject,
+        stored.id
+      )
+      const session = await createSession(stored.id)
+      setCookie(res, req, SESSION_COOKIE, session, config.sessionMaxSeconds)
+      redirect(res, appRedirectUrl(returnTo))
+    } catch (err) {
+      const code =
+        err instanceof AuthError ? err.code : 'workbuddy_unavailable'
+      const message = err && err.message ? err.message : 'unknown error'
+      console.error(
+        `[auth] WorkBuddy callback failed: code=${code}; ${message}`
+      )
+      redirect(res, appRedirectUrl(returnTo, code))
+    }
     return true
   }
 
@@ -2221,7 +2649,10 @@ module.exports = {
     buildWecomLoginUrl,
     buildWecomClientLoginUrl,
     buildOneIdLoginUrl,
+    buildWorkBuddyLoginUrl,
     oneIdClaims,
+    workBuddyClaims,
+    workBuddySubject,
     createWecomResponseError,
     isPrivateOrLocalHost,
     isDevBypassAllowed,

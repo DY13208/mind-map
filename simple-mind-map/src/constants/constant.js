@@ -249,6 +249,15 @@ export const cssContent = `
   .smm-text-node-wrap, .smm-expand-btn-text {
     user-select: none;
   }
+
+  .smm-mind-map-container.smm-right-key-drag {
+    cursor: grab;
+  }
+
+  body.smm-canvas-panning,
+  body.smm-canvas-panning * {
+    cursor: grabbing !important;
+  }
 `
 
 // html自闭合标签列表

@@ -27,7 +27,7 @@ const jobStore = require('./jobs/jobStore');
 
 const PORT = Number(process.env.KNOWLEDGE_MCP_PORT || 18792);
 const JWT_SECRET = process.env.KNOWLEDGE_MCP_JWT_SECRET || '';
-const VERSION = '0.6.0';
+const VERSION = '0.6.1';
 const rateLimiter = createRateLimiter({
   windowMs: Number(process.env.KNOWLEDGE_MCP_RATE_WINDOW_MS || 60000),
   maxPerUser: Number(process.env.KNOWLEDGE_MCP_RATE_MAX_PER_USER || 60),
@@ -51,7 +51,7 @@ const TOOLS = [
   { name: 'wiki_spaces', description: 'List every Wiki (Docmost) space the calling account can read.', inputSchema: { type: 'object', properties: {} } },
   { name: 'wiki_search', description: 'Full-text search the whole Wiki, scoped to the pages the calling account may read.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, spaceId: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] } },
   { name: 'wiki_tree', description: 'Page tree of a Wiki space, or of the subtree under a page.', inputSchema: { type: 'object', properties: { spaceId: { type: 'string' }, pageId: { type: 'string' } } } },
-  { name: 'wiki_read', description: 'Read one Wiki page body (markdown or html); Docmost enforces view permission.', inputSchema: { type: 'object', properties: { pageId: { type: 'string' }, format: { type: 'string', enum: ['markdown', 'html'] } }, required: ['pageId'] } },
+  { name: 'wiki_read', description: 'Read one Wiki page body (markdown, html, or raw ProseMirror json); Docmost enforces view permission.', inputSchema: { type: 'object', properties: { pageId: { type: 'string' }, format: { type: 'string', enum: ['markdown', 'html', 'json'] } }, required: ['pageId'] } },
   { name: 'wiki_create', description: 'Create a Wiki page (markdown by default); Docmost enforces create/edit permission for the calling account.', inputSchema: { type: 'object', properties: { spaceId: { type: 'string' }, title: { type: 'string' }, content: { type: 'string' }, parentPageId: { type: 'string' }, format: { type: 'string', enum: ['markdown', 'html', 'json'] } }, required: ['spaceId'] } },
   { name: 'wiki_update', description: 'Update a Wiki page title and/or body; Docmost enforces edit permission. operation=replace|append|prepend when content is set.', inputSchema: { type: 'object', properties: { pageId: { type: 'string' }, title: { type: 'string' }, content: { type: 'string' }, format: { type: 'string', enum: ['markdown', 'html', 'json'] }, operation: { type: 'string', enum: ['replace', 'append', 'prepend'] } }, required: ['pageId'] } },
 ];

@@ -28,6 +28,10 @@ class View {
     this.mindMap.keyCommand.addShortcut('Control+i', () => {
       this.fit()
     })
+    this.syncRightKeyDragCursor()
+    this.mindMap.on('after_update_config', () => {
+      this.syncRightKeyDragCursor()
+    })
     // 拖动视图
     this.mindMap.event.on('mousedown', e => {
       const { isDisableDrag, mousedownEventPreventDefault } = this.mindMap.opt
@@ -37,6 +41,9 @@ class View {
       }
       this.sx = this.x
       this.sy = this.y
+      if (this.isRightKeyCanvasDrag(e)) {
+        this.setCanvasPanningCursor(true)
+      }
     })
     this.mindMap.event.on('drag', (e, event) => {
       // 按住ctrl键拖动为多选
@@ -57,6 +64,7 @@ class View {
     })
     this.mindMap.event.on('mouseup', () => {
       this.firstDrag = true
+      this.setCanvasPanningCursor(false)
     })
     // 放大缩小视图
     this.mindMap.event.on('mousewheel', (e, dirs, event, isTouchPad) => {
@@ -149,6 +157,42 @@ class View {
       if (!this.checkNeedMindMapInCanvas()) return
       this.transform()
     })
+  }
+
+  // 右键拖动画布时，空白处显示张开的小手
+  isRightKeyCanvasDrag(e) {
+    return (
+      !!this.mindMap.opt.useLeftKeySelectionRightKeyDrag &&
+      e.which === 3 &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !this.mindMap.opt.isDisableDrag
+    )
+  }
+
+  syncRightKeyDragCursor() {
+    const el = this.mindMap.el
+    if (!el) return
+    el.classList.toggle(
+      'smm-right-key-drag',
+      !!this.mindMap.opt.useLeftKeySelectionRightKeyDrag
+    )
+    if (!this.mindMap.opt.useLeftKeySelectionRightKeyDrag) {
+      this.setCanvasPanningCursor(false)
+    }
+  }
+
+  // 按下右键拖动时换成握住的小手，松开后恢复
+  setCanvasPanningCursor(on) {
+    if (on) {
+      if (this._canvasPanning) return
+      this._canvasPanning = true
+      document.body.classList.add('smm-canvas-panning')
+      return
+    }
+    if (!this._canvasPanning) return
+    this._canvasPanning = false
+    document.body.classList.remove('smm-canvas-panning')
   }
 
   //  获取当前变换状态数据
