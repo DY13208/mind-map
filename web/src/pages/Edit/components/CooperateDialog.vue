@@ -1129,7 +1129,7 @@ export default {
             break
           }
           const result = await cooperate.hydrateExpandedPartialParents()
-          if (!result || !result.hydrated) break
+          if (!result || !result.changed) break
         }
       } finally {
         this.personalExpandApplying = false

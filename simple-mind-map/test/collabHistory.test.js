@@ -934,6 +934,32 @@ function mockRes() {
   assert.strictEqual(inserts.summary.inserted, 1)
   assert.strictEqual(inserts.summary.updated, 0)
 
+  // Same-millisecond snapshots must follow the room revision, not UUID order.
+  const tied = createMemoryHistoryStore(seed())
+  const createdAt = '2026-01-01T00:00:00.000Z'
+  await tied.insertVersion({
+    id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    room_key: ROOM,
+    revision: 0,
+    type: 'AUTO',
+    created_at: createdAt
+  })
+  const newer = await tied.insertVersion({
+    id: '00000000-0000-4000-8000-000000000000',
+    room_key: ROOM,
+    revision: 1,
+    type: 'AUTO',
+    created_at: createdAt
+  })
+  const latest = await tied.insertVersion({
+    id: '11111111-1111-4111-8111-111111111111',
+    room_key: ROOM,
+    revision: 2,
+    type: 'AUTO',
+    created_at: '2026-01-01T00:00:00.001Z'
+  })
+  assert.strictEqual((await tied.previousVisibleVersion(ROOM, latest)).id, newer.id)
+
   console.log('collabHistory.test.js ok')
 })().catch(err => {
   console.error(err)

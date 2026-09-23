@@ -325,10 +325,14 @@ function createPgHistoryStore(pool) {
         let sql = `select * from room_versions
           where room_key = $1 and hidden = false`
         if (before && before.created_at) {
-          params.push(before.created_at, before.id)
-          sql += ` and (created_at, id) < ($2::timestamptz, $3::uuid)`
+          params.push(
+            before.created_at,
+            before.revision == null ? -1 : Number(before.revision),
+            before.id
+          )
+          sql += ` and (created_at, coalesce(revision, -1), id) < ($2::timestamptz, $3::bigint, $4::uuid)`
         }
-        sql += ` order by created_at desc, id desc limit 1`
+        sql += ` order by created_at desc, coalesce(revision, -1) desc, id desc limit 1`
         const res = await db.query(sql, params)
         return res.rows[0] || null
       },

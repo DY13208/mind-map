@@ -671,15 +671,22 @@ class MindMapNode {
   // 根据是否激活更新节点
   updateNodeByActive(active) {
     if (this.group) {
-      const { isShowCreateChildBtnIcon } = this.mindMap.opt
+      const {
+        isShowCreateChildBtnIcon,
+        alwaysShowExpandBtn,
+        notShowExpandBtn
+      } = this.mindMap.opt
       // 切换激活状态，需要切换展开收起按钮的显隐
       if (active) {
-        this.showExpandBtn()
+        if (alwaysShowExpandBtn && !notShowExpandBtn) this.renderExpandBtn()
+        else this.showExpandBtn()
         if (isShowCreateChildBtnIcon) {
           this.showQuickCreateChildBtn()
         }
       } else {
-        this.hideExpandBtn()
+        if (alwaysShowExpandBtn && !notShowExpandBtn) this.renderExpandBtn()
+        else if (this._isMouseenter) this.showExpandBtn()
+        else this.hideExpandBtn()
         if (isShowCreateChildBtnIcon) {
           this.hideQuickCreateChildBtn()
         }

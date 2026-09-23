@@ -135,7 +135,9 @@ function evaluateRedo(original, laterOperations, actorId) {
   }
   const later = Array.isArray(laterOperations) ? laterOperations : []
   const originalId = opIdOf(original)
-  const undoOp = later.find(op => undoTargetId(op) === originalId)
+  // An operation can be undone, redone, then undone again. Only the latest
+  // undo starts the current redo window; an older redo must not block it.
+  const undoOp = later.filter(op => undoTargetId(op) === originalId).pop()
   if (!undoOp) {
     return { ok: false, code: 'REDO_UNAVAILABLE', error: '该操作尚未撤销，无法重做' }
   }

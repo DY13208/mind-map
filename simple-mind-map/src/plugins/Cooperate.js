@@ -4122,7 +4122,7 @@ class Cooperate {
    */
   async hydrateExpandedPartialParents() {
     const renderer = this.mindMap && this.mindMap.renderer
-    if (!renderer || !renderer.root || !this.httpFetchSubtree) return { hydrated: 0 }
+    if (!renderer || !renderer.root || !this.httpFetchSubtree) return { hydrated: 0, changed: false }
     const jobs = []
     const seen = new Set()
     const visit = node => {
@@ -4133,17 +4133,29 @@ class Cooperate {
         0
       const expanded = !(node.getData && node.getData('expand') === false)
       const needs = this.nodeNeedsHydrate(node)
-      if (needs && uid && !seen.has(uid) && (live > 0 || expanded)) {
+      if (
+        needs && uid && !seen.has(uid) && (live > 0 || expanded) &&
+        (!this.hydrateFailedUids.has(uid) || this.dirtySubtrees.has(uid))
+      ) {
         seen.add(uid)
-        jobs.push(this.hydrateFromHttp(node))
+        jobs.push(
+          this.hydrateFromHttp(node).catch(err => {
+            this.hydrateFailedUids.add(uid)
+            console.error('[mind-map] expanded partial hydrate failed', uid, err)
+            return false
+          })
+        )
       }
       if (Array.isArray(node.children)) node.children.forEach(visit)
     }
     visit(renderer.root)
-    if (!jobs.length) return { hydrated: 0 }
-    await Promise.all(jobs)
-    if (typeof this.mindMap.render === 'function') this.mindMap.render()
-    return { hydrated: jobs.length }
+    if (!jobs.length) return { hydrated: 0, changed: false }
+    const results = await Promise.all(jobs)
+    const changed = results.some(Boolean)
+    // render_end invokes the personal expand restore again. Rendering after a
+    // no-op fetch would otherwise create an endless subtree/render cycle.
+    if (changed && typeof this.mindMap.render === 'function') this.mindMap.render()
+    return { hydrated: jobs.length, changed }
   }
 
   async ensurePlacementParent(parentNode) {
@@ -4214,6 +4226,8 @@ class Cooperate {
           this.httpFetchSubtree(uid, {
             knownVersion: options.knownVersion ?? 0,
             deep: options.deep,
+            offset: options.offset,
+            limit: options.limit,
             priority: 'high'
           })
         const knownVersion = complete
@@ -4238,6 +4252,7 @@ class Cooperate {
         if (
           (!result || !result.children || !result.children.length) &&
           count > 0 &&
+          !(result && Number(result.total) === 0) &&
           this.httpFetchDeepSubtree
         ) {
           const deep = await this.httpFetchDeepSubtree(uid, {
@@ -4248,53 +4263,79 @@ class Cooperate {
           if (deep && deep.tree) {
             result = {
               children: deep.tree.children || [],
-              total:
-                Number(
-                  (deep.tree.data && deep.tree.data.childCount) || count
-                ) || count,
+              total: deep.tree.data && deep.tree.data.childCount != null &&
+                Number.isInteger(Number(deep.tree.data.childCount))
+                ? Number(deep.tree.data.childCount)
+                : count,
               version: deep.version,
               descendantCount: deep.tree.data && deep.tree.data.descendantCount,
               has_more: false
             }
           }
         }
+        if (result && result.has_more && Array.isArray(result.children)) {
+          const children = result.children.slice()
+          let offset = Number(result.offset) || 0
+          offset += result.children.length
+          // The subtree endpoint pages direct children. Do not leave old maps
+          // with >200 siblings permanently "partial" after Undo/Redo.
+          for (let page = 0; page < 20 && result.has_more; page += 1) {
+            const next = await fetchSubtree({ knownVersion: 0, offset, limit: 500 })
+            const more = next && Array.isArray(next.children) ? next.children : []
+            const versionChanged = next && next.version != null && result.version != null &&
+              Number(next.version) !== Number(result.version)
+            if (!more.length || versionChanged) break
+            children.push(...more)
+            offset += more.length
+            result = { ...next, children, offset: 0 }
+          }
+        }
+        if (!result || result.missing) {
+          const err = new Error('subtree missing')
+          err.code = 'SUBTREE_MISSING'
+          throw err
+        }
+        const beforeChildren = Array.isArray(data.children) ? data.children.length : 0
+        const beforeCount = Number(data.data && data.data.childCount) || 0
+        const beforeDescendants = Number(data.data && data.data.descendantCount) || 0
         this.mergeHttpChildren(data, result && result.children)
         if (data.data) {
-          const total =
-            Number((result && result.total) || 0) ||
-            Number(data.data.childCount) ||
-            0
+          const serverTotal = Number(result && result.total)
+          const total = result && result.total != null &&
+            Number.isInteger(serverTotal) && serverTotal >= 0
+            ? serverTotal
+            : beforeCount
           data.data.hasMore = !!(result && result.has_more)
           if (result && Number.isInteger(result.descendantCount)) {
             data.data.descendantCount = result.descendantCount
           }
-          // Prefer server total; never shrink authoritative count to loaded length.
-          if (total > 0) data.data.childCount = total
+          // Zero is authoritative too (not a falsy fallback to stale count).
+          data.data.childCount = total
           if (result && result.version != null) {
             data.data.subtreeVersion = Number(result.version) || 0
           }
         }
         const afterLen = Array.isArray(data.children) ? data.children.length : 0
         const afterCount = Number(data.data && data.data.childCount) || 0
+        const changed = afterLen !== beforeChildren ||
+          afterCount !== beforeCount ||
+          (Number(data.data && data.data.descendantCount) || 0) !== beforeDescendants
         if (afterCount > 0 && afterLen >= afterCount) {
           this.hydratedUids.add(uid)
           this.hydrateFailedUids.delete(uid)
         } else if (afterCount > 0 && afterLen < afterCount) {
           this.hydrateFailedUids.add(uid)
-          // Deep fetch may still be incomplete for very wide parents; keep dirty.
-          this.dirtySubtrees.set(uid, afterCount)
+          // A partial/no-progress response must not trigger a render loop.
+          // A newer remote operation marks this subtree dirty for a retry.
         } else if (afterLen > 0) {
           this.hydratedUids.add(uid)
           this.hydrateFailedUids.delete(uid)
-        } else if (count > 0) {
-          this.hydrateFailedUids.add(uid)
-          const err = new Error('subtree empty')
-          err.code = 'SUBTREE_EMPTY'
-          throw err
         } else {
           this.hydratedUids.add(uid)
+          this.hydrateFailedUids.delete(uid)
         }
         this.dirtySubtrees.delete(uid)
+        return changed
       } finally {
         this.httpHydrating = false
         this.flushPendingHttpRefresh()
@@ -4347,7 +4388,11 @@ class Cooperate {
     }
     if (data.data) {
       data.data.hasMore = !!(result && result.has_more)
-      data.data.childCount = (result && result.total) || count || 0
+      const serverTotal = Number(result && result.total)
+      data.data.childCount = result && result.total != null &&
+        Number.isInteger(serverTotal) && serverTotal >= 0
+        ? serverTotal
+        : count
       if (result && Number.isInteger(result.descendantCount)) {
         data.data.descendantCount = result.descendantCount
       }

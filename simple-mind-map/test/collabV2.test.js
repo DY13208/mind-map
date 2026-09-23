@@ -1422,6 +1422,29 @@ async function testRapidUndoRedoAndHistoryStatus() {
   unsubscribe()
 }
 
+async function testRepeatedInsertUndoRedoCycles() {
+  const roomKey = 'room-repeated-insert-history'
+  const engine = createEngine()
+  const hub = createHub(engine)
+  const a = await makeClient(hub, { roomKey, userId: 'A' })
+  for (const uid of ['history-child-a', 'history-child-b']) {
+    await a.adapter.submitOperation({
+      type: 'node.insert',
+      payload: { uid, parent: 'root', text: uid }
+    })
+  }
+  for (let cycle = 0; cycle < 2; cycle++) {
+    await a.adapter.undoLastLocalOperation()
+    assert.ok(!engine.getRoom(roomKey).nodes['history-child-b'])
+    await a.adapter.undoLastLocalOperation()
+    assert.ok(!engine.getRoom(roomKey).nodes['history-child-a'])
+    await a.adapter.redoLastLocalOperation()
+    assert.ok(engine.getRoom(roomKey).nodes['history-child-a'])
+    await a.adapter.redoLastLocalOperation()
+    assert.ok(engine.getRoom(roomKey).nodes['history-child-b'])
+  }
+}
+
 async function testUidReusedSkipDoesNotSticky() {
   const roomKey = 'room-uid-reused'
   const engine = createEngine()
@@ -1777,6 +1800,7 @@ async function main() {
     ['TextInsertDeleteUndoRedo', testTextInsertDeleteUndoRedo],
     ['SequentialAndMultiUserUndo', testSequentialAndMultiUserUndo],
     ['RapidUndoRedoAndHistoryStatus', testRapidUndoRedoAndHistoryStatus],
+    ['RepeatedInsertUndoRedoCycles', testRepeatedInsertUndoRedoCycles],
     ['UidReusedSkipDoesNotSticky', testUidReusedSkipDoesNotSticky],
     ['DropPendingInsertThenDelete', testDropPendingInsertThenDelete],
     ['DeleteAfterAckedInsert', testDeleteAfterAckedInsert],

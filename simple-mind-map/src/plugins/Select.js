@@ -252,6 +252,9 @@ class Select {
 
   //  检测在选区里的节点
   checkInNodes() {
+    // A collaborative Undo can start an asynchronous layout while the mouse
+    // selection throttle is pending. The renderer temporarily clears root.
+    if (!this.mindMap.renderer.root) return
     let { scaleX, scaleY, translateX, translateY } =
       this.mindMap.draw.transform()
     let minx = Math.min(this.mouseDownX, this.mouseMoveX)
