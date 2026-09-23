@@ -83,6 +83,6 @@ export const requiredItem = (items, id, label) => {
 }
 export const validName = value => {
   const name = String(value || '').trim()
-  if (!name || name.length > 60) throw new Error('名称需为 1 至 60 个字符')
+  if (!name || name.length > 80) throw new Error('名称需为 1 至 80 个字符')
   return name
 }
