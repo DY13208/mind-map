@@ -586,16 +586,12 @@ class Render {
     let isTrueClick = true
     // 是否是左键多选节点，右键拖动画布
     const { useLeftKeySelectionRightKeyDrag } = this.mindMap.opt
-    // 右键拖动模式下，右键是打开已框选节点的菜单，不能把选区清掉。
-    if (useLeftKeySelectionRightKeyDrag && eventType === 'contextmenu') {
+    // 两种模式里右键都用来打开已框选节点的菜单，不能把选区清掉。
+    if (eventType === 'contextmenu') {
       return
     }
     // 如果鼠标按下和松开的距离较大，则不认为是点击事件
-    if (
-      eventType === 'contextmenu'
-        ? !useLeftKeySelectionRightKeyDrag
-        : useLeftKeySelectionRightKeyDrag
-    ) {
+    if (useLeftKeySelectionRightKeyDrag) {
       const mousedownPos = this.mindMap.event.mousedownPos
       isTrueClick =
         Math.abs(e.clientX - mousedownPos.x) <= 5 &&
