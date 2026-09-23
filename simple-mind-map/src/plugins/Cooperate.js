@@ -5008,97 +5008,108 @@ class Cooperate {
     if (!this.httpCollabMode) return
     this.stampGenIntentFromLocal()
     if (this.collabV2Adapter && typeof this.collabV2Adapter.undo === 'function') {
-      const isUndo = name === 'BACK'
-      const status =
-        this.collabV2Adapter.getStatus && this.collabV2Adapter.getStatus()
-      undoTrace('cooperate.v2-authority', {
-        name,
-        call: isUndo ? 'undoLastLocalOperation' : 'redoLastLocalOperation',
-        undoDepth: status && status.undoDepth,
-        redoDepth: status && status.redoDepth,
-        nativeHistory: 'skipped'
-      })
-      this._v2UndoActive = true
-      this._v2UndoAllowReplace = false
-      const statusNow =
-        this.collabV2Adapter.getStatus && this.collabV2Adapter.getStatus()
-      const top =
-        (this.collabV2Adapter.peekUndoTarget &&
-          this.collabV2Adapter.peekUndoTarget()) ||
-        (statusNow && statusNow.undoTop) ||
-        null
-      collabPasteUndo.publishUndoTargetTrace({
-        undoOpId: '',
-        targetOperationId: top && (top.opId || (top.opIds && top.opIds[top.opIds.length - 1])),
-        targetType: top && top.type,
-        targetUids: top && top.opIds,
-        inversePayload: null,
-        undoDepth: statusNow && statusNow.undoDepth
-      })
-      if (isUndo && top && (top.type === 'map.replace' || top.type === 'map.replaced')) {
-        if (this._lastPastedUids && this._lastPastedUids.size) {
-          undoFullTreeForbidden('PASTE_UNDO_FULL_TREE_FORBIDDEN')
-          this._v2UndoActive = false
-          const err = collabPasteUndo.pasteUndoFullTreeForbidden('undo-target-map.replace', {
-            targetOperationId: top.opId
-          })
-          return Promise.reject(err)
+      const perform = () => {
+        const isUndo = name === 'BACK'
+        const status =
+          this.collabV2Adapter.getStatus && this.collabV2Adapter.getStatus()
+        undoTrace('cooperate.v2-authority', {
+          name,
+          call: isUndo ? 'undoLastLocalOperation' : 'redoLastLocalOperation',
+          undoDepth: status && status.undoDepth,
+          redoDepth: status && status.redoDepth,
+          nativeHistory: 'skipped'
+        })
+        this._v2UndoActive = true
+        this._v2UndoAllowReplace = false
+        const statusNow =
+          this.collabV2Adapter.getStatus && this.collabV2Adapter.getStatus()
+        const top =
+          (this.collabV2Adapter.peekUndoTarget &&
+            this.collabV2Adapter.peekUndoTarget()) ||
+          (statusNow && statusNow.undoTop) ||
+          null
+        collabPasteUndo.publishUndoTargetTrace({
+          undoOpId: '',
+          targetOperationId: top && (top.opId || (top.opIds && top.opIds[top.opIds.length - 1])),
+          targetType: top && top.type,
+          targetUids: top && top.opIds,
+          inversePayload: null,
+          undoDepth: statusNow && statusNow.undoDepth
+        })
+        if (isUndo && top && (top.type === 'map.replace' || top.type === 'map.replaced')) {
+          if (this._lastPastedUids && this._lastPastedUids.size) {
+            undoFullTreeForbidden('PASTE_UNDO_FULL_TREE_FORBIDDEN')
+            this._v2UndoActive = false
+            const err = collabPasteUndo.pasteUndoFullTreeForbidden('undo-target-map.replace', {
+              targetOperationId: top.opId
+            })
+            if (this.mindMap) this.mindMap.emit('undo_conflict', err)
+            return Promise.resolve()
+          }
         }
+        const run = isUndo
+          ? this.collabV2Adapter.undoLastLocalOperation()
+          : this.collabV2Adapter.redoLastLocalOperation()
+        return Promise.resolve(run)
+          .then(result => {
+            if (result && result.serverRevision != null) {
+              this.acknowledgeLocalVersion(result.serverRevision, {
+                duplicate: true
+              })
+            }
+            const op = result && result.operation
+            const evType = op && ((op.event && op.event.type) || op.type)
+            if (evType === 'map.replaced' || evType === 'map.replace') {
+              this._v2UndoAllowReplace = true
+            }
+            if (op && (op.event || op.type || op.payload)) {
+              const normalized = collabNodeFeatures.normalizeAppliedUpdatePayload(op)
+              const applied = this.applyV2RemoteOperation(op, { applySelf: true })
+              collabNodeFeatures.publishUndoApplyTrace({
+                undoOpId: op.opId || op.operationId,
+                targetOpId:
+                  (op.payload &&
+                    (op.payload.targetOperationId ||
+                      op.payload.undoOf ||
+                      op.payload.redoOf)) ||
+                  '',
+                targetUid: normalized.uid,
+                inversePatch: normalized.patch,
+                serverAppliedEvent: (op.event && op.event.type) || op.type,
+                originNodeDataAfter: true,
+                rendererRefreshed: true
+              })
+              return applied
+            }
+          })
+          .catch(err => {
+            if (err && (err.code === 'UNDO_EMPTY' || err.code === 'REDO_EMPTY' || err.code === 'UNDO_PENDING')) {
+              undoTrace('cooperate.undo.skip', { code: err.code, name })
+              if (err.code === 'UNDO_PENDING' && this.mindMap) {
+                this.mindMap.emit('undo_conflict', err)
+              }
+              return
+            }
+            console.error('[mind-map] v2 undo/redo failed', err)
+            if (
+              this.mindMap &&
+              err &&
+              (err.code === 'UNDO_CONFLICT' || err.code === 'REDO_CONFLICT')
+            ) {
+              this.mindMap.emit('undo_conflict', err)
+            }
+          })
+          .finally(() => {
+            this._v2UndoActive = false
+            this._v2UndoAllowReplace = false
+          })
       }
-      const run = isUndo
-        ? this.collabV2Adapter.undoLastLocalOperation()
-        : this.collabV2Adapter.redoLastLocalOperation()
-      Promise.resolve(run)
-        .then(result => {
-          if (result && result.serverRevision != null) {
-            this.acknowledgeLocalVersion(result.serverRevision, {
-              duplicate: true
-            })
-          }
-          const op = result && result.operation
-          const evType = op && ((op.event && op.event.type) || op.type)
-          if (evType === 'map.replaced' || evType === 'map.replace') {
-            this._v2UndoAllowReplace = true
-          }
-          if (op && (op.event || op.type || op.payload)) {
-            const normalized = collabNodeFeatures.normalizeAppliedUpdatePayload(op)
-            const applied = this.applyV2RemoteOperation(op, { applySelf: true })
-            collabNodeFeatures.publishUndoApplyTrace({
-              undoOpId: op.opId || op.operationId,
-              targetOpId:
-                (op.payload &&
-                  (op.payload.targetOperationId ||
-                    op.payload.undoOf ||
-                    op.payload.redoOf)) ||
-                '',
-              targetUid: normalized.uid,
-              inversePatch: normalized.patch,
-              serverAppliedEvent: (op.event && op.event.type) || op.type,
-              originNodeDataAfter: true,
-              rendererRefreshed: true
-            })
-            return applied
-          }
-        })
-        .catch(err => {
-          if (err && (err.code === 'UNDO_EMPTY' || err.code === 'REDO_EMPTY' || err.code === 'UNDO_PENDING')) {
-            undoTrace('cooperate.undo.skip', { code: err.code, name })
-            return
-          }
-          console.error('[mind-map] v2 undo/redo failed', err)
-          if (
-            this.mindMap &&
-            err &&
-            (err.code === 'UNDO_CONFLICT' || err.code === 'REDO_CONFLICT')
-          ) {
-            this.mindMap.emit('undo_conflict', err)
-          }
-        })
-        .finally(() => {
-          this._v2UndoActive = false
-          this._v2UndoAllowReplace = false
-        })
-      return
+      // Keep the canvas application in the same order as the adapter history.
+      // Otherwise rapid clicks clear _v2UndoActive during the next operation.
+      const previous = this._v2HistoryQueue || Promise.resolve()
+      const next = previous.catch(() => {}).then(perform)
+      this._v2HistoryQueue = next
+      return next
     }
     if (name === 'BACK' && this.httpUndoOperation && this.localUndoStack.length) {
       const last = this.localUndoStack.pop()

@@ -584,6 +584,7 @@ export default {
     if (this.collabV2Adapter && this.collabV2Adapter.disconnect) {
       this.collabV2Adapter.disconnect()
     }
+    this.$bus.$emit('collab_history', { enabled: false })
     if (this._fileSearchTimer) {
       clearTimeout(this._fileSearchTimer)
       this._fileSearchTimer = null
@@ -767,6 +768,12 @@ export default {
       this.exposeCollabV2Debug()
       this._unsubCollabV2 = adapter.subscribe(snap => {
         this.exposeCollabV2Debug()
+        this.$bus.$emit('collab_history', {
+          enabled: true,
+          undoDepth: snap.undoDepth || 0,
+          redoDepth: snap.redoDepth || 0,
+          pendingCount: snap.outboxPending || 0
+        })
         if (snap.peers) this.peerList = this.mapV2Peers(snap.peers)
         if (
           snap.phase === 'LIVE' &&
@@ -872,6 +879,7 @@ export default {
         this.collabV2Adapter.disconnect()
       }
       this.collabV2Adapter = null
+      this.$bus.$emit('collab_history', { enabled: false })
       if (cooperate && typeof cooperate.setCollabV2Adapter === 'function') {
         cooperate.setCollabV2Adapter(null)
       }
@@ -910,6 +918,10 @@ export default {
 
     onUndoConflict(err) {
       const code = err && err.code
+      if (code === 'UNDO_PENDING') {
+        this.$message.warning('当前操作尚未保存，稍后可重试')
+        return
+      }
       if (code === 'REDO_CONFLICT') {
         this.$message.warning(this.$t('cooperate.redoConflict'))
         return

@@ -600,7 +600,11 @@ class MindMapNode {
     }
     // 更新快速创建子节点按钮
     if (isShowCreateChildBtnIcon) {
-      if (this.isGeneralization || childrenLength > 0) {
+      if (
+        readonly ||
+        this.isGeneralization ||
+        (childrenLength > 0 && this.getData('expand') === false)
+      ) {
         this.removeQuickCreateChildBtn()
       } else {
         const { isActive } = this.getData()

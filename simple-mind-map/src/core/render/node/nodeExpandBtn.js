@@ -127,6 +127,17 @@ function updateExpandBtnPos() {
   if (!this._expandBtn) {
     return
   }
+  if (this.getData('expand') !== false) {
+    // An expanded parent's trailing edge belongs to the add-child action.
+    // Keep the collapse control above the node, independently of layout direction.
+    const x = (this.width - this.expandBtnSize) / 2
+    const y = -this.expandBtnSize / 2 - 6
+    const { translateX, translateY } = this._expandBtn.transform()
+    if (x !== translateX || y !== translateY) {
+      this._expandBtn.translate(x - translateX, y - translateY)
+    }
+    return
+  }
   this.renderer.layout.renderExpandBtn(this, this._expandBtn)
 }
 

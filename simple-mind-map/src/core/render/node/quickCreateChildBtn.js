@@ -9,7 +9,8 @@ function initQuickCreateChildBtn() {
 // 显示按钮
 function showQuickCreateChildBtn() {
   if (this.isGeneralization) return
-  if (this.getChildrenLength() > 0) return
+  if (this.mindMap.opt.readonly) return
+  if (this.getChildrenLength() > 0 && this.getData('expand') === false) return
   // 创建按钮
   if (this._quickCreateChildBtn) {
     if (this._quickCreateChildBtn.parent() !== this.group) {
