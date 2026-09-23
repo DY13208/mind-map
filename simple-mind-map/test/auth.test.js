@@ -1,4 +1,6 @@
 const assert = require('assert')
+const fs = require('fs')
+const path = require('path')
 
 process.env.MIND_MAP_SKIP_ROOT_ENV = '1'
 Object.assign(process.env, {
@@ -395,5 +397,16 @@ assert.strictEqual(
   'http://localhost:8989/files'
 )
 assert.strictEqual(__test.hostnamesEquivalent('localhost', '127.0.0.1'), true)
+
+// WorkBuddy 注册的回调不在 /api/ 下，网关必须转发给认证服务，
+// 否则 SPA history fallback 会返回 200 页面并造成登录循环。
+const nginxConfig = fs.readFileSync(
+  path.join(__dirname, '../../docker/nginx.conf'),
+  'utf8'
+)
+assert.match(
+  nginxConfig,
+  /location = \/oauth\/callback\s*\{[^}]*proxy_pass http:\/\/127\.0\.0\.1:1234;/
+)
 
 console.log('auth unit tests passed')

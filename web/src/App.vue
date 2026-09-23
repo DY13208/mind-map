@@ -181,6 +181,10 @@ const authErrors = {
   oneid_unavailable: 'OneID 服务暂不可用，可使用企业微信扫码。',
   workbuddy_access_denied:
     'WorkBuddy 单点登录未完成，可重试或使用企业微信扫码。',
+  workbuddy_invalid_state:
+    'WorkBuddy 登录状态校验失败，请重新点击单点登录。',
+  workbuddy_expired_state:
+    'WorkBuddy 登录已过期，请重新点击单点登录。',
   workbuddy_missing_code: 'WorkBuddy 未返回有效授权码，请重新登录。',
   workbuddy_token_failed: 'WorkBuddy 登录票据交换失败，请稍后重试。',
   workbuddy_identity_failed:
@@ -222,6 +226,7 @@ export default {
       qrChallenge: null,
       qrPanel: null,
       qrRefreshing: false,
+      qrCompleting: false,
       qrFailure: '',
       qrRefreshTimer: null,
       isWecomClient: isWecomClientEnvironment(),
@@ -343,11 +348,15 @@ export default {
         if (
           this.authState.wecomEnabled &&
           this.isWecomClient &&
-          // 从普通浏览器唤起企业微信桌面端后，首次 OAuth 回调会进入新的
-          // WebView Cookie 上下文。此时保留严格的浏览器绑定，并在桌面端
-          // 自动重建一次挑战；比放宽 state 校验更安全，也避免用户手动重试。
-          (!this.authErrorCode || this.authErrorCode === 'invalid_state') &&
-          !this.hasAttemptedWecomClientAutoLogin()
+          // 桌面端唤起后可能换成新的 WebView Cookie 上下文，也可能收到
+          // 已消费的扫码 state。保留后端一次性校验，在客户端最多重建两次
+          // 授权挑战；登录成功或主动退出后重置/禁止重试。
+          (!this.authErrorCode ||
+            this.authErrorCode === 'invalid_state' ||
+            this.authErrorCode === 'expired_state') &&
+          !this.hasAttemptedWecomClientAutoLogin(
+            this.authErrorCode ? 2 : 1
+          )
         ) {
           this.startWecomClientLogin()
           return
@@ -376,10 +385,12 @@ export default {
         return true
       }
     },
-    hasAttemptedWecomClientAutoLogin() {
+    hasAttemptedWecomClientAutoLogin(maxAttempts = 1) {
       try {
         return (
-          window.sessionStorage.getItem(WECOM_CLIENT_AUTO_ATTEMPT_KEY) === '1'
+          (Number(
+            window.sessionStorage.getItem(WECOM_CLIENT_AUTO_ATTEMPT_KEY)
+          ) || 0) >= maxAttempts
         )
       } catch (err) {
         return true
@@ -416,7 +427,7 @@ export default {
       if (mount) mount.innerHTML = ''
     },
     async refreshLoginQr() {
-      if (this.qrRefreshing) return
+      if (this.qrRefreshing || this.qrCompleting) return
       this.clearQrRefreshTimer()
       this.destroyQrPanel()
       this.qrRefreshing = true
@@ -444,7 +455,8 @@ export default {
       }
     },
     completeLogin(code) {
-      if (!this.qrChallenge || !code) return
+      if (!this.qrChallenge || !code || this.qrCompleting) return
+      this.qrCompleting = true
       this.clearQrRefreshTimer()
       const url = new URL(getAuthApiUrl('/api/auth/wecom/callback'))
       url.searchParams.set('code', code)

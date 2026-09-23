@@ -2256,7 +2256,7 @@ async function handleAuthApi(req, res) {
       )
       if (!nonce || !browserId) {
         throw new AuthError(
-          'invalid_state',
+          'workbuddy_invalid_state',
           'WorkBuddy 登录状态校验失败',
           400
         )
@@ -2268,7 +2268,7 @@ async function handleAuthApi(req, res) {
       )
       if (!consumedReturnTo) {
         throw new AuthError(
-          'expired_state',
+          'workbuddy_expired_state',
           'WorkBuddy 登录状态已过期，请重新登录',
           400
         )
