@@ -1026,20 +1026,31 @@ export const formatDataToArray = data => {
   return Array.isArray(data) ? data : [data]
 }
 
+// Prefer data.uid over instance.uid — hydrate/reuse can leave them divergent.
+export const getNodeUid = node => {
+  if (!node) return ''
+  if (typeof node.getData === 'function') {
+    return node.getData('uid') || node.uid || ''
+  }
+  if (node.data && node.data.uid) return node.data.uid
+  return node.uid || ''
+}
+
 //  获取节点在同级里的位置索引
 export const getNodeDataIndex = node => {
-  return node.parent
-    ? node.parent.nodeData.children.findIndex(item => {
-        return item.data.uid === node.uid
-      })
-    : 0
+  if (!node || !node.parent) return 0
+  const kids =
+    node.parent.nodeData && Array.isArray(node.parent.nodeData.children)
+      ? node.parent.nodeData.children
+      : []
+  const uid = getNodeUid(node)
+  return kids.findIndex(item => item && item.data && item.data.uid === uid)
 }
 
 // 从一个节点列表里找出某个节点的索引
 export const getNodeIndexInNodeList = (node, nodeList) => {
-  return nodeList.findIndex(item => {
-    return item.uid === node.uid
-  })
+  const uid = getNodeUid(node)
+  return (nodeList || []).findIndex(item => getNodeUid(item) === uid)
 }
 
 // 根据内容生成颜色
@@ -1204,8 +1215,40 @@ export const getDataFromClipboard = async () => {
 export const removeFromParentNodeData = node => {
   if (!node || !node.parent) return
   const index = getNodeDataIndex(node)
-  if (index === -1) return
+  if (index === -1) {
+    // Fallback: filter by uid in case index lookup missed a divergent uid.
+    const uid = getNodeUid(node)
+    const kids = node.parent.nodeData && node.parent.nodeData.children
+    if (uid && Array.isArray(kids)) {
+      node.parent.nodeData.children = kids.filter(
+        item => !(item && item.data && item.data.uid === uid)
+      )
+    }
+    return
+  }
   node.parent.nodeData.children.splice(index, 1)
+}
+
+// Drop a node from both the live children list and nodeData.children of its
+// current parent. Used by multi-select moves so old parents cannot keep a
+// stale membership that later redraws ghost connectors.
+export const detachNodeFromParent = node => {
+  if (!node || !node.parent) return
+  const parent = node.parent
+  const uid = getNodeUid(node)
+  if (Array.isArray(parent.children)) {
+    parent.children = parent.children.filter(
+      item => item !== node && getNodeUid(item) !== uid
+    )
+  }
+  removeFromParentNodeData(node)
+  if (typeof parent.setData === 'function' && parent.nodeData) {
+    const live = Array.isArray(parent.nodeData.children)
+      ? parent.nodeData.children.length
+      : 0
+    parent.setData({ childCount: live })
+  }
+  if (typeof parent.removeLine === 'function') parent.removeLine()
 }
 
 // 给html自闭合标签添加闭合状态

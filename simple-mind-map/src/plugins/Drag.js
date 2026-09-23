@@ -1201,6 +1201,10 @@ class Drag extends Base {
 
   // 设置提示元素的大小和位置
   setPlaceholderRect({ x, y, dir, rotate, notRenderLine }) {
+    // Always drop the previous otherDraw hint lines before creating new ones.
+    // Otherwise a second setPlaceholderRect in the same overlap pass orphans
+    // the first batch (reference overwritten, SVG left on otherDraw).
+    this.removeExtraLines()
     let w = this.placeholderWidth
     let h = this.placeholderHeight
     if (rotate) {
@@ -1210,6 +1214,7 @@ class Drag extends Base {
     }
     this.placeholder.size(w, h).move(x, y)
     if (notRenderLine) {
+      if (this.placeHolderLine) this.placeHolderLine.hide()
       return
     }
     const { dragPlaceholderLineConfig } = this.mindMap.opt
@@ -1243,6 +1248,9 @@ class Drag extends Base {
     )
     this.placeHolderExtraLines = [...parent._lines]
     this.placeHolderExtraLines.forEach(line => {
+      if (typeof line.addClass === 'function') {
+        line.addClass('smm-drag-placeholder-artifact')
+      }
       this.mindMap.otherDraw.add(line)
       line
         .stroke({

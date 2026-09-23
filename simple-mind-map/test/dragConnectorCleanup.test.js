@@ -15,16 +15,43 @@ function loadClass(file, globals = {}) {
 }
 
 const Node = loadClass('core/render/node/MindMapNode.js')
+
+function getNodeUid(node) {
+  if (!node) return ''
+  if (typeof node.getData === 'function') return node.getData('uid') || node.uid || ''
+  return (node.data && node.data.uid) || node.uid || ''
+}
+
+function removeFromParentNodeData(node) {
+  if (!node || !node.parent) return
+  const siblings = node.parent.nodeData.children
+  const idx = siblings.findIndex(item => item === node.nodeData || (item && item.data && item.data.uid === getNodeUid(node)))
+  if (idx > -1) siblings.splice(idx, 1)
+}
+
+function detachNodeFromParent(node) {
+  if (!node || !node.parent) return
+  const parent = node.parent
+  const uid = getNodeUid(node)
+  if (Array.isArray(parent.children)) {
+    parent.children = parent.children.filter(item => item !== node && getNodeUid(item) !== uid)
+  }
+  removeFromParentNodeData(node)
+  if (typeof parent.setData === 'function' && parent.nodeData) {
+    parent.setData({ childCount: (parent.nodeData.children || []).length })
+  }
+  if (typeof parent.removeLine === 'function') parent.removeLine()
+}
+
 const Render = loadClass('core/render/Render.js', {
   CONSTANTS: { LAYOUT: {} },
   LogicalStructure: class {}, MindMap: class {}, CatalogOrganization: class {},
   OrganizationStructure: class {}, Timeline: class {}, VerticalTimeline: class {}, Fishbone: class {},
   formatDataToArray: value => Array.isArray(value) ? value : [value],
-  getNodeIndexInNodeList: (node, nodes) => nodes.indexOf(node),
-  removeFromParentNodeData: node => {
-    const siblings = node.parent.nodeData.children
-    siblings.splice(siblings.indexOf(node.nodeData), 1)
-  }
+  getNodeIndexInNodeList: (node, nodes) => nodes.findIndex(item => getNodeUid(item) === getNodeUid(node)),
+  getNodeUid,
+  removeFromParentNodeData,
+  detachNodeFromParent
 })
 
 function node(uid, children = []) {

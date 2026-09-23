@@ -19,9 +19,11 @@ import {
   createUidForAppointNodes,
   formatDataToArray,
   removeFromParentNodeData,
+  detachNodeFromParent,
   createUid,
   getNodeDataIndex,
   getNodeIndexInNodeList,
+  getNodeUid,
   setDataToClipboard,
   getDataFromClipboard,
   htmlEscape,
@@ -1793,49 +1795,97 @@ class Render {
     if (dir === 'after') {
       nodeList.reverse()
     }
+    const touchedParents = new Set()
     nodeList.forEach(item => {
       // 移动节点
       let nodeParent = item.parent
       let nodeBorthers = nodeParent.children
       let nodeIndex = getNodeIndexInNodeList(item, nodeBorthers)
-      const uid = item.getData('uid')
+      const uid = getNodeUid(item)
       const dataIndex = nodeParent.nodeData.children.findIndex(
-        child => child.data.uid === uid
+        child => child && child.data && child.data.uid === uid
       )
       const existParent = exist.parent
       if (item === exist || !existParent || nodeIndex === -1 || dataIndex === -1) {
         return
       }
-      const anchorUid = exist.getData('uid')
+      const anchorUid = getNodeUid(exist)
       if (
         uid === anchorUid ||
         getNodeIndexInNodeList(exist, existParent.children) === -1 ||
-        !existParent.nodeData.children.some(child => child.data.uid === anchorUid)
+        !existParent.nodeData.children.some(
+          child => child && child.data && child.data.uid === anchorUid
+        )
       ) {
         return
       }
-      // Invalidate old connectors before asynchronous layout reuses the nodes.
-      nodeParent.removeLine()
-      nodeBorthers.splice(nodeIndex, 1)
-      nodeParent.nodeData.children.splice(dataIndex, 1)
-
-      // 目标节点
+      // Validate the insert slot before mutating the old parent. An early
+      // return after splice left multi-select moves half-applied and kept
+      // stale connectors on the previous parent.
       let existBorthers = existParent.children
       let existIndex = getNodeIndexInNodeList(exist, existBorthers)
       let targetDataIndex = existParent.nodeData.children.findIndex(
-        child => child.data.uid === anchorUid
+        child => child && child.data && child.data.uid === anchorUid
       )
-      if (existIndex === -1) {
+      if (existIndex === -1 || targetDataIndex === -1) {
         return
       }
+      touchedParents.add(nodeParent)
+      touchedParents.add(existParent)
+      // Invalidate old connectors before asynchronous layout reuses the nodes.
+      if (typeof nodeParent.removeLine === 'function') nodeParent.removeLine()
+      detachNodeFromParent(item)
+
       if (dir === 'after') {
         existIndex++
         targetDataIndex++
+      }
+      // Re-read lists after detach in case old/new parent were the same.
+      existBorthers = existParent.children
+      existIndex = Math.max(
+        0,
+        Math.min(
+          existIndex,
+          existBorthers.length
+        )
+      )
+      targetDataIndex = Math.max(
+        0,
+        Math.min(
+          targetDataIndex,
+          existParent.nodeData.children.length
+        )
+      )
+      // Same-parent reorder: after detach, anchor index may have shifted.
+      if (nodeParent === existParent) {
+        existIndex = getNodeIndexInNodeList(exist, existBorthers)
+        targetDataIndex = existParent.nodeData.children.findIndex(
+          child => child && child.data && child.data.uid === anchorUid
+        )
+        if (existIndex === -1 || targetDataIndex === -1) return
+        if (dir === 'after') {
+          existIndex++
+          targetDataIndex++
+        }
       }
       existBorthers.splice(existIndex, 0, item)
       existParent.nodeData.children.splice(targetDataIndex, 0, item.nodeData)
       item.parent = existParent
       this.resetMovedNodePosition(item)
+    })
+    touchedParents.forEach(parent => {
+      if (!parent) return
+      if (Array.isArray(parent.children)) {
+        parent.children = parent.children.filter(
+          child => child && child.parent === parent
+        )
+      }
+      if (typeof parent.setData === 'function' && parent.nodeData) {
+        parent.setData({
+          childCount: (parent.nodeData.children || []).length
+        })
+      }
+      if (typeof parent.removeLine === 'function') parent.removeLine()
     })
     this.mindMap.render()
   }
@@ -2064,25 +2114,43 @@ class Render {
     ) {
       return
     }
+    const touchedParents = new Set([toNode])
     nodeList.forEach(item => {
       this.removeNodeFromActiveList(item)
       const fromParent = item.parent
-      if (fromParent) fromParent.removeLine()
-      removeFromParentNodeData(item)
-      if (fromParent && Array.isArray(fromParent.children)) {
-        const idx = getNodeIndexInNodeList(item, fromParent.children)
-        if (idx > -1) fromParent.children.splice(idx, 1)
-      }
+      if (fromParent) touchedParents.add(fromParent)
+      detachNodeFromParent(item)
       toNode.setData({
         expand: true
       })
       if (!toNode.nodeData.children) toNode.nodeData.children = []
+      const uid = getNodeUid(item)
+      toNode.nodeData.children = toNode.nodeData.children.filter(
+        child => !(child && child.data && child.data.uid === uid)
+      )
       toNode.nodeData.children.push(item.nodeData)
-      if (Array.isArray(toNode.children) && !toNode.children.includes(item)) {
+      if (Array.isArray(toNode.children)) {
+        toNode.children = toNode.children.filter(
+          child => child !== item && getNodeUid(child) !== uid
+        )
         toNode.children.push(item)
       }
       item.parent = toNode
       this.resetMovedNodePosition(item)
+    })
+    touchedParents.forEach(parent => {
+      if (!parent) return
+      if (Array.isArray(parent.children)) {
+        parent.children = parent.children.filter(
+          child => child && child.parent === parent
+        )
+      }
+      if (typeof parent.setData === 'function' && parent.nodeData) {
+        parent.setData({
+          childCount: (parent.nodeData.children || []).length
+        })
+      }
+      if (typeof parent.removeLine === 'function') parent.removeLine()
     })
     this.emitNodeActiveEvent()
     this.mindMap.render()

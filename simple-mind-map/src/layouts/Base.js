@@ -149,6 +149,7 @@ class Base {
       newNode = data._node
       // A hydrated tree can retain the renderer reference while replacing the
       // data object. Commands and geometry must use this tree's current data.
+      const prevParent = newNode.parent
       newNode.nodeData = newNode.handleData(data)
       // 节点层级改变了
       const isLayerTypeChange = this.checkIsLayerTypeChange(
@@ -160,6 +161,15 @@ class Base {
       if (isRoot) {
         newNode.isRoot = true
       } else {
+        if (
+          prevParent &&
+          parent &&
+          parent._node &&
+          prevParent !== parent._node &&
+          Array.isArray(prevParent.children)
+        ) {
+          prevParent.children = prevParent.children.filter(item => item !== newNode)
+        }
         newNode.parent = parent._node
       }
       this.cacheNode(data._node.uid, newNode)
@@ -205,6 +215,7 @@ class Base {
       newNode = this.lru.get(uid) || this.renderer.lastNodeCache[uid]
       // 保存该节点上一次的数据
       const lastData = JSON.stringify(newNode.getData())
+      const prevParent = newNode.parent
       // 节点层级改变了
       const isLayerTypeChange = this.checkIsLayerTypeChange(
         newNode.layerIndex,
@@ -216,6 +227,15 @@ class Base {
       if (isRoot) {
         newNode.isRoot = true
       } else {
+        if (
+          prevParent &&
+          parent &&
+          parent._node &&
+          prevParent !== parent._node &&
+          Array.isArray(prevParent.children)
+        ) {
+          prevParent.children = prevParent.children.filter(item => item !== newNode)
+        }
         newNode.parent = parent._node
       }
       this.cacheNode(uid, newNode)

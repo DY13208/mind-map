@@ -200,6 +200,10 @@ class MindMapNode {
 
   //  复位部分布局时会重新设置的数据
   reset() {
+    // Clear connectors before children are rebuilt. Otherwise a reused instance
+    // keeps SVG paths in the shared lineDraw while layout reparents the node,
+    // which shows up as multi-select move "ghost lines" until a full refresh.
+    if (typeof this.removeLine === 'function') this.removeLine()
     this.children = []
     this.parent = null
     this.isRoot = false
@@ -993,7 +997,16 @@ class MindMapNode {
 
   //  添加子节点
   addChildren(node) {
-    this.children.push(node)
+    if (!node) return
+    // Layout reuse can reparent without removing the instance from the previous
+    // parent's children array. Scrub that stale membership so old parents cannot
+    // keep drawing connectors to nodes that already moved.
+    if (node.parent && node.parent !== this && Array.isArray(node.parent.children)) {
+      node.parent.children = node.parent.children.filter(item => item !== node)
+    }
+    if (!this.children.includes(node)) {
+      this.children.push(node)
+    }
   }
 
   //  设置连线样式

@@ -9,6 +9,7 @@ import {
   transformTreeDataToObject,
   transformObjectToTreeData,
   removeFromParentNodeData,
+  detachNodeFromParent,
   copyNodeTree,
   formatGetNodeGeneralization,
   checkIsNodeStyleDataKey
@@ -2207,7 +2208,7 @@ class Cooperate {
     const uid = node.getData && node.getData('uid')
     const oldParent = node.parent
     if (oldParent && oldParent !== nextParent) {
-      removeFromParentNodeData(node)
+      detachNodeFromParent(node)
     }
     if (!nextParent.nodeData.children) nextParent.nodeData.children = []
     const kids = nextParent.nodeData.children
@@ -2221,7 +2222,8 @@ class Cooperate {
     if (oldParent && oldParent !== nextParent && Array.isArray(oldParent.children)) {
       oldParent.children = oldParent.children.filter(item => item !== node)
     }
-    if (Array.isArray(nextParent.children) && !nextParent.children.includes(node)) {
+    if (Array.isArray(nextParent.children)) {
+      nextParent.children = nextParent.children.filter(item => item !== node)
       const liveSlot = Math.max(0, Math.min(slot, nextParent.children.length))
       nextParent.children.splice(liveSlot, 0, node)
     }
@@ -2267,6 +2269,12 @@ class Cooperate {
     this.mindMap.command.pause()
     let plan = null
     try {
+      if (this.mindMap.renderer) {
+        // Multi-node batch moves must paint synchronously. Async performance
+        // paint from an earlier move can redraw connectors using a parent's
+        // stale children list and leave ghost lines until refresh.
+        this.mindMap.renderer._syncPaintOnce = true
+      }
       if (
         typeof this.hydrateLazyChildren === 'function' &&
         nextParent.getData &&
