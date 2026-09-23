@@ -28,9 +28,9 @@ class View {
     this.mindMap.keyCommand.addShortcut('Control+i', () => {
       this.fit()
     })
-    this.syncRightKeyDragCursor()
+    this.syncCanvasDragCursor()
     this.mindMap.on('after_update_config', () => {
-      this.syncRightKeyDragCursor()
+      this.syncCanvasDragCursor()
     })
     // 拖动视图
     this.mindMap.event.on('mousedown', e => {
@@ -41,7 +41,7 @@ class View {
       }
       this.sx = this.x
       this.sy = this.y
-      if (this.isRightKeyCanvasDrag(e)) {
+      if (this.isCanvasDragPointer(e)) {
         this.setCanvasPanningCursor(true)
       }
     })
@@ -159,30 +159,32 @@ class View {
     })
   }
 
-  // 右键拖动画布时，空白处显示张开的小手
-  isRightKeyCanvasDrag(e) {
+  // 当前模式下，按下的是否是「拖动画布」那一键（右键拖 / 左键拖 都走这里）
+  isCanvasDragPointer(e) {
+    const useRightDrag = !!this.mindMap.opt.useLeftKeySelectionRightKeyDrag
+    const isDragButton = useRightDrag ? e.which === 3 : e.which === 1
     return (
-      !!this.mindMap.opt.useLeftKeySelectionRightKeyDrag &&
-      e.which === 3 &&
+      isDragButton &&
       !e.ctrlKey &&
       !e.metaKey &&
       !this.mindMap.opt.isDisableDrag
     )
   }
 
-  syncRightKeyDragCursor() {
+  // 两种拖动模式空白处都显示张开的小手
+  syncCanvasDragCursor() {
     const el = this.mindMap.el
     if (!el) return
-    el.classList.toggle(
-      'smm-right-key-drag',
-      !!this.mindMap.opt.useLeftKeySelectionRightKeyDrag
-    )
-    if (!this.mindMap.opt.useLeftKeySelectionRightKeyDrag) {
+    const enabled = !this.mindMap.opt.isDisableDrag
+    el.classList.toggle('smm-canvas-drag', enabled)
+    // 兼容旧类名
+    el.classList.toggle('smm-right-key-drag', enabled)
+    if (!enabled) {
       this.setCanvasPanningCursor(false)
     }
   }
 
-  // 按下右键拖动时换成握住的小手，松开后恢复
+  // 按下拖动键时换成握住的小手，松开后恢复
   setCanvasPanningCursor(on) {
     if (on) {
       if (this._canvasPanning) return

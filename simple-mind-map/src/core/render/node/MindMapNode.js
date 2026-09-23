@@ -460,17 +460,16 @@ class MindMapNode {
     })
     // 右键菜单事件
     this.group.on('contextmenu', e => {
-      const { readonly, useLeftKeySelectionRightKeyDrag } = this.mindMap.opt
+      const { readonly } = this.mindMap.opt
       // Mac上按住ctrl键点击鼠标左键不知为何触发的是contextmenu事件
       if (readonly || e.ctrlKey) {
         return
       }
       e.stopPropagation()
       e.preventDefault()
-      // 只忽略这次右键自己拖动了画布的情况。不能拿上一次左键框选的按下位置来比，
-      // 否则框选后再点右键会被当成拖动，菜单打不开。
+      // 右键拖动画布或右键框选时，松手带出的 contextmenu 不能当成打开菜单。
+      // 只看这次右键自己的按下位置，不能拿上一次左键框选的起点来比。
       if (
-        useLeftKeySelectionRightKeyDrag &&
         this._rightDownX != null &&
         (Math.abs(e.clientX - this._rightDownX) > 5 ||
           Math.abs(e.clientY - this._rightDownY) > 5)
@@ -488,16 +487,6 @@ class MindMapNode {
         this.mindMap.select &&
         typeof this.mindMap.select.isNodeInList === 'function' &&
         this.mindMap.select.isNodeInList(cached, this)
-      // 框选结束时如果已经多选，仍打开菜单，方便直接加概要
-      if (
-        this.mindMap.select &&
-        !useLeftKeySelectionRightKeyDrag &&
-        this.mindMap.select.hasSelectRange() &&
-        activeList.length <= 1 &&
-        !inCachedMulti
-      ) {
-        return
-      }
       if (inCachedMulti) {
         if (!(activeList.length > 1 && this.isInActiveList())) {
           this.restoreMultiSelect(cached)

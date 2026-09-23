@@ -393,20 +393,8 @@ export default {
       })
     },
 
-    isRightDragMode() {
-      return !!(
-        this.mindMap &&
-        this.mindMap.opt &&
-        this.mindMap.opt.useLeftKeySelectionRightKeyDrag
-      )
-    },
-
-    onMultiSelectEnd(payload) {
-      const nodes = (payload && payload.nodes) || []
-      if (nodes.length <= 1) return
-      // 左键框选、右键拖动时，框选结束不要立刻弹菜单，等用户再点右键。
-      if (this.isRightDragMode()) return
-      this.showSelectionMenu(nodes, payload.clientX, payload.clientY)
+    onMultiSelectEnd() {
+      // 两种模式：框选结束都不要立刻弹菜单，等用户再点一次右键。
     },
 
     showSelectionMenu(nodes, clientX, clientY) {
@@ -551,25 +539,13 @@ export default {
       const moved =
         Math.abs(this.mosuedownX - e.clientX) > 3 ||
         Math.abs(this.mosuedownY - e.clientY) > 3
-      const draggedCanvas =
-        this.isRightDragMode() &&
-        (Math.abs(this.mosuedownX - e.clientX) > 8 ||
-          Math.abs(this.mosuedownY - e.clientY) > 8)
-      if (draggedCanvas) {
+      // 右键拖动画布，或右键框选：松手时都不弹菜单
+      if (moved) {
         this.hide()
         return
       }
-      if (moved && !this.isRightDragMode()) {
-        const cached = this.getCachedMultiNodes()
-        // 右键框选结束后菜单已经打开，拖动松开时不要把它关掉。
-        if (cached.length > 1) {
-          return
-        }
-        this.hide()
-        return
-      }
+      // 已有多选时，再点右键打开选中节点菜单（两种模式一致）
       if (
-        this.isRightDragMode() &&
         this.showSelectionMenu(this.getCachedMultiNodes(), e.clientX, e.clientY)
       ) {
         return

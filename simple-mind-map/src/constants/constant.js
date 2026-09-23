@@ -250,6 +250,7 @@ export const cssContent = `
     user-select: none;
   }
 
+  .smm-mind-map-container.smm-canvas-drag,
   .smm-mind-map-container.smm-right-key-drag {
     cursor: grab;
   }
