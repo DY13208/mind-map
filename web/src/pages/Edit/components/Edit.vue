@@ -339,7 +339,6 @@ export default {
     this.$bus.$on('startPainter', this.handleStartPainter)
     this.$bus.$on('localStorageExceeded', this.onLocalStorageExceeded)
     this.$bus.$on('toggle_appearance_mode', this.handleToggleAppearanceMode)
-    this.$bus.$on('history-restored', this.onHistoryRestored)
     this.$bus.$on('prepare_reload', this.prepareReload)
     window.addEventListener('resize', this.handleResize)
     // 房间模式下协作挂了不能等于"图没了"：等一会儿还没连上就用本地留底恢复
@@ -385,7 +384,6 @@ export default {
     this.$bus.$off('hideLoading', this.handleForceHideLoading)
     this.$bus.$off('localStorageExceeded', this.onLocalStorageExceeded)
     this.$bus.$off('toggle_appearance_mode', this.handleToggleAppearanceMode)
-    this.$bus.$off('history-restored', this.onHistoryRestored)
     this.$bus.$off('prepare_reload', this.prepareReload)
     window.removeEventListener('resize', this.handleResize)
     if (this.mindMap) {
@@ -447,7 +445,7 @@ export default {
 
     ...mapMutations(['setLocalConfig']),
 
-    onHistoryRestored(restored) {
+    async onHistoryRestored(restored) {
       const cooperate = this.mindMap && this.mindMap.cooperate
       if (
         cooperate &&
@@ -458,7 +456,15 @@ export default {
           (restored && restored.newRevision) ||
             (cooperate.lastAppliedVersion || 0) + 1
         )
-        cooperate.recoverHttpCollab(target).catch(() => {})
+        const result = await cooperate.recoverHttpCollab(target, {
+          reason: 'VERSION_RESTORE'
+        })
+        if (!result || !result.applied) {
+          const error = new Error('history canvas refresh did not complete')
+          error.code = (result && result.code) || 'HTTP_HISTORY_RESTORE_INCOMPLETE'
+          throw error
+        }
+        return result
       }
     },
 
