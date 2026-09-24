@@ -255,9 +255,10 @@ export const cssContent = `
     user-select: none;
   }
 
+  /* 默认箭头；仅真正拖动画布时换成握住的小手 */
   .smm-mind-map-container.smm-canvas-drag,
   .smm-mind-map-container.smm-right-key-drag {
-    cursor: grab;
+    cursor: default;
   }
 
   body.smm-canvas-panning,
