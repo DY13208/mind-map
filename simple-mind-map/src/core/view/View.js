@@ -41,9 +41,6 @@ class View {
       }
       this.sx = this.x
       this.sy = this.y
-      if (this.isCanvasDragPointer(e)) {
-        this.setCanvasPanningCursor(true)
-      }
     })
     this.mindMap.event.on('drag', (e, event) => {
       // 按住ctrl键拖动为多选
@@ -51,6 +48,8 @@ class View {
       if (e.ctrlKey || e.metaKey || this.mindMap.opt.isDisableDrag) {
         return
       }
+      // 真正发生拖动位移时才换成小手（右键单击不切换）
+      this.setCanvasPanningCursor(true)
       if (this.firstDrag) {
         this.firstDrag = false
         // 清除激活节点
@@ -171,7 +170,7 @@ class View {
     )
   }
 
-  // 两种拖动模式空白处都显示张开的小手
+  // 标记画布可拖；空闲时保持默认箭头（具体样式见 cssContent）
   syncCanvasDragCursor() {
     const el = this.mindMap.el
     if (!el) return
@@ -184,7 +183,7 @@ class View {
     }
   }
 
-  // 按下拖动键时换成握住的小手，松开后恢复
+  // 真正拖动时换成握住的小手，松开后恢复箭头
   setCanvasPanningCursor(on) {
     if (on) {
       if (this._canvasPanning) return

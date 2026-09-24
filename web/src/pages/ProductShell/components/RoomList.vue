@@ -188,11 +188,15 @@ export default {
   border: 1px solid #e3e9e6;
   border-radius: 12px;
   overflow: hidden;
+  /deep/ .el-table__row {
+    cursor: pointer;
+  }
   .roomName {
     display: flex;
     gap: 9px;
     align-items: center;
     color: #234238;
+    cursor: pointer;
     i {
       color: #0b9366;
     }

@@ -469,6 +469,10 @@ export const getTextFromHtml = html => {
   return getTextFromHtmlEl.textContent
 }
 
+import trimNodeEditTextUtil from './trimNodeEditText'
+export const trimNodeEditText = trimNodeEditTextUtil.trimNodeEditText
+export const trimRichTextHtml = trimNodeEditTextUtil.trimRichTextHtml
+
 // 将blob转成data:url
 export const readBlob = blob => {
   return new Promise((resolve, reject) => {

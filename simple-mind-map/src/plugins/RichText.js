@@ -11,7 +11,8 @@ import {
   getNodeRichTextStyles,
   htmlEscape,
   compareVersion,
-  checkIsRichText
+  checkIsRichText,
+  trimNodeEditText
 } from '../utils'
 import { richTextSupportStyleList } from '../constants/constant'
 import MindMapNode from '../core/render/node/MindMapNode'
@@ -390,7 +391,7 @@ class RichText {
     if (typeof beforeHideRichTextEdit === 'function') {
       beforeHideRichTextEdit(this)
     }
-    const html = this.getEditText()
+    const html = trimNodeEditText(this.getEditText(), true)
     const list = nodes && nodes.length > 0 ? nodes : [this.node]
     const node = this.node
     this.textEditNode.style.display = 'none'
