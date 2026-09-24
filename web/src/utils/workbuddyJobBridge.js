@@ -9,7 +9,10 @@
  *     POST /api/dispatch  {gateway,prompt,name}   派发任务
  *     POST /api/stop      {gateway,id}            停止任务
  *
- *   主服务    comm.py                   http://<页面host>:5000
+ *   主服务    通讯页（LanComm / comm.py）
+ *     地址不能靠猜：页面在公网域名上时 http://<域名>:5000 常被别的服务占着
+ *     （实测 xx.stillgroup.net:5000 是群晖 NAS），通讯页其实在局域网某台机器上。
+ *     所以这里准备一组候选地址逐个探测，谁回的 /api/peers 合法就用谁，见 resolveJobHub()
  *     GET  /api/peers                       各主机登记表（name/ip/port/online）
  *     GET  /api/gateways?ip=&port=          代查某台主机
  *     GET  /api/jobs?ip=&port=&gateway=
@@ -22,6 +25,13 @@ import { getRuntimeConfig } from './runtimeConfig'
 
 const DEFAULT_BRIDGE = 'http://127.0.0.1:8799'
 const DEFAULT_HUB_PORT = 5000
+// 通讯页可能监听的端口：新版 5050、老版 5000
+const HUB_PORT_CANDIDATES = [5050, 5000]
+const HUB_OVERRIDE_KEY = 'mindmap-job-hub'
+const HUB_CACHE_KEY = 'mindmap-job-hub-resolved'
+const HUB_PROBE_TIMEOUT = 2500
+const HUB_CACHE_TTL = 30000
+const HUB_FAIL_TTL = 5000
 const HOST_PORT = 8799
 const TIMEOUT = 8000
 const DISPATCH_TIMEOUT = 60000
@@ -55,12 +65,184 @@ export function getJobBridgeBase() {
   )
 }
 
-/** 主服务（通讯页 comm.py）地址：默认页面所在主机的 5000 端口 */
-export function getJobHubBase() {
+function pageOrigin() {
+  try {
+    const loc = typeof window !== 'undefined' ? window.location || {} : {}
+    return loc.origin && loc.origin !== 'null' ? trimBase(loc.origin) : ''
+  } catch (err) {
+    return ''
+  }
+}
+
+/** 局域网 / 回环主机名。公网域名不算 —— 那样会把 <域名>:5000 猜成通讯页 */
+export function isPrivateHost(host) {
+  const value = String(host || '').trim().toLowerCase()
+  if (!value) return false
+  if (isLoopbackIp(value)) return true
+  if (value.endsWith('.local') || value.endsWith('.lan')) return true
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(value)
+  if (!m) return false
+  const a = Number(m[1])
+  const b = Number(m[2])
+  if (a === 10) return true
+  if (a === 192 && b === 168) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  return false
+}
+
+function urlHubParam() {
+  try {
+    const loc = typeof window !== 'undefined' ? window.location || {} : {}
+    const q = new URLSearchParams(loc.search || '').get('hub')
+    return q ? trimBase(q) : ''
+  } catch (err) {
+    return ''
+  }
+}
+
+function storedHubOverride() {
+  try {
+    return trimBase(window.localStorage.getItem(HUB_OVERRIDE_KEY) || '')
+  } catch (err) {
+    return ''
+  }
+}
+
+/** 手动指定的通讯页地址：页面地址加 ?hub=http://ip:端口 优先，其次本地记下的 */
+export function getJobHubOverride() {
+  return urlHubParam() || storedHubOverride()
+}
+
+/** 记住通讯页地址（传空串清掉）。改完会丢掉「上次连上的地址」缓存，下次重新探测 */
+export function setJobHubOverride(url) {
+  try {
+    const value = trimBase(url)
+    if (value) window.localStorage.setItem(HUB_OVERRIDE_KEY, value)
+    else window.localStorage.removeItem(HUB_OVERRIDE_KEY)
+  } catch (err) {
+    /* 隐私模式下写不进去，忽略 */
+  }
+  try {
+    window.sessionStorage.removeItem(HUB_CACHE_KEY)
+  } catch (err) {
+    /* 同上 */
+  }
+  hubResolved = null
+  hubExpireAt = 0
+  return getJobHubOverride()
+}
+
+/**
+ * 通讯页候选地址，按可信度排序：
+ * ① 页面 URL 的 ?hub= ② 构建时注入的配置 ③ 本地记下的
+ * ④ 页面自己就在局域网时，同主机的 5050 / 5000 ⑤ 同源 /jobhub（服务器把通讯页反代到这儿）
+ */
+export function jobHubCandidates() {
   const cfg = getRuntimeConfig()
-  const configured = runtime().workbuddyJobHub || cfg.workbuddyJobHub
-  if (configured) return trimBase(configured)
-  return `http://${pageHost()}:${DEFAULT_HUB_PORT}`
+  const out = []
+  const push = url => {
+    const value = trimBase(url)
+    if (value && !out.includes(value)) out.push(value)
+  }
+  push(urlHubParam())
+  push(runtime().workbuddyJobHub)
+  push(cfg.workbuddyJobHub)
+  push(storedHubOverride())
+  const host = pageHost()
+  if (isPrivateHost(host)) {
+    HUB_PORT_CANDIDATES.forEach(port => push(`http://${host}:${port}`))
+  }
+  const origin = pageOrigin()
+  if (origin) push(`${origin}/jobhub`)
+  return out
+}
+
+/** 同步拿一个「最可能对」的地址：只用于展示和兜底，真正请求请用 resolveJobHub() */
+export function getJobHubBase() {
+  const candidates = jobHubCandidates()
+  return candidates[0] || `http://${pageHost()}:${DEFAULT_HUB_PORT}`
+}
+
+function noHubTip(tried) {
+  const list = tried.slice(0, 4).join('、')
+  return (
+    `没找到通讯页（试过 ${list || '没有候选地址'}）。` +
+    '页面在公网域名上时浏览器不允许直连局域网 http 地址：' +
+    '可在服务器把 /jobhub 反代到通讯页，或打开页面时加 ?hub=http://<通讯页IP>:端口'
+  )
+}
+
+function readHubCache() {
+  try {
+    return trimBase(window.sessionStorage.getItem(HUB_CACHE_KEY) || '')
+  } catch (err) {
+    return ''
+  }
+}
+
+function writeHubCache(base) {
+  try {
+    window.sessionStorage.setItem(HUB_CACHE_KEY, base)
+  } catch (err) {
+    /* 忽略 */
+  }
+}
+
+/** 探一个候选：必须回 JSON 且带 peers 数组才算通讯页（群晖那种 HTML 页面不算） */
+async function probeJobHub(base) {
+  const res = await request(`${base}/api/peers`, { timeout: HUB_PROBE_TIMEOUT })
+  if (!res.ok) return null
+  const json = res.json
+  if (!json || !Array.isArray(json.peers)) return null
+  return { base, peers: json.peers }
+}
+
+let hubResolved = null
+let hubExpireAt = 0
+let hubInFlight = null
+
+async function doResolveJobHub() {
+  const candidates = jobHubCandidates()
+  if (!candidates.length) {
+    return { ok: false, base: '', peers: [], tried: [], error: noHubTip([]) }
+  }
+  const cached = readHubCache()
+  const list =
+    cached && candidates.includes(cached)
+      ? [cached, ...candidates.filter(url => url !== cached)]
+      : candidates
+  const found = await Promise.all(list.map(base => probeJobHub(base)))
+  const hit = found.find(Boolean)
+  if (!hit) {
+    return { ok: false, base: '', peers: [], tried: list, error: noHubTip(list) }
+  }
+  writeHubCache(hit.base)
+  return { ok: true, base: hit.base, peers: hit.peers, tried: list, error: '' }
+}
+
+/**
+ * 找到真正能用的通讯页地址：候选并发探一遍，按候选顺序取第一个通的。
+ * 成功缓存 30s、失败只缓存 5s（通了就快，断了也能很快自己恢复）。
+ */
+export async function resolveJobHub({ force = false } = {}) {
+  if (!force && hubResolved && Date.now() < hubExpireAt) return hubResolved
+  if (!force && hubInFlight) return hubInFlight
+  const task = doResolveJobHub()
+  hubInFlight = task
+  try {
+    const value = await task
+    hubResolved = value
+    hubExpireAt = Date.now() + (value.ok ? HUB_CACHE_TTL : HUB_FAIL_TTL)
+    return value
+  } finally {
+    if (hubInFlight === task) hubInFlight = null
+  }
+}
+
+/** 转发用的通讯页地址；没解析出来返回空串（调用方退回直连结果） */
+async function hubBaseForRelay() {
+  const resolved = await resolveJobHub()
+  return resolved.base || ''
 }
 
 export function normalizeHost(raw = {}) {
@@ -145,20 +327,21 @@ function pickError(res, fallback) {
 
 /** 主服务登记的局域网主机列表（通讯页 /api/peers） */
 export async function listHubPeers() {
-  const hub = getJobHubBase()
-  const res = await request(`${hub}/api/peers`)
-  if (!res.ok) {
+  const resolved = await resolveJobHub()
+  if (!resolved.ok) {
     return {
       ok: false,
-      hub,
+      hub: resolved.base || getJobHubBase(),
       peers: [],
-      error: res.offline
-        ? `连不上主服务 ${hub}（通讯页 comm.py 是否在运行？）`
-        : pickError(res, '主服务没有返回主机列表')
+      tried: resolved.tried,
+      error: resolved.error
     }
   }
-  const rows = res.json && Array.isArray(res.json.peers) ? res.json.peers : []
-  return { ok: true, hub, peers: rows.map(normalizeHost) }
+  return {
+    ok: true,
+    hub: resolved.base,
+    peers: resolved.peers.map(normalizeHost)
+  }
 }
 
 /** 本机桥接（127.0.0.1:8799）的会话列表 */
@@ -251,16 +434,18 @@ export async function listHostGateways(host) {
   }
 
   if (!local) {
-    const hub = getJobHubBase()
-    const relayed = await request(
-      `${hub}/api/gateways?ip=${encodeURIComponent(target.ip)}&port=${target.port}`
-    )
-    if (relayed.ok) {
-      return {
-        ok: true,
-        gateways: readGateways(relayed.json),
-        diag: readDiag(relayed.json),
-        via: 'hub'
+    const hub = await hubBaseForRelay()
+    if (hub) {
+      const relayed = await request(
+        `${hub}/api/gateways?ip=${encodeURIComponent(target.ip)}&port=${target.port}`
+      )
+      if (relayed.ok) {
+        return {
+          ok: true,
+          gateways: readGateways(relayed.json),
+          diag: readDiag(relayed.json),
+          via: 'hub'
+        }
       }
     }
   }
@@ -339,7 +524,14 @@ export async function dispatchWorkbuddyJob(opts = {}) {
     direct.status === 404 ||
     direct.status === 502
   if (retriable) {
-    const hub = getJobHubBase()
+    const hub = await hubBaseForRelay()
+    if (!hub) {
+      return {
+        ok: false,
+        host: target,
+        error: `直连 ${target.label} 不通，也没找到通讯页可转发（页面没配主服务地址）`
+      }
+    }
     const relayed = await request(`${hub}/api/dispatch`, {
       method: 'POST',
       body: { ip: target.ip, port: target.port, ...payload },
@@ -353,7 +545,7 @@ export async function dispatchWorkbuddyJob(opts = {}) {
     return {
       ok: false,
       host: target,
-      error: shaped.error || `直连与主服务转发都失败`
+      error: shaped.error || '直连与通讯页转发都失败'
     }
   }
 
@@ -397,17 +589,19 @@ export async function listHostJobs({ host, gateway } = {}) {
     }
   }
   if (!local) {
-    const hub = getJobHubBase()
-    const relayed = await request(
-      `${hub}/api/jobs?ip=${encodeURIComponent(target.ip)}&port=${
-        target.port
-      }${gateway ? `&gateway=${encodeURIComponent(gateway)}` : ''}`
-    )
-    if (relayed.ok) {
-      return {
-        ok: true,
-        jobs: (relayed.json && relayed.json.jobs) || [],
-        via: 'hub'
+    const hub = await hubBaseForRelay()
+    if (hub) {
+      const relayed = await request(
+        `${hub}/api/jobs?ip=${encodeURIComponent(target.ip)}&port=${
+          target.port
+        }${gateway ? `&gateway=${encodeURIComponent(gateway)}` : ''}`
+      )
+      if (relayed.ok) {
+        return {
+          ok: true,
+          jobs: (relayed.json && relayed.json.jobs) || [],
+          via: 'hub'
+        }
       }
     }
   }
@@ -435,13 +629,15 @@ export async function fetchJobTranscript({ host, gateway, jobId } = {}) {
     return { ok: true, ...res.json, via: 'direct' }
   }
   if (!local) {
-    const hub = getJobHubBase()
-    const relayUrl =
-      `${hub}/api/transcript?ip=${encodeURIComponent(target.ip)}` +
-      `&port=${target.port}&id=${encodeURIComponent(jobId)}`
-    const relayed = await request(relayUrl, { timeout: 60000 })
-    if (relayed.ok && relayed.json && relayed.json.ok) {
-      return { ok: true, ...relayed.json, via: 'hub' }
+    const hub = await hubBaseForRelay()
+    if (hub) {
+      const relayUrl =
+        `${hub}/api/transcript?ip=${encodeURIComponent(target.ip)}` +
+        `&port=${target.port}&id=${encodeURIComponent(jobId)}`
+      const relayed = await request(relayUrl, { timeout: 60000 })
+      if (relayed.ok && relayed.json && relayed.json.ok) {
+        return { ok: true, ...relayed.json, via: 'hub' }
+      }
     }
   }
   return { ok: false, error: pickError(res, '拿不到完整回答') }

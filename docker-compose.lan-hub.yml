@@ -1,0 +1,39 @@
+# 通讯页（按钮派发主服务）单独跑一个容器。
+#
+# 为什么需要它：页面上的「运行」按钮要先问通讯页「局域网上有哪些电脑在待命」，
+# 派发失败时还要它代为转发。通讯页必须和那些电脑网络可达，所以它放在
+# 公司内网那台服务器上最合适（服务器 ↔ 各电脑互通，页面只管从公网访问服务器）。
+#
+# 用法（服务器上）：
+#   1) mkdir -p lan-hub && 把 scripts/workbuddy-lan-hub.py 放进 ./lan-hub/
+#   2) docker compose -f docker-compose.lan-hub.yml up -d
+#   3) 网关容器里把上游指过来：JOBHUB_UPSTREAM=http://lan-hub:5051
+#      （没跟网关同一个 docker 网络时用 http://<宿主机内网IP>:5051，或直接让
+#        nginx 走 host.docker.internal:5051 —— 这是默认值）
+#   4) 各台电脑的桥接重新登记（桥接只认局域网地址，这里填服务器的内网 IP）：
+#      python test1.py --lan --hub http://<服务器内网IP>:5051
+#
+# 不想用容器？服务器上直接跑也一样：
+#   pip3 install flask
+#   nohup python3 workbuddy-lan-hub.py --port 5051 > lan-hub.log 2>&1 &
+
+services:
+  lan-hub:
+    image: python:3.12-slim
+    container_name: lan-hub
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir flask >/dev/null 2>&1 &&
+             exec python /app/workbuddy-lan-hub.py
+                  --port 5051
+                  --allow-origin '*.stillgroup.net'"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LAN_HUB_ALLOW_ORIGIN=*.stillgroup.net
+    volumes:
+      # 脚本目录整份挂进来：peers.json 也落在这里，重建容器不丢登记表
+      - ./lan-hub:/app
+    ports:
+      # 只给网关（同机）用的话可以去掉这行，让 nginx 走 host.docker.internal
+      - "5051:5051"
+    restart: unless-stopped

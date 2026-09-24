@@ -23,7 +23,62 @@ from urllib.parse import urlencode
 
 from flask import Flask, jsonify, request
 
-from test1 import _lan_ip, _private_host
+try:  # 跟桥接（test1.py）放一起时，直接复用它的实现，行为保持一致
+    from test1 import _host_of_origin, _lan_ip, _origin_allowed, _private_host
+except Exception:  # 单独拷到别的目录也能跑：内置一份等价实现
+    def _host_of_origin(origin):
+        try:
+            from urllib.parse import urlparse
+            return (urlparse(origin).hostname or "").strip("[]").lower()
+        except Exception:
+            return ""
+
+    def _origin_allowed(origin, pattern):
+        """来源是否命中白名单条目：支持 `*`、精确匹配、`*.domain`（端口无关）"""
+        if not pattern:
+            return False
+        if pattern == "*" or pattern == origin:
+            return True
+        try:
+            from urllib.parse import urlparse
+            op = urlparse(origin)
+            pp = urlparse(pattern if "//" in pattern else "//" + pattern)
+            oh = (op.hostname or "").strip("[]").lower()
+            ph = (pp.hostname or "").strip("[]").lower()
+            if not oh or not ph:
+                return False
+            if op.scheme and pp.scheme and op.scheme.lower() != pp.scheme.lower():
+                return False
+            if ph.startswith("*."):
+                base = ph[2:]
+                return oh == base or oh.endswith("." + base)
+            return oh == ph and (op.port or 0) == (pp.port or 0)
+        except Exception:
+            return False
+
+    def _lan_ip():
+        import socket
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.connect(("8.8.8.8", 80))
+            ip = sock.getsockname()[0]
+            sock.close()
+            return ip
+        except Exception:
+            return ""
+
+    def _private_host(host):
+        """本机或局域网地址"""
+        if host in ("localhost", "127.0.0.1", "::1"):
+            return True
+        parts = host.split(".")
+        if len(parts) != 4 or not all(p.isdigit() for p in parts):
+            return False
+        nums = [int(p) for p in parts]
+        if any(n > 255 for n in nums):
+            return False
+        a, b = nums[0], nums[1]
+        return a == 10 or (a == 192 and b == 168) or (a == 172 and 16 <= b <= 31)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PEERS_PATH = os.path.join(HERE, "peers.json")
@@ -31,6 +86,45 @@ ONLINE_SEC = 30
 _lock = threading.Lock()
 
 app = Flask(__name__)
+
+# ---------------------------------------------------------------- 跨源
+# 脑图页面（按钮在页面上）通常和通讯页**不同源**：域名/端口都可能不一样。
+# 浏览器会先发 OPTIONS 预检、再要求响应带 Access-Control-Allow-Origin，
+# 不加这些头的话「连不上主服务」其实是浏览器把响应拦了，跟服务在不在跑无关。
+ALLOW_ORIGIN_ENV = "LAN_HUB_ALLOW_ORIGIN"
+ALLOW_ORIGIN_DEFAULT = "*.stillgroup.net"
+ALLOW_ORIGIN_PATTERNS = []
+
+
+def _cors_origin():
+    """本次请求的来源要不要放行。
+
+    局域网/本机来源（http://192.168.x.x、http://localhost...）直接放行 —— 通讯页
+    本来就是给人从局域网打开的；其余来源（公网域名等）要显式列进白名单，
+    未设 token 时不至于被任意网页调用。
+    """
+    origin = (request.headers.get("Origin") or "").strip()
+    if not origin:
+        return ""
+    if _private_host(_host_of_origin(origin)):
+        return origin
+    for pattern in ALLOW_ORIGIN_PATTERNS:
+        if _origin_allowed(origin, pattern):
+            return origin
+    return ""
+
+
+@app.after_request
+def _apply_cors(resp):
+    allowed = _cors_origin()
+    if allowed:
+        resp.headers["Access-Control-Allow-Origin"] = allowed
+        resp.headers["Vary"] = "Origin"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        # Chrome 的 Private Network Access 预检会要这个头
+        resp.headers["Access-Control-Allow-Private-Network"] = "true"
+    return resp
 
 
 def _load():
@@ -550,14 +644,45 @@ def jobs():
     return jsonify({"jobs": body.get("jobs") or [], "ip": ip})
 
 
+def _banner_lines(host, port, allow):
+    ip = _lan_ip() or "127.0.0.1"
+    rows = [
+        ("页面地址", "http://%s:%d/" % (ip, port)),
+        ("本机地址", "http://127.0.0.1:%d/" % port),
+        ("桥接登记", "POST /api/register  {ip, port, name}"),
+        ("接口来源", "局域网来源直接放行" + ("；白名单 " + allow if allow else "（白名单为空）")),
+        ("跨源", "已开（浏览器会先发 OPTIONS 预检）"),
+        ("停止服务", "Ctrl + C"),
+    ]
+    width = 60
+    out = ["=" * width, "按钮派发 · 通讯页", "=" * width]
+    for key, value in rows:
+        out.append("%-10s%s" % (key, value))
+    out.append("")
+    out.append("每台电脑登记：python test1.py --lan --hub http://%s:%d" % (ip, port))
+    return out
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=5000)
+    ap.add_argument(
+        "--allow-origin",
+        default=None,
+        help="额外的跨源白名单（逗号分隔，支持 *.domain）；局域网来源本来就放行。"
+        "默认读环境变量 %s，没有则用 %s" % (ALLOW_ORIGIN_ENV, ALLOW_ORIGIN_DEFAULT),
+    )
     args = ap.parse_args()
-    print("局域网通讯  http://127.0.0.1:%d/" % args.port, flush=True)
-    print("每台电脑：python test1.py --lan --hub http://<本机局域网IP>:%d" % args.port, flush=True)
+
+    raw = args.allow_origin
+    if raw is None:
+        raw = os.environ.get(ALLOW_ORIGIN_ENV, "") or ALLOW_ORIGIN_DEFAULT
+    ALLOW_ORIGIN_PATTERNS[:] = [p.strip() for p in raw.split(",") if p.strip()]
+
+    for line in _banner_lines(args.host, args.port, ", ".join(ALLOW_ORIGIN_PATTERNS)):
+        print(line, flush=True)
     app.run(host=args.host, port=args.port, threaded=True)
 
 

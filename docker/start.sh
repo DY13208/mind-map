@@ -14,6 +14,18 @@ case "$YIRAN_UPSTREAM" in
 esac
 YIRAN_UPSTREAM=${YIRAN_UPSTREAM%/}
 
+# 通讯页（按钮派发主服务）的上游。默认当它跑在宿主机上（python comm.py --port 5051）；
+# 跑在同 compose 里就写 http://lan-hub:5051，跑在别的机器上就写那台的地址。
+JOBHUB_UPSTREAM=${JOBHUB_UPSTREAM:-http://host.docker.internal:5051}
+case "$JOBHUB_UPSTREAM" in
+  http://*|https://*) ;;
+  *) echo "[gateway] invalid JOBHUB_UPSTREAM" >&2; exit 1 ;;
+esac
+case "$JOBHUB_UPSTREAM" in
+  *";"*|*"{"*|*"}"*|*" "*) echo "[gateway] invalid JOBHUB_UPSTREAM characters" >&2; exit 1 ;;
+esac
+JOBHUB_UPSTREAM=${JOBHUB_UPSTREAM%/}
+
 COGNEE_UPSTREAM=${COGNEE_API:-${COGNEE_UPSTREAM:-http://192.168.0.204:8320}}
 case "$COGNEE_UPSTREAM" in
   http://*|https://*) ;;
@@ -31,9 +43,11 @@ esac
 sed -e "s|__YIRAN_UPSTREAM__|$YIRAN_UPSTREAM|g" \
     -e "s|__COGNEE_UPSTREAM__|$COGNEE_UPSTREAM|g" \
     -e "s|__COGNEE_API_KEY__|$COGNEE_API_KEY|g" \
+    -e "s|__JOBHUB_UPSTREAM__|$JOBHUB_UPSTREAM|g" \
   /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
 echo "[gateway] Yiran upstream: $YIRAN_UPSTREAM"
 echo "[gateway] Cognee upstream: $COGNEE_UPSTREAM"
+echo "[gateway] Job hub upstream: $JOBHUB_UPSTREAM"
 
 echo "[gateway] waiting for postgres ${PGHOST:-postgres}:${PGPORT:-5432}..."
 i=0
