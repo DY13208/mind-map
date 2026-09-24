@@ -339,7 +339,181 @@ async function main() {
     JSON.stringify(publicHosts.defaultHost && publicHosts.defaultHost.key)
   )
 
+  // ---- 8. 页面部署在局域网某台机器上：默认就用那台的 WorkBuddy ----
+  // 场景：页面挂在 http://192.168.0.54:8990，同事从自己电脑打开它派任务。
+  // 不要求每个人都在自己电脑上跑桥接 —— 用「页面所在那台」的最省事。
+  setPage({
+    hostname: '192.168.0.54',
+    origin: 'http://192.168.0.54:8990',
+    port: '8990',
+    protocol: 'http:'
+  })
+  window.sessionStorage.clear()
+  hub.setJobHubOverride('')
+  check(
+    'pageMachineHost：私网页面 → 指向页面那台的 8799',
+    (hub.pageMachineHost() || {}).key === '192.168.0.54:8799',
+    JSON.stringify(hub.pageMachineHost())
+  )
+  setPage({
+    hostname: 'xx.stillgroup.net',
+    origin: 'https://xx.stillgroup.net:8989',
+    port: '8989',
+    protocol: 'https:'
+  })
+  check('pageMachineHost：公网域名页面 → 不用它（得走中继）', hub.pageMachineHost() === null)
+  setPage({
+    hostname: '192.168.0.54',
+    origin: 'http://192.168.0.54:8990',
+    port: '8990',
+    protocol: 'http:'
+  })
+  window.sessionStorage.clear()
+  hub.setJobHubOverride('')
+  fetchLog = []
+  fetchHandler = url => {
+    if (url === 'http://192.168.0.54:8799/api/gateways') {
+      return { status: 200, body: { gateways: [{ url: 'http://127.0.0.1:50001', cwd: 'D:\\demo' }] } }
+    }
+    if (url.includes('/api/peers')) return new Error('不该去找通讯页')
+    if (url.includes(':8799')) return new Error('Failed to fetch')
+    return new Error('不该请求：' + url)
+  }
+  const pageHosts = await hub.resolveJobHosts()
+  check(
+    '页面主机能用：不去翻通讯页（少一次请求 + 少几条红字）',
+    !fetchLog.some(l => l.url.includes('/api/peers')),
+    JSON.stringify(fetchLog.map(l => l.url))
+  )
+  check(
+    '页面在私网 IP 上：执行主机列表第一条是「页面主机」',
+    !!pageHosts.hosts[0] && pageHosts.hosts[0].key === '192.168.0.54:8799',
+    JSON.stringify(pageHosts.hosts.map(h => h.key))
+  )
+  check(
+    '默认目标就是页面那台（不用同事自己开桥接）',
+    !!pageHosts.defaultHost && pageHosts.defaultHost.key === '192.168.0.54:8799',
+    JSON.stringify(pageHosts.defaultHost && pageHosts.defaultHost.key)
+  )
+  check(
+    '没有通讯页也算可用（ok:true）',
+    pageHosts.ok === true,
+    JSON.stringify({ ok: pageHosts.ok, error: pageHosts.error })
+  )
+  check('页面上标出它是什么角色', /页面主机/.test(pageHosts.hosts[0].label), pageHosts.hosts[0].label)
+
+  // ---- 9. 写操作必须是 POST ----
+  // 回归：把 dispatch/stop/attach 收敛到 bridgeRequest 时漏了 method: 'POST'，
+  // 于是按 GET 发、又带着 body → fetch 直接抛
+  // 「Failed to execute 'fetch' on 'Window': Request with GET/HEAD method cannot have body」
+  setPage({
+    hostname: '192.168.0.54',
+    origin: 'http://192.168.0.54:8990',
+    port: '8990',
+    protocol: 'http:'
+  })
+  window.sessionStorage.clear()
+  hub.setJobHubOverride('')
+  fetchLog = []
+  fetchHandler = url => {
+    if (url.includes('/api/dispatch')) {
+      return { status: 200, body: { ok: true, job: { id: 'job-1' }, gatewayCwd: 'D:\\demo' } }
+    }
+    if (url.includes('/api/stop')) return { status: 200, body: { ok: true } }
+    if (url.includes('/api/attach')) return { status: 200, body: { ok: true, attachments: [] } }
+    return { status: 200, body: {} }
+  }
+  const writeTarget = { ip: '192.168.0.54', port: 8799 }
+  const dispatched = await hub.dispatchWorkbuddyJob({
+    host: writeTarget,
+    gateway: 'http://127.0.0.1:50001',
+    prompt: '把今天的销售表汇总'
+  })
+  await hub.stopHostJob({ host: writeTarget, gateway: 'http://127.0.0.1:50001', id: 'job-1' })
+  await hub.attachFilesViaBridge({
+    host: writeTarget,
+    roomKey: 'room-1',
+    nodeUid: 'node-1',
+    files: [{ name: 'a.txt', base64: 'eA==' }]
+  })
+  const writes = fetchLog.filter(l => /\/api\/(dispatch|stop|attach)/.test(l.url))
+  check('派发成功', dispatched.ok === true, JSON.stringify(dispatched.error || ''))
+  check(
+    '派发/停止/挂附件都是 POST（GET 带 body 会被 fetch 直接抛错）',
+    writes.length === 3 && writes.every(l => l.method === 'POST'),
+    JSON.stringify(writes.map(l => `${l.method} ${l.url}`))
+  )
+
+  // ---- 10. 同源桥接：页面和 WorkBuddy 在同一台机器上（走 /bridge/ 反代）----
+  // 场景：脑图部署在服务器上，任务也用**服务器上**的 WorkBuddy 跑。
+  // 浏览器的 127.0.0.1 是同事自己的电脑，所以桥接必须挂在同源路径下。
+  runtimeConfig = { workbuddyJobBridge: '/bridge' }
+  setPage({
+    hostname: 'xx.stillgroup.net',
+    origin: 'https://xx.stillgroup.net:8989',
+    port: '8989',
+    protocol: 'https:'
+  })
+  window.sessionStorage.clear()
+  hub.setJobHubOverride('')
+  check(
+    '桥接配成相对路径 → 认成同源桥接',
+    hub.isSameOriginBridge() === true,
+    hub.getJobBridgeBase()
+  )
+  fetchLog = []
+  fetchHandler = url => {
+    if (url === '/bridge/api/gateways') {
+      return { status: 200, body: { gateways: [{ url: 'http://127.0.0.1:50001', cwd: 'D:\\demo' }] } }
+    }
+    if (url.includes('/api/peers')) return new Error('不该去找通讯页')
+    return new Error('不该请求：' + url)
+  }
+  const sameHosts = await hub.resolveJobHosts()
+  check(
+    '同源桥接：请求走相对路径（同源，没有跨域也没有混合内容）',
+    fetchLog.some(l => l.url === '/bridge/api/gateways'),
+    JSON.stringify(fetchLog.map(l => l.url))
+  )
+  check(
+    '同源桥接：主机列表里标明「页面同源」（别让人以为是自己的电脑）',
+    sameHosts.hosts.some(h => /页面同源/.test(h.label)),
+    JSON.stringify(sameHosts.hosts.map(h => h.label))
+  )
+  check(
+    '同源桥接：默认目标就是它',
+    !!sameHosts.defaultHost && sameHosts.defaultHost.key === '127.0.0.1:8799',
+    JSON.stringify(sameHosts.defaultHost && sameHosts.defaultHost.key)
+  )
+  // 派发也要打在同源路径上
+  fetchLog = []
+  fetchHandler = url => {
+    if (url === '/bridge/api/dispatch') {
+      return { status: 200, body: { ok: true, job: { id: 'job-9' } } }
+    }
+    return new Error('不该请求：' + url)
+  }
+  const sameDispatch = await hub.dispatchWorkbuddyJob({
+    host: { ip: '127.0.0.1', port: 8799 },
+    gateway: 'http://127.0.0.1:50001',
+    prompt: '干活'
+  })
+  check(
+    '同源桥接：派发也走 /bridge（POST）',
+    sameDispatch.ok === true && fetchLog.some(l => l.url === '/bridge/api/dispatch' && l.method === 'POST'),
+    JSON.stringify(fetchLog.map(l => `${l.method} ${l.url}`))
+  )
+  runtimeConfig = {}
+
   // ---- 6. 本机桥接没跑时，提示要说清怎么办 ----
+  setPage({
+    hostname: '192.168.0.54',
+    origin: 'http://192.168.0.54:8990',
+    port: '8990',
+    protocol: 'http:'
+  })
+  window.sessionStorage.clear()
+  hub.setJobHubOverride('')
   fetchHandler = url => {
     if (url.includes(':8799')) return new Error('Failed to fetch')
     return { status: 200, body: { peers: [] } }

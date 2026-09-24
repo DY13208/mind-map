@@ -26,6 +26,17 @@ case "$JOBHUB_UPSTREAM" in
 esac
 JOBHUB_UPSTREAM=${JOBHUB_UPSTREAM%/}
 
+# /bridge/ 反代的上游：执行主机（页面这台机器）上的桥接。
+BRIDGE_UPSTREAM=${BRIDGE_UPSTREAM:-http://host.docker.internal:8799}
+case "$BRIDGE_UPSTREAM" in
+  http://*|https://*) ;;
+  *) echo "[gateway] invalid BRIDGE_UPSTREAM" >&2; exit 1 ;;
+esac
+case "$BRIDGE_UPSTREAM" in
+  *";"*|*"{"*|*"}"*|*" "*) echo "[gateway] invalid BRIDGE_UPSTREAM characters" >&2; exit 1 ;;
+esac
+BRIDGE_UPSTREAM=${BRIDGE_UPSTREAM%/}
+
 COGNEE_UPSTREAM=${COGNEE_API:-${COGNEE_UPSTREAM:-http://192.168.0.204:8320}}
 case "$COGNEE_UPSTREAM" in
   http://*|https://*) ;;
@@ -44,10 +55,12 @@ sed -e "s|__YIRAN_UPSTREAM__|$YIRAN_UPSTREAM|g" \
     -e "s|__COGNEE_UPSTREAM__|$COGNEE_UPSTREAM|g" \
     -e "s|__COGNEE_API_KEY__|$COGNEE_API_KEY|g" \
     -e "s|__JOBHUB_UPSTREAM__|$JOBHUB_UPSTREAM|g" \
+    -e "s|__BRIDGE_UPSTREAM__|$BRIDGE_UPSTREAM|g" \
   /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
 echo "[gateway] Yiran upstream: $YIRAN_UPSTREAM"
 echo "[gateway] Cognee upstream: $COGNEE_UPSTREAM"
 echo "[gateway] Job hub upstream: $JOBHUB_UPSTREAM"
+echo "[gateway] Bridge upstream: $BRIDGE_UPSTREAM"
 
 echo "[gateway] waiting for postgres ${PGHOST:-postgres}:${PGPORT:-5432}..."
 i=0
