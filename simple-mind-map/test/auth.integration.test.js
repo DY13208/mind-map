@@ -116,10 +116,17 @@ async function main() {
           'workbuddy-integration-secret'
         )
         assert.strictEqual(form.get('grant_type'), 'authorization_code')
-        assert.strictEqual(form.get('code'), 'workbuddy-valid-code')
+        assert.ok(
+          ['workbuddy-valid-code', 'workbuddy-no-hints-code'].includes(
+            form.get('code')
+          )
+        )
+        const noHints = form.get('code') === 'workbuddy-no-hints-code'
         res.end(
           JSON.stringify({
-            access_token: 'workbuddy-access-token',
+            access_token: noHints
+              ? 'workbuddy-no-hints-token'
+              : 'workbuddy-access-token',
             token_type: 'Bearer',
             expires_in: 1800,
             openid: 'workbuddy-zhangsan'
@@ -129,10 +136,11 @@ async function main() {
       return
     }
     if (url.pathname === '/workbuddy/userinfo' && req.method === 'POST') {
-      assert.strictEqual(
-        req.headers.authorization,
-        'Bearer workbuddy-access-token'
-      )
+      if (req.headers.authorization === 'Bearer workbuddy-no-hints-token') {
+        res.end(JSON.stringify({ sub: 'workbuddy-no-hints-subject' }))
+        return
+      }
+      assert.strictEqual(req.headers.authorization, 'Bearer workbuddy-access-token')
       res.end(
         JSON.stringify({
           sub: 'workbuddy-zhangsan',
@@ -449,6 +457,20 @@ async function main() {
     response = await request('/api/files')
     assert.strictEqual(response.status, 401)
 
+    // A real openid-only WorkBuddy profile may contain no phone or WeCom
+    // userid. Never create a second account from its opaque subject.
+    response = await request('/api/auth/workbuddy/login')
+    const unlinkedState = new URL(response.headers.get('location')).searchParams.get('state')
+    response = await request(
+      `/oauth/callback?code=workbuddy-no-hints-code&state=${encodeURIComponent(unlinkedState)}`
+    )
+    assert.strictEqual(
+      new URL(response.headers.get('location')).searchParams.get('auth_error'),
+      'workbuddy_account_not_linked'
+    )
+    response = await request('/api/auth/me')
+    assert.strictEqual((await response.json()).authenticated, false)
+
     response = await request(
       '/api/auth/wecom/client-login?return_to=%2Ffiles%3Ffrom%3Dwecom'
     )
@@ -490,6 +512,21 @@ async function main() {
     assert.strictEqual(clientWecomMe.authenticated, true)
     assert.strictEqual(clientWecomMe.user.wecomUserId, 'zhangsan')
     const clientWecomInternalUserId = clientWecomMe.user.id
+
+    response = await request('/api/auth/workbuddy/link?return_to=%2Ffiles', {
+      method: 'POST', headers: { Origin: appOrigin }
+    })
+    assert.strictEqual(response.status, 200)
+    const linkState = new URL((await response.json()).authorizeUrl).searchParams.get('state')
+    response = await request(
+      `/oauth/callback?code=workbuddy-no-hints-code&state=${encodeURIComponent(linkState)}`
+    )
+    assert.strictEqual(response.status, 302)
+    const linkedLocation = new URL(response.headers.get('location'))
+    assert.strictEqual(linkedLocation.pathname, '/files')
+    assert.strictEqual(linkedLocation.searchParams.get('workbuddy_linked'), '1')
+    response = await request('/api/auth/me')
+    assert.strictEqual((await response.json()).user.id, clientWecomInternalUserId)
 
     response = await request('/api/auth/logout', {
       method: 'POST',
@@ -545,6 +582,7 @@ async function main() {
     assert.strictEqual(workBuddyMe.authenticated, true)
     assert.strictEqual(workBuddyMe.user.wecomUserId, 'zhangsan')
     assert.strictEqual(workBuddyMe.user.id, clientWecomInternalUserId)
+    assert.deepStrictEqual(workBuddyMe.user.departments, [1, 2])
     assert.strictEqual(
       workBuddyMe.user.avatar,
       'https://example.test/workbuddy-avatar.png'
@@ -561,6 +599,63 @@ async function main() {
       'workbuddy_expired_state'
     )
 
+    response = await request('/api/auth/logout', {
+      method: 'POST',
+      headers: { Origin: appOrigin }
+    })
+    assert.strictEqual(response.status, 204)
+
+    response = await request('/api/auth/workbuddy/login')
+    const linkedLoginState = new URL(response.headers.get('location')).searchParams.get('state')
+    response = await request(
+      `/oauth/callback?code=workbuddy-no-hints-code&state=${encodeURIComponent(linkedLoginState)}`
+    )
+    assert.strictEqual(response.status, 302)
+    assert.strictEqual(
+      new URL(response.headers.get('location')).searchParams.has('auth_error'),
+      false
+    )
+    response = await request('/api/auth/me')
+    const linkedMe = await response.json()
+    assert.strictEqual(linkedMe.user.id, clientWecomInternalUserId)
+    assert.strictEqual(linkedMe.user.wecomUserId, 'zhangsan')
+
+    response = await request('/api/auth/logout', {
+      method: 'POST',
+      headers: { Origin: appOrigin }
+    })
+    assert.strictEqual(response.status, 204)
+
+    response = await request('/api/auth/workbuddy/link', {
+      method: 'POST', headers: { Origin: appOrigin }
+    })
+    assert.strictEqual(response.status, 401)
+    assert.strictEqual((await response.json()).code, 'workbuddy_link_session_expired')
+    response = await request('/api/auth/dev-login', {
+      method: 'POST',
+      headers: { Origin: appOrigin, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'integration-test-dev-bypass-key-at-least-32-characters'
+      })
+    })
+    assert.strictEqual((await response.json()).user.id, devInternalUserId)
+    response = await request('/api/auth/workbuddy/link', {
+      method: 'POST', headers: { Origin: 'http://evil.example' }
+    })
+    assert.strictEqual(response.status, 403)
+    response = await request('/api/auth/workbuddy/link', {
+      method: 'POST', headers: { Origin: appOrigin }
+    })
+    const conflictState = new URL((await response.json()).authorizeUrl).searchParams.get('state')
+    response = await request(
+      `/oauth/callback?code=workbuddy-no-hints-code&state=${encodeURIComponent(conflictState)}`
+    )
+    assert.strictEqual(
+      new URL(response.headers.get('location')).searchParams.get('auth_error'),
+      'workbuddy_identity_conflict'
+    )
+    response = await request('/api/auth/me')
+    assert.strictEqual((await response.json()).user.id, devInternalUserId)
     response = await request('/api/auth/logout', {
       method: 'POST',
       headers: { Origin: appOrigin }

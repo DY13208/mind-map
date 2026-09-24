@@ -132,6 +132,21 @@
     </div>
     <template v-else>
       <router-view></router-view>
+      <div
+        v-if="authState.workbuddyEnabled && (workbuddyLinkNeeded || workbuddyLinkSuccess)"
+        class="authLinkNotice"
+        role="status"
+      >
+        <strong>{{ workbuddyLinkSuccess ? 'WorkBuddy 已绑定' : '绑定 WorkBuddy 账号' }}</strong>
+        <p v-if="workbuddyLinkSuccess">今后可直接用 WorkBuddy 单点登录，沿用当前企业微信账号和权限。</p>
+        <p v-else>{{ authErrorMessage || '请确认当前是你本人的企业微信账号，再授权绑定 WorkBuddy。' }}</p>
+        <div class="authLinkNoticeActions">
+          <button v-if="!workbuddyLinkSuccess" type="button" @click="startWorkBuddyLink">验证并绑定</button>
+          <button type="button" class="authLinkDismiss" @click="dismissWorkBuddyLinkNotice">
+            {{ workbuddyLinkSuccess ? '知道了' : '稍后' }}
+          </button>
+        </div>
+      </div>
     </template>
   </div>
 </template>
@@ -144,6 +159,7 @@ import {
   devLogin,
   getAuthApiUrl,
   getWorkBuddyLoginUrl,
+  getWorkBuddyLinkUrl,
   getStoredDevAuthKey,
   getWecomClientLoginUrl,
   loadAuthState,
@@ -190,7 +206,9 @@ const authErrors = {
   workbuddy_identity_failed:
     'WorkBuddy 未返回有效成员身份，请联系管理员。',
   workbuddy_account_not_linked:
-    'WorkBuddy 账号未匹配到现有企业微信成员。为避免产生第二套账号，已阻止登录，请联系管理员核对成员信息。',
+    '首次使用请先扫描企业微信二维码登录，再验证并绑定 WorkBuddy；不会创建第二套账号。',
+  workbuddy_link_session_expired:
+    '企业微信登录已过期，请先扫码登录，再绑定 WorkBuddy。',
   workbuddy_identity_conflict:
     '该 WorkBuddy 账号已绑定其他成员，已拒绝变更绑定。',
   workbuddy_invalid_response: 'WorkBuddy 返回的数据不完整，请稍后重试。',
@@ -232,6 +250,8 @@ export default {
       isWecomClient: isWecomClientEnvironment(),
       wecomClientRedirecting: false,
       workbuddyRedirecting: false,
+      workbuddyLinkNeeded: false,
+      workbuddyLinkSuccess: false,
       showDevLogin: false,
       devAuthKey: '',
       devAuthMobile: '',
@@ -265,8 +285,24 @@ export default {
   created() {
     const url = new URL(window.location.href)
     this.authErrorCode = url.searchParams.get('auth_error') || ''
-    if (this.authErrorCode) {
+    const linkCompleted = url.searchParams.get('workbuddy_linked') === '1'
+    try {
+      if (this.authErrorCode === 'workbuddy_account_not_linked') {
+        window.sessionStorage.setItem('mind_map_workbuddy_link_needed', '1')
+      }
+      if (linkCompleted) {
+        window.sessionStorage.removeItem('mind_map_workbuddy_link_needed')
+      }
+      this.workbuddyLinkNeeded =
+        window.sessionStorage.getItem('mind_map_workbuddy_link_needed') === '1'
+    } catch (err) {
+      this.workbuddyLinkNeeded =
+        this.authErrorCode === 'workbuddy_account_not_linked'
+    }
+    this.workbuddyLinkSuccess = linkCompleted
+    if (this.authErrorCode || linkCompleted) {
       url.searchParams.delete('auth_error')
+      url.searchParams.delete('workbuddy_linked')
       window.history.replaceState(
         null,
         '',
@@ -412,6 +448,38 @@ export default {
       this.workbuddyRedirecting = true
       markWorkBuddyAutoLoginAttempted()
       window.location.assign(getWorkBuddyLoginUrl())
+    },
+    async startWorkBuddyLink() {
+      if (!this.authState.authenticated || !this.authState.workbuddyEnabled) return
+      if (this.workbuddyRedirecting) return
+      this.workbuddyRedirecting = true
+      try {
+        const response = await fetch(getWorkBuddyLinkUrl(), {
+          method: 'POST',
+          credentials: 'include',
+          headers: { Accept: 'application/json' }
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok || !data.authorizeUrl) {
+          this.authErrorCode = data.code || 'workbuddy_unavailable'
+          return
+        }
+        window.location.assign(data.authorizeUrl)
+      } catch (err) {
+        this.authErrorCode = 'workbuddy_unavailable'
+      } finally {
+        this.workbuddyRedirecting = false
+      }
+    },
+    dismissWorkBuddyLinkNotice() {
+      this.workbuddyLinkNeeded = false
+      this.workbuddyLinkSuccess = false
+      this.authErrorCode = ''
+      try {
+        window.sessionStorage.removeItem('mind_map_workbuddy_link_needed')
+      } catch (err) {
+        // Private browsing may disable sessionStorage.
+      }
     },
     clearQrRefreshTimer() {
       if (!this.qrRefreshTimer) return
@@ -894,6 +962,52 @@ body,
   animation: authSpin 0.8s linear infinite;
 }
 
+.authLinkNotice {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 3000;
+  width: min(400px, calc(100vw - 32px));
+  padding: 18px 20px;
+  border: 1px solid #cfe4da;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 12px 40px rgba(15, 45, 35, 0.16);
+  color: #102820;
+
+  strong {
+    font-size: 16px;
+  }
+
+  p {
+    margin-top: 8px;
+    color: #53635b;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+}
+
+.authLinkNoticeActions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+
+  button {
+    padding: 8px 14px;
+    border: 1px solid #0a855b;
+    border-radius: 8px;
+    background: #0a855b;
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .authLinkDismiss {
+    border-color: #dce6e0;
+    background: #fff;
+    color: #53635b;
+  }
+}
+
 @keyframes authSpin {
   to {
     transform: rotate(360deg);
@@ -901,6 +1015,11 @@ body,
 }
 
 @media (max-width: 720px) {
+  .authLinkNotice {
+    right: 16px;
+    bottom: 16px;
+  }
+
   .authCard {
     padding-right: 20px;
     padding-left: 20px;

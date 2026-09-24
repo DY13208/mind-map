@@ -13,6 +13,7 @@ const WECOM_IP_DENIED_ERROR_CODE = 60020
 const OAUTH_PROVIDER_WECOM = 'wecom'
 const OAUTH_PROVIDER_ONEID = 'oneid'
 const OAUTH_PROVIDER_WORKBUDDY = 'workbuddy'
+const OAUTH_PROVIDER_WORKBUDDY_LINK = 'workbuddy-link'
 
 let authPool = null
 let authInitialization = null
@@ -1441,7 +1442,7 @@ function workBuddySubject(claims) {
   ).trim()
 }
 
-async function exchangeWorkBuddyCode(code) {
+async function fetchWorkBuddyIdentity(code) {
   if (!config.workbuddyEnabled || !config.workbuddy) {
     throw new AuthError(
       'workbuddy_disabled',
@@ -1502,6 +1503,12 @@ async function exchangeWorkBuddyCode(code) {
     )
   }
 
+  return { subject, claims }
+}
+
+async function exchangeWorkBuddyCode(code) {
+  const { subject, claims } = await fetchWorkBuddyIdentity(code)
+
   const linked = await findExternalIdentity(
     OAUTH_PROVIDER_WORKBUDDY,
     subject
@@ -1546,6 +1553,43 @@ async function exchangeWorkBuddyCode(code) {
     externalProvider: OAUTH_PROVIDER_WORKBUDDY,
     externalSubject: subject
   }
+}
+
+async function linkWorkBuddyToWecom(code, currentUser) {
+  if (
+    !config.wecomEnabled ||
+    !currentUser ||
+    currentUser.corpId !== config.corpId ||
+    !currentUser.wecomUserId
+  ) {
+    throw new AuthError(
+      'workbuddy_link_session_expired',
+      '请先使用企业微信登录，再绑定 WorkBuddy',
+      401
+    )
+  }
+  const { subject, claims } = await fetchWorkBuddyIdentity(code)
+  const linked = await findExternalIdentity(OAUTH_PROVIDER_WORKBUDDY, subject)
+  if (linked && linked.internalUserId !== currentUser.id) {
+    throw new AuthError(
+      'workbuddy_identity_conflict',
+      '该 WorkBuddy 账号已绑定其他成员，已拒绝变更绑定',
+      409
+    )
+  }
+  const claimMatch = await resolveOAuthWecomIdentity(claims, 'WorkBuddy')
+  if (claimMatch && claimMatch.id !== currentUser.wecomUserId) {
+    throw new AuthError(
+      'workbuddy_identity_conflict',
+      'WorkBuddy 成员信息与当前企业微信账号不一致',
+      409
+    )
+  }
+  await linkExternalIdentity(
+    OAUTH_PROVIDER_WORKBUDDY,
+    subject,
+    currentUser.id
+  )
 }
 
 async function listWecomContacts(options = {}) {
@@ -1680,6 +1724,7 @@ async function findExternalIdentity(provider, subject) {
   const row = result.rows[0]
   if (!row) return null
   return {
+    internalUserId: row.user_id,
     id: row.wecom_userid || row.user_id,
     corpId: row.corp_id,
     wecomUserId: row.wecom_userid || row.user_id,
@@ -1740,7 +1785,10 @@ async function upsertUser(user) {
          when excluded.position <> '' then excluded.position
          else wecom_users.position
        end,
-       departments = excluded.departments,
+       departments = case
+         when $8::boolean then wecom_users.departments
+         else excluded.departments
+       end,
        updated_at = now(),
        last_login_at = now()
      returning user_id, corp_id, wecom_userid`,
@@ -1751,7 +1799,8 @@ async function upsertUser(user) {
       user.name,
       user.avatar,
       user.position || '',
-      JSON.stringify(user.departments)
+      JSON.stringify(user.departments),
+      user.externalProvider === OAUTH_PROVIDER_WORKBUDDY
     ]
   )
   const row = result.rows[0]
@@ -2243,12 +2292,53 @@ async function handleAuthApi(req, res) {
     return true
   }
 
+  if (pathname === '/api/auth/workbuddy/link' && req.method === 'POST') {
+    if (!req.headers.origin || !isAllowedOrigin(req) || fetchSite(req) === 'cross-site') {
+      sendJson(req, res, 403, {
+        error: '请求来源未获授权',
+        code: 'origin_denied'
+      })
+      return true
+    }
+    if (!config.workbuddyEnabled || !config.wecomEnabled) {
+      sendJson(req, res, 404, {
+        error: 'WorkBuddy 账号绑定未启用',
+        code: 'workbuddy_disabled'
+      })
+      return true
+    }
+    const currentUser = await authenticateRequest(req)
+    if (!currentUser || currentUser.corpId !== config.corpId) {
+      sendJson(req, res, 401, {
+        error: '请先使用企业微信登录',
+        code: 'workbuddy_link_session_expired'
+      })
+      return true
+    }
+    const state = await createOAuthChallenge(
+      req,
+      res,
+      url.searchParams.get('return_to'),
+      OAUTH_PROVIDER_WORKBUDDY_LINK
+    )
+    sendJson(req, res, 200, { authorizeUrl: buildWorkBuddyLoginUrl(state) })
+    return true
+  }
+
   if (pathname === '/oauth/callback' && req.method === 'GET') {
     let returnTo = '/'
     try {
-      const nonce = verifySignedValue(
+      const signedState = url.searchParams.get('state')
+      const linkNonce = verifySignedValue(
+        `oauth-state:${OAUTH_PROVIDER_WORKBUDDY_LINK}`,
+        signedState
+      )
+      const provider = linkNonce
+        ? OAUTH_PROVIDER_WORKBUDDY_LINK
+        : OAUTH_PROVIDER_WORKBUDDY
+      const nonce = linkNonce || verifySignedValue(
         `oauth-state:${OAUTH_PROVIDER_WORKBUDDY}`,
-        url.searchParams.get('state')
+        signedState
       )
       const browserId = verifySignedValue(
         'oauth-browser',
@@ -2264,7 +2354,7 @@ async function handleAuthApi(req, res) {
       const consumedReturnTo = await consumeOAuthState(
         nonce,
         browserId,
-        OAUTH_PROVIDER_WORKBUDDY
+        provider
       )
       if (!consumedReturnTo) {
         throw new AuthError(
@@ -2281,16 +2371,24 @@ async function handleAuthApi(req, res) {
           401
         )
       }
-      const user = await exchangeWorkBuddyCode(url.searchParams.get('code'))
-      const stored = await upsertUser(user)
-      await linkExternalIdentity(
-        user.externalProvider,
-        user.externalSubject,
-        stored.id
-      )
-      const session = await createSession(stored.id)
-      setCookie(res, req, SESSION_COOKIE, session, config.sessionMaxSeconds)
-      redirect(res, appRedirectUrl(returnTo))
+      if (provider === OAUTH_PROVIDER_WORKBUDDY_LINK) {
+        const currentUser = await authenticateRequest(req)
+        await linkWorkBuddyToWecom(url.searchParams.get('code'), currentUser)
+        const successUrl = new URL(appRedirectUrl(returnTo))
+        successUrl.searchParams.set('workbuddy_linked', '1')
+        redirect(res, successUrl.toString())
+      } else {
+        const user = await exchangeWorkBuddyCode(url.searchParams.get('code'))
+        const stored = await upsertUser(user)
+        await linkExternalIdentity(
+          user.externalProvider,
+          user.externalSubject,
+          stored.id
+        )
+        const session = await createSession(stored.id)
+        setCookie(res, req, SESSION_COOKIE, session, config.sessionMaxSeconds)
+        redirect(res, appRedirectUrl(returnTo))
+      }
     } catch (err) {
       const code =
         err instanceof AuthError ? err.code : 'workbuddy_unavailable'

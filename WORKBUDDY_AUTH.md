@@ -31,10 +31,10 @@ WORKBUDDY_AUTHORIZATION_ENDPOINT=https://www.workbuddy.cn/oauth2
 WORKBUDDY_TOKEN_ENDPOINT=https://www.workbuddy.cn/oauth2/token
 WORKBUDDY_USERINFO_ENDPOINT=https://www.workbuddy.cn/oauth2/userinfo
 WORKBUDDY_SCOPES=openid
-WORKBUDDY_AUTO_LOGIN=true
+WORKBUDDY_AUTO_LOGIN=false
 ```
 
-同时保持原企业微信配置不变。`WORKBUDDY_AUTO_LOGIN=true` 会让未登录 CPD 的用户优先进入 WorkBuddy OAuth；WorkBuddy 已登录时无需再次扫码。OAuth 失败返回后不会自动循环，页面仍保留企业微信扫码入口。
+同时保持原企业微信配置不变。当前建议 `WORKBUDDY_AUTO_LOGIN=false`，登录页由用户自行选择企业微信扫码或 WorkBuddy。OAuth 失败返回后不会自动循环，页面仍保留企业微信扫码入口。
 
 旧的 `ONEID_*` 配置是另一套腾讯 OneID 身份源。切换到 WorkBuddy OAuth 后应设置：
 
@@ -46,6 +46,6 @@ ONEID_AUTO_LOGIN=false
 
 ## 同账号保证
 
-首次登录优先使用 WorkBuddy 用户信息里的企业微信 userid 或手机号匹配现有成员。匹配成功后只保存 WorkBuddy subject 的哈希与原内部用户 ID 的绑定。之后即使昵称或头像变化，也会命中原账号。
+首次登录优先使用 WorkBuddy 用户信息里的企业微信 userid 或手机号匹配现有成员。若 WorkBuddy 仅返回 `openid` 等不含可核对成员信息的标识，系统不会按昵称猜测：用户先扫码登录原企业微信账号，随后在页面提示中点击“验证并绑定”，再次完成 WorkBuddy 授权。两边均验证通过后，只保存 WorkBuddy subject 的哈希与原内部用户 ID 的绑定。此后 WorkBuddy 单点登录会沿用原账号、文件、团队和权限。
 
-当无法确认是同一个成员时，系统会返回 `workbuddy_account_not_linked`，不会自动新建第二套账号。一个 WorkBuddy 身份也不能被静默改绑到其他成员。
+当无法确认是同一个成员时，系统会返回 `workbuddy_account_not_linked`，不会自动新建第二套账号。绑定时必须保留有效的企业微信登录会话；一个 WorkBuddy 身份不能被静默改绑到其他成员。如果 WorkBuddy 返回的企业微信成员信息与当前会话冲突，也会拒绝绑定。
