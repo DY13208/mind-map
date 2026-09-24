@@ -631,6 +631,89 @@ def transcript():
     return jsonify(body)
 
 
+@app.post("/api/stop")
+def stop():
+    """代停某台主机上的任务（桥接 /api/stop）。"""
+    data = request.get_json(silent=True) or {}
+    ip = (data.get("ip") or "").strip() or _client_ip()
+    port = data.get("port")
+    job_id = (data.get("id") or "").strip()
+    if not job_id:
+        return jsonify({"ok": False, "error": "缺少任务 id"})
+    body = {"id": job_id}
+    if data.get("gateway"):
+        body["gateway"] = data.get("gateway")
+    code, out = _bridge_call(ip, port, "/api/stop", method="POST", body=body, timeout=30)
+    if code != 200 or not isinstance(out, dict):
+        err = out.get("error") if isinstance(out, dict) else out
+        return jsonify({"ok": False, "error": err or "停止失败", "status": code}), (
+            code if code >= 400 else 502)
+    out.setdefault("ip", ip)
+    return jsonify(out)
+
+
+@app.get("/api/job-artifacts")
+def job_artifacts():
+    """代取某台主机上某个任务产出的文件清单/内容（桥接 /api/job-artifacts）。"""
+    ip = (request.args.get("ip") or "").strip()
+    query = {k: request.args.get(k) for k in ("id", "gateway", "content") if request.args.get(k)}
+    if not query.get("id"):
+        return jsonify({"ok": False, "error": "缺少任务 id", "files": []})
+    path = "/api/job-artifacts?" + urlencode(query)
+    # 取内容时要把 base64 传回来，给足时间
+    code, out = _bridge_call(ip, request.args.get("port"), path,
+                             timeout=120 if query.get("content") else 45)
+    if code != 200 or not isinstance(out, dict):
+        err = out.get("error") if isinstance(out, dict) else out
+        return jsonify({"ok": False, "error": err or "取产物失败", "files": []}), (
+            code if code >= 400 else 502)
+    out.setdefault("ip", ip)
+    return jsonify(out)
+
+
+@app.post("/api/attach")
+def attach():
+    """代把附件挂到某台电脑的桥接上（桥接再用 MCP 挂回脑图节点）。
+
+    multipart 原样透传 —— 不改 body、不改 Content-Type，否则桥接那端解析不了。
+    """
+    ip = (request.args.get("ip") or request.form.get("ip") or "").strip()
+    port = request.args.get("port") or request.form.get("port")
+    if not _private_host(ip):
+        return jsonify({"ok": False, "error": "只接受局域网 IP"}), 400
+    try:
+        port = int(port or 8799)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "端口不对"}), 400
+
+    raw = request.get_data()
+    if not raw:
+        return jsonify({"ok": False, "error": "没有收到文件"}), 400
+    url = "http://%s:%d/api/attach" % (ip, port)
+    req = urllib.request.Request(url, data=raw, method="POST")
+    req.add_header("Content-Type", request.headers.get("Content-Type") or "application/octet-stream")
+    for header in ("X-Task-Button", "Authorization"):
+        if request.headers.get(header):
+            req.add_header(header, request.headers[header])
+    try:
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            out = json.loads(resp.read().decode("utf-8", "replace") or "{}")
+            code = resp.status
+    except urllib.error.HTTPError as err:
+        try:
+            out = json.loads(err.read().decode("utf-8", "replace") or "{}")
+        except Exception:
+            out = {"ok": False, "error": "挂附件失败（HTTP %s）" % err.code}
+        code = err.code
+    except Exception as err:
+        return jsonify({"ok": False, "error": "连不上 %s:%d（那台电脑要先运行 test1.py --lan）" % (ip, port),
+                        "detail": str(err)}), 502
+    if not isinstance(out, dict):
+        out = {"ok": False, "error": "桥接返回了看不懂的内容"}
+    out.setdefault("ip", ip)
+    return jsonify(out), code if code >= 400 else 200
+
+
 @app.get("/api/jobs")
 def jobs():
     ip = (request.args.get("ip") or "").strip()

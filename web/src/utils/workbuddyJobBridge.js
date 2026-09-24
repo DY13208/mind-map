@@ -245,6 +245,91 @@ async function hubBaseForRelay() {
   return resolved.base || ''
 }
 
+/**
+ * 页面是不是从公网地址打开的。
+ *
+ * Chrome/Edge 142 起的 Local Network Access 不允许**公网页面**访问回环/私网地址
+ * （控制台：Permission was denied for this request to access the local address space）。
+ * 这种页面直连 127.0.0.1:8799 或 192.168.x.x:8799 一律是死路 —— 桥接活没活、CORS
+ * 配没配都一样，浏览器那关就过不去，让同事逐个去改浏览器权限也不现实。
+ *
+ * 所以公网页面一律走**同源** /jobhub 中继：服务器替我们去连那些电脑，浏览器从头到尾
+ * 只跟自己的源打交道 —— 没有 LNA，也没有跨源。
+ */
+export function isPublicPage() {
+  return !isPrivateHost(pageHost())
+}
+
+/**
+ * 请求某台电脑的桥接：直连 → 不行就同源中继（通讯页代连）。
+ *
+ * - 页面在私网地址上：先直连（快，且不依赖通讯页）
+ * - 页面在公网地址上：跳过直连（必然被 LNA 拦，跑一趟只会刷一堆控制台错误）
+ * - 回环目标（127.0.0.1）**不吃中继**：中继是服务器去连，`127.0.0.1` 在那边等于
+ *   服务器自己，语义完全不同。回环本机只能靠直连。
+ *
+ * 返回 `{ ok, status, json, via, error }`，业务层的 ok 由调用方判断。
+ */
+async function bridgeRequest(target, opts = {}) {
+  const local = isLoopbackIp(target.ip) || !target.ip
+  const relayable = !local && !!opts.relayPath
+  const failures = []
+
+  if (!isPublicPage()) {
+    const base = local ? getJobBridgeBase() : hostBase(target)
+    const res = await request(`${base}${opts.path || ''}`, {
+      method: opts.method,
+      body: opts.body,
+      timeout: opts.timeout
+    })
+    if (res.ok) return { ...res, via: 'direct' }
+    failures.push(res)
+  }
+
+  // 回环地址吃不了中继：中继是通讯页代连，127.0.0.1 在那边等于通讯页自己那台机器。
+  if (!relayable) {
+    const last = failures[failures.length - 1]
+    if (last) return { ...last, via: '', errors: failures }
+    return {
+      ok: false,
+      status: 0,
+      offline: true,
+      json: {},
+      error:
+        '本机桥接只能直连，走不了中继；页面在公网地址上时浏览器又不允许直连 —— ' +
+        '请在浏览器里把这个站点允许访问本地网络，或者双击 run_bridge.bat 用局域网地址打开页面。',
+      errors: failures,
+      via: ''
+    }
+  }
+
+  const hub = await hubBaseForRelay()
+  if (!hub) {
+    const last = failures[failures.length - 1] || {}
+    return {
+      ok: false,
+      status: last.status || 0,
+      offline: true,
+      json: {},
+      error: isPublicPage()
+        ? '页面在公网地址上，浏览器不允许直连局域网，而通讯页（/jobhub 中继）又没找到；' +
+          '请让通讯页跑起来，或在服务器上把 /jobhub 反代到它。'
+        : pickError(last, '请求失败'),
+      errors: failures,
+      via: ''
+    }
+  }
+
+  const relayed = await request(`${hub}${opts.relayPath}`, {
+    method: opts.relayMethod || opts.method,
+    body: opts.relayBody !== undefined ? opts.relayBody : opts.body,
+    timeout: opts.timeout
+  })
+  if (relayed.ok) return { ...relayed, via: 'hub' }
+  failures.push(relayed)
+  return { ...relayed, via: '', errors: failures }
+}
+
 export function normalizeHost(raw = {}) {
   const ip = String(raw.ip || raw.host || '').trim()
   const port = Number(raw.port || HOST_PORT) || HOST_PORT
@@ -346,12 +431,22 @@ export async function listHubPeers() {
 
 /** 本机桥接（127.0.0.1:8799）的会话列表 */
 export async function listLocalGateways() {
-  const res = await request(`${getJobBridgeBase()}/api/gateways`)
+  const base = getJobBridgeBase()
+  const res = await request(`${base}/api/gateways`)
   if (!res.ok) {
     return {
       ok: false,
       gateways: [],
-      error: pickError(res, '连不上本机任务桥')
+      // 浏览器那句 "Failed to fetch" 帮不了任何人：说清是哪台、怎么办。
+      error: res.offline
+        ? isPublicPage()
+          ? `连不上本机任务桥（${base}）：页面在公网地址上，浏览器（Chrome/Edge 142+ 的` +
+            '本地网络访问限制）不允许它连本机服务。给这个站点允许「本地网络访问」，' +
+            '或者用局域网地址打开脑图页面 —— 也可以直接选列表里登记过的其它电脑。'
+          : `连不上本机任务桥（${base}）—— 这台电脑的桥接没在跑。` +
+            '双击 run_bridge.bat（lan-bridge 技能目录里）启动后再点「运行」；' +
+            '急着跑也可以在「执行主机」里选别的电脑。'
+        : pickError(res, '连不上本机任务桥')
     }
   }
   const list = res.json && Array.isArray(res.json.gateways) ? res.json.gateways : []
@@ -397,7 +492,10 @@ export async function resolveJobHosts() {
   hubRes.peers
     .filter(p => !isLoopbackIp(p.ip))
     .forEach(p => push(p))
-  push(local)
+  // 公网页面下浏览器不允许连 127.0.0.1，列出来只会让人白点一次；
+  // 这时本机会以「局域网身份」出现在上面那批 peer 里（桥接往通讯页登记过）。
+  // 一台 peer 都没有时仍留着它 —— 好歹能把「怎么开桥接」说清楚。
+  if (!isPublicPage() || !hubRes.peers.length) push(local)
 
   const online = hosts.filter(h => h.online)
   const defaultHost =
@@ -426,36 +524,28 @@ export async function listHostGateways(host) {
   if (!target.ip) return { ok: false, gateways: [], error: '没有指定主机' }
 
   const local = isLoopbackIp(target.ip)
-  const directBase = local ? getJobBridgeBase() : hostBase(target)
-
-  const res = await request(`${directBase}/api/gateways`)
+  const res = await bridgeRequest(target, {
+    path: '/api/gateways',
+    relayPath: `/api/gateways?ip=${encodeURIComponent(target.ip)}&port=${target.port}`
+  })
   if (res.ok) {
-    return { ok: true, gateways: readGateways(res.json), diag: readDiag(res.json), via: 'direct' }
-  }
-
-  if (!local) {
-    const hub = await hubBaseForRelay()
-    if (hub) {
-      const relayed = await request(
-        `${hub}/api/gateways?ip=${encodeURIComponent(target.ip)}&port=${target.port}`
-      )
-      if (relayed.ok) {
-        return {
-          ok: true,
-          gateways: readGateways(relayed.json),
-          diag: readDiag(relayed.json),
-          via: 'hub'
-        }
-      }
+    return {
+      ok: true,
+      gateways: readGateways(res.json),
+      diag: readDiag(res.json),
+      via: res.via
     }
   }
 
+  const localProbe = await listLocalGateways()
   return {
     ok: false,
     gateways: [],
     error: local
-      ? pickError(res, '连不上本机任务桥，请先运行 test1.py')
-      : `连不上 ${target.label}（那台电脑要运行 test1.py --lan）`
+      ? localProbe.ok === false && localProbe.error
+        ? localProbe.error
+        : pickError(res, '连不上本机任务桥，请先运行 test1.py')
+      : pickError(res, `连不上 ${target.label}（那台电脑要运行 test1.py --lan）`)
   }
 }
 
@@ -500,56 +590,23 @@ export async function dispatchWorkbuddyJob(opts = {}) {
   }
 
   if (isLoopbackIp(target.ip) || !target.ip) {
-    const res = await request(`${getJobBridgeBase()}/api/dispatch`, {
-      method: 'POST',
+    // 本机走不了中继（通讯页去连 127.0.0.1 等于连它自己），只能直连
+    const res = await bridgeRequest(target, {
+      path: '/api/dispatch',
       body: payload,
       timeout: DISPATCH_TIMEOUT
     })
     return shapeJobResult(res, target)
   }
 
-  const direct = await request(`${hostBase(target)}/api/dispatch`, {
-    method: 'POST',
+  const res = await bridgeRequest(target, {
+    path: '/api/dispatch',
     body: payload,
-    timeout: DISPATCH_TIMEOUT
+    timeout: DISPATCH_TIMEOUT,
+    relayPath: '/api/dispatch',
+    relayBody: { ip: target.ip, port: target.port, ...payload }
   })
-  if (direct.ok && direct.json && direct.json.ok) {
-    return shapeJobResult(direct, target)
-  }
-
-  const retriable =
-    direct.offline ||
-    !direct.status ||
-    direct.status === 403 ||
-    direct.status === 404 ||
-    direct.status === 502
-  if (retriable) {
-    const hub = await hubBaseForRelay()
-    if (!hub) {
-      return {
-        ok: false,
-        host: target,
-        error: `直连 ${target.label} 不通，也没找到通讯页可转发（页面没配主服务地址）`
-      }
-    }
-    const relayed = await request(`${hub}/api/dispatch`, {
-      method: 'POST',
-      body: { ip: target.ip, port: target.port, ...payload },
-      timeout: DISPATCH_TIMEOUT
-    })
-    const shaped = shapeJobResult(relayed, target)
-    if (shaped.ok) {
-      shaped.via = 'hub'
-      return shaped
-    }
-    return {
-      ok: false,
-      host: target,
-      error: shaped.error || '直连与通讯页转发都失败'
-    }
-  }
-
-  return shapeJobResult(direct, target)
+  return shapeJobResult(res, target)
 }
 
 function shapeJobResult(res, target) {
@@ -577,32 +634,18 @@ export async function listHostJobs({ host, gateway } = {}) {
   const target = normalizeHost(host || {})
   if (!target.ip) return { ok: false, jobs: [], error: '没有指定主机' }
   const query = gateway ? `?gateway=${encodeURIComponent(gateway)}` : ''
-  const local = isLoopbackIp(target.ip)
-  const directBase = local ? getJobBridgeBase() : hostBase(target)
-
-  const res = await request(`${directBase}/api/jobs${query}`)
+  const relayQuery =
+    `ip=${encodeURIComponent(target.ip)}&port=${target.port}` +
+    (gateway ? `&gateway=${encodeURIComponent(gateway)}` : '')
+  const res = await bridgeRequest(target, {
+    path: `/api/jobs${query}`,
+    relayPath: `/api/jobs?${relayQuery}`
+  })
   if (res.ok) {
     return {
       ok: true,
       jobs: (res.json && res.json.jobs) || [],
-      via: 'direct'
-    }
-  }
-  if (!local) {
-    const hub = await hubBaseForRelay()
-    if (hub) {
-      const relayed = await request(
-        `${hub}/api/jobs?ip=${encodeURIComponent(target.ip)}&port=${
-          target.port
-        }${gateway ? `&gateway=${encodeURIComponent(gateway)}` : ''}`
-      )
-      if (relayed.ok) {
-        return {
-          ok: true,
-          jobs: (relayed.json && relayed.json.jobs) || [],
-          via: 'hub'
-        }
-      }
+      via: res.via
     }
   }
   return { ok: false, jobs: [], error: pickError(res, '拿不到任务列表') }
@@ -615,30 +658,22 @@ export async function listHostJobs({ host, gateway } = {}) {
 export async function fetchJobTranscript({ host, gateway, jobId } = {}) {
   if (!jobId) return { ok: false, error: '缺少任务 id' }
   const target = normalizeHost(host || {})
-  const local = isLoopbackIp(target.ip) || !target.ip
   // 带上 gateway：这台电脑可能有多个会话，不指定会取到别的会话的同名任务
   const query =
     `?id=${encodeURIComponent(jobId)}` +
     (gateway ? `&gateway=${encodeURIComponent(gateway)}` : '')
 
-  const res = await request(
-    `${local ? getJobBridgeBase() : hostBase(target)}/api/transcript${query}`,
-    { timeout: 45000 }
-  )
+  const relayQuery =
+    `ip=${encodeURIComponent(target.ip)}&port=${target.port}` +
+    `&id=${encodeURIComponent(jobId)}` +
+    (gateway ? `&gateway=${encodeURIComponent(gateway)}` : '')
+  const res = await bridgeRequest(target, {
+    path: `/api/transcript${query}`,
+    relayPath: `/api/transcript?${relayQuery}`,
+    timeout: 60000
+  })
   if (res.ok && res.json && res.json.ok) {
-    return { ok: true, ...res.json, via: 'direct' }
-  }
-  if (!local) {
-    const hub = await hubBaseForRelay()
-    if (hub) {
-      const relayUrl =
-        `${hub}/api/transcript?ip=${encodeURIComponent(target.ip)}` +
-        `&port=${target.port}&id=${encodeURIComponent(jobId)}`
-      const relayed = await request(relayUrl, { timeout: 60000 })
-      if (relayed.ok && relayed.json && relayed.json.ok) {
-        return { ok: true, ...relayed.json, via: 'hub' }
-      }
-    }
+    return { ok: true, ...res.json, via: res.via }
   }
   return { ok: false, error: pickError(res, '拿不到完整回答') }
 }
@@ -656,24 +691,28 @@ export async function fetchJobArtifacts({
 } = {}) {
   if (!jobId) return { ok: false, files: [], error: '缺少任务 id' }
   const target = normalizeHost(host || {})
-  const local = isLoopbackIp(target.ip) || !target.ip
   const query =
     `?id=${encodeURIComponent(jobId)}` +
     (gateway ? `&gateway=${encodeURIComponent(gateway)}` : '') +
     `&content=${content ? 1 : 0}`
-  const res = await request(
-    `${local ? getJobBridgeBase() : hostBase(target)}/api/job-artifacts${query}`,
-    { timeout: 60000 }
-  )
+  const relayQuery =
+    `?ip=${encodeURIComponent(target.ip)}&port=${target.port}` +
+    `&id=${encodeURIComponent(jobId)}` +
+    (gateway ? `&gateway=${encodeURIComponent(gateway)}` : '') +
+    `&content=${content ? 1 : 0}`
+  const res = await bridgeRequest(target, {
+    path: `/api/job-artifacts${query}`,
+    relayPath: `/api/job-artifacts${relayQuery}`,
+    timeout: 120000
+  })
   if (res.ok && res.json && res.json.ok) {
     return {
       ok: true,
       files: res.json.files || [],
       cwd: res.json.cwd || '',
-      via: 'direct'
+      via: res.via
     }
   }
-  // 通讯页（comm.py）没有这个转发接口，其他主机只能直连
   return { ok: false, files: [], error: pickError(res, '拿不到产物文件') }
 }
 
@@ -695,15 +734,12 @@ export async function attachFilesViaBridge({
   const list = (files || []).filter(item => item && item.name && item.base64)
   if (!list.length) return { ok: false, error: '没有要挂的文件' }
   const target = normalizeHost(host || {})
-  const local = isLoopbackIp(target.ip) || !target.ip
-  const res = await request(
-    `${local ? getJobBridgeBase() : hostBase(target)}/api/attach`,
-    {
-      method: 'POST',
-      body: { roomKey, nodeUid, files: list, confirmSopChange },
-      timeout: 180000
-    }
-  )
+  const res = await bridgeRequest(target, {
+    path: '/api/attach',
+    body: { roomKey, nodeUid, files: list, confirmSopChange },
+    timeout: 180000,
+    relayPath: `/api/attach?ip=${encodeURIComponent(target.ip)}&port=${target.port}`
+  })
   if (res.ok && res.json && res.json.ok) {
     return {
       ok: true,
@@ -718,15 +754,18 @@ export async function attachFilesViaBridge({
   }
 }
 
-/** 停止某台主机上的某个任务（comm.py 没有转发接口，只走直连） */
+/** 停止某台主机上的某个任务（直连不通就走通讯页中继） */
 export async function stopHostJob({ host, gateway, id } = {}) {
   const target = normalizeHost(host || {})
   if (!id) return { ok: false, error: '缺少任务 id' }
-  const local = isLoopbackIp(target.ip) || !target.ip
-  const res = await request(
-    `${local ? getJobBridgeBase() : hostBase(target)}/api/stop`,
-    { method: 'POST', body: { gateway, id } }
-  )
-  if (res.ok && res.json && res.json.ok) return { ok: true, result: res.json }
+  const res = await bridgeRequest(target, {
+    path: '/api/stop',
+    body: { gateway, id },
+    relayPath: '/api/stop',
+    relayBody: { ip: target.ip, port: target.port, gateway, id }
+  })
+  if (res.ok && res.json && res.json.ok) {
+    return { ok: true, result: res.json, via: res.via }
+  }
   return { ok: false, error: pickError(res, '停止失败') }
 }

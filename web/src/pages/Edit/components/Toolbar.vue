@@ -1103,8 +1103,16 @@ export default {
         const local = this.jobHosts.find(
           item => item.key === LOCAL_JOB_HOST_KEY
         )
-        this.jobHostKey = local ? local.key : ''
-        this.jobHostsError = local && local.online ? '' : res.error || ''
+        // 默认派给本机；但本机桥接没跑时不能死盯着它 —— 局域网里别的电脑是好的，
+        // 直接在点「运行」时报「连不上本机任务桥」等于把整条路堵死。
+        const online = this.jobHosts.find(item => item.online)
+        this.jobHostKey =
+          (local && local.online && local.key) ||
+          (online && online.key) ||
+          (local && local.key) ||
+          ''
+        // 只要还有能用（在线）的主机，就不是错误，别弹红字吓人
+        this.jobHostsError = online ? '' : res.error || ''
       } catch (err) {
         this.jobHosts = []
         this.jobHostKey = ''

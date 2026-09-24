@@ -193,6 +193,7 @@ async function main() {
 
   // 5050 挂、5000 通（老版本通讯页）
   window.sessionStorage.clear()
+  hub.setJobHubOverride('')  // 连模块内存里的解析缓存一起清掉
   fetchHandler = url => {
     if (url.startsWith('http://192.168.1.114:5000/')) return { status: 200, body: { peers: [] } }
     return new Error('connect ECONNREFUSED')
@@ -202,6 +203,7 @@ async function main() {
 
   // 返回 HTML（群晖那种）不算通讯页
   window.sessionStorage.clear()
+  hub.setJobHubOverride('')  // 连模块内存里的解析缓存一起清掉
   fetchHandler = () => ({ status: 200, body: '<!DOCTYPE html><html>群晖 NAS</html>' })
   resolved = await hub.resolveJobHub({ force: true })
   check(
@@ -220,6 +222,7 @@ async function main() {
 
   // ---- 5. 缓存 ----
   window.sessionStorage.clear()
+  hub.setJobHubOverride('')  // 连模块内存里的解析缓存一起清掉
   fetchLog = []
   fetchHandler = () => ({ status: 200, body: { peers: [] } })
   await hub.resolveJobHub({ force: true })
@@ -234,6 +237,120 @@ async function main() {
   check('上次连上的地址被记到 sessionStorage', window.sessionStorage.getItem('mindmap-job-hub-resolved') !== null)
   await hub.resolveJobHub({ force: true })
   check('force:true 会重探', fetchLog.length > 0)
+
+  // ---- 7. 公网页面：一律走同源 /jobhub 中继 ----
+  // 页面在公网地址上时，浏览器（Chrome 142+ 的 Local Network Access）不许它访问
+  // 回环/私网地址，直连只会白跑一趟 + 控制台一堆错。所以这时要直接走同源中继。
+  setPage({
+    hostname: 'xx.stillgroup.net',
+    origin: 'https://xx.stillgroup.net:8989',
+    port: '8989',
+    protocol: 'https:'
+  })
+  window.sessionStorage.clear()
+  hub.setJobHubOverride('')  // 连模块内存里的解析缓存一起清掉
+  fetchLog = []
+  fetchHandler = url => {
+    if (url.includes('/jobhub/api/peers')) {
+      return { status: 200, body: { peers: [{ ip: '192.168.1.114', port: 8799, name: 'DESKTOP' }] } }
+    }
+    if (url.includes('/jobhub/api/gateways')) {
+      return { status: 200, body: { gateways: [{ url: 'http://127.0.0.1:50001', cwd: 'D:\\demo' }] } }
+    }
+    return new Error('公网页面不该直连：' + url)
+  }
+  const relayed = await hub.listHostGateways({ ip: '192.168.1.114', port: 8799 })
+  check(
+    '公网页面：局域网主机走同源中继（via=hub）',
+    relayed.ok && relayed.via === 'hub',
+    JSON.stringify({ ok: relayed.ok, via: relayed.via })
+  )
+  check(
+    '中继打的就是页面同源的 /jobhub',
+    fetchLog.some(l => l.url === 'https://xx.stillgroup.net:8989/jobhub/api/gateways?ip=192.168.1.114&port=8799'),
+    JSON.stringify(fetchLog.map(l => l.url))
+  )
+  check(
+    '一次都没直连 192.168.1.114:8799',
+    !fetchLog.some(l => l.url.startsWith('http://192.168.1.114:8799')),
+    JSON.stringify(fetchLog.map(l => l.url))
+  )
+
+  // 回环地址不吃中继：中继是通讯页去连，127.0.0.1 在那边等于它自己
+  fetchLog = []
+  window.sessionStorage.clear()
+  hub.setJobHubOverride('')  // 连模块内存里的解析缓存一起清掉
+  fetchHandler = url => {
+    if (url.includes(':8799')) return new Error('Failed to fetch')
+    return { status: 200, body: { peers: [] } }
+  }
+  const loopback = await hub.listHostGateways({ ip: '127.0.0.1', port: 8799 })
+  check(
+    '回环主机不走中继（否则打到通讯页自己那台机器）',
+    !loopback.ok && !fetchLog.some(l => l.url.includes('/jobhub/api/gateways')),
+    JSON.stringify({ ok: loopback.ok, log: fetchLog.map(l => l.url) })
+  )
+
+  // 私网页面：还是直连优先（不依赖通讯页，也不多绕一圈）
+  setPage({ hostname: '192.168.0.54', origin: 'http://192.168.0.54:8989', port: '8989', protocol: 'http:' })
+  window.sessionStorage.clear()
+  hub.setJobHubOverride('')  // 连模块内存里的解析缓存一起清掉
+  fetchLog = []
+  fetchHandler = url => {
+    if (url.startsWith('http://192.168.1.114:8799')) return { status: 200, body: { gateways: [] } }
+    return new Error('私网页面不该走这条路：' + url)
+  }
+  const direct = await hub.listHostGateways({ ip: '192.168.1.114', port: 8799 })
+  check(
+    '私网页面：直连优先（via=direct）',
+    direct.ok && direct.via === 'direct',
+    JSON.stringify({ ok: direct.ok, via: direct.via })
+  )
+
+  // 公网页面下主机列表不该出现回环
+  setPage({
+    hostname: 'xx.stillgroup.net',
+    origin: 'https://xx.stillgroup.net:8989',
+    port: '8989',
+    protocol: 'https:'
+  })
+  window.sessionStorage.clear()
+  hub.setJobHubOverride('')  // 连模块内存里的解析缓存一起清掉
+  fetchHandler = url => {
+    if (url.includes('/jobhub/api/peers')) {
+      return {
+        status: 200,
+        body: { peers: [{ ip: '192.168.1.114', port: 8799, name: 'DESKTOP', online: true }] }
+      }
+    }
+    if (url.includes('/jobhub/api/gateways')) return { status: 200, body: { gateways: [] } }
+    if (url.includes(':8799')) return new Error('Failed to fetch')
+    return { status: 200, body: {} }
+  }
+  const publicHosts = await hub.resolveJobHosts()
+  check(
+    '公网页面：列表里没有 127.0.0.1（浏览器连不上，列了只会让人白点）',
+    !publicHosts.hosts.some(h => h.ip === '127.0.0.1'),
+    JSON.stringify(publicHosts.hosts.map(h => h.key))
+  )
+  check(
+    '公网页面：默认目标是登记过的局域网主机',
+    !!publicHosts.defaultHost && publicHosts.defaultHost.ip === '192.168.1.114',
+    JSON.stringify(publicHosts.defaultHost && publicHosts.defaultHost.key)
+  )
+
+  // ---- 6. 本机桥接没跑时，提示要说清怎么办 ----
+  fetchHandler = url => {
+    if (url.includes(':8799')) return new Error('Failed to fetch')
+    return { status: 200, body: { peers: [] } }
+  }
+  const locals = await hub.listLocalGateways()
+  check(
+    '本机桥接没跑：不再只回一句 Failed to fetch',
+    !locals.ok && /这台电脑的桥接没在跑/.test(locals.error) && /run_bridge\.bat/.test(locals.error),
+    locals.error
+  )
+  check('提示里带上了桥接地址', /127\.0\.0\.1:8799/.test(locals.error))
 
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)

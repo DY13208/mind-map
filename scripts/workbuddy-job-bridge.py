@@ -1874,16 +1874,24 @@ def _lan_ip():
         return ""
 
 
-def _start_hub_announce(hub, port):
-    """每隔一段时间把本机局域网 IP 登记到 Flask 通讯。"""
+def _start_hub_announce(hub, port, allow_public=False):
+    """每隔一段时间把本机局域网 IP 登记到通讯页。
+
+    默认只认局域网地址（通讯页一般就在旁边那台机器上）。通讯页搬到服务器上以后，
+    要用公网/https 地址登记就显式加 --allow-public-hub —— 那是把本机局域网 IP 和
+    主机名报给对方，值得多按一次开关。
+    """
     import socket
     import threading
     from urllib.parse import urlparse
     hub = (hub or "").strip().rstrip("/")
     parsed = urlparse(hub)
     host = (parsed.hostname or "").strip("[]")
-    if parsed.scheme not in ("http", "https") or not _private_host(host):
-        log("  [!] --hub 只接受局域网地址，已忽略")
+    if parsed.scheme not in ("http", "https"):
+        log("  [!] --hub 只接受 http/https 地址，已忽略")
+        return
+    if not _private_host(host) and not allow_public:
+        log("  [!] --hub 是公网地址，已忽略（要登记到服务器上的通讯页就加 --allow-public-hub）")
         return
     ip = _lan_ip()
     if not ip:
@@ -1912,7 +1920,11 @@ def main():
     ap.add_argument("--lan", action="store_true",
                     help="开放到局域网。接口只接受本机和私网 IP，供 Flask 通讯按 IP 调用")
     ap.add_argument("--hub", default=None,
-                    help="向 Flask 通讯登记本机 IP，例如 http://192.168.0.54:5000")
+                    help="向通讯页登记本机 IP，例如 http://192.168.0.54:5000 "
+                         "或 https://mind.example.com/jobhub")
+    ap.add_argument("--allow-public-hub", action="store_true",
+                    help="允许 --hub 用公网地址（通讯页部署在服务器上时用；"
+                         "会把本机局域网 IP 和主机名报给对方）")
     ap.add_argument("--password", default=None)
     ap.add_argument("--allow-origin", default=None,
                     help="允许跨源调用本服务的来源, 用于把按钮嵌进你自己的网页/服务器上的脑图; "
@@ -1972,7 +1984,7 @@ def main():
     if args.hub:
         global HUB_URL
         HUB_URL = args.hub
-        _start_hub_announce(args.hub, args.port)
+        _start_hub_announce(args.hub, args.port, args.allow_public_hub)
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     try:
