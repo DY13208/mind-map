@@ -497,6 +497,13 @@ async function main() {
     })
     assert.strictEqual(response.status, 204)
 
+    response = await request('/oauth/callback?state=invalid')
+    assert.strictEqual(response.status, 302)
+    assert.strictEqual(
+      new URL(response.headers.get('location')).searchParams.get('auth_error'),
+      'workbuddy_invalid_state'
+    )
+
     response = await request(
       '/api/auth/workbuddy/login?return_to=%2Ffiles%3Ffrom%3Dworkbuddy-oauth'
     )
@@ -541,6 +548,17 @@ async function main() {
     assert.strictEqual(
       workBuddyMe.user.avatar,
       'https://example.test/workbuddy-avatar.png'
+    )
+
+    response = await request(
+      `/oauth/callback?code=workbuddy-valid-code&state=${encodeURIComponent(
+        workBuddyState
+      )}`
+    )
+    assert.strictEqual(response.status, 302)
+    assert.strictEqual(
+      new URL(response.headers.get('location')).searchParams.get('auth_error'),
+      'workbuddy_expired_state'
     )
 
     response = await request('/api/auth/logout', {

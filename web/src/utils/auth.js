@@ -140,9 +140,23 @@ export function clearWorkBuddyAutoLoginAttempt() {
 
 export function markWecomClientAutoLoginAttempted() {
   try {
-    window.sessionStorage.setItem(WECOM_CLIENT_AUTO_ATTEMPT_KEY, '1')
+    const attempts = Number(
+      window.sessionStorage.getItem(WECOM_CLIENT_AUTO_ATTEMPT_KEY)
+    ) || 0
+    window.sessionStorage.setItem(
+      WECOM_CLIENT_AUTO_ATTEMPT_KEY,
+      String(Math.min(2, attempts + 1))
+    )
   } catch (err) {
     // sessionStorage 不可用时仍允许企业微信网页授权跳转。
+  }
+}
+
+export function suppressWecomClientAutoLogin() {
+  try {
+    window.sessionStorage.setItem(WECOM_CLIENT_AUTO_ATTEMPT_KEY, '2')
+  } catch (err) {
+    // sessionStorage 不可用不影响主动退出。
   }
 }
 
@@ -195,7 +209,7 @@ export async function logout() {
   // 用户主动退出后，本标签页不能立刻再次触发 OneID 自动登录。
   markOneIdAutoLoginAttempted()
   // 企业微信客户端内也要尊重主动退出，不能立即静默登录回来。
-  markWecomClientAutoLoginAttempted()
+  suppressWecomClientAutoLogin()
   let confirmed = false
   try {
     const response = await fetchWithTimeout(
