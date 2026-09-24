@@ -77,6 +77,9 @@ services:
       COGNEE_API: ${COGNEE_API:-http://192.168.0.204:8320}
       COGNEE_API_KEY: ${COGNEE_API_KEY:-}
       COGNEE_DATASET: ${COGNEE_DATASET:-liangce}
+      # 通讯页（按钮派发主服务）：/jobhub/ 反代的上游。默认当它跑在宿主机上
+      # （python comm.py --port 5051）；跑在同 compose 里就填 http://lan-hub:5051。
+      JOBHUB_UPSTREAM: ${JOBHUB_UPSTREAM:-http://host.docker.internal:5051}
       # Docmost / Wiki SSO（由 scripts/docker-up.js 从 .secrets/wiki.env 注入）
       DOCMOST_APP_URL: ${DOCMOST_APP_URL:-http://localhost:3040}
       DOCMOST_DATABASE_URL: ${DOCMOST_DATABASE_URL:-}
