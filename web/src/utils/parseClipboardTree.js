@@ -28,36 +28,24 @@ const stripMarker = text => {
     .trim()
 }
 
-const walkScore = (nodes, acc = { n: 0, nested: 0 }) => {
-  ;(nodes || []).forEach(node => {
-    acc.n += 1
-    const children = node && node.children
-    if (children && children.length) {
-      acc.nested += children.length
-      walkScore(children, acc)
-    }
-  })
-  return acc
-}
-
-const scoreTree = nodes => {
-  const acc = walkScore(nodes)
-  return acc.nested * 10 + acc.n
-}
-
 const looksLikeOutline = text => {
   const lines = String(text || '')
-    .split(/\r?\n/)
+    .split(/\r\n|\n|\r/)
     .filter(line => line.trim())
   if (lines.length < 2) return false
-  const hasIndent = lines.some(line => indentWidth(line) > 0)
   const marked = lines.filter(line => LIST_MARKER.test(line.trim())).length
-  return hasIndent || marked >= 2
+  if (marked >= 2) return true
+  const indents = lines.map(indentWidth)
+  const min = Math.min(...indents)
+  // A single indented line may be a continuation of a wrapped node title.
+  // Repeated indentation (or a tab-delimited outline) provides a clearer tree signal.
+  const nested = indents.filter(indent => indent > min)
+  return nested.length >= 2 || lines.some(line => /^\t/.test(line))
 }
 
 export const parseIndentedOutline = text => {
   const lines = String(text || '')
-    .split(/\r?\n/)
+    .split(/\r\n|\n|\r/)
     .map(line => ({
       indent: indentWidth(line),
       text: stripMarker(line.trim())
@@ -98,8 +86,12 @@ const collectLiText = li => {
   Array.from(clone.querySelectorAll('ul, ol')).forEach(list => {
     list.remove()
   })
+  Array.from(clone.querySelectorAll('br')).forEach(br => {
+    br.replaceWith(clone.ownerDocument.createTextNode('\n'))
+  })
   return String(clone.textContent || '')
-    .replace(/\s+/g, ' ')
+    .replace(/[^\S\r\n]+/g, ' ')
+    .replace(/ *\n */g, '\n')
     .trim()
 }
 
@@ -169,16 +161,11 @@ export const parseOpmlTree = xml => {
 }
 
 export const parseClipboardToNodes = (text = '', html = '') => {
+  const opmlTextTree = parseOpmlTree(text)
+  if (opmlTextTree.length) return opmlTextTree
+  const opmlHtmlTree = parseOpmlTree(html)
+  if (opmlHtmlTree.length) return opmlHtmlTree
   const htmlTree = parseHtmlListTree(html)
-  const opmlTree = parseOpmlTree(text) || parseOpmlTree(html)
-  const textTree = looksLikeOutline(text) ? parseIndentedOutline(text) : []
-  const candidates = [
-    { tree: htmlTree, score: scoreTree(htmlTree) },
-    { tree: opmlTree, score: scoreTree(opmlTree) },
-    { tree: textTree, score: scoreTree(textTree) }
-  ].sort((a, b) => b.score - a.score)
-  const best = candidates[0]
-  if (!best || !best.tree.length) return []
-  if (best.score < 2 && !looksLikeOutline(text) && !htmlTree.length) return []
-  return best.tree
+  if (htmlTree.length) return htmlTree
+  return looksLikeOutline(text) ? parseIndentedOutline(text) : []
 }
