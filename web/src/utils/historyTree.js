@@ -44,7 +44,7 @@ export function withExpandMode(tree, mode) {
   function walk(node, depth) {
     if (!node || typeof node !== 'object') return
     if (!node.data) node.data = {}
-    if (mode === 'collapsed') node.data.expand = depth === 0
+    if (mode === 'collapsed' || mode === 'overview') node.data.expand = depth === 0
     else node.data.expand = true
     ;(node.children || []).forEach(child => walk(child, depth + 1))
   }

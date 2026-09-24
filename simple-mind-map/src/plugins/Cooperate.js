@@ -686,9 +686,9 @@ class Cooperate {
     this.expectRemoteDoc = !!value
   }
 
-  setPreviewApplied(applied) {
+  setPreviewApplied(applied, options = {}) {
     this.previewApplied = !!applied
-    if (applied && this.httpCollabMode && this.safeLoadMode) {
+    if (applied && options.hydrateExpanded !== false && this.httpCollabMode && this.safeLoadMode) {
       // Defer: renderer root may not exist until setData finishes.
       Promise.resolve()
         .then(() => this.hydrateExpandedPartialParents())

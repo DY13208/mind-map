@@ -2,7 +2,7 @@ import nodeDescendantCount from 'simple-mind-map/src/utils/nodeDescendantCount'
 
 const LARGE_NODE_THRESHOLD = 100
 const KEEP_EXPAND_DEPTH = 2
-const MAX_IMPORT_FANOUT = 48
+const MAX_IMPORT_FANOUT = 24
 const MAX_DISPLAY_NODES = 280
 const OVERFLOW_KEY = '_overflowChildren'
 

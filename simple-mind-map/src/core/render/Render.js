@@ -142,6 +142,7 @@ class Render {
 
   //  设置布局结构
   setLayout() {
+    if (this.isRendering || this.renderCallbackList.length) this.cancelRender()
     this._renderGeneration = (this._renderGeneration || 0) + 1
     this.isRendering = false
     this.hasWaitRendering = false
@@ -652,16 +653,28 @@ class Render {
     return false
   }
 
+  cancelRender() {
+    this._renderGeneration = (this._renderGeneration || 0) + 1
+    clearTimeout(this.renderTimer)
+    this.isRendering = false
+    this.hasWaitRendering = false
+    this.renderCallbackList = []
+    this.renderSourceList = []
+    this.mindMap.emit('render_cancelled', { generation: this._renderGeneration })
+  }
+
   // 渲染完毕的操作
   onRenderEnd() {
-    this.renderCallbackList.forEach(fn => {
-      fn()
-    })
+    const callbacks = this.renderCallbackList
     this.isRendering = false
     this.reRender = false
     this.renderCallbackList = []
     this.renderSourceList = []
     this.mindMap.emit('node_tree_render_end')
+    this.mindMap.emit('render_complete', {
+      renderedNodes: Object.keys(this.nodeCache).length
+    })
+    callbacks.forEach(fn => fn())
   }
 
   // 渲染
@@ -695,6 +708,8 @@ class Render {
     }
     const syncPaint = !!this._syncPaintOnce
     this._syncPaintOnce = false
+    const forceOverviewPaint = !!this._forceOverviewPaintOnce
+    this._forceOverviewPaintOnce = false
     this.isRendering = true
     const renderGeneration = this._renderGeneration
     const isLayoutSwitch = this.checkHasRenderSource(CONSTANTS.CHANGE_LAYOUT)
@@ -764,7 +779,7 @@ class Render {
           }
           this.onRenderEnd()
         },
-        isLayoutSwitch,
+        isLayoutSwitch || forceOverviewPaint,
         asyncPaint
       )
     })

@@ -11,6 +11,13 @@
       <div class="statusBar">
         <span class="statusDot" :class="status"></span>
         <span class="statusLabel">{{ statusText }}</span>
+        <el-button
+          v-if="connected && largeMapInitialOverview && hasSavedMapView"
+          type="text"
+          size="mini"
+          @click="restoreOpenedMapView"
+          >返回上次位置</el-button
+        >
         <span
           v-if="connected"
           class="saveState"
@@ -24,6 +31,9 @@
         <span v-if="roomRole" class="roleTag" :class="roomRole">{{
           memberRoleText(roomRole)
         }}</span>
+      </div>
+      <div v-if="roomLoadError" role="alert" class="empty">
+        {{ roomLoadError }}
       </div>
       <div class="peerList" v-if="peerList.length">
         <div class="peer" v-for="peer in peerList" :key="peer.id">
@@ -287,7 +297,7 @@
       }}</el-button>
       <el-button
         type="primary"
-        :loading="connecting"
+        :disabled="connecting"
         @click="joinFromDialog"
         v-else
         >{{ $t('cooperate.join') }}</el-button
@@ -359,6 +369,21 @@ import { io } from 'socket.io-client'
 const USER_NAME_KEY = 'COOPERATE_USER_NAME'
 const USER_ID_KEY = 'COOPERATE_USER_ID'
 const V2_CLIENT_KEY = 'mind-map-collab-v2-client'
+
+// Keep structurally partial previews collapsed when reopening a room.
+function hasPartialPreviewTree(root) {
+  const stack = root ? [root] : []
+  while (stack.length) {
+    const node = stack.pop()
+    if (!node) continue
+    const data = node.data || {}
+    const live = Array.isArray(node.children) ? node.children.length : 0
+    const declared = Number(data.childCount) || 0
+    if (data.hasMore === true || (declared > live && (declared > 0 || data.expand === false))) return true
+    ;(node.children || []).forEach(child => stack.push(child))
+  }
+  return false
+}
 
 function tabClientId() {
   try {
@@ -472,7 +497,8 @@ export default {
       personalExpandApplying: false,
       personalExpandOnCommand: null,
       personalExpandOnRender: null,
-      personalExpandOnChange: null
+      personalExpandOnChange: null,
+      largeMapInitialOverview: false
     }
   },
   computed: {
@@ -486,6 +512,9 @@ export default {
       if (this.connecting) return 'connecting'
       if (this.connected) return 'connected'
       return 'disconnected'
+    },
+    hasSavedMapView() {
+      return !!(this.roomName && loadMapView(this.roomName))
     },
     statusText() {
       if (this.httpCollab && this.connected) {
@@ -1079,7 +1108,7 @@ export default {
       this.personalExpandOnChange = snapshotNow
       this.mindMap.on('personal_expand_change', this.personalExpandOnChange)
       this.personalExpandOnRender = () => {
-        this.restorePersonalExpandState()
+        if (!this.largeMapInitialOverview) this.restorePersonalExpandState()
       }
       this.mindMap.on('afterExecCommand', this.personalExpandOnCommand)
       this.mindMap.on('node_tree_render_end', this.personalExpandOnRender)
@@ -1097,13 +1126,14 @@ export default {
             ...remote
           }
           savePersonalExpandState(roomKey, userId, this.personalExpandState)
-          this.restorePersonalExpandState()
+          if (!this.largeMapInitialOverview) this.restorePersonalExpandState()
         })
         .catch(() => {})
     },
 
     async restorePersonalExpandState() {
       if (
+        this.largeMapInitialOverview ||
         this.personalExpandApplying ||
         !this.personalExpandState ||
         !Object.keys(this.personalExpandState).length ||
@@ -1285,6 +1315,7 @@ export default {
         await this.tryFocusFromQuery()
         return
       }
+      if (this.largeMapInitialOverview) return
       await this.restoreOpenedMapView()
     },
 
@@ -2245,8 +2276,15 @@ export default {
       }
     },
 
-    async applyPreview(preview, silent) {
+    async applyPreview(preview, silent, attemptId) {
+      if (attemptId !== this._openAttemptId) return false
       const cooperate = this.mindMap.cooperate
+      this.largeMapInitialOverview = !!(
+        preview &&
+        (preview.safe_load ||
+          (preview.tree &&
+            (countNodes(preview.tree) > 280 || hasPartialPreviewTree(preview.tree))))
+      )
       if (typeof window !== 'undefined') {
         window.__COLLAB_V2_APPLY__ = {
           useV2: this.useCollabV2(),
@@ -2273,25 +2311,43 @@ export default {
       if (cooperate) {
         cooperate.safeLoadMode = !!(preview && preview.safe_load)
       }
-      cooperate.setPreviewApplied(true)
+      cooperate.setPreviewApplied(true, {
+        hydrateExpanded: !this.largeMapInitialOverview
+      })
+      // Apply the saved layout/theme before the overview's first paint. Applying
+      // them afterwards starts a second layout pass that can hide the canvas.
+      if (this.largeMapInitialOverview && typeof cooperate.hydrateRoomMetadata === 'function') {
+        cooperate.hydrateRoomMetadata(preview)
+      }
       // Apply canvas data, but do not block room entry on first paint.
       // Previously waited up to 4s for node_tree_render_end, which felt like a hang.
       const renderWait = new Promise(resolve => {
         let settled = false
-        const done = () => {
+        let timer
+        const done = rendered => {
           if (settled) return
           settled = true
-          this.mindMap.off('node_tree_render_end', done)
-          resolve()
+          this.mindMap.off('render_complete', done)
+          this.mindMap.off('render_error', failed)
+          clearTimeout(timer)
+          resolve(rendered !== false)
         }
-        this.mindMap.on('node_tree_render_end', done)
+        const failed = () => done(false)
+        this.mindMap.on('render_complete', done)
+        this.mindMap.on('render_error', failed)
         let tree = preview.tree
-        if (tree && countNodes(tree) > 280) {
+        if (tree && this.largeMapInitialOverview) {
+          tree.data = tree.data || {}
+          tree.data.expand = true
           stubImportedTree(tree, {
             keepDepth: 1,
             maxNodes: 280,
-            maxChildren: 40
+            maxChildren: 24
           })
+        }
+        if (this.largeMapInitialOverview) this.mindMap.view.reset()
+        if (this.largeMapInitialOverview && this.mindMap.renderer) {
+          this.mindMap.renderer._forceOverviewPaintOnce = true
         }
         this.$bus.$emit('setData', tree, {
           quiet: true,
@@ -2303,15 +2359,26 @@ export default {
         if (typeof cooperate.seedPreviewHydration === 'function') {
           cooperate.seedPreviewHydration(preview.tree)
         }
-        setTimeout(done, 600)
+        timer = setTimeout(() => done(false), 1500)
       })
-      await renderWait
+      const firstPaintReady = await renderWait
+      if (attemptId !== this._openAttemptId) return false
+      if (!firstPaintReady && this.largeMapInitialOverview) {
+        if (this.mindMap.renderer && this.mindMap.renderer.cancelRender) {
+          this.mindMap.renderer.cancelRender()
+        }
+        throw new Error('脑图概览绘制失败，请重试')
+      }
+      if (firstPaintReady && this.largeMapInitialOverview && this.mindMap.view) {
+        this.mindMap.view.fit()
+      }
       const renderRoot =
         this.mindMap.renderer && this.mindMap.renderer.renderTree
       if (renderRoot && typeof cooperate.seedPreviewHydration === 'function') {
         cooperate.seedPreviewHydration(renderRoot)
       }
       if (
+        !this.largeMapInitialOverview &&
         cooperate &&
         typeof cooperate.hydrateExpandedPartialParents === 'function'
       ) {
@@ -2319,10 +2386,11 @@ export default {
           console.error('[mind-map] expanded partial hydrate failed', err)
         })
       }
-      if (typeof cooperate.hydrateRoomMetadata === 'function') {
+      if (!this.largeMapInitialOverview && typeof cooperate.hydrateRoomMetadata === 'function') {
         cooperate.hydrateRoomMetadata(preview)
       }
       await this.$nextTick()
+      if (attemptId !== this._openAttemptId) return false
       cooperate.setPreviewApplied(false)
       if (this.useCollabV2()) {
         try {
@@ -2391,6 +2459,7 @@ export default {
       const attemptId = (this._openAttemptId = (this._openAttemptId || 0) + 1)
       const started = Date.now()
       const ROOM_LOAD_MS = 25000
+      this.$bus.$emit('hideLoading')
       this.connecting = true
       this.roomLoadError = ''
       this.roomLoadPhase = 'ROOM_LOADING_TREE'
@@ -2413,6 +2482,7 @@ export default {
         try {
           markPhase('ROOM_LOADING_TREE')
           meta = await getFileMeta(roomKey)
+          if (attemptId !== this._openAttemptId) return
           if (typeof window !== 'undefined') {
             window.__ROOM_INTEGRITY_REPORT__ = meta
             window.__SERVICE_RECOVERY_TRACE__ = {
@@ -2448,6 +2518,7 @@ export default {
             safe,
             timeoutMs: safe ? 15000 : 12000
           })
+          if (attemptId !== this._openAttemptId) return
         } catch (err) {
           if (err && (err.statusCode === 403 || err.code === 'FORBIDDEN')) {
             this.$message.warning(this.$t('acl.noAccess'))
@@ -2455,7 +2526,11 @@ export default {
           }
           if (!this.isNotFound(err)) throw err
           if (!createIfMissing) {
-            if (!silent) {
+            if (silent) {
+              this._roomLoadFailed = true
+              this.roomLoadError = this.$t('cooperate.openFailed')
+              this.dialogVisible = true
+            } else {
               this.$message.warning(this.$t('cooperate.openFailed'))
             }
             return
@@ -2471,22 +2546,29 @@ export default {
         if (preview && preview.tree) {
           previewLoaded = true
           markPhase('ROOM_BUILDING_RUNTIME')
-          const connected = await this.applyPreview(preview, silent)
+          const connected = await this.applyPreview(preview, silent, attemptId)
+          if (attemptId !== this._openAttemptId) return
           markPhase('ROOM_RENDERING')
           if (connected) return
         }
       } catch (err) {
+        if (attemptId !== this._openAttemptId) return
         cooperate.setPreviewApplied(false)
         const code = (err && err.code) || ''
         if (code === 'ROOM_LOAD_TIMEOUT') {
           this._roomLoadFailed = true
-          this.roomLoadError = 'ROOM_LOAD_TIMEOUT'
+          this.roomLoadError = '脑图加载超时，请重试'
           this.setCooperateStatus('disconnected')
           this.$bus.$emit('hideLoading')
-          if (!silent) this.$message.error('脑图加载超时')
+          this.dialogVisible = true
           return
         }
-        if (!silent) {
+        if (silent) {
+          this._roomLoadFailed = true
+          this.roomLoadError = err.message || this.$t('cooperate.openFailed')
+          this.dialogVisible = true
+          return
+        } else {
           this.$message.warning(
             err.message || this.$t('cooperate.openFailed')
           )

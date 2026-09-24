@@ -16,7 +16,7 @@ function newIdempotencyKey() {
 
 export default {
   backendStatus: C3_SERVICE_STATUS_MATRIX.History,
-  listVersions: async (roomKey, query = {}) => {
+  listVersions: async (roomKey, query = {}, options = {}) => {
     try {
       const params = new URLSearchParams()
       if (query.limit != null) params.set('limit', String(query.limit))
@@ -29,7 +29,8 @@ export default {
       const data = await productRequest(
         `/api/files/${encodeURIComponent(roomKey)}/versions${
           qs ? `?${qs}` : ''
-        }`
+        }`,
+        { signal: options.signal }
       )
       const list = versionsFrom(data)
       return Object.assign(list, {
@@ -40,6 +41,7 @@ export default {
         viewingHistory: true
       })
     } catch (error) {
+      if (error && error.name === 'AbortError') throw error
       error.message = userMessageFromError(error)
       throw error
     }

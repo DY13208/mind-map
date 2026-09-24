@@ -13,7 +13,7 @@
     @opened="onOpened"
     @closed="onClosed"
   >
-    <div class="historyShell" v-loading="loading">
+    <div class="historyShell">
       <div v-if="restoring" class="restoreStatus" role="status" aria-live="polite">
         {{ restoreStatus }}
       </div>
@@ -43,6 +43,8 @@
             :metadata="preview.metadata"
             :loading="preview.loading"
             :error="preview.error"
+            @retry="selected && loadPreview(selected)"
+            @failed="onPreviewFailed"
           />
         </section>
         <aside v-show="!isNarrow || pane === 'list'" class="timelinePane">
@@ -84,7 +86,8 @@
               />
             </div>
           </div>
-          <div v-if="!groups.length" class="emptyWrap">
+          <div v-if="loading" class="emptyWrap">正在获取历史版本…</div>
+          <div v-else-if="!groups.length" class="emptyWrap">
             <EmptyState
               title="暂无历史版本"
               description="编辑脑图或创建手动版本后会显示在这里"
@@ -190,7 +193,8 @@ export default {
     preview: { tree: null, metadata: {}, loading: false, error: '' },
     previewToken: 0,
     lastPreRestoreId: '',
-    loadController: null
+    loadController: null,
+    listController: null
   }),
   computed: {
     shown: {
@@ -252,6 +256,12 @@ export default {
       if (value) {
         this.measure()
         this.reload()
+      } else {
+        this._reloadToken = (this._reloadToken || 0) + 1
+        if (this.listController) this.listController.abort()
+        this.abortPreview()
+        const mapPreview = this.$refs.mapPreview
+        if (mapPreview && mapPreview.teardown) mapPreview.teardown()
       }
     }
   },
@@ -263,6 +273,7 @@ export default {
     window.removeEventListener('resize', this.measure)
     this.unbindDialogDrag()
     this.abortPreview()
+    if (this.listController) this.listController.abort()
   },
   methods: {
     typeLabel: versionTypeLabel,
@@ -376,6 +387,11 @@ export default {
       return q
     },
     async reload() {
+      const reloadToken = this._reloadToken = (this._reloadToken || 0) + 1
+      if (this.listController) this.listController.abort()
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+      this.listController = controller
+      this.abortPreview()
       this.loading = true
       this.error = ''
       this.versions = []
@@ -383,22 +399,28 @@ export default {
       this.lastPreRestoreId = this.lastPreRestoreId
       try {
         await this.waitOwnEdits()
-        const result = await historyService.listVersions(this.roomKey, this.query())
+        if (reloadToken !== this._reloadToken || !this.visible) return
+        const result = await historyService.listVersions(this.roomKey, this.query(), {
+          signal: controller && controller.signal
+        })
+        if (reloadToken !== this._reloadToken || !this.visible) return
         this.versions = result.list || []
         this.nextCursor = result.nextCursor || null
         this.currentRevision = Number(
           result.currentRevision || (this.room && this.room.revision) || 0
         )
         const first = this.versions[0]
-        if (first) await this.select(first)
+        if (first) this.select(first)
         else {
           this.selected = null
           this.preview = { tree: null, metadata: {}, loading: false, error: '' }
         }
       } catch (error) {
-        this.error = userMessageFromError(error)
+        if (error && error.name === 'AbortError') return
+        if (reloadToken === this._reloadToken) this.error = userMessageFromError(error)
       } finally {
-        this.loading = false
+        if (this.listController === controller) this.listController = null
+        if (reloadToken === this._reloadToken) this.loading = false
       }
     },
     async loadMore() {
@@ -440,6 +462,14 @@ export default {
       }
       return userMessageFromError(error) || '预览加载失败'
     },
+    onPreviewFailed(error) {
+      this.preview = {
+        tree: null,
+        metadata: {},
+        loading: false,
+        error: this.previewErrorMessage(error)
+      }
+    },
     async loadPreview(item) {
       this.abortPreview()
       const token = this.previewToken
@@ -454,8 +484,10 @@ export default {
           { signal: controller && controller.signal }
         )
         if (token !== this.previewToken) return
+        // Vue 2 must not observe every node in a large history snapshot.
+        const tree = data.tree && Object.freeze(data.tree)
         this.preview = {
-          tree: data.tree,
+          tree,
           metadata: data.metadata || {},
           loading: false,
           error: ''
@@ -589,6 +621,7 @@ export default {
     onClosed() {
       this._reloadToken = (this._reloadToken || 0) + 1
       this.loading = false
+      if (this.listController) this.listController.abort()
       this.unbindDialogDrag()
       this.abortPreview()
       this.restoreError = ''

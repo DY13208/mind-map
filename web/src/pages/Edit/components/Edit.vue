@@ -294,11 +294,10 @@ export default {
     this.$bus.$on('node_tree_render_end', this.handleHideLoading)
     this.$bus.$on('showLoading', this.handleShowLoading)
     this.$bus.$on('hideLoading', this.handleForceHideLoading)
-    this.enableShowLoading = true
-    showLoading()
-    this.loadingSafetyTimer = setTimeout(() => {
-      this.handleHideLoading({ force: true })
-    }, 20000)
+    // Opening the editor must never cover the canvas with a loading overlay.
+    // Explicit imports/saves still use their own progress UI below.
+    this.enableShowLoading = false
+    hideLoading()
     let dataReady = true
     try {
       await promiseWithTimeout(this.getData(), 10000, 'mind map data')
@@ -502,6 +501,8 @@ export default {
 
     // 显示loading
     handleShowLoading(text, durationOrOptions) {
+      // Empty requests come from appearance changes; they must not cover the map.
+      if (!text && !durationOrOptions) return
       this.enableShowLoading = true
       const options =
         typeof durationOrOptions === 'number'
@@ -1165,6 +1166,14 @@ export default {
           })
         }
       })
+      if (this.isLargeMap && !this.$route.query.room) {
+        this.mindMap.renderer._forceOverviewPaintOnce = true
+        const fitOverview = () => {
+          this.mindMap.off('render_complete', fitOverview)
+          this.mindMap.view.fit()
+        }
+        this.mindMap.on('render_complete', fitOverview)
+      }
       this.bindCanvasThemeEvents()
       this.ensureAppearanceThemeAligned()
       this.loadPlugins()
