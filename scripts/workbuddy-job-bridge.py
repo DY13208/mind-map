@@ -31,10 +31,15 @@ http://127.0.0.1:8799 ，结果回到当前页面。
 """
 
 import argparse
+import base64
 import ctypes
 import glob
 import json
+import mimetypes
 import os
+import re
+import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -417,7 +422,461 @@ def job_full_text(g, job_id):
 
 
 # ---------------------------------------------------------------------------
-# MCP（Streamable HTTP，零依赖）：把桥接本身变成一条 MCP 链接 http://<host>:8799/mcp
+# 产物文件：任务输出里提到的文件，读出来给页面挂到脑图节点（挂附件）
+#
+# 只有落在「执行主机工作目录」或 BRIDGE_ARTIFACT_ROOTS 里的文件才允许读，
+# 免得好心办坏事——被网页拿去读整台机器的文件。
+# ---------------------------------------------------------------------------
+
+ARTIFACT_MAX_BYTES = 20 * 1024 * 1024
+ARTIFACT_MAX_FILES = 12
+ARTIFACT_TEXT_LIMIT = 200000
+ARTIFACT_EXT_RE = (
+    "html?|htm|md|markdown|txt|csv|tsv|json|ya?ml|log|xml|"
+    "xlsx?|xlsm|docx?|pptx?|pdf|zip|xmind|"
+    "png|jpe?g|webp|gif|svg|mp4|mov"
+)
+_ABS_PATH_RE = re.compile(
+    r"(?:[A-Za-z]:[\\/]|\\\\)[^\s\"'`，。；：、（）()\[\]【】《》<>|*?\n\r\t]*?"
+    r"\.(?:" + ARTIFACT_EXT_RE + r")(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+_REL_PATH_RE = re.compile(
+    r"(?<![\w/\\.\-])[A-Za-z0-9_.\-\u4e00-\u9fff]+"
+    r"(?:[\\/][A-Za-z0-9_.\-\u4e00-\u9fff]+)*"
+    r"\.(?:" + ARTIFACT_EXT_RE + r")(?![A-Za-z0-9])",
+)
+
+
+def _clean_path_text(raw):
+    return (raw or "").strip().strip("`\"'“”‘’（）()《》<>，。；、").rstrip(".,;:)]）】").strip()
+
+
+ARTIFACT_FILTER = (os.environ.get("BRIDGE_ARTIFACT_FILTER") or "1").lower() not in ("0", "false", "no", "off")
+ARTIFACT_DIR_HINTS = (
+    "output", "outputs", "out", "dist", "release", "export", "exports",
+    "report", "reports", "deliverable", "deliverables", "artifact", "artifacts",
+    "交付", "产物", "输出", "结果", "生成", "报表", "报告",
+)
+# 源码目录与代码类扩展名不算产物（除非就在产物目录里）
+ARTIFACT_DIR_BLOCK = (
+    "node_modules", ".git", "src", "bin", "scripts", "__pycache__", "vendor",
+)
+ARTIFACT_CODE_EXT = (
+    ".js", ".mjs", ".cjs", ".ts", ".vue", ".json", ".scss", ".less", ".css",
+    ".map", ".lock", ".env", ".py", ".pyc", ".toml", ".ini", ".yml", ".yaml",
+)
+ARTIFACT_LINE_HINTS = (
+    "交付", "产物", "产出", "生成", "落地", "文件清单", "产物清单", "输出文件",
+    "交付物", "deliverable", "artifact", "output",
+)
+
+
+def _line_at(text, pos):
+    start = text.rfind("\n", 0, pos) + 1
+    end = text.find("\n", pos)
+    return text[start:end if end >= 0 else len(text)]
+
+
+def _looks_like_artifact(real, line):
+    parts = [p.lower() for p in os.path.normpath(real).split(os.sep)[:-1]]
+    if any(p in ARTIFACT_DIR_HINTS for p in parts):
+        return True
+    if any(p in ARTIFACT_DIR_BLOCK for p in parts):
+        return False
+    if os.path.splitext(real)[1].lower() in ARTIFACT_CODE_EXT:
+        return False
+    low = (line or "").lower()
+    return any(h in low for h in ARTIFACT_LINE_HINTS)
+
+
+def artifact_roots(gateways):
+    """允许读取的目录白名单：执行主机的工作目录 + BRIDGE_ARTIFACT_ROOTS（分号分隔）。"""
+    roots = []
+    for g in gateways or []:
+        cwd = (g.get("cwd") or "").strip()
+        if cwd and os.path.isdir(cwd):
+            roots.append(os.path.realpath(cwd))
+    for item in (os.environ.get("BRIDGE_ARTIFACT_ROOTS") or "").split(";"):
+        item = item.strip()
+        if item and os.path.isdir(item):
+            roots.append(os.path.realpath(item))
+    out = []
+    for r in roots:
+        if r not in out:
+            out.append(r)
+    return out
+
+
+def _path_in_roots(real, roots):
+    if not roots:
+        return False
+    low = os.path.normcase(os.path.realpath(real))
+    for root in roots:
+        r = os.path.normcase(os.path.realpath(root)).rstrip("\\/")
+        if low == r or low.startswith(r + os.sep):
+            return True
+    return False
+
+
+def resolve_artifact_path(raw, cwd, roots):
+    """把输出里的一段文字解析成真实文件路径，(路径, 失败原因)。"""
+    text = _clean_path_text(raw)
+    if not text:
+        return None, "路径为空"
+    if re.match(r"^[A-Za-z]:[\\/]", text) or text.startswith("\\\\") or text.startswith("//"):
+        candidate = os.path.normpath(text)
+    else:
+        if not cwd:
+            return None, "只有相对路径，且执行主机没有工作目录"
+        candidate = os.path.normpath(os.path.join(cwd, text.replace("/", os.sep)))
+    try:
+        real = os.path.realpath(candidate)
+    except Exception as err:
+        return None, "路径解析失败：%s" % err
+    if not os.path.isfile(real):
+        return None, "文件不存在"
+    if not _path_in_roots(real, roots):
+        return None, "不在允许读取的目录内"
+    return real, ""
+
+
+def read_artifact(real, with_content=True):
+    """读一个产物文件，(信息, 出错原因)。"""
+    info = {
+        "path": real,
+        "name": os.path.basename(real),
+        "size": os.path.getsize(real),
+        "mime": mimetypes.guess_type(real)[0] or "application/octet-stream",
+        "exists": True,
+    }
+    if not with_content:
+        return info, ""
+    if info["size"] > ARTIFACT_MAX_BYTES:
+        return info, "文件超过 %d MB，未带回内容" % (ARTIFACT_MAX_BYTES // 1024 // 1024)
+    try:
+        with open(real, "rb") as fh:
+            info["base64"] = base64.b64encode(fh.read()).decode("ascii")
+    except Exception as err:
+        return info, "读取失败：%s" % err
+    return info, ""
+
+
+def extract_artifact_paths(text, cwd, roots, limit=ARTIFACT_MAX_FILES * 3):
+    """从任务输出里挑出真实存在的产物文件。
+
+    绝对路径、相对路径都过一遍「像不像产物」：
+    - 在 output/dist/交付 之类目录下 → 收；
+    - 在 src/bin/node_modules 之类源码目录下，或扩展名是 .js/.vue/.json 这类代码文件 → 丢；
+    - 其余看同行有没有「交付/产物/生成/落地」字样。
+    否则 `web/public/templates/xxx.json` 这种正文引用也会被当成产物挂上去。
+    设 BRIDGE_ARTIFACT_FILTER=0 可关掉这层过滤。
+    """
+    text = text or ""
+    found = []
+    seen = set()
+
+    def add(raw, line):
+        real, _why = resolve_artifact_path(raw, cwd, roots)
+        if not real:
+            return
+        if ARTIFACT_FILTER and not _looks_like_artifact(real, line):
+            return
+        key = os.path.normcase(real)
+        if key in seen:
+            return
+        seen.add(key)
+        found.append(real)
+
+    for m in _ABS_PATH_RE.finditer(text):
+        add(m.group(0), _line_at(text, m.start()))
+    if cwd:
+        for m in _REL_PATH_RE.finditer(text):
+            add(m.group(0), _line_at(text, m.start()))
+    return found[:limit]
+
+
+def read_artifacts_for_gateway(g, paths, with_content=True, cwd_override=""):
+    cwd = (cwd_override or g.get("cwd") or "").strip()
+    roots = artifact_roots([g])
+    files = []
+    for raw in (paths or [])[:ARTIFACT_MAX_FILES * 2]:
+        real, why = resolve_artifact_path(raw, cwd, roots)
+        if not real:
+            files.append({
+                "path": str(raw),
+                "name": os.path.basename(str(raw)),
+                "exists": False,
+                "error": why,
+            })
+            continue
+        item, err = read_artifact(real, with_content=with_content)
+        if err:
+            item["error"] = err
+        files.append(item)
+    return {"ok": True, "cwd": cwd, "roots": roots, "files": files}
+
+
+def job_artifacts(g, job_id, with_content=True):
+    """一个任务产出的文件清单：从它的完整回答里解析路径 + 校验存在 + 可选带内容。"""
+    info = job_full_text(g, job_id)
+    job = info.get("job") or {}
+    cwd = (job.get("cwd") or g.get("cwd") or "").strip()
+    text = info.get("text") or ""
+    roots = artifact_roots([dict(g, cwd=cwd)])
+    paths = extract_artifact_paths(text, cwd, roots)
+    files = []
+    for real in paths:
+        item, err = read_artifact(real, with_content=with_content)
+        if err:
+            item["error"] = err
+        files.append(item)
+    return {
+        "ok": True,
+        "job": job,
+        "cwd": cwd,
+        "roots": roots,
+        "filter": ARTIFACT_FILTER,
+        "source": info.get("source") or "",
+        "chars": len(text),
+        "text": text[:ARTIFACT_TEXT_LIMIT],
+        "truncated": len(text) > ARTIFACT_TEXT_LIMIT,
+        "files": files,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 远程 mind-map MCP（客户端）：把附件经 MCP 挂回脑图
+#
+# 前端上传附件原本要经页面同域的 /api/attachments/resumable 与
+# /api/files/<room>/attachments（nginx → 协同服务 1234）。服务器部署时这条路
+# 可能不通；走 MCP 的 upload_attachment 是官方同效路径（节点上一样出现回形针）。
+#
+# 配置（优先环境变量，缺省从 ~/.workbuddy/mcp.json 的 mind-map 条目取）：
+#   BRIDGE_MCP_URL / BRIDGE_MCP_TOKEN   MCP 地址与 Bearer token
+#   BRIDGE_MCP_INSECURE=1               跳过证书校验（自签证书时用）
+#   BRIDGE_ATTACH=0                     关掉这条通道，前端会退回协同服务上传
+# ---------------------------------------------------------------------------
+
+REMOTE_MCP_URL = (os.environ.get("BRIDGE_MCP_URL") or "").strip()
+REMOTE_MCP_TOKEN = (os.environ.get("BRIDGE_MCP_TOKEN") or "").strip()
+REMOTE_MCP_INSECURE = (os.environ.get("BRIDGE_MCP_INSECURE") or "0").lower() not in (
+    "0", "false", "no", "off")
+REMOTE_MCP_ENABLED = (os.environ.get("BRIDGE_ATTACH") or "1").lower() not in (
+    "0", "false", "no", "off")
+REMOTE_MCP_TIMEOUT = int(os.environ.get("BRIDGE_MCP_TIMEOUT") or "120")
+ATTACH_MAX_BYTES = 20 * 1024 * 1024
+ATTACH_TEXT_KEEP = 2400
+
+# 注意用 RLock：会话过期时 remote_mcp_call 会递归重试一次，普通 Lock 会自锁
+_remote_mcp = {"session": "", "lock": threading.RLock()}
+
+
+def remote_mcp_config():
+    """MCP 地址与 token：环境变量优先，其次 ~/.workbuddy/mcp.json 里的 mind-map"""
+    url, token = REMOTE_MCP_URL, REMOTE_MCP_TOKEN
+    if url and token:
+        return url, token
+    try:
+        path = os.path.join(WORKBUDDY_DIR, "mcp.json")
+        with open(path, "r", encoding="utf-8") as fh:
+            entry = ((json.load(fh).get("mcpServers") or {}).get("mind-map") or {})
+        url = url or (entry.get("url") or "").strip()
+        token = token or ((entry.get("headers") or {}).get("Authorization") or "").strip()
+    except Exception:
+        pass
+    return url, token
+
+
+def remote_mcp_ready():
+    if not REMOTE_MCP_ENABLED:
+        return False
+    url, token = remote_mcp_config()
+    return bool(url and token)
+
+
+def _remote_mcp_post(payload, timeout=None):
+    url, token = remote_mcp_config()
+    if not url:
+        raise RuntimeError("没有配置 MCP 地址（BRIDGE_MCP_URL 或 mcp.json 的 mind-map）")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
+    if token:
+        headers["Authorization"] = token if token.lower().startswith("bearer ") else "Bearer " + token
+    sid = _remote_mcp.get("session")
+    if sid:
+        headers["mcp-session-id"] = sid
+    req = urllib.request.Request(
+        url, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=headers, method="POST")
+    ctx = None
+    if REMOTE_MCP_INSECURE:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    with urllib.request.urlopen(req, timeout=timeout or REMOTE_MCP_TIMEOUT, context=ctx) as r:
+        new_sid = r.headers.get("mcp-session-id")
+        if new_sid:
+            _remote_mcp["session"] = new_sid
+        return r.read().decode("utf-8", "replace")
+
+
+def _remote_mcp_parse(raw):
+    """MCP 回包可能是纯 JSON，也可能是 SSE（data: {...}）"""
+    text = (raw or "").strip()
+    if not text:
+        return None
+    if text.startswith("{"):
+        try:
+            return json.loads(text)
+        except Exception:
+            return None
+    for line in text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        chunk = line[5:].strip()
+        if not chunk:
+            continue
+        try:
+            return json.loads(chunk)
+        except Exception:
+            continue
+    return None
+
+
+def _remote_mcp_rpc(method, params=None, notify=False, timeout=None):
+    body = {"jsonrpc": "2.0", "method": method}
+    if not notify:
+        body["id"] = int(time.time() * 1000) % 1000000
+    if params is not None:
+        body["params"] = params
+    return _remote_mcp_parse(_remote_mcp_post(body, timeout))
+
+
+def remote_mcp_init():
+    res = _remote_mcp_rpc("initialize", {
+        "protocolVersion": "2024-11-05",
+        "capabilities": {},
+        "clientInfo": {"name": "workbuddy-bridge", "version": "1.0"},
+    })
+    if not res or "result" not in res:
+        return False, json.dumps(res or {}, ensure_ascii=False)[:200]
+    _remote_mcp_rpc("notifications/initialized", {}, notify=True)
+    return True, ""
+
+
+def remote_mcp_call(tool, args, timeout=None, retry_session=True):
+    """调一个 MCP 工具；会话过期（-32001）自动重连一次。"""
+    with _remote_mcp["lock"]:
+        if not _remote_mcp.get("session"):
+            ok, err = remote_mcp_init()
+            if not ok:
+                return False, "MCP 握手失败：" + (err or "无响应")
+        res = _remote_mcp_rpc("tools/call", {"name": tool, "arguments": args}, timeout=timeout)
+        if res is None:
+            return False, "MCP 无响应（网络或证书问题）"
+        if "error" in res:
+            err = res["error"] or {}
+            msg = err.get("message") if isinstance(err, dict) else str(err)
+            code = err.get("code") if isinstance(err, dict) else ""
+            expired = code == -32001 or "session" in str(msg).lower()
+            if expired and retry_session:
+                _remote_mcp["session"] = ""
+                return remote_mcp_call(tool, args, timeout=timeout, retry_session=False)
+            return False, "%s（%s）" % (msg, code)
+        content = (res.get("result") or {}).get("content") or []
+        text = ""
+        if content and isinstance(content[0], dict):
+            text = content[0].get("text") or ""
+        if (res.get("result") or {}).get("isError"):
+            return False, (text or "MCP 工具返回错误")[:300]
+        try:
+            return True, json.loads(text)
+        except Exception:
+            return True, {"__text__": text}
+
+
+# MCP 的英文报错翻成人能看的话
+def friendly_attach_error(msg):
+    low = str(msg).lower()
+    if "not found" in low or "不存在" in str(msg) or "找不到" in str(msg):
+        return "节点在服务端还找不到（刚建的节点可能还没同步，或 uid 不对）"
+    if "authorit" in low or "permission" in low or "forbidden" in low or "401" in low or "403" in low:
+        return "没有权限（检查 MCP token 是否还有效）"
+    if "session" in low:
+        return "MCP 会话失效（会自动重连，仍失败请重试）"
+    if "invalid arguments" in low:
+        return "MCP 参数被拒：" + str(msg)[:200]
+    return str(msg)[:300]
+
+
+# 只有「节点还没同步到服务端」这类错误值得重试；参数错、权限错重试也没用
+RETRY_ERROR_HINTS = ("not found", "不存在", "找不到", "no node", "unknown node", "node_uid")
+
+
+def remote_mcp_upload(room_key, node_uid, name, mime, b64, confirm=True, retries=3):
+    """单个文件挂到节点上。节点刚建好时服务端可能还没同步，这种情况等一会儿重试。"""
+    args = {
+        "room_key": room_key,
+        "node": node_uid,
+        "file_name": name,
+        "content_base64": b64,
+        "confirm_sop_change": bool(confirm),
+    }
+    if mime:
+        args["mime_type"] = mime
+    last = ""
+    for i in range(max(1, retries)):
+        ok, res = remote_mcp_call("upload_attachment", args)
+        if ok and isinstance(res, dict) and res.get("ok"):
+            return True, (res.get("attachment") or {})
+        last = res if isinstance(res, str) else json.dumps(res, ensure_ascii=False)[:300]
+        retryable = any(hint in str(last).lower() for hint in RETRY_ERROR_HINTS)
+        if not retryable or i + 1 >= retries:
+            break
+        time.sleep(1.0)
+    return False, last or "upload_attachment 失败"
+
+
+def attach_files_to_map(room_key, node_uid, files, confirm=True):
+    """把一批文件（{name, mimeType, base64}）经 MCP 挂到脑图节点上。"""
+    results = []
+    for item in files or []:
+        name = str(item.get("name") or "").strip()
+        b64 = item.get("base64") or ""
+        if not name or not b64:
+            results.append({"name": name, "ok": False, "error": "缺少 name 或 base64"})
+            continue
+        mime = str(item.get("mimeType") or "").strip() or (
+            mimetypes.guess_type(name)[0] or "")
+        size = len(b64) * 3 // 4
+        if size > ATTACH_MAX_BYTES:
+            results.append({"name": name, "ok": False,
+                            "error": "超过 %dMB，没挂" % (ATTACH_MAX_BYTES // 1024 // 1024)})
+            continue
+        ok, info = remote_mcp_upload(room_key, node_uid, name, mime, b64, confirm)
+        if not ok:
+            results.append({"name": name, "ok": False,
+                            "error": friendly_attach_error(info)})
+            continue
+        text = info.get("extractedText") or ""
+        results.append({
+            "name": name,
+            "ok": True,
+            "attachmentId": info.get("id") or "",
+            "fileName": info.get("fileName") or name,
+            "mimeType": info.get("mimeType") or mime,
+            "status": info.get("status") or "",
+            "byteSize": info.get("byteSize") or size,
+            "extractedText": text[:ATTACH_TEXT_KEEP],
+        })
+    return results
+
+
+# ---------------------------------------------------------------------------
+# MCP 服务端（Streamable HTTP，零依赖）：桥接自己也是一条 MCP 链接
 # ---------------------------------------------------------------------------
 
 MCP_PROTOCOL_VERSION = "2025-06-18"
@@ -474,6 +933,22 @@ def mcp_tools():
                 "properties": {
                     "id": {"type": "string", "description": "任务 id"},
                     "gateway": {"type": "string", "description": "该任务所在会话，不填用首个可用"},
+                },
+                "required": ["id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "job_artifacts",
+            "description": "列出某个任务产出的文件（从它的完整回答里解析路径并校验存在）。"
+                           "content=true 时连同文件内容（base64）一起返回，便于挂到脑图节点。"
+                           "只允许读取执行主机工作目录内的文件。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "任务 id"},
+                    "gateway": {"type": "string", "description": "该任务所在会话，不填用首个可用"},
+                    "content": {"type": "boolean", "description": "是否带回文件内容，默认 false"},
                 },
                 "required": ["id"],
                 "additionalProperties": False,
@@ -569,6 +1044,17 @@ def mcp_call(name, args, explicit_password=None):
         info = job_full_text(g, job_id)
         info["gateway"] = g["url"]
         info["chars"] = len(info["text"])
+        return json.dumps(info, ensure_ascii=False), False
+
+    if name == "job_artifacts":
+        job_id = (args.get("id") or "").strip()
+        if not job_id:
+            return "id 不能为空", True
+        g = pick_gateway(args.get("gateway"), explicit_password)
+        if not g:
+            return "本机没有可用的 WorkBuddy 会话", True
+        info = job_artifacts(g, job_id, bool(args.get("content", False)))
+        info["gateway"] = g["url"]
         return json.dumps(info, ensure_ascii=False), False
 
     if name == "stop_job":
@@ -746,12 +1232,31 @@ button.mini{margin:0;width:auto;padding:3px 9px;font-size:12px;background:#3a3a3
 .job .result{margin-top:6px;font-size:13px;white-space:pre-wrap;word-break:break-word}
 .job .actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
 .full{margin-top:8px;padding:10px;background:#1f1f1e;border:1px solid var(--line);
-      border-radius:6px;font-size:12.5px;line-height:1.65;white-space:pre-wrap;
+      border-radius:6px;font-size:12.5px;line-height:1.65;
       word-break:break-word;max-height:380px;overflow:auto}
-.full .head{color:var(--dim);font-size:12px;margin-bottom:6px}
+.full .head,#result .head{color:var(--dim);font-size:12px;margin-bottom:6px}
 #result{max-height:420px;overflow:auto;background:#1f1f1e;border:1px solid var(--line);
-        border-radius:8px;padding:10px;font-size:12.5px;line-height:1.65}
+        border-radius:8px;padding:10px;font-size:12.5px;line-height:1.65;word-break:break-word}
 #result:empty{display:none}
+/* Markdown 渲染后的排版（.full / #result 里） */
+.md h1,.md h2,.md h3,.md h4,.md h5,.md h6{margin:12px 0 6px;font-weight:600;line-height:1.35}
+.md h1{font-size:15.5px}.md h2{font-size:14.5px}.md h3{font-size:13.5px}.md h4,.md h5,.md h6{font-size:13px}
+.md p{margin:0 0 8px}
+.md ul,.md ol{margin:0 0 8px;padding-left:20px}
+.md li{margin:2px 0}
+.md pre{margin:8px 0;padding:10px;background:#141618;border-radius:6px;overflow:auto}
+.md pre code{background:transparent;padding:0}
+.md code{background:#2a2a28;padding:1px 4px;border-radius:3px;font-family:Consolas,'SF Mono',monospace}
+.md table{width:100%;margin:8px 0;border-collapse:collapse;font-size:12px}
+.md th,.md td{padding:4px 7px;border:1px solid var(--line);text-align:left;
+      vertical-align:top;word-break:break-word}
+.md th{background:#2a2a28;font-weight:600}
+.md blockquote{margin:8px 0;padding:4px 10px;border-left:3px solid var(--line);color:var(--dim)}
+.md hr{margin:10px 0;border:0;border-top:1px solid var(--line)}
+.md a{color:var(--accent)}
+.md img{max-width:100%}
+.md > :first-child{margin-top:0}
+.md > :last-child{margin-bottom:0}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;
      vertical-align:middle;background:var(--dim)}
 .s-working{background:var(--warn)}.s-done{background:var(--ok)}
@@ -872,6 +1377,82 @@ function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
     {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+
+// ---- 轻量 Markdown 渲染（先 esc 再套格式，不引外部库）----
+function mdInline(s) {
+  let t = esc(s);
+  t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
+  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  t = t.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+  t = t.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  return t;
+}
+function mdRow(line) {
+  return line.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(s => s.trim());
+}
+function mdToHtml(src) {
+  const lines = String(src == null ? '' : src).replace(/\r\n?/g, '\n').split('\n');
+  const out = [];
+  let i = 0, list = null, para = [];
+  const flushPara = () => {
+    if (para.length) {
+      out.push('<p>' + mdInline(para.join('\n')).replace(/\n/g, '<br>') + '</p>');
+      para = [];
+    }
+  };
+  const closeList = () => { if (list) { out.push('</' + list + '>'); list = null; } };
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^```/.test(line)) {                       // 围栏代码块
+      flushPara(); closeList();
+      const buf = [];
+      i += 1;
+      while (i < lines.length && !/^```/.test(lines[i])) { buf.push(lines[i]); i += 1; }
+      i += 1;
+      out.push('<pre><code>' + esc(buf.join('\n')) + '</code></pre>');
+      continue;
+    }
+    if (/\|/.test(line) && i + 1 < lines.length &&
+        /^\s*\|?[\s:|-]*-[\s:|-]*\|?[\s:|-]*$/.test(lines[i + 1])) {   // 表格
+      flushPara(); closeList();
+      const head = mdRow(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && /\|/.test(lines[i]) && lines[i].trim()) { rows.push(mdRow(lines[i])); i += 1; }
+      out.push('<table><thead><tr>' + head.map(c => '<th>' + mdInline(c) + '</th>').join('') + '</tr></thead><tbody>'
+        + rows.map(r => '<tr>' + r.map(c => '<td>' + mdInline(c) + '</td>').join('') + '</tr>').join('')
+        + '</tbody></table>');
+      continue;
+    }
+    const h = line.match(/^(#{1,6})\s+(.*)$/);     // 标题
+    if (h) {
+      flushPara(); closeList();
+      out.push('<h' + h[1].length + '>' + mdInline(h[2]) + '</h' + h[1].length + '>');
+      i += 1; continue;
+    }
+    if (/^\s*([-*_])\s*\1\s*\1[\s\-*_]*$/.test(line)) { flushPara(); closeList(); out.push('<hr>'); i += 1; continue; }
+    if (/^\s*>\s?/.test(line)) {                   // 引用
+      flushPara(); closeList();
+      const buf = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) { buf.push(lines[i].replace(/^\s*>\s?/, '')); i += 1; }
+      out.push('<blockquote>' + mdInline(buf.join('\n')).replace(/\n/g, '<br>') + '</blockquote>');
+      continue;
+    }
+    const li = line.match(/^\s*([-*+]|\d+[.)])\s+(.*)$/);   // 列表
+    if (li) {
+      flushPara();
+      const kind = /^\d/.test(li[1]) ? 'ol' : 'ul';
+      if (list !== kind) { closeList(); out.push('<' + kind + '>'); list = kind; }
+      out.push('<li>' + mdInline(li[2]) + '</li>');
+      i += 1; continue;
+    }
+    if (!line.trim()) { flushPara(); closeList(); i += 1; continue; }
+    para.push(line); i += 1;
+  }
+  flushPara(); closeList();
+  return out.join('\n');
+}
 function fmt(ts){ return ts ? new Date(ts).toLocaleTimeString('zh-CN') : ''; }
 
 const fullCache = {};   // id -> 完整回答
@@ -903,7 +1484,9 @@ async function loadFull(id) {
   const res = await fetchFull(id);
   if (res.ok) {
     fullCache[id] = res.text;
-    box.textContent = '全文 ' + res.chars + ' 字（来源 ' + res.source + '）\n\n' + res.text;
+    box.className = 'full md';
+    box.innerHTML = '<div class="head">全文 ' + res.chars + ' 字（来源 ' + esc(res.source) + '）</div>'
+      + mdToHtml(res.text);
   } else {
     box.textContent = '取全文失败：' + res.error;
     fullOpen[id] = false;
@@ -920,8 +1503,10 @@ function copyFull(id) {
 
 function fullBox(id) {
   const open = fullOpen[id] ? 'block' : 'none';
-  const body = fullCache[id] ? esc(fullCache[id]) : '';
-  return '<div class="full" id="full-' + esc(id) + '" style="display:' + open + '">'
+  const body = fullCache[id]
+    ? '<div class="head">全文 ' + fullCache[id].length + ' 字</div>' + mdToHtml(fullCache[id])
+    : '';
+  return '<div class="full md" id="full-' + esc(id) + '" style="display:' + open + '">'
     + body + '</div>';
 }
 
@@ -931,7 +1516,10 @@ async function fillTopFull(cur) {
   const res = await fetchFull(cur.id);
   if (res.ok) {
     fullCache[cur.id] = res.text;
-    $('#result').textContent = '全文 ' + res.chars + ' 字（来源 ' + res.source + '）\n\n' + res.text;
+    const box = $('#result');
+    box.className = 'result md';
+    box.innerHTML = '<div class="head">全文 ' + res.chars + ' 字（来源 ' + esc(res.source) + '）</div>'
+      + mdToHtml(res.text);
   }
 }
 
@@ -946,7 +1534,10 @@ async function poll() {
       const st = cur.state || cur.status || '';
       const running = ['working','busy','active','pending'].includes(st) || cur.alive === true;
       if (!running && fullCache[cur.id]) {
-        $('#result').textContent = '全文 ' + fullCache[cur.id].length + ' 字\n\n' + fullCache[cur.id];
+        const box = $('#result');
+        box.className = 'result md';
+        box.innerHTML = '<div class="head">全文 ' + fullCache[cur.id].length + ' 字</div>'
+          + mdToHtml(fullCache[cur.id]);
       } else {
         $('#result').textContent = cur.detail
           || (st === 'done' ? '已完成，没有文本结果' : ('执行中… ' + st));
@@ -1175,6 +1766,16 @@ class Handler(BaseHTTPRequestHandler):
             gws = resolve_gateways(self.explicit_password)
             return self._json(gateways_payload(gws))
 
+        if self.path.startswith("/api/job-artifacts"):
+            from urllib.parse import parse_qs, urlparse
+            q = parse_qs(urlparse(self.path).query)
+            g = self._pick_gateway((q.get("gateway") or [None])[0])
+            job_id = ((q.get("id") or [""])[0] or "").strip()
+            if not g or not job_id:
+                return self._json({"ok": False, "error": "参数不完整"})
+            want = ((q.get("content") or ["1"])[0] or "1").lower()
+            return self._json(job_artifacts(g, job_id, want not in ("0", "false", "no")))
+
         if self.path.startswith("/api/transcript"):
             from urllib.parse import parse_qs, urlparse
             q = parse_qs(urlparse(self.path).query)
@@ -1212,6 +1813,42 @@ class Handler(BaseHTTPRequestHandler):
             ok, payload = dispatch_to_gateway(g, p.get("prompt") or "", p.get("name"),
                                               p.get("cwd"))
             return self._json(payload)
+
+        if self.path == "/api/attach":
+            p = self._read()
+            room = str(p.get("roomKey") or "").strip()
+            node = str(p.get("nodeUid") or "").strip()
+            files = p.get("files") or []
+            if not remote_mcp_ready():
+                return self._json({
+                    "ok": False,
+                    "error": "桥接没配 MCP 附件通道（BRIDGE_MCP_URL/BRIDGE_MCP_TOKEN，"
+                             "或 ~/.workbuddy/mcp.json 里的 mind-map）",
+                })
+            if not room or not node:
+                return self._json({"ok": False, "error": "缺少 roomKey / nodeUid"})
+            if not files:
+                return self._json({"ok": False, "error": "没有要挂的文件"})
+            try:
+                results = attach_files_to_map(room, node, files,
+                                              p.get("confirmSopChange", True))
+            except Exception as e:
+                return self._json({"ok": False, "error": "%s: %s" % (type(e).__name__, e)})
+            ok_files = [f for f in results if f.get("ok")]
+            return self._json({
+                "ok": bool(ok_files),
+                "via": "mcp",
+                "attachments": results,
+                "failed": [f for f in results if not f.get("ok")],
+            })
+
+        if self.path == "/api/artifacts":
+            p = self._read()
+            g = self._pick_gateway(p.get("gateway"))
+            if not g:
+                return self._json({"ok": False, "error": "目标网关不可用（WorkBuddy 是否在运行？）"})
+            return self._json(read_artifacts_for_gateway(
+                g, p.get("paths") or [], p.get("content", True), p.get("cwd") or ""))
 
         if self.path == "/api/stop":
             p = self._read()
@@ -1321,6 +1958,14 @@ def main():
         log("  [!] 脑图如果部署在服务器上（公网域名），浏览器点运行会被 CORS 拦，")
         log("      要加：--allow-origin \"*.你的域名\" 或设环境变量 BRIDGE_ALLOW_ORIGIN")
     log("  MCP 链接    http://127.0.0.1:%d/mcp  （Streamable HTTP）" % args.port)
+    mcp_url, _mcp_token = remote_mcp_config()
+    if REMOTE_MCP_ENABLED and mcp_url:
+        log("  附件通道    经 MCP 挂回脑图 → %s" % mcp_url)
+    elif REMOTE_MCP_ENABLED:
+        log("  附件通道    未配置（设 BRIDGE_MCP_URL/BRIDGE_MCP_TOKEN，"
+            "或让 ~/.workbuddy/mcp.json 里有 mind-map）")
+    else:
+        log("  附件通道    已关闭（BRIDGE_ATTACH=0），前端会退回协同服务上传")
     log("  停止服务    Ctrl + C")
     log("=" * 60)
 

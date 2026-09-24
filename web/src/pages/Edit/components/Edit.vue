@@ -107,7 +107,20 @@ import ShortcutKey from './ShortcutKey.vue'
 import Contextmenu from './Contextmenu.vue'
 import RichTextToolbar from './RichTextToolbar.vue'
 import NodeNoteContentShow from './NodeNoteContentShow.vue'
-import { getData, getDataAsync, getConfig, storeData } from '@/api'
+import {
+  getData,
+  getDataAsync,
+  getConfig,
+  storeData,
+  getPendingRoomDraft,
+  clearPendingRoomDraft
+} from '@/api'
+import {
+  shouldRestoreDraft,
+  draftRestoredTip,
+  isDraftFallbackEnabled,
+  COLLAB_DRAFT_FALLBACK_MS
+} from '@/utils/collabDraftFallback'
 import Navigator from './Navigator.vue'
 import NodeImgPreview from './NodeImgPreview.vue'
 import SidebarTrigger from './SidebarTrigger.vue'
@@ -145,6 +158,8 @@ import NodeAttachmentPreview from './NodeAttachmentPreview.vue'
 import CooperateDialog from './CooperateDialog.vue'
 import MapRefDialog from './MapRefDialog.vue'
 import { normalizeMapRef } from '@/utils/mapRefNav'
+import { writeJobResultToMap, createJobContainer } from '@/utils/jobResultWriter'
+import { roomFromLocation } from '@/utils/roomLocation'
 
 // 注册插件
 MindMap.usePlugin(MiniMap)
@@ -223,6 +238,7 @@ export default {
       isLargeMap: false,
       storeDataTimer: null,
       pendingStoreData: null,
+      collabDraftFallbackTimer: null,
       prevImg: '',
       storeConfigTimer: null,
       showDragMask: false,
@@ -311,6 +327,9 @@ export default {
     }
     this.$bus.$on('execCommand', this.execCommand)
     this.$bus.$on('applySubMapToNode', this.applySubMapToNode)
+    this.$bus.$on('write_job_result', this.onWriteJobResult)
+    this.$bus.$on('create_job_container', this.onCreateJobContainer)
+    this.$bus.$on('read_generalization', this.onReadGeneralization)
     this.$bus.$on('paddingChange', this.onPaddingChange)
     this.$bus.$on('export', this.export)
     this.$bus.$on('setData', this.setData)
@@ -323,8 +342,12 @@ export default {
     this.$bus.$on('history-restored', this.onHistoryRestored)
     this.$bus.$on('prepare_reload', this.prepareReload)
     window.addEventListener('resize', this.handleResize)
+    // 房间模式下协作挂了不能等于"图没了"：等一会儿还没连上就用本地留底恢复
+    this.startCollabDraftFallback()
   },
+
   beforeDestroy() {
+    this.stopCollabDraftFallback()
     if (this.storeDataTimer) {
       clearTimeout(this.storeDataTimer)
       this.storeDataTimer = null
@@ -347,6 +370,9 @@ export default {
     this.stopImportProgressPoll()
     this.$bus.$off('execCommand', this.execCommand)
     this.$bus.$off('applySubMapToNode', this.applySubMapToNode)
+    this.$bus.$off('write_job_result', this.onWriteJobResult)
+    this.$bus.$off('create_job_container', this.onCreateJobContainer)
+    this.$bus.$off('read_generalization', this.onReadGeneralization)
     this.$bus.$off('paddingChange', this.onPaddingChange)
     this.$bus.$off('export', this.export)
     this.$bus.$off('setData', this.setData)
@@ -368,6 +394,57 @@ export default {
     }
   },
   methods: {
+  /**
+   * 协作服务连不上时的数据兜底。
+   *
+   * 页面带房间号时，前端把持久化整个交给协作服务（`api` 的 storeData 在协作会话里
+   * 不写 localStorage/IndexedDB）。协作服务一挂（nginx 502），那批改动就只在内存里，
+   * 刷新/重新部署即消失。现在协作会话也会本地留底，这里负责恢复出来。
+   */
+  startCollabDraftFallback() {
+    this.stopCollabDraftFallback()
+    if (!roomFromLocation(this.$route)) return
+    if (!isDraftFallbackEnabled(window)) return
+    this.collabDraftFallbackTimer = setTimeout(() => {
+      this.collabDraftFallbackTimer = null
+      this.restoreCollabDraftIfNeeded()
+    }, COLLAB_DRAFT_FALLBACK_MS)
+  },
+
+  stopCollabDraftFallback() {
+    if (this.collabDraftFallbackTimer) {
+      clearTimeout(this.collabDraftFallbackTimer)
+      this.collabDraftFallbackTimer = null
+    }
+  },
+
+  restoreCollabDraftIfNeeded() {
+    if (!this.mindMap || typeof this.mindMap.setData !== 'function') return
+    const state = this.$store && this.$store.state
+    const live =
+      !!state &&
+      (state.collabPhase === 'LIVE' || state.cooperateStatus === 'connected')
+    const draft = getPendingRoomDraft()
+    const current =
+      typeof this.mindMap.getData === 'function'
+        ? this.mindMap.getData(true)
+        : null
+    if (!shouldRestoreDraft({ live, draft, root: current && current.root })) {
+      return
+    }
+    try {
+      this.mindMap.setData(draft.root)
+      clearPendingRoomDraft()
+      this.$message.warning({
+        message: draftRestoredTip(draft),
+        duration: 0,
+        showClose: true
+      })
+    } catch (err) {
+      console.warn('[edit] restore local draft failed:', err.message || err)
+    }
+  },
+
     ...mapMutations(['setLocalConfig']),
 
     onHistoryRestored(restored) {
@@ -831,12 +908,60 @@ export default {
       if (!this.mindMap) return
       this.mindMap.on('node_tree_render_start', this.syncCanvasDarkBackground)
       this.mindMap.on('view_theme_change', this.onViewThemeChange)
+      this.mindMap.on('node_click', this.onGeneralizationNodeClick)
+      this.mindMap.on('node_tree_render_end', this.markGeneralizationClickable)
     },
 
     unbindCanvasThemeEvents() {
       if (!this.mindMap) return
       this.mindMap.off('node_tree_render_start', this.syncCanvasDarkBackground)
       this.mindMap.off('view_theme_change', this.onViewThemeChange)
+      this.mindMap.off('node_click', this.onGeneralizationNodeClick)
+      this.mindMap.off('node_tree_render_end', this.markGeneralizationClickable)
+    },
+
+    /**
+     * 概要点不是一个真正的节点，不能当「运行」的落点：
+     * 点它之后把选中切回它所属的那个节点（点概要 = 选中「按它继续」，
+     * 派发由工具栏「运行」按钮做；这里只负责把选中状态掰回来 ——
+     * active() 是在 emit 之后同步跑的，所以推到下一 tick）。
+     */
+    onGeneralizationNodeClick(node) {
+      if (!node || !node.isGeneralization || !this.mindMap) return
+      const owner = node.generalizationBelongNode || node.parent
+      if (!owner) return
+      this.$nextTick(() => {
+        const renderer = this.mindMap && this.mindMap.renderer
+        if (!renderer) return
+        if (renderer.clearActiveNodeList) renderer.clearActiveNodeList()
+        if (renderer.addNodeToActiveList) renderer.addNodeToActiveList(owner)
+        if (renderer.emitNodeActiveEvent) renderer.emitNodeActiveEvent(owner)
+      })
+    },
+
+    /** 概要点做成「像能点的」：手型鼠标 + 悬停提示（渲染完顺手刷一遍） */
+    markGeneralizationClickable() {
+      const renderer = this.mindMap && this.mindMap.renderer
+      if (!renderer || !renderer.root) return
+      // 渲染结束事件比较密，200ms 内最多刷一次光标
+      const now = Date.now()
+      if (now - (this.genCursorAt || 0) < 200) return
+      this.genCursorAt = now
+      const walk = node => {
+        if (!node) return
+        const list = node._generalizationList || []
+        list.forEach(item => {
+          const gen = item && item.generalizationNode
+          const el = gen && gen.group && gen.group.node
+          if (!el || !el.style) return
+          if (el.style.cursor !== 'pointer') el.style.cursor = 'pointer'
+          const tip = '点这里选中这条概要，再点工具栏「运行」接着执行'
+          if (el.getAttribute('title') !== tip) el.setAttribute('title', tip)
+        })
+        const children = node.children || []
+        children.forEach(walk)
+      }
+      walk(renderer.root)
     },
 
     // 获取思维导图数据，实际应该调接口获取
@@ -1406,6 +1531,113 @@ export default {
         result.error = (err && err.message) || 'apply failed'
         return result.ok
       }
+    },
+
+    /**
+     * 把一次运行的结果写回导图：运行节点下追加「运行输出 · 时间」子分支，
+     * 完整输出与产物文件作为附件挂在上面。
+     * 调用方（Toolbar）传一个 result 对象进来拿回执，跟 applySubMapToNode 一个套路。
+     */
+    /**
+     * 派发前先在运行节点下建「任务 · 时间」容器（D 节点走这条）。
+     * 这次的任务内容与结果都挂在这个容器节点下，一次运行一个，好追溯。
+     */
+    onCreateJobContainer(payload) {
+      const result =
+        payload && payload.result && typeof payload.result === 'object'
+          ? payload.result
+          : { ok: false }
+      const data = payload || {}
+      result.promise = (async () => {
+        try {
+          const out = await createJobContainer({
+            mindMap: this.mindMap,
+            nodeUid: data.nodeUid,
+            prompt: data.prompt
+          })
+          Object.assign(result, { ok: true }, out, { node: undefined })
+        } catch (err) {
+          result.ok = false
+          result.error = (err && err.message) || '建任务节点失败'
+        }
+        return result
+      })()
+      return result.promise
+    },
+
+    /**
+     * 给 Toolbar 读一条概要的最新文字（概要点自身的文字存在所属节点的
+     * `generalization` 数组里）。点概要时记下 genUid，这里按它取最新的，
+     * 所以双击改完文字再点运行，用的就是新文字。
+     */
+    onReadGeneralization(payload) {
+      const result =
+        payload && payload.result && typeof payload.result === 'object'
+          ? payload.result
+          : { ok: false }
+      const data = payload || {}
+      result.promise = (async () => {
+        try {
+          const renderer = this.mindMap && this.mindMap.renderer
+          const node =
+            renderer && typeof renderer.findNodeByUid === 'function'
+              ? renderer.findNodeByUid(String(data.nodeUid || ''))
+              : null
+          if (!node) throw new Error('找不到这个节点')
+          const raw = node.getData('generalization')
+          const list = Array.isArray(raw) ? raw : raw ? [raw] : []
+          if (!list.length) {
+            result.ok = true
+            result.text = ''
+            return result
+          }
+          const wanted = String(data.genUid || '')
+          const hit = wanted
+            ? list.find(item => String((item && item.uid) || '') === wanted)
+            : null
+          const target = hit || list[list.length - 1]
+          result.ok = true
+          result.text = String((target && target.text) || '')
+          result.uid = String((target && target.uid) || '')
+          result.count = list.length
+        } catch (err) {
+          result.ok = false
+          result.error = (err && err.message) || '读取概要失败'
+        }
+        return result
+      })()
+      return result.promise
+    },
+
+    onWriteJobResult(payload) {
+      const result =
+        payload && payload.result && typeof payload.result === 'object'
+          ? payload.result
+          : { ok: false }
+      const data = payload || {}
+      // 调用方（Toolbar）拿 result.promise 等回执，emit 本身不等异步
+      result.promise = (async () => {
+        try {
+          if (!this.mindMap) throw new Error('导图还没准备好')
+          const roomKey = data.roomKey || roomFromLocation(this.$route) || ''
+          const out = await writeJobResultToMap({
+            mindMap: this.mindMap,
+            nodeUid: data.nodeUid,
+            markdown: data.markdown,
+            prompt: data.prompt,
+            roomKey,
+            artifacts: data.artifacts,
+            bridgeAttach: data.bridgeAttach,
+            onProgress: data.onProgress
+          })
+          Object.assign(result, { ok: true }, out)
+        } catch (err) {
+          result.ok = false
+          result.error = (err && err.message) || '写入导图失败'
+        }
+        return result
+      })()
+      return result.promise
     },
 
     // 导出

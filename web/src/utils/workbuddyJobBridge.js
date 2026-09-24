@@ -206,9 +206,11 @@ export async function resolveJobHosts() {
   }
 
   const pageHostIp = pageHost()
-  const server = hubRes.peers.find(p => p.ip === pageHostIp)
+  // 通讯页里可能有一条过期的 127.0.0.1 登记；回环地址一律以本机探测为准，别让它盖掉探测结果
+  const server = hubRes.peers.find(
+    p => p.ip === pageHostIp && !isLoopbackIp(p.ip)
+  )
   if (server) push(withRole(server, '主服务'))
-  // 主服务的 127.0.0.1 登记项由本机探测代替
   hubRes.peers
     .filter(p => !isLoopbackIp(p.ip))
     .forEach(p => push(p))
@@ -416,11 +418,14 @@ export async function listHostJobs({ host, gateway } = {}) {
  * 取某个任务的完整回答。
  * 任务列表里的 detail 只有一行摘要（~100 字），全文在桥接的 /api/transcript。
  */
-export async function fetchJobTranscript({ host, jobId } = {}) {
+export async function fetchJobTranscript({ host, gateway, jobId } = {}) {
   if (!jobId) return { ok: false, error: '缺少任务 id' }
   const target = normalizeHost(host || {})
   const local = isLoopbackIp(target.ip) || !target.ip
-  const query = `?id=${encodeURIComponent(jobId)}`
+  // 带上 gateway：这台电脑可能有多个会话，不指定会取到别的会话的同名任务
+  const query =
+    `?id=${encodeURIComponent(jobId)}` +
+    (gateway ? `&gateway=${encodeURIComponent(gateway)}` : '')
 
   const res = await request(
     `${local ? getJobBridgeBase() : hostBase(target)}/api/transcript${query}`,
@@ -440,6 +445,81 @@ export async function fetchJobTranscript({ host, jobId } = {}) {
     }
   }
   return { ok: false, error: pickError(res, '拿不到完整回答') }
+}
+
+/**
+ * 这次运行产出的文件：桥接从任务的完整回答里解析路径、校验存在，
+ * content=true 时把内容（base64）也带回来，供挂到脑图节点上。
+ * 只允许读取执行主机工作目录内的文件。
+ */
+export async function fetchJobArtifacts({
+  host,
+  gateway,
+  jobId,
+  content = true
+} = {}) {
+  if (!jobId) return { ok: false, files: [], error: '缺少任务 id' }
+  const target = normalizeHost(host || {})
+  const local = isLoopbackIp(target.ip) || !target.ip
+  const query =
+    `?id=${encodeURIComponent(jobId)}` +
+    (gateway ? `&gateway=${encodeURIComponent(gateway)}` : '') +
+    `&content=${content ? 1 : 0}`
+  const res = await request(
+    `${local ? getJobBridgeBase() : hostBase(target)}/api/job-artifacts${query}`,
+    { timeout: 60000 }
+  )
+  if (res.ok && res.json && res.json.ok) {
+    return {
+      ok: true,
+      files: res.json.files || [],
+      cwd: res.json.cwd || '',
+      via: 'direct'
+    }
+  }
+  // 通讯页（comm.py）没有这个转发接口，其他主机只能直连
+  return { ok: false, files: [], error: pickError(res, '拿不到产物文件') }
+}
+
+/**
+ * 让执行主机上的桥接把附件**经 MCP**（upload_attachment）挂到脑图节点上。
+ * 这条路绕开页面同域的 /api/attachments/resumable + /api/files/<room>/attachments
+ * （那两条要经服务器 nginx 转到协同服务），服务器部署时更稳。
+ * 桥接自己从本地读产物；这里只负责把内容送过去。
+ */
+export async function attachFilesViaBridge({
+  host,
+  roomKey,
+  nodeUid,
+  files,
+  confirmSopChange = true
+} = {}) {
+  if (!roomKey) return { ok: false, error: '没有房间信息' }
+  if (!nodeUid) return { ok: false, error: '没有节点 uid' }
+  const list = (files || []).filter(item => item && item.name && item.base64)
+  if (!list.length) return { ok: false, error: '没有要挂的文件' }
+  const target = normalizeHost(host || {})
+  const local = isLoopbackIp(target.ip) || !target.ip
+  const res = await request(
+    `${local ? getJobBridgeBase() : hostBase(target)}/api/attach`,
+    {
+      method: 'POST',
+      body: { roomKey, nodeUid, files: list, confirmSopChange },
+      timeout: 180000
+    }
+  )
+  if (res.ok && res.json && res.json.ok) {
+    return {
+      ok: true,
+      attachments: res.json.attachments || [],
+      via: 'bridge-mcp'
+    }
+  }
+  return {
+    ok: false,
+    error: pickError(res, '经 MCP 挂附件失败'),
+    raw: res.json
+  }
 }
 
 /** 停止某台主机上的某个任务（comm.py 没有转发接口，只走直连） */

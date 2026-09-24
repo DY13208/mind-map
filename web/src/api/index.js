@@ -13,13 +13,18 @@ const IDB_NAME = 'mind-map-local'
 const IDB_STORE = 'drafts'
 const IDB_KEY = 'current'
 const IDB_TIMEOUT_MS = 5000
+// 房间模式下本地留底的节流间隔：协作是主通道，但本地也得有底，别每次改动都写一遍
+const COLLAB_DRAFT_MIN_INTERVAL_MS = 3000
 const JSON_PARSE_TIMEOUT_MS = 15000
 
 let mindMapData = null
 let localSaveVersion = 0
 let idb = null
 let skipHeavyLocalDraft = false
+let collabDraftAt = 0
 const LOCAL_DRAFT_NODE_LIMIT = 400
+// 房间模式下本地留底的草稿（协作连不上时的兜底），由 Edit.vue 决定要不要用它恢复
+let pendingRoomDraft = null
 
 function currentRoom() {
   try {
@@ -27,6 +32,19 @@ function currentRoom() {
   } catch (e) {
     return ''
   }
+}
+
+/** 草稿 key：有房间时按房间存，同一个浏览器开多个房间不会互相覆盖 */
+function draftKey() {
+  const room = currentRoom()
+  return room ? `room:${room}` : IDB_KEY
+}
+
+/** 协作模式下本地留底的那份草稿（没有就是 null） */
+export const getPendingRoomDraft = () => pendingRoomDraft
+
+export const clearPendingRoomDraft = () => {
+  pendingRoomDraft = null
 }
 
 function isCollabSession() {
@@ -72,22 +90,22 @@ function openDraftDb() {
   return promiseWithTimeout(openPromise, IDB_TIMEOUT_MS, 'IndexedDB open')
 }
 
-async function readDraft() {
+async function readDraft(key = IDB_KEY) {
   const db = await openDraftDb()
   const readPromise = new Promise((resolve, reject) => {
     const tx = db.transaction(IDB_STORE, 'readonly')
-    const req = tx.objectStore(IDB_STORE).get(IDB_KEY)
+    const req = tx.objectStore(IDB_STORE).get(key)
     req.onsuccess = () => resolve(req.result || null)
     req.onerror = () => reject(req.error)
   })
   return promiseWithTimeout(readPromise, IDB_TIMEOUT_MS, 'IndexedDB read')
 }
 
-async function writeDraft(data) {
+async function writeDraft(data, key = IDB_KEY) {
   const db = await openDraftDb()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(IDB_STORE, 'readwrite')
-    tx.objectStore(IDB_STORE).put(data, IDB_KEY)
+    tx.objectStore(IDB_STORE).put(data, key)
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
@@ -151,8 +169,17 @@ export const getDataAsync = async () => {
     mindMapData = placeholderMap()
     writeSession({ backend: 'collab', room: currentRoom(), at: Date.now() })
     clearLegacyLocalStorageTree()
+    // 协作连不上时要有底：把本地留底的草稿读出来备着。
+    // 这里**不自动采用**（会和 yjs 文档打架），由 Edit.vue 在确认协作没连上后再恢复。
+    try {
+      const draft = await readDraft(draftKey())
+      pendingRoomDraft = draft && draft.root ? draft : null
+    } catch (error) {
+      pendingRoomDraft = null
+    }
     return mindMapData
   }
+  pendingRoomDraft = null
   skipHeavyLocalDraft = false
   try {
     const draft = await readDraft()
@@ -218,7 +245,22 @@ export const storeData = data => {
         at: Date.now()
       })
       clearLegacyLocalStorageTree()
-      return
+      // ⚠️ 以前这里直接 return，**什么持久化都不做**：协作服务一挂（或断网），
+      // 刷新/重新部署后整张图就没了（服务端 502 时实测过）。
+      // 现在照样往本地 IndexedDB 留一份底（节流，别每次改动都写），
+      // 由 Edit.vue 在协作连不上时恢复出来。
+      const now = Date.now()
+      if (now - collabDraftAt < COLLAB_DRAFT_MIN_INTERVAL_MS) return
+      collabDraftAt = now
+      const saveVersion = ++localSaveVersion
+      return writeDraft(originData, draftKey())
+        .then(() => {
+          if (saveVersion !== localSaveVersion) return
+          pendingRoomDraft = null
+        })
+        .catch(error => {
+          console.log(error)
+        })
     }
     if (
       skipHeavyLocalDraft ||
