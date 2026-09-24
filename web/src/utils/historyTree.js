@@ -1,47 +1,55 @@
-// Iterative conversion also handles deep imported chains without stack overflow.
 export function historyGraphToMindMap(graph) {
-  const nested = graph && graph.data && Array.isArray(graph.children)
-  const nodes = graph && typeof graph === 'object' ? graph : {}
-  const keys = nested ? [] : Object.keys(nodes)
-  const rootUid = keys.find(uid => nodes[uid] && nodes[uid].isRoot) || keys[0]
-  const source = nested ? graph : nodes[rootUid]
-  if (!source)
-    return { data: { uid: 'root', text: '未命名', expand: true }, children: [] }
-  const seen = new Set()
-  const make = (node, uid) => ({
-    data: {
-      ...(node.data || {}),
-      uid: uid || (node.data && node.data.uid) || node.uid,
-      expand: !node.data || node.data.expand !== false
-    },
-    children: []
-  })
-  const root = make(source, nested ? null : rootUid)
-  seen.add(source)
-  const queue = [{ source, target: root }]
-  for (let i = 0; i < queue.length; i++) {
-    const item = queue[i]
-    for (const child of item.source.children || []) {
-      const node = typeof child === 'string' ? nodes[child] : child
-      if (!node || typeof node !== 'object' || seen.has(node)) continue
-      seen.add(node)
-      const target = make(node, typeof child === 'string' ? child : null)
-      item.target.children.push(target)
-      queue.push({ source: node, target })
-    }
+  if (graph && graph.data && Array.isArray(graph.children)) {
+    return expandNested(graph)
   }
-  return root
+  const nodes = graph && typeof graph === 'object' ? graph : {}
+  const rootUid =
+    Object.keys(nodes).find(uid => nodes[uid] && nodes[uid].isRoot) ||
+    Object.keys(nodes)[0]
+  if (!rootUid) {
+    return { data: { uid: 'root', text: '未命名', expand: true }, children: [] }
+  }
+  const seen = new Set()
+  function walk(uid) {
+    if (!uid || seen.has(uid) || !nodes[uid]) return null
+    seen.add(uid)
+    const node = nodes[uid]
+    const data = Object.assign({}, node.data || {}, { uid })
+    if (data.expand == null) data.expand = true
+    const children = (node.children || []).map(child =>
+      typeof child === 'string' ? walk(child) : expandNested(child)
+    ).filter(Boolean)
+    return { data, children }
+  }
+  return walk(rootUid) || expandNested(graph)
+}
+
+function expandNested(node) {
+  if (!node || typeof node !== 'object') return null
+  const data = Object.assign({}, node.data || {}, {
+    uid: (node.data && node.data.uid) || node.uid
+  })
+  if (data.expand == null) data.expand = true
+  const children = (node.children || []).map(expandNested).filter(Boolean)
+  return { data, children }
 }
 
 export function withExpandMode(tree, mode) {
-  const clone = historyGraphToMindMap(tree)
-  const queue = [clone]
-  for (let i = 0; i < queue.length; i++) {
-    const node = queue[i]
-    if (mode !== 'preserve') node.data.expand = mode !== 'collapsed' || i === 0
-    queue.push(...node.children)
+  let clone = { data: { uid: 'root', text: '未命名', expand: true }, children: [] }
+  try {
+    clone = JSON.parse(JSON.stringify(tree || clone))
+  } catch (err) {
+    return clone
   }
-  clone.data.expand = true
+  function walk(node, depth) {
+    if (!node || typeof node !== 'object') return
+    if (!node.data) node.data = {}
+    if (mode === 'collapsed') node.data.expand = depth === 0
+    else node.data.expand = true
+    ;(node.children || []).forEach(child => walk(child, depth + 1))
+  }
+  walk(clone, 0)
+  if (clone.data) clone.data.expand = true
   return clone
 }
 
@@ -73,11 +81,7 @@ export function historyDisplayName(item) {
   )
   if (match) {
     if (match[4] != null) return match[1] + ' ' + match[2] + ' ' + match[3]
-    return (
-      match[1] +
-      ' ' +
-      formatLocalDateTime(match[2] + 'T' + match[3] + ':00.000Z')
-    )
+    return match[1] + ' ' + formatLocalDateTime(match[2] + 'T' + match[3] + ':00.000Z')
   }
   return name || '未命名版本'
 }

@@ -1,5 +1,5 @@
 import Base from './Base'
-import { getNodeIndexInNodeList } from '../utils'
+import { walk, asyncRun, getNodeIndexInNodeList } from '../utils'
 import { CONSTANTS } from '../constants/constant'
 
 //  时间轴
@@ -13,25 +13,25 @@ class Timeline extends Base {
   //  布局
   doLayout(callback) {
     let task = [
-      async () => {
-        await this.computedBaseValue()
+      () => {
+        this.computedBaseValue()
       },
-      async () => {
-        await this.computedLeftTopValue()
+      () => {
+        this.computedLeftTopValue()
       },
-      async () => {
-        await this.adjustLeftTopValue()
+      () => {
+        this.adjustLeftTopValue()
       },
-      async () => {
+      () => {
         callback(this.root)
       }
     ]
-    return this.runLayout(task)
+    asyncRun(task)
   }
 
   //  遍历数据创建节点、计算根节点的位置，计算根节点的子节点的top值
   computedBaseValue() {
-    return this.walk(
+    walk(
       this.renderer.renderTree,
       null,
       (cur, parent, isRoot, layerIndex, index, ancestors) => {
@@ -76,7 +76,7 @@ class Timeline extends Base {
 
   //  遍历节点树计算节点的left、top
   computedLeftTopValue() {
-    return this.walk(
+    walk(
       this.root,
       null,
       (node, parent, isRoot, layerIndex) => {
@@ -114,7 +114,7 @@ class Timeline extends Base {
 
   //  调整节点left、top
   adjustLeftTopValue() {
-    return this.walk(
+    walk(
       this.root,
       null,
       (node, parent, isRoot, layerIndex) => {

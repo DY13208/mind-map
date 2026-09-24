@@ -1,5 +1,5 @@
 import Base from './Base'
-import { getNodeIndexInNodeList } from '../utils'
+import { walk, asyncRun, getNodeIndexInNodeList } from '../utils'
 import { CONSTANTS } from '../constants/constant'
 
 //  逻辑结构图
@@ -13,26 +13,26 @@ class LogicalStructure extends Base {
   //  布局
   doLayout(callback) {
     let task = [
-      async () => {
-        await this.computedBaseValue()
+      () => {
+        this.computedBaseValue()
       },
-      async () => {
-        await this.computedTopValue()
+      () => {
+        this.computedTopValue()
       },
-      async () => {
-        await this.adjustTopValue()
+      () => {
+        this.adjustTopValue()
       },
-      async () => {
+      () => {
         callback(this.root)
       }
     ]
-    return this.runLayout(task)
+    asyncRun(task)
   }
 
   //  遍历数据计算节点的left、width、height
   computedBaseValue() {
     let sortIndex = 0
-    return this.walk(
+    walk(
       this.renderer.renderTree,
       null,
       (cur, parent, isRoot, layerIndex, index, ancestors) => {
@@ -92,7 +92,7 @@ class LogicalStructure extends Base {
 
   //  遍历节点树计算节点的top
   computedTopValue() {
-    return this.walk(
+    walk(
       this.root,
       null,
       (node, parent, isRoot, layerIndex) => {
@@ -114,7 +114,7 @@ class LogicalStructure extends Base {
 
   //  调整节点top
   adjustTopValue() {
-    return this.walk(
+    walk(
       this.root,
       null,
       (node, parent, isRoot, layerIndex) => {

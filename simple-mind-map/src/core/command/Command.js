@@ -75,10 +75,6 @@ class Command {
 
   //  执行命令
   exec(name, ...args) {
-    // View navigation stays available; structural edits must not mutate a tree
-    // while expand-all is progressively hydrating it. Remote updates bypass this.
-    if (this.mindMap.renderer && this.mindMap.renderer._expandAllToken &&
-      !['SET_NODE_ACTIVE', 'CLEAR_ACTIVE_NODE', 'GO_TARGET_NODE', 'RETURN_CENTER', 'UNEXPAND_ALL'].includes(name)) return
     if (this.mindMap.opt.readonly) {
       const data = name === 'SET_NODE_DATA' ? args[1] : null
       const allowed = {

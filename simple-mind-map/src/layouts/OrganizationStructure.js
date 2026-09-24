@@ -1,5 +1,5 @@
 import Base from './Base'
-import { getNodeIndexInNodeList } from '../utils'
+import { walk, asyncRun, getNodeIndexInNodeList } from '../utils'
 
 //  组织结构图
 // 和逻辑结构图基本一样，只是方向变成向下生长，所以先计算节点的top，后计算节点的left、最后调整节点的left即可
@@ -12,25 +12,25 @@ class OrganizationStructure extends Base {
   //  布局
   doLayout(callback) {
     let task = [
-      async () => {
-        await this.computedBaseValue()
+      () => {
+        this.computedBaseValue()
       },
-      async () => {
-        await this.computedLeftValue()
+      () => {
+        this.computedLeftValue()
       },
-      async () => {
-        await this.adjustLeftValue()
+      () => {
+        this.adjustLeftValue()
       },
-      async () => {
+      () => {
         callback(this.root)
       }
     ]
-    return this.runLayout(task)
+    asyncRun(task)
   }
 
   //  遍历数据计算节点的left、width、height
   computedBaseValue() {
-    return this.walk(
+    walk(
       this.renderer.renderTree,
       null,
       (cur, parent, isRoot, layerIndex, index, ancestors) => {
@@ -89,7 +89,7 @@ class OrganizationStructure extends Base {
 
   //  遍历节点树计算节点的left
   computedLeftValue() {
-    return this.walk(
+    walk(
       this.root,
       null,
       (node, parent, isRoot, layerIndex) => {
@@ -111,7 +111,7 @@ class OrganizationStructure extends Base {
 
   //  调整节点left
   adjustLeftValue() {
-    return this.walk(
+    walk(
       this.root,
       null,
       (node, parent, isRoot, layerIndex) => {

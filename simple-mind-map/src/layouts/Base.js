@@ -1,7 +1,6 @@
 import MindMapNode from '../core/render/node/MindMapNode'
 import { CONSTANTS, initRootNodePositionMap } from '../constants/constant'
 import Lru from '../utils/Lru'
-import { runSteps, walkSteps } from '../utils/renderScheduler'
 import { createUid, walk } from '../utils/index'
 
 //  布局基类
@@ -20,34 +19,6 @@ class Base {
     this.lru = new Lru(this.mindMap.opt.maxNodeCacheCount)
     // 当initRootNodePosition不为默认的值时，根节点的位置距默认的配置时根节点距离的差值
     this.rootNodeCenterOffset = null
-  }
-
-  walk(...args) {
-    if (!this.mindMap.opt.cooperativeRendering || !this.mindMap.opt.openPerformance) {
-      return walk(...args)
-    }
-    const generation = this.renderer._renderGeneration
-    return runSteps(walkSteps(...args), {
-      budget: this.mindMap.opt.renderFrameBudget,
-      valid: () => generation === this.renderer._renderGeneration,
-      progress: completed => this.mindMap.emit('render_progress', { phase: 'layout', completed })
-    })
-  }
-
-  async runLayout(tasks) {
-    const generation = this.renderer._renderGeneration
-    try {
-      for (const task of tasks) {
-        if (generation !== this.renderer._renderGeneration) return
-        await task()
-      }
-    } catch (error) {
-      if (generation !== this.renderer._renderGeneration) return
-      this.renderer.isRendering = false
-      this.mindMap.nodeDraw.css('visibility', '')
-      this.mindMap.lineDraw.css('visibility', '')
-      this.mindMap.emit('render_error', error)
-    }
   }
 
   //  计算节点位置

@@ -447,23 +447,16 @@ export function getFileSubtree(roomKey, uid, options = {}) {
   return job
 }
 
-export function getFileExport(roomKey, maxNodes) {
-  if (maxNodes != null) {
-    const limit = Math.min(10000, Math.max(0, Number(maxNodes) || 0))
-    return request(
-      `/api/files/${encodeURIComponent(roomKey)}?format=full${
-        limit ? `&max_nodes=${limit}` : ''
-      }`
-    )
-  }
-  return request(`/api/files/${encodeURIComponent(roomKey)}?format=export`)
-    .then(payload => {
-      if (!payload || payload.truncated || !payload.tree) {
-        throw new Error('导出内容不完整，请稍后重试')
-      }
-      return payload
-    })
+export function getFileExport(roomKey, maxNodes = 10000) {
+  const limit = Math.min(10000, Math.max(0, Number(maxNodes) || 0))
+  return request(
+    `/api/files/${encodeURIComponent(roomKey)}?format=full${
+      limit ? `&max_nodes=${limit}` : ''
+    }`
+  )
 }
+
+/** 服务端全量大纲（不依赖画布展开/懒加载） */
 export function getFileOutline(roomKey, maxNodes = 5000) {
   const limit = Math.min(10000, Math.max(1, Number(maxNodes) || 5000))
   return request(

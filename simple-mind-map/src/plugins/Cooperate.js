@@ -2885,7 +2885,7 @@ class Cooperate {
     })
   }
 
-  onThemeChange() {
+  onThemeChange(theme) {
     if (!this.httpCollabMode || this.isApplyingRemote) return
     // 个人主题由 view-state 保存，不再发布 map.meta.update。
   }
@@ -4352,7 +4352,7 @@ class Cooperate {
     }
   }
 
-  async hydrateNodeData(data, options = {}) {
+  async hydrateNodeData(data) {
     if (!data || !this.httpFetchSubtree) return data
     const uid = data.data && data.data.uid
     if (!uid) return data
@@ -4360,19 +4360,17 @@ class Cooperate {
     const count = Number(data.data && data.data.childCount) || 0
     const dirtyAt = uid && this.dirtySubtrees && this.dirtySubtrees.get(uid)
     if (live && (!count || live >= count) && !dirtyAt) return data
-    const knownVersion = !options.paginated && live
+    const knownVersion = live
       ? Number((data.data && data.data.subtreeVersion) || 0) || 0
       : 0
     let result = await this.httpFetchSubtree(uid, {
       knownVersion,
-      ...(options.paginated ? { offset: live, limit: 48 } : {}),
       priority: 'low'
     })
     const needsLocalChildren = count > 0 && live < count
     if (result && result.unchanged && needsLocalChildren) {
       result = await this.httpFetchSubtree(uid, {
         knownVersion: 0,
-        ...(options.paginated ? { offset: live, limit: 48 } : {}),
         priority: 'low'
       })
     }

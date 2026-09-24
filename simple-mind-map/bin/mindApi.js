@@ -752,15 +752,13 @@ function mapPayload(roomKey, obj, row, extra = {}) {
   const { format = 'outline', max_nodes, maxNodes, ...rest } = extra
   const meta = { ...mapMeta(roomKey, obj, row), ...rest }
   if (format === 'meta') return meta
-  if (format === 'full' || format === 'export') {
+  if (format === 'full') {
     const size = Object.keys(obj).length
-    // The interactive "full" response remains bounded. Export reads the
-    // authoritative snapshot and must never silently omit nodes above 10k.
-    const limit = format === 'export' ? 100000 : Math.min(
+    const limit = Math.min(
       10000,
       Math.max(0, Number(max_nodes || maxNodes || 0) || 0)
     )
-    if (format === 'full' && !limit && size > 1200) {
+    if (!limit && size > 1200) {
       return {
         ...meta,
         truncated: true,
@@ -779,9 +777,7 @@ function mapPayload(roomKey, obj, row, extra = {}) {
     if (stats.truncated) {
       payload.truncated = true
       payload.hint =
-        format === 'export'
-          ? 'Export exceeds the 100000-node safety limit.'
-          : 'Tree truncated. Use search_nodes or raise max_nodes (max 10000).'
+        'Tree truncated. Use search_nodes or raise max_nodes (max 10000).'
     }
     return payload
   }
@@ -796,46 +792,6 @@ function mapPayload(roomKey, obj, row, extra = {}) {
     ...meta,
     outline: mindDoc.toOutline(obj, limit ? { maxNodes: limit } : {})
   }
-}
-
-// Export is allowed to exceed the interactive response cap. Serialize its
-// potentially deep tree iteratively and stream chunks to avoid call-stack
-// overflow and a second full-size JSON string in server memory.
-async function sendExportJson(res, payload) {
-  const { tree, ...meta } = payload
-  res.setHeader('Content-Type', 'application/json; charset=utf-8')
-  let buffer = JSON.stringify(meta).slice(0, -1) + ',"tree":'
-  const flush = async () => {
-    if (!buffer) return
-    if (!res.write(buffer)) await new Promise(resolve => res.once('drain', resolve))
-    buffer = ''
-  }
-  if (!tree) {
-    buffer += 'null}'
-    await flush()
-    res.end()
-    return
-  }
-  const stack = [{ node: tree, index: 0, opened: false }]
-  while (stack.length) {
-    const frame = stack[stack.length - 1]
-    if (!frame.opened) {
-      frame.opened = true
-      buffer += '{"data":' + JSON.stringify(frame.node.data || {}) + ',"children":['
-    }
-    const children = frame.node.children || []
-    if (frame.index < children.length) {
-      if (frame.index > 0) buffer += ','
-      stack.push({ node: children[frame.index++], index: 0, opened: false })
-    } else {
-      buffer += ']}'
-      stack.pop()
-    }
-    if (buffer.length >= 65536) await flush()
-  }
-  buffer += '}'
-  await flush()
-  res.end()
 }
 
 async function denyIfCannot(req, res, roomKey, action) {
@@ -3013,14 +2969,16 @@ async function handleApi(req, res) {
         return true
       }
       const format = url.searchParams.get('format') || 'outline'
-      const payload = mapPayload(roomKey, loaded.obj, loaded.row, {
-        format,
-        max_nodes: url.searchParams.get('max_nodes'),
-        ...publicAccess(req.roomAccess)
-      })
-      if (format === 'export') await sendExportJson(res, payload)
-      else sendJson(res, 200, payload)
-      if (format === 'full' || format === 'export' || format === 'nodes') {
+      sendJson(
+        res,
+        200,
+        mapPayload(roomKey, loaded.obj, loaded.row, {
+          format,
+          max_nodes: url.searchParams.get('max_nodes'),
+          ...publicAccess(req.roomAccess)
+        })
+      )
+      if (format === 'full' || format === 'nodes') {
         const actor = roomAcl.actorFromReq(req)
         const fsEngine = require('./fileSystem').getFileSystem()
         if (actor && actor.id && fsEngine && fsEngine.recordRoomOpened) {
@@ -3087,4 +3045,4 @@ async function handleApi(req, res) {
   return false
 }
 
-module.exports = { handleApi, executeTrustedOperation, mapPayload, sendExportJson }
+module.exports = { handleApi, executeTrustedOperation }
