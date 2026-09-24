@@ -400,9 +400,17 @@ function addFollowUpGeneralization(mindMap, target, batch) {
     false,
     nodes
   )
-  // 概要数据挂在范围第一个节点上
-  const raw = nodes[0].getData('generalization')
-  const list = Array.isArray(raw) ? raw : raw ? [raw] : []
+  // ⚠️ 概要数据落在哪：**范围概要挂在共同父节点上**（也就是这次的容器），
+  // 只有一个节点时才挂它自己 —— 见 simple-mind-map 的 parseAddGeneralizationNodeList
+  // （group.length > 1 时 `node = uidToParent[uid]`）。以前这里只读 nodes[0]，
+  // 结果范围概要读不到、`out.generalization` 永远是 null（提示里那句「已加概要」不出现）。
+  const read = node => {
+    if (!node || typeof node.getData !== 'function') return []
+    const raw = node.getData('generalization')
+    return Array.isArray(raw) ? raw : raw ? [raw] : []
+  }
+  const fromOwner = read(target)
+  const list = fromOwner.length ? fromOwner : read(nodes[0])
   return list[list.length - 1] || null
 }
 
@@ -479,6 +487,27 @@ async function waitNewChild(parent, before, tries = 24) {
     if (i < tries - 1) await sleep(50)
   }
   return lastChildOf(parent)
+}
+
+/**
+ * 在指定节点**后面**插一个同级节点（不是子节点）。
+ * 用来让「下一步」接在上一块任务后面，而不是嵌进上一块里面。
+ */
+function insertAfter(mindMap, node, tree) {
+  if (!node || !tree) return
+  const parent = node.parent
+  if (parent && typeof parent.setData === 'function') {
+    parent.setData({ expand: true })
+  }
+  // INSERT_NODE(openEdit, appointNodes, appointData, appointChildren)：
+  // simple-mind-map 会插到 appointNodes 之后（parent.children.splice(index + 1, 0, ...)）
+  mindMap.execCommand(
+    'INSERT_NODE',
+    false,
+    [node],
+    tree.data || {},
+    tree.children || []
+  )
 }
 
 function insertChildren(mindMap, parent, trees) {
@@ -613,8 +642,10 @@ async function attachToNode(mindMap, node, roomKey, file, bridgeAttach) {
 }
 
 /**
- * 在运行节点下建一个「任务 · 时间」容器：这次的任务内容与结果都挂在它下面。
+ * 建一个「任务 · 时间」容器：这次的任务内容与结果都挂在它下面。
  * 一次运行一个容器 —— 运行输出永远紧跟任务内容，不会落到 SOP 末尾。
+ * 落点已经是任务容器时（从概要接着往下做），新容器挂在**同一个父节点下、紧跟它之后**，
+ * 与上一块同级 —— 也就是「续写接在上一块（连同它的概要）后面」，不嵌进上一块里面。
  * @returns {Promise<{ uid: String, title: String, node: Object }>}
  */
 export async function createJobContainer({
@@ -630,15 +661,28 @@ export async function createJobContainer({
   const title = buildTaskContainerTitle()
   // 任务内容是多行提示词，节点文本压成一行（脑图上不加备注标签）
   const inline = cleanInlineMarkdown(text).replace(/\s+/g, ' ').trim()
+  const tree = {
+    data: { text: title },
+    children: text
+      ? [{ data: { text: `任务内容：${clip(inline, NODE_TEXT_LIMIT)}` } }]
+      : []
+  }
+
+  // ⚠️ 落点本身就是「任务」容器时（从概要点「运行」接着往下做就是这种情况），
+  // 新任务**不能嵌进去** —— 嵌进去这一步会变成上一块的子块、排进上一块的概要范围里，
+  // 看着就像「续写没有接在概要后面」。改成挂在同一个父节点下、紧跟上一块之后：
+  // 脑图读起来就是一条链 —— 任务块（含概要）→ 下一个任务块。
+  if (isTaskContainerNode(target) && target.parent) {
+    const parent = target.parent
+    const before = (parent.children || []).slice()
+    insertAfter(mindMap, target, tree)
+    const created = await waitNewChild(parent, before)
+    if (!created) throw new Error('建任务节点失败，请重试')
+    return { uid: nodeUid(created), title, node: created }
+  }
+
   const before = (target.children || []).slice()
-  insertChildren(mindMap, target, [
-    {
-      data: { text: title },
-      children: text
-        ? [{ data: { text: `任务内容：${clip(inline, NODE_TEXT_LIMIT)}` } }]
-        : []
-    }
-  ])
+  insertChildren(mindMap, target, [tree])
   const created = await waitNewChild(target, before)
   if (!created) throw new Error('建任务节点失败，请重试')
   return { uid: nodeUid(created), title, node: created }

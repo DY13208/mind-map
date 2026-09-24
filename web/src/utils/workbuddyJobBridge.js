@@ -261,6 +261,37 @@ export function isPublicPage() {
 }
 
 /**
+ * 桥接地址配成了**相对路径**（例如 `/bridge`）—— 说明这台机器的 app 容器把桥接
+ * 反代到了同源路径下（见 docker/nginx.conf 的 `/bridge/`）。这时页面调
+ * `/bridge/api/gateways` 就是**服务器自己的桥接**，跟浏览器所在的电脑无关。
+ *
+ * 这是「页面部署在服务器上、任务也用服务器上的 WorkBuddy 跑」的标准形态：
+ * 同源请求，没有跨源、没有 https→http 混合内容，也不受 Chrome 本地网络访问限制。
+ */
+export function isSameOriginBridge() {
+  return String(getJobBridgeBase() || '').startsWith('/')
+}
+
+/**
+ * 页面自己所在那台机器的桥接 —— 注意是**页面**在哪台机器上，不是浏览器在哪台。
+ *
+ * 页面部署在局域网里某台机器上时（例如 `http://192.168.0.54:8990`），
+ * 「谁提供页面就用谁的 WorkBuddy」是最省事的形态：同事打开页面就能派任务，
+ * 不用每个人都在自己电脑上装桥接、开服务。默认目标也应该是它。
+ *
+ * 页面在**公网域名**上时返回 null —— 那种情况 `<域名>:8799` 不是浏览器能连的地方
+ * （LNA 会拦），得走同源 /jobhub 中继。
+ */
+export function pageMachineHost() {
+  const host = pageHost()
+  if (!isPrivateHost(host)) return null
+  const loc = typeof window !== 'undefined' ? window.location || {} : {}
+  // 页面自己就挂在桥接端口上，那就是本机，不用再叠一层
+  if (Number(loc.port || 0) === HOST_PORT) return null
+  return normalizeHost({ ip: host, port: HOST_PORT, name: '' })
+}
+
+/**
  * 请求某台电脑的桥接：直连 → 不行就同源中继（通讯页代连）。
  *
  * - 页面在私网地址上：先直连（快，且不依赖通讯页）
@@ -275,7 +306,8 @@ async function bridgeRequest(target, opts = {}) {
   const relayable = !local && !!opts.relayPath
   const failures = []
 
-  if (!isPublicPage()) {
+  if (!isPublicPage() || isSameOriginBridge()) {
+    // 同源桥接（/bridge）例外：那本来就是同源请求，公网页面照样能发
     const base = local ? getJobBridgeBase() : hostBase(target)
     const res = await request(`${base}${opts.path || ''}`, {
       method: opts.method,
@@ -360,6 +392,16 @@ export function hostBase(host) {
 }
 
 async function request(url, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase()
+  const hasBody = options.body !== undefined
+  if (hasBody && (method === 'GET' || method === 'HEAD')) {
+    console.warn(
+      `[jobBridge] ${method} ${url} 带了 body —— 调用方漏了 method: 'POST'，这次不发 body`
+    )
+  }
+  const sendBody = hasBody && method !== 'GET' && method !== 'HEAD'
+    ? JSON.stringify(options.body)
+    : undefined
   const useAbort = typeof AbortController !== 'undefined'
   const controller = useAbort ? new AbortController() : null
   const timer = useAbort
@@ -370,13 +412,14 @@ async function request(url, options = {}) {
     : null
   try {
     const res = await fetch(url, {
-      method: options.method || 'GET',
+      method,
       headers: {
         'Content-Type': 'application/json',
         ...(options.headers || {})
       },
-      body:
-        options.body === undefined ? undefined : JSON.stringify(options.body),
+      // GET/HEAD 不能带 body（浏览器会直接抛 TypeError）；带上 body 说明调用方漏了
+      // method: 'POST'，这里兜住并提醒，别让整个派发流程炸在半路。
+      body: sendBody,
       signal: controller ? controller.signal : undefined
     })
     const text = await res.text()
@@ -439,7 +482,10 @@ export async function listLocalGateways() {
       gateways: [],
       // 浏览器那句 "Failed to fetch" 帮不了任何人：说清是哪台、怎么办。
       error: res.offline
-        ? isPublicPage()
+        ? isSameOriginBridge()
+          ? `连不上执行主机（${base}）：页面这台机器上的桥接没在跑。` +
+            '在它上面双击 run_bridge.bat 启动后再点「运行」。'
+          : isPublicPage()
           ? `连不上本机任务桥（${base}）：页面在公网地址上，浏览器（Chrome/Edge 142+ 的` +
             '本地网络访问限制）不允许它连本机服务。给这个站点允许「本地网络访问」，' +
             '或者用局域网地址打开脑图页面 —— 也可以直接选列表里登记过的其它电脑。'
@@ -466,14 +512,30 @@ export async function resolveJobHosts() {
   const local = normalizeHost({
     ip: '127.0.0.1',
     port: HOST_PORT,
-    name: '这台电脑',
+    // 同源桥接时这里其实指向「页面所在的那台机器」，别写成「这台电脑」误导人
+    name: isSameOriginBridge() ? '执行主机（页面同源）' : '这台电脑',
     self: true
   })
   const localProbe = await listLocalGateways()
   local.online = localProbe.ok
   if (!local.online) local.error = localProbe.error
 
-  const hubRes = await listHubPeers()
+  // 页面部署在局域网某台机器上（http://192.168.0.54:8990）→ 就用那台的 WorkBuddy。
+  // 它排在最前面，也是默认目标：同事只要打开这个页面就能派任务。
+  const pageMachine = pageMachineHost()
+  let pageOnline = false
+  if (pageMachine) {
+    const probe = await listHostGateways(pageMachine)
+    pageMachine.online = probe.ok
+    if (!probe.ok) pageMachine.error = probe.error
+    pageOnline = probe.ok
+  }
+
+  // 页面主机能用就不再翻通讯页：它已经是默认目标，别的机器这里用不上，
+  // 多探测一轮只会多一次请求 + 控制台几条「连不上」红字，看着像坏了。
+  const hubRes = pageOnline
+    ? { ok: false, peers: [], hub: '', error: '' }
+    : await listHubPeers()
   const hosts = []
   const seen = new Set()
 
@@ -488,6 +550,7 @@ export async function resolveJobHosts() {
   const server = hubRes.peers.find(
     p => p.ip === pageHostIp && !isLoopbackIp(p.ip)
   )
+  if (pageMachine) push(withRole(pageMachine, '页面主机'))
   if (server) push(withRole(server, '主服务'))
   hubRes.peers
     .filter(p => !isLoopbackIp(p.ip))
@@ -499,6 +562,8 @@ export async function resolveJobHosts() {
 
   const online = hosts.filter(h => h.online)
   const defaultHost =
+    (pageMachine && pageMachine.online && hosts.find(h => h.key === pageMachine.key)) ||
+    (pageMachine && hosts.find(h => h.key === pageMachine.key)) ||
     (server && server.online && hosts.find(h => h.key === server.key)) ||
     (server && hosts.find(h => h.key === server.key)) ||
     (local.online ? local : null) ||
@@ -506,12 +571,13 @@ export async function resolveJobHosts() {
     hosts[0] ||
     null
 
+  const usable = !!((pageMachine && pageMachine.online) || hubRes.ok || local.online)
   return {
-    ok: !!(hubRes.ok || local.online),
+    ok: usable,
     hosts,
     defaultHost,
     hub: hubRes.hub,
-    error: hubRes.ok || local.online ? '' : hubRes.error
+    error: usable ? '' : hubRes.error
   }
 }
 
@@ -592,6 +658,7 @@ export async function dispatchWorkbuddyJob(opts = {}) {
   if (isLoopbackIp(target.ip) || !target.ip) {
     // 本机走不了中继（通讯页去连 127.0.0.1 等于连它自己），只能直连
     const res = await bridgeRequest(target, {
+      method: 'POST',
       path: '/api/dispatch',
       body: payload,
       timeout: DISPATCH_TIMEOUT
@@ -600,6 +667,7 @@ export async function dispatchWorkbuddyJob(opts = {}) {
   }
 
   const res = await bridgeRequest(target, {
+    method: 'POST',
     path: '/api/dispatch',
     body: payload,
     timeout: DISPATCH_TIMEOUT,
@@ -735,6 +803,7 @@ export async function attachFilesViaBridge({
   if (!list.length) return { ok: false, error: '没有要挂的文件' }
   const target = normalizeHost(host || {})
   const res = await bridgeRequest(target, {
+    method: 'POST',
     path: '/api/attach',
     body: { roomKey, nodeUid, files: list, confirmSopChange },
     timeout: 180000,
@@ -759,6 +828,7 @@ export async function stopHostJob({ host, gateway, id } = {}) {
   const target = normalizeHost(host || {})
   if (!id) return { ok: false, error: '缺少任务 id' }
   const res = await bridgeRequest(target, {
+    method: 'POST',
     path: '/api/stop',
     body: { gateway, id },
     relayPath: '/api/stop',

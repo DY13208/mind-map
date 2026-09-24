@@ -122,3 +122,38 @@ YIRAN_UPSTREAM=https://xiaoce.example.com
 ```
 
 地址填写小策服务根地址，不要带末尾 `/api`。远端小策须配置相同的 `MIND_MAP_YIRAN_SSO_SECRET`，然后运行 `start-with-remote-yiran.bat`。不配置 `YIRAN_UPSTREAM` 时仍默认使用 compose 内的 `http://yiran:8000`。
+
+## 任务派发相关代理（`/jobhub`、`/bridge`）
+
+脑图页面上的「运行」按钮要打到各台电脑的 WorkBuddy，而浏览器不能直连它们
+（跨源，以及 Chrome/Edge 142 起的「本地网络访问」限制会拦公网页面访问回环/私网地址），
+所以一律由网关**同源代理**：
+
+| 路径 | 环境变量（默认） | 上游 |
+|------|-----------------|------|
+| `/jobhub/*` | `JOBHUB_UPSTREAM`（`http://host.docker.internal:5051`） | 通讯页 `scripts/workbuddy-lan-hub.py`：主机登记表 + 跨机派发中继 |
+| `/bridge/*` | `BRIDGE_UPSTREAM`（`http://host.docker.internal:8799`） | 执行主机上的桥接 `test1.py --lan`：页面与 WorkBuddy 同机时走它 |
+
+页面 → `/bridge/api/...` 是**同源请求**，没有跨源、也没有 https→http 混合内容，不受本地网络访问限制。
+
+`/bridge` 还需要前端知道走**相对路径**，在 `docker/runtime-config.local.js` 里加一行
+（该文件 gitignored，每个部署一份）：
+
+```js
+window.__MIND_MAP_RUNTIME__ = {
+  // …原有配置…
+  workbuddyJobBridge: '/bridge'
+}
+```
+
+改完必须**重建 `app` 镜像**（前端与 nginx 都打在镜像里）：
+
+```bash
+docker compose build app && docker compose up -d app
+```
+
+验证（不用开浏览器）：`curl -s http://<网关地址>/bridge/api/gateways` 返回里有 `gateways` 即通。
+
+> ⚠️ `/bridge/` 等于把「往这台机器派任务」开放给所有能打开页面的人（桥接 `--lan` 只校验
+> 来源是内网/回环，nginx 反代过去的源 IP 是容器内网地址，会被放行）。公网部署别裸奔：
+> 只在内网/VPN 用，或在防火墙/上层反代按来源 IP 限制。
