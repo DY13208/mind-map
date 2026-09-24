@@ -468,34 +468,36 @@ function objectToTree(obj, options = {}) {
   const stats = options.stats || {}
   const rootUid = findRootUid(obj)
   if (!rootUid || !obj[rootUid]) return null
-  const map = {}
-  let count = 0
+  const map = new Map()
+  let count = 1
   let truncated = false
-  const walk = uid => {
-    if (map[uid]) return map[uid]
+  const tree = { data: clone(obj[rootUid].data || {}), children: [] }
+  map.set(rootUid, tree)
+  const stack = [{ uid: rootUid, target: tree, index: 0 }]
+  while (stack.length) {
+    const frame = stack[stack.length - 1]
+    const children = obj[frame.uid].children || []
+    if (frame.index >= children.length) {
+      stack.pop()
+      continue
+    }
+    const childUid = children[frame.index++]
+    if (!obj[childUid]) continue
+    const cached = map.get(childUid)
+    if (cached) {
+      frame.target.children.push(cached)
+      continue
+    }
     if (maxNodes && count >= maxNodes) {
       truncated = true
-      return null
+      continue
     }
-    const cur = obj[uid]
-    if (!cur) return null
+    const child = { data: clone(obj[childUid].data || {}), children: [] }
+    frame.target.children.push(child)
+    map.set(childUid, child)
     count += 1
-    const node = {
-      data: clone(cur.data || {}),
-      children: []
-    }
-    map[uid] = node
-    ;(cur.children || []).forEach(childUid => {
-      if (maxNodes && count >= maxNodes) {
-        truncated = true
-        return
-      }
-      const child = walk(childUid)
-      if (child) node.children.push(child)
-    })
-    return node
+    stack.push({ uid: childUid, target: child, index: 0 })
   }
-  const tree = walk(rootUid)
   stats.count = count
   stats.truncated = truncated
   stats.node_count = Object.keys(obj).length

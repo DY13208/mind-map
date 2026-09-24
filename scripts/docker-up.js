@@ -79,7 +79,7 @@ function detectHost() {
 }
 
 function writeMcpConfig(host) {
-  const url = `http://${host}:${PORT}/mcp`
+  const url = `https://${host}:${PORT}/mcp`
   // 与 scripts/launcher.js 的 mcpServerEntry 保持一致：设了 MCP_TOKEN 就必须
   // 带上 Authorization，否则网关一律 401，导图 MCP 在 WorkBuddy 里连不上。
   const entry = {
@@ -548,7 +548,7 @@ async function up() {
   console.log('')
   console.log(`  主机 IP  ${host}`)
   console.log(`  对外只开放一个端口：${PORT}`)
-  console.log(`  页面     http://${host}:${PORT}`)
+  console.log(`  页面     https://${host}:${PORT}`)
   console.log(`  MCP      ${mcpUrl}`)
   console.log(`  Wiki     ${wikiAppUrl}`)
   const openclawHostPort = Number(process.env.OPENCLAW_PORT || OPENCLAW_PORT || 4623)
@@ -596,6 +596,7 @@ async function up() {
       'postgres',
       'redis',
       'app',
+      'tls',
       'docmost-db',
       'docmost-redis',
       'docmost',
@@ -719,7 +720,7 @@ async function up() {
           console.log(
             `  页面访问 /openclaw-api → http://127.0.0.1:${oc.port}（经 Docker 网关转发）`
           )
-          console.log(`  助理页  http://${host}:${PORT}/assistant`)
+          console.log(`  助理页  https://${host}:${PORT}/assistant`)
         } else {
           console.log(
             '  也可稍后手动执行：node scripts/openclaw-gateway.js'

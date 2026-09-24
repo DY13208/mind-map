@@ -28,6 +28,8 @@
           <HistoryMapPreview
             ref="mapPreview"
             :tree="preview.tree"
+            :projection="preview.projection"
+            :active="visible"
             :metadata="preview.metadata"
             :loading="preview.loading"
             :error="preview.error"
@@ -137,6 +139,7 @@
 <script>
 import { userMessageFromError } from '@/services/apiError'
 import historyService from '@/services/historyService'
+import { treeTask } from '@/utils/treeWorker'
 import {
   versionTypeLabel,
   versionTypeTag,
@@ -237,7 +240,7 @@ export default {
       if (value) {
         this.measure()
         this.reload()
-      }
+      } else this.onClosed()
     }
   },
   mounted() {
@@ -295,21 +298,22 @@ export default {
       return q
     },
     async reload() {
+      const reloadToken = this._reloadToken = (this._reloadToken || 0) + 1
       this.loading = true
       this.error = ''
       this.versions = []
       this.nextCursor = null
-      this.lastPreRestoreId = this.lastPreRestoreId
       try {
         await this.waitOwnEdits()
         const result = await historyService.listVersions(this.roomKey, this.query())
+        if (reloadToken !== this._reloadToken || !this.visible) return
         this.versions = result.list || []
         this.nextCursor = result.nextCursor || null
         this.currentRevision = Number(
           result.currentRevision || (this.room && this.room.revision) || 0
         )
         const first = this.versions[0]
-        if (first) await this.select(first)
+        if (first) this.select(first)
         else {
           this.selected = null
           this.preview = { tree: null, metadata: {}, loading: false, error: '' }
@@ -317,7 +321,7 @@ export default {
       } catch (error) {
         this.error = userMessageFromError(error)
       } finally {
-        this.loading = false
+        if (reloadToken === this._reloadToken) this.loading = false
       }
     },
     async loadMore() {
@@ -338,6 +342,10 @@ export default {
       }
     },
     abortPreview() {
+      if (this._previewSession) {
+        treeTask('release', { sessionId: this._previewSession }).catch(() => {})
+        this._previewSession = null
+      }
       this.previewToken += 1
       if (this.loadController) {
         this.loadController.abort()
@@ -362,6 +370,7 @@ export default {
     async loadPreview(item) {
       this.abortPreview()
       const token = this.previewToken
+      const sessionId = this._previewSession = 'history-' + this._uid + '-' + token
       this.preview = { tree: null, metadata: {}, loading: true, error: '' }
       const controller =
         typeof AbortController !== 'undefined' ? new AbortController() : null
@@ -370,11 +379,12 @@ export default {
         const data = await historyService.getVersionTree(
           this.roomKey,
           item.versionId,
-          { signal: controller && controller.signal }
+          { signal: controller && controller.signal, sessionId }
         )
         if (token !== this.previewToken) return
         this.preview = {
-          tree: data.tree,
+          tree: Object.freeze(data.tree),
+          projection: data.projection || null,
           metadata: data.metadata || {},
           loading: false,
           error: ''
@@ -487,6 +497,8 @@ export default {
       })
     },
     onClosed() {
+      this._reloadToken = (this._reloadToken || 0) + 1
+      this.loading = false
       this.abortPreview()
       this.preview = { tree: null, metadata: {}, loading: false, error: '' }
       this.selected = null

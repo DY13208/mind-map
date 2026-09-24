@@ -37,8 +37,9 @@ export async function productRequest(path, options = {}) {
   let data = {}
   if (raw) {
     try {
-      data = JSON.parse(raw)
+      data = options.parseJson ? await options.parseJson(raw) : JSON.parse(raw)
     } catch (err) {
+      if (err && err.name === 'AbortError') throw err
       const invalid = new Error('协作服务返回了无效响应')
       invalid.code = 'INVALID_RESPONSE'
       invalid.statusCode = res.status

@@ -1,3 +1,4 @@
+import { now, runSteps } from '../../utils/renderScheduler'
 import merge from 'deepmerge'
 import LogicalStructure from '../../layouts/LogicalStructure'
 import MindMap from '../../layouts/MindMap'
@@ -81,8 +82,6 @@ const layouts = {
 
 const EXPAND_ALL_BATCH = 6
 const EXPAND_ALL_PER_FRAME = 48
-const EXPAND_ALL_MAX_NODES = 200
-const EXPAND_ALL_MAX_ROUNDS = 24
 
 //  渲染
 class Render {
@@ -202,6 +201,7 @@ class Render {
       if (!node || seen.has(node)) return
       seen.add(node)
       if (node.group) live.add(node.group)
+      if (node._overviewGroup) live.add(node._overviewGroup)
       ;(node._lines || []).forEach(line => liveLines.add(line))
       ;(node.children || []).forEach(collect)
       ;(node._generalizationList || []).forEach(item => collect(item.generalizationNode))
@@ -244,6 +244,8 @@ class Render {
       }
       return
     }
+    this.cancelRender()
+    this.cancelExpandAll()
     this.renderTree = data || null
   }
 
@@ -272,7 +274,7 @@ class Render {
       if (!this.renderTree) {
         return
       }
-      if (this.root) {
+      if (this.root && !this.isRendering) {
         this.mindMap.emit('node_tree_render_start')
         this.root.render(
           () => {
@@ -318,6 +320,8 @@ class Render {
     this.handlePaste = this.handlePaste.bind(this)
     window.addEventListener('paste', this.handlePaste)
     this.mindMap.on('beforeDestroy', () => {
+      this.cancelRender()
+      this.cancelExpandAll()
       window.removeEventListener('paste', this.handlePaste)
     })
   }
@@ -652,16 +656,38 @@ class Render {
     return false
   }
 
+  cancelRender() {
+    this._renderGeneration++
+    this._paintGeneration = (this._paintGeneration || 0) + 1
+    clearTimeout(this.renderTimer)
+    this.isRendering = false
+    this.hasWaitRendering = false
+    this.renderCallbackList = []
+    if (this.mindMap.nodeDraw) this.mindMap.nodeDraw.css('visibility', '')
+    if (this.mindMap.lineDraw) this.mindMap.lineDraw.css('visibility', '')
+    this.mindMap.emit('render_cancelled', { generation: this._renderGeneration })
+  }
+
+  cancelExpandAll() {
+    if (!this._expandAllToken) return
+    this._expandAllToken = 0
+    this._expandOperationId = (this._expandOperationId || 0) + 1
+    this.mindMap.emit('expand_progress', { running: false, cancelled: true })
+  }
+
   // 渲染完毕的操作
   onRenderEnd() {
-    this.renderCallbackList.forEach(fn => {
-      fn()
-    })
+    this.mindMap.nodeDraw.css('visibility', '')
+    this.mindMap.lineDraw.css('visibility', '')
+    const callbacks = this.renderCallbackList
+    this.renderCallbackList = []
+    callbacks.forEach(fn => { fn() })
     this.isRendering = false
     this.reRender = false
     this.renderCallbackList = []
     this.renderSourceList = []
     this.mindMap.emit('node_tree_render_end')
+    this.mindMap.emit('render_complete', { durationMs: now() - (this._renderStarted || now()), renderedNodes: Object.keys(this.nodeCache).length })
   }
 
   // 渲染
@@ -696,8 +722,13 @@ class Render {
     const syncPaint = !!this._syncPaintOnce
     this._syncPaintOnce = false
     this.isRendering = true
+    this._renderStarted = now()
     const renderGeneration = this._renderGeneration
     const isLayoutSwitch = this.checkHasRenderSource(CONSTANTS.CHANGE_LAYOUT)
+    if (isLayoutSwitch && this.mindMap.opt.cooperativeRendering && this.mindMap.opt.openPerformance) {
+      this.mindMap.nodeDraw.css('visibility', 'hidden')
+      this.mindMap.lineDraw.css('visibility', 'hidden')
+    }
     if (isLayoutSwitch) {
       this._layoutRenderCount = (this._layoutRenderCount || 0) + 1
     }
@@ -734,10 +765,9 @@ class Render {
       if (stale.destroyed.length) this.emitNodeActiveEvent()
       // 更新根节点
       this.root = root
-      // Layout switch must paint synchronously so an in-flight performance
-      // pass cannot leave the previous structure on the canvas.
+      // Cooperative layout switches keep the canvas hidden until the new pass commits.
       const asyncPaint =
-        !!this.mindMap.opt.openPerformance && !isLayoutSwitch && !syncPaint
+        !!this.mindMap.opt.openPerformance && (this.mindMap.opt.cooperativeRendering || (!isLayoutSwitch && !syncPaint))
       this.root.render(
         () => {
           if (renderGeneration !== this._renderGeneration) {
@@ -879,7 +909,7 @@ class Render {
               if (!gNode.getData('isActive')) {
                 this.addNodeToActiveList(gNode)
               }
-              ;(gNode.children || []).forEach(addTree)
+              (gNode.children || []).forEach(addTree)
               // 概要子树里的节点还能再挂概要
               ;(gNode._generalizationList || []).forEach(sub => {
                 addTree(sub && sub.generalizationNode)
@@ -2350,14 +2380,14 @@ class Render {
 
   waitForRender() {
     return new Promise(resolve => {
-      let settled = false
       const done = () => {
-        if (settled) return
-        settled = true
+        this.mindMap.off('render_cancelled', done)
+        this.mindMap.off('render_error', done)
         resolve()
       }
+      this.mindMap.on('render_cancelled', done)
+      this.mindMap.on('render_error', done)
       this.render(done)
-      setTimeout(done, 1200)
     })
   }
 
@@ -2407,7 +2437,7 @@ class Render {
       while (index < jobs.length) {
         const node = jobs[index++]
         try {
-          await cooperate.hydrateNodeData(node)
+          await cooperate.hydrateNodeData(node, { paginated: true })
         } catch (err) {
           console.error('[mind-map] load children failed', err)
         }
@@ -2420,23 +2450,19 @@ class Render {
 
   //  展开所有
   expandAllNode(uid = '') {
-    if (!this.renderTree) return
+    if (!this.renderTree || this._expandAllToken) return
     const token = (this._expandOperationId || 0) + 1
     this._expandOperationId = token
     this._expandAllToken = token
-    const command = this.mindMap.command
-    if (command) command.pause()
-    const start = this.findExpandStartNode(uid)
-    this.expandSubtreeProgressive(start, token)
-      .catch(err => {
-        console.error('[mind-map] expand all failed', err)
+    this.mindMap.emit('expand_progress', { running: true, completed: 0 })
+    return this.expandSubtreeProgressive(this.findExpandStartNode(uid), token)
+      .catch(error => {
+        if (this._expandAllToken === token) this.mindMap.emit('expand_progress', { running: false, error: error.message })
       })
       .finally(() => {
-        if (this._expandAllToken === token) this._expandAllToken = 0
-        if (command && command.isPause) {
-          command.recovery()
-          command.addHistory()
-        }
+        if (this._expandAllToken !== token) return
+        this._expandAllToken = 0
+        this.mindMap.emit('expand_progress', { running: false })
       })
   }
 
@@ -2455,7 +2481,7 @@ class Render {
         found = node
         return
       }
-      ;(node.children || []).forEach(visit)
+      (node.children || []).forEach(visit)
       this.getGeneralizationTrees(node).forEach(visit)
     }
     visit(this.renderTree)
@@ -2465,96 +2491,95 @@ class Render {
 
   async expandSubtreeProgressive(start, token) {
     if (!start) return
-    const startData = this.getExpandTreeData(start)
-    if (startData && startData.expand === false && this.nodeHasChildren(start)) {
-      startData.expand = true
+    const queue = [start]
+    const visited = new Set()
+    let completed = 0
+    let loaded = 0
+    let nextPaint = 280
+    const valid = () => this._expandAllToken === token
+    const paintIfNeeded = async () => {
+      if (completed + loaded < nextPaint) return
       this.mindMap.emit('personal_expand_change')
       await this.waitForRender()
+      nextPaint = completed + loaded < 1000 ? 1000 : completed + loaded < 3000 ? 3000 : Infinity
     }
-    let painted = 0
-    for (let round = 0; round < EXPAND_ALL_MAX_ROUNDS; round++) {
-      if (this._expandAllToken !== token) return
-      let frontier = this.collectCollapsedFrontier(start)
-      if (!frontier.length) return
-      await this.hydrateFrontier(frontier)
-      if (this._expandAllToken !== token) return
-      frontier = this.collectCollapsedFrontier(start).filter(node => {
-        return node.children && node.children.length > 0
-      })
-      if (!frontier.length) return
-      let i = 0
-      while (i < frontier.length) {
-        if (this._expandAllToken !== token) return
-        if (painted >= EXPAND_ALL_MAX_NODES) return
-        const slice = []
-        let willShow = 0
-        while (i < frontier.length && slice.length < EXPAND_ALL_BATCH) {
-          const node = frontier[i]
-          const kids = (node.children && node.children.length) || 0
-          if (
-            slice.length &&
-            (willShow + kids > EXPAND_ALL_PER_FRAME ||
-              painted + willShow + kids > EXPAND_ALL_MAX_NODES)
-          ) {
-            break
-          }
-          slice.push(node)
-          willShow += kids
-          i += 1
-          if (willShow >= EXPAND_ALL_PER_FRAME) break
+    for (let index = 0; index < queue.length && valid(); index++) {
+      const node = queue[index]
+      if (!node || visited.has(node)) continue
+      visited.add(node)
+      const data = this.getExpandTreeData(node)
+      if (node.data && Array.isArray(data._overflowChildren)) {
+        while (data._overflowChildren.length && valid()) {
+          const chunk = data._overflowChildren.splice(0, 48)
+          node.children = (node.children || []).concat(chunk)
+          loaded += chunk.length
+          data.expand = true
+          this.mindMap.emit('expand_progress', { running: true, completed, loaded })
+          await paintIfNeeded()
         }
-        if (!slice.length) {
-          const node = frontier[i++]
-          if (!node) break
-          this.getExpandTreeData(node).expand = true
-          painted += (node.children && node.children.length) || 0
-          this.mindMap.emit('personal_expand_change')
-          await this.waitForRender()
-          if (painted >= EXPAND_ALL_MAX_NODES) return
-          continue
-        }
-        slice.forEach(node => {
-          this.getExpandTreeData(node).expand = true
-        })
-        painted += willShow
-        this.mindMap.emit('personal_expand_change')
-        await this.waitForRender()
+        if (!data._overflowChildren.length) { delete data._overflowChildren; data.hasMore = false }
       }
+      const cooperate = this.mindMap.cooperate
+      if (node.data && cooperate && typeof cooperate.hydrateNodeData === 'function') {
+        while (valid() && Number(data.childCount) > (node.children || []).length) {
+          const before = (node.children || []).length
+          await cooperate.hydrateNodeData(node)
+          if (!valid()) return
+          if ((node.children || []).length <= before) {
+            throw new Error('部分分支未能加载，请重试展开')
+          }
+          loaded += (node.children || []).length - before
+          data.expand = true
+          this.mindMap.emit('expand_progress', { running: true, completed, loaded })
+          await paintIfNeeded()
+        }
+      }
+      if (!valid()) return
+      data.expand = true
+      for (const child of node.children || []) queue.push(child)
+      for (const child of this.getGeneralizationTrees(node)) queue.push(child)
+      completed++
+      if (completed % EXPAND_ALL_PER_FRAME === 0) {
+        this.mindMap.emit('expand_progress', { running: true, completed })
+        await paintIfNeeded()
+        await new Promise(resolve => setTimeout(resolve, 0))
+      }
+    }
+    if (valid()) {
+      this.mindMap.emit('personal_expand_change')
+      await this.waitForRender()
+      this.mindMap.emit('expand_progress', { running: false, completed })
     }
   }
 
   //  收起所有
   unexpandAllNode(isSetRootNodeCenter = true, uid = '') {
     if (!this.renderTree) return
-    this._expandAllToken = 0
-    this._expandOperationId = (this._expandOperationId || 0) + 1
-
-    const _walk = (node, isRoot, enableUnExpand) => {
-      // 如果该节点为目标节点，那么修改允许展开的标志
+    this.cancelExpandAll()
+    const generation = this._renderGeneration
+    const queue = [{ node: this.renderTree, isRoot: true, enabled: !uid }]
+    let cursor = 0
+    const step = () => {
+      if (cursor >= queue.length) return false
+      const { node, isRoot, enabled } = queue[cursor++]
       const data = this.getExpandTreeData(node)
-      if (!enableUnExpand && data && data.uid === uid) {
-        enableUnExpand = true
+      const applies = enabled || (data && data.uid === uid)
+      if (applies && !isRoot && this.nodeHasChildren(node)) data.expand = false
+      for (const child of [...(node.children || []), ...this.getGeneralizationTrees(node)]) {
+        queue.push({ node: child, isRoot: false, enabled: applies })
       }
-      if (enableUnExpand && !isRoot && this.nodeHasChildren(node)) {
-        data.expand = false
-      }
-      if (node.children && node.children.length > 0) {
-        node.children.forEach(child => {
-          _walk(child, false, enableUnExpand)
-        })
-      }
-      this.getGeneralizationTrees(node).forEach(item => {
-        _walk(item, false, enableUnExpand)
-      })
+      return true
     }
-    _walk(this.renderTree, true, !uid)
-    this.mindMap.emit('personal_expand_change')
-
-    this.mindMap.render(() => {
-      if (isSetRootNodeCenter) {
-        this.setRootNodeCenter()
-      }
-    })
+    const finish = () => {
+      this.mindMap.emit('personal_expand_change')
+      this.mindMap.render(() => { if (isSetRootNodeCenter) this.setRootNodeCenter() })
+    }
+    if (this.mindMap.opt.cooperativeRendering && this.mindMap.opt.openPerformance) {
+      return runSteps(step, { budget: this.mindMap.opt.renderFrameBudget,
+        valid: () => generation === this._renderGeneration }).then(done => { if (done) finish() })
+    }
+    while (step()) { /* legacy synchronous path */ }
+    finish()
   }
 
   //  展开到指定层级

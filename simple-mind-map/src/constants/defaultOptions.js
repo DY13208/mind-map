@@ -241,6 +241,10 @@ export const defaultOpt = {
   customHyperlinkJump: null,
   // 是否开启性能模式，默认情况下所有节点都会直接渲染，无论是否处于画布可视区域，这样当节点数量比较多时（1000+）会比较卡，如果你的数据量比较大，那么可以通过该配置开启性能模式，即只渲染画布可视区域内的节点，超出的节点不渲染，这样会大幅提高渲染速度，当然同时也会带来一些其他问题，比如：1.当拖动或是缩放画布时会实时计算并渲染未节点的节点，所以会带来一定卡顿；2.导出图片、svg、pdf时需要先渲染全部节点，所以会比较慢；3.其他目前未发现的问题
   openPerformance: false,
+  // Independent rollout switch; legacy rendering remains available.
+  cooperativeRendering: true,
+  renderFrameBudget: 8,
+  simplifiedNodeScale: 0.18,
   // 性能优化模式配置
   performanceConfig: {
     time: 250, // 当视图改变后多久刷新一次节点，单位：ms，

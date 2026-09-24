@@ -53,6 +53,7 @@ export function getRuntimeConfig() {
       collabUrl: `${originWs}/collab`,
       collabApi: originHttp,
       collabV2: runtime.collabV2 !== false && runtime.collabV2 !== '0',
+    largeMapScheduler: runtime.largeMapScheduler !== false && runtime.largeMapScheduler !== '0',
       collabV2Trace:
         runtime.collabV2Trace === true || runtime.collabV2Trace === '1',
       aiBaseUrl: originHttp,
@@ -85,6 +86,7 @@ export function getRuntimeConfig() {
     collabUrl: `${wsProtocol}//${runtime.host || host}:${collabPort}`,
     collabApi: `${httpProtocol}//${runtime.host || host}:${collabPort}`,
     collabV2: runtime.collabV2 !== false && runtime.collabV2 !== '0',
+    largeMapScheduler: runtime.largeMapScheduler !== false && runtime.largeMapScheduler !== '0',
     collabV2Trace:
       runtime.collabV2Trace === true || runtime.collabV2Trace === '1',
     aiBaseUrl: `${httpProtocol}//${runtime.host || host}:${aiPort}`,

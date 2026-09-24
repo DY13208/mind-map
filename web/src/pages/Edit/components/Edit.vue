@@ -13,6 +13,10 @@
       ref="mindMapContainer"
       data-testid="mindmap-canvas"
     ></div>
+    <div v-if="expandProgress.running" class="largeMapProgress" role="status" style="position:absolute;top:100px;left:50%;transform:translateX(-50%);z-index:20;background:white;padding:12px;border-radius:8px;box-shadow:0 2px 12px #0002">
+      正在展开，已处理 {{ (expandProgress.completed || 0) + (expandProgress.loaded || 0) }} 个节点
+      <el-button size="mini" @click="mindMap.renderer.cancelExpandAll()">取消展开</el-button>
+    </div>
     <Count :mindMap="mindMap" v-if="!isZenMode"></Count>
     <Navigator v-if="mindMap && !isZenMode && showNavigator" :mindMap="mindMap"></Navigator>
     <NavigatorToolbar :mindMap="mindMap" v-if="!isZenMode && showNavigatorToolbar"></NavigatorToolbar>
@@ -236,6 +240,7 @@ export default {
       mindMapData: null,
       mindMapConfig: {},
       isLargeMap: false,
+      expandProgress: { running: false, completed: 0 },
       storeDataTimer: null,
       pendingStoreData: null,
       collabDraftFallbackTimer: null,
@@ -1083,6 +1088,7 @@ export default {
           openBlankMode: false
         },
         ...(config || {}),
+        cooperativeRendering: getRuntimeConfig().largeMapScheduler,
         ...(this.isLargeMap
           ? {
               openPerformance: true,
@@ -1213,6 +1219,10 @@ export default {
       }
       // api/index.js文件使用
       // 当正在编辑本地文件时通过该方法获取最新数据
+      this.mindMap.on('expand_progress', progress => {
+        this.expandProgress = { ...this.expandProgress, ...progress }
+        if (progress.error) this.$message.error(progress.error)
+      })
       Vue.prototype.getCurrentData = () => {
         const fullData = this.mindMap.getData(true)
         return { ...fullData }

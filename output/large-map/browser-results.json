@@ -1,0 +1,35 @@
+{
+  "paginatedHydration": true,
+  "preview1000": {
+    "elapsed": 405.60000000009313,
+    "nodes": 49,
+    "observed": false
+  },
+  "preview10000": {
+    "elapsed": 305.60000000009313,
+    "nodes": 49,
+    "observed": false
+  },
+  "preview30000": {
+    "elapsed": 336.60000000009313,
+    "nodes": 49,
+    "observed": false
+  },
+  "realXmind": {
+    "nodeCount": 10401,
+    "processingMs": 45.799999999813735
+  },
+  "lifecycle": {
+    "maxDom": 9,
+    "remainingDom": 0
+  },
+  "noWorkerFallback": true,
+  "legacy1000Ms": 1567.5,
+  "legacyLongTasks": [
+    1494
+  ],
+  "cooperative1000Ms": 2418.1999999997206,
+  "cooperativeLongTasks": [],
+  "cooperative10000Ms": 36586.39999999991,
+  "cooperative10000LongTasks": []
+}
