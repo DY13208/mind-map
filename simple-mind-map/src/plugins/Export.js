@@ -450,6 +450,7 @@ class Export {
         }
       } catch (err) {
         console.error('[mind-map] export tree failed', err)
+        throw err
       }
     }
     return this.mindMap.getData(withConfig)

@@ -1,5 +1,5 @@
 import Base from './Base'
-import { walk, asyncRun, getNodeIndexInNodeList } from '../utils'
+import { getNodeIndexInNodeList } from '../utils'
 import { CONSTANTS } from '../constants/constant'
 
 //  思维导图
@@ -13,25 +13,25 @@ class MindMap extends Base {
   //  布局
   doLayout(callback) {
     let task = [
-      () => {
-        this.computedBaseValue()
+      async () => {
+        await this.computedBaseValue()
       },
-      () => {
-        this.computedTopValue()
+      async () => {
+        await this.computedTopValue()
       },
-      () => {
-        this.adjustTopValue()
+      async () => {
+        await this.adjustTopValue()
       },
-      () => {
+      async () => {
         callback(this.root)
       }
     ]
-    asyncRun(task)
+    return this.runLayout(task)
   }
 
   //  遍历数据计算节点的left、width、height
   computedBaseValue() {
-    walk(
+    return this.walk(
       this.renderer.renderTree,
       null,
       (cur, parent, isRoot, layerIndex, index, ancestors) => {
@@ -127,7 +127,7 @@ class MindMap extends Base {
 
   //  遍历节点树计算节点的top
   computedTopValue() {
-    walk(
+    return this.walk(
       this.root,
       null,
       (node, parent, isRoot, layerIndex) => {
@@ -155,7 +155,7 @@ class MindMap extends Base {
 
   //  调整节点top
   adjustTopValue() {
-    walk(
+    return this.walk(
       this.root,
       null,
       (node, parent, isRoot, layerIndex) => {

@@ -1,3 +1,4 @@
+import { treeTask } from './treeWorker'
 import nodeDescendantCount from 'simple-mind-map/src/utils/nodeDescendantCount'
 
 const LARGE_NODE_THRESHOLD = 100
@@ -148,43 +149,7 @@ export function stubImportedTree(root, options = {}) {
 }
 
 function runJsonWorker(action, payload) {
-  if (typeof Worker === 'undefined' || typeof Blob === 'undefined') {
-    return Promise.resolve(
-      action === 'parse' ? JSON.parse(payload) : JSON.stringify(payload)
-    )
-  }
-  return new Promise((resolve, reject) => {
-    const source = `
-      self.onmessage = function (event) {
-        try {
-          var action = event.data.action
-          var value = event.data.payload
-          var result = action === 'parse' ? JSON.parse(value) : JSON.stringify(value)
-          self.postMessage({ ok: true, result: result })
-        } catch (error) {
-          self.postMessage({ ok: false, error: error && error.message ? error.message : String(error) })
-        }
-      }
-    `
-    const url = URL.createObjectURL(
-      new Blob([source], { type: 'application/javascript' })
-    )
-    const worker = new Worker(url)
-    const cleanup = () => {
-      worker.terminate()
-      URL.revokeObjectURL(url)
-    }
-    worker.onmessage = event => {
-      cleanup()
-      if (event.data.ok) resolve(event.data.result)
-      else reject(new Error(event.data.error || 'JSON worker failed'))
-    }
-    worker.onerror = event => {
-      cleanup()
-      reject(new Error(event.message || 'JSON worker failed'))
-    }
-    worker.postMessage({ action, payload })
-  })
+  return treeTask(action, payload)
 }
 
 export function parseJsonOffMainThread(text) {

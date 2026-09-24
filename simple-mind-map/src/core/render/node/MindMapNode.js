@@ -1,3 +1,4 @@
+import { runSteps, walkSteps } from '../../../utils/renderScheduler'
 import Style from './Style'
 import Shape from './Shape'
 import { G, Rect, Text, SVG } from '@svgdotjs/svg.js'
@@ -579,8 +580,7 @@ class MindMapNode {
     const {
       alwaysShowExpandBtn,
       notShowExpandBtn,
-      isShowCreateChildBtnIcon,
-      readonly
+      isShowCreateChildBtnIcon
     } = this.mindMap.opt
     const childrenLength = this.getChildrenLength()
     // 不显示展开收起按钮则不需要处理
@@ -648,9 +648,10 @@ class MindMapNode {
   // 判断节点是否可见
   checkIsInClient(padding = 0) {
     const { left: nx, top: ny } = this.getNodePosInClient(this.left, this.top)
+    const transform = this.mindMap.draw.transform()
     return (
-      nx + this.width > 0 - padding &&
-      ny + this.height > 0 - padding &&
+      nx + this.width * transform.scaleX > 0 - padding &&
+      ny + this.height * transform.scaleY > 0 - padding &&
       nx < this.mindMap.width + padding &&
       ny < this.mindMap.height + padding
     )
@@ -673,6 +674,7 @@ class MindMapNode {
 
   // 根据是否激活更新节点
   updateNodeByActive(active) {
+    if (active && this._overviewGroup) this.render(() => {}, false, false, true)
     if (this.group) {
       const { isShowCreateChildBtnIcon } = this.mindMap.opt
       // 切换激活状态，需要切换展开收起按钮的显隐
@@ -695,9 +697,27 @@ class MindMapNode {
   // 递归渲染
   // forceRender：强制渲染，无论是否处于画布可视区域
   // async：异步渲染
-  render(callback = () => {}, forceRender = false, async = false) {
+  render(callback = () => {}, forceRender = false, async = false, ownOnly = false) {
+    if (async && this.mindMap.opt.cooperativeRendering) {
+      const generation = this.renderer._renderGeneration
+      const paint = this.renderer._paintGeneration = (this.renderer._paintGeneration || 0) + 1
+      const valid = () => generation === this.renderer._renderGeneration && paint === this.renderer._paintGeneration
+      runSteps(walkSteps(this, null, node => {
+        node.render(() => {}, forceRender, false, true)
+        return node.getData('expand') === false
+      }), {
+        budget: this.mindMap.opt.renderFrameBudget, valid,
+        progress: completed => this.mindMap.emit('render_progress', { phase: 'paint', completed })
+      }).then(done => { if (done && valid()) callback() }).catch(error => {
+        if (!valid()) return
+        this.renderer.isRendering = false
+        this.mindMap.emit('render_error', error)
+      })
+      return
+    }
     // 节点
     // 重新渲染连线
+    this._forceLineRender = forceRender
     this.renderLine()
     const { openPerformance, performanceConfig } = this.mindMap.opt
     // 强制渲染、或没有开启性能模式、或不在画布可视区域内不渲染节点内容
@@ -708,6 +728,22 @@ class MindMapNode {
       this.checkIsInClient(performanceConfig.padding) ||
       this.isRoot
     ) {
+      const simplified = !forceRender && openPerformance &&
+        this.mindMap.draw.transform().scaleX < this.mindMap.opt.simplifiedNodeScale &&
+        !this.getData('isActive') && !this.isRoot
+      if (simplified) {
+        if (this.group) this.group.hide()
+        if (!this._overviewGroup) {
+          this._overviewGroup = new G().addClass('smm-node')
+          this._overviewGroup.rect(1, 1).fill('#80948a')
+          this._overviewGroup.on('click', () => this.mindMap.execCommand('SET_NODE_ACTIVE', this))
+        }
+        this.nodeDraw.add(this._overviewGroup)
+        this._overviewGroup.show()
+        this._overviewGroup.first().size(this.width, this.height).move(this.left, this.top)
+      } else {
+      if (this._overviewGroup) this._overviewGroup.remove()
+      if (this.group) this.group.show()
       if (!this.group) {
         // 创建组
         this.group = new G()
@@ -730,12 +766,13 @@ class MindMapNode {
         this.updateExpandBtnPlaceholderRect()
         this.update(forceRender)
       }
+      }
     } else if (openPerformance && performanceConfig.removeNodeWhenOutCanvas) {
       this.removeSelf()
     }
     // 子节点
     if (
-      this.children &&
+      !ownOnly && this.children &&
       this.children.length &&
       this.getData('expand') !== false
     ) {
@@ -782,6 +819,7 @@ class MindMapNode {
 
   // 删除自身，只是从画布删除，节点容器还在，后续还可以重新插回画布
   removeSelf() {
+    if (this._overviewGroup) this._overviewGroup.remove()
     if (!this.group) return
     this.group.remove()
     this.removeGeneralization()
@@ -803,6 +841,7 @@ class MindMapNode {
 
   // 销毁节点，不但会从画布删除，而且原节点直接置空，后续无法再插回画布
   destroy() {
+    if (this._overviewGroup) { this._overviewGroup.remove(); this._overviewGroup = null }
     this.removeLine()
     if (!this.group) return
     if (this.emptyUser) {
@@ -954,7 +993,16 @@ class MindMapNode {
       },
       this.style.getStyle('lineStyle', true)
     )
-    this._lines.forEach(line => {
+    this._lines.forEach((line, index) => {
+      const child = this.children[index]
+      if (this.mindMap.opt.openPerformance && child && !this._forceLineRender) {
+        const a = this.getNodePosInClient(Math.min(this.left, child.left), Math.min(this.top, child.top))
+        const b = this.getNodePosInClient(Math.max(this.left + this.width, child.left + child.width), Math.max(this.top + this.height, child.top + child.height))
+        const padding = this.mindMap.opt.performanceConfig.padding
+        const visible = b.left >= -padding && b.top >= -padding && a.left <= this.mindMap.width + padding && a.top <= this.mindMap.height + padding
+        if (visible) this.lineDraw.add(line)
+        else line.remove()
+      } else this.lineDraw.add(line)
       if (typeof line.addClass === 'function') line.addClass('smm-tree-connector')
     })
     // 子级的连线也需要更新

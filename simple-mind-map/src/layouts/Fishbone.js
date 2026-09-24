@@ -1,5 +1,5 @@
 import Base from './Base'
-import { walk, asyncRun, degToRad, getNodeIndexInNodeList } from '../utils'
+import { degToRad, getNodeIndexInNodeList } from '../utils'
 import { CONSTANTS } from '../constants/constant'
 import utils from './fishboneUtils'
 import { SVG } from '@svgdotjs/svg.js'
@@ -78,23 +78,26 @@ class Fishbone extends Base {
 
   //  布局
   doLayout(callback) {
+    const generation = this.renderer._renderGeneration
     let task = [
-      () => {
-        this.computedBaseValue()
+      async () => {
+        await this.computedBaseValue()
+        if (generation !== this.renderer._renderGeneration) return
         this.addFishTail()
       },
-      () => {
-        this.computedLeftTopValue()
+      async () => {
+        await this.computedLeftTopValue()
       },
-      () => {
-        this.adjustLeftTopValue()
+      async () => {
+        await this.adjustLeftTopValue()
+        if (generation !== this.renderer._renderGeneration) return
         this.updateFishTailPosition()
       },
-      () => {
+      async () => {
         callback(this.root)
       }
     ]
-    asyncRun(task)
+    return this.runLayout(task)
   }
 
   // 创建鱼尾
@@ -149,7 +152,7 @@ class Fishbone extends Base {
 
   //  遍历数据创建节点、计算根节点的位置，计算根节点的子节点的top值
   computedBaseValue() {
-    walk(
+    return this.walk(
       this.renderer.renderTree,
       null,
       (node, parent, isRoot, layerIndex, index, ancestors) => {
@@ -207,7 +210,7 @@ class Fishbone extends Base {
 
   //  遍历节点树计算节点的left、top
   computedLeftTopValue() {
-    walk(
+    return this.walk(
       this.root,
       null,
       (node, parent, isRoot, layerIndex) => {
@@ -242,7 +245,7 @@ class Fishbone extends Base {
 
   //  调整节点left、top
   adjustLeftTopValue() {
-    walk(
+    return this.walk(
       this.root,
       null,
       (node, parent, isRoot, layerIndex) => {

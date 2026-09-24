@@ -1,3 +1,4 @@
+import { treeTask } from '@/utils/treeWorker'
 import { productRequest } from './productHttp'
 import { userMessageFromError } from './apiError'
 import { C3_SERVICE_STATUS_MATRIX } from './serviceStatus'
@@ -92,7 +93,8 @@ export default {
         `/api/files/${encodeURIComponent(roomKey)}/versions/${encodeURIComponent(
           versionId
         )}/tree`,
-        { signal: options.signal, timeoutMs: options.timeoutMs || 30000 }
+        { signal: options.signal, timeoutMs: options.timeoutMs || 30000,
+          parseJson: options.sessionId ? raw => treeTask('historyResponse', { raw, sessionId: options.sessionId }, { signal: options.signal, revision: options.sessionId }) : undefined }
       )
       return {
         ...data,

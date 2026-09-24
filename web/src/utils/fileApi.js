@@ -448,9 +448,13 @@ export function getFileSubtree(roomKey, uid, options = {}) {
 }
 
 export function getFileExport(roomKey) {
-  return request(
-    `/api/files/${encodeURIComponent(roomKey)}?format=full&max_nodes=10000`
-  )
+  return request(`/api/files/${encodeURIComponent(roomKey)}?format=export`)
+    .then(payload => {
+      if (!payload || payload.truncated || !payload.tree) {
+        throw new Error('导出内容不完整，请稍后重试')
+      }
+      return payload
+    })
 }
 
 /** 服务端全量大纲（不依赖画布展开/懒加载） */
