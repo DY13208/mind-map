@@ -601,6 +601,7 @@ export async function replaceFileTree(roomKey, tree, extra = {}) {
   const payload = {
     tree,
     title: extra.title,
+    baseVersion: extra.baseVersion,
     confirm_sop_change: extra.confirm_sop_change !== false,
     operationId: extra.operationId
   }

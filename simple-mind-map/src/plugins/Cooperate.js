@@ -3733,10 +3733,20 @@ class Cooperate {
     }
     this.httpReplaceInFlight = true
     const tree = (fullData && fullData.root) || fullData
+    // The server rejects writes based on a pre-restore revision. Carry the
+    // revision that this canvas has actually applied, so a later restore
+    // cannot be overwritten by an import started from stale content.
+    const replaceExtra = {
+      ...extra,
+      baseVersion:
+        extra.baseVersion == null
+          ? Number(this.lastAppliedVersion) || 0
+          : extra.baseVersion
+    }
     try {
       const result = await collabFullTree.withAllowedFullTreeMutation(
         reason || 'IMPORT',
-        () => this.httpReplaceTree(tree, extra)
+        () => this.httpReplaceTree(tree, replaceExtra)
       )
       this.afterHttpReplace(result, tree)
       collabFullTree.publishImportTrace({

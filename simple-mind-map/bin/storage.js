@@ -30,6 +30,7 @@ const {
 } = require('./roomNodes')
 const { queryRoomNodes } = require('./nodeQuery')
 const { isCollabV2Enabled, isCollabV2Trace } = require('./collabV2/flag')
+const { persistMapReplaceHistory } = require('./collabHistory/pgStore')
 
 const pool = new Pool({
   host: process.env.PGHOST,
@@ -1896,11 +1897,6 @@ async function commitDirectRoomOperation(roomKey, command, apply) {
 function rejectIfStaleAfterRestore(room, command) {
   const epoch = Number(room.restore_epoch_revision || 0)
   if (!epoch) return
-  const type = String(command.type || '')
-  const reason =
-    (command.payload && (command.payload.reason || command.payload.fullTreeReason)) ||
-    ''
-  if (type === 'map.replace' && reason === 'VERSION_RESTORE') return
   const base =
     command.baseVersion != null && command.baseVersion !== undefined
       ? Number(command.baseVersion)
@@ -2078,7 +2074,7 @@ async function commitDirectRoomOperationOnce(client, roomKey, command, apply) {
 async function commitRoomOperationOnce(client, roomKey, command, apply) {
   await client.query('begin')
   const roomResult = await client.query(
-    `select room_key, title, nodes, version, updated_at,
+    `select room_key, title, nodes, metadata, version, updated_at,
             coalesce(restore_epoch_revision, 0) as restore_epoch_revision
      from rooms where room_key = $1 for update`,
     [roomKey]
@@ -2150,12 +2146,23 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
     client
   })
   const version = currentVersion + 1
+  // Version restore writes through collabHistory's locked store path. Every
+  // map.replace that reaches this operation commit is an import/full overwrite.
+  const isImportReplace = command.type === 'map.replace'
   const event = {
     ...(applied.event || {}),
     mapId: roomKey,
     version,
     operationId: command.operationId,
     actorId: command.actorId
+  }
+  if (isImportReplace) {
+    event.payload = {
+      ...(event.payload || {}),
+      reason: 'IMPORT',
+      fullTreeReason: 'IMPORT',
+      resnapshot: true
+    }
   }
   const canonical = snapshotNodesForStorage(applied.nodes || {})
   const snapshot = canonical.nodes
@@ -2204,6 +2211,16 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
         : null
     ]
   )
+  const operationPayload = { ...(command.payload || {}) }
+  if (isImportReplace) {
+    // map.replace cannot be replayed from this operation alone; its exact pre/post
+    // states are checkpointed below in this same transaction instead.
+    delete operationPayload.tree
+    delete operationPayload.nodes
+    operationPayload.reason = 'IMPORT'
+    operationPayload.fullTreeReason = 'IMPORT'
+    operationPayload.resnapshot = true
+  }
   const inserted = await client.query(
     `insert into room_operations
      (room_key, version, operation_id, actor_id, client_id,
@@ -2219,7 +2236,7 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
       command.actorId,
       command.clientId || null,
       command.type,
-      JSON.stringify(command.payload || {}),
+      JSON.stringify(operationPayload),
       JSON.stringify(event),
       applied.inversePayload == null
         ? null
@@ -2248,6 +2265,21 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
        on conflict (room_key, version) do nothing`,
       [roomKey, version, JSON.stringify(snapshot)]
     )
+  }
+  if (isImportReplace) {
+    await persistMapReplaceHistory(client, {
+      roomKey,
+      operationId: command.operationId,
+      actorId: command.actorId,
+      operationCreatedAt: inserted.rows[0] && inserted.rows[0].created_at,
+      preRevision: currentVersion,
+      postRevision: version,
+      preNodes: picked.nodes,
+      postNodes: snapshot,
+      preMetadata: room.metadata || {},
+      postMetadata: applied.metadata || room.metadata || {},
+      snapshotVersion: 1
+    })
   }
   await client.query('select pg_notify($1, $2)', [
     'collab_events',

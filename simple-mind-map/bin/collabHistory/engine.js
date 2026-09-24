@@ -698,6 +698,23 @@ function createHistoryEngine(options = {}) {
   async function maybeCheckpointAfterOp(roomKey, operation) {
     const type = String(operation.operation_type || operation.type || '')
     const revision = Number(operation.version || operation.serverRevision || 0)
+    if (
+      type === 'map.replace' &&
+      store.hasAtomicMapReplaceHistory &&
+      (await store.hasAtomicMapReplaceHistory(
+        roomKey,
+        revision,
+        operation.operation_id || operation.operationId
+      ))
+    ) {
+      const checkpoint = store.latestCheckpointAt
+        ? await store.latestCheckpointAt(roomKey, revision)
+        : null
+      if (config.autoVersionOnCheckpoint) {
+        await maybeAutoVersion(roomKey, revision, operation.actor_id || '')
+      }
+      return checkpoint
+    }
     const has = store.hasAnyCheckpoint ? await store.hasAnyCheckpoint(roomKey) : false
     if (!has) {
       return ensureHistoryBaseline(roomKey, {

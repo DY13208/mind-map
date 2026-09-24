@@ -8,6 +8,7 @@ function summaryText(summary, status) {
   }
   const kind = summary && summary.kind
   if (kind === 'import') return '由导入生成'
+  if (kind === 'pre_import') return '导入前自动备份'
   if (kind === 'restore') return '从历史版本恢复'
   if (kind === 'pre_restore') return '恢复前自动备份'
   if (kind === 'legacy') return '旧版快照'

@@ -32,6 +32,7 @@ const methods = vm.runInNewContext(
       methodSource('  async syncHttpDirtySubtrees(treeNodeIndex) {', '  async syncHttpRemoteOperations(operations) {'),
       methodSource('  async recoverHttpCollab(targetVersion, options = {}) {', '  async refreshVisibleFromHttp(updatedAt, options = {}) {'),
       methodSource('  async refreshVisibleFromHttp(updatedAt, options = {}) {', '  flushPendingHttpRefresh() {'),
+      methodSource('  async persistHttpReplace(fullData, extra = {}) {', '  async restoreHttpTree(options = {}) {'),
       methodSource('  async restoreHttpTree(options = {}) {', '  mergeHttpChildren(data, incoming) {')
     ].join(',\n')}
   })`,
@@ -87,6 +88,13 @@ const methods = vm.runInNewContext(
     HTTP_RECOVER_RETRY_BASE_MS: 500,
     HTTP_RECOVER_RETRY_MAX_MS: 30000,
     HTTP_RECOVER_RESTORE_WAIT_MS: 60000,
+    collabFullTree: {
+      resolveFullTreeReason: extra => extra.reason || '',
+      currentFullTreeReason: () => '',
+      isFullTreeMutationAllowed: () => true,
+      publishImportTrace() {},
+      withAllowedFullTreeMutation: (_reason, fn) => fn()
+    },
     setTimeout,
     clearTimeout,
     Date,
@@ -284,6 +292,81 @@ test('history resnapshot fetches every rendered node in bounded requests', async
   assert.equal(plugin.lastAppliedVersion, 12)
   assert.equal(plugin.rendererLookupCount, 0)
   assert.equal(plugin.treeLookupCount, 0)
+})
+
+test('HTTP import replacement sends the applied post-restore revision as baseVersion', async () => {
+  const calls = []
+  const plugin = {
+    httpReplaceInFlight: false,
+    lastAppliedVersion: 11,
+    httpReplaceTree: async (tree, extra) => {
+      calls.push({ tree, extra })
+      return { version: 12 }
+    },
+    afterHttpReplace() {},
+    persistHttpReplace: methods.persistHttpReplace
+  }
+
+  const tree = { data: { uid: 'root', text: 'imported' }, children: [] }
+  const result = await plugin.persistHttpReplace(
+    { root: tree },
+    { source: 'import', reason: 'IMPORT' }
+  )
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].tree, tree)
+  assert.equal(calls[0].extra.baseVersion, 11)
+  assert.equal(result.version, 12)
+  assert.equal(plugin.httpReplaceInFlight, false)
+
+  await plugin.persistHttpReplace(
+    { root: tree },
+    { source: 'import', reason: 'IMPORT', baseVersion: 4 }
+  )
+  assert.equal(calls[1].extra.baseVersion, 4, 'an explicit stale base must not be upgraded')
+})
+
+test('server restore epoch accepts current baseVersion and rejects a stale or missing one', () => {
+  const storageSource = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '../bin/storage.js'),
+    'utf8'
+  )
+  const start = storageSource.indexOf('function rejectIfStaleAfterRestore(')
+  const end = storageSource.indexOf(
+    '\nasync function commitDirectRoomOperationOnce',
+    start
+  )
+  assert.notEqual(start, -1, 'restore epoch guard must exist in storage')
+  assert.notEqual(end, -1, 'restore epoch guard boundary must exist in storage')
+  const rejectIfStaleAfterRestore = vm.runInNewContext(
+    `(() => { ${storageSource.slice(start, end)}; return rejectIfStaleAfterRestore })()`
+  )
+  const room = { restore_epoch_revision: 11, version: 12 }
+
+  assert.doesNotThrow(() =>
+    rejectIfStaleAfterRestore(room, {
+      type: 'map.replace',
+      baseVersion: 11,
+      payload: { reason: 'IMPORT' }
+    })
+  )
+  assert.throws(
+    () =>
+      rejectIfStaleAfterRestore(room, {
+        type: 'map.replace',
+        baseVersion: 10,
+        payload: { reason: 'IMPORT' }
+      }),
+    error => error && error.code === 'STALE_AFTER_VERSION_RESTORE'
+  )
+  assert.throws(
+    () =>
+      rejectIfStaleAfterRestore(room, {
+        type: 'map.replace',
+        payload: { reason: 'IMPORT' }
+      }),
+    error => error && error.code === 'STALE_AFTER_VERSION_RESTORE'
+  )
 })
 
 test('VERSION_RESTORE still refreshes when its realtime operation advanced the revision first', async () => {

@@ -75,6 +75,7 @@ export function historyDisplayName(item) {
   const createdAt = item && item.createdAt
   const name = String((item && item.name) || '')
   if (type === 'AUTO') return '自动保存 ' + formatLocalDateTime(createdAt)
+  if (type === 'PRE_IMPORT') return '导入前 ' + formatLocalDateTime(createdAt)
   if (type === 'PRE_RESTORE') return '恢复前 ' + formatLocalDateTime(createdAt)
   const match = name.match(
     /^(恢复到) (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})(?::(\d{2}))?$/
@@ -91,6 +92,7 @@ export function versionTypeLabel(type) {
   if (key === 'AUTO') return '自动'
   if (key === 'MANUAL') return '手动'
   if (key === 'IMPORT') return '导入'
+  if (key === 'PRE_IMPORT') return '导入前备份'
   if (key === 'PRE_RESTORE') return '恢复前备份'
   if (key === 'RESTORE') return '恢复记录'
   if (key === 'LEGACY') return '旧版快照'
@@ -102,6 +104,7 @@ export function versionTypeTag(type) {
   if (key === 'AUTO') return 'info'
   if (key === 'MANUAL') return 'success'
   if (key === 'IMPORT') return 'warning'
+  if (key === 'PRE_IMPORT') return ''
   if (key === 'PRE_RESTORE') return ''
   if (key === 'RESTORE') return 'danger'
   if (key === 'LEGACY') return 'info'

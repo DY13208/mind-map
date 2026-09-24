@@ -1,7 +1,251 @@
 const { randomUUID } = require('crypto')
 const { readRoomNodes, replaceRoomNodes, canonicalizeNodes } = require('../roomNodes')
-const { cloneJson } = require('./canonical')
+const {
+  cloneJson,
+  toBusinessTree,
+  canonicalMetadata,
+  historyChecksum,
+  nodeCount,
+  assertTreeValid
+} = require('./canonical')
 const { assertHistoryWritable } = require('./migrate')
+
+const IMPORT_VERSION_SUMMARY = {
+  inserted: 0,
+  updated: 0,
+  deleted: 0,
+  moved: 0,
+  restored: 0
+}
+
+function businessTreeOrEmpty(graph) {
+  const tree = toBusinessTree(graph)
+  if (Object.keys(tree || {}).length) return tree
+  return {
+    root: {
+      isRoot: true,
+      data: { uid: 'root', text: '未命名' },
+      children: []
+    }
+  }
+}
+
+async function insertMapReplaceCheckpoint(db, input) {
+  const tree = businessTreeOrEmpty(input.nodes)
+  const metadata = canonicalMetadata(input.metadata || {})
+  assertTreeValid(tree)
+  const checksum = historyChecksum(tree, metadata)
+  const checkpointId = randomUUID()
+  const inserted = await db.query(
+    `insert into room_checkpoints
+       (id, room_key, revision, tree_snapshot, metadata_snapshot,
+        created_at, created_by, reason, operation_count, snapshot_version,
+        checksum, node_count)
+     values ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8,$9,$10,$11,$12)
+     on conflict (room_key, revision) do nothing
+     returning id, checksum`,
+    [
+      checkpointId,
+      input.roomKey,
+      Number(input.revision),
+      JSON.stringify(tree),
+      JSON.stringify(metadata),
+      input.createdAt,
+      input.createdBy || '',
+      input.reason,
+      Number(input.operationCount || 0),
+      Number(input.snapshotVersion || 1),
+      checksum,
+      nodeCount(tree)
+    ]
+  )
+  if (inserted.rows[0]) {
+    return { id: inserted.rows[0].id, revision: Number(input.revision), checksum }
+  }
+  const existing = await db.query(
+    `select id, tree_snapshot, metadata_snapshot, checksum from room_checkpoints
+     where room_key = $1 and revision = $2 for update`,
+    [input.roomKey, Number(input.revision)]
+  )
+  const existingChecksum = existing.rows[0]
+    ? existing.rows[0].checksum ||
+      historyChecksum(
+        existing.rows[0].tree_snapshot,
+        existing.rows[0].metadata_snapshot || {}
+      )
+    : ''
+  if (!existing.rows[0] || existingChecksum !== checksum) {
+    const error = new Error('导入前后历史快照与当前版本不一致')
+    error.code = 'CHECKPOINT_CONFLICT'
+    error.statusCode = 409
+    throw error
+  }
+  if (!existing.rows[0].checksum) {
+    await db.query(
+      `update room_checkpoints set checksum = $3
+       where room_key = $1 and revision = $2`,
+      [input.roomKey, Number(input.revision), checksum]
+    )
+  }
+  return {
+    id: existing.rows[0].id,
+    revision: Number(input.revision),
+    checksum
+  }
+}
+
+async function countOperationsAround(db, roomKey, beforeRevision, afterRevision) {
+  const res = await db.query(
+    `select
+       count(*) filter (where version <= $2)::int as before_count,
+       count(*) filter (where version <= $3)::int as after_count
+     from (
+       select version from room_operations
+       where room_key = $1
+       union all
+       select version from room_operations_archive
+       where room_key = $1
+     ) operations`,
+    [roomKey, Number(beforeRevision), Number(afterRevision)]
+  )
+  return {
+    before: Number((res.rows[0] && res.rows[0].before_count) || 0),
+    after: Number((res.rows[0] && res.rows[0].after_count) || 0)
+  }
+}
+
+async function insertMapReplaceVersion(db, input) {
+  const id = randomUUID()
+  const summary = {
+    kind: input.summaryKind,
+    ...IMPORT_VERSION_SUMMARY
+  }
+  const res = await db.query(
+    `insert into room_versions
+       (id, room_key, revision, checkpoint_revision, name, description, type,
+        created_by, created_at, source, hidden, summary, summary_status,
+        editors, source_kind, availability, legacy_source)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,false,$11::jsonb,'na',
+             $12::jsonb,$13,'readable','')
+     returning *`,
+    [
+      id,
+      input.roomKey,
+      Number(input.revision),
+      Number(input.checkpointRevision),
+      input.name,
+      input.description || '',
+      input.type,
+      input.createdBy || '',
+      input.createdAt,
+      'import',
+      JSON.stringify(summary),
+      JSON.stringify(input.createdBy ? [input.createdBy] : []),
+      input.sourceKind
+    ]
+  )
+  const row = res.rows[0]
+  await db.query(
+    `insert into room_history_audit
+       (id, room_key, action, version_id, target_revision, from_revision,
+        new_revision, user_id, detail)
+     values ($1,$2,'VERSION_CREATE',$3,$4,$5,$6,$7,$8::jsonb)`,
+    [
+      randomUUID(),
+      input.roomKey,
+      id,
+      Number(input.revision),
+      Number(input.revision),
+      Number(input.newRevision),
+      input.createdBy || '',
+      JSON.stringify({
+        type: input.type,
+        name: input.name,
+        operationId: input.operationId,
+        sourceKind: input.sourceKind
+      })
+    ]
+  )
+  return row
+}
+
+/** Persist both sides of an HTTP map.replace using its already-open room transaction. */
+async function persistMapReplaceHistory(db, input = {}) {
+  if (!db || typeof db.query !== 'function') {
+    throw new TypeError('map.replace history requires a PostgreSQL transaction')
+  }
+  await assertHistoryWritable(db)
+  const roomKey = String(input.roomKey || '')
+  const operationId = String(input.operationId || '')
+  const preRevision = Number(input.preRevision)
+  const postRevision = Number(input.postRevision)
+  if (!roomKey || !operationId || !Number.isFinite(preRevision) || postRevision !== preRevision + 1) {
+    throw new TypeError('invalid map.replace history revisions')
+  }
+  const operationTime = Date.parse(input.operationCreatedAt || '')
+  const eventTime = Number.isFinite(operationTime) ? operationTime : Date.now()
+  const preCreatedAt = new Date(eventTime - 1).toISOString()
+  const postCreatedAt = new Date(eventTime + 1).toISOString()
+  const actorId = String(input.actorId || '')
+  const operationCounts = await countOperationsAround(
+    db,
+    roomKey,
+    preRevision,
+    postRevision
+  )
+
+  const preCheckpoint = await insertMapReplaceCheckpoint(db, {
+    roomKey,
+    revision: preRevision,
+    nodes: input.preNodes,
+    metadata: input.preMetadata,
+    createdAt: preCreatedAt,
+    createdBy: actorId,
+    reason: 'PRE_IMPORT',
+    snapshotVersion: input.snapshotVersion,
+    operationCount: operationCounts.before
+  })
+  const preVersion = await insertMapReplaceVersion(db, {
+    roomKey,
+    revision: preRevision,
+    checkpointRevision: preCheckpoint.revision,
+    newRevision: postRevision,
+    createdBy: actorId,
+    createdAt: preCreatedAt,
+    type: 'PRE_IMPORT',
+    name: '导入前自动备份',
+    description: '导入前自动备份',
+    summaryKind: 'pre_import',
+    sourceKind: 'pre_import',
+    operationId
+  })
+  const postCheckpoint = await insertMapReplaceCheckpoint(db, {
+    roomKey,
+    revision: postRevision,
+    nodes: input.postNodes,
+    metadata: input.postMetadata,
+    createdAt: postCreatedAt,
+    createdBy: actorId,
+    reason: 'IMPORT',
+    snapshotVersion: input.snapshotVersion,
+    operationCount: operationCounts.after
+  })
+  const postVersion = await insertMapReplaceVersion(db, {
+    roomKey,
+    revision: postRevision,
+    checkpointRevision: postCheckpoint.revision,
+    newRevision: postRevision,
+    createdBy: actorId,
+    createdAt: postCreatedAt,
+    type: 'IMPORT',
+    name: '导入',
+    description: '导入',
+    summaryKind: 'import',
+    sourceKind: 'import',
+    operationId
+  })
+  return { preCheckpoint, postCheckpoint, preVersion, postVersion }
+}
 
 function rowCheckpoint(row) {
   if (!row) return null
@@ -255,6 +499,28 @@ function createPgHistoryStore(pool) {
           [roomKey, Number(revision)]
         )
         return rowCheckpoint(res.rows[0])
+      },
+      async hasAtomicMapReplaceHistory(roomKey, revision, operationId) {
+        if (!operationId) return false
+        const res = await db.query(
+          `select exists (
+             select 1
+             from room_versions v
+             join room_checkpoints c
+               on c.room_key = v.room_key and c.revision = v.revision
+             join room_history_audit a
+               on a.version_id = v.id
+             where v.room_key = $1
+               and v.revision = $2
+               and v.type = 'IMPORT'
+               and v.source_kind = 'import'
+               and c.reason = 'IMPORT'
+               and a.action = 'VERSION_CREATE'
+               and a.detail ->> 'operationId' = $3
+           ) as captured`,
+          [roomKey, Number(revision), String(operationId)]
+        )
+        return !!(res.rows[0] && res.rows[0].captured)
       },
       async getCheckpoint(id) {
         const res = await db.query(`select * from room_checkpoints where id = $1`, [id])
@@ -629,4 +895,10 @@ function createPgHistoryStore(pool) {
   return root
 }
 
-module.exports = { createPgHistoryStore, cloneJson, encodeCursor, decodeCursor }
+module.exports = {
+  createPgHistoryStore,
+  persistMapReplaceHistory,
+  cloneJson,
+  encodeCursor,
+  decodeCursor
+}

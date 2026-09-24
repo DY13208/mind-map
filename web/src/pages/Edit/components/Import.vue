@@ -192,6 +192,7 @@ export default {
                 ? 'FULL_TREE_MUTATION_FORBIDDEN'
                 : 'IMPORT_APPLY_FAILED')
           err.stage = (payload && payload.stage) || err.code
+          err.alreadyNotified = !!(payload && payload.notified)
           reject(err)
         }
         this.$bus.$once('setDataComplete', onDone)
@@ -235,7 +236,9 @@ export default {
         } catch (error) {
           console.log(error)
           hideLoading()
-          this.$message.error(this.importErrorText(error, 'IMPORT_PARSE_FAILED'))
+          if (!error.alreadyNotified) {
+            this.$message.error(this.importErrorText(error, 'IMPORT_PARSE_FAILED'))
+          }
         }
       }
     },
@@ -257,7 +260,9 @@ export default {
       } catch (error) {
         console.log(error)
         hideLoading()
-        this.$message.error(this.importErrorText(error, 'IMPORT_PARSE_FAILED'))
+        if (!error.alreadyNotified) {
+          this.$message.error(this.importErrorText(error, 'IMPORT_PARSE_FAILED'))
+        }
       }
     },
 
@@ -290,7 +295,9 @@ export default {
         } catch (error) {
           console.log(error)
           hideLoading()
-          this.$message.error(this.importErrorText(error, 'IMPORT_PARSE_FAILED'))
+          if (!error.alreadyNotified) {
+            this.$message.error(this.importErrorText(error, 'IMPORT_PARSE_FAILED'))
+          }
         }
       }
     },

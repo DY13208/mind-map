@@ -1397,6 +1397,8 @@ export default {
                 ? 'IMPORT_TOO_LARGE'
                 : code === 'IMPORT_APPLY_FAILED'
                   ? 'IMPORT_APPLY_FAILED'
+                  : code === 'STALE_AFTER_VERSION_RESTORE'
+                    ? '脑图已恢复到新版本，请刷新页面后重新导入'
                   : (err && err.message) || this.$t('edit.importPersistFailed')
           )
         }
@@ -1404,7 +1406,8 @@ export default {
           this.$bus.$emit('setDataFailed', {
             code: (err && err.code) || 'IMPORT_APPLY_FAILED',
             stage: (err && err.stage) || 'IMPORT_APPLY_FAILED',
-            message: (err && err.message) || ''
+            message: (err && err.message) || '',
+            notified: !!persistReplace
           })
         } else {
           throw err
