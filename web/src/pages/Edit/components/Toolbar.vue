@@ -515,6 +515,10 @@ jobMd.renderer.rules.link_open = function (tokens, idx, options, env, self) {
 }
 
 const JOB_POLL_INTERVAL = 2500
+// 派发后在主机上一直找不到这条任务时的容忍次数（2.5s × 24 ≈ 1 分钟）。
+// 任务记录是**执行主机的 WorkBuddy 内存里**的：WorkBuddy 重启、桥接重开、
+// 换了会话，这条记录就查不到了 —— 再轮询下去永远不会结束，得停手并说清楚。
+const JOB_POLL_MISS_LIMIT = 24
 // 概要：点它 = 选中「按这条概要继续」，真正的派发还是由「运行」按钮触发
 const GENERALIZATION_TEXT_LIMIT = 60
 
@@ -614,6 +618,8 @@ export default {
       // 本次派发、正在等的任务。轮询与写回只看它 ——
       // 不能复用 jobCurrentId（那是面板里正在看的记录，点一下列表就被换了）
       jobPending: null,
+      // 连着多少次在主机上没查到这条任务（到了上限就停轮询并报错）
+      jobPendingMiss: 0,
       // 结果写回导图：运行节点 uid、写回状态、已写过的任务 id
       jobRunNodeUid: '',
       jobRunNodeTitle: '',
@@ -1074,6 +1080,7 @@ export default {
         this.jobCurrentId = jobId
         this.jobActiveId = jobId
         this.jobPendingPrompt = promptText
+        this.jobPendingMiss = 0
         this.jobPending = {
           id: jobId,
           nodeUid: this.jobRunNodeUid,
@@ -1485,6 +1492,7 @@ export default {
         this.jobCurrentId = jobId
         this.jobActiveId = jobId
         this.jobPendingPrompt = prompt
+        this.jobPendingMiss = 0
         this.jobPending = {
           id: jobId,
           nodeUid: this.jobRunNodeUid,
@@ -1525,14 +1533,52 @@ export default {
       }
     },
 
+    /**
+     * 轮询在主机上查不到这条任务 —— 那台机器上已经没有它了。
+     *
+     * 任务记录在执行主机的 WorkBuddy 内存里：WorkBuddy 重启、桥接重开、
+     * 换了会话都会让记录消失。以前这里直接 return，于是永远轮询下去，
+     * 界面上只停在「已派发…」，结果悄无声息地丢掉（用户看到的就是"没回传、
+     * 运行历史也没记录"）。所以数到上限就停手，并把原因写在状态栏和提示里。
+     */
+    notePendingJobMissing(why = '') {
+      this.jobPendingMiss = (this.jobPendingMiss || 0) + 1
+      if (this.jobPendingMiss < JOB_POLL_MISS_LIMIT) {
+        if (this.jobPendingMiss === 6) {
+          this.jobStatus = '已派发，等主机上报任务记录…'
+          this.jobStatusType = 'jobWait'
+        }
+        return
+      }
+      this.stopJobPoll()
+      this.jobPending = null
+      const host = this.jobSelectedHost || {}
+      const label = host.label || host.key || '那台机器'
+      this.jobStatus = '没等到结果'
+      this.jobStatusType = 'jobErr'
+      this.jobWriteError = why
+        ? `连不上 ${label} 的任务桥（${why}）—— 这次没有写回导图，可以重跑一次。`
+        : `${label} 的任务桥里找不到这条任务（WorkBuddy 或桥接重启过，任务记录会跟着消失）` +
+          '—— 这次没有写回导图，可以重跑一次。'
+      this.$message.error(this.jobWriteError)
+      this.loadJobHistory()
+    },
+
     async pollJob() {
       const pending = this.jobPending
       const host = this.jobSelectedHost
       if (!host || !pending || !pending.id) return
       const res = await listHostJobs({ host, gateway: this.jobGateway })
-      if (!res.ok) return
+      if (!res.ok) {
+        this.notePendingJobMissing(res.error || '拿不到任务列表')
+        return
+      }
       const cur = (res.jobs || []).find(item => item.id === pending.id)
-      if (!cur) return
+      if (!cur) {
+        this.notePendingJobMissing('')
+        return
+      }
+      this.jobPendingMiss = 0
       const state = cur.state || cur.status || ''
       const detail = String(cur.detail || '').replace(/^result:\s*/i, '')
       const running =
