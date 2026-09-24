@@ -13,12 +13,12 @@
         v-if="!isZenMode"
         @open-history="historyVisible = true"
       ></Toolbar>
-      <Edit></Edit>
+      <Edit ref="editor"></Edit>
       <HistoryPanel
         :visible.sync="historyVisible"
         :room="historyRoom"
         :wait-for-commit="true"
-        @restored="onHistoryRestored"
+        :after-restore="onHistoryRestored"
       />
     </template>
   </div>
@@ -119,8 +119,12 @@ export default {
         : document.body.classList.remove('isDark')
     },
 
-    onHistoryRestored() {
-      this.$bus.$emit('history-restored')
+    onHistoryRestored(restored) {
+      const editor = this.$refs.editor
+      if (editor && typeof editor.onHistoryRestored === 'function') {
+        return editor.onHistoryRestored(restored)
+      }
+      return Promise.resolve()
     },
 
     goToMyMaps() {

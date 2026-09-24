@@ -113,6 +113,9 @@ const RECENT_HTTP_MS = 8000
 const RECENT_PUSH_GRACE_MS = 2500
 const GEN_INTENT_MS = 30000
 const PATCH_CONCURRENCY = 2
+const HTTP_RECOVER_RETRY_BASE_MS = 500
+const HTTP_RECOVER_RETRY_MAX_MS = 30000
+const HTTP_RECOVER_RESTORE_WAIT_MS = 60000
 const NULLABLE_PATCH_KEYS = [
   'image',
   'imageTitle',
@@ -184,6 +187,90 @@ function keepHttpChild(uid, serverKids, lastPushed, recentPushed) {
   if (!lastPushed[uid]) return true
   const at = recentPushed && recentPushed.get(uid)
   return !!(at && Date.now() - at < RECENT_PUSH_GRACE_MS)
+}
+
+function indexTreeNodesByUid(root, index = new Map()) {
+  const stack = root ? [root] : []
+  while (stack.length) {
+    const node = stack.pop()
+    if (!node) continue
+    const uid = node.data && node.data.uid
+    if (uid) index.set(uid, node)
+    const children = node.children || []
+    for (let i = children.length - 1; i >= 0; i--) {
+      stack.push(children[i])
+    }
+  }
+  return index
+}
+
+function removeTreeNodesFromUidIndex(root, index) {
+  const stack = root ? [root] : []
+  while (stack.length) {
+    const node = stack.pop()
+    if (!node) continue
+    const uid = node.data && node.data.uid
+    if (uid && index.get(uid) === node) index.delete(uid)
+    ;(node.children || []).forEach(child => stack.push(child))
+  }
+}
+
+function indexRenderedNodesByUid(root) {
+  const index = new Map()
+  const visited = new Set()
+  const stack = root ? [{ node: root, isGeneralization: false }] : []
+  while (stack.length) {
+    const { node, isGeneralization } = stack.pop()
+    if (!node || visited.has(node)) continue
+    visited.add(node)
+    const uid =
+      (typeof node.getData === 'function' && node.getData('uid')) ||
+      (node.nodeData && node.nodeData.data && node.nodeData.data.uid) ||
+      (node.data && node.data.uid)
+    if (uid && !index.has(uid)) index.set(uid, node)
+
+    const children = node.children || []
+    const generalizations = (node._generalizationList || [])
+      .map(item => item && item.generalizationNode)
+      .filter(Boolean)
+    if (isGeneralization) {
+      for (let i = generalizations.length - 1; i >= 0; i--) {
+        stack.push({ node: generalizations[i], isGeneralization: true })
+      }
+      for (let i = children.length - 1; i >= 0; i--) {
+        stack.push({ node: children[i], isGeneralization: true })
+      }
+    } else {
+      for (let i = children.length - 1; i >= 0; i--) {
+        stack.push({ node: children[i], isGeneralization: false })
+      }
+      for (let i = generalizations.length - 1; i >= 0; i--) {
+        stack.push({ node: generalizations[i], isGeneralization: true })
+      }
+    }
+  }
+  return index
+}
+
+function hasVersionRestoreOperation(payload = {}) {
+  const operations = Array.isArray(payload && payload.operations)
+    ? payload.operations
+    : []
+  return operations.some(operation => {
+    const event = (operation && operation.event) || operation || {}
+    const type = event.type || (operation && operation.type)
+    const eventData = event.payload || {}
+    const operationData = (operation && operation.payload) || {}
+    return (
+      (type === 'map.replaced' || type === 'map.replace') &&
+      [
+        eventData.reason,
+        eventData.fullTreeReason,
+        operationData.reason,
+        operationData.fullTreeReason
+      ].includes('VERSION_RESTORE')
+    )
+  })
 }
 
 function isPermanentNodeError(err) {
@@ -469,7 +556,12 @@ class Cooperate {
     this.localRedoStack = []
     this.dirtySubtrees = new Map()
     this.httpRecovering = false
+    this.httpRecoverQueued = false
     this.httpPendingRecoverVersion = 0
+    this.httpPendingRecoverOptions = null
+    this.httpRestoreWaiters = []
+    this.httpRecoverRetryTimer = null
+    this.httpRecoverRetryDelay = HTTP_RECOVER_RETRY_BASE_MS
     this.hydratedUids = new Set()
     this.hydrateFailedUids = new Set()
     this.hydrateInflight = new Map()
@@ -871,6 +963,11 @@ class Cooperate {
     if (this.onLayoutChange) this.mindMap.off('layout_change', this.onLayoutChange)
     clearTimeout(this.httpTextTimer)
     clearTimeout(this.httpStructureTimer)
+    clearTimeout(this.httpRecoverRetryTimer)
+    clearTimeout(this.httpRemoteRecoverTimer)
+    this.httpRecoverRetryTimer = null
+    this.httpRemoteRecoverTimer = null
+    this.httpPendingRemoteVersion = 0
     clearTimeout(this._v2InsertRetryTimer)
   }
 
@@ -1898,7 +1995,11 @@ class Cooperate {
         this.markMoveFullTreeForbidden('applyV2RemoteOperation.map.replaced')
         return false
       }
-      return this.recoverHttpCollab(op.serverRevision || this.lastAppliedVersion)
+      const reason = payload.reason || payload.fullTreeReason || ''
+      return this.recoverHttpCollab(
+        op.serverRevision || this.lastAppliedVersion,
+        reason ? { reason } : {}
+      )
     }
     const uid = payload.uid
     const renderer = this.mindMap && this.mindMap.renderer
@@ -3282,6 +3383,17 @@ class Cooperate {
   }
 
   clearHttpCollab() {
+    const restoreWaiters = Array.isArray(this.httpRestoreWaiters)
+      ? this.httpRestoreWaiters.splice(0)
+      : []
+    restoreWaiters.forEach(waiter => {
+      clearTimeout(waiter.timer)
+      waiter.resolve({
+        applied: false,
+        skipped: true,
+        reason: 'HTTP_COLLAB_DISABLED'
+      })
+    })
     this.httpCollabMode = false
     this.safeLoadMode = false
     this.httpRoomKey = ''
@@ -3308,7 +3420,12 @@ class Cooperate {
     this.localRedoStack = []
     this.dirtySubtrees = new Map()
     this.httpRecovering = false
+    this.httpRecoverQueued = false
     this.httpPendingRecoverVersion = 0
+    this.httpPendingRecoverOptions = null
+    clearTimeout(this.httpRecoverRetryTimer)
+    this.httpRecoverRetryTimer = null
+    this.httpRecoverRetryDelay = HTTP_RECOVER_RETRY_BASE_MS
     this.hydratedUids = new Set()
     this.hydrateFailedUids = new Set()
     this.hydrateInflight = new Map()
@@ -3635,22 +3752,124 @@ class Cooperate {
     }
   }
 
-  async restoreHttpTree() {
+  async restoreHttpTree(options = {}) {
     if (!this.httpFetchExportTree) return false
     const exported = await this.httpFetchExportTree()
     const tree = exported && exported.tree
-    if (!tree) return false
+    const failRestore = (code, message) => {
+      const err = new Error(message)
+      err.code = code
+      throw err
+    }
+    if (
+      !tree ||
+      !tree.data ||
+      !tree.data.uid ||
+      (exported && exported.truncated === true)
+    ) {
+      failRestore(
+        'HTTP_HISTORY_EXPORT_INCOMPLETE',
+        '历史版本全量数据缺失或已截断'
+      )
+    }
+    let nodeCount = 0
+    let invalidNode = false
+    const stack = [tree]
+    while (stack.length) {
+      const node = stack.pop()
+      if (!node || !node.data || !node.data.uid) {
+        invalidNode = true
+        continue
+      }
+      nodeCount += 1
+      if (node.children == null) continue
+      if (!Array.isArray(node.children)) {
+        invalidNode = true
+        continue
+      }
+      node.children.forEach(child => stack.push(child))
+    }
+    const declaredNodeCount = Number(exported.node_count)
+    if (
+      invalidNode ||
+      (Number.isFinite(declaredNodeCount) && declaredNodeCount !== nodeCount)
+    ) {
+      failRestore(
+        'HTTP_HISTORY_EXPORT_INCOMPLETE',
+        '历史版本全量节点数量不完整'
+      )
+    }
+    const targetVersion = Number(options.targetVersion) || 0
+    const serverVersion = Number(exported.version)
+    if (
+      targetVersion > 0 &&
+      (!Number.isFinite(serverVersion) || serverVersion < targetVersion)
+    ) {
+      failRestore(
+        'HTTP_HISTORY_STALE_SNAPSHOT',
+        '历史版本全量数据版本落后于恢复目标'
+      )
+    }
+    if (!this.mindMap || typeof this.mindMap.setFullData !== 'function') {
+      failRestore(
+        'HTTP_HISTORY_RENDER_UNAVAILABLE',
+        '历史版本画布尚未准备好'
+      )
+    }
+
+    let finishRenderWait
+    let onRenderEnd
+    let resolveRender
+    const renderPromise = new Promise(resolve => {
+      resolveRender = resolve
+    })
+    const hasRenderEvent =
+      typeof this.mindMap.on === 'function' &&
+      typeof this.mindMap.off === 'function'
+    if (hasRenderEvent) {
+      onRenderEnd = () => {
+        if (finishRenderWait) finishRenderWait()
+      }
+      finishRenderWait = () => {
+        if (!onRenderEnd) return
+        this.mindMap.off('node_tree_render_end', onRenderEnd)
+        onRenderEnd = null
+        resolveRender()
+      }
+      this.mindMap.on('node_tree_render_end', onRenderEnd)
+    }
+    const previousSetData = this.isSetData
     this.isSetData = true
     try {
       this.mindMap.setFullData({
         ...exported,
         root: tree
       })
+      if (!hasRenderEvent) {
+        if (typeof this.mindMap.render !== 'function') {
+          failRestore(
+            'HTTP_HISTORY_RENDER_UNAVAILABLE',
+            '历史版本画布无法完成渲染'
+          )
+        }
+        finishRenderWait = resolveRender
+        this.mindMap.render(resolveRender)
+      }
+      await renderPromise
       this.afterHttpReplace(exported)
     } finally {
-      this.isSetData = false
+      if (onRenderEnd) {
+        this.mindMap.off('node_tree_render_end', onRenderEnd)
+        onRenderEnd = null
+      }
+      this.isSetData = previousSetData
     }
-    return true
+    return {
+      applied: true,
+      version: Number.isFinite(serverVersion) ? serverVersion : targetVersion,
+      nodeCount,
+      updatedAt: exported.updated_at || ''
+    }
   }
 
   mergeHttpChildren(data, incoming) {
@@ -4480,7 +4699,7 @@ class Cooperate {
     return changed || !!this.findTreeNode(tree, uid)
   }
 
-  async syncHttpDirtySubtrees() {
+  async syncHttpDirtySubtrees(treeNodeIndex) {
     if (!this.httpCollabMode || !this.httpFetchSubtree) return false
     const tree = this.mindMap.renderer && this.mindMap.renderer.renderTree
     if (!tree) return false
@@ -4492,18 +4711,39 @@ class Cooperate {
         this.dirtySubtrees.delete(uid)
         continue
       }
-      let treeNode = this.findTreeNode(tree, uid)
+      let treeNode = treeNodeIndex
+        ? treeNodeIndex.get(uid)
+        : this.findTreeNode(tree, uid)
       if (!treeNode) {
         await this.ensureHttpNodePath(uid)
-        treeNode = this.findTreeNode(tree, uid)
+        treeNode =
+          (treeNodeIndex && treeNodeIndex.get(uid)) ||
+          this.findTreeNode(tree, uid)
+        if (treeNode && treeNodeIndex) {
+          indexTreeNodesByUid(treeNode, treeNodeIndex)
+        }
       }
       if (!treeNode) continue
-      const before = (treeNode.children || []).length
+      const previousChildren = new Set(treeNode.children || [])
+      const before = previousChildren.size
       try {
         await this.hydrateNodeData(treeNode)
       } catch (err) {
         console.error('[mind-map] dirty subtree sync failed', uid, err)
         continue
+      }
+      if (treeNodeIndex) {
+        const currentChildren = new Set(treeNode.children || [])
+        previousChildren.forEach(child => {
+          if (!currentChildren.has(child)) {
+            removeTreeNodesFromUidIndex(child, treeNodeIndex)
+          }
+        })
+        currentChildren.forEach(child => {
+          if (!previousChildren.has(child)) {
+            indexTreeNodesByUid(child, treeNodeIndex)
+          }
+        })
       }
       this.hydratedUids.add(uid)
       this.dirtySubtrees.delete(uid)
@@ -4985,10 +5225,19 @@ class Cooperate {
     }, 280)
   }
 
-  scheduleRemoteRecover(version) {
-    const target = Number(version) || 0
+  scheduleRemoteRecover(version, options = {}) {
+    const target = Math.max(
+      Number(version) || 0,
+      Number(this.httpPendingRecoverVersion) || 0
+    )
     if (!target || !this.httpCollabMode) return
     if (target <= (Number(this.lastAppliedVersion) || 0)) return
+    if (options && Object.keys(options).length) {
+      this.httpPendingRecoverOptions = {
+        ...(this.httpPendingRecoverOptions || {}),
+        ...options
+      }
+    }
     this.httpPendingRemoteVersion = Math.max(
       this.httpPendingRemoteVersion || 0,
       target
@@ -4999,8 +5248,65 @@ class Cooperate {
       const pending = this.httpPendingRemoteVersion
       this.httpPendingRemoteVersion = 0
       if (!pending || pending <= (Number(this.lastAppliedVersion) || 0)) return
-      this.recoverHttpCollab(pending).catch(() => {})
+      this.recoverHttpCollab(
+        pending,
+        this.httpPendingRecoverOptions || {}
+      ).catch(() => {})
     }, 150)
+  }
+
+  scheduleHttpRecoverRetry(version, options = {}) {
+    const target = Math.max(
+      Number(version) || 0,
+      Number(this.httpPendingRecoverVersion) || 0
+    )
+    const versionRestore =
+      options.reason === 'VERSION_RESTORE' ||
+      options.fullTreeReason === 'VERSION_RESTORE'
+    if (
+      !this.httpCollabMode ||
+      (!target && !versionRestore) ||
+      (target <= (Number(this.lastAppliedVersion) || 0) && !versionRestore)
+    ) {
+      return
+    }
+    if (options && Object.keys(options).length) {
+      this.httpPendingRecoverOptions = {
+        ...(this.httpPendingRecoverOptions || {}),
+        ...options
+      }
+    }
+    if (this.httpRecoverRetryTimer) return
+    const delay = Math.max(
+      HTTP_RECOVER_RETRY_BASE_MS,
+      Number(this.httpRecoverRetryDelay) || HTTP_RECOVER_RETRY_BASE_MS
+    )
+    this.httpRecoverRetryDelay = Math.min(
+      HTTP_RECOVER_RETRY_MAX_MS,
+      delay * 2
+    )
+    this.httpRecoverRetryTimer = setTimeout(() => {
+      this.httpRecoverRetryTimer = null
+      const pending = Math.max(
+        target,
+        Number(this.httpPendingRecoverVersion) || 0
+      )
+      const pendingOptions = this.httpPendingRecoverOptions || options || {}
+      const pendingVersionRestore =
+        pendingOptions.reason === 'VERSION_RESTORE' ||
+        pendingOptions.fullTreeReason === 'VERSION_RESTORE'
+      if (
+        !this.httpCollabMode ||
+        (pending <= (Number(this.lastAppliedVersion) || 0) &&
+          !pendingVersionRestore)
+      ) {
+        return
+      }
+      this.recoverHttpCollab(
+        pending,
+        { ...pendingOptions, __httpRecoverRetry: true }
+      ).catch(() => {})
+    }, delay)
   }
 
   scheduleHttpStructureSync(delay = 180) {
@@ -6330,7 +6636,7 @@ class Cooperate {
       ;(node.children || []).forEach(walk)
     }
     walk(this.mindMap.renderer && this.mindMap.renderer.renderTree)
-    return uids.slice(0, 200)
+    return uids
   }
 
   async fetchHttpNodes(uids) {
@@ -6364,37 +6670,125 @@ class Cooperate {
   }
 
   async recoverHttpCollab(targetVersion, options = {}) {
-    if (!this.httpCollabMode) return
-    const plan = planCollabRecovery(this.lastAppliedVersion, targetVersion)
-    if (plan.type === 'ignore') return
+    if (!this.httpCollabMode) {
+      return { applied: false, skipped: true, reason: 'HTTP_COLLAB_DISABLED' }
+    }
+    options = { ...(this.httpPendingRecoverOptions || {}), ...(options || {}) }
+    const backgroundRetry = options.__httpRecoverRetry === true
+    delete options.__httpRecoverRetry
+    let versionRestore =
+      options.reason === 'VERSION_RESTORE' ||
+      options.fullTreeReason === 'VERSION_RESTORE'
+    const waitForVersionRestore = () =>
+      new Promise(resolve => {
+        if (!Array.isArray(this.httpRestoreWaiters)) {
+          this.httpRestoreWaiters = []
+        }
+        const waiter = {
+          version: Number(targetVersion) || 0,
+          resolve,
+          timer: null
+        }
+        waiter.timer = setTimeout(() => {
+          this.httpRestoreWaiters = (this.httpRestoreWaiters || []).filter(
+            pending => pending !== waiter
+          )
+          resolve({
+            applied: false,
+            timedOut: true,
+            code: 'HTTP_HISTORY_RESTORE_TIMEOUT',
+            version: waiter.version
+          })
+        }, HTTP_RECOVER_RESTORE_WAIT_MS)
+        this.httpRestoreWaiters.push(waiter)
+      })
+    let plan = planCollabRecovery(this.lastAppliedVersion, targetVersion)
+    // A restore operation can advance the revision before its UI result reaches
+    // this editor. Equal revisions still need an authoritative tree refresh.
+    if (plan.type === 'ignore' && versionRestore) {
+      plan = {
+        type: 'resnapshot',
+        version: Number(targetVersion) || Number(this.lastAppliedVersion) || 0
+      }
+    }
+    if (plan.type === 'ignore') return { applied: false, skipped: true }
     if (this.httpRecovering) {
+      this.httpRecoverQueued = true
       this.httpPendingRecoverVersion = Math.max(
         this.httpPendingRecoverVersion || 0,
         Number(targetVersion) || 0
       )
-      return
+      if (options && Object.keys(options).length) {
+        this.httpPendingRecoverOptions = {
+          ...(this.httpPendingRecoverOptions || {}),
+          ...options
+        }
+      }
+      if (versionRestore) {
+        return backgroundRetry
+          ? { applied: false, queued: true }
+          : waitForVersionRestore()
+      }
+      return { applied: false, queued: true }
     }
     this.httpRecovering = true
+    this.httpRecoverQueued = false
+    clearTimeout(this.httpRecoverRetryTimer)
+    this.httpRecoverRetryTimer = null
+    if (options && Object.keys(options).length) {
+      this.httpPendingRecoverOptions = {
+        ...(this.httpPendingRecoverOptions || {}),
+        ...options
+      }
+    }
     if (this.collabStore) this.collabStore.setStatus('recovering')
+    let retryVersion = Number(plan.version) || Number(targetVersion) || 0
+    let recoveredVersion = retryVersion
+    let retryAllowed = true
+    let refreshApplied = false
     try {
       let action = plan
       if (plan.type === 'fetch_operations' && this.httpFetchOperations) {
         try {
           const payload = await this.httpFetchOperations(plan.afterVersion)
           action = planAfterOperations(this.lastAppliedVersion, payload)
+          if (
+            action.type === 'resnapshot' &&
+            hasVersionRestoreOperation(payload)
+          ) {
+            options = { ...options, reason: 'VERSION_RESTORE' }
+            versionRestore = true
+            this.httpPendingRecoverOptions = {
+              ...(this.httpPendingRecoverOptions || {}),
+              reason: 'VERSION_RESTORE'
+            }
+          }
         } catch (err) {
           action = { type: 'resnapshot', version: plan.version }
         }
       } else if (plan.type === 'fetch_operations') {
         action = { type: 'resnapshot', version: plan.version }
       }
-      if (action.type === 'ignore') return
+      if (action.type === 'ignore') {
+        if (versionRestore) {
+          action = {
+            type: 'resnapshot',
+            version: Number(targetVersion) || Number(this.lastAppliedVersion) || 0
+          }
+        } else {
+          return { applied: false, skipped: true }
+        }
+      }
+      retryVersion = Number(action.version) || retryVersion
+      recoveredVersion = retryVersion
       if (
         this.safeLoadMode &&
         action.type === 'resnapshot' &&
-        options.reason !== 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
+        options.reason !== 'AUTHORITATIVE_SNAPSHOT_RECOVERY' &&
+        !versionRestore
       ) {
-        return
+        retryAllowed = false
+        return { applied: false, skipped: true, reason: 'SAFE_LOAD_RESNAPSHOT' }
       }
       if (action.type === 'apply' && action.operations) {
         if (this.collabStore) {
@@ -6429,39 +6823,178 @@ class Cooperate {
       ) {
         await new Promise(resolve => setTimeout(resolve, 40))
       }
-      const refreshed = await this.refreshVisibleFromHttp('', { force: true })
+      const refreshed = await this.refreshVisibleFromHttp('', {
+        force: true,
+        allowReviveDeleted: versionRestore,
+        targetVersion: retryVersion
+      })
       if (refreshed && refreshed.deferred) {
-        // Keep version open so the next poll/presence event retries.
         this.httpPendingRecoverVersion = Math.max(
           this.httpPendingRecoverVersion || 0,
-          Number(action.version) || Number(targetVersion) || 0
+          retryVersion
         )
-        return
+        if (options && Object.keys(options).length) {
+          this.httpPendingRecoverOptions = {
+            ...(this.httpPendingRecoverOptions || {}),
+            ...options
+          }
+        }
+        return versionRestore && !backgroundRetry
+          ? waitForVersionRestore()
+          : { applied: false, deferred: true, version: retryVersion }
       }
       if (refreshed && refreshed.skipped && !refreshed.applied) {
         this.httpPendingRecoverVersion = Math.max(
           this.httpPendingRecoverVersion || 0,
-          Number(action.version) || Number(targetVersion) || 0
+          retryVersion
         )
-        return
+        if (options && Object.keys(options).length) {
+          this.httpPendingRecoverOptions = {
+            ...(this.httpPendingRecoverOptions || {}),
+            ...options
+          }
+        }
+        return versionRestore && !backgroundRetry
+          ? waitForVersionRestore()
+          : { applied: false, skipped: true, version: retryVersion }
       }
+      refreshApplied = !!(refreshed && refreshed.applied)
       const applied = Number(action.version)
-      if (Number.isFinite(applied) && applied > this.lastAppliedVersion) {
-        this.lastAppliedVersion = applied
+      const refreshedVersion = Number(refreshed && refreshed.version)
+      if (Number.isFinite(applied)) recoveredVersion = applied
+      if (Number.isFinite(refreshedVersion) && refreshedVersion >= recoveredVersion) {
+        recoveredVersion = refreshedVersion
       }
-      if (this.collabStore && Number.isFinite(applied)) {
-        this.collabStore.setLastAppliedVersion(applied)
+      if (Number.isFinite(recoveredVersion) && recoveredVersion > this.lastAppliedVersion) {
+        this.lastAppliedVersion = recoveredVersion
       }
-      if (Number.isFinite(applied)) this.stampLoadedSubtreeVersions(applied)
+      if (this.collabStore && Number.isFinite(recoveredVersion)) {
+        this.collabStore.setLastAppliedVersion(recoveredVersion)
+      }
+      if (Number.isFinite(recoveredVersion)) {
+        this.stampLoadedSubtreeVersions(recoveredVersion)
+      }
+      return {
+        applied: refreshApplied,
+        skipped: !refreshApplied,
+        version: Number(this.lastAppliedVersion) || Number(recoveredVersion) || 0
+      }
+    } catch (err) {
+      this.httpPendingRecoverVersion = Math.max(
+        this.httpPendingRecoverVersion || 0,
+        retryVersion
+      )
+      if (options && Object.keys(options).length) {
+        this.httpPendingRecoverOptions = {
+          ...(this.httpPendingRecoverOptions || {}),
+          ...options
+        }
+      }
+      const terminalRestoreError =
+        err &&
+        (err.code === 'HTTP_HISTORY_NODE_MISSING' ||
+          err.code === 'FORBIDDEN' ||
+          err.statusCode === 401 ||
+          err.statusCode === 403)
+      if (versionRestore && !backgroundRetry && !terminalRestoreError) {
+        return waitForVersionRestore()
+      }
+      if (versionRestore && terminalRestoreError) {
+        retryAllowed = false
+        const restoreWaiters = Array.isArray(this.httpRestoreWaiters)
+          ? this.httpRestoreWaiters.splice(0)
+          : []
+        const result = {
+          applied: false,
+          code: err.code || 'HTTP_HISTORY_RESTORE_FAILED',
+          error: err.message || '历史版本恢复加载失败',
+          version: retryVersion
+        }
+        restoreWaiters.forEach(waiter => {
+          clearTimeout(waiter.timer)
+          waiter.resolve(result)
+        })
+      }
+      throw err
     } finally {
       this.httpRecovering = false
       if (this.collabStore) this.collabStore.setStatus('live')
       const pending = this.httpPendingRecoverVersion
-      this.httpPendingRecoverVersion = 0
-      if (!this.safeLoadMode && pending > this.lastAppliedVersion) {
-        Promise.resolve().then(() => {
-          this.recoverHttpCollab(pending, options).catch(() => {})
+      const queuedWhileRecovering = this.httpRecoverQueued
+      const restoreWaiters = Array.isArray(this.httpRestoreWaiters)
+        ? this.httpRestoreWaiters
+        : []
+      this.httpRecoverQueued = false
+      let forcedRestoreStarted = false
+      if (restoreWaiters.length && versionRestore && refreshApplied) {
+        const completedWaiters = restoreWaiters.filter(
+          waiter => Number(waiter.version) <= recoveredVersion
+        )
+        const uncoveredWaiters = restoreWaiters.filter(
+          waiter => Number(waiter.version) > recoveredVersion
+        )
+        this.httpRestoreWaiters = uncoveredWaiters
+        const result = {
+          applied: true,
+          version: recoveredVersion
+        }
+        completedWaiters.forEach(waiter => {
+          clearTimeout(waiter.timer)
+          waiter.resolve(result)
         })
+        if (uncoveredWaiters.length) {
+          const restoreVersion = Math.max(
+            Number(pending) || 0,
+            ...uncoveredWaiters.map(waiter => Number(waiter.version) || 0)
+          )
+          const restoreOptions = {
+            ...(this.httpPendingRecoverOptions || {}),
+            reason: 'VERSION_RESTORE'
+          }
+          this.httpPendingRecoverVersion = 0
+          this.httpPendingRecoverOptions = null
+          forcedRestoreStarted = true
+          this.recoverHttpCollab(restoreVersion, restoreOptions).catch(() => {})
+        }
+      } else if (restoreWaiters.length && !versionRestore) {
+        const restoreVersion = Math.max(
+          Number(pending) || 0,
+          ...restoreWaiters.map(waiter => Number(waiter.version) || 0)
+        )
+        const restoreOptions = {
+          ...(this.httpPendingRecoverOptions || {}),
+          reason: 'VERSION_RESTORE'
+        }
+        this.httpPendingRecoverVersion = 0
+        this.httpPendingRecoverOptions = null
+        forcedRestoreStarted = true
+        this.recoverHttpCollab(restoreVersion, restoreOptions).catch(() => {})
+      }
+      if (!forcedRestoreStarted) {
+        const pendingOptions = this.httpPendingRecoverOptions || options || {}
+        const pendingVersionRestore =
+          pendingOptions.reason === 'VERSION_RESTORE' ||
+          pendingOptions.fullTreeReason === 'VERSION_RESTORE'
+        const pendingNeedsRestoreRetry =
+          pendingVersionRestore && !refreshApplied
+        if (pending <= this.lastAppliedVersion && !pendingNeedsRestoreRetry) {
+          this.httpPendingRecoverVersion = 0
+          this.httpPendingRecoverOptions = null
+          clearTimeout(this.httpRecoverRetryTimer)
+          this.httpRecoverRetryTimer = null
+          this.httpRecoverRetryDelay = HTTP_RECOVER_RETRY_BASE_MS
+        } else if (
+          retryAllowed &&
+          (pending > retryVersion ||
+            (queuedWhileRecovering && pending > this.lastAppliedVersion))
+        ) {
+          // A newer event queued during recovery should be processed promptly.
+          this.httpPendingRecoverVersion = 0
+          this.scheduleRemoteRecover(pending, pendingOptions)
+        } else if (retryAllowed) {
+          // Retry transient failures and deferred refreshes with bounded backoff.
+          this.scheduleHttpRecoverRetry(pending, pendingOptions)
+        }
       }
     }
   }
@@ -6471,6 +7004,7 @@ class Cooperate {
       return { applied: false, skipped: true }
     }
     const force = !!options.force
+    const allowReviveDeleted = options.allowReviveDeleted === true
     if (this.httpSettlingAfterReplace || Date.now() < this.suppressLocalUntil) {
       this.httpPendingRefreshAt = updatedAt || this.httpPendingRefreshAt || '1'
       this.httpPendingRefreshForce = force || this.httpPendingRefreshForce
@@ -6499,7 +7033,7 @@ class Cooperate {
         ...this.collectVisibleUids(),
         ...Array.from(this.dirtySubtrees.keys())
       ])
-    ].slice(0, 200)
+    ]
     if (!uids.length) return { applied: false, skipped: true }
     pruneRecentMap(this.recentHttpDeleted)
     pruneRecentMap(this.recentPushed, RECENT_PUSH_GRACE_MS)
@@ -6507,7 +7041,32 @@ class Cooperate {
     let applied = false
     try {
       const remoteNodes = await this.fetchHttpNodes(uids)
+      if (allowReviveDeleted) {
+        const currentRootUid = tree.data && tree.data.uid
+        const serverRoot = remoteNodes.find(item => item && item.isRoot)
+        if (!serverRoot || serverRoot.uid !== currentRootUid) {
+          const restored = await this.restoreHttpTree({
+            targetVersion: options.targetVersion
+          })
+          if (!restored || !restored.applied) {
+            return { applied: false, skipped: true }
+          }
+          this.httpUpdatedAt = restored.updatedAt || this.httpUpdatedAt
+          applied = true
+          return {
+            applied: true,
+            skipped: false,
+            version: restored.version,
+            nodeCount: restored.nodeCount,
+            treeReplaced: true
+          }
+        }
+      }
       if (!remoteNodes.length) return { applied: false, skipped: true }
+      const treeNodesByUid = indexTreeNodesByUid(tree)
+      // Match Render.findNodeByUid while building the index only once, including
+      // rendered summary/generalization nodes and their nested children.
+      const renderedNodesByUid = indexRenderedNodesByUid(renderer.root)
       const editing =
         renderer.textEdit &&
         typeof renderer.textEdit.isShowTextEdit === 'function' &&
@@ -6520,8 +7079,9 @@ class Cooperate {
       try {
         const missing = []
         const missingFor = new Map()
+        const serverChildrenByParent = new Map()
         remoteNodes.forEach(item => {
-          const node = renderer.findNodeByUid(item.uid)
+          const node = renderedNodesByUid.get(item.uid)
           const data = item.data || {}
           if (node && node !== editing) {
             const localData = (node.getData && node.getData()) || {}
@@ -6594,8 +7154,9 @@ class Cooperate {
               }
             }
           }
-          const treeNode = this.findTreeNode(tree, item.uid)
+          const treeNode = treeNodesByUid.get(item.uid)
           if (!treeNode) return
+          const previousGeneralizationChildren = (treeNode.children || []).slice()
           if (
             this.syncGeneralizationChildStubs(
               treeNode,
@@ -6603,9 +7164,19 @@ class Cooperate {
               item.data || {}
             )
           ) {
+            const currentGeneralizationChildren = new Set(treeNode.children || [])
+            previousGeneralizationChildren.forEach(child => {
+              if (!currentGeneralizationChildren.has(child)) {
+                removeTreeNodesFromUidIndex(child, treeNodesByUid)
+              }
+            })
             changed = true
           }
           const serverKids = item.children || []
+          serverChildrenByParent.set(item.uid, serverKids)
+          if (allowReviveDeleted) {
+            serverKids.forEach(uid => this.reviveDeletedUid(uid))
+          }
           const keep = new Set(serverKids)
           const have = new Set(
             (treeNode.children || [])
@@ -6613,7 +7184,10 @@ class Cooperate {
               .filter(Boolean)
           )
           const need = serverKids.filter(
-            id => id && !have.has(id) && !this.isRecentlyHttpDeleted(id)
+            id =>
+              id &&
+              !have.has(id) &&
+              (allowReviveDeleted || !this.isTombstonedUid(id))
           )
           if (need.length) {
             missingFor.set(item.uid, need)
@@ -6624,10 +7198,25 @@ class Cooperate {
             const id = child && child.data && child.data.uid
             return keepHttpChild(id, keep, this.lastPushed, this.recentPushed)
           })
-          if (next.length !== prevKids.length) {
-            prevKids
-              .filter(child => !next.includes(child))
-              .forEach(child => this.dropHttpTree(child))
+          const order = new Map(serverKids.map((id, index) => [id, index]))
+          next.sort((a, b) => {
+            const ai = order.get(a && a.data && a.data.uid)
+            const bi = order.get(b && b.data && b.data.uid)
+            if (ai == null && bi == null) return 0
+            if (ai == null) return 1
+            if (bi == null) return -1
+            return ai - bi
+          })
+          const childrenChanged =
+            next.length !== prevKids.length ||
+            next.some((child, index) => child !== prevKids[index])
+          if (childrenChanged) {
+            if (next.length !== prevKids.length) {
+              prevKids.filter(child => !next.includes(child)).forEach(child => {
+                this.dropHttpTree(child)
+                removeTreeNodesFromUidIndex(child, treeNodesByUid)
+              })
+            }
             treeNode.children = next
             changed = true
           }
@@ -6655,74 +7244,156 @@ class Cooperate {
           }
         })
         if (missing.length) {
-          let byUid = new Map()
-          const extraNodes = await this.fetchHttpNodes(missing.slice(0, 200))
-          extraNodes.forEach(item => byUid.set(item.uid, item))
-          // Fallback: parent subtree when batch node fetch misses newly inserted kids.
-          for (const [parentUid, childIds] of missingFor) {
-            const stillMissing = childIds.filter(id => !byUid.has(id))
-            if (!stillMissing.length || !this.httpFetchSubtree) continue
-            try {
-              const subtree = await this.httpFetchSubtree(parentUid, {
-                knownVersion: 0,
-                priority: 'low'
+          // Fetch missing nodes a level at a time. Only descend through nodes
+          // whose parent and node are expanded, so collapsed branches retain
+          // lazy loading while restored expanded branches render completely.
+          let frontier = missingFor
+          while (frontier.size) {
+            const requested = [
+              ...new Set(Array.from(frontier.values()).flat())
+            ]
+            const byUid = new Map()
+            const extraNodes = await this.fetchHttpNodes(requested)
+            extraNodes.forEach(item => byUid.set(item.uid, item))
+
+            // Fallback to the authoritative parent subtree if a batch lookup
+            // misses a just-restored node.
+            for (const [parentUid, childIds] of frontier) {
+              const stillMissing = childIds.filter(id => !byUid.has(id))
+              if (!stillMissing.length || !this.httpFetchSubtree) continue
+              try {
+                const subtree = await this.httpFetchSubtree(parentUid, {
+                  knownVersion: 0,
+                  priority: 'low'
+                })
+                ;(subtree && subtree.children ? subtree.children : []).forEach(
+                  child => {
+                    const id = child && child.data && child.data.uid
+                    if (!id) return
+                    byUid.set(id, {
+                      uid: id,
+                      data: child.data || {},
+                      children: (child.children || [])
+                        .map(item =>
+                          typeof item === 'string'
+                            ? item
+                            : item && item.data && item.data.uid
+                        )
+                        .filter(Boolean)
+                    })
+                  }
+                )
+              } catch (err) {
+                console.error('[mind-map] subtree fallback failed', err)
+              }
+            }
+            const unresolved = []
+            frontier.forEach((childIds, parentUid) => {
+              childIds.forEach(id => {
+                if (!byUid.has(id)) unresolved.push({ id, parentUid })
               })
-              ;(subtree && subtree.children ? subtree.children : []).forEach(
-                child => {
-                  const id = child && child.data && child.data.uid
-                  if (!id) return
-                  byUid.set(id, {
-                    uid: id,
-                    data: child.data || {},
-                    children: (child.children || [])
-                      .map(item => item && item.data && item.data.uid)
-                      .filter(Boolean)
-                  })
-                }
+            })
+            if (unresolved.length) {
+              const err = new Error(
+                `history refresh could not fetch ${unresolved.length} restored node(s)`
               )
-            } catch (err) {
-              console.error('[mind-map] subtree fallback failed', err)
+              err.code = 'HTTP_HISTORY_NODE_MISSING'
+              err.uids = unresolved.map(item => item.id)
+              throw err
             }
-          }
-          missingFor.forEach((childIds, parentUid) => {
-            const parent = this.findTreeNode(tree, parentUid)
-            if (!parent) return
-            const stubs = childIds
-              .map(id => byUid.get(id))
-              .filter(Boolean)
-              .map(item => ({
-                data: {
-                  ...(item.data || {}),
-                  uid: item.uid,
-                  expand: false,
-                  childCount: Array.isArray(item.children)
-                    ? item.children.length
-                    : Number((item.data && item.data.childCount) || 0)
-                },
-                children: []
-              }))
-            const before = (parent.children || []).length
-            this.mergeHttpChildren(parent, stubs)
-            if ((parent.children || []).length !== before) {
-              if (this.expandTreeNode(parent)) changed = true
-            }
-            // Keep local child order aligned with server when possible.
-            if (Array.isArray(parent.children) && childIds.length) {
-              const order = new Map(childIds.map((id, index) => [id, index]))
-              parent.children.sort((a, b) => {
-                const ai = order.get(a && a.data && a.data.uid)
-                const bi = order.get(b && b.data && b.data.uid)
-                if (ai == null && bi == null) return 0
-                if (ai == null) return 1
-                if (bi == null) return -1
-                return ai - bi
+
+            const nextFrontier = new Map()
+            frontier.forEach((childIds, parentUid) => {
+              const parent = treeNodesByUid.get(parentUid)
+              if (!parent) return
+              const previousChildren = new Set(parent.children || [])
+              const stubs = childIds
+                .map(id => byUid.get(id))
+                .filter(Boolean)
+                .map(item => {
+                  const serverKids = Array.isArray(item.children)
+                    ? item.children.filter(Boolean)
+                    : null
+                  return {
+                    data: {
+                      ...(item.data || {}),
+                      uid: item.uid,
+                      childCount:
+                        serverKids != null
+                          ? serverKids.length
+                          : Number((item.data && item.data.childCount) || 0)
+                    },
+                    children: []
+                  }
+                })
+              this.mergeHttpChildren(parent, stubs)
+              const addedChildren = (parent.children || []).filter(
+                child => !previousChildren.has(child)
+              )
+              if (addedChildren.length) {
+                addedChildren.forEach(child =>
+                  indexTreeNodesByUid(child, treeNodesByUid)
+                )
+                changed = true
+              }
+
+              const fullOrder =
+                serverChildrenByParent.get(parentUid) || childIds
+              const order = new Map(fullOrder.map((id, index) => [id, index]))
+              if (Array.isArray(parent.children) && childIds.length) {
+                parent.children.sort((a, b) => {
+                  const ai = order.get(a && a.data && a.data.uid)
+                  const bi = order.get(b && b.data && b.data.uid)
+                  if (ai == null && bi == null) return 0
+                  if (ai == null) return 1
+                  if (bi == null) return -1
+                  return ai - bi
+                })
+              }
+
+              const childrenByUid = new Map(
+                (parent.children || [])
+                  .map(child => [child && child.data && child.data.uid, child])
+                  .filter(([uid]) => !!uid)
+              )
+              childIds.forEach(id => {
+                const item = byUid.get(id)
+                const child = childrenByUid.get(id)
+                if (!item || !child) return
+                const serverKids = Array.isArray(item.children)
+                  ? item.children.filter(Boolean)
+                  : []
+                serverChildrenByParent.set(id, serverKids)
+                if (allowReviveDeleted) {
+                  serverKids.forEach(uid => this.reviveDeletedUid(uid))
+                }
+                if (
+                  !serverKids.length ||
+                  parent.data && parent.data.expand === false ||
+                  child.data && child.data.expand === false
+                ) {
+                  return
+                }
+                const have = new Set(
+                  (child.children || [])
+                    .map(current => current && current.data && current.data.uid)
+                    .filter(Boolean)
+                )
+                const need = serverKids.filter(
+                  uid =>
+                    uid &&
+                    !have.has(uid) &&
+                    (allowReviveDeleted || !this.isTombstonedUid(uid))
+                )
+                if (need.length) nextFrontier.set(id, need)
               })
-            }
-          })
+            })
+            frontier = nextFrontier
+          }
         }
         if (changed) {
-          await this.syncHttpDirtySubtrees()
-          this.mindMap.render()
+          await this.syncHttpDirtySubtrees(treeNodesByUid)
+          await new Promise(resolve => this.mindMap.render(resolve))
         }
         // Only acknowledge a revision after every fetch and merge completed.
         // A transient request/render failure must remain retryable by polling.

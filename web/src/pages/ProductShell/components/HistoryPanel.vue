@@ -1,5 +1,6 @@
 <template>
   <el-dialog
+    ref="historyDialog"
     class="historyDialog"
     :custom-class="'historyDialog' + (isNarrow ? ' isNarrow' : '')"
     :visible.sync="shown"
@@ -13,6 +14,17 @@
     @closed="onClosed"
   >
     <div class="historyShell" v-loading="loading">
+      <div v-if="restoring" class="restoreStatus" role="status" aria-live="polite">
+        {{ restoreStatus }}
+      </div>
+      <el-alert
+        v-if="restoreError"
+        class="restoreError"
+        :title="restoreError"
+        type="error"
+        :closable="false"
+        show-icon
+      />
       <div v-if="error" class="historyError">
         <el-alert :title="error" type="error" :closable="false" />
         <el-button size="small" @click="reload">重试</el-button>
@@ -158,13 +170,16 @@ export default {
   props: {
     visible: Boolean,
     room: Object,
-    waitForCommit: Boolean
+    waitForCommit: Boolean,
+    afterRestore: Function
   },
   data: () => ({
     loading: false,
     loadingMore: false,
     creating: false,
     restoring: false,
+    restoreStatus: '',
+    restoreError: '',
     error: '',
     versions: [],
     nextCursor: null,
@@ -249,6 +264,7 @@ export default {
   },
   beforeDestroy() {
     window.removeEventListener('resize', this.measure)
+    this.unbindDialogDrag()
     this.abortPreview()
   },
   methods: {
@@ -257,6 +273,71 @@ export default {
     displayName: historyDisplayName,
     measure() {
       this.narrow = window.innerWidth < 900
+    },
+    bindDialogDrag() {
+      this.unbindDialogDrag()
+      const wrapper = this.$refs.historyDialog && this.$refs.historyDialog.$el
+      const dialog = wrapper && wrapper.querySelector('.el-dialog.historyDialog')
+      const header = dialog && dialog.querySelector('.el-dialog__header')
+      if (!header) return
+
+      let offsetX = 0
+      let offsetY = 0
+      let dragging = null
+      const stopDragging = event => {
+        if (event && dragging && event.pointerId !== dragging.pointerId) return
+        dragging = null
+        window.removeEventListener('pointermove', onPointerMove)
+        window.removeEventListener('pointerup', stopDragging)
+        window.removeEventListener('pointercancel', stopDragging)
+      }
+      const onPointerMove = event => {
+        if (!dragging || event.pointerId !== dragging.pointerId) return
+        const { rect, startX, startY, initialX, initialY } = dragging
+        const left = rect.left - initialX
+        const right = rect.right - initialX
+        const top = rect.top - initialY
+        const bottom = rect.bottom - initialY
+        offsetX = Math.max(
+          -left,
+          Math.min(window.innerWidth - right, initialX + event.clientX - startX)
+        )
+        offsetY = Math.max(
+          -top,
+          Math.min(window.innerHeight - bottom, initialY + event.clientY - startY)
+        )
+        dialog.style.transform = `translate(${offsetX}px, ${offsetY}px)`
+      }
+      const onPointerDown = event => {
+        if (
+          dragging ||
+          event.button !== 0 ||
+          event.target.closest('.el-dialog__headerbtn')
+        ) return
+        event.preventDefault()
+        dragging = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          initialX: offsetX,
+          initialY: offsetY,
+          rect: dialog.getBoundingClientRect()
+        }
+        window.addEventListener('pointermove', onPointerMove)
+        window.addEventListener('pointerup', stopDragging)
+        window.addEventListener('pointercancel', stopDragging)
+      }
+      header.addEventListener('pointerdown', onPointerDown)
+      this._historyDragCleanup = () => {
+        stopDragging()
+        header.removeEventListener('pointerdown', onPointerDown)
+        dialog.style.transform = ''
+      }
+    },
+    unbindDialogDrag() {
+      if (!this._historyDragCleanup) return
+      this._historyDragCleanup()
+      this._historyDragCleanup = null
     },
     formatDate(value) {
       return new Date(value).toLocaleDateString('zh-CN')
@@ -442,6 +523,9 @@ export default {
       )
         .then(async () => {
           this.restoring = true
+          this.restoreStatus = '正在恢复历史版本…'
+          this.restoreError = ''
+          let serverRestored = false
           try {
             const restored = await historyService.restoreVersion(
               this.roomKey,
@@ -452,10 +536,24 @@ export default {
             this.currentRevision = Number(
               restored.newRevision || this.currentRevision + 1
             )
-            this.$message.success('已恢复，协作中的脑图会同步更新')
+            serverRestored = true
+            this.restoreStatus = this.afterRestore
+              ? '正在加载已恢复的脑图节点…'
+              : '正在更新历史版本列表…'
             this.$emit('restored', restored)
+            if (this.afterRestore) await this.afterRestore(restored)
             await this.reload()
+            this.$message.success(
+              this.afterRestore
+                ? '历史版本已恢复，脑图已加载'
+                : '已恢复，协作中的脑图会同步更新'
+            )
           } catch (error) {
+            if (serverRestored) {
+              const code = error && error.code ? `（${error.code}）` : ''
+              this.restoreError = `历史版本已在服务器恢复，但画布加载失败${code}。请刷新页面查看恢复结果。`
+              return
+            }
             if (error && error.code === 'RESTORE_CONFLICT') {
               await this.reload()
               this.$message.warning('当前内容已有新修改，请确认后再次恢复')
@@ -464,6 +562,7 @@ export default {
             this.$message.error(userMessageFromError(error))
           } finally {
             this.restoring = false
+            this.restoreStatus = ''
           }
         })
         .catch(() => {})
@@ -487,6 +586,7 @@ export default {
       if (hit) await this.select(hit)
     },
     onOpened() {
+      this.bindDialogDrag()
       this.$nextTick(() => {
         requestAnimationFrame(() => {
           const preview = this.$refs.mapPreview
@@ -499,7 +599,9 @@ export default {
     onClosed() {
       this._reloadToken = (this._reloadToken || 0) + 1
       this.loading = false
+      this.unbindDialogDrag()
       this.abortPreview()
+      this.restoreError = ''
       this.preview = { tree: null, metadata: {}, loading: false, error: '' }
       this.selected = null
       this.pane = 'list'
@@ -513,6 +615,19 @@ export default {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+.restoreStatus {
+  flex: none;
+  padding: 8px 12px;
+  color: #245c43;
+  background: #edf7f0;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.restoreError {
+  flex: none;
+  margin-bottom: 8px;
 }
 .historyLayout {
   display: grid;
@@ -642,6 +757,14 @@ export default {
 .el-dialog.historyDialog .el-dialog__header,
 .el-dialog.historyDialog .el-dialog__footer {
   flex: none;
+}
+.el-dialog.historyDialog .el-dialog__header {
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+.el-dialog.historyDialog .el-dialog__headerbtn {
+  cursor: pointer;
 }
 .el-dialog.historyDialog .el-dialog__body {
   flex: 1;
