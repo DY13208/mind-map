@@ -100,6 +100,12 @@ export function getWorkBuddyLoginUrl() {
   return url.toString()
 }
 
+export function getWorkBuddyLinkUrl() {
+  const url = new URL(getAuthApiUrl('/api/auth/workbuddy/link'))
+  url.searchParams.set('return_to', currentReturnTo())
+  return url.toString()
+}
+
 export function getWecomClientLoginUrl() {
   const url = new URL(getAuthApiUrl('/api/auth/wecom/client-login'))
   url.searchParams.set('return_to', currentReturnTo())
