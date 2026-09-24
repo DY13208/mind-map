@@ -306,6 +306,70 @@ async function main() {
   await vm.rewriteActiveJob()
   check('还在跑的任务不让重写', writes3.length === 0)
 
+  // ---- 8. 派发后主机上一直没有这条任务：到上限就停手报错（别永远轮询）----
+  jobResponses.length = 0
+  vm = makeVm()
+  vm.jobPollTimer = 4242
+  vm.jobPending = { id: 'job-lost', nodeUid: 'n-1', nodeTitle: 'x' }
+  const lostWrites = []
+  vm.writeJobResultToNode = async () => {
+    lostWrites.push(1)
+  }
+  // listHostJobs 在 jobResponses 空时默认回 { ok: true, jobs: [] } —— 正好是「查不到」
+  for (let i = 0; i < 6; i += 1) await vm.pollJob()
+  check(
+    '查不到任务时先给个过程状态（不是一直停在「已派发」）',
+    /等主机上报/.test(vm.jobStatus),
+    vm.jobStatus
+  )
+  for (let i = 0; i < 22; i += 1) await vm.pollJob()
+  check('到上限后停止轮询', vm.jobPollTimer === null)
+  check('到上限后清掉 pending', vm.jobPending === null)
+  check(
+    '把原因说清楚（找不到记录 / 可能重启过）',
+    /找不到这条任务/.test(vm.jobWriteError) && /重跑/.test(vm.jobWriteError),
+    vm.jobWriteError
+  )
+  check('状态栏标成出错', vm.jobStatusType === 'jobErr' && vm.jobStatus === '没等到结果')
+  check('弹一次错误提示', vm.messages.some(m => m[0] === 'error'))
+  check('这一路不会误写回导图', lostWrites.length === 0)
+
+  // ---- 9. 拿不到任务列表也算「查不到」，原因带进提示 ----
+  jobResponses.length = 0
+  vm = makeVm()
+  vm.jobPollTimer = 7
+  vm.jobPending = { id: 'job-lost' }
+  for (let i = 0; i < 26; i += 1) {
+    jobResponses.push({ ok: false, error: '连不上 192.168.1.114:8799' })
+    await vm.pollJob()
+  }
+  check(
+    '连不上时把连接错误带进提示',
+    /连不上 192.168.1.114:8799/.test(vm.jobWriteError) && vm.jobPending === null,
+    vm.jobWriteError
+  )
+
+  // ---- 10. 中途查到了：计数清零，照常写回 ----
+  jobResponses.length = 0
+  vm = makeVm()
+  vm.jobPollTimer = 8
+  vm.jobPending = { id: 'job-x', nodeUid: 'n-1', nodeTitle: 'x' }
+  vm.jobPendingMiss = 5
+  const writes4 = []
+  vm.writeJobResultToNode = async (job, opts) => {
+    writes4.push({ id: job.id, markdown: opts.markdown })
+  }
+  vm.fetchJobText = async () => '这次任务的全文'
+  jobResponses.push({ ok: true, jobs: [{ id: 'job-x', state: 'done' }] })
+  await vm.pollJob()
+  check('查到了就清零（不会误判成丢失）', vm.jobPendingMiss === 0)
+  check(
+    '查到 done 照常写回全文',
+    writes4.length === 1 && writes4[0].markdown === '这次任务的全文',
+    JSON.stringify(writes4)
+  )
+  check('状态变已完成', /已完成/.test(vm.jobStatus), vm.jobStatus)
+
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)
   if (failed.length) {
