@@ -657,6 +657,23 @@ export default {
       return list
     },
 
+    applyV2NodePresence(peers) {
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (!cooperate || typeof cooperate.applyPresenceUsers !== 'function') return
+      const mine = this.collabV2Adapter && this.collabV2Adapter.getClientId()
+      cooperate.applyPresenceUsers(
+        (peers || [])
+          .filter(peer => peer.clientId && peer.clientId !== mine)
+          .map(peer => ({
+            id: peer.clientId,
+            name: peer.name || peer.userId || 'user',
+            color: peer.color || '#409EFF',
+            avatar: peer.avatar || '',
+            editingUid: peer.editingUid || null
+          }))
+      )
+    },
+
     exposeCollabV2Debug() {
       if (typeof window === 'undefined' || !this.collabV2Adapter) return
       const adapter = this.collabV2Adapter
@@ -803,7 +820,10 @@ export default {
           redoDepth: snap.redoDepth || 0,
           pendingCount: snap.outboxPending || 0
         })
-        if (snap.peers) this.peerList = this.mapV2Peers(snap.peers)
+        if (snap.peers) {
+          this.peerList = this.mapV2Peers(snap.peers)
+          this.applyV2NodePresence(snap.peers)
+        }
         if (
           snap.phase === 'LIVE' &&
           cooperate &&
@@ -882,6 +902,7 @@ export default {
       }
       this.peerList = this.mapV2Peers(adapter.getStatus().peers)
       const snap = adapter.getStatus()
+      this.applyV2NodePresence(snap.peers)
       this.$store.commit('setCollabPresence', {
         phase: snap.phase || '',
         status: snap.status || '',

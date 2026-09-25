@@ -21,6 +21,10 @@ function initDragHandle() {
   this.dragHandleMousedownBodyCursor = ''
   // 鼠标按下时记录当前节点的left值
   this.dragHandleMousedownLeft = 0
+  // A width drag changes the position of the descendants. Coalesce layout
+  // updates to one per animation frame instead of repainting the whole tree
+  // for every mousemove event.
+  this.dragHandleLayoutFrame = null
 
   this.onDragMousemoveHandle = this.onDragMousemoveHandle.bind(this)
   window.addEventListener('mousemove', this.onDragMousemoveHandle)
@@ -74,11 +78,21 @@ function onDragMousemoveHandle(e) {
   this.reRender(useCustomContent ? [] : ['text'], {
     ignoreUpdateCustomTextWidth: true
   })
+  if (this.dragHandleLayoutFrame === null) {
+    this.dragHandleLayoutFrame = requestAnimationFrame(() => {
+      this.dragHandleLayoutFrame = null
+      if (this.isDragHandleMousedown) this.mindMap.render()
+    })
+  }
 }
 
 // 鼠标松开事件
 function onDragMouseupHandle() {
   if (!this.isDragHandleMousedown) return
+  if (this.dragHandleLayoutFrame !== null) {
+    cancelAnimationFrame(this.dragHandleLayoutFrame)
+    this.dragHandleLayoutFrame = null
+  }
   document.body.style.cursor = this.dragHandleMousedownBodyCursor
   this.group.css({
     cursor: 'default'

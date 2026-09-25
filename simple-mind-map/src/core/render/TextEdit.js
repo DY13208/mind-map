@@ -328,7 +328,7 @@ export default class TextEdit {
       autoEmptyTextWhenKeydownEnterEdit
     } = this.mindMap.opt
     if (!isFromScale) {
-      this.mindMap.emit('before_show_text_edit')
+      this.mindMap.emit('before_show_text_edit', node)
     }
     this.registerTmpShortcut()
     if (!this.textEditNode) {

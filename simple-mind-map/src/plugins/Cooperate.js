@@ -1560,16 +1560,8 @@ class Cooperate {
     return restored > 0
   }
 
-  onBeforeShowTextEdit() {
-    const renderer = this.mindMap.renderer
-    const node =
-      (renderer &&
-        renderer.textEdit &&
-        renderer.textEdit.currentNode) ||
-      (renderer &&
-        renderer.activeNodeList &&
-        renderer.activeNodeList[0]) ||
-      null
+  onBeforeShowTextEdit(editingNode) {
+    const node = editingNode && editingNode.getData ? editingNode : null
     const uid = node && node.getData && node.getData('uid')
     if (uid && this.collabV2Adapter) {
       const snap = this.collabV2Adapter.getStatus()
@@ -1674,23 +1666,23 @@ class Cooperate {
     )
     this.presenceUsers = next
     next.forEach(item => {
-      const uids = [
-        ...(item.selectedUids || []),
-        ...(item.editingUid ? [item.editingUid] : [])
-      ]
-      const unique = [...new Set(uids.filter(Boolean))]
-      unique.forEach(uid => {
-        const userInfo = {
-          id: item.id,
-          name: item.name,
-          color: item.color,
-          avatar: item.avatar,
-          editing: item.editingUid === uid
-        }
-        const node = renderer.findNodeByUid(uid)
-        if (node) node.addUser(userInfo)
-        else this.waitNodeUidMap[uid] = userInfo
-      })
+      // Selection remains presence data, but a node avatar means that the
+      // collaborator is actively editing that node's text.
+      const uid = item.editingUid
+      if (!uid) return
+      const userInfo = {
+        id: item.id,
+        name: item.name,
+        color: item.color,
+        avatar: item.avatar,
+        editing: true
+      }
+      const node = renderer.findNodeByUid(uid)
+      if (node) node.addUser(userInfo)
+      else {
+        if (!this.waitNodeUidMap[uid]) this.waitNodeUidMap[uid] = []
+        this.waitNodeUidMap[uid].push(userInfo)
+      }
     })
   }
 
@@ -1730,7 +1722,7 @@ class Cooperate {
     Object.keys(this.waitNodeUidMap).forEach(uid => {
       const node = this.mindMap.renderer.findNodeByUid(uid)
       if (node) {
-        node.addUser(this.waitNodeUidMap[uid])
+        this.waitNodeUidMap[uid].forEach(user => node.addUser(user))
       }
     })
     this.waitNodeUidMap = {}

@@ -227,7 +227,7 @@ class RichText {
     this.isInserting = isInserting
     if (!rect) rect = node._textData.node.node.getBoundingClientRect()
     if (!isFromScale) {
-      this.mindMap.emit('before_show_text_edit')
+      this.mindMap.emit('before_show_text_edit', node)
     }
     this.mindMap.renderer.textEdit.registerTmpShortcut()
     // 原始宽高
