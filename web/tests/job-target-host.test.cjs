@@ -1,4 +1,5 @@
 /* eslint-env node */
+/* global globalThis */
 /**
  * 「执行主机」默认目标的选择 —— Toolbar.prepareLocalTarget 的单测。
  *
@@ -23,10 +24,30 @@ function check(name, ok, extra = '') {
 
 const LOCAL_KEY = '127.0.0.1:8799'
 
+// 组件用 window.localStorage 记住「派发固定用哪条会话」，这里给个最小实现
+const lsStore = new Map()
+globalThis.window = {
+  localStorage: {
+    getItem: k => (lsStore.has(k) ? lsStore.get(k) : null),
+    setItem: (k, v) => lsStore.set(k, String(v)),
+    removeItem: k => lsStore.delete(k)
+  }
+}
+
 // ---- 可编程的桥接 stub ----
 let resolveResult = { hosts: [], defaultHost: null, hub: '', error: '' }
 let gatewayResult = { ok: true, gateways: [{ url: 'http://127.0.0.1:50001', cwd: 'D:\\demo' }] }
-const calls = { gateways: 0, history: 0 }
+const calls = { gateways: 0, history: 0, spawn: 0 }
+// 起会话相关（默认：额度 5 个、还能起）
+let spawnInfoResult = {
+  ok: true,
+  items: [],
+  count: 0,
+  limit: 5,
+  remaining: 5,
+  canSpawn: true
+}
+let spawnResult = { ok: false, error: '（测试没给 spawnResult）' }
 
 const bridgeStub = {
   resolveJobHosts: async () => resolveResult,
@@ -38,6 +59,12 @@ const bridgeStub = {
     calls.history += 1
     return { ok: true, jobs: [] }
   },
+  listSpawnedSessions: async () => spawnInfoResult,
+  spawnHostSession: async () => {
+    calls.spawn += 1
+    return typeof spawnResult === 'function' ? spawnResult() : spawnResult
+  },
+  releaseHostSession: async () => ({ ok: true }),
   describeEmptyGateways: () => '这台主机上没有 WorkBuddy 会话',
   stopHostJob: async () => ({ ok: true }),
   fetchJobTranscript: async () => ({ ok: true, text: '' }),
@@ -125,6 +152,23 @@ function makeVm() {
     vm.jobHistoryError = ''
   }
   vm.loadJobGateways = methods.loadJobGateways.bind(vm)
+  // 自动挑端口 / 自动等会话这一组
+  vm.jobSpawnInfo = { count: 0, limit: 5, remaining: 5, canSpawn: true }
+  vm.jobSpawning = false
+  vm.jobGatewayCwd = ''
+  ;[
+    'isJobRunning',
+    'pickJobGateway',
+    'ensureDispatchTarget',
+    'autoSpawnSession',
+    'loadSpawnInfo',
+    'chooseSession',
+    'rememberSession',
+    'recallSession',
+    'sessionStoreKey'
+  ].forEach(name => {
+    if (methods[name]) vm[name] = methods[name].bind(vm)
+  })
   return vm
 }
 
@@ -225,6 +269,141 @@ async function main() {
   await vm.prepareLocalTarget()
   check('探测抛异常：兜住并提示', vm.jobHosts.length === 0 && /boom|读取失败/.test(vm.jobHostsError), vm.jobHostsError)
   bridgeStub.resolveJobHosts = async () => resolveResult
+
+  // ---- 7. 没有可派端口（会话）时：**让桥接起一个**再用 ----
+  // 现场：桥接在线但 WorkBuddy 一条会话都没有。以前直接拒绝，让用户自己去桌面版开一条；
+  // 现在点运行就自动起（最多 5 个），起来直接用。
+  resolveResult = {
+    hosts: [host('127.0.0.1', 8799, true, '这台电脑')],
+    hub: '',
+    error: ''
+  }
+  gatewayResult = { ok: true, gateways: [], diag: null }
+  spawnInfoResult = { ok: true, items: [], count: 0, limit: 5, remaining: 5, canSpawn: true }
+  calls.spawn = 0
+  vm = makeVm()
+  await vm.prepareLocalTarget()
+  check('一开始没有会话：gateway 为空', vm.jobGateway === '', JSON.stringify(vm.jobGateway))
+  // 起会话成功 → 之后网关列表里就多出这条
+  spawnResult = () => {
+    gatewayResult = {
+      ok: true,
+      gateways: [{ url: 'http://127.0.0.1:50001', cwd: 'D:\\demo', spawned: true }]
+    }
+    return {
+      ok: true,
+      gateway: { url: 'http://127.0.0.1:50001', port: 50001 },
+      count: 1,
+      limit: 5,
+      remaining: 4
+    }
+  }
+  const spawned = await vm.ensureDispatchTarget()
+  check(
+    '没有端口时：自动让桥接起一个并选中它（不用再点一次运行）',
+    spawned.ok === true && spawned.gateway === 'http://127.0.0.1:50001',
+    JSON.stringify(spawned)
+  )
+  check('确实调了起会话', calls.spawn === 1, String(calls.spawn))
+  check('起会话期间状态栏说明了', /起一个|新会话/.test(vm.jobStatus), vm.jobStatus)
+  check('额度同步成 1/5', vm.jobSpawnInfo.count === 1 && vm.jobSpawnInfo.remaining === 4,
+    JSON.stringify(vm.jobSpawnInfo))
+
+  // ---- 7b. 额度用完了：不再起，直接给能照做的原因 ----
+  gatewayResult = { ok: true, gateways: [], diag: null }
+  spawnInfoResult = { ok: true, items: [], count: 5, limit: 5, remaining: 0, canSpawn: true }
+  calls.spawn = 0
+  vm = makeVm()
+  await vm.prepareLocalTarget()
+  const capped = await vm.ensureDispatchTarget()
+  check(
+    '额度满了：不起新会话，并说清要先去回收',
+    capped.ok === false && calls.spawn === 0 && /上限|回收/.test(capped.error),
+    `${calls.spawn} · ${capped.error}`
+  )
+
+  // ---- 7c. 桥接起不了（找不到 codebuddy）：说清怎么配 ----
+  gatewayResult = { ok: true, gateways: [], diag: null }
+  spawnInfoResult = { ok: true, items: [], count: 0, limit: 5, remaining: 5, canSpawn: false }
+  vm = makeVm()
+  await vm.prepareLocalTarget()
+  const noCli = await vm.ensureDispatchTarget()
+  check(
+    '桥接起不了会话：提示用 WORKBUDDY_HOME / WORKBUDDY_CLI 指目录',
+    noCli.ok === false && /WORKBUDDY/.test(noCli.error),
+    noCli.error
+  )
+  spawnInfoResult = { ok: true, items: [], count: 0, limit: 5, remaining: 5, canSpawn: true }
+  spawnResult = { ok: false, error: '起会话失败（测试占位）' }
+  gatewayResult = { ok: true, gateways: [{ url: 'http://127.0.0.1:50001', cwd: 'D:\\demo' }] }
+
+  // ---- 8. 桥接都没在线：别干等，立刻给原因 ----
+  resolveResult = {
+    hosts: [host('127.0.0.1', 8799, false, '这台电脑')],
+    hub: '',
+    error: '这台电脑的桥接没在跑'
+  }
+  gatewayResult = { ok: false, gateways: [], error: '这台电脑的桥接没在跑' }
+  vm = makeVm()
+  await vm.prepareLocalTarget()
+  const t0 = Date.now()
+  const dead = await vm.ensureDispatchTarget()
+  const cost = Date.now() - t0
+  check(
+    '桥接没在线：不干等，马上给原因',
+    dead.ok === false && cost < 2500,
+    `${cost}ms · ${dead.error}`
+  )
+  check('原因是桥接/会话，用户能照做', /桥接|会话/.test(dead.error), dead.error)
+  gatewayResult = { ok: true, gateways: [{ url: 'http://127.0.0.1:50001', cwd: 'D:\\demo' }] }
+
+  // ---- 9. 多条会话时自动挑一条，但不冲掉用户手动选的 ----
+  vm = makeVm()
+  vm.jobHosts = [host('127.0.0.1', 8799, true, '这台电脑')]
+  vm.jobHostKey = LOCAL_KEY
+  const two = [
+    { url: 'http://127.0.0.1:50001', port: 50001 },
+    { url: 'http://127.0.0.1:50002', port: 50002 }
+  ]
+  // 现场（2026-09-28）：用户看到"每次运行端口都变了、像把上一个回收了换最新的，
+  // 也不管上个任务跑完没"。根因是这里原来「优先挑没在跑任务的那条」，
+  // 而桥接给的列表按心跳新鲜度排（刚用过那条排最前）→ 页面一刷新就换一条。
+  lsStore.clear()
+  vm.jobGateway = ''
+  check(
+    '已选的那条还在：保持不动（忙也用它，任务排在这条会话里）',
+    vm.pickJobGateway(two, 'http://127.0.0.1:50002') === 'http://127.0.0.1:50002'
+  )
+  check('只有一条：直接用', vm.pickJobGateway([two[0]], '') === two[0].url)
+  check(
+    '多条且没选过：用第一条 —— 不再按忙闲跳来跳去',
+    vm.pickJobGateway(two, '') === two[0].url
+  )
+
+  // 记住过的那条（localStorage）优先于第一条 —— 刷新页面也不换端口
+  vm.rememberSession('http://127.0.0.1:50002')
+  check(
+    '刷新页面后还记得上次用的那条',
+    vm.pickJobGateway(two, '') === 'http://127.0.0.1:50002',
+    vm.pickJobGateway(two, '')
+  )
+  check(
+    '记住的那条没了：退回第一条（不会挑不出来）',
+    vm.pickJobGateway([two[0]], '') === two[0].url
+  )
+
+  // 点会话栏那一行 = 手动指定并记住
+  vm.jobGateway = two[0].url
+  vm.chooseSession(two[1])
+  check(
+    '点会话行即选中并记住',
+    vm.jobGateway === two[1].url && vm.recallSession() === two[1].url,
+    `${vm.jobGateway} / ${vm.recallSession()}`
+  )
+  check(
+    '手动选完之后不会再被换掉',
+    vm.pickJobGateway(two, vm.jobGateway) === two[1].url
+  )
 
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)

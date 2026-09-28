@@ -70,7 +70,11 @@ window.__MIND_MAP_RUNTIME__ = {}
 let fetchHandler = () => ({ status: 200, body: '{"peers":[]}' })
 let fetchLog = []
 globalThis.fetch = async (url, options = {}) => {
-  fetchLog.push({ url: String(url), method: options.method || 'GET' })
+  fetchLog.push({
+    url: String(url),
+    method: options.method || 'GET',
+    body: options.body || ''
+  })
   const r = fetchHandler(String(url), options)
   if (r instanceof Error) throw r
   const status = r.status === undefined ? 200 : r.status
@@ -443,6 +447,161 @@ async function main() {
     writes.length === 3 && writes.every(l => l.method === 'POST'),
     JSON.stringify(writes.map(l => `${l.method} ${l.url}`))
   )
+
+  // ---- 11. 旧版服务回 HTML 404（缺接口）→ 说人话，别把那坨 HTML 弹给用户 ----
+  // 现场：服务器通讯页是旧版，点「停止」走 /jobhub/api/stop → Flask 的 404 页面
+  fetchHandler = () => ({
+    status: 404,
+    body:
+      '<!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n' +
+      '<h1>Not Found</h1>\n<p>The requested URL was not found on the server.</p>'
+  })
+  window.sessionStorage.clear()
+  hub.setJobHubOverride('')
+  const stopBroken = await hub.stopHostJob({
+    host: writeTarget,
+    gateway: 'http://127.0.0.1:50001',
+    id: 'job-1'
+  })
+  check(
+    '停止遇到 HTML 404：不把 HTML 弹出来，给能照做的说明',
+    stopBroken.ok === false &&
+      !/[<>]/.test(String(stopBroken.error || '')) &&
+      /404/.test(stopBroken.error) &&
+      /旧版/.test(stopBroken.error),
+    stopBroken.error
+  )
+  const gwBroken = await hub.listHostGateways(writeTarget)
+  check(
+    '拿会话列表遇到 HTML 404：也不弹 HTML',
+    gwBroken.ok === false && !/[<>]/.test(String(gwBroken.error || '')),
+    gwBroken.error
+  )
+
+  // ---- 12. 直连不通 + 中继是旧版：两条原因都要说出来 ----
+  // 现场（2026-09-28）：本机桥接没跑 → 直连被拒；退到中继，而通讯页是旧版 →
+  // /api/stop 直接 404。只报一句 404 的话，用户不知道是该去起桥接、还是换通讯页脚本。
+  fetchHandler = url => {
+    const u = String(url)
+    if (u.includes(':5050/api/peers')) return { status: 200, body: '{"peers":[]}' }
+    if (u.includes(':5050')) {
+      return {
+        status: 404,
+        body: '<!doctype html>\n<html lang=en>\n<title>404 Not Found</title>'
+      }
+    }
+    return new Error('Failed to fetch')
+  }
+  window.sessionStorage.clear()
+  hub.setJobHubOverride('http://192.168.1.114:5050')
+  const bothDead = await hub.stopHostJob({
+    host: writeTarget,
+    gateway: 'http://127.0.0.1:50001',
+    id: 'job-1'
+  })
+  check(
+    '直连不通 + 中继 404：两条原因都要报（并说清连不上哪个地址）',
+    bothDead.ok === false &&
+      /直连/.test(bothDead.error) &&
+      /中继/.test(bothDead.error) &&
+      /192\.168\.0\.54:8799/.test(bothDead.error) &&
+      /旧版/.test(bothDead.error) &&
+      !/[<>]/.test(String(bothDead.error || '')),
+    bothDead.error
+  )
+  window.sessionStorage.clear()
+  hub.setJobHubOverride('')
+
+  // ---- 13. 自动起会话的三个接口（起会话慢，超时要给足）----
+  fetchLog = []
+  fetchHandler = url => {
+    const u = String(url)
+    if (u.includes('/api/sessions/spawned')) {
+      return {
+        status: 200,
+        body: JSON.stringify({
+          ok: true,
+          items: [{ pid: 123, url: 'http://127.0.0.1:51000', cwd: 'D:\\x' }],
+          count: 1,
+          limit: 5,
+          remaining: 4,
+          canSpawn: true
+        })
+      }
+    }
+    if (u.includes('/api/sessions/spawn')) {
+      return {
+        status: 200,
+        body: JSON.stringify({
+          ok: true,
+          items: [{ pid: 456, url: 'http://127.0.0.1:52000' }],
+          count: 2,
+          limit: 5,
+          remaining: 3
+        })
+      }
+    }
+    if (u.includes('/api/sessions/release')) {
+      return { status: 200, body: JSON.stringify({ ok: true, count: 1, limit: 5 }) }
+    }
+    return { status: 200, body: '{}' }
+  }
+
+  const spawnedList = await hub.listSpawnedSessions(writeTarget)
+  check(
+    '查自动会话：拿到额度（count/limit/remaining）',
+    spawnedList.ok === true &&
+      spawnedList.count === 1 &&
+      spawnedList.limit === 5 &&
+      spawnedList.remaining === 4 &&
+      spawnedList.items.length === 1,
+    JSON.stringify(spawnedList)
+  )
+
+  const spawnRes = await hub.spawnHostSession({
+    host: writeTarget,
+    cwd: 'D:\\x',
+    count: 1
+  })
+  const spawnCall = fetchLog.find(l => /\/api\/sessions\/spawn$/.test(l.url))
+  check(
+    '起会话：POST 到 /api/sessions/spawn（写操作必须 POST）',
+    !!spawnCall && spawnCall.method === 'POST',
+    JSON.stringify(spawnCall)
+  )
+  check(
+    '起会话：返回新会话与额度',
+    spawnRes.ok === true &&
+      spawnRes.gateway.url === 'http://127.0.0.1:52000' &&
+      spawnRes.remaining === 3,
+    JSON.stringify(spawnRes)
+  )
+  check(
+    '起会话：把 cwd / count 传给桥接（新会话要落在同一个工作区）',
+    !!spawnCall && /"cwd":"D:/.test(spawnCall.body) && /"count":1/.test(spawnCall.body),
+    String(spawnCall && spawnCall.body)
+  )
+
+  const relRes = await hub.releaseHostSession({ host: writeTarget, url: 'http://127.0.0.1:52000' })
+  const relCall = fetchLog.find(l => /\/api\/sessions\/release$/.test(l.url))
+  check(
+    '回收会话：POST /api/sessions/release，带 url',
+    relRes.ok === true && !!relCall && relCall.method === 'POST',
+    JSON.stringify(relCall)
+  )
+
+  // 桥接是旧版（没有这些路由）→ 说人话，别把 HTML 弹出来
+  fetchLog = []
+  fetchHandler = () => ({ status: 404, body: '<!doctype html>\n<html>404</html>' })
+  window.sessionStorage.clear()
+  hub.setJobHubOverride('')
+  const oldSpawn = await hub.spawnHostSession({ host: writeTarget, cwd: 'D:\\x' })
+  check(
+    '起会话遇到旧版桥接：不弹 HTML，提示换脚本',
+    oldSpawn.ok === false && /旧版/.test(oldSpawn.error) && !/[<>]/.test(String(oldSpawn.error)),
+    oldSpawn.error
+  )
+  fetchHandler = () => ({ status: 200, body: '{"peers":[]}' })
 
   // ---- 10. 同源桥接：页面和 WorkBuddy 在同一台机器上（走 /bridge/ 反代）----
   // 场景：脑图部署在服务器上，任务也用**服务器上**的 WorkBuddy 跑。

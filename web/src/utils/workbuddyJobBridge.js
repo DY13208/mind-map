@@ -321,7 +321,14 @@ async function bridgeRequest(target, opts = {}) {
   // 回环地址吃不了中继：中继是通讯页代连，127.0.0.1 在那边等于通讯页自己那台机器。
   if (!relayable) {
     const last = failures[failures.length - 1]
-    if (last) return { ...last, via: '', errors: failures }
+    if (last) {
+      return {
+        ...last,
+        via: '',
+        errors: failures,
+        error: combineErrors(failures, '请求失败')
+      }
+    }
     return {
       ok: false,
       status: 0,
@@ -359,7 +366,12 @@ async function bridgeRequest(target, opts = {}) {
   })
   if (relayed.ok) return { ...relayed, via: 'hub' }
   failures.push(relayed)
-  return { ...relayed, via: '', errors: failures }
+  return {
+    ...relayed,
+    via: '',
+    errors: failures,
+    error: combineErrors(failures, '请求失败')
+  }
 }
 
 export function normalizeHost(raw = {}) {
@@ -435,6 +447,8 @@ async function request(url, options = {}) {
       ok: false,
       status: 0,
       offline: true,
+      // 带上地址：报错时能说清"连不上哪儿"，比浏览器那句 Failed to fetch 有用
+      url,
       error: (err && err.message) || '请求失败'
     }
   } finally {
@@ -442,15 +456,71 @@ async function request(url, options = {}) {
   }
 }
 
+function looksLikeHtml(text) {
+  return /^\s*<(!doctype|html|head|body|title|h1|p[\s>])/i.test(String(text || ''))
+}
+
+/**
+ * 服务端回的 HTML 页面（Flask/nginx 的 404）不是给用户看的 ——
+ * 直接把那一坨 <html> 弹出来，用户只能看到"404 Not Found"，
+ * 完全不知道要去升级哪台机器的哪个脚本。
+ */
+function htmlErrorText(res, fallback) {
+  const status = (res && res.status) || 0
+  // 有时上游已经说了"这是直连/中继哪一步"，此时不需要再叠一层前缀
+  const head = fallback ? `${fallback}：` : ''
+  if (status === 404) {
+    return (
+      `${head}这台机器上的服务没有这个接口（HTTP 404），` +
+      '通讯页/桥接是旧版 —— 换成 scripts/workbuddy-lan-hub.py / ' +
+      'scripts/workbuddy-job-bridge.py 后重启，或先用「运行历史 → WorkBuddy 会话」确认它还在'
+    )
+  }
+  return `${head}服务端返回 HTTP ${status}（不是 JSON，多半是旧版服务或中间的反代）`
+}
+
 function pickError(res, fallback) {
   const json = res && res.json
+  // bridgeRequest 已经把「直连 + 中继」两条原因拼成一句了，别用 json.raw 覆盖掉它
+  if (res && typeof res.error === 'string' && res.error) return res.error
   if (res && res.offline) return res.error || fallback
   if (json) {
     if (typeof json.error === 'string' && json.error) return json.error
     if (json.error) return JSON.stringify(json.error)
-    if (json.raw) return String(json.raw)
+    if (json.raw) {
+      const raw = String(json.raw)
+      return looksLikeHtml(raw) ? htmlErrorText(res, fallback) : raw
+    }
   }
-  return `${fallback}（HTTP ${(res && res.status) || 0}）`
+  if (!(res && res.ok) && looksLikeHtml(res && res.text)) {
+    return htmlErrorText(res, fallback)
+  }
+  return `${fallback || '请求没成功'}（HTTP ${(res && res.status) || 0}）`
+}
+
+/**
+ * 两条路都失败时，别只报最后一条。
+ *
+ * 最常见的现场（2026-09-28 实测）：本机桥接没跑 → 直连被拒 → 退到中继；
+ * 而通讯页又是旧版，`/api/stop` 直接 404。只报"404"的话用户不知道该去起桥接、
+ * 还是该去换通讯页脚本 —— 两个原因都摆出来。
+ */
+function combineErrors(failures, fallback) {
+  const list = (failures || []).filter(Boolean)
+  if (!list.length) return fallback
+  if (list.length === 1) return pickError(list[0], fallback)
+  return list
+    .map((item, index) => {
+      // 第一个失败一定是直连（中继步排在它后面）
+      const who = index === 0 ? '直连' : '中继'
+      if (item.offline) {
+        return `${who}：连不上 ${item.url || '目标地址'}（${
+          item.error || '网络不可达'
+        }）`
+      }
+      return `${who}：${pickError(item, '')}`
+    })
+    .join('；')
 }
 
 /** 主服务登记的局域网主机列表（通讯页 /api/peers） */
@@ -613,6 +683,99 @@ export async function listHostGateways(host) {
         : pickError(res, '连不上本机任务桥，请先运行 test1.py')
       : pickError(res, `连不上 ${target.label}（那台电脑要运行 test1.py --lan）`)
   }
+}
+
+/** 起会话要等它把端口注册出来（实测 ~2s，最多 60s），超时给足 */
+const SPAWN_TIMEOUT = 100000
+
+/**
+ * 桥接**自动起的**会话（含上限与已用额度）。
+ * 用户自己在桌面版开的会话不算在里面，也不允许被回收。
+ */
+export async function listSpawnedSessions(host) {
+  const target = normalizeHost(host || {})
+  if (!target.ip) return { ok: false, items: [], error: '没有指定主机' }
+  const res = await bridgeRequest(target, {
+    path: '/api/sessions/spawned',
+    relayPath: `/api/sessions/spawned?ip=${encodeURIComponent(
+      target.ip
+    )}&port=${target.port}`,
+    relayMethod: 'GET'
+  })
+  if (!res.ok || !res.json || res.json.ok === false) {
+    return { ok: false, items: [], error: pickError(res, '拿不到自动会话列表') }
+  }
+  const json = res.json
+  return {
+    ok: true,
+    items: Array.isArray(json.items) ? json.items : [],
+    count: Number(json.count) || 0,
+    limit: Number(json.limit) || 0,
+    remaining: Number(json.remaining) || 0,
+    canSpawn: json.canSpawn !== false,
+    via: res.via
+  }
+}
+
+/**
+ * 让桥接起一个新会话（≥2 秒，慢在等它把端口注册出来）。
+ * 上限由桥接管（默认 5 个，只算它自己起的）。
+ */
+export async function spawnHostSession(opts = {}) {
+  const target = normalizeHost(opts.host || {})
+  if (!target.ip) return { ok: false, error: '没有指定主机' }
+  const body = {}
+  if (opts.cwd) body.cwd = opts.cwd
+  if (opts.model) body.model = opts.model
+  if (opts.count) body.count = opts.count
+  const res = await bridgeRequest(target, {
+    method: 'POST',
+    path: '/api/sessions/spawn',
+    body,
+    relayPath: '/api/sessions/spawn',
+    relayBody: { ip: target.ip, port: target.port, ...body },
+    timeout: SPAWN_TIMEOUT
+  })
+  if (!res.ok || !res.json) {
+    return { ok: false, error: pickError(res, '起会话失败') }
+  }
+  const json = res.json
+  if (json.ok === false) {
+    return { ok: false, error: pickError(res, '起会话失败'), ...json }
+  }
+  const items = Array.isArray(json.items) ? json.items : []
+  return {
+    ok: items.length > 0,
+    items,
+    gateway: items[0] || null,
+    count: json.count,
+    limit: json.limit,
+    remaining: json.remaining,
+    via: res.via,
+    error: items.length ? '' : json.error || '新会话没起来'
+  }
+}
+
+/** 回收桥接自动起的会话（用户自己开的会被桥接拒绝，不会误杀） */
+export async function releaseHostSession(opts = {}) {
+  const target = normalizeHost(opts.host || {})
+  if (!target.ip) return { ok: false, error: '没有指定主机' }
+  const body = {}
+  if (opts.url) body.url = opts.url
+  if (opts.pid) body.pid = opts.pid
+  const res = await bridgeRequest(target, {
+    method: 'POST',
+    path: '/api/sessions/release',
+    body,
+    relayPath: '/api/sessions/release',
+    relayBody: { ip: target.ip, port: target.port, ...body },
+    timeout: 40000
+  })
+  if (!res.ok || !res.json) return { ok: false, error: pickError(res, '回收失败') }
+  if (res.json.ok === false) {
+    return { ok: false, error: pickError(res, '回收失败'), ...res.json }
+  }
+  return { ok: true, ...res.json, via: res.via }
 }
 
 function readGateways(json) {

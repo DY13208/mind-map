@@ -652,6 +652,54 @@ def stop():
     return jsonify(out)
 
 
+@app.get("/api/sessions/spawned")
+def sessions_spawned():
+    """代查某台主机上「桥接自动起的会话」（桥接 /api/sessions/spawned）。"""
+    ip = (request.args.get("ip") or "").strip()
+    code, out = _bridge_call(ip, request.args.get("port"), "/api/sessions/spawned", timeout=20)
+    if code != 200 or not isinstance(out, dict):
+        err = out.get("error") if isinstance(out, dict) else out
+        return jsonify({"ok": False, "items": [], "error": err or "取会话列表失败"}), \
+            (code if code >= 400 else 502)
+    out.setdefault("ip", ip)
+    return jsonify(out)
+
+
+@app.post("/api/sessions/spawn")
+def sessions_spawn():
+    """代起一个 WorkBuddy 会话（桥接 /api/sessions/spawn）。
+
+    慢：要等新会话把端口注册出来（实测 ~2s，最多 60s），所以超时给足。
+    """
+    data = request.get_json(silent=True) or {}
+    ip = (data.get("ip") or "").strip() or _client_ip()
+    body = {k: data[k] for k in ("cwd", "model", "permissionMode", "count") if data.get(k)}
+    code, out = _bridge_call(ip, data.get("port"), "/api/sessions/spawn",
+                             method="POST", body=body, timeout=90)
+    if code != 200 or not isinstance(out, dict):
+        err = out.get("error") if isinstance(out, dict) else out
+        return jsonify({"ok": False, "error": err or "起会话失败", "status": code}), \
+            (code if code >= 400 else 502)
+    out.setdefault("ip", ip)
+    return jsonify(out)
+
+
+@app.post("/api/sessions/release")
+def sessions_release():
+    """代回收一个自动起的会话（桥接 /api/sessions/release）。"""
+    data = request.get_json(silent=True) or {}
+    ip = (data.get("ip") or "").strip() or _client_ip()
+    body = {k: data[k] for k in ("url", "pid") if data.get(k)}
+    code, out = _bridge_call(ip, data.get("port"), "/api/sessions/release",
+                             method="POST", body=body, timeout=30)
+    if code != 200 or not isinstance(out, dict):
+        err = out.get("error") if isinstance(out, dict) else out
+        return jsonify({"ok": False, "error": err or "回收失败", "status": code}), \
+            (code if code >= 400 else 502)
+    out.setdefault("ip", ip)
+    return jsonify(out)
+
+
 @app.get("/api/job-artifacts")
 def job_artifacts():
     """代取某台主机上某个任务产出的文件清单/内容（桥接 /api/job-artifacts）。"""
