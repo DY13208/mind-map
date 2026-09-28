@@ -49,6 +49,7 @@ const store = new Vuex.Store({
     collabDiagnostic: null,
     roomRole: '',
     roomCanEdit: true,
+    roomCanShare: true,
     roomCanManage: true,
     aclForcedReadonly: false,
     aiConfig: {
@@ -139,6 +140,7 @@ const store = new Vuex.Store({
     setRoomAcl(state, data = {}) {
       state.roomRole = data.role || ''
       state.roomCanEdit = data.canEdit !== false
+      state.roomCanShare = data.canShare !== false && state.roomCanEdit
       state.roomCanManage = !!data.canManage
       state.aclForcedReadonly = !state.roomCanEdit
     },

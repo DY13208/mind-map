@@ -58,6 +58,7 @@
     <NodeAttachment v-if="mindMap" :mindMap="mindMap"></NodeAttachment>
     <NodeAttachmentPreview v-if="mindMap"></NodeAttachmentPreview>
     <CooperateDialog :mindMap="mindMap"></CooperateDialog>
+    <NodeShareDialog></NodeShareDialog>
     <MapRefDialog></MapRefDialog>
     <div
       class="dragMask"
@@ -156,6 +157,7 @@ import NodeAutoExpand from './NodeAutoExpand.vue'
 import NodeAttachment from './NodeAttachment.vue'
 import NodeAttachmentPreview from './NodeAttachmentPreview.vue'
 import CooperateDialog from './CooperateDialog.vue'
+import NodeShareDialog from './NodeShareDialog.vue'
 import MapRefDialog from './MapRefDialog.vue'
 import { normalizeMapRef } from '@/utils/mapRefNav'
 import { writeJobResultToMap, createJobContainer } from '@/utils/jobResultWriter'
@@ -224,6 +226,7 @@ export default {
     NodeAttachment,
     NodeAttachmentPreview,
     CooperateDialog,
+    NodeShareDialog,
     MapRefDialog
   },
   data() {

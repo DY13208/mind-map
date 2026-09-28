@@ -2,6 +2,7 @@ const MESSAGES = {
   unauthorized: '请先使用企业微信登录',
   AUTH_TIMEOUT: '登录状态确认超时，请重试',
   FORBIDDEN: '没有权限执行该操作',
+  SHARE_RECIPIENT_DENIED: '当前账号不是分享接收人，请切换到被指定的账号后重试',
   ROOM_NOT_FOUND: '找不到该脑图',
   FOLDER_NOT_FOUND: '找不到该文件夹',
   FOLDER_NOT_EMPTY: '该文件夹中还有脑图或子文件夹，请先移动内容后再删除。',

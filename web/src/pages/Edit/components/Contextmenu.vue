@@ -111,6 +111,9 @@
       <div class="item" @click="exec('EXPORT_CUR_NODE_TO_PNG')">
         <span class="name">{{ $t('contextmenu.exportNodeToPng') }}</span>
       </div>
+      <div v-if="roomCanShare" class="item" data-testid="share-node" @click="shareNode">
+        <span class="name">分享此节点</span>
+      </div>
       <div class="splitLine" v-if="enableAi"></div>
       <div class="item" @click="aiCreate" v-if="enableAi">
         <span class="name">{{ $t('contextmenu.aiCreate') }}</span>
@@ -236,7 +239,8 @@ export default {
     ...mapState({
       isZenMode: state => state.localConfig.isZenMode,
       isDark: state => state.localConfig.isDark,
-      enableAi: state => state.localConfig.enableAi
+      enableAi: state => state.localConfig.enableAi,
+      roomCanShare: state => state.roomCanShare
     }),
     expandList() {
       return [
@@ -360,6 +364,12 @@ export default {
   },
   methods: {
     ...mapMutations(['setLocalConfig']),
+
+    shareNode() {
+      const node = this.node
+      this.hide()
+      if (node) this.$bus.$emit('showNodeShare', node)
+    },
 
     // 计算右键菜单元素的显示位置
     getShowPosition(x, y) {
