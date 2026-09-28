@@ -107,6 +107,13 @@ export function getRuntimeConfig() {
   }
 }
 
+export function getGraphServiceUrl() {
+  const runtime =
+    (typeof window !== 'undefined' && window.__MIND_MAP_RUNTIME__) || {}
+  const url = String(runtime.graphServiceUrl || '/wiki-compiler/').trim()
+  return url || '/wiki-compiler/'
+}
+
 export function getAiBaseUrl(port) {
   const cfg = getRuntimeConfig()
   if (cfg.gateway) return cfg.aiBaseUrl

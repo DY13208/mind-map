@@ -251,6 +251,22 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  # 公司模型编译结果的图谱。只在 Docker 网络里，经 app 的 /wiki-compiler/ 对外。
+  wiki-graph:
+    build:
+      context: ./integrations/wiki-graph
+    image: mind-map-wiki-graph:1
+    environment:
+      WIKI_DIR: /wiki
+    volumes:
+      - ${WIKI_COMPILE_DIR:-./data/wiki-compiler/wiki}:/wiki:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3848/api/graph',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
 
   # ===== 公网 TLS 终止（唯一对外入口）=====
   # 路由器只把公网 8989 转到本机，所以 8989 必须是 HTTPS。
