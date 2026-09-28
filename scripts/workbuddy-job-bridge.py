@@ -38,9 +38,12 @@ import json
 import mimetypes
 import os
 import re
+import socket
 import ssl
+import subprocess
 import threading
 import time
+import uuid
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -132,6 +135,391 @@ def _process_env_var(pid, name):
             kernel32.CloseHandle(handle)
     _proc_env_cache[(pid, name)] = (now, value or "")
     return value
+
+
+def _process_cmdline(pid):
+    """只读本机会话进程的启动命令行（和 _process_env_var 同一套 PEB 读法）。
+
+    用途：自己起会话时**克隆**正在跑那一条的启动参数（--model / --settings / --tools …），
+    保证新会话和用户手点开的那条行为一致，不用去猜产品的运行时配置。
+    """
+    if os.name != "nt" or not pid or ctypes.sizeof(ctypes.c_void_p) < 8:
+        return None
+    now = time.time()
+    hit = _proc_env_cache.get((pid, "__cmdline__"))
+    if hit and now - hit[0] < 5:
+        return hit[1] or None
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    ntdll = ctypes.WinDLL("ntdll", use_last_error=True)
+
+    class PBI(ctypes.Structure):
+        _fields_ = [
+            ("Reserved1", ctypes.c_void_p),
+            ("PebBaseAddress", ctypes.c_void_p),
+            ("Reserved2_0", ctypes.c_void_p),
+            ("Reserved2_1", ctypes.c_void_p),
+            ("UniqueProcessId", ctypes.c_void_p),
+            ("Reserved3", ctypes.c_void_p),
+        ]
+
+    def read_mem(handle, addr, size):
+        buf = (ctypes.c_ubyte * size)()
+        got = ctypes.c_size_t()
+        kernel32.ReadProcessMemory(handle, ctypes.c_void_p(addr), buf, size, ctypes.byref(got))
+        return bytes(buf[: got.value])
+
+    value = None
+    handle = kernel32.OpenProcess(0x0400 | 0x0010, False, int(pid))
+    if handle:
+        try:
+            info = PBI()
+            retlen = ctypes.c_ulong()
+            status = ntdll.NtQueryInformationProcess(
+                handle, 0, ctypes.byref(info), ctypes.sizeof(info), ctypes.byref(retlen))
+            peb = info.PebBaseAddress
+            if status == 0 and peb:
+                # x64 RTL_USER_PROCESS_PARAMETERS：CommandLine(UNICODE_STRING) 在 +0x70，
+                # Environment 在 +0x80（上面 _process_env_var 读的就是 +0x80）
+                params = int.from_bytes(read_mem(handle, peb + 0x20, 8), "little")
+                raw = read_mem(handle, params + 0x70, 16)
+                if len(raw) == 16:
+                    length = int.from_bytes(raw[0:2], "little")
+                    buf_ptr = int.from_bytes(raw[8:16], "little")
+                    if length and buf_ptr and length < 32768:
+                        text = read_mem(handle, buf_ptr, length).decode("utf-16le", "ignore")
+                        value = text.strip() or None
+        except Exception:
+            value = None
+        finally:
+            kernel32.CloseHandle(handle)
+    _proc_env_cache[(pid, "__cmdline__")] = (now, value or "")
+    return value
+
+
+def split_cmdline(cmd):
+    """按 Windows 规则拆命令行（交给系统 CommandLineToArgvW，别自己手搓引号）。"""
+    if not cmd:
+        return []
+    try:
+        n = ctypes.c_int(0)
+        argv = ctypes.windll.shell32.CommandLineToArgvW(ctypes.c_wchar_p(cmd), ctypes.byref(n))
+        if not argv:
+            return cmd.split()
+        try:
+            return [argv[i] for i in range(n.value)]
+        finally:
+            ctypes.windll.kernel32.LocalFree(argv)
+    except Exception:
+        return cmd.split()
+
+
+# ── 自动构建会话（2026-09-28）──────────────────────────────────────────────
+# 需求：「点运行时优先构建会话，最多五个，后面自动找闲置的会话执行」。
+# 会话本体就是一个 `codebuddy --serve` 进程（桌面版开的会话也是它），桥接直接起：
+#     WorkBuddy.exe <cli/bin/codebuddy> --serve --port <空闲端口> --host 127.0.0.1
+#         --session-id <uuid> --permission-mode <mode> [克隆来的 --model/--settings/…]
+# 起来后它自己写 ~/.workbuddy/sessions/<pid>.json（带 url），桥接就能派任务进去。
+# 实测（2026-09-28）：注册 ✓ / netstat LISTENING ✓ / /api/gateways 能看到 ✓ / 派发 ok:true ✓
+MAX_SPAWNED_SESSIONS = 5
+SPAWN_STATE_PATH = os.path.join(WORKBUDDY_DIR, "bridge-spawned-sessions.json")
+SPAWN_READY_TIMEOUT_S = 60
+# 能从现有会话照搬的参数；--serve/--port/--session-id/--prewarm 这些不能复用故跳过
+SPAWN_FLAG_SINGLE = ("--model", "--settings", "--agent", "--channels", "--mcp-config",
+                     "--tools", "--permission-mode-before-plan",
+                     "--subagent-permission-mode")
+SPAWN_FLAG_LIST = ("--allowedTools", "--disallowedTools")
+_cli_template_cache = {"at": 0.0, "value": None, "probed": False}
+
+
+def _free_tcp_port():
+    s = socket.socket()
+    try:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+    finally:
+        s.close()
+
+
+def _guess_install():
+    """找 WorkBuddy 安装目录（宿主 exe + codebuddy 脚本）。"""
+    cands = []
+    env = os.environ.get("WORKBUDDY_HOME")
+    if env:
+        cands.append(env)
+    local = os.environ.get("LOCALAPPDATA") or ""
+    pf = os.environ.get("ProgramFiles") or ""
+    cands += [
+        os.path.join(local, "Programs", "WorkBuddy"),
+        os.path.join(local, "WorkBuddy"),
+        os.path.join(pf, "WorkBuddy"),
+        "C:\\Program Files\\WorkBuddy",
+        "C:\\Program Files (x86)\\WorkBuddy",
+        "D:\\workbuddy",
+    ]
+    for root in cands:
+        if not root:
+            continue
+        exe = os.path.join(root, "WorkBuddy.exe")
+        cli = os.path.join(root, "resources", "app.asar.unpacked", "cli", "bin", "codebuddy")
+        if os.path.isfile(exe) and os.path.isfile(cli):
+            return exe, cli
+    return "", ""
+
+
+def _cloneable_flags(tail):
+    """挑出能照搬到新会话的启动参数。"""
+    out = []
+    i = 0
+    while i < len(tail):
+        a = tail[i]
+        if a in SPAWN_FLAG_SINGLE:
+            if i + 1 < len(tail) and not tail[i + 1].startswith("--"):
+                out += [a, tail[i + 1]]
+            i += 2
+            continue
+        if a in SPAWN_FLAG_LIST:
+            out.append(a)
+            i += 1
+            while i < len(tail) and not tail[i].startswith("--"):
+                out.append(tail[i])
+                i += 1
+            continue
+        i += 1
+    return out
+
+
+def _set_flag(flags, name, value):
+    """在参数表里替换/追加一个单值 flag。"""
+    out = list(flags)
+    try:
+        idx = out.index(name)
+    except ValueError:
+        return out + [name, value]
+    if idx + 1 < len(out):
+        out[idx + 1] = value
+    else:
+        out.append(value)
+    return out
+
+
+def cli_template():
+    """克隆一份启动参数：优先取正在跑的会话进程，其次找安装目录。
+
+    返回 {"exe","cli","flags","from"}；拿不到 cli 时返回 None。
+    """
+    now = time.time()
+    cache = _cli_template_cache
+    if cache["probed"] and now - cache["at"] < 60:
+        return cache["value"]
+    found = None
+    for session in list_live_sessions():
+        parts = split_cmdline(_process_cmdline(session.get("pid")))
+        if len(parts) < 2 or not os.path.isfile(parts[1]):
+            continue
+        found = {"exe": parts[0], "cli": parts[1],
+                 "flags": _cloneable_flags(parts[2:]), "from": session.get("pid")}
+        break
+    if not found:
+        exe, cli = _guess_install()
+        if cli:
+            found = {"exe": exe or cli, "cli": cli, "flags": [], "from": None}
+    override_cli = os.environ.get("WORKBUDDY_CLI") or ""
+    if override_cli and os.path.isfile(override_cli):
+        found = {"exe": os.environ.get("WORKBUDDY_EXE") or override_cli,
+                 "cli": override_cli,
+                 "flags": (found or {}).get("flags") or [], "from": None}
+    cache.update({"at": now, "value": found, "probed": True})
+    return found
+
+
+def _pid_alive(pid):
+    if not pid:
+        return False
+    if os.name == "nt":
+        h = ctypes.windll.kernel32.OpenProcess(0x1000, False, int(pid))
+        if not h:
+            return False
+        ctypes.windll.kernel32.CloseHandle(h)
+        return True
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except Exception:
+        return False
+
+
+def _load_spawned():
+    try:
+        with open(SPAWN_STATE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_spawned(items):
+    try:
+        with open(SPAWN_STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=1)
+    except Exception:
+        pass
+
+
+def spawned_sessions():
+    """本脚本起的会话（顺带把已死的记录清掉）。只有这些才允许被回收。"""
+    alive, changed = [], False
+    for it in _load_spawned():
+        if _pid_alive(it.get("pid")):
+            it["alive"] = True
+            alive.append(it)
+        else:
+            changed = True
+    if changed:
+        _save_spawned(alive)
+    return alive
+
+
+def spawned_count():
+    return len(spawned_sessions())
+
+
+def _session_record(pid):
+    try:
+        with open(os.path.join(SESSIONS_DIR, "%s.json" % pid), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def spawn_session(cwd="", model="", permission_mode="fullAccess", count=1):
+    """起 1~count 个 WorkBuddy 会话，返回 {"ok","items","count","limit","error"}。
+
+    上限 MAX_SPAWNED_SESSIONS —— 只算**我们起的**，用户自己开的会话不占额度。
+    """
+    try:
+        want = max(1, min(int(count or 1), MAX_SPAWNED_SESSIONS))
+    except Exception:
+        want = 1
+    already = spawned_count()
+    room = MAX_SPAWNED_SESSIONS - already
+    if room <= 0:
+        return {"ok": False, "limit": MAX_SPAWNED_SESSIONS, "count": already,
+                "spawned": [], "items": [],
+                "error": "自动起的会话已经有 %d 个（上限 %d），先回收几个再起"
+                         % (already, MAX_SPAWNED_SESSIONS)}
+    want = min(want, room)
+    tpl = cli_template()
+    if not tpl or not os.path.isfile(tpl.get("cli") or ""):
+        return {"ok": False, "limit": MAX_SPAWNED_SESSIONS, "count": already,
+                "spawned": [], "items": [],
+                "error": "找不到 WorkBuddy 的 codebuddy（用 WORKBUDDY_HOME / "
+                         "WORKBUDDY_CLI 指定安装目录）"}
+    work_cwd = (cwd or "").strip() or latest_workspace_cwd() or WORKBUDDY_DIR
+    if not os.path.isdir(work_cwd):
+        work_cwd = WORKBUDDY_DIR
+    password = resolve_password()
+    items, errors = [], []
+    for _ in range(want):
+        port = _free_tcp_port()
+        sid = str(uuid.uuid4())
+        flags = list(tpl.get("flags") or [])
+        flags = _set_flag(flags, "--permission-mode", permission_mode or "fullAccess")
+        if model:
+            flags = _set_flag(flags, "--model", model)
+        args = [tpl["exe"], tpl["cli"], "--serve", "--port", str(port),
+                "--host", "127.0.0.1", "--session-id", sid] + flags
+        env = dict(os.environ)
+        env["CODEBUDDY_CONFIG_DIR"] = WORKBUDDY_DIR
+        if password:
+            env["CODEBUDDY_GATEWAY_PASSWORD"] = password
+        logdir = os.path.join(WORKBUDDY_DIR, "logs")
+        try:
+            os.makedirs(logdir, exist_ok=True)
+        except Exception:
+            logdir = WORKBUDDY_DIR
+        logfile = os.path.join(logdir, "spawned-session-%s.log" % sid[:8])
+        try:
+            out = open(logfile, "wb")
+        except Exception:
+            out = None
+        try:
+            proc = subprocess.Popen(args, cwd=work_cwd, env=env,
+                                    stdout=out or subprocess.DEVNULL,
+                                    stderr=subprocess.STDOUT)
+        except Exception as e:
+            errors.append("起进程失败：%s" % e)
+            if out:
+                out.close()
+            continue
+
+        url = ""
+        deadline = time.time() + SPAWN_READY_TIMEOUT_S
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                break
+            rec = _session_record(proc.pid)
+            if rec and rec.get("url"):
+                url = str(rec["url"]).rstrip("/")
+                break
+            time.sleep(0.7)
+        if not url:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            errors.append("新会话 %ds 内没注册出端口（看 %s）"
+                          % (SPAWN_READY_TIMEOUT_S, logfile))
+            continue
+        item = {"pid": proc.pid, "url": url, "cwd": work_cwd, "port": port,
+                "sessionId": sid, "startedAt": int(time.time() * 1000), "log": logfile}
+        state = _load_spawned()
+        state.append(item)
+        _save_spawned(state)
+        items.append(item)
+        log("[spawn] 新会话 pid=%s url=%s cwd=%s" % (proc.pid, url, work_cwd))
+
+    total = spawned_count()
+    return {"ok": bool(items), "spawned": items, "items": items,
+            "count": total, "limit": MAX_SPAWNED_SESSIONS,
+            "remaining": max(0, MAX_SPAWNED_SESSIONS - total),
+            "errors": errors,
+            "error": "" if items else (errors[0] if errors else "没起来")}
+
+
+def release_spawned_session(url="", pid=0):
+    """回收**本脚本起的**会话（用户自己开的会话不在名单里，绝不误杀）。"""
+    want_url = str(url or "").rstrip("/")
+    target = None
+    for it in spawned_sessions():
+        if (pid and it.get("pid") == int(pid)) or (want_url and it.get("url") == want_url):
+            target = it
+            break
+    if not target:
+        return {"ok": False, "count": spawned_count(), "limit": MAX_SPAWNED_SESSIONS,
+                "error": "这不是自动起的会话，不回收（只关本脚本起的那些）"}
+    try:
+        if os.name == "nt":
+            h = ctypes.windll.kernel32.OpenProcess(0x0001, False, int(target["pid"]))
+            if h:
+                ctypes.windll.kernel32.TerminateProcess(h, 0)
+                ctypes.windll.kernel32.CloseHandle(h)
+        else:
+            os.kill(int(target["pid"]), 15)
+    except Exception as e:
+        return {"ok": False, "error": "结束进程失败：%s" % e}
+    time.sleep(0.6)
+    rest = [it for it in _load_spawned() if it.get("pid") != target.get("pid")]
+    _save_spawned(rest)
+    try:
+        rec = os.path.join(SESSIONS_DIR, "%s.json" % target.get("pid"))
+        if os.path.isfile(rec):
+            os.remove(rec)
+    except Exception:
+        pass
+    log("[spawn] 回收会话 pid=%s url=%s" % (target.get("pid"), target.get("url")))
+    return {"ok": True, "released": target, "count": spawned_count(),
+            "limit": MAX_SPAWNED_SESSIONS}
 
 
 def candidate_passwords(explicit=None):
@@ -1169,12 +1557,23 @@ def resolve_gateways(password, only_alive=True):
 
 def public_gateway(gateway):
     keys = ("url", "cwd", "title", "pid", "version", "ageMs", "startedAt",
-            "internal", "stale")
+            "internal", "stale", "spawned", "spawnedPid")
     return {k: gateway[k] for k in keys if k in gateway}
 
 
 def gateways_payload(gws):
     """给页面的 /api/gateways 响应: 可用网关 + 为什么没有可用的。"""
+    # 标出哪些是桥接自动起的会话（前端显示「自动」+ 允许回收）
+    try:
+        _spawned = {str(it.get("url") or "").rstrip("/"): it for it in spawned_sessions()}
+    except Exception:
+        _spawned = {}
+    for g in gws:
+        hit = _spawned.get(str(g.get("url") or "").rstrip("/"))
+        if hit:
+            g["spawned"] = True
+            g["spawnedPid"] = hit.get("pid")
+
     reasons = []
     for s in list_live_sessions():
         if any(g["url"] == s["url"] for g in gws):
@@ -1788,6 +2187,19 @@ class Handler(BaseHTTPRequestHandler):
             info["chars"] = len(info["text"])
             return self._json(info)
 
+        if self.path.startswith("/api/sessions/spawned"):
+            items = spawned_sessions()
+            tpl = cli_template()
+            return self._json({
+                "ok": True,
+                "items": items,
+                "count": len(items),
+                "limit": MAX_SPAWNED_SESSIONS,
+                "remaining": max(0, MAX_SPAWNED_SESSIONS - len(items)),
+                "canSpawn": bool(tpl and tpl.get("cli")),
+                "templateFrom": (tpl or {}).get("from"),
+            })
+
         if self.path.startswith("/api/jobs"):
             from urllib.parse import parse_qs, urlparse
             q = parse_qs(urlparse(self.path).query)
@@ -1849,6 +2261,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "error": "目标网关不可用（WorkBuddy 是否在运行？）"})
             return self._json(read_artifacts_for_gateway(
                 g, p.get("paths") or [], p.get("content", True), p.get("cwd") or ""))
+
+        if self.path == "/api/sessions/spawn":
+            p = self._read()
+            res = spawn_session(cwd=p.get("cwd") or "", model=p.get("model") or "",
+                                permission_mode=p.get("permissionMode") or "fullAccess",
+                                count=p.get("count") or 1)
+            return self._json(res)
+
+        if self.path == "/api/sessions/release":
+            p = self._read()
+            res = release_spawned_session(url=p.get("url") or "", pid=p.get("pid") or 0)
+            return self._json(res)
 
         if self.path == "/api/stop":
             p = self._read()

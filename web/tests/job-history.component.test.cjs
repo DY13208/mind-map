@@ -43,11 +43,16 @@ const jobWriter = loadCjs(path.join(WEB, 'src/utils/jobResultWriter.js'), name =
 const jobResponses = [] // 每次 listHostJobs 消费一个
 const calls = { list: 0, stop: [] }
 let stopResult = { ok: true }
+// 「WorkBuddy 会话（端口）」用例用：可编程的会话列表 + 按会话给任务
+let gatewaysResult = { ok: true, gateways: [] }
+let jobsByGateway = {}
 const bridgeStub = {
   resolveJobHosts: async () => ({ hosts: [], defaultHost: null }),
-  listHostGateways: async () => ({ ok: true, gateways: [] }),
-  listHostJobs: async () => {
+  listHostGateways: async () => gatewaysResult,
+  listHostJobs: async args => {
     calls.list += 1
+    const gw = args && args.gateway
+    if (gw && jobsByGateway[gw]) return jobsByGateway[gw]
     if (!jobResponses.length) return { ok: true, jobs: [] }
     const next = jobResponses.shift()
     if (next instanceof Error) throw next
@@ -59,6 +64,11 @@ const bridgeStub = {
   },
   fetchJobTranscript: async () => ({ ok: true, text: '' }),
   fetchJobArtifacts: async () => ({ ok: true, files: [] }),
+  listSpawnedSessions: async () => ({
+    ok: true, items: [], count: 0, limit: 5, remaining: 5, canSpawn: true
+  }),
+  spawnHostSession: async () => ({ ok: true, gateway: { url: 'http://127.0.0.1:1' } }),
+  releaseHostSession: async () => ({ ok: true }),
   attachFilesViaBridge: async () => ({ ok: false }),
   describeEmptyGateways: () => '',
   dispatchWorkbuddyJob: async () => ({ ok: true, job: { id: 'job-x' } })
@@ -131,7 +141,13 @@ function makeVm() {
     jobHistoryVisible: false,
     jobCurrentId: '',
     jobActiveId: '',
-    jobPending: null,
+    jobPendingList: [],
+    jobPendingMiss: 0,
+    jobPollBusy: false,
+    jobSessions: [],
+    jobSessionsLoading: false,
+    jobSessionsError: '',
+    jobSessionsExpanded: false,
     jobStatus: '',
     jobStatusType: 'jobOk',
     jobSearch: '',
@@ -152,6 +168,14 @@ function makeVm() {
   })
   Object.defineProperty(vm, 'jobSelectedHost', {
     get: () => vm.jobHosts.find(h => h.key === vm.jobHostKey) || null,
+    configurable: true
+  })
+  // jobPending 在组件里是 computed（列表里最新那条），这里照着造一个
+  Object.defineProperty(vm, 'jobPending', {
+    get: () => {
+      const list = vm.jobPendingList || []
+      return list.length ? list[list.length - 1] : null
+    },
     configurable: true
   })
   return vm
@@ -310,7 +334,9 @@ async function main() {
   jobResponses.length = 0
   vm = makeVm()
   vm.jobPollTimer = 4242
-  vm.jobPending = { id: 'job-lost', nodeUid: 'n-1', nodeTitle: 'x' }
+  vm.jobPendingList = [
+    { id: 'job-lost', nodeUid: 'n-1', nodeTitle: 'x', miss: 0 }
+  ]
   const lostWrites = []
   vm.writeJobResultToNode = async () => {
     lostWrites.push(1)
@@ -324,7 +350,7 @@ async function main() {
   )
   for (let i = 0; i < 22; i += 1) await vm.pollJob()
   check('到上限后停止轮询', vm.jobPollTimer === null)
-  check('到上限后清掉 pending', vm.jobPending === null)
+  check('到上限后清掉 pending', vm.jobPendingList.length === 0)
   check(
     '把原因说清楚（找不到记录 / 可能重启过）',
     /找不到这条任务/.test(vm.jobWriteError) && /重跑/.test(vm.jobWriteError),
@@ -338,14 +364,15 @@ async function main() {
   jobResponses.length = 0
   vm = makeVm()
   vm.jobPollTimer = 7
-  vm.jobPending = { id: 'job-lost' }
+  vm.jobPendingList = [{ id: 'job-lost', miss: 0 }]
   for (let i = 0; i < 26; i += 1) {
     jobResponses.push({ ok: false, error: '连不上 192.168.1.114:8799' })
     await vm.pollJob()
   }
   check(
     '连不上时把连接错误带进提示',
-    /连不上 192.168.1.114:8799/.test(vm.jobWriteError) && vm.jobPending === null,
+    /连不上 192.168.1.114:8799/.test(vm.jobWriteError) &&
+      vm.jobPendingList.length === 0,
     vm.jobWriteError
   )
 
@@ -353,7 +380,9 @@ async function main() {
   jobResponses.length = 0
   vm = makeVm()
   vm.jobPollTimer = 8
-  vm.jobPending = { id: 'job-x', nodeUid: 'n-1', nodeTitle: 'x' }
+  vm.jobPendingList = [
+    { id: 'job-x', nodeUid: 'n-1', nodeTitle: 'x', miss: 0 }
+  ]
   vm.jobPendingMiss = 5
   const writes4 = []
   vm.writeJobResultToNode = async (job, opts) => {
@@ -369,6 +398,190 @@ async function main() {
     JSON.stringify(writes4)
   )
   check('状态变已完成', /已完成/.test(vm.jobStatus), vm.jobStatus)
+
+  // ---- 10b. 连开多个任务：**每一条**都要写回它自己的容器 ----
+  // 现场（2026-09-28）：10:37:41 / 10:37:56 / 10:38:09 连开三个，画布上只有最后一个
+  // 有「运行输出」。三个任务其实都 done 了 —— 因为 jobPending 只有一个槽位，
+  // 后一个派发把前一个覆盖掉，前两个跑完根本没人写回。
+  jobResponses.length = 0
+  jobsByGateway = {}
+  vm = makeVm()
+  vm.jobPollTimer = 9
+  vm.jobHosts = [HOST]
+  vm.jobHostKey = HOST.key
+  vm.jobGateway = 'http://127.0.0.1:50001'
+  vm.jobPendingList = [
+    { id: 'job-1', nodeUid: 'box-1', nodeTitle: '任务 · 10:37', hostKey: HOST.key, gateway: 'http://127.0.0.1:50001', miss: 0 },
+    { id: 'job-2', nodeUid: 'box-2', nodeTitle: '任务 · 10:37', hostKey: HOST.key, gateway: 'http://127.0.0.1:50002', miss: 0 },
+    { id: 'job-3', nodeUid: 'box-3', nodeTitle: '任务 · 10:38', hostKey: HOST.key, gateway: 'http://127.0.0.1:50001', miss: 0 }
+  ]
+  jobsByGateway['http://127.0.0.1:50001'] = {
+    ok: true,
+    jobs: [
+      { id: 'job-1', state: 'done', detail: 'result: 第一篇' },
+      { id: 'job-3', state: 'done', detail: 'result: 第三篇' }
+    ]
+  }
+  jobsByGateway['http://127.0.0.1:50002'] = {
+    ok: true,
+    jobs: [{ id: 'job-2', state: 'done', detail: 'result: 第二篇' }]
+  }
+  const multiWrites = []
+  vm.writeJobResultToNode = async (job, opts) => {
+    multiWrites.push({
+      id: job.id,
+      nodeUid: opts.nodeUid,
+      gateway: opts.gateway,
+      md: opts.markdown
+    })
+  }
+  vm.fetchJobText = async (id, entry) => `全文-${id}@${entry && entry.gateway}`
+  await vm.pollJob()
+  check(
+    '连开三个：三条都写回，各写各的容器',
+    multiWrites.length === 3 &&
+      multiWrites
+        .map(w => `${w.id}:${w.nodeUid}`)
+        .sort()
+        .join(',') === 'job-1:box-1,job-2:box-2,job-3:box-3',
+    JSON.stringify(multiWrites.map(w => `${w.id}:${w.nodeUid}`))
+  )
+  check(
+    '取全文按条目自己那条会话（job-2 在 50002，不是当前选中的 50001）',
+    multiWrites.find(w => w.id === 'job-2').gateway === 'http://127.0.0.1:50002' &&
+      multiWrites.find(w => w.id === 'job-2').md === '全文-job-2@http://127.0.0.1:50002',
+    JSON.stringify(multiWrites.map(w => w.gateway))
+  )
+  check(
+    '全部写回后出队并停止轮询',
+    vm.jobPendingList.length === 0 && vm.jobPollTimer === null,
+    `${vm.jobPendingList.length} / ${vm.jobPollTimer}`
+  )
+
+  // ---- 10c. 一条跑完、一条还在跑：只写回完成那条，轮询继续 ----
+  jobsByGateway = {}
+  vm = makeVm()
+  vm.jobPollTimer = 11
+  vm.jobHosts = [HOST]
+  vm.jobHostKey = HOST.key
+  vm.jobGateway = 'http://127.0.0.1:50001'
+  vm.jobPendingList = [
+    { id: 'job-a', nodeUid: 'box-a', nodeTitle: 'A', hostKey: HOST.key, gateway: 'http://127.0.0.1:50001', miss: 0 },
+    { id: 'job-b', nodeUid: 'box-b', nodeTitle: 'B', hostKey: HOST.key, gateway: 'http://127.0.0.1:50001', miss: 0 }
+  ]
+  jobsByGateway['http://127.0.0.1:50001'] = {
+    ok: true,
+    jobs: [
+      { id: 'job-a', state: 'done', detail: 'result: A 好了' },
+      { id: 'job-b', state: 'working', detail: '还在跑' }
+    ]
+  }
+  const mixWrites = []
+  vm.writeJobResultToNode = async (job, opts) => {
+    mixWrites.push({ id: job.id, nodeUid: opts.nodeUid })
+  }
+  vm.fetchJobText = async () => 'A 的全文'
+  await vm.pollJob()
+  check(
+    '只写回已完成的那条',
+    mixWrites.length === 1 && mixWrites[0].id === 'job-a' && mixWrites[0].nodeUid === 'box-a',
+    JSON.stringify(mixWrites)
+  )
+  check(
+    '还在跑的那条留在队列里，轮询不停',
+    vm.jobPendingList.length === 1 &&
+      vm.jobPendingList[0].id === 'job-b' &&
+      vm.jobPollTimer === 11,
+    `${JSON.stringify(vm.jobPendingList.map(x => x.id))} / ${vm.jobPollTimer}`
+  )
+  check(
+    '状态栏看得出还有几个在跑',
+    /1 个在跑/.test(vm.jobStatus),
+    vm.jobStatus
+  )
+
+  // ---- 11. WorkBuddy 会话（端口）一览：默认收起，展开才拉，能看出谁忙谁闲 ----
+  jobResponses.length = 0
+  jobsByGateway = {}
+  gatewaysResult = {
+    ok: true,
+    gateways: [
+      { url: 'http://127.0.0.1:52369', title: '排查本地 API', cwd: 'D:\\cathch' },
+      { url: 'http://127.0.0.1:55317', title: '启动 lan-bridge', cwd: 'D:\\demo' }
+    ]
+  }
+  jobsByGateway = {
+    'http://127.0.0.1:52369': {
+      ok: true,
+      jobs: [
+        { id: 'j1', name: '脑图运行 · 招聘', state: 'working' },
+        { id: 'j0', name: '老任务', state: 'done' }
+      ]
+    },
+    'http://127.0.0.1:55317': {
+      ok: true,
+      jobs: [{ id: 'j2', name: '旧任务', state: 'done' }]
+    }
+  }
+  vm = makeVm()
+  // 派发用的会话就是列表里的第一条（真实场景也是：会话列表头一条默认被选中）
+  vm.jobGateway = 'http://127.0.0.1:52369'
+  check('会话栏默认收起', vm.jobSessionsExpanded === false && vm.jobSessions.length === 0)
+  await vm.toggleJobSessions()
+  check(
+    '展开后列出全部会话（端口）',
+    vm.jobSessions.length === 2 &&
+      vm.jobSessions.map(s => s.port).join(',') === '52369,55317',
+    JSON.stringify(vm.jobSessions.map(s => s.port))
+  )
+  check(
+    '在跑的那个会话标出运行中的任务',
+    vm.jobSessions[0].running.length === 1 && vm.jobSessions[0].running[0].id === 'j1',
+    JSON.stringify(vm.jobSessions[0].running.map(j => j.id))
+  )
+  check('跑完的会话算闲置', vm.jobSessions[1].running.length === 0)
+  check(
+    '头部计数只数在跑的',
+    component.computed.runningSessionCount.call(vm) === 1,
+    String(component.computed.runningSessionCount.call(vm))
+  )
+  check(
+    '标出「派发用这条」的那个会话',
+    vm.jobSessions.some(s => s.url === vm.jobGateway)
+  )
+  await vm.toggleJobSessions()
+  check('再点一下收起', vm.jobSessionsExpanded === false)
+
+  // 拿不到会话列表：报错但别炸
+  gatewaysResult = { ok: false, error: '连不上 192.168.1.114:8799 的任务桥' }
+  vm = makeVm()
+  await vm.loadJobSessions()
+  check(
+    '拿不到会话列表时报错、留空',
+    /连不上 192.168.1.114:8799/.test(vm.jobSessionsError) &&
+      vm.jobSessions.length === 0 &&
+      vm.jobSessionsLoading === false,
+    vm.jobSessionsError
+  )
+
+  // 展开着的时候刷新运行历史会顺手刷会话
+  gatewaysResult = {
+    ok: true,
+    gateways: [{ url: 'http://127.0.0.1:52369', title: 'A' }]
+  }
+  jobsByGateway = {
+    'http://127.0.0.1:52369': { ok: true, jobs: [{ id: 'j9', state: 'busy' }] }
+  }
+  vm = makeVm()
+  vm.jobSessionsExpanded = true
+  vm.jobSessions = []
+  jobResponses.push({ ok: true, jobs: [] })
+  await vm.loadJobHistory()
+  check(
+    '展开状态下刷新运行历史会顺手刷会话忙闲',
+    vm.jobSessions.length === 1 && vm.jobSessions[0].running.length === 1,
+    JSON.stringify(vm.jobSessions.map(s => s.running.length))
+  )
 
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)

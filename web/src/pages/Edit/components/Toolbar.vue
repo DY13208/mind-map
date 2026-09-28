@@ -404,6 +404,100 @@
               jobWriteError || jobWriteState
             }}</span>
           </div>
+          <div class="sessBox">
+            <div class="sessHead" @click="toggleJobSessions">
+              <i
+                :class="
+                  jobSessionsExpanded
+                    ? 'el-icon-arrow-down'
+                    : 'el-icon-arrow-right'
+                "
+              ></i>
+              <span class="sessTitle">WorkBuddy 会话（端口）</span>
+              <span class="sessMeta" v-if="jobSessionsLoading">读取中…</span>
+              <span class="sessMeta" v-else-if="jobSessions.length">
+                {{ jobSessions.length }} 个 · 运行中 {{ runningSessionCount
+                }}<template v-if="jobSpawnInfo.limit"
+                  > · 自动 {{ jobSpawnInfo.count }}/{{ jobSpawnInfo.limit }}</template
+                >
+              </span>
+              <span class="sessMeta" v-else-if="jobSessionsError"
+                >读不到（点开看原因）</span
+              >
+            </div>
+            <div class="sessBody" v-if="jobSessionsExpanded">
+              <p class="jobHint jobErr" v-if="jobSessionsError">
+                {{ jobSessionsError }}
+              </p>
+              <div
+                class="sessRow"
+                v-for="s in jobSessions"
+                :key="s.url"
+                :class="{ picked: s.url === jobGateway }"
+                :title="'点这一行 = 派发固定用它'"
+                @click="chooseSession(s)"
+              >
+                <span
+                  class="sessDot"
+                  :class="s.running.length ? 'busy' : 'idle'"
+                ></span>
+                <span class="sessPort">:{{ s.port || '?' }}</span>
+                <span class="sessName" :title="s.title || s.cwd">{{
+                  s.title || s.cwd || '(未命名会话)'
+                }}</span>
+                <span
+                  class="sessState"
+                  :class="s.running.length ? 'busy' : 'idle'"
+                >
+                  {{
+                    s.running.length
+                      ? '运行中 · ' +
+                        s.running
+                          .map(j => jobNodeText(j) || j.name || j.id)
+                          .join('、')
+                      : '闲置'
+                  }}
+                </span>
+                <span class="sessAuto" v-if="s.spawned" title="桥接自动起的会话"
+                  >自动</span
+                >
+                <span class="sessUsing" v-if="s.url === jobGateway"
+                  >派发用这条</span
+                >
+                <el-button
+                  v-if="s.spawned"
+                  class="sessKill"
+                  type="text"
+                  size="mini"
+                  @click.stop="releaseSession(s)"
+                  >回收</el-button
+                >
+              </div>
+              <p
+                class="jobHint"
+                v-if="!jobSessions.length && !jobSessionsError && !jobSessionsLoading"
+              >
+                这台机器上没读到 WorkBuddy 会话（桌面版没开？）
+              </p>
+              <div class="sessFoot">
+                <el-button
+                  type="text"
+                  size="mini"
+                  :loading="jobSpawning"
+                  :disabled="!canSpawnMore"
+                  @click="createSession"
+                  >新建会话</el-button
+                >
+                <el-button
+                  type="text"
+                  size="mini"
+                  :loading="jobSessionsLoading"
+                  @click="loadJobSessions"
+                  >刷新</el-button
+                >
+              </div>
+            </div>
+          </div>
           <div
             class="histBody mdBody"
             v-if="jobActiveHtml"
@@ -493,7 +587,10 @@ import {
   fetchJobArtifacts,
   attachFilesViaBridge,
   describeEmptyGateways,
-  dispatchWorkbuddyJob
+  dispatchWorkbuddyJob,
+  listSpawnedSessions,
+  spawnHostSession,
+  releaseHostSession
 } from '@/utils/workbuddyJobBridge'
 import { buildNodeRunPrompt, buildFollowUpPrompt } from '@/utils/mindmapRunPrompt'
 import {
@@ -517,6 +614,8 @@ const JOB_POLL_INTERVAL = 2500
 // 任务记录是**执行主机的 WorkBuddy 内存里**的：WorkBuddy 重启、桥接重开、
 // 换了会话，这条记录就查不到了 —— 再轮询下去永远不会结束，得停手并说清楚。
 const JOB_POLL_MISS_LIMIT = 24
+// 「没有可派端口（会话）」时不再干等 —— 直接让桥接起一个（见 autoSpawnSession）。
+// 上限由桥接管（MAX_SPAWNED_SESSIONS=5，只算桥接自己起的）。
 // 概要：点它 = 选中「按这条概要继续」，真正的派发还是由「运行」按钮触发
 const GENERALIZATION_TEXT_LIMIT = 60
 
@@ -528,6 +627,12 @@ function clipJobText(text, limit = GENERALIZATION_TEXT_LIMIT) {
 }
 // 执行位置固定为「这台电脑」，不再让用户选主机/任务
 const LOCAL_JOB_HOST_KEY = '127.0.0.1:8799'
+
+/** 会话地址（http://127.0.0.1:52369）→ 端口「52369」，取不到给空 */
+function sessionPort(url) {
+  const m = /:(\d+)\/?$/.exec(String(url || ''))
+  return m ? m[1] : ''
+}
 const JOB_RUNNING_STATES = ['working', 'busy', 'active', 'running', 'pending']
 
 // 工具栏
@@ -613,11 +718,26 @@ export default {
       jobActiveId: '',
       jobFollowPrompt: '',
       jobFollowDispatching: false,
-      // 本次派发、正在等的任务。轮询与写回只看它 ——
-      // 不能复用 jobCurrentId（那是面板里正在看的记录，点一下列表就被换了）
-      jobPending: null,
-      // 连着多少次在主机上没查到这条任务（到了上限就停轮询并报错）
+      // 已经派出去、还在等结果的任务 —— **可以同时有好几条**。
+      // 每条的 hostKey / gateway 都记在自己身上：现在会自动挑闲置会话、自动起会话，
+      // 连着开几个任务很可能落在**不同**会话上，拿"当前选中的那条"去查必然查不到。
+      // ⚠️ 以前这里只存一条，后一个任务会把前一个覆盖掉 —— 前几个跑完了没人写回导图
+      //（2026-09-28 的真实故障：连开三个，只有最后一个有产物）。
+      jobPendingList: [],
+      // 最新那条查不到的次数（状态栏与提示用）
       jobPendingMiss: 0,
+      // 一轮轮询没跑完就别再进来（写回要几秒，避免重复处理同一条）
+      jobPollBusy: false,
+      // 「派发固定用哪条会话」，按主机分；localStorage 的兜底（隐私模式下用它）
+      rememberedSession: null,
+      // 执行主机上的 WorkBuddy 会话（= 端口）一览：默认收起，点开看谁在跑谁闲置
+      jobSessions: [],
+      jobSessionsLoading: false,
+      jobSessionsError: '',
+      jobSessionsExpanded: false,
+      // 桥接自动起的会话额度（「自动 X/5」；满了就不许再起）
+      jobSpawnInfo: { count: 0, limit: 0, remaining: 0, canSpawn: true },
+      jobSpawning: false,
       // 结果写回导图：运行节点 uid、写回状态、已写过的任务 id
       jobRunNodeUid: '',
       jobRunNodeTitle: '',
@@ -779,6 +899,20 @@ export default {
       return (gateway && gateway.cwd) || ''
     },
 
+    /** 还能不能再起自动会话（额度没用完） */
+    canSpawnMore() {
+      const info = this.jobSpawnInfo || {}
+      if (info.canSpawn === false) return false
+      if (!info.limit) return true
+      return info.remaining > 0
+    },
+
+    /** 有几个会话正忙（头部的「运行中 N」用） */
+    runningSessionCount() {
+      return (this.jobSessions || []).filter(s => (s.running || []).length)
+        .length
+    },
+
     /** 只读展示「跑在哪台电脑的哪条任务」 */
     jobTargetLabel() {
       const host = this.jobSelectedHost
@@ -823,6 +957,17 @@ export default {
 
     jobPolling() {
       return this.jobPollTimer != null
+    },
+
+    /** 最近派出去、还在等结果的那条（状态栏和「停止」按钮看它） */
+    jobPending() {
+      const list = this.jobPendingList || []
+      return list.length ? list[list.length - 1] : null
+    },
+
+    /** 还有几个任务在等结果 */
+    jobPendingCount() {
+      return (this.jobPendingList || []).length
     },
 
   },
@@ -1014,8 +1159,8 @@ export default {
     },
 
     onJobHistoryClosed() {
-      // 面板关了也继续等：跑完要写回导图；任务结束后 pollJob 自己会停
-      if (!this.jobPending) this.stopJobPoll()
+      // 面板关了也继续等：跑完要写回导图；任务都结束后 pollJob 自己会停
+      if (!(this.jobPendingList || []).length) this.stopJobPoll()
     },
 
     /** 选中一条记录 → 右侧取它的完整回答 */
@@ -1040,15 +1185,12 @@ export default {
     async runFollowUp() {
       const prompt = String(this.jobFollowPrompt || '').trim()
       if (!prompt || this.jobFollowDispatching) return
-      const host = this.jobSelectedHost
-      if (!host || !this.jobGateway) {
-        this.$message.warning(
-          this.jobHostsError ||
-            this.jobGatewaysError ||
-            '这台电脑上没有可派的 WorkBuddy 会话'
-        )
+      const target = await this.ensureDispatchTarget()
+      if (!target.ok) {
+        this.$message.warning(target.error)
         return
       }
+      const { host, gateway } = target
       this.jobFollowDispatching = true
       this.rememberRunTarget({ reuseContainer: true })
       this.jobStatus = '正在继续执行…'
@@ -1057,7 +1199,7 @@ export default {
         const promptText = this.buildFollowUpJobPrompt(prompt)
         const result = await dispatchWorkbuddyJob({
           host,
-          gateway: this.jobGateway,
+          gateway,
           prompt: promptText,
           name: `脑图运行 · ${
             this.nodePlainTitle(this.activeJobNode) || '继续'
@@ -1078,17 +1220,14 @@ export default {
         this.jobCurrentId = jobId
         this.jobActiveId = jobId
         this.jobPendingPrompt = promptText
-        this.jobPendingMiss = 0
-        this.jobPending = {
+        this.addPendingJob({
           id: jobId,
           nodeUid: this.jobRunNodeUid,
-          nodeTitle: this.jobRunNodeTitle,
-          at: Date.now()
-        }
-        this.jobStatus = `已派发${jobId ? ` · ${jobId}` : ''}`
+          nodeTitle: this.jobRunNodeTitle
+        })
+        this.jobStatus = `已派发${jobId ? ` · ${jobId}` : ''}${this.pendingSuffix()}`
         this.jobStatusType = 'jobOk'
         this.jobFollowPrompt = ''
-        this.startJobPoll()
         await this.loadJobHistory()
         const created = this.jobHistory.find(item => item.id === jobId)
         if (created) await this.openHistoryItem(created)
@@ -1160,12 +1299,141 @@ export default {
       } else {
         this.jobGateways = res.gateways || []
         if (this.jobGateways.length) {
-          this.jobGateway = this.jobGateways[0].url
+          this.jobGateway = this.pickJobGateway(
+            this.jobGateways,
+            this.recallSession(host)
+          )
         } else {
           this.jobGatewaysError = describeEmptyGateways(res.diag)
         }
       }
       await this.loadJobHistory()
+    },
+
+    /** 记住「派发用哪条会话」的 key（按主机分，同一个浏览器开多个房间/主机不串） */
+    sessionStoreKey(host) {
+      return `mindmap-job-session:${(host && host.key) || 'default'}`
+    },
+
+    /** 上次派发用的那条会话（刷新页面也不变）；没记住就给空 */
+    recallSession(host = null) {
+      // 不传就当"当前选中的那台主机"（免得调用方忘记传，key 变成 default）
+      const target = host || this.jobSelectedHost
+      const key = this.sessionStoreKey(target)
+      const remembered = this.rememberedSession
+      if (remembered && remembered[key]) return remembered[key]
+      try {
+        // 隐私模式 / 单测里没有 window，取不到就当没记住
+        return String(window.localStorage.getItem(key) || '')
+      } catch (err) {
+        return ''
+      }
+    },
+
+    /** 记住/清掉「派发用哪条会话」 */
+    rememberSession(url) {
+      const host = this.jobSelectedHost
+      const key = this.sessionStoreKey(host)
+      const value = String(url || '')
+      if (!this.rememberedSession) this.rememberedSession = {}
+      if (value) this.rememberedSession[key] = value
+      else delete this.rememberedSession[key]
+      try {
+        if (value) window.localStorage.setItem(key, value)
+        else window.localStorage.removeItem(key)
+      } catch (err) {
+        /* 隐私模式写不进去，靠内存里那份兜着 */
+      }
+    },
+
+    /**
+     * 选一条派发用的会话（端口）—— **要稳定，别乱跳**。
+     *
+     * ⚠️ 2026-09-28 改：以前这里会「优先挑没在跑任务的那条」，结果用户看到的是
+     * "每次运行端口都变了、像把上一个回收了换最新的，也不管上个任务跑完没"：
+     * 桥接给的会话列表是按**心跳新鲜度**排的（刚用过那条排最前），页面一刷新
+     * 顺序就变，按顺序挑自然每次都不一样。
+     *
+     * 现在：
+     * ① 上次用的那条还在 → **就用它**（忙也用它，任务排在这条会话里就是了）
+     * ② 不在了 → 用记住过的那条（localStorage，刷新页面也算数）
+     * ③ 都没有 → 第一条
+     * 想换端口：在「WorkBuddy 会话（端口）」里**点那一条**即选中并记住。
+     */
+    pickJobGateway(list, previous = '') {
+      const rows = list || []
+      if (!rows.length) return ''
+      const kept = rows.find(item => item.url === previous)
+      if (kept) return kept.url
+      const remembered = this.recallSession(this.jobSelectedHost)
+      const hit = rows.find(item => item.url === remembered)
+      if (hit) return hit.url
+      return rows[0].url
+    },
+
+    /** 手动指定派发用哪条会话（点会话栏那一行），并记住 */
+    chooseSession(row) {
+      if (!row || !row.url) return
+      if (row.url === this.jobGateway) return
+      this.jobGateway = row.url
+      this.rememberSession(row.url)
+      this.$message.success(
+        `派发改用会话 :${row.port || '?'}（${
+          row.title || row.cwd || '未命名'
+        }）—— 以后一直用它`
+      )
+    },
+
+    /**
+     * 派发前确认有可用的会话（端口）。
+     *
+     * 「没有派发端口」要分两种，处理方式不一样：
+     * - **桥接都没在线** → 等也没用，直接把原因给出来
+     * - **桥接在线但还没会话** → 等一下再找：刚重启桥接、刚打开 WorkBuddy 的那几秒
+     *   很常见，等到了就**直接派出去**，不用用户自己再点一次
+     */
+    async ensureDispatchTarget() {
+      if (this.jobSelectedHost && this.jobGateway) {
+        return {
+          ok: true,
+          host: this.jobSelectedHost,
+          gateway: this.jobGateway
+        }
+      }
+      // 桥接在线但没会话 → 直接**让桥接起一个**（点运行时优先构建会话，最多 5 个）。
+      // 起完就用它派发，不用用户自己去桌面版开一条任务。
+      const cur = this.jobSelectedHost
+      let spawnError = ''
+      if (cur && cur.online) {
+        this.jobStatus = '这台机器上没有可派的会话，正在让桥接起一个…'
+        this.jobStatusType = 'jobWait'
+        const got = await this.autoSpawnSession()
+        if (got.ok) {
+          await this.prepareLocalTarget()
+          if (this.jobSelectedHost && this.jobGateway) {
+            return {
+              ok: true,
+              host: this.jobSelectedHost,
+              gateway: this.jobGateway
+            }
+          }
+        } else {
+          spawnError = got.error || ''
+        }
+      }
+      const host = this.jobSelectedHost
+      return {
+        ok: false,
+        host,
+        error:
+          !host || !host.online
+            ? this.jobHostsError ||
+              '连不上这台机器的任务桥（桥接没在跑？双击 run_bridge.bat 后再点运行）'
+            : spawnError ||
+              this.jobGatewaysError ||
+              '这台机器上没有可派的 WorkBuddy 会话，桥接也没能起新的 —— ' +
+                '打开 WorkBuddy 桌面版（进一个对话）再试'
+      }
     },
 
     /**
@@ -1200,6 +1468,8 @@ export default {
         this.jobHistoryError = (err && err.message) || '拿不到运行记录'
       } finally {
         this.jobHistoryLoading = false
+        // 会话（端口）那一栏如果展开着，顺手刷一下忙/闲
+        if (this.jobSessionsExpanded) await this.loadJobSessions()
       }
     },
 
@@ -1323,7 +1593,9 @@ export default {
      * 完整输出存成 .md、任务产出的文件一起挂成附件。同一条任务只写一次（force 除外）。
      */
     async writeJobResultToNode(job, options = {}) {
-      const host = this.jobSelectedHost
+      // 默认用当前选中的主机/会话；多任务并行时调用方会把它自己那份传进来
+      const host = options.host || this.jobSelectedHost
+      const gateway = options.gateway || this.jobGateway
       const jobId = (job && job.id) || ''
       const nodeUid = options.nodeUid || this.jobRunNodeUid
       const nodeTitle = options.nodeTitle || this.jobRunNodeTitle
@@ -1342,11 +1614,7 @@ export default {
       try {
         let artifacts = []
         try {
-          const res = await fetchJobArtifacts({
-            host,
-            gateway: this.jobGateway,
-            jobId
-          })
+          const res = await fetchJobArtifacts({ host, gateway, jobId })
           if (res && res.ok) artifacts = res.files || []
         } catch (err) {
           // 产物读不到不影响把文字写进去
@@ -1444,15 +1712,13 @@ export default {
         options.node || (active && !active.isGeneralization ? active : null)
       try {
         await this.prepareLocalTarget()
-        const host = this.jobSelectedHost
-        if (!host || !this.jobGateway) {
-          this.$message.warning(
-            this.jobHostsError ||
-              this.jobGatewaysError ||
-              '这台电脑上没有可派的 WorkBuddy 会话'
-          )
+        // 没会话时不再直接拒绝：等一下再找，找到就派（见 ensureDispatchTarget）
+        const target = await this.ensureDispatchTarget()
+        if (!target.ok) {
+          this.$message.warning(target.error)
           return
         }
+        const { host, gateway } = target
         this.rememberRunTarget({ node: runNode })
         // 点过概要 → 接着它继续；否则按节点默认任务。两种都不重跑整张 SOP。
         let prompt = ''
@@ -1469,7 +1735,7 @@ export default {
         if (!(await this.prepareJobContainer(prompt, runNode))) return
         const result = await dispatchWorkbuddyJob({
           host,
-          gateway: this.jobGateway,
+          gateway,
           prompt,
           name: `脑图运行 · ${
             this.nodePlainTitle(runNode) || '当前节点'
@@ -1490,23 +1756,20 @@ export default {
         this.jobCurrentId = jobId
         this.jobActiveId = jobId
         this.jobPendingPrompt = prompt
-        this.jobPendingMiss = 0
-        this.jobPending = {
+        this.addPendingJob({
           id: jobId,
           nodeUid: this.jobRunNodeUid,
-          nodeTitle: this.jobRunNodeTitle,
-          at: Date.now()
-        }
+          nodeTitle: this.jobRunNodeTitle
+        })
         this.jobStatus = `${continued ? '已派发继续执行' : '已派发'}${
           jobId ? ` · ${jobId}` : ''
-        } · 结果写到「${this.jobRunNodeTitle || '运行节点'}」下`
+        } · 结果写到「${this.jobRunNodeTitle || '运行节点'}」下${this.pendingSuffix()}`
         this.jobStatusType = 'jobOk'
         this.$message.success(
           `${continued ? '已按概要继续执行' : '已派发'}${
             jobId ? ` · ${jobId}` : ''
           }，跑完结果挂在「${this.jobRunNodeTitle || '运行节点'}」下面`
         )
-        this.startJobPoll()
         if (this.jobHistoryVisible) await this.loadJobHistory()
         return
       } catch (err) {
@@ -1516,6 +1779,177 @@ export default {
       } finally {
         this.jobDispatching = false
       }
+    },
+
+    /** 展开/收起「WorkBuddy 会话（端口）」；展开时现拉一次 */
+    toggleJobSessions() {
+      this.jobSessionsExpanded = !this.jobSessionsExpanded
+      if (this.jobSessionsExpanded) return this.loadJobSessions()
+      return null
+    },
+
+    /**
+     * 这台机器上**所有** WorkBuddy 会话（一个会话一个端口）+ 各自忙/闲。
+     *
+     * 会话从桥接 /api/gateways 拿；闲不闲看那个会话自己的任务列表里有没有在跑的
+     * （JOB_RUNNING_STATES 或 alive）。所以「运行中」= 那个端口现在有事在干。
+     */
+    async loadJobSessions() {
+      const host = this.jobSelectedHost
+      this.jobSessionsLoading = true
+      this.jobSessionsError = ''
+      if (!host) {
+        this.jobSessions = []
+        this.jobSessionsLoading = false
+        return
+      }
+      try {
+        const res = await listHostGateways(host)
+        if (!res.ok) {
+          this.jobSessions = []
+          this.jobSessionsError = res.error || '拿不到会话列表'
+          return
+        }
+        const sessions = []
+        // 串行查：会话通常个位数，别一波并发把桥接打满
+        for (const gw of res.gateways || []) {
+          const url = String((gw && gw.url) || '')
+          const row = {
+            url,
+            port: sessionPort(url),
+            title: (gw && (gw.title || gw.cwd)) || '',
+            cwd: (gw && gw.cwd) || '',
+            // 桥接自己起的会话：面板标「自动」并允许回收
+            spawned: !!(gw && gw.spawned),
+            pid: (gw && (gw.spawnedPid || gw.pid)) || 0,
+            running: []
+          }
+          if (url) {
+            const jobs = await listHostJobs({ host, gateway: url })
+            row.running = (jobs.jobs || []).filter(item =>
+              this.isJobRunning(item)
+            )
+          }
+          sessions.push(row)
+        }
+        this.jobSessions = sessions
+        if (typeof this.loadSpawnInfo === 'function') {
+          await this.loadSpawnInfo(host)
+        }
+      } catch (err) {
+        this.jobSessions = []
+        this.jobSessionsError = (err && err.message) || '拿不到会话列表'
+      } finally {
+        this.jobSessionsLoading = false
+      }
+    },
+
+    /** 自动会话额度（面板显示「自动 X/5」，也决定还能不能再起） */
+    async loadSpawnInfo(host) {
+      const res = await listSpawnedSessions(host)
+      if (!res.ok) return res
+      this.jobSpawnInfo = {
+        count: res.count || 0,
+        limit: res.limit || 0,
+        remaining: res.remaining || 0,
+        canSpawn: res.canSpawn !== false
+      }
+      return res
+    },
+
+    /**
+     * 没有可派端口时**让桥接起一个**（点运行 → 优先构建会话，最多 5 个）。
+     *
+     * 以前这里是「等它自己出现」，现在直接起：会话就是一个 codebuddy --serve 进程，
+     * 桥接起完会等它注册出端口（实测 ~2s）再回话，所以拿到就能派。
+     */
+    async autoSpawnSession() {
+      const host = this.jobSelectedHost
+      if (!host || !host.online) return { ok: false, error: '' }
+      if (this.jobSpawning) return { ok: false, error: '' }
+      // 额度以桥接**现报的**为准（面板里那份可能已经过期，限额判断不能靠它）
+      if (typeof this.loadSpawnInfo === 'function') {
+        await this.loadSpawnInfo(host)
+      }
+      const info = this.jobSpawnInfo || {}
+      if (info.canSpawn === false) {
+        return {
+          ok: false,
+          error:
+            '这台机器上的桥接起不了会话（找不到 WorkBuddy 的 codebuddy —— ' +
+            '用 WORKBUDDY_HOME / WORKBUDDY_CLI 指一下安装目录）'
+        }
+      }
+      if (info.limit && !info.remaining) {
+        return {
+          ok: false,
+          error: `自动起的会话已经到上限 ${info.limit} 个了 —— 先在会话栏里回收几个再运行`
+        }
+      }
+      this.jobSpawning = true
+      try {
+        const res = await spawnHostSession({
+          host,
+          cwd: this.jobGatewayCwd || '',
+          count: 1
+        })
+        if (res.limit !== undefined) {
+          this.jobSpawnInfo = {
+            count: res.count || 0,
+            limit: res.limit || 0,
+            remaining: res.remaining || 0,
+            canSpawn: true
+          }
+        }
+        if (!res.ok) return { ok: false, error: res.error || '' }
+        this.jobStatus = `已让桥接起了一个新会话（${
+          res.gateway && res.gateway.port ? ':' + res.gateway.port : res.gateway.url
+        }），正在派发…`
+        this.jobStatusType = 'jobWait'
+        return { ok: true, item: res.gateway }
+      } catch (err) {
+        return { ok: false, error: (err && err.message) || '起会话失败' }
+      } finally {
+        this.jobSpawning = false
+      }
+    },
+
+    /** 面板里手动「新建会话」 */
+    async createSession() {
+      const host = this.jobSelectedHost
+      if (!host || !host.online) {
+        this.$message.warning(this.jobHostsError || '这台机器的任务桥没在跑')
+        return
+      }
+      const res = await spawnHostSession({
+        host,
+        cwd: this.jobGatewayCwd || '',
+        count: 1
+      })
+      if (!res.ok) {
+        this.$message.error(res.error || '起会话失败')
+      } else {
+        const item = res.gateway || {}
+        this.$message.success(`已起一个新会话（${item.port ? ':' + item.port : item.url}）`)
+      }
+      await this.loadJobSessions()
+    },
+
+    /** 面板里「回收」一个自动起的会话 */
+    async releaseSession(row) {
+      const host = this.jobSelectedHost
+      if (!host || !row) return
+      const res = await releaseHostSession({ host, url: row.url, pid: row.pid })
+      if (!res.ok) {
+        this.$message.error(res.error || '回收失败')
+        return
+      }
+      if (row.url === this.jobGateway) {
+        this.jobGateway = ''
+      }
+      this.$message.success('已回收这个自动会话')
+      await this.loadJobSessions()
+      await this.loadJobGateways()
     },
 
     startJobPoll() {
@@ -1538,101 +1972,198 @@ export default {
      * 换了会话都会让记录消失。以前这里直接 return，于是永远轮询下去，
      * 界面上只停在「已派发…」，结果悄无声息地丢掉（用户看到的就是"没回传、
      * 运行历史也没记录"）。所以数到上限就停手，并把原因写在状态栏和提示里。
+     * 计数**按条目算**（同时可能有好几条在等）。
      */
-    notePendingJobMissing(why = '') {
-      this.jobPendingMiss = (this.jobPendingMiss || 0) + 1
-      if (this.jobPendingMiss < JOB_POLL_MISS_LIMIT) {
-        if (this.jobPendingMiss === 6) {
+    notePendingJobMissing(entry, why = '') {
+      if (!entry) return
+      entry.miss = (entry.miss || 0) + 1
+      this.jobPendingMiss = entry.miss
+      if (entry.miss < JOB_POLL_MISS_LIMIT) {
+        if (entry.miss === 6) {
           this.jobStatus = '已派发，等主机上报任务记录…'
           this.jobStatusType = 'jobWait'
         }
         return
       }
-      this.stopJobPoll()
-      this.jobPending = null
-      const host = this.jobSelectedHost || {}
+      this.jobPendingList = (this.jobPendingList || []).filter(
+        x => x.id !== entry.id
+      )
+      const host = this.hostOfEntry(entry) || {}
       const label = host.label || host.key || '那台机器'
+      const who = `「${entry.nodeTitle || '这个节点'}」`
       this.jobStatus = '没等到结果'
       this.jobStatusType = 'jobErr'
       this.jobWriteError = why
-        ? `连不上 ${label} 的任务桥（${why}）—— 这次没有写回导图，可以重跑一次。`
+        ? `连不上 ${label} 的任务桥（${why}）—— ${who}这次没有写回导图，可以重跑一次。`
         : `${label} 的任务桥里找不到这条任务（WorkBuddy 或桥接重启过，任务记录会跟着消失）` +
-          '—— 这次没有写回导图，可以重跑一次。'
+          `—— ${who}这次没有写回导图，可以重跑一次。`
       this.$message.error(this.jobWriteError)
+      if (!(this.jobPendingList || []).length) this.stopJobPoll()
       this.loadJobHistory()
     },
 
-    async pollJob() {
-      const pending = this.jobPending
-      const host = this.jobSelectedHost
-      if (!host || !pending || !pending.id) return
-      const res = await listHostJobs({ host, gateway: this.jobGateway })
-      if (!res.ok) {
-        this.notePendingJobMissing(res.error || '拿不到任务列表')
-        return
+    /** 这条任务派到哪台机器上（用条目自己记的，不用当前选中的） */
+    hostOfEntry(entry) {
+      if (entry && entry.hostKey) {
+        const hit = (this.jobHosts || []).find(h => h.key === entry.hostKey)
+        if (hit) return hit
       }
-      const cur = (res.jobs || []).find(item => item.id === pending.id)
-      if (!cur) {
-        this.notePendingJobMissing('')
-        return
-      }
+      return this.jobSelectedHost
+    },
+
+    /** 记下一条"派出去等结果"的任务，并保证轮询在跑 */
+    addPendingJob(entry) {
+      if (!entry || !entry.id) return
+      this.rememberSession(this.jobGateway)
+      const list = (this.jobPendingList || []).filter(x => x.id !== entry.id)
+      list.push(
+        Object.assign(
+          {
+            miss: 0,
+            at: Date.now(),
+            // 派到哪个会话要记牢：下面轮询、取全文、写回产物都按它来
+            hostKey: this.jobHostKey,
+            gateway: this.jobGateway
+          },
+          entry
+        )
+      )
+      this.jobPendingList = list
       this.jobPendingMiss = 0
-      const state = cur.state || cur.status || ''
-      const detail = String(cur.detail || '').replace(/^result:\s*/i, '')
-      const running =
-        JOB_RUNNING_STATES.indexOf(state) !== -1 || cur.alive === true
-      if (running) {
-        this.jobStatus = `执行中（${state || 'working'}）`
-        this.jobStatusType = 'jobWait'
-        // 面板正看着这条时，先把摘要顶上去
-        if (detail && this.jobCurrentId === pending.id) {
-          this.jobFullText = detail
-        }
-        return
-      }
-      this.stopJobPoll()
+      this.startJobPoll()
+    },
+
+    /** 「还有 N 个在跑」后缀（同时开多个任务时状态栏好看清） */
+    pendingSuffix() {
+      const n = (this.jobPendingList || []).length
+      return n > 1 ? ` · 同时 ${n} 个在跑` : ''
+    },
+
+    /** 一条任务跑完了：取它自己的全文 → 写回它自己的容器 */
+    async finishPendingJob(entry, cur, state) {
+      const jobId = entry.id
+      const detail = String((cur && cur.detail) || '').replace(/^result:\s*/i, '')
+      const who = `「${entry.nodeTitle || '这个节点'}」`
       if (state === 'failed' || state === 'stopped') {
         this.jobStatus = state === 'failed' ? '执行失败' : '已停止'
         this.jobStatusType = 'jobErr'
         this.jobWriteState = ''
         this.jobWriteError =
           state === 'failed'
-            ? '这次运行失败了，没有写回导图'
-            : '这次运行被停止了，没有写回导图'
-        this.jobPending = null
+            ? `${who}那次运行失败了，没有写回导图`
+            : `${who}那次运行被停止了，没有写回导图`
+        this.$message.error(this.jobWriteError)
         this.loadJobHistory()
         return
       }
       this.jobStatus = `已完成（${state || 'done'}）`
       this.jobStatusType = 'jobOk'
-      const jobId = pending.id
-      this.jobPending = null
-      // 取这次任务自己的全文（不能用面板里选中的那条）
-      const markdown = (await this.fetchJobText(jobId)) || detail
+      const markdown = (await this.fetchJobText(jobId, entry)) || detail
       if (this.jobCurrentId === jobId) {
         this.jobFullText = markdown || '没有文字结果'
         this.jobFullChars = (markdown || '').length
       }
       if (this.jobHistoryVisible && !this.jobActiveId) this.jobActiveId = jobId
-      // 跑完就把结果落到运行节点下：末尾追加子分支 + 挂全文与产物文件
+      // 落到**这条任务自己的**容器下（nodeUid 是派发时就记下的）
       await this.writeJobResultToNode(
         { id: jobId },
         {
-          nodeUid: pending.nodeUid,
-          nodeTitle: pending.nodeTitle,
-          markdown
+          nodeUid: entry.nodeUid,
+          nodeTitle: entry.nodeTitle,
+          markdown,
+          host: this.hostOfEntry(entry),
+          gateway: entry.gateway
         }
       )
       this.loadJobHistory()
     },
 
-    /** 取某个任务的完整回答（只返回文本，不动界面状态） */
-    async fetchJobText(jobId) {
-      const host = this.jobSelectedHost
+    /**
+     * 轮询**所有**还在等结果的任务。
+     *
+     * ⚠️ 必须遍历列表，不能用单个槽位 —— 连着开多个任务时后一个会把前一个覆盖掉，
+     * 前几个跑完了也没人写回导图（2026-09-28 实测：连开三个，只有最后一个有产物，
+     * 另外两个任务其实都 `done` 了）。每条的 host/gateway 也按条目自己带的来查。
+     */
+    async pollJob() {
+      const list = this.jobPendingList || []
+      if (!list.length) {
+        this.stopJobPoll()
+        return
+      }
+      if (this.jobPollBusy) return
+      this.jobPollBusy = true
+      try {
+        const finished = []
+        let running = 0
+        let missed = 0
+        for (const entry of list.slice()) {
+          const host = this.hostOfEntry(entry)
+          if (!host) {
+            this.notePendingJobMissing(entry, '找不到执行主机')
+            continue
+          }
+          const res = await listHostJobs({ host, gateway: entry.gateway })
+          if (!res.ok) {
+            missed += 1
+            this.notePendingJobMissing(entry, res.error || '拿不到任务列表')
+            continue
+          }
+          const cur = (res.jobs || []).find(item => item.id === entry.id)
+          if (!cur) {
+            missed += 1
+            this.notePendingJobMissing(entry, '')
+            continue
+          }
+          entry.miss = 0
+          const state = cur.state || cur.status || ''
+          const isRunning =
+            JOB_RUNNING_STATES.indexOf(state) !== -1 || cur.alive === true
+          if (isRunning) {
+            running += 1
+            const detail = String(cur.detail || '').replace(/^result:\s*/i, '')
+            // 面板正看着这条时，先把摘要顶上去
+            if (detail && this.jobCurrentId === entry.id) {
+              this.jobFullText = detail
+            }
+            continue
+          }
+          finished.push({ entry, cur, state })
+        }
+        // 先从列表里摘掉再写回：写回要几秒，别让下一轮轮询重复处理同一条
+        if (finished.length) {
+          const ids = finished.map(x => x.entry.id)
+          this.jobPendingList = (this.jobPendingList || []).filter(
+            x => ids.indexOf(x.id) === -1
+          )
+        }
+        for (const item of finished) {
+          await this.finishPendingJob(item.entry, item.cur, item.state)
+        }
+        // 这一轮没报"查不到"就把计数清零（不然会拿着上一轮的残留值误判）
+        if (!missed) this.jobPendingMiss = 0
+        // 还有在跑的就把状态顶成「执行中 · N 个在跑」——放在写回**之后**，
+        // 否则会被 finishPendingJob 里的「已完成」盖掉（单测抓出来的）
+        if (running) {
+          this.jobStatus = `执行中 · ${running} 个在跑`
+          this.jobStatusType = 'jobWait'
+        }
+        if (!(this.jobPendingList || []).length) this.stopJobPoll()
+      } finally {
+        this.jobPollBusy = false
+      }
+    },
+
+    /**
+     * 取某个任务的完整回答（只返回文本，不动界面状态）。
+     * 传 entry 时按**它派发时那台主机/那条会话**去取 —— 多任务并行时各行其是。
+     */
+    async fetchJobText(jobId, entry = null) {
+      const host = this.hostOfEntry(entry)
       if (!host || !jobId) return ''
       const res = await fetchJobTranscript({
         host,
-        gateway: this.jobGateway,
+        gateway: (entry && entry.gateway) || this.jobGateway,
         jobId
       })
       return (res && res.ok && res.text) || ''
@@ -1684,12 +2215,24 @@ export default {
       return this.stopJobById((pending && pending.id) || this.jobCurrentId)
     },
 
+    /** 停**全部**还在等结果的任务（同时开了好几个时用） */
+    async stopAllPendingJobs() {
+      const ids = (this.jobPendingList || []).map(x => x.id).filter(Boolean)
+      for (const id of ids) {
+        await this.stopJobById(id)
+      }
+      return ids.length
+    },
+
     async stopJobById(jobId) {
-      const host = this.jobSelectedHost
+      // 按条目定位到它派发时那台机器/那条会话（多任务并行时不能用当前选中的）
+      const entry =
+        (this.jobPendingList || []).find(x => x.id === jobId) || null
+      const host = this.hostOfEntry(entry)
       if (!host || !jobId) return
       const res = await stopHostJob({
         host,
-        gateway: this.jobGateway,
+        gateway: (entry && entry.gateway) || this.jobGateway,
         id: jobId
       })
       if (res.ok) {
@@ -2645,6 +3188,40 @@ export default {
         color: hsla(0, 0%, 100%, 0.7);
         border-bottom-color: #3a3a37;
       }
+      .sessBox {
+        border-color: #3a3a37;
+      }
+      .sessHead {
+        background: rgba(255, 255, 255, 0.04);
+        &:hover {
+          background: rgba(255, 255, 255, 0.08);
+        }
+      }
+      .sessTitle {
+        color: hsla(0, 0%, 100%, 0.8);
+      }
+      .sessRow {
+        border-top-color: #3a3a37;
+        &:hover {
+          background: rgba(255, 255, 255, 0.06);
+        }
+        &.picked {
+          background: rgba(127, 168, 232, 0.14);
+        }
+      }
+      .sessName {
+        color: hsla(0, 0%, 100%, 0.85);
+      }
+      .sessState {
+        color: #7bc99a;
+        &.idle {
+          color: hsla(0, 0%, 100%, 0.45);
+        }
+      }
+      .sessAuto {
+        color: #e0a94f;
+        border-color: #5a4a2a;
+      }
       .histBody {
         color: hsla(0, 0%, 100%, 0.85);
         background: #1e2226;
@@ -2691,6 +3268,103 @@ export default {
     flex: 0 0 268px;
     flex-direction: column;
     min-width: 0;
+  }
+  /* WorkBuddy 会话（端口）一览：默认收起，点开看哪个端口在跑、哪个闲着 */
+  .sessBox {
+    margin-bottom: 10px;
+    overflow: hidden;
+    font-size: 12px;
+    border: 1px solid #ebeef5;
+    border-radius: 4px;
+  }
+  .sessHead {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    cursor: pointer;
+    background: #f7f9fc;
+    &:hover {
+      background: #eef3fa;
+    }
+  }
+  .sessTitle {
+    font-weight: 500;
+    color: #606266;
+  }
+  .sessMeta {
+    margin-left: auto;
+    color: #909399;
+  }
+  .sessBody {
+    padding: 4px 8px 6px;
+  }
+  .sessRow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    cursor: pointer;
+    border-top: 1px solid #f2f4f8;
+    &:first-child {
+      border-top: 0;
+    }
+    &:hover {
+      background: #f7f9fc;
+    }
+    &.picked {
+      background: #eef3fa;
+    }
+  }
+  .sessDot {
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    background: #c0c4cc;
+    border-radius: 50%;
+    &.busy {
+      background: #67c23a;
+    }
+  }
+  .sessPort {
+    flex: 0 0 auto;
+    color: #909399;
+    font-family: Menlo, Consolas, monospace;
+  }
+  .sessName {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    color: #303133;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sessState {
+    flex: 0 0 auto;
+    color: #67c23a;
+    &.idle {
+      color: #909399;
+    }
+  }
+  .sessUsing {
+    flex: 0 0 auto;
+    color: #409eff;
+  }
+  .sessAuto {
+    flex: 0 0 auto;
+    padding: 0 4px;
+    color: #e6a23c;
+    line-height: 16px;
+    border: 1px solid #f0c78a;
+    border-radius: 2px;
+  }
+  .sessKill {
+    flex: 0 0 auto;
+    padding: 0;
+  }
+  .sessFoot {
+    padding-top: 4px;
+    text-align: right;
   }
   .histList {
     flex: 1;
