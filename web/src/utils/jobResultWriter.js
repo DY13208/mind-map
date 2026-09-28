@@ -493,23 +493,6 @@ async function waitNewChild(parent, before, tries = 24) {
  * 在指定节点**后面**插一个同级节点（不是子节点）。
  * 用来让「下一步」接在上一块任务后面，而不是嵌进上一块里面。
  */
-function insertAfter(mindMap, node, tree) {
-  if (!node || !tree) return
-  const parent = node.parent
-  if (parent && typeof parent.setData === 'function') {
-    parent.setData({ expand: true })
-  }
-  // INSERT_NODE(openEdit, appointNodes, appointData, appointChildren)：
-  // simple-mind-map 会插到 appointNodes 之后（parent.children.splice(index + 1, 0, ...)）
-  mindMap.execCommand(
-    'INSERT_NODE',
-    false,
-    [node],
-    tree.data || {},
-    tree.children || []
-  )
-}
-
 function insertChildren(mindMap, parent, trees) {
   if (!trees || !trees.length) return
   if (parent && typeof parent.setData === 'function') {
@@ -549,24 +532,53 @@ function applyAttachment(mindMap, node, attachment, file) {
     ),
     attachmentProgress: 100
   }
-  if (mindMap && typeof mindMap.execCommand === 'function') {
-    mindMap.execCommand('SET_NODE_ATTACHMENT', node, '', name, meta)
-    return
-  }
-  // 兜底：拿不到命令时直接写数据，至少不丢内容
   const patch = { attachmentUrl: '', attachmentName: name, ...meta }
-  if (node && typeof node.setData === 'function') {
-    node.setData(patch)
-  } else if (
+  const read = key =>
+    String((node && typeof node.getData === 'function' && node.getData(key)) || '')
+  // 「落地」的判据：节点 data 里确实写上了名字（有 id 的话 id 也要对上）。
+  // 命令可能是静默失败的（引擎旧版、只读态会把 SET_NODE_DATA 直接丢掉），
+  // 所以**必须验证**，不能调完就当成功 —— 否则附件传上去了、节点上却没有回形针。
+  const landed = () =>
+    read('attachmentName') === name &&
+    read('attachmentId') === String(meta.attachmentId || '')
+
+  if (mindMap && typeof mindMap.execCommand === 'function') {
+    try {
+      mindMap.execCommand('SET_NODE_ATTACHMENT', node, '', name, meta)
+    } catch (err) {
+      // 命令抛错就往下走兜底，别因为一个命令把整条写回炸掉
+      console.warn('[writer] SET_NODE_ATTACHMENT failed:', err)
+    }
+    if (landed()) return true
+  }
+  // 兜底①：走渲染器的 setNodeData（跟命令同一条数据通路）
+  if (
     mindMap &&
     mindMap.renderer &&
     typeof mindMap.renderer.setNodeDataRender === 'function'
   ) {
-    mindMap.renderer.setNodeDataRender(node, patch)
+    try {
+      mindMap.renderer.setNodeDataRender(node, patch)
+    } catch (err) {
+      console.warn('[writer] setNodeDataRender failed:', err)
+    }
+    if (landed()) return true
+  }
+  // 兜底②：直接写节点数据 + 重绘。丢掉协作历史，但至少节点上有附件
+  const raw = node && node.nodeData && node.nodeData.data
+  if (raw) {
+    Object.keys(patch).forEach(key => {
+      raw[key] = patch[key]
+    })
   }
   if (node && typeof node.reRender === 'function') {
-    node.reRender(['attachment'])
+    try {
+      node.reRender(['attachment'])
+    } catch (err) {
+      /* 重绘失败不影响数据 */
+    }
   }
+  return landed()
 }
 
 function errorDetail(err) {
@@ -598,6 +610,7 @@ async function fileToBase64(file) {
  */
 async function attachToNode(mindMap, node, roomKey, file, bridgeAttach) {
   const uid = nodeUid(node)
+  let bridgeError = ''
   if (bridgeAttach && uid) {
     try {
       const base64 = await fileToBase64(file)
@@ -622,11 +635,15 @@ async function attachToNode(mindMap, node, roomKey, file, bridgeAttach) {
           errorMessage: '',
           extractedText: first.extractedText || ''
         }
-        applyAttachment(mindMap, node, attachment, file)
-        return { ...attachment, via: 'mcp' }
+        if (applyAttachment(mindMap, node, attachment, file)) {
+          return { ...attachment, via: 'mcp' }
+        }
+        bridgeError = '桥接传上去了，可是没绑到节点上'
       }
     } catch (err) {
-      // 桥接这条路不通（旧版桥接 / 没配 MCP）就退回协同服务上传
+      // 桥接这条路不通（旧版桥接 / 没配 MCP）就退回协同服务上传，
+      // 但**原因要留着** —— 两条都失败时用户得知道分别卡在哪
+      bridgeError = errorDetail(err)
     }
   }
   const res = await uploadNodeAttachment(roomKey, {
@@ -637,15 +654,23 @@ async function attachToNode(mindMap, node, roomKey, file, bridgeAttach) {
     sourceKind: 'attachment'
   })
   const attachment = (res && res.attachment) || {}
-  applyAttachment(mindMap, node, attachment, file)
+  const suffix = bridgeError ? `；桥接那条：${bridgeError}` : ''
+  if (!attachment.id) {
+    throw new Error(`上传成功但没拿到附件 id${suffix}`)
+  }
+  if (!applyAttachment(mindMap, node, attachment, file)) {
+    throw new Error(
+      `附件已上传（${attachment.fileName || file.name}），但没能绑到节点上，节点上不会出现回形针${suffix}`
+    )
+  }
   return attachment
 }
 
 /**
  * 建一个「任务 · 时间」容器：这次的任务内容与结果都挂在它下面。
  * 一次运行一个容器 —— 运行输出永远紧跟任务内容，不会落到 SOP 末尾。
- * 落点已经是任务容器时（从概要接着往下做），新容器挂在**同一个父节点下、紧跟它之后**，
- * 与上一块同级 —— 也就是「续写接在上一块（连同它的概要）后面」，不嵌进上一块里面。
+ * 落点已经是任务容器时（从概要点「运行」接着往下做就是这种情况），新容器挂在**它下面**
+ * —— 「摘要写的继续的任务放在这个任务下」，所以续写是上一块的最后一个子节点。
  * @returns {Promise<{ uid: String, title: String, node: Object }>}
  */
 export async function createJobContainer({
@@ -668,19 +693,8 @@ export async function createJobContainer({
       : []
   }
 
-  // ⚠️ 落点本身就是「任务」容器时（从概要点「运行」接着往下做就是这种情况），
-  // 新任务**不能嵌进去** —— 嵌进去这一步会变成上一块的子块、排进上一块的概要范围里，
-  // 看着就像「续写没有接在概要后面」。改成挂在同一个父节点下、紧跟上一块之后：
-  // 脑图读起来就是一条链 —— 任务块（含概要）→ 下一个任务块。
-  if (isTaskContainerNode(target) && target.parent) {
-    const parent = target.parent
-    const before = (parent.children || []).slice()
-    insertAfter(mindMap, target, tree)
-    const created = await waitNewChild(parent, before)
-    if (!created) throw new Error('建任务节点失败，请重试')
-    return { uid: nodeUid(created), title, node: created }
-  }
-
+  // 落点本身是「任务」容器时**不再另起同级分支** —— 用户要的是「续写挂在这个任务下」，
+  // 所以走下面那条通用路径：作为它的最后一个子节点插进去（任务内容 / 运行输出 / 附件之后）。
   const before = (target.children || []).slice()
   insertChildren(mindMap, target, [tree])
   const created = await waitNewChild(target, before)
@@ -696,6 +710,8 @@ export async function createJobContainer({
  * @param {String}   payload.prompt     任务内容（落点不是容器、需要现建容器时用）
  * @param {String}   payload.roomKey    房间 key，缺了就不挂附件
  * @param {Array}    payload.artifacts  产物文件 [{name, size, mime, base64}]
+ * @param {Array}    payload.artifactSkips 桥接报的「文件在、但不在允许目录里」清单
+ *                                          [{path, name, error}] —— 只用来给用户解释
  * @param {Function} payload.bridgeAttach 经桥接 MCP 挂附件的通道（可选；给了就优先用它）
  * @param {Function} payload.onProgress 进度文字回调
  */
@@ -706,6 +722,7 @@ export async function writeJobResultToMap({
   prompt,
   roomKey,
   artifacts,
+  artifactSkips,
   bridgeAttach,
   onProgress
 } = {}) {
@@ -847,6 +864,19 @@ export async function writeJobResultToMap({
         }
       }
     }
+  }
+
+  // 产物文件存在、但桥接不许读（不在执行会话工作目录里）—— 这是「产物没挂上」最常见的原因，
+  // 一定要说出来，并且告诉用户怎么解（在桥接启动参数里加 --artifact-roots）
+  if (artifactSkips && artifactSkips.length) {
+    const names = artifactSkips
+      .map(item => (item && (item.name || item.path)) || '')
+      .filter(Boolean)
+    out.warnings.push(
+      `有 ${artifactSkips.length} 个产物没挂上（文件在，但不在桥接允许读取的目录里）：` +
+        `${names.slice(0, 3).join('、')}${names.length > 3 ? ' 等' : ''}` +
+        ' —— 在执行那台电脑启动桥接时加参数 --artifact-roots "产物所在目录"（分号分隔可以给多个）'
+    )
   }
 
   // 给「这次的任务」加一个范围概要：包住任务内容 + 运行输出，

@@ -685,6 +685,63 @@ async function main() {
   )
   check('提示里带上了桥接地址', /127\.0\.0\.1:8799/.test(locals.error))
 
+  // ---- 空会话时的提示必须能自证：说清是「哪台机器、哪个目录、为什么」 ----
+  // 起因：用户看到「这台主机上没有 WorkBuddy 会话」后第一反应是「你是写死了 IP 地址吗」
+  const savedLoc = { ...window.location }
+  const savedRuntime = { ...window.__MIND_MAP_RUNTIME__ }
+
+  window.__MIND_MAP_RUNTIME__ = {}
+  // ① 桌面版没在跑：目录是空的
+  let msg = hub.describeEmptyGateways(
+    { sessions: 0, sessionFiles: 0, sessionsDir: 'C:\\Users\\x\\.workbuddy\\sessions' },
+    { ip: '192.168.0.54', port: 8799 }
+  )
+  check(
+    '空会话提示里有具体地址',
+    msg.includes('http://192.168.0.54:8799'),
+    msg.slice(0, 90)
+  )
+  check('空会话提示里有会话目录', /sessions/.test(msg), msg.slice(0, 90))
+  check('空会话提示直说「这台机器没在跑桌面版」', /没在跑/.test(msg), msg.slice(0, 60))
+
+  // ② 目录里有会话文件、但一条都不能用 → 换措辞，别说成「没有会话」
+  msg = hub.describeEmptyGateways(
+    { sessions: 0, sessionFiles: 3, sessionsDir: '/home/u/.workbuddy/sessions' },
+    { ip: '192.168.0.54', port: 8799 }
+  )
+  check('有会话文件但都失效：措辞不同', /3 个会话文件/.test(msg) && !/目录 .* 是空的/.test(msg), msg.slice(0, 90))
+
+  // ③ 有会话、但网关都失效 → 把原因列出来
+  msg = hub.describeEmptyGateways(
+    { sessions: 2, alive: 0, skipped: [{ cwd: 'D:/a', why: '网关已失效' }] },
+    { ip: '192.168.0.54', port: 8799 }
+  )
+  check('有会话但网关失效：列出原因', /2 条 WorkBuddy 会话/.test(msg) && /D:\/a/.test(msg), msg.slice(0, 100))
+
+  // ④ 回环 + 同源桥接：必须说成「服务器上的 127.0.0.1」，不能写「这台电脑」
+  window.__MIND_MAP_RUNTIME__ = { workbuddyJobBridge: '/bridge' }
+  msg = hub.describeEmptyGateways({ sessions: 0, sessionFiles: 0 }, { ip: '127.0.0.1', port: 8799 })
+  check('同源桥接：回环说成「页面同源桥接（服务器上…）」', /服务器上的/.test(msg), msg.slice(0, 80))
+  check('同源桥接：提示里带容器挂载那条建议', /BRIDGE_WORKBUDDY_DIR/.test(msg), msg.slice(-70))
+
+  // ⑤ 回环 + 直连：就是「浏览器所在机器」
+  window.__MIND_MAP_RUNTIME__ = {}
+  msg = hub.describeEmptyGateways({ sessions: 0, sessionFiles: 0 }, { ip: '127.0.0.1', port: 8799 })
+  check('直连回环：说成「浏览器所在机器」', /浏览器所在机器/.test(msg), msg.slice(0, 80))
+  check(
+    '两种回环文案确实不一样',
+    hub.describeJobHostLabel({ ip: '127.0.0.1', port: 8799 }) !==
+      (() => {
+        window.__MIND_MAP_RUNTIME__ = { workbuddyJobBridge: '/bridge' }
+        const one = hub.describeJobHostLabel({ ip: '127.0.0.1', port: 8799 })
+        window.__MIND_MAP_RUNTIME__ = {}
+        return one
+      })()
+  )
+
+  Object.assign(window.location, savedLoc)
+  window.__MIND_MAP_RUNTIME__ = savedRuntime
+
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)
   if (failed.length) {

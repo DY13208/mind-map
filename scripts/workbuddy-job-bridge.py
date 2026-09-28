@@ -48,7 +48,11 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-WORKBUDDY_DIR = os.path.join(os.path.expanduser("~"), ".workbuddy")
+# 会话目录：默认 ~/.workbuddy。桥接跑在容器里时它看不到宿主机的会话目录
+# （症状：页面永远提示「这台主机上没有 WorkBuddy 会话」），
+# 用 BRIDGE_WORKBUDDY_DIR 指到挂进来的宿主机 .workbuddy 即可。
+WORKBUDDY_DIR = (os.environ.get("BRIDGE_WORKBUDDY_DIR") or "").strip() or os.path.join(
+    os.path.expanduser("~"), ".workbuddy")
 SESSIONS_DIR = os.path.join(WORKBUDDY_DIR, "sessions")
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gateway.json")
 HEARTBEAT_FRESH_MS = 10 * 60 * 1000
@@ -854,6 +858,10 @@ ARTIFACT_CODE_EXT = (
     ".js", ".mjs", ".cjs", ".ts", ".vue", ".json", ".scss", ".less", ".css",
     ".map", ".lock", ".env", ".py", ".pyc", ".toml", ".ini", ".yml", ".yaml",
 )
+# resolve_artifact_path 的失败原因之一。对上它说明：**文件真的存在**，
+# 只是不在允许读取的目录里 —— 这是「产物没挂上附件」最常见的原因
+# （任务把文件写在执行会话工作目录之外，比如 D:\直播提报web\output）。
+ARTIFACT_OUT_OF_ROOTS = "不在允许读取的目录内"
 ARTIFACT_LINE_HINTS = (
     "交付", "产物", "产出", "生成", "落地", "文件清单", "产物清单", "输出文件",
     "交付物", "deliverable", "artifact", "output",
@@ -878,14 +886,47 @@ def _looks_like_artifact(real, line):
     return any(h in low for h in ARTIFACT_LINE_HINTS)
 
 
+ARTIFACT_ROOTS_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "artifact-roots.txt")
+
+
+def file_artifact_roots():
+    """脚本旁边 artifact-roots.txt 里的额外产物目录（一行一个，# 开头是注释）。
+
+    为什么不直接写在 run_bridge.bat 里 set：cmd 按系统 OEM 代码页（简体中文是 GBK）
+    读批处理文件，而 .bat 存的是 UTF-8 —— 中文路径会变成乱码，路径就匹配不上了。
+    单独放一个 UTF-8 的文本文件最稳，改完重启桥接即可（不用重新部署）。
+    """
+    if not os.path.isfile(ARTIFACT_ROOTS_FILE):
+        return []
+    out = []
+    try:
+        with open(ARTIFACT_ROOTS_FILE, "r", encoding="utf-8") as fh:
+            for line in fh:
+                item = line.strip().strip('"')
+                if not item or item.startswith("#"):
+                    continue
+                out.append(item)
+    except Exception:
+        return out
+    return out
+
+
 def artifact_roots(gateways):
-    """允许读取的目录白名单：执行主机的工作目录 + BRIDGE_ARTIFACT_ROOTS（分号分隔）。"""
+    """允许读取的目录白名单：执行主机的工作目录 + 额外目录。
+
+    额外目录两个来源（都给就都收）：
+      - 环境变量 / --artifact-roots（分号分隔）
+      - 脚本旁边 artifact-roots.txt（一行一个，UTF-8）
+    """
     roots = []
     for g in gateways or []:
         cwd = (g.get("cwd") or "").strip()
         if cwd and os.path.isdir(cwd):
             roots.append(os.path.realpath(cwd))
-    for item in (os.environ.get("BRIDGE_ARTIFACT_ROOTS") or "").split(";"):
+    extra = (os.environ.get("BRIDGE_ARTIFACT_ROOTS") or "").split(";")
+    extra += file_artifact_roots()
+    for item in extra:
         item = item.strip()
         if item and os.path.isdir(item):
             roots.append(os.path.realpath(item))
@@ -925,7 +966,7 @@ def resolve_artifact_path(raw, cwd, roots):
     if not os.path.isfile(real):
         return None, "文件不存在"
     if not _path_in_roots(real, roots):
-        return None, "不在允许读取的目录内"
+        return None, ARTIFACT_OUT_OF_ROOTS
     return real, ""
 
 
@@ -950,7 +991,7 @@ def read_artifact(real, with_content=True):
     return info, ""
 
 
-def extract_artifact_paths(text, cwd, roots, limit=ARTIFACT_MAX_FILES * 3):
+def extract_artifact_paths(text, cwd, roots, limit=ARTIFACT_MAX_FILES * 3, diag=None):
     """从任务输出里挑出真实存在的产物文件。
 
     绝对路径、相对路径都过一遍「像不像产物」：
@@ -959,14 +1000,28 @@ def extract_artifact_paths(text, cwd, roots, limit=ARTIFACT_MAX_FILES * 3):
     - 其余看同行有没有「交付/产物/生成/落地」字样。
     否则 `web/public/templates/xxx.json` 这种正文引用也会被当成产物挂上去。
     设 BRIDGE_ARTIFACT_FILTER=0 可关掉这层过滤。
+
+    diag 给一个 list 时，把「文件在、但不在允许目录里」的那些路径记进去 ——
+    以前这类路径被静默丢掉，页面只看到「0 个产物」，根本不知道发生了什么。
     """
     text = text or ""
     found = []
     seen = set()
+    diag_seen = set()
 
     def add(raw, line):
-        real, _why = resolve_artifact_path(raw, cwd, roots)
+        real, why = resolve_artifact_path(raw, cwd, roots)
         if not real:
+            if diag is not None and why == ARTIFACT_OUT_OF_ROOTS:
+                clean = _clean_path_text(raw)
+                if clean and clean not in diag_seen:
+                    diag_seen.add(clean)
+                    diag.append({
+                        "path": clean,
+                        "name": os.path.basename(clean),
+                        "exists": True,
+                        "error": why,
+                    })
             return
         if ARTIFACT_FILTER and not _looks_like_artifact(real, line):
             return
@@ -1012,7 +1067,8 @@ def job_artifacts(g, job_id, with_content=True):
     cwd = (job.get("cwd") or g.get("cwd") or "").strip()
     text = info.get("text") or ""
     roots = artifact_roots([dict(g, cwd=cwd)])
-    paths = extract_artifact_paths(text, cwd, roots)
+    skipped = []
+    paths = extract_artifact_paths(text, cwd, roots, diag=skipped)
     files = []
     for real in paths:
         item, err = read_artifact(real, with_content=with_content)
@@ -1030,6 +1086,8 @@ def job_artifacts(g, job_id, with_content=True):
         "text": text[:ARTIFACT_TEXT_LIMIT],
         "truncated": len(text) > ARTIFACT_TEXT_LIMIT,
         "files": files,
+        # 文件存在但落在允许目录之外 —— 页面据此提示「把它的目录加进 --artifact-roots」
+        "skipped": skipped,
     }
 
 
@@ -1561,6 +1619,19 @@ def public_gateway(gateway):
     return {k: gateway[k] for k in keys if k in gateway}
 
 
+def _password_hint():
+    """廉价判断网关密码有没有来源（不读进程内存，免得每次刷新都去翻 PEB）。"""
+    if (os.environ.get("CODEBUDDY_GATEWAY_PASSWORD") or "").strip():
+        return "环境变量"
+    for path, keys in (
+        (os.path.join(WORKBUDDY_DIR, "settings.json"), ("gateway", "password")),
+        (CONFIG_PATH, ("password",)),
+    ):
+        if _json_password(path, *keys):
+            return os.path.basename(path)
+    return ""
+
+
 def gateways_payload(gws):
     """给页面的 /api/gateways 响应: 可用网关 + 为什么没有可用的。"""
     # 标出哪些是桥接自动起的会话（前端显示「自动」+ 允许回收）
@@ -1585,6 +1656,13 @@ def gateways_payload(gws):
         else:
             why = "网关已失效"
         reasons.append({"cwd": s["cwd"], "why": why})
+    # 「一条会话都没有」时页面得能说清是「桌面版没在跑」还是「目录看错了」，
+    # 所以把会话目录和原始文件个数一并报回去
+    # （2026-09-28：用户看到提示后第一反应是「你是写死了 IP 地址吗」）
+    try:
+        session_files = len(glob.glob(os.path.join(SESSIONS_DIR, "*.json")))
+    except Exception:
+        session_files = 0
     return {
         "gateways": [public_gateway(g) for g in gws],
         "hasPassword": any(g.get("password") for g in gws),
@@ -1592,6 +1670,10 @@ def gateways_payload(gws):
             "sessions": len(reasons) + len(gws),
             "alive": len(gws),
             "skipped": reasons[:6],
+            "sessionFiles": session_files,
+            "sessionsDir": SESSIONS_DIR,
+            "workbuddyDir": WORKBUDDY_DIR,
+            "passwordSource": _password_hint(),
         },
     }
 
@@ -2354,9 +2436,14 @@ def main():
                     help="允许跨源调用本服务的来源, 用于把按钮嵌进你自己的网页/服务器上的脑图; "
                          "支持逗号分隔和 *.domain 通配; 也可以走环境变量 BRIDGE_ALLOW_ORIGIN；"
                          "都不给就只放行本机和局域网私网来源")
+    ap.add_argument("--artifact-roots", default=None,
+                    help="额外允许读取产物的目录（分号分隔）。任务把产物写在执行会话工作目录"
+                         "之外时，不加上这里就挂不上附件；也可以走环境变量 BRIDGE_ARTIFACT_ROOTS")
     args = ap.parse_args()
     if not args.allow_origin:
         args.allow_origin = (os.environ.get("BRIDGE_ALLOW_ORIGIN") or "").strip() or None
+    if args.artifact_roots:
+        os.environ["BRIDGE_ARTIFACT_ROOTS"] = args.artifact_roots
 
     if args.lan:
         args.host = "0.0.0.0"
@@ -2389,6 +2476,13 @@ def main():
             log("  登记到      %s" % args.hub)
     else:
         log("  浏览器打开  http://%s:%d/" % (args.host, args.port))
+    extra_roots = (os.environ.get("BRIDGE_ARTIFACT_ROOTS") or "").strip()
+    if not extra_roots:
+        extra_roots = ";".join(file_artifact_roots())
+    log("  产物目录    %s" % (extra_roots or "(只认执行会话的工作目录)"))
+    if not extra_roots:
+        log("  [!] 任务把产物写在执行会话工作目录之外时（比如落盘到 D:\\某项目\\output），")
+        log("      在 %s 里列出来，否则页面会提示「产物没挂上」" % os.path.basename(ARTIFACT_ROOTS_FILE))
     log("  跨源白名单  %s" % (args.allow_origin or "(只放行本机/私网来源)"))
     if args.lan and not args.allow_origin:
         log("  [!] 脑图如果部署在服务器上（公网域名），浏览器点运行会被 CORS 拦，")
