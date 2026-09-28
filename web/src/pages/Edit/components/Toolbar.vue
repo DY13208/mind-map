@@ -592,7 +592,11 @@ import {
   spawnHostSession,
   releaseHostSession
 } from '@/utils/workbuddyJobBridge'
-import { buildNodeRunPrompt, buildFollowUpPrompt } from '@/utils/mindmapRunPrompt'
+import {
+  buildNodeRunPrompt,
+  buildFollowUpPrompt,
+  withCpdAdvisor
+} from '@/utils/mindmapRunPrompt'
 import {
   lastTaskContainer,
   isFollowUpPlaceholder
@@ -1123,9 +1127,11 @@ export default {
         (this.$route.query && this.$route.query.room) || ''
       ).trim()
       if (!selected) {
-        return room
-          ? `请分析并执行脑图房间「${room}」相关任务，给出可执行结论。`
-          : '请分析当前脑图并给出可执行结论。'
+        return withCpdAdvisor(
+          room
+            ? `请分析并执行脑图房间「${room}」相关任务，给出可执行结论。`
+            : '请分析当前脑图并给出可执行结论。'
+        )
       }
       return buildNodeRunPrompt({
         node: selected,
@@ -1140,7 +1146,7 @@ export default {
       ).trim()
       const active = (this.activeNodes || [])[0]
       const node = wanted || (active && !active.isGeneralization ? active : null)
-      if (!node) return String(text || '').trim()
+      if (!node) return withCpdAdvisor(text)
       return buildFollowUpPrompt(text, {
         node,
         room,
