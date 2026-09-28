@@ -1225,17 +1225,20 @@ export default {
     async runFollowUp() {
       const prompt = String(this.jobFollowPrompt || '').trim()
       if (!prompt || this.jobFollowDispatching) return
-      const target = await this.ensureDispatchTarget()
-      if (!target.ok) {
-        this.$message.warning(target.error)
-        return
-      }
-      const { host, gateway } = target
+      // ⚠️ 防重入标志必须放在 `await` **之前**（2026-09-28 修）：以前设在
+      // `ensureDispatchTarget()` 之后，那 1~2 秒窗口里重复点「继续」会**并发**起会话/派发
+      // （实测一口气起过 9 条会话，把机器堆满）。
       this.jobFollowDispatching = true
-      this.rememberRunTarget({ reuseContainer: true })
-      this.jobStatus = '正在继续执行…'
-      this.jobStatusType = 'jobWait'
       try {
+        const target = await this.followUpTarget()
+        if (!target.ok) {
+          this.$message.warning(target.error)
+          return
+        }
+        const { host, gateway } = target
+        this.rememberRunTarget({ reuseContainer: true })
+        this.jobStatus = `正在继续执行…（会话 ${this.gatewayShort(gateway)}）`
+        this.jobStatusType = 'jobWait'
         const promptText = this.buildFollowUpJobPrompt(prompt)
         const result = await dispatchWorkbuddyJob({
           host,
@@ -1277,6 +1280,40 @@ export default {
       } finally {
         this.jobFollowDispatching = false
       }
+    },
+
+    /**
+     * 「继续执行」该派到哪条会话（2026-09-28 新增）。
+     *
+     * ⚠️ 以前直接用 sticky 的 `this.jobGateway`，**不保证是这条任务原来所在的会话** ——
+     * 用户换过派发会话、或开了多条会话之后点「继续」，任务会被接到别的会话上，上下文直接断
+     * （页面表现就是「继续」后一直执行中 / 答非所问）。
+     * 现在**优先锚定这条运行记录自己的 `gateway`**（桥接 `/api/jobs` 每条都带），
+     * 那条会话已经不在时才回落到当前选中的会话，并明确告诉用户改派了。
+     */
+    async followUpTarget() {
+      const item = this.activeJobItem
+      const own = String((item && item.gateway) || '').replace(/\/$/, '')
+      const target = await this.ensureDispatchTarget()
+      if (!target.ok) return target
+      if (!own) return target
+      if (own === String(this.jobGateway || '').replace(/\/$/, '')) return target
+      const list = this.jobGateways || []
+      const known = list.some(g => String(g.url || '').replace(/\/$/, '') === own)
+      if (list.length && !known) {
+        this.$message.warning(
+          `这条任务原来的会话（${this.gatewayShort(own)}）已经不在了，改派到当前会话`
+        )
+        return target
+      }
+      this.jobGateway = own
+      return { ok: true, host: this.jobSelectedHost, gateway: own }
+    },
+
+    /** 会话地址 → 好认的短名字（`:端口`） */
+    gatewayShort(url) {
+      const m = String(url || '').match(/:(\d+)\s*$/)
+      return m ? ':' + m[1] : String(url || '当前会话')
     },
 
     /** 静默识别这台电脑上可派的会话（对应 test1.py 桥接的 /api/gateways） */
@@ -2292,8 +2329,13 @@ export default {
 
     async stopJobById(jobId) {
       // 按条目定位到它派发时那台机器/那条会话（多任务并行时不能用当前选中的）
+      // ⚠️ 2026-09-28：**也要在运行历史里找**。以前只查 `jobPendingList`（内存态、刷新即空），
+      // 于是从历史列表点「停止」时 entry 为空 → gateway 回落到「当前选中的那条会话」，
+      // 停的可能是别人的任务（串台）。桥接现在给每条 job 都带了 `gateway`，正好能用。
       const entry =
-        (this.jobPendingList || []).find(x => x.id === jobId) || null
+        (this.jobPendingList || []).find(x => x.id === jobId) ||
+        (this.jobHistory || []).find(x => x.id === jobId) ||
+        null
       const host = this.hostOfEntry(entry)
       if (!host || !jobId) return
       const res = await stopHostJob({
