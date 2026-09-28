@@ -41,7 +41,7 @@ const publicPath =
   process.env.PUBLIC_PATH !== undefined
     ? process.env.PUBLIC_PATH
     : isDev
-    ? ''
+    ? '/'
     : './dist'
 
 module.exports = {

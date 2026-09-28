@@ -845,6 +845,7 @@ export default {
             role: snap.role,
             canEdit: snap.canEdit,
             canManage: snap.role === 'owner',
+            shareId: snap.shareId || null,
             canView: snap.canView
           })
         }

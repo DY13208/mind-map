@@ -132,6 +132,8 @@ const server = http.createServer(async (request, response) => {
       const handledTus = await require('./nodeKnowledge').handleApi(request, response)
       if (handledTus) return
     }
+    if (pathname.startsWith('/api/node-shares')) applyCorsHeaders(request, response)
+    if (await require('./nodeShares').handleNodeShareApi(request, response, pathname)) return
     if (await require('./knowledge').handleApi(request, response, pathname)) return
     const handled = await handleApi(request, response)
     if (handled) return

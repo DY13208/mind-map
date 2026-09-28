@@ -22,6 +22,11 @@ const roomPathRedirect = to => ({
 
 const routes = [
   {
+    path: '/node-share/:id',
+    name: 'NodeShare',
+    component: () => import('./pages/NodeShare/Index.vue')
+  },
+  {
     path: '/dashboards',
     redirect: '/files'
   },

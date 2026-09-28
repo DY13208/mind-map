@@ -87,6 +87,28 @@ function attachCollabV2(httpServer, options = {}) {
         ''
     ).trim()
     socket.data.canEdit = {}
+    socket.data.shareRooms = new Set()
+    let checkingShareAccess = false
+    const shareAccessTimer = setInterval(async () => {
+      if (checkingShareAccess || !socket.connected || !socket.data.shareRooms.size) return
+      checkingShareAccess = true
+      try {
+        const req = Object.assign(socket.request, {
+          authUser: socket.authUser,
+          forceAcl: !!socket.testAcl
+        })
+        for (const roomKey of socket.data.shareRooms) {
+          const access = await roomAcl.assertRoomAccess(getPool(), req, roomKey, 'view')
+          if (!access.shareId) socket.data.shareRooms.delete(roomKey)
+          socket.data.canEdit[roomKey] = !!access.canEdit
+        }
+      } catch (err) {
+        socket.disconnect(true)
+      } finally {
+        checkingShareAccess = false
+      }
+    }, 10000)
+    shareAccessTimer.unref()
 
     const emitPresence = throttle((roomKey) => {
       io.to('v2:' + roomKey).emit('presence:state', {
@@ -128,6 +150,7 @@ function attachCollabV2(httpServer, options = {}) {
         const access = await roomAcl.assertRoomAccess(getPool(), req, roomKey, 'view')
         socket.data.clientId = clientId
         socket.data.canEdit[roomKey] = !!access.canEdit
+        if (access.shareId) socket.data.shareRooms.add(roomKey)
         collabTrace('join.identity', {
           roomKey,
           userId: access.userId || (socket.authUser && socket.authUser.id) || '',
@@ -158,6 +181,7 @@ function attachCollabV2(httpServer, options = {}) {
           canEdit: !!access.canEdit,
           canView: true,
           canManage: !!access.canManage,
+          shareId: access.shareId || null,
           legacyOpen: !!access.legacyOpen,
           serverRevision: Number(version || 0),
           metadata,
@@ -318,6 +342,7 @@ function attachCollabV2(httpServer, options = {}) {
     socket.on('presence', onPresence)
 
     socket.on('disconnect', () => {
+      clearInterval(shareAccessTimer)
       socket.data.rooms.forEach(roomKey => {
         presence.removePeer(roomKey, socket.data.clientId || socket.id)
         io.to('v2:' + roomKey).emit('presence:state', {

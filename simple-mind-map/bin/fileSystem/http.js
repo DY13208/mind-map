@@ -616,7 +616,7 @@ async function handleFileSystemApi(req, res, options = {}) {
     }
     const infoKey = fileInfo(pathname)
     if (infoKey && method === 'GET') {
-      const file = await fs.getRoom(safeRoomKey(infoKey), { userId, bypass })
+      const file = await fs.getRoom(safeRoomKey(infoKey), { userId, bypass, access: req.roomAccess })
       sendJson(res, 200, { ok: true, viewingHistory: false, file })
       return true
     }
