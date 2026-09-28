@@ -168,6 +168,23 @@ const routes = [
     ]
   },
   {
+    path: '/graph',
+    component: () =>
+      import(
+        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'
+      ),
+    children: [
+      {
+        path: '',
+        name: 'GraphService',
+        component: () =>
+          import(
+            /* webpackChunkName: "graph-service" */ './pages/ProductShell/GraphServicePage.vue'
+          )
+      }
+    ]
+  },
+  {
     path: '/cognee',
     component: () =>
       import(
