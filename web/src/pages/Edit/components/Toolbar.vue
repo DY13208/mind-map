@@ -366,6 +366,15 @@
               <span class="hMeta"
                 >{{ jobStateText(item) }} · {{ jobTimeText(item) }}</span
               >
+              <el-button
+                v-if="isJobRunning(item)"
+                class="hStop"
+                type="text"
+                size="mini"
+                :loading="jobStopBusyId === item.id"
+                @click.stop="stopHistoryItem(item)"
+                >停止</el-button
+              >
             </div>
             <p class="jobHint" v-if="!filteredJobHistory.length">
               {{
@@ -526,6 +535,14 @@
                   type="text"
                   size="mini"
                   @click="stopJob"
+                  >停止</el-button
+                >
+                <el-button
+                  v-else-if="activeJobRunning"
+                  type="text"
+                  size="mini"
+                  :loading="jobStopBusyId === jobActiveId"
+                  @click="stopHistoryItem(activeJobItem)"
                   >停止</el-button
                 >
                 <el-button
@@ -730,6 +747,8 @@ export default {
       jobPendingMiss: 0,
       // 一轮轮询没跑完就别再进来（写回要几秒，避免重复处理同一条）
       jobPollBusy: false,
+      // 正在被「停止」的那条 id（行内停止按钮的 loading）
+      jobStopBusyId: '',
       // 「派发固定用哪条会话」，按主机分；localStorage 的兜底（隐私模式下用它）
       rememberedSession: null,
       // 执行主机上的 WorkBuddy 会话（= 端口）一览：默认收起，点开看谁在跑谁闲置
@@ -970,6 +989,25 @@ export default {
     /** 还有几个任务在等结果 */
     jobPendingCount() {
       return (this.jobPendingList || []).length
+    },
+
+    /** 运行历史里当前选中的那条（底部「停止」按钮用） */
+    activeJobItem() {
+      return (
+        (this.jobHistory || []).find(x => x.id === this.jobActiveId) || null
+      )
+    },
+
+    /**
+     * 选中的运行记录是否还在跑。
+     *
+     * ⚠️ 为什么需要它（2026-09-28）：底部那个「停止」按钮原来的条件是
+     * `jobPending && jobPolling` —— 两者都是**本页面内存态**，只覆盖「这次打开页面
+     * 之后自己派出去、且轮询还没停」的那一条。刷新页面 / 关掉面板再打开，历史列表里
+     * 明明还挂着一条「执行中」，却**再也找不到停止按钮**。改成也认「选中的这条还在跑」。
+     */
+    activeJobRunning() {
+      return !!this.activeJobItem && this.isJobRunning(this.activeJobItem)
     },
 
   },
@@ -2222,6 +2260,27 @@ export default {
       return this.stopJobById((pending && pending.id) || this.jobCurrentId)
     },
 
+    /**
+     * 从**运行历史列表**里停一条（2026-09-28 新增）。
+     *
+     * 与 `stopJob` 的区别：那个只认「本页面刚派出去、轮询还没停」的内存记录
+     * （`jobPendingList` 不持久化），**刷新页面之后就什么也停不了** —— 用户看到的
+     * 就是「历史里明明挂着执行中，却没有停止按钮」。
+     * 这个直接按列表里那条的 id 停，刷新后照样可用；链路不变
+     * （`stopJobById` → `stopHostJob` → 桥接 `/api/stop`），桥接成功后会把台账那条
+     * 钉成 `stopped`，下一次拉列表就显示「已停止」。
+     */
+    async stopHistoryItem(item) {
+      const id = (item && item.id) || ''
+      if (!id || this.jobStopBusyId) return
+      this.jobStopBusyId = id
+      try {
+        await this.stopJobById(id)
+      } finally {
+        this.jobStopBusyId = ''
+      }
+    },
+
     /** 停**全部**还在等结果的任务（同时开了好几个时用） */
     async stopAllPendingJobs() {
       const ids = (this.jobPendingList || []).map(x => x.id).filter(Boolean)
@@ -3423,6 +3482,18 @@ export default {
     &.s-failed {
       background: #f56c6c;
     }
+    // 「已停止」：默认灰点是 #c0c4cc，跟「未知状态」分不开，用深一档的灰
+    // （2026-09-28：桥接新增 stopped 状态后才用得上）
+    &.s-stopped {
+      background: #909399;
+    }
+  }
+  // 行内「停止」：只在运行中的条目上出现，别被 hName 的省略号吃掉
+  .histItem .hStop {
+    flex: 0 0 auto;
+    margin-left: 6px;
+    padding: 0 4px;
+    font-size: 12px;
   }
   .histItem .hName {
     flex: 1;
