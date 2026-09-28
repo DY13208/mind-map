@@ -270,6 +270,7 @@ function createCollaborationAdapter(options = {}) {
     lastServerRevision: 0,
     serverRevision: 0,
     role: '',
+    shareId: null,
     canEdit: true,
     canView: true,
     peers: [],
@@ -632,6 +633,7 @@ function createCollaborationAdapter(options = {}) {
       lastServerRevision: state.lastServerRevision,
       serverRevision: Number(state.serverRevision || state.lastServerRevision || 0),
       role: state.role,
+      shareId: state.shareId,
       canEdit: state.canEdit,
       canView: state.canView,
       peers: state.peers.slice(),
@@ -851,6 +853,7 @@ function createCollaborationAdapter(options = {}) {
       throw err
     }
     state.role = result.role || state.role
+    state.shareId = result.shareId || null
     state.canEdit = result.canEdit !== false
     state.canView = result.canView !== false
     state.peers = result.peers || []

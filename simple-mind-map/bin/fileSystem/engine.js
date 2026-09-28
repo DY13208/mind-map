@@ -518,9 +518,10 @@ function createFileSystem(options = {}) {
         }
       }
     }
-    if (!bypass && !role && !legacyOpen) {
+    if (!bypass && !role && !legacyOpen && !(input.access && input.access.canView)) {
       throw fsError('FORBIDDEN', '没有权限执行该操作', 403)
     }
+    if (input.access && input.access.shareId) row.role = input.access.role
     return withAccess(row, userId, bypass)
   }
 

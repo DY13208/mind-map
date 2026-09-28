@@ -590,7 +590,8 @@ function writeOpenclawRuntimeConfig({
     openclawControlUrl: `http://127.0.0.1:${port}/chat`,
     openclawBridgeWs: '/openclaw-bridge/ws',
     cogneeBase: '/cognee-api',
-    cogneeDataset: String(process.env.COGNEE_DATASET || 'liangce')
+    cogneeDataset: String(process.env.COGNEE_DATASET || 'liangce'),
+    graphServiceUrl: '/wiki-compiler/'
   }
   if (resolvedWikiBase) config.wikiBase = resolvedWikiBase
   fs.writeFileSync(

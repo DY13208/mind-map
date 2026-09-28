@@ -114,9 +114,17 @@
           <Demonstrate :isDark="isDark" :mindMap="mindMap"></Demonstrate>
         </div>
         <div class="item">
-          <el-dropdown @command="handleCommand">
-            <div class="btn el-icon-more"></div>
+          <el-dropdown trigger="click" @command="handleCommand">
+            <div class="btn el-icon-more" aria-label="更多操作" title="更多操作"></div>
             <el-dropdown-menu slot="dropdown">
+              <el-dropdown-item
+                v-if="!isReadonly"
+                command="jobHistory"
+                data-testid="run-workbuddy-history"
+              >
+                <span class="el-icon-time"></span>
+                运行历史
+              </el-dropdown-item>
               <el-dropdown-item command="shortcutKey">
                 <span class="iconfont iconjianpan"></span>
                 {{ $t('navigatorToolbar.shortcutKeys') }}
@@ -255,6 +263,10 @@ export default {
     },
 
     handleCommand(command) {
+      if (command === 'jobHistory') {
+        this.$bus.$emit('open_workbuddy_job_history')
+        return
+      }
       if (command === 'shortcutKey') {
         this.setActiveSidebar('shortcutKey')
         return

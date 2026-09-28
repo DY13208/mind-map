@@ -22,6 +22,11 @@ const roomPathRedirect = to => ({
 
 const routes = [
   {
+    path: '/node-share/:id',
+    name: 'NodeShare',
+    component: () => import('./pages/NodeShare/Index.vue')
+  },
+  {
     path: '/dashboards',
     redirect: '/files'
   },
@@ -158,6 +163,23 @@ const routes = [
         component: () =>
           import(
             /* webpackChunkName: "product-shell" */ './pages/ProductShell/McpAccessPage.vue'
+          )
+      }
+    ]
+  },
+  {
+    path: '/graph',
+    component: () =>
+      import(
+        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'
+      ),
+    children: [
+      {
+        path: '',
+        name: 'GraphService',
+        component: () =>
+          import(
+            /* webpackChunkName: "graph-service" */ './pages/ProductShell/GraphServicePage.vue'
           )
       }
     ]

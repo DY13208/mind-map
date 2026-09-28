@@ -1,6 +1,7 @@
 export function summarizeAccess(access = {}) {
   const canEdit = access.canEdit !== false && access.role !== 'viewer'
   const canManage = !!access.canManage || access.role === 'owner'
+  const shareId = access.shareId || null
   const role =
     access.role ||
     (canManage ? 'owner' : canEdit ? 'editor' : access.role === null ? '' : 'viewer')
@@ -9,6 +10,8 @@ export function summarizeAccess(access = {}) {
     canView: access.canView !== false,
     canEdit,
     canManage,
+    canShare: canEdit && !shareId,
+    shareId,
     legacyOpen: !!access.legacyOpen
   }
 }

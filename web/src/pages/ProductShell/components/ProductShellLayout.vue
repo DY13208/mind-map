@@ -126,6 +126,15 @@
           <i class="el-icon-reading" aria-hidden="true"></i>
           <span>Wiki</span>
         </a>
+        <router-link
+          to="/graph"
+          title="wiki-compiler"
+          aria-label="wiki-compiler"
+          data-testid="nav-wiki-compiler"
+        >
+          <i class="el-icon-share" aria-hidden="true"></i>
+          <span>wiki-compiler</span>
+        </router-link>
       </nav>
       <AccessNotifications v-if="profile" :key="profile.id" :collapsed="sidebarCollapsed" class="sidebarNotifications" />
       <div class="sidebarFooter" v-if="profile">

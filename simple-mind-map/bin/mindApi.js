@@ -848,6 +848,7 @@ function publicAccess(access) {
     canView: !!access.canView,
     canEdit: !!access.canEdit,
     canManage: !!access.canManage,
+    shareId: access.shareId || null,
     legacyOpen: !!access.legacyOpen
   }
 }

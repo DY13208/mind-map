@@ -13,11 +13,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = path.resolve(__dirname, '..');
 const MCP_CFG = path.join(process.env.USERPROFILE || process.env.HOME || '', '.workbuddy', 'mcp.json');
+const { directChildren, findStructural, parseCompanyModel } = require('./wiki-model-schema');
 const MODEL_TITLE = '公司模型';
-const CONTRACT_ANCHOR = '合同';           // 法务 → 知识 → 合同
-const LAW_ANCHOR = '法务';
 const FEE_ANCHOR = '渠道法务分';          // 评分因子所在分支
 
 function readToken() {
@@ -65,66 +63,6 @@ function makeClient(token) {
   };
 }
 
-/** 把 markdown 缩进列表解析成 {level, text} 序列 */
-function parseOutline(md) {
-  const out = [];
-  for (const raw of md.split('\n')) {
-    const m = /^(\s*)-\s+(.*)$/.exec(raw);
-    if (!m) continue;
-    const indent = m[1].replace(/\t/g, '  ').length;
-    out.push({ level: Math.floor(indent / 2), text: m[2].trim() });
-  }
-  return out;
-}
-
-function subtree(nodes, startIdx) {
-  const base = nodes[startIdx].level;
-  const out = [];
-  for (let i = startIdx + 1; i < nodes.length && nodes[i].level > base; i++) out.push(nodes[i]);
-  return out;
-}
-
-function directChildren(nodes, parentIdx) {
-  const base = nodes[parentIdx].level;
-  const out = [];
-  for (let i = parentIdx + 1; i < nodes.length && nodes[i].level > base; i++) {
-    if (nodes[i].level === base + 1) out.push({ idx: i, ...nodes[i] });
-  }
-  return out;
-}
-
-function findFirst(nodes, pred) {
-  for (let i = 0; i < nodes.length; i++) if (pred(nodes[i].text)) return i;
-  return -1;
-}
-
-/**
- * 结构定位：同名节点可能多处出现（如「渠道法务分」在叶子「分销类必核（渠道法务分）」里也含该子串），
- * 只按文本取首个匹配会命中错误的叶子。这里额外要求结构校验通过。
- */
-function findStructural(nodes, matchText, validate) {
-  for (let i = 0; i < nodes.length; i++) {
-    if (!matchText(nodes[i].text)) continue;
-    if (!validate || validate(i)) return i;
-  }
-  return -1;
-}
-
-/** 该节点是否有直属子节点（用于区分容器节点与叶子） */
-function hasChildren(nodes, idx) {
-  return directChildren(nodes, idx).length > 0;
-}
-
-/** 分类 → 要素：要素清单 = 该分类下第一个子节点（模板，惯例叫「合同一」）的子节点名 */
-function elementsOf(nodes, branchIdx) {
-  const kids = directChildren(nodes, branchIdx);
-  if (!kids.length) return { template: null, elements: [], instances: [] };
-  const template = kids[0];
-  const elements = directChildren(nodes, template.idx).map((k) => k.text);
-  const instances = kids.slice(1).map((k) => k.text);
-  return { template: template.text, elements, instances };
-}
-
 (async () => {
   const args = process.argv.slice(2);
   const asJson = args.includes('--json');
@@ -133,29 +71,38 @@ function elementsOf(nodes, branchIdx) {
   const client = makeClient(readToken());
   await client.initialize();
 
-  const found = await client.tool('wiki_search', { query: MODEL_TITLE, limit: 10 });
-  const page = (found.items || []).find((i) => i.title === MODEL_TITLE) || (found.items || [])[0];
-  if (!page) throw new Error('未找到 Wiki 页面「' + MODEL_TITLE + '」');
+  const found = await client.tool('wiki_search', { query: MODEL_TITLE, limit: 20 });
+  const pages = (found.items || []).filter((i) => i.title === MODEL_TITLE);
+  if (!pages.length) throw new Error('未找到 Wiki 页面「' + MODEL_TITLE + '」');
 
-  const doc = await client.tool('wiki_read', { pageId: page.pageId });
+  // 同名页面可能只是目录短页。读到结构完整的「合同」容器，并在多页都能解析时取正文最长的一页。
+  let page = null;
+  let doc = null;
+  let nodes = null;
+  let branches = null;
+  let bestScore = -1;
+  for (const candidate of pages) {
+    const read = await client.tool('wiki_read', { pageId: candidate.pageId });
+    let parsed;
+    try {
+      parsed = parseCompanyModel(read.body || '');
+    } catch (error) {
+      if (error.code === 'MODEL_CONTRACT_MISSING') continue;
+      throw error;
+    }
+    const score = read.bodyChars || (read.body || '').length;
+    if (score > bestScore) {
+      bestScore = score;
+      page = candidate;
+      doc = read;
+      nodes = parsed.nodes;
+      branches = parsed.branches;
+    }
+  }
+  if (!page) throw new Error('在模型里没找到结构完整的「合同」节点');
   if (doc.truncated) {
     console.error('[警告] 页面被截断（bodyChars=%s），要素清单可能不完整——请调高 KNOWLEDGE_WIKI_MAX_BODY 或直连数据库。', doc.bodyChars);
   }
-  const nodes = parseOutline(doc.body || '');
-
-  const lawIdx = findFirst(nodes, (t) => t.includes(LAW_ANCHOR));
-  // 「合同」容器：要求它有直属子节点，且至少一个子节点自身还有子节点（即模板结构）
-  const anchorIdx = findStructural(
-    nodes,
-    (t) => t === CONTRACT_ANCHOR,
-    (i) => directChildren(nodes, i).some((c) => hasChildren(nodes, c.idx)),
-  );
-  if (anchorIdx < 0) throw new Error('在模型里没找到结构完整的「' + CONTRACT_ANCHOR + '」节点');
-
-  const branches = directChildren(nodes, anchorIdx).map((b) => {
-    const { template, elements, instances } = elementsOf(nodes, b.idx);
-    return { 分类: b.text, 模板节点: template, 要素: elements, 已有合同: instances };
-  });
 
   // 渠道法务评分因子：渠道法务分 → 按渠道类型 → <类型> → 因子 → 因子名
   // 结构校验：必须能找到「按渠道类型」子节点，否则命中的是叶子里的同名子串
