@@ -786,8 +786,30 @@ function readDiag(json) {
   return (json && json.diag) || null
 }
 
-/** 网关列表为空时，用桥接给的诊断说清楚为什么 */
-export function describeEmptyGateways(diag) {
+/**
+ * 「哪台机器」要说清楚 —— 否则用户会怀疑地址是不是写死的。
+ * 回环地址在两种形态下含义完全不同，分开说：
+ *   - 同源桥接（/bridge）：请求由页面同源的 nginx 转出去，`127.0.0.1` 在**服务器**上
+ *   - 直连：`127.0.0.1` 就是**浏览器所在这台电脑**
+ */
+export function describeJobHostLabel(target) {
+  const t = target || {}
+  if (isLoopbackIp(t.ip)) {
+    return isSameOriginBridge()
+      ? `页面同源桥接（服务器上的 http://127.0.0.1:${t.port || HOST_PORT}）`
+      : `这台电脑（浏览器所在机器，http://127.0.0.1:${t.port || HOST_PORT}）`
+  }
+  return `http://${t.ip}:${t.port || HOST_PORT}`
+}
+
+/**
+ * 网关列表为空时，用桥接给的诊断说清楚「哪台机器、为什么」。
+ * diag 里现在有 sessionsDir / sessionFiles / passwordSource（桥接补齐的），
+ * 所以能区分：桌面版没在跑 / 目录看错了 / 会话都在但网关失效 / 密码没取到。
+ */
+export function describeEmptyGateways(diag, target) {
+  const where = describeJobHostLabel(target)
+  const dir = (diag && diag.sessionsDir) || '~/.workbuddy/sessions'
   const count = diag && Number(diag.sessions)
   if (count) {
     const skipped = Array.isArray(diag.skipped) ? diag.skipped : []
@@ -795,11 +817,29 @@ export function describeEmptyGateways(diag) {
       .slice(0, 2)
       .map(item => `${item.cwd || '会话'}：${item.why || '不可用'}`)
       .join('；')
-    return `这台主机上有 ${count} 条 WorkBuddy 会话，但没有一条的网关可用（${
-      why || '网关已失效'
-    }）。请重新打开桌面版 WorkBuddy 的任务后再刷新。`
+    return (
+      `${where} 上有 ${count} 条 WorkBuddy 会话，但没有一条的网关可用（${
+        why || '网关已失效'
+      }）。请重新打开桌面版 WorkBuddy 的任务后再点「刷新主机」。`
+    )
   }
-  return '这台主机上没有 WorkBuddy 会话。请在它上面打开桌面版 WorkBuddy，进入任意一条任务，然后点「刷新主机」。'
+  const files = (diag && Number(diag.sessionFiles)) || 0
+  if (files) {
+    return (
+      `${where} 上有 ${files} 个会话文件，但一条能用的都没有（心跳过期或网关已失效）。` +
+      `在这台机器上重新进入 WorkBuddy 的一条对话，再点「刷新主机」。（会话目录 ${dir}）`
+    )
+  }
+  const noPwd = diag && diag.passwordSource === '' ? '，网关密码也没取到' : ''
+  return (
+    `${where} 上没有 WorkBuddy 会话 —— 会话目录 ${dir} 是空的${noPwd}，` +
+    '说明**这台机器上没在跑（或没登录）WorkBuddy 桌面版**。' +
+    '在它上面打开桌面版、进入任意一条对话，再点「刷新主机」。' +
+    (isSameOriginBridge()
+      ? '（桥接如果跑在容器里，它看不到宿主机的会话目录 —— 把宿主机的 .workbuddy 挂进去，' +
+        '或给桥接设 BRIDGE_WORKBUDDY_DIR 指过去）'
+      : '')
+  )
 }
 
 /**
@@ -941,10 +981,13 @@ export async function fetchJobArtifacts({
       ok: true,
       files: res.json.files || [],
       cwd: res.json.cwd || '',
+      // 文件存在、但不在桥接允许读取的目录里 —— 以前这些路径被静默丢掉，
+      // 页面只看到「0 个产物」，完全不知道发生了什么
+      skipped: Array.isArray(res.json.skipped) ? res.json.skipped : [],
       via: res.via
     }
   }
-  return { ok: false, files: [], error: pickError(res, '拿不到产物文件') }
+  return { ok: false, files: [], skipped: [], error: pickError(res, '拿不到产物文件') }
 }
 
 /**

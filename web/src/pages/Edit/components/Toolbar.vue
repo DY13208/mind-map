@@ -1304,7 +1304,7 @@ export default {
             this.recallSession(host)
           )
         } else {
-          this.jobGatewaysError = describeEmptyGateways(res.diag)
+          this.jobGatewaysError = describeEmptyGateways(res.diag, host)
         }
       }
       await this.loadJobHistory()
@@ -1613,9 +1613,13 @@ export default {
       this.jobWriteState = '正在读取产物文件…'
       try {
         let artifacts = []
+        let artifactSkips = []
         try {
           const res = await fetchJobArtifacts({ host, gateway, jobId })
-          if (res && res.ok) artifacts = res.files || []
+          if (res && res.ok) {
+            artifacts = res.files || []
+            artifactSkips = res.skipped || []
+          }
         } catch (err) {
           // 产物读不到不影响把文字写进去
         }
@@ -1628,6 +1632,7 @@ export default {
           prompt: options.prompt || this.jobPendingPrompt || '',
           job,
           artifacts,
+          artifactSkips,
           // 附件优先经桥接的 MCP 通道挂（服务器部署时比协同服务上传那条路稳），
           // 桥接不通会自动退回原来的上传方式
           bridgeAttach: args => attachFilesViaBridge({ host, ...args }),

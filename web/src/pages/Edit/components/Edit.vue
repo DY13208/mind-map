@@ -1627,6 +1627,7 @@ export default {
             prompt: data.prompt,
             roomKey,
             artifacts: data.artifacts,
+            artifactSkips: data.artifactSkips,
             bridgeAttach: data.bridgeAttach,
             onProgress: data.onProgress
           })
