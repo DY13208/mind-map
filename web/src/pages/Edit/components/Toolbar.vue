@@ -632,6 +632,19 @@ const JOB_FINISHED_STATES = [
   'aborted'
 ]
 
+/**
+ * 待回写任务落盘用的 key。
+ *
+ * 为什么需要它（2026-09-29 反馈「产物没有回填，都要我去 WorkBuddy 说一声」）：
+ * `jobPendingList` 原来是纯内存的，页面一刷新就空 —— 任务其实在会话里跑完了、
+ * 产物也在（桥接 /api/job-artifacts 取得到，实测 3.8KB 的 md 就在），
+ * 但**再没有人轮询它**，导图于是永远不回写。存一份在 localStorage，
+ * 页面回来时接着轮询、把欠下的回写补上。
+ */
+const JOB_PENDING_STORE = 'mindmap:pendingJobs'
+/** 超过这个时长就不恢复了：别把几天前的僵尸任务捡回来一直轮询 */
+const JOB_PENDING_TTL_MS = 12 * 60 * 60 * 1000
+
 // 工具栏
 let fileHandle = null
 const defaultBtnList = [
@@ -1036,6 +1049,10 @@ export default {
 
   },
   watch: {
+    // 待回写列表一变就落盘：刷新/换页回来还能接着等、接着补回写
+    jobPendingList() {
+      this.savePendingJobs()
+    },
     isHandleLocalFile(val) {
       if (!val) {
         Notification.closeAll()
@@ -1077,6 +1094,16 @@ export default {
     this.$bus.$on('lang_change', this.computeToolbarShowThrottle)
     window.addEventListener('beforeunload', this.onUnload)
     this.$bus.$on('node_note_dblclick', this.onNodeNoteDblclick)
+    // 上次没回写完的任务：捡回来接着轮询（刷新页面不该让任务白跑）
+    const restored = this.restorePendingJobs()
+    if (restored) {
+      this.prepareLocalTarget()
+        .then(() => {
+          if (this._isDestroyed) return
+          if ((this.jobPendingList || []).length) this.startJobPoll()
+        })
+        .catch(() => {})
+    }
   },
   beforeDestroy() {
     this.$bus.$off('node_click', this.onJobNodeClick)
@@ -2164,6 +2191,72 @@ export default {
       this.$message.success('已回收这个自动会话')
       await this.loadJobSessions()
       await this.loadJobGateways()
+    },
+
+    /** 当前房间号（落盘/恢复待回写任务时用来区分房间） */
+    currentRoomKey() {
+      return String(
+        (this.$route && this.$route.query && this.$route.query.room) || ''
+      ).trim()
+    },
+
+    /** 待回写任务落盘：刷新页面不丢，回来接着轮询、把欠下的回写补上 */
+    savePendingJobs() {
+      try {
+        if (typeof localStorage === 'undefined') return
+        const room = this.currentRoomKey()
+        const rows = (this.jobPendingList || [])
+          .filter(item => item && item.id && item.gateway)
+          .map(item => ({
+            ...item,
+            room: item.room || room,
+            at: item.at || Date.now()
+          }))
+        if (!rows.length) {
+          localStorage.removeItem(JOB_PENDING_STORE)
+          return
+        }
+        localStorage.setItem(JOB_PENDING_STORE, JSON.stringify(rows.slice(-20)))
+      } catch (err) {
+        // 存不下也不影响主流程
+      }
+    },
+
+    /**
+     * 页面打开时把「还没回写完」的任务捡回来。
+     *
+     * 现场（2026-09-29）：任务在会话里跑完了、产物也在，但用户中途刷新过页面，
+     * 内存里的 jobPendingList 一空，就再没人轮询 → 导图永远不回写，
+     * 用户只能自己跑去 WorkBuddy 里催一句。这里让它跨刷新活下来。
+     */
+    restorePendingJobs() {
+      try {
+        if (typeof localStorage === 'undefined') return 0
+        const raw = localStorage.getItem(JOB_PENDING_STORE)
+        if (!raw) return 0
+        const rows = JSON.parse(raw)
+        if (!Array.isArray(rows)) {
+          localStorage.removeItem(JOB_PENDING_STORE)
+          return 0
+        }
+        const room = this.currentRoomKey()
+        const now = Date.now()
+        const keep = rows.filter(item => {
+          if (!item || !item.id || !item.gateway) return false
+          // 只认当前房间：换图了就别把别的房间的任务带过来
+          if (item.room && room && item.room !== room) return false
+          const at = Number(item.at || 0)
+          return !at || now - at < JOB_PENDING_TTL_MS
+        })
+        if (!keep.length) {
+          localStorage.removeItem(JOB_PENDING_STORE)
+          return 0
+        }
+        this.jobPendingList = keep
+        return keep.length
+      } catch (err) {
+        return 0
+      }
     },
 
     startJobPoll() {
