@@ -96,6 +96,13 @@ check(
     /要我继续吗/.test(runPrompt) &&
     /写回目标系统/.test(runPrompt)
 )
+// 2026-09-29 实测：提示词只写「把结果写回目标系统」时，Agent 会去翻 cpd 插件目录、
+// 找 mmclient、自己造脚本调 MCP —— 一个 10+10 的任务走了 41 次工具调用、好几分钟。
+// 所以必须明说「脑图由页面自动写回，你别动手」。
+check(
+  '明确「脑图本身不用你写回」（否则 Agent 会白耗几十轮工具调用）',
+  /脑图本身不用你写回/.test(runPrompt) && /MCP/.test(runPrompt)
+)
 
 console.log('--- 继续执行 ---')
 const followPrompt = buildFollowUpPrompt('接着上次往下写', {
