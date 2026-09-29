@@ -73,6 +73,8 @@ let spawnedResult = {
   remaining: 5,
   canSpawn: true
 }
+// 取任务全文的结果（默认空 —— 不设的话「超时兜底」用例会拿到空文本）
+let transcriptResult = { ok: true, text: '' }
 const bridgeStub = {
   resolveJobHosts: async () => ({ hosts: [], defaultHost: null }),
   listHostGateways: async () => gatewaysResult,
@@ -90,7 +92,7 @@ const bridgeStub = {
     calls.stop.push(args)
     return stopResult
   },
-  fetchJobTranscript: async () => ({ ok: true, text: '' }),
+  fetchJobTranscript: async () => transcriptResult,
   fetchJobArtifacts: async () => ({ ok: true, files: [] }),
   spawnHostSession: async () => ({ ok: true, gateway: { url: 'http://127.0.0.1:1' } }),
   releaseHostSession: async () => ({ ok: true }),
@@ -919,6 +921,126 @@ async function main() {
     '展开状态下刷新运行历史会顺手刷会话忙闲',
     vm.jobSessions.length === 1 && vm.jobSessions[0].running.length === 1,
     JSON.stringify(vm.jobSessions.map(s => s.running.length))
+  )
+
+  // ---- 15. 「自动」会话不落回执：挑会话时避开它（2026-09-29 现场）----
+  vm = makeVm()
+  vm.jobSpawnedIndex = new Set(['http://127.0.0.1:54418', 16572])
+  const autoRow = { url: 'http://127.0.0.1:54418', pid: 16572 }
+  const normalRow = { url: 'http://127.0.0.1:50323', pid: 9001 }
+  check(
+    '挑派发会话：有普通会话时不选「自动」的那条',
+    vm.pickJobGateway([autoRow, normalRow], '') === normalRow.url,
+    vm.pickJobGateway([autoRow, normalRow], '')
+  )
+  check(
+    '上次用的正是「自动」会话 → 也换成普通会话',
+    vm.pickJobGateway([autoRow, normalRow], autoRow.url) === normalRow.url,
+    vm.pickJobGateway([autoRow, normalRow], autoRow.url)
+  )
+  check(
+    '只有「自动」会话 → 仍然派给它（总比不派强，结果靠超时兜回）',
+    vm.pickJobGateway([autoRow], '') === autoRow.url,
+    vm.pickJobGateway([autoRow], '')
+  )
+  check(
+    'isAutoSession：url 口径与 pid 口径都认',
+    vm.isAutoSession(autoRow) === true &&
+      vm.isAutoSession(normalRow) === false &&
+      vm.isAutoSession({ url: autoRow.url, pid: 0 }) === true &&
+      vm.isAutoSession({ url: 'http://127.0.0.1:60000', pid: 16572 }) === true &&
+      vm.isAutoSession(null) === false
+  )
+
+  // ---- 16. run 永远不落终态 → 超时后主动从会话历史收一次并写回 ----
+  const recovered = []
+  transcriptResult = { ok: true, text: '## 一句话结论\n四季如春。' }
+  vm = makeVm()
+  vm.jobGateway = 'http://127.0.0.1:54418'
+  vm.jobHostKey = HOST.key
+  jobsByGateway = {
+    'http://127.0.0.1:54418': {
+      ok: true,
+      jobs: [
+        {
+          id: 'stuck-1',
+          state: 'working',
+          alive: true,
+          name: '写一个四季如春的作文100字',
+          detail: ''
+        }
+      ]
+    }
+  }
+  vm.jobPendingList = [
+    {
+      id: 'stuck-1',
+      gateway: 'http://127.0.0.1:54418',
+      hostKey: HOST.key,
+      nodeUid: 'box-9',
+      nodeTitle: '四季',
+      at: Date.now() - 5 * 60 * 1000,
+      miss: 0
+    }
+  ]
+  vm.writeJobResultToNode = async (job, opts) => {
+    recovered.push(opts)
+  }
+  await vm.pollJob()
+  check(
+    '「自动」会话卡在 working：超时后按会话历史收尾并写回',
+    recovered.length === 1 &&
+      recovered[0].nodeUid === 'box-9' &&
+      String(recovered[0].markdown).includes('四季如春'),
+    JSON.stringify(recovered.map(r => r.nodeUid))
+  )
+  check('收尾后这条从待回写列表里出队', vm.jobPendingList.length === 0)
+
+  // ---- 17. 过了放弃线还取不到正文 → 判死收尾，别永远转圈 ----
+  transcriptResult = { ok: true, text: '' }
+  vm = makeVm()
+  vm.jobGateway = 'http://127.0.0.1:54418'
+  vm.jobHostKey = HOST.key
+  jobsByGateway = {
+    'http://127.0.0.1:54418': {
+      ok: true,
+      jobs: [
+        {
+          id: 'stuck-2',
+          state: 'dispatched',
+          alive: true,
+          name: 'x',
+          detail: ''
+        }
+      ]
+    }
+  }
+  vm.jobPendingList = [
+    {
+      id: 'stuck-2',
+      gateway: 'http://127.0.0.1:54418',
+      hostKey: HOST.key,
+      nodeUid: 'box-10',
+      nodeTitle: '卡住的',
+      at: Date.now() - 7 * 60 * 1000,
+      miss: 0
+    }
+  ]
+  vm.writeJobResultToNode = async () => {}
+  await vm.pollJob()
+  check(
+    '过了放弃线仍取不到正文：判死并移出，不再永远显示「已派发」',
+    vm.jobPendingList.length === 0 &&
+      vm.jobStatusType === 'jobErr' &&
+      String(vm.jobWriteError).includes('取不回'),
+    vm.jobWriteError
+  )
+  check(
+    '刚派发不久的任务不受宽限影响（还在正常等）',
+    vm.pendingReceiptTimedOut({ at: Date.now() }) === false &&
+      vm.pendingReceiptGaveUp({ at: Date.now() }) === false &&
+      vm.pendingReceiptTimedOut({ at: Date.now() - 5 * 60 * 1000 }) === true &&
+      vm.pendingReceiptGaveUp({ at: Date.now() - 7 * 60 * 1000 }) === true
   )
 
   const failed = results.filter(r => !r.ok)
