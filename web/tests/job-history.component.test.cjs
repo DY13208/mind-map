@@ -75,6 +75,8 @@ let spawnedResult = {
 }
 // 取任务全文的结果（默认空 —— 不设的话「超时兜底」用例会拿到空文本）
 let transcriptResult = { ok: true, text: '' }
+// 派发结果（重试用例要换 job id）
+let dispatchResult = { ok: true, job: { id: 'job-x' }, mode: 'jobs' }
 const bridgeStub = {
   resolveJobHosts: async () => ({ hosts: [], defaultHost: null }),
   listHostGateways: async () => gatewaysResult,
@@ -98,7 +100,7 @@ const bridgeStub = {
   releaseHostSession: async () => ({ ok: true }),
   attachFilesViaBridge: async () => ({ ok: false }),
   describeEmptyGateways: () => '',
-  dispatchWorkbuddyJob: async () => ({ ok: true, job: { id: 'job-x' } })
+  dispatchWorkbuddyJob: async () => dispatchResult
 }
 
 const parsed = compiler.parseComponent(
@@ -1148,6 +1150,126 @@ async function main() {
       moved[0].nodeUid === 'box-m' &&
       vm.jobPendingList.length === 0,
     JSON.stringify(moved.map(m => m.nodeUid))
+  )
+
+  // ---- 20. 失败自动换会话重试（最多 3 次）----
+  // 2026-09-29 需求：「加入3次重试作保障」。必须**换会话** —— 失败原因多半就是
+  // 那条会话不可用（旧版 WorkBuddy 的自动会话走 runs、任务根本进不去）。
+  vm = makeVm()
+  vm.jobHostKey = HOST.key
+  vm.jobGateways = [
+    { url: 'http://127.0.0.1:54418' },
+    { url: 'http://127.0.0.1:56752' }
+  ]
+  vm.jobSpawnedIndex = new Set(['http://127.0.0.1:54418', 16572])
+  vm.jobGateway = 'http://127.0.0.1:54418'
+  dispatchResult = { ok: true, job: { id: 'retry-1' }, mode: 'jobs' }
+  const retryEntry = {
+    id: 'fail-1',
+    gateway: 'http://127.0.0.1:54418',
+    hostKey: HOST.key,
+    nodeUid: 'box-r',
+    nodeTitle: '会失败的任务',
+    at: Date.now(),
+    miss: 0,
+    prompt: '写一篇短文'
+  }
+  vm.jobPendingList = [retryEntry]
+  const didRetry = await vm.retryPendingJob(retryEntry, '执行失败')
+  check(
+    '失败时换**另一条**会话重派（不是原地重试）',
+    didRetry === true &&
+      retryEntry.gateway === 'http://127.0.0.1:56752' &&
+      retryEntry.retry === 1 &&
+      retryEntry.id === 'retry-1',
+    JSON.stringify({
+      g: retryEntry.gateway,
+      r: retryEntry.retry,
+      id: retryEntry.id
+    })
+  )
+  check(
+    '重派后条目回到待回写列表（新 id 得有人轮询）',
+    vm.jobPendingList.length === 1 &&
+      vm.jobPendingList[0].id === 'retry-1'
+  )
+
+  retryEntry.retry = 3
+  check(
+    '用满 3 次就不再重试',
+    (await vm.retryPendingJob(retryEntry, 'x')) === false
+  )
+  check(
+    '只有一条会话时无法换会话 → 不重试（免得原地再进同一个坑）',
+    (await (async () => {
+      const only = {
+        id: 'f2',
+        gateway: 'http://127.0.0.1:56752',
+        hostKey: HOST.key,
+        nodeUid: 'b',
+        nodeTitle: 'x',
+        at: Date.now(),
+        miss: 0,
+        prompt: 'p'
+      }
+      vm.jobGateways = [{ url: 'http://127.0.0.1:56752' }]
+      return vm.retryPendingJob(only, 'x')
+    })()) === false
+  )
+  check(
+    '老条目没记下提示词 → 不重试（安全降级，不当成 bug）',
+    (await vm.retryPendingJob({
+      id: 'f3',
+      gateway: 'http://127.0.0.1:56752',
+      hostKey: HOST.key,
+      nodeUid: 'b',
+      nodeTitle: 'x',
+      at: Date.now(),
+      miss: 0
+    }, 'x')) === false
+  )
+
+  // state=failed 走到 pollJob 里 → 应该重派，而不是直接报「没有写回导图」
+  vm = makeVm()
+  vm.jobHostKey = HOST.key
+  vm.jobGateways = [
+    { url: 'http://127.0.0.1:54418' },
+    { url: 'http://127.0.0.1:56752' }
+  ]
+  vm.jobSpawnedIndex = new Set(['http://127.0.0.1:54418', 16572])
+  vm.jobGateway = 'http://127.0.0.1:54418'
+  dispatchResult = { ok: true, job: { id: 'retry-2' }, mode: 'jobs' }
+  jobsByGateway = {
+    'http://127.0.0.1:54418': {
+      ok: true,
+      jobs: [{ id: 'fail-2', state: 'failed', alive: false, name: 'x', detail: '' }]
+    }
+  }
+  const failEntry = {
+    id: 'fail-2',
+    gateway: 'http://127.0.0.1:54418',
+    hostKey: HOST.key,
+    nodeUid: 'box-f',
+    nodeTitle: '跑挂了的任务',
+    at: Date.now(),
+    miss: 0,
+    prompt: '写点东西'
+  }
+  vm.jobPendingList = [failEntry]
+  vm.writeJobResultToNode = async () => {
+    throw new Error('不该走到写回')
+  }
+  await vm.pollJob()
+  check(
+    '执行失败 → 自动换会话重派，而不是直接报「没有写回导图」',
+    failEntry.retry === 1 &&
+      failEntry.gateway === 'http://127.0.0.1:56752' &&
+      vm.jobPendingList.length === 1,
+    JSON.stringify({
+      r: failEntry.retry,
+      g: failEntry.gateway,
+      n: vm.jobPendingList.length
+    })
   )
 
   const failed = results.filter(r => !r.ok)
