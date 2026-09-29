@@ -71,8 +71,8 @@ async function commit(engine, raw) {
     room_key: ROOM,
     version: nextRev,
     operation_id: randomUUID(),
-    actor_id: 'u1',
-    client_id: 'c1',
+    actor_id: raw.actor_id || 'u1',
+    client_id: raw.client_id || 'c1',
     operation_type: raw.type,
     payload: raw.payload || {},
     event,
@@ -320,7 +320,7 @@ function mockRes() {
   const classified = await classification.engine.summarizeRange(ROOM, 0, 2)
   assert.strictEqual(classified.updated, 1)
 
-  // 已生成的旧摘要会在列表读取时使用新规则重新计算并回写。
+  // 有固定区间的旧摘要会在列表响应中按新规则重算，但不写回历史记录。
   await classification.store.setLiveState(ROOM, {
     revision: 2,
     nodes: (await classification.store.getLiveState(ROOM)).nodes,
@@ -333,13 +333,24 @@ function mockRes() {
     skipEnsure: true
   })
   await classification.store.updateVersionMeta(ROOM, legacySummary.id, {
-    summary: { kind: 'edits', inserted: 0, updated: 5, deleted: 0, moved: 0 },
+    summary: {
+      kind: 'edits',
+      inserted: 0,
+      updated: 5,
+      deleted: 0,
+      moved: 0,
+      fromRevision: 0,
+      toRevision: 2
+    },
     summary_status: 'ready'
   })
   const refreshedList = await classification.engine.listVersions(ROOM, { limit: 10 })
   const refreshed = refreshedList.versions.find(row => row.id === legacySummary.id)
   assert.strictEqual(refreshed.summary.updated, 1)
   assert.strictEqual(refreshed.summary.algorithmVersion, 2)
+  const legacyStoredSummary = await classification.store.getVersion(ROOM, legacySummary.id)
+  assert.strictEqual(legacyStoredSummary.summary.updated, 5)
+  assert.strictEqual(legacyStoredSummary.summary.algorithmVersion, undefined)
 
   const currentBefore = await store.getLiveState(ROOM)
   const targetRev = 3
@@ -933,6 +944,248 @@ function mockRes() {
   })
   assert.strictEqual(inserts.summary.inserted, 1)
   assert.strictEqual(inserts.summary.updated, 0)
+
+  // Auto and manual editor attribution comes from the exact operation interval,
+  // while createdBy remains the actor who triggered the version request.
+  const attribution = engineWith({ checkpointEvery: 100000 })
+  await attribution.engine.ensureHistoryBaseline(ROOM)
+  await commit(attribution.engine, {
+    type: 'node.update',
+    actor_id: 'chen',
+    payload: { uid: 'root', text: 'Root by Chen' }
+  })
+  await commit(attribution.engine, {
+    type: 'node.update',
+    actor_id: 'alex',
+    payload: { uid: 'root', note: 'Alex note' }
+  })
+  const attributedAuto = await attribution.engine.flushPendingAutoVersion(ROOM, {
+    userId: 'history-viewer',
+    editors: ['history-viewer'],
+    source: 'history_open'
+  })
+  assert.deepStrictEqual(attributedAuto.editors, ['alex', 'chen'])
+  assert.strictEqual(attributedAuto.created_by, 'history-viewer')
+  assert.strictEqual(attributedAuto.summary.fromRevision, 0)
+  assert.strictEqual(attributedAuto.summary.toRevision, 2)
+  const autoAudit = (await attribution.store.listAudit(ROOM)).find(
+    row => row.version_id === attributedAuto.id
+  )
+  assert.strictEqual(autoAudit.user_id, 'history-viewer')
+
+  await commit(attribution.engine, {
+    type: 'node.update',
+    actor_id: 'chen',
+    payload: { uid: 'root', text: 'Root by Chen again' }
+  })
+  const attributedManual = await attribution.engine.createVersion(ROOM, {
+    type: 'MANUAL',
+    name: 'manual attribution',
+    createdBy: 'manual-requester',
+    editors: ['wrong-editor']
+  })
+  assert.deepStrictEqual(attributedManual.editors, ['chen'])
+  assert.strictEqual(attributedManual.created_by, 'manual-requester')
+  assert.strictEqual(attributedManual.summary.fromRevision, 2)
+  assert.strictEqual(attributedManual.summary.toRevision, 3)
+
+  // Existing rows are corrected for display from reliable operation ranges,
+  // without persisting corrected attribution back into history metadata.
+  const oldAttribution = engineWith({ checkpointEvery: 100000 })
+  await oldAttribution.engine.ensureHistoryBaseline(ROOM)
+  await commit(oldAttribution.engine, {
+    type: 'node.update',
+    actor_id: 'chen',
+    payload: { uid: 'root', text: 'Root changed' }
+  })
+  const oldAuto = await oldAttribution.store.insertVersion({
+    room_key: ROOM,
+    revision: 1,
+    type: 'AUTO',
+    name: 'legacy auto attribution',
+    created_by: 'history-viewer',
+    created_at: new Date(Date.now() + 1000).toISOString(),
+    editors: ['history-viewer'],
+    source_kind: 'auto',
+    summary: { kind: 'edits', updated: 1, algorithmVersion: 2 },
+    summary_status: 'ready'
+  })
+  const oldList = await oldAttribution.engine.listVersions(ROOM, { type: 'AUTO' })
+  const oldPresented = oldList.versions.find(row => row.id === oldAuto.id)
+  assert.deepStrictEqual(oldPresented.editors.map(item => item.userId), ['chen'])
+  assert.strictEqual(oldPresented.created_by, 'history-viewer')
+  assert.strictEqual(oldPresented.summary.fromRevision, 0)
+  assert.strictEqual(oldPresented.summary.toRevision, 1)
+  const oldStoredAfter = await oldAttribution.store.getVersion(ROOM, oldAuto.id)
+  assert.deepStrictEqual(oldStoredAfter.editors, ['history-viewer'])
+
+  // Hidden or missing predecessors make old ranges uncertain, so display no
+  // editors instead of guessing from createdBy or the earliest checkpoint.
+  const hiddenPredecessor = engineWith({ checkpointEvery: 100000 })
+  const hiddenBaseline = await hiddenPredecessor.engine.ensureHistoryBaseline(ROOM)
+  const baselineVersion = (await hiddenPredecessor.engine.listVersions(ROOM, {}))
+    .versions.find(row => row.source_kind === 'room_initial')
+  assert.ok(hiddenBaseline)
+  assert.ok(baselineVersion)
+  await hiddenPredecessor.engine.hideVersion(ROOM, baselineVersion.id, 'owner')
+  await commit(hiddenPredecessor.engine, {
+    type: 'node.update',
+    actor_id: 'chen',
+    payload: { uid: 'root', text: 'Root changed under hidden base' }
+  })
+  const hiddenOld = await hiddenPredecessor.store.insertVersion({
+    room_key: ROOM,
+    revision: 1,
+    type: 'AUTO',
+    name: 'hidden predecessor range',
+    created_by: 'history-viewer',
+    created_at: new Date(Date.now() + 1000).toISOString(),
+    editors: ['history-viewer'],
+    source_kind: 'auto',
+    summary: { kind: 'edits', updated: 1, algorithmVersion: 2 },
+    summary_status: 'ready'
+  })
+  const hiddenRows = await hiddenPredecessor.engine.listVersions(ROOM, { type: 'AUTO' })
+  const hiddenPresented = hiddenRows.versions.find(row => row.id === hiddenOld.id)
+  assert.deepStrictEqual(hiddenPresented.editors, [])
+
+  const missingPredecessor = engineWith({ checkpointEvery: 100000 })
+  await missingPredecessor.engine.ensureHistoryBaseline(ROOM)
+  await commit(missingPredecessor.engine, {
+    type: 'node.update',
+    actor_id: 'chen',
+    payload: { uid: 'root', text: 'Root changed without earlier version row' }
+  })
+  const noPredecessorOld = await missingPredecessor.store.insertVersion({
+    room_key: ROOM,
+    revision: 1,
+    type: 'AUTO',
+    name: 'missing predecessor range',
+    created_by: 'history-viewer',
+    created_at: '2000-01-01T00:00:00.000Z',
+    editors: ['history-viewer'],
+    source_kind: 'auto',
+    summary: { kind: 'edits', updated: 1, algorithmVersion: 2 },
+    summary_status: 'ready'
+  })
+  const noPredecessorRows = await missingPredecessor.engine.listVersions(ROOM, {
+    type: 'AUTO'
+  })
+  const noPredecessorPresented = noPredecessorRows.versions.find(
+    row => row.id === noPredecessorOld.id
+  )
+  assert.deepStrictEqual(noPredecessorPresented.editors, [])
+
+  const noRevision = await missingPredecessor.store.insertVersion({
+    room_key: ROOM,
+    revision: null,
+    type: 'AUTO',
+    name: 'null revision attribution',
+    created_by: 'history-viewer',
+    editors: ['history-viewer'],
+    source_kind: 'auto',
+    summary: { kind: 'edits', updated: 1, algorithmVersion: 2 },
+    summary_status: 'ready'
+  })
+  const noRevisionRows = await missingPredecessor.engine.listVersions(ROOM, {
+    type: 'AUTO'
+  })
+  const noRevisionPresented = noRevisionRows.versions.find(
+    row => row.id === noRevision.id
+  )
+  assert.deepStrictEqual(noRevisionPresented.editors, [])
+
+  const actorStore = createMemoryHistoryStore(seed())
+  await actorStore.appendOperation({ room_key: ROOM, version: 1, actor_id: 'z' })
+  await actorStore.appendOperation({ room_key: ROOM, version: 3, actor_id: 'a' })
+  const incompleteActors = await actorStore.listOperationActors(ROOM, [
+    { id: 'gap', fromRevision: 0, toRevision: 3 }
+  ])
+  assert.deepStrictEqual(incompleteActors, [
+    { id: 'gap', editors: [], complete: false }
+  ])
+  const hiddenTimelineStore = createMemoryHistoryStore(seed())
+  const hiddenRow = await hiddenTimelineStore.insertVersion({
+    room_key: ROOM,
+    revision: 0,
+    type: 'AUTO',
+    created_at: '2026-01-01T00:00:00.000Z'
+  })
+  await hiddenTimelineStore.hideVersion(ROOM, hiddenRow.id)
+  const afterHidden = await hiddenTimelineStore.insertVersion({
+    room_key: ROOM,
+    revision: 1,
+    type: 'AUTO',
+    created_at: '2026-01-01T00:00:01.000Z'
+  })
+  const previousHidden = await hiddenTimelineStore.listVersionPredecessors(ROOM, [
+    afterHidden
+  ])
+  assert.strictEqual(previousHidden[0].previous.id, hiddenRow.id)
+
+  // Separate engine instances share the store's room lock, preventing duplicate
+  // auto versions when two history requests flush the same revision.
+  const sharedStore = createMemoryHistoryStore(seed())
+  const sharedEngineA = createHistoryEngine({ store: sharedStore })
+  const sharedEngineB = createHistoryEngine({ store: sharedStore })
+  await sharedEngineA.ensureHistoryBaseline(ROOM)
+  await commit(sharedEngineA, {
+    type: 'node.update',
+    actor_id: 'chen',
+    payload: { uid: 'root', text: 'Concurrent flush' }
+  })
+  await Promise.all([
+    sharedEngineA.flushPendingAutoVersion(ROOM, { userId: 'viewer-a' }),
+    sharedEngineB.flushPendingAutoVersion(ROOM, { userId: 'viewer-b' })
+  ])
+  const sharedAutos = (await sharedStore.listVersions(ROOM, { type: 'AUTO' })).versions
+  assert.strictEqual(sharedAutos.filter(row => Number(row.revision) === 1).length, 1)
+
+  // A worker claimed at revision 1 must not absorb a later edit committed before
+  // it obtains the room lock; the follow-up job gets its own version boundary.
+  const workerStore = createMemoryHistoryStore(seed())
+  const workerEngineA = createHistoryEngine({
+    store: workerStore,
+    config: { autoVersionIdleMs: 1, checkpointEvery: 100000 }
+  })
+  const workerEngineB = createHistoryEngine({ store: workerStore })
+  await workerEngineA.ensureHistoryBaseline(ROOM)
+  await commit(workerEngineA, {
+    type: 'node.update',
+    actor_id: 'alpha',
+    payload: { uid: 'root', text: 'Version one' }
+  })
+  const baseClaim = workerStore.claimDueAutoJobs.bind(workerStore)
+  let claimedResolve
+  let releaseClaimResolve
+  const claimedSignal = new Promise(resolve => { claimedResolve = resolve })
+  const claimGate = new Promise(resolve => { releaseClaimResolve = resolve })
+  let pauseClaim = true
+  workerStore.claimDueAutoJobs = async (...args) => {
+    const jobs = await baseClaim(...args)
+    if (pauseClaim && jobs.length) {
+      pauseClaim = false
+      claimedResolve()
+      await claimGate
+    }
+    return jobs
+  }
+  const workerRun = workerEngineB.processDueAutoJobs(Date.now() + 5000)
+  await claimedSignal
+  await commit(workerEngineA, {
+    type: 'node.update',
+    actor_id: 'beta',
+    payload: { uid: 'root', text: 'Version two' }
+  })
+  releaseClaimResolve()
+  const workerFirst = await workerRun
+  assert.strictEqual(workerFirst.length, 1)
+  assert.strictEqual(Number(workerFirst[0].revision), 1)
+  assert.deepStrictEqual(workerFirst[0].editors, ['alpha'])
+  const workerSecond = await workerEngineA.processDueAutoJobs(Date.now() + 10000)
+  assert.strictEqual(workerSecond.length, 1)
+  assert.strictEqual(Number(workerSecond[0].revision), 2)
+  assert.deepStrictEqual(workerSecond[0].editors, ['beta'])
 
   // Same-millisecond snapshots must follow the room revision, not UUID order.
   const tied = createMemoryHistoryStore(seed())

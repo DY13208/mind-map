@@ -74,6 +74,23 @@ function lookupBeforeVersion(lookup, cutoffVersion) {
   }
 }
 
+function replayFailureContext(row) {
+  const op = asReplayOp(row)
+  const payload = op.payload || {}
+  const targetOperationId =
+    payload.targetOperationId ||
+    payload.target_operation_id ||
+    payload.targetOpId ||
+    ''
+  return {
+    roomKey: String(op.roomKey || ''),
+    revision: Number(op.version || 0),
+    operationId: String(op.operation_id || ''),
+    operationType: String(op.type || ''),
+    targetOperationId: String(targetOperationId)
+  }
+}
+
 function assertContinuousOps(rows, fromRevision) {
   const ordered = (rows || [])
     .slice()
@@ -90,7 +107,15 @@ function assertContinuousOps(rows, fromRevision) {
       throw historyError(
         'HISTORY_OPS_GAP',
         `operation log gap at revision ${expected}, got ${version}`,
-        409
+        409,
+        {
+          details: {
+            revision: version,
+            expectedRevision: expected,
+            operationId: String(row.operation_id || row.opId || ''),
+            operationType: String(row.operation_type || row.type || '')
+          }
+        }
       )
     }
     expected = version + 1
@@ -129,7 +154,8 @@ async function replayOperation(store, row, lookup) {
       throw historyError(
         'HISTORY_REPLAY_FAILED',
         'cannot replay undo/redo: ' + (error && error.message),
-        409
+        409,
+        { cause: error, details: replayFailureContext(row) }
       )
     }
   }
@@ -158,7 +184,17 @@ async function replayOperations(baseTree, baseMeta, rows, options = {}) {
         )
   const lookup = createHistoryLookup(ordered, options.lookup || {})
   for (const row of ordered) {
-    store = await replayOperation(store, row, lookup)
+    try {
+      store = await replayOperation(store, row, lookup)
+    } catch (error) {
+      if (error && /^HISTORY_/.test(String(error.code || ''))) throw error
+      throw historyError(
+        'HISTORY_REPLAY_FAILED',
+        'historical reconstruction failed',
+        409,
+        { cause: error, details: replayFailureContext(row) }
+      )
+    }
   }
   return {
     tree: cloneJson(store.graph),

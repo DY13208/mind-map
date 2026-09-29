@@ -263,10 +263,16 @@ async function main() {
   const containerEvt = vm.events.find(a => a[0] === 'create_job_container')
   check('点运行派发了一次', dispatched.length === 1, JSON.stringify(dispatched[0] && dispatched[0].name))
   check(
-    '任务内容用概要里写的「下一步」',
-    dispatched[0].prompt.startsWith('接着把投放计划细化到周') &&
-      dispatched[0].prompt.includes('【背景 · 脑图当前节点】'),
+    '第一位固定是「调用CPD 方法论指导专家」',
+    dispatched[0].prompt.split('\n')[0] === runPrompt.CPD_ADVISOR_LINE,
     dispatched[0].prompt.split('\n')[0]
+  )
+  check(
+    '任务内容用概要里写的「下一步」',
+    dispatched[0].prompt.startsWith(
+      runPrompt.CPD_ADVISOR_LINE + '\n接着把投放计划细化到周'
+    ) && dispatched[0].prompt.includes('【背景 · 脑图当前节点】'),
+    dispatched[0].prompt.split('\n')[1]
   )
   check(
     '落点是概要所属的节点（不是概要）',
@@ -284,8 +290,8 @@ async function main() {
   await vm.runWorkbuddyJob()
   check(
     '用的是概要当下的文字（不是点时的快照）',
-    dispatched[0].prompt.startsWith('改成：先算预算上限'),
-    dispatched[0].prompt.split('\n')[0]
+    dispatched[0].prompt.split('\n')[1].startsWith('改成：先算预算上限'),
+    dispatched[0].prompt.split('\n')[1]
   )
 
   // ---- 5. 概要还没写内容：按节点默认任务跑，并提示怎么写 ----

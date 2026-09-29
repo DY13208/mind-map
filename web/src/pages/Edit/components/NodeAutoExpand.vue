@@ -134,11 +134,16 @@ export default {
           focusFlowExpandNode(this.mindMap, job.nodeUid)
         },
         onSuccess: res => {
-          if (this.$message) {
+          if (!this.$message) return
+          if (res && res.written) {
             this.$message.success(
-              `「${res.nodeLabel}」已实例化，代办人：${res.assigneeName}`
+              `「${res.nodeLabel}」已写入 ${res.written} 条子节点`
             )
+            return
           }
+          this.$message.info(
+            `「${res.nodeLabel}」未在 Wiki 中检索到内容，未写入`
+          )
         },
         onError: (_err, msg) => {
           if (this.$message) this.$message.error(msg)

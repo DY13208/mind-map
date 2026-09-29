@@ -99,7 +99,10 @@ export function createFlowExpandQueue({ getConcurrency, onChange }) {
           emit()
         }
       })
-      job.status = `已完成 · 代办人：${result.assigneeName}`
+      job.status =
+        result && result.written
+          ? `已写入 ${result.written} 条子节点`
+          : '未检索到内容，未写入'
       job.result = result
       if (job.onSuccess) job.onSuccess(result)
       finishJob(job, { ok: true })
@@ -115,8 +118,8 @@ export function createFlowExpandQueue({ getConcurrency, onChange }) {
         /Failed to fetch|NetworkError|ECONNREFUSED|Bad Gateway|<!DOCTYPE html>/i.test(
           raw
         )
-          ? '连不上 WorkBuddy，请确认服务器已启动 WorkBuddy 代理'
-          : raw || '流程补充失败'
+          ? '连不上 wiki-compiler，请确认图谱服务已启动'
+          : raw || 'Wiki 检索失败'
       job.status = msg
       job.error = msg
       if (job.onError) job.onError(err, msg)

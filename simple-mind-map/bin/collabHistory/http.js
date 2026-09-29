@@ -94,6 +94,24 @@ function treeUnavailableMessage(error) {
   return error && error.message
 }
 
+function replayDiagnostic(error, roomKey, versionId) {
+  const details = error && error.details ? error.details : {}
+  const cause = error && error.cause
+  const diagnostic = {
+    roomKey,
+    versionId,
+    code: error && error.code,
+    revision: details.revision == null ? null : Number(details.revision),
+    operationId: details.operationId || null,
+    operationType: details.operationType || null,
+    targetOperationId: details.targetOperationId || null,
+    expectedRevision:
+      details.expectedRevision == null ? null : Number(details.expectedRevision),
+    causeCode: cause && cause.code ? String(cause.code) : null
+  }
+  return diagnostic
+}
+
 async function handleHistoryApi(req, res, options = {}) {
   const url = options.url || new URL(req.url, 'http://127.0.0.1')
   const match = matchHistory(url.pathname)
@@ -176,7 +194,7 @@ async function handleHistoryApi(req, res, options = {}) {
       await engine.ensureHistoryBaseline(roomKey)
       const coverage = await engine.getHistoryCoverage(roomKey)
       const presented = engine.presentVersions
-        ? (await engine.presentVersions([row]))[0]
+        ? (await engine.presentVersions(roomKey, [row]))[0]
         : row
       sendJson(res, 200, {
         ok: true,
@@ -242,6 +260,16 @@ async function handleHistoryApi(req, res, options = {}) {
     sendJson(res, 405, { ok: false, code: 'METHOD_NOT_ALLOWED' })
     return true
   } catch (error) {
+    if (
+      error &&
+      (error.code === 'HISTORY_OPS_GAP' ||
+        error.code === 'HISTORY_REPLAY_FAILED')
+    ) {
+      console.error(
+        '[history] reconstruction failed',
+        replayDiagnostic(error, roomKey, versionId)
+      )
+    }
     sendJson(res, error.statusCode || 400, {
       ok: false,
       code: error.code || 'HISTORY_ERROR',

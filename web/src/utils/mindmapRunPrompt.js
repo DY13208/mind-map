@@ -8,6 +8,22 @@
  * （simple-mind-map 的节点对象自带 parent 链，不用拿到 mindMap 实例）。
  */
 
+/**
+ * 每次派发都固定带上的第一行 —— 先请 CPD 方法论指导专家介入。
+ *
+ * 页面上的「运行 / 继续执行 / 没选中节点时的兜底」最后都走这个文件的两个
+ * builder，所以统一在这里加，别再散落到各个调用处（否则漏一处就少一处）。
+ */
+export const CPD_ADVISOR_LINE = '【调用CPD 方法论指导专家】'
+
+/** 给任意一条要派发的提示词加上固定抬头；已经带过就不重复加 */
+export function withCpdAdvisor(prompt) {
+  const text = String(prompt == null ? '' : prompt).trim()
+  if (!text) return CPD_ADVISOR_LINE
+  if (text.includes(CPD_ADVISOR_LINE)) return text
+  return `${CPD_ADVISOR_LINE}\n${text}`
+}
+
 const RESULT_TITLE_RE = /^运行输出\s*[·・:：]/
 const MAX_PATH_DEPTH = 6
 const MAX_RESULT_CHARS = 1200
@@ -368,7 +384,7 @@ export function buildNodeRunPrompt({ node, room = '', cwd = '' } = {}) {
   )
   lines.push('   ## 产出          → 这次产出的文件名 + 一句话说明；没有就写「无」')
   lines.push('4. 缺数据必须在「待补充数据」里点名，不要用假设的数字或占位内容凑答案。')
-  return lines.join('\n')
+  return withCpdAdvisor(lines.join('\n'))
 }
 
 /** 「继续执行」用：用户输入为主，后面附上当前节点与前序结果的背景 */
@@ -407,5 +423,5 @@ export function buildFollowUpPrompt(text, { node, room = '', cwd = '' } = {}) {
   lines.push(
     '输出照旧精简：## 一句话结论 / ## 关键要点 / ## 待补充数据 / ## 产出，过程与日志不要写。'
   )
-  return lines.join('\n')
+  return withCpdAdvisor(lines.join('\n'))
 }

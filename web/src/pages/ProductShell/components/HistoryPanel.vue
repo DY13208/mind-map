@@ -376,6 +376,7 @@ export default {
           .filter(Boolean)
           .join('、')
       }
+      if (String(item.type || '').toUpperCase() === 'AUTO') return '编辑者未记录'
       return item.createdBy || '未知编辑人'
     },
     query() {
