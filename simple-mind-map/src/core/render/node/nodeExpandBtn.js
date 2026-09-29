@@ -127,6 +127,8 @@ function updateExpandBtnPos() {
   if (!this._expandBtn) {
     return
   }
+  // Both states use the layout's branch junction: expanded parents collapse
+  // beside the child connector, while collapsed parents show the count there.
   this.renderer.layout.renderExpandBtn(this, this._expandBtn)
 }
 
@@ -134,6 +136,18 @@ function updateExpandBtnPos() {
 function renderExpandBtn() {
   if (this.isGeneralization) return
   if (this.getChildrenLength() <= 0 || this.isRoot) {
+    return
+  }
+  const { isShowCreateChildBtnIcon, readonly } = this.mindMap.opt
+  if (
+    isShowCreateChildBtnIcon &&
+    !readonly &&
+    this.getData('isActive') &&
+    this.getData('expand') !== false
+  ) {
+    // Selected expanded parents use the same junction for add-child.
+    // Hide collapse so the two actions never overlap or compete for clicks.
+    this.removeExpandBtn()
     return
   }
   if (this._expandBtn) {
@@ -188,6 +202,8 @@ function showExpandBtn() {
   const { alwaysShowExpandBtn, notShowExpandBtn } = this.mindMap.opt
   if (alwaysShowExpandBtn || notShowExpandBtn) return
   setTimeout(() => {
+    const { isActive, expand } = this.getData()
+    if (!isActive && expand !== false && !this._isMouseenter) return
     this.renderExpandBtn()
   }, 0)
 }

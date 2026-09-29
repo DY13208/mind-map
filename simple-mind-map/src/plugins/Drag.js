@@ -200,8 +200,28 @@ class Drag extends Base {
       }
     }
     let didMove = false
+    const requestSyncPaint = () => {
+      if (this.mindMap.renderer) this.mindMap.renderer._syncPaintOnce = true
+    }
+    const markRemeasure = node => {
+      if (!node) return
+      const family =
+        node.parent && node.parent.children && node.parent.children.length
+          ? node.parent.children
+          : node.children || []
+      family.forEach(item => {
+        if (item) item._forceMeasure = true
+      })
+      node._forceMeasure = true
+      ;(node.children || []).forEach(child => {
+        if (child) child._forceMeasure = true
+      })
+    }
     // 存在重叠子节点，则移动作为其子节点
     if (this.overlapNode) {
+      requestSyncPaint()
+      markRemeasure(this.overlapNode)
+      ;(this.beingDragNodeList || []).forEach(markRemeasure)
       this.removeNodeActive(this.overlapNode)
       this.mindMap.execCommand(
         'MOVE_NODE_TO',
@@ -210,6 +230,9 @@ class Drag extends Base {
       )
       didMove = true
     } else if (this.prevNode) {
+      requestSyncPaint()
+      markRemeasure(this.prevNode)
+      ;(this.beingDragNodeList || []).forEach(markRemeasure)
       // 存在前一个相邻节点，作为其下一个兄弟节点
       this.removeNodeActive(this.prevNode)
       this.mindMap.execCommand(
@@ -219,6 +242,9 @@ class Drag extends Base {
       )
       didMove = true
     } else if (this.nextNode) {
+      requestSyncPaint()
+      markRemeasure(this.nextNode)
+      ;(this.beingDragNodeList || []).forEach(markRemeasure)
       // 存在下一个相邻节点，作为其前一个兄弟节点
       this.removeNodeActive(this.nextNode)
       this.mindMap.execCommand(
@@ -1175,6 +1201,10 @@ class Drag extends Base {
 
   // 设置提示元素的大小和位置
   setPlaceholderRect({ x, y, dir, rotate, notRenderLine }) {
+    // Always drop the previous otherDraw hint lines before creating new ones.
+    // Otherwise a second setPlaceholderRect in the same overlap pass orphans
+    // the first batch (reference overwritten, SVG left on otherDraw).
+    this.removeExtraLines()
     let w = this.placeholderWidth
     let h = this.placeholderHeight
     if (rotate) {
@@ -1184,6 +1214,7 @@ class Drag extends Base {
     }
     this.placeholder.size(w, h).move(x, y)
     if (notRenderLine) {
+      if (this.placeHolderLine) this.placeHolderLine.hide()
       return
     }
     const { dragPlaceholderLineConfig } = this.mindMap.opt
@@ -1217,6 +1248,9 @@ class Drag extends Base {
     )
     this.placeHolderExtraLines = [...parent._lines]
     this.placeHolderExtraLines.forEach(line => {
+      if (typeof line.addClass === 'function') {
+        line.addClass('smm-drag-placeholder-artifact')
+      }
       this.mindMap.otherDraw.add(line)
       line
         .stroke({

@@ -13,12 +13,12 @@
         v-if="!isZenMode"
         @open-history="historyVisible = true"
       ></Toolbar>
-      <Edit></Edit>
+      <Edit ref="editor"></Edit>
       <HistoryPanel
         :visible.sync="historyVisible"
         :room="historyRoom"
         :wait-for-commit="true"
-        @restored="onHistoryRestored"
+        :after-restore="onHistoryRestored"
       />
     </template>
   </div>
@@ -32,7 +32,7 @@ import HistoryPanel from '../ProductShell/components/HistoryPanel.vue'
 import { productRequest } from '@/services/productHttp'
 import { normalizeRoomDto } from '@/services/roomDto'
 import { mapState, mapMutations } from 'vuex'
-import { getLocalConfig } from '@/api'
+import { getLocalConfig, withRightDragDefault } from '@/api'
 import { navigateToMyMaps } from '@/utils/roomLocation'
 
 export default {
@@ -104,7 +104,7 @@ export default {
 
     // 初始化本地配置
     initLocalConfig() {
-      let config = getLocalConfig()
+      let config = withRightDragDefault(getLocalConfig())
       if (config) {
         this.setLocalConfig({
           ...this.$store.state.localConfig,
@@ -119,8 +119,12 @@ export default {
         : document.body.classList.remove('isDark')
     },
 
-    onHistoryRestored() {
-      this.$bus.$emit('history-restored')
+    onHistoryRestored(restored) {
+      const editor = this.$refs.editor
+      if (editor && typeof editor.onHistoryRestored === 'function') {
+        return editor.onHistoryRestored(restored)
+      }
+      return Promise.resolve()
     },
 
     goToMyMaps() {

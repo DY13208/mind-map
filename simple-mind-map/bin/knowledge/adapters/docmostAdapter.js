@@ -75,14 +75,28 @@ function buildDocmostPagePath(spaceSlug, slugId, title) {
 /**
  * Canonical knowledge MD keeps machine metadata (YAML frontmatter, node anchors,
  * hash comments, relative .md branch links). Docmost should receive clean Markdown.
+ *
+ * Human-slot reverse sync needs stable node markers in Wiki Markdown. Pass
+ * `{ preserveMindmapMarkers: true }` to keep `<!-- mindmap:node=... -->` and
+ * inline-code `` `mindmap:node=...` `` markers (Docmost strips HTML comments).
  */
-function toDocmostMarkdown(text, { pageLinks = null, env = process.env } = {}) {
+function toDocmostMarkdown(
+  text,
+  { pageLinks = null, env = process.env, preserveMindmapMarkers = false } = {}
+) {
   let body = String(text || '').replace(/\r\n?/g, '\n')
   // Drop YAML frontmatter
   body = body.replace(/^---\n[\s\S]*?\n---\n+/, '')
-  // Drop compiler anchors / hash comments
-  body = body.replace(/<a\s+id="node-[^"]*"\s*><\/a>\n?/gi, '')
-  body = body.replace(/<!--\s*mindmap:node=[^>]*-->\n?/gi, '')
+  if (!preserveMindmapMarkers) {
+    // Drop compiler anchors / hash comments (standard slot: clean Wiki view)
+    body = body.replace(/<a\s+id="node-[^"]*"\s*><\/a>\n?/gi, '')
+    body = body.replace(/<!--\s*mindmap:node=[^>]*-->\n?/gi, '')
+    body = body.replace(/^`mindmap:node=[^`]+`\s*$/gim, '')
+    body = body.replace(/^mindmap-node:[0-9a-fA-F]+(?:\s+hash=\S+)?\s*$/gim, '')
+  } else {
+    // Keep markers; still drop empty anchors (Docmost may strip them)
+    body = body.replace(/<a\s+id="node-[^"]*"\s*><\/a>\n?/gi, '')
+  }
   // Rewrite relative branch links → Docmost page path or plain title
   body = body.replace(
     /\[([^\]]+)\]\((branches\/[a-zA-Z0-9._-]+\.md)\)/g,
@@ -531,6 +545,18 @@ async function sync(roomId, options = {}) {
         standard.title === title &&
         standard.docmost_space_id === space.spaceId
       ) {
+        // Content unchanged ≠ version synced. Bump mapping version only (no Docmost API).
+        if (
+          String(standard.last_synced_version || '') !== String(versionTag)
+        ) {
+          const bumped = await mappingStore.bumpLastSyncedVersion(mindPool, {
+            roomId,
+            topicKey,
+            slot: 'standard',
+            lastSyncedVersion: versionTag
+          })
+          if (bumped) standard = bumped
+        }
         pages[doc.file] = {
           pageId: standard.docmost_page_id,
           slugId: await client.findPageSlugId(db, standard.docmost_page_id),

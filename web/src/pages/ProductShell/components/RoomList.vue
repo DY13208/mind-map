@@ -61,6 +61,7 @@
           @click.native.stop
           ><i class="el-icon-more" /><el-dropdown-menu slot="dropdown"
             ><el-dropdown-item command="open">打开</el-dropdown-item
+            ><el-dropdown-item command="duplicate">创建副本</el-dropdown-item
             ><el-dropdown-item command="rename">重命名</el-dropdown-item
             ><el-dropdown-item command="move">移动到文件夹</el-dropdown-item
             ><el-dropdown-item v-if="allowMoveToTeam" command="move-to-team"
@@ -71,10 +72,13 @@
               >删除</el-dropdown-item
             ></el-dropdown-menu
           ></el-dropdown
-        ><el-dropdown v-if="scope.row.__kind === 'folder' && !selectMode && scope.row.canManage !== false"
+        ><el-dropdown v-if="scope.row.__kind === 'folder' && !selectMode"
           trigger="click" @command="$emit($event, scope.row)" @click.native.stop>
           <i class="el-icon-more" /><el-dropdown-menu slot="dropdown">
+            <el-dropdown-item v-if="allowShare" command="share-folder">分享 / 权限</el-dropdown-item>
+            <el-dropdown-item v-if="scope.row.canManage !== false" command="rename-folder">重命名</el-dropdown-item>
             <el-dropdown-item v-if="allowMoveToTeam" command="move-folder-to-team">移至团队空间</el-dropdown-item>
+            <el-dropdown-item v-if="allowDelete && scope.row.canManage !== false" command="delete-folder" divided>删除</el-dropdown-item>
           </el-dropdown-menu>
         </el-dropdown></template
       ></el-table-column
@@ -91,6 +95,7 @@ export default {
     rooms: Array,
     folders: { type: Array, default: () => [] },
     allowDelete: { type: Boolean, default: false },
+    allowShare: { type: Boolean, default: true },
     allowMoveToTeam: { type: Boolean, default: true },
     selectMode: { type: Boolean, default: false },
     selectedRoomKeys: { type: Array, default: () => [] },
@@ -183,11 +188,15 @@ export default {
   border: 1px solid #e3e9e6;
   border-radius: 12px;
   overflow: hidden;
+  /deep/ .el-table__row {
+    cursor: pointer;
+  }
   .roomName {
     display: flex;
     gap: 9px;
     align-items: center;
     color: #234238;
+    cursor: pointer;
     i {
       color: #0b9366;
     }

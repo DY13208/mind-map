@@ -8,7 +8,8 @@ import {
   checkSmmFormatData,
   getTextFromHtml,
   isWhite,
-  getVisibleColorFromTheme
+  getVisibleColorFromTheme,
+  trimNodeEditText
 } from '../../utils'
 import {
   ERROR_TYPES,
@@ -327,7 +328,7 @@ export default class TextEdit {
       autoEmptyTextWhenKeydownEnterEdit
     } = this.mindMap.opt
     if (!isFromScale) {
-      this.mindMap.emit('before_show_text_edit')
+      this.mindMap.emit('before_show_text_edit', node)
     }
     this.registerTmpShortcut()
     if (!this.textEditNode) {
@@ -500,7 +501,7 @@ export default class TextEdit {
       return
     }
     const currentNode = this.currentNode
-    const text = this.getEditText()
+    const text = trimNodeEditText(this.getEditText(), false)
     this.currentNode = null
     this.textEditNode.style.display = 'none'
     this.textEditNode.innerHTML = ''

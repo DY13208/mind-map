@@ -10,6 +10,12 @@ services:
       APP_URL: ${DOCMOST_APP_URL:-http://localhost:3040}
       NODE_OPTIONS: --max-old-space-size=${DOCMOST_NODE_MAX_OLD_SPACE_SIZE:-4096}
       REDIS_URL: redis://docmost-redis:6379
+      # Wiki save → mind-map async reverse sync (human slot only)
+      MIND_MAP_INTERNAL_URL: ${MIND_MAP_INTERNAL_URL:-http://app:80}
+      WIKI_MINDMAP_AUTO_SYNC: ${WIKI_MINDMAP_AUTO_SYNC:-true}
+      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:-}
+      DOCMOST_SSO_SECRET: ${DOCMOST_SSO_SECRET:-}
+      WIKI_MINDMAP_HOOK_SECRET: ${WIKI_MINDMAP_HOOK_SECRET:-}
     expose:
       - '3000'
     volumes:

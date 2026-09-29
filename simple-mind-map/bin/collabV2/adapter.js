@@ -270,6 +270,7 @@ function createCollaborationAdapter(options = {}) {
     lastServerRevision: 0,
     serverRevision: 0,
     role: '',
+    shareId: null,
     canEdit: true,
     canView: true,
     peers: [],
@@ -309,6 +310,7 @@ function createCollaborationAdapter(options = {}) {
   let drainLoop = null
   let draining = false
   let enqueueGate = Promise.resolve()
+  let historyQueue = Promise.resolve()
 
   function withEnqueueLock(fn) {
     const prev = enqueueGate
@@ -631,6 +633,7 @@ function createCollaborationAdapter(options = {}) {
       lastServerRevision: state.lastServerRevision,
       serverRevision: Number(state.serverRevision || state.lastServerRevision || 0),
       role: state.role,
+      shareId: state.shareId,
       canEdit: state.canEdit,
       canView: state.canView,
       peers: state.peers.slice(),
@@ -850,6 +853,7 @@ function createCollaborationAdapter(options = {}) {
       throw err
     }
     state.role = result.role || state.role
+    state.shareId = result.shareId || null
     state.canEdit = result.canEdit !== false
     state.canView = result.canView !== false
     state.peers = result.peers || []
@@ -991,6 +995,7 @@ function createCollaborationAdapter(options = {}) {
     state.undoStack.push(entry)
     if (state.undoStack.length > 200) state.undoStack.shift()
     state.redoStack = []
+    emit('history:push')
   }
 
   async function submitBatched(raw) {
@@ -1823,6 +1828,7 @@ function createCollaborationAdapter(options = {}) {
     }
     state.undoStack.pop()
     state.redoStack.push(last)
+    emit('history:undo')
     return result
   }
 
@@ -1859,8 +1865,61 @@ function createCollaborationAdapter(options = {}) {
     }
     state.redoStack.pop()
     state.undoStack.push(last)
+    emit('history:redo')
     return result
   }
+
+  function historyBusy() {
+    return state.outboxPending > 0 ||
+      state.outboxSending > 0 ||
+      state.pendingAcks.size > 0
+  }
+
+  function waitForHistoryReady() {
+    if (!historyBusy()) return Promise.resolve()
+    return new Promise((resolve, reject) => {
+      let finished = false
+      let unsubscribe = null
+      let timer = null
+      const finish = error => {
+        if (finished) return
+        finished = true
+        if (unsubscribe) unsubscribe()
+        if (timer) clearTimeout(timer)
+        if (error) reject(error)
+        else resolve()
+      }
+      unsubscribe = subscribe(() => {
+        if (!historyBusy()) finish()
+      })
+      timer = setTimeout(() => {
+        const error = new Error('保存尚未完成，请稍后重试')
+        error.code = 'UNDO_PENDING'
+        finish(error)
+      }, 15000)
+      if (!historyBusy()) finish()
+    })
+  }
+
+  function queueHistory(action) {
+    const next = historyQueue.catch(() => {}).then(async () => {
+      // A command may still be writing its outbox row when the user presses
+      // Undo. Its history entry only exists after ACK, so wait for that write.
+      const durable = await waitForOutboxDurable({ timeoutMs: 15000 })
+      if (durable.timeout) {
+        const error = new Error('保存尚未完成，请稍后重试')
+        error.code = 'UNDO_PENDING'
+        throw error
+      }
+      await waitForHistoryReady()
+      return action()
+    })
+    historyQueue = next.catch(() => {})
+    return next
+  }
+
+  const queuedUndo = () => queueHistory(undo)
+  const queuedRedo = () => queueHistory(redo)
 
   async function httpFallbackSync() {
     if (typeof options.httpSync !== 'function') return null
@@ -1986,10 +2045,10 @@ function createCollaborationAdapter(options = {}) {
     connect,
     disconnect,
     submitOperation,
-    undo,
-    undoLastLocalOperation: undo,
-    redo,
-    redoLastLocalOperation: redo,
+    undo: queuedUndo,
+    undoLastLocalOperation: queuedUndo,
+    redo: queuedRedo,
+    redoLastLocalOperation: queuedRedo,
     applyRemoteOperation,
     resync,
     setPresence,

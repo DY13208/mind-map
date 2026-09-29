@@ -1,5 +1,6 @@
 <template>
   <el-dialog
+    ref="historyDialog"
     class="historyDialog"
     :custom-class="'historyDialog' + (isNarrow ? ' isNarrow' : '')"
     :visible.sync="shown"
@@ -12,7 +13,18 @@
     @opened="onOpened"
     @closed="onClosed"
   >
-    <div class="historyShell" v-loading="loading">
+    <div class="historyShell">
+      <div v-if="restoring" class="restoreStatus" role="status" aria-live="polite">
+        {{ restoreStatus }}
+      </div>
+      <el-alert
+        v-if="restoreError"
+        class="restoreError"
+        :title="restoreError"
+        type="error"
+        :closable="false"
+        show-icon
+      />
       <div v-if="error" class="historyError">
         <el-alert :title="error" type="error" :closable="false" />
         <el-button size="small" @click="reload">重试</el-button>
@@ -31,6 +43,8 @@
             :metadata="preview.metadata"
             :loading="preview.loading"
             :error="preview.error"
+            @retry="selected && loadPreview(selected)"
+            @failed="onPreviewFailed"
           />
         </section>
         <aside v-show="!isNarrow || pane === 'list'" class="timelinePane">
@@ -72,7 +86,8 @@
               />
             </div>
           </div>
-          <div v-if="!groups.length" class="emptyWrap">
+          <div v-if="loading" class="emptyWrap">正在获取历史版本…</div>
+          <div v-else-if="!groups.length" class="emptyWrap">
             <EmptyState
               title="暂无历史版本"
               description="编辑脑图或创建手动版本后会显示在这里"
@@ -155,13 +170,16 @@ export default {
   props: {
     visible: Boolean,
     room: Object,
-    waitForCommit: Boolean
+    waitForCommit: Boolean,
+    afterRestore: Function
   },
   data: () => ({
     loading: false,
     loadingMore: false,
     creating: false,
     restoring: false,
+    restoreStatus: '',
+    restoreError: '',
     error: '',
     versions: [],
     nextCursor: null,
@@ -175,7 +193,8 @@ export default {
     preview: { tree: null, metadata: {}, loading: false, error: '' },
     previewToken: 0,
     lastPreRestoreId: '',
-    loadController: null
+    loadController: null,
+    listController: null
   }),
   computed: {
     shown: {
@@ -237,6 +256,12 @@ export default {
       if (value) {
         this.measure()
         this.reload()
+      } else {
+        this._reloadToken = (this._reloadToken || 0) + 1
+        if (this.listController) this.listController.abort()
+        this.abortPreview()
+        const mapPreview = this.$refs.mapPreview
+        if (mapPreview && mapPreview.teardown) mapPreview.teardown()
       }
     }
   },
@@ -246,7 +271,9 @@ export default {
   },
   beforeDestroy() {
     window.removeEventListener('resize', this.measure)
+    this.unbindDialogDrag()
     this.abortPreview()
+    if (this.listController) this.listController.abort()
   },
   methods: {
     typeLabel: versionTypeLabel,
@@ -254,6 +281,71 @@ export default {
     displayName: historyDisplayName,
     measure() {
       this.narrow = window.innerWidth < 900
+    },
+    bindDialogDrag() {
+      this.unbindDialogDrag()
+      const wrapper = this.$refs.historyDialog && this.$refs.historyDialog.$el
+      const dialog = wrapper && wrapper.querySelector('.el-dialog.historyDialog')
+      const header = dialog && dialog.querySelector('.el-dialog__header')
+      if (!header) return
+
+      let offsetX = 0
+      let offsetY = 0
+      let dragging = null
+      const stopDragging = event => {
+        if (event && dragging && event.pointerId !== dragging.pointerId) return
+        dragging = null
+        window.removeEventListener('pointermove', onPointerMove)
+        window.removeEventListener('pointerup', stopDragging)
+        window.removeEventListener('pointercancel', stopDragging)
+      }
+      const onPointerMove = event => {
+        if (!dragging || event.pointerId !== dragging.pointerId) return
+        const { rect, startX, startY, initialX, initialY } = dragging
+        const left = rect.left - initialX
+        const right = rect.right - initialX
+        const top = rect.top - initialY
+        const bottom = rect.bottom - initialY
+        offsetX = Math.max(
+          -left,
+          Math.min(window.innerWidth - right, initialX + event.clientX - startX)
+        )
+        offsetY = Math.max(
+          -top,
+          Math.min(window.innerHeight - bottom, initialY + event.clientY - startY)
+        )
+        dialog.style.transform = `translate(${offsetX}px, ${offsetY}px)`
+      }
+      const onPointerDown = event => {
+        if (
+          dragging ||
+          event.button !== 0 ||
+          event.target.closest('.el-dialog__headerbtn')
+        ) return
+        event.preventDefault()
+        dragging = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          initialX: offsetX,
+          initialY: offsetY,
+          rect: dialog.getBoundingClientRect()
+        }
+        window.addEventListener('pointermove', onPointerMove)
+        window.addEventListener('pointerup', stopDragging)
+        window.addEventListener('pointercancel', stopDragging)
+      }
+      header.addEventListener('pointerdown', onPointerDown)
+      this._historyDragCleanup = () => {
+        stopDragging()
+        header.removeEventListener('pointerdown', onPointerDown)
+        dialog.style.transform = ''
+      }
+    },
+    unbindDialogDrag() {
+      if (!this._historyDragCleanup) return
+      this._historyDragCleanup()
+      this._historyDragCleanup = null
     },
     formatDate(value) {
       return new Date(value).toLocaleDateString('zh-CN')
@@ -295,6 +387,11 @@ export default {
       return q
     },
     async reload() {
+      const reloadToken = this._reloadToken = (this._reloadToken || 0) + 1
+      if (this.listController) this.listController.abort()
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+      this.listController = controller
+      this.abortPreview()
       this.loading = true
       this.error = ''
       this.versions = []
@@ -302,22 +399,28 @@ export default {
       this.lastPreRestoreId = this.lastPreRestoreId
       try {
         await this.waitOwnEdits()
-        const result = await historyService.listVersions(this.roomKey, this.query())
+        if (reloadToken !== this._reloadToken || !this.visible) return
+        const result = await historyService.listVersions(this.roomKey, this.query(), {
+          signal: controller && controller.signal
+        })
+        if (reloadToken !== this._reloadToken || !this.visible) return
         this.versions = result.list || []
         this.nextCursor = result.nextCursor || null
         this.currentRevision = Number(
           result.currentRevision || (this.room && this.room.revision) || 0
         )
         const first = this.versions[0]
-        if (first) await this.select(first)
+        if (first) this.select(first)
         else {
           this.selected = null
           this.preview = { tree: null, metadata: {}, loading: false, error: '' }
         }
       } catch (error) {
-        this.error = userMessageFromError(error)
+        if (error && error.name === 'AbortError') return
+        if (reloadToken === this._reloadToken) this.error = userMessageFromError(error)
       } finally {
-        this.loading = false
+        if (this.listController === controller) this.listController = null
+        if (reloadToken === this._reloadToken) this.loading = false
       }
     },
     async loadMore() {
@@ -359,6 +462,14 @@ export default {
       }
       return userMessageFromError(error) || '预览加载失败'
     },
+    onPreviewFailed(error) {
+      this.preview = {
+        tree: null,
+        metadata: {},
+        loading: false,
+        error: this.previewErrorMessage(error)
+      }
+    },
     async loadPreview(item) {
       this.abortPreview()
       const token = this.previewToken
@@ -373,8 +484,10 @@ export default {
           { signal: controller && controller.signal }
         )
         if (token !== this.previewToken) return
+        // Vue 2 must not observe every node in a large history snapshot.
+        const tree = data.tree && Object.freeze(data.tree)
         this.preview = {
-          tree: data.tree,
+          tree,
           metadata: data.metadata || {},
           loading: false,
           error: ''
@@ -432,6 +545,9 @@ export default {
       )
         .then(async () => {
           this.restoring = true
+          this.restoreStatus = '正在恢复历史版本…'
+          this.restoreError = ''
+          let serverRestored = false
           try {
             const restored = await historyService.restoreVersion(
               this.roomKey,
@@ -442,10 +558,24 @@ export default {
             this.currentRevision = Number(
               restored.newRevision || this.currentRevision + 1
             )
-            this.$message.success('已恢复，协作中的脑图会同步更新')
+            serverRestored = true
+            this.restoreStatus = this.afterRestore
+              ? '正在加载已恢复的脑图节点…'
+              : '正在更新历史版本列表…'
             this.$emit('restored', restored)
+            if (this.afterRestore) await this.afterRestore(restored)
             await this.reload()
+            this.$message.success(
+              this.afterRestore
+                ? '历史版本已恢复，脑图已加载'
+                : '已恢复，协作中的脑图会同步更新'
+            )
           } catch (error) {
+            if (serverRestored) {
+              const code = error && error.code ? `（${error.code}）` : ''
+              this.restoreError = `历史版本已在服务器恢复，但画布加载失败${code}。请刷新页面查看恢复结果。`
+              return
+            }
             if (error && error.code === 'RESTORE_CONFLICT') {
               await this.reload()
               this.$message.warning('当前内容已有新修改，请确认后再次恢复')
@@ -454,6 +584,7 @@ export default {
             this.$message.error(userMessageFromError(error))
           } finally {
             this.restoring = false
+            this.restoreStatus = ''
           }
         })
         .catch(() => {})
@@ -477,6 +608,7 @@ export default {
       if (hit) await this.select(hit)
     },
     onOpened() {
+      this.bindDialogDrag()
       this.$nextTick(() => {
         requestAnimationFrame(() => {
           const preview = this.$refs.mapPreview
@@ -487,7 +619,12 @@ export default {
       })
     },
     onClosed() {
+      this._reloadToken = (this._reloadToken || 0) + 1
+      this.loading = false
+      if (this.listController) this.listController.abort()
+      this.unbindDialogDrag()
       this.abortPreview()
+      this.restoreError = ''
       this.preview = { tree: null, metadata: {}, loading: false, error: '' }
       this.selected = null
       this.pane = 'list'
@@ -501,6 +638,19 @@ export default {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+.restoreStatus {
+  flex: none;
+  padding: 8px 12px;
+  color: #245c43;
+  background: #edf7f0;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.restoreError {
+  flex: none;
+  margin-bottom: 8px;
 }
 .historyLayout {
   display: grid;
@@ -630,6 +780,14 @@ export default {
 .el-dialog.historyDialog .el-dialog__header,
 .el-dialog.historyDialog .el-dialog__footer {
   flex: none;
+}
+.el-dialog.historyDialog .el-dialog__header {
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+.el-dialog.historyDialog .el-dialog__headerbtn {
+  cursor: pointer;
 }
 .el-dialog.historyDialog .el-dialog__body {
   flex: 1;

@@ -58,6 +58,7 @@
     <NodeAttachment v-if="mindMap" :mindMap="mindMap"></NodeAttachment>
     <NodeAttachmentPreview v-if="mindMap"></NodeAttachmentPreview>
     <CooperateDialog :mindMap="mindMap"></CooperateDialog>
+    <NodeShareDialog></NodeShareDialog>
     <MapRefDialog></MapRefDialog>
     <div
       class="dragMask"
@@ -156,6 +157,7 @@ import NodeAutoExpand from './NodeAutoExpand.vue'
 import NodeAttachment from './NodeAttachment.vue'
 import NodeAttachmentPreview from './NodeAttachmentPreview.vue'
 import CooperateDialog from './CooperateDialog.vue'
+import NodeShareDialog from './NodeShareDialog.vue'
 import MapRefDialog from './MapRefDialog.vue'
 import { normalizeMapRef } from '@/utils/mapRefNav'
 import { writeJobResultToMap, createJobContainer } from '@/utils/jobResultWriter'
@@ -224,6 +226,7 @@ export default {
     NodeAttachment,
     NodeAttachmentPreview,
     CooperateDialog,
+    NodeShareDialog,
     MapRefDialog
   },
   data() {
@@ -294,11 +297,10 @@ export default {
     this.$bus.$on('node_tree_render_end', this.handleHideLoading)
     this.$bus.$on('showLoading', this.handleShowLoading)
     this.$bus.$on('hideLoading', this.handleForceHideLoading)
-    this.enableShowLoading = true
-    showLoading()
-    this.loadingSafetyTimer = setTimeout(() => {
-      this.handleHideLoading({ force: true })
-    }, 20000)
+    // Opening the editor must never cover the canvas with a loading overlay.
+    // Explicit imports/saves still use their own progress UI below.
+    this.enableShowLoading = false
+    hideLoading()
     let dataReady = true
     try {
       await promiseWithTimeout(this.getData(), 10000, 'mind map data')
@@ -339,7 +341,6 @@ export default {
     this.$bus.$on('startPainter', this.handleStartPainter)
     this.$bus.$on('localStorageExceeded', this.onLocalStorageExceeded)
     this.$bus.$on('toggle_appearance_mode', this.handleToggleAppearanceMode)
-    this.$bus.$on('history-restored', this.onHistoryRestored)
     this.$bus.$on('prepare_reload', this.prepareReload)
     window.addEventListener('resize', this.handleResize)
     // 房间模式下协作挂了不能等于"图没了"：等一会儿还没连上就用本地留底恢复
@@ -385,7 +386,6 @@ export default {
     this.$bus.$off('hideLoading', this.handleForceHideLoading)
     this.$bus.$off('localStorageExceeded', this.onLocalStorageExceeded)
     this.$bus.$off('toggle_appearance_mode', this.handleToggleAppearanceMode)
-    this.$bus.$off('history-restored', this.onHistoryRestored)
     this.$bus.$off('prepare_reload', this.prepareReload)
     window.removeEventListener('resize', this.handleResize)
     if (this.mindMap) {
@@ -447,7 +447,7 @@ export default {
 
     ...mapMutations(['setLocalConfig']),
 
-    onHistoryRestored(restored) {
+    async onHistoryRestored(restored) {
       const cooperate = this.mindMap && this.mindMap.cooperate
       if (
         cooperate &&
@@ -458,7 +458,15 @@ export default {
           (restored && restored.newRevision) ||
             (cooperate.lastAppliedVersion || 0) + 1
         )
-        cooperate.recoverHttpCollab(target).catch(() => {})
+        const result = await cooperate.recoverHttpCollab(target, {
+          reason: 'VERSION_RESTORE'
+        })
+        if (!result || !result.applied) {
+          const error = new Error('history canvas refresh did not complete')
+          error.code = (result && result.code) || 'HTTP_HISTORY_RESTORE_INCOMPLETE'
+          throw error
+        }
+        return result
       }
     },
 
@@ -496,6 +504,8 @@ export default {
 
     // 显示loading
     handleShowLoading(text, durationOrOptions) {
+      // Empty requests come from appearance changes; they must not cover the map.
+      if (!text && !durationOrOptions) return
       this.enableShowLoading = true
       const options =
         typeof durationOrOptions === 'number'
@@ -1159,6 +1169,14 @@ export default {
           })
         }
       })
+      if (this.isLargeMap && !this.$route.query.room) {
+        this.mindMap.renderer._forceOverviewPaintOnce = true
+        const fitOverview = () => {
+          this.mindMap.off('render_complete', fitOverview)
+          this.mindMap.view.fit()
+        }
+        this.mindMap.on('render_complete', fitOverview)
+      }
       this.bindCanvasThemeEvents()
       this.ensureAppearanceThemeAligned()
       this.loadPlugins()
@@ -1391,6 +1409,8 @@ export default {
                 ? 'IMPORT_TOO_LARGE'
                 : code === 'IMPORT_APPLY_FAILED'
                   ? 'IMPORT_APPLY_FAILED'
+                  : code === 'STALE_AFTER_VERSION_RESTORE'
+                    ? '脑图已恢复到新版本，请刷新页面后重新导入'
                   : (err && err.message) || this.$t('edit.importPersistFailed')
           )
         }
@@ -1398,7 +1418,8 @@ export default {
           this.$bus.$emit('setDataFailed', {
             code: (err && err.code) || 'IMPORT_APPLY_FAILED',
             stage: (err && err.stage) || 'IMPORT_APPLY_FAILED',
-            message: (err && err.message) || ''
+            message: (err && err.message) || '',
+            notified: !!persistReplace
           })
         } else {
           throw err

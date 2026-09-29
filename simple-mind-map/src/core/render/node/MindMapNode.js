@@ -200,6 +200,10 @@ class MindMapNode {
 
   //  复位部分布局时会重新设置的数据
   reset() {
+    // Clear connectors before children are rebuilt. Otherwise a reused instance
+    // keeps SVG paths in the shared lineDraw while layout reparents the node,
+    // which shows up as multi-select move "ghost lines" until a full refresh.
+    if (typeof this.removeLine === 'function') this.removeLine()
     this.children = []
     this.parent = null
     this.isRoot = false
@@ -412,6 +416,10 @@ class MindMapNode {
         ](this, true)
         this.renderer.emitNodeActiveEvent(isActive ? null : this)
       }
+      if (e.which === 3) {
+        this._rightDownX = e.clientX
+        this._rightDownY = e.clientY
+      }
       this.mindMap.emit('node_mousedown', this, e)
     })
     this.group.on('mouseup', e => {
@@ -456,13 +464,22 @@ class MindMapNode {
     })
     // 右键菜单事件
     this.group.on('contextmenu', e => {
-      const { readonly, useLeftKeySelectionRightKeyDrag } = this.mindMap.opt
+      const { readonly } = this.mindMap.opt
       // Mac上按住ctrl键点击鼠标左键不知为何触发的是contextmenu事件
       if (readonly || e.ctrlKey) {
         return
       }
       e.stopPropagation()
       e.preventDefault()
+      // 右键拖动画布或右键框选时，松手带出的 contextmenu 不能当成打开菜单。
+      // 只看这次右键自己的按下位置，不能拿上一次左键框选的起点来比。
+      if (
+        this._rightDownX != null &&
+        (Math.abs(e.clientX - this._rightDownX) > 5 ||
+          Math.abs(e.clientY - this._rightDownY) > 5)
+      ) {
+        return
+      }
       const activeList = this.renderer.activeNodeList || []
       const cached =
         (this.mindMap.select &&
@@ -474,16 +491,6 @@ class MindMapNode {
         this.mindMap.select &&
         typeof this.mindMap.select.isNodeInList === 'function' &&
         this.mindMap.select.isNodeInList(cached, this)
-      // 框选结束时如果已经多选，仍打开菜单，方便直接加概要
-      if (
-        this.mindMap.select &&
-        !useLeftKeySelectionRightKeyDrag &&
-        this.mindMap.select.hasSelectRange() &&
-        activeList.length <= 1 &&
-        !inCachedMulti
-      ) {
-        return
-      }
       if (inCachedMulti) {
         if (!(activeList.length > 1 && this.isInActiveList())) {
           this.restoreMultiSelect(cached)
@@ -593,7 +600,11 @@ class MindMapNode {
     }
     // 更新快速创建子节点按钮
     if (isShowCreateChildBtnIcon) {
-      if (this.isGeneralization || childrenLength > 0) {
+      if (
+        readonly ||
+        this.isGeneralization ||
+        (childrenLength > 0 && this.getData('expand') === false)
+      ) {
         this.removeQuickCreateChildBtn()
       } else {
         const { isActive } = this.getData()
@@ -660,15 +671,22 @@ class MindMapNode {
   // 根据是否激活更新节点
   updateNodeByActive(active) {
     if (this.group) {
-      const { isShowCreateChildBtnIcon } = this.mindMap.opt
+      const {
+        isShowCreateChildBtnIcon,
+        alwaysShowExpandBtn,
+        notShowExpandBtn
+      } = this.mindMap.opt
       // 切换激活状态，需要切换展开收起按钮的显隐
       if (active) {
-        this.showExpandBtn()
+        if (alwaysShowExpandBtn && !notShowExpandBtn) this.renderExpandBtn()
+        else this.showExpandBtn()
         if (isShowCreateChildBtnIcon) {
           this.showQuickCreateChildBtn()
         }
       } else {
-        this.hideExpandBtn()
+        if (alwaysShowExpandBtn && !notShowExpandBtn) this.renderExpandBtn()
+        else if (this._isMouseenter) this.showExpandBtn()
+        else this.hideExpandBtn()
         if (isShowCreateChildBtnIcon) {
           this.hideQuickCreateChildBtn()
         }
@@ -990,7 +1008,16 @@ class MindMapNode {
 
   //  添加子节点
   addChildren(node) {
-    this.children.push(node)
+    if (!node) return
+    // Layout reuse can reparent without removing the instance from the previous
+    // parent's children array. Scrub that stale membership so old parents cannot
+    // keep drawing connectors to nodes that already moved.
+    if (node.parent && node.parent !== this && Array.isArray(node.parent.children)) {
+      node.parent.children = node.parent.children.filter(item => item !== node)
+    }
+    if (!this.children.includes(node)) {
+      this.children.push(node)
+    }
   }
 
   //  设置连线样式

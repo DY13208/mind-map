@@ -56,6 +56,24 @@ function createHistoryLookup(rows, extra = {}) {
   }
 }
 
+function lookupBeforeVersion(lookup, cutoffVersion) {
+  return {
+    getOperation(id) {
+      return lookup.getOperation(id)
+    },
+    async listAfter(version) {
+      const rows = await lookup.listAfter(version)
+      // During live submission the undo/redo operation has not been persisted
+      // when its safety checks run. A historical replay already has the whole
+      // range in memory, so hide the operation currently being replayed (and
+      // future operations) to preserve that same point-in-time view.
+      return (rows || []).filter(
+        row => Number(row.version || row.serverRevision || 0) < cutoffVersion
+      )
+    }
+  }
+}
+
 function assertContinuousOps(rows, fromRevision) {
   const ordered = (rows || [])
     .slice()
@@ -94,7 +112,7 @@ async function replayOperation(store, row, lookup) {
     try {
       await applyUndoOrRedo(store, op, {
         version,
-        lookup,
+        lookup: lookupBeforeVersion(lookup, version),
         applyReplace: generated => {
           const replaced = applyMapReplace(store.graph, generated, {
             payload: generated.payload

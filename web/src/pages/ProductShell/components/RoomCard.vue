@@ -43,6 +43,7 @@
           ><span class="more"><i class="el-icon-more"/></span
           ><el-dropdown-menu slot="dropdown"
             ><el-dropdown-item command="open">打开</el-dropdown-item
+            ><el-dropdown-item command="duplicate">创建副本</el-dropdown-item
             ><el-dropdown-item command="rename">重命名</el-dropdown-item
             ><el-dropdown-item command="move">移动到文件夹</el-dropdown-item
             ><el-dropdown-item v-if="allowMoveToTeam" command="move-to-team"

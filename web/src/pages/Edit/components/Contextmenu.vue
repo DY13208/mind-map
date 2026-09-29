@@ -111,6 +111,9 @@
       <div class="item" @click="exec('EXPORT_CUR_NODE_TO_PNG')">
         <span class="name">{{ $t('contextmenu.exportNodeToPng') }}</span>
       </div>
+      <div v-if="roomCanShare" class="item" data-testid="share-node" @click="shareNode">
+        <span class="name">分享此节点</span>
+      </div>
       <div class="splitLine" v-if="enableAi"></div>
       <div class="item" @click="aiCreate" v-if="enableAi">
         <span class="name">{{ $t('contextmenu.aiCreate') }}</span>
@@ -236,7 +239,8 @@ export default {
     ...mapState({
       isZenMode: state => state.localConfig.isZenMode,
       isDark: state => state.localConfig.isDark,
-      enableAi: state => state.localConfig.enableAi
+      enableAi: state => state.localConfig.enableAi,
+      roomCanShare: state => state.roomCanShare
     }),
     expandList() {
       return [
@@ -361,6 +365,12 @@ export default {
   methods: {
     ...mapMutations(['setLocalConfig']),
 
+    shareNode() {
+      const node = this.node
+      this.hide()
+      if (node) this.$bus.$emit('showNodeShare', node)
+    },
+
     // 计算右键菜单元素的显示位置
     getShowPosition(x, y) {
       const rect = this.$refs.contextmenuRef.getBoundingClientRect()
@@ -393,25 +403,35 @@ export default {
       })
     },
 
-    onMultiSelectEnd(payload) {
-      const nodes = (payload && payload.nodes) || []
-      if (nodes.length <= 1) return
+    onMultiSelectEnd() {
+      // 两种模式：框选结束都不要立刻弹菜单，等用户再点一次右键。
+    },
+
+    showSelectionMenu(nodes, clientX, clientY) {
+      const list = nodes || []
+      if (list.length <= 1) return false
       const anchor =
-        nodes.find(item => item && !item.isRoot && !item.isGeneralization) ||
-        nodes[0]
+        list.find(item => item && !item.isRoot && !item.isGeneralization) ||
+        list[0]
       this.type = 'node'
       this.isShow = true
       this.node = anchor
-      this.selectedNodes = nodes.slice()
+      this.selectedNodes = list.slice()
+      const number = anchor && anchor.getData && anchor.getData('number')
+      if (number) {
+        this.numberType = number.type || 1
+        this.numberLevel = number.level === '' ? 1 : number.level
+      }
       this.$nextTick(() => {
         if (!this.isShow || !this.$refs.contextmenuRef) return
         const { x, y } = this.getShowPosition(
-          (payload.clientX || 0) + 10,
-          (payload.clientY || 0) + 10
+          (clientX || 0) + 10,
+          (clientY || 0) + 10
         )
         this.left = x
         this.top = y
       })
+      return true
     },
 
     nodeUid(node) {
@@ -529,13 +549,15 @@ export default {
       const moved =
         Math.abs(this.mosuedownX - e.clientX) > 3 ||
         Math.abs(this.mosuedownY - e.clientY) > 3
+      // 右键拖动画布，或右键框选：松手时都不弹菜单
       if (moved) {
-        const cached = this.getCachedMultiNodes()
-        // 右键框选结束后马上要点「插入概要」，不能把刚弹出的菜单关掉
-        if (cached.length > 1) {
-          return
-        }
         this.hide()
+        return
+      }
+      // 已有多选时，再点右键打开选中节点菜单（两种模式一致）
+      if (
+        this.showSelectionMenu(this.getCachedMultiNodes(), e.clientX, e.clientY)
+      ) {
         return
       }
       this.show2(e)

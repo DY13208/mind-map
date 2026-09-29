@@ -1,3 +1,4 @@
+const crypto = require('crypto')
 const { isAuthEnabled } = require('./auth')
 
 const ROLES = ['owner', 'editor', 'viewer']
@@ -143,6 +144,44 @@ function actorFromReq(req, env = process.env) {
 function presenceDocRoomKey(docName) {
   const name = String(docName || '')
   return name.endsWith('__presence') ? name.slice(0, -'__presence'.length) : name
+}
+
+function nodeShareCookieName(roomKey) {
+  return `mind_map_share_${crypto.createHash('sha256').update(String(roomKey)).digest('hex').slice(0, 16)}`
+}
+
+async function getNodeShareAccess(db, req, roomKey, userId) {
+  const cookieName = nodeShareCookieName(roomKey)
+  const rawCookie = String((req && req.headers && req.headers.cookie) || '')
+    .split(';')
+    .map(part => part.trim())
+    .find(part => part.startsWith(`${cookieName}=`))
+  if (!rawCookie) return null
+  let value
+  try { value = decodeURIComponent(rawCookie.slice(cookieName.length + 1)) } catch (err) { return null }
+  const match = /^([0-9a-f-]{36})\.([A-Za-z0-9_-]{20,120})$/i.exec(value)
+  if (!match) return null
+  const tokenHash = crypto.createHash('sha256').update(match[2]).digest('hex')
+  let result
+  try {
+    result = await db.query(
+      `select id, role, recipient_user_id, recipient_user_ids from node_shares
+       where id = $1 and room_key = $2 and token_hash = $3 and revoked_at is null
+         and (expires_at is null or expires_at > now())`,
+      [match[1], roomKey, tokenHash]
+    )
+  } catch (err) {
+    if (err && err.code === '42P01') return null
+    throw err
+  }
+  const share = result.rows[0]
+  if (!share) return null
+  const recipients = Array.isArray(share.recipient_user_ids) && share.recipient_user_ids.length
+    ? share.recipient_user_ids
+    : share.recipient_user_id ? [share.recipient_user_id] : []
+  if (recipients.length && !recipients.includes(userId)) return null
+  if (!recipients.length && share.role !== 'viewer') return null
+  return { ...accessSummary(share.role), shareId: share.id }
 }
 
 const FILE_COLLECTION_KEYS = new Set(['recent', 'favorites', 'trash'])
@@ -520,11 +559,19 @@ async function assertRoomAccess(db, req, roomKey, action) {
   if (access.deleted || !access.exists) {
     throw aclError(404, 'NOT_FOUND', 'not found')
   }
-  const summary = accessSummary(access.role, { legacyOpen: access.legacyOpen })
-  if (!roleAllows(access.role, action, { legacyOpen: access.legacyOpen })) {
+  let summary = accessSummary(access.role, { legacyOpen: access.legacyOpen })
+  let shareId = null
+  if (!summary.canManage && req && req.headers && req.headers.cookie) {
+    const shared = await getNodeShareAccess(db, req, roomKey, actor.id)
+    if (shared && ROLE_RANK[shared.role] > (ROLE_RANK[summary.role] || 0)) {
+      summary = shared
+      shareId = shared.shareId
+    }
+  }
+  if (!roleAllows(summary.role, action, { legacyOpen: summary.legacyOpen })) {
     throw aclError(403, 'FORBIDDEN', '没有权限执行该操作')
   }
-  return { ...summary, ...access, userId: actor.id }
+  return { ...access, ...summary, userId: actor.id, shareId }
 }
 
 async function ensureOwner(db, roomKey, userId) {
@@ -1232,6 +1279,7 @@ module.exports = {
   isSuperAdminUser,
   actorFromReq,
   presenceDocRoomKey,
+  nodeShareCookieName,
   inferRoomAcl,
   FILE_COLLECTION_KEYS,
   roleAllows,

@@ -126,6 +126,15 @@
           <i class="el-icon-reading" aria-hidden="true"></i>
           <span>Wiki</span>
         </a>
+        <router-link
+          to="/graph"
+          title="wiki-compiler"
+          aria-label="wiki-compiler"
+          data-testid="nav-wiki-compiler"
+        >
+          <i class="el-icon-share" aria-hidden="true"></i>
+          <span>wiki-compiler</span>
+        </router-link>
       </nav>
       <AccessNotifications v-if="profile" :key="profile.id" :collapsed="sidebarCollapsed" class="sidebarNotifications" />
       <div class="sidebarFooter" v-if="profile">
@@ -184,7 +193,6 @@ export default {
       hasSidebarPreference: preference !== null,
       profile: null,
       fileNav: [
-        { path: '/dashboards', label: '看板', icon: 'el-icon-data-analysis' },
         { path: '/files/recent', label: '最近', icon: 'el-icon-time' },
         { path: '/files', label: '脑图', icon: 'el-icon-files' },
         { path: '/files/favorites', label: '收藏', icon: 'el-icon-star-off' },

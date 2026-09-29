@@ -11,7 +11,8 @@ import {
   getNodeRichTextStyles,
   htmlEscape,
   compareVersion,
-  checkIsRichText
+  checkIsRichText,
+  trimNodeEditText
 } from '../utils'
 import { richTextSupportStyleList } from '../constants/constant'
 import MindMapNode from '../core/render/node/MindMapNode'
@@ -100,6 +101,12 @@ class RichText {
       .smm-richtext-node-wrap {
         word-break: break-all;
         user-select: none;
+      }
+
+      .smm-richtext-node-wrap p {
+        margin: 0;
+        padding: 0;
+        line-height: 1.2;
       }
 
       .ql-editor .ql-align-left, 
@@ -220,7 +227,7 @@ class RichText {
     this.isInserting = isInserting
     if (!rect) rect = node._textData.node.node.getBoundingClientRect()
     if (!isFromScale) {
-      this.mindMap.emit('before_show_text_edit')
+      this.mindMap.emit('before_show_text_edit', node)
     }
     this.mindMap.renderer.textEdit.registerTmpShortcut()
     // 原始宽高
@@ -384,7 +391,7 @@ class RichText {
     if (typeof beforeHideRichTextEdit === 'function') {
       beforeHideRichTextEdit(this)
     }
-    const html = this.getEditText()
+    const html = trimNodeEditText(this.getEditText(), true)
     const list = nodes && nodes.length > 0 ? nodes : [this.node]
     const node = this.node
     this.textEditNode.style.display = 'none'

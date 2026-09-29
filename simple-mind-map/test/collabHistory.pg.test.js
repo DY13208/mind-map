@@ -6,6 +6,7 @@ const {
   createPgHistoryStore,
   handleHistoryApi
 } = require('../bin/collabHistory')
+const storage = require('../bin/storage')
 const { migrateHistorySchema, stableUuid } = require('../bin/collabHistory/migrate')
 const { historyChecksum, toBusinessTree } = require('../bin/collabHistory/canonical')
 
@@ -116,6 +117,167 @@ async function main() {
       autoVersionMinMs: 60 * 60 * 1000
     }
   })
+
+  // A full import must capture both sides in the same transaction as its room
+  // operation. Seed a room without any history baseline to cover legacy rooms.
+  const importRoomKey = 'hist-import-' + randomUUID()
+  const beforeImport = {
+    root: {
+      isRoot: true,
+      data: { uid: 'root', text: '导入前' },
+      children: []
+    }
+  }
+  const afterImport = {
+    root: {
+      isRoot: true,
+      data: { uid: 'root', text: '导入后' },
+      children: ['added']
+    },
+    added: {
+      isRoot: false,
+      data: { uid: 'added', text: '新节点' },
+      children: []
+    }
+  }
+  await pool.query(
+    `insert into rooms(room_key, title, cos_key, nodes, metadata, version)
+     values ($1,$2,$3,$4::jsonb,'{}'::jsonb,7)`,
+    [importRoomKey, 'map replace history', 'test/' + importRoomKey, JSON.stringify(beforeImport)]
+  )
+  await storage.replaceRoomNodes(importRoomKey, beforeImport, 7)
+  const importOperationId = randomUUID()
+  const importCommand = {
+    operationId: importOperationId,
+    mapId: importRoomKey,
+    actorId: 'import-user',
+    clientId: 'history-test',
+    baseVersion: 7,
+    type: 'map.replace',
+    payload: { resnapshot: true }
+  }
+  const imported = await storage.commitRoomOperation(
+    importRoomKey,
+    importCommand,
+    async () => ({
+      nodes: afterImport,
+      inversePayload: { type: 'resnapshot' },
+      event: { type: 'map.replaced', payload: { resnapshot: true } }
+    })
+  )
+  assert.strictEqual(imported.operation.version, 8)
+  const importVersions = await engine.listVersions(importRoomKey, { limit: 20 })
+  const preImportVersion = importVersions.versions.find(
+    row => row.type === 'PRE_IMPORT'
+  )
+  const postImportVersion = importVersions.versions.find(
+    row => row.type === 'IMPORT'
+  )
+  assert.ok(preImportVersion, 'legacy room gets a pre-import version')
+  assert.ok(postImportVersion, 'import gets a post-import version')
+  assert.strictEqual(Number(preImportVersion.revision), 7)
+  assert.strictEqual(Number(postImportVersion.revision), 8)
+  const restoredPreImport = await engine.getVersionTree(
+    importRoomKey,
+    preImportVersion.id
+  )
+  const restoredPostImport = await engine.getVersionTree(
+    importRoomKey,
+    postImportVersion.id
+  )
+  assert.strictEqual(restoredPreImport.tree.root.data.text, '导入前')
+  assert.strictEqual(restoredPostImport.tree.root.data.text, '导入后')
+  assert.strictEqual(restoredPostImport.tree.added.data.text, '新节点')
+
+  const storedImportOperation = await storage.getRoomOperation(
+    importRoomKey,
+    importOperationId
+  )
+  assert.strictEqual(storedImportOperation.payload.reason, 'IMPORT')
+  assert.ok(!storedImportOperation.payload.tree)
+  assert.ok(!storedImportOperation.payload.nodes)
+  const historyCountsBeforeDuplicate = await pool.query(
+    `select
+       (select count(*)::int from room_checkpoints where room_key = $1) as checkpoints,
+       (select count(*)::int from room_versions where room_key = $1) as versions`,
+    [importRoomKey]
+  )
+  const replayedImport = await storage.commitRoomOperation(
+    importRoomKey,
+    importCommand,
+    async () => {
+      throw new Error('duplicate operation must not apply again')
+    }
+  )
+  assert.strictEqual(replayedImport.duplicate, true)
+  await engine.maybeCheckpointAfterOp(importRoomKey, storedImportOperation)
+  const historyCountsAfterDuplicate = await pool.query(
+    `select
+       (select count(*)::int from room_checkpoints where room_key = $1) as checkpoints,
+       (select count(*)::int from room_versions where room_key = $1) as versions`,
+    [importRoomKey]
+  )
+  assert.deepStrictEqual(
+    historyCountsAfterDuplicate.rows[0],
+    historyCountsBeforeDuplicate.rows[0],
+    'duplicate operation and async history event do not create duplicate history'
+  )
+  await pool.query(
+    `update rooms set restore_epoch_revision = 8 where room_key = $1`,
+    [importRoomKey]
+  )
+  await assert.rejects(
+    storage.commitRoomOperation(
+      importRoomKey,
+      {
+        ...importCommand,
+        operationId: randomUUID(),
+        baseVersion: 7,
+        payload: { reason: 'VERSION_RESTORE' }
+      },
+      async () => ({ nodes: afterImport })
+    ),
+    error => error && error.code === 'STALE_AFTER_VERSION_RESTORE'
+  )
+
+  const failedImportRoomKey = 'hist-import-rollback-' + randomUUID()
+  await pool.query(
+    `insert into rooms(room_key, title, cos_key, nodes, metadata, version)
+     values ($1,$2,$3,$4::jsonb,'{}'::jsonb,3)`,
+    [failedImportRoomKey, 'map replace rollback', 'test/' + failedImportRoomKey, JSON.stringify(beforeImport)]
+  )
+  await storage.replaceRoomNodes(failedImportRoomKey, beforeImport, 3)
+  await assert.rejects(
+    storage.commitRoomOperation(
+      failedImportRoomKey,
+      {
+        ...importCommand,
+        operationId: randomUUID(),
+        mapId: failedImportRoomKey,
+        baseVersion: 3
+      },
+      async () => ({
+        nodes: { broken: { isRoot: false, data: { uid: 'broken' }, children: [] } },
+        inversePayload: { type: 'resnapshot' },
+        event: { type: 'map.replaced', payload: { resnapshot: true } }
+      })
+    ),
+    /历史树校验失败/
+  )
+  const failedImportState = await pool.query(
+    `select r.version,
+       (select count(*)::int from room_operations o where o.room_key = r.room_key) as operations,
+       (select count(*)::int from room_checkpoints c where c.room_key = r.room_key) as checkpoints,
+       (select count(*)::int from room_versions v where v.room_key = r.room_key) as versions
+     from rooms r where r.room_key = $1`,
+    [failedImportRoomKey]
+  )
+  assert.deepStrictEqual(failedImportState.rows[0], {
+    version: '3',
+    operations: 0,
+    checkpoints: 0,
+    versions: 0
+  })
   const baseline = await engine.ensureHistoryBaseline(roomKey)
   assert.ok(baseline)
   const listed = await engine.listVersions(roomKey, { limit: 20 })
@@ -171,6 +333,7 @@ async function main() {
   assert.ok(checksum)
 
   await pool.query(`delete from rooms where room_key = $1`, [roomKey])
+  await pool.query(`delete from rooms where room_key in ($1, $2)`, [importRoomKey, failedImportRoomKey])
   console.log('collabHistory.pg.test.js ok')
   process.exit(0)
 }

@@ -28,6 +28,10 @@ class View {
     this.mindMap.keyCommand.addShortcut('Control+i', () => {
       this.fit()
     })
+    this.syncCanvasDragCursor()
+    this.mindMap.on('after_update_config', () => {
+      this.syncCanvasDragCursor()
+    })
     // 拖动视图
     this.mindMap.event.on('mousedown', e => {
       const { isDisableDrag, mousedownEventPreventDefault } = this.mindMap.opt
@@ -44,6 +48,8 @@ class View {
       if (e.ctrlKey || e.metaKey || this.mindMap.opt.isDisableDrag) {
         return
       }
+      // 真正发生拖动位移时才换成小手（右键单击不切换）
+      this.setCanvasPanningCursor(true)
       if (this.firstDrag) {
         this.firstDrag = false
         // 清除激活节点
@@ -57,6 +63,7 @@ class View {
     })
     this.mindMap.event.on('mouseup', () => {
       this.firstDrag = true
+      this.setCanvasPanningCursor(false)
     })
     // 放大缩小视图
     this.mindMap.event.on('mousewheel', (e, dirs, event, isTouchPad) => {
@@ -149,6 +156,44 @@ class View {
       if (!this.checkNeedMindMapInCanvas()) return
       this.transform()
     })
+  }
+
+  // 当前模式下，按下的是否是「拖动画布」那一键（右键拖 / 左键拖 都走这里）
+  isCanvasDragPointer(e) {
+    const useRightDrag = !!this.mindMap.opt.useLeftKeySelectionRightKeyDrag
+    const isDragButton = useRightDrag ? e.which === 3 : e.which === 1
+    return (
+      isDragButton &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !this.mindMap.opt.isDisableDrag
+    )
+  }
+
+  // 标记画布可拖；空闲时保持默认箭头（具体样式见 cssContent）
+  syncCanvasDragCursor() {
+    const el = this.mindMap.el
+    if (!el) return
+    const enabled = !this.mindMap.opt.isDisableDrag
+    el.classList.toggle('smm-canvas-drag', enabled)
+    // 兼容旧类名
+    el.classList.toggle('smm-right-key-drag', enabled)
+    if (!enabled) {
+      this.setCanvasPanningCursor(false)
+    }
+  }
+
+  // 真正拖动时换成握住的小手，松开后恢复箭头
+  setCanvasPanningCursor(on) {
+    if (on) {
+      if (this._canvasPanning) return
+      this._canvasPanning = true
+      document.body.classList.add('smm-canvas-panning')
+      return
+    }
+    if (!this._canvasPanning) return
+    this._canvasPanning = false
+    document.body.classList.remove('smm-canvas-panning')
   }
 
   //  获取当前变换状态数据

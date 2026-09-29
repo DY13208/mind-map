@@ -19,9 +19,11 @@ import {
   createUidForAppointNodes,
   formatDataToArray,
   removeFromParentNodeData,
+  detachNodeFromParent,
   createUid,
   getNodeDataIndex,
   getNodeIndexInNodeList,
+  getNodeUid,
   setDataToClipboard,
   getDataFromClipboard,
   htmlEscape,
@@ -140,6 +142,7 @@ class Render {
 
   //  设置布局结构
   setLayout() {
+    if (this.isRendering || this.renderCallbackList.length) this.cancelRender()
     this._renderGeneration = (this._renderGeneration || 0) + 1
     this.isRendering = false
     this.hasWaitRendering = false
@@ -586,12 +589,12 @@ class Render {
     let isTrueClick = true
     // 是否是左键多选节点，右键拖动画布
     const { useLeftKeySelectionRightKeyDrag } = this.mindMap.opt
+    // 两种模式里右键都用来打开已框选节点的菜单，不能把选区清掉。
+    if (eventType === 'contextmenu') {
+      return
+    }
     // 如果鼠标按下和松开的距离较大，则不认为是点击事件
-    if (
-      eventType === 'contextmenu'
-        ? !useLeftKeySelectionRightKeyDrag
-        : useLeftKeySelectionRightKeyDrag
-    ) {
+    if (useLeftKeySelectionRightKeyDrag) {
       const mousedownPos = this.mindMap.event.mousedownPos
       isTrueClick =
         Math.abs(e.clientX - mousedownPos.x) <= 5 &&
@@ -650,16 +653,28 @@ class Render {
     return false
   }
 
+  cancelRender() {
+    this._renderGeneration = (this._renderGeneration || 0) + 1
+    clearTimeout(this.renderTimer)
+    this.isRendering = false
+    this.hasWaitRendering = false
+    this.renderCallbackList = []
+    this.renderSourceList = []
+    this.mindMap.emit('render_cancelled', { generation: this._renderGeneration })
+  }
+
   // 渲染完毕的操作
   onRenderEnd() {
-    this.renderCallbackList.forEach(fn => {
-      fn()
-    })
+    const callbacks = this.renderCallbackList
     this.isRendering = false
     this.reRender = false
     this.renderCallbackList = []
     this.renderSourceList = []
     this.mindMap.emit('node_tree_render_end')
+    this.mindMap.emit('render_complete', {
+      renderedNodes: Object.keys(this.nodeCache).length
+    })
+    callbacks.forEach(fn => fn())
   }
 
   // 渲染
@@ -669,6 +684,14 @@ class Render {
     this.renderTimer = setTimeout(() => {
       this._render()
     }, 0)
+  }
+
+  // 更新的渲染已经接管画布时，把这次中断的渲染让出去，避免位置一直停在重叠的旧布局上
+  finishSupersededRender() {
+    this.isRendering = false
+    if (!this.hasWaitRendering) return
+    this.hasWaitRendering = false
+    this.render()
   }
 
   // 真正的渲染
@@ -683,6 +706,10 @@ class Render {
       this.hasWaitRendering = true
       return
     }
+    const syncPaint = !!this._syncPaintOnce
+    this._syncPaintOnce = false
+    const forceOverviewPaint = !!this._forceOverviewPaintOnce
+    this._forceOverviewPaintOnce = false
     this.isRendering = true
     const renderGeneration = this._renderGeneration
     const isLayoutSwitch = this.checkHasRenderSource(CONSTANTS.CHANGE_LAYOUT)
@@ -710,7 +737,10 @@ class Render {
     // 计算布局
     this.root = null
     this.layout.doLayout(root => {
-      if (renderGeneration !== this._renderGeneration) return
+      if (renderGeneration !== this._renderGeneration) {
+        this.finishSupersededRender()
+        return
+      }
       const stale = destroyStaleLayoutNodes(this.lastNodeCache, this.nodeCache)
       stale.destroyed.forEach(uid => {
         const prev = this.lastNodeCache[uid]
@@ -722,10 +752,13 @@ class Render {
       // Layout switch must paint synchronously so an in-flight performance
       // pass cannot leave the previous structure on the canvas.
       const asyncPaint =
-        !!this.mindMap.opt.openPerformance && !isLayoutSwitch
+        !!this.mindMap.opt.openPerformance && !isLayoutSwitch && !syncPaint
       this.root.render(
         () => {
-          if (renderGeneration !== this._renderGeneration) return
+          if (renderGeneration !== this._renderGeneration) {
+            this.finishSupersededRender()
+            return
+          }
           this.isRendering = false
           if (this.hasWaitRendering) {
             this.hasWaitRendering = false
@@ -746,7 +779,7 @@ class Render {
           }
           this.onRenderEnd()
         },
-        isLayoutSwitch,
+        isLayoutSwitch || forceOverviewPaint,
         asyncPaint
       )
     })
@@ -1777,49 +1810,97 @@ class Render {
     if (dir === 'after') {
       nodeList.reverse()
     }
+    const touchedParents = new Set()
     nodeList.forEach(item => {
       // 移动节点
       let nodeParent = item.parent
       let nodeBorthers = nodeParent.children
       let nodeIndex = getNodeIndexInNodeList(item, nodeBorthers)
-      const uid = item.getData('uid')
+      const uid = getNodeUid(item)
       const dataIndex = nodeParent.nodeData.children.findIndex(
-        child => child.data.uid === uid
+        child => child && child.data && child.data.uid === uid
       )
       const existParent = exist.parent
       if (item === exist || !existParent || nodeIndex === -1 || dataIndex === -1) {
         return
       }
-      const anchorUid = exist.getData('uid')
+      const anchorUid = getNodeUid(exist)
       if (
         uid === anchorUid ||
         getNodeIndexInNodeList(exist, existParent.children) === -1 ||
-        !existParent.nodeData.children.some(child => child.data.uid === anchorUid)
+        !existParent.nodeData.children.some(
+          child => child && child.data && child.data.uid === anchorUid
+        )
       ) {
         return
       }
-      // Invalidate old connectors before asynchronous layout reuses the nodes.
-      nodeParent.removeLine()
-      nodeBorthers.splice(nodeIndex, 1)
-      nodeParent.nodeData.children.splice(dataIndex, 1)
-
-      // 目标节点
+      // Validate the insert slot before mutating the old parent. An early
+      // return after splice left multi-select moves half-applied and kept
+      // stale connectors on the previous parent.
       let existBorthers = existParent.children
       let existIndex = getNodeIndexInNodeList(exist, existBorthers)
       let targetDataIndex = existParent.nodeData.children.findIndex(
-        child => child.data.uid === anchorUid
+        child => child && child.data && child.data.uid === anchorUid
       )
-      if (existIndex === -1) {
+      if (existIndex === -1 || targetDataIndex === -1) {
         return
       }
+      touchedParents.add(nodeParent)
+      touchedParents.add(existParent)
+      // Invalidate old connectors before asynchronous layout reuses the nodes.
+      if (typeof nodeParent.removeLine === 'function') nodeParent.removeLine()
+      detachNodeFromParent(item)
+
       if (dir === 'after') {
         existIndex++
         targetDataIndex++
+      }
+      // Re-read lists after detach in case old/new parent were the same.
+      existBorthers = existParent.children
+      existIndex = Math.max(
+        0,
+        Math.min(
+          existIndex,
+          existBorthers.length
+        )
+      )
+      targetDataIndex = Math.max(
+        0,
+        Math.min(
+          targetDataIndex,
+          existParent.nodeData.children.length
+        )
+      )
+      // Same-parent reorder: after detach, anchor index may have shifted.
+      if (nodeParent === existParent) {
+        existIndex = getNodeIndexInNodeList(exist, existBorthers)
+        targetDataIndex = existParent.nodeData.children.findIndex(
+          child => child && child.data && child.data.uid === anchorUid
+        )
+        if (existIndex === -1 || targetDataIndex === -1) return
+        if (dir === 'after') {
+          existIndex++
+          targetDataIndex++
+        }
       }
       existBorthers.splice(existIndex, 0, item)
       existParent.nodeData.children.splice(targetDataIndex, 0, item.nodeData)
       item.parent = existParent
       this.resetMovedNodePosition(item)
+    })
+    touchedParents.forEach(parent => {
+      if (!parent) return
+      if (Array.isArray(parent.children)) {
+        parent.children = parent.children.filter(
+          child => child && child.parent === parent
+        )
+      }
+      if (typeof parent.setData === 'function' && parent.nodeData) {
+        parent.setData({
+          childCount: (parent.nodeData.children || []).length
+        })
+      }
+      if (typeof parent.removeLine === 'function') parent.removeLine()
     })
     this.mindMap.render()
   }
@@ -2048,25 +2129,43 @@ class Render {
     ) {
       return
     }
+    const touchedParents = new Set([toNode])
     nodeList.forEach(item => {
       this.removeNodeFromActiveList(item)
       const fromParent = item.parent
-      if (fromParent) fromParent.removeLine()
-      removeFromParentNodeData(item)
-      if (fromParent && Array.isArray(fromParent.children)) {
-        const idx = getNodeIndexInNodeList(item, fromParent.children)
-        if (idx > -1) fromParent.children.splice(idx, 1)
-      }
+      if (fromParent) touchedParents.add(fromParent)
+      detachNodeFromParent(item)
       toNode.setData({
         expand: true
       })
       if (!toNode.nodeData.children) toNode.nodeData.children = []
+      const uid = getNodeUid(item)
+      toNode.nodeData.children = toNode.nodeData.children.filter(
+        child => !(child && child.data && child.data.uid === uid)
+      )
       toNode.nodeData.children.push(item.nodeData)
-      if (Array.isArray(toNode.children) && !toNode.children.includes(item)) {
+      if (Array.isArray(toNode.children)) {
+        toNode.children = toNode.children.filter(
+          child => child !== item && getNodeUid(child) !== uid
+        )
         toNode.children.push(item)
       }
       item.parent = toNode
       this.resetMovedNodePosition(item)
+    })
+    touchedParents.forEach(parent => {
+      if (!parent) return
+      if (Array.isArray(parent.children)) {
+        parent.children = parent.children.filter(
+          child => child && child.parent === parent
+        )
+      }
+      if (typeof parent.setData === 'function' && parent.nodeData) {
+        parent.setData({
+          childCount: (parent.nodeData.children || []).length
+        })
+      }
+      if (typeof parent.removeLine === 'function') parent.removeLine()
     })
     this.emitNodeActiveEvent()
     this.mindMap.render()

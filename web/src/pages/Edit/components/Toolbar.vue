@@ -229,10 +229,12 @@
             data-testid="refresh"
             @click="refreshPage"
           >
-            <span
-              class="icon"
-              :class="refreshing ? 'el-icon-loading' : 'el-icon-refresh'"
-            ></span>
+            <span class="icon">
+              <i
+                class="refreshIcon"
+                :class="refreshing ? 'el-icon-loading' : 'el-icon-refresh'"
+              ></i>
+            </span>
             <span class="text">{{ $t('toolbar.refresh') }}</span>
           </div>
           <div
@@ -248,16 +250,6 @@
               :class="jobDispatching ? 'el-icon-loading' : 'el-icon-video-play'"
             ></span>
             <span class="text">运行</span>
-          </div>
-          <div
-            class="toolbarBtn"
-            data-testid="run-workbuddy-history"
-            title="运行历史：左边是节点执行记录（可搜索），右边是内容，底部可继续执行"
-            @click="openJobHistory"
-            v-if="!isReadonly"
-          >
-            <span class="icon el-icon-time"></span>
-            <span class="text">运行历史</span>
           </div>
           <div
             class="toolbarBtn"
@@ -333,54 +325,87 @@
       </div>
     </div>
     <el-dialog
-      title="运行历史"
       :visible.sync="jobHistoryVisible"
-      width="900px"
-      custom-class="workbuddyJobDialog jobHistoryDialog"
+      width="960px"
+      :custom-class="`workbuddyJobDialog jobHistoryDialog${isDark ? ' isDark' : ''}`"
       append-to-body
       @closed="onJobHistoryClosed"
     >
+      <div slot="title" class="histDialogTitle">
+        <span class="histEyebrow">WORKBUDDY · 执行记录</span>
+        <span class="histHeading">运行历史</span>
+        <span class="histCount">{{ jobHistory.length }} 条</span>
+      </div>
       <div class="hist" :class="{ isDark: isDark }">
         <aside class="histLeft">
+          <div class="histSidebarHead">
+            <strong>执行记录</strong>
+            <button
+              type="button"
+              class="histRefresh"
+              :disabled="jobHistoryLoading"
+              aria-label="刷新运行历史"
+              @click="loadJobHistory"
+            >
+              <i :class="jobHistoryLoading ? 'el-icon-loading' : 'el-icon-refresh'"></i>
+              刷新
+            </button>
+          </div>
           <el-input
             v-model="jobSearch"
             size="mini"
             clearable
             placeholder="搜索节点 / 任务名 / 内容"
             prefix-icon="el-icon-search"
+            data-testid="run-history-search"
           ></el-input>
+          <div class="histListCount" aria-live="polite">
+            {{ jobSearch ? `找到 ${filteredJobHistory.length} 条` : `共 ${jobHistory.length} 条记录` }}
+          </div>
           <div class="histList">
-            <div
+            <button
+              type="button"
               class="histItem"
               :class="{ active: item.id === jobActiveId }"
               v-for="item in filteredJobHistory"
               :key="item.id"
+              :aria-pressed="String(item.id === jobActiveId)"
               @click="openHistoryItem(item)"
             >
               <span class="hDot" :class="jobStateClass(item)"></span>
-              <span class="hName" :title="item.intent || ''">{{
-                jobNodeText(item) || item.name || '(未命名)'
-              }}</span>
-              <span class="hMeta"
-                >{{ jobStateText(item) }} · {{ jobTimeText(item) }}</span
+              <span class="histItemText">
+                <span class="hName" :title="item.intent || ''">{{
+                  jobNodeText(item) || item.name || '(未命名)'
+                }}</span>
+                <span class="hMeta">{{ jobTimeText(item) }}</span>
+              </span>
+              <span class="hState" :class="jobStateClass(item)" :title="item.detail || ''">{{ jobStateText(item) }}</span>
+              <el-button
+                v-if="isJobRunning(item)"
+                class="hStop"
+                type="text"
+                size="mini"
+                :loading="jobStopBusyId === item.id"
+                @click.stop="stopHistoryItem(item)"
+                >停止</el-button
               >
+            </button>
+            <div class="histEmpty" v-if="!filteredJobHistory.length">
+              <i :class="jobHistoryLoading ? 'el-icon-loading' : 'el-icon-time'"></i>
+              <strong>{{ jobHistoryLoading ? '正在读取记录' : jobHistoryError ? '暂时无法读取' : jobSearch ? '没有匹配的记录' : '还没有运行记录' }}</strong>
+              <p>{{ jobHistoryError || (jobSearch ? '换个关键词试试' : '运行节点后，记录会显示在这里') }}</p>
             </div>
-            <p class="jobHint" v-if="!filteredJobHistory.length">
-              {{
-                jobHistoryLoading ? '读取中…' : jobHistoryError || '没有记录'
-              }}
-            </p>
           </div>
           <div class="histFoot">
-            <span class="jobHint">{{ jobTargetLabel }}</span>
-            <el-button type="text" size="mini" @click="loadJobHistory"
-              >刷新</el-button
-            >
+            <span class="jobHint" :title="jobTargetLabel">{{ jobTargetLabel || '尚未识别执行主机' }}</span>
           </div>
         </aside>
         <section class="histRight">
           <div class="histHead">
-            <span class="histTitle">{{ activeJobTitle }}</span>
+            <div class="histHeadInfo">
+              <span class="histEyebrow">执行结果</span>
+              <strong class="histTitle" :title="activeJobTitle">{{ activeJobTitle }}</strong>
+            </div>
             <span class="histHeadBtns">
               <el-button
                 v-if="jobActiveId"
@@ -503,11 +528,16 @@
             v-if="jobActiveHtml"
             v-html="jobActiveHtml"
           ></div>
-          <p class="jobHint" v-else-if="jobFullLoading">正在取内容…</p>
-          <p class="jobHint" v-else>
-            左侧选一条记录看内容；只有摘要时点「重取全文」。任务跑完会自动写到运行节点下。
-          </p>
+          <div class="histDetailEmpty" v-else-if="jobFullLoading">
+            <i class="el-icon-loading"></i><span>正在读取执行内容…</span>
+          </div>
+          <div class="histDetailEmpty" v-else>
+            <i class="el-icon-document"></i>
+            <strong>{{ jobActiveId ? '暂无完整内容' : '选择一条运行记录' }}</strong>
+            <span>{{ jobActiveId ? '可尝试点击“重取全文”' : '在左侧查看节点执行结果和后续任务' }}</span>
+          </div>
           <div class="histComposer">
+            <label class="histComposerLabel">继续执行</label>
             <el-input
               v-model="jobFollowPrompt"
               type="textarea"
@@ -524,6 +554,14 @@
                   type="text"
                   size="mini"
                   @click="stopJob"
+                  >停止</el-button
+                >
+                <el-button
+                  v-else-if="activeJobRunning"
+                  type="text"
+                  size="mini"
+                  :loading="jobStopBusyId === jobActiveId"
+                  @click="stopHistoryItem(activeJobItem)"
                   >停止</el-button
                 >
                 <el-button
@@ -732,6 +770,8 @@ export default {
       jobPendingMiss: 0,
       // 一轮轮询没跑完就别再进来（写回要几秒，避免重复处理同一条）
       jobPollBusy: false,
+      // 正在被「停止」的那条 id（行内停止按钮的 loading）
+      jobStopBusyId: '',
       // 「派发固定用哪条会话」，按主机分；localStorage 的兜底（隐私模式下用它）
       rememberedSession: null,
       // 执行主机上的 WorkBuddy 会话（= 端口）一览：默认收起，点开看谁在跑谁闲置
@@ -974,6 +1014,25 @@ export default {
       return (this.jobPendingList || []).length
     },
 
+    /** 运行历史里当前选中的那条（底部「停止」按钮用） */
+    activeJobItem() {
+      return (
+        (this.jobHistory || []).find(x => x.id === this.jobActiveId) || null
+      )
+    },
+
+    /**
+     * 选中的运行记录是否还在跑。
+     *
+     * ⚠️ 为什么需要它（2026-09-28）：底部那个「停止」按钮原来的条件是
+     * `jobPending && jobPolling` —— 两者都是**本页面内存态**，只覆盖「这次打开页面
+     * 之后自己派出去、且轮询还没停」的那一条。刷新页面 / 关掉面板再打开，历史列表里
+     * 明明还挂着一条「执行中」，却**再也找不到停止按钮**。改成也认「选中的这条还在跑」。
+     */
+    activeJobRunning() {
+      return !!this.activeJobItem && this.isJobRunning(this.activeJobItem)
+    },
+
   },
   watch: {
     isHandleLocalFile(val) {
@@ -1003,6 +1062,7 @@ export default {
       this.setCanvasToolbarsCollapsed
     )
     this.$bus.$on('node_active', this.onNodeActive)
+    this.$bus.$on('open_workbuddy_job_history', this.openJobHistory)
   },
   mounted() {
     this.computeToolbarShow()
@@ -1025,6 +1085,7 @@ export default {
       this.setCanvasToolbarsCollapsed
     )
     this.$bus.$off('node_active', this.onNodeActive)
+    this.$bus.$off('open_workbuddy_job_history', this.openJobHistory)
     window.removeEventListener('resize', this.computeToolbarShowThrottle)
     this.$bus.$off('lang_change', this.computeToolbarShowThrottle)
     window.removeEventListener('beforeunload', this.onUnload)
@@ -1156,6 +1217,7 @@ export default {
 
     /** 运行历史：左列表 + 右内容 + 底部继续执行 */
     async openJobHistory() {
+      if (this.isReadonly || this.jobHistoryVisible) return
       this.jobHistoryVisible = true
       this.jobSearch = ''
       await this.prepareLocalTarget()
@@ -1191,17 +1253,20 @@ export default {
     async runFollowUp() {
       const prompt = String(this.jobFollowPrompt || '').trim()
       if (!prompt || this.jobFollowDispatching) return
-      const target = await this.ensureDispatchTarget()
-      if (!target.ok) {
-        this.$message.warning(target.error)
-        return
-      }
-      const { host, gateway } = target
+      // ⚠️ 防重入标志必须放在 `await` **之前**（2026-09-28 修）：以前设在
+      // `ensureDispatchTarget()` 之后，那 1~2 秒窗口里重复点「继续」会**并发**起会话/派发
+      // （实测一口气起过 9 条会话，把机器堆满）。
       this.jobFollowDispatching = true
-      this.rememberRunTarget({ reuseContainer: true })
-      this.jobStatus = '正在继续执行…'
-      this.jobStatusType = 'jobWait'
       try {
+        const target = await this.followUpTarget()
+        if (!target.ok) {
+          this.$message.warning(target.error)
+          return
+        }
+        const { host, gateway } = target
+        this.rememberRunTarget({ reuseContainer: true })
+        this.jobStatus = `正在继续执行…（会话 ${this.gatewayShort(gateway)}）`
+        this.jobStatusType = 'jobWait'
         const promptText = this.buildFollowUpJobPrompt(prompt)
         const result = await dispatchWorkbuddyJob({
           host,
@@ -1243,6 +1308,40 @@ export default {
       } finally {
         this.jobFollowDispatching = false
       }
+    },
+
+    /**
+     * 「继续执行」该派到哪条会话（2026-09-28 新增）。
+     *
+     * ⚠️ 以前直接用 sticky 的 `this.jobGateway`，**不保证是这条任务原来所在的会话** ——
+     * 用户换过派发会话、或开了多条会话之后点「继续」，任务会被接到别的会话上，上下文直接断
+     * （页面表现就是「继续」后一直执行中 / 答非所问）。
+     * 现在**优先锚定这条运行记录自己的 `gateway`**（桥接 `/api/jobs` 每条都带），
+     * 那条会话已经不在时才回落到当前选中的会话，并明确告诉用户改派了。
+     */
+    async followUpTarget() {
+      const item = this.activeJobItem
+      const own = String((item && item.gateway) || '').replace(/\/$/, '')
+      const target = await this.ensureDispatchTarget()
+      if (!target.ok) return target
+      if (!own) return target
+      if (own === String(this.jobGateway || '').replace(/\/$/, '')) return target
+      const list = this.jobGateways || []
+      const known = list.some(g => String(g.url || '').replace(/\/$/, '') === own)
+      if (list.length && !known) {
+        this.$message.warning(
+          `这条任务原来的会话（${this.gatewayShort(own)}）已经不在了，改派到当前会话`
+        )
+        return target
+      }
+      this.jobGateway = own
+      return { ok: true, host: this.jobSelectedHost, gateway: own }
+    },
+
+    /** 会话地址 → 好认的短名字（`:端口`） */
+    gatewayShort(url) {
+      const m = String(url || '').match(/:(\d+)\s*$/)
+      return m ? ':' + m[1] : String(url || '当前会话')
     },
 
     /** 静默识别这台电脑上可派的会话（对应 test1.py 桥接的 /api/gateways） */
@@ -1493,7 +1592,21 @@ export default {
       return JOB_RUNNING_STATES.indexOf(state) !== -1 || item.alive === true
     },
 
+    /**
+     * 排队中的那条：桥接把位置写在 detail（`排队中（第 N 位）：…`），
+     * 但 state 仍是 `working`（对「跑完没」来说它确实没跑完）——
+     * 只认 state 的话列表永远显示「执行中」，用户看不出自己是在排队。
+     */
+    jobQueueText(item) {
+      const matched = String((item && item.detail) || '').match(
+        /排队中（第\s*(\d+)\s*位）/
+      )
+      return matched ? `排队中（第 ${matched[1]} 位）` : ''
+    },
+
     jobStateText(item) {
+      const queued = this.jobQueueText(item)
+      if (queued) return queued
       const state = item.state || item.status || '?'
       const map = {
         done: '已完成',
@@ -1518,6 +1631,8 @@ export default {
     },
 
     jobStateClass(item) {
+      // 排队的 state 是 working，但配色该跟「执行中」区分开（.s-pending 已有样式）
+      if (this.jobQueueText(item)) return 's-pending'
       const state = item.state || item.status || ''
       return 's-' + (state || 'unknown')
     },
@@ -2226,6 +2341,27 @@ export default {
       return this.stopJobById((pending && pending.id) || this.jobCurrentId)
     },
 
+    /**
+     * 从**运行历史列表**里停一条（2026-09-28 新增）。
+     *
+     * 与 `stopJob` 的区别：那个只认「本页面刚派出去、轮询还没停」的内存记录
+     * （`jobPendingList` 不持久化），**刷新页面之后就什么也停不了** —— 用户看到的
+     * 就是「历史里明明挂着执行中，却没有停止按钮」。
+     * 这个直接按列表里那条的 id 停，刷新后照样可用；链路不变
+     * （`stopJobById` → `stopHostJob` → 桥接 `/api/stop`），桥接成功后会把台账那条
+     * 钉成 `stopped`，下一次拉列表就显示「已停止」。
+     */
+    async stopHistoryItem(item) {
+      const id = (item && item.id) || ''
+      if (!id || this.jobStopBusyId) return
+      this.jobStopBusyId = id
+      try {
+        await this.stopJobById(id)
+      } finally {
+        this.jobStopBusyId = ''
+      }
+    },
+
     /** 停**全部**还在等结果的任务（同时开了好几个时用） */
     async stopAllPendingJobs() {
       const ids = (this.jobPendingList || []).map(x => x.id).filter(Boolean)
@@ -2237,8 +2373,13 @@ export default {
 
     async stopJobById(jobId) {
       // 按条目定位到它派发时那台机器/那条会话（多任务并行时不能用当前选中的）
+      // ⚠️ 2026-09-28：**也要在运行历史里找**。以前只查 `jobPendingList`（内存态、刷新即空），
+      // 于是从历史列表点「停止」时 entry 为空 → gateway 回落到「当前选中的那条会话」，
+      // 停的可能是别人的任务（串台）。桥接现在给每条 job 都带了 `gateway`，正好能用。
       const entry =
-        (this.jobPendingList || []).find(x => x.id === jobId) || null
+        (this.jobPendingList || []).find(x => x.id === jobId) ||
+        (this.jobHistory || []).find(x => x.id === jobId) ||
+        null
       const host = this.hostOfEntry(entry)
       if (!host || !jobId) return
       const res = await stopHostJob({
@@ -2956,6 +3097,11 @@ export default {
         flex-direction: column;
         text-align: center;
         padding: 0 5px;
+
+        .refreshIcon {
+          display: inline-block;
+          line-height: 1;
+        }
       }
 
       .text {
@@ -3115,6 +3261,48 @@ export default {
 }
 
 .workbuddyJobDialog {
+  max-width: calc(100vw - 32px);
+  margin-top: 8vh !important;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(18, 38, 61, 0.22);
+
+  .el-dialog__header {
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid #e8edf2;
+  }
+  .el-dialog__headerbtn {
+    top: 24px;
+    right: 24px;
+  }
+  .el-dialog__body {
+    padding: 0;
+  }
+  .histDialogTitle {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding-right: 36px;
+  }
+  .histEyebrow {
+    color: #83909d;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .histHeading {
+    color: #20354a;
+    font-size: 19px;
+    font-weight: 650;
+  }
+  .histCount {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #edf4fb;
+    color: #366487;
+    font-size: 11px;
+    white-space: nowrap;
+  }
   .jobHint {
     margin: 6px 0 0;
     font-size: 12px;
@@ -3150,9 +3338,9 @@ export default {
   /* 两栏：左边执行记录（可搜索），右边内容，底部继续执行 */
   .hist {
     display: flex;
-    gap: 14px;
-    height: 560px;
-    min-height: 0;
+    height: 68vh;
+    max-height: 610px;
+    min-height: 400px;
 
     &.isDark {
       .jobHint {
@@ -3276,9 +3464,44 @@ export default {
 
   .histLeft {
     display: flex;
-    flex: 0 0 268px;
+    flex: 0 0 290px;
     flex-direction: column;
     min-width: 0;
+    padding: 18px 14px 14px;
+    border-right: 1px solid #e8edf2;
+    background: #f8fafc;
+  }
+  .histSidebarHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    color: #20354a;
+    font-size: 13px;
+  }
+  .histRefresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #3974a4;
+    font-size: 12px;
+    cursor: pointer;
+    &:hover:not(:disabled) {
+      background: #e8f2fa;
+    }
+    &:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+  }
+  .histListCount {
+    margin: 12px 2px 8px;
+    color: #83909d;
+    font-size: 11px;
   }
   /* WorkBuddy 会话（端口）一览：默认收起，点开看哪个端口在跑、哪个闲着 */
   .sessBox {
@@ -3379,33 +3602,40 @@ export default {
   }
   .histList {
     flex: 1;
-    margin-top: 8px;
     overflow: auto;
-    border: 1px solid #ebeef5;
-    border-radius: 4px;
+    min-height: 0;
+    border: 0;
   }
   .histItem {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 8px;
+    align-items: flex-start;
+    gap: 9px;
+    width: 100%;
+    padding: 11px 10px;
+    margin-bottom: 6px;
     font-size: 12px;
+    text-align: left;
     cursor: pointer;
-    border-top: 1px solid #ebeef5;
-    &:first-child {
-      border-top: 0;
-    }
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
     &:hover {
-      background: #f7f9fc;
+      background: #eef4f8;
     }
     &.active {
-      background: #ecf2fb;
+      border-color: #b8d5eb;
+      background: #e8f3fb;
+    }
+    &:focus-visible {
+      outline: 2px solid #409eff;
+      outline-offset: 1px;
     }
   }
   .histItem .hDot {
     flex: 0 0 auto;
     width: 7px;
     height: 7px;
+    margin-top: 5px;
     border-radius: 50%;
     background: #c0c4cc;
     &.s-done,
@@ -3422,24 +3652,103 @@ export default {
     &.s-failed {
       background: #f56c6c;
     }
+    // 「已停止」：默认灰点是 #c0c4cc，跟「未知状态」分不开，用深一档的灰
+    // （2026-09-28：桥接新增 stopped 状态后才用得上）
+    &.s-stopped {
+      background: #909399;
+    }
+  }
+  // 行内「停止」：只在运行中的条目上出现，别被 hName 的省略号吃掉
+  .histItem .hStop {
+    flex: 0 0 auto;
+    margin-left: 6px;
+    padding: 0 4px;
+    font-size: 12px;
+  }
+  .histItemText {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
   }
   .histItem .hName {
-    flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: #303133;
+    color: #24384a;
+    font-size: 12px;
+    font-weight: 600;
   }
   .histItem .hMeta {
+    color: #83909d;
+    font-size: 11px;
+  }
+  .histItem .hState {
     flex: 0 0 auto;
-    color: #909399;
+    padding: 2px 5px;
+    border-radius: 4px;
+    background: #e9eef3;
+    color: #637181;
+    font-size: 10px;
+    &.s-done,
+    &.s-completed {
+      background: #e6f5ed;
+      color: #167349;
+    }
+    &.s-working,
+    &.s-running,
+    &.s-busy,
+    &.s-active,
+    &.s-pending {
+      background: #fff3dc;
+      color: #9b691a;
+    }
+    &.s-failed {
+      background: #feebea;
+      color: #b93e39;
+    }
+  }
+  .histEmpty,
+  .histDetailEmpty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 170px;
+    padding: 20px;
+    color: #8796a5;
+    text-align: center;
+    i {
+      font-size: 24px;
+      color: #a5b9c8;
+    }
+    strong {
+      color: #4d6072;
+      font-size: 13px;
+    }
+    p,
+    span {
+      margin: 0;
+      font-size: 11px;
+      line-height: 1.5;
+      word-break: break-word;
+    }
   }
   .histFoot {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    margin-top: 6px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #e8edf2;
+    .jobHint {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   }
 
   .histRight {
@@ -3447,21 +3756,30 @@ export default {
     flex: 1;
     flex-direction: column;
     min-width: 0;
+    padding: 20px 22px 18px;
   }
   .histHead {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding-bottom: 6px;
+    padding-bottom: 16px;
     font-size: 13px;
     color: #606266;
     border-bottom: 1px solid #ebeef5;
+  }
+  .histHeadInfo {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
   }
   .histTitle {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: #20354a;
+    font-size: 14px;
   }
   .histHeadBtns {
     flex: 0 0 auto;
@@ -3486,17 +3804,37 @@ export default {
   }
   .histBody {
     flex: 1;
-    margin-top: 8px;
-    padding: 10px;
+    min-height: 0;
+    margin-top: 14px;
+    padding: 16px 18px;
     overflow: auto;
-    font-size: 12.5px;
+    font-size: 13px;
     line-height: 1.65;
     word-break: break-word;
-    background: #f5f7fa;
-    border-radius: 4px;
+    color: #344658;
+    background: #f8fafc;
+    border: 1px solid #e8edf2;
+    border-radius: 10px;
+  }
+  .histDetailEmpty {
+    flex: 1;
+    min-height: 0;
+    margin-top: 14px;
+    border: 1px dashed #d8e3eb;
+    border-radius: 10px;
+    background: #fbfcfe;
   }
   .histComposer {
-    margin-top: 10px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid #e8edf2;
+  }
+  .histComposerLabel {
+    display: block;
+    margin-bottom: 8px;
+    color: #344658;
+    font-size: 12px;
+    font-weight: 600;
   }
   .composerBar {
     display: flex;
@@ -3617,6 +3955,131 @@ export default {
     }
     img {
       max-width: 100%;
+    }
+  }
+
+  &.isDark {
+    background: #242a2f;
+    color: #dce6ed;
+    .el-dialog__header,
+    .histHead,
+    .histComposer,
+    .histFoot {
+      border-color: #3b454d;
+    }
+    .histHeading,
+    .histSidebarHead,
+    .histTitle,
+    .histComposerLabel {
+      color: #e1eaf0;
+    }
+    .histCount {
+      background: #304252;
+      color: #a9d1ef;
+    }
+    .histLeft {
+      border-color: #3b454d;
+      background: #20262b;
+    }
+    .histRefresh {
+      color: #9fcdf0;
+      &:hover:not(:disabled) {
+        background: #30404c;
+      }
+    }
+    .histItem {
+      &.active {
+        border-color: #52738d;
+        background: #2d4050;
+      }
+    }
+    .histItem .hState {
+      background: #35414b;
+      color: #b5c6d2;
+      &.s-done,
+      &.s-completed {
+        background: #1f493b;
+        color: #9de0bd;
+      }
+      &.s-working,
+      &.s-running,
+      &.s-busy,
+      &.s-active,
+      &.s-pending {
+        background: #574730;
+        color: #f0c983;
+      }
+      &.s-failed {
+        background: #543636;
+        color: #f1aaaa;
+      }
+    }
+    .histEmpty,
+    .histDetailEmpty {
+      color: #a8b7c2;
+      strong {
+        color: #d4e0e8;
+      }
+    }
+    .histDetailEmpty {
+      border-color: #45515a;
+      background: #20262b;
+    }
+    .histBody {
+      border-color: #3b454d;
+    }
+  }
+}
+
+@media screen and (max-width: 720px) {
+  .workbuddyJobDialog {
+    width: calc(100vw - 24px) !important;
+    max-width: none;
+    margin-top: 12px !important;
+    .el-dialog__header {
+      padding: 14px 16px 12px;
+    }
+    .el-dialog__headerbtn {
+      top: 17px;
+      right: 16px;
+    }
+    .histDialogTitle {
+      flex-wrap: wrap;
+      gap: 3px 8px;
+    }
+    .histEyebrow {
+      width: 100%;
+    }
+    .hist {
+      flex-direction: column;
+      height: calc(100vh - 104px);
+      min-height: 0;
+    }
+    .histLeft {
+      flex: 0 0 200px;
+      padding: 12px;
+      border-right: 0;
+      border-bottom: 1px solid #e8edf2;
+    }
+    .histRight {
+      min-height: 0;
+      padding: 12px;
+    }
+    .histHead {
+      padding-bottom: 9px;
+    }
+    .histHeadBtns {
+      gap: 0;
+    }
+    .histComposer {
+      margin-top: 9px;
+      padding-top: 9px;
+    }
+    .composerBar {
+      flex-wrap: wrap;
+    }
+    .composerBtns {
+      margin-left: auto;
     }
   }
 }

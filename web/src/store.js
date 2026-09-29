@@ -12,8 +12,10 @@ const store = new Vuex.Store({
       isZenMode: false, // 是否是禅模式
       // 是否开启节点富文本
       openNodeRichText: true,
-      // 鼠标行为
-      useLeftKeySelectionRightKeyDrag: false,
+      // 鼠标行为：左键框选，右键拖动画布
+      useLeftKeySelectionRightKeyDrag: true,
+      // 已把右键拖动写成默认；旧本地配置只迁移一次
+      rightDragDefaultApplied: true,
       // 是否显示滚动条
       isShowScrollbar: false,
       // 是否显示小地图
@@ -47,6 +49,7 @@ const store = new Vuex.Store({
     collabDiagnostic: null,
     roomRole: '',
     roomCanEdit: true,
+    roomCanShare: true,
     roomCanManage: true,
     aclForcedReadonly: false,
     aiConfig: {
@@ -137,6 +140,7 @@ const store = new Vuex.Store({
     setRoomAcl(state, data = {}) {
       state.roomRole = data.role || ''
       state.roomCanEdit = data.canEdit !== false
+      state.roomCanShare = data.canShare !== false && state.roomCanEdit
       state.roomCanManage = !!data.canManage
       state.aclForcedReadonly = !state.roomCanEdit
     },

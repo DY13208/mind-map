@@ -41,6 +41,7 @@ function localizeGeneratedVersionName(row) {
   const createdAt = row && (row.created_at || row.createdAt)
   const name = String((row && row.name) || '')
   if (type === 'AUTO') return '自动保存 ' + stripSeconds(formatVersionTime(createdAt))
+  if (type === 'PRE_IMPORT') return '导入前 ' + stripSeconds(formatVersionTime(createdAt))
   if (type === 'PRE_RESTORE') return '恢复前 ' + stripSeconds(formatVersionTime(createdAt))
   return name
 }

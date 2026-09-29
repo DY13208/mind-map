@@ -68,7 +68,6 @@ export class PageService {
     @InjectKysely() private readonly db: KyselyDB,
     private readonly storageService: StorageService,
     @InjectQueue(QueueName.ATTACHMENT_QUEUE) private attachmentQueue: Queue,
-    @InjectQueue(QueueName.AI_QUEUE) private aiQueue: Queue,
     @InjectQueue(QueueName.GENERAL_QUEUE) private generalQueue: Queue,
     private eventEmitter: EventEmitter2,
     private collaborationGateway: CollaborationGateway,
@@ -514,21 +513,7 @@ export class PageService {
           },
         );
 
-        await this.aiQueue.add(
-          QueueJob.PAGE_MOVED_TO_SPACE,
-          {
-            pageIds: pageIdsToMove,
-            spaceId,
-            workspaceId: currentRootPage.workspaceId,
-          },
-          {
-            attempts: 2,
-            backoff: {
-              type: 'fixed',
-              delay: 2 * 60 * 1000,
-            },
-          },
-        );
+        // 2026-09-22: ai-queue enqueue removed (dead queue, no consumer).
       }
 
       return { childPageIds };

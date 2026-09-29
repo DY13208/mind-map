@@ -14,15 +14,43 @@ class KnowledgeCompiler {
     this.tracker = options.tracker || new ChangeTracker()
     this.pending = new Map()
     this.errors = new Map()
+    /** @type {Map<string, number>} */
+    this.failCounts = new Map()
+    /** @type {Map<string, number>} */
+    this.failCooldownUntil = new Map()
     this.log = options.log || console.log
     this.readSnapshot = options.readSnapshot || readSnapshot
   }
+  compileFailCooldownMs(failCount) {
+    // Cap at 5 minutes. First failure: 5s, then 10s, 20s, 40s, 80s, 160s, 300s.
+    const exp = Math.min(Math.max(0, failCount - 1), 6)
+    return Math.min(300000, 5000 * Math.pow(2, exp))
+  }
   compile(roomId, options = {}) {
     safeId(roomId)
+    const cooldownUntil = this.failCooldownUntil.get(roomId) || 0
+    if (Date.now() < cooldownUntil) {
+      return Promise.resolve({
+        roomId,
+        status: 'cooldown',
+        reason: this.errors.get(roomId) || 'compile_cooldown',
+        cooldownUntil
+      })
+    }
     if (this.pending.has(roomId)) return this.pending.get(roomId)
-    const job = this.run(roomId, options).catch(err => {
+    const job = this.run(roomId, options).then(result => {
+      this.failCounts.delete(roomId)
+      this.failCooldownUntil.delete(roomId)
+      return result
+    }).catch(err => {
       this.errors.set(roomId, err.message)
-      this.log(`[KnowledgeCompiler][room=${roomId}] failed: ${err.message}`)
+      const n = (this.failCounts.get(roomId) || 0) + 1
+      this.failCounts.set(roomId, n)
+      const ms = this.compileFailCooldownMs(n)
+      this.failCooldownUntil.set(roomId, Date.now() + ms)
+      this.log(
+        `[KnowledgeCompiler][room=${roomId}] failed: ${err.message} (failCount=${n} cooldownMs=${ms})`
+      )
       throw err
     }).finally(() => this.pending.delete(roomId))
     this.pending.set(roomId, job)

@@ -396,4 +396,26 @@ export class EnvironmentService {
   getAllowedPrivateNetworks(): string {
     return this.configService.get<string>('ALLOWED_PRIVATE_NETWORKS', 'none');
   }
+
+  /** Mind-map internal base URL for Wiki→Mindmap auto-sync hook (e.g. http://app:80). */
+  getMindMapInternalUrl(): string {
+    return (
+      this.configService.get<string>('MIND_MAP_INTERNAL_URL', '') || ''
+    ).replace(/\/$/, '');
+  }
+
+  getWikiMindmapHookSecret(): string {
+    return (
+      this.configService.get<string>('WIKI_MINDMAP_HOOK_SECRET', '') ||
+      this.configService.get<string>('DOCMOST_SSO_SECRET', '') ||
+      ''
+    ).trim();
+  }
+
+  isWikiMindmapAutoSyncEnabled(): boolean {
+    const raw = (
+      this.configService.get<string>('WIKI_MINDMAP_AUTO_SYNC', 'true') || 'true'
+    ).toLowerCase();
+    return raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on';
+  }
 }

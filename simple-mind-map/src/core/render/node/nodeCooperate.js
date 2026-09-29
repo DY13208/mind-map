@@ -17,7 +17,7 @@ function createTextAvatar(item) {
   const g = new G()
   const str = item.isMore ? item.name : String(item.name)[0]
   // 圆
-  const circle = new Circle().size(avatarSize, avatarSize)
+  const circle = new Circle().size(avatarSize, avatarSize).move(0, 0)
   circle.fill({
     color: item.color || generateColorByContent(str)
   })
@@ -29,15 +29,19 @@ function createTextAvatar(item) {
   }
   // 文本
   const text = new Text()
-    .text(str)
+    .plain(str)
     .fill({
       color: '#fff'
     })
     .css({
       'font-size': fontSize + 'px'
     })
-    .dx(-fontSize / 2)
-    .dy((avatarSize - fontSize) / 2)
+    .attr({
+      x: avatarSize / 2,
+      y: avatarSize / 2,
+      'text-anchor': 'middle',
+      'dominant-baseline': 'central'
+    })
   g.add(circle).add(text)
   return g
 }
@@ -52,10 +56,14 @@ function createImageAvatar(item) {
 function updateUserListNode() {
   if (!this._userListGroup) return
   const { avatarSize } = this.mindMap.opt.cooperateStyle
+  const avatarGap = 3
   this._userListGroup.clear()
   // 根据当前节点长度计算最多能显示几个
   const length = this.userList.length
-  const maxShowCount = Math.floor(this.width / avatarSize)
+  const maxShowCount = Math.max(
+    1,
+    Math.floor((this.width + avatarGap) / (avatarSize + avatarGap))
+  )
   const list = []
   if (length > maxShowCount) {
     // 如果当前用户数量比最多能显示的多，最后需要显示一个提示信息
@@ -66,6 +74,10 @@ function updateUserListNode() {
   } else {
     list.push(...this.userList)
   }
+  const rowWidth = list.length * avatarSize + Math.max(0, list.length - 1) * avatarGap
+  // Keep the editor badge at the leading edge of the node, with a small inset
+  // when the node is wide enough to contain the whole row.
+  const startX = Math.max(0, Math.min(avatarGap, this.width - rowWidth))
   list.forEach((item, index) => {
     let node = null
     if (item.avatar) {
@@ -82,7 +94,7 @@ function updateUserListNode() {
     node.on('mouseleave', (e) => {
       this.mindMap.emit('node_cooperate_avatar_mouseleave', item, this, node, e)
     })
-    node.x(index * avatarSize).cy(-avatarSize / 2)
+    node.x(startX + index * (avatarSize + avatarGap)).y(-avatarSize - avatarGap)
     this._userListGroup.add(node)
   })
 }

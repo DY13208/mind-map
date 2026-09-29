@@ -257,6 +257,7 @@ async function createDashboard(req, res, context, actor) {
     } catch (error) {
       html = ''
     }
+    html = ensureCharsetMeta(html)
     if (!html || Buffer.byteLength(html, 'utf8') > MAX_HTML_BYTES) {
       context.sendJson(res, 400, {
         ok: false,
@@ -365,7 +366,7 @@ async function updateDashboard(req, res, context, actor, id) {
       })
       return
     }
-    html = decoded
+    html = ensureCharsetMeta(decoded)
     sourceType = 'html'
     storedUrl = ''
     fileName =
@@ -396,6 +397,25 @@ function safeFileName(value, fallback) {
   return name || fallback
 }
 
+function ensureCharsetMeta(html) {
+  const text = String(html || '')
+  if (!text) return text
+  if (text.charCodeAt(0) === 0xfeff) return text
+  if (/charset\s*=/i.test(text.slice(0, 1024))) return text
+  const meta = '<meta charset="utf-8">'
+  const headMatch = text.match(/<head[^>]*>/i)
+  if (headMatch) {
+    const index = headMatch.index + headMatch[0].length
+    return text.slice(0, index) + meta + text.slice(index)
+  }
+  const htmlMatch = text.match(/<html[^>]*>/i)
+  if (htmlMatch) {
+    const index = htmlMatch.index + htmlMatch[0].length
+    return text.slice(0, index) + meta + text.slice(index)
+  }
+  return meta + text
+}
+
 async function downloadDashboard(req, res, context, actor, id) {
   const row = await getDashboard(context.db, id)
   if (!row) {
@@ -418,6 +438,7 @@ async function downloadDashboard(req, res, context, actor, id) {
       return
     }
   }
+  html = ensureCharsetMeta(html)
   let baseName = row.file_name
   if (!baseName) baseName = `${row.title || '数据看板'}.html`
   if (!/\.html?$/i.test(baseName)) baseName += '.html'
@@ -454,7 +475,7 @@ async function sendDashboardContent(req, res, context, actor, id) {
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': 'no-store'
   })
-  res.end(row.html_content || '')
+  res.end(ensureCharsetMeta(row.html_content || ''))
 }
 
 async function deleteDashboard(req, res, context, actor, id) {
@@ -612,6 +633,7 @@ module.exports = {
   normalizeLevel,
   normalizeSourceUrl,
   safeFileName,
+  ensureCharsetMeta,
   rowToDashboard,
   initSchema,
   listDashboards,

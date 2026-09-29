@@ -132,6 +132,21 @@
     </div>
     <template v-else>
       <router-view></router-view>
+      <div
+        v-if="authState.workbuddyEnabled && (workbuddyLinkNeeded || workbuddyLinkSuccess)"
+        class="authLinkNotice"
+        role="status"
+      >
+        <strong>{{ workbuddyLinkSuccess ? 'WorkBuddy 已绑定' : '绑定 WorkBuddy 账号' }}</strong>
+        <p v-if="workbuddyLinkSuccess">今后可直接用 WorkBuddy 单点登录，沿用当前企业微信账号和权限。</p>
+        <p v-else>{{ authErrorMessage || '请确认当前是你本人的企业微信账号，再授权绑定 WorkBuddy。' }}</p>
+        <div class="authLinkNoticeActions">
+          <button v-if="!workbuddyLinkSuccess" type="button" @click="startWorkBuddyLink">验证并绑定</button>
+          <button type="button" class="authLinkDismiss" @click="dismissWorkBuddyLinkNotice">
+            {{ workbuddyLinkSuccess ? '知道了' : '稍后' }}
+          </button>
+        </div>
+      </div>
     </template>
   </div>
 </template>
@@ -144,6 +159,7 @@ import {
   devLogin,
   getAuthApiUrl,
   getWorkBuddyLoginUrl,
+  getWorkBuddyLinkUrl,
   getStoredDevAuthKey,
   getWecomClientLoginUrl,
   loadAuthState,
@@ -181,12 +197,18 @@ const authErrors = {
   oneid_unavailable: 'OneID 服务暂不可用，可使用企业微信扫码。',
   workbuddy_access_denied:
     'WorkBuddy 单点登录未完成，可重试或使用企业微信扫码。',
+  workbuddy_invalid_state:
+    'WorkBuddy 登录状态校验失败，请重新点击单点登录。',
+  workbuddy_expired_state:
+    'WorkBuddy 登录已过期，请重新点击单点登录。',
   workbuddy_missing_code: 'WorkBuddy 未返回有效授权码，请重新登录。',
   workbuddy_token_failed: 'WorkBuddy 登录票据交换失败，请稍后重试。',
   workbuddy_identity_failed:
     'WorkBuddy 未返回有效成员身份，请联系管理员。',
   workbuddy_account_not_linked:
-    'WorkBuddy 账号未匹配到现有企业微信成员。为避免产生第二套账号，已阻止登录，请联系管理员核对成员信息。',
+    '首次使用请先扫描企业微信二维码登录，再验证并绑定 WorkBuddy；不会创建第二套账号。',
+  workbuddy_link_session_expired:
+    '企业微信登录已过期，请先扫码登录，再绑定 WorkBuddy。',
   workbuddy_identity_conflict:
     '该 WorkBuddy 账号已绑定其他成员，已拒绝变更绑定。',
   workbuddy_invalid_response: 'WorkBuddy 返回的数据不完整，请稍后重试。',
@@ -222,11 +244,14 @@ export default {
       qrChallenge: null,
       qrPanel: null,
       qrRefreshing: false,
+      qrCompleting: false,
       qrFailure: '',
       qrRefreshTimer: null,
       isWecomClient: isWecomClientEnvironment(),
       wecomClientRedirecting: false,
       workbuddyRedirecting: false,
+      workbuddyLinkNeeded: false,
+      workbuddyLinkSuccess: false,
       showDevLogin: false,
       devAuthKey: '',
       devAuthMobile: '',
@@ -260,8 +285,24 @@ export default {
   created() {
     const url = new URL(window.location.href)
     this.authErrorCode = url.searchParams.get('auth_error') || ''
-    if (this.authErrorCode) {
+    const linkCompleted = url.searchParams.get('workbuddy_linked') === '1'
+    try {
+      if (this.authErrorCode === 'workbuddy_account_not_linked') {
+        window.sessionStorage.setItem('mind_map_workbuddy_link_needed', '1')
+      }
+      if (linkCompleted) {
+        window.sessionStorage.removeItem('mind_map_workbuddy_link_needed')
+      }
+      this.workbuddyLinkNeeded =
+        window.sessionStorage.getItem('mind_map_workbuddy_link_needed') === '1'
+    } catch (err) {
+      this.workbuddyLinkNeeded =
+        this.authErrorCode === 'workbuddy_account_not_linked'
+    }
+    this.workbuddyLinkSuccess = linkCompleted
+    if (this.authErrorCode || linkCompleted) {
       url.searchParams.delete('auth_error')
+      url.searchParams.delete('workbuddy_linked')
       window.history.replaceState(
         null,
         '',
@@ -343,11 +384,15 @@ export default {
         if (
           this.authState.wecomEnabled &&
           this.isWecomClient &&
-          // 从普通浏览器唤起企业微信桌面端后，首次 OAuth 回调会进入新的
-          // WebView Cookie 上下文。此时保留严格的浏览器绑定，并在桌面端
-          // 自动重建一次挑战；比放宽 state 校验更安全，也避免用户手动重试。
-          (!this.authErrorCode || this.authErrorCode === 'invalid_state') &&
-          !this.hasAttemptedWecomClientAutoLogin()
+          // 桌面端唤起后可能换成新的 WebView Cookie 上下文，也可能收到
+          // 已消费的扫码 state。保留后端一次性校验，在客户端最多重建两次
+          // 授权挑战；登录成功或主动退出后重置/禁止重试。
+          (!this.authErrorCode ||
+            this.authErrorCode === 'invalid_state' ||
+            this.authErrorCode === 'expired_state') &&
+          !this.hasAttemptedWecomClientAutoLogin(
+            this.authErrorCode ? 2 : 1
+          )
         ) {
           this.startWecomClientLogin()
           return
@@ -376,10 +421,12 @@ export default {
         return true
       }
     },
-    hasAttemptedWecomClientAutoLogin() {
+    hasAttemptedWecomClientAutoLogin(maxAttempts = 1) {
       try {
         return (
-          window.sessionStorage.getItem(WECOM_CLIENT_AUTO_ATTEMPT_KEY) === '1'
+          (Number(
+            window.sessionStorage.getItem(WECOM_CLIENT_AUTO_ATTEMPT_KEY)
+          ) || 0) >= maxAttempts
         )
       } catch (err) {
         return true
@@ -402,6 +449,38 @@ export default {
       markWorkBuddyAutoLoginAttempted()
       window.location.assign(getWorkBuddyLoginUrl())
     },
+    async startWorkBuddyLink() {
+      if (!this.authState.authenticated || !this.authState.workbuddyEnabled) return
+      if (this.workbuddyRedirecting) return
+      this.workbuddyRedirecting = true
+      try {
+        const response = await fetch(getWorkBuddyLinkUrl(), {
+          method: 'POST',
+          credentials: 'include',
+          headers: { Accept: 'application/json' }
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok || !data.authorizeUrl) {
+          this.authErrorCode = data.code || 'workbuddy_unavailable'
+          return
+        }
+        window.location.assign(data.authorizeUrl)
+      } catch (err) {
+        this.authErrorCode = 'workbuddy_unavailable'
+      } finally {
+        this.workbuddyRedirecting = false
+      }
+    },
+    dismissWorkBuddyLinkNotice() {
+      this.workbuddyLinkNeeded = false
+      this.workbuddyLinkSuccess = false
+      this.authErrorCode = ''
+      try {
+        window.sessionStorage.removeItem('mind_map_workbuddy_link_needed')
+      } catch (err) {
+        // Private browsing may disable sessionStorage.
+      }
+    },
     clearQrRefreshTimer() {
       if (!this.qrRefreshTimer) return
       window.clearTimeout(this.qrRefreshTimer)
@@ -416,7 +495,7 @@ export default {
       if (mount) mount.innerHTML = ''
     },
     async refreshLoginQr() {
-      if (this.qrRefreshing) return
+      if (this.qrRefreshing || this.qrCompleting) return
       this.clearQrRefreshTimer()
       this.destroyQrPanel()
       this.qrRefreshing = true
@@ -444,7 +523,8 @@ export default {
       }
     },
     completeLogin(code) {
-      if (!this.qrChallenge || !code) return
+      if (!this.qrChallenge || !code || this.qrCompleting) return
+      this.qrCompleting = true
       this.clearQrRefreshTimer()
       const url = new URL(getAuthApiUrl('/api/auth/wecom/callback'))
       url.searchParams.set('code', code)
@@ -882,6 +962,52 @@ body,
   animation: authSpin 0.8s linear infinite;
 }
 
+.authLinkNotice {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 3000;
+  width: min(400px, calc(100vw - 32px));
+  padding: 18px 20px;
+  border: 1px solid #cfe4da;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 12px 40px rgba(15, 45, 35, 0.16);
+  color: #102820;
+
+  strong {
+    font-size: 16px;
+  }
+
+  p {
+    margin-top: 8px;
+    color: #53635b;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+}
+
+.authLinkNoticeActions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+
+  button {
+    padding: 8px 14px;
+    border: 1px solid #0a855b;
+    border-radius: 8px;
+    background: #0a855b;
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .authLinkDismiss {
+    border-color: #dce6e0;
+    background: #fff;
+    color: #53635b;
+  }
+}
+
 @keyframes authSpin {
   to {
     transform: rotate(360deg);
@@ -889,6 +1015,11 @@ body,
 }
 
 @media (max-width: 720px) {
+  .authLinkNotice {
+    right: 16px;
+    bottom: 16px;
+  }
+
   .authCard {
     padding-right: 20px;
     padding-left: 20px;

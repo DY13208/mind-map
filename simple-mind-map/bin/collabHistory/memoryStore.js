@@ -197,13 +197,22 @@ function createMemoryHistoryStore(seed = {}) {
         .sort((a, b) => {
           const dt = new Date(b.created_at) - new Date(a.created_at)
           if (dt) return dt
+          // Consecutive snapshots can share the same millisecond. Their room
+          // revision, not a random UUID, determines which came later.
+          const dr = Number(b.revision ?? -1) - Number(a.revision ?? -1)
+          if (dr) return dr
           return String(b.id).localeCompare(String(a.id))
         })
       if (!before) return rows[0] ? cloneJson(rows[0]) : null
       const idx = rows.findIndex(item => String(item.id) === String(before.id))
       const hit = idx >= 0 ? rows[idx + 1] : rows.find(item => {
         const dt = new Date(item.created_at) - new Date(before.created_at)
-        return dt < 0 || (dt === 0 && String(item.id) < String(before.id))
+        const dr = Number(item.revision ?? -1) - Number(before.revision ?? -1)
+        return (
+          dt < 0 ||
+          (dt === 0 &&
+            (dr < 0 || (dr === 0 && String(item.id) < String(before.id))))
+        )
       })
       return hit ? cloneJson(hit) : null
     },

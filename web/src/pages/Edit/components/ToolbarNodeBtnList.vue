@@ -248,6 +248,9 @@ export default {
       activeNodes: [],
       backEnd: true,
       forwardEnd: true,
+      nativeBackEnd: true,
+      nativeForwardEnd: true,
+      collabHistoryEnabled: false,
       readonly: false,
       isFullDataFile: false,
       timer: null,
@@ -291,6 +294,7 @@ export default {
     this.$bus.$on('mode_change', this.onModeChange)
     this.$bus.$on('node_active', this.onNodeActive)
     this.$bus.$on('back_forward', this.onBackForward)
+    this.$bus.$on('collab_history', this.onCollabHistory)
     this.$bus.$on('painter_start', this.onPainterStart)
     this.$bus.$on('painter_end', this.onPainterEnd)
     this.$bus.$on('node_flow_expand_queue', this.onFlowExpandQueue)
@@ -299,6 +303,7 @@ export default {
     this.$bus.$off('mode_change', this.onModeChange)
     this.$bus.$off('node_active', this.onNodeActive)
     this.$bus.$off('back_forward', this.onBackForward)
+    this.$bus.$off('collab_history', this.onCollabHistory)
     this.$bus.$off('painter_start', this.onPainterStart)
     this.$bus.$off('painter_end', this.onPainterEnd)
     this.$bus.$off('node_flow_expand_queue', this.onFlowExpandQueue)
@@ -318,8 +323,18 @@ export default {
 
     // 监听前进后退
     onBackForward(index, len) {
-      this.backEnd = index <= 0
-      this.forwardEnd = index >= len - 1
+      this.nativeBackEnd = index <= 0
+      this.nativeForwardEnd = index >= len - 1
+      if (!this.collabHistoryEnabled) {
+        this.backEnd = this.nativeBackEnd
+        this.forwardEnd = this.nativeForwardEnd
+      }
+    },
+
+    onCollabHistory({ enabled = false, undoDepth = 0, redoDepth = 0, pendingCount = 0 } = {}) {
+      this.collabHistoryEnabled = enabled
+      this.backEnd = enabled ? undoDepth <= 0 && pendingCount <= 0 : this.nativeBackEnd
+      this.forwardEnd = enabled ? redoDepth <= 0 : this.nativeForwardEnd
     },
 
     // 开始格式刷

@@ -447,9 +447,12 @@ export function getFileSubtree(roomKey, uid, options = {}) {
   return job
 }
 
-export function getFileExport(roomKey) {
+export function getFileExport(roomKey, maxNodes = 10000) {
+  const limit = Math.min(10000, Math.max(0, Number(maxNodes) || 0))
   return request(
-    `/api/files/${encodeURIComponent(roomKey)}?format=full&max_nodes=10000`
+    `/api/files/${encodeURIComponent(roomKey)}?format=full${
+      limit ? `&max_nodes=${limit}` : ''
+    }`
   )
 }
 
@@ -598,6 +601,7 @@ export async function replaceFileTree(roomKey, tree, extra = {}) {
   const payload = {
     tree,
     title: extra.title,
+    baseVersion: extra.baseVersion,
     confirm_sop_change: extra.confirm_sop_change !== false,
     operationId: extra.operationId
   }

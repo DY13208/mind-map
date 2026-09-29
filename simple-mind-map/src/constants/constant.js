@@ -189,6 +189,11 @@ export const nodeDataNoStylePropList = [
   'richText',
   'resetRichText', // 重新创建富文本内容，去掉原有样式
   'uid',
+  'childCount', // structural/lazy-load metadata, not a user-editable style
+  'descendantCount',
+  'subtreeVersion',
+  'hasMore',
+  'traceId', // collaboration transport metadata
   'activeStyle',
   'associativeLineTargets',
   'associativeLineTargetControlOffsets',
@@ -248,6 +253,17 @@ export const cssContent = `
 
   .smm-text-node-wrap, .smm-expand-btn-text {
     user-select: none;
+  }
+
+  /* 默认箭头；仅真正拖动画布时换成握住的小手 */
+  .smm-mind-map-container.smm-canvas-drag,
+  .smm-mind-map-container.smm-right-key-drag {
+    cursor: default;
+  }
+
+  body.smm-canvas-panning,
+  body.smm-canvas-panning * {
+    cursor: grabbing !important;
   }
 `
 

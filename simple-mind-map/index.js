@@ -765,6 +765,9 @@ class MindMap {
   // 销毁
   destroy() {
     this.emit('beforeDestroy')
+    if (this.view && typeof this.view.setCanvasPanningCursor === 'function') {
+      this.view.setCanvasPanningCursor(false)
+    }
     // 清除节点编辑框
     this.renderer.textEdit.hideEditTextBox()
     this.renderer.textEdit.removeTextEditEl()
