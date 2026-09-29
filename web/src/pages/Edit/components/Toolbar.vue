@@ -642,8 +642,14 @@ const JOB_FINISHED_STATES = [
  * 页面回来时接着轮询、把欠下的回写补上。
  */
 const JOB_PENDING_STORE = 'mindmap:pendingJobs'
-/** 超过这个时长就不恢复了：别把几天前的僵尸任务捡回来一直轮询 */
-const JOB_PENDING_TTL_MS = 12 * 60 * 60 * 1000
+/**
+ * 只补「刚派发不久」的任务。
+ *
+ * 窗口开太大（原来 12 小时）会把早上跑完、早就被手动处理过的任务也捡回来重写一遍
+ * —— 用户看到的就是「还没执行完就写回了、而且写的是之前的产物」（2026-09-29 反馈）。
+ * 刷新后真正需要续等的，本来就是刚刚那一条，30 分钟足够。
+ */
+const JOB_PENDING_TTL_MS = 30 * 60 * 1000
 
 // 工具栏
 let fileHandle = null
@@ -1329,7 +1335,9 @@ export default {
         this.addPendingJob({
           id: jobId,
           nodeUid: runTarget.nodeUid,
-          nodeTitle: runTarget.nodeTitle
+          nodeTitle: runTarget.nodeTitle,
+          hostKey: host.key,
+          gateway
         })
         this.jobStatus = `已派发${jobId ? ` · ${jobId}` : ''}${this.pendingSuffix()}`
         this.jobStatusType = 'jobOk'
@@ -1984,7 +1992,10 @@ export default {
         this.addPendingJob({
           id: jobId,
           nodeUid: container.nodeUid,
-          nodeTitle: container.nodeTitle
+          nodeTitle: container.nodeTitle,
+          // 会话/主机用这次的局部值 —— 并发时实例变量可能已被后一条改掉
+          hostKey: host.key,
+          gateway
         })
         this.jobStatus = `${continued ? '已派发继续执行' : '已派发'}${
           jobId ? ` · ${jobId}` : ''
@@ -2344,19 +2355,15 @@ export default {
     /** 记下一条"派出去等结果"的任务，并保证轮询在跑 */
     addPendingJob(entry) {
       if (!entry || !entry.id) return
-      this.rememberSession(this.jobGateway)
+      // 会话与主机**以 entry 自己带的为准**：并发派发时 this.jobGateway /
+      // this.jobHostKey 可能已经被后一条改掉，取错会话就会拉到别的任务的全文和产物
+      // （2026-09-29：写回内容对不上就是这么来的）。实例变量只在没传时兜底。
+      const gateway = String((entry && entry.gateway) || this.jobGateway || '')
+      const hostKey = String((entry && entry.hostKey) || this.jobHostKey || '')
+      this.rememberSession(gateway)
       const list = (this.jobPendingList || []).filter(x => x.id !== entry.id)
       list.push(
-        Object.assign(
-          {
-            miss: 0,
-            at: Date.now(),
-            // 派到哪个会话要记牢：下面轮询、取全文、写回产物都按它来
-            hostKey: this.jobHostKey,
-            gateway: this.jobGateway
-          },
-          entry
-        )
+        Object.assign({ miss: 0, at: Date.now() }, entry, { gateway, hostKey })
       )
       this.jobPendingList = list
       this.jobPendingMiss = 0

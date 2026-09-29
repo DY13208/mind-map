@@ -833,6 +833,63 @@ async function main() {
     })()) === true
   )
 
+  // ---- 11f. 恢复窗口只有 30 分钟：早上跑完的别捡回来重写 ----
+  // 现场（2026-09-29）：「我还没执行完就写回了，似乎是之前的写回产物」——
+  // 12 小时的窗口把早就被手动处理过的任务也捡回来重写了。
+  localStore.set(
+    'mindmap:pendingJobs',
+    JSON.stringify([
+      {
+        id: 'stale-3h',
+        gateway: 'http://127.0.0.1:50001',
+        at: Date.now() - 3 * 3600 * 1000
+      }
+    ])
+  )
+  vm = makeVm()
+  check(
+    '3 小时前派发的不再捡回来',
+    vm.restorePendingJobs() === 0 && (vm.jobPendingList || []).length === 0
+  )
+  localStore.set(
+    'mindmap:pendingJobs',
+    JSON.stringify([
+      {
+        id: 'fresh-5m',
+        gateway: 'http://127.0.0.1:50001',
+        at: Date.now() - 5 * 60 * 1000
+      }
+    ])
+  )
+  vm = makeVm()
+  check('5 分钟前的还会捡回来（刚派发就刷新的场景）', vm.restorePendingJobs() === 1)
+  localStore.clear()
+
+  // ---- 11g. 待回写条目的会话以它自己带的为准 ----
+  // 并发派发时 this.jobGateway 可能已被后一条改掉，取错会话就会拉到别的任务的产物。
+  vm = makeVm()
+  vm.startJobPoll = () => {} // 别真起定时器
+  vm.jobGateway = 'http://127.0.0.1:99999'
+  vm.addPendingJob({
+    id: 'p-own',
+    gateway: 'http://127.0.0.1:50001',
+    hostKey: '127.0.0.1:8799',
+    nodeUid: 'box-own'
+  })
+  const own = (vm.jobPendingList || []).find(x => x.id === 'p-own')
+  check(
+    '条目保留自己的 gateway（不被当前选中覆盖）',
+    !!own && own.gateway === 'http://127.0.0.1:50001',
+    own ? own.gateway : '-'
+  )
+  vm.addPendingJob({ id: 'p-fallback', nodeUid: 'box-f' })
+  const fb = (vm.jobPendingList || []).find(x => x.id === 'p-fallback')
+  check(
+    '没带时才回退到当前会话',
+    !!fb && fb.gateway === 'http://127.0.0.1:99999',
+    fb ? fb.gateway : '-'
+  )
+
   // 拿不到会话列表：报错但别炸
   gatewaysResult = { ok: false, error: '连不上 192.168.1.114:8799 的任务桥' }
   vm = makeVm()
