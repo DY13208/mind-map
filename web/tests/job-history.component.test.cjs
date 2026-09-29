@@ -77,6 +77,8 @@ let spawnedResult = {
 let transcriptResult = { ok: true, text: '' }
 // 派发结果（重试用例要换 job id）
 let dispatchResult = { ok: true, job: { id: 'job-x' }, mode: 'jobs' }
+// 按时间窗扫会话产物的结果（「自动」会话拿不到回执时的兜底）
+let recentArtifactsResult = { ok: true, files: [] }
 const bridgeStub = {
   resolveJobHosts: async () => ({ hosts: [], defaultHost: null }),
   listHostGateways: async () => gatewaysResult,
@@ -96,6 +98,7 @@ const bridgeStub = {
   },
   fetchJobTranscript: async () => transcriptResult,
   fetchJobArtifacts: async () => ({ ok: true, files: [] }),
+  fetchRecentArtifacts: async () => recentArtifactsResult,
   spawnHostSession: async () => ({ ok: true, gateway: { url: 'http://127.0.0.1:1' } }),
   releaseHostSession: async () => ({ ok: true }),
   attachFilesViaBridge: async () => ({ ok: false }),
@@ -1294,6 +1297,54 @@ async function main() {
     '目标为空时先拉一次会话列表就能派（不用去起新会话）',
     ensured.ok === true && ensured.gateway === 'http://127.0.0.1:56752',
     JSON.stringify({ ok: ensured.ok, gw: ensured.gateway })
+  )
+
+  // ---- 22. 正文拿不到、但能扫到产物 → 也要挂回导图 ----
+  // 用户反馈（2026-09-29）：「新建会话这种自动的，没法返回产物，但是能知道跑了」。
+  // 这类会话走 runs 通道：run 台账不更新、transcript 也空 —— 但产物确实落在 output/ 下。
+  const artWrites = []
+  transcriptResult = { ok: true, text: '' }
+  recentArtifactsResult = {
+    ok: true,
+    files: [
+      { path: 'D:/cathch/x/output/作文-2026-09-29.md', size: 1200, exists: true }
+    ]
+  }
+  vm = makeVm()
+  vm.jobHostKey = HOST.key
+  vm.jobGateways = [{ url: 'http://127.0.0.1:54418' }]
+  vm.jobGateway = 'http://127.0.0.1:54418'
+  jobsByGateway = {
+    'http://127.0.0.1:54418': {
+      ok: true,
+      jobs: [{ id: 'art-1', state: 'working', alive: true, name: 'x', detail: '' }]
+    }
+  }
+  vm.jobPendingList = [
+    {
+      id: 'art-1',
+      gateway: 'http://127.0.0.1:54418',
+      hostKey: HOST.key,
+      nodeUid: 'box-a',
+      nodeTitle: '自动会话的任务',
+      at: Date.now() - 5 * 60 * 1000,
+      miss: 0
+    }
+  ]
+  vm.writeJobResultToNode = async (job, opts) => {
+    artWrites.push(opts)
+  }
+  await vm.pollJob()
+  check(
+    '正文拿不到但扫到产物 → 照样写回，并把产物带上（挂附件）',
+    artWrites.length === 1 &&
+      Array.isArray(artWrites[0].artifacts) &&
+      artWrites[0].artifacts.length === 1 &&
+      vm.jobPendingList.length === 0,
+    JSON.stringify({
+      writes: artWrites.length,
+      arts: (artWrites[0] && artWrites[0].artifacts || []).length
+    })
   )
 
   const failed = results.filter(r => !r.ok)

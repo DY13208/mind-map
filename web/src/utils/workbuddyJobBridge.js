@@ -965,6 +965,47 @@ export async function fetchJobTranscript({ host, gateway, jobId } = {}) {
  * content=true 时把内容（base64）也带回来，供挂到脑图节点上。
  * 只允许读取执行主机工作目录内的文件。
  */
+/**
+ * 按**时间窗**扫执行机会话工作目录里的产物 —— 不看任务回执。
+ *
+ * 为什么要它（2026-09-29 用户反馈「新建会话这种自动的，没法返回产物，但是能知道跑了」）：
+ * 桥接自己起的 headless 会话在旧版 WorkBuddy 上只能走 `POST /api/v1/runs`，
+ * run 台账不更新、`/api/v1/jobs/:id/transcript` 也是空的 —— 于是前端既判不出「跑完了」，
+ * 也拿不到产物清单（`/api/job-artifacts` 是从任务正文里解析路径的）。
+ * 这条接口绕开回执：给定派发时间，把之后新出现的产物文件捞回来，至少能挂回导图。
+ */
+export async function fetchRecentArtifacts({
+  host,
+  gateway,
+  since = 0,
+  limit = 20,
+  content = false
+} = {}) {
+  const target = normalizeHost(host || {})
+  if (!target.ip) return { ok: false, files: [], error: '没有指定主机' }
+  const common =
+    `&since=${encodeURIComponent(since)}` +
+    `&limit=${encodeURIComponent(limit)}` +
+    `&content=${content ? 1 : 0}` +
+    (gateway ? `&gateway=${encodeURIComponent(gateway)}` : '')
+  const res = await bridgeRequest(target, {
+    path: `/api/recent-artifacts?x=1${common}`,
+    relayPath: `/api/recent-artifacts?ip=${encodeURIComponent(
+      target.ip
+    )}&port=${target.port}${common}`,
+    timeout: 60000
+  })
+  if (res.ok && res.json && res.json.ok) {
+    return {
+      ok: true,
+      files: res.json.files || [],
+      cwd: res.json.cwd || '',
+      via: res.via
+    }
+  }
+  return { ok: false, files: [], error: pickError(res, '扫不到产物文件') }
+}
+
 export async function fetchJobArtifacts({
   host,
   gateway,

@@ -626,6 +626,7 @@ import {
   stopHostJob,
   fetchJobTranscript,
   fetchJobArtifacts,
+  fetchRecentArtifacts,
   attachFilesViaBridge,
   describeEmptyGateways,
   dispatchWorkbuddyJob,
@@ -2102,31 +2103,46 @@ export default {
       const text = String(
         options.markdown != null ? options.markdown : this.jobFullText || ''
       ).trim()
-      if (!text) {
-        this.jobWriteError = '这次运行没有文字输出，没东西写进导图'
+      // 调用方已经扫好的产物（比如「自动」会话拿不到回执、只能按时间窗扫目录那种）
+      const presetArtifacts = Array.isArray(options.artifacts)
+        ? options.artifacts.filter(Boolean)
+        : null
+      // 只有产物、没有正文也照写 —— 以前这里直接 return，产物就跟着一起丢了
+      // （2026-09-29 用户反馈：「新建会话这种自动的，没法返回产物」）
+      if (!text && !(presetArtifacts && presetArtifacts.length)) {
+        this.jobWriteError = '这次运行没有文字输出，也没扫到产物文件'
         return
       }
+      // 正文位置放一句说明，别让节点是个空白
+      const bodyText =
+        text ||
+        '（这个会话不返回文字结果，产物已挂在下面「附件」里；' +
+          '想拿到正文，请在它上面打开 WorkBuddy 桌面版，或把它升级到新版）'
       this.jobWriteBusy = true
       this.jobWriteError = ''
       this.jobWriteState = '正在读取产物文件…'
       try {
         let artifacts = []
         let artifactSkips = []
-        try {
-          const res = await fetchJobArtifacts({ host, gateway, jobId })
-          if (res && res.ok) {
-            artifacts = res.files || []
-            artifactSkips = res.skipped || []
+        if (presetArtifacts) {
+          artifacts = presetArtifacts
+        } else {
+          try {
+            const res = await fetchJobArtifacts({ host, gateway, jobId })
+            if (res && res.ok) {
+              artifacts = res.files || []
+              artifactSkips = res.skipped || []
+            }
+          } catch (err) {
+            // 产物读不到不影响把文字写进去
           }
-        } catch (err) {
-          // 产物读不到不影响把文字写进去
         }
         this.jobWriteState = '正在写入导图…'
         const box = { ok: false }
         this.$bus.$emit('write_job_result', {
           result: box,
           nodeUid,
-          markdown: text,
+          markdown: bodyText,
           prompt: options.prompt || this.jobPendingPrompt || '',
           job,
           artifacts,
@@ -2674,6 +2690,31 @@ export default {
       this.loadJobHistory()
     },
 
+    /**
+     * 兜底：按**时间窗**扫这条任务所在会话的产物 —— 不看回执。
+     *
+     * 用于「会话不返回结果、但任务确实跑了」这种情况（旧版 WorkBuddy 的 headless
+     * 会话走 runs 通道：既判不出终态、transcript 也空），此时 /api/job-artifacts
+     * 无从下手（它靠任务正文里的路径），只能按派发时间扫目录。
+     */
+    async fetchRecentArtifactsFor(entry) {
+      const host = this.hostOfEntry(entry)
+      if (!host || typeof fetchRecentArtifacts !== 'function') return []
+      try {
+        const res = await fetchRecentArtifacts({
+          host,
+          gateway: (entry && entry.gateway) || this.jobGateway,
+          // 往前放宽 2 分钟：从派发到落盘之间有时间差
+          since: Math.max(0, Number((entry && entry.at) || 0) - 120000),
+          limit: 12,
+          content: true
+        })
+        return (res && res.ok && res.files) || []
+      } catch (err) {
+        return []
+      }
+    },
+
     /** 派发够久了（见 JOB_RECEIPT_GRACE_MS）—— 该主动去会话历史收一次结果 */
     pendingReceiptTimedOut(entry) {
       const at = Number((entry && entry.at) || 0)
@@ -2890,6 +2931,8 @@ export default {
           nodeUid: entry.nodeUid,
           nodeTitle: entry.nodeTitle,
           markdown,
+          // 「自动」会话扫回来的产物（没有正文时也要把文件挂上）
+          artifacts: entry.cachedArtifacts || null,
           host: this.hostOfEntry(entry),
           gateway: entry.gateway
         }
@@ -2959,7 +3002,18 @@ export default {
                 finished.push({ entry, cur, state: 'recovered' })
                 continue
               }
-              // 拉不到正文：可能真在跑（长任务），给到放弃线再收尾
+              // 拉不到正文：这类会话（旧版 WorkBuddy 的 headless 实例）连会话历史
+              // 都没有，但**产物文件确实落在 output/ 下** —— 按时间窗扫一遍，
+              // 有就先把产物挂回导图（用户：「没法返回产物，但是能知道跑了」）
+              const files = await this.fetchRecentArtifactsFor(entry)
+              if (files.length) {
+                entry.cachedArtifacts = files
+                cur.detail =
+                  `（这个会话不返回文字结果，已把 ${files.length} 个产物挂到「附件」下）`
+                finished.push({ entry, cur, state: 'artifacts' })
+                continue
+              }
+              // 还是什么都没有：可能真在跑（长任务），给到放弃线再收尾
               if (this.pendingReceiptGaveUp(entry)) {
                 await this.abandonPendingJob(entry)
                 continue
