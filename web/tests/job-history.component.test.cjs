@@ -44,11 +44,27 @@ const jobResponses = [] // 每次 listHostJobs 消费一个
 const calls = { list: 0, stop: [] }
 let stopResult = { ok: true }
 // 「WorkBuddy 会话（端口）」用例用：可编程的会话列表 + 按会话给任务
-let gatewaysResult = { ok: true, gateways: [] }
+// 默认给一个会话：loadJobHistory 现在会先问「这台机器有哪些会话」，再逐个拉任务
+// （跨会话历史，见下面 11b 的用例）
+let gatewaysResult = {
+  ok: true,
+  gateways: [{ url: 'http://127.0.0.1:8799' }]
+}
 let jobsByGateway = {}
+// 桥接自动起的会话（/api/sessions/spawned）：老版桥接的 /api/gateways 不带 spawned，
+// 前端要靠这份清单兜底认「能不能回收」
+let spawnedResult = {
+  ok: true,
+  items: [],
+  count: 0,
+  limit: 5,
+  remaining: 5,
+  canSpawn: true
+}
 const bridgeStub = {
   resolveJobHosts: async () => ({ hosts: [], defaultHost: null }),
   listHostGateways: async () => gatewaysResult,
+  listSpawnedSessions: async () => spawnedResult,
   listHostJobs: async args => {
     calls.list += 1
     const gw = args && args.gateway
@@ -64,9 +80,6 @@ const bridgeStub = {
   },
   fetchJobTranscript: async () => ({ ok: true, text: '' }),
   fetchJobArtifacts: async () => ({ ok: true, files: [] }),
-  listSpawnedSessions: async () => ({
-    ok: true, items: [], count: 0, limit: 5, remaining: 5, canSpawn: true
-  }),
   spawnHostSession: async () => ({ ok: true, gateway: { url: 'http://127.0.0.1:1' } }),
   releaseHostSession: async () => ({ ok: true }),
   attachFilesViaBridge: async () => ({ ok: false }),
@@ -551,6 +564,88 @@ async function main() {
   )
   await vm.toggleJobSessions()
   check('再点一下收起', vm.jobSessionsExpanded === false)
+
+  // ---- 11b. 远程老桥接：/api/gateways 没有 spawned 字段，也要能回收 ----
+  // 现场（2026-09-29）：执行主机的桥接是 09-28 之前的版本，gateways 里 5 个会话都没有
+  // spawned 字段（但 /api/sessions/spawned 有五条），于是「回收」按钮整片消失 ——
+  // 会话攒满 5 个把机器拖卡，又再也收不回去。
+  gatewaysResult = {
+    ok: true,
+    gateways: [
+      { url: 'http://127.0.0.1:59561', title: '图谱标题命名', pid: 4564 },
+      { url: 'http://127.0.0.1:58959', title: '扩写四季文章', pid: 4632 }
+    ]
+  }
+  spawnedResult = {
+    ok: true,
+    items: [{ pid: 4564, url: 'http://127.0.0.1:59561/', alive: true }],
+    count: 1,
+    limit: 5,
+    remaining: 4,
+    canSpawn: true
+  }
+  vm = makeVm()
+  await vm.loadJobSessions()
+  check(
+    '老桥接没 spawned 字段时，靠自动会话清单认出来（尾斜杠也要认）',
+    vm.jobSessions[0].spawned === true && vm.jobSessions[1].spawned === false,
+    JSON.stringify(vm.jobSessions.map(s => s.spawned))
+  )
+  check(
+    '顺手把额度也填上（不再多打一次桥接）',
+    vm.jobSpawnInfo.count === 1 && vm.jobSpawnInfo.limit === 5,
+    JSON.stringify(vm.jobSpawnInfo)
+  )
+  spawnedResult = {
+    ok: true,
+    items: [],
+    count: 0,
+    limit: 5,
+    remaining: 5,
+    canSpawn: true
+  }
+
+  // ---- 11c. 运行历史跨会话合并：任务存在各自会话里，只问一个就「记录不见了」 ----
+  gatewaysResult = {
+    ok: true,
+    gateways: [
+      { url: 'http://127.0.0.1:52369' },
+      { url: 'http://127.0.0.1:55317' }
+    ]
+  }
+  jobsByGateway = {
+    'http://127.0.0.1:52369': {
+      ok: true,
+      jobs: [
+        { id: 'old-a', name: '早先的活', updatedAt: 100, gateway: 'http://127.0.0.1:52369' },
+        { id: 'dup', name: '两边都报同一条', updatedAt: 150 }
+      ]
+    },
+    'http://127.0.0.1:55317': {
+      ok: true,
+      jobs: [
+        { id: 'new-b', name: '刚跑的活', updatedAt: 300 },
+        { id: 'dup', name: '两边都报同一条', updatedAt: 150 }
+      ]
+    }
+  }
+  vm = makeVm()
+  await vm.loadJobHistory()
+  check(
+    '两个会话的记录合并、按时间倒序',
+    vm.jobHistory.map(j => j.id).join(',') === 'new-b,dup,old-a',
+    vm.jobHistory.map(j => j.id).join(',')
+  )
+  check(
+    '同一条任务两边都报也只留一条',
+    vm.jobHistory.filter(j => j.id === 'dup').length === 1
+  )
+  check(
+    '每条都带上来自哪个会话（停止/取完整回答要用）',
+    vm.jobHistory.every(j => !!j.gateway),
+    JSON.stringify(vm.jobHistory.map(j => j.gateway))
+  )
+  jobsByGateway = {}
 
   // 拿不到会话列表：报错但别炸
   gatewaysResult = { ok: false, error: '连不上 192.168.1.114:8799 的任务桥' }

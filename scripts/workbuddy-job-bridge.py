@@ -1634,13 +1634,31 @@ def _password_hint():
 
 def gateways_payload(gws):
     """给页面的 /api/gateways 响应: 可用网关 + 为什么没有可用的。"""
-    # 标出哪些是桥接自动起的会话（前端显示「自动」+ 允许回收）
+    # 标出哪些是桥接自动起的会话（前端显示「自动」+ 允许回收）。
+    # 先按 url 认，认不出再按 pid 认 —— 2026-09-29 实测：远程那台的会话记录 url 是回环
+    # `http://127.0.0.1:<port>`，而网关这边上报的可能是绑定的另一个地址（docker/多网卡），
+    # 只比 url 会让「回收」按钮永远不出现，会话攒满就再也收不回去。
     try:
-        _spawned = {str(it.get("url") or "").rstrip("/"): it for it in spawned_sessions()}
+        spawned_items = spawned_sessions()
     except Exception:
-        _spawned = {}
+        spawned_items = []
+    by_url = {}
+    by_pid = {}
+    for it in spawned_items:
+        key = str(it.get("url") or "").rstrip("/").lower()
+        if key:
+            by_url[key] = it
+        try:
+            by_pid[int(it.get("pid"))] = it
+        except (TypeError, ValueError):
+            pass
     for g in gws:
-        hit = _spawned.get(str(g.get("url") or "").rstrip("/"))
+        hit = by_url.get(str(g.get("url") or "").rstrip("/").lower())
+        if not hit:
+            try:
+                hit = by_pid.get(int(g.get("pid")))
+            except (TypeError, ValueError):
+                hit = None
         if hit:
             g["spawned"] = True
             g["spawnedPid"] = hit.get("pid")
