@@ -1117,6 +1117,64 @@ def read_artifacts_for_gateway(g, paths, with_content=True, cwd_override=""):
     return {"ok": True, "cwd": cwd, "roots": roots, "files": files}
 
 
+# 按时间窗扫产物时要看的子目录（相对会话工作目录）
+RECENT_ARTIFACT_DIRS = (
+    "output", "outputs", "out", "export", "exports", "dist",
+    "report", "reports", "deliverable", "deliverables", "artifact", "artifacts",
+    "交付", "产物", "输出", "结果", "生成", "报表", "报告",
+)
+
+
+def recent_artifacts(g, since_ms=0, limit=20, with_content=False):
+    """会话工作目录里**最近新出现**的产物文件（不依赖任务回执）。
+
+    为什么要它（2026-09-29 用户反馈「新建会话这种自动的，没法返回产物，但是能知道跑了」）：
+    桥接自己起的 headless 会话在旧版 WorkBuddy(2.132.0) 上只能走 `POST /api/v1/runs`
+    —— run 台账不更新、`/api/v1/jobs/:id/transcript` 也拿不到正文，前端永远判不出终态，
+    于是「任务跑了、产物也在，就是回不到导图」。
+
+    这里干脆**不靠回执**：按「派发时间之后新出现的文件」把产物捞回来，至少能挂回导图。
+    只在白名单目录（会话 cwd / BRIDGE_ARTIFACT_ROOTS）的产物子目录里找，读文件的权限不变。
+    """
+    roots = artifact_roots([g])
+    since = float(since_ms or 0) / 1000.0
+    hits = []
+    for base in roots:
+        for sub in RECENT_ARTIFACT_DIRS:
+            d = os.path.join(base, sub)
+            if not os.path.isdir(d):
+                continue
+            try:
+                names = os.listdir(d)
+            except Exception:
+                continue
+            for name in names:
+                p = os.path.join(d, name)
+                try:
+                    st = os.stat(p)
+                except Exception:
+                    continue
+                if not os.path.isfile(p):
+                    continue
+                if since and st.st_mtime < since:
+                    continue
+                hits.append((st.st_mtime, p))
+    hits.sort(reverse=True)
+    try:
+        want = max(1, min(int(limit or 20), 50))
+    except Exception:
+        want = 20
+    files = []
+    for _, p in hits[:want]:
+        item, err = read_artifact(p, with_content=with_content)
+        if err:
+            item["error"] = err
+        files.append(item)
+    return {"ok": True, "cwd": (g.get("cwd") or "").strip(), "roots": roots,
+            "since": int(since_ms or 0), "limit": want,
+            "count": len(files), "files": files}
+
+
 def job_artifacts(g, job_id, with_content=True):
     """一个任务产出的文件清单：从它的完整回答里解析路径 + 校验存在 + 可选带内容。"""
     info = job_full_text(g, job_id)
@@ -2321,6 +2379,26 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/gateways"):
             gws = resolve_gateways(self.explicit_password)
             return self._json(gateways_payload(gws))
+
+        if self.path.startswith("/api/recent-artifacts"):
+            # 不依赖任务回执的产物捞取：按「派发时间之后新出现的文件」扫会话工作目录。
+            # 给「会话不返回结果、但任务确实跑了」这种情况用（见 recent_artifacts 的说明）。
+            from urllib.parse import parse_qs, urlparse
+            q = parse_qs(urlparse(self.path).query)
+            g = self._pick_gateway((q.get("gateway") or [None])[0])
+            if not g:
+                return self._json({"ok": False, "error": "没有可用网关"})
+            try:
+                since = int(float((q.get("since") or ["0"])[0] or 0))
+            except Exception:
+                since = 0
+            try:
+                limit = int((q.get("limit") or ["20"])[0] or 20)
+            except Exception:
+                limit = 20
+            want = ((q.get("content") or ["0"])[0] or "0").lower()
+            return self._json(recent_artifacts(
+                g, since, limit, want not in ("0", "false", "no")))
 
         if self.path.startswith("/api/job-artifacts"):
             from urllib.parse import parse_qs, urlparse
