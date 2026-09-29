@@ -709,6 +709,16 @@ const JOB_RECEIPT_GRACE_MS = 4 * 60 * 1000
 const JOB_RECEIPT_SAFE_STORE = 'mindmap:jobReceiptSafe'
 
 /**
+ * 任务失败时最多自动重派几次 —— **每次换一条会话**。
+ *
+ * 为什么需要（2026-09-29）：那台机器的「自动」会话跑不出结果（任务进不去、
+ * 状态不更新），用户在页面上只能自己发现、自己再点一次运行。加这道保障：
+ * 判死 / 失败 / 任务记录消失时，自动换个会话重派，最多 3 次，第 3 次才真放弃。
+ * 必须换会话 —— 原地重试只会再进同一个坑（失败原因多半就是那条会话）。
+ */
+const JOB_RETRY_LIMIT = 3
+
+/**
  * 宽限也拉不到正文时的放弃线（派发后 6 分钟）。
  * 到点还没正文，就别再占着轮询了 —— 直接收尾并提示用户去 output/ 找产物。
  */
@@ -815,6 +825,8 @@ export default {
       jobStopBusyId: '',
       // 「派发固定用哪条会话」，按主机分；localStorage 的兜底（隐私模式下用它）
       rememberedSession: null,
+      // 用户是否**手动点过**会话栏（点过 = 他的明确选择，派发前不再自动换人）
+      jobGatewayPinned: false,
       // 执行主机上的 WorkBuddy 会话（= 端口）一览：默认收起，点开看谁在跑谁闲置
       jobSessions: [],
       // 「自动」会话的 url/pid 索引（桥接自己起的 headless 实例，不落回执，挑会话时避开）
@@ -1408,7 +1420,9 @@ export default {
           nodeUid: runTarget.nodeUid,
           nodeTitle: runTarget.nodeTitle,
           hostKey: host.key,
-          gateway
+          gateway,
+          // 重试要用（见 retryPendingJob）
+          prompt: promptText
         })
         this.jobStatus = `已派发${jobId ? ` · ${jobId}` : ''}${this.pendingSuffix()}`
         this.jobStatusType = 'jobOk'
@@ -1531,13 +1545,15 @@ export default {
             this.recallSession(host),
             this.jobSpawnedIndex
           )
-          if (
-            this.jobGateway &&
-            this.jobGateways.every(row => rowIsAuto(row, this.jobSpawnedIndex))
-          ) {
+          if (this.jobGateway) {
+            this.jobGatewaysError = ''
+          } else {
+            // pickJobGateway 返回空 = 只剩「没被证实能用」的自动会话。
+            // 别派进去（任务进不去、状态不更新、白等 4~6 分钟），直接说清出路。
             this.jobGatewaysError =
-              '这台机器上只有「自动」起的会话 —— 它们不落回执，结果可能取不回。' +
-              '建议在它上面打开 WorkBuddy 桌面版（进任意一条对话）再点运行。'
+              '这台机器上只有「自动」起的会话，而它们上面的任务跑不出结果' +
+              '（派过去也不会回执）—— 请在它上面打开 WorkBuddy 桌面版、进入任意一个对话，' +
+              '再回来点运行。'
           }
         } else {
           this.jobGatewaysError = describeEmptyGateways(res.diag, host)
@@ -1603,9 +1619,12 @@ export default {
       const remembered = this.recallSession(this.jobSelectedHost)
       // 打分挑一条，判据按可靠性从高到低：
       //   ① **已知走 jobs、回执收得回** 的会话（最高，最可信）
-      //   ② 还不知道的（中性）
-      //   ③ **已知走 runs、回执取不回** 的（最低，直接避掉）
-      //   ④ 「自动」会话降权（本机能用、服务器那台不能，靠 ① 兜正；这里只是保守）
+      //   ② 还不知道的普通会话（中性）
+      //   ③ **已知走 runs** 的（最低，直接避掉）
+      //   ④ 「自动」会话：**只有已知走过 jobs 的才放行**。未知的一律重罚 ——
+      //      2026-09-29 实测：服务器那台（WorkBuddy 2.132.0）的自动会话走 runs，
+      //      任务**根本跑不起来**（sessionId=None、transcript 空、无产物），
+      //      只能等 4~6 分钟判死。宁可拦住并让人去桌面版开一条，也别派进黑洞。
       //   ⑤ 上次用的 / 记住过的那条加分 —— **端口稳定这条原则不变**
       const score = item => {
         let s = 0
@@ -1613,7 +1632,7 @@ export default {
         if (safe === true) s += 8
         else if (safe === null) s += 2
         else s -= 6
-        if (rowIsAuto(item, idx)) s -= 4
+        if (rowIsAuto(item, idx) && safe !== true) s -= 10
         if (item.url === previous) s += 3
         else if (item.url === remembered) s += 2
         return s
@@ -1627,6 +1646,9 @@ export default {
           best = item
         }
       })
+      // 只剩下「没被证实能用」的自动会话 → 返回空，让上层给明确提示，
+      // 别把任务派进去白等 4~6 分钟（那正是用户看到的「一直卡着」）。
+      if (bestScore !== null && bestScore < 0) return ''
       return best.url
     },
 
@@ -1682,6 +1704,8 @@ export default {
       if (!row || !row.url) return
       if (row.url === this.jobGateway) return
       this.jobGateway = row.url
+      // 用户手动指定 = 明确选择，派发前不再自动换人（见 ensureDispatchTarget）
+      this.jobGatewayPinned = true
       this.rememberSession(row.url)
       const label = `:${row.port || '?'}（${row.title || row.cwd || '未命名'}）`
       if (row.spawned) {
@@ -1704,6 +1728,21 @@ export default {
      *   很常见，等到了就**直接派出去**，不用用户自己再点一次
      */
     async ensureDispatchTarget() {
+      // 派发前**再评估一次**目标会话：缓存里的 jobGateway 可能是「自动」会话、
+      // 或是后来被证明走 runs 的那条（比如 13:46 那次派完才发现）。
+      // 用户手动点过的那条（pinned）除外 —— 那是他的明确选择，配了 warning 提醒。
+      if (
+        this.jobGateway &&
+        !this.jobGatewayPinned &&
+        (this.jobGateways || []).length
+      ) {
+        const better = this.pickJobGateway(
+          this.jobGateways,
+          this.jobGateway,
+          this.jobSpawnedIndex
+        )
+        if (better && better !== this.jobGateway) this.jobGateway = better
+      }
       if (this.jobSelectedHost && this.jobGateway) {
         return {
           ok: true,
@@ -1721,12 +1760,17 @@ export default {
         const got = await this.autoSpawnSession()
         if (got.ok) {
           await this.prepareLocalTarget()
-          // 这次派发就用**刚起的这条**：pickJobGateway 会避开「自动」会话，
-          // 不显式指定的话会落回旧的那条，等于白起一个。
+          // 这次派发就用**刚起的这条**。注意：**不写 rememberSession** ——
+          // 它只服务这一次派发；写进去会被当成「用户选的那条」长期复用，
+          // 把「优先用非自动会话」的挑选逻辑顶掉（2026-09-29 就是这么把任务
+          // 派到自动会话、卡了一整轮的）。
           const fresh = (got.item && got.item.url) || ''
           if (fresh && (this.jobGateways || []).some(r => r.url === fresh)) {
             this.jobGateway = fresh
-            this.rememberSession(fresh)
+            // prepareLocalTarget 会把「没挑到可用会话」写成错误状态（刚起的会话
+            // 还没被证实可用），这里覆盖回来 —— 这次派发就是要用它。
+            this.jobStatus = '已让桥接起了一个新会话，正在派发…'
+            this.jobStatusType = 'jobWait'
           }
           if (this.jobSelectedHost && this.jobGateway) {
             return {
@@ -2168,7 +2212,9 @@ export default {
           nodeTitle: container.nodeTitle,
           // 会话/主机用这次的局部值 —— 并发时实例变量可能已被后一条改掉
           hostKey: host.key,
-          gateway
+          gateway,
+          // 重试要用（见 retryPendingJob）
+          prompt
         })
         const runsMode = result.mode === 'runs'
         this.jobStatus = runsMode
@@ -2515,7 +2561,7 @@ export default {
      * 运行历史也没记录"）。所以数到上限就停手，并把原因写在状态栏和提示里。
      * 计数**按条目算**（同时可能有好几条在等）。
      */
-    notePendingJobMissing(entry, why = '') {
+    async notePendingJobMissing(entry, why = '') {
       if (!entry) return
       entry.miss = (entry.miss || 0) + 1
       this.jobPendingMiss = entry.miss
@@ -2526,18 +2572,23 @@ export default {
         }
         return
       }
+      // 连报了一分钟"找不到这条任务" —— 先**换条会话重派**（最多 JOB_RETRY_LIMIT 次），
+      // 别一上来就跟用户说"任务记录消失、可以重跑一次"（2026-09-29 反馈）
+      if (await this.retryPendingJob(entry, why)) return
       this.jobPendingList = (this.jobPendingList || []).filter(
         x => x.id !== entry.id
       )
       const host = this.hostOfEntry(entry) || {}
       const label = host.label || host.key || '那台机器'
       const who = `「${entry.nodeTitle || '这个节点'}」`
+      const tried = Number(entry.retry || 0)
+      const suffix = tried ? `（已自动换会话重试 ${tried} 次仍未成）` : ''
       this.jobStatus = '没等到结果'
       this.jobStatusType = 'jobErr'
       this.jobWriteError = why
-        ? `连不上 ${label} 的任务桥（${why}）—— ${who}这次没有写回导图，可以重跑一次。`
+        ? `连不上 ${label} 的任务桥（${why}）—— ${who}这次没有写回导图${suffix}，可以重跑一次。`
         : `${label} 的任务桥里找不到这条任务（WorkBuddy 或桥接重启过，任务记录会跟着消失）` +
-          `—— ${who}这次没有写回导图，可以重跑一次。`
+          `—— ${who}这次没有写回导图${suffix}，可以重跑一次。`
       this.$message.error(this.jobWriteError)
       if (!(this.jobPendingList || []).length) this.stopJobPoll()
       this.loadJobHistory()
@@ -2557,6 +2608,74 @@ export default {
       return Date.now() - at > JOB_RECEIPT_GIVEUP_MS
     },
 
+    /** 重试时挑一条会话：**排除刚失败的那条**（失败原因往往就是它） */
+    pickRetryGateway(failedUrl = '') {
+      const rows = (this.jobGateways || []).filter(r => r.url !== failedUrl)
+      if (!rows.length) return ''
+      return this.pickJobGateway(rows, '', this.jobSpawnedIndex)
+    },
+
+    /**
+     * 自动换一条会话，把这条任务重派一次（见 JOB_RETRY_LIMIT）。
+     *
+     * 返回 true = **已经重派**，调用方别再把这条从待回写列表里摘掉，接着轮询新的 id；
+     * false = 不能重试（次数用完 / 没有别的会话 / 派发本身失败）→ 按原逻辑收尾。
+     *
+     * 为什么必须换会话：失败原因多半就是"那条会话不可用"（旧版 WorkBuddy 的自动
+     * 会话走 runs、任务根本进不去），原地重试只会再进同一个坑。
+     */
+    async retryPendingJob(entry, reason = '') {
+      if (!entry || !entry.id) return false
+      const tries = Number(entry.retry || 0)
+      if (tries >= JOB_RETRY_LIMIT) return false
+      const host = this.hostOfEntry(entry)
+      if (!host) return false
+      const prompt = String(entry.prompt || '')
+      // 没记下原提示词就没法重派（老版本落盘的条目可能没有）
+      if (!prompt) return false
+      if (!(this.jobGateways || []).length) {
+        // 刷新后恢复的场景：会话列表可能还没加载
+        await this.loadJobGateways().catch(() => {})
+      }
+      const gateway = this.pickRetryGateway(entry.gateway)
+      if (!gateway) return false
+      let result = null
+      try {
+        result = await dispatchWorkbuddyJob({
+          host,
+          gateway,
+          prompt,
+          name: `脑图运行 · ${entry.nodeTitle || '重试'}`
+        })
+      } catch (err) {
+        return false
+      }
+      if (!result || !result.ok) return false
+      const jobId = (result.job && (result.job.id || result.job.jobId)) || ''
+      if (!jobId) return false
+      this.noteReceiptSafe(gateway, result.mode)
+      entry.retry = tries + 1
+      entry.id = jobId
+      entry.gateway = gateway
+      entry.at = Date.now()
+      entry.miss = 0
+      entry.cachedText = ''
+      entry.lastError = String(reason || '')
+      // finishPendingJob 那条路会先把条目摘出列表再收尾，所以这里要保证它回到列表里，
+      // 否则新的 id 没人轮询
+      if (!(this.jobPendingList || []).some(x => x.id === entry.id)) {
+        this.jobPendingList = [...(this.jobPendingList || []), entry]
+      } else {
+        this.jobPendingList = [...(this.jobPendingList || [])]
+      }
+      this.jobStatus = `第 ${entry.retry}/${JOB_RETRY_LIMIT} 次重试（换到 ${this.gatewayShort(
+        gateway
+      )}）…`
+      this.jobStatusType = 'jobWait'
+      this.startJobPoll()
+      return true
+    },
+
     /**
      * 放弃一条等不到回执的任务。
      *
@@ -2564,22 +2683,56 @@ export default {
      * 页面必须**自己收尾**，不能永远停在「已派发」转圈。产物其实可能在会话的
      * 工作目录 output/ 下，所以提示里明确让用户去那儿看，或点「重取全文」再试。
      */
-    abandonPendingJob(entry, reason = '') {
+    async abandonPendingJob(entry, reason = '') {
       if (!entry) return
+      // 先试着重派（换一条会话，最多 JOB_RETRY_LIMIT 次）—— 能救回来就不算放弃
+      if (await this.retryPendingJob(entry, reason)) return
+      const who = `「${entry.nodeTitle || '这个节点'}」`
+      const tried = Number(entry.retry || 0)
+      const suffix = tried
+        ? `（已自动换会话重试 ${tried} 次仍未成功）`
+        : ''
       this.jobPendingList = (this.jobPendingList || []).filter(
         x => x.id !== entry.id
       )
-      const who = `「${entry.nodeTitle || '这个节点'}」`
       this.jobStatus = '结果取不回'
       this.jobStatusType = 'jobErr'
       this.jobWriteError = reason
-        ? `${who}这次运行${reason}`
+        ? `${who}这次运行${reason}${suffix}`
         : `${who}那次任务其实已经执行，但这个会话（多半是「自动」起的无头会话）` +
-          '不落回执，结果取不回 —— 产物一般在会话工作目录的 output/ 下；' +
+          `不落回执，结果取不回${suffix} —— 产物一般在会话工作目录的 output/ 下；` +
           '也可以选中这条点「重取全文」再试一次。'
       this.$message.warning(this.jobWriteError)
       if (!(this.jobPendingList || []).length) this.stopJobPoll()
       this.loadJobHistory()
+    },
+
+    /**
+     * 在**别的会话**里找这条任务。
+     *
+     * 为什么需要（2026-09-29）：派发目标可能在两次派发之间被换掉，于是
+     * `entry.gateway` 记的那条会话里根本没有这条任务 —— 旧逻辑会连报
+     * `JOB_POLL_MISS_LIMIT` 次「找不到这条任务」然后放弃，用户看到的是
+     * 「任务桥里找不到这条任务（WorkBuddy 或桥接重启过）」这种吓人的结论，
+     * 而任务其实好好地跑在另一条会话里。只在"当前会话找不到"时才走这里。
+     */
+    async findJobAcrossGateways(host, jobId, excludeGateway = '') {
+      if (!host || !jobId) return null
+      try {
+        const gwRes = await listHostGateways(host)
+        const urls = ((gwRes && gwRes.ok && gwRes.gateways) || [])
+          .map(gw => String((gw && gw.url) || ''))
+          .filter(url => url && url !== excludeGateway)
+        for (const url of urls) {
+          const r = await listHostJobs({ host, gateway: url }).catch(() => null)
+          if (!r || !r.ok) continue
+          const hit = (r.jobs || []).find(item => item.id === jobId)
+          if (hit) return { job: hit, gateway: url }
+        }
+      } catch (err) {
+        /* 找不到就按原逻辑走（继续累计 miss） */
+      }
+      return null
     },
 
     /** 这条任务派到哪台机器上（用条目自己记的，不用当前选中的） */
@@ -2621,12 +2774,21 @@ export default {
       const detail = String((cur && cur.detail) || '').replace(/^result:\s*/i, '')
       const who = `「${entry.nodeTitle || '这个节点'}」`
       if (state === 'failed' || state === 'stopped') {
+        // 「执行失败」先换个会话重试（最多 JOB_RETRY_LIMIT 次）；
+        // 「已停止」是用户主动停的，不重试。
+        if (state === 'failed' && (await this.retryPendingJob(entry, '执行失败'))) {
+          return
+        }
         this.jobStatus = state === 'failed' ? '执行失败' : '已停止'
         this.jobStatusType = 'jobErr'
         this.jobWriteState = ''
+        const triedFail = Number(entry.retry || 0)
+        const suffixFail = triedFail
+          ? `（已自动换会话重试 ${triedFail} 次）`
+          : ''
         this.jobWriteError =
           state === 'failed'
-            ? `${who}那次运行失败了，没有写回导图`
+            ? `${who}那次运行失败了，没有写回导图${suffixFail}`
             : `${who}那次运行被停止了，没有写回导图`
         this.$message.error(this.jobWriteError)
         this.loadJobHistory()
@@ -2677,19 +2839,29 @@ export default {
         for (const entry of list.slice()) {
           const host = this.hostOfEntry(entry)
           if (!host) {
-            this.notePendingJobMissing(entry, '找不到执行主机')
+            await this.notePendingJobMissing(entry, '找不到执行主机')
             continue
           }
           const res = await listHostJobs({ host, gateway: entry.gateway })
           if (!res.ok) {
             missed += 1
-            this.notePendingJobMissing(entry, res.error || '拿不到任务列表')
+            await this.notePendingJobMissing(entry, res.error || '拿不到任务列表')
             continue
           }
-          const cur = (res.jobs || []).find(item => item.id === entry.id)
+          let cur = (res.jobs || []).find(item => item.id === entry.id)
+          if (!cur) {
+            // 这条会话里没有 → 很可能任务被派到了**别的会话**（派发目标在两次
+            // 派发之间被换过），而不是"记录消失"。跨会话再找一遍，
+            // 别一上来就报「任务桥里找不到这条任务、可以重跑一次」（2026-09-29）。
+            const hit = await this.findJobAcrossGateways(host, entry.id, entry.gateway)
+            if (hit) {
+              cur = hit.job
+              if (hit.gateway) entry.gateway = hit.gateway
+            }
+          }
           if (!cur) {
             missed += 1
-            this.notePendingJobMissing(entry, '')
+            await this.notePendingJobMissing(entry, '')
             continue
           }
           entry.miss = 0
@@ -2709,7 +2881,7 @@ export default {
               }
               // 拉不到正文：可能真在跑（长任务），给到放弃线再收尾
               if (this.pendingReceiptGaveUp(entry)) {
-                this.abandonPendingJob(entry)
+                await this.abandonPendingJob(entry)
                 continue
               }
             }
@@ -3789,6 +3961,18 @@ export default {
 </style>
 
 <style lang="less">
+/**
+ * 轻提示（$message）默认弹在**视口顶部居中**，而「运行」按钮就在顶部工具栏上 ——
+ * 每次派发/失败/重试弹一条就把按钮盖住（2026-09-29 用户反馈：「不要弹出信息挡住运行按钮」）。
+ *
+ * 统一往下挪一截。这里刻意用 `margin-top` 而不是改 `top`：
+ * element-ui 靠给每条消息算 inline `top` 来堆叠，改 top 会把堆叠算坏（多条会叠在一起），
+ * margin 是在其之上再偏移，堆叠不受影响。
+ */
+.el-message {
+  margin-top: 72px;
+}
+
 .collabDiagPopper {
   .collabDiag {
     font-size: 12px;
