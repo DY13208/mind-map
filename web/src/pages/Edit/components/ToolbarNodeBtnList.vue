@@ -227,7 +227,6 @@
 <script>
 import { mapState, mapMutations } from 'vuex'
 import workbuddyFillIcon from '@/assets/img/workbuddy-fill.svg'
-import { checkWorkbuddy } from '@/utils/workbuddyChat'
 
 export default {
   props: {
@@ -364,14 +363,7 @@ export default {
       this.runFlowExpand()
     },
 
-    async runFlowExpand() {
-      const wb = await checkWorkbuddy()
-      if (!wb.ok) {
-        if (this.$message) {
-          this.$message.warning('WorkBuddy 未就绪，请确认服务器已启动代理')
-        }
-        return
-      }
+    runFlowExpand() {
       this.$bus.$emit('node_flow_expand', this.activeNodes[0])
     },
 
