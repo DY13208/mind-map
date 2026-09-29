@@ -546,6 +546,7 @@ import {
   stopHostJob,
   fetchJobTranscript,
   fetchJobArtifacts,
+  fetchRecentArtifacts,
   attachFilesViaBridge,
   describeEmptyGateways,
   dispatchWorkbuddyJob,
@@ -1559,7 +1560,10 @@ export default {
           this.jobGatewaysError = describeEmptyGateways(res.diag, host)
         }
       }
-      await this.loadJobHistory()
+      // ⚠️ 这里**不能 await**：运行历史是跨会话拉取（每个会话一个请求，公网页面还要走中继），
+      // 慢的时候好几秒。而它在派发路径上（prepareLocalTarget / ensureDispatchTarget 都会调本方法），
+      // 一 await 就等于「点运行后按钮多转好几秒」（2026-09-29 反馈）。历史只是面板信息，后台刷新即可。
+      this.loadJobHistory()
     },
 
     /** 记住「派发用哪条会话」的 key（按主机分，同一个浏览器开多个房间/主机不串） */
@@ -1748,6 +1752,34 @@ export default {
           ok: true,
           host: this.jobSelectedHost,
           gateway: this.jobGateway
+        }
+      }
+      // 目标为空时**先快速拉一次会话列表**：多数情况只是页面刚打开、还没加载完，
+      // 一个 /api/gateways 就挑得到了。以前这里直接去「让桥接起一个会话」——
+      // 那是全场最慢的一步（起进程 + 等注册，超时 45s），用户体感就是
+      // 「点运行后按钮好久不能点」（2026-09-29 反馈）。
+      if (this.jobSelectedHost && this.jobSelectedHost.online) {
+        const quick = await listHostGateways(this.jobSelectedHost).catch(() => null)
+        if (quick && quick.ok && (quick.gateways || []).length) {
+          this.jobGateways = quick.gateways
+          const spawned = await this.fetchSpawnedIndex(this.jobSelectedHost).catch(
+            () => null
+          )
+          this.jobSpawnedIndex = (spawned && spawned.index) || null
+          if (spawned && spawned.info) this.jobSpawnInfo = spawned.info
+          this.jobGateway = this.pickJobGateway(
+            this.jobGateways,
+            this.recallSession(this.jobSelectedHost),
+            this.jobSpawnedIndex
+          )
+          if (this.jobGateway) {
+            this.jobGatewaysError = ''
+            return {
+              ok: true,
+              host: this.jobSelectedHost,
+              gateway: this.jobGateway
+            }
+          }
         }
       }
       // 桥接在线但没会话 → 直接**让桥接起一个**（点运行时优先构建会话，最多 5 个）。
@@ -2044,31 +2076,46 @@ export default {
       const text = String(
         options.markdown != null ? options.markdown : this.jobFullText || ''
       ).trim()
-      if (!text) {
-        this.jobWriteError = '这次运行没有文字输出，没东西写进导图'
+      // 调用方已经扫好的产物（比如「自动」会话拿不到回执、只能按时间窗扫目录那种）
+      const presetArtifacts = Array.isArray(options.artifacts)
+        ? options.artifacts.filter(Boolean)
+        : null
+      // 只有产物、没有正文也照写 —— 以前这里直接 return，产物就跟着一起丢了
+      // （2026-09-29 用户反馈：「新建会话这种自动的，没法返回产物」）
+      if (!text && !(presetArtifacts && presetArtifacts.length)) {
+        this.jobWriteError = '这次运行没有文字输出，也没扫到产物文件'
         return
       }
+      // 正文位置放一句说明，别让节点是个空白
+      const bodyText =
+        text ||
+        '（这个会话不返回文字结果，产物已挂在下面「附件」里；' +
+          '想拿到正文，请在它上面打开 WorkBuddy 桌面版，或把它升级到新版）'
       this.jobWriteBusy = true
       this.jobWriteError = ''
       this.jobWriteState = '正在读取产物文件…'
       try {
         let artifacts = []
         let artifactSkips = []
-        try {
-          const res = await fetchJobArtifacts({ host, gateway, jobId })
-          if (res && res.ok) {
-            artifacts = res.files || []
-            artifactSkips = res.skipped || []
+        if (presetArtifacts) {
+          artifacts = presetArtifacts
+        } else {
+          try {
+            const res = await fetchJobArtifacts({ host, gateway, jobId })
+            if (res && res.ok) {
+              artifacts = res.files || []
+              artifactSkips = res.skipped || []
+            }
+          } catch (err) {
+            // 产物读不到不影响把文字写进去
           }
-        } catch (err) {
-          // 产物读不到不影响把文字写进去
         }
         this.jobWriteState = '正在写入导图…'
         const box = { ok: false }
         this.$bus.$emit('write_job_result', {
           result: box,
           nodeUid,
-          markdown: text,
+          markdown: bodyText,
           prompt: options.prompt || this.jobPendingPrompt || '',
           job,
           artifacts,
@@ -2178,16 +2225,36 @@ export default {
         }
         // 先建「任务 · 时间」容器，这次的任务内容与结果都挂在它下面。
         // 落点从返回值拿 —— 并发时读 this.jobRunNodeUid 会被后一条覆盖
+        // 给个阶段提示：这一步之后是网络派发，公网页面走中继会有一两秒，
+        // 没有提示的话用户只看到按钮转圈（2026-09-29 反馈「要等好久」）
+        this.jobStatus = '正在准备任务节点…'
+        this.jobStatusType = 'jobWait'
         const container = await this.prepareJobContainer(prompt, runNode)
         if (!container.ok) return
-        const result = await dispatchWorkbuddyJob({
-          host,
-          gateway,
-          prompt,
-          name: `脑图运行 · ${
-            this.nodePlainTitle(runNode) || '当前节点'
-          }${continued ? ' · 继续' : ''}`
-        })
+        this.jobStatus = `正在派发…（会话 ${this.gatewayShort(gateway)}）`
+        this.jobStatusType = 'jobWait'
+        // 派发超时给到 60s（公网页面要走中继：浏览器→服务器→通讯页→执行机→会话，
+        // 偶尔会慢）。但用户不能一直对着转圈的按钮猜 —— 3 秒还没回来就把话说清楚。
+        const slowTip = setTimeout(() => {
+          if (this.jobDispatching) {
+            this.jobStatus = `还在派发…（${this.gatewayShort(
+              gateway
+            )}）网络较慢，请稍等`
+          }
+        }, 3000)
+        let result = null
+        try {
+          result = await dispatchWorkbuddyJob({
+            host,
+            gateway,
+            prompt,
+            name: `脑图运行 · ${
+              this.nodePlainTitle(runNode) || '当前节点'
+            }${continued ? ' · 继续' : ''}`
+          })
+        } finally {
+          clearTimeout(slowTip)
+        }
         if (!result.ok) {
           const errText =
             typeof result.error === 'string'
@@ -2238,7 +2305,9 @@ export default {
             }，跑完结果挂在「${this.jobRunNodeTitle || '运行节点'}」下面`
           )
         }
-        if (this.jobHistoryVisible) await this.loadJobHistory()
+        // 历史是跨会话拉取（每会话一个请求，公网页面还要走中继）—— 后台刷，
+        // 别让它拖住 jobDispatching 复位（那直接表现为「运行按钮好久才能再点」）
+        if (this.jobHistoryVisible) this.loadJobHistory()
         return
       } catch (err) {
         this.jobStatus = `派发失败：${(err && err.message) || '未知错误'}`
@@ -2594,6 +2663,31 @@ export default {
       this.loadJobHistory()
     },
 
+    /**
+     * 兜底：按**时间窗**扫这条任务所在会话的产物 —— 不看回执。
+     *
+     * 用于「会话不返回结果、但任务确实跑了」这种情况（旧版 WorkBuddy 的 headless
+     * 会话走 runs 通道：既判不出终态、transcript 也空），此时 /api/job-artifacts
+     * 无从下手（它靠任务正文里的路径），只能按派发时间扫目录。
+     */
+    async fetchRecentArtifactsFor(entry) {
+      const host = this.hostOfEntry(entry)
+      if (!host || typeof fetchRecentArtifacts !== 'function') return []
+      try {
+        const res = await fetchRecentArtifacts({
+          host,
+          gateway: (entry && entry.gateway) || this.jobGateway,
+          // 往前放宽 2 分钟：从派发到落盘之间有时间差
+          since: Math.max(0, Number((entry && entry.at) || 0) - 120000),
+          limit: 12,
+          content: true
+        })
+        return (res && res.ok && res.files) || []
+      } catch (err) {
+        return []
+      }
+    },
+
     /** 派发够久了（见 JOB_RECEIPT_GRACE_MS）—— 该主动去会话历史收一次结果 */
     pendingReceiptTimedOut(entry) {
       const at = Number((entry && entry.at) || 0)
@@ -2810,6 +2904,8 @@ export default {
           nodeUid: entry.nodeUid,
           nodeTitle: entry.nodeTitle,
           markdown,
+          // 「自动」会话扫回来的产物（没有正文时也要把文件挂上）
+          artifacts: entry.cachedArtifacts || null,
           host: this.hostOfEntry(entry),
           gateway: entry.gateway
         }
@@ -2879,7 +2975,18 @@ export default {
                 finished.push({ entry, cur, state: 'recovered' })
                 continue
               }
-              // 拉不到正文：可能真在跑（长任务），给到放弃线再收尾
+              // 拉不到正文：这类会话（旧版 WorkBuddy 的 headless 实例）连会话历史
+              // 都没有，但**产物文件确实落在 output/ 下** —— 按时间窗扫一遍，
+              // 有就先把产物挂回导图（用户：「没法返回产物，但是能知道跑了」）
+              const files = await this.fetchRecentArtifactsFor(entry)
+              if (files.length) {
+                entry.cachedArtifacts = files
+                cur.detail =
+                  `（这个会话不返回文字结果，已把 ${files.length} 个产物挂到「附件」下）`
+                finished.push({ entry, cur, state: 'artifacts' })
+                continue
+              }
+              // 还是什么都没有：可能真在跑（长任务），给到放弃线再收尾
               if (this.pendingReceiptGaveUp(entry)) {
                 await this.abandonPendingJob(entry)
                 continue
