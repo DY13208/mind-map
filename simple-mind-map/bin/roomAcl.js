@@ -219,6 +219,9 @@ function inferRoomAcl(pathname, method) {
   if (rest === '/nodes/query') {
     return { roomKey, action: 'view' }
   }
+  if (rest === '/export-tree') {
+    return { roomKey, action: 'view' }
+  }
   if (rest === '/info' || rest.startsWith('/info')) {
     return { roomKey, action: 'view' }
   }

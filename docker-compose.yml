@@ -98,6 +98,7 @@ services:
       # MCP upload_attachment：宿主机 WorkBuddy 产物目录（见 .env WORKBUDDY_HOST_DIR）
       WORKBUDDY_MOUNT: /workbuddy
       WORKBUDDY_HOST_DIR: ${WORKBUDDY_HOST_DIR:-./data/workbuddy}
+      MINDMAP_EXPORT_DIR: /app/.tmp/mindmap-exports
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -106,6 +107,7 @@ services:
       - ./output:/app/output:ro
       # WorkBuddy 产物目录（默认仓库内 ./data/workbuddy；本机可在 .env 改成真实 WorkBuddy 路径）
       - ${WORKBUDDY_HOST_DIR:-./data/workbuddy}:/workbuddy:ro
+      - ./.tmp/mindmap-exports:/app/.tmp/mindmap-exports
       - mind-map-openclaw:/openclaw-data:ro
       # Start-Docker 自动注入的 OpenClaw Token 等（gitignore）
       - ./docker/runtime-config.local.js:/usr/share/nginx/html/runtime-config.js:ro

@@ -160,11 +160,11 @@ function createServer(authorization) {
   const server = new McpServer(
     {
       name: 'mind-map',
-      version: '1.3.0'
+      version: '1.4.0'
     },
     {
       instructions:
-        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps，只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。历史版本只提供元数据和新增、修改、删除、移动计数，不提供历史脑图正文。回滚必须依次调用 list_versions、get_version，向用户展示目标版本和变更摘要并获得明确确认，再用列表返回的 currentRevision 调用 restore_version；RESTORE_CONFLICT 后必须重新查询并再次确认，禁止自动重试。附件（与网页工具栏「附件」同一套能力）：生成或拿到产物后必须调用 upload_attachment 挂到目标节点，节点会出现可点击回形针图标；禁止只把本机路径、挂载说明、「请拖到节点」写进 text/note；禁止用 update_node 的 note 代替挂载。upload_attachment 优先 file_path（WorkBuddy 目录或 ./output），否则 content_base64 / source_url。已有附件用 list_attachments / read_attachment；attachmentExtractedText 只是截断预览。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。工具返回 isError 表示没有写入，禁止声称已完成。'
+        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps，只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。需要完整读取整间房间时只调用一次 export_room_tree，禁止用反复 query_nodes 拼整图。该工具在服务端读完快照；complete 为 true 才表示整图已读完。节点超过 500 时响应只含 export_path 和摘要，完整内容在该文件里；打不开文件时用 read_room_export 按 offset 读这份导出，不要回到 query_nodes。complete 为 false 时查看 incomplete_reason，不得声称已读完。历史版本只提供元数据和新增、修改、删除、移动计数，不提供历史脑图正文。回滚必须依次调用 list_versions、get_version，向用户展示目标版本和变更摘要并获得明确确认，再用列表返回的 currentRevision 调用 restore_version；RESTORE_CONFLICT 后必须重新查询并再次确认，禁止自动重试。附件（与网页工具栏「附件」同一套能力）：生成或拿到产物后必须调用 upload_attachment 挂到目标节点，节点会出现可点击回形针图标；禁止只把本机路径、挂载说明、「请拖到节点」写进 text/note；禁止用 update_node 的 note 代替挂载。upload_attachment 优先 file_path（WorkBuddy 目录或 ./output），否则 content_base64 / source_url。已有附件用 list_attachments / read_attachment；attachmentExtractedText 只是截断预览。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。工具返回 isError 表示没有写入，禁止声称已完成。'
     }
   )
 
@@ -435,6 +435,92 @@ function createServer(authorization) {
             body: JSON.stringify(body),
             timeoutMs: 25000
           })
+        )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'export_room_tree',
+    '服务端一次性完整导出单个脑图房间。内部读取当前 room 快照并遍历全部节点，直到没有未访问子节点、没有未处理游标。不要用 query_nodes 自己翻页拼整图。默认返回 JSON。节点数不超过 500 时内联返回 room、summary、nodes、edges、references；超过 500 时写入 .tmp/mindmap-exports/<room_key>--r<revision>.json（或 ndjson）并只返回 export_path 与摘要。complete 为 true 才表示已读完；能取得节点总数时还必须 expected_node_count 等于 exported_node_count。只读，不修改导图。',
+    {
+      room_key: z.string().describe('房间号'),
+      include_notes: z
+        .boolean()
+        .describe('是否导出节点备注，默认 true')
+        .optional(),
+      include_references: z
+        .boolean()
+        .describe('是否导出超链接、脑图引用和关联线，默认 true')
+        .optional(),
+      format: z
+        .enum(['json', 'ndjson'])
+        .describe('导出格式，默认 json。大房间写入文件时使用该格式')
+        .optional()
+    },
+    async ({ room_key, include_notes, include_references, format }) => {
+      try {
+        return ok(
+          await api(`/api/files/${encodeURIComponent(room_key)}/export-tree`, {
+            method: 'POST',
+            body: JSON.stringify({
+              include_notes,
+              include_references,
+              format
+            }),
+            timeoutMs: 60000
+          })
+        )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'read_room_export',
+    '分页读取 export_room_tree 已经写好的导出文件。不会重新遍历脑图，也不会调用 query_nodes。仅当无法直接打开 export_path 时使用。has_more 为 true 时把 next_offset 作为下一次 offset，直到 false。',
+    {
+      room_key: z.string().describe('房间号'),
+      revision: z
+        .number()
+        .int()
+        .min(0)
+        .describe('导出时的修订号；省略则读取该房间最新一份导出')
+        .optional(),
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .describe('节点偏移，默认 0')
+        .optional(),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(1000)
+        .describe('本页节点数，默认 200，最大 1000')
+        .optional(),
+      format: z
+        .enum(['json', 'ndjson'])
+        .describe('要读取的导出格式；省略时优先 json')
+        .optional()
+    },
+    async ({ room_key, revision, offset, limit, format }) => {
+      try {
+        const qs = new URLSearchParams()
+        if (revision != null) qs.set('revision', String(revision))
+        if (offset != null) qs.set('offset', String(offset))
+        if (limit != null) qs.set('limit', String(limit))
+        if (format) qs.set('format', format)
+        const suffix = qs.toString() ? `?${qs.toString()}` : ''
+        return ok(
+          await api(
+            `/api/files/${encodeURIComponent(room_key)}/export-tree${suffix}`,
+            { timeoutMs: 60000 }
+          )
         )
       } catch (err) {
         return fail(err)

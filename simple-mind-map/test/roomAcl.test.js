@@ -52,6 +52,14 @@ function testNormalizeAndInfer() {
     { roomKey: 'room-a', action: 'view' }
   )
   assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/room-a/export-tree', 'POST'),
+    { roomKey: 'room-a', action: 'view' }
+  )
+  assert.deepStrictEqual(
+    roomAcl.inferRoomAcl('/api/files/room-a/export-tree', 'GET'),
+    { roomKey: 'room-a', action: 'view' }
+  )
+  assert.deepStrictEqual(
     roomAcl.inferRoomAcl('/api/files/room-a', 'PATCH'),
     { roomKey: 'room-a', action: 'edit' }
   )
