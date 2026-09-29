@@ -18,6 +18,10 @@ const EXTRA_SECTION_LIMIT = 1
 const EXTRA_POINT_LIMIT = 6
 const TABLE_ROW_LIMIT = 6
 const NODE_TEXT_LIMIT = 90
+/** 完整展开时单条节点的显示上限：比提炼版宽，超过的原文进 note（点开能看全） */
+const FULL_TEXT_LIMIT = 160
+/** 完整展开的节点总数上限：防止一篇超长回答把导图撑爆 */
+const MAX_FULL_NODES = 400
 // 一段太长就按句子拆成几条（不是砍掉），最多留几条
 const SENTENCE_PER_ITEM = 4
 const MAX_NODES = 40
@@ -79,10 +83,16 @@ function sentencesOf(text) {
     .filter(Boolean)
 }
 
-/** 长文按句子切段（保留内容，不是砍掉），再按行宽合并 */
+/**
+ * 长文按句子切段（保留内容，不是砍掉），再按行宽合并。
+ *
+ * 这里**不截断** —— 返回的是原文片段。显示上限交给各自的消费方：
+ * 提炼版在 add() 里 clip 到 NODE_TEXT_LIMIT；完整展开版把超长原文放进节点
+ * note。以前在这里就 clip 掉了，结果 note 里也只能存半句（2026-09-29 修）。
+ */
 function splitLong(text, limit = NODE_TEXT_LIMIT) {
   const parts = sentencesOf(text)
-  if (parts.length <= 1) return [clip(text, limit)]
+  if (parts.length <= 1) return [String(text || '').trim()]
   const out = []
   let acc = ''
   parts.forEach(part => {
@@ -94,7 +104,7 @@ function splitLong(text, limit = NODE_TEXT_LIMIT) {
     acc += part
   })
   if (acc) out.push(acc)
-  return out.map(line => clip(line, limit))
+  return out
 }
 
 function pushItem(items, text, dropped) {
@@ -331,6 +341,60 @@ export function markdownToNodes(markdown, options = {}) {
 
   root.missing = keptMissing
   root.dropped = dropped.count
+  return root
+}
+
+/**
+ * Markdown → **完整展开**的节点结构（不提炼、不丢弃）。
+ *
+ * 2026-09-29 用户要求：「运行输出」下面**只要完整输出 + 附件**。
+ * 所以这里按章节原样铺开 —— 每个标题一个子节点，章内一条一行；
+ * 单条超过 FULL_TEXT_LIMIT 的，节点上截断显示、**原文进 note**（点开看全），
+ * 不再有「另有 N 条细节」这种省略。
+ */
+export function markdownToFullNodes(markdown, options = {}) {
+  const limit = Number(options.maxNodes) || MAX_FULL_NODES
+  const dropped = { count: 0 }
+  const sections = parseSections(markdown, dropped)
+  const root = { children: [], missing: [], dropped: 0 }
+  let count = 0
+
+  const make = text => {
+    const raw = String(text || '').trim()
+    if (!raw) return null
+    const data = { text: clip(raw, FULL_TEXT_LIMIT) }
+    if (raw.length > FULL_TEXT_LIMIT) data.note = raw
+    return { data, children: [] }
+  }
+
+  sections.forEach(sec => {
+    const items = (sec.items || []).filter(item => String(item || '').trim())
+    if (!items.length) return
+    const title = String(sec.title || '').trim()
+    if (!title) {
+      // 没有标题的段落（开场白之类）直接铺在结果节点下
+      items.forEach(item => {
+        if (count >= limit) return
+        const node = make(item)
+        if (!node) return
+        count += 1
+        root.children.push(node)
+      })
+      return
+    }
+    const kids = []
+    items.forEach(item => {
+      if (count + kids.length + 1 >= limit) return
+      const node = make(item)
+      if (node) kids.push(node)
+    })
+    if (!kids.length) return
+    const head = { data: { text: clip(title, FULL_TEXT_LIMIT) }, children: kids }
+    if (title.length > FULL_TEXT_LIMIT) head.data.note = title
+    count += 1 + kids.length
+    root.children.push(head)
+  })
+
   return root
 }
 
@@ -749,7 +813,9 @@ export async function writeJobResultToMap({
   }
 
   const title = buildResultTitle()
-  const tree = markdownToNodes(text)
+  // 「运行输出」下面只要完整输出 + 附件（2026-09-29 要求）：不再提炼成
+  // 一句话结论 / 关键要点 / 待补充数据 / 产出，回答原文按章节原样铺开。
+  const tree = markdownToFullNodes(text)
   const containerBefore = (container.children || []).slice()
   say('正在把结果写进导图…')
   insertChildren(mindMap, container, [

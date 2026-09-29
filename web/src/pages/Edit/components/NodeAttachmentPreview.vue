@@ -198,6 +198,22 @@ function previewMimeType(fileName, kind) {
   return 'application/octet-stream'
 }
 
+/**
+ * 预览弹窗的尺寸：默认就取「接近满屏、留出边距」。
+ *
+ * 原来固定 860×500，预览表格 / HTML / 长文档时很挤（2026-09-29 反馈
+ * 「附件预览的弹窗要很大才行」）。156 ≈ 顶部 15vh + 标题栏与边距，
+ * 与拖拽时的上限保持一致，所以放大后不会顶出视口。
+ */
+function previewSize() {
+  const vw = typeof window === 'undefined' ? 1440 : window.innerWidth
+  const vh = typeof window === 'undefined' ? 900 : window.innerHeight
+  return {
+    dialogWidth: `${Math.round(Math.max(720, Math.min(1360, vw - 96)))}px`,
+    dialogHeight: Math.round(Math.max(520, Math.min(900, vh - 156)))
+  }
+}
+
 export default {
   name: 'NodeAttachmentPreview',
   data() {
@@ -220,8 +236,8 @@ export default {
       markdownViewerContainer: null,
       workbookSheets: [],
       activeSheetName: '',
-      dialogWidth: '860px',
-      dialogHeight: 500,
+      // 打开时就接近满屏，别让用户第一眼看到挤巴巴的小窗
+      ...previewSize(),
       isMaximized: false,
       previousDialogSize: null,
       resizeSession: null
@@ -592,12 +608,19 @@ export default {
           height: this.dialogHeight
         }
         this.dialogWidth = `${Math.max(320, window.innerWidth - 32)}px`
+        // 高度也要撑开 —— 以前只放大宽度，最大化后仍然只有 500 高，照样挤
+        this.dialogHeight = Math.max(420, window.innerHeight - 156)
         this.isMaximized = true
         return
       }
-      const size = this.previousDialogSize || { width: '860px', height: 500 }
-      this.dialogWidth = size.width
-      this.dialogHeight = size.height
+      if (this.previousDialogSize) {
+        this.dialogWidth = this.previousDialogSize.width
+        this.dialogHeight = this.previousDialogSize.height
+      } else {
+        const fresh = previewSize()
+        this.dialogWidth = fresh.dialogWidth
+        this.dialogHeight = fresh.dialogHeight
+      }
       this.isMaximized = false
     },
     onWindowResize() {
