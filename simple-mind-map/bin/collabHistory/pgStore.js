@@ -10,6 +10,9 @@ const {
 } = require('./canonical')
 const { assertHistoryWritable } = require('./migrate')
 
+const HISTORY_OPERATION_COLUMNS =
+  'room_key, version, operation_id, actor_id, client_id, operation_type, payload, event, inverse_payload, created_at'
+
 const IMPORT_VERSION_SUMMARY = {
   inserted: 0,
   updated: 0,
@@ -392,13 +395,11 @@ function createPgHistoryStore(pool) {
       async listOperations(roomKey, afterRevision, toRevision) {
         const to = toRevision == null ? 1e18 : Number(toRevision)
         const res = await db.query(
-          `select room_key, version, operation_id, actor_id, client_id,
-                  operation_type, payload, event, inverse_payload, created_at
+          `select ${HISTORY_OPERATION_COLUMNS}
            from room_operations
            where room_key = $1 and version > $2 and version <= $3
            union all
-           select room_key, version, operation_id, actor_id, client_id,
-                  operation_type, payload, event, inverse_payload, created_at
+           select ${HISTORY_OPERATION_COLUMNS}
            from room_operations_archive
            where room_key = $1 and version > $2 and version <= $3
            order by version asc`,
@@ -408,10 +409,10 @@ function createPgHistoryStore(pool) {
       },
       async getOperation(roomKey, operationId) {
         const res = await db.query(
-          `select * from room_operations
+          `select ${HISTORY_OPERATION_COLUMNS} from room_operations
            where room_key = $1 and operation_id = $2
            union all
-           select * from room_operations_archive
+           select ${HISTORY_OPERATION_COLUMNS} from room_operations_archive
            where room_key = $1 and operation_id = $2
            limit 1`,
           [roomKey, operationId]
@@ -529,11 +530,18 @@ function createPgHistoryStore(pool) {
       async insertVersion(row) {
         await ensureWritable(db)
         const id = row.id || randomUUID()
+        const autoVersion = String(row.type).toUpperCase() === 'AUTO' && !row.hidden && row.revision != null
+        const conflictSql = autoVersion
+          ? `on conflict (room_key, revision)
+             where type = 'AUTO' and revision is not null and hidden = false
+             do nothing`
+          : ''
         const sql = `insert into room_versions
            (id, room_key, revision, checkpoint_revision, name, description, type,
             created_by, source, hidden, summary, summary_status, editors,
             source_kind, availability, legacy_source, created_at)
            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13::jsonb,$14,$15,$16,$17)
+           ${conflictSql}
            returning *`
         const params = [
           id,
@@ -554,21 +562,18 @@ function createPgHistoryStore(pool) {
           row.legacy_source || '',
           row.created_at || new Date().toISOString()
         ]
-        try {
-          const res = await db.query(sql, params)
-          return res.rows[0]
-        } catch (error) {
-          if (error && error.code === '23505' && String(row.type).toUpperCase() === 'AUTO') {
-            const existing = await db.query(
-              `select * from room_versions
-               where room_key = $1 and revision = $2 and type = 'AUTO' and hidden = false
-               limit 1`,
-              [row.room_key, Number(row.revision)]
-            )
-            if (existing.rows[0]) return existing.rows[0]
-          }
-          throw error
+        const res = await db.query(sql, params)
+        if (res.rows[0]) return res.rows[0]
+        if (autoVersion) {
+          const existing = await db.query(
+            `select * from room_versions
+             where room_key = $1 and revision = $2 and type = 'AUTO' and hidden = false
+             limit 1`,
+            [row.room_key, Number(row.revision)]
+          )
+          if (existing.rows[0]) return existing.rows[0]
         }
+        throw new Error('History version insert returned no row')
       },
       async getVersion(roomKey, versionId, options = {}) {
         const hiddenSql = options.includeHidden ? '' : ' and hidden = false'
@@ -585,6 +590,66 @@ function createPgHistoryStore(pool) {
           [roomKey, versionId]
         )
         return res.rows[0] || null
+      },
+      async listVersionPredecessors(roomKey, versions) {
+        if (!versions || !versions.length) return []
+        const targets = versions.map(row => ({
+          id: String(row.id),
+          revision: row.revision == null ? null : Number(row.revision),
+          created_at: row.created_at
+        }))
+        const res = await db.query(
+          `select target.id, to_jsonb(previous) as previous
+           from jsonb_to_recordset($2::jsonb)
+             as target(id text, revision bigint, created_at timestamptz)
+           left join lateral (
+             select v.id, v.revision, v.created_at, v.hidden, v.type, v.source_kind
+             from room_versions v
+             where v.room_key = $1
+               and (v.created_at, coalesce(v.revision, -1), v.id::text)
+                 < (target.created_at, coalesce(target.revision, -1), target.id)
+             order by v.created_at desc, coalesce(v.revision, -1) desc, v.id desc
+             limit 1
+           ) previous on true`,
+          [roomKey, JSON.stringify(targets)]
+        )
+        return res.rows
+      },
+      async listOperationActors(roomKey, ranges) {
+        if (!ranges || !ranges.length) return []
+        const targets = ranges.map(range => ({
+          id: String(range.id),
+          from_revision: Number(range.fromRevision),
+          to_revision: Number(range.toRevision)
+        }))
+        const res = await db.query(
+          `select target.id,
+                  coalesce(array_agg(distinct btrim(op.actor_id) order by btrim(op.actor_id))
+                    filter (where nullif(btrim(op.actor_id), '') is not null),
+                    array[]::text[]) as editors,
+                  count(op.version) as operation_count,
+                  count(distinct op.version) as distinct_count,
+                  target.from_revision, target.to_revision
+           from jsonb_to_recordset($2::jsonb)
+             as target(id text, from_revision bigint, to_revision bigint)
+           left join lateral (
+             select version, actor_id from room_operations
+             where room_key = $1 and version > target.from_revision
+               and version <= target.to_revision
+             union all
+             select version, actor_id from room_operations_archive
+             where room_key = $1 and version > target.from_revision
+               and version <= target.to_revision
+           ) op on true
+           group by target.id, target.from_revision, target.to_revision`,
+          [roomKey, JSON.stringify(targets)]
+        )
+        return res.rows.map(row => {
+          const expected = Number(row.to_revision) - Number(row.from_revision)
+          const complete = Number.isSafeInteger(expected) && expected >= 0 &&
+            Number(row.operation_count) === expected && Number(row.distinct_count) === expected
+          return { id: row.id, editors: complete ? row.editors : [], complete }
+        })
       },
       async previousVisibleVersion(roomKey, before) {
         const params = [roomKey]

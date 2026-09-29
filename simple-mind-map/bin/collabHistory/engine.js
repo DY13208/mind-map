@@ -128,6 +128,12 @@ function createHistoryEngine(options = {}) {
     return fn(store)
   }
 
+  async function runWithRoomLock(roomKey, preferred, fn) {
+    if (preferred) return fn(preferred)
+    if (store.withRoomLock) return store.withRoomLock(roomKey, fn)
+    return runWithStore(null, fn)
+  }
+
   async function createCheckpoint(roomKey, input = {}) {
     const run = async tx => {
       const live = input.state || (await tx.getLiveState(roomKey))
@@ -419,8 +425,9 @@ function createHistoryEngine(options = {}) {
     }
   }
 
-  async function summarizeRange(roomKey, fromRevision, toRevision, tx = store) {
-    const ops = await tx.listOperations(roomKey, fromRevision, toRevision)
+  function summarizeOperations(ops, fromRevision, toRevision) {
+    const from = Number(fromRevision)
+    const to = Number(toRevision)
     const summary = {
       kind: 'edits',
       inserted: 0,
@@ -429,8 +436,25 @@ function createHistoryEngine(options = {}) {
       moved: 0,
       restored: 0,
       metadataChanged: false,
-      replaced: false
+      replaced: false,
+      fromRevision: from,
+      toRevision: to
     }
+    const revisions = new Set()
+    const editors = new Set()
+    ops.forEach(op => {
+      const revision = Number(op.version)
+      if (Number.isSafeInteger(revision)) revisions.add(revision)
+      const actorId = String(op.actor_id || op.actorId || '').trim()
+      if (actorId) editors.add(actorId)
+    })
+    summary.editors = Array.from(editors).sort()
+    summary.editorsComplete =
+      Number.isSafeInteger(from) &&
+      Number.isSafeInteger(to) &&
+      to >= from &&
+      ops.length === to - from &&
+      revisions.size === to - from
     ops.forEach(op => {
       const type = String(op.operation_type || op.type || '')
       if (type === 'node.insert') summary.inserted += 1
@@ -464,6 +488,13 @@ function createHistoryEngine(options = {}) {
     return summary
   }
 
+  async function summarizeRange(roomKey, fromRevision, toRevision, tx = store) {
+    const from = Number(fromRevision)
+    const to = Number(toRevision)
+    const ops = await tx.listOperations(roomKey, from, to)
+    return summarizeOperations(ops, from, to)
+  }
+
   async function persistSummary(tx, roomKey, row) {
     const type = String(row.type || '').toUpperCase()
     const kindMap = {
@@ -490,21 +521,53 @@ function createHistoryEngine(options = {}) {
     }
     try {
       const prev = await tx.previousVisibleVersion(roomKey, row)
-      const from = prev && prev.revision != null ? Number(prev.revision) : 0
-      const summary = {
-        ...(await summarizeRange(roomKey, from, Number(row.revision), tx)),
-        algorithmVersion: SUMMARY_ALGORITHM_VERSION
+      let from = null
+      if (prev) {
+        if (prev.hidden || prev.revision == null) throw new Error('unreliable version predecessor')
+        from = Number(prev.revision)
+      } else {
+        const earliest = tx.earliestCheckpoint
+          ? await tx.earliestCheckpoint(roomKey)
+          : null
+        if (earliest && Number(earliest.revision) === 0) from = 0
       }
+      const to = Number(row.revision)
+      if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || to < from) {
+        throw new Error('unreliable version range')
+      }
+      const calculated = await summarizeRange(roomKey, from, to, tx)
+      const editors = calculated.editorsComplete ? calculated.editors : []
+      const summary = { ...calculated, algorithmVersion: SUMMARY_ALGORITHM_VERSION }
+      delete summary.editors
+      delete summary.editorsComplete
       if (tx.updateVersionMeta) {
         await tx.updateVersionMeta(roomKey, row.id, {
           summary,
-          summary_status: 'ready'
+          summary_status: 'ready',
+          editors
         })
       }
       row.summary = summary
       row.summary_status = 'ready'
+      row.editors = editors
     } catch (err) {
+      const to = Number(row.revision)
+      const summary = {
+        kind: 'edits',
+        inserted: 0,
+        updated: 0,
+        deleted: 0,
+        moved: 0,
+        restored: 0,
+        metadataChanged: false,
+        replaced: false,
+        fromRevision: null,
+        toRevision: Number.isSafeInteger(to) ? to : null,
+        algorithmVersion: SUMMARY_ALGORITHM_VERSION
+      }
+      row.summary = summary
       row.summary_status = 'pending'
+      row.editors = []
     }
     return row
   }
@@ -540,11 +603,15 @@ function createHistoryEngine(options = {}) {
     const checkpoint =
       revision == null ? null : await tx.latestCheckpointAt(roomKey, revision)
     const type = String(input.type || 'MANUAL').toUpperCase()
-    const editors = uniqEditors(
-      input.editors || (input.createdBy ? [input.createdBy] : [])
-    )
+    const derivesEditorsFromOperations =
+      (type === 'AUTO' || type === 'MANUAL') &&
+      input.source_kind !== 'room_initial'
+    const editors = derivesEditorsFromOperations
+      ? []
+      : uniqEditors(input.editors || (input.createdBy ? [input.createdBy] : []))
+    const requestedId = input.id || randomUUID()
     const row = await tx.insertVersion({
-      id: input.id || randomUUID(),
+      id: requestedId,
       room_key: roomKey,
       revision,
       checkpoint_revision: checkpoint
@@ -557,13 +624,19 @@ function createHistoryEngine(options = {}) {
       created_at: input.created_at || new Date().toISOString(),
       source: input.source || 'api',
       hidden: false,
-      summary: input.summary || {},
-      summary_status: input.summary_status || 'pending',
+      summary: derivesEditorsFromOperations ? {} : input.summary || {},
+      summary_status: derivesEditorsFromOperations
+        ? 'pending'
+        : input.summary_status || 'pending',
       editors,
       source_kind: input.source_kind || '',
       availability: input.availability || 'readable',
       legacy_source: input.legacy_source || ''
     })
+    // AUTO rows are unique per room revision. If another creator already
+    // captured this revision, return that row without recording a second
+    // audit event or recalculating its metadata.
+    if (String(row.id) !== String(requestedId)) return row
     await tx.insertAudit({
       room_key: roomKey,
       action: 'VERSION_CREATE',
@@ -579,15 +652,30 @@ function createHistoryEngine(options = {}) {
 
   async function maybeAutoVersion(roomKey, revision, createdBy, now = Date.now()) {
     if (!config.autoVersionOnCheckpoint) return null
-    const last = await store.lastAutoVersionAt(roomKey)
-    if (last && now - last < config.autoVersionMinMs) return null
-    return createVersion(roomKey, {
-      revision,
-      type: 'AUTO',
-      name: '自动保存 ' + formatVersionTime(now),
-      createdBy,
-      source: 'checkpoint',
-      source_kind: 'checkpoint'
+    return runWithRoomLock(roomKey, null, async tx => {
+      const live = await tx.getLiveState(roomKey)
+      const targetRevision = Number(revision)
+      if (
+        !Number.isSafeInteger(targetRevision) ||
+        targetRevision < 0 ||
+        targetRevision > Number(live.revision || 0)
+      ) {
+        return null
+      }
+      const last = await tx.lastAutoVersionAt(roomKey)
+      if (last && now - last < config.autoVersionMinMs) return null
+      const captured = await latestCapturedRevision(roomKey, tx)
+      if (captured != null && targetRevision <= Number(captured)) return null
+      return createVersion(roomKey, {
+        revision: targetRevision,
+        type: 'AUTO',
+        name: '自动保存 ' + formatVersionTime(now),
+        createdBy,
+        source: 'checkpoint',
+        source_kind: 'checkpoint',
+        tx,
+        locked: true
+      })
     })
   }
 
@@ -625,26 +713,37 @@ function createHistoryEngine(options = {}) {
     const created = []
     for (const job of jobs) {
       try {
-        const live = await store.getLiveState(job.room_key)
-        const revision = Math.min(
-          Number(job.last_revision || 0),
-          Number(live.revision || 0)
+        const row = await enqueueRoom(job.room_key, () =>
+          runWithRoomLock(job.room_key, null, async tx => {
+            const live = await tx.getLiveState(job.room_key)
+            const revision = Math.min(
+              Number(job.last_revision || 0),
+              Number(live.revision || 0)
+            )
+            const captured = await latestCapturedRevision(job.room_key, tx)
+            if (
+              (captured != null && revision <= Number(captured)) ||
+              (!revision && Number(live.revision) === 0)
+            ) {
+              if (tx.completeAutoJob) await tx.completeAutoJob(job.room_key, revision)
+              return null
+            }
+            const version = await createVersion(job.room_key, {
+              revision,
+              type: 'AUTO',
+              name: '自动保存 ' + formatVersionTime(now),
+              createdBy: '',
+              editors: [],
+              source: 'auto',
+              source_kind: 'auto',
+              tx,
+              locked: true
+            })
+            if (tx.completeAutoJob) await tx.completeAutoJob(job.room_key, revision)
+            return version
+          })
         )
-        if (!revision && Number(live.revision) === 0) {
-          await store.completeAutoJob(job.room_key, 0)
-          continue
-        }
-        const row = await createVersion(job.room_key, {
-          revision,
-          type: 'AUTO',
-          name: '自动保存 ' + formatVersionTime(now),
-          createdBy: (job.editors && job.editors[0]) || '',
-          editors: job.editors || [],
-          source: 'auto',
-          source_kind: 'auto'
-        })
-        await store.completeAutoJob(job.room_key, revision)
-        created.push(row)
+        if (row) created.push(row)
       } catch (error) {
         if (store.failAutoJob) await store.failAutoJob(job.room_key, error)
       }
@@ -669,30 +768,34 @@ function createHistoryEngine(options = {}) {
   }
 
   async function flushPendingAutoVersion(roomKey, input = {}) {
-    return enqueueRoom(roomKey, async () => {
-      const live = await store.getLiveState(roomKey)
-      const revision = Number(live.revision || 0)
-      const captured = await latestCapturedRevision(roomKey)
-      if (captured != null && revision <= Number(captured)) {
-        if (store.completeAutoJob) await store.completeAutoJob(roomKey, revision)
-        return null
-      }
-      if (!revision && captured == null) {
-        if (store.completeAutoJob) await store.completeAutoJob(roomKey, 0)
-        return null
-      }
-      const row = await createVersion(roomKey, {
-        revision,
-        type: 'AUTO',
-        name: '自动保存 ' + formatVersionTime(Date.now()),
-        createdBy: input.userId || '',
-        editors: input.editors || (input.userId ? [input.userId] : []),
-        source: input.source || 'flush',
-        source_kind: 'auto'
+    return enqueueRoom(roomKey, () =>
+      runWithRoomLock(roomKey, input.tx, async tx => {
+        const live = await tx.getLiveState(roomKey)
+        const revision = Number(live.revision || 0)
+        const captured = await latestCapturedRevision(roomKey, tx)
+        if (captured != null && revision <= Number(captured)) {
+          if (tx.completeAutoJob) await tx.completeAutoJob(roomKey, revision)
+          return null
+        }
+        if (!revision && captured == null) {
+          if (tx.completeAutoJob) await tx.completeAutoJob(roomKey, 0)
+          return null
+        }
+        const row = await createVersion(roomKey, {
+          revision,
+          type: 'AUTO',
+          name: '自动保存 ' + formatVersionTime(Date.now()),
+          createdBy: input.userId || '',
+          editors: input.editors || (input.userId ? [input.userId] : []),
+          source: input.source || 'flush',
+          source_kind: 'auto',
+          tx,
+          locked: true
+        })
+        if (tx.completeAutoJob) await tx.completeAutoJob(roomKey, revision)
+        return row
       })
-      if (store.completeAutoJob) await store.completeAutoJob(roomKey, revision)
-      return row
-    })
+    )
   }
 
   async function maybeCheckpointAfterOp(roomKey, operation) {
@@ -1003,26 +1106,171 @@ function createHistoryEngine(options = {}) {
     })
   }
 
-  async function hydrateEditors(rows, tx = store) {
+  function isOperationAttributedVersion(row) {
+    const type = String(row && row.type || '').toUpperCase()
+    return (
+      (type === 'AUTO' || type === 'MANUAL') &&
+      row.source_kind !== 'room_initial'
+    )
+  }
+
+  function fixedSummaryRange(row) {
+    const summary = row && row.summary
+    if (
+      !summary ||
+      row.revision == null ||
+      String(row.revision).trim() === '' ||
+      summary.fromRevision == null ||
+      summary.toRevision == null
+    ) {
+      return null
+    }
+    const fromRevision = Number(summary.fromRevision)
+    const toRevision = Number(summary.toRevision)
+    if (
+      !Number.isSafeInteger(fromRevision) ||
+      !Number.isSafeInteger(toRevision) ||
+      fromRevision < 0 ||
+      toRevision < fromRevision ||
+      toRevision !== Number(row.revision)
+    ) {
+      return null
+    }
+    return { fromRevision, toRevision }
+  }
+
+  async function presentVersions(roomKey, rows, tx = store) {
+    if (Array.isArray(roomKey)) {
+      rows = roomKey
+      roomKey = (rows[0] && rows[0].room_key) || ''
+    }
+    const presented = (rows || []).map(row => ({
+      ...row,
+      summary: row.summary && typeof row.summary === 'object' ? { ...row.summary } : {},
+      editors: Array.isArray(row.editors) ? row.editors.slice() : []
+    }))
+    const attributedRows = presented.filter(isOperationAttributedVersion)
+    const rowsNeedingPredecessor = attributedRows.filter(
+      row => row.revision != null && !fixedSummaryRange(row)
+    )
+    const predecessors =
+      rowsNeedingPredecessor.length && tx.listVersionPredecessors
+        ? await tx.listVersionPredecessors(roomKey, rowsNeedingPredecessor)
+        : []
+    const predecessorById = new Map(
+      (predecessors || []).map(item => [String(item.id), item.previous || null])
+    )
+    const ranges = []
+    const rangeById = new Map()
+    attributedRows.forEach(row => {
+      let range = fixedSummaryRange(row)
+      if (!range && row.revision != null) {
+        const previous = predecessorById.get(String(row.id))
+        if (previous) {
+          if (!previous.hidden && previous.revision != null) {
+            const fromRevision = Number(previous.revision)
+            const toRevision = Number(row.revision)
+            if (
+              Number.isSafeInteger(fromRevision) &&
+              Number.isSafeInteger(toRevision) &&
+              fromRevision >= 0 &&
+              toRevision >= fromRevision
+            ) {
+              range = { fromRevision, toRevision }
+            }
+          }
+        }
+      }
+      if (range) {
+        rangeById.set(String(row.id), range)
+        ranges.push({ id: row.id, ...range })
+      }
+    })
+
+    const actorRanges =
+      ranges.length && tx.listOperationActors
+        ? await tx.listOperationActors(roomKey, ranges)
+        : []
+    const actorById = new Map(
+      (actorRanges || []).map(item => [String(item.id), item])
+    )
+    presented.forEach(row => {
+      if (!isOperationAttributedVersion(row)) return
+      const range = rangeById.get(String(row.id))
+      const actors = actorById.get(String(row.id))
+      row.editors = range && actors && actors.complete
+        ? uniqEditors(actors.editors || [])
+        : []
+      if (range) {
+        row.summary = {
+          ...(row.summary || {}),
+          fromRevision: range.fromRevision,
+          toRevision: range.toRevision
+        }
+      }
+    })
+
+    // Old rows may have a pending or outdated summary. Calculate it for this
+    // response only; history reads must not rewrite saved version metadata.
+    const summariesToRefresh = attributedRows.filter(row => {
+      const summary = row.summary || {}
+      const needsRefresh =
+        row.summary_status === 'pending' ||
+        (row.summary_status === 'ready' &&
+          Number(summary.algorithmVersion || 0) < SUMMARY_ALGORITHM_VERSION)
+      return needsRefresh && rangeById.has(String(row.id))
+    })
+    if (summariesToRefresh.length) {
+      const summaryRanges = summariesToRefresh.map(row => ({
+        row,
+        range: rangeById.get(String(row.id))
+      }))
+      const minFrom = Math.min(...summaryRanges.map(item => item.range.fromRevision))
+      const maxTo = Math.max(...summaryRanges.map(item => item.range.toRevision))
+      try {
+        const operationRows = await tx.listOperations(roomKey, minFrom, maxTo)
+        summaryRanges.forEach(({ row, range }) => {
+          const interval = operationRows.filter(op => {
+            const revision = Number(op.version)
+            return revision > range.fromRevision && revision <= range.toRevision
+          })
+          const calculated = summarizeOperations(
+            interval,
+            range.fromRevision,
+            range.toRevision
+          )
+          if (!calculated.editorsComplete) return
+          delete calculated.editors
+          delete calculated.editorsComplete
+          row.summary = {
+            ...calculated,
+            algorithmVersion: SUMMARY_ALGORITHM_VERSION
+          }
+          row.summary_status = 'ready'
+        })
+      } catch (err) {
+        // Summary refresh is response-only and best-effort for old rows.
+      }
+    }
+
     const ids = []
-    rows.forEach(row => {
-      const fromEditors = (row.editors || []).map(item =>
+    presented.forEach(row => {
+      const editorIds = (row.editors || []).map(item =>
         item && typeof item === 'object' ? item.userId || item.user_id : item
       )
-      uniqEditors([row.created_by, ...fromEditors]).forEach(id => ids.push(id))
+      uniqEditors([row.created_by, ...editorIds]).forEach(id => ids.push(id))
     })
     const names = tx.resolveUserNames ? await tx.resolveUserNames(ids) : {}
-    return rows.map(row => {
-      const fromEditors = (row.editors || []).map(item =>
+    return presented.map(row => {
+      const editorIds = (row.editors || []).map(item =>
         item && typeof item === 'object' ? item.userId || item.user_id : item
       )
-      const editors = uniqEditors([...fromEditors, row.created_by]).map(userId => ({
-        userId,
-        name: names[userId] || userId
-      }))
       return {
         ...row,
-        editors,
+        editors: uniqEditors(editorIds).map(userId => ({
+          userId,
+          name: names[userId] || userId
+        })),
         created_by_name: names[row.created_by] || row.created_by || ''
       }
     })
@@ -1032,17 +1280,7 @@ function createHistoryEngine(options = {}) {
     await ensureHistoryBaseline(roomKey)
     const listed = await store.listVersions(roomKey, query)
     const coverage = await getHistoryCoverage(roomKey)
-    const refreshed = await Promise.all(
-      (listed.versions || []).map(row => {
-        const summary = row.summary || {}
-        const needsRefresh =
-          row.summary_status === 'pending' ||
-          (row.summary_status === 'ready' &&
-            Number(summary.algorithmVersion || 0) < SUMMARY_ALGORITHM_VERSION)
-        return needsRefresh ? persistSummary(store, roomKey, row) : row
-      })
-    )
-    const versions = await hydrateEditors(refreshed)
+    const versions = await presentVersions(roomKey, listed.versions || [])
     return { ...listed, versions, ...coverage }
   }
 
@@ -1061,22 +1299,29 @@ function createHistoryEngine(options = {}) {
   }
 
   async function getVersionTree(roomKey, versionId) {
-    const row = await store.getVersion(roomKey, versionId)
-    if (!row) throw historyError('VERSION_NOT_FOUND', 'version not found', 404)
-    if (row.availability === 'unreadable') {
+    const storedRow = await store.getVersion(roomKey, versionId)
+    if (!storedRow) throw historyError('VERSION_NOT_FOUND', 'version not found', 404)
+    if (storedRow.availability === 'unreadable') {
       throw historyError(
         'HISTORY_REVISION_UNAVAILABLE',
         'version content cannot be reconstructed',
         409
       )
     }
+    const [row] = await presentVersions(roomKey, [storedRow])
     const isLegacy =
       String(row.type).toUpperCase() === 'LEGACY' || row.revision == null
     const cacheKey = row.id
     const knownChecksum = versionChecksums.get(cacheKey)
     if (knownChecksum) {
       const cached = treeCache.get(cacheKey, knownChecksum)
-      if (cached) return cached
+      if (cached) {
+        return {
+          ...cached,
+          version: row,
+          summary: row.summary || cached.summary
+        }
+      }
     }
     const historical = isLegacy
       ? await getLegacyState(roomKey, row)
@@ -1085,12 +1330,7 @@ function createHistoryEngine(options = {}) {
     versionChecksums.set(cacheKey, checksum)
     const hit = treeCache.get(cacheKey, checksum)
     if (hit) return hit
-    const summaryIsCurrent =
-      row.summary && Number(row.summary.algorithmVersion || 0) >= SUMMARY_ALGORITHM_VERSION
-    const summary =
-      row.summary_status === 'na' || (row.summary_status === 'ready' && summaryIsCurrent)
-        ? row.summary
-        : await persistSummary(store, roomKey, row).then(item => item.summary)
+    const summary = row.summary || {}
     const payload = {
       ...historical,
       version: row,
@@ -1120,7 +1360,7 @@ function createHistoryEngine(options = {}) {
     flushPendingAutoVersion,
     onCommitted,
     listVersions,
-    presentVersions: hydrateEditors,
+    presentVersions,
     getVersion: (roomKey, id, options) => store.getVersion(roomKey, id, options),
     hideVersion,
     getVersionTree,

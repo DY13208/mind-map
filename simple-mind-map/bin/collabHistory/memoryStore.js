@@ -91,6 +91,47 @@ function createMemoryHistoryStore(seed = {}) {
         .sort((a, b) => Number(a.version) - Number(b.version))
         .map(cloneJson)
     },
+    async listOperationActors(roomKey, ranges) {
+      return (ranges || []).map(range => {
+        const from = Number(range.fromRevision)
+        const to = Number(range.toRevision)
+        const validRange =
+          Number.isSafeInteger(from) &&
+          Number.isSafeInteger(to) &&
+          from >= 0 &&
+          to >= from
+        const rows = validRange
+          ? ops.filter(
+              op =>
+                op.room_key === roomKey &&
+                Number(op.version) > from &&
+                Number(op.version) <= to
+            )
+          : []
+        const revisions = new Set()
+        const editors = new Set()
+        let complete = validRange
+        rows.forEach(op => {
+          const revision = Number(op.version)
+          if (!Number.isSafeInteger(revision) || revisions.has(revision)) {
+            complete = false
+          } else {
+            revisions.add(revision)
+          }
+          const actorId = String(op.actor_id || op.actorId || '').trim()
+          if (actorId) editors.add(actorId)
+        })
+        const expectedCount = validRange ? to - from : -1
+        if (rows.length !== expectedCount || revisions.size !== expectedCount) {
+          complete = false
+        }
+        return {
+          id: range.id,
+          editors: complete ? Array.from(editors).sort() : [],
+          complete
+        }
+      })
+    },
     async getOperation(roomKey, operationId) {
       return cloneJson(
         ops.find(
@@ -215,6 +256,31 @@ function createMemoryHistoryStore(seed = {}) {
         )
       })
       return hit ? cloneJson(hit) : null
+    },
+    async listVersionPredecessors(roomKey, rows) {
+      const timeline = versions
+        .filter(item => item.room_key === roomKey)
+        .slice()
+        .sort((a, b) => {
+          const dt = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          if (dt) return dt
+          const ar = a.revision == null ? -1 : Number(a.revision)
+          const br = b.revision == null ? -1 : Number(b.revision)
+          if (ar !== br) return ar - br
+          const aid = String(a.id)
+          const bid = String(b.id)
+          return aid < bid ? -1 : aid > bid ? 1 : 0
+        })
+      const positionById = new Map(
+        timeline.map((item, index) => [String(item.id), index])
+      )
+      return (rows || []).map(row => {
+        const index = positionById.get(String(row.id))
+        return {
+          id: row.id,
+          previous: index != null && index > 0 ? cloneJson(timeline[index - 1]) : null
+        }
+      })
     },
     async updateVersionMeta(roomKey, versionId, patch) {
       const row = versions.find(
