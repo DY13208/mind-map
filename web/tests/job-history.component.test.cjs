@@ -1043,6 +1043,59 @@ async function main() {
       vm.pendingReceiptGaveUp({ at: Date.now() - 7 * 60 * 1000 }) === true
   )
 
+  // ---- 18. 按「派发时实际走的接口」学回执安全性 ----
+  // 判据为什么不能只看「是不是自动会话」（2026-09-29 实测）：
+  // 本机 WorkBuddy 2.137.1 的**自动会话**走 jobs、任务正常 done；
+  // 服务器 2.132.0 的自动会话只能回退 runs、回执取不回。
+  // 真正决定成败的是那条会话支不支持 Jobs 接口，而这个事实在派发响应的 mode 里。
+  vm = makeVm()
+  vm.jobHostKey = HOST.key
+  check(
+    '还没派发过 → 回执安全性未知(null)，不冤枉任何一条会话',
+    vm.receiptSafeOf('http://127.0.0.1:1') === null
+  )
+  vm.noteReceiptSafe('http://127.0.0.1:54418', 'runs')
+  vm.noteReceiptSafe('http://127.0.0.1:56752', 'jobs')
+  check(
+    'runs 记为不安全、jobs 记为安全',
+    vm.receiptSafeOf('http://127.0.0.1:54418') === false &&
+      vm.receiptSafeOf('http://127.0.0.1:56752') === true
+  )
+  check(
+    '学习结果落盘（刷新后还记得）',
+    String(localStore.get('mindmap:jobReceiptSafe') || '').includes('54418')
+  )
+
+  const autoOk = { url: 'http://127.0.0.1:6980', pid: 6980 }
+  const plainUnknown = { url: 'http://127.0.0.1:35792', pid: 35792 }
+  vm = makeVm()
+  vm.jobHostKey = HOST.key
+  vm.jobSpawnedIndex = new Set(['http://127.0.0.1:6980', 6980])
+  vm.noteReceiptSafe(autoOk.url, 'jobs')
+  check(
+    '自动会话但走过 jobs → 依然优先（别被「自动」标签一律降权）',
+    vm.pickJobGateway([plainUnknown, autoOk], '') === autoOk.url,
+    vm.pickJobGateway([plainUnknown, autoOk], '')
+  )
+  vm.noteReceiptSafe('http://127.0.0.1:54418', 'runs')
+  check(
+    '已知走 runs 的会话 → 被换成别的（哪怕它是上次用的那条）',
+    vm.pickJobGateway(
+      [{ url: 'http://127.0.0.1:54418', pid: 16572 }, plainUnknown],
+      'http://127.0.0.1:54418'
+    ) === plainUnknown.url
+  )
+  check(
+    '都没学过时仍然优先上次用的那条（端口稳定原则不变）',
+    (() => {
+      const fresh = makeVm()
+      fresh.jobHostKey = HOST.key
+      fresh.jobSpawnedIndex = new Set(['http://127.0.0.1:6980', 6980])
+      return fresh.pickJobGateway([autoOk, plainUnknown], plainUnknown.url) ===
+        plainUnknown.url
+    })()
+  )
+
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)
   if (failed.length) {

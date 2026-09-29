@@ -737,6 +737,17 @@ function rowIsAuto(item, idx) {
 }
 
 /**
+ * 已知的「回执收不收得回」：true 安全 / false 不安全 / null 还不知道。
+ * key = `hostKey::url`（不同机器的 url 可能撞端口，必须带主机）。
+ * 同样写成模块级纯函数 —— 单测里的手搓 vm 没有 `this` 上的方法（踩过两次）。
+ */
+function receiptSafeFrom(store, hostKey, url) {
+  const key = `${hostKey || 'default'}::${String(url || '')}`
+  const map = store || {}
+  return Object.prototype.hasOwnProperty.call(map, key) ? !!map[key] : null
+}
+
+/**
  * 待回写任务落盘用的 key。
  *
  * 为什么需要它（2026-09-29 反馈「产物没有回填，都要我去 WorkBuddy 说一声」）：
@@ -769,6 +780,13 @@ const JOB_PENDING_TTL_MS = 30 * 60 * 1000
  * 所以：派发超过这个时间还判不出终态时，主动拉一次正文；拉得到就按「完成」收尾。
  */
 const JOB_RECEIPT_GRACE_MS = 4 * 60 * 1000
+
+/**
+ * 每条会话「回执收不收得回」的学习结果（key = `hostKey::url`）。
+ * 来源是派发响应里的 `mode`：走 jobs 就安全，走 runs（那台会话没挂 Jobs 接口）
+ * 就取不回结果。见 noteReceiptSafe()。
+ */
+const JOB_RECEIPT_SAFE_STORE = 'mindmap:jobReceiptSafe'
 
 /**
  * 宽限也拉不到正文时的放弃线（派发后 6 分钟）。
@@ -877,6 +895,8 @@ export default {
       jobSessions: [],
       // 「自动」会话的 url/pid 索引（桥接自己起的 headless 实例，不落回执，挑会话时避开）
       jobSpawnedIndex: null,
+      // 每条会话「回执收不收得回」的学习结果（hostKey::url → bool），落 localStorage
+      rememberedReceiptSafe: null,
       jobSessionsLoading: false,
       jobSessionsError: '',
       jobSessionsExpanded: false,
@@ -1177,6 +1197,8 @@ export default {
     window.addEventListener('beforeunload', this.onUnload)
     this.$bus.$on('node_note_dblclick', this.onNodeNoteDblclick)
     // 上次没回写完的任务：捡回来接着轮询（刷新页面不该让任务白跑）
+    // 「哪条会话回执收得回」也是跨刷新记住的 —— 挑派发会话要用
+    this.restoreReceiptSafe()
     const restored = this.restorePendingJobs()
     if (restored) {
       this.prepareLocalTarget()
@@ -1391,6 +1413,8 @@ export default {
             this.nodePlainTitle(this.activeJobNode) || '继续'
           }`
         })
+        // 记下这条会话走的是 jobs 还是 runs（见 noteReceiptSafe）
+        if (result.ok) this.noteReceiptSafe(gateway, result.mode)
         if (!result.ok) {
           const errText =
             typeof result.error === 'string'
@@ -1603,18 +1627,34 @@ export default {
       const rows = list || []
       if (!rows.length) return ''
       const idx = spawnedIndex || this.jobSpawnedIndex
-      const isAuto = item => rowIsAuto(item, idx)
       const remembered = this.recallSession(this.jobSelectedHost)
-      const prevRow = rows.find(item => item.url === previous)
-      const memRow = rows.find(item => item.url === remembered)
-      // ① / ② 上次用的、记住过的那条还在，且**不是自动会话** → 就用它（端口稳定这条原则不变）
-      if (prevRow && !isAuto(prevRow)) return prevRow.url
-      if (memRow && !isAuto(memRow)) return memRow.url
-      // ③ 挑第一条非自动会话 —— 自动会话取不回结果，能不派就不派
-      const fresh = rows.find(item => !isAuto(item))
-      if (fresh) return fresh.url
-      // ④ 全是自动会话：退回记着的那条（任务能跑，结果靠 JOB_RECEIPT_GRACE_MS 兜回来）
-      return (prevRow || memRow || rows[0]).url
+      // 打分挑一条，判据按可靠性从高到低：
+      //   ① **已知走 jobs、回执收得回** 的会话（最高，最可信）
+      //   ② 还不知道的（中性）
+      //   ③ **已知走 runs、回执取不回** 的（最低，直接避掉）
+      //   ④ 「自动」会话降权（本机能用、服务器那台不能，靠 ① 兜正；这里只是保守）
+      //   ⑤ 上次用的 / 记住过的那条加分 —— **端口稳定这条原则不变**
+      const score = item => {
+        let s = 0
+        const safe = receiptSafeFrom(this.rememberedReceiptSafe, this.jobHostKey, item.url)
+        if (safe === true) s += 8
+        else if (safe === null) s += 2
+        else s -= 6
+        if (rowIsAuto(item, idx)) s -= 4
+        if (item.url === previous) s += 3
+        else if (item.url === remembered) s += 2
+        return s
+      }
+      let best = rows[0]
+      let bestScore = null
+      rows.forEach(item => {
+        const s = score(item)
+        if (bestScore === null || s > bestScore) {
+          bestScore = s
+          best = item
+        }
+      })
+      return best.url
     },
 
     /**
@@ -1622,6 +1662,46 @@ export default {
      */
     isAutoSession(item, idx = null) {
       return rowIsAuto(item, idx || this.jobSpawnedIndex)
+    },
+
+    /**
+     * 这条会话「回执收不收得回」—— 由**派发时实际走的接口**学出来。
+     *
+     * 为什么不能只看「是不是自动会话」（2026-09-29 实测踩到）：
+     * 本机 WorkBuddy 2.137.1 起的**自动会话**派发走 `POST /api/v1/jobs`，
+     * 任务正常 done（连写文件都成功）；而服务器 2.132.0 起的自动会话
+     * 只能回退到 `POST /api/v1/runs` —— run 台账不更新、回执取不回。
+     * 所以真正决定成败的是「那条会话支不支持 Jobs 接口」，不是它怎么起的。
+     * 这条事实在派发响应里就有（`mode`），记下来即可，不用额外探测。
+     */
+    receiptSafeKey(url) {
+      return `${this.jobHostKey || 'default'}::${String(url || '')}`
+    },
+
+    /** 已知的回执安全性：true 安全 / false 不安全 / null 还不知道 */
+    receiptSafeOf(url) {
+      return receiptSafeFrom(this.rememberedReceiptSafe, this.jobHostKey, url)
+    },
+
+    /** 派发之后按实际 mode 记一笔（jobs 安全 / runs 不安全） */
+    noteReceiptSafe(url, mode) {
+      const m = String(mode || '')
+      if (!url || !m) return
+      const key = `${this.jobHostKey || 'default'}::${String(url)}`
+      const value = m !== 'runs'
+      if (!this.rememberedReceiptSafe) this.rememberedReceiptSafe = {}
+      if (this.rememberedReceiptSafe[key] === value) return
+      this.rememberedReceiptSafe[key] = value
+      try {
+        // 和 restoreReceiptSafe 用同一个全局名，测试里的桩也认它
+        if (typeof localStorage === 'undefined') return
+        localStorage.setItem(
+          JOB_RECEIPT_SAFE_STORE,
+          JSON.stringify(this.rememberedReceiptSafe)
+        )
+      } catch (err) {
+        /* 隐私模式写不进去，内存里那份兜着 */
+      }
     },
 
     /** 手动指定派发用哪条会话（点会话栏那一行），并记住 */
@@ -2103,6 +2183,9 @@ export default {
         }
         const jobId =
           (result.job && (result.job.id || result.job.jobId)) || ''
+        // 记下这条会话实际走的是 jobs 还是 runs（见 noteReceiptSafe）——
+        // 走 runs 说明它不支持 Jobs 接口，回执取不回，下次挑会话就绕开它
+        this.noteReceiptSafe(gateway, result.mode)
         this.jobCurrentId = jobId
         this.jobActiveId = jobId
         this.jobPendingPrompt = prompt
@@ -2114,15 +2197,28 @@ export default {
           hostKey: host.key,
           gateway
         })
-        this.jobStatus = `${continued ? '已派发继续执行' : '已派发'}${
-          jobId ? ` · ${jobId}` : ''
-        } · 结果写到「${container.nodeTitle || '运行节点'}」下${this.pendingSuffix()}`
-        this.jobStatusType = 'jobOk'
-        this.$message.success(
-          `${continued ? '已按概要继续执行' : '已派发'}${
-            jobId ? ` · ${jobId}` : ''
-          }，跑完结果挂在「${this.jobRunNodeTitle || '运行节点'}」下面`
-        )
+        const runsMode = result.mode === 'runs'
+        this.jobStatus = runsMode
+          ? `已派发（这条会话没有 Jobs 接口，结果可能要等几分钟兜回来）${
+              jobId ? ` · ${jobId}` : ''
+            }`
+          : `${continued ? '已派发继续执行' : '已派发'}${
+              jobId ? ` · ${jobId}` : ''
+            } · 结果写到「${container.nodeTitle || '运行节点'}」下${this.pendingSuffix()}`
+        this.jobStatusType = runsMode ? 'jobWait' : 'jobOk'
+        if (runsMode) {
+          this.$message.warning(
+            '这条 WorkBuddy 会话没有 Jobs 接口，桥接只能走回退通道 —— ' +
+              '它会照常跑，但状态不更新，结果要等 ~4 分钟由会话历史兜回来。' +
+              '想立刻拿到结果，就在会话栏里换一条，或把它上面的 WorkBuddy 升级到新版。'
+          )
+        } else {
+          this.$message.success(
+            `${continued ? '已按概要继续执行' : '已派发'}${
+              jobId ? ` · ${jobId}` : ''
+            }，跑完结果挂在「${this.jobRunNodeTitle || '运行节点'}」下面`
+          )
+        }
         if (this.jobHistoryVisible) await this.loadJobHistory()
         return
       } catch (err) {
@@ -2381,6 +2477,19 @@ export default {
      * 内存里的 jobPendingList 一空，就再没人轮询 → 导图永远不回写，
      * 用户只能自己跑去 WorkBuddy 里催一句。这里让它跨刷新活下来。
      */
+    /** 恢复「哪条会话回执收得回」的学习结果（见 noteReceiptSafe） */
+    restoreReceiptSafe() {
+      try {
+        if (typeof localStorage === 'undefined') return
+        const raw = localStorage.getItem(JOB_RECEIPT_SAFE_STORE)
+        if (!raw) return
+        const obj = JSON.parse(raw)
+        if (obj && typeof obj === 'object') this.rememberedReceiptSafe = obj
+      } catch (err) {
+        /* 坏了就当没学过，不影响使用 */
+      }
+    },
+
     restorePendingJobs() {
       try {
         if (typeof localStorage === 'undefined') return 0
