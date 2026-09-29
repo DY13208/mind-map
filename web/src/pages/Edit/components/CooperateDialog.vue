@@ -45,253 +45,255 @@
         </div>
       </div>
 
-      <section class="memberPanel" v-if="connected && roomName">
-        <div class="fileHead">
-          <div class="fileHeadTitle">
-            <span>{{ $t('acl.share') }}</span>
-          </div>
-        </div>
-        <div v-if="membersLoading" class="empty">{{ $t('other.loading') }}</div>
-        <div v-else class="memberList">
-          <div class="memberItem" v-for="item in memberList" :key="item.user_id">
-            <span
-              class="avatar"
-              :style="memberAvatarStyle(item)"
-            >{{ memberInitial(item) }}</span>
-            <span class="name">{{ item.name || item.user_id }}</span>
-            <span class="roleTag" v-if="!roomCanManage" :class="item.role">{{
-              memberRoleText(item.role)
-            }}</span>
-            <template v-if="roomCanManage">
-              <el-select
-                :value="item.role"
-                size="mini"
-                class="roleSelect"
-                :disabled="memberBusy"
-                @change="val => changeMemberRole(item, val)"
-              >
-                <el-option :label="$t('acl.owner')" value="owner"></el-option>
-                <el-option :label="$t('acl.editor')" value="editor"></el-option>
-                <el-option :label="$t('acl.viewer')" value="viewer"></el-option>
-              </el-select>
-              <el-button
-                type="text"
-                class="danger"
-                :disabled="memberBusy"
-                @click="dropMember(item)"
-                >{{ $t('acl.remove') }}</el-button
-              >
-            </template>
-          </div>
-        </div>
-        <div v-if="roomCanManage" class="memberAdd">
-          <el-input
-            v-model.trim="memberQuery"
-            size="small"
-            :placeholder="$t('acl.searchUsers')"
-            @input="searchMemberUsers"
-            @keydown.native.stop
-          ></el-input>
-          <div class="userHits" v-if="userHits.length">
-            <div
-              class="memberItem"
-              v-for="user in userHits"
-              :key="user.user_id"
-            >
-              <span class="name">{{ user.name || user.user_id }}</span>
-              <el-button
-                type="text"
-                @click="addMember(user, 'viewer')"
-                >{{ $t('acl.addViewer') }}</el-button
-              >
-              <el-button type="text" @click="addMember(user, 'editor')">{{
-                $t('acl.addEditor')
-              }}</el-button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="filePanel">
-        <div class="fileHead">
-          <div class="fileHeadTitle">
-            <span>{{ $t('cooperate.files') }}</span>
-            <span class="fileCount">{{
-              $t('cooperate.fileCount', { count: fileTotal })
-            }}</span>
-          </div>
-          <el-button type="text" :disabled="filesLoading" @click="loadFiles">{{
-            $t('cooperate.refresh')
-          }}</el-button>
-        </div>
-        <el-input
-          v-model.trim="fileQuery"
-          class="fileSearch"
-          size="small"
-          clearable
-          prefix-icon="el-icon-search"
-          :placeholder="$t('cooperate.searchFiles')"
-          @keydown.native.stop
-        ></el-input>
-        <div class="fileList">
-          <div v-if="filesLoading" class="fileSkeleton">
-            <div class="fileSkeletonRow" v-for="n in 4" :key="'sk-' + n"></div>
-          </div>
-          <div
-            class="empty"
-            v-else-if="!fileList.length"
-          >
-            {{
-              fileQuery
-                ? $t('cooperate.emptySearch', { q: fileQuery })
-                : $t('cooperate.noFiles')
-            }}
-          </div>
-          <template v-else>
-            <div
-              class="fileItem"
-              v-for="item in fileList"
-              :key="item.roomKey"
-              :class="{ current: connected && roomName === item.roomKey }"
-              @dblclick="openFile(item)"
-            >
-            <div class="fileMeta">
-              <div class="fileTitle">
-                {{ item.title }}
+      <el-tabs v-model="activeDialogTab" class="cooperateTabs" @tab-click="onDialogTabClick">
+        <el-tab-pane :label="$t('acl.share')" name="members">
+          <section class="memberPanel" v-if="connected && roomName">
+            <div v-if="membersLoading" class="empty">{{ $t('other.loading') }}</div>
+            <div v-else class="memberList">
+              <div class="memberItem" v-for="item in memberList" :key="item.user_id">
                 <span
-                  v-if="connected && roomName === item.roomKey"
-                  class="currentTag"
-                  >{{ $t('cooperate.currentRoom') }}</span
+                  class="avatar"
+                  :style="memberAvatarStyle(item)"
+                >{{ memberInitial(item) }}</span>
+                <span class="name">{{ item.name || item.user_id }}</span>
+                <span class="roleTag" v-if="!roomCanManage" :class="item.role">{{
+                  memberRoleText(item.role)
+                }}</span>
+                <template v-if="roomCanManage">
+                  <el-select
+                    :value="item.role"
+                    size="mini"
+                    class="roleSelect"
+                    :disabled="memberBusy"
+                    @change="val => changeMemberRole(item, val)"
+                  >
+                    <el-option :label="$t('acl.owner')" value="owner"></el-option>
+                    <el-option :label="$t('acl.editor')" value="editor"></el-option>
+                    <el-option :label="$t('acl.viewer')" value="viewer"></el-option>
+                  </el-select>
+                  <el-button
+                    type="text"
+                    class="danger"
+                    :disabled="memberBusy"
+                    @click="dropMember(item)"
+                    >{{ $t('acl.remove') }}</el-button
+                  >
+                </template>
+              </div>
+            </div>
+            <div v-if="roomCanManage" class="memberAdd">
+              <el-input
+                v-model.trim="memberQuery"
+                size="small"
+                :placeholder="$t('acl.searchUsers')"
+                @input="searchMemberUsers"
+                @keydown.native.stop
+              ></el-input>
+              <div class="userHits" v-if="userHits.length">
+                <div
+                  class="memberItem"
+                  v-for="user in userHits"
+                  :key="user.user_id"
                 >
-                <span class="roleTag" :class="item.role || 'editor'">{{
-                  fileRoleText(item.role)
+                  <span class="name">{{ user.name || user.user_id }}</span>
+                  <el-button
+                    type="text"
+                    @click="addMember(user, 'viewer')"
+                    >{{ $t('acl.addViewer') }}</el-button
+                  >
+                  <el-button type="text" @click="addMember(user, 'editor')">{{
+                    $t('acl.addEditor')
+                  }}</el-button>
+                </div>
+              </div>
+            </div>
+          </section>
+          <div v-else class="empty">{{ $t('cooperate.disconnected') }}</div>
+        </el-tab-pane>
+
+        <el-tab-pane :label="$t('cooperate.files')" name="files">
+          <section class="filePanel">
+            <div class="fileHead">
+            <div class="fileHeadTitle">
+              <span class="fileCount">{{
+                  $t('cooperate.fileCount', { count: fileTotal })
                 }}</span>
               </div>
-              <div class="fileTime">{{ formatTime(item.updatedAt) }}</div>
-            </div>
-            <div class="fileActions" @click.stop>
-              <el-button type="text" @click="openFile(item)">{{
-                $t('cooperate.openFile')
+              <el-button type="text" :disabled="filesLoading" @click="loadFiles">{{
+                $t('cooperate.refresh')
               }}</el-button>
-              <el-button
-                type="text"
-                v-if="item.canManage"
-                @click="renameSavedFile(item)"
-                >{{ $t('cooperate.renameFile') }}</el-button
-              >
-              <el-button
-                type="text"
-                class="danger"
-                v-if="item.canManage"
-                @click="removeSavedFile(item)"
-                >{{ $t('cooperate.deleteFile') }}</el-button
-              >
             </div>
-            </div>
-          </template>
-        </div>
-        <div class="filePager" v-if="fileTotal > filePageSize">
-          <el-pagination
-            small
-            layout="total, prev, pager, next"
-            :page-size="filePageSize"
-            :current-page="filePage"
-            :total="fileTotal"
-            @current-change="onFilePageChange"
-          ></el-pagination>
-        </div>
-      </section>
-
-      <el-form class="joinForm" label-width="88px" size="small" @submit.native.prevent>
-        <el-form-item :label="$t('cooperate.userName')" required>
-          <el-input
-            v-model.trim="userName"
-            :placeholder="$t('cooperate.userNamePlaceholder')"
-            maxlength="20"
-            @keydown.native.stop
-          ></el-input>
-        </el-form-item>
-        <el-form-item :label="$t('cooperate.roomName')" required>
-          <el-input
-            v-model.trim="roomName"
-            :placeholder="$t('cooperate.roomNamePlaceholder')"
-            maxlength="40"
-            :disabled="connected || connecting"
-            @keydown.native.stop
-          >
-            <el-button
-              slot="append"
-              :disabled="connected || connecting"
-              @click="createRoom"
-              >{{ $t('cooperate.newRoom') }}</el-button
-            >
-          </el-input>
-        </el-form-item>
-      </el-form>
-
-      <button
-        class="advancedToggle"
-        type="button"
-        @click="showAdvanced = !showAdvanced"
-      >
-        {{ $t('cooperate.advanced') }}
-        <i :class="showAdvanced ? 'el-icon-arrow-up' : 'el-icon-arrow-down'"></i>
-      </button>
-      <div class="advancedBox" v-show="showAdvanced">
-        <p class="hint">{{ $t('cooperate.tip') }}</p>
-        <p class="hint">{{ $t('cooperate.startServerTip') }}</p>
-        <el-form label-width="88px" size="small" @submit.native.prevent>
-          <el-form-item :label="$t('cooperate.serverUrl')" required>
             <el-input
-              v-model.trim="serverUrl"
-              :placeholder="$t('cooperate.serverUrlPlaceholder')"
-              :disabled="connected || connecting"
+              v-model.trim="fileQuery"
+              class="fileSearch"
+              size="small"
+              clearable
+              prefix-icon="el-icon-search"
+              :placeholder="$t('cooperate.searchFiles')"
               @keydown.native.stop
             ></el-input>
-          </el-form-item>
-        </el-form>
-      </div>
+            <div class="fileList">
+              <div v-if="filesLoading" class="fileSkeleton">
+                <div class="fileSkeletonRow" v-for="n in 4" :key="'sk-' + n"></div>
+              </div>
+              <div
+                class="empty"
+                v-else-if="!fileList.length"
+              >
+                {{
+                  fileQuery
+                    ? $t('cooperate.emptySearch', { q: fileQuery })
+                    : $t('cooperate.noFiles')
+                }}
+              </div>
+              <template v-else>
+                <div
+                  class="fileItem"
+                  v-for="item in fileList"
+                  :key="item.roomKey"
+                  :class="{ current: connected && roomName === item.roomKey }"
+                  @dblclick="openFile(item)"
+                >
+                <div class="fileMeta">
+                  <div class="fileTitle">
+                    {{ item.title }}
+                    <span
+                      v-if="connected && roomName === item.roomKey"
+                      class="currentTag"
+                      >{{ $t('cooperate.currentRoom') }}</span
+                    >
+                    <span class="roleTag" :class="item.role || 'editor'">{{
+                      fileRoleText(item.role)
+                    }}</span>
+                  </div>
+                  <div class="fileTime">{{ formatTime(item.updatedAt) }}</div>
+                </div>
+                <div class="fileActions" @click.stop>
+                  <el-button type="text" @click="openFile(item)">{{
+                    $t('cooperate.openFile')
+                  }}</el-button>
+                  <el-button
+                    type="text"
+                    v-if="item.canManage"
+                    @click="renameSavedFile(item)"
+                    >{{ $t('cooperate.renameFile') }}</el-button
+                  >
+                  <el-button
+                    type="text"
+                    class="danger"
+                    v-if="item.canManage"
+                    @click="removeSavedFile(item)"
+                    >{{ $t('cooperate.deleteFile') }}</el-button
+                  >
+                </div>
+                </div>
+              </template>
+            </div>
+            <div class="filePager" v-if="fileTotal > filePageSize">
+              <el-pagination
+                small
+                layout="total, prev, pager, next"
+                :page-size="filePageSize"
+                :current-page="filePage"
+                :total="fileTotal"
+                @current-change="onFilePageChange"
+              ></el-pagination>
+            </div>
+          </section>
+        </el-tab-pane>
 
-      <section class="historyPanel" v-if="connected">
-        <div class="fileHead">
-          <span>{{ $t('cooperate.history') }}</span>
-          <el-button type="text" @click="loadHistory">{{
-            $t('cooperate.refresh')
-          }}</el-button>
-        </div>
-        <div class="empty" v-if="!historyList.length && !historyLoading">
-          {{ $t('cooperate.noHistory') }}
-        </div>
-        <div
-          class="historyItem"
-          v-for="item in filteredHistory"
-          :key="item.operationId"
-        >
-          <span class="historyMeta">
-            v{{ item.version }} · {{ item.type }} · {{ item.actorId }}
-          </span>
-          <el-button
-            v-if="canUndoHistoryItem(item)"
-            type="text"
-            @click="undoHistoryItem(item)"
-            >{{ $t('toolbar.undo') }}</el-button
+        <el-tab-pane :label="$t('cooperate.settingsTab')" name="settings">
+          <el-form class="joinForm" label-width="88px" size="small" @submit.native.prevent>
+            <el-form-item :label="$t('cooperate.userName')" required>
+              <el-input
+                v-model.trim="userName"
+                :placeholder="$t('cooperate.userNamePlaceholder')"
+                maxlength="20"
+                @keydown.native.stop
+              ></el-input>
+            </el-form-item>
+            <el-form-item :label="$t('cooperate.roomName')" required>
+              <el-input
+                v-model.trim="roomName"
+                :placeholder="$t('cooperate.roomNamePlaceholder')"
+                maxlength="40"
+                :disabled="connected || connecting"
+                @keydown.native.stop
+              >
+                <el-button
+                  slot="append"
+                  :disabled="connected || connecting"
+                  @click="createRoom"
+                  >{{ $t('cooperate.newRoom') }}</el-button
+                >
+              </el-input>
+            </el-form-item>
+          </el-form>
+
+          <button
+            class="advancedToggle"
+            type="button"
+            @click="showAdvanced = !showAdvanced"
           >
-        </div>
-        <div class="filePager" v-if="historyList.length > historyPageSize">
-          <el-pagination
-            small
-            layout="prev, pager, next"
-            :page-size="historyPageSize"
-            :current-page.sync="historyPage"
-            :total="historyList.length"
-          ></el-pagination>
-        </div>
-      </section>
+            {{ $t('cooperate.advanced') }}
+            <i :class="showAdvanced ? 'el-icon-arrow-up' : 'el-icon-arrow-down'"></i>
+          </button>
+          <div class="advancedBox" v-show="showAdvanced">
+            <p class="hint">{{ $t('cooperate.tip') }}</p>
+            <p class="hint">{{ $t('cooperate.startServerTip') }}</p>
+            <el-form label-width="88px" size="small" @submit.native.prevent>
+              <el-form-item :label="$t('cooperate.serverUrl')" required>
+                <el-input
+                  v-model.trim="serverUrl"
+                  :placeholder="$t('cooperate.serverUrlPlaceholder')"
+                  :disabled="connected || connecting"
+                  @keydown.native.stop
+                ></el-input>
+              </el-form-item>
+            </el-form>
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane :label="$t('cooperate.history')" name="history" :disabled="!connected">
+          <section class="historyPanel" v-if="connected">
+            <div class="fileHead">
+              <span>{{ $t('cooperate.history') }}</span>
+              <el-button type="text" @click="loadHistory">{{
+                $t('cooperate.refresh')
+              }}</el-button>
+            </div>
+            <div class="empty" v-if="!historyList.length && !historyLoading">
+              {{ $t('cooperate.noHistory') }}
+            </div>
+            <div
+              class="historyItem"
+              v-for="item in filteredHistory"
+              :key="item.operationId"
+            >
+              <span class="historyMeta">
+                v{{ item.version }} · {{ item.type }} · {{ item.actorId }}
+              </span>
+              <el-button
+                v-if="canUndoHistoryItem(item)"
+                type="text"
+                @click="undoHistoryItem(item)"
+                >{{ $t('toolbar.undo') }}</el-button
+              >
+            </div>
+            <div class="filePager" v-if="historyList.length > historyPageSize">
+              <el-pagination
+                small
+                layout="prev, pager, next"
+                :page-size="historyPageSize"
+                :current-page.sync="historyPage"
+                :total="historyList.length"
+              ></el-pagination>
+            </div>
+          </section>
+        </el-tab-pane>
+      </el-tabs>
     </div>
     <div slot="footer" class="dialog-footer">
-      <el-button @click="copyInvite" :disabled="!roomName">{{
-        $t('cooperate.copyInvite')
-      }}</el-button>
       <el-button v-if="connected" @click="leave">{{
         $t('cooperate.leave')
       }}</el-button>
@@ -445,6 +447,7 @@ export default {
   data() {
     return {
       dialogVisible: false,
+      activeDialogTab: 'members',
       userName: '',
       roomName: '',
       serverUrl: defaultServerUrl(),
@@ -484,7 +487,7 @@ export default {
       historyList: [],
       historyLoading: false,
       historyPage: 1,
-      historyPageSize: 8,
+      historyPageSize: 6,
       memberList: [],
       membersLoading: false,
       memberQuery: '',
@@ -584,6 +587,7 @@ export default {
     this.$bus.$on('node_dblclick', this.onNodeDblclickMapRef)
     this.$bus.$on('openMapRefEdit', this.navigateToMapRef)
     this.$bus.$on('showShareAcl', this.openShare)
+    this.$bus.$on('copyInviteLink', this.copyInvite)
     this._seenHttpChanges = new Map()
     this._unsubCollabStore = null
   },
@@ -596,6 +600,7 @@ export default {
     this.$bus.$off('node_dblclick', this.onNodeDblclickMapRef)
     this.$bus.$off('openMapRefEdit', this.navigateToMapRef)
     this.$bus.$off('showShareAcl', this.openShare)
+    this.$bus.$off('copyInviteLink', this.copyInvite)
     if (this.mindMap) {
       this.mindMap.off('room_acl_denied', this.onAclDenied)
       this.mindMap.off('undo_conflict', this.onUndoConflict)
@@ -981,8 +986,15 @@ export default {
     },
 
     openShare() {
+      this.activeDialogTab = this.connected ? 'members' : 'settings'
       this.dialogVisible = true
       this.loadMembers()
+    },
+
+    onDialogTabClick(tab) {
+      if (tab.name === 'members' && this.connected) this.loadMembers()
+      if (tab.name === 'files') this.loadFiles()
+      if (tab.name === 'history') this.loadHistory()
     },
 
     mapCollabStoreStatus(status) {
@@ -1012,6 +1024,7 @@ export default {
     },
 
     open() {
+      this.activeDialogTab = this.connected ? 'files' : 'settings'
       this.dialogVisible = true
       this.filePage = 1
       this.loadFiles()
@@ -2887,7 +2900,7 @@ export default {
 
   .filePanel,
   .historyPanel {
-    margin-top: 4px;
+    margin-top: 0;
     padding: 12px;
     border: 1px solid #e6e8eb;
     border-radius: 10px;
@@ -2895,7 +2908,7 @@ export default {
   }
 
   .historyPanel {
-    margin-top: 12px;
+    margin-top: 0;
   }
 
   .fileHead {
@@ -2926,7 +2939,7 @@ export default {
 
   .fileList {
     min-height: 168px;
-    max-height: 280px;
+    max-height: 208px;
     overflow: auto;
   }
 
@@ -3012,7 +3025,7 @@ export default {
   }
 
   .memberPanel {
-    margin-bottom: 12px;
+    margin-bottom: 0;
     padding: 12px;
     border: 1px solid #e6e8eb;
     border-radius: 10px;
@@ -3211,8 +3224,13 @@ export default {
 
 <style lang="less">
 .cooperateDialogShell {
+  max-width: calc(100vw - 32px);
+  margin-top: ~"min(6vh, 48px)" !important;
+
   .el-dialog__body {
     padding: 12px 20px 8px;
+    max-height: ~"min(calc(100vh - 180px), 560px)";
+    overflow-y: auto;
   }
 
   .el-dialog__header {
