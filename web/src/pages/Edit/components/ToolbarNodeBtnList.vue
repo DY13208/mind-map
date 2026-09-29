@@ -36,7 +36,7 @@
         }"
         @click="$bus.$emit('startPainter')"
       >
-        <span class="icon iconfont iconjiedian"></span>
+        <span class="icon el-icon-brush"></span>
         <span class="text">{{ $t('toolbar.painter') }}</span>
       </div>
       <div
@@ -468,6 +468,10 @@ export default {
       flex-direction: row;
       text-align: center;
       padding: 0 5px;
+    }
+
+    .el-icon-brush {
+      font-size: 16px;
     }
 
     .text {

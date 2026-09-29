@@ -3,30 +3,30 @@
     <div class="toolbar" ref="toolbarRef">
       <!-- 节点操作 -->
       <div
-        class="toolbarBlockWrapper"
+        class="toolbarBlockWrapper nodeToolbarWrapper"
         :class="{ collapsed: nodeToolbarCollapsed }"
         v-if="!isReadonly"
       >
-        <button
-          type="button"
-          class="collapseToggleBtn"
-          :class="{ collapsed: nodeToolbarCollapsed }"
-          :title="
-            nodeToolbarCollapsed
-              ? $t('toolbar.expandToolbar')
-              : $t('toolbar.collapseToolbar')
-          "
-          :aria-label="
-            nodeToolbarCollapsed
-              ? $t('toolbar.expandToolbar')
-              : $t('toolbar.collapseToolbar')
-          "
-          :aria-expanded="String(!nodeToolbarCollapsed)"
-          @click.stop="toggleNodeToolbar"
-        >
-          <span class="iconfont iconjiantouyou"></span>
-        </button>
-        <div class="toolbarBlock">
+        <div class="toolbarBlock" ref="nodeToolbarBlock">
+          <button
+            type="button"
+            class="collapseToggleBtn"
+            :class="{ collapsed: nodeToolbarCollapsed }"
+            :title="
+              nodeToolbarCollapsed
+                ? $t('toolbar.expandToolbar')
+                : $t('toolbar.collapseToolbar')
+            "
+            :aria-label="
+              nodeToolbarCollapsed
+                ? $t('toolbar.expandToolbar')
+                : $t('toolbar.collapseToolbar')
+            "
+            :aria-expanded="String(!nodeToolbarCollapsed)"
+            @click.stop="toggleNodeToolbar"
+          >
+            <span class="iconfont iconjiantouyou"></span>
+          </button>
           <ToolbarNodeBtnList :list="horizontalList"></ToolbarNodeBtnList>
           <!-- 更多 -->
           <el-popover
@@ -43,76 +43,29 @@
               @click.native="popoverShow = false"
             ></ToolbarNodeBtnList>
             <div slot="reference" class="toolbarBtn">
-              <span class="icon iconfont icongongshi"></span>
+              <span class="icon el-icon-more moreIcon"></span>
               <span class="text">{{ $t('toolbar.more') }}</span>
             </div>
           </el-popover>
         </div>
       </div>
-      <!-- 导出 -->
+      <!-- 文件与协作操作 -->
       <div
-        class="toolbarBlockWrapper"
+        class="toolbarBlockWrapper fileToolbarWrapper"
         :class="{ collapsed: fileToolbarCollapsed }"
       >
-        <button
-          type="button"
-          class="collapseToggleBtn"
-          :class="{ collapsed: fileToolbarCollapsed }"
-          :title="
-            fileToolbarCollapsed
-              ? $t('toolbar.expandToolbar')
-              : $t('toolbar.collapseToolbar')
-          "
-          :aria-label="
-            fileToolbarCollapsed
-              ? $t('toolbar.expandToolbar')
-              : $t('toolbar.collapseToolbar')
-          "
-          :aria-expanded="String(!fileToolbarCollapsed)"
-          @click.stop="toggleFileToolbar"
-        >
-          <span class="iconfont iconjiantouyou"></span>
-        </button>
-        <div class="toolbarBlock">
-          <div class="toolbarBtn" @click="openDirectory" v-if="!isMobile">
-            <span class="icon iconfont icondakai"></span>
-            <span class="text">{{ $t('toolbar.directory') }}</span>
-          </div>
-          <el-tooltip
-            effect="dark"
-            :content="$t('toolbar.newFileTip')"
-            placement="bottom"
-            v-if="!isMobile"
+        <div class="toolbarBlock" ref="fileToolbarBlock">
+          <button
+            type="button"
+            class="collapseToggleBtn"
+            :class="{ collapsed: fileToolbarCollapsed }"
+            :title="fileToolbarCollapsed ? $t('toolbar.expandToolbar') : $t('toolbar.collapseToolbar')"
+            :aria-label="fileToolbarCollapsed ? $t('toolbar.expandToolbar') : $t('toolbar.collapseToolbar')"
+            :aria-expanded="String(!fileToolbarCollapsed)"
+            @click.stop="toggleFileToolbar"
           >
-            <div class="toolbarBtn" @click="createNewLocalFile">
-              <span class="icon iconfont iconxinjian"></span>
-              <span class="text">{{ $t('toolbar.newFile') }}</span>
-            </div>
-          </el-tooltip>
-          <el-tooltip
-            effect="dark"
-            :content="$t('toolbar.openFileTip')"
-            placement="bottom"
-            v-if="!isMobile"
-          >
-            <div class="toolbarBtn" @click="openLocalFile">
-              <span class="icon iconfont iconwenjian1"></span>
-              <span class="text">{{ $t('toolbar.openFile') }}</span>
-            </div>
-          </el-tooltip>
-          <div class="toolbarBtn" @click="saveLocalFile" v-if="!isMobile">
-            <span class="icon iconfont iconlingcunwei"></span>
-            <span class="text">{{ $t('toolbar.saveAs') }}</span>
-          </div>
-          <div
-            class="toolbarBtn"
-            data-testid="import"
-            @click="$bus.$emit('showImport')"
-            v-if="!isReadonly"
-          >
-            <span class="icon iconfont icondaoru"></span>
-            <span class="text">{{ $t('toolbar.import') }}</span>
-          </div>
+            <span class="iconfont iconjiantouyou"></span>
+          </button>
           <div
             class="collabStatus"
             data-testid="collab-status"
@@ -121,7 +74,7 @@
             <el-popover
               placement="bottom"
               width="240"
-              trigger="click"
+              trigger="hover"
               popper-class="collabPeerPopper"
             >
               <div class="collabPeerPopover">
@@ -143,17 +96,23 @@
                   {{ $t('cooperate.noOnlinePeers') }}
                 </div>
               </div>
-              <div slot="reference" class="collabAvatars" data-testid="collab-peers">
-                <span
-                  class="miniAvatar"
-                  v-for="peer in visibleCollabPeers"
-                  :key="peer.id"
-                  :style="peerAvatarStyle(peer)"
-                  >{{ peer.shortName || '?' }}</span
-                >
-                <span class="more" v-if="extraPeerCount">+{{ extraPeerCount }}</span>
-                <span class="peerCount">{{ collabPeers.length }}</span>
-              </div>
+              <button
+                slot="reference"
+                type="button"
+                class="collabPresence"
+                data-testid="collab-peers"
+                :aria-label="$t('cooperate.onlineCount', { count: collabPeers.length })"
+              >
+                <span class="avatarStack" aria-hidden="true">
+                  <span
+                    v-for="peer in visibleCollabPeers"
+                    :key="peer.id"
+                    class="miniAvatar"
+                    :style="peerAvatarStyle(peer)"
+                  >{{ peer.shortName || '?' }}</span>
+                </span>
+                <span class="peerCount">{{ $t('cooperate.onlineCount', { count: collabPeers.length }) }}</span>
+              </button>
             </el-popover>
             <el-popover
               v-if="displayedSaveChip === 'failed'"
@@ -196,69 +155,29 @@
               collabSaveLabel
             }}</span>
           </div>
-          <div
-            class="toolbarBtn"
-            data-testid="share"
-            @click="$bus.$emit('showShareAcl')"
+          <ToolbarFileBtnList
+            :list="fileHorizontalActions"
+            :is-dark="isDark"
+            @select="onFileToolbarAction"
+          />
+          <el-popover
+            v-if="fileVerticalActions.length"
+            v-model="filePopoverShow"
+            placement="bottom-end"
+            width="120"
+            trigger="hover"
           >
-            <span class="icon iconfont iconxietongwendang"></span>
-            <span class="text">{{ $t('acl.share') }}</span>
-          </div>
-          <div
-            class="toolbarBtn"
-            data-testid="history-versions"
-            v-if="$route.query.room"
-            @click="$emit('open-history')"
-          >
-            <span class="icon el-icon-time"></span>
-            <span class="text">历史版本</span>
-          </div>
-          <div
-            class="toolbarBtn"
-            data-testid="back-to-my-maps"
-            title="返回脑图"
-            v-if="$route.query.room"
-            @click="goToMyMaps"
-          >
-            <span class="icon el-icon-back"></span>
-            <span class="text">脑图</span>
-          </div>
-          <div
-            class="toolbarBtn"
-            :class="{ disabled: refreshing }"
-            data-testid="refresh"
-            @click="refreshPage"
-          >
-            <span class="icon">
-              <i
-                class="refreshIcon"
-                :class="refreshing ? 'el-icon-loading' : 'el-icon-refresh'"
-              ></i>
-            </span>
-            <span class="text">{{ $t('toolbar.refresh') }}</span>
-          </div>
-          <div
-            class="toolbarBtn"
-            data-testid="run-workbuddy-job"
-            :class="{ disabled: isReadonly || jobDispatching }"
-            :title="runButtonTitle"
-            @click="runWorkbuddyJob()"
-            v-if="!isReadonly"
-          >
-            <span
-              class="icon"
-              :class="jobDispatching ? 'el-icon-loading' : 'el-icon-video-play'"
-            ></span>
-            <span class="text">运行</span>
-          </div>
-          <div
-            class="toolbarBtn"
-            @click="$bus.$emit('showExport')"
-            style="margin-right: 0"
-          >
-            <span class="icon iconfont iconexport"></span>
-            <span class="text">{{ $t('toolbar.export') }}</span>
-          </div>
+            <ToolbarFileBtnList
+              dir="v"
+              :list="fileVerticalActions"
+              :is-dark="isDark"
+              @select="onFileToolbarAction"
+            />
+            <div slot="reference" class="toolbarBtn fileMoreBtn">
+              <span class="icon el-icon-more moreIcon"></span>
+              <span class="text">{{ $t('toolbar.more') }}</span>
+            </div>
+          </el-popover>
           <!-- 本地文件树 -->
           <div
             class="fileTreeBox"
@@ -391,7 +310,7 @@
               >
             </button>
             <div class="histEmpty" v-if="!filteredJobHistory.length">
-              <i :class="jobHistoryLoading ? 'el-icon-loading' : 'el-icon-time'"></i>
+              <i :class="jobHistoryLoading ? 'el-icon-loading' : 'el-icon-tickets'"></i>
               <strong>{{ jobHistoryLoading ? '正在读取记录' : jobHistoryError ? '暂时无法读取' : jobSearch ? '没有匹配的记录' : '还没有运行记录' }}</strong>
               <p>{{ jobHistoryError || (jobSearch ? '换个关键词试试' : '运行节点后，记录会显示在这里') }}</p>
             </div>
@@ -612,6 +531,7 @@ import MarkdownIt from 'markdown-it'
 import exampleData from 'simple-mind-map/example/exampleData'
 import { getData } from '../../../api'
 import ToolbarNodeBtnList from './ToolbarNodeBtnList.vue'
+import ToolbarFileBtnList from './ToolbarFileBtnList.vue'
 import { throttle, isMobile } from 'simple-mind-map/src/utils/index'
 import { stringifyJsonOffMainThread } from '@/utils/importTree'
 import { navigateToMyMaps } from '@/utils/roomLocation'
@@ -745,7 +665,8 @@ export default {
     NodeTag,
     Export,
     Import,
-    ToolbarNodeBtnList
+    ToolbarNodeBtnList,
+    ToolbarFileBtnList
   },
   data() {
     return {
@@ -754,6 +675,9 @@ export default {
       verticalList: [],
       showMoreBtn: true,
       popoverShow: false,
+      fileHorizontalCount: 0,
+      filePopoverShow: false,
+      toolbarLayoutRevision: 0,
       fileTreeProps: {
         label: 'name',
         children: 'children',
@@ -851,10 +775,7 @@ export default {
       return this.collabPhase === 'LIVE' || this.cooperateStatus === 'connected'
     },
     visibleCollabPeers() {
-      return (this.collabPeers || []).slice(0, 3)
-    },
-    extraPeerCount() {
-      return Math.max(0, (this.collabPeers || []).length - 3)
+      return (this.collabPeers || []).slice(0, 2)
     },
     collabSaveChip() {
       const phase = this.collabPhase
@@ -951,6 +872,51 @@ export default {
         })
       }
       return res
+    },
+
+    fileToolbarLayoutKey() {
+      return [this.isMobile, this.isReadonly, !!this.$route.query.room].join('|')
+    },
+
+    fileToolbarActions() {
+      const actions = []
+      if (this.$route.query.room) {
+        actions.push({ key: 'maps', label: '脑图', icon: 'el-icon-back', title: '返回脑图', testId: 'back-to-my-maps' })
+      }
+      actions.push({
+        key: 'refresh', label: this.$t('toolbar.refresh'),
+        icon: this.refreshing ? 'el-icon-loading' : 'el-icon-refresh',
+        disabled: this.refreshing, testId: 'refresh'
+      })
+      if (!this.isReadonly) {
+        actions.push({ key: 'run', label: '运行', icon: this.jobDispatching ? 'el-icon-loading' : 'el-icon-video-play', disabled: this.jobDispatching, title: this.runButtonTitle, testId: 'run-workbuddy-job' })
+      }
+      if (this.$route.query.room) {
+        actions.push({ key: 'copyInvite', label: this.$t('acl.copyLink'), icon: 'iconfont iconfuzhi', title: this.$t('cooperate.copyInvite'), testId: 'copy-invite' })
+      }
+      actions.push({ key: 'share', label: this.$t('acl.permissions'), icon: 'iconfont iconxietongwendang', testId: 'share' })
+      if (!this.isReadonly) {
+        actions.push({ key: 'import', label: this.$t('toolbar.import'), icon: 'iconfont icondaoru', testId: 'import' })
+      }
+      actions.push({ key: 'export', label: this.$t('toolbar.export'), icon: 'iconfont iconexport' })
+      if (this.$route.query.room) {
+        actions.push({ key: 'history', label: '历史版本', icon: 'el-icon-time', testId: 'history-versions' })
+      }
+      if (!this.isMobile) {
+        actions.push(
+          { key: 'new', label: this.$t('toolbar.newFile'), icon: 'iconfont iconxinjian', title: this.$t('toolbar.newFileTip') },
+          { key: 'saveAs', label: this.$t('toolbar.saveAs'), icon: 'iconfont iconlingcunwei' }
+        )
+      }
+      return actions
+    },
+
+    fileHorizontalActions() {
+      return this.fileToolbarActions.slice(0, this.fileHorizontalCount)
+    },
+
+    fileVerticalActions() {
+      return this.fileToolbarActions.slice(this.fileHorizontalCount)
     },
 
     jobSelectedHost() {
@@ -1081,6 +1047,9 @@ export default {
         this.computeToolbarShow()
       }
     },
+    fileToolbarLayoutKey() {
+      this.computeToolbarShow()
+    },
     collabSaveChip: {
       immediate: true,
       handler(next) {
@@ -1098,6 +1067,8 @@ export default {
     )
     this.$bus.$on('node_active', this.onNodeActive)
     this.$bus.$on('open_workbuddy_job_history', this.openJobHistory)
+    this.$bus.$on('open_local_directory', this.openDirectory)
+    this.$bus.$on('open_local_file', this.openLocalFile)
   },
   mounted() {
     this.computeToolbarShow()
@@ -1121,6 +1092,8 @@ export default {
     )
     this.$bus.$off('node_active', this.onNodeActive)
     this.$bus.$off('open_workbuddy_job_history', this.openJobHistory)
+    this.$bus.$off('open_local_directory', this.openDirectory)
+    this.$bus.$off('open_local_file', this.openLocalFile)
     window.removeEventListener('resize', this.computeToolbarShowThrottle)
     this.$bus.$off('lang_change', this.computeToolbarShowThrottle)
     window.removeEventListener('beforeunload', this.onUnload)
@@ -2589,34 +2562,78 @@ export default {
 
     toggleFileToolbar() {
       this.fileToolbarCollapsed = !this.fileToolbarCollapsed
+      if (this.fileToolbarCollapsed) this.filePopoverShow = false
     },
 
-    // 计算工具按钮如何显示
-    computeToolbarShow() {
+    onFileToolbarAction(key) {
+      this.filePopoverShow = false
+      switch (key) {
+        case 'new': return this.createNewLocalFile()
+        case 'saveAs': return this.saveLocalFile()
+        case 'import': return this.$bus.$emit('showImport')
+        case 'copyInvite': return this.$bus.$emit('copyInviteLink')
+        case 'share': return this.$bus.$emit('showShareAcl')
+        case 'history': return this.$emit('open-history')
+        case 'maps': return this.goToMyMaps()
+        case 'refresh': return this.refreshPage()
+        case 'run': return this.runWorkbuddyJob()
+        case 'export': return this.$bus.$emit('showExport')
+      }
+    },
+
+    // 两侧面板等宽；首次溢出时同时出现“更多”，之后各自按半区宽度收纳。
+    async computeToolbarShow() {
       if (!this.$refs.toolbarRef) return
-      const windowWidth = window.innerWidth - 40
-      const all = [...this.btnLit]
-      let index = 1
-      const loopCheck = () => {
-        if (index > all.length) return done()
-        this.horizontalList = all.slice(0, index)
-        this.$nextTick(() => {
-          const width = this.$refs.toolbarRef.getBoundingClientRect().width
-          if (width < windowWidth) {
-            index++
-            loopCheck()
-          } else if (index > 0 && width > windowWidth) {
-            index--
-            this.horizontalList = all.slice(0, index)
-            done()
-          }
-        })
+      const revision = (this.toolbarLayoutRevision || 0) + 1
+      this.toolbarLayoutRevision = revision
+      const nodeActions = this.isReadonly ? [] : [...this.btnLit]
+      this.horizontalList = nodeActions
+      this.verticalList = []
+      this.showMoreBtn = false
+      this.fileHorizontalCount = this.fileToolbarActions.length
+      this.popoverShow = false
+      this.filePopoverShow = false
+      await this.$nextTick()
+      const overflows = block => {
+        if (!block) return false
+        const blockStyle = window.getComputedStyle(block)
+        const available = block.clientWidth -
+          parseFloat(blockStyle.paddingLeft) -
+          parseFloat(blockStyle.paddingRight)
+        const used = Array.from(block.children).reduce((width, child) => {
+          const style = window.getComputedStyle(child)
+          if (style.position === 'absolute') return width
+          return width + child.getBoundingClientRect().width +
+            parseFloat(style.marginLeft) + parseFloat(style.marginRight)
+        }, 0)
+        return used > available + 1
       }
-      const done = () => {
-        this.verticalList = all.slice(index)
-        this.showMoreBtn = this.verticalList.length > 0
+      const nodeOverflows = () => overflows(this.$refs.nodeToolbarBlock)
+      const fileOverflows = () => overflows(this.$refs.fileToolbarBlock)
+      while (
+        revision === this.toolbarLayoutRevision &&
+        (nodeOverflows() || fileOverflows())
+      ) {
+        let changed = false
+        if (
+          this.horizontalList.length > 0 &&
+          (nodeOverflows() || !this.showMoreBtn)
+        ) {
+          this.horizontalList = nodeActions.slice(0, this.horizontalList.length - 1)
+          this.verticalList = nodeActions.slice(this.horizontalList.length)
+          this.showMoreBtn = this.verticalList.length > 0
+          changed = true
+        }
+        if (
+          this.fileHorizontalCount > 0 &&
+          (fileOverflows() || this.fileVerticalActions.length === 0)
+        ) {
+          this.fileHorizontalCount--
+          changed = true
+        }
+        if (!changed) break
+        await this.$nextTick()
       }
-      loopCheck()
     },
 
     // 监听本地文件读写
@@ -2917,12 +2934,14 @@ export default {
       .collabStatus {
         background: rgba(255, 255, 255, 0.06);
         border-color: rgba(255, 255, 255, 0.1);
-        .more,
-        .peerCount {
-          color: hsla(0, 0%, 100%, 0.7);
+        .collabPresence {
+          color: hsla(0, 0%, 100%, 0.8);
         }
         .miniAvatar {
           border-color: #262a2e;
+        }
+        .saveChip {
+          border-color: rgba(255, 255, 255, 0.14);
         }
       }
       .toolbarBlock {
@@ -2996,11 +3015,11 @@ export default {
   }
   .toolbar {
     position: fixed;
-    left: 50%;
-    transform: translateX(-50%);
+    left: 20px;
+    right: 20px;
     top: 20px;
-    width: max-content;
     display: flex;
+    gap: 20px;
     font-size: 12px;
     font-family:
       PingFangSC-Regular,
@@ -3010,11 +3029,18 @@ export default {
     z-index: 2;
     .toolbarBlockWrapper {
       position: relative;
-      margin-right: 20px;
+      flex: 1 1 0;
+      min-width: 0;
       transition: transform 0.3s;
 
-      &:last-of-type {
+      &.nodeToolbarWrapper .toolbarBlock {
+        margin-left: auto;
         margin-right: 0;
+      }
+
+      &.fileToolbarWrapper .toolbarBlock {
+        margin-left: 0;
+        margin-right: auto;
       }
 
       &.collapsed {
@@ -3024,9 +3050,9 @@ export default {
       .collapseToggleBtn {
         position: absolute;
         left: 50%;
-        top: calc(100% - 22px);
+        top: 100%;
         width: 60px;
-        height: 28px;
+        height: 20px;
         padding: 0;
         border: 0;
         border-radius: 0 0 10px 10px;
@@ -3037,13 +3063,7 @@ export default {
         align-items: center;
         justify-content: center;
         transform: translateX(-50%);
-        transition: top 0.1s linear;
         z-index: 0;
-
-        &:hover,
-        &:focus-visible {
-          top: calc(100% - 10px);
-        }
 
         &:focus-visible {
           outline: 2px solid #409eff;
@@ -3067,14 +3087,24 @@ export default {
 
     .toolbarBlock {
       display: flex;
+      justify-content: center;
+      box-sizing: border-box;
+      width: max-content;
+      max-width: 100%;
+      margin: 0 auto;
       background-color: #fff;
       padding: 10px 20px;
       border-radius: 6px;
       box-shadow: 0 2px 16px 0 rgba(0, 0, 0, 0.06);
       border: 1px solid rgba(0, 0, 0, 0.06);
-      flex-shrink: 0;
       position: relative;
       z-index: 1;
+
+      /deep/ .toolbarNodeBtnList,
+      /deep/ .toolbarFileBtnList,
+      .collabStatus {
+        flex-shrink: 0;
+      }
 
       .fileTreeBox {
         position: absolute;
@@ -3224,12 +3254,31 @@ export default {
       }
     }
 
+    .fileMoreBtn {
+      align-items: center;
+      margin-left: 20px;
+      margin-right: 0;
+      text-align: center;
+
+      .icon {
+        box-sizing: border-box;
+        width: 28px;
+        height: 26px;
+        padding: 0;
+        align-items: center;
+        font-size: 18px;
+      }
+    }
+
+    .moreIcon {
+      font-size: 18px;
+    }
+
     .collabStatus {
       display: flex;
       align-items: center;
-      gap: 8px;
-      margin-right: 16px;
-      padding: 4px 8px 4px 6px;
+      margin-right: 20px;
+      padding: 5px 10px;
       border-radius: 999px;
       background: rgba(15, 23, 42, 0.04);
       border: 1px solid rgba(15, 23, 42, 0.08);
@@ -3239,39 +3288,56 @@ export default {
         border-color: rgba(16, 185, 129, 0.35);
       }
 
-      .collabAvatars {
-        display: flex;
+      .collabPresence {
+        display: inline-flex;
         align-items: center;
+        gap: 4px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: #475569;
+        font: inherit;
+        white-space: nowrap;
         cursor: pointer;
+        &:hover {
+          color: #334155;
+        }
+        &:focus-visible {
+          outline: 2px solid #409eff;
+          outline-offset: 3px;
+        }
       }
 
+      .avatarStack {
+        display: inline-flex;
+        align-items: center;
+        margin-right: 3px;
+      }
       .miniAvatar {
-        width: 22px;
-        height: 22px;
-        margin-left: -6px;
-        border-radius: 50%;
-        color: #fff;
-        font-size: 11px;
-        line-height: 22px;
-        text-align: center;
+        width: 19px;
+        height: 19px;
+        margin-left: -5px;
         border: 2px solid #fff;
+        border-radius: 50%;
         box-sizing: border-box;
-
+        color: #fff;
+        font-size: 10px;
+        line-height: 15px;
+        text-align: center;
         &:first-child {
           margin-left: 0;
         }
       }
-
-      .more,
       .peerCount {
-        margin-left: 4px;
-        font-size: 11px;
-        color: rgba(26, 26, 26, 0.65);
+        font-weight: 500;
+        color: inherit;
       }
 
       .saveChip {
+        margin-left: 9px;
+        padding-left: 9px;
+        border-left: 1px solid rgba(15, 23, 42, 0.12);
         font-size: 11px;
-        letter-spacing: 0.02em;
         white-space: nowrap;
       }
 
