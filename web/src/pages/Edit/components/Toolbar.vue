@@ -725,6 +725,20 @@ const JOB_RETRY_LIMIT = 3
  */
 const JOB_RECEIPT_GIVEUP_MS = 6 * 60 * 1000
 
+/**
+ * 「已知走 runs 回退通道」的会话，宽限期缩短到 90 秒。
+ *
+ * 现场（2026-09-29 服务器 192.168.1.114）：那台的 WorkBuddy 是 **2.132.0** ——
+ * **所有**会话（连非自动的）派发都返回 `mode=runs`，`POST /api/v1/jobs` 一律 404。
+ * 这类会话的 run 状态**从来不会更新**，所以「等 4 分钟再去看」纯属白等：
+ * 任务照样在跑、产物照样落盘，早点去扫就能早点把结果兜回来。
+ * 逐条会话学一遍（`receiptSafeOf === false` 就是已知走 runs），学到的就早点收。
+ */
+const JOB_RUNS_GRACE_MS = 90 * 1000
+
+/** 「这台机器的会话都走回退通道」这句提示，按主机记一次就够（别每次派发都弹） */
+const RUNS_TIP_STORE = 'mindmap:runsTipShown'
+
 // 工具栏
 let fileHandle = null
 const defaultBtnList = [
@@ -1621,38 +1635,46 @@ export default {
       if (!rows.length) return ''
       const idx = spawnedIndex || this.jobSpawnedIndex
       const remembered = this.recallSession(this.jobSelectedHost)
-      // 打分挑一条，判据按可靠性从高到低：
-      //   ① **已知走 jobs、回执收得回** 的会话（最高，最可信）
-      //   ② 还不知道的普通会话（中性）
-      //   ③ **已知走 runs** 的（最低，直接避掉）
-      //   ④ 「自动」会话：**只有已知走过 jobs 的才放行**。未知的一律重罚 ——
-      //      2026-09-29 实测：服务器那台（WorkBuddy 2.132.0）的自动会话走 runs，
-      //      任务**根本跑不起来**（sessionId=None、transcript 空、无产物），
-      //      只能等 4~6 分钟判死。宁可拦住并让人去桌面版开一条，也别派进黑洞。
-      //   ⑤ 上次用的 / 记住过的那条加分 —— **端口稳定这条原则不变**
+      const safeOf = url =>
+        receiptSafeFrom(this.rememberedReceiptSafe, this.jobHostKey, url)
+      // ① 先把「没被证实能用」的自动会话**剔出去** —— 派过去就是进黑洞
+      //    （2026-09-29 实测：服务器那台 WorkBuddy 2.132.0 的自动会话走 runs，
+      //    任务根本跑不起来：sessionId=None、transcript 空、无产物，只能等 4~6 分钟判死）。
+      //    一条都不剩就返回空，让上层给明确提示，而不是硬派。
+      //    ⚠️ 这一步必须和"忙闲扣分"分开算：否则会话都忙时总分被扣成负数，
+      //    会被误判成"没有可用会话"（单测抓出来的）。
+      const usable = rows.filter(
+        item => !(rowIsAuto(item, idx) && safeOf(item.url) !== true)
+      )
+      if (!usable.length) return ''
+      // ② 在可用会话里挑分最高的：
+      //    已知走 jobs（回执收得回）+8 / 未知 +2 / 已知走 runs -6
+      //    这条会话上还有**我没收回的任务** → 扣分：一条 WorkBuddy 会话同时只跑一个任务，
+      //      挤在一起就是串行排队（实测：6 秒内派 4 条，只有第一条按时出结果）。
+      //    上次用的 +3、记住过的 +2 —— **端口稳定这条原则不变**（会话闲置时行为完全不变）。
       const score = item => {
         let s = 0
-        const safe = receiptSafeFrom(this.rememberedReceiptSafe, this.jobHostKey, item.url)
+        const safe = safeOf(item.url)
         if (safe === true) s += 8
         else if (safe === null) s += 2
         else s -= 6
-        if (rowIsAuto(item, idx) && safe !== true) s -= 10
+        const mine = (this.jobPendingList || []).filter(
+          x => x && x.gateway === item.url
+        ).length
+        if (mine > 0) s -= 6 * Math.min(mine, 3)
         if (item.url === previous) s += 3
         else if (item.url === remembered) s += 2
         return s
       }
-      let best = rows[0]
+      let best = usable[0]
       let bestScore = null
-      rows.forEach(item => {
+      usable.forEach(item => {
         const s = score(item)
         if (bestScore === null || s > bestScore) {
           bestScore = s
           best = item
         }
       })
-      // 只剩下「没被证实能用」的自动会话 → 返回空，让上层给明确提示，
-      // 别把任务派进去白等 4~6 分钟（那正是用户看到的「一直卡着」）。
-      if (bestScore !== null && bestScore < 0) return ''
       return best.url
     },
 
@@ -2293,11 +2315,27 @@ export default {
             } · 结果写到「${container.nodeTitle || '运行节点'}」下${this.pendingSuffix()}`
         this.jobStatusType = runsMode ? 'jobWait' : 'jobOk'
         if (runsMode) {
-          this.$message.warning(
-            '这条 WorkBuddy 会话没有 Jobs 接口，桥接只能走回退通道 —— ' +
-              '它会照常跑，但状态不更新，结果要等 ~4 分钟由会话历史兜回来。' +
-              '想立刻拿到结果，就在会话栏里换一条，或把它上面的 WorkBuddy 升级到新版。'
-          )
+          // runs 是那台机器 WorkBuddy 版本的**常态**（所有会话都走），每次都弹会烦死人 ——
+          // 同一台主机只弹一次；状态栏每次都照旧提示（2026-09-29 用户反馈）
+          let shown = false
+          try {
+            shown = localStorage.getItem(RUNS_TIP_STORE) === this.jobHostKey
+          } catch (err) {
+            /* 隐私模式：当没提示过 */
+          }
+          if (!shown) {
+            this.$message.warning(
+              '这条 WorkBuddy 会话没有 Jobs 接口，桥接走回退通道：任务照常跑、产物也照常出，' +
+                '但状态不更新，结果要等一会儿由会话历史兜回来。' +
+                '想立刻见效，把它上面的 WorkBuddy 升级到新版（2.137+）；' +
+                '这台机器上的会话都这样，之后不再重复弹这句提示。'
+            )
+            try {
+              localStorage.setItem(RUNS_TIP_STORE, this.jobHostKey || '')
+            } catch (err) {
+              /* 写不进去就算了 */
+            }
+          }
         } else {
           this.$message.success(
             `${continued ? '已按概要继续执行' : '已派发'}${
@@ -2692,7 +2730,14 @@ export default {
     pendingReceiptTimedOut(entry) {
       const at = Number((entry && entry.at) || 0)
       if (!at) return false
-      return Date.now() - at > JOB_RECEIPT_GRACE_MS
+      // 这条会话**已知走 runs**（状态永远不更新）→ 早点去取，别白等 4 分钟
+      const safe = receiptSafeFrom(
+        this.rememberedReceiptSafe,
+        this.jobHostKey,
+        entry && entry.gateway
+      )
+      const grace = safe === false ? JOB_RUNS_GRACE_MS : JOB_RECEIPT_GRACE_MS
+      return Date.now() - at > grace
     },
 
     /** 过了放弃线还没正文（见 JOB_RECEIPT_GIVEUP_MS） */
