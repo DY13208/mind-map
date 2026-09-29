@@ -4,31 +4,51 @@
       class="nodeImportDialog"
       :title="$t('import.title')"
       :visible.sync="dialogVisible"
-      width="350px"
+      width="480px"
     >
+      <p class="importDescription">{{ $t('import.description') }}</p>
       <el-upload
         ref="upload"
+        class="importUpload"
         action="x"
+        drag
         :accept="supportFileStr"
         :file-list="fileList"
+        :show-file-list="false"
         :auto-upload="false"
         :multiple="false"
         :on-change="onChange"
-        :on-remove="onRemove"
         :limit="1"
         :on-exceed="onExceed"
       >
-        <el-button slot="trigger" size="small" type="primary">{{
-          $t('import.selectFile')
-        }}</el-button>
-        <div slot="tip" class="el-upload__tip">
-          {{ $t('import.support') }}{{ supportFileStr }}{{ $t('import.file') }}
+        <div class="uploadPrompt">
+          <span class="uploadIcon el-icon-upload" aria-hidden="true"></span>
+          <strong>{{ $t('import.selectFile') }}</strong>
+          <span>{{ $t('import.dropHint') }}</span>
         </div>
       </el-upload>
+      <div class="formatRow">
+        <span>{{ $t('import.supportedFormats') }}</span>
+        <span class="formatTag" v-for="format in ['SMM', 'JSON', 'XMIND', 'MD']" :key="format">{{ format }}</span>
+      </div>
+      <div v-if="fileList.length" class="selectedFile">
+        <span class="selectedFileIcon iconfont iconwenjian1" aria-hidden="true"></span>
+        <div class="selectedFileName">
+          <span>{{ $t('import.selectedFile') }}</span>
+          <strong :title="fileList[0].name">{{ fileList[0].name }}</strong>
+        </div>
+        <button
+          type="button"
+          class="removeFile"
+          :aria-label="$t('import.removeFile')"
+          :title="$t('import.removeFile')"
+          @click="clearSelectedFile"
+        ><span class="el-icon-close" aria-hidden="true"></span></button>
+      </div>
       <span slot="footer" class="dialog-footer">
         <el-button @click="cancel">{{ $t('dialog.cancel') }}</el-button>
-        <el-button type="primary" @click="confirm">{{
-          $t('dialog.confirm')
+        <el-button type="primary" :disabled="!fileList.length" @click="confirm">{{
+          $t('import.startImport')
         }}</el-button>
       </span>
     </el-dialog>
@@ -84,7 +104,7 @@ export default {
   watch: {
     dialogVisible(val, oldVal) {
       if (!val && oldVal) {
-        this.fileList = []
+        this.clearSelectedFile()
       }
     }
   },
@@ -144,15 +164,15 @@ export default {
             this.supportFileStr +
             this.$t('import.file')
         )
-        this.fileList = []
+        this.clearSelectedFile()
       } else {
-        this.fileList.push(file)
+        this.fileList = [file]
       }
     },
 
-    // 移除文件
-    onRemove(file, fileList) {
-      this.fileList = fileList
+    clearSelectedFile() {
+      this.fileList = []
+      if (this.$refs.upload) this.$refs.upload.clearFiles()
     },
 
     // 数量超出限制
@@ -340,6 +360,183 @@ export default {
 
 <style lang="less" scoped>
 .nodeImportDialog {
+  /deep/ .el-dialog {
+    max-width: calc(100vw - 32px);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  /deep/ .el-dialog__header {
+    padding: 24px 24px 0;
+  }
+
+  /deep/ .el-dialog__title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #1f2937;
+  }
+
+  /deep/ .el-dialog__body {
+    padding: 8px 24px 16px;
+  }
+
+  /deep/ .el-dialog__footer {
+    padding: 0 24px 24px;
+  }
+
+  .importDescription {
+    margin: 0 0 20px;
+    color: #64748b;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .importUpload {
+    width: 100%;
+
+    /deep/ .el-upload,
+    /deep/ .el-upload-dragger {
+      width: 100%;
+    }
+
+    /deep/ .el-upload-dragger {
+      height: 160px;
+      border: 1px dashed #b8c8dc;
+      border-radius: 9px;
+      background: #f8fbff;
+      transition: background 0.2s, border-color 0.2s;
+
+      &:hover,
+      &.is-dragover {
+        border-color: #409eff;
+        background: #f1f7ff;
+      }
+    }
+
+    /deep/ .el-upload:focus .el-upload-dragger {
+      outline: 2px solid #409eff;
+      outline-offset: 2px;
+    }
+
+    .uploadPrompt {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      color: #64748b;
+      font-size: 12px;
+
+      .uploadIcon {
+        margin: 0 0 3px;
+        color: #409eff;
+        font-size: 32px;
+        line-height: 1;
+      }
+
+      strong {
+        color: #2563eb;
+        font-size: 14px;
+        font-weight: 600;
+      }
+    }
+  }
+
+  .formatRow {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+    color: #64748b;
+    font-size: 12px;
+
+    > span:first-child {
+      margin-right: 4px;
+    }
+  }
+
+  .formatTag {
+    padding: 3px 7px;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    background: #f8fafc;
+    color: #475569;
+    font-size: 11px;
+    line-height: 1.2;
+  }
+
+  .selectedFile {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 18px;
+    padding: 10px 12px;
+    border: 1px solid #dbeafe;
+    border-radius: 8px;
+    background: #f8fbff;
+  }
+
+  .selectedFileIcon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    background: #e8f2ff;
+    color: #409eff;
+    font-size: 16px;
+    flex: none;
+  }
+
+  .selectedFileName {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+
+    span {
+      color: #64748b;
+      font-size: 11px;
+    }
+
+    strong {
+      overflow: hidden;
+      color: #1f2937;
+      font-size: 13px;
+      font-weight: 500;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  .removeFile {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: #64748b;
+    cursor: pointer;
+    flex: none;
+
+    &:hover {
+      background: #e8f2ff;
+      color: #2563eb;
+    }
+
+    &:focus-visible {
+      outline: 2px solid #409eff;
+      outline-offset: 2px;
+    }
+  }
 }
 
 .canvasList {

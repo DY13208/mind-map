@@ -117,12 +117,20 @@
           <el-dropdown trigger="click" @command="handleCommand">
             <div class="btn el-icon-more" aria-label="更多操作" title="更多操作"></div>
             <el-dropdown-menu slot="dropdown">
+              <el-dropdown-item v-if="!isMobile" command="directory">
+                <span class="iconfont icondakai"></span>
+                {{ $t('toolbar.directory') }}
+              </el-dropdown-item>
+              <el-dropdown-item v-if="!isMobile" command="openFile">
+                <span class="iconfont iconwenjian1"></span>
+                {{ $t('toolbar.openFile') }}
+              </el-dropdown-item>
               <el-dropdown-item
                 v-if="!isReadonly"
                 command="jobHistory"
                 data-testid="run-workbuddy-history"
               >
-                <span class="el-icon-time"></span>
+                <span class="el-icon-tickets"></span>
                 运行历史
               </el-dropdown-item>
               <el-dropdown-item command="shortcutKey">
@@ -175,6 +183,7 @@ import i18n from '@/i18n'
 import { storeLang, getLang } from '@/api'
 import { mapState, mapMutations } from 'vuex'
 import pkg from 'simple-mind-map/package.json'
+import { isMobile } from 'simple-mind-map/src/utils/index'
 import Demonstrate from './Demonstrate.vue'
 
 // 导航器工具栏
@@ -197,7 +206,8 @@ export default {
       langList,
       lang: '',
       openMiniMap: false,
-      toolbarCollapsed: false
+      toolbarCollapsed: false,
+      isMobile: isMobile()
     }
   },
   computed: {
@@ -263,6 +273,14 @@ export default {
     },
 
     handleCommand(command) {
+      if (command === 'directory') {
+        this.$bus.$emit('open_local_directory')
+        return
+      }
+      if (command === 'openFile') {
+        this.$bus.$emit('open_local_file')
+        return
+      }
       if (command === 'jobHistory') {
         this.$bus.$emit('open_workbuddy_job_history')
         return
