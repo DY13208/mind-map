@@ -1272,6 +1272,30 @@ async function main() {
     })
   )
 
+  // ---- 21. 目标会话为空 → 先快速拉一次列表，别一上来就去「起会话」 ----
+  // 2026-09-29 反馈：「点运行之后为什么要等好久才能重新点击」。其中一个原因就是
+  // 页面刚打开、jobGateway 还没加载完时，ensureDispatchTarget 直接去让桥接起会话
+  // （起进程 + 等注册，超时 45s）。多数情况一个 /api/gateways 就挑得到了。
+  vm = makeVm()
+  vm.jobHostKey = HOST.key
+  vm.jobGateways = []
+  vm.jobGateway = ''
+  gatewaysResult = { ok: true, gateways: [{ url: 'http://127.0.0.1:56752' }] }
+  spawnedResult = {
+    ok: true,
+    items: [],
+    count: 0,
+    limit: 5,
+    remaining: 5,
+    canSpawn: true
+  }
+  const ensured = await vm.ensureDispatchTarget()
+  check(
+    '目标为空时先拉一次会话列表就能派（不用去起新会话）',
+    ensured.ok === true && ensured.gateway === 'http://127.0.0.1:56752',
+    JSON.stringify({ ok: ensured.ok, gw: ensured.gateway })
+  )
+
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)
   if (failed.length) {
