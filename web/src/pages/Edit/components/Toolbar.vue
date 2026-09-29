@@ -689,6 +689,29 @@ function normSessionUrl(url) {
 }
 const JOB_RUNNING_STATES = ['working', 'busy', 'active', 'running', 'pending']
 
+/**
+ * 明确表示「已经结束了」的状态。
+ *
+ * 为什么需要它（2026-09-29 实测）：任务里 `alive` 的含义是「这个 run 还挂在会话上」，
+ * 而任务跑完后它**可能仍是 true**（那台旧版桥接回的就是恒 true）。判断在不在跑时
+ * 若把 state 与 alive 用 `||` 连起来，任务就永远显示「执行中」——
+ * 前端也就**永远不触发回写**，用户看到的是「跑完了不回写 / 一直卡在已派发」。
+ * 所以 state 一旦是终态，一律按「跑完了」处理。
+ */
+const JOB_FINISHED_STATES = [
+  'done',
+  'completed',
+  'complete',
+  'success',
+  'succeeded',
+  'failed',
+  'error',
+  'stopped',
+  'canceled',
+  'cancelled',
+  'aborted'
+]
+
 // 工具栏
 let fileHandle = null
 const defaultBtnList = [
@@ -1637,7 +1660,11 @@ export default {
     },
 
     isJobRunning(item) {
-      const state = item.state || item.status || ''
+      const state = String((item && (item.state || item.status)) || '')
+        .trim()
+        .toLowerCase()
+      // 终态优先：别让 alive 把已经结束的任务拖成「执行中」（否则永不回写）
+      if (JOB_FINISHED_STATES.indexOf(state) !== -1) return false
       return JOB_RUNNING_STATES.indexOf(state) !== -1 || item.alive === true
     },
 
@@ -2331,8 +2358,8 @@ export default {
           }
           entry.miss = 0
           const state = cur.state || cur.status || ''
-          const isRunning =
-            JOB_RUNNING_STATES.indexOf(state) !== -1 || cur.alive === true
+          // 与 isJobRunning 同源：终态优先，别让 alive 把跑完的任务一直挂着不回写
+          const isRunning = this.isJobRunning(cur)
           if (isRunning) {
             running += 1
             const detail = String(cur.detail || '').replace(/^result:\s*/i, '')
