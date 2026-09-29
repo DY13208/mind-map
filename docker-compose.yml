@@ -71,6 +71,8 @@ services:
       KNOWLEDGE_COMPILER_ENABLED: ${KNOWLEDGE_COMPILER_ENABLED:-true}
       KNOWLEDGE_SYNC_INTERVAL: ${KNOWLEDGE_SYNC_INTERVAL:-300}
       KNOWLEDGE_OUTPUT_DIR: /app/knowledge
+      # 检查按钮只读查询编译 Wiki；外部网关地址需包含 /wiki-compiler 前缀。
+      CPD_WIKI_API_URL: ${CPD_WIKI_API_URL:-http://wiki-graph:3848}
       # OpenClaw 卷内产物（只读），供预览/下载
       OPENCLAW_DATA_DIR: /openclaw-data
       YIRAN_UPSTREAM: ${YIRAN_UPSTREAM:-http://host.docker.internal:18232}
