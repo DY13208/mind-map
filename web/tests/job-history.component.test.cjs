@@ -789,6 +789,50 @@ async function main() {
   )
   localStore.clear()
 
+  // ---- 11e. 并发：两个任务各写各自的容器 ----
+  // 现场（2026-09-29）：「两个任务同时执行，只会出现一个任务 / 第二个一直卡着 /
+  // 手动点击写回的时候挂载的节点是第一个任务」。根因：prepareJobContainer 里有
+  // 一次 await，落点却写在共享的 this.jobRunNodeUid 上 —— 并发时后一条把它覆盖，
+  // 两条任务于是都指向同一个容器。现在落点由**返回值**带回。
+  const nodeA = makeNode('A 节点', { uid: 'node-a' })
+  const nodeB = makeNode('B 节点', { uid: 'node-b' })
+  const madeBoxes = ['box-A', 'box-B']
+  let boxSeq = 0
+  vm = makeVm()
+  vm.$bus.$emit = (name, payload) => {
+    if (name !== 'create_job_container' || !payload || !payload.result) return
+    const uid = madeBoxes[boxSeq++]
+    payload.result.promise = Promise.resolve({ ok: true, uid, title: uid })
+  }
+  const [boxA, boxB] = await Promise.all([
+    vm.prepareJobContainer('prompt-a', nodeA),
+    vm.prepareJobContainer('prompt-b', nodeB)
+  ])
+  check(
+    '并发准备容器：各自拿到自己的落点',
+    boxA.nodeUid === 'box-A' && boxB.nodeUid === 'box-B',
+    `${boxA.nodeUid} / ${boxB.nodeUid}`
+  )
+  check(
+    '返回的是落点对象（不再靠 true/false + 实例变量传值）',
+    boxA.ok === true && !!boxA.nodeUid && !!boxA.nodeTitle,
+    JSON.stringify(boxA)
+  )
+  check(
+    '建容器失败时明确 ok:false（调用方据此中止）',
+    (await (async () => {
+      let n = 0
+      const vm2 = makeVm()
+      vm2.$bus.$emit = (name, payload) => {
+        if (name !== 'create_job_container' || !payload || !payload.result) return
+        n += 1
+        payload.result.promise = Promise.resolve({ ok: false, error: '炸了' })
+      }
+      const out = await vm2.prepareJobContainer('p', nodeA)
+      return out.ok === false && n === 1
+    })()) === true
+  )
+
   // 拿不到会话列表：报错但别炸
   gatewaysResult = { ok: false, error: '连不上 192.168.1.114:8799 的任务桥' }
   vm = makeVm()
