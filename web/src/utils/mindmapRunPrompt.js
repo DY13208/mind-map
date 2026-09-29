@@ -9,19 +9,20 @@
  */
 
 /**
- * 每次派发都固定带上的第一行 —— 先请 CPD 方法论指导专家介入。
+ * 派发提示词的固定抬头 —— **已按用户要求（2026-09-29）取消**。
  *
- * 页面上的「运行 / 继续执行 / 没选中节点时的兜底」最后都走这个文件的两个
- * builder，所以统一在这里加，别再散落到各个调用处（否则漏一处就少一处）。
+ * 原值 `'【调用CPD 方法论指导专家】'` 是 2026-09-28 的需求（每次执行都带）。
+ * 实测副作用：Agent 为了"调用这个专家"会去翻插件目录找 cpd-guide，白耗十几轮工具调用
+ * （一个 10+10 的任务走了 41 次工具调用）。用户明确说不要这句话了，所以置空。
+ *
+ * 导出与 `withCpdAdvisor` 包装都**保留**（Toolbar 的兜底出口还在调），
+ * 现在等价于透传原文，调用处不用改。
  */
-export const CPD_ADVISOR_LINE = '【调用CPD 方法论指导专家】'
+export const CPD_ADVISOR_LINE = ''
 
-/** 给任意一条要派发的提示词加上固定抬头；已经带过就不重复加 */
+/** 兼容包装：现在就是透传（以前负责在开头加固定抬头） */
 export function withCpdAdvisor(prompt) {
-  const text = String(prompt == null ? '' : prompt).trim()
-  if (!text) return CPD_ADVISOR_LINE
-  if (text.includes(CPD_ADVISOR_LINE)) return text
-  return `${CPD_ADVISOR_LINE}\n${text}`
+  return String(prompt == null ? '' : prompt)
 }
 
 const RESULT_TITLE_RE = /^运行输出\s*[·・:：]/
@@ -393,9 +394,7 @@ export function buildNodeRunPrompt({ node, room = '', cwd = '' } = {}) {
   lines.push(
     '6. **脑图本身不用你写回**：结果放在回答里（或写进 output 目录的文件）就行，' +
       '页面会自动把它写回导图。**不要为了写回脑图去找 MCP / mmclient 之类的工具、' +
-      '也不要自己写脚本调接口**；「调用CPD 专家」若没有现成入口，就用你已掌握的' +
-      ' CPD 方法论直接做，别去翻插件目录找它。' +
-      '这两件事每样都会白耗十几轮工具调用，任务要等好几分钟才出结果。'
+      '也不要自己写脚本调接口** —— 每样都会白耗十几轮工具调用，任务要等好几分钟才出结果。'
   )
   return withCpdAdvisor(lines.join('\n'))
 }
