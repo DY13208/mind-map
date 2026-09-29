@@ -90,6 +90,12 @@ check('原有内容没被顶掉', runPrompt.includes('【脑图流程的一步')
 check('保留节点名', runPrompt.includes('节点：春天短文'))
 check('保留这一步的要求', runPrompt.includes('写一篇 52 字的春天短文'))
 check('保留房间号', runPrompt.includes('房间：room-1'))
+check(
+  '要求「一次做完、不要停下来征求同意」',
+  /一次做完/.test(runPrompt) &&
+    /要我继续吗/.test(runPrompt) &&
+    /写回目标系统/.test(runPrompt)
+)
 
 console.log('--- 继续执行 ---')
 const followPrompt = buildFollowUpPrompt('接着上次往下写', {
@@ -102,6 +108,10 @@ check('第一行也是固定抬头', followLines[0] === LINE, followLines[0])
 check('只出现一次', followPrompt.split(LINE).length - 1 === 1)
 check('用户输入的正文还在最前', followPrompt.includes('接着上次往下写'))
 check('背景块还在', followPrompt.includes('【背景 · 脑图当前节点】'))
+check(
+  '继续执行也要求一次做完、不要停在征求同意',
+  /一次做完/.test(followPrompt) && /征求同意结尾/.test(followPrompt)
+)
 
 console.log('--- Toolbar 的两个兜底出口 ---')
 const toolbar = fs.readFileSync(
