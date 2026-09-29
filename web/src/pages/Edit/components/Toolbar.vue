@@ -675,6 +675,18 @@ function sessionPort(url) {
   const m = /:(\d+)\/?$/.exec(String(url || ''))
   return m ? m[1] : ''
 }
+
+/**
+ * 会话地址归一化：去尾斜杠 + 主机小写，用来跨接口对同一个会话。
+ * 桥接的 /api/gateways 与 /api/sessions/spawned 都回 `http://127.0.0.1:<port>`，
+ * 但一个是回环、一个可能带尾斜杠，字符串直接比会漏。
+ */
+function normSessionUrl(url) {
+  return String(url || '')
+    .trim()
+    .replace(/\/+$/, '')
+    .toLowerCase()
+}
 const JOB_RUNNING_STATES = ['working', 'busy', 'active', 'running', 'pending']
 
 // 工具栏
@@ -1555,14 +1567,51 @@ export default {
       }
       this.jobHistoryLoading = true
       try {
-        const res = await listHostJobs({ host, gateway: this.jobGateway })
-        if (!res.ok) {
-          this.jobHistoryError = res.error || '拿不到运行记录'
+        // 运行历史要**跨会话**看：任务派到哪个会话，就存在那个会话自己的任务列表里
+        // （桥接的 /api/jobs 是实时问会话的 `/api/v1/jobs`）。只问当前选中的那一个，
+        // 换个会话就「之前的记录不见了」（2026-09-29 反馈）。这里把所有会话的都拉回来
+        // 合并，每条自带 gateway，停止与取完整回答照样找得到目标。
+        const gwRes = await listHostGateways(host)
+        const urls = ((gwRes && gwRes.ok && gwRes.gateways) || [])
+          .map(gw => String((gw && gw.url) || ''))
+          .filter(Boolean)
+        if (!urls.length) {
+          this.jobHistory = []
+          this.jobHistoryError =
+            gwRes && !gwRes.ok ? gwRes.error || '拿不到运行记录' : ''
+          return
+        }
+        const batches = await Promise.all(
+          urls.map(url =>
+            listHostJobs({ host, gateway: url }).catch(err => ({
+              ok: false,
+              error: (err && err.message) || '拉取失败'
+            }))
+          )
+        )
+        const seen = new Set()
+        const merged = []
+        batches.forEach((item, index) => {
+          if (!item || !item.ok) return
+          ;(item.jobs || []).forEach(job => {
+            if (!job || typeof job !== 'object') return
+            const id = String(job.id || '')
+            if (id) {
+              if (seen.has(id)) return
+              seen.add(id)
+            }
+            merged.push({ ...job, gateway: job.gateway || urls[index] })
+          })
+        })
+        // 全都没拉到才算错；只要有一个会话答上，就按拿到的显示。
+        // 错误原样透出来 —— 「网关暂时不可用」比一句「拿不到运行记录」有用得多
+        if (!merged.length && batches.every(item => !item || !item.ok)) {
+          const first = batches.find(item => item && item.error)
+          this.jobHistoryError = (first && first.error) || '拿不到运行记录'
           return
         }
         this.jobHistoryError = ''
-        this.jobHistory = (res.jobs || [])
-          .slice()
+        this.jobHistory = merged
           .sort(
             (a, b) =>
               (b.updatedAt || b.startedAt || 0) -
@@ -1936,18 +1985,24 @@ export default {
           this.jobSessionsError = res.error || '拿不到会话列表'
           return
         }
+        const spawned = await this.fetchSpawnedIndex(host)
         const sessions = []
         // 串行查：会话通常个位数，别一波并发把桥接打满
         for (const gw of res.gateways || []) {
           const url = String((gw && gw.url) || '')
+          const pid = Number((gw && (gw.spawnedPid || gw.pid)) || 0) || 0
           const row = {
             url,
             port: sessionPort(url),
             title: (gw && (gw.title || gw.cwd)) || '',
             cwd: (gw && gw.cwd) || '',
-            // 桥接自己起的会话：面板标「自动」并允许回收
-            spawned: !!(gw && gw.spawned),
-            pid: (gw && (gw.spawnedPid || gw.pid)) || 0,
+            // 桥接自己起的会话：面板标「自动」并允许回收。
+            // 老版桥接的 /api/gateways 不带 spawned（远程实测），退回用自动会话清单认。
+            spawned:
+              !!(gw && gw.spawned) ||
+              spawned.index.has(normSessionUrl(url)) ||
+              (pid > 0 && spawned.index.has(pid)),
+            pid,
             running: []
           }
           if (url) {
@@ -1959,15 +2014,48 @@ export default {
           sessions.push(row)
         }
         this.jobSessions = sessions
-        if (typeof this.loadSpawnInfo === 'function') {
-          await this.loadSpawnInfo(host)
-        }
+        // 自动会话额度：上面那次 /api/sessions/spawned 已经带回来了，别再打一遍桥接
+        if (spawned.info) this.jobSpawnInfo = spawned.info
       } catch (err) {
         this.jobSessions = []
         this.jobSessionsError = (err && err.message) || '拿不到会话列表'
       } finally {
         this.jobSessionsLoading = false
       }
+    },
+
+    /**
+     * 拉一次「桥接自动起的会话」清单，产出两样东西：
+     *   · index —— url / pid 的集合，判断某个会话能不能回收
+     *   · info  —— 额度（面板上的「自动 X/5」）
+     *
+     * 为什么需要它（2026-09-29 远程实测）：服务器执行主机上的桥接是 09-28 之前的版本，
+     * `/api/gateways` **没有 spawned 字段**（但 `/api/sessions/spawned` 有，5 个会话都在里面）。
+     * 只认 gw.spawned 的话，「回收」按钮永远不出现 —— 会话攒满 5 个把执行机拖卡，
+     * 而面板里再也收不回去。
+     */
+    async fetchSpawnedIndex(host) {
+      const out = { index: new Set(), info: null }
+      if (typeof listSpawnedSessions !== 'function') return out
+      try {
+        const res = await listSpawnedSessions(host)
+        if (!res || !res.ok) return out
+        ;(res.items || []).forEach(item => {
+          const url = normSessionUrl(item && item.url)
+          if (url) out.index.add(url)
+          const pid = Number((item && item.pid) || 0)
+          if (pid > 0) out.index.add(pid)
+        })
+        out.info = {
+          count: res.count || 0,
+          limit: res.limit || 0,
+          remaining: res.remaining || 0,
+          canSpawn: res.canSpawn !== false
+        }
+      } catch (err) {
+        // 老桥接没这个接口也无妨：按钮退化成只看 gateways 的字段
+      }
+      return out
     },
 
     /** 自动会话额度（面板显示「自动 X/5」，也决定还能不能再起） */
