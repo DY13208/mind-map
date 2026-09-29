@@ -1299,7 +1299,7 @@ export default {
           return
         }
         const { host, gateway } = target
-        this.rememberRunTarget({ reuseContainer: true })
+        const runTarget = this.rememberRunTarget({ reuseContainer: true })
         this.jobStatus = `正在继续执行…（会话 ${this.gatewayShort(gateway)}）`
         this.jobStatusType = 'jobWait'
         const promptText = this.buildFollowUpJobPrompt(prompt)
@@ -1328,8 +1328,8 @@ export default {
         this.jobPendingPrompt = promptText
         this.addPendingJob({
           id: jobId,
-          nodeUid: this.jobRunNodeUid,
-          nodeTitle: this.jobRunNodeTitle
+          nodeUid: runTarget.nodeUid,
+          nodeTitle: runTarget.nodeTitle
         })
         this.jobStatus = `已派发${jobId ? ` · ${jobId}` : ''}${this.pendingSuffix()}`
         this.jobStatusType = 'jobOk'
@@ -1746,43 +1746,64 @@ export default {
         this.jobRunNodeUid = uid
         this.jobRunNodeTitle = this.nodePlainTitle(node)
       }
-      if (!node || !reuseContainer) return
-      const container = lastTaskContainer(node)
-      const containerUid = container && container.getData && container.getData('uid')
-      if (containerUid) {
-        this.jobRunNodeUid = String(containerUid)
-        this.jobRunNodeTitle = this.nodePlainTitle(container)
+      if (node && reuseContainer) {
+        const container = lastTaskContainer(node)
+        const containerUid =
+          container && container.getData && container.getData('uid')
+        if (containerUid) {
+          this.jobRunNodeUid = String(containerUid)
+          this.jobRunNodeTitle = this.nodePlainTitle(container)
+        }
       }
+      // 落点也回传给调用方：并发时不要再去读共享的实例变量
+      return { nodeUid: this.jobRunNodeUid, nodeTitle: this.jobRunNodeTitle }
     },
 
     /**
      * 开跑前先建「任务 · 时间」容器节点：这次的任务内容与结果都挂在它下面，
      * 一次运行一个 —— 运行输出紧跟在任务后面。
      */
+    /**
+     * ⚠️ 落点必须**由返回值带回去**，不能用 this.jobRunNodeUid 传：
+     * 这里有一次 await，两个任务连着点「运行」时会在这里交错，
+     * 共享的实例变量会被后一条覆盖 —— 2026-09-29 的现场就是「两个任务
+     * 只有一个出现 / 手动写回挂到第一个任务」，根因在此。
+     */
     async prepareJobContainer(prompt, wanted = null) {
       const active = (this.activeNodes || [])[0]
       const node = wanted || (active && !active.isGeneralization ? active : null)
-      if (!node) return true
+      if (!node) {
+        return {
+          ok: true,
+          nodeUid: this.jobRunNodeUid,
+          nodeTitle: this.jobRunNodeTitle
+        }
+      }
       const box = { ok: false }
-      this.jobRunNodeUid = String((node.getData && node.getData('uid')) || '')
-      this.jobRunNodeTitle = this.nodePlainTitle(node)
+      const ownerUid = String((node.getData && node.getData('uid')) || '')
+      const ownerTitle = this.nodePlainTitle(node)
+      // 实例变量只留给「当前这一条」做界面显示用，不作为并发时的数据来源
+      this.jobRunNodeUid = ownerUid
+      this.jobRunNodeTitle = ownerTitle
       this.$bus.$emit('create_job_container', {
         result: box,
-        nodeUid: this.jobRunNodeUid,
+        nodeUid: ownerUid,
         prompt
       })
-      if (!box.promise) return false
+      if (!box.promise) return { ok: false, nodeUid: '', nodeTitle: '' }
       const out = await box.promise
       if (!out || out.ok === false) {
         const errText = (out && out.error) || '建任务节点失败'
         this.jobStatus = errText
         this.jobStatusType = 'jobErr'
         this.$message.error(errText)
-        return false
+        return { ok: false, nodeUid: '', nodeTitle: '' }
       }
-      this.jobRunNodeUid = out.uid || this.jobRunNodeUid
-      this.jobRunNodeTitle = out.title || this.jobRunNodeTitle
-      return true
+      return {
+        ok: true,
+        nodeUid: out.uid || ownerUid,
+        nodeTitle: out.title || ownerTitle
+      }
     },
 
     /**
@@ -1933,8 +1954,10 @@ export default {
           prompt = picked.prompt
           continued = picked.continued
         }
-        // 先建「任务 · 时间」容器，这次的任务内容与结果都挂在它下面
-        if (!(await this.prepareJobContainer(prompt, runNode))) return
+        // 先建「任务 · 时间」容器，这次的任务内容与结果都挂在它下面。
+        // 落点从返回值拿 —— 并发时读 this.jobRunNodeUid 会被后一条覆盖
+        const container = await this.prepareJobContainer(prompt, runNode)
+        if (!container.ok) return
         const result = await dispatchWorkbuddyJob({
           host,
           gateway,
@@ -1960,12 +1983,12 @@ export default {
         this.jobPendingPrompt = prompt
         this.addPendingJob({
           id: jobId,
-          nodeUid: this.jobRunNodeUid,
-          nodeTitle: this.jobRunNodeTitle
+          nodeUid: container.nodeUid,
+          nodeTitle: container.nodeTitle
         })
         this.jobStatus = `${continued ? '已派发继续执行' : '已派发'}${
           jobId ? ` · ${jobId}` : ''
-        } · 结果写到「${this.jobRunNodeTitle || '运行节点'}」下${this.pendingSuffix()}`
+        } · 结果写到「${container.nodeTitle || '运行节点'}」下${this.pendingSuffix()}`
         this.jobStatusType = 'jobOk'
         this.$message.success(
           `${continued ? '已按概要继续执行' : '已派发'}${
