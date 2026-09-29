@@ -949,13 +949,13 @@ async function main() {
     JSON.stringify(vm.pickJobGateway([autoRow], ''))
   )
   check(
-    '自动会话但已证实走过 jobs → 照样能用（不搞一刀切）',
+    '自动会话**一律不用**（哪怕它走过 jobs）—— 用户要求停用自动会话',
     (() => {
       const fresh = makeVm()
       fresh.jobHostKey = HOST.key
       fresh.jobSpawnedIndex = new Set([autoRow.url, autoRow.pid])
       fresh.noteReceiptSafe(autoRow.url, 'jobs')
-      return fresh.pickJobGateway([autoRow], '') === autoRow.url
+      return fresh.pickJobGateway([autoRow], '') === ''
     })()
   )
   check(
@@ -1088,8 +1088,8 @@ async function main() {
   vm.jobSpawnedIndex = new Set(['http://127.0.0.1:6980', 6980])
   vm.noteReceiptSafe(autoOk.url, 'jobs')
   check(
-    '自动会话但走过 jobs → 依然优先（别被「自动」标签一律降权）',
-    vm.pickJobGateway([plainUnknown, autoOk], '') === autoOk.url,
+    '自动会话一律排在门外：哪怕它走过 jobs，也优先用普通会话',
+    vm.pickJobGateway([plainUnknown, autoOk], '') === plainUnknown.url,
     vm.pickJobGateway([plainUnknown, autoOk], '')
   )
   vm.noteReceiptSafe('http://127.0.0.1:54418', 'runs')
@@ -1359,8 +1359,8 @@ async function main() {
     { id: 'p1', gateway: busyGw, at: Date.now(), miss: 0 }
   ]
   check(
-    '当前会话上还有我没收回的任务 → 换到闲置的那条（别挤成排队）',
-    vm.pickJobGateway(vm.jobGateways, busyGw, null) === idleGw,
+    '会话忙**不再换会话**（用户要求改成队列串行）—— 仍然用上次那条，任务去排队',
+    vm.pickJobGateway(vm.jobGateways, busyGw, null) === busyGw,
     vm.pickJobGateway(vm.jobGateways, busyGw, null)
   )
   check(
@@ -1413,6 +1413,43 @@ async function main() {
       gateway: 'http://127.0.0.1:50010',
       at: fiveMinAgo
     }) === true
+  )
+
+  // ---- 25. 队列串行：已有任务在跑就入队，跑完自动派下一个 ----
+  // 用户要求（2026-09-29）：「用队列排队执行」。
+  vm = makeVm()
+  vm.jobHostKey = HOST.key
+  vm.jobGateways = [{ url: 'http://127.0.0.1:50001' }]
+  vm.jobGateway = 'http://127.0.0.1:50001'
+  vm.startJobPoll = () => {}
+  vm.jobPendingList = [
+    { id: 'run-1', gateway: 'http://127.0.0.1:50001', at: Date.now(), miss: 0 }
+  ]
+  dispatchResult = { ok: true, job: { id: 'queued-1' }, mode: 'jobs' }
+  vm.enqueueDispatch({
+    host: HOST,
+    gateway: 'http://127.0.0.1:50001',
+    prompt: '写点东西',
+    name: '脑图运行 · 排队',
+    container: { nodeUid: 'box-q', nodeTitle: '排队任务' }
+  })
+  check(
+    '已有任务在路上 → 入队（不并发派发）',
+    (vm.jobQueue || []).length === 1 && vm.jobPendingList.length === 1,
+    String((vm.jobQueue || []).length)
+  )
+  check(
+    '队列落盘（刷新不丢）',
+    String(localStore.get('mindmap:jobQueue') || '').includes('写点东西')
+  )
+  vm.jobPendingList = []
+  await vm.drainJobQueue()
+  check(
+    '前一个跑完 → 自动派下一个，并进待回写列表',
+    (vm.jobQueue || []).length === 0 &&
+      vm.jobPendingList.length === 1 &&
+      vm.jobPendingList[0].id === 'queued-1',
+    JSON.stringify({ q: (vm.jobQueue || []).length, p: vm.jobPendingList.length })
   )
 
   const failed = results.filter(r => !r.ok)
