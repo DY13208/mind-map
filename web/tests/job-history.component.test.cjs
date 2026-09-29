@@ -1,3 +1,5 @@
+/* eslint-env node */
+/* global globalThis */
 /**
  * 运行历史：拉取失败不能清空列表 —— Toolbar 方法级单测。
  *
@@ -15,6 +17,16 @@ const babel = require('@babel/core')
 const compiler = require('vue-template-compiler')
 
 const WEB = path.join(__dirname, '..')
+
+// 待回写任务落盘用：Node 里没有 localStorage，给个最小实现
+const localStore = new Map()
+globalThis.localStorage = {
+  getItem: k => (localStore.has(k) ? localStore.get(k) : null),
+  setItem: (k, v) => localStore.set(k, String(v)),
+  removeItem: k => localStore.delete(k),
+  clear: () => localStore.clear()
+}
+
 const results = []
 function check(name, ok, extra = '') {
   results.push({ name, ok })
@@ -724,6 +736,58 @@ async function main() {
     JSON.stringify(vm.jobHistory.map(j => j.gateway))
   )
   jobsByGateway = {}
+
+  // ---- 11d. 待回写任务跨刷新活下来 ----
+  // 现场（2026-09-29）：「产物没有回填，都要我去 WorkBuddy 说一声」。
+  // 任务其实跑完了、产物也在（桥接 /api/job-artifacts 取得到），
+  // 但用户中途刷新过页面 → 内存里的 jobPendingList 一空 → 再没人轮询 → 永不回写。
+  localStore.clear()
+  vm = makeVm()
+  vm.jobPendingList = [
+    {
+      id: 'p-keep',
+      nodeUid: 'box-p',
+      nodeTitle: '任务 · 10:40',
+      hostKey: HOST.key,
+      gateway: 'http://127.0.0.1:50001'
+    }
+  ]
+  vm.savePendingJobs()
+  const saved = localStore.get('mindmap:pendingJobs')
+  check('待回写任务会落盘', !!saved && /p-keep/.test(saved), String(saved).slice(0, 90))
+
+  // 模拟「刷新页面」：新 vm 什么都不记得
+  vm = makeVm()
+  check('刷新后内存里是空的', (vm.jobPendingList || []).length === 0)
+  const restoredCount = vm.restorePendingJobs()
+  check(
+    '恢复出上次没回写完的任务',
+    restoredCount === 1 && vm.jobPendingList[0].id === 'p-keep',
+    `${restoredCount} / ${JSON.stringify(vm.jobPendingList)}`
+  )
+
+  // 回写完（列表清空）→ 落盘也清掉，别下次又捡回来
+  vm.jobPendingList = []
+  vm.savePendingJobs()
+  check('回写完成后落盘清空', !localStore.get('mindmap:pendingJobs'))
+
+  // 过期的不捡：超过 TTL 的记录直接丢掉，避免僵尸任务一直被轮询
+  localStore.set(
+    'mindmap:pendingJobs',
+    JSON.stringify([
+      {
+        id: 'old',
+        gateway: 'http://127.0.0.1:50001',
+        at: Date.now() - 24 * 3600 * 1000
+      }
+    ])
+  )
+  vm = makeVm()
+  check(
+    '过期任务不恢复',
+    vm.restorePendingJobs() === 0 && (vm.jobPendingList || []).length === 0
+  )
+  localStore.clear()
 
   // 拿不到会话列表：报错但别炸
   gatewaysResult = { ok: false, error: '连不上 192.168.1.114:8799 的任务桥' }
