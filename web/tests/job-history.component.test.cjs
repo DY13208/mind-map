@@ -459,16 +459,94 @@ async function main() {
         .join(',') === 'job-1:box-1,job-2:box-2,job-3:box-3',
     JSON.stringify(multiWrites.map(w => `${w.id}:${w.nodeUid}`))
   )
+
+  check(
+    '全部写回后出队并停止轮询',
+    vm.jobPendingList.length === 0 && vm.jobPollTimer === null,
+    `${vm.jobPendingList.length} / ${vm.jobPollTimer}`
+  )
+
+  // ---- 10b-2. 旧版桥接回 alive:true 但 state 已是 done：必须判定「跑完」并回写 ----
+  // 现场（2026-09-29）：那台执行主机的桥接是旧版，任务其实跑完了，/api/jobs 里
+  // `state=done` 但 `alive` 仍是 true。判断写成 `state在跑 || alive===true` 的话，
+  // 卡片永远停在「已派发，等待该会话的 Agent 回复」，**前端永远不触发回写**。
+  // 现在 state 是终态就一律按跑完处理。
+  jobResponses.length = 0
+  jobsByGateway = {}
+  vm = makeVm()
+  vm.jobPollTimer = 12
+  vm.jobHosts = [HOST]
+  vm.jobHostKey = HOST.key
+  vm.jobGateway = 'http://127.0.0.1:50001'
+  vm.jobPendingList = [
+    {
+      id: 'job-alive',
+      nodeUid: 'box-a',
+      nodeTitle: '任务 · 10:20',
+      hostKey: HOST.key,
+      gateway: 'http://127.0.0.1:50001',
+      miss: 0
+    }
+  ]
+  jobsByGateway['http://127.0.0.1:50001'] = {
+    ok: true,
+    jobs: [{ id: 'job-alive', state: 'done', alive: true, detail: 'result: 好朋友' }]
+  }
+  const aliveWrites = []
+  vm.writeJobResultToNode = async (job, opts) => {
+    aliveWrites.push({ id: job.id, md: opts.markdown })
+  }
+  vm.fetchJobText = async () => '写完了的全文'
+  await vm.pollJob()
+  check(
+    'alive:true 但 state=done → 判定跑完并写回',
+    aliveWrites.length === 1 && aliveWrites[0].md === '写完了的全文',
+    JSON.stringify(aliveWrites)
+  )
+  check(
+    '出队，不再挂成「执行中」',
+    (vm.jobPendingList || []).length === 0,
+    String((vm.jobPendingList || []).length)
+  )
+
+  // ---- 10b-3. 反向保护：state=working 时别被误判成跑完 ----
+  jobsByGateway = {
+    'http://127.0.0.1:50001': {
+      ok: true,
+      jobs: [{ id: 'job-run', state: 'working', alive: true }]
+    }
+  }
+  vm = makeVm()
+  vm.jobPollTimer = 13
+  vm.jobHosts = [HOST]
+  vm.jobHostKey = HOST.key
+  vm.jobGateway = 'http://127.0.0.1:50001'
+  vm.jobPendingList = [
+    {
+      id: 'job-run',
+      nodeUid: 'box-r',
+      nodeTitle: '任务 · 10:21',
+      hostKey: HOST.key,
+      gateway: 'http://127.0.0.1:50001',
+      miss: 0
+    }
+  ]
+  const runWrites = []
+  vm.writeJobResultToNode = async () => {
+    runWrites.push(1)
+  }
+  await vm.pollJob()
+  check(
+    'state=working 且 alive=true 时仍算在跑（不误判）',
+    runWrites.length === 0 && (vm.jobPendingList || []).length === 1,
+    `${runWrites.length} / ${(vm.jobPendingList || []).length}`
+  )
+  jobsByGateway = {}
   check(
     '取全文按条目自己那条会话（job-2 在 50002，不是当前选中的 50001）',
     multiWrites.find(w => w.id === 'job-2').gateway === 'http://127.0.0.1:50002' &&
       multiWrites.find(w => w.id === 'job-2').md === '全文-job-2@http://127.0.0.1:50002',
     JSON.stringify(multiWrites.map(w => w.gateway))
-  )
-  check(
-    '全部写回后出队并停止轮询',
-    vm.jobPendingList.length === 0 && vm.jobPollTimer === null,
-    `${vm.jobPendingList.length} / ${vm.jobPollTimer}`
   )
 
   // ---- 10c. 一条跑完、一条还在跑：只写回完成那条，轮询继续 ----
