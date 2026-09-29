@@ -939,9 +939,19 @@ async function main() {
     vm.pickJobGateway([autoRow, normalRow], autoRow.url)
   )
   check(
-    '只有「自动」会话 → 仍然派给它（总比不派强，结果靠超时兜回）',
-    vm.pickJobGateway([autoRow], '') === autoRow.url,
-    vm.pickJobGateway([autoRow], '')
+    '只有「没被证实能用」的自动会话 → 返回空，不派进去白等（让上层提示开桌面版）',
+    vm.pickJobGateway([autoRow], '') === '',
+    JSON.stringify(vm.pickJobGateway([autoRow], ''))
+  )
+  check(
+    '自动会话但已证实走过 jobs → 照样能用（不搞一刀切）',
+    (() => {
+      const fresh = makeVm()
+      fresh.jobHostKey = HOST.key
+      fresh.jobSpawnedIndex = new Set([autoRow.url, autoRow.pid])
+      fresh.noteReceiptSafe(autoRow.url, 'jobs')
+      return fresh.pickJobGateway([autoRow], '') === autoRow.url
+    })()
   )
   check(
     'isAutoSession：url 口径与 pid 口径都认',
@@ -1094,6 +1104,50 @@ async function main() {
       return fresh.pickJobGateway([autoOk, plainUnknown], plainUnknown.url) ===
         plainUnknown.url
     })()
+  )
+
+  // ---- 19. 任务被派到**别的会话**时，轮询得能在别处找到它 ----
+  // 2026-09-29 反馈：页面上报「任务桥里找不到这条任务（WorkBuddy 或桥接重启过），
+  // 这次没有写回导图」—— 真相是派发目标中途被换过，任务好好跑在另一条会话里，
+  // 而轮询只在 entry.gateway 那一条里找。
+  const moved = []
+  transcriptResult = { ok: true, text: '## 一句话结论\n在别的会话里跑完了' }
+  vm = makeVm()
+  vm.jobHostKey = HOST.key
+  gatewaysResult = {
+    ok: true,
+    gateways: [{ url: 'http://127.0.0.1:50001' }, { url: 'http://127.0.0.1:50002' }]
+  }
+  jobsByGateway = {
+    'http://127.0.0.1:50001': { ok: true, jobs: [] },
+    'http://127.0.0.1:50002': {
+      ok: true,
+      jobs: [
+        { id: 'moved-1', state: 'completed', alive: false, name: '飘走的任务', detail: 'done' }
+      ]
+    }
+  }
+  vm.jobPendingList = [
+    {
+      id: 'moved-1',
+      gateway: 'http://127.0.0.1:50001',
+      hostKey: HOST.key,
+      nodeUid: 'box-m',
+      nodeTitle: '飘了',
+      at: Date.now(),
+      miss: 0
+    }
+  ]
+  vm.writeJobResultToNode = async (job, opts) => {
+    moved.push(opts)
+  }
+  await vm.pollJob()
+  check(
+    '任务在别的会话里也能找到并写回（不再误报「任务记录消失」）',
+    moved.length === 1 &&
+      moved[0].nodeUid === 'box-m' &&
+      vm.jobPendingList.length === 0,
+    JSON.stringify(moved.map(m => m.nodeUid))
   )
 
   const failed = results.filter(r => !r.ok)
