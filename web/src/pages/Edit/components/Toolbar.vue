@@ -3895,6 +3895,18 @@ export default {
 </style>
 
 <style lang="less">
+/**
+ * 轻提示（$message）默认弹在**视口顶部居中**，而「运行」按钮就在顶部工具栏上 ——
+ * 每次派发/失败/重试弹一条就把按钮盖住（2026-09-29 用户反馈：「不要弹出信息挡住运行按钮」）。
+ *
+ * 统一往下挪一截。这里刻意用 `margin-top` 而不是改 `top`：
+ * element-ui 靠给每条消息算 inline `top` 来堆叠，改 top 会把堆叠算坏（多条会叠在一起），
+ * margin 是在其之上再偏移，堆叠不受影响。
+ */
+.el-message {
+  margin-top: 72px;
+}
+
 .collabDiagPopper {
   .collabDiag {
     font-size: 12px;
