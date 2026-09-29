@@ -299,15 +299,14 @@ async function main() {
     }
   }
   const spawned = await vm.ensureDispatchTarget()
+  // 用户要求（2026-09-29）：「不走自动会话、不创建自动会话，反正都不能用」——
+  // 桥接 spawn 的自动会话在旧版 WorkBuddy 上走 runs 回退通道，起了也白起，现在一律不起。
   check(
-    '没有端口时：自动让桥接起一个并选中它（不用再点一次运行）',
-    spawned.ok === true && spawned.gateway === 'http://127.0.0.1:50001',
-    JSON.stringify(spawned)
+    '没有可用会话 → **不再自动起会话**，直接报错',
+    spawned.ok === false && calls.spawn === 0,
+    `${calls.spawn} · ${spawned.error}`
   )
-  check('确实调了起会话', calls.spawn === 1, String(calls.spawn))
-  check('起会话期间状态栏说明了', /起一个|新会话/.test(vm.jobStatus), vm.jobStatus)
-  check('额度同步成 1/5', vm.jobSpawnInfo.count === 1 && vm.jobSpawnInfo.remaining === 4,
-    JSON.stringify(vm.jobSpawnInfo))
+  check('报错里给了能照做的出路', /会话|桌面版/.test(spawned.error), spawned.error)
 
   // ---- 7b. 额度用完了：不再起，直接给能照做的原因 ----
   gatewayResult = { ok: true, gateways: [], diag: null }
@@ -317,8 +316,8 @@ async function main() {
   await vm.prepareLocalTarget()
   const capped = await vm.ensureDispatchTarget()
   check(
-    '额度满了：不起新会话，并说清要先去回收',
-    capped.ok === false && calls.spawn === 0 && /上限|回收/.test(capped.error),
+    '额度满也不起会话',
+    capped.ok === false && calls.spawn === 0,
     `${calls.spawn} · ${capped.error}`
   )
 
@@ -329,9 +328,9 @@ async function main() {
   await vm.prepareLocalTarget()
   const noCli = await vm.ensureDispatchTarget()
   check(
-    '桥接起不了会话：提示用 WORKBUDDY_HOME / WORKBUDDY_CLI 指目录',
-    noCli.ok === false && /WORKBUDDY/.test(noCli.error),
-    noCli.error
+    '桥接起不了会话的场景也一样：不起，给原因',
+    noCli.ok === false && calls.spawn === 0,
+    `${calls.spawn} · ${noCli.error}`
   )
   spawnInfoResult = { ok: true, items: [], count: 0, limit: 5, remaining: 5, canSpawn: true }
   spawnResult = { ok: false, error: '起会话失败（测试占位）' }

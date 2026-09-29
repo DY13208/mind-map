@@ -424,17 +424,15 @@
                 class="jobHint"
                 v-if="!jobSessions.length && !jobSessionsError && !jobSessionsLoading"
               >
-                这台机器上没读到 WorkBuddy 会话（桌面版没开？）
+                这台机器上没读到 WorkBuddy 会话（桌面版没开？自动会话已停用）
+              </p>
+              <p class="jobHint" v-if="(jobQueue || []).length">
+                排队等待派发：{{ (jobQueue || []).length }} 个（按顺序执行，上一个跑完自动派下一个）
               </p>
               <div class="sessFoot">
-                <el-button
-                  type="text"
-                  size="mini"
-                  :loading="jobSpawning"
-                  :disabled="!canSpawnMore"
-                  @click="createSession"
-                  >新建会话</el-button
-                >
+                <!-- 「新建会话」按钮已按用户要求撤掉（2026-09-29）：桥接起的自动会话
+                     在旧版 WorkBuddy 上走 runs 回退通道，任务进不去、状态不更新，
+                     一律不再创建。要加会话请在执行机上打开 WorkBuddy 桌面版。 -->
                 <el-button
                   type="text"
                   size="mini"
@@ -736,6 +734,14 @@ const JOB_RECEIPT_GIVEUP_MS = 6 * 60 * 1000
  */
 const JOB_RUNS_GRACE_MS = 90 * 1000
 
+/**
+ * 派发队列落盘用的 key（用户要求 2026-09-29：「用队列排队执行」）。
+ *
+ * 一条 WorkBuddy 会话同时只跑一个任务，所以派发**串行化**：已经有任务在路上就先入队，
+ * 等它回来再派下一个。存一份在 localStorage，刷新页面也不会把排队中的任务弄丢。
+ */
+const JOB_QUEUE_STORE = 'mindmap:jobQueue'
+
 /** 「这台机器的会话都走回退通道」这句提示，按主机记一次就够（别每次派发都弹） */
 const RUNS_TIP_STORE = 'mindmap:runsTipShown'
 
@@ -832,6 +838,8 @@ export default {
       // ⚠️ 以前这里只存一条，后一个任务会把前一个覆盖掉 —— 前几个跑完了没人写回导图
       //（2026-09-28 的真实故障：连开三个，只有最后一个有产物）。
       jobPendingList: [],
+      // 排队等待派发的任务（串行执行：上一个跑完才轮到下一个）
+      jobQueue: [],
       // 最新那条查不到的次数（状态栏与提示用）
       jobPendingMiss: 0,
       // 一轮轮询没跑完就别再进来（写回要几秒，避免重复处理同一条）
@@ -1197,6 +1205,7 @@ export default {
     // 上次没回写完的任务：捡回来接着轮询（刷新页面不该让任务白跑）
     // 「哪条会话回执收得回」也是跨刷新记住的 —— 挑派发会话要用
     this.restoreReceiptSafe()
+    this.restoreJobQueue()
     const restored = this.restorePendingJobs()
     if (restored) {
       this.prepareLocalTarget()
@@ -1637,31 +1646,22 @@ export default {
       const remembered = this.recallSession(this.jobSelectedHost)
       const safeOf = url =>
         receiptSafeFrom(this.rememberedReceiptSafe, this.jobHostKey, url)
-      // ① 先把「没被证实能用」的自动会话**剔出去** —— 派过去就是进黑洞
-      //    （2026-09-29 实测：服务器那台 WorkBuddy 2.132.0 的自动会话走 runs，
-      //    任务根本跑不起来：sessionId=None、transcript 空、无产物，只能等 4~6 分钟判死）。
-      //    一条都不剩就返回空，让上层给明确提示，而不是硬派。
-      //    ⚠️ 这一步必须和"忙闲扣分"分开算：否则会话都忙时总分被扣成负数，
-      //    会被误判成"没有可用会话"（单测抓出来的）。
-      const usable = rows.filter(
-        item => !(rowIsAuto(item, idx) && safeOf(item.url) !== true)
-      )
+      // ① **不用自动会话**（用户要求 2026-09-29：「不走自动会话、不创建自动会话，反正都不能用」）。
+      //    那类会话（桥接 spawn 的 headless 实例）在旧版 WorkBuddy 上走 runs 回退通道，
+      //    任务进不去、状态不更新，留着只会把任务带进黑洞 —— 直接全部剔除。
+      //    一条可用的都没有就返回空，让上层给明确提示，而不是偷偷起一条新的。
+      const usable = rows.filter(item => !rowIsAuto(item, idx))
       if (!usable.length) return ''
       // ② 在可用会话里挑分最高的：
       //    已知走 jobs（回执收得回）+8 / 未知 +2 / 已知走 runs -6
-      //    这条会话上还有**我没收回的任务** → 扣分：一条 WorkBuddy 会话同时只跑一个任务，
-      //      挤在一起就是串行排队（实测：6 秒内派 4 条，只有第一条按时出结果）。
-      //    上次用的 +3、记住过的 +2 —— **端口稳定这条原则不变**（会话闲置时行为完全不变）。
+      //    上次用的 +3、记住过的 +2 —— **端口稳定这条原则不变**
+      //    （并行不再靠"换一条会话"，而是靠**队列串行**，见 enqueueDispatch）
       const score = item => {
         let s = 0
         const safe = safeOf(item.url)
         if (safe === true) s += 8
         else if (safe === null) s += 2
         else s -= 6
-        const mine = (this.jobPendingList || []).filter(
-          x => x && x.gateway === item.url
-        ).length
-        if (mine > 0) s -= 6 * Math.min(mine, 3)
         if (item.url === previous) s += 3
         else if (item.url === remembered) s += 2
         return s
@@ -1754,9 +1754,8 @@ export default {
      *   很常见，等到了就**直接派出去**，不用用户自己再点一次
      */
     async ensureDispatchTarget() {
-      // 派发前**再评估一次**目标会话：缓存里的 jobGateway 可能是「自动」会话、
-      // 或是后来被证明走 runs 的那条（比如 13:46 那次派完才发现）。
-      // 用户手动点过的那条（pinned）除外 —— 那是他的明确选择，配了 warning 提醒。
+      // 派发前**再评估一次**目标会话：缓存里的 jobGateway 可能是后来被证明走 runs 的、
+      // 或者压根是自动会话（已停用）。用户手动点过的（pinned）除外。
       if (
         this.jobGateway &&
         !this.jobGatewayPinned &&
@@ -1776,10 +1775,7 @@ export default {
           gateway: this.jobGateway
         }
       }
-      // 目标为空时**先快速拉一次会话列表**：多数情况只是页面刚打开、还没加载完，
-      // 一个 /api/gateways 就挑得到了。以前这里直接去「让桥接起一个会话」——
-      // 那是全场最慢的一步（起进程 + 等注册，超时 45s），用户体感就是
-      // 「点运行后按钮好久不能点」（2026-09-29 反馈）。
+      // 目标为空 → 先快速拉一次会话列表：多数情况只是页面刚打开、还没加载完
       if (this.jobSelectedHost && this.jobSelectedHost.online) {
         const quick = await listHostGateways(this.jobSelectedHost).catch(() => null)
         if (quick && quick.ok && (quick.gateways || []).length) {
@@ -1804,39 +1800,9 @@ export default {
           }
         }
       }
-      // 桥接在线但没会话 → 直接**让桥接起一个**（点运行时优先构建会话，最多 5 个）。
-      // 起完就用它派发，不用用户自己去桌面版开一条任务。
-      const cur = this.jobSelectedHost
-      let spawnError = ''
-      if (cur && cur.online) {
-        this.jobStatus = '这台机器上没有可派的会话，正在让桥接起一个…'
-        this.jobStatusType = 'jobWait'
-        const got = await this.autoSpawnSession()
-        if (got.ok) {
-          await this.prepareLocalTarget()
-          // 这次派发就用**刚起的这条**。注意：**不写 rememberSession** ——
-          // 它只服务这一次派发；写进去会被当成「用户选的那条」长期复用，
-          // 把「优先用非自动会话」的挑选逻辑顶掉（2026-09-29 就是这么把任务
-          // 派到自动会话、卡了一整轮的）。
-          const fresh = (got.item && got.item.url) || ''
-          if (fresh && (this.jobGateways || []).some(r => r.url === fresh)) {
-            this.jobGateway = fresh
-            // prepareLocalTarget 会把「没挑到可用会话」写成错误状态（刚起的会话
-            // 还没被证实可用），这里覆盖回来 —— 这次派发就是要用它。
-            this.jobStatus = '已让桥接起了一个新会话，正在派发…'
-            this.jobStatusType = 'jobWait'
-          }
-          if (this.jobSelectedHost && this.jobGateway) {
-            return {
-              ok: true,
-              host: this.jobSelectedHost,
-              gateway: this.jobGateway
-            }
-          }
-        } else {
-          spawnError = got.error || ''
-        }
-      }
+      // 用户要求（2026-09-29）：**不创建自动会话** —— 那类会话（桥接 spawn 的 headless 实例）
+      // 在旧版 WorkBuddy 上走 runs 回退通道，任务进不去、状态不更新，起了也白起。
+      // 没有可用会话就直说，让人自己去桌面版开一条。
       const host = this.jobSelectedHost
       return {
         ok: false,
@@ -1845,10 +1811,9 @@ export default {
           !host || !host.online
             ? this.jobHostsError ||
               '连不上这台机器的任务桥（桥接没在跑？双击 run_bridge.bat 后再点运行）'
-            : spawnError ||
-              this.jobGatewaysError ||
-              '这台机器上没有可派的 WorkBuddy 会话，桥接也没能起新的 —— ' +
-                '打开 WorkBuddy 桌面版（进一个对话）再试'
+            : this.jobGatewaysError ||
+              '这台机器上没有可用的 WorkBuddy 会话（自动会话已停用）—— ' +
+                '请在它上面打开 WorkBuddy 桌面版、进入任意一个对话，再回来点运行。'
       }
     },
 
@@ -2253,6 +2218,22 @@ export default {
         this.jobStatusType = 'jobWait'
         const container = await this.prepareJobContainer(prompt, runNode)
         if (!container.ok) return
+        // —— 队列闸门（用户要求 2026-09-29：「用队列排队执行」）——
+        // 一条 WorkBuddy 会话同时只跑一个任务。已经有任务在路上就先入队，
+        // 等它回来由 drainJobQueue 派下一个；不再并发挤进去，也不再换别的会话。
+        if (this.jobBusyCount() > 0) {
+          this.enqueueDispatch({
+            host,
+            gateway,
+            prompt,
+            name: `脑图运行 · ${this.nodePlainTitle(runNode) || '当前节点'}${
+              continued ? ' · 继续' : ''
+            }`,
+            container,
+            continued
+          })
+          return
+        }
         this.jobStatus = `正在派发…（会话 ${this.gatewayShort(gateway)}）`
         this.jobStatusType = 'jobWait'
         // 派发超时给到 60s（公网页面要走中继：浏览器→服务器→通讯页→执行机→会话，
@@ -2883,6 +2864,119 @@ export default {
       return this.jobSelectedHost
     },
 
+    /** 已经在路上（派出去还没收回）的任务数 —— 队列的"占用"判据 */
+    jobBusyCount() {
+      return (this.jobPendingList || []).length
+    },
+
+    /**
+     * 入队：把"组装好、只差派发"的这条任务排到队尾。
+     *
+     * 用户要求（2026-09-29）：「用队列排队执行」—— 一条 WorkBuddy 会话同时只跑一个任务，
+     * 与其并发挤进去（后几条干等）或换到别的会话（端口乱跳），不如老老实实排队：
+     * 上一个跑完，drainJobQueue 自动派下一个。
+     */
+    enqueueDispatch(item) {
+      if (!item || !item.prompt) return
+      if (!this.jobQueue) this.jobQueue = []
+      this.jobQueue.push({
+        key: `q-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        at: Date.now(),
+        hostKey: (item.host && item.host.key) || this.jobHostKey,
+        gateway: item.gateway || this.jobGateway,
+        prompt: item.prompt,
+        name: item.name || '脑图运行 · 排队',
+        container: item.container || null,
+        continued: !!item.continued
+      })
+      this.saveJobQueue()
+      const ahead = this.jobBusyCount() + (this.jobQueue || []).length - 1
+      this.jobStatus = `已排队，前面还有 ${ahead} 个任务 —— 上一个跑完就轮到它`
+      this.jobStatusType = 'jobWait'
+      this.$message.info(`已排队（前面 ${ahead} 个），会按顺序执行`)
+    },
+
+    /** 有任务回来了 → 从队首取一个派出去（严格串行） */
+    async drainJobQueue() {
+      if (!(this.jobQueue || []).length) return
+      if (this.jobBusyCount() > 0) return
+      const item = this.jobQueue.shift()
+      this.saveJobQueue()
+      if (!item) return
+      const host =
+        (this.jobHosts || []).find(h => h.key === item.hostKey) || this.jobSelectedHost
+      if (!host) {
+        this.$message.error('排队任务没有可用主机，已跳过')
+        return this.drainJobQueue()
+      }
+      try {
+        const res = await dispatchWorkbuddyJob({
+          host,
+          gateway: item.gateway,
+          prompt: item.prompt,
+          name: item.name
+        })
+        if (!res || !res.ok) {
+          const err =
+            res && typeof res.error === 'string' ? res.error : '派发失败'
+          this.jobStatus = `排队任务派发失败：${err}`
+          this.jobStatusType = 'jobErr'
+          this.$message.error(`排队中的任务派发失败：${err}`)
+          return this.drainJobQueue()
+        }
+        const jobId = (res.job && (res.job.id || res.job.jobId)) || ''
+        this.noteReceiptSafe(item.gateway, res.mode)
+        this.addPendingJob({
+          id: jobId,
+          nodeUid: (item.container && item.container.nodeUid) || '',
+          nodeTitle: (item.container && item.container.nodeTitle) || '',
+          hostKey: host.key,
+          gateway: item.gateway,
+          prompt: item.prompt
+        })
+        this.jobStatus = `队列任务已派发（${this.gatewayShort(item.gateway)}）${
+          jobId ? ` · ${jobId}` : ''
+        }${this.pendingSuffix()}`
+        this.jobStatusType = 'jobOk'
+        this.startJobPoll()
+      } catch (err) {
+        this.$message.error(`排队任务派发异常：${(err && err.message) || err}`)
+      }
+    },
+
+    /** 队列落盘：刷新页面不丢排队中的任务 */
+    saveJobQueue() {
+      try {
+        if (typeof localStorage === 'undefined') return
+        const rows = (this.jobQueue || []).filter(x => x && x.prompt)
+        if (!rows.length) {
+          localStorage.removeItem(JOB_QUEUE_STORE)
+          return
+        }
+        localStorage.setItem(JOB_QUEUE_STORE, JSON.stringify(rows.slice(-20)))
+      } catch (err) {
+        /* 存不下不影响主流程 */
+      }
+    },
+
+    /** 页面打开时把排队中的任务捡回来 */
+    restoreJobQueue() {
+      try {
+        if (typeof localStorage === 'undefined') return 0
+        const raw = localStorage.getItem(JOB_QUEUE_STORE)
+        if (!raw) return 0
+        const rows = JSON.parse(raw)
+        if (!Array.isArray(rows)) {
+          localStorage.removeItem(JOB_QUEUE_STORE)
+          return 0
+        }
+        this.jobQueue = rows.filter(x => x && x.prompt)
+        return this.jobQueue.length
+      } catch (err) {
+        return 0
+      }
+    },
+
     /** 记下一条"派出去等结果"的任务，并保证轮询在跑 */
     addPendingJob(entry) {
       if (!entry || !entry.id) return
@@ -3065,7 +3159,14 @@ export default {
           this.jobStatus = `执行中 · ${running} 个在跑`
           this.jobStatusType = 'jobWait'
         }
-        if (!(this.jobPendingList || []).length) this.stopJobPoll()
+        if (!(this.jobPendingList || []).length) {
+          this.stopJobPoll()
+          // 队列里还有排队的 → 派下一个（严格串行执行）
+          if ((this.jobQueue || []).length) {
+            await this.drainJobQueue()
+            if ((this.jobPendingList || []).length) this.startJobPoll()
+          }
+        }
       } finally {
         this.jobPollBusy = false
       }
