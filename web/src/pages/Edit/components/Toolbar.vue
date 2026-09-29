@@ -379,7 +379,7 @@
                 }}</span>
                 <span class="hMeta">{{ jobTimeText(item) }}</span>
               </span>
-              <span class="hState" :class="jobStateClass(item)">{{ jobStateText(item) }}</span>
+              <span class="hState" :class="jobStateClass(item)" :title="item.detail || ''">{{ jobStateText(item) }}</span>
               <el-button
                 v-if="isJobRunning(item)"
                 class="hStop"
@@ -1586,7 +1586,21 @@ export default {
       return JOB_RUNNING_STATES.indexOf(state) !== -1 || item.alive === true
     },
 
+    /**
+     * 排队中的那条：桥接把位置写在 detail（`排队中（第 N 位）：…`），
+     * 但 state 仍是 `working`（对「跑完没」来说它确实没跑完）——
+     * 只认 state 的话列表永远显示「执行中」，用户看不出自己是在排队。
+     */
+    jobQueueText(item) {
+      const matched = String((item && item.detail) || '').match(
+        /排队中（第\s*(\d+)\s*位）/
+      )
+      return matched ? `排队中（第 ${matched[1]} 位）` : ''
+    },
+
     jobStateText(item) {
+      const queued = this.jobQueueText(item)
+      if (queued) return queued
       const state = item.state || item.status || '?'
       const map = {
         done: '已完成',
@@ -1611,6 +1625,8 @@ export default {
     },
 
     jobStateClass(item) {
+      // 排队的 state 是 working，但配色该跟「执行中」区分开（.s-pending 已有样式）
+      if (this.jobQueueText(item)) return 's-pending'
       const state = item.state || item.status || ''
       return 's-' + (state || 'unknown')
     },
