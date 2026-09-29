@@ -701,6 +701,80 @@ async function loadSnapshot(roomKey) {
   return loadMap(roomKey)
 }
 
+async function loadCheckSnapshot(roomKey, nodeUid) {
+  const loaded = await loadSnapshot(roomKey)
+  if (!loaded) throw Object.assign(new Error('脑图不存在'), { statusCode: 404, code: 'ROOM_NOT_FOUND' })
+  const nodes = loaded.obj
+  if (!nodes[nodeUid]) throw Object.assign(new Error('当前节点不存在'), { statusCode: 404, code: 'NODE_NOT_FOUND' })
+  const snapshot = { roomKey, nodes, mapVersion: Number((loaded.row && loaded.row.version) || 0) }
+  const resolved = require('./checkRuns').resolveCheckChain(snapshot, nodeUid)
+  const scoped = new Set([nodeUid])
+  const addScope = item => {
+    if (!item) return
+    for (const uid of item.nodeUids || []) scoped.add(uid)
+  }
+  addScope(resolved.chain)
+  for (const item of resolved.candidates || []) addScope(item)
+  const attachmentIds = new Set()
+  const attachmentNodeBindings = new Map()
+  const bindAttachment = (id, uid) => {
+    const key = String(id)
+    attachmentIds.add(key)
+    if (!attachmentNodeBindings.has(key)) attachmentNodeBindings.set(key, uid)
+  }
+  for (const uid of scoped) {
+    const data = (nodes[uid] && nodes[uid].data) || {}
+    if (data.attachmentId) bindAttachment(data.attachmentId, uid)
+    for (const item of Array.isArray(data.attachments) ? data.attachments : []) {
+      if (item && (item.id || item.attachmentId)) bindAttachment(item.id || item.attachmentId, uid)
+    }
+  }
+  const result = await getPool().query(
+    `with scoped_attachments as (
+       select id, node_uid, file_name, content_hash, status, updated_at,
+              extracted_text, char_length(extracted_text) as total_chars
+       from node_attachments where room_key = $1
+         and (node_uid = any($2::text[]) or id = any($3::text[]))
+       order by id limit 501
+     ), budgeted as (
+       select *, greatest(0, 400001 - coalesce(
+         sum(least(total_chars, 200001)) over (
+           order by id rows between unbounded preceding and 1 preceding
+         ), 0)) as remaining from scoped_attachments
+     ) select id, node_uid, file_name, content_hash, status, updated_at, total_chars,
+              substr(extracted_text, 1, least(200001, remaining)::integer) as content,
+              least(total_chars, 200001, remaining) as read_chars
+       from budgeted order by id`, [roomKey, [...scoped], [...attachmentIds]]
+  )
+  snapshot.sources = result.rows.slice(0, 500).map(row => {
+    // A deduplicated attachment may retain its first uploader's node_uid.
+    // Bind it to the inspected node which actually references that attachment.
+    const boundUid = !scoped.has(row.node_uid) && attachmentNodeBindings.has(row.id)
+      ? attachmentNodeBindings.get(row.id) : row.node_uid
+    return require('./cpdCheckHttp').attachmentSource(row, roomKey, boundUid)
+  })
+  if (result.rows.length > 500) snapshot.sources.push({
+    sourceRef: { type: 'attachment_limit', roomKey }, status: 'incomplete', complete: false,
+    truncated: true, content: '', title: '链路附件超过单次检查上限', version: String(result.rows.length)
+  })
+  else {
+    const foundIds = new Set(result.rows.map(row => row.id))
+    for (const id of attachmentIds) {
+      if (!foundIds.has(id)) snapshot.sources.push({
+        nodeUid: attachmentNodeBindings.get(id),
+        sourceRef: { type: 'attachment', roomKey, id, nodeUid: attachmentNodeBindings.get(id) },
+        status: 'not_found', complete: false, truncated: false, content: '', version: 'unavailable',
+        title: '当前脑图中无法读取此附件'
+      })
+    }
+  }
+  return snapshot
+}
+
+const handleCheckHttp = require('./cpdCheckHttp').createCheckHttp({
+  getPool, loadSnapshot: loadCheckSnapshot, readBody, sendJson, roomAcl, assertRateLimit
+})
+
 function mapTitle(obj, row) {
   if (row && row.title) {
     return mindDoc.stripHtml(row.title) || '未命名'
@@ -1331,6 +1405,8 @@ async function handleApi(req, res) {
       return true
     }
   }
+
+  if (await handleCheckHttp(req, res, { url, pathname })) return true
 
   if (
     await require('./fileSystem').handleFileSystemApi(req, res, { url, pathname })

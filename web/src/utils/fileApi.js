@@ -5,6 +5,7 @@ import { collabTrace, collabPersistSnapshot } from 'simple-mind-map/src/utils/co
 import { stringifyJsonOffMainThread } from '@/utils/importTree'
 
 const DEFAULT_TIMEOUT_MS = 20000
+const CPD_CHECK_TIMEOUT_MS = 120000
 const SUBTREE_TIMEOUT_MS = 12000
 const MAX_API_INFLIGHT = 2
 const REPLACE_TIMEOUT_MIN_MS = 120000
@@ -162,7 +163,8 @@ async function request(path, options = {}) {
           ...clientHeaders(options.headers || {})
         },
         method: options.method,
-        body: options.body
+        body: options.body,
+        signal: options.signal
       },
       timeoutMs
     )
@@ -285,6 +287,70 @@ export function authorizeSopRun(roomKey, uid = '') {
       body: JSON.stringify({ uid: uid || undefined })
     }
   )
+}
+
+function cpdChecksPath(roomKey, suffix = '') {
+  return `/api/files/${encodeURIComponent(roomKey)}/cpd-checks${suffix}`
+}
+
+/** Create a read-only CPD check run for one selected node. */
+export function createCpdCheckRun(roomKey, { nodeUid, requestId, signal, mode } = {}) {
+  return request(cpdChecksPath(roomKey), {
+    method: 'POST',
+    timeoutMs: CPD_CHECK_TIMEOUT_MS,
+    signal,
+    body: JSON.stringify({ nodeUid, requestId, mode })
+  })
+}
+
+/** List persisted CPD check runs for the selected node. */
+export function listCpdCheckRuns(roomKey, nodeUid, { signal } = {}) {
+  const query = new URLSearchParams()
+  if (nodeUid) query.set('nodeUid', String(nodeUid))
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  return request(cpdChecksPath(roomKey, suffix), { signal })
+}
+
+/** Load one persisted CPD check report. */
+export function getCpdCheckRun(roomKey, checkRunId, { signal } = {}) {
+  return request(
+    cpdChecksPath(roomKey, `/${encodeURIComponent(checkRunId)}`),
+    { signal, timeoutMs: CPD_CHECK_TIMEOUT_MS }
+  )
+}
+
+/** Confirm the user-selected candidate process and continue the same check. */
+export function confirmCpdCheckCandidate(
+  roomKey,
+  checkRunId,
+  candidateId,
+  { signal } = {}
+) {
+  return request(
+    cpdChecksPath(roomKey, `/${encodeURIComponent(checkRunId)}/confirm`),
+    {
+      method: 'POST',
+      timeoutMs: CPD_CHECK_TIMEOUT_MS,
+      signal,
+      body: JSON.stringify({ candidateId })
+    }
+  )
+}
+
+export function submitCpdCheckReview(roomKey, checkRunId, body, { signal } = {}) {
+  return request(cpdChecksPath(roomKey, `/${encodeURIComponent(checkRunId)}/reviews`), {
+    method: 'POST', timeoutMs: CPD_CHECK_TIMEOUT_MS, signal, body: JSON.stringify(body || {})
+  })
+}
+
+export function getCpdCheckSource(roomKey, checkRunId, sourceId, { signal } = {}) {
+  return request(cpdChecksPath(roomKey, `/${encodeURIComponent(checkRunId)}/sources/${encodeURIComponent(sourceId)}`), { signal, timeoutMs: CPD_CHECK_TIMEOUT_MS })
+}
+
+export function retryCpdCheckSource(roomKey, checkRunId, sourceId, body, { signal } = {}) {
+  return request(cpdChecksPath(roomKey, `/${encodeURIComponent(checkRunId)}/sources/${encodeURIComponent(sourceId)}/retry`), {
+    method: 'POST', timeoutMs: CPD_CHECK_TIMEOUT_MS, signal, body: JSON.stringify(body || {})
+  })
 }
 
 export function createFile(body = {}) {

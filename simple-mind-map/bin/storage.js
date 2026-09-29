@@ -1784,6 +1784,7 @@ async function initSchemaOnce() {
   await teamSpace.initSchema(pool)
   const nodeKnowledge = require('./nodeKnowledge')
   await nodeKnowledge.initSchema(pool)
+  await require('./checkRuns/store').initSchema(pool)
   const trashed = await pool.query(
     `select room_key from rooms where deleted_at is not null`
   )
