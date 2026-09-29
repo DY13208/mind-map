@@ -1648,38 +1648,46 @@ export default {
       if (!rows.length) return ''
       const idx = spawnedIndex || this.jobSpawnedIndex
       const remembered = this.recallSession(this.jobSelectedHost)
-      // 打分挑一条，判据按可靠性从高到低：
-      //   ① **已知走 jobs、回执收得回** 的会话（最高，最可信）
-      //   ② 还不知道的普通会话（中性）
-      //   ③ **已知走 runs** 的（最低，直接避掉）
-      //   ④ 「自动」会话：**只有已知走过 jobs 的才放行**。未知的一律重罚 ——
-      //      2026-09-29 实测：服务器那台（WorkBuddy 2.132.0）的自动会话走 runs，
-      //      任务**根本跑不起来**（sessionId=None、transcript 空、无产物），
-      //      只能等 4~6 分钟判死。宁可拦住并让人去桌面版开一条，也别派进黑洞。
-      //   ⑤ 上次用的 / 记住过的那条加分 —— **端口稳定这条原则不变**
+      const safeOf = url =>
+        receiptSafeFrom(this.rememberedReceiptSafe, this.jobHostKey, url)
+      // ① 先把「没被证实能用」的自动会话**剔出去** —— 派过去就是进黑洞
+      //    （2026-09-29 实测：服务器那台 WorkBuddy 2.132.0 的自动会话走 runs，
+      //    任务根本跑不起来：sessionId=None、transcript 空、无产物，只能等 4~6 分钟判死）。
+      //    一条都不剩就返回空，让上层给明确提示，而不是硬派。
+      //    ⚠️ 这一步必须和"忙闲扣分"分开算：否则会话都忙时总分被扣成负数，
+      //    会被误判成"没有可用会话"（单测抓出来的）。
+      const usable = rows.filter(
+        item => !(rowIsAuto(item, idx) && safeOf(item.url) !== true)
+      )
+      if (!usable.length) return ''
+      // ② 在可用会话里挑分最高的：
+      //    已知走 jobs（回执收得回）+8 / 未知 +2 / 已知走 runs -6
+      //    这条会话上还有**我没收回的任务** → 扣分：一条 WorkBuddy 会话同时只跑一个任务，
+      //      挤在一起就是串行排队（实测：6 秒内派 4 条，只有第一条按时出结果）。
+      //    上次用的 +3、记住过的 +2 —— **端口稳定这条原则不变**（会话闲置时行为完全不变）。
       const score = item => {
         let s = 0
-        const safe = receiptSafeFrom(this.rememberedReceiptSafe, this.jobHostKey, item.url)
+        const safe = safeOf(item.url)
         if (safe === true) s += 8
         else if (safe === null) s += 2
         else s -= 6
-        if (rowIsAuto(item, idx) && safe !== true) s -= 10
+        const mine = (this.jobPendingList || []).filter(
+          x => x && x.gateway === item.url
+        ).length
+        if (mine > 0) s -= 6 * Math.min(mine, 3)
         if (item.url === previous) s += 3
         else if (item.url === remembered) s += 2
         return s
       }
-      let best = rows[0]
+      let best = usable[0]
       let bestScore = null
-      rows.forEach(item => {
+      usable.forEach(item => {
         const s = score(item)
         if (bestScore === null || s > bestScore) {
           bestScore = s
           best = item
         }
       })
-      // 只剩下「没被证实能用」的自动会话 → 返回空，让上层给明确提示，
-      // 别把任务派进去白等 4~6 分钟（那正是用户看到的「一直卡着」）。
-      if (bestScore !== null && bestScore < 0) return ''
       return best.url
     },
 

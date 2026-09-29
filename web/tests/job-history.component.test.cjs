@@ -1347,6 +1347,46 @@ async function main() {
     })
   )
 
+  // ---- 23. 并发派发自动分流：别都挤在一条会话上排队 ----
+  // 2026-09-29 实测：6 秒内派 4 条任务到同一条会话 → 只有第一条按时出结果，
+  // 其余干等（一条 WorkBuddy 会话同时只跑一个任务）。
+  vm = makeVm()
+  vm.jobHostKey = HOST.key
+  const busyGw = 'http://127.0.0.1:50001'
+  const idleGw = 'http://127.0.0.1:50002'
+  vm.jobGateways = [{ url: busyGw }, { url: idleGw }]
+  vm.jobPendingList = [
+    { id: 'p1', gateway: busyGw, at: Date.now(), miss: 0 }
+  ]
+  check(
+    '当前会话上还有我没收回的任务 → 换到闲置的那条（别挤成排队）',
+    vm.pickJobGateway(vm.jobGateways, busyGw, null) === idleGw,
+    vm.pickJobGateway(vm.jobGateways, busyGw, null)
+  )
+  check(
+    '会话闲置时行为完全不变：仍然用它（端口稳定原则不破）',
+    (() => {
+      const fresh = makeVm()
+      fresh.jobHostKey = HOST.key
+      fresh.jobGateways = [{ url: busyGw }, { url: idleGw }]
+      fresh.jobPendingList = []
+      return fresh.pickJobGateway(fresh.jobGateways, busyGw, null) === busyGw
+    })()
+  )
+  check(
+    '所有会话都忙 → 还是用上次那条（不乱跳）',
+    (() => {
+      const fresh = makeVm()
+      fresh.jobHostKey = HOST.key
+      fresh.jobGateways = [{ url: busyGw }, { url: idleGw }]
+      fresh.jobPendingList = [
+        { id: 'p1', gateway: busyGw, at: Date.now(), miss: 0 },
+        { id: 'p2', gateway: idleGw, at: Date.now(), miss: 0 }
+      ]
+      return fresh.pickJobGateway(fresh.jobGateways, busyGw, null) === busyGw
+    })()
+  )
+
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)
   if (failed.length) {
