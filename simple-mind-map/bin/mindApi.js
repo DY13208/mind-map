@@ -4,6 +4,11 @@ const path = require('path')
 const Y = require('yjs')
 const mindDoc = require('./mindDoc')
 const { queryLegacyNodes } = require('./nodeQuery')
+const {
+  deliverRoomExport,
+  readExportPage,
+  snapshotExpectedCount
+} = require('./exportRoomTree')
 const { applyNodeCommand, dataFields } = require('./roomCommands')
 const roomAcl = require('./roomAcl')
 const accessRequests = require('./accessRequests')
@@ -1985,6 +1990,63 @@ async function handleApi(req, res) {
         error: err.message || 'bad request',
         code: err.code || 'ACL_ERROR'
       })
+      return true
+    }
+  }
+
+  const exportTreeMatch = pathname.match(/^\/api\/files\/([^/]+)\/export-tree$/)
+  if (exportTreeMatch) {
+    const roomKey = decodeURIComponent(exportTreeMatch[1])
+    if (req.method === 'GET') {
+      try {
+        const page = readExportPage({
+          roomKey,
+          revision: url.searchParams.get('revision'),
+          offset: url.searchParams.get('offset'),
+          limit: url.searchParams.get('limit'),
+          format: url.searchParams.get('format')
+        })
+        sendJson(res, 200, page)
+      } catch (err) {
+        sendJson(res, err.statusCode || (err.code === 'EXPORT_NOT_FOUND' ? 404 : 500), {
+          error: err.message || 'export read failed',
+          code: err.code || 'EXPORT_READ_ERROR'
+        })
+      }
+      return true
+    }
+    if (req.method === 'POST') {
+      try {
+        const rawBody = await readBody(req)
+        const body =
+          rawBody && typeof rawBody === 'object' && !Array.isArray(rawBody)
+            ? rawBody
+            : {}
+        const snapshot = await getRoomSnapshot(roomKey)
+        if (!snapshot) {
+          sendJson(res, 404, { error: 'not found', code: 'ROOM_NOT_FOUND' })
+          return true
+        }
+        const graph =
+          snapshot.nodes && typeof snapshot.nodes === 'object' ? snapshot.nodes : {}
+        const payload = deliverRoomExport({
+          roomKey,
+          title: snapshot.title || '',
+          revision: snapshot.version,
+          nodes: graph,
+          treeSource: snapshot.treeSource || 'rooms.nodes',
+          expectedNodeCount: snapshotExpectedCount(snapshot, graph),
+          include_notes: body.include_notes,
+          include_references: body.include_references,
+          format: body.format
+        })
+        sendJson(res, 200, payload)
+      } catch (err) {
+        sendJson(res, err.statusCode || 500, {
+          error: err.message || 'export failed',
+          code: err.code || 'EXPORT_ERROR'
+        })
+      }
       return true
     }
   }
