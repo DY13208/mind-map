@@ -226,6 +226,9 @@ def split_cmdline(cmd):
 # 起来后它自己写 ~/.workbuddy/sessions/<pid>.json（带 url），桥接就能派任务进去。
 # 实测（2026-09-28）：注册 ✓ / netstat LISTENING ✓ / /api/gateways 能看到 ✓ / 派发 ok:true ✓
 MAX_SPAWNED_SESSIONS = 5
+# 模板打分低于这个值就别闷头起会话（见 _template_score）：说明这台机器上没有
+# 「参数完整」的会话可克隆，起出来的会缺 --settings/--model，取不回结果。
+TEMPLATE_MIN_SCORE = 5
 SPAWN_STATE_PATH = os.path.join(WORKBUDDY_DIR, "bridge-spawned-sessions.json")
 SPAWN_READY_TIMEOUT_S = 60
 # 能从现有会话照搬的参数；--serve/--port/--session-id/--prewarm 这些不能复用故跳过
@@ -271,6 +274,29 @@ def _guess_install():
     return "", ""
 
 
+def _template_score(tail, pid=None, auto_pids=()):
+    """给一个会话进程的启动参数打分 —— 越高越适合当 spawn 的模板。
+
+    权重按"少了它新会话就干不了活"排：`--settings` 最重（模型/插件/沙箱都在里面），
+    其次 `--model`、`--tools`；`--prewarm` 是预热进程（不是 serve）直接扣到底。
+    """
+    if not tail:
+        return -1
+    score = 0
+    if "--prewarm" in tail:
+        score -= 20
+    if "--serve" in tail:
+        score += 1
+    for weight, flag in ((6, "--settings"), (5, "--model"), (3, "--tools"),
+                         (3, "--allowedTools"), (2, "--mcp-config")):
+        if flag in tail:
+            score += weight
+    # 桥接自己 spawn 的会话参数可能本身就是精简版，别拿它当模板（否则一直自我克隆）
+    if pid and str(pid) in set(auto_pids or ()):
+        score -= 3
+    return score
+
+
 def _cloneable_flags(tail):
     """挑出能照搬到新会话的启动参数。"""
     out = []
@@ -308,26 +334,48 @@ def _set_flag(flags, name, value):
 
 
 def cli_template():
-    """克隆一份启动参数：优先取正在跑的会话进程，其次找安装目录。
+    """克隆一份启动参数：挑**参数最完整**的那个会话当模板，其次找安装目录。
 
     返回 {"exe","cli","flags","from"}；拿不到 cli 时返回 None。
+
+    ⚠️ 为什么不能"取第一个"（2026-09-29 本机实测四类进程）：
+    会话列表是按**心跳新鲜度**排的，排最前的往往是刚干过活的那条 —— 于是经常拿到
+      · `--prewarm` 预热进程：压根不是 serve，一个可克隆参数都没有（实测 pid 23880）
+      · 或桥接自己 spawn 的精简会话（实测 pid 6980，只有
+        `--serve --port --host --session-id --permission-mode`）
+    克隆出来的新会话就"光秃秃"跑起来 —— **缺 `--settings`**（模型/插件/沙箱都在里面）、
+    缺 `--model`、缺 `--tools`，表现就是**能接活却不产出/不落回执**。
+    相对的，桌面版真会话长这样（实测 pid 35792）：
+      `--serve --session-id … --permission-mode fullAccess --allowedTools … --model … --tools … --settings "{…}"`
+    所以这里改成按"参数完整度"打分选最优，而不是谁排在前面就用谁。
     """
     now = time.time()
     cache = _cli_template_cache
     if cache["probed"] and now - cache["at"] < 60:
         return cache["value"]
+    try:
+        auto_pids = {str(it.get("pid")) for it in spawned_sessions()}
+    except Exception:
+        auto_pids = set()
     found = None
+    best_score = None
     for session in list_live_sessions():
         parts = split_cmdline(_process_cmdline(session.get("pid")))
         if len(parts) < 2 or not os.path.isfile(parts[1]):
             continue
+        tail = parts[2:]
+        score = _template_score(tail, session.get("pid"), auto_pids)
+        if best_score is not None and score <= best_score:
+            continue
+        best_score = score
         found = {"exe": parts[0], "cli": parts[1],
-                 "flags": _cloneable_flags(parts[2:]), "from": session.get("pid")}
-        break
+                 "flags": _cloneable_flags(tail), "from": session.get("pid"),
+                 "score": score}
     if not found:
         exe, cli = _guess_install()
         if cli:
-            found = {"exe": exe or cli, "cli": cli, "flags": [], "from": None}
+            found = {"exe": exe or cli, "cli": cli, "flags": [], "from": None,
+                     "score": 0}
     override_cli = os.environ.get("WORKBUDDY_CLI") or ""
     if override_cli and os.path.isfile(override_cli):
         found = {"exe": os.environ.get("WORKBUDDY_EXE") or override_cli,
@@ -419,6 +467,14 @@ def spawn_session(cwd="", model="", permission_mode="fullAccess", count=1):
                 "spawned": [], "items": [],
                 "error": "找不到 WorkBuddy 的 codebuddy（用 WORKBUDDY_HOME / "
                          "WORKBUDDY_CLI 指定安装目录）"}
+    # 模板太差就别闷头起：新会话会缺 --settings/--model，能接活却取不回结果
+    template_warning = ""
+    if int(tpl.get("score") or 0) < TEMPLATE_MIN_SCORE:
+        template_warning = (
+            "这台机器上没有找到「参数完整」的 WorkBuddy 会话（克隆模板里缺 --settings / --model，"
+            "当前打分 %s）—— 这样起出来的会话能接活、但可能取不回结果。"
+            "建议先在它上面打开 WorkBuddy 桌面版并进入任意一个对话，再点运行。"
+            % (tpl.get("score"),))
     work_cwd = (cwd or "").strip() or latest_workspace_cwd() or WORKBUDDY_DIR
     if not os.path.isdir(work_cwd):
         work_cwd = WORKBUDDY_DIR
@@ -488,6 +544,7 @@ def spawn_session(cwd="", model="", permission_mode="fullAccess", count=1):
             "count": total, "limit": MAX_SPAWNED_SESSIONS,
             "remaining": max(0, MAX_SPAWNED_SESSIONS - total),
             "errors": errors,
+            "warning": template_warning,
             "error": "" if items else (errors[0] if errors else "没起来")}
 
 
@@ -2298,6 +2355,9 @@ class Handler(BaseHTTPRequestHandler):
                 "remaining": max(0, MAX_SPAWNED_SESSIONS - len(items)),
                 "canSpawn": bool(tpl and tpl.get("cli")),
                 "templateFrom": (tpl or {}).get("from"),
+                # 模板打分：低于 TEMPLATE_MIN_SCORE 说明这台机器上没有「参数完整」的
+                # 会话可克隆，新起的会话会缺 --settings/--model（取不回结果）
+                "templateScore": (tpl or {}).get("score"),
             })
 
         if self.path.startswith("/api/jobs"):

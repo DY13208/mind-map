@@ -889,6 +889,13 @@ function shapeJobResult(res, target) {
       job: json.job || {},
       gatewayCwd: json.gatewayCwd || '',
       taskTitle: json.taskTitle || '',
+      // 桥接派发时走的接口：'jobs'（POST /api/v1/jobs，台账完整、回执收得回）
+      // 还是 'runs'（404 后的回退路径 —— 那条会话不支持 Jobs 接口，
+      // run 状态不更新，前端永远判不出终态、取不回结果）。
+      // 2026-09-29 实测：本机 WorkBuddy 2.137.1 的会话走 jobs；服务器 2.132.0
+      // 起的 headless 会话只走 runs，就卡在「已派发」。
+      mode: json.mode || '',
+      warning: json.warning || '',
       via: 'direct'
     }
   }
