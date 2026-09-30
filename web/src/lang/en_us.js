@@ -46,6 +46,7 @@ export default {
   },
   setting: {
     title: 'Setting',
+    compactLayout: 'Compact arrangement (logical structure)',
     openPerformance: 'Enable performance mode',
     enableFreeDrag: 'Enable node free drag(Beta)',
     isEnableNodeRichText: 'Enable node rich text editing',

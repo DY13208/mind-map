@@ -2,13 +2,16 @@ import { Rect } from '@svgdotjs/svg.js'
 
 // 初始化拖拽
 function initDragHandle() {
-  if (!this.checkEnableDragModifyNodeWidth()) {
+  if (!this.mindMap.opt.enableDragModifyNodeWidth || this._dragHandleInitialized) {
     return
   }
+  this._dragHandleInitialized = true
   // 拖拽手柄元素
   this._dragHandleNodes = null
-  // 手柄元素的宽度
-  this.dragHandleWidth = 4
+  this._dragHandleMarks = null
+  // 选中后显示在节点上方两角的宽度拖拽手柄
+  this.dragHandleWidth = 6
+  this.dragHandleHitWidth = 14
   // 鼠标按下时的x坐标
   this.dragHandleMousedownX = 0
   // 鼠标是否处于按下状态
@@ -27,10 +30,7 @@ function initDragHandle() {
   this.dragHandleLayoutFrame = null
 
   this.onDragMousemoveHandle = this.onDragMousemoveHandle.bind(this)
-  window.addEventListener('mousemove', this.onDragMousemoveHandle)
   this.onDragMouseupHandle = this.onDragMouseupHandle.bind(this)
-  window.addEventListener('mouseup', this.onDragMouseupHandle)
-  this.mindMap.on('node_mouseup', this.onDragMouseupHandle)
 }
 
 // 鼠标移动事件
@@ -89,6 +89,9 @@ function onDragMousemoveHandle(e) {
 // 鼠标松开事件
 function onDragMouseupHandle() {
   if (!this.isDragHandleMousedown) return
+  window.removeEventListener('mousemove', this.onDragMousemoveHandle, true)
+  window.removeEventListener('mouseup', this.onDragMouseupHandle, true)
+  window.removeEventListener('blur', this.onDragMouseupHandle)
   if (this.dragHandleLayoutFrame !== null) {
     cancelAnimationFrame(this.dragHandleLayoutFrame)
     this.dragHandleLayoutFrame = null
@@ -111,16 +114,24 @@ function onDragMouseupHandle() {
 // 插件拖拽手柄元素
 function createDragHandleNode() {
   const list = [new Rect(), new Rect()]
+  this._dragHandleMarks = [new Rect(), new Rect()]
   list.forEach((node, index) => {
     node
-      .size(this.dragHandleWidth, this.height)
+      .size(this.dragHandleHitWidth, this.dragHandleHitWidth)
       .fill({
         color: 'transparent'
       })
       .css({
         cursor: 'ew-resize'
       })
+    this._dragHandleMarks[index]
+      .size(this.dragHandleWidth, this.dragHandleWidth)
+      .fill({ color: '#fff' })
+      .stroke({ color: '#409eff', width: 1 })
+      .radius(1)
+      .attr('pointer-events', 'none')
     node.on('mousedown', e => {
+      if (!this.checkEnableDragModifyNodeWidth()) return
       e.stopPropagation()
       e.preventDefault()
       this.dragHandleMousedownX = e.clientX
@@ -134,6 +145,9 @@ function createDragHandleNode() {
       this.dragHandleMousedownBodyCursor = document.body.style.cursor
       this.dragHandleMousedownLeft = this.left
       this.isDragHandleMousedown = true
+      window.addEventListener('mousemove', this.onDragMousemoveHandle, true)
+      window.addEventListener('mouseup', this.onDragMouseupHandle, true)
+      window.addEventListener('blur', this.onDragMouseupHandle)
     })
   })
   return list
@@ -141,20 +155,36 @@ function createDragHandleNode() {
 
 // 更新拖拽按钮的显隐和位置尺寸
 function updateDragHandle() {
-  if (!this.checkEnableDragModifyNodeWidth()) return
+  if (!this.checkEnableDragModifyNodeWidth()) {
+    if (this._dragHandleNodes) {
+      this._dragHandleNodes.forEach(node => node.remove())
+      this._dragHandleMarks.forEach(node => node.remove())
+    }
+    return
+  }
+  if (!this._dragHandleInitialized) this.initDragHandle()
   if (!this._dragHandleNodes) {
     this._dragHandleNodes = this.createDragHandleNode()
   }
   if (this.getData('isActive')) {
-    this._dragHandleNodes.forEach(node => {
-      node.height(this.height)
+    this._dragHandleNodes.forEach((node, index) => {
+      node.x(index === 0
+        ? -this.dragHandleHitWidth / 2
+        : this.width - this.dragHandleHitWidth / 2)
+      node.y(-this.dragHandleHitWidth / 2)
       this.group.add(node)
+      const mark = this._dragHandleMarks[index]
+      mark.x(index === 0
+        ? -this.dragHandleWidth / 2
+        : this.width - this.dragHandleWidth / 2)
+      mark.y(-this.dragHandleWidth / 2)
+      this.group.add(mark)
     })
-    this._dragHandleNodes[1].x(this.width - this.dragHandleWidth)
   } else {
     this._dragHandleNodes.forEach(node => {
       node.remove()
     })
+    this._dragHandleMarks.forEach(node => node.remove())
   }
 }
 

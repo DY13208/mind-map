@@ -1,7 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { searchWiki } = require('../../integrations/wiki-graph/server.cjs');
+const fs = require('fs');
+const os = require('os');
+const { searchWiki, handleSearch, loadTopicArticle, wikiProvenance } = require('../../integrations/wiki-graph/server.cjs');
 
 const FIXTURE = path.join(__dirname, 'fixtures');
 
@@ -82,4 +84,54 @@ test('blank query is rejected by the search wrapper', () => {
   const missing = handleSearch(FIXTURE, {});
   assert.equal(missing.status, 400);
   assert.deepEqual(missing.body, { error: 'query is required' });
+});
+
+test('provenance only labels explicitly marked business sources and reserves local-verify for demo', () => {
+  assert.deepEqual(wikiProvenance({ pageId: 'local-verify', title: '本地验证' }, { provenance: 'business' }), {
+    origin: 'demo', sourceTitle: '本地验证', sourceId: 'local-verify'
+  });
+  assert.deepEqual(wikiProvenance({ id: 'corp-wiki', title: '业务 Wiki', provenance: 'business' }), {
+    origin: 'business', sourceTitle: '业务 Wiki', sourceId: 'corp-wiki'
+  });
+  assert.deepEqual(wikiProvenance({ title: '未标注来源' }), {
+    origin: 'unknown', sourceTitle: '未标注来源', sourceId: ''
+  });
+});
+
+test('business search excludes local verification content while demo search exposes its provenance', () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'wiki-check-provenance-'));
+  try {
+    fs.cpSync(FIXTURE, temp, { recursive: true });
+    const statePath = path.join(temp, '.compile-state.json');
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    state.source = { pageId: 'local-verify', title: '本地验收数据' };
+    fs.writeFileSync(statePath, JSON.stringify(state), 'utf8');
+
+    const business = handleSearch(temp, { query: '直播推广', mode: 'business' });
+    const demo = handleSearch(temp, { query: '直播推广', mode: 'demo' });
+    assert.equal(business.status, 200);
+    assert.deepEqual(business.body.results, []);
+    assert.equal(demo.status, 200);
+    assert.ok(demo.body.results.length > 0);
+    assert.deepEqual(demo.body.results[0].provenance, {
+      origin: 'demo', sourceTitle: '本地验收数据', sourceId: 'local-verify'
+    });
+
+    const topic = loadTopicArticle(temp, '直播推广');
+    assert.equal(topic.provenance.origin, 'demo');
+    assert.equal(topic.provenance.sourceTitle, '本地验收数据');
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test('invalid search mode is rejected instead of silently broadening the source set', () => {
+  assert.deepEqual(handleSearch(FIXTURE, { query: '直播推广', mode: 'all' }), {
+    status: 400, body: { error: 'mode must be business or demo' }
+  });
+});
+
+test('topic API helper reports unknown provenance when the compile state has no explicit source marker', () => {
+  const topic = loadTopicArticle(FIXTURE, '直播推广');
+  assert.deepEqual(topic.provenance, { origin: 'unknown', sourceTitle: '', sourceId: '' });
 });

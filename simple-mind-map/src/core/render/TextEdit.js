@@ -406,7 +406,8 @@ export default class TextEdit {
     this.textEditNode.style.left = Math.floor(rect.left) + 'px'
     this.textEditNode.style.top = Math.floor(rect.top) + 'px'
     this.textEditNode.style.display = 'block'
-    this.textEditNode.style.maxWidth = textAutoWrapWidth * scale + 'px'
+    this.textEditNode.style.maxWidth =
+      (node.hasCustomWidth() ? node.customTextWidth : textAutoWrapWidth) * scale + 'px'
     if (isMultiLine) {
       this.textEditNode.style.lineHeight = noneRichTextNodeLineHeight
       this.textEditNode.style.transform = `translateY(${

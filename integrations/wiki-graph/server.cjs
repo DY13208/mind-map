@@ -255,9 +255,10 @@ function loadGraph() {
   return { name, totalTopics, totalSources, topics, concepts, edges };
 }
 
-function loadArticle(type, slug) {
-  const dir = type === 'concept' ? 'concepts' : 'topics';
-  const filePath = path.join(wikiDir, dir, `${slug}.md`);
+function loadArticle(type, slug, dir = wikiDir) {
+  if (!slug || slug === '.' || slug === '..' || /[\\/\0]/.test(slug)) return null;
+  const contentDir = type === 'concept' ? 'concepts' : 'topics';
+  const filePath = path.join(dir, contentDir, `${slug}.md`);
   if (!fs.existsSync(filePath)) return null;
 
   const content = fs.readFileSync(filePath, 'utf8');
@@ -269,6 +270,38 @@ function loadArticle(type, slug) {
   const title = titleMatch ? titleMatch[1] : slug;
 
   return { slug, title, meta, sections };
+}
+
+function wikiProvenance(source = {}, articleMeta = {}) {
+  const pageId = String(source.pageId || source.sourceId || source.id || '').trim();
+  const explicit = [
+    articleMeta.provenance,
+    articleMeta.source_provenance,
+    articleMeta.source_origin,
+    source.provenance,
+    source.origin
+  ].map(value => String(value || '').trim().toLowerCase());
+  // This id is reserved by the compiler workflow for local verification
+  // content. It must remain demo even if a copied article contains a marker.
+  const origin = pageId === 'local-verify' || explicit.includes('demo')
+    ? 'demo'
+    : explicit.includes('business') ? 'business' : 'unknown';
+  const sourceTitle = String(
+    source.title || source.sourceTitle || source.name || articleMeta.source_title || articleMeta.sourceTitle || ''
+  ).trim();
+  return { origin, sourceTitle, sourceId: pageId || String(articleMeta.source_id || '').trim() };
+}
+
+function articleProvenance(dir, article) {
+  const state = readJson(path.join(dir, '.compile-state.json')) || {};
+  return wikiProvenance(state.source || {}, article && article.meta || {});
+}
+
+function loadTopicArticle(dir, slug) {
+  const article = loadArticle('topic', slug, dir);
+  if (!article) return null;
+  article.provenance = articleProvenance(dir, article);
+  return article;
 }
 
 // --- HTTP Server ---
@@ -297,6 +330,7 @@ function displayHeading(heading) {
 
 function loadCurrentWiki(dir) {
   const state = readJson(path.join(dir, '.compile-state.json')) || {};
+  const source = state.source && typeof state.source === 'object' ? state.source : {};
   const indexPath = path.join(dir, 'INDEX.md');
   const indexTopics = fs.existsSync(indexPath)
     ? parseIndexTopics(fs.readFileSync(indexPath, 'utf8'))
@@ -309,7 +343,7 @@ function loadCurrentWiki(dir) {
     const filePath = path.join(dir, 'topics', topic.slug + '.md');
     if (!fs.existsSync(filePath)) continue;
     const raw = fs.readFileSync(filePath, 'utf8');
-    const { body } = parseFrontmatter(raw);
+    const { body, meta } = parseFrontmatter(raw);
     const lines = body.split('\n');
     const sections = [];
     let heading = null;
@@ -341,6 +375,7 @@ function loadCurrentWiki(dir) {
     topics.push({
       name: topic.name || topic.slug,
       slug: topic.slug,
+      provenance: wikiProvenance(source, meta),
       sections: sections.filter(section => !/^sources$/i.test(section.heading)),
       sources
     });
@@ -390,6 +425,7 @@ function tokenize(query, phrases) {
   const stripped = String(query || '').replace(/[\s,，.。!！?？、；;:：""''（）()【】[\]\-_/]+/g, '');
   const tokens = new Set();
   const stops = [...STOPWORDS].sort((a, b) => b.length - a.length);
+  const MAX_TOKENS = 120;
   let rest = stripped;
   while (rest) {
     const phrase = phrases.find(item => rest.startsWith(item));
@@ -410,8 +446,19 @@ function tokenize(query, phrases) {
       end += 1;
     }
     const chunk = rest.slice(0, end);
-    if (chunk.length >= 2 && chunk.length <= 8) tokens.add(chunk);
+    if (chunk.length >= 2 && chunk.length <= 8) {
+      tokens.add(chunk);
+    } else if (chunk.length > 8) {
+      // Long runs of concatenated phrases (e.g. a check-button query with a
+      // D title plus several field labels) used to be dropped entirely. Fall
+      // back to 2-char sliding windows so short field terms still match.
+      for (let i = 0; i + 2 <= chunk.length; i += 1) {
+        tokens.add(chunk.slice(i, i + 2));
+        if (tokens.size >= MAX_TOKENS) break;
+      }
+    }
     rest = rest.slice(end);
+    if (tokens.size >= MAX_TOKENS) break;
   }
   return [...tokens];
 }
@@ -453,14 +500,18 @@ function clampTopK(value) {
 
 function searchWiki(dir, options) {
   const query = String(options.query || '');
+  const mode = options.mode === 'demo' ? 'demo' : 'business';
   const wiki = loadCurrentWiki(dir);
   const tokens = tokenize(query, knownPhrases(wiki));
   const lexical = [];
   for (const topic of wiki.topics) {
+    if (mode === 'business' && topic.provenance.origin === 'demo') continue;
     for (const section of topic.sections) {
       const score = sectionScore(tokens, topic.name, section.heading, section.content);
       if (score <= 0) continue;
-      lexical.push({ topic, section, score });
+      const searchable = `${topic.name} ${section.heading} ${section.content}`;
+      const matchedTerms = tokens.filter(token => token.length >= 2 && searchable.includes(token));
+      lexical.push({ topic, section, score, matchedTerms: [...new Set(matchedTerms)] });
     }
   }
   const hitTopics = new Set(lexical.map(item => item.topic.name));
@@ -486,10 +537,12 @@ function searchWiki(dir, options) {
       topic: item.topic.name,
       section: item.section.heading,
       content: item.section.content,
+      matched_terms: item.matchedTerms,
       concepts: wiki.concepts
         .filter(concept => concept.connects.includes(item.topic.name))
         .map(concept => concept.name),
       source: item.topic.sources,
+      provenance: item.topic.provenance,
       version: wiki.version
     }))
   };
@@ -498,7 +551,10 @@ function searchWiki(dir, options) {
 function handleSearch(dir, body) {
   const query = body && body.query != null ? String(body.query).trim() : '';
   if (!query) return { status: 400, body: { error: 'query is required' } };
-  return { status: 200, body: searchWiki(dir, { query, top_k: body.top_k }) };
+  if (body.mode != null && !['business', 'demo'].includes(String(body.mode))) {
+    return { status: 400, body: { error: 'mode must be business or demo' } };
+  }
+  return { status: 200, body: searchWiki(dir, { query, top_k: body.top_k, mode: body.mode }) };
 }
 
 function readRequestBody(req) {
@@ -532,7 +588,7 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: 'query is required' }));
         return;
       }
-      const result = handleSearch(wikiDir, { query, top_k: body.top_k });
+      const result = handleSearch(wikiDir, { query, top_k: body.top_k, mode: body.mode });
       res.writeHead(result.status, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(result.body));
     }).catch(() => {
@@ -546,7 +602,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify(loadGraph()));
   } else if (url.pathname.startsWith('/api/topic/')) {
     const slug = safeDecode(url.pathname.split('/api/topic/')[1]);
-    const article = loadArticle('topic', slug);
+    const article = loadTopicArticle(wikiDir, slug);
     if (article) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(article));
@@ -586,4 +642,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { searchWiki, tokenize, loadCurrentWiki, handleSearch };
+module.exports = { searchWiki, tokenize, loadCurrentWiki, handleSearch, wikiProvenance, loadTopicArticle };

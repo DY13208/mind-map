@@ -515,6 +515,14 @@
     <NodeTag></NodeTag>
     <Export></Export>
     <Import ref="ImportRef"></Import>
+    <CPDCheckPanel
+      ref="cpdCheckPanel"
+      :room-key="cpdRoomKey"
+      :node-uid="activeJobNodeUid"
+      :node-title="activeJobNode ? nodePlainTitle(activeJobNode) : ''"
+      :readonly="isReadonly"
+      :before-check="waitForCpdSnapshot"
+    ></CPDCheckPanel>
   </div>
 </template>
 
@@ -526,6 +534,7 @@ import NodeNote from './NodeNote.vue'
 import NodeTag from './NodeTag.vue'
 import Export from './Export.vue'
 import Import from './Import.vue'
+import CPDCheckPanel from './CPDCheckPanel.vue'
 import { mapState } from 'vuex'
 import { Notification } from 'element-ui'
 import MarkdownIt from 'markdown-it'
@@ -778,6 +787,7 @@ export default {
     NodeTag,
     Export,
     Import,
+    CPDCheckPanel,
     ToolbarNodeBtnList,
     ToolbarFileBtnList
   },
@@ -1009,6 +1019,15 @@ export default {
         icon: this.refreshing ? 'el-icon-loading' : 'el-icon-refresh',
         disabled: this.refreshing, testId: 'refresh'
       })
+      if (this.cpdRoomKey) {
+        actions.push({
+          key: 'check', label: '检查', icon: 'el-icon-circle-check',
+          title: this.activeJobNode
+            ? `检查「${this.nodePlainTitle(this.activeJobNode) || '当前节点'}」对应的整条 CPD 链路`
+            : '请先选中一个节点',
+          testId: 'cpd-check-button'
+        })
+      }
       if (!this.isReadonly) {
         actions.push({ key: 'run', label: '运行', icon: this.jobDispatching ? 'el-icon-loading' : 'el-icon-video-play', disabled: this.jobDispatching, title: this.runButtonTitle, testId: 'run-workbuddy-job' })
       }
@@ -1048,6 +1067,15 @@ export default {
     activeJobNode() {
       const node = (this.activeNodes || [])[0]
       return node && !node.isGeneralization ? node : null
+    },
+
+    cpdRoomKey() {
+      return String((this.$route.query && this.$route.query.room) || '').trim()
+    },
+
+    activeJobNodeUid() {
+      const node = this.activeJobNode
+      return String((node && node.getData && node.getData('uid')) || '')
     },
 
     /** 「运行」按钮的悬停提示：选中过概要时说明这次是「接着这条概要继续」 */
@@ -1238,6 +1266,31 @@ export default {
     this.$bus.$off('node_note_dblclick', this.onNodeNoteDblclick)
   },
   methods: {
+    async waitForCpdSnapshot() {
+      const deadline = Date.now() + 8000
+      while (true) {
+        const state = (this.$store && this.$store.state) || {}
+        const status = typeof window !== 'undefined' && typeof window.__COLLAB_V2_STATUS__ === 'function'
+          ? window.__COLLAB_V2_STATUS__() || {} : {}
+        const pending = status.outboxPending === true || Number(status.outboxPending || status.pendingCount || 0) > 0 ||
+          status.outboxSending === true || Number(status.outboxSending || 0) > 0 ||
+          Number(state.collabPendingCount || 0) > 0 || state.collabSaveState === 'saving'
+        if (!pending) return
+        if (Date.now() >= deadline) throw new Error('脑图修改尚未保存，请同步完成后再检查')
+        await new Promise(resolve => setTimeout(resolve, 200))
+      }
+    },
+    openCpdCheck() {
+      if (!this.activeJobNode) {
+        this.$message.warning('请先选中需要检查的节点')
+        return
+      }
+      if (!this.cpdRoomKey) {
+        this.$message.warning('CPD 检查需要在已保存的脑图房间中使用')
+        return
+      }
+      if (this.$refs.cpdCheckPanel) this.$refs.cpdCheckPanel.open()
+    },
     setCanvasToolbarsCollapsed(collapsed) {
       this.nodeToolbarCollapsed = collapsed
       this.fileToolbarCollapsed = collapsed
@@ -3380,6 +3433,7 @@ export default {
         case 'history': return this.$emit('open-history')
         case 'maps': return this.goToMyMaps()
         case 'refresh': return this.refreshPage()
+        case 'check': return this.openCpdCheck()
         case 'run': return this.runWorkbuddyJob()
         case 'export': return this.$bus.$emit('showExport')
       }
