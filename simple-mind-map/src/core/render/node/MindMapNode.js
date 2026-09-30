@@ -200,10 +200,12 @@ class MindMapNode {
 
   //  复位部分布局时会重新设置的数据
   reset() {
-    // Clear connectors before children are rebuilt. Otherwise a reused instance
-    // keeps SVG paths in the shared lineDraw while layout reparents the node,
-    // which shows up as multi-select move "ghost lines" until a full refresh.
-    if (typeof this.removeLine === 'function') this.removeLine()
+    // This is also called for unchanged nodes during asynchronous layout.
+    // Keep the committed connectors attached until renderLine() can update
+    // their geometry and prune unused slots; clearing here blanks the entire
+    // map's lines between layout/paint tasks on insert, delete and resize.
+    // Move/detach, collapsed/retired nodes and layout switches still perform
+    // their own targeted cleanup, so stale paths cannot survive those changes.
     this.children = []
     this.parent = null
     this.isRoot = false
@@ -431,6 +433,7 @@ class MindMapNode {
     this.group.on('mouseenter', e => {
       if (this.isDrag) return
       this._isMouseenter = true
+      this.updateDragHandle()
       // 显示展开收起按钮
       this.showExpandBtn()
       if (this.isGeneralization) {
@@ -441,6 +444,7 @@ class MindMapNode {
     this.group.on('mouseleave', e => {
       if (!this._isMouseenter) return
       this._isMouseenter = false
+      this.updateDragHandle()
       this.hideExpandBtn()
       if (this.isGeneralization) {
         this.handleGeneralizationMouseleave()

@@ -6,7 +6,7 @@ const vm = require('node:vm')
 
 class Rect {
   constructor() { this.events = {}; this._parent = null }
-  size() { return this }
+  size(width, height) { this.width = width; this.height = height; return this }
   fill() { return this }
   stroke() { return this }
   radius() { return this }
@@ -34,13 +34,19 @@ vm.runInNewContext(source, {
   cancelAnimationFrame() {}
 })
 
-test('all four corners preview node width and tree layout during the drag', () => {
+test('both node edges can resize from either corner without visible handles', () => {
   const methods = moduleMock.exports
-  for (const index of [0, 1, 2, 3]) {
-    const group = { add(handle) { handle._parent = this }, css() {} }
+  for (const corner of [0, 1, 2, 3]) {
+    const index = corner % 2
+    const group = {
+      add(handle) { handle._parent = this },
+      css() {},
+      addClass() {},
+      removeClass() {}
+    }
     let treeRenders = 0
     let previewWidth
-    let storedWidth
+    let storedData
     const node = {
       ...methods,
       mindMap: {
@@ -63,25 +69,39 @@ test('all four corners preview node width and tree layout during the drag', () =
       getData: key => key === 'isActive',
       checkEnableDragModifyNodeWidth: () => true,
       isUseCustomNodeContent: () => false,
-      setData(data) { storedWidth = data.customTextWidth }
+      setData(data) {
+        assert.equal(this.nodeData.data.customTextWidth, undefined)
+        if (index === 0) assert.equal(this.nodeData.data.customLeft, undefined)
+        storedData = data
+        Object.assign(this.nodeData.data, data)
+      }
     }
     node.initDragHandle()
     node.updateDragHandle()
-    assert.equal(node._dragHandleNodes.length, 4)
+    assert.equal(node._dragHandleNodes.length, 2)
+    assert.equal(node._dragHandleMarks, undefined)
     assert.equal(JSON.stringify(node._dragHandleNodes.map(handle => [handle.left, handle.top])),
-      JSON.stringify([[-7, -7], [93, -7], [-7, 23], [93, 23]]))
-    const event = { clientX: 100, stopPropagation() {}, preventDefault() {} }
+      JSON.stringify([[-6, -6], [94, -6]]))
+    assert.equal(node._dragHandleNodes[0].height, 42)
+    const event = {
+      clientX: 100,
+      clientY: corner < 2 ? 0 : 30,
+      stopPropagation() {},
+      preventDefault() {}
+    }
     node._dragHandleNodes[index].events.mousedown(event)
     node.onDragMousemoveHandle({ ...event, clientX: 110 })
     assert.equal(node.customTextWidth, index % 2 === 0 ? 90 : 110)
     assert.equal(node.left, index % 2 === 0 ? 20 : 10)
+    if (index === 0) assert.equal(node.nodeData.data.customLeft, 20)
     assert.equal(treeRenders, 0)
     frames.shift()()
     assert.equal(previewWidth, index % 2 === 0 ? 90 : 110)
     assert.equal(treeRenders, 1)
     assert.equal(node.renderer._syncLayoutForResize, true)
     node.onDragMouseupHandle()
-    assert.equal(storedWidth, index % 2 === 0 ? 90 : 110)
+    assert.equal(storedData.customTextWidth, index % 2 === 0 ? 90 : 110)
+    if (index === 0) assert.equal(storedData.customLeft, 20)
     assert.equal(treeRenders, 2)
   }
 })

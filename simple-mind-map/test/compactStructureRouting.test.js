@@ -181,6 +181,30 @@ test('children keep the same local gap after parents of different widths', () =>
   assert.deepEqual(gaps, [36, 36])
 })
 
+test('resizing a parent shifts its children and connector in the same layout pass', () => {
+  const child = node('child', 70)
+  const parent = node('parent', 60, [child])
+  parent.layerIndex = 1
+  const root = node('root', 80, [parent])
+  root.top = 300
+  const renderer = {
+    mindMap: {
+      opt: { alwaysShowExpandBtn: true, notShowExpandBtn: false },
+      themeConfig: { nodeUseLineStyle: false }
+    }
+  }
+  const layout = new moduleMock.exports(renderer)
+  layout.root = root
+  layout.computedBaseValue()
+  layout.computedTopValue()
+  const oldLeft = child.left
+  const oldBus = layout.busXByNode.get(parent)
+  parent.width = 180
+  layout.computedTopValue()
+  assert.ok(child.left > oldLeft)
+  assert.ok(layout.busXByNode.get(parent) > oldBus)
+})
+
 test('a branch trunk stays outside a neighboring node in its vertical span', () => {
   const request = node('request', 70)
   request.top = 138

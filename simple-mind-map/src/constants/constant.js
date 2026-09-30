@@ -252,6 +252,11 @@ export const cssContent = `
     stroke-width: 2;
   }
 
+  /* Resizable nodes use their own border as the drag target. */
+  .smm-node.smm-resizable-node .smm-hover-node{
+    display: none !important;
+  }
+
   .smm-text-node-wrap, .smm-expand-btn-text {
     user-select: none;
   }
