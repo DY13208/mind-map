@@ -21,6 +21,7 @@
       class="authScreen"
       v-else-if="authState.enabled && !authState.authenticated"
     >
+      <LoginGridBackground />
       <div class="authCard authCard--login">
         <div class="authIntro">
           <div class="authBrandBlock">
@@ -169,6 +170,7 @@ import {
   WECOM_CLIENT_AUTO_ATTEMPT_KEY
 } from '@/utils/auth'
 import { mountWecomLoginPanel } from '@/utils/wecomLogin'
+import LoginGridBackground from '@/components/LoginGridBackground.vue'
 
 const PAGE_TITLE = 'CPD'
 const AUTH_BOOTSTRAP_MS = 45000
@@ -220,6 +222,7 @@ const authErrors = {
 
 export default {
   name: 'App',
+  components: { LoginGridBackground },
   data() {
     return {
       authLoading: true,
@@ -578,6 +581,8 @@ body,
 }
 
 .authScreen {
+  position: relative;
+  isolation: isolate;
   min-height: 100dvh;
   display: flex;
   align-items: center;
@@ -596,6 +601,7 @@ body,
 }
 
 .authCard {
+  position: relative;
   width: 380px;
   max-width: 100%;
   padding: 32px;
@@ -1012,6 +1018,26 @@ body,
   to {
     transform: rotate(360deg);
   }
+}
+
+// Login palette follows the OS, independently of the editor's map theme.
+@media (prefers-color-scheme: dark) {
+  .authScreen {
+    background: radial-gradient(circle at 18% 16%, rgba(28, 130, 95, 0.12), transparent 35%), #10231c;
+    .authCard { background: #192f26; border-color: #345344; }
+    .authBrand, .authQrHeading strong { color: #e9f3ee; }
+    .authSubtitle, .authQrHeading span, .authDevToggle, .authDevHint, .authOneIdHint { color: #b4c7bd; }
+    .authButton--secondary { background: #203e30; color: #d4eee0; border-color: #52735f; }
+    .authButton--secondary:hover:not(:disabled) { background: #2a4c3c; }
+    .authRefresh { color: #9edbc0; }
+    .authError, .authDevError { background: #472e2b; color: #ffcbc3; }
+    .authDevInput { background: #10251c; border-color: #52735f; color: #e9f3ee; }
+    .authDevInput::placeholder { color: #b4c7bd; }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .authRefreshIcon.spinning, .authSpinner { animation: none; }
 }
 
 @media (max-width: 720px) {
