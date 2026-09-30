@@ -142,6 +142,16 @@
           </div>
         </div>
       </template>
+      <!-- 第一种逻辑结构图的排列方式 -->
+      <div class="row">
+        <div class="rowItem">
+          <el-checkbox
+            v-model="config.compactLayout"
+            @change="compactLayoutChange"
+            >{{ $t('setting.compactLayout') }}</el-checkbox
+          >
+        </div>
+      </div>
       <!-- 配置性能模式 -->
       <div class="row">
         <div class="rowItem">
@@ -488,7 +498,7 @@
 
 <script>
 import Sidebar from './Sidebar.vue'
-import { storeConfig } from '@/api'
+import { storeConfig, storeData } from '@/api'
 import { mapState, mapMutations } from 'vuex'
 import Color from './Color.vue'
 import {
@@ -517,6 +527,7 @@ export default {
   data() {
     return {
       config: {
+        compactLayout: false,
         openPerformance: false,
         enableFreeDrag: false,
         mousewheelAction: 'zoom',
@@ -602,6 +613,15 @@ export default {
   },
   methods: {
     ...mapMutations(['setLocalConfig']),
+
+    compactLayoutChange(value) {
+      this.updateOtherConfig('compactLayout', value)
+      if (this.mindMap.getLayout() !== 'logicalStructure') {
+        this.mindMap.setLayout('logicalStructure')
+      }
+      // Also migrate documents that still store the former compactStructure layout.
+      storeData({ layout: 'logicalStructure' })
+    },
 
     // 初始化其他配置
     initConfig() {

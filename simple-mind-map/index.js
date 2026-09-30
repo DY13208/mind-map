@@ -177,6 +177,10 @@ class MindMap {
   //  配置参数处理
   handleOpt(opt) {
     // 检查布局配置
+    if (opt.layout === CONSTANTS.LAYOUT.COMPACT_STRUCTURE) {
+      opt.layout = CONSTANTS.LAYOUT.LOGICAL_STRUCTURE
+      opt.compactLayout = true
+    }
     if (!layoutValueList.includes(opt.layout)) {
       opt.layout = CONSTANTS.LAYOUT.LOGICAL_STRUCTURE
     }
@@ -434,6 +438,11 @@ class MindMap {
     }
     this.opt = this.handleOpt(merge.all([defaultOpt, this.opt, opt]))
     this.emit('after_update_config', this.opt, lastOpt)
+    if (this.opt.compactLayout !== lastOpt.compactLayout &&
+      this.opt.layout === CONSTANTS.LAYOUT.LOGICAL_STRUCTURE) {
+      this.renderer.setLayout()
+      this.render(null, CONSTANTS.CHANGE_LAYOUT)
+    }
   }
 
   //  获取当前布局结构
@@ -444,6 +453,10 @@ class MindMap {
   //  设置布局结构
   setLayout(layout, notRender = false) {
     // 检查布局配置
+    if (layout === CONSTANTS.LAYOUT.COMPACT_STRUCTURE) {
+      this.opt.compactLayout = true
+      layout = CONSTANTS.LAYOUT.LOGICAL_STRUCTURE
+    }
     if (!layoutValueList.includes(layout)) {
       layout = CONSTANTS.LAYOUT.LOGICAL_STRUCTURE
     }

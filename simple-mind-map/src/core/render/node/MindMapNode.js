@@ -1237,20 +1237,11 @@ class MindMapNode {
     }
   }
 
-  // 检查是否支持拖拽调整宽度
-  // 1.富文本模式
-  // 2.自定义节点内容
+  // 检查是否支持拖拽调整宽度。普通文本也使用 customTextWidth
+  // 进行换行和尺寸计算，与富文本节点共用同一套拖拽交互。
   checkEnableDragModifyNodeWidth() {
-    const {
-      enableDragModifyNodeWidth,
-      isUseCustomNodeContent,
-      customCreateNodeContent
-    } = this.mindMap.opt
-    return (
-      enableDragModifyNodeWidth &&
-      (this.mindMap.richText ||
-        (isUseCustomNodeContent && customCreateNodeContent))
-    )
+    const { enableDragModifyNodeWidth, readonly } = this.mindMap.opt
+    return enableDragModifyNodeWidth && !readonly
   }
 
   // 是否存在自定义宽度

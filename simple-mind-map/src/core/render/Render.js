@@ -1,5 +1,6 @@
 import merge from 'deepmerge'
 import LogicalStructure from '../../layouts/LogicalStructure'
+import CompactStructure from '../../layouts/CompactStructure'
 import MindMap from '../../layouts/MindMap'
 import CatalogOrganization from '../../layouts/CatalogOrganization'
 import OrganizationStructure from '../../layouts/OrganizationStructure'
@@ -151,8 +152,15 @@ class Render {
       this.layout.beforeChange()
     }
     this.cleanupLayoutRenderer()
+    if (this.mindMap.opt.layout === CONSTANTS.LAYOUT.COMPACT_STRUCTURE) {
+      this.mindMap.opt.layout = CONSTANTS.LAYOUT.LOGICAL_STRUCTURE
+      this.mindMap.opt.compactLayout = true
+    }
     const { layout } = this.mindMap.opt
-    let L = layouts[layout] || this.mindMap[layout]
+    let L = layout === CONSTANTS.LAYOUT.LOGICAL_STRUCTURE &&
+      this.mindMap.opt.compactLayout
+      ? CompactStructure
+      : layouts[layout] || this.mindMap[layout]
     if (!L) {
       L = layouts[CONSTANTS.LAYOUT.LOGICAL_STRUCTURE]
       this.mindMap.opt.layout = CONSTANTS.LAYOUT.LOGICAL_STRUCTURE

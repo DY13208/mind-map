@@ -46,6 +46,7 @@ export default {
   },
   setting: {
     title: '設置',
+    compactLayout: '緊湊排列（邏輯結構圖）',
     openPerformance: '啟用效能模式',
     enableFreeDrag: '啟用節點自由拖曳 (Beta)',
     isEnableNodeRichText: '啟用節點豐富文字編輯',

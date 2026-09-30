@@ -45,6 +45,7 @@ export default {
   },
   setting: {
     title: '设置',
+    compactLayout: '紧凑排列（逻辑结构图）',
     openPerformance: '开启性能模式(Beta)',
     enableFreeDrag: '是否开启节点自由拖拽',
     isEnableNodeRichText: '是否开启节点富文本编辑',

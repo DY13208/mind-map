@@ -46,6 +46,7 @@ export default {
   },
   setting: {
     title: 'Cài đặt',
+    compactLayout: 'Bố cục gọn (sơ đồ logic)',
     openPerformance: 'Bật chế độ hiệu suất',
     enableFreeDrag: 'Cho phép kéo thả tự do nút (Beta)',
     isEnableNodeRichText: 'Cho phép chỉnh sửa văn bản phong phú của nút',
