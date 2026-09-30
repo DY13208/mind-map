@@ -240,15 +240,23 @@
           <div
             class="toolbarBtn"
             data-testid="run-workbuddy-job"
-            :class="{ disabled: isReadonly || jobDispatching }"
+            :class="{
+              disabled: isReadonly || jobDispatching,
+              busy: jobDispatching
+            }"
             :title="runButtonTitle"
             @click="runWorkbuddyJob()"
             v-if="!isReadonly"
           >
-            <span
-              class="icon"
-              :class="jobDispatching ? 'el-icon-loading' : 'el-icon-video-play'"
-            ></span>
+            <!-- 转圈只转里面的图标：以前的 loading 类直接加在 .icon 上，
+                 那是个 26px 的白底方块，于是整块连边框一起转（用户反馈
+                 「不要整个按钮都旋转」）。照上方刷新按钮的写法套一层 <i>。 -->
+            <span class="icon">
+              <i
+                class="runIcon"
+                :class="jobDispatching ? 'el-icon-loading' : 'el-icon-video-play'"
+              ></i>
+            </span>
             <span class="text">运行</span>
           </div>
           <div
@@ -3795,6 +3803,14 @@ export default {
         &.disabled {
           color: #54595f;
         }
+
+        // 派发中：图标方块亮成主题色（深色主题下的配色）
+        &.busy {
+          .icon {
+            border-color: rgba(64, 158, 255, 0.55);
+            background: rgba(64, 158, 255, 0.16);
+          }
+        }
       }
     }
   }
@@ -4006,6 +4022,15 @@ export default {
         pointer-events: none;
       }
 
+      // 派发中：图标方块亮成主题色，一眼看出「在跑」而不是「按钮坏了」。
+      // 只动方块，文字颜色仍交给 .disabled —— 两套主题各写各的，互不打架。
+      &.busy {
+        .icon {
+          border-color: #409eff;
+          background: #ecf5ff;
+        }
+      }
+
       .icon {
         display: flex;
         height: 26px;
@@ -4016,6 +4041,13 @@ export default {
         flex-direction: column;
         text-align: center;
         padding: 0 5px;
+
+        // 图标本体。转圈只转它，外层的方块（边框+白底）保持静止。
+        // inline-block 是转圈动画生效的前提，别删。
+        i {
+          display: inline-block;
+          line-height: 1;
+        }
 
         .refreshIcon {
           display: inline-block;
