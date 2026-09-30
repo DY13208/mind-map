@@ -16,8 +16,9 @@ export default {
     this.gridGeneration = 0
     this.gridMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
     this.gridPointer = window.matchMedia('(pointer: coarse)')
+    this.gridColor = window.matchMedia('(prefers-color-scheme: dark)')
     this.gridSync = () => this.syncGrid()
-    for (const query of [this.gridMotion, this.gridPointer]) {
+    for (const query of [this.gridMotion, this.gridPointer, this.gridColor]) {
       if (query.addEventListener) query.addEventListener('change', this.gridSync)
       else query.addListener(this.gridSync)
     }
@@ -29,7 +30,7 @@ export default {
     this.gridDisposed = true
     clearTimeout(this.gridTimer)
     this.stopGrid()
-    for (const query of [this.gridMotion, this.gridPointer]) {
+    for (const query of [this.gridMotion, this.gridPointer, this.gridColor]) {
       if (query.removeEventListener) query.removeEventListener('change', this.gridSync)
       else query.removeListener(this.gridSync)
     }
@@ -37,6 +38,11 @@ export default {
     this.$refs.output.removeEventListener('webglcontextlost', this.onContextLost)
   },
   methods: {
+    gridPalette() {
+      return this.gridColor && this.gridColor.matches
+        ? { tint: [0.45, 0.45, 0.45], tintStrength: 0.10 }
+        : { tint: [0.04, 0.42, 0.30], tintStrength: 0.16 }
+    },
     stopGrid() {
       this.gridGeneration++
       if (this.gridInstance) this.gridInstance.destroy()
@@ -54,7 +60,11 @@ export default {
         this.stopGrid()
         return
       }
-      if (this.gridInstance || this.gridState === 'loading') return
+      if (this.gridInstance) {
+        this.gridInstance.setOptions(this.gridPalette())
+        return
+      }
+      if (this.gridState === 'loading') return
       const generation = ++this.gridGeneration
       this.gridState = 'loading'
       try {
@@ -76,8 +86,7 @@ export default {
           liftHeight: 22,
           tilt: 0.12,
           shading: 0.13,
-          tint: [0.04, 0.42, 0.30],
-          tintStrength: 0.16,
+          ...this.gridPalette(),
           idleRipples: 0
         })
         if (!this.gridInstance) this.gridFailed = true
@@ -112,8 +121,8 @@ export default {
 @media (prefers-color-scheme: dark) {
   .loginGridBackground {
     background-image:
-      linear-gradient(rgba(100, 180, 150, 0.07) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(100, 180, 150, 0.07) 1px, transparent 1px);
+      linear-gradient(rgba(180, 180, 180, 0.055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(180, 180, 180, 0.055) 1px, transparent 1px);
   }
 }
 @media (prefers-reduced-motion: reduce), (pointer: coarse) {

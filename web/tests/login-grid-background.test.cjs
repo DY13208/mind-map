@@ -19,7 +19,7 @@ const { code } = babel.transformSync(script, {
   plugins: [require.resolve('@babel/plugin-transform-modules-commonjs')]
 })
 
-function fixture({ reduced = false, coarse = false, hidden = false, missingObserver = false, result = 'ok', pending = false } = {}) {
+function fixture({ reduced = false, coarse = false, dark = false, hidden = false, missingObserver = false, result = 'ok', pending = false } = {}) {
   const events = new Set()
   const eventTarget = prefix => ({
     addEventListener(name) { events.add(`${prefix}:${name}`) },
@@ -27,17 +27,21 @@ function fixture({ reduced = false, coarse = false, hidden = false, missingObser
   })
   const motion = { matches: reduced, ...eventTarget('motion') }
   const pointer = { matches: coarse, ...eventTarget('pointer') }
+  const color = { matches: dark, ...eventTarget('color') }
   const window = {
-    matchMedia: query => query.includes('reduced-motion') ? motion : pointer,
+    matchMedia: query => query.includes('reduced-motion') ? motion : query.includes('color-scheme') ? color : pointer,
     ResizeObserver: missingObserver ? null : function () {},
     IntersectionObserver: function () {}
   }
   const document = { hidden, ...eventTarget('document') }
   const calls = []
+  const updates = []
   let destroys = 0
   let imports = 0
   let resolve
-  const api = { createGrid(...args) { calls.push(args); return result === 'null' ? null : { destroy() { destroys++ } } } }
+  const api = { createGrid(...args) { calls.push(args); return result === 'null' ? null : {
+    destroy() { destroys++ }, setOptions(options) { updates.push(options) }
+  } } }
   const loadGrid = () => {
     imports++
     if (result === 'reject') return Promise.reject(new Error('chunk unavailable'))
@@ -57,7 +61,7 @@ function fixture({ reduced = false, coarse = false, hidden = false, missingObser
   }
   for (const [name, method] of Object.entries(component.methods)) ctx[name] = method.bind(ctx)
   component.mounted.call(ctx)
-  return { ctx, calls, events, document, motion, pointer, parent, component, api,
+  return { ctx, calls, updates, events, document, motion, pointer, color, parent, component, api,
     get imports() { return imports }, get destroys() { return destroys },
     resolve() { resolve(api) }, destroy() { component.beforeDestroy.call(ctx) }
   }
@@ -108,8 +112,19 @@ async function main() {
   assert.equal(active.calls[0][0].listenTarget, active.parent)
   assert.equal(active.calls[0][1].captureHtml, false)
   assert.equal(active.calls[0][1].idleRipples, 0)
+  assert.deepEqual(active.calls[0][1].tint, [0.04, 0.42, 0.30])
   await active.ctx.syncGrid()
   assert.equal(active.imports, 1)
+  const original = active.ctx.gridInstance
+  active.color.matches = true
+  await active.ctx.syncGrid()
+  assert.deepEqual(active.updates.at(-1).tint, [0.45, 0.45, 0.45])
+  assert.equal(active.ctx.gridInstance, original)
+  assert.equal(active.destroys, 0)
+  assert.equal(active.calls.length, 1)
+  active.color.matches = false
+  await active.ctx.syncGrid()
+  assert.deepEqual(active.updates.at(-1).tint, [0.04, 0.42, 0.30])
   active.motion.matches = true
   await active.ctx.syncGrid()
   assert.equal(active.ctx.gridState, 'static')
@@ -121,6 +136,11 @@ async function main() {
   await active.ctx.syncGrid()
   assert.equal(active.ctx.gridState, 'static')
   assert.equal(active.destroys, 2)
+  const dark = fixture({ dark: true })
+  await dark.ctx.syncGrid()
+  assert.deepEqual(dark.calls[0][1].tint, [0.45, 0.45, 0.45])
+  dark.destroy()
+  assert.equal(dark.events.size, 0)
   active.destroy()
   assert.equal(active.events.size, 0)
   assert.equal(active.destroys, 2)

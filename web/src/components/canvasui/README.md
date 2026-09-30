@@ -20,6 +20,10 @@ components as standalone components or a component bundle is not allowed.
   pointer trail settles.
 - Pointer events are read passively on the login screen. The decoration cannot
   intercept clicks, scrolling or focus.
+- Dark mode uses the editor's neutral charcoal surfaces. Grid tint is updated
+  in place on system color-scheme changes, without rebuilding the animation.
+  The WeCom SDK uses its official `color_scheme: auto` setting, independently
+  of the decorative canvas. Do not use filters or remount QR panels for theming.
 - Touch input, reduced motion, missing observers, failed dynamic import,
   unavailable WebGL and context loss use the static CSS grid. Hidden documents
   and destroyed login pages release observers, listeners, RAF and GPU resources.

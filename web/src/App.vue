@@ -581,6 +581,7 @@ body,
 }
 
 .authScreen {
+  color-scheme: light;
   position: relative;
   isolation: isolate;
   min-height: 100dvh;
@@ -1023,16 +1024,29 @@ body,
 // Login palette follows the OS, independently of the editor's map theme.
 @media (prefers-color-scheme: dark) {
   .authScreen {
-    background: radial-gradient(circle at 18% 16%, rgba(28, 130, 95, 0.12), transparent 35%), #10231c;
-    .authCard { background: #192f26; border-color: #345344; }
-    .authBrand, .authQrHeading strong { color: #e9f3ee; }
-    .authSubtitle, .authQrHeading span, .authDevToggle, .authDevHint, .authOneIdHint { color: #b4c7bd; }
-    .authButton--secondary { background: #203e30; color: #d4eee0; border-color: #52735f; }
-    .authButton--secondary:hover:not(:disabled) { background: #2a4c3c; }
-    .authRefresh { color: #9edbc0; }
+    color-scheme: dark;
+    background: radial-gradient(circle at 18% 16%, rgba(255, 255, 255, 0.035), transparent 35%), #111214;
+    .authCard {
+      background: #1d1e1f;
+      border-color: #34383f;
+      box-shadow: 0 22px 54px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.12);
+    }
+    .authBrand, .authQrHeading strong { color: #f0f1f3; }
+    .authSubtitle, .authQrHeading span, .authDevToggle, .authDevHint, .authOneIdHint,
+    .authFailureText, .authFailureCode { color: #b4b7bd; }
+    .authButton { background: #34383f; color: #f0f1f3; border-color: #4b4f56; }
+    .authButton:hover:not(:disabled) { background: #42474f; border-color: #626770; }
+    .authButton:disabled { background: #282a2e; color: #a1a5ad; border-color: #383c42; }
+    .authButton--secondary { background: #262a2e; border-color: #4b4f56; }
+    .authButton--secondary:hover:not(:disabled) { background: #34383f; }
+    .authQrShell { background: #262a2e; border-color: #34383f; }
+    .authQrOverlay, .authQrFailure { background: rgba(38, 42, 46, 0.96); color: #b4b7bd; }
+    .authRefresh { color: #c3c6cd; }
+    .authRefresh:hover:not(:disabled) { color: #f0f1f3; }
     .authError, .authDevError { background: #472e2b; color: #ffcbc3; }
-    .authDevInput { background: #10251c; border-color: #52735f; color: #e9f3ee; }
-    .authDevInput::placeholder { color: #b4c7bd; }
+    .authDevLogin { border-color: #34383f; }
+    .authDevInput { background: #171819; border-color: #4b4f56; color: #f0f1f3; }
+    .authDevInput::placeholder { color: #a1a5ad; }
   }
 }
 
