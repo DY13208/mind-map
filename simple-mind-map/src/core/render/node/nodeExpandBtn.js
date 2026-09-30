@@ -10,8 +10,9 @@ import { CONSTANTS } from '../../../constants/constant'
 const ICON_RING_INSET = 31.232 / 1024
 const ICON_RING_WIDTH = 74 / 1024
 
-// Short counts fit the icon circle; longer counts stretch it into a pill.
-const getCountBadgeGeometry = (count, btnSize, expandBtnStyle) => {
+// Only a single digit fits safely inside the icon ring. Keep padding between
+// glyphs and rounded ends for all longer labels, including custom formatters.
+const getCountBadgeGeometry = (count, btnSize, expandBtnStyle, textWidth = 0) => {
   const strokeWidth = btnSize * ICON_RING_WIDTH
   const inset = btnSize * ICON_RING_INSET + strokeWidth / 2
   const height = btnSize - inset * 2
@@ -19,12 +20,15 @@ const getCountBadgeGeometry = (count, btnSize, expandBtnStyle) => {
     (expandBtnStyle && expandBtnStyle.fontSize) || 12,
     Math.round(btnSize * 0.55)
   )
-  const length = String(count).length
-  const width = length <= 2
-    ? height
-    : Math.max(height, Math.ceil(length * fontSize * 0.6 + fontSize * 0.8))
+  const label = String(count)
+  const length = Array.from(label).length
+  const estimatedWidth = length * fontSize * (/^\d+$/.test(label) ? 0.7 : 1)
+  const width = Math.max(height, Math.ceil(Math.max(estimatedWidth, textWidth) + fontSize))
   return { width, height, inset, strokeWidth, fontSize }
 }
+
+const getCountBadgeGeometryKey = (count, btnSize, expandBtnStyle) =>
+  JSON.stringify([String(count), btnSize, expandBtnStyle && expandBtnStyle.fontSize])
 
 const getCountBadgeColor = expandBtnStyle =>
   (expandBtnStyle && expandBtnStyle.color) || '#808080'
@@ -59,11 +63,11 @@ function getExpandBtnOuterWidth() {
   const { notShowExpandBtn, isShowExpandNum, expandBtnStyle } = this.mindMap.opt
   if (notShowExpandBtn || this.isRoot || this.getChildrenLength() <= 0) return 0
   if (isShowExpandNum && this.getData('expand') === false) {
-    const { width, inset } = getCountBadgeGeometry(
-      this.getExpandBtnCount(),
-      this.expandBtnSize,
-      expandBtnStyle
-    )
+    const count = this.getExpandBtnCount()
+    const key = getCountBadgeGeometryKey(count, this.expandBtnSize, expandBtnStyle)
+    const { width, inset } = this._expandBtnCountGeometryKey === key
+      ? this._expandBtnCountGeometry
+      : getCountBadgeGeometry(count, this.expandBtnSize, expandBtnStyle)
     return Math.max(this.expandBtnSize, width + inset * 2)
   }
   return this.expandBtnSize
@@ -119,14 +123,17 @@ function sumNode(data = []) {
 //  创建或更新展开收缩按钮内容
 function updateExpandBtnNode() {
   let { expand } = this.getData()
+  const { expandBtnStyle } = this.mindMap.opt
   const descendantCount = expand === false && this.mindMap.opt.isShowExpandNum
     ? nodeDescendantCount.getDescendantCount(this) : null
+  const count = descendantCount === null ? null : this.getExpandBtnCount(descendantCount)
   // 如果本次和上次的展开状态一样则返回
   // Collapsed badges must also refresh when descendants change remotely.
   // Keep unchanged SVG elements mounted so mouseover cannot interrupt a click.
   const badgeKey = descendantCount === null
     ? null
-    : `${descendantCount}|${getCountBadgeSide.call(this)}`
+    : JSON.stringify([descendantCount, getCountBadgeGeometryKey(count, this.expandBtnSize, expandBtnStyle),
+      getCountBadgeSide.call(this), expandBtnStyle && expandBtnStyle.color, expandBtnStyle && expandBtnStyle.fill])
   if (expand === this._lastExpandBtnType &&
     badgeKey === this._lastExpandBtnCount) return
   this._lastExpandBtnCount = badgeKey
@@ -150,9 +157,23 @@ function updateExpandBtnNode() {
     if (isShowExpandNum) {
       if (!expand) {
         const color = getCountBadgeColor(expandBtnStyle)
-        const count = this.getExpandBtnCount(descendantCount)
+        const initial = getCountBadgeGeometry(count, this.expandBtnSize, expandBtnStyle)
+        // Measure only when the badge changes, not on every hover/layout frame.
+        // Plain text avoids SVG.js retaining a tspan's old x after recentering.
+        node.attr({ 'font-size': initial.fontSize + 'px' })
+        node.plain(String(count))
+        this._expandBtn.add(this._fillExpandNode).add(node)
+        let textWidth = 0
+        try {
+          if (typeof node.length === 'function') textWidth = node.length()
+        } catch (err) {
+          // Detached/export SVGs can lack text measurement; use the estimate.
+        }
+        if (!Number.isFinite(textWidth) || textWidth < 0) textWidth = 0
         const { width, height, inset, strokeWidth, fontSize } =
-          getCountBadgeGeometry(count, this.expandBtnSize, expandBtnStyle)
+          getCountBadgeGeometry(count, this.expandBtnSize, expandBtnStyle, textWidth)
+        this._expandBtnCountGeometry = { width, height, inset, strokeWidth, fontSize }
+        this._expandBtnCountGeometryKey = getCountBadgeGeometryKey(count, this.expandBtnSize, expandBtnStyle)
         const side = getCountBadgeSide.call(this)
         const x = side === 'right'
           ? inset
@@ -167,7 +188,6 @@ function updateExpandBtnNode() {
           .y(-height / 2)
         node.attr({ x: x + width / 2, 'font-size': fontSize + 'px' })
         node.fill({ color })
-        node.text(String(count))
       } else {
         this._fillExpandNode.stroke('none')
         this._fillExpandNode
