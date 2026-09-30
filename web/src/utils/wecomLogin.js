@@ -38,6 +38,8 @@ export async function mountWecomLoginPanel(mountEl, challenge, handlers = {}) {
       state: challenge.state,
       redirect_type: 'callback',
       panel_size: 'small',
+      // Use the official auto theme; do not remount or invalidate QR state on a theme change.
+      color_scheme: 'auto',
       lang: 'zh'
     },
     onLoginSuccess({ code }) {
