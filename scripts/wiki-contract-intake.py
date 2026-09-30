@@ -198,6 +198,27 @@ def extract_doc_binary(path):
     return "\n".join(best)
 
 
+def repair_mojibake(t):
+    """修复「UTF-8 字节被按 GBK 解码」产生的乱码（如 缁忛攢 → 经销）。
+
+    老 .doc 的二进制里既有 UTF-16 也有 UTF-8 文本流，用 GB18030 解会得到
+    形似中文但没有意义的假字，重编码回字节再按 UTF-8 解即可还原。
+    同一文件里两种编码可能混排，所以**逐行**判断，别整段一起修。
+    """
+    out = []
+    for line in (t or "").split("\n"):
+        cand = line
+        if not re.search(r"[的就是在合同协议条款]", line):
+            try:
+                r = line.encode("gb18030", "ignore").decode("utf-8", "ignore")
+                if len(SANE.findall(r)) > len(SANE.findall(line)):
+                    cand = r
+            except Exception:
+                pass
+        out.append(cand)
+    return "\n".join(out)
+
+
 def extract_pdf_page_images(path, slug, src_dir):
     """扫描件（无字体层）降级：把页面图片导出为 JPG/PNG，供人工或视觉模型读。
 
@@ -275,7 +296,7 @@ def extract(path, slug="", src_dir=""):
         imgs = extract_pdf_page_images(path, slug, src_dir) if (slug and src_dir) else []
         return "", ("needs-ocr" if imgs else "no-text"), imgs
     if e == ".doc":
-        t = extract_doc_binary(path)
+        t = repair_mojibake(extract_doc_binary(path))
         return t, ("crude" if t.strip() else "no-text"), []
     return "", "unsupported", []
 
