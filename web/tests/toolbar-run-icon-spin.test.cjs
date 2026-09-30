@@ -154,6 +154,11 @@ check(
   '派发中（.busy）只高亮图标方块、不动画',
   /&\.busy\s*\{[\s\S]{0,200}?\.icon\s*\{/.test(scoped)
 )
+check(
+  '派发中把文字颜色也拉回来（.disabled 的灰会让「运行」两字看不见）—— 两套主题各一条',
+  (scoped.match(/&\.busy\s*\{\s*color\s*:/g) || []).length >= 2,
+  String((scoped.match(/&\.busy\s*\{\s*color\s*:/g) || []).length)
+)
 
 // ---- 模板：派发中给按钮挂 busy 类 ----
 const runBtnCls = classBindingOf(runBtn)
