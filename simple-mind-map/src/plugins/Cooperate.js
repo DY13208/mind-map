@@ -80,6 +80,19 @@ function collapseDeepNodes(root, keepDepth = 2) {
   }
 }
 
+// Selection is local UI state. Lazy subtree payloads can contain stale
+// isActive flags from another session; never activate nodes while revealing.
+function clearHydratedSelection(root) {
+  const stack = root ? [root] : []
+  while (stack.length) {
+    const node = stack.pop()
+    if (!node) continue
+    if (node.data) node.data.isActive = false
+    ;(node.children || []).forEach(child => stack.push(child))
+  }
+  return root
+}
+
 const INSERT_COMMANDS = {
   INSERT_NODE: true,
   INSERT_MULTI_NODE: true,
@@ -814,7 +827,7 @@ class Cooperate {
       data.data._overflowChildren
     if (overflow && overflow.length && !this.httpFetchSubtree) {
       const chunk = overflow.splice(0, 48)
-      data.children = (data.children || []).concat(chunk)
+      data.children = (data.children || []).concat(chunk.map(clearHydratedSelection))
       if (!overflow.length) {
         delete data.data._overflowChildren
         data.data.hasMore = false
@@ -844,7 +857,7 @@ class Cooperate {
       const childMap = this.ymap.get(childUid)
       if (!childMap || typeof childMap.toJSON !== 'function') return
       const json = childMap.toJSON()
-      data.children.push({
+      data.children.push(clearHydratedSelection({
         data: {
           ...(json.data || {}),
           uid: childUid,
@@ -852,7 +865,7 @@ class Cooperate {
           childCount: Array.isArray(json.children) ? json.children.length : 0
         },
         children: []
-      })
+      }))
     })
   }
 
@@ -3883,7 +3896,7 @@ class Cooperate {
     ;(incoming || []).forEach(child => {
       const uid = child && child.data && child.data.uid
       if (!uid || have.has(uid) || this.isTombstonedUid(uid)) return
-      data.children.push(child)
+      data.children.push(clearHydratedSelection(child))
       have.add(uid)
       this.markUidPushed(uid, child.data, 'server')
     })
@@ -4603,7 +4616,7 @@ class Cooperate {
       return data
     }
     if (!data.children || !data.children.length) {
-      data.children = (result && result.children) || []
+      data.children = ((result && result.children) || []).map(clearHydratedSelection)
     } else {
       this.mergeHttpChildren(data, result && result.children)
     }

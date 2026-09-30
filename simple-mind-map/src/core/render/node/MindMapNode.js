@@ -431,6 +431,7 @@ class MindMapNode {
     this.group.on('mouseenter', e => {
       if (this.isDrag) return
       this._isMouseenter = true
+      this.updateDragHandle()
       // 显示展开收起按钮
       this.showExpandBtn()
       if (this.isGeneralization) {
@@ -441,6 +442,7 @@ class MindMapNode {
     this.group.on('mouseleave', e => {
       if (!this._isMouseenter) return
       this._isMouseenter = false
+      this.updateDragHandle()
       this.hideExpandBtn()
       if (this.isGeneralization) {
         this.handleGeneralizationMouseleave()

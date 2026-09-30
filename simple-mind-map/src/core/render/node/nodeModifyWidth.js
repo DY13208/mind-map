@@ -8,10 +8,9 @@ function initDragHandle() {
   this._dragHandleInitialized = true
   // 拖拽手柄元素
   this._dragHandleNodes = null
-  this._dragHandleMarks = null
-  // 四角共享同一套文本宽度调整逻辑；高度由文本换行自动计算。
-  this.dragHandleWidth = 6
-  this.dragHandleHitWidth = 14
+  // Transparent edge hit areas include both corners. No selection rectangle
+  // or visible handle is needed to resize the node.
+  this.dragHandleHitWidth = 12
   // 鼠标按下时的x坐标
   this.dragHandleMousedownX = 0
   // 鼠标是否处于按下状态
@@ -24,9 +23,12 @@ function initDragHandle() {
   this.dragHandleMousedownBodyCursor = ''
   // 鼠标按下时记录当前节点的left值
   this.dragHandleMousedownLeft = 0
+  this.dragHandleOriginalWidth = undefined
+  this.dragHandleOriginalLeft = undefined
   // Coalesce the size and layout update into a single paint per frame.
   this.dragHandleLayoutFrame = null
   this.dragHandleNeedsUpdate = false
+  this.dragHandleDidMove = false
 
   this.onDragMousemoveHandle = this.onDragMousemoveHandle.bind(this)
   this.onDragMouseupHandle = this.onDragMouseupHandle.bind(this)
@@ -51,6 +53,7 @@ function onDragMousemoveHandle(e) {
   })
   const { scaleX } = this.mindMap.draw.transform()
   const ox = e.clientX - this.dragHandleMousedownX
+  if (Math.abs(ox) < 2 && !this.dragHandleDidMove) return
   let newWidth =
     this.dragHandleMousedownCustomTextWidth +
     (this.dragHandleIndex % 2 === 0 ? -ox : ox) / scaleX
@@ -69,13 +72,17 @@ function onDragMousemoveHandle(e) {
         imgSize[0] + this.customTextWidth - this._rectInfo.textContentWidth
     }
   }
+  if (newWidth === this.customTextWidth) return
+  this.dragHandleDidMove = true
   this.customTextWidth = newWidth
   // The layout pass reads nodeData, while the command (and history update) is
   // committed only on mouseup. Keep the preview geometry in both places.
   this.nodeData.data.customTextWidth = newWidth
   if (this.dragHandleIndex % 2 === 0) {
-    this.left = this.dragHandleMousedownLeft +
+    this.customLeft = this.dragHandleMousedownLeft +
       this.dragHandleMousedownCustomTextWidth - newWidth
+    this.left = this.customLeft
+    this.nodeData.data.customLeft = this.customLeft
   }
   this.dragHandleNeedsUpdate = true
   if (this.dragHandleLayoutFrame === null) {
@@ -109,34 +116,37 @@ function onDragMouseupHandle() {
   })
   this.isDragHandleMousedown = false
   this.dragHandleMousedownX = 0
+  const draggedFromLeft = this.dragHandleIndex === 0
   this.dragHandleIndex = 0
   this.dragHandleMousedownCustomTextWidth = 0
-  this.setData({
-    customTextWidth: this.customTextWidth
-  })
+  if (!this.dragHandleDidMove) return
+  this.dragHandleDidMove = false
+  // Preview writes into nodeData so every layout pass sees the new size. Put
+  // the original values back before the command, otherwise collaboration and
+  // history may treat the final resize as a no-op.
+  this.nodeData.data.customTextWidth = this.dragHandleOriginalWidth
+  if (draggedFromLeft) {
+    this.nodeData.data.customLeft = this.dragHandleOriginalLeft
+  }
+  this.setData(draggedFromLeft
+    ? { customTextWidth: this.customTextWidth, customLeft: this.customLeft }
+    : { customTextWidth: this.customTextWidth })
   this.mindMap.render()
   this.mindMap.emit('dragModifyNodeWidthEnd', this)
 }
 
 // 插件拖拽手柄元素
 function createDragHandleNode() {
-  const list = Array.from({ length: 4 }, () => new Rect())
-  this._dragHandleMarks = Array.from({ length: 4 }, () => new Rect())
+  const list = [new Rect(), new Rect()]
   list.forEach((node, index) => {
     node
-      .size(this.dragHandleHitWidth, this.dragHandleHitWidth)
+      .size(this.dragHandleHitWidth, this.height + this.dragHandleHitWidth)
       .fill({
         color: 'transparent'
       })
       .css({
-        cursor: index === 0 || index === 3 ? 'nwse-resize' : 'nesw-resize'
+        cursor: 'ew-resize'
       })
-    this._dragHandleMarks[index]
-      .size(this.dragHandleWidth, this.dragHandleWidth)
-      .fill({ color: '#fff' })
-      .stroke({ color: '#409eff', width: 1 })
-      .radius(1)
-      .attr('pointer-events', 'none')
     node.on('mousedown', e => {
       if (!this.checkEnableDragModifyNodeWidth()) return
       e.stopPropagation()
@@ -151,7 +161,10 @@ function createDragHandleNode() {
           : this.customTextWidth
       this.dragHandleMousedownBodyCursor = document.body.style.cursor
       this.dragHandleMousedownLeft = this.left
+      this.dragHandleOriginalWidth = this.nodeData.data.customTextWidth
+      this.dragHandleOriginalLeft = this.nodeData.data.customLeft
       this.isDragHandleMousedown = true
+      this.dragHandleDidMove = false
       window.addEventListener('mousemove', this.onDragMousemoveHandle, true)
       window.addEventListener('mouseup', this.onDragMouseupHandle, true)
       window.addEventListener('blur', this.onDragMouseupHandle)
@@ -165,36 +178,28 @@ function updateDragHandle() {
   if (!this.checkEnableDragModifyNodeWidth()) {
     if (this._dragHandleNodes) {
       this._dragHandleNodes.forEach(node => node.remove())
-      this._dragHandleMarks.forEach(node => node.remove())
     }
+    if (this.group) this.group.removeClass('smm-resizable-node')
     return
   }
   if (!this._dragHandleInitialized) this.initDragHandle()
   if (!this._dragHandleNodes) {
     this._dragHandleNodes = this.createDragHandleNode()
   }
-  if (this.getData('isActive')) {
-    this._dragHandleNodes.forEach((node, index) => {
-      const isLeft = index % 2 === 0
-      const isTop = index < 2
-      node.x(isLeft
-        ? -this.dragHandleHitWidth / 2
-        : this.width - this.dragHandleHitWidth / 2)
-      node.y((isTop ? 0 : this.height) - this.dragHandleHitWidth / 2)
-      if (node.parent() !== this.group) this.group.add(node)
-      const mark = this._dragHandleMarks[index]
-      mark.x(isLeft
-        ? -this.dragHandleWidth / 2
-        : this.width - this.dragHandleWidth / 2)
-      mark.y((isTop ? 0 : this.height) - this.dragHandleWidth / 2)
-      if (mark.parent() !== this.group) this.group.add(mark)
-    })
-  } else {
-    this._dragHandleNodes.forEach(node => {
-      node.remove()
-    })
-    this._dragHandleMarks.forEach(node => node.remove())
+  this.group.addClass('smm-resizable-node')
+  if (!this.getData('isActive') && !this._isMouseenter &&
+    !this.isDragHandleMousedown) {
+    this._dragHandleNodes.forEach(node => node.remove())
+    return
   }
+  this._dragHandleNodes.forEach((node, index) => {
+    node.size(this.dragHandleHitWidth, this.height + this.dragHandleHitWidth)
+    node.x(index === 0
+      ? -this.dragHandleHitWidth / 2
+      : this.width - this.dragHandleHitWidth / 2)
+    node.y(-this.dragHandleHitWidth / 2)
+    if (node.parent() !== this.group) this.group.add(node)
+  })
 }
 
 export default {
