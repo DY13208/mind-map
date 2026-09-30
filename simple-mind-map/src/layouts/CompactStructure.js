@@ -10,6 +10,8 @@ class CompactStructure extends LogicalStructure {
     this.compactConfig = compactLayoutConfig
     this.busXByNode = new Map()
     this.obstacleRightByNode = new Map()
+    this.armOffsetsByNode = new Map()
+    this.placedConnectorRoutes = []
   }
 
   getMarginX() {
@@ -23,11 +25,17 @@ class CompactStructure extends LogicalStructure {
   }
 
   doLayout(callback) {
-    asyncRun([
+    const tasks = [
       () => this.computedBaseValue(),
       () => this.computedTopValue(),
       () => callback(this.root)
-    ])
+    ]
+    if (this.renderer._syncLayoutForResize) {
+      this.renderer._syncLayoutForResize = false
+      tasks.forEach(task => task())
+    } else {
+      asyncRun(tasks)
+    }
   }
 
   computedBaseValue() {
@@ -61,6 +69,8 @@ class CompactStructure extends LogicalStructure {
     const levels = this.levels || []
     this.obstacleRightByNode = new Map()
     this.busXByNode = new Map()
+    this.armOffsetsByNode = new Map()
+    this.placedConnectorRoutes = []
     for (let depth = 1; depth < levels.length; depth++) {
       const parents = levels[depth - 1] || []
       const groups = []
@@ -146,7 +156,11 @@ class CompactStructure extends LogicalStructure {
   // actual parent/child Y coordinates, minimizing crossings between another
   // branch's horizontal arm and this branch's vertical trunk.
   assignConnectorLanes(onlyDepth = null) {
-    if (onlyDepth === null) this.busXByNode = new Map()
+    if (onlyDepth === null || onlyDepth === 0) {
+      this.busXByNode = new Map()
+      this.armOffsetsByNode = new Map()
+      this.placedConnectorRoutes = []
+    }
     const nodeUseLineStyle = this.mindMap.themeConfig.nodeUseLineStyle
     const levels = this.levels || []
     levels.forEach((nodes, depth) => {
@@ -218,16 +232,40 @@ class CompactStructure extends LogicalStructure {
         }
       }
       const { alwaysShowExpandBtn, notShowExpandBtn } = this.mindMap.opt
-      const placed = []
+      const placed = this.placedConnectorRoutes
       const crossingCount = (vertical, horizontal) => {
         if (horizontal.y <= vertical.minY || horizontal.y >= vertical.maxY) return 0
         return vertical.busX > Math.min(horizontal.from, horizontal.to) &&
           vertical.busX < Math.max(horizontal.from, horizontal.to) ? 1 : 0
       }
       const arms = route => [
-        { y: route.sourceY, from: route.sourceRight, to: route.busX },
-        ...route.childYs.map(y => ({ y, from: route.busX, to: route.childLeft }))
+        { y: route.sourceY + (route.sourceOffset || 0), from: route.sourceRight, to: route.busX },
+        ...route.childYs.map((y, index) => ({
+          y: y + ((route.childOffsets || [])[index] || 0),
+          from: route.busX,
+          to: route.childLeft
+        }))
       ]
+      const armConflict = (arm, other) => {
+        const left = Math.max(Math.min(arm.from, arm.to), Math.min(other.from, other.to))
+        const right = Math.min(Math.max(arm.from, arm.to), Math.max(other.from, other.to))
+        return right - left > 1 && Math.abs(arm.y - other.y) < 3
+      }
+      const visibleNodes = levels.slice(0, depth + 2).flat()
+      const hitsNode = (segment, target) => {
+        const left = target.left + 1
+        const right = target.left + target.width - 1
+        const top = target.top + 1
+        const bottom = target.top + target.height - 1
+        if (segment.y1 === segment.y2) {
+          return segment.y1 > top && segment.y1 < bottom &&
+            Math.max(segment.x1, segment.x2) > left &&
+            Math.min(segment.x1, segment.x2) < right
+        }
+        return segment.x1 > left && segment.x1 < right &&
+          Math.max(segment.y1, segment.y2) > top &&
+          Math.min(segment.y1, segment.y2) < bottom
+      }
       ordered.forEach(route => {
         const { node } = route
         const expandBtnSize = alwaysShowExpandBtn && !notShowExpandBtn && depth > 0
@@ -252,6 +290,13 @@ class CompactStructure extends LogicalStructure {
               )
             })
           })
+          visibleNodes.forEach(other => {
+            if (other === node || node.children.includes(other)) return
+            candidates.push(
+              other.left - this.compactConfig.connectorMargin,
+              other.left + other.width + this.compactConfig.connectorMargin
+            )
+          })
           candidates.forEach(x => {
             if (x < minX || x > maxX) return
             const nearby = placed.some(other => {
@@ -261,12 +306,17 @@ class CompactStructure extends LogicalStructure {
             if (nearby) return
             route.busX = x
             const routeArms = arms(route)
-            const collisions = placed.reduce((count, other) => {
+            const nodeCollisions = visibleNodes.filter(other => {
+              return other !== node && !node.children.includes(other) &&
+                hitsNode({ x1: x, y1: route.minY, x2: x, y2: route.maxY }, other)
+            }).length
+            const lineCollisions = placed.reduce((count, other) => {
               const otherArms = arms(other)
               return count + otherArms.reduce((sum, arm) => sum + crossingCount(route, arm), 0) +
                 routeArms.reduce((sum, arm) => sum + crossingCount(other, arm), 0)
             }, 0)
-            const score = collisions * 10000 + Math.abs(x - middle)
+            const collisions = nodeCollisions + lineCollisions
+            const score = nodeCollisions * 100000 + lineCollisions * 10000 + Math.abs(x - middle)
             if (!best || score < best.score) best = { x, score, collisions }
           })
           if (best && best.collisions === 0) break
@@ -290,6 +340,69 @@ class CompactStructure extends LogicalStructure {
         route.busX = best
           ? best.x
           : Math.max(minX, route.childLeft - this.compactConfig.connectorMargin)
+        // Coincident horizontal arms cannot be separated by moving the vertical
+        // bus alone. Give only the colliding arms a short local dogleg.
+        // Moving a bus cannot solve collinear arms. Keep lane selection about
+        // trunk crossings, then resolve horizontal overlap at the arm itself.
+        const existingArms = placed.flatMap(arms)
+        const offsets = [0]
+        for (let distance = 6; distance <= 60; distance += 6) {
+          offsets.push(-distance, distance)
+        }
+        const chooseOffset = (arm, target, isSource) => {
+          const obstacles = visibleNodes.filter(other => other !== node && other !== target)
+          for (const offset of offsets) {
+            const candidate = { ...arm, y: arm.y + offset }
+            if (existingArms.some(other => armConflict(candidate, other))) continue
+            const stubX = isSource
+              ? Math.min(route.busX - 2, arm.from + 6)
+              : Math.max(route.busX + 2, arm.to - 6)
+            const useDogleg = offset !== 0 && (isSource
+              ? stubX > arm.from : stubX < arm.to)
+            if (offset !== 0 && !useDogleg) continue
+            const segments = useDogleg
+              ? isSource
+                ? [
+                    { x1: arm.from, y1: arm.y, x2: stubX, y2: arm.y },
+                    { x1: stubX, y1: arm.y, x2: stubX, y2: candidate.y },
+                    { x1: stubX, y1: candidate.y, x2: arm.to, y2: candidate.y }
+                  ]
+                : [
+                    { x1: arm.from, y1: candidate.y, x2: stubX, y2: candidate.y },
+                    { x1: stubX, y1: candidate.y, x2: stubX, y2: arm.y },
+                    { x1: stubX, y1: arm.y, x2: arm.to, y2: arm.y }
+                  ]
+              : [{ x1: arm.from, y1: arm.y, x2: arm.to, y2: arm.y }]
+            if (segments.some(segment => obstacles.some(other => hitsNode(segment, other)))) {
+              continue
+            }
+            if (placed.some(other => segments.some(segment => {
+              return segment.y1 === segment.y2 && crossingCount(other, {
+                y: segment.y1, from: segment.x1, to: segment.x2
+              })
+            }))) continue
+            return offset
+          }
+          return 0
+        }
+        route.sourceOffset = chooseOffset({
+          y: route.sourceY,
+          from: route.sourceRight,
+          to: route.busX
+        }, null, true)
+        route.childOffsets = route.childYs.map((y, index) => chooseOffset({
+          y,
+          from: route.busX,
+          to: route.childLeft
+        }, node.children[index], false))
+        const routedYs = [route.sourceY + route.sourceOffset,
+          ...route.childYs.map((y, index) => y + route.childOffsets[index])]
+        route.minY = Math.min(...routedYs)
+        route.maxY = Math.max(...routedYs)
+        this.armOffsetsByNode.set(node, {
+          source: route.sourceOffset,
+          children: route.childOffsets
+        })
         this.busXByNode.set(node, route.busX)
         placed.push(route)
       })
@@ -357,6 +470,7 @@ class CompactStructure extends LogicalStructure {
     const y1 = top + height / 2 + (nodeUseLineStyle && !node.isRoot ? height / 2 : 0)
     const x1 = left + width + expandBtnSize
     const trunkX = Math.max(x1, busX)
+    const armOffsets = this.armOffsetsByNode.get(node) || { source: 0, children: [] }
     const branches = []
     node.children.forEach((item, index) => {
       if (this.renderReversedHorizontalLine(
@@ -364,17 +478,28 @@ class CompactStructure extends LogicalStructure {
       )) return
       const y2 = item.top + item.height / 2 + (nodeUseLineStyle ? item.height / 2 : 0)
       const x2 = item.left + (nodeUseLineStyle ? item.width : 0)
-      branches.push({ item, index, x2, y2 })
+      branches.push({ item, index, x2, y2,
+        offset: armOffsets.children[index] || 0 })
     })
     if (!branches.length) return
-    const topY = branches.reduce((min, branch) => Math.min(min, branch.y2), y1)
-    const bottomY = branches.reduce((max, branch) => Math.max(max, branch.y2), y1)
-    branches.forEach(({ item, index, x2, y2 }, branchIndex) => {
+    const sourceY = y1 + armOffsets.source
+    const topY = branches.reduce((min, branch) => Math.min(min, branch.y2 + branch.offset), sourceY)
+    const bottomY = branches.reduce((max, branch) => Math.max(max, branch.y2 + branch.offset), sourceY)
+    branches.forEach(({ item, index, x2, y2, offset }, branchIndex) => {
       // The first child owns the shared trunk. Other children draw only their
       // horizontal branch, so the same vertical segment is never painted twice.
-      const path = branchIndex === 0
-        ? `M ${x1},${y1} L ${trunkX},${y1} M ${trunkX},${topY} L ${trunkX},${bottomY} M ${trunkX},${y2} L ${x2},${y2}`
+      const sourceStubX = Math.min(trunkX - 2, x1 + 6)
+      const sourceArm = armOffsets.source && sourceStubX > x1
+        ? `M ${x1},${y1} L ${sourceStubX},${y1} L ${sourceStubX},${sourceY} L ${trunkX},${sourceY}`
+        : `M ${x1},${y1} L ${trunkX},${y1}`
+      const childArmY = y2 + offset
+      const childStubX = Math.max(trunkX + 2, x2 - 6)
+      const childArm = offset && childStubX < x2
+        ? `M ${trunkX},${childArmY} L ${childStubX},${childArmY} L ${childStubX},${y2} L ${x2},${y2}`
         : `M ${trunkX},${y2} L ${x2},${y2}`
+      const path = branchIndex === 0
+        ? `${sourceArm} M ${trunkX},${topY} L ${trunkX},${bottomY} ${childArm}`
+        : childArm
       this.setLineStyle(style, lines[index], path, item)
     })
   }
