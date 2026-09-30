@@ -42,6 +42,7 @@ class Drag extends Base {
     this.drawTransform = null
     // 克隆节点
     this.clone = null
+    this.dragRangeGuide = null
     // 同级位置占位符
     this.placeholder = null
     this.placeholderWidth = 50
@@ -279,7 +280,7 @@ class Drag extends Base {
       this.mindMap.render()
     }
     this.removeCloneNode()
-    if (didMove && draggedUids.length) {
+    if (this.isDragging && draggedUids.length) {
       const renderer = this.mindMap.renderer
       const owners = new Set()
       draggedUids.forEach(uid => {
@@ -287,11 +288,12 @@ class Drag extends Base {
           renderer && typeof renderer.findNodeByUid === 'function'
             ? renderer.findNodeByUid(uid)
             : null
-        if (live && typeof renderer.setNodeActive === 'function') {
-          renderer.setNodeActive(live, true)
+        if (live && typeof renderer.addNodeToActiveList === 'function') {
+          renderer.addNodeToActiveList(live, true)
         }
-        if (live && live.parent) owners.add(live.parent)
+        if (didMove && live && live.parent) owners.add(live.parent)
       })
+      renderer.emitNodeActiveEvent()
       owners.forEach(owner => {
         if (typeof owner.updateGeneralization === 'function') {
           owner.updateGeneralization()
@@ -379,6 +381,7 @@ class Drag extends Base {
       this.nodeTreeToList()
       // 创建克隆节点
       this.createCloneNode()
+      this.createDragRangeGuide()
       // 清除当前所有激活的节点
       this.mindMap.execCommand('CLEAR_ACTIVE_NODE')
       this.isDragging = true
@@ -447,6 +450,8 @@ class Drag extends Base {
           handleDragCloneNode(this.clone)
         }
       }
+      // 拖拽预览也要保留节点的选中轮廓，即使拖动前未选中节点。
+      this.clone.addClass('smm-drag-preview')
       this.clone.opacity(dragOpacityConfig.cloneNodeOpacity)
       this.clone.css('z-index', 99999)
       // 同级位置提示元素
@@ -475,8 +480,45 @@ class Drag extends Base {
     }
   }
 
+  // 虚线框包住被拖动节点及其可见子节点，不延伸到整个画布。
+  createDragRangeGuide() {
+    const node = this.beingDragNodeList[0]
+    if (!node) return
+    const bounds = {
+      left: node.left,
+      top: node.top,
+      right: node.left + node.width,
+      bottom: node.top + node.height
+    }
+    const includeVisible = current => {
+      if (!current) return
+      bounds.left = Math.min(bounds.left, current.left)
+      bounds.top = Math.min(bounds.top, current.top)
+      bounds.right = Math.max(bounds.right, current.left + current.width)
+      bounds.bottom = Math.max(bounds.bottom, current.top + current.height)
+      if (current.getData('expand') === false) return
+      ;(current.children || []).forEach(includeVisible)
+    }
+    includeVisible(node)
+    const padding = 16
+    this.dragRangeGuide = this.mindMap.otherDraw
+      .rect()
+      .move(bounds.left - padding, bounds.top - padding)
+      .size(
+        bounds.right - bounds.left + padding * 2,
+        bounds.bottom - bounds.top + padding * 2
+      )
+      .fill('none')
+      .stroke({ color: '#246bff', width: 2, dasharray: '7 7' })
+    this.dragRangeGuide.attr('pointer-events', 'none')
+  }
+
   //  移除克隆节点
   removeCloneNode() {
+    if (this.dragRangeGuide) {
+      this.dragRangeGuide.remove()
+      this.dragRangeGuide = null
+    }
     if (this.clone) {
       this.clone.remove()
       this.clone = null

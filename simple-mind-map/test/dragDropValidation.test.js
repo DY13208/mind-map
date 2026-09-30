@@ -55,6 +55,27 @@ test('release resolves the final target before an unexpired hover throttle',asyn
   assert.equal(finalTarget,'target')
 })
 
+test('drag without a valid drop restores the node to the active list', async()=>{
+  const dragged=node(0,0)
+  dragged.getData=k=>k==='uid'?'dragged':k==='expand'?true:false
+  const active=[]
+  const drag=Object.assign(Object.create(Drag.prototype),{
+    isMousedown:true,isDragging:true,clone:{},drawTransform:null,
+    beingDragNodeList:[dragged],removeCloneNode(){},reset(){},
+    mindMap:{
+      opt:{enableFreeDrag:false},
+      renderer:{
+        findNodeByUid:uid=>uid==='dragged'?dragged:null,
+        addNodeToActiveList:node=>active.push(node),
+        emitNodeActiveEvent(){}
+      },
+      emit(){}
+    }
+  })
+  await drag.onMouseup({clientX:0,clientY:0})
+  assert.deepEqual(active,[dragged])
+})
+
 function dropTarget({ left = 100, top = 100, width = 80, height = 40 } = {}) {
   return {
     left, top, width, height,
