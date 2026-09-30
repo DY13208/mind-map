@@ -71,6 +71,90 @@ function connector(owner) {
   return line
 }
 
+test('layout reset retains live connectors until the completed layout is painted', () => {
+  const parent = node('parent', [node('a'), node('b')])
+  const first = connector(parent)
+  const second = connector(parent)
+  parent.reset()
+  // Layout calculation yields between tasks. Removing paths here exposes a
+  // blank frame even when only one node was inserted or resized.
+  assert.equal(first.removed, false)
+  assert.equal(second.removed, false)
+  assert.equal(parent._lines.length, 2)
+  assert.equal(parent.children.length, 0)
+  assert.equal(parent.parent, null)
+})
+
+test('repeated insert resize and delete repaint reuses paths and prunes only unused slots', () => {
+  const a = node('a')
+  const b = node('b')
+  const parent = node('parent', [a, b])
+  const first = connector(parent)
+  const second = connector(parent)
+  let created = 0
+  parent.lineDraw = { path() {
+    created++
+    return { removed: false, remove() { this.removed = true } }
+  } }
+  const layout = { renderLine(owner, lines) {
+    lines.forEach((line, i) => { line.target = owner.children[i].getData('uid') })
+  } }
+  parent.renderer = { nodeCache: { parent }, layout }
+  parent.mindMap = { renderer: parent.renderer }
+  parent.style = { getStyle: () => 'straight' }
+  const repaint = children => {
+    parent.reset()
+    // The previous committed frame remains attached during async layout.
+    assert.equal(first.removed, false)
+    children.forEach(child => parent.addChildren(child))
+    parent.renderLine()
+  }
+  const c = node('c')
+  repaint([a, b, c])
+  const third = parent._lines[2]
+  assert.equal(created, 1)
+  assert.equal(parent._lines[0], first)
+  assert.equal(parent._lines[1], second)
+  repaint([a, b, c]) // geometry-only update
+  assert.equal(created, 1)
+  repaint([c, a]) // delete/reorder, including historical tree hydration
+  assert.equal(third.removed, true)
+  assert.equal(second.removed, false)
+  assert.equal(first.target, 'c')
+  assert.equal(second.target, 'a')
+  repaint([c, a])
+  assert.equal(created, 1)
+  assert.equal(parent._lines.length, 2)
+  parent.reset()
+  parent.renderLine() // parent becomes a leaf
+  assert.equal(first.removed, true)
+  assert.equal(second.removed, true)
+  assert.equal(parent._lines.length, 0)
+})
+
+test('a real layout switch still clears paths in both caches including detached owners', () => {
+  const live = node('live')
+  const retired = node('retired')
+  const liveLine = connector(live)
+  const retiredLine = connector(retired)
+  let layerCleared = 0
+  let cacheCleared = 0
+  const renderer = Object.assign(Object.create(Render.prototype), {
+    nodeCache: { live }, lastNodeCache: { live, retired },
+    layout: { lru: { clear() { cacheCleared++ } } },
+    mindMap: { lineDraw: { clear() { layerCleared++ } } }
+  })
+  renderer.cleanupLayoutRenderer()
+  assert.equal(liveLine.removed, true)
+  assert.equal(retiredLine.removed, true)
+  assert.equal(live._lines.length, 0)
+  assert.equal(retired._lines.length, 0)
+  assert.equal(live.needLayout, true)
+  assert.equal(retired.needLayout, true)
+  assert.equal(cacheCleared, 1)
+  assert.equal(layerCleared, 1)
+})
+
 test('collapsed render removes old outgoing connectors but keeps the incoming edge', () => {
   const parent = node('parent')
   const old = node('old')
