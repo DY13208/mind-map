@@ -1016,6 +1016,7 @@ export default {
       }
       actions.push({
         key: 'refresh', label: this.$t('toolbar.refresh'),
+        iconClass: 'refreshIcon',
         icon: this.refreshing ? 'el-icon-loading' : 'el-icon-refresh',
         disabled: this.refreshing, testId: 'refresh'
       })
@@ -1029,7 +1030,15 @@ export default {
         })
       }
       if (!this.isReadonly) {
-        actions.push({ key: 'run', label: '运行', icon: this.jobDispatching ? 'el-icon-loading' : 'el-icon-video-play', disabled: this.jobDispatching, title: this.runButtonTitle, testId: 'run-workbuddy-job' })
+        // 转圈只转 .icon 里的 <i class="runIcon">（ToolbarFileBtnList 负责套这层），
+        // 外层方块不动；派发中挂 busy：图标方块高亮 + 文字色拉回，不是纯灰掉。
+        actions.push({
+          key: 'run', label: '运行',
+          iconClass: 'runIcon',
+          icon: this.jobDispatching ? 'el-icon-loading' : 'el-icon-video-play',
+          disabled: this.jobDispatching, busy: this.jobDispatching,
+          title: this.runButtonTitle, testId: 'run-workbuddy-job'
+        })
       }
       if (this.$route.query.room) {
         actions.push({ key: 'copyInvite', label: this.$t('acl.copyLink'), icon: 'iconfont iconfuzhi', title: this.$t('cooperate.copyInvite'), testId: 'copy-invite' })
@@ -3868,6 +3877,18 @@ export default {
         &.disabled {
           color: #54595f;
         }
+
+        // 派发中：图标方块亮成主题色（深色主题下的配色）
+        // 文字色也要拉回来 —— .disabled 的 #54595f 在 #262a2e 工具栏上几乎看不见，
+        // 而此刻按钮只是「暂时不可重复点」，不是「坏掉」
+        &.busy {
+          color: hsla(0, 0%, 100%, 0.9);
+
+          .icon {
+            border-color: rgba(64, 158, 255, 0.55);
+            background: rgba(64, 158, 255, 0.16);
+          }
+        }
       }
     }
   }
@@ -4090,6 +4111,19 @@ export default {
         pointer-events: none;
       }
 
+      // 派发中：图标方块亮成主题色，一眼看出「在跑」而不是「按钮坏了」。
+      // 文字色也一起拉回来（.disabled 的 #bcbcbc 太淡），因为此刻按钮只是
+      // 「暂时不可重复点」，不是真禁用。
+      // 两条 .busy 各有主题：深色那条带 .isDark 多一层类，优先级更高，不会互相覆盖。
+      &.busy {
+        color: rgba(26, 26, 26, 0.8);
+
+        .icon {
+          border-color: #409eff;
+          background: #ecf5ff;
+        }
+      }
+
       .icon {
         display: flex;
         height: 26px;
@@ -4100,6 +4134,13 @@ export default {
         flex-direction: column;
         text-align: center;
         padding: 0 5px;
+
+        // 图标本体。转圈只转它，外层的方块（边框+白底）保持静止。
+        // inline-block 是转圈动画生效的前提，别删。
+        i {
+          display: inline-block;
+          line-height: 1;
+        }
 
         .refreshIcon {
           display: inline-block;
