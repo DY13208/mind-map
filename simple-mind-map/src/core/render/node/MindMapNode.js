@@ -538,11 +538,12 @@ class MindMapNode {
 
   //  激活节点
   active(e) {
-    if (this.mindMap.opt.readonly) {
-      return
-    }
     e && e.stopPropagation()
-    if (this.getData('isActive')) {
+    if (
+      this.getData('isActive') &&
+      this.renderer.findActiveNodeIndex(this) !== -1
+    ) {
+      this.updateNodeActiveClass()
       return
     }
     if (
@@ -670,6 +671,26 @@ class MindMapNode {
     if (!this.group) return
     const isActive = this.getData('isActive')
     this.group[isActive ? 'addClass' : 'removeClass']('active')
+    // 选中框是 SVG 元素，直接设置显示样式，避免被主题或嵌入页面的 CSS 隐藏。
+    const outline = this.hoverNode && this.hoverNode.node
+    if (!outline) return
+    const style = outline.style
+    if (isActive) {
+      style.setProperty('display', 'block')
+      style.setProperty('opacity', '1')
+      style.setProperty('stroke', '#246bff')
+      style.setProperty('stroke-width', '3')
+      style.setProperty('pointer-events', 'none')
+    } else {
+      const properties = [
+        'display',
+        'opacity',
+        'stroke',
+        'stroke-width',
+        'pointer-events'
+      ]
+      properties.forEach(property => style.removeProperty(property))
+    }
   }
 
   // 根据是否激活更新节点

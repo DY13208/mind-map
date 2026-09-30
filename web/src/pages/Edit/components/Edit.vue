@@ -1093,6 +1093,14 @@ export default {
           openBlankMode: false
         },
         ...(config || {}),
+        // 选中节点的外框要在不同主题下都清晰可见。
+        hoverRectColor: '#246bff',
+        hoverRectPadding: 4,
+        dragOpacityConfig: {
+          beingDragNodeOpacity: 0.3,
+          ...((config && config.dragOpacityConfig) || {}),
+          cloneNodeOpacity: 0.9
+        },
         ...(this.isLargeMap
           ? {
               openPerformance: true,
@@ -1767,6 +1775,21 @@ export default {
 </style>
 
 <style lang="less">
+/* SVG 节点由脑图库动态插入，选中框需要使用非 scoped 样式。 */
+#mindMapContainer .smm-node.active .smm-hover-node,
+#mindMapContainer .smm-drag-preview .smm-hover-node {
+  display: block;
+  opacity: 1;
+  stroke: #246bff;
+  stroke-width: 3;
+  pointer-events: none;
+}
+
+#mindMapContainer rect.smm-drag-preview {
+  stroke: #246bff;
+  stroke-width: 3;
+}
+
 /* 日夜间画布交叉淡入（View Transition），保持短促以免感觉「闪一下」 */
 ::view-transition-group(mind-map-appearance) {
   animation-duration: 0.18s;
