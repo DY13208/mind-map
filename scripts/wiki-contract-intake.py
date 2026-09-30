@@ -305,6 +305,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", required=True)
     ap.add_argument("--out", default=os.path.join(ROOT, "data", "contracts"))
+    ap.add_argument("--taken-dir", default="", help="已入库 JSON 目录（默认 <项目>/data/contracts）")
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--include-attachments", action="store_true", help="连授权书/委托书/声明书一起收")
     ap.add_argument("--limit", type=int, default=0)
@@ -329,17 +330,19 @@ def main():
         except Exception as e:
             log("! manifest 读取失败，按空处理: %s" % e)
 
-    # 已入库合同的来源文件名（data/contracts/*.json 的 source_file）
+    # 已入库合同的来源文件名（默认看主目录 data/contracts，分月暂存时也能识别已入库项）
+    taken_dir = os.path.abspath(args.taken_dir or os.path.join(ROOT, "data", "contracts"))
     taken = set()
-    for f in os.listdir(out_root):
-        if f.endswith(".json"):
-            try:
-                sp = json.load(open(os.path.join(out_root, f), encoding="utf-8"))
-                for k in ("source_file", "sourceFile"):
-                    if sp.get(k):
-                        taken.add(os.path.basename(str(sp[k])))
-            except Exception:
-                pass
+    if os.path.isdir(taken_dir):
+        for f in os.listdir(taken_dir):
+            if f.endswith(".json"):
+                try:
+                    sp = json.load(open(os.path.join(taken_dir, f), encoding="utf-8"))
+                    for k in ("source_file", "sourceFile"):
+                        if sp.get(k):
+                            taken.add(os.path.basename(str(sp[k])))
+                except Exception:
+                    pass
 
     cands = []
     skipped = {"temp": 0, "attachment": 0, "neg": 0, "nokw": 0}
