@@ -7,6 +7,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
+import { buildSopContext } from './sopContext.mjs'
 import mcpUserToken from './mcpUserToken.js'
 import {
   attachmentMetaForNode,
@@ -436,6 +437,22 @@ function createServer(authorization) {
             timeoutMs: 25000
           })
         )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'build_sop_context',
+    '按节点 UID 只读采集 SOP 所需的脑图事实上下文；完整读取路径、子节点、后代、同级节点及附件正文，不调用 get_map，不修改节点。',
+    {
+      room_key: z.string().min(1).describe('房间号'),
+      node_uid: z.string().min(1).describe('目标节点 UID；同名节点必须使用准确 UID')
+    },
+    async ({ room_key, node_uid }) => {
+      try {
+        return ok(await buildSopContext(room_key, node_uid, api))
       } catch (err) {
         return fail(err)
       }
