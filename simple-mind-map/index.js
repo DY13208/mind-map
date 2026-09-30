@@ -193,6 +193,14 @@ class MindMap {
   handleData(data) {
     if (isUndef(data) || Object.keys(data).length <= 0) return null
     data = simpleDeepClone(data || {})
+    // Selection belongs to the current editor session. Imported/saved trees
+    // must never reactivate nodes when the page is loaded again.
+    const clearSelection = node => {
+      if (!node) return
+      if (node.data) node.data.isActive = false
+      ;(node.children || []).forEach(clearSelection)
+    }
+    clearSelection(data)
     // 根节点不能收起
     if (data.data && !data.data.expand) {
       data.data.expand = true

@@ -9,7 +9,7 @@ function initDragHandle() {
   // 拖拽手柄元素
   this._dragHandleNodes = null
   this._dragHandleMarks = null
-  // 选中后显示在节点上方两角的宽度拖拽手柄
+  // 四角共享同一套文本宽度调整逻辑；高度由文本换行自动计算。
   this.dragHandleWidth = 6
   this.dragHandleHitWidth = 14
   // 鼠标按下时的x坐标
@@ -24,10 +24,9 @@ function initDragHandle() {
   this.dragHandleMousedownBodyCursor = ''
   // 鼠标按下时记录当前节点的left值
   this.dragHandleMousedownLeft = 0
-  // A width drag changes the position of the descendants. Coalesce layout
-  // updates to one per animation frame instead of repainting the whole tree
-  // for every mousemove event.
+  // Coalesce the size and layout update into a single paint per frame.
   this.dragHandleLayoutFrame = null
+  this.dragHandleNeedsUpdate = false
 
   this.onDragMousemoveHandle = this.onDragMousemoveHandle.bind(this)
   this.onDragMouseupHandle = this.onDragMouseupHandle.bind(this)
@@ -54,7 +53,7 @@ function onDragMousemoveHandle(e) {
   const ox = e.clientX - this.dragHandleMousedownX
   let newWidth =
     this.dragHandleMousedownCustomTextWidth +
-    (this.dragHandleIndex === 0 ? -ox : ox) / scaleX
+    (this.dragHandleIndex % 2 === 0 ? -ox : ox) / scaleX
   newWidth = Math.max(newWidth, minNodeTextModifyWidth)
   if (maxNodeTextModifyWidth !== -1) {
     newWidth = Math.min(newWidth, maxNodeTextModifyWidth)
@@ -71,17 +70,24 @@ function onDragMousemoveHandle(e) {
     }
   }
   this.customTextWidth = newWidth
-  if (this.dragHandleIndex === 0) {
-    this.left = this.dragHandleMousedownLeft + ox / scaleX
+  // The layout pass reads nodeData, while the command (and history update) is
+  // committed only on mouseup. Keep the preview geometry in both places.
+  this.nodeData.data.customTextWidth = newWidth
+  if (this.dragHandleIndex % 2 === 0) {
+    this.left = this.dragHandleMousedownLeft +
+      this.dragHandleMousedownCustomTextWidth - newWidth
   }
-  // 自定义内容不重新渲染，交给开发者
-  this.reRender(useCustomContent ? [] : ['text'], {
-    ignoreUpdateCustomTextWidth: true
-  })
+  this.dragHandleNeedsUpdate = true
   if (this.dragHandleLayoutFrame === null) {
     this.dragHandleLayoutFrame = requestAnimationFrame(() => {
       this.dragHandleLayoutFrame = null
-      if (this.isDragHandleMousedown) this.mindMap.render()
+      if (!this.isDragHandleMousedown || !this.dragHandleNeedsUpdate) return
+      this.dragHandleNeedsUpdate = false
+      this.renderer._syncLayoutForResize = !!(
+        this.renderer.layout && this.renderer.layout.compactConfig
+      )
+      this.renderer._syncPaintOnce = true
+      this.mindMap.render()
     })
   }
 }
@@ -96,6 +102,7 @@ function onDragMouseupHandle() {
     cancelAnimationFrame(this.dragHandleLayoutFrame)
     this.dragHandleLayoutFrame = null
   }
+  this.dragHandleNeedsUpdate = false
   document.body.style.cursor = this.dragHandleMousedownBodyCursor
   this.group.css({
     cursor: 'default'
@@ -113,8 +120,8 @@ function onDragMouseupHandle() {
 
 // 插件拖拽手柄元素
 function createDragHandleNode() {
-  const list = [new Rect(), new Rect()]
-  this._dragHandleMarks = [new Rect(), new Rect()]
+  const list = Array.from({ length: 4 }, () => new Rect())
+  this._dragHandleMarks = Array.from({ length: 4 }, () => new Rect())
   list.forEach((node, index) => {
     node
       .size(this.dragHandleHitWidth, this.dragHandleHitWidth)
@@ -122,7 +129,7 @@ function createDragHandleNode() {
         color: 'transparent'
       })
       .css({
-        cursor: 'ew-resize'
+        cursor: index === 0 || index === 3 ? 'nwse-resize' : 'nesw-resize'
       })
     this._dragHandleMarks[index]
       .size(this.dragHandleWidth, this.dragHandleWidth)
@@ -168,17 +175,19 @@ function updateDragHandle() {
   }
   if (this.getData('isActive')) {
     this._dragHandleNodes.forEach((node, index) => {
-      node.x(index === 0
+      const isLeft = index % 2 === 0
+      const isTop = index < 2
+      node.x(isLeft
         ? -this.dragHandleHitWidth / 2
         : this.width - this.dragHandleHitWidth / 2)
-      node.y(-this.dragHandleHitWidth / 2)
-      this.group.add(node)
+      node.y((isTop ? 0 : this.height) - this.dragHandleHitWidth / 2)
+      if (node.parent() !== this.group) this.group.add(node)
       const mark = this._dragHandleMarks[index]
-      mark.x(index === 0
+      mark.x(isLeft
         ? -this.dragHandleWidth / 2
         : this.width - this.dragHandleWidth / 2)
-      mark.y(-this.dragHandleWidth / 2)
-      this.group.add(mark)
+      mark.y((isTop ? 0 : this.height) - this.dragHandleWidth / 2)
+      if (mark.parent() !== this.group) this.group.add(mark)
     })
   } else {
     this._dragHandleNodes.forEach(node => {

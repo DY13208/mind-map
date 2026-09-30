@@ -133,6 +133,16 @@ test('compact branches use separate routed trunks without crossing other branche
       assert.equal(crosses, false, `${v.owner} trunk crosses ${h.owner} branch`)
     }
   }
+  for (let i = 0; i < horizontal.length; i++) {
+    for (let j = i + 1; j < horizontal.length; j++) {
+      const a = horizontal[i]
+      const b = horizontal[j]
+      if (a.owner === b.owner) continue
+      const overlap = Math.min(a.max, b.max) - Math.max(a.min, b.min)
+      assert.ok(overlap <= 1 || Math.abs(a.y - b.y) >= 3,
+        `${a.owner} and ${b.owner} paint over the same horizontal line`)
+    }
+  }
   for (const parent of root.children) {
     for (const v of vertical) {
       if (v.owner === parent.id) continue
@@ -201,4 +211,80 @@ test('a branch trunk stays outside a neighboring node in its vertical span', () 
     return v.x >= itbp.left + itbp.width ||
       v.max <= itbp.top || v.min >= itbp.top + itbp.height
   }))
+})
+
+test('resize preview completes compact layout in the same paint', () => {
+  const renderer = {
+    _syncLayoutForResize: true,
+    mindMap: {
+      opt: { alwaysShowExpandBtn: false, notShowExpandBtn: false },
+      themeConfig: { nodeUseLineStyle: false }
+    }
+  }
+  const layout = new moduleMock.exports(renderer)
+  const calls = []
+  layout.root = node('root', 80)
+  layout.computedBaseValue = () => calls.push('measure')
+  layout.computedTopValue = () => calls.push('position')
+  layout.doLayout(() => calls.push('paint'))
+  assert.deepEqual(calls, ['measure', 'position', 'paint'])
+  assert.equal(renderer._syncLayoutForResize, false)
+})
+
+test('a widened parent does not route its connector through another child group', () => {
+  const request = node('request', 80)
+  request.left = 830
+  request.top = 417
+  const neighboringChild = node('neighboring-child', 130)
+  neighboringChild.left = 590
+  neighboringChild.top = 484
+  const c = node('c', 380)
+  c.left = 418
+  c.top = 434
+  const sop = node('sop', 70, [request])
+  sop.left = 418
+  sop.top = 484
+  sop.layerIndex = 1
+  const itbp = node('itbp', 130, [neighboringChild])
+  itbp.left = 418
+  itbp.top = 524
+  itbp.layerIndex = 1
+  const root = node('root', 150, [c, sop, itbp])
+  const renderer = {
+    mindMap: {
+      opt: { alwaysShowExpandBtn: true, notShowExpandBtn: false },
+      themeConfig: { nodeUseLineStyle: false }
+    }
+  }
+  const layout = new moduleMock.exports(renderer)
+  layout.root = root
+  layout.levels = [[root], [c, sop, itbp], [request, neighboringChild]]
+  layout.obstacleRightByNode.set(sop, c.left + c.width)
+  layout.obstacleRightByNode.set(itbp, c.left + c.width)
+  layout.renderReversedHorizontalLine = () => false
+  const paths = []
+  layout.setLineStyle = (style, line, d) => paths.push({ owner: line.owner, d })
+  layout.assignConnectorLanes(1)
+  assert.notEqual(layout.armOffsetsByNode.get(sop).source, 0,
+    'the widened C node should force the SOP source arm around the next group')
+  layout.renderLineStraight(sop, [{ owner: sop.id }])
+  const foreignChildren = [
+    { parent: itbp, child: neighboringChild },
+    { parent: c, child: c }
+  ]
+  for (const { owner, d } of paths) {
+    const { horizontal, vertical } = segments(d, owner)
+    for (const { parent, child } of foreignChildren) {
+      if (parent.id === owner) continue
+      const left = child.left + 1
+      const right = child.left + child.width - 1
+      const top = child.top + 1
+      const bottom = child.top + child.height - 1
+      const crosses = horizontal.some(line => line.y > top && line.y < bottom &&
+        line.max > left && line.min < right) ||
+        vertical.some(line => line.x > left && line.x < right &&
+          line.max > top && line.min < bottom)
+      assert.equal(crosses, false, `${owner} connector crosses ${child.id}`)
+    }
+  }
 })
