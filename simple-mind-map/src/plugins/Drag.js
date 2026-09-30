@@ -507,6 +507,7 @@ class Drag extends Base {
     }
     const {
       LOGICAL_STRUCTURE,
+      COMPACT_STRUCTURE,
       LOGICAL_STRUCTURE_LEFT,
       MIND_MAP,
       ORGANIZATION_STRUCTURE,
@@ -536,6 +537,7 @@ class Drag extends Base {
       }
       switch (this.mindMap.opt.layout) {
         case LOGICAL_STRUCTURE:
+        case COMPACT_STRUCTURE:
         case LOGICAL_STRUCTURE_LEFT:
           this.handleLogicalStructure(node)
           break
@@ -579,6 +581,7 @@ class Drag extends Base {
   handleOverlapNode() {
     const {
       LOGICAL_STRUCTURE,
+      COMPACT_STRUCTURE,
       LOGICAL_STRUCTURE_LEFT,
       MIND_MAP,
       ORGANIZATION_STRUCTURE,
@@ -612,6 +615,7 @@ class Drag extends Base {
       dir = this.getNewChildNodeDir(lastChild)
       switch (this.mindMap.opt.layout) {
         case LOGICAL_STRUCTURE:
+        case COMPACT_STRUCTURE:
         case MIND_MAP:
           x =
             dir === LEFT
@@ -731,6 +735,7 @@ class Drag extends Base {
       dir = this.getNewChildNodeDir(this.overlapNode)
       switch (this.mindMap.opt.layout) {
         case LOGICAL_STRUCTURE:
+        case COMPACT_STRUCTURE:
         case MIND_MAP:
           x =
             dir === RIGHT
@@ -831,6 +836,7 @@ class Drag extends Base {
   getNewChildNodeDir(node) {
     const {
       LOGICAL_STRUCTURE,
+      COMPACT_STRUCTURE,
       LOGICAL_STRUCTURE_LEFT,
       MIND_MAP,
       TIMELINE2,
@@ -844,6 +850,7 @@ class Drag extends Base {
     } = CONSTANTS.LAYOUT
     switch (this.mindMap.opt.layout) {
       case LOGICAL_STRUCTURE:
+      case COMPACT_STRUCTURE:
         return CONSTANTS.LAYOUT_GROW_DIR.RIGHT
       case LOGICAL_STRUCTURE_LEFT:
         return CONSTANTS.LAYOUT_GROW_DIR.LEFT

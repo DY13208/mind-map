@@ -77,8 +77,8 @@ export default {
   },
   created() {
     this.layout = this.mindMap.getLayout()
-    this.handleLayoutChange = layout => {
-      this.layout = layout || this.mindMap.getLayout()
+    this.handleLayoutChange = () => {
+      this.layout = this.mindMap.getLayout()
     }
     this.mindMap.on('layout_change', this.handleLayoutChange)
   },

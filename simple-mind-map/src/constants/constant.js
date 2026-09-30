@@ -9,6 +9,7 @@ export const CONSTANTS = {
   LAYOUT: {
     LOGICAL_STRUCTURE: 'logicalStructure',
     LOGICAL_STRUCTURE_LEFT: 'logicalStructureLeft',
+    COMPACT_STRUCTURE: 'compactStructure',
     MIND_MAP: 'mindMap',
     ORGANIZATION_STRUCTURE: 'organizationStructure',
     CATALOG_ORGANIZATION: 'catalogOrganization',

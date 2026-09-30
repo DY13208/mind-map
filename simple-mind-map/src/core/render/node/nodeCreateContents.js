@@ -467,8 +467,9 @@ function createTextNode(specifyText) {
   if (!isUndef(text)) {
     textArr = String(text).split(/\n/gim)
   }
-  const { textAutoWrapWidth: maxWidth, emptyTextMeasureHeightText } =
-    this.mindMap.opt
+  const { textAutoWrapWidth, emptyTextMeasureHeightText } = this.mindMap.opt
+  const hasCustomWidth = this.hasCustomWidth()
+  const maxWidth = hasCustomWidth ? this.customTextWidth : textAutoWrapWidth
   let isMultiLine = textArr.length > 1
   textArr.forEach((item, index) => {
     let arr = item.split('')
@@ -524,7 +525,7 @@ function createTextNode(specifyText) {
     const tmpBbox = tmpNode.bbox()
     height = tmpBbox.height
   }
-  width = Math.min(Math.ceil(width), maxWidth)
+  width = hasCustomWidth ? maxWidth : Math.min(Math.ceil(width), maxWidth)
   height = Math.ceil(height)
   g.attr('data-width', width)
   g.attr('data-height', height)
