@@ -55,13 +55,14 @@
           <span>{{ overviewText }}</span>
           <strong v-if="report.mode === 'demo' || report.mode === 'demo_validation'" class="cpd-demo-badge">演示结果，不能用于正式通过</strong>
           <span v-if="reportIsStale" class="cpd-stale">
-            报告已过期，请重新检查
+            {{ reportStaleReason }}
           </span>
       </div>
       </div>
       <el-tabs v-if="run" v-model="activeTab" class="cpd-tabs" data-testid="cpd-check-tabs">
           <el-tab-pane label="问题与依据" name="findings">
             <div class="cpd-section">
+              <p v-if="wikiNoMatchReason" class="cpd-candidate-note" data-testid="cpd-wiki-no-match">{{ wikiNoMatchReason }}</p>
               <section v-if="candidates.length" class="cpd-section">
                 <h3>待确认的流程候选 <small>选择后继续检查，不会自动采用最高分</small></h3>
                 <article v-for="(candidate, index) in candidates" :key="candidateId(candidate) || `candidate-${index}`" class="cpd-candidate">
@@ -85,7 +86,7 @@
                   {{ item.label }} <strong>{{ item.count }}</strong>
                 </span>
               </div>
-              <small class="cpd-rule-hint">CK 编号沿用检查逻辑总表。同一节点同一规则的字段已合并；证据只显示可追溯的原文。</small>
+              <small class="cpd-rule-hint">同一节点同一检查项的字段已合并；证据只显示可追溯的原文。</small>
               <div v-if="!findings.length" class="cpd-empty-state">
                 后端尚未返回逐项检查结果，当前报告不能据此判定通过。
               </div>
@@ -99,7 +100,7 @@
                 >
                   <div class="cpd-finding-head">
                     <strong>{{ findingRule(finding) }}</strong>
-                    <span class="cpd-finding-state">{{ findingStatusLabel(finding.status, finding.severity) }}</span>
+                    <span class="cpd-finding-state">{{ findingStateLabel(finding) }}</span>
                   </div>
                   <div class="cpd-finding-node">
                     <span>节点：{{ findingNodeTitle(finding) }}</span>
@@ -107,7 +108,7 @@
                   <div v-if="finding.mergedCount > 1" class="cpd-field-details">
                     <div v-for="(detail, detailIndex) in findingDetails(finding)" :key="findingKey(detail, detailIndex)">
                       <strong>{{ findingFields(detail).join('、') || '检查项' }}</strong>
-                      <span>{{ findingStatusLabel(detail.status, detail.severity) }}</span>
+                      <span>{{ findingStateLabel(detail) }}</span>
                       <p>{{ findingDetailMessage(detail) }}</p>
                       <small v-if="findingNextStep(detail)">下一步：{{ findingNextStep(detail) }}</small>
                     </div>
@@ -125,14 +126,14 @@
                   </div>
                   <div v-if="evidenceEntries(finding).length" class="cpd-evidence-list">
                     <div v-for="entry in evidenceEntries(finding)" :key="entry.id" class="cpd-evidence-entry">
-                      <small>{{ entry.label || '原文依据' }}<template v-if="!entry.complete"> · 来源未完整读取</template></small>
-                      <blockquote>{{ entry.quote }}</blockquote>
+                      <small v-if="evidenceDisplay(entry).label">{{ evidenceDisplay(entry).label }}<template v-if="!entry.complete"> · 来源未完整读取</template></small>
+                      <blockquote>{{ evidenceDisplay(entry).quote }}</blockquote>
                     </div>
                   </div>
                   <div v-if="findingSource(finding)" class="cpd-finding-source">来源：{{ findingSource(finding) }}</div>
                   <div v-if="sourceErrors(finding).length" class="cpd-source-error-list">
                     <div v-for="sourceError in sourceErrors(finding)" :key="sourceError.sourceId + ':' + sourceError.status">
-                      {{ sourceError.title || sourceErrorScopeLabel(sourceError.scope) }}：{{ sourceStatusLabel(sourceError.status) }}<template v-if="sourceError.error">（{{ sourceError.error }}）</template>
+                      {{ sourceError.title || sourceErrorScopeLabel(sourceError.scope) }}：{{ sourceStatusLabel(sourceError.status, sourceError.error) }}
                     </div>
                     <small>影响项：{{ sourceErrorImpact(finding) }}</small>
                   </div>
@@ -145,6 +146,7 @@
                     </p>
                     <p v-if="report.mode === 'demo' || report.mode === 'demo_validation'" class="cpd-review-disabled">演示报告不能作为正式人工核对。</p>
                     <template v-else>
+                      <p class="cpd-review-guidance">勾选表示已阅读原文，不代表通过；请阅读全部依据后作出判断。核对通过仅处理本项；判定未通过会记录该项问题，需修改后重新检查。</p>
                       <label v-for="entry in reviewEvidenceEntries(target)" :key="entry.id" class="cpd-review-evidence">
                         <input
                           type="checkbox"
@@ -152,7 +154,7 @@
                           :disabled="reviewDisabled(target, 'confirm')"
                           @change="toggleReviewEvidence(target, entry.id, $event.target.checked)"
                         >
-                        <span>{{ entry.label || '核对原文' }}：{{ entry.quote }}</span>
+                        <span>{{ evidenceDisplay(entry, '核对原文').text }}</span>
                       </label>
                       <textarea
                         class="cpd-review-reason"
@@ -160,11 +162,11 @@
                         :disabled="reviewDisabled(target, 'confirm')"
                         rows="2"
                         maxlength="2000"
-                        placeholder="填写本次核对说明（必填）"
+                        placeholder="填写判断理由（必填）"
                         @input="setReviewReason(target, $event.target.value)"
                       ></textarea>
                       <div class="cpd-review-actions">
-                        <el-button size="mini" type="primary" :loading="reviewSubmittingKey === findingKey(target, 0)" :disabled="reviewDisabled(target, 'confirm')" @click="submitReview(target, 'confirm')">确认</el-button>
+                        <el-button size="mini" type="primary" :loading="reviewSubmittingKey === findingKey(target, 0)" :disabled="reviewDisabled(target, 'confirm')" @click="submitReview(target, 'confirm')">核对通过</el-button>
                         <el-button size="mini" type="danger" plain :loading="reviewSubmittingKey === findingKey(target, 0)" :disabled="reviewDisabled(target, 'reject')" @click="submitReview(target, 'reject')">判定未通过</el-button>
                         <el-button v-if="target.manualReview" size="mini" plain :loading="reviewSubmittingKey === findingKey(target, 0)" :disabled="reviewDisabled(target, 'revoke')" @click="submitReview(target, 'revoke')">撤销核对</el-button>
                       </div>
@@ -182,7 +184,7 @@
                 >
                   <div class="cpd-finding-head">
                     <strong>{{ findingRule(finding) }}</strong>
-                    <span class="cpd-finding-state">{{ reportIsStale ? '历史结果（报告已过期）' : findingStatusLabel(finding.status, finding.severity) }}</span>
+                    <span class="cpd-finding-state">{{ reportIsStale ? '历史结果（报告已过期）' : findingStateLabel(finding) }}</span>
                   </div>
                   <div class="cpd-finding-node">
                     <span>节点：{{ findingNodeTitle(finding) }}</span>
@@ -190,7 +192,7 @@
                   <p class="cpd-finding-issue">{{ findingIssue(finding) }}</p>
                   <div v-if="evidenceEntries(finding).length" class="cpd-evidence-list">
                     <div v-for="entry in evidenceEntries(finding)" :key="entry.id" class="cpd-evidence-entry">
-                      <small>{{ entry.label || '原文依据' }}</small><blockquote>{{ entry.quote }}</blockquote>
+                      <small v-if="evidenceDisplay(entry).label">{{ evidenceDisplay(entry).label }}</small><blockquote>{{ evidenceDisplay(entry).quote }}</blockquote>
                     </div>
                   </div>
                   <div v-for="target in reviewTargets(finding).filter(item => item.manualReview)" :key="findingKey(target, 0) + ':history'" class="cpd-manual-review">
@@ -449,6 +451,14 @@ export default {
     reportStageLabel() {
       return this.stageLabel(this.run)
     },
+    wikiNoMatchReason() {
+      const statuses = Array.isArray(this.report.sourceStatuses) ? this.report.sourceStatuses : []
+      const wiki = statuses.find(item => item.scope === 'wiki' && item.status === 'no_results')
+      return wiki ? (wiki.matchReason || '未找到与当前业务相关的 Wiki SOP。请补充具体业务内容或提供对应资料。') : ''
+    },
+    reportStaleReason() {
+      return this.report.staleReason || (this.run && this.run.staleReason) || '报告已过期，请重新检查'
+    },
     referenceFields() {
       const comparison = this.report.referenceComparison || {}
       const labels = { targetValue: '目标值', frequency: '频率', inputs: '输入源', criterion: '判据', owner: '责任人', outputs: '产物' }
@@ -466,14 +476,14 @@ export default {
     },
     categoryStatistics() {
       const labels = {
-        structure: '结构', missing: '待补齐', review: '待核对', source_error: '来源异常',
+        structure: '结构', missing: '待补齐', review: '待人工核对', source_error: '来源异常',
         hint: '提示', passed: '已核验', not_applicable: '本阶段不适用', auxiliary: '辅助汇总'
       }
       const summaryCategories = this.report.summary && this.report.summary.categories
       const counts = summaryCategories && typeof summaryCategories === 'object' && !Array.isArray(summaryCategories)
         ? summaryCategories
-        : this.findings.reduce((result, item) => {
-            const category = item.category || (this.isPassedFinding(item) ? 'passed' : this.isNotApplicableFinding(item) ? 'not_applicable' : this.isMissingFinding(item) ? 'missing' : 'hint')
+            : this.findings.reduce((result, item) => {
+            const category = this.findingCategory(item)
             result[category] = (result[category] || 0) + 1
             return result
           }, {})
@@ -550,11 +560,11 @@ export default {
       return this.rawCandidates.filter(candidate => !this.candidateKind(candidate))
     },
     findingGroups() {
-      const labels = { structure: '结构问题', missing: '缺少信息', review: '待核对', source_error: '来源异常', hint: '提示' }
+      const labels = { structure: '结构问题', missing: '缺少信息', review: '待人工核对', source_error: '来源异常', hint: '提示' }
       const order = Object.keys(labels)
       const groups = new Map(order.map(key => [key, []]))
       this.displayFindings.forEach(finding => {
-        const category = finding.category || (this.isMissingFinding(finding) ? 'missing' : 'hint')
+        const category = this.findingCategory(finding)
         if (groups.has(category)) groups.get(category).push(finding)
       })
       const summaryCategories = this.report.summary && this.report.summary.categories || {}
@@ -890,7 +900,7 @@ export default {
         return null
       }
       if (!reason) {
-        this.error = '请填写本次人工核对说明。'
+        this.error = '请填写判断理由。'
         return null
       }
       if (decision !== 'revoke' && (!required.length || !required.every(id => evidenceIds.includes(id)))) {
@@ -1006,15 +1016,51 @@ export default {
       return ''
     },
     candidatePath(candidate) {
-      const nested = candidate && candidate.source && typeof candidate.source === 'object'
-        ? candidate.source
-        : candidate
-      const path = pathOf(nested) || pathOf(candidate)
-      const sourceLabel = typeof (candidate && candidate.source) === 'string'
-        ? candidate.source
-        : nested && (nested.sourceName || nested.source_name || nested.type)
-      const identity = nested && (nested.id || nested.uid || nested.sourceId || nested.source_id)
-      return [path, sourceLabel, identity].filter(Boolean).join(' · ')
+      if (!candidate || typeof candidate !== 'object') return ''
+      const nested = candidate.source && typeof candidate.source === 'object' ? candidate.source : {}
+      const refs = [
+        candidate.sourceRef,
+        candidate.source_ref,
+        nested.sourceRef,
+        nested.source_ref
+      ].filter(ref => ref && typeof ref === 'object')
+      const records = [nested, ...refs, candidate]
+      const readable = value => {
+        const text = String(value || '').trim()
+        return text && !this.isTechnicalSourcePath(text) ? text : ''
+      }
+      const path = records.map(pathOf).map(readable).find(Boolean) ||
+        refs.map(ref => [ref.topic, ref.section].filter(Boolean).join(' / ')).map(readable).find(Boolean) || ''
+      const name = [
+        ...[nested, ...refs].flatMap(item => [
+          item.displayName, item.display_name, item.sourceName, item.source_name,
+          item.name, item.title, item.filename, item.file_name
+        ]),
+        candidate.sourceName, candidate.source_name, candidate.filename, candidate.file_name
+      ].map(readable).find(Boolean) || ''
+      const typeLabels = {
+        wiki: 'Wiki 知识库', wiki_compiler: 'Wiki 知识库',
+        chain: '当前脑图', chain_node: '当前脑图', current_chain: '当前脑图',
+        map_knowledge: '脑图知识库', map_node: '脑图知识库', room_map: '脑图知识库',
+        canonical: '项目资料', canonical_list: '项目资料', canonical_read: '项目资料',
+        attachment: '节点附件', file_attachment: '节点附件',
+        company_ai: '房间绑定知识库',
+        docmost: '外部文档', mapped_docmost: '外部文档',
+        selected_flow: '参考流程'
+      }
+      const sourceTypes = [
+        ...refs.flatMap(ref => [ref.type, ref.kind]),
+        nested.sourceType, nested.source_type, nested.source,
+        nested.type, nested.kind,
+        typeof candidate.source === 'string' ? candidate.source : '',
+        candidate.sourceType, candidate.source_type
+      ].filter(value => typeof value === 'string' && value.trim())
+      const normalizeType = value => String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+      const sourceType = sourceTypes.find(value => typeLabels[normalizeType(value)] || /[\u3400-\u9fff]/.test(value))
+      const typeLabel = typeLabels[normalizeType(sourceType)] ||
+        (sourceType && /[\u3400-\u9fff]/.test(sourceType) ? sourceType.trim() : '资料来源（类型未标注）')
+      const display = path || name || typeLabel
+      return display
     },
     candidateParts(candidate) {
       const referenceDetails = candidate && candidate.referenceDetails && typeof candidate.referenceDetails === 'object'
@@ -1213,10 +1259,14 @@ export default {
       return `${identity || 'finding'}:${index}`
     },
     findingRule(finding) {
-      const ruleId = finding.ruleId || finding.rule_id || finding.rule || finding.code
-      const title = finding.ruleTitle || finding.rule_title || finding.title
-      if (title && ruleId && String(title) !== String(ruleId)) return `${title}（${ruleId}）`
-      return title || ruleId || 'CPD 规则'
+      const values = [finding && (finding.ruleTitle || finding.rule_title), finding && finding.title,
+        finding && (finding.ruleName || finding.rule_name), finding && finding.name, finding && finding.label]
+      const title = values.map(value => String(value || '')
+        .replace(/\s*[（(]?\s*CK-\d+\s*[）)]?\s*/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/^[\s:：·—-]+|[\s:：·—-]+$/g, '')
+        .trim()).find(Boolean)
+      return title || '检查项名称未提供'
     },
     findingNodeUid(finding) {
       return String((finding && (finding.nodeUid || finding.node_uid)) || '')
@@ -1321,6 +1371,27 @@ export default {
       }))
       return [...entries.values()]
     },
+    evidenceDisplay(entry, fallback = '原文依据') {
+      const quote = String(entry && entry.quote || '')
+      const originalLabel = String(entry && entry.label || '').trim()
+      const labelParts = originalLabel.split(/\s*·\s*/u).map(part => part.trim()).filter(Boolean)
+      const normalizeEvidenceText = value => String(value || '')
+        .normalize('NFKC')
+        .replace(/\s+/gu, ' ')
+        .trim()
+        .replace(/^[CPD]\s*:\s*/iu, '')
+        .replace(/\s+/gu, ' ')
+        .trim()
+        .toLocaleLowerCase()
+
+      if (labelParts.length > 1 && normalizeEvidenceText(labelParts[labelParts.length - 1]) &&
+        normalizeEvidenceText(labelParts[labelParts.length - 1]) === normalizeEvidenceText(quote)) {
+        labelParts.pop()
+      }
+
+      const label = labelParts.join(' · ') || (!originalLabel ? fallback : '')
+      return { label, quote, text: [label, quote].filter(Boolean).join('：') }
+    },
     reviewTargets(finding) {
       if (Array.isArray(finding && finding.reviewTargets)) return finding.reviewTargets
       if (Array.isArray(finding && finding.originals)) return finding.originals.filter(item => item.reviewable || item.manualReview)
@@ -1354,7 +1425,7 @@ export default {
         this.reportIsStale || !finding || (!finding.reviewable && !canRevoke) || !!this.reviewSubmittingKey || this.confirming
     },
     reviewDecisionLabel(decision) {
-      return ({ confirm: '确认', reject: '判定未通过', revoke: '撤销核对' })[decision] || '待处理'
+      return ({ confirm: '核对通过', reject: '判定未通过', revoke: '撤销核对' })[decision] || '待处理'
     },
     manualReviewLabel(finding, stale) {
       if (stale) return '历史人工核对（不作为当前有效结论）'
@@ -1369,9 +1440,9 @@ export default {
       const ids = Array.isArray(finding && finding.relatedRuleIds) ? finding.relatedRuleIds : []
       const titles = ids.map(id => {
         const original = this.findings.find(item => (item.ruleId || item.rule_id) === id)
-        return original && original.title ? `${id}（${original.title}）` : id
+        return this.findingRule(original)
       })
-      return titles.join('、') || '本链路来源核验'
+      return [...new Set(titles)].join('、') || '本链路来源核验'
     },
     isPassedFinding(finding) {
       const status = String((finding && finding.status) || '').toLowerCase()
@@ -1385,6 +1456,22 @@ export default {
       const status = String((finding && finding.status) || '').toLowerCase()
       return ['needs_supplement', 'needs_info', 'incomplete', 'missing'].includes(status)
     },
+    isPendingManualReview(finding) {
+      const status = String(finding && finding.status || '').toLowerCase().replace(/[- ]/g, '_')
+      if (status !== 'needs_info') return false
+      const category = String(finding && finding.category || '').toLowerCase().replace(/[- ]/g, '_')
+      if (category === 'missing') return false
+      const validationType = String(finding && (finding.validationType || finding.validation_type) || '').toLowerCase().replace(/[- ]/g, '_')
+      return !!(finding && finding.reviewable === true) || validationType === 'manual_text_review' || category === 'review'
+    },
+    findingCategory(finding) {
+      const category = String(finding && finding.category || '').trim().toLowerCase()
+      if (category) return category
+      if (this.isPendingManualReview(finding)) return 'review'
+      if (this.isPassedFinding(finding)) return 'passed'
+      if (this.isNotApplicableFinding(finding)) return 'not_applicable'
+      return this.isMissingFinding(finding) ? 'missing' : 'hint'
+    },
     isBlockingFinding(finding) {
       const status = String((finding && finding.status) || '').toLowerCase()
       const severity = String((finding && finding.severity) || '').toLowerCase()
@@ -1396,12 +1483,14 @@ export default {
       )
     },
     findingNextStep(finding) {
+      if (this.isPendingManualReview(finding)) return '阅读原文依据，填写判断理由后选择核对结果'
       const explicit = finding.nextStep || finding.next_step || finding.action
       if (explicit) return explicit
       if (finding.field || this.isMissingFinding(finding)) return '补充缺少的信息或引用后重新检查'
+      const ruleId = String(finding.ruleId || finding.rule_id || finding.rule || finding.code || '').toLowerCase()
       const rule = String(this.findingRule(finding) || '').toLowerCase()
       const issue = String(this.findingIssue(finding) || '').toLowerCase()
-      if (/ck04|ck06|ck12|ck27|ck28|structure|孤立|对应关系|结构/.test(`${rule} ${issue}`)) {
+      if (/ck[-_ ]?(?:04|06|12|27|28)|structure|孤立|对应关系|结构/.test(`${ruleId} ${rule} ${issue}`)) {
         return '修正 CPD 结构或对应关系后重新检查'
       }
       if (/permission|forbidden|无权限/.test(issue)) return '取得该来源的读取权限后重新检查'
@@ -1463,7 +1552,7 @@ export default {
       const selectionStage = report.selectionStage || report.selection_stage || run.selectionStage || run.selection_stage
       if (selectionStage === 'chain') return '待选链路'
       if (selectionStage === 'source') return '待选参考流程'
-      if (Number(categories.review || 0) > 0) return '待核对'
+      if (Number(categories.review || 0) > 0) return '待人工核对'
       if (Number(categories.missing || 0) > 0) return '待补齐'
       if (Number(categories.source_error || 0) > 0) return '尚未核验'
       return this.statusLabel(status)
@@ -1483,6 +1572,15 @@ export default {
         return /block|critical|阻断/i.test(String(severity || '')) ? '待核验 · 阻断' : '待核验'
       }
       return this.statusLabel(value)
+    },
+    findingStateLabel(finding) {
+      const status = String(finding && finding.status || '').toLowerCase()
+      if (['passed', 'pass', 'blocked', 'failed', 'fail'].includes(status)) {
+        return this.findingStatusLabel(status, finding && finding.severity)
+      }
+      if (this.findingCategory(finding) === 'source_error' || (finding && (finding.ruleId || finding.rule_id) === 'CK-30')) return '来源异常'
+      if (this.isPendingManualReview(finding)) return '待人工核对'
+      return this.findingStatusLabel(finding && finding.status, finding && finding.severity)
     },
     findingStatusClass(status, severity) {
       const value = String(status || '').toLowerCase()
@@ -1511,7 +1609,9 @@ export default {
       }
       try { return JSON.stringify(omitNodeIdentifiers(value), null, 2) } catch (_) { return String(value || '') }
     },
-    sourceStatusLabel(status) {
+    sourceStatusLabel(status, error) {
+      const errorCode = String(error || '').toLowerCase()
+      if (errorCode === 'canonical_storage_permission_denied') return '房间资料目录无读取权限'
       const value = String(status || '').toLowerCase()
       const labels = {
         unavailable: '来源不可用',
@@ -1639,6 +1739,7 @@ export default {
 .cpd-evidence-entry small { color: #606266; font-size: 12px; }
 .cpd-manual-review { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; padding: 10px; border-top: 1px solid #ebeef5; background: #fafafa; }
 .cpd-review-result { margin: 0; color: #606266; line-height: 1.5; }
+.cpd-review-guidance { margin: 0; color: #606266; line-height: 1.5; }
 .cpd-review-disabled { margin: 0; color: #e6a23c; }
 .cpd-review-evidence { display: flex; align-items: flex-start; gap: 8px; line-height: 1.5; }
 .cpd-review-evidence input { flex: none; margin-top: 4px; }

@@ -41,6 +41,17 @@ async function main() {
         await pool.query("update auth_cognee_codes set expires_at = now() - interval '1 second'")
         res.writeHead(204)
         res.end()
+      } else if (url.pathname === '/wwopen/sso/qrConnect') {
+        const callback = new URL(process.env.AUTH_APP_ORIGIN + '/api/auth/wecom/callback')
+        callback.searchParams.set('code', 'fixture-success')
+        callback.searchParams.set('state', url.searchParams.get('state') || '')
+        const parentOrigin = new URL(process.env.COGNEE_SSO_REDIRECT_URI).origin
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end(`<!doctype html><html lang="zh"><meta charset="utf-8"><title>模拟企业微信接口</title>
+          <style>body{margin:0;text-align:center;font:14px sans-serif;padding:18px}svg{width:190px;height:190px;margin:12px 0}button{padding:10px;border:0;background:#1677ff;color:white;border-radius:6px}</style>
+          <h3>企业微信扫码登录</h3><svg viewBox="0 0 100 100" aria-label="测试二维码"><rect width="100" height="100" fill="white"/><path fill="black" d="M0 0h30v30H0zM70 0h30v30H70zM0 70h30v30H0zM40 40h20v20H40zM70 50h10v40H70zM40 80h20v20H40zM90 40h10v20H90zM0 40h20v20H0zM40 0h10v20H40z"/><path fill="white" d="M5 5h20v20H5zM75 5h20v20H75zM5 75h20v20H5z"/><path fill="black" d="M10 10h10v10H10zM80 10h10v10H80zM10 80h10v10H10z"/></svg>
+          <p>测试二维码 · 模拟外部接口</p><button id="confirm">模拟确认登录</button>
+          <script>document.getElementById('confirm').onclick=function(){window.parent.postMessage(${JSON.stringify(callback.href)}, ${JSON.stringify(parentOrigin)})}</script></html>`)
       } else if (url.pathname === '/cgi-bin/gettoken') {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ errcode: 0, access_token: 'fixture-token', expires_in: 7200 }))

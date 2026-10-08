@@ -175,6 +175,23 @@ test('分类、阻断和旧统计同源；CK-32 不计入 actionable，CK-30/34 
   assert.equal(JSON.stringify(report), before, '重复装饰不得复制 evidence 或计数')
 })
 
+test('房间资料目录权限错误有用户可读来源标签并保留来源异常分类', () => {
+  const { snapshot, chain } = makeFixture()
+  assert.equal(rules.sourceStatusLabel('unavailable', 'canonical_storage_permission_denied'), '房间资料目录无读取权限')
+  const report = {
+    sourceStatuses: [{ scope: 'company_ai', status: 'unavailable', error: 'canonical_storage_permission_denied' }],
+    findings: [
+      { ruleId: 'CK-30', title: '三级检索', status: 'needs_info', severity: 'warning' },
+      { ruleId: 'CK-31', title: '正常项', status: 'passed', severity: 'info' },
+      { ruleId: 'CK-31', title: '失败项', status: 'failed', severity: 'blocker' }
+    ]
+  }
+  contract.decorateReport(report, { snapshot, chain })
+  assert.equal(report.findings.find(item => item.ruleId === 'CK-30').category, 'source_error')
+  assert.equal(report.findings.find(item => item.ruleId === 'CK-31' && item.status === 'passed').status, 'passed')
+  assert.equal(report.findings.find(item => item.ruleId === 'CK-31' && item.status === 'failed').status, 'failed')
+})
+
 test('人工确认通过后重算清除阻断并保留复核资格；演示报告不可正式通过；stale 不覆盖', () => {
   const { snapshot, chain } = makeFixture()
   const report = { status: 'needs_confirmation', findings: [{

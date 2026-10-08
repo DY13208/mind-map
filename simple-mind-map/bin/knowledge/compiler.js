@@ -71,7 +71,7 @@ class KnowledgeCompiler {
     }
   }
   async archive(roomId) {
-    const from = path.join(this.outputDir, safeId(roomId))
+    const from = store.roomDirectory(this.outputDir, roomId)
     await store.recover(from)
     if (!await store.exists(from)) return null
     const trash = path.join(this.outputDir, '.trash')
@@ -84,7 +84,7 @@ class KnowledgeCompiler {
   async run(roomId, options) {
     const started = Date.now()
     return this.withLock(roomId, async client => {
-      const roomDir = path.join(this.outputDir, roomId)
+      const roomDir = store.roomDirectory(this.outputDir, roomId)
       await store.recover(roomDir)
       const previous = await store.readManifest(roomDir)
       const input = await this.readSnapshot(this.pool, roomId, previous, { ...options, snapshotClient: client })
@@ -156,7 +156,7 @@ class KnowledgeCompiler {
     // Avoid observing a manifest mid-publication. No node content in status.
     if (this.pending.has(roomId)) return { roomId, status: 'compiling', dirtyNodes: this.tracker.count(roomId) }
     return this.withLock(roomId, async client => {
-      const dir = path.join(this.outputDir, roomId)
+      const dir = store.roomDirectory(this.outputDir, roomId)
       await store.recover(dir)
       const manifest = await store.readManifest(dir)
       const last = Number(manifest?.lastCompiledVersion || 0)

@@ -222,3 +222,57 @@ test('blank canvas drop creates an independent theme even when ordinary free dra
   assert.equal(move.positions[0].customLeft, 200)
   assert.equal(move.positions[0].customTop, 200)
 })
+
+test('reattaching a floating theme previews the parent connector without changing live data', () => {
+  const compactSource = fs.readFileSync(path.join(__dirname, '../src/layouts/CompactStructure.js'), 'utf8')
+    .replace(/^import .*\n/gm, '')
+    .replace('export default CompactStructure', 'module.exports = CompactStructure')
+  const compactModule = { exports: {} }
+  vm.runInNewContext(compactSource, {
+    module: compactModule,
+    LogicalStructure: class {
+      constructor(renderer) { this.mindMap = renderer.mindMap }
+      renderLine(parent, lines, style) { this.renderLineStraight(parent, lines, style) }
+      renderReversedHorizontalLine() { return false }
+      setLineStyle(style, line, path) { line.plot(path) }
+    },
+    compactLayoutConfig: { levelGap: 36 },
+    asyncRun() {}
+  })
+  const positionPrototype = {
+    get left() { return this.customLeft === undefined ? this._left : this.customLeft },
+    set left(value) { this._left = value },
+    get top() { return this.customTop === undefined ? this._top : this.customTop },
+    set top(value) { this._top = value }
+  }
+  const makeNode = (left, top, isFloating = false) => Object.assign(Object.create(positionPrototype), {
+    _left: left, _top: top, customLeft: isFloating ? left : undefined,
+    customTop: isFloating ? top : undefined, width: 80, height: 28, layerIndex: 1, expandBtnSize: 16,
+    nodeData: { data: { isFloating, customLeft: isFloating ? left : null } },
+    children: [],
+    style: { getStyle: () => 'straight' },
+    getData(key) { return this.nodeData.data[key] },
+    fakeClone() { return Object.assign(Object.create(positionPrototype), this) }
+  })
+  for (const asChild of [false, true]) {
+    const parent = makeNode(100, 100)
+    const sibling = makeNode(216, 100)
+    sibling.parent = parent
+    const floating = makeNode(500, 300, true)
+    const line = { visible: false, path: '', show() { this.visible = true }, hide() { this.visible = false }, plot(d) { this.path = d } }
+    const mindMap = { opt: { dragPlaceholderLineConfig: {}, alwaysShowExpandBtn: false }, themeConfig: { nodeUseLineStyle: false } }
+    mindMap.renderer = { layout: new compactModule.exports({ mindMap }) }
+    const drag = Object.assign(Object.create(Drag.prototype), {
+      mindMap, beingDragNodeList: [floating],
+      overlapNode: asChild ? parent : null, prevNode: asChild ? null : sibling,
+      placeholderWidth: 50, placeholderHeight: 10,
+      placeholder: { size() { return this }, move() {} },
+      placeHolderLine: line, removeExtraLines() {}
+    })
+    drag.setPlaceholderRect({ x: 216, y: 150, dir: 'right' })
+    assert.equal(line.visible, true, 'the preview connector must remain visible')
+    assert.match(line.path, /L 216,155$/, 'the connector must end at the insertion marker, not the original floating position')
+    assert.equal(floating.getData('isFloating'), true, 'hovering must not attach the live theme')
+    assert.equal(floating.getData('customLeft'), 500)
+  }
+})

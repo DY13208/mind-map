@@ -19,6 +19,23 @@ const FIELD_QUERY_TERMS = {
 const FIELD_LABELS = {
   frequency: '频率', input: '输入源', criterion: '判据', owner: '责任人', artifact: '产物'
 }
+const BUSINESS_CONTEXT_STOP_TERMS = [
+  '未达标处置', '检查标准', '验收标准', '完成标准', '达标条件', '材料来源', '依赖资料',
+  '目标值', '输入源', '数据源', '时间要求', '执行步骤', '检查项',
+  '每个工作日', '每季度', '每星期', '每小时', '每周', '每月', '每年', '每日', '每天', '每次',
+  '不得低于', '不低于', '不少于', '不超过', '不高于',
+  '第一套', '第二套', '第三套', '第四套', '检查目标', '候选', '确认', '对应', '验收',
+  '责任人', '负责人', '执行人', '频率', '周期', '判据', '目标', '检查', '计划', '执行',
+  '流程', '方案', '步骤', '方法', '内容', '要求', '记录', '来源', '输入', '输出', '产物',
+  '交付物', '材料', '数据', '操作', '处理', '进行', '达到', '达标', '确保', '使用', '按照',
+  '至少', '至多', '不低', '根据', '开展', '跟踪', '持续', '并', '按', '本次', '当前', '相关',
+  '是否', '可以', '需要', '必须', '以及', '并且',
+  'sop', 'cpd'
+].sort((left, right) => right.length - left.length)
+const MAX_BUSINESS_CONTEXT_TEXTS = 32
+const MAX_BUSINESS_CONTEXT_TEXT_CHARS = 500
+const MAX_BUSINESS_TERMS = 120
+const MAX_RELEVANCE_TEXT_CHARS = 50000
 
 function result(status, extra = {}) {
   return { status, ...extra }
@@ -366,12 +383,27 @@ function createWikiProvider({ env = process.env, fetchImpl = globalThis.fetch, t
     })
   }
 
-  async function searchSources({ roomKey, query, mode = 'business', actor, requestCache } = {}) {
+  async function searchSources({ roomKey, query, businessContext, mode = 'business', actor, requestCache } = {}) {
     const q = String(query || '').trim().slice(0, MAX_QUERY_CHARS)
-    if (!roomKey || !q || !['business', 'demo'].includes(mode)) return result('error', { error: 'invalid_room_or_query_or_mode', candidates: [], complete: false })
-    const searched = await search(q, { roomKey, actor, mode, requestCache })
+    if (!roomKey || !['business', 'demo'].includes(mode)) return result('error', { error: 'invalid_room_or_query_or_mode', candidates: [], complete: false })
+    const relevance = businessRelevanceTerms(businessContext, q)
+    if (relevance.explicit && !relevance.terms.length) return result('no_results', {
+      candidates: [], complete: true, filteredCount: 0, matchReason: noRelevantCandidatesReason(0)
+    })
+    if (!q && !relevance.explicit) return result('error', { error: 'invalid_room_or_query_or_mode', candidates: [], complete: false })
+    const searchQuery = relevance.terms.join(' ').slice(0, MAX_QUERY_CHARS)
+    if (!searchQuery) return result('no_results', {
+      candidates: [], complete: true, filteredCount: 0, matchReason: noRelevantCandidatesReason(0)
+    })
+    const searched = await search(searchQuery, { roomKey, actor, mode, requestCache })
     if (searched.status !== 'ok' && searched.status !== 'no_results') return searched
-    if (searched.status === 'no_results') return { ...searched, candidates: [], complete: true }
+    if (searched.status === 'no_results') return {
+      ...searched,
+      candidates: [],
+      complete: true,
+      filteredCount: 0,
+      matchReason: noRelevantCandidatesReason(relevance.terms.length)
+    }
     const byTopic = new Map()
     for (const { item } of searched.candidates) {
       // Enforce the default policy in the caller too. A client provided
@@ -382,8 +414,14 @@ function createWikiProvider({ env = process.env, fetchImpl = globalThis.fetch, t
       byTopic.set(item.topic, group)
     }
     const candidates = []
+    let filteredCount = 0
     for (const items of byTopic.values()) {
-      const sourceRef = makeSourceRef(roomKey, q, items)
+      const businessMatches = matchingBusinessTerms(relevance.terms, items)
+      if (!businessMatches.length) {
+        filteredCount += 1
+        continue
+      }
+      const sourceRef = makeSourceRef(roomKey, searchQuery, items)
       const primary = items.find(item => item.chunkId === sourceRef.chunkId) || items[0]
       const sourceHash = sha256(primary.content)
       const referenceDetails = referenceDetailsFor(items)
@@ -395,7 +433,7 @@ function createWikiProvider({ env = process.env, fetchImpl = globalThis.fetch, t
         title: primary.topic,
         path: pathFor(primary.topic, sourceRef.section),
         source: 'wiki',
-        matchReason: buildMatchReason(items, coverage),
+        matchReason: buildMatchReason(items, coverage, businessMatches),
         summary: cleanText(primary.content, 320),
         referenceDetails,
         ...coverage,
@@ -411,7 +449,12 @@ function createWikiProvider({ env = process.env, fetchImpl = globalThis.fetch, t
         roomKey
       })
     }
-    return result(candidates.length ? 'ok' : 'no_results', { candidates, complete: searched.complete && candidates.length > 0 })
+    return result(candidates.length ? 'ok' : 'no_results', {
+      candidates,
+      complete: Boolean(searched.complete),
+      filteredCount,
+      ...(candidates.length ? {} : { matchReason: noRelevantCandidatesReason(relevance.terms.length) })
+    })
   }
 
   async function readSource({ roomKey, sourceRef, mode = 'business', actor, requestCache } = {}) {
@@ -545,17 +588,105 @@ function fieldCoverage(query, details) {
   }
 }
 
-function buildMatchReason(items, coverage = {}) {
-  const terms = [...new Set(items.flatMap(item => item.matchedTerms || []))].slice(0, 12)
+function buildMatchReason(items, coverage = {}, businessMatches = []) {
   const sections = [...new Set(items.map(item => item.section).filter(Boolean))].slice(0, 5)
   const parts = []
-  if (terms.length) parts.push(`命中词：${terms.join('、')}`)
+  if (businessMatches.length) parts.push(`命中业务词：${businessMatches.slice(0, 8).join('、')}`)
   const matched = (coverage.matchedFields || []).map(field => FIELD_LABELS[field] || field)
   const unmatched = (coverage.unmatchedFields || []).map(field => FIELD_LABELS[field] || field)
   if (matched.length) parts.push(`命中字段：${matched.join('、')}`)
   if (unmatched.length && !coverage.fieldCoverageComplete) parts.push(`命中片段未覆盖：${unmatched.join('、')}`)
   if (sections.length) parts.push(`相关小节：${sections.join('、')}`)
-  return parts.join('；') || '命中当前有效 Wiki 主题，需确认是否适用于本链路'
+  if (businessMatches.length) parts.push('仅为相关候选，需人工确认适用性')
+  return parts.join('；') || '与当前业务上下文匹配，需确认是否适用于本链路'
+}
+
+function normalizeRelevanceText(value) {
+  return cleanText(value, MAX_RELEVANCE_TEXT_CHARS)
+    .normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/(?:^|[\s,，;；])(?:c|p|d)\s*[:：]/giu, ' ')
+    .replace(/\b(?:c|p|d)\b/giu, ' ')
+    .replace(/每(?:周|星期|月|季度|年|天|日|次|班|小时|工作日)/gu, ' ')
+    .replace(/\d+(?:[.,]\d+)*(?:[%％])?/gu, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+}
+
+function businessTokensFromText(value) {
+  let text = normalizeRelevanceText(value)
+  for (const term of BUSINESS_CONTEXT_STOP_TERMS) {
+    text = text.replace(new RegExp(escapeRegExp(term), 'giu'), ' ')
+  }
+  const tokens = []
+  for (const chunk of text.split(/\s+/u).filter(Boolean)) {
+    if (/\p{Script=Han}/u.test(chunk)) {
+      const runs = chunk.match(/\p{Script=Han}+/gu) || []
+      for (const run of runs) {
+        const chars = [...run]
+        if (chars.length >= 2) tokens.push(run.slice(0, 80))
+      }
+    } else if ([...chunk].length >= 3) {
+      tokens.push(chunk)
+    }
+    if (tokens.length >= MAX_BUSINESS_TERMS) break
+  }
+  return [...new Set(tokens)].slice(0, MAX_BUSINESS_TERMS)
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function businessRelevanceTerms(businessContext, query) {
+  const explicit = Boolean(businessContext && typeof businessContext === 'object' && Array.isArray(businessContext.texts))
+  const supplied = explicit
+    ? businessContext.texts.filter(value => typeof value === 'string' && value.trim()).slice(0, MAX_BUSINESS_CONTEXT_TEXTS)
+    : []
+  const texts = explicit ? supplied : [query]
+  const terms = [...new Set(texts.flatMap(value => businessTokensFromText(value.slice(0, MAX_BUSINESS_CONTEXT_TEXT_CHARS))))]
+    .slice(0, MAX_BUSINESS_TERMS)
+  return { terms, explicit }
+}
+
+function matchingBusinessTerms(terms, items) {
+  if (!terms.length) return []
+  const haystack = normalizeRelevanceText(items
+    .map(item => `${item.topic || ''} ${item.section || ''} ${item.content || ''}`)
+    .join(' '))
+  const compact = haystack.replace(/\s+/gu, '')
+  const matches = []
+  for (const phrase of terms) {
+    if (compact.includes(phrase)) {
+      matches.push(phrase)
+      continue
+    }
+    if (!/^\p{Script=Han}+$/u.test(phrase)) continue
+    const chars = [...phrase]
+    if (chars.length < 3) continue
+    // Allow literal Chinese subphrase overlap for alternate word boundaries
+    // while avoiding invented semantic equivalences or arbitrary score cutoffs.
+    for (const size of [5, 4, 3]) {
+      if (chars.length < size) continue
+      let found = false
+      for (let index = 0; index + size <= chars.length; index += 1) {
+        const subphrase = chars.slice(index, index + size).join('')
+        if (compact.includes(subphrase)) {
+          matches.push(subphrase)
+          found = true
+          break
+        }
+      }
+      if (found) break
+    }
+  }
+  return [...new Set(matches)].slice(0, 8)
+}
+
+function noRelevantCandidatesReason(termCount) {
+  return termCount
+    ? '未找到与当前业务相关的 Wiki SOP'
+    : '未找到与当前业务相关的 Wiki SOP：查询中没有可用于判断相关性的业务关键词，已跳过候选'
 }
 
 module.exports = {

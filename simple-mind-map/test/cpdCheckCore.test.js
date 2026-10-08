@@ -207,6 +207,44 @@ test('多个可能的 CPD 对应关系仍要求选链，且模型回调完全不
   assert.equal(judgeCalls, 0)
 })
 
+test('多流程候选报告读取与确认保持新鲜；确认后的链路变化仍会过期', async () => {
+  const snapshot = { mapVersion: 'ambiguous-flow-v1', sources: [], nodes: {
+    owner: { uid: 'owner', text: '业务流程', children: ['cRoot'] },
+    cRoot: { uid: 'cRoot', text: 'C：质量合格率达到 98%', children: ['p1', 'p2'] },
+    p1: { uid: 'p1', text: 'P：按第一套抽检方案执行', children: ['d1'] },
+    p2: { uid: 'p2', text: 'P：按第二套抽检方案执行', children: ['d2'] },
+    d1: { uid: 'd1', text: 'D：执行第一套抽检', note: '频率：每周\n输入源：抽检记录\n判据：合格率达到 98%',
+      data: { frequency: '每周', inputs: '抽检记录', criterion: '合格率达到 98%', owner: '质检主管', outputs: '抽检报告' }, children: [] },
+    d2: { uid: 'd2', text: 'D：执行第二套抽检', note: '频率：每周\n输入源：抽检记录\n判据：合格率达到 98%',
+      data: { frequency: '每周', inputs: '抽检记录', criterion: '合格率达到 98%', owner: '质检主管', outputs: '抽检报告' }, children: [] }
+  } }
+  const db = makeMemoryDb()
+  const deps = makeDeps({ db, snapshot,
+    search: async () => ({ status: 'no_results', candidates: [], complete: true })
+  })
+  const pending = await create(snapshot, deps, 'ambiguous-flow-fingerprint', 'cRoot')
+  assert.equal(pending.status, 'needs_confirmation')
+  assert.equal(pending.report.selectionStage, 'flow')
+  assert.equal(pending.report.flowCandidates.length, 2)
+
+  const loaded = await core.getCheck({ roomKey: ROOM, runId: pending.runId, actor: ACTOR }, deps)
+  assert.equal(loaded.status, 'needs_confirmation', '新建报告读取时不应因指纹表示不一致而过期')
+  assert.equal(loaded.report.stale, undefined)
+
+  const selected = loaded.report.flowCandidates[0]
+  const confirmed = await core.confirmCheck({ roomKey: ROOM, runId: loaded.runId,
+    candidateId: selected.candidateId, actor: ACTOR }, deps)
+  assert.equal(confirmed.selection.confirmationState, 'complete')
+  assert.equal(confirmed.selection.chainCandidateId, selected.candidateId)
+  assert.notEqual(confirmed.status, 'stale')
+
+  const selectedPlanUid = selected.planRootUids[0]
+  snapshot.nodes[selectedPlanUid].text += '（要求调整）'
+  const stale = await core.getCheck({ roomKey: ROOM, runId: confirmed.runId, actor: ACTOR }, deps)
+  assert.equal(stale.status, 'stale')
+  assert.match(stale.report.staleReason, /链路节点/)
+})
+
 test('只有文字核对项时不搜索知识库；同一请求复用报告也不调用模型', async () => {
   const snapshot = makeSnapshot()
   const calls = { judge: 0, search: 0 }
@@ -244,6 +282,23 @@ test('不完整附件及知识库无权限不能解释为材料齐备', async ()
   assert.ok(run.report.sourceStatuses.some(item => item.scope === 'company_ai' && item.status === 'forbidden'))
   assert.deepEqual(scopes, ['map_knowledge', 'company_ai', 'wiki'])
   assert.equal(judgeCalls, 0)
+})
+
+test('来源异常主错误和兼容错误列表会保存在检查报告中', async () => {
+  const snapshot = makeSnapshot({ includeSource: false, missingOwner: true })
+  const rawError = 'EACCES: permission denied, scandir /data/rooms/room-check-test'
+  const run = await create(snapshot, makeDeps({ snapshot,
+    search: async ({ scope }) => scope === 'company_ai'
+      ? { status: 'unavailable', candidates: [], complete: false,
+          error: 'canonical_storage_permission_denied', errors: [rawError] }
+      : { status: 'no_results', candidates: [], complete: true }
+  }), 'canonical-storage-permission')
+
+  const sourceStatus = run.report.sourceStatuses.find(item => item.scope === 'company_ai')
+  assert.equal(sourceStatus.status, 'unavailable')
+  assert.equal(sourceStatus.error, 'canonical_storage_permission_denied')
+  assert.deepEqual(sourceStatus.errors, [rawError], 'retain the raw errors array for backward-compatible diagnostics')
+  assert.match(run.report.findings.find(item => item.ruleId === 'CK-30').message, /房间资料目录无读取权限/)
 })
 
 test('多项材料只命中其中一项时，未命中的材料仍待补充', async () => {
@@ -391,6 +446,30 @@ test('确认流程后只返回原文和显式字段对照，不产出语义结�
   const stale = await core.getCheck({ roomKey: ROOM, runId: confirmed.runId, actor: ACTOR }, deps)
   assert.equal(stale.status, 'stale')
   assert.equal(stale.report.status, 'stale')
+})
+
+test('当前链的 canonical 分支副本不会作为参考流程；其他链的分支仍可选', async () => {
+  const snapshot = makeSnapshot({ includeSource: false, missingOwner: true })
+  const currentChainCopy = {
+    candidateId: 'current-chain-copy', kind: 'flow', sourceRole: 'canonical', source: 'canonical',
+    sourceRef: { type: 'canonical', roomId: ROOM, path: 'branches/c1.md' },
+    title: 'c1.md', complete: true, independentEvidence: true
+  }
+  const otherChain = {
+    candidateId: 'other-chain-reference', kind: 'flow', sourceRole: 'canonical', source: 'canonical',
+    sourceRef: { type: 'canonical', roomId: ROOM, path: 'branches/another-c-root.md' },
+    title: 'another-c-root.md', complete: true, independentEvidence: true
+  }
+  const run = await create(snapshot, makeDeps({ snapshot,
+    search: async ({ scope }) => scope === 'company_ai'
+      ? { status: 'ok', candidates: [currentChainCopy, otherChain], complete: true }
+      : { status: 'no_results', candidates: [], complete: true }
+  }), 'canonical-current-chain-filter')
+
+  assert.equal(run.status, 'needs_confirmation')
+  assert.equal(run.report.selectionStage, 'source')
+  assert.deepEqual(run.report.flowCandidates.map(item => item.candidateId), ['other-chain-reference'])
+  assert.equal(run.report.flowCandidates[0].sourceRef.path, 'branches/another-c-root.md')
 })
 
 test('GET 报告时发现链路或来源发生变化会标为 stale', async t => {
@@ -727,4 +806,24 @@ test('v5 Wiki 重读更新同一主题的失效命中，只读取原登记主题
   assert.deepEqual(reads, ['会员流程', '会员流程'])
   assert.equal(result.report.sources.find(item => item.sourceId === sourceId).sourceRef.chunkId, 'new')
   assert.equal(result.report.sources.find(item => item.sourceId === sourceId).complete, true)
+})
+
+
+test('Wiki 业务检索包含完整链路，排除根标题和缺失字段标签', async () => {
+  const snapshot = makeSnapshot({ includeSource: false, missingOwner: true })
+  snapshot.nodes.owner.text = 'CPD候选确认验收-20261008'
+  const calls = []
+  await create(snapshot, makeDeps({ snapshot, search: async args => {
+    calls.push(args)
+    return { status: 'no_results', candidates: [], complete: true }
+  } }), 'wiki-business-context')
+  const wiki = calls.find(item => item.scope === 'wiki')
+  assert.ok(wiki)
+  assert.match(wiki.query, /库存盘点|库存记录/)
+  assert.doesNotMatch(wiki.query, /CPD候选确认验收|责任人|材料来源|目标值/)
+  assert.ok(wiki.businessContext.texts.some(text => /每周核对库存记录/.test(text)))
+  assert.ok(wiki.businessContext.texts.some(text => /库存盘点准确率/.test(text)))
+  assert.ok(wiki.query.length <= 240)
+  assert.match(calls.find(item => item.scope === 'map_knowledge').query, /责任人/,
+    '本图材料检索仍保留所需字段')
 })

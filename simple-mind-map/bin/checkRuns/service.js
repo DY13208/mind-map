@@ -7,6 +7,7 @@ const chainUtils = require('./chain')
 const { checkRunFreshness } = require('./freshness')
 const { applyChainEvidence } = require('./localEvidence')
 const { sourceIdFor, digest } = require('./identity')
+const { branchPath } = require('../knowledge/utils')
 const reportContract = () => require('./reportContract')
 
 const inFlight = new Map()
@@ -387,7 +388,11 @@ function sanitizeCandidate(candidate) {
 function candidateInChain(candidate, chain) {
   const ref = candidate && candidate.sourceRef || {}
   const uid = String(ref.uid || ref.nodeUid || '')
-  return uid && (chain.nodeUids || []).map(String).includes(uid)
+  const chainUids = new Set([...(chain.nodeUids || []), ...(chain.auditNodeUids || [])].map(String))
+  if (uid && chainUids.has(uid)) return true
+  if (String(ref.type || '').toLowerCase() !== 'canonical' || !ref.path) return false
+  const candidatePath = String(ref.path).replace(/\\/g, '/')
+  return [...chainUids].some(nodeUid => branchPath(nodeUid) === candidatePath)
 }
 
 function chainDescription(snapshot, chain) {
@@ -484,6 +489,22 @@ function materialMatchFor(item, content) {
   return null
 }
 
+// Keep business relevance separate from missing validation field labels.
+function businessSearchContext(snapshot, chain, findings) {
+  const nodes = chainUtils.nodesOf(snapshot)
+  const auditUids = chain.auditNodeUids || chain.nodeUids || []
+  const prioritizedUids = [...new Set([
+    chain.selectedUid, ...(chain.checkRootUids || []), ...(chain.planRootUids || []),
+    ...(chain.executionUids || []), ...auditUids
+  ].filter(uid => auditUids.includes(uid)))]
+  const texts = prioritizedUids.map(uid => chainUtils.nodeText(nodes[uid]))
+    .filter(text => text && !chainUtils.isBareRoleLabel(text))
+  for (const item of findings || []) {
+    if (item.ruleId === 'CK-29' && item.quote) texts.push(String(item.quote))
+  }
+  return { texts: [...new Set(texts)].slice(0, 32) }
+}
+
 async function searchForCandidates({ roomKey, actor, snapshot, chain, report, deps, startAt = 0 }) {
   deps = { ...deps, requestCache: deps.requestCache || new Map() }
   const readBodies = []
@@ -506,11 +527,13 @@ async function searchForCandidates({ roomKey, actor, snapshot, chain, report, de
     report.sourceStatuses.push({ scope: 'map_knowledge', status: 'unavailable', error: 'provider_not_configured' })
   } else {
     const query = buildQuery(snapshot, chain, pending)
+    const businessContext = businessSearchContext(snapshot, chain, pending)
     const chainContext = { ...chainDescription(snapshot, chain), excludeUids: chain.nodeUids }
     for (let index = startAt; index < SEARCH_SCOPES.length; index++) {
       const scope = SEARCH_SCOPES[index]
       let result
-      try { result = await search({ roomKey, query, scope, chain: chainContext, actor, mode: deps.mode || 'business', requestCache: deps.requestCache }) }
+      const scopeQuery = scope === 'wiki' ? (businessContext.texts.join(' ').slice(0, QUERY_MAX_CHARS) || query) : query
+      try { result = await search({ roomKey, query: scopeQuery, businessContext, scope, chain: chainContext, actor, mode: deps.mode || 'business', requestCache: deps.requestCache }) }
       catch (_) { result = { status: 'error', candidates: [], error: 'search_failed' } }
       const raw = (Array.isArray(result && result.candidates) ? result.candidates : [])
         .map(sanitizeCandidate).filter(item => item.title && item.sourceRef && !candidateInChain(item, chain))
@@ -560,6 +583,7 @@ async function searchForCandidates({ roomKey, actor, snapshot, chain, report, de
         }
       }
       report.sourceStatuses.push({ scope, status: result && result.status || 'error', count: raw.length,
+        matchReason: result && result.matchReason || '',
         error: result && (result.error || result.code) || '', errors: result && result.errors || [] }, ...reads)
       if (flows.length) {
         report.flowCandidates = flows
@@ -744,7 +768,9 @@ async function createCheck(input, deps = {}) {
         sources: [],
         summary: { passed: 0, blockers: 1, needsSupplement: 0, warnings: 0, notApplicable: 0 }
       }
-      chainFingerprint = crypto.createHash('sha256').update(candidates.map(item => chainUtils.fingerprintChain(snapshot, item)).sort().join('|')).digest('hex')
+      chainFingerprint = crypto.createHash('sha256')
+        .update(resolved.candidates.map(candidate => chainUtils.fingerprintChain(snapshot, candidate)).sort().join('|'))
+        .digest('hex')
     } else if (resolved.status !== 'resolved') {
       report = failedReport({ nodeUid, message: '当前节点无法定位到完整的 C/P 链路；请先确认或补充 CPD 结构。' })
       const nodes = chainUtils.nodesOf(snapshot)
@@ -1178,6 +1204,7 @@ module.exports = {
     sourceIdentity,
     dedupeSources,
     buildQuery,
+    businessSearchContext,
     materialMatchFor,
     sanitizeCandidate,
     hasFlowStructure,

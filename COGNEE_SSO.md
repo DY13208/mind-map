@@ -1,6 +1,8 @@
 # Cognee 使用 mind-map 企业微信登录
 
-本项目提供 `/api/auth/cognee/authorize` 和 `/api/auth/cognee/exchange`，让 Cognee 复用现有企业微信扫码/客户端登录。已登录用户直接返回 Cognee，未登录用户先经过原企业微信登录。企业微信应用配置与原回调地址无需复制或改动。
+本项目提供 `/api/auth/cognee/authorize` 和 `/api/auth/cognee/exchange`，让 Cognee 复用现有企业微信扫码/客户端登录。Cognee 登录页内嵌的二维码由本项目现有 `/api/auth/qr` 生成，扫码仍回到原 `/api/auth/wecom/callback`，无需新增企业微信应用或回调域名。两端使用同一 HTTPS 主机名（端口可以不同），以保留原回调的浏览器状态 Cookie。已登录用户也可直接返回 Cognee。
+
+所有企业微信成员都使用 Cognee 已有账号 `izw99s@hotmail.com`，共享其完整权限及内容；账号映射由 Cognee 完成。Cognee 登录页提供密码登录切换，并在二维码和密码两种模式下保留原「Login WorkBuddy」按钮及授权流程。
 
 在本项目部署 `.env` 增加：
 
@@ -16,6 +18,7 @@ MIND_MAP_SSO_ENABLED=true
 MIND_MAP_SSO_ORIGIN=https://xx.stillgroup.net:8989
 MIND_MAP_SSO_REDIRECT_URI=https://xx.stillgroup.net:3030/sso/mind-map/callback
 MIND_MAP_COGNEE_SSO_SECRET=<相同共享密钥>
+MIND_MAP_SSO_ACCOUNT_EMAIL=izw99s@hotmail.com
 ENABLE_BACKEND_ACCESS_CONTROL=true
 REQUIRE_AUTHENTICATION=true
 ```
