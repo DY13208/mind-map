@@ -1657,6 +1657,9 @@ export default {
             roomKey,
             artifacts: data.artifacts,
             artifactSkips: data.artifactSkips,
+            // 「产物为什么没扫到」的诊断（扫了哪个目录、各命中几个）—— 透传给写回，
+            // 产物为空时把原因写进提示，而不是静默只写正文（2026-10-08 反馈）
+            artifactDiag: data.artifactDiag,
             bridgeAttach: data.bridgeAttach,
             onProgress: data.onProgress
           })

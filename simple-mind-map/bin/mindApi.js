@@ -1186,28 +1186,38 @@ async function handleApi(req, res) {
       return true
     }
 
+    // ⚠️ 必须**递归**扫：产物经常落在 output/<某个子目录>/ 里（Agent 自己建了个文件夹，
+    // 或者没按 runDir 写）。只扫根目录就会出现「文件明明在、一个都扫不到」——
+    // 界面上就是「产物没有挂上」（2026-10-08 用户反馈）。
     const items = []
     const seen = new Set()
-    roots.forEach(root => {
+    const MAX_SCAN_FILES = 400
+    const walkRecent = (dir, depth) => {
+      if (depth > 3 || items.length >= MAX_SCAN_FILES) return
       let names = []
       try {
-        if (!fs.existsSync(root)) return
-        names = fs.readdirSync(root)
+        names = fs.readdirSync(dir)
       } catch (e) {
         return
       }
       names.forEach(name => {
-        if (!allowed.test(name)) return
-        const full = path.join(root, name)
+        if (items.length >= MAX_SCAN_FILES) return
+        if (name.startsWith('.')) return
+        const full = path.join(dir, name)
         let st = null
         try {
           st = fs.statSync(full)
         } catch (e) {
           return
         }
-        if (!st.isFile()) return
+        if (st.isDirectory()) {
+          walkRecent(full, depth + 1)
+          return
+        }
+        if (!st.isFile() || !allowed.test(name)) return
         if (since && (st.mtimeMs || 0) < since) return
-        const key = name.toLowerCase()
+        // 去重用完整路径：不同子目录里的同名文件是两个文件，不能被合并掉
+        const key = full.toLowerCase()
         if (seen.has(key)) return
         seen.add(key)
         items.push({
@@ -1218,6 +1228,10 @@ async function handleApi(req, res) {
           mime: mimeOf(path.extname(name).toLowerCase())
         })
       })
+    }
+    roots.forEach(root => {
+      if (!fs.existsSync(root)) return
+      walkRecent(root, 0)
     })
     items.sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
     const picked = items.slice(0, limit)

@@ -172,7 +172,14 @@ new Function('require', 'module', 'exports', code)(name => {
     return { getTextFromHtml: html => String(html || '').replace(/<[^>]+>/g, '') }
   }
   if (name === '@/utils/jobResultWriter') return jobWriter
-  if (name === '@/utils/mindmapRunPrompt') return {}
+  if (name === '@/utils/mindmapRunPrompt') {
+    // 回显 args（cwd / runDir）—— 「助理不能带执行主机路径」那条要验真实分支
+    return {
+      buildNodeRunPrompt: args => `NODE:${args.cwd || ''}|${args.runDir || ''}`,
+      buildFollowUpPrompt: (text, args) => `FU:${args.cwd || ''}|${args.runDir || ''}`,
+      withCpdAdvisor: t => String(t)
+    }
+  }
   if (name === '@/utils/agentChat') return agentChatStub
   if (name === '@/utils/runChannel') return runChannelUtil
   if (name === '@/utils/runLog') return runLogUtil
@@ -1897,6 +1904,49 @@ async function main() {
   )
   dispatchResult = { ok: true, job: { id: 'job-x' }, mode: 'jobs' }
   localStore.clear()
+
+  // ---- 30. 助理通道的提示词不带「执行主机」的工作目录 ----
+  // 助理跑在网关自己的 workspace 里；把桥接主机那条 Windows 路径塞进提示词，
+  // 它会往一个根本不存在的目录写产物 → 页面上就是「产物没有挂上」（2026-10-08 反馈）。
+  vm = makeVm()
+  vm.jobGatewayCwd = 'D:\\执行主机的目录'
+  const seenCwd = []
+  vm.buildFollowUpJobPrompt = (text, node, runDir, cwd) => {
+    seenCwd.push(cwd)
+    return String(text || '内容')
+  }
+  vm.prepareJobContainer = async () => ({
+    ok: true,
+    nodeUid: 'u-oc',
+    nodeTitle: '任务 · OC'
+  })
+  vm.writeJobResultToNode = async () => {}
+  openclawPlan.length = 0
+  openclawPlan.push({ content: '助理的正文' })
+  await vm.runViaOpenclaw({ options: { prompt: '接着做' } })
+  check(
+    '助理通道传空 cwd（不带执行主机的路径）',
+    seenCwd.length === 1 && seenCwd[0] === '',
+    JSON.stringify(seenCwd)
+  )
+  // 桥接通道：不传 cwd 时仍用「执行主机的工作目录」（产物就落在那台机器上）
+  vm = makeVm()
+  vm.jobGatewayCwd = 'D:\\执行主机的目录'
+  vm.$route = { query: { room: 'room-x' } }
+  vm.activeNodes = [
+    { isGeneralization: false, getData: k => (k === 'uid' ? 'u1' : '节点标题') }
+  ]
+  check(
+    '桥接不传 cwd → 仍用执行主机的工作目录',
+    vm.buildDefaultJobPrompt(null, '20261008-2032') ===
+      'NODE:D:\\执行主机的目录|20261008-2032',
+    vm.buildDefaultJobPrompt(null, '20261008-2032')
+  )
+  check(
+    '显式传空 cwd → 提示词里不带主机路径（助理通道用）',
+    vm.buildDefaultJobPrompt(null, '20261008-2032', '') === 'NODE:|20261008-2032',
+    vm.buildDefaultJobPrompt(null, '20261008-2032', '')
+  )
 
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)

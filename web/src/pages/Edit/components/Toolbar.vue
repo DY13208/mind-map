@@ -1394,20 +1394,23 @@ export default {
      * 这次运行的指令：点过同节点的概要且写了内容 → 接着它继续；否则按节点默认任务。
      * 概要文字在运行时现取（双击改完文字也能拿到新的）。
      */
-    async resolveRunPrompt(runNode, runDir = '') {
+    async resolveRunPrompt(runNode, runDir = '', cwd) {
       const gen = this.jobGeneralization
       const uid = String((runNode && runNode.getData && runNode.getData('uid')) || '')
       if (gen && uid && gen.ownerUid === uid) {
         const text = await this.readGeneralizationText(gen)
         if (text && !isFollowUpPlaceholder(text)) {
           return {
-            prompt: this.buildFollowUpJobPrompt(text, runNode, runDir),
+            prompt: this.buildFollowUpJobPrompt(text, runNode, runDir, cwd),
             continued: true
           }
         }
         this.$message.info('概要里还没写内容，这次按节点默认任务跑')
       }
-      return { prompt: this.buildDefaultJobPrompt(runNode, runDir), continued: false }
+      return {
+        prompt: this.buildDefaultJobPrompt(runNode, runDir, cwd),
+        continued: false
+      }
     },
 
     /** 向 Edit 要概要的最新文字（概要点数据其实存在所属节点的 generalization 里） */
@@ -1437,7 +1440,7 @@ export default {
      * 按当前节点派发的任务内容：只做这一步，并把前面几步跑出来的结果当输入继续往下做
      * （不是把整张脑图当 SOP 从头再跑一遍）。组装逻辑在 utils/mindmapRunPrompt.js
      */
-    buildDefaultJobPrompt(wanted = null, runDir = '') {
+    buildDefaultJobPrompt(wanted = null, runDir = '', cwd) {
       const active = (this.activeNodes || [])[0]
       const selected =
         wanted || (active && !active.isGeneralization ? active : null)
@@ -1454,13 +1457,15 @@ export default {
       return buildNodeRunPrompt({
         node: selected,
         room,
-        cwd: this.jobGatewayCwd,
+        // 不给 cwd 就沿用「执行主机」的工作目录（桥接通道）；
+        // 助理通道显式传 '' —— 它在自己的 workspace 里跑，别给它别的机器的路径
+        cwd: cwd === undefined ? this.jobGatewayCwd : cwd,
         // 助理通道会给一个「本次运行专用」的产物目录，页面跑完只按它挂附件
         runDir
       })
     },
 
-    buildFollowUpJobPrompt(text, wanted = null, runDir = '') {
+    buildFollowUpJobPrompt(text, wanted = null, runDir = '', cwd) {
       const room = String(
         (this.$route.query && this.$route.query.room) || ''
       ).trim()
@@ -1470,7 +1475,7 @@ export default {
       return buildFollowUpPrompt(text, {
         node,
         room,
-        cwd: this.jobGatewayCwd,
+        cwd: cwd === undefined ? this.jobGatewayCwd : cwd,
         runDir
       })
     },
@@ -2343,6 +2348,7 @@ export default {
           job,
           artifacts,
           artifactSkips,
+          artifactDiag: options.artifactDiag || null,
           // 附件优先经桥接的 MCP 通道挂（服务器部署时比协同服务上传那条路稳），
           // 桥接不通会自动退回原来的上传方式。
           // 助理通道没有执行主机，直接走协同服务上传（bridgeAttach 给 null 即可）。
@@ -2461,35 +2467,51 @@ export default {
      * 兜底：目录没扫到（Agent 没按目录写、或目录名对不上）→ 退回按时间窗扫共享 output，
      * 宁可多也别把产物丢了。
      */
-    async fetchOpenclawArtifacts(since, dir = '') {
+    async fetchOpenclawArtifacts(since, dir = '', diag = null) {
       const runDir = String(dir || '').trim()
+      // 诊断信息：产物没扫到时，要能说出「扫了哪里、各命中几个」——
+      // 否则界面上只会看到「完成」，人不知道文件是没写还是没扫到（2026-10-08 反馈）
+      const note = (key, value) => {
+        if (diag && typeof diag === 'object') diag[key] = value
+      }
+      if (diag && typeof diag === 'object') {
+        diag.runDir = runDir
+        diag.since = Number(since) || 0
+      }
       const query = async qs => {
-        const res = await fetch(`/api/artifacts/recent?${qs}`, {
-          cache: 'no-store',
-          credentials: 'include'
-        })
-        if (!res.ok) return []
-        const json = await res.json().catch(() => ({}))
-        return (json && json.items) || []
+        try {
+          const res = await fetch(`/api/artifacts/recent?${qs}`, {
+            cache: 'no-store',
+            credentials: 'include'
+          })
+          if (!res.ok) {
+            note('error', `取产物接口返回 ${res.status}`)
+            return []
+          }
+          const json = await res.json().catch(() => ({}))
+          note('total', Number((json && json.total) || 0))
+          return (json && json.items) || []
+        } catch (err) {
+          note('error', (err && err.message) || '取产物失败')
+          return []
+        }
       }
       if (runDir) {
         try {
           const pinned = await query(
             `dir=${encodeURIComponent(runDir)}&limit=20&content=1`
           )
+          note('dirCount', pinned.length)
           if (pinned.length) return pinned
         } catch (err) {
           /* 掉到下面的时间窗兜底 */
         }
       }
-      try {
-        return await query(
-          `since=${encodeURIComponent(Number(since) || 0)}&limit=8&content=1`
-        )
-      } catch (err) {
-        // 捞不到不影响正文写回
-        return []
-      }
+      const fallback = await query(
+        `since=${encodeURIComponent(Number(since) || 0)}&limit=8&content=1`
+      )
+      note('sinceCount', fallback.length)
+      return fallback
     },
 
     /**
@@ -2511,11 +2533,13 @@ export default {
       // 排队条目要把 runDir 一起带上：晚点真的跑起来时，扫的就是同一个目录。
       const runDir = String(options.runDir || this.makeRunDir())
       // 点过概要 → 接着它继续；否则按节点默认任务（跟桥接同一套取词逻辑）
+      // ⚠️ cwd 传空：助理跑在它自己的 workspace 里，不能把「执行主机」的 Windows 路径
+      // 塞进提示词 —— 那样它会往一个根本不存在的目录写产物，页面上就是「产物没挂上」。
       let prompt = ''
       if (options.prompt) {
-        prompt = this.buildFollowUpJobPrompt(options.prompt, runNode, runDir)
+        prompt = this.buildFollowUpJobPrompt(options.prompt, runNode, runDir, '')
       } else {
-        const picked = await this.resolveRunPrompt(runNode, runDir)
+        const picked = await this.resolveRunPrompt(runNode, runDir, '')
         prompt = picked.prompt
       }
 
@@ -2681,9 +2705,11 @@ export default {
           running > 1 ? `正在写回导图…（并行 ${running} 条）` : '正在写回导图…'
         // 助理的产物落在 workspace/output（挂宿主 ./output）——
         // 只按**这次运行的专属目录**捞，回形针上就只有这一次的东西
+        const artifactDiag = {}
         const artifacts = await this.fetchOpenclawArtifacts(
           run.startedAt,
-          outDir
+          outDir,
+          artifactDiag
         )
         await this.writeJobResultToNode(
           { id },
@@ -2691,6 +2717,7 @@ export default {
             channel: RUN_CHANNEL_OPENCLAW,
             markdown,
             artifacts,
+            artifactDiag,
             // 落点用这次任务自己的（并行/排队时读实例变量会被别的任务覆盖）
             nodeUid,
             nodeTitle,
