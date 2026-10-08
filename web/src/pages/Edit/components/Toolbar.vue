@@ -579,7 +579,8 @@ import {
   RUN_CHANNEL_BRIDGE,
   readRunChannel,
   writeRunChannel,
-  runChannelLabel
+  runChannelLabel,
+  readRunConcurrency
 } from '@/utils/runChannel'
 
 // 任务结果按 Markdown 渲染，配置与项目其他对话页保持一致
@@ -833,14 +834,16 @@ export default {
       // 点运行直接读设置（utils/runChannel.js 落盘）。
       // 这次运行实际用的通道
       jobChannel: '',
-      // 助理通道的流式正文与中止句柄
+      // 助理通道**并行运行中**的任务：runId → { runId, text, abort, nodeUid, nodeTitle, runDir, startedAt }
+      // 每次运行一份自己的状态。2026-10-08 实测确认网关能真并发
+      // （不同 conversationId = 独立会话；并发 2 条总耗时 ≈ 较慢那条，不是两条之和），
+      // 所以进度、正文、中止句柄都不能再共用实例变量 —— 否则两条并行会互相覆盖。
+      jobOpenclawRuns: {},
+      // 最新一条助理运行的正文（展示/兜底用，不是并发判据）
       jobOpenclawText: '',
       jobOpenclawAbort: null,
-      // 助理通道**正在跑**一个任务。助理没有回执也没有 jobId，
-      // 所以队列的"占用"判据就是它（见 jobBusyCount / startOpenclawRun）。
-      // 为什么不让助理真并发：网关侧是共享 agent 会话 + 产物按共享 output 目录时间窗扫，
-      // 同时跑两个会串正文、把附件挂到别人的任务上。
-      jobOpenclawBusy: false,
+      // 结果写回的串行链（并发跑多个任务时，写回必须排队 —— 见 writeJobResultToNode）
+      jobWriteChain: null,
       jobHosts: [],
       jobHostsLoading: false,
       jobHostsError: '',
@@ -2162,10 +2165,27 @@ export default {
     },
 
     /**
-     * 任务跑完 → 把输出写回运行节点：节点下末尾追加「运行输出 · 时间」子分支，
+     * 任务跑完 → 把输出写回运行节点（**排队执行，见 writeJobResultOnce**）。
+     *
+     * 为什么要有这一层：助理现在能并发跑多条，两个结果可能几乎同时回来；
+     * 而下游 writeJobResultToMap 里有 `if (this.jobWriteBusy) return`（全局锁，撞上就**静默丢掉**
+     * 后一个写回）。2026-10-08：这里用一条 promise 链把写回串起来 —— 谁先写完谁先走，谁也不丢。
+     * 写回本身很快（就是建几个节点 + 传附件），串行不会拖慢体感。
+     */
+    writeJobResultToNode(job, options = {}) {
+      const prev = this.jobWriteChain || Promise.resolve()
+      const once = () => this.writeJobResultOnce(job, options)
+      const next = prev.then(once, once)
+      // 链上不能挂 rejected，否则后面所有写回都会被带崩
+      this.jobWriteChain = next.catch(() => {})
+      return next
+    },
+
+    /**
+     * 真正写回一次（调用方见 writeJobResultToNode）：节点下末尾追加「运行输出 · 时间」子分支，
      * 完整输出存成 .md、任务产出的文件一起挂成附件。同一条任务只写一次（force 除外）。
      */
-    async writeJobResultToNode(job, options = {}) {
+    async writeJobResultOnce(job, options = {}) {
       // 默认用当前选中的主机/会话；多任务并行时调用方会把它自己那份传进来
       const host = options.host || this.jobSelectedHost
       const gateway = options.gateway || this.jobGateway
@@ -2402,12 +2422,12 @@ export default {
         if (!container || !container.ok) return
       }
 
-      // —— 队列闸门（跟桥接口径一致：一次只跑一个任务）——
-      // 助理没有回执、也没有 jobId，所以「有没有在跑」看 jobOpenclawBusy（见 jobBusyCount）。
-      // 不让助理真并发的原因：这条路在网关侧落在**同一个 agent 会话**
-      // （phase2b1 探针里 A/B 都是 agent:main:main），产物又是按共享 output 目录的
-      // 时间窗扫的 —— 同时跑两个，正文会串、附件会挂到别人的任务上。
-      if (this.jobBusyCount() > 0) {
+      // —— 并发闸门：助理**可以**并行（2026-10-08 实测：不同 conversationId = 独立会话，
+      // 并发 2 条总耗时 ≈ 较慢那条，不是两条之和），所以不再强制串行。
+      // 但要有个上限（右侧栏「设置 → AI 执行引擎」里配，默认 3），到顶了就入队，
+      // 等某一条跑完 drainJobQueue 再派 —— 这样连点十几下也不会把网关打爆。
+      const limit = this.openclawConcurrencyLimit()
+      if (this.openclawRunCount() >= limit) {
         this.enqueueDispatch({
           channel: RUN_CHANNEL_OPENCLAW,
           prompt,
@@ -2420,67 +2440,122 @@ export default {
         })
         return
       }
-      // 起跑即返回（不 await 到跑完）：按钮在派出去那一刻就解锁，第二个任务能接着点，
-      // 到闸门处自动排队 —— 这才叫「一次一个任务」，而不是「按钮锁死」
+      // 起跑即返回（不 await 到跑完）：按钮在派出去那一刻就解锁，第二个任务能接着点 ——
+      // 上限没满就直接并行跑，满了才排队（2026-10-08 用户要求「能并发」）。
       this.startOpenclawRun({ prompt, container, runDir })
+    },
+
+    /** 并行跑着几条助理任务 */
+    openclawRunList() {
+      const runs = this.jobOpenclawRuns || {}
+      return Object.keys(runs).map(id => runs[id])
+    },
+
+    openclawRunCount() {
+      return this.openclawRunList().length
+    },
+
+    /** 助理并行上限（设置里配，默认 3） */
+    openclawConcurrencyLimit() {
+      try {
+        return readRunConcurrency()
+      } catch (err) {
+        return 1
+      }
+    },
+
+    /**
+     * 状态栏文案：并行跑着多条时要把它们一起说清楚（不能只显示最后一条的进度）。
+     */
+    refreshOpenclawStatus() {
+      const runs = this.openclawRunList()
+      if (!runs.length) return
+      if (runs.length === 1) {
+        this.jobStatus = `助理执行中…（${runs[0].text.length} 字）`
+      } else {
+        this.jobStatus = `助理执行中…（并行 ${runs.length} 条：${runs
+          .map(item => `${item.text.length} 字`)
+          .join(' / ')}）`
+      }
+      this.jobStatusType = 'jobWait'
     },
 
     /**
      * 真正跑一次助理：流式收正文 → 按这次运行的专属目录捞产物 → 写回导图。
      *
      * 后台跑（调用方不 await），所以**错误必须自己收干净** —— 没人接它的 rejected promise。
-     * 跑完 / 失败 / 取消都会清 jobOpenclawBusy，并把队列里的下一个派出去。
+     * 每条运行的状态都放在 jobOpenclawRuns[runId] 里（并行不互相覆盖）；
+     * 收尾时把自己从表里摘掉，再 drainJobQueue 把等着的下一个放出去。
      */
     async startOpenclawRun({ prompt = '', container = null, runDir = '' } = {}) {
       const nodeUid = (container && container.nodeUid) || ''
       const nodeTitle = (container && container.nodeTitle) || ''
       const outDir = String(runDir || '')
-      this.jobOpenclawBusy = true
+      const runId = `oc-${Date.now().toString(36)}-${Math.random()
+        .toString(36)
+        .slice(2, 6)}`
       const controller =
         typeof AbortController !== 'undefined' ? new AbortController() : null
-      this.jobOpenclawAbort = controller
-      this.jobOpenclawText = ''
-      this.jobFullText = ''
-      this.jobStatus = '正在通过助理执行…'
-      this.jobStatusType = 'jobWait'
       // 记下起跑时刻：产物目录没扫到时要回退按时间窗捞，所以这个还得留着
       // （往前放宽 2 秒，避开「来不及落盘 / 时间戳粒度」的时间差）
-      const startedAt = Date.now() - 2000
+      const run = {
+        runId,
+        text: '',
+        abort: controller,
+        nodeUid,
+        nodeTitle,
+        runDir: outDir,
+        startedAt: Date.now() - 2000
+      }
+      this.jobOpenclawRuns = { ...(this.jobOpenclawRuns || {}), [runId]: run }
+      this.jobOpenclawAbort = controller
+      const parallel = this.openclawRunCount()
+      this.jobStatus =
+        parallel > 1
+          ? `助理执行中…（并行 ${parallel} 条）`
+          : '正在通过助理执行…'
+      this.jobStatusType = 'jobWait'
       try {
         const res = await streamChat({
           messages: [{ role: 'user', content: prompt }],
-          conversationId: `mind-openclaw-${Date.now().toString(36)}`,
+          // 每条运行一个独立的 conversationId —— 网关侧就是靠它分会话的（实测可并行）
+          conversationId: `mind-openclaw-${runId}`,
           signal: controller ? controller.signal : undefined,
           onDelta: text => {
             // agentChat 的 onDelta 给的是**累计全文**
-            this.jobOpenclawText = String(text || '')
-            this.jobFullText = this.jobOpenclawText
-            this.jobStatus = `助理执行中…（${this.jobOpenclawText.length} 字）`
+            run.text = String(text || '')
+            this.jobOpenclawText = run.text
+            this.refreshOpenclawStatus()
           },
           onEvent: label => {
-            if (label) this.jobStatus = `助理：${label}`
+            if (label && this.openclawRunCount() === 1) {
+              this.jobStatus = `助理：${label}`
+            }
           }
         })
-        const markdown = String(
-          (res && res.content) || this.jobOpenclawText || ''
-        ).trim()
+        const markdown = String((res && res.content) || run.text || '').trim()
         if (!markdown) {
           this.jobStatus = '助理没有返回内容'
           this.jobStatusType = 'jobErr'
           this.$message.warning('助理没有返回内容，没有东西写回导图')
           return
         }
-        this.jobStatus = '正在写回导图…'
+        const running = this.openclawRunCount()
+        this.jobStatus =
+          running > 1 ? `正在写回导图…（并行 ${running} 条）` : '正在写回导图…'
         // 助理的产物落在 workspace/output（挂宿主 ./output）——
         // 只按**这次运行的专属目录**捞，回形针上就只有这一次的东西
-        const artifacts = await this.fetchOpenclawArtifacts(startedAt, outDir)
+        const artifacts = await this.fetchOpenclawArtifacts(
+          run.startedAt,
+          outDir
+        )
         await this.writeJobResultToNode(
-          { id: `openclaw-${Date.now().toString(36)}` },
+          { id: runId },
           {
             channel: RUN_CHANNEL_OPENCLAW,
             markdown,
             artifacts,
-            // 落点用这次任务自己的（并发/排队时读实例变量会被别的任务覆盖）
+            // 落点用这次任务自己的（并行/排队时读实例变量会被别的任务覆盖）
             nodeUid,
             nodeTitle,
             prompt,
@@ -2498,23 +2573,32 @@ export default {
         this.jobStatusType = 'jobErr'
         this.$message.error(`助理执行失败：${msg}`)
       } finally {
-        this.jobOpenclawAbort = null
-        // 这一条落地了（不管成没成）→ 放开闸门，把排队里的下一个放出去
-        this.jobOpenclawBusy = false
+        const next = { ...(this.jobOpenclawRuns || {}) }
+        delete next[runId]
+        this.jobOpenclawRuns = next
+        if (this.jobOpenclawAbort === controller) this.jobOpenclawAbort = null
+        // 腾出一个名额 → 把等着的下一个放出去（drainJobQueue 自己会再核一次上限）
         if ((this.jobQueue || []).length) this.drainJobQueue()
       }
     },
 
-    /** 助理通道正在跑 → 停掉它 */
-    stopOpenclawRun() {
-      if (this.jobOpenclawAbort) {
-        try {
-          this.jobOpenclawAbort.abort()
-        } catch (err) {
-          /* ignore */
+    /**
+     * 停掉助理运行。
+     * 不给 runId 就全停（页面上的「停止」按钮没有绑到具体某条，见模板）。
+     */
+    stopOpenclawRun(runId = '') {
+      const runs = this.jobOpenclawRuns || {}
+      const ids = runId ? [runId] : Object.keys(runs)
+      ids.forEach(id => {
+        const run = runs[id]
+        if (run && run.abort) {
+          try {
+            run.abort.abort()
+          } catch (err) {
+            /* ignore */
+          }
         }
-        this.jobOpenclawAbort = null
-      }
+      })
     },
 
     async runWorkbuddyJob(options = {}) {
@@ -3211,11 +3295,11 @@ export default {
       return this.jobSelectedHost
     },
 
-    /** 已经在路上（派出去还没收回）的任务数 —— 队列的"占用"判据 */
+    /** 已经在路上（派出去还没收回）的**桥接**任务数 —— 桥接队列的"占用"判据 */
     jobBusyCount() {
-      // 桥接：等回执的条数；助理：有没有一条在流式跑。
-      // 两条通道共用一个闸门 —— 一次只跑一个任务，写回才不会互相抢（见 startOpenclawRun）。
-      return (this.jobPendingList || []).length + (this.jobOpenclawBusy ? 1 : 0)
+      // 助理通道**不再**算在这里：它能并发（见 openclawRunCount / openclawConcurrencyLimit），
+      // 一次跑几条由「设置 → AI 执行引擎 → 并行任务数」决定。
+      return (this.jobPendingList || []).length
     },
 
     /**
@@ -3263,6 +3347,12 @@ export default {
       if (!item) return
       // 助理条目：没有 host / 会话 / 回执，直接把这条起跑（startOpenclawRun 自己收尾再 drain）
       if (item.channel === RUN_CHANNEL_OPENCLAW) {
+        // 并行名额还满着就先塞回队首等 —— 某条跑完会再调 drain 一次
+        if (this.openclawRunCount() >= this.openclawConcurrencyLimit()) {
+          this.jobQueue.unshift(item)
+          this.saveJobQueue()
+          return
+        }
         const container = item.container || {
           ok: true,
           nodeUid: item.nodeUid || '',

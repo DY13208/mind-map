@@ -65,3 +65,38 @@ export function runChannelLabel(channel) {
   )
   return (hit && hit.label) || RUN_CHANNEL_OPTIONS[0].label
 }
+
+// —— 助理通道的并行上限 ——
+// 2026-10-08 实测：网关侧不同 conversationId 是独立会话，能**真并行**
+// （并发 2 条总耗时 ≈ 较慢那条，不是两条之和）。所以不再强制串行，
+// 但要有上限，免得一次点十几条把网关打爆。
+const CONCURRENCY_KEY = 'mindmap:runConcurrency'
+export const RUN_CONCURRENCY_DEFAULT = 3
+export const RUN_CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5, 6]
+
+export function normalizeRunConcurrency(value) {
+  const n = Math.floor(Number(value))
+  if (!Number.isFinite(n) || n < 1) return RUN_CONCURRENCY_DEFAULT
+  return Math.min(n, 6)
+}
+
+export function readRunConcurrency() {
+  try {
+    if (typeof localStorage === 'undefined') return RUN_CONCURRENCY_DEFAULT
+    return normalizeRunConcurrency(localStorage.getItem(CONCURRENCY_KEY))
+  } catch (err) {
+    return RUN_CONCURRENCY_DEFAULT
+  }
+}
+
+export function writeRunConcurrency(value) {
+  const n = normalizeRunConcurrency(value)
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(CONCURRENCY_KEY, String(n))
+    }
+  } catch (err) {
+    /* 存不下不影响 */
+  }
+  return n
+}

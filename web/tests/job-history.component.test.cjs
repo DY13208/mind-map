@@ -1550,34 +1550,79 @@ async function main() {
   await vm.runWorkbuddyJob({ channel: 'openclaw' })
   check('显式指定通道优先于设置', explicitCalls === 1 && vm.jobChannel === 'openclaw')
 
-  // ---- 27. 助理（OpenClaw）通道：一次一个任务 + 按钮不锁死 + 落点不乱 ----
-  // 2026-10-08 用户反馈：「用助理运行时运行按钮一直转圈、不能点第二个任务」。
-  // 根因：runViaOpenclaw 原来 await 到整条流跑完（分钟级）才返回，busy 一直挂着。
-  // 改法：runViaOpenclaw 只「准备 + 起跑」立即返回；正在跑时第二条入队，跑完自动派下一个。
+  // ---- 27. 助理通道：能并发（有上限）+ 按钮不锁死 + 落点不乱 ----
+  // 2026-10-08 用户先反馈「运行按钮一直转圈、不能点第二个任务」→ 先做成排队；
+  // 随后问「只能走队列吗 能走并发吗」→ 网关侧实测（不同 conversationId = 独立会话，
+  // 并发 2 条总耗时 ≈ 较慢那条，不是两条之和）确认能真并行，于是改成：
+  // 上限内直接并行，到上限（设置里配，默认 3）才入队，跑完自动补位。
   localStore.clear()
   openclawPlan.length = 0
   openclawHold.length = 0
   openclawStreamCalls.length = 0
   openclawWrites.length = 0
+
+  // A) 上限内 → 直接并行两条
   vm = makeVm()
   vm.jobQueue = []
-  vm.jobOpenclawBusy = false
+  vm.jobOpenclawRuns = {}
   vm.buildFollowUpJobPrompt = t => String(t)
   vm.writeJobResultToNode = async (job, options) => {
     openclawWrites.push(options.nodeUid)
   }
-  check('没任务在跑时 jobBusyCount=0', vm.jobBusyCount() === 0)
-  vm.jobOpenclawBusy = true
-  check('助理在跑时算一个占用（闸门认它）', vm.jobBusyCount() === 1)
-  vm.jobOpenclawBusy = false
+  check(
+    '默认并行上限是 3',
+    vm.openclawConcurrencyLimit() === 3,
+    String(vm.openclawConcurrencyLimit())
+  )
+  check('没任务在跑时占用为 0', vm.openclawRunCount() === 0)
+  check('jobBusyCount 只管桥接（不被助理占用）', vm.jobBusyCount() === 0)
 
-  openclawPlan.push({ hold: true, content: '第一条的正文' })
-  openclawPlan.push({ content: '第二条的正文' })
   const ocBoxA = { ok: true, nodeUid: 'u-A', nodeTitle: '任务 · A' }
   const ocBoxB = { ok: true, nodeUid: 'u-B', nodeTitle: '任务 · B' }
-  const firstRun = vm.startOpenclawRun({ prompt: '任务A', container: ocBoxA })
-  check('助理起跑即占位', vm.jobOpenclawBusy === true)
+  openclawPlan.push({ hold: true, content: '第一条的正文' })
+  openclawPlan.push({ hold: true, content: '第二条的正文' })
+  const runA = vm.startOpenclawRun({ prompt: '任务A', container: ocBoxA })
+  const runB = vm.startOpenclawRun({ prompt: '任务B', container: ocBoxB })
+  check(
+    '上限内两条**同时**在跑（真并发，不进队列）',
+    vm.openclawRunCount() === 2 && (vm.jobQueue || []).length === 0,
+    JSON.stringify({ running: vm.openclawRunCount(), queued: (vm.jobQueue || []).length })
+  )
+  check(
+    '每条用自己的 conversationId（网关靠它分会话）',
+    new Set(openclawStreamCalls.map(c => c.conversationId)).size === 2,
+    openclawStreamCalls.map(c => c.conversationId).join(',')
+  )
+  check('状态栏说清是并行几条', /并行 2 条/.test(vm.jobStatus), vm.jobStatus)
 
+  openclawHold.forEach(fn => fn())
+  await Promise.all([runA, runB])
+  for (let i = 0; i < 40 && vm.openclawRunCount(); i++) {
+    await new Promise(r => setTimeout(r, 5))
+  }
+  check('跑完名额清空', vm.openclawRunCount() === 0)
+  check(
+    '两条各自写回自己的任务容器（并发也不乱）',
+    openclawWrites.slice().sort().join(',') === 'u-A,u-B',
+    openclawWrites.join(',')
+  )
+
+  // B) 上限 = 1 → 退回排队；跑完自动补位
+  localStore.set('mindmap:runConcurrency', '1')
+  openclawPlan.length = 0
+  openclawHold.length = 0
+  openclawWrites.length = 0
+  vm = makeVm()
+  vm.jobQueue = []
+  vm.jobOpenclawRuns = {}
+  vm.buildFollowUpJobPrompt = t => String(t)
+  vm.writeJobResultToNode = async (job, options) => {
+    openclawWrites.push(options.nodeUid)
+  }
+  check('上限能配成 1', vm.openclawConcurrencyLimit() === 1)
+  openclawPlan.push({ hold: true, content: 'A 的正文' })
+  openclawPlan.push({ content: 'B 的正文' })
+  const firstRun = vm.startOpenclawRun({ prompt: '任务A', container: ocBoxA })
   const secondCall = vm.runViaOpenclaw({
     options: { prompt: '任务B', container: ocBoxB }
   })
@@ -1589,7 +1634,7 @@ async function main() {
     ])) === 'returned'
   )
   check(
-    '助理在跑时第二条进队列（不并发）',
+    '到上限了 → 第二条入队（不硬挤）',
     (vm.jobQueue || []).length === 1 && vm.jobQueue[0].prompt === '任务B',
     JSON.stringify((vm.jobQueue || []).map(x => x.prompt))
   )
@@ -1599,20 +1644,40 @@ async function main() {
       vm.jobQueue[0].nodeUid === 'u-B' &&
       vm.jobQueue[0].container.nodeUid === 'u-B'
   )
-  check('第二条只是排队，第一条照旧在跑', vm.jobOpenclawBusy === true)
+  check('第二条只是排队，第一条照旧在跑', vm.openclawRunCount() === 1)
 
   openclawHold.shift()()
   await firstRun
-  for (let i = 0; i < 40 && (vm.jobOpenclawBusy || (vm.jobQueue || []).length); i++) {
+  for (let i = 0; i < 40 && (vm.openclawRunCount() || (vm.jobQueue || []).length); i++) {
     await new Promise(r => setTimeout(r, 5))
   }
-  check('第一条跑完自动派了第二条（队列清空）', (vm.jobQueue || []).length === 0)
+  check('第一条跑完自动补位（队列清空）', (vm.jobQueue || []).length === 0)
   check(
     '两条各自写回自己的任务容器（挂载不乱）',
-    openclawWrites.join(',') === 'u-A,u-B',
+    openclawWrites.slice().sort().join(',') === 'u-A,u-B',
     openclawWrites.join(',')
   )
-  check('全跑完闸门放开', vm.jobOpenclawBusy === false)
+  check('全跑完名额放开', vm.openclawRunCount() === 0)
+  localStore.clear()
+
+  // C) 写回要排队 —— 并发跑多条时两个结果同时回来，不能丢一个
+  // （下游 writeJobResultToMap 里有 `if (this.jobWriteBusy) return` 全局锁）
+  vm = makeVm()
+  const writeOrder = []
+  vm.writeJobResultOnce = async (job, options) => {
+    writeOrder.push('start-' + options.nodeUid)
+    await new Promise(r => setTimeout(r, 10))
+    writeOrder.push('end-' + options.nodeUid)
+  }
+  await Promise.all([
+    vm.writeJobResultToNode({ id: 'r1' }, { nodeUid: 'n1', markdown: 'a', force: true }),
+    vm.writeJobResultToNode({ id: 'r2' }, { nodeUid: 'n2', markdown: 'b', force: true })
+  ])
+  check(
+    '两个写回都执行了、而且不重叠（不丢）',
+    writeOrder.join(',') === 'start-n1,end-n1,start-n2,end-n2',
+    writeOrder.join(',')
+  )
 
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)

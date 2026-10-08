@@ -71,6 +71,27 @@ check(
   rc.runChannelLabel('bridge')
 )
 
+// 并行上限（2026-10-08：助理实测能真并行，前端按这个数封顶）
+localStore.clear()
+check('并行上限默认 3', rc.readRunConcurrency() === 3, String(rc.readRunConcurrency()))
+check(
+  '选项是 1~6',
+  rc.RUN_CONCURRENCY_OPTIONS.join(',') === '1,2,3,4,5,6',
+  rc.RUN_CONCURRENCY_OPTIONS.join(',')
+)
+check(
+  '写 5 → 读回 5',
+  rc.writeRunConcurrency(5) === 5 && rc.readRunConcurrency() === 5,
+  String(rc.readRunConcurrency())
+)
+check(
+  '越界归一：0 → 默认 3、99 → 封顶 6、乱写 → 默认 3',
+  rc.writeRunConcurrency(0) === 3 &&
+    rc.writeRunConcurrency(99) === 6 &&
+    rc.writeRunConcurrency('乱写') === 3
+)
+localStore.clear()
+
 // ============ B. Setting.vue：AI 执行引擎换成下拉 ============
 console.log('--- B. 设置面板 ---')
 const settingSrc = fs.readFileSync(
@@ -157,6 +178,26 @@ check(
       String(settingComponent.computed.runChannelTip.call({ runChannel: 'openclaw' }))
     )
 )
+
+// 「并行任务数」：只在助理通道显示，改了立刻落盘
+check(
+  '设置里有「并行任务数」下拉（只在助理通道显示）',
+  /并行任务数/.test(settingTpl) &&
+    /v-model="runConcurrency"/.test(settingTpl) &&
+    /runChannel === RUN_CHANNEL_OPENCLAW/.test(settingTpl)
+)
+check(
+  '有 onRunConcurrencyChange 方法',
+  typeof settingMethods.onRunConcurrencyChange === 'function'
+)
+const fakeConcurrency = { runConcurrency: 3, $message: { success: () => {} } }
+settingMethods.onRunConcurrencyChange.call(fakeConcurrency, 5)
+check(
+  '并发数改完立刻落盘（下一次点运行就按它）',
+  localStore.get('mindmap:runConcurrency') === '5' && fakeConcurrency.runConcurrency === 5,
+  localStore.get('mindmap:runConcurrency')
+)
+localStore.clear()
 
 // ============ C. Toolbar.vue：弹窗拆了 ============
 console.log('--- C. 工具栏（不再弹窗）---')
