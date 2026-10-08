@@ -892,6 +892,11 @@ export default {
       // 助理通道的流式正文与中止句柄
       jobOpenclawText: '',
       jobOpenclawAbort: null,
+      // 助理通道**正在跑**一个任务。助理没有回执也没有 jobId，
+      // 所以队列的"占用"判据就是它（见 jobBusyCount / startOpenclawRun）。
+      // 为什么不让助理真并发：网关侧是共享 agent 会话 + 产物按共享 output 目录时间窗扫，
+      // 同时跑两个会串正文、把附件挂到别人的任务上。
+      jobOpenclawBusy: false,
       jobHosts: [],
       jobHostsLoading: false,
       jobHostsError: '',
@@ -2410,12 +2415,16 @@ export default {
     },
 
     /**
-     * 走「助理（OpenClaw）」通道执行一次。
+     * 走「助理（OpenClaw）」通道执行一次：**只负责准备 + 起跑**。
      *
      * 跟桥接最大的不同：助理是**流式直连**，没有「派发 → 轮询 → 回执」这一套 ——
-     * 提示词发过去、正文流回来就算完，所以不需要执行会话、队列闸门、jobs/runs 判定。
+     * 提示词发过去、正文流回来就算完，所以不需要执行会话、jobs/runs 判定。
      * 产物照样有：助理的 workspace/output 挂在宿主 ./output（docker-compose 里配的），
      * 跑完按时间窗捞这次新增的文件，跟桥接走同一套写回（任务 → 附件 → 产物|完整输出）。
+     *
+     * ⚠️ 真正的执行在 startOpenclawRun() 里**后台跑**，这里不 await 到跑完 ——
+     * 2026-10-08 用户反馈：「用助理运行时运行按钮一直转圈、不能点第二个任务」，
+     * 根因就是这里原来 await 到整条流结束（分钟级），按钮的 busy 一直挂着。
      */
     async runViaOpenclaw({ runNode = null, options = {} } = {}) {
       this.rememberRunTarget({ node: runNode })
@@ -2428,11 +2437,47 @@ export default {
         prompt = picked.prompt
       }
 
-      this.jobStatus = '正在准备任务节点…'
-      this.jobStatusType = 'jobWait'
-      const container = await this.prepareJobContainer(prompt, runNode)
-      if (!container || !container.ok) return
+      // 由队列派下来的条目：容器在入队时就建好了，别再建一个任务节点
+      let container = options.container || null
+      if (!container || !container.ok) {
+        this.jobStatus = '正在准备任务节点…'
+        this.jobStatusType = 'jobWait'
+        container = await this.prepareJobContainer(prompt, runNode)
+        if (!container || !container.ok) return
+      }
 
+      // —— 队列闸门（跟桥接口径一致：一次只跑一个任务）——
+      // 助理没有回执、也没有 jobId，所以「有没有在跑」看 jobOpenclawBusy（见 jobBusyCount）。
+      // 不让助理真并发的原因：这条路在网关侧落在**同一个 agent 会话**
+      // （phase2b1 探针里 A/B 都是 agent:main:main），产物又是按共享 output 目录的
+      // 时间窗扫的 —— 同时跑两个，正文会串、附件会挂到别人的任务上。
+      if (this.jobBusyCount() > 0) {
+        this.enqueueDispatch({
+          channel: RUN_CHANNEL_OPENCLAW,
+          prompt,
+          container,
+          continued: !!options.prompt,
+          name: `脑图运行 · ${this.nodePlainTitle(runNode) || '当前节点'}${
+            options.prompt ? ' · 继续' : ''
+          }`
+        })
+        return
+      }
+      // 起跑即返回（不 await 到跑完）：按钮在派出去那一刻就解锁，第二个任务能接着点，
+      // 到闸门处自动排队 —— 这才叫「一次一个任务」，而不是「按钮锁死」
+      this.startOpenclawRun({ prompt, container })
+    },
+
+    /**
+     * 真正跑一次助理：流式收正文 → 按时间窗捞产物 → 写回导图。
+     *
+     * 后台跑（调用方不 await），所以**错误必须自己收干净** —— 没人接它的 rejected promise。
+     * 跑完 / 失败 / 取消都会清 jobOpenclawBusy，并把队列里的下一个派出去。
+     */
+    async startOpenclawRun({ prompt = '', container = null } = {}) {
+      const nodeUid = (container && container.nodeUid) || ''
+      const nodeTitle = (container && container.nodeTitle) || ''
+      this.jobOpenclawBusy = true
       const controller =
         typeof AbortController !== 'undefined' ? new AbortController() : null
       this.jobOpenclawAbort = controller
@@ -2477,8 +2522,9 @@ export default {
             channel: RUN_CHANNEL_OPENCLAW,
             markdown,
             artifacts,
-            nodeUid: container.nodeUid,
-            nodeTitle: container.nodeTitle,
+            // 落点用这次任务自己的（并发/排队时读实例变量会被别的任务覆盖）
+            nodeUid,
+            nodeTitle,
             prompt,
             force: true
           }
@@ -2495,6 +2541,9 @@ export default {
         this.$message.error(`助理执行失败：${msg}`)
       } finally {
         this.jobOpenclawAbort = null
+        // 这一条落地了（不管成没成）→ 放开闸门，把排队里的下一个放出去
+        this.jobOpenclawBusy = false
+        if ((this.jobQueue || []).length) this.drainJobQueue()
       }
     },
 
@@ -3206,15 +3255,20 @@ export default {
 
     /** 已经在路上（派出去还没收回）的任务数 —— 队列的"占用"判据 */
     jobBusyCount() {
-      return (this.jobPendingList || []).length
+      // 桥接：等回执的条数；助理：有没有一条在流式跑。
+      // 两条通道共用一个闸门 —— 一次只跑一个任务，写回才不会互相抢（见 startOpenclawRun）。
+      return (this.jobPendingList || []).length + (this.jobOpenclawBusy ? 1 : 0)
     },
 
     /**
      * 入队：把"组装好、只差派发"的这条任务排到队尾。
      *
-     * 用户要求（2026-09-29）：「用队列排队执行」—— 一条 WorkBuddy 会话同时只跑一个任务，
+     * 用户要求（2026-09-29）：「用队列排队执行」—— 一条会话（或助理）同时只跑一个任务，
      * 与其并发挤进去（后几条干等）或换到别的会话（端口乱跳），不如老老实实排队：
      * 上一个跑完，drainJobQueue 自动派下一个。
+     *
+     * 助理（OpenClaw）条目也会进这个队（channel=openclaw）：它没有 host/会话/回执，
+     * 所以落点靠 container（入队时就建好了的任务容器）带回去，跑完由 drainJobQueue 起跑。
      */
     enqueueDispatch(item) {
       if (!item || !item.prompt) return
@@ -3222,11 +3276,15 @@ export default {
       this.jobQueue.push({
         key: `q-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         at: Date.now(),
+        channel: item.channel || RUN_CHANNEL_BRIDGE,
         hostKey: (item.host && item.host.key) || this.jobHostKey,
         gateway: item.gateway || this.jobGateway,
         prompt: item.prompt,
         name: item.name || '脑图运行 · 排队',
         container: item.container || null,
+        // 落点也平铺一份：万一 container 丢了（老数据 / 手工改），还能按 uid 挂回去
+        nodeUid: (item.container && item.container.nodeUid) || '',
+        nodeTitle: (item.container && item.container.nodeTitle) || '',
         continued: !!item.continued
       })
       this.saveJobQueue()
@@ -3243,6 +3301,19 @@ export default {
       const item = this.jobQueue.shift()
       this.saveJobQueue()
       if (!item) return
+      // 助理条目：没有 host / 会话 / 回执，直接把这条起跑（startOpenclawRun 自己收尾再 drain）
+      if (item.channel === RUN_CHANNEL_OPENCLAW) {
+        const container = item.container || {
+          ok: true,
+          nodeUid: item.nodeUid || '',
+          nodeTitle: item.nodeTitle || ''
+        }
+        this.jobStatus = `队列到它了（助理）· ${
+          container.nodeTitle || '当前节点'
+        }`
+        this.jobStatusType = 'jobWait'
+        return this.startOpenclawRun({ prompt: item.prompt, container })
+      }
       const host =
         (this.jobHosts || []).find(h => h.key === item.hostKey) || this.jobSelectedHost
       if (!host) {

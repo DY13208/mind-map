@@ -106,6 +106,31 @@ const bridgeStub = {
   dispatchWorkbuddyJob: async () => dispatchResult
 }
 
+// ---- 可编程的助理（OpenClaw）流 ----
+// 助理通道是**流式直连**（streamChat），没有派发/轮询/回执这一套。
+// openclawPlan 每次调用消费一项：{ content } 立刻跑完，{ hold:true } 挂着等
+// openclawHold 里的回调放开（模拟"还在跑"）。
+const openclawPlan = []
+const openclawHold = []
+const openclawStreamCalls = []
+const openclawWrites = [] // 写回时的落点 nodeUid，按顺序
+const agentChatStub = {
+  streamChat: opts => {
+    openclawStreamCalls.push(opts)
+    const plan = openclawPlan.shift() || { content: '' }
+    const push = () => {
+      if (opts && opts.onDelta) opts.onDelta(plan.content || '')
+      return { content: plan.content || '', events: [], toolCalls: [] }
+    }
+    if (plan.hold) {
+      return new Promise(resolve => {
+        openclawHold.push(() => resolve(push()))
+      })
+    }
+    return Promise.resolve(push())
+  }
+}
+
 const parsed = compiler.parseComponent(
   fs.readFileSync(path.join(WEB, 'src/pages/Edit/components/Toolbar.vue'), 'utf8')
 )
@@ -138,6 +163,7 @@ new Function('require', 'module', 'exports', code)(name => {
   }
   if (name === '@/utils/jobResultWriter') return jobWriter
   if (name === '@/utils/mindmapRunPrompt') return {}
+  if (name === '@/utils/agentChat') return agentChatStub
   if (name === '@/utils/workbuddyJobBridge') return bridgeStub
   return {}
 }, mod, mod.exports)
@@ -1522,6 +1548,70 @@ async function main() {
   )
   check('记下这次用的通道', vm.jobChannel === 'openclaw', vm.jobChannel)
   check('跑完复位 jobDispatching', vm.jobDispatching === false)
+
+  // ---- 27. 助理（OpenClaw）通道：一次一个任务 + 按钮不锁死 + 落点不乱 ----
+  // 2026-10-08 用户反馈：「用助理运行时运行按钮一直转圈、不能点第二个任务」。
+  // 根因：runViaOpenclaw 原来 await 到整条流跑完（分钟级）才返回，busy 一直挂着。
+  // 改法：runViaOpenclaw 只「准备 + 起跑」立即返回；正在跑时第二条入队，跑完自动派下一个。
+  localStore.clear()
+  openclawPlan.length = 0
+  openclawHold.length = 0
+  openclawStreamCalls.length = 0
+  openclawWrites.length = 0
+  vm = makeVm()
+  vm.jobQueue = []
+  vm.jobOpenclawBusy = false
+  vm.buildFollowUpJobPrompt = t => String(t)
+  vm.writeJobResultToNode = async (job, options) => {
+    openclawWrites.push(options.nodeUid)
+  }
+  check('没任务在跑时 jobBusyCount=0', vm.jobBusyCount() === 0)
+  vm.jobOpenclawBusy = true
+  check('助理在跑时算一个占用（闸门认它）', vm.jobBusyCount() === 1)
+  vm.jobOpenclawBusy = false
+
+  openclawPlan.push({ hold: true, content: '第一条的正文' })
+  openclawPlan.push({ content: '第二条的正文' })
+  const ocBoxA = { ok: true, nodeUid: 'u-A', nodeTitle: '任务 · A' }
+  const ocBoxB = { ok: true, nodeUid: 'u-B', nodeTitle: '任务 · B' }
+  const firstRun = vm.startOpenclawRun({ prompt: '任务A', container: ocBoxA })
+  check('助理起跑即占位', vm.jobOpenclawBusy === true)
+
+  const secondCall = vm.runViaOpenclaw({
+    options: { prompt: '任务B', container: ocBoxB }
+  })
+  check(
+    '第二条点了就返回（按钮不再锁到跑完）',
+    (await Promise.race([
+      secondCall.then(() => 'returned'),
+      new Promise(r => setTimeout(() => r('blocked'), 50))
+    ])) === 'returned'
+  )
+  check(
+    '助理在跑时第二条进队列（不并发）',
+    (vm.jobQueue || []).length === 1 && vm.jobQueue[0].prompt === '任务B',
+    JSON.stringify((vm.jobQueue || []).map(x => x.prompt))
+  )
+  check(
+    '排队条目自己带着通道与落点（刷新/重排也不乱）',
+    vm.jobQueue[0].channel === 'openclaw' &&
+      vm.jobQueue[0].nodeUid === 'u-B' &&
+      vm.jobQueue[0].container.nodeUid === 'u-B'
+  )
+  check('第二条只是排队，第一条照旧在跑', vm.jobOpenclawBusy === true)
+
+  openclawHold.shift()()
+  await firstRun
+  for (let i = 0; i < 40 && (vm.jobOpenclawBusy || (vm.jobQueue || []).length); i++) {
+    await new Promise(r => setTimeout(r, 5))
+  }
+  check('第一条跑完自动派了第二条（队列清空）', (vm.jobQueue || []).length === 0)
+  check(
+    '两条各自写回自己的任务容器（挂载不乱）',
+    openclawWrites.join(',') === 'u-A,u-B',
+    openclawWrites.join(',')
+  )
+  check('全跑完闸门放开', vm.jobOpenclawBusy === false)
 
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)
