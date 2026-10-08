@@ -336,6 +336,8 @@ export const defaultOpt = {
   // 【Drag插件】
   // 是否开启节点自由拖拽
   enableFreeDrag: false,
+  // Drop onto blank canvas to create an independent theme.
+  enableDetachedDrag: true,
   // 拖拽节点时鼠标移动到画布边缘是否开启画布自动移动
   autoMoveWhenMouseInEdgeOnDrag: true,
   // 拖拽多个节点时随鼠标移动的示意矩形的样式配置

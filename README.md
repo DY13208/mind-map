@@ -49,6 +49,8 @@ Docker 与开发启动的完整端口列表见 [PORTS.md](./PORTS.md)。
 
 如需限制为企业成员访问，可启用企业微信扫码登录，或接入 WorkBuddy / 腾讯 OneID 单点登录。配置与验收步骤分别见 [WECOM_AUTH.md](./WECOM_AUTH.md) 和 [ONEID_AUTH.md](./ONEID_AUTH.md)。
 
+Cognee 可直接复用本项目企业微信登录，配置见 [COGNEE_SSO.md](./COGNEE_SSO.md)。
+
 ---
 
 ## 🚀 推荐：Docker 一键启动

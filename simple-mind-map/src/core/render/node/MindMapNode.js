@@ -404,7 +404,12 @@ class MindMapNode {
         }
       }
       // 多选和取消多选
-      if (!readonly && (e.ctrlKey || e.metaKey) && enableCtrlKeyNodeSelection) {
+      if (
+        !readonly &&
+        e.button !== 2 && e.which !== 3 &&
+        (e.ctrlKey || e.metaKey) &&
+        enableCtrlKeyNodeSelection
+      ) {
         this.isMultipleChoice = true
         const isActive = this.getData('isActive')
         if (!isActive)
@@ -484,26 +489,10 @@ class MindMapNode {
       ) {
         return
       }
-      const activeList = this.renderer.activeNodeList || []
-      const cached =
-        (this.mindMap.select &&
-          typeof this.mindMap.select.getMultiSelectCache === 'function' &&
-          this.mindMap.select.getMultiSelectCache()) ||
-        []
-      const inCachedMulti =
-        cached.length > 1 &&
-        this.mindMap.select &&
-        typeof this.mindMap.select.isNodeInList === 'function' &&
-        this.mindMap.select.isNodeInList(cached, this)
-      if (inCachedMulti) {
-        if (!(activeList.length > 1 && this.isInActiveList())) {
-          this.restoreMultiSelect(cached)
-        }
-      } else if (activeList.length > 1 && this.isInActiveList()) {
-        // 右键已选中的节点时保持多选
-      } else if (!this.getData('isActive')) {
-        this.active(e)
-      }
+      // The live selection is authoritative. An older multi-selection cache
+      // must never replace a node that the user has since selected explicitly.
+      if (!this.isInActiveList()) this.active(e)
+      else this.updateNodeActiveClass()
       this.mindMap.emit('node_contextmenu', e, this)
     })
   }
@@ -671,25 +660,30 @@ class MindMapNode {
     if (!this.group) return
     const isActive = this.getData('isActive')
     this.group[isActive ? 'addClass' : 'removeClass']('active')
-    // 选中框是 SVG 元素，直接设置显示样式，避免被主题或嵌入页面的 CSS 隐藏。
+    // Highlight the existing shape, preserving its radius, fill and geometry.
+    // Inline CSS overrides theme stroke attributes without changing node size.
+    const shape = this.shapeNode && this.shapeNode.node
+    if (shape) {
+      const style = shape.style
+      if (isActive) {
+        const color = this.getStyle('hoverRectColor') || this.mindMap.opt.hoverRectColor
+        style.setProperty('stroke', color)
+        style.setProperty('stroke-width', String(Math.max(2, this.getBorderWidth())))
+        style.setProperty('stroke-dasharray', 'none')
+      } else {
+        ['stroke', 'stroke-width', 'stroke-dasharray'].forEach(property => {
+          style.removeProperty(property)
+        })
+      }
+    }
+    // Keep the auxiliary rectangle for hover/search, never for selection.
     const outline = this.hoverNode && this.hoverNode.node
-    if (!outline) return
-    const style = outline.style
-    if (isActive) {
-      style.setProperty('display', 'block')
-      style.setProperty('opacity', '1')
-      style.setProperty('stroke', '#246bff')
-      style.setProperty('stroke-width', '3')
-      style.setProperty('pointer-events', 'none')
-    } else {
-      const properties = [
-        'display',
-        'opacity',
-        'stroke',
-        'stroke-width',
-        'pointer-events'
-      ]
-      properties.forEach(property => style.removeProperty(property))
+    if (outline) {
+      ['opacity', 'stroke', 'stroke-width', 'pointer-events'].forEach(property => {
+        outline.style.removeProperty(property)
+      })
+      if (isActive) outline.style.setProperty('display', 'none')
+      else outline.style.removeProperty('display')
     }
   }
 

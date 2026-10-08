@@ -72,6 +72,8 @@ root.children = [branch]
 
 const activated = []
 const select = Object.create(Select.prototype)
+select.isMousedown = true
+select.isSelecting = true
 select.mouseDownX = 270
 select.mouseDownY = 30
 select.mouseMoveX = 380

@@ -61,9 +61,10 @@ class LogicalStructure extends Base {
       },
       (cur, parent, isRoot, layerIndex) => {
         // 返回时计算节点的areaHeight，也就是子节点所占的高度之和，包括外边距
-        let len = cur.data.expand === false ? 0 : cur._node.children.length
+        const layoutChildren = cur._node.children.filter(child => !child.getData('isFloating'))
+        let len = cur.data.expand === false ? 0 : layoutChildren.length
         cur._node.childrenAreaHeight = len
-          ? cur._node.children.reduce((h, item) => {
+          ? layoutChildren.reduce((h, item) => {
               return h + item.height
             }, 0) +
             (len + 1) * this.getMarginY(layerIndex + 1)
@@ -101,7 +102,7 @@ class LogicalStructure extends Base {
           // 第一个子节点的top值 = 该节点中心的top值 - 子节点的高度之和的一半
           let top = node.top + node.height / 2 - node.childrenAreaHeight / 2
           let totalTop = top + marginY
-          node.children.forEach(cur => {
+          node.children.filter(child => !child.getData('isFloating')).forEach(cur => {
             cur.top = totalTop
             totalTop += cur.height + marginY
           })
@@ -137,6 +138,7 @@ class LogicalStructure extends Base {
 
   //  更新兄弟节点的top
   updateBrothers(node, addHeight) {
+    if (node.getData('isFloating')) return
     if (node.parent) {
       let childrenList = node.parent.children
       let index = getNodeIndexInNodeList(node, childrenList)

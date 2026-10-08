@@ -50,7 +50,8 @@ function snapshotMoveOrigins(args = []) {
         index: index < 0 ? 0 : index,
         position: {
           customLeft: typeof node.getData === 'function' ? node.getData('customLeft') : undefined,
-          customTop: typeof node.getData === 'function' ? node.getData('customTop') : undefined
+          customTop: typeof node.getData === 'function' ? node.getData('customTop') : undefined,
+          isFloating: typeof node.getData === 'function' ? !!node.getData('isFloating') : false
         },
         node
       }
@@ -149,7 +150,18 @@ function planNativeMove({ uid, parentUid, index, parentKids, oldParentUid }) {
   }
 }
 
+// A detach is one move operation, including its independent-theme geometry.
+function movePositionPatch(node) {
+  const floating = node && node.getData && node.getData('isFloating')
+  return {
+    customLeft: floating ? node.getData('customLeft') : null,
+    customTop: floating ? node.getData('customTop') : null,
+    isFloating: !!floating
+  }
+}
+
 const api = {
+  movePositionPatch,
   nodeUid,
   childrenOf,
   childUid,

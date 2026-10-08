@@ -7,7 +7,7 @@ const vm = require('node:vm')
 const source = fs.readFileSync(
   path.join(__dirname, '../src/layouts/CompactStructure.js'),
   'utf8'
-).replace(/^import .*\n/gm, '').replace('export default CompactStructure', 'module.exports = CompactStructure')
+).replace(/^import .*\r?\n/gm, '').replace('export default CompactStructure', 'module.exports = CompactStructure')
 const moduleMock = { exports: {} }
 class LogicalStructure {
   constructor(renderer) {
@@ -402,4 +402,74 @@ test('collapsed branches release their space while custom positions stay fixed',
     compactLayoutConfig.siblingGap)
   assert.equal(custom.top, 1200)
   assert.equal(custom.left, 900)
+})
+
+test('independent themes neither reserve space nor extend the central connector trunk', () => {
+  const first = node('first', 70)
+  const floating = node('floating', 80, [node('floating-child', 50)])
+  floating.left = 900
+  floating.top = 1200
+  floating.getData = key => key === 'isFloating' ? true : key === 'expand' ? true : undefined
+  floating.hasCustomPosition = () => true
+  const last = node('last', 70)
+  const root = node('root', 80, [first, floating, last])
+  root.top = 300
+  const layout = new moduleMock.exports({ mindMap: {
+    opt: { alwaysShowExpandBtn: false }, themeConfig: { nodeUseLineStyle: false }
+  } })
+  layout.root = root
+  layout.computedBaseValue()
+  layout.computedTopValue()
+  assert.equal(last.top - first.top - first.height, compactLayoutConfig.siblingGap)
+  assert.equal(floating.top, 1200)
+  assert.equal(floating.left, 900)
+  assert.equal(floating.children[0].top + floating.children[0].height / 2,
+    floating.top + floating.height / 2)
+  layout.renderReversedHorizontalLine = () => false
+  const paths = []
+  layout.setLineStyle = (style, line, d) => paths.push(d)
+  let hidden = false
+  layout.renderLineStraight(root, [{}, { plot() {}, hide() { hidden = true } }, {}])
+  assert.equal(hidden, true)
+  paths.forEach(d => {
+    const { vertical } = segments(d, 'root')
+    vertical.forEach(line => assert.ok(line.max < floating.top))
+  })
+})
+
+
+test('floating themes near a branch leave its node positions and connector routes unchanged', () => {
+  const measure = floats => {
+    const branch = node('branch', 120, Array.from({ length: 6 }, (_, i) => node(`child${i}`, 100)))
+    const root = node('root', 80, [branch, ...floats])
+    root.top = 300
+    const layout = new moduleMock.exports({ mindMap: {
+      opt: { alwaysShowExpandBtn: true }, themeConfig: { nodeUseLineStyle: false }
+    } })
+    layout.root = root
+    layout.computedBaseValue()
+    layout.computedTopValue()
+    return [root, branch, ...branch.children].map(current => ({
+      left: current.left, top: current.top,
+      bus: layout.busXByNode.get(current),
+      offsets: layout.armOffsetsByNode.has(current) ? {
+        source: layout.armOffsetsByNode.get(current).source,
+        children: current.children.filter(child => !child.getData('isFloating')).map(child => {
+          return layout.armOffsetsByNode.get(current).children[current.children.indexOf(child)]
+        })
+      } : undefined
+    }))
+  }
+  const baseline = measure([])
+  for (const expanded of [false, true]) {
+    const floating = node('floating', 500, expanded ? [node('float-child', 250, [node('float-leaf', 120)])] : [])
+    floating.left = 200
+    floating.top = 315
+    floating.getData = key => key === 'isFloating' ? true : key === 'expand' ? expanded : undefined
+    floating.hasCustomPosition = () => true
+    assert.deepEqual(measure([floating]), baseline)
+    assert.equal(floating.left, 200)
+    assert.equal(floating.top, 315)
+    if (expanded) assert.equal(floating.children[0].left - floating.left - floating.width, 36)
+  }
 })
