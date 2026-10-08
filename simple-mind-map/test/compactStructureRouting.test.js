@@ -7,7 +7,7 @@ const vm = require('node:vm')
 const source = fs.readFileSync(
   path.join(__dirname, '../src/layouts/CompactStructure.js'),
   'utf8'
-).replace(/^import .*\n/gm, '').replace('export default CompactStructure', 'module.exports = CompactStructure')
+).replace(/^import .*\r?\n/gm, '').replace('export default CompactStructure', 'module.exports = CompactStructure')
 const moduleMock = { exports: {} }
 class LogicalStructure {
   constructor(renderer) {
