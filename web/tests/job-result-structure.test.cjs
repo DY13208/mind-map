@@ -56,6 +56,9 @@ let dropInserts = false
 // queueInserts = true 时把插入挂起，等测试显式 flush —— 模拟「两个任务同时插入」的竞态
 let queueInserts = false
 const queuedInserts = []
+// 模拟「这次插入被协同吃掉」：dropTreeText 每次都丢，…Once 只丢一次（用来验重试）
+let dropTreeText = ''
+let dropTreeTextOnce = ''
 let seq = 0
 function makeNode(text, uid) {
   seq += 1
@@ -124,7 +127,17 @@ function makeMindMap() {
         const parents = args[0]
         const trees = args[1]
         const parent = Array.isArray(parents) ? parents[0] : parents
-        const list = trees || []
+        const list = (trees || []).filter(tree => {
+          const text = tree && tree.data && tree.data.text
+          if (dropTreeText && text === dropTreeText) return false
+          if (dropTreeTextOnce && text === dropTreeTextOnce) {
+            dropTreeTextOnce = ''
+            return false
+          }
+          return true
+        })
+        // 整批都被吃掉（模拟「命令被协同服务丢了」）
+        if (!list.length) return
         if (queueInserts) {
           queuedInserts.push(() => list.forEach(tree => attachTree(parent, tree)))
           return
@@ -538,6 +551,60 @@ async function main() {
     '两个容器都在父节点下（没有互相覆盖）',
     (mapG.root.children || []).length === 2,
     String((mapG.root.children || []).length)
+  )
+
+  // ============ G. 插入被协同吃掉时：自动重试一次，仍失败则报出是哪个节点 ============
+  // 用户 2026-10-08 看到「有 1 个产物节点没落进导图」——这句太含糊，也不好受。
+  console.log('--- 插入被吃掉一次：自动重试补上 ---')
+  const mapH = makeMindMap()
+  const boxH = await writer.createJobContainer({
+    mindMap: mapH,
+    nodeUid: mapH.root.getData('uid'),
+    prompt: '任务内容'
+  })
+  dropTreeTextOnce = '附件' // 「附件」分支第一次插入被吃掉
+  const outH = await writer.writeJobResultToMap({
+    mindMap: mapH,
+    nodeUid: boxH.uid,
+    markdown: MD,
+    roomKey: 'room-test',
+    artifacts: []
+  })
+  check(
+    '被吃掉一次后重试补上了（没有告警）',
+    outH.nodes >= 2 && !outH.warnings.some(w => /没落进导图|没建起来/.test(w)),
+    `nodes=${outH.nodes} warnings=${JSON.stringify(outH.warnings)}`
+  )
+
+  console.log('--- 重试也失败：告警要点名是哪个节点 ---')
+  const mapI = makeMindMap()
+  const boxI = await writer.createJobContainer({
+    mindMap: mapI,
+    nodeUid: mapI.root.getData('uid'),
+    prompt: '任务内容'
+  })
+  dropTreeText = 'output/B.md' // 这个产物节点两次都落不进去
+  const outI = await writer.writeJobResultToMap({
+    mindMap: mapI,
+    nodeUid: boxI.uid,
+    markdown: MD,
+    roomKey: 'room-test',
+    artifacts: [
+      { name: 'output/A.md', size: 10, mime: 'text/markdown', base64: Buffer.from('a').toString('base64') },
+      { name: 'output/B.md', size: 10, mime: 'text/markdown', base64: Buffer.from('b').toString('base64') }
+    ],
+    bridgeAttach: async () => ({ ok: true, attachments: [{ ok: true, attachmentId: 'x', status: 'ready' }] })
+  })
+  dropTreeText = ''
+  check(
+    '告警里点名了没落进去的那个节点',
+    outI.warnings.some(w => /没落进导图/.test(w) && /output\/B\.md/.test(w)),
+    JSON.stringify(outI.warnings)
+  )
+  check(
+    '另一个产物照常落地并挂上附件',
+    outI.attachments.some(a => a.name === 'output/A.md'),
+    JSON.stringify(outI.attachments.map(a => a.name))
   )
 
   const failed = results.filter(item => !item.ok)

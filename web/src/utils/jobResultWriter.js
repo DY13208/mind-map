@@ -553,7 +553,7 @@ function sleep(ms) {
  * @param {Boolean} all   true = 等这批**全部**落地（插一批时用）
  * @returns 单个节点 / 节点数组 / null（超时没落地）
  */
-async function waitForInserted(parent, uids, { all = false, tries = 160 } = {}) {
+async function waitForInserted(parent, uids, { all = false, tries = 60 } = {}) {
   const want = new Set((uids || []).filter(Boolean))
   if (!want.size) return null
   const uidOf = node =>
@@ -579,7 +579,7 @@ async function waitForInserted(parent, uids, { all = false, tries = 160 } = {}) 
  * 而这一路都是 await 不抛错的写法 —— 不复核就会出现「提示已写入、图上什么都没有」。
  * 返回 true = 长出了新节点。
  */
-async function waitContainerGrowth(container, beforeCount, tries = 160) {
+async function waitContainerGrowth(container, beforeCount, tries = 60) {
   const want = Number(beforeCount || 0) + 1
   for (let i = 0; i < tries; i += 1) {
     if (((container && container.children) || []).length >= want) return true
@@ -674,6 +674,44 @@ async function insertChildren(mindMap, parent, trees) {
   await ensureInsertParent(mindMap, parent)
   mindMap.execCommand('INSERT_MULTI_CHILD_NODE', [parent], trees)
   return uids
+}
+
+/**
+ * 插一批节点并**确认真的落地**；没落地就换个 uid 再插一次。
+ *
+ * 为什么带重试：协同那条链路偶尔会吃掉插入命令（尤其是同时写回两条任务时），
+ * 用户 2026-10-08 看到的就是「有 1 个产物节点没落进导图」—— 一次不成再插一次基本就落地了。
+ * 重试用**新的 uid**（旧的没落地，不会重复）；万一第一次其实是「落得慢」，
+ * 后面按名字查重也能兜住（调用方按名字复用已有节点，见 findAttachBranch / md 查重）。
+ *
+ * @returns {Promise<{nodes: Array<Object|null>, lost: Array<String>}>}
+ *          nodes 与入参 trees 一一对应（没落地的那项是 null）
+ */
+async function insertTreesWithRetry(mindMap, parent, trees, attempts = 2) {
+  const list = (trees || []).filter(Boolean)
+  if (!list.length) return { nodes: [], lost: [] }
+  const texts = list.map(tree => String((tree.data && tree.data.text) || ''))
+  const placed = new Array(list.length).fill(null)
+  let pending = list.map((tree, idx) => ({ tree, idx }))
+  for (let round = 0; round < attempts && pending.length; round += 1) {
+    const batch = pending.map(item => item.tree)
+    const uids = await insertChildren(mindMap, parent, batch)
+    await waitForInserted(parent, uids, { all: true })
+    const byUid = new Map()
+    ;((parent && parent.children) || []).forEach(node => {
+      const uid = String((node && node.getData && node.getData('uid')) || '')
+      if (uid) byUid.set(uid, node)
+    })
+    const still = []
+    pending.forEach((item, i) => {
+      const hit = byUid.get(uids[i])
+      if (hit) placed[item.idx] = hit
+      else still.push(item)
+    })
+    pending = still
+  }
+  const lost = pending.map(item => texts[item.idx]).filter(Boolean)
+  return { nodes: placed, lost }
 }
 
 function fileFromText(name, text, type) {
@@ -927,9 +965,9 @@ export async function createJobContainer({
   // 落点本身是「任务」容器时**不再另起同级分支** —— 用户要的是「续写挂在这个任务下」，
   // 所以走下面那条通用路径：作为它的最后一个子节点插进去（任务内容 / 运行输出 / 附件之后）。
   // 按 uid 认领自己插的那个 —— 另一个任务可能同时在同一个节点下建容器（并发跑两条时）
-  const uids = await insertChildren(mindMap, target, [tree])
-  const created = await waitForInserted(target, uids)
-  if (!created) throw new Error('建任务节点失败，请重试')
+  const res = await insertTreesWithRetry(mindMap, target, [tree])
+  const created = res.nodes[0] || null
+  if (!created) throw new Error('建任务节点失败（命令没落到图上），请重试')
   return { uid: nodeUid(created), title, node: created }
 }
 
@@ -995,10 +1033,10 @@ export async function writeJobResultToMap({
   if (inlineResult) {
     tree = markdownToFullNodes(text)
     say('正在把结果写进导图…')
-    const uids = await insertChildren(mindMap, container, [
+    const res = await insertTreesWithRetry(mindMap, container, [
       { data: { text: title }, children: tree.children }
     ])
-    const made = await waitForInserted(container, uids)
+    const made = res.nodes[0] || null
     if (!made) {
       throw new Error(
         '写入导图失败：命令没有落到图上（协同连接可能断了）—— 刷新页面后点「写入导图」重试'
@@ -1036,10 +1074,10 @@ export async function writeJobResultToMap({
     say('正在准备附件…')
     let branch = findAttachBranch(container)
     if (!branch) {
-      const uids = await insertChildren(mindMap, container, [
+      const res = await insertTreesWithRetry(mindMap, container, [
         { data: { text: ATTACH_BRANCH_TITLE }, children: [] }
       ])
-      branch = await waitForInserted(container, uids)
+      branch = res.nodes[0] || null
     }
     if (!branch) {
       out.warnings.push(
@@ -1055,17 +1093,18 @@ export async function writeJobResultToMap({
       )
       if (missing.length) {
         say(`正在挂载 ${missing.length} 个产物文件…`)
-        const uids = await insertChildren(
+        // 按 uid 认领 + 没落地就重试一次（协同偶尔会吃掉插入命令）
+        const res = await insertTreesWithRetry(
           mindMap,
           branch,
           missing.map(info => ({ data: { text: String(info.name) } }))
         )
-        // 等**这一批全部**落地再往下（按 uid 认领，不会认成别人插的节点）
-        const landed = await waitForInserted(branch, uids, { all: true })
-        if (landed) out.nodes += missing.length
-        else {
+        out.nodes += res.nodes.filter(Boolean).length
+        if (res.lost.length) {
           out.warnings.push(
-            `有 ${missing.length} 个产物节点没落进导图（命令可能被协同服务丢了）`
+            `有 ${res.lost.length} 个产物节点没落进导图（命令被协同服务丢了）：` +
+              `${res.lost.slice(0, 3).join('、')}${res.lost.length > 3 ? ' 等' : ''}` +
+              ' —— 刷新页面后点「写入导图」可重试'
           )
         }
       }
@@ -1102,14 +1141,15 @@ export async function writeJobResultToMap({
       let mdNode = kids().find(k => nodeText(k) === mdLabel)
       if (!mdNode) {
         // note 里存全文：节点上不铺长文本，但「继续执行」要从这儿取回上次的正文
-        const uids = await insertChildren(mindMap, branch, [
+        const res = await insertTreesWithRetry(mindMap, branch, [
           { data: { text: mdLabel, note: text } }
         ])
-        mdNode = await waitForInserted(branch, uids)
+        mdNode = res.nodes[0] || null
         if (mdNode) out.nodes += 1
         else
           out.warnings.push(
-            '「完整输出.md」没落进导图（命令可能被协同服务丢了）—— 刷新页面后重试'
+            '「完整输出.md」没落进导图（命令被协同服务丢了，已自动重试过一次）—— ' +
+              '刷新页面后点「写入导图」再试'
           )
       }
       if (mdNode && typeof mdNode.setData === 'function') {
