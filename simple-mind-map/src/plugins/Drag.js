@@ -1291,6 +1291,16 @@ class Drag extends Base {
     parent = parent.fakeClone()
     node = node.fakeClone()
     const tmpNode = this.beingDragNodeList[0].fakeClone()
+    // The insertion preview is attached even when its source is floating.
+    // fakeClone shares nodeData, so isolate preview flags from the live node.
+    tmpNode.nodeData = {
+      ...tmpNode.nodeData,
+      data: { ...tmpNode.nodeData.data, isFloating: false, customLeft: null, customTop: null }
+    }
+    // Position getters prefer these cached coordinates over left/top.
+    tmpNode.customLeft = undefined
+    tmpNode.customTop = undefined
+    tmpNode.parent = parent
     tmpNode.dir = dir
     tmpNode.left = x
     tmpNode.top = y
