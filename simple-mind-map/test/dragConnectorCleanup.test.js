@@ -297,3 +297,30 @@ test('normal render cleanup removes only orphan node groups and tree connectors'
   assert.equal(oldLine.removed, true)
   for (const item of [liveGroup, summaryGroup, summaryChildGroup, otherOverlay, liveLine, summaryLine]) assert.equal(item.removed, false)
 })
+
+test('detach keeps the subtree and position; reattach clears independent-theme geometry', () => {
+  const leaf = node('leaf')
+  const branch = node('branch', [leaf])
+  const sibling = node('sibling')
+  const old = node('old', [branch, sibling])
+  const root = node('root', [old])
+  root.isRoot = true
+  const renderer = Object.assign(Object.create(Render.prototype), {
+    runAfterHydrate: () => false,
+    removeNodeFromActiveList() {}, emitNodeActiveEvent() {},
+    mindMap: { render() {} }
+  })
+  renderer.moveNodeTo(branch, root, [{ uid: 'branch', customLeft: 420, customTop: 600 }])
+  assert.equal(branch.parent, root)
+  assert.equal(branch.getData('isFloating'), true)
+  assert.equal(branch.customLeft, 420)
+  assert.equal(branch.customTop, 600)
+  assert.deepEqual(branch.nodeData.children, [leaf.nodeData])
+  assert.deepEqual(old.nodeData.children, [sibling.nodeData])
+  renderer.moveNodeTo(branch, old)
+  assert.equal(branch.parent, old)
+  assert.equal(branch.getData('isFloating'), false)
+  assert.equal(branch.getData('customLeft'), null)
+  assert.equal(branch.customLeft, undefined)
+  assert.deepEqual(branch.nodeData.children, [leaf.nodeData])
+})

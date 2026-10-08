@@ -1093,9 +1093,9 @@ export default {
           openBlankMode: false
         },
         ...(config || {}),
-        // 选中节点的外框要在不同主题下都清晰可见。
+        // 选中状态直接使用节点自身的边框。
         hoverRectColor: '#246bff',
-        hoverRectPadding: 4,
+        hoverRectPadding: 0,
         dragOpacityConfig: {
           beingDragNodeOpacity: 0.3,
           ...((config && config.dragOpacityConfig) || {}),
@@ -1776,7 +1776,10 @@ export default {
 
 <style lang="less">
 /* SVG 节点由脑图库动态插入，选中框需要使用非 scoped 样式。 */
-#mindMapContainer .smm-node.active .smm-hover-node,
+#mindMapContainer .smm-node.active .smm-hover-node {
+  display: none !important;
+}
+
 #mindMapContainer .smm-drag-preview .smm-hover-node {
   display: block;
   opacity: 1;

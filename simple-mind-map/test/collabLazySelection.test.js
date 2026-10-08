@@ -34,3 +34,49 @@ test('revealing lazy children does not select them or their descendants', () => 
   assert.equal(parent.children[0].data.isActive, false)
   assert.equal(parent.children[0].children[0].data.isActive, false)
 })
+
+
+const activeMethod = source.slice(
+  source.indexOf('  onNodeActive(node, nodeList) {'),
+  source.indexOf('\n  ensureActiveSelection()', source.indexOf('  onNodeActive(node, nodeList) {'))
+)
+const expandMethod = source.slice(
+  source.indexOf('  onExpandBtnClick(node) {'),
+  source.indexOf('\n  async repairEmptyExpand(', source.indexOf('  onExpandBtnClick(node) {'))
+)
+const hooksModule = { exports: {} }
+vm.runInNewContext(`class SelectionHooks {
+${activeMethod}
+${expandMethod}
+}
+module.exports = SelectionHooks`, {
+  module: hooksModule
+})
+
+test('selecting a lazy collapsed node only updates presence and keeps children collapsed', () => {
+  const hooks = new hooksModule.exports()
+  const data = { uid: 'parent', expand: false, childCount: 3, isActive: true }
+  const node = { uid: 'parent', nodeData: { data, children: [] }, getData: key => data[key] }
+  let presence
+  hooks.setLocalPresence = value => { presence = value }
+  hooks.repairEmptyExpand = () => assert.fail('selecting must not load or expand children')
+  hooks.onNodeActive(node, [node])
+  assert.equal(data.expand, false)
+  assert.equal(node.nodeData.children.length, 0)
+  assert.deepEqual(Array.from(presence.selectedUids), ['parent'])
+  assert.deepEqual(Array.from(hooks.lastActiveUids), ['parent'])
+})
+
+test('clicking the child count badge still requests lazy children', () => {
+  const hooks = new hooksModule.exports()
+  const data = { uid: 'parent', expand: false, childCount: 3 }
+  const node = { nodeData: { data, children: [] }, getData: key => data[key] }
+  let repaired
+  hooks.repairEmptyExpand = target => { repaired = target }
+  hooks.onExpandBtnClick(node)
+  assert.equal(repaired, node)
+  repaired = null
+  node.nodeData.children = [{ data: { uid: 'child' }, children: [] }]
+  hooks.onExpandBtnClick(node)
+  assert.equal(repaired, null, 'loaded children do not need another fetch')
+})

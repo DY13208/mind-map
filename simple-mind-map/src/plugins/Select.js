@@ -66,6 +66,9 @@ class Select {
     let { x, y } = this.mindMap.toPos(e.clientX, e.clientY)
     this.mouseDownX = x
     this.mouseDownY = y
+    this.mouseMoveX = x
+    this.mouseMoveY = y
+    this.isSelecting = false
     this.createRect(x, y)
   }
 
@@ -134,11 +137,11 @@ class Select {
     }
     const didSelect = this.isSelecting
     // 节流会丢掉松开前最后一次检测，这里立刻提交选区，否则右键菜单拿到的还是空选中
-    if (typeof this.checkInNodesRaw === 'function') {
-      this.checkInNodesRaw()
+    if (didSelect) {
+      if (typeof this.checkInNodesRaw === 'function') this.checkInNodesRaw()
+      this.checkTriggerNodeActiveEvent()
+      this.rememberMultiSelect()
     }
-    this.checkTriggerNodeActiveEvent()
-    this.rememberMultiSelect()
     this.autoMove.clearAutoMoveTimer()
     this.isMousedown = false
     this.cacheActiveList = []
@@ -157,7 +160,9 @@ class Select {
   }
 
   onNodeActive(node, nodeList) {
-    if (Array.isArray(nodeList) && nodeList.length > 1) {
+    if (Array.isArray(nodeList) && nodeList.length <= 1) {
+      this.clearMultiSelectCache()
+    } else if (Array.isArray(nodeList) && nodeList.length > 1) {
       this.lastMultiSelectList = nodeList.slice()
       this.lastMultiSelectUids = nodeList
         .map(item => this.getNodeUid(item))
@@ -254,7 +259,7 @@ class Select {
   checkInNodes() {
     // A collaborative Undo can start an asynchronous layout while the mouse
     // selection throttle is pending. The renderer temporarily clears root.
-    if (!this.mindMap.renderer.root) return
+    if (!this.isMousedown || !this.isSelecting || !this.mindMap.renderer.root) return
     let { scaleX, scaleY, translateX, translateY } =
       this.mindMap.draw.transform()
     let minx = Math.min(this.mouseDownX, this.mouseMoveX)
@@ -289,7 +294,7 @@ class Select {
     // 框选，否则“概要后节点”永远选不中。概要子树里的节点还能再挂概要，所以
     // 这里需要递归。
     const checkGeneralizations = node => {
-      ;(node._generalizationList || []).forEach(item => {
+      (node._generalizationList || []).forEach(item => {
         const gNode = item && item.generalizationNode
         if (!gNode) return
         bfsWalk(gNode, child => {
