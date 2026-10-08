@@ -1,8 +1,7 @@
 window.__MIND_MAP_RUNTIME__ = {
-  "host": "192.168.0.193",
+  "host": "192.168.1.38",
   "webPort": 8989,
   "collabPort": 1234,
   "aiPort": 3456,
-  "mcpPort": 3847,
-  "workbuddyJobHub": ""
+  "mcpPort": 3847
 }

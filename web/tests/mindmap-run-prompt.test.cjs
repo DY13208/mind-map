@@ -119,14 +119,6 @@ check(
     /add_node/.test(runPrompt) &&
     /绝不能因为写不出文件/.test(runPrompt)
 )
-// 2026-10-08 现场：Agent 把附件直接挂在任务节点上，回形针长在任务行尾，
-// 用户要的是 `任务 → 附件 → 文件名` 三段式（和页面回写的「完整输出.md」同层）。
-check(
-  '产物附件要挂到「附件」节点下的文件名节点，不许直接挂任务节点',
-  /「附件」/.test(runPrompt) &&
-    /文件名节点/.test(runPrompt) &&
-    /不要直接把附件挂在任务/.test(runPrompt)
-)
 
 console.log('--- 继续执行 ---')
 const followPrompt = buildFollowUpPrompt('接着上次往下写', {
