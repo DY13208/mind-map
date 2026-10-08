@@ -97,10 +97,18 @@ check(
 )
 // 2026-09-29 实测：提示词只写「把结果写回目标系统」时，Agent 会去翻 cpd 插件目录、
 // 找 mmclient、自己造脚本调 MCP —— 一个 10+10 的任务走了 41 次工具调用、好几分钟。
-// 所以必须明说「脑图由页面自动写回，你别动手」。
+// 2026-10-08 用户要求**反转这条**：产物要用 MCP 的 upload_attachment 挂回节点
+// （光把文字放回答里不够，人得能点开产物文件）。
+// 但「翻插件目录找路 / 自己写脚本调接口」这种白耗仍然禁止。
 check(
-  '明确「脑图本身不用你写回」（否则 Agent 会白耗几十轮工具调用）',
-  /脑图本身不用你写回/.test(runPrompt) && /MCP/.test(runPrompt)
+  '要求用 MCP 把本次新增的产物挂回节点（upload_attachment）',
+  /upload_attachment/.test(runPrompt) &&
+    /room_key/.test(runPrompt) &&
+    /新增的产物/.test(runPrompt)
+)
+check(
+  '明确禁止用 note / text 写文件路径冒充附件',
+  /冒充附件/.test(runPrompt)
 )
 
 console.log('--- 继续执行 ---')
@@ -110,6 +118,14 @@ const followPrompt = buildFollowUpPrompt('接着上次往下写', {
   cwd: '/tmp/wd'
 })
 const followLines = followPrompt.split('\n')
+check(
+  '继续执行也要求用 MCP 挂产物（不能只说「页面会自动写回」）',
+  /upload_attachment/.test(followPrompt) && /room_key/.test(followPrompt)
+)
+check(
+  '继续执行也禁止用 note / text 冒充附件',
+  /冒充附件/.test(followPrompt)
+)
 check('继续执行也不再有固定抬头', followLines[0] !== LINE, followLines[0])
 check('继续执行里也不再出现这句话', !followPrompt.includes(LINE))
 check('用户输入的正文还在最前', followPrompt.includes('接着上次往下写'))
