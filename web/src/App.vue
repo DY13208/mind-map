@@ -21,6 +21,7 @@
       class="authScreen"
       v-else-if="authState.enabled && !authState.authenticated"
     >
+      <LoginGridBackground />
       <div class="authCard authCard--login">
         <div class="authIntro">
           <div class="authBrandBlock">
@@ -169,6 +170,7 @@ import {
   WECOM_CLIENT_AUTO_ATTEMPT_KEY
 } from '@/utils/auth'
 import { mountWecomLoginPanel } from '@/utils/wecomLogin'
+import LoginGridBackground from '@/components/LoginGridBackground.vue'
 
 const PAGE_TITLE = 'CPD'
 const AUTH_BOOTSTRAP_MS = 45000
@@ -220,6 +222,7 @@ const authErrors = {
 
 export default {
   name: 'App',
+  components: { LoginGridBackground },
   data() {
     return {
       authLoading: true,
@@ -578,6 +581,9 @@ body,
 }
 
 .authScreen {
+  color-scheme: light;
+  position: relative;
+  isolation: isolate;
   min-height: 100dvh;
   display: flex;
   align-items: center;
@@ -596,6 +602,7 @@ body,
 }
 
 .authCard {
+  position: relative;
   width: 380px;
   max-width: 100%;
   padding: 32px;
@@ -1012,6 +1019,39 @@ body,
   to {
     transform: rotate(360deg);
   }
+}
+
+// Login palette follows the OS, independently of the editor's map theme.
+@media (prefers-color-scheme: dark) {
+  .authScreen {
+    color-scheme: dark;
+    background: radial-gradient(circle at 18% 16%, rgba(255, 255, 255, 0.035), transparent 35%), #111214;
+    .authCard {
+      background: #1d1e1f;
+      border-color: #34383f;
+      box-shadow: 0 22px 54px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.12);
+    }
+    .authBrand, .authQrHeading strong { color: #f0f1f3; }
+    .authSubtitle, .authQrHeading span, .authDevToggle, .authDevHint, .authOneIdHint,
+    .authFailureText, .authFailureCode { color: #b4b7bd; }
+    .authButton { background: #34383f; color: #f0f1f3; border-color: #4b4f56; }
+    .authButton:hover:not(:disabled) { background: #42474f; border-color: #626770; }
+    .authButton:disabled { background: #282a2e; color: #a1a5ad; border-color: #383c42; }
+    .authButton--secondary { background: #262a2e; border-color: #4b4f56; }
+    .authButton--secondary:hover:not(:disabled) { background: #34383f; }
+    .authQrShell { background: #262a2e; border-color: #34383f; }
+    .authQrOverlay, .authQrFailure { background: rgba(38, 42, 46, 0.96); color: #b4b7bd; }
+    .authRefresh { color: #c3c6cd; }
+    .authRefresh:hover:not(:disabled) { color: #f0f1f3; }
+    .authError, .authDevError { background: #472e2b; color: #ffcbc3; }
+    .authDevLogin { border-color: #34383f; }
+    .authDevInput { background: #171819; border-color: #4b4f56; color: #f0f1f3; }
+    .authDevInput::placeholder { color: #a1a5ad; }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .authRefreshIcon.spinning, .authSpinner { animation: none; }
 }
 
 @media (max-width: 720px) {

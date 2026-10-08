@@ -217,7 +217,7 @@ function renderTopic(category, date) {
 function renderIndex(categories, date, page) {
   const sourceCount = categories.reduce((sum, item) => sum + item.合同记录.length, 0);
   const lines = [
-    '# 公司模型合同知识库',
+    '# 公司模型wiki',
     '',
     'Last compiled: ' + date,
     'Total topics: ' + categories.length + ' | Total concepts: 0 | Total sources: ' + sourceCount,

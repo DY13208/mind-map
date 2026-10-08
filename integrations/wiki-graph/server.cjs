@@ -150,8 +150,8 @@ function loadGraph() {
   const nameMatch = indexContent.match(/^# (.+)/m);
   const name = nameMatch ? nameMatch[1].replace(' Knowledge Base', '') : 'Wiki';
 
-  // Extract stats
-  const statsMatch = indexContent.match(/Total topics: (\d+) \| Total sources: (\d+)/);
+  // Extract stats（INDEX 里 topics 与 sources 之间可能有 concepts 段，故用 [^\n]* 兜住）
+  const statsMatch = indexContent.match(/Total topics: (\d+)[^\n]*?Total sources: (\d+)/);
   const totalTopics = statsMatch ? parseInt(statsMatch[1]) : 0;
   const totalSources = statsMatch ? parseInt(statsMatch[2]) : 0;
 

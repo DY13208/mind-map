@@ -48,6 +48,9 @@ const APPLY = args.includes('--apply');
 const FROM_MCP = args.includes('--content-from-mcp');
 const ELEMENTS_FILE = arg('--elements');
 const PAGE_TITLE = arg('--page-title', DEFAULT_PAGE_TITLE);
+// 同名页面可能不止一个（本机库里标题「公司模型」有 3 个：真实模型页 / 一份旧版 / 一个 1.4KB 残页），
+// wiki_search 的排序不保证命中真身 → 支持显式指定页面 id。
+const PAGE_ID = arg('--page-id');
 
 const log = (...a) => console.log(...a);
 const die = (m) => { console.error('✗ ' + m); process.exit(1); };
@@ -169,9 +172,14 @@ function stripIds(n) {
 
   // 1) 定位页面（按标题，不写死 pageId）
   const found = await client.tool('wiki_search', { query: PAGE_TITLE, limit: 10 });
-  const page = (found.items || []).find((i) => i.title === PAGE_TITLE);
+  const exact = (found.items || []).filter((i) => i.title === PAGE_TITLE);
+  if (exact.length > 1) {
+    log('⚠ 标题「%s」有 %d 个精确匹配：%s —— 命中哪个取决于搜索排序，'
+      + '可用 --page-id 显式指定', PAGE_TITLE, exact.length, exact.map((i) => i.pageId).join('、'));
+  }
+  const page = PAGE_ID ? { title: PAGE_TITLE, pageId: PAGE_ID } : exact[0];
   if (!page) die(`未找到 Wiki 页面「${PAGE_TITLE}」`);
-  log('页面：%s (%s)', page.title, page.pageId);
+  log('页面：%s (%s)%s', page.title, page.pageId, PAGE_ID ? '  [--page-id 指定]' : '');
 
   // 2) 读全文并备份 content
   const backupDir = path.join(ROOT, 'tmp', 'wiki-backup');
