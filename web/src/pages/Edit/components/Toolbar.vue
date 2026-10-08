@@ -523,61 +523,6 @@
       :readonly="isReadonly"
       :before-check="waitForCpdSnapshot"
     ></CPDCheckPanel>
-    <!-- 运行通道选择（2026-10-08 用户要求）：默认助理（OpenClaw） -->
-    <el-dialog
-      title="用哪种方式执行？"
-      :visible.sync="runChannelVisible"
-      width="460px"
-      append-to-body
-      :close-on-click-modal="false"
-      @close="cancelRunChannel"
-    >
-      <div class="runChannelBox">
-        <label
-          class="runChannelItem"
-          :class="{ active: runChannelPick === 'openclaw' }"
-        >
-          <input
-            type="radio"
-            value="openclaw"
-            v-model="runChannelPick"
-            class="runChannelRadio"
-          />
-          <span class="runChannelBody">
-            <span class="runChannelTitle">
-              助理（OpenClaw）
-              <span class="runChannelTag">默认</span>
-            </span>
-            <span class="runChannelDesc"
-              >直连助理流式执行，出结果快；正文和产出的文件都写回导图</span
-            >
-          </span>
-        </label>
-        <label
-          class="runChannelItem"
-          :class="{ active: runChannelPick === 'bridge' }"
-        >
-          <input
-            type="radio"
-            value="bridge"
-            v-model="runChannelPick"
-            class="runChannelRadio"
-          />
-          <span class="runChannelBody">
-            <span class="runChannelTitle">桥接（执行机的 WorkBuddy）</span>
-            <span class="runChannelDesc"
-              >派到执行机的 WorkBuddy 会话跑，执行机上产出的文件会挂成附件</span
-            >
-          </span>
-        </label>
-      </div>
-      <div slot="footer">
-        <el-button size="small" @click="cancelRunChannel">取消</el-button>
-        <el-button size="small" type="primary" @click="confirmRunChannel"
-          >开始运行</el-button
-        >
-      </div>
-    </el-dialog>
   </div>
 </template>
 
@@ -626,15 +571,16 @@ import {
   isFollowUpPlaceholder
 } from '@/utils/jobResultWriter'
 import { streamChat } from '@/utils/agentChat'
-
-/**
- * 运行通道（2026-10-08 用户要求）：点「运行」先选走哪条路，**默认助理（OpenClaw）**。
- *   助理：直连 OpenClaw 流式执行（没有派发/轮询/回执那套），正文回来就写回导图
- *   桥接：派到执行机的 WorkBuddy 会话（老路子，支持产物附件回传）
- */
-const RUN_CHANNEL_STORE = 'mindmap:runChannel'
-const RUN_CHANNEL_OPENCLAW = 'openclaw'
-const RUN_CHANNEL_BRIDGE = 'bridge'
+// 运行通道（用哪条路执行）在右侧栏「设置 → AI 执行引擎」里选，工具栏只读它：
+//   助理（OpenClaw）：直连流式执行，正文回来就写回导图
+//   桥接：派到执行机的 WorkBuddy 会话（老路子，支持产物附件回传）
+import {
+  RUN_CHANNEL_OPENCLAW,
+  RUN_CHANNEL_BRIDGE,
+  readRunChannel,
+  writeRunChannel,
+  runChannelLabel
+} from '@/utils/runChannel'
 
 // 任务结果按 Markdown 渲染，配置与项目其他对话页保持一致
 const jobMd = new MarkdownIt({ html: false, linkify: true, breaks: true })
@@ -883,11 +829,9 @@ export default {
       displayedSaveChip: 'offline',
       saveChipTimer: null,
       jobDispatching: false,
-      // 运行通道选择弹窗（2026-10-08）：默认助理（OpenClaw）
-      runChannelVisible: false,
-      runChannelPick: RUN_CHANNEL_OPENCLAW,
-      runChannelPending: null,
-      // 这次运行实际用的通道（''=还没选/取消）
+      // 运行通道（用哪条路执行）**不在这里选**了 —— 见右侧栏「设置 → AI 执行引擎」，
+      // 点运行直接读设置（utils/runChannel.js 落盘）。
+      // 这次运行实际用的通道
       jobChannel: '',
       // 助理通道的流式正文与中止句柄
       jobOpenclawText: '',
@@ -1166,11 +1110,18 @@ export default {
       return String((node && node.getData && node.getData('uid')) || '')
     },
 
-    /** 「运行」按钮的悬停提示：选中过概要时说明这次是「接着这条概要继续」 */
+    /** 「运行」按钮的悬停提示：说明这次用哪个执行引擎、选中过概要时接着说继续 */
     runButtonTitle() {
+      const label = runChannelLabel(
+        typeof this.recallRunChannel === 'function'
+          ? this.recallRunChannel()
+          : RUN_CHANNEL_OPENCLAW
+      )
       const gen = this.jobGeneralization
-      if (!gen) return '按当前选中节点直接派发到本机 WorkBuddy'
-      return `点运行 → 接着「${gen.title || '当前节点'}」的概要继续执行（不是重跑 SOP）`
+      if (!gen) {
+        return `按设置（${label}）执行当前选中节点 —— 想换执行引擎去右侧栏「设置 → AI 执行引擎」`
+      }
+      return `点运行 → 接着「${gen.title || '当前节点'}」的概要继续执行（不是重跑 SOP）；执行引擎：${label}`
     },
 
     /** 执行主机上这个会话的工作目录（产物落在这里，写进提示词给它当输出目录） */
@@ -2360,55 +2311,17 @@ export default {
      * @param {Object} options.node   指定要跑的节点（点概要时传概要所属节点；默认当前选中）
      * @param {String} options.prompt 指定任务内容（点概要时用概要里写的「下一步」）
      */
-    /** 上次用的运行通道；没存过就是助理（OpenClaw）—— 用户要求默认它 */
+    /**
+     * 用哪条通道 —— 由右侧栏「设置 → AI 执行引擎」决定，工具栏只负责读。
+     * 2026-10-08 用户要求：把原来的「点运行先弹窗选通道」挪到设置里，点运行直接按设置跑。
+     * 取值/落盘都在 utils/runChannel.js，和设置面板共用同一个 key。
+     */
     recallRunChannel() {
-      try {
-        const saved = String(localStorage.getItem(RUN_CHANNEL_STORE) || '')
-        if (saved === RUN_CHANNEL_OPENCLAW || saved === RUN_CHANNEL_BRIDGE) {
-          return saved
-        }
-      } catch (err) {
-        /* 隐私模式：用默认值 */
-      }
-      return RUN_CHANNEL_OPENCLAW
+      return readRunChannel()
     },
 
     rememberRunChannel(channel) {
-      try {
-        localStorage.setItem(RUN_CHANNEL_STORE, String(channel || ''))
-      } catch (err) {
-        /* 存不下不影响这次运行 */
-      }
-    },
-
-    /**
-     * 弹「用哪条通道执行」的窗，等用户选。
-     * 返回 Promise<'openclaw' | 'bridge' | ''>（'' = 用户取消）。
-     */
-    pickRunChannel() {
-      this.runChannelPick = this.recallRunChannel()
-      this.runChannelVisible = true
-      return new Promise(resolve => {
-        this.runChannelPending = resolve
-      })
-    },
-
-    /** 弹窗里点「开始运行」 */
-    confirmRunChannel() {
-      const channel = this.runChannelPick || RUN_CHANNEL_OPENCLAW
-      this.rememberRunChannel(channel)
-      this.runChannelVisible = false
-      const done = this.runChannelPending
-      this.runChannelPending = null
-      if (done) done(channel)
-    },
-
-    /** 弹窗关闭 / 点取消 */
-    cancelRunChannel() {
-      this.runChannelVisible = false
-      const done = this.runChannelPending
-      this.runChannelPending = null
-      if (done) done('')
+      return writeRunChannel(channel)
     },
 
     /**
@@ -2611,14 +2524,14 @@ export default {
       const runNode =
         options.node || (active && !active.isGeneralization ? active : null)
       try {
-        // —— 选通道（2026-10-08 用户要求）：默认「助理（OpenClaw）」——
-        // 手搓 vm 的单测没有 pickRunChannel 这个方法，自动退回桥接，老测试不受影响
+        // —— 用哪条通道（2026-10-08 用户要求）——
+        // 在右侧栏「设置 → AI 执行引擎」选一次，这里直接读，**不再弹窗**。
+        // 取不到（老页面 / 单测手搓的 vm）就按默认走助理。
         const channel =
           options.channel ||
-          (typeof this.pickRunChannel === 'function'
-            ? await this.pickRunChannel()
-            : RUN_CHANNEL_BRIDGE)
-        if (!channel) return
+          (typeof this.recallRunChannel === 'function'
+            ? this.recallRunChannel()
+            : RUN_CHANNEL_OPENCLAW)
         this.jobChannel = channel
         if (channel === RUN_CHANNEL_OPENCLAW) {
           await this.runViaOpenclaw({ runNode, options })
@@ -4719,102 +4632,6 @@ export default {
  */
 .el-message {
   margin-top: 72px;
-}
-
-/**
- * 运行通道选择弹窗（2026-10-08）。
- * 必须放**非 scoped** 里 —— 弹窗用了 append-to-body，会挂到 body 下，
- * scoped 的 data-v 属性选不到它。
- */
-.runChannelBox {
-  display: flex;
-  flex-direction: column;
-
-  .runChannelItem {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 12px 14px;
-    border: 1px solid #e4e7ed;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: border-color 0.15s, background 0.15s;
-
-    & + .runChannelItem {
-      margin-top: 10px;
-    }
-
-    &:hover {
-      border-color: #c6e2ff;
-    }
-
-    &.active {
-      border-color: #409eff;
-      background: #ecf5ff;
-    }
-  }
-
-  .runChannelRadio {
-    margin: 3px 0 0;
-    flex: none;
-  }
-
-  .runChannelBody {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .runChannelTitle {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 14px;
-    font-weight: 600;
-    color: #1a1a1a;
-  }
-
-  .runChannelTag {
-    padding: 0 4px;
-    border: 1px solid #b3d8ff;
-    border-radius: 3px;
-    font-size: 11px;
-    font-weight: 400;
-    line-height: 16px;
-    color: #409eff;
-  }
-
-  .runChannelDesc {
-    margin-top: 4px;
-    font-size: 12px;
-    line-height: 1.5;
-    color: #7a7f85;
-  }
-}
-
-/* 深色主题（画布夜间模式）下的通道弹窗 */
-.isDark .runChannelBox,
-.el-dialog__wrapper.isDark .runChannelBox {
-  .runChannelItem {
-    border-color: #3a4046;
-    background: #262a2e;
-
-    &:hover {
-      border-color: #4a6b8a;
-    }
-
-    &.active {
-      border-color: #409eff;
-      background: rgba(64, 158, 255, 0.16);
-    }
-  }
-
-  .runChannelTitle {
-    color: #e8eaed;
-  }
-
-  .runChannelDesc {
-    color: #9aa1a9;
-  }
 }
 
 .collabDiagPopper {

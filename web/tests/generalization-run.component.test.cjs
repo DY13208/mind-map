@@ -36,6 +36,11 @@ const jobWriter = loadCjs(path.join(WEB, 'src/utils/jobResultWriter.js'), name =
   return {}
 })
 const runPrompt = loadCjs(path.join(WEB, 'src/utils/mindmapRunPrompt.js'), () => ({}))
+// 运行通道（设置里选的「AI 执行引擎」）：真模块，它只依赖 localStorage
+const runChannelUtil = loadCjs(
+  path.join(WEB, 'src/utils/runChannel.js'),
+  () => ({})
+)
 
 // ---- Toolbar.vue ----
 const toolbarSrc = fs.readFileSync(
@@ -105,6 +110,7 @@ new Function('require', 'module', 'exports', code)(name => {
   }
   if (name === '@/utils/jobResultWriter') return jobWriter
   if (name === '@/utils/mindmapRunPrompt') return runPrompt
+  if (name === '@/utils/runChannel') return runChannelUtil
   if (name === '@/utils/workbuddyJobBridge') return bridgeStub
   return {}
 }, mod, mod.exports)
@@ -259,7 +265,7 @@ async function main() {
   vm = makeVm()
   vm.activeNodes = [OWNER]
   vm.onJobNodeClick(GEN_WRITTEN)
-  await vm.runWorkbuddyJob()
+  await vm.runWorkbuddyJob({ channel: 'bridge' })
   const containerEvt = vm.events.find(a => a[0] === 'create_job_container')
   check('点运行派发了一次', dispatched.length === 1, JSON.stringify(dispatched[0] && dispatched[0].name))
   // 固定抬头已于 2026-09-29 取消（用户要求），改成断言「不再有它」
@@ -288,7 +294,7 @@ async function main() {
   vm = makeVm()
   vm.activeNodes = [OWNER]
   vm.onJobNodeClick(GEN_WRITTEN)
-  await vm.runWorkbuddyJob()
+  await vm.runWorkbuddyJob({ channel: 'bridge' })
   check(
     '用的是概要当下的文字（不是点时的快照）',
     dispatched[0].prompt.split('\n')[0].startsWith('改成：先算预算上限'),
@@ -306,7 +312,7 @@ async function main() {
     vm.messages.some(m => m[0] === 'info' && m[1].includes('双击概要')),
     JSON.stringify(vm.messages.map(m => m[0]))
   )
-  await vm.runWorkbuddyJob()
+  await vm.runWorkbuddyJob({ channel: 'bridge' })
   check(
     '占位概要 → 点运行走节点默认任务',
     dispatched.length === 1 && dispatched[0].prompt.includes('【脑图流程的一步'),
@@ -320,7 +326,7 @@ async function main() {
   vm = makeVm()
   vm.activeNodes = [OTHER]
   vm.onJobNodeClick(GEN_WRITTEN) // 记的是 owner-1
-  await vm.runWorkbuddyJob()
+  await vm.runWorkbuddyJob({ channel: 'bridge' })
   check(
     '换节点后概要自动失效，按新节点默认任务跑',
     dispatched.length === 1 &&

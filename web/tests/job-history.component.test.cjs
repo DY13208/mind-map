@@ -51,6 +51,12 @@ const jobWriter = loadCjs(path.join(WEB, 'src/utils/jobResultWriter.js'), name =
   return {}
 })
 
+// 运行通道（设置里选的「AI 执行引擎」）—— 用真模块，它只依赖 localStorage
+const runChannelUtil = loadCjs(
+  path.join(WEB, 'src/utils/runChannel.js'),
+  () => ({})
+)
+
 // ---- 可编程的桥接 stub ----
 const jobResponses = [] // 每次 listHostJobs 消费一个
 const calls = { list: 0, stop: [] }
@@ -164,6 +170,7 @@ new Function('require', 'module', 'exports', code)(name => {
   if (name === '@/utils/jobResultWriter') return jobWriter
   if (name === '@/utils/mindmapRunPrompt') return {}
   if (name === '@/utils/agentChat') return agentChatStub
+  if (name === '@/utils/runChannel') return runChannelUtil
   if (name === '@/utils/workbuddyJobBridge') return bridgeStub
   return {}
 }, mod, mod.exports)
@@ -1478,8 +1485,11 @@ async function main() {
     JSON.stringify({ q: (vm.jobQueue || []).length, p: vm.jobPendingList.length })
   )
 
-  // ---- 26. 运行通道选择（2026-10-08 用户要求）：默认助理（OpenClaw）----
-  // 点「运行」先弹窗选走哪条路：助理（直连流式）或桥接（执行机会话）。
+  // ---- 26. 运行通道：设置里选一次，点运行直接按它跑（2026-10-08 用户要求）----
+  // 用户原话：「把运行弹窗选择用什么跑 放到右侧栏的设置里面的AI执行引擎 可以下拉选择
+  // 点运行就直接按照设置的运行了 就不用弹窗」。
+  // 所以这里断言两件事：① 取值/落盘还是那套（默认助理）；② 工具栏**没有弹窗**了，
+  // 点运行直接按设置分叉。
   localStore.clear()
   vm = makeVm()
   check(
@@ -1488,66 +1498,57 @@ async function main() {
     vm.recallRunChannel()
   )
   localStore.set('mindmap:runChannel', 'bridge')
-  check('存过桥接就记住桥接', vm.recallRunChannel() === 'bridge')
+  check('设置里选过桥接就记住桥接', vm.recallRunChannel() === 'bridge')
   localStore.set('mindmap:runChannel', '乱写的值')
   check('非法值回落到默认（OpenClaw）', vm.recallRunChannel() === 'openclaw')
-
-  localStore.clear()
-  vm = makeVm()
-  const openclawPick = vm.pickRunChannel()
   check(
-    '弹窗打开时默认选中 OpenClaw',
-    vm.runChannelVisible === true && vm.runChannelPick === 'openclaw',
-    vm.runChannelPick
+    '旧的运行弹窗已拆掉（不再有 pickRunChannel）',
+    typeof vm.pickRunChannel !== 'function' &&
+      typeof vm.confirmRunChannel !== 'function'
   )
-  vm.confirmRunChannel()
-  check('确认后返回选中的通道', (await openclawPick) === 'openclaw')
   check(
-    '选择落盘（下次打开还是它）',
-    localStore.get('mindmap:runChannel') === 'openclaw',
-    localStore.get('mindmap:runChannel')
-  )
-  check('确认后弹窗关闭', vm.runChannelVisible === false)
-
-  vm = makeVm()
-  const bridgePick = vm.pickRunChannel()
-  vm.runChannelPick = 'bridge'
-  vm.confirmRunChannel()
-  check(
-    '选桥接也能工作并落盘',
-    (await bridgePick) === 'bridge' &&
-      localStore.get('mindmap:runChannel') === 'bridge',
-    localStore.get('mindmap:runChannel')
+    '工具栏不再残留弹窗状态',
+    vm.runChannelVisible === undefined && vm.runChannelPick === undefined
   )
 
-  vm = makeVm()
-  const cancelled = vm.pickRunChannel()
-  vm.cancelRunChannel()
-  check(
-    '取消时返回空串（不该当成一次运行）',
-    (await cancelled) === '' && vm.runChannelVisible === false
-  )
-
-  // 选助理 → 真的走助理通道（不弹窗、不去派发执行机会话）
+  // 设置没动过（默认助理）→ 点运行直接走助理通道，全程没有弹窗
   localStore.clear()
   vm = makeVm()
   let openclawCalls = 0
   vm.runViaOpenclaw = async () => {
     openclawCalls += 1
   }
-  await vm.runWorkbuddyJob({ channel: 'openclaw' })
+  await vm.runWorkbuddyJob()
   check(
-    '选助理时走助理通道（不派发到执行机）',
+    '按设置（默认助理）点运行 → 直接走助理通道',
     openclawCalls === 1,
     String(openclawCalls)
   )
-  check(
-    '显式给通道时不再弹窗',
-    !vm.runChannelVisible,
-    String(vm.runChannelVisible)
-  )
   check('记下这次用的通道', vm.jobChannel === 'openclaw', vm.jobChannel)
   check('跑完复位 jobDispatching', vm.jobDispatching === false)
+
+  // 设置里选了桥接 → 点运行直接走桥接分支（不再问一次）
+  localStore.set('mindmap:runChannel', 'bridge')
+  vm = makeVm()
+  vm.buildDefaultJobPrompt = () => '任务内容'
+  vm.prepareJobContainer = async () => ({ ok: false })
+  await vm.runWorkbuddyJob()
+  check(
+    '按设置（桥接）点运行 → 直接走桥接分支',
+    vm.jobChannel === 'bridge',
+    vm.jobChannel
+  )
+  check('跑完通道选择不再残留弹窗态', vm.runChannelVisible === undefined)
+
+  // 显式给通道仍然优先（内部调用 / 单测用）
+  localStore.set('mindmap:runChannel', 'bridge')
+  vm = makeVm()
+  let explicitCalls = 0
+  vm.runViaOpenclaw = async () => {
+    explicitCalls += 1
+  }
+  await vm.runWorkbuddyJob({ channel: 'openclaw' })
+  check('显式指定通道优先于设置', explicitCalls === 1 && vm.jobChannel === 'openclaw')
 
   // ---- 27. 助理（OpenClaw）通道：一次一个任务 + 按钮不锁死 + 落点不乱 ----
   // 2026-10-08 用户反馈：「用助理运行时运行按钮一直转圈、不能点第二个任务」。

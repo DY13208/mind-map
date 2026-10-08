@@ -287,9 +287,23 @@
         </div>
       </div>
       <div class="row" v-if="localConfigs.enableAi">
-        <div class="rowItem">
+        <div class="rowItem workbuddyModelRow runChannelRow">
           <span class="name">AI 执行引擎</span>
-          <span class="value">助理（OpenClaw）</span>
+          <el-select
+            v-model="runChannel"
+            size="mini"
+            style="width: 200px"
+            class="runChannelSelect"
+            @change="onRunChannelChange"
+          >
+            <el-option
+              v-for="item in runChannelOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            ></el-option>
+          </el-select>
+          <p class="runChannelTip">{{ runChannelTip }}</p>
         </div>
       </div>
       <!-- WorkBuddy / 小策执行已下线；模型由助理 Gateway 配置 -->
@@ -509,6 +523,12 @@ import {
   AI_BACKEND_WORKBUDDY,
   AI_BACKEND_XIAOCE
 } from '@/utils/agentChat'
+import {
+  RUN_CHANNEL_OPTIONS,
+  readRunChannel,
+  writeRunChannel,
+  runChannelLabel
+} from '@/utils/runChannel'
 
 export default {
   components: {
@@ -577,7 +597,10 @@ export default {
       xiaoceAgents: [],
       xiaoceScopeLoading: false,
       AI_BACKEND_WORKBUDDY: 'workbuddy',
-      AI_BACKEND_XIAOCE: 'xiaoce'
+      AI_BACKEND_XIAOCE: 'xiaoce',
+      // 「运行」用哪条通道执行：在这里选一次，之后点运行直接按它跑（不再弹窗）
+      runChannel: readRunChannel(),
+      runChannelOptions: RUN_CHANNEL_OPTIONS
     }
   },
   computed: {
@@ -585,7 +608,12 @@ export default {
       activeSidebar: state => state.activeSidebar,
       localConfig: state => state.localConfig,
       isDark: state => state.localConfig.isDark
-    })
+    }),
+    /** 下拉框下面那行说明：让人知道这条通道具体怎么跑 */
+    runChannelTip() {
+      const hit = RUN_CHANNEL_OPTIONS.find(item => item.value === this.runChannel)
+      return (hit && hit.desc) || ''
+    }
   },
   watch: {
     activeSidebar(val) {
@@ -742,6 +770,17 @@ export default {
       })
     },
 
+    /**
+     * 设置里换了「AI 执行引擎」→ 落盘。
+     * 工具栏点「运行」时会现读这个值，所以改完立刻生效、也不用再弹窗问一次
+     * （2026-10-08 用户要求：运行弹窗挪到这里）。
+     */
+    onRunChannelChange(value) {
+      const saved = writeRunChannel(value)
+      this.runChannel = saved
+      this.$message.success(`AI 执行引擎已切换为：${runChannelLabel(saved)}`)
+    },
+
     onAiBackendChange(value) {
       this.updateLocalConfig('aiBackend', value)
       if (value === AI_BACKEND_XIAOCE) this.loadXiaoceScope(true)
@@ -882,6 +921,10 @@ export default {
         }
       }
     }
+
+    .runChannelTip {
+      color: hsla(0, 0%, 100%, 0.5);
+    }
   }
 
   .workbuddyModelRow {
@@ -892,6 +935,17 @@ export default {
 
     .refreshModelsBtn {
       margin-left: 4px;
+    }
+  }
+
+  // 「AI 执行引擎」：下拉 + 一句话说明（说明换行到下一行，别跟下拉挤一排）
+  .runChannelRow {
+    .runChannelTip {
+      flex-basis: 100%;
+      margin: 2px 0 0;
+      font-size: 12px;
+      line-height: 1.5;
+      color: rgba(26, 26, 26, 0.5);
     }
   }
 

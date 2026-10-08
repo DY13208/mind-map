@@ -107,6 +107,16 @@ new Function('require', 'module', 'exports', code)(name => {
     return { writeJobResult: async () => ({ ok: true }), runJobWriteBack: async () => ({ ok: true }) }
   }
   if (name === '@/utils/mindmapRunPrompt') return {}
+  if (name === '@/utils/runChannel') {
+    // 运行通道：本用例只测「派到哪台机器」，给最小实现即可
+    return {
+      RUN_CHANNEL_OPENCLAW: 'openclaw',
+      RUN_CHANNEL_BRIDGE: 'bridge',
+      readRunChannel: () => 'openclaw',
+      writeRunChannel: c => c,
+      runChannelLabel: () => '助理（OpenClaw）'
+    }
+  }
   if (name === '@/utils/workbuddyJobBridge') return bridgeStub
   return {}
 }, mod, mod.exports)
