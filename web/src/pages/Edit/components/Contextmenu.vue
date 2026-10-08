@@ -442,18 +442,7 @@ export default {
     collectSelectedNodes(node) {
       const renderer = this.mindMap && this.mindMap.renderer
       const active = (renderer && renderer.activeNodeList) || []
-      const select = this.mindMap && this.mindMap.select
-      const cached =
-        select && typeof select.getMultiSelectCache === 'function'
-          ? select.getMultiSelectCache()
-          : []
       const uid = this.nodeUid(node)
-      if (
-        cached.length > 1 &&
-        cached.some(item => this.nodeUid(item) === uid)
-      ) {
-        return cached.slice()
-      }
       if (active.length > 1 && active.some(item => this.nodeUid(item) === uid)) {
         return active.slice()
       }
@@ -564,11 +553,8 @@ export default {
     },
 
     getCachedMultiNodes() {
-      const select = this.mindMap && this.mindMap.select
-      if (select && typeof select.getMultiSelectCache === 'function') {
-        return select.getMultiSelectCache() || []
-      }
-      return []
+      const renderer = this.mindMap && this.mindMap.renderer
+      return renderer ? (renderer.activeNodeList || []).slice() : []
     },
 
     // 画布右键显示

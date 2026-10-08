@@ -154,7 +154,8 @@ const NULLABLE_PATCH_KEYS = [
   'attachmentError',
   'attachmentExtractedText',
   'customLeft',
-  'customTop'
+  'customTop',
+  'isFloating'
 ]
 
 const FIELD_COMMANDS = {
@@ -1548,8 +1549,9 @@ class Cooperate {
     if (selectedUids.length) {
       this.lastActiveUids = selectedUids.slice()
     }
+    // Selection only updates presence. Lazy children are loaded by an
+    // explicit expand action (the count badge, menu or keyboard command).
     this.setLocalPresence({ selectedUids })
-    if (node) this.repairEmptyExpand(node)
   }
 
   ensureActiveSelection() {
@@ -2419,7 +2421,7 @@ class Cooperate {
       // Move events can carry restored coordinates when undoing a move.
       const positionData = { ...(payload.data || {}), ...(payload.patch || {}) }
       const positionPatch = {}
-      ;['customLeft', 'customTop'].forEach(key => {
+      ;['customLeft', 'customTop', 'isFloating'].forEach(key => {
         if (Object.prototype.hasOwnProperty.call(positionData, key)) {
           positionPatch[key] = positionData[key]
           node[key] = positionData[key] == null ? undefined : positionData[key]
@@ -4214,7 +4216,8 @@ class Cooperate {
       attachmentError: next.attachmentError,
       attachmentExtractedText: next.attachmentExtractedText,
       customLeft: next.customLeft,
-      customTop: next.customTop
+      customTop: next.customTop,
+      isFloating: next.isFloating
     }
     Object.keys(next || {}).forEach(key => {
       if (checkIsNodeStyleDataKey(key)) stylePayload[key] = next[key]
@@ -6413,7 +6416,7 @@ class Cooperate {
         index: item.index,
         oldParentUid: origin && origin.parent,
         oldIndex: origin && origin.index,
-        patch: { customLeft: null, customTop: null },
+        patch: collabMove.movePositionPatch(item.node),
         kind
       }
       const send = this.collabV2Adapter
@@ -6421,8 +6424,7 @@ class Cooperate {
         : this.httpPatchNode(item.uid, {
             parent: item.parent,
             index: item.index,
-            customLeft: null,
-            customTop: null
+            ...collabMove.movePositionPatch(item.node)
           })
       return send
         .then(result => {
@@ -6457,7 +6459,7 @@ class Cooperate {
             parentUid: item.parent,
             newParentUid: item.parent,
             index: item.index,
-            patch: { customLeft: null, customTop: null },
+            patch: collabMove.movePositionPatch(item.node),
             oldParentUid: originByUid.get(item.uid) && originByUid.get(item.uid).parent,
             oldIndex: originByUid.get(item.uid) && originByUid.get(item.uid).index,
             kind:

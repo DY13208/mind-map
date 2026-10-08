@@ -18,7 +18,7 @@ function node(uid, parent = null) {
     renderLine() { this.draws++ }
   }
 }
-for (const mode of ['unchanged', 'replaced', 'deleted', 'same-parent']) {
+for (const mode of ['unchanged', 'replaced', 'deleted', 'same-parent', 'independent']) {
   test('move completion only repaints live parents: ' + mode, async () => {
     const old = node('old')
     const target = mode === 'same-parent' ? old : node('target')
@@ -51,7 +51,13 @@ for (const mode of ['unchanged', 'replaced', 'deleted', 'same-parent']) {
         }
       }
     }
-    await applyV2PayloadMove.call(co, { uid: 'child', parentUid: target.getData('uid'), index: 0 })
+    await applyV2PayloadMove.call(co, { uid: 'child', parentUid: target.getData('uid'), index: 0,
+      patch: mode === 'independent' ? { isFloating: true, customLeft: 420, customTop: 600 } : {} })
+    if (mode === 'independent') {
+      assert.equal(child.getData('isFloating'), true)
+      assert.equal(child.customLeft, 420)
+      assert.equal(child.customTop, 600)
+    }
     if (mode === 'replaced' || mode === 'deleted') {
       assert.equal(old.draws, 0, 'detached parent must not recreate old SVG paths')
       assert.equal(target.draws, 0)

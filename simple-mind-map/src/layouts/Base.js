@@ -929,6 +929,13 @@ class Base {
 
   // 设置连线样式
   setLineStyle(style, line, path, childNode) {
+    const floating = childNode && childNode.getData && childNode.getData('isFloating')
+    if (floating) {
+      line.plot('M 0,0')
+      if (typeof line.hide === 'function') line.hide()
+      return
+    }
+    if (typeof line.show === 'function') line.show()
     line.plot(this.transformPath(path))
     style && style(line, childNode, true)
   }

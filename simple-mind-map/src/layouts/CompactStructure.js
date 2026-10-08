@@ -41,16 +41,19 @@ class CompactStructure extends LogicalStructure {
   computedBaseValue() {
     super.computedBaseValue()
     const levels = []
-    const queue = [{ node: this.root, depth: 0 }]
+    this.componentByNode = new Map()
+    const queue = [{ node: this.root, depth: 0, component: this.root }]
     for (let i = 0; i < queue.length; i++) {
-      const { node, depth } = queue[i]
+      const { node, depth, component } = queue[i]
       if (!node) continue
+      const currentComponent = node.getData('isFloating') ? node : component
+      this.componentByNode.set(node, currentComponent)
       if (!levels[depth]) levels[depth] = []
       levels[depth].push(node)
       if (node.getData('expand') !== false) {
         const children = node.children || []
         children.forEach(child => {
-          queue.push({ node: child, depth: depth + 1 })
+          queue.push({ node: child, depth: depth + 1, component: currentComponent })
         })
       }
     }
@@ -63,6 +66,19 @@ class CompactStructure extends LogicalStructure {
       Number.isFinite(height) ? height : 0,
       this.compactConfig.nodeMinHeight
     )
+  }
+
+  getBranchChildren(node) {
+    return (node.children || []).filter(child => !child.getData('isFloating'))
+  }
+
+  // Floating themes share document storage, but each has its own layout.
+  getLayoutComponent(node) {
+    if (this.componentByNode && this.componentByNode.has(node)) {
+      return this.componentByNode.get(node)
+    }
+    if (node.getData('isFloating')) return node
+    return node.parent ? this.getLayoutComponent(node.parent) : this.root
   }
 
   computedTopValue() {
@@ -78,7 +94,7 @@ class CompactStructure extends LogicalStructure {
     for (let depth = levels.length - 1; depth >= 0; depth--) {
       const gap = this.getMarginY(depth + 1)
       ;(levels[depth] || []).forEach(node => {
-        const children = node.getData('expand') === false ? [] : node.children || []
+        const children = node.getData('expand') === false ? [] : this.getBranchChildren(node)
         const childrenHeight = children.reduce((sum, child) => {
           return sum + branchHeights.get(child)
         }, 0) + Math.max(0, children.length - 1) * gap
@@ -93,7 +109,7 @@ class CompactStructure extends LogicalStructure {
     for (let depth = 1; depth < levels.length; depth++) {
       const groups = []
       ;(levels[depth - 1] || []).forEach(parent => {
-        const children = parent.getData('expand') === false ? [] : parent.children || []
+        const children = parent.getData('expand') === false ? [] : this.getBranchChildren(parent)
         if (!children.length) return
         const gap = this.getMarginY(depth)
         const height = children.reduce((sum, child) => {
@@ -126,6 +142,7 @@ class CompactStructure extends LogicalStructure {
           (nodeUseLineStyle ? child.height / 2 : 0)
       })
       return {
+        component: this.getLayoutComponent(parent),
         min: childYs.reduce((min, y) => Math.min(min, y), sourceY),
         max: childYs.reduce((max, y) => Math.max(max, y), sourceY)
       }
@@ -133,12 +150,14 @@ class CompactStructure extends LogicalStructure {
     const { alwaysShowExpandBtn, notShowExpandBtn } = this.mindMap.opt
     groups.forEach((group, index) => {
       const { parent, children } = group
+      const component = this.getLayoutComponent(parent)
       const top = children.reduce((min, child) => Math.min(min, child.top), parent.top)
       const bottom = children.reduce((max, child) => {
         return Math.max(max, child.top + child.height)
       }, parent.top + parent.height)
       const obstacleRight = obstacles.reduce((right, node) => {
-        if (node.top >= bottom || node.top + node.height <= top) return right
+        if (this.getLayoutComponent(node) !== component ||
+          node.top >= bottom || node.top + node.height <= top) return right
         const badgeWidth = node.getData('expand') === false &&
           typeof node.getExpandBtnOuterWidth === 'function'
           ? node.getExpandBtnOuterWidth()
@@ -147,7 +166,8 @@ class CompactStructure extends LogicalStructure {
       }, parent.left + parent.width)
       this.obstacleRightByNode.set(parent, obstacleRight)
       const overlapping = spans.filter(span => {
-        return span.min < spans[index].max && span.max > spans[index].min
+        return span.component === component &&
+          span.min < spans[index].max && span.max > spans[index].min
       }).length
       const expandReserve = alwaysShowExpandBtn && !notShowExpandBtn &&
         parent.layerIndex > 0 ? parent.expandBtnSize || 0 : 0
@@ -177,17 +197,20 @@ class CompactStructure extends LogicalStructure {
     levels.forEach((nodes, depth) => {
       if (onlyDepth !== null && depth !== onlyDepth) return
       const routes = nodes.filter(node => {
-        return node.getData('expand') !== false && node.children && node.children.length
+        return node.getData('expand') !== false && this.getBranchChildren(node).length
       }).map(node => {
+        const children = this.getBranchChildren(node)
         const sourceY = node.top + node.height / 2 +
           (nodeUseLineStyle && !node.isRoot ? node.height / 2 : 0)
-        const childYs = node.children.map(child => {
+        const childYs = children.map(child => {
           return child.top + child.height / 2 +
             (nodeUseLineStyle ? child.height / 2 : 0)
         })
         return {
           node,
-          childLeft: node.children.reduce((min, child) => Math.min(min, child.left), Infinity),
+          component: this.getLayoutComponent(node),
+          children,
+          childLeft: children.reduce((min, child) => Math.min(min, child.left), Infinity),
           sourceY,
           childYs,
           minY: childYs.reduce((min, y) => Math.min(min, y), sourceY),
@@ -198,6 +221,7 @@ class CompactStructure extends LogicalStructure {
       const inRange = (y, route) => y >= route.minY && y <= route.maxY
       const costCache = new Map()
       const crossingCost = (leftRoute, rightRoute) => {
+        if (leftRoute.component !== rightRoute.component) return 0
         let row = costCache.get(leftRoute)
         if (!row) {
           row = new Map()
@@ -243,7 +267,6 @@ class CompactStructure extends LogicalStructure {
         }
       }
       const { alwaysShowExpandBtn, notShowExpandBtn } = this.mindMap.opt
-      const placed = this.placedConnectorRoutes
       const crossingCount = (vertical, horizontal) => {
         if (horizontal.y <= vertical.minY || horizontal.y >= vertical.maxY) return 0
         return vertical.busX > Math.min(horizontal.from, horizontal.to) &&
@@ -262,7 +285,6 @@ class CompactStructure extends LogicalStructure {
         const right = Math.min(Math.max(arm.from, arm.to), Math.max(other.from, other.to))
         return right - left > 1 && Math.abs(arm.y - other.y) < 3
       }
-      const visibleNodes = levels.slice(0, depth + 2).flat()
       const hitsNode = (segment, target) => {
         const left = target.left + 1
         const right = target.left + target.width - 1
@@ -278,7 +300,11 @@ class CompactStructure extends LogicalStructure {
           Math.min(segment.y1, segment.y2) < bottom
       }
       ordered.forEach(route => {
-        const { node } = route
+        const { node, component } = route
+        const placed = this.placedConnectorRoutes.filter(other => other.component === component)
+        const visibleNodes = levels.slice(0, depth + 2).flat().filter(other => {
+          return this.getLayoutComponent(other) === component
+        })
         const expandBtnSize = alwaysShowExpandBtn && !notShowExpandBtn && depth > 0
           ? node.expandBtnSize || 0
           : 0
@@ -302,7 +328,7 @@ class CompactStructure extends LogicalStructure {
             })
           })
           visibleNodes.forEach(other => {
-            if (other === node || node.children.includes(other)) return
+            if (other === node || route.children.includes(other)) return
             candidates.push(
               other.left - this.compactConfig.connectorMargin,
               other.left + other.width + this.compactConfig.connectorMargin
@@ -318,7 +344,7 @@ class CompactStructure extends LogicalStructure {
             route.busX = x
             const routeArms = arms(route)
             const nodeCollisions = visibleNodes.filter(other => {
-              return other !== node && !node.children.includes(other) &&
+              return other !== node && !route.children.includes(other) &&
                 hitsNode({ x1: x, y1: route.minY, x2: x, y2: route.maxY }, other)
             }).length
             const lineCollisions = placed.reduce((count, other) => {
@@ -331,7 +357,7 @@ class CompactStructure extends LogicalStructure {
             if (!best || score < best.score) best = { x, score, collisions }
           })
           if (best && best.collisions === 0) break
-          if (node.children.some(child => child.hasCustomPosition())) break
+          if (route.children.some(child => child.hasCustomPosition())) break
           const previousX = placed.reduce((max, other) => {
             return route.minY < other.maxY && route.maxY > other.minY
               ? Math.max(max, other.busX)
@@ -344,7 +370,7 @@ class CompactStructure extends LogicalStructure {
             requiredLeft - route.childLeft
           )
           route.childLeft += shift
-          node.children.forEach(child => { child.left += shift })
+          route.children.forEach(child => { child.left += shift })
           best = null
           attempts++
         }
@@ -405,17 +431,17 @@ class CompactStructure extends LogicalStructure {
           y,
           from: route.busX,
           to: route.childLeft
-        }, node.children[index], false))
+        }, route.children[index], false))
         const routedYs = [route.sourceY + route.sourceOffset,
           ...route.childYs.map((y, index) => y + route.childOffsets[index])]
         route.minY = Math.min(...routedYs)
         route.maxY = Math.max(...routedYs)
         this.armOffsetsByNode.set(node, {
           source: route.sourceOffset,
-          children: route.childOffsets
+          children: node.children.map(child => route.childOffsets[route.children.indexOf(child)] || 0)
         })
         this.busXByNode.set(node, route.busX)
-        placed.push(route)
+        this.placedConnectorRoutes.push(route)
       })
     })
   }
@@ -423,13 +449,20 @@ class CompactStructure extends LogicalStructure {
   // The elbow sits in the gap between complete depth columns. The inherited
   // elbow would use each parent's width and could run through a wider sibling.
   renderLineStraight(node, lines, style) {
-    if (!node.children.length) return []
+    const children = this.getBranchChildren(node)
+    if (!children.length) {
+      lines.forEach(line => {
+        if (line.plot) line.plot('M 0,0')
+        if (line.hide) line.hide()
+      })
+      return []
+    }
     const { left, top, width, height, layerIndex } = node
     const { alwaysShowExpandBtn, notShowExpandBtn } = this.mindMap.opt
     const expandBtnSize = alwaysShowExpandBtn && !notShowExpandBtn && layerIndex > 0
       ? node.expandBtnSize
       : 0
-    const childLeft = node.children[0] && node.children[0].left
+    const childLeft = children[0] && children[0].left
     const busX = this.busXByNode.has(node)
       ? this.busXByNode.get(node)
       : Number.isFinite(childLeft)
@@ -442,6 +475,13 @@ class CompactStructure extends LogicalStructure {
     const armOffsets = this.armOffsetsByNode.get(node) || { source: 0, children: [] }
     const branches = []
     node.children.forEach((item, index) => {
+      if (item.getData('isFloating')) {
+        if (lines[index]) {
+          if (lines[index].plot) lines[index].plot('M 0,0')
+          if (lines[index].hide) lines[index].hide()
+        }
+        return
+      }
       if (this.renderReversedHorizontalLine(
         node, item, lines[index], style, 'straight', false
       )) return

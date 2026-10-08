@@ -254,6 +254,29 @@ class Drag extends Base {
         this.nextNode
       )
       didMove = true
+    } else if (hadClone && this.mindMap.opt.enableDetachedDrag !== false) {
+      // Store independent themes beneath the document root so the existing
+      // tree persistence, search and undo paths retain the whole subtree.
+      // isFloating separates their visual layout and removes the incoming edge.
+      const root = this.mindMap.renderer && this.mindMap.renderer.root
+      if (root) {
+        const { x: screenX, y: screenY } = this.mindMap.toPos(
+          e.clientX - this.offsetX, e.clientY - this.offsetY
+        )
+        const { scaleX, scaleY, translateX, translateY } = this.drawTransform
+        const x = (screenX - translateX) / scaleX
+        const y = (screenY - translateY) / scaleY
+        const anchor = this.beingDragNodeList[0]
+        const positions = this.beingDragNodeList.map(node => ({
+          uid: node.getData('uid'),
+          customLeft: x + node.left - anchor.left,
+          customTop: y + node.top - anchor.top,
+          isFloating: true
+        }))
+        requestSyncPaint()
+        this.mindMap.execCommand('MOVE_NODE_TO', this.beingDragNodeList, root, positions)
+        didMove = true
+      }
     } else if (
       hadClone &&
       enableFreeDrag &&
@@ -440,10 +463,19 @@ class Drag extends Base {
       } else {
         // 否则克隆当前的节点
         this.clone = node.group.clone()
-        // 删除展开收起按钮元素
-        const expandEl = this.clone.findOne('.smm-expand-btn')
-        if (expandEl) {
-          expandEl.remove()
+        // Preview only the node itself, without auxiliary outlines or controls.
+        ;['.smm-expand-btn', '.smm-hover-node', '.smm-quick-create-child-btn'].forEach(selector => {
+          const element = this.clone.findOne(selector)
+          if (element) element.remove()
+        })
+        const shape = this.clone.findOne('.smm-node-shape')
+        if (shape) {
+          const fill = node.style.merge('fillColor')
+          shape.css({
+            stroke: '#246bff', 'stroke-width': 2, 'stroke-dasharray': 'none',
+            fill: !fill || fill === 'none' || fill === 'transparent'
+              ? this.mindMap.themeConfig.backgroundColor || '#fff' : fill
+          })
         }
         this.mindMap.otherDraw.add(this.clone)
         if (typeof handleDragCloneNode === 'function') {
@@ -480,37 +512,17 @@ class Drag extends Base {
     }
   }
 
-  // 虚线框包住被拖动节点及其可见子节点，不延伸到整个画布。
+  // Trace each original node's own shape, without its descendants or padding.
   createDragRangeGuide() {
-    const node = this.beingDragNodeList[0]
-    if (!node) return
-    const bounds = {
-      left: node.left,
-      top: node.top,
-      right: node.left + node.width,
-      bottom: node.top + node.height
-    }
-    const includeVisible = current => {
-      if (!current) return
-      bounds.left = Math.min(bounds.left, current.left)
-      bounds.top = Math.min(bounds.top, current.top)
-      bounds.right = Math.max(bounds.right, current.left + current.width)
-      bounds.bottom = Math.max(bounds.bottom, current.top + current.height)
-      if (current.getData('expand') === false) return
-      ;(current.children || []).forEach(includeVisible)
-    }
-    includeVisible(node)
-    const padding = 16
-    this.dragRangeGuide = this.mindMap.otherDraw
-      .rect()
-      .move(bounds.left - padding, bounds.top - padding)
-      .size(
-        bounds.right - bounds.left + padding * 2,
-        bounds.bottom - bounds.top + padding * 2
-      )
-      .fill('none')
-      .stroke({ color: '#246bff', width: 2, dasharray: '7 7' })
+    this.dragRangeGuide = this.mindMap.otherDraw.group()
     this.dragRangeGuide.attr('pointer-events', 'none')
+    this.beingDragNodeList.forEach(node => {
+      if (!node.shapeNode) return
+      const shape = node.shapeNode.clone()
+      shape.css({ fill: 'none', stroke: '#246bff', 'stroke-width': 2,
+        'stroke-dasharray': '6 4', opacity: 1 })
+      this.dragRangeGuide.group().translate(node.left, node.top).add(shape)
+    })
   }
 
   //  移除克隆节点

@@ -2122,7 +2122,7 @@ class Render {
   }
 
   //  移动节点作为另一个节点的子节点
-  moveNodeTo(node, toNode) {
+  moveNodeTo(node, toNode, positions = []) {
     let nodeList = formatDataToArray(node)
     nodeList = nodeList.filter(item => {
       return !item.isRoot
@@ -2131,7 +2131,7 @@ class Render {
     if (
       this.runAfterHydrate(
         [toNode].filter(Boolean),
-        () => this.moveNodeTo(node, toNode),
+        () => this.moveNodeTo(node, toNode, positions),
         'MOVE_NODE_TO'
       )
     ) {
@@ -2160,6 +2160,12 @@ class Render {
       }
       item.parent = toNode
       this.resetMovedNodePosition(item)
+      const position = positions.find(entry => entry.uid === getNodeUid(item))
+      if (position) {
+        item.setData({ isFloating: true, customLeft: position.customLeft, customTop: position.customTop })
+        item.customLeft = position.customLeft
+        item.customTop = position.customTop
+      }
     })
     touchedParents.forEach(parent => {
       if (!parent) return
@@ -2202,7 +2208,7 @@ class Render {
   resetMovedNodePosition(node) {
     node.customLeft = undefined
     node.customTop = undefined
-    node.setData({ customLeft: null, customTop: null })
+    node.setData({ customLeft: null, customTop: null, isFloating: false })
   }
 
   //   粘贴节点到节点

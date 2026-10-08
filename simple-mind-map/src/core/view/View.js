@@ -48,6 +48,11 @@ class View {
       if (e.ctrlKey || e.metaKey || this.mindMap.opt.isDisableDrag) {
         return
       }
+      // A right-click may include a few pixels of pointer jitter. Do not
+      // clear selection or move the canvas until an actual drag starts.
+      if (this.firstDrag &&
+        Math.abs(event.mousemoveOffset.x) <= 5 &&
+        Math.abs(event.mousemoveOffset.y) <= 5) return
       // 真正发生拖动位移时才换成小手（右键单击不切换）
       this.setCanvasPanningCursor(true)
       if (this.firstDrag) {
