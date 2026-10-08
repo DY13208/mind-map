@@ -86,6 +86,8 @@ function makeMindMap() {
   const map = {
     renderCount: 0,
     cmds: [],
+    // readonly 一开，核心 Command.exec 会**静默丢弃**所有结构命令（真实行为）
+    opt: { readonly: false },
     renderer: {
       renderTree: { data: {} },
       activeNodeList: [],
@@ -421,6 +423,65 @@ async function main() {
     okOut.nodes >= 2 && (containerD.node.children || []).length > 1,
     `nodes=${okOut.nodes} kids=${(containerD.node.children || []).length}`
   )
+
+  // ============ E. 只读房间 / 懒加载 —— 「命令被丢了」的两个真凶 ============
+  // 用户 2026-10-08 看到「可能协同任务丢了」。查核心命令层：
+  //   · Command.exec 在 mindMap.opt.readonly 为真时**静默丢弃**所有结构命令；
+  //   · Renderer.runAfterHydrate 碰到「子节点没拉全」的父节点，会把插入推迟到
+  //     hydration 之后，失败只 console.error —— 命令等于丢了。
+  console.log('--- 只读房间：命令会被静默丢弃，必须提前说清 ---')
+  const mapE = makeMindMap()
+  mapE.opt.readonly = true
+  let threwE = ''
+  try {
+    await writer.writeJobResultToMap({
+      mindMap: mapE,
+      nodeUid: mapE.root.getData('uid'),
+      markdown: MD,
+      roomKey: 'room-test'
+    })
+  } catch (err) {
+    threwE = (err && err.message) || String(err)
+  }
+  check(
+    '只读房间 → 直接说「只读、没有编辑权限」，不写空账',
+    /只读/.test(threwE) && /编辑权限/.test(threwE),
+    threwE
+  )
+  let threwE2 = ''
+  try {
+    await writer.createJobContainer({
+      mindMap: mapE,
+      nodeUid: mapE.root.getData('uid'),
+      prompt: '任务内容'
+    })
+  } catch (err) {
+    threwE2 = (err && err.message) || String(err)
+  }
+  check('只读房间 → 建任务容器也当场报只读', /只读/.test(threwE2), threwE2)
+
+  console.log('--- 懒加载父节点：插入前先补 hydration ---')
+  const mapF = makeMindMap()
+  const hydrateCalls = []
+  mapF.cooperate = {
+    nodeNeedsHydrate: () => true,
+    ensurePlacementParent: async node => {
+      hydrateCalls.push((node && node.getData && node.getData('text')) || '')
+    }
+  }
+  const outF = await writer.writeJobResultToMap({
+    mindMap: mapF,
+    nodeUid: mapF.root.getData('uid'),
+    markdown: MD,
+    roomKey: 'room-test',
+    artifacts: []
+  })
+  check(
+    '每次插入前都对落点补过 hydration',
+    hydrateCalls.length >= 3,
+    `${hydrateCalls.length}: ${hydrateCalls.join(' / ')}`
+  )
+  check('补完 hydration 后照常写出', outF.nodes >= 2, String(outF.nodes))
 
   const failed = results.filter(item => !item.ok)
   console.log(
