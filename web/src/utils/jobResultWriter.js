@@ -548,15 +548,20 @@ function sleep(ms) {
 }
 
 /**
- * 等新插入的子节点真的挂上（协作模式下命令可能不是同步落到树上）。
- * 返回新出现的那个子节点。
+ * 等刚插进去的子节点真的挂上（协作模式下命令可能不是同步落到树上），
+ * 返回**最后一个**新子节点。
+ *
+ * ⚠️ expect = 这次调用插入的个数，**必须等全部落地再往下走**。
+ * 协同模式下命令不是同步落树：上一个节点的插入还没落地、就急着等下一个，
+ * 「新出现的那个」很可能是上一个节点 → 附件挂到别人身上。
+ * 库里实测到过这个症状：同一个 node_uid 下同时挂了产物文件和「完整输出」，
+ * 节点上的回形针指哪一个看运气（用户反馈「挂载不要乱」就是这个）。
  */
-async function waitNewChild(parent, before, tries = 24) {
-  const prev = new Set(before || [])
+async function waitNewChild(parent, before, tries = 24, expect = 1) {
+  const want = (before || []).length + Math.max(1, Number(expect) || 1)
   for (let i = 0; i < tries; i += 1) {
     const list = (parent && parent.children) || []
-    const found = list.find(item => !prev.has(item))
-    if (found) return found
+    if (list.length >= want) return list[list.length - 1]
     if (i < tries - 1) await sleep(50)
   }
   return lastChildOf(parent)
@@ -949,7 +954,8 @@ export async function writeJobResultToMap({
           branch,
           missing.map(info => ({ data: { text: String(info.name) } }))
         )
-        await waitNewChild(branch, beforeFiles)
+        // 等**这一批全部**落地再往下（否则后一步的「新节点」会认成这里还没落地的那个）
+        await waitNewChild(branch, beforeFiles, 24, missing.length)
         out.nodes += missing.length
       }
       for (let i = 0; i < files.length; i += 1) {

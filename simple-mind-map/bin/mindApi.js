@@ -1097,6 +1097,95 @@ async function handleApi(req, res) {
       }[ext] || 'application/octet-stream')
 
     const allowed = /\.(html?|xlsx?|docx?|pdf|md|csv|txt|json|png|jpe?g)$/i
+
+    // —— 只列「本次运行的专属目录」：dir=20261008-1832 ——
+    // 用户要求（2026-10-08）：「只挂这一次运行的东西，不要乱不要多不要少」。
+    // 时间窗扫描（下面的逻辑）挂在共享 output 根目录上，会捞到别的任务/别的工具写的文件，
+    // 也会被 limit 截断；产物目录是这次运行专用的，扫它就精确了。
+    // 这里**忽略 since**：目录本身就是范围，产物早两秒落盘也不该漏。
+    const rawDir = String(url.searchParams.get('dir') || '').trim()
+    if (rawDir) {
+      const safeDir = rawDir
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '')
+        .replace(/\/+$/, '')
+      const escaped =
+        !safeDir ||
+        safeDir.includes('..') ||
+        path.isAbsolute(safeDir) ||
+        /^[a-zA-Z]:/.test(safeDir)
+      if (escaped) {
+        sendJson(res, 400, { ok: false, error: 'invalid dir' })
+        return true
+      }
+      const dirItems = []
+      const dirSeen = new Set()
+      const MAX_DIR_FILES = 60
+      const walk = (dir, depth) => {
+        if (depth > 3 || dirItems.length >= MAX_DIR_FILES) return
+        let names = []
+        try {
+          names = fs.readdirSync(dir)
+        } catch (e) {
+          return
+        }
+        names.forEach(name => {
+          if (dirItems.length >= MAX_DIR_FILES) return
+          if (name.startsWith('.')) return
+          const full = path.join(dir, name)
+          let st = null
+          try {
+            st = fs.statSync(full)
+          } catch (e) {
+            return
+          }
+          if (st.isDirectory()) {
+            walk(full, depth + 1)
+            return
+          }
+          if (!st.isFile() || !allowed.test(name)) return
+          const key = name.toLowerCase()
+          if (dirSeen.has(key)) return
+          dirSeen.add(key)
+          dirItems.push({
+            name,
+            path: full,
+            mtime: st.mtimeMs || 0,
+            size: st.size || 0,
+            mime: mimeOf(path.extname(name).toLowerCase())
+          })
+        })
+      }
+      roots.forEach(root => {
+        const base = path.resolve(root, safeDir)
+        const rel = path.relative(root, base)
+        // 越界（../ 或跑到根外）直接不收
+        if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return
+        walk(base, 0)
+      })
+      dirItems.sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
+      const dirPicked = dirItems.slice(0, limit)
+      if (withContent) {
+        const MAX_BYTES = 5 * 1024 * 1024
+        dirPicked.forEach(item => {
+          if (item.size > MAX_BYTES) return
+          try {
+            item.base64 = fs.readFileSync(item.path).toString('base64')
+          } catch (e) {
+            /* 读不到就只给名字 */
+          }
+        })
+      }
+      sendJson(res, 200, {
+        ok: true,
+        dir: safeDir,
+        items: dirPicked,
+        total: dirItems.length,
+        roots
+      })
+      return true
+    }
+
     const items = []
     const seen = new Set()
     roots.forEach(root => {

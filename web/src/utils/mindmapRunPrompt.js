@@ -340,13 +340,70 @@ function priorResultsBlock(results) {
 }
 
 /**
+ * 产物该写到哪。
+ * 给了 runDir（每次运行一个专属空目录）就写死到它里面 —— 页面跑完只按这个目录挂附件，
+ * 于是「这一次运行的东西」不多不少；不给（例如桥接通道）沿用旧口径，让文件名带日期。
+ */
+function outputDirLine(cwd, runDir) {
+  const base = cwd || '执行主机的工作目录'
+  const dir = String(runDir || '').trim()
+  if (!dir) {
+    return '这次要产出的文件请集中写到该工作目录的 output 子目录，文件名带上日期；'
+  }
+  return (
+    `这次要产出的文件**只能**写到 ${base} 的 output/${dir}/ 里` +
+    `（这个子目录是本次运行专用的，里面应该只有这一次的东西）：` +
+    `不要写到 output 根目录、不要写别的目录、也不要覆盖或改动以前跑出来的文件；`
+  )
+}
+
+/**
+ * 「回答里只放本次运行的内容」——这段回答会被原样存成导图上的「完整输出」，
+ * 所以历史背景不能跟着一起进来（2026-10-08 用户要求：完整输出不要包含之前的）。
+ */
+const ONLY_THIS_RUN_LINE =
+  '上面给你的「前序结果」「上一次跑出来的结果」「概要里写的下一步」都只是**输入背景**，' +
+  '不是要你输出的内容：不要抄进回答、不要复述、也不要写「上次已经…」「之前提到…」这类回顾。' +
+  '这段回答会被原样存成导图上的「完整输出」——**里面只能有本次运行的内容**。'
+
+/**
+ * 产物怎么回到导图。有 runDir（页面能按目录挂）就**不要**让 Agent 自己挂 ——
+ * 两条路一起走会在节点上挂出重复附件 / 挂错节点（用户要求：不要乱、不要多）。
+ * 写文件被拒时的 MCP 兜底仍然保留（2026-10-08 之前专门加过，别删）。
+ */
+function attachHowToLine(runDir) {
+  const dir = String(runDir || '').trim()
+  const whoHangs = dir
+    ? `② 本次新增的产物文件，写到第 2 条给的那个 output/${dir}/ 目录就行，` +
+      '**页面会自动按这个目录把它们挂成附件**；' +
+      '**不要自己再调 MCP 的 `upload_attachment` 挂一遍** —— ' +
+      '同一份挂两次会在导图里多出重复附件、还可能挂到别的节点上；'
+    : '② 本次新增的产物文件，用 MCP 工具 `upload_attachment` 挂到当前节点' +
+      '（room_key 用上面给的「房间」，node 用当前节点的标题或路径），能写文件就传 `file_path`；'
+  return (
+    '**产物怎么回到导图**：' +
+    '① 文字结论放回答里就行 —— 页面会把它原样写回导图（存成「完整输出」）；' +
+    whoHangs +
+    '③ **只有写文件被拒 / 目录不可写时**才用 MCP 兜底：文字内容用 `add_node` 加到当前节点下面，' +
+    '或用 `upload_attachment` 的 `content_base64` 把正文直接挂成附件 —— ' +
+    '**绝不能因为写不出文件就把产物丢在回答里**（那样人拿不到东西）；' +
+    '④ 只写/只挂本次新增的，**不要用 note / text 写文件路径冒充附件**（那样点不开）；' +
+    '也别去翻插件目录找路、或自己写脚本调接口（那才会白耗几十轮、任务几分钟出不来结果）。'
+  )
+}
+
+/**
  * 组装「按节点运行」的任务内容。
  * @param {Object} payload
  * @param {Object} payload.node  运行节点（simple-mind-map 节点对象）
  * @param {String} payload.room  房间 key（可选）
  * @param {String} payload.cwd   执行主机的工作目录（可选，用来告诉它产物写哪）
+ * @param {String} payload.runDir 本次运行的专属产物目录名（可选，如 20261008-1832）。
+ *        给了就把产物**写死**到这个子目录里，页面按这个目录挂附件 ——
+ *        这样「完整输出 / 附件」只收这一次运行的东西，不跟历史产物混
+ *        （2026-10-08 用户要求：不要乱、不要多、不要少）。没给就沿用旧口径。
  */
-export function buildNodeRunPrompt({ node, room = '', cwd = '' } = {}) {
+export function buildNodeRunPrompt({ node, room = '', cwd = '', runDir = '' } = {}) {
   const title = nodeText(node)
   const pathNodes = collectNodePath(node)
   const pathText = pathNodes.map(nodeText).filter(Boolean).join(' → ')
@@ -411,12 +468,13 @@ export function buildNodeRunPrompt({ node, room = '', cwd = '' } = {}) {
   lines.push(`请只完成「${title || '当前节点'}」这一步：`)
   lines.push(
     '1. 把上面的前序结果当作已知输入，不要重新收集或分析已经做过的部分；' +
-      '它们是背景，不要原样复述进输出 —— 输出只写这一步的结论与产物。'
+      '它们是背景，不要原样复述进输出 —— 输出只写这一步的结论与产物。' +
+      ONLY_THIS_RUN_LINE
   )
   lines.push(
     `2. 需要上游文件就直接读（产物一般在 ${
       cwd || '执行主机的工作目录'
-    } 下），这次要产出的文件请集中写到该工作目录的 output 子目录，文件名带上日期；`
+    } 下），${outputDirLine(cwd, runDir)}`
   )
   lines.push('3. 输出要**精简**：脑图只放核心，过程、日志、代码都不要写进去。按这个结构写：')
   lines.push('   ## 一句话结论    → 1～2 句说清这一步的结果')
@@ -432,26 +490,15 @@ export function buildNodeRunPrompt({ node, room = '', cwd = '' } = {}) {
       '不要用「要我继续吗」「你点头我才做」这类结尾 —— 只有确实需要人拍板的选择、' +
       '或者缺少关键数据时，才在「待补充数据」里说明。'
   )
-  lines.push(
-    '6. **结果和产物怎么回去**（两条路都要走通）：' +
-      '① 文字结论放回答里就行 —— 页面会自动把它写回导图；' +
-      '② 本次执行**新增的产物**，用 MCP 工具 `upload_attachment` 挂到当前节点' +
-      '（room_key 用上面给的「房间」，node 用当前节点的标题或路径），' +
-      '挂上去节点会出现回形针，人能直接点开预览 / 下载。' +
-      '**产物怎么送上去，按这个顺序试**：' +
-      'a) 能写文件 → 先写到工作目录的 output/ 下，再把 `file_path` 传给 `upload_attachment`；' +
-      'b) **写文件被拒 / 目录不可写 → 不要放弃、也不要改成"只在回答里贴正文"**，' +
-      '改用 MCP 把内容直接送上去：文字内容用 `add_node` 加到当前节点下面，' +
-      '或用 `upload_attachment` 的 `content_base64` 把正文直接挂成附件。' +
-      '**绝不能因为写不出文件就把产物丢在回答里** —— 那样人拿不到东西；' +
-      'c) 只挂本次新增的；**不要用 note / text 写文件路径冒充附件**（那样点不开）；' +
-      '也别去翻插件目录找路、或自己写脚本调接口（那才会白耗几十轮、任务几分钟出不来结果）。'
-  )
+  lines.push(`6. ${attachHowToLine(runDir)}`)
   return withCpdAdvisor(lines.join('\n'))
 }
 
 /** 「继续执行」用：用户输入为主，后面附上当前节点与前序结果的背景 */
-export function buildFollowUpPrompt(text, { node, room = '', cwd = '' } = {}) {
+export function buildFollowUpPrompt(
+  text,
+  { node, room = '', cwd = '', runDir = '' } = {}
+) {
   const ask = String(text || '').trim()
   const title = nodeText(node)
   const pathNodes = collectNodePath(node)
@@ -483,17 +530,13 @@ export function buildFollowUpPrompt(text, { node, room = '', cwd = '' } = {}) {
   }
   lines.push('')
   lines.push('请接着上面的进度做，不要重头执行整个流程。')
+  lines.push(ONLY_THIS_RUN_LINE)
   lines.push(
     '一次做完，不要停在「你确认我就继续」：属于执行的动作直接做掉（含写回目标系统 / ' +
       '线上服务），不要以征求同意结尾。'
   )
-  lines.push(
-    '文字结论放回答里就行（页面会自动写回导图）；**这次新增的产物**要用 MCP 工具 ' +
-      '`upload_attachment` 挂到当前节点（room_key 用上面的「房间」，node 用当前节点）。' +
-      '能写文件就传 `file_path`；**写文件被拒就改用 `add_node` 把内容加到节点下面，' +
-      '或 `upload_attachment` 的 `content_base64` —— 绝不能只在回答里贴正文**。' +
-      '别用 note / text 写文件路径冒充附件，那样人点不开。'
-  )
+  lines.push(`本次产物写哪：${outputDirLine(cwd, runDir)}`)
+  lines.push(attachHowToLine(runDir))
   lines.push(
     '输出照旧精简：## 一句话结论 / ## 关键要点 / ## 待补充数据 / ## 产出，过程与日志不要写。'
   )

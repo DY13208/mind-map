@@ -1427,17 +1427,20 @@ export default {
      * 这次运行的指令：点过同节点的概要且写了内容 → 接着它继续；否则按节点默认任务。
      * 概要文字在运行时现取（双击改完文字也能拿到新的）。
      */
-    async resolveRunPrompt(runNode) {
+    async resolveRunPrompt(runNode, runDir = '') {
       const gen = this.jobGeneralization
       const uid = String((runNode && runNode.getData && runNode.getData('uid')) || '')
       if (gen && uid && gen.ownerUid === uid) {
         const text = await this.readGeneralizationText(gen)
         if (text && !isFollowUpPlaceholder(text)) {
-          return { prompt: this.buildFollowUpJobPrompt(text, runNode), continued: true }
+          return {
+            prompt: this.buildFollowUpJobPrompt(text, runNode, runDir),
+            continued: true
+          }
         }
         this.$message.info('概要里还没写内容，这次按节点默认任务跑')
       }
-      return { prompt: this.buildDefaultJobPrompt(runNode), continued: false }
+      return { prompt: this.buildDefaultJobPrompt(runNode, runDir), continued: false }
     },
 
     /** 向 Edit 要概要的最新文字（概要点数据其实存在所属节点的 generalization 里） */
@@ -1467,7 +1470,7 @@ export default {
      * 按当前节点派发的任务内容：只做这一步，并把前面几步跑出来的结果当输入继续往下做
      * （不是把整张脑图当 SOP 从头再跑一遍）。组装逻辑在 utils/mindmapRunPrompt.js
      */
-    buildDefaultJobPrompt(wanted = null) {
+    buildDefaultJobPrompt(wanted = null, runDir = '') {
       const active = (this.activeNodes || [])[0]
       const selected =
         wanted || (active && !active.isGeneralization ? active : null)
@@ -1484,11 +1487,13 @@ export default {
       return buildNodeRunPrompt({
         node: selected,
         room,
-        cwd: this.jobGatewayCwd
+        cwd: this.jobGatewayCwd,
+        // 助理通道会给一个「本次运行专用」的产物目录，页面跑完只按它挂附件
+        runDir
       })
     },
 
-    buildFollowUpJobPrompt(text, wanted = null) {
+    buildFollowUpJobPrompt(text, wanted = null, runDir = '') {
       const room = String(
         (this.$route.query && this.$route.query.room) || ''
       ).trim()
@@ -1498,8 +1503,25 @@ export default {
       return buildFollowUpPrompt(text, {
         node,
         room,
-        cwd: this.jobGatewayCwd
+        cwd: this.jobGatewayCwd,
+        runDir
       })
+    },
+
+    /**
+     * 本次运行的产物目录名（对应 output/&lt;runDir&gt;/）。
+     *
+     * 2026-10-08 用户要求「只挂这一次运行的东西，不要乱不要多不要少」：
+     * 提示词把产物**写死**到这个专属子目录，页面跑完只按这个目录挂附件 ——
+     * 既不会捞到别的任务/别的工具写的文件，也不会被 8 条上限截断。
+     */
+    makeRunDir() {
+      const d = new Date()
+      const p = n => String(n).padStart(2, '0')
+      return (
+        `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
+        `-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+      )
     },
 
     /** 运行历史：左列表 + 右内容 + 底部继续执行 */
@@ -2390,24 +2412,41 @@ export default {
     },
 
     /**
-     * 按时间窗捞这次跑出来的产物（后端 /api/artifacts/recent）。
+     * 捞这次的产物（后端 /api/artifacts/recent）。
      *
-     * 助理（OpenClaw）也在产出文件 —— 它的 workspace/output 就挂在宿主的 ./output
-     * （见 docker-compose 的 openclaw-gateway 卷），后端这个接口会按 mtime 找出
-     * `since` 之后新增的文件，可选直接回 base64。
-     * 语义与桥接的 /api/recent-artifacts 对齐，所以写回那套能原样复用。
+     * 助理（OpenClaw）的 workspace/output 挂在宿主 ./output（见 docker-compose 的
+     * openclaw-gateway 卷），后端这个接口按 mtime 找出 `since` 之后新增的文件，可选回 base64。
+     *
+     * 首选**本次运行的专属目录**（提示词要求产物只能写 `output/<dir>/`）：
+     * 只收这一次运行的东西 —— 不夹带历史产物、不被 8 条上限截断（用户要求：不多不少不乱）。
+     * 兜底：目录没扫到（Agent 没按目录写、或目录名对不上）→ 退回按时间窗扫共享 output，
+     * 宁可多也别把产物丢了。
      */
-    async fetchOpenclawArtifacts(since) {
-      try {
-        const res = await fetch(
-          `/api/artifacts/recent?since=${encodeURIComponent(
-            Number(since) || 0
-          )}&limit=8&content=1`,
-          { cache: 'no-store', credentials: 'include' }
-        )
+    async fetchOpenclawArtifacts(since, dir = '') {
+      const runDir = String(dir || '').trim()
+      const query = async qs => {
+        const res = await fetch(`/api/artifacts/recent?${qs}`, {
+          cache: 'no-store',
+          credentials: 'include'
+        })
         if (!res.ok) return []
         const json = await res.json().catch(() => ({}))
         return (json && json.items) || []
+      }
+      if (runDir) {
+        try {
+          const pinned = await query(
+            `dir=${encodeURIComponent(runDir)}&limit=20&content=1`
+          )
+          if (pinned.length) return pinned
+        } catch (err) {
+          /* 掉到下面的时间窗兜底 */
+        }
+      }
+      try {
+        return await query(
+          `since=${encodeURIComponent(Number(since) || 0)}&limit=8&content=1`
+        )
       } catch (err) {
         // 捞不到不影响正文写回
         return []
@@ -2428,12 +2467,16 @@ export default {
      */
     async runViaOpenclaw({ runNode = null, options = {} } = {}) {
       this.rememberRunTarget({ node: runNode })
+      // 这次运行专属的产物目录：提示词写死到它里面，页面跑完只按它挂附件 ——
+      // 「这一次运行的东西」不多不少（用户 2026-10-08 要求）。
+      // 排队条目要把 runDir 一起带上：晚点真的跑起来时，扫的就是同一个目录。
+      const runDir = String(options.runDir || this.makeRunDir())
       // 点过概要 → 接着它继续；否则按节点默认任务（跟桥接同一套取词逻辑）
       let prompt = ''
       if (options.prompt) {
-        prompt = this.buildFollowUpJobPrompt(options.prompt, runNode)
+        prompt = this.buildFollowUpJobPrompt(options.prompt, runNode, runDir)
       } else {
-        const picked = await this.resolveRunPrompt(runNode)
+        const picked = await this.resolveRunPrompt(runNode, runDir)
         prompt = picked.prompt
       }
 
@@ -2456,6 +2499,7 @@ export default {
           channel: RUN_CHANNEL_OPENCLAW,
           prompt,
           container,
+          runDir,
           continued: !!options.prompt,
           name: `脑图运行 · ${this.nodePlainTitle(runNode) || '当前节点'}${
             options.prompt ? ' · 继续' : ''
@@ -2465,18 +2509,19 @@ export default {
       }
       // 起跑即返回（不 await 到跑完）：按钮在派出去那一刻就解锁，第二个任务能接着点，
       // 到闸门处自动排队 —— 这才叫「一次一个任务」，而不是「按钮锁死」
-      this.startOpenclawRun({ prompt, container })
+      this.startOpenclawRun({ prompt, container, runDir })
     },
 
     /**
-     * 真正跑一次助理：流式收正文 → 按时间窗捞产物 → 写回导图。
+     * 真正跑一次助理：流式收正文 → 按这次运行的专属目录捞产物 → 写回导图。
      *
      * 后台跑（调用方不 await），所以**错误必须自己收干净** —— 没人接它的 rejected promise。
      * 跑完 / 失败 / 取消都会清 jobOpenclawBusy，并把队列里的下一个派出去。
      */
-    async startOpenclawRun({ prompt = '', container = null } = {}) {
+    async startOpenclawRun({ prompt = '', container = null, runDir = '' } = {}) {
       const nodeUid = (container && container.nodeUid) || ''
       const nodeTitle = (container && container.nodeTitle) || ''
+      const outDir = String(runDir || '')
       this.jobOpenclawBusy = true
       const controller =
         typeof AbortController !== 'undefined' ? new AbortController() : null
@@ -2485,7 +2530,7 @@ export default {
       this.jobFullText = ''
       this.jobStatus = '正在通过助理执行…'
       this.jobStatusType = 'jobWait'
-      // 记下起跑时刻：助理的产物也落在 output 目录，跑完按时间窗捞这次新增的
+      // 记下起跑时刻：产物目录没扫到时要回退按时间窗捞，所以这个还得留着
       // （往前放宽 2 秒，避开「来不及落盘 / 时间戳粒度」的时间差）
       const startedAt = Date.now() - 2000
       try {
@@ -2513,9 +2558,9 @@ export default {
           return
         }
         this.jobStatus = '正在写回导图…'
-        // 助理的产物也在 output 目录里（workspace/output 挂在宿主 ./output）——
-        // 按时间窗捞这次新增的，跟桥接那条路走同一套写回
-        const artifacts = await this.fetchOpenclawArtifacts(startedAt)
+        // 助理的产物落在 workspace/output（挂宿主 ./output）——
+        // 只按**这次运行的专属目录**捞，回形针上就只有这一次的东西
+        const artifacts = await this.fetchOpenclawArtifacts(startedAt, outDir)
         await this.writeJobResultToNode(
           { id: `openclaw-${Date.now().toString(36)}` },
           {
@@ -3282,6 +3327,8 @@ export default {
         prompt: item.prompt,
         name: item.name || '脑图运行 · 排队',
         container: item.container || null,
+        // 助理条目的产物目录（跑起来时按它捞产物）
+        runDir: item.runDir || '',
         // 落点也平铺一份：万一 container 丢了（老数据 / 手工改），还能按 uid 挂回去
         nodeUid: (item.container && item.container.nodeUid) || '',
         nodeTitle: (item.container && item.container.nodeTitle) || '',
@@ -3312,7 +3359,11 @@ export default {
           container.nodeTitle || '当前节点'
         }`
         this.jobStatusType = 'jobWait'
-        return this.startOpenclawRun({ prompt: item.prompt, container })
+        return this.startOpenclawRun({
+          prompt: item.prompt,
+          container,
+          runDir: item.runDir || ''
+        })
       }
       const host =
         (this.jobHosts || []).find(h => h.key === item.hostKey) || this.jobSelectedHost

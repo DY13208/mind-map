@@ -48,6 +48,9 @@ new Function('require', 'module', 'exports', code)(
 const writer = mod.exports
 
 // ---------- 内存版 mindMap ----------
+// slowLand = true 时模拟「协同模式下命令不是同步落树」：一批节点分批落地
+// （第一个立刻，其余 30ms 后）。用来验证「附件不要挂错节点」。
+let slowLand = false
 let seq = 0
 function makeNode(text) {
   seq += 1
@@ -108,7 +111,15 @@ function makeMindMap() {
         const parents = args[0]
         const trees = args[1]
         const parent = Array.isArray(parents) ? parents[0] : parents
-        ;(trees || []).forEach(tree => attachTree(parent, tree))
+        const list = trees || []
+        if (slowLand && list.length > 1) {
+          attachTree(parent, list[0])
+          setTimeout(() => {
+            list.slice(1).forEach(tree => attachTree(parent, tree))
+          }, 30)
+          return
+        }
+        list.forEach(tree => attachTree(parent, tree))
         return
       }
       if (cmd === 'SET_NODE_ATTACHMENT') {
@@ -285,6 +296,78 @@ async function main() {
     '提示里说明了没挂附件',
     (out2.warnings || []).some(w => /没挂附件/.test(w)),
     JSON.stringify(out2.warnings)
+  )
+
+  // ============ D. 协同分批落地时附件不能挂错（2026-10-08 用户要求「不要乱」）============
+  // 库里实测到的症状：同一个 node_uid 下同时挂了产物文件和「完整输出」——
+  // 因为产物节点还没落地，写回就去认「新出现的那个节点」，认成了产物节点。
+  console.log('--- 协同分批落地：附件各归各位 ---')
+  const bridgeAttachStub = async payload => {
+    const sent = (payload && payload.files && payload.files[0]) || {}
+    return {
+      ok: true,
+      attachments: [
+        {
+          ok: true,
+          attachmentId: `aid-${sent.name || 'x'}`,
+          fileName: sent.name || '',
+          mimeType: sent.mimeType || '',
+          status: 'ready',
+          extractedText: ''
+        }
+      ]
+    }
+  }
+  slowLand = true
+  const map3 = makeMindMap()
+  await writer.writeJobResultToMap({
+    mindMap: map3,
+    nodeUid: map3.root.getData('uid'),
+    markdown: MD,
+    prompt: '两个产物的任务',
+    roomKey: 'room-test',
+    artifacts: [
+      {
+        name: 'output/A.md',
+        size: 10,
+        mime: 'text/markdown',
+        base64: Buffer.from('a').toString('base64')
+      },
+      {
+        name: 'output/B.md',
+        size: 10,
+        mime: 'text/markdown',
+        base64: Buffer.from('b').toString('base64')
+      }
+    ],
+    bridgeAttach: bridgeAttachStub
+  })
+  slowLand = false
+  const container3 = map3.root.children[0]
+  const branch3 = findByText((container3 && container3.children) || [], '附件')
+  const kids3 = (branch3 && branch3.children) || []
+  const fileA = findByText(kids3, 'output/A.md')
+  const fileB = findByText(kids3, 'output/B.md')
+  const md3 = findByText(kids3, '完整输出.md')
+  check(
+    '两个产物节点 + 完整输出节点都建出来了',
+    !!fileA && !!fileB && !!md3,
+    JSON.stringify(texts(kids3))
+  )
+  check(
+    '产物 A 节点上挂的就是 A',
+    !!fileA && String(fileA.getData('attachmentName') || '') === 'output/A.md',
+    fileA && String(fileA.getData('attachmentName'))
+  )
+  check(
+    '产物 B 节点上挂的就是 B',
+    !!fileB && String(fileB.getData('attachmentName') || '') === 'output/B.md',
+    fileB && String(fileB.getData('attachmentName'))
+  )
+  check(
+    '完整输出节点上挂的是它自己的 md（不是产物）',
+    !!md3 && /^运行输出 · /.test(String(md3.getData('attachmentName') || '')),
+    md3 && String(md3.getData('attachmentName'))
   )
 
   const failed = results.filter(item => !item.ok)

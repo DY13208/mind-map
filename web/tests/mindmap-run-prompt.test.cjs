@@ -220,6 +220,73 @@ check(
   JSON.stringify(legacySelf)
 )
 
+// ---- 本次运行的专属产物目录 + 「完整输出只含本次」（2026-10-08 用户要求）----
+// 用户原话：「完整输出不要包含之前的 只要这一次运行的东西相关的挂载回节点
+// 不要乱不要多不要少」。
+// 做法：助理通道给一个专属目录 output/<runDir>/，产物只能写这里，页面只按它挂附件；
+// 同时**不让 Agent 自己再挂一遍**（两条路一起走会重复挂 / 挂错节点）。
+console.log('--- 产物目录与「只含本次」---')
+const jobNode = mkNode('D：写个作文')
+const withDir = buildNodeRunPrompt({
+  node: jobNode,
+  room: 'room-test',
+  cwd: 'D:\\良策0010',
+  runDir: '20261008-1832'
+})
+check(
+  '给了 runDir → 产物写死到 output/<runDir>/',
+  withDir.includes('output/20261008-1832/'),
+  ''
+)
+check(
+  '给了 runDir → 明确不许写到 output 根目录 / 覆盖旧产物',
+  /不要写到 output 根目录/.test(withDir) &&
+    /不要覆盖或改动以前跑出来的文件/.test(withDir)
+)
+check(
+  '给了 runDir → 不让 Agent 自己再挂一遍（否则重复/挂错节点）',
+  /不要自己再调 MCP/.test(withDir) &&
+    /挂一遍/.test(withDir) &&
+    !/用 MCP 工具 `upload_attachment` 挂到当前节点/.test(withDir)
+)
+check(
+  '写文件被拒时的 MCP 兜底仍在（别删）',
+  /content_base64/.test(withDir) && /add_node/.test(withDir)
+)
+check(
+  '完整输出只含本次：明确禁止复述上次 / 前序结果',
+  /里面只能有本次运行的内容/.test(withDir) && /不要复述/.test(withDir)
+)
+
+const noDir = buildNodeRunPrompt({
+  node: jobNode,
+  room: 'room-test',
+  cwd: 'D:\\良策0010'
+})
+check(
+  '没给 runDir（桥接通道）→ 不写死目录、照旧要求 MCP 挂附件',
+  !/output\/2026/.test(noDir) &&
+    /用 MCP 工具 `upload_attachment` 挂到当前节点/.test(noDir)
+)
+check('没给 runDir 也一样要求「只含本次」', /里面只能有本次运行的内容/.test(noDir))
+
+const fu = buildFollowUpPrompt('继续做第二步', {
+  node: jobNode,
+  room: 'room-test',
+  cwd: 'D:\\良策0010',
+  runDir: '20261008-1832'
+})
+check(
+  '继续执行也带 runDir',
+  fu.includes('output/20261008-1832/')
+)
+check(
+  '继续执行也要求「只含本次」+ 写不出文件时用 MCP 兜底',
+  /里面只能有本次运行的内容/.test(fu) &&
+    /content_base64/.test(fu) &&
+    /add_node/.test(fu)
+)
+
 const failed = results.filter(item => !item.ok)
 console.log(
   `\n共 ${results.length} 项，通过 ${results.length - failed.length} 项，失败 ${failed.length} 项`
