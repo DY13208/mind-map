@@ -53,11 +53,14 @@ const writer = mod.exports
 // dropInserts = true 时模拟「命令被协同服务静默丢掉」：插入命令一个都不落。
 let slowLand = false
 let dropInserts = false
+// queueInserts = true 时把插入挂起，等测试显式 flush —— 模拟「两个任务同时插入」的竞态
+let queueInserts = false
+const queuedInserts = []
 let seq = 0
-function makeNode(text) {
+function makeNode(text, uid) {
   seq += 1
   const node = {
-    nodeData: { data: { text, uid: `uid-${seq}` } },
+    nodeData: { data: { text, uid: uid || `uid-${seq}` } },
     children: [],
     parent: null,
     getData(key) {
@@ -76,7 +79,11 @@ function makeNode(text) {
   return node
 }
 function attachTree(parent, tree) {
-  const made = makeNode((tree.data && tree.data.text) || '')
+  // 引擎会**保留**调用方传进来的 data.uid（见 createUidForAppointNodes），照它模拟
+  const made = makeNode(
+    (tree.data && tree.data.text) || '',
+    tree.data && tree.data.uid
+  )
   made.parent = parent
   parent.children.push(made)
   ;(tree.children || []).forEach(child => attachTree(made, child))
@@ -118,6 +125,10 @@ function makeMindMap() {
         const trees = args[1]
         const parent = Array.isArray(parents) ? parents[0] : parents
         const list = trees || []
+        if (queueInserts) {
+          queuedInserts.push(() => list.forEach(tree => attachTree(parent, tree)))
+          return
+        }
         if (slowLand && list.length > 1) {
           attachTree(parent, list[0])
           setTimeout(() => {
@@ -482,6 +493,52 @@ async function main() {
     `${hydrateCalls.length}: ${hydrateCalls.join(' / ')}`
   )
   check('补完 hydration 后照常写出', outF.nodes >= 2, String(outF.nodes))
+
+  // ============ F. 两个任务同时跑：落点不能互相认领 ============
+  // 用户 2026-10-08 反馈：「两个任务同时运行，第一个没有完整输出、第二个内容重复」。
+  // 根因：认领新节点用的是「最后一个新子节点」—— 两条任务同时往同一个父节点插东西时，
+  // 双方会认到**同一个**节点，于是共用一个「任务容器」→「附件」分支和「完整输出.md」
+  // 被复用，后写的把先写的正文覆盖掉（看起来就是内容重复/丢了）。
+  console.log('--- 两个任务同时建容器：各认各的（按 uid） ---')
+  const mapG = makeMindMap()
+  queueInserts = true
+  const boxA = writer.createJobContainer({
+    mindMap: mapG,
+    nodeUid: mapG.root.getData('uid'),
+    prompt: '任务A的内容'
+  })
+  const boxB = writer.createJobContainer({
+    mindMap: mapG,
+    nodeUid: mapG.root.getData('uid'),
+    prompt: '任务B的内容'
+  })
+  await new Promise(r => setTimeout(r, 10))
+  // 两批插入「同时」落地（真实场景：协同下命令落地时机由服务端回包决定）
+  queuedInserts.splice(0).forEach(fn => fn())
+  const [madeA, madeB] = await Promise.all([boxA, boxB])
+  queueInserts = false
+  check(
+    '两条任务各拿各的容器（uid 不同）',
+    !!madeA.uid && !!madeB.uid && madeA.uid !== madeB.uid,
+    `${madeA.uid} / ${madeB.uid}`
+  )
+  const contentOf = node =>
+    ((node.children || [])[0] && node.children[0].getData('text')) || ''
+  check(
+    'A 的容器里是 A 的任务内容（没认成 B 的节点）',
+    /任务A/.test(contentOf(madeA.node)),
+    contentOf(madeA.node)
+  )
+  check(
+    'B 的容器里是 B 的任务内容',
+    /任务B/.test(contentOf(madeB.node)),
+    contentOf(madeB.node)
+  )
+  check(
+    '两个容器都在父节点下（没有互相覆盖）',
+    (mapG.root.children || []).length === 2,
+    String((mapG.root.children || []).length)
+  )
 
   const failed = results.filter(item => !item.ok)
   console.log(

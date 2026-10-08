@@ -543,25 +543,32 @@ function sleep(ms) {
 }
 
 /**
- * 等刚插进去的子节点真的挂上（协作模式下命令可能不是同步落到树上），
- * 返回**最后一个**新子节点。
+ * 等这次插进去的节点真的挂上，按 **uid** 精确认领（不是「最后一个新子节点」）。
  *
- * ⚠️ expect = 这次调用插入的个数，**必须等全部落地再往下走**。
- * 协同模式下命令不是同步落树：上一个节点的插入还没落地、就急着等下一个，
- * 「新出现的那个」很可能是上一个节点 → 附件挂到别人身上。
- * 库里实测到过这个症状：同一个 node_uid 下同时挂了产物文件和「完整输出」，
- * 节点上的回形针指哪一个看运气（用户反馈「挂载不要乱」就是这个）。
+ * 为什么必须按 uid：两个任务可能**同时**往同一个父节点插东西 ——
+ * 用「最后一个新出现的」认领会拿到别人插的节点（2026-10-08 用户反馈
+ * 「两个任务同时运行，第一个没有完整输出、第二个内容重复」，就是这么来的）。
+ *
+ * @param {Array}  uids   insertChildren 返回的 uid 列表
+ * @param {Boolean} all   true = 等这批**全部**落地（插一批时用）
+ * @returns 单个节点 / 节点数组 / null（超时没落地）
  */
-async function waitNewChild(parent, before, tries = 160, expect = 1) {
-  const want = (before || []).length + Math.max(1, Number(expect) || 1)
+async function waitForInserted(parent, uids, { all = false, tries = 160 } = {}) {
+  const want = new Set((uids || []).filter(Boolean))
+  if (!want.size) return null
+  const uidOf = node =>
+    String((node && node.getData && node.getData('uid')) || '')
   for (let i = 0; i < tries; i += 1) {
-    const list = (parent && parent.children) || []
-    if (list.length >= want) return list[list.length - 1]
+    const hits = ((parent && parent.children) || []).filter(node =>
+      want.has(uidOf(node))
+    )
+    if (all) {
+      if (hits.length >= want.size) return hits
+    } else if (hits.length) {
+      return hits[0]
+    }
     if (i < tries - 1) await sleep(50)
   }
-  // ⚠️ 这里**不能**退回「最后一个子节点」：那样调用方以为写成功了，
-  // 实际图上什么都没有 —— 用户看到的就是「状态栏说成功、图上没有」（2026-10-08 反馈）。
-  // 拿不到就老老实实返回 null，让调用方报错/给警告。
   return null
 }
 
@@ -623,16 +630,50 @@ async function ensureInsertParent(mindMap, parent) {
 }
 
 /**
- * 在指定节点**后面**插一个同级节点（不是子节点）。
- * 用来让「下一步」接在上一块任务后面，而不是嵌进上一块里面。
+ * 给待插入的节点发**唯一 uid**（引擎会保留传入的 uid，见
+ * simple-mind-map/src/utils/index.js 的 createUidForAppointNodes），
+ * 插完就能按 uid 精确找回「自己插的那个」。
+ */
+let insertUidSeq = 0
+function makeInsertUid() {
+  insertUidSeq += 1
+  return `jobres-${Date.now().toString(36)}-${insertUidSeq.toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 6)}`
+}
+
+function stampInsertUids(trees) {
+  const uids = []
+  const walk = list => {
+    (list || []).forEach(tree => {
+      if (!tree || !tree.data) return
+      if (!tree.data.uid) tree.data.uid = makeInsertUid()
+      uids.push(String(tree.data.uid))
+      walk(tree.children)
+    })
+  }
+  walk(trees)
+  return uids
+}
+
+/**
+ * 在指定节点下插一批子节点，返回**这次插入的 uid 列表**。
+ *
+ * ⚠️ 以前这里插完靠 `waitNewChild` 取「最后一个新子节点」认领 —— 两个任务同时往同一个
+ * 父节点插东西时会**互相认领错**：2026-10-08 用户反馈「两个任务同时运行，第一个没有
+ * 完整输出、第二个内容重复」，就是两条任务认到了同一个「任务容器」，只后共用一个
+ * 「附件」分支与「完整输出.md」节点（后者把前者的正文覆盖掉、附件挂到同一节点）。
+ * 现在每个节点带唯一 uid，插完按 uid 精确认领，互不干扰。
  */
 async function insertChildren(mindMap, parent, trees) {
-  if (!trees || !trees.length) return
+  if (!trees || !trees.length) return []
   if (parent && typeof parent.setData === 'function') {
     parent.setData({ expand: true })
   }
+  const uids = stampInsertUids(trees)
   await ensureInsertParent(mindMap, parent)
   mindMap.execCommand('INSERT_MULTI_CHILD_NODE', [parent], trees)
+  return uids
 }
 
 function fileFromText(name, text, type) {
@@ -885,9 +926,9 @@ export async function createJobContainer({
 
   // 落点本身是「任务」容器时**不再另起同级分支** —— 用户要的是「续写挂在这个任务下」，
   // 所以走下面那条通用路径：作为它的最后一个子节点插进去（任务内容 / 运行输出 / 附件之后）。
-  const before = (target.children || []).slice()
-  await insertChildren(mindMap, target, [tree])
-  const created = await waitNewChild(target, before)
+  // 按 uid 认领自己插的那个 —— 另一个任务可能同时在同一个节点下建容器（并发跑两条时）
+  const uids = await insertChildren(mindMap, target, [tree])
+  const created = await waitForInserted(target, uids)
   if (!created) throw new Error('建任务节点失败，请重试')
   return { uid: nodeUid(created), title, node: created }
 }
@@ -953,12 +994,11 @@ export async function writeJobResultToMap({
   const containerKidsBefore = (container.children || []).length
   if (inlineResult) {
     tree = markdownToFullNodes(text)
-    const containerBefore = (container.children || []).slice()
     say('正在把结果写进导图…')
-    await insertChildren(mindMap, container, [
+    const uids = await insertChildren(mindMap, container, [
       { data: { text: title }, children: tree.children }
     ])
-    const made = await waitNewChild(container, containerBefore)
+    const made = await waitForInserted(container, uids)
     if (!made) {
       throw new Error(
         '写入导图失败：命令没有落到图上（协同连接可能断了）—— 刷新页面后点「写入导图」重试'
@@ -996,11 +1036,10 @@ export async function writeJobResultToMap({
     say('正在准备附件…')
     let branch = findAttachBranch(container)
     if (!branch) {
-      const beforeBranch = (container.children || []).slice()
-      await insertChildren(mindMap, container, [
+      const uids = await insertChildren(mindMap, container, [
         { data: { text: ATTACH_BRANCH_TITLE }, children: [] }
       ])
-      branch = await waitNewChild(container, beforeBranch)
+      branch = await waitForInserted(container, uids)
     }
     if (!branch) {
       out.warnings.push(
@@ -1016,14 +1055,13 @@ export async function writeJobResultToMap({
       )
       if (missing.length) {
         say(`正在挂载 ${missing.length} 个产物文件…`)
-        const beforeFiles = kids().slice()
-        await insertChildren(
+        const uids = await insertChildren(
           mindMap,
           branch,
           missing.map(info => ({ data: { text: String(info.name) } }))
         )
-        // 等**这一批全部**落地再往下（否则后一步的「新节点」会认成这里还没落地的那个）
-        const landed = await waitNewChild(branch, beforeFiles, 60, missing.length)
+        // 等**这一批全部**落地再往下（按 uid 认领，不会认成别人插的节点）
+        const landed = await waitForInserted(branch, uids, { all: true })
         if (landed) out.nodes += missing.length
         else {
           out.warnings.push(
@@ -1063,10 +1101,11 @@ export async function writeJobResultToMap({
       const mdLabel = '完整输出.md'
       let mdNode = kids().find(k => nodeText(k) === mdLabel)
       if (!mdNode) {
-        const beforeMd = kids().slice()
         // note 里存全文：节点上不铺长文本，但「继续执行」要从这儿取回上次的正文
-        await insertChildren(mindMap, branch, [{ data: { text: mdLabel, note: text } }])
-        mdNode = await waitNewChild(branch, beforeMd)
+        const uids = await insertChildren(mindMap, branch, [
+          { data: { text: mdLabel, note: text } }
+        ])
+        mdNode = await waitForInserted(branch, uids)
         if (mdNode) out.nodes += 1
         else
           out.warnings.push(
