@@ -1054,6 +1054,100 @@ async function handleApi(req, res) {
     return true
   }
 
+  // 按时间窗列产物（助理 / SOP 用：跑之前记时间戳，跑完来捞这次新增的文件）
+  // 与桥接的 /api/recent-artifacts 语义对齐，参数也一致：since / limit / content。
+  // 为什么要它：/api/artifacts/search 得给关键词，/api/artifacts/local 只能单个取流，
+  // 都接不上「跑完自动挂附件」那条路（写回要的是 [{name,size,mime,base64}]）。
+  if (req.method === 'GET' && pathname === '/api/artifacts/recent') {
+    const since = Number(url.searchParams.get('since') || 0) || 0
+    const limit = Math.min(
+      Math.max(Number(url.searchParams.get('limit') || 8) || 8, 1),
+      32
+    )
+    const withContent = url.searchParams.get('content') === '1'
+    const openclawData = String(
+      process.env.OPENCLAW_DATA_DIR || '/openclaw-data'
+    ).trim()
+    const roots = [
+      process.env.SOP_OUTPUT_DIR,
+      process.env.MIND_MAP_OUTPUT_DIR,
+      path.resolve(__dirname, '../..', 'output'),
+      path.resolve(process.cwd(), 'output'),
+      openclawData ? path.join(openclawData, 'workspace', 'output') : ''
+    ]
+      .filter(Boolean)
+      .map(p => path.resolve(String(p)))
+      .filter((p, i, arr) => arr.indexOf(p) === i)
+
+    const mimeOf = ext =>
+      ({
+        '.html': 'text/html; charset=utf-8',
+        '.htm': 'text/html; charset=utf-8',
+        '.md': 'text/markdown; charset=utf-8',
+        '.csv': 'text/csv; charset=utf-8',
+        '.txt': 'text/plain; charset=utf-8',
+        '.json': 'application/json; charset=utf-8',
+        '.pdf': 'application/pdf',
+        '.xlsx':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.xls': 'application/vnd.ms-excel',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg'
+      }[ext] || 'application/octet-stream')
+
+    const allowed = /\.(html?|xlsx?|docx?|pdf|md|csv|txt|json|png|jpe?g)$/i
+    const items = []
+    const seen = new Set()
+    roots.forEach(root => {
+      let names = []
+      try {
+        if (!fs.existsSync(root)) return
+        names = fs.readdirSync(root)
+      } catch (e) {
+        return
+      }
+      names.forEach(name => {
+        if (!allowed.test(name)) return
+        const full = path.join(root, name)
+        let st = null
+        try {
+          st = fs.statSync(full)
+        } catch (e) {
+          return
+        }
+        if (!st.isFile()) return
+        if (since && (st.mtimeMs || 0) < since) return
+        const key = name.toLowerCase()
+        if (seen.has(key)) return
+        seen.add(key)
+        items.push({
+          name,
+          path: full,
+          mtime: st.mtimeMs || 0,
+          size: st.size || 0,
+          mime: mimeOf(path.extname(name).toLowerCase())
+        })
+      })
+    })
+    items.sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
+    const picked = items.slice(0, limit)
+    if (withContent) {
+      // 附件大小上限与前端一致（5MB），超了就只回名字
+      const MAX_BYTES = 5 * 1024 * 1024
+      picked.forEach(item => {
+        if (item.size > MAX_BYTES) return
+        try {
+          item.base64 = fs.readFileSync(item.path).toString('base64')
+        } catch (e) {
+          /* 读不到就只给名字 */
+        }
+      })
+    }
+    sendJson(res, 200, { ok: true, items: picked, total: items.length, roots })
+    return true
+  }
+
   // 本地 SOP 产物预览 / 下载（仅允许项目 output 目录）
   if (req.method === 'GET' && pathname === '/api/artifacts/local') {
     const rawPath = String(url.searchParams.get('path') || '').trim()

@@ -549,7 +549,7 @@
               <span class="runChannelTag">默认</span>
             </span>
             <span class="runChannelDesc"
-              >直连助理流式执行，出结果快；正文写回导图（不产出附件文件）</span
+              >直连助理流式执行，出结果快；正文和产出的文件都写回导图</span
             >
           </span>
         </label>
@@ -2385,11 +2385,37 @@ export default {
     },
 
     /**
+     * 按时间窗捞这次跑出来的产物（后端 /api/artifacts/recent）。
+     *
+     * 助理（OpenClaw）也在产出文件 —— 它的 workspace/output 就挂在宿主的 ./output
+     * （见 docker-compose 的 openclaw-gateway 卷），后端这个接口会按 mtime 找出
+     * `since` 之后新增的文件，可选直接回 base64。
+     * 语义与桥接的 /api/recent-artifacts 对齐，所以写回那套能原样复用。
+     */
+    async fetchOpenclawArtifacts(since) {
+      try {
+        const res = await fetch(
+          `/api/artifacts/recent?since=${encodeURIComponent(
+            Number(since) || 0
+          )}&limit=8&content=1`,
+          { cache: 'no-store', credentials: 'include' }
+        )
+        if (!res.ok) return []
+        const json = await res.json().catch(() => ({}))
+        return (json && json.items) || []
+      } catch (err) {
+        // 捞不到不影响正文写回
+        return []
+      }
+    },
+
+    /**
      * 走「助理（OpenClaw）」通道执行一次。
      *
      * 跟桥接最大的不同：助理是**流式直连**，没有「派发 → 轮询 → 回执」这一套 ——
      * 提示词发过去、正文流回来就算完，所以不需要执行会话、队列闸门、jobs/runs 判定。
-     * 代价是**拿不到产物文件**（文件在助理那边），正文照常写回导图。
+     * 产物照样有：助理的 workspace/output 挂在宿主 ./output（docker-compose 里配的），
+     * 跑完按时间窗捞这次新增的文件，跟桥接走同一套写回（任务 → 附件 → 产物|完整输出）。
      */
     async runViaOpenclaw({ runNode = null, options = {} } = {}) {
       this.rememberRunTarget({ node: runNode })
@@ -2414,6 +2440,9 @@ export default {
       this.jobFullText = ''
       this.jobStatus = '正在通过助理执行…'
       this.jobStatusType = 'jobWait'
+      // 记下起跑时刻：助理的产物也落在 output 目录，跑完按时间窗捞这次新增的
+      // （往前放宽 2 秒，避开「来不及落盘 / 时间戳粒度」的时间差）
+      const startedAt = Date.now() - 2000
       try {
         const res = await streamChat({
           messages: [{ role: 'user', content: prompt }],
@@ -2439,11 +2468,15 @@ export default {
           return
         }
         this.jobStatus = '正在写回导图…'
+        // 助理的产物也在 output 目录里（workspace/output 挂在宿主 ./output）——
+        // 按时间窗捞这次新增的，跟桥接那条路走同一套写回
+        const artifacts = await this.fetchOpenclawArtifacts(startedAt)
         await this.writeJobResultToNode(
           { id: `openclaw-${Date.now().toString(36)}` },
           {
             channel: RUN_CHANNEL_OPENCLAW,
             markdown,
+            artifacts,
             nodeUid: container.nodeUid,
             nodeTitle: container.nodeTitle,
             prompt,
