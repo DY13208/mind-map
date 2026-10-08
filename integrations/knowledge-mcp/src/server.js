@@ -24,6 +24,7 @@ const {
 const { createRateLimiter, payloadLimits } = require('./security/rateLimit');
 const { breakers } = require('./security/resilience');
 const jobStore = require('./jobs/jobStore');
+const { wikiCompilerCall, TOOLS: WIKI_COMPILER_TOOLS } = require('./adapters/wikiCompiler');
 
 const PORT = Number(process.env.KNOWLEDGE_MCP_PORT || 18792);
 const JWT_SECRET = process.env.KNOWLEDGE_MCP_JWT_SECRET || '';
@@ -36,6 +37,7 @@ const rateLimiter = createRateLimiter({
 const limits = payloadLimits(process.env);
 
 const TOOLS = [
+  ...WIKI_COMPILER_TOOLS,
   { name: 'canonical_list', description: 'List Canonical docs in ACL-allowed rooms.', inputSchema: { type: 'object', properties: { roomId: { type: 'string' } } } },
   { name: 'canonical_read', description: 'Read one Canonical doc (manifest + ACL gated).', inputSchema: { type: 'object', properties: { roomId: { type: 'string' }, path: { type: 'string' } }, required: ['roomId', 'path'] } },
   { name: 'docmost_search', description: 'Mapping-first Docmost search within ACL rooms.', inputSchema: { type: 'object', properties: { roomId: { type: 'string' }, query: { type: 'string' } } } },
@@ -159,6 +161,10 @@ async function callTool(userId, name, args) {
     }
   }
   switch (name) {
+    case 'wiki_compiler_graph': return wikiCompilerCall(userId, 'graph', args || {});
+    case 'wiki_compiler_search': return wikiCompilerCall(userId, 'search', args || {});
+    case 'wiki_compiler_topic': return wikiCompilerCall(userId, 'topic', args || {});
+    case 'wiki_compiler_concept': return wikiCompilerCall(userId, 'concept', args || {});
     case 'canonical_list': return canonicalList(userId, args || {});
     case 'canonical_read': return canonicalRead(userId, { roomId: args.roomId, path: args.path });
     case 'docmost_search': return docmostSearch(userId, args || {});
