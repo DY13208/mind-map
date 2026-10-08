@@ -2274,8 +2274,26 @@ export default {
       const nodeTitle = options.nodeTitle || this.jobRunNodeTitle
       // 助理（OpenClaw）通道没有执行会话、也没有 runId —— 别按桥接那套门槛挡住它
       const viaOpenclaw = options.channel === RUN_CHANNEL_OPENCLAW
-      if (this.jobWriteBusy) return
-      if (!viaOpenclaw && (!host || !jobId)) return
+      // ⚠️ 下面这三条以前都是**静默 return**：跑完了、界面上什么都没说，结果什么都没写回 ——
+      // 用户看到的就是「执行完毕没有回写」（2026-10-08 反馈）。现在一律说出来。
+      if (this.jobWriteBusy) {
+        this.jobWriteError =
+          '上一次写回还没结束，这次的结果没有写进导图 —— 稍后点「写入导图」补一次'
+        this.$message.warning(this.jobWriteError)
+        return
+      }
+      if (!viaOpenclaw && !host) {
+        this.jobWriteError =
+          '没有可用的执行主机（桥接没在跑？）—— 结果取不回来，没有写进导图'
+        this.$message.warning(this.jobWriteError)
+        return
+      }
+      if (!viaOpenclaw && !jobId) {
+        this.jobWriteError =
+          '这条任务没有任务号（接单的会话没返回 job id）—— 结果取不回来，没有写进导图'
+        this.$message.warning(this.jobWriteError)
+        return
+      }
       if (!viaOpenclaw && !options.force && this.jobWrittenJobId === jobId) return
       const text = String(
         options.markdown != null ? options.markdown : this.jobFullText || ''
@@ -2863,6 +2881,15 @@ export default {
           })
         }
         const runsMode = result.mode === 'runs'
+        // runs 回退没给任务号 → 页面**没有东西可以轮询**：任务照样跑完，但结果永远回不来、
+        // 也不会自动写回（用户看到的「执行完毕没有回写」，2026-10-08）。
+        // 以前这里一声不吭，只在状态栏含糊地写「等几分钟兜回来」—— 那是兜不回来的，现在明说。
+        if (runsMode && !jobId) {
+          this.jobWriteError =
+            '这条会话接单了，但没返回任务号：页面收不到结果，不会自动写回导图。' +
+            '请在它的 WorkBuddy 里查看这次结果，或把 WorkBuddy 升级到新版（2.137+）后重跑。'
+          this.$message.warning(this.jobWriteError)
+        }
         this.jobStatus = runsMode
           ? `已派发（这条会话没有 Jobs 接口，结果可能要等几分钟兜回来）${
               jobId ? ` · ${jobId}` : ''

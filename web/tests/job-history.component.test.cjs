@@ -1832,6 +1832,72 @@ async function main() {
   jobsByGateway = {}
   localStore.clear()
 
+  // ---- 29. 「执行完毕没有回写」不能是静默的（2026-10-08 用户反馈）----
+  // 真正跑完却没有回写，原来的写法是**静默 return**：界面上一个字都不说，
+  // 用户只能看到「执行完毕」然后图上一片空白。现在每一条都要说出来。
+  const emitted = []
+  localStore.clear()
+  vm = makeVm()
+  vm.$bus = { $emit: name => emitted.push(name), $on: () => {}, $off: () => {} }
+  vm.jobWriteError = ''
+  vm.jobWriteBusy = true
+  await vm.writeJobResultOnce(
+    { id: 'w1' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u1' }
+  )
+  check('写回撞上上一次还没结束 → 明说没写进去', /没有写进导图/.test(vm.jobWriteError), vm.jobWriteError)
+  check('没写进去就不该发写回命令', emitted.length === 0, emitted.join(','))
+
+  vm = makeVm()
+  vm.jobWriteError = ''
+  vm.jobHosts = []
+  vm.jobHostKey = ''
+  await vm.writeJobResultOnce(
+    { id: 'w2' },
+    { channel: 'bridge', markdown: '正文', nodeUid: 'u1', force: true }
+  )
+  check('桥接没有可用主机 → 明说结果取不回来', /执行主机/.test(vm.jobWriteError), vm.jobWriteError)
+
+  vm = makeVm()
+  vm.jobWriteError = ''
+  await vm.writeJobResultOnce(
+    { id: '' },
+    { channel: 'bridge', markdown: '正文', nodeUid: 'u1', force: true }
+  )
+  check('没有任务号 → 明说', /任务号/.test(vm.jobWriteError), vm.jobWriteError)
+
+  // runs 回退没给任务号：任务在执行机上照样跑完，但页面**没有东西可轮询** —— 结果永远回不来
+  localStore.set('mindmap:runChannel', 'bridge')
+  vm = makeVm()
+  vm.$bus = { $emit: () => {}, $on: () => {}, $off: () => {} }
+  vm.buildDefaultJobPrompt = () => '任务内容'
+  // 「派到哪台机器/哪条会话」不是这条用例要测的 —— 直接给一个可用的目标
+  vm.ensureDispatchTarget = async () => ({
+    ok: true,
+    host: HOST,
+    gateway: 'http://127.0.0.1:8799'
+  })
+  vm.prepareJobContainer = async () => ({
+    ok: true,
+    nodeUid: 'u-r',
+    nodeTitle: '任务 · R'
+  })
+  vm.jobWriteError = ''
+  dispatchResult = { ok: true, job: {}, mode: 'runs' }
+  await vm.runWorkbuddyJob()
+  check(
+    'runs 没给任务号 → 明说收不到结果、不会自动回写',
+    /没返回任务号/.test(vm.jobWriteError),
+    `${vm.jobWriteError} || status=${vm.jobStatus}`
+  )
+  check(
+    '这种情况不该挂一条空 id 的待回写（挂上去会永远轮询不到）',
+    (vm.jobPendingList || []).length === 0,
+    JSON.stringify((vm.jobPendingList || []).map(x => x.id))
+  )
+  dispatchResult = { ok: true, job: { id: 'job-x' }, mode: 'jobs' }
+  localStore.clear()
+
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)
   if (failed.length) {
