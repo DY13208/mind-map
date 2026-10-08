@@ -477,12 +477,7 @@ function ensureKnowledgeMcpBuilt(extraEnv) {
     return false
   }
   console.log('  building knowledge-mcp...')
-  execSync('docker compose -f docker-compose.yml build knowledge-mcp', {
-    cwd: ROOT,
-    stdio: 'inherit',
-    env: { ...process.env, ...(extraEnv || {}) },
-    windowsHide: true
-  })
+  require('./knowledge-mcp-build').buildKnowledgeMcp(imageTag, extraEnv)
   fs.mkdirSync(stampDir, { recursive: true })
   fs.writeFileSync(stampPath, hash + '\n', 'utf8')
   try {

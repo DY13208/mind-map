@@ -1,8 +1,8 @@
 # Phase 4 hardened image ? non-root at runtime via entrypoint+gosu
 FROM node:22-bookworm-slim
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends gosu ca-certificates \
+RUN apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o APT::Update::Error-Mode=any update \
+  && apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends gosu ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
   && mkdir -p /data/audit /data/openwiki/jobs /data/openwiki/rooms \
   && chown -R node:node /data
