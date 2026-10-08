@@ -88,9 +88,22 @@ test('compact branches use separate routed trunks without crossing other branche
   layout.computedBaseValue()
   layout.computedTopValue()
 
-  assert.deepEqual(root.children.slice(1).map((child, i) => {
-    return child.top - root.children[i].top - root.children[i].height
-  }), [10, 10, 10, 10, 10])
+  // Parents belong beside their own children, rather than in a tiny column
+  // disconnected from widely displaced descendant groups.
+  root.children.forEach(parent => {
+    const first = parent.children[0]
+    const last = parent.children[parent.children.length - 1]
+    assert.equal(parent.top + parent.height / 2,
+      (first.top + last.top + last.height) / 2)
+  })
+  for (let i = 1; i < root.children.length; i++) {
+    const previous = root.children[i - 1]
+    const current = root.children[i]
+    const bottom = Math.max(previous.top + previous.height,
+      ...previous.children.map(child => child.top + child.height))
+    const top = Math.min(current.top, ...current.children.map(child => child.top))
+    assert.ok(top - bottom >= compactLayoutConfig.siblingGap)
+  }
 
   const branches = root.children.filter(child => child.children.length)
   for (let i = 0; i < branches.length; i++) {
@@ -125,7 +138,7 @@ test('compact branches use separate routed trunks without crossing other branche
     horizontal.push(...result.horizontal)
     vertical.push(...result.vertical)
   })
-  assert.equal(vertical.length, 7, 'one vertical trunk for each expanded parent')
+  assert.equal(vertical.length, 4, 'single-child branches are horizontal; other parents share one trunk')
   for (const v of vertical) {
     for (const h of horizontal) {
       if (v.owner === h.owner) continue
@@ -311,4 +324,82 @@ test('a widened parent does not route its connector through another child group'
       assert.equal(crosses, false, `${owner} connector crosses ${child.id}`)
     }
   }
+})
+
+test('deep branches stay together without overlapping other subtrees', () => {
+  const root = node('root', 90, [
+    node('deep', 45, [
+      node('wide', 260, Array.from({ length: 8 }, (_, i) => node(`leaf-${i}`, 100))),
+      node('small', 65, [node('last', 50)])
+    ]),
+    node('neighbor', 80, [node('neighbor-leaf', 70)]),
+    node('short', 60)
+  ])
+  root.top = 500
+  const layout = new moduleMock.exports({ mindMap: {
+    opt: { alwaysShowExpandBtn: true, notShowExpandBtn: false },
+    themeConfig: { nodeUseLineStyle: false }
+  } })
+  layout.root = root
+  layout.computedBaseValue()
+  layout.computedTopValue()
+  const bounds = parent => {
+    const children = parent.getData('expand') === false ? [] : parent.children
+    const nested = children.map(bounds)
+    return {
+      top: Math.min(parent.top, ...nested.map(bound => bound.top)),
+      bottom: Math.max(parent.top + parent.height, ...nested.map(bound => bound.bottom))
+    }
+  }
+  const visible = layout.levels.flat()
+  visible.forEach(parent => {
+    const children = parent.children
+    children.forEach((child, index) => {
+      const current = bounds(child)
+      if (index) {
+        const previous = bounds(children[index - 1])
+        assert.ok(current.top - previous.bottom >= layout.getMarginY(parent.layerIndex + 1))
+      }
+      assert.ok(child.left - parent.left - parent.width <= 60,
+        'normal branches should have short local connector arms')
+    })
+    if (children.length) {
+      const first = bounds(children[0])
+      const last = bounds(children[children.length - 1])
+      assert.equal(parent.top + parent.height / 2, (first.top + last.bottom) / 2)
+    }
+  })
+  for (let i = 0; i < visible.length; i++) {
+    for (let j = i + 1; j < visible.length; j++) {
+      const a = visible[i]
+      const b = visible[j]
+      const overlaps = a.left < b.left + b.width && a.left + a.width > b.left &&
+        a.top < b.top + b.height && a.top + a.height > b.top
+      assert.equal(overlaps, false, `${a.id} overlaps ${b.id}`)
+    }
+  }
+})
+
+test('collapsed branches release their space while custom positions stay fixed', () => {
+  const hidden = node('hidden', 80)
+  const collapsed = node('collapsed', 80, [hidden])
+  collapsed.getData = key => key === 'expand' ? false : undefined
+  const custom = node('custom', 60)
+  custom.top = 1200
+  custom.left = 900
+  custom.hasCustomPosition = () => true
+  const root = node('root', 80, [collapsed, node('normal', 70), custom])
+  root.top = 500
+  const layout = new moduleMock.exports({ mindMap: {
+    opt: { alwaysShowExpandBtn: false, notShowExpandBtn: false },
+    themeConfig: { nodeUseLineStyle: false }
+  } })
+  layout.root = root
+  layout.computedBaseValue()
+  layout.computedTopValue()
+  assert.equal(layout.levels.flat().includes(hidden), false)
+  assert.equal(root.children[1].top - collapsed.top - collapsed.height,
+    compactLayoutConfig.siblingGap)
+  assert.equal(custom.top, 1200)
+  assert.equal(custom.left, 900)
 })

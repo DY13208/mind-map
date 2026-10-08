@@ -527,7 +527,7 @@ export default {
   data() {
     return {
       config: {
-        compactLayout: false,
+        compactLayout: true,
         openPerformance: false,
         enableFreeDrag: false,
         mousewheelAction: 'zoom',

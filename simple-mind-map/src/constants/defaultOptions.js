@@ -14,7 +14,7 @@ export const defaultOpt = {
   // 布局
   layout: CONSTANTS.LAYOUT.LOGICAL_STRUCTURE,
   // 第一种逻辑结构图的紧凑排列开关
-  compactLayout: false,
+  compactLayout: true,
   // 如果结构为鱼骨图，那么可以通过该选项控制倾斜角度
   fishboneDeg: 45,
   // 主题
