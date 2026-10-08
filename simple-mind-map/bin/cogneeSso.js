@@ -113,6 +113,18 @@ async function handleCogneeSsoApi(req, res, services) {
     if (!authEnabled) throw new SsoError('wecom_login_required', 503)
     if (url.pathname === '/api/auth/cognee/authorize' && req.method === 'GET') {
       const { state, challenge } = validAuthorization(url, config)
+      // The existing WeCom callback adds auth_error to return_to on failure.
+      // Return to Cognee once instead of immediately starting another QR login.
+      if (url.searchParams.has('auth_error')) {
+        const callback = new URL(config.redirectUri)
+        callback.searchParams.set('error', 'wecom_login_failed')
+        callback.searchParams.set('state', state)
+        res.writeHead(303, {
+          Location: callback.href, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'
+        })
+        res.end()
+        return true
+      }
       const user = await authenticateRequest(req)
       if (!user) {
         const login = /MicroMessenger/i.test(String(req.headers['user-agent'] || ''))

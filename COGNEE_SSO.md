@@ -26,6 +26,8 @@ Cognee 会沿用已启用 WorkBuddy 的会话签名配置；没有 WorkBuddy 时
 
 授权码有效期 90 秒，必须经过固定 HTTPS 回调、浏览器状态与 S256 PKCE 校验，后台持相同共享密钥才能兑换。数据库只存哈希，原子消费防止重复和并发兑换，支持多进程和服务重启。企业微信凭据仍仅由 mind-map 管理。
 
+原企业微信回调出现错误时，授权入口将失败结果和原状态返回 Cognee 登录页，避免重复触发扫码。Cognee 清除本次登录状态，用户可以重新开始。
+
 测试（`simple-mind-map` 目录）：
 
 ```bash
@@ -35,3 +37,5 @@ npm run test:auth
 ```
 
 PostgreSQL 测试使用当前 `.env` 的 PG 连接，但仅在随机临时 schema 内运行并最终删除，不修改已有账号、会话或业务数据。线上验收需分别完成已登录 mind-map 的直接进入与未登录用户的扫码回跳。
+
+`test/fixtures/cogneeSsoIssuer.js` 是 Cognee `test_mind_map_sso_protocol.py` 的配套 HTTPS 联调服务，必须显式设置隔离的测试环境才能启动。它运行真实 mind-map 认证逻辑，外部企业微信接口使用测试响应；完整运行方式见 Cognee 的配置文档。

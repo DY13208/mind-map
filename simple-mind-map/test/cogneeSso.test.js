@@ -54,6 +54,17 @@ async function run() {
   assert.equal(location.searchParams.get('return_to'), req.url)
   assert.equal(res.headers['Cache-Control'], 'no-store')
   assert.equal(res.headers['Referrer-Policy'], 'no-referrer')
+  const failed = makeResponse()
+  await handleCogneeSsoApi({ ...req, url: req.url + '&auth_error=wecom_ip_denied' }, failed, {
+    ...services,
+    authenticateRequest: async () => { throw new Error('Failed OAuth must not restart login') }
+  })
+  const failedLocation = new URL(failed.headers.Location)
+  assert.equal(failedLocation.origin, new URL(config.redirectUri).origin)
+  assert.equal(failedLocation.pathname, '/sso/mind-map/callback')
+  assert.equal(failedLocation.searchParams.get('error'), 'wecom_login_failed')
+  assert.equal(failedLocation.searchParams.get('state'), params.state)
+  assert(!failedLocation.searchParams.has('code'))
   const denied = makeResponse()
   await handleCogneeSsoApi({ url: '/api/auth/cognee/exchange', method: 'POST', headers: {} }, denied, services)
   assert.equal(denied.status, 401)
