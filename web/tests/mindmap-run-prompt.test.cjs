@@ -110,6 +110,15 @@ check(
   '明确禁止用 note / text 写文件路径冒充附件',
   /冒充附件/.test(runPrompt)
 )
+// 2026-10-08 现场：Agent 写文件被权限拒绝，就「改以下方正文呈现」——产物直接没有文件。
+// 所以必须写明兜底：写不出来就走 MCP 把内容送上去，绝不允许只在回答里贴正文。
+check(
+  '写文件被拒要有兜底路径（add_node / content_base64），不许只在回答里贴正文',
+  /写文件被拒/.test(runPrompt) &&
+    /content_base64/.test(runPrompt) &&
+    /add_node/.test(runPrompt) &&
+    /绝不能因为写不出文件/.test(runPrompt)
+)
 
 console.log('--- 继续执行 ---')
 const followPrompt = buildFollowUpPrompt('接着上次往下写', {
