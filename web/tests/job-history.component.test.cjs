@@ -1969,14 +1969,29 @@ async function main() {
   vm.collabSaveState = 'saved'
   check('已保存 → 没问题', vm.collabSaveTrouble() === '', vm.collabSaveTrouble())
 
-  // 写回结束但协同离线：不能说「完成」，要说清「只在本机、刷新就丢、怎么补」
+  // 「能不能写」的判据（含没确认的命令、重同步中、服务端拒绝码）
+  vm = makeVm()
+  vm.collabLiveStatus = () => ({ phase: 'LIVE' })
+  check('干净状态 → 可以写', vm.collabBusyReason() === '', vm.collabBusyReason())
+  vm.collabLiveStatus = () => ({ phase: 'RESYNCING' })
+  check('正在重同步 → 要等', /同步/.test(vm.collabBusyReason()), vm.collabBusyReason())
+  vm.collabLiveStatus = () => ({ phase: 'LIVE', outboxPending: 2, pendingAcks: 1 })
+  check('还有命令没被确认 → 要等', /3 条命令没被服务器确认/.test(vm.collabBusyReason()), vm.collabBusyReason())
+  vm.collabLiveStatus = () => ({ phase: 'ERROR', saveState: 'error', lastError: { code: 'PARENT_DELETED' } })
+  check(
+    '服务端拒了那条命令 → 说清是父节点不在了',
+    /父节点已经不在服务器上/.test(vm.collabBusyReason()),
+    vm.collabBusyReason()
+  )
+
+  // 写回结束但协同始终没确认：不能报「完成」；而且**会自动整条重写一次**
   vm = makeVm()
   vm.$route = { query: { room: 'room-x' } }
   vm.collabPhase = 'OFFLINE'
-  // 不等真实的重试窗口（否则这条用例要跑十几秒）
-  vm.waitForCollabSaved = async () => false
+  let emits = 0
   vm.$bus.$emit = (name, payload) => {
     if (name !== 'write_job_result' || !payload || !payload.result) return
+    emits += 1
     payload.result.promise = Promise.resolve({
       ok: true,
       nodes: 2,
@@ -1986,6 +2001,9 @@ async function main() {
       missing: []
     })
   }
+  // 不等真实的重试窗口（否则这条用例要跑十几秒）；offline = 永远等不到
+  vm.collabLiveStatus = () => ({ phase: 'OFFLINE' })
+  vm.waitCollabIdle = async () => false
   vm.messages.length = 0
   await vm.writeJobResultOnce(
     { id: 'w-sync' },
@@ -2001,6 +2019,7 @@ async function main() {
     !vm.messages.some(([kind]) => kind === 'success'),
     JSON.stringify(vm.messages)
   )
+  check('没确认时整条重写了一次（幂等，不会冒重复节点）', emits === 2, String(emits))
   check(
     '运行记录标成「未同步」（历史里能看见、能补写）',
     runLogUtil.readRunRecords().find(r => r.id === 'w-sync').synced === false,
@@ -2011,6 +2030,37 @@ async function main() {
     /未同步到服务器/.test(vm.jobMetaText({ id: 'w-sync', synced: false, startedAt: Date.now() })),
     vm.jobMetaText({ id: 'w-sync', synced: false, startedAt: Date.now() })
   )
+
+  // 第一次没确认、重写之后确认了 → 报成功（自愈成功不该吓用户）
+  vm = makeVm()
+  vm.$route = { query: { room: 'room-x' } }
+  let emits2 = 0
+  vm.$bus.$emit = (name, payload) => {
+    if (name !== 'write_job_result' || !payload || !payload.result) return
+    emits2 += 1
+    payload.result.promise = Promise.resolve({
+      ok: true,
+      nodes: 2,
+      inlineNodes: false,
+      attachments: [{ name: '完整输出.md', kind: 'text', via: 'collab' }],
+      warnings: [],
+      missing: []
+    })
+  }
+  let waits = 0
+  // 第一次「等不到确认」，重写那次等到了
+  vm.waitCollabIdle = async () => {
+    waits += 1
+    return waits > 1
+  }
+  vm.collabLiveStatus = () => ({ phase: 'LIVE' })
+  vm.messages.length = 0
+  await vm.writeJobResultOnce(
+    { id: 'w-heal' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u-heal', force: true }
+  )
+  check('自愈：重写一次后报成功', emits2 === 2 && vm.messages.some(([k]) => k === 'success'), `${emits2} ${JSON.stringify(vm.messages)}`)
+  check('自愈成功就不该再挂未同步', !vm.jobWriteError && runLogUtil.readRunRecords().find(r => r.id === 'w-heal').synced === true, vm.jobWriteError)
 
   // 同步没问题时照旧报成功
   vm = makeVm()

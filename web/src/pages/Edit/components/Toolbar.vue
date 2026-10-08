@@ -1367,27 +1367,135 @@ export default {
 
     /** 等这段改动同步上去（返回 true = 已经落服务器了） */
     async waitForCollabSaved(deadlineMs = 10000) {
+      return this.waitCollabIdle(deadlineMs)
+    },
+
+    /** 协同客户端的实时诊断（{phase, saveState, outboxPending, pendingAcks, lastError, snapshotRecoveryCount}） */
+    collabLiveStatus() {
+      try {
+        if (
+          typeof window !== 'undefined' &&
+          typeof window.__COLLAB_V2_STATUS__ === 'function'
+        ) {
+          return window.__COLLAB_V2_STATUS__() || {}
+        }
+      } catch (err) {
+        /* 拿不到就当没有 */
+      }
+      return {}
+    },
+
+    /**
+     * 协同现在忙/不正常的原因（'' = 可以认为「吸收完了」）。
+     * 只看客户端自己报的状态：还有没有没确认的命令、是不是在重连/重同步、有没有报错。
+     */
+    collabBusyReason() {
+      const st = this.collabLiveStatus()
+      const phase = String(st.phase || this.collabPhase || '')
+      if (phase === 'ERROR' || st.saveState === 'error') {
+        return this.collabRejectedReason() || '协同同步报错'
+      }
+      if (phase === 'OFFLINE' || phase === 'DISCONNECTED' || st.saveState === 'offline') {
+        return '协同离线'
+      }
+      if (phase === 'RESYNCING' || phase === 'JOINING' || phase === 'CONNECTING') {
+        return `正在同步（${phase}）`
+      }
+      const sending = Number(st.outboxSending || 0)
+      if (sending > 0) return `还有 ${sending} 条命令在发送`
+      const pending =
+        Number(st.outboxPending || 0) + Number(st.pendingAcks || 0)
+      if (pending > 0) return `还有 ${pending} 条命令没被服务器确认`
+      if (Number(this.collabPendingCount || 0) > 0) {
+        return `还有 ${this.collabPendingCount} 条命令没被服务器确认`
+      }
+      if (this.collabSaveState === 'saving') return '还在同步'
+      // 兜底：保存状态那一套（离线/报错/还有改动）也照一眼
+      const chip = this.collabSaveTrouble()
+      if (chip === 'offline') return '协同离线'
+      if (chip === 'failed') return this.collabRejectedReason() || '协同同步报错'
+      if (chip === 'pending') return '还有命令没被服务器确认'
+      return ''
+    },
+
+    /**
+     * 协同服务**明确拒了**哪一步（用客户端诊断里的错误码说话）。
+     *
+     * 客户端有几条「静默丢弃」的路子：目标/父节点不在了、uid 被占用、
+     * 依赖的 insert 已经彻底失败（BLOCKED_BY_TERMINAL_CREATE）—— 命令直接被移除，
+     * 页面上什么都看不到，可本机画布上节点还在，刷新才消失。这里把它翻成人话。
+     */
+    collabRejectedReason() {
+      const st = this.collabLiveStatus()
+      const err = st.lastError || {}
+      const code = String(err.code || st.errorCode || '').toUpperCase()
+      const map = {
+        TARGET_DELETED: '协同服务说目标节点已经不在服务器上了',
+        PARENT_DELETED: '协同服务说父节点已经不在服务器上了',
+        NODE_DELETED: '协同服务说这个节点已经被删掉了',
+        UID_REUSED: '节点编号被占用了（协同服务拒了这次插入）',
+        MOVE_CONFLICT: '移动冲突（协同服务拒了这次修改）',
+        BLOCKED_BY_TERMINAL_CREATE: '它前面的那次插入彻底失败了，后面的被一起丢掉',
+        OUTBOX_QUARANTINED: '这条命令被隔离了（服务端没接受）',
+        STALE_AFTER_VERSION_RESTORE: '房间刚做过版本恢复，这条命令过期了',
+        FORBIDDEN: '没有编辑权限（被协同服务拒了）',
+        SOP_CONFIRM_REQUIRED: '这一步需要先在 SOP 里确认'
+      }
+      if (!code) return ''
+      return map[code] || `协同服务拒了这条命令（${code}）`
+    },
+
+    /** 等协同把手上的活干完（返回 true = 服务端已经确认完） */
+    async waitCollabIdle(deadlineMs = 12000) {
       const deadline = Date.now() + Math.max(0, Number(deadlineMs) || 0)
       for (;;) {
-        if (!this.collabSaveTrouble()) return true
+        if (!this.collabBusyReason()) return true
         if (Date.now() >= deadline) return false
         await new Promise(resolve => setTimeout(resolve, 250))
       }
     },
 
-    /** 写回之后没同步上去时，给用户看的话（说清后果与怎么补） */
-    collabNotSavedTip(trouble) {
-      const why =
-        trouble === 'failed'
-          ? '协同同步报错了'
-          : trouble === 'offline'
-          ? '协同现在没连上'
-          : '还有改动没同步上去'
-      return (
-        `导图改了，但**还没同步到服务器**（${why}）—— ` +
-        '现在只在这台浏览器里，**刷新就没了**。' +
-        '等右下角保存状态变成「已保存」后，在运行历史里选中这条记录、点「写入导图」补一次。'
-      )
+    /**
+     * 这次写回**服务器到底收下了没有**（写回的唯一完成判据）。
+     *
+     * 「本机树里有节点」不算数：协同客户端可能把命令丢在 outbox 里没发出去、
+     * 发出去被服务端拒了、或者中途一次**权威快照恢复**把整棵树换回服务器的版本 ——
+     * 三种情况下画布上看得见、刷新就没了（2026-10-08 用户反馈）。
+     *
+     * @returns {{ok:Boolean, why:String}}
+     */
+    async verifyWritePersisted() {
+      const before = this.collabLiveStatus()
+      const settled = await this.waitCollabIdle(12000)
+      const after = this.collabLiveStatus()
+      // 写的过程中发生过「权威快照恢复」→ 整棵树被服务器版本替换，本机插的很可能没了
+      if (
+        Number(after.snapshotRecoveryCount || 0) >
+        Number(before.snapshotRecoveryCount || 0)
+      ) {
+        return { ok: false, why: '写的过程中房间做过一次整树恢复' }
+      }
+      if (!settled) {
+        return { ok: false, why: this.collabBusyReason() || '协同一直没确认' }
+      }
+      const rejected = this.collabRejectedReason()
+      if (rejected) return { ok: false, why: rejected }
+      return { ok: true, why: '' }
+    },
+
+    /**
+     * 把结果交给导图（Edit.vue 那边的 writeJobResultToMap）。
+     * 抽出来是为了「没落库就整条重写一次」——重写要发一模一样的命令。
+     */
+    async pushJobResultToMap(payload) {
+      const box = { ok: false }
+      this.$bus.$emit('write_job_result', { ...(payload || {}), result: box })
+      if (!box.promise) throw new Error('当前页面没有导图，写不进去')
+      const out = await box.promise
+      if (!out || out.ok === false) {
+        throw new Error((out && out.error) || '写入导图失败')
+      }
+      return out
     },
 
     async waitForCpdSnapshot() {
@@ -2396,12 +2504,13 @@ export default {
       this.jobWriteBusy = true
       this.jobWriteError = ''
       this.jobWriteState = '正在读取产物文件…'
-      // 协同没连上时**先等一等再写**：现在写下去只活在本机，过一会儿 resync 会被
-      // 服务器上的状态盖掉 —— 白写一遍（2026-10-08 用户反馈「强制刷新之后只有任务
-      // 跟任务内容了」）。等不到也照写（本机至少看得见），但结尾会明确警告。
-      if (this.collabSaveTrouble()) {
-        this.jobWriteState = '协同还没连上，正在等它恢复…'
-        await this.waitForCollabSaved(8000)
+      // 协同没吸收完（离线 / 在重同步 / 还有命令没确认）时**先等一等再写**：
+      // 现在写下去只活在本机，过一会儿 resync/整树恢复会被服务器上的状态盖掉 ——
+      // 白写一遍（2026-10-08 用户反馈「跑完写不回去、强刷就没了」）。
+      // 等不到也照写（本机至少看得见），但结尾会明确警告。
+      if (this.collabBusyReason()) {
+        this.jobWriteState = `协同还在同步（${this.collabBusyReason()}），等它吸收完再写…`
+        await this.waitCollabIdle(8000)
       }
       try {
         let artifacts = []
@@ -2421,9 +2530,7 @@ export default {
           }
         }
         this.jobWriteState = '正在写入导图…'
-        const box = { ok: false }
-        this.$bus.$emit('write_job_result', {
-          result: box,
+        const payload = {
           nodeUid,
           markdown: bodyText,
           prompt: options.prompt || this.jobPendingPrompt || '',
@@ -2440,11 +2547,19 @@ export default {
           onProgress: label => {
             if (label) this.jobWriteState = label
           }
-        })
-        if (!box.promise) throw new Error('当前页面没有导图，写不进去')
-        const out = await box.promise
-        if (!out || out.ok === false) {
-          throw new Error((out && out.error) || '写入导图失败')
+        }
+        let out = await this.pushJobResultToMap(payload)
+        // —— 写下去 ≠ 存住了：必须**服务端确认**才算完成 ——
+        // 协同客户端有几条静默丢弃的路子（目标/父节点不在、uid 被占用、
+        // 依赖的插入彻底失败、快照恢复把整树换掉），本机画布上照样有节点，
+        // 刷新就没了（2026-10-08 用户反馈「跑完写不回去、强刷就没了」）。
+        // 所以：等确认；没确认就**整条重写一次**（写回本身是幂等的：节点按名字复用、
+        // 按 uid 认领，重写不会冒重复节点）。
+        let verify = await this.verifyWritePersisted()
+        if (!verify.ok && !options.__retried) {
+          this.jobWriteState = `服务器没确认（${verify.why}），正在重写一次…`
+          out = await this.pushJobResultToMap(payload)
+          verify = await this.verifyWritePersisted()
         }
         this.jobWrittenJobId = jobId
         this.jobWriteResult = out
@@ -2469,6 +2584,8 @@ export default {
           : `已写入「${nodeTitle || '运行节点'}」的「附件」（${attCount} 个文件${
               out.generalization ? '、已加概要（双击概要写下一步）' : ''
             }）`
+        // —— 最后一道闸：服务器**确认**了才算完成 ——
+        // 上面 verifyWritePersisted 已等服务端把手上的命令消化完；这里只是把结论说出来。
         if (out.warnings && out.warnings.length) {
           const needService = out.warnings.some(item => /没挂上/.test(item))
           this.jobWriteError =
@@ -2477,26 +2594,15 @@ export default {
               ? '（附件要经过协同服务上传，确认 启动.bat 起了再试）'
               : '')
         }
-        // —— 最后一道闸：这次写回**真的同步到服务器了吗** ——
-        // 本机树里有节点 ≠ 服务器上有：协同离线 / 积压时，改动只活在浏览器内存里，
-        // 刷新就没了（2026-10-08 用户反馈「强制刷新之后只有任务跟任务内容了」）。
-        // 所以「完成」这两个字，必须等改动落库之后才说。
-        const trouble = this.collabSaveTrouble()
-        if (trouble) {
-          const saved = await this.waitForCollabSaved(
-            trouble === 'offline' ? 3000 : 12000
-          )
-          if (!saved) {
-            const tip = this.collabNotSavedTip(trouble)
-            this.jobWriteError = this.jobWriteError
-              ? `${this.jobWriteError}；${tip}`
-              : tip
-            patchRunRecord(jobId, { synced: false, syncTip: tip })
-          } else {
-            patchRunRecord(jobId, { synced: true, syncTip: '' })
-          }
-        } else {
+        if (verify.ok) {
           patchRunRecord(jobId, { synced: true, syncTip: '' })
+        } else {
+          const tip =
+            `导图改了，但**还没同步到服务器**（${verify.why}）—— ` +
+            '现在可能只在这台浏览器里，**刷新就没了**。' +
+            '等右下角保存状态变成「已保存」后，在运行历史里选中这条记录、点「写入导图」补一次。'
+          this.jobWriteError = this.jobWriteError ? `${this.jobWriteError}；${tip}` : tip
+          patchRunRecord(jobId, { synced: false, syncTip: tip })
         }
         if (this.jobWriteError) {
           this.$message.warning(this.jobWriteError)
