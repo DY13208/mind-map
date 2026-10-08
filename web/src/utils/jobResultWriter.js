@@ -522,6 +522,81 @@ function resolveTargetNode(mindMap, uid) {
   return active || null
 }
 
+/**
+ * 拿到「当前真正在树上的那个节点」。
+ *
+ * ⚠️ 为什么不能一直用手里的引用：协同接收到远端改动、或任何一次重渲染，都会**重建节点实例**
+ * ——数据还在、我们握着的那只对象已经脱离画布了。此后往它身上插东西，数据能进、但它的
+ * `children` 永远不更新 ——「命令没有落到图上」就是这么报出来的（2026-10-08 用户反馈）。
+ * 按 uid 现查（引擎自己也这么找节点）就能拿到活的那只。
+ */
+function liveNode(mindMap, node) {
+  const renderer = mindMap && mindMap.renderer
+  const uid = node && typeof node.getData === 'function' ? node.getData('uid') : null
+  if (
+    uid == null ||
+    uid === '' ||
+    !renderer ||
+    typeof renderer.findNodeByUid !== 'function'
+  ) {
+    return node
+  }
+  return renderer.findNodeByUid(uid) || node
+}
+
+/** 这些 uid 现在都在树上吗（按 uid 现查，不看我们手里那个引用） */
+function findInserted(mindMap, uids) {
+  const renderer = mindMap && mindMap.renderer
+  const hits = []
+  ;(uids || []).forEach(uid => {
+    if (!uid) return
+    const node =
+      renderer && typeof renderer.findNodeByUid === 'function'
+        ? renderer.findNodeByUid(uid)
+        : null
+    if (node) hits.push(node)
+  })
+  return hits
+}
+
+/**
+ * 「命令没落到图上」时到底为什么 —— 把现场事实一并报出来。
+ *
+ * 这句话以前只讲「常见原因」，用户没法判断是哪一种，我们只能靠猜（2026-10-08 用户
+ * 直接把这句话发回来，还是定位不了）。现在把能查的都查出来：只读？命令队列暂停？
+ * 引擎在等子树加载？落点还在不在？它现在有几个子节点？
+ */
+function insertFailedReason(mindMap, container) {
+  const facts = []
+  if (mindMap && mindMap.opt && mindMap.opt.readonly) facts.push('房间处于只读态')
+  const renderer = mindMap && mindMap.renderer
+  if (renderer && renderer._lazyCommandPending) facts.push('引擎正在等子树加载完成')
+  if (renderer && renderer._skipLazyHydrate) facts.push('引擎正处于「跳过懒加载」窗口')
+  const command = mindMap && mindMap.command
+  if (command && command.isPause) facts.push('命令队列处于暂停态')
+  const live = liveNode(mindMap, container)
+  if (!live) {
+    facts.push('落点节点在图上已经找不到了')
+  } else {
+    const kids = (live.children || []).length
+    facts.push(`落点「${nodeText(live) || '未命名'}」现在有 ${kids} 个子节点`)
+  }
+  const cooperate = mindMap && mindMap.cooperate
+  if (cooperate && typeof cooperate.nodeNeedsHydrate === 'function' && live) {
+    try {
+      if (cooperate.nodeNeedsHydrate(live)) facts.push('落点的子节点还没从服务器拉全')
+    } catch (err) {
+      /* 查不动就算了，不影响报错 */
+    }
+  }
+  return (
+    '写入导图失败：命令没有落到图上（' +
+    (facts.join('；') || '原因没查出来') +
+    '）—— 先在「运行历史」里点「写入导图」重试；还不行就刷新页面再试，' +
+    '并把「协同」面板右下角的诊断复制出来'
+  )
+}
+
 /** 节点文字（去 HTML 与空白） */
 function nodeText(node) {
   const raw =
@@ -553,15 +628,20 @@ function sleep(ms) {
  * @param {Boolean} all   true = 等这批**全部**落地（插一批时用）
  * @returns 单个节点 / 节点数组 / null（超时没落地）
  */
-async function waitForInserted(parent, uids, { all = false, tries = 60 } = {}) {
+async function waitForInserted(mindMap, parent, uids, { all = false, tries = 60 } = {}) {
   const want = new Set((uids || []).filter(Boolean))
   if (!want.size) return null
   const uidOf = node =>
     String((node && node.getData && node.getData('uid')) || '')
   for (let i = 0; i < tries; i += 1) {
-    const hits = ((parent && parent.children) || []).filter(node =>
+    // ① 按 uid **现查**（父节点对象可能已经被重渲染换掉了，但它插进去的节点在树上）
+    const found = findInserted(mindMap, uids)
+    // ② 再兜一眼活父节点的直接子节点（万一 uid 查不到树、但确实挂在下面）
+    const live = liveNode(mindMap, parent)
+    const kids = ((live && live.children) || []).filter(node =>
       want.has(uidOf(node))
     )
+    const hits = Array.from(new Set(found.concat(kids)))
     if (all) {
       if (hits.length >= want.size) return hits
     } else if (hits.length) {
@@ -575,14 +655,15 @@ async function waitForInserted(parent, uids, { all = false, tries = 60 } = {}) {
 /**
  * 等落点容器真的长出东西来（子节点变多）。
  *
- * 写回到最后必须复核一次：协同模式下命令可能被**静默丢弃**（连接断了、被服务端拒了），
- * 而这一路都是 await 不抛错的写法 —— 不复核就会出现「提示已写入、图上什么都没有」。
+ * ⚠️ 必须每轮**按 uid 现查**容器：手里的引用可能已经脱离画布（重渲染 / 协同套用远端改动），
+ * 那样它的 children 永远不会变，会误报「命令没有落到图上」（2026-10-08 用户反馈）。
  * 返回 true = 长出了新节点。
  */
-async function waitContainerGrowth(container, beforeCount, tries = 60) {
+async function waitContainerGrowth(mindMap, container, beforeCount, tries = 60) {
   const want = Number(beforeCount || 0) + 1
   for (let i = 0; i < tries; i += 1) {
-    if (((container && container.children) || []).length >= want) return true
+    const live = liveNode(mindMap, container)
+    if (((live && live.children) || []).length >= want) return true
     if (i < tries - 1) await sleep(50)
   }
   return false
@@ -667,12 +748,14 @@ function stampInsertUids(trees) {
  */
 async function insertChildren(mindMap, parent, trees) {
   if (!trees || !trees.length) return []
-  if (parent && typeof parent.setData === 'function') {
-    parent.setData({ expand: true })
+  // 插入前把落点换成「当前活的那只」：手里的引用可能是上一次渲染留下的
+  const live = liveNode(mindMap, parent)
+  if (live && typeof live.setData === 'function') {
+    live.setData({ expand: true })
   }
   const uids = stampInsertUids(trees)
-  await ensureInsertParent(mindMap, parent)
-  mindMap.execCommand('INSERT_MULTI_CHILD_NODE', [parent], trees)
+  await ensureInsertParent(mindMap, live)
+  mindMap.execCommand('INSERT_MULTI_CHILD_NODE', [live], trees)
   return uids
 }
 
@@ -696,11 +779,17 @@ async function insertTreesWithRetry(mindMap, parent, trees, attempts = 2) {
   for (let round = 0; round < attempts && pending.length; round += 1) {
     const batch = pending.map(item => item.tree)
     const uids = await insertChildren(mindMap, parent, batch)
-    await waitForInserted(parent, uids, { all: true })
+    await waitForInserted(mindMap, parent, uids, { all: true })
     const byUid = new Map()
-    ;((parent && parent.children) || []).forEach(node => {
-      const uid = String((node && node.getData && node.getData('uid')) || '')
+    // 先按 uid **现查**（父节点引用可能已过期），再兜活父节点的直接子节点
+    findInserted(mindMap, uids).forEach(node => {
+      const uid = String((node.getData && node.getData('uid')) || '')
       if (uid) byUid.set(uid, node)
+    })
+    const live = liveNode(mindMap, parent)
+    ;((live && live.children) || []).forEach(node => {
+      const uid = String((node.getData && node.getData('uid')) || '')
+      if (uid && !byUid.has(uid)) byUid.set(uid, node)
     })
     const still = []
     pending.forEach((item, i) => {
@@ -1030,9 +1119,13 @@ export async function writeJobResultToMap({
   //   ② 没有 roomKey —— 挂不了附件，正文必须以节点形式留在导图上。
   const inlineResult = INLINE_RESULT_NODES || !roomKey
   let tree = { children: [], missing: [], dropped: 0 }
+  // ⚠️ 落点换成「当前活的那只」：上面建容器/解析目标之间可能有重渲染，
+  // 握着旧引用会让后面所有插入都插到脱离画布的节点上（数据进、画布不长）。
+  container = liveNode(mindMap, container) || container
   let resultNode = container
   // 写回开始前记一下：结束时拿它复核「到底有没有东西落到图上」（见 waitContainerGrowth）
-  const containerKidsBefore = (container.children || []).length
+  const containerKidsBefore = ((liveNode(mindMap, container) || container).children || [])
+    .length
   if (inlineResult) {
     tree = markdownToFullNodes(text)
     say('正在把结果写进导图…')
@@ -1115,7 +1208,10 @@ export async function writeJobResultToMap({
     // 附件（产物文件 + 完整输出）统一挂在「附件」分支里，而「附件」**直接挂在任务容器下**
     // —— 2026-10-08 用户要求的结构：任务 → 附件 → 完整输出 | 产物
     say('正在准备附件…')
-    let branch = findAttachBranch(container)
+    // refresh：每一步之后都按 uid 把引用换成「当前活的那只」——插入会触发重渲染，
+    // 手里的旧引用从那一刻起就不再更新（数据对、画布对，只有旧引用是死的）。
+    const refresh = node => liveNode(mindMap, node) || node
+    let branch = findAttachBranch(refresh(container))
     if (!branch) {
       const res = await insertTreesWithRetry(mindMap, container, [
         { data: { text: ATTACH_BRANCH_TITLE }, children: [] }
@@ -1128,7 +1224,7 @@ export async function writeJobResultToMap({
       )
     } else {
       out.nodes += 1
-      const kids = () => branch.children || []
+      const kids = () => refresh(branch).children || []
 
       // 1) 产物文件：一个文件一个子节点（同名节点直接复用，不重复建）
       const missing = files.filter(
@@ -1153,6 +1249,7 @@ export async function writeJobResultToMap({
       }
       for (let i = 0; i < files.length; i += 1) {
         const info = files[i]
+        // 每一步都重查一次节点（上面的插入会重渲染，引用会失效）
         const node = kids().find(k => nodeText(k) === String(info.name || ''))
         if (!node) continue
         if (Number(info.size) > MAX_ATTACH_BYTES) {
@@ -1195,6 +1292,8 @@ export async function writeJobResultToMap({
               '刷新页面后点「写入导图」再试'
           )
       }
+      // 引用再刷一次（插产物/插完整输出都会引发重渲染）
+      mdNode = refresh(mdNode)
       if (mdNode && typeof mdNode.setData === 'function') {
         try {
           mdNode.setData({ note: text })
@@ -1250,20 +1349,16 @@ export async function writeJobResultToMap({
   // 上面整条路都是「不抛错」的写法 —— 命令被协同服务**静默丢掉**时也会一路走到这里，
   // 于是界面报成功、画布上一个节点都没有。所以最后必须确认落点容器真的长出了东西，
   // 没长出来就如实报错（用户在「运行历史 → 写入导图」里还能再试一次）。
-  if (!(await waitContainerGrowth(container, containerKidsBefore))) {
-    throw new Error(
-      readonlyReason(mindMap) ||
-        '写入导图失败：命令没有落到图上 —— 常见原因：① 这个房间的数据没加载全' +
-          '（协同断开 / 子树拉取失败，插入会被引擎推迟甚至丢掉）；② 没有编辑权限。' +
-          '刷新页面后点「写入导图」再试一次；还不行就把「协同」面板右下角的诊断复制出来'
-    )
+  // 每轮按 uid 现查容器（手里的引用可能已被重渲染换掉，见 liveNode）。
+  if (!(await waitContainerGrowth(mindMap, container, containerKidsBefore))) {
+    throw new Error(readonlyReason(mindMap) || insertFailedReason(mindMap, container))
   }
 
   // 给「这次的任务」加一个范围概要：包住任务内容 + 运行输出，
   // 概要留成「下一步做什么」的填写位 —— 下次点运行会读它当任务指令
   say('正在给这次结果加概要…')
   try {
-    const batch = (container.children || []).slice()
+    const batch = ((liveNode(mindMap, container) || container).children || []).slice()
     const generalization = addFollowUpGeneralization(mindMap, container, batch)
     out.generalization = generalization
       ? { nodes: batch.length, text: FOLLOW_UP_PLACEHOLDER }
