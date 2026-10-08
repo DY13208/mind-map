@@ -92,6 +92,21 @@ function attachTree(parent, tree) {
   ;(tree.children || []).forEach(child => attachTree(made, child))
   return made
 }
+
+// swapInstances = true 时模拟「重渲染把节点实例整批换新」：
+// 命令照常作用在活的那棵树上，但执行完就把节点对象全部重建 —— 调用方手里的引用
+// 从此不再更新（数据对、画布对，只有旧引用是死的）。
+let swapInstances = false
+function cloneInstances(node) {
+  const copy = makeNode(node.getData('text'), node.getData('uid'))
+  copy.nodeData = node.nodeData // 数据是共享的（和真实引擎一致）
+  ;(node.children || []).forEach(child => {
+    const made = cloneInstances(child)
+    made.parent = copy
+    copy.children.push(made)
+  })
+  return copy
+}
 function makeMindMap() {
   const map = {
     renderCount: 0,
@@ -126,7 +141,10 @@ function makeMindMap() {
         // 引擎的签名是 (nodeList, trees) —— 第一个参数是数组
         const parents = args[0]
         const trees = args[1]
-        const parent = Array.isArray(parents) ? parents[0] : parents
+        const passed = Array.isArray(parents) ? parents[0] : parents
+        // 引擎真正改的是**活的那棵树**上的节点（调用方手里的引用可能早就过期了）
+        const parent =
+          (passed && map.renderer.findNodeByUid(passed.getData('uid'))) || passed
         const list = (trees || []).filter(tree => {
           const text = tree && tree.data && tree.data.text
           if (dropTreeText && text === dropTreeText) return false
@@ -147,9 +165,14 @@ function makeMindMap() {
           setTimeout(() => {
             list.slice(1).forEach(tree => attachTree(parent, tree))
           }, 30)
-          return
+        } else {
+          list.forEach(tree => attachTree(parent, tree))
         }
-        list.forEach(tree => attachTree(parent, tree))
+        // 重渲染会把**节点实例整批换新**：数据/画布都对，但调用方手里的引用从此刻起
+        // 不再更新（它的 children 永远是旧的）—— 2026-10-08「命令没有落到图上」的成因
+        if (swapInstances) {
+          map.root = cloneInstances(map.root)
+        }
         return
       }
       if (cmd === 'SET_NODE_ATTACHMENT') {
@@ -690,6 +713,94 @@ async function main() {
       .flatMap(n => n.children || [])
       .some(n => String(n.getData('text')) === 'output/大文件.md'),
     '不该出现只挂名字的空节点'
+  )
+
+  // ============ I. 重渲染把节点实例换掉时，校验不能误报「命令没有落到图上」============
+  // 用户 2026-10-08 直接把这条报错发回来：
+  // 「写入导图失败：命令没有落到图上 —— 常见原因：① 数据没加载全 ② 没有编辑权限」。
+  // 真因：插入会触发重渲染，**节点实例整批换新**，而校验读的是当初拿到的那只旧对象
+  // —— 数据进树了、画布也画了，只有旧引用的 children 永远不更新 → 误报。
+  console.log('--- 实例被重渲染换掉：按 uid 现查，不再误报 ---')
+  swapInstances = true
+  const mapS = makeMindMap()
+  const boxS = await writer.createJobContainer({
+    mindMap: mapS,
+    nodeUid: mapS.root.getData('uid'),
+    prompt: '对公司的建议'
+  })
+  const outS = await writer.writeJobResultToMap({
+    mindMap: mapS,
+    nodeUid: boxS.uid,
+    markdown: MD,
+    roomKey: 'room-test',
+    artifacts: [
+      {
+        name: 'output/对公司的建议.md',
+        size: 20,
+        mime: 'text/markdown',
+        base64: Buffer.from('hello').toString('base64')
+      }
+    ],
+    bridgeAttach: async () => ({
+      ok: true,
+      attachments: [{ ok: true, attachmentId: 'sw-1', status: 'ready' }]
+    })
+  })
+  swapInstances = false
+  const liveBox = mapS.renderer.findNodeByUid(boxS.uid)
+  const liveKids = (liveBox && liveBox.children) || []
+  check(
+    '实例被换过也能认到自己的节点（不误报「命令没有落到图上」）',
+    !!outS && outS.nodes >= 2,
+    JSON.stringify(outS && { nodes: outS.nodes, attachments: outS.attachments.length })
+  )
+  const liveBranch = (liveKids || []).find(n => n.getData('text') === '附件')
+  check(
+    '活着的容器里确实有「附件」分支',
+    !!liveBranch,
+    JSON.stringify((liveKids || []).map(n => n.getData('text')))
+  )
+  check(
+    '「附件」里有产物节点 + 完整输出',
+    !!liveBranch &&
+      ['output/对公司的建议.md', '完整输出.md'].every(name =>
+        ((liveBranch.children || []).some(n => n.getData('text') === name))
+      ),
+    JSON.stringify(((liveBranch && liveBranch.children) || []).map(n => n.getData('text')))
+  )
+  check(
+    '两个附件都挂上了（引用失效也不能漏挂）',
+    (outS.attachments || []).length === 2,
+    JSON.stringify(outS.attachments.map(a => a.name))
+  )
+
+  // 报错也要能说清现场（只读 / 暂停 / 落点状态），而不是只讲「常见原因」
+  console.log('--- 真没落图时：报错带上现场事实 ---')
+  const mapT = makeMindMap()
+  const boxT = await writer.createJobContainer({
+    mindMap: mapT,
+    nodeUid: mapT.root.getData('uid'),
+    prompt: '任务内容'
+  })
+  dropInserts = true
+  let insertErr = ''
+  try {
+    await writer.writeJobResultToMap({
+      mindMap: mapT,
+      nodeUid: boxT.uid,
+      markdown: MD,
+      roomKey: 'room-test',
+      artifacts: [],
+      bridgeAttach: async () => ({ ok: true, attachments: [] })
+    })
+  } catch (err) {
+    insertErr = (err && err.message) || ''
+  }
+  dropInserts = false
+  check(
+    '报错里带上落点与子节点数（能判断是哪种情况）',
+    /命令没有落到图上/.test(insertErr) && /落点「[^」]*」现在有 \d+ 个子节点/.test(insertErr),
+    insertErr
   )
 
   const failed = results.filter(item => !item.ok)
