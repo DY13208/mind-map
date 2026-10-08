@@ -287,6 +287,20 @@ check(
     /add_node/.test(fu)
 )
 
+// 助理通道不给 cwd（助理跑在自己的 workspace 里，不能把执行主机的 Windows 路径塞给它）
+const assistantDir = buildNodeRunPrompt({
+  node: jobNode,
+  room: 'room-test',
+  cwd: '',
+  runDir: '20261008-2032'
+})
+check(
+  '助理不给 cwd → 说「当前的工作目录」，并禁止用别的机器的绝对路径',
+  /当前的工作目录/.test(assistantDir) &&
+    /别用别的机器上的绝对路径/.test(assistantDir),
+  ''
+)
+
 const failed = results.filter(item => !item.ok)
 console.log(
   `\n共 ${results.length} 项，通过 ${results.length - failed.length} 项，失败 ${failed.length} 项`

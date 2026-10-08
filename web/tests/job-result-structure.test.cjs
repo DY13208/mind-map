@@ -607,6 +607,91 @@ async function main() {
     JSON.stringify(outI.attachments.map(a => a.name))
   )
 
+  // ============ H. 产物没挂上时，必须说清为什么（2026-10-08 用户反馈）============
+  // 用户原话：「对公司的建议产物没有挂上」。
+  // 以前这三条都是静默的：扫不到就当没有、读不回内容就丢掉、超过上限就截断，
+  // 界面上照样报「完成」—— 现在都要点名说出来。
+  console.log('--- 一个产物都没扫到：说出扫了哪里 ---')
+  const mapJ = makeMindMap()
+  const boxJ = await writer.createJobContainer({
+    mindMap: mapJ,
+    nodeUid: mapJ.root.getData('uid'),
+    prompt: '对公司的建议'
+  })
+  const outJ = await writer.writeJobResultToMap({
+    mindMap: mapJ,
+    nodeUid: boxJ.uid,
+    markdown: MD,
+    roomKey: 'room-test',
+    artifacts: [],
+    artifactDiag: { runDir: '20261008-2030', dirCount: 0, sinceCount: 0 }
+  })
+  check(
+    '没扫到产物 → 明说「只写回了正文」',
+    outJ.warnings.some(w => /没扫到任何产物文件/.test(w)),
+    JSON.stringify(outJ.warnings)
+  )
+  check(
+    '告警里带上扫过哪两个地方、各命中几个',
+    outJ.warnings.some(
+      w =>
+        /output\/20261008-2030\/（0 个）/.test(w) &&
+        /output 目录里新增的文件（0 个）/.test(w)
+    ),
+    JSON.stringify(outJ.warnings)
+  )
+  const branchJ = findByText(mapJ.root.children[0].children || [], '附件')
+  const branchJKids = (branchJ && branchJ.children) || []
+  check(
+    '正文照常写回（不能因为没产物就整条丢掉）',
+    !!findPrefix(branchJKids, '完整输出'),
+    JSON.stringify(texts(branchJKids))
+  )
+
+  console.log('--- 有产物但读不回内容 / 超过上限 ---')
+  const mapK = makeMindMap()
+  const boxK = await writer.createJobContainer({
+    mindMap: mapK,
+    nodeUid: mapK.root.getData('uid'),
+    prompt: '任务内容'
+  })
+  const many = []
+  for (let i = 0; i < 10; i += 1) {
+    many.push({
+      name: `output/P${i}.md`,
+      size: 10,
+      mime: 'text/markdown',
+      base64: Buffer.from(`p${i}`).toString('base64')
+    })
+  }
+  // 一个「文件在、但内容没取回来」的（后端超过 5MB 就只回名字）
+  many.splice(1, 0, { name: 'output/大文件.md', size: 9 * 1024 * 1024, mime: 'text/markdown' })
+  const outK = await writer.writeJobResultToMap({
+    mindMap: mapK,
+    nodeUid: boxK.uid,
+    markdown: MD,
+    roomKey: 'room-test',
+    artifacts: many,
+    bridgeAttach: async () => ({ ok: true, attachments: [{ ok: true, attachmentId: 'y', status: 'ready' }] })
+  })
+  check(
+    '读不回内容的产物被点名（不再静默丢掉）',
+    outK.warnings.some(w => /读不回内容、没挂附件/.test(w) && /output\/大文件\.md/.test(w)),
+    JSON.stringify(outK.warnings)
+  )
+  check(
+    '超过上限时说明只挂了前几个、剩哪些没挂',
+    outK.warnings.some(w => /这次产物有 \d+ 个，只挂了前 8 个/.test(w)),
+    JSON.stringify(outK.warnings)
+  )
+  check(
+    '读不回内容的那个不会建出空节点',
+    !(mapK.root.children[0].children || [])
+      .flatMap(n => n.children || [])
+      .some(n => String(n.getData('text')) === 'output/大文件.md'),
+    '不该出现只挂名字的空节点'
+  )
+
   const failed = results.filter(item => !item.ok)
   console.log(
     `\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`

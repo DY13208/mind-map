@@ -345,7 +345,7 @@ function priorResultsBlock(results) {
  * 于是「这一次运行的东西」不多不少；不给（例如桥接通道）沿用旧口径，让文件名带日期。
  */
 function outputDirLine(cwd, runDir) {
-  const base = cwd || '执行主机的工作目录'
+  const base = cwd || '你当前的工作目录（workspace）'
   const dir = String(runDir || '').trim()
   if (!dir) {
     return '这次要产出的文件请集中写到该工作目录的 output 子目录，文件名带上日期；'
@@ -353,7 +353,10 @@ function outputDirLine(cwd, runDir) {
   return (
     `这次要产出的文件**只能**写到 ${base} 的 output/${dir}/ 里` +
     `（这个子目录是本次运行专用的，里面应该只有这一次的东西）：` +
-    `不要写到 output 根目录、不要写别的目录、也不要覆盖或改动以前跑出来的文件；`
+    `不要写到 output 根目录、不要写别的目录、也不要覆盖或改动以前跑出来的文件；` +
+    `目录以你**自己当前的工作目录**为基准（相对路径 output/${dir}/ 就行），` +
+    `别用别的机器上的绝对路径 —— 用错基准文件会落到页面扫不到的地方，` +
+    `人就看不到产物了；`
   )
 }
 

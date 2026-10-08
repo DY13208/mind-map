@@ -981,6 +981,8 @@ export async function createJobContainer({
  * @param {Array}    payload.artifacts  产物文件 [{name, size, mime, base64}]
  * @param {Array}    payload.artifactSkips 桥接报的「文件在、但不在允许目录里」清单
  *                                          [{path, name, error}] —— 只用来给用户解释
+ * @param {Object}   payload.artifactDiag  取产物的诊断 {runDir, dirCount, sinceCount, total, error}
+ *                                          —— 只在「一个产物都没扫到」时用来解释原因
  * @param {Function} payload.bridgeAttach 经桥接 MCP 挂附件的通道（可选；给了就优先用它）
  * @param {Function} payload.onProgress 进度文字回调
  */
@@ -992,6 +994,7 @@ export async function writeJobResultToMap({
   roomKey,
   artifacts,
   artifactSkips,
+  artifactDiag,
   bridgeAttach,
   onProgress
 } = {}) {
@@ -1061,9 +1064,49 @@ export async function writeJobResultToMap({
   if (!roomKey) {
     out.warnings.push('没有房间信息，没挂附件（正文已直接铺进导图）')
   } else {
-    const files = (artifacts || [])
-      .filter(item => item && item.name && item.base64)
-      .slice(0, MAX_ARTIFACT_FILES)
+    // ⚠️ 产物「一个都没挂上」以前是**静默**的：扫不到就当没有、读不回内容就丢掉、
+    // 超过上限就截断 —— 界面上照样报「完成」，人只能看着图干瞪眼（2026-10-08 反馈
+    // 「产物没有挂上」）。三条路现在都点名说出来。
+    const found = (artifacts || []).filter(item => item && item.name)
+    const namesOf = list =>
+      list
+        .slice(0, 3)
+        .map(item => String(item.name))
+        .join('、') + (list.length > 3 ? ' 等' : '')
+    const noContent = found.filter(item => !item.base64)
+    if (!found.length) {
+      const diag = artifactDiag && typeof artifactDiag === 'object' ? artifactDiag : null
+      const scanned = []
+      if (diag && diag.runDir) {
+        scanned.push(`output/${diag.runDir}/（${Number(diag.dirCount) || 0} 个）`)
+      }
+      if (diag && (diag.sinceCount != null || diag.error)) {
+        scanned.push(
+          diag.error
+            ? `output 目录（取产物接口出错：${diag.error}）`
+            : `output 目录里新增的文件（${Number(diag.sinceCount) || 0} 个）`
+        )
+      }
+      out.warnings.push(
+        '这次只写回了正文：没扫到任何产物文件' +
+          (scanned.length ? ` —— 已查 ${scanned.join('、')}` : '') +
+          '；如果这一步本该产出文件，说明 Agent 没把文件写进这次运行的产物目录'
+      )
+    } else {
+      if (noContent.length) {
+        out.warnings.push(
+          `有 ${noContent.length} 个产物读不回内容、没挂附件：${namesOf(noContent)}` +
+            '（多半是文件超过 5MB 或读取失败）'
+        )
+      }
+      if (found.length > MAX_ARTIFACT_FILES) {
+        out.warnings.push(
+          `这次产物有 ${found.length} 个，只挂了前 ${MAX_ARTIFACT_FILES} 个：` +
+            `${namesOf(found.slice(MAX_ARTIFACT_FILES))}`
+        )
+      }
+    }
+    const files = found.filter(item => item.base64).slice(0, MAX_ARTIFACT_FILES)
 
     // 挂完附件要复核「节点上真的长出回形针没有」——协同模式下命令可能被丢弃或竞态，
     // 收尾时统一补一次（见 ensureResultVisible）。2026-10-08 用户反馈「要强制刷新才出现」。

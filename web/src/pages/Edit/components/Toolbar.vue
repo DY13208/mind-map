@@ -1321,6 +1321,75 @@ export default {
     this.$bus.$off('node_note_dblclick', this.onNodeNoteDblclick)
   },
   methods: {
+    /**
+     * 协同里还有没有「改了但没上去」的改动。
+     *
+     * 这是「刷新就丢」的判据（2026-10-08 用户反馈「强制刷新之后只有任务跟任务内容了」）：
+     * 节点是**先在本机 Yjs 文档里插进去**的，画布立刻就看得见；能不能活过刷新，
+     * 取决于这些改动有没有真的提交到协同服务。以前写回只检查「本机树里有没有」，
+     * 所以离线/积压时照样报「完成」，刷新一load 就只剩同步上去的那部分。
+     */
+    collabSyncPending() {
+      const status =
+        typeof window !== 'undefined' &&
+        typeof window.__COLLAB_V2_STATUS__ === 'function'
+          ? window.__COLLAB_V2_STATUS__() || {}
+          : {}
+      const pending =
+        status.outboxPending === true ||
+        Number(status.outboxPending || status.pendingCount || 0) > 0 ||
+        status.outboxSending === true ||
+        Number(status.outboxSending || 0) > 0 ||
+        Number(this.collabPendingCount || 0) > 0 ||
+        this.collabSaveState === 'saving'
+      return { pending, status }
+    },
+
+    /**
+     * 这次改动有没有「同步到服务器」的麻烦。返回 ''（没问题）/ 'offline' / 'failed' / 'pending'。
+     *
+     * ⚠️ 只在**确实在用协同**时才判：本地文件模式、没有房间信息时不存在同步问题，
+     * 别把「单机版」也报成没保存。判据只认明确的证据（状态字段 / 积压条数），
+     * 不靠默认值猜 —— collabSaveChip 在状态还没上报时会兜底成 offline，那个不能当证据。
+     */
+    collabSaveTrouble() {
+      const phase = this.collabPhase
+      const save = this.collabSaveState
+      const inRoom = !!this.currentRoomKey() || !!phase || !!save
+      if (!inRoom) return ''
+      if (save === 'error' || phase === 'ERROR') return 'failed'
+      if (save === 'offline' || phase === 'OFFLINE' || phase === 'DISCONNECTED') {
+        return 'offline'
+      }
+      if (this.collabSyncPending().pending) return 'pending'
+      return ''
+    },
+
+    /** 等这段改动同步上去（返回 true = 已经落服务器了） */
+    async waitForCollabSaved(deadlineMs = 10000) {
+      const deadline = Date.now() + Math.max(0, Number(deadlineMs) || 0)
+      for (;;) {
+        if (!this.collabSaveTrouble()) return true
+        if (Date.now() >= deadline) return false
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+    },
+
+    /** 写回之后没同步上去时，给用户看的话（说清后果与怎么补） */
+    collabNotSavedTip(trouble) {
+      const why =
+        trouble === 'failed'
+          ? '协同同步报错了'
+          : trouble === 'offline'
+          ? '协同现在没连上'
+          : '还有改动没同步上去'
+      return (
+        `导图改了，但**还没同步到服务器**（${why}）—— ` +
+        '现在只在这台浏览器里，**刷新就没了**。' +
+        '等右下角保存状态变成「已保存」后，在运行历史里选中这条记录、点「写入导图」补一次。'
+      )
+    },
+
     async waitForCpdSnapshot() {
       const deadline = Date.now() + 8000
       for (;;) {
@@ -1394,20 +1463,23 @@ export default {
      * 这次运行的指令：点过同节点的概要且写了内容 → 接着它继续；否则按节点默认任务。
      * 概要文字在运行时现取（双击改完文字也能拿到新的）。
      */
-    async resolveRunPrompt(runNode, runDir = '') {
+    async resolveRunPrompt(runNode, runDir = '', cwd) {
       const gen = this.jobGeneralization
       const uid = String((runNode && runNode.getData && runNode.getData('uid')) || '')
       if (gen && uid && gen.ownerUid === uid) {
         const text = await this.readGeneralizationText(gen)
         if (text && !isFollowUpPlaceholder(text)) {
           return {
-            prompt: this.buildFollowUpJobPrompt(text, runNode, runDir),
+            prompt: this.buildFollowUpJobPrompt(text, runNode, runDir, cwd),
             continued: true
           }
         }
         this.$message.info('概要里还没写内容，这次按节点默认任务跑')
       }
-      return { prompt: this.buildDefaultJobPrompt(runNode, runDir), continued: false }
+      return {
+        prompt: this.buildDefaultJobPrompt(runNode, runDir, cwd),
+        continued: false
+      }
     },
 
     /** 向 Edit 要概要的最新文字（概要点数据其实存在所属节点的 generalization 里） */
@@ -1437,7 +1509,7 @@ export default {
      * 按当前节点派发的任务内容：只做这一步，并把前面几步跑出来的结果当输入继续往下做
      * （不是把整张脑图当 SOP 从头再跑一遍）。组装逻辑在 utils/mindmapRunPrompt.js
      */
-    buildDefaultJobPrompt(wanted = null, runDir = '') {
+    buildDefaultJobPrompt(wanted = null, runDir = '', cwd) {
       const active = (this.activeNodes || [])[0]
       const selected =
         wanted || (active && !active.isGeneralization ? active : null)
@@ -1454,13 +1526,15 @@ export default {
       return buildNodeRunPrompt({
         node: selected,
         room,
-        cwd: this.jobGatewayCwd,
+        // 不给 cwd 就沿用「执行主机」的工作目录（桥接通道）；
+        // 助理通道显式传 '' —— 它在自己的 workspace 里跑，别给它别的机器的路径
+        cwd: cwd === undefined ? this.jobGatewayCwd : cwd,
         // 助理通道会给一个「本次运行专用」的产物目录，页面跑完只按它挂附件
         runDir
       })
     },
 
-    buildFollowUpJobPrompt(text, wanted = null, runDir = '') {
+    buildFollowUpJobPrompt(text, wanted = null, runDir = '', cwd) {
       const room = String(
         (this.$route.query && this.$route.query.room) || ''
       ).trim()
@@ -1470,7 +1544,7 @@ export default {
       return buildFollowUpPrompt(text, {
         node,
         room,
-        cwd: this.jobGatewayCwd,
+        cwd: cwd === undefined ? this.jobGatewayCwd : cwd,
         runDir
       })
     },
@@ -1513,6 +1587,10 @@ export default {
       this.jobActiveId = item.id
       this.jobCurrentId = item.id
       this.resetJobFullText()
+      // 上次写回没同步到服务器的那条：点开就把原因亮出来（刷新会丢 → 需要补写）
+      this.jobWriteError =
+        item.synced === false ? String(item.syncTip || '这次写回没同步到服务器') : ''
+      this.jobWriteState = ''
       // 本地留存那条（助理 / 桥接不通时的兜底）正文就在记录里，不在会话历史里
       const seed = String(
         item.localOnly ? item.result || item.detail || '' : item.detail || ''
@@ -2155,7 +2233,9 @@ export default {
      * 不标一下分不清「这条是谁跑的」。
      */
     jobMetaText(item) {
-      return [this.jobTimeText(item), this.jobChannelShort(item)]
+      // 「未同步」要标出来：这条写回只在本机，刷新就没了（2026-10-08 反馈）
+      const notSynced = item && item.synced === false ? '⚠ 未同步到服务器' : ''
+      return [this.jobTimeText(item), this.jobChannelShort(item), notSynced]
         .filter(Boolean)
         .join(' · ')
     },
@@ -2316,6 +2396,13 @@ export default {
       this.jobWriteBusy = true
       this.jobWriteError = ''
       this.jobWriteState = '正在读取产物文件…'
+      // 协同没连上时**先等一等再写**：现在写下去只活在本机，过一会儿 resync 会被
+      // 服务器上的状态盖掉 —— 白写一遍（2026-10-08 用户反馈「强制刷新之后只有任务
+      // 跟任务内容了」）。等不到也照写（本机至少看得见），但结尾会明确警告。
+      if (this.collabSaveTrouble()) {
+        this.jobWriteState = '协同还没连上，正在等它恢复…'
+        await this.waitForCollabSaved(8000)
+      }
       try {
         let artifacts = []
         let artifactSkips = []
@@ -2343,6 +2430,7 @@ export default {
           job,
           artifacts,
           artifactSkips,
+          artifactDiag: options.artifactDiag || null,
           // 附件优先经桥接的 MCP 通道挂（服务器部署时比协同服务上传那条路稳），
           // 桥接不通会自动退回原来的上传方式。
           // 助理通道没有执行主机，直接走协同服务上传（bridgeAttach 给 null 即可）。
@@ -2388,6 +2476,29 @@ export default {
             (needService
               ? '（附件要经过协同服务上传，确认 启动.bat 起了再试）'
               : '')
+        }
+        // —— 最后一道闸：这次写回**真的同步到服务器了吗** ——
+        // 本机树里有节点 ≠ 服务器上有：协同离线 / 积压时，改动只活在浏览器内存里，
+        // 刷新就没了（2026-10-08 用户反馈「强制刷新之后只有任务跟任务内容了」）。
+        // 所以「完成」这两个字，必须等改动落库之后才说。
+        const trouble = this.collabSaveTrouble()
+        if (trouble) {
+          const saved = await this.waitForCollabSaved(
+            trouble === 'offline' ? 3000 : 12000
+          )
+          if (!saved) {
+            const tip = this.collabNotSavedTip(trouble)
+            this.jobWriteError = this.jobWriteError
+              ? `${this.jobWriteError}；${tip}`
+              : tip
+            patchRunRecord(jobId, { synced: false, syncTip: tip })
+          } else {
+            patchRunRecord(jobId, { synced: true, syncTip: '' })
+          }
+        } else {
+          patchRunRecord(jobId, { synced: true, syncTip: '' })
+        }
+        if (this.jobWriteError) {
           this.$message.warning(this.jobWriteError)
         } else if (missing) {
           this.$message.warning(
@@ -2421,12 +2532,28 @@ export default {
         return
       }
       this.rememberRunTarget()
-      if (!this.jobRunNodeUid) {
+      // 优先用记录里那个任务容器（uid 也在图上就写回原处）；
+      // 容器没同步上去 / 已被删 → 退回「当前选中节点」
+      const targetUid = String(item.nodeUid || '').trim()
+      if (!targetUid && !this.jobRunNodeUid) {
         this.$message.warning('先在图上选中要写入的那个节点，再点「写入导图」')
         return
       }
       const markdown = (await this.fetchJobText(item.id)) || this.jobFullText
-      await this.writeJobResultToNode(item, { force: true, markdown })
+      // 助理那条的产物在 output/<runDir>/ 里，刷新后照样能按目录重新捞回来 ——
+      // 不然「补写」只能补正文，附件还是缺（2026-10-08 用户反馈产物/挂载问题）
+      let artifacts = null
+      if ((item.channel || '') === RUN_CHANNEL_OPENCLAW && item.runDir) {
+        artifacts = await this.fetchOpenclawArtifacts(0, item.runDir)
+        if (!artifacts.length) artifacts = null
+      }
+      const options = { force: true, markdown }
+      if (targetUid) options.nodeUid = targetUid
+      if (artifacts) {
+        options.artifacts = artifacts
+        options.channel = RUN_CHANNEL_OPENCLAW
+      }
+      await this.writeJobResultToNode(item, options)
       if (this.jobWriteError) this.$message.error(this.jobWriteError)
       else if (this.jobWriteState) this.$message.success(this.jobWriteState)
     },
@@ -2461,35 +2588,51 @@ export default {
      * 兜底：目录没扫到（Agent 没按目录写、或目录名对不上）→ 退回按时间窗扫共享 output，
      * 宁可多也别把产物丢了。
      */
-    async fetchOpenclawArtifacts(since, dir = '') {
+    async fetchOpenclawArtifacts(since, dir = '', diag = null) {
       const runDir = String(dir || '').trim()
+      // 诊断信息：产物没扫到时，要能说出「扫了哪里、各命中几个」——
+      // 否则界面上只会看到「完成」，人不知道文件是没写还是没扫到（2026-10-08 反馈）
+      const note = (key, value) => {
+        if (diag && typeof diag === 'object') diag[key] = value
+      }
+      if (diag && typeof diag === 'object') {
+        diag.runDir = runDir
+        diag.since = Number(since) || 0
+      }
       const query = async qs => {
-        const res = await fetch(`/api/artifacts/recent?${qs}`, {
-          cache: 'no-store',
-          credentials: 'include'
-        })
-        if (!res.ok) return []
-        const json = await res.json().catch(() => ({}))
-        return (json && json.items) || []
+        try {
+          const res = await fetch(`/api/artifacts/recent?${qs}`, {
+            cache: 'no-store',
+            credentials: 'include'
+          })
+          if (!res.ok) {
+            note('error', `取产物接口返回 ${res.status}`)
+            return []
+          }
+          const json = await res.json().catch(() => ({}))
+          note('total', Number((json && json.total) || 0))
+          return (json && json.items) || []
+        } catch (err) {
+          note('error', (err && err.message) || '取产物失败')
+          return []
+        }
       }
       if (runDir) {
         try {
           const pinned = await query(
             `dir=${encodeURIComponent(runDir)}&limit=20&content=1`
           )
+          note('dirCount', pinned.length)
           if (pinned.length) return pinned
         } catch (err) {
           /* 掉到下面的时间窗兜底 */
         }
       }
-      try {
-        return await query(
-          `since=${encodeURIComponent(Number(since) || 0)}&limit=8&content=1`
-        )
-      } catch (err) {
-        // 捞不到不影响正文写回
-        return []
-      }
+      const fallback = await query(
+        `since=${encodeURIComponent(Number(since) || 0)}&limit=8&content=1`
+      )
+      note('sinceCount', fallback.length)
+      return fallback
     },
 
     /**
@@ -2511,11 +2654,13 @@ export default {
       // 排队条目要把 runDir 一起带上：晚点真的跑起来时，扫的就是同一个目录。
       const runDir = String(options.runDir || this.makeRunDir())
       // 点过概要 → 接着它继续；否则按节点默认任务（跟桥接同一套取词逻辑）
+      // ⚠️ cwd 传空：助理跑在它自己的 workspace 里，不能把「执行主机」的 Windows 路径
+      // 塞进提示词 —— 那样它会往一个根本不存在的目录写产物，页面上就是「产物没挂上」。
       let prompt = ''
       if (options.prompt) {
-        prompt = this.buildFollowUpJobPrompt(options.prompt, runNode, runDir)
+        prompt = this.buildFollowUpJobPrompt(options.prompt, runNode, runDir, '')
       } else {
-        const picked = await this.resolveRunPrompt(runNode, runDir)
+        const picked = await this.resolveRunPrompt(runNode, runDir, '')
         prompt = picked.prompt
       }
 
@@ -2681,9 +2826,11 @@ export default {
           running > 1 ? `正在写回导图…（并行 ${running} 条）` : '正在写回导图…'
         // 助理的产物落在 workspace/output（挂宿主 ./output）——
         // 只按**这次运行的专属目录**捞，回形针上就只有这一次的东西
+        const artifactDiag = {}
         const artifacts = await this.fetchOpenclawArtifacts(
           run.startedAt,
-          outDir
+          outDir,
+          artifactDiag
         )
         await this.writeJobResultToNode(
           { id },
@@ -2691,6 +2838,7 @@ export default {
             channel: RUN_CHANNEL_OPENCLAW,
             markdown,
             artifacts,
+            artifactDiag,
             // 落点用这次任务自己的（并行/排队时读实例变量会被别的任务覆盖）
             nodeUid,
             nodeTitle,
