@@ -476,13 +476,14 @@ function createCheckProviders(options = {}) {
     timeoutMs: options.wikiTimeoutMs || 8000,
     signal
   })
-  async function searchSources({ roomKey, query, scope, chain, actor, mode = 'business', requestCache } = {}) {
+  async function searchSources({ roomKey, query, businessContext, scope, chain, actor, mode = 'business', requestCache } = {}) {
     if (signal && signal.aborted) return statusResult('unavailable', { error: 'request_aborted', candidates: [], complete: false })
     const q = String(query || '').trim().slice(0, MAX_QUERY_CHARS)
-    if (!safeRoomKey(roomKey) || !q) return statusResult('error', { error: 'invalid_room_or_query', candidates: [] })
+    const hasWikiBusinessContext = scope === 'wiki' && businessContext && Array.isArray(businessContext.texts)
+    if (!safeRoomKey(roomKey) || (!q && !hasWikiBusinessContext)) return statusResult('error', { error: 'invalid_room_or_query', candidates: [] })
 
     if (scope === 'wiki') {
-      const found = await wiki.searchSources({ roomKey, query: q, mode, actor, requestCache })
+      const found = await wiki.searchSources({ roomKey, query: q, businessContext, mode, actor, requestCache })
       if (found.status !== 'ok') return { ...found, source: 'wiki' }
       return {
         ...found,
@@ -590,11 +591,13 @@ function createCheckProviders(options = {}) {
     ])
     const candidates = []
     const errors = outcomes.filter(result => result.status !== 'ok')
+    const canonicalList = outcomes[0]
+    const canonicalStoragePermissionDenied = canonicalList.status !== 'ok' &&
+      /\b(?:EACCES|EPERM)\b/i.test(String(canonicalList.error || canonicalList.code || ''))
     let canonicalDocsTotal = 0
 
     // canonical_list is ACL-gated. Since it has no text-search method, read at
     // most MAX_CANONICAL_DOCS bodies from this room and search only in memory.
-    const canonicalList = outcomes[0]
     if (canonicalList.status === 'ok') {
       const items = Array.isArray(canonicalList.value)
         ? canonicalList.value
@@ -718,10 +721,14 @@ function createCheckProviders(options = {}) {
     const unique = [...new Map(candidates.map(candidate => [candidate.candidateId, candidate])).values()]
       .slice(0, MAX_CANDIDATES)
     const complete = errors.length === 0 && canonicalDocsTotal <= MAX_CANONICAL_DOCS
-    if (unique.length) return statusResult('ok', { candidates: unique, complete, errors: errors.map(item => item.error || item.status) })
+    const error = canonicalStoragePermissionDenied
+      ? 'canonical_storage_permission_denied'
+      : errors.map(item => item.error || item.status).find(Boolean) || ''
+    const errorDetails = errors.map(item => item.error || item.status)
+    if (unique.length) return statusResult('ok', { candidates: unique, complete, error, errors: errorDetails })
     if (errors.length) {
       const status = errors.some(item => item.status === 'forbidden') ? 'forbidden' : 'unavailable'
-      return statusResult(status, { candidates: [], complete: false, errors: errors.map(item => item.error || item.status) })
+      return statusResult(status, { candidates: [], complete: false, error, errors: errorDetails })
     }
     return statusResult('no_results', { candidates: [], complete, errors: [] })
   }
