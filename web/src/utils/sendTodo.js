@@ -304,12 +304,37 @@ async function dispatchTodoViaXiaoce({
   }
 }
 
+/**
+ * 取一个「人能看懂」的中止原因。
+ *
+ * `AbortController.abort()` 不带 reason 时，浏览器给的是
+ * `signal is aborted without reason`、undici(fetch) 抛的是 `Aborted` ——
+ * 这两句会被上层原样当成「企微派发失败」的原因写进 SOP 台账
+ * （2026-09-14「刘欢：招聘」两条失败记录就是这么来的），用户看不懂。
+ * 这里统一换成「操作已取消」，**name 保持 AbortError**（现有判断依赖它）。
+ */
+function abortReasonOf(signal) {
+  const reason = signal && signal.reason
+  const message = String((reason && reason.message) || '')
+  if (
+    reason &&
+    message &&
+    !/aborted without reason/i.test(message) &&
+    message !== 'Aborted'
+  ) {
+    return reason
+  }
+  const err = new Error('操作已取消')
+  err.name = 'AbortError'
+  return err
+}
+
 async function isWorkbuddyTodoRouteAvailable({ signal } = {}) {
   const now = Date.now()
   if (workbuddyTodoRouteCache.expiresAt > now) {
     return workbuddyTodoRouteCache.available
   }
-  if (signal && signal.aborted) throw signal.reason || new Error('操作已取消')
+  if (signal && signal.aborted) throw abortReasonOf(signal)
 
   const { baseUrl, apiKey } = getWorkbuddyConfig()
   const controller = new AbortController()
@@ -329,7 +354,7 @@ async function isWorkbuddyTodoRouteAvailable({ signal } = {}) {
     }
     return available
   } catch (err) {
-    if (signal && signal.aborted) throw signal.reason || err
+    if (signal && signal.aborted) throw abortReasonOf(signal)
     workbuddyTodoRouteCache = { available: false, expiresAt: Date.now() + 3000 }
     return false
   } finally {

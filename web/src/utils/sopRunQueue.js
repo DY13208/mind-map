@@ -8,6 +8,25 @@ import { areWaitingWecomTodosDone } from './sopNotify'
 import { getLocalConfig } from '@/api'
 import { authorizeSopRun } from './fileApi'
 
+/**
+ * 造一个「已取消」的中止原因。
+ *
+ * 为什么要带 reason：`AbortController.abort()` 不传 reason 时，
+ * `signal.reason` 是一句技术黑话 `signal is aborted without reason` ——
+ * 它会被 sendTodo / sopNotify 原样当成「企微派发失败」的原因写进台账
+ * （2026-09-14「刘欢：招聘」两条失败记录就是这么来的），用户根本看不懂。
+ * 这里统一换成「任务已取消」，**name 仍是 AbortError**，现有判断不受影响。
+ */
+function makeAbortError(message = '任务已取消') {
+  try {
+    return new DOMException(message, 'AbortError')
+  } catch (err) {
+    const fallback = new Error(message)
+    fallback.name = 'AbortError'
+    return fallback
+  }
+}
+
 async function assertSopRunAuthorized(roomKey, sopUid) {
   try {
     const res = await authorizeSopRun(roomKey, sopUid)
@@ -1108,7 +1127,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       }
       const controller = controllers.get(jobId)
       if (controller) {
-        controller.abort()
+        controller.abort(makeAbortError())
         return true
       }
       return false
@@ -1133,7 +1152,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
       finishing.clear()
       controllers.forEach(controller => {
         try {
-          controller.abort()
+          controller.abort(makeAbortError('已取消全部任务'))
         } catch (e) {
           /* ignore */
         }
