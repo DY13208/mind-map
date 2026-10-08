@@ -2,8 +2,8 @@ import LogicalStructure from './LogicalStructure'
 import compactLayoutConfig from './compactLayoutConfig'
 import { asyncRun } from '../utils'
 
-// Keep parents in a compact column. Pack each parent's immediate children as
-// one group, without reserving the height of its more distant descendants.
+// Pack complete branches with small gaps, keeping each parent centered on its
+// own children. Compactness must not disconnect the visual hierarchy.
 class CompactStructure extends LogicalStructure {
   constructor(renderer) {
     super(renderer)
@@ -67,38 +67,49 @@ class CompactStructure extends LogicalStructure {
 
   computedTopValue() {
     const levels = this.levels || []
+    const branchHeights = new Map()
     this.obstacleRightByNode = new Map()
     this.busXByNode = new Map()
     this.armOffsetsByNode = new Map()
     this.placedConnectorRoutes = []
-    for (let depth = 1; depth < levels.length; depth++) {
-      const parents = levels[depth - 1] || []
-      const groups = []
-      parents.forEach(parent => {
-        const children = parent.getData('expand') === false
-          ? []
-          : parent.children || []
-        if (!children.length) return
-        const gap = depth === 1
-          ? this.compactConfig.siblingGap
-          : this.compactConfig.childGap
-        const height = children.reduce((sum, child) => {
-          return sum + this.nodeHeight(child)
-        }, 0) + (children.length - 1) * gap
-        const groupTop = parent.top + parent.height / 2 - height / 2
-        let top = groupTop
-        children.forEach(child => {
-          if (!child.hasCustomPosition()) child.top = top
-          top += this.nodeHeight(child) + gap
-        })
-        groups.push({ parent, children, height, top: groupTop })
+
+    // Measure bottom-up so a deep branch cannot push its descendants away
+    // from a parent that has already been squeezed between its siblings.
+    for (let depth = levels.length - 1; depth >= 0; depth--) {
+      const gap = this.getMarginY(depth + 1)
+      ;(levels[depth] || []).forEach(node => {
+        const children = node.getData('expand') === false ? [] : node.children || []
+        const childrenHeight = children.reduce((sum, child) => {
+          return sum + branchHeights.get(child)
+        }, 0) + Math.max(0, children.length - 1) * gap
+        const summaryHeight = typeof node.checkHasVisibleGeneralization === 'function' &&
+          node.checkHasVisibleGeneralization()
+          ? node.childrenAreaHeight2 || 0
+          : 0
+        branchHeights.set(node, Math.max(this.nodeHeight(node), childrenHeight, summaryHeight))
       })
-      // Root children stay fixed. Every later sibling group moves together,
-      // keeping its own vertical bus and its children visually associated.
-      if (depth > 1) this.packGroups(groups)
-      const obstacles = levels.slice(0, depth).flat()
-      this.positionChildGroups(obstacles, groups)
-      // Finalize this level's corridors before placing its grandchildren.
+    }
+
+    for (let depth = 1; depth < levels.length; depth++) {
+      const groups = []
+      ;(levels[depth - 1] || []).forEach(parent => {
+        const children = parent.getData('expand') === false ? [] : parent.children || []
+        if (!children.length) return
+        const gap = this.getMarginY(depth)
+        const height = children.reduce((sum, child) => {
+          return sum + branchHeights.get(child)
+        }, 0) + (children.length - 1) * gap
+        let top = parent.top + parent.height / 2 - height / 2
+        children.forEach(child => {
+          const branchHeight = branchHeights.get(child)
+          if (!child.hasCustomPosition()) {
+            child.top = top + (branchHeight - child.height) / 2
+          }
+          top += branchHeight + gap
+        })
+        groups.push({ parent, children })
+      })
+      this.positionChildGroups(levels.slice(0, depth).flat(), groups)
       this.assignConnectorLanes(depth - 1)
     }
   }
@@ -406,48 +417,6 @@ class CompactStructure extends LogicalStructure {
         this.busXByNode.set(node, route.busX)
         placed.push(route)
       })
-    })
-  }
-
-  // Project sibling groups to the nearest non-overlapping positions. Only
-  // immediate children occupy space here; grandchildren are placed separately.
-  packGroups(groups) {
-    if (groups.length < 2) return
-    const offsets = [0]
-    for (let i = 1; i < groups.length; i++) {
-      offsets[i] = offsets[i - 1] + groups[i - 1].height + this.compactConfig.groupGap
-    }
-    const blocks = []
-    groups.forEach((group, index) => {
-      const fixedChild = group.children.find(child => child.hasCustomPosition())
-      const fixedOffset = fixedChild
-        ? group.children.slice(0, group.children.indexOf(fixedChild)).reduce((sum, child) => {
-          return sum + this.nodeHeight(child) + this.compactConfig.childGap
-        }, 0)
-        : 0
-      const weight = fixedChild ? 1000000 : 1
-      const desiredTop = fixedChild ? fixedChild.top - fixedOffset : group.top
-      const desired = desiredTop - offsets[index]
-      blocks.push({ start: index, end: index, weight, sum: desired * weight })
-      while (blocks.length > 1) {
-        const last = blocks[blocks.length - 1]
-        const prev = blocks[blocks.length - 2]
-        if (prev.sum / prev.weight <= last.sum / last.weight) break
-        prev.end = last.end
-        prev.weight += last.weight
-        prev.sum += last.sum
-        blocks.pop()
-      }
-    })
-    blocks.forEach(block => {
-      const base = block.sum / block.weight
-      for (let i = block.start; i <= block.end; i++) {
-        let top = base + offsets[i]
-        groups[i].children.forEach(child => {
-          if (!child.hasCustomPosition()) child.top = top
-          top += this.nodeHeight(child) + this.compactConfig.childGap
-        })
-      }
     })
   }
 
