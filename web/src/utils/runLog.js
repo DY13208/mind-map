@@ -154,6 +154,13 @@ export function recordToHistoryItem(rec) {
     room: rec.room || '',
     gateway: rec.gateway || '',
     hostKey: rec.hostKey || '',
+    // 这次运行专属的产物目录 + 已扫到的产物名 —— 刷新后「写入导图」补写时
+    // 还能按目录把产物重新捞回来（产物文件还在 output/<runDir>/ 里）
+    runDir: rec.runDir || '',
+    artifactNames: Array.isArray(rec.artifactNames) ? rec.artifactNames : [],
+    // synced=false = 写回只在本机、没同步到服务器（刷新会丢），列表里要标出来
+    synced: rec.synced,
+    syncTip: rec.syncTip || '',
     // 没有执行会话 → 正文/产物都在本地这份记录里，别再按桥接那套去查
     localOnly: !rec.gateway
   }

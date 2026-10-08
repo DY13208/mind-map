@@ -1321,6 +1321,75 @@ export default {
     this.$bus.$off('node_note_dblclick', this.onNodeNoteDblclick)
   },
   methods: {
+    /**
+     * 协同里还有没有「改了但没上去」的改动。
+     *
+     * 这是「刷新就丢」的判据（2026-10-08 用户反馈「强制刷新之后只有任务跟任务内容了」）：
+     * 节点是**先在本机 Yjs 文档里插进去**的，画布立刻就看得见；能不能活过刷新，
+     * 取决于这些改动有没有真的提交到协同服务。以前写回只检查「本机树里有没有」，
+     * 所以离线/积压时照样报「完成」，刷新一load 就只剩同步上去的那部分。
+     */
+    collabSyncPending() {
+      const status =
+        typeof window !== 'undefined' &&
+        typeof window.__COLLAB_V2_STATUS__ === 'function'
+          ? window.__COLLAB_V2_STATUS__() || {}
+          : {}
+      const pending =
+        status.outboxPending === true ||
+        Number(status.outboxPending || status.pendingCount || 0) > 0 ||
+        status.outboxSending === true ||
+        Number(status.outboxSending || 0) > 0 ||
+        Number(this.collabPendingCount || 0) > 0 ||
+        this.collabSaveState === 'saving'
+      return { pending, status }
+    },
+
+    /**
+     * 这次改动有没有「同步到服务器」的麻烦。返回 ''（没问题）/ 'offline' / 'failed' / 'pending'。
+     *
+     * ⚠️ 只在**确实在用协同**时才判：本地文件模式、没有房间信息时不存在同步问题，
+     * 别把「单机版」也报成没保存。判据只认明确的证据（状态字段 / 积压条数），
+     * 不靠默认值猜 —— collabSaveChip 在状态还没上报时会兜底成 offline，那个不能当证据。
+     */
+    collabSaveTrouble() {
+      const phase = this.collabPhase
+      const save = this.collabSaveState
+      const inRoom = !!this.currentRoomKey() || !!phase || !!save
+      if (!inRoom) return ''
+      if (save === 'error' || phase === 'ERROR') return 'failed'
+      if (save === 'offline' || phase === 'OFFLINE' || phase === 'DISCONNECTED') {
+        return 'offline'
+      }
+      if (this.collabSyncPending().pending) return 'pending'
+      return ''
+    },
+
+    /** 等这段改动同步上去（返回 true = 已经落服务器了） */
+    async waitForCollabSaved(deadlineMs = 10000) {
+      const deadline = Date.now() + Math.max(0, Number(deadlineMs) || 0)
+      for (;;) {
+        if (!this.collabSaveTrouble()) return true
+        if (Date.now() >= deadline) return false
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+    },
+
+    /** 写回之后没同步上去时，给用户看的话（说清后果与怎么补） */
+    collabNotSavedTip(trouble) {
+      const why =
+        trouble === 'failed'
+          ? '协同同步报错了'
+          : trouble === 'offline'
+          ? '协同现在没连上'
+          : '还有改动没同步上去'
+      return (
+        `导图改了，但**还没同步到服务器**（${why}）—— ` +
+        '现在只在这台浏览器里，**刷新就没了**。' +
+        '等右下角保存状态变成「已保存」后，在运行历史里选中这条记录、点「写入导图」补一次。'
+      )
+    },
+
     async waitForCpdSnapshot() {
       const deadline = Date.now() + 8000
       for (;;) {
@@ -1518,6 +1587,10 @@ export default {
       this.jobActiveId = item.id
       this.jobCurrentId = item.id
       this.resetJobFullText()
+      // 上次写回没同步到服务器的那条：点开就把原因亮出来（刷新会丢 → 需要补写）
+      this.jobWriteError =
+        item.synced === false ? String(item.syncTip || '这次写回没同步到服务器') : ''
+      this.jobWriteState = ''
       // 本地留存那条（助理 / 桥接不通时的兜底）正文就在记录里，不在会话历史里
       const seed = String(
         item.localOnly ? item.result || item.detail || '' : item.detail || ''
@@ -2160,7 +2233,9 @@ export default {
      * 不标一下分不清「这条是谁跑的」。
      */
     jobMetaText(item) {
-      return [this.jobTimeText(item), this.jobChannelShort(item)]
+      // 「未同步」要标出来：这条写回只在本机，刷新就没了（2026-10-08 反馈）
+      const notSynced = item && item.synced === false ? '⚠ 未同步到服务器' : ''
+      return [this.jobTimeText(item), this.jobChannelShort(item), notSynced]
         .filter(Boolean)
         .join(' · ')
     },
@@ -2321,6 +2396,13 @@ export default {
       this.jobWriteBusy = true
       this.jobWriteError = ''
       this.jobWriteState = '正在读取产物文件…'
+      // 协同没连上时**先等一等再写**：现在写下去只活在本机，过一会儿 resync 会被
+      // 服务器上的状态盖掉 —— 白写一遍（2026-10-08 用户反馈「强制刷新之后只有任务
+      // 跟任务内容了」）。等不到也照写（本机至少看得见），但结尾会明确警告。
+      if (this.collabSaveTrouble()) {
+        this.jobWriteState = '协同还没连上，正在等它恢复…'
+        await this.waitForCollabSaved(8000)
+      }
       try {
         let artifacts = []
         let artifactSkips = []
@@ -2394,6 +2476,29 @@ export default {
             (needService
               ? '（附件要经过协同服务上传，确认 启动.bat 起了再试）'
               : '')
+        }
+        // —— 最后一道闸：这次写回**真的同步到服务器了吗** ——
+        // 本机树里有节点 ≠ 服务器上有：协同离线 / 积压时，改动只活在浏览器内存里，
+        // 刷新就没了（2026-10-08 用户反馈「强制刷新之后只有任务跟任务内容了」）。
+        // 所以「完成」这两个字，必须等改动落库之后才说。
+        const trouble = this.collabSaveTrouble()
+        if (trouble) {
+          const saved = await this.waitForCollabSaved(
+            trouble === 'offline' ? 3000 : 12000
+          )
+          if (!saved) {
+            const tip = this.collabNotSavedTip(trouble)
+            this.jobWriteError = this.jobWriteError
+              ? `${this.jobWriteError}；${tip}`
+              : tip
+            patchRunRecord(jobId, { synced: false, syncTip: tip })
+          } else {
+            patchRunRecord(jobId, { synced: true, syncTip: '' })
+          }
+        } else {
+          patchRunRecord(jobId, { synced: true, syncTip: '' })
+        }
+        if (this.jobWriteError) {
           this.$message.warning(this.jobWriteError)
         } else if (missing) {
           this.$message.warning(
@@ -2427,12 +2532,28 @@ export default {
         return
       }
       this.rememberRunTarget()
-      if (!this.jobRunNodeUid) {
+      // 优先用记录里那个任务容器（uid 也在图上就写回原处）；
+      // 容器没同步上去 / 已被删 → 退回「当前选中节点」
+      const targetUid = String(item.nodeUid || '').trim()
+      if (!targetUid && !this.jobRunNodeUid) {
         this.$message.warning('先在图上选中要写入的那个节点，再点「写入导图」')
         return
       }
       const markdown = (await this.fetchJobText(item.id)) || this.jobFullText
-      await this.writeJobResultToNode(item, { force: true, markdown })
+      // 助理那条的产物在 output/<runDir>/ 里，刷新后照样能按目录重新捞回来 ——
+      // 不然「补写」只能补正文，附件还是缺（2026-10-08 用户反馈产物/挂载问题）
+      let artifacts = null
+      if ((item.channel || '') === RUN_CHANNEL_OPENCLAW && item.runDir) {
+        artifacts = await this.fetchOpenclawArtifacts(0, item.runDir)
+        if (!artifacts.length) artifacts = null
+      }
+      const options = { force: true, markdown }
+      if (targetUid) options.nodeUid = targetUid
+      if (artifacts) {
+        options.artifacts = artifacts
+        options.channel = RUN_CHANNEL_OPENCLAW
+      }
+      await this.writeJobResultToNode(item, options)
       if (this.jobWriteError) this.$message.error(this.jobWriteError)
       else if (this.jobWriteState) this.$message.success(this.jobWriteState)
     },

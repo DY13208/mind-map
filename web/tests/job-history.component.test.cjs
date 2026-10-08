@@ -1948,6 +1948,151 @@ async function main() {
     vm.buildDefaultJobPrompt(null, '20261008-2032', '')
   )
 
+  // ---- 31. 「刷新就丢」的判据：写回之后要确认真的同步到服务器了 ----
+  // 用户 2026-10-08：「强制刷新之后 只有任务跟任务内容了」—— 节点是先在**本机** Yjs 里
+  // 插进去的，画布立刻看得见；没提交到协同服务的那些，刷新一 load 就没了。
+  // 以前写回只检查本机树，所以离线/积压时照样报「完成」。
+  console.log('--- 写回是否真的同步到服务器 ---')
+  vm = makeVm()
+  check('不在房间里 → 不判同步（单机版没有这个问题）', vm.collabSaveTrouble() === '', vm.collabSaveTrouble())
+  vm.collabPhase = 'OFFLINE'
+  check('协同离线 → offline', vm.collabSaveTrouble() === 'offline', vm.collabSaveTrouble())
+  vm = makeVm()
+  vm.collabSaveState = 'error'
+  check('协同报错 → failed', vm.collabSaveTrouble() === 'failed', vm.collabSaveTrouble())
+  vm = makeVm()
+  vm.collabPhase = 'LIVE'
+  vm.collabPendingCount = 3
+  check('还有 3 条没上去 → pending', vm.collabSaveTrouble() === 'pending', vm.collabSaveTrouble())
+  vm = makeVm()
+  vm.collabPhase = 'LIVE'
+  vm.collabSaveState = 'saved'
+  check('已保存 → 没问题', vm.collabSaveTrouble() === '', vm.collabSaveTrouble())
+
+  // 写回结束但协同离线：不能说「完成」，要说清「只在本机、刷新就丢、怎么补」
+  vm = makeVm()
+  vm.$route = { query: { room: 'room-x' } }
+  vm.collabPhase = 'OFFLINE'
+  // 不等真实的重试窗口（否则这条用例要跑十几秒）
+  vm.waitForCollabSaved = async () => false
+  vm.$bus.$emit = (name, payload) => {
+    if (name !== 'write_job_result' || !payload || !payload.result) return
+    payload.result.promise = Promise.resolve({
+      ok: true,
+      nodes: 2,
+      inlineNodes: false,
+      attachments: [{ name: '完整输出.md', kind: 'text', via: 'collab' }],
+      warnings: [],
+      missing: []
+    })
+  }
+  vm.messages.length = 0
+  await vm.writeJobResultOnce(
+    { id: 'w-sync' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u-sync', force: true }
+  )
+  check(
+    '写回后没同步上去 → 明说「还没同步到服务器、刷新就没了」',
+    /还没同步到服务器/.test(vm.jobWriteError) && /刷新就没了/.test(vm.jobWriteError),
+    vm.jobWriteError
+  )
+  check(
+    '这种情况下**不能**报成功',
+    !vm.messages.some(([kind]) => kind === 'success'),
+    JSON.stringify(vm.messages)
+  )
+  check(
+    '运行记录标成「未同步」（历史里能看见、能补写）',
+    runLogUtil.readRunRecords().find(r => r.id === 'w-sync').synced === false,
+    JSON.stringify(runLogUtil.readRunRecords().find(r => r.id === 'w-sync') || {})
+  )
+  check(
+    '历史条目小字带「未同步」标记',
+    /未同步到服务器/.test(vm.jobMetaText({ id: 'w-sync', synced: false, startedAt: Date.now() })),
+    vm.jobMetaText({ id: 'w-sync', synced: false, startedAt: Date.now() })
+  )
+
+  // 同步没问题时照旧报成功
+  vm = makeVm()
+  vm.$route = { query: { room: 'room-x' } }
+  vm.collabPhase = 'LIVE'
+  vm.collabSaveState = 'saved'
+  vm.$bus.$emit = (name, payload) => {
+    if (name !== 'write_job_result' || !payload || !payload.result) return
+    payload.result.promise = Promise.resolve({
+      ok: true,
+      nodes: 2,
+      inlineNodes: false,
+      attachments: [{ name: '完整输出.md', kind: 'text', via: 'collab' }],
+      warnings: [],
+      missing: []
+    })
+  }
+  vm.messages.length = 0
+  await vm.writeJobResultOnce(
+    { id: 'w-ok' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u-ok', force: true }
+  )
+  check(
+    '同步正常 → 报成功、没有告警',
+    vm.messages.some(([kind]) => kind === 'success') && !vm.jobWriteError,
+    JSON.stringify([vm.messages, vm.jobWriteError])
+  )
+
+  // ---- 32. 刷新后「写入导图」补写：产物按 runDir 重新捞回来 ----
+  console.log('--- 补写：正文 + 产物一起补 ---')
+  vm = makeVm()
+  const scanned = []
+  const wrote = []
+  vm.fetchOpenclawArtifacts = async (since, dir) => {
+    scanned.push([since, dir])
+    return [{ name: 'output/对公司的建议.md', size: 20, mime: 'text/markdown', base64: 'YQ==' }]
+  }
+  vm.fetchJobText = async () => '这是一次运行留下的正文'
+  vm.writeJobResultToNode = async (job, options) => {
+    wrote.push(options)
+  }
+  vm.jobHistory = [
+    {
+      id: 'oc-old',
+      channel: 'openclaw',
+      state: 'done',
+      runDir: '20261008-2031',
+      nodeUid: 'u-container',
+      localOnly: true
+    }
+  ]
+  vm.jobActiveId = 'oc-old'
+  await vm.rewriteActiveJob()
+  check(
+    '补写时按记录里的 runDir 重新捞产物',
+    scanned.length === 1 && scanned[0][1] === '20261008-2031',
+    JSON.stringify(scanned)
+  )
+  check(
+    '产物一起传下去（补写不是只补正文）',
+    wrote.length === 1 && (wrote[0].artifacts || []).length === 1,
+    JSON.stringify(wrote.map(w => (w.artifacts || []).map(a => a.name)))
+  )
+  check(
+    '落点用记录里那个任务容器，不用用户现选',
+    wrote[0].nodeUid === 'u-container',
+    JSON.stringify(wrote[0].nodeUid)
+  )
+
+  check(
+    'recordToHistoryItem 透出 runDir / 产物名（刷新后才有得补）',
+    (() => {
+      const item = runLogUtil.recordToHistoryItem({
+        id: 'x',
+        runDir: '20261008-2031',
+        artifactNames: ['a.md']
+      })
+      return item.runDir === '20261008-2031' && item.artifactNames[0] === 'a.md'
+    })(),
+    ''
+  )
+
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)
   if (failed.length) {
