@@ -523,6 +523,7 @@ async function initAuth() {
     await authPool.query(
       'delete from auth_oauth_states where expires_at <= now()'
     )
+    await require('./cogneeSso').initStore(authPool)
   })()
 
   try {
@@ -2171,6 +2172,14 @@ async function handleAuthApi(req, res) {
     })
     return true
   }
+
+  if (await require('./cogneeSso').handleCogneeSsoApi(req, res, {
+    authenticateRequest,
+    sendJson,
+    readJsonBody,
+    authEnabled: config.enabled && config.wecomEnabled,
+    getPool: async () => { await initAuth(); return authPool }
+  })) return true
 
   if (pathname === '/api/auth/yiran-token' && req.method === 'POST') {
     if (!isAllowedOrigin(req)) {
