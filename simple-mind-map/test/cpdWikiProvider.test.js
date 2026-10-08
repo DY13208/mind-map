@@ -4,6 +4,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const crypto = require('crypto')
 const { createWikiProvider } = require('../bin/checkRuns/wikiProvider')
+const { createCheckProviders } = require('../bin/checkRuns/providers')
 
 function sha256(value) {
   return crypto.createHash('sha256').update(String(value), 'utf8').digest('hex')
@@ -45,7 +46,7 @@ function makeProvider(fetchImpl) {
   return createWikiProvider({ env: { CPD_WIKI_API_URL: BASE }, fetchImpl, timeoutMs: 2000 })
 }
 
-test('search merges chunks of one topic and keeps different topics as separate candidates', async () => {
+test('search merges relevant chunks and filters a different topic matched only by generic fields', async () => {
   const calls = []
   const results = [
     makeChunk({ topic: '库存盘点 SOP', section: '检查标准', start: 10, content: 'C：库存准确率至少 98%', source: ['Sources/库存制度.md'], score: 3, matchedTerms: ['库存', '检查标准'] }),
@@ -59,7 +60,8 @@ test('search merges chunks of one topic and keeps different topics as separate c
 
   const found = await provider.searchSources({ roomKey: ROOM, query: '库存 频率 判据 责任人' })
   assert.equal(found.status, 'ok')
-  assert.equal(found.candidates.length, 2)
+  assert.equal(found.candidates.length, 1)
+  assert.equal(found.filteredCount, 1)
   const stock = found.candidates.find(candidate => candidate.title === '库存盘点 SOP')
   assert.equal(stock.sourceRef.topic, '库存盘点 SOP')
   assert.equal(stock.sourceRef.section, '检查标准')
@@ -73,7 +75,7 @@ test('search merges chunks of one topic and keeps different topics as separate c
   assert.equal(stock.provenance.origin, 'unknown')
   assert.equal(stock.sourceId, stock.sourceRef.sourceId)
   assert.match(stock.sourceId, /^source-/)
-  assert.match(stock.matchReason, /命中词：库存/)
+  assert.match(stock.matchReason, /命中业务词：库存/)
   assert.deepEqual(stock.requiredFields, ['frequency', 'criterion', 'owner'])
   assert.deepEqual(stock.matchedFields, ['frequency', 'criterion'])
   assert.deepEqual(stock.unmatchedFields, ['owner'])
@@ -85,7 +87,161 @@ test('search merges chunks of one topic and keeps different topics as separate c
   assert.equal(stock.referenceDetails.complete, false)
   assert.equal(stock.sourceRef.roomId, ROOM)
   assert.equal(calls[0].url, '/api/search')
-  assert.deepEqual(calls[0].body, { query: '库存 频率 判据 责任人', top_k: 30, mode: 'business' })
+  assert.deepEqual(calls[0].body, { query: '库存', top_k: 30, mode: 'business' })
+})
+
+test('business context rejects membership topics whose hits are only CPD and field-structure terms', async () => {
+  const results = [
+    makeChunk({
+      topic: '会员运营SOP', section: 'C：会员成交与利润目标', content: 'C：会员成交目标达到98%',
+      score: 100, matchedTerms: ['方案', '执行', '达到', '目标', '未达', '达标']
+    }),
+    makeChunk({
+      topic: '私域复购运营SOP', section: 'D：复购触达执行', content: 'D：每周执行会员复购触达并记录',
+      score: 55, matchedTerms: ['目标', '执行', '记录']
+    }),
+    makeChunk({
+      topic: '会员指标与数据规范', section: '会员运营字段说明', content: '会员运营目标值与材料来源字段',
+      score: 40, matchedTerms: ['确认', '目标', '标值']
+    })
+  ]
+  const provider = makeProvider(async () => jsonResponse({ query: '结构词查询', results }))
+  const businessContext = {
+    texts: [
+      'P：按第一套抽检方案执行',
+      'C：质量合格率达到98%',
+      'D：执行第一套抽检'
+    ]
+  }
+
+  const found = await provider.searchSources({
+    roomKey: ROOM,
+    query: '第一套抽检方案执行 质量合格率 目标值 每周 材料来源',
+    businessContext
+  })
+
+  assert.equal(found.status, 'no_results')
+  assert.deepEqual(found.candidates, [])
+  assert.equal(found.filteredCount, 3)
+  assert.equal(found.complete, true)
+  assert.equal(found.matchReason, '未找到与当前业务相关的 Wiki SOP')
+})
+
+test('generic CPD labels, cadence, target values, and source labels alone are not business terms', async () => {
+  let requests = 0
+  const provider = makeProvider(async () => {
+    requests += 1
+    return jsonResponse({
+    results: [makeChunk({
+      topic: '会员运营SOP', section: '会员成交目标',
+      content: 'C：目标值达到98%。P：每周执行。D：材料来源为会员台账。',
+      score: 100, matchedTerms: ['每周', '执行', '目标值', '材料来源']
+    })]
+    })
+  })
+
+  const found = await provider.searchSources({
+    roomKey: ROOM,
+    query: 'P每周执行 C目标值达到98 D材料来源',
+    businessContext: { texts: ['P：每周执行方案', 'C：目标值达到98%', 'D：材料来源'] }
+  })
+
+  assert.equal(found.status, 'no_results')
+  assert.equal(found.filteredCount, 0)
+  assert.equal(found.complete, true)
+  assert.match(found.matchReason, /没有可用于判断相关性的业务关键词/)
+  assert.equal(requests, 0, 'an explicit context with no business terms should skip Wiki search')
+})
+
+test('shared numeric comparison language does not match different business topics', async () => {
+  const provider = makeProvider(async () => jsonResponse({
+    results: [makeChunk({
+      topic: '质量抽检规范', section: '质量合格率',
+      content: 'C：质量合格率不低于95%', score: 100, matchedTerms: ['不低于', '95']
+    })]
+  }))
+
+  const found = await provider.searchSources({
+    roomKey: ROOM,
+    query: '会员成交率不低于95%',
+    businessContext: { texts: ['C：会员成交率不低于95%'] }
+  })
+
+  assert.equal(found.status, 'no_results')
+  assert.equal(found.filteredCount, 1)
+  assert.equal(found.matchReason, '未找到与当前业务相关的 Wiki SOP')
+})
+
+test('business context admits a directly related member SOP and reports the literal matched business phrase', async () => {
+  const businessContext = {
+    texts: [
+      'C会员成交达成率95%',
+      'P每周开展会员权益触达会员成交95%',
+      'D每周执行会员权益触达并跟踪成交'
+    ]
+  }
+  const results = [
+    makeChunk({
+      topic: '会员运营SOP', section: '会员成交管理',
+      content: 'C：会员成交达成率达到95%。P：会员权益触达。D：跟踪会员成交。',
+      score: 1, matchedTerms: ['会员']
+    }),
+    makeChunk({
+      topic: '质量抽检规范', section: '质量目标',
+      content: 'C：质量合格率达到98%。P：每周抽检。',
+      score: 100, matchedTerms: ['目标', '执行', '达到']
+    })
+  ]
+  const provider = makeProvider(async () => jsonResponse({ query: '会员运营', results }))
+
+  const found = await provider.searchSources({
+    roomKey: ROOM,
+    query: businessContext.texts.join(' '),
+    businessContext
+  })
+
+  assert.equal(found.status, 'ok')
+  assert.equal(found.candidates.length, 1)
+  assert.equal(found.filteredCount, 1)
+  assert.equal(found.candidates[0].title, '会员运营SOP')
+  assert.match(found.candidates[0].matchReason, /命中业务词：会员成交达成率/)
+})
+
+test('check provider forwards optional business context to Wiki while preserving query fallback for older callers', async () => {
+  let requests = 0
+  const provider = createCheckProviders({
+    env: { CPD_WIKI_API_URL: BASE },
+    fetchImpl: async () => {
+      requests += 1
+      return jsonResponse({
+        results: [makeChunk({ topic: '会员运营SOP', section: '会员成交', content: '会员成交每周跟进' })]
+      })
+    }
+  })
+
+  const emptyContext = await provider.searchSources({
+    roomKey: ROOM,
+    scope: 'wiki',
+    query: '',
+    businessContext: { texts: [] }
+  })
+  assert.equal(emptyContext.status, 'no_results')
+  assert.equal(requests, 0, 'explicit empty context must not fall back to the broad query')
+
+  const filtered = await provider.searchSources({
+    roomKey: ROOM,
+    scope: 'wiki',
+    query: '会员成交',
+    businessContext: { texts: ['库存盘点'] }
+  })
+  assert.equal(filtered.status, 'no_results')
+  assert.equal(filtered.filteredCount, 1)
+  assert.equal(requests, 1)
+
+  const compatible = await provider.searchSources({ roomKey: ROOM, scope: 'wiki', query: '会员成交' })
+  assert.equal(compatible.status, 'ok')
+  assert.equal(compatible.candidates[0].title, '会员运营SOP')
+  assert.equal(requests, 2)
 })
 
 test('readSource rechecks every merged chunk against the current search and the full topic', async () => {
@@ -221,38 +377,38 @@ test('cross-room refs are refused before any request and missing query stays inv
 
 test('search failures stay typed: forbidden, unavailable, invalid json, invalid items and oversized bodies', async () => {
   const forbidden = await makeProvider(async () => jsonResponse({}, 403))
-    .searchSources({ roomKey: ROOM, query: 'q' })
+    .searchSources({ roomKey: ROOM, query: '库存' })
   assert.equal(forbidden.status, 'forbidden')
   assert.equal(forbidden.error, 'wiki_forbidden')
 
   const unavailable = await makeProvider(async () => jsonResponse({}, 503))
-    .searchSources({ roomKey: ROOM, query: 'q' })
+    .searchSources({ roomKey: ROOM, query: '库存' })
   assert.equal(unavailable.status, 'unavailable')
 
   const network = await makeProvider(async () => { throw new Error('boom') })
-    .searchSources({ roomKey: ROOM, query: 'q' })
+    .searchSources({ roomKey: ROOM, query: '库存' })
   assert.equal(network.status, 'unavailable')
   assert.equal(network.error, 'wiki_unreachable')
 
   const invalidJson = await makeProvider(async () => new Response('not-json', { status: 200 }))
-    .searchSources({ roomKey: ROOM, query: 'q' })
+    .searchSources({ roomKey: ROOM, query: '库存' })
   assert.equal(invalidJson.status, 'parse_failed')
   assert.equal(invalidJson.error, 'wiki_invalid_json')
 
   const invalidItem = await makeProvider(async () => jsonResponse({
-    query: 'q', results: [{ topic: '主题', section: '', chunk_id: 'x', content: '正文' }]
-  })).searchSources({ roomKey: ROOM, query: 'q' })
+    query: '库存', results: [{ topic: '主题', section: '', chunk_id: 'x', content: '正文' }]
+  })).searchSources({ roomKey: ROOM, query: '库存' })
   assert.equal(invalidItem.status, 'parse_failed')
   assert.equal(invalidItem.error, 'wiki_invalid_search_item')
 
   const oversized = await makeProvider(async () => new Response('[]', {
     status: 200, headers: { 'Content-Type': 'application/json', 'content-length': String(2 * 1024 * 1024) }
-  })).searchSources({ roomKey: ROOM, query: 'q' })
+  })).searchSources({ roomKey: ROOM, query: '库存' })
   assert.equal(oversized.status, 'parse_failed')
   assert.equal(oversized.error, 'wiki_response_too_large')
 
-  const noResults = await makeProvider(async () => jsonResponse({ query: 'q', results: [] }))
-    .searchSources({ roomKey: ROOM, query: 'q' })
+  const noResults = await makeProvider(async () => jsonResponse({ query: '库存', results: [] }))
+    .searchSources({ roomKey: ROOM, query: '库存' })
   assert.equal(noResults.status, 'no_results')
   assert.deepEqual(noResults.candidates, [])
   assert.equal(noResults.complete, true)
@@ -261,11 +417,11 @@ test('search failures stay typed: forbidden, unavailable, invalid json, invalid 
 test('oversized full topics are truncated and never reported as complete evidence', async () => {
   const section = '检查标准'
   const content = `C：${'库'.repeat(200100)}`
-  const chunk = makeChunk({ topic: '大主题', section, content })
+  const chunk = makeChunk({ topic: '库存大主题', section, content })
   const provider = makeProvider(async (url) => {
     const path = requestPath(url)
     if (path === '/api/search') return jsonResponse({ query: '库存', results: [chunk] })
-    return jsonResponse(topicBody({ topic: '大主题', title: '大主题', sections: [{ heading: section, content }] }))
+    return jsonResponse(topicBody({ topic: '库存大主题', title: '库存大主题', sections: [{ heading: section, content }] }))
   })
   const found = await provider.searchSources({ roomKey: ROOM, query: '库存' })
   const read = await provider.readSource({ roomKey: ROOM, sourceRef: found.candidates[0].sourceRef })

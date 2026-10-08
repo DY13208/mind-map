@@ -70,6 +70,7 @@ const SOURCE_STATUS_LABELS = Object.freeze({
   knowledge_mcp_auth_unconfigured: '知识库鉴权未配置',
   knowledge_mcp_url_invalid: '知识库地址无效',
   knowledge_mcp_error: '知识库错误',
+  canonical_storage_permission_denied: '房间资料目录无读取权限',
   invalid_room_or_query: '检索参数无效',
   missing_user_identity: '缺少用户身份',
   invalid_source_ref: '来源标识无效',

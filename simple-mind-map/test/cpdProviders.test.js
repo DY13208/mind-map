@@ -52,7 +52,12 @@ test('Wiki scope forwards business/demo mode and preserves provenance, stable id
     }
   })
   const found = await providers.searchSources({
-    roomKey: 'room-a', query: '会员成交 频率', scope: 'wiki', mode: 'business', actor: { id: 'user-a' }
+    roomKey: 'room-a',
+    query: '库存 频率',
+    businessContext: { texts: ['C：会员成交率95%'] },
+    scope: 'wiki',
+    mode: 'business',
+    actor: { id: 'user-a' }
   })
   assert.equal(found.status, 'ok')
   assert.equal(found.candidates[0].provenance.origin, 'business')
@@ -60,7 +65,7 @@ test('Wiki scope forwards business/demo mode and preserves provenance, stable id
   assert.equal(found.candidates[0].sourceId, found.candidates[0].sourceRef.sourceId)
   assert.deepEqual(found.candidates[0].requiredFields, ['frequency'])
   assert.deepEqual(found.candidates[0].matchedFields, ['frequency'])
-  assert.deepEqual(requests[0].body, { query: '会员成交 频率', top_k: 30, mode: 'business' })
+  assert.deepEqual(requests[0].body, { query: '会员成交率', top_k: 30, mode: 'business' })
 })
 
 test('company knowledge uses the current user JWT and restricts every search/read to the current room', async () => {
@@ -205,6 +210,50 @@ test('MCP ACL denial stays forbidden instead of becoming a no-results answer', a
   assert.equal(result.status, 'forbidden')
   assert.equal(result.complete, false)
   assert.deepEqual(result.candidates, [])
+})
+
+test('canonical room-storage permission errors use a stable non-ACL code and survive partial results', async () => {
+  const rawError = 'EACCES: permission denied, scandir /data/rooms/room-a'
+  const makeProviders = ({ canonicalFailure = true, includeOpenwiki = false } = {}) => createCheckProviders({
+    env: { KNOWLEDGE_MCP_URL: 'http://knowledge.test/mcp' },
+    tokenIssuer: () => 'signed-token',
+    fetchImpl: async (_url, options) => {
+      const request = JSON.parse(options.body)
+      const tool = request.params.name
+      if (tool === 'canonical_list') return canonicalFailure
+        ? rpcToolResponse({ error: rawError }, { isError: true })
+        : rpcToolResponse([])
+      if (tool === 'docmost_search' || tool === 'docmost_get') return rpcToolResponse([])
+      if (tool === 'openwiki_search') return rpcToolResponse(includeOpenwiki ? [{ title: '库存记录指南',
+        uri: 'openwiki://room/room-a/guides/stock.md', snippet: '库存记录每日更新。' }] : [])
+      throw new Error(`Unexpected tool ${tool}`)
+    }
+  })
+
+  const providers = makeProviders()
+  const unavailable = await providers.searchSources({
+    roomKey: 'room-a', query: '库存记录', scope: 'company_ai', actor: { id: 'user-a' }
+  })
+  assert.equal(unavailable.status, 'unavailable', 'storage permission is not the user ACL forbidden state')
+  assert.equal(unavailable.error, 'canonical_storage_permission_denied')
+  assert.deepEqual(unavailable.candidates, [])
+  assert.deepEqual(unavailable.errors, [rawError])
+
+  const partial = await makeProviders({ includeOpenwiki: true }).searchSources({
+    roomKey: 'room-a', query: '库存记录', scope: 'company_ai', actor: { id: 'user-a' }
+  })
+  assert.equal(partial.status, 'ok', 'available independent search results remain usable')
+  assert.equal(partial.complete, false, 'a failed canonical branch prevents claiming complete search')
+  assert.equal(partial.error, 'canonical_storage_permission_denied')
+  assert.deepEqual(partial.errors, [rawError])
+  assert.equal(partial.candidates.length, 1)
+
+  const noResults = await makeProviders({ canonicalFailure: false }).searchSources({
+    roomKey: 'room-a', query: '库存记录', scope: 'company_ai', actor: { id: 'user-a' }
+  })
+  assert.equal(noResults.status, 'no_results')
+  assert.equal(noResults.complete, true)
+  assert.deepEqual(noResults.errors, [])
 })
 
 test('a source reference from another room cannot be read', async () => {
