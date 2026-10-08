@@ -552,7 +552,7 @@ function sleep(ms) {
  * 库里实测到过这个症状：同一个 node_uid 下同时挂了产物文件和「完整输出」，
  * 节点上的回形针指哪一个看运气（用户反馈「挂载不要乱」就是这个）。
  */
-async function waitNewChild(parent, before, tries = 60, expect = 1) {
+async function waitNewChild(parent, before, tries = 160, expect = 1) {
   const want = (before || []).length + Math.max(1, Number(expect) || 1)
   for (let i = 0; i < tries; i += 1) {
     const list = (parent && parent.children) || []
@@ -572,7 +572,7 @@ async function waitNewChild(parent, before, tries = 60, expect = 1) {
  * 而这一路都是 await 不抛错的写法 —— 不复核就会出现「提示已写入、图上什么都没有」。
  * 返回 true = 长出了新节点。
  */
-async function waitContainerGrowth(container, beforeCount, tries = 60) {
+async function waitContainerGrowth(container, beforeCount, tries = 160) {
   const want = Number(beforeCount || 0) + 1
   for (let i = 0; i < tries; i += 1) {
     if (((container && container.children) || []).length >= want) return true
@@ -582,14 +582,56 @@ async function waitContainerGrowth(container, beforeCount, tries = 60) {
 }
 
 /**
+ * 只读态：`Command.exec` 在 `mindMap.opt.readonly` 为真时**静默丢弃**所有结构命令
+ * （见 simple-mind-map/src/core/command/Command.js），命令不落地、也不报错 ——
+ * 写回就会「说成功、图上没有」。所以写之前/写完之后都要查一次，并且如实说明原因。
+ * 常见来源：房间角色是 viewer、或操作被服务端 ACL 拒了（app 会把人降成只读）。
+ */
+function readonlyReason(mindMap) {
+  const ro = !!(mindMap && mindMap.opt && mindMap.opt.readonly)
+  return ro
+    ? '这个房间当前是只读的（没有编辑权限），结果写不进去 —— 请让有编辑权限的人来写，' +
+        '或把角色改成可编辑后再点「写入导图」'
+    : ''
+}
+
+/**
+ * 插入前先把落点子树的子节点补齐（协同模式下大图是**懒加载**的）。
+ *
+ * 为什么必须做：`Renderer.runAfterHydrate` 碰到「子节点没拉全」的父节点时，会把插入
+ * **推迟**到 hydration 完成之后再执行，而且失败时只 `console.error` 一句 ——
+ * 命令等于被静默丢掉。写回是一串连发命令，任一环被推迟，后面就全落空
+ * （2026-10-08 用户看到的「可能协同任务丢了」就是这个）。
+ * 这里先主动 await 一次 hydration，插入就能当场落树。
+ */
+async function ensureInsertParent(mindMap, parent) {
+  const cooperate = mindMap && mindMap.cooperate
+  if (!cooperate || !parent) return
+  try {
+    if (
+      typeof cooperate.nodeNeedsHydrate === 'function' &&
+      !cooperate.nodeNeedsHydrate(parent)
+    ) {
+      return
+    }
+    if (typeof cooperate.ensurePlacementParent === 'function') {
+      await cooperate.ensurePlacementParent(parent)
+    }
+  } catch (err) {
+    // 补不齐也不阻断：下面的插入会走引擎自己的延迟路径，收尾复核会兜住
+  }
+}
+
+/**
  * 在指定节点**后面**插一个同级节点（不是子节点）。
  * 用来让「下一步」接在上一块任务后面，而不是嵌进上一块里面。
  */
-function insertChildren(mindMap, parent, trees) {
+async function insertChildren(mindMap, parent, trees) {
   if (!trees || !trees.length) return
   if (parent && typeof parent.setData === 'function') {
     parent.setData({ expand: true })
   }
+  await ensureInsertParent(mindMap, parent)
   mindMap.execCommand('INSERT_MULTI_CHILD_NODE', [parent], trees)
 }
 
@@ -825,6 +867,8 @@ export async function createJobContainer({
   prompt
 } = {}) {
   if (!mindMap) throw new Error('导图还没准备好，稍后再试')
+  const ro = readonlyReason(mindMap)
+  if (ro) throw new Error(ro)
   const target = resolveTargetNode(mindMap, targetUid)
   if (!target) throw new Error('找不到要挂任务的节点（可能已被删掉）')
 
@@ -842,7 +886,7 @@ export async function createJobContainer({
   // 落点本身是「任务」容器时**不再另起同级分支** —— 用户要的是「续写挂在这个任务下」，
   // 所以走下面那条通用路径：作为它的最后一个子节点插进去（任务内容 / 运行输出 / 附件之后）。
   const before = (target.children || []).slice()
-  insertChildren(mindMap, target, [tree])
+  await insertChildren(mindMap, target, [tree])
   const created = await waitNewChild(target, before)
   if (!created) throw new Error('建任务节点失败，请重试')
   return { uid: nodeUid(created), title, node: created }
@@ -876,6 +920,8 @@ export async function writeJobResultToMap({
     if (onProgress) onProgress(text)
   }
   if (!mindMap) throw new Error('导图还没准备好，稍后再试')
+  const readonly = readonlyReason(mindMap)
+  if (readonly) throw new Error(readonly)
   const text = String(markdown || '').trim()
   if (!text) throw new Error('这次运行没有文字输出，没东西可写入脑图')
   const resolved = resolveTargetNode(mindMap, targetUid)
@@ -909,7 +955,7 @@ export async function writeJobResultToMap({
     tree = markdownToFullNodes(text)
     const containerBefore = (container.children || []).slice()
     say('正在把结果写进导图…')
-    insertChildren(mindMap, container, [
+    await insertChildren(mindMap, container, [
       { data: { text: title }, children: tree.children }
     ])
     const made = await waitNewChild(container, containerBefore)
@@ -951,7 +997,7 @@ export async function writeJobResultToMap({
     let branch = findAttachBranch(container)
     if (!branch) {
       const beforeBranch = (container.children || []).slice()
-      insertChildren(mindMap, container, [
+      await insertChildren(mindMap, container, [
         { data: { text: ATTACH_BRANCH_TITLE }, children: [] }
       ])
       branch = await waitNewChild(container, beforeBranch)
@@ -971,7 +1017,7 @@ export async function writeJobResultToMap({
       if (missing.length) {
         say(`正在挂载 ${missing.length} 个产物文件…`)
         const beforeFiles = kids().slice()
-        insertChildren(
+        await insertChildren(
           mindMap,
           branch,
           missing.map(info => ({ data: { text: String(info.name) } }))
@@ -1019,7 +1065,7 @@ export async function writeJobResultToMap({
       if (!mdNode) {
         const beforeMd = kids().slice()
         // note 里存全文：节点上不铺长文本，但「继续执行」要从这儿取回上次的正文
-        insertChildren(mindMap, branch, [{ data: { text: mdLabel, note: text } }])
+        await insertChildren(mindMap, branch, [{ data: { text: mdLabel, note: text } }])
         mdNode = await waitNewChild(branch, beforeMd)
         if (mdNode) out.nodes += 1
         else
@@ -1084,7 +1130,10 @@ export async function writeJobResultToMap({
   // 没长出来就如实报错（用户在「运行历史 → 写入导图」里还能再试一次）。
   if (!(await waitContainerGrowth(container, containerKidsBefore))) {
     throw new Error(
-      '写入导图失败：命令没有落到图上（协同连接可能断了）—— 请刷新页面后点「写入导图」重试'
+      readonlyReason(mindMap) ||
+        '写入导图失败：命令没有落到图上 —— 常见原因：① 这个房间的数据没加载全' +
+          '（协同断开 / 子树拉取失败，插入会被引擎推迟甚至丢掉）；② 没有编辑权限。' +
+          '刷新页面后点「写入导图」再试一次；还不行就把「协同」面板右下角的诊断复制出来'
     )
   }
 
