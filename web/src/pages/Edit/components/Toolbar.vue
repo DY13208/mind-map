@@ -1277,7 +1277,7 @@ export default {
   methods: {
     async waitForCpdSnapshot() {
       const deadline = Date.now() + 8000
-      while (true) {
+      for (;;) {
         const state = (this.$store && this.$store.state) || {}
         const status = typeof window !== 'undefined' && typeof window.__COLLAB_V2_STATUS__ === 'function'
           ? window.__COLLAB_V2_STATUS__() || {} : {}
@@ -2184,11 +2184,18 @@ export default {
         this.jobWrittenJobId = jobId
         this.jobWriteResult = out
         const missing = (out.missing || []).length
-        this.jobWriteState = `已写入「${nodeTitle || '运行节点'}」：${out.title}（${
-          out.nodes
-        } 个节点${
-          out.attachments.length ? `、${out.attachments.length} 个附件` : ''
-        }${out.generalization ? '、已加概要（双击概要写下一步）' : ''}）`
+        const attCount = (out.attachments || []).length
+        // 新结构（2026-10-08）不铺正文节点：结果全在「任务 → 附件」里，
+        // 文案就别再报一个已经不存在的「运行输出」节点名。
+        this.jobWriteState = out.inlineNodes
+          ? `已写入「${nodeTitle || '运行节点'}」：${out.title}（${
+              out.nodes
+            } 个节点${
+              attCount ? `、${attCount} 个附件` : ''
+            }${out.generalization ? '、已加概要（双击概要写下一步）' : ''}）`
+          : `已写入「${nodeTitle || '运行节点'}」的「附件」（${attCount} 个文件${
+              out.generalization ? '、已加概要（双击概要写下一步）' : ''
+            }）`
         if (out.warnings && out.warnings.length) {
           const needService = out.warnings.some(item => /没挂上/.test(item))
           this.jobWriteError =

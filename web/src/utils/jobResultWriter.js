@@ -30,6 +30,15 @@ const MAX_ARTIFACT_FILES = 8
 const MAX_ATTACH_BYTES = 5 * 1024 * 1024
 const ATTACH_TEXT_LIMIT = 2400
 
+/**
+ * 运行结果是否在脑图上**铺成节点树**。
+ *
+ * 2026-10-08 用户要求结构是「任务 → 附件 → 完整输出 | 产物」——所以默认**不铺**：
+ * 不再建「运行输出 · 时间」这一层，正文完整地放进「完整输出.md」附件里。
+ * 想恢复旧的「按章节原样铺开」形态，把这里改成 true 即可。
+ */
+const INLINE_RESULT_NODES = false
+
 export const MISSING_BRANCH_TITLE = '❗待补充数据'
 // 附件（全文 + 产物文件）统一挂在这个分支下，排在「产出」节点后面
 export const ATTACH_BRANCH_TITLE = '附件'
@@ -645,6 +654,60 @@ function applyAttachment(mindMap, node, attachment, file) {
   return landed()
 }
 
+/** 展开一棵子树（协同下 setData 也是异步落树，所以统一放到收尾做） */
+function expandBranch(node, depth = 0) {
+  if (!node || depth > 8) return
+  if (typeof node.setData === 'function') {
+    try {
+      node.setData({ expand: true })
+    } catch (err) {
+      /* 只读态会被丢弃，无妨 */
+    }
+  }
+  const kids = (node.children || []).slice()
+  kids.forEach(child => expandBranch(child, depth + 1))
+}
+
+/**
+ * 写回收尾：让刚写进去的东西**当场可见**。
+ *
+ * 2026-10-08 用户反馈「现在是强制刷新才会出现产物挂载到任务节点」。
+ * 根因不是一个点：写回是「本地命令 + 协同同步 + 附件上传」混着走的 ——
+ * 协同模式下命令不是同步落树（insertChildren 的注释也写着这一点），
+ * 附件命令同样可能被丢弃或撞上竞态，于是本地画布上没有回形针，刷新
+ * （从服务端拉全量数据）才出现。这里做三件事，做完就不必再 Ctrl+F5：
+ *   1. 展开新节点 —— 折叠状态下插进去的节点在画布上根本看不见
+ *   2. 复核每个附件节点：attachmentName 没落上就补写一次
+ *   3. 强制整树重绘
+ * 另安排一次延迟复核：协同的服务端回包可能晚到，1.2 秒后再看一次。
+ */
+function ensureResultVisible(mindMap, root, checks = []) {
+  if (!mindMap || !root) return
+  const verify = () => {
+    const list = checks || []
+    list.forEach(item => {
+      const node = item && item.node
+      if (!node || typeof node.getData !== 'function') return
+      const cur = String(node.getData('attachmentName') || '')
+      if (cur === String(item.name || '')) return
+      applyAttachment(mindMap, node, item.attachment, item.file)
+    })
+  }
+  expandBranch(root)
+  verify()
+  if (typeof mindMap.render === 'function') mindMap.render()
+  if (typeof setTimeout === 'function') {
+    setTimeout(() => {
+      try {
+        verify()
+        if (typeof mindMap.render === 'function') mindMap.render()
+      } catch (err) {
+        /* 页面可能已销毁，忽略 */
+      }
+    }, 1200)
+  }
+}
+
 function errorDetail(err) {
   const parts = [
     (err && err.message) || String(err || ''),
@@ -813,22 +876,33 @@ export async function writeJobResultToMap({
   }
 
   const title = buildResultTitle()
-  // 「运行输出」下面只要完整输出 + 附件（2026-09-29 要求）：不再提炼成
-  // 一句话结论 / 关键要点 / 待补充数据 / 产出，回答原文按章节原样铺开。
-  const tree = markdownToFullNodes(text)
-  const containerBefore = (container.children || []).slice()
-  say('正在把结果写进导图…')
-  insertChildren(mindMap, container, [
-    { data: { text: title }, children: tree.children }
-  ])
-  const resultNode = await waitNewChild(container, containerBefore)
-  if (!resultNode) throw new Error('写入导图失败，请重试')
+  // 结构（2026-10-08 用户要求）：「任务 → 附件 → 完整输出 | 产物」。
+  // 不再建「运行输出」这一层中间节点，正文也不铺成节点树 —— 全文进「完整输出.md」。
+  // 两个例外仍然要铺（否则内容就丢了）：
+  //   ① INLINE_RESULT_NODES 打开；
+  //   ② 没有 roomKey —— 挂不了附件，正文必须以节点形式留在导图上。
+  const inlineResult = INLINE_RESULT_NODES || !roomKey
+  let tree = { children: [], missing: [], dropped: 0 }
+  let resultNode = container
+  if (inlineResult) {
+    tree = markdownToFullNodes(text)
+    const containerBefore = (container.children || []).slice()
+    say('正在把结果写进导图…')
+    insertChildren(mindMap, container, [
+      { data: { text: title }, children: tree.children }
+    ])
+    const made = await waitNewChild(container, containerBefore)
+    if (!made) throw new Error('写入导图失败，请重试')
+    resultNode = made
+  }
 
   const out = {
     title,
     nodeUid: nodeUid(resultNode),
     containerUid: nodeUid(container),
-    nodes: 1 + countNodeTrees(tree.children),
+    nodes: inlineResult ? 1 + countNodeTrees(tree.children) : 0,
+    // 正文是不是铺成了节点（false = 只挂了附件，用来决定提示文案怎么写）
+    inlineNodes: inlineResult,
     missing: tree.missing || [],
     dropped: tree.dropped || 0,
     attachments: [],
@@ -836,22 +910,26 @@ export async function writeJobResultToMap({
   }
 
   if (!roomKey) {
-    out.warnings.push('没有房间信息，本次只写了文字、没挂附件')
+    out.warnings.push('没有房间信息，没挂附件（正文已直接铺进导图）')
   } else {
     const files = (artifacts || [])
       .filter(item => item && item.name && item.base64)
       .slice(0, MAX_ARTIFACT_FILES)
 
-    // 附件（产物文件 + 完整输出）统一挂在一个「附件」分支里，这个分支排在
-    // 「产出」节点后面；**不挂在「运行输出」节点本身上**（这样运行输出节点保持干净）
+    // 挂完附件要复核「节点上真的长出回形针没有」——协同模式下命令可能被丢弃或竞态，
+    // 收尾时统一补一次（见 ensureResultVisible）。2026-10-08 用户反馈「要强制刷新才出现」。
+    const landedChecks = []
+
+    // 附件（产物文件 + 完整输出）统一挂在「附件」分支里，而「附件」**直接挂在任务容器下**
+    // —— 2026-10-08 用户要求的结构：任务 → 附件 → 完整输出 | 产物
     say('正在准备附件…')
-    let branch = findAttachBranch(resultNode)
+    let branch = findAttachBranch(container)
     if (!branch) {
-      const beforeBranch = (resultNode.children || []).slice()
-      insertChildren(mindMap, resultNode, [
+      const beforeBranch = (container.children || []).slice()
+      insertChildren(mindMap, container, [
         { data: { text: ATTACH_BRANCH_TITLE }, children: [] }
       ])
-      branch = await waitNewChild(resultNode, beforeBranch)
+      branch = await waitNewChild(container, beforeBranch)
     }
     if (!branch) {
       out.warnings.push('附件分支没建起来，这次只写了文字')
@@ -889,6 +967,7 @@ export async function writeJobResultToMap({
         try {
           const file = fileFromBase64(info.name, info.base64, info.mime)
           const done = await attachToNode(mindMap, node, roomKey, file, bridgeAttach)
+          landedChecks.push({ node, file, name: info.name, attachment: done })
           out.attachments.push({
             name: info.name,
             kind: 'artifact',
@@ -906,9 +985,17 @@ export async function writeJobResultToMap({
       let mdNode = kids().find(k => nodeText(k) === mdLabel)
       if (!mdNode) {
         const beforeMd = kids().slice()
-        insertChildren(mindMap, branch, [{ data: { text: mdLabel } }])
+        // note 里存全文：节点上不铺长文本，但「继续执行」要从这儿取回上次的正文
+        insertChildren(mindMap, branch, [{ data: { text: mdLabel, note: text } }])
         mdNode = await waitNewChild(branch, beforeMd)
         out.nodes += 1
+      }
+      if (mdNode && typeof mdNode.setData === 'function') {
+        try {
+          mdNode.setData({ note: text })
+        } catch (err) {
+          /* 只读态丢弃，正文还在附件里 */
+        }
       }
       if (mdNode) {
         try {
@@ -920,6 +1007,7 @@ export async function writeJobResultToMap({
             mdFile,
             bridgeAttach
           )
+          landedChecks.push({ node: mdNode, file: mdFile, name: mdLabel, attachment: uploaded })
           out.attachments.push({
             name: mdFile.name,
             kind: 'text',
@@ -928,6 +1016,14 @@ export async function writeJobResultToMap({
         } catch (err) {
           out.warnings.push(`完整输出没挂上：${errorDetail(err)}`)
         }
+      }
+
+      // 收尾：展开到新内容、复核附件落地、强制重绘 —— 让结果当场可见，不用手动刷新
+      say('正在刷新节点…')
+      try {
+        ensureResultVisible(mindMap, container, landedChecks)
+      } catch (err) {
+        console.warn('[writer] ensureResultVisible failed:', err)
       }
     }
   }

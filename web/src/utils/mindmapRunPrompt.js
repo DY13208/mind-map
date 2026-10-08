@@ -62,6 +62,10 @@ const D_NODE_RE = /^(D)(?!\d)\s*[：:]\s*(.+)$/i
 const FOLLOW_UP_PLACEHOLDER_RE = /^✍️\s*下一步/
 const TASK_CONTAINER_RE = /^任务\s*[·・:：]/
 const MAX_FOLLOW_UP_CHARS = 600
+// 附件分支：旧结构叫「产物文件」，2026-10-08 起叫「附件」并直接挂在任务下
+const ATTACH_BRANCH_RE = /^(附件|产物文件|输出文件|文件清单)/
+// 「完整输出.md」是这次运行的正文载体（节点上不铺长文本，全文在 note 里）
+const FULL_OUTPUT_LABEL = '完整输出.md'
 
 /** 是不是 D 节点（D：xxx / D: xxx） */
 export function isDNode(node) {
@@ -150,8 +154,8 @@ function missingBranch(resultNode) {
 export function latestMissingData(node, options = {}) {
   const container = lastContainer(node)
   if (!container) return []
-  const results = childNodes(container).filter(isResultNode)
-  const latest = results[results.length - 1]
+  const carriers = resultCarriersOf(container)
+  const latest = carriers[carriers.length - 1]
   if (!latest) return []
   const limit = Number(options.limit) || 8
   return missingBranch(latest).slice(0, limit)
@@ -166,23 +170,53 @@ function resultNodesOf(node) {
       return
     }
     if (TASK_CONTAINER_RE.test(nodeText(child))) {
-      childNodes(child).forEach(grand => {
-        if (isResultNode(grand)) out.push(grand)
-      })
+      resultCarriersOf(child).forEach(carrier => out.push(carrier))
     }
   })
   return out
 }
 
-/** 结果分支下面「产物文件」那一支里的文件名清单 */
-function resultFiles(resultNode) {
-  const branch = childNodes(resultNode).find(
-    item => nodeText(item) === '产物文件'
+/** 附件分支：旧结构挂在「运行输出」下面，新结构（2026-10-08）直接挂在任务容器下 */
+function attachBranchOf(node) {
+  if (!node) return null
+  if (ATTACH_BRANCH_RE.test(nodeText(node))) return node
+  return (
+    childNodes(node).find(item => ATTACH_BRANCH_RE.test(nodeText(item))) || null
   )
+}
+
+/**
+ * 附件里的产物文件名清单。
+ * 「完整输出.md」是这次运行的正文载体、不算产物，排除掉。
+ */
+function resultFiles(carrier) {
+  const branch = attachBranchOf(carrier)
   if (!branch) return []
   return childNodes(branch)
     .map(item => nodeText(item))
-    .filter(Boolean)
+    .filter(text => text && text !== FULL_OUTPUT_LABEL)
+}
+
+/**
+ * 任务容器里的「结果载体」—— 兼容两种写法：
+ *   旧：容器下的「运行输出 · …」节点（正文铺在它下面）
+ *   新：容器下的「附件」分支（正文在「完整输出.md」节点的 note 里）
+ */
+function resultCarriersOf(container) {
+  const kids = childNodes(container)
+  const legacy = kids.filter(isResultNode)
+  const attach = kids.find(item => ATTACH_BRANCH_RE.test(nodeText(item)))
+  return attach ? legacy.concat([attach]) : legacy
+}
+
+/** 从载体里取正文：优先「完整输出.md」的 note，没有就退回遍历子节点文字 */
+function carrierBody(carrier) {
+  const md = childNodes(carrier).find(
+    item => nodeText(item) === FULL_OUTPUT_LABEL
+  )
+  const note = md ? nodeNote(md) : ''
+  if (note) return note
+  return resultBody(carrier)
 }
 
 /** 结果分支的正文：把下面各层子节点的文字拼出来（节点文本本身有截断，能看个大概） */
@@ -199,15 +233,22 @@ function resultBody(resultNode) {
   return lines.join('\n')
 }
 
+/** 载体在提示词里的标题：附件分支不该被叫成「附件」（叫它是哪一段结果更有用） */
+function carrierTitle(carrier) {
+  const text = nodeText(carrier)
+  if (ATTACH_BRANCH_RE.test(text)) return '完整输出与产物'
+  return text
+}
+
 function pushResult(rows, seen, ownerNode, resultNode, maxChars) {
   const uid =
     (resultNode.getData && resultNode.getData('uid')) || nodeText(resultNode)
   if (seen.has(uid)) return
   seen.add(uid)
-  const body = resultBody(resultNode)
+  const body = carrierBody(resultNode)
   rows.push({
     owner: nodeText(ownerNode),
-    title: nodeText(resultNode),
+    title: carrierTitle(resultNode),
     text: body.length > maxChars ? body.slice(0, maxChars) + '…' : body,
     files: resultFiles(resultNode)
   })
@@ -268,14 +309,14 @@ function lastContainer(node) {
 export function latestSelfResult(node, options = {}) {
   const container = lastContainer(node)
   if (!container) return null
-  const results = childNodes(container).filter(isResultNode)
-  const latest = results[results.length - 1]
+  const carriers = resultCarriersOf(container)
+  const latest = carriers[carriers.length - 1]
   if (!latest) return null
-  const body = resultBody(latest).trim()
+  const body = carrierBody(latest).trim()
   if (!body) return null
   const maxChars = Number(options.maxResultChars) || 1000
   return {
-    title: nodeText(latest),
+    title: carrierTitle(latest),
     text: body.length > maxChars ? body.slice(0, maxChars) + '…' : body
   }
 }

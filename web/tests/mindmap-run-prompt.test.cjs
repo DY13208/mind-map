@@ -168,6 +168,58 @@ check(
   !/if\s*\(!selected\)\s*\{\s*return room\s*\?/.test(toolbar)
 )
 
+// ---- 新结构（2026-10-08）：附件直接挂任务容器下，正文在「完整输出.md」的 note 里 ----
+// 结构从「任务 → 运行输出 → 附件」压成「任务 → 附件 → 完整输出|产物」后，
+// 「继续执行」取上次正文的那几条路径必须跟着兼容，否则会读不到东西。
+// （复用文件开头那个 mkNode）
+const newAttach = mkNode('附件', [
+  mkNode('output/作文-10-08.md'),
+  mkNode('完整输出.md', [], { note: '上一次运行的完整正文' })
+])
+const newContainer = mkNode('任务 · 10-08 15:00', [
+  mkNode('任务内容：写个作文'),
+  newAttach
+])
+const newD = mkNode('D：写作文', [newContainer])
+
+const newSelf = prompt.latestSelfResult(newD)
+check(
+  '新结构：能取到上次正文（来自「完整输出.md」的 note）',
+  !!newSelf && String(newSelf.text).includes('上一次运行的完整正文'),
+  JSON.stringify(newSelf)
+)
+
+const cur = mkNode('当前节点')
+const rows = prompt.collectPriorResults([newD, cur])
+check(
+  '新结构：上游结果里列出了附件里的产物',
+  rows.length === 1 && rows[0].files.includes('output/作文-10-08.md'),
+  JSON.stringify(rows)
+)
+check(
+  '「完整输出.md」不算产物文件',
+  rows.length === 1 && !rows[0].files.includes('完整输出.md'),
+  JSON.stringify(rows[0] && rows[0].files)
+)
+check(
+  '新结构：没有「待补充数据」分支时返回空数组',
+  prompt.latestMissingData(newD).length === 0
+)
+
+// 旧结构必须继续能读（历史上写进去的任务还在图上）
+const legacyResult = mkNode('运行输出 · 10-08 09:00', [
+  mkNode('一句话结论'),
+  mkNode('关键要点')
+])
+const legacyContainer = mkNode('任务 · 10-08 09:00', [legacyResult])
+const legacyD = mkNode('D：老结构', [legacyContainer])
+const legacySelf = prompt.latestSelfResult(legacyD)
+check(
+  '旧结构（运行输出节点）仍能取到正文 —— 兼容不能丢',
+  !!legacySelf && String(legacySelf.text).includes('一句话结论'),
+  JSON.stringify(legacySelf)
+)
+
 const failed = results.filter(item => !item.ok)
 console.log(
   `\n共 ${results.length} 项，通过 ${results.length - failed.length} 项，失败 ${failed.length} 项`
