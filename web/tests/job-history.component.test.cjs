@@ -1452,6 +1452,77 @@ async function main() {
     JSON.stringify({ q: (vm.jobQueue || []).length, p: vm.jobPendingList.length })
   )
 
+  // ---- 26. 运行通道选择（2026-10-08 用户要求）：默认助理（OpenClaw）----
+  // 点「运行」先弹窗选走哪条路：助理（直连流式）或桥接（执行机会话）。
+  localStore.clear()
+  vm = makeVm()
+  check(
+    '默认通道是助理（OpenClaw）',
+    vm.recallRunChannel() === 'openclaw',
+    vm.recallRunChannel()
+  )
+  localStore.set('mindmap:runChannel', 'bridge')
+  check('存过桥接就记住桥接', vm.recallRunChannel() === 'bridge')
+  localStore.set('mindmap:runChannel', '乱写的值')
+  check('非法值回落到默认（OpenClaw）', vm.recallRunChannel() === 'openclaw')
+
+  localStore.clear()
+  vm = makeVm()
+  const openclawPick = vm.pickRunChannel()
+  check(
+    '弹窗打开时默认选中 OpenClaw',
+    vm.runChannelVisible === true && vm.runChannelPick === 'openclaw',
+    vm.runChannelPick
+  )
+  vm.confirmRunChannel()
+  check('确认后返回选中的通道', (await openclawPick) === 'openclaw')
+  check(
+    '选择落盘（下次打开还是它）',
+    localStore.get('mindmap:runChannel') === 'openclaw',
+    localStore.get('mindmap:runChannel')
+  )
+  check('确认后弹窗关闭', vm.runChannelVisible === false)
+
+  vm = makeVm()
+  const bridgePick = vm.pickRunChannel()
+  vm.runChannelPick = 'bridge'
+  vm.confirmRunChannel()
+  check(
+    '选桥接也能工作并落盘',
+    (await bridgePick) === 'bridge' &&
+      localStore.get('mindmap:runChannel') === 'bridge',
+    localStore.get('mindmap:runChannel')
+  )
+
+  vm = makeVm()
+  const cancelled = vm.pickRunChannel()
+  vm.cancelRunChannel()
+  check(
+    '取消时返回空串（不该当成一次运行）',
+    (await cancelled) === '' && vm.runChannelVisible === false
+  )
+
+  // 选助理 → 真的走助理通道（不弹窗、不去派发执行机会话）
+  localStore.clear()
+  vm = makeVm()
+  let openclawCalls = 0
+  vm.runViaOpenclaw = async () => {
+    openclawCalls += 1
+  }
+  await vm.runWorkbuddyJob({ channel: 'openclaw' })
+  check(
+    '选助理时走助理通道（不派发到执行机）',
+    openclawCalls === 1,
+    String(openclawCalls)
+  )
+  check(
+    '显式给通道时不再弹窗',
+    !vm.runChannelVisible,
+    String(vm.runChannelVisible)
+  )
+  check('记下这次用的通道', vm.jobChannel === 'openclaw', vm.jobChannel)
+  check('跑完复位 jobDispatching', vm.jobDispatching === false)
+
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)
   if (failed.length) {

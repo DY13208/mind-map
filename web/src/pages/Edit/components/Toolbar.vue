@@ -523,6 +523,61 @@
       :readonly="isReadonly"
       :before-check="waitForCpdSnapshot"
     ></CPDCheckPanel>
+    <!-- 运行通道选择（2026-10-08 用户要求）：默认助理（OpenClaw） -->
+    <el-dialog
+      title="用哪种方式执行？"
+      :visible.sync="runChannelVisible"
+      width="460px"
+      append-to-body
+      :close-on-click-modal="false"
+      @close="cancelRunChannel"
+    >
+      <div class="runChannelBox">
+        <label
+          class="runChannelItem"
+          :class="{ active: runChannelPick === 'openclaw' }"
+        >
+          <input
+            type="radio"
+            value="openclaw"
+            v-model="runChannelPick"
+            class="runChannelRadio"
+          />
+          <span class="runChannelBody">
+            <span class="runChannelTitle">
+              助理（OpenClaw）
+              <span class="runChannelTag">默认</span>
+            </span>
+            <span class="runChannelDesc"
+              >直连助理流式执行，出结果快；正文写回导图（不产出附件文件）</span
+            >
+          </span>
+        </label>
+        <label
+          class="runChannelItem"
+          :class="{ active: runChannelPick === 'bridge' }"
+        >
+          <input
+            type="radio"
+            value="bridge"
+            v-model="runChannelPick"
+            class="runChannelRadio"
+          />
+          <span class="runChannelBody">
+            <span class="runChannelTitle">桥接（执行机的 WorkBuddy）</span>
+            <span class="runChannelDesc"
+              >派到执行机的 WorkBuddy 会话跑，执行机上产出的文件会挂成附件</span
+            >
+          </span>
+        </label>
+      </div>
+      <div slot="footer">
+        <el-button size="small" @click="cancelRunChannel">取消</el-button>
+        <el-button size="small" type="primary" @click="confirmRunChannel"
+          >开始运行</el-button
+        >
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -570,6 +625,16 @@ import {
   lastTaskContainer,
   isFollowUpPlaceholder
 } from '@/utils/jobResultWriter'
+import { streamChat } from '@/utils/agentChat'
+
+/**
+ * 运行通道（2026-10-08 用户要求）：点「运行」先选走哪条路，**默认助理（OpenClaw）**。
+ *   助理：直连 OpenClaw 流式执行（没有派发/轮询/回执那套），正文回来就写回导图
+ *   桥接：派到执行机的 WorkBuddy 会话（老路子，支持产物附件回传）
+ */
+const RUN_CHANNEL_STORE = 'mindmap:runChannel'
+const RUN_CHANNEL_OPENCLAW = 'openclaw'
+const RUN_CHANNEL_BRIDGE = 'bridge'
 
 // 任务结果按 Markdown 渲染，配置与项目其他对话页保持一致
 const jobMd = new MarkdownIt({ html: false, linkify: true, breaks: true })
@@ -818,6 +883,15 @@ export default {
       displayedSaveChip: 'offline',
       saveChipTimer: null,
       jobDispatching: false,
+      // 运行通道选择弹窗（2026-10-08）：默认助理（OpenClaw）
+      runChannelVisible: false,
+      runChannelPick: RUN_CHANNEL_OPENCLAW,
+      runChannelPending: null,
+      // 这次运行实际用的通道（''=还没选/取消）
+      jobChannel: '',
+      // 助理通道的流式正文与中止句柄
+      jobOpenclawText: '',
+      jobOpenclawAbort: null,
       jobHosts: [],
       jobHostsLoading: false,
       jobHostsError: '',
@@ -2120,8 +2194,11 @@ export default {
       const jobId = (job && job.id) || ''
       const nodeUid = options.nodeUid || this.jobRunNodeUid
       const nodeTitle = options.nodeTitle || this.jobRunNodeTitle
-      if (!host || !jobId || this.jobWriteBusy) return
-      if (!options.force && this.jobWrittenJobId === jobId) return
+      // 助理（OpenClaw）通道没有执行会话、也没有 runId —— 别按桥接那套门槛挡住它
+      const viaOpenclaw = options.channel === RUN_CHANNEL_OPENCLAW
+      if (this.jobWriteBusy) return
+      if (!viaOpenclaw && (!host || !jobId)) return
+      if (!viaOpenclaw && !options.force && this.jobWrittenJobId === jobId) return
       const text = String(
         options.markdown != null ? options.markdown : this.jobFullText || ''
       ).trim()
@@ -2148,7 +2225,8 @@ export default {
         let artifactSkips = []
         if (presetArtifacts) {
           artifacts = presetArtifacts
-        } else {
+        } else if (!viaOpenclaw) {
+          // 助理通道没有执行会话，扫不到产物（文件在助理那边）
           try {
             const res = await fetchJobArtifacts({ host, gateway, jobId })
             if (res && res.ok) {
@@ -2170,8 +2248,11 @@ export default {
           artifacts,
           artifactSkips,
           // 附件优先经桥接的 MCP 通道挂（服务器部署时比协同服务上传那条路稳），
-          // 桥接不通会自动退回原来的上传方式
-          bridgeAttach: args => attachFilesViaBridge({ host, ...args }),
+          // 桥接不通会自动退回原来的上传方式。
+          // 助理通道没有执行主机，直接走协同服务上传（bridgeAttach 给 null 即可）。
+          bridgeAttach: viaOpenclaw
+            ? null
+            : args => attachFilesViaBridge({ host, ...args }),
           onProgress: label => {
             if (label) this.jobWriteState = label
           }
@@ -2252,6 +2333,150 @@ export default {
      * @param {Object} options.node   指定要跑的节点（点概要时传概要所属节点；默认当前选中）
      * @param {String} options.prompt 指定任务内容（点概要时用概要里写的「下一步」）
      */
+    /** 上次用的运行通道；没存过就是助理（OpenClaw）—— 用户要求默认它 */
+    recallRunChannel() {
+      try {
+        const saved = String(localStorage.getItem(RUN_CHANNEL_STORE) || '')
+        if (saved === RUN_CHANNEL_OPENCLAW || saved === RUN_CHANNEL_BRIDGE) {
+          return saved
+        }
+      } catch (err) {
+        /* 隐私模式：用默认值 */
+      }
+      return RUN_CHANNEL_OPENCLAW
+    },
+
+    rememberRunChannel(channel) {
+      try {
+        localStorage.setItem(RUN_CHANNEL_STORE, String(channel || ''))
+      } catch (err) {
+        /* 存不下不影响这次运行 */
+      }
+    },
+
+    /**
+     * 弹「用哪条通道执行」的窗，等用户选。
+     * 返回 Promise<'openclaw' | 'bridge' | ''>（'' = 用户取消）。
+     */
+    pickRunChannel() {
+      this.runChannelPick = this.recallRunChannel()
+      this.runChannelVisible = true
+      return new Promise(resolve => {
+        this.runChannelPending = resolve
+      })
+    },
+
+    /** 弹窗里点「开始运行」 */
+    confirmRunChannel() {
+      const channel = this.runChannelPick || RUN_CHANNEL_OPENCLAW
+      this.rememberRunChannel(channel)
+      this.runChannelVisible = false
+      const done = this.runChannelPending
+      this.runChannelPending = null
+      if (done) done(channel)
+    },
+
+    /** 弹窗关闭 / 点取消 */
+    cancelRunChannel() {
+      this.runChannelVisible = false
+      const done = this.runChannelPending
+      this.runChannelPending = null
+      if (done) done('')
+    },
+
+    /**
+     * 走「助理（OpenClaw）」通道执行一次。
+     *
+     * 跟桥接最大的不同：助理是**流式直连**，没有「派发 → 轮询 → 回执」这一套 ——
+     * 提示词发过去、正文流回来就算完，所以不需要执行会话、队列闸门、jobs/runs 判定。
+     * 代价是**拿不到产物文件**（文件在助理那边），正文照常写回导图。
+     */
+    async runViaOpenclaw({ runNode = null, options = {} } = {}) {
+      this.rememberRunTarget({ node: runNode })
+      // 点过概要 → 接着它继续；否则按节点默认任务（跟桥接同一套取词逻辑）
+      let prompt = ''
+      if (options.prompt) {
+        prompt = this.buildFollowUpJobPrompt(options.prompt, runNode)
+      } else {
+        const picked = await this.resolveRunPrompt(runNode)
+        prompt = picked.prompt
+      }
+
+      this.jobStatus = '正在准备任务节点…'
+      this.jobStatusType = 'jobWait'
+      const container = await this.prepareJobContainer(prompt, runNode)
+      if (!container || !container.ok) return
+
+      const controller =
+        typeof AbortController !== 'undefined' ? new AbortController() : null
+      this.jobOpenclawAbort = controller
+      this.jobOpenclawText = ''
+      this.jobFullText = ''
+      this.jobStatus = '正在通过助理执行…'
+      this.jobStatusType = 'jobWait'
+      try {
+        const res = await streamChat({
+          messages: [{ role: 'user', content: prompt }],
+          conversationId: `mind-openclaw-${Date.now().toString(36)}`,
+          signal: controller ? controller.signal : undefined,
+          onDelta: text => {
+            // agentChat 的 onDelta 给的是**累计全文**
+            this.jobOpenclawText = String(text || '')
+            this.jobFullText = this.jobOpenclawText
+            this.jobStatus = `助理执行中…（${this.jobOpenclawText.length} 字）`
+          },
+          onEvent: label => {
+            if (label) this.jobStatus = `助理：${label}`
+          }
+        })
+        const markdown = String(
+          (res && res.content) || this.jobOpenclawText || ''
+        ).trim()
+        if (!markdown) {
+          this.jobStatus = '助理没有返回内容'
+          this.jobStatusType = 'jobErr'
+          this.$message.warning('助理没有返回内容，没有东西写回导图')
+          return
+        }
+        this.jobStatus = '正在写回导图…'
+        await this.writeJobResultToNode(
+          { id: `openclaw-${Date.now().toString(36)}` },
+          {
+            channel: RUN_CHANNEL_OPENCLAW,
+            markdown,
+            nodeUid: container.nodeUid,
+            nodeTitle: container.nodeTitle,
+            prompt,
+            force: true
+          }
+        )
+      } catch (err) {
+        if (err && err.name === 'AbortError') {
+          this.jobStatus = '已取消'
+          this.jobStatusType = 'jobErr'
+          return
+        }
+        const msg = (err && err.message) || String(err)
+        this.jobStatus = `助理执行失败：${msg}`
+        this.jobStatusType = 'jobErr'
+        this.$message.error(`助理执行失败：${msg}`)
+      } finally {
+        this.jobOpenclawAbort = null
+      }
+    },
+
+    /** 助理通道正在跑 → 停掉它 */
+    stopOpenclawRun() {
+      if (this.jobOpenclawAbort) {
+        try {
+          this.jobOpenclawAbort.abort()
+        } catch (err) {
+          /* ignore */
+        }
+        this.jobOpenclawAbort = null
+      }
+    },
+
     async runWorkbuddyJob(options = {}) {
       if (this.jobDispatching || this.isReadonly) return
       this.jobDispatching = true
@@ -2259,6 +2484,19 @@ export default {
       const runNode =
         options.node || (active && !active.isGeneralization ? active : null)
       try {
+        // —— 选通道（2026-10-08 用户要求）：默认「助理（OpenClaw）」——
+        // 手搓 vm 的单测没有 pickRunChannel 这个方法，自动退回桥接，老测试不受影响
+        const channel =
+          options.channel ||
+          (typeof this.pickRunChannel === 'function'
+            ? await this.pickRunChannel()
+            : RUN_CHANNEL_BRIDGE)
+        if (!channel) return
+        this.jobChannel = channel
+        if (channel === RUN_CHANNEL_OPENCLAW) {
+          await this.runViaOpenclaw({ runNode, options })
+          return
+        }
         await this.prepareLocalTarget()
         // 没会话时不再直接拒绝：等一下再找，找到就派（见 ensureDispatchTarget）
         const target = await this.ensureDispatchTarget()
@@ -4326,6 +4564,102 @@ export default {
  */
 .el-message {
   margin-top: 72px;
+}
+
+/**
+ * 运行通道选择弹窗（2026-10-08）。
+ * 必须放**非 scoped** 里 —— 弹窗用了 append-to-body，会挂到 body 下，
+ * scoped 的 data-v 属性选不到它。
+ */
+.runChannelBox {
+  display: flex;
+  flex-direction: column;
+
+  .runChannelItem {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid #e4e7ed;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+
+    & + .runChannelItem {
+      margin-top: 10px;
+    }
+
+    &:hover {
+      border-color: #c6e2ff;
+    }
+
+    &.active {
+      border-color: #409eff;
+      background: #ecf5ff;
+    }
+  }
+
+  .runChannelRadio {
+    margin: 3px 0 0;
+    flex: none;
+  }
+
+  .runChannelBody {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .runChannelTitle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #1a1a1a;
+  }
+
+  .runChannelTag {
+    padding: 0 4px;
+    border: 1px solid #b3d8ff;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 16px;
+    color: #409eff;
+  }
+
+  .runChannelDesc {
+    margin-top: 4px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #7a7f85;
+  }
+}
+
+/* 深色主题（画布夜间模式）下的通道弹窗 */
+.isDark .runChannelBox,
+.el-dialog__wrapper.isDark .runChannelBox {
+  .runChannelItem {
+    border-color: #3a4046;
+    background: #262a2e;
+
+    &:hover {
+      border-color: #4a6b8a;
+    }
+
+    &.active {
+      border-color: #409eff;
+      background: rgba(64, 158, 255, 0.16);
+    }
+  }
+
+  .runChannelTitle {
+    color: #e8eaed;
+  }
+
+  .runChannelDesc {
+    color: #9aa1a9;
+  }
 }
 
 .collabDiagPopper {
