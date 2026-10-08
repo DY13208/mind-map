@@ -57,6 +57,10 @@ const runChannelUtil = loadCjs(
   () => ({})
 )
 
+// 运行日志（本地留存）—— 也用真模块：运行历史 = 桥接列表 + 这一份，
+// 合并逻辑（同 id 以桥接为准 / 本地补正文）就是本轮要测的东西
+const runLogUtil = loadCjs(path.join(WEB, 'src/utils/runLog.js'), () => ({}))
+
 // ---- 可编程的桥接 stub ----
 const jobResponses = [] // 每次 listHostJobs 消费一个
 const calls = { list: 0, stop: [] }
@@ -171,6 +175,7 @@ new Function('require', 'module', 'exports', code)(name => {
   if (name === '@/utils/mindmapRunPrompt') return {}
   if (name === '@/utils/agentChat') return agentChatStub
   if (name === '@/utils/runChannel') return runChannelUtil
+  if (name === '@/utils/runLog') return runLogUtil
   if (name === '@/utils/workbuddyJobBridge') return bridgeStub
   return {}
 }, mod, mod.exports)
@@ -1550,34 +1555,79 @@ async function main() {
   await vm.runWorkbuddyJob({ channel: 'openclaw' })
   check('显式指定通道优先于设置', explicitCalls === 1 && vm.jobChannel === 'openclaw')
 
-  // ---- 27. 助理（OpenClaw）通道：一次一个任务 + 按钮不锁死 + 落点不乱 ----
-  // 2026-10-08 用户反馈：「用助理运行时运行按钮一直转圈、不能点第二个任务」。
-  // 根因：runViaOpenclaw 原来 await 到整条流跑完（分钟级）才返回，busy 一直挂着。
-  // 改法：runViaOpenclaw 只「准备 + 起跑」立即返回；正在跑时第二条入队，跑完自动派下一个。
+  // ---- 27. 助理通道：能并发（有上限）+ 按钮不锁死 + 落点不乱 ----
+  // 2026-10-08 用户先反馈「运行按钮一直转圈、不能点第二个任务」→ 先做成排队；
+  // 随后问「只能走队列吗 能走并发吗」→ 网关侧实测（不同 conversationId = 独立会话，
+  // 并发 2 条总耗时 ≈ 较慢那条，不是两条之和）确认能真并行，于是改成：
+  // 上限内直接并行，到上限（设置里配，默认 3）才入队，跑完自动补位。
   localStore.clear()
   openclawPlan.length = 0
   openclawHold.length = 0
   openclawStreamCalls.length = 0
   openclawWrites.length = 0
+
+  // A) 上限内 → 直接并行两条
   vm = makeVm()
   vm.jobQueue = []
-  vm.jobOpenclawBusy = false
+  vm.jobOpenclawRuns = {}
   vm.buildFollowUpJobPrompt = t => String(t)
   vm.writeJobResultToNode = async (job, options) => {
     openclawWrites.push(options.nodeUid)
   }
-  check('没任务在跑时 jobBusyCount=0', vm.jobBusyCount() === 0)
-  vm.jobOpenclawBusy = true
-  check('助理在跑时算一个占用（闸门认它）', vm.jobBusyCount() === 1)
-  vm.jobOpenclawBusy = false
+  check(
+    '默认并行上限是 3',
+    vm.openclawConcurrencyLimit() === 3,
+    String(vm.openclawConcurrencyLimit())
+  )
+  check('没任务在跑时占用为 0', vm.openclawRunCount() === 0)
+  check('jobBusyCount 只管桥接（不被助理占用）', vm.jobBusyCount() === 0)
 
-  openclawPlan.push({ hold: true, content: '第一条的正文' })
-  openclawPlan.push({ content: '第二条的正文' })
   const ocBoxA = { ok: true, nodeUid: 'u-A', nodeTitle: '任务 · A' }
   const ocBoxB = { ok: true, nodeUid: 'u-B', nodeTitle: '任务 · B' }
-  const firstRun = vm.startOpenclawRun({ prompt: '任务A', container: ocBoxA })
-  check('助理起跑即占位', vm.jobOpenclawBusy === true)
+  openclawPlan.push({ hold: true, content: '第一条的正文' })
+  openclawPlan.push({ hold: true, content: '第二条的正文' })
+  const runA = vm.startOpenclawRun({ prompt: '任务A', container: ocBoxA })
+  const runB = vm.startOpenclawRun({ prompt: '任务B', container: ocBoxB })
+  check(
+    '上限内两条**同时**在跑（真并发，不进队列）',
+    vm.openclawRunCount() === 2 && (vm.jobQueue || []).length === 0,
+    JSON.stringify({ running: vm.openclawRunCount(), queued: (vm.jobQueue || []).length })
+  )
+  check(
+    '每条用自己的 conversationId（网关靠它分会话）',
+    new Set(openclawStreamCalls.map(c => c.conversationId)).size === 2,
+    openclawStreamCalls.map(c => c.conversationId).join(',')
+  )
+  check('状态栏说清是并行几条', /并行 2 条/.test(vm.jobStatus), vm.jobStatus)
 
+  openclawHold.forEach(fn => fn())
+  await Promise.all([runA, runB])
+  for (let i = 0; i < 40 && vm.openclawRunCount(); i++) {
+    await new Promise(r => setTimeout(r, 5))
+  }
+  check('跑完名额清空', vm.openclawRunCount() === 0)
+  check(
+    '两条各自写回自己的任务容器（并发也不乱）',
+    openclawWrites.slice().sort().join(',') === 'u-A,u-B',
+    openclawWrites.join(',')
+  )
+
+  // B) 上限 = 1 → 退回排队；跑完自动补位
+  localStore.set('mindmap:runConcurrency', '1')
+  openclawPlan.length = 0
+  openclawHold.length = 0
+  openclawWrites.length = 0
+  vm = makeVm()
+  vm.jobQueue = []
+  vm.jobOpenclawRuns = {}
+  vm.buildFollowUpJobPrompt = t => String(t)
+  vm.writeJobResultToNode = async (job, options) => {
+    openclawWrites.push(options.nodeUid)
+  }
+  check('上限能配成 1', vm.openclawConcurrencyLimit() === 1)
+  openclawPlan.push({ hold: true, content: 'A 的正文' })
+  openclawPlan.push({ content: 'B 的正文' })
+  const firstRun = vm.startOpenclawRun({ prompt: '任务A', container: ocBoxA })
   const secondCall = vm.runViaOpenclaw({
     options: { prompt: '任务B', container: ocBoxB }
   })
@@ -1589,7 +1639,7 @@ async function main() {
     ])) === 'returned'
   )
   check(
-    '助理在跑时第二条进队列（不并发）',
+    '到上限了 → 第二条入队（不硬挤）',
     (vm.jobQueue || []).length === 1 && vm.jobQueue[0].prompt === '任务B',
     JSON.stringify((vm.jobQueue || []).map(x => x.prompt))
   )
@@ -1599,20 +1649,254 @@ async function main() {
       vm.jobQueue[0].nodeUid === 'u-B' &&
       vm.jobQueue[0].container.nodeUid === 'u-B'
   )
-  check('第二条只是排队，第一条照旧在跑', vm.jobOpenclawBusy === true)
+  check('第二条只是排队，第一条照旧在跑', vm.openclawRunCount() === 1)
 
   openclawHold.shift()()
   await firstRun
-  for (let i = 0; i < 40 && (vm.jobOpenclawBusy || (vm.jobQueue || []).length); i++) {
+  for (let i = 0; i < 40 && (vm.openclawRunCount() || (vm.jobQueue || []).length); i++) {
     await new Promise(r => setTimeout(r, 5))
   }
-  check('第一条跑完自动派了第二条（队列清空）', (vm.jobQueue || []).length === 0)
+  check('第一条跑完自动补位（队列清空）', (vm.jobQueue || []).length === 0)
   check(
     '两条各自写回自己的任务容器（挂载不乱）',
-    openclawWrites.join(',') === 'u-A,u-B',
+    openclawWrites.slice().sort().join(',') === 'u-A,u-B',
     openclawWrites.join(',')
   )
-  check('全跑完闸门放开', vm.jobOpenclawBusy === false)
+  check('全跑完名额放开', vm.openclawRunCount() === 0)
+  localStore.clear()
+
+  // C) 写回要排队 —— 并发跑多条时两个结果同时回来，不能丢一个
+  // （下游 writeJobResultToMap 里有 `if (this.jobWriteBusy) return` 全局锁）
+  vm = makeVm()
+  const writeOrder = []
+  vm.writeJobResultOnce = async (job, options) => {
+    writeOrder.push('start-' + options.nodeUid)
+    await new Promise(r => setTimeout(r, 10))
+    writeOrder.push('end-' + options.nodeUid)
+  }
+  await Promise.all([
+    vm.writeJobResultToNode({ id: 'r1' }, { nodeUid: 'n1', markdown: 'a', force: true }),
+    vm.writeJobResultToNode({ id: 'r2' }, { nodeUid: 'n2', markdown: 'b', force: true })
+  ])
+  check(
+    '两个写回都执行了、而且不重叠（不丢）',
+    writeOrder.join(',') === 'start-n1,end-n1,start-n2,end-n2',
+    writeOrder.join(',')
+  )
+
+  // ---- 28. 运行历史：运行了就得有记录（2026-10-08 用户反馈「运行没有历史」）----
+  // 原来历史只有桥接视角（去问执行主机的 WorkBuddy 有哪些任务）：
+  //   ① 助理（WorkBuddy）通道是流式直连、没有派发/回执，网关照不到它 → 用它跑完一条都没有；
+  //   ② 桥接没起来（本机就是 /bridge 502）时更是全空。
+  // 现在本页面留一份运行日志（utils/runLog.js），历史 = 桥接的任务列表 + 这一份。
+  localStore.clear()
+  openclawPlan.length = 0
+  openclawHold.length = 0
+  openclawWrites.length = 0
+  vm = makeVm()
+  vm.jobQueue = []
+  vm.jobOpenclawRuns = {}
+  vm.jobHistory = []
+  vm.jobHistoryVisible = false
+  vm.buildFollowUpJobPrompt = t => String(t)
+  vm.writeJobResultToNode = async (job, options) => {
+    openclawWrites.push(options.nodeUid)
+  }
+  openclawPlan.push({ content: '助理这一次的正文' })
+  await vm.runViaOpenclaw({
+    options: {
+      prompt: '任务·助理',
+      container: { ok: true, nodeUid: 'u-oc', nodeTitle: '任务 · 助理' }
+    }
+  })
+  // 起跑是后台跑（调用方不 await），等它跑完：记录要落成「已完成」
+  for (let i = 0; i < 80 && vm.openclawRunCount(); i++) {
+    await new Promise(r => setTimeout(r, 5))
+  }
+  const ocRows = runLogUtil.readRunRecords()
+  check('助理跑完在本页面留了运行记录', ocRows.length === 1, JSON.stringify(ocRows.map(r => r.id)))
+  check(
+    '记录里状态是已完成、正文也在',
+    ocRows[0] && ocRows[0].state === 'done' && ocRows[0].result === '助理这一次的正文',
+    ocRows[0] && `${ocRows[0].state}/${ocRows[0].result}`
+  )
+  check(
+    '记录标了通道与落点（历史里认得出是谁跑的）',
+    ocRows[0] && ocRows[0].channel === 'openclaw' && ocRows[0].nodeTitle === '任务 · 助理',
+    ocRows[0] && `${ocRows[0].channel}/${ocRows[0].nodeTitle}`
+  )
+
+  // 桥接不通（/bridge 502）→ 历史不该是空的，也不该报错
+  gatewaysResult = { ok: false, error: '连不上桥接（/bridge 502）' }
+  await vm.loadJobHistory()
+  check(
+    '桥接不通时助理那条照样在运行历史里',
+    vm.jobHistory.length === 1 && vm.jobHistory[0].channel === 'openclaw',
+    JSON.stringify(vm.jobHistory.map(x => x.channel))
+  )
+  check('有本地记录 → 不显示「拿不到运行记录」', vm.jobHistoryError === '', vm.jobHistoryError)
+  check(
+    '本地那条能看出「没有执行会话」（正文不靠桥接取）',
+    vm.jobHistory[0].localOnly === true && vm.jobHistory[0].intent === '节点：任务 · 助理',
+    JSON.stringify({ localOnly: vm.jobHistory[0].localOnly, intent: vm.jobHistory[0].intent })
+  )
+
+  // 桥接列表里出现了同一条 → 按 id 合并，以桥接为准；桥接没正文时用本地那份补
+  const ocId = ocRows[0].id
+  gatewaysResult = { ok: true, gateways: [{ url: 'http://127.0.0.1:8799' }] }
+  jobsByGateway = {
+    'http://127.0.0.1:8799': {
+      ok: true,
+      jobs: [
+        {
+          id: ocId,
+          name: '桥接看到的这条',
+          state: 'done',
+          startedAt: Date.now(),
+          updatedAt: Date.now()
+        }
+      ]
+    }
+  }
+  await vm.loadJobHistory()
+  check('同一条不会重复（按 id 合并）', vm.jobHistory.length === 1, String(vm.jobHistory.length))
+  check(
+    '以桥接那条为准（认它是执行会话里的任务）',
+    vm.jobHistory[0].gateway === 'http://127.0.0.1:8799' && vm.jobHistory[0].localOnly === false,
+    JSON.stringify({ gw: vm.jobHistory[0].gateway, localOnly: vm.jobHistory[0].localOnly })
+  )
+  check(
+    '桥接没正文时用本地留的那份补上',
+    vm.jobHistory[0].detail === '助理这一次的正文',
+    String(vm.jobHistory[0].detail)
+  )
+
+  // 点开本地那条：正文就在记录里（刷新页面、桥接不通都还能看）
+  localStore.clear()
+  runLogUtil.saveRunRecord({
+    id: 'oc-local',
+    channel: 'openclaw',
+    state: 'done',
+    nodeTitle: '任务 · 本地',
+    result: '本地留存的正文',
+    startedAt: Date.now()
+  })
+  gatewaysResult = { ok: false, error: '桥接没起来' }
+  jobsByGateway = {}
+  await vm.loadJobHistory()
+  await vm.openHistoryItem(vm.jobHistory[0])
+  check('点开本地那条就能看到正文（不依赖桥接）', vm.jobFullText === '本地留存的正文', vm.jobFullText)
+  check('本地那条不去查会话历史', vm.jobFullSource === 'local', vm.jobFullSource)
+
+  // 刷新页面：助理是流式直连，刷新这条流就断了 → 别永远停在「执行中」
+  localStore.clear()
+  runLogUtil.saveRunRecord({ id: 'oc-run', channel: 'openclaw', state: 'working', nodeTitle: 'A' })
+  runLogUtil.saveRunRecord({
+    id: 'br-run',
+    channel: 'bridge',
+    state: 'working',
+    nodeTitle: 'B',
+    gateway: 'http://127.0.0.1:8799'
+  })
+  const swept = runLogUtil.markInterruptedRuns()
+  check(
+    '刷新后把助理那条标成已停止（不留假的「执行中」）',
+    swept === 1 && runLogUtil.readRunRecords().find(r => r.id === 'oc-run').state === 'stopped',
+    String(swept)
+  )
+  check(
+    '桥接那条不动（任务在执行机上照跑，状态以桥接为准）',
+    runLogUtil.readRunRecords().find(r => r.id === 'br-run').state === 'working'
+  )
+
+  // 列表小字标通道，分得清「这条是谁跑的」
+  check(
+    '列表小字带通道',
+    /助理/.test(vm.jobMetaText({ channel: 'openclaw', startedAt: Date.now() })) &&
+      /桥接/.test(vm.jobMetaText({ channel: 'bridge', startedAt: Date.now() })),
+    vm.jobMetaText({ channel: 'openclaw', startedAt: Date.now() })
+  )
+
+  // 从历史里停助理那条：停的是本页面这条流（没有执行会话可停）
+  vm = makeVm()
+  let aborted = false
+  vm.jobOpenclawRuns = {
+    'oc-live': { runId: 'oc-live', abort: { abort: () => (aborted = true) } }
+  }
+  vm.loadJobHistory = async () => {}
+  await vm.stopHistoryItem({ id: 'oc-live', channel: 'openclaw' })
+  check('从运行历史里能停助理那条', aborted === true)
+
+  // 收尾：把桩恢复成默认，免得影响别的用例
+  gatewaysResult = { ok: true, gateways: [{ url: 'http://127.0.0.1:8799' }] }
+  jobsByGateway = {}
+  localStore.clear()
+
+  // ---- 29. 「执行完毕没有回写」不能是静默的（2026-10-08 用户反馈）----
+  // 真正跑完却没有回写，原来的写法是**静默 return**：界面上一个字都不说，
+  // 用户只能看到「执行完毕」然后图上一片空白。现在每一条都要说出来。
+  const emitted = []
+  localStore.clear()
+  vm = makeVm()
+  vm.$bus = { $emit: name => emitted.push(name), $on: () => {}, $off: () => {} }
+  vm.jobWriteError = ''
+  vm.jobWriteBusy = true
+  await vm.writeJobResultOnce(
+    { id: 'w1' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u1' }
+  )
+  check('写回撞上上一次还没结束 → 明说没写进去', /没有写进导图/.test(vm.jobWriteError), vm.jobWriteError)
+  check('没写进去就不该发写回命令', emitted.length === 0, emitted.join(','))
+
+  vm = makeVm()
+  vm.jobWriteError = ''
+  vm.jobHosts = []
+  vm.jobHostKey = ''
+  await vm.writeJobResultOnce(
+    { id: 'w2' },
+    { channel: 'bridge', markdown: '正文', nodeUid: 'u1', force: true }
+  )
+  check('桥接没有可用主机 → 明说结果取不回来', /执行主机/.test(vm.jobWriteError), vm.jobWriteError)
+
+  vm = makeVm()
+  vm.jobWriteError = ''
+  await vm.writeJobResultOnce(
+    { id: '' },
+    { channel: 'bridge', markdown: '正文', nodeUid: 'u1', force: true }
+  )
+  check('没有任务号 → 明说', /任务号/.test(vm.jobWriteError), vm.jobWriteError)
+
+  // runs 回退没给任务号：任务在执行机上照样跑完，但页面**没有东西可轮询** —— 结果永远回不来
+  localStore.set('mindmap:runChannel', 'bridge')
+  vm = makeVm()
+  vm.$bus = { $emit: () => {}, $on: () => {}, $off: () => {} }
+  vm.buildDefaultJobPrompt = () => '任务内容'
+  // 「派到哪台机器/哪条会话」不是这条用例要测的 —— 直接给一个可用的目标
+  vm.ensureDispatchTarget = async () => ({
+    ok: true,
+    host: HOST,
+    gateway: 'http://127.0.0.1:8799'
+  })
+  vm.prepareJobContainer = async () => ({
+    ok: true,
+    nodeUid: 'u-r',
+    nodeTitle: '任务 · R'
+  })
+  vm.jobWriteError = ''
+  dispatchResult = { ok: true, job: {}, mode: 'runs' }
+  await vm.runWorkbuddyJob()
+  check(
+    'runs 没给任务号 → 明说收不到结果、不会自动回写',
+    /没返回任务号/.test(vm.jobWriteError),
+    `${vm.jobWriteError} || status=${vm.jobStatus}`
+  )
+  check(
+    '这种情况不该挂一条空 id 的待回写（挂上去会永远轮询不到）',
+    (vm.jobPendingList || []).length === 0,
+    JSON.stringify((vm.jobPendingList || []).map(x => x.id))
+  )
+  dispatchResult = { ok: true, job: { id: 'job-x' }, mode: 'jobs' }
+  localStore.clear()
 
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)

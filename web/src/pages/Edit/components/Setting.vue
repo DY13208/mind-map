@@ -306,6 +306,30 @@
           <p class="runChannelTip">{{ runChannelTip }}</p>
         </div>
       </div>
+      <div
+        class="row"
+        v-if="localConfigs.enableAi && runChannel === RUN_CHANNEL_OPENCLAW"
+      >
+        <div class="rowItem workbuddyModelRow runChannelRow">
+          <span class="name">并行任务数</span>
+          <el-select
+            v-model="runConcurrency"
+            size="mini"
+            style="width: 200px"
+            @change="onRunConcurrencyChange"
+          >
+            <el-option
+              v-for="n in RUN_CONCURRENCY_OPTIONS"
+              :key="n"
+              :label="`最多同时跑 ${n} 个`"
+              :value="n"
+            ></el-option>
+          </el-select>
+          <p class="runChannelTip">
+            助理会按会话并行执行；超出这个数的任务自动排队，跑完一个就补上一个。
+          </p>
+        </div>
+      </div>
       <!-- WorkBuddy / 小策执行已下线；模型由助理 Gateway 配置 -->
       <div class="row" v-if="false && localConfigs.enableAi && localConfigs.aiBackend === AI_BACKEND_XIAOCE">
         <div class="rowItem workbuddyModelRow">
@@ -525,9 +549,13 @@ import {
 } from '@/utils/agentChat'
 import {
   RUN_CHANNEL_OPTIONS,
+  RUN_CHANNEL_OPENCLAW,
+  RUN_CONCURRENCY_OPTIONS,
   readRunChannel,
   writeRunChannel,
-  runChannelLabel
+  runChannelLabel,
+  readRunConcurrency,
+  writeRunConcurrency
 } from '@/utils/runChannel'
 
 export default {
@@ -600,7 +628,11 @@ export default {
       AI_BACKEND_XIAOCE: 'xiaoce',
       // 「运行」用哪条通道执行：在这里选一次，之后点运行直接按它跑（不再弹窗）
       runChannel: readRunChannel(),
-      runChannelOptions: RUN_CHANNEL_OPTIONS
+      runChannelOptions: RUN_CHANNEL_OPTIONS,
+      RUN_CHANNEL_OPENCLAW,
+      // 助理通道的并行上限（助理能真并行，靠这个数封顶，超出的排队）
+      runConcurrency: readRunConcurrency(),
+      RUN_CONCURRENCY_OPTIONS
     }
   },
   computed: {
@@ -779,6 +811,13 @@ export default {
       const saved = writeRunChannel(value)
       this.runChannel = saved
       this.$message.success(`AI 执行引擎已切换为：${runChannelLabel(saved)}`)
+    },
+
+    /** 助理并行上限：落盘即生效（下一次点「运行」就按新上限） */
+    onRunConcurrencyChange(value) {
+      const saved = writeRunConcurrency(value)
+      this.runConcurrency = saved
+      this.$message.success(`并行任务数已设为：最多同时跑 ${saved} 个`)
     },
 
     onAiBackendChange(value) {

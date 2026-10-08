@@ -522,11 +522,6 @@ function resolveTargetNode(mindMap, uid) {
   return active || null
 }
 
-function lastChildOf(node) {
-  const list = (node && node.children) || []
-  return list[list.length - 1] || null
-}
-
 /** 节点文字（去 HTML 与空白） */
 function nodeText(node) {
   const raw =
@@ -557,14 +552,33 @@ function sleep(ms) {
  * 库里实测到过这个症状：同一个 node_uid 下同时挂了产物文件和「完整输出」，
  * 节点上的回形针指哪一个看运气（用户反馈「挂载不要乱」就是这个）。
  */
-async function waitNewChild(parent, before, tries = 24, expect = 1) {
+async function waitNewChild(parent, before, tries = 60, expect = 1) {
   const want = (before || []).length + Math.max(1, Number(expect) || 1)
   for (let i = 0; i < tries; i += 1) {
     const list = (parent && parent.children) || []
     if (list.length >= want) return list[list.length - 1]
     if (i < tries - 1) await sleep(50)
   }
-  return lastChildOf(parent)
+  // ⚠️ 这里**不能**退回「最后一个子节点」：那样调用方以为写成功了，
+  // 实际图上什么都没有 —— 用户看到的就是「状态栏说成功、图上没有」（2026-10-08 反馈）。
+  // 拿不到就老老实实返回 null，让调用方报错/给警告。
+  return null
+}
+
+/**
+ * 等落点容器真的长出东西来（子节点变多）。
+ *
+ * 写回到最后必须复核一次：协同模式下命令可能被**静默丢弃**（连接断了、被服务端拒了），
+ * 而这一路都是 await 不抛错的写法 —— 不复核就会出现「提示已写入、图上什么都没有」。
+ * 返回 true = 长出了新节点。
+ */
+async function waitContainerGrowth(container, beforeCount, tries = 60) {
+  const want = Number(beforeCount || 0) + 1
+  for (let i = 0; i < tries; i += 1) {
+    if (((container && container.children) || []).length >= want) return true
+    if (i < tries - 1) await sleep(50)
+  }
+  return false
 }
 
 /**
@@ -889,6 +903,8 @@ export async function writeJobResultToMap({
   const inlineResult = INLINE_RESULT_NODES || !roomKey
   let tree = { children: [], missing: [], dropped: 0 }
   let resultNode = container
+  // 写回开始前记一下：结束时拿它复核「到底有没有东西落到图上」（见 waitContainerGrowth）
+  const containerKidsBefore = (container.children || []).length
   if (inlineResult) {
     tree = markdownToFullNodes(text)
     const containerBefore = (container.children || []).slice()
@@ -897,7 +913,11 @@ export async function writeJobResultToMap({
       { data: { text: title }, children: tree.children }
     ])
     const made = await waitNewChild(container, containerBefore)
-    if (!made) throw new Error('写入导图失败，请重试')
+    if (!made) {
+      throw new Error(
+        '写入导图失败：命令没有落到图上（协同连接可能断了）—— 刷新页面后点「写入导图」重试'
+      )
+    }
     resultNode = made
   }
 
@@ -937,7 +957,9 @@ export async function writeJobResultToMap({
       branch = await waitNewChild(container, beforeBranch)
     }
     if (!branch) {
-      out.warnings.push('附件分支没建起来，这次只写了文字')
+      out.warnings.push(
+        '附件分支没建起来（命令没落到图上）—— 这次的结果没有写进导图'
+      )
     } else {
       out.nodes += 1
       const kids = () => branch.children || []
@@ -955,8 +977,13 @@ export async function writeJobResultToMap({
           missing.map(info => ({ data: { text: String(info.name) } }))
         )
         // 等**这一批全部**落地再往下（否则后一步的「新节点」会认成这里还没落地的那个）
-        await waitNewChild(branch, beforeFiles, 24, missing.length)
-        out.nodes += missing.length
+        const landed = await waitNewChild(branch, beforeFiles, 60, missing.length)
+        if (landed) out.nodes += missing.length
+        else {
+          out.warnings.push(
+            `有 ${missing.length} 个产物节点没落进导图（命令可能被协同服务丢了）`
+          )
+        }
       }
       for (let i = 0; i < files.length; i += 1) {
         const info = files[i]
@@ -994,7 +1021,11 @@ export async function writeJobResultToMap({
         // note 里存全文：节点上不铺长文本，但「继续执行」要从这儿取回上次的正文
         insertChildren(mindMap, branch, [{ data: { text: mdLabel, note: text } }])
         mdNode = await waitNewChild(branch, beforeMd)
-        out.nodes += 1
+        if (mdNode) out.nodes += 1
+        else
+          out.warnings.push(
+            '「完整输出.md」没落进导图（命令可能被协同服务丢了）—— 刷新页面后重试'
+          )
       }
       if (mdNode && typeof mdNode.setData === 'function') {
         try {
@@ -1044,6 +1075,16 @@ export async function writeJobResultToMap({
       `有 ${artifactSkips.length} 个产物没挂上（文件在，但不在桥接允许读取的目录里）：` +
         `${names.slice(0, 3).join('、')}${names.length > 3 ? ' 等' : ''}` +
         ' —— 在执行那台电脑启动桥接时加参数 --artifact-roots "产物所在目录"（分号分隔可以给多个）'
+    )
+  }
+
+  // ⚠️ 收尾复核（2026-10-08 用户反馈「状态栏说成功、图上什么都没有」）：
+  // 上面整条路都是「不抛错」的写法 —— 命令被协同服务**静默丢掉**时也会一路走到这里，
+  // 于是界面报成功、画布上一个节点都没有。所以最后必须确认落点容器真的长出了东西，
+  // 没长出来就如实报错（用户在「运行历史 → 写入导图」里还能再试一次）。
+  if (!(await waitContainerGrowth(container, containerKidsBefore))) {
+    throw new Error(
+      '写入导图失败：命令没有落到图上（协同连接可能断了）—— 请刷新页面后点「写入导图」重试'
     )
   }
 

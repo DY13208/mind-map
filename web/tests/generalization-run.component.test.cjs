@@ -41,6 +41,8 @@ const runChannelUtil = loadCjs(
   path.join(WEB, 'src/utils/runChannel.js'),
   () => ({})
 )
+// 运行日志（本地留存）：真模块，运行历史会读它
+const runLogUtil = loadCjs(path.join(WEB, 'src/utils/runLog.js'), () => ({}))
 
 // ---- Toolbar.vue ----
 const toolbarSrc = fs.readFileSync(
@@ -111,6 +113,7 @@ new Function('require', 'module', 'exports', code)(name => {
   if (name === '@/utils/jobResultWriter') return jobWriter
   if (name === '@/utils/mindmapRunPrompt') return runPrompt
   if (name === '@/utils/runChannel') return runChannelUtil
+  if (name === '@/utils/runLog') return runLogUtil
   if (name === '@/utils/workbuddyJobBridge') return bridgeStub
   return {}
 }, mod, mod.exports)
