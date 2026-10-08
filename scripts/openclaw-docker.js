@@ -388,6 +388,37 @@ function ensureOpenclawConfig(token, port = DEFAULT_PORT) {
   origins.add(`http://localhost:${mindPort}`)
   cfg.gateway.controlUi = cfg.gateway.controlUi || {}
   cfg.gateway.controlUi.allowedOrigins = Array.from(origins)
+
+  /* TRUSTED_PROXIES_ATTRIBUTION */
+  // OpenClaw ≥2026.9.1 对「带转发类头（Forwarded / X-Forwarded-* / X-Real-IP）
+  // 且来源 IP 不在 gateway.trustedProxies 里」的请求直接 403：
+  //   type=proxy_attribution_required
+  // 本项目的正解是让 app 的 nginx 在 /openclaw-api/ 那一跳把转发头全部清掉
+  // （见 docker/nginx.conf），网关就当普通请求走 token 鉴权，所以这里**故意不写
+  // 任何默认网段** —— 盲目放开 docker 私网段等于把归因检查架空，而且网段重建会漂。
+  // 只有「网关前面另有反代、且该反代无法清头」时才需要显式配置：
+  //   .env 里 OPENCLAW_TRUSTED_PROXIES=172.21.0.9,10.0.0.0/8（逗号/空格分隔，支持 CIDR）
+  {
+    const envMap = loadEnvFile()
+    const raw = String(
+      process.env.OPENCLAW_TRUSTED_PROXIES ||
+        envMap.OPENCLAW_TRUSTED_PROXIES ||
+        ''
+    ).trim()
+    const extra = raw
+      ? raw
+          .split(/[,;\s]+/)
+          .map(s => s.trim())
+          .filter(Boolean)
+      : []
+    const existing = Array.isArray(cfg.gateway.trustedProxies)
+      ? cfg.gateway.trustedProxies.map(String).filter(Boolean)
+      : []
+    if (existing.length || extra.length) {
+      // 已有值一律保留（运维手工配的通常更窄），这里只做并集追加
+      cfg.gateway.trustedProxies = Array.from(new Set([...existing, ...extra]))
+    }
+  }
   // 容器内无宿主机 docker CLI；显式关掉 sandbox，避免 spawn docker ENOENT
   cfg.agents = cfg.agents || {}
   cfg.agents.defaults = cfg.agents.defaults || {}

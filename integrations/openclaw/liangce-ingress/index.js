@@ -62,7 +62,13 @@ function cleanupJti(now) {
   }
 }
 
-function b64urlJson(buf) {
+// 注意：本文件是 ESM（顶层 import），顶层函数声明重名会直接 SyntaxError。
+// 上面第 12 行的 b64urlJson 是「对象 → base64url」的编码器（签发 JWT 用），
+// 这里是「base64url → 对象」的解码器（校验 handoff 用），早期两条分支各加了一个
+// 同名 helper，合并后插件整个加载失败：
+//   [plugins] liangce-ingress failed to load ... SyntaxError: Identifier 'b64urlJson' has already been declared
+// 所以解码器改名，别再改回去。
+function parseB64urlJson(buf) {
   return JSON.parse(Buffer.from(buf, "base64url").toString("utf8"));
 }
 
@@ -84,7 +90,7 @@ function verifyHandoff(token, secret, conversationId) {
     err.code = "openclaw_handoff_bad_sig";
     throw err;
   }
-  const payload = b64urlJson(body);
+  const payload = parseB64urlJson(body);
   if (payload.typ !== TYP || payload.iss !== ISS || payload.aud !== AUD) {
     const err = new Error("handoff iss/aud/typ mismatch");
     err.code = "openclaw_handoff_aud";
