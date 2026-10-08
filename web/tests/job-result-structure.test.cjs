@@ -50,7 +50,9 @@ const writer = mod.exports
 // ---------- 内存版 mindMap ----------
 // slowLand = true 时模拟「协同模式下命令不是同步落树」：一批节点分批落地
 // （第一个立刻，其余 30ms 后）。用来验证「附件不要挂错节点」。
+// dropInserts = true 时模拟「命令被协同服务静默丢掉」：插入命令一个都不落。
 let slowLand = false
+let dropInserts = false
 let seq = 0
 function makeNode(text) {
   seq += 1
@@ -107,6 +109,8 @@ function makeMindMap() {
     execCommand(cmd, ...args) {
       map.cmds.push(cmd)
       if (cmd === 'INSERT_MULTI_CHILD_NODE') {
+        // 命令被协同服务丢掉：插了跟没插一样（这就是「报成功、图上没有」的成因）
+        if (dropInserts) return
         // 引擎的签名是 (nodeList, trees) —— 第一个参数是数组
         const parents = args[0]
         const trees = args[1]
@@ -368,6 +372,54 @@ async function main() {
     '完整输出节点上挂的是它自己的 md（不是产物）',
     !!md3 && /^运行输出 · /.test(String(md3.getData('attachmentName') || '')),
     md3 && String(md3.getData('attachmentName'))
+  )
+
+  // ============ D. 命令被静默丢掉 → 必须报错，不能报成功 ============
+  // 2026-10-08 用户反馈「状态栏说成功、图上什么都没有」。成因：整条写回都是
+  // 「不抛错」的写法（连 waitNewChild 都退回「最后一个子节点」充数），
+  // 命令被协同服务丢掉时也一路走到「已写入导图」。
+  console.log('--- 命令没落到图上：必须报错，不能报成功 ---')
+  const mapD = makeMindMap()
+  const containerD = await writer.createJobContainer({
+    mindMap: mapD,
+    nodeUid: mapD.root.getData('uid'),
+    prompt: '任务内容'
+  })
+  check('先正常建出任务容器', !!containerD.uid, containerD.uid)
+
+  dropInserts = true
+  let threw = ''
+  try {
+    await writer.writeJobResultToMap({
+      mindMap: mapD,
+      nodeUid: containerD.uid,
+      markdown: MD,
+      roomKey: 'room-test',
+      artifacts: []
+    })
+  } catch (err) {
+    threw = (err && err.message) || String(err)
+  }
+  check('命令被丢掉 → 抛错，而不是报「已写入」', /没有落到图上/.test(threw), threw)
+  check(
+    '抛错时不留下「已写入」的假象（节点数为 0）',
+    (containerD.node.children || []).length === 1,
+    String((containerD.node.children || []).length)
+  )
+
+  // 同一棵树，命令能落 → 正常写回且真的长出节点
+  dropInserts = false
+  const okOut = await writer.writeJobResultToMap({
+    mindMap: mapD,
+    nodeUid: containerD.uid,
+    markdown: MD,
+    roomKey: 'room-test',
+    artifacts: []
+  })
+  check(
+    '命令能落时正常写出（附件 + 完整输出）',
+    okOut.nodes >= 2 && (containerD.node.children || []).length > 1,
+    `nodes=${okOut.nodes} kids=${(containerD.node.children || []).length}`
   )
 
   const failed = results.filter(item => !item.ok)
