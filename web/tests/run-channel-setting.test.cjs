@@ -252,6 +252,17 @@ function loadToolbar() {
         return { getTextFromHtml: html => String(html || '').replace(/<[^>]+>/g, '') }
       }
       if (name === '@/utils/runChannel') return rc
+      if (name === '@/utils/runLog') {
+        // 运行日志（本地留存）：本用例只关心「通道设置」，给最小实现
+        return {
+          makeRunLogId: () => 'run-test',
+          saveRunRecord: () => null,
+          patchRunRecord: () => null,
+          readRunRecords: () => [],
+          markInterruptedRuns: () => 0,
+          recordToHistoryItem: rec => rec || null
+        }
+      }
       return {}
     },
     mod,

@@ -296,7 +296,7 @@
                 <span class="hName" :title="item.intent || ''">{{
                   jobNodeText(item) || item.name || '(未命名)'
                 }}</span>
-                <span class="hMeta">{{ jobTimeText(item) }}</span>
+                <span class="hMeta">{{ jobMetaText(item) }}</span>
               </span>
               <span class="hState" :class="jobStateClass(item)" :title="item.detail || ''">{{ jobStateText(item) }}</span>
               <el-button
@@ -582,6 +582,16 @@ import {
   runChannelLabel,
   readRunConcurrency
 } from '@/utils/runChannel'
+// 运行日志（本地留存）：运行历史 = 桥接的任务列表 + 这一份。
+// 助理通道是流式直连、桥接不通时也拿不到列表，所以本地这份是「运行有历史」的保证。
+import {
+  makeRunLogId,
+  saveRunRecord,
+  patchRunRecord,
+  readRunRecords,
+  markInterruptedRuns,
+  recordToHistoryItem
+} from '@/utils/runLog'
 
 // 任务结果按 Markdown 渲染，配置与项目其他对话页保持一致
 const jobMd = new MarkdownIt({ html: false, linkify: true, breaks: true })
@@ -1274,6 +1284,9 @@ export default {
     this.$bus.$on('node_note_dblclick', this.onNodeNoteDblclick)
     // 上次没回写完的任务：捡回来接着轮询（刷新页面不该让任务白跑）
     // 「哪条会话回执收得回」也是跨刷新记住的 —— 挑派发会话要用
+    // 先收尾：助理那条是流式直连，刷新页面这条流就断了，别让运行记录
+    // 永远停在「执行中」（见 utils/runLog.js 的 markInterruptedRuns）
+    markInterruptedRuns()
     this.restoreReceiptSafe()
     this.restoreJobQueue()
     const restored = this.restorePendingJobs()
@@ -1500,13 +1513,20 @@ export default {
       this.jobActiveId = item.id
       this.jobCurrentId = item.id
       this.resetJobFullText()
-      this.jobFullText = String(item.detail || '')
-        .replace(/^result:\s*/i, '')
-        .trim()
+      // 本地留存那条（助理 / 桥接不通时的兜底）正文就在记录里，不在会话历史里
+      const seed = String(
+        item.localOnly ? item.result || item.detail || '' : item.detail || ''
+      )
+      this.jobFullText = seed.replace(/^result:\s*/i, '').trim()
       if (this.isJobRunning(item)) {
         // 正在跑的交给 pollJob 盯（只盯本次派发的那个），这里只提示
         this.jobStatus = '这个任务还在跑，跑完会自动写入运行节点'
         this.jobStatusType = 'jobWait'
+        return
+      }
+      if (item.localOnly) {
+        this.jobFullChars = this.jobFullText.length
+        this.jobFullSource = 'local'
         return
       }
       await this.loadJobFullText()
@@ -1942,7 +1962,8 @@ export default {
     async loadJobHistory() {
       const host = this.jobSelectedHost
       if (!host) {
-        this.jobHistory = []
+        const local = this.mergeRunHistory([])
+        this.jobHistory = local
         this.jobHistoryError = ''
         return
       }
@@ -1957,9 +1978,14 @@ export default {
           .map(gw => String((gw && gw.url) || ''))
           .filter(Boolean)
         if (!urls.length) {
-          this.jobHistory = []
+          // 桥接问不到（没起来 / 这台机器没会话）：本地留存的那份照常显示 ——
+          // 用户要的是「运行要有历史」，不是「桥接通了才有历史」
+          const local = this.mergeRunHistory([])
+          this.jobHistory = local
           this.jobHistoryError =
-            gwRes && !gwRes.ok ? gwRes.error || '拿不到运行记录' : ''
+            local.length || !(gwRes && !gwRes.ok)
+              ? ''
+              : gwRes.error || '拿不到运行记录'
           return
         }
         const batches = await Promise.all(
@@ -1987,18 +2013,18 @@ export default {
         // 全都没拉到才算错；只要有一个会话答上，就按拿到的显示。
         // 错误原样透出来 —— 「网关暂时不可用」比一句「拿不到运行记录」有用得多
         if (!merged.length && batches.every(item => !item || !item.ok)) {
+          const local = this.mergeRunHistory([])
+          if (local.length) {
+            this.jobHistoryError = ''
+            this.jobHistory = local
+            return
+          }
           const first = batches.find(item => item && item.error)
           this.jobHistoryError = (first && first.error) || '拿不到运行记录'
           return
         }
         this.jobHistoryError = ''
-        this.jobHistory = merged
-          .sort(
-            (a, b) =>
-              (b.updatedAt || b.startedAt || 0) -
-              (a.updatedAt || a.startedAt || 0)
-          )
-          .slice(0, 20)
+        this.jobHistory = this.mergeRunHistory(merged)
       } catch (err) {
         this.jobHistoryError = (err && err.message) || '拿不到运行记录'
       } finally {
@@ -2006,6 +2032,41 @@ export default {
         // 会话（端口）那一栏如果展开着，顺手刷一下忙/闲
         if (this.jobSessionsExpanded) await this.loadJobSessions()
       }
+    },
+
+    /**
+     * 运行历史 = 桥接的任务列表 + 本地留存的运行记录（见 utils/runLog.js）。
+     *
+     * 为什么非要有本地那份：助理（WorkBuddy）通道是流式直连，网关照不到它 ——
+     * 2026-10-08 用户反馈「运行没有历史」，就是这个（助理已是默认通道）。
+     * 桥接没起来时它还能兜底，历史不至于全空。
+     * 同一条（同 id）以**桥接的为准**（状态更实时），本地那份只补它没有的正文。
+     */
+    mergeRunHistory(bridgeJobs) {
+      const byId = new Map()
+      readRunRecords().forEach(rec => {
+        const item = recordToHistoryItem(rec)
+        if (item) byId.set(item.id, item)
+      })
+      ;(bridgeJobs || []).forEach((job, index) => {
+        if (!job) return
+        const id = String(job.id || '')
+        const key = id || `bridge-${index}`
+        const prev = id ? byId.get(id) : null
+        const row = { ...(prev || {}), ...job }
+        // 桥接那条没有正文时，用本地留的那份（runs 会话回执取不回时特别有用）
+        if (!row.detail && prev && prev.result) row.detail = prev.result
+        row.source = (prev && prev.source) || 'bridge'
+        // 有执行会话 → 正文按桥接那套去取，不算「本地记录」
+        row.localOnly = false
+        byId.set(key, row)
+      })
+      return Array.from(byId.values())
+        .sort(
+          (a, b) =>
+            (b.updatedAt || b.startedAt || 0) - (a.updatedAt || a.startedAt || 0)
+        )
+        .slice(0, 20)
     },
 
     /** 刚停完任务时网关要重建列表，第一次没拿到就等一下再拉（失败也不清空） */
@@ -2078,6 +2139,25 @@ export default {
       return `${String(d.getHours()).padStart(2, '0')}:${String(
         d.getMinutes()
       ).padStart(2, '0')}`
+    },
+
+    /** 「这条是谁跑的」：助理 / 桥接（桥接列表本身不带通道就不标） */
+    jobChannelShort(item) {
+      const channel = String((item && item.channel) || '')
+      if (channel === RUN_CHANNEL_OPENCLAW) return '助理'
+      if (channel === RUN_CHANNEL_BRIDGE) return '桥接'
+      return ''
+    },
+
+    /**
+     * 列表里那行小字：时间 + 通道。
+     * 运行历史现在混着两条通道的记录（桥接的任务 + 本页面留存的运行），
+     * 不标一下分不清「这条是谁跑的」。
+     */
+    jobMetaText(item) {
+      return [this.jobTimeText(item), this.jobChannelShort(item)]
+        .filter(Boolean)
+        .join(' · ')
     },
 
     /** 当前选中的节点 —— 运行结果的落点（概要点不是节点，跳过） */
@@ -2262,6 +2342,14 @@ export default {
         }
         this.jobWrittenJobId = jobId
         this.jobWriteResult = out
+        // 本地运行记录同步成「已完成 + 正文」：运行历史里点开就有内容
+        if (jobId) {
+          patchRunRecord(jobId, {
+            state: 'done',
+            result: bodyText,
+            detail: ''
+          })
+        }
         const missing = (out.missing || []).length
         const attCount = (out.attachments || []).length
         // 新结构（2026-10-08）不铺正文节点：结果全在「任务 → 附件」里，
@@ -2422,6 +2510,25 @@ export default {
         if (!container || !container.ok) return
       }
 
+      // 运行历史要留痕（2026-10-08 用户反馈「运行没有历史」）：
+      // 助理是流式直连，没有「派发 → 回执」那套，网关照不到它 —— 不自己记，历史里
+      // 就一条都没有（而它现在是默认通道）。点下运行先记一条，跑完再补正文。
+      const runId = String(options.runId || makeRunLogId('oc'))
+      const runName = `脑图运行 · ${this.nodePlainTitle(runNode) || '当前节点'}${
+        options.prompt ? ' · 继续' : ''
+      }`
+      saveRunRecord({
+        id: runId,
+        channel: RUN_CHANNEL_OPENCLAW,
+        state: 'pending',
+        name: runName,
+        nodeUid: container.nodeUid,
+        nodeTitle: container.nodeTitle,
+        room: this.currentRoomKey(),
+        prompt,
+        runDir
+      })
+
       // —— 并发闸门：助理**可以**并行（2026-10-08 实测：不同 conversationId = 独立会话，
       // 并发 2 条总耗时 ≈ 较慢那条，不是两条之和），所以不再强制串行。
       // 但要有个上限（右侧栏「设置 → AI 执行引擎」里配，默认 3），到顶了就入队，
@@ -2433,16 +2540,15 @@ export default {
           prompt,
           container,
           runDir,
-          continued: !!options.prompt,
-          name: `脑图运行 · ${this.nodePlainTitle(runNode) || '当前节点'}${
-            options.prompt ? ' · 继续' : ''
-          }`
+          runId,
+          name: runName,
+          continued: !!options.prompt
         })
         return
       }
       // 起跑即返回（不 await 到跑完）：按钮在派出去那一刻就解锁，第二个任务能接着点 ——
       // 上限没满就直接并行跑，满了才排队（2026-10-08 用户要求「能并发」）。
-      this.startOpenclawRun({ prompt, container, runDir })
+      this.startOpenclawRun({ prompt, container, runDir, runId })
     },
 
     /** 并行跑着几条助理任务 */
@@ -2487,19 +2593,22 @@ export default {
      * 每条运行的状态都放在 jobOpenclawRuns[runId] 里（并行不互相覆盖）；
      * 收尾时把自己从表里摘掉，再 drainJobQueue 把等着的下一个放出去。
      */
-    async startOpenclawRun({ prompt = '', container = null, runDir = '' } = {}) {
+    async startOpenclawRun({
+      prompt = '',
+      container = null,
+      runDir = '',
+      runId = ''
+    } = {}) {
       const nodeUid = (container && container.nodeUid) || ''
       const nodeTitle = (container && container.nodeTitle) || ''
       const outDir = String(runDir || '')
-      const runId = `oc-${Date.now().toString(36)}-${Math.random()
-        .toString(36)
-        .slice(2, 6)}`
+      const id = String(runId || makeRunLogId('oc'))
       const controller =
         typeof AbortController !== 'undefined' ? new AbortController() : null
       // 记下起跑时刻：产物目录没扫到时要回退按时间窗捞，所以这个还得留着
       // （往前放宽 2 秒，避开「来不及落盘 / 时间戳粒度」的时间差）
       const run = {
-        runId,
+        runId: id,
         text: '',
         abort: controller,
         nodeUid,
@@ -2507,7 +2616,7 @@ export default {
         runDir: outDir,
         startedAt: Date.now() - 2000
       }
-      this.jobOpenclawRuns = { ...(this.jobOpenclawRuns || {}), [runId]: run }
+      this.jobOpenclawRuns = { ...(this.jobOpenclawRuns || {}), [id]: run }
       this.jobOpenclawAbort = controller
       const parallel = this.openclawRunCount()
       this.jobStatus =
@@ -2515,11 +2624,14 @@ export default {
           ? `助理执行中…（并行 ${parallel} 条）`
           : '正在通过助理执行…'
       this.jobStatusType = 'jobWait'
+      // 排队的那些在记录里是 pending → 真跑起来了就变 working
+      patchRunRecord(id, { state: 'working' })
+      if (this.jobHistoryVisible) this.loadJobHistory()
       try {
         const res = await streamChat({
           messages: [{ role: 'user', content: prompt }],
           // 每条运行一个独立的 conversationId —— 网关侧就是靠它分会话的（实测可并行）
-          conversationId: `mind-openclaw-${runId}`,
+          conversationId: `mind-openclaw-${id}`,
           signal: controller ? controller.signal : undefined,
           onDelta: text => {
             // agentChat 的 onDelta 给的是**累计全文**
@@ -2538,8 +2650,14 @@ export default {
           this.jobStatus = '助理没有返回内容'
           this.jobStatusType = 'jobErr'
           this.$message.warning('助理没有返回内容，没有东西写回导图')
+          patchRunRecord(id, {
+            state: 'failed',
+            error: '助理没有返回内容'
+          })
           return
         }
+        // 正文先落进运行记录：历史里点开就能看，刷新页面也不丢
+        patchRunRecord(id, { state: 'working', result: markdown })
         const running = this.openclawRunCount()
         this.jobStatus =
           running > 1 ? `正在写回导图…（并行 ${running} 条）` : '正在写回导图…'
@@ -2550,7 +2668,7 @@ export default {
           outDir
         )
         await this.writeJobResultToNode(
-          { id: runId },
+          { id },
           {
             channel: RUN_CHANNEL_OPENCLAW,
             markdown,
@@ -2562,21 +2680,31 @@ export default {
             force: true
           }
         )
+        patchRunRecord(id, {
+          state: 'done',
+          result: markdown,
+          artifactNames: (artifacts || [])
+            .map(item => String((item && item.name) || ''))
+            .filter(Boolean)
+        })
       } catch (err) {
         if (err && err.name === 'AbortError') {
           this.jobStatus = '已取消'
           this.jobStatusType = 'jobErr'
+          patchRunRecord(id, { state: 'stopped', error: '已取消' })
           return
         }
         const msg = (err && err.message) || String(err)
         this.jobStatus = `助理执行失败：${msg}`
         this.jobStatusType = 'jobErr'
+        patchRunRecord(id, { state: 'failed', error: msg })
         this.$message.error(`助理执行失败：${msg}`)
       } finally {
         const next = { ...(this.jobOpenclawRuns || {}) }
-        delete next[runId]
+        delete next[id]
         this.jobOpenclawRuns = next
         if (this.jobOpenclawAbort === controller) this.jobOpenclawAbort = null
+        if (this.jobHistoryVisible) this.loadJobHistory()
         // 腾出一个名额 → 把等着的下一个放出去（drainJobQueue 自己会再核一次上限）
         if ((this.jobQueue || []).length) this.drainJobQueue()
       }
@@ -2717,6 +2845,23 @@ export default {
           // 重试要用（见 retryPendingJob）
           prompt
         })
+        // 运行历史也留一份本地记录：桥接不通（/bridge 502）时列表还能看到这条
+        if (jobId) {
+          saveRunRecord({
+            id: jobId,
+            channel: RUN_CHANNEL_BRIDGE,
+            state: 'working',
+            name: `脑图运行 · ${container.nodeTitle || '当前节点'}${
+              continued ? ' · 继续' : ''
+            }`,
+            nodeUid: container.nodeUid,
+            nodeTitle: container.nodeTitle,
+            room: this.currentRoomKey(),
+            prompt,
+            gateway,
+            hostKey: host.key
+          })
+        }
         const runsMode = result.mode === 'runs'
         this.jobStatus = runsMode
           ? `已派发（这条会话没有 Jobs 接口，结果可能要等几分钟兜回来）${
@@ -3326,6 +3471,9 @@ export default {
         container: item.container || null,
         // 助理条目的产物目录（跑起来时按它捞产物）
         runDir: item.runDir || '',
+        // 助理条目的运行 id：运行记录（运行历史）早就在点「运行」时写好了，
+        // 排队期间也不能换 id —— 换了历史里那条就永远停在「排队中」
+        runId: item.runId || '',
         // 落点也平铺一份：万一 container 丢了（老数据 / 手工改），还能按 uid 挂回去
         nodeUid: (item.container && item.container.nodeUid) || '',
         nodeTitle: (item.container && item.container.nodeTitle) || '',
@@ -3365,7 +3513,8 @@ export default {
         return this.startOpenclawRun({
           prompt: item.prompt,
           container,
-          runDir: item.runDir || ''
+          runDir: item.runDir || '',
+          runId: item.runId || ''
         })
       }
       const host =
@@ -3399,6 +3548,21 @@ export default {
           gateway: item.gateway,
           prompt: item.prompt
         })
+        // 本地也留一条运行记录（见 runViaOpenclaw / utils/runLog.js）
+        if (jobId) {
+          saveRunRecord({
+            id: jobId,
+            channel: RUN_CHANNEL_BRIDGE,
+            state: 'working',
+            name: item.name || '脑图运行 · 排队',
+            nodeUid: (item.container && item.container.nodeUid) || '',
+            nodeTitle: (item.container && item.container.nodeTitle) || '',
+            room: this.currentRoomKey(),
+            prompt: item.prompt,
+            gateway: item.gateway,
+            hostKey: host.key
+          })
+        }
         this.jobStatus = `队列任务已派发（${this.gatewayShort(item.gateway)}）${
           jobId ? ` · ${jobId}` : ''
         }${this.pendingSuffix()}`
@@ -3488,6 +3652,13 @@ export default {
           state === 'failed'
             ? `${who}那次运行失败了，没有写回导图${suffixFail}`
             : `${who}那次运行被停止了，没有写回导图`
+        // 本地运行记录同步成终态（运行历史里别停在「执行中」）
+        if (jobId) {
+          patchRunRecord(jobId, {
+            state: state === 'failed' ? 'failed' : 'stopped',
+            error: this.jobWriteError
+          })
+        }
         this.$message.error(this.jobWriteError)
         this.loadJobHistory()
         return
@@ -3713,6 +3884,13 @@ export default {
       if (!id || this.jobStopBusyId) return
       this.jobStopBusyId = id
       try {
+        // 助理那条：没有执行会话，停的就是本页面这条流（见 stopOpenclawRun）
+        if (item && item.channel === RUN_CHANNEL_OPENCLAW) {
+          this.stopOpenclawRun(id)
+          patchRunRecord(id, { state: 'stopped', error: '已取消' })
+          await this.loadJobHistory()
+          return
+        }
         await this.stopJobById(id)
       } finally {
         this.jobStopBusyId = ''
@@ -3738,6 +3916,9 @@ export default {
         (this.jobHistory || []).find(x => x.id === jobId) ||
         null
       const host = this.hostOfEntry(entry)
+      // 本地留存那条（助理 / 桥接不通时的兜底）没有执行会话，桥接停不了 ——
+      // 助理那条由 stopHistoryItem 直接停本页面这条流
+      if (entry && entry.localOnly) return
       if (!host || !jobId) return
       const res = await stopHostJob({
         host,

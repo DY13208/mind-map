@@ -57,6 +57,10 @@ const runChannelUtil = loadCjs(
   () => ({})
 )
 
+// 运行日志（本地留存）—— 也用真模块：运行历史 = 桥接列表 + 这一份，
+// 合并逻辑（同 id 以桥接为准 / 本地补正文）就是本轮要测的东西
+const runLogUtil = loadCjs(path.join(WEB, 'src/utils/runLog.js'), () => ({}))
+
 // ---- 可编程的桥接 stub ----
 const jobResponses = [] // 每次 listHostJobs 消费一个
 const calls = { list: 0, stop: [] }
@@ -171,6 +175,7 @@ new Function('require', 'module', 'exports', code)(name => {
   if (name === '@/utils/mindmapRunPrompt') return {}
   if (name === '@/utils/agentChat') return agentChatStub
   if (name === '@/utils/runChannel') return runChannelUtil
+  if (name === '@/utils/runLog') return runLogUtil
   if (name === '@/utils/workbuddyJobBridge') return bridgeStub
   return {}
 }, mod, mod.exports)
@@ -1678,6 +1683,154 @@ async function main() {
     writeOrder.join(',') === 'start-n1,end-n1,start-n2,end-n2',
     writeOrder.join(',')
   )
+
+  // ---- 28. 运行历史：运行了就得有记录（2026-10-08 用户反馈「运行没有历史」）----
+  // 原来历史只有桥接视角（去问执行主机的 WorkBuddy 有哪些任务）：
+  //   ① 助理（WorkBuddy）通道是流式直连、没有派发/回执，网关照不到它 → 用它跑完一条都没有；
+  //   ② 桥接没起来（本机就是 /bridge 502）时更是全空。
+  // 现在本页面留一份运行日志（utils/runLog.js），历史 = 桥接的任务列表 + 这一份。
+  localStore.clear()
+  openclawPlan.length = 0
+  openclawHold.length = 0
+  openclawWrites.length = 0
+  vm = makeVm()
+  vm.jobQueue = []
+  vm.jobOpenclawRuns = {}
+  vm.jobHistory = []
+  vm.jobHistoryVisible = false
+  vm.buildFollowUpJobPrompt = t => String(t)
+  vm.writeJobResultToNode = async (job, options) => {
+    openclawWrites.push(options.nodeUid)
+  }
+  openclawPlan.push({ content: '助理这一次的正文' })
+  await vm.runViaOpenclaw({
+    options: {
+      prompt: '任务·助理',
+      container: { ok: true, nodeUid: 'u-oc', nodeTitle: '任务 · 助理' }
+    }
+  })
+  // 起跑是后台跑（调用方不 await），等它跑完：记录要落成「已完成」
+  for (let i = 0; i < 80 && vm.openclawRunCount(); i++) {
+    await new Promise(r => setTimeout(r, 5))
+  }
+  const ocRows = runLogUtil.readRunRecords()
+  check('助理跑完在本页面留了运行记录', ocRows.length === 1, JSON.stringify(ocRows.map(r => r.id)))
+  check(
+    '记录里状态是已完成、正文也在',
+    ocRows[0] && ocRows[0].state === 'done' && ocRows[0].result === '助理这一次的正文',
+    ocRows[0] && `${ocRows[0].state}/${ocRows[0].result}`
+  )
+  check(
+    '记录标了通道与落点（历史里认得出是谁跑的）',
+    ocRows[0] && ocRows[0].channel === 'openclaw' && ocRows[0].nodeTitle === '任务 · 助理',
+    ocRows[0] && `${ocRows[0].channel}/${ocRows[0].nodeTitle}`
+  )
+
+  // 桥接不通（/bridge 502）→ 历史不该是空的，也不该报错
+  gatewaysResult = { ok: false, error: '连不上桥接（/bridge 502）' }
+  await vm.loadJobHistory()
+  check(
+    '桥接不通时助理那条照样在运行历史里',
+    vm.jobHistory.length === 1 && vm.jobHistory[0].channel === 'openclaw',
+    JSON.stringify(vm.jobHistory.map(x => x.channel))
+  )
+  check('有本地记录 → 不显示「拿不到运行记录」', vm.jobHistoryError === '', vm.jobHistoryError)
+  check(
+    '本地那条能看出「没有执行会话」（正文不靠桥接取）',
+    vm.jobHistory[0].localOnly === true && vm.jobHistory[0].intent === '节点：任务 · 助理',
+    JSON.stringify({ localOnly: vm.jobHistory[0].localOnly, intent: vm.jobHistory[0].intent })
+  )
+
+  // 桥接列表里出现了同一条 → 按 id 合并，以桥接为准；桥接没正文时用本地那份补
+  const ocId = ocRows[0].id
+  gatewaysResult = { ok: true, gateways: [{ url: 'http://127.0.0.1:8799' }] }
+  jobsByGateway = {
+    'http://127.0.0.1:8799': {
+      ok: true,
+      jobs: [
+        {
+          id: ocId,
+          name: '桥接看到的这条',
+          state: 'done',
+          startedAt: Date.now(),
+          updatedAt: Date.now()
+        }
+      ]
+    }
+  }
+  await vm.loadJobHistory()
+  check('同一条不会重复（按 id 合并）', vm.jobHistory.length === 1, String(vm.jobHistory.length))
+  check(
+    '以桥接那条为准（认它是执行会话里的任务）',
+    vm.jobHistory[0].gateway === 'http://127.0.0.1:8799' && vm.jobHistory[0].localOnly === false,
+    JSON.stringify({ gw: vm.jobHistory[0].gateway, localOnly: vm.jobHistory[0].localOnly })
+  )
+  check(
+    '桥接没正文时用本地留的那份补上',
+    vm.jobHistory[0].detail === '助理这一次的正文',
+    String(vm.jobHistory[0].detail)
+  )
+
+  // 点开本地那条：正文就在记录里（刷新页面、桥接不通都还能看）
+  localStore.clear()
+  runLogUtil.saveRunRecord({
+    id: 'oc-local',
+    channel: 'openclaw',
+    state: 'done',
+    nodeTitle: '任务 · 本地',
+    result: '本地留存的正文',
+    startedAt: Date.now()
+  })
+  gatewaysResult = { ok: false, error: '桥接没起来' }
+  jobsByGateway = {}
+  await vm.loadJobHistory()
+  await vm.openHistoryItem(vm.jobHistory[0])
+  check('点开本地那条就能看到正文（不依赖桥接）', vm.jobFullText === '本地留存的正文', vm.jobFullText)
+  check('本地那条不去查会话历史', vm.jobFullSource === 'local', vm.jobFullSource)
+
+  // 刷新页面：助理是流式直连，刷新这条流就断了 → 别永远停在「执行中」
+  localStore.clear()
+  runLogUtil.saveRunRecord({ id: 'oc-run', channel: 'openclaw', state: 'working', nodeTitle: 'A' })
+  runLogUtil.saveRunRecord({
+    id: 'br-run',
+    channel: 'bridge',
+    state: 'working',
+    nodeTitle: 'B',
+    gateway: 'http://127.0.0.1:8799'
+  })
+  const swept = runLogUtil.markInterruptedRuns()
+  check(
+    '刷新后把助理那条标成已停止（不留假的「执行中」）',
+    swept === 1 && runLogUtil.readRunRecords().find(r => r.id === 'oc-run').state === 'stopped',
+    String(swept)
+  )
+  check(
+    '桥接那条不动（任务在执行机上照跑，状态以桥接为准）',
+    runLogUtil.readRunRecords().find(r => r.id === 'br-run').state === 'working'
+  )
+
+  // 列表小字标通道，分得清「这条是谁跑的」
+  check(
+    '列表小字带通道',
+    /助理/.test(vm.jobMetaText({ channel: 'openclaw', startedAt: Date.now() })) &&
+      /桥接/.test(vm.jobMetaText({ channel: 'bridge', startedAt: Date.now() })),
+    vm.jobMetaText({ channel: 'openclaw', startedAt: Date.now() })
+  )
+
+  // 从历史里停助理那条：停的是本页面这条流（没有执行会话可停）
+  vm = makeVm()
+  let aborted = false
+  vm.jobOpenclawRuns = {
+    'oc-live': { runId: 'oc-live', abort: { abort: () => (aborted = true) } }
+  }
+  vm.loadJobHistory = async () => {}
+  await vm.stopHistoryItem({ id: 'oc-live', channel: 'openclaw' })
+  check('从运行历史里能停助理那条', aborted === true)
+
+  // 收尾：把桩恢复成默认，免得影响别的用例
+  gatewaysResult = { ok: true, gateways: [{ url: 'http://127.0.0.1:8799' }] }
+  jobsByGateway = {}
+  localStore.clear()
 
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)

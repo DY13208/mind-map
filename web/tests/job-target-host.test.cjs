@@ -118,6 +118,17 @@ new Function('require', 'module', 'exports', code)(name => {
     }
   }
   if (name === '@/utils/workbuddyJobBridge') return bridgeStub
+  if (name === '@/utils/runLog') {
+    // 运行日志：本用例只测「派到哪台机器」，给最小实现（内存里一对空函数）
+    return {
+      makeRunLogId: () => 'run-test',
+      saveRunRecord: () => null,
+      patchRunRecord: () => null,
+      readRunRecords: () => [],
+      markInterruptedRuns: () => 0,
+      recordToHistoryItem: rec => rec || null
+    }
+  }
   return {}
 }, mod, mod.exports)
 const methods = (mod.exports.default && mod.exports.default.methods) || {}
