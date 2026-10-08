@@ -956,7 +956,7 @@ export function createSopRunQueue({ getConcurrency, onChange } = {}) {
           raw
         )
       const msg = isNet
-        ? '连不上助理（OpenClaw），请确认 Gateway / Bridge 已启动后再运行'
+        ? '连不上助理（WorkBuddy），请确认 Gateway / Bridge 已启动后再运行'
         : raw || 'SOP 执行失败'
       void backendLabel
       if (

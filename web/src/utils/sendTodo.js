@@ -408,14 +408,14 @@ async function dispatchTodoViaOpenclaw({
 }) {
   if (onEvent) onEvent('openclaw_wecom', { phase: 'preparing', assignee: assigneeName })
   if (onDelta) {
-    onDelta(`正在通过助理（OpenClaw）给 ${assigneeName} 创建企微待办…\n`)
+    onDelta(`正在通过助理（WorkBuddy）给 ${assigneeName} 创建企微待办…\n`)
   }
 
   const health = await checkOpenclawHealth()
   if (!health || !health.ok) {
     const errHint =
       (health && health.message) ||
-      '助理（OpenClaw）未就绪，请先运行 Start-Docker 或 node scripts/openclaw-gateway.js'
+      '助理（WorkBuddy）未就绪，请先运行 Start-Docker 或 node scripts/openclaw-gateway.js'
     if (onDelta) onDelta(`${errHint}\n`)
     return {
       assignee: assigneeName,

@@ -17,7 +17,7 @@
       <div class="runExecutionMain">
         <label class="runExecutionField runEngineField">
           <span>执行引擎</span>
-          <el-input size="small" value="助理（OpenClaw）" disabled />
+          <el-input size="small" value="助理（WorkBuddy）" disabled />
         </label>
         <label class="runExecutionField runModelField">
           <span>模型</span>

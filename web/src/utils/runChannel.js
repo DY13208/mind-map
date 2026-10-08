@@ -3,7 +3,7 @@
  * 之后点运行直接按它跑，**不再弹窗**（2026-10-08 用户要求）。
  *
  * 两条通道：
- *   openclaw  助理（OpenClaw）—— 流式直连，正文与产物按「本次运行的专属目录」写回
+ *   openclaw  助理（WorkBuddy）—— 流式直连，正文与产物按「本次运行的专属目录」写回
  *   bridge    桥接（执行机上的 WorkBuddy 会话）—— 派发 → 轮询回执 → 写回
  *
  * 这里只做「取值 / 落盘 / 归一化」，工具栏与设置面板共用，
@@ -11,14 +11,14 @@
  */
 export const RUN_CHANNEL_OPENCLAW = 'openclaw'
 export const RUN_CHANNEL_BRIDGE = 'bridge'
-/** 没存过时的默认通道：助理（OpenClaw） */
+/** 没存过时的默认通道：助理（WorkBuddy） */
 export const RUN_CHANNEL_DEFAULT = RUN_CHANNEL_OPENCLAW
 
 /** 设置里下拉框的选项（顺带当 label 表用） */
 export const RUN_CHANNEL_OPTIONS = [
   {
     value: RUN_CHANNEL_OPENCLAW,
-    label: '助理（OpenClaw）',
+    label: '助理（WorkBuddy）',
     desc: '流式直连，正文和产物都按本次运行的目录写回导图'
   },
   {

@@ -114,7 +114,7 @@ new Function('require', 'module', 'exports', code)(name => {
       RUN_CHANNEL_BRIDGE: 'bridge',
       readRunChannel: () => 'openclaw',
       writeRunChannel: c => c,
-      runChannelLabel: () => '助理（OpenClaw）'
+      runChannelLabel: () => '助理（WorkBuddy）'
     }
   }
   if (name === '@/utils/workbuddyJobBridge') return bridgeStub

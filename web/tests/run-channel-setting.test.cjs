@@ -50,7 +50,7 @@ function loadCjs(file, stub) {
 // ============ A. 真模块：utils/runChannel.js ============
 console.log('--- A. 运行通道取值/落盘 ---')
 const rc = loadCjs(path.join(WEB, 'src/utils/runChannel.js'))
-check('默认是助理（OpenClaw）', rc.RUN_CHANNEL_DEFAULT === 'openclaw')
+check('默认是助理（WorkBuddy）', rc.RUN_CHANNEL_DEFAULT === 'openclaw')
 check(
   '只提供两条通道、且默认那条排第一',
   rc.RUN_CHANNEL_OPTIONS.length === 2 &&
@@ -67,7 +67,7 @@ check('与旧 key 兼容（mindmap:runChannel）', rc.readRunChannel() === 'open
 check(
   'label 能对上',
   rc.runChannelLabel('bridge') === '桥接（执行机的 WorkBuddy）' &&
-    rc.runChannelLabel('openclaw') === '助理（OpenClaw）',
+    rc.runChannelLabel('openclaw') === '助理（WorkBuddy）',
   rc.runChannelLabel('bridge')
 )
 
@@ -90,7 +90,7 @@ check(
   '下拉选项来自统一的通道清单（不再是写死的纯文本）',
   /v-for="item in runChannelOptions"/.test(settingTpl) &&
     /:value="item.value"/.test(settingTpl) &&
-    !/<span class="value">助理（OpenClaw）<\/span>/.test(settingTpl)
+    !/<span class="value">助理/.test(settingTpl)
 )
 check(
   '选项说明跟着当前通道变',

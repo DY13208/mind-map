@@ -1396,7 +1396,7 @@ export async function runSopWithWorkbuddy({
       backend === AI_BACKEND_XIAOCE
         ? '小策未就绪，请确认已登录且企业/智能体配置可用'
         : backend === AI_BACKEND_OPENCLAW
-          ? '助理（OpenClaw）未就绪，请先运行 Start-Docker 拉起 Gateway / Bridge'
+          ? '助理（WorkBuddy）未就绪，请先运行 Start-Docker 拉起 Gateway / Bridge'
           : 'WorkBuddy 未就绪，请确认本机已启动 WorkBuddy API 代理'
     )
   }

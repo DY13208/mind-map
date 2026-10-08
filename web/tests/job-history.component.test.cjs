@@ -1493,7 +1493,7 @@ async function main() {
   localStore.clear()
   vm = makeVm()
   check(
-    '默认通道是助理（OpenClaw）',
+    '默认通道是助理（WorkBuddy）',
     vm.recallRunChannel() === 'openclaw',
     vm.recallRunChannel()
   )
