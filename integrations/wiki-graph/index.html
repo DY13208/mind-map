@@ -102,18 +102,7 @@
   .hud-search input::placeholder { color: var(--text-disabled); }
   .hud-search input:focus { border-color: var(--border-visible); }
 
-  .hud-legend {
-    bottom: 20px; left: 50%; transform: translateX(-50%);
-    display: flex; gap: 16px; flex-wrap: wrap; justify-content: center;
-    padding: 10px 20px;
-  }
-  .legend-item {
-    display: flex; align-items: center; gap: 6px;
-    font-family: var(--font-mono);
-    font-size: 10px; color: var(--text-disabled);
-    letter-spacing: 0.04em;
-  }
-  .legend-dot { width: 6px; height: 6px; border-radius: 50%; }
+
 
   /* Panel */
   .panel {
@@ -247,7 +236,6 @@
   <button id="expansionReset">RESET</button>
 </div>
 
-<div class="hud hud-legend" id="legend"></div>
 
 <div class="panel" id="panel">
   <button class="panel-close" id="panelClose">&times;</button>
@@ -362,11 +350,6 @@ async function loadData() {
     if (adjacency[e.from]) adjacency[e.from].add(e.to);
     if (adjacency[e.to]) adjacency[e.to].add(e.from);
   });
-
-  const legend = document.getElementById('legend');
-  legend.innerHTML = nodes.map(n =>
-    `<div class="legend-item"><div class="legend-dot" style="background:${n.color}"></div>${escapeHtml(n.name)}</div>`
-  ).join('');
 
   layoutNodes();
   animate();
