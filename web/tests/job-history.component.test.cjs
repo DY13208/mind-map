@@ -2019,7 +2019,11 @@ async function main() {
     !vm.messages.some(([kind]) => kind === 'success'),
     JSON.stringify(vm.messages)
   )
-  check('没确认时整条重写了一次（幂等，不会冒重复节点）', emits === 2, String(emits))
+  check(
+    '没确认时按同一段写回逻辑自动重试（首次 + 重试 3 次 = 4 次，幂等不会冒重复节点）',
+    emits === 4,
+    String(emits)
+  )
   check(
     '运行记录标成「未同步」（历史里能看见、能补写）',
     runLogUtil.readRunRecords().find(r => r.id === 'w-sync').synced === false,
@@ -2142,6 +2146,295 @@ async function main() {
     })(),
     ''
   )
+
+  // ---- 33. 刷新后：结果没挂在节点上的，自动补写回去 ----
+  // 用户 2026-10-09：「在识别到任务内容没挂在节点并且运行完成的时候，刷新页面就是把
+  // 运行记录的写入导图逻辑接过来重新写上」。判据用**图上的真实结构**（走 probe_job_result
+  // 探针），不靠记录里的标志 —— 写回被协同吃掉时，本地记录照样是「已完成」的样子。
+  console.log('--- 刷新后自动补写 ---')
+  runLogUtil.clearRunRecords()
+  localStore.clear()
+  vm = makeVm()
+  vm.fetchJobText = async () => ''
+  let autoWrites = 0
+  vm.writeJobResultToNode = async () => {
+    autoWrites += 1
+  }
+  // 图上什么都没有 → 该补
+  vm.probeJobResult = async () => ({
+    ok: true,
+    exists: false,
+    hasTaskContent: false,
+    hasAttach: false,
+    hasFullOutput: false
+  })
+  runLogUtil.saveRunRecord({
+    id: 'rep-1',
+    channel: 'openclaw',
+    state: 'done',
+    nodeUid: 'u-rep-1',
+    result: '这是那次的正文',
+    runDir: '20261009-0900'
+  })
+  vm.messages.length = 0
+  const n1 = await vm.autoRepairUnwrittenRuns()
+  check('结果没在图上 → 自动补写一条', n1 === 1 && autoWrites === 1, `${n1} / ${autoWrites}`)
+  check(
+    '补完在记录上留痕（免得每次刷新重写）',
+    (() => {
+      const rec = runLogUtil.readRunRecords().find(r => r.id === 'rep-1')
+      return !!rec.autoRepairedAt && rec.synced === true && rec.repairAttempts === 0
+    })(),
+    JSON.stringify(runLogUtil.readRunRecords().find(r => r.id === 'rep-1') || {})
+  )
+  check(
+    '补完给一条提示（不是闷着改）',
+    vm.messages.some(([k, m]) => k === 'info' && /已自动补上/.test(m)),
+    JSON.stringify(vm.messages)
+  )
+
+  // 图上已经有了 → 不补
+  runLogUtil.clearRunRecords()
+  vm = makeVm()
+  autoWrites = 0
+  vm.fetchJobText = async () => ''
+  vm.writeJobResultToNode = async () => {
+    autoWrites += 1
+  }
+  vm.probeJobResult = async () => ({
+    ok: true,
+    exists: true,
+    hasTaskContent: true,
+    hasAttach: true,
+    hasFullOutput: true
+  })
+  runLogUtil.saveRunRecord({
+    id: 'rep-2',
+    channel: 'openclaw',
+    state: 'done',
+    nodeUid: 'u-rep-2',
+    result: '正文'
+  })
+  const n2 = await vm.autoRepairUnwrittenRuns()
+  check(
+    '图上已经有完整结果 → 不重复写（只记一次核对）',
+    n2 === 0 && autoWrites === 0 && !!runLogUtil.readRunRecords().find(r => r.id === 'rep-2').verifiedAt,
+    `${n2} / ${autoWrites}`
+  )
+
+  // 只落了一半（有附件没有完整输出）→ 该补
+  runLogUtil.clearRunRecords()
+  vm = makeVm()
+  autoWrites = 0
+  vm.fetchJobText = async () => ''
+  vm.writeJobResultToNode = async () => {
+    autoWrites += 1
+  }
+  vm.probeJobResult = async () => ({
+    ok: true,
+    exists: true,
+    hasTaskContent: true,
+    hasAttach: true,
+    hasFullOutput: false
+  })
+  runLogUtil.saveRunRecord({
+    id: 'rep-3',
+    channel: 'openclaw',
+    state: 'done',
+    nodeUid: 'u-rep-3',
+    result: '正文'
+  })
+  check('只落了一半也要补', (await vm.autoRepairUnwrittenRuns()) === 1 && autoWrites === 1, String(autoWrites))
+
+  // 老结构（结果铺在「运行输出」里）→ 已经写过，别补第二份
+  runLogUtil.clearRunRecords()
+  vm = makeVm()
+  autoWrites = 0
+  vm.fetchJobText = async () => ''
+  vm.writeJobResultToNode = async () => {
+    autoWrites += 1
+  }
+  vm.probeJobResult = async () => ({
+    ok: true,
+    exists: true,
+    hasTaskContent: true,
+    hasAttach: false,
+    hasFullOutput: false,
+    hasLegacyOutput: true
+  })
+  runLogUtil.saveRunRecord({
+    id: 'rep-old',
+    channel: 'openclaw',
+    state: 'done',
+    nodeUid: 'u-old',
+    result: '正文'
+  })
+  check(
+    '老结构记录不补第二份（认「运行输出」那层）',
+    (await vm.autoRepairUnwrittenRuns()) === 0 && autoWrites === 0,
+    String(autoWrites)
+  )
+
+  // 没跑完 / 补过 3 次 / 只读房间 → 都不动
+  runLogUtil.clearRunRecords()
+  vm = makeVm()
+  autoWrites = 0
+  vm.fetchJobText = async () => ''
+  vm.writeJobResultToNode = async () => {
+    autoWrites += 1
+  }
+  vm.probeJobResult = async () => ({ ok: true, exists: false })
+  runLogUtil.saveRunRecord({ id: 'rep-run', channel: 'openclaw', state: 'working', nodeUid: 'u-a', result: 'x' })
+  runLogUtil.saveRunRecord({
+    id: 'rep-4',
+    channel: 'openclaw',
+    state: 'done',
+    nodeUid: 'u-b',
+    result: 'x',
+    repairAttempts: 3
+  })
+  check('还在跑的 / 补过 3 次的 → 都不动', (await vm.autoRepairUnwrittenRuns()) === 0 && autoWrites === 0, String(autoWrites))
+
+  vm = makeVm()
+  vm.isReadonly = true
+  autoWrites = 0
+  vm.writeJobResultToNode = async () => {
+    autoWrites += 1
+  }
+  runLogUtil.clearRunRecords()
+  runLogUtil.saveRunRecord({ id: 'rep-ro', channel: 'openclaw', state: 'done', nodeUid: 'u-c', result: 'x' })
+  check(
+    '只读房间不偷偷写，但把原因留在记录上',
+    (await vm.autoRepairUnwrittenRuns()) === 0 &&
+      autoWrites === 0 &&
+      /只读/.test(runLogUtil.readRunRecords().find(r => r.id === 'rep-ro').syncTip || ''),
+    runLogUtil.readRunRecords().find(r => r.id === 'rep-ro').syncTip
+  )
+  // ---- 写回失败自动重试（2026-10-09 用户要求）----
+  // 现场那句：「写入导图失败：命令没有落到图上（落点「任务 · 10-09 09:16」现在有 2 个子节点）」
+  // —— 手动去「运行历史 → 写入导图」重试一下往往就成，所以让它自动重试 3 次。
+  const LAND_FAIL =
+    '写入导图失败：命令没有落到图上（落点「任务 · 10-09 09:16」现在有 2 个子节点）—— ' +
+    '先在「运行历史」里点「写入导图」重试；还不行就刷新页面再试'
+
+  // ⓐ 权限类失败：重试多少遍都一样 → 只写一次就收手，别让人白等
+  vm = makeVm()
+  vm.$route = { query: { room: 'room-x' } }
+  vm.collabPhase = 'LIVE'
+  vm.collabSaveState = 'saved'
+  vm.waitCollabIdle = async () => true
+  let roPushes = 0
+  vm.$bus.$emit = (name, payload) => {
+    if (name !== 'write_job_result' || !payload || !payload.result) return
+    roPushes += 1
+    payload.result.promise = Promise.resolve({
+      ok: false,
+      error: '这个房间当前是只读的（没有编辑权限），结果写不进去 —— 请让有编辑权限的人来写'
+    })
+  }
+  vm.messages.length = 0
+  await vm.writeJobResultOnce(
+    { id: 'w-ro' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u-ro', force: true }
+  )
+  check('只读这种「重试也没用」的失败只写一次', roPushes === 1, String(roPushes))
+  check(
+    '只读失败照原样报出来，不硬说重试过',
+    /只读/.test(vm.jobWriteError) && !/自动重试/.test(vm.jobWriteError),
+    vm.jobWriteError
+  )
+
+  // ⓑ 前两次「命令没落图」，第三次落上了 → 报成功，并说明重试过几次
+  vm = makeVm()
+  vm.$route = { query: { room: 'room-x' } }
+  vm.collabPhase = 'LIVE'
+  vm.collabSaveState = 'saved'
+  vm.waitCollabIdle = async () => true
+  let landPushes = 0
+  vm.$bus.$emit = (name, payload) => {
+    if (name !== 'write_job_result' || !payload || !payload.result) return
+    landPushes += 1
+    payload.result.promise = Promise.resolve(
+      landPushes <= 2
+        ? { ok: false, error: LAND_FAIL }
+        : {
+            ok: true,
+            nodes: 2,
+            inlineNodes: false,
+            attachments: [{ name: '完整输出.md', kind: 'text', via: 'collab' }],
+            warnings: [],
+            missing: []
+          }
+    )
+  }
+  vm.messages.length = 0
+  await vm.writeJobResultOnce(
+    { id: 'w-land' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u-land', force: true }
+  )
+  check('命令没落图 → 自动重试，第 3 次成了', landPushes === 3, String(landPushes))
+  check(
+    '重试补上的这次报成功，并说明自动重试过 2 次',
+    vm.messages.some(([k]) => k === 'success') && /自动重试 2 次/.test(vm.jobWriteState),
+    `${JSON.stringify(vm.messages)} ${vm.jobWriteState}`
+  )
+  check('重试成功后不挂错误', !vm.jobWriteError, vm.jobWriteError)
+
+  // ⓒ 首次 + 重试 3 次全失败 → 如实报错；记录留成「跑完 + 未同步」，手动/刷新后都还能补
+  vm = makeVm()
+  vm.$route = { query: { room: 'room-x' } }
+  vm.collabPhase = 'LIVE'
+  vm.collabSaveState = 'saved'
+  vm.waitCollabIdle = async () => true
+  runLogUtil.clearRunRecords()
+  runLogUtil.saveRunRecord({
+    id: 'w-always',
+    channel: 'openclaw',
+    state: 'working',
+    nodeUid: 'u-always',
+    nodeTitle: '任务 · 10-09 09:16'
+  })
+  let alwaysPushes = 0
+  vm.$bus.$emit = (name, payload) => {
+    if (name !== 'write_job_result' || !payload || !payload.result) return
+    alwaysPushes += 1
+    payload.result.promise = Promise.resolve({ ok: false, error: LAND_FAIL })
+  }
+  vm.messages.length = 0
+  await vm.writeJobResultOnce(
+    { id: 'w-always' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u-always', force: true }
+  )
+  check(
+    '4 次都没落图 → 一共写了 4 次（首次 + 重试 3 次）',
+    alwaysPushes === 4,
+    String(alwaysPushes)
+  )
+  check(
+    '报错说清「已自动重试 3 次仍未成功」',
+    /命令没有落到图上/.test(vm.jobWriteError) &&
+      /自动重试 3 次仍未成功/.test(vm.jobWriteError),
+    vm.jobWriteError
+  )
+  check(
+    '4 次都失败时不能报成功',
+    !vm.messages.some(([k]) => k === 'success'),
+    JSON.stringify(vm.messages)
+  )
+  const recAlways = runLogUtil.readRunRecords().find(r => r.id === 'w-always')
+  check(
+    '记录留成「跑完 + 未同步」（刷新后自动补写 / 手动补写都接得上）',
+    !!recAlways && recAlways.state === 'done' && recAlways.synced === false,
+    JSON.stringify(recAlways || {})
+  )
+  check(
+    '未同步原因写进记录（含失败原文）',
+    /命令没有落到图上/.test(String((recAlways && recAlways.syncTip) || '')),
+    String((recAlways && recAlways.syncTip) || '')
+  )
+
+  runLogUtil.clearRunRecords()
+  localStore.clear()
 
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)

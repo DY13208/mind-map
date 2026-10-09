@@ -803,6 +803,83 @@ async function main() {
     insertErr
   )
 
+  // ============ J. 探针：这条运行的结果在不在图上（刷新后自动补写的判据）============
+  // 2026-10-09 用户要求：识别到任务内容没挂在节点、且运行完成 → 刷新后自动重写。
+  // 判据必须看**图上的真实结构**，不能看记录里的标志位。
+  console.log('--- 探针：结果在不在图上 ---')
+  const mapP = makeMindMap()
+  const boxP = await writer.createJobContainer({
+    mindMap: mapP,
+    nodeUid: mapP.root.getData('uid'),
+    prompt: '对公司的建议'
+  })
+  const probeBare = writer.inspectJobResult({ mindMap: mapP, nodeUid: boxP.uid })
+  check(
+    '只有容器（还没写回）→ 认得出「任务内容在、结果不在」',
+    probeBare.exists && probeBare.hasTaskContent && !probeBare.hasAttach,
+    JSON.stringify(probeBare)
+  )
+  await writer.writeJobResultToMap({
+    mindMap: mapP,
+    nodeUid: boxP.uid,
+    markdown: MD,
+    roomKey: 'room-test',
+    artifacts: [
+      {
+        name: 'output/建议.md',
+        size: 10,
+        mime: 'text/markdown',
+        base64: Buffer.from('x').toString('base64')
+      }
+    ],
+    bridgeAttach: async () => ({
+      ok: true,
+      attachments: [{ ok: true, attachmentId: 'pp-1', status: 'ready' }]
+    })
+  })
+  const probeFull = writer.inspectJobResult({ mindMap: mapP, nodeUid: boxP.uid })
+  check(
+    '写完之后 → 附件 / 完整输出 / 产物都认得到',
+    probeFull.hasAttach &&
+      probeFull.hasFullOutput &&
+      probeFull.artifactNames.includes('output/建议.md'),
+    JSON.stringify(probeFull)
+  )
+  check(
+    '节点不在（或 uid 不对）→ exists=false，不会误判成「已写」',
+    (() => {
+      const miss = writer.inspectJobResult({ mindMap: mapP, nodeUid: 'no-such-uid' })
+      return miss.ok && miss.exists === false
+    })(),
+    ''
+  )
+
+  // 接线：Toolbar 发 probe_job_result，Edit.vue 接住并调 inspectJobResult
+  console.log('--- 接线（防止事件名写错、功能静默不生效）---')
+  const toolbarSrc = fs.readFileSync(
+    path.join(WEB, 'src/pages/Edit/components/Toolbar.vue'),
+    'utf8'
+  )
+  const editSrc = fs.readFileSync(path.join(WEB, 'src/pages/Edit/components/Edit.vue'), 'utf8')
+  check(
+    'Toolbar 发的是 probe_job_result（带 result 回填盒）',
+    toolbarSrc.includes("$bus.$emit('probe_job_result'") &&
+      toolbarSrc.includes('result: box'),
+    ''
+  )
+  check(
+    'Edit.vue 注册了 probe_job_result 且用上了 inspectJobResult',
+    editSrc.includes("$bus.$on('probe_job_result', this.onProbeJobResult)") &&
+      editSrc.includes('inspectJobResult({ mindMap: this.mindMap'),
+    ''
+  )
+  check(
+    '刷新后会调度自动补写（mounted 里挂了）',
+    /this\.scheduleAutoRepair\(\)/.test(toolbarSrc) &&
+      /autoRepairUnwrittenRuns/.test(toolbarSrc),
+    ''
+  )
+
   const failed = results.filter(item => !item.ok)
   console.log(
     `\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`

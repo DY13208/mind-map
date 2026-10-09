@@ -160,7 +160,11 @@ import CooperateDialog from './CooperateDialog.vue'
 import NodeShareDialog from './NodeShareDialog.vue'
 import MapRefDialog from './MapRefDialog.vue'
 import { normalizeMapRef } from '@/utils/mapRefNav'
-import { writeJobResultToMap, createJobContainer } from '@/utils/jobResultWriter'
+import {
+  writeJobResultToMap,
+  createJobContainer,
+  inspectJobResult
+} from '@/utils/jobResultWriter'
 import { roomFromLocation } from '@/utils/roomLocation'
 
 // 注册插件
@@ -331,6 +335,7 @@ export default {
     this.$bus.$on('applySubMapToNode', this.applySubMapToNode)
     this.$bus.$on('write_job_result', this.onWriteJobResult)
     this.$bus.$on('create_job_container', this.onCreateJobContainer)
+    this.$bus.$on('probe_job_result', this.onProbeJobResult)
     this.$bus.$on('read_generalization', this.onReadGeneralization)
     this.$bus.$on('paddingChange', this.onPaddingChange)
     this.$bus.$on('export', this.export)
@@ -373,6 +378,7 @@ export default {
     this.$bus.$off('applySubMapToNode', this.applySubMapToNode)
     this.$bus.$off('write_job_result', this.onWriteJobResult)
     this.$bus.$off('create_job_container', this.onCreateJobContainer)
+    this.$bus.$off('probe_job_result', this.onProbeJobResult)
     this.$bus.$off('read_generalization', this.onReadGeneralization)
     this.$bus.$off('paddingChange', this.onPaddingChange)
     this.$bus.$off('export', this.export)
@@ -1592,6 +1598,28 @@ export default {
         return result
       })()
       return result.promise
+    },
+
+    /**
+     * 让 Toolbar 查「某条运行的结果在不在图上」——刷新后自动补写的判据
+     * （2026-10-09 用户要求：识别到任务内容没挂在节点、且运行已完成 → 刷新后自动重写）。
+     */
+    onProbeJobResult(payload) {
+      const result =
+        payload && payload.result && typeof payload.result === 'object'
+          ? payload.result
+          : { ok: false }
+      const data = payload || {}
+      try {
+        Object.assign(
+          result,
+          inspectJobResult({ mindMap: this.mindMap, nodeUid: data.nodeUid })
+        )
+      } catch (err) {
+        result.ok = false
+        result.error = (err && err.message) || '查不到这个节点'
+      }
+      return result
     },
 
     /**
