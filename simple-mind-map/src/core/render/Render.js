@@ -2392,33 +2392,31 @@ class Render {
 
   collectCollapsedFrontier(root) {
     const out = []
-    const visit = (node, parentExpanded) => {
+    const visit = node => {
       if (!node) return
       const data = this.getExpandTreeData(node)
-      const expanded = data.expand !== false
-      if (parentExpanded && this.nodeHasChildren(node) && !expanded) {
+      const expanded = !data || data.expand !== false
+      const children = node.children || []
+      const childCount = Number(data && data.childCount) || 0
+      // 已展开的节点也可能是 HTTP 懒加载占位节点，需要先补齐子节点。
+      if (childCount > children.length) {
         out.push(node)
         return
       }
-      if (!expanded) return
-      const kids = node.children || []
-      for (let i = 0; i < kids.length; i++) visit(kids[i], true)
-      this.getGeneralizationTrees(node).forEach(item => visit(item, true))
+      if (!expanded) {
+        if (this.nodeHasChildren(node)) out.push(node)
+        return
+      }
+      for (let i = 0; i < children.length; i++) visit(children[i])
+      this.getGeneralizationTrees(node).forEach(visit)
     }
-    if (!root) return out
-    if (this.getExpandTreeData(root).expand === false) {
-      if (this.nodeHasChildren(root)) out.push(root)
-      return out
-    }
-    const kids = root.children || []
-    for (let i = 0; i < kids.length; i++) visit(kids[i], true)
-    this.getGeneralizationTrees(root).forEach(item => visit(item, true))
+    visit(root)
     return out
   }
 
   async hydrateFrontier(nodes) {
     const cooperate = this.mindMap.cooperate
-    if (!cooperate || typeof cooperate.hydrateNodeData !== 'function') return
+    if (!cooperate || typeof cooperate.hydrateNodeData !== 'function') return false
     const stubs = (nodes || []).filter(node => {
       // 概要条目是原始 generalization 数据，不是协同层的普通节点记录，
       // 不能把它交给只接受 node.data 的懒加载接口。
@@ -2428,15 +2426,19 @@ class Render {
       const count = Number(data && data.childCount) || 0
       return count > live
     })
-    if (!stubs.length) return
+    if (!stubs.length) return false
     const jobs = stubs.slice(0, EXPAND_ALL_BATCH * 2)
     const concurrency = 2
     let index = 0
+    let changed = false
     const worker = async () => {
       while (index < jobs.length) {
         const node = jobs[index++]
+        const before = (node.children && node.children.length) || 0
         try {
           await cooperate.hydrateNodeData(node)
+          const after = (node.children && node.children.length) || 0
+          if (after > before) changed = true
         } catch (err) {
           console.error('[mind-map] load children failed', err)
         }
@@ -2445,6 +2447,7 @@ class Render {
     await Promise.all(
       new Array(Math.min(concurrency, jobs.length)).fill(0).map(() => worker())
     )
+    return changed
   }
 
   //  展开所有
@@ -2494,27 +2497,96 @@ class Render {
 
   async expandSubtreeProgressive(start, token) {
     if (!start) return
-    const startData = this.getExpandTreeData(start)
-    if (startData && startData.expand === false && this.nodeHasChildren(start)) {
+    const initialTree = this.renderTree
+    const initialData = this.getExpandTreeData(start)
+    const startUid = initialData && initialData.uid
+    const resolveStart = () => {
+      if (startUid) return this.findExpandStartNode(startUid)
+      return this.renderTree === initialTree ? start : null
+    }
+    const isCurrent = () => this._expandAllToken === token
+
+    // 选中节点本身可能是尚未加载的 HTTP 占位节点，需先加载再展开。
+    let liveStart = resolveStart()
+    if (!liveStart) return
+    let hydrated = await this.hydrateFrontier([liveStart])
+    if (!isCurrent()) return
+    liveStart = resolveStart()
+    if (!liveStart) return
+
+    let startData = this.getExpandTreeData(liveStart)
+    if (
+      startData &&
+      startData.expand === false &&
+      this.nodeHasChildren(liveStart) &&
+      liveStart.children &&
+      liveStart.children.length
+    ) {
       startData.expand = true
       this.mindMap.emit('personal_expand_change')
       await this.waitForRender()
+      if (!isCurrent()) return
+      liveStart = resolveStart()
+      if (!liveStart) return
+    } else if (hydrated && (!startData || startData.expand !== false)) {
+      // 已展开的占位节点加载出子节点后，即使展开标记没变也要重绘。
+      await this.waitForRender()
+      if (!isCurrent()) return
+      liveStart = resolveStart()
+      if (!liveStart) return
     }
+
     let painted = 0
     for (let round = 0; round < EXPAND_ALL_MAX_ROUNDS; round++) {
-      if (this._expandAllToken !== token) return
-      let frontier = this.collectCollapsedFrontier(start)
+      if (!isCurrent()) return
+      liveStart = resolveStart()
+      if (!liveStart) return
+      let frontier = this.collectCollapsedFrontier(liveStart)
       if (!frontier.length) return
-      await this.hydrateFrontier(frontier)
-      if (this._expandAllToken !== token) return
-      frontier = this.collectCollapsedFrontier(start).filter(node => {
-        return node.children && node.children.length > 0
+      hydrated = await this.hydrateFrontier(frontier)
+      if (!isCurrent()) return
+      liveStart = resolveStart()
+      if (!liveStart) return
+      frontier = this.collectCollapsedFrontier(liveStart)
+      const expandable = frontier.filter(node => {
+        const data = this.getExpandTreeData(node)
+        return data && data.expand === false && node.children && node.children.length > 0
       })
-      if (!frontier.length) return
-      let i = 0
-      while (i < frontier.length) {
-        if (this._expandAllToken !== token) return
+      if (!expandable.length) {
+        if (!hydrated) return
+        await this.waitForRender()
+        if (!isCurrent()) return
+        continue
+      }
+
+      // 保留原有展开预算；异步期间可能替换整棵树，因此只跨 await 保存 UID。
+      const pendingUids = new Set()
+      const pendingNodes = new Set()
+      expandable.forEach(node => {
+        const data = this.getExpandTreeData(node)
+        if (data && data.uid) pendingUids.add(data.uid)
+        else pendingNodes.add(node)
+      })
+      while (pendingUids.size || pendingNodes.size) {
+        if (!isCurrent()) return
         if (painted >= EXPAND_ALL_MAX_NODES) return
+        liveStart = resolveStart()
+        if (!liveStart) return
+        frontier = this.collectCollapsedFrontier(liveStart).filter(node => {
+          const data = this.getExpandTreeData(node)
+        if (
+          !data ||
+          data.expand !== false ||
+          !node.children ||
+          !node.children.length
+        ) {
+            return false
+          }
+          return data.uid ? pendingUids.has(data.uid) : pendingNodes.has(node)
+        })
+        if (!frontier.length) break
+
+        let i = 0
         const slice = []
         let willShow = 0
         while (i < frontier.length && slice.length < EXPAND_ALL_BATCH) {
@@ -2533,21 +2605,29 @@ class Render {
           if (willShow >= EXPAND_ALL_PER_FRAME) break
         }
         if (!slice.length) {
-          const node = frontier[i++]
+          const node = frontier[0]
           if (!node) break
           this.getExpandTreeData(node).expand = true
+          const data = this.getExpandTreeData(node)
+          if (data && data.uid) pendingUids.delete(data.uid)
+          else pendingNodes.delete(node)
           painted += (node.children && node.children.length) || 0
           this.mindMap.emit('personal_expand_change')
           await this.waitForRender()
+          if (!isCurrent()) return
           if (painted >= EXPAND_ALL_MAX_NODES) return
           continue
         }
         slice.forEach(node => {
           this.getExpandTreeData(node).expand = true
+          const data = this.getExpandTreeData(node)
+          if (data && data.uid) pendingUids.delete(data.uid)
+          else pendingNodes.delete(node)
         })
         painted += willShow
         this.mindMap.emit('personal_expand_change')
         await this.waitForRender()
+        if (!isCurrent()) return
       }
     }
   }
