@@ -4,6 +4,8 @@
 
 所有企业微信成员都使用 Cognee 已有账号 `izw99s@hotmail.com`，共享其完整权限及内容；账号映射由 Cognee 完成。Cognee 登录页提供密码登录切换，并在二维码和密码两种模式下保留原「Login WorkBuddy」按钮及授权流程。
 
+Cognee 的黑色扫码界面通过官方 `href` 参数加载其公开 `/wecom-qr.css`，仅隐藏应用名称并调整状态提示布局。该样式由 Cognee 管理，不需要修改本项目的 `WECOM_QR_STYLE_URL`，原回调和成员验证保持不变。
+
 在本项目部署 `.env` 增加：
 
 ```dotenv
