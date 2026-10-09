@@ -603,9 +603,10 @@ async function handleApi(req, res, options) {
     }
     if (path === '/api/teams' && req.method === 'GET') { const items = await listTeams(db, who); sendJson(res, 200, { items, list: items }); return true }
     if (path === '/api/teams' && req.method === 'POST') { sendJson(res, 201, await createTeam(db, who, await readBody(req))); return true }
-    const match = path.match(/^\/api\/teams\/([^/]+)(?:\/(members|rooms|folders|transfer-ownership)(?:\/([^/]+))?)?$/)
+    const match = path.match(/^\/api\/teams\/([^/]+)(?:\/(members|rooms|folders|transfer-ownership)(?:\/([^/]+))?)?(\/deletion)?$/)
     if (!match) return false
     const id = teamId(decodeURIComponent(match[1])); const sub = match[2]; const target = match[3] ? decodeURIComponent(match[3]) : ''
+    if (match[4] && (sub !== 'folders' || !target)) return false
     if (!sub && req.method === 'GET') { sendJson(res, 200, dto(await getTeam(db, who.corpId, id, who.userId, teamAccessOpts(who)))); return true }
     if (!sub && req.method === 'PATCH') {
       const team = await getTeam(db, who.corpId, id, who.userId, teamAccessOpts(who)); manager(team); const body = await readBody(req); const fields = []; const params = [who.corpId, id]
@@ -644,6 +645,20 @@ async function handleApi(req, res, options) {
       }
       const team = await getTeam(db, who.corpId, id, who.userId, teamAccessOpts(who))
       const canManage = ['owner', 'admin'].includes(team.role)
+      if (match[4]) {
+        manager(team)
+        const existing = await fs.store.getFolder(target)
+        if (!existing || String(existing.team_id || '') !== String(id)) {
+          throw error(404, 'FOLDER_NOT_FOUND', '找不到该团队文件夹')
+        }
+        const input = { userId: who.userId, bypass: true, teamId: id }
+        if (req.method === 'GET') {
+          sendJson(res, 200, await fs.previewFolderDeletion(target, input))
+        } else if (req.method === 'POST') {
+          sendJson(res, 200, await fs.deleteFolderContents(target, { ...await readBody(req), ...input }))
+        } else return false
+        return true
+      }
       if (req.method === 'GET' && !target) {
         const listed = await fs.listFolders({
           userId: who.userId,

@@ -124,12 +124,20 @@
         <el-button type="primary" @click="saveSettings">保存</el-button>
       </span>
     </el-dialog>
+    <DeleteFolderDialog
+      :visible.sync="deleteFolderVisible"
+      :folder="folderToDelete"
+      :folders="folders"
+      :team-id="$route.params.id"
+      @deleted="onFolderDeleted"
+    />
   </section>
 </template>
 <script>
 import teamService from '@/services/teamService'
 import RoomCard from './components/RoomCard.vue'
 import FolderCard from './components/FolderCard.vue'
+import DeleteFolderDialog from './components/DeleteFolderDialog.vue'
 import TeamMemberList from './components/TeamMemberList.vue'
 import EmptyState from './components/EmptyState.vue'
 import RoomActionDialogs from './components/RoomActionDialogs.vue'
@@ -139,6 +147,7 @@ export default {
   components: {
     RoomCard,
     FolderCard,
+    DeleteFolderDialog,
     TeamMemberList,
     EmptyState,
     RoomActionDialogs,
@@ -157,6 +166,8 @@ export default {
     requestId: 0,
     shareVisible: false,
     settingsVisible: false,
+    deleteFolderVisible: false,
+    folderToDelete: null,
     settingsForm: { name: '', description: '' }
   }),
   computed: {
@@ -346,31 +357,17 @@ export default {
         this.busy = false
       }
     },
-    async deleteFolder(folder) {
+    deleteFolder(folder) {
       if (!this.canManage) {
         this.$message.error('只有团队所有者或管理员可以删除文件夹')
         return
       }
-      const confirmed = await this.$confirm(
-        '删除文件夹「' +
-          folder.name +
-          '」？若其中还有脑图或子文件夹，需要先将内容移出后再删除。',
-        '删除文件夹'
-      )
-        .then(() => true)
-        .catch(() => false)
-      if (!confirmed) return
-      this.busy = true
-      try {
-        await teamService.deleteFolder(this.$route.params.id, folder.id)
-        if (this.folderId === folder.id) this.folderId = null
-        await this.load()
-        this.$message.success('文件夹已删除')
-      } catch (error) {
-        this.$message.error(error.message || '删除文件夹失败')
-      } finally {
-        this.busy = false
-      }
+      this.folderToDelete = folder
+      this.deleteFolderVisible = true
+    },
+    async onFolderDeleted(result) {
+      if (result.deletedFolderIds.includes(this.folderId)) this.folderId = null
+      await this.load()
     },
     openSettings() {
       this.settingsForm = { name: this.team.name, description: this.team.description || '' }

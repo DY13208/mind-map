@@ -1130,7 +1130,8 @@ function createFileSystem(options = {}) {
     createFolder,
     listFolders,
     renameFolder,
-    deleteFolder
+    deleteFolder,
+    ...require('./folderDeletion').createFolderDeletion(store, notifyStorage)
   }
 }
 

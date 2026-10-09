@@ -245,6 +245,14 @@ const teamService = {
       )
     ),
 
+  previewFolderDeletion: (teamId, folderId) => request(() => productRequest(
+    `/api/teams/${encodeURIComponent(teamId)}/folders/${encodeURIComponent(folderId)}/deletion`
+  )),
+  deleteFolderContents: (teamId, folderId, input) => request(() => productRequest(
+    `/api/teams/${encodeURIComponent(teamId)}/folders/${encodeURIComponent(folderId)}/deletion`,
+    { method: 'POST', body: JSON.stringify(input) }
+  )),
+
   createRoom: (teamId, title, folderId = null) =>
     request(async () => {
       const data = await productRequest(`/api/teams/${encodeURIComponent(teamId)}/rooms`, {

@@ -213,6 +213,13 @@
       :team-id="selectedTeamId || null"
       @imported="onImported"
     />
+    <DeleteFolderDialog
+      :visible.sync="deleteFolderVisible"
+      :folder="folderToDelete"
+      :folders="folders"
+      :team-id="selectedTeamId || ''"
+      @deleted="onFolderDeleted"
+    />
   </section>
 </template>
 
@@ -227,6 +234,7 @@ import EmptyState from './components/EmptyState.vue'
 import FileToolbar from './components/FileToolbar.vue'
 import FolderBreadcrumb from './components/FolderBreadcrumb.vue'
 import FolderCard from './components/FolderCard.vue'
+import DeleteFolderDialog from './components/DeleteFolderDialog.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import MoveToFolderDialog from './components/MoveToFolderDialog.vue'
 import MoveToTeamDialog from './components/MoveToTeamDialog.vue'
@@ -271,6 +279,7 @@ export default {
     FileToolbar,
     FolderBreadcrumb,
     FolderCard,
+    DeleteFolderDialog,
     HistoryPanel,
     MoveToFolderDialog,
     MoveToTeamDialog,
@@ -300,6 +309,8 @@ export default {
       activeItem: null,
       renameKind: 'room',
       renameVisible: false,
+      deleteFolderVisible: false,
+      folderToDelete: null,
       moveVisible: false,
       moveToTeamVisible: false,
       shareVisible: false,
@@ -1068,27 +1079,19 @@ export default {
         '重命名成功'
       )
     },
-    async deleteFolder(folder) {
+    deleteFolder(folder) {
       if (this.isTeamView && !this.canManageTeam) {
         this.$message.error('只有团队所有者或管理员可以删除文件夹')
         return
       }
-      const confirmed = await this.$confirm(
-        '删除文件夹「' +
-          folder.name +
-          '」？若其中还有脑图或子文件夹，需要先将内容移出后再删除。',
-        '删除文件夹'
-      )
-        .then(() => true)
-        .catch(() => false)
-      if (confirmed)
-        await this.perform(
-          () =>
-            this.isTeamView
-              ? teamService.deleteFolder(this.selectedTeamId, folder.id)
-              : folderService.deleteFolder(folder.id),
-          '文件夹已删除'
-        )
+      this.folderToDelete = folder
+      this.deleteFolderVisible = true
+    },
+    async onFolderDeleted(result) {
+      this.clearSelection()
+      if (this.mode === 'folder' && result.deletedFolderIds.includes(this.$route.params.id)) {
+        await this.$router.push({ path: this.filesBasePath, query: this.$route.query })
+      } else await this.load({ reset: true, keepPage: true })
     },
     moveRoom(room) {
       this.batchAction = null

@@ -353,6 +353,40 @@ function createMemoryFileStore(seed = {}) {
         row => !row.deleted_at && row.parent_id === id
       ).length
     },
+    async getFolderDeletionContents(id) {
+      const ids = new Set([id])
+      let changed = true
+      while (changed) {
+        changed = false
+        for (const f of folders.values()) {
+          if (ids.has(f.parent_id) && !ids.has(f.id)) { ids.add(f.id); changed = true }
+        }
+      }
+      const files = [...rooms.values()].filter(r => ids.has(r.folder_id) && isActiveRoom(r))
+      const keys = new Set(files.map(r => r.room_key))
+      return { folders: [...folders.values()].filter(f => ids.has(f.id)).map(cloneJson),
+        rooms: files.map(cloneJson), members: members.filter(m => keys.has(m.room_key)).map(cloneJson) }
+    },
+    async finishFolderDeletion(id, contents, input) {
+      if (input.action === 'move') {
+        for (const r of contents.rooms.filter(r => r.folder_id === id)) {
+          await this.updateFolder(r.room_key, input.targetId)
+        }
+        for (const f of folders.values()) {
+          if (f.parent_id === id) { f.parent_id = input.targetId; f.updated_at = nowIso() }
+        }
+      } else if (input.action === 'trash') {
+        for (const room of contents.rooms) await this.trashRoom(room.room_key, input.userId)
+      }
+      const removed = new Set(input.action === 'move' ? [id] : contents.folders.map(f => f.id))
+      for (const r of rooms.values()) {
+        if (removed.has(r.folder_id) && !isActiveRoom(r)) r.folder_id = null
+      }
+      removed.forEach(folderId => folders.delete(folderId))
+      for (let i = folderMembers.length - 1; i >= 0; i--) {
+        if (removed.has(folderMembers[i].folder_id)) folderMembers.splice(i, 1)
+      }
+    },
     async deleteFolder(id) {
       bump()
       folders.delete(id)

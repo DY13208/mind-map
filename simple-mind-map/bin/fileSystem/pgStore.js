@@ -213,17 +213,19 @@ function createPgFileStore(pool) {
         nodes
       }
     },
-    async getFolder(id) {
-      queryCount += 1
-      const res = await pool.query(
-        `select * from folders where id = $1 and deleted_at is null`,
+    async getFolder(id, db) {
+      const conn = db || pool
+      if (!db) queryCount += 1
+      const res = await conn.query(
+        `select * from folders where id = $1 and deleted_at is null${db ? " for update" : ""}`,
         [id]
       )
       return res.rows[0] || null
     },
-    async listFolderMembers(id) {
-      queryCount += 1
-      const res = await pool.query(
+    async listFolderMembers(id, db) {
+      const conn = db || pool
+      if (!db) queryCount += 1
+      const res = await conn.query(
         `select fm.folder_id, fm.user_id, fm.role, fm.created_at, fm.updated_at,
                 coalesce(u.name, fm.user_id) as name, coalesce(u.avatar, '') as avatar,
                 coalesce(u.wecom_userid, fm.user_id) as wecom_userid
@@ -271,10 +273,11 @@ function createPgFileStore(pool) {
       )
       return res.rows.map(row => row.id)
     },
-    async folderNameTaken(name, parentId, exceptId, teamId) {
-      queryCount += 1
+    async folderNameTaken(name, parentId, exceptId, teamId, db) {
+      const conn = db || pool
+      if (!db) queryCount += 1
       const team = teamId ? String(teamId) : null
-      const res = await pool.query(
+      const res = await conn.query(
         `select 1 from folders
          where deleted_at is null
            and parent_id is not distinct from $2
@@ -423,6 +426,46 @@ function createPgFileStore(pool) {
         [id]
       )
       return Number((res.rows[0] && res.rows[0].n) || 0)
+    },
+    async getFolderDeletionContents(id, db) {
+      const conn = db || pool
+      if (db) await conn.query('select id from folders where id = $1 for update', [id])
+      const tree = await conn.query(`with recursive subtree as (
+        select id from folders where id = $1
+        union select f.id from folders f join subtree s on f.parent_id = s.id
+      ) select f.* from folders f where f.id in (select id from subtree)
+        order by f.id${db ? ' for update' : ''}`, [id])
+      const ids = tree.rows.map(f => f.id)
+      const files = await conn.query(`select r.room_key, r.folder_id, r.owner_id, r.team_id
+        from rooms r where r.folder_id = any($1::uuid[]) and r.deleted_at is null
+        and not exists (select 1 from room_tombstones t where t.room_key = r.room_key)
+        order by r.room_key${db ? ' for update' : ''}`, [ids])
+      const members = await conn.query(`select room_key, user_id, role from room_members
+        where room_key = any($1::text[])`, [files.rows.map(r => r.room_key)])
+      return { folders: tree.rows, rooms: files.rows, members: members.rows }
+    },
+    async finishFolderDeletion(id, contents, input, db) {
+      const conn = db || pool
+      const ids = contents.folders.map(f => f.id)
+      if (input.action === 'move') {
+        await conn.query(`update rooms set folder_id = $2, updated_at = now()
+          where room_key = any($1::text[])`,
+        [contents.rooms.filter(r => r.folder_id === id).map(r => r.room_key), input.targetId])
+        await conn.query(`update folders set parent_id = $2, updated_at = now()
+          where parent_id = $1`, [id, input.targetId])
+      } else if (input.action === 'trash') {
+        await conn.query(`update rooms set deleted_from_folder_id = folder_id,
+          folder_id = null, deleted_at = now(), deleted_by = $2
+          where room_key = any($1::text[])`, [contents.rooms.map(r => r.room_key), input.userId])
+      }
+      const removed = input.action === 'move' ? [id] : ids
+      // Older trash/tombstone rows can still hold a folder FK. Do not revive them.
+      await conn.query(`update rooms set folder_id = null
+        where folder_id = any($1::uuid[])
+        and (deleted_at is not null or exists (
+          select 1 from room_tombstones t where t.room_key = rooms.room_key))`, [removed])
+      // One statement satisfies the self FK without briefly changing folder names' namespaces.
+      await conn.query(`delete from folders where id = any($1::uuid[])`, [removed])
     },
     async deleteFolder(id) {
       queryCount += 1

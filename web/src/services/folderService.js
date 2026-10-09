@@ -53,6 +53,10 @@ export default {
       throw error
     }
   },
+  previewDeletion: id => productRequest(`/api/folders/${encodeURIComponent(id)}/deletion`),
+  deleteContents: (id, input) => productRequest(`/api/folders/${encodeURIComponent(id)}/deletion`, {
+    method: 'POST', body: JSON.stringify(input)
+  }),
   getMembers: async id => {
     const data = await productRequest(`/api/folders/${encodeURIComponent(id)}/members`)
     return { list: (data.list || []).map(normalizeMemberDto), canManage: !!data.canManage }

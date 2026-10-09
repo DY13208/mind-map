@@ -180,6 +180,7 @@ async function handleFileSystemApi(req, res, options = {}) {
       folderMembersBulk(pathname) ||
       folderTransferOwnership(pathname) ||
       folderItem(pathname) ||
+      /^\/api\/folders\/[^/]+\/deletion$/.test(pathname) ||
       fileMove(pathname) ||
       fileSopAuthorize(pathname) ||
       fileInfo(pathname) ||
@@ -568,6 +569,17 @@ async function handleFileSystemApi(req, res, options = {}) {
         bypass
       })
       sendJson(res, 201, { ok: true, folder })
+      return true
+    }
+    const deletionMatch = pathname.match(/^\/api\/folders\/([^/]+)\/deletion$/)
+    if (deletionMatch && (method === 'GET' || method === 'POST')) {
+      const id = decodeURIComponent(deletionMatch[1])
+      const result = method === 'GET'
+        ? await fs.previewFolderDeletion(id, { userId, bypass })
+        : await fs.deleteFolderContents(id, {
+          ...(options.body || await readBody(req)), userId, bypass
+        })
+      sendJson(res, 200, result)
       return true
     }
     const folderId = folderItem(pathname)
