@@ -58,7 +58,8 @@
     <NodeAttachment v-if="mindMap" :mindMap="mindMap"></NodeAttachment>
     <NodeAttachmentPreview v-if="mindMap"></NodeAttachmentPreview>
     <CooperateDialog :mindMap="mindMap"></CooperateDialog>
-    <NodeShareDialog></NodeShareDialog>
+    <!-- 保留旧分享弹窗，节点分享目前直接复制链接并继承文件权限。 -->
+    <NodeShareDialog v-if="false"></NodeShareDialog>
     <MapRefDialog></MapRefDialog>
     <div
       class="dragMask"

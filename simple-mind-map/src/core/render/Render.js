@@ -82,8 +82,6 @@ const layouts = {
 
 const EXPAND_ALL_BATCH = 6
 const EXPAND_ALL_PER_FRAME = 48
-const EXPAND_ALL_MAX_NODES = 200
-const EXPAND_ALL_MAX_ROUNDS = 24
 
 //  渲染
 class Render {
@@ -2456,7 +2454,7 @@ class Render {
     const command = this.mindMap.command
     if (command) command.pause()
     const start = this.findExpandStartNode(uid)
-    this.expandSubtreeProgressive(start, token)
+    return this.expandSubtreeProgressive(start, token)
       .catch(err => {
         console.error('[mind-map] expand all failed', err)
       })
@@ -2494,58 +2492,47 @@ class Render {
 
   async expandSubtreeProgressive(start, token) {
     if (!start) return
-    const startData = this.getExpandTreeData(start)
-    if (startData && startData.expand === false && this.nodeHasChildren(start)) {
-      startData.expand = true
-      this.mindMap.emit('personal_expand_change')
-      await this.waitForRender()
-    }
-    let painted = 0
-    for (let round = 0; round < EXPAND_ALL_MAX_ROUNDS; round++) {
+    // Visit the selected node itself, including already-expanded lazy stubs.
+    // Loading must precede expanding so an empty stub cannot lose its frontier.
+    const queue = [start]
+    const visited = new Set()
+    let index = 0
+    while (index < queue.length) {
       if (this._expandAllToken !== token) return
-      let frontier = this.collectCollapsedFrontier(start)
-      if (!frontier.length) return
-      await this.hydrateFrontier(frontier)
-      if (this._expandAllToken !== token) return
-      frontier = this.collectCollapsedFrontier(start).filter(node => {
-        return node.children && node.children.length > 0
-      })
-      if (!frontier.length) return
-      let i = 0
-      while (i < frontier.length) {
-        if (this._expandAllToken !== token) return
-        if (painted >= EXPAND_ALL_MAX_NODES) return
-        const slice = []
-        let willShow = 0
-        while (i < frontier.length && slice.length < EXPAND_ALL_BATCH) {
-          const node = frontier[i]
-          const kids = (node.children && node.children.length) || 0
-          if (
-            slice.length &&
-            (willShow + kids > EXPAND_ALL_PER_FRAME ||
-              painted + willShow + kids > EXPAND_ALL_MAX_NODES)
-          ) {
-            break
-          }
-          slice.push(node)
-          willShow += kids
-          i += 1
-          if (willShow >= EXPAND_ALL_PER_FRAME) break
-        }
-        if (!slice.length) {
-          const node = frontier[i++]
-          if (!node) break
-          this.getExpandTreeData(node).expand = true
-          painted += (node.children && node.children.length) || 0
-          this.mindMap.emit('personal_expand_change')
-          await this.waitForRender()
-          if (painted >= EXPAND_ALL_MAX_NODES) return
+      const batch = []
+      let willShow = 0
+      while (index < queue.length && batch.length < EXPAND_ALL_BATCH) {
+        const node = queue[index]
+        if (!node || visited.has(node)) {
+          index++
           continue
         }
-        slice.forEach(node => {
-          this.getExpandTreeData(node).expand = true
-        })
-        painted += willShow
+        const kids = (node.children && node.children.length) || 0
+        if (batch.length && willShow + kids > EXPAND_ALL_PER_FRAME) break
+        index++
+        visited.add(node)
+        batch.push(node)
+        willShow += kids
+      }
+      const childCounts = batch.map(node => (node.children || []).length)
+      await this.hydrateFrontier(batch)
+      if (this._expandAllToken !== token) return
+      let changed = false
+      batch.forEach((node, batchIndex) => {
+        const children = node.children || []
+        const summaries = this.getGeneralizationTrees(node)
+        // Failed loads stay collapsed and can be retried by the user.
+        if (children.length || summaries.length) {
+          const data = this.getExpandTreeData(node)
+          if (data.expand !== true || children.length !== childCounts[batchIndex]) {
+            changed = true
+          }
+          data.expand = true
+        }
+        children.forEach(child => queue.push(child))
+        summaries.forEach(summary => queue.push(summary))
+      })
+      if (changed) {
         this.mindMap.emit('personal_expand_change')
         await this.waitForRender()
       }

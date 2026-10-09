@@ -97,6 +97,39 @@ async function main() {
   collapse.call(f.renderer, false)
   finishHydration(); await pending
   assert.strictEqual(f.branch.data.expand, false, 'in-flight expand all must stop after collapse')
+  // A collapsed lazy starting node must load before its expand flag changes.
+  for (const initiallyExpanded of [false, true]) {
+    f = fixture()
+    const lazy = { data: { uid: 'lazy', expand: initiallyExpanded, childCount: 1 }, children: [] }
+    const lazyChild = { data: { uid: 'lazy-child', expand: false, childCount: 1 }, children: [] }
+    f.renderer.renderTree.children = [lazy]
+    const loaded = []
+    f.renderer.hydrateFrontier = async nodes => {
+      nodes.forEach(node => {
+        if (node === lazy && !node.children.length) { loaded.push(node.data.uid); node.children = [lazyChild] }
+        if (node === lazyChild && !node.children.length) { loaded.push(node.data.uid); node.children = [{ data: { uid: 'lazy-leaf' }, children: [] }] }
+      })
+    }
+    await progressive.call(f.renderer, lazy, 1)
+    assert.deepStrictEqual(loaded, ['lazy', 'lazy-child'], 'expand all must load the selected lazy branch and nested stubs')
+    assert.strictEqual(lazy.data.expand, true)
+    assert.strictEqual(lazyChild.data.expand, true)
+    assert.strictEqual(f.branch.data.expand, false, 'expanding a branch must not expand unrelated nodes')
+  }
+  f = fixture()
+  const wide = { data: { uid: 'wide', expand: false }, children: Array.from({ length: 240 }, (_, i) => ({
+    data: { uid: 'wide-' + i, expand: false }, children: [{ data: { uid: 'leaf-' + i }, children: [] }]
+  })) }
+  let deep = { data: { uid: 'bottom' }, children: [] }
+  for (let i = 0; i < 30; i++) deep = { data: { uid: 'depth-' + i, expand: false }, children: [deep] }
+  wide.children.push(deep)
+  f.renderer.renderTree.children = [wide]
+  await progressive.call(f.renderer, wide, 1)
+  const verifyExpanded = node => {
+    if (node.children.length) assert.strictEqual(node.data.expand, true, 'expand all must not stop at a node or depth limit')
+    node.children.forEach(verifyExpanded)
+  }
+  verifyExpanded(wide)
   // Exercise the real Vue subscription while a restore is awaiting hydration.
   const vue = fs.readFileSync(require.resolve('../../web/src/pages/Edit/components/CooperateDialog.vue'), 'utf8')
   const begin = vue.indexOf('    bindPersonalExpandState() {')
