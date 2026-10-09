@@ -2,6 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const { verifyIdentity } = require('../../../simple-mind-map/bin/wikiCompiler/access');
 const { wikiCompilerCall, TOOLS } = require('../src/adapters/wikiCompiler');
 
 test('compiler tools advertise four read-only operations', () => {
@@ -24,6 +25,7 @@ test('routes graph/search/articles through a configured prefix and preserves res
   const server = http.createServer(async (req, res) => {
     let raw = '';
     for await (const chunk of req) raw += chunk;
+    assert.equal(verifyIdentity(req.headers['x-wiki-compiler-identity'], { WIKI_COMPILER_INTERNAL_SECRET: 't'.repeat(64) }), 'u');
     requests.push({ path: req.url, method: req.method, body: raw ? JSON.parse(raw) : null });
     if (req.url.endsWith('/missing')) { res.writeHead(404); return res.end(); }
     if (req.url.endsWith('/broken')) return res.end('bad json');
@@ -33,7 +35,7 @@ test('routes graph/search/articles through a configured prefix and preserves res
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => { server.closeAllConnections(); server.close(); });
-  const env = { WIKI_COMPILER_API_URL: `http://127.0.0.1:${server.address().port}/wiki-compiler` };
+  const env = { WIKI_COMPILER_INTERNAL_SECRET: 't'.repeat(64), WIKI_COMPILER_API_URL: `http://127.0.0.1:${server.address().port}/wiki-compiler` };
   for (const op of ['graph', 'search', 'topic', 'concept']) {
     const result = await wikiCompilerCall('u', op, { query: '合同', slug: '合同 规则', top_k: 3 }, env);
     assert.equal(result.sections[0].content, '正文');

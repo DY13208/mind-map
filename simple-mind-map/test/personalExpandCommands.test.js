@@ -14,7 +14,8 @@ const progressive = method('async expandSubtreeProgressive', 'unexpandAllNode')
 const collapse = method('unexpandAllNode', 'expandToLevel')
 const findStart = method('findExpandStartNode', 'async expandSubtreeProgressive')
 const level = method('expandToLevel', 'toggleActiveExpand')
-// Same limits as the actual renderer; exercise all async batches.
+const collectFrontier = method('collectCollapsedFrontier', 'async hydrateFrontier')
+// 使用与实际渲染器相同的限制，覆盖异步分批展开。
 vm.runInContext('const EXPAND_ALL_MAX_ROUNDS=24, EXPAND_ALL_MAX_NODES=200, EXPAND_ALL_BATCH=6, EXPAND_ALL_PER_FRAME=48', sandbox)
 sandbox.walk = (root, parent, visit) => {
   function walk(node, depth) { visit(node, null, depth === 0, depth); (node.children || []).forEach(child => walk(child, depth + 1)) }
@@ -36,27 +37,27 @@ function fixture() {
     children: [branch]
   }
   let saved
+  let renderCount = 0
   const renderer = { renderTree: root, _expandAllToken: 1, _expandOperationId: 1,
     getExpandTreeData: node => node.data || node,
     getGeneralizationTrees(node) {
       const list = node.data && node.data.generalization
       return list ? (Array.isArray(list) ? list : [list]) : []
     },
-    nodeHasChildren: node => node.children.length > 0,
-    collectCollapsedFrontier(node) {
-      if (node.data.expand === false && node.children.length) return [node]
-      return node.children.flatMap(child => this.collectCollapsedFrontier(child))
-    },
+    nodeHasChildren: node => node.children.length > 0 || Number((node.data || node).childCount) > 0,
+    findExpandStartNode: uid => findStart.call(renderer, uid),
+    collectCollapsedFrontier(node) { return collectFrontier.call(this, node) },
     hydrateFrontier: async () => {},
     applyExpandFlagsToLevel: flags,
-    waitForRender: async () => renderer.mindMap.render(), setRootNodeCenter() {}
+    waitForRender: async () => { renderCount++; renderer.mindMap.render() }, setRootNodeCenter() {}
   }
   const mindMap = renderer.mindMap = { renderer,
     emit(name) { if (name === 'personal_expand_change') saved = sandbox.collect(mindMap, saved) },
     render() { sandbox.apply(mindMap, saved) }
   }
   saved = sandbox.collect(mindMap)
-  return { renderer, branch, deep, summary, summaryChild, summaryGrandchild }
+  return { renderer, branch, deep, summary, summaryChild, summaryGrandchild,
+    get renderCount() { return renderCount } }
 }
 async function main() {
   let f = fixture()
@@ -67,6 +68,86 @@ async function main() {
   await progressive.call(f.renderer, f.renderer.renderTree, 1)
   assert.strictEqual(f.branch.data.expand, true, 'render restoration must keep each expanded batch')
   assert.strictEqual(f.deep.data.expand, true, 'nested async batch must stay expanded')
+
+  // 选中目标本身可能是已折叠的 HTTP 懒加载占位节点，必须先请求其子树。
+  f = fixture()
+  const lazyLeaf = { data: { uid: 'lazy-leaf' }, children: [] }
+  const lazyDeep = { data: { uid: 'lazy-deep', expand: false, childCount: 1 }, children: [] }
+  const lazyTarget = { data: { uid: 'lazy-target', expand: false, childCount: 1 }, children: [] }
+  const lazyLevelOne = { data: { uid: 'lazy-level-one', expand: true }, children: [lazyTarget] }
+  f.renderer.renderTree = {
+    data: { uid: 'root', expand: true }, children: [lazyLevelOne]
+  }
+  const hydrationRequests = []
+  f.renderer.hydrateFrontier = async nodes => {
+    let changed = false
+    for (const node of nodes) {
+      const uid = node.data && node.data.uid
+      if (uid === 'lazy-target' || uid === 'lazy-deep') hydrationRequests.push(uid)
+      if (uid === 'lazy-target' && !node.children.length) {
+        node.children.push(lazyDeep)
+        changed = true
+      } else if (uid === 'lazy-deep' && !node.children.length) {
+        node.children.push(lazyLeaf)
+        changed = true
+      }
+    }
+    return changed
+  }
+  await progressive.call(f.renderer, lazyTarget, 1)
+  assert.deepStrictEqual(hydrationRequests, ['lazy-target', 'lazy-deep'],
+    'expanding a collapsed target stub must hydrate the target before traversing below it')
+  assert.strictEqual(lazyTarget.data.expand, true)
+  assert.strictEqual(lazyDeep.data.expand, true)
+  assert.strictEqual(lazyDeep.children[0], lazyLeaf)
+
+  // 已展开的部分占位节点也要继续加载，expand=true 不代表子树已齐全。
+  f = fixture()
+  const partialLeaf = { data: { uid: 'partial-leaf' }, children: [] }
+  const partialStub = { data: { uid: 'partial', expand: true, childCount: 1 }, children: [] }
+  const partialRoot = { data: { uid: 'root', expand: true }, children: [partialStub] }
+  f.renderer.renderTree = partialRoot
+  let partialHydrations = 0
+  f.renderer.hydrateFrontier = async nodes => {
+    const node = nodes.find(item => item.data && item.data.uid === 'partial')
+    if (!node || node.children.length) return false
+    partialHydrations++
+    node.children.push(partialLeaf)
+    return true
+  }
+  await progressive.call(f.renderer, partialRoot, 1)
+  assert.strictEqual(partialHydrations, 1,
+    'expanded partial stubs must still be sent through lazy hydration')
+  assert.strictEqual(partialStub.children[0], partialLeaf)
+  assert.ok(f.renderCount > 0, 'hydrated children of an expanded stub must be rendered')
+
+  // 协同刷新可能在加载期间替换 renderTree，后续应从当前树按 UID 继续。
+  f = fixture()
+  const oldRoot = f.renderer.renderTree
+  const replacementLeaf = { data: { uid: 'replacement-leaf' }, children: [] }
+  const replacementBranch = {
+    data: { uid: 'branch', expand: false, childCount: 1 },
+    children: [replacementLeaf]
+  }
+  const replacementRoot = {
+    data: { uid: 'root', expand: true }, children: [replacementBranch]
+  }
+  let replaced = false
+  f.renderer.hydrateFrontier = async nodes => {
+    if (!replaced && nodes.some(node => node.data && node.data.uid === 'branch')) {
+      replaced = true
+      f.renderer.renderTree = replacementRoot
+    }
+    return false
+  }
+  await progressive.call(f.renderer, oldRoot, 1)
+  assert.strictEqual(replaced, true, 'test must replace renderTree during a frontier await')
+  assert.strictEqual(replacementBranch.data.expand, true,
+    'the current tree should continue expanding after hydration replaces the old reference')
+  assert.strictEqual(f.branch.data.expand, false,
+    'a detached tree reference must not receive the expansion')
+
+  f = fixture()
   collapse.call(f.renderer, false)
   assert.strictEqual(f.branch.data.expand, false)
   assert.strictEqual(f.deep.data.expand, false)
@@ -97,6 +178,39 @@ async function main() {
   collapse.call(f.renderer, false)
   finishHydration(); await pending
   assert.strictEqual(f.branch.data.expand, false, 'in-flight expand all must stop after collapse')
+  // A collapsed lazy starting node must load before its expand flag changes.
+  for (const initiallyExpanded of [false, true]) {
+    f = fixture()
+    const lazy = { data: { uid: 'lazy', expand: initiallyExpanded, childCount: 1 }, children: [] }
+    const lazyChild = { data: { uid: 'lazy-child', expand: false, childCount: 1 }, children: [] }
+    f.renderer.renderTree.children = [lazy]
+    const loaded = []
+    f.renderer.hydrateFrontier = async nodes => {
+      nodes.forEach(node => {
+        if (node === lazy && !node.children.length) { loaded.push(node.data.uid); node.children = [lazyChild] }
+        if (node === lazyChild && !node.children.length) { loaded.push(node.data.uid); node.children = [{ data: { uid: 'lazy-leaf' }, children: [] }] }
+      })
+    }
+    await progressive.call(f.renderer, lazy, 1)
+    assert.deepStrictEqual(loaded, ['lazy', 'lazy-child'], 'expand all must load the selected lazy branch and nested stubs')
+    assert.strictEqual(lazy.data.expand, true)
+    assert.strictEqual(lazyChild.data.expand, true)
+    assert.strictEqual(f.branch.data.expand, false, 'expanding a branch must not expand unrelated nodes')
+  }
+  f = fixture()
+  const wide = { data: { uid: 'wide', expand: false }, children: Array.from({ length: 240 }, (_, i) => ({
+    data: { uid: 'wide-' + i, expand: false }, children: [{ data: { uid: 'leaf-' + i }, children: [] }]
+  })) }
+  let deep = { data: { uid: 'bottom' }, children: [] }
+  for (let i = 0; i < 30; i++) deep = { data: { uid: 'depth-' + i, expand: false }, children: [deep] }
+  wide.children.push(deep)
+  f.renderer.renderTree.children = [wide]
+  await progressive.call(f.renderer, wide, 1)
+  const verifyExpanded = node => {
+    if (node.children.length) assert.strictEqual(node.data.expand, true, 'expand all must not stop at a node or depth limit')
+    node.children.forEach(verifyExpanded)
+  }
+  verifyExpanded(wide)
   // Exercise the real Vue subscription while a restore is awaiting hydration.
   const vue = fs.readFileSync(require.resolve('../../web/src/pages/Edit/components/CooperateDialog.vue'), 'utf8')
   const begin = vue.indexOf('    bindPersonalExpandState() {')

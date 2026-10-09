@@ -1,3 +1,4 @@
+const { issueIdentity } = require('../wikiCompiler/access')
 'use strict'
 
 const crypto = require('crypto')
@@ -233,7 +234,7 @@ function normalizeSearchItem(item) {
     ? item.source.filter(value => typeof value === 'string' && value.trim()).slice(0, 30).map(value => value.slice(0, 1000))
     : []
   return {
-    topic, section, chunkId, content, version, sourcePaths, score: Number(item.score),
+    topic, title: String(item.topic_title || topic), section, chunkId, content, version, sourcePaths, score: Number(item.score),
     matchedTerms: Array.isArray(item.matched_terms)
       ? [...new Set(item.matched_terms.filter(value => typeof value === 'string' && value.trim()).map(value => value.trim().slice(0, 80)))].slice(0, 30)
       : [],
@@ -312,7 +313,7 @@ function classifyTopic(content) {
 }
 
 function createWikiProvider({ env = process.env, fetchImpl = globalThis.fetch, timeoutMs = 8000, signal } = {}) {
-  async function requestJson(url, { method = 'GET', body, operation, requestCache, cacheKey } = {}) {
+  async function requestJson(url, { method = 'GET', body, operation, requestCache, cacheKey, actor } = {}) {
     const configured = configuredBaseUrl(env)
     if (configured.error) return result('unavailable', { error: configured.error })
     if (typeof fetchImpl !== 'function') return result('unavailable', { error: 'wiki_fetch_unavailable' })
@@ -324,7 +325,7 @@ function createWikiProvider({ env = process.env, fetchImpl = globalThis.fetch, t
     try {
       const response = await fetchImpl(url.toString(), {
         method,
-        headers: { Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        headers: { 'X-Wiki-Compiler-Identity': issueIdentity(String(actor && (actor.id || actor.userId || actor.sub) || ''), env), Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
         ...(body ? { body: JSON.stringify(body) } : {}),
         signal: linked.signal
       })
@@ -357,7 +358,7 @@ function createWikiProvider({ env = process.env, fetchImpl = globalThis.fetch, t
       method: 'POST',
       body: { query, top_k: MAX_RESULTS, mode },
       operation: 'search',
-      requestCache,
+      actor, requestCache,
       cacheKey
     })
     if (response.status !== 'ok') return { ...response, candidates: [], complete: false }
@@ -430,7 +431,7 @@ function createWikiProvider({ env = process.env, fetchImpl = globalThis.fetch, t
         sourceRef,
         sourceId: sourceRef.sourceId,
         provenance: normalizeProvenance(primary.provenance),
-        title: primary.topic,
+        title: primary.title || primary.topic,
         path: pathFor(primary.topic, sourceRef.section),
         source: 'wiki',
         matchReason: buildMatchReason(items, coverage, businessMatches),
@@ -491,7 +492,7 @@ function createWikiProvider({ env = process.env, fetchImpl = globalThis.fetch, t
     const configured = configuredBaseUrl(env)
     if (configured.error) return result('unavailable', { sourceRef, error: configured.error, complete: false, truncated: false })
     const read = await requestJson(makeTopicUrl(configured.url, topic), {
-      operation: 'topic', requestCache,
+      operation: 'topic', actor, requestCache,
       cacheKey: `wiki-topic:${configured.url.origin}:${roomKey}:${String(actor && (actor.id || actor.userId || actor.sub) || '')}:${mode}:${topic}`
     })
     if (read.status !== 'ok') return {

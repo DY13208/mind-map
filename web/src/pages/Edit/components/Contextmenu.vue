@@ -111,7 +111,7 @@
       <div class="item" @click="exec('EXPORT_CUR_NODE_TO_PNG')">
         <span class="name">{{ $t('contextmenu.exportNodeToPng') }}</span>
       </div>
-      <div v-if="roomCanShare" class="item" data-testid="share-node" @click="shareNode">
+      <div class="item" data-testid="share-node" @click="shareNode">
         <span class="name">分享此节点</span>
       </div>
       <div class="splitLine" v-if="enableAi"></div>
@@ -197,6 +197,8 @@ import { transformToMarkdown } from 'simple-mind-map/src/parse/toMarkdown'
 import { transformToTxt } from 'simple-mind-map/src/parse/toTxt'
 import { setDataToClipboard, setImgToClipboard, copy } from '@/utils'
 import { numberTypeList, numberLevelList } from '@/config'
+import { buildInviteUrl, roomFromLocation } from '@/utils/roomLocation'
+import { getRuntimeConfig } from '@/utils/runtimeConfig'
 
 // 右键菜单
 export default {
@@ -365,10 +367,38 @@ export default {
   methods: {
     ...mapMutations(['setLocalConfig']),
 
-    shareNode() {
+    async shareNode() {
       const node = this.node
+      const uid = node && node.getData && node.getData('uid')
+      const room = roomFromLocation(this.$route)
       this.hide()
-      if (node) this.$bus.$emit('showNodeShare', node)
+      if (!room || !uid) {
+        this.$message.warning('请先打开已保存的脑图')
+        return
+      }
+      const link = `${buildInviteUrl(room, getRuntimeConfig().appUrl)}&focus=${encodeURIComponent(uid)}`
+      try {
+        try {
+          if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('clipboard unavailable')
+          await navigator.clipboard.writeText(link)
+        } catch (err) {
+          // HTTP deployments and denied clipboard permissions use the legacy API.
+          const input = document.createElement('textarea')
+          input.value = link
+          input.style.position = 'fixed'
+          input.style.opacity = '0'
+          document.body.appendChild(input)
+          try {
+            input.select()
+            if (!document.execCommand('copy')) throw new Error('copy failed')
+          } finally {
+            document.body.removeChild(input)
+          }
+        }
+        this.$message.success('节点链接已复制，仅有文件访问权限的人可打开。')
+      } catch (err) {
+        this.$message.error('复制失败，请重试')
+      }
     },
 
     // 计算右键菜单元素的显示位置
