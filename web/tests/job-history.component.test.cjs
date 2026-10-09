@@ -2666,6 +2666,76 @@ async function main() {
       runLogUtil.readRunRecords().find(r => r.id === 'no-api').synced === false
   )
 
+  // ---- uid 过期：靠标题找回、并修正记录（2026-10-09 「找不到节点但其实写进去了」）----
+  vm = makeVm()
+  vm.$route = { query: { room: 'room-x' } }
+  vm.fetchJobText = async () => '正文'
+  let wroteTarget = ''
+  vm.writeJobResultToNode = async (job, options) => {
+    wroteTarget = `${options.nodeUid}|${options.nodeTitle || ''}`
+    vm.jobWriteResult = { containerUid: 'uid-real-9' }
+    vm.jobWriteError = ''
+  }
+  runLogUtil.clearRunRecords()
+  runLogUtil.saveRunRecord({
+    id: 'u-heal',
+    channel: 'openclaw',
+    state: 'done',
+    nodeUid: 'uid-stale',
+    nodeTitle: '任务 · 10-09 09:16',
+    result: 'x'
+  })
+  await vm.writeRunRecordToMap(
+    runLogUtil.readRunRecords().find(r => r.id === 'u-heal'),
+    { silent: true }
+  )
+  check(
+    '写回记录时把标题一起带上（uid 过期时靠它找回）',
+    wroteTarget === 'uid-stale|任务 · 10-09 09:16',
+    wroteTarget
+  )
+  check(
+    '写回成功后把记录里的过期 uid 修正成真实那个',
+    runLogUtil.readRunRecords().find(r => r.id === 'u-heal').nodeUid === 'uid-real-9',
+    JSON.stringify(runLogUtil.readRunRecords().find(r => r.id === 'u-heal') || {})
+  )
+
+  // 探针按标题找到 → 回洗「未同步」的同时修正 uid
+  vm = makeVm()
+  stubAcks(vm, { pending: [], acked: null })
+  vm.probeJobResult = async () => ({
+    ok: true,
+    exists: true,
+    hasFullOutput: true,
+    uid: 'uid-real-7',
+    resolvedBy: 'title'
+  })
+  runLogUtil.clearRunRecords()
+  runLogUtil.saveRunRecord({
+    id: 'heal-uid',
+    channel: 'openclaw',
+    state: 'done',
+    nodeUid: 'uid-stale-2',
+    nodeTitle: '任务 · 10-09 09:20',
+    result: 'x',
+    synced: false,
+    syncTip: '(误报) 还没同步到服务器'
+  })
+  check(
+    '回洗：按标题找到 → 洗掉误报标记 + 记录 uid 修正',
+    (await vm.refreshSyncMarks()) === 1 &&
+      runLogUtil.readRunRecords().find(r => r.id === 'heal-uid').synced === true &&
+      runLogUtil.readRunRecords().find(r => r.id === 'heal-uid').nodeUid === 'uid-real-7',
+    JSON.stringify(runLogUtil.readRunRecords().find(r => r.id === 'heal-uid') || {})
+  )
+  check(
+    '探针调用时把标题一起传过去（否则 uid 过期就找不到）',
+    /probeJobResult\(rec\.nodeUid, rec\.nodeTitle\)/.test(
+      fs.readFileSync(path.join(WEB, 'src/pages/Edit/components/Toolbar.vue'), 'utf8')
+    ),
+    ''
+  )
+
   runLogUtil.clearRunRecords()
   localStore.clear()
 

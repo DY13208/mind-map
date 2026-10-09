@@ -1616,7 +1616,12 @@ export default {
       try {
         Object.assign(
           result,
-          inspectJobResult({ mindMap: this.mindMap, nodeUid: data.nodeUid })
+          inspectJobResult({
+            mindMap: this.mindMap,
+            nodeUid: data.nodeUid,
+            // 记录里的 uid 会过期（重连/整树恢复后会换）→ 让探针按标题兜底找回来
+            nodeTitle: data.nodeTitle
+          })
         )
       } catch (err) {
         result.ok = false

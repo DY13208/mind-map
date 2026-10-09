@@ -193,6 +193,9 @@ function makeMindMap() {
     }
   }
   map.root = makeNode('根主题')
+  // 真实引擎里 Render 持有 root（findNodeByUid 就是从这里 walk 的）；
+  // 我们的「按标题找回」也一样 —— mock 必须补上，否则测的不是真实结构
+  map.renderer.root = map.root
   return map
 }
 
@@ -868,9 +871,10 @@ async function main() {
     ''
   )
   check(
-    'Edit.vue 注册了 probe_job_result 且用上了 inspectJobResult',
+    'Edit.vue 注册了 probe_job_result，用 inspectJobResult 且透传 nodeTitle',
     editSrc.includes("$bus.$on('probe_job_result', this.onProbeJobResult)") &&
-      editSrc.includes('inspectJobResult({ mindMap: this.mindMap'),
+      editSrc.includes('inspectJobResult({') &&
+      editSrc.includes('nodeTitle: data.nodeTitle'),
     ''
   )
   check(
@@ -955,6 +959,75 @@ async function main() {
       JSON.stringify(outU.ensuredUids)
     )
     void kidsU
+  }
+
+  // ---- uid 过期（重连/整树恢复后节点换了 uid）→ 按标题找回落点，别报「找不到节点」----
+  // 2026-10-09 用户反馈：「还是显示找不到节点 可能已经删掉了，但是实际上已经写入了」
+  {
+    const mapT = makeMindMap()
+    const made = await writer.createJobContainer({
+      mindMap: mapT,
+      nodeUid: mapT.root.getData('uid'),
+      prompt: '任务内容：X'
+    })
+    const staleUid = made.uid
+    const title = String(made.node.getData('text') || '')
+    // 模拟「uid 过期」：节点实例还在图上，但 uid 被换掉了
+    made.node.nodeData.data.uid = 'uid-reborn-1'
+
+    let threwT = ''
+    let outT = null
+    try {
+      outT = await writer.writeJobResultToMap({
+        mindMap: mapT,
+        nodeUid: staleUid,
+        nodeTitle: title,
+        markdown: MD,
+        roomKey: 'room-test',
+        artifacts: []
+      })
+    } catch (err) {
+      threwT = (err && err.message) || String(err)
+    }
+    check('uid 过期时按标题找回原容器，不再报「找不到节点」', !threwT && !!outT, threwT)
+    check(
+      '写进的是那个老容器（没新建第二个任务容器）',
+      !!outT &&
+        outT.containerUid === 'uid-reborn-1' &&
+        mapT.root.children.filter(item => writer.isTaskContainerNode(item)).length === 1,
+      outT ? String(outT.containerUid) : ''
+    )
+
+    const insp = writer.inspectJobResult({
+      mindMap: mapT,
+      nodeUid: staleUid,
+      nodeTitle: title
+    })
+    check(
+      '探针：uid 过期也能按标题找到，并回报真实 uid（供记录修正）',
+      insp.exists === true &&
+        insp.resolvedBy === 'title' &&
+        insp.uid === 'uid-reborn-1' &&
+        insp.hasFullOutput === true,
+      JSON.stringify(insp)
+    )
+
+    let threw2 = ''
+    try {
+      await writer.writeJobResultToMap({
+        mindMap: mapT,
+        nodeUid: 'uid-nowhere',
+        markdown: MD,
+        roomKey: 'room-test'
+      })
+    } catch (err) {
+      threw2 = (err && err.message) || String(err)
+    }
+    check(
+      '没有标题可兜底时仍然报错，并把 uid 写进报错里',
+      /找不到运行的那个节点/.test(threw2) && /uid-nowhere/.test(threw2),
+      threw2
+    )
   }
 
   const failed = results.filter(item => !item.ok)

@@ -2789,6 +2789,8 @@ export default {
         this.jobWriteState = '正在写入导图…'
         const payload = {
           nodeUid,
+          // uid 可能已过期（重连/整树恢复后节点换了 uid）→ 带上标题，写回器按它兜底找回原容器
+          nodeTitle,
           markdown: bodyText,
           prompt: options.prompt || this.jobPendingPrompt || '',
           job,
@@ -2939,11 +2941,12 @@ export default {
      * 查「某条运行的结果在不在图上」。走 Edit.vue 的 mindMap（Toolbar 自己不持有）。
      * 返回 { ok, exists, hasTaskContent, hasAttach, hasFullOutput, artifactNames }
      */
-    probeJobResult(nodeUid) {
+    probeJobResult(nodeUid, nodeTitle = '') {
       const uid = String(nodeUid || '').trim()
-      if (!uid) return Promise.resolve({ ok: false, exists: false })
+      const title = String(nodeTitle || '').trim()
+      if (!uid && !title) return Promise.resolve({ ok: false, exists: false })
       const box = { ok: false }
-      this.$bus.$emit('probe_job_result', { result: box, nodeUid: uid })
+      this.$bus.$emit('probe_job_result', { result: box, nodeUid: uid, nodeTitle: title })
       if (box && typeof box.then === 'function') return box
       // Edit.vue 是同步回填（没有 promise）：直接用它填好的结果
       return Promise.resolve(box)
@@ -2972,6 +2975,8 @@ export default {
       const options = { force: true, markdown }
       const targetUid = String(record.nodeUid || '').trim()
       if (targetUid) options.nodeUid = targetUid
+      // 记录里的 uid 会过期（重连 / 整树恢复后节点实例连 uid 一起换）→ 带上标题兜底
+      if (record.nodeTitle) options.nodeTitle = String(record.nodeTitle)
       if (artifacts) {
         options.artifacts = artifacts
         options.channel = RUN_CHANNEL_OPENCLAW
@@ -2984,11 +2989,18 @@ export default {
       // ⚠️ 只更新**已经在本页面日志里**的那条：桥接的任务记录不在本地日志里，
       // 给它 patch 会凭空造一条「本地运行记录」出来，污染运行历史（合并时多出一条）
       if (readRunRecords().some(rec => rec && rec.id === record.id)) {
-        patchRunRecord(record.id, {
+        const patch = {
           writtenAt: Date.now(),
           synced: !this.jobWriteError,
           syncTip: this.jobWriteError || ''
-        })
+        }
+        // 顺手把过期的 uid 修正成「这次实际写进的那个容器」——
+        // 下次按 uid 就能直接找到，不用再靠标题兜底（也修掉「找不到节点」的老记录）
+        const realUid = String(
+          (this.jobWriteResult && this.jobWriteResult.containerUid) || ''
+        ).trim()
+        if (realUid && realUid !== targetUid) patch.nodeUid = realUid
+        patchRunRecord(record.id, patch)
       }
       return true
     },
@@ -3022,13 +3034,18 @@ export default {
         if (!ack.hasApi || ack.pending.includes(String(rec.nodeUid))) continue
         let info = null
         try {
-          info = await this.probeJobResult(rec.nodeUid)
+          info = await this.probeJobResult(rec.nodeUid, rec.nodeTitle)
         } catch (err) {
           info = null
         }
         if (!info || info.ok === false || !info.exists) continue
         if (!(info.hasFullOutput || info.hasLegacyOutput || info.hasAttach)) continue
-        patchRunRecord(rec.id, { synced: true, syncTip: '', verifiedAt: Date.now() })
+        const patch = { synced: true, syncTip: '', verifiedAt: Date.now() }
+        // 记录里的 uid 过期了（探针是按标题找回来的）→ 顺手修正，下次直接命中
+        if (info.uid && String(info.uid) !== String(rec.nodeUid || '')) {
+          patch.nodeUid = String(info.uid)
+        }
+        patchRunRecord(rec.id, patch)
         cleared += 1
       }
       return cleared
@@ -3083,7 +3100,7 @@ export default {
         for (const rec of rows) {
           let info = null
           try {
-            info = await this.probeJobResult(rec.nodeUid)
+            info = await this.probeJobResult(rec.nodeUid, rec.nodeTitle)
           } catch (err) {
             info = null
           }
@@ -3092,8 +3109,18 @@ export default {
           //   新结构看「完整输出.md」，老结构看「运行输出」那一层
           // （老记录不能当成「没写」，否则会自动补出第二份）
           if (info.exists && (info.hasFullOutput || info.hasLegacyOutput)) {
-            patchRunRecord(rec.id, { verifiedAt: Date.now() })
+            patchRunRecord(
+              rec.id,
+              info.uid && String(info.uid) !== String(rec.nodeUid || '')
+                ? { verifiedAt: Date.now(), nodeUid: String(info.uid) }
+                : { verifiedAt: Date.now() }
+            )
             continue
+          }
+          // uid 过期但节点被标题找回来了 → 这次就写进**真实那个容器**，并修正记录
+          if (info.uid && String(info.uid) !== String(rec.nodeUid || '')) {
+            rec.nodeUid = String(info.uid)
+            patchRunRecord(rec.id, { nodeUid: String(info.uid) })
           }
           patchRunRecord(rec.id, {
             repairAttempts: Number(rec.repairAttempts || 0) + 1
