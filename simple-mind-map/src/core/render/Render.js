@@ -82,8 +82,6 @@ const layouts = {
 
 const EXPAND_ALL_BATCH = 6
 const EXPAND_ALL_PER_FRAME = 48
-const EXPAND_ALL_MAX_NODES = 200
-const EXPAND_ALL_MAX_ROUNDS = 24
 
 //  渲染
 class Render {
@@ -2459,7 +2457,7 @@ class Render {
     const command = this.mindMap.command
     if (command) command.pause()
     const start = this.findExpandStartNode(uid)
-    this.expandSubtreeProgressive(start, token)
+    return this.expandSubtreeProgressive(start, token)
       .catch(err => {
         console.error('[mind-map] expand all failed', err)
       })
@@ -2497,142 +2495,66 @@ class Render {
 
   async expandSubtreeProgressive(start, token) {
     if (!start) return
-    const initialTree = this.renderTree
-    const initialData = this.getExpandTreeData(start)
-    const startUid = initialData && initialData.uid
-    const resolveStart = () => {
-      if (startUid) return this.findExpandStartNode(startUid)
-      return this.renderTree === initialTree ? start : null
-    }
-    const isCurrent = () => this._expandAllToken === token
-
-    // 选中节点本身可能是尚未加载的 HTTP 占位节点，需先加载再展开。
-    let liveStart = resolveStart()
-    if (!liveStart) return
-    let hydrated = await this.hydrateFrontier([liveStart])
-    if (!isCurrent()) return
-    liveStart = resolveStart()
-    if (!liveStart) return
-
-    let startData = this.getExpandTreeData(liveStart)
-    if (
-      startData &&
-      startData.expand === false &&
-      this.nodeHasChildren(liveStart) &&
-      liveStart.children &&
-      liveStart.children.length
-    ) {
-      startData.expand = true
-      this.mindMap.emit('personal_expand_change')
-      await this.waitForRender()
-      if (!isCurrent()) return
-      liveStart = resolveStart()
-      if (!liveStart) return
-    } else if (hydrated && (!startData || startData.expand !== false)) {
-      // 已展开的占位节点加载出子节点后，即使展开标记没变也要重绘。
-      await this.waitForRender()
-      if (!isCurrent()) return
-      liveStart = resolveStart()
-      if (!liveStart) return
-    }
-
-    let painted = 0
-    for (let round = 0; round < EXPAND_ALL_MAX_ROUNDS; round++) {
-      if (!isCurrent()) return
-      liveStart = resolveStart()
-      if (!liveStart) return
-      let frontier = this.collectCollapsedFrontier(liveStart)
-      if (!frontier.length) return
-      hydrated = await this.hydrateFrontier(frontier)
-      if (!isCurrent()) return
-      liveStart = resolveStart()
-      if (!liveStart) return
-      frontier = this.collectCollapsedFrontier(liveStart)
-      const expandable = frontier.filter(node => {
-        const data = this.getExpandTreeData(node)
-        return data && data.expand === false && node.children && node.children.length > 0
-      })
-      if (!expandable.length) {
-        if (!hydrated) return
-        await this.waitForRender()
-        if (!isCurrent()) return
-        continue
-      }
-
-      // 保留原有展开预算；异步期间可能替换整棵树，因此只跨 await 保存 UID。
-      const pendingUids = new Set()
-      const pendingNodes = new Set()
-      expandable.forEach(node => {
-        const data = this.getExpandTreeData(node)
-        if (data && data.uid) pendingUids.add(data.uid)
-        else pendingNodes.add(node)
-      })
-      while (pendingUids.size || pendingNodes.size) {
-        if (!isCurrent()) return
-        if (painted >= EXPAND_ALL_MAX_NODES) return
-        liveStart = resolveStart()
-        if (!liveStart) return
-        frontier = this.collectCollapsedFrontier(liveStart).filter(node => {
-          const data = this.getExpandTreeData(node)
-        if (
-          !data ||
-          data.expand !== false ||
-          !node.children ||
-          !node.children.length
-        ) {
-            return false
-          }
-          return data.uid ? pendingUids.has(data.uid) : pendingNodes.has(node)
-        })
-        if (!frontier.length) break
-
-        let i = 0
-        const slice = []
-        let willShow = 0
-        while (i < frontier.length && slice.length < EXPAND_ALL_BATCH) {
-          const node = frontier[i]
-          const kids = (node.children && node.children.length) || 0
-          if (
-            slice.length &&
-            (willShow + kids > EXPAND_ALL_PER_FRAME ||
-              painted + willShow + kids > EXPAND_ALL_MAX_NODES)
-          ) {
-            break
-          }
-          slice.push(node)
-          willShow += kids
-          i += 1
-          if (willShow >= EXPAND_ALL_PER_FRAME) break
-        }
-        if (!slice.length) {
-          const node = frontier[0]
-          if (!node) break
-          this.getExpandTreeData(node).expand = true
-          const data = this.getExpandTreeData(node)
-          if (data && data.uid) pendingUids.delete(data.uid)
-          else pendingNodes.delete(node)
-          painted += (node.children && node.children.length) || 0
-          this.mindMap.emit('personal_expand_change')
-          await this.waitForRender()
-          if (!isCurrent()) return
-          if (painted >= EXPAND_ALL_MAX_NODES) return
+    // Queue stable identities: collaboration hydration can replace renderTree.
+    const entryFor = node => ({
+      node,
+      uid: (this.getExpandTreeData(node) || {}).uid,
+      tree: this.renderTree
+    })
+    const resolve = entry => this.renderTree === entry.tree
+      ? entry.node
+      : entry.uid ? this.findExpandStartNode(entry.uid) : null
+    const startEntry = entryFor(start)
+    const queue = [startEntry]
+    const visited = new Set()
+    let index = 0
+    while (index < queue.length) {
+      if (this._expandAllToken !== token || !resolve(startEntry)) return
+      const batch = []
+      let willShow = 0
+      while (index < queue.length && batch.length < EXPAND_ALL_BATCH) {
+        const entry = queue[index]
+        const node = resolve(entry)
+        const key = entry.uid || node
+        if (!node || visited.has(key)) {
+          index++
           continue
         }
-        slice.forEach(node => {
-          this.getExpandTreeData(node).expand = true
+        const kids = (node.children && node.children.length) || 0
+        if (batch.length && willShow + kids > EXPAND_ALL_PER_FRAME) break
+        index++
+        visited.add(key)
+        batch.push(entryFor(node))
+        willShow += kids
+      }
+      const childCounts = batch.map(entry => (entry.node.children || []).length)
+      await this.hydrateFrontier(batch.map(entry => entry.node))
+      if (this._expandAllToken !== token || !resolve(startEntry)) return
+      let changed = false
+      batch.forEach((entry, batchIndex) => {
+        const node = resolve(entry)
+        if (!node) return
+        const children = node.children || []
+        const summaries = this.getGeneralizationTrees(node)
+        // Failed loads stay collapsed and can be retried by the user.
+        if (children.length || summaries.length) {
           const data = this.getExpandTreeData(node)
-          if (data && data.uid) pendingUids.delete(data.uid)
-          else pendingNodes.delete(node)
-        })
-        painted += willShow
+          if (data.expand !== true || children.length !== childCounts[batchIndex]) {
+            changed = true
+          }
+          data.expand = true
+        }
+        children.forEach(child => queue.push(entryFor(child)))
+        summaries.forEach(summary => queue.push(entryFor(summary)))
+      })
+      if (changed) {
         this.mindMap.emit('personal_expand_change')
         await this.waitForRender()
-        if (!isCurrent()) return
+        if (this._expandAllToken !== token) return
       }
     }
   }
 
-  //  收起所有
   unexpandAllNode(isSetRootNodeCenter = true, uid = '') {
     if (!this.renderTree) return
     this._expandAllToken = 0
