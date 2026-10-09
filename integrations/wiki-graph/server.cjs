@@ -624,6 +624,10 @@ function createWikiServer({ dir, pool, env = process.env }) {
       res.end(JSON.stringify(value));
     };
     if (url.pathname === '/health') return json(200, { status: 'ok' });
+    if (url.pathname === '/interaction.js' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(fs.readFileSync(path.join(__dirname, 'interaction.js'), 'utf8')); return;
+    }
     if (url.pathname === '/' || url.pathname === '/index.html') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8')); return;
