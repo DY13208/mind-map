@@ -336,6 +336,7 @@ export default {
     this.$bus.$on('write_job_result', this.onWriteJobResult)
     this.$bus.$on('create_job_container', this.onCreateJobContainer)
     this.$bus.$on('probe_job_result', this.onProbeJobResult)
+    this.$bus.$on('probe_job_ack', this.onProbeJobAck)
     this.$bus.$on('read_generalization', this.onReadGeneralization)
     this.$bus.$on('paddingChange', this.onPaddingChange)
     this.$bus.$on('export', this.export)
@@ -379,6 +380,7 @@ export default {
     this.$bus.$off('write_job_result', this.onWriteJobResult)
     this.$bus.$off('create_job_container', this.onCreateJobContainer)
     this.$bus.$off('probe_job_result', this.onProbeJobResult)
+    this.$bus.$off('probe_job_ack', this.onProbeJobAck)
     this.$bus.$off('read_generalization', this.onReadGeneralization)
     this.$bus.$off('paddingChange', this.onPaddingChange)
     this.$bus.$off('export', this.export)
@@ -1619,6 +1621,64 @@ export default {
         result.ok = false
         result.error = (err && err.message) || '查不到这个节点'
       }
+      return result
+    },
+
+    /**
+     * 让 Toolbar 问「本次写回插进去的节点，服务端**确认**了吗」。
+     *
+     * 为什么要这个判据（2026-10-09 用户反馈「重试写入成功显示没成功，刷新后都显示未同步」）：
+     * 原来只按客户端队列判（还有没有没确认的命令 / outbox 积压条数），而那是**全客户端共享的**
+     * 计数 —— 服务器 outbox 长期积压两万多条，于是每次写回都被误判成「没同步」。
+     * 协同插件自己记了逐节点的账（`Cooperate.ackedUids` / `pendingUids`）：
+     *   · pendingUids.has(uid) → 这条插入已提交、服务端还没确认
+     *   · isPersistAcked(uid)  → 服务端已经确认过（真落库了）
+     * 这里把「我这次的节点」逐一对一遍，只认这个结论。
+     */
+    onProbeJobAck(payload) {
+      const result =
+        payload && payload.result && typeof payload.result === 'object'
+          ? payload.result
+          : { ok: false }
+      const uids = ((payload && payload.uids) || [])
+        .map(uid => String(uid || '').trim())
+        .filter(Boolean)
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (!uids.length) {
+        result.hasApi = false
+        result.error = '没有要查的节点'
+        return result
+      }
+      if (
+        !cooperate ||
+        (typeof cooperate.isPersistAcked !== 'function' &&
+          !cooperate.pendingUids)
+      ) {
+        // 老版本 / 没在用协同 → 让调用方回退到原来的口径（别硬给结论）
+        result.hasApi = false
+        return result
+      }
+      const pending = cooperate.pendingUids
+      const isPending = uid =>
+        pending && typeof pending.has === 'function'
+          ? pending.has(uid)
+          : Array.isArray(pending)
+          ? pending.indexOf(uid) !== -1
+          : false
+      result.hasApi = true
+      result.ok = true
+      result.pending = uids.filter(isPending)
+      // 正面证据：服务端确认过（老版本没有这个 API 时就只给 pending 那份）
+      result.acked =
+        typeof cooperate.isPersistAcked === 'function'
+          ? uids.filter(uid => {
+              try {
+                return !!cooperate.isPersistAcked(uid)
+              } catch (err) {
+                return false
+              }
+            })
+          : null
       return result
     },
 

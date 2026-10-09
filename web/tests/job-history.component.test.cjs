@@ -2433,6 +2433,239 @@ async function main() {
     String((recAlways && recAlways.syncTip) || '')
   )
 
+  // ---- 「已同步」判据改成**逐 uid**（2026-10-09 用户反馈：写成功了却显示没成功 / 刷新后全标未同步）----
+  // 现场：服务器 outbox 长期积压两万多条 → 老的「队列空了才算同步」永远不成立 → 全被误标未同步。
+  // 新口径：只问「我这次插的节点服务端确认了吗」（probe_job_ack → Cooperate.ackedUids/pendingUids）。
+  const ACK_OUT = {
+    ok: true,
+    nodes: 2,
+    inlineNodes: false,
+    attachments: [{ name: '完整输出.md', kind: 'text', via: 'collab' }],
+    warnings: [],
+    missing: [],
+    insertedUids: ['u-new-1', 'u-new-2'],
+    ensuredUids: ['u-container', 'u-new-1', 'u-new-2']
+  }
+  const stubWriteOut = (target, out, fail = '') => {
+    target.$bus.$emit = (name, payload) => {
+      if (name !== 'write_job_result' || !payload || !payload.result) return
+      payload.result.promise = Promise.resolve(fail ? { ok: false, error: fail } : out)
+    }
+  }
+  const stubAcks = (target, { pending = [], acked = null, hasApi = true } = {}) => {
+    const prev = target.$bus.$emit
+    target.$bus.$emit = (name, payload) => {
+      if (name === 'probe_job_ack') {
+        const box = payload && payload.result
+        if (box) {
+          box.hasApi = hasApi
+          box.ok = true
+          box.pending = pending.slice()
+          box.acked = acked ? acked.slice() : null
+        }
+        return
+      }
+      prev(name, payload)
+    }
+  }
+  const newVmForWrite = () => {
+    const v = makeVm()
+    v.$route = { query: { room: 'room-x' } }
+    v.collabPhase = 'LIVE'
+    v.collabSaveState = 'saved'
+    v.writeAckWaitMs = 0 // 别在单测里真等 8 秒
+    return v
+  }
+
+  // 我的节点全被确认了，但客户端队列里还积压着别人/历史的命令 → 不能再判「没同步」
+  vm = newVmForWrite()
+  vm.collabPendingCount = 3
+  vm.collabLiveStatus = () => ({ phase: 'LIVE', saveState: 'saving', outboxPending: 5 })
+  stubWriteOut(vm, ACK_OUT)
+  stubAcks(vm, { pending: [], acked: ['u-new-1', 'u-new-2'] })
+  runLogUtil.clearRunRecords()
+  vm.messages.length = 0
+  await vm.writeJobResultOnce(
+    { id: 'w-ack' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u-container', force: true }
+  )
+  check(
+    '我的节点都被服务端确认 → 队列里还有积压也不再判「没同步」',
+    !vm.jobWriteError,
+    vm.jobWriteError
+  )
+  check(
+    '这种情况要报成功（不再「写成功了显示没成功」）',
+    vm.messages.some(([k]) => k === 'success'),
+    JSON.stringify(vm.messages)
+  )
+  check(
+    '记录标成已同步、不带未同步原因',
+    runLogUtil.readRunRecords().find(r => r.id === 'w-ack').synced === true &&
+      !runLogUtil.readRunRecords().find(r => r.id === 'w-ack').syncTip,
+    JSON.stringify(runLogUtil.readRunRecords().find(r => r.id === 'w-ack') || {})
+  )
+
+  // 我的节点还在服务端待确认 → 判不 ok（并自动重试）
+  vm = newVmForWrite()
+  vm.collabLiveStatus = () => ({ phase: 'LIVE', saveState: 'saved' })
+  stubWriteOut(vm, ACK_OUT)
+  stubAcks(vm, { pending: ['u-new-1'], acked: ['u-new-2'] })
+  vm.messages.length = 0
+  await vm.writeJobResultOnce(
+    { id: 'w-pend' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u-container', force: true }
+  )
+  check(
+    '我的节点还没被确认 → 判「没同步」，并说清是几个节点',
+    /没被服务器确认/.test(vm.jobWriteError),
+    vm.jobWriteError
+  )
+  check(
+    '未同步原因写进记录（供历史里看/补写）',
+    /没被服务器确认/.test(
+      String(runLogUtil.readRunRecords().find(r => r.id === 'w-pend').syncTip || '')
+    ),
+    String(runLogUtil.readRunRecords().find(r => r.id === 'w-pend').syncTip || '')
+  )
+
+  // 新节点既不在待确认、也没被确认 → 这条插入根本没提交（被引擎推迟/丢了）
+  vm = newVmForWrite()
+  vm.collabLiveStatus = () => ({ phase: 'LIVE', saveState: 'saved' })
+  stubWriteOut(vm, ACK_OUT)
+  stubAcks(vm, { pending: [], acked: ['u-new-2'] })
+  vm.messages.length = 0
+  await vm.writeJobResultOnce(
+    { id: 'w-ghost' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u-container', force: true }
+  )
+  check(
+    '节点没提交到服务器 → 判没同步（不能默默放过）',
+    /没提交到服务器/.test(vm.jobWriteError),
+    vm.jobWriteError
+  )
+
+  // 上一次的拒绝码不能一直背在身上（老错误不是这次写回的证据）
+  vm = newVmForWrite()
+  const staleAt = Date.now() - 120000
+  vm.collabLiveStatus = () => ({
+    phase: 'LIVE',
+    saveState: 'saved',
+    lastError: { code: 'PARENT_DELETED', timestamp: staleAt }
+  })
+  stubWriteOut(vm, ACK_OUT)
+  stubAcks(vm, { pending: [], acked: ['u-new-1', 'u-new-2'] })
+  vm.messages.length = 0
+  await vm.writeJobResultOnce(
+    { id: 'w-stale' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u-container', force: true }
+  )
+  check('两分钟前的旧拒绝码不算这次写回的失败', !vm.jobWriteError, vm.jobWriteError)
+
+  // 这次写回期间**新出现**的拒绝要如实判失败
+  // （时间戳要单调递增 —— 真实时钟就是这样；全部落在同一毫秒的话
+  //   「比写回开始前更新」这条就永远不成立，那是测试桩的问题，不是逻辑的问题）
+  vm = newVmForWrite()
+  let statusCalls = 0
+  const statusT0 = Date.now()
+  vm.collabLiveStatus = () => {
+    statusCalls += 1
+    return statusCalls <= 2
+      ? { phase: 'LIVE', saveState: 'saved' }
+      : {
+          phase: 'LIVE',
+          saveState: 'error',
+          lastError: { code: 'PARENT_DELETED', timestamp: statusT0 + statusCalls }
+        }
+  }
+  stubWriteOut(vm, ACK_OUT)
+  stubAcks(vm, { pending: [], acked: ['u-new-1', 'u-new-2'] })
+  vm.messages.length = 0
+  await vm.writeJobResultOnce(
+    { id: 'w-newrej' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u-container', force: true }
+  )
+  check(
+    '这次写回期间新出现的拒绝 → 判失败并翻成人话',
+    /父节点已经不在服务器上/.test(vm.jobWriteError),
+    vm.jobWriteError
+  )
+
+  // 拿不到逐 uid 判据（老版本 / 没在用协同）→ 回退队列口径
+  vm = newVmForWrite()
+  vm.collabLiveStatus = () => ({ phase: 'LIVE', saveState: 'saved', outboxPending: 3 })
+  vm.waitCollabIdle = async () => false
+  stubWriteOut(vm, ACK_OUT)
+  stubAcks(vm, { hasApi: false })
+  vm.messages.length = 0
+  await vm.writeJobResultOnce(
+    { id: 'w-fallback' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u-container', force: true }
+  )
+  check(
+    '拿不到逐 uid 判据时回退老口径（保守：还报未同步）',
+    /还没同步到服务器/.test(vm.jobWriteError),
+    vm.jobWriteError
+  )
+
+  // 回洗误报的「未同步」标记（刷新后老记录不再一律显示未同步）
+  runLogUtil.clearRunRecords()
+  vm = makeVm()
+  stubAcks(vm, { pending: [], acked: null })
+  vm.probeJobResult = async () => ({ ok: true, exists: true, hasFullOutput: true })
+  runLogUtil.saveRunRecord({
+    id: 'miss-mark',
+    channel: 'openclaw',
+    state: 'done',
+    nodeUid: 'u-mm',
+    result: '正文',
+    synced: false,
+    syncTip: '(误报) 还没同步到服务器'
+  })
+  check(
+    '内容在图上 + 容器不在待确认队列 → 回洗掉「未同步」误报',
+    (await vm.refreshSyncMarks()) === 1 &&
+      runLogUtil.readRunRecords().find(r => r.id === 'miss-mark').synced === true,
+    JSON.stringify(runLogUtil.readRunRecords().find(r => r.id === 'miss-mark') || {})
+  )
+  check('同一页面不重复洗（每条只查一次）', (await vm.refreshSyncMarks()) === 0)
+
+  vm = makeVm()
+  stubAcks(vm, { pending: ['u-mm'], acked: null })
+  vm.probeJobResult = async () => ({ ok: true, exists: true, hasFullOutput: true })
+  runLogUtil.saveRunRecord({
+    id: 'still-miss',
+    channel: 'openclaw',
+    state: 'done',
+    nodeUid: 'u-mm',
+    result: 'x',
+    synced: false,
+    syncTip: 'x'
+  })
+  check(
+    '容器还在待确认队列里 → 不洗（确实没同步）',
+    (await vm.refreshSyncMarks()) === 0 &&
+      runLogUtil.readRunRecords().find(r => r.id === 'still-miss').synced === false
+  )
+
+  vm = makeVm()
+  stubAcks(vm, { hasApi: false })
+  vm.probeJobResult = async () => ({ ok: true, exists: true, hasFullOutput: true })
+  runLogUtil.saveRunRecord({
+    id: 'no-api',
+    channel: 'openclaw',
+    state: 'done',
+    nodeUid: 'u-mm',
+    result: 'x',
+    synced: false,
+    syncTip: 'x'
+  })
+  check(
+    '拿不到判据时不动标记（不乱洗）',
+    (await vm.refreshSyncMarks()) === 0 &&
+      runLogUtil.readRunRecords().find(r => r.id === 'no-api').synced === false
+  )
+
   runLogUtil.clearRunRecords()
   localStore.clear()
 
