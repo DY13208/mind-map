@@ -333,7 +333,7 @@ function createPgFileStore(pool) {
         const team = teamClause(params)
         const res = await pool.query(
           `select f.*,
-                  ${teamId ? 'true' : 'false'} as can_manage,
+                  true as can_manage,
                   coalesce(cu.name, f.created_by, '') as created_by_name,
                   coalesce(cu.avatar, '') as created_by_avatar,
                   (

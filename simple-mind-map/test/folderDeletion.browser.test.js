@@ -10,9 +10,16 @@ const { createFileSystem, createMemoryFileStore, handleFileSystemApi } = require
 async function main() {
   const build = path.resolve(process.argv[2] || '')
   assert.ok(fs.existsSync(path.join(build, 'index.html')), 'provide a frontend production build directory')
-  let engine, store, source, child, target, direct
-  async function seed(empty = false) {
+  const previousAdmins = process.env.MIND_MAP_SUPER_ADMIN_IDS
+  process.env.MIND_MAP_SUPER_ADMIN_IDS = 'fixture-super-admin'
+  let engine, store, source, child, target, direct, actor = 'owner'
+  async function seed(empty = false, asAdmin = false) {
+    actor = asAdmin ? 'fixture-super-admin' : 'owner'
     store = createMemoryFileStore()
+    if (asAdmin) {
+      const listFolders = store.listFolders.bind(store)
+      store.listFolders = async opts => (await listFolders(opts)).map(f => ({ ...f, can_manage: false }))
+    }
     engine = createFileSystem({ store })
     source = await engine.createFolder({ name: '待删除文件夹', userId: 'owner' })
     target = await engine.createFolder({ name: '保留内容的目标', userId: 'owner' })
@@ -26,10 +33,10 @@ async function main() {
   const server = http.createServer(async (req, res) => {
     try {
       const pathname = new URL(req.url, 'http://127.0.0.1').pathname.replace(/^\/dist\//, '/')
-      if (pathname === '/api/auth/me') return json(res, { enabled: true, authenticated: true, user: { id: 'owner', name: '测试账号', corpId: 'test-corp' } })
+      if (pathname === '/api/auth/me') return json(res, { enabled: true, authenticated: true, user: { id: actor, name: '测试账号', corpId: 'test-corp' } })
       if (pathname === '/api/teams') return json(res, { items: [], list: [] })
       if (pathname.startsWith('/api/')) {
-        req.authUser = { id: 'owner', corpId: 'test-corp' }
+        req.authUser = { id: actor, corpId: 'test-corp' }
         if (await handleFileSystemApi(req, res, { engine })) return
         return json(res, { ok: true, list: [] })
       }
@@ -54,8 +61,8 @@ async function main() {
     page = await browser.newPage({ viewport: { width: 1360, height: 900 } })
     page.setDefaultTimeout(10000)
     page.on('pageerror', e => errors.push(e.message))
-    const open = async (empty = false) => {
-      await seed(empty)
+    const open = async (empty = false, asAdmin = false) => {
+      await seed(empty, asAdmin)
       await page.goto(origin + '/files')
       const card = page.locator('.folderCard').filter({ hasText: '待删除文件夹' })
       await card.waitFor()
@@ -63,6 +70,7 @@ async function main() {
         await page.getByRole('button', { name: '消息中心', exact: true }).click()
       }
       await card.locator('.more').click()
+      if (asAdmin) await page.locator('.el-dropdown-menu:visible').getByText('重命名', { exact: true }).waitFor()
       await page.locator('.el-dropdown-menu:visible').getByText('删除', { exact: true }).click()
       await page.locator('.deleteFolderDialog:visible .el-dialog').waitFor()
       await page.getByText('正在检查文件夹内容…').waitFor({ state: 'hidden' })
@@ -98,8 +106,15 @@ async function main() {
     await dialog.getByText('这是一个空文件夹，确认删除吗？').waitFor()
     await dialog.getByRole('button', { name: '取消', exact: true }).click()
     assert.ok(await store.getFolder(source.id), 'cancel preserves the folder')
+    await page.setViewportSize({ width: 1360, height: 900 })
+    await open(false, true)
+    await dialog.locator('.el-radio').filter({ hasText: '全部删除' }).click()
+    await dialog.getByRole('button', { name: '全部删除', exact: true }).click()
+    await dialog.waitFor({ state: 'hidden' })
+    assert.equal(await store.getFolder(source.id), null, 'super-admin can delete another owner\'s folder')
+    assert.equal((await store.getRoom(direct)).deleted_by, 'fixture-super-admin')
     assert.deepEqual(errors, [])
-    console.log('Production frontend browser checks passed: move, recursive trash, cancel, live list refresh, and 390px dialog')
+    console.log('Production frontend browser checks passed: owner and super-admin menus, move, recursive trash, cancel, live list refresh, and 390px dialog')
   } catch (error) {
     if (page) {
       console.error('Fixture page:', page.url(), (await page.locator('body').innerText()).slice(0, 1800), errors)
@@ -108,6 +123,8 @@ async function main() {
   } finally {
     if (browser) await browser.close()
     await new Promise(resolve => server.close(resolve))
+    if (previousAdmins === undefined) delete process.env.MIND_MAP_SUPER_ADMIN_IDS
+    else process.env.MIND_MAP_SUPER_ADMIN_IDS = previousAdmins
   }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

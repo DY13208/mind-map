@@ -15,6 +15,17 @@ async function fixture() {
 const rejected = code => err => err.code === code
 const input = (preview, action, extra = {}) => ({ userId: 'owner', action, revision: preview.revision, ...extra })
 
+test('trusted bypass overrides a false store flag without granting ordinary users management', async () => {
+  const store = createMemoryFileStore()
+  // Reproduce PostgreSQL listing with an explicit false can_manage flag.
+  store.kind = 'pg'
+  store.listFolders = async () => [{ id: 'folder', created_by: 'another-owner', can_manage: false, room_count: 0 }]
+  const fs = createFileSystem({ store })
+  assert.equal((await fs.listFolders({ userId: 'admin', bypass: true })).list[0].canManage, true)
+  assert.equal((await fs.listFolders({ userId: 'viewer' })).list[0].canManage, false)
+  assert.equal((await fs.listFolders({ userId: 'member', teamId: 'team-a', bypass: true, canManage: false })).list[0].canManage, false)
+})
+
 test('preview counts the entire subtree without writing; foreign users cannot inspect it', async () => {
   const f = await fixture()
   const before = JSON.stringify([...f.store.folders])
