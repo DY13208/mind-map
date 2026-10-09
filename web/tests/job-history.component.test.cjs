@@ -2019,7 +2019,11 @@ async function main() {
     !vm.messages.some(([kind]) => kind === 'success'),
     JSON.stringify(vm.messages)
   )
-  check('没确认时整条重写了一次（幂等，不会冒重复节点）', emits === 2, String(emits))
+  check(
+    '没确认时按同一段写回逻辑自动重试（首次 + 重试 3 次 = 4 次，幂等不会冒重复节点）',
+    emits === 4,
+    String(emits)
+  )
   check(
     '运行记录标成「未同步」（历史里能看见、能补写）',
     runLogUtil.readRunRecords().find(r => r.id === 'w-sync').synced === false,
@@ -2306,6 +2310,129 @@ async function main() {
       /只读/.test(runLogUtil.readRunRecords().find(r => r.id === 'rep-ro').syncTip || ''),
     runLogUtil.readRunRecords().find(r => r.id === 'rep-ro').syncTip
   )
+  // ---- 写回失败自动重试（2026-10-09 用户要求）----
+  // 现场那句：「写入导图失败：命令没有落到图上（落点「任务 · 10-09 09:16」现在有 2 个子节点）」
+  // —— 手动去「运行历史 → 写入导图」重试一下往往就成，所以让它自动重试 3 次。
+  const LAND_FAIL =
+    '写入导图失败：命令没有落到图上（落点「任务 · 10-09 09:16」现在有 2 个子节点）—— ' +
+    '先在「运行历史」里点「写入导图」重试；还不行就刷新页面再试'
+
+  // ⓐ 权限类失败：重试多少遍都一样 → 只写一次就收手，别让人白等
+  vm = makeVm()
+  vm.$route = { query: { room: 'room-x' } }
+  vm.collabPhase = 'LIVE'
+  vm.collabSaveState = 'saved'
+  vm.waitCollabIdle = async () => true
+  let roPushes = 0
+  vm.$bus.$emit = (name, payload) => {
+    if (name !== 'write_job_result' || !payload || !payload.result) return
+    roPushes += 1
+    payload.result.promise = Promise.resolve({
+      ok: false,
+      error: '这个房间当前是只读的（没有编辑权限），结果写不进去 —— 请让有编辑权限的人来写'
+    })
+  }
+  vm.messages.length = 0
+  await vm.writeJobResultOnce(
+    { id: 'w-ro' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u-ro', force: true }
+  )
+  check('只读这种「重试也没用」的失败只写一次', roPushes === 1, String(roPushes))
+  check(
+    '只读失败照原样报出来，不硬说重试过',
+    /只读/.test(vm.jobWriteError) && !/自动重试/.test(vm.jobWriteError),
+    vm.jobWriteError
+  )
+
+  // ⓑ 前两次「命令没落图」，第三次落上了 → 报成功，并说明重试过几次
+  vm = makeVm()
+  vm.$route = { query: { room: 'room-x' } }
+  vm.collabPhase = 'LIVE'
+  vm.collabSaveState = 'saved'
+  vm.waitCollabIdle = async () => true
+  let landPushes = 0
+  vm.$bus.$emit = (name, payload) => {
+    if (name !== 'write_job_result' || !payload || !payload.result) return
+    landPushes += 1
+    payload.result.promise = Promise.resolve(
+      landPushes <= 2
+        ? { ok: false, error: LAND_FAIL }
+        : {
+            ok: true,
+            nodes: 2,
+            inlineNodes: false,
+            attachments: [{ name: '完整输出.md', kind: 'text', via: 'collab' }],
+            warnings: [],
+            missing: []
+          }
+    )
+  }
+  vm.messages.length = 0
+  await vm.writeJobResultOnce(
+    { id: 'w-land' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u-land', force: true }
+  )
+  check('命令没落图 → 自动重试，第 3 次成了', landPushes === 3, String(landPushes))
+  check(
+    '重试补上的这次报成功，并说明自动重试过 2 次',
+    vm.messages.some(([k]) => k === 'success') && /自动重试 2 次/.test(vm.jobWriteState),
+    `${JSON.stringify(vm.messages)} ${vm.jobWriteState}`
+  )
+  check('重试成功后不挂错误', !vm.jobWriteError, vm.jobWriteError)
+
+  // ⓒ 首次 + 重试 3 次全失败 → 如实报错；记录留成「跑完 + 未同步」，手动/刷新后都还能补
+  vm = makeVm()
+  vm.$route = { query: { room: 'room-x' } }
+  vm.collabPhase = 'LIVE'
+  vm.collabSaveState = 'saved'
+  vm.waitCollabIdle = async () => true
+  runLogUtil.clearRunRecords()
+  runLogUtil.saveRunRecord({
+    id: 'w-always',
+    channel: 'openclaw',
+    state: 'working',
+    nodeUid: 'u-always',
+    nodeTitle: '任务 · 10-09 09:16'
+  })
+  let alwaysPushes = 0
+  vm.$bus.$emit = (name, payload) => {
+    if (name !== 'write_job_result' || !payload || !payload.result) return
+    alwaysPushes += 1
+    payload.result.promise = Promise.resolve({ ok: false, error: LAND_FAIL })
+  }
+  vm.messages.length = 0
+  await vm.writeJobResultOnce(
+    { id: 'w-always' },
+    { channel: 'openclaw', markdown: '正文', nodeUid: 'u-always', force: true }
+  )
+  check(
+    '4 次都没落图 → 一共写了 4 次（首次 + 重试 3 次）',
+    alwaysPushes === 4,
+    String(alwaysPushes)
+  )
+  check(
+    '报错说清「已自动重试 3 次仍未成功」',
+    /命令没有落到图上/.test(vm.jobWriteError) &&
+      /自动重试 3 次仍未成功/.test(vm.jobWriteError),
+    vm.jobWriteError
+  )
+  check(
+    '4 次都失败时不能报成功',
+    !vm.messages.some(([k]) => k === 'success'),
+    JSON.stringify(vm.messages)
+  )
+  const recAlways = runLogUtil.readRunRecords().find(r => r.id === 'w-always')
+  check(
+    '记录留成「跑完 + 未同步」（刷新后自动补写 / 手动补写都接得上）',
+    !!recAlways && recAlways.state === 'done' && recAlways.synced === false,
+    JSON.stringify(recAlways || {})
+  )
+  check(
+    '未同步原因写进记录（含失败原文）',
+    /命令没有落到图上/.test(String((recAlways && recAlways.syncTip) || '')),
+    String((recAlways && recAlways.syncTip) || '')
+  )
+
   runLogUtil.clearRunRecords()
   localStore.clear()
 

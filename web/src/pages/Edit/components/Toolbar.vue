@@ -749,6 +749,39 @@ const JOB_RECEIPT_SAFE_STORE = 'mindmap:jobReceiptSafe'
 const JOB_RETRY_LIMIT = 3
 
 /**
+ * **写回失败时最多重试几次**（2026-10-09 用户要求）。
+ *
+ * 现场：跑完写回时经常只看到一句「写入导图失败：命令没有落到图上（落点「任务 · 10-09 09:16」
+ * 现在有 2 个子节点）」—— 根因多半是**协同还没把手上的命令消化完**（命令被推迟/丢弃、
+ * 服务端还没 ack、写的过程中做过整树恢复），当时点「运行历史 → 写入导图」重试一下就好了。
+ * 既然手动重试有效，就把它自动化：失败后按**同一段写回逻辑**再试 3 次，
+ * 中间等协同把手上的活吸收完 —— 写回本身是幂等的（节点按名字复用、按 uid 认领），
+ * 重写不会冒重复节点。
+ *
+ * 命名口径与 JOB_RETRY_LIMIT 一致：LIMIT 是**重试**次数，不含第一次。
+ */
+const WRITE_RETRY_LIMIT = 3
+
+/** 重试之间等协同多久（等它把 outbox 里的命令发完并拿到 ack） */
+const WRITE_RETRY_COLLAB_WAIT_MS = 6000
+
+/** 重试之间再退避一下（第 N 次重试等 N×300ms），别刚失败就顶上去 */
+const WRITE_RETRY_BACKOFF_MS = 300
+
+/**
+ * 这些失败**重试没用**，直接如实报错：没权限 / 没导图 / 落点被删。
+ * （只读态无论写几遍都写不进去，重试 3 次只是让人白等。）
+ */
+const WRITE_FATAL_RE = /只读|没有编辑权限|当前页面没有导图|找不到要挂任务的节点/
+
+/**
+ * 这些是「命令没落图 / 服务器还没确认」一类 —— 等协同吸收完再写一遍通常就好了，
+ * 值得重试（用户看到的那句「命令没有落到图上」就属于这类）。
+ */
+const WRITE_RETRYABLE_RE =
+  /命令没有落到图上|建任务节点失败|导图还没准备好|没落进导图|写入导图失败|没被服务器确认|还没同步|没同步到服务器|整树恢复/
+
+/**
  * 宽限也拉不到正文时的放弃线（派发后 6 分钟）。
  * 到点还没正文，就别再占着轮询了 —— 直接收尾并提示用户去 output/ 找产物。
  */
@@ -1507,6 +1540,67 @@ export default {
         throw new Error((out && out.error) || '写入导图失败')
       }
       return out
+    },
+
+    /**
+     * 这次写回失败**值不值得重试**（2026-10-09 用户要求「这种写入失败也重试 3 次」）。
+     *
+     * 判据是**失败原因**：权限 / 没导图 → 重试多少次都一样，别让用户白等；
+     * 「命令没落图 / 服务器没确认」→ 等协同吸收完再写通常就好了，必须重试。
+     */
+    isRetryableWriteFailure(err) {
+      const msg = (err && err.message) || String(err || '')
+      if (!msg) return false
+      if (WRITE_FATAL_RE.test(msg)) return false
+      return WRITE_RETRYABLE_RE.test(msg)
+    },
+
+    /**
+     * 写回 + 服务端确认 + **失败自动重试**（2026-10-09 用户要求）。
+     *
+     * 「写入导图失败：命令没有落到图上」这类报错，手动去「运行历史 → 写入导图」
+     * 重试一下往往就成功 —— 说明失败是**当时**协同还没消化完，不是内容有问题。
+     * 那就别让用户自己点：失败后等协同吸收完（waitCollabIdle），按同一段写回逻辑再写一遍，
+     * 最多 WRITE_RETRY_LIMIT 次。写回幂等（节点按名字复用、按 uid 认领），重写不会冒重复节点。
+     *
+     * @returns {Promise<{out:Object|null, verify:{ok:Boolean,why:String}, attempts:Number, error:Error|null}>}
+     *   attempts = 一共写了几次（1 = 一次就成，没重试）；
+     *   error 非空 = 连写都没写进去（调用方按失败收尾）；
+     *   error 为空但 verify.ok=false = 写进去了、服务器没确认（调用方按「未同步」收尾）。
+     */
+    async pushJobResultWithRetry(
+      payload,
+      { retries = WRITE_RETRY_LIMIT, silent = false } = {}
+    ) {
+      const limit = Math.max(0, Number(retries) || 0)
+      let out = null
+      let verify = { ok: false, why: '还没写' }
+      let error = null
+      let attempt = 0
+      for (;;) {
+        attempt += 1
+        error = null
+        try {
+          out = await this.pushJobResultToMap(payload)
+          verify = await this.verifyWritePersisted()
+        } catch (err) {
+          error = err
+          verify = { ok: false, why: (err && err.message) || '写入导图失败' }
+          // 权限 / 没导图：重试没意义，立刻按失败收尾，别让人白等
+          if (!this.isRetryableWriteFailure(err)) break
+        }
+        if (!error && verify.ok) return { out, verify, attempts: attempt, error: null }
+        if (attempt > limit) break
+        const why = error ? error.message || String(error) : `服务器没确认（${verify.why}）`
+        this.jobWriteState = `写入没成功（第 ${attempt} 次失败：${why}）—— 正在重试第 ${attempt}/${limit} 次…`
+        if (!silent) this.$message.info(`写入没成功，正在自动重试（第 ${attempt}/${limit} 次）…`)
+        // 失败多半是协同没消化完 → 先等它吸收完再写第二遍（顺便退避一下）
+        await this.waitCollabIdle(WRITE_RETRY_COLLAB_WAIT_MS)
+        await new Promise(resolve =>
+          setTimeout(resolve, WRITE_RETRY_BACKOFF_MS * attempt)
+        )
+      }
+      return { out, verify, attempts: attempt, error }
     },
 
     async waitForCpdSnapshot() {
@@ -2575,19 +2669,17 @@ export default {
             if (label) this.jobWriteState = label
           }
         }
-        let out = await this.pushJobResultToMap(payload)
-        // —— 写下去 ≠ 存住了：必须**服务端确认**才算完成 ——
-        // 协同客户端有几条静默丢弃的路子（目标/父节点不在、uid 被占用、
-        // 依赖的插入彻底失败、快照恢复把整树换掉），本机画布上照样有节点，
-        // 刷新就没了（2026-10-08 用户反馈「跑完写不回去、强刷就没了」）。
-        // 所以：等确认；没确认就**整条重写一次**（写回本身是幂等的：节点按名字复用、
-        // 按 uid 认领，重写不会冒重复节点）。
-        let verify = await this.verifyWritePersisted()
-        if (!verify.ok && !options.__retried) {
-          this.jobWriteState = `服务器没确认（${verify.why}），正在重写一次…`
-          out = await this.pushJobResultToMap(payload)
-          verify = await this.verifyWritePersisted()
-        }
+        // —— 写下去 ≠ 存住了：必须**服务端确认**才算完成；失败就自动重试 ——
+        // 协同客户端有几条静默丢弃的路子（目标/父节点不在、uid 被占用、依赖的插入彻底失败、
+        // 快照恢复把整树换掉），本机画布上照样有节点，刷新就没了（2026-10-08 用户反馈
+        // 「跑完写不回去、强刷就没了」）；「命令没有落到图上」也多半只是**当时**没消化完
+        // （手动去运行历史点「写入导图」重试往往就成）。所以这一段把两件事一起做掉：
+        // 等服务端确认 + 按同一段写回逻辑自动重试 WRITE_RETRY_LIMIT 次（2026-10-09 用户要求）。
+        const tried = await this.pushJobResultWithRetry(payload, { silent })
+        if (!tried.out) throw tried.error || new Error('写入导图失败')
+        const out = tried.out
+        const verify = tried.verify
+        const retryNote = tried.attempts > 1 ? `（自动重试 ${tried.attempts - 1} 次）` : ''
         this.jobWrittenJobId = jobId
         this.jobWriteResult = out
         // 本地运行记录同步成「已完成 + 正文」：运行历史里点开就有内容
@@ -2602,7 +2694,7 @@ export default {
         const attCount = (out.attachments || []).length
         // 新结构（2026-10-08）不铺正文节点：结果全在「任务 → 附件」里，
         // 文案就别再报一个已经不存在的「运行输出」节点名。
-        this.jobWriteState = out.inlineNodes
+        this.jobWriteState = (out.inlineNodes
           ? `已写入「${nodeTitle || '运行节点'}」：${out.title}（${
               out.nodes
             } 个节点${
@@ -2610,9 +2702,10 @@ export default {
             }${out.generalization ? '、已加概要（双击概要写下一步）' : ''}）`
           : `已写入「${nodeTitle || '运行节点'}」的「附件」（${attCount} 个文件${
               out.generalization ? '、已加概要（双击概要写下一步）' : ''
-            }）`
+            }）`) + retryNote
         // —— 最后一道闸：服务器**确认**了才算完成 ——
-        // 上面 verifyWritePersisted 已等服务端把手上的命令消化完；这里只是把结论说出来。
+        // 上面 pushJobResultWithRetry 已等服务端把手上的命令消化完（并重试过）；
+        // 这里只是把结论说出来。
         if (out.warnings && out.warnings.length) {
           const needService = out.warnings.some(item => /没挂上/.test(item))
           this.jobWriteError =
@@ -2626,6 +2719,7 @@ export default {
         } else {
           const tip =
             `导图改了，但**还没同步到服务器**（${verify.why}）—— ` +
+            `已自动重试 ${Math.max(0, tried.attempts - 1)} 次仍未确认；` +
             '现在可能只在这台浏览器里，**刷新就没了**。' +
             '等右下角保存状态变成「已保存」后，在运行历史里选中这条记录、点「写入导图」补一次。'
           this.jobWriteError = this.jobWriteError ? `${this.jobWriteError}；${tip}` : tip
@@ -2645,8 +2739,27 @@ export default {
         if (this.jobHistoryVisible) await this.loadJobHistory()
       } catch (err) {
         this.jobWriteState = ''
-        this.jobWriteError = (err && err.message) || '写入导图失败'
+        const raw = (err && err.message) || '写入导图失败'
+        const retryable = this.isRetryableWriteFailure(err)
+        // 可重试的失败：说清「已经自动重试过 3 次」——不然用户会以为程序没试过
+        this.jobWriteError = retryable
+          ? `${raw}｜已按「运行历史 → 写入导图」的逻辑自动重试 ${WRITE_RETRY_LIMIT} 次仍未成功`
+          : raw
+        // 这条记录留成「未同步 + 已跑完」：
+        //   ① 运行历史里点「写入导图」还能手动再来；
+        //   ② 刷新后 scheduleAutoRepair 会按图上的真实结构再补（每条最多 3 次）。
+        // ⚠️ 只 patch **已经在本页面日志里**的那条 —— 桥接任务的记录不在本地日志里，
+        // 凭空给它 patch 会在运行历史里多出一条假记录（2026-10-08 踩过）。
+        if (jobId && readRunRecords().some(rec => rec && rec.id === jobId)) {
+          patchRunRecord(jobId, {
+            state: 'done',
+            result: bodyText,
+            synced: false,
+            syncTip: this.jobWriteError
+          })
+        }
         notify.error(this.jobWriteError)
+        if (this.jobHistoryVisible) await this.loadJobHistory()
       } finally {
         this.jobWriteBusy = false
       }
