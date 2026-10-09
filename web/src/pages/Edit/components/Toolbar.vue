@@ -839,6 +839,9 @@ export default {
       diagCopied: false,
       displayedSaveChip: 'offline',
       saveChipTimer: null,
+      // 刷新后自动补写：跑完但结果没挂上节点的记录，正在串行补（避免重入）
+      autoRepairRunning: false,
+      autoRepairTimer: null,
       jobDispatching: false,
       // 运行通道（用哪条路执行）**不在这里选**了 —— 见右侧栏「设置 → AI 执行引擎」，
       // 点运行直接读设置（utils/runChannel.js 落盘）。
@@ -1298,8 +1301,16 @@ export default {
         })
         .catch(() => {})
     }
+    // 刷新后自动补写：上次跑完但结果没挂上节点的（协同吃掉 / 中途断线 / 只写了一半），
+    // 这次就把运行记录里那套「写入导图」接过来重写一遍（2026-10-09 用户要求）。
+    // 等一会儿再动：导图和协同都要先就绪，早写会被整树恢复盖掉。
+    this.scheduleAutoRepair()
   },
   beforeDestroy() {
+    if (this.autoRepairTimer) {
+      clearTimeout(this.autoRepairTimer)
+      this.autoRepairTimer = null
+    }
     this.$bus.$off('node_click', this.onJobNodeClick)
     if (this.saveChipTimer) {
       clearTimeout(this.saveChipTimer)
@@ -2454,6 +2465,22 @@ export default {
      * 完整输出存成 .md、任务产出的文件一起挂成附件。同一条任务只写一次（force 除外）。
      */
     async writeJobResultOnce(job, options = {}) {
+      // 自动补写（silent）时不弹消息，只把结论留在状态里 —— 免得刷新一次就飘一排提示
+      const silent = options.silent === true
+      const notify = {
+        warning: text => {
+          if (!silent) this.$message.warning(text)
+        },
+        success: text => {
+          if (!silent) this.$message.success(text)
+        },
+        error: text => {
+          if (!silent) this.$message.error(text)
+        },
+        info: text => {
+          if (!silent) this.$message.info(text)
+        }
+      }
       // 默认用当前选中的主机/会话；多任务并行时调用方会把它自己那份传进来
       const host = options.host || this.jobSelectedHost
       const gateway = options.gateway || this.jobGateway
@@ -2467,19 +2494,19 @@ export default {
       if (this.jobWriteBusy) {
         this.jobWriteError =
           '上一次写回还没结束，这次的结果没有写进导图 —— 稍后点「写入导图」补一次'
-        this.$message.warning(this.jobWriteError)
+        notify.warning(this.jobWriteError)
         return
       }
       if (!viaOpenclaw && !host) {
         this.jobWriteError =
           '没有可用的执行主机（桥接没在跑？）—— 结果取不回来，没有写进导图'
-        this.$message.warning(this.jobWriteError)
+        notify.warning(this.jobWriteError)
         return
       }
       if (!viaOpenclaw && !jobId) {
         this.jobWriteError =
           '这条任务没有任务号（接单的会话没返回 job id）—— 结果取不回来，没有写进导图'
-        this.$message.warning(this.jobWriteError)
+        notify.warning(this.jobWriteError)
         return
       }
       if (!viaOpenclaw && !options.force && this.jobWrittenJobId === jobId) return
@@ -2605,28 +2632,190 @@ export default {
           patchRunRecord(jobId, { synced: false, syncTip: tip })
         }
         if (this.jobWriteError) {
-          this.$message.warning(this.jobWriteError)
+          notify.warning(this.jobWriteError)
         } else if (missing) {
-          this.$message.warning(
+          notify.warning(
             `还需要补 ${missing} 项数据（已列在「待补充数据」里）：${(out.missing || [])
               .slice(0, 3)
               .join('；')}`
           )
         } else {
-          this.$message.success(this.jobWriteState)
+          notify.success(this.jobWriteState)
         }
         if (this.jobHistoryVisible) await this.loadJobHistory()
       } catch (err) {
         this.jobWriteState = ''
         this.jobWriteError = (err && err.message) || '写入导图失败'
-        this.$message.error(this.jobWriteError)
+        notify.error(this.jobWriteError)
       } finally {
         this.jobWriteBusy = false
       }
     },
 
     /**
-     * 手动重写某条记录（运行历史右上「写入导图」）。
+     * 刷新后自动补写的调度：导图/协同还没就绪时要等 —— 每 2 秒试一次，最多 ~20 秒。
+     * 判据放在 autoRepairUnwrittenRuns 里（探针要能问到图上结构才算就绪）。
+     */
+    scheduleAutoRepair(tries = 10) {
+      if (this.autoRepairTimer) clearTimeout(this.autoRepairTimer)
+      const tick = async left => {
+        if (this._isDestroyed) return
+        // 没跑完的记录 / 没落点的记录 → 没事可做，别定时器一直挂着
+        const rows = readRunRecords()
+        const todo = rows.filter(
+          rec =>
+            rec &&
+            rec.nodeUid &&
+            rec.state === 'done' &&
+            (!rec.source || rec.source === 'local') &&
+            Number(rec.repairAttempts || 0) < 3
+        )
+        if (!todo.length) return
+        const done = await this.autoRepairUnwrittenRuns()
+        if (done) return
+        if (left <= 0) return
+        this.autoRepairTimer = setTimeout(() => tick(left - 1), 2000)
+      }
+      this.autoRepairTimer = setTimeout(() => tick(tries), 1500)
+    },
+
+    /**
+     * 查「某条运行的结果在不在图上」。走 Edit.vue 的 mindMap（Toolbar 自己不持有）。
+     * 返回 { ok, exists, hasTaskContent, hasAttach, hasFullOutput, artifactNames }
+     */
+    probeJobResult(nodeUid) {
+      const uid = String(nodeUid || '').trim()
+      if (!uid) return Promise.resolve({ ok: false, exists: false })
+      const box = { ok: false }
+      this.$bus.$emit('probe_job_result', { result: box, nodeUid: uid })
+      if (box && typeof box.then === 'function') return box
+      // Edit.vue 是同步回填（没有 promise）：直接用它填好的结果
+      return Promise.resolve(box)
+    },
+
+    /**
+     * 把一条**运行记录**写回导图 —— 手动「写入导图」和刷新后的自动补写共用这一段
+     * （2026-10-09 用户要求：自动补写要「把运行记录的写入导图逻辑接过来」）。
+     *
+     * 产物不放在记录里（太大），而是按记录里的 runDir **回 output/<runDir>/ 重新捞**
+     * ——所以刷新之后照样能连附件一起补回来。
+     *
+     * @returns {Promise<Boolean>} 有没有真的写（false = 没内容可写）
+     */
+    async writeRunRecordToMap(record, { silent = false } = {}) {
+      if (!record || !record.id) return false
+      const markdown =
+        (await this.fetchJobText(record.id)) || record.result || this.jobFullText || ''
+      if (!String(markdown || '').trim()) return false
+      // 助理那条的产物在 output/<runDir>/ 里，刷新后照样能按目录重新捞回来
+      let artifacts = null
+      if ((record.channel || '') === RUN_CHANNEL_OPENCLAW && record.runDir) {
+        artifacts = await this.fetchOpenclawArtifacts(0, record.runDir)
+        if (!artifacts.length) artifacts = null
+      }
+      const options = { force: true, markdown }
+      const targetUid = String(record.nodeUid || '').trim()
+      if (targetUid) options.nodeUid = targetUid
+      if (artifacts) {
+        options.artifacts = artifacts
+        options.channel = RUN_CHANNEL_OPENCLAW
+      }
+      if (silent) {
+        // 自动补写不要刷屏：只把结论写进记录，页面上安静一点
+        options.silent = true
+      }
+      await this.writeJobResultToNode(record, options)
+      // ⚠️ 只更新**已经在本页面日志里**的那条：桥接的任务记录不在本地日志里，
+      // 给它 patch 会凭空造一条「本地运行记录」出来，污染运行历史（合并时多出一条）
+      if (readRunRecords().some(rec => rec && rec.id === record.id)) {
+        patchRunRecord(record.id, {
+          writtenAt: Date.now(),
+          synced: !this.jobWriteError,
+          syncTip: this.jobWriteError || ''
+        })
+      }
+      return true
+    },
+
+    /**
+     * 刷新页面后：把「没挂到节点上」的运行结果自动补写回去。
+     *
+     * 2026-10-09 用户要求：「在识别到任务内容没挂在节点、并且运行完成的时候，刷新页面就是
+     * 把运行记录的写入导图逻辑接过来重新写上」。判据用**图上的真实结构**（probeJobResult：
+     * 任务容器在不在 / 有没有「任务内容：」/「附件」/「完整输出.md」），不靠记录里的标志 ——
+     * 因为写回被协同吃掉时，本地记录还是「已完成」的样子。
+     *
+     * 护栏：只在跑完的记录上做；有房间且只读就跳过；一条最多补 3 次；串行、每条只写一次；
+     * 补过的记录落 `autoRepairedAt`，避免每次刷新重写。
+     */
+    async autoRepairUnwrittenRuns() {
+      if (this.autoRepairRunning) return 0
+      const rows = readRunRecords().filter(rec => {
+        if (!rec || !rec.id || !rec.nodeUid) return false
+        if (rec.source && rec.source !== 'local') return false
+        if (rec.state !== 'done') return false
+        if (!String(rec.result || '').trim() && !rec.runDir) return false
+        if (Number(rec.repairAttempts || 0) >= 3) return false
+        return true
+      })
+      if (!rows.length) return 0
+      if (this.isReadonly) {
+        // 只读房间补不了，也不能偷偷改：把原因挂到记录上，等有权限时手动补
+        rows.forEach(rec =>
+          patchRunRecord(rec.id, {
+            synced: false,
+            syncTip: '这个房间当前是只读的，没能自动补写 —— 有编辑权限后点「写入导图」补一次'
+          })
+        )
+        return 0
+      }
+      // 等协同把手上的活干完再动（不然补了也会被整树恢复盖掉）
+      await this.waitCollabIdle(8000)
+      this.autoRepairRunning = true
+      let repaired = 0
+      try {
+        for (const rec of rows) {
+          let info = null
+          try {
+            info = await this.probeJobResult(rec.nodeUid)
+          } catch (err) {
+            info = null
+          }
+          if (!info || info.ok === false) continue
+          // 图上已经写过了 → 不用补：
+          //   新结构看「完整输出.md」，老结构看「运行输出」那一层
+          // （老记录不能当成「没写」，否则会自动补出第二份）
+          if (info.exists && (info.hasFullOutput || info.hasLegacyOutput)) {
+            patchRunRecord(rec.id, { verifiedAt: Date.now() })
+            continue
+          }
+          patchRunRecord(rec.id, {
+            repairAttempts: Number(rec.repairAttempts || 0) + 1
+          })
+          const done = await this.writeRunRecordToMap(rec, { silent: true })
+          if (done && !this.jobWriteError) {
+            repaired += 1
+            patchRunRecord(rec.id, {
+              autoRepairedAt: Date.now(),
+              repairAttempts: 0,
+              synced: true,
+              syncTip: ''
+            })
+          }
+        }
+      } finally {
+        this.autoRepairRunning = false
+      }
+      if (repaired) {
+        this.$message.info(
+          `检测到 ${repaired} 条运行结果没写进导图，已自动补上（不用再手动点「写入导图」）`
+        )
+        this.jobWriteState = `已自动补写 ${repaired} 条运行结果`
+      }
+      return repaired
+    },
+
+    /** 手动重写某条记录（运行历史右上「写入导图」）。
      * 落点用**当前选中的节点** —— 上次派发的落点早过期了，拿它会把内容写错地方；
      * 所以也顺带修「附件没挂上」的老记录：选中那条记录原本的节点，再点这里重写即可。
      */
@@ -2645,21 +2834,13 @@ export default {
         this.$message.warning('先在图上选中要写入的那个节点，再点「写入导图」')
         return
       }
-      const markdown = (await this.fetchJobText(item.id)) || this.jobFullText
-      // 助理那条的产物在 output/<runDir>/ 里，刷新后照样能按目录重新捞回来 ——
-      // 不然「补写」只能补正文，附件还是缺（2026-10-08 用户反馈产物/挂载问题）
-      let artifacts = null
-      if ((item.channel || '') === RUN_CHANNEL_OPENCLAW && item.runDir) {
-        artifacts = await this.fetchOpenclawArtifacts(0, item.runDir)
-        if (!artifacts.length) artifacts = null
+      // 和「刷新后自动补写」共用同一段（writeRunRecordToMap）——
+      // 手动/自动两条路的行为从此不会各写各的
+      const done = await this.writeRunRecordToMap(item)
+      if (!done) {
+        this.$message.warning('这条记录里没有可写的内容')
+        return
       }
-      const options = { force: true, markdown }
-      if (targetUid) options.nodeUid = targetUid
-      if (artifacts) {
-        options.artifacts = artifacts
-        options.channel = RUN_CHANNEL_OPENCLAW
-      }
-      await this.writeJobResultToNode(item, options)
       if (this.jobWriteError) this.$message.error(this.jobWriteError)
       else if (this.jobWriteState) this.$message.success(this.jobWriteState)
     },

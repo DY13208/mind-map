@@ -2143,6 +2143,172 @@ async function main() {
     ''
   )
 
+  // ---- 33. 刷新后：结果没挂在节点上的，自动补写回去 ----
+  // 用户 2026-10-09：「在识别到任务内容没挂在节点并且运行完成的时候，刷新页面就是把
+  // 运行记录的写入导图逻辑接过来重新写上」。判据用**图上的真实结构**（走 probe_job_result
+  // 探针），不靠记录里的标志 —— 写回被协同吃掉时，本地记录照样是「已完成」的样子。
+  console.log('--- 刷新后自动补写 ---')
+  runLogUtil.clearRunRecords()
+  localStore.clear()
+  vm = makeVm()
+  vm.fetchJobText = async () => ''
+  let autoWrites = 0
+  vm.writeJobResultToNode = async () => {
+    autoWrites += 1
+  }
+  // 图上什么都没有 → 该补
+  vm.probeJobResult = async () => ({
+    ok: true,
+    exists: false,
+    hasTaskContent: false,
+    hasAttach: false,
+    hasFullOutput: false
+  })
+  runLogUtil.saveRunRecord({
+    id: 'rep-1',
+    channel: 'openclaw',
+    state: 'done',
+    nodeUid: 'u-rep-1',
+    result: '这是那次的正文',
+    runDir: '20261009-0900'
+  })
+  vm.messages.length = 0
+  const n1 = await vm.autoRepairUnwrittenRuns()
+  check('结果没在图上 → 自动补写一条', n1 === 1 && autoWrites === 1, `${n1} / ${autoWrites}`)
+  check(
+    '补完在记录上留痕（免得每次刷新重写）',
+    (() => {
+      const rec = runLogUtil.readRunRecords().find(r => r.id === 'rep-1')
+      return !!rec.autoRepairedAt && rec.synced === true && rec.repairAttempts === 0
+    })(),
+    JSON.stringify(runLogUtil.readRunRecords().find(r => r.id === 'rep-1') || {})
+  )
+  check(
+    '补完给一条提示（不是闷着改）',
+    vm.messages.some(([k, m]) => k === 'info' && /已自动补上/.test(m)),
+    JSON.stringify(vm.messages)
+  )
+
+  // 图上已经有了 → 不补
+  runLogUtil.clearRunRecords()
+  vm = makeVm()
+  autoWrites = 0
+  vm.fetchJobText = async () => ''
+  vm.writeJobResultToNode = async () => {
+    autoWrites += 1
+  }
+  vm.probeJobResult = async () => ({
+    ok: true,
+    exists: true,
+    hasTaskContent: true,
+    hasAttach: true,
+    hasFullOutput: true
+  })
+  runLogUtil.saveRunRecord({
+    id: 'rep-2',
+    channel: 'openclaw',
+    state: 'done',
+    nodeUid: 'u-rep-2',
+    result: '正文'
+  })
+  const n2 = await vm.autoRepairUnwrittenRuns()
+  check(
+    '图上已经有完整结果 → 不重复写（只记一次核对）',
+    n2 === 0 && autoWrites === 0 && !!runLogUtil.readRunRecords().find(r => r.id === 'rep-2').verifiedAt,
+    `${n2} / ${autoWrites}`
+  )
+
+  // 只落了一半（有附件没有完整输出）→ 该补
+  runLogUtil.clearRunRecords()
+  vm = makeVm()
+  autoWrites = 0
+  vm.fetchJobText = async () => ''
+  vm.writeJobResultToNode = async () => {
+    autoWrites += 1
+  }
+  vm.probeJobResult = async () => ({
+    ok: true,
+    exists: true,
+    hasTaskContent: true,
+    hasAttach: true,
+    hasFullOutput: false
+  })
+  runLogUtil.saveRunRecord({
+    id: 'rep-3',
+    channel: 'openclaw',
+    state: 'done',
+    nodeUid: 'u-rep-3',
+    result: '正文'
+  })
+  check('只落了一半也要补', (await vm.autoRepairUnwrittenRuns()) === 1 && autoWrites === 1, String(autoWrites))
+
+  // 老结构（结果铺在「运行输出」里）→ 已经写过，别补第二份
+  runLogUtil.clearRunRecords()
+  vm = makeVm()
+  autoWrites = 0
+  vm.fetchJobText = async () => ''
+  vm.writeJobResultToNode = async () => {
+    autoWrites += 1
+  }
+  vm.probeJobResult = async () => ({
+    ok: true,
+    exists: true,
+    hasTaskContent: true,
+    hasAttach: false,
+    hasFullOutput: false,
+    hasLegacyOutput: true
+  })
+  runLogUtil.saveRunRecord({
+    id: 'rep-old',
+    channel: 'openclaw',
+    state: 'done',
+    nodeUid: 'u-old',
+    result: '正文'
+  })
+  check(
+    '老结构记录不补第二份（认「运行输出」那层）',
+    (await vm.autoRepairUnwrittenRuns()) === 0 && autoWrites === 0,
+    String(autoWrites)
+  )
+
+  // 没跑完 / 补过 3 次 / 只读房间 → 都不动
+  runLogUtil.clearRunRecords()
+  vm = makeVm()
+  autoWrites = 0
+  vm.fetchJobText = async () => ''
+  vm.writeJobResultToNode = async () => {
+    autoWrites += 1
+  }
+  vm.probeJobResult = async () => ({ ok: true, exists: false })
+  runLogUtil.saveRunRecord({ id: 'rep-run', channel: 'openclaw', state: 'working', nodeUid: 'u-a', result: 'x' })
+  runLogUtil.saveRunRecord({
+    id: 'rep-4',
+    channel: 'openclaw',
+    state: 'done',
+    nodeUid: 'u-b',
+    result: 'x',
+    repairAttempts: 3
+  })
+  check('还在跑的 / 补过 3 次的 → 都不动', (await vm.autoRepairUnwrittenRuns()) === 0 && autoWrites === 0, String(autoWrites))
+
+  vm = makeVm()
+  vm.isReadonly = true
+  autoWrites = 0
+  vm.writeJobResultToNode = async () => {
+    autoWrites += 1
+  }
+  runLogUtil.clearRunRecords()
+  runLogUtil.saveRunRecord({ id: 'rep-ro', channel: 'openclaw', state: 'done', nodeUid: 'u-c', result: 'x' })
+  check(
+    '只读房间不偷偷写，但把原因留在记录上',
+    (await vm.autoRepairUnwrittenRuns()) === 0 &&
+      autoWrites === 0 &&
+      /只读/.test(runLogUtil.readRunRecords().find(r => r.id === 'rep-ro').syncTip || ''),
+    runLogUtil.readRunRecords().find(r => r.id === 'rep-ro').syncTip
+  )
+  runLogUtil.clearRunRecords()
+  localStore.clear()
+
   const failed = results.filter(r => !r.ok)
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`)
   if (failed.length) {

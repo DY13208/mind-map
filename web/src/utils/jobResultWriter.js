@@ -1061,6 +1061,54 @@ export async function createJobContainer({
 }
 
 /**
+ * 查「这次运行的结果到底在不在图上」—— 刷新页面后自动补写靠它做判据
+ * （2026-10-09 用户要求：「识别到任务内容没挂在节点、并且运行完成」时，
+ * 刷新后自动把运行记录的那套「写入导图」接过来重写一遍）。
+ *
+ * 只认**节点上真实存在的结构**：任务容器在不在、有没有「任务内容：」、
+ * 「附件」分支、产物节点、「完整输出.md」。查不到就说明这次写回没落地
+ * （或只落了一部分），该补写。
+ *
+ * @returns {{ok:Boolean, exists:Boolean, title:String, hasTaskContent:Boolean,
+ *            hasAttach:Boolean, hasFullOutput:Boolean, artifactNames:Array<String>}}
+ */
+export function inspectJobResult({ mindMap, nodeUid: targetUid } = {}) {
+  const renderer = mindMap && mindMap.renderer
+  const uid = String(targetUid || '').trim()
+  const empty = {
+    ok: true,
+    exists: false,
+    title: '',
+    hasTaskContent: false,
+    hasAttach: false,
+    hasFullOutput: false,
+    artifactNames: []
+  }
+  if (!uid || !renderer || typeof renderer.findNodeByUid !== 'function') {
+    return { ...empty, ok: false }
+  }
+  const node = renderer.findNodeByUid(uid)
+  if (!node) return empty
+  const kids = (node.children || []) || []
+  const branch = findAttachBranch(node)
+  const branchKids = (branch && branch.children) || []
+  const names = branchKids.map(child => nodeText(child)).filter(Boolean)
+  const kidTexts = kids.map(child => nodeText(child).trim())
+  return {
+    ok: true,
+    exists: true,
+    title: String(node.getData('text') || ''),
+    hasTaskContent: kidTexts.some(text => /^任务内容[:：]/.test(text)),
+    hasAttach: !!branch,
+    hasFullOutput: !!branchKids.find(child => /完整输出/.test(nodeText(child))),
+    // 老结构：结果铺在「运行输出」这一层里（那时附件挂在它下面）——
+    // 已经写过的老记录不能当成「没写」，否则自动补写会给他补出第二份
+    hasLegacyOutput: kidTexts.some(text => /^运行输出/.test(text)),
+    artifactNames: names.filter(name => !/完整输出/.test(name))
+  }
+}
+
+/**
  * @param {Object}   payload
  * @param {Object}   payload.mindMap    simple-mind-map 实例（Edit.vue 持有）
  * @param {String}   payload.nodeUid    落点：运行节点，或这次运行的任务容器
