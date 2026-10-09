@@ -48,6 +48,6 @@ test('mouse gestures drag and pin nodes, pan, zoom and preserve article clicks w
   await page.mouse.click(screen.x, screen.y);
   await page.waitForFunction(() => panel.classList.contains('open'));
   assert.equal(await page.locator('#panelTitle').textContent(), '主题正文');
-  assert.equal(await page.locator('#graphControls, #resetView').count(), 0);
+  assert.equal(await page.locator('#graphControls, #resetView, #legend, .hud-legend').count(), 0);
   assert.deepEqual(errors, []);
 });
