@@ -116,6 +116,7 @@ const server = http.createServer(async (request, response) => {
       pathname.startsWith('/api/') &&
       pathname !== '/api/health' &&
       pathname !== '/api/knowledge/wiki-page-saved' &&
+      !pathname.startsWith('/api/wiki-compiler/') &&
       !(tusRequest && request.method === 'OPTIONS')
     ) {
       const authenticated = await requireAuthenticatedRequest(request, response)
@@ -134,7 +135,8 @@ const server = http.createServer(async (request, response) => {
     }
     if (pathname.startsWith('/api/node-shares')) applyCorsHeaders(request, response)
     if (await require('./nodeShares').handleNodeShareApi(request, response, pathname)) return
-    if (await require('./knowledge').handleApi(request, response, pathname)) return
+    if (await require('./wikiCompiler/api').handleApi(request, response, pathname)) return
+    if (pathname.startsWith('/api/knowledge/') && await require('./knowledge').handleApi(request, response, pathname)) return
     const handled = await handleApi(request, response)
     if (handled) return
   } catch (err) {
@@ -331,8 +333,14 @@ Promise.all([initSchema(), initAuth()])
       )
     }
     const { startOperationsArchiver } = require('./storage')
-    await require('./knowledge').start({ pool: getPool(), operationEvents, bus }).catch(err => {
+    await Promise.resolve().then(() => {
+      if (/^(true|1|yes|on)$/i.test(String(process.env.KNOWLEDGE_COMPILER_ENABLED || 'false')))
+        return require('./knowledge').start({ pool: getPool(), operationEvents, bus })
+    }).catch(err => {
       console.error('[KnowledgeCompiler] startup failed (collaboration continues):', err.message)
+    })
+    await require('./wikiCompiler').start({ pool: getPool(), operationEvents, bus }).catch(err => {
+      console.error('[WikiCompiler] startup failed (collaboration continues):', err.message)
     })
     startOperationsArchiver()
     const v2 = attachCollabV2(server, {

@@ -5,22 +5,9 @@ const { verifyToken, extractBearer } = require('./auth/jwt');
 const { writeAudit } = require('./audit/log');
 const { getPool } = require('./acl/rooms');
 const { canonicalList, canonicalRead } = require('./adapters/canonical');
-const { docmostSearch, docmostGet } = require('./adapters/docmost');
 const { openwikiSearch, openwikiRead, openwikiStatus } = require('./adapters/openwiki');
-const { docmostAiGet, docmostAiUpsert } = require('./adapters/docmostAi');
-const {
-  wikiSpaces,
-  wikiSearch,
-  wikiTree,
-  wikiRead,
-  wikiCreate,
-  wikiUpdate,
-} = require('./adapters/wiki');
-const {
-  openwikiRefresh,
-  openwikiRefreshStatus,
-  openwikiRetryPublish,
-} = require('./adapters/openwikiRefresh');
+
+
 const { createRateLimiter, payloadLimits } = require('./security/rateLimit');
 const { breakers } = require('./security/resilience');
 const jobStore = require('./jobs/jobStore');
@@ -56,7 +43,8 @@ const TOOLS = [
   { name: 'wiki_read', description: 'Read one Wiki page body (markdown, html, or raw ProseMirror json); Docmost enforces view permission.', inputSchema: { type: 'object', properties: { pageId: { type: 'string' }, format: { type: 'string', enum: ['markdown', 'html', 'json'] } }, required: ['pageId'] } },
   { name: 'wiki_create', description: 'Create a Wiki page (markdown by default); Docmost enforces create/edit permission for the calling account.', inputSchema: { type: 'object', properties: { spaceId: { type: 'string' }, title: { type: 'string' }, content: { type: 'string' }, parentPageId: { type: 'string' }, format: { type: 'string', enum: ['markdown', 'html', 'json'] } }, required: ['spaceId'] } },
   { name: 'wiki_update', description: 'Update a Wiki page title and/or body; Docmost enforces edit permission. operation=replace|append|prepend when content is set.', inputSchema: { type: 'object', properties: { pageId: { type: 'string' }, title: { type: 'string' }, content: { type: 'string' }, format: { type: 'string', enum: ['markdown', 'html', 'json'] }, operation: { type: 'string', enum: ['replace', 'append', 'prepend'] } }, required: ['pageId'] } },
-];
+].filter(tool => !/^(false|0|off|no)$/i.test(String(process.env.KNOWLEDGE_DOCMOST_TOOLS_ENABLED || 'true')) ||
+  (!tool.name.startsWith('docmost_') && (!tool.name.startsWith('wiki_') || tool.name.startsWith('wiki_compiler_')) && tool.name !== 'openwiki_retry_publish'));
 
 function sendJson(res, status, body) {
   const data = JSON.stringify(body);
@@ -167,22 +155,22 @@ async function callTool(userId, name, args) {
     case 'wiki_compiler_concept': return wikiCompilerCall(userId, 'concept', args || {});
     case 'canonical_list': return canonicalList(userId, args || {});
     case 'canonical_read': return canonicalRead(userId, { roomId: args.roomId, path: args.path });
-    case 'docmost_search': return docmostSearch(userId, args || {});
-    case 'docmost_get': return docmostGet(userId, args || {});
-    case 'docmost_ai_get': return docmostAiGet(userId, args || {});
-    case 'docmost_ai_upsert': return docmostAiUpsert(userId, args || {});
+    case 'docmost_search': return require('./adapters/docmost').docmostSearch(userId, args || {});
+    case 'docmost_get': return require('./adapters/docmost').docmostGet(userId, args || {});
+    case 'docmost_ai_get': return require('./adapters/docmostAi').docmostAiGet(userId, args || {});
+    case 'docmost_ai_upsert': return require('./adapters/docmostAi').docmostAiUpsert(userId, args || {});
     case 'openwiki_search': return openwikiSearch(userId, args || {});
     case 'openwiki_read': return openwikiRead(userId, { roomId: args.roomId, path: args.path });
     case 'openwiki_status': return openwikiStatus(userId, args || {});
-    case 'openwiki_refresh': return openwikiRefresh(userId, args || {});
-    case 'openwiki_refresh_status': return openwikiRefreshStatus(userId, args || {});
-    case 'openwiki_retry_publish': return openwikiRetryPublish(userId, args || {});
-    case 'wiki_spaces': return wikiSpaces(userId);
-    case 'wiki_search': return wikiSearch(userId, args || {});
-    case 'wiki_tree': return wikiTree(userId, args || {});
-    case 'wiki_read': return wikiRead(userId, args || {});
-    case 'wiki_create': return wikiCreate(userId, args || {});
-    case 'wiki_update': return wikiUpdate(userId, args || {});
+    case 'openwiki_refresh': return require('./adapters/openwikiRefresh').openwikiRefresh(userId, args || {});
+    case 'openwiki_refresh_status': return require('./adapters/openwikiRefresh').openwikiRefreshStatus(userId, args || {});
+    case 'openwiki_retry_publish': return require('./adapters/openwikiRefresh').openwikiRetryPublish(userId, args || {});
+    case 'wiki_spaces': return require('./adapters/wiki').wikiSpaces(userId);
+    case 'wiki_search': return require('./adapters/wiki').wikiSearch(userId, args || {});
+    case 'wiki_tree': return require('./adapters/wiki').wikiTree(userId, args || {});
+    case 'wiki_read': return require('./adapters/wiki').wikiRead(userId, args || {});
+    case 'wiki_create': return require('./adapters/wiki').wikiCreate(userId, args || {});
+    case 'wiki_update': return require('./adapters/wiki').wikiUpdate(userId, args || {});
     default: {
       const e = new Error('unknown_tool');
       e.code = 'unknown_tool';

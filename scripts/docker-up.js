@@ -41,6 +41,7 @@ function loadRootEnv() {
 }
 
 loadRootEnv()
+require('./wiki-compiler-env').ensureCompilerEnv(ROOT)
 
 const PORT = Number(process.env.MIND_MAP_PORT || 8080)
 
@@ -431,6 +432,7 @@ function listKnowledgeMcpSourceFiles() {
     }
   }
   walk(rootDir)
+  out.push(path.join(ROOT, 'simple-mind-map/bin/wikiCompiler/access.js'))
   // Also rebuild when compose service definition changes
   const composeFile = path.join(ROOT, 'docker-compose.yml')
   if (fs.existsSync(composeFile)) out.push(composeFile)

@@ -40,7 +40,7 @@ test('Wiki scope reports wiki_not_configured without making a network request', 
 test('Wiki scope forwards business/demo mode and preserves provenance, stable identity and field coverage', async () => {
   const requests = []
   const providers = createCheckProviders({
-    env: { CPD_WIKI_API_URL: 'http://wiki.test' },
+    env: { CPD_WIKI_API_URL: 'http://wiki.test', WIKI_COMPILER_INTERNAL_SECRET: 'test-independent-secret-'.repeat(3) },
     fetchImpl: async (url, options) => {
       requests.push({ url, body: JSON.parse(options.body) })
       return new Response(JSON.stringify({ query: '会员成交 频率', results: [{

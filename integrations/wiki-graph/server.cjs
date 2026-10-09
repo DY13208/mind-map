@@ -328,7 +328,8 @@ function displayHeading(heading) {
   return String(heading || '').replace(/\s*\[coverage:[^\]]*\]\s*$/i, '').trim();
 }
 
-function loadCurrentWiki(dir) {
+function loadCurrentWiki(dir, allowedRooms) {
+  if (allowedRooms) return loadRoomWiki(dir, allowedRooms);
   const state = readJson(path.join(dir, '.compile-state.json')) || {};
   const source = state.source && typeof state.source === 'object' ? state.source : {};
   const indexPath = path.join(dir, 'INDEX.md');
@@ -501,7 +502,7 @@ function clampTopK(value) {
 function searchWiki(dir, options) {
   const query = String(options.query || '');
   const mode = options.mode === 'demo' ? 'demo' : 'business';
-  const wiki = loadCurrentWiki(dir);
+  const wiki = loadCurrentWiki(dir, options.allowedRooms);
   const tokens = tokenize(query, knownPhrases(wiki));
   const lexical = [];
   for (const topic of wiki.topics) {
@@ -531,10 +532,12 @@ function searchWiki(dir, options) {
   const top = lexical.slice(0, clampTopK(options.top_k));
   return {
     query,
+    version: wiki.version,
     results: top.map(item => ({
-      chunk_id: item.topic.name + '::' + item.section.heading + '::' + item.section.startLine,
+      chunk_id: (item.topic.roomId ? item.topic.slug : item.topic.name) + '::' + item.section.heading + '::' + item.section.startLine,
       score: item.score,
-      topic: item.topic.name,
+      topic: item.topic.roomId ? item.topic.slug : item.topic.name,
+      topic_title: item.topic.name,
       section: item.section.heading,
       content: item.section.content,
       matched_terms: item.matchedTerms,
@@ -554,7 +557,7 @@ function handleSearch(dir, body) {
   if (body.mode != null && !['business', 'demo'].includes(String(body.mode))) {
     return { status: 400, body: { error: 'mode must be business or demo' } };
   }
-  return { status: 200, body: searchWiki(dir, { query, top_k: body.top_k, mode: body.mode }) };
+  return { status: 200, body: searchWiki(dir, { query, top_k: body.top_k, mode: body.mode, allowedRooms: body.allowedRooms }) };
 }
 
 function readRequestBody(req) {
@@ -566,80 +569,96 @@ function readRequestBody(req) {
   });
 }
 
-const server = http.createServer((req, res) => {
-  const url = new URL(req.url, `http://localhost:${PORT}`);
-
-  // CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-
-  if (req.method === 'POST' && url.pathname === '/api/search') {
-    readRequestBody(req).then(raw => {
-      let body = {};
-      try {
-        body = raw ? JSON.parse(raw) : {};
-      } catch (error) {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ error: 'query is required' }));
-        return;
-      }
-      const query = body.query == null ? '' : String(body.query).trim();
-      if (!query) {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ error: 'query is required' }));
-        return;
-      }
-      const result = handleSearch(wikiDir, { query, top_k: body.top_k, mode: body.mode });
-      res.writeHead(result.status, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify(result.body));
-    }).catch(() => {
-      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ error: 'query is required' }));
-    });
-    return;
+function roomBundles(dir, allowedRooms) {
+  const bundles = [];
+  for (const roomId of [...allowedRooms].sort()) {
+    if (!/^[a-zA-Z0-9_-][a-zA-Z0-9._-]{0,119}$/.test(roomId)) continue;
+    const roomDir = path.join(dir, 'rooms', roomId);
+    const pointer = readJson(path.join(roomDir, 'current.json'));
+    if (!pointer || !/^[a-f0-9-]{36}$/.test(pointer.generation)) continue;
+    const bundle = readJson(path.join(roomDir, 'generations', pointer.generation, 'bundle.json'));
+    if (!bundle || bundle.roomId !== roomId || bundle.sourceHash !== pointer.sourceHash || !Array.isArray(bundle.topics)) continue;
+    bundles.push(bundle);
   }
-  if (url.pathname === '/api/graph') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(loadGraph()));
-  } else if (url.pathname.startsWith('/api/topic/')) {
-    const slug = safeDecode(url.pathname.split('/api/topic/')[1]);
-    const article = loadTopicArticle(wikiDir, slug);
-    if (article) {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(article));
-    } else {
-      res.writeHead(404);
-      res.end('Not found');
-    }
-  } else if (url.pathname.startsWith('/api/concept/')) {
-    const slug = safeDecode(url.pathname.split('/api/concept/')[1]);
-    const article = loadArticle('concept', slug);
-    if (article) {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(article));
-    } else {
-      res.writeHead(404);
-      res.end('Not found');
-    }
-  } else if (url.pathname === '/' || url.pathname === '/index.html') {
-    const htmlPath = path.join(__dirname, 'index.html');
-    if (fs.existsSync(htmlPath)) {
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(fs.readFileSync(htmlPath, 'utf8'));
-    } else {
-      res.writeHead(404);
-      res.end('index.html not found');
-    }
-  } else {
-    res.writeHead(404);
-    res.end('Not found');
+  return bundles;
+}
+function roomArticle(topic) {
+  const body = topic.markdown.replace(/^# [^\n]*\n?/, '').trim();
+  const markdown = '# ' + topic.title + '\n\n## 内容\n\n' + body;
+  const sections = parseSections(markdown);
+  const provenance = { origin: 'business', sourceTitle: topic.roomTitle, sourceId: topic.roomId,
+    roomId: topic.roomId, nodeUid: topic.nodeUid, sourceVersion: topic.version,
+    sourceRevision: topic.sourceRevision, contentHash: topic.contentHash, publishedAt: topic.publishedAt };
+  return { slug: topic.slug, title: topic.roomTitle + ' / ' + topic.title,
+    meta: { topic: topic.slug, room_id: topic.roomId, node_uid: topic.nodeUid, status: 'active',
+      source_count: 1, last_compiled: topic.publishedAt }, sections, provenance, markdown };
+}
+function loadRoomWiki(dir, allowedRooms) {
+  const bundles = roomBundles(dir, allowedRooms);
+  const topics = [];
+  for (const bundle of bundles) for (const topic of bundle.topics) {
+    const article = roomArticle(topic);
+    let startLine = 1;
+    topics.push({ name: article.title, slug: topic.slug, roomId: topic.roomId,
+      parentUid: topic.parentUid, nodeUid: topic.nodeUid, provenance: article.provenance,
+      sections: article.sections.map(section => ({ ...section, startLine: startLine++ })),
+      sources: [article.title] });
   }
-});
-
-if (require.main === module) {
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`📊 Wiki Knowledge Graph running at http://localhost:${PORT}`);
-    console.log(`   Topics: ${loadGraph().topics.length} | Concepts: ${loadGraph().concepts.length}`);
+  return { version: require('node:crypto').createHash('sha256').update(JSON.stringify(bundles.map(b => [b.roomId, b.sourceHash]))).digest('hex'), topics, concepts: [], edges: [] };
+}
+function roomGraph(dir, allowedRooms) {
+  const wiki = loadRoomWiki(dir, allowedRooms);
+  const topics = wiki.topics.map(t => ({ slug: t.slug, name: t.name, aliases: '', sourceCount: 1,
+    lastUpdated: t.provenance.publishedAt, status: 'active', roomId: t.roomId, nodeUid: t.nodeUid, provenance: t.provenance }));
+  const byNode = new Map(wiki.topics.map(t => [t.roomId + ':' + t.nodeUid, t.slug]));
+  const edges = wiki.topics.filter(t => t.parentUid && byNode.has(t.roomId + ':' + t.parentUid))
+    .map(t => ({ from: byNode.get(t.roomId + ':' + t.parentUid), to: t.slug, type: 'structure', concept: null }));
+  return { name: '脑图知识库', version: wiki.version, totalTopics: topics.length, totalSources: allowedRooms.size, topics, concepts: [], edges };
+}
+function createWikiServer({ dir, pool, env = process.env }) {
+  const { verifyIdentity, readableRooms } = require('../../simple-mind-map/bin/wikiCompiler/access');
+  return http.createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://localhost');
+    const json = (status, value) => {
+      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(value));
+    };
+    if (url.pathname === '/health') return json(200, { status: 'ok' });
+    if (url.pathname === '/' || url.pathname === '/index.html') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8')); return;
+    }
+    if (!url.pathname.startsWith('/api/')) return json(404, { error: 'not_found' });
+    try {
+      const user = verifyIdentity(req.headers['x-wiki-compiler-identity'], env);
+      const allowedRooms = await readableRooms(pool, user, env);
+      if (url.pathname === '/api/search' && req.method === 'POST') {
+        const raw = await readRequestBody(req);
+        const body = JSON.parse(raw || '{}');
+        const result = handleSearch(dir, { ...body, allowedRooms });
+        return json(result.status, result.body);
+      }
+      if (req.method !== 'GET') return json(405, { error: 'method_not_allowed' });
+      if (url.pathname === '/api/graph') return json(200, roomGraph(dir, allowedRooms));
+      if (url.pathname.startsWith('/api/topic/')) {
+        const slug = safeDecode(url.pathname.slice('/api/topic/'.length));
+        const topic = roomBundles(dir, allowedRooms).flatMap(b => b.topics).find(t => t.slug === slug);
+        return topic ? json(200, roomArticle(topic)) : json(404, { error: 'not_found' });
+      }
+      if (url.pathname.startsWith('/api/concept/')) return json(404, { error: 'not_found' });
+      return json(404, { error: 'not_found' });
+    } catch (error) {
+      const status = error.code === 'unauthorized' ? 401 : error instanceof SyntaxError ? 400 : 503;
+      return json(status, { error: status === 401 ? 'unauthorized' : status === 400 ? 'invalid_json' : 'wiki_compiler_unavailable' });
+    }
   });
 }
-
-module.exports = { searchWiki, tokenize, loadCurrentWiki, handleSearch, wikiProvenance, loadTopicArticle };
+if (require.main === module) {
+  const { Pool } = require('pg');
+  const pool = new Pool({ connectionString: process.env.MIND_MAP_DATABASE_URL || process.env.DATABASE_URL || undefined,
+    connectionTimeoutMillis: 3000, statement_timeout: 5000 });
+  const server = createWikiServer({ dir: wikiDir, pool });
+  server.listen(PORT, '0.0.0.0', () => console.log('Wiki compiler listening on ' + PORT));
+}
+module.exports = { searchWiki, tokenize, loadCurrentWiki, handleSearch, wikiProvenance, loadTopicArticle,
+  createWikiServer, loadRoomWiki, roomGraph, roomBundles };
