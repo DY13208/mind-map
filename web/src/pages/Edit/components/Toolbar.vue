@@ -765,6 +765,12 @@ const WRITE_RETRY_LIMIT = 3
 /** 重试之间等协同多久（等它把 outbox 里的命令发完并拿到 ack） */
 const WRITE_RETRY_COLLAB_WAIT_MS = 6000
 
+/**
+ * 等「我这次插的节点」被服务端确认的上限。
+ * 等的是**自己的节点**（逐 uid），不是客户端队列里所有人共享的积压 —— 见 verifyWritePersisted。
+ */
+const WRITE_ACK_WAIT_MS = 8000
+
 /** 重试之间再退避一下（第 N 次重试等 N×300ms），别刚失败就顶上去 */
 const WRITE_RETRY_BACKOFF_MS = 300
 
@@ -875,6 +881,10 @@ export default {
       // 刷新后自动补写：跑完但结果没挂上节点的记录，正在串行补（避免重入）
       autoRepairRunning: false,
       autoRepairTimer: null,
+      // 本页面已经回洗过「未同步」标记的记录 id（免得每次定时器都重复问一遍）
+      syncMarkChecked: [],
+      // 等「我这次插的节点」被服务端确认的上限（单测里调 0，免得干等）
+      writeAckWaitMs: WRITE_ACK_WAIT_MS,
       jobDispatching: false,
       // 运行通道（用哪条路执行）**不在这里选**了 —— 见右侧栏「设置 → AI 执行引擎」，
       // 点运行直接读设置（utils/runChannel.js 落盘）。
@@ -1489,6 +1499,30 @@ export default {
       return map[code] || `协同服务拒了这条命令（${code}）`
     },
 
+    /**
+     * 协同**真连不上**的原因（'' = 连接没问题）。
+     *
+     * 与 collabBusyReason 的区别：这里只认「离线 / 断线 / 正在重连重同步 / 报错」这类
+     * **硬阻塞** —— 等它恢复才有意义。而「队列里还有 N 条命令没确认」不在其列：
+     * 那是全客户端共享的计数，可能压着别人的历史命令（服务器 outbox 积压过两万多条），
+     * 拿它当「写回没成功」的判据就是 2026-10-09 那次误报的根源。
+     */
+    collabHardBlockReason() {
+      const st = this.collabLiveStatus()
+      const phase = String(st.phase || this.collabPhase || '')
+      const save = String(st.saveState || this.collabSaveState || '')
+      if (phase === 'ERROR' || save === 'error') {
+        return this.collabRejectedReason() || '协同同步报错'
+      }
+      if (phase === 'OFFLINE' || phase === 'DISCONNECTED' || save === 'offline') {
+        return '协同离线'
+      }
+      if (phase === 'RESYNCING' || phase === 'JOINING' || phase === 'CONNECTING') {
+        return `正在同步（${phase}）`
+      }
+      return ''
+    },
+
     /** 等协同把手上的活干完（返回 true = 服务端已经确认完） */
     async waitCollabIdle(deadlineMs = 12000) {
       const deadline = Date.now() + Math.max(0, Number(deadlineMs) || 0)
@@ -1500,31 +1534,119 @@ export default {
     },
 
     /**
+     * 问页面「这些节点被服务端**确认**了吗」（逐 uid 的真实证据，见 Edit.vue 的 onProbeJobAck）。
+     *
+     * @param {Array<String>} uids
+     * @returns {Promise<{hasApi:Boolean, pending:Array<String>, acked:Array<String>|null}>}
+     *          hasApi=false → 拿不到逐 uid 判据（老版本 / 没在用协同），调用方要回退老口径
+     */
+    async probeJobAcks(uids) {
+      const wanted = (uids || []).map(uid => String(uid || '').trim()).filter(Boolean)
+      if (!wanted.length) return { hasApi: false, pending: [], acked: null }
+      const box = { ok: false, hasApi: false, pending: [], acked: null }
+      this.$bus.$emit('probe_job_ack', { result: box, uids: wanted })
+      const res = box && typeof box.then === 'function' ? await box : box
+      return {
+        hasApi: !!(res && res.hasApi),
+        pending: (res && res.pending) || [],
+        acked: (res && res.acked) || null
+      }
+    },
+
+    /**
      * 这次写回**服务器到底收下了没有**（写回的唯一完成判据）。
      *
      * 「本机树里有节点」不算数：协同客户端可能把命令丢在 outbox 里没发出去、
      * 发出去被服务端拒了、或者中途一次**权威快照恢复**把整棵树换回服务器的版本 ——
      * 三种情况下画布上看得见、刷新就没了（2026-10-08 用户反馈）。
      *
-     * @returns {{ok:Boolean, why:String}}
+     * ⚠️ 判据必须是「**我这次插的节点**确认了没有」（2026-10-09 用户反馈
+     * 「重试写入成功显示没成功、刷新后都显示未同步」）：以前用客户端队列的**全局**计数
+     * （还有多少条命令没确认 / outbox 积压），服务器 outbox 长期积压两万多条 →
+     * 每次都判「没同步」，写得好好的也报失败。现在按 uid 逐节点问：
+     *   · 还有我的节点在 pendingUids 里 → 继续等服务端确认（等不到才判不 ok）
+     *   · 我的新节点既不在 pending 也不在 acked → 这条插入根本没提交（被引擎推迟/丢了）→ 不 ok
+     *   · 我的新节点全部 acked → 铁证，直接 ok（不再看队列里别人的东西）
+     *   · 拿不到逐 uid 判据（没在用协同 / 老版本）→ 回退到原来的队列口径
+     *
+     * @param {Object} payload { inserted:[uid], ensured:[uid] } —— 来自写回结果
+     * @returns {{ok:Boolean, why:String, via:String}}
      */
-    async verifyWritePersisted() {
+    async verifyWritePersisted(payload = {}) {
       const before = this.collabLiveStatus()
-      const settled = await this.waitCollabIdle(12000)
+      const inserted = (payload.inserted || []).map(String).filter(Boolean)
+      const ensured = (payload.ensured || []).map(String).filter(Boolean)
+      // 基线：**这次写回开始之前**最近一次错误的时刻（由调用方在写之前取好）
+      // —— 只有「写回开始之后新出现的拒绝」才算这次的失败，老错误不能一直背在身上
+      const lastErrAtBefore = Number(payload.since || 0)
+
+      // ① 按 uid 等服务端确认（这是我的节点，跟队列里别人的积压无关）
+      let ack = null
+      if (inserted.length) {
+        const waitMs =
+          this.writeAckWaitMs != null ? Number(this.writeAckWaitMs) : WRITE_ACK_WAIT_MS
+        const deadline = Date.now() + Math.max(0, waitMs || 0)
+        for (;;) {
+          ack = await this.probeJobAcks([...inserted, ...ensured])
+          if (!ack.hasApi) break
+          const minePending = ack.pending.filter(uid => inserted.indexOf(uid) !== -1)
+          if (!minePending.length) break
+          if (Date.now() >= deadline) break
+          await new Promise(resolve => setTimeout(resolve, 250))
+        }
+      }
+
       const after = this.collabLiveStatus()
       // 写的过程中发生过「权威快照恢复」→ 整棵树被服务器版本替换，本机插的很可能没了
       if (
         Number(after.snapshotRecoveryCount || 0) >
         Number(before.snapshotRecoveryCount || 0)
       ) {
-        return { ok: false, why: '写的过程中房间做过一次整树恢复' }
+        return { ok: false, why: '写的过程中房间做过一次整树恢复', via: 'snapshot' }
       }
+      // 只认**这次写回期间新出现**的拒绝（老错误不能一直背在身上 —— 也是误报源）
+      const errNow = after.lastError || null
+      const errAt = Number((errNow && errNow.timestamp) || 0)
+      if (errNow && errNow.code && errAt > lastErrAtBefore && !errNow.recovered) {
+        return {
+          ok: false,
+          why: this.collabRejectedReason() || `协同服务拒了这条命令（${errNow.code}）`,
+          via: 'rejected'
+        }
+      }
+
+      // ② 有逐 uid 判据 → 就按它下结论
+      if (ack && ack.hasApi) {
+        const stillPending = ack.pending.filter(uid => inserted.indexOf(uid) !== -1)
+        if (stillPending.length) {
+          return {
+            ok: false,
+            why: `还有 ${stillPending.length} 个节点没被服务器确认`,
+            via: 'ack'
+          }
+        }
+        if (ack.acked) {
+          const ackedSet = new Set(ack.acked)
+          const unknown = inserted.filter(uid => !ackedSet.has(uid))
+          if (unknown.length) {
+            return {
+              ok: false,
+              why: `有 ${unknown.length} 个节点没提交到服务器（命令被引擎推迟或丢了）`,
+              via: 'ack'
+            }
+          }
+          return { ok: true, why: '', via: 'ack' }
+        }
+        // 拿不到 acked 那半份证据（老版本只给 pending）：只能说明「我的命令不在队列里了」
+        return { ok: true, why: '', via: 'ack-pending-only' }
+      }
+
+      // ③ 没有逐 uid 判据（不在房间里 / 老版本）→ 回退原来的队列口径
+      const settled = await this.waitCollabIdle(WRITE_ACK_WAIT_MS)
       if (!settled) {
-        return { ok: false, why: this.collabBusyReason() || '协同一直没确认' }
+        return { ok: false, why: this.collabBusyReason() || '协同一直没确认', via: 'queue' }
       }
-      const rejected = this.collabRejectedReason()
-      if (rejected) return { ok: false, why: rejected }
-      return { ok: true, why: '' }
+      return { ok: true, why: '', via: 'queue' }
     },
 
     /**
@@ -1581,8 +1703,15 @@ export default {
         attempt += 1
         error = null
         try {
+          // 记下「写之前」最近一次错误的时刻：只有之后新出现的拒绝才算这次的失败
+          const since =
+            Number((this.collabLiveStatus().lastError || {}).timestamp) || 0
           out = await this.pushJobResultToMap(payload)
-          verify = await this.verifyWritePersisted()
+          verify = await this.verifyWritePersisted({
+            inserted: (out && out.insertedUids) || [],
+            ensured: (out && out.ensuredUids) || [],
+            since
+          })
         } catch (err) {
           error = err
           verify = { ok: false, why: (err && err.message) || '写入导图失败' }
@@ -1594,8 +1723,11 @@ export default {
         const why = error ? error.message || String(error) : `服务器没确认（${verify.why}）`
         this.jobWriteState = `写入没成功（第 ${attempt} 次失败：${why}）—— 正在重试第 ${attempt}/${limit} 次…`
         if (!silent) this.$message.info(`写入没成功，正在自动重试（第 ${attempt}/${limit} 次）…`)
-        // 失败多半是协同没消化完 → 先等它吸收完再写第二遍（顺便退避一下）
-        await this.waitCollabIdle(WRITE_RETRY_COLLAB_WAIT_MS)
+        // 协同真断了/在重连 → 等它回来再写第二遍；只是「有命令在排队」就别干等
+        // （那是队列里别人的东西，等也等不来，见 verifyWritePersisted 的说明）
+        if (this.collabHardBlockReason()) {
+          await this.waitCollabIdle(WRITE_RETRY_COLLAB_WAIT_MS)
+        }
         await new Promise(resolve =>
           setTimeout(resolve, WRITE_RETRY_BACKOFF_MS * attempt)
         )
@@ -2629,9 +2761,13 @@ export default {
       // 现在写下去只活在本机，过一会儿 resync/整树恢复会被服务器上的状态盖掉 ——
       // 白写一遍（2026-10-08 用户反馈「跑完写不回去、强刷就没了」）。
       // 等不到也照写（本机至少看得见），但结尾会明确警告。
-      if (this.collabBusyReason()) {
-        this.jobWriteState = `协同还在同步（${this.collabBusyReason()}），等它吸收完再写…`
-        await this.waitCollabIdle(8000)
+      const hardBlock = this.collabHardBlockReason()
+      if (hardBlock) {
+        // 只等「真连不上 / 在重连」这类硬阻塞；只是队列里有积压就不等了 ——
+        // 那句积压多半是别人/历史的命令（服务器 outbox 积压过两万多条），
+        // 等它等于每次写回白等 8 秒，而且判「有没有同步」本来就不该看它
+        this.jobWriteState = `协同还没连上（${hardBlock}），等它恢复再写…`
+        await this.waitCollabIdle(WRITE_RETRY_COLLAB_WAIT_MS)
       }
       try {
         let artifacts = []
@@ -2773,6 +2909,13 @@ export default {
       if (this.autoRepairTimer) clearTimeout(this.autoRepairTimer)
       const tick = async left => {
         if (this._isDestroyed) return
+        // 先按证据回洗可能误报的「未同步」标记 —— 它跟「要不要补写」是两件事：
+        // 已经写好的记录也要洗（2026-10-09 反馈：刷新后所有记录都显示未同步）
+        try {
+          await this.refreshSyncMarks()
+        } catch (err) {
+          /* 洗不动不影响补写 */
+        }
         // 没跑完的记录 / 没落点的记录 → 没事可做，别定时器一直挂着
         const rows = readRunRecords()
         const todo = rows.filter(
@@ -2851,6 +2994,47 @@ export default {
     },
 
     /**
+     * 洗掉**误报**的「未同步到服务器」标记（2026-10-09 用户反馈：刷新后所有记录都显示未同步）。
+     *
+     * 背景：上一版的完成判据看的是客户端队列的**全局**积压（服务器 outbox 压了两万多条），
+     * 于是写得好好的也被标成 synced=false；而且旧代码只写 verifiedAt、**从不清这个标记**，
+     * 误报就一直挂在运行历史里。这里按证据回洗：
+     *   ① 容器不在服务端待确认队列里（逐 uid 问，拿不到该判据就不动）
+     *   ② 图上确实有这次的结果（附件/完整输出，老结构认「运行输出」）
+     * 两条都成立 → 已落库，标记清掉。每条记录一个页面生命周期里只查一次。
+     */
+    async refreshSyncMarks() {
+      if (!Array.isArray(this.syncMarkChecked)) this.syncMarkChecked = []
+      const rows = readRunRecords().filter(
+        rec =>
+          rec &&
+          rec.id &&
+          rec.nodeUid &&
+          rec.synced === false &&
+          rec.state === 'done' &&
+          this.syncMarkChecked.indexOf(rec.id) === -1
+      )
+      if (!rows.length) return 0
+      let cleared = 0
+      for (const rec of rows) {
+        this.syncMarkChecked.push(rec.id)
+        const ack = await this.probeJobAcks([rec.nodeUid])
+        if (!ack.hasApi || ack.pending.includes(String(rec.nodeUid))) continue
+        let info = null
+        try {
+          info = await this.probeJobResult(rec.nodeUid)
+        } catch (err) {
+          info = null
+        }
+        if (!info || info.ok === false || !info.exists) continue
+        if (!(info.hasFullOutput || info.hasLegacyOutput || info.hasAttach)) continue
+        patchRunRecord(rec.id, { synced: true, syncTip: '', verifiedAt: Date.now() })
+        cleared += 1
+      }
+      return cleared
+    },
+
+    /**
      * 刷新页面后：把「没挂到节点上」的运行结果自动补写回去。
      *
      * 2026-10-09 用户要求：「在识别到任务内容没挂在节点、并且运行完成的时候，刷新页面就是
@@ -2863,6 +3047,12 @@ export default {
      */
     async autoRepairUnwrittenRuns() {
       if (this.autoRepairRunning) return 0
+      // 先回洗误报的「未同步」标记（它跟「要不要补写」是两件事：已写好的记录也要洗）
+      try {
+        await this.refreshSyncMarks()
+      } catch (err) {
+        /* 洗标记失败不影响补写 */
+      }
       const rows = readRunRecords().filter(rec => {
         if (!rec || !rec.id || !rec.nodeUid) return false
         if (rec.source && rec.source !== 'local') return false
@@ -2882,8 +3072,11 @@ export default {
         )
         return 0
       }
-      // 等协同把手上的活干完再动（不然补了也会被整树恢复盖掉）
-      await this.waitCollabIdle(8000)
+      // 只在「协同真连不上/在重连」时等它恢复；只是队列里有积压就不等 ——
+      // 那多半是别人的历史命令（服务器 outbox 积压过两万多条），等它等于每次刷新白等 8 秒
+      if (this.collabHardBlockReason()) {
+        await this.waitCollabIdle(WRITE_RETRY_COLLAB_WAIT_MS)
+      }
       this.autoRepairRunning = true
       let repaired = 0
       try {

@@ -874,11 +874,88 @@ async function main() {
     ''
   )
   check(
+    'Toolbar 发 probe_job_ack 问「我的节点服务端确认了吗」',
+    toolbarSrc.includes("$bus.$emit('probe_job_ack'") &&
+      toolbarSrc.includes('async probeJobAcks('),
+    ''
+  )
+  check(
+    'Edit.vue 注册了 probe_job_ack，并用 ackedUids/pendingUids 给结论',
+    editSrc.includes("$bus.$on('probe_job_ack', this.onProbeJobAck)") &&
+      editSrc.includes('cooperate.isPersistAcked(uid)') &&
+      editSrc.includes('cooperate.pendingUids'),
+    ''
+  )
+  {
+    const verifyBody = toolbarSrc.slice(
+      toolbarSrc.indexOf('async verifyWritePersisted'),
+      toolbarSrc.indexOf('async pushJobResultWithRetry')
+    )
+    check(
+      '判同步按「我这次插的节点」下结论（拿不到逐 uid 判据才回退队列口径）',
+      /probeJobAcks\(/.test(verifyBody) &&
+        /ack\.hasApi/.test(verifyBody) &&
+        /via: 'ack'/.test(verifyBody) &&
+        /via: 'queue'/.test(verifyBody),
+      ''
+    )
+  }
+  check(
     '刷新后会调度自动补写（mounted 里挂了）',
     /this\.scheduleAutoRepair\(\)/.test(toolbarSrc) &&
       /autoRepairUnwrittenRuns/.test(toolbarSrc),
     ''
   )
+
+  // ---- 写回结果要带出「本次牵涉的节点 uid」（给「服务端确认了没有」当判据用）----
+  // 2026-10-09：判同步不能再看客户端队列的全局积压（服务器 outbox 积压两万多条 → 全误报），
+  // 必须逐节点问服务端 —— 那写回就得把 uid 交出来（inserted = 本次新插的，ensured = 写完后应该在的）
+  {
+    const mapU = makeMindMap()
+    const containerU = await writer.createJobContainer({
+      mindMap: mapU,
+      nodeUid: mapU.root.getData('uid'),
+      prompt: '任务内容'
+    })
+    const outU = await writer.writeJobResultToMap({
+      mindMap: mapU,
+      nodeUid: containerU.uid,
+      markdown: MD,
+      roomKey: 'room-test',
+      artifacts: [{ name: 'a.txt', size: 3, mime: 'text/plain', base64: 'YQ==' }]
+    })
+    check(
+      '写回结果带出 insertedUids / ensuredUids 两串 uid',
+      Array.isArray(outU.insertedUids) && Array.isArray(outU.ensuredUids),
+      JSON.stringify({ i: outU.insertedUids, e: outU.ensuredUids })
+    )
+    const kidsU = ((findByText(mapU.root.children || [], '附件 · uid') || {}).children) || null
+    // 容器下就是「附件」分支；找它和它下面的节点
+    const boxU = mapU.root.children.find(
+      item => item.getData('uid') === containerU.uid
+    )
+    const attachU = findByText((boxU && boxU.children) || [], '附件')
+    const mdU = findByText((attachU && attachU.children) || [], '完整输出.md')
+    const fileU = findByText((attachU && attachU.children) || [], 'a.txt')
+    const inserted = outU.insertedUids || []
+    check(
+      '新插的节点（附件分支 / 产物 / 完整输出）都在 insertedUids 里',
+      !!attachU &&
+        !!mdU &&
+        !!fileU &&
+        inserted.indexOf(attachU.getData('uid')) !== -1 &&
+        inserted.indexOf(mdU.getData('uid')) !== -1 &&
+        inserted.indexOf(fileU.getData('uid')) !== -1,
+      JSON.stringify(inserted)
+    )
+    check(
+      'ensuredUids 覆盖容器 + 所有新插的节点',
+      (outU.ensuredUids || []).indexOf(containerU.uid) !== -1 &&
+        inserted.every(uid => outU.ensuredUids.indexOf(uid) !== -1),
+      JSON.stringify(outU.ensuredUids)
+    )
+    void kidsU
+  }
 
   const failed = results.filter(item => !item.ok)
   console.log(
