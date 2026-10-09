@@ -19,7 +19,18 @@ FAWU = os.path.join(ROOT, "data", "fawu")
 OUT = os.path.join(ROOT, "data", "contracts")
 SRC_ROOT = r"C:\Users\yr\Desktop\法务"
 
-F = ["主体名称", "注册信息", "资质文件", "本地路径", "备注"]
+F = ["主体名称", "注册信息", "股东及出资", "资质文件", "本地路径", "备注"]
+
+# 人工核定的股东信息（来源：公司章程 / 变更通知书 / NAR1，正文可查）
+SHAREHOLDER_MANUAL = {
+    "深圳市依然电商科技有限公司": [
+        "公司类型：一人有限公司（不设股东会）",
+        "股东：徐健｜认缴出资 2000 万元（2022 年版章程）｜出资比例 100%｜出资方式 货币",
+        "2022-12-19 变更：认缴注册资本总额 2000 万元 → 5000 万元，股东仍为徐健 100%",
+        "股东身份证号 342923198405231713｜住所 北京市海淀区西二旗西路29号智学苑2楼601号",
+        "来源：章程22年.pdf 第七条/第十二条；变更通知书（注册资本变更）.pdf",
+    ],
+}
 
 # 文件分类（按文件名）
 PAT = [
@@ -141,6 +152,37 @@ def dig_facts(joined):
     return facts
 
 
+def dig_shareholders(joined, name):
+    """股东及出资：优先人工核定，其次从正文抠。"""
+    if name in SHAREHOLDER_MANUAL:
+        return list(SHAREHOLDER_MANUAL[name])
+    out = []
+    j = joined[:400000]
+
+    def one(label, pat):
+        m = re.search(pat, j)
+        if m:
+            v = " ".join(m.group(1).split())
+            if v:
+                out.append("%s：%s" % (label, v))
+
+    one("股东", r"股东姓名或名称[\s:：]*([\u4e00-\u9fff]{2,6})")
+    if not any(x.startswith("股东：") for x in out):
+        one("股东", r"公司股东共\s*\d+\s*个[^\n]{0,40}?姓名[\s:：]*([\u4e00-\u9fff]{2,6})")
+    one("认缴出资额", r"认缴出资额[\s:：]*([0-9,，.]+\s*万?元?)")
+    one("出资比例", r"出资比例[\s:：]*([0-9.]+%)")
+    one("股东人数", r"公司股东共\s*(\d+)\s*个")
+    # 香港/海外公司常见的股东证件文件（只能作为线索）
+    idx = []
+    for pat, label in [(r"股东身份证[^\n]{0,20}", "股东身份证件"), (r"組織章程細則|组织章程细则", "组织章程细则"),
+                       (r"NAR1", "周年申报表 NAR1（含股东名册）")]:
+        if re.search(pat, j, re.I):
+            idx.append(label)
+    if idx:
+        out.append("档案内可见：%s" % "、".join(dict.fromkeys(idx)))
+    return out
+
+
 def main():
     rows = load_index()
     texts = load_texts()
@@ -221,8 +263,11 @@ def main():
         elif ocr_n:
             notes.append("注册信息含 %d 份扫描件的 OCR 结果，编号类字段建议与原照核对" % ocr_n)
 
-        def first_or(items_list, default="-"):
-            return items_list[0] if items_list else default
+        sh = dig_shareholders("\n".join(texts_by_group.get(group, []) + ocr.get(group, [])), disp)
+        if not sh:
+            sh = ["⚠️ 档案以扫描件为主，未抽到股东/出资信息（可 OCR 章程、NAR1 后补）"]
+        else:
+            sh.append("来源目录：%s" % dir_path)
 
         rec = {
             "contract": "主体资质·%s" % disp,
@@ -231,6 +276,7 @@ def main():
             "elements": {
                 "主体名称": [disp, "文件 %d 件" % len(items)],
                 "注册信息": facts if facts else ["⚠️ 未抽取到（扫描件为主）"],
+                "股东及出资": sh,
                 "资质文件": [summary] + files,
                 "本地路径": paths,
                 "备注": notes,
