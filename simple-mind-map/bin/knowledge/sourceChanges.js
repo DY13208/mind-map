@@ -37,5 +37,6 @@ async function recordLegacySave(db, roomId) {
     returning revision
   ) insert into knowledge_source_changes(room_key, revision, uids, reason)
     select $1, revision, array['*']::text[], 'legacy_save' from next`, [roomId])
+  await db.query("select pg_notify('knowledge_events', json_build_object('roomId', $1::text)::text)", [roomId])
 }
 module.exports = { initSchema, recordLegacySave }

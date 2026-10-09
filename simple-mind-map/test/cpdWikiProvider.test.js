@@ -3,8 +3,20 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const crypto = require('crypto')
-const { createWikiProvider } = require('../bin/checkRuns/wikiProvider')
-const { createCheckProviders } = require('../bin/checkRuns/providers')
+const { createWikiProvider: actualWikiProvider } = require('../bin/checkRuns/wikiProvider')
+const { createCheckProviders: actualCheckProviders } = require('../bin/checkRuns/providers')
+const { verifyIdentity } = require('../bin/wikiCompiler/access')
+const INTERNAL_SECRET = 'test-independent-secret-'.repeat(3)
+function authenticated(provider) {
+  for (const method of ['searchSources', 'readSource']) {
+    const original = provider[method].bind(provider)
+    provider[method] = options => original({ actor: { id: 'user-a' }, ...options })
+  }
+  return provider
+}
+const createWikiProvider = options => authenticated(actualWikiProvider({ ...options, env: { WIKI_COMPILER_INTERNAL_SECRET: INTERNAL_SECRET, ...options.env } }))
+const createCheckProviders = options => authenticated(actualCheckProviders({ ...options, env: { WIKI_COMPILER_INTERNAL_SECRET: INTERNAL_SECRET, ...options.env } }))
+
 
 function sha256(value) {
   return crypto.createHash('sha256').update(String(value), 'utf8').digest('hex')
@@ -552,4 +564,19 @@ test('Wiki search timeout remains unavailable and is not cached', async () => {
   assert.equal(first.error, 'wiki_timeout')
   assert.equal(second.status, 'unavailable')
   assert.equal(calls, 2)
+})
+
+test('independent compiler requests carry authenticated actor and refuse missing identity', async () => {
+  let calls = 0
+  const env = { CPD_WIKI_API_URL: BASE, WIKI_COMPILER_INTERNAL_SECRET: INTERNAL_SECRET }
+  const provider = actualWikiProvider({ env, fetchImpl: async (_url, options) => {
+    calls++
+    assert.equal(verifyIdentity(options.headers['X-Wiki-Compiler-Identity'], env), 'real-user')
+    return jsonResponse({ results: [] })
+  } })
+  await provider.searchSources({ roomKey: ROOM, query: '预算', actor: { id: 'real-user' } })
+  assert.equal(calls, 1)
+  const denied = await provider.searchSources({ roomKey: ROOM, query: '预算' })
+  assert.equal(denied.status, 'unavailable')
+  assert.equal(calls, 1)
 })

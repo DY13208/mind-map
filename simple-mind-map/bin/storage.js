@@ -781,7 +781,7 @@ async function upsertRoom(roomKey, title, options = {}) {
           [roomKey, JSON.stringify(snapshot)]
         )
       }
-      if (overwriteTable && require('./knowledge').enabled()) {
+      if (overwriteTable && (require('./wikiCompiler').enabled() || /^(true|1|yes|on)$/i.test(String(process.env.KNOWLEDGE_COMPILER_ENABLED || 'false')))) {
         // Isolate optional legacy tracking failures from the original save.
         await client.query('SAVEPOINT knowledge_legacy')
         try { await require('./knowledge/sourceChanges').recordLegacySave(client, roomKey) }

@@ -1,6 +1,7 @@
 'use strict';
+const { issueIdentity } = require('../../../../simple-mind-map/bin/wikiCompiler/access');
 
-// Shared compiled company Wiki, matching the graph page's data scope.
+// Independently compiled brain-map knowledge, filtered by live room ACL.
 // Authentication, rate limiting and audit are enforced by the MCP server.
 function fail(code) {
   return Object.assign(new Error(code), { code });
@@ -38,7 +39,7 @@ async function wikiCompilerCall(userId, operation, args = {}, env = process.env)
   try {
     const response = await fetch(new URL(endpoint, base), {
       method: body ? 'POST' : 'GET',
-      headers: { Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { 'X-Wiki-Compiler-Identity': issueIdentity(userId, env), Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
       redirect: 'error',
@@ -60,15 +61,15 @@ async function wikiCompilerCall(userId, operation, args = {}, env = process.env)
     try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
     catch (_) { throw fail('wiki_compiler_invalid_response'); }
   } catch (error) {
-    if (['not_found', 'wiki_compiler_unavailable', 'wiki_compiler_response_too_large', 'wiki_compiler_invalid_response'].includes(error.code)) throw error;
+    if (['wiki_compiler_unconfigured', 'not_found', 'wiki_compiler_unavailable', 'wiki_compiler_response_too_large', 'wiki_compiler_invalid_response'].includes(error.code)) throw error;
     throw fail(controller.signal.aborted ? 'wiki_compiler_timeout' : 'wiki_compiler_unavailable');
   } finally { clearTimeout(timeout); }
 }
 
 const TOOLS = [
-  { name: 'wiki_compiler_graph', description: 'Read the shared compiled company Wiki graph: topics, concepts and relationships. Read-only; not room-scoped.', inputSchema: { type: 'object', properties: {} } },
-  { name: 'wiki_compiler_search', description: 'Search sections in the shared compiled company Wiki. Business mode excludes demo sources. Read-only; not Docmost or room-scoped OpenWiki.', inputSchema: { type: 'object', properties: { query: { type: 'string', minLength: 1 }, top_k: { type: 'integer', minimum: 1, maximum: 50 }, mode: { type: 'string', enum: ['business', 'demo'], default: 'business' } }, required: ['query'] } },
-  ...['topic', 'concept'].map(type => ({ name: `wiki_compiler_${type}`, description: `Read a ${type} article from the shared compiled company Wiki by slug obtained from graph or search. Read-only; not room-scoped.`, inputSchema: { type: 'object', properties: { slug: { type: 'string', minLength: 1, maxLength: 256 } }, required: ['slug'] } })),
+  { name: 'wiki_compiler_graph', description: 'Read the compiled brain-map graph permitted by your live room permissions. Read-only; independent of Docmost.', inputSchema: { type: 'object', properties: {} } },
+  { name: 'wiki_compiler_search', description: 'Search compiled brain-map sections permitted by your live room permissions. Read-only; independent of Docmost.', inputSchema: { type: 'object', properties: { query: { type: 'string', minLength: 1 }, top_k: { type: 'integer', minimum: 1, maximum: 50 }, mode: { type: 'string', enum: ['business', 'demo'], default: 'business' } }, required: ['query'] } },
+  ...['topic', 'concept'].map(type => ({ name: `wiki_compiler_${type}`, description: `Read a ${type} article by slug obtained from graph or search, subject to live room permissions. Read-only; independent of Docmost.`, inputSchema: { type: 'object', properties: { slug: { type: 'string', minLength: 1, maxLength: 256 } }, required: ['slug'] } })),
 ];
 
 module.exports = { wikiCompilerCall, TOOLS };

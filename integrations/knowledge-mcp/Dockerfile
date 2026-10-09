@@ -7,13 +7,14 @@ RUN apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o APT::Update::E
   && mkdir -p /data/audit /data/openwiki/jobs /data/openwiki/rooms \
   && chown -R node:node /data
 
-WORKDIR /app
+WORKDIR /app/integrations/knowledge-mcp
 
-COPY package.json package-lock.json ./
+COPY integrations/knowledge-mcp/package.json integrations/knowledge-mcp/package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY --chown=node:node src ./src
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY --chown=node:node integrations/knowledge-mcp/src ./src
+COPY simple-mind-map/bin/wikiCompiler/access.js /app/simple-mind-map/bin/wikiCompiler/access.js
+COPY integrations/knowledge-mcp/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # Guard against CRLF checkouts on Windows hosts: a trailing \r in the shebang
 # makes the container die with "exec ... no such file or directory".
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \

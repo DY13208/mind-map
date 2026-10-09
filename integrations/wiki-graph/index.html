@@ -322,6 +322,7 @@ function resize() {
 
 async function loadData() {
   const res = await fetch(apiUrl('/api/graph'));
+  if (!res.ok) { document.getElementById('wikiMeta').textContent = res.status === 401 ? '请先登录脑图应用' : '知识库暂时不可用'; return; }
   graphData = await res.json();
 
   document.getElementById('wikiName').textContent = graphData.name;
@@ -357,7 +358,7 @@ async function loadData() {
 
   const legend = document.getElementById('legend');
   legend.innerHTML = nodes.map(n =>
-    `<div class="legend-item"><div class="legend-dot" style="background:${n.color}"></div>${n.name}</div>`
+    `<div class="legend-item"><div class="legend-dot" style="background:${n.color}"></div>${escapeHtml(n.name)}</div>`
   ).join('');
 
   layoutNodes();
@@ -742,7 +743,7 @@ async function openArticle(type, slug) {
     }
     return `
       <div class="section">
-        <div class="section-heading">${heading} ${badge}</div>
+        <div class="section-heading">${escapeHtml(heading)} ${badge}</div>
         <div class="section-content">${markdownToHtml(s.content)}</div>
       </div>`;
   }).join('');

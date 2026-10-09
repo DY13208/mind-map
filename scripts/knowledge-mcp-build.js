@@ -22,8 +22,8 @@ function copySourceImage(imageTag, env) {
   const dir = path.join(ROOT, '.docker-build-stamps')
   fs.mkdirSync(dir, { recursive: true })
   const dockerfile = path.join(dir, 'knowledge-mcp.Dockerfile')
-  fs.writeFileSync(dockerfile, `FROM ${imageTag}\nCOPY --chown=node:node src /app/src\nLABEL ${LABEL}="${runtimeHash()}"\n`)
-  execFileSync('docker', ['build', '--pull=false', '-t', imageTag, '-f', dockerfile, CONTEXT], {
+  fs.writeFileSync(dockerfile, `FROM ${imageTag}\nCOPY --chown=node:node integrations/knowledge-mcp/src /app/integrations/knowledge-mcp/src\nCOPY simple-mind-map/bin/wikiCompiler/access.js /app/simple-mind-map/bin/wikiCompiler/access.js\nLABEL ${LABEL}="${runtimeHash()}"\n`)
+  execFileSync('docker', ['build', '--pull=false', '-t', imageTag, '-f', dockerfile, ROOT], {
     cwd: ROOT, env, stdio: 'inherit', windowsHide: true
   })
 }
