@@ -767,14 +767,16 @@ async function insertChildren(mindMap, parent, trees) {
  * 重试用**新的 uid**（旧的没落地，不会重复）；万一第一次其实是「落得慢」，
  * 后面按名字查重也能兜住（调用方按名字复用已有节点，见 findAttachBranch / md 查重）。
  *
- * @returns {Promise<{nodes: Array<Object|null>, lost: Array<String>}>}
- *          nodes 与入参 trees 一一对应（没落地的那项是 null）
+ * @returns {Promise<{nodes: Array<Object|null>, lost: Array<String>, placedUids: Array<String>}>}
+ *          nodes 与入参 trees 一一对应（没落地的那项是 null）；
+ *          placedUids = 这次**真的插进树里**的节点 uid（用来问服务端「确认了吗」）
  */
 async function insertTreesWithRetry(mindMap, parent, trees, attempts = 2) {
   const list = (trees || []).filter(Boolean)
-  if (!list.length) return { nodes: [], lost: [] }
+  if (!list.length) return { nodes: [], lost: [], placedUids: [] }
   const texts = list.map(tree => String((tree.data && tree.data.text) || ''))
   const placed = new Array(list.length).fill(null)
+  const placedUids = new Set()
   let pending = list.map((tree, idx) => ({ tree, idx }))
   for (let round = 0; round < attempts && pending.length; round += 1) {
     const batch = pending.map(item => item.tree)
@@ -794,13 +796,15 @@ async function insertTreesWithRetry(mindMap, parent, trees, attempts = 2) {
     const still = []
     pending.forEach((item, i) => {
       const hit = byUid.get(uids[i])
-      if (hit) placed[item.idx] = hit
-      else still.push(item)
+      if (hit) {
+        placed[item.idx] = hit
+        placedUids.add(String(uids[i]))
+      } else still.push(item)
     })
     pending = still
   }
   const lost = pending.map(item => texts[item.idx]).filter(Boolean)
-  return { nodes: placed, lost }
+  return { nodes: placed, lost, placedUids: Array.from(placedUids) }
 }
 
 function fileFromText(name, text, type) {
@@ -1199,8 +1203,34 @@ export async function writeJobResultToMap({
     missing: tree.missing || [],
     dropped: tree.dropped || 0,
     attachments: [],
-    warnings: []
+    warnings: [],
+    // 本次写回牵涉的节点 uid —— 给「服务端到底确认了没有」当判据用（见 Toolbar）：
+    //   ensuredUids  = 写完之后**应该存在**的节点（含复用到的旧节点）
+    //   insertedUids = 这次**新插进去**的节点（有它才能拿到「服务端已确认」的正面证据）
+    // 为什么要带出来：光看客户端队列「还有没有没确认的命令」会被**别人的**积压命令误伤
+    // （服务器 outbox 积压两万多条），于是每次写回都被判成「没同步」（2026-10-09 反馈）。
+    ensuredUids: [],
+    insertedUids: []
   }
+  // 记录「这一步牵涉到的节点」（existing = 复用的旧节点 / placed = 本次新插的）
+  const touched = new Set()
+  const fresh = new Set()
+  const markTouched = node => {
+    const uid = nodeUid(node)
+    if (uid) touched.add(uid)
+    return node
+  }
+  const markPlaced = res => {
+    const uids = (res && res.placedUids) || []
+    uids.forEach(uid => {
+      if (!uid) return
+      touched.add(String(uid))
+      fresh.add(String(uid))
+    })
+    return res
+  }
+  markTouched(container)
+  markTouched(resultNode)
 
   if (!roomKey) {
     out.warnings.push('没有房间信息，没挂附件（正文已直接铺进导图）')
@@ -1261,10 +1291,13 @@ export async function writeJobResultToMap({
     const refresh = node => liveNode(mindMap, node) || node
     let branch = findAttachBranch(refresh(container))
     if (!branch) {
-      const res = await insertTreesWithRetry(mindMap, container, [
-        { data: { text: ATTACH_BRANCH_TITLE }, children: [] }
-      ])
+      const res = markPlaced(
+        await insertTreesWithRetry(mindMap, container, [
+          { data: { text: ATTACH_BRANCH_TITLE }, children: [] }
+        ])
+      )
       branch = res.nodes[0] || null
+      markTouched(branch)
     }
     if (!branch) {
       out.warnings.push(
@@ -1281,10 +1314,12 @@ export async function writeJobResultToMap({
       if (missing.length) {
         say(`正在挂载 ${missing.length} 个产物文件…`)
         // 按 uid 认领 + 没落地就重试一次（协同偶尔会吃掉插入命令）
-        const res = await insertTreesWithRetry(
-          mindMap,
-          branch,
-          missing.map(info => ({ data: { text: String(info.name) } }))
+        const res = markPlaced(
+          await insertTreesWithRetry(
+            mindMap,
+            branch,
+            missing.map(info => ({ data: { text: String(info.name) } }))
+          )
         )
         out.nodes += res.nodes.filter(Boolean).length
         if (res.lost.length) {
@@ -1298,7 +1333,9 @@ export async function writeJobResultToMap({
       for (let i = 0; i < files.length; i += 1) {
         const info = files[i]
         // 每一步都重查一次节点（上面的插入会重渲染，引用会失效）
-        const node = kids().find(k => nodeText(k) === String(info.name || ''))
+        const node = markTouched(
+          kids().find(k => nodeText(k) === String(info.name || ''))
+        )
         if (!node) continue
         if (Number(info.size) > MAX_ATTACH_BYTES) {
           out.warnings.push(
@@ -1329,9 +1366,11 @@ export async function writeJobResultToMap({
       let mdNode = kids().find(k => nodeText(k) === mdLabel)
       if (!mdNode) {
         // note 里存全文：节点上不铺长文本，但「继续执行」要从这儿取回上次的正文
-        const res = await insertTreesWithRetry(mindMap, branch, [
-          { data: { text: mdLabel, note: text } }
-        ])
+        const res = markPlaced(
+          await insertTreesWithRetry(mindMap, branch, [
+            { data: { text: mdLabel, note: text } }
+          ])
+        )
         mdNode = res.nodes[0] || null
         if (mdNode) out.nodes += 1
         else
@@ -1340,8 +1379,10 @@ export async function writeJobResultToMap({
               '刷新页面后点「写入导图」再试'
           )
       }
+      markTouched(mdNode)
       // 引用再刷一次（插产物/插完整输出都会引发重渲染）
       mdNode = refresh(mdNode)
+      markTouched(mdNode)
       if (mdNode && typeof mdNode.setData === 'function') {
         try {
           mdNode.setData({ note: text })
@@ -1416,6 +1457,9 @@ export async function writeJobResultToMap({
     out.warnings.push(`概要没加上：${(err && err.message) || err}`)
   }
 
+  // 交给调用方去问「服务端确认了没有」（Toolbar.verifyWritePersisted）
+  out.ensuredUids = Array.from(touched)
+  out.insertedUids = Array.from(fresh)
   say('已写入导图')
   return out
 }
