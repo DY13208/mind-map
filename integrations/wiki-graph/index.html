@@ -261,6 +261,8 @@
   <div class="tt-detail" id="ttDetail"></div>
 </div>
 
+
+<script src="interaction.js"></script>
 <script>
 const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
@@ -296,6 +298,11 @@ let hoveredNode = null;
 let hoveredEdge = null;
 let selectedNode = null;
 let searchQuery = '';
+const view = new GraphInteraction();
+let activePointer = null;
+let suppressClick = false;
+canvas.style.touchAction = 'none';
+canvas.style.cursor = 'grab';
 
 // Multi-hop expansion state
 let adjacency = {};            // slug -> Set<slug>
@@ -382,6 +389,7 @@ function layoutNodes() {
   const angleStep = (2 * Math.PI) / nodes.length;
 
   nodes.forEach((n, i) => {
+    if (n.pinned) return;
     const conn = connCount[n.slug] || 0;
     n.targetDist = minDist + (maxDist - minDist) * (1 - conn / maxConn) * 0.65 + minDist * 0.35;
     n.angle = -Math.PI / 2 + angleStep * i;
@@ -395,13 +403,19 @@ function layoutNodes() {
 function animate() {
   ctx.clearRect(0, 0, W, H);
   drawBackground();
+  ctx.save();
+  ctx.translate(view.x, view.y);
+  ctx.scale(view.scale, view.scale);
   drawEdges();
   drawNodes();
   drawCenter();
+  ctx.restore();
 
   nodes.forEach(n => {
-    n.x += (n.targetX - n.x) * 0.05;
-    n.y += (n.targetY - n.y) * 0.05;
+    if (!n.pinned) {
+      n.x += (n.targetX - n.x) * 0.05;
+      n.y += (n.targetY - n.y) * 0.05;
+    }
     n.scale += (n.targetScale - n.scale) * 0.12;
   });
 
@@ -625,19 +639,20 @@ function hexAlpha(hex, alpha) {
 
 // --- Interaction ---
 
-canvas.addEventListener('mousemove', (e) => {
-  const mx = e.clientX, my = e.clientY;
+function updateHover(e) {
+  const point = view.toWorld(e.clientX, e.clientY);
+  const mx = point.x, my = point.y;
   let found = null;
   let foundEdge = null;
 
   for (const n of nodes) {
     const dist = Math.sqrt((mx - n.x) ** 2 + (my - n.y) ** 2);
-    if (dist < n.radius * n.scale + 10) { found = n; break; }
+    if (dist < n.radius * n.scale + 10 / view.scale) { found = n; break; }
   }
 
   if (!found) {
     // Find closest edge midpoint within threshold
-    let minDist = 35;
+    let minDist = 35 / view.scale;
     for (const edge of edges) {
       const fromN = nodes.find(n => n.slug === edge.from);
       const toN = nodes.find(n => n.slug === edge.to);
@@ -651,33 +666,75 @@ canvas.addEventListener('mousemove', (e) => {
 
   hoveredNode = found;
   hoveredEdge = found ? null : foundEdge; // Node takes priority
-  canvas.style.cursor = (found || foundEdge) ? 'pointer' : 'default';
+  canvas.style.cursor = found ? 'grab' : foundEdge && foundEdge.concept ? 'pointer' : 'grab';
 
   if (found) {
     document.getElementById('ttName').textContent = found.name;
     document.getElementById('ttDetail').textContent =
       `${found.sourceCount} sources · click to read`;
-    tooltip.style.left = (mx + 16) + 'px';
-    tooltip.style.top = (my - 10) + 'px';
+    tooltip.style.left = (e.clientX + 16) + 'px';
+    tooltip.style.top = (e.clientY - 10) + 'px';
     tooltip.classList.add('visible');
   } else if (foundEdge) {
     if (foundEdge.type === 'shared') {
       document.getElementById('ttName').textContent = `${foundEdge.from} ↔ ${foundEdge.to}`;
       document.getElementById('ttDetail').textContent = `${foundEdge.sharedCount} shared sources`;
     } else {
+      if (!foundEdge.concept) { tooltip.classList.remove('visible'); return; }
       const concept = concepts.find(c => c.slug === foundEdge.concept);
       document.getElementById('ttName').textContent = concept ? concept.name : foundEdge.concept;
       document.getElementById('ttDetail').textContent = 'click to read concept';
     }
-    tooltip.style.left = (mx + 16) + 'px';
-    tooltip.style.top = (my - 10) + 'px';
+    tooltip.style.left = (e.clientX + 16) + 'px';
+    tooltip.style.top = (e.clientY - 10) + 'px';
     tooltip.classList.add('visible');
   } else {
     tooltip.classList.remove('visible');
   }
+}
+
+canvas.addEventListener('pointerdown', e => {
+  if (e.button !== 0 || activePointer !== null) return;
+  updateHover(e);
+  activePointer = e.pointerId;
+  suppressClick = false;
+  view.begin(e.clientX, e.clientY, hoveredNode);
+  canvas.setPointerCapture(e.pointerId);
 });
+canvas.addEventListener('pointermove', e => {
+  if (activePointer !== null) {
+    if (activePointer !== e.pointerId) return;
+    if (view.move(e.clientX, e.clientY)) {
+      tooltip.classList.remove('visible');
+      canvas.style.cursor = 'grabbing';
+    }
+    return;
+  }
+  updateHover(e);
+});
+function finishGesture(e) {
+  if (activePointer !== e.pointerId) return;
+  suppressClick = view.end() || e.type !== 'pointerup';
+  activePointer = null;
+  if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+  canvas.style.cursor = 'grab';
+}
+canvas.addEventListener('pointerup', finishGesture);
+canvas.addEventListener('pointercancel', finishGesture);
+canvas.addEventListener('lostpointercapture', finishGesture);
+canvas.addEventListener('pointerleave', () => {
+  if (activePointer === null) { hoveredNode = null; hoveredEdge = null; tooltip.classList.remove('visible'); }
+});
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const delta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H : 1);
+  view.zoom(e.clientX, e.clientY, delta);
+  updateHover(e);
+}, { passive: false });
 
 canvas.addEventListener('click', async (evt) => {
+  if (suppressClick) { suppressClick = false; return; }
+  updateHover(evt);
   // Shift-click on a node → expand neighborhood (multi-hop)
   if (evt.shiftKey && hoveredNode) {
     expandFromSeed(hoveredNode.slug);
@@ -686,7 +743,7 @@ canvas.addEventListener('click', async (evt) => {
   if (hoveredNode) {
     selectedNode = hoveredNode;
     await openArticle('topic', hoveredNode.slug);
-  } else if (hoveredEdge && hoveredEdge.type !== 'shared') {
+  } else if (hoveredEdge && hoveredEdge.concept && hoveredEdge.type !== 'shared') {
     await openArticle('concept', hoveredEdge.concept);
   } else if (panel.classList.contains('open')) {
     closePanel();
