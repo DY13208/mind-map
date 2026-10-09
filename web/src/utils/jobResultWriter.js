@@ -511,15 +511,52 @@ export function sizeText(bytes) {
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
-function resolveTargetNode(mindMap, uid) {
+function resolveTargetNode(mindMap, uid, options = {}) {
   const renderer = mindMap && mindMap.renderer
   const wanted = String(uid || '').trim()
   if (wanted && renderer && typeof renderer.findNodeByUid === 'function') {
-    // 指定了落点就以它为准：找不到宁可报错，也不要悄悄写到别的节点上
-    return renderer.findNodeByUid(wanted) || null
+    const hit = renderer.findNodeByUid(wanted)
+    if (hit) return hit
   }
-  const active = renderer && renderer.activeNodeList && renderer.activeNodeList[0]
-  return active || null
+  // 按 uid 没找到 → **按标题在整棵树上找回来**（2026-10-09 用户反馈：
+  // 「还是显示找不到节点（可能已经删掉了），但实际上已经写入了」）。
+  // 成因：记录里存的 uid 会过期 —— 重连 / 整树恢复 / 服务端重建节点后，
+  // 节点实例连 uid 一起换了，可内容好端端在图上；这时按 uid 找不到就报错，
+  // 而「写入导图」本来是幂等的（按名字复用），按标题找回原容器继续写才对。
+  const title = String((options && options.title) || '').trim()
+  if (title) {
+    const byTitle = findNodeByTitleText(mindMap, title)
+    if (byTitle) return byTitle
+  }
+  if (!wanted) {
+    const active = renderer && renderer.activeNodeList && renderer.activeNodeList[0]
+    return active || null
+  }
+  return null
+}
+
+/**
+ * 在**整棵树**上按节点文字找一个节点（用于「uid 过期了但节点还在」时把它找回来）。
+ * 只认完全相等（去 HTML、去空白后），不做模糊匹配 —— 免得写到别的节点上。
+ */
+function findNodeByTitleText(mindMap, text, limit = 5000) {
+  const renderer = mindMap && mindMap.renderer
+  const root = renderer && renderer.root
+  const wanted = String(text || '').trim()
+  if (!root || !wanted) return null
+  const stack = [root]
+  let seen = 0
+  while (stack.length && seen < limit) {
+    const node = stack.shift()
+    if (!node) continue
+    seen += 1
+    if (node !== root && !node.isGeneralization && nodeText(node) === wanted) {
+      return node
+    }
+    const kids = node.children || []
+    for (let i = 0; i < kids.length; i += 1) stack.push(kids[i])
+  }
+  return null
 }
 
 /**
@@ -1036,13 +1073,19 @@ async function attachToNode(mindMap, node, roomKey, file, bridgeAttach) {
 export async function createJobContainer({
   mindMap,
   nodeUid: targetUid,
+  nodeTitle = '',
   prompt
 } = {}) {
   if (!mindMap) throw new Error('导图还没准备好，稍后再试')
   const ro = readonlyReason(mindMap)
   if (ro) throw new Error(ro)
-  const target = resolveTargetNode(mindMap, targetUid)
-  if (!target) throw new Error('找不到要挂任务的节点（可能已被删掉）')
+  const target = resolveTargetNode(mindMap, targetUid, { title: nodeTitle })
+  if (!target) {
+    throw new Error(
+      `找不到要挂任务的节点（可能已被删掉）：uid=${String(targetUid || '（空）')}` +
+        (nodeTitle ? `、标题=${nodeTitle}` : '')
+    )
+  }
 
   const text = String(prompt || '').trim()
   const title = buildTaskContainerTitle()
@@ -1076,22 +1119,31 @@ export async function createJobContainer({
  * @returns {{ok:Boolean, exists:Boolean, title:String, hasTaskContent:Boolean,
  *            hasAttach:Boolean, hasFullOutput:Boolean, artifactNames:Array<String>}}
  */
-export function inspectJobResult({ mindMap, nodeUid: targetUid } = {}) {
+export function inspectJobResult({ mindMap, nodeUid: targetUid, nodeTitle = '' } = {}) {
   const renderer = mindMap && mindMap.renderer
   const uid = String(targetUid || '').trim()
   const empty = {
     ok: true,
     exists: false,
     title: '',
+    // 找到时回报**当前真实的** uid：记录里的 uid 会过期（重连/整树恢复后会换），
+    // 调用方拿它把记录修正过来，下次就不用再靠标题兜底了
+    uid: '',
+    resolvedBy: '',
     hasTaskContent: false,
     hasAttach: false,
     hasFullOutput: false,
     artifactNames: []
   }
-  if (!uid || !renderer || typeof renderer.findNodeByUid !== 'function') {
+  if (!renderer || typeof renderer.findNodeByUid !== 'function') {
     return { ...empty, ok: false }
   }
-  const node = renderer.findNodeByUid(uid)
+  let node = uid ? renderer.findNodeByUid(uid) : null
+  let resolvedBy = node ? 'uid' : ''
+  if (!node && String(nodeTitle || '').trim()) {
+    node = findNodeByTitleText(mindMap, nodeTitle)
+    if (node) resolvedBy = 'title'
+  }
   if (!node) return empty
   const kids = (node.children || []) || []
   const branch = findAttachBranch(node)
@@ -1102,6 +1154,8 @@ export function inspectJobResult({ mindMap, nodeUid: targetUid } = {}) {
     ok: true,
     exists: true,
     title: String(node.getData('text') || ''),
+    uid: nodeUid(node),
+    resolvedBy,
     hasTaskContent: kidTexts.some(text => /^任务内容[:：]/.test(text)),
     hasAttach: !!branch,
     hasFullOutput: !!branchKids.find(child => /完整输出/.test(nodeText(child))),
@@ -1130,6 +1184,7 @@ export function inspectJobResult({ mindMap, nodeUid: targetUid } = {}) {
 export async function writeJobResultToMap({
   mindMap,
   nodeUid: targetUid,
+  nodeTitle = '',
   markdown,
   prompt,
   roomKey,
@@ -1147,8 +1202,14 @@ export async function writeJobResultToMap({
   if (readonly) throw new Error(readonly)
   const text = String(markdown || '').trim()
   if (!text) throw new Error('这次运行没有文字输出，没东西可写入脑图')
-  const resolved = resolveTargetNode(mindMap, targetUid)
-  if (!resolved) throw new Error('找不到运行的那个节点（可能已被删掉）')
+  const resolved = resolveTargetNode(mindMap, targetUid, { title: nodeTitle })
+  if (!resolved) {
+    throw new Error(
+      `找不到运行的那个节点（可能已被删掉）：uid=${String(targetUid || '（空）')}` +
+        (nodeTitle ? `、标题=${nodeTitle}` : '') +
+        ' —— 可以在图上重新选中那个任务节点，再点「写入导图」'
+    )
+  }
 
   // 落点必须落在「任务」里面：目标本身是容器就用它，否则现建一个 ——
   // 这样运行输出永远跟在这次的任务后面，不会甩在 SOP 末尾
@@ -1158,6 +1219,7 @@ export async function writeJobResultToMap({
     const made = await createJobContainer({
       mindMap,
       nodeUid: nodeUid(resolved),
+      nodeTitle: nodeText(resolved),
       prompt
     })
     container = made.node
