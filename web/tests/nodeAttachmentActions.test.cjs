@@ -200,7 +200,10 @@ async function run() {
     expectedAttachmentName: 'report.pdf'
   })
   await flush()
-  assert.match(vm.confirmation.message, /report\.pdf/)
+  assert.equal(
+    vm.confirmation.message,
+    '确定从当前节点移除附件“report.pdf”吗？此操作只解绑当前节点；原文件保留供历史恢复和共享节点使用。'
+  )
   assert.deepEqual(calls.deletes[0], [
     'room-A',
     'att-old',
@@ -233,6 +236,10 @@ async function run() {
   assert.equal(managed.getData('text'), 'concurrent newer text')
   assert.equal(managed.getData('attachmentId'), '')
   assert.equal(managed.getData('attachmentName'), '')
+  assert.ok(vm.messages.entries.some(entry =>
+    entry[0] === 'success' &&
+    entry[1] === '已从当前节点移除附件，原文件保留供历史恢复和共享节点使用'
+  ))
 
   // A newer attachment that arrives before a stale DELETE response is kept.
   const replacedDuringDelete = node('n-race-delete', {
@@ -271,6 +278,22 @@ async function run() {
   assert.equal(mismatchVm.commands.length, 0)
   assert.ok(mismatchVm.messages.entries.some(entry => entry[0] === 'warning'))
 
+  // Idempotent DELETE explains that only the node reference is absent while
+  // the stored object remains available for history and shared references.
+  const alreadyDetached = node('n-already-detached', {
+    attachmentId: 'att-already', attachmentName: 'already.pdf'
+  })
+  const alreadyDetachedVm = makeAttachmentVm(component, api, [alreadyDetached])
+  api.deleteResult = async () => ({ already_detached: true, detached: false })
+  await alreadyDetachedVm.onManageAttachment({
+    action: 'delete', uid: 'n-already-detached', node: alreadyDetached,
+    expectedAttachmentId: 'att-already', expectedAttachmentName: 'already.pdf'
+  })
+  assert.ok(alreadyDetachedVm.messages.entries.some(entry =>
+    entry[0] === 'info' &&
+    entry[1] === '当前节点已无该附件，原文件保留供历史恢复和共享节点使用'
+  ))
+
   // Replace confirmation and failed upload do not clear or restore a stale
   // snapshot; the original pointer and metadata remain exactly as they were.
   const existing = node('n-replace', {
@@ -289,7 +312,7 @@ async function run() {
     expectedAttachmentId: 'att-existing', expectedAttachmentName: 'source.xlsx'
   })
   assert.equal(inputClicks, 1)
-  assert.equal(calls.deletes.length, 3)
+  assert.equal(calls.deletes.length, 4)
   const oldData = { ...existing.getData() }
   const originalConsoleError = console.error
   console.error = () => {}
