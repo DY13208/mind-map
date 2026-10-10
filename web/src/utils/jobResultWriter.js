@@ -690,23 +690,6 @@ async function waitForInserted(mindMap, parent, uids, { all = false, tries = 60 
 }
 
 /**
- * 等落点容器真的长出东西来（子节点变多）。
- *
- * ⚠️ 必须每轮**按 uid 现查**容器：手里的引用可能已经脱离画布（重渲染 / 协同套用远端改动），
- * 那样它的 children 永远不会变，会误报「命令没有落到图上」（2026-10-08 用户反馈）。
- * 返回 true = 长出了新节点。
- */
-async function waitContainerGrowth(mindMap, container, beforeCount, tries = 60) {
-  const want = Number(beforeCount || 0) + 1
-  for (let i = 0; i < tries; i += 1) {
-    const live = liveNode(mindMap, container)
-    if (((live && live.children) || []).length >= want) return true
-    if (i < tries - 1) await sleep(50)
-  }
-  return false
-}
-
-/**
  * 只读态：`Command.exec` 在 `mindMap.opt.readonly` 为真时**静默丢弃**所有结构命令
  * （见 simple-mind-map/src/core/command/Command.js），命令不落地、也不报错 ——
  * 写回就会「说成功、图上没有」。所以写之前/写完之后都要查一次，并且如实说明原因。
@@ -1237,15 +1220,36 @@ export async function writeJobResultToMap({
   // 握着旧引用会让后面所有插入都插到脱离画布的节点上（数据进、画布不长）。
   container = liveNode(mindMap, container) || container
   let resultNode = container
-  // 写回开始前记一下：结束时拿它复核「到底有没有东西落到图上」（见 waitContainerGrowth）
-  const containerKidsBefore = ((liveNode(mindMap, container) || container).children || [])
-    .length
+  // 记录「这一步牵涉到的节点」（existing = 复用的旧节点 / placed = 本次新插的）
+  // —— 必须在**第一次插入之前**就备好：inlineResult 那条路也要 markPlaced（否则收尾复核
+  // 拿不到「本次真插了什么」，见文末「收尾复核」）。
+  const touched = new Set()
+  const fresh = new Set()
+  const markTouched = node => {
+    const uid = nodeUid(node)
+    if (uid) touched.add(uid)
+    return node
+  }
+  const markPlaced = res => {
+    const uids = (res && res.placedUids) || []
+    uids.forEach(uid => {
+      if (!uid) return
+      touched.add(String(uid))
+      fresh.add(String(uid))
+    })
+    return res
+  }
+  markTouched(container)
+  markTouched(resultNode)
+
   if (inlineResult) {
     tree = markdownToFullNodes(text)
     say('正在把结果写进导图…')
-    const res = await insertTreesWithRetry(mindMap, container, [
-      { data: { text: title }, children: tree.children }
-    ])
+    const res = markPlaced(
+      await insertTreesWithRetry(mindMap, container, [
+        { data: { text: title }, children: tree.children }
+      ])
+    )
     const made = res.nodes[0] || null
     if (!made) {
       throw new Error(
@@ -1274,26 +1278,6 @@ export async function writeJobResultToMap({
     ensuredUids: [],
     insertedUids: []
   }
-  // 记录「这一步牵涉到的节点」（existing = 复用的旧节点 / placed = 本次新插的）
-  const touched = new Set()
-  const fresh = new Set()
-  const markTouched = node => {
-    const uid = nodeUid(node)
-    if (uid) touched.add(uid)
-    return node
-  }
-  const markPlaced = res => {
-    const uids = (res && res.placedUids) || []
-    uids.forEach(uid => {
-      if (!uid) return
-      touched.add(String(uid))
-      fresh.add(String(uid))
-    })
-    return res
-  }
-  markTouched(container)
-  markTouched(resultNode)
-
   if (!roomKey) {
     out.warnings.push('没有房间信息，没挂附件（正文已直接铺进导图）')
   } else {
@@ -1496,12 +1480,30 @@ export async function writeJobResultToMap({
     )
   }
 
-  // ⚠️ 收尾复核（2026-10-08 用户反馈「状态栏说成功、图上什么都没有」）：
+  // ⚠️ 收尾复核（2026-10-08「状态栏说成功、图上什么都没有」；2026-10-09 修误报）：
   // 上面整条路都是「不抛错」的写法 —— 命令被协同服务**静默丢掉**时也会一路走到这里，
-  // 于是界面报成功、画布上一个节点都没有。所以最后必须确认落点容器真的长出了东西，
-  // 没长出来就如实报错（用户在「运行历史 → 写入导图」里还能再试一次）。
-  // 每轮按 uid 现查容器（手里的引用可能已被重渲染换掉，见 liveNode）。
-  if (!(await waitContainerGrowth(mindMap, container, containerKidsBefore))) {
+  // 于是界面报成功、画布上一个节点都没有。所以最后必须确认东西真的落到了图上。
+  //
+  // 判据**不能**是「落点子节点数有没有变多」（旧写法 `waitContainerGrowth`）：写回是
+  // **幂等复用**的 —— 附件分支 / 产物节点 / 完整输出都按名字复用，重试第二次时数量本来就
+  // 不会涨。2026-10-09 15:35 用户收到的
+  //   「写入导图失败：命令没有落到图上（落点「任务 · 10-09 15:35」现在有 2 个子节点）」
+  // 就是那条判据在**重试**时误报的 —— 他手动点一次「写入导图」往往就成，说明内容早在图上。
+  //
+  // 换成「本次到底插进去了什么」：`fresh` 里的 uid 是 `insertTreesWithRetry` **确认过在树上**
+  // 的（命令被静默丢弃时它是空的，见该函数的 `placedUids`）。
+  const placedThisRun = Array.from(fresh)
+  let landedOk = true
+  if (placedThisRun.length) {
+    // 本次有新插 → 等它们都真在树上（按 uid 认领，不看数量）
+    landedOk = !!(await waitForInserted(mindMap, container, placedThisRun, { all: true }))
+  } else {
+    // 本次一个新节点都没插 → 两种可能：① 全部复用（幂等重写，结果早在图上，算成功）；
+    // ② 该插的一个都没落（命令被丢弃）。用**结构**区分：附件分支还在不在。
+    const insp = inspectJobResult({ mindMap, nodeUid: nodeUid(container) })
+    landedOk = !!(insp.exists && (!roomKey || insp.hasAttach))
+  }
+  if (!landedOk) {
     throw new Error(readonlyReason(mindMap) || insertFailedReason(mindMap, container))
   }
 

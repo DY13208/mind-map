@@ -1030,6 +1030,56 @@ async function main() {
     )
   }
 
+  // ============ M. 同一容器重写（全部复用、数量不增长）不能误报「命令没有落到图上」============
+  // 现场（2026-10-09 15:35 用户报错）：「写入导图失败：命令没有落到图上（落点「任务 · 10-09 15:35」
+  // 现在有 2 个子节点）」+「已自动重试 3 次仍未确认」。写回本身是**幂等复用**的（附件分支/产物
+  // 节点按名字复用），重试时容器子节点数**不会增长**；而收尾复核用的是「数量涨了没有」，
+  // 于是一次没确认→重试→判据永远不满足→误报。
+  console.log('--- 重写幂等：第二次写回不能误报命令没落图 ---')
+  {
+    const mapR = makeMindMap()
+    const boxR = await writer.createJobContainer({
+      mindMap: mapR,
+      nodeUid: mapR.root.getData('uid'),
+      prompt: '任务内容：R'
+    })
+    const firstOut = await writer.writeJobResultToMap({
+      mindMap: mapR,
+      nodeUid: boxR.uid,
+      markdown: MD,
+      roomKey: 'room-test',
+      artifacts: [],
+      bridgeAttach: async () => ({ ok: true, attachments: [] })
+    })
+    const containerR = mapR.renderer.findNodeByUid(boxR.uid)
+    const kidsAfterFirst = ((containerR && containerR.children) || []).length
+    check(
+      '第一次写回成功（容器下长出附件分支）',
+      !!firstOut && kidsAfterFirst >= 2,
+      '子节点=' + kidsAfterFirst
+    )
+
+    let threwR = ''
+    let secondOut = null
+    try {
+      secondOut = await writer.writeJobResultToMap({
+        mindMap: mapR,
+        nodeUid: boxR.uid,
+        markdown: MD,
+        roomKey: 'room-test',
+        artifacts: [],
+        bridgeAttach: async () => ({ ok: true, attachments: [] })
+      })
+    } catch (err) {
+      threwR = (err && err.message) || String(err)
+    }
+    check(
+      '第二次写回（节点全部复用、子节点数不增长）不能误报「命令没有落到图上」',
+      !threwR && !!secondOut,
+      threwR
+    )
+  }
+
   const failed = results.filter(item => !item.ok)
   console.log(
     `\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`
