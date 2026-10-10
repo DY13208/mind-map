@@ -453,7 +453,9 @@ export default {
       try {
         await this.$confirm(
           action === 'delete'
-            ? `确定从当前节点删除附件“${fileName}”吗？这只会解除当前节点的引用，服务端保留文件，也不影响其他节点。`
+            ? target.expectedAttachmentId
+              ? `确定从当前节点移除附件“${fileName}”吗？此操作只解绑当前节点；原文件保留供历史恢复和共享节点使用。`
+              : `确定从当前节点移除附件“${fileName}”吗？此操作只清除当前节点保存的引用，不会删除远程文件。`
             : `将为当前节点选择新文件。附件“${fileName}”会继续保留，直到新文件上传成功后才切换；取消或上传失败时原附件不变。`,
           action === 'delete' ? '删除节点附件' : '替换节点附件',
           {
@@ -493,11 +495,11 @@ export default {
           const updatedLocally = this.applyDetachedResponse(target, result)
           this.abortInflight(target.uid, target.expectedAttachmentId)
           if (result && result.already_detached) {
-            this.$message.info('当前节点已解除该附件引用，文件仍保留在房间中')
+            this.$message.info('当前节点已无该附件，原文件保留供历史恢复和共享节点使用')
           } else if (!updatedLocally) {
-            this.$message.info('旧附件引用已解除；节点已有更新内容，已保留当前内容')
+            this.$message.info('旧附件已从当前节点移除，原文件保留供历史恢复和共享节点使用；节点已有更新内容，已保留当前内容')
           } else {
-            this.$message.success('已从当前节点删除附件，文件仍保留在房间中')
+            this.$message.success('已从当前节点移除附件，原文件保留供历史恢复和共享节点使用')
           }
         } else {
           // Legacy URL-only attachments have no server attachment record to

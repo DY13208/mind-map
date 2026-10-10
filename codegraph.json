@@ -1,3 +1,3 @@
 {
-  "exclude": ["dist-build/", "dist-docker/"]
+  "exclude": ["dist-build/", "dist-docker/", "dist-docker-inject/", "dist-docker-tmp/", "output/"]
 }
