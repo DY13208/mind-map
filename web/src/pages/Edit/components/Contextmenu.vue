@@ -88,6 +88,9 @@
         <span class="name">{{ $t('contextmenu.cutNode') }}</span>
         <span class="desc">Ctrl + X</span>
       </div>
+      <div class="item" data-testid="copy-node-for-ai" @click="copyNodeForAi">
+        <span class="name">复制给 AI（SOP）</span>
+      </div>
       <div class="item" @click="exec('PASTE_NODE')">
         <span class="name">{{ $t('contextmenu.pasteNode') }}</span>
         <span class="desc">Ctrl + V</span>
@@ -366,6 +369,49 @@ export default {
   },
   methods: {
     ...mapMutations(['setLocalConfig']),
+
+    async copyNodeForAi() {
+      const node = this.node
+      const uid = this.nodeUid(node)
+      const room = roomFromLocation(this.$route)
+      const path = []
+      let current = node
+      while (current) {
+        const raw = String(current.getData('text') || '')
+        const text = (current.getData('richText') ? getTextFromHtml(raw) : raw)
+          .replace(/\s+/g, ' ')
+          .trim()
+        if (text) path.unshift(text)
+        current = current.parent
+      }
+      this.hide()
+      if (!room || !uid) {
+        this.$message.warning('请先打开已保存的脑图')
+        return
+      }
+      const text = `执行这个SOP：${path.join(' / ')}（room_key=${room}，node_uid=${uid}）`
+      try {
+        try {
+          if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('clipboard unavailable')
+          await navigator.clipboard.writeText(text)
+        } catch (err) {
+          const input = document.createElement('textarea')
+          input.value = text
+          input.style.position = 'fixed'
+          input.style.opacity = '0'
+          document.body.appendChild(input)
+          try {
+            input.select()
+            if (!document.execCommand('copy')) throw new Error('copy failed')
+          } finally {
+            document.body.removeChild(input)
+          }
+        }
+        this.$message.success('SOP 指令已复制，可粘贴给 AI 使用')
+      } catch (err) {
+        this.$message.error('复制失败，请重试')
+      }
+    },
 
     async shareNode() {
       const node = this.node
