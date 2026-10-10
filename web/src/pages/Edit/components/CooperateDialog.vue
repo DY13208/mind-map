@@ -2424,6 +2424,11 @@ export default {
       if (!this.largeMapInitialOverview && typeof cooperate.hydrateRoomMetadata === 'function') {
         cooperate.hydrateRoomMetadata(preview)
       }
+      // 概览只用于首次绘制；完成后恢复个人展开偏好，包括按需加载后代。
+      // 保持此标记会永久跳过展开状态和上次画布位置的恢复。
+      this.largeMapInitialOverview = false
+      await this.restorePersonalExpandState()
+      if (attemptId !== this._openAttemptId) return false
       await this.$nextTick()
       if (attemptId !== this._openAttemptId) return false
       cooperate.setPreviewApplied(false)
