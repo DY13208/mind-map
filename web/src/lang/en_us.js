@@ -398,7 +398,14 @@ export default {
     ai: 'AI',
     flowExpand: 'Complete flow',
     sopRegistry: 'SOP registry',
-    cooperate: 'Collab'
+    cooperate: 'Collab',
+    backToMainMap: 'Back to main map',
+    backToParentMap: 'Back to parent map',
+    mapNavUnsavedTitle: 'Unsaved changes',
+    mapNavUnsavedTip:
+      'This map has changes that are not saved to the server yet. Going back now may lose them. Go back anyway?',
+    mapNavLeaveAnyway: 'Go back',
+    mapNavStay: 'Stay here'
   },
   edit: {
     newFeatureNoticeTitle: 'New feature reminder',

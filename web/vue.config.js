@@ -44,6 +44,18 @@ const publicPath =
     ? '/'
     : './dist'
 
+// changeOrigin 会把 Host 改成协作服务地址，协作服务的来源校验（WebSocket 握手、写接口）
+// 只能靠 X-Forwarded-Host 认出浏览器实际打开的地址；http-proxy 的 xfwd 不给 WebSocket 补这个头。
+function forwardBrowserOrigin(proxyReq, req) {
+  const browserHost = String((req.headers && req.headers.host) || '').trim()
+  if (!browserHost || req.headers['x-forwarded-host']) return
+  proxyReq.setHeader('X-Forwarded-Host', browserHost)
+  proxyReq.setHeader(
+    'X-Forwarded-Proto',
+    req.connection && req.connection.encrypted ? 'https' : 'http'
+  )
+}
+
 module.exports = {
   publicPath,
   outputDir: '../dist',
@@ -177,12 +189,16 @@ module.exports = {
       '/collab-v2': {
         target: process.env.COLLAB_API || 'http://127.0.0.1:1234',
         changeOrigin: true,
-        ws: true
+        ws: true,
+        onProxyReq: forwardBrowserOrigin,
+        onProxyReqWs: forwardBrowserOrigin
       },
       '/api': {
         target: process.env.COLLAB_API || 'http://127.0.0.1:1234',
         changeOrigin: true,
-        ws: true
+        ws: true,
+        onProxyReq: forwardBrowserOrigin,
+        onProxyReqWs: forwardBrowserOrigin
       }
     }
   }

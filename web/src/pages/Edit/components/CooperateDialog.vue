@@ -358,6 +358,12 @@ import {
   saveMapView
 } from '@/utils/mapRefNav'
 import {
+  buildChildTrail,
+  consumeMapNavViewRestore,
+  ensureEntryNav,
+  writeChildEntryNav
+} from '@/utils/mapNavTrail'
+import {
   applyPersonalExpandState,
   collectPersonalExpandState,
   loadPersonalExpandState,
@@ -1313,7 +1319,7 @@ export default {
       this.$router.replace({ query }).catch(() => {})
     },
 
-    async restoreOpenedMapView() {
+    async restoreOpenedMapView(options = {}) {
       const snap = loadMapView(this.roomName)
       if (!snap || !this.mindMap) return
       restoreMapView(this.mindMap, snap)
@@ -1324,6 +1330,8 @@ export default {
         } catch (err) {
           // ignore missing historical selection
         }
+        // revealUid 会把选中节点移到视野中央；返回上级时要原样还原离开时的画布位置
+        if (options.exactView === true) restoreMapView(this.mindMap, snap)
       }
     },
 
@@ -1331,6 +1339,13 @@ export default {
       const gen = (this._mapOpenGen = (this._mapOpenGen || 0) + 1)
       await this.$nextTick()
       if (gen !== this._mapOpenGen) return
+      // 从子脑图「返回上级」：恢复离开时的画布位置和选中，不按 URL 里的 focus 重新定位
+      if (consumeMapNavViewRestore(this.roomName)) {
+        this._pendingShallowExpand = 0
+        this.clearShallowExpandQuery()
+        await this.restoreOpenedMapView({ exactView: true })
+        return
+      }
       const shallow =
         Number(this.$route.query.shallowExpand) ||
         Number(this._pendingShallowExpand) ||
@@ -1372,7 +1387,21 @@ export default {
     },
 
     async navigateToMapRef(ref) {
+      // 双击子脑图节点会同时触发 node_dblclick 和 map_ref_click：只处理第一次，
+      // 否则第二次会拿跳转前的房间号把子脑图条目的返回路径覆盖掉
+      if (this._mapRefNavigating) return
+      this._mapRefNavigating = true
+      try {
+        await this.openMapRefTarget(ref)
+      } finally {
+        this._mapRefNavigating = false
+      }
+    },
+
+    async openMapRefTarget(ref) {
       const current = roomFromLocation(this.$route)
+      // 必须在任何 await 之前读：此刻 history.state 一定还是上级脑图自己的条目
+      const parentNav = ensureEntryNav(current)
       this.persistCurrentMapView()
       let info
       try {
@@ -1436,7 +1465,17 @@ export default {
         }
         return
       }
-      this.$router.push({ query }).catch(() => {})
+      // 等待期间用户已经切到别的脑图：不再跳转，也不写返回路径
+      if (roomFromLocation(this.$route) !== current) return
+      const childTrail = buildChildTrail(parentNav, normalized.mapId)
+      try {
+        await this.$router.push({ query })
+      } catch (err) {
+        return
+      }
+      if (roomFromLocation(this.$route) !== normalized.mapId) return
+      if (childTrail.length) writeChildEntryNav(normalized.mapId, childTrail)
+      this.$bus.$emit('map_nav_context_change')
     },
 
     tryAutoJoin() {

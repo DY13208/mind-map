@@ -373,7 +373,14 @@ export default {
     openFileTip:
       'Vui lòng xuất tệp đang chỉnh sửa trước khi mở tệp, Cẩn thận mất nội dung',
     ai: 'AI',
-    cooperate: 'Cộng tác'
+    cooperate: 'Cộng tác',
+    backToMainMap: 'Về sơ đồ chính',
+    backToParentMap: 'Về sơ đồ cấp trên',
+    mapNavUnsavedTitle: 'Chưa lưu thay đổi',
+    mapNavUnsavedTip:
+      'Sơ đồ hiện tại còn thay đổi chưa được lưu lên máy chủ, quay lại bây giờ có thể mất các thay đổi này. Vẫn quay lại?',
+    mapNavLeaveAnyway: 'Vẫn quay lại',
+    mapNavStay: 'Ở lại'
   },
   edit: {
     newFeatureNoticeTitle: 'Nhắc nhở tính năng mới',
