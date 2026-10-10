@@ -95,6 +95,23 @@
         <span class="name">{{ $t('contextmenu.pasteNode') }}</span>
         <span class="desc">Ctrl + V</span>
       </div>
+      <template v-if="hasNodeAttachment && hasExplicitNodeContext">
+        <div class="splitLine"></div>
+        <div
+          class="item danger"
+          data-testid="delete-node-attachment"
+          @click="manageNodeAttachment('delete')"
+        >
+          <span class="name">删除附件</span>
+        </div>
+        <div
+          class="item"
+          data-testid="replace-node-attachment"
+          @click="manageNodeAttachment('replace')"
+        >
+          <span class="name">替换附件</span>
+        </div>
+      </template>
       <div class="splitLine"></div>
       <div class="item" data-testid="mapref" @click="openMapRef">
         <span class="name">{{ $t('contextmenu.mapRef') }}</span>
@@ -237,7 +254,8 @@ export default {
       numberLevel: '',
       subItemsShowLeft: false,
       isNodeMousedown: false,
-      selectedNodes: []
+      selectedNodes: [],
+      hasExplicitNodeContext: false
     }
   },
   computed: {
@@ -329,6 +347,16 @@ export default {
     },
     hasNote() {
       return !!this.node.getData('note')
+    },
+    hasNodeAttachment() {
+      const data = this.node && this.node.getData && this.node.getData()
+      return !!(
+        data &&
+        (data.attachmentId ||
+          data.attachmentUrl ||
+          data.attachmentName ||
+          data.attachmentStatus)
+      )
     },
     numberTypeList() {
       return numberTypeList[this.$i18n.locale] || numberTypeList.zh
@@ -465,6 +493,7 @@ export default {
       this.type = 'node'
       this.isShow = true
       this.node = node
+      this.hasExplicitNodeContext = true
       this.selectedNodes = this.collectSelectedNodes(node)
       const number = this.node && this.node.getData && this.node.getData('number')
       if (number) {
@@ -492,6 +521,7 @@ export default {
       this.type = 'node'
       this.isShow = true
       this.node = anchor
+      this.hasExplicitNodeContext = false
       this.selectedNodes = list.slice()
       const number = anchor && anchor.getData && anchor.getData('number')
       if (number) {
@@ -589,6 +619,30 @@ export default {
       this.$message.success(this.$t('mapRef.removed'))
     },
 
+    async manageNodeAttachment(action) {
+      const node = this.node
+      const uid = this.nodeUid(node)
+      if (
+        !this.hasExplicitNodeContext ||
+        !node ||
+        !uid ||
+        !['delete', 'replace'].includes(action) ||
+        !(await this.canExecuteCommand('SET_NODE_ATTACHMENT'))
+      ) {
+        return
+      }
+      const data = node.getData ? node.getData() || {} : {}
+      this.$bus.$emit('manageNodeAttachment', {
+        action,
+        uid,
+        node,
+        expectedAttachmentId: String(data.attachmentId || ''),
+        expectedAttachmentUrl: String(data.attachmentUrl || ''),
+        expectedAttachmentName: String(data.attachmentName || '')
+      })
+      this.hide()
+    },
+
     // 鼠标按下事件
     onMousedown(e) {
       if (e.which !== 3) {
@@ -654,6 +708,7 @@ export default {
       this.type = ''
       this.node = ''
       this.selectedNodes = []
+      this.hasExplicitNodeContext = false
       this.numberType = ''
       this.numberLevel = ''
     },

@@ -84,6 +84,7 @@ const methods = component.methods
 const opened = []
 const tabs = []
 const messages = []
+const managedNodes = []
 const previousOpen = global.window && global.window.open
 global.window = global.window || global
 global.window.open = (url, target, features) => {
@@ -94,6 +95,7 @@ const vm = {
   ...component.data(),
   $route: {},
   $message: { warning() {}, info(text) { messages.push(text) } },
+  $bus: { $emit: (event, node) => managedNodes.push({ event, node }) },
   openStoredAttachment: value => opened.push(['stored', value]),
   openExternalAttachment: value => opened.push(['external', value]),
   openHtmlInNewPage: data => methods.openHtmlInNewPage.call(vm, data),
@@ -123,18 +125,20 @@ assert.deepEqual(tabs, [
     features: 'noopener'
   }
 ])
-methods.onAttachmentClick.call(vm, {
+const busyNode = {
   getData: () => ({
     attachmentId: 'att-busy',
     attachmentName: '表.xlsx',
     attachmentStatus: 'processing'
   })
-})
+}
+methods.onAttachmentClick.call(vm, busyNode)
 assert.equal(opened.length, 2)
 assert.equal(tabs.length, 1)
-assert.equal(messages[0], '正在处理，请稍候')
+assert.deepEqual(managedNodes, [{ event: 'manageNodeAttachment', node: busyNode }])
 assert.ok(!attachmentSource.includes('$loading'))
-assert.ok(attachmentSource.includes("attachmentStatus: 'uploading'"))
+assert.ok(attachmentSource.includes('附件上传中；原附件会保留到新文件上传成功后再切换'))
+assert.ok(!attachmentSource.includes("attachmentStatus: 'uploading'"))
 assert.ok(attachmentSource.includes('waitForAttachmentReady'))
 
 const previousUrl = global.URL

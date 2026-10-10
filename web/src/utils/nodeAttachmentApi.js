@@ -260,20 +260,65 @@ export async function getNodeAttachment(roomKey, attachmentId) {
   )
 }
 
-export async function deleteNodeAttachment(roomKey, attachmentId, nodeUid = '') {
-  const query = nodeUid
-    ? `?node_uid=${encodeURIComponent(String(nodeUid))}`
-    : ''
+export async function getRoomRevision(roomKey) {
+  const data = await apiRequest(
+    `/api/files/${encodeURIComponent(roomKey)}?format=meta`,
+    { method: 'GET' }
+  )
+  const rawRevision = data
+    ? data.currentRevision != null
+      ? data.currentRevision
+      : data.revision != null
+      ? data.revision
+      : data.version != null
+      ? data.version
+      : undefined
+    : undefined
+  const revision = Number(rawRevision)
+  if (!Number.isSafeInteger(revision) || revision < 0) {
+    const err = new Error('无法获取导图当前修订号')
+    err.code = 'REVISION_UNAVAILABLE'
+    throw err
+  }
+  return revision
+}
+
+export async function deleteNodeAttachment(
+  roomKey,
+  attachmentId,
+  nodeUid,
+  options = {}
+) {
+  if (!nodeUid) throw new Error('删除节点附件必须指定 node_uid')
+  if (options.baseVersion == null) {
+    throw new Error('删除节点附件必须指定有效的 base_version')
+  }
+  const baseVersion = Number(options.baseVersion)
+  if (!Number.isSafeInteger(baseVersion) || baseVersion < 0) {
+    throw new Error('删除节点附件必须指定有效的 base_version')
+  }
+  const query = [
+    `node_uid=${encodeURIComponent(String(nodeUid))}`,
+    ...(options.confirmSopChange ? ['confirm_sop_change=true'] : []),
+    `base_version=${encodeURIComponent(String(baseVersion))}`
+  ].join('&')
   return apiRequest(
     `/api/files/${encodeURIComponent(roomKey)}/attachments/${encodeURIComponent(
       attachmentId
-    )}${query}`,
+    )}?${query}`,
     { method: 'DELETE' }
   )
 }
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function throwIfAborted(signal) {
+  if (!signal || !signal.aborted) return
+  const err = new Error('aborted')
+  err.name = 'AbortError'
+  throw err
 }
 
 export async function waitForAttachmentReady(
@@ -286,12 +331,11 @@ export async function waitForAttachmentReady(
   const started = Date.now()
   let last = null
   while (Date.now() - started <= timeoutMs) {
-    if (options.signal && options.signal.aborted) {
-      const err = new Error('aborted')
-      err.name = 'AbortError'
-      throw err
-    }
+    throwIfAborted(options.signal)
     const data = await getNodeAttachment(roomKey, attachmentId)
+    // A GET already in flight may finish after AbortController.abort().
+    // Check again before allowing its stale data into onUpdate or the caller.
+    throwIfAborted(options.signal)
     last = (data && data.attachment) || null
     if (typeof options.onUpdate === 'function') options.onUpdate(last)
     const status = String((last && last.status) || '')

@@ -1,5 +1,7 @@
 const assert = require('assert').strict
 const crypto = require('crypto')
+const { assertHistoryPgTestEnvironment } = require('./historyPgSafety')
+assertHistoryPgTestEnvironment()
 const storage = require('../bin/storage')
 const store = require('../bin/nodeKnowledge/store')
 
@@ -38,10 +40,12 @@ async function main() {
     await pool.query(
       `insert into room_nodes(room_key, uid, parent_uid, position, data, is_root, node_version)
        values ($1, 'root', null, 'a0', $2::jsonb, true, 1),
-              ($1, 'node-2', 'root', 'a1', $3::jsonb, false, 1)`,
+              ($1, 'node-1', 'root', 'a1', $3::jsonb, false, 1),
+              ($1, 'node-2', 'root', 'a2', $4::jsonb, false, 1)`,
       [
         roomKey,
         JSON.stringify({ uid: 'root', text: '根' }),
+        JSON.stringify({ uid: 'node-1', text: '原始附件节点', attachmentId: readyId }),
         JSON.stringify({ uid: 'node-2', text: '复用附件', attachmentId: readyId })
       ]
     )
@@ -62,11 +66,32 @@ async function main() {
       (await store.listMeta(pool, roomKey, { nodeUid: 'node-2' })).map(i => i.id),
       [readyId]
     )
+    await pool.query(
+      `update room_nodes
+       set data = data - 'attachmentId'
+       where room_key = $1 and uid = 'node-1'`,
+      [roomKey]
+    )
+    assert.deepEqual(
+      await store.listMeta(pool, roomKey, { nodeUid: 'node-1' }),
+      [],
+      'detached attachment must not remain in the original node listing'
+    )
+    assert.deepEqual(
+      (await store.listMeta(pool, roomKey, { nodeUid: 'node-2' })).map(i => i.id),
+      [readyId],
+      'a shared attachment must remain listed by another node that still points to it'
+    )
     assert.deepEqual(
       (await store.listMeta(pool, roomKey, { ids: [failedId] })).map(i => i.id),
       [failedId]
     )
     assert.deepEqual(await store.listMeta(pool, roomKey, { nodeUid: 'nobody' }), [])
+    assert.deepEqual(
+      await store.listMeta(pool, roomKey, { nodeUid: 'node-9' }),
+      [],
+      'normalized room must not use stale node_uid when that node has no current row'
+    )
 
     const head = await store.getTextSlice(pool, roomKey, readyId, { limit: 3 })
     assert.equal(head.text, '甲乙丙')

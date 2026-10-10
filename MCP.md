@@ -27,6 +27,7 @@ IP 由启动脚本探测，不要手写，也不要用 `127.0.0.1`（WorkBuddy �
 | `list_attachments` | 列出导图（或指定节点）的附件及解析状态，只返回元数据 |
 | `read_attachment` | 读取附件正文（服务端已提取的文本，含 PDF/Word/Excel/PPT 与图片 OCR），按字符分页 |
 | `upload_attachment` | 把文件挂到指定节点；网页可点击附件图标查看/下载 |
+| `delete_attachment` | 从指定节点解绑附件；保留文件对象、其他节点引用和历史版本 |
 | `list_todos` | 列出待办，可选同时读取已完成 |
 | `prepare_todo` | 读取待办并匹配任意SOP的C/P |
 | `complete_todo` | 全部C通过后把任务移动到已完成 |
@@ -124,6 +125,8 @@ read_attachment room_key="demo" attachment_id="<id>" offset=4000 length=4000
 
 默认单次 4000 字符、最多 20000 字符。`has_more=true` 时把 `next_offset` 当成下一次的 `offset` 继续读，直到 `has_more=false`。
 
+整张导图的列表包含仍保留在房间文件库中的附件记录，也可能包含已从节点解绑或被新文件替换的旧记录；按 `node_uid` 查询时以节点当前附件指向为准。解绑不会物理删除文件，也不会移除其他节点或历史版本中的引用。
+
 `status` 不是 `ready` 时不会有正文：`processing` 表示大文件仍在后台解析，稍后重试；`failed` 会给出 `errorMessage`（例如老式 `.doc` 不支持解析，需要人工下载打开）。这两种情况都应如实告知用户，不要编造附件内容。原始文件本身不经 MCP 返回，人类可在网页上预览或下载。
 
 ### 挂载附件（产物可点击查看）
@@ -146,6 +149,16 @@ upload_attachment room_key="demo" node="<uid>" source_url="https://..."
 ```
 
 成功后节点会带上 `attachmentId`，网页上出现附件图标，点击即可查看/下载。支持 txt/md/csv/pdf/docx/xlsx/html 与常见图片；单文件建议不超过约 24MB。
+
+对同一节点再次上传时，节点当前附件会指向这次上传的文件：内容相同会按房间内内容哈希复用同一个附件 id；内容不同会生成新附件 id 并替换节点当前元数据。被替换的旧文件仍保留在房间附件库和历史记录里，不会被上传操作物理删除。
+
+解绑节点当前附件时，必须明确提供节点和当前 `attachment_id`：
+
+```text
+delete_attachment room_key="demo" node="<uid>" attachment_id="<id>"
+```
+
+工具会把解绑作为协作变更写入修订和历史，并返回更新后的节点与 revision。若节点已指向另一附件，会返回 `ATTACHMENT_MISMATCH` 冲突并保留现状；先重新读取节点附件后再决定。SOP 节点只有在用户明确确认后才能传 `confirm_sop_change=true`。解绑只移除该节点的当前附件元数据，文件对象、共享节点和历史版本均保留。
 
 ---
 

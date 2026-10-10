@@ -336,7 +336,7 @@ async function applyCommittedLive(roomKey, command, committed) {
  * Trusted in-process mutation (caller already enforced ACL).
  * Used by Wiki→Mindmap sync — same commit path as HTTP node APIs.
  */
-async function executeTrustedOperation(roomKey, command) {
+async function executeTrustedOperation(roomKey, command, internalOptions = {}) {
   assertRoomWritable(roomKey)
   assertRateLimit(roomKey)
   if (command.type === 'node.update' || command.type === 'node.move') {
@@ -356,6 +356,18 @@ async function executeTrustedOperation(roomKey, command) {
             room.nodes && Object.keys(room.nodes).length
               ? room.nodes
               : getLiveObject(roomKey) || {}
+          if (typeof internalOptions.validateBase === 'function') {
+            const validation = await internalOptions.validateBase({
+              nodes: base,
+              currentVersion,
+              room
+            })
+            if (validation && validation.noop) {
+              const err = new Error('操作无需更新')
+              err.operationNoop = validation.result || {}
+              throw err
+            }
+          }
           const tempDoc = new Y.Doc()
           try {
             mindDoc.applyObjectToDoc(tempDoc, base, { replace: true })
@@ -387,6 +399,9 @@ async function executeTrustedOperation(roomKey, command) {
     })
     return live || committed
   } catch (err) {
+    if (err && err.operationNoop) {
+      return { noop: true, ...err.operationNoop }
+    }
     recordOperation({
       mapId: roomKey,
       version: 0,
@@ -398,11 +413,16 @@ async function executeTrustedOperation(roomKey, command) {
   }
 }
 
-async function executeOperation(req, roomKey, command) {
+async function executeOperation(req, roomKey, command, internalOptions = {}) {
   await roomAcl.assertRoomAccess(getPool(), req, roomKey, 'edit')
   const started = Date.now()
   try {
-    const committed = await executeTrustedOperation(roomKey, command)
+    const committed = await executeTrustedOperation(
+      roomKey,
+      command,
+      internalOptions
+    )
+    if (committed && committed.noop) return committed
     const version = Number(
       (committed.operation && committed.operation.version) || 0
     )
@@ -441,6 +461,143 @@ async function executeOperation(req, roomKey, command) {
       code: err.code || 'OPERATION_REJECTED'
     })
     throw err
+  }
+}
+
+function attachmentDetachError(message, code, statusCode, details) {
+  const err = new Error(message)
+  err.code = code
+  err.statusCode = statusCode
+  if (details) err.details = details
+  return err
+}
+
+async function detachNodeAttachment(req, input = {}) {
+  const roomKey = String(input.roomKey || '').trim()
+  const nodeUid = String(input.nodeUid || '').trim()
+  const attachmentId = String(input.attachmentId || '').trim()
+  const confirmSopChange = input.confirmSopChange === true
+  const baseVersion = input.baseVersion
+  if (!roomKey) {
+    throw attachmentDetachError('缺少 room_key', 'ROOM_KEY_REQUIRED', 400)
+  }
+  if (!nodeUid) {
+    throw attachmentDetachError('缺少 node_uid', 'NODE_UID_REQUIRED', 400)
+  }
+  if (!attachmentId) {
+    throw attachmentDetachError('缺少 attachment_id', 'ATTACHMENT_ID_REQUIRED', 400)
+  }
+
+  const attachmentFields = [
+    'attachmentUrl',
+    'attachmentName',
+    'attachmentId',
+    'attachmentMimeType',
+    'attachmentStatus',
+    'attachmentError',
+    'attachmentExtractedText',
+    'attachmentProgress'
+  ]
+  const patch = Object.fromEntries(attachmentFields.map(field => [field, null]))
+  const commandBody = {
+    confirm_sop_change: confirmSopChange,
+    ...(baseVersion == null ? {} : { baseVersion })
+  }
+  const command = normalizeCommand(
+    req,
+    roomKey,
+    commandBody,
+    'node.update',
+    {
+      uid: nodeUid,
+      patch,
+      confirm_sop_change: confirmSopChange
+    }
+  )
+  const committed = await executeOperation(req, roomKey, command, {
+    validateBase: ({ nodes, currentVersion }) => {
+      const node = nodes && nodes[nodeUid]
+      if (!node) {
+        throw attachmentDetachError(
+          '节点不存在',
+          'NODE_NOT_FOUND',
+          404,
+          { node_uid: nodeUid }
+        )
+      }
+      const data = node.data || {}
+      const currentAttachmentId = String(data.attachmentId || '').trim()
+      const hasAttachmentMetadata = attachmentFields.some(field =>
+        Object.prototype.hasOwnProperty.call(data, field)
+      )
+      if (!currentAttachmentId && !hasAttachmentMetadata) {
+        return {
+          noop: true,
+          result: {
+            version: currentVersion,
+            revision: currentVersion,
+            nodeUid,
+            node: { uid: nodeUid, data }
+          }
+        }
+      }
+      if (currentAttachmentId !== attachmentId) {
+        throw attachmentDetachError(
+          '节点当前附件已变化，请刷新后重试',
+          'ATTACHMENT_MISMATCH',
+          409,
+          {
+            node_uid: nodeUid,
+            expected_attachment_id: attachmentId,
+            current_attachment_id: currentAttachmentId || null
+          }
+        )
+      }
+      const sopGuard = require('../src/utils/collabSopGuard')
+      if (sopGuard.isSopLabel(data) && !confirmSopChange) {
+        throw sopGuard.sopConfirmError({
+          operationType: 'node.update',
+          targetUid: nodeUid,
+          detectedSopChange: true,
+          reason: 'sop_root_attachment_detach',
+          confirm_sop_change: false,
+          required: true,
+          guardFile: 'collabSopGuard.js',
+          guardFunction: 'inspectSopChange'
+        })
+      }
+    }
+  })
+
+  const version = committed.noop
+    ? Number(committed.version || 0)
+    : Number((committed.operation && committed.operation.version) || 0)
+  const node = committed.noop
+    ? committed.node
+    : committed.nodes && committed.nodes[nodeUid]
+  if (!node) {
+    throw attachmentDetachError('节点不存在', 'NODE_NOT_FOUND', 404, {
+      node_uid: nodeUid
+    })
+  }
+  const op =
+    !committed.noop && committed.operation
+      ? operationResponse(roomKey, committed)
+      : {}
+  const nodeResult = { uid: nodeUid, data: node.data || {} }
+  return {
+    ...op,
+    ok: true,
+    room_key: roomKey,
+    node_uid: nodeUid,
+    attachment_id: attachmentId,
+    detached: !committed.noop,
+    ...(committed.noop ? { already_detached: true } : {}),
+    retained: true,
+    revision: version,
+    version,
+    node: nodeResult,
+    data: nodeResult.data
   }
 }
 
@@ -1611,7 +1768,13 @@ async function handleApi(req, res) {
     return true
   }
 
-  if (await require('./nodeKnowledge').handleApi(req, res, { url, pathname })) {
+  if (
+    await require('./nodeKnowledge').handleApi(req, res, {
+      url,
+      pathname,
+      detachAttachment: input => detachNodeAttachment(req, input)
+    })
+  ) {
     return true
   }
 

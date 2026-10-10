@@ -70,6 +70,7 @@ async function main() {
   const originalGetContentById = store.getContentById
   const originalListMeta = store.listMeta
   const originalGetTextSlice = store.getTextSlice
+  const originalRemoveById = store.removeById
   const accessCalls = []
   try {
     roomAcl.assertRoomAccess = async (db, req, roomKey, action) => {
@@ -309,11 +310,129 @@ async function main() {
       assert.equal(denied.statusCode, 403, pathname)
       assert.equal(JSON.parse(denied.body).code, 'FORBIDDEN', pathname)
     }
+
+    // DELETE now detaches through the collaborative mutation callback. It
+    // must never delete the stored object/row, and forwards the restore guard.
+    const detachCalls = []
+    let removeByIdCalls = 0
+    store.removeById = async () => {
+      removeByIdCalls += 1
+      throw new Error('DELETE must not remove the retained attachment row')
+    }
+    roomAcl.assertRoomAccess = async (db, req, roomKey, action) => {
+      accessCalls.push({ roomKey, action })
+    }
+    const detached = createResponse()
+    await httpApi.handleApi(
+      {
+        method: 'DELETE',
+        url: '/api/files/room-demo/attachments/att-1?node_uid=node-9&base_version=7&confirm_sop_change=1'
+      },
+      detached,
+      {
+        pathname: '/api/files/room-demo/attachments/att-1',
+        db: {},
+        detachAttachment: async input => {
+          detachCalls.push(input)
+          return {
+            ok: true,
+            room_key: input.roomKey,
+            node_uid: input.nodeUid,
+            attachment_id: input.attachmentId,
+            detached: true,
+            retained: true,
+            revision: input.baseVersion + 1,
+            node: { uid: input.nodeUid, data: {} }
+          }
+        }
+      }
+    )
+    assert.equal(detached.statusCode, 200)
+    assert.equal(JSON.parse(detached.body).retained, true)
+    assert.deepEqual(detachCalls, [
+      {
+        roomKey: 'room-demo',
+        nodeUid: 'node-9',
+        attachmentId: 'att-1',
+        confirmSopChange: true,
+        baseVersion: 7
+      }
+    ])
+    assert.deepEqual(accessCalls.at(-1), {
+      roomKey: 'room-demo',
+      action: 'edit'
+    })
+
+    const missingNodeUid = createResponse()
+    await httpApi.handleApi(
+      { method: 'DELETE', url: '/api/files/room-demo/attachments/att-1' },
+      missingNodeUid,
+      {
+        pathname: '/api/files/room-demo/attachments/att-1',
+        db: {},
+        detachAttachment: async () => {
+          throw new Error('node_uid validation must happen first')
+        }
+      }
+    )
+    assert.equal(missingNodeUid.statusCode, 400)
+    assert.equal(JSON.parse(missingNodeUid.body).code, 'NODE_UID_REQUIRED')
+
+    const forbiddenDetach = createResponse()
+    roomAcl.assertRoomAccess = async () => {
+      const error = new Error('无权编辑附件')
+      error.statusCode = 403
+      error.code = 'FORBIDDEN'
+      throw error
+    }
+    await httpApi.handleApi(
+      {
+        method: 'DELETE',
+        url: '/api/files/room-demo/attachments/att-1?node_uid=node-9&base_version=7'
+      },
+      forbiddenDetach,
+      {
+        pathname: '/api/files/room-demo/attachments/att-1',
+        db: {},
+        detachAttachment: async () => {
+          throw new Error('ACL denial must happen before detach')
+        }
+      }
+    )
+    assert.equal(forbiddenDetach.statusCode, 403)
+    assert.equal(JSON.parse(forbiddenDetach.body).code, 'FORBIDDEN')
+
+    const conflictDetach = createResponse()
+    roomAcl.assertRoomAccess = async () => {}
+    await httpApi.handleApi(
+      {
+        method: 'DELETE',
+        url: '/api/files/room-demo/attachments/att-1?node_uid=node-9&base_version=7'
+      },
+      conflictDetach,
+      {
+        pathname: '/api/files/room-demo/attachments/att-1',
+        db: {},
+        detachAttachment: async () => {
+          const error = new Error('节点当前附件已变化，请刷新后重试')
+          error.statusCode = 409
+          error.code = 'ATTACHMENT_MISMATCH'
+          error.details = { current_attachment_id: 'att-2' }
+          throw error
+        }
+      }
+    )
+    assert.equal(conflictDetach.statusCode, 409)
+    assert.deepEqual(JSON.parse(conflictDetach.body).details, {
+      current_attachment_id: 'att-2'
+    })
+    assert.equal(removeByIdCalls, 0)
   } finally {
     roomAcl.assertRoomAccess = originalAssertRoomAccess
     store.getContentById = originalGetContentById
     store.listMeta = originalListMeta
     store.getTextSlice = originalGetTextSlice
+    store.removeById = originalRemoveById
   }
 
   console.log('nodeKnowledge HTTP attachment tests passed')

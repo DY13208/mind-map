@@ -12,6 +12,7 @@
 import { roomFromLocation } from '@/utils/roomLocation'
 import {
   getNodeAttachment,
+  getRoomRevision,
   deleteNodeAttachment,
   uploadNodeAttachment,
   waitForAttachmentReady,
@@ -30,7 +31,18 @@ export default {
   data() {
     return {
       pendingNodes: [],
-      inflight: {}
+      inflight: {},
+      operationEpochs: {},
+      operationSequence: 0,
+      navigationEpoch: 0,
+      destroyed: false
+    }
+  },
+  watch: {
+    $route() {
+      this.navigationEpoch += 1
+      this.pendingNodes = []
+      Object.keys(this.inflight).forEach(uid => this.abortInflight(uid))
     }
   },
   created() {
@@ -41,15 +53,111 @@ export default {
     this.hydrateExistingAttachments()
   },
   beforeDestroy() {
+    this.destroyed = true
+    this.navigationEpoch += 1
+    this.pendingNodes = []
     this.$bus.$off('selectAttachment', this.onSelectAttachment)
     this.$bus.$off('manageNodeAttachment', this.onManageAttachment)
     Object.keys(this.inflight).forEach(uid => this.abortInflight(uid))
   },
   methods: {
-    abortInflight(uid) {
+    abortInflight(uid, expectedAttachmentId = '') {
       const job = this.inflight[uid]
-      if (job && job.controller) job.controller.abort()
+      if (
+        expectedAttachmentId &&
+        job &&
+        String(job.attachmentId || '') !== String(expectedAttachmentId)
+      ) {
+        return false
+      }
       this.$delete(this.inflight, uid)
+      if (job && job.controller) job.controller.abort()
+      return !!job
+    },
+    nodeUid(item) {
+      if (!item) return ''
+      return String(
+        (item.getData && item.getData('uid')) ||
+          item.uid ||
+          (item.node && item.node.uid) ||
+          ''
+      )
+    },
+    liveNode(uid) {
+      const renderer = this.mindMap && this.mindMap.renderer
+      return uid && renderer && typeof renderer.findNodeByUid === 'function'
+        ? renderer.findNodeByUid(uid)
+        : null
+    },
+    captureTarget(item, roomKey, expected = {}) {
+      const uid = this.nodeUid(item)
+      const node = this.liveNode(uid) || this.resolveNode(item)
+      if (!uid || !node) return null
+      const data = (node.getData && node.getData()) || {}
+      return {
+        uid,
+        node,
+        roomKey,
+        navigationEpoch:
+          expected.navigationEpoch != null
+            ? expected.navigationEpoch
+            : this.navigationEpoch,
+        expectedAttachmentId:
+          expected.expectedAttachmentId != null
+            ? String(expected.expectedAttachmentId)
+            : String(data.attachmentId || ''),
+        expectedAttachmentUrl:
+          expected.expectedAttachmentUrl != null
+            ? String(expected.expectedAttachmentUrl)
+            : String(data.attachmentUrl || ''),
+        expectedAttachmentName:
+          expected.expectedAttachmentName != null
+            ? String(expected.expectedAttachmentName)
+            : String(data.attachmentName || ''),
+        replacementIntentToken: expected.replacementIntentToken || 0
+      }
+    },
+    roomIsCurrent(roomKey, navigationEpoch) {
+      return (
+        !this.destroyed &&
+        navigationEpoch === this.navigationEpoch &&
+        roomFromLocation(this.$route) === roomKey
+      )
+    },
+    targetIsCurrent(target) {
+      if (
+        !target ||
+        !this.roomIsCurrent(target.roomKey, target.navigationEpoch)
+      ) {
+        return false
+      }
+      const node = this.liveNode(target.uid)
+      if (!node) return false
+      const data = (node.getData && node.getData()) || {}
+      const attachmentId = String(data.attachmentId || '')
+      if (attachmentId !== target.expectedAttachmentId) return false
+      if (attachmentId) return true
+      return (
+        String(data.attachmentUrl || '') === target.expectedAttachmentUrl &&
+        String(data.attachmentName || '') === target.expectedAttachmentName
+      )
+    },
+    beginOperation(target) {
+      const token = ++this.operationSequence
+      this.$set(this.operationEpochs, target.uid, token)
+      return token
+    },
+    operationIsCurrent(target, token) {
+      return (
+        this.targetIsCurrent(target) &&
+        this.operationEpochs[target.uid] === token
+      )
+    },
+    operationTokenIsCurrent(uid, token) {
+      return (
+        !this.destroyed &&
+        this.operationEpochs[uid] === token
+      )
     },
     resolveNode(item) {
       const renderer = this.mindMap && this.mindMap.renderer
@@ -63,6 +171,62 @@ export default {
         item ||
         null
       )
+    },
+    applyLocalAttachment(node, patch) {
+      if (!node || !patch) return
+      const renderer = this.mindMap && this.mindMap.renderer
+      if (renderer && typeof renderer.setNodeData === 'function') {
+        renderer.setNodeData(node, patch)
+      } else if (node.nodeData && node.nodeData.data) {
+        Object.assign(node.nodeData.data, patch)
+      }
+      if (typeof node.reRender === 'function') {
+        node.reRender(['attachment'])
+      } else if (
+        renderer &&
+        typeof renderer.reRenderNodeCheckChange === 'function'
+      ) {
+        renderer.reRenderNodeCheckChange(node)
+      }
+    },
+    applyDetachedResponse(target, result) {
+      if (!this.roomIsCurrent(target.roomKey, target.navigationEpoch)) return false
+      const node = this.liveNode(target.uid)
+      if (!node) return false
+      const current = (node.getData && node.getData()) || {}
+      const currentId = String(current.attachmentId || '')
+      if (currentId && currentId !== target.expectedAttachmentId) return false
+      if (
+        !currentId &&
+        (String(current.attachmentUrl || '') !== target.expectedAttachmentUrl ||
+          String(current.attachmentName || '') !== target.expectedAttachmentName) &&
+        (current.attachmentUrl || current.attachmentName)
+      ) return false
+      const serverNode = result && result.node
+      const serverData =
+        (serverNode && serverNode.data) || (result && result.data) || null
+      const serverId = String((serverData && serverData.attachmentId) || '')
+      if (serverId && serverId !== target.expectedAttachmentId) return false
+      const fields = [
+        'attachmentUrl',
+        'attachmentName',
+        'attachmentId',
+        'attachmentMimeType',
+        'attachmentStatus',
+        'attachmentError',
+        'attachmentExtractedText',
+        'attachmentProgress'
+      ]
+      const patch = {}
+      fields.forEach(key => {
+        patch[key] = serverData && Object.prototype.hasOwnProperty.call(serverData, key)
+          ? serverData[key]
+          : key === 'attachmentProgress'
+          ? 0
+          : ''
+      })
+      this.applyLocalAttachment(node, patch)
+      return true
     },
     applyAttachment(item, url, name, meta, options = {}) {
       const node = this.resolveNode(item)
@@ -100,45 +264,6 @@ export default {
         renderer.reRenderNodeCheckChange(node)
       }
     },
-    snapshotOf(node) {
-      const data = (node && node.getData && node.getData()) || {}
-      return {
-        attachmentUrl: data.attachmentUrl || '',
-        attachmentName: data.attachmentName || '',
-        attachmentId: data.attachmentId || '',
-        attachmentMimeType: data.attachmentMimeType || '',
-        attachmentStatus: data.attachmentStatus || '',
-        attachmentError: data.attachmentError || '',
-        attachmentExtractedText: data.attachmentExtractedText || '',
-        attachmentProgress: data.attachmentProgress
-      }
-    },
-    restoreSnapshot(item, snapshot) {
-      if (!snapshot) {
-        this.applyAttachment(item, '', '', {
-          attachmentId: '',
-          attachmentMimeType: '',
-          attachmentStatus: '',
-          attachmentError: '',
-          attachmentExtractedText: '',
-          attachmentProgress: 0
-        })
-        return
-      }
-      this.applyAttachment(
-        item,
-        snapshot.attachmentUrl || '',
-        snapshot.attachmentName || '',
-        {
-          attachmentId: snapshot.attachmentId || '',
-          attachmentMimeType: snapshot.attachmentMimeType || '',
-          attachmentStatus: snapshot.attachmentStatus || '',
-          attachmentError: snapshot.attachmentError || '',
-          attachmentExtractedText: snapshot.attachmentExtractedText || '',
-          attachmentProgress: snapshot.attachmentProgress || 0
-        }
-      )
-    },
     metaFromAttachment(attachment, file, extras = {}) {
       const saved = attachment || {}
       return {
@@ -160,6 +285,7 @@ export default {
     },
     async hydrateExistingAttachments() {
       const roomKey = roomFromLocation(this.$route)
+      const navigationEpoch = this.navigationEpoch
       const root = this.mindMap && this.mindMap.renderer && this.mindMap.renderer.root
       if (!roomKey || !root) return
       const nodes = []
@@ -170,29 +296,30 @@ export default {
       }
       visit(root)
       for (let index = 0; index < nodes.length; index += 1) {
-        const node = nodes[index]
-        const data = node.getData() || {}
-        const status = String(data.attachmentStatus || '').toLowerCase()
-        if (status === 'uploading' && !data.attachmentId) {
-          this.restoreSnapshot(node, {
-            attachmentUrl: '',
-            attachmentName: '',
-            attachmentId: '',
-            attachmentMimeType: '',
-            attachmentStatus: '',
-            attachmentError: '',
-            attachmentExtractedText: '',
-            attachmentProgress: 0
-          })
-          continue
-        }
+        const initialNode = nodes[index]
+        const initialData = initialNode.getData() || {}
+        const target = this.captureTarget(initialNode, roomKey, {
+          expectedAttachmentId: initialData.attachmentId,
+          navigationEpoch
+        })
+        if (
+          !target ||
+          !initialData.attachmentId ||
+          !this.targetIsCurrent(target)
+        ) continue
         try {
-          const result = await getNodeAttachment(roomKey, data.attachmentId)
+          const result = await getNodeAttachment(
+            roomKey,
+            target.expectedAttachmentId
+          )
+          if (!this.targetIsCurrent(target)) continue
+          const node = this.liveNode(target.uid)
+          const data = (node && node.getData && node.getData()) || {}
           const attachment = result && result.attachment
           if (!attachment) continue
           const nextStatus = attachment.status || data.attachmentStatus
           this.applyAttachment(
-            node,
+            { uid: target.uid, node },
             data.attachmentUrl || '',
             data.attachmentName || attachment.fileName || '',
             {
@@ -213,7 +340,11 @@ export default {
             }
           )
           if (attachment.status === 'processing' || attachment.status === 'pending') {
-            this.watchAttachment(node, roomKey, attachment.id || data.attachmentId)
+            this.watchAttachment(
+              { uid: target.uid, node },
+              roomKey,
+              attachment.id || target.expectedAttachmentId
+            )
           }
         } catch (err) {
           // 单个历史附件不可读取时不影响其余节点。
@@ -221,33 +352,50 @@ export default {
       }
     },
     watchAttachment(item, roomKey, attachmentId, options = {}) {
-      const node = this.resolveNode(item)
-      const uid = (node && node.getData && node.getData('uid')) || (item && item.uid)
-      if (!uid || !attachmentId) return
+      const uid = this.nodeUid(item)
+      const liveNode = this.liveNode(uid)
+      const data = (liveNode && liveNode.getData && liveNode.getData()) || {}
+      const target = this.captureTarget(liveNode || item, roomKey, {
+        expectedAttachmentId: attachmentId,
+        expectedAttachmentUrl: data.attachmentUrl,
+        expectedAttachmentName: data.attachmentName
+      })
+      if (!uid || !attachmentId || !target || !this.targetIsCurrent(target)) return
       this.abortInflight(uid)
       const controller =
         typeof AbortController !== 'undefined' ? new AbortController() : { abort() {}, signal: { aborted: false } }
-      this.$set(this.inflight, uid, { controller, attachmentId })
+      const task = { controller, attachmentId, roomKey, target }
+      this.$set(this.inflight, uid, task)
       waitForAttachmentReady(roomKey, attachmentId, {
         signal: controller.signal,
         onUpdate: attachment => {
-          if (this.inflight[uid] && this.inflight[uid].attachmentId !== attachmentId) return
+          if (
+            this.inflight[uid] !== task ||
+            !this.targetIsCurrent(target)
+          ) return
+          const node = this.liveNode(uid)
+          const current = (node && node.getData && node.getData()) || {}
           this.applyAttachment(
             { uid, node },
-            '',
-            (attachment && attachment.fileName) || '',
+            current.attachmentUrl || '',
+            (attachment && attachment.fileName) || current.attachmentName || '',
             this.metaFromAttachment(attachment, null, { progress: 100 }),
             { persist: false, progressOnly: true }
           )
         }
       })
         .then(attachment => {
-          if (this.inflight[uid] && this.inflight[uid].attachmentId !== attachmentId) return
-          if (!attachment) return
+          if (
+            this.inflight[uid] !== task ||
+            !this.targetIsCurrent(target) ||
+            !attachment
+          ) return
+          const node = this.liveNode(uid)
+          const current = (node && node.getData && node.getData()) || {}
           this.applyAttachment(
             { uid, node },
-            '',
-            attachment.fileName || '',
+            current.attachmentUrl || '',
+            attachment.fileName || current.attachmentName || '',
             this.metaFromAttachment(attachment, null, { progress: 100 })
           )
           if (attachment.status === 'failed') {
@@ -260,7 +408,7 @@ export default {
           if (err && err.name === 'AbortError') return
         })
         .finally(() => {
-          if (this.inflight[uid] && this.inflight[uid].attachmentId === attachmentId) {
+          if (this.inflight[uid] === task) {
             this.$delete(this.inflight, uid)
           }
         })
@@ -276,50 +424,103 @@ export default {
         this.$message.warning('请先进入协作房间后再上传附件')
         return
       }
-      // Keep the selected identities. Collaboration renders may replace node
-      // instances while the file picker/upload is open.
-      this.pendingNodes = list.map(node => ({ uid: node.uid, node }))
+      // Snapshot the intended target and attachment before the native picker.
+      // Collaboration may replace node instances while the picker is open.
+      this.pendingNodes = list
+        .map(node => this.captureTarget(node, roomKey))
+        .filter(Boolean)
       this.$refs.fileInput && this.$refs.fileInput.click()
     },
     async onManageAttachment(item) {
-      const node = this.resolveNode(item)
-      const data = (node && node.getData && node.getData()) || {}
-      const attachmentId = String(data.attachmentId || '')
-      const uid = String(data.uid || (node && node.uid) || '')
-      const status = String(data.attachmentStatus || '').toLowerCase()
-      if (!node || !attachmentId || !['pending', 'processing', 'failed'].includes(status)) {
+      const action = item && item.action ? item.action : 'replace'
+      const itemNode = (item && item.node) || item
+      const roomKey = roomFromLocation(this.$route)
+      const target = this.captureTarget(itemNode, roomKey, item || {})
+      if (!roomKey || !target || !this.targetIsCurrent(target)) {
+        this.$message.warning('节点附件已发生变化，请重新打开附件菜单')
         return
       }
-      const roomKey = roomFromLocation(this.$route)
-      if (!roomKey) return
-      const busy = status === 'pending' || status === 'processing'
+      const node = this.liveNode(target.uid)
+      const data = (node && node.getData && node.getData()) || {}
+      const hasAttachment = !!(
+        target.expectedAttachmentId ||
+        target.expectedAttachmentUrl ||
+        target.expectedAttachmentName ||
+        data.attachmentStatus
+      )
+      if (!hasAttachment || !['delete', 'replace'].includes(action)) return
+      const fileName = target.expectedAttachmentName || '未命名附件'
       try {
         await this.$confirm(
-          busy
-            ? '将停止等待当前附件解析、移除该附件，并选择新文件重新上传。已开始的服务端解析结果不会再写回节点。'
-            : '将移除解析失败的附件，并选择新文件重新上传。',
-          busy ? '终止解析并重新上传' : '重新上传附件',
+          action === 'delete'
+            ? `确定从当前节点删除附件“${fileName}”吗？这只会解除当前节点的引用，服务端保留文件，也不影响其他节点。`
+            : `将为当前节点选择新文件。附件“${fileName}”会继续保留，直到新文件上传成功后才切换；取消或上传失败时原附件不变。`,
+          action === 'delete' ? '删除节点附件' : '替换节点附件',
           {
-            confirmButtonText: busy ? '终止并选择文件' : '移除并选择文件',
+            confirmButtonText: action === 'delete' ? '删除附件' : '选择文件',
             cancelButtonText: '取消',
-            type: 'warning'
+            type: action === 'delete' ? 'warning' : 'info'
           }
         )
       } catch (err) {
         return
       }
-      try {
-        const result = await deleteNodeAttachment(roomKey, attachmentId, uid)
-        this.abortInflight(uid)
-        this.restoreSnapshot(node, null)
-        this.pendingNodes = [{ uid, node }]
+      if (!this.targetIsCurrent(target)) {
+        this.$message.warning('节点附件已发生变化，请重新操作')
+        return
+      }
+      if (action === 'replace') {
+        target.replacementIntentToken = this.beginOperation(target)
+        this.pendingNodes = [target]
         this.$refs.fileInput && this.$refs.fileInput.click()
-        const attachment = result && result.attachment
-        if (attachment && attachment.shared) {
-          this.$message.info('该附件仍被其他节点使用，已仅从当前节点移除')
+        return
+      }
+
+      this.beginOperation(target)
+      try {
+        if (target.expectedAttachmentId) {
+          const baseVersion = await getRoomRevision(roomKey)
+          if (!this.targetIsCurrent(target)) {
+            this.$message.warning('节点附件已发生变化，请重新操作')
+            return
+          }
+          const result = await deleteNodeAttachment(
+            roomKey,
+            target.expectedAttachmentId,
+            target.uid,
+            { confirmSopChange: true, baseVersion }
+          )
+          const updatedLocally = this.applyDetachedResponse(target, result)
+          this.abortInflight(target.uid, target.expectedAttachmentId)
+          if (result && result.already_detached) {
+            this.$message.info('当前节点已解除该附件引用，文件仍保留在房间中')
+          } else if (!updatedLocally) {
+            this.$message.info('旧附件引用已解除；节点已有更新内容，已保留当前内容')
+          } else {
+            this.$message.success('已从当前节点删除附件，文件仍保留在房间中')
+          }
+        } else {
+          // Legacy URL-only attachments have no server attachment record to
+          // DELETE; clear only the current node's pointer using the normal
+          // collaboration command. No remote URL or file is removed.
+          if (!this.targetIsCurrent(target)) return
+          this.abortInflight(target.uid)
+          this.applyAttachment(node, '', '', {
+            attachmentId: '',
+            attachmentMimeType: '',
+            attachmentStatus: '',
+            attachmentError: '',
+            attachmentExtractedText: '',
+            attachmentProgress: 0
+          })
+          this.$message.success('已解除当前节点的附件引用')
         }
       } catch (err) {
-        this.$message.error((err && err.message) || '移除附件失败')
+        if (err && (err.code === 'ATTACHMENT_MISMATCH' || err.statusCode === 409)) {
+          this.$message.warning('节点附件已被其他操作更新，请刷新后重试')
+          return
+        }
+        this.$message.error((err && err.message) || '删除附件失败')
       }
     },
     async onFilePicked(event) {
@@ -336,79 +537,90 @@ export default {
         return
       }
       const roomKey = roomFromLocation(this.$route)
-      const mindMap =
-        this.mindMap ||
-        (pendingNodes[0] && pendingNodes[0].node && pendingNodes[0].node.mindMap) ||
-        null
-      if (!mindMap || !roomKey) {
+      const validTargets = pendingNodes.filter(
+        target =>
+          target.roomKey === roomKey &&
+          this.targetIsCurrent(target) &&
+          (!target.replacementIntentToken ||
+            this.operationTokenIsCurrent(
+              target.uid,
+              target.replacementIntentToken
+            ))
+      )
+      if (!this.mindMap || !roomKey) {
         this.$message.error('无法上传：缺少导图或房间')
         return
       }
-      const snapshots = pendingNodes.map(item => ({
-        ...item,
-        snapshot: this.snapshotOf(this.resolveNode(item))
+      if (!validTargets.length) {
+        this.$message.warning('目标节点或附件已发生变化，请重新选择节点')
+        return
+      }
+      const operations = validTargets.map(target => ({
+        target,
+        token: this.beginOperation(target)
       }))
-      snapshots.forEach(item => {
-        this.applyAttachment(
-          item,
-          '',
-          file.name,
-          {
-            attachmentId: '',
-            attachmentMimeType: file.type || '',
-            attachmentStatus: 'uploading',
-            attachmentError: '',
-            attachmentExtractedText: '',
-            attachmentProgress: 0
-          },
-          { persist: false }
-        )
-      })
+      let uploadNotice = null
+      if (typeof this.$message === 'function') {
+        uploadNotice = this.$message({
+          message: '附件上传中；原附件会保留到新文件上传成功后再切换',
+          type: 'info',
+          duration: 0,
+          showClose: true
+        })
+      } else if (this.$message && this.$message.info) {
+        this.$message.info('附件上传中；原附件会保留到新文件上传成功后再切换')
+      }
       try {
-        let lastPercent = -1
         const res = await uploadNodeAttachment(roomKey, {
           file,
           fileName: file.name,
           mimeType: file.type || 'application/octet-stream',
-          nodeUid: pendingNodes[0] && pendingNodes[0].uid,
-          sourceKind: 'attachment',
-          onUploadProgress: evt => {
-            const percent = Number(evt && evt.percent) || 0
-            if (percent === lastPercent) return
-            lastPercent = percent
-            snapshots.forEach(item => {
-              this.applyAttachment(
-                item,
-                '',
-                file.name,
-                {
-                  attachmentId: '',
-                  attachmentMimeType: file.type || '',
-                  attachmentStatus: 'uploading',
-                  attachmentError: '',
-                  attachmentExtractedText: '',
-                  attachmentProgress: percent
-                },
-                { persist: false, progressOnly: true }
-              )
-            })
-          }
+          nodeUid: validTargets[0].uid,
+          sourceKind: 'attachment'
         })
-        const attachment = (res && res.attachment) || {}
-        snapshots.forEach(item => {
+        const attachment = (res && (res.attachment || (res.data && res.data.attachment))) || {}
+        if (!attachment.id) {
+          this.$message.error('上传已完成，但服务端未返回附件 ID；原附件保持不变')
+          return
+        }
+        let applied = 0
+        const attachedTargets = []
+        operations.forEach(({ target, token }) => {
+          if (!this.operationIsCurrent(target, token)) return
+          const node = this.liveNode(target.uid)
+          if (!node) return
+          this.abortInflight(target.uid)
           this.applyAttachment(
-            item,
+            { uid: target.uid, node },
             '',
             attachment.fileName || file.name,
             this.metaFromAttachment(attachment, file)
           )
+          applied += 1
+          attachedTargets.push({ uid: target.uid, token })
         })
+        if (!applied) {
+          this.$message.warning('上传已完成，但目标节点已变化；附件未替换到节点')
+          return
+        }
         if (attachment.status === 'ready') {
           this.$message.success('已添加')
         } else if (attachment.status === 'processing' || attachment.status === 'pending') {
           this.$message.success('已上传，正在处理')
-          snapshots.forEach(item => {
-            this.watchAttachment(item, roomKey, attachment.id, { notify: true })
+          attachedTargets.forEach(({ uid, token }) => {
+            if (!this.operationTokenIsCurrent(uid, token)) return
+            const node = this.liveNode(uid)
+            if (
+              !node ||
+              String((node.getData && node.getData('attachmentId')) || '') !==
+                String(attachment.id || '')
+            ) return
+            this.watchAttachment(
+              { uid, node },
+              roomKey,
+              attachment.id,
+              { notify: true }
+            )
           })
         } else {
           this.$message.warning(
@@ -417,8 +629,11 @@ export default {
         }
       } catch (err) {
         console.error('[attachment] upload failed', err)
-        snapshots.forEach(item => this.restoreSnapshot(item, item.snapshot))
         this.$message.error((err && err.message) || '附件上传失败')
+      } finally {
+        if (uploadNotice && typeof uploadNotice.close === 'function') {
+          uploadNotice.close()
+        }
       }
     }
   }

@@ -192,14 +192,47 @@ async function handleApi(req, res, options = {}) {
       const roomKey = safeRoomKey(attachmentHit.roomKey)
       await roomAcl.assertRoomAccess(db, req, roomKey, 'edit')
       const params = searchParamsOf(req, options)
-      const removed = await store.removeById(db, roomKey, attachmentHit.id, {
-        nodeUid: params.get('node_uid') || params.get('nodeUid') || ''
-      })
-      if (!removed) {
-        sendJson(res, 404, { ok: false, error: '附件不存在', code: 'NOT_FOUND' })
-        return true
+      const nodeUid = String(
+        params.get('node_uid') || params.get('nodeUid') || ''
+      ).trim()
+      if (!nodeUid) {
+        const err = new Error('删除节点附件必须提供 node_uid')
+        err.statusCode = 400
+        err.code = 'NODE_UID_REQUIRED'
+        throw err
       }
-      sendJson(res, 200, { ok: true, attachment: removed })
+      if (typeof options.detachAttachment !== 'function') {
+        const err = new Error('节点附件协作解绑通道不可用')
+        err.statusCode = 503
+        err.code = 'ATTACHMENT_DETACH_UNAVAILABLE'
+        throw err
+      }
+      const confirmSopChange = /^(1|true)$/i.test(
+        String(params.get('confirm_sop_change') || '').trim()
+      )
+      const baseVersionRaw =
+        params.get('base_version') || params.get('baseVersion')
+      const baseVersion =
+        baseVersionRaw == null || String(baseVersionRaw).trim() === ''
+          ? null
+          : Number(baseVersionRaw)
+      if (
+        baseVersion !== null &&
+        (!Number.isSafeInteger(baseVersion) || baseVersion < 0)
+      ) {
+        const err = new Error('base_version 必须是非负整数')
+        err.statusCode = 400
+        err.code = 'INVALID_BASE_VERSION'
+        throw err
+      }
+      const result = await options.detachAttachment({
+        roomKey,
+        nodeUid,
+        attachmentId: attachmentHit.id,
+        confirmSopChange,
+        baseVersion
+      })
+      sendJson(res, 200, result)
       return true
     }
 
@@ -223,7 +256,8 @@ async function handleApi(req, res, options = {}) {
     sendJson(res, err.statusCode || 400, {
       ok: false,
       error: err.message || 'node knowledge error',
-      code: err.code || 'NODE_KNOWLEDGE_ERROR'
+      code: err.code || 'NODE_KNOWLEDGE_ERROR',
+      ...(err.details ? { details: err.details } : {})
     })
     return true
   }

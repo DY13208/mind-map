@@ -1,9 +1,12 @@
 const assert = require('assert')
 const crypto = require('crypto')
 require('../bin/loadEnv')
+const { assertHistoryPgTestEnvironment } = require('./historyPgSafety')
+assertHistoryPgTestEnvironment()
 const mindDoc = require('../bin/mindDoc')
 const { applyCollabEvent, applyCollabEvents } = require('../bin/collabRecovery')
-const { readRoomNodes } = require('../bin/storage')
+const { readRoomNodes, getPool } = require('../bin/storage')
+const attachmentStore = require('../bin/nodeKnowledge/store')
 const Y = require('yjs')
 const WebSocket = require('ws')
 const { WebsocketProvider } = require('y-websocket')
@@ -16,8 +19,17 @@ const wsUrl = (
 class AuthedWebSocket extends WebSocket {
   constructor(url, protocols) {
     const token = process.env.MCP_TOKEN
+    const headers = {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(process.env.COLLAB_TEST_COOKIE
+        ? { Cookie: process.env.COLLAB_TEST_COOKIE }
+        : {}),
+      ...(process.env.COLLAB_TEST_ORIGIN
+        ? { Origin: process.env.COLLAB_TEST_ORIGIN }
+        : {})
+    }
     super(url, protocols, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
+      headers
     })
   }
 }
@@ -55,6 +67,13 @@ function authHeaders(extra = {}) {
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(process.env.COLLAB_TEST_COOKIE
+      ? { Cookie: process.env.COLLAB_TEST_COOKIE }
+      : {}),
+    ...(process.env.COLLAB_TEST_ORIGIN
+      ? { Origin: process.env.COLLAB_TEST_ORIGIN }
+      : {}),
+    'x-client-id': process.env.COLLAB_TEST_CLIENT_ID || 'attachment-test-client',
     ...extra
   }
 }
@@ -504,6 +523,214 @@ async function testSubtreeKnownVersion(roomKey) {
   assert.strictEqual(located.data.version, 1)
 }
 
+async function testAttachmentDetach(roomKey) {
+  await insertChild(roomKey, 'attachment-a', 'Attachment A')
+  await insertChild(roomKey, 'attachment-b', 'Attachment B')
+  await insertChild(roomKey, 'attachment-c', 'Attachment C')
+  await insertChild(roomKey, 'sop-attachment', 'SOP')
+  const sharedId = `att-${crypto.randomUUID()}`
+  const pool = getPool()
+  await pool.query(
+    `insert into node_attachments
+       (id, room_key, node_uid, content_hash, file_name, mime_type, byte_size,
+        status, error_message, extracted_text, extracted_chars, source_kind)
+     values ($1, $2, 'attachment-a', $3, '共享附件.txt', 'text/plain', 20,
+             'ready', '', '保留原始内容', 6, 'attachment')`,
+    [sharedId, roomKey, `${roomKey}-attachment-hash`]
+  )
+
+  for (const [uid, status] of [
+    ['attachment-a', 'ready'],
+    ['attachment-b', 'ready'],
+    ['attachment-c', 'processing'],
+    ['sop-attachment', 'ready']
+  ]) {
+    const patched = await request(
+      `/api/files/${encodeURIComponent(roomKey)}/nodes/${encodeURIComponent(uid)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          attachmentId: uid === 'attachment-c' ? 'att-processing' : sharedId,
+          attachmentUrl: `/api/files/${roomKey}/attachments/${sharedId}/content`,
+          attachmentName: `${uid}.txt`,
+          attachmentMimeType: 'text/plain',
+          attachmentStatus: status,
+          attachmentError: status === 'processing' ? '后台解析中' : '',
+          attachmentExtractedText: status === 'ready' ? '截断预览' : '',
+          attachmentProgress: status === 'processing' ? 42 : 100,
+          confirm_sop_change: true
+        })
+      }
+    )
+    assert.strictEqual(patched.response.status, 200, patched.data.error)
+  }
+
+  const before = await serverNodes(roomKey)
+  assert.strictEqual(
+    before.nodes['sop-attachment'] && before.nodes['sop-attachment'].data.text,
+    'SOP',
+    'SOP root fixture must be present before attachment deletion checks'
+  )
+  assert.strictEqual(
+    before.nodes['sop-attachment'].data.attachmentId,
+    sharedId,
+    'SOP root fixture must still point at the attachment before deletion checks'
+  )
+  const sopNeedsConfirmation = await request(
+    `/api/files/${encodeURIComponent(roomKey)}/attachments/${encodeURIComponent(
+      sharedId
+    )}?node_uid=sop-attachment&base_version=${before.version}`,
+    { method: 'DELETE' }
+  )
+  assert.strictEqual(sopNeedsConfirmation.response.status, 400)
+  assert.strictEqual(sopNeedsConfirmation.data.code, 'SOP_CONFIRM_REQUIRED')
+  assert.strictEqual((await serverNodes(roomKey)).version, before.version)
+
+  const checkpoint = await request(
+    `/api/files/${encodeURIComponent(roomKey)}/versions`,
+    { method: 'POST', body: JSON.stringify({ name: '附件删除前' }) }
+  )
+  assert.strictEqual(checkpoint.response.status, 201, checkpoint.data.error)
+  const checkpointId = checkpoint.data.version.versionId
+
+  assert.deepEqual(
+    (await attachmentStore.listMeta(pool, roomKey, { nodeUid: 'attachment-a' })).map(
+      item => item.id
+    ),
+    [sharedId]
+  )
+  assert.deepEqual(
+    (await attachmentStore.listMeta(pool, roomKey, { nodeUid: 'attachment-b' })).map(
+      item => item.id
+    ),
+    [sharedId]
+  )
+
+  const detached = await request(
+    `/api/files/${encodeURIComponent(roomKey)}/attachments/${encodeURIComponent(
+      sharedId
+    )}?node_uid=attachment-a&base_version=${before.version}`,
+    { method: 'DELETE' }
+  )
+  assert.strictEqual(detached.response.status, 200, detached.data.error)
+  assert.strictEqual(detached.data.detached, true)
+  assert.strictEqual(detached.data.retained, true)
+  assert.strictEqual(detached.data.revision, before.version + 1)
+  assert.equal(detached.data.node.data.attachmentId, undefined)
+  for (const field of [
+    'attachmentUrl',
+    'attachmentName',
+    'attachmentMimeType',
+    'attachmentStatus',
+    'attachmentError',
+    'attachmentExtractedText',
+    'attachmentProgress'
+  ]) {
+    assert.equal(detached.data.node.data[field], undefined, `${field} must be cleared`)
+  }
+  const afterDetachOps = await fetchAllOperations(roomKey)
+  assert.ok(
+    afterDetachOps.operations.some(op => op.version === detached.data.revision),
+    'detach must be a collaborative operation with a revision'
+  )
+  assert.deepEqual(
+    await attachmentStore.listMeta(pool, roomKey, { nodeUid: 'attachment-a' }),
+    [],
+    'detached node listing must no longer include its former attachment'
+  )
+  assert.deepEqual(
+    (await attachmentStore.listMeta(pool, roomKey, { nodeUid: 'attachment-b' })).map(
+      item => item.id
+    ),
+    [sharedId],
+    'shared file remains listed by the other node that still points to it'
+  )
+  assert.ok(await attachmentStore.getById(pool, roomKey, sharedId), 'stored row is retained')
+
+  const currentAfterDetach = detached.data.revision
+  const repeated = await request(
+    `/api/files/${encodeURIComponent(roomKey)}/attachments/${encodeURIComponent(
+      sharedId
+    )}?node_uid=attachment-a&base_version=${currentAfterDetach}`,
+    { method: 'DELETE' }
+  )
+  assert.strictEqual(repeated.response.status, 200, repeated.data.error)
+  assert.strictEqual(repeated.data.detached, false)
+  assert.strictEqual(repeated.data.already_detached, true)
+  assert.strictEqual(repeated.data.revision, currentAfterDetach)
+
+  const mismatch = await request(
+    `/api/files/${encodeURIComponent(roomKey)}/attachments/old-id?node_uid=attachment-b&base_version=${currentAfterDetach}`,
+    { method: 'DELETE' }
+  )
+  assert.strictEqual(mismatch.response.status, 409)
+  assert.strictEqual(mismatch.data.code, 'ATTACHMENT_MISMATCH')
+  assert.deepStrictEqual(mismatch.data.details, {
+    node_uid: 'attachment-b',
+    expected_attachment_id: 'old-id',
+    current_attachment_id: sharedId
+  })
+
+  const restored = await request(
+    `/api/files/${encodeURIComponent(roomKey)}/versions/${encodeURIComponent(
+      checkpointId
+    )}/restore`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ expectedCurrentRevision: currentAfterDetach })
+    }
+  )
+  assert.strictEqual(restored.response.status, 200, restored.data.error)
+  assert.ok(restored.data.newRevision > currentAfterDetach)
+
+  const staleAfterRestore = await request(
+    `/api/files/${encodeURIComponent(roomKey)}/attachments/${encodeURIComponent(
+      sharedId
+    )}?node_uid=attachment-a&base_version=${currentAfterDetach}`,
+    { method: 'DELETE' }
+  )
+  assert.strictEqual(staleAfterRestore.response.status, 409)
+  assert.strictEqual(staleAfterRestore.data.code, 'STALE_AFTER_VERSION_RESTORE')
+
+  const validAfterRestore = await request(
+    `/api/files/${encodeURIComponent(roomKey)}/attachments/${encodeURIComponent(
+      sharedId
+    )}?node_uid=attachment-a&base_version=${restored.data.newRevision}`,
+    { method: 'DELETE' }
+  )
+  assert.strictEqual(validAfterRestore.response.status, 200, validAfterRestore.data.error)
+  assert.strictEqual(validAfterRestore.data.detached, true)
+  assert.strictEqual(validAfterRestore.data.revision, restored.data.newRevision + 1)
+
+  const processing = await request(
+    `/api/files/${encodeURIComponent(roomKey)}/attachments/att-processing?node_uid=attachment-c&base_version=${validAfterRestore.data.revision}`,
+    { method: 'DELETE' }
+  )
+  assert.strictEqual(processing.response.status, 200, processing.data.error)
+  assert.strictEqual(processing.data.detached, true)
+  assert.equal(processing.data.node.data.attachmentStatus, undefined)
+  assert.equal(processing.data.node.data.attachmentProgress, undefined)
+  const sopDetached = await request(
+    `/api/files/${encodeURIComponent(roomKey)}/attachments/${encodeURIComponent(
+      sharedId
+    )}?node_uid=sop-attachment&base_version=${processing.data.revision}&confirm_sop_change=1`,
+    { method: 'DELETE' }
+  )
+  assert.strictEqual(sopDetached.response.status, 200, sopDetached.data.error)
+  assert.strictEqual(sopDetached.data.detached, true)
+  assert.ok(await attachmentStore.getById(pool, roomKey, sharedId), 'restore and detach retain file row')
+}
+
+async function testAttachmentDetachRoom(roomKey) {
+  try {
+    await testAttachmentDetach(roomKey)
+  } finally {
+    await getPool()
+      .query('delete from node_attachments where room_key = $1', [roomKey])
+      .catch(() => {})
+  }
+}
+
 async function testUndoAndHistoricalSnapshot(roomKey) {
   const firstId = crypto.randomUUID()
   const added = await insertChild(roomKey, 'keep', 'Keep', {
@@ -602,6 +829,12 @@ async function main() {
     throw new Error(`collab server is not running at ${baseUrl}`)
   }
 
+  if (process.env.ATTACHMENT_DELETE_ONLY === '1') {
+    await withRoom('节点附件解绑', testAttachmentDetachRoom)
+    console.log('node attachment delete integration passed')
+    return
+  }
+
   await withRoom('操作日志房间', testSmokeAndRename)
   await withRoom('幂等十次', testIdempotentTenTimes)
   await withRoom('规范化节点表', testNormalizedTableRoundtrip)
@@ -609,6 +842,7 @@ async function main() {
   await withRoom('双客户端丢包', testDroppedEventsConverge)
   await withRoom('一千次版本', testThousandVersions)
   await withRoom('子树版本短路', testSubtreeKnownVersion)
+  await withRoom('节点附件解绑', testAttachmentDetachRoom)
   await withRoom('撤销与历史快照', testUndoAndHistoricalSnapshot)
   await withRoom('同父并发插入', testConcurrentInsertsAtSameParent)
   console.log('room operations integration passed')
