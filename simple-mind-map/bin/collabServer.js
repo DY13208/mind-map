@@ -123,6 +123,7 @@ const server = http.createServer(async (request, response) => {
       if (!authenticated) return
     }
     if (handleMcpConfigApi(request, response, pathname)) return
+    if (await require('./localKnowledge/http').handleApi(request, response, pathname)) return
     {
       const { handleOpenclawHandoffApi } = require('./openclawHandoffApi')
       if (await handleOpenclawHandoffApi(request, response, pathname, request.authUser || null)) {
@@ -353,6 +354,7 @@ Promise.all([initSchema(), initAuth()])
       }
     })
     server.listen(port, host, () => {
+      require('./localKnowledge/http').checkConfiguration().catch(error => console.warn('[local-knowledge]', error.message))
       console.log(`Collab server running at ws://${host}:${port}`)
       console.log(`Collab HTTP API: http://${host}:${port}/api/files`)
       if (v2.enabled) {

@@ -39,6 +39,7 @@ services:
       # （apt-get 装 nginx 必失败）。在 .env 里配 BUILD_HTTP_PROXY 即可透传，
       # 留空则不使用代理（适合能直连 Debian 源的网络环境）。
       args:
+        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-mirrors.aliyun.com}
         HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
         HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
         NO_PROXY: ${BUILD_NO_PROXY:-localhost,127.0.0.1,postgres,redis}
@@ -71,6 +72,13 @@ services:
       WIKI_COMPILER_SYNC_ENABLED: ${WIKI_COMPILER_SYNC_ENABLED:-true}
       WIKI_COMPILER_SYNC_INTERVAL: ${WIKI_COMPILER_SYNC_INTERVAL:-300}
       WIKI_COMPILER_OUTPUT_DIR: /app/wiki-compiler
+      # Use scripts/local-knowledge-compose.cjs to generate multiple read-only mounts.
+      LOCAL_KNOWLEDGE_ROOT: /app/local-knowledge
+      LOCAL_KNOWLEDGE_ROOTS: ${LOCAL_KNOWLEDGE_CONTAINER_ROOTS:-}
+      LOCAL_KNOWLEDGE_SOURCE_IDS: ${LOCAL_KNOWLEDGE_SOURCE_IDS:-}
+      LOCAL_KNOWLEDGE_CACHE_DIR: /app/local-knowledge-cache
+      LOCAL_KNOWLEDGE_SOURCE_ID: ${LOCAL_KNOWLEDGE_ROOT:-./data/local-knowledge}
+      MINERU_API_TOKEN: ${MINERU_API_TOKEN:-}
       WIKI_COMPILER_CONTRACTS_DIR: /app/contracts
       WIKI_COMPILER_COMPANY_ROOM_ID: ${WIKI_COMPILER_COMPANY_ROOM_ID:-}
       WIKI_COMPILER_INTERNAL_SECRET: ${WIKI_COMPILER_INTERNAL_SECRET:-}
@@ -114,6 +122,8 @@ services:
       # WorkBuddy / OpenClaw 写到宿主机 output 的产物，供预览/下载
       - ${WIKI_COMPILE_DIR:-./data/wiki-compiler/wiki}:/app/wiki-compiler
       - ./data/contracts:/app/contracts:ro
+      - ${LOCAL_KNOWLEDGE_ROOT:-./data/local-knowledge}:/app/local-knowledge:ro
+      - local-knowledge-cache:/app/local-knowledge-cache
       - ./knowledge:/app/knowledge
       - ./output:/app/output:ro
       # WorkBuddy 产物目录（默认仓库内 ./data/workbuddy；本机可在 .env 改成真实 WorkBuddy 路径）
@@ -314,6 +324,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  local-knowledge-cache:
   mind-map-pg:
   mind-map-openclaw:
   knowledge-mcp-audit:

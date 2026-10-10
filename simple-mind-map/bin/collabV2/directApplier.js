@@ -71,6 +71,7 @@ const DATA_META_KEYS = [
   'event',
   'expected',
   'expectedValue',
+  'expectedLeaf',
   'batchId',
   'oldParentUid',
   'newParentUid',
@@ -447,12 +448,16 @@ async function applyDelete(store, op, version) {
   if (!uid) throw nodeDeletedError(uid)
   const live = await store.getLive(uid)
   if (!live) throw nodeDeletedError(uid)
+  if(payload.expected && Object.keys(payload.expected).some(key=>stableValue(live.data[key])!==stableValue(payload.expected[key]))) {
+    throw commandError('目标已被其他协作者修改', 'REPLACE_CONFLICT', 409)
+  }
   if (live.is_root) {
     throw commandError('不能删除根节点', 'ROOT_DELETE', 400)
   }
   await assertNotSop(store, uid, payload, 'node.delete')
   const keepChildren = !!(payload.keepChildren || payload.keep_children)
   const kids = await store.listChildren(uid)
+  if(payload.expectedLeaf && kids.length)throw commandError('目标已有独立子节点，停止清理', 'REPLACE_CONFLICT', 409)
   let promoted = []
   let removed = [uid]
   if (keepChildren) {

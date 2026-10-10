@@ -1,5 +1,6 @@
 const TurndownService = require('turndown')
 const { hash, branchPath } = require('./utils')
+const {factKey}=require('../../src/utils/fillFacts')
 const td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' })
 td.remove(['script', 'style', 'iframe', 'object'])
 function safeUrl(value) {
@@ -25,6 +26,7 @@ function title(value) {
 function semantic(row, attachments) {
   const d = row || {}
   return {
+    autoFill: d.autoFill?.version===2 && (!d.autoFill.key || d.autoFill.key===factKey(d.text,d.autoFill.field,d.autoFill.owner||'')) ? 2 : 0,
     text: markdown(d.text), note: markdown(d.note), hyperlink: safeUrl(d.hyperlink), hyperlinkTitle: title(d.hyperlinkTitle),
     image: safeUrl(d.image), imageTitle: title(d.imageTitle), unresolvedImage: d.image && !safeUrl(d.image) ? String(d.image) : '',
     tag: Array.isArray(d.tag) ? d.tag.map(item => typeof item === 'string' ? item : item?.text || '').filter(Boolean) : [],
@@ -84,7 +86,7 @@ function renderDocument(input, rootUid, previous) {
     hashes.push([uid, nodeHash])
     nodes[uid] = { hash: nodeHash, path: rootUid === model.rootUid ? 'README.md' : branchPath(rootUid),
       parentUid: row.parent_uid, documentRootUid: rootUid === model.rootUid ? null : rootUid }
-    parts.push(nodeBody(uid, { ...content, roomId }, depth), `<!-- mindmap:node=${Buffer.from(uid).toString('hex')} hash=${nodeHash} -->`)
+    parts.push(nodeBody(uid, { ...content, roomId }, depth), `<!-- mindmap:node=${Buffer.from(uid).toString('hex')} hash=${nodeHash} depth=${depth}${content.autoFill?' auto_fill=2':''} -->`)
     if (rootUid !== model.rootUid) {
       const kids = model.children.get(uid)
       for (let i = kids.length - 1; i >= 0; i--) stack.push([kids[i], depth + 1])

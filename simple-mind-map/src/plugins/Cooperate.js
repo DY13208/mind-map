@@ -130,6 +130,7 @@ const HTTP_RECOVER_RETRY_BASE_MS = 500
 const HTTP_RECOVER_RETRY_MAX_MS = 30000
 const HTTP_RECOVER_RESTORE_WAIT_MS = 60000
 const NULLABLE_PATCH_KEYS = [
+  'autoFill',
   'image',
   'imageTitle',
   'imageSize',
@@ -4899,6 +4900,12 @@ class Cooperate {
   onBeforeExecCommand(name) {
     if (!this.httpCollabMode) return
     const args = Array.prototype.slice.call(arguments, 1)
+    if(name==='SET_NODE_DATA' && args[0]?.getData) {
+      this.fillRepairGuards ||= new Map()
+      const uid=args[0].getData('uid')
+      if(args[2]?.fillRepair)this.fillRepairGuards.set(uid,args[2].expected)
+      else this.fillRepairGuards.delete(uid)
+    }
     if (MOVE_COMMANDS[name] && name !== 'INSERT_PARENT_NODE') {
       this.pendingMoveCommand = {
         name,
@@ -4961,13 +4968,17 @@ class Cooperate {
     ) {
       return
     }
-    const list =
-      (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
+    const list = name==='REMOVE_NODE' && args[0] && (Array.isArray(args[0])?args[0].length:true)
+      ? (Array.isArray(args[0])?args[0]:[args[0]])
+      : (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
     const selection = collabDelete.collectDeleteRoots(list, name)
     this.pendingHttpDeletes = selection.roots.map(item => ({
       uid: item.uid,
       keepChildren: item.keepChildren,
-      descendantUids: item.descendantUids
+      descendantUids: item.descendantUids,
+      ...(args[1] && args[1].fillRepair ? {
+        expected:{text:item.node.getData('text'),note:item.node.getData('note')},expectedLeaf:true
+      }:{})
     }))
     this.pendingHttpGeneralizationOwners = selection.owners
     collabDelete.publishDeleteTrace({
@@ -5207,6 +5218,7 @@ class Cooperate {
       if (genOwners.length) {
         genOwners.forEach(owner => this.syncHttpGeneralization(owner))
       }
+      if(name==='SET_NODE_DATA' && args[2]?.fillRepair){this.flushHttpText();return}
       if (
         name === 'SET_NODE_TAG' ||
         name === 'SET_NODE_IMAGE' ||
@@ -5779,6 +5791,7 @@ class Cooperate {
       const full = this.nodePatchPayload(node)
       const delta = this.nodePatchPayload(node, { onlyChanged: true })
       if (!delta) return
+      if(this.fillRepairGuards?.has(uid))delta.expected=this.fillRepairGuards.get(uid)
       const snap = JSON.stringify(full)
       items.push({ uid, node, target, full, delta, snap })
     })
@@ -5791,6 +5804,7 @@ class Cooperate {
           }))
         })
         items.forEach(item => {
+          this.fillRepairGuards?.delete(item.uid)
           this.lastPushed[item.uid] = {
             text: item.full.text,
             note: item.full.note,
@@ -5810,6 +5824,7 @@ class Cooperate {
       jobs.push(() =>
         this.httpPatchNode(uid, delta)
           .then(() => {
+            this.fillRepairGuards?.delete(uid)
             succeeded = true
             this.lastPushed[uid] = {
               text: full.text,

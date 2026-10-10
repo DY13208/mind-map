@@ -11,6 +11,45 @@ const MAX_API_INFLIGHT = 2
 const REPLACE_TIMEOUT_MIN_MS = 120000
 const REPLACE_TIMEOUT_MAX_MS = 600000
 
+export function localKnowledgeStatus() { return request('/api/local-knowledge/status') }
+export function refreshLocalKnowledge(roomId) {
+  return request('/api/local-knowledge/refresh', {method:'POST',body:JSON.stringify({roomId,titles:['刷新索引']})})
+}
+
+export async function fillLocalKnowledge(body, { signal, onStatus } = {}) {
+  const response = await fetch(`${apiBase()}/api/local-knowledge/fill`, {
+    method: 'POST', credentials: 'include', signal,
+    headers: clientHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(body)
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw Object.assign(new Error(data.error || '本地资料检索失败'), { code: data.code, statusCode: response.status })
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''; let result
+  const parse = line => {
+    if (!line.trim()) return
+    const data = JSON.parse(line)
+    if (data.status && onStatus) onStatus(data.status)
+    if (data.error) throw Object.assign(new Error(data.error), { code: data.code })
+    if (data.result) result = data.result
+  }
+  try {
+    while (true) {
+      const chunk = await reader.read()
+      buffer += decoder.decode(chunk.value, { stream: !chunk.done })
+      let index
+      while ((index = buffer.indexOf('\n')) >= 0) { parse(buffer.slice(0, index)); buffer = buffer.slice(index + 1) }
+      if (chunk.done) break
+    }
+    parse(buffer)
+    if (!result) throw new Error('本地资料读取未完成')
+    return result
+  } finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
+}
+
 let apiActive = 0
 const apiHighWait = []
 const apiLowWait = []

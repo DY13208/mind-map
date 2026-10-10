@@ -230,43 +230,9 @@ async function ocrViaHttp(buffer, mimeType, fileName) {
   }
 }
 
-async function ocrViaTesseract(buffer) {
-  let Tesseract
-  try {
-    Tesseract = require('tesseract.js')
-  } catch (e) {
-    const err = new Error('本地 OCR 未安装（缺少 tesseract.js）')
-    err.code = 'OCR_NOT_CONFIGURED'
-    throw err
-  }
-  const langs = String(process.env.NODE_KNOWLEDGE_OCR_LANGS || 'eng+chi_sim')
-  const result = await Tesseract.recognize(buffer, langs, {
-    logger: () => {}
-  })
-  const text = clip(result && result.data && result.data.text)
-  if (!text) {
-    const err = new Error('本地 OCR 未识别到文字')
-    err.code = 'OCR_EMPTY'
-    throw err
-  }
-  return text
-}
-
-async function ocrImage(buffer, mimeType, fileName) {
-  const endpoint = String(process.env.NODE_KNOWLEDGE_OCR_URL || '').trim()
-  if (endpoint) {
-    try {
-      return await ocrViaHttp(buffer, mimeType, fileName)
-    } catch (err) {
-      // Fall through to local OCR when remote OCR is unavailable.
-      try {
-        return await ocrViaTesseract(buffer)
-      } catch (localErr) {
-        throw err
-      }
-    }
-  }
-  return ocrViaTesseract(buffer)
+async function ocrImage(buffer,mimeType,fileName) {
+ if(String(process.env.NODE_KNOWLEDGE_OCR_URL||'').trim())return ocrViaHttp(buffer,mimeType,fileName)
+ throw Object.assign(new Error('图片 OCR 服务未配置'),{code:'OCR_NOT_CONFIGURED'})
 }
 
 async function extractBuffer(buffer, options = {}) {
@@ -383,6 +349,5 @@ module.exports = {
   extractBuffer,
   compactXlsxCsv,
   ocrViaHttp,
-  ocrViaTesseract,
   ocrImage
 }

@@ -74,7 +74,8 @@ function deleteOperationsFromRoots(selection) {
     type: 'node.delete',
     payload: {
       uid: item.uid,
-      keepChildren: !!item.keepChildren
+      keepChildren: !!item.keepChildren,
+      ...(item.expected?{expected:item.expected,expectedLeaf:!!item.expectedLeaf}:{})
     }
   }))
 }
