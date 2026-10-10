@@ -115,6 +115,21 @@ function isStickyErrorCode(code) {
   return !!STICKY_ERROR_CODES[String(code || '')]
 }
 
+// join 失败后不再重试的错误；其余（socket 没连上、服务端没及时回 join 等）都按临时故障自动重连
+const FATAL_JOIN_ERROR_CODES = {
+  FORBIDDEN: true,
+  INVALID_CLIENT_ID: true,
+  NOT_FOUND: true,
+  ROOM_DELETED: true
+}
+
+function isFatalJoinError(err) {
+  return !!FATAL_JOIN_ERROR_CODES[String((err && err.code) || '')]
+}
+
+const REJOIN_BASE_DELAY_MS = 2000
+const REJOIN_MAX_DELAY_MS = 30000
+
 const SKIPPABLE_GONE_CODES = {
   UID_REUSED: true,
   TARGET_DELETED: true,
@@ -303,10 +318,14 @@ function createCollaborationAdapter(options = {}) {
     gapRecoveredOps: 0,
     snapshotRecoveryCount: 0,
     requiresConfirmation: null,
-    heartbeatTimer: null
+    heartbeatTimer: null,
+    rejoinTimer: null,
+    rejoinAttempts: 0
   }
   let socket = options.socket || null
   let connecting = null
+  let connectingRoomKey = ''
+  let unbindNetworkRecovery = null
   let drainLoop = null
   let draining = false
   let enqueueGate = Promise.resolve()
@@ -796,6 +815,10 @@ function createCollaborationAdapter(options = {}) {
           stage: STAGES.SOCKET_CONNECT
         })
       })
+      // socket.io 的自动重连次数用完就永久放弃，之后网络恢复也不会再连
+      if (next.io && typeof next.io.on === 'function') {
+        next.io.on('reconnect_failed', () => scheduleRejoin())
+      }
     }
     socket.on('presence:state', payload => {
       if (payload && payload.roomKey === state.roomKey) {
@@ -820,9 +843,138 @@ function createCollaborationAdapter(options = {}) {
     socket.on('connect', () => {
       state.stage = STAGES.SOCKET_CONNECT
       if (state.roomKey) {
-        joinRoom().then(() => retryPending()).catch(() => {})
+        rejoinRoom().catch(() => {})
       }
     })
+  }
+
+  function canAutoReconnect() {
+    if (!socket || !state.roomKey) return false
+    const manager = socket.io
+    if (
+      manager &&
+      typeof manager.reconnection === 'function' &&
+      manager.reconnection() === false
+    ) {
+      return false
+    }
+    return true
+  }
+
+  function clearRejoinTimer() {
+    if (state.rejoinTimer) {
+      clearTimeout(state.rejoinTimer)
+      state.rejoinTimer = null
+    }
+  }
+
+  function scheduleRejoin() {
+    if (state.rejoinTimer || !canAutoReconnect()) return
+    const baseDelay = Number(options.rejoinBaseDelayMs) || REJOIN_BASE_DELAY_MS
+    const delay = Math.min(
+      REJOIN_MAX_DELAY_MS,
+      baseDelay * Math.pow(2, state.rejoinAttempts)
+    )
+    state.rejoinAttempts += 1
+    state.rejoinTimer = setTimeout(() => {
+      state.rejoinTimer = null
+      rejoinNow()
+    }, delay)
+    if (state.rejoinTimer.unref) state.rejoinTimer.unref()
+  }
+
+  function rejoinNow() {
+    if (!canAutoReconnect() || connecting || isLive()) return
+    if (!socket.connected) {
+      // 连上后由 'connect' 事件重新 join；连不上就按退避继续试
+      if (typeof socket.connect === 'function') socket.connect()
+      scheduleRejoin()
+      return
+    }
+    rejoinRoom().catch(() => {})
+  }
+
+  /** 同一房间同一时刻只跑一个 join；失败时临时故障转入自动重连，不再停在 ERROR */
+  function rejoinRoom() {
+    const roomKey = state.roomKey
+    if (connecting && connectingRoomKey === roomKey) return connecting
+    const previous = connecting
+    const attempt = (previous ? previous.catch(() => {}) : Promise.resolve()).then(
+      () => {
+        if (state.roomKey !== roomKey) {
+          const err = new Error('room switched before join')
+          err.code = 'ROOM_SWITCHED'
+          throw err
+        }
+        return joinRoom()
+      }
+    )
+    const tracked = attempt.then(
+      result => {
+        if (connecting === tracked) {
+          connecting = null
+          connectingRoomKey = ''
+        }
+        if (state.roomKey === roomKey) {
+          state.rejoinAttempts = 0
+          clearRejoinTimer()
+          retryPending()
+        }
+        return result
+      },
+      err => {
+        if (connecting === tracked) {
+          connecting = null
+          connectingRoomKey = ''
+        }
+        if (state.roomKey === roomKey && !(err && err.code === 'ROOM_SWITCHED')) {
+          markJoinFailed(err)
+        }
+        throw err
+      }
+    )
+    connecting = tracked
+    connectingRoomKey = roomKey
+    return tracked
+  }
+
+  function markJoinFailed(err) {
+    const extra = {
+      error: (err && err.message) || 'join failed',
+      errorCode: (err && err.code) || 'JOIN_FAILED',
+      stage: (err && err.stage) || STAGES.SOCKET_JOIN
+    }
+    if (isFatalJoinError(err)) {
+      setStatus('disconnected', { ...extra, saveState: 'error', phase: 'ERROR' })
+      return
+    }
+    setStatus('reconnecting', { ...extra, saveState: 'offline', phase: 'OFFLINE' })
+    scheduleRejoin()
+  }
+
+  function bindNetworkRecovery() {
+    if (unbindNetworkRecovery || typeof window === 'undefined') return
+    if (typeof window.addEventListener !== 'function') return
+    const wake = () => {
+      if (!state.roomKey || isLive()) return
+      clearRejoinTimer()
+      state.rejoinAttempts = 0
+      rejoinNow()
+    }
+    const onVisible = () => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') wake()
+    }
+    window.addEventListener('online', wake)
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisible)
+    }
+    unbindNetworkRecovery = () => {
+      window.removeEventListener('online', wake)
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisible)
+      }
+      unbindNetworkRecovery = null
+    }
   }
 
   async function joinRoom() {
@@ -963,24 +1115,19 @@ function createCollaborationAdapter(options = {}) {
     } else if (socket) {
       bindSocket(socket)
     }
-    if (connecting) return connecting
-    connecting = joinRoom()
-      .then(result => {
-        connecting = null
-        return result
-      })
-      .catch(err => {
-        connecting = null
-        setStatus('disconnected', {
-          saveState: 'error',
-          error: err.message,
-          errorCode: err.code || 'JOIN_FAILED',
-          phase: 'ERROR',
-          stage: err.stage || STAGES.SOCKET_JOIN
-        })
-        throw err
-      })
-    return connecting
+    bindNetworkRecovery()
+    clearRejoinTimer()
+    state.rejoinAttempts = 0
+    // 切换脑图时 socket 可能已因重连次数用完而停在断开状态：先拉起来，join 会在连上后发出
+    if (
+      socket &&
+      socket.connected === false &&
+      typeof socket.connect === 'function' &&
+      canAutoReconnect()
+    ) {
+      socket.connect()
+    }
+    return rejoinRoom()
   }
 
   async function disconnect() {
@@ -988,8 +1135,12 @@ function createCollaborationAdapter(options = {}) {
       clearInterval(state.heartbeatTimer)
       state.heartbeatTimer = null
     }
+    clearRejoinTimer()
+    state.rejoinAttempts = 0
+    if (unbindNetworkRecovery) unbindNetworkRecovery()
     state.roomKey = ''
     connecting = null
+    connectingRoomKey = ''
     if (socket && socket.disconnect) socket.disconnect()
     setStatus('disconnected', { saveState: 'idle', phase: 'DISCONNECTED' })
   }

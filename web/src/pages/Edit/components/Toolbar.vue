@@ -178,6 +178,14 @@
               <span class="text">{{ $t('toolbar.more') }}</span>
             </div>
           </el-popover>
+          <!-- 返回主脑图 / 上级脑图：固定在最右侧，不参与「更多」收纳 -->
+          <ToolbarFileBtnList
+            v-if="mapNavBackActions.length"
+            class="mapNavBackList"
+            :list="mapNavBackActions"
+            :is-dark="isDark"
+            @select="onFileToolbarAction"
+          />
           <!-- 本地文件树 -->
           <div
             class="fileTreeBox"
@@ -545,6 +553,15 @@ import ToolbarFileBtnList from './ToolbarFileBtnList.vue'
 import { throttle, isMobile } from 'simple-mind-map/src/utils/index'
 import { stringifyJsonOffMainThread } from '@/utils/importTree'
 import { navigateToMyMaps } from '@/utils/roomLocation'
+import { inspectMapRef } from '@/utils/mapRefNav'
+import {
+  buildParentEntryNav,
+  getMapNavContext,
+  isParentEntry,
+  markMapNavViewRestore,
+  readEntryNav,
+  replaceEntryNav
+} from '@/utils/mapNavTrail'
 import { getTextFromHtml } from 'simple-mind-map/src/utils'
 import {
   resolveJobHosts,
@@ -592,6 +609,11 @@ import {
   markInterruptedRuns,
   recordToHistoryItem
 } from '@/utils/runLog'
+
+// 返回上级脑图前，等待协同保存完成的最长时间
+const MAP_NAV_SAVE_WAIT_MS = 5000
+// 后退后多久没落到上级条目，就改用 replace 直接打开上级脑图
+const MAP_NAV_BACK_TIMEOUT_MS = 3000
 
 // 任务结果按 Markdown 渲染，配置与项目其他对话页保持一致
 const jobMd = new MarkdownIt({ html: false, linkify: true, breaks: true })
@@ -862,6 +884,8 @@ export default {
       fileHorizontalCount: 0,
       filePopoverShow: false,
       toolbarLayoutRevision: 0,
+      mapNavContext: null,
+      mapNavReturning: false,
       fileTreeProps: {
         label: 'name',
         children: 'children',
@@ -1088,7 +1112,31 @@ export default {
     },
 
     fileToolbarLayoutKey() {
-      return [this.isMobile, this.isReadonly, !!this.$route.query.room].join('|')
+      const backAction = this.mapNavBackActions[0]
+      return [
+        this.isMobile,
+        this.isReadonly,
+        !!this.$route.query.room,
+        backAction ? backAction.label : ''
+      ].join('|')
+    },
+
+    mapNavBackActions() {
+      const context = this.mapNavContext
+      if (!context) return []
+      const label = context.toMain
+        ? this.$t('toolbar.backToMainMap')
+        : this.$t('toolbar.backToParentMap')
+      return [
+        {
+          key: 'mapNavBack',
+          label,
+          title: label,
+          icon: 'el-icon-top-left',
+          disabled: this.mapNavReturning,
+          testId: 'map-nav-back'
+        }
+      ]
     },
 
     fileToolbarActions() {
@@ -1301,6 +1349,9 @@ export default {
     fileToolbarLayoutKey() {
       this.computeToolbarShow()
     },
+    '$route.fullPath'() {
+      this.refreshMapNavContext()
+    },
     collabSaveChip: {
       immediate: true,
       handler(next) {
@@ -1320,11 +1371,14 @@ export default {
     this.$bus.$on('open_workbuddy_job_history', this.openJobHistory)
     this.$bus.$on('open_local_directory', this.openDirectory)
     this.$bus.$on('open_local_file', this.openLocalFile)
+    this.$bus.$on('map_nav_context_change', this.refreshMapNavContext)
+    this.refreshMapNavContext()
   },
   mounted() {
     this.computeToolbarShow()
     this.computeToolbarShowThrottle = throttle(this.computeToolbarShow, 300)
     window.addEventListener('resize', this.computeToolbarShowThrottle)
+    window.addEventListener('popstate', this.onMapNavPopstate)
     this.$bus.$on('lang_change', this.computeToolbarShowThrottle)
     window.addEventListener('beforeunload', this.onUnload)
     this.$bus.$on('node_note_dblclick', this.onNodeNoteDblclick)
@@ -1369,6 +1423,9 @@ export default {
     this.$bus.$off('open_workbuddy_job_history', this.openJobHistory)
     this.$bus.$off('open_local_directory', this.openDirectory)
     this.$bus.$off('open_local_file', this.openLocalFile)
+    this.$bus.$off('map_nav_context_change', this.refreshMapNavContext)
+    window.removeEventListener('popstate', this.onMapNavPopstate)
+    if (this.cancelMapNavBack) this.cancelMapNavBack()
     window.removeEventListener('resize', this.computeToolbarShowThrottle)
     this.$bus.$off('lang_change', this.computeToolbarShowThrottle)
     window.removeEventListener('beforeunload', this.onUnload)
@@ -4824,7 +4881,155 @@ export default {
         case 'check': return this.openCpdCheck()
         case 'run': return this.runWorkbuddyJob()
         case 'export': return this.$bus.$emit('showExport')
+        case 'mapNavBack': return this.returnToParentMap()
       }
+    },
+
+    refreshMapNavContext() {
+      this.mapNavContext = getMapNavContext(
+        window.history.state,
+        this.currentRoomKey()
+      )
+    },
+
+    onMapNavPopstate() {
+      // 同一 URL 的条目之间前进后退时路由不变，只能靠 popstate 重读条目状态
+      this.$nextTick(this.refreshMapNavContext)
+    },
+
+    /** 返回上级脑图：只走本标签页记录的真实访问路径，不用 history.back() 兜底到别的页面 */
+    async returnToParentMap() {
+      if (this.mapNavReturning) return
+      const currentRoom = this.currentRoomKey()
+      const context = getMapNavContext(window.history.state, currentRoom)
+      if (!context) {
+        this.mapNavContext = null
+        return
+      }
+      this.mapNavReturning = true
+      try {
+        if (!(await this.confirmMapNavLeave())) return
+        if (!(await this.verifyMapNavParentAccess(context.parent.room))) return
+        // 等待期间用户可能已经切走了
+        if (this.currentRoomKey() !== currentRoom) return
+        markMapNavViewRestore(context.parent.room)
+        await this.traverseBackToParentMap(context.parent, currentRoom)
+      } catch (err) {
+        console.error('[mapNav] return to parent failed', err)
+        this.$message.warning(this.$t('mapRef.openFailed'))
+      } finally {
+        this.mapNavReturning = false
+        this.refreshMapNavContext()
+      }
+    },
+
+    /** 还有没保存到服务器的修改：先等一会儿，仍未保存就让用户确认 */
+    async confirmMapNavLeave() {
+      let trouble = this.collabSaveTrouble()
+      if (trouble === 'pending') {
+        await this.waitForCollabSaved(MAP_NAV_SAVE_WAIT_MS)
+        trouble = this.collabSaveTrouble()
+      }
+      if (!trouble && !this.waitingWriteToLocalFile) return true
+      try {
+        await this.$confirm(
+          this.$t('toolbar.mapNavUnsavedTip'),
+          this.$t('toolbar.mapNavUnsavedTitle'),
+          {
+            type: 'warning',
+            confirmButtonText: this.$t('toolbar.mapNavLeaveAnyway'),
+            cancelButtonText: this.$t('toolbar.mapNavStay')
+          }
+        )
+        return true
+      } catch (err) {
+        return false
+      }
+    },
+
+    /** 上级脑图要能被当前用户访问（服务端 ref-resolve 按 view 权限校验），历史状态被篡改也越不了权 */
+    async verifyMapNavParentAccess(room) {
+      try {
+        const info = await inspectMapRef({ mapId: room })
+        if (info && info.exists) return true
+        this.$message.warning(this.$t('mapRef.missingMap'))
+      } catch (err) {
+        const msg = String((err && err.message) || '')
+        const forbidden =
+          !!err &&
+          (err.statusCode === 403 ||
+            err.code === 'FORBIDDEN' ||
+            /403|permission/i.test(msg))
+        const missing =
+          !!err &&
+          (err.statusCode === 404 ||
+            err.code === 'NOT_FOUND' ||
+            err.code === 'ROOM_DELETED')
+        this.$message.warning(
+          this.$t(
+            forbidden
+              ? 'mapRef.noPermission'
+              : missing
+                ? 'mapRef.missingMap'
+                : 'mapRef.openFailed'
+          )
+        )
+      }
+      return false
+    },
+
+    /**
+     * 上一条历史记录就是进入子脑图前的上级条目（进入时由 push 生成），后退即可，不会多出历史记录；
+     * 后退后若落点不是记录的上级条目，就把当前条目 replace 成上级脑图，同样不新增记录。
+     */
+    traverseBackToParentMap(parent, fromRoom) {
+      const childNav = readEntryNav(window.history.state, fromRoom)
+      return new Promise(resolve => {
+        let settled = false
+        let timer = null
+        const cleanup = () => {
+          window.removeEventListener('popstate', onPopstate)
+          window.removeEventListener('beforeunload', onUnload)
+          clearTimeout(timer)
+          this.cancelMapNavBack = null
+        }
+        const finish = landedOnParent => {
+          if (settled) return
+          settled = true
+          cleanup()
+          if (landedOnParent) {
+            resolve()
+            return
+          }
+          this.replaceWithParentMap(parent, childNav).then(resolve, resolve)
+        }
+        const onPopstate = () => finish(isParentEntry(window.history.state, parent))
+        // 上级条目属于刷新前的文档：浏览器会整页加载上级地址，不能再触发兜底 replace
+        const onUnload = () => {
+          settled = true
+          cleanup()
+          resolve()
+        }
+        this.cancelMapNavBack = onUnload
+        window.addEventListener('popstate', onPopstate)
+        window.addEventListener('beforeunload', onUnload)
+        timer = setTimeout(() => finish(false), MAP_NAV_BACK_TIMEOUT_MS)
+        window.history.back()
+      })
+    },
+
+    async replaceWithParentMap(parent, childNav) {
+      if (this.currentRoomKey() === parent.room) return
+      const query = { ...this.$route.query, room: parent.room }
+      delete query.focus
+      delete query.shallowExpand
+      try {
+        await this.$router.replace({ query })
+      } catch (err) {
+        return
+      }
+      if (this.currentRoomKey() !== parent.room) return
+      replaceEntryNav(buildParentEntryNav(childNav && childNav.trail, parent))
     },
 
     // 两侧面板等宽；首次溢出时同时出现“更多”，之后各自按半区宽度收纳。
@@ -5546,6 +5751,10 @@ export default {
         align-items: center;
         font-size: 18px;
       }
+    }
+
+    .mapNavBackList {
+      margin-left: 20px;
     }
 
     .moreIcon {
