@@ -527,11 +527,7 @@ function createCollaborationAdapter(options = {}) {
     if (extra.stage) state.stage = extra.stage
     if (extra.saveState) state.saveState = extra.saveState
     if (extra.opId) state.lastOpId = extra.opId
-    if (extra.error === '') {
-      maybeClearRecoveredError({
-        ignorePendingAcks: extra.saveState === 'saved'
-      })
-    } else if (extra.errorCode != null || extra.error) {
+    if (extra.error !== '' && (extra.errorCode != null || extra.error)) {
       recordError({
         code: extra.errorCode,
         message: extra.error || extra.errorCode,
@@ -555,6 +551,13 @@ function createCollaborationAdapter(options = {}) {
       state.phase = extra.error ? 'ERROR' : 'DISCONNECTED'
     }
     if (state.status !== status) state.status = status
+    // Recovery must inspect the new phase: a completed resync was still
+    // RESYNCING here, so isLive() used to leave REVISION_GAP active forever.
+    if (extra.error === '') {
+      maybeClearRecoveredError({
+        ignorePendingAcks: extra.saveState === 'saved'
+      })
+    }
     emit()
   }
 
