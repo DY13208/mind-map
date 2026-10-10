@@ -308,21 +308,34 @@ function createReadDb(options = {}) {
           err.code = '42P01'
           throw err
         }
+        if (text.startsWith('select 1')) {
+          return {
+            rows: options.roomHasNormalizedNodes === false ? [] : [{ present: 1 }]
+          }
+        }
         return { rows: (nodeAttachmentIds[params[1]] || []).map(id => ({ id })) }
       }
-      const idFilters = params.filter(value => Array.isArray(value))
+      const idParamIndexes = [...text.matchAll(/a\.id = any\(\$(\d+)/g)].map(
+        match => Number(match[1]) - 1
+      )
+      const idFilters = idParamIndexes.map(index => params[index] || [])
+      const nodeUidMatch = text.match(/a\.node_uid = \$(\d+)/)
+      const currentPointer = text.includes("a.source_kind <> 'attachment'")
+      const currentIds = currentPointer ? idFilters.shift() || [] : []
+      const nodeUid = nodeUidMatch ? params[Number(nodeUidMatch[1]) - 1] : ''
       const rows = attachments
         .filter(row => row.room_key === params[0])
         .filter(row => {
-          if (!text.includes('a.node_uid =')) return true
-          const allowed = idFilters[0] || []
-          return row.node_uid === params[1] || allowed.includes(row.id)
+          if (!nodeUidMatch) return true
+          if (currentPointer) {
+            return (
+              currentIds.includes(row.id) ||
+              (row.source_kind !== 'attachment' && row.node_uid === nodeUid)
+            )
+          }
+          return row.node_uid === nodeUid
         })
-        .filter(row => {
-          if (!text.includes('and a.id = any(')) return true
-          const explicit = idFilters[idFilters.length - 1] || []
-          return explicit.includes(row.id)
-        })
+        .filter(row => idFilters.every(allowed => allowed.includes(row.id)))
         .filter(row => !text.includes('a.id = $2') || row.id === params[1])
         .map(row => {
           const projected = { ...row }
@@ -405,6 +418,67 @@ async function testListMetaAndTextSlice() {
     reused.map(item => item.id),
     ['att-shared']
   )
+
+  // On migrated rooms the normalized node pointer is authoritative: detach or
+  // replacement must not keep the uploader's old row in the node's listing.
+  const detached = await store.listMeta(
+    createReadDb({
+      attachments,
+      nodeAttachmentIds: { 'node-1': [] }
+    }),
+    'room-demo',
+    { nodeUid: 'node-1' }
+  )
+  assert.deepEqual(detached, [])
+
+  const missingMigratedNode = await store.listMeta(
+    createReadDb({
+      attachments,
+      nodeAttachmentIds: { 'some-other-node': [] }
+    }),
+    'room-demo',
+    { nodeUid: 'node-9' }
+  )
+  assert.deepEqual(
+    missingMigratedNode,
+    [],
+    'a normalized room must not fall back to origin node_uid for a missing node'
+  )
+
+  const replacementRows = [
+    ...attachments,
+    {
+      ...attachments[0],
+      id: 'att-replacement',
+      node_uid: 'node-1',
+      file_name: '新合同.pdf'
+    }
+  ]
+  const replacement = await store.listMeta(
+    createReadDb({
+      attachments: replacementRows,
+      nodeAttachmentIds: { 'node-1': ['att-replacement'] }
+    }),
+    'room-demo',
+    { nodeUid: 'node-1' }
+  )
+  assert.deepEqual(replacement.map(item => item.id), ['att-replacement'])
+
+  const nonAttachmentSource = await store.listMeta(
+    createReadDb({
+      attachments: [
+        {
+          ...attachments[0],
+          id: 'knowledge-link',
+          source_kind: 'link'
+        }
+      ],
+      nodeAttachmentIds: { 'node-1': [] }
+    }),
+    'room-demo',
+    { nodeUid: 'node-1' }
+  )
+  assert.deepEqual(nonAttachmentSource.map(item => item.id), ['knowledge-link'])
 
   // Rooms predating the room_nodes migration still match on the attachment side.
   const legacy = await store.listMeta(createReadDb({ attachments }), 'room-demo', {
