@@ -1,0 +1,158 @@
+name: mcp-incremental-test
+
+x-app-common: &app-common
+  image: mcp-incremental-app:0160b5a7
+  build:
+    context: ..
+    dockerfile: Dockerfile
+    args:
+      DEBIAN_MIRROR: mirrors.aliyun.com
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      NO_PROXY: localhost,127.0.0.1,postgres,redis
+  environment: &app-environment
+    MIND_MAP_SKIP_ROOT_ENV: "1"
+    PGHOST: postgres
+    PGPORT: "5432"
+    PGDATABASE: mcp_incremental_test
+    PGUSER: mcp_test
+    PGPASSWORD: mcp-incremental-test-db-password
+    PGAPPNAME: mcp-incremental-test
+    REDIS_URL: redis://redis:6379
+    COLLAB_EVENT_BUS: redis
+    COLLAB_V2: "1"
+    COLLAB_RATE_LIMIT_PER_ROOM: "800"
+    COLLAB_RATE_LIMIT_GLOBAL: "8000"
+    COLLAB_OUTBOX_POLL_MS: "50"
+    MCP_TOKEN: mcp-incremental-test-only-token-0160b5a7
+    MCP_CLIENT_ID: mcp-incremental-test-agent
+    MCP_HOST: 127.0.0.1
+    MCP_PORT: "3847"
+    MIND_MAP_API: http://127.0.0.1:1234
+    HOST: 127.0.0.1
+    PORT: "1234"
+    WEB_PORT: "80"
+    GATEWAY: "1"
+    PUBLIC_HOST: 127.0.0.1
+    WECOM_AUTH_ENABLED: "0"
+    ONEID_AUTH_ENABLED: "0"
+    WORKBUDDY_AUTH_ENABLED: "0"
+    WIKI_COMPILER_SYNC_ENABLED: "false"
+    KNOWLEDGE_COMPILER_ENABLED: "false"
+    DOCMOST_SYNC_ENABLED: "false"
+    YIRAN_UPSTREAM: http://127.0.0.1:9
+    JOBHUB_UPSTREAM: http://127.0.0.1:9
+    BRIDGE_UPSTREAM: http://127.0.0.1:9
+    COGNEE_API: http://127.0.0.1:9
+    SOP_OUTPUT_DIR: /tmp/mcp-baseline-output
+    KNOWLEDGE_OUTPUT_DIR: /tmp/mcp-baseline-knowledge
+    WIKI_COMPILER_OUTPUT_DIR: /tmp/mcp-baseline-wiki
+    NODE_OPTIONS: --max-old-space-size=3072 --require=/test/preload.cjs
+    MCP_BASELINE_INSTANCE: ${MCP_BASELINE_INSTANCE:-app}
+    MCP_BASELINE_RUN_ID: ${MCP_BASELINE_RUN_ID:-manual}
+    MCP_BASELINE_METRICS_FILE: /baseline/${MCP_BASELINE_RUN_ID:-manual}-${MCP_BASELINE_INSTANCE:-app}.jsonl
+    TZ: Asia/Shanghai
+  volumes:
+    - ../tests/mcp-incremental:/test:ro
+    - ../tests/mcp-incremental/results:/baseline
+  command: ["/bin/sh", "/test/start-test.sh"]
+  # Optional production-only routes are not exercised by this harness. Resolve
+  # their static nginx upstream names locally so nginx can start without adding
+  # external services or connecting to production dependencies.
+  extra_hosts:
+    - knowledge-mcp=127.0.0.1
+    - wiki-graph=127.0.0.1
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  healthcheck:
+    test:
+      [
+        "CMD",
+        "node",
+        "-e",
+        "fetch('http://127.0.0.1:1234/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      ]
+    interval: 5s
+    timeout: 5s
+    retries: 24
+    start_period: 20s
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mcp_incremental_test
+      POSTGRES_USER: mcp_test
+      POSTGRES_PASSWORD: mcp-incremental-test-db-password
+    command:
+      [
+        "postgres",
+        "-c",
+        "log_min_duration_statement=25",
+        "-c",
+        "log_lock_waits=on",
+        "-c",
+        "deadlock_timeout=1ms",
+        "-c",
+        "log_line_prefix=%m [%p] app=%a tx=%x "
+      ]
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    ports:
+      - 127.0.0.1:25492:5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mcp_test -d mcp_incremental_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - 127.0.0.1:16389:6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  app-a:
+    <<: *app-common
+    environment:
+      <<: *app-environment
+      MCP_BASELINE_INSTANCE: app-a
+      MCP_BASELINE_METRICS_FILE: /baseline/${MCP_BASELINE_RUN_ID:-manual}-app-a.jsonl
+    ports:
+      - 127.0.0.1:19090:80
+
+  app-b:
+    <<: *app-common
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      app-a:
+        condition: service_healthy
+    environment:
+      <<: *app-environment
+      MCP_BASELINE_INSTANCE: app-b
+      MCP_BASELINE_METRICS_FILE: /baseline/${MCP_BASELINE_RUN_ID:-manual}-app-b.jsonl
+    ports:
+      - 127.0.0.1:19091:80
+
+volumes:
+  pg-data:
+    name: mcp-incremental-test-pg-data
+  redis-data:
+    name: mcp-incremental-test-redis-data
+
