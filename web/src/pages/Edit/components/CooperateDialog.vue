@@ -365,9 +365,10 @@ import {
 } from '@/utils/mapNavTrail'
 import {
   applyPersonalExpandState,
+  isPersonalExpandNodeVisible,
   collectPersonalExpandState,
   loadPersonalExpandState,
-  savePersonalExpandState
+  createPersonalExpandPersistence
 } from '@/utils/personalExpandState'
 import { bindPersonalAppearance } from '@/utils/personalAppearance'
 import { applyRoomAccess, fileRoleLabelKey, memberRoleLabelKey } from '@/utils/roomAcl'
@@ -502,7 +503,6 @@ export default {
       collabV2Adapter: null,
       personalExpandState: null,
       personalExpandRoomKey: '',
-      personalExpandRemoteTimer: null,
       personalExpandApplying: false,
       personalExpandOnCommand: null,
       personalExpandOnRender: null,
@@ -1080,34 +1080,34 @@ export default {
       if (!this.mindMap || !this.roomName) return
       const roomKey = this.roomName
       const userId = this.userId || 'local'
+      this._personalExpandBinding = {}
       this.personalExpandRoomKey = roomKey
       this.personalExpandState = loadPersonalExpandState(roomKey, userId)
       this.stopPersonalAppearance = bindPersonalAppearance(
         this.mindMap, roomKey, userId, getPersonalViewState, savePersonalViewState
       )
 
-      let locallyChanged = false
-      const persist = () => {
-        locallyChanged = true
-        if (!this.personalExpandState) return
-        savePersonalExpandState(roomKey, userId, this.personalExpandState)
-        clearTimeout(this.personalExpandRemoteTimer)
-        this.personalExpandRemoteTimer = setTimeout(() => {
-          this.personalExpandRemoteTimer = null
-          savePersonalViewState(roomKey, {
-            expand: this.personalExpandState || {}
-          }).catch(() => {})
-        }, 350)
-      }
+      this._personalExpandPersistence = createPersonalExpandPersistence(
+        roomKey, userId, getPersonalViewState, savePersonalViewState, state => {
+          if (this.personalExpandRoomKey !== roomKey) return
+          this.personalExpandState = state
+          if (!this.largeMapInitialOverview) this.restorePersonalExpandState()
+        }
+      )
+      const persistence = this._personalExpandPersistence
+      const persist = changes => persistence.record(changes)
       const snapshotNow = () => {
         if (!this.personalExpandState || !this.mindMap) return
-        this.personalExpandState = collectPersonalExpandState(
-          this.mindMap,
-          this.personalExpandState
-        )
-        persist()
+        const next = collectPersonalExpandState(this.mindMap, this.personalExpandState)
+        const changes = {}
+        for (const uid of Object.keys(next)) {
+          if (next[uid] !== this.personalExpandState[uid]) changes[uid] = next[uid]
+        }
+        this.personalExpandState = next
+        if (Object.keys(changes).length) persist(changes)
       }
       this.personalExpandOnCommand = (name, ...args) => {
+        if (this.mindMap.cooperate && this.mindMap.cooperate.isApplyingRemote) return
         if (name === 'SET_NODE_EXPAND') {
           const node = args[0]
           const uid =
@@ -1116,7 +1116,7 @@ export default {
               : node && node.data && node.data.uid
           if (uid) {
             this.$set(this.personalExpandState, uid, args[1] !== false)
-            persist()
+            persist({ [uid]: args[1] !== false })
           }
           return
         }
@@ -1142,7 +1142,7 @@ export default {
               : node && node.data && node.data.uid
           if (uid) {
             this.$set(this.personalExpandState, uid, args[1].expand !== false)
-            persist()
+            persist({ [uid]: args[1].expand !== false })
           }
         }
       }
@@ -1151,25 +1151,14 @@ export default {
       this.personalExpandOnRender = () => {
         if (!this.largeMapInitialOverview) this.restorePersonalExpandState()
       }
+      this._personalExpandBeforeUpdate = tree => {
+        applyPersonalExpandState({ renderer: { renderTree: tree } }, this.personalExpandState)
+      }
+      this.mindMap.on('before_update_data', this._personalExpandBeforeUpdate)
       this.mindMap.on('afterExecCommand', this.personalExpandOnCommand)
       this.mindMap.on('node_tree_render_end', this.personalExpandOnRender)
       // setData 的首次渲染可能尚未开始，先尝试一次，后续由 render_end 补齐。
       this.personalExpandOnRender()
-      getPersonalViewState(roomKey)
-        .then(result => {
-          if (this.personalExpandRoomKey !== roomKey || locallyChanged) return
-          const remote =
-            result && result.state && result.state.expand
-              ? result.state.expand
-              : {}
-          this.personalExpandState = {
-            ...this.personalExpandState,
-            ...remote
-          }
-          savePersonalExpandState(roomKey, userId, this.personalExpandState)
-          if (!this.largeMapInitialOverview) this.restorePersonalExpandState()
-        })
-        .catch(() => {})
     },
 
     async restorePersonalExpandState() {
@@ -1183,11 +1172,13 @@ export default {
         return
       }
       const roomKey = this.personalExpandRoomKey
+      const state = this.personalExpandState
+      const binding = this._personalExpandBinding
       this.personalExpandApplying = true
       try {
         const cooperate = this.mindMap.cooperate
         for (let round = 0; round < 20; round += 1) {
-          if (!roomKey || this.personalExpandRoomKey !== roomKey) break
+          if (!roomKey || this.personalExpandRoomKey !== roomKey || this.personalExpandState !== state || this._personalExpandBinding !== binding) break
           const changed = applyPersonalExpandState(
             this.mindMap,
             this.personalExpandState
@@ -1203,28 +1194,21 @@ export default {
           if (!result || !result.changed) break
         }
       } finally {
-        this.personalExpandApplying = false
+        if (this._personalExpandBinding === binding) {
+          this.personalExpandApplying = false
+          if (this.personalExpandState !== state) this.restorePersonalExpandState()
+        }
       }
     },
 
     unbindPersonalExpandState() {
       if (this.stopPersonalAppearance) this.stopPersonalAppearance()
       this.stopPersonalAppearance = null
-      if (this.personalExpandRemoteTimer) {
-        clearTimeout(this.personalExpandRemoteTimer)
-        this.personalExpandRemoteTimer = null
-      }
-      if (this.personalExpandState && this.personalExpandRoomKey) {
-        savePersonalExpandState(
-          this.personalExpandRoomKey,
-          this.userId || 'local',
-          this.personalExpandState
-        )
-        savePersonalViewState(this.personalExpandRoomKey, {
-          expand: this.personalExpandState
-        }).catch(() => {})
-      }
+      if (this._personalExpandPersistence) this._personalExpandPersistence.stop()
+      this._personalExpandPersistence = null
       if (this.mindMap) {
+        this.mindMap.off('before_update_data', this._personalExpandBeforeUpdate)
+        this._personalExpandBeforeUpdate = null
         if (this.personalExpandOnChange) {
           this.mindMap.off('personal_expand_change', this.personalExpandOnChange)
         }
@@ -1237,6 +1221,7 @@ export default {
       }
       this.personalExpandState = null
       this.personalExpandRoomKey = ''
+      this._personalExpandBinding = null
       this.personalExpandOnChange = null
       this.personalExpandOnCommand = null
       this.personalExpandOnRender = null
@@ -1276,6 +1261,12 @@ export default {
     async applyMapRefShallowExpand(level = 2) {
       const mm = this.mindMap
       if (!mm || !mm.renderer) return
+      // Shallow expansion is a first-open default, never a replacement for
+      // this user's remembered view when navigating into a sub-map.
+      if (Object.keys(this.personalExpandState || {}).length) {
+        await this.restorePersonalExpandState()
+        return
+      }
       const target = Math.max(1, Number(level) || 2)
       const renderer = mm.renderer
       await new Promise(resolve => {
@@ -1304,7 +1295,8 @@ export default {
             setTimeout(finish, 2500)
             return
           }
-          mm.execCommand('UNEXPAND_TO_LEVEL', target)
+          renderer.applyExpandFlagsToLevel(target)
+          mm.render()
         } catch (err) {
           console.warn('[mapRef] shallow expand failed', err)
         }
@@ -1324,7 +1316,7 @@ export default {
       if (!snap || !this.mindMap) return
       restoreMapView(this.mindMap, snap)
       const uid = snap.selectedUids && snap.selectedUids[0]
-      if (uid && this.mindMap.cooperate) {
+      if (uid && this.mindMap.cooperate && isPersonalExpandNodeVisible(this.mindMap, uid)) {
         try {
           await this.mindMap.cooperate.revealUid(uid)
         } catch (err) {
@@ -1355,7 +1347,7 @@ export default {
         await this.applyMapRefShallowExpand(shallow)
         this.clearShallowExpandQuery()
         if (gen !== this._mapOpenGen) return
-        // 子脑图跳转：不恢复历史全展开视图，只按需定位 focus
+        // 子脑图跳转保留个人展开状态，只按需定位 focus
         if (this.$route.query.focus) {
           await this.tryFocusFromQuery()
         }

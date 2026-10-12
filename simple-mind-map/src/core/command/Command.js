@@ -7,6 +7,7 @@ import {
 } from '../../utils'
 import { ERROR_TYPES } from '../../constants/constant'
 import pkg from '../../../package.json'
+import { isPersonalViewCommand } from '../../utils/personalNodeView'
 import { undoTrace } from '../../utils/collabTrace'
 
 //  命令类
@@ -117,6 +118,7 @@ class Command {
         fn(...args)
       })
       this.mindMap.emit('afterExecCommand', name, ...args)
+      if (isPersonalViewCommand(name, args)) return
       if (
         ['BACK', 'FORWARD', 'SET_NODE_ACTIVE', 'CLEAR_ACTIVE_NODE'].includes(
           name

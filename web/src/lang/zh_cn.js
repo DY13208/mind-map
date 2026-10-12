@@ -391,6 +391,8 @@ export default {
     cooperate: '协同',
     backToMainMap: '返回主脑图',
     backToParentMap: '返回上级脑图',
+    mapNavSaving: '正在保存…',
+    mapNavSaveFailed: '自动保存尚未完成，请检查网络或保存状态后重试返回。',
     mapNavUnsavedTitle: '修改尚未保存',
     mapNavUnsavedTip: '当前脑图还有修改没有保存到服务器，现在返回可能丢失这些修改。确定要返回吗？',
     mapNavLeaveAnyway: '仍然返回',

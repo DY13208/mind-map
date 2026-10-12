@@ -2352,7 +2352,6 @@ class Render {
       after()
       if (command && command.isPause) {
         command.recovery()
-        command.addHistory()
       }
     }
     if (command) command.pause()
@@ -2465,7 +2464,6 @@ class Render {
         if (this._expandAllToken === token) this._expandAllToken = 0
         if (command && command.isPause) {
           command.recovery()
-          command.addHistory()
         }
       })
   }

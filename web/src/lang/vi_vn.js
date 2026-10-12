@@ -376,6 +376,8 @@ export default {
     cooperate: 'Cộng tác',
     backToMainMap: 'Về sơ đồ chính',
     backToParentMap: 'Về sơ đồ cấp trên',
+    mapNavSaving: 'Đang lưu…',
+    mapNavSaveFailed: 'Chưa hoàn tất lưu tự động. Kiểm tra kết nối hoặc trạng thái lưu rồi thử quay lại.',
     mapNavUnsavedTitle: 'Chưa lưu thay đổi',
     mapNavUnsavedTip:
       'Sơ đồ hiện tại còn thay đổi chưa được lưu lên máy chủ, quay lại bây giờ có thể mất các thay đổi này. Vẫn quay lại?',

@@ -52,7 +52,7 @@
       <!-- 文件与协作操作 -->
       <div
         class="toolbarBlockWrapper fileToolbarWrapper"
-        :class="{ collapsed: fileToolbarCollapsed }"
+        :class="{ collapsed: fileToolbarCollapsed, readonly: isReadonly }"
       >
         <div class="toolbarBlock" ref="fileToolbarBlock">
           <button
@@ -611,7 +611,7 @@ import {
 } from '@/utils/runLog'
 
 // 返回上级脑图前，等待协同保存完成的最长时间
-const MAP_NAV_SAVE_WAIT_MS = 5000
+const MAP_NAV_SAVE_WAIT_MS = 15000
 // 后退后多久没落到上级条目，就改用 replace 直接打开上级脑图
 const MAP_NAV_BACK_TIMEOUT_MS = 3000
 
@@ -1130,7 +1130,7 @@ export default {
       return [
         {
           key: 'mapNavBack',
-          label,
+          label: this.mapNavReturning ? this.$t('toolbar.mapNavSaving') : label,
           title: label,
           icon: 'el-icon-top-left',
           disabled: this.mapNavReturning,
@@ -4908,7 +4908,7 @@ export default {
       }
       this.mapNavReturning = true
       try {
-        if (!(await this.confirmMapNavLeave())) return
+        if (!(await this.saveBeforeMapNavLeave())) return
         if (!(await this.verifyMapNavParentAccess(context.parent.room))) return
         // 等待期间用户可能已经切走了
         if (this.currentRoomKey() !== currentRoom) return
@@ -4923,26 +4923,42 @@ export default {
       }
     },
 
-    /** 还有没保存到服务器的修改：先等一会儿，仍未保存就让用户确认 */
-    async confirmMapNavLeave() {
-      let trouble = this.collabSaveTrouble()
-      if (trouble === 'pending') {
-        await this.waitForCollabSaved(MAP_NAV_SAVE_WAIT_MS)
-        trouble = this.collabSaveTrouble()
-      }
-      if (!trouble && !this.waitingWriteToLocalFile) return true
+    /** 主动提交文本编辑和防抖修改，保存完成后再返回，不提供丢弃修改的确认框。 */
+    async saveBeforeMapNavLeave() {
+      // 只读视图没有业务修改，不触发编辑字段扫描；个人视图由自身保存链路处理。
+      if (this.isReadonly && !this.collabSyncPending().pending && !this.waitingWriteToLocalFile) return true
       try {
-        await this.$confirm(
-          this.$t('toolbar.mapNavUnsavedTip'),
-          this.$t('toolbar.mapNavUnsavedTitle'),
-          {
-            type: 'warning',
-            confirmButtonText: this.$t('toolbar.mapNavLeaveAnyway'),
-            cancelButtonText: this.$t('toolbar.mapNavStay')
+        // 复用刷新前保存：提交尚未结束的文本编辑，落本地缓存，
+        // 并将待发送的协同操作写入持久化队列。
+        const prepared = await this.prepareReload()
+        if (!prepared || prepared.ok === false || prepared.timeout) {
+          throw (prepared && prepared.error) || new Error('save preparation incomplete')
+        }
+        await this.flushLocalFileNow()
+        const cooperate = this.mindMap && this.mindMap.cooperate
+        const adapter = cooperate && cooperate.collabV2Adapter
+        if (this.collabSyncPending().pending) {
+          if (adapter && typeof adapter.retryPending === 'function') {
+            // 启动发送；是否可离开以服务器确认状态为准，不只检查本地队列持久化。
+            Promise.resolve(adapter.retryPending()).catch(() => {})
           }
-        )
+          if (!(await this.waitForCollabSaved(MAP_NAV_SAVE_WAIT_MS))) {
+            throw new Error('save acknowledgement timeout')
+          }
+        }
+        const status = this.collabLiveStatus()
+        if (
+          this.waitingWriteToLocalFile ||
+          this.collabSyncPending().pending ||
+          this.collabSaveTrouble() === 'failed' ||
+          status.saveState === 'requires_confirmation'
+        ) {
+          throw new Error('save incomplete')
+        }
         return true
       } catch (err) {
+        console.warn('[mapNav] save before return failed', err)
+        this.$message.warning(this.$t('toolbar.mapNavSaveFailed'))
         return false
       }
     },
@@ -5503,6 +5519,11 @@ export default {
 
       &.fileToolbarWrapper .toolbarBlock {
         margin-left: 0;
+        margin-right: auto;
+      }
+
+      &.fileToolbarWrapper.readonly .toolbarBlock {
+        margin-left: auto;
         margin-right: auto;
       }
 

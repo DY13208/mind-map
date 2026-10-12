@@ -953,7 +953,7 @@ function createFileSystem(options = {}) {
       .slice(0, 20000)
       .forEach(uid => {
         const key = String(uid || '').trim().slice(0, 160)
-        if (key) result[key] = input[uid] !== false
+        if (key) Object.defineProperty(result, key, { value: input[uid] !== false, enumerable: true, configurable: true, writable: true })
       })
     return result
   }
@@ -963,6 +963,10 @@ function createFileSystem(options = {}) {
     const result = {}
     if (!partial || Object.prototype.hasOwnProperty.call(input, 'expand')) {
       result.expand = normalizeExpandState(input.expand)
+    }
+    if (input.expandVersions && typeof input.expandVersions === 'object') {
+      result.expandVersions = Object.fromEntries(Object.entries(input.expandVersions)
+        .filter(([, version]) => Number.isSafeInteger(version) && version >= 0))
     }
     if (typeof input.theme === 'string' && input.theme.length <= 160) result.theme = input.theme
     if (typeof input.layout === 'string' && input.layout.length <= 160) result.layout = input.layout
@@ -999,8 +1003,19 @@ function createFileSystem(options = {}) {
     if (!uid) throw fsError('unauthorized', '请先使用企业微信扫码登录', 401)
     await getRoom(roomKey, { userId: uid, bypass: input.bypass })
     const normalized = normalizeUserViewState(viewState, true)
-    await store.upsertUserState(roomKey, uid, { view_state: normalized })
-    return normalized
+    // Clients send only edited UIDs and the versions they observed. Never trust
+    // client-supplied resulting versions.
+    delete normalized.expandVersions
+    if (viewState && Object.prototype.hasOwnProperty.call(viewState, 'expandBase')) {
+      const bases = viewState.expandBase
+      if (!bases || typeof bases !== 'object' || Array.isArray(bases)) {
+        throw fsError('INVALID_VIEW_STATE', '展开状态版本无效', 400)
+      }
+      normalized.expandBase = Object.fromEntries(Object.keys(normalized.expand || {})
+        .map(key => [key, Number.isSafeInteger(bases[key]) && bases[key] >= 0 ? bases[key] : -1]))
+    }
+    const saved = await store.upsertUserState(roomKey, uid, { view_state: normalized })
+    return normalizeUserViewState(saved.view_state)
   }
 
   function assertManage(access) {

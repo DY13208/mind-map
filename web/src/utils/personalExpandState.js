@@ -9,16 +9,19 @@ function storageKey(roomKey, userId) {
 
 function nodeDataOf(node) {
   if (!node) return null
-  return node.data || (node.nodeData && node.nodeData.data) || null
+  return node.data || (node.nodeData && node.nodeData.data) || (node.uid ? node : null)
 }
 
 function childrenOf(node) {
   if (!node) return []
-  return Array.isArray(node.children)
+  const children = Array.isArray(node.children)
     ? node.children
     : node.nodeData && Array.isArray(node.nodeData.children)
       ? node.nodeData.children
       : []
+  const data = nodeDataOf(node)
+  const summaries = data && data.generalization
+  return summaries ? children.concat(Array.isArray(summaries) ? summaries : [summaries]) : children
 }
 
 function walkTree(root, visit) {
@@ -32,6 +35,20 @@ function walkTree(root, visit) {
       stack.push(children[i])
     }
   }
+}
+
+export function isPersonalExpandNodeVisible(mindMap, uid) {
+  const root = mindMap && mindMap.renderer && mindMap.renderer.renderTree
+  const stack = root ? [root] : []
+  while (stack.length) {
+    const node = stack.pop()
+    const data = nodeDataOf(node)
+    if (!data) continue
+    if (data.uid === uid) return true
+    if (data.expand === false) continue
+    for (const child of childrenOf(node)) stack.push(child)
+  }
+  return false
 }
 
 export function loadPersonalExpandState(roomKey, userId) {
@@ -83,3 +100,107 @@ export function applyPersonalExpandState(mindMap, state) {
   return changed
 }
 
+// Backend is authoritative across devices; cache and the pending journal cover
+// reload/offline operation. Version checks prevent old journals overwriting it.
+export function createPersonalExpandPersistence(roomKey, userId, getState, saveState, onReady) {
+  const key = storageKey(roomKey, userId) + ':pending'
+  let state = loadPersonalExpandState(roomKey, userId)
+  let versions = {}
+  let pending = {}
+  try {
+    const journal = JSON.parse(localStorage.getItem(key) || '{}')
+    versions = journal.versions || {}
+    pending = journal.pending || {}
+  } catch (err) { /* Storage may be unavailable. */ }
+  let ready = false
+  let stopped = false
+  let timer = null
+  let flight = null
+  const cache = () => {
+    savePersonalExpandState(roomKey, userId, state)
+    try { localStorage.setItem(key, JSON.stringify({ versions, pending })) } catch (err) { /* Storage may be unavailable. */ }
+  }
+  const schedule = (delay = 350) => {
+    clearTimeout(timer)
+    if (!stopped) timer = setTimeout(() => flush(), delay)
+  }
+  const flush = (keepalive = false) => {
+    clearTimeout(timer)
+    if (!ready || flight || !Object.keys(pending).length) return flight || Promise.resolve()
+    const batch = { ...pending }
+    const expand = {}
+    const expandBase = {}
+    for (const uid of Object.keys(batch)) {
+      expand[uid] = batch[uid].value
+      expandBase[uid] = batch[uid].base
+    }
+    flight = Promise.resolve().then(() => saveState(roomKey, { expand, expandBase }, { keepalive }))
+      .then(result => {
+        const remote = result && result.state || {}
+        versions = remote.expandVersions || versions
+        for (const uid of Object.keys(batch)) {
+          // A newer command issued during the request stays pending and uses
+          // the acknowledged version, even when the first request conflicted.
+          if (pending[uid] === batch[uid]) delete pending[uid]
+          else if (pending[uid]) pending[uid].base = versions[uid] || 0
+        }
+        cache()
+      })
+      .catch(() => { /* Retain journal and retry on reconnect/next open. */ })
+      .finally(() => {
+        flight = null
+        if (Object.keys(pending).length) schedule(1500)
+      })
+    return flight
+  }
+  const record = changes => {
+    for (const [uid, value] of Object.entries(changes)) {
+      state[uid] = value !== false
+      pending[uid] = { value: value !== false, base: ready ? versions[uid] || 0 : undefined }
+    }
+    cache()
+    schedule()
+  }
+  let loadId = 0
+  const load = () => {
+    const id = ++loadId
+    return getState(roomKey).then(result => {
+      if (stopped || id !== loadId) return
+      const remote = result && result.state || {}
+      versions = remote.expandVersions || {}
+      state = { ...state, ...(remote.expand || {}) }
+      for (const uid of Object.keys(pending)) {
+        state[uid] = pending[uid].value
+        if (pending[uid].base === undefined) pending[uid].base = versions[uid] || 0
+      }
+      ready = true
+      cache()
+      onReady({ ...state })
+      if (Object.keys(pending).length) schedule()
+    }).catch(() => { if (!stopped && id === loadId) scheduleLoad() })
+  }
+  let loadTimer = null
+  const scheduleLoad = () => { clearTimeout(loadTimer); loadTimer = setTimeout(load, 3000) }
+  const onHide = () => { cache(); flush(true) }
+  const onOnline = () => { if (ready) flush(); else load() }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pagehide', onHide)
+    window.addEventListener('online', onOnline)
+  }
+  load()
+  return {
+    record, flush,
+    stop() {
+      stopped = true
+      clearTimeout(timer)
+      clearTimeout(loadTimer)
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('pagehide', onHide)
+        window.removeEventListener('online', onOnline)
+      }
+      cache()
+      // Finish edits queued during an in-flight write before leaving this map.
+      return Promise.resolve(flight).then(() => flush(true))
+    }
+  }
+}

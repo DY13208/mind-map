@@ -1,3 +1,5 @@
+import { stripPersonalNodeView, preservePersonalNodeView, isPersonalViewCommand } from '../utils/personalNodeView'
+const transformTreeDataToObject = tree => stripPersonalNodeView(treeToObject(tree))
 import * as Y from 'yjs'
 import { WebrtcProvider } from 'y-webrtc'
 import {
@@ -6,7 +8,7 @@ import {
   getType,
   isUndef,
   getTextFromHtml,
-  transformTreeDataToObject,
+  transformTreeDataToObject as treeToObject,
   transformObjectToTreeData,
   removeFromParentNodeData,
   detachNodeFromParent,
@@ -1137,12 +1139,12 @@ class Cooperate {
             text: data.text,
             note: data.note,
             richText: data.richText,
-            expand: data.expand !== false
+            expand: true
           },
           children: []
         })
       }
-      renderer.setNodeData(parentNode, { expand: true })
+      // A remote insert must preserve the local parent expansion.
       this.mindMap.render()
       if (this.currentData) {
         this.currentData[uid] = json
@@ -1238,6 +1240,7 @@ class Cooperate {
     }
     try {
       // 避免 updateData 自带的 render + addHistory 叠加二次 render
+      preservePersonalNodeView(res, this.mindMap.renderer.renderTree)
       const data = this.mindMap.handleData(res)
       this.mindMap.emit('before_update_data', data)
       this.mindMap.command.pause()
@@ -1316,6 +1319,7 @@ class Cooperate {
   }
 
   onAfterExecCommand(name) {
+    if (isPersonalViewCommand(name, Array.prototype.slice.call(arguments, 1))) return
     if (name === 'PASTE_NODE') {
       this._pasteTraceId = this._commandTraceId || createTraceId()
       collabTrace('paste.command', {
@@ -1491,7 +1495,7 @@ class Cooperate {
   // 找出更新点
   updateChanges(data) {
     const { beforeCooperateUpdate } = this.mindMap.opt
-    const oldData = this.currentData || {}
+    const oldData = stripPersonalNodeView(this.currentData || {})
     const now = Date.now()
     this.recentDeleted.forEach((at, uid) => {
       if (now - at > 8000) this.recentDeleted.delete(uid)
@@ -2214,8 +2218,8 @@ class Cooperate {
             text: data.text,
             note: data.note,
             richText: data.richText,
-            expand: data.expand !== false,
-            ...data
+            ...data,
+            expand: true
           },
           children: []
         }
@@ -2228,7 +2232,6 @@ class Cooperate {
       const count = Number(parentNode.getData && parentNode.getData('childCount')) || 0
       const live = parentNode.nodeData.children.length
       renderer.setNodeData(parentNode, {
-        expand: true,
         childCount: Math.max(count, live)
       })
       this.mindMap.render()
@@ -2577,7 +2580,7 @@ class Cooperate {
           parentNode.nodeData.children.push(tree)
         }
       }
-      renderer.setNodeData(parentNode, { expand: true })
+      // Restoring remote nodes must preserve the local parent expansion.
       this.mindMap.render()
     } catch (err) {
       v2Trace('remote.apply.restore.err', { uid, message: err && err.message })
@@ -4910,6 +4913,7 @@ class Cooperate {
   }
 
   onBeforeExecCommand(name) {
+    if (isPersonalViewCommand(name, Array.prototype.slice.call(arguments, 1))) return
     if (!this.httpCollabMode) return
     const args = Array.prototype.slice.call(arguments, 1)
     if (MOVE_COMMANDS[name] && name !== 'INSERT_PARENT_NODE') {
@@ -5104,6 +5108,7 @@ class Cooperate {
   }
 
   onHttpCommand(name, args = []) {
+    if (isPersonalViewCommand(name, args)) return
     if (name === 'BACK' || name === 'FORWARD') {
       try {
         this.syncHttpUndoRedo(name)

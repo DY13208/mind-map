@@ -1,3 +1,4 @@
+const { mergePersonalViewState } = require('./personalViewState')
 const { randomUUID } = require('crypto')
 const { replaceRoomNodes, canonicalizeNodes, validateNodeGraph } = require('../roomNodes')
 const { DEFAULT_METADATA, normalizeTitle } = require('./model')
@@ -473,8 +474,14 @@ function createPgFileStore(pool) {
       return true
     },
     async upsertUserState(roomKey, userId, patch, db) {
-      const conn = db || pool
-      if (!db) queryCount += 1
+      // Ensure creation and merge are serialized across tabs/devices, including
+      // the first write. Appearance-only writes take the same lock.
+      if (!db) return this.withTx(conn => this.upsertUserState(roomKey, userId, patch, conn))
+      const conn = db
+      await conn.query(`insert into room_user_state (room_key, user_id)
+        values ($1, $2) on conflict (room_key, user_id) do nothing`, [roomKey, userId])
+      const current = await conn.query(`select view_state from room_user_state
+        where room_key = $1 and user_id = $2 for update`, [roomKey, userId])
       const favorite =
         patch.is_favorite == null ? null : !!patch.is_favorite
       const hasViewState = Object.prototype.hasOwnProperty.call(
@@ -497,7 +504,7 @@ function createPgFileStore(pool) {
           userId,
           favorite,
           patch.touch_opened ? new Date().toISOString() : patch.last_opened_at || null,
-          hasViewState ? JSON.stringify(patch.view_state || {}) : null
+          hasViewState ? JSON.stringify(mergePersonalViewState(current.rows[0].view_state || {}, patch.view_state || {})) : null
         ]
       )
       return res.rows[0]

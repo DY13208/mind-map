@@ -1,3 +1,4 @@
+const { mergePersonalViewState } = require('./personalViewState')
 const { cloneJson } = require('../collabHistory/canonical')
 const { canonicalizeNodes, validateNodeGraph } = require('../roomNodes')
 const { DEFAULT_METADATA, newFolderId, normalizeTitle } = require('./model')
@@ -430,7 +431,7 @@ function createMemoryFileStore(seed = {}) {
             : prev.last_opened_at,
         view_state:
           patch.view_state !== undefined
-            ? cloneJson({ ...(prev.view_state || {}), ...(patch.view_state || {}) })
+            ? cloneJson(mergePersonalViewState(prev.view_state || {}, patch.view_state || {}))
             : cloneJson(prev.view_state || {}),
         updated_at: nowIso()
       }

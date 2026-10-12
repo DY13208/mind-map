@@ -150,7 +150,7 @@ async function request(path, options = {}) {
   if (options.onUploadProgress) {
     return requestWithUploadProgress(path, { ...options, timeoutMs })
   }
-  const release = await acquireApiSlot(priority)
+  const release = options.keepalive ? () => {} : await acquireApiSlot(priority)
   let res
   try {
     res = await fetchWithTimeout(
@@ -164,7 +164,8 @@ async function request(path, options = {}) {
         },
         method: options.method,
         body: options.body,
-        signal: options.signal
+        signal: options.signal,
+        keepalive: !!options.keepalive
       },
       timeoutMs
     )
@@ -456,12 +457,13 @@ export function getPersonalViewState(roomKey) {
   })
 }
 
-export function savePersonalViewState(roomKey, state) {
+export function savePersonalViewState(roomKey, state, options = {}) {
   return request(`/api/files/${encodeURIComponent(roomKey)}/view-state`, {
     method: 'PATCH',
     timeoutMs: 8000,
     priority: 'low',
-    body: JSON.stringify({ state: state || {} })
+    body: JSON.stringify({ state: state || {} }),
+    keepalive: !!options.keepalive
   })
 }
 

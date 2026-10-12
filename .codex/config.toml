@@ -1,6 +1,2 @@
-[mcp_servers.mind-map]
-command = "node"
-args = ["simple-mind-map/bin/mcpServer.mjs"]
-
-[mcp_servers.mind-map.env]
-MIND_MAP_API = "http://127.0.0.1:1234"
+# mind-map MCP 使用 ~/.codex/config.toml 中的全局 HTTP 配置。
+# 不在项目中重复定义同名 STDIO 服务，避免合并后 command 与 url 冲突。

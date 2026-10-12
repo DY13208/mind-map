@@ -275,12 +275,12 @@ test('按钮文案按场景切换，使用线条图标，不进入「更多」�
   assert.match(toolbarScript, /case 'mapNavBack': return this\.returnToParentMap\(\)/)
 })
 
-test('返回前检查未保存修改与上级权限；只在落点不是上级条目时 replace，不 push 新记录', () => {
+test('返回前自动保存修改与检查上级权限；只在落点不是上级条目时 replace，不 push 新记录', () => {
   const body = toolbarScript.slice(
     toolbarScript.indexOf('async returnToParentMap() {'),
     toolbarScript.indexOf('async replaceWithParentMap(')
   )
-  assert.ok(body.indexOf('confirmMapNavLeave()') < body.indexOf('verifyMapNavParentAccess('))
+  assert.ok(body.indexOf('saveBeforeMapNavLeave()') < body.indexOf('verifyMapNavParentAccess('))
   assert.match(body, /inspectMapRef\(\{ mapId: room \}\)/)
   assert.match(body, /isParentEntry\(window\.history\.state, parent\)/)
   assert.doesNotMatch(body, /\$router\.push/)
