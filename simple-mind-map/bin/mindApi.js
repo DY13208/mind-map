@@ -10,6 +10,7 @@ const {
   snapshotExpectedCount
 } = require('./exportRoomTree')
 const { applyNodeCommand, dataFields } = require('./roomCommands')
+const { withExpectedCondition } = require('./nodeUpdateExpected')
 const roomAcl = require('./roomAcl')
 const accessRequests = require('./accessRequests')
 const teamSpace = require('./teamSpace')
@@ -2698,18 +2699,26 @@ async function handleApi(req, res) {
           fallbackType = 'node.reorder'
         } else if (hasIndex && !hasData) fallbackType = 'node.reorder'
         else if (hasIndex) fallbackType = 'node.move'
+        const fallbackPayload = withExpectedCondition(body, {
+          uid: nodeRef,
+          parentUid: body.parent || body.parent_uid,
+          index: body.index,
+          patch: patchFields,
+          confirm_sop_change: body.confirm_sop_change === true
+        })
+        const commandBody =
+          body.payload && typeof body.payload === 'object'
+            ? {
+                ...body,
+                payload: withExpectedCondition(body, body.payload)
+              }
+            : body
         const command = normalizeCommand(
           req,
           roomKey,
-          body,
+          commandBody,
           fallbackType,
-          {
-            uid: nodeRef,
-            parentUid: body.parent || body.parent_uid,
-            index: body.index,
-            patch: patchFields,
-            confirm_sop_change: body.confirm_sop_change === true
-          }
+          fallbackPayload
         )
         const committed = await executeOperation(req, roomKey, command)
         sendJson(res, 200, await nodeMutationResponse(roomKey, committed))

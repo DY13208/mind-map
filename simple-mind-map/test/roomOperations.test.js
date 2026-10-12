@@ -1,7 +1,8 @@
 const assert = require('assert')
 const Y = require('yjs')
 const mindDoc = require('../bin/mindDoc')
-const { applyNodeCommand } = require('../bin/roomCommands')
+const { applyNodeCommand, dataFields } = require('../bin/roomCommands')
+const { withExpectedCondition } = require('../bin/nodeUpdateExpected')
 const {
   planCollabRecovery,
   planAfterOperations,
@@ -107,6 +108,167 @@ function testSopChangesRequireConfirmation() {
     }
   })
   assert.strictEqual(applied.event.type, 'node.updated')
+}
+
+function testExpectedAttachmentUpdatePrecondition() {
+  const doc = seedDoc({
+    root: node('root', 'Root', ['a']),
+    a: node('a', 'A', [], {
+      attachmentId: 'old-id',
+      attachmentUrl: '/old',
+      attachmentName: 'old.txt',
+      __fv: { attachment: 7, note: 4 }
+    })
+  })
+  const expected = {
+    attachmentId: 'old-id',
+    attachmentUrl: '/old',
+    attachmentName: 'old.txt',
+    '__fv.attachment': 7,
+    uid: 'a',
+    revision: 1
+  }
+  const success = applyNodeCommand(
+    doc,
+    {
+      type: 'node.update',
+      payload: {
+        uid: 'a',
+        patch: {
+          attachmentId: 'new-id',
+          attachmentUrl: '/new',
+          attachmentName: 'new.txt'
+        },
+        expected
+      }
+    },
+    { version: 8 }
+  )
+  const updated = mindDoc.readObject(doc).a.data
+  assert.strictEqual(updated.attachmentId, 'new-id')
+  assert.strictEqual(updated.attachmentUrl, '/new')
+  assert.strictEqual(updated.attachmentName, 'new.txt')
+  assert.strictEqual(updated.expected, undefined)
+  assert.strictEqual(updated.expectedValue, undefined)
+  assert.strictEqual(updated['__fv.attachment'], undefined)
+  assert.strictEqual(updated.__fv.attachment, 8)
+  assert.strictEqual(success.event.payload.expected, undefined)
+
+  applyNodeCommand(
+    doc,
+    {
+      type: 'node.update',
+      payload: { uid: 'a', note: 'unrelated edit' }
+    },
+    { version: 9 }
+  )
+  assert.strictEqual(mindDoc.readObject(doc).a.data.__fv.note, 9)
+  const attachmentVersionStillMatches = applyNodeCommand(
+    doc,
+    {
+      type: 'node.update',
+      payload: {
+        uid: 'a',
+        patch: { attachmentName: 'latest.txt' },
+        expected: { attachmentId: 'new-id', '__fv.attachment': 8 }
+      }
+    },
+    { version: 10 }
+  )
+  assert.strictEqual(attachmentVersionStillMatches.event.type, 'node.updated')
+  assert.strictEqual(mindDoc.readObject(doc).a.data.attachmentName, 'latest.txt')
+
+  const beforeConflict = {
+    ...mindDoc.readObject(doc).a.data,
+    __fv: { ...mindDoc.readObject(doc).a.data.__fv }
+  }
+  let conflict
+  try {
+    applyNodeCommand(
+      doc,
+      {
+        type: 'node.update',
+        payload: {
+          uid: 'a',
+          patch: { attachmentId: 'must-not-write' },
+          expected: { attachmentId: 'new-id', '__fv.attachment': 7 }
+        }
+      },
+      { version: 11 }
+    )
+  } catch (err) {
+    conflict = err
+  }
+  assert.strictEqual(conflict && conflict.code, 'REPLACE_CONFLICT')
+  assert.strictEqual(conflict && conflict.statusCode, 409)
+  assert.deepStrictEqual(mindDoc.readObject(doc).a.data, beforeConflict)
+
+  const expectedValueUpdate = applyNodeCommand(
+    doc,
+    {
+      type: 'node.update',
+      payload: {
+        uid: 'a',
+        attachmentName: 'expected-value.txt',
+        expectedValue: { attachmentId: 'new-id', '__fv.attachment': 10 }
+      }
+    },
+    { version: 12 }
+  )
+  assert.strictEqual(expectedValueUpdate.event.payload.expectedValue, undefined)
+  assert.strictEqual(
+    mindDoc.readObject(doc).a.data.attachmentName,
+    'expected-value.txt'
+  )
+  applyNodeCommand(
+    doc,
+    {
+      type: 'node.update',
+      payload: { uid: 'a', patch: { attachmentName: 'legacy.txt' } }
+    },
+    { version: 13 }
+  )
+  assert.strictEqual(mindDoc.readObject(doc).a.data.attachmentName, 'legacy.txt')
+}
+
+function testPatchExpectedConditionTransport() {
+  const snapshot = { attachmentId: 'old-id' }
+  assert.deepStrictEqual(
+    withExpectedCondition({ expected: snapshot }, { uid: 'a', patch: {} }),
+    { uid: 'a', patch: {}, expected: snapshot }
+  )
+  assert.deepStrictEqual(
+    withExpectedCondition(
+      {
+        expected: snapshot,
+        payload: { uid: 'a', patch: { attachmentId: 'new-id' } }
+      },
+      { uid: 'a', patch: { attachmentId: 'new-id' } }
+    ),
+    { uid: 'a', patch: { attachmentId: 'new-id' }, expected: snapshot }
+  )
+  assert.deepStrictEqual(
+    withExpectedCondition(
+      { expected: { attachmentId: 'stale' } },
+      { expected: snapshot }
+    ),
+    { expected: snapshot }
+  )
+  assert.deepStrictEqual(
+    withExpectedCondition(
+      { expectedValue: snapshot },
+      { uid: 'a', patch: {} }
+    ),
+    { uid: 'a', patch: {}, expectedValue: snapshot }
+  )
+  assert.deepStrictEqual(
+    dataFields({
+      attachmentId: 'new-id',
+      expected: snapshot,
+      expectedValue: snapshot
+    }),
+    { attachmentId: 'new-id' }
+  )
 }
 
 function testRecoveryPlannerDetectsGapsAndResnapshot() {
@@ -580,6 +742,8 @@ function testRedoRequiresUndoAndBlocksDoubleRedo() {
 testInsertUpdateMoveDeleteStayOnTempDoc()
 testInsertRecordsInverseAndResolvedUid()
 testSopChangesRequireConfirmation()
+testExpectedAttachmentUpdatePrecondition()
+testPatchExpectedConditionTransport()
 testRecoveryPlannerDetectsGapsAndResnapshot()
 testApplyCollabEventsReplayInsertUpdateMoveDelete()
 testApplyCollabEventKeepChildrenAndTitleNoop()

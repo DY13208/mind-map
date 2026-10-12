@@ -354,6 +354,316 @@ async function run() {
   assert.equal(noId.getData('attachmentId'), 'att-preserved')
   assert.equal(noIdVm.commands.length, 0)
 
+  // A silent SET_NODE_ATTACHMENT no-op must not be reported as success or
+  // retried blindly; the uploaded storage object remains unattached and the
+  // previous node reference stays intact.
+  const noOpNode = node('n-command-noop', {
+    attachmentId: 'att-noop-before',
+    attachmentName: 'before-noop.txt',
+    attachmentStatus: 'ready'
+  })
+  const noOpVm = makeAttachmentVm(component, api, [noOpNode])
+  let noOpCalls = 0
+  noOpVm.mindMap.execCommand = (...args) => {
+    noOpCalls += 1
+    noOpVm.commands.push(args)
+  }
+  api.uploadResult = async () => ({
+    attachment: { id: 'att-noop-uploaded', fileName: 'after-noop.txt', status: 'ready' }
+  })
+  noOpVm.pendingNodes = [noOpVm.captureTarget(noOpNode, 'room-A')]
+  await noOpVm.onFilePicked({
+    target: { files: [{ name: 'after-noop.txt', size: 5, type: 'text/plain' }], value: 'x' }
+  })
+  assert.equal(noOpCalls, 1)
+  assert.equal(noOpNode.getData('attachmentId'), 'att-noop-before')
+  assert.equal(noOpNode.getData('attachmentName'), 'before-noop.txt')
+  assert.ok(noOpVm.messages.entries.some(entry =>
+    entry[0] === 'error' &&
+    entry[1].includes('附件已上传到服务器') &&
+    entry[1].includes('原附件已保留')
+  ))
+  assert.ok(!noOpVm.messages.entries.some(entry => entry[0] === 'success'))
+
+  // Older command versions may update only URL/name. Restore just those
+  // fields through SET_NODE_DATA while the same live node still has its old ID.
+  const legacyNode = node('n-legacy-attachment-command', {
+    attachmentId: 'att-legacy-before',
+    attachmentUrl: 'old-url',
+    attachmentName: 'legacy-before.txt',
+    attachmentMimeType: 'application/old',
+    attachmentStatus: 'ready'
+  })
+  const legacyVm = makeAttachmentVm(component, api, [legacyNode])
+  const legacyCommands = []
+  legacyVm.mindMap.execCommand = (command, target, ...args) => {
+    legacyCommands.push(command)
+    if (command === 'SET_NODE_ATTACHMENT') {
+      target.nodeData.data.attachmentUrl = args[0]
+      target.nodeData.data.attachmentName = args[1]
+    } else if (command === 'SET_NODE_DATA') {
+      Object.assign(target.nodeData.data, args[0])
+    }
+  }
+  api.uploadResult = async () => ({
+    attachment: {
+      id: 'att-legacy-uploaded',
+      fileName: 'legacy-after.txt',
+      mimeType: 'application/new',
+      status: 'ready'
+    }
+  })
+  legacyVm.pendingNodes = [legacyVm.captureTarget(legacyNode, 'room-A')]
+  await legacyVm.onFilePicked({
+    target: { files: [{ name: 'legacy-after.txt', size: 5, type: 'text/plain' }], value: 'x' }
+  })
+  assert.deepEqual(legacyCommands, ['SET_NODE_ATTACHMENT', 'SET_NODE_DATA'])
+  assert.equal(legacyNode.getData('attachmentId'), 'att-legacy-before')
+  assert.equal(legacyNode.getData('attachmentUrl'), 'old-url')
+  assert.equal(legacyNode.getData('attachmentName'), 'legacy-before.txt')
+  assert.equal(legacyNode.getData('attachmentMimeType'), 'application/old')
+  assert.ok(legacyVm.messages.entries.some(entry =>
+    entry[0] === 'error' && entry[1].includes('原附件已保留')
+  ))
+
+  // Never restore a snapshot over a different live attachment ID. If a
+  // concurrent edit wins during the first command, report the state as unknown.
+  const concurrentNode = node('n-concurrent-attachment-id', {
+    attachmentId: 'att-concurrent-before',
+    attachmentUrl: 'concurrent-old-url',
+    attachmentName: 'concurrent-before.txt',
+    attachmentMimeType: 'application/old'
+  })
+  const concurrentVm = makeAttachmentVm(component, api, [concurrentNode])
+  let concurrentRollbackCalls = 0
+  concurrentVm.mindMap.execCommand = (command, target, ...args) => {
+    if (command === 'SET_NODE_ATTACHMENT') {
+      Object.assign(target.nodeData.data, {
+        attachmentUrl: args[0],
+        attachmentName: args[1],
+        attachmentId: 'att-from-concurrent-edit'
+      })
+    } else if (command === 'SET_NODE_DATA') {
+      concurrentRollbackCalls += 1
+      Object.assign(target.nodeData.data, args[0])
+    }
+  }
+  api.uploadResult = async () => ({
+    attachment: { id: 'att-concurrent-uploaded', fileName: 'concurrent-after.txt', status: 'ready' }
+  })
+  concurrentVm.pendingNodes = [concurrentVm.captureTarget(concurrentNode, 'room-A')]
+  await concurrentVm.onFilePicked({
+    target: { files: [{ name: 'concurrent-after.txt', size: 6, type: 'text/plain' }], value: 'x' }
+  })
+  assert.equal(concurrentRollbackCalls, 0)
+  assert.equal(concurrentNode.getData('attachmentId'), 'att-from-concurrent-edit')
+  assert.ok(concurrentVm.messages.entries.some(entry =>
+    entry[0] === 'error' && entry[1].includes('状态未能确认')
+  ))
+
+  const readonlyNode = node('n-readonly-attachment', {
+    attachmentId: 'att-readonly-before', attachmentName: 'readonly-before.txt'
+  })
+  const readonlyVm = makeAttachmentVm(component, api, [readonlyNode])
+  readonlyVm.mindMap.opt = { readonly: true }
+  let readonlyCalls = 0
+  readonlyVm.mindMap.execCommand = () => { readonlyCalls += 1 }
+  const readonlyResult = readonlyVm.applyAttachment(
+    { uid: readonlyNode.uid, node: readonlyNode },
+    '',
+    'readonly-after.txt',
+    { attachmentId: 'att-readonly-after', attachmentMimeType: 'text/plain' }
+  )
+  assert.equal(readonlyCalls, 0)
+  assert.equal(readonlyResult.applied, false)
+  assert.equal(readonlyNode.getData('attachmentId'), 'att-readonly-before')
+
+  // A non-transient command exception is surfaced and does not clear the old
+  // reference or trigger repeated command dispatches.
+  const throwingNode = node('n-command-throws', {
+    attachmentId: 'att-throw-before',
+    attachmentName: 'before-throw.txt',
+    attachmentStatus: 'ready'
+  })
+  const throwingVm = makeAttachmentVm(component, api, [throwingNode])
+  let throwCalls = 0
+  throwingVm.mindMap.execCommand = () => {
+    throwCalls += 1
+    throw new Error('collaboration denied')
+  }
+  api.uploadResult = async () => ({
+    attachment: { id: 'att-throw-uploaded', fileName: 'after-throw.txt', status: 'ready' }
+  })
+  throwingVm.pendingNodes = [throwingVm.captureTarget(throwingNode, 'room-A')]
+  await throwingVm.onFilePicked({
+    target: { files: [{ name: 'after-throw.txt', size: 6, type: 'text/plain' }], value: 'x' }
+  })
+  assert.equal(throwCalls, 1)
+  assert.equal(throwingNode.getData('attachmentId'), 'att-throw-before')
+  assert.equal(throwingNode.getData('attachmentName'), 'before-throw.txt')
+  assert.ok(throwingVm.messages.entries.some(entry =>
+    entry[0] === 'error' && entry[1].includes('collaboration denied')
+  ))
+
+  // Re-resolving by UID rejects a command that wrote to a detached node
+  // instance after the renderer replaced it during upload completion.
+  const staleInstance = node('n-replaced-instance', {
+    attachmentId: 'att-instance-old', attachmentName: 'instance-old.txt'
+  })
+  const currentInstance = node('n-replaced-instance', {
+    attachmentId: 'att-instance-old', attachmentName: 'instance-old.txt'
+  })
+  const instanceVm = makeAttachmentVm(component, api, [staleInstance])
+  const writeStaleInstance = instanceVm.mindMap.execCommand
+  instanceVm.mindMap.execCommand = (...args) => {
+    writeStaleInstance(...args)
+    instanceVm.mindMap.renderer.findNodeByUid = uid =>
+      uid === currentInstance.uid ? currentInstance : null
+  }
+  api.uploadResult = async () => ({
+    attachment: { id: 'att-instance-new', fileName: 'instance-new.txt', status: 'ready' }
+  })
+  instanceVm.pendingNodes = [instanceVm.captureTarget(staleInstance, 'room-A')]
+  await instanceVm.onFilePicked({
+    target: { files: [{ name: 'instance-new.txt', size: 9, type: 'text/plain' }], value: 'x' }
+  })
+  assert.equal(staleInstance.getData('attachmentId'), 'att-instance-new')
+  assert.equal(currentInstance.getData('attachmentId'), 'att-instance-old')
+  assert.ok(instanceVm.messages.entries.some(entry =>
+    entry[0] === 'error' && entry[1].includes('节点挂载失败')
+  ))
+  assert.ok(!instanceVm.messages.entries.some(entry => entry[0] === 'success'))
+
+  // A renderer may rebuild the same UID during a successful command. The
+  // current instance's verified fields should still count as a successful attach.
+  const rebuiltSource = node('n-rebuilt-instance-success', {
+    attachmentId: 'att-rebuilt-old', attachmentName: 'rebuilt-old.txt'
+  })
+  const rebuiltLive = node('n-rebuilt-instance-success', {
+    attachmentId: 'att-rebuilt-new',
+    attachmentUrl: '',
+    attachmentName: 'rebuilt-new.txt',
+    attachmentMimeType: 'text/plain'
+  })
+  const rebuiltVm = makeAttachmentVm(component, api, [rebuiltSource])
+  const writeBeforeRebuild = rebuiltVm.mindMap.execCommand
+  rebuiltVm.mindMap.execCommand = (...args) => {
+    writeBeforeRebuild(...args)
+    Object.assign(rebuiltLive.nodeData.data, {
+      attachmentUrl: args[2],
+      attachmentName: args[3],
+      ...(args[4] || {})
+    })
+    rebuiltVm.mindMap.renderer.findNodeByUid = uid =>
+      uid === rebuiltLive.uid ? rebuiltLive : null
+  }
+  api.uploadResult = async () => ({
+    attachment: {
+      id: 'att-rebuilt-new',
+      fileName: 'rebuilt-new.txt',
+      mimeType: 'text/plain',
+      status: 'ready'
+    }
+  })
+  rebuiltVm.pendingNodes = [rebuiltVm.captureTarget(rebuiltSource, 'room-A')]
+  await rebuiltVm.onFilePicked({
+    target: { files: [{ name: 'rebuilt-new.txt', size: 9, type: 'text/plain' }], value: 'x' }
+  })
+  assert.equal(rebuiltLive.getData('attachmentId'), 'att-rebuilt-new')
+  assert.equal(rebuiltLive.getData('attachmentName'), 'rebuilt-new.txt')
+  assert.ok(rebuiltVm.messages.entries.some(entry => entry[0] === 'success'))
+
+  // Restoring a field absent on the original node uses null, which the normal
+  // command path treats as deletion. An old command that writes only name must
+  // not leave an orphaned name or report success.
+  const initiallyEmpty = node('n-empty-legacy-attachment', {})
+  const emptyVm = makeAttachmentVm(component, api, [initiallyEmpty])
+  emptyVm.mindMap.execCommand = (command, target, ...args) => {
+    if (command === 'SET_NODE_ATTACHMENT') {
+      target.nodeData.data.attachmentName = args[1]
+    } else if (command === 'SET_NODE_DATA') {
+      Object.keys(args[0]).forEach(key => {
+        if (args[0][key] == null) delete target.nodeData.data[key]
+        else target.nodeData.data[key] = args[0][key]
+      })
+    }
+  }
+  api.uploadResult = async () => ({
+    attachment: { id: 'att-empty-uploaded', fileName: 'empty-new.txt', status: 'ready' }
+  })
+  emptyVm.pendingNodes = [emptyVm.captureTarget(initiallyEmpty, 'room-A')]
+  await emptyVm.onFilePicked({
+    target: { files: [{ name: 'empty-new.txt', size: 4, type: 'text/plain' }], value: 'x' }
+  })
+  assert.ok(
+    initiallyEmpty.getData('attachmentName') == null ||
+    initiallyEmpty.getData('attachmentName') === ''
+  )
+  assert.ok(!emptyVm.messages.entries.some(entry => entry[0] === 'success'))
+
+  // Only explicitly transient failures are retried, with a bounded attempt
+  // count. A successful command is then verified against the live node.
+  const retryNode = node('n-command-retry', {
+    attachmentId: 'att-retry-before', attachmentName: 'before-retry.txt'
+  })
+  const retryVm = makeAttachmentVm(component, api, [retryNode])
+  const runCommand = retryVm.mindMap.execCommand
+  let retryCalls = 0
+  retryVm.mindMap.execCommand = (...args) => {
+    retryCalls += 1
+    if (retryCalls === 1) {
+      throw Object.assign(new Error('temporary connection reset'), {
+        code: 'ETIMEDOUT'
+      })
+    }
+    return runCommand(...args)
+  }
+  api.uploadResult = async () => ({
+    attachment: { id: 'att-retry-uploaded', fileName: 'after-retry.txt', status: 'ready' }
+  })
+  retryVm.pendingNodes = [retryVm.captureTarget(retryNode, 'room-A')]
+  await retryVm.onFilePicked({
+    target: { files: [{ name: 'after-retry.txt', size: 7, type: 'text/plain' }], value: 'x' }
+  })
+  assert.equal(retryCalls, 2)
+  assert.equal(retryNode.getData('attachmentId'), 'att-retry-uploaded')
+  assert.ok(retryVm.messages.entries.some(entry => entry[0] === 'success'))
+
+  // One failed target does not hide another target's confirmed success, and
+  // the failed node retains its original attachment fields.
+  const multiSuccess = node('n-multi-success', {
+    attachmentId: 'att-multi-old-a', attachmentName: 'old-a.txt'
+  })
+  const multiFailure = node('n-multi-failure', {
+    attachmentId: 'att-multi-old-b', attachmentName: 'old-b.txt'
+  })
+  const multiVm = makeAttachmentVm(component, api, [multiSuccess, multiFailure])
+  const multiCommand = multiVm.mindMap.execCommand
+  multiVm.mindMap.execCommand = (...args) => {
+    if (args[1].uid === 'n-multi-failure') {
+      multiVm.commands.push(args)
+      return
+    }
+    return multiCommand(...args)
+  }
+  api.uploadResult = async () => ({
+    attachment: { id: 'att-multi-uploaded', fileName: 'shared.txt', status: 'ready' }
+  })
+  multiVm.pendingNodes = [
+    multiVm.captureTarget(multiSuccess, 'room-A'),
+    multiVm.captureTarget(multiFailure, 'room-A')
+  ]
+  await multiVm.onFilePicked({
+    target: { files: [{ name: 'shared.txt', size: 8, type: 'text/plain' }], value: 'x' }
+  })
+  assert.equal(multiSuccess.getData('attachmentId'), 'att-multi-uploaded')
+  assert.equal(multiFailure.getData('attachmentId'), 'att-multi-old-b')
+  assert.equal(multiFailure.getData('attachmentName'), 'old-b.txt')
+  assert.ok(multiVm.messages.entries.some(entry =>
+    entry[0] === 'warning' && entry[1].includes('1 个节点挂载失败')
+  ))
+  assert.ok(!multiVm.messages.entries.some(entry => entry[0] === 'success'))
+
   // A delayed poll callback after abort cannot write even if the old task
   // resolves despite AbortController cancellation.
   const polled = node('n-poll', { attachmentId: 'att-poll', attachmentName: 'poll.txt' })
