@@ -28,6 +28,10 @@ function createFileSystem(options = {}) {
 
   function withAccess(row, userId, bypass) {
     const summary = accessFromRole(row.role, row.legacy_open, bypass)
+    // Administrative access does not make the current user a room owner.
+    if (bypass && userId) {
+      summary.role = row.role || (row.legacy_open ? 'editor' : 'admin')
+    }
     return publicFile(row, summary)
   }
 
@@ -421,10 +425,10 @@ function createFileSystem(options = {}) {
     )
     const listParams = params.slice()
     listParams.push(opts.limit, pageOffset)
-    const roleJoin = userParam
-      ? `left join room_members my on my.room_key = r.room_key and my.user_id = $${userParam}`
+    const roleJoin = stateParam
+      ? `left join room_members my on my.room_key = r.room_key and my.user_id = $${stateParam}`
       : ''
-    const roleSelect = userParam
+    const roleSelect = stateParam
       ? `, my.role as role,
          (not exists (select 1 from room_members mx where mx.room_key = r.room_key)) as legacy_open`
       : `, null::text as role, true as legacy_open`

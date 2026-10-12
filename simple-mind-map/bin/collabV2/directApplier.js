@@ -13,6 +13,7 @@ const { inspectSopChange, sopConfirmError } = require('../collabSopGuard')
 const { normalizeOperation, normalizeType, BATCH_MAX } = require('./protocol')
 const { collabTrace } = require('./trace')
 const { stripSearchHtml } = require('../roomNodes')
+const { assertExpectedNodeData } = require('../nodeUpdateExpected')
 const { mergeMapMetadata, pickMetaPatch } = require('../mapMetadata')
 const {
   pasteUndoInverse,
@@ -117,14 +118,6 @@ function dataFields(input = {}) {
   const patch = { ...(input || {}) }
   DATA_META_KEYS.forEach(key => delete patch[key])
   return patch
-}
-
-function stableValue(value) {
-  try {
-    return JSON.stringify(value === undefined ? null : value)
-  } catch (err) {
-    return String(value)
-  }
 }
 
 function clampIndex(index, max) {
@@ -334,19 +327,7 @@ async function applyUpdate(store, op, version) {
   const live = await store.getLive(uid)
   if (!live) throw nodeDeletedError(uid)
   await assertNotSop(store, uid, payload, type)
-  const expected = payload.expected || payload.expectedValue
-  if (expected && typeof expected === 'object') {
-    const keys = Object.keys(expected).filter(key => key !== 'revision' && key !== 'uid')
-    const conflict = keys.find(key => {
-      if (key === 'text') {
-        return stripSearchHtml(live.data[key]) !== stripSearchHtml(expected[key])
-      }
-      return stableValue(live.data[key]) !== stableValue(expected[key])
-    })
-    if (conflict) {
-      throw commandError('目标已被其他协作者修改', 'REPLACE_CONFLICT', 409)
-    }
-  }
+  assertExpectedNodeData(live.data || {}, payload)
   const structural =
     payload.parentUid !== undefined ||
     payload.parent_uid !== undefined ||

@@ -20,6 +20,97 @@ import {
   formatAttachmentMaxMb
 } from '@/utils/nodeAttachmentApi'
 
+const ATTACHMENT_WRITE_MAX_ATTEMPTS = 3
+const ATTACHMENT_WRITE_RETRY_DELAY_MS = 120
+const ATTACHMENT_FIELDS = [
+  'attachmentUrl',
+  'attachmentName',
+  'attachmentId',
+  'attachmentMimeType',
+  'attachmentStatus',
+  'attachmentError',
+  'attachmentExtractedText',
+  'attachmentProgress'
+]
+const ATTACHMENT_IDENTITY_FIELDS = [
+  'attachmentId',
+  'attachmentName',
+  'attachmentUrl',
+  'attachmentMimeType'
+]
+const RETRYABLE_ATTACHMENT_WRITE_CODES = new Set([
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+  'ERR_NETWORK'
+])
+const RETRYABLE_ATTACHMENT_WRITE_STATUSES = [408, 425, 429, 500, 502, 503, 504]
+
+function attachmentField(node, key) {
+  return typeof node.getData === 'function'
+    ? node.getData(key)
+    : node.nodeData && node.nodeData.data && node.nodeData.data[key]
+}
+
+function sameAttachmentField(key, left, right) {
+  return key === 'attachmentProgress'
+    ? Number(left || 0) === Number(right || 0)
+    : String(left || '') === String(right || '')
+}
+
+function restoreAttachmentReference(mindMap, liveNodeByUid, uid, node, before, requested) {
+  const liveNode = liveNodeByUid(uid)
+  if (liveNode !== node) return false
+  const currentId = attachmentField(liveNode, 'attachmentId')
+  if (
+    !sameAttachmentField('attachmentId', currentId, before.attachmentId) &&
+    !sameAttachmentField('attachmentId', currentId, requested.attachmentId)
+  ) return false
+
+  const restore = {}
+  let unsafe = false
+  ATTACHMENT_FIELDS.forEach(key => {
+    const current = attachmentField(liveNode, key)
+    if (sameAttachmentField(key, current, before[key])) return
+    if (Object.prototype.hasOwnProperty.call(requested, key) &&
+        sameAttachmentField(key, current, requested[key])) {
+      restore[key] = before[key] === undefined ? null : before[key]
+    } else if (ATTACHMENT_IDENTITY_FIELDS.includes(key)) {
+      // A changed identity field that is neither our requested value nor the
+      // snapshot may belong to a concurrent edit; leave it untouched.
+      unsafe = true
+    }
+  })
+  if (unsafe) return false
+  if (Object.keys(restore).length) {
+    try {
+      mindMap.execCommand('SET_NODE_DATA', liveNode, restore)
+    } catch (err) {
+      return false
+    }
+  }
+  const after = liveNodeByUid(uid)
+  return after === node && ATTACHMENT_IDENTITY_FIELDS.every(key =>
+    sameAttachmentField(key, attachmentField(after, key), before[key])
+  )
+}
+
+function isRetryableAttachmentWriteError(error) {
+  if (!error || error.retryable === false) return false
+  if (error.retryable === true) return true
+  if (RETRYABLE_ATTACHMENT_WRITE_CODES.has(String(error.code || ''))) return true
+  const status = Number(
+    error.statusCode || error.status || (error.response && error.response.status)
+  )
+  return RETRYABLE_ATTACHMENT_WRITE_STATUSES.includes(status)
+}
+
+function waitForAttachmentWriteRetry(attempt) {
+  return new Promise(resolve => {
+    setTimeout(resolve, ATTACHMENT_WRITE_RETRY_DELAY_MS * attempt)
+  })
+}
+
 export default {
   name: 'NodeAttachment',
   props: {
@@ -229,13 +320,74 @@ export default {
       return true
     },
     applyAttachment(item, url, name, meta, options = {}) {
-      const node = this.resolveNode(item)
-      if (!node || !this.mindMap) return
       const persist = options.persist !== false
       if (persist) {
-        this.mindMap.execCommand('SET_NODE_ATTACHMENT', node, url, name, meta)
-        return
+        const uid = this.nodeUid(item)
+        const node = uid && this.liveNode(uid)
+        if (!node || !this.mindMap) {
+          return { applied: false, stale: true, preserved: false }
+        }
+        if (this.mindMap.opt && this.mindMap.opt.readonly) {
+          return {
+            applied: false,
+            preserved: true,
+            error: new Error('当前为只读权限，无法挂载附件')
+          }
+        }
+        const before = {}
+        const requested = { attachmentUrl: url, attachmentName: name }
+        ATTACHMENT_FIELDS.forEach(key => {
+          before[key] = attachmentField(node, key)
+          if (
+            key !== 'attachmentUrl' &&
+            key !== 'attachmentName' &&
+            meta &&
+            meta[key] != null
+          ) requested[key] = meta[key]
+        })
+        const expected = {
+          attachmentName: requested.attachmentName,
+          attachmentUrl: requested.attachmentUrl
+        }
+        ATTACHMENT_IDENTITY_FIELDS.forEach(key => {
+          if (requested[key] !== undefined) expected[key] = requested[key]
+        })
+        let commandError = null
+        try {
+          this.mindMap.execCommand('SET_NODE_ATTACHMENT', node, url, name, meta)
+        } catch (err) {
+          commandError = err
+        }
+
+        // The command can silently do nothing in read-only mode or on older runtimes.
+        // Check stable attachment identity fields on the current node, not this old reference.
+        const liveNode = this.liveNode(uid)
+        const landed = !!liveNode && Object.keys(expected).every(key =>
+          sameAttachmentField(key, attachmentField(liveNode, key), expected[key])
+        )
+        if (landed) return { applied: true }
+        const preserved = restoreAttachmentReference(
+          this.mindMap,
+          uid => this.liveNode(uid),
+          uid,
+          node,
+          before,
+          requested
+        )
+        const error = commandError instanceof Error
+          ? commandError
+          : new Error(commandError || '附件写入命令未生效，节点数据没有更新')
+        if (!preserved && error && error.message) {
+          error.message += '；附件可能部分写入，原附件状态未能确认'
+        }
+        return {
+          applied: false,
+          preserved,
+          error
+        }
       }
+      const node = this.resolveNode(item)
+      if (!node || !this.mindMap) return
       const renderer = this.mindMap.renderer
       const patch = {
         attachmentUrl: url,
@@ -263,6 +415,28 @@ export default {
       if (renderer && typeof renderer.reRenderNodeCheckChange === 'function') {
         renderer.reRenderNodeCheckChange(node)
       }
+    },
+    async applyUploadedAttachment(target, token, attachment, file) {
+      for (let attempt = 1; attempt <= ATTACHMENT_WRITE_MAX_ATTEMPTS; attempt += 1) {
+        if (!this.operationIsCurrent(target, token)) {
+          return { applied: false, stale: true, preserved: false }
+        }
+        const node = this.liveNode(target.uid)
+        if (!node) return { applied: false, stale: true, preserved: false }
+        const result = this.applyAttachment(
+          { uid: target.uid, node },
+          '',
+          attachment.fileName || file.name,
+          this.metaFromAttachment(attachment, file)
+        )
+        if (result && result.applied) return result
+        if (!result || !isRetryableAttachmentWriteError(result.error) || attempt === ATTACHMENT_WRITE_MAX_ATTEMPTS) return result
+        // Retry only a command that explicitly failed with a transient error.
+        // A silent no-op is not repeated, and target freshness is checked again
+        // after the delay before dispatching another collaborative command.
+        await waitForAttachmentWriteRetry(attempt)
+      }
+      return { applied: false, error: new Error('附件写入命令未生效') }
     },
     metaFromAttachment(attachment, file, extras = {}) {
       const saved = attachment || {}
@@ -587,28 +761,67 @@ export default {
         }
         let applied = 0
         const attachedTargets = []
-        operations.forEach(({ target, token }) => {
-          if (!this.operationIsCurrent(target, token)) return
-          const node = this.liveNode(target.uid)
-          if (!node) return
-          this.abortInflight(target.uid)
-          this.applyAttachment(
-            { uid: target.uid, node },
-            '',
-            attachment.fileName || file.name,
-            this.metaFromAttachment(attachment, file)
+        const failedTargets = []
+        for (const { target, token } of operations) {
+          if (!this.operationIsCurrent(target, token)) {
+            failedTargets.push({
+              preserved: false,
+              error: new Error('目标节点或附件已变化，未执行挂载')
+            })
+            continue
+          }
+          const result = await this.applyUploadedAttachment(
+            target,
+            token,
+            attachment,
+            file
           )
+          if (!result || !result.applied) {
+            failedTargets.push({
+              ...(result || {}),
+              preserved: !!(result && result.preserved),
+              error:
+                (result && result.error) ||
+                new Error(
+                  result && result.stale
+                    ? '目标节点或附件已变化，未执行挂载'
+                    : '附件写入命令未生效'
+                )
+            })
+            continue
+          }
+          this.abortInflight(target.uid)
           applied += 1
           attachedTargets.push({ uid: target.uid, token })
-        })
+        }
         if (!applied) {
-          this.$message.warning('上传已完成，但目标节点已变化；附件未替换到节点')
+          const reason =
+            (failedTargets[0].error && failedTargets[0].error.message) ||
+            '附件写入命令未生效'
+          const preservation = failedTargets.every(target => target.preserved)
+            ? '原附件已保留'
+            : '附件字段可能部分写入，原附件状态未能确认，请检查节点'
+          this.$message.error(
+            `附件已上传到服务器，但节点挂载失败：${reason}；${preservation}`
+          )
           return
         }
-        if (attachment.status === 'ready') {
+        const partialFailure = failedTargets.length > 0
+        const preservation = failedTargets.every(target => target.preserved)
+          ? '失败节点的原附件已保留'
+          : '失败节点附件状态未确认，请检查节点'
+        const partialFailureMessage =
+          `附件已挂载到 ${applied} 个节点，另有 ${failedTargets.length} 个节点挂载失败；${preservation}`
+        if (partialFailure) {
+          this.$message.warning(partialFailureMessage)
+        } else if (attachment.status === 'ready') {
           this.$message.success('已添加')
         } else if (attachment.status === 'processing' || attachment.status === 'pending') {
           this.$message.success('已上传，正在处理')
+        } else {
+          this.$message.warning(attachment.errorMessage || '处理失败')
+        }
+        if (attachment.status === 'processing' || attachment.status === 'pending') {
           attachedTargets.forEach(({ uid, token }) => {
             if (!this.operationTokenIsCurrent(uid, token)) return
             const node = this.liveNode(uid)
@@ -624,10 +837,6 @@ export default {
               { notify: true }
             )
           })
-        } else {
-          this.$message.warning(
-            attachment.errorMessage || '处理失败'
-          )
         }
       } catch (err) {
         console.error('[attachment] upload failed', err)
