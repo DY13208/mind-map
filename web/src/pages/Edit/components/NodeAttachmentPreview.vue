@@ -268,11 +268,20 @@ export default {
       )
     }
   },
+  watch: {
+    $route(to, from) {
+      if (roomFromLocation(to) !== roomFromLocation(from)) {
+        this.visible = false
+        this.resetPreview()
+      }
+    }
+  },
   created() {
     this.$bus.$on('node_attachmentClick', this.onAttachmentClick)
     window.addEventListener('resize', this.onWindowResize)
   },
   beforeDestroy() {
+    this.requestId += 1
     this.$bus.$off('node_attachmentClick', this.onAttachmentClick)
     window.removeEventListener('resize', this.onWindowResize)
     this.cancelActiveRequest()
@@ -334,6 +343,9 @@ export default {
       this.cancelActiveRequest()
       this.releaseBlobUrl()
       this.destroyMarkdownViewer()
+      if (this.$refs && this.$refs.docxViewer) {
+        this.$refs.docxViewer.textContent = ''
+      }
       this.loading = false
       this.downloading = false
       this.attachmentId = ''
@@ -355,12 +367,18 @@ export default {
       this.blobUrl = ''
     },
     destroyMarkdownViewer() {
+      const container = this.markdownViewerContainer
       if (
         this.markdownViewer &&
         typeof this.markdownViewer.destroy === 'function'
       ) {
         this.markdownViewer.destroy()
       }
+      // Toast UI Viewer.destroy() detaches listeners but leaves its rendered
+      // .toastui-editor-contents element in the host. Clear only the container
+      // owned by this instance so reopen and route changes cannot retain stale
+      // attachment content.
+      if (container) container.textContent = ''
       this.markdownViewer = null
       this.markdownViewerContainer = null
     },
@@ -429,7 +447,7 @@ export default {
               ? 'application/vnd.ms-excel.sheet.macroenabled.12'
               : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
           })
-          await this.loadWorkbookCanvas(content.buffer)
+          await this.loadWorkbookCanvas(content.buffer, requestId)
           return
         }
         if (this.kind === 'presentation') {
@@ -477,8 +495,14 @@ export default {
       this.visible = true
     },
     renderMarkdown() {
+      const requestId = this.requestId
+      const markdown = this.previewText
       this.$nextTick(() => {
-        if (this.kind !== 'markdown' || !this.$refs.markdownViewer) return
+        if (
+          requestId !== this.requestId ||
+          this.kind !== 'markdown' ||
+          !this.$refs.markdownViewer
+        ) return
         const container = this.$refs.markdownViewer
         // Markdown 的 v-if 节点会在切换图片、表格等附件时重建。不能继续
         // 向已脱离页面的旧 Viewer 写内容，否则弹窗会看起来是空白的。
@@ -492,18 +516,23 @@ export default {
           this.markdownViewer = new Viewer({ el: container })
           this.markdownViewerContainer = container
         }
-        this.markdownViewer.setMarkdown(safeMarkdownSource(this.previewText))
+        this.markdownViewer.setMarkdown(safeMarkdownSource(markdown))
       })
     },
-    async renderDocxPreview(blob, requestId) {
+    async renderDocxPreview(blob, requestId, renderAsync) {
       await this.$nextTick()
       const container = this.$refs.docxViewer
       if (!container || requestId !== this.requestId) return
+      const staging = document.createElement('div')
       try {
-        const module = await import('docx-preview')
-        if (requestId !== this.requestId) return
-        container.textContent = ''
-        await module.renderAsync(blob, container, null, {
+        let render = renderAsync
+        if (!render) {
+          const module = await import('docx-preview')
+          if (requestId !== this.requestId || container !== this.$refs.docxViewer) return
+          render = (input, target, options) =>
+            module.renderAsync(input, target, null, options)
+        }
+        await render(blob, staging, {
           inWrapper: true,
           breakPages: true,
           renderHeaders: true,
@@ -513,20 +542,24 @@ export default {
           renderComments: false,
           experimental: true
         })
+        if (requestId !== this.requestId || container !== this.$refs.docxViewer) return
+        container.textContent = ''
+        while (staging.firstChild) container.appendChild(staging.firstChild)
       } catch (err) {
         if (requestId !== this.requestId) return
         this.error = 'DOCX 原样预览加载失败，请下载后使用本地 Office 打开'
       }
     },
-    async loadWorkbookCanvas(buffer) {
+    async loadWorkbookCanvas(buffer, requestId = this.requestId, loadModules) {
       try {
-        const [xlsxModule, zipModule] = await Promise.all([
-          import('xlsx'),
-          import('jszip')
-        ])
+        const [xlsxModule, zipModule] = loadModules
+          ? await loadModules()
+          : await Promise.all([import('xlsx'), import('jszip')])
+        if (requestId !== this.requestId) return
         const XLSX = xlsxModule.default || xlsxModule
         const JSZip = zipModule.default || zipModule
         const slim = await slimSpreadsheetZip(buffer, JSZip)
+        if (requestId !== this.requestId) return
         const workbook = XLSX.read(slim, {
           type: 'array',
           raw: false,
@@ -541,6 +574,7 @@ export default {
           this.error = '无法预览该表格，请下载后查看'
         }
       } catch (err) {
+        if (requestId !== this.requestId) return
         this.workbookSheets = []
         this.error = '无法预览该表格，请下载后查看'
       }

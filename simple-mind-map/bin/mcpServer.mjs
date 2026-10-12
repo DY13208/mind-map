@@ -13,6 +13,7 @@ import {
   attachmentMetaForNode,
   resolveAttachmentUploadInput
 } from './mcpAttachmentUpload.mjs'
+import { deleteNodeAttachment } from './mcpAttachmentDelete.mjs'
 
 const { bearerToken, verifyMcpUserToken } = mcpUserToken
 
@@ -54,7 +55,26 @@ function historyFail(err) {
           ok: false,
           code: err.code || 'HISTORY_ERROR',
           error: err.message || String(err),
-          statusCode: err.statusCode || 0
+          statusCode: err.statusCode || 0,
+          ...(err.details ? { details: err.details } : {})
+        })
+      }
+    ]
+  }
+}
+
+function attachmentDeleteFail(err) {
+  return {
+    isError: true,
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          ok: false,
+          code: err.code || 'ATTACHMENT_DELETE_ERROR',
+          error: err.message || String(err),
+          statusCode: err.statusCode || 0,
+          ...(err.details ? { details: err.details } : {})
         })
       }
     ]
@@ -125,6 +145,7 @@ async function apiRequest(pathName, options = {}) {
     )
     error.code = data.code || `HTTP_${res.status}`
     error.statusCode = res.status
+    if (data.details) error.details = data.details
     throw error
   }
   return data
@@ -622,8 +643,43 @@ function createServer(authorization) {
   )
 
   server.tool(
+    'delete_attachment',
+    '从指定节点解绑附件并通过协作操作同步修订、广播和历史。附件对象会保留，不会物理删除；如果节点已换成其他附件会返回冲突。node 支持 uid、完整标题或路径；同名节点必须改用 uid/完整路径。修改 SOP 节点前必须先获得用户确认并传 confirm_sop_change=true。',
+    {
+      room_key: z.string().describe('房间号'),
+      node: z
+        .string()
+        .describe('要解绑附件的节点 uid、完整标题或路径；有同名时使用 uid'),
+      attachment_id: z
+        .string()
+        .describe('要从节点解绑的附件 id，来自节点 data 或 list_attachments'),
+      confirm_sop_change: z
+        .boolean()
+        .describe('目标节点属于 SOP 时，必须先获用户确认并传 true')
+        .optional()
+    },
+    async ({ room_key, node, attachment_id, confirm_sop_change }) => {
+      try {
+        const baseVersion = await currentMapRevision(room_key)
+        return ok(
+          await deleteNodeAttachment({
+            api,
+            roomKey: room_key,
+            node,
+            attachmentId: attachment_id,
+            baseVersion,
+            confirmSopChange: confirm_sop_change === true
+          })
+        )
+      } catch (err) {
+        return attachmentDeleteFail(err)
+      }
+    }
+  )
+
+  server.tool(
     'upload_attachment',
-    '与网页工具栏「附件」相同：上传文件并挂到节点，节点出现可点击回形针，人类可直接预览/下载。产物必须用本工具，禁止把路径或「请拖到节点」写进 note/text。提供 file_path（WorkBuddy 目录或仓库 output）、content_base64 或 source_url 之一。支持 txt/md/csv/pdf/docx/xlsx/html 与常见图片。成功返回 attachment.id 与 content_url。',
+    '与网页工具栏「附件」相同：上传文件并挂到节点，节点出现可点击回形针，人类可直接预览/下载。若节点已有附件，本次上传会替换节点当前指向：相同内容复用附件 id，不同内容生成新 id；旧文件保留在房间文件库和历史中。产物必须用本工具，禁止把路径或「请拖到节点」写进 note/text。提供 file_path（WorkBuddy 目录或仓库 output）、content_base64 或 source_url 之一。支持 txt/md/csv/pdf/docx/xlsx/html 与常见图片。成功返回 attachment.id 与 content_url。',
     {
       room_key: z.string().describe('房间号'),
       node: z

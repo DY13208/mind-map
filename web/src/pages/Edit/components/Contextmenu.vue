@@ -88,10 +88,30 @@
         <span class="name">{{ $t('contextmenu.cutNode') }}</span>
         <span class="desc">Ctrl + X</span>
       </div>
+      <div class="item" data-testid="copy-node-for-ai" @click="copyNodeForAi">
+        <span class="name">复制给 AI（SOP）</span>
+      </div>
       <div class="item" @click="exec('PASTE_NODE')">
         <span class="name">{{ $t('contextmenu.pasteNode') }}</span>
         <span class="desc">Ctrl + V</span>
       </div>
+      <template v-if="hasNodeAttachment && hasExplicitNodeContext">
+        <div class="splitLine"></div>
+        <div
+          class="item danger"
+          data-testid="delete-node-attachment"
+          @click="manageNodeAttachment('delete')"
+        >
+          <span class="name">删除附件</span>
+        </div>
+        <div
+          class="item"
+          data-testid="replace-node-attachment"
+          @click="manageNodeAttachment('replace')"
+        >
+          <span class="name">替换附件</span>
+        </div>
+      </template>
       <div class="splitLine"></div>
       <div class="item" data-testid="mapref" @click="openMapRef">
         <span class="name">{{ $t('contextmenu.mapRef') }}</span>
@@ -234,7 +254,8 @@ export default {
       numberLevel: '',
       subItemsShowLeft: false,
       isNodeMousedown: false,
-      selectedNodes: []
+      selectedNodes: [],
+      hasExplicitNodeContext: false
     }
   },
   computed: {
@@ -327,6 +348,16 @@ export default {
     hasNote() {
       return !!this.node.getData('note')
     },
+    hasNodeAttachment() {
+      const data = this.node && this.node.getData && this.node.getData()
+      return !!(
+        data &&
+        (data.attachmentId ||
+          data.attachmentUrl ||
+          data.attachmentName ||
+          data.attachmentStatus)
+      )
+    },
     numberTypeList() {
       return numberTypeList[this.$i18n.locale] || numberTypeList.zh
     },
@@ -366,6 +397,49 @@ export default {
   },
   methods: {
     ...mapMutations(['setLocalConfig']),
+
+    async copyNodeForAi() {
+      const node = this.node
+      const uid = this.nodeUid(node)
+      const room = roomFromLocation(this.$route)
+      const path = []
+      let current = node
+      while (current) {
+        const raw = String(current.getData('text') || '')
+        const text = (current.getData('richText') ? getTextFromHtml(raw) : raw)
+          .replace(/\s+/g, ' ')
+          .trim()
+        if (text) path.unshift(text)
+        current = current.parent
+      }
+      this.hide()
+      if (!room || !uid) {
+        this.$message.warning('请先打开已保存的脑图')
+        return
+      }
+      const text = `执行这个SOP：${path.join(' / ')}（room_key=${room}，node_uid=${uid}）`
+      try {
+        try {
+          if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('clipboard unavailable')
+          await navigator.clipboard.writeText(text)
+        } catch (err) {
+          const input = document.createElement('textarea')
+          input.value = text
+          input.style.position = 'fixed'
+          input.style.opacity = '0'
+          document.body.appendChild(input)
+          try {
+            input.select()
+            if (!document.execCommand('copy')) throw new Error('copy failed')
+          } finally {
+            document.body.removeChild(input)
+          }
+        }
+        this.$message.success('SOP 指令已复制，可粘贴给 AI 使用')
+      } catch (err) {
+        this.$message.error('复制失败，请重试')
+      }
+    },
 
     async shareNode() {
       const node = this.node
@@ -419,6 +493,7 @@ export default {
       this.type = 'node'
       this.isShow = true
       this.node = node
+      this.hasExplicitNodeContext = true
       this.selectedNodes = this.collectSelectedNodes(node)
       const number = this.node && this.node.getData && this.node.getData('number')
       if (number) {
@@ -446,6 +521,7 @@ export default {
       this.type = 'node'
       this.isShow = true
       this.node = anchor
+      this.hasExplicitNodeContext = false
       this.selectedNodes = list.slice()
       const number = anchor && anchor.getData && anchor.getData('number')
       if (number) {
@@ -543,6 +619,30 @@ export default {
       this.$message.success(this.$t('mapRef.removed'))
     },
 
+    async manageNodeAttachment(action) {
+      const node = this.node
+      const uid = this.nodeUid(node)
+      if (
+        !this.hasExplicitNodeContext ||
+        !node ||
+        !uid ||
+        !['delete', 'replace'].includes(action) ||
+        !(await this.canExecuteCommand('SET_NODE_ATTACHMENT'))
+      ) {
+        return
+      }
+      const data = node.getData ? node.getData() || {} : {}
+      this.$bus.$emit('manageNodeAttachment', {
+        action,
+        uid,
+        node,
+        expectedAttachmentId: String(data.attachmentId || ''),
+        expectedAttachmentUrl: String(data.attachmentUrl || ''),
+        expectedAttachmentName: String(data.attachmentName || '')
+      })
+      this.hide()
+    },
+
     // 鼠标按下事件
     onMousedown(e) {
       if (e.which !== 3) {
@@ -608,6 +708,7 @@ export default {
       this.type = ''
       this.node = ''
       this.selectedNodes = []
+      this.hasExplicitNodeContext = false
       this.numberType = ''
       this.numberLevel = ''
     },

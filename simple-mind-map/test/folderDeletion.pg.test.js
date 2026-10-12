@@ -52,6 +52,12 @@ async function main() {
       return { source: ids[0], child: ids[1], target: ids[2], keys }
     }
     let f = await seed()
+    const adminFolders = await fs.listFolders({ userId: 'super-admin', bypass: true })
+    assert.ok(adminFolders.list.every(folder => folder.canManage), 'super-admin must see folder delete/rename actions')
+    const ownerFolders = await fs.listFolders({ userId: 'owner' })
+    assert.ok(ownerFolders.list.every(folder => folder.canManage), 'owners retain folder management')
+    const otherFolders = await fs.listFolders({ userId: 'unrelated-user' })
+    assert.equal(otherFolders.list.length, 0, 'ordinary unrelated users cannot list private folders')
     let preview = await fs.previewFolderDeletion(f.source, { userId: 'owner' })
     assert.equal(preview.roomCount, 2)
     await fs.deleteFolderContents(f.source, { userId: 'owner', action: 'move', revision: preview.revision, targetFolderId: f.target })

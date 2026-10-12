@@ -4228,6 +4228,16 @@ class Cooperate {
         if (stylePayload[key] === undefined) delete stylePayload[key]
       }
     })
+    // HTTP recovery includes complete records, including unchanged nodes.
+    // Only recreate visual content whose value actually changed.
+    const currentData = (node.getData && node.getData()) || {}
+    Object.keys(stylePayload).forEach(key => {
+      const value = stylePayload[key]
+      if (
+        (value == null && currentData[key] == null) ||
+        JSON.stringify(value) === JSON.stringify(currentData[key])
+      ) delete stylePayload[key]
+    })
     if (Object.keys(stylePayload).length) {
       const data = node.nodeData && node.nodeData.data
       Object.keys(stylePayload).forEach(key => {
@@ -4255,6 +4265,7 @@ class Cooperate {
       if (
         this.mindMap &&
         typeof this.mindMap.render === 'function' &&
+        !this.httpRefreshing &&
         collabNodeFeatures.needsGeometryRefresh(stylePayload)
       ) {
         this.mindMap.render()
@@ -4668,7 +4679,7 @@ class Cooperate {
     return true
   }
 
-  async ensureHttpNodePath(uid, locatedCache) {
+  async ensureHttpNodePath(uid, locatedCache, options = {}) {
     if (!uid || uid === 'root') return false
     if (this.isTombstonedUid(uid)) return false
     const renderer = this.mindMap.renderer
@@ -4698,7 +4709,7 @@ class Cooperate {
         const stub = located.nodes && located.nodes[id]
         if (parent && stub && !this.isTombstonedUid(id)) {
           this.mergeHttpChildren(parent, [stub])
-          if (this.expandTreeNode(parent)) changed = true
+          if (options.expand !== false && this.expandTreeNode(parent)) changed = true
           treeNode = this.findTreeNode(tree, id)
         }
       }
@@ -4708,7 +4719,7 @@ class Cooperate {
         } catch (err) {
           console.error('[mind-map] hydrate path failed', id, err)
         }
-        if (this.expandTreeNode(treeNode)) changed = true
+        if (options.expand !== false && this.expandTreeNode(treeNode)) changed = true
         this.hydratedUids.add(id)
         this.dirtySubtrees.delete(id)
       }
@@ -4732,7 +4743,7 @@ class Cooperate {
         ? treeNodeIndex.get(uid)
         : this.findTreeNode(tree, uid)
       if (!treeNode) {
-        await this.ensureHttpNodePath(uid)
+        await this.ensureHttpNodePath(uid, undefined, { expand: false })
         treeNode =
           (treeNodeIndex && treeNodeIndex.get(uid)) ||
           this.findTreeNode(tree, uid)
@@ -4765,7 +4776,6 @@ class Cooperate {
       this.hydratedUids.add(uid)
       this.dirtySubtrees.delete(uid)
       if ((treeNode.children || []).length !== before) changed = true
-      if (this.expandTreeNode(treeNode)) changed = true
     }
     return changed
   }
@@ -4782,7 +4792,10 @@ class Cooperate {
     try {
       for (const uid of uids) {
         if (this.isTombstonedUid(uid)) continue
-        if (await this.ensureHttpNodePath(uid)) changed = true
+        const tree = this.mindMap.renderer && this.mindMap.renderer.renderTree
+        if (!this.findTreeNode(tree, uid)) {
+          if (await this.ensureHttpNodePath(uid, undefined, { expand: false })) changed = true
+        }
       }
       if (await this.syncHttpDirtySubtrees()) changed = true
     } finally {

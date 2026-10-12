@@ -747,7 +747,9 @@ function createFileSystem(options = {}) {
           can_manage:
             teamId != null
               ? canManageTeam
-              : row.can_manage != null
+              : bypass
+                ? true
+                : row.can_manage != null
                 ? row.can_manage
                 : row.created_by === userId || bypass
         })

@@ -196,10 +196,23 @@ async function attachmentIdsOnNode(db, roomKey, nodeUid) {
        where room_key = $1 and uid = $2 and deleted_at is null`,
       [roomKey, nodeUid]
     )
-    return res.rows.map(row => String(row.id || '')).filter(Boolean)
+    let roomHasNormalizedNodes = res.rows.length > 0
+    if (!roomHasNormalizedNodes) {
+      const marker = await db.query(
+        `select 1 from room_nodes where room_key = $1 limit 1`,
+        [roomKey]
+      )
+      roomHasNormalizedNodes = marker.rows.length > 0
+    }
+    return {
+      available: roomHasNormalizedNodes,
+      ids: res.rows.map(row => String(row.id || '')).filter(Boolean)
+    }
   } catch (err) {
     // Rooms predating the room_nodes migration only have the attachment side.
-    if (err && (err.code === '42P01' || err.code === '42703')) return []
+    if (err && (err.code === '42P01' || err.code === '42703')) {
+      return { available: false, ids: [] }
+    }
     throw err
   }
 }
@@ -214,10 +227,24 @@ async function listMeta(db, roomKey, options = {}) {
   const params = [roomKey]
   const where = ['a.room_key = $1']
   if (nodeUid) {
-    params.push(nodeUid)
-    const uidParam = `$${params.length}`
-    params.push(await attachmentIdsOnNode(db, roomKey, nodeUid))
-    where.push(`(a.node_uid = ${uidParam} or a.id = any($${params.length}::text[]))`)
+    const current = await attachmentIdsOnNode(db, roomKey, nodeUid)
+    if (current.available) {
+      // Once normalized node rows are available, the node's current pointer is
+      // authoritative. a.node_uid is only the original uploader and remains
+      // populated after detach/replacement, so attachment rows must follow the
+      // current pointer. Non-attachment sources still use node_uid because
+      // ensureSources records those without writing node attachment metadata.
+      params.push(nodeUid)
+      const uidParam = `$${params.length}`
+      params.push(current.ids)
+      where.push(
+        `(a.id = any($${params.length}::text[]) or (a.source_kind <> 'attachment' and a.node_uid = ${uidParam}))`
+      )
+    } else {
+      // Pre-migration rooms have no normalized current pointer to consult.
+      params.push(nodeUid)
+      where.push(`a.node_uid = $${params.length}`)
+    }
   }
   if (ids.length) {
     params.push(ids)
