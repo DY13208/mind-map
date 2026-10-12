@@ -1,3 +1,4 @@
+const { summaryCompanyNames, summaryCompany, summaryShareholders, summaryDisagrees } = require('../../src/utils/shareholderSummary')
 const { candidatesFor, selectCandidates, multipleReports } = require('../../src/utils/fillConflict')
 const { extractValues, valuesConflict, latestValues, normalizeField } = require('../../src/utils/genericFill')
 const fs = require('node:fs/promises')
@@ -46,9 +47,9 @@ function abort(signal) {
   if (signal?.aborted)
     throw Object.assign(new Error('已取消'), { name: 'AbortError' })
 }
-function context(titles) {
+function context(titles, summaryNames = []) {
   const field = normalizeField(titles.at(-1))
-  const company = titles.slice(0, -1).reverse().find(isCompany) || ''
+  const company = summaryCompany(titles, summaryNames) || titles.slice(0, -1).reverse().find(isCompany) || ''
   const entity =
     (ALIASES[field] && company) ||
     titles
@@ -64,7 +65,11 @@ function companyScope(relative, company) {
   return named.length ? directoryName(named.at(-1)) === norm(company) : null
 }
 function selectFacts(pages, titles, relative, method) {
-  const { field, company, entity, aliases } = context(titles)
+  const { field, company, entity, aliases } = context(titles, summaryCompanyNames(pages))
+  if (field === '股东' && company) {
+    const summary = summaryShareholders(pages,company)
+    if (summary.length) return summary.map(f=>({...f,file:relative,method}))
+  }
   if (!field || BROAD.test(field) || (ALIASES[field] && !company)) return []
   const scope = company ? companyScope(relative, company) : null
   if (scope === false) return []
@@ -596,7 +601,8 @@ function createService({
     const warnings = (index.status().rootErrors || []).map(r=>({file:r.label,code:'root_read_failed'}))
     if (index.status().error)
       warnings.push({ file: '', code: 'index_incomplete' })
-    const { field, company, entity, aliases } = context(titles)
+    const summaryNames = index.entries().flatMap(r=>r.pages ? r.summaryCompanies || [] : [])
+    const { field, company, entity, aliases } = context(titles, summaryNames)
     if (ALIASES[field] && !company)
       return {
         reason: 'local_entity_required',
@@ -611,6 +617,7 @@ function createService({
       ? index.scoped(company, record => {
           const scope = companyScope(record.relative, company)
           return (
+            field === '股东' && record.pages && summaryCompany([company,'股东'],record.summaryCompanies || []) ||
             scope === true ||
             (scope !== false &&
               norm(path.basename(record.relative)).includes(norm(company)))
@@ -638,6 +645,7 @@ function createService({
         const file = relative
         if (company) {
           const scoped =
+            field === '股东' && record.pages && summaryCompany([company,'股东'],record.summaryCompanies || []) ||
             companyScope(relative, company) === true ||
             (companyScope(relative, company) !== false &&
               norm(path.basename(file)).includes(norm(company)))
@@ -783,7 +791,7 @@ function createService({
         company,
         entity,
         field,
-        field === '经营许可' ? 'license-4' : ALIASES[field] ? 'facts-1' : 'generic-values-7'
+        field === '经营许可' ? 'license-4' : field === '股东' ? 'shareholder-summary-2' : ALIASES[field] ? 'facts-1' : 'generic-values-7'
       ])
       if (!cached[key]) {
         if (Object.keys(cached).length >= 32)
@@ -860,7 +868,8 @@ function createService({
       if (!unique.has(key)) unique.set(key, { ...fact, evidence: [] })
       unique.get(key).evidence.push(fact)
     }
-    if (conflicts(facts, field)) {
+    const summaryDisagreement = field === '股东' && summaryDisagrees(facts)
+    if (conflicts(facts, field) || summaryDisagreement) {
       const allCandidates = candidatesFor(facts, field)
       const recordSelection = multipleReports(allCandidates,field)
       const multiple = true
