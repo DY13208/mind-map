@@ -1,6 +1,7 @@
 import LogicalStructure from './LogicalStructure'
 import compactLayoutConfig from './compactLayoutConfig'
 import { asyncRun } from '../utils'
+import { walkLayoutInSlices } from '../utils/layoutSlices'
 
 // Pack complete branches with small gaps, keeping each parent centered on its
 // own children. Compactness must not disconnect the visual hierarchy.
@@ -25,6 +26,16 @@ class CompactStructure extends LogicalStructure {
   }
 
   doLayout(callback) {
+    if (this.mindMap.opt.openPerformance && !this.renderer._syncLayoutForResize) {
+      const generation = this.renderer._renderGeneration
+      const cancelled = () => generation !== this.renderer._renderGeneration
+      this.computedBaseValue((...args) => walkLayoutInSlices(args, { cancelled })).then(completed => {
+        if (!completed || cancelled()) return
+        this.computedTopValue()
+        callback(this.root)
+      }).catch(error => this.mindMap.opt.errorHandler('layout_error', error))
+      return
+    }
     const tasks = [
       () => this.computedBaseValue(),
       () => this.computedTopValue(),
@@ -38,8 +49,19 @@ class CompactStructure extends LogicalStructure {
     }
   }
 
-  computedBaseValue() {
-    super.computedBaseValue()
+  computedBaseValue(walker) {
+    const prepared = super.computedBaseValue(walker)
+    if (prepared && typeof prepared.then === 'function') {
+      return prepared.then(completed => {
+        if (!completed) return false
+        this.computeCompactBaseValue()
+        return true
+      })
+    }
+    this.computeCompactBaseValue()
+  }
+
+  computeCompactBaseValue() {
     const levels = []
     this.componentByNode = new Map()
     const queue = [{ node: this.root, depth: 0, component: this.root }]

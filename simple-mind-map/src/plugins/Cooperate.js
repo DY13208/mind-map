@@ -2013,7 +2013,9 @@ class Cooperate {
     const renderer = this.mindMap && this.mindMap.renderer
     if (this.currentData && type && type !== 'map.replaced') {
       try {
-        this.currentData = applyCollabEvent(this.currentData, event)
+        this.currentData = applyCollabEvent(this.currentData, event, {
+          liveFieldUpdate: true
+        })
       } catch (err) {
         v2Trace('remote.currentData.fail', { type, uid, message: err && err.message })
       }
@@ -4387,7 +4389,7 @@ class Cooperate {
         (!this.hydrateFailedUids.has(uid) || this.dirtySubtrees.has(uid))
       ) {
         seen.add(uid)
-        jobs.push(
+        jobs.push(() =>
           this.hydrateFromHttp(node).catch(err => {
             this.hydrateFailedUids.add(uid)
             console.error('[mind-map] expanded partial hydrate failed', uid, err)
@@ -4399,7 +4401,11 @@ class Cooperate {
     }
     visit(renderer.root)
     if (!jobs.length) return { hydrated: 0, changed: false }
-    const results = await Promise.all(jobs)
+    // Large expanded rooms must not start hundreds of subtree requests at once.
+    const results = []
+    for (let index = 0; index < jobs.length; index += 4) {
+      results.push(...await Promise.all(jobs.slice(index, index + 4).map(run => run())))
+    }
     const changed = results.some(Boolean)
     // render_end invokes the personal expand restore again. Rendering after a
     // no-op fetch would otherwise create an endless subtree/render cycle.

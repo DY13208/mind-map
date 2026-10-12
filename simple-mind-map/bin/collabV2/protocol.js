@@ -173,7 +173,18 @@ function isWriteType(type) {
   return WRITE_TYPES.has(normalizeType(type))
 }
 
+// Canvas coordinates are presentation adjustments, not semantic node edits.
+function isPositionOnlyUpdate(operation = {}) {
+  if (normalizeType(operation.type) !== 'node.update') return false
+  const payload = operation.payload || {}
+  if (['parent', 'parentUid', 'parent_uid', 'index'].some(key => payload[key] !== undefined)) return false
+  const patch = payload.patch || payload.data || {}
+  const keys = Object.keys(patch).filter(key => key !== '__fv')
+  return keys.length > 0 && keys.every(key => key === 'customLeft' || key === 'customTop')
+}
+
 module.exports = {
+  isPositionOnlyUpdate,
   TYPE_ALIAS,
   WRITE_TYPES,
   BATCH_RECOMMENDED,

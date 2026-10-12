@@ -1,0 +1,12 @@
+const test = require('node:test')
+const assert = require('node:assert/strict')
+const { isPositionOnlyUpdate } = require('../simple-mind-map/bin/collabV2/protocol')
+test('coordinates do not occupy undo entries, but reparenting and content still do', () => {
+  const op = patch => ({ type: 'node.update', payload: { uid: 'n', patch } })
+  assert.equal(isPositionOnlyUpdate(op({ customLeft: 10, customTop: 20 })), true)
+  assert.equal(isPositionOnlyUpdate(op({ customLeft: null, __fv: { style: 1 } })), true)
+  assert.equal(isPositionOnlyUpdate(op({ customLeft: 10, text: 'new' })), false)
+  assert.equal(isPositionOnlyUpdate({ type: 'node.move', payload: { uid: 'n', parentUid: 'b' } }), false)
+  assert.equal(isPositionOnlyUpdate({ type: 'node.update', payload: { uid: 'n', parentUid: 'b', patch: { customLeft: 10 } } }), false)
+  assert.equal(isPositionOnlyUpdate(op({})), false)
+})
