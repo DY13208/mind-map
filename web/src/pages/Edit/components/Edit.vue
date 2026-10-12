@@ -14,6 +14,11 @@
       data-testid="mindmap-canvas"
     ></div>
     <Count :mindMap="mindMap" v-if="!isZenMode"></Count>
+    <HyperlinkPreview
+      :visible="hyperlinkPreviewVisible"
+      :url="hyperlinkPreviewUrl"
+      @close="closeHyperlinkPreview"
+    />
     <Navigator v-if="mindMap && !isZenMode && showNavigator" :mindMap="mindMap"></Navigator>
     <NavigatorToolbar :mindMap="mindMap" v-if="!isZenMode && showNavigatorToolbar"></NavigatorToolbar>
     <OutlineSidebar :mindMap="mindMap"></OutlineSidebar>
@@ -75,6 +80,7 @@
 
 <script>
 import MindMap from 'simple-mind-map'
+import HyperlinkPreview from './HyperlinkPreview.vue'
 import MiniMap from 'simple-mind-map/src/plugins/MiniMap.js'
 import Watermark from 'simple-mind-map/src/plugins/Watermark.js'
 import KeyboardNavigation from 'simple-mind-map/src/plugins/KeyboardNavigation.js'
@@ -199,6 +205,7 @@ if (typeof window.MoreThemes !== 'undefined') {
 
 export default {
   components: {
+    HyperlinkPreview,
     OutlineSidebar,
     Style,
     BaseStyle,
@@ -236,6 +243,8 @@ export default {
   },
   data() {
     return {
+      hyperlinkPreviewVisible: false,
+      hyperlinkPreviewUrl: '',
       enableShowLoading: true,
       loadingSafetyTimer: null,
       importPersistLock: false,
@@ -403,6 +412,23 @@ export default {
     }
   },
   methods: {
+    openHyperlinkPreview(value) {
+      try {
+        const url = new URL(String(value || '').trim(), window.location.href)
+        if (!['http:', 'https:'].includes(url.protocol)) {
+          this.$message.warning('网页预览仅支持 HTTP 或 HTTPS 链接')
+          return
+        }
+        this.hyperlinkPreviewUrl = url.href
+        this.hyperlinkPreviewVisible = true
+      } catch (_) {
+        this.$message.warning('链接地址无效，请检查超链接设置')
+      }
+    },
+    closeHyperlinkPreview() {
+      this.hyperlinkPreviewVisible = false
+      this.hyperlinkPreviewUrl = ''
+    },
   /**
    * 协作服务连不上时的数据兜底。
    *
@@ -1082,6 +1108,7 @@ export default {
           openBlankMode: false
         },
         ...(config || {}),
+        customHyperlinkJump: url => this.openHyperlinkPreview(url),
         // 选中状态直接使用节点自身的边框。
         hoverRectColor: '#246bff',
         hoverRectPadding: 0,
