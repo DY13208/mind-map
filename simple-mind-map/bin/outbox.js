@@ -200,7 +200,8 @@ async function flushOutbox(pool, bus) {
 function startOutboxPublisher(options = {}) {
   const pool = options.pool || getPool()
   const bus = options.bus
-  const onEvent = options.onEvent || fanoutDocumentChange
+  const onEvent = options.onEvent === false
+    ? null : options.onEvent || fanoutDocumentChange
   const intervalMs = Math.max(
     50,
     Number(options.intervalMs || process.env.COLLAB_OUTBOX_POLL_MS || 250)
@@ -208,7 +209,7 @@ function startOutboxPublisher(options = {}) {
   let timer = null
   let running = false
   let stopped = false
-  const unsubscribe = bus && bus.subscribe ? bus.subscribe(onEvent) : null
+  const unsubscribe = onEvent && bus && bus.subscribe ? bus.subscribe(onEvent) : null
 
   async function tick() {
     if (running || stopped || !bus) return 0
