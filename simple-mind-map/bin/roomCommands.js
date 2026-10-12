@@ -1,6 +1,7 @@
 const mindDoc = require('./mindDoc')
 const { insertPositionAt } = require('./fractionalIndex')
 const { mergeNodeDataLww } = require('./fieldMerge')
+const { assertExpectedNodeData } = require('./nodeUpdateExpected')
 const {
   parentDeletedError,
   nodeDeletedError,
@@ -28,6 +29,8 @@ const COMMAND_META_KEYS = [
   'type',
   'payload',
   'confirm_sop_change',
+  'expected',
+  'expectedValue',
   'keep_children',
   'keepChildren'
 ]
@@ -186,8 +189,12 @@ function applyNodeCommand(ydoc, command, options = {}) {
     if (!uid || !before[uid]) {
       throw moving ? moveConflictError(uid) : nodeDeletedError(uid)
     }
+    assertExpectedNodeData(before[uid].data || {}, payload)
     const oldLocation = parentPosition(before, uid)
     const oldData = { ...(before[uid].data || {}) }
+    const eventPayload = { ...payload }
+    delete eventPayload.expected
+    delete eventPayload.expectedValue
     const parent = payload.parentUid || payload.parent_uid || payload.parent
     if (parent !== undefined || payload.index !== undefined) {
       if (parent !== undefined && parent != null && !before[parent]) {
@@ -247,7 +254,7 @@ function applyNodeCommand(ydoc, command, options = {}) {
         {
           type: moved ? 'node.moved' : 'node.updated',
           payload: {
-            ...payload,
+            ...eventPayload,
             uid,
             ...(changedFields.length ? { changedFields } : {}),
             ...(Object.keys(fieldVersions).length ? { fieldVersions } : {})
