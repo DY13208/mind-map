@@ -18,6 +18,7 @@ const {
 } = require('../collabHistory/clientEpoch')
 const {
   createOpId,
+  isPositionOnlyUpdate,
   isOpId,
   normalizeOperation,
   isWriteType,
@@ -1249,7 +1250,7 @@ function createCollaborationAdapter(options = {}) {
     op.observedRevision = Number(state.lastServerRevision) || 0
     op.baseRevision = op.observedRevision
     op.status = 'pending'
-    op.skipUndoStack = !!raw.skipUndoStack
+    op.skipUndoStack = !!raw.skipUndoStack || isPositionOnlyUpdate(op)
     op.traceId = raw.traceId || op.traceId || (op.payload && op.payload.traceId) || ''
     state.lastOpId = op.opId
     state.stage = STAGES.OUTBOX_PUT

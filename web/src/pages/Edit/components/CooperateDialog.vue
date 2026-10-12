@@ -309,6 +309,7 @@
 </template>
 
 <script>
+import { createExpandRestoreGate } from '@/utils/expandRestoreGate'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import { mapMutations, mapState } from 'vuex'
@@ -1087,8 +1088,11 @@ export default {
       )
 
       let locallyChanged = false
+      let localRevision = 0
+      const restoreGate = createExpandRestoreGate()
       const persist = () => {
         locallyChanged = true
+        localRevision += 1
         if (!this.personalExpandState) return
         savePersonalExpandState(roomKey, userId, this.personalExpandState)
         clearTimeout(this.personalExpandRemoteTimer)
@@ -1149,7 +1153,15 @@ export default {
       this.personalExpandOnChange = snapshotNow
       this.mindMap.on('personal_expand_change', this.personalExpandOnChange)
       this.personalExpandOnRender = () => {
-        if (!this.largeMapInitialOverview) this.restorePersonalExpandState()
+        if (this.largeMapInitialOverview || this.personalExpandApplying || !this.mindMap) return
+        const cooperate = this.mindMap.cooperate
+        if (!restoreGate.shouldRestore(
+          this.mindMap.renderer && this.mindMap.renderer.renderTree,
+          cooperate && cooperate.lastAppliedVersion,
+          this.personalExpandState,
+          localRevision
+        )) return
+        this.restorePersonalExpandState().catch(() => restoreGate.invalidate())
       }
       this.mindMap.on('afterExecCommand', this.personalExpandOnCommand)
       this.mindMap.on('node_tree_render_end', this.personalExpandOnRender)

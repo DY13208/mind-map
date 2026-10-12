@@ -78,7 +78,27 @@ function placeChild(next, parentUid, uid, payload) {
   next[parentUid] = { ...next[parentUid], children: kids }
 }
 
-export function applyCollabEvent(obj, event) {
+export function applyCollabEvent(obj, event, options = {}) {
+  // Live collaboration owns its node index. Plain field updates can replace
+  // one entry without copying every key in a large room on every keystroke.
+  // Recovery callers retain the immutable behavior, as do structural events.
+  const patchPayload = (event && event.payload) || {}
+  if (
+    options.liveFieldUpdate && obj && event && event.type === 'node.updated' &&
+    patchPayload.parentUid === undefined && patchPayload.parent_uid === undefined &&
+    patchPayload.parent === undefined && patchPayload.index === undefined
+  ) {
+    const uid = patchPayload.uid
+    if (!uid || !obj[uid]) throw new Error('node not found')
+    const patch = patchPayload.patch || patchPayload.data
+    if (patch && typeof patch === 'object') {
+      const data = { ...(obj[uid].data || {}), ...patch, uid }
+      if (patchPayload.text != null) data.text = patchPayload.text
+      if (patchPayload.note != null) data.note = patchPayload.note
+      obj[uid] = { ...obj[uid], data }
+    }
+    return obj
+  }
   const next = cloneNodes(obj)
   const type = event && event.type
   const payload = (event && event.payload) || {}
