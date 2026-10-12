@@ -827,6 +827,18 @@ function mockRes() {
   )
   assert.strictEqual(oldOwnerMem.role, 'manager')
 
+  const roleFixture = engineWith()
+  const ownMap = await roleFixture.fs.createRoom({ title: 'mine', userId: OWNER })
+  const otherMap = await roleFixture.fs.createRoom({ title: 'other', userId: OTHER })
+  const adminList = await roleFixture.fs.listRooms({ userId: OWNER, bypass: true })
+  const mine = adminList.list.find(row => row.roomKey === ownMap.room.roomKey)
+  const other = adminList.list.find(row => row.roomKey === otherMap.room.roomKey)
+  assert.strictEqual(mine.role, 'owner')
+  assert.strictEqual(other.role, 'admin')
+  assert.strictEqual(other.canManage, true)
+  assert.strictEqual(other.canEdit, true)
+  assert.strictEqual(adminList.list.filter(row => row.role === 'owner').length, 1)
+
   console.log('fileSystem.test.js ok')
 })().catch(err => {
   console.error(err)
