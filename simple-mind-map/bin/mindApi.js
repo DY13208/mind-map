@@ -19,6 +19,7 @@ const {
   listRooms,
   listRoomsPage,
   getRoom,
+  getRoomMeta,
   getRoomSnapshot,
   getRoomSubtree,
   getRoomRef,
@@ -54,14 +55,18 @@ const {
   reviveRoom,
   scheduleSave,
   commitRoomOperation,
+  commitDirectRoomOperation,
+  invalidateRoomCache,
   getRoomVersion,
   listRoomOperations,
+  listRoomOperationsContiguous,
   getRoomOperation,
   getNearestSnapshot,
   auditRoomNodes,
   repairRoomNodes,
   forceRoomSnapshot,
   getMinOperationVersion,
+  getEarliestAvailableOperationVersion,
   getRoomArchiveStats,
   archiveRoomOperations,
   archiveAllRoomOperations,
@@ -278,7 +283,7 @@ function normalizeCommand(req, roomKey, body, fallbackType, fallbackPayload) {
         ? null
         : Number(baseVersionRaw),
     type: String(base.type || fallbackType || ''),
-    payload: base.payload || fallbackPayload || {}
+    payload: stripMcpRequestFields(base.payload || fallbackPayload || {})
   }
   if (require('./collabV2/flag').isCollabV2Enabled()) {
     command.clientId = require('./collabV2/protocol').requireClientId(
@@ -288,13 +293,19 @@ function normalizeCommand(req, roomKey, body, fallbackType, fallbackPayload) {
   return command
 }
 
+function stripMcpRequestFields(input = {}) {
+  return require('./mcpOperationIdentity').stripMcpRequestMetadata(
+    input || {}
+  )
+}
+
 async function applyCommittedLive(roomKey, command, committed) {
+  if (committed && committed.duplicate) return committed
   const nodes =
     committed.nodes ||
     ((await getRoomSnapshot(roomKey)) || {}).nodes ||
     null
   if (nodes) rememberRoomNodes(roomKey, nodes)
-  if (committed.duplicate) return committed
   if (command.type === 'map.update') return committed
   // Prefer the in-memory doc even when still empty (warmup race): otherwise the
   // first HTTP mutation can land in PG while ensureDoc later hydrates a stale
@@ -381,7 +392,8 @@ async function executeTrustedOperation(roomKey, command, internalOptions = {}) {
           } finally {
             tempDoc.destroy()
           }
-        }
+        },
+        { mcpRequest: internalOptions.mcpRequest }
       )
     })
     const live = await applyCommittedLive(roomKey, command, committed)
@@ -414,16 +426,119 @@ async function executeTrustedOperation(roomKey, command, internalOptions = {}) {
   }
 }
 
+function isMcpDirectEnabled() {
+  const flags = require('./collabV2/flag')
+  return (
+    flags.envFlag('COLLAB_MCP_DIRECT', false) &&
+    flags.isCollabV2Enabled() &&
+    flags.isCollabV2EventBridgeEnabled()
+  )
+}
+
+async function executeMcpDirectOperation(roomKey, command, source, mcpRequest) {
+  const meta = await getRoomMeta(roomKey)
+  if (!meta || !(meta.room_nodes_initialized === true || meta.room_nodes_initialized === 't')) {
+    return null
+  }
+  const policy = require('./mcpDirectPolicy')
+  const refs = []
+  const payload = command.payload || {}
+  if (command.type === 'node.insert') {
+    refs.push(payload.parentUid || payload.parent_uid || payload.parent || 'root')
+  } else {
+    refs.push(payload.uid || '')
+  }
+  const knownUids = new Set()
+  for (const ref of refs) {
+    if (!ref || policy.isUidReference(ref)) continue
+    const resolved = await getRoomRef(roomKey, ref)
+    if (resolved && resolved.nodeExists) knownUids.add(String(ref))
+  }
+  if (!policy.isMcpDirectShape(command, source, knownUids)) return null
+
+  assertRoomWritable(roomKey)
+  assertRateLimit(roomKey)
+  if (command.type === 'node.update') {
+    assertPatchSize(
+      (payload && (payload.patch || payload.data)) || payload
+    )
+  }
+  const committed = await withRoomMutation(roomKey, async () =>
+    commitDirectRoomOperation(
+      roomKey,
+      command,
+      async ({ client, room, currentVersion }) => {
+        const store = require('./collabV2/directStore').createPgStore(
+          client,
+          roomKey
+        )
+        store.setMeta((room && room.metadata) || {})
+        const applied = await require('./collabV2/directApplier').applyDirect(
+          store,
+          {
+            ...command,
+            roomKey,
+            targetId: payload.uid || '',
+            opId: command.operationId
+          },
+          { version: currentVersion + 1 }
+        )
+        return { ...applied, queryStats: store.stats }
+      },
+      { mcpRequest }
+    )
+  )
+  invalidateRoomCache(roomKey)
+  dropLiveDoc(roomKey)
+  return committed
+}
+
 async function executeOperation(req, roomKey, command, internalOptions = {}) {
   await roomAcl.assertRoomAccess(getPool(), req, roomKey, 'edit')
   const started = Date.now()
   try {
-    const committed = await executeTrustedOperation(
-      roomKey,
-      command,
-      internalOptions
-    )
-    if (committed && committed.noop) return committed
+    let mcpRequest = null
+    if (
+      req.verifiedMcpSource &&
+      ['node.insert', 'node.update', 'node.delete'].includes(command.type)
+    ) {
+      const { digestMcpOperation } = require('./mcpOperationIdentity')
+      mcpRequest = {
+        v: 1,
+        principalId: req.verifiedMcpSource.principalId,
+        digest: digestMcpOperation({
+          roomKey,
+          principalId: req.verifiedMcpSource.principalId,
+          type: command.type,
+          payload: command.payload
+        })
+      }
+    }
+    let committed = null
+    let submissionPath = 'legacy'
+    if (
+      mcpRequest &&
+      !Object.keys(internalOptions || {}).length &&
+      isMcpDirectEnabled()
+    ) {
+      const directCommitted = await executeMcpDirectOperation(
+        roomKey,
+        command,
+        req.verifiedMcpSource,
+        mcpRequest
+      )
+      if (directCommitted) {
+        committed = directCommitted
+        submissionPath = 'direct'
+      }
+    }
+    if (!committed) {
+      committed = await executeTrustedOperation(roomKey, command, {
+        ...internalOptions,
+        ...(mcpRequest ? { mcpRequest } : {})
+      })
+    }
+    if (committed && committed.noop) return { ...committed, submissionPath }
     const version = Number(
       (committed.operation && committed.operation.version) || 0
     )
@@ -437,7 +552,7 @@ async function executeOperation(req, roomKey, command, internalOptions = {}) {
       duplicate: !!committed.duplicate,
       code: command.type
     })
-    return committed
+    return { ...committed, submissionPath }
   } catch (err) {
     const durationMs = Date.now() - started
     recordOperation({
@@ -776,6 +891,10 @@ function operationResponse(roomKey, committed) {
     room_key: roomKey,
     mapId: roomKey,
     version: operation.version,
+    currentRevision:
+      committed.currentRevision != null
+        ? Number(committed.currentRevision)
+        : Number(operation.version || 0),
     operationId: operation.operation_id,
     event: operation.event,
     uid: (committed.result && committed.result.uid) || payload.uid || '',
@@ -786,16 +905,21 @@ function operationResponse(roomKey, committed) {
       committed.result && committed.result.index != null
         ? committed.result.index
         : payload.index,
-    removed: (committed.result && committed.result.removed) || payload.removed || []
+    removed: (committed.result && committed.result.removed) || payload.removed || [],
+    submissionPath: committed.submissionPath || 'legacy'
   }
 }
 
 async function nodeMutationResponse(roomKey, committed) {
   const op = operationResponse(roomKey, committed)
-  const row = await getRoom(roomKey)
+  const row =
+    committed.submissionPath === 'direct'
+      ? await getRoomMeta(roomKey)
+      : await getRoom(roomKey)
   return {
     ...op,
-    title: mindDoc.stripHtml((row && row.title) || '') || '未命名',
+    title:
+      mindDoc.stripHtml((row && (row.title || row.root_text)) || '') || '未命名',
     share_url: shareUrl(roomKey),
     updated_at: row && row.updated_at
   }
@@ -1594,6 +1718,7 @@ async function handleApi(req, res) {
       outbox = { pending: 0, failed: 0, oldestAgeMs: 0, error: err.message }
     }
     const metrics = getMetricsSnapshot()
+    const eventBridge = require('./collabV2/socketServer').getOperationEventBridgeStatus()
     const alerts = []
     if (outbox.failed > 0) {
       alerts.push({
@@ -1612,6 +1737,9 @@ async function handleApi(req, res) {
     if (metrics.lastVersionGap) {
       alerts.push({ type: 'version_gap', ...metrics.lastVersionGap })
     }
+    if (eventBridge.enabled && !eventBridge.listenerHealthy) {
+      alerts.push({ type: 'collab_event_bridge_unhealthy' })
+    }
     sendJson(res, 200, {
       ok: alerts.length === 0,
       service: 'mind-map-collab',
@@ -1619,6 +1747,7 @@ async function handleApi(req, res) {
       outbox,
       presence: getPresenceStatus(),
       bus: require('./eventBus').getEventBusStatus(),
+      eventBridge,
       rateLimit: getRateLimitStatus(),
       metrics,
       alerts: alerts.concat(metrics.alerts || []).slice(0, 30)
@@ -1668,11 +1797,13 @@ async function handleApi(req, res) {
     try {
       const roomKey = url.searchParams.get('roomKey') || url.searchParams.get('mapId')
       const after = url.searchParams.get('afterRevision') || url.searchParams.get('after')
+      const headVersionRaw = url.searchParams.get('headVersion')
       const result = await require('./collabV2/sequencer').listOperations(
         req,
         roomKey,
         after,
-        url.searchParams.get('limit')
+        url.searchParams.get('limit'),
+        headVersionRaw == null ? undefined : { headVersion: Number(headVersionRaw) }
       )
       sendJson(res, 200, { ok: true, ...result })
     } catch (err) {
@@ -2125,38 +2256,87 @@ async function handleApi(req, res) {
       const limit = Number(url.searchParams.get('limit') || 500) || 500
       const safeLimit = Math.min(1000, Math.max(1, limit))
       const actorId = url.searchParams.get('actor') || url.searchParams.get('actorId')
-      const minVersion = await getMinOperationVersion(roomKey)
-      if (
-        minVersion != null &&
-        afterVersion > 0 &&
-        afterVersion < minVersion
-      ) {
+      if (actorId) {
+        // Actor-filtered operations are an audit view, not a replay stream.
+        const minVersion = await getMinOperationVersion(roomKey)
+        if (
+          minVersion != null &&
+          afterVersion > 0 &&
+          afterVersion < minVersion
+        ) {
+          sendJson(res, 409, {
+            error: 'requested operations were archived',
+            code: 'RESNAPSHOT_REQUIRED',
+            mapId: roomKey,
+            afterVersion,
+            minVersion,
+            currentVersion
+          })
+          recordRecovery('resnapshot')
+          return true
+        }
+        const operations = await listRoomOperations(roomKey, afterVersion, safeLimit, {
+          actorId
+        })
+        sendJson(res, 200, {
+          mapId: roomKey,
+          afterVersion,
+          currentVersion,
+          operations,
+          events: operations.map(item => item.event),
+          hasMore:
+            (operations.length ? operations[operations.length - 1].version : afterVersion) <
+              currentVersion && operations.length >= safeLimit
+        })
+        return true
+      }
+
+      const requestedHeadValue = url.searchParams.get('headVersion')
+      const requestedHead =
+        requestedHeadValue == null ? NaN : Number(requestedHeadValue)
+      const headVersion = Number.isFinite(requestedHead)
+        ? Math.min(currentVersion, Math.max(0, requestedHead))
+        : currentVersion
+      const page = await listRoomOperationsContiguous(roomKey, afterVersion, {
+        headVersion,
+        limit: safeLimit
+      })
+      if (page.reload || page.ok === false) {
+        const minVersion = await getEarliestAvailableOperationVersion(roomKey)
         sendJson(res, 409, {
-          error: 'requested operations were archived',
+          error: 'requested operations are not contiguous',
           code: 'RESNAPSHOT_REQUIRED',
+          reload: true,
           mapId: roomKey,
           afterVersion,
           minVersion,
-          currentVersion
+          currentVersion: headVersion,
+          currentRevision: headVersion,
+          serverRevision: headVersion,
+          headVersion,
+          completeFromRevision: headVersion,
+          missingVersion: page.missingVersion,
+          reason: page.reason,
+          operations: []
         })
         recordRecovery('resnapshot')
         return true
       }
-      const operations = await listRoomOperations(roomKey, afterVersion, safeLimit, {
-        actorId: actorId || undefined
-      })
+      const operations = page.operations || []
       if (operations.length) recordRecovery('operations')
-      const lastVersion = operations.length
-        ? operations[operations.length - 1].version
-        : afterVersion
       sendJson(res, 200, {
         mapId: roomKey,
         afterVersion,
-        currentVersion,
+        currentVersion: headVersion,
+        currentRevision: headVersion,
+        serverRevision: headVersion,
+        headVersion,
+        fromVersion: afterVersion,
+        toVersion: page.toVersion,
+        completeFromRevision: page.completeFromRevision,
         operations,
         events: operations.map(item => item.event),
-        hasMore:
-          lastVersion < currentVersion && operations.length >= safeLimit
+        hasMore: !!page.hasMore
       })
       return true
     }
@@ -3471,12 +3651,57 @@ async function handleApi(req, res) {
   if (fileMatch) {
     const roomKey = decodeURIComponent(fileMatch[1])
     if (req.method === 'GET') {
+      const format = url.searchParams.get('format') || 'outline'
+      if (
+        format === 'meta' &&
+        require('./collabV2/flag').isCollabV2Enabled()
+      ) {
+        const meta = await getRoomMeta(roomKey)
+        if (!meta) {
+          sendJson(res, 404, { error: 'not found' })
+          return true
+        }
+        const storedTitle = String(meta.title || '').trim()
+        const tableInitialized =
+          meta.room_nodes_initialized === true ||
+          meta.room_nodes_initialized === 't'
+        if (!storedTitle && !tableInitialized) {
+          console.warn(
+            '[mcp_meta_legacy_fallback]',
+            JSON.stringify({ roomKey, reason: 'empty_title_uninitialized_nodes' })
+          )
+          const loaded = await loadMap(roomKey)
+          if (!loaded) {
+            sendJson(res, 404, { error: 'not found' })
+            return true
+          }
+          sendJson(
+            res,
+            200,
+            mapPayload(roomKey, loaded.obj, loaded.row, {
+              format,
+              ...publicAccess(req.roomAccess)
+            })
+          )
+          return true
+        }
+        sendJson(
+          res,
+          200,
+          mapPayload(
+            roomKey,
+            {},
+            { ...meta, title: storedTitle || meta.root_text || '' },
+            { format, ...publicAccess(req.roomAccess) }
+          )
+        )
+        return true
+      }
       const loaded = await loadMap(roomKey)
       if (!loaded) {
         sendJson(res, 404, { error: 'not found' })
         return true
       }
-      const format = url.searchParams.get('format') || 'outline'
       sendJson(
         res,
         200,

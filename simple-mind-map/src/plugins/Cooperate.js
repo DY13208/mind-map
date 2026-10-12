@@ -6772,6 +6772,8 @@ class Cooperate {
     let versionRestore =
       options.reason === 'VERSION_RESTORE' ||
       options.fullTreeReason === 'VERSION_RESTORE'
+    const authoritativeRecovery =
+      options.reason === 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
     const waitForVersionRestore = () =>
       new Promise(resolve => {
         if (!Array.isArray(this.httpRestoreWaiters)) {
@@ -6798,10 +6800,13 @@ class Cooperate {
     let plan = planCollabRecovery(this.lastAppliedVersion, targetVersion)
     // A restore operation can advance the revision before its UI result reaches
     // this editor. Equal revisions still need an authoritative tree refresh.
-    if (plan.type === 'ignore' && versionRestore) {
+    if (plan.type === 'ignore' && (versionRestore || authoritativeRecovery)) {
       plan = {
         type: 'resnapshot',
-        version: Number(targetVersion) || Number(this.lastAppliedVersion) || 0
+        version: Number(targetVersion) || Number(this.lastAppliedVersion) || 0,
+        reason: versionRestore
+          ? 'VERSION_RESTORE'
+          : 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
       }
     }
     if (plan.type === 'ignore') return { applied: false, skipped: true }
@@ -6857,10 +6862,18 @@ class Cooperate {
             }
           }
         } catch (err) {
-          action = { type: 'resnapshot', version: plan.version }
+          action = {
+            type: 'resnapshot',
+            version: plan.version,
+            reason: 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
+          }
         }
       } else if (plan.type === 'fetch_operations') {
-        action = { type: 'resnapshot', version: plan.version }
+        action = {
+          type: 'resnapshot',
+          version: plan.version,
+          reason: 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
+        }
       }
       if (action.type === 'ignore') {
         if (versionRestore) {
@@ -6870,6 +6883,18 @@ class Cooperate {
           }
         } else {
           return { applied: false, skipped: true }
+        }
+      }
+      if (action.type === 'resnapshot' && !versionRestore) {
+        options = {
+          ...options,
+          reason:
+            action.reason ||
+            'AUTHORITATIVE_SNAPSHOT_RECOVERY'
+        }
+        this.httpPendingRecoverOptions = {
+          ...(this.httpPendingRecoverOptions || {}),
+          reason: options.reason
         }
       }
       retryVersion = Number(action.version) || retryVersion
@@ -6952,6 +6977,19 @@ class Cooperate {
           : { applied: false, skipped: true, version: retryVersion }
       }
       refreshApplied = !!(refreshed && refreshed.applied)
+      if (!refreshApplied) {
+        this.httpPendingRecoverVersion = Math.max(
+          this.httpPendingRecoverVersion || 0,
+          retryVersion
+        )
+        if (options && Object.keys(options).length) {
+          this.httpPendingRecoverOptions = {
+            ...(this.httpPendingRecoverOptions || {}),
+            ...options
+          }
+        }
+        return { applied: false, skipped: true, version: retryVersion }
+      }
       const applied = Number(action.version)
       const refreshedVersion = Number(refreshed && refreshed.version)
       if (Number.isFinite(applied)) recoveredVersion = applied

@@ -15,6 +15,7 @@ const { collabTrace } = require('./trace')
 const { stripSearchHtml } = require('../roomNodes')
 const { assertExpectedNodeData } = require('../nodeUpdateExpected')
 const { mergeMapMetadata, pickMetaPatch } = require('../mapMetadata')
+const { normalizeRestoreRows } = require('../nodeRestoreCodec')
 const {
   pasteUndoInverse,
   forestRootsFromInserts,
@@ -64,6 +65,8 @@ const DATA_META_KEYS = [
   'type',
   'payload',
   'confirm_sop_change',
+  '__mcpRequest',
+  'requestDigest',
   'keep_children',
   'keepChildren',
   'ops',
@@ -491,8 +494,10 @@ async function applyDelete(store, op, version) {
 
 async function applyRestore(store, op, version) {
   const payload = op.payload || {}
-  const uid = payload.uid
-  let rows = Array.isArray(payload.rows) ? payload.rows.slice() : []
+  let rows = normalizeRestoreRows(payload)
+  const uid =
+    (rows.some(row => row.uid === String(payload.uid || '')) && String(payload.uid)) ||
+    (rows[0] && rows[0].uid)
   if (!rows.length) {
     const uids = Array.isArray(payload.removed) && payload.removed.length
       ? payload.removed
@@ -508,7 +513,10 @@ async function applyRestore(store, op, version) {
   if (liveHits.length) {
     throw commandError(`节点已存在: ${liveHits[0].uid}`, 'UID_EXISTS', 409)
   }
-  let parentUid = payload.parentUid || payload.parent_uid || payload.parent || rows[0].parent_uid
+  const root = rows.find(row => row.uid === uid) || rows[0]
+  let parentUid =
+    payload.parentUid || payload.parent_uid || payload.parent ||
+    root.parent_uid || rows[0].parent_uid
   let parent = parentUid ? await store.getLive(parentUid) : null
   let parentFallback = false
   if (!parent) {
@@ -517,7 +525,6 @@ async function applyRestore(store, op, version) {
     parentFallback = true
     if (!parent) throw parentDeletedError(parentUid)
   }
-  const root = rows.find(row => row.uid === uid) || rows[0]
   const stamp = await placeAmongSiblings(
     store,
     parent.uid,

@@ -14,8 +14,10 @@ import {
   uploadAttachmentAndMountNode
 } from './mcpAttachmentUpload.mjs'
 import { deleteNodeAttachment } from './mcpAttachmentDelete.mjs'
+import mcpSubmitGateModule from './mcpSubmitGate.js'
 
 const { bearerToken, verifyMcpUserToken } = mcpUserToken
+const { createMcpSubmitGate } = mcpSubmitGateModule
 
 const API = (process.env.MIND_MAP_API || 'http://127.0.0.1:1234').replace(
   /\/$/,
@@ -24,6 +26,7 @@ const API = (process.env.MIND_MAP_API || 'http://127.0.0.1:1234').replace(
 const MCP_PORT = Number(process.env.MCP_PORT || 3847)
 const MCP_HOST = process.env.MCP_HOST || '0.0.0.0'
 const MCP_TOKEN = process.env.MCP_TOKEN || ''
+const mcpSubmitGate = createMcpSubmitGate()
 // Collab V2 requireClientId rejects empty clientId on all writes; MCP tools
 // historically only sent business fields. Stable per-process id keeps ops
 // attributable without forcing every tool payload to pass clientId.
@@ -39,10 +42,25 @@ function ok(data) {
 }
 
 function fail(err) {
-  return {
+  const result = {
     isError: true,
     content: [{ type: 'text', text: err.message || String(err) }]
   }
+  if (
+    err.operationId ||
+    err.code === 'MCP_WRITE_BUSY' ||
+    err.code === 'MCP_WRITE_QUEUE_TIMEOUT'
+  ) {
+    result.structuredContent = {
+      code: err.code || 'MCP_WRITE_ERROR',
+      statusCode: Number(err.statusCode || 0),
+      ...(Number(err.retryAfterMs) > 0
+        ? { retryAfterMs: Number(err.retryAfterMs) }
+        : {}),
+      ...(err.operationId ? { operation_id: err.operationId } : {})
+    }
+  }
+  return result
 }
 
 function historyFail(err) {
@@ -141,7 +159,17 @@ function historyCoverage(data = {}) {
 }
 
 async function apiRequest(pathName, options = {}) {
-  const { timeoutMs = 25000, headers, authorization, ...rest } = options
+  const {
+    timeoutMs = 25000,
+    headers,
+    authorization,
+    signal: requestSignal,
+    ...rest
+  } = options
+  const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  const signal = requestSignal
+    ? AbortSignal.any([timeoutSignal, requestSignal])
+    : timeoutSignal
   const res = await fetch(`${API}${pathName}`, {
     ...rest,
     headers: {
@@ -154,7 +182,7 @@ async function apiRequest(pathName, options = {}) {
           : {}),
       ...(headers || {})
     },
-    signal: AbortSignal.timeout(timeoutMs)
+    signal
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
@@ -164,6 +192,9 @@ async function apiRequest(pathName, options = {}) {
     error.code = data.code || `HTTP_${res.status}`
     error.statusCode = res.status
     if (data.details) error.details = data.details
+    if (Number(data.retryAfterMs) > 0) {
+      error.retryAfterMs = Number(data.retryAfterMs)
+    }
     throw error
   }
   return data
@@ -190,12 +221,90 @@ function createServer(authorization) {
     }
     return revision
   }
-  const writeMap = async (roomKey, pathName, method, body) => {
-    const baseVersion = await currentMapRevision(roomKey)
-    return api(pathName, {
-      method,
-      body: JSON.stringify({ ...body, baseVersion })
+  const writeMap = async (
+    roomKey,
+    pathName,
+    method,
+    body,
+    { signal, timeoutMs = 25000 } = {}
+  ) => {
+    const estimatedBytes = Buffer.byteLength(JSON.stringify(body || {}), 'utf8')
+    return mcpSubmitGate.run(
+      roomKey,
+      async () => {
+        const baseVersion = await currentMapRevision(roomKey)
+        return api(pathName, {
+          method,
+          timeoutMs,
+          signal,
+          body: JSON.stringify({ ...body, baseVersion })
+        })
+      },
+      { signal, estimatedBytes }
+    )
+  }
+  const isTransientNodeWriteError = (err, signal) => {
+    if (signal && signal.aborted) return false
+    if (
+      err.code === 'MCP_WRITE_BUSY' ||
+      err.code === 'MCP_WRITE_QUEUE_TIMEOUT' ||
+      err.statusCode === 429
+    ) {
+      return true
+    }
+    if (err.statusCode) return false
+    return (
+      err.name === 'TypeError' ||
+      err.name === 'AbortError' ||
+      err.name === 'TimeoutError' ||
+      ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'UND_ERR_SOCKET'].includes(
+        err.code
+      )
+    )
+  }
+  const waitBeforeRetry = (delayMs, signal) =>
+    new Promise((resolve, reject) => {
+      if (signal && signal.aborted) {
+        const error = new Error('MCP 写入已取消')
+        error.name = 'AbortError'
+        return reject(error)
+      }
+      const timer = setTimeout(resolve, Math.max(1, Math.min(5000, Number(delayMs) || 250)))
+      if (signal) {
+        signal.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(timer)
+            const error = new Error('MCP 写入已取消')
+            error.name = 'AbortError'
+            reject(error)
+          },
+          { once: true }
+        )
+      }
     })
+  const writeNodeMap = async (
+    roomKey,
+    pathName,
+    method,
+    body,
+    operationId,
+    { signal } = {}
+  ) => {
+    const stableBody = { ...body, operation_id: operationId }
+    for (let retry = 0; retry <= 3; retry += 1) {
+      try {
+        return await writeMap(roomKey, pathName, method, stableBody, {
+          signal,
+          timeoutMs: 65000
+        })
+      } catch (err) {
+        err.operationId = operationId
+        if (retry >= 3 || !isTransientNodeWriteError(err, signal)) throw err
+        await waitBeforeRetry(err.retryAfterMs, signal)
+      }
+    }
+    throw new Error('MCP 节点写入重试失败')
   }
   const server = new McpServer(
     {
@@ -936,12 +1045,13 @@ function createServer(authorization) {
       confirm_sop_change: z
         .boolean()
         .describe('父节点属于SOP时，必须先获得用户确认并传true')
-        .optional()
+        .optional(),
+      operation_id: z.string().uuid().describe('可选幂等请求ID，超时后使用同一ID重试').optional()
     },
-    async ({ room_key, text, parent, note, confirm_sop_change }) => {
+    async ({ room_key, text, parent, note, confirm_sop_change, operation_id }, extra = {}) => {
       try {
         return ok(
-          await writeMap(
+          await writeNodeMap(
             room_key,
             `/api/files/${encodeURIComponent(room_key)}/nodes`,
             'POST',
@@ -950,7 +1060,9 @@ function createServer(authorization) {
               parent: parent || 'root',
               note,
               confirm_sop_change
-            }
+            },
+            operation_id || randomUUID(),
+            { signal: extra && extra.signal }
           )
         )
       } catch (err) {
@@ -961,7 +1073,7 @@ function createServer(authorization) {
 
   server.tool(
     'update_node',
-    '修改节点文字或备注。禁止用 note/text 写本机文件路径或挂载说明来代替附件；挂文件必须用 upload_attachment（等同工具栏「附件」）。node 优先用 uid；也可用完整标题、部分文字或 根/父/子 路径。成功只返回 uid。工具报错即未写入。',
+    '修改节点文字或备注。禁止用 note/text 写本机文件路径或挂载说明来代替附件；挂文件必须用 upload_attachment（等同工具栏「附件」）。node 优先用 uid；也可用完整标题、部分文字或 根/父/子 路径。成功只返回 uid；如网络超时结果不确定，可用相同 operation_id 重试核验。',
     {
       room_key: z.string().describe('房间号'),
       node: z.string().describe('节点 uid 或文字路径'),
@@ -970,18 +1082,21 @@ function createServer(authorization) {
       confirm_sop_change: z
         .boolean()
         .describe('节点属于SOP时，必须先获得用户确认并传true')
-        .optional()
+        .optional(),
+      operation_id: z.string().uuid().describe('可选幂等请求ID，超时后使用同一ID重试').optional()
     },
-    async ({ room_key, node, text, note, confirm_sop_change }) => {
+    async ({ room_key, node, text, note, confirm_sop_change, operation_id }, extra = {}) => {
       try {
         return ok(
-          await writeMap(
+          await writeNodeMap(
             room_key,
             `/api/files/${encodeURIComponent(
               room_key
             )}/nodes/${encodeURIComponent(node)}`,
             'PATCH',
-            { text, note, confirm_sop_change }
+            { text, note, confirm_sop_change },
+            operation_id || randomUUID(),
+            { signal: extra && extra.signal }
           )
         )
       } catch (err) {
@@ -999,18 +1114,21 @@ function createServer(authorization) {
       confirm_sop_change: z
         .boolean()
         .describe('节点属于SOP时，必须先获得用户确认并传true')
-        .optional()
+        .optional(),
+      operation_id: z.string().uuid().describe('可选幂等请求ID，超时后使用同一ID重试').optional()
     },
-    async ({ room_key, node, confirm_sop_change }) => {
+    async ({ room_key, node, confirm_sop_change, operation_id }, extra = {}) => {
       try {
         return ok(
-          await writeMap(
+          await writeNodeMap(
             room_key,
             `/api/files/${encodeURIComponent(
               room_key
             )}/nodes/${encodeURIComponent(node)}`,
             'DELETE',
-            { confirm_sop_change }
+            { confirm_sop_change },
+            operation_id || randomUUID(),
+            { signal: extra && extra.signal }
           )
         )
       } catch (err) {
