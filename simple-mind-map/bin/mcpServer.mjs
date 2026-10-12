@@ -10,8 +10,8 @@ import { z } from 'zod'
 import { buildSopContext } from './sopContext.mjs'
 import mcpUserToken from './mcpUserToken.js'
 import {
-  attachmentMetaForNode,
-  resolveAttachmentUploadInput
+  resolveAttachmentUploadInput,
+  uploadAttachmentAndMountNode
 } from './mcpAttachmentUpload.mjs'
 import { deleteNodeAttachment } from './mcpAttachmentDelete.mjs'
 
@@ -72,6 +72,24 @@ function attachmentDeleteFail(err) {
         text: JSON.stringify({
           ok: false,
           code: err.code || 'ATTACHMENT_DELETE_ERROR',
+          error: err.message || String(err),
+          statusCode: err.statusCode || 0,
+          ...(err.details ? { details: err.details } : {})
+        })
+      }
+    ]
+  }
+}
+
+function attachmentUploadFail(err) {
+  return {
+    isError: true,
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          ok: false,
+          code: err.code || 'ATTACHMENT_UPLOAD_ERROR',
           error: err.message || String(err),
           statusCode: err.statusCode || 0,
           ...(err.details ? { details: err.details } : {})
@@ -679,7 +697,7 @@ function createServer(authorization) {
 
   server.tool(
     'upload_attachment',
-    '与网页工具栏「附件」相同：上传文件并挂到节点，节点出现可点击回形针，人类可直接预览/下载。若节点已有附件，本次上传会替换节点当前指向：相同内容复用附件 id，不同内容生成新 id；旧文件保留在房间文件库和历史中。产物必须用本工具，禁止把路径或「请拖到节点」写进 note/text。提供 file_path（WorkBuddy 目录或仓库 output）、content_base64 或 source_url 之一。支持 txt/md/csv/pdf/docx/xlsx/html 与常见图片。成功返回 attachment.id 与 content_url。',
+    '与网页工具栏「附件」相同：上传文件并挂到节点，节点出现可点击回形针，人类可直接预览/下载。若节点已有附件，本次上传会替换节点当前指向：相同内容复用附件 id，不同内容生成新 id；旧文件保留在房间文件库和历史中。产物必须用本工具，禁止把路径或「请拖到节点」写进 note/text。提供 file_path（WorkBuddy 目录或仓库 output）、content_base64 或 source_url 之一。支持 txt/md/csv/pdf/docx/xlsx/html 与常见图片。只有确认节点字段已持久化后才报告成功，并返回 attachment.id 与 content_url；附件已保存但挂载失败时返回 attachment_id 供诊断，不会重复上传或删除文件。',
     {
       room_key: z.string().describe('房间号'),
       node: z
@@ -720,110 +738,26 @@ function createServer(authorization) {
       confirm_sop_change
     }) => {
       try {
-        // Resolve title/path → uid (same as toolbar targeting a node)
-        let nodeUid = String(node || '').trim()
-        try {
-          const located = await api(
-            `/api/files/${encodeURIComponent(
-              room_key
-            )}/locate?uid=${encodeURIComponent(nodeUid)}`,
-            { timeoutMs: 15000 }
-          )
-          if (located && located.uid) nodeUid = located.uid
-        } catch (e) {
-          // Fall through; PATCH/update will resolve or fail clearly
-        }
-
         const resolved = await resolveAttachmentUploadInput({
-          node: nodeUid,
+          node,
           file_name,
           mime_type,
           file_path,
           content_base64,
           source_url
         })
-        const uploadBody = {
-          fileName: resolved.fileName,
-          nodeUid: resolved.nodeUid || nodeUid,
-          sourceKind: 'attachment'
-        }
-        if (resolved.mimeType) uploadBody.mimeType = resolved.mimeType
-        if (resolved.contentBase64) {
-          uploadBody.contentBase64 = resolved.contentBase64
-        }
-        if (resolved.sourceUrl) uploadBody.sourceUrl = resolved.sourceUrl
-
-        const uploaded = await api(
-          `/api/files/${encodeURIComponent(room_key)}/attachments`,
-          {
-            method: 'POST',
-            body: JSON.stringify(uploadBody),
-            timeoutMs: 120000
-          }
+        return ok(
+          await uploadAttachmentAndMountNode({
+            api,
+            roomKey: room_key,
+            nodeRef: resolved.nodeUid || node,
+            uploadInput: resolved,
+            confirmSopChange: confirm_sop_change === true,
+            operationId: randomUUID()
+          })
         )
-        const attachment = (uploaded && uploaded.attachment) || uploaded || {}
-        if (!attachment.id) {
-          throw new Error('上传成功但未返回 attachment.id')
-        }
-
-        // Same node fields as toolbar SET_NODE_ATTACHMENT
-        const patch = attachmentMetaForNode(attachment)
-        let nodeResult = null
-        let lastErr = null
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          try {
-            nodeResult = await api(
-              `/api/files/${encodeURIComponent(
-                room_key
-              )}/nodes/${encodeURIComponent(nodeUid)}`,
-              {
-                method: 'PATCH',
-                body: JSON.stringify({
-                  ...patch,
-                  confirm_sop_change: confirm_sop_change === true
-                }),
-                timeoutMs: 30000
-              }
-            )
-            lastErr = null
-            break
-          } catch (err) {
-            lastErr = err
-            const msg = String((err && err.message) || '')
-            if (
-              /正在保存整图|REPLACE_IN_PROGRESS|请稍候/.test(msg) &&
-              attempt < 2
-            ) {
-              await new Promise(r => setTimeout(r, 400 * (attempt + 1)))
-              continue
-            }
-            throw err
-          }
-        }
-        if (lastErr) throw lastErr
-
-        const contentUrl = `/api/files/${encodeURIComponent(
-          room_key
-        )}/attachments/${encodeURIComponent(attachment.id)}/content`
-
-        return ok({
-          ok: true,
-          room_key,
-          attachment,
-          node_uid: nodeUid,
-          node: nodeResult,
-          content_url: contentUrl,
-          toolbar_equivalent: true,
-          message:
-            attachment.status === 'ready'
-              ? '已按工具栏「附件」方式挂载，可在网页点击节点回形针查看'
-              : attachment.status === 'processing' ||
-                attachment.status === 'pending'
-              ? '已挂载（回形针可见），服务端仍在解析正文；可先点击下载原件'
-              : '已挂载（回形针可见），解析未成功；仍可点击下载原件'
-        })
       } catch (err) {
-        return fail(err)
+        return attachmentUploadFail(err)
       }
     }
   )

@@ -25,8 +25,23 @@ function nodeText(node) {
   return stripText(node.text)
 }
 
+// 知识节点标题前缀。W 后面紧跟数字（W1）不算前缀。
+const WIKI_KNOWLEDGE_PREFIX_RE = /^W(?!\d)\s*[：:]\s*/i
+
+/** 去掉知识节点的 W：，供检索组句和去重。C / P / D 不动。 */
+export function stripWikiKnowledgePrefix(text) {
+  return stripText(text).replace(WIKI_KNOWLEDGE_PREFIX_RE, '')
+}
+
+/** 写入图上的知识节点统一为「W：正文」。已有前缀只规范冒号，不叠两层。 */
+export function withWikiKnowledgePrefix(text) {
+  const body = stripWikiKnowledgePrefix(text)
+  if (!body) return ''
+  return 'W：' + body
+}
+
 function usefulTitle(text) {
-  const value = stripText(text)
+  const value = stripWikiKnowledgePrefix(text)
   if (!value) return ''
   if (PLACEHOLDERS.has(value.toLowerCase())) return ''
   return value
@@ -34,7 +49,7 @@ function usefulTitle(text) {
 
 /**
  * 从选中节点的父节点开始，沿 parent 一直走到根，再在末尾加上当前节点。
- * 占位标题（中心主题、分支主题等）不进入句子。
+ * 占位标题（中心主题、分支主题等）不进入句子。知识节点的 W： 不进入检索句。
  */
 export function wikiFillTitles(node) {
   const chain = []
@@ -97,23 +112,41 @@ function queryTitles(query, titles) {
     .filter(Boolean)
 }
 
-/** 结果名称必须出现在某一级节点标题里，避免「合同」这类短词反向套中「合同双方」。 */
+/** 编译标题上的覆盖率标记不参与和节点名对齐。 */
+function sectionLabel(name) {
+  return usefulTitle(name)
+    .replace(/\s*\[coverage:[^\]]*\]/gi, '')
+    .trim()
+}
+
+/**
+ * 只认和某一级节点标题完全相同的名称。
+ * 「合同」不能因为被「合同双方」包含就算命中。
+ */
 function nameInTitles(name, titles) {
-  const value = usefulTitle(name)
+  const value = sectionLabel(name)
   if (!value) return false
-  return titles.some(title => title === value || title.includes(value))
+  return titles.some(title => title === value)
 }
 
 function resultsForSentence(results, query, titles) {
   const list = results || []
   const chain = queryTitles(query, titles)
   if (!chain.length) return list
-  const topicHits = list.filter(item => nameInTitles(item && item.topic, chain))
-  const scoped = topicHits.length ? topicHits : list
-  const sectionHits = scoped.filter(item =>
-    nameInTitles(item && item.section, chain)
+  const topicHits = list.filter(item =>
+    nameInTitles(item && (item.topic_title || item.topic), chain)
   )
-  if (sectionHits.length) return sectionHits
+  const scoped = topicHits.length ? topicHits : list
+  const sectionHits = scoped
+    .map(item => ({
+      item,
+      rank: sectionLabel(item && item.section).length
+    }))
+    .filter(row => nameInTitles(row.item && row.item.section, chain))
+  if (sectionHits.length) {
+    const best = Math.max(...sectionHits.map(row => row.rank))
+    return sectionHits.filter(row => row.rank === best).map(row => row.item)
+  }
   if (topicHits.length) return topicHits
   return []
 }
@@ -139,13 +172,15 @@ function longestCommon(left, right) {
   return best
 }
 
-function headingMatches(heading, titles) {
+function headingMatches(heading, titles, exactOnly) {
   const text = normalizeName(heading)
   if (!text) return false
   return titles.some(title => {
     const name = normalizeName(title)
     if (!name || name.length < 4) return false
-    if (text === name || text.includes(name) || name.includes(text)) return true
+    if (text === name) return true
+    if (exactOnly) return false
+    if (text.includes(name) || name.includes(text)) return true
     const common = longestCommon(text, name)
     const shorter = Math.min(text.length, name.length)
     return common >= 4 && common / shorter >= 0.5
@@ -294,7 +329,12 @@ function linesForResult(content, titles) {
       lines: blocks.map(node => stripText(node.data.text)).filter(Boolean)
     }
   }
-  const matched = headings.filter(node => headingMatches(node.data.text, titles))
+  const exact = headings.filter(node =>
+    headingMatches(node.data.text, titles, true)
+  )
+  const matched = exact.length
+    ? exact
+    : headings.filter(node => headingMatches(node.data.text, titles))
   if (!matched.length) return { matched: false, lines: [] }
   return {
     matched: true,
@@ -321,9 +361,10 @@ export function resultsToChildTrees(results, existingTexts, query, titles) {
   const trees = []
   for (const row of chosen) {
     for (const line of row.lines) {
-      if (!line || seen.has(line) || chain.includes(line)) continue
+      const key = usefulTitle(line)
+      if (!key || seen.has(key) || chain.includes(key)) continue
       trees.push({ data: { text: line }, children: [] })
-      seen.add(line)
+      seen.add(key)
     }
   }
   return trees
@@ -360,4 +401,21 @@ export async function searchWikiCompiler(query, options = {}) {
     query: text,
     results: (body && body.results) || []
   }
+}
+
+/** 简写结果落成子节点：标题加 W：，与已有子节点按去掉前缀后的正文去重。 */
+export function toKnowledgeChildTrees(lines, existingTexts) {
+  const seen = new Set(
+    (existingTexts || []).map(text => usefulTitle(text)).filter(Boolean)
+  )
+  const trees = []
+  for (const line of lines || []) {
+    const key = usefulTitle(line)
+    if (!key || seen.has(key)) continue
+    const text = withWikiKnowledgePrefix(line)
+    if (!text) continue
+    trees.push({ data: { text }, children: [] })
+    seen.add(key)
+  }
+  return trees
 }

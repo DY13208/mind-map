@@ -172,7 +172,7 @@ import {
 import { mountWecomLoginPanel } from '@/utils/wecomLogin'
 import LoginGridBackground from '@/components/LoginGridBackground.vue'
 
-const PAGE_TITLE = 'CPD'
+const PAGE_TITLE = 'WCPD'
 const AUTH_BOOTSTRAP_MS = 45000
 const isWecomClientEnvironment = () =>
   /\bwxwork\b/i.test(String(window.navigator.userAgent || ''))

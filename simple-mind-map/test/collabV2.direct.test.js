@@ -313,6 +313,102 @@ async function testReplaceOneAndConflictSkip() {
   assert.strictEqual(batch.result.count, 1)
 }
 
+async function testExpectedAttachmentUpdatePrecondition() {
+  const store = createMemoryStore({
+    root: { isRoot: true, data: { uid: 'root', text: 'Root' }, children: ['n1'] },
+    n1: {
+      data: {
+        uid: 'n1',
+        attachmentId: 'old-id',
+        attachmentUrl: '/old',
+        attachmentName: 'old.txt',
+        __fv: { attachment: 7, note: 4 }
+      },
+      children: []
+    }
+  })
+  const updated = await applyDirect(
+    store,
+    {
+      type: 'node.update',
+      payload: {
+        uid: 'n1',
+        patch: {
+          attachmentId: 'new-id',
+          attachmentUrl: '/new',
+          attachmentName: 'new.txt'
+        },
+        expected: {
+          attachmentId: 'old-id',
+          attachmentUrl: '/old',
+          attachmentName: 'old.txt',
+          '__fv.attachment': 7,
+          uid: 'n1',
+          revision: 1
+        }
+      }
+    },
+    { version: 8 }
+  )
+  assert.strictEqual(updated.event.type, 'node.updated')
+  assert.strictEqual(store.graph.n1.data.attachmentId, 'new-id')
+  assert.strictEqual(store.graph.n1.data.attachmentUrl, '/new')
+  assert.strictEqual(store.graph.n1.data.attachmentName, 'new.txt')
+  assert.strictEqual(store.graph.n1.data.expected, undefined)
+  assert.strictEqual(store.graph.n1.data.expectedValue, undefined)
+  assert.strictEqual(store.graph.n1.data['__fv.attachment'], undefined)
+
+  const beforeConflict = structuredClone(store.graph.n1.data)
+  await assert.rejects(
+    applyDirect(
+      store,
+      {
+        type: 'node.update',
+        payload: {
+          uid: 'n1',
+          patch: { attachmentId: 'must-not-write' },
+          expected: {
+            attachmentId: 'new-id',
+            '__fv.attachment': 7
+          }
+        }
+      },
+      { version: 9 }
+    ),
+    err => err.code === 'REPLACE_CONFLICT' && err.statusCode === 409
+  )
+  assert.deepStrictEqual(store.graph.n1.data, beforeConflict)
+
+  // Attachment-version checks are group-scoped: unrelated field versions can advance.
+  await applyDirect(
+    store,
+    { type: 'node.update', payload: { uid: 'n1', note: 'unrelated edit' } },
+    { version: 9 }
+  )
+  assert.strictEqual(store.graph.n1.data.__fv.note, 9)
+  const stableAttachment = await applyDirect(
+    store,
+    {
+      type: 'node.update',
+      payload: {
+        uid: 'n1',
+        patch: { attachmentName: 'latest.txt' },
+        expected: { attachmentId: 'new-id', '__fv.attachment': 8 }
+      }
+    },
+    { version: 10 }
+  )
+  assert.strictEqual(stableAttachment.event.type, 'node.updated')
+  assert.strictEqual(store.graph.n1.data.attachmentName, 'latest.txt')
+
+  await applyDirect(
+    store,
+    { type: 'node.update', payload: { uid: 'n1', attachmentName: 'legacy.txt' } },
+    { version: 11 }
+  )
+  assert.strictEqual(store.graph.n1.data.attachmentName, 'legacy.txt')
+}
+
 async function testReplaceAllTwenty() {
   const store = createMemoryStore({
     root: { isRoot: true, data: { uid: 'root', text: 'Root' }, children: [] }
@@ -369,6 +465,7 @@ async function main() {
   await testClientBatchIsIncremental()
   await testUpdateDoesNotReorderSiblings()
   await testReplaceOneAndConflictSkip()
+  await testExpectedAttachmentUpdatePrecondition()
   await testReplaceAllTwenty()
   await testRestoreAndUnknown()
   console.log('collabV2 direct tests ok')

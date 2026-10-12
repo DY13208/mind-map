@@ -31,6 +31,29 @@
           </div>
         </div>
 
+        <section aria-labelledby="workbuddy-setup-title">
+          <div class="mcpSectionHead">
+            <div>
+              <h2 id="workbuddy-setup-title">接入自己的 WorkBuddy</h2>
+              <p>
+                复制接入指令并发送给本机 WorkBuddy，打开它提供的链接，
+                企业微信扫码并确认后，它会领取配置并新增 mind-map MCP。
+              </p>
+            </div>
+            <el-button
+              type="primary"
+              :disabled="loading || !token"
+              :icon="copied === 'workbuddy' ? 'el-icon-check' : 'el-icon-document-copy'"
+              @click="copyText(workbuddySetupText, 'workbuddy')"
+              >{{ copied === 'workbuddy' ? '已复制' : '复制 WorkBuddy 接入指令' }}</el-button
+            >
+          </div>
+          <p class="mcpSetupNote">
+            指令不包含个人密钥。授权时请核对 WorkBuddy 提供的确认码。
+            完成后让 WorkBuddy 检查 MCP 连接；如客户端提示重新加载，请按提示操作。
+          </p>
+        </section>
+
         <section aria-labelledby="mcp-config-title">
           <div class="mcpSectionHead">
             <div>
@@ -133,6 +156,20 @@ export default {
     }
   },
   computed: {
+    workbuddySetupText() {
+      const origin = new URL(this.mcpUrl).origin
+      return [
+        '请在当前这台电脑的 WorkBuddy 中新增一个名为 mind-map 的 MCP，直接完成配置。',
+        `先 POST ${origin}/api/mcp-config/device 创建授权请求，无需登录，返回 device_code、user_code、verification_uri、poll_uri、expires_in 和 interval。`,
+        '把 verification_uri 授权链接和 user_code 确认码展示给我，让我打开链接、企业微信扫码登录并确认授权。不要替我确认，也不要展示 device_code。',
+        '按 interval（至少 3 秒）POST poll_uri，JSON 请求体为 {"device_code":"创建请求返回的领取凭证"}。202 authorization_pending 表示继续等待；429 slow_down 时降低频率；400 invalid_or_expired_code 时停止并重新创建请求。最多等待 expires_in 秒。',
+        '授权后返回 200 和 mcpServers，其中 mind-map 包含个人 Authorization。只领取一次，立即写入本机配置；不要将返回的密钥展示在回复、日志、命令行参数或 Git 中。',
+        '先确认本机 WorkBuddy 实际使用的 MCP 配置文件和格式，不要猜测路径，也不要修改其他客户端的配置。',
+        '读取并备份现有文件，按客户端格式合并领取到的服务器配置，保留所有其他 MCP 和配置字段。若已有 mind-map，只更新该项。',
+        '写入后检查 JSON 格式并验证 MCP 连接，使用只读工具确认可用，不要修改脑图数据。如需要重新加载客户端，告诉我操作步骤；不要在验证前宣称接入成功。',
+        '如果无法访问本机配置，请明确说明原因和手动添加方法。'
+      ].join('\n\n')
+    },
     wikiMcpUrl() {
       if (typeof window === 'undefined' || !window.location) {
         return this.wikiMcpPath
@@ -212,7 +249,9 @@ export default {
         }
         this.copied = kind
         const msg =
-          kind === 'config'
+          kind === 'workbuddy'
+            ? '接入指令已复制，请发送给自己的 WorkBuddy'
+            : kind === 'config'
             ? 'MCP 配置已复制'
             : kind === 'wikiUrl'
             ? 'Wiki MCP 地址已复制'
@@ -337,6 +376,12 @@ pre {
 }
 .mcpWikiWarn {
   margin-top: 12px;
+}
+.mcpSetupNote {
+  margin: 0;
+  color: var(--ui-text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
 }
 .mcpSecurityNote {
   display: flex;

@@ -36,6 +36,8 @@ const {
 const roomAcl = require('./roomAcl')
 const { issueMcpUserToken } = require('./mcpUserToken')
 const { handleMcpOAuth } = require('./mcpOAuth')
+const { createMcpDeviceConfigHandler } = require('./mcpDeviceConfig')
+const handleMcpDeviceConfig = createMcpDeviceConfigHandler({ authenticateRequest })
 const {
   issueKnowledgeMcpToken,
   knowledgeMcpConfigured
@@ -103,6 +105,7 @@ const server = http.createServer(async (request, response) => {
   try {
     const pathname = new URL(request.url, 'http://127.0.0.1').pathname
     const tusRequest = isTusPath(pathname)
+    if (await handleMcpDeviceConfig(request, response)) return
     if (await handleMcpOAuth(request, response, { authenticateRequest })) return
     if (request.method === 'OPTIONS' && pathname.startsWith('/api/') && !tusRequest) {
       applyCorsHeaders(request, response)
@@ -316,22 +319,21 @@ Promise.all([initSchema(), initAuth()])
       })
     })
     const outboxEnabled =
-      !v2RuntimeOnly &&
       !/^(0|false|off|no)$/i.test(
         String(process.env.COLLAB_OUTBOX_PUBLISHER || '1')
       )
     let publisher = null
     if (outboxEnabled) {
-      publisher = startOutboxPublisher({ pool: getPool(), bus })
+      // V2 still writes transactional outbox rows. Publish them for downstream
+      // consumers, while keeping the retired Yjs awareness fanout disabled.
+      publisher = startOutboxPublisher({
+        pool: getPool(), bus, onEvent: v2RuntimeOnly ? false : undefined
+      })
       operationEvents.on('committed', () => {
         publisher.kick().catch(() => {})
       })
     } else {
-      console.warn(
-        v2RuntimeOnly
-          ? '[outbox] V1 publisher off (COLLAB_V2 runtime)'
-          : '[outbox] publisher disabled (COLLAB_OUTBOX_PUBLISHER)'
-      )
+      console.warn('[outbox] publisher disabled (COLLAB_OUTBOX_PUBLISHER)')
     }
     const { startOperationsArchiver } = require('./storage')
     await Promise.resolve().then(() => {
