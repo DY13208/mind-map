@@ -8,6 +8,7 @@ import {
   parseAbbreviatedLines,
   resultsToChildTrees,
   searchWikiCompiler,
+  toKnowledgeChildTrees,
   wikiFillTitles
 } from '@/utils/wikiNodeFill'
 
@@ -138,13 +139,7 @@ export async function runFlowExpandJob({ mindMap, node, onStatus, signal }) {
 
   setStatus('正在简写检索结果…')
   const lines = await abbreviateEvidence(query, evidence, signal)
-  const seen = new Set(existingChildTexts(node))
-  const trees = []
-  for (const line of lines) {
-    if (!line || seen.has(line)) continue
-    trees.push({ data: { text: line }, children: [] })
-    seen.add(line)
-  }
+  const trees = toKnowledgeChildTrees(lines, existingChildTexts(node))
   if (!trees.length) {
     setStatus('未检索到内容，未写入')
     return {
