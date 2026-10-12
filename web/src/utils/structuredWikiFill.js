@@ -1,8 +1,10 @@
+import { summaryCompanyNames, summaryCompany, summaryShareholders, summaryDisagrees } from 'simple-mind-map/src/utils/shareholderSummary'
 import { candidatesFor, multipleReports } from 'simple-mind-map/src/utils/fillConflict'
 import { extractValues, valuesConflict, latestValues, normalizeField } from 'simple-mind-map/src/utils/genericFill'
 import { licenseTexts } from 'simple-mind-map/src/utils/licenseFacts'
 import { resultsToChildTrees } from './wikiNodeFill'
 import {
+  shareholderName,
   visibleText,
   factKey,
   factKeys,
@@ -54,7 +56,8 @@ export function extractWikiFill(
   options = {}
 ) {
   const field = normalizeField(titles[titles.length - 1])
-  const company = titles
+  const declaredSummaryNames = (results || []).flatMap(item=>summaryCompanyNames([{text:evidenceRows(item.content,options).map(r=>r.raw).join('\n')}]))
+  const company = summaryCompany(titles,declaredSummaryNames) || titles
     .slice(0, -1)
     .reverse()
     .find(t => /公司|Limited|Co\.,?\s*Ltd/i.test(t))
@@ -69,6 +72,16 @@ export function extractWikiFill(
     for (const item of results || []) {
       if (typeof item.content !== 'string') continue
       parsed++
+      const summary = field === '股东' ? summaryShareholders([{text:evidenceRows(item.content,options).map(r=>r.raw).join('\n')}],company) : []
+      if (summary.length) {
+        matched += summary.length
+        for (const fact of summary) {
+          const tree={data:{text:fact.text,autoFill:{version:2,field,key:factKey(fact.text,field),owner:fact.owner,summary:true,dateKind:'unknown'}},children:[]}
+          const evidence={sourceTitle:item.provenance?.sourceTitle || 'Wiki',quote:fact.quote,line:fact.line,date:'',matchBasis:fact.matchBasis}
+          trees.push(tree);sources.push(evidence);evidenceFor.set(tree,evidence)
+        }
+        continue
+      }
       const stack = item.section
         ? [
             {
@@ -368,6 +381,7 @@ export function extractWikiFill(
       unique.push(tree)
     }
   }
+  if (field==='股东' && summaryDisagrees(trees.map(t=>({text:t.data.text,owner:t.data.autoFill?.owner,summary:t.data.autoFill?.summary,...evidenceFor.get(t)})))) reason='conflict'
   if (
     factsConflict(
       trees.map(t => t.data.text),
