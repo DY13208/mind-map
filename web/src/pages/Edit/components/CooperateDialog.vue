@@ -1154,6 +1154,9 @@ export default {
       this.mindMap.on('personal_expand_change', this.personalExpandOnChange)
       this.personalExpandOnRender = () => {
         if (this.largeMapInitialOverview || this.personalExpandApplying || !this.mindMap) return
+        // Do not memoize a restore before the first layout has produced nodes.
+        // The same renderTree identity is retained when that layout finishes.
+        if (!this.mindMap.renderer || !this.mindMap.renderer.root) return
         const cooperate = this.mindMap.cooperate
         if (!restoreGate.shouldRestore(
           this.mindMap.renderer && this.mindMap.renderer.renderTree,
@@ -1204,7 +1207,9 @@ export default {
             this.mindMap,
             this.personalExpandState
           )
-          if (changed) this.mindMap.render()
+          // Hydration inspects rendered instances, not only renderTree data.
+          // Wait until expanded parents exist before checking their children.
+          if (changed) await new Promise(resolve => this.mindMap.render(resolve))
           if (
             !cooperate ||
             typeof cooperate.hydrateExpandedPartialParents !== 'function'
@@ -1213,6 +1218,9 @@ export default {
           }
           const result = await cooperate.hydrateExpandedPartialParents()
           if (!result || !result.changed) break
+          // Hydration schedules a render; finish it before the next pass so
+          // nested lazy branches are visited rather than the previous layout.
+          await new Promise(resolve => this.mindMap.render(resolve))
         }
       } finally {
         this.personalExpandApplying = false
