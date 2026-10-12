@@ -26,6 +26,48 @@ test('query walks parents then adds the selected node', async () => {
   assert.equal(buildWikiFillQuery(live), '合同的直播推广')
 })
 
+test('W prefix is stripped from the search sentence and kept off C/P/D titles', async () => {
+  const { buildWikiFillQuery } = await import('../web/src/utils/wikiNodeFill.js')
+  const root = node('中心主题')
+  const contract = node('C：合同', root)
+  const live = node('P：直播推广', contract)
+  const fee = node('W：预付款', live)
+  assert.equal(buildWikiFillQuery(fee), 'C：合同的P：直播推广的预付款')
+  const half = node('W: 合同双方', live)
+  assert.equal(buildWikiFillQuery(half), 'C：合同的P：直播推广的合同双方')
+})
+
+test('existing W nodes block the same knowledge and new nodes are prefixed once', async () => {
+  const { resultsToChildTrees, toKnowledgeChildTrees } = await import(
+    '../web/src/utils/wikiNodeFill.js'
+  )
+  const trees = resultsToChildTrees(
+    [
+      {
+        topic: '直播推广',
+        section: '预付款',
+        content: '- 按销售收入支付\n- 预付款：10万',
+        source: []
+      }
+    ],
+    ['W：按销售收入支付'],
+    '合同的直播推广的预付款',
+    ['合同', 'W：直播推广', 'W:预付款']
+  )
+  assert.deepEqual(
+    trees.map(item => item.data.text),
+    ['预付款：10万']
+  )
+  const written = toKnowledgeChildTrees(
+    ['预付款：10万', 'W：按销售收入支付', 'W: 甲方：依然'],
+    ['W：预付款：10万', 'C：检查项']
+  )
+  assert.deepEqual(
+    written.map(item => item.data.text),
+    ['W：按销售收入支付', 'W：甲方：依然']
+  )
+})
+
 test('markdown content becomes child nodes without invented locators', async () => {
   const { contentToChildren, resultsToChildTrees } = await import(
     '../web/src/utils/wikiNodeFill.js'
@@ -75,6 +117,56 @@ test('markdown content becomes child nodes without invented locators', async () 
   )
   assert.equal(fresh[0].children.length, 0)
   assert.equal(JSON.stringify(fresh).includes('第4条'), false)
+})
+
+test('合同双方 wins over the empty 合同 outline and ignores coverage marks', async () => {
+  const { resultsToChildTrees } = await import('../web/src/utils/wikiNodeFill.js')
+  const titles = [
+    'C:公司法务分',
+    '知识',
+    '合同',
+    '直播推广',
+    '胡可直播合同',
+    '合同双方'
+  ]
+  const trees = resultsToChildTrees(
+    [
+      {
+        topic: 'map-empty',
+        topic_title: '公司法务分 / 知识',
+        section: '合同',
+        content: [
+          '### 直播推广',
+          '#### 胡可直播合同',
+          '##### 合同双方'
+        ].join('\n')
+      },
+      {
+        topic: 'map-filled',
+        topic_title: '法务 / 直播推广',
+        section: '合同双方 [coverage: high -- 6 sources]',
+        content: [
+          '### 胡可直播合同',
+          '- 甲方：深圳市依然电商科技有限公司',
+          '- 乙方：星拍档（北京）文化传媒有限公司',
+          '### 刘虞佳Rena&Biodance 直播合作协议（still0803）',
+          '- 乙方：杭州轰贝传媒有限责任公司',
+          '### 胡可直播业务合同（still0730）',
+          '- 甲方：另一版'
+        ].join('\n')
+      }
+    ],
+    [],
+    titles.join('的'),
+    titles
+  )
+  assert.deepEqual(
+    trees.map(item => item.data.text),
+    [
+      '甲方：深圳市依然电商科技有限公司',
+      '乙方：星拍档（北京）文化传媒有限公司'
+    ]
+  )
 })
 
 test('section named in the sentence is preferred over sibling sections', async () => {

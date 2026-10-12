@@ -19,6 +19,8 @@ import { extractWikiFill, fillStatus } from '@/utils/structuredWikiFill'
 import {
   buildWikiFillQuery,
   searchWikiCompiler,
+  stripWikiKnowledgePrefix,
+  withWikiKnowledgePrefix,
   wikiFillTitles
 } from '@/utils/wikiNodeFill'
 
@@ -428,7 +430,7 @@ export async function runFlowExpandJob({
     titles,
     displayNames
   )
-  const oldTexts = existingChildTexts(node)
+  const oldTexts = existingChildTexts(node).map(stripWikiKnowledgePrefix)
   const presentedOld = presentFillTrees(
     oldTexts.map(text => ({ data: { text }, children: [] })),
     titles,
@@ -455,6 +457,8 @@ export async function runFlowExpandJob({
     seen.add(text)
     return true
   })
+  if (trees.length)
+    trees.forEach(tree => { tree.data.text = withWikiKnowledgePrefix(tree.data.text) })
   if (trees.length)
     mindMap.execCommand('INSERT_MULTI_CHILD_NODE', [node], trees)
   const result = {
