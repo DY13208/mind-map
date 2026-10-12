@@ -638,7 +638,8 @@ export default {
       )
     },
 
-    // 日间/夜间：优先用 View Transition 做画布交叉淡入；否则用快照淡出，避免纯色遮罩「闪一下」。
+    // Theme rendering already traverses the graph; avoid capturing or cloning
+    // the entire canvas on top of that work, especially for large maps.
     async handleToggleAppearanceMode(nextDark) {
       if (!this.mindMap || this.appearanceTransitioning) return
       const wantDark = !!nextDark
@@ -665,11 +666,6 @@ export default {
       const el = this.mindMap.el
       const token = Symbol('appearance')
       this.appearanceTransitionToken = token
-      const reduceMotion =
-        typeof window !== 'undefined' &&
-        window.matchMedia &&
-        window.matchMedia('(prefers-reduced-motion: reduce)').matches
-
       const runChange = async () => {
         if (this.appearanceTransitionToken !== token || !this.mindMap) return
         await this.applyAppearanceModeChange(wantDark, resolved)
@@ -679,23 +675,7 @@ export default {
       }
 
       try {
-        if (
-          !reduceMotion &&
-          el &&
-          typeof document.startViewTransition === 'function'
-        ) {
-          el.style.viewTransitionName = 'mind-map-appearance'
-          const transition = document.startViewTransition(() => runChange())
-          await transition.finished.catch(() => {})
-        } else if (!reduceMotion) {
-          this.showAppearanceSnapshot()
-          await runChange()
-          if (this.appearanceTransitionToken === token) {
-            await this.fadeOutAppearanceSnapshot()
-          }
-        } else {
-          await runChange()
-        }
+        await runChange()
       } finally {
         if (el) el.style.viewTransitionName = ''
         this.clearAppearanceSnapshot()

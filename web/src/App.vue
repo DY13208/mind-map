@@ -5,7 +5,7 @@
     </div>
     <div class="authScreen" v-else-if="authFailure">
       <div class="authCard authCard--compact">
-        <h1 class="authBrand">CPD</h1>
+        <h1 class="authBrand">WCPD</h1>
         <p class="authFailureText">{{ authFailure }}</p>
         <p class="authFailureCode" v-if="authFailureCode">{{ authFailureCode }}</p>
         <button
@@ -26,7 +26,7 @@
         <div class="authIntro">
           <div class="authBrandBlock">
             <div class="authBrandMark">依</div>
-            <h1 class="authBrand">CPD</h1>
+            <h1 class="authBrand">WCPD</h1>
           </div>
           <p class="authSubtitle">{{ authLoginSubtitle }}</p>
           <div class="authError" v-if="authErrorMessage">{{ authErrorMessage }}</div>
