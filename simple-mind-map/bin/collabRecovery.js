@@ -295,20 +295,52 @@ function planAfterOperations(
 ) {
   const last = Number(lastAppliedVersion) || 0
   const operations = Array.isArray(payload.operations) ? payload.operations : []
-  const current = Number(payload.currentVersion)
+  const current = Number(
+    payload.currentRevision != null
+      ? payload.currentRevision
+      : payload.currentVersion != null
+        ? payload.currentVersion
+        : payload.serverRevision
+  )
   const nextVersion = Number.isFinite(current)
     ? current
     : operations.length
-      ? Number(operations[operations.length - 1].version) || last
+      ? Number(
+          operations[operations.length - 1].serverRevision ||
+            operations[operations.length - 1].version
+        ) || last
       : last
+  const resnapshot = (reason = 'AUTHORITATIVE_SNAPSHOT_RECOVERY') => ({
+    type: 'resnapshot',
+    version: nextVersion,
+    reason
+  })
+  if (payload.reload === true || payload.code === 'RESNAPSHOT_REQUIRED') {
+    return resnapshot()
+  }
+  if (
+    payload.completeFromRevision != null &&
+    Number(payload.completeFromRevision) !== last
+  ) {
+    return resnapshot()
+  }
   if (payload.hasMore || nextVersion - last > maxGap) {
-    return { type: 'resnapshot', version: nextVersion }
+    return resnapshot()
   }
   if (!operations.length && nextVersion > last) {
-    return { type: 'resnapshot', version: nextVersion }
+    return resnapshot()
+  }
+  let expected = last + 1
+  for (const operation of operations) {
+    const version = Number(operation.serverRevision || operation.version)
+    if (!Number.isFinite(version) || version !== expected) return resnapshot()
+    expected += 1
+  }
+  if (operations.length && expected - 1 !== nextVersion) {
+    return resnapshot()
   }
   if (operations.some(operationRequiresResnapshot)) {
-    return { type: 'resnapshot', version: nextVersion }
+    return resnapshot()
   }
   return {
     type: 'apply',

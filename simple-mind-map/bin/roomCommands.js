@@ -10,6 +10,7 @@ const {
   cycleError,
   commandError
 } = require('./conflictErrors')
+const { normalizeRestoreRows, restoreRowsToNodes } = require('./nodeRestoreCodec')
 
 const COMMAND_META_KEYS = [
   'uid',
@@ -29,6 +30,8 @@ const COMMAND_META_KEYS = [
   'type',
   'payload',
   'confirm_sop_change',
+  '__mcpRequest',
+  'requestDigest',
   'expected',
   'expectedValue',
   'keep_children',
@@ -492,12 +495,18 @@ function uniqueUids(list) {
 
 function restoreNodesOnDoc(ydoc, payload = {}) {
   const obj = mindDoc.readObject(ydoc)
-  const nodes = payload.nodes || {}
+  const rows = normalizeRestoreRows(payload)
+  const nodes = restoreRowsToNodes(rows)
   Object.keys(nodes).forEach(uid => {
     obj[uid] = JSON.parse(JSON.stringify(nodes[uid]))
   })
-  const uid = payload.uid
-  const parentUid = payload.parentUid || payload.parent_uid || payload.parent
+  const uid =
+    (rows.some(row => row.uid === String(payload.uid || '')) && String(payload.uid)) ||
+    (rows[0] && rows[0].uid)
+  const rootRow = rows.find(row => row.uid === uid) || rows[0]
+  const parentUid =
+    payload.parentUid || payload.parent_uid || payload.parent ||
+    (rootRow && rootRow.parent_uid)
   const promoted = (uid && obj[uid] && obj[uid].children) || []
   if (parentUid && obj[parentUid] && uid) {
     let kids = [...(obj[parentUid].children || [])].filter(id => id !== uid)

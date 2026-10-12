@@ -8,11 +8,29 @@ const {
   safeRoomKey,
   isDeletedRoom
 } = require('../storage')
-const { isCollabV2Enabled } = require('./flag')
+const {
+  isCollabV2Enabled,
+  isCollabV2EventBridgeEnabled
+} = require('./flag')
 const { submitOperation, listOperations } = require('./sequencer')
 const { isValidClientId, requireClientId } = require('./protocol')
 const { createPresenceHub } = require('./presenceHub')
 const { collabTrace } = require('./trace')
+
+let activeOperationEventBridge = null
+
+function getOperationEventBridgeStatus() {
+  return activeOperationEventBridge
+    ? activeOperationEventBridge.status()
+    : {
+        enabled: false,
+        listenerHealthy: false,
+        activeRooms: 0,
+        pendingDrains: 0,
+        queueLength: 0,
+        laggingRooms: 0
+      }
+}
 
 function throttle(fn, ms) {
   let timer = null
@@ -45,6 +63,43 @@ function attachCollabV2(httpServer, options = {}) {
     pingTimeout: 20000,
     maxHttpBufferSize: 8 * 1024 * 1024
   })
+
+  let operationEventBridge = null
+  if (isCollabV2EventBridgeEnabled()) {
+    const storage = require('../storage')
+    const { createOperationEventBridge } = require('./operationEventBridge')
+    operationEventBridge = createOperationEventBridge({
+      bus: options.eventBus,
+      io,
+      listRoomOperationsContiguous: storage.listRoomOperationsContiguous,
+      listActiveRoomHeads: storage.listActiveRoomHeads,
+      getActiveRoomKeys: () => {
+        const active = new Set()
+        const sockets = io.sockets && io.sockets.sockets
+        if (sockets && typeof sockets.values === 'function') {
+          for (const socket of sockets.values()) {
+            if (!socket.connected || !socket.data || !socket.data.bridgeRooms) continue
+            socket.data.bridgeRooms.forEach(roomKey => active.add(roomKey))
+          }
+        }
+        return Array.from(active)
+      },
+      invalidateRoomState: async roomKey => {
+        if (typeof storage.invalidateRoomCache === 'function') {
+          storage.invalidateRoomCache(roomKey)
+        }
+        if (typeof storage.dropLiveDoc === 'function') {
+          storage.dropLiveDoc(roomKey)
+        }
+      },
+      intervalMs: 1000,
+      pageSize: options.eventBridgePageSize
+    })
+    activeOperationEventBridge = operationEventBridge
+    operationEventBridge.start().catch(err => {
+      console.error('[collab-v2] event bridge start failed', (err && err.code) || 'ERROR')
+    })
+  }
 
   io.use(async (socket, next) => {
     try {
@@ -80,6 +135,7 @@ function attachCollabV2(httpServer, options = {}) {
 
   io.on('connection', socket => {
     socket.data.rooms = new Set()
+    socket.data.bridgeRooms = new Set()
     socket.data.clientId = String(
       (socket.handshake &&
         socket.handshake.auth &&
@@ -170,8 +226,11 @@ function attachCollabV2(httpServer, options = {}) {
           editingUid: null
         })
         const last = Math.max(0, Number(body && body.lastServerRevision) || 0)
-        const sync = await listOperations(req, roomKey, last, 500)
         const version = await getRoomVersion(roomKey)
+        const headVersion = Math.max(0, Number(version) || 0)
+        const sync = await listOperations(req, roomKey, last, 500, {
+          headVersion
+        })
         const metaRow = await getRoomMetadata(roomKey)
         const metadata = (metaRow && metaRow.metadata) || {}
         reply({
@@ -183,7 +242,7 @@ function attachCollabV2(httpServer, options = {}) {
           canManage: !!access.canManage,
           shareId: access.shareId || null,
           legacyOpen: !!access.legacyOpen,
-          serverRevision: Number(version || 0),
+          serverRevision: headVersion,
           metadata,
           theme: metadata.theme,
           themeConfig: metadata.themeConfig,
@@ -191,6 +250,10 @@ function attachCollabV2(httpServer, options = {}) {
           sync,
           peers: presence.list(roomKey)
         })
+        if (operationEventBridge) {
+          operationEventBridge.activateRoom(roomKey, headVersion)
+          socket.data.bridgeRooms.add(roomKey)
+        }
         emitPresence(roomKey)
       } catch (err) {
         reply({
@@ -232,7 +295,7 @@ function attachCollabV2(httpServer, options = {}) {
           operation: op,
           queryStats: result.queryStats || null
         })
-        if (!result.duplicate) {
+        if (!result.duplicate && !operationEventBridge) {
           const roomName = 'v2:' + op.roomKey
           let size = 0
           try {
@@ -300,7 +363,10 @@ function attachCollabV2(httpServer, options = {}) {
           req,
           roomKey,
           body && body.afterRevision,
-          body && body.limit
+          body && body.limit,
+          body && body.headVersion != null
+            ? { headVersion: body.headVersion }
+            : undefined
         )
         reply({ ok: true, ...result })
       } catch (err) {
@@ -361,7 +427,16 @@ function attachCollabV2(httpServer, options = {}) {
     })
   })
 
-  return { io, presence, enabled: true }
+  async function stop() {
+    if (operationEventBridge) {
+      await operationEventBridge.stop()
+      if (activeOperationEventBridge === operationEventBridge) {
+        activeOperationEventBridge = null
+      }
+    }
+  }
+
+  return { io, presence, enabled: true, operationEventBridge, stop }
 }
 
 function shouldHandleUpgrade(url) {
@@ -369,4 +444,8 @@ function shouldHandleUpgrade(url) {
   return path.startsWith('/collab-v2') || path.startsWith('/socket.io')
 }
 
-module.exports = { attachCollabV2, shouldHandleUpgrade }
+module.exports = {
+  attachCollabV2,
+  shouldHandleUpgrade,
+  getOperationEventBridgeStatus
+}

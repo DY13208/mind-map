@@ -31,6 +31,10 @@ const {
 const { queryRoomNodes } = require('./nodeQuery')
 const { isCollabV2Enabled, isCollabV2Trace } = require('./collabV2/flag')
 const { persistMapReplaceHistory } = require('./collabHistory/pgStore')
+const {
+  resolveDuplicate: resolveMcpDuplicate,
+  stripMcpRequestMetadata
+} = require('./mcpOperationIdentity')
 
 const pool = new Pool({
   host: process.env.PGHOST,
@@ -1086,6 +1090,35 @@ async function getRoom(roomKey) {
   })
 }
 
+async function getRoomMeta(roomKey) {
+  return withPgRetry(async () => {
+    const result = await pool.query(
+      `select r.room_key, r.title, r.cos_key, r.version, r.created_at,
+              r.updated_at, r.metadata,
+              exists (
+                select 1 from room_nodes rn
+                where rn.room_key = r.room_key and rn.deleted_at is null
+              ) as room_nodes_initialized,
+              case when coalesce(trim(r.title), '') = '' then (
+                select rn.data->>'text' from room_nodes rn
+                where rn.room_key = r.room_key
+                  and rn.is_root and rn.deleted_at is null
+                limit 1
+              ) else null end as root_text
+       from rooms r where r.room_key = $1`,
+      [roomKey]
+    )
+    const row = result.rows[0] || null
+    if (row) {
+      rememberRoomMeta(roomKey, {
+        version: row.version,
+        updated_at: row.updated_at
+      })
+    }
+    return row
+  })
+}
+
 async function nodesFromTableIfCurrent(roomKey, json, version) {
   try {
     const table = await readRoomNodes(pool, roomKey)
@@ -1860,18 +1893,24 @@ function operationRow(row) {
     client_seq: row.client_seq == null ? null : Number(row.client_seq),
     target_id: row.target_id || '',
     operation_type: row.operation_type,
-    payload: row.payload || {},
-    event: row.event || {},
+    payload: stripMcpRequestMetadata(row.payload || {}),
+    event: stripMcpRequestMetadata(row.event || {}),
     inverse_payload: row.inverse_payload || null,
     created_at: row.created_at
   }
 }
 
-async function commitRoomOperation(roomKey, command, apply) {
+async function commitRoomOperation(roomKey, command, apply, internalOptions = {}) {
   return withPgRetry(async () => {
     const client = await pool.connect()
     try {
-      return await commitRoomOperationOnce(client, roomKey, command, apply)
+      return await commitRoomOperationOnce(
+        client,
+        roomKey,
+        command,
+        apply,
+        internalOptions
+      )
     } catch (err) {
       await client.query('rollback').catch(() => {})
       throw err
@@ -1881,11 +1920,22 @@ async function commitRoomOperation(roomKey, command, apply) {
   })
 }
 
-async function commitDirectRoomOperation(roomKey, command, apply) {
+async function commitDirectRoomOperation(
+  roomKey,
+  command,
+  apply,
+  internalOptions = {}
+) {
   return withPgRetry(async () => {
     const client = await pool.connect()
     try {
-      return await commitDirectRoomOperationOnce(client, roomKey, command, apply)
+      return await commitDirectRoomOperationOnce(
+        client,
+        roomKey,
+        command,
+        apply,
+        internalOptions
+      )
     } catch (err) {
       await client.query('rollback').catch(() => {})
       throw err
@@ -1893,6 +1943,68 @@ async function commitDirectRoomOperation(roomKey, command, apply) {
       client.release()
     }
   })
+}
+
+async function findRoomOperationById(
+  client,
+  roomKey,
+  operationId,
+  includeArchive = false
+) {
+  const activeQuery = `select room_key, version, operation_id, actor_id, client_id,
+                              operation_type, payload, event, inverse_payload, created_at,
+                              client_seq, target_id
+                       from room_operations
+                       where room_key = $1 and operation_id = $2`
+  const result = await client.query(
+    includeArchive
+      ? `${activeQuery}
+         union all
+         select room_key, version, operation_id, actor_id, client_id,
+                operation_type, payload, event, inverse_payload, created_at,
+                null::bigint as client_seq, null::text as target_id
+         from room_operations_archive
+         where room_key = $1 and operation_id = $2
+         limit 1`
+      : activeQuery,
+    [roomKey, operationId]
+  )
+  return result.rows[0] || null
+}
+
+function checkOperationDuplicate(existing, internalOptions = {}) {
+  if (!existing) return null
+  const incoming = internalOptions.mcpRequest || null
+  const stored =
+    existing.payload && typeof existing.payload === 'object'
+      ? existing.payload.__mcpRequest
+      : null
+  if (incoming || stored) {
+    resolveMcpDuplicate({
+      existing,
+      principalId: incoming && incoming.principalId,
+      digest: incoming && incoming.digest
+    })
+  }
+  return operationRow(existing)
+}
+
+function storedOperationPayload(command, internalOptions = {}) {
+  const payload = stripMcpRequestMetadata(command && command.payload)
+  const metadata = internalOptions.mcpRequest
+  if (
+    metadata &&
+    metadata.v === 1 &&
+    metadata.principalId &&
+    metadata.digest
+  ) {
+    payload.__mcpRequest = {
+      v: 1,
+      principalId: String(metadata.principalId).slice(0, 160),
+      digest: String(metadata.digest)
+    }
+  }
+  return payload
 }
 
 function rejectIfStaleAfterRestore(room, command) {
@@ -1916,7 +2028,13 @@ function rejectIfStaleAfterRestore(room, command) {
   }
 }
 
-async function commitDirectRoomOperationOnce(client, roomKey, command, apply) {
+async function commitDirectRoomOperationOnce(
+  client,
+  roomKey,
+  command,
+  apply,
+  internalOptions = {}
+) {
   await client.query('begin')
   const roomResult = await client.query(
     `select room_key, title, version, updated_at, metadata,
@@ -1930,24 +2048,26 @@ async function commitDirectRoomOperationOnce(client, roomKey, command, apply) {
     err.statusCode = 404
     throw err
   }
-  const existing = await client.query(
-    `select room_key, version, operation_id, actor_id, client_id,
-            operation_type, payload, event, inverse_payload, created_at,
-            client_seq, target_id
-     from room_operations
-     where room_key = $1 and operation_id = $2`,
-    [roomKey, command.operationId]
-  )
-  if (existing.rows[0]) {
-    await client.query('commit')
-    const operation = operationRow(existing.rows[0])
-    rememberRoomMeta(roomKey, {
-      version: operation.version,
-      updated_at: operation.created_at
-    })
-    return { duplicate: true, operation }
-  }
   const currentVersion = Number(room.version || 0)
+  const existing = await findRoomOperationById(
+    client,
+    roomKey,
+    command.operationId,
+    !!internalOptions.mcpRequest
+  )
+  if (existing) {
+    const operation = checkOperationDuplicate(existing, internalOptions)
+    await client.query('commit')
+    rememberRoomMeta(roomKey, {
+      version: currentVersion,
+      updated_at: room.updated_at
+    })
+    return {
+      duplicate: true,
+      operation,
+      currentRevision: currentVersion
+    }
+  }
   if (
     command.baseVersion !== null &&
     command.baseVersion !== undefined &&
@@ -1973,13 +2093,13 @@ async function commitDirectRoomOperationOnce(client, roomKey, command, apply) {
     currentVersion
   })
   const version = currentVersion + 1
-  const event = {
+  const event = stripMcpRequestMetadata({
     ...(applied.event || {}),
     mapId: roomKey,
     version,
     operationId: command.operationId,
     actorId: command.actorId
-  }
+  })
   await client.query(
     `update rooms
      set version = $2,
@@ -2017,7 +2137,7 @@ async function commitDirectRoomOperationOnce(client, roomKey, command, apply) {
       command.actorId,
       command.clientId || null,
       command.type,
-      JSON.stringify(command.payload || {}),
+      JSON.stringify(storedOperationPayload(command, internalOptions)),
       JSON.stringify(event),
       applied.inversePayload == null
         ? null
@@ -2072,7 +2192,13 @@ async function commitDirectRoomOperationOnce(client, roomKey, command, apply) {
   }
 }
 
-async function commitRoomOperationOnce(client, roomKey, command, apply) {
+async function commitRoomOperationOnce(
+  client,
+  roomKey,
+  command,
+  apply,
+  internalOptions = {}
+) {
   await client.query('begin')
   const roomResult = await client.query(
     `select room_key, title, nodes, metadata, version, updated_at,
@@ -2086,24 +2212,26 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
     err.statusCode = 404
     throw err
   }
-  const existing = await client.query(
-    `select room_key, version, operation_id, actor_id, client_id,
-            operation_type, payload, event, inverse_payload, created_at,
-            client_seq, target_id
-     from room_operations
-     where room_key = $1 and operation_id = $2`,
-    [roomKey, command.operationId]
-  )
-  if (existing.rows[0]) {
-    await client.query('commit')
-    const operation = operationRow(existing.rows[0])
-    rememberRoomMeta(roomKey, {
-      version: operation.version,
-      updated_at: operation.created_at
-    })
-    return { duplicate: true, operation }
-  }
   const currentVersion = Number(room.version || 0)
+  const existing = await findRoomOperationById(
+    client,
+    roomKey,
+    command.operationId,
+    !!internalOptions.mcpRequest
+  )
+  if (existing) {
+    const operation = checkOperationDuplicate(existing, internalOptions)
+    await client.query('commit')
+    rememberRoomMeta(roomKey, {
+      version: currentVersion,
+      updated_at: room.updated_at
+    })
+    return {
+      duplicate: true,
+      operation,
+      currentRevision: currentVersion
+    }
+  }
   if (
     command.baseVersion !== null &&
     command.baseVersion !== undefined &&
@@ -2150,13 +2278,13 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
   // Version restore writes through collabHistory's locked store path. Every
   // map.replace that reaches this operation commit is an import/full overwrite.
   const isImportReplace = command.type === 'map.replace'
-  const event = {
+  const event = stripMcpRequestMetadata({
     ...(applied.event || {}),
     mapId: roomKey,
     version,
     operationId: command.operationId,
     actorId: command.actorId
-  }
+  })
   if (isImportReplace) {
     event.payload = {
       ...(event.payload || {}),
@@ -2212,7 +2340,7 @@ async function commitRoomOperationOnce(client, roomKey, command, apply) {
         : null
     ]
   )
-  const operationPayload = { ...(command.payload || {}) }
+  const operationPayload = storedOperationPayload(command, internalOptions)
   if (isImportReplace) {
     // map.replace cannot be replayed from this operation alone; its exact pre/post
     // states are checkpointed below in this same transaction instead.
@@ -2360,6 +2488,144 @@ async function listRoomOperations(roomKey, afterVersion = 0, limit = 500, option
   sql += ` order by version asc limit $3`
   const res = await pool.query(sql, params)
   return res.rows.map(operationRow)
+}
+
+async function listRoomOperationsContiguous(
+  roomKey,
+  afterVersion = 0,
+  options = {}
+) {
+  const after = Math.max(0, Number(afterVersion) || 0)
+  const requestedHead = Number(options.headVersion)
+  const head = Number.isFinite(requestedHead)
+    ? Math.max(0, requestedHead)
+    : Math.max(0, Number((await getRoomVersion(roomKey)) || 0))
+  const limit = Math.min(1000, Math.max(1, Number(options.limit) || 500))
+  const base = {
+    roomKey,
+    afterVersion: after,
+    currentVersion: head,
+    currentRevision: head,
+    serverRevision: head
+  }
+  const reload = (missingVersion, reason = 'VERSION_GAP') => ({
+    ok: false,
+    reload: true,
+    code: 'RESNAPSHOT_REQUIRED',
+    ...base,
+    completeFromRevision: head,
+    missingVersion,
+    reason,
+    operations: []
+  })
+
+  if (after >= head) {
+    return {
+      ok: true,
+      reload: false,
+      ...base,
+      fromVersion: after,
+      toVersion: after,
+      completeFromRevision: after,
+      operations: [],
+      hasMore: false
+    }
+  }
+
+  const safeLimit = limit
+  const result = await pool.query(
+    `with combined as (
+       select room_key, version, operation_id, actor_id, client_id,
+              operation_type, payload, event, inverse_payload, created_at,
+              client_seq, target_id, 0 as source_rank
+       from room_operations
+       where room_key = $1 and version > $2 and version <= $3
+       union all
+       select room_key, version, operation_id, actor_id, client_id,
+              operation_type, payload, event, inverse_payload, created_at,
+              null::bigint as client_seq, null::text as target_id, 1 as source_rank
+       from room_operations_archive
+       where room_key = $1 and version > $2 and version <= $3
+     ), version_stats as (
+       select version, count(distinct operation_id)::int as operation_count
+       from combined
+       group by version
+     ), ranked as (
+       select combined.*, version_stats.operation_count,
+              row_number() over (
+                partition by combined.version order by combined.source_rank asc
+              ) as duplicate_rank
+       from combined
+       join version_stats using (version)
+     )
+     select room_key, version, operation_id, actor_id, client_id,
+            operation_type, payload, event, inverse_payload, created_at,
+            client_seq, target_id, operation_count
+     from ranked
+     where duplicate_rank = 1
+     order by version asc
+     limit $4`,
+    [roomKey, after, head, safeLimit]
+  )
+  const rows = result.rows || []
+  const operations = []
+  let expected = after + 1
+  const seenOperationIds = new Set()
+  for (const row of rows) {
+    const version = Number(row.version || 0)
+    if (Number(row.operation_count || 0) > 1) {
+      return reload(version, 'DUPLICATE_VERSION')
+    }
+    if (version !== expected) return reload(expected)
+    const operation = operationRow(row)
+    if (operation.operation_id && seenOperationIds.has(operation.operation_id)) {
+      return reload(version, 'DUPLICATE_OPERATION')
+    }
+    if (operation.operation_id) seenOperationIds.add(operation.operation_id)
+    operations.push(operation)
+    expected += 1
+  }
+  if (expected <= head && rows.length < safeLimit) return reload(expected)
+
+  const toVersion = operations.length
+    ? Number(operations[operations.length - 1].version)
+    : after
+  return {
+    ok: true,
+    reload: false,
+    ...base,
+    fromVersion: after,
+    toVersion,
+    completeFromRevision: after,
+    operations,
+    hasMore: toVersion < head
+  }
+}
+
+async function listActiveRoomHeads(roomKeys = []) {
+  const keys = [...new Set((roomKeys || []).map(key => String(key || '')).filter(Boolean))]
+  if (!keys.length) return []
+  const result = await pool.query(
+    `select room_key, version from rooms where room_key = any($1::text[])`,
+    [keys]
+  )
+  return (result.rows || []).map(row => ({
+    roomKey: row.room_key,
+    headVersion: Number(row.version || 0)
+  }))
+}
+
+async function getEarliestAvailableOperationVersion(roomKey) {
+  const result = await pool.query(
+    `select min(version) as version from (
+       select version from room_operations where room_key = $1
+       union all
+       select version from room_operations_archive where room_key = $1
+     ) retained_operations`,
+    [roomKey]
+  )
+  const version = result.rows[0] && result.rows[0].version
+  return version == null ? null : Number(version)
 }
 
 async function getNearestSnapshot(roomKey, version) {
@@ -2527,6 +2793,7 @@ module.exports = {
   listRooms,
   listRoomsPage,
   getRoom,
+  getRoomMeta,
   getRoomMetadata: roomKey =>
     require('./mapMetadata').getRoomMetadata(pool, roomKey),
   updateRoomMetadata: (roomKey, patch, options) =>
@@ -2582,6 +2849,9 @@ module.exports = {
   withPgRetry,
   getRoomVersion,
   listRoomOperations,
+  listRoomOperationsContiguous,
+  listActiveRoomHeads,
+  getEarliestAvailableOperationVersion,
   getRoomOperation,
   getNearestSnapshot,
   auditRoomNodes,
