@@ -832,8 +832,23 @@ export default {
           redoDepth: snap.redoDepth || 0,
           pendingCount: snap.outboxPending || 0
         })
+        // 保存状态每变一次都会推一次快照；在线名单没变时不要重建头像列表。
         if (snap.peers) {
-          this.peerList = this.mapV2Peers(snap.peers)
+          const peerSig = list =>
+            JSON.stringify(
+              (list || []).map(peer => [
+                peer.id,
+                peer.name,
+                peer.color,
+                peer.avatar,
+                peer.editingUid || null,
+                !!peer.isMe
+              ])
+            )
+          const nextPeers = this.mapV2Peers(snap.peers)
+          if (peerSig(nextPeers) !== peerSig(this.peerList)) {
+            this.peerList = nextPeers
+          }
           this.applyV2NodePresence(snap.peers)
         }
         if (
@@ -2413,22 +2428,17 @@ export default {
       if (this.largeMapInitialOverview && typeof cooperate.hydrateRoomMetadata === 'function') {
         cooperate.hydrateRoomMetadata(preview)
       }
-      // Apply canvas data, but do not block room entry on first paint.
-      // Previously waited up to 4s for node_tree_render_end, which felt like a hang.
+      // 等这次 setData 自己的绘制结束，而不是画布上可能还没结束的占位根节点。
+      // 占位根节点会先被画出来，但不能在它还在屏幕上时就把遮罩揭掉。
       const renderWait = new Promise(resolve => {
         let settled = false
         let timer
         const done = rendered => {
           if (settled) return
           settled = true
-          this.mindMap.off('render_complete', done)
-          this.mindMap.off('render_error', failed)
           clearTimeout(timer)
           resolve(rendered !== false)
         }
-        const failed = () => done(false)
-        this.mindMap.on('render_complete', done)
-        this.mindMap.on('render_error', failed)
         let tree = preview.tree
         if (tree && this.largeMapInitialOverview) {
           tree.data = tree.data || {}
@@ -2445,7 +2455,8 @@ export default {
         }
         this.$bus.$emit('setData', tree, {
           quiet: true,
-          fromSaved: true
+          fromSaved: true,
+          onReady: () => done(true)
         })
         if (typeof cooperate.markTreeUids === 'function') {
           cooperate.markTreeUids(preview.tree)
@@ -2453,7 +2464,7 @@ export default {
         if (typeof cooperate.seedPreviewHydration === 'function') {
           cooperate.seedPreviewHydration(preview.tree)
         }
-        timer = setTimeout(() => done(false), 1500)
+        timer = setTimeout(() => done(false), 8000)
       })
       const firstPaintReady = await renderWait
       if (attemptId !== this._openAttemptId) return false
@@ -2466,6 +2477,8 @@ export default {
       if (firstPaintReady && this.largeMapInitialOverview && this.mindMap.view) {
         this.mindMap.view.fit()
       }
+      // 真实树已经画上（大图也已经 fit）。后面的展开恢复不再挡着首屏。
+      this.$bus.$emit('room_canvas_ready')
       const renderRoot =
         this.mindMap.renderer && this.mindMap.renderer.renderTree
       if (renderRoot && typeof cooperate.seedPreviewHydration === 'function') {
@@ -2551,6 +2564,7 @@ export default {
       const roomKey = this.roomName
       const cooperate = this.mindMap && this.mindMap.cooperate
       if (!roomKey || !cooperate) {
+        this.$bus.$emit('room_canvas_ready')
         if (!silent) this.join()
         else this.join({ silent: true })
         return
@@ -2676,6 +2690,10 @@ export default {
         if (this._openAttemptId === attemptId && !this.connected) {
           this.connecting = false
           if (!this._roomLoadFailed) this.setCooperateStatus('disconnected')
+        }
+        // 加载失败或没有树时也要揭开遮罩，避免页面一直停在转圈。
+        if (this._openAttemptId === attemptId) {
+          this.$bus.$emit('room_canvas_ready')
         }
       }
       if (this.connected) return
