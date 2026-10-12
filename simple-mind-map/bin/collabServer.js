@@ -36,6 +36,8 @@ const {
 const roomAcl = require('./roomAcl')
 const { issueMcpUserToken } = require('./mcpUserToken')
 const { handleMcpOAuth } = require('./mcpOAuth')
+const { createMcpDeviceConfigHandler } = require('./mcpDeviceConfig')
+const handleMcpDeviceConfig = createMcpDeviceConfigHandler({ authenticateRequest })
 const {
   issueKnowledgeMcpToken,
   knowledgeMcpConfigured
@@ -103,6 +105,7 @@ const server = http.createServer(async (request, response) => {
   try {
     const pathname = new URL(request.url, 'http://127.0.0.1').pathname
     const tusRequest = isTusPath(pathname)
+    if (await handleMcpDeviceConfig(request, response)) return
     if (await handleMcpOAuth(request, response, { authenticateRequest })) return
     if (request.method === 'OPTIONS' && pathname.startsWith('/api/') && !tusRequest) {
       applyCorsHeaders(request, response)
