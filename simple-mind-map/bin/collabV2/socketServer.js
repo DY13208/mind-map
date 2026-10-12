@@ -33,11 +33,57 @@ function throttle(fn, ms) {
   }
 }
 
+// 同一连接连续编辑时复用刚通过的编辑权限，不再每次保存都查 3~4 条权限 SQL。
+// 撤权最多延迟这么久生效；被拒或分享失效时立即清掉。
+const EDIT_ACCESS_TTL_MS = 5000
+const PRESENCE_BROADCAST_MS = 250
+
+function presenceSignature(peers) {
+  return JSON.stringify(
+    (peers || []).map(peer => [
+      peer.clientId,
+      peer.userId || '',
+      peer.name || '',
+      peer.color || '',
+      peer.avatar || '',
+      peer.role || '',
+      peer.editingUid || null,
+      peer.selectedUids || [],
+      peer.cursor || null
+    ])
+  )
+}
+
 function attachCollabV2(httpServer, options = {}) {
   if (!isCollabV2Enabled()) {
     return { io: null, presence: null, enabled: false }
   }
   const presence = createPresenceHub()
+  const presenceSent = new Map()
+  const presenceTimers = new Map()
+
+  // 房间级合并：多人同时动选区时一轮只发一次，内容没变就不发。
+  function broadcastPresence(roomKey, { immediate = false } = {}) {
+    const send = () => {
+      presenceTimers.delete(roomKey)
+      const peers = presence.list(roomKey)
+      const sig = presenceSignature(peers)
+      if (presenceSent.get(roomKey) === sig) return
+      if (peers.length) presenceSent.set(roomKey, sig)
+      else presenceSent.delete(roomKey)
+      io.to('v2:' + roomKey).emit('presence:state', { roomKey, peers })
+    }
+    if (immediate) {
+      clearTimeout(presenceTimers.get(roomKey))
+      send()
+      return
+    }
+    if (presenceTimers.has(roomKey)) return
+    const timer = setTimeout(send, PRESENCE_BROADCAST_MS)
+    if (timer.unref) timer.unref()
+    presenceTimers.set(roomKey, timer)
+  }
+
   const io = new Server(httpServer, {
     path: '/collab-v2',
     cors: { origin: true, credentials: true },
@@ -87,6 +133,7 @@ function attachCollabV2(httpServer, options = {}) {
         ''
     ).trim()
     socket.data.canEdit = {}
+    socket.data.editAccess = new Map()
     socket.data.shareRooms = new Set()
     let checkingShareAccess = false
     const shareAccessTimer = setInterval(async () => {
@@ -101,8 +148,10 @@ function attachCollabV2(httpServer, options = {}) {
           const access = await roomAcl.assertRoomAccess(getPool(), req, roomKey, 'view')
           if (!access.shareId) socket.data.shareRooms.delete(roomKey)
           socket.data.canEdit[roomKey] = !!access.canEdit
+          if (!access.canEdit) socket.data.editAccess.delete(roomKey)
         }
       } catch (err) {
+        socket.data.editAccess.clear()
         socket.disconnect(true)
       } finally {
         checkingShareAccess = false
@@ -110,12 +159,17 @@ function attachCollabV2(httpServer, options = {}) {
     }, 10000)
     shareAccessTimer.unref()
 
-    const emitPresence = throttle((roomKey) => {
-      io.to('v2:' + roomKey).emit('presence:state', {
-        roomKey,
-        peers: presence.list(roomKey)
-      })
-    }, 80)
+    const emitPresence = roomKey => broadcastPresence(roomKey)
+
+    const cachedEditAccess = roomKey => {
+      const hit = socket.data.editAccess.get(roomKey)
+      if (!hit) return null
+      if (Date.now() - hit.at > EDIT_ACCESS_TTL_MS) {
+        socket.data.editAccess.delete(roomKey)
+        return null
+      }
+      return hit.access
+    }
 
     socket.on('join', async (body, cb) => {
       const reply = typeof cb === 'function' ? cb : () => {}
@@ -150,6 +204,7 @@ function attachCollabV2(httpServer, options = {}) {
         const access = await roomAcl.assertRoomAccess(getPool(), req, roomKey, 'view')
         socket.data.clientId = clientId
         socket.data.canEdit[roomKey] = !!access.canEdit
+        socket.data.editAccess.delete(roomKey)
         if (access.shareId) socket.data.shareRooms.add(roomKey)
         collabTrace('join.identity', {
           roomKey,
@@ -170,7 +225,7 @@ function attachCollabV2(httpServer, options = {}) {
           editingUid: null
         })
         const last = Math.max(0, Number(body && body.lastServerRevision) || 0)
-        const sync = await listOperations(req, roomKey, last, 500)
+        const sync = await listOperations(req, roomKey, last, 500, { viewAccess: access })
         const version = await getRoomVersion(roomKey)
         const metaRow = await getRoomMetadata(roomKey)
         const metadata = (metaRow && metaRow.metadata) || {}
@@ -215,13 +270,22 @@ function attachCollabV2(httpServer, options = {}) {
           : String((body && (body.clientId || body.client_id)) || '').trim()
         requireClientId(clientId)
         socket.data.clientId = clientId
-        const result = await submitOperation(req, {
-          ...(body || {}),
-          userId: (socket.authUser && socket.authUser.id) || (body && body.userId),
-          clientId
-        })
+        const editAccess =
+          roomKey && socket.data.rooms.has(roomKey) ? cachedEditAccess(roomKey) : null
+        const result = await submitOperation(
+          req,
+          {
+            ...(body || {}),
+            userId: (socket.authUser && socket.authUser.id) || (body && body.userId),
+            clientId
+          },
+          { editAccess }
+        )
         if (result.access && roomKey) {
           socket.data.canEdit[roomKey] = !!result.access.canEdit
+          if (result.access.canEdit && !editAccess) {
+            socket.data.editAccess.set(roomKey, { access: result.access, at: Date.now() })
+          }
         }
         const op = result.operation
         reply({
@@ -256,6 +320,7 @@ function attachCollabV2(httpServer, options = {}) {
         }
       } catch (err) {
         const failedRoom = safeRoomKey((body && (body.roomKey || body.room_key)) || '')
+        if (failedRoom) socket.data.editAccess.delete(failedRoom)
         if (failedRoom && (err.statusCode === 403 || err.code === 'FORBIDDEN')) {
           socket.data.canEdit[failedRoom] = false
         }
@@ -337,18 +402,16 @@ function attachCollabV2(httpServer, options = {}) {
         cursor: body.cursor
       })
       emitPresence(roomKey)
-    }, 80)
+    }, PRESENCE_BROADCAST_MS)
 
     socket.on('presence', onPresence)
 
     socket.on('disconnect', () => {
       clearInterval(shareAccessTimer)
+      socket.data.editAccess.clear()
       socket.data.rooms.forEach(roomKey => {
         presence.removePeer(roomKey, socket.data.clientId || socket.id)
-        io.to('v2:' + roomKey).emit('presence:state', {
-          roomKey,
-          peers: presence.list(roomKey)
-        })
+        broadcastPresence(roomKey, { immediate: true })
         if (
           typeof options.onRoomIdle === 'function' &&
           presence.list(roomKey).length === 0

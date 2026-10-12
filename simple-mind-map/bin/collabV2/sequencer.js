@@ -39,7 +39,7 @@ async function peekReplaceUndo(roomKey, op) {
   return !!(source && source.type === 'map.replace')
 }
 
-async function submitOperation(req, raw) {
+async function submitOperation(req, raw, options = {}) {
   const op = normalizeOperation(raw)
   op.roomKey = safeRoomKey(op.roomKey)
   const traceId = op.traceId || (op.payload && op.payload.traceId) || ''
@@ -67,12 +67,11 @@ async function submitOperation(req, raw) {
     throw unsupportedOperation(op.type, op.roomKey)
   }
   op.clientId = requireClientId(op.clientId)
-  const access = await roomAcl.assertRoomAccess(
-    getPool(),
-    req,
-    op.roomKey,
-    'edit'
-  )
+  // 调用方只能传入刚用 'edit' 校验通过、且属于同一房间的结果。
+  const access =
+    options.editAccess && options.editAccess.canEdit
+      ? options.editAccess
+      : await roomAcl.assertRoomAccess(getPool(), req, op.roomKey, 'edit')
   op.userId = access.userId || op.userId
   collabTrace('5.acl', {
     traceId,
@@ -180,9 +179,11 @@ async function submitOperation(req, raw) {
   }
 }
 
-async function listOperations(req, roomKey, afterRevision, limit) {
+async function listOperations(req, roomKey, afterRevision, limit, options = {}) {
   const key = safeRoomKey(roomKey)
-  await roomAcl.assertRoomAccess(getPool(), req, key, 'view')
+  if (!options.viewAccess) {
+    await roomAcl.assertRoomAccess(getPool(), req, key, 'view')
+  }
   const current = await getRoomVersion(key)
   const after = Math.max(0, Number(afterRevision) || 0)
   const pageSize = Math.min(500, Math.max(1, Number(limit) || 500))
