@@ -19,7 +19,7 @@
           class="productLogo"
           @click="$router.push('/files')"
         >
-          <span>C</span><strong>CPD</strong>
+          <span>W</span><strong>WCPD</strong>
         </div>
         <button
           v-else

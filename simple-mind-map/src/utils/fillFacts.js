@@ -110,4 +110,4 @@ function cleanupNodes(nodes) {
   }
   return {deletes,updates,preserved}
 }
-module.exports={visibleText,factKey,factKeys,factsConflict,isAutomaticNote,cleanupNodes,presentFillTrees,capitalCurrency}
+module.exports={shareholderName,visibleText,factKey,factKeys,factsConflict,isAutomaticNote,cleanupNodes,presentFillTrees,capitalCurrency}

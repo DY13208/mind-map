@@ -1,3 +1,4 @@
+const { summaryCompanyNames } = require('../../src/utils/shareholderSummary')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const crypto = require('node:crypto')
@@ -69,7 +70,9 @@ function createIndex({
               search,
               parserKey,
               keywords,
-              factQueries
+              factQueries,
+              summaryCompanies,
+              summaryIndexVersion
             }) => ({
               file,
               relative,
@@ -79,7 +82,9 @@ function createIndex({
               search,
               parserKey,
               keywords,
-              factQueries
+              factQueries,
+              summaryCompanies,
+              summaryIndexVersion
             })
           )
       })
@@ -155,6 +160,8 @@ function createIndex({
             throw new Error('文件未提取到正文')
           if (records.get(record.file) === record) {
             record.pages = pages
+            record.summaryCompanies = summaryCompanyNames(pages)
+            record.summaryIndexVersion = 2
             record.search = (
               record.relative +
               '\n' +
@@ -285,6 +292,7 @@ function createIndex({
               if (inside(base, r.file)) {
                 if (!r.parserKey && extractionKey(r.file) === 'local-1')
                   r.parserKey = 'local-1'
+                if (r.pages && r.summaryIndexVersion !== 2) { r.summaryCompanies = summaryCompanyNames(r.pages); r.summaryIndexVersion = 2; dirty = true }
                 records.set(r.file, r)
               }
         } catch {}
