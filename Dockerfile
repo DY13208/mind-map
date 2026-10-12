@@ -35,11 +35,13 @@ FROM node:20-bookworm-slim
 # --build-arg DEBIAN_MIRROR=deb.debian.org 覆盖回官方源。
 ARG DEBIAN_MIRROR=mirrors.aliyun.com
 RUN set -eux; \
+  node -e "require('fs').writeFileSync('/tmp/node-root-ca.pem', require('tls').rootCertificates.join(String.fromCharCode(10)))"; \
   for f in /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list; do \
     if [ -f "$f" ]; then sed -i "s|deb.debian.org|${DEBIAN_MIRROR}|g" "$f"; fi; \
   done; \
-  apt-get update -o Acquire::Retries=3; \
-  apt-get install -y --no-install-recommends nginx ca-certificates; \
+  apt-get update -o Acquire::Retries=3 -o Acquire::https::CaInfo=/tmp/node-root-ca.pem; \
+  apt-get install -y --no-install-recommends -o Acquire::https::CaInfo=/tmp/node-root-ca.pem nginx ca-certificates; \
+  rm -f /tmp/node-root-ca.pem; \
   rm -rf /var/lib/apt/lists/*; \
   mkdir -p /usr/share/nginx/html /var/log/nginx /var/cache/nginx /tmp
 

@@ -1,80 +1,32 @@
-const STYLE_KEY = '__flowExpandStyleBackup'
-const styledUids = new Set()
-
-const RUNNING_STYLE = {
-  borderColor: '#1268ff',
-  borderWidth: 4
-}
-
-const QUEUED_STYLE = {
-  borderColor: '#e6a23c',
-  borderWidth: 3
-}
-
-function findNode(mindMap, uid) {
-  if (!mindMap || !mindMap.renderer || !uid) return null
-  return mindMap.renderer.findNodeByUid(uid)
-}
-
-function backupStyle(node) {
-  if (!node || node[STYLE_KEY]) return
-  node[STYLE_KEY] = {
-    borderColor: node.getStyle('borderColor'),
-    borderWidth: node.getStyle('borderWidth')
+// Fill state must never be persisted as node styling. Standard selection stays with renderer.
+const legacyUids = new Set()
+function restore(mindMap, uid) {
+  const node = mindMap?.renderer?.findNodeByUid(uid),
+    backup = node?.__flowExpandStyleBackup
+  if (!backup) return
+  const color = node.getStyle('borderColor'),
+    width = node.getStyle('borderWidth')
+  if (
+    (color === '#1268ff' && width === 4) ||
+    (color === '#e6a23c' && width === 3)
+  ) {
+    mindMap.renderer.setNodeStyles(node, { ...backup })
+    node.reRender?.()
   }
+  delete node.__flowExpandStyleBackup
 }
-
-function restoreStyle(mindMap, uid) {
-  const node = findNode(mindMap, uid)
-  if (!node || !node[STYLE_KEY]) {
-    styledUids.delete(uid)
-    return
-  }
-  mindMap.renderer.setNodeStyles(node, { ...node[STYLE_KEY] })
-  delete node[STYLE_KEY]
-  if (node.reRender) node.reRender()
-  styledUids.delete(uid)
-}
-
-function applyStyle(mindMap, uid, style) {
-  const node = findNode(mindMap, uid)
-  if (!node) return false
-  backupStyle(node)
-  mindMap.renderer.setNodeStyles(node, style)
-  if (node.reRender) node.reRender()
-  styledUids.add(uid)
-  return true
-}
-
 export function syncFlowExpandVisuals(mindMap, jobs) {
-  if (!mindMap) return
-  const active = new Map()
-  ;(jobs || []).forEach(job => {
-    if (!job || !job.nodeUid) return
-    if (job.state === 'running' || job.state === 'queued') {
-      active.set(job.nodeUid, job.state)
+  for (const job of jobs || []) {
+    if (job.nodeUid) {
+      legacyUids.add(job.nodeUid)
+      restore(mindMap, job.nodeUid)
     }
-  })
-
-  Array.from(styledUids).forEach(uid => {
-    if (!active.has(uid)) restoreStyle(mindMap, uid)
-  })
-
-  active.forEach((state, uid) => {
-    applyStyle(
-      mindMap,
-      uid,
-      state === 'running' ? RUNNING_STYLE : QUEUED_STYLE
-    )
-  })
+  }
 }
-
 export function clearAllFlowExpandVisuals(mindMap) {
-  Array.from(styledUids).forEach(uid => restoreStyle(mindMap, uid))
-  styledUids.clear()
+  for (const uid of legacyUids) restore(mindMap, uid)
+  legacyUids.clear()
 }
-
 export function focusFlowExpandNode(mindMap, uid) {
-  if (!mindMap || !uid) return
-  mindMap.execCommand('GO_TARGET_NODE', uid)
+  if (mindMap && uid) mindMap.execCommand('GO_TARGET_NODE', uid)
 }

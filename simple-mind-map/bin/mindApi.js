@@ -2708,6 +2708,7 @@ async function handleApi(req, res) {
             parentUid: body.parent || body.parent_uid,
             index: body.index,
             patch: patchFields,
+            expected: body.expected,
             confirm_sop_change: body.confirm_sop_change === true
           }
         )

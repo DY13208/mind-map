@@ -44,3 +44,19 @@ output/*.py
 
 # Generated Wiki compiler data
 /data/wiki-compiler/
+/data/local-knowledge-ocr/
+/data/local-knowledge/
+/tmp/local-fill-build/
+
+/data/local-knowledge-cache/
+# Local development tests: keep on disk, exclude new test files from Git.
+/tests/
+/simple-mind-map/test/
+/web/tests/
+*.test.*
+*.spec.*
+.planning/2026-10-09-local-knowledge-fill/findings.md
+.planning/2026-10-09-local-knowledge-fill/progress.md
+.planning/2026-10-09-local-knowledge-fill/task_plan.md
+# Local planning scratch files and build/test logs.
+/.planning/
