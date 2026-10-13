@@ -392,6 +392,7 @@ export default {
     cooperate: '協同',
     backToMainMap: '返回主腦圖',
     backToParentMap: '返回上級腦圖',
+    mapNavSaveFailedTip: '自動儲存尚未完成，已留在目前腦圖，請稍後重試返回。',
     mapNavUnsavedTitle: '修改尚未儲存',
     mapNavUnsavedTip: '目前腦圖還有修改沒有儲存到伺服器，現在返回可能遺失這些修改。確定要返回嗎？',
     mapNavLeaveAnyway: '仍然返回',

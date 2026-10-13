@@ -1,6 +1,6 @@
 <template>
   <div class="toolbarContainer" :class="{ isDark: isDark }">
-    <div class="toolbar" ref="toolbarRef">
+    <div class="toolbar" :class="{ readonly: isReadonly }" ref="toolbarRef">
       <!-- 节点操作 -->
       <div
         class="toolbarBlockWrapper nodeToolbarWrapper"
@@ -611,7 +611,7 @@ import {
 } from '@/utils/runLog'
 
 // 返回上级脑图前，等待协同保存完成的最长时间
-const MAP_NAV_SAVE_WAIT_MS = 5000
+const MAP_NAV_SAVE_WAIT_MS = 15000
 // 后退后多久没落到上级条目，就改用 replace 直接打开上级脑图
 const MAP_NAV_BACK_TIMEOUT_MS = 3000
 
@@ -4908,7 +4908,7 @@ export default {
       }
       this.mapNavReturning = true
       try {
-        if (!(await this.confirmMapNavLeave())) return
+        if (!(await this.saveBeforeMapNavLeave())) return
         if (!(await this.verifyMapNavParentAccess(context.parent.room))) return
         // 等待期间用户可能已经切走了
         if (this.currentRoomKey() !== currentRoom) return
@@ -4923,26 +4923,35 @@ export default {
       }
     },
 
-    /** 还有没保存到服务器的修改：先等一会儿，仍未保存就让用户确认 */
-    async confirmMapNavLeave() {
-      let trouble = this.collabSaveTrouble()
-      if (trouble === 'pending') {
-        await this.waitForCollabSaved(MAP_NAV_SAVE_WAIT_MS)
-        trouble = this.collabSaveTrouble()
-      }
-      if (!trouble && !this.waitingWriteToLocalFile) return true
+    /** 返回前提交编辑内容并等待保存确认；保存失败时保留当前脑图。 */
+    async saveBeforeMapNavLeave() {
+      const before = this.collabLiveStatus()
+      if (
+        this.isReadonly &&
+        !this.collabSyncPending().pending &&
+        !Number(before.pendingAcks || 0) &&
+        before.saveState !== 'requires_confirmation' &&
+        this.collabSaveState !== 'requires_confirmation' &&
+        !this.waitingWriteToLocalFile
+      ) return true
       try {
-        await this.$confirm(
-          this.$t('toolbar.mapNavUnsavedTip'),
-          this.$t('toolbar.mapNavUnsavedTitle'),
-          {
-            type: 'warning',
-            confirmButtonText: this.$t('toolbar.mapNavLeaveAnyway'),
-            cancelButtonText: this.$t('toolbar.mapNavStay')
-          }
-        )
+        const result = await this.prepareReload({ retryPending: true })
+        if (!result || !result.ok || result.timeout) throw new Error('Save preparation failed')
+        await this.flushLocalFileNow()
+        if (!(await this.waitForCollabSaved(MAP_NAV_SAVE_WAIT_MS))) {
+          throw new Error('Save acknowledgement timed out')
+        }
+        const status = this.collabLiveStatus()
+        if (
+          this.waitingWriteToLocalFile ||
+          this.collabBusyReason() ||
+          status.saveState === 'requires_confirmation' ||
+          this.collabSaveState === 'requires_confirmation'
+        ) throw new Error('Map still has unsaved changes')
         return true
       } catch (err) {
+        console.warn('[mapNav] auto save failed', err)
+        this.$message.warning(this.$t('toolbar.mapNavSaveFailedTip'))
         return false
       }
     },
@@ -5155,7 +5164,7 @@ export default {
       navigateToMyMaps(this.$router)
     },
 
-    prepareReload() {
+    prepareReload(options = {}) {
       return new Promise(resolve => {
         let settled = false
         const finish = result => {
@@ -5165,7 +5174,7 @@ export default {
           resolve(result || { ok: true })
         }
         const timer = setTimeout(() => finish({ ok: true, timeout: true }), 5000)
-        this.$bus.$emit('prepare_reload', finish)
+        this.$bus.$emit('prepare_reload', finish, options)
       })
     },
 
@@ -5490,6 +5499,12 @@ export default {
     font-weight: 400;
     color: rgba(26, 26, 26, 0.8);
     z-index: 2;
+
+    &.readonly .toolbarBlockWrapper.fileToolbarWrapper .toolbarBlock {
+      margin-left: auto;
+      margin-right: auto;
+    }
+
     .toolbarBlockWrapper {
       position: relative;
       flex: 1 1 0;
