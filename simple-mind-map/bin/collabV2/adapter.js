@@ -1,4 +1,5 @@
 const { createOutbox } = require('./outbox')
+const performanceObserver = require('./performanceObserver')
 const {
   shouldQuarantineOutboxOp,
   summarizeOutbox
@@ -873,6 +874,7 @@ function createCollaborationAdapter(options = {}) {
       (op && op.clientId) || (op && op.event && op.event.clientId) || ''
     ).trim()
     if (rev && rev > state.lastServerRevision + 1) {
+      performanceObserver.record('version_gap', { roomKey: state.roomKey, opId, revision: rev, appliedRevision: state.lastServerRevision })
       if (meta.fromSync) {
         const error = new Error(
           'sync page is not contiguous at ' + (state.lastServerRevision + 1)
@@ -893,6 +895,7 @@ function createCollaborationAdapter(options = {}) {
       return
     }
     if (rev && rev <= state.lastServerRevision) {
+      performanceObserver.record('event_duplicate', { roomKey: state.roomKey, opId, revision: rev })
       if (opId) state.seenOpIds.add(opId)
       return
     }
@@ -900,10 +903,12 @@ function createCollaborationAdapter(options = {}) {
       if (opId) state.seenOpIds.add(opId)
       advanceRevision(rev)
       adapterTrace('10.remote.echo-self', { opId, clientId: opClientId, rev })
+      performanceObserver.record('event_applied', { roomKey: state.roomKey, opId, revision: rev, disposition: 'self', fromSync: !!meta.fromSync })
       return
     }
     if (opId && state.seenOpIds.has(opId)) {
       advanceRevision(rev)
+      performanceObserver.record('event_duplicate', { roomKey: state.roomKey, opId, revision: rev })
       return
     }
     if (!meta.local && isVersionRestoreEvent(op)) {
@@ -912,11 +917,13 @@ function createCollaborationAdapter(options = {}) {
       await refreshOutboxCounts()
       state.drainPaused = false
     }
+    let diagnosticCallbackResult
     if (options.onRemoteOperation && !meta.local) {
-      await options.onRemoteOperation(op)
+      diagnosticCallbackResult = await options.onRemoteOperation(op)
     }
     if (opId) state.seenOpIds.add(opId)
     advanceRevision(rev)
+    performanceObserver.record('event_applied', { roomKey: state.roomKey, opId, revision: rev, disposition: 'remote', fromSync: !!meta.fromSync, callbackReturnedFalse: diagnosticCallbackResult === false })
     if (!meta.local) kickDrain()
     emit()
   }
@@ -929,11 +936,13 @@ function createCollaborationAdapter(options = {}) {
     next._collabBound = true
     socket = next
     socket.on('op:event', op => {
+      performanceObserver.record('event_received', { roomKey: op && op.roomKey, opId: op && (op.opId || op.operationId), revision: Number(op && (op.serverRevision || op.version)) || 0 })
       if (remoteEventsBuffered) {
         bufferRemoteOperation(op)
         return
       }
       applyRemoteOperation(op).catch(err => {
+        performanceObserver.record('event_apply_failed', { roomKey: state.roomKey, opId: op && (op.opId || op.operationId), code: err && err.code || 'REMOTE_APPLY_FAILED' })
         recordError({
           code: (err && err.code) || 'REMOTE_APPLY_FAILED',
           message: (err && err.message) || 'remote apply failed',
@@ -1249,6 +1258,7 @@ function createCollaborationAdapter(options = {}) {
   }
 
   async function recoverFromSnapshot(sync, targetRevision) {
+    performanceObserver.record('resnapshot_attempt', { roomKey: state.roomKey, targetRevision: Number(targetRevision) || 0 })
     const target = Math.max(
       0,
       Number(
@@ -2468,6 +2478,7 @@ function createCollaborationAdapter(options = {}) {
 
   async function runResync(input = {}) {
     if (!state.roomKey) return
+    performanceObserver.record('gap_sync', { roomKey: state.roomKey, appliedRevision: state.lastServerRevision, forceSnapshot: !!input.forceSnapshot })
     if (!remoteEventsBuffered) {
       remoteEventsBuffered = true
       resnapshotBufferOwned = true
