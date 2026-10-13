@@ -595,6 +595,9 @@ async function up() {
     [
       'up',
       '-d',
+      '--wait',
+      '--wait-timeout',
+      '240',
       '--force-recreate',
       '--no-deps',
       'postgres',

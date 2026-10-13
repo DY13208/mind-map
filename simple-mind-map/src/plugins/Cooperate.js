@@ -4472,7 +4472,7 @@ class Cooperate {
    * After safe_load / F5: hydrate parents that already show incomplete children
    * (or are expanded). Do not hydrate the whole map.
    */
-  async hydrateExpandedPartialParents() {
+  async hydrateExpandedPartialParents({ render = true } = {}) {
     const renderer = this.mindMap && this.mindMap.renderer
     if (!renderer || !renderer.root || !this.httpFetchSubtree) return { hydrated: 0, changed: false }
     const jobs = []
@@ -4504,13 +4504,17 @@ class Cooperate {
     if (!jobs.length) return { hydrated: 0, changed: false }
     // Large expanded rooms must not start hundreds of subtree requests at once.
     const results = []
-    for (let index = 0; index < jobs.length; index += 4) {
-      results.push(...await Promise.all(jobs.slice(index, index + 4).map(run => run())))
-    }
+    let nextJob = 0
+    await Promise.all(Array.from({ length: Math.min(4, jobs.length) }, async () => {
+      while (nextJob < jobs.length) {
+        const run = jobs[nextJob++]
+        results.push(await run())
+      }
+    }))
     const changed = results.some(Boolean)
     // render_end invokes the personal expand restore again. Rendering after a
     // no-op fetch would otherwise create an endless subtree/render cycle.
-    if (changed && typeof this.mindMap.render === 'function') this.mindMap.render()
+    if (render && changed && typeof this.mindMap.render === 'function') this.mindMap.render()
     return { hydrated: jobs.length, changed }
   }
 

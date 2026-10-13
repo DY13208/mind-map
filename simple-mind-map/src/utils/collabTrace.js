@@ -34,6 +34,18 @@ export function createTraceId() {
 }
 
 let snapshotProvider = null
+const performanceListeners = new Set()
+
+// Performance collection is independent of verbose console tracing.
+export function subscribeCollabPerformance(fn) {
+  performanceListeners.add(fn)
+  return () => performanceListeners.delete(fn)
+}
+export function recordCollabPerformance(stage, detail = {}) {
+  performanceListeners.forEach(fn => {
+    try { fn(stage, detail) } catch (_) { /* diagnostics never affect collaboration */ }
+  })
+}
 
 export function setCollabTraceSnapshotProvider(fn) {
   snapshotProvider = typeof fn === 'function' ? fn : null
@@ -106,6 +118,7 @@ export function moveFullTreeForbidden(reason, extra = {}) {
 }
 
 export function collabTrace(stage, detail = {}) {
+  recordCollabPerformance(stage, detail)
   if (!runtimeTraceFlag()) return
   const snap = collabPersistSnapshot()
   const row = {

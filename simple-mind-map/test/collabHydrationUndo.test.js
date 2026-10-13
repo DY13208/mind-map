@@ -102,6 +102,41 @@ function fixture({ uid = 'parent', count, children = [], responses }) {
   assert.equal((await hydrateExpandedPartialParents.call(wide.context)).hydrated, 0)
   assert.equal(wide.renders, 1)
 
+  const ownedRender = fixture({ count: 1, responses: [{ total: 1, children: [existing], version: 3 }] })
+  assert.equal((await hydrateExpandedPartialParents.call(ownedRender.context, { render: false })).changed, true)
+  assert.equal(ownedRender.data.children.length, 1)
+  assert.equal(ownedRender.renders, 0, 'caller can own the single awaited render')
+
+  // One slow request must not stall every later sibling behind a batch barrier.
+  let releaseSlow
+  const slow = new Promise(resolve => { releaseSlow = resolve })
+  const started = []
+  let active = 0
+  let peak = 0
+  const nodes = Array.from({ length: 8 }, (_, i) => ({
+    getData(key) { return key === 'uid' ? `job-${i}` : true },
+    nodeData: { children: [] }, children: []
+  }))
+  const poolContext = {
+    mindMap: { renderer: { root: { children: nodes } }, render() {} },
+    httpFetchSubtree() {}, hydrateFailedUids: new Set(), dirtySubtrees: new Map(),
+    nodeNeedsHydrate(node) { return nodes.includes(node) },
+    async hydrateFromHttp(node) {
+      const i = nodes.indexOf(node)
+      started.push(i)
+      peak = Math.max(peak, ++active)
+      if (i === 0) await slow
+      active -= 1
+      return true
+    }
+  }
+  const poolRun = hydrateExpandedPartialParents.call(poolContext)
+  for (let i = 0; i < 20; i += 1) await Promise.resolve()
+  assert.equal(started.length, 8, 'fast workers continue while first request waits')
+  assert.ok(peak <= 4, 'concurrency remains bounded')
+  releaseSlow()
+  assert.equal((await poolRun).hydrated, 8)
+
   console.log('collab hydration undo tests passed')
 })().catch(err => {
   console.error(err)

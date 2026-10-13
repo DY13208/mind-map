@@ -318,6 +318,25 @@ function createServer(authorization) {
   )
 
   server.tool(
+    'get_performance_diagnostics',
+    '只读生产性能诊断（仅超级管理员）。返回最近15分钟的MCP/HTTP/事务/浏览器性能采样，不包含节点内容或原始日志。浏览器需 perfDiagnostics=1 才有渲染采样；无采样不代表没有卡顿。',
+    {
+      room_key: z.string().max(100).optional().describe('按房间过滤；不填则读全进程'),
+      after: z.number().int().nonnegative().optional().describe('上次返回的 cursor；只返回其后的事件'),
+      since: z.number().int().nonnegative().optional().describe('采样起点 Unix 毫秒时间戳')
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    async ({ room_key, after, since }) => {
+      try {
+        const params = new URLSearchParams()
+        if (room_key) params.set('room', room_key)
+        if (after != null) params.set('after', String(after))
+        if (since != null) params.set('since', String(since))
+        return ok(await api(`/api/diagnostics/performance?${params}`))
+      } catch (err) { return fail(err) }
+    }
+  )
+  server.tool(
     'list_maps',
     '列出全部思维导图房间，含标题和给人类打开的 share_url',
     {},

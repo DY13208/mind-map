@@ -1258,9 +1258,11 @@ export default {
           ) {
             break
           }
-          const result = await cooperate.hydrateExpandedPartialParents()
+          // This loop owns the awaited render. Avoid scheduling a second
+          // whole-map layout inside hydration for the same batch of children.
+          const result = await cooperate.hydrateExpandedPartialParents({ render: false })
           if (!result || !result.changed) break
-          // Hydration schedules a render; finish it before the next pass so
+          // Finish the render before the next pass so
           // nested lazy branches are visited rather than the previous layout.
           await new Promise(resolve => this.mindMap.render(resolve))
         }

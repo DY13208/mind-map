@@ -78,6 +78,7 @@
 
 <script>
 import MindMap from 'simple-mind-map'
+import { startPerformanceDiagnostics } from '@/utils/performanceDiagnostics'
 import MiniMap from 'simple-mind-map/src/plugins/MiniMap.js'
 import Watermark from 'simple-mind-map/src/plugins/Watermark.js'
 import KeyboardNavigation from 'simple-mind-map/src/plugins/KeyboardNavigation.js'
@@ -365,6 +366,7 @@ export default {
   },
 
   beforeDestroy() {
+    if (this._stopPerformanceDiagnostics) this._stopPerformanceDiagnostics()
     this.stopCollabDraftFallback()
     if (this.storeDataTimer) {
       clearTimeout(this.storeDataTimer)
@@ -1203,6 +1205,8 @@ export default {
           })
         }
       })
+      if (this._stopPerformanceDiagnostics) this._stopPerformanceDiagnostics()
+      this._stopPerformanceDiagnostics = startPerformanceDiagnostics(this.mindMap, roomFromLocation(this.$route) || '', this.$bus)
       if (this.isLargeMap && !this.$route.query.room) {
         this.mindMap.renderer._forceOverviewPaintOnce = true
         const fitOverview = () => {

@@ -67,12 +67,15 @@ async function submitOperation(req, raw, options = {}) {
     throw unsupportedOperation(op.type, op.roomKey)
   }
   op.clientId = requireClientId(op.clientId)
+  const diagnostic = require('../performanceDiagnostics')
+  const aclStarted = diagnostic.now()
   // 调用方只能传入刚用 'edit' 校验通过、且属于同一房间的结果。
   const access =
     options.editAccess && options.editAccess.canEdit
       ? options.editAccess
       : await roomAcl.assertRoomAccess(getPool(), req, op.roomKey, 'edit')
   op.userId = access.userId || op.userId
+  diagnostic.record({ kind: 'acl', roomKey: op.roomKey, source: 'socket', type: op.type, durationMs: diagnostic.now() - aclStarted })
   collabTrace('5.acl', {
     traceId,
     opId: op.opId,

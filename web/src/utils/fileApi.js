@@ -1,7 +1,7 @@
 import { FetchTimeoutError, fetchWithTimeout } from './fetchWithTimeout'
 import { getRuntimeConfig } from './runtimeConfig'
 import { createOperationId } from 'simple-mind-map/src/utils/operationId'
-import { collabTrace, collabPersistSnapshot } from 'simple-mind-map/src/utils/collabTrace'
+import { collabTrace, collabPersistSnapshot, recordCollabPerformance } from 'simple-mind-map/src/utils/collabTrace'
 import { stringifyJsonOffMainThread } from '@/utils/importTree'
 
 const DEFAULT_TIMEOUT_MS = 20000
@@ -189,7 +189,12 @@ async function request(path, options = {}) {
   if (options.onUploadProgress) {
     return requestWithUploadProgress(path, { ...options, timeoutMs })
   }
+  const queuedAt = performance.now()
   const release = await acquireApiSlot(priority)
+  const diagnosticRoute = path.match(/^\/api\/files\/([^/?]+)(?:\/(preview|subtree|locate|nodes|info|operations|version|export))?/)
+  if (diagnosticRoute) recordCollabPerformance('api.queue', {
+    roomKey: diagnosticRoute[1], route: '/api/files/:room/' + (diagnosticRoute[2] || (new URLSearchParams(path.split('?')[1] || '').get('format') === 'meta' ? 'meta' : 'snapshot')), durationMs: performance.now() - queuedAt
+  })
   let res
   try {
     res = await fetchWithTimeout(

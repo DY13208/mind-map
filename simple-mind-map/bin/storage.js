@@ -1902,19 +1902,29 @@ function operationRow(row) {
 
 async function commitRoomOperation(roomKey, command, apply, internalOptions = {}) {
   return withPgRetry(async () => {
+    const diag = require('./performanceDiagnostics')
+    const started = diag.now()
     const client = await pool.connect()
+    diag.record({ kind: 'pool', roomKey, path: 'full', source: internalOptions.mcpRequest ? 'mcp' : 'other', durationMs: diag.now() - started })
+    const txStarted = diag.now()
+    let ok = false
+    let queryStats = null
     try {
-      return await commitRoomOperationOnce(
+      const result = await commitRoomOperationOnce(
         client,
         roomKey,
         command,
         apply,
         internalOptions
       )
+      ok = true
+      queryStats = result && result.queryStats
+      return result
     } catch (err) {
       await client.query('rollback').catch(() => {})
       throw err
     } finally {
+      diag.record({ kind: 'transaction', roomKey, path: 'full', source: internalOptions.mcpRequest ? 'mcp' : 'other', type: command.type, durationMs: diag.now() - txStarted, ok, queries: queryStats?.queries, writes: queryStats?.writes })
       client.release()
     }
   })
@@ -1927,19 +1937,29 @@ async function commitDirectRoomOperation(
   internalOptions = {}
 ) {
   return withPgRetry(async () => {
+    const diag = require('./performanceDiagnostics')
+    const started = diag.now()
     const client = await pool.connect()
+    diag.record({ kind: 'pool', roomKey, path: 'direct', source: internalOptions.mcpRequest ? 'mcp' : 'socket-or-other', durationMs: diag.now() - started })
+    const txStarted = diag.now()
+    let ok = false
+    let queryStats = null
     try {
-      return await commitDirectRoomOperationOnce(
+      const result = await commitDirectRoomOperationOnce(
         client,
         roomKey,
         command,
         apply,
         internalOptions
       )
+      ok = true
+      queryStats = result && result.queryStats
+      return result
     } catch (err) {
       await client.query('rollback').catch(() => {})
       throw err
     } finally {
+      diag.record({ kind: 'transaction', roomKey, path: 'direct', source: internalOptions.mcpRequest ? 'mcp' : 'socket-or-other', type: command.type, durationMs: diag.now() - txStarted, ok, queries: queryStats?.queries, writes: queryStats?.writes })
       client.release()
     }
   })
@@ -2036,6 +2056,8 @@ async function commitDirectRoomOperationOnce(
   internalOptions = {}
 ) {
   await client.query('begin')
+  const diag = require('./performanceDiagnostics')
+  const lockStarted = diag.now()
   const roomResult = await client.query(
     `select room_key, title, version, updated_at, metadata,
             coalesce(restore_epoch_revision, 0) as restore_epoch_revision
@@ -2043,6 +2065,7 @@ async function commitDirectRoomOperationOnce(
     [roomKey]
   )
   const room = roomResult.rows[0]
+  diag.record({ kind: 'lock-query', roomKey, path: 'direct', source: internalOptions.mcpRequest ? 'mcp' : 'socket-or-other', durationMs: diag.now() - lockStarted })
   if (!room) {
     const err = new Error('not found')
     err.statusCode = 404
@@ -2200,6 +2223,8 @@ async function commitRoomOperationOnce(
   internalOptions = {}
 ) {
   await client.query('begin')
+  const diag = require('./performanceDiagnostics')
+  const lockStarted = diag.now()
   const roomResult = await client.query(
     `select room_key, title, nodes, metadata, version, updated_at,
             coalesce(restore_epoch_revision, 0) as restore_epoch_revision
@@ -2207,6 +2232,7 @@ async function commitRoomOperationOnce(
     [roomKey]
   )
   const room = roomResult.rows[0]
+  diag.record({ kind: 'lock-query', roomKey, path: 'full', source: internalOptions.mcpRequest ? 'mcp' : 'other', durationMs: diag.now() - lockStarted })
   if (!room) {
     const err = new Error('not found')
     err.statusCode = 404

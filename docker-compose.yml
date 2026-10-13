@@ -55,6 +55,8 @@ services:
       PGPASSWORD: ${PGPASSWORD:-mindmap}
       REDIS_URL: redis://redis:6379
       COLLAB_EVENT_BUS: redis
+      # Bounded performance evidence; admin-only read API, no raw logs/content.
+      PERFORMANCE_DIAGNOSTICS: ${PERFORMANCE_DIAGNOSTICS:-1}
       PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
       WEB_PORT: ${MIND_MAP_HTTP_PORT:-8990}
       GATEWAY: "1"
@@ -151,8 +153,8 @@ services:
         ]
       interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 15s
+      retries: 12
+      start_period: 90s
     restart: unless-stopped
 
   # OpenClaw Gateway（龙虾）：助理页 / SOP 企微待办依赖；Start-Docker 一并拉起

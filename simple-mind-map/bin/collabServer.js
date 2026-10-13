@@ -52,6 +52,9 @@ const { isCollabV2Enabled } = require('./collabV2/flag')
 
 const host = process.env.HOST || '0.0.0.0'
 const port = Number(process.env.PORT || 1234)
+const performanceDiagnostics = require('./performanceDiagnostics')
+performanceDiagnostics.start()
+let diagnosticsRuntime = () => ({ ready: false })
 
 let openSockets = 0
 
@@ -103,6 +106,7 @@ function trackSocket(conn) {
 }
 
 const server = http.createServer(async (request, response) => {
+  performanceDiagnostics.observeHttp(request, response)
   try {
     const pathname = new URL(request.url, 'http://127.0.0.1').pathname
     const tusRequest = isTusPath(pathname)
@@ -127,6 +131,12 @@ const server = http.createServer(async (request, response) => {
       if (!authenticated) return
     }
     if (handleMcpConfigApi(request, response, pathname)) return
+    if (await performanceDiagnostics.handleApi(request, response, pathname, {
+      pool: getPool(), isSuperAdminUser: roomAcl.isSuperAdminUser,
+      assertRoomAccess: roomAcl.assertRoomAccess, isAllowedOrigin,
+      runtime: diagnosticsRuntime,
+      readBody: require('./storage').readBody
+    })) return
     if (await require('./localKnowledge/http').handleApi(request, response, pathname)) return
     {
       const { handleOpenclawHandoffApi } = require('./openclawHandoffApi')
@@ -356,6 +366,13 @@ Promise.all([initSchema(), initAuth()])
         }
         return engine.flushPendingAutoVersion(roomKey, { source: 'room_idle' })
       }
+    })
+    diagnosticsRuntime = roomKey => ({
+      ready: true, collabV2: !!v2.enabled,
+      connections: v2.io ? v2.io.engine.clientsCount : openSockets,
+      roomPeers: roomKey && v2.presence ? v2.presence.list(roomKey).length : null,
+      mcpDirectConfigured: require('./collabV2/flag').envFlag('COLLAB_MCP_DIRECT', true),
+      eventBridge: getOperationEventBridgeStatus()
     })
     server.listen(port, host, () => {
       require('./localKnowledge/http').checkConfiguration().catch(error => console.warn('[local-knowledge]', error.message))
