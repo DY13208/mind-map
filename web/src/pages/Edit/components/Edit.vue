@@ -1050,7 +1050,7 @@ export default {
       }
     },
 
-    async prepareReload(done) {
+    async prepareReload(done, options = {}) {
       try {
         this.commitOpenTextEdit()
         this.manualSave()
@@ -1060,7 +1060,18 @@ export default {
         }
         const cooperate = this.mindMap && this.mindMap.cooperate
         if (cooperate && typeof cooperate.flushPendingForReload === 'function') {
-          await cooperate.flushPendingForReload({ timeoutMs: 4000 })
+          const result = await cooperate.flushPendingForReload({ timeoutMs: 4000 })
+          if (options.retryPending && result && (!result.ok || result.timeout)) {
+            if (typeof done === 'function') done({ ...result, ok: false })
+            return
+          }
+        }
+        const adapter = cooperate && cooperate.collabV2Adapter
+        if (options.retryPending && adapter && typeof adapter.retryPending === 'function') {
+          // drain 的服务器确认由导航栏等待，不阻塞准备阶段的回调。
+          Promise.resolve(adapter.retryPending()).catch(err => {
+            console.warn('[mapNav] retry pending save failed', err)
+          })
         }
         if (typeof done === 'function') done({ ok: true })
       } catch (err) {

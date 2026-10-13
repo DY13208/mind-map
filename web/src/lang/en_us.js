@@ -401,6 +401,7 @@ export default {
     cooperate: 'Collab',
     backToMainMap: 'Back to main map',
     backToParentMap: 'Back to parent map',
+    mapNavSaveFailedTip: 'Auto-save has not completed. You are still on this map; please try going back again shortly.',
     mapNavUnsavedTitle: 'Unsaved changes',
     mapNavUnsavedTip:
       'This map has changes that are not saved to the server yet. Going back now may lose them. Go back anyway?',
