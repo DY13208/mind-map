@@ -27,6 +27,13 @@ function fail(error, extra = {}) {
   return { success: false, error, ...extra }
 }
 
+/** Title-only root is an unbound branch. A note or any child is existing content. */
+function branchHasUserContent(tree) {
+  if (!tree) return false
+  if (String(tree.note || '').trim()) return true
+  return Array.isArray(tree.children) && tree.children.length > 0
+}
+
 async function loadWikiPageMarkdown(pageId, env = process.env) {
   const auth = await docmostClient.ensureSyncAuth(env)
   const page = await docmostClient.request('/api/pages/info', {
@@ -170,10 +177,13 @@ function createWikiMindmapSyncService(deps) {
     const currentTree = mindmapSubtreeToTree(nodes, branchRootUid)
     const mindHash = subtreeHash(currentTree)
 
-    // Conflict: both sides changed since last successful sync
+    // Baseline is the pair of hashes from the last successful sync.
+    // Only-wiki applies the diff. Only-mind skips. Both sides conflict.
+    // No baseline: first bind onto an empty branch, otherwise conflict.
     const lastWiki = String(mapping.content_hash || '')
     const lastMind = String(mapping.mindmap_hash || '')
-    if (lastWiki && lastMind) {
+    const hasBaseline = Boolean(lastWiki && lastMind)
+    if (hasBaseline) {
       const wikiChanged = wikiHash !== lastWiki
       const mindChanged = mindHash !== lastMind
       if (wikiChanged && mindChanged) {
@@ -203,14 +213,14 @@ function createWikiMindmapSyncService(deps) {
           ]
         })
       }
-      // Idempotent: neither changed
-      if (!wikiChanged && !mindChanged) {
+      if (!wikiChanged) {
+        const action = mindChanged ? 'MINDMAP_AHEAD' : 'skip'
         logSync({
           page_id,
           room_id,
           topic_key,
           slot,
-          action: 'skip',
+          action,
           source: 'wiki',
           status: 'success',
           duration: Date.now() - started + 'ms'
@@ -229,6 +239,32 @@ function createWikiMindmapSyncService(deps) {
           conflicts: 0
         }
       }
+    } else if (branchHasUserContent(currentTree)) {
+      logSync({
+        page_id,
+        room_id,
+        topic_key,
+        slot,
+        action: 'conflict',
+        source: 'wiki',
+        status: 'SYNC_CONFLICT',
+        duration: Date.now() - started + 'ms'
+      })
+      return fail('SYNC_CONFLICT', {
+        page_id,
+        room_id,
+        topic_key,
+        slot,
+        conflicts: [
+          {
+            code: 'MISSING_BASELINE',
+            last_wiki_hash: lastWiki,
+            wiki_hash: wikiHash,
+            last_mindmap_hash: lastMind,
+            mindmap_hash: mindHash
+          }
+        ]
+      })
     }
 
     const parsed = parseMarkdownToTree(markdown)
