@@ -850,14 +850,25 @@ function collectTreeUids(tree, out = []) {
   return out
 }
 
-/**
- * Stamp authoritative direct-child and full descendant totals from room_nodes.
- * childCount must NEVER equal clipped children.length.
- * Read only live UID/parent edges once, then count bottom-up without depth caps.
- */
-async function stampAuthoritativeChildCounts(db, roomKey, tree) {
-  const uids = Array.from(new Set(collectTreeUids(tree)))
-  if (!uids.length) return { queryCount: 0, stamped: 0 }
+function isRootFlag(value) {
+  return value === true || value === 't' || value === 'true' || value === 1
+}
+
+function edgesToChildren(rows) {
+  const childrenByUid = new Map()
+  ;(rows || []).forEach(row => {
+    if (!row || row.cycle || !row.uid || childrenByUid.has(row.uid)) return
+    childrenByUid.set(row.uid, [])
+  })
+  ;(rows || []).forEach(row => {
+    if (!row || !row.parent_uid || !row.uid) return
+    if (!childrenByUid.has(row.parent_uid) || !childrenByUid.has(row.uid)) return
+    childrenByUid.get(row.parent_uid).push(row.uid)
+  })
+  return childrenByUid
+}
+
+async function queryRoomEdges(db, roomKey) {
   const res = await db.query(
     `select uid, parent_uid
      from room_nodes
@@ -865,13 +876,75 @@ async function stampAuthoritativeChildCounts(db, roomKey, tree) {
        and deleted_at is null`,
     [roomKey]
   )
-  const childrenByUid = new Map(res.rows.map(row => [row.uid, []]))
-  res.rows.forEach(row => {
-    if (childrenByUid.has(row.parent_uid)) {
-      childrenByUid.get(row.parent_uid).push(row.uid)
+  return res.rows
+}
+
+const EDGE_WALK_DEPTH_LIMIT = 256
+
+/**
+ * Live UID/parent edges for descendant counts.
+ * A branch reads only its own subtree. The room root still reads every live
+ * edge, because its descendant totals cover the whole map. A walk that hits
+ * the depth guard falls back to the full edge list so the totals stay complete.
+ */
+async function loadLiveEdges(db, roomKey, rootUid) {
+  let queries = 0
+  if (rootUid) {
+    queries += 1
+    const root = await db.query(
+      `select is_root
+       from room_nodes
+       where room_key = $1 and uid = $2 and deleted_at is null`,
+      [roomKey, rootUid]
+    )
+    const row = root.rows[0]
+    if (row && !isRootFlag(row.is_root)) {
+      queries += 1
+      const scoped = await db.query(
+        `with recursive walk as (
+           select uid, parent_uid, array[uid]::text[] as path, false as cycle, 0 as depth
+           from room_nodes
+           where room_key = $1 and uid = $2 and deleted_at is null
+           union all
+           select n.uid, n.parent_uid, w.path || n.uid, n.uid = any(w.path), w.depth + 1
+           from room_nodes n
+           inner join walk w
+             on n.room_key = $1 and n.parent_uid = w.uid and n.deleted_at is null
+           where w.cycle is not true and w.depth < ${EDGE_WALK_DEPTH_LIMIT}
+         )
+         select uid, parent_uid, cycle, depth from walk`,
+        [roomKey, rootUid]
+      )
+      if (
+        scoped.rows.some(item => Number(item.depth) >= EDGE_WALK_DEPTH_LIMIT)
+      ) {
+        queries += 1
+        return { rows: await queryRoomEdges(db, roomKey), queryCount: queries }
+      }
+      return { rows: scoped.rows, queryCount: queries }
     }
-  })
-  const descendants = countGraphDescendants(childrenByUid)
+  }
+  queries += 1
+  return { rows: await queryRoomEdges(db, roomKey), queryCount: queries }
+}
+
+function countEdges(rows) {
+  const childrenByUid = edgesToChildren(rows)
+  return {
+    childrenByUid,
+    descendants: countGraphDescendants(childrenByUid)
+  }
+}
+
+/**
+ * Stamp authoritative direct-child and full descendant totals from room_nodes.
+ * childCount must NEVER equal clipped children.length.
+ */
+async function stampAuthoritativeChildCounts(db, roomKey, tree) {
+  const uids = Array.from(new Set(collectTreeUids(tree)))
+  if (!uids.length) return { queryCount: 0, stamped: 0 }
+  const loaded = await loadLiveEdges(db, roomKey, tree && tree.data && tree.data.uid)
+  const { childrenByUid, descendants } = countEdges(loaded.rows)
   const totals = new Map()
   childrenByUid.forEach((children, uid) => {
     totals.set(uid, children.length)
@@ -884,13 +957,105 @@ async function stampAuthoritativeChildCounts(db, roomKey, tree) {
     node.data.childCount = total
     node.data.descendantCount = descendants.get(uid) || 0
     stamped += 1
-    const loaded = Array.isArray(node.children) ? node.children.length : 0
-    if (total > loaded) node.data.hasMore = true
-    else if (node.data.hasMore && total <= loaded) node.data.hasMore = false
+    const loadedCount = Array.isArray(node.children) ? node.children.length : 0
+    if (total > loadedCount) node.data.hasMore = true
+    else if (node.data.hasMore && total <= loadedCount) node.data.hasMore = false
     ;(node.children || []).forEach(walk)
   }
   walk(tree)
-  return { queryCount: 1, stamped, totals }
+  return { queryCount: loaded.queryCount, stamped, totals }
+}
+
+function plainNodeText(data) {
+  return String((data && data.text) || '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function copyNodeData(row) {
+  let data = row && row.data
+  if (typeof data === 'string') {
+    try {
+      data = JSON.parse(data)
+    } catch (_) {
+      data = {}
+    }
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) data = {}
+  const next = { ...data }
+  delete next.imgMap
+  return next
+}
+
+/**
+ * Locate one node from room_nodes without reading the room snapshot.
+ * Returns missing when the table cannot prove the ancestor chain, so the
+ * caller can fall back to the snapshot path (text search and legacy JSON).
+ */
+async function locateRoomNode(db, roomKey, ref) {
+  if (!nodesTableAuthorityEnabled()) return null
+  const meta = await db.query(
+    `select version, updated_at from rooms where room_key = $1`,
+    [roomKey]
+  )
+  if (!meta.rows.length) return { notFound: true }
+  const version = Number(meta.rows[0].version || 0)
+  const updated_at = meta.rows[0].updated_at
+  const resolved = await resolveRoomNodeUid(db, roomKey, ref)
+  if (!resolved) return { missing: true, version, updated_at }
+  const chain = await db.query(
+    `with recursive walk as (
+       select uid, parent_uid, data, is_root, 0 as depth, array[uid]::text[] as path
+       from room_nodes
+       where room_key = $1 and uid = $2 and deleted_at is null
+       union all
+       select n.uid, n.parent_uid, n.data, n.is_root, w.depth + 1, w.path || n.uid
+       from room_nodes n
+       inner join walk w
+         on n.room_key = $1 and n.uid = w.parent_uid and n.deleted_at is null
+       where w.is_root is not true
+         and w.depth < ${EDGE_WALK_DEPTH_LIMIT}
+         and not n.uid = any(w.path)
+     )
+     select uid, parent_uid, data, is_root, depth
+     from walk
+     order by depth desc`,
+    [roomKey, resolved]
+  )
+  if (!chain.rows.length) return { missing: true, version, updated_at }
+  const reachedRoot = chain.rows.some(row => isRootFlag(row.is_root))
+  const hitDepth = chain.rows.some(
+    row => Number(row.depth) >= EDGE_WALK_DEPTH_LIMIT
+  )
+  if (!reachedRoot || hitDepth) return { missing: true, version, updated_at }
+  const ancestors = chain.rows.map(row => row.uid)
+  const loaded = await loadLiveEdges(db, roomKey, ancestors[0])
+  const { childrenByUid, descendants } = countEdges(loaded.rows)
+  const nodes = {}
+  chain.rows.forEach(row => {
+    const root = isRootFlag(row.is_root)
+    nodes[row.uid] = {
+      data: {
+        ...copyNodeData(row),
+        uid: row.uid,
+        expand: root,
+        childCount: (childrenByUid.get(row.uid) || []).length,
+        descendantCount: descendants.get(row.uid) || 0
+      },
+      children: []
+    }
+  })
+  return {
+    uid: resolved,
+    ancestors,
+    path: chain.rows
+      .map(row => plainNodeText(row.data) || row.uid)
+      .join(' / '),
+    nodes,
+    version,
+    updated_at
+  }
 }
 
 async function readRoomSubtree(db, roomKey, uid, options = {}) {
@@ -1068,6 +1233,7 @@ module.exports = {
   dedupeMatchesByUid,
   queryNeedsSearch,
   readRoomSubtree,
+  locateRoomNode,
   stampAuthoritativeChildCounts,
   resolveRoomRef,
   listDeletedNodeUids,

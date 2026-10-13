@@ -27,6 +27,51 @@ vm.runInNewContext(source,{
   }
 })
 const Drag = moduleMock.exports
+test('mouse moves after preview cleanup cancel safely without null transform errors', () => {
+  let restored = 0, resets = 0, stopped = 0
+  const drag = Object.assign(Object.create(Drag.prototype), {
+    isMousedown: true, isDragging: true, clone: null, drawTransform: {},
+    beingDragNodeList: [{ setOpacity() { restored++ }, showChildren() {}, endDrag() {} }],
+    autoMove: { clearAutoMoveTimer() { stopped++ } },
+    mindMap: { draw: {} },
+    reset() { resets++; this.isMousedown = false; this.isDragging = false }
+  })
+  for (let i = 0; i < 200; i++) drag.onMove(1, 2, {})
+  assert.equal(resets, 1); assert.equal(restored, 1); assert.equal(stopped, 1)
+})
+
+test('async drag initialization is single-flight and cannot resume after mouseup', async () => {
+  let release, hooks = 0, clones = 0
+  const pending = new Promise(resolve => { release = resolve })
+  const n = { left: 0, top: 0, getData: () => false }
+  const drag = Object.assign(Object.create(Drag.prototype), {
+    isMousedown: true, isDragging: false, mousedownNode: n, mouseDownX: 0, mouseDownY: 0,
+    mindMap: { draw: { transform: () => ({ scaleX: 1, scaleY: 1, translateX: 0, translateY: 0 }) },
+      opt: { beforeDragStart: () => { hooks++; return pending } }, execCommand() {} },
+    nodeTreeToList() {}, createCloneNode() { clones++ }, createDragRangeGuide() {}
+  })
+  const first = drag.handleStartMove()
+  await drag.handleStartMove()
+  assert.equal(hooks, 1)
+  drag.isMousedown = false
+  release(false)
+  await first
+  assert.equal(clones, 0); assert.equal(drag.isDragging, false)
+  assert.equal(drag._dragStartToken, null)
+})
+
+test('a valid async drag initialization still creates its preview', async () => {
+  let clones = 0
+  const n = { left: 0, top: 0, getData: () => false }
+  const drag = Object.assign(Object.create(Drag.prototype), {
+    isMousedown: true, isDragging: false, mousedownNode: n, mouseDownX: 0, mouseDownY: 0,
+    mindMap: { draw: { transform: () => ({ scaleX: 1, scaleY: 1, translateX: 0, translateY: 0 }) },
+      opt: { beforeDragStart: async () => false }, execCommand() {} },
+    nodeTreeToList() {}, createCloneNode() { clones++ }, createDragRangeGuide() {}
+  })
+  await drag.handleStartMove()
+  assert.equal(clones, 1); assert.equal(drag.isDragging, true)
+})
 function node(left, top, children = []) {
   return {left,top,width:40,height:20,children,getData:k=>k==='expand'?true:'n',setOpacity(){},showChildren(){},endDrag(){}}
 }
@@ -225,7 +270,7 @@ test('blank canvas drop creates an independent theme even when ordinary free dra
 
 test('reattaching a floating theme previews the parent connector without changing live data', () => {
   const compactSource = fs.readFileSync(path.join(__dirname, '../src/layouts/CompactStructure.js'), 'utf8')
-    .replace(/^import .*\n/gm, '')
+    .replace(/^import [^\r\n]*\r?\n/gm, '')
     .replace('export default CompactStructure', 'module.exports = CompactStructure')
   const compactModule = { exports: {} }
   vm.runInNewContext(compactSource, {

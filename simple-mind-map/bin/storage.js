@@ -18,6 +18,7 @@ const {
   readRoomNodes,
   searchRoomNodes,
   readRoomSubtree,
+  locateRoomNode,
   resolveRoomRef,
   listDeletedNodeUids,
   purgeDeletedNodes,
@@ -1435,6 +1436,15 @@ async function getRoomSubtree(roomKey, uid, options = {}) {
   }
 }
 
+async function getRoomLocate(roomKey, ref) {
+  try {
+    return await locateRoomNode(pool, roomKey, ref)
+  } catch (err) {
+    console.error('[room_nodes] locate failed', roomKey, err.message)
+    return null
+  }
+}
+
 async function getRoomRef(roomKey, uid) {
   try {
     return await resolveRoomRef(pool, roomKey, uid)
@@ -2828,6 +2838,7 @@ module.exports = {
   mergeMapMetadata: require('./mapMetadata').mergeMapMetadata,
   getRoomSnapshot,
   getRoomSubtree,
+  getRoomLocate,
   getRoomRef,
   renameRoom,
   removeRoom,

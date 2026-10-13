@@ -22,6 +22,7 @@ const {
   getRoomMeta,
   getRoomSnapshot,
   getRoomSubtree,
+  getRoomLocate,
   getRoomRef,
   removeRoom,
   ensureDoc,
@@ -3552,6 +3553,30 @@ async function handleApi(req, res) {
   const locateMatch = pathname.match(/^\/api\/files\/([^/]+)\/locate$/)
   if (locateMatch && req.method === 'GET') {
     const roomKey = decodeURIComponent(locateMatch[1])
+    const locateRef =
+      url.searchParams.get('uid') || url.searchParams.get('q') || 'root'
+    const fastLocated = await getRoomLocate(roomKey, locateRef)
+    if (fastLocated && fastLocated.notFound) {
+      sendJson(res, 404, { error: 'not found' })
+      return true
+    }
+    if (fastLocated && !fastLocated.missing && fastLocated.nodes) {
+      const version = Number(fastLocated.version || 0)
+      Object.keys(fastLocated.nodes).forEach(id => {
+        const node = fastLocated.nodes[id]
+        if (node && node.data && version) node.data.subtreeVersion = version
+      })
+      sendJson(res, 200, {
+        room_key: roomKey,
+        version,
+        updated_at: fastLocated.updated_at,
+        uid: fastLocated.uid,
+        ancestors: fastLocated.ancestors,
+        path: fastLocated.path,
+        nodes: fastLocated.nodes
+      })
+      return true
+    }
     const loaded = await loadSnapshot(roomKey)
     if (!loaded) {
       sendJson(res, 404, { error: 'not found' })
@@ -3559,7 +3584,7 @@ async function handleApi(req, res) {
     }
     const located = mindDoc.locateNode(
       loaded.obj,
-      url.searchParams.get('uid') || url.searchParams.get('q') || 'root'
+      locateRef
     )
     if (!located) {
       sendJson(res, 404, { error: 'not found' })

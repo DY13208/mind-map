@@ -2369,7 +2369,7 @@ export default {
           }),
         fetchExportTree: () => getFileExport(roomKey),
         fetchNodes: uids => getFileNodes(roomKey, uids),
-        fetchLocate: uid => locateFileNode(roomKey, uid),
+        fetchLocate: (uid, options) => locateFileNode(roomKey, uid, options),
         fetchOperations: after => getMapOperations(roomKey, after),
         fetchVersion: () => getMapVersion(roomKey),
         undoOperation: operationId =>

@@ -6,13 +6,17 @@ const source = fs.readFileSync(require.resolve('../src/plugins/Cooperate.js'), '
 function method(start, end) {
   return source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)))
 }
+const renderTimers = []
 const methods = vm.runInNewContext(`({
 ${method('  findTreeNode(root, uid) {', '  expandTreeNode(node) {')},
 ${method('  expandTreeNode(node) {', '  async ensureHttpNodePath(')},
 ${method('  async ensureHttpNodePath(', '  async syncHttpDirtySubtrees(treeNodeIndex) {')},
-${method('  applyHttpRemoteNodeFields(node, next = {}, merged = {}) {', '  syncGeneralizationChildStubs(')}
+${method('  applyHttpRemoteNodeFields(node, next = {}, merged = {}) {', '  syncGeneralizationChildStubs(')},
+${method('  scheduleRemoteGeometryRender() {', '  scheduleRemoteRecover(')}
 })`, {
   console,
+  setTimeout: fn => { renderTimers.push(fn); return renderTimers.length },
+  REMOTE_GEOMETRY_RENDER_MS: 120,
   FV_KEY: '_fv',
   checkIsNodeStyleDataKey: () => false,
   collabNodeFeatures: {
@@ -63,5 +67,7 @@ test('unchanged HTTP records do not recreate nodes; changed batch defers layout'
   assert.equal(layouts, 0)
   context.httpRefreshing = false
   context.applyHttpRemoteNodeFields(node, { text: 'newer' })
+  assert.equal(layouts, 0)
+  renderTimers.shift()()
   assert.equal(layouts, 1)
 })

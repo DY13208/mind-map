@@ -400,6 +400,7 @@ function payloadNodeData(payload) {
     data.generalization = payload.generalization
   }
   if (payload && payload.uid && !data.uid) data.uid = payload.uid
+  delete data.expand
   return data
 }
 
@@ -1127,6 +1128,20 @@ class Cooperate {
     if (!parentUid) return false
     const parentNode = renderer.findNodeByUid(parentUid)
     if (!parentNode) return false
+    if (parentNode.getData && parentNode.getData('expand') === false) {
+      const count = Number(parentNode.getData('childCount')) || 0
+      const live = (parentNode.nodeData && parentNode.nodeData.children || []).length
+      renderer.setNodeData(parentNode, { childCount: Math.max(count, live) + 1 })
+      if (this.currentData) {
+        this.currentData[uid] = json
+        const parent = this.currentData[parentUid]
+        if (parent) {
+          const children = parent.children || []
+          if (!children.includes(uid)) parent.children = [...children, uid]
+        }
+      }
+      return true
+    }
     this.isApplyingRemote = true
     this.mindMap.command.pause()
     try {
@@ -1135,19 +1150,21 @@ class Cooperate {
         child => child && child.data && child.data.uid === uid
       )
       if (!exists) {
-        const data = json.data || {}
+        const data = { ...(json.data || {}) }
+        delete data.expand
         parentNode.nodeData.children.push({
           data: {
+            ...data,
             uid,
-            text: data.text,
-            note: data.note,
-            richText: data.richText,
-            expand: data.expand !== false
+            expand: false
           },
           children: []
         })
       }
-      renderer.setNodeData(parentNode, { expand: true })
+      const count = Number(parentNode.getData && parentNode.getData('childCount')) || 0
+      renderer.setNodeData(parentNode, {
+        childCount: Math.max(count, parentNode.nodeData.children.length)
+      })
       this.mindMap.render()
       if (this.currentData) {
         this.currentData[uid] = json
@@ -2206,6 +2223,10 @@ class Cooperate {
   }
 
   markRemoteDirty(uid, parentUid) {
+    if (this.httpLocateFailures) {
+      if (uid) this.httpLocateFailures.delete(uid)
+      if (parentUid) this.httpLocateFailures.delete(parentUid)
+    }
     if (!this.dirtySubtrees) return
     if (parentUid) this.dirtySubtrees.set(parentUid, Date.now())
     if (uid) this.dirtySubtrees.set(uid, Date.now())
@@ -2314,12 +2335,9 @@ class Cooperate {
         const index = Number(payload.index)
         const child = {
           data: {
+            ...data,
             uid,
-            text: data.text,
-            note: data.note,
-            richText: data.richText,
-            expand: data.expand !== false,
-            ...data
+            expand: false
           },
           children: []
         }
@@ -2332,7 +2350,6 @@ class Cooperate {
       const count = Number(parentNode.getData && parentNode.getData('childCount')) || 0
       const live = parentNode.nodeData.children.length
       renderer.setNodeData(parentNode, {
-        expand: true,
         childCount: Math.max(count, live)
       })
       this.mindMap.render()
@@ -3494,6 +3511,8 @@ class Cooperate {
   }
 
   clearHttpCollab() {
+    this.httpLocateFailures = new Map()
+    this.httpLocateInflight = new Map()
     const restoreWaiters = Array.isArray(this.httpRestoreWaiters)
       ? this.httpRestoreWaiters.splice(0)
       : []
@@ -4267,6 +4286,7 @@ class Cooperate {
   }
 
   applyHttpRemoteNodeFields(node, next = {}, merged = {}) {
+    if (next && Object.prototype.hasOwnProperty.call(next, 'expand')) delete next.expand
     const renderer = this.mindMap.renderer
     if (!node || !renderer) return false
     let changed = false
@@ -4491,7 +4511,7 @@ class Cooperate {
       ) {
         seen.add(uid)
         jobs.push(() =>
-          this.hydrateFromHttp(node).catch(err => {
+          this.hydrateFromHttp(node, { priority: 'low' }).catch(err => {
             this.hydrateFailedUids.add(uid)
             console.error('[mind-map] expanded partial hydrate failed', uid, err)
             return false
@@ -4559,7 +4579,7 @@ class Cooperate {
     walk(this.mindMap.renderer && this.mindMap.renderer.renderTree)
   }
 
-  async hydrateFromHttp(node) {
+  async hydrateFromHttp(node, options = {}) {
     if (!node || !this.httpFetchSubtree) return
     const uid = node.getData && node.getData('uid')
     const data = node.nodeData
@@ -4588,7 +4608,7 @@ class Cooperate {
             deep: options.deep,
             offset: options.offset,
             limit: options.limit,
-            priority: 'high'
+            priority: options.priority || 'high'
           })
         const knownVersion = complete
           ? Number((data.data && data.data.subtreeVersion) || 0) || 0
@@ -4618,7 +4638,7 @@ class Cooperate {
           const deep = await this.httpFetchDeepSubtree(uid, {
             knownVersion: 0,
             maxNodes: Math.max(400, count + 10),
-            priority: 'high'
+            priority: options.priority || 'high'
           })
           if (deep && deep.tree) {
             result = {
@@ -4719,6 +4739,7 @@ class Cooperate {
     const live = Array.isArray(data.children) ? data.children.length : 0
     const count = Number(data.data && data.data.childCount) || 0
     const dirtyAt = uid && this.dirtySubtrees && this.dirtySubtrees.get(uid)
+    if (!dirtyAt && count === 0 && live === 0 && this.hydratedUids.has(uid)) return data
     if (live && (!count || live >= count) && !dirtyAt) return data
     const knownVersion = live
       ? Number((data.data && data.data.subtreeVersion) || 0) || 0
@@ -4798,11 +4819,32 @@ class Cooperate {
     if (!tree) return false
     if (this.findTreeNode(tree, uid)) return true
     if (!this.httpFetchLocate) return false
+    const locateRoom = this.httpRoomKey
+    const fetchLocate = this.httpFetchLocate
     let located = locatedCache
     if (!located) {
+      const passive = options.expand === false
+      if (!this.httpLocateFailures) this.httpLocateFailures = new Map()
+      if (!this.httpLocateInflight) this.httpLocateInflight = new Map()
+      const failures = this.httpLocateFailures
+      const inflight = this.httpLocateInflight
+      const previous = failures.get(uid)
+      if (passive && previous && previous.retryAt > Date.now()) return false
       try {
-        located = await this.httpFetchLocate(uid)
+        let job = inflight.get(uid)
+        if (!job) {
+          job = Promise.resolve().then(() => fetchLocate(uid, { priority: passive ? 'low' : 'high' }))
+            .finally(() => { if (inflight.get(uid) === job) inflight.delete(uid) })
+          inflight.set(uid, job)
+        }
+        located = await job
+        if (this.httpRoomKey !== locateRoom) return false
+        failures.delete(uid)
       } catch (err) {
+        const attempts = Math.min(4, (previous && previous.attempts || 0) + 1)
+        const missing = err && (err.statusCode === 404 || err.code === 'NODE_NOT_FOUND')
+        failures.set(uid, { attempts, retryAt: Date.now() + (missing ? Math.min(60000, 10000 * 2 ** (attempts - 1)) : 2000) })
+        if (failures.size > 500) failures.delete(failures.keys().next().value)
         console.error('[mind-map] locate node failed', uid, err)
         return false
       }
@@ -4854,15 +4896,11 @@ class Cooperate {
         ? treeNodeIndex.get(uid)
         : this.findTreeNode(tree, uid)
       if (!treeNode) {
-        await this.ensureHttpNodePath(uid, undefined, { expand: false })
-        treeNode =
-          (treeNodeIndex && treeNodeIndex.get(uid)) ||
-          this.findTreeNode(tree, uid)
-        if (treeNode && treeNodeIndex) {
-          indexTreeNodesByUid(treeNode, treeNodeIndex)
-        }
+        // An unloaded branch remains dirty until the user expands it. Passive
+        // sync must not locate every invisible UID and hydrate its entire path.
+        continue
       }
-      if (!treeNode) continue
+      if (treeNode.data && treeNode.data.expand === false && !(treeNode.children || []).length) continue
       const previousChildren = new Set(treeNode.children || [])
       const before = previousChildren.size
       try {

@@ -82,7 +82,9 @@ const DATA_META_KEYS = [
   'oldPosition',
   'newPosition',
   'oldIndex',
-  'kind'
+  'kind',
+  // Expand/collapse is per-user view state, not shared node content.
+  'expand'
 ]
 
 const STRUCTURAL_PAYLOAD_KEYS = ['parentUid', 'parent_uid', 'parent', 'index', 'position', 'order']
@@ -232,7 +234,6 @@ async function applyInsert(store, op, version) {
   const data = {
     uid,
     text: payload.text != null ? String(payload.text) : extra.text || '新节点',
-    expand: true,
     ...extra
   }
   data.uid = uid
@@ -686,7 +687,6 @@ async function applyInsertBulk(store, childOps, version, roomKey) {
       const data = {
         uid: item.uid,
         text: item.payload.text != null ? String(item.payload.text) : extra.text || '新节点',
-        expand: true,
         ...extra
       }
       data.uid = item.uid

@@ -23,6 +23,7 @@ class Drag extends Base {
 
   //  复位
   reset() {
+    this._dragStartToken = null
     this.removeCloneNode()
     // 是否正在拖拽中
     this.isDragging = false
@@ -97,6 +98,7 @@ class Drag extends Base {
       return
     }
     this.isMousedown = true
+    this._dragStartToken = null
     // 记录鼠标按下时的节点
     this.mousedownNode = node
     // 记录鼠标按下的坐标
@@ -352,6 +354,18 @@ class Drag extends Base {
     if (!this.isMousedown || !this.isDragging) {
       return
     }
+    // Remote hydration or drag cleanup can remove the preview between mouse
+    // events. Cancel this gesture rather than repeatedly dereferencing null.
+    if (!this.clone || !this.drawTransform || !this.mindMap.draw) {
+      this.autoMove.clearAutoMoveTimer()
+      ;(this.beingDragNodeList || []).forEach(node => {
+        node.setOpacity(1)
+        node.showChildren()
+        node.endDrag()
+      })
+      this.reset()
+      return
+    }
     // 更新克隆节点的位置
     let { scaleX, scaleY, translateX, translateY } = this.drawTransform
     let cloneNodeLeft = x - this.offsetX
@@ -370,44 +384,51 @@ class Drag extends Base {
 
   // 开始拖拽时初始化一些数据
   async handleStartMove() {
-    if (!this.isDragging) {
-      // 鼠标按下的节点
-      let node = this.mousedownNode
-      // 计算鼠标按下的位置距离节点左上角的距离
-      this.drawTransform = this.mindMap.draw.transform()
-      let { scaleX, scaleY, translateX, translateY } = this.drawTransform
-      this.offsetX = this.mouseDownX - (node.left * scaleX + translateX)
-      this.offsetY = this.mouseDownY - (node.top * scaleY + translateY)
-      // 如果鼠标按下的节点是激活节点，那么保存当前所有激活的节点
-      if (node.getData('isActive')) {
-        // 找出这些激活节点中的最顶层节点
-        // 并按索引从小到大排序
-        this.beingDragNodeList = sortNodeList(
-          getTopAncestorsFomNodeList(
-            // 过滤掉根节点和概要节点
-            this.mindMap.renderer.activeNodeList.filter(item => {
-              return !item.isRoot && !item.isGeneralization
-            })
+    if (!this.isDragging && !this._dragStartToken && this.isMousedown) {
+      const token = {}
+      this._dragStartToken = token
+      try {
+        // 鼠标按下的节点
+        let node = this.mousedownNode
+        // 计算鼠标按下的位置距离节点左上角的距离
+        this.drawTransform = this.mindMap.draw.transform()
+        let { scaleX, scaleY, translateX, translateY } = this.drawTransform
+        this.offsetX = this.mouseDownX - (node.left * scaleX + translateX)
+        this.offsetY = this.mouseDownY - (node.top * scaleY + translateY)
+        // 如果鼠标按下的节点是激活节点，那么保存当前所有激活的节点
+        if (node.getData('isActive')) {
+          // 找出这些激活节点中的最顶层节点
+          // 并按索引从小到大排序
+          this.beingDragNodeList = sortNodeList(
+            getTopAncestorsFomNodeList(
+              // 过滤掉根节点和概要节点
+              this.mindMap.renderer.activeNodeList.filter(item => {
+                return !item.isRoot && !item.isGeneralization
+              })
+            )
           )
-        )
-      } else {
-        // 否则只拖拽按下的节点
-        this.beingDragNodeList = [node]
+        } else {
+          // 否则只拖拽按下的节点
+          this.beingDragNodeList = [node]
+        }
+        // 拦截拖拽
+        const { beforeDragStart } = this.mindMap.opt
+        if (typeof beforeDragStart === 'function') {
+          const stop = await beforeDragStart([...this.beingDragNodeList])
+          if (stop) return
+        }
+        if (this._dragStartToken !== token || !this.isMousedown || this.mousedownNode !== node) return
+        // 将节点树转为节点数组
+        this.nodeTreeToList()
+        // 创建克隆节点
+        this.createCloneNode()
+        this.createDragRangeGuide()
+        // 清除当前所有激活的节点
+        this.mindMap.execCommand('CLEAR_ACTIVE_NODE')
+        this.isDragging = true
+      } finally {
+        if (this._dragStartToken === token) this._dragStartToken = null
       }
-      // 拦截拖拽
-      const { beforeDragStart } = this.mindMap.opt
-      if (typeof beforeDragStart === 'function') {
-        const stop = await beforeDragStart([...this.beingDragNodeList])
-        if (stop) return
-      }
-      // 将节点树转为节点数组
-      this.nodeTreeToList()
-      // 创建克隆节点
-      this.createCloneNode()
-      this.createDragRangeGuide()
-      // 清除当前所有激活的节点
-      this.mindMap.execCommand('CLEAR_ACTIVE_NODE')
-      this.isDragging = true
     }
   }
 

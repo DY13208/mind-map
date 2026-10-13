@@ -51,6 +51,7 @@ export async function fillLocalKnowledge(body, { signal, onStatus } = {}) {
 }
 
 let apiActive = 0
+let apiLowActive = 0
 const apiHighWait = []
 const apiLowWait = []
 const inflightSubtree = new Map()
@@ -61,16 +62,20 @@ function acquireApiSlot(priority = 'high') {
   return new Promise(resolve => {
     const start = () => {
       apiActive += 1
+      if (priority === 'low') apiLowActive += 1
       let released = false
       resolve(() => {
         if (released) return
         released = true
         apiActive -= 1
-        const next = apiHighWait.shift() || apiLowWait.shift()
-        if (next) next()
+        if (priority === 'low') apiLowActive -= 1
+        while (apiActive < MAX_API_INFLIGHT && apiHighWait.length) apiHighWait.shift()()
+        // Keep one slot available to expansion/navigation while passive
+        // hydration runs. Preserve the overall concurrency bound of two.
+        while (apiActive < MAX_API_INFLIGHT && apiLowActive < 1 && apiLowWait.length) apiLowWait.shift()()
       })
     }
-    if (apiActive < MAX_API_INFLIGHT) {
+    if (apiActive < MAX_API_INFLIGHT && (priority !== 'low' || apiLowActive < 1)) {
       start()
       return
     }
@@ -581,11 +586,12 @@ export function getFileFlatNodes(roomKey) {
   )
 }
 
-export function locateFileNode(roomKey, uid) {
+export function locateFileNode(roomKey, uid, options = {}) {
   return request(
     `/api/files/${encodeURIComponent(roomKey)}/locate?uid=${encodeURIComponent(
       uid || ''
-    )}`
+    )}`,
+    { priority: options.priority || 'high' }
   )
 }
 
