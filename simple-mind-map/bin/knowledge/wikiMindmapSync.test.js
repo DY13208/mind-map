@@ -321,8 +321,8 @@ test('service: human update + create + idempotent second sync', async () => {
     slot: 'human',
     owner: 'human',
     docmost_page_id: 'page_h',
-    content_hash: '',
-    mindmap_hash: '',
+    content_hash: contentHash('stale-wiki-baseline'),
+    mindmap_hash: subtreeHash(mindmapSubtreeToTree(nodes, rootUid)),
     title: '入职'
   }
   let wikiMd =
@@ -479,6 +479,210 @@ test('service: SYNC_CONFLICT when both sides changed', async () => {
   } finally {
     store.ensureSchema = origEnsure
     store.getMappingByPageId = origGet
+    client.ensureSyncAuth = origAuth
+    client.request = origReq
+  }
+})
+
+test('service: mind-only change does not write wiki back', async () => {
+  const rootUid = 'root_abc'
+  const nodes = {
+    [rootUid]: {
+      isRoot: false,
+      data: { uid: rootUid, text: 'Root', note: 'from-mind' },
+      children: []
+    }
+  }
+  const wikiMd = '# Root\n\nfrom-wiki\n'
+  const mapping = {
+    room_id: 'room1',
+    topic_key: 'branches/root_abc.md',
+    slot: 'human',
+    owner: 'human',
+    docmost_page_id: 'page_h',
+    content_hash: contentHash(wikiMd),
+    mindmap_hash: contentHash('previous-mind'),
+    title: 't'
+  }
+  const commands = []
+
+  const store = require('./docmostMappingStore')
+  const origEnsure = store.ensureSchema
+  const origGet = store.getMappingByPageId
+  store.ensureSchema = async () => {}
+  store.getMappingByPageId = async () => mapping
+
+  const client = require('./adapters/docmostClient')
+  const origAuth = client.ensureSyncAuth
+  const origReq = client.request
+  client.ensureSyncAuth = async () => ({ cookie: 'c' })
+  client.request = async () => ({ id: 'page_h', title: 't', content: wikiMd })
+
+  const service = createWikiMindmapSyncService({
+    pool: { query: async () => ({ rows: [] }) },
+    loadRoomNodes: async () => ({ nodes }),
+    executeCommand: async (_room, command) => {
+      commands.push(command)
+      return {}
+    },
+    writeBackMarkers: false
+  })
+
+  try {
+    const r = await service.syncPageToMindmap({ pageId: 'page_h' })
+    assert.equal(r.success, true)
+    assert.equal(r.skipped, 1)
+    assert.equal(r.updated, 0)
+    assert.equal(r.created, 0)
+    assert.equal(r.deleted, 0)
+    assert.equal(commands.length, 0)
+    assert.equal(nodes[rootUid].data.note, 'from-mind')
+  } finally {
+    store.ensureSchema = origEnsure
+    store.getMappingByPageId = origGet
+    client.ensureSyncAuth = origAuth
+    client.request = origReq
+  }
+})
+
+test('service: missing baseline with existing mind content conflicts', async () => {
+  const rootUid = 'root_abc'
+  const nodes = {
+    [rootUid]: {
+      isRoot: false,
+      data: { uid: rootUid, text: 'Root', note: '' },
+      children: ['A']
+    },
+    A: {
+      isRoot: false,
+      data: { uid: 'A', text: '已有节点', note: '脑图正文' },
+      children: []
+    }
+  }
+  const mapping = {
+    room_id: 'room1',
+    topic_key: 'branches/root_abc.md',
+    slot: 'human',
+    owner: 'human',
+    docmost_page_id: 'page_h',
+    content_hash: '',
+    mindmap_hash: '',
+    title: 't'
+  }
+
+  const store = require('./docmostMappingStore')
+  const origEnsure = store.ensureSchema
+  const origGet = store.getMappingByPageId
+  store.ensureSchema = async () => {}
+  store.getMappingByPageId = async () => mapping
+
+  const client = require('./adapters/docmostClient')
+  const origAuth = client.ensureSyncAuth
+  const origReq = client.request
+  client.ensureSyncAuth = async () => ({ cookie: 'c' })
+  client.request = async () => ({
+    id: 'page_h',
+    title: 't',
+    content: '# Root\n\nwiki\n'
+  })
+
+  const service = createWikiMindmapSyncService({
+    pool: { query: async () => ({ rows: [] }) },
+    loadRoomNodes: async () => ({ nodes }),
+    executeCommand: async () => {
+      throw new Error('should not execute')
+    },
+    writeBackMarkers: false
+  })
+
+  try {
+    const r = await service.syncPageToMindmap({ pageId: 'page_h' })
+    assert.equal(r.success, false)
+    assert.equal(r.error, 'SYNC_CONFLICT')
+    assert.equal(r.conflicts[0].code, 'MISSING_BASELINE')
+    assert.equal(nodes.A.data.note, '脑图正文')
+
+    mapping.content_hash = contentHash('only-wiki-hash')
+    const partial = await service.syncPageToMindmap({ pageId: 'page_h' })
+    assert.equal(partial.success, false)
+    assert.equal(partial.error, 'SYNC_CONFLICT')
+    assert.equal(partial.conflicts[0].code, 'MISSING_BASELINE')
+  } finally {
+    store.ensureSchema = origEnsure
+    store.getMappingByPageId = origGet
+    client.ensureSyncAuth = origAuth
+    client.request = origReq
+  }
+})
+
+test('service: missing baseline on an empty branch is the first bind', async () => {
+  const rootUid = 'root_abc'
+  const nodes = {
+    [rootUid]: {
+      isRoot: false,
+      data: { uid: rootUid, text: 'Root', note: '' },
+      children: []
+    }
+  }
+  const mapping = {
+    room_id: 'room1',
+    topic_key: 'branches/root_abc.md',
+    slot: 'human',
+    owner: 'human',
+    docmost_page_id: 'page_h',
+    content_hash: '',
+    mindmap_hash: '',
+    title: 't'
+  }
+  const commands = []
+
+  const store = require('./docmostMappingStore')
+  const origEnsure = store.ensureSchema
+  const origGet = store.getMappingByPageId
+  const origRecord = store.recordWikiMindmapSyncState
+  store.ensureSchema = async () => {}
+  store.getMappingByPageId = async () => mapping
+  store.recordWikiMindmapSyncState = async () => mapping
+
+  const client = require('./adapters/docmostClient')
+  const origAuth = client.ensureSyncAuth
+  const origReq = client.request
+  client.ensureSyncAuth = async () => ({ cookie: 'c' })
+  client.request = async () => ({
+    id: 'page_h',
+    title: 't',
+    content: '# Root\n\n## 子节点\n\n正文\n'
+  })
+
+  const service = createWikiMindmapSyncService({
+    pool: { query: async () => ({ rows: [] }) },
+    loadRoomNodes: async () => ({ nodes }),
+    executeCommand: async (_room, command) => {
+      commands.push(command)
+      if (command.type === 'node.insert') {
+        const uid = 'new_1'
+        nodes[uid] = {
+          isRoot: false,
+          data: { uid, text: command.payload.text, note: command.payload.note || '' },
+          children: []
+        }
+        nodes[command.payload.parentUid].children.push(uid)
+        return { result: { uid }, event: { payload: { uid } } }
+      }
+      return { result: { uid: command.payload && command.payload.uid } }
+    },
+    writeBackMarkers: false
+  })
+
+  try {
+    const r = await service.syncPageToMindmap({ pageId: 'page_h' })
+    assert.equal(r.success, true)
+    assert.equal(r.created, 1)
+    assert.equal(commands.some(c => c.type === 'node.insert'), true)
+  } finally {
+    store.ensureSchema = origEnsure
+    store.getMappingByPageId = origGet
+    store.recordWikiMindmapSyncState = origRecord
     client.ensureSyncAuth = origAuth
     client.request = origReq
   }
