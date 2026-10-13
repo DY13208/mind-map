@@ -85,9 +85,11 @@ const handleClipboardText = async (text, extra = {}) => {
     }
     // 本应用内部复制的节点 JSON，交给默认粘贴逻辑
     if (parsedData && parsedData.simpleMindMap) {
-      return ''
+      return parsedData
     }
-  } catch (error) {}
+  } catch (error) {
+    // Non-JSON clipboard content continues through the outline parsers.
+  }
   // 知犀数据格式2
   if (raw.includes('￿﻿')) {
     const res = await handleZHIXI(raw)

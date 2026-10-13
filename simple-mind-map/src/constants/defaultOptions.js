@@ -155,6 +155,7 @@ export const defaultOpt = {
   // 概要节点也支持 children 字段，可在概要后继续添加子节点
   // 如果你的处理逻辑存在异步逻辑，也可以返回一个promise
   customHandleClipboardText: null,
+  customHandleClipboardData: null,
   // 禁止鼠标滚轮缩放，你仍旧可以使用api进行缩放
   disableMouseWheelZoom: false,
   // 错误处理函数

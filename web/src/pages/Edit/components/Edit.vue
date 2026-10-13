@@ -144,6 +144,7 @@ import {
   yieldToUi
 } from '@/utils/importTree'
 import handleClipboardText from '@/utils/handleClipboardText'
+import { copyNodeAttachments } from '@/utils/copyNodeAttachments'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
 import { isDarkThemeValue, resolveAppearanceTheme } from '@/utils/themeAppearance'
 import Scrollbar from './Scrollbar.vue'
@@ -1136,6 +1137,22 @@ export default {
         useLeftKeySelectionRightKeyDrag: this.useLeftKeySelectionRightKeyDrag,
         customInnerElsAppendTo: null,
         customHandleClipboardText: handleClipboardText,
+        customHandleClipboardData: async payload => {
+          const roomKey = roomFromLocation(this.$route)
+          let notice = null
+          try {
+            const trees = await copyNodeAttachments(payload, roomKey, () => {
+              notice = this.$message({ message: '正在复制附件，请稍候…', type: 'info', duration: 0 })
+            })
+            if (roomFromLocation(this.$route) !== roomKey) throw new Error('脑图已切换，请重新粘贴')
+            return trees
+          } catch (error) {
+            this.$message.error('粘贴失败：' + (error.message || '附件复制失败'))
+            throw error
+          } finally {
+            if (notice) notice.close()
+          }
+        },
         defaultNodeImage: require('../../../assets/img/图片加载失败.svg'),
         initRootNodePosition: ['center', 'center'],
         handleIsSplitByWrapOnPasteCreateNewNode: () => {

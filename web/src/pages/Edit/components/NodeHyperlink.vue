@@ -94,7 +94,13 @@ export default {
       this.link = this.removeProtocol(this.link)
     },
 
-    handleShowNodeLink() {
+    handleShowNodeLink(node) {
+      // Context menu edits must target the clicked node, even after selection changes.
+      if (node && typeof node.getData === 'function') {
+        this.handleNodeActive(null, [node])
+      } else {
+        this.handleNodeActive(null, this.activeNodes)
+      }
       this.dialogVisible = true
     },
 
@@ -103,13 +109,14 @@ export default {
     },
 
     confirm() {
+      const link = this.link.trim()
       this.activeNodes.forEach(node => {
         node.setHyperlink(
-          (this.protocol === 'none' ? '' : this.protocol + '://') + this.link,
-          this.linkTitle
+          link ? (this.protocol === 'none' ? '' : this.protocol + '://') + link : '',
+          link ? this.linkTitle : ''
         )
-        this.cancel()
       })
+      this.cancel()
     }
   }
 }
