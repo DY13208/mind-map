@@ -65,6 +65,6 @@ node scripts/deploy-performance-repair.cjs --dry-run --deploy mind-map-app:perf-
 node scripts/deploy-performance-repair.cjs --deploy mind-map-app:perf-repair-<提交号>
 ```
 
-回滚容器保持停止，移除 Compose 标签、端口绑定、生产网络及自动重启；旧镜像和原环境配置留在本地 Docker，凭证不写入发布报告或镜像。若旧代码目录有可写层补丁，脚本停止，避免使用不包含补丁的旧镜像作为备份。健康失败或镜像不一致时恢复原服务。成功后的 `deployment.json` 提供确切的回滚命令；回滚会重建带正确 Compose 身份的应用，而不是启动孤立备份。
+回滚容器保持停止，禁用 Compose 管理身份、端口绑定、生产网络及自动重启；旧镜像和原环境配置留在本地 Docker，凭证不写入发布报告或镜像。Docker 会继承镜像标签，备份因此把 Compose 标签值显式置空，避免仍被匹配成正式服务；校验区分空键与有效管理标签。若旧代码目录有可写层补丁，脚本停止，避免使用不包含补丁的旧镜像作为备份。健康失败或镜像不一致时恢复原服务。成功后的 `deployment.json` 提供确切的回滚命令；回滚会重建带正确 Compose 身份的应用，而不是启动孤立备份。
 
 发布后核对健康、功能开关、运行文件哈希和数据库列结构；最终手动验收仍由用户确认，重点是在实际业务大图展开/收起及两个窗口间编辑同步。

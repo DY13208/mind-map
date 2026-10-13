@@ -33,6 +33,7 @@ function makeCurrentContainer() {
         'com.docker.compose.container-number': '1',
         'com.docker.compose.image': 'sha256:old-image',
         'com.docker.compose.replace': 'app-1',
+        'com.docker.compose.version': '5.3.1',
         'custom.label': 'kept'
       },
       ExposedPorts: { '80/tcp': {} },
@@ -73,9 +74,29 @@ function makeHealthResponse(enabled, ok = true, status = 200) {
   }
 }
 
-function makeMockDocker(initial) {
+function makeMockDocker(initial, options = {}) {
   const containers = new Map([[TARGET, structuredClone(initial)]])
   const calls = []
+  const created = []
+  const imageLabels = options.imageLabels || {
+    'sha256:old-image': {
+      'com.docker.compose.project': 'mind-map',
+      'com.docker.compose.service': 'app',
+      'com.docker.compose.version': '5.3.1'
+    },
+    'sha256:new-image': {
+      'com.docker.compose.project': 'image-project',
+      'com.docker.compose.service': 'image-service',
+      'com.docker.compose.version': '5.4.0',
+      [BACKUP_LABEL]: 'true',
+      [BACKUP_SOURCE_IMAGE_LABEL]: 'image-source',
+      [BACKUP_BRIDGE_ENABLED_LABEL]: 'true'
+    }
+  }
+  const imageExposedPorts = options.imageExposedPorts || {
+    'sha256:old-image': { '80/tcp': {} },
+    'sha256:new-image': { '80/tcp': {} }
+  }
   let nextId = 0
   function docker(args) {
     calls.push(args.slice())
@@ -119,18 +140,38 @@ function makeMockDocker(initial) {
     const image = config.Image === 'mind-map-app:perf-repair-test'
       ? 'sha256:new-image'
       : config.Image
+    const configFields = Object.fromEntries(Object.entries(config).filter(([key]) =>
+      !['HostConfig', 'NetworkingConfig'].includes(key)
+    ))
     const container = {
       Id: 'mock-created-' + (++nextId),
       Name: '/' + name,
       Image: image,
-      Config: Object.fromEntries(Object.entries(config).filter(([key]) =>
-        !['HostConfig', 'NetworkingConfig'].includes(key)
-      )),
+      Config: {
+        ...configFields,
+        // Docker combines image Config.Labels with container labels, where
+        // explicitly supplied values (including empty strings) take priority.
+        Labels: {
+          ...(imageLabels[image] || {}),
+          ...(config.Labels || {})
+        },
+        // Image exposed ports are retained when the create config supplies {}.
+        ExposedPorts: {
+          ...(imageExposedPorts[image] || {}),
+          ...(config.ExposedPorts || {})
+        }
+      },
       HostConfig: structuredClone(config.HostConfig),
       State: { Running: false },
-      NetworkSettings: { Networks: {} },
+      NetworkSettings: {
+        Networks: config.HostConfig.NetworkMode === 'none'
+          ? {}
+          : { [config.HostConfig.NetworkMode]: {} }
+      },
       Mounts: config.HostConfig.Mounts || []
     }
+    if (options.mutateCreated) options.mutateCreated(container, name)
+    created.push(structuredClone(container))
     containers.set(name, container)
     return { Id: container.Id }
   }
@@ -139,7 +180,7 @@ function makeMockDocker(initial) {
     if (!container) throw new Error('mock inspect target missing: ' + name)
     return container
   }
-  return { docker, engine, inspect, containers, calls }
+  return { docker, engine, inspect, containers, calls, created }
 }
 
 async function testHealthGuard() {
@@ -159,10 +200,14 @@ function testBackupAndRuntimeConfig() {
   assert.equal(backup.Labels[BACKUP_LABEL], 'true')
   assert.equal(backup.Labels[BACKUP_SOURCE_IMAGE_LABEL], current.Image)
   assert.equal(backup.Labels[BACKUP_BRIDGE_ENABLED_LABEL], 'false')
-  assert.equal(Object.keys(backup.Labels).some(key => key.startsWith('com.docker.compose.')), false)
+  const backupComposeLabels = Object.entries(backup.Labels)
+    .filter(([key]) => key.startsWith('com.docker.compose.'))
+  assert.equal(backupComposeLabels.length, 6)
+  assert.equal(backupComposeLabels.every(([, value]) => value === ''), true)
   assert.equal(backup.HostConfig.NetworkMode, 'none')
   assert.deepEqual(backup.HostConfig.PortBindings, {})
   assert.equal(backup.HostConfig.RestartPolicy.Name, 'no')
+  assert.equal(backup.HostConfig.PublishAllPorts, false)
   assert.deepEqual(backup.ExposedPorts, {})
   assert.deepEqual(backup.HostConfig.Mounts, current.HostConfig.Mounts)
   assert.deepEqual(backup.Env, current.Config.Env)
@@ -172,6 +217,10 @@ function testBackupAndRuntimeConfig() {
   assert.equal(active.Labels['com.docker.compose.project'], 'mind-map')
   assert.equal(active.Labels['com.docker.compose.service'], 'app')
   assert.equal(active.Labels['com.docker.compose.image'], 'sha256:new-image')
+  assert.equal(active.Labels['com.docker.compose.version'], '5.3.1')
+  assert.equal(active.Labels[BACKUP_LABEL], '')
+  assert.equal(active.Labels[BACKUP_SOURCE_IMAGE_LABEL], '')
+  assert.equal(active.Labels[BACKUP_BRIDGE_ENABLED_LABEL], '')
   assert.deepEqual(active.HostConfig.PortBindings, current.HostConfig.PortBindings)
   assert.deepEqual(active.HostConfig.Mounts, current.HostConfig.Mounts)
   assert.equal(active.Env.find(entry => entry.startsWith('PRIVATE_TOKEN=')), current.Config.Env[0])
@@ -188,8 +237,40 @@ function testBackupAndRuntimeConfig() {
   assert.equal(restored.Image, current.Image)
   assert.deepEqual(restored.Env, backup.Env)
   assert.equal(restored.Labels['com.docker.compose.service'], 'app')
+  assert.equal(restored.Labels['com.docker.compose.version'], '5.3.1')
+  assert.equal(restored.Labels[BACKUP_LABEL], '')
+  assert.equal(restored.Labels[BACKUP_SOURCE_IMAGE_LABEL], '')
+  assert.equal(restored.Labels[BACKUP_BRIDGE_ENABLED_LABEL], '')
   assert.deepEqual(restored.HostConfig.PortBindings, current.HostConfig.PortBindings)
   assert.deepEqual(restored.HostConfig.Mounts, current.HostConfig.Mounts)
+}
+
+async function testDockerImageLabelInheritance() {
+  const current = makeCurrentContainer()
+  current.HostConfig.PublishAllPorts = true
+  const mock = makeMockDocker(current)
+  const backupName = 'mind-map-app-rollback-perf-2026-10-13T01-02-03-000Z'
+  const backupConfig = backupCreateConfig(current, false)
+  await mock.engine('POST', '/containers/create?name=' + backupName, backupConfig)
+  const backup = mock.inspect(backupName)
+  assert.equal(backup.Config.Labels['com.docker.compose.project'], '')
+  assert.equal(backup.Config.Labels['com.docker.compose.service'], '')
+  assert.equal(backup.Config.Labels['com.docker.compose.version'], '')
+  assert.deepEqual(backup.Config.ExposedPorts, { '80/tcp': {} })
+  assert.deepEqual(backup.HostConfig.PortBindings, {})
+  assert.equal(backup.HostConfig.PublishAllPorts, false)
+  assert.equal(backup.HostConfig.NetworkMode, 'none')
+  assert.deepEqual(backup.NetworkSettings.Networks, {})
+
+  const activeConfig = activeCreateConfig(current, 'mind-map-app:perf-repair-test', 'sha256:new-image', false)
+  await mock.engine('POST', '/containers/create?name=active-probe', activeConfig)
+  const active = mock.inspect('active-probe')
+  assert.equal(active.Config.Labels['com.docker.compose.project'], 'mind-map')
+  assert.equal(active.Config.Labels['com.docker.compose.service'], 'app')
+  assert.equal(active.Config.Labels['com.docker.compose.version'], '5.3.1')
+  assert.equal(active.Config.Labels[BACKUP_LABEL], '')
+  assert.equal(active.Config.Labels[BACKUP_SOURCE_IMAGE_LABEL], '')
+  assert.equal(active.Config.Labels[BACKUP_BRIDGE_ENABLED_LABEL], '')
 }
 
 function activeContainer(current, config) {
@@ -238,10 +319,52 @@ async function testDryRunDoesNotMutate() {
   const plan = await controller.dryRunDeploy('mind-map-app:perf-repair-test')
   assert.equal(plan.dryRun, true)
   assert.equal(plan.writableLayerCodeChanges, 0)
-  assert.equal(plan.backupComposeLabels, 0)
+  assert.deepEqual(plan.backupComposeLabels, {
+    blankKeys: [
+      'com.docker.compose.container-number',
+      'com.docker.compose.image',
+      'com.docker.compose.project',
+      'com.docker.compose.replace',
+      'com.docker.compose.service',
+      'com.docker.compose.version'
+    ],
+    activeComposeLabels: {}
+  })
   assert.equal(plan.composeManagedTarget, true)
   assert.equal(mock.calls.some(args => ['rename', 'stop', 'start', 'rm'].includes(args[0])), false)
   assert.equal(mock.calls.some(args => args[0] === 'engine' && args[1] === 'POST'), false)
+}
+
+async function testBackupValidationFailureLeavesOriginalInPlace() {
+  const original = makeCurrentContainer()
+  const mock = makeMockDocker(original, {
+    mutateCreated(container, name) {
+      if (name.startsWith('mind-map-app-rollback-perf-')) {
+        // Simulate a non-empty image-inherited Compose label surviving create.
+        container.Config.Labels['com.docker.compose.service'] = 'app'
+      }
+    }
+  })
+  const controller = createController({
+    ...mock,
+    inspectImage: () => 'sha256:new-image',
+    fetchImpl: async () => makeHealthResponse(false),
+    wait: async () => {},
+    healthAttempts: 1,
+    now: () => new Date('2026-10-13T01:02:03.000Z')
+  })
+
+  await assert.rejects(controller.deploy('mind-map-app:perf-repair-test'), /Compose 管理标签/)
+  const stillActive = mock.inspect(TARGET)
+  assert.equal(stillActive.Id, original.Id)
+  assert.equal(stillActive.Image, original.Image)
+  assert.equal(stillActive.State.Running, true)
+  assert.equal(mock.containers.has('mind-map-app-staging-perf-2026-10-13T01-02-03-000Z'), false)
+  assert.equal(mock.containers.has('mind-map-app-rollback-perf-2026-10-13T01-02-03-000Z'), false)
+  assert.equal(mock.calls.some(args => args[0] === 'rename'), false)
+  assert.equal(mock.calls.some(args => args[0] === 'stop'), false)
+  assert.equal(mock.calls.some(args => args[0] === 'rm' && args.includes('mind-map-app-rollback-perf-2026-10-13T01-02-03-000Z')), true)
+  assert.equal(mock.calls.some(args => args[0] === 'rm' && args.includes('-v')), false)
 }
 
 async function testFailedDeployRestoresOldContainer() {
@@ -319,8 +442,10 @@ async function testRollbackRebuildsManagedTargetAndKeepsBackup() {
 async function main() {
   await testHealthGuard()
   testBackupAndRuntimeConfig()
+  await testDockerImageLabelInheritance()
   testCodeLayerGuard()
   await testDryRunDoesNotMutate()
+  await testBackupValidationFailureLeavesOriginalInPlace()
   await testFailedDeployRestoresOldContainer()
   await testRollbackRebuildsManagedTargetAndKeepsBackup()
   console.log('deploy-performance-repair tests passed')

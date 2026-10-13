@@ -70,10 +70,36 @@ function assertNoCodeLayerChanges(changes) {
   return codeChanges
 }
 
-function stripComposeLabels(labels) {
+function blankComposeLabels(labels) {
   return Object.fromEntries(
-    Object.entries(labels || {}).filter(([key]) => !key.startsWith('com.docker.compose.'))
+    Object.entries(labels || {}).map(([key, value]) => [
+      key,
+      key.startsWith('com.docker.compose.') ? '' : value
+    ])
   )
+}
+
+function blankBackupMarkers(labels) {
+  return {
+    ...(labels || {}),
+    [BACKUP_LABEL]: '',
+    [BACKUP_SOURCE_IMAGE_LABEL]: '',
+    [BACKUP_BRIDGE_ENABLED_LABEL]: ''
+  }
+}
+
+function composeLabelSummary(labels) {
+  const entries = Object.entries(labels || {})
+    .filter(([key]) => key.startsWith('com.docker.compose.'))
+    .sort(([left], [right]) => left.localeCompare(right))
+  return {
+    blankKeys: entries
+      .filter(([, value]) => value == null || String(value) === '')
+      .map(([key]) => key),
+    activeComposeLabels: Object.fromEntries(
+      entries.filter(([, value]) => value != null && String(value) !== '')
+    )
+  }
 }
 
 function emptyPortBindings() {
@@ -90,7 +116,7 @@ function backupCreateConfig(current, bridgeEnabled) {
   const config = cloneJson(current.Config)
   config.Image = current.Image
   config.ExposedPorts = {}
-  config.Labels = stripComposeLabels(config.Labels)
+  config.Labels = blankComposeLabels(config.Labels)
   config.Labels[BACKUP_LABEL] = 'true'
   config.Labels[BACKUP_SOURCE_IMAGE_LABEL] = current.Image
   config.Labels[BACKUP_BRIDGE_ENABLED_LABEL] = String(bridgeEnabled)
@@ -99,6 +125,7 @@ function backupCreateConfig(current, bridgeEnabled) {
   const hostConfig = cloneJson(current.HostConfig)
   hostConfig.NetworkMode = 'none'
   hostConfig.PortBindings = emptyPortBindings()
+  hostConfig.PublishAllPorts = false
   hostConfig.RestartPolicy = { Name: 'no', MaximumRetryCount: 0 }
   hostConfig.AutoRemove = false
   delete hostConfig.ContainerIDFile
@@ -147,7 +174,7 @@ function activeCreateConfig(current, image, imageId, bridgeEnabled) {
   config.Image = image
   config.Env = Array.from(env, ([key, value]) => key + '=' + value)
   config.Labels = {
-    ...(config.Labels || {}),
+    ...blankBackupMarkers(config.Labels),
     'com.docker.compose.image': imageId
   }
   if (config.Hostname === String(current.Id || '').slice(0, 12)) config.Hostname = ''
@@ -166,9 +193,11 @@ function rollbackCreateConfig(current, backup) {
   config.Image = backup.Image
   config.ExposedPorts = cloneJson(current.Config.ExposedPorts || config.ExposedPorts || {})
   config.Labels = {
+    ...(backup.Config.Labels || {}),
     ...(current.Config.Labels || {}),
     'com.docker.compose.image': backup.Image
   }
+  config.Labels = blankBackupMarkers(config.Labels)
   if (config.Hostname === String(backup.Id || '').slice(0, 12)) config.Hostname = ''
   if (config.Hostname === String(current.Id || '').slice(0, 12)) config.Hostname = ''
   const createConfig = {
@@ -195,7 +224,8 @@ function assertRollbackBackup(container, name) {
     throw new Error('回滚容器缺少性能修复备份标记')
   }
   const labels = container.Config.Labels || {}
-  if (Object.keys(labels).some(key => key.startsWith('com.docker.compose.'))) {
+  const composeLabels = composeLabelSummary(labels)
+  if (Object.keys(composeLabels.activeComposeLabels).length) {
     throw new Error('回滚容器仍带有 Compose 管理标签，停止回滚')
   }
   if (container.Config.Labels[BACKUP_SOURCE_IMAGE_LABEL] !== container.Image) {
@@ -206,15 +236,17 @@ function assertRollbackBackup(container, name) {
   }
   if (container.State?.Running) throw new Error('回滚备份容器必须保持停止状态')
   const host = container.HostConfig || {}
-  if (host.NetworkMode !== 'none' || Object.keys(host.PortBindings || {}).length) {
+  if (host.NetworkMode !== 'none' || Object.keys(host.PortBindings || {}).length || host.PublishAllPorts !== false) {
     throw new Error('回滚备份容器仍连接网络或占用端口')
+  }
+  const networks = Object.keys(container.NetworkSettings?.Networks || {})
+  if (networks.some(network => network !== 'none')) {
+    throw new Error('回滚备份容器仍连接生产网络')
   }
   if (host.RestartPolicy?.Name !== 'no') {
     throw new Error('回滚备份容器必须禁用自动重启')
   }
-  if (Object.keys(container.Config.ExposedPorts || {}).length) {
-    throw new Error('回滚备份容器不得声明暴露端口')
-  }
+  return composeLabels
 }
 
 function engineRequest(socketPath, method, endpoint, data, httpModule = http) {
@@ -370,6 +402,8 @@ function createController(deps) {
     const plan = await getDeploymentPlan(image)
     let backupCreated = false
     let backupCreateAttempted = false
+    let backupId = null
+    let backupComposeLabels = null
     let stagingRenameAttempted = false
     let activeCreateAttempted = false
     let healthPassed = false
@@ -377,9 +411,9 @@ function createController(deps) {
     let committed = false
     try {
       backupCreateAttempted = true
-      await createContainer(plan.backupName, plan.backupConfig)
+      backupId = await createContainer(plan.backupName, plan.backupConfig)
       backupCreated = true
-      assertRollbackBackup(inspect(plan.backupName), plan.backupName)
+      backupComposeLabels = assertRollbackBackup(inspect(plan.backupName), plan.backupName)
 
       stagingRenameAttempted = true
       docker(['rename', TARGET, plan.stagingName])
@@ -408,7 +442,8 @@ function createController(deps) {
           source: 'original-container-image',
           imageId: plan.current.Image,
           writableLayerIncluded: false,
-          codeLayerChanges: 'none'
+          codeLayerChanges: 'none',
+          composeLabels: backupComposeLabels
         },
         health,
         preserved: {
@@ -487,12 +522,18 @@ function createController(deps) {
         }
       }
 
-      if (!recoveryError && (backupCreated || backupCreateAttempted)) {
+      if (!recoveryError && backupId && (backupCreated || backupCreateAttempted)) {
         const backup = tryInspect(plan.backupName)
         if (backup) {
           try {
-            assertRollbackBackup(backup, plan.backupName)
-            if (backup.Image !== plan.current.Image) throw new Error('新建回滚备份镜像不匹配')
+            if (backup.Id !== backupId) throw new Error('回滚备份名称已被其他容器占用，未删除未知容器')
+            const currentAtTarget = tryInspect(TARGET)
+            const staging = tryInspect(plan.stagingName)
+            const oldAppRestored = currentAtTarget?.Id === plan.current.Id && !staging
+            if (!oldAppRestored) {
+              assertRollbackBackup(backup, plan.backupName)
+              if (backup.Image !== plan.current.Image) throw new Error('新建回滚备份镜像不匹配')
+            }
             recoveryError = tryRemoveContainer(plan.backupName) || null
           } catch (backupError) {
             recoveryError = backupError
@@ -600,7 +641,7 @@ function createController(deps) {
       backupSourceImage: plan.current.Image,
       writableLayerCodeChanges: 0,
       composeManagedTarget: plan.activeConfig.Labels['com.docker.compose.service'] === 'app',
-      backupComposeLabels: Object.keys(plan.backupConfig.Labels).filter(key => key.startsWith('com.docker.compose.')).length,
+      backupComposeLabels: composeLabelSummary(plan.backupConfig.Labels),
       preserved: {
         environment: true,
         ports: Object.keys(plan.current.HostConfig.PortBindings || {}).length,
@@ -619,6 +660,7 @@ function createController(deps) {
       restoredImage: plan.imageId,
       bridgeEnabled: plan.expectedBridge,
       composeManagedTarget: plan.config.Labels['com.docker.compose.service'] === 'app',
+      composeLabels: composeLabelSummary(plan.config.Labels),
       ports: Object.keys(plan.config.HostConfig.PortBindings || {}).length,
       mounts: Object.keys(plan.config.HostConfig.Mounts || {}).length + (plan.current.Mounts || []).length,
       networks: Object.keys((plan.current.NetworkSettings && plan.current.NetworkSettings.Networks) || {})
@@ -695,7 +737,6 @@ module.exports = {
   networkEndpoints,
   parseEnvironment,
   rollbackCreateConfig,
-  stripComposeLabels,
   validateHealth
 }
 
