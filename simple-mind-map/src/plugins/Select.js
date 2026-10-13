@@ -1,4 +1,4 @@
-import { bfsWalk, throttle, checkTwoRectIsOverlap } from '../utils'
+import { bfsWalk, checkTwoRectIsOverlap } from '../utils'
 import AutoMove from '../utils/AutoMove'
 
 // 节点选择插件
@@ -16,6 +16,8 @@ class Select {
     this.cacheActiveList = []
     this.lastMultiSelectList = []
     this.lastMultiSelectUids = []
+    this.checkInNodesTimer = null
+    this.isDestroyed = false
     this.autoMove = new AutoMove(mindMap)
     this.bindEvent()
   }
@@ -26,7 +28,13 @@ class Select {
     this.onMousemove = this.onMousemove.bind(this)
     this.onMouseup = this.onMouseup.bind(this)
     this.checkInNodesRaw = this.checkInNodes.bind(this)
-    this.checkInNodes = throttle(this.checkInNodesRaw, 300, this)
+    this.checkInNodes = (...args) => {
+      if (this.checkInNodesTimer || this.isDestroyed) return
+      this.checkInNodesTimer = setTimeout(() => {
+        this.checkInNodesTimer = null
+        if (!this.isDestroyed) this.checkInNodesRaw(...args)
+      }, 300)
+    }
 
     this.onNodeActive = this.onNodeActive.bind(this)
     this.mindMap.on('mousedown', this.onMousedown)
@@ -38,17 +46,38 @@ class Select {
 
   // 解绑事件
   unBindEvent() {
+    this.isDestroyed = true
     this.mindMap.off('mousedown', this.onMousedown)
     this.mindMap.off('mousemove', this.onMousemove)
     this.mindMap.off('mouseup', this.onMouseup)
     this.mindMap.off('node_mouseup', this.onMouseup)
     this.mindMap.off('node_active', this.onNodeActive)
+    this.clearSelectionState()
+  }
+
+  isSelectionAllowed() {
+    const opt = this.mindMap.opt || {}
+    return !opt.readonly || opt.allowReadonlySelection
+  }
+
+  clearSelectionState() {
+    if (this.checkInNodesTimer) {
+      clearTimeout(this.checkInNodesTimer)
+      this.checkInNodesTimer = null
+    }
+    this.autoMove.clearAutoMoveTimer()
+    this.isMousedown = false
+    this.isSelecting = false
+    this.cacheActiveList = []
+    if (this.rect) this.rect.remove()
+    this.rect = null
   }
 
   // 鼠标按下
   onMousedown(e) {
-    const { readonly, mousedownEventPreventDefault } = this.mindMap.opt
-    if (readonly) {
+    const { mousedownEventPreventDefault } = this.mindMap.opt
+    if (!this.isSelectionAllowed()) {
+      this.clearSelectionState()
       return
     }
     let { useLeftKeySelectionRightKeyDrag } = this.mindMap.opt
@@ -74,7 +103,15 @@ class Select {
 
   // 鼠标移动
   onMousemove(e) {
-    if (this.mindMap.opt.readonly) {
+    if (!this.isSelectionAllowed()) {
+      if (
+        this.isMousedown ||
+        this.isSelecting ||
+        this.rect ||
+        this.checkInNodesTimer
+      ) {
+        this.clearSelectionState()
+      }
       return
     }
     if (!this.isMousedown) {
@@ -129,7 +166,8 @@ class Select {
 
   // 结束框选
   onMouseup() {
-    if (this.mindMap.opt.readonly) {
+    if (!this.isSelectionAllowed()) {
+      this.clearSelectionState()
       return
     }
     if (!this.isMousedown) {
@@ -138,16 +176,15 @@ class Select {
     const didSelect = this.isSelecting
     // 节流会丢掉松开前最后一次检测，这里立刻提交选区，否则右键菜单拿到的还是空选中
     if (didSelect) {
+      if (this.checkInNodesTimer) {
+        clearTimeout(this.checkInNodesTimer)
+        this.checkInNodesTimer = null
+      }
       if (typeof this.checkInNodesRaw === 'function') this.checkInNodesRaw()
       this.checkTriggerNodeActiveEvent()
       this.rememberMultiSelect()
     }
-    this.autoMove.clearAutoMoveTimer()
-    this.isMousedown = false
-    this.cacheActiveList = []
-    if (this.rect) this.rect.remove()
-    this.rect = null
-    this.isSelecting = false
+    this.clearSelectionState()
     if (didSelect && this.lastMultiSelectUids.length > 1) {
       const pos = (this.mindMap.event && this.mindMap.event.mousemovePos) || {}
       this.mindMap.emit('multi_select_end', {

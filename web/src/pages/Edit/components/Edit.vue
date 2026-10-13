@@ -1092,6 +1092,7 @@ export default {
       }
       this.prepareInitialCanvasBackground()
       this.mindMap = new MindMap({
+        historyCopyRoomKey: roomFromLocation(this.$route) || '',
         el: this.$refs.mindMapContainer,
         data: root,
         fit: false,

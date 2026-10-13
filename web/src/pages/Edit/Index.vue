@@ -62,6 +62,9 @@ export default {
     })
   },
   watch: {
+    historyVisible(value) {
+      this.setHistoryInteractionPaused(value)
+    },
     isDark() {
       this.setBodyDark()
     }
@@ -100,6 +103,7 @@ export default {
     this.setBodyDark()
   },
   beforeDestroy() {
+    this.setHistoryInteractionPaused(false)
     if (typeof this._finishRoomCanvasWait === 'function') {
       this._finishRoomCanvasWait()
     }
@@ -108,6 +112,22 @@ export default {
     this.setActiveSidebar('')
   },
   methods: {
+    setHistoryInteractionPaused(value) {
+      const editor = this.$refs.editor
+      const map = editor && editor.mindMap
+      if (map) map.opt.historyInteractionPaused = !!value
+      if (value && !map) return
+      if (value && !this._historyPausedMap) {
+        this._historyPausedMap = map
+        this._historyWasPaused = map.keyCommand.isPause
+        map.keyCommand.pause()
+      } else if (!value && this._historyPausedMap) {
+        const paused = this._historyPausedMap
+        if (!this._historyWasPaused) paused.keyCommand.recovery()
+        paused.opt.historyInteractionPaused = false
+        this._historyPausedMap = null
+      }
+    },
     ...mapMutations(['setLocalConfig', 'setActiveSidebar']),
 
     // 初始化本地配置

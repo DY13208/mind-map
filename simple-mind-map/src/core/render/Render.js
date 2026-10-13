@@ -47,11 +47,13 @@ import { lineStyleProps } from '../../theme/default'
 import { CONSTANTS, ERROR_TYPES } from '../../constants/constant'
 import { Polygon } from '@svgdotjs/svg.js'
 import mapRefUtil from '../../utils/mapRef'
+import collabPaste from '../../utils/collabPaste'
 import { undoTrace, undoFullTreeForbidden } from '../../utils/collabTrace'
 import {
   destroyStaleLayoutNodes,
   inspectLayoutRenderer
 } from '../../utils/collabLayoutCleanup'
+import historyClipboard from '../../utils/historyClipboard'
 
 // 布局列表
 const layouts = {
@@ -1575,6 +1577,7 @@ class Render {
       this.beingCopyData = null
       return
     }
+    historyClipboard.clearHistoryCopy()
     let nodeList = getTopAncestorsFomNodeList(this.activeNodeList)
     nodeList = sortNodeList(nodeList)
     const cooperate = this.mindMap.cooperate
@@ -1607,6 +1610,7 @@ class Render {
   }
 
   async cutNow() {
+    historyClipboard.clearHistoryCopy()
     const cooperate = this.mindMap.cooperate
     let copied = null
     if (
@@ -1662,6 +1666,7 @@ class Render {
 
   // 原生 paste：HTTP 可用，且点击节点后焦点在 SVG 上也能粘贴
   handlePaste(event) {
+    if (this.mindMap.opt.historyInteractionPaused) return
     if (this.mindMap.opt.readonly) return
     const { disabledClipboard } = this.mindMap.opt
     if (disabledClipboard) return
@@ -1672,20 +1677,41 @@ class Render {
       (event.originalEvent && event.originalEvent.clipboardData)
     if (!clipboardData) return
     const payload = this.readClipboardDataFromEvent(clipboardData)
-    if (!payload.text && !payload.html && !payload.img) return
+    if (!payload.text && !payload.html && !payload.img) {
+      const historyTrees = this.getHistoryCopyForCurrentRoom()
+      if (!historyTrees) return
+      this._pasteFromNativeEvent = true
+      event.preventDefault()
+      this.paste()
+      return
+    }
     this._pasteFromNativeEvent = true
     event.preventDefault()
     this.paste(payload)
   }
 
   pasteInAppCopy() {
+    if (this.mindMap.opt.historyInteractionPaused) return false
+    const historyTrees = this.getHistoryCopyForCurrentRoom()
+    if (historyTrees) {
+      this.mindMap.execCommand('PASTE_NODE', historyTrees)
+      return true
+    }
     if (!this.beingCopyData) return false
     this.mindMap.execCommand('PASTE_NODE', this.beingCopyData)
     return true
   }
 
+  getHistoryCopyForCurrentRoom() {
+    const roomKey = this.mindMap && this.mindMap.opt
+      ? this.mindMap.opt.historyCopyRoomKey
+      : ''
+    return roomKey ? historyClipboard.getHistoryCopy(roomKey) : null
+  }
+
   // 粘贴
   async paste(preset = null) {
+    if (this.mindMap.opt.historyInteractionPaused) return
     if (this._copyPromise) {
       try {
         await this._copyPromise
@@ -1716,6 +1742,11 @@ class Render {
         errorHandler(ERROR_TYPES.READ_CLIPBOARD_ERROR, error)
       }
     }
+    const historyTrees = this.getHistoryCopyForCurrentRoom()
+    if (historyTrees) {
+      this.mindMap.execCommand('PASTE_NODE', historyTrees)
+      return
+    }
     if (this.beingCopyData) {
       this.mindMap.execCommand('PASTE_NODE', this.beingCopyData)
     }
@@ -1732,6 +1763,7 @@ class Render {
     // 本应用刚复制的节点：剪贴板已是 Tab 大纲，用内存中的完整数据粘贴
     if (
       this.beingCopyData &&
+      !this.getHistoryCopyForCurrentRoom() &&
       text &&
       !checkSmmFormatData(text).isSmm &&
       clipboardTextLooksLikeOutline(text)
@@ -2265,7 +2297,20 @@ class Render {
       trees = cooperate.preparePasteTrees(trees)
     } else {
       trees = formatDataToArray(simpleDeepClone(data))
-      createUidForAppointNodes(trees, true, null, true)
+      const roomKey = this.mindMap.opt && this.mindMap.opt.historyCopyRoomKey
+      const historySignature = roomKey
+        ? historyClipboard.getHistoryCopySignature(roomKey)
+        : ''
+      const isHistoryCopy =
+        !!historySignature &&
+        historySignature === JSON.stringify({ simpleMindMap: true, data: trees })
+      if (isHistoryCopy) {
+        // History extraction resolves private image keys against that version's
+        // own imgMap. Do not let a same-key entry in the current map replace it.
+        trees = collabPaste.preparePasteTrees(trees).trees
+      } else {
+        createUidForAppointNodes(trees, true, null, true)
+      }
     }
     this.mindMap.execCommand('INSERT_MULTI_CHILD_NODE', [], trees)
   }

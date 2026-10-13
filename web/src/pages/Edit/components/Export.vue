@@ -4,10 +4,7 @@
     :class="{ isMobile: isMobile, isDark: isDark }"
     :title="$t('export.title')"
     :visible.sync="dialogVisible"
-    v-loading.fullscreen.lock="loading"
-    :element-loading-text="loadingText"
-    element-loading-spinner="el-icon-loading"
-    element-loading-background="rgba(0, 0, 0, 0.8)"
+    :append-to-body="managed"
     :width="isMobile ? '90%' : '800px'"
     :top="isMobile ? '20px' : '15vh'"
   >
@@ -46,7 +43,12 @@
             <span class="closeBtn el-icon-close" @click="cancel"></span>
           </div>
           <!-- 配置 -->
-          <div class="contentBox customScrollbar">
+          <div
+            class="contentBox customScrollbar"
+            v-loading="managed && loading"
+            :element-loading-text="loadingText"
+            element-loading-spinner="el-icon-loading"
+          >
             <div class="contentRow">
               <div class="contentName">{{ $t('export.format') }}</div>
               <div class="contentValue info">
@@ -131,10 +133,16 @@
           </div>
           <!-- 按钮 -->
           <div class="btnList">
+            <span v-if="managed && loading" role="status" aria-live="polite">正在导出历史版本…</span>
             <el-button @click="cancel" size="small">{{
               $t('dialog.cancel')
             }}</el-button>
-            <el-button type="primary" @click="confirm" size="small">{{
+            <el-button
+              type="primary"
+              @click="confirm"
+              size="small"
+              :loading="managed && loading"
+            >{{
               $t('export.confirm')
             }}</el-button>
           </div>
@@ -148,16 +156,27 @@
 import { mapState, mapMutations } from 'vuex'
 import { downTypeList } from '@/config'
 import { isMobile } from 'simple-mind-map/src/utils/index'
-import MarkdownIt from 'markdown-it'
 
-// 导出
-let md = null
 export default {
+  props: {
+    executeExport: {
+      type: Function,
+      default: null
+    },
+    defaultFileName: {
+      type: String,
+      default: ''
+    },
+    managed: {
+      type: Boolean,
+      default: false
+    }
+  },
   data() {
     return {
       dialogVisible: false,
       exportType: 'smm',
-      fileName: this.$t('export.defaultFileName'),
+      fileName: this.defaultFileName || this.$t('export.defaultFileName'),
       widthConfig: true,
       isTransparent: false,
       loading: false,
@@ -167,7 +186,9 @@ export default {
       extraText: '',
       isMobile: isMobile(),
       isFitBg: true,
-      imageFormat: 'png'
+      imageFormat: 'png',
+      operationToken: 0,
+      closeEvent: ''
     }
   },
   computed: {
@@ -206,19 +227,47 @@ export default {
     }
   },
   created() {
-    this.$bus.$on('showExport', this.handleShowExport)
+    if (!this.managed) {
+      this.$bus.$on('showExport', this.handleShowExport)
+    }
   },
   beforeDestroy() {
-    this.$bus.$off('showExport', this.handleShowExport)
+    if (!this.managed) {
+      this.$bus.$off('showExport', this.handleShowExport)
+    }
+  },
+  watch: {
+    dialogVisible(value, oldValue) {
+      // Element UI can close the dialog directly (Escape or backdrop). Treat
+      // that as cancellation too, so the history owner can abort its request.
+      if (
+        this.managed &&
+        oldValue &&
+        !value &&
+        !this.closeEvent
+      ) {
+        this.operationToken += 1
+        this.loading = false
+        this.$emit('cancelled')
+      }
+    }
   },
   methods: {
     ...mapMutations(['setExtraTextOnExport']),
 
     handleShowExport() {
+      this.open()
+    },
+
+    open() {
+      if (this.managed) {
+        this.fileName = this.defaultFileName || this.$t('export.defaultFileName')
+      }
       this.dialogVisible = true
     },
 
     onPaddingChange() {
+      if (this.managed) return
       this.$bus.$emit('paddingChange', {
         exportPaddingX: Number(this.paddingX),
         exportPaddingY: Number(this.paddingY)
@@ -226,10 +275,75 @@ export default {
     },
 
     cancel() {
-      this.dialogVisible = false
+      if (this.managed && this.loading) {
+        this.operationToken += 1
+        this.loading = false
+      }
+      this.closeDialog(this.managed ? 'cancelled' : '')
     },
 
-    confirm() {
+    closeDialog(eventName) {
+      if (!this.dialogVisible) return
+      if (this.managed && eventName) {
+        this.closeEvent = eventName
+      }
+      this.dialogVisible = false
+      if (this.managed && eventName) {
+        this.$emit(eventName)
+        this.$nextTick(() => {
+          this.closeEvent = ''
+        })
+      }
+    },
+
+    createExportRequest() {
+      return {
+        type: this.exportType === 'png' ? this.imageFormat : this.exportType,
+        fileName: this.fileName,
+        withConfig: this.widthConfig,
+        isTransparent: this.isTransparent,
+        isFitBg: this.isFitBg,
+        paddingX: Number(this.paddingX),
+        paddingY: Number(this.paddingY),
+        extraText: this.extraText
+      }
+    },
+
+    async confirm() {
+      if (this.loading) return
+
+      if (this.managed) {
+        if (typeof this.executeExport !== 'function') {
+          this.$message.error('历史版本导出不可用')
+          return
+        }
+
+        const operationToken = ++this.operationToken
+        const request = this.createExportRequest()
+        this.loading = true
+        this.loadingText = this.$t('export.notifyMessage')
+        try {
+          await this.executeExport(request)
+          if (operationToken !== this.operationToken) return
+          this.$notify.info({
+            title: this.$t('export.notifyTitle'),
+            message: this.$t('export.notifyMessage')
+          })
+          this.closeDialog('completed')
+        } catch (error) {
+          if (operationToken !== this.operationToken) return
+          this.$message.error(
+            (error && error.message) || this.$t('edit.exportError')
+          )
+          this.$emit('failed', error)
+        } finally {
+          if (operationToken === this.operationToken) {
+            this.loading = false
+          }
+        }
+        return
+      }
+
       this.setExtraTextOnExport(this.extraText)
       if (this.exportType === 'svg') {
         this.$bus.$emit(
@@ -277,7 +391,7 @@ export default {
         title: this.$t('export.notifyTitle'),
         message: this.$t('export.notifyMessage')
       })
-      this.cancel()
+      this.closeDialog('')
     }
   }
 }

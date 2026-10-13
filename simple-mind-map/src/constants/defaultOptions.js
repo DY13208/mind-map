@@ -11,6 +11,8 @@ export const defaultOpt = {
   viewData: null,
   // 是否只读
   readonly: false,
+  // 只读模式下是否允许通过点击、多选和框选激活节点
+  allowReadonlySelection: false,
   // 布局
   layout: CONSTANTS.LAYOUT.LOGICAL_STRUCTURE,
   // 第一种逻辑结构图的紧凑排列开关

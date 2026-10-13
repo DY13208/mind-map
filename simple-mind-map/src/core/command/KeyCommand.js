@@ -111,6 +111,7 @@ export default class KeyCommand {
 
   // 按键事件
   onKeydown(e) {
+    if (this.mindMap.opt.historyInteractionPaused) return
     const {
       enableShortcutOnlyWhenMouseInSvg,
       beforeShortcutRun,

@@ -382,6 +382,7 @@ class MindMapNode {
     this.group.on('mousedown', e => {
       const {
         readonly,
+        allowReadonlySelection,
         enableCtrlKeyNodeSelection,
         useLeftKeySelectionRightKeyDrag,
         mousedownEventPreventDefault
@@ -389,8 +390,9 @@ class MindMapNode {
       if (mousedownEventPreventDefault) {
         e.preventDefault()
       }
-      // 只读模式不需要阻止冒泡
-      if (!readonly) {
+      const canSelectNode = !readonly || allowReadonlySelection
+      // 只允许选择的只读模式沿用可编辑画布的冒泡处理，避免节点手势触发背景框选或平移。
+      if (canSelectNode) {
         if (this.isRoot) {
           // 根节点，右键拖拽画布模式下不需要阻止冒泡
           if (e.which === 3 && !useLeftKeySelectionRightKeyDrag) {
@@ -405,7 +407,7 @@ class MindMapNode {
       }
       // 多选和取消多选
       if (
-        !readonly &&
+        canSelectNode &&
         e.button !== 2 && e.which !== 3 &&
         (e.ctrlKey || e.metaKey) &&
         enableCtrlKeyNodeSelection

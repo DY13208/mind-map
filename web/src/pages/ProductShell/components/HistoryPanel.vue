@@ -41,6 +41,7 @@
             ref="mapPreview"
             :tree="preview.tree"
             :metadata="preview.metadata"
+            :room-key="String(roomKey)"
             :loading="preview.loading"
             :error="preview.error"
             @retry="selected && loadPreview(selected)"
@@ -116,6 +117,7 @@
                 </p>
                 <p class="versionSummary">{{ summaryText(item) }}</p>
                 <div class="versionActions">
+                  <el-button size="mini" :disabled="restoring || exporting || item.availability === 'unreadable'" @click.stop="openExport(item)">导出此版本</el-button>
                   <el-button
                     v-if="canRestoreItem(item)"
                     size="mini"
@@ -138,6 +140,7 @@
         </aside>
       </div>
     </div>
+    <HistoryExportDialog ref="exportDialog" managed :execute-export="executeHistoryExport" :default-file-name="exportFileName" @cancelled="cancelExport" @completed="cancelExport" />
     <span slot="footer">
       <el-button
         v-if="lastPreRestoreId"
@@ -159,6 +162,9 @@ import {
 } from '@/utils/historyTree'
 import EmptyState from './EmptyState.vue'
 import HistoryMapPreview from './HistoryMapPreview.vue'
+import HistoryExportDialog from '@/pages/Edit/components/Export.vue'
+import { exportHistoryVersion } from '@/services/historyExport'
+import { prepareHistorySnapshot } from '@/utils/historySnapshot'
 
 function endOfDay(isoDate) {
   return isoDate ? isoDate + 'T23:59:59.999Z' : ''
@@ -166,7 +172,7 @@ function endOfDay(isoDate) {
 
 export default {
   name: 'HistoryPanel',
-  components: { EmptyState, HistoryMapPreview },
+  components: { EmptyState, HistoryMapPreview, HistoryExportDialog },
   props: {
     visible: Boolean,
     room: Object,
@@ -178,6 +184,8 @@ export default {
     loadingMore: false,
     creating: false,
     restoring: false,
+    exporting: false,
+    exportFileName: '',
     restoreStatus: '',
     restoreError: '',
     error: '',
@@ -259,7 +267,11 @@ export default {
       } else {
         this._reloadToken = (this._reloadToken || 0) + 1
         if (this.listController) this.listController.abort()
+        if (this._loadMoreController) this._loadMoreController.abort()
+        this.loadingMore = false
         this.abortPreview()
+        this.cancelExport()
+        if (this.$refs.exportDialog) this.$refs.exportDialog.cancel()
         const mapPreview = this.$refs.mapPreview
         if (mapPreview && mapPreview.teardown) mapPreview.teardown()
       }
@@ -273,9 +285,48 @@ export default {
     window.removeEventListener('resize', this.measure)
     this.unbindDialogDrag()
     this.abortPreview()
+    this.cancelExport()
     if (this.listController) this.listController.abort()
+    if (this._loadMoreController) this._loadMoreController.abort()
   },
   methods: {
+    async openExport(item) {
+      if (this.exporting || this.restoring || item.availability === 'unreadable') return
+      this.cancelExport()
+      this._exportTarget = { roomKey: String(this.roomKey), versionId: item.versionId }
+      const stamp = new Date(item.createdAt).toLocaleString('sv-SE').replace(/[:/\\]/g, '-')
+      this.exportFileName = `${(this.room && this.room.title) || '脑图'}-${stamp}-${item.versionId}`.replace(/[<>:"/\\|?*]/g, '-')
+      await this.$nextTick()
+      if (this.visible && this.$refs.exportDialog) this.$refs.exportDialog.open()
+    },
+    cancelExport() {
+      if (this._exportController) this._exportController.abort()
+      this._exportController = null
+      this._exportTarget = null
+      this.exporting = false
+    },
+    async executeHistoryExport(request) {
+      const target = this._exportTarget
+      if (!target || this.exporting) throw new Error('请重新选择要导出的历史版本')
+      const controller = new AbortController()
+      this._exportController = controller
+      this.exporting = true
+      try {
+        const version = await historyService.getVersionTree(target.roomKey, target.versionId, { signal: controller.signal })
+        if (controller.signal.aborted || target !== this._exportTarget) {
+          const error = new Error('导出已取消')
+          error.name = 'AbortError'
+          throw error
+        }
+        const snapshot = prepareHistorySnapshot(version.tree, version.metadata)
+        return await exportHistoryVersion({ tree: snapshot.tree, metadata: version.metadata || {}, request, signal: controller.signal })
+      } finally {
+        if (this._exportController === controller) {
+          this._exportController = null
+          this.exporting = false
+        }
+      }
+    },
     typeLabel: versionTypeLabel,
     typeTag: versionTypeTag,
     displayName: historyDisplayName,
@@ -389,6 +440,8 @@ export default {
     },
     async reload() {
       const reloadToken = this._reloadToken = (this._reloadToken || 0) + 1
+      if (this._loadMoreController) this._loadMoreController.abort()
+      this.loadingMore = false
       if (this.listController) this.listController.abort()
       const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
       this.listController = controller
@@ -426,19 +479,28 @@ export default {
     },
     async loadMore() {
       if (!this.nextCursor || this.loadingMore) return
+      const token = this._reloadToken
+      const roomKey = this.roomKey
+      const controller = new AbortController()
+      this._loadMoreController = controller
       this.loadingMore = true
       try {
-        const result = await historyService.listVersions(this.roomKey, {
+        const result = await historyService.listVersions(roomKey, {
           ...this.query(),
           cursor: this.nextCursor
-        })
+        }, { signal: controller.signal })
+        if (!this.visible || token !== this._reloadToken || roomKey !== this.roomKey || controller.signal.aborted) return
         const extra = result.list || []
         this.versions = this.versions.concat(extra)
         this.nextCursor = result.nextCursor || null
       } catch (error) {
+        if (controller.signal.aborted || token !== this._reloadToken || !this.visible) return
         this.$message.error(userMessageFromError(error))
       } finally {
-        this.loadingMore = false
+        if (this._loadMoreController === controller) {
+          this._loadMoreController = null
+          this.loadingMore = false
+        }
       }
     },
     abortPreview() {

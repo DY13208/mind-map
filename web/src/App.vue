@@ -132,7 +132,7 @@
       </div>
     </div>
     <template v-else>
-      <router-view></router-view>
+      <router-view :key="$route.path === '/' ? 'editor:' + String($route.query.room || '') : 'page'"></router-view>
       <div
         v-if="authState.workbuddyEnabled && (workbuddyLinkNeeded || workbuddyLinkSuccess)"
         class="authLinkNotice"
