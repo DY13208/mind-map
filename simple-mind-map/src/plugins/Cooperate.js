@@ -6459,7 +6459,8 @@ class Cooperate {
           uid,
           text,
           note,
-          index: row.index
+          index: row.index,
+          data: row.data || undefined
         })
         this.markUidPushed(uid, row.data || { text, note }, 'ack')
         this.recentPushed.set(uid, Date.now())

@@ -1145,7 +1145,8 @@ export const setDataToClipboard = data => {
   const outline = nodesToTabOutline(trees)
   const html = nodesToOutlineHtml(trees, data)
   const smmJson = JSON.stringify(data)
-  // Without HTML support, JSON is the only way to preserve node metadata.
+  // Paste events may omit HTML even after a successful multi-format write.
+  // Keep complete data in plain text too; HTML still provides the readable outline.
   const plain = smmJson
 
   const fallbackCopy = text => {
@@ -1165,7 +1166,7 @@ export const setDataToClipboard = data => {
 
   if (navigator.clipboard && navigator.clipboard.write && outline) {
     const items = {
-      'text/plain': new Blob([outline], { type: 'text/plain' })
+      'text/plain': new Blob([plain], { type: 'text/plain' })
     }
     if (html) {
       items['text/html'] = new Blob([html], { type: 'text/html' })
