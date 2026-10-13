@@ -18,6 +18,7 @@ const {
 } = require('../collabHistory/clientEpoch')
 const {
   createOpId,
+  isPositionOnlyUpdate,
   isOpId,
   normalizeOperation,
   isWriteType,
@@ -129,6 +130,9 @@ function isFatalJoinError(err) {
 
 const REJOIN_BASE_DELAY_MS = 2000
 const REJOIN_MAX_DELAY_MS = 30000
+const SNAPSHOT_RETRY_BASE_DELAY_MS = 1000
+const SNAPSHOT_RETRY_MAX_DELAY_MS = 30000
+const MAX_BUFFERED_REMOTE_OPS = 2000
 
 const SKIPPABLE_GONE_CODES = {
   UID_REUSED: true,
@@ -139,8 +143,45 @@ const SKIPPABLE_GONE_CODES = {
   MOVE_CONFLICT: true
 }
 
+const INCREMENTAL_EVENT_TYPES = new Set([
+  'map.updated',
+  'node.inserted',
+  'node.updated',
+  'node.moved',
+  'node.reordered',
+  'node.deleted',
+  'node.restored',
+  'operation.undone',
+  'operation.redone'
+])
+
+function operationRequiresSnapshot(op) {
+  const event = (op && op.event) || {}
+  const payload = (op && op.payload) || event.payload || {}
+  const type = String(op && (op.type || event.type) || '')
+  return (
+    event.resnapshot === true ||
+    payload.resnapshot === true ||
+    type === 'map.replaced' ||
+    isVersionRestoreEvent(op) ||
+    !INCREMENTAL_EVENT_TYPES.has(type)
+  )
+}
+
 function isSkippableGoneError(code) {
   return !!SKIPPABLE_GONE_CODES[String(code || '')]
+}
+
+function ackRevisionDisposition(currentRevision, acknowledgedRevision) {
+  const current = Math.max(0, Number(currentRevision) || 0)
+  const acknowledged = Math.max(0, Number(acknowledgedRevision) || 0)
+  if (!acknowledged || acknowledged <= current) {
+    return { advance: false, resync: false }
+  }
+  if (acknowledged === current + 1) {
+    return { advance: true, resync: false }
+  }
+  return { advance: false, resync: true }
 }
 
 function insertUidsOf(op) {
@@ -330,6 +371,13 @@ function createCollaborationAdapter(options = {}) {
   let draining = false
   let enqueueGate = Promise.resolve()
   let historyQueue = Promise.resolve()
+  let remoteEventsBuffered = false
+  let bufferedRemoteOps = []
+  let pendingResnapshotNotice = null
+  let resyncPromise = null
+  let resyncRetryTimer = null
+  let resyncRetryAttempts = 0
+  let resnapshotBufferOwned = false
 
   function withEnqueueLock(fn) {
     const prev = enqueueGate
@@ -602,6 +650,91 @@ function createCollaborationAdapter(options = {}) {
     assignLastServerRevision(rev, { allowDecrease: false })
   }
 
+  function rememberResnapshotNotice(payload) {
+    const reportedRevision = payload && payload.currentRevision != null
+      ? payload.currentRevision
+      : payload && payload.serverRevision != null
+        ? payload.serverRevision
+        : payload && payload.currentVersion
+    const revision = Math.max(
+      0,
+      Number(reportedRevision) || 0
+    )
+    if (
+      !pendingResnapshotNotice ||
+      revision >= Number(pendingResnapshotNotice.currentRevision || 0)
+    ) {
+      pendingResnapshotNotice = {
+        ...(payload || {}),
+        roomKey: state.roomKey,
+        reload: true,
+        code: 'RESNAPSHOT_REQUIRED',
+        currentRevision: revision,
+        serverRevision: revision
+      }
+    }
+  }
+
+  function bufferRemoteOperation(op) {
+    if (!op) return
+    const opId = String(op.opId || op.operationId || '')
+    const revision = Number(op.serverRevision || op.version || 0)
+    const duplicate = bufferedRemoteOps.some(item =>
+      (opId && String(item.opId || item.operationId || '') === opId) ||
+      (revision > 0 && Number(item.serverRevision || item.version || 0) === revision)
+    )
+    if (duplicate) return
+    bufferedRemoteOps.push(op)
+    if (bufferedRemoteOps.length > MAX_BUFFERED_REMOTE_OPS) {
+      bufferedRemoteOps = []
+      rememberResnapshotNotice({
+        roomKey: state.roomKey,
+        reason: 'BUFFER_OVERFLOW',
+        currentRevision: Number(state.serverRevision || state.lastServerRevision || 0)
+      })
+    }
+  }
+
+  function scheduleResyncRetry(notice) {
+    if (notice) rememberResnapshotNotice(notice)
+    if (resyncRetryTimer || !state.roomKey) return
+    const delay = Math.min(
+      SNAPSHOT_RETRY_MAX_DELAY_MS,
+      SNAPSHOT_RETRY_BASE_DELAY_MS * Math.pow(2, Math.min(5, resyncRetryAttempts))
+    )
+    resyncRetryAttempts += 1
+    resyncRetryTimer = setTimeout(() => {
+      resyncRetryTimer = null
+      const retryNotice = pendingResnapshotNotice
+      pendingResnapshotNotice = null
+      resync(retryNotice ? { forceSnapshot: true, payload: retryNotice } : {}).catch(() => {})
+    }, delay)
+    if (resyncRetryTimer.unref) resyncRetryTimer.unref()
+  }
+
+  async function finishRemoteBuffer(options = {}) {
+    remoteEventsBuffered = false
+    if (options.discard) {
+      bufferedRemoteOps = []
+      pendingResnapshotNotice = null
+      return
+    }
+    const buffered = bufferedRemoteOps
+      .splice(0)
+      .sort((a, b) =>
+        Number(a.serverRevision || a.version || 0) -
+        Number(b.serverRevision || b.version || 0)
+      )
+    for (const op of buffered) {
+      await applyRemoteOperation(op, { buffered: true })
+    }
+    const notice = pendingResnapshotNotice
+    pendingResnapshotNotice = null
+    if (notice) {
+      await resync({ forceSnapshot: true, payload: notice })
+    }
+  }
+
   function deriveSaveState() {
     const pendingAcks = state.pendingAcks.size
     const outboxPending = Number(state.outboxPending || 0)
@@ -722,6 +855,8 @@ function createCollaborationAdapter(options = {}) {
 
   async function applyRemoteOperation(op, meta = {}) {
     if (!op) return
+    const opRoomKey = String(op.roomKey || '').trim()
+    if (opRoomKey && state.roomKey && opRoomKey !== state.roomKey) return
     const opId = op.opId || op.operationId
     adapterTrace('10.remote.recv', {
       traceId: op.traceId || (op.payload && op.payload.traceId),
@@ -737,13 +872,15 @@ function createCollaborationAdapter(options = {}) {
     const opClientId = String(
       (op && op.clientId) || (op && op.event && op.event.clientId) || ''
     ).trim()
-    if (opClientId && opClientId === state.clientId) {
-      if (opId) state.seenOpIds.add(opId)
-      advanceRevision(rev)
-      adapterTrace('10.remote.echo-self', { opId, clientId: opClientId, rev })
-      return
-    }
-    if (rev && rev > state.lastServerRevision + 1 && !meta.fromSync) {
+    if (rev && rev > state.lastServerRevision + 1) {
+      if (meta.fromSync) {
+        const error = new Error(
+          'sync page is not contiguous at ' + (state.lastServerRevision + 1)
+        )
+        error.code = 'RESNAPSHOT_REQUIRED'
+        error.currentRevision = state.lastServerRevision
+        throw error
+      }
       recordError({
         code: 'REVISION_GAP',
         message: 'revision gap ' + rev + ' > ' + (state.lastServerRevision + 1),
@@ -751,15 +888,24 @@ function createCollaborationAdapter(options = {}) {
         opId,
         details: { serverRevision: rev, lastServerRevision: state.lastServerRevision }
       })
+      bufferRemoteOperation(op)
       await resync()
+      return
+    }
+    if (rev && rev <= state.lastServerRevision) {
+      if (opId) state.seenOpIds.add(opId)
+      return
+    }
+    if (opClientId && opClientId === state.clientId) {
+      if (opId) state.seenOpIds.add(opId)
+      advanceRevision(rev)
+      adapterTrace('10.remote.echo-self', { opId, clientId: opClientId, rev })
       return
     }
     if (opId && state.seenOpIds.has(opId)) {
       advanceRevision(rev)
       return
     }
-    if (opId) state.seenOpIds.add(opId)
-    advanceRevision(rev)
     if (!meta.local && isVersionRestoreEvent(op)) {
       state.drainPaused = true
       await quarantinePendingAfterRestore(outbox, state.clientId, state.roomKey)
@@ -769,6 +915,8 @@ function createCollaborationAdapter(options = {}) {
     if (options.onRemoteOperation && !meta.local) {
       await options.onRemoteOperation(op)
     }
+    if (opId) state.seenOpIds.add(opId)
+    advanceRevision(rev)
     if (!meta.local) kickDrain()
     emit()
   }
@@ -781,6 +929,10 @@ function createCollaborationAdapter(options = {}) {
     next._collabBound = true
     socket = next
     socket.on('op:event', op => {
+      if (remoteEventsBuffered) {
+        bufferRemoteOperation(op)
+        return
+      }
       applyRemoteOperation(op).catch(err => {
         recordError({
           code: (err && err.code) || 'REMOTE_APPLY_FAILED',
@@ -791,6 +943,14 @@ function createCollaborationAdapter(options = {}) {
         })
         setStatus('live', { saveState: 'error' })
       })
+    })
+    socket.on('sync:resnapshot-required', payload => {
+      if (!payload || String(payload.roomKey || '') !== state.roomKey) return
+      rememberResnapshotNotice(payload)
+      if (remoteEventsBuffered) return
+      const notice = pendingResnapshotNotice
+      pendingResnapshotNotice = null
+      resync({ forceSnapshot: true, payload: notice }).catch(() => {})
     })
     if (!next._diagBound) {
       next._diagBound = true
@@ -979,6 +1139,7 @@ function createCollaborationAdapter(options = {}) {
 
   async function joinRoom() {
     if (!socket) throw new Error('socket missing')
+    remoteEventsBuffered = true
     setStatus('connecting', {
       saveState: 'saving',
       phase: 'JOINING',
@@ -1012,30 +1173,52 @@ function createCollaborationAdapter(options = {}) {
     state.canEdit = result.canEdit !== false
     state.canView = result.canView !== false
     state.peers = result.peers || []
-    if (Number(result.serverRevision) > 0) {
-      state.serverRevision = Number(result.serverRevision)
-    }
-    if (result.sync && result.sync.reload) {
-      advanceRevision(result.sync.serverRevision || result.serverRevision || 0)
-      if (options.onReloadRequired) await options.onReloadRequired(result.sync)
-    } else if (result.sync && result.sync.operations) {
-      await applySyncPage(result.sync)
-    } else if (Number(result.serverRevision) > 0 && state.lastServerRevision <= 0) {
-      advanceRevision(result.serverRevision)
-    }
     const authRev = Number(result.serverRevision)
-    if (Number.isFinite(authRev) && authRev >= 0) {
-      state.serverRevision = Math.max(Number(state.serverRevision || 0), authRev)
-      if (state.lastServerRevision > authRev) {
-        adapterTrace('revision.clamp', {
-          from: state.lastServerRevision,
-          to: authRev,
-          roomKey: state.roomKey,
-          clientId: state.clientId
-        })
-        assignLastServerRevision(authRev, { allowDecrease: true })
+    const headRevision = Number.isFinite(authRev)
+      ? Math.max(0, authRev)
+      : Math.max(0, Number(result.sync && (result.sync.currentRevision || result.sync.serverRevision)) || 0)
+    state.serverRevision = Math.max(
+      headRevision,
+      Number(state.lastServerRevision) || 0
+    )
+    if (headRevision < state.lastServerRevision) {
+      await recoverFromSnapshot(
+        {
+          ...(result.sync || {}),
+          reload: true,
+          currentRevision: headRevision,
+          serverRevision: headRevision,
+          reason: 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
+        },
+        headRevision
+      )
+      assignLastServerRevision(headRevision, { allowDecrease: true })
+    } else if (result.sync && result.sync.reload) {
+      await recoverFromSnapshot(result.sync, headRevision)
+    } else if (result.sync && Array.isArray(result.sync.operations)) {
+      await applySyncPage(result.sync, headRevision)
+    } else if (headRevision > state.lastServerRevision) {
+      const firstPage = await requestSyncPage(state.lastServerRevision, headRevision)
+      if (!firstPage || firstPage.ok === false) {
+        const error = new Error((firstPage && firstPage.error) || 'join sync failed')
+        error.code = normalizeErrorCode(firstPage && firstPage.code, 'REVISION_GAP')
+        throw error
       }
+      await applySyncPage(firstPage, headRevision)
     }
+    if (state.lastServerRevision < headRevision) {
+      const error = new Error('join sync did not reach the fixed room head')
+      error.code = 'RESNAPSHOT_REQUIRED'
+      error.currentRevision = headRevision
+      throw error
+    }
+    state.serverRevision = Math.max(
+      headRevision,
+      Number(state.lastServerRevision) || 0
+    )
+    await finishRemoteBuffer()
+    clearResyncRetry()
+    resyncRetryAttempts = 0
     setStatus('live', { saveState: 'saved', error: '', errorCode: '', phase: 'LIVE' })
     startHeartbeat()
     await quarantineStaleImportOps()
@@ -1046,18 +1229,159 @@ function createCollaborationAdapter(options = {}) {
     return result
   }
 
-  async function applySyncPage(sync) {
-    const ops = (sync && sync.operations) || []
-    for (const op of ops) {
+  function clearResyncRetry() {
+    if (resyncRetryTimer) clearTimeout(resyncRetryTimer)
+    resyncRetryTimer = null
+  }
+
+  async function requestSyncPage(afterRevision, headVersion) {
+    const payload = {
+      roomKey: state.roomKey,
+      afterRevision,
+      limit: 500,
+      headVersion
+    }
+    if (socket && socket.connected) {
+      const result = await emitAck('sync', payload).catch(() => null)
+      if (result && result.ok) return result
+    }
+    return httpFallbackSync({ afterRevision, headVersion, limit: 500 })
+  }
+
+  async function recoverFromSnapshot(sync, targetRevision) {
+    const target = Math.max(
+      0,
+      Number(
+        targetRevision != null
+          ? targetRevision
+          : sync && (sync.currentRevision || sync.serverRevision || sync.currentVersion)
+      ) || 0
+    )
+    if (typeof options.onReloadRequired !== 'function') {
+      const error = new Error('authoritative snapshot recovery handler is unavailable')
+      error.code = 'SNAPSHOT_RECOVERY_UNAVAILABLE'
+      error.currentRevision = target
+      throw error
+    }
+    const result = await options.onReloadRequired({
+      ...(sync || {}),
+      roomKey: state.roomKey,
+      reload: true,
+      currentRevision: target,
+      serverRevision: target,
+      reason: 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
+    })
+    const appliedRevision = Number(
+      result && (result.version != null ? result.version : result.currentRevision)
+    )
+    if (
+      !result ||
+      result.applied !== true ||
+      !Number.isFinite(appliedRevision) ||
+      appliedRevision < target
+    ) {
+      const error = new Error('authoritative snapshot was not applied')
+      error.code = 'SNAPSHOT_NOT_APPLIED'
+      error.currentRevision = target
+      throw error
+    }
+    if (appliedRevision < state.lastServerRevision) {
+      assignLastServerRevision(appliedRevision, { allowDecrease: true })
+    } else {
+      advanceRevision(appliedRevision)
+    }
+    state.serverRevision = appliedRevision
+    state.snapshotRecoveryCount = Number(state.snapshotRecoveryCount || 0) + 1
+    state.lastSyncAt = Date.now()
+    return { applied: true, version: appliedRevision }
+  }
+
+  async function applySyncPage(sync, fixedHead, pageNumber = 0) {
+    if (!sync || sync.ok === false) {
+      const error = new Error((sync && sync.error) || 'sync failed')
+      error.code = normalizeErrorCode(sync && sync.code, 'REVISION_GAP')
+      throw error
+    }
+    const head = Math.max(
+      0,
+      Number(
+        fixedHead != null
+          ? fixedHead
+          : sync.currentRevision || sync.serverRevision || sync.currentVersion
+      ) || 0
+    )
+    if (sync.reload) {
+      return recoverFromSnapshot(sync, head)
+    }
+    if (pageNumber > 40) {
+      const error = new Error('sync exceeded the bounded page count')
+      error.code = 'RESNAPSHOT_REQUIRED'
+      error.currentRevision = head
+      throw error
+    }
+    const from = Number(
+      sync.fromRevision != null
+        ? sync.fromRevision
+        : sync.fromVersion != null
+          ? sync.fromVersion
+          : state.lastServerRevision
+    )
+    if (from !== state.lastServerRevision) {
+      const error = new Error('sync page starts at an unexpected revision')
+      error.code = 'RESNAPSHOT_REQUIRED'
+      error.currentRevision = head
+      throw error
+    }
+    for (const op of sync.operations || []) {
+      if (operationRequiresSnapshot(op)) {
+        return recoverFromSnapshot(
+          { ...sync, reload: true, reason: 'UNSUPPORTED_OPERATION' },
+          head
+        )
+      }
+      const revision = Number(op.serverRevision || op.version || 0)
+      if (revision !== state.lastServerRevision + 1) {
+        const error = new Error('sync page contains a version gap')
+        error.code = 'RESNAPSHOT_REQUIRED'
+        error.currentRevision = head
+        throw error
+      }
       await applyRemoteOperation(op, { fromSync: true })
+      state.gapRecoveredOps = Number(state.gapRecoveredOps || 0) + 1
     }
-    if (sync && sync.hasMore) {
-      const next = await emitAck('sync', {
-        roomKey: state.roomKey,
-        afterRevision: state.lastServerRevision
-      })
-      if (next && next.ok) await applySyncPage(next)
+    const to = Number(
+      sync.toRevision != null
+        ? sync.toRevision
+        : sync.toVersion != null
+          ? sync.toVersion
+          : state.lastServerRevision
+    )
+    if (to !== state.lastServerRevision) {
+      const error = new Error('sync page end does not match applied revision')
+      error.code = 'RESNAPSHOT_REQUIRED'
+      error.currentRevision = head
+      throw error
     }
+    if (sync.currentRevision != null && Number(sync.currentRevision) !== head) {
+      const error = new Error('sync page changed its fixed room head')
+      error.code = 'RESNAPSHOT_REQUIRED'
+      error.currentRevision = Number(sync.currentRevision)
+      throw error
+    }
+    if (state.lastServerRevision >= head) return { applied: true, version: head }
+    if (!sync.hasMore) {
+      const error = new Error('sync ended before the fixed room head')
+      error.code = 'RESNAPSHOT_REQUIRED'
+      error.currentRevision = head
+      throw error
+    }
+    const next = await requestSyncPage(state.lastServerRevision, head)
+    if (!next || next.ok === false) {
+      const error = new Error((next && next.error) || 'sync continuation failed')
+      error.code = normalizeErrorCode(next && next.code, 'REVISION_GAP')
+      throw error
+    }
+    return applySyncPage(next, head, pageNumber + 1)
   }
 
   function emitAck(event, payload) {
@@ -1136,9 +1460,14 @@ function createCollaborationAdapter(options = {}) {
       state.heartbeatTimer = null
     }
     clearRejoinTimer()
+    clearResyncRetry()
     state.rejoinAttempts = 0
     if (unbindNetworkRecovery) unbindNetworkRecovery()
     state.roomKey = ''
+    remoteEventsBuffered = false
+    resnapshotBufferOwned = false
+    bufferedRemoteOps = []
+    pendingResnapshotNotice = null
     connecting = null
     connectingRoomKey = ''
     if (socket && socket.disconnect) socket.disconnect()
@@ -1249,7 +1578,7 @@ function createCollaborationAdapter(options = {}) {
     op.observedRevision = Number(state.lastServerRevision) || 0
     op.baseRevision = op.observedRevision
     op.status = 'pending'
-    op.skipUndoStack = !!raw.skipUndoStack
+    op.skipUndoStack = !!raw.skipUndoStack || isPositionOnlyUpdate(op)
     op.traceId = raw.traceId || op.traceId || (op.payload && op.payload.traceId) || ''
     state.lastOpId = op.opId
     state.stage = STAGES.OUTBOX_PUT
@@ -1772,13 +2101,23 @@ function createCollaborationAdapter(options = {}) {
     bumpOutboxPending(-1)
     state.seenOpIds.add(op.opId)
     const rev = Number(result.serverRevision || 0)
-    advanceRevision(rev)
     state.aheadAttempts = 0
     state.lastAckAt = Date.now()
     if (state.currentError && state.currentError.code === 'SOP_CONFIRM_REQUIRED') {
       // keep lastError; room continues
     }
     endSending()
+    const ackDisposition = ackRevisionDisposition(state.lastServerRevision, rev)
+    if (ackDisposition.resync) {
+      try {
+        await resync()
+      } catch (err) {
+        // The operation is committed and its ACK remains successful. Keep the
+        // local watermark before the gap; bounded retry will recover it later.
+      }
+    } else if (ackDisposition.advance) {
+      advanceRevision(rev)
+    }
     const kind = normalizeType(op.type)
     if (kind === 'operation.undo') {
       // stacks updated by undo()
@@ -1796,7 +2135,11 @@ function createCollaborationAdapter(options = {}) {
     // Finish local ACK bookkeeping before exposing completion to the caller.
     // No asynchronous gap between resolving the waiter and publishing saved.
     settleAck(op.opId, null, result)
-    setStatus('live', { saveState: 'saved', error: '' })
+    const ackCaughtUp = !rev || rev <= state.lastServerRevision
+    setStatus('live', {
+      saveState: ackCaughtUp ? 'saved' : 'resync',
+      ...(ackCaughtUp ? { error: '' } : {})
+    })
     // Counters are diagnostic; a failed refresh must not strand an ACK waiter.
     await refreshOutboxCounts()
     return { ok: true, result }
@@ -2075,110 +2418,159 @@ function createCollaborationAdapter(options = {}) {
   const queuedUndo = () => queueHistory(undo)
   const queuedRedo = () => queueHistory(redo)
 
-  async function httpFallbackSync() {
+  async function httpFallbackSync(input = {}) {
     if (typeof options.httpSync !== 'function') return null
     return options.httpSync({
       roomKey: state.roomKey,
-      afterRevision: state.lastServerRevision
+      afterRevision:
+        input.afterRevision != null ? input.afterRevision : state.lastServerRevision,
+      headVersion: input.headVersion,
+      limit: input.limit || 500
     })
   }
 
-  async function resync() {
+  function runPendingResnapshot() {
+    if (remoteEventsBuffered || resyncPromise || !pendingResnapshotNotice) {
+      return Promise.resolve(null)
+    }
+    const notice = pendingResnapshotNotice
+    pendingResnapshotNotice = null
+    return resync({ forceSnapshot: true, payload: notice })
+  }
+
+  function resync(input = {}) {
+    if (resyncPromise) {
+      if (input.forceSnapshot) rememberResnapshotNotice(input.payload || {})
+      return resyncPromise.then(async result => {
+        if (!resyncPromise) await runPendingResnapshot()
+        return result
+      })
+    }
+    const task = runResync(input)
+    const tracked = task.then(
+      async result => {
+        if (resyncPromise === tracked) resyncPromise = null
+        if (resnapshotBufferOwned) {
+          resnapshotBufferOwned = false
+          await finishRemoteBuffer()
+        }
+        await runPendingResnapshot()
+        return result
+      },
+      err => {
+        if (resyncPromise === tracked) resyncPromise = null
+        throw err
+      }
+    )
+    resyncPromise = tracked
+    return tracked
+  }
+
+  async function runResync(input = {}) {
     if (!state.roomKey) return
+    if (!remoteEventsBuffered) {
+      remoteEventsBuffered = true
+      resnapshotBufferOwned = true
+    }
     setStatus(state.status, {
       saveState: 'saving',
       phase: 'RESYNCING',
       stage: STAGES.GAP_SYNC
     })
-    let result = null
-    if (socket) {
-      try {
-        result = await emitAck('sync', {
-          roomKey: state.roomKey,
-          afterRevision: state.lastServerRevision
-        })
-      } catch (err) {
-        result = null
+    try {
+      let result
+      let recovered
+      let headVersion
+      if (input.forceSnapshot) {
+        const notice = input.payload || pendingResnapshotNotice || {}
+        const reportedHead = notice.currentRevision != null
+          ? notice.currentRevision
+          : notice.serverRevision != null
+            ? notice.serverRevision
+            : notice.currentVersion != null
+              ? notice.currentVersion
+              : state.serverRevision || state.lastServerRevision
+        headVersion = Number(reportedHead) || 0
+        recovered = await recoverFromSnapshot(
+          {
+            ...notice,
+            reload: true,
+            currentRevision: headVersion,
+            serverRevision: headVersion
+          },
+          headVersion
+        )
+      } else {
+        result = await requestSyncPage(state.lastServerRevision, null)
+        if (!result || result.ok === false) {
+          const err = new Error((result && result.error) || 'sync failed')
+          err.code = normalizeErrorCode(result && result.code, 'REVISION_GAP')
+          err.currentRevision = Number(
+            result && (result.currentRevision || result.serverRevision || result.currentVersion)
+          ) || 0
+          throw err
+        }
+        headVersion = Number(
+          result.currentRevision || result.serverRevision || result.currentVersion
+        ) || 0
+        if (result.reload || headVersion < state.lastServerRevision) {
+          recovered = await recoverFromSnapshot(
+            { ...result, reload: true, currentRevision: headVersion },
+            headVersion
+          )
+        } else {
+          recovered = await applySyncPage(result, headVersion)
+          if (state.lastServerRevision < headVersion) {
+            const error = new Error('sync did not reach the fixed room head')
+            error.code = 'RESNAPSHOT_REQUIRED'
+            error.currentRevision = headVersion
+            throw error
+          }
+          recovered = { applied: true, version: state.lastServerRevision }
+        }
       }
-    }
-    if (!result || !result.ok) {
-      result = await httpFallbackSync()
-    }
-    if (!result || result.ok === false) {
-      const err = new Error((result && result.error) || 'sync failed')
-      err.code = normalizeErrorCode(result && result.code, 'REVISION_GAP')
+
+      const appliedRevision = Number(
+        recovered && recovered.version != null ? recovered.version : state.lastServerRevision
+      )
+      if (!recovered || recovered.applied !== true || appliedRevision < headVersion) {
+        const error = new Error('sync did not apply the requested room head')
+        error.code = 'RESNAPSHOT_REQUIRED'
+        error.currentRevision = headVersion
+        throw error
+      }
+      if (appliedRevision > state.lastServerRevision) advanceRevision(appliedRevision)
+      state.serverRevision = Math.max(Number(state.serverRevision || 0), appliedRevision)
+      // Rebase pending local work against the revision that was actually
+      // applied by the sync/snapshot. There is no ACK-local `rev` in this
+      // path; using one here can leave outbox rows based on a stale revision.
+      await rebaseUnsent(state.lastServerRevision)
+      state.lastSyncAt = Date.now()
+      state.lastSync = {
+        pages: 1,
+        reload: !!input.forceSnapshot || !!(result && result.reload),
+        fromRevision: Number(result && (result.fromRevision || result.fromVersion)) || 0,
+        toRevision: state.lastServerRevision,
+        currentRevision: headVersion
+      }
+      clearResyncRetry()
+      resyncRetryAttempts = 0
+      setStatus('live', { saveState: 'saved', error: '', phase: 'LIVE' })
+      return result || { ok: true, reload: true, currentRevision: headVersion }
+    } catch (err) {
       recordError({
-        code: err.code,
-        message: err.message,
+        code: err.code || 'REVISION_GAP',
+        message: err.message || 'sync failed',
         stage: STAGES.GAP_SYNC,
-        details: { afterRevision: state.lastServerRevision }
+        details: {
+          afterRevision: state.lastServerRevision,
+          currentRevision: err.currentRevision
+        }
       })
       setStatus(state.status, { saveState: 'error', phase: 'ERROR' })
+      scheduleResyncRetry(input.forceSnapshot ? input.payload : null)
       throw err
     }
-    let pages = 0
-    const syncPages = []
-    while (result && result.ok !== false) {
-      if (result.reload) {
-        advanceRevision(result.serverRevision || 0)
-        state.snapshotRecoveryCount = Number(state.snapshotRecoveryCount || 0) + 1
-        state.lastSyncAt = Date.now()
-        state.lastSync = { pages: pages + 1, reload: true, syncPages }
-        if (options.onReloadRequired) {
-          await options.onReloadRequired({
-            ...result,
-            reason: 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
-          })
-        }
-        await rebaseUnsent(state.lastServerRevision)
-        setStatus('live', { saveState: 'saved', error: '', phase: 'LIVE' })
-        return result
-      }
-      const fromRevision = Number(result.fromRevision || state.lastServerRevision || 0)
-      const toRevision = Number(
-        result.toRevision ||
-          (result.operations && result.operations.length
-            ? result.operations[result.operations.length - 1].serverRevision
-            : fromRevision)
-      )
-      syncPages.push({
-        fromRevision,
-        toRevision,
-        hasMore: !!result.hasMore,
-        count: (result.operations || []).length
-      })
-      for (const op of result.operations || []) {
-        await applyRemoteOperation(op, { fromSync: true })
-        state.gapRecoveredOps = Number(state.gapRecoveredOps || 0) + 1
-      }
-      if (result.serverRevision) {
-        state.serverRevision = Math.max(
-          Number(state.serverRevision || 0),
-          Number(result.serverRevision)
-        )
-      }
-      pages += 1
-      if (!result.hasMore || pages > 40) break
-      result = socket
-        ? await emitAck('sync', {
-            roomKey: state.roomKey,
-            afterRevision: state.lastServerRevision
-          }).catch(() => null)
-        : await httpFallbackSync()
-      if (!result || result.ok === false) break
-    }
-    state.lastSync = {
-      pages,
-      fromRevision: syncPages[0] && syncPages[0].fromRevision,
-      toRevision: syncPages.length
-        ? syncPages[syncPages.length - 1].toRevision
-        : state.lastServerRevision,
-      hasMore: !!(syncPages.length && syncPages[syncPages.length - 1].hasMore),
-      syncPages
-    }
-    state.lastSyncAt = Date.now()
-    setStatus('live', { saveState: 'saved', error: '', phase: 'LIVE' })
-    return result
   }
 
   function setPresence(next) {
@@ -2223,4 +2615,8 @@ function createCollaborationAdapter(options = {}) {
   }
 }
 
-module.exports = { createCollaborationAdapter, sessionClientId }
+module.exports = {
+  createCollaborationAdapter,
+  sessionClientId,
+  ackRevisionDisposition
+}

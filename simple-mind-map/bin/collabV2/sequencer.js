@@ -3,7 +3,7 @@ const {
   commitRoomOperation,
   commitDirectRoomOperation,
   getPool,
-  listRoomOperations,
+  listRoomOperationsContiguous,
   getRoomVersion,
   safeRoomKey
 } = require('../storage')
@@ -39,7 +39,7 @@ async function peekReplaceUndo(roomKey, op) {
   return !!(source && source.type === 'map.replace')
 }
 
-async function submitOperation(req, raw) {
+async function submitOperation(req, raw, options = {}) {
   const op = normalizeOperation(raw)
   op.roomKey = safeRoomKey(op.roomKey)
   const traceId = op.traceId || (op.payload && op.payload.traceId) || ''
@@ -67,12 +67,11 @@ async function submitOperation(req, raw) {
     throw unsupportedOperation(op.type, op.roomKey)
   }
   op.clientId = requireClientId(op.clientId)
-  const access = await roomAcl.assertRoomAccess(
-    getPool(),
-    req,
-    op.roomKey,
-    'edit'
-  )
+  // 调用方只能传入刚用 'edit' 校验通过、且属于同一房间的结果。
+  const access =
+    options.editAccess && options.editAccess.canEdit
+      ? options.editAccess
+      : await roomAcl.assertRoomAccess(getPool(), req, op.roomKey, 'edit')
   op.userId = access.userId || op.userId
   collabTrace('5.acl', {
     traceId,
@@ -180,25 +179,60 @@ async function submitOperation(req, raw) {
   }
 }
 
-async function listOperations(req, roomKey, afterRevision, limit) {
+async function listOperations(req, roomKey, afterRevision, limit, options = {}) {
   const key = safeRoomKey(roomKey)
-  await roomAcl.assertRoomAccess(getPool(), req, key, 'view')
-  const current = await getRoomVersion(key)
+  if (!options.viewAccess) {
+    await roomAcl.assertRoomAccess(getPool(), req, key, 'view')
+  }
   const after = Math.max(0, Number(afterRevision) || 0)
   const pageSize = Math.min(500, Math.max(1, Number(limit) || 500))
-  const operations = await listRoomOperations(key, after, pageSize)
-  const mapped = (operations || []).map(item =>
+  const requestedHead = Number(options.headVersion)
+  const current = Number.isFinite(requestedHead)
+    ? requestedHead
+    : Number((await getRoomVersion(key)) || 0)
+  const page = await listRoomOperationsContiguous(key, after, {
+    headVersion: current,
+    limit: pageSize
+  })
+  if (!page || page.reload || page.ok === false) {
+    const head = Number(
+      (page && (page.currentRevision || page.currentVersion)) || current || 0
+    )
+    return {
+      reload: true,
+      code: (page && page.code) || 'RESNAPSHOT_REQUIRED',
+      hasMore: false,
+      fromRevision: after,
+      toRevision: head,
+      fromVersion: after,
+      toVersion: head,
+      completeFromRevision: head,
+      currentRevision: head,
+      serverRevision: head,
+      currentVersion: head,
+      pageSize,
+      missingVersion: page && page.missingVersion,
+      reason: (page && page.reason) || 'VERSION_GAP',
+      operations: []
+    }
+  }
+  const mapped = (page.operations || []).map(item =>
     fromCommitted(item, { roomKey: key })
   )
   const last = mapped.length ? Number(mapped[mapped.length - 1].serverRevision) : after
-  const hasMore = last < Number(current || 0)
+  const head = Number(page.currentRevision || page.currentVersion || current || 0)
   return {
     reload: false,
-    hasMore,
+    hasMore: !!page.hasMore,
     fromRevision: after,
     toRevision: last,
+    fromVersion: after,
+    toVersion: last,
+    completeFromRevision: Number(page.completeFromRevision),
+    currentRevision: head,
     pageSize,
-    serverRevision: Number(current || 0),
+    serverRevision: head,
+    currentVersion: head,
     operations: mapped
   }
 }

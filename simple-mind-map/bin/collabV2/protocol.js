@@ -126,23 +126,28 @@ function toCommand(op) {
   }
 }
 
+function clientSafePayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return {}
+  const safe = { ...payload }
+  delete safe.__mcpRequest
+  delete safe.requestDigest
+  return safe
+}
+
 function fromCommitted(operation, extra = {}) {
   const event = operation.event || {}
-  const rawPayload = operation.payload || {}
-  const eventPayload = event.payload || {}
-  const undoControl =
-    !rawPayload.uid &&
-    (rawPayload.targetOperationId ||
-      rawPayload.target_operation_id ||
-      rawPayload.targetOpId)
-  const payload =
-    undoControl && eventPayload && typeof eventPayload === 'object'
-      ? eventPayload
-      : rawPayload.uid || rawPayload.patch
-        ? rawPayload
-        : rawPayload && Object.keys(rawPayload).length
-          ? rawPayload
-          : eventPayload
+  const rawPayload = clientSafePayload(operation.payload)
+  const eventPayload = clientSafePayload(event.payload)
+  // A committed event is the authoritative result of applying the request.
+  // Merge it over the original payload so server-generated IDs, row data and
+  // positions reach every client, while retaining request-only metadata such
+  // as target operation IDs used by older undo records.
+  const payload = Object.keys(eventPayload).length
+    ? { ...rawPayload, ...eventPayload }
+    : rawPayload
+  const safeEvent = event && typeof event === 'object'
+    ? { ...event, payload: eventPayload }
+    : event
   return {
     opId: operation.operationId || operation.operation_id,
     roomKey: operation.roomKey || operation.room_key || extra.roomKey,
@@ -162,7 +167,7 @@ function fromCommitted(operation, extra = {}) {
       operation.target_id ||
       targetIdFrom(event.type, payload),
     payload,
-    event,
+    event: safeEvent,
     createdAt: operation.createdAt || operation.created_at,
     serverRevision: Number(operation.version || event.version || 0),
     duplicate: !!extra.duplicate
@@ -173,7 +178,18 @@ function isWriteType(type) {
   return WRITE_TYPES.has(normalizeType(type))
 }
 
+// Canvas coordinates are presentation adjustments, not semantic node edits.
+function isPositionOnlyUpdate(operation = {}) {
+  if (normalizeType(operation.type) !== 'node.update') return false
+  const payload = operation.payload || {}
+  if (['parent', 'parentUid', 'parent_uid', 'index'].some(key => payload[key] !== undefined)) return false
+  const patch = payload.patch || payload.data || {}
+  const keys = Object.keys(patch).filter(key => key !== '__fv')
+  return keys.length > 0 && keys.every(key => key === 'customLeft' || key === 'customTop')
+}
+
 module.exports = {
+  isPositionOnlyUpdate,
   TYPE_ALIAS,
   WRITE_TYPES,
   BATCH_RECOMMENDED,
@@ -187,6 +203,7 @@ module.exports = {
   normalizeOperation,
   toCommand,
   fromCommitted,
+  clientSafePayload,
   isWriteType,
   targetIdFrom
 }

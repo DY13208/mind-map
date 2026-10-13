@@ -1,4 +1,5 @@
 import Base from './Base'
+import { walkLayoutInSlices } from '../utils/layoutSlices'
 import { walk, asyncRun, getNodeIndexInNodeList } from '../utils'
 import { CONSTANTS } from '../constants/constant'
 
@@ -12,6 +13,17 @@ class MindMap extends Base {
 
   //  布局
   doLayout(callback) {
+    if (this.mindMap.opt.openPerformance) {
+      const generation = this.renderer._renderGeneration
+      const cancelled = () => generation !== this.renderer._renderGeneration
+      this.computedBaseValue((...args) => walkLayoutInSlices(args, { cancelled })).then(completed => {
+        if (!completed || cancelled()) return
+        this.computedTopValue()
+        this.adjustTopValue()
+        callback(this.root)
+      }).catch(error => this.mindMap.opt.errorHandler('layout_error', error))
+      return
+    }
     let task = [
       () => {
         this.computedBaseValue()
@@ -30,8 +42,8 @@ class MindMap extends Base {
   }
 
   //  遍历数据计算节点的left、width、height
-  computedBaseValue() {
-    walk(
+  computedBaseValue(walker = walk) {
+    return walker(
       this.renderer.renderTree,
       null,
       (cur, parent, isRoot, layerIndex, index, ancestors) => {

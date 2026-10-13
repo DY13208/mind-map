@@ -8,7 +8,10 @@
   >
     <div
       class="mindMapContainer"
-      :class="{ isCanvasDarkFallback: useDarkCanvasFallback }"
+      :class="{
+        isCanvasDarkFallback: useDarkCanvasFallback,
+        isRoomCanvasPending: roomCanvasPending
+      }"
       id="mindMapContainer"
       ref="mindMapContainer"
       data-testid="mindmap-canvas"
@@ -257,7 +260,13 @@ export default {
       appearanceTransitioning: false,
       appearanceTransitionTimer: null,
       appearanceTransitionToken: null,
-      appearanceSnapshotEl: null
+      appearanceSnapshotEl: null,
+      // 房间打开时画布上先放一个空根节点。在服务端树画完之前藏住它。
+      roomCanvasPending: !!(
+        this.$route &&
+        this.$route.query &&
+        this.$route.query.room
+      )
     }
   },
   computed: {
@@ -349,6 +358,7 @@ export default {
     this.$bus.$on('localStorageExceeded', this.onLocalStorageExceeded)
     this.$bus.$on('toggle_appearance_mode', this.handleToggleAppearanceMode)
     this.$bus.$on('prepare_reload', this.prepareReload)
+    this.$bus.$on('room_canvas_ready', this.onRoomCanvasReady)
     window.addEventListener('resize', this.handleResize)
     // 房间模式下协作挂了不能等于"图没了"：等一会儿还没连上就用本地留底恢复
     this.startCollabDraftFallback()
@@ -396,6 +406,7 @@ export default {
     this.$bus.$off('localStorageExceeded', this.onLocalStorageExceeded)
     this.$bus.$off('toggle_appearance_mode', this.handleToggleAppearanceMode)
     this.$bus.$off('prepare_reload', this.prepareReload)
+    this.$bus.$off('room_canvas_ready', this.onRoomCanvasReady)
     window.removeEventListener('resize', this.handleResize)
     if (this.mindMap) {
       this.unbindCanvasThemeEvents()
@@ -403,6 +414,28 @@ export default {
     }
   },
   methods: {
+    onRoomCanvasReady() {
+      this.roomCanvasPending = false
+    },
+
+    openHyperlink(value) {
+      let url = null
+      try {
+        url = new URL(String(value || '').trim(), window.location.href)
+      } catch (_) {
+        this.$message.warning('链接地址无效，请检查超链接设置')
+        return
+      }
+      if (!['http:', 'https:'].includes(url.protocol)) {
+        this.$message.warning('仅支持 HTTP 或 HTTPS 链接')
+        return
+      }
+      // 普通新标签页，不用弹层，也不另开小窗口。脑图留在当前标签页。
+      const tab = window.open(url.href, '_blank', 'noopener,noreferrer')
+      if (!tab) {
+        this.$message.warning('浏览器拦截了新标签页，请允许弹窗后再打开')
+      }
+    },
   /**
    * 协作服务连不上时的数据兜底。
    *
@@ -638,7 +671,8 @@ export default {
       )
     },
 
-    // 日间/夜间：优先用 View Transition 做画布交叉淡入；否则用快照淡出，避免纯色遮罩「闪一下」。
+    // Theme rendering already traverses the graph; avoid capturing or cloning
+    // the entire canvas on top of that work, especially for large maps.
     async handleToggleAppearanceMode(nextDark) {
       if (!this.mindMap || this.appearanceTransitioning) return
       const wantDark = !!nextDark
@@ -665,11 +699,6 @@ export default {
       const el = this.mindMap.el
       const token = Symbol('appearance')
       this.appearanceTransitionToken = token
-      const reduceMotion =
-        typeof window !== 'undefined' &&
-        window.matchMedia &&
-        window.matchMedia('(prefers-reduced-motion: reduce)').matches
-
       const runChange = async () => {
         if (this.appearanceTransitionToken !== token || !this.mindMap) return
         await this.applyAppearanceModeChange(wantDark, resolved)
@@ -679,23 +708,7 @@ export default {
       }
 
       try {
-        if (
-          !reduceMotion &&
-          el &&
-          typeof document.startViewTransition === 'function'
-        ) {
-          el.style.viewTransitionName = 'mind-map-appearance'
-          const transition = document.startViewTransition(() => runChange())
-          await transition.finished.catch(() => {})
-        } else if (!reduceMotion) {
-          this.showAppearanceSnapshot()
-          await runChange()
-          if (this.appearanceTransitionToken === token) {
-            await this.fadeOutAppearanceSnapshot()
-          }
-        } else {
-          await runChange()
-        }
+        await runChange()
       } finally {
         if (el) el.style.viewTransitionName = ''
         this.clearAppearanceSnapshot()
@@ -1062,6 +1075,8 @@ export default {
       const config = this.mindMapConfig
       // 如果url中存在要打开的文件，那么思维导图数据、主题、布局都使用默认的
       if (hasFileURL || this.$route.query.room) {
+        // 只用来把引擎立起来。房间模式下这个空根节点会一直藏着，
+        // 直到 CooperateDialog 把服务端的树画完。
         root = {
           data: {
             text: this.$t('edit.root')
@@ -1102,6 +1117,7 @@ export default {
           openBlankMode: false
         },
         ...(config || {}),
+        customHyperlinkJump: url => this.openHyperlink(url),
         // 选中状态直接使用节点自身的边框。
         hoverRectColor: '#246bff',
         hoverRectPadding: 0,
@@ -1319,6 +1335,13 @@ export default {
       if (persistReplace) cooperate.beginHttpReplace()
       let rootNodeData = null
       let importDone = !isUserImport
+      let savedPaint = null
+      let savedPaintNotified = false
+      const notifySavedPaint = () => {
+        if (savedPaintNotified) return
+        savedPaintNotified = true
+        if (options && typeof options.onReady === 'function') options.onReady()
+      }
       const prevReadonly = !!(this.mindMap && this.mindMap.opt && this.mindMap.opt.readonly)
       try {
         rootNodeData = data.root || data
@@ -1365,8 +1388,10 @@ export default {
             { fullData: data.root ? data : { root: rootNodeData } }
           )
         } else if (data.root) {
+          if (options && options.fromSaved) savedPaint = this.waitForNextTreePaint()
           this.mindMap.setFullData(data)
         } else {
+          if (options && options.fromSaved) savedPaint = this.waitForNextTreePaint()
           this.mindMap.setData(data)
         }
         if (persistReplace && rootNodeData) {
@@ -1381,6 +1406,8 @@ export default {
         }
         this.mindMap.view.reset()
         await yieldToUi()
+        if (savedPaint) await savedPaint
+        notifySavedPaint()
         if (persistReplace && cooperate) {
           await new Promise(resolve => {
             let settled = false
@@ -1438,6 +1465,9 @@ export default {
             message: (err && err.message) || '',
             notified: !!persistReplace
           })
+        } else if (options && options.fromSaved) {
+          console.error('[edit] saved tree paint failed', err)
+          notifySavedPaint()
         } else {
           throw err
         }
@@ -1465,6 +1495,46 @@ export default {
           message: this.$t('edit.autoOpenNodeRichTextTip')
         })
       }
+    },
+
+    waitForNextTreePaint() {
+      return new Promise(resolve => {
+        if (!this.mindMap) {
+          resolve()
+          return
+        }
+        // 必须是这次 setData 触发的绘制。打开时占位根节点的绘制可能还没结束，
+        // 不能把它当成真实树已经画完。
+        let armed = false
+        let started = false
+        let settled = false
+        const finish = () => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          if (!this.mindMap) {
+            resolve()
+            return
+          }
+          this.mindMap.off('set_data', onSet)
+          this.mindMap.off('node_tree_render_start', onStart)
+          this.mindMap.off('node_tree_render_end', onEnd)
+          resolve()
+        }
+        const onSet = () => {
+          armed = true
+        }
+        const onStart = () => {
+          if (armed) started = true
+        }
+        const onEnd = () => {
+          if (started) finish()
+        }
+        this.mindMap.on('set_data', onSet)
+        this.mindMap.on('node_tree_render_start', onStart)
+        this.mindMap.on('node_tree_render_end', onEnd)
+        const timer = setTimeout(finish, 8000)
+      })
     },
 
     // 重新渲染
@@ -1866,6 +1936,11 @@ export default {
     &.isCanvasDarkFallback {
       background-color: #262a2e !important;
       background-image: none !important;
+    }
+
+    // 占位根节点仍会画进 SVG，但不能参与显示，否则刷新时会先闪出「根节点」。
+    &.isRoomCanvasPending {
+      visibility: hidden;
     }
   }
 }

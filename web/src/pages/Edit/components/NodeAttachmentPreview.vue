@@ -9,143 +9,144 @@
     :close-on-click-modal="false"
     @closed="onClosed"
   >
-    <section
-      v-loading="loading"
-      class="attachmentPreviewBody"
-      :aria-busy="loading ? 'true' : 'false'"
-      :style="{ height: `${dialogHeight}px` }"
-    >
-      <div v-if="error" class="previewState previewError" role="alert">
-        {{ error }}
+    <div class="attachmentPreviewLayout" :style="{ height: `${dialogHeight}px` }">
+      <div class="attachmentPreviewToolbar" role="toolbar" aria-label="附件预览操作">
+        <el-button
+          size="small"
+          :aria-label="isMaximized ? '还原预览窗口' : '最大化预览窗口'"
+          @click="toggleMaximize"
+        >
+          {{ isMaximized ? '还原' : '最大化' }}
+        </el-button>
+        <el-button
+          v-if="externalUrl"
+          size="small"
+          @click="openExternal"
+        >
+          外部打开
+        </el-button>
+        <el-button
+          v-if="attachmentId"
+          type="primary"
+          size="small"
+          :loading="downloading"
+          @click="download"
+        >
+          下载
+        </el-button>
+        <el-button size="small" @click="visible = false">关闭</el-button>
       </div>
-      <div v-else-if="kind === 'image'" class="imagePreviewWrap">
-        <img :src="blobUrl" :alt="title" class="imagePreview" />
-      </div>
-      <iframe
-        v-else-if="kind === 'pdf'"
-        :src="blobUrl"
-        :title="title"
-        class="documentPreviewFrame"
-      ></iframe>
-      <div
-        v-else-if="kind === 'markdown'"
-        ref="markdownViewer"
-        class="markdownPreview customScrollbar"
-      ></div>
       <section
-        v-else-if="kind === 'office' || kind === 'presentation'"
-        class="officePreviewCanvas"
+        v-loading="loading"
+        class="attachmentPreviewBody"
+        :aria-busy="loading ? 'true' : 'false'"
       >
-        <template v-if="workbookSheets.length">
-          <header class="workbookHeader">
-            <div>
-              <span class="canvasEyebrow">工作簿预览</span>
-              <strong>{{ activeWorkbookSheet.name }}</strong>
-            </div>
-            <span class="workbookMeta">
-              {{ activeWorkbookSheet.rows.length }} 行 · {{ activeWorkbookSheet.columnCount }} 列
-              <template v-if="activeWorkbookSheet.truncated"> · 已显示前 500 行</template>
-            </span>
-          </header>
-          <nav class="workbookTabs" aria-label="工作表">
-            <button
-              v-for="sheet in workbookSheets"
-              :key="sheet.name"
-              type="button"
-              class="workbookTab"
-              :class="{ active: sheet.name === activeSheetName }"
-              :aria-current="sheet.name === activeSheetName ? 'page' : null"
-              @click="activeSheetName = sheet.name"
-            >
-              {{ sheet.name }}
-            </button>
-          </nav>
-          <div
-            class="spreadsheetViewport customScrollbar"
-            tabindex="0"
-            role="region"
-            :aria-label="`${activeWorkbookSheet.name} 工作表内容`"
-          >
-            <table class="spreadsheetTable">
-              <thead>
-                <tr>
-                  <th class="sheetCorner" scope="col">#</th>
-                  <th
-                    v-for="column in activeWorkbookSheet.columnCount"
-                    :key="column"
-                    scope="col"
-                  >
-                    {{ spreadsheetColumnName(column - 1) }}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(row, rowIndex) in activeWorkbookSheet.rows" :key="rowIndex">
-                  <th scope="row">{{ rowIndex + 1 }}</th>
-                  <td v-for="column in activeWorkbookSheet.columnCount" :key="column">
-                    {{ row[column - 1] || '' }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </template>
-        <div v-else-if="isDocxFile" ref="docxViewer" class="docxPreview customScrollbar"></div>
-        <div v-else-if="kind === 'presentation'" class="documentPreviewCanvas">
-          <header class="documentCanvasHeader">
-            <span class="canvasEyebrow">演示文稿</span>
-            <span>幻灯片文本</span>
-          </header>
-          <pre class="textPreview customScrollbar">{{ previewText }}</pre>
+        <div v-if="error" class="previewState previewError" role="alert">
+          {{ error }}
         </div>
-        <div v-else-if="!loading && isSpreadsheetFile" class="previewState">
-          无法预览该表格，请下载后查看
+        <div v-else-if="kind === 'image'" class="imagePreviewWrap">
+          <img :src="blobUrl" :alt="title" class="imagePreview" />
         </div>
-      </section>
-      <pre
-        v-else-if="kind === 'text' || kind === 'json'"
-        class="textPreview customScrollbar"
-      >{{ previewText }}</pre>
-      <div v-else-if="kind === 'external'" class="externalPreviewWrap">
         <iframe
-          :src="externalUrl"
+          v-else-if="kind === 'pdf'"
+          :src="blobUrl"
           :title="title"
           class="documentPreviewFrame"
-          sandbox="allow-same-origin allow-popups allow-forms allow-downloads"
-          referrerpolicy="no-referrer"
         ></iframe>
-        <p class="externalPreviewHint">
-          若内容为空或被站点限制嵌入，请使用“外部打开”。
-        </p>
-      </div>
-      <div v-else class="previewState">暂不支持该文件类型的站内预览。</div>
-    </section>
-    <span slot="footer" class="dialog-footer">
-      <el-button
-        size="small"
-        :aria-label="isMaximized ? '还原预览窗口' : '最大化预览窗口'"
-        @click="toggleMaximize"
-      >
-        {{ isMaximized ? '还原' : '最大化' }}
-      </el-button>
-      <el-button
-        v-if="externalUrl"
-        size="small"
-        @click="openExternal"
-      >
-        外部打开
-      </el-button>
-      <el-button
-        v-if="attachmentId"
-        type="primary"
-        size="small"
-        :loading="downloading"
-        @click="download"
-      >
-        下载
-      </el-button>
-      <el-button size="small" @click="visible = false">关闭</el-button>
-    </span>
+        <div
+          v-else-if="kind === 'markdown'"
+          ref="markdownViewer"
+          class="markdownPreview customScrollbar"
+        ></div>
+        <section
+          v-else-if="kind === 'office' || kind === 'presentation'"
+          class="officePreviewCanvas"
+        >
+          <template v-if="workbookSheets.length">
+            <header class="workbookHeader">
+              <div>
+                <span class="canvasEyebrow">工作簿预览</span>
+                <strong>{{ activeWorkbookSheet.name }}</strong>
+              </div>
+              <span class="workbookMeta">
+                {{ activeWorkbookSheet.rows.length }} 行 · {{ activeWorkbookSheet.columnCount }} 列
+                <template v-if="activeWorkbookSheet.truncated"> · 已显示前 500 行</template>
+              </span>
+            </header>
+            <nav class="workbookTabs" aria-label="工作表">
+              <button
+                v-for="sheet in workbookSheets"
+                :key="sheet.name"
+                type="button"
+                class="workbookTab"
+                :class="{ active: sheet.name === activeSheetName }"
+                :aria-current="sheet.name === activeSheetName ? 'page' : null"
+                @click="activeSheetName = sheet.name"
+              >
+                {{ sheet.name }}
+              </button>
+            </nav>
+            <div
+              class="spreadsheetViewport customScrollbar"
+              tabindex="0"
+              role="region"
+              :aria-label="`${activeWorkbookSheet.name} 工作表内容`"
+            >
+              <table class="spreadsheetTable">
+                <thead>
+                  <tr>
+                    <th class="sheetCorner" scope="col">#</th>
+                    <th
+                      v-for="column in activeWorkbookSheet.columnCount"
+                      :key="column"
+                      scope="col"
+                    >
+                      {{ spreadsheetColumnName(column - 1) }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, rowIndex) in activeWorkbookSheet.rows" :key="rowIndex">
+                    <th scope="row">{{ rowIndex + 1 }}</th>
+                    <td v-for="column in activeWorkbookSheet.columnCount" :key="column">
+                      {{ row[column - 1] || '' }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
+          <div v-else-if="isDocxFile" ref="docxViewer" class="docxPreview customScrollbar"></div>
+          <div v-else-if="kind === 'presentation'" class="documentPreviewCanvas">
+            <header class="documentCanvasHeader">
+              <span class="canvasEyebrow">演示文稿</span>
+              <span>幻灯片文本</span>
+            </header>
+            <pre class="textPreview customScrollbar">{{ previewText }}</pre>
+          </div>
+          <div v-else-if="!loading && isSpreadsheetFile" class="previewState">
+            无法预览该表格，请下载后查看
+          </div>
+        </section>
+        <pre
+          v-else-if="kind === 'text' || kind === 'json'"
+          class="textPreview customScrollbar"
+        >{{ previewText }}</pre>
+        <div v-else-if="kind === 'external'" class="externalPreviewWrap">
+          <iframe
+            :src="externalUrl"
+            :title="title"
+            class="documentPreviewFrame"
+            sandbox="allow-same-origin allow-popups allow-forms allow-downloads"
+            referrerpolicy="no-referrer"
+          ></iframe>
+          <p class="externalPreviewHint">
+            若内容为空或被站点限制嵌入，请使用“外部打开”。
+          </p>
+        </div>
+        <div v-else class="previewState">暂不支持该文件类型的站内预览。</div>
+      </section>
+    </div>
     <button
       class="dialogResizeHandle"
       type="button"
@@ -199,18 +200,17 @@ function previewMimeType(fileName, kind) {
 }
 
 /**
- * 预览弹窗的尺寸：默认就取「接近满屏、留出边距」。
+ * 预览弹窗的尺寸：为标题、工具栏、底部空间和上下边距预留高度。
  *
- * 原来固定 860×500，预览表格 / HTML / 长文档时很挤（2026-09-29 反馈
- * 「附件预览的弹窗要很大才行」）。156 ≈ 顶部 15vh + 标题栏与边距，
- * 与拖拽时的上限保持一致，所以放大后不会顶出视口。
+ * 操作栏位于预览内容上方，预览区需要在短视口内保持独立滚动，不能让
+ * 弹窗整体被内容挤出视口；因此这里按可用高度给预览区设上限。
  */
 function previewSize() {
   const vw = typeof window === 'undefined' ? 1440 : window.innerWidth
   const vh = typeof window === 'undefined' ? 900 : window.innerHeight
   return {
     dialogWidth: `${Math.round(Math.max(720, Math.min(1360, vw - 96)))}px`,
-    dialogHeight: Math.round(Math.max(520, Math.min(900, vh - 156)))
+    dialogHeight: Math.round(Math.max(96, Math.min(900, vh - 220)))
   }
 }
 
@@ -615,14 +615,15 @@ export default {
     resizeDialog(event) {
       if (!this.resizeSession) return
       const maxWidth = Math.max(640, window.innerWidth - 32)
-      const maxHeight = Math.max(420, window.innerHeight - 156)
+      const maxHeight = Math.max(96, window.innerHeight - 220)
+      const minHeight = Math.min(260, maxHeight)
       const width = Math.min(
         maxWidth,
         Math.max(640, this.resizeSession.width + event.clientX - this.resizeSession.startX)
       )
       const height = Math.min(
         maxHeight,
-        Math.max(420, this.resizeSession.height + event.clientY - this.resizeSession.startY)
+        Math.max(minHeight, this.resizeSession.height + event.clientY - this.resizeSession.startY)
       )
       this.dialogWidth = `${Math.round(width)}px`
       this.dialogHeight = Math.round(height)
@@ -643,7 +644,7 @@ export default {
         }
         this.dialogWidth = `${Math.max(320, window.innerWidth - 32)}px`
         // 高度也要撑开 —— 以前只放大宽度，最大化后仍然只有 500 高，照样挤
-        this.dialogHeight = Math.max(420, window.innerHeight - 156)
+        this.dialogHeight = Math.max(96, Math.min(900, window.innerHeight - 220))
         this.isMaximized = true
         return
       }
@@ -700,9 +701,34 @@ export default {
 </script>
 
 <style lang="less" scoped>
+.attachmentPreviewLayout {
+  box-sizing: border-box;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.attachmentPreviewToolbar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 2px 0 12px;
+}
+
+/deep/ .attachmentPreviewToolbar .el-button {
+  margin-left: 0;
+}
+
 .attachmentPreviewBody {
-  min-height: 320px;
-  max-height: calc(100vh - 156px);
+  position: relative;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   border: 1px solid #e8edf4;
   border-radius: 6px;
@@ -710,7 +736,10 @@ export default {
 }
 
 .previewState {
-  min-height: 320px;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1006,7 +1035,30 @@ export default {
   position: relative;
   min-width: 640px;
   max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  margin-top: 16px !important;
+  margin-bottom: 16px !important;
   transition: width 160ms ease-out;
+}
+
+/deep/ .nodeAttachmentPreviewDialog .el-dialog__header {
+  flex: 0 0 auto;
+}
+
+/deep/ .nodeAttachmentPreviewDialog .el-dialog__body {
+  box-sizing: border-box;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 14px 20px 10px;
+}
+
+/deep/ .nodeAttachmentPreviewDialog .el-dialog__footer {
+  flex: 0 0 auto;
 }
 
 /deep/ .nodeAttachmentPreviewDialog.is-resizing {
@@ -1029,30 +1081,31 @@ export default {
   flex-direction: column;
 }
 
-/deep/ .nodeAttachmentPreviewDialog.is-maximized .attachmentPreviewBody {
+/deep/ .nodeAttachmentPreviewDialog.is-maximized .attachmentPreviewLayout {
   height: auto !important;
-  max-height: none;
   min-height: 0;
   flex: 1;
 }
 
-/deep/ .nodeAttachmentPreviewDialog .el-dialog__body {
-  padding-bottom: 10px;
+/deep/ .nodeAttachmentPreviewDialog.is-maximized .attachmentPreviewBody {
+  min-height: 0;
+  flex: 1;
 }
 
 @media (max-width: 768px) {
   /deep/ .nodeAttachmentPreviewDialog {
+    min-width: 0;
     width: calc(100vw - 24px) !important;
-    margin-top: 8vh !important;
+    margin-top: 8px !important;
+    margin-bottom: 8px !important;
   }
 
   .attachmentPreviewBody {
-    min-height: 240px;
-    max-height: 72vh;
+    min-height: 0;
   }
 
   .documentPreviewFrame {
-    height: 60vh;
+    height: 100%;
   }
 
   .workbookHeader,

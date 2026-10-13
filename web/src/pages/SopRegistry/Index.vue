@@ -3340,13 +3340,16 @@ export default {
             reconnectionDelayMax: 15000
           })
         },
-        httpSync: async ({ afterRevision }) => {
+        httpSync: async ({ afterRevision, headVersion, limit }) => {
           const api = getRuntimeConfig().collabApi || ''
           const roomKey = encodeURIComponent(this.roomKey || '')
+          const head =
+            headVersion == null ? '' : `&headVersion=${encodeURIComponent(Number(headVersion) || 0)}`
+          const pageLimit = `&limit=${encodeURIComponent(Number(limit) || 500)}`
           const res = await fetch(
             `${api}/api/collab-v2/ops?roomKey=${roomKey}&afterRevision=${Number(
               afterRevision
-            ) || 0}`,
+            ) || 0}${head}${pageLimit}`,
             { credentials: 'include', headers: { Accept: 'application/json' } }
           )
           return res.json().catch(() => ({ ok: false }))
@@ -3359,16 +3362,38 @@ export default {
             return cooperate.applyV2RemoteOperation(op)
           }
         },
-        onReloadRequired: () => {
+        onReloadRequired: async sync => {
           if (
-            cooperate &&
-            typeof cooperate.recoverHttpCollab === 'function'
+            !sync ||
+            sync.reason !== 'AUTHORITATIVE_SNAPSHOT_RECOVERY' ||
+            !cooperate ||
+            typeof cooperate.recoverHttpCollab !== 'function'
           ) {
-            return cooperate.recoverHttpCollab(
-              this.collabV2Adapter &&
-                this.collabV2Adapter.getStatus().lastServerRevision
-            )
+            return { applied: false }
           }
+          const status = this.collabV2Adapter && this.collabV2Adapter.getStatus()
+          const targetRevision = Number(
+            sync.currentRevision != null
+              ? sync.currentRevision
+              : sync.serverRevision != null
+                ? sync.serverRevision
+                : sync.currentVersion != null
+                  ? sync.currentVersion
+                  : status && status.lastServerRevision
+          ) || 0
+          const recovered = await cooperate.recoverHttpCollab(targetRevision, {
+            reason: 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
+          })
+          const appliedRevision = Number(recovered && recovered.version)
+          if (
+            !recovered ||
+            recovered.applied !== true ||
+            !Number.isFinite(appliedRevision) ||
+            appliedRevision < targetRevision
+          ) {
+            return { applied: false, version: appliedRevision }
+          }
+          return { applied: true, version: appliedRevision }
         },
         onRejected: () => {
           this.syncStatus = 'error'

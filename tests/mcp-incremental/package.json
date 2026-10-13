@@ -1,0 +1,16 @@
+{
+  "name": "mind-map-mcp-incremental-baseline",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "smoke": "node smoke.mjs",
+    "fixtures": "node verify-fixtures.mjs",
+    "failure-cases": "node failure-cases.mjs",
+    "phase1": "node phase1.mjs",
+    "interactions": "node interactions.mjs"
+  },
+  "dependencies": {
+    "pg": "8.23.0",
+    "playwright": "1.55.0"
+  }
+}

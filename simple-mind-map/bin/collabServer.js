@@ -45,7 +45,8 @@ const {
 const { setWsConnections, recordBroadcast } = require('./collabMetrics')
 const {
   attachCollabV2,
-  shouldHandleUpgrade
+  shouldHandleUpgrade,
+  getOperationEventBridgeStatus
 } = require('./collabV2/socketServer')
 const { isCollabV2Enabled } = require('./collabV2/flag')
 
@@ -347,6 +348,7 @@ Promise.all([initSchema(), initAuth()])
     })
     startOperationsArchiver()
     const v2 = attachCollabV2(server, {
+      eventBus: bus,
       onRoomIdle(roomKey) {
         const engine = history.getHistoryEngine()
         if (!engine || typeof engine.flushPendingAutoVersion !== 'function') {
@@ -372,6 +374,32 @@ Promise.all([initSchema(), initAuth()])
         })`
       )
     })
+
+    let shutdownStarted = false
+    const shutdown = signal => {
+      if (shutdownStarted) return
+      shutdownStarted = true
+      console.log(`[shutdown] ${signal}: stopping collab event bridge`)
+      ;(async () => {
+        if (typeof v2.stop === 'function') await v2.stop()
+        if (publisher && typeof publisher.stop === 'function') {
+          await publisher.stop()
+        } else if (bus && typeof bus.close === 'function') {
+          await bus.close()
+        }
+        if (v2.io && typeof v2.io.close === 'function') {
+          await new Promise(resolve => v2.io.close(resolve))
+        } else if (server.listening) {
+          await new Promise(resolve => server.close(resolve))
+        }
+        process.exit(0)
+      })().catch(err => {
+        console.error('[shutdown] cleanup failed', (err && err.code) || 'ERROR')
+        process.exit(1)
+      })
+    }
+    process.once('SIGTERM', () => shutdown('SIGTERM'))
+    process.once('SIGINT', () => shutdown('SIGINT'))
   })
   .catch(err => {
     console.error('Failed to start collab server:', err)

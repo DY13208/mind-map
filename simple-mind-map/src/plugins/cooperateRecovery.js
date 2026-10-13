@@ -78,7 +78,27 @@ function placeChild(next, parentUid, uid, payload) {
   next[parentUid] = { ...next[parentUid], children: kids }
 }
 
-export function applyCollabEvent(obj, event) {
+export function applyCollabEvent(obj, event, options = {}) {
+  // Live collaboration owns its node index. Plain field updates can replace
+  // one entry without copying every key in a large room on every keystroke.
+  // Recovery callers retain the immutable behavior, as do structural events.
+  const patchPayload = (event && event.payload) || {}
+  if (
+    options.liveFieldUpdate && obj && event && event.type === 'node.updated' &&
+    patchPayload.parentUid === undefined && patchPayload.parent_uid === undefined &&
+    patchPayload.parent === undefined && patchPayload.index === undefined
+  ) {
+    const uid = patchPayload.uid
+    if (!uid || !obj[uid]) throw new Error('node not found')
+    const patch = patchPayload.patch || patchPayload.data
+    if (patch && typeof patch === 'object') {
+      const data = { ...(obj[uid].data || {}), ...patch, uid }
+      if (patchPayload.text != null) data.text = patchPayload.text
+      if (patchPayload.note != null) data.note = patchPayload.note
+      obj[uid] = { ...obj[uid], data }
+    }
+    return obj
+  }
   const next = cloneNodes(obj)
   const type = event && event.type
   const payload = (event && event.payload) || {}
@@ -256,8 +276,35 @@ function applyRestoreEvent(obj, payload = {}) {
     if (!kids.includes(row.uid)) kids.push(row.uid)
     next[parentUid] = { ...next[parentUid], children: kids }
   })
+  const restoredUids = new Set((payload.rows || []).map(row => row && row.uid))
+  const restoredParents = new Set(
+    (payload.rows || [])
+      .map(row => row && row.parent_uid)
+      .filter(parentUid => parentUid && restoredUids.has(parentUid))
+  )
+  restoredParents.forEach(parentUid => {
+    const children = [...((next[parentUid] && next[parentUid].children) || [])]
+    if (
+      children.length &&
+      children.every(uid => next[uid] && next[uid].position)
+    ) {
+      children.sort((a, b) => {
+        const left = String(next[a].position)
+        const right = String(next[b].position)
+        return left === right
+          ? String(a).localeCompare(String(b))
+          : left < right
+            ? -1
+            : 1
+      })
+      next[parentUid] = { ...next[parentUid], children }
+    }
+  })
   const uid = payload.uid
-  const parentUid = payload.parentUid || payload.parent_uid || payload.parent
+  const restoredRoot = (payload.rows || []).find(row => row && row.uid === uid)
+  const parentUid =
+    payload.parentUid || payload.parent_uid || payload.parent ||
+    (restoredRoot && restoredRoot.parent_uid)
   const promoted = (uid && next[uid] && next[uid].children) || []
   if (parentUid && next[parentUid] && uid) {
     let kids = [...(next[parentUid].children || [])].filter(id => id !== uid)
@@ -350,20 +397,52 @@ export function planAfterOperations(
 ) {
   const last = Number(lastAppliedVersion) || 0
   const operations = Array.isArray(payload.operations) ? payload.operations : []
-  const current = Number(payload.currentVersion)
+  const current = Number(
+    payload.currentRevision != null
+      ? payload.currentRevision
+      : payload.currentVersion != null
+        ? payload.currentVersion
+        : payload.serverRevision
+  )
   const nextVersion = Number.isFinite(current)
     ? current
     : operations.length
-      ? Number(operations[operations.length - 1].version) || last
+      ? Number(
+          operations[operations.length - 1].serverRevision ||
+            operations[operations.length - 1].version
+        ) || last
       : last
+  const resnapshot = (reason = 'AUTHORITATIVE_SNAPSHOT_RECOVERY') => ({
+    type: 'resnapshot',
+    version: nextVersion,
+    reason
+  })
+  if (payload.reload === true || payload.code === 'RESNAPSHOT_REQUIRED') {
+    return resnapshot()
+  }
+  if (
+    payload.completeFromRevision != null &&
+    Number(payload.completeFromRevision) !== last
+  ) {
+    return resnapshot()
+  }
   if (payload.hasMore || nextVersion - last > maxGap) {
-    return { type: 'resnapshot', version: nextVersion }
+    return resnapshot()
   }
   if (!operations.length && nextVersion > last) {
-    return { type: 'resnapshot', version: nextVersion }
+    return resnapshot()
+  }
+  let expected = last + 1
+  for (const operation of operations) {
+    const version = Number(operation.serverRevision || operation.version)
+    if (!Number.isFinite(version) || version !== expected) return resnapshot()
+    expected += 1
+  }
+  if (operations.length && expected - 1 !== nextVersion) {
+    return resnapshot()
   }
   if (operations.some(operationRequiresResnapshot)) {
-    return { type: 'resnapshot', version: nextVersion }
+    return resnapshot()
   }
   return {
     type: 'apply',

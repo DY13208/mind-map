@@ -8,6 +8,7 @@ import {
 import { ERROR_TYPES } from '../../constants/constant'
 import pkg from '../../../package.json'
 import { undoTrace } from '../../utils/collabTrace'
+import { isPersonalViewCommand } from '../../utils/personalViewCommands'
 
 //  命令类
 class Command {
@@ -117,6 +118,10 @@ class Command {
         fn(...args)
       })
       this.mindMap.emit('afterExecCommand', name, ...args)
+      // Personal expand state is persisted separately. Serializing a whole
+      // room snapshot here is costly and must not create a content undo step.
+      if (this.mindMap.cooperate && this.mindMap.cooperate.httpCollabMode &&
+          isPersonalViewCommand(name, args)) return
       if (
         ['BACK', 'FORWARD', 'SET_NODE_ACTIVE', 'CLEAR_ACTIVE_NODE'].includes(
           name

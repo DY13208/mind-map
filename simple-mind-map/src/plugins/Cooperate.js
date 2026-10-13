@@ -124,6 +124,7 @@ const STRUCTURE_COMMANDS = {
 
 const RECENT_HTTP_MS = 8000
 const RECENT_PUSH_GRACE_MS = 2500
+const REMOTE_GEOMETRY_RENDER_MS = 120
 const GEN_INTENT_MS = 30000
 const PATCH_CONCURRENCY = 2
 const HTTP_RECOVER_RETRY_BASE_MS = 500
@@ -888,6 +889,7 @@ class Cooperate {
     this.awareness = null
     this.currentAwarenessData = []
     this.waitNodeUidMap = {}
+    this._presenceSignature = null
     this.hasAppliedSync = false
     if (!recreateDoc) return
     this.previewApplied = false
@@ -976,6 +978,8 @@ class Cooperate {
     }
     if (this.onThemeChange) this.mindMap.off('view_theme_change', this.onThemeChange)
     if (this.onLayoutChange) this.mindMap.off('layout_change', this.onLayoutChange)
+    clearTimeout(this._remoteGeometryTimer)
+    this._remoteGeometryTimer = null
     clearTimeout(this.httpTextTimer)
     clearTimeout(this.httpStructureTimer)
     clearTimeout(this.httpRecoverRetryTimer)
@@ -1659,6 +1663,17 @@ class Cooperate {
       this.presenceUsers = list || []
       return
     }
+    // 每次保存确认、每条远端操作都会带着同一份在线名单回来。
+    // 名单里没人换编辑节点时，不去动节点上的头像 DOM。
+    const signature = JSON.stringify(
+      (list || [])
+        .filter(item => item && item.id && !(this.userInfo && item.id === this.userInfo.id))
+        .map(item => [item.id, item.editingUid || null, item.name || '', item.color || '', item.avatar || ''])
+    )
+    if (signature === this._presenceSignature && !Object.keys(this.waitNodeUidMap || {}).length) {
+      return
+    }
+    this._presenceSignature = signature
     const prev = this.presenceUsers || []
     const clearMap = new Map()
     prev.forEach(item => {
@@ -1742,6 +1757,21 @@ class Cooperate {
       }
     })
     this.waitNodeUidMap = {}
+    // 整树重建会换掉节点实例，名单没变也要把编辑头像补回去（只补缺的）。
+    ;(this.presenceUsers || []).forEach(item => {
+      const uid = item && item.editingUid
+      if (!uid) return
+      const node = this.mindMap.renderer.findNodeByUid(uid)
+      if (!node || !Array.isArray(node.userList)) return
+      if (node.userList.some(user => user.id == item.id)) return
+      node.addUser({
+        id: item.id,
+        name: item.name,
+        color: item.color,
+        avatar: item.avatar,
+        editing: true
+      })
+    })
     const renderer = this.mindMap && this.mindMap.renderer
     if (renderer && renderer._lastRenderWasLayoutSwitch) {
       inspectLayoutRenderer(
@@ -2013,7 +2043,9 @@ class Cooperate {
     const renderer = this.mindMap && this.mindMap.renderer
     if (this.currentData && type && type !== 'map.replaced') {
       try {
-        this.currentData = applyCollabEvent(this.currentData, event)
+        this.currentData = applyCollabEvent(this.currentData, event, {
+          liveFieldUpdate: true
+        })
       } catch (err) {
         v2Trace('remote.currentData.fail', { type, uid, message: err && err.message })
       }
@@ -4268,7 +4300,7 @@ class Cooperate {
         !this.httpRefreshing &&
         collabNodeFeatures.needsGeometryRefresh(stylePayload)
       ) {
-        this.mindMap.render()
+        this.scheduleRemoteGeometryRender()
       }
       changed = true
     }
@@ -4387,7 +4419,7 @@ class Cooperate {
         (!this.hydrateFailedUids.has(uid) || this.dirtySubtrees.has(uid))
       ) {
         seen.add(uid)
-        jobs.push(
+        jobs.push(() =>
           this.hydrateFromHttp(node).catch(err => {
             this.hydrateFailedUids.add(uid)
             console.error('[mind-map] expanded partial hydrate failed', uid, err)
@@ -4399,7 +4431,11 @@ class Cooperate {
     }
     visit(renderer.root)
     if (!jobs.length) return { hydrated: 0, changed: false }
-    const results = await Promise.all(jobs)
+    // Large expanded rooms must not start hundreds of subtree requests at once.
+    const results = []
+    for (let index = 0; index < jobs.length; index += 4) {
+      results.push(...await Promise.all(jobs.slice(index, index + 4).map(run => run())))
+    }
     const changed = results.some(Boolean)
     // render_end invokes the personal expand restore again. Rendering after a
     // no-op fetch would otherwise create an endless subtree/render cycle.
@@ -5260,10 +5296,24 @@ class Cooperate {
 
   scheduleHttpTextSync() {
     clearTimeout(this.httpTextTimer)
+    // 在线的人越多，每次保存要广播给越多人重排；打字停顿后再合并成一次。
+    const peers = (this.presenceUsers || []).length
+    const delay = peers >= 8 ? 700 : peers >= 3 ? 450 : 280
     this.httpTextTimer = setTimeout(() => {
       this.httpTextTimer = null
       this.flushHttpText()
-    }, 280)
+    }, delay)
+  }
+
+  // 节点是逐个改的，但排版要看整棵树。多条远端改字落在同一窗口里只排一次。
+  scheduleRemoteGeometryRender() {
+    if (this._remoteGeometryTimer) return
+    this._remoteGeometryTimer = setTimeout(() => {
+      this._remoteGeometryTimer = null
+      if (this.mindMap && typeof this.mindMap.render === 'function') {
+        this.mindMap.render()
+      }
+    }, REMOTE_GEOMETRY_RENDER_MS)
   }
 
   scheduleRemoteRecover(version, options = {}) {
@@ -6722,6 +6772,8 @@ class Cooperate {
     let versionRestore =
       options.reason === 'VERSION_RESTORE' ||
       options.fullTreeReason === 'VERSION_RESTORE'
+    const authoritativeRecovery =
+      options.reason === 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
     const waitForVersionRestore = () =>
       new Promise(resolve => {
         if (!Array.isArray(this.httpRestoreWaiters)) {
@@ -6748,10 +6800,13 @@ class Cooperate {
     let plan = planCollabRecovery(this.lastAppliedVersion, targetVersion)
     // A restore operation can advance the revision before its UI result reaches
     // this editor. Equal revisions still need an authoritative tree refresh.
-    if (plan.type === 'ignore' && versionRestore) {
+    if (plan.type === 'ignore' && (versionRestore || authoritativeRecovery)) {
       plan = {
         type: 'resnapshot',
-        version: Number(targetVersion) || Number(this.lastAppliedVersion) || 0
+        version: Number(targetVersion) || Number(this.lastAppliedVersion) || 0,
+        reason: versionRestore
+          ? 'VERSION_RESTORE'
+          : 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
       }
     }
     if (plan.type === 'ignore') return { applied: false, skipped: true }
@@ -6807,10 +6862,18 @@ class Cooperate {
             }
           }
         } catch (err) {
-          action = { type: 'resnapshot', version: plan.version }
+          action = {
+            type: 'resnapshot',
+            version: plan.version,
+            reason: 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
+          }
         }
       } else if (plan.type === 'fetch_operations') {
-        action = { type: 'resnapshot', version: plan.version }
+        action = {
+          type: 'resnapshot',
+          version: plan.version,
+          reason: 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
+        }
       }
       if (action.type === 'ignore') {
         if (versionRestore) {
@@ -6820,6 +6883,18 @@ class Cooperate {
           }
         } else {
           return { applied: false, skipped: true }
+        }
+      }
+      if (action.type === 'resnapshot' && !versionRestore) {
+        options = {
+          ...options,
+          reason:
+            action.reason ||
+            'AUTHORITATIVE_SNAPSHOT_RECOVERY'
+        }
+        this.httpPendingRecoverOptions = {
+          ...(this.httpPendingRecoverOptions || {}),
+          reason: options.reason
         }
       }
       retryVersion = Number(action.version) || retryVersion
@@ -6902,6 +6977,19 @@ class Cooperate {
           : { applied: false, skipped: true, version: retryVersion }
       }
       refreshApplied = !!(refreshed && refreshed.applied)
+      if (!refreshApplied) {
+        this.httpPendingRecoverVersion = Math.max(
+          this.httpPendingRecoverVersion || 0,
+          retryVersion
+        )
+        if (options && Object.keys(options).length) {
+          this.httpPendingRecoverOptions = {
+            ...(this.httpPendingRecoverOptions || {}),
+            ...options
+          }
+        }
+        return { applied: false, skipped: true, version: retryVersion }
+      }
       const applied = Number(action.version)
       const refreshedVersion = Number(refreshed && refreshed.version)
       if (Number.isFinite(applied)) recoveredVersion = applied

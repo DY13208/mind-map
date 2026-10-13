@@ -309,6 +309,7 @@
 </template>
 
 <script>
+import { createExpandRestoreGate } from '@/utils/expandRestoreGate'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import { mapMutations, mapState } from 'vuex'
@@ -753,11 +754,14 @@ export default {
             randomizationFactor: 0.4
           })
         },
-        httpSync: async ({ afterRevision }) => {
+        httpSync: async ({ afterRevision, headVersion, limit }) => {
           const api = getRuntimeConfig().collabApi || ''
           const roomKey = encodeURIComponent(this.roomName || '')
+          const head =
+            headVersion == null ? '' : `&headVersion=${encodeURIComponent(Number(headVersion) || 0)}`
+          const pageLimit = `&limit=${encodeURIComponent(Number(limit) || 500)}`
           const res = await fetch(
-            `${api}/api/collab-v2/ops?roomKey=${roomKey}&afterRevision=${Number(afterRevision) || 0}`,
+            `${api}/api/collab-v2/ops?roomKey=${roomKey}&afterRevision=${Number(afterRevision) || 0}${head}${pageLimit}`,
             { credentials: 'include', headers: { Accept: 'application/json' } }
           )
           return res.json().catch(() => ({ ok: false }))
@@ -767,16 +771,40 @@ export default {
             return cooperate.applyV2RemoteOperation(op)
           }
         },
-        onReloadRequired: sync => {
-          if (this._roomLoadFailed || this.roomLoadError) return
-          if (!sync || sync.reason !== 'AUTHORITATIVE_SNAPSHOT_RECOVERY') return
-          if (cooperate && typeof cooperate.recoverHttpCollab === 'function') {
-            return cooperate.recoverHttpCollab(
-              this.collabV2Adapter &&
-                this.collabV2Adapter.getStatus().lastServerRevision,
-              { reason: 'AUTHORITATIVE_SNAPSHOT_RECOVERY' }
-            )
+        onReloadRequired: async sync => {
+          if (
+            this._roomLoadFailed ||
+            this.roomLoadError ||
+            !sync ||
+            sync.reason !== 'AUTHORITATIVE_SNAPSHOT_RECOVERY' ||
+            !cooperate ||
+            typeof cooperate.recoverHttpCollab !== 'function'
+          ) {
+            return { applied: false }
           }
+          const status = this.collabV2Adapter && this.collabV2Adapter.getStatus()
+          const targetRevision = Number(
+            sync.currentRevision != null
+              ? sync.currentRevision
+              : sync.serverRevision != null
+                ? sync.serverRevision
+                : sync.currentVersion != null
+                  ? sync.currentVersion
+                  : status && status.lastServerRevision
+          ) || 0
+          const recovered = await cooperate.recoverHttpCollab(targetRevision, {
+            reason: 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
+          })
+          const appliedRevision = Number(recovered && recovered.version)
+          if (
+            !recovered ||
+            recovered.applied !== true ||
+            !Number.isFinite(appliedRevision) ||
+            appliedRevision < targetRevision
+          ) {
+            return { applied: false, version: appliedRevision }
+          }
+          return { applied: true, version: appliedRevision }
         },
         onRejected: (op, err) => {
           if (err && err.code === 'SOP_CONFIRM_REQUIRED') {
@@ -831,8 +859,23 @@ export default {
           redoDepth: snap.redoDepth || 0,
           pendingCount: snap.outboxPending || 0
         })
+        // 保存状态每变一次都会推一次快照；在线名单没变时不要重建头像列表。
         if (snap.peers) {
-          this.peerList = this.mapV2Peers(snap.peers)
+          const peerSig = list =>
+            JSON.stringify(
+              (list || []).map(peer => [
+                peer.id,
+                peer.name,
+                peer.color,
+                peer.avatar,
+                peer.editingUid || null,
+                !!peer.isMe
+              ])
+            )
+          const nextPeers = this.mapV2Peers(snap.peers)
+          if (peerSig(nextPeers) !== peerSig(this.peerList)) {
+            this.peerList = nextPeers
+          }
           this.applyV2NodePresence(snap.peers)
         }
         if (
@@ -1087,8 +1130,11 @@ export default {
       )
 
       let locallyChanged = false
+      let localRevision = 0
+      const restoreGate = createExpandRestoreGate()
       const persist = () => {
         locallyChanged = true
+        localRevision += 1
         if (!this.personalExpandState) return
         savePersonalExpandState(roomKey, userId, this.personalExpandState)
         clearTimeout(this.personalExpandRemoteTimer)
@@ -1149,7 +1195,18 @@ export default {
       this.personalExpandOnChange = snapshotNow
       this.mindMap.on('personal_expand_change', this.personalExpandOnChange)
       this.personalExpandOnRender = () => {
-        if (!this.largeMapInitialOverview) this.restorePersonalExpandState()
+        if (this.largeMapInitialOverview || this.personalExpandApplying || !this.mindMap) return
+        // Do not memoize a restore before the first layout has produced nodes.
+        // The same renderTree identity is retained when that layout finishes.
+        if (!this.mindMap.renderer || !this.mindMap.renderer.root) return
+        const cooperate = this.mindMap.cooperate
+        if (!restoreGate.shouldRestore(
+          this.mindMap.renderer && this.mindMap.renderer.renderTree,
+          cooperate && cooperate.lastAppliedVersion,
+          this.personalExpandState,
+          localRevision
+        )) return
+        this.restorePersonalExpandState().catch(() => restoreGate.invalidate())
       }
       this.mindMap.on('afterExecCommand', this.personalExpandOnCommand)
       this.mindMap.on('node_tree_render_end', this.personalExpandOnRender)
@@ -1192,7 +1249,9 @@ export default {
             this.mindMap,
             this.personalExpandState
           )
-          if (changed) this.mindMap.render()
+          // Hydration inspects rendered instances, not only renderTree data.
+          // Wait until expanded parents exist before checking their children.
+          if (changed) await new Promise(resolve => this.mindMap.render(resolve))
           if (
             !cooperate ||
             typeof cooperate.hydrateExpandedPartialParents !== 'function'
@@ -1201,6 +1260,9 @@ export default {
           }
           const result = await cooperate.hydrateExpandedPartialParents()
           if (!result || !result.changed) break
+          // Hydration schedules a render; finish it before the next pass so
+          // nested lazy branches are visited rather than the previous layout.
+          await new Promise(resolve => this.mindMap.render(resolve))
         }
       } finally {
         this.personalExpandApplying = false
@@ -2393,22 +2455,17 @@ export default {
       if (this.largeMapInitialOverview && typeof cooperate.hydrateRoomMetadata === 'function') {
         cooperate.hydrateRoomMetadata(preview)
       }
-      // Apply canvas data, but do not block room entry on first paint.
-      // Previously waited up to 4s for node_tree_render_end, which felt like a hang.
+      // 等这次 setData 自己的绘制结束，而不是画布上可能还没结束的占位根节点。
+      // 占位根节点会先被画出来，但不能在它还在屏幕上时就把遮罩揭掉。
       const renderWait = new Promise(resolve => {
         let settled = false
         let timer
         const done = rendered => {
           if (settled) return
           settled = true
-          this.mindMap.off('render_complete', done)
-          this.mindMap.off('render_error', failed)
           clearTimeout(timer)
           resolve(rendered !== false)
         }
-        const failed = () => done(false)
-        this.mindMap.on('render_complete', done)
-        this.mindMap.on('render_error', failed)
         let tree = preview.tree
         if (tree && this.largeMapInitialOverview) {
           tree.data = tree.data || {}
@@ -2425,7 +2482,8 @@ export default {
         }
         this.$bus.$emit('setData', tree, {
           quiet: true,
-          fromSaved: true
+          fromSaved: true,
+          onReady: () => done(true)
         })
         if (typeof cooperate.markTreeUids === 'function') {
           cooperate.markTreeUids(preview.tree)
@@ -2433,7 +2491,7 @@ export default {
         if (typeof cooperate.seedPreviewHydration === 'function') {
           cooperate.seedPreviewHydration(preview.tree)
         }
-        timer = setTimeout(() => done(false), 1500)
+        timer = setTimeout(() => done(false), 8000)
       })
       const firstPaintReady = await renderWait
       if (attemptId !== this._openAttemptId) return false
@@ -2446,6 +2504,8 @@ export default {
       if (firstPaintReady && this.largeMapInitialOverview && this.mindMap.view) {
         this.mindMap.view.fit()
       }
+      // 真实树已经画上（大图也已经 fit）。后面的展开恢复不再挡着首屏。
+      this.$bus.$emit('room_canvas_ready')
       const renderRoot =
         this.mindMap.renderer && this.mindMap.renderer.renderTree
       if (renderRoot && typeof cooperate.seedPreviewHydration === 'function') {
@@ -2531,6 +2591,7 @@ export default {
       const roomKey = this.roomName
       const cooperate = this.mindMap && this.mindMap.cooperate
       if (!roomKey || !cooperate) {
+        this.$bus.$emit('room_canvas_ready')
         if (!silent) this.join()
         else this.join({ silent: true })
         return
@@ -2656,6 +2717,10 @@ export default {
         if (this._openAttemptId === attemptId && !this.connected) {
           this.connecting = false
           if (!this._roomLoadFailed) this.setCooperateStatus('disconnected')
+        }
+        // 加载失败或没有树时也要揭开遮罩，避免页面一直停在转圈。
+        if (this._openAttemptId === attemptId) {
+          this.$bus.$emit('room_canvas_ready')
         }
       }
       if (this.connected) return

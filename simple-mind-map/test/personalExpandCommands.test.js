@@ -217,6 +217,7 @@ async function main() {
   const end = vue.indexOf('    async restorePersonalExpandState()', begin)
   let remoteReady
   const listeners = {}
+  vm.runInContext(fs.readFileSync(require.resolve('../../web/src/utils/expandRestoreGate.js'), 'utf8').replace('export function', 'function'), sandbox)
   Object.assign(sandbox, {
     loadPersonalExpandState: () => ({ branch: true }),
     savePersonalExpandState() {}, bindPersonalAppearance: () => () => {},
@@ -228,7 +229,7 @@ async function main() {
   f = fixture()
   f.renderer.mindMap.on = (name, fn) => { listeners[name] = fn }
   const component = { mindMap: f.renderer.mindMap, roomName: 'test', userId: 'test-user',
-    unbindPersonalExpandState() {}, restorePersonalExpandState() {},
+    unbindPersonalExpandState() {}, restorePersonalExpandState() { return Promise.resolve() },
     $set(state, uid, value) { state[uid] = value }, personalExpandApplying: true }
   bind.call(component)
   listeners.afterExecCommand('SET_NODE_EXPAND', { data: { uid: 'branch' } }, false)

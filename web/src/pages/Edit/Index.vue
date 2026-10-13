@@ -91,10 +91,18 @@ export default {
       }
     }
     this.show = !this.accessDenied
+    // 房间会先用一个空的「根节点」把画布引擎拉起来，再换成服务端的树。
+    // 遮罩要留到真实树画完，否则刷新时会先看见那个根节点再跳成整张图。
+    if (!this.accessDenied && this.roomKey) {
+      await this.waitForRoomCanvas()
+    }
     loading.close()
     this.setBodyDark()
   },
   beforeDestroy() {
+    if (typeof this._finishRoomCanvasWait === 'function') {
+      this._finishRoomCanvasWait()
+    }
     // 深色主题只属于脑图编辑器，离开编辑页后不能污染产品外壳。
     document.body.classList.remove('isDark')
     this.setActiveSidebar('')
@@ -129,6 +137,26 @@ export default {
 
     goToMyMaps() {
       navigateToMyMaps(this.$router)
+    },
+
+    waitForRoomCanvas() {
+      return new Promise(resolve => {
+        let settled = false
+        const finish = () => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          this.$bus.$off('room_canvas_ready', onReady)
+          // 先等画布从隐藏切到可见，再揭开遮罩，避免空帧或占位根节点露出来。
+          this.$nextTick(() => {
+            requestAnimationFrame(() => resolve())
+          })
+        }
+        const onReady = () => finish()
+        const timer = setTimeout(finish, 25000)
+        this._finishRoomCanvasWait = finish
+        this.$bus.$on('room_canvas_ready', onReady)
+      })
     }
   }
 }

@@ -13,6 +13,7 @@ function primaryUidsOf(operation) {
     payload.uid,
     inv.uid,
     ...(Array.isArray(payload.removed) ? payload.removed : []),
+    ...(Array.isArray(inv.rows) ? inv.rows.map(row => row && row.uid) : []),
     ...restored
   ])
 }
@@ -219,28 +220,20 @@ function evaluateUndo(target, laterOperations, actorId) {
 }
 
 function applyRestore(obj, payload = {}) {
+  const { normalizeRestoreRows, restoreRowsToNodes } = require('./nodeRestoreCodec')
   const next = JSON.parse(JSON.stringify(obj || {}))
-  const nodes = payload.nodes || {}
+  const rows = normalizeRestoreRows(payload)
+  const nodes = restoreRowsToNodes(rows)
   Object.keys(nodes).forEach(uid => {
     next[uid] = JSON.parse(JSON.stringify(nodes[uid]))
   })
-  ;(payload.rows || []).forEach(row => {
-    next[row.uid] = {
-      isRoot: !!row.is_root,
-      data: { ...(row.data || {}), uid: row.uid },
-      children: (next[row.uid] && next[row.uid].children) || [],
-      position: row.position || ''
-    }
-  })
-  ;(payload.rows || []).forEach(row => {
-    const parentUid = row.parent_uid
-    if (!parentUid || !next[parentUid]) return
-    const kids = [...(next[parentUid].children || [])]
-    if (!kids.includes(row.uid)) kids.push(row.uid)
-    next[parentUid] = { ...next[parentUid], children: kids }
-  })
-  const uid = payload.uid
-  const parentUid = payload.parentUid || payload.parent_uid || payload.parent
+  const uid =
+    (rows.some(row => row.uid === String(payload.uid || '')) && String(payload.uid)) ||
+    (rows[0] && rows[0].uid)
+  const rootRow = rows.find(row => row.uid === uid) || rows[0]
+  const parentUid =
+    payload.parentUid || payload.parent_uid || payload.parent ||
+    (rootRow && rootRow.parent_uid)
   const promoted = (uid && next[uid] && next[uid].children) || []
   if (parentUid && next[parentUid] && uid) {
     let kids = [...(next[parentUid].children || [])].filter(id => id !== uid)

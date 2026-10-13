@@ -3,7 +3,7 @@
     <div class="productHeader">
       <div>
         <h1>Cognee 接入</h1>
-        <p>CPD知识图谱（Cognee）探活、数据集与语义检索</p>
+        <p>WCPD知识图谱（Cognee）探活、数据集与语义检索</p>
       </div>
       <el-button
         size="small"

@@ -3,6 +3,11 @@ require('./loadEnv')
 const crypto = require('crypto')
 const { Pool } = require('pg')
 const { bearerToken, verifyMcpUserToken } = require('./mcpUserToken')
+const {
+  envFlag,
+  isCollabV2Enabled,
+  isCollabV2EventBridgeEnabled
+} = require('./collabV2/flag')
 
 const SESSION_COOKIE = 'mind_map_session'
 const OAUTH_BROWSER_COOKIE = 'mind_map_oauth_browser'
@@ -406,6 +411,33 @@ function readConfig(env = process.env) {
 }
 
 const config = readConfig()
+
+function validateMcpDirectConfig() {
+  if (!envFlag('COLLAB_MCP_DIRECT', false)) return
+  if (!isCollabV2Enabled() || !isCollabV2EventBridgeEnabled()) {
+    throw new Error(
+      'COLLAB_MCP_DIRECT requires COLLAB_V2 and COLLAB_V2_EVENT_BRIDGE to be enabled'
+    )
+  }
+}
+
+validateMcpDirectConfig()
+
+function verifyMcpAuthorization(authorization, token) {
+  const secret = String(
+    token !== undefined && token !== null
+      ? token
+      : config.mcpToken || process.env.MCP_TOKEN || ''
+  ).trim()
+  if (!secret) return null
+  const header = String(authorization || '')
+  if (safeEqualString(header, `Bearer ${secret}`)) {
+    return { principalId: 'mcp-service', kind: 'service' }
+  }
+  const user = verifyMcpUserToken(bearerToken(header), secret)
+  if (!user || !user.userId) return null
+  return { principalId: String(user.userId).slice(0, 160), kind: 'user' }
+}
 
 function isAuthEnabled() {
   return config.enabled
@@ -1940,20 +1972,25 @@ async function authenticateWebsocketRequest(req) {
 }
 
 async function requireAuthenticatedRequest(req, res) {
-  if (!config.enabled) return true
   const authorization = String(req.headers.authorization || '')
-  if (safeEqualString(authorization, `Bearer ${config.mcpToken}`)) {
-    req.authUser = { id: 'mcp-service', name: 'MCP Service', service: true }
-    return true
-  }
-  const mcpUser = verifyMcpUserToken(
-    bearerToken(authorization),
-    config.mcpToken
+  const verifiedMcpSource = verifyMcpAuthorization(
+    authorization,
+    config.mcpToken || process.env.MCP_TOKEN || ''
   )
-  if (mcpUser) {
-    req.authUser = { id: mcpUser.userId, name: mcpUser.userId, mcp: true }
+  if (verifiedMcpSource) {
+    req.verifiedMcpSource = verifiedMcpSource
+    if (config.enabled && verifiedMcpSource.kind === 'service') {
+      req.authUser = { id: 'mcp-service', name: 'MCP Service', service: true }
+    } else if (config.enabled && verifiedMcpSource.kind === 'user') {
+      req.authUser = {
+        id: verifiedMcpSource.principalId,
+        name: verifiedMcpSource.principalId,
+        mcp: true
+      }
+    }
     return true
   }
+  if (!config.enabled) return true
   const method = String(req.method || 'GET').toUpperCase()
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && !isAllowedOrigin(req)) {
     sendJson(req, res, 403, {
@@ -2741,6 +2778,7 @@ module.exports = {
   authenticateRequest,
   authenticateWebsocketRequest,
   requireAuthenticatedRequest,
+  verifyMcpAuthorization,
   applyCorsHeaders,
   isAllowedOrigin,
   createTestIdentity,

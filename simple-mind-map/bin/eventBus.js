@@ -40,15 +40,52 @@ function createPostgresBus(pool) {
   local.name = 'postgres'
   let listenerClient = null
   let started = null
+  let closed = false
+  let listenerHealthy = false
+  let reconnectTimer = null
+  let reconnectAttempts = 0
+  let lastError = ''
+
+  function releaseListener(client, error) {
+    if (!client || listenerClient !== client) return
+    listenerClient = null
+    listenerHealthy = false
+    started = null
+    try {
+      client.release(error)
+    } catch (err) {
+      // A failed pg client may already have been removed from the pool.
+    }
+    if (!closed) scheduleReconnect()
+  }
+
+  function scheduleReconnect() {
+    if (closed || reconnectTimer) return
+    reconnectAttempts += 1
+    const delay = Math.min(30000, 250 * Math.pow(2, Math.min(7, reconnectAttempts - 1)))
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null
+      ensureListener().catch(() => scheduleReconnect())
+    }, delay)
+    if (reconnectTimer.unref) reconnectTimer.unref()
+  }
 
   async function ensureListener() {
+    if (closed) throw new Error('postgres event listener is closed')
     if (started) return started
-    started = (async () => {
-      listenerClient = await pool.connect()
-      listenerClient.on('error', err => {
-        console.error('[event-bus] listener', err.message)
+    const attempt = (async () => {
+      const client = await pool.connect()
+      listenerClient = client
+      client.on('error', err => {
+        lastError = String((err && err.code) || 'PG_LISTENER_ERROR')
+        console.error('[event-bus] listener', (err && err.message) || lastError)
+        releaseListener(client, err)
       })
-      listenerClient.on('notification', msg => {
+      client.on('end', () => {
+        lastError = 'PG_LISTENER_CLOSED'
+        releaseListener(client)
+      })
+      client.on('notification', msg => {
         if (msg.channel !== 'collab_events') return
         let payload = null
         try {
@@ -60,14 +97,27 @@ function createPostgresBus(pool) {
           console.error('[event-bus] local fanout', err.message)
         })
       })
-      await listenerClient.query('LISTEN collab_events')
+      await client.query('LISTEN collab_events')
+      listenerHealthy = true
+      reconnectAttempts = 0
+      lastError = ''
     })()
-    return started
+    started = attempt
+    try {
+      return await attempt
+    } catch (err) {
+      if (started === attempt) started = null
+      if (listenerClient) releaseListener(listenerClient, err)
+      lastError = String((err && err.code) || 'PG_LISTENER_CONNECT_FAILED')
+      scheduleReconnect()
+      throw err
+    }
   }
 
   return {
     name: 'postgres',
     async start() {
+      closed = false
       await ensureListener()
     },
     async publish(event) {
@@ -94,20 +144,31 @@ function createPostgresBus(pool) {
       return local.subscribe(listener)
     },
     async close() {
+      closed = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      reconnectTimer = null
       await local.close()
       if (listenerClient) {
+        const client = listenerClient
         try {
-          await listenerClient.query('UNLISTEN collab_events')
+          await client.query('UNLISTEN collab_events')
         } catch (err) {
           // ignore
         }
-        listenerClient.release()
         listenerClient = null
+        listenerHealthy = false
+        try { client.release() } catch (err) { /* ignore */ }
       }
       started = null
     },
     status() {
-      return { name: 'postgres', ok: true, channel: 'collab_events' }
+      return {
+        name: 'postgres',
+        ok: listenerHealthy,
+        channel: 'collab_events',
+        reconnectAttempts,
+        lastError: lastError || undefined
+      }
     }
   }
 }
@@ -155,6 +216,26 @@ function createRedisStreamBus(options = {}) {
   let connected = false
   let lastId = options.startId || '$'
   const publishedIds = new Set()
+  const trackedClients = new WeakSet()
+
+  function trackClient(client) {
+    if (!client || trackedClients.has(client) || typeof client.on !== 'function') return
+    trackedClients.add(client)
+    client.on('error', err => {
+      connected = false
+      lastError = String((err && err.code) || 'REDIS_CONNECTION_ERROR')
+    })
+    client.on('reconnecting', () => {
+      connected = false
+    })
+    client.on('end', () => {
+      connected = false
+    })
+    client.on('ready', () => {
+      connected = true
+      lastError = ''
+    })
+  }
 
   async function ensureClients() {
     if (!publisher) publisher = clientFactory()
@@ -162,6 +243,8 @@ function createRedisStreamBus(options = {}) {
       reader =
         typeof publisher.duplicate === 'function' ? publisher.duplicate() : clientFactory()
     }
+    trackClient(publisher)
+    if (reader !== publisher) trackClient(reader)
     if (typeof publisher.connect === 'function' && publisher.isOpen !== true) {
       await publisher.connect()
     }
@@ -199,6 +282,7 @@ function createRedisStreamBus(options = {}) {
       } catch (err) {
         if (stopped) return
         lastError = String((err && err.message) || err)
+        connected = false
         await new Promise(resolve => setTimeout(resolve, 500))
       }
     }
@@ -226,7 +310,12 @@ function createRedisStreamBus(options = {}) {
           }
         }
       )
-      if (id) publishedIds.add(String(id))
+      if (id) {
+        publishedIds.add(String(id))
+        if (publishedIds.size > 4096) {
+          publishedIds.delete(publishedIds.values().next().value)
+        }
+      }
       await local.publish(payload)
       return payload
     },
