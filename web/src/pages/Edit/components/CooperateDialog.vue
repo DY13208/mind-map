@@ -802,7 +802,12 @@ export default {
             !Number.isFinite(appliedRevision) ||
             appliedRevision < targetRevision
           ) {
-            return { applied: false, version: appliedRevision }
+            return {
+              applied: false,
+              deferred: !!(recovered && (recovered.deferred || recovered.queued)),
+              queued: !!(recovered && recovered.queued),
+              version: appliedRevision
+            }
           }
           return { applied: true, version: appliedRevision }
         },

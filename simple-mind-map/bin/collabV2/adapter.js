@@ -129,6 +129,38 @@ function isFatalJoinError(err) {
   return !!FATAL_JOIN_ERROR_CODES[String((err && err.code) || '')]
 }
 
+function classifySnapshotApply(result, targetRevision) {
+  const target = Math.max(0, Number(targetRevision) || 0)
+  const appliedRevision = Number(
+    result && (result.version != null ? result.version : result.currentRevision)
+  )
+  const missed =
+    !result ||
+    result.applied !== true ||
+    !Number.isFinite(appliedRevision) ||
+    appliedRevision < target
+  return {
+    missed,
+    deferred: !!(result && (result.deferred || result.queued)),
+    appliedRevision
+  }
+}
+
+// A client already at the room head can fail to repaint while another refresh
+// or a large-map settle is still running. Retry that in the background a few
+// times before surfacing SNAPSHOT_NOT_APPLIED.
+function shouldQuietSnapshotRetry(input = {}) {
+  const target = Math.max(0, Number(input.currentRevision) || 0)
+  const local = Math.max(0, Number(input.lastServerRevision) || 0)
+  return !!(
+    input.code === 'SNAPSHOT_NOT_APPLIED' &&
+    input.deferred &&
+    target > 0 &&
+    local >= target &&
+    Number(input.attempts) < 4
+  )
+}
+
 const REJOIN_BASE_DELAY_MS = 2000
 const REJOIN_MAX_DELAY_MS = 30000
 const SNAPSHOT_RETRY_BASE_DELAY_MS = 1000
@@ -1281,18 +1313,13 @@ function createCollaborationAdapter(options = {}) {
       serverRevision: target,
       reason: 'AUTHORITATIVE_SNAPSHOT_RECOVERY'
     })
-    const appliedRevision = Number(
-      result && (result.version != null ? result.version : result.currentRevision)
-    )
-    if (
-      !result ||
-      result.applied !== true ||
-      !Number.isFinite(appliedRevision) ||
-      appliedRevision < target
-    ) {
+    const verdict = classifySnapshotApply(result, target)
+    const appliedRevision = verdict.appliedRevision
+    if (verdict.missed) {
       const error = new Error('authoritative snapshot was not applied')
       error.code = 'SNAPSHOT_NOT_APPLIED'
       error.currentRevision = target
+      error.deferred = verdict.deferred
       throw error
     }
     if (appliedRevision < state.lastServerRevision) {
@@ -2569,6 +2596,28 @@ function createCollaborationAdapter(options = {}) {
       setStatus('live', { saveState: 'saved', error: '', phase: 'LIVE' })
       return result || { ok: true, reload: true, currentRevision: headVersion }
     } catch (err) {
+      if (
+        shouldQuietSnapshotRetry({
+          code: err.code,
+          deferred: err.deferred,
+          currentRevision: err.currentRevision,
+          lastServerRevision: state.lastServerRevision,
+          attempts: resyncRetryAttempts
+        })
+      ) {
+        scheduleResyncRetry(input.forceSnapshot ? input.payload : null)
+        await rebaseUnsent(state.lastServerRevision)
+        setStatus(state.status, {
+          saveState: 'resync',
+          phase: 'RESYNCING',
+          error: ''
+        })
+        return {
+          ok: true,
+          deferred: true,
+          currentRevision: state.lastServerRevision
+        }
+      }
       recordError({
         code: err.code || 'REVISION_GAP',
         message: err.message || 'sync failed',
@@ -2629,5 +2678,7 @@ function createCollaborationAdapter(options = {}) {
 module.exports = {
   createCollaborationAdapter,
   sessionClientId,
-  ackRevisionDisposition
+  ackRevisionDisposition,
+  classifySnapshotApply,
+  shouldQuietSnapshotRetry
 }

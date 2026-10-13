@@ -3549,6 +3549,7 @@ class Cooperate {
     this.localUndoStack = []
     this.localRedoStack = []
     this.dirtySubtrees = new Map()
+    this.releaseHttpRecoverTurnWaiters('cancelled')
     this.httpRecovering = false
     this.httpRecoverQueued = false
     this.httpPendingRecoverVersion = 0
@@ -3605,6 +3606,54 @@ class Cooperate {
       this.httpSettlingAfterReplace ||
       Date.now() < this.suppressLocalUntil
     )
+  }
+
+  httpRecoverBlocked() {
+    return !!(
+      this.httpRefreshing ||
+      this.httpHydrating ||
+      this.isApplyingRemote ||
+      this.isHttpSettling()
+    )
+  }
+
+  async waitUntilHttpRecoverIdle(budgetMs) {
+    const started = Date.now()
+    const budget = Number(budgetMs) || 8000
+    while (this.httpRecoverBlocked() && Date.now() - started < budget) {
+      await new Promise(resolve => setTimeout(resolve, 40))
+    }
+  }
+
+  waitForHttpRecoverTurn() {
+    if (!this.httpRecovering) return Promise.resolve('idle')
+    return new Promise(resolve => {
+      if (!Array.isArray(this.httpRecoverTurnWaiters)) {
+        this.httpRecoverTurnWaiters = []
+      }
+      let settled = false
+      const finish = value => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(value)
+      }
+      const waiter = { finish }
+      const timer = setTimeout(() => {
+        this.httpRecoverTurnWaiters = (this.httpRecoverTurnWaiters || []).filter(
+          item => item !== waiter
+        )
+        finish('timeout')
+      }, 20000)
+      this.httpRecoverTurnWaiters.push(waiter)
+    })
+  }
+
+  releaseHttpRecoverTurnWaiters(reason) {
+    const waiters = Array.isArray(this.httpRecoverTurnWaiters)
+      ? this.httpRecoverTurnWaiters.splice(0)
+      : []
+    waiters.forEach(waiter => waiter.finish(reason || 'released'))
   }
 
   postReplaceSettleMs() {
@@ -6940,7 +6989,22 @@ class Cooperate {
           ? { applied: false, queued: true }
           : waitForVersionRestore()
       }
-      return { applied: false, queued: true }
+      const turn = await this.waitForHttpRecoverTurn()
+      if (turn !== 'released' && turn !== 'idle') {
+        return {
+          applied: false,
+          deferred: true,
+          queued: true,
+          version: Number(targetVersion) || 0
+        }
+      }
+      return this.recoverHttpCollab(
+        Math.max(
+          Number(targetVersion) || 0,
+          Number(this.httpPendingRecoverVersion) || 0
+        ),
+        this.httpPendingRecoverOptions || options
+      )
     }
     this.httpRecovering = true
     this.httpRecoverQueued = false
@@ -7056,18 +7120,21 @@ class Cooperate {
       } else if (action.type === 'resnapshot') {
         this.markCollapsedLoadedDirty(action.version)
       }
-      const started = Date.now()
-      while (
-        (this.httpRefreshing || this.httpHydrating || this.isApplyingRemote) &&
-        Date.now() - started < 8000
-      ) {
-        await new Promise(resolve => setTimeout(resolve, 40))
-      }
-      const refreshed = await this.refreshVisibleFromHttp('', {
+      const busyBudget = authoritativeRecovery || versionRestore ? 20000 : 8000
+      await this.waitUntilHttpRecoverIdle(busyBudget)
+      let refreshed = await this.refreshVisibleFromHttp('', {
         force: true,
         allowReviveDeleted: versionRestore,
         targetVersion: retryVersion
       })
+      if (refreshed && refreshed.deferred && (authoritativeRecovery || versionRestore)) {
+        await this.waitUntilHttpRecoverIdle(busyBudget)
+        refreshed = await this.refreshVisibleFromHttp('', {
+          force: true,
+          allowReviveDeleted: versionRestore,
+          targetVersion: retryVersion
+        })
+      }
       if (refreshed && refreshed.deferred) {
         this.httpPendingRecoverVersion = Math.max(
           this.httpPendingRecoverVersion || 0,
@@ -7249,6 +7316,7 @@ class Cooperate {
           this.scheduleHttpRecoverRetry(pending, pendingOptions)
         }
       }
+      this.releaseHttpRecoverTurnWaiters('released')
     }
   }
 
