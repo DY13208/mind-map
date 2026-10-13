@@ -108,14 +108,16 @@
           <i class="el-icon-connection" aria-hidden="true"></i>
           <span>MCP 接入</span>
         </router-link>
-        <router-link
-          to="/cognee"
-          title="Cognee 知识图谱"
-          aria-label="Cognee 知识图谱"
+        <a
+          href="https://xx.stillgroup.net:3030/dashboard"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Cognee 知识图谱（新标签页打开）"
+          aria-label="Cognee 知识图谱（新标签页打开）"
         >
           <i class="el-icon-search" aria-hidden="true"></i>
           <span>Cognee</span>
-        </router-link>
+        </a>
         <a
           href="#"
           title="Wiki 知识库"
