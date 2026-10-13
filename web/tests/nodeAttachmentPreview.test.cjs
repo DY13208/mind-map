@@ -1,24 +1,4 @@
 const assert = require('assert').strict
-const fs = require('fs')
-const path = require('path')
-const babel = require('@babel/core')
-
-function loadUtils() {
-  const filename = path.resolve(__dirname, '../src/utils/nodeAttachmentPreview.js')
-  const { code } = babel.transformSync(fs.readFileSync(filename, 'utf8'), {
-    babelrc: false,
-    configFile: false,
-    plugins: [require.resolve('@babel/plugin-transform-modules-commonjs')]
-  })
-  const moduleRef = { exports: {} }
-  new Function('module', 'exports', 'TextDecoder', code)(
-    moduleRef,
-    moduleRef.exports,
-    TextDecoder
-  )
-  return moduleRef.exports
-}
-
 const {
   attachmentPreviewKind,
   decodeAttachmentText,
@@ -32,8 +12,12 @@ const {
   workbookSheetsFromXlsx,
   slimSpreadsheetZip,
   WORKBOOK_PREVIEW_MAX_ROWS,
-  safeMarkdownSource
-} = loadUtils()
+  safeMarkdownSource,
+  assertImagePreviewBudget,
+  assertOfficeZipBudget,
+  canPreviewOriginalAttachment,
+  attachmentPreviewByteLimit
+} = require('./loadAttachmentUtils.cjs')()
 
 assert.equal(attachmentPreviewKind('合同.pdf'), 'pdf')
 assert.equal(attachmentPreviewKind('截图.PNG'), 'image')
@@ -90,6 +74,38 @@ assert.equal(
 )
 assert.equal(attachmentPreviewKind('archive.zip'), 'unsupported')
 
+assert.equal(canPreviewOriginalAttachment({ attachmentId: 'a', attachmentName: '图.png', attachmentStatus: 'failed' }), true)
+assert.equal(canPreviewOriginalAttachment({ attachmentId: 'a', attachmentName: '图.png', attachmentStatus: 'uploading' }), false)
+assert.equal(attachmentPreviewByteLimit('office'), 5 * 1024 * 1024)
+assert.equal(attachmentPreviewByteLimit('text'), 256 * 1024)
+const png = Buffer.alloc(24)
+png.set([0x89, 0x50, 0x4e, 0x47])
+png.writeUInt32BE(1200, 16)
+png.writeUInt32BE(800, 20)
+assert.deepEqual(assertImagePreviewBudget(png), { width: 1200, height: 800 })
+png.writeUInt32BE(100000, 16)
+assert.throws(() => assertImagePreviewBudget(png), /分辨率过大/)
+assert.throws(() => assertImagePreviewBudget(Buffer.from('invalid')), /图片尺寸/)
+const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, 0, 32, 0, 48, 3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0])
+assert.deepEqual(assertImagePreviewBudget(jpeg), { width: 48, height: 32 })
+assert.deepEqual(assertImagePreviewBudget(Buffer.from('47494638396130002000', 'hex')), { width: 48, height: 32 })
+const webp = Buffer.alloc(30)
+webp.write('RIFF', 0)
+webp.write('VP8X', 12)
+webp[24] = 47
+webp[27] = 31
+assert.deepEqual(assertImagePreviewBudget(webp), { width: 48, height: 32 })
+assert.throws(() => assertOfficeZipBudget({ files: { bomb: { _data: { uncompressedSize: 100 * 1024 * 1024 } } } }), /展开后内容过大/)
+const partialUtf8 = Buffer.from('你好世界').subarray(0, 10)
+assert.equal(decodeAttachmentText(partialUtf8, true), '你好世')
+
+const sparse = XLSX => {
+  const wide = { SheetNames: ['稀疏表'], Sheets: { '稀疏表': { '!ref': 'A1:XFD1048576', A1: { t: 's', v: '标题' } } } }
+  const result = workbookSheetsFromXlsx(XLSX, wide)
+  assert.equal(result[0].truncated, true)
+  assert.equal(result[0].rows.length, 1)
+}
+
 assert.equal(decodeAttachmentText(Buffer.from('中文 UTF-8', 'utf8')), '中文 UTF-8')
 assert.equal(
   decodeAttachmentText(Buffer.from([0xef, 0xbb, 0xbf, ...Buffer.from('带 BOM', 'utf8')])),
@@ -120,6 +136,7 @@ assert.equal(
 assert.equal(safeMarkdownSource('# 标题\n<script>alert(1)</script>'), '# 标题\n&lt;script&gt;alert(1)&lt;/script&gt;')
 
 const XLSX = require('xlsx')
+sparse(XLSX)
 const workbook = XLSX.utils.book_new()
 XLSX.utils.book_append_sheet(
   workbook,

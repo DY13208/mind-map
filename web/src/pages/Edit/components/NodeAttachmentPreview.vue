@@ -7,8 +7,9 @@
     append-to-body
     :custom-class="dialogClass"
     :close-on-click-modal="false"
-    @closed="onClosed"
+    @close="onClosed"
   >
+    <p v-if="previewHint" class="previewHint" role="status">{{ previewHint }}</p>
     <section
       v-loading="loading"
       class="attachmentPreviewBody"
@@ -18,11 +19,14 @@
       <div v-if="error" class="previewState previewError" role="alert">
         {{ error }}
       </div>
+      <div v-else-if="previewBlocked" class="previewState">
+        文件较大，已停止自动加载。请下载原文件后查看。
+      </div>
       <div v-else-if="kind === 'image'" class="imagePreviewWrap">
-        <img :src="blobUrl" :alt="title" class="imagePreview" />
+        <img v-if="blobUrl" :src="blobUrl" :alt="title" class="imagePreview" @error="error = '图片加载失败，请下载原文件查看'" />
       </div>
       <iframe
-        v-else-if="kind === 'pdf'"
+        v-else-if="kind === 'pdf' && blobUrl"
         :src="blobUrl"
         :title="title"
         class="documentPreviewFrame"
@@ -55,7 +59,7 @@
               class="workbookTab"
               :class="{ active: sheet.name === activeSheetName }"
               :aria-current="sheet.name === activeSheetName ? 'page' : null"
-              @click="activeSheetName = sheet.name"
+              @click="activeSheetName = sheet.name; workbookPage = 1"
             >
               {{ sheet.name }}
             </button>
@@ -80,8 +84,8 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(row, rowIndex) in activeWorkbookSheet.rows" :key="rowIndex">
-                  <th scope="row">{{ rowIndex + 1 }}</th>
+                <tr v-for="(row, rowIndex) in workbookPageRows" :key="rowIndex">
+                  <th scope="row">{{ workbookPageStart + rowIndex + 1 }}</th>
                   <td v-for="column in activeWorkbookSheet.columnCount" :key="column">
                     {{ row[column - 1] || '' }}
                   </td>
@@ -89,6 +93,13 @@
               </tbody>
             </table>
           </div>
+          <el-pagination
+            v-if="activeWorkbookSheet.rows.length > workbookPageSize"
+            :current-page.sync="workbookPage"
+            :page-size="workbookPageSize"
+            :total="activeWorkbookSheet.rows.length"
+            layout="prev, pager, next"
+          />
         </template>
         <div v-else-if="isDocxFile" ref="docxViewer" class="docxPreview customScrollbar"></div>
         <div v-else-if="kind === 'presentation'" class="documentPreviewCanvas">
@@ -174,7 +185,12 @@ import {
   isSpreadsheetAttachment,
   slimSpreadsheetZip,
   workbookSheetsFromXlsx,
-  safeMarkdownSource
+  safeMarkdownSource,
+  canPreviewOriginalAttachment,
+  attachmentPreviewByteLimit,
+  assertOfficeZipBudget,
+  assertImagePreviewBudget,
+  WORKBOOK_PAGE_ROWS
 } from '@/utils/nodeAttachmentPreview'
 
 const MIME_BY_EXT = {
@@ -230,12 +246,16 @@ export default {
       sourceBlob: null,
       externalUrl: '',
       error: '',
+      previewBlocked: false,
+      previewHint: '',
       requestId: 0,
       controller: null,
       markdownViewer: null,
       markdownViewerContainer: null,
       workbookSheets: [],
       activeSheetName: '',
+      workbookPage: 1,
+      workbookPageSize: WORKBOOK_PAGE_ROWS,
       // 打开时就接近满屏，别让用户第一眼看到挤巴巴的小窗
       ...previewSize(),
       isMaximized: false,
@@ -255,6 +275,12 @@ export default {
         this.workbookSheets[0] ||
         { name: '', rows: [], columnCount: 0, truncated: false }
       )
+    },
+    workbookPageStart() {
+      return (this.workbookPage - 1) * this.workbookPageSize
+    },
+    workbookPageRows() {
+      return this.activeWorkbookSheet.rows.slice(this.workbookPageStart, this.workbookPageStart + this.workbookPageSize)
     },
     isDocxFile() {
       return /\.docx$/i.test(
@@ -283,8 +309,13 @@ export default {
   methods: {
     onAttachmentClick(node) {
       const data = node && node.getData ? node.getData() || {} : {}
+      if (canPreviewOriginalAttachment(data)) {
+        if (data.attachmentId) this.openStoredAttachment(data)
+        else this.openExternalAttachment(data)
+        return
+      }
       if (isAttachmentBusy(data) || (data.attachmentStatus === 'failed' && !data.attachmentId)) {
-        this.$bus.$emit('manageNodeAttachment', node)
+        this.$message.info(attachmentBusyMessage(data))
         return
       }
       if (data.attachmentStatus === 'failed' && data.attachmentId) {
@@ -343,15 +374,18 @@ export default {
       this.sourceBlob = null
       this.externalUrl = ''
       this.error = ''
+      this.previewBlocked = false
+      this.previewHint = ''
       this.workbookSheets = []
       this.activeSheetName = ''
+      this.workbookPage = 1
     },
     cancelActiveRequest() {
       if (this.controller) this.controller.abort()
       this.controller = null
     },
     releaseBlobUrl() {
-      if (this.blobUrl) URL.revokeObjectURL(this.blobUrl)
+      if (this.blobUrl && this.blobUrl.startsWith('blob:')) URL.revokeObjectURL(this.blobUrl)
       this.blobUrl = ''
     },
     destroyMarkdownViewer() {
@@ -395,29 +429,52 @@ export default {
         this.attachmentId = attachment.id || data.attachmentId
         this.attachment = attachment
         this.title = String(attachment.fileName || data.attachmentName || '附件预览')
-        this.kind = attachmentPreviewKind(attachment.fileName, attachment.mimeType)
-        if (isAttachmentBusy(attachment) && !this.previewText) {
+        this.kind = attachmentPreviewKind(attachment.fileName || data.attachmentName, attachment.mimeType || data.attachmentMimeType)
+        const originalPreview = canPreviewOriginalAttachment(attachment)
+        if (originalPreview && attachment.status === 'failed') {
+          this.previewHint = '文字提取失败不影响原文件预览。'
+        }
+        if (isAttachmentBusy(attachment) && !originalPreview && !this.previewText) {
           this.error = attachmentBusyMessage(attachment.status ? attachment : data)
           return
         }
-        if (isAttachmentBusy(attachment) && this.previewText) {
+        if (isAttachmentBusy(attachment) && !originalPreview && this.previewText) {
           this.loading = false
           return
         }
         if (this.kind === 'html') {
+          const htmlId = this.attachmentId
           this.visible = false
           this.openHtmlInNewPage({
-            attachmentId: this.attachmentId
+            attachmentId: htmlId
           })
+          return
+        }
+        const maxBytes = attachmentPreviewByteLimit(this.kind)
+        const textKind = ['text', 'json', 'markdown'].includes(this.kind)
+        if (!textKind && this.kind !== 'presentation' && Number(attachment.byteSize) > maxBytes) {
+          this.previewBlocked = true
+          this.previewHint = `文件大小 ${(Number(attachment.byteSize) / 1024 / 1024).toFixed(1)} MB，超过此类型的站内预览限制。`
+          return
+        }
+        if (this.kind === 'pdf') {
+          // Let the browser's PDF viewer own the response, without an extra
+          // full ArrayBuffer and Blob in the mind-map page.
+          this.blobUrl = nodeAttachmentContentUrl(roomKey, this.attachmentId, { maxBytes })
           return
         }
         if (this.kind === 'office') {
           this.controller = typeof AbortController !== 'undefined' ? new AbortController() : null
           const content = await fetchNodeAttachmentContent(roomKey, this.attachmentId, {
-            signal: this.controller && this.controller.signal
+            signal: this.controller && this.controller.signal,
+            maxBytes
           })
           if (requestId !== this.requestId) return
           if (/\.docx$/i.test(attachment.fileName || '')) {
+            const zipModule = await import('jszip')
+            const zip = await (zipModule.default || zipModule).loadAsync(content.buffer)
+            assertOfficeZipBudget(zip)
+            if (requestId !== this.requestId) return
             this.sourceBlob = new Blob([content.buffer], {
               type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
             })
@@ -429,11 +486,11 @@ export default {
               ? 'application/vnd.ms-excel.sheet.macroenabled.12'
               : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
           })
-          await this.loadWorkbookCanvas(content.buffer)
+          await this.loadWorkbookCanvas(content.buffer, requestId)
           return
         }
         if (this.kind === 'presentation') {
-          this.previewText = String(attachment.extractedText || this.previewText || '')
+          this.previewText = String(attachment.extractedText || this.previewText || '').slice(0, 20000)
           if (!this.previewText.trim()) {
             this.error = attachment.errorMessage || '该演示文稿未生成可读文本，请下载后查看'
           }
@@ -445,20 +502,29 @@ export default {
         }
         this.controller = typeof AbortController !== 'undefined' ? new AbortController() : null
         const content = await fetchNodeAttachmentContent(roomKey, this.attachmentId, {
-          signal: this.controller && this.controller.signal
+          signal: this.controller && this.controller.signal,
+          maxBytes,
+          prefix: textKind
         })
         if (requestId !== this.requestId) return
+        if (this.kind === 'image') assertImagePreviewBudget(content.buffer)
         this.sourceBlob = new Blob([content.buffer], {
           type: previewMimeType(attachment.fileName, this.kind)
         })
         if (this.kind === 'image' || this.kind === 'pdf') {
           this.blobUrl = URL.createObjectURL(this.sourceBlob)
         } else {
-          this.previewText = formatAttachmentText(content.buffer, this.kind)
+          this.previewText = formatAttachmentText(content.buffer, this.kind, content.truncated)
+          if (content.truncated) this.previewHint = '当前仅预览文件开头 256 KB；完整内容请下载查看。'
           if (this.kind === 'markdown') this.renderMarkdown()
         }
       } catch (err) {
         if (err && err.name === 'AbortError') return
+        if (requestId === this.requestId && (err.code === 'PREVIEW_TOO_LARGE' || err.statusCode === 413)) {
+          this.previewBlocked = true
+          this.previewText = ''
+          return
+        }
         if (requestId === this.requestId && !this.previewText) {
           this.error = (err && err.message) || '附件预览加载失败'
         }
@@ -518,7 +584,7 @@ export default {
         this.error = 'DOCX 原样预览加载失败，请下载后使用本地 Office 打开'
       }
     },
-    async loadWorkbookCanvas(buffer) {
+    async loadWorkbookCanvas(buffer, requestId = this.requestId) {
       try {
         const [xlsxModule, zipModule] = await Promise.all([
           import('xlsx'),
@@ -527,6 +593,7 @@ export default {
         const XLSX = xlsxModule.default || xlsxModule
         const JSZip = zipModule.default || zipModule
         const slim = await slimSpreadsheetZip(buffer, JSZip)
+        if (requestId !== this.requestId) return
         const workbook = XLSX.read(slim, {
           type: 'array',
           raw: false,
@@ -535,14 +602,16 @@ export default {
           sheetRows: 501
         })
         const sheets = workbookSheetsFromXlsx(XLSX, workbook)
+        if (requestId !== this.requestId) return
         this.workbookSheets = sheets
         this.activeSheetName = (sheets[0] && sheets[0].name) || ''
         if (!sheets.length) {
           this.error = '无法预览该表格，请下载后查看'
         }
       } catch (err) {
+        if (requestId !== this.requestId) return
         this.workbookSheets = []
-        this.error = '无法预览该表格，请下载后查看'
+        this.error = (err && err.message) || '无法预览该表格，请下载后查看'
       }
     },
     spreadsheetColumnName(index) {
@@ -631,24 +700,18 @@ export default {
       if (!this.attachmentId || this.downloading) return
       this.downloading = true
       try {
-        let blob = this.sourceBlob
-        if (!blob) {
-          const roomKey = roomFromLocation(this.$route)
-          if (!roomKey) throw new Error('无法确认当前协作房间')
-          const content = await fetchNodeAttachmentContent(roomKey, this.attachmentId)
-          blob = new Blob([content.buffer], {
-            type: previewMimeType(this.title, this.kind)
-          })
-        }
-        const url = URL.createObjectURL(blob)
+        const roomKey = roomFromLocation(this.$route)
+        if (!roomKey) throw new Error('无法确认当前协作房间')
+        const url = nodeAttachmentContentUrl(roomKey, this.attachmentId, { download: true })
         const link = document.createElement('a')
         link.href = url
         link.download = this.title || 'attachment'
+        link.target = '_blank'
+        link.rel = 'noopener'
         link.style.display = 'none'
         document.body.appendChild(link)
         link.click()
         document.body.removeChild(link)
-        setTimeout(() => URL.revokeObjectURL(url), 0)
       } catch (err) {
         this.$message.error((err && err.message) || '附件下载失败')
       } finally {
@@ -688,6 +751,12 @@ export default {
 
 .previewError {
   color: #c45656;
+}
+
+.previewHint {
+  margin: 0 0 12px;
+  color: #667085;
+  line-height: 1.6;
 }
 
 .imagePreviewWrap {
@@ -735,6 +804,9 @@ export default {
 
 .officePreviewCanvas {
   height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   background: #fff;
 }
 
@@ -818,7 +890,8 @@ export default {
 }
 
 .spreadsheetViewport {
-  height: calc(100% - 108px);
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   background: #fff;
 }
@@ -970,8 +1043,13 @@ export default {
 
 /deep/ .nodeAttachmentPreviewDialog {
   position: relative;
+  display: flex;
+  flex-direction: column;
   min-width: 640px;
   max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  margin-top: 16px !important;
+  margin-bottom: 16px !important;
   transition: width 160ms ease-out;
 }
 
@@ -1003,13 +1081,23 @@ export default {
 }
 
 /deep/ .nodeAttachmentPreviewDialog .el-dialog__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
   padding-bottom: 10px;
+}
+
+/deep/ .nodeAttachmentPreviewDialog .attachmentPreviewBody {
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 @media (max-width: 768px) {
   /deep/ .nodeAttachmentPreviewDialog {
     width: calc(100vw - 24px) !important;
-    margin-top: 8vh !important;
+    margin-top: 16px !important;
   }
 
   .attachmentPreviewBody {
@@ -1018,7 +1106,7 @@ export default {
   }
 
   .documentPreviewFrame {
-    height: 60vh;
+    height: 100%;
   }
 
   .workbookHeader,
@@ -1029,7 +1117,7 @@ export default {
   }
 
   .spreadsheetViewport {
-    height: calc(100% - 108px);
+    min-height: 0;
   }
 
   /deep/ .nodeAttachmentPreviewDialog {

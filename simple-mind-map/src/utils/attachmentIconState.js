@@ -7,7 +7,7 @@ function clampPercent(value) {
 }
 
 function attachmentStatusOf(data) {
-  return String((data && data.attachmentStatus) || '')
+  return String((data && (data.attachmentStatus || data.status)) || '')
     .trim()
     .toLowerCase()
 }
@@ -39,9 +39,21 @@ function isAttachmentBusy(data) {
 }
 
 function isAttachmentPreviewReady(data) {
-  if (!data || isAttachmentBusy(data)) return false
+  if (!data || attachmentStatusOf(data) === 'uploading') return false
+  if (canPreviewOriginalAttachment(data)) return true
+  if (isAttachmentBusy(data)) return false
   if (attachmentStatusOf(data) === 'failed') return false
   return hasAttachmentFile(data)
+}
+
+// OCR/extraction state does not describe whether the uploaded image/PDF can
+// be opened. Keep the original available even when extraction fails.
+function canPreviewOriginalAttachment(data = {}) {
+  const name = String(data.attachmentName || data.fileName || '')
+  const mime = String(data.attachmentMimeType || data.mimeType || '').split(';')[0].trim()
+  return !!(data.attachmentId || data.id || data.attachmentUrl) &&
+    attachmentStatusOf(data) !== 'uploading' &&
+    (/\.(png|jpe?g|webp|gif|pdf)$/i.test(name) || /^(image\/(png|jpe?g|webp|gif)|application\/pdf)$/i.test(mime))
 }
 
 function attachmentIconViewState(data = {}) {
@@ -64,27 +76,27 @@ function attachmentIconViewState(data = {}) {
   if (status === 'pending' || status === 'processing') {
     return {
       phase: 'processing',
-      previewable: false,
+      previewable: canPreviewOriginalAttachment(data),
       iconOpacity: 0.28,
       progressMode: 'indeterminate',
       percent: 0,
       progressColor: '#fa8c16',
       badge: null,
       showPercent: false,
-      title: `${name} · 正在处理`
+      title: `${name} · 正在处理${canPreviewOriginalAttachment(data) ? '，点击查看原文件' : ''}`
     }
   }
   if (status === 'failed') {
     return {
       phase: 'failed',
-      previewable: false,
+      previewable: canPreviewOriginalAttachment(data),
       iconOpacity: 1,
       progressMode: 'none',
       percent: 0,
       progressColor: '#f04438',
       badge: { color: '#f04438' },
       showPercent: false,
-      title: `${name} · 处理失败`
+      title: `${name} · ${canPreviewOriginalAttachment(data) ? '文字提取失败，点击查看原文件' : '处理失败'}`
     }
   }
   if (isAttachmentPreviewReady(data)) {
@@ -117,5 +129,6 @@ module.exports = {
   hasAttachmentIcon,
   isAttachmentBusy,
   isAttachmentPreviewReady,
+  canPreviewOriginalAttachment,
   attachmentIconViewState
 }

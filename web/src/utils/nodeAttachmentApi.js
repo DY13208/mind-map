@@ -4,6 +4,7 @@ import { getRuntimeConfig } from './runtimeConfig'
 import { collectNodeKnowledge, knowledgeNeedsRemoteExtract } from './nodeKnowledge'
 import { Upload } from 'tus-js-client'
 import { enqueueAttachmentUpload } from './attachmentUploadQueue'
+import { readBoundedAttachmentResponse } from './boundedAttachmentRead'
 
 const MAX_UPLOAD_CHARS = 1.6e6
 export const DEFAULT_MAX_ATTACHMENT_BYTES = 200 * 1024 * 1024
@@ -301,11 +302,15 @@ export async function waitForAttachmentReady(
   return last
 }
 
-export function nodeAttachmentContentUrl(roomKey, attachmentId) {
+export function nodeAttachmentContentUrl(roomKey, attachmentId, options = {}) {
   const base = String(getRuntimeConfig().collabApi || '').replace(/\/$/, '')
+  const params = new URLSearchParams()
+  if (options.download) params.set('download', '1')
+  if (options.maxBytes) params.set(options.prefix ? 'prefix_bytes' : 'max_bytes', String(options.maxBytes))
+  const query = params.toString()
   return `${base}/api/files/${encodeURIComponent(
     roomKey
-  )}/attachments/${encodeURIComponent(attachmentId)}/content`
+  )}/attachments/${encodeURIComponent(attachmentId)}/content${query ? `?${query}` : ''}`
 }
 
 export async function fetchNodeAttachmentContent(
@@ -313,7 +318,7 @@ export async function fetchNodeAttachmentContent(
   attachmentId,
   options = {}
 ) {
-  const res = await fetch(nodeAttachmentContentUrl(roomKey, attachmentId), {
+  const res = await fetch(nodeAttachmentContentUrl(roomKey, attachmentId, options), {
     method: 'GET',
     credentials: 'include',
     cache: 'no-store',
@@ -332,8 +337,10 @@ export async function fetchNodeAttachmentContent(
     error.statusCode = res.status
     throw error
   }
+  const content = await readBoundedAttachmentResponse(res, options)
   return {
-    buffer: await res.arrayBuffer(),
+    ...content,
+    truncated: content.truncated || res.headers.get('x-preview-truncated') === '1',
     contentType: res.headers.get('content-type') || ''
   }
 }

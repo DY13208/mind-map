@@ -296,7 +296,7 @@ async function putObjectFromFile(cosKey, filePath, mimeType) {
   return true
 }
 
-async function getObjectBuffer(cosKey) {
+async function getObjectBuffer(cosKey, options = {}) {
   if (!storeEnabled || !cosKey) {
     const err = new Error('附件原文件未存储，无法查看或重新解析')
     err.statusCode = 404
@@ -306,21 +306,30 @@ async function getObjectBuffer(cosKey) {
   const data = await cosCall('getObject', {
     Bucket,
     Region,
-    Key: cosKey
+    Key: cosKey,
+    ...(options.prefixBytes ? { Range: `bytes=0-${options.prefixBytes - 1}` } : {})
   })
   const body = data && data.Body
   return Buffer.isBuffer(body) ? body : Buffer.from(body || '')
 }
 
-async function getContentById(db, roomKey, id) {
+async function getContentById(db, roomKey, id, options = {}) {
   const row = await db.query(
     `select * from node_attachments where room_key = $1 and id = $2 limit 1`,
     [roomKey, id]
   )
   if (!row.rows[0]) return null
+  const attachment = rowToDto(row.rows[0])
+  const maxBytes = Math.min(32 * 1024 * 1024, Math.max(0, Number(options.maxBytes) || 0))
+  if (maxBytes && attachment.byteSize > maxBytes) {
+    throw Object.assign(new Error('附件过大，请下载后查看'), { statusCode: 413, code: 'PREVIEW_TOO_LARGE' })
+  }
+  const prefixBytes = Math.min(256 * 1024, Math.max(0, Math.floor(Number(options.prefixBytes) || 0)))
+  const buffer = await getObjectBuffer(row.rows[0].cos_key, { prefixBytes })
   return {
-    attachment: rowToDto(row.rows[0]),
-    buffer: await getObjectBuffer(row.rows[0].cos_key)
+    attachment,
+    buffer: prefixBytes ? buffer.subarray(0, prefixBytes) : buffer,
+    truncated: !!prefixBytes && attachment.byteSize > prefixBytes
   }
 }
 

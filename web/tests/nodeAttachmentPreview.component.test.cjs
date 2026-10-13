@@ -40,27 +40,7 @@ function loadComponent(fileName) {
         }
       }
       if (name === '@/utils/nodeAttachmentPreview') {
-        return {
-          safeMarkdownSource: value => value,
-          attachmentPreviewKind: (fileName, mimeType) => {
-            if (
-              /\.html?$/i.test(String(fileName || '')) ||
-              /html/.test(String(mimeType || ''))
-            ) {
-              return 'html'
-            }
-            return 'file'
-          },
-          isHtmlAttachment: (fileName, mimeType, url) =>
-            /\.html?$/i.test(String(fileName || '')) ||
-            /html/.test(String(mimeType || '')) ||
-            /\.html?([?#]|$)/i.test(String(url || '')),
-          isAttachmentBusy: data =>
-            /uploading|pending|processing/i.test(
-              String((data && (data.attachmentStatus || data.status)) || '')
-            ),
-          attachmentBusyMessage: () => '正在处理，请稍候'
-        }
+        return require('./loadAttachmentUtils.cjs')()
       }
       return {}
     },
@@ -133,6 +113,14 @@ methods.onAttachmentClick.call(vm, {
 assert.equal(opened.length, 2)
 assert.equal(tabs.length, 1)
 assert.equal(messages[0], '正在处理，请稍候')
+for (const status of ['failed', 'processing', 'pending']) {
+  methods.onAttachmentClick.call(vm, { getData: () => ({
+    attachmentId: 'picture-' + status,
+    attachmentName: '图片.png',
+    attachmentStatus: status
+  }) })
+  assert.equal(opened[opened.length - 1][0], 'stored', 'OCR state must not trigger replacement')
+}
 assert.ok(!attachmentSource.includes('$loading'))
 assert.ok(attachmentSource.includes("attachmentStatus: 'uploading'"))
 assert.ok(attachmentSource.includes('waitForAttachmentReady'))
