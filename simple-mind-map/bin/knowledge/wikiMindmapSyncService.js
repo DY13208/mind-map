@@ -16,6 +16,29 @@ const { diffTrees } = require('./wikiMindmapDiff')
 const docmostClient = require('./adapters/docmostClient')
 const { toDocmostMarkdown } = require('./adapters/docmostAdapter')
 
+function indexSyncTree(node, map = new Map()) {
+  if (!node) return map
+  const id = node.nodeId || node.uid
+  if (id) map.set(id, node)
+  ;(node.children || []).forEach(child => indexSyncTree(child, map))
+  return map
+}
+
+async function readLiveNodeFields(pool, roomId, uid) {
+  const result = await pool.query(
+    `select data
+     from room_nodes
+     where room_key = $1 and uid = $2 and deleted_at is null`,
+    [roomId, uid]
+  )
+  const data = result.rows[0] && result.rows[0].data
+  if (!data || typeof data !== 'object') return null
+  return {
+    text: String(data.text != null ? data.text : ''),
+    note: String(data.note != null ? data.note : '')
+  }
+}
+
 function logSync(fields) {
   const parts = Object.keys(fields)
     .filter(k => fields[k] !== undefined && fields[k] !== null)
@@ -325,13 +348,18 @@ function createWikiMindmapSyncService(deps) {
     let deleted = 0
     let moved = 0
 
+    const baseVersion = Number.isFinite(Number(room && room.version))
+      ? Number(room.version)
+      : null
+    const snapshotNodes = indexSyncTree(currentTree)
+
     async function run(type, payload) {
       const command = {
         operationId: crypto.randomUUID(),
         mapId: room_id,
         actorId: String(actorId || 'wiki-sync'),
         clientId: 'wiki-mindmap-sync',
-        baseVersion: null,
+        baseVersion,
         type,
         payload
       }
@@ -387,9 +415,57 @@ function createWikiMindmapSyncService(deps) {
 
     for (const u of ops.update) {
       const t0 = Date.now()
+      const patch = { ...(u.patch || {}) }
+      const snap = snapshotNodes.get(u.nodeId)
+      if (pool && snap) {
+        const live = await readLiveNodeFields(pool, room_id, u.nodeId)
+        if (!live) {
+          logSync({
+            page_id,
+            room_id,
+            topic_key,
+            slot,
+            action: 'SKIP_STALE',
+            node_id: u.nodeId,
+            source: 'wiki',
+            status: 'skipped',
+            field: 'deleted'
+          })
+          continue
+        }
+        if (patch.text != null && live.text !== String(snap.text || '')) {
+          delete patch.text
+          logSync({
+            page_id,
+            room_id,
+            topic_key,
+            slot,
+            action: 'SKIP_STALE',
+            node_id: u.nodeId,
+            source: 'wiki',
+            status: 'skipped',
+            field: 'text'
+          })
+        }
+        if (patch.note != null && live.note !== String(snap.note || '')) {
+          delete patch.note
+          logSync({
+            page_id,
+            room_id,
+            topic_key,
+            slot,
+            action: 'SKIP_STALE',
+            node_id: u.nodeId,
+            source: 'wiki',
+            status: 'skipped',
+            field: 'note'
+          })
+        }
+      }
+      if (!Object.keys(patch).length) continue
       await run('node.update', {
         uid: u.nodeId,
-        patch: u.patch
+        patch
       })
       updated += 1
       logSync({

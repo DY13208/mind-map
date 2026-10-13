@@ -429,7 +429,7 @@ async function executeTrustedOperation(roomKey, command, internalOptions = {}) {
 function isMcpDirectEnabled() {
   const flags = require('./collabV2/flag')
   return (
-    flags.envFlag('COLLAB_MCP_DIRECT', false) &&
+    flags.envFlag('COLLAB_MCP_DIRECT', true) &&
     flags.isCollabV2Enabled() &&
     flags.isCollabV2EventBridgeEnabled()
   )
@@ -443,21 +443,28 @@ async function executeMcpDirectOperation(roomKey, command, source, mcpRequest) {
   const policy = require('./mcpDirectPolicy')
   const refs = []
   const payload = command.payload || {}
-  if (command.type === 'node.insert') {
-    refs.push(payload.parentUid || payload.parent_uid || payload.parent || 'root')
+  if (command.type === 'node.batch') {
+    if (!policy.isMcpDirectBatch(command)) return null
   } else {
-    refs.push(payload.uid || '')
+    if (command.type === 'node.insert') {
+      refs.push(payload.parentUid || payload.parent_uid || payload.parent || 'root')
+    } else {
+      refs.push(payload.uid || '')
+    }
+    const knownUids = new Set()
+    for (const ref of refs) {
+      if (!ref || policy.isUidReference(ref)) continue
+      const resolved = await getRoomRef(roomKey, ref)
+      if (resolved && resolved.nodeExists) knownUids.add(String(ref))
+    }
+    if (!policy.isMcpDirectShape(command, source, knownUids)) return null
   }
-  const knownUids = new Set()
-  for (const ref of refs) {
-    if (!ref || policy.isUidReference(ref)) continue
-    const resolved = await getRoomRef(roomKey, ref)
-    if (resolved && resolved.nodeExists) knownUids.add(String(ref))
-  }
-  if (!policy.isMcpDirectShape(command, source, knownUids)) return null
 
   assertRoomWritable(roomKey)
   assertRateLimit(roomKey)
+  if (command.type === 'node.batch') {
+    assertBatchSize(payload.ops)
+  }
   if (command.type === 'node.update') {
     assertPatchSize(
       (payload && (payload.patch || payload.data)) || payload
@@ -500,7 +507,9 @@ async function executeOperation(req, roomKey, command, internalOptions = {}) {
     let mcpRequest = null
     if (
       req.verifiedMcpSource &&
-      ['node.insert', 'node.update', 'node.delete'].includes(command.type)
+      ['node.insert', 'node.update', 'node.delete', 'node.batch'].includes(
+        command.type
+      )
     ) {
       const { digestMcpOperation } = require('./mcpOperationIdentity')
       mcpRequest = {
@@ -531,6 +540,12 @@ async function executeOperation(req, roomKey, command, internalOptions = {}) {
         committed = directCommitted
         submissionPath = 'direct'
       }
+    }
+    if (!committed && command.type === 'node.batch' && mcpRequest && isMcpDirectEnabled()) {
+      const err = new Error('批量节点请使用 uid，不能整图提交')
+      err.statusCode = 400
+      err.code = 'MCP_BATCH_NOT_DIRECT'
+      throw err
     }
     if (!committed) {
       committed = await executeTrustedOperation(roomKey, command, {

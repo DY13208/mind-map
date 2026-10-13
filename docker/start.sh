@@ -114,7 +114,37 @@ supervise() {
   done
 }
 
-supervise collab /tmp/collab.pid env NODE_OPTIONS=--max-old-space-size=3072 node /app/simple-mind-map/bin/collabServer.js &
+flag_on() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    0|false|off|no) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+run_knowledge=false
+run_wiki=false
+if flag_on "${KNOWLEDGE_COMPILER_ENABLED:-true}"; then
+  run_knowledge=true
+fi
+if flag_on "${WIKI_COMPILER_SYNC_ENABLED:-true}"; then
+  run_wiki=true
+fi
+if [ "$run_knowledge" = true ] || [ "$run_wiki" = true ]; then
+  supervise compilers /tmp/compilers.pid env \
+    KNOWLEDGE_COMPILER_ENABLED="$run_knowledge" \
+    WIKI_COMPILER_SYNC_ENABLED="$run_wiki" \
+    node /app/simple-mind-map/bin/compilerProcess.js &
+  compiler_loop=$!
+else
+  compiler_loop=
+  echo "[gateway] background compilers disabled"
+fi
+
+supervise collab /tmp/collab.pid env \
+  NODE_OPTIONS=--max-old-space-size=3072 \
+  KNOWLEDGE_COMPILER_ENABLED=false \
+  WIKI_COMPILER_SYNC_ENABLED=false \
+  node /app/simple-mind-map/bin/collabServer.js &
 collab_loop=$!
 
 echo "[gateway] waiting for collab http://127.0.0.1:1234/api/health ..."
@@ -158,9 +188,16 @@ kill_pidfile() {
 cleanup() {
   touch "$STOP_FLAG"
   kill_pidfile /tmp/collab.pid
+  kill_pidfile /tmp/compilers.pid
   kill_pidfile /tmp/mcp.pid
   kill_pidfile /tmp/ai.pid
+  if [ -n "${compiler_loop:-}" ]; then
+    kill "$compiler_loop" 2>/dev/null || true
+  fi
   kill "$collab_loop" "$mcp_loop" "$ai_loop" "$nginx_pid" 2>/dev/null || true
+  if [ -n "${compiler_loop:-}" ]; then
+    wait "$compiler_loop" 2>/dev/null || true
+  fi
   wait "$collab_loop" "$mcp_loop" "$ai_loop" "$nginx_pid" 2>/dev/null || true
 }
 

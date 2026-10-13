@@ -313,7 +313,7 @@ function createServer(authorization) {
     },
     {
       instructions:
-        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps，只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。需要完整读取整间房间时只调用一次 export_room_tree，禁止用反复 query_nodes 拼整图。该工具在服务端读完快照；complete 为 true 才表示整图已读完。节点超过 500 时响应只含 export_path 和摘要，完整内容在该文件里；打不开文件时用 read_room_export 按 offset 读这份导出，不要回到 query_nodes。complete 为 false 时查看 incomplete_reason，不得声称已读完。历史版本只提供元数据和新增、修改、删除、移动计数，不提供历史脑图正文。回滚必须依次调用 list_versions、get_version，向用户展示目标版本和变更摘要并获得明确确认，再用列表返回的 currentRevision 调用 restore_version；RESTORE_CONFLICT 后必须重新查询并再次确认，禁止自动重试。附件（与网页工具栏「附件」同一套能力）：生成或拿到产物后必须调用 upload_attachment 挂到目标节点，节点会出现可点击回形针图标；禁止只把本机路径、挂载说明、「请拖到节点」写进 text/note；禁止用 update_node 的 note 代替挂载。upload_attachment 优先 file_path（WorkBuddy 目录或 ./output），否则 content_base64 / source_url。已有附件用 list_attachments / read_attachment；attachmentExtractedText 只是截断预览。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。工具返回 isError 表示没有写入，禁止声称已完成。'
+        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps，只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。需要完整读取整间房间时只调用一次 export_room_tree，禁止用反复 query_nodes 拼整图。该工具在服务端读完快照；complete 为 true 才表示整图已读完。节点超过 500 时响应只含 export_path 和摘要，完整内容在该文件里；打不开文件时用 read_room_export 按 offset 读这份导出，不要回到 query_nodes。complete 为 false 时查看 incomplete_reason，不得声称已读完。历史版本只提供元数据和新增、修改、删除、移动计数，不提供历史脑图正文。回滚必须依次调用 list_versions、get_version，向用户展示目标版本和变更摘要并获得明确确认，再用列表返回的 currentRevision 调用 restore_version；RESTORE_CONFLICT 后必须重新查询并再次确认，禁止自动重试。附件（与网页工具栏「附件」同一套能力）：生成或拿到产物后必须调用 upload_attachment 挂到目标节点，节点会出现可点击回形针图标；禁止只把本机路径、挂载说明、「请拖到节点」写进 text/note；禁止用 update_node 的 note 代替挂载。upload_attachment 优先 file_path（WorkBuddy 目录或 ./output），否则 content_base64 / source_url。已有附件用 list_attachments / read_attachment；attachmentExtractedText 只是截断预览。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。一次写多个节点必须用 apply_nodes，整批一次提交、版本只加 1；不要循环 add_node、update_node 或 delete_node。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。工具返回 isError 表示没有写入，禁止声称已完成。'
     }
   )
 
@@ -1127,6 +1127,83 @@ function createServer(authorization) {
             )}/nodes/${encodeURIComponent(node)}`,
             'DELETE',
             { confirm_sop_change },
+            operation_id || randomUUID(),
+            { signal: extra && extra.signal }
+          )
+        )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'apply_nodes',
+    '一次提交多个节点的新增、修改或删除，整批共用一个版本号。operations 里的 parent 和 node 必须是 uid 或 root，不要用文字路径。同一批里新建的节点要带上 uid，后续操作用这个 uid 当 parent。任一条失败则整批回滚。适合按块写入；单个节点仍用 add_node、update_node、delete_node。',
+    {
+      room_key: z.string().describe('房间号'),
+      operations: z
+        .array(
+          z.object({
+            op: z.enum(['add', 'update', 'delete']).describe('add 新增，update 修改，delete 删除'),
+            parent: z.string().describe('add 的父节点 uid 或 root').optional(),
+            node: z.string().describe('update/delete 的节点 uid；add 时可指定新节点 uid').optional(),
+            text: z.string().describe('节点文字').optional(),
+            note: z.string().describe('备注').optional(),
+            confirm_sop_change: z
+              .boolean()
+              .describe('目标属于 SOP 时必须先获用户确认并传 true')
+              .optional()
+          })
+        )
+        .min(1)
+        .max(100)
+        .describe('最多 100 条，按顺序执行'),
+      operation_id: z.string().uuid().describe('可选幂等请求ID，超时后使用同一ID重试').optional()
+    },
+    async ({ room_key, operations, operation_id }, extra = {}) => {
+      try {
+        const ops = operations.map(item => {
+          const confirm = item.confirm_sop_change
+          if (item.op === 'add') {
+            return {
+              type: 'node.insert',
+              payload: {
+                parentUid: item.parent || 'root',
+                ...(item.node ? { uid: item.node } : {}),
+                ...(item.text != null ? { text: item.text } : {}),
+                ...(item.note != null ? { note: item.note } : {}),
+                ...(confirm != null ? { confirm_sop_change: confirm } : {})
+              }
+            }
+          }
+          if (item.op === 'update') {
+            const patch = {}
+            if (item.text != null) patch.text = item.text
+            if (item.note != null) patch.note = item.note
+            return {
+              type: 'node.update',
+              payload: {
+                uid: item.node,
+                patch,
+                ...(confirm != null ? { confirm_sop_change: confirm } : {})
+              }
+            }
+          }
+          return {
+            type: 'node.delete',
+            payload: {
+              uid: item.node,
+              ...(confirm != null ? { confirm_sop_change: confirm } : {})
+            }
+          }
+        })
+        return ok(
+          await writeNodeMap(
+            room_key,
+            `/api/maps/${encodeURIComponent(room_key)}/operations`,
+            'POST',
+            { type: 'node.batch', payload: { ops } },
             operation_id || randomUUID(),
             { signal: extra && extra.signal }
           )

@@ -11,7 +11,7 @@ function boolEnv(name, fallback) {
 
 function historyConfig(overrides = {}) {
   return {
-    checkpointEvery: numEnv('HISTORY_CHECKPOINT_EVERY', 200),
+    checkpointEvery: numEnv('HISTORY_CHECKPOINT_EVERY', 1000),
     autoVersionMinMs: numEnv('HISTORY_AUTO_VERSION_MIN_MS', 15 * 60 * 1000),
     autoVersionIdleMs: numEnv('HISTORY_AUTO_VERSION_IDLE_MS', 2 * 60 * 1000),
     autoVersionOnCheckpoint: boolEnv('HISTORY_AUTO_VERSION_ON_CHECKPOINT', false),

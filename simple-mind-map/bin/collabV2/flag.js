@@ -9,7 +9,7 @@ function isCollabV2Enabled() {
 }
 
 function isCollabV2EventBridgeEnabled() {
-  return isCollabV2Enabled() && envFlag('COLLAB_V2_EVENT_BRIDGE', false)
+  return isCollabV2Enabled() && envFlag('COLLAB_V2_EVENT_BRIDGE', true)
 }
 
 function isCollabV2Trace() {

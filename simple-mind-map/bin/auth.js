@@ -413,7 +413,7 @@ function readConfig(env = process.env) {
 const config = readConfig()
 
 function validateMcpDirectConfig() {
-  if (!envFlag('COLLAB_MCP_DIRECT', false)) return
+  if (!envFlag('COLLAB_MCP_DIRECT', true)) return
   if (!isCollabV2Enabled() || !isCollabV2EventBridgeEnabled()) {
     throw new Error(
       'COLLAB_MCP_DIRECT requires COLLAB_V2 and COLLAB_V2_EVENT_BRIDGE to be enabled'

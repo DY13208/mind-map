@@ -53,4 +53,26 @@ function isMcpDirectShape(command, source, knownUids = new Set()) {
   return false
 }
 
-module.exports = { isMcpDirectShape, isUidReference }
+function isUidToken(value) {
+  const ref = String(value || '').trim()
+  return !!ref && ref !== 'root' && !ref.includes('/')
+}
+
+function isMcpDirectBatch(command) {
+  const ops = command && command.payload && command.payload.ops
+  if (!Array.isArray(ops) || ops.length < 1 || ops.length > 100) return false
+  return ops.every(item => {
+    const type = String((item && item.type) || '')
+    const payload = (item && item.payload) || {}
+    if (type === 'node.insert') {
+      const parent = payload.parentUid || payload.parent_uid || payload.parent
+      return parent === 'root' || isUidToken(parent)
+    }
+    if (type === 'node.update' || type === 'node.delete') {
+      return isUidToken(payload.uid)
+    }
+    return false
+  })
+}
+
+module.exports = { isMcpDirectShape, isUidReference, isMcpDirectBatch }

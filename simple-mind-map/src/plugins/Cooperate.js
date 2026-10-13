@@ -2011,6 +2011,7 @@ class Cooperate {
       }
       if (pending.length) {
         v2Trace('remote.apply.batch.leftover', { left: pending.length })
+        if (this.deferUnloadedRemoteEvents(pending)) return true
         return this.syncHttpRemoteOperations([op])
       }
       return true
@@ -2188,10 +2189,72 @@ class Cooperate {
       if (parentUid) this.dirtySubtrees.set(parentUid, Date.now())
       if (uid) this.dirtySubtrees.set(uid, Date.now())
     }
+    if (this.deferUnloadedRemote(type, uid, parentUid)) {
+      this.notifySearchInvalidate()
+      return true
+    }
     v2Trace('remote.apply.fallback-hydrate', { type, uid, parentUid })
     const applied = this.syncHttpRemoteOperations([op])
     this.notifySearchInvalidate()
     return applied
+  }
+
+  remoteTargetRendered(uid) {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!uid || !renderer || typeof renderer.findNodeByUid !== 'function') return false
+    return !!renderer.findNodeByUid(uid)
+  }
+
+  markRemoteDirty(uid, parentUid) {
+    if (!this.dirtySubtrees) return
+    if (parentUid) this.dirtySubtrees.set(parentUid, Date.now())
+    if (uid) this.dirtySubtrees.set(uid, Date.now())
+  }
+
+  unloadedRemoteAnchor(type, uid, parentUid) {
+    const name = String(type || '')
+    if (/insert|move|reorder/.test(name)) return parentUid || uid
+    return uid || parentUid
+  }
+
+  deferUnloadedRemote(type, uid, parentUid) {
+    const anchor = this.unloadedRemoteAnchor(type, uid, parentUid)
+    if (!anchor) return false
+    const renderer = this.mindMap && this.mindMap.renderer
+    const node =
+      renderer && typeof renderer.findNodeByUid === 'function'
+        ? renderer.findNodeByUid(anchor)
+        : null
+    const collapsed =
+      node &&
+      node.getData &&
+      node.getData('expand') === false &&
+      /insert|move|reorder/.test(String(type || ''))
+    if (node && !collapsed) return false
+    this.markRemoteDirty(uid, parentUid)
+    v2Trace('remote.apply.defer-unloaded', { type, uid, parentUid, collapsed: !!collapsed })
+    return true
+  }
+
+  deferUnloadedRemoteEvents(events) {
+    const list = Array.isArray(events) ? events : []
+    if (!list.length) return false
+    const unloaded = list.every(child => {
+      const payload = (child && child.payload) || {}
+      const parent = payload.parentUid || payload.parent_uid || payload.parent
+      return !this.remoteTargetRendered(
+        this.unloadedRemoteAnchor(child && child.type, payload.uid, parent)
+      )
+    })
+    if (!unloaded) return false
+    list.forEach(child => {
+      const payload = (child && child.payload) || {}
+      this.markRemoteDirty(
+        payload.uid,
+        payload.parentUid || payload.parent_uid || payload.parent
+      )
+    })
+    return true
   }
 
   isGeneralizationUid(parentUid, uid) {
@@ -2231,6 +2294,14 @@ class Cooperate {
     if (renderer.findNodeByUid(uid)) return true
     const parentNode = renderer.findNodeByUid(parentUid)
     if (!parentNode) return false
+    if (parentNode.getData && parentNode.getData('expand') === false) {
+      const count = Number(parentNode.getData('childCount')) || 0
+      const live = (parentNode.nodeData && parentNode.nodeData.children || []).length
+      renderer.setNodeData(parentNode, { childCount: Math.max(count, live) + 1 })
+      this.markRemoteDirty(uid, parentUid)
+      if (typeof parentNode.reRender === 'function') parentNode.reRender()
+      return true
+    }
     const data = payloadNodeData(payload)
     this.isApplyingRemote = true
     this.mindMap.command.pause()
@@ -6930,7 +7001,16 @@ class Cooperate {
             Math.max(this.dirtySubtrees.get(uid) || 0, dirty[uid])
           )
         })
-        await this.syncHttpRemoteOperations(action.operations)
+        const pendingRemote = action.operations.filter(op => {
+          const event = (op && op.event) || op || {}
+          const payload = event.payload || op.payload || {}
+          const parent = payload.parentUid || payload.parent_uid || payload.parent
+          const type = op.type || event.type
+          return !this.deferUnloadedRemote(type, payload.uid, parent)
+        })
+        if (pendingRemote.length) {
+          await this.syncHttpRemoteOperations(pendingRemote)
+        }
       } else if (action.type === 'resnapshot') {
         this.markCollapsedLoadedDirty(action.version)
       }

@@ -83,6 +83,24 @@ const layouts = {
 
 const EXPAND_ALL_BATCH = 6
 const EXPAND_ALL_PER_FRAME = 48
+// Compact layout is super-linear. Around 300 visible nodes one pass was
+// already about a second, and around 900 it froze the page for tens of seconds.
+const COMPACT_VISIBLE_NODE_LIMIT = 250
+
+function countVisibleLayoutNodes(tree) {
+  if (!tree) return 0
+  let count = 0
+  const stack = [tree]
+  while (stack.length) {
+    const node = stack.pop()
+    if (!node) continue
+    count += 1
+    if (node.data && node.data.expand === false) continue
+    const kids = node.children || []
+    for (let i = 0; i < kids.length; i += 1) stack.push(kids[i])
+  }
+  return count
+}
 
 //  渲染
 class Render {
@@ -165,8 +183,26 @@ class Render {
       this.mindMap.opt.layout = CONSTANTS.LAYOUT.LOGICAL_STRUCTURE
     }
     this.layout = new L(this, this.mindMap.opt.layout)
+    this._compactDegraded = false
     this._layoutSwitchCount = (this._layoutSwitchCount || 0) + 1
     this._lastLayoutName = this.mindMap.opt.layout
+  }
+
+  // Large expanded maps keep the user's compact preference, but this render
+  // uses the ordinary logical layout so the main thread does not freeze.
+  applyCompactLayoutBudget() {
+    const opt = this.mindMap && this.mindMap.opt
+    if (!opt || opt.layout !== CONSTANTS.LAYOUT.LOGICAL_STRUCTURE) return
+    if (!opt.compactLayout && !this._compactDegraded) return
+    const visible = countVisibleLayoutNodes(this.renderTree)
+    const over = visible > COMPACT_VISIBLE_NODE_LIMIT
+    if (over && this.layout instanceof CompactStructure) {
+      this.layout = new LogicalStructure(this, CONSTANTS.LAYOUT.LOGICAL_STRUCTURE)
+      this._compactDegraded = true
+    } else if (!over && this._compactDegraded && opt.compactLayout) {
+      this.layout = new CompactStructure(this, CONSTANTS.LAYOUT.LOGICAL_STRUCTURE)
+      this._compactDegraded = false
+    }
   }
 
   cleanupLayoutRenderer() {
@@ -741,6 +777,7 @@ class Render {
       return
     }
     this.mindMap.emit('node_tree_render_start')
+    this.applyCompactLayoutBudget()
     // 计算布局
     this.root = null
     const layoutDiagnostic = performanceObserver.enabled()
