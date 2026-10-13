@@ -90,5 +90,12 @@ assert.equal(ready.showPercent, false)
 assert.equal(ready.title, '表.xlsx')
 
 assert.equal(uploading.showPercent, true)
+for (const status of ['failed', 'processing', 'pending']) {
+  const image = { attachmentId: 'image-1', attachmentName: '截图.png', attachmentStatus: status }
+  assert.equal(isAttachmentPreviewReady(image), true)
+  const state = attachmentIconViewState(image)
+  assert.equal(state.previewable, true)
+  assert.match(state.title, /点击查看原文件/)
+}
 
 console.log('attachment icon state tests passed')

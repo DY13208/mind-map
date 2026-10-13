@@ -52,29 +52,12 @@ function loadComponent(fileName) {
         }
       }
       if (name === '@/utils/nodeAttachmentPreview') {
+        const real = require('./loadAttachmentUtils.cjs')()
         return {
-          safeMarkdownSource: value => value,
-          attachmentPreviewKind: (fileName, mimeType) => {
-            if (
-              /\.html?$/i.test(String(fileName || '')) ||
-              /html/.test(String(mimeType || ''))
-            ) {
-              return 'html'
-            }
-            return 'file'
-          },
-          isHtmlAttachment: (fileName, mimeType, url) =>
-            /\.html?$/i.test(String(fileName || '')) ||
-            /html/.test(String(mimeType || '')) ||
-            /\.html?([?#]|$)/i.test(String(url || '')),
-          isAttachmentBusy: data =>
-            /uploading|pending|processing/i.test(
-              String((data && (data.attachmentStatus || data.status)) || '')
-            ),
-          attachmentBusyMessage: () => '正在处理，请稍候',
+          ...real,
           slimSpreadsheetZip: buffer => {
             const job = workbookJobs.get(buffer.name)
-            if (!job) return Promise.resolve(buffer)
+            if (!job) return real.slimSpreadsheetZip(buffer)
             job.started = true
             return job.promise
           },
@@ -154,7 +137,16 @@ const busyNode = {
 methods.onAttachmentClick.call(vm, busyNode)
 assert.equal(opened.length, 2)
 assert.equal(tabs.length, 1)
-assert.deepEqual(managedNodes, [{ event: 'manageNodeAttachment', node: busyNode }])
+assert.equal(messages[0], '正在处理，请稍候')
+assert.deepEqual(managedNodes, [])
+for (const status of ['failed', 'processing', 'pending']) {
+  methods.onAttachmentClick.call(vm, { getData: () => ({
+    attachmentId: 'picture-' + status,
+    attachmentName: '图片.png',
+    attachmentStatus: status
+  }) })
+  assert.equal(opened[opened.length - 1][0], 'stored', 'OCR state must not trigger replacement')
+}
 assert.ok(!attachmentSource.includes('$loading'))
 assert.ok(attachmentSource.includes('附件上传中；原附件会保留到新文件上传成功后再切换'))
 assert.ok(!attachmentSource.includes("attachmentStatus: 'uploading'"))

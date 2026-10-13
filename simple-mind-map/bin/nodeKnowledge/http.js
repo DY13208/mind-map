@@ -152,15 +152,24 @@ async function handleApi(req, res, options = {}) {
     ) {
       const roomKey = safeRoomKey(attachmentHit.roomKey)
       await roomAcl.assertRoomAccess(db, req, roomKey, 'view')
-      const content = await store.getContentById(db, roomKey, attachmentHit.id)
+      const params = searchParamsOf(req, options)
+      const content = await store.getContentById(db, roomKey, attachmentHit.id, {
+        maxBytes: params.get('max_bytes'),
+        prefixBytes: params.get('prefix_bytes')
+      })
       if (!content) {
         sendJson(res, 404, { ok: false, error: '附件不存在', code: 'NOT_FOUND' })
         return true
       }
       const item = content.attachment
+      const headers = attachmentResponseHeaders(item.fileName || 'attachment')
+      if (params.get('download') === '1') {
+        headers['Content-Disposition'] = headers['Content-Disposition'].replace(/^inline;/, 'attachment;')
+      }
       res.writeHead(200, {
-        ...attachmentResponseHeaders(item.fileName || 'attachment'),
+        ...headers,
         'Content-Length': content.buffer.length,
+        ...(content.truncated ? { 'X-Preview-Truncated': '1' } : {})
       })
       res.end(content.buffer)
       return true

@@ -102,6 +102,22 @@ async function main() {
     assert.ok(response.body.equals(raw), 'content response must preserve original bytes')
     assert.deepEqual(accessCalls, [{ roomKey: 'room-demo', action: 'view' }])
 
+    store.getContentById = async (db, room, id, options) => {
+      assert.equal(options.prefixBytes, '262144')
+      return { attachment: { fileName: '日志.txt' }, buffer: raw, truncated: true }
+    }
+    const prefix = createResponse()
+    await httpApi.handleApi({ method: 'GET', url: '/api/files/room-demo/attachments/att-1/content?prefix_bytes=262144' }, prefix, { db: {} })
+    assert.equal(prefix.headers['X-Preview-Truncated'], '1')
+
+    store.getContentById = async () => ({ attachment: { fileName: '图片.png' }, buffer: raw })
+    const download = createResponse()
+    await httpApi.handleApi({ method: 'GET', url: '/api/files/room-demo/attachments/att-1/content?download=1' }, download, { db: {} })
+    assert.match(download.headers['Content-Disposition'], /^attachment;/)
+
+    // The real store must reject oversize previews before contacting COS.
+    await assert.rejects(originalGetContentById({ query: async () => ({ rows: [{ byte_size: 50 * 1024 * 1024 }] }) }, 'room-demo', 'large', { maxBytes: 5 * 1024 * 1024 }), { code: 'PREVIEW_TOO_LARGE', statusCode: 413 })
+
     roomAcl.assertRoomAccess = async () => {
       const error = new Error('无权访问附件')
       error.statusCode = 403
