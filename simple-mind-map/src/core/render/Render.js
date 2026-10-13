@@ -1,4 +1,5 @@
 import merge from 'deepmerge'
+import performanceObserver from '../../../bin/collabV2/performanceObserver'
 import LogicalStructure from '../../layouts/LogicalStructure'
 import CompactStructure from '../../layouts/CompactStructure'
 import MindMap from '../../layouts/MindMap'
@@ -742,7 +743,17 @@ class Render {
     this.mindMap.emit('node_tree_render_start')
     // 计算布局
     this.root = null
+    const layoutDiagnostic = performanceObserver.enabled()
+    const layoutShape = layoutDiagnostic ? performanceObserver.treeShape(this.renderTree) : null
+    const layoutStarted = layoutDiagnostic ? performance.now() : 0
     this.layout.doLayout(root => {
+      if (layoutDiagnostic) performanceObserver.record('layout', {
+        ...layoutShape,
+        layout: this.layout instanceof CompactStructure ? 'compactStructure' : this.mindMap.opt.layout,
+        compactPreference: this.mindMap.opt.compactLayout,
+        elapsedMs: performance.now() - layoutStarted,
+        superseded: renderGeneration !== this._renderGeneration
+      })
       if (renderGeneration !== this._renderGeneration) {
         this.finishSupersededRender()
         return
