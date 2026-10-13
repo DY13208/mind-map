@@ -15,7 +15,7 @@ IP 由启动脚本探测，不要手写，也不要用 `127.0.0.1`（WorkBuddy �
 
 | 工具 | 作用 |
 | --- | --- |
-| `list_maps` | 列出房间，含给人类打开的 `share_url` |
+| `list_maps` | 按标题筛选并分页列出当前用户可见的房间 |
 | `create_map` | 新建导图 |
 | `get_map` | `format=outline` 大纲（默认最多 800 节点）；`format=full` 树（超大图会截断，可用 `max_nodes`） |
 | `list_versions` | 列出历史版本及新增、修改、删除、移动计数，支持分页和筛选 |
@@ -41,10 +41,17 @@ IP 由启动脚本探测，不要手写，也不要用 `127.0.0.1`（WorkBuddy �
 | `delete_map` | 删除房间 |
 | `get_share_link` | 只取网页邀请链接 |
 
-1. AI 调用 `create_map` 或 `list_maps`
-2. 把返回的 `share_url` 发给同事
+1. AI 调用 `create_map` 或 `list_maps`，确定房间号
+2. 需要邀请同事时调用 `get_share_link`，再把返回的 `share_url` 发给对方
 3. 同事打开链接，自动进入同一房间
 4. AI 继续 `add_node` / `update_node`，网页上立刻能看到
+
+`list_maps` 默认每页 20 个房间，最多 100 个；它只返回当前页。首次调用可传 `limit` 和标题筛选 `query`，当 `has_more=true` 时将 `next_cursor` 原样传回，并保持相同的 `query`，直到 `has_more=false`。`total` 和列表都遵循当前用户的房间访问权限；只有读完分页后才能据此判断可见房间数量。
+
+```text
+list_maps limit=100 query="项目"
+list_maps limit=100 query="项目" cursor="<上一页的 next_cursor>"
+```
 
 ### 历史版本
 

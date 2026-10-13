@@ -1,5 +1,6 @@
 const crypto = require('crypto')
 const { countGraphDescendants } = require('./descendantCounts')
+const { getRoomSubtreeCounts } = require('./subtreeCountCache')
 const {
   applyPositionsToTree,
   comparePositions,
@@ -843,10 +844,23 @@ function childStubFromRow(row, childCount, version) {
   }
 }
 
-function collectTreeUids(tree, out = []) {
-  if (!tree || !tree.data) return out
-  if (tree.data.uid) out.push(String(tree.data.uid))
-  ;(tree.children || []).forEach(child => collectTreeUids(child, out))
+function collectTreeUids(tree) {
+  const out = []
+  const seen = new Set()
+  const stack = [tree]
+  while (stack.length) {
+    const node = stack.pop()
+    if (!node || !node.data) continue
+    if (node.data.uid) {
+      const uid = String(node.data.uid)
+      if (!seen.has(uid)) {
+        seen.add(uid)
+        out.push(uid)
+      }
+    }
+    const children = Array.isArray(node.children) ? node.children : []
+    for (let i = children.length - 1; i >= 0; i--) stack.push(children[i])
+  }
   return out
 }
 
@@ -855,54 +869,120 @@ function collectTreeUids(tree, out = []) {
  * childCount must NEVER equal clipped children.length.
  * Read only live UID/parent edges once, then count bottom-up without depth caps.
  */
-async function stampAuthoritativeChildCounts(db, roomKey, tree) {
-  const uids = Array.from(new Set(collectTreeUids(tree)))
+async function stampAuthoritativeChildCounts(db, roomKey, tree, options = {}) {
+  const uids = collectTreeUids(tree)
   if (!uids.length) return { queryCount: 0, stamped: 0 }
-  const res = await db.query(
-    `select uid, parent_uid
-     from room_nodes
-     where room_key = $1
-       and deleted_at is null`,
-    [roomKey]
-  )
-  const childrenByUid = new Map(res.rows.map(row => [row.uid, []]))
-  res.rows.forEach(row => {
-    if (childrenByUid.has(row.parent_uid)) {
-      childrenByUid.get(row.parent_uid).push(row.uid)
-    }
-  })
-  const descendants = countGraphDescendants(childrenByUid)
-  const totals = new Map()
-  childrenByUid.forEach((children, uid) => {
-    totals.set(uid, children.length)
-  })
+  const cacheDb = options.cacheDb || db
+  const loadCounts = async () => {
+    const res = await db.query(
+      `select uid, parent_uid
+       from room_nodes
+       where room_key = $1
+         and deleted_at is null`,
+      [roomKey]
+    )
+    const childrenByUid = new Map(res.rows.map(row => [row.uid, []]))
+    res.rows.forEach(row => {
+      if (childrenByUid.has(row.parent_uid)) {
+        childrenByUid.get(row.parent_uid).push(row.uid)
+      }
+    })
+    const descendants = countGraphDescendants(childrenByUid)
+    return new Map(Array.from(childrenByUid, ([uid, children]) => [uid, {
+      childCount: children.length,
+      descendantCount: descendants.get(uid) || 0
+    }]))
+  }
+  // A Pool-backed repeatable-read transaction gives the room version and the
+  // edge scan one stable snapshot. Supplied Clients may belong to an external
+  // transaction (including one that can roll back), so never share their
+  // counts through the cross-request cache.
+  const cached = options.consistentSnapshot
+    ? await getRoomSubtreeCounts(cacheDb, roomKey, options.version, loadCounts)
+    : { counts: await loadCounts(), queryCount: 1 }
   let stamped = 0
-  const walk = node => {
-    if (!node || !node.data) return
+  const stack = [tree]
+  while (stack.length) {
+    const node = stack.pop()
+    if (!node || !node.data) continue
     const uid = String(node.data.uid || '')
-    const total = totals.has(uid) ? totals.get(uid) : 0
-    node.data.childCount = total
-    node.data.descendantCount = descendants.get(uid) || 0
+    const count = cached.counts.get(uid)
+    const childCount = count ? count.childCount : 0
+    node.data.childCount = childCount
+    node.data.descendantCount = count ? count.descendantCount : 0
     stamped += 1
     const loaded = Array.isArray(node.children) ? node.children.length : 0
-    if (total > loaded) node.data.hasMore = true
-    else if (node.data.hasMore && total <= loaded) node.data.hasMore = false
-    ;(node.children || []).forEach(walk)
+    if (childCount > loaded) node.data.hasMore = true
+    else if (node.data.hasMore && childCount <= loaded) node.data.hasMore = false
+    const children = Array.isArray(node.children) ? node.children : []
+    for (let i = children.length - 1; i >= 0; i--) stack.push(children[i])
   }
-  walk(tree)
-  return { queryCount: 1, stamped, totals }
+  const result = { queryCount: cached.queryCount, stamped }
+  // Keep the exported helper's legacy totals Map without allocating it on the
+  // normal subtree-read path, which only needs the stamped node fields.
+  let totals
+  Object.defineProperty(result, 'totals', {
+    enumerable: true,
+    get() {
+      if (!totals) {
+        totals = new Map()
+        cached.counts.forEach((count, uid) => totals.set(uid, count.childCount))
+      }
+      return totals
+    }
+  })
+  return result
+}
+
+async function withRoomReadSnapshot(db, fn) {
+  // A pool can provide a fresh connection for a stable MVCC snapshot. A
+  // supplied Client is reused as-is: pg.Client also has connect(), but that
+  // method opens the Client itself and must not be called a second time.
+  if (
+    !db ||
+    typeof db.connect !== 'function' ||
+    typeof db.getTransactionStatus === 'function'
+  ) return fn(db, false)
+  const client = await db.connect()
+  let inTransaction = false
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
+    inTransaction = true
+    const result = await fn(client, true)
+    await client.query('COMMIT')
+    inTransaction = false
+    return result
+  } catch (err) {
+    if (inTransaction) await client.query('ROLLBACK').catch(() => {})
+    throw err
+  } finally {
+    if (typeof client.release === 'function') client.release()
+  }
 }
 
 async function readRoomSubtree(db, roomKey, uid, options = {}) {
   if (!nodesTableAuthorityEnabled()) return null
-  const meta = await db.query(
+  return withRoomReadSnapshot(db, (snapshotDb, consistentSnapshot) =>
+    readRoomSubtreeSnapshot(
+      snapshotDb,
+      db,
+      roomKey,
+      uid,
+      options,
+      consistentSnapshot
+    )
+  )
+}
+
+async function readRoomSubtreeSnapshot(snapshotDb, cacheDb, roomKey, uid, options, consistentSnapshot) {
+  const meta = await snapshotDb.query(
     `select version, updated_at from rooms where room_key = $1`,
     [roomKey]
   )
   if (!meta.rows.length) return { notFound: true }
   const version = Number(meta.rows[0].version || 0)
   const updated_at = meta.rows[0].updated_at
-  const resolved = await resolveRoomNodeUid(db, roomKey, uid)
+  const resolved = await resolveRoomNodeUid(snapshotDb, roomKey, uid)
   if (!resolved) return { missing: true, version, updated_at }
   const known = Number(options.knownVersion) || 0
   if (known > 0 && known >= version) {
@@ -913,7 +993,7 @@ async function readRoomSubtree(db, roomKey, uid, options = {}) {
       2000,
       Math.max(1, Number(options.maxNodes) || MAX_DEEP_SUBTREE_NODES)
     )
-    const descendants = await db.query(
+    const descendants = await snapshotDb.query(
       `with recursive walk as (
          select uid, parent_uid, position, data, is_root, node_version, deleted_at, 0 as depth
          from room_nodes
@@ -940,9 +1020,10 @@ async function readRoomSubtree(db, roomKey, uid, options = {}) {
     if (!payload) return { missing: true, version, updated_at }
     // Overwrite clipped stampPreviewMeta childCount with PG authority.
     const stamp = await stampAuthoritativeChildCounts(
-      db,
+      snapshotDb,
       roomKey,
-      payload.tree
+      payload.tree,
+      { version, cacheDb, consistentSnapshot }
     )
     return {
       ...payload,
@@ -956,7 +1037,7 @@ async function readRoomSubtree(db, roomKey, uid, options = {}) {
     500,
     Math.max(1, Number(options.limit) || MAX_SUBTREE_CHILDREN)
   )
-  const kids = await db.query(
+  const kids = await snapshotDb.query(
     `select uid, parent_uid, position, data, is_root, node_version
      from room_nodes
      where room_key = $1 and parent_uid = $2 and deleted_at is null
@@ -964,18 +1045,18 @@ async function readRoomSubtree(db, roomKey, uid, options = {}) {
      offset $3 limit $4`,
     [roomKey, resolved, offset, limit]
   )
-  const totalRes = await db.query(
-    `select count(*)::int as total
-     from room_nodes
-     where room_key = $1 and parent_uid = $2 and deleted_at is null`,
-    [roomKey, resolved]
-  )
-  const total = Number((totalRes.rows[0] && totalRes.rows[0].total) || 0)
   const children = kids.rows.map(row =>
     childStubFromRow(row, 0, version)
   )
   const countTree = { data: { uid: resolved }, children }
-  await stampAuthoritativeChildCounts(db, roomKey, countTree)
+  await stampAuthoritativeChildCounts(snapshotDb, roomKey, countTree, {
+    version,
+    cacheDb,
+    consistentSnapshot
+  })
+  // The authoritative count comes from the complete live edge set, so the
+  // page total stays correct even when the requested kids page is clipped.
+  const total = countTree.data.childCount
   return {
     uid: resolved,
     total,

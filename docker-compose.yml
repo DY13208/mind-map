@@ -66,6 +66,10 @@ services:
       COLLAB_RATE_LIMIT_PER_ROOM: "800"
       COLLAB_RATE_LIMIT_GLOBAL: "8000"
       COLLAB_V2: "1"
+      # Keep incremental MCP/event bridging opt-in during upgrades. Enabling
+      # only MCP Direct without its event bridge is rejected at startup.
+      COLLAB_V2_EVENT_BRIDGE: ${COLLAB_V2_EVENT_BRIDGE:-false}
+      COLLAB_MCP_DIRECT: ${COLLAB_MCP_DIRECT:-false}
       TZ: Asia/Shanghai
       HISTORY_DISPLAY_TZ: Asia/Shanghai
       SOP_OUTPUT_DIR: /app/output

@@ -57,10 +57,10 @@ function createGeneratedInsertFixture() {
   return { committed, canonicalPayload }
 }
 
-function makeCommitted(version, eventType = 'map.updated', payload = {}) {
+function makeCommitted(version, eventType = 'map.updated', payload = {}, roomKey = 'bridge-room') {
   return {
     operationId: `op-${version}`,
-    roomKey: 'bridge-room',
+    roomKey,
     actorId: 'test-agent',
     clientId: 'browser-client',
     client_seq: version,
@@ -101,6 +101,8 @@ function createBridgeFixture(options = {}) {
   let headVersion = Number(options.headVersion || 0)
   let activeQueries = 0
   let maxActiveQueries = 0
+  let headQueryCount = 0
+  let operationQueryCount = 0
   const io = {
     to(room) {
       return {
@@ -116,15 +118,25 @@ function createBridgeFixture(options = {}) {
     intervalMs: options.intervalMs || 10000,
     pageSize: options.pageSize || 2,
     getActiveRoomKeys: () => Array.from(activeRooms),
-    listActiveRoomHeads: async roomKeys =>
-      roomKeys.map(roomKey => ({ roomKey, headVersion })),
+    listActiveRoomHeads: async roomKeys => {
+      headQueryCount += 1
+      if (typeof options.beforeReadHeads === 'function') await options.beforeReadHeads(roomKeys)
+      return roomKeys.map(roomKey => ({ roomKey, headVersion }))
+    },
     listRoomOperationsContiguous: async (roomKey, afterVersion, query = {}) => {
+      operationQueryCount += 1
       activeQueries += 1
       maxActiveQueries = Math.max(maxActiveQueries, activeQueries)
-      if (options.readDelayMs) {
-        await new Promise(resolve => setTimeout(resolve, options.readDelayMs))
+      try {
+        if (typeof options.beforeReadOperations === 'function') {
+          await options.beforeReadOperations({ roomKey, afterVersion, query, operationQueryCount })
+        }
+        if (options.readDelayMs) {
+          await new Promise(resolve => setTimeout(resolve, options.readDelayMs))
+        }
+      } finally {
+        activeQueries -= 1
       }
-      activeQueries -= 1
       const head = Number(query.headVersion == null ? headVersion : query.headVersion)
       const available = rows
         .filter(row => row.roomKey === roomKey && row.version > afterVersion && row.version <= head)
@@ -184,7 +196,9 @@ function createBridgeFixture(options = {}) {
     invalidations,
     activeRooms,
     setHead: value => { headVersion = Number(value) },
-    getMaxActiveQueries: () => maxActiveQueries
+    getMaxActiveQueries: () => maxActiveQueries,
+    getHeadQueryCount: () => headQueryCount,
+    getOperationQueryCount: () => operationQueryCount
   }
 }
 
@@ -256,8 +270,232 @@ async function testBridgeDrainsVersionsInOrderAndDeduplicatesWakeups() {
   assert.strictEqual(fixture.getMaxActiveQueries(), 1)
   assert.strictEqual(fixture.invalidations.length, 3)
   const status = fixture.bridge.status()
-  assert.ok(status.duplicateNotifications >= 1)
+  assert.strictEqual(status.duplicateNotifications, 1)
+  assert.strictEqual(status.skippedDuplicateWakeups, 1)
+  assert.strictEqual(status.notifications, 2)
+  assert.strictEqual(status.duplicateRatio, 1 / 3)
   assert.ok(!JSON.stringify(status).includes('bridge-room'))
+  await fixture.bridge.stop()
+}
+
+async function testConcurrentDuplicateWakeupDoesNotStartAnotherDrain() {
+  let releaseRead
+  let markReadStarted
+  const readGate = new Promise(resolve => { releaseRead = resolve })
+  const readStarted = new Promise(resolve => { markReadStarted = resolve })
+  const fixture = createBridgeFixture({
+    beforeReadOperations: async () => {
+      markReadStarted()
+      await readGate
+    }
+  })
+  fixture.activeRooms.add('bridge-room')
+  await fixture.bridge.start()
+  fixture.bridge.activateRoom('bridge-room', 0)
+  await waitFor(() => fixture.bridge.status().pendingDrains === 0)
+  const emptyDrainsBeforeWakeup = fixture.bridge.status().emptyDrains
+  fixture.rows.push(makeCommitted(1))
+  fixture.setHead(1)
+
+  const wakeup = { mapId: 'bridge-room', version: 1, operationId: 'same-op' }
+  await fixture.bus.publish(wakeup)
+  await readStarted
+  const queriesAtFirstRead = fixture.getHeadQueryCount() + fixture.getOperationQueryCount()
+  await fixture.bus.publish(wakeup)
+  assert.strictEqual(
+    fixture.getHeadQueryCount() + fixture.getOperationQueryCount(),
+    queriesAtFirstRead,
+    'a concurrent duplicate should not add a head or operation query'
+  )
+
+  releaseRead()
+  await waitFor(() => fixture.emissions.some(row => row.event === 'op:event'))
+  await waitFor(() => fixture.bridge.status().pendingDrains === 0)
+  assert.strictEqual(fixture.getOperationQueryCount(), 1)
+  assert.strictEqual(fixture.bridge.status().emptyDrains, emptyDrainsBeforeWakeup)
+  await fixture.bridge.stop()
+}
+
+async function testPendingWakeupLimitBypassesCacheWithoutDroppingNotifications() {
+  let releaseRead
+  let markReadStarted
+  const readGate = new Promise(resolve => { releaseRead = resolve })
+  const readStarted = new Promise(resolve => { markReadStarted = resolve })
+  const fixture = createBridgeFixture({
+    beforeReadOperations: async ({ operationQueryCount }) => {
+      if (operationQueryCount !== 1) return
+      markReadStarted()
+      await readGate
+    }
+  })
+  fixture.activeRooms.add('bridge-room')
+  await fixture.bridge.start()
+  fixture.bridge.activateRoom('bridge-room', 0)
+  await waitFor(() => fixture.bridge.status().pendingDrains === 0)
+  const emptyDrainsBefore = fixture.bridge.status().emptyDrains
+  fixture.rows.push(makeCommitted(1))
+  fixture.setHead(1)
+
+  await fixture.bus.publish({ mapId: 'bridge-room', version: 1, operationId: 'overflow-0' })
+  await readStarted
+  for (let index = 1; index < 2048; index += 1) {
+    await fixture.bus.publish({
+      mapId: 'bridge-room',
+      version: index + 1,
+      operationId: `overflow-${index}`
+    })
+  }
+
+  const overflow = { mapId: 'bridge-room', version: 2049, operationId: 'overflow-last' }
+  await fixture.bus.publish(overflow)
+  await fixture.bus.publish(overflow)
+  const saturatedStatus = fixture.bridge.status()
+  assert.strictEqual(saturatedStatus.notifications, 2050)
+  assert.strictEqual(saturatedStatus.duplicateNotifications, 0)
+  assert.strictEqual(saturatedStatus.skippedDuplicateWakeups, 0)
+  assert.strictEqual(saturatedStatus.queueLength, 1)
+
+  releaseRead()
+  await waitFor(() => fixture.emissions.some(row => row.event === 'op:event'))
+  await waitFor(() => fixture.bridge.status().pendingDrains === 0)
+  assert.strictEqual(fixture.getOperationQueryCount(), 1)
+  assert.strictEqual(fixture.bridge.status().emptyDrains, emptyDrainsBefore + 1)
+  await fixture.bridge.stop()
+}
+
+async function testFailedDrainAllowsSameWakeupToRetry() {
+  let attempts = 0
+  const fixture = createBridgeFixture({
+    beforeReadOperations: async () => {
+      attempts += 1
+      if (attempts === 1) {
+        throw Object.assign(new Error('temporary operation read failure'), { code: 'TEMP_READ' })
+      }
+    }
+  })
+  fixture.activeRooms.add('bridge-room')
+  await fixture.bridge.start()
+  fixture.bridge.activateRoom('bridge-room', 0)
+  await waitFor(() => fixture.bridge.status().pendingDrains === 0)
+  fixture.rows.push(makeCommitted(1))
+  fixture.setHead(1)
+
+  const wakeup = { mapId: 'bridge-room', version: 1, operationId: 'retry-op' }
+  await fixture.bus.publish(wakeup)
+  await waitFor(() => fixture.bridge.status().failedDrains === 1)
+  assert.strictEqual(fixture.bridge.status().pendingDrains, 0)
+
+  await fixture.bus.publish(wakeup)
+  await waitFor(() => fixture.emissions.some(row => row.event === 'op:event'))
+  const status = fixture.bridge.status()
+  assert.strictEqual(attempts, 2)
+  assert.strictEqual(status.failedDrains, 1)
+  assert.strictEqual(status.notifications, 2)
+  assert.strictEqual(status.duplicateNotifications, 0)
+  assert.strictEqual(status.duplicateRatio, 0)
+  await fixture.bridge.stop()
+}
+
+async function testDifferentVersionAndUnsignedWakeupsAreNotDropped() {
+  const fixture = createBridgeFixture({ readDelayMs: 20 })
+  fixture.activeRooms.add('bridge-room')
+  await fixture.bridge.start()
+  fixture.bridge.activateRoom('bridge-room', 0)
+  await waitFor(() => fixture.bridge.status().pendingDrains === 0)
+  const emptyDrainsBeforeWakeups = fixture.bridge.status().emptyDrains
+  fixture.rows.push(makeCommitted(1))
+  fixture.setHead(1)
+
+  await Promise.all([
+    fixture.bus.publish({ mapId: 'bridge-room', version: 1, operationId: 'same-op' }),
+    fixture.bus.publish({ mapId: 'bridge-room', version: 2, operationId: 'same-op' }),
+    fixture.bus.publish({ mapId: 'bridge-room' })
+  ])
+  await waitFor(() => fixture.emissions.some(row => row.event === 'op:event'))
+  await waitFor(() => fixture.bridge.status().pendingDrains === 0)
+
+  const status = fixture.bridge.status()
+  assert.strictEqual(status.notifications, 3)
+  assert.strictEqual(status.duplicateNotifications, 0)
+  assert.strictEqual(status.skippedDuplicateWakeups, 0)
+  assert.strictEqual(
+    status.emptyDrains,
+    emptyDrainsBeforeWakeups + 1,
+    'different and unsigned notifications must schedule a follow-up check'
+  )
+  assert.strictEqual(status.duplicateRatio, 0)
+  await fixture.bridge.stop()
+}
+
+async function testConcurrentDrainsKeepEmptyCountsRoomLocal() {
+  let releaseBridgeRoomHead
+  let markBridgeRoomHeadRead
+  let markOtherRoomOperationRead
+  const bridgeRoomHeadGate = new Promise(resolve => { releaseBridgeRoomHead = resolve })
+  const bridgeRoomHeadRead = new Promise(resolve => { markBridgeRoomHeadRead = resolve })
+  const otherRoomOperationRead = new Promise(resolve => { markOtherRoomOperationRead = resolve })
+  const fixture = createBridgeFixture({
+    beforeReadHeads: async roomKeys => {
+      if (roomKeys.length === 1 && roomKeys[0] === 'bridge-room') {
+        markBridgeRoomHeadRead()
+        await bridgeRoomHeadGate
+      }
+    },
+    beforeReadOperations: async ({ roomKey }) => {
+      if (roomKey === 'other-room') markOtherRoomOperationRead()
+    }
+  })
+  fixture.activeRooms.add('bridge-room')
+  fixture.activeRooms.add('other-room')
+  fixture.rows.push(makeCommitted(1, 'map.updated', {}, 'other-room'))
+  fixture.setHead(1)
+  await fixture.bridge.start()
+
+  const emptyDrainsBefore = fixture.bridge.status().emptyDrains
+  fixture.bridge.activateRoom('bridge-room', 1)
+  await bridgeRoomHeadRead
+  fixture.bridge.activateRoom('other-room', 0)
+  await otherRoomOperationRead
+  await waitFor(() => fixture.emissions.some(row => row.event === 'op:event'))
+  releaseBridgeRoomHead()
+  await waitFor(() => fixture.bridge.status().pendingDrains === 0)
+
+  assert.strictEqual(fixture.bridge.status().operationsSent, 1)
+  assert.strictEqual(fixture.bridge.status().emptyDrains, emptyDrainsBefore + 1)
+  await fixture.bridge.stop()
+}
+
+async function testRoomExitClearsWakeupDeduplicationState() {
+  const fixture = createBridgeFixture({ intervalMs: 250 })
+  fixture.activeRooms.add('bridge-room')
+  await fixture.bridge.start()
+  fixture.bridge.activateRoom('bridge-room', 0)
+  await waitFor(() => fixture.bridge.status().pendingDrains === 0)
+  fixture.rows.push(makeCommitted(1))
+  fixture.setHead(1)
+  const wakeup = { mapId: 'bridge-room', version: 1, operationId: 'reentered-op' }
+
+  await fixture.bus.publish(wakeup)
+  await waitFor(() => fixture.emissions.some(row => row.event === 'op:event'))
+  await waitFor(() => fixture.bridge.status().pendingDrains === 0)
+  const operationQueriesBeforeExit = fixture.getOperationQueryCount()
+
+  fixture.activeRooms.delete('bridge-room')
+  await waitFor(() => fixture.bridge.status().activeRooms === 0)
+  fixture.activeRooms.add('bridge-room')
+  fixture.bridge.activateRoom('bridge-room', 1)
+  await waitFor(() => fixture.bridge.status().pendingDrains === 0)
+  const operationQueriesAfterReactivation = fixture.getOperationQueryCount()
+  const headQueriesBeforeReenteredWakeup = fixture.getHeadQueryCount()
+  await fixture.bus.publish(wakeup)
+  await waitFor(() => fixture.bridge.status().notifications === 2)
+  await waitFor(() => fixture.getHeadQueryCount() > headQueriesBeforeReenteredWakeup)
+
+  const status = fixture.bridge.status()
+  assert.strictEqual(status.duplicateNotifications, 0)
+  assert.strictEqual(fixture.getOperationQueryCount(), operationQueriesAfterReactivation)
+  assert.ok(operationQueriesAfterReactivation >= operationQueriesBeforeExit)
+  assert.strictEqual(status.notifications, 2)
   await fixture.bridge.stop()
 }
 
@@ -508,6 +746,12 @@ async function run() {
     ['private request summary stays out of client patch', testPrivateRequestSummaryDoesNotReachClientPatch],
     ['generated insert applies through client pure reducer', testGeneratedInsertAppliesThroughClientPureReducer],
     ['bridge drains committed versions in order and deduplicates wakeups', testBridgeDrainsVersionsInOrderAndDeduplicatesWakeups],
+    ['a concurrent duplicate wakeup does not start another drain', testConcurrentDuplicateWakeupDoesNotStartAnotherDrain],
+    ['a full pending wakeup cache bypasses dedupe without dropping notifications', testPendingWakeupLimitBypassesCacheWithoutDroppingNotifications],
+    ['a failed drain allows the same wakeup to retry', testFailedDrainAllowsSameWakeupToRetry],
+    ['different versions and unsigned wakeups are not dropped', testDifferentVersionAndUnsignedWakeupsAreNotDropped],
+    ['concurrent room drains keep empty counts room-local', testConcurrentDrainsKeepEmptyCountsRoomLocal],
+    ['a room exit clears wakeup deduplication state', testRoomExitClearsWakeupDeduplicationState],
     ['active-room head check repairs a missed notification', testBridgeIdleHeadCheckFindsMissedNotification],
     ['unsupported bridge event requests a snapshot', testUnsupportedBridgeEventRequiresSnapshot],
     ['a later join cannot advance an existing room cursor', testExistingBridgeCursorCannotBeAdvancedByNewJoin],

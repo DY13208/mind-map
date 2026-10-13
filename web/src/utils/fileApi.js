@@ -192,6 +192,13 @@ async function request(path, options = {}) {
   const release = await acquireApiSlot(priority)
   let res
   try {
+    // Recheck after waiting for a connection slot: the caller's node may have
+    // been deleted while this request was queued.
+    if (options.isCurrent && !options.isCurrent()) {
+      const err = new Error('请求目标已失效')
+      err.name = 'AbortError'
+      throw err
+    }
     res = await fetchWithTimeout(
       `${apiBase()}${path}`,
       {
@@ -208,7 +215,7 @@ async function request(path, options = {}) {
       timeoutMs
     )
   } catch (err) {
-    noteApiFailure(err)
+    if (err.name !== 'AbortError') noteApiFailure(err)
     if (err instanceof FetchTimeoutError) {
       throw new Error('协作服务响应超时，请稍后重试')
     }
@@ -538,17 +545,20 @@ export function getFileSubtree(roomKey, uid, options = {}) {
   const query = params.toString()
   const key = subtreeDedupeKey(roomKey, uid, options)
   const pending = inflightSubtree.get(key)
-  if (pending) return pending
+  if (pending && (!pending.isCurrent || pending.isCurrent())) return pending.promise
+  const state = { isCurrent: options.isCurrent, promise: null }
   const job = request(
     `/api/files/${encodeURIComponent(roomKey)}/subtree${query ? `?${query}` : ''}`,
     {
       timeoutMs: options.timeoutMs || SUBTREE_TIMEOUT_MS,
+      isCurrent: options.isCurrent,
       priority: options.priority || 'high'
     }
   ).finally(() => {
-    if (inflightSubtree.get(key) === job) inflightSubtree.delete(key)
+    if (inflightSubtree.get(key) === state) inflightSubtree.delete(key)
   })
-  inflightSubtree.set(key, job)
+  state.promise = job
+  inflightSubtree.set(key, state)
   return job
 }
 

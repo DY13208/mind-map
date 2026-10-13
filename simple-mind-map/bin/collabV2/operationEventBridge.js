@@ -62,6 +62,7 @@ function createOperationEventBridge(options = {}) {
   const inFlight = new Map()
   const pendingRooms = new Set()
   const recentWakeups = new Map()
+  const pendingWakeupsByRoom = new Map()
   const recentLimit = 2048
   let running = false
   let unsubscribe = null
@@ -81,6 +82,8 @@ function createOperationEventBridge(options = {}) {
     resnapshotRequests: 0,
     unsupportedEvents: 0,
     failedDrains: 0,
+    skippedDuplicateWakeups: 0,
+    emptyDrains: 0,
     headChecks: 0,
     listenerRestarts: 0
   }
@@ -103,20 +106,86 @@ function createOperationEventBridge(options = {}) {
     listenerHealthy = !!unsubscribe && healthy
   }
 
+  function wakeupSignature(event, roomKey) {
+    if (!event || event.version == null || String(event.version).trim() === '') return ''
+    const parsedVersion = Number(event.version)
+    const operationId = String(event.operationId || '').trim()
+    if (!Number.isFinite(parsedVersion) || parsedVersion < 0 || !operationId) return ''
+    return JSON.stringify([roomKey, Math.floor(parsedVersion), operationId])
+  }
+
+  function trimRecentWakeups() {
+    if (recentWakeups.size < recentLimit) return true
+    for (const [signature, wakeup] of recentWakeups) {
+      if (wakeup.pending) continue
+      recentWakeups.delete(signature)
+      if (recentWakeups.size < recentLimit) return true
+    }
+    return recentWakeups.size < recentLimit
+  }
+
   function markWakeup(event, roomKey) {
-    const version = nonNegativeInteger(event && event.version, 0)
-    const operationId = String((event && event.operationId) || '')
-    const signature = version || operationId ? `${roomKey}:${version}:${operationId}` : ''
-    if (signature && recentWakeups.has(signature)) {
-      metrics.duplicateNotifications += 1
-      return
+    const signature = wakeupSignature(event, roomKey)
+    if (signature) {
+      const existing = recentWakeups.get(signature)
+      if (existing) {
+        metrics.duplicateNotifications += 1
+        metrics.skippedDuplicateWakeups += 1
+        if (existing.pending) existing.retryRequested = true
+        return { duplicate: true, signature }
+      }
+      if (trimRecentWakeups()) {
+        recentWakeups.set(signature, {
+          roomKey,
+          pending: true,
+          retryRequested: false
+        })
+      } else {
+        // Keep every wakeup live while bounding dedupe bookkeeping under pressure.
+        metrics.notifications += 1
+        return { duplicate: false, signature: '' }
+      }
     }
     metrics.notifications += 1
-    if (signature) {
-      recentWakeups.set(signature, Date.now())
-      if (recentWakeups.size > recentLimit) {
-        recentWakeups.delete(recentWakeups.keys().next().value)
+    return { duplicate: false, signature }
+  }
+
+  function trackWakeup(roomKey, signature) {
+    if (!signature) return
+    let signatures = pendingWakeupsByRoom.get(roomKey)
+    if (!signatures) {
+      signatures = new Set()
+      pendingWakeupsByRoom.set(roomKey, signatures)
+    }
+    signatures.add(signature)
+  }
+
+  function finishRoomWakeups(roomKey, succeeded) {
+    const signatures = pendingWakeupsByRoom.get(roomKey)
+    if (!signatures) return
+    pendingWakeupsByRoom.delete(roomKey)
+
+    const retrySignatures = []
+    for (const signature of signatures) {
+      const wakeup = recentWakeups.get(signature)
+      if (!wakeup) continue
+      if (succeeded) {
+        wakeup.pending = false
+        wakeup.retryRequested = false
+      } else if (wakeup.retryRequested && running) {
+        wakeup.pending = true
+        wakeup.retryRequested = false
+        retrySignatures.push(signature)
+      } else {
+        recentWakeups.delete(signature)
       }
+    }
+
+    if (retrySignatures.length) {
+      for (const signature of retrySignatures) trackWakeup(roomKey, signature)
+      Promise.resolve().then(() => {
+        if (running && !inFlight.has(roomKey)) drainRoom(roomKey).catch(() => {})
+      })
     }
   }
 
@@ -149,8 +218,9 @@ function createOperationEventBridge(options = {}) {
 
   async function drainToHead(roomKey, requestedHead) {
     let headVersion = requestedHead == null ? await readHead(roomKey) : nonNegativeInteger(requestedHead, 0)
-    if (headVersion == null) return
+    if (headVersion == null) return { empty: false }
     metrics.compensationRuns += 1
+    let sentOperations = 0
 
     let afterVersion = nonNegativeInteger(cursors.get(roomKey), 0)
     while (running && afterVersion < headVersion) {
@@ -163,7 +233,7 @@ function createOperationEventBridge(options = {}) {
           reason: (page && page.reason) || 'VERSION_GAP',
           missingVersion: page && page.missingVersion
         })
-        return
+        return { empty: false }
       }
 
       const operations = Array.isArray(page.operations) ? page.operations : []
@@ -172,7 +242,7 @@ function createOperationEventBridge(options = {}) {
           reason: 'VERSION_GAP',
           missingVersion: afterVersion + 1
         })
-        return
+        return { empty: false }
       }
 
       for (const committed of operations) {
@@ -182,12 +252,12 @@ function createOperationEventBridge(options = {}) {
             reason: 'VERSION_GAP',
             missingVersion: afterVersion + 1
           })
-          return
+          return { empty: false }
         }
         const operation = fromCommitted(committed, { roomKey })
         if (requiresSnapshot(committed, operation)) {
           emitResnapshotRequired(roomKey, headVersion, { reason: 'UNSUPPORTED_OPERATION' })
-          return
+          return { empty: false }
         }
         if (typeof invalidateRoomState === 'function') {
           await invalidateRoomState(roomKey, version)
@@ -196,6 +266,7 @@ function createOperationEventBridge(options = {}) {
         afterVersion = version
         cursors.set(roomKey, afterVersion)
         metrics.operationsSent += 1
+        sentOperations += 1
       }
 
       const toVersion = nonNegativeInteger(page.toVersion, afterVersion)
@@ -204,17 +275,20 @@ function createOperationEventBridge(options = {}) {
           reason: 'VERSION_GAP',
           missingVersion: afterVersion + 1
         })
-        return
+        return { empty: false }
       }
-      if (afterVersion >= headVersion) return
+      if (afterVersion >= headVersion) {
+        return { empty: sentOperations === 0 }
+      }
       if (!page.hasMore) {
         emitResnapshotRequired(roomKey, headVersion, {
           reason: 'VERSION_GAP',
           missingVersion: afterVersion + 1
         })
-        return
+        return { empty: false }
       }
     }
+    return { empty: sentOperations === 0 }
   }
 
   function drainRoom(roomKey, requestedHead) {
@@ -224,21 +298,26 @@ function createOperationEventBridge(options = {}) {
       pendingRooms.add(key)
       return inFlight.get(key)
     }
+    let succeeded = true
     const task = (async () => {
-      let nextHead = requestedHead
-      do {
-        pendingRooms.delete(key)
-        await drainToHead(key, nextHead)
-        nextHead = undefined
-      } while (running && pendingRooms.has(key))
-    })()
-      .catch(err => {
+      try {
+        let nextHead = requestedHead
+        do {
+          pendingRooms.delete(key)
+          const outcome = await drainToHead(key, nextHead)
+          if (outcome && outcome.empty) metrics.emptyDrains += 1
+          nextHead = undefined
+        } while (running && pendingRooms.has(key))
+      } catch (err) {
+        succeeded = false
         metrics.failedDrains += 1
         lastErrorCode = String((err && err.code) || 'EVENT_DRAIN_FAILED').slice(0, 80)
-      })
-      .finally(() => {
+      } finally {
         inFlight.delete(key)
-      })
+        finishRoomWakeups(key, succeeded)
+      }
+      return succeeded
+    })()
     inFlight.set(key, task)
     return task
   }
@@ -256,6 +335,7 @@ function createOperationEventBridge(options = {}) {
         if (!active.has(roomKey) && !inFlight.has(roomKey)) {
           cursors.delete(roomKey)
           pendingRooms.delete(roomKey)
+          clearRoomWakeups(roomKey)
         }
       }
       if (!keys.length) {
@@ -285,10 +365,19 @@ function createOperationEventBridge(options = {}) {
     return reconciliation
   }
 
+  function clearRoomWakeups(roomKey) {
+    pendingWakeupsByRoom.delete(roomKey)
+    for (const [signature, wakeup] of recentWakeups) {
+      if (wakeup.roomKey === roomKey) recentWakeups.delete(signature)
+    }
+  }
+
   function onBusEvent(event) {
     const roomKey = roomKeyOf(event && (event.mapId || event.roomKey))
     if (!roomKey || !cursors.has(roomKey)) return
-    markWakeup(event, roomKey)
+    const wakeup = markWakeup(event, roomKey)
+    if (wakeup.duplicate) return
+    trackWakeup(roomKey, wakeup.signature)
     drainRoom(roomKey).catch(() => {})
   }
 
@@ -321,6 +410,8 @@ function createOperationEventBridge(options = {}) {
     pendingRooms.clear()
     await Promise.allSettled(Array.from(inFlight.values()))
     inFlight.clear()
+    pendingWakeupsByRoom.clear()
+    recentWakeups.clear()
     return status()
   }
 
@@ -346,6 +437,8 @@ function createOperationEventBridge(options = {}) {
       laggingRooms: laggingRoomsCount,
       lastHeadCheckAt,
       lastErrorCode,
+      duplicateRatio: metrics.duplicateNotifications /
+        (metrics.notifications + metrics.duplicateNotifications || 1),
       ...metrics
     }
   }
