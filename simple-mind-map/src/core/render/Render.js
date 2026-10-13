@@ -1,4 +1,5 @@
 import merge from 'deepmerge'
+import { readSmmClipboardHtml } from '../../utils/copyOutline'
 import performanceObserver from '../../../bin/collabV2/performanceObserver'
 import LogicalStructure from '../../layouts/LogicalStructure'
 import CompactStructure from '../../layouts/CompactStructure'
@@ -1588,7 +1589,7 @@ class Render {
     }
     if (!this.beingCopyData) return
     if (!this.mindMap.opt.disabledClipboard) {
-      setDataToClipboard(createSmmFormatData(this.beingCopyData))
+      setDataToClipboard(createSmmFormatData(this.beingCopyData, cooperate && cooperate.httpRoomKey))
     }
   }
 
@@ -1627,7 +1628,7 @@ class Render {
     this.mindMap.execCommand('CUT_NODE', copyData => {
       this.beingCopyData = copied || copyData
       if (!this.mindMap.opt.disabledClipboard) {
-        setDataToClipboard(createSmmFormatData(this.beingCopyData))
+        setDataToClipboard(createSmmFormatData(this.beingCopyData, cooperate && cooperate.httpRoomKey))
       }
     })
   }
@@ -1753,6 +1754,27 @@ class Render {
   }
 
   async applyClipboardPaste({ text = '', html = '', img = null }) {
+    const jsonPayload = checkSmmFormatData(text)
+    const copiedPayload = readSmmClipboardHtml(html) || (jsonPayload.isSmm
+      ? { simpleMindMap: true, data: jsonPayload.data, sourceRoom: jsonPayload.sourceRoom }
+      : null)
+    if (copiedPayload) {
+      const targetUids = this.activeNodeList.map(node => node.getData('uid'))
+      if (!targetUids.length) return
+      let trees = copiedPayload.data
+      if (this.mindMap.opt.customHandleClipboardData) {
+        try {
+          trees = await this.mindMap.opt.customHandleClipboardData(copiedPayload)
+        } catch (error) {
+          this.mindMap.opt.errorHandler(ERROR_TYPES.CUSTOM_HANDLE_CLIPBOARD_TEXT_ERROR, error)
+          return
+        }
+      }
+      const targets = targetUids.map(uid => this.findNodeByUid(uid)).filter(Boolean)
+      if (targets.length !== targetUids.length) return
+      this.mindMap.execCommand('PASTE_NODE', trees, targets)
+      return
+    }
     const {
       errorHandler,
       handleIsSplitByWrapOnPasteCreateNewNode,
@@ -2290,7 +2312,7 @@ class Render {
   }
 
   //   粘贴节点到节点
-  pasteNode(data) {
+  pasteNode(data, appointNodes = []) {
     const cooperate = this.mindMap.cooperate
     let trees = formatDataToArray(data)
     if (cooperate && typeof cooperate.preparePasteTrees === 'function') {
@@ -2312,7 +2334,7 @@ class Render {
         createUidForAppointNodes(trees, true, null, true)
       }
     }
-    this.mindMap.execCommand('INSERT_MULTI_CHILD_NODE', [], trees)
+    this.mindMap.execCommand('INSERT_MULTI_CHILD_NODE', appointNodes, trees)
   }
 
   //  设置节点样式

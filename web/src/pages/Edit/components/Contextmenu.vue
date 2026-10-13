@@ -119,9 +119,14 @@
       <div class="item" @click="clearMapRef" v-if="hasMapRef">
         <span class="name">{{ $t('contextmenu.removeMapRef') }}</span>
       </div>
-      <div class="item" @click="exec('REMOVE_HYPERLINK')" v-if="hasHyperlink">
-        <span class="name">{{ $t('contextmenu.removeHyperlink') }}</span>
-      </div>
+      <template v-if="hasHyperlink && hasExplicitNodeContext">
+        <div class="item" data-testid="edit-node-hyperlink" @click="editHyperlink">
+          <span class="name">编辑超链接</span>
+        </div>
+        <div class="item danger" data-testid="delete-node-hyperlink" @click="exec('REMOVE_HYPERLINK')">
+          <span class="name">删除超链接</span>
+        </div>
+      </template>
       <div class="item" @click="exec('REMOVE_NOTE')" v-if="hasNote">
         <span class="name">{{ $t('contextmenu.removeNote') }}</span>
       </div>
@@ -339,7 +344,7 @@ export default {
       return !!(this.node && this.node.isGeneralization)
     },
     hasHyperlink() {
-      return !!this.node.getData('hyperlink')
+      return !!(this.node && this.node.getData && this.node.getData('hyperlink'))
     },
     hasMapRef() {
       const ref = this.node && this.node.getData && this.node.getData('mapRef')
@@ -617,6 +622,13 @@ export default {
       }
       this.hide()
       this.$message.success(this.$t('mapRef.removed'))
+    },
+
+    async editHyperlink() {
+      const node = this.node
+      if (!this.hasExplicitNodeContext || !node || !(await this.canExecuteCommand('SET_NODE_HYPERLINK'))) return
+      this.hide()
+      this.$bus.$emit('showNodeLink', node)
     },
 
     async manageNodeAttachment(action) {

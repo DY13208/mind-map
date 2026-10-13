@@ -85,7 +85,7 @@ function treeToHtml(node) {
 }
 
 /** 节点树 → HTML 嵌套列表（部分应用粘贴更友好） */
-export function nodesToOutlineHtml(trees) {
+export function nodesToOutlineHtml(trees, clipboardData = {}) {
   const list = Array.isArray(trees) ? trees : [trees]
   const body = list
     .filter(Boolean)
@@ -93,7 +93,26 @@ export function nodesToOutlineHtml(trees) {
     .filter(Boolean)
     .join('')
   if (!body) return ''
-  return `<ul>${body}</ul>`
+  const payload = encodeURIComponent(JSON.stringify({
+    simpleMindMap: true,
+    data: list.filter(Boolean),
+    ...(clipboardData.sourceRoom ? { sourceRoom: clipboardData.sourceRoom } : {})
+  }))
+  return `<ul data-simple-mind-map="${payload}">${body}</ul>`
+}
+
+// Keep complete node data alongside the outline for copies between editor pages.
+export function readSmmClipboardHtml(html) {
+  const match = String(html || '').match(/\bdata-simple-mind-map="([^"]+)"/)
+  if (!match) return null
+  try {
+    const payload = JSON.parse(decodeURIComponent(match[1]))
+    return payload && payload.simpleMindMap === true && Array.isArray(payload.data)
+      ? payload
+      : null
+  } catch (error) {
+    return null
+  }
 }
 
 export function clipboardTextLooksLikeOutline(text) {

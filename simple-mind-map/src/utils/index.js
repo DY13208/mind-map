@@ -1143,9 +1143,10 @@ export const checkClipboardReadEnable = () => {
 export const setDataToClipboard = data => {
   const trees = data && data.data ? data.data : []
   const outline = nodesToTabOutline(trees)
-  const html = nodesToOutlineHtml(trees)
+  const html = nodesToOutlineHtml(trees, data)
   const smmJson = JSON.stringify(data)
-  const plain = outline || smmJson
+  // Without HTML support, JSON is the only way to preserve node metadata.
+  const plain = smmJson
 
   const fallbackCopy = text => {
     const ta = document.createElement('textarea')
@@ -1291,16 +1292,18 @@ export const getChromeVersion = () => {
 }
 
 // 创建smm粘贴的粘贴数据
-export const createSmmFormatData = data => {
+export const createSmmFormatData = (data, sourceRoom = '') => {
   return {
     simpleMindMap: true,
-    data
+    data,
+    ...(sourceRoom ? { sourceRoom } : {})
   }
 }
 
 // 检查是否是smm粘贴格式的数据
 export const checkSmmFormatData = data => {
   let smmData = null
+  let sourceRoom = ''
   // 如果是字符串，则尝试解析为对象
   if (typeof data === 'string') {
     try {
@@ -1308,6 +1311,7 @@ export const checkSmmFormatData = data => {
       // 判断是否是对象，且存在属性标志
       if (typeof parsedData === 'object' && parsedData.simpleMindMap) {
         smmData = parsedData.data
+        sourceRoom = parsedData.sourceRoom || ''
       }
     } catch (error) {
       // 非 JSON 剪贴板内容继续按普通文本处理。
@@ -1315,10 +1319,12 @@ export const checkSmmFormatData = data => {
   } else if (typeof data === 'object' && data.simpleMindMap) {
     // 否则如果是对象，则检查属性标志
     smmData = data.data
+    sourceRoom = data.sourceRoom || ''
   }
   const isSmm = !!smmData
   return {
     isSmm,
+    sourceRoom,
     data: isSmm ? smmData : String(data)
   }
 }
