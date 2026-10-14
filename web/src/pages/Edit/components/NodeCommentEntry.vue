@@ -35,7 +35,8 @@ export default {
       isDark: false,
       left: 0,
       top: 0,
-      hideTimer: null
+      hideTimer: null,
+      editing: false
     }
   },
   computed: {
@@ -45,6 +46,8 @@ export default {
   },
   created() {
     this.$bus.$on('node_mouseenter', this.onNodeEnter)
+    this.$bus.$on('before_show_text_edit', this.onTextEditStart)
+    this.$bus.$on('hide_text_edit', this.onTextEditEnd)
     this.$bus.$on('node_mouseleave', this.scheduleHide)
     HIDE_EVENTS.forEach(event => this.$bus.$on(event, this.hide))
   },
@@ -55,6 +58,8 @@ export default {
   },
   beforeDestroy() {
     this.$bus.$off('node_mouseenter', this.onNodeEnter)
+    this.$bus.$off('before_show_text_edit', this.onTextEditStart)
+    this.$bus.$off('hide_text_edit', this.onTextEditEnd)
     this.$bus.$off('node_mouseleave', this.scheduleHide)
     HIDE_EVENTS.forEach(event => this.$bus.$off(event, this.hide))
     this.cancelHide()
@@ -69,8 +74,29 @@ export default {
       const list = node.getData('comments')
       return !(Array.isArray(list) && list.length)
     },
+    // ????????????????
+    onTextEditStart() {
+      this.editing = true
+      this.hide()
+    },
+    onTextEditEnd() {
+      this.editing = false
+    },
+    isTextEditing(node) {
+      if (this.editing) return true
+      const textEdit = node && node.mindMap && node.mindMap.renderer && node.mindMap.renderer.textEdit
+      try {
+        return !!(textEdit && typeof textEdit.isShowTextEdit === 'function' && textEdit.isShowTextEdit())
+      } catch (e) {
+        return false
+      }
+    },
     onNodeEnter(node) {
       this.cancelHide()
+      if (this.isTextEditing(node)) {
+        this.hide()
+        return
+      }
       if (!this.canComment(node)) {
         this.hide()
         return

@@ -46,7 +46,8 @@ export default {
       readonly: false,
       left: 0,
       top: 0,
-      commentCount: 0
+      commentCount: 0,
+      editing: false
     }
   },
   computed: {
@@ -60,6 +61,8 @@ export default {
   },
   created() {
     this.$bus.$on('node_active', this.onNodeActive)
+    this.$bus.$on('before_show_text_edit', this.onTextEditStart)
+    this.$bus.$on('hide_text_edit', this.onTextEditEnd)
     HIDE_EVENTS.forEach(event => this.$bus.$on(event, this.hide))
     REPOSITION_EVENTS.forEach(event => this.$bus.$on(event, this.refresh))
   },
@@ -70,13 +73,48 @@ export default {
   },
   beforeDestroy() {
     this.$bus.$off('node_active', this.onNodeActive)
+    this.$bus.$off('before_show_text_edit', this.onTextEditStart)
+    this.$bus.$off('hide_text_edit', this.onTextEditEnd)
+    if (this.reshowTimer) clearTimeout(this.reshowTimer)
     HIDE_EVENTS.forEach(event => this.$bus.$off(event, this.hide))
     REPOSITION_EVENTS.forEach(event => this.$bus.$off(event, this.refresh))
     if (this.$el && this.$el.parentNode) this.$el.parentNode.removeChild(this.$el)
   },
   methods: {
+    // ??????????????? F2/??/????????????????????
+    isTextEditing(node) {
+      if (this.editing) return true
+      const mindMap = node && node.mindMap
+      const textEdit = mindMap && mindMap.renderer && mindMap.renderer.textEdit
+      try {
+        return !!(textEdit && typeof textEdit.isShowTextEdit === 'function' && textEdit.isShowTextEdit())
+      } catch (e) {
+        return false
+      }
+    },
+    onTextEditStart() {
+      this.editing = true
+      if (this.reshowTimer) clearTimeout(this.reshowTimer)
+      this.reshowTimer = null
+      this.hide()
+    },
+    // ??????????????????????????????????
+    onTextEditEnd(textEditNode, activeNodeList) {
+      this.editing = false
+      const list = Array.isArray(activeNodeList) ? activeNodeList.slice() : []
+      if (list.length !== 1) return this.hide()
+      if (this.reshowTimer) clearTimeout(this.reshowTimer)
+      this.reshowTimer = setTimeout(() => {
+        this.reshowTimer = null
+        this.onNodeActive(list[0], list)
+      }, 0)
+    },
     onNodeActive(node, activeNodeList) {
       const list = Array.isArray(activeNodeList) ? activeNodeList : []
+      if (this.isTextEditing(node)) {
+        this.hide()
+        return
+      }
       if (!node || list.length !== 1 || list[0] !== node || node.isGeneralization) {
         this.hide()
         return
@@ -87,6 +125,7 @@ export default {
     },
     refresh() {
       if (!this.visible || !this.node) return
+      if (this.isTextEditing(this.node)) return this.hide()
       const node = this.node
       const renderer = node.mindMap && node.mindMap.renderer
       const uid = typeof node.getData === 'function' ? node.getData('uid') : ''

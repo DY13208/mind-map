@@ -1305,7 +1305,9 @@ export default {
         'node_mousedown',
         'node_mouseup',
         'map_ref_click',
-        'multi_select_end'
+        'multi_select_end',
+        'before_show_text_edit',
+        'hide_text_edit'
       ].forEach(event => {
         this.mindMap.on(event, (...args) => {
           this.$bus.$emit(event, ...args)
