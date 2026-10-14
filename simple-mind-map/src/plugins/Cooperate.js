@@ -56,6 +56,7 @@ import mapRefUtil from '../utils/mapRef'
 import collabInsertCollect from '../utils/collabInsertCollect'
 import collabGeneralization from '../utils/collabGeneralization'
 import collabMove from '../utils/collabMove'
+import { beginHydration, invalidateHydration, invalidateHydrationSession } from '../utils/hydrationLifecycle'
 import {
   collabTrace,
   createTraceId,
@@ -1821,7 +1822,10 @@ class Cooperate {
   }
 
   setLazyLoaders(config = {}) {
-    if (config.roomKey) this.httpRoomKey = config.roomKey
+    if (config.roomKey) {
+      if (this.httpRoomKey !== config.roomKey) invalidateHydrationSession(this)
+      this.httpRoomKey = config.roomKey
+    }
     if (config.fetchSubtree) this.httpFetchSubtree = config.fetchSubtree
     if (config.fetchDeepSubtree) this.httpFetchDeepSubtree = config.fetchDeepSubtree
     if (config.fetchExportTree) this.httpFetchExportTree = config.fetchExportTree
@@ -3078,7 +3082,10 @@ class Cooperate {
     this.pendingGenIntent = new Map()
     this.enableLargeMapMode(Number(config.nodeCount) || 0)
     const roomKey = config.roomKey || this.httpRoomKey || ''
-    if (roomKey) this.httpRoomKey = roomKey
+    if (roomKey) {
+      if (this.httpRoomKey !== roomKey) invalidateHydrationSession(this)
+      this.httpRoomKey = roomKey
+    }
     this.collabStore.reset(roomKey, Number(config.version) || 0)
     this.collabStore.setStatus('live')
     this.wrapHttpMutators(config)
@@ -3511,6 +3518,7 @@ class Cooperate {
   }
 
   clearHttpCollab() {
+    invalidateHydrationSession(this)
     this.httpLocateFailures = new Map()
     this.httpLocateInflight = new Map()
     const restoreWaiters = Array.isArray(this.httpRestoreWaiters)
@@ -4633,6 +4641,7 @@ class Cooperate {
     const uid = node.getData && node.getData('uid')
     const data = node.nodeData
     if (!uid || !data) return
+    if (this.isTombstonedUid && this.isTombstonedUid(uid)) return false
     const liveLen = Array.isArray(data.children) ? data.children.length : 0
     const count = Number(data.data && data.data.childCount) || 0
     const dirtyAt = this.dirtySubtrees.get(uid)
@@ -4647,7 +4656,9 @@ class Cooperate {
       return
     }
     const pending = this.hydrateInflight && this.hydrateInflight.get(uid)
-    if (pending) return pending
+    if (pending && (!pending.hydrationGuard || pending.hydrationGuard.isCurrent())) return pending
+    const guard = beginHydration(this, uid)
+    const isCurrent = guard.isCurrent
     const job = (async () => {
       this.httpHydrating = true
       try {
@@ -4657,15 +4668,18 @@ class Cooperate {
             deep: options.deep,
             offset: options.offset,
             limit: options.limit,
+            isCurrent,
             priority: options.priority || 'high'
           })
         const knownVersion = complete
           ? Number((data.data && data.data.subtreeVersion) || 0) || 0
           : 0
         let result = await fetchSubtree({ knownVersion })
+        if (!isCurrent()) return false
         const needsLocalChildren = count > 0 && liveLen < count
         if (result && result.unchanged && needsLocalChildren) {
           result = await fetchSubtree({ knownVersion: 0 })
+          if (!isCurrent()) return false
         }
         if (result && result.unchanged) {
           if (!needsLocalChildren) {
@@ -4677,6 +4691,7 @@ class Cooperate {
             return
           }
           result = await fetchSubtree({ knownVersion: 0 })
+          if (!isCurrent()) return false
         }
         if (
           (!result || !result.children || !result.children.length) &&
@@ -4687,8 +4702,10 @@ class Cooperate {
           const deep = await this.httpFetchDeepSubtree(uid, {
             knownVersion: 0,
             maxNodes: Math.max(400, count + 10),
+            isCurrent,
             priority: options.priority || 'high'
           })
+          if (!isCurrent()) return false
           if (deep && deep.tree) {
             result = {
               children: deep.tree.children || [],
@@ -4710,6 +4727,7 @@ class Cooperate {
           // with >200 siblings permanently "partial" after Undo/Redo.
           for (let page = 0; page < 20 && result.has_more; page += 1) {
             const next = await fetchSubtree({ knownVersion: 0, offset, limit: 500 })
+            if (!isCurrent()) return false
             const more = next && Array.isArray(next.children) ? next.children : []
             const versionChanged = next && next.version != null && result.version != null &&
               Number(next.version) !== Number(result.version)
@@ -4765,16 +4783,23 @@ class Cooperate {
         }
         this.dirtySubtrees.delete(uid)
         return changed
+      } catch (err) {
+        // A remotely deleted node may disappear while a hydration is queued
+        // or in flight. Do not schedule another read or apply its stale data.
+        if (!isCurrent()) return false
+        throw err
       } finally {
         this.httpHydrating = false
         this.flushPendingHttpRefresh()
       }
     })()
+    job.hydrationGuard = guard
     if (!this.hydrateInflight) this.hydrateInflight = new Map()
     this.hydrateInflight.set(uid, job)
     try {
       return await job
     } finally {
+      guard.release()
       if (this.hydrateInflight && this.hydrateInflight.get(uid) === job) {
         this.hydrateInflight.delete(uid)
       }
@@ -4785,60 +4810,117 @@ class Cooperate {
     if (!data || !this.httpFetchSubtree) return data
     const uid = data.data && data.data.uid
     if (!uid) return data
-    const live = Array.isArray(data.children) ? data.children.length : 0
-    const count = Number(data.data && data.data.childCount) || 0
-    const dirtyAt = uid && this.dirtySubtrees && this.dirtySubtrees.get(uid)
-    if (!dirtyAt && count === 0 && live === 0 && this.hydratedUids.has(uid)) return data
-    if (live && (!count || live >= count) && !dirtyAt) return data
-    const knownVersion = live
-      ? Number((data.data && data.data.subtreeVersion) || 0) || 0
-      : 0
-    let result = await this.httpFetchSubtree(uid, {
-      knownVersion,
-      priority: 'low'
-    })
-    const needsLocalChildren = count > 0 && live < count
-    if (result && result.unchanged && needsLocalChildren) {
-      result = await this.httpFetchSubtree(uid, {
-        knownVersion: 0,
+    const guard = beginHydration(this, uid)
+    const isCurrent = guard.isCurrent
+    try {
+      if (!isCurrent()) return data
+      const live = Array.isArray(data.children) ? data.children.length : 0
+      const count = Number(data.data && data.data.childCount) || 0
+      const dirtyAt = uid && this.dirtySubtrees && this.dirtySubtrees.get(uid)
+      // Only a previous authoritative read establishes that an empty node is
+      // complete. A new dirty marker must still trigger a fresh read.
+      if (!dirtyAt && count === 0 && live === 0 && !data.data.hasMore && this.hydratedUids.has(uid)) return data
+      if (live && (!count || live >= count) && !dirtyAt && !data.data.hasMore) return data
+      const knownVersion = live
+        ? Number((data.data && data.data.subtreeVersion) || 0) || 0
+        : 0
+      let result = await Promise.resolve(this.httpFetchSubtree(uid, {
+        knownVersion,
+        isCurrent,
         priority: 'low'
+      })).catch(err => {
+        if (!isCurrent()) return null
+        throw err
       })
-    }
-    if (result && result.unchanged && !needsLocalChildren) {
-      this.dirtySubtrees.delete(uid)
-      if (result.version && data.data) {
-        data.data.subtreeVersion = Number(result.version)
+      if (!isCurrent()) return data
+      const needsLocalChildren = count > 0 && live < count
+      if (result && result.unchanged && needsLocalChildren) {
+        result = await Promise.resolve(this.httpFetchSubtree(uid, {
+          knownVersion: 0,
+          isCurrent,
+          priority: 'low'
+        })).catch(err => {
+          if (!isCurrent()) return null
+          throw err
+        })
+        if (!isCurrent()) return data
       }
+      if (result && result.unchanged && !needsLocalChildren) {
+        this.dirtySubtrees.delete(uid)
+        if (result.version && data.data) {
+          data.data.subtreeVersion = Number(result.version)
+        }
+        return data
+      }
+      if (result && result.has_more && Array.isArray(result.children)) {
+        const children = result.children.slice()
+        const pageVersion = result.version
+        let offset = (Number(result.offset) || 0) + children.length
+        for (let page = 0; page < 20 && result.has_more; page += 1) {
+          const next = await this.httpFetchSubtree(uid, {
+            knownVersion: 0, offset, limit: 500, isCurrent, priority: 'low'
+          })
+          if (!isCurrent()) return data
+          if (!next || !Array.isArray(next.children) || !next.children.length ||
+              (pageVersion != null && next.version != null && Number(pageVersion) !== Number(next.version))) {
+            const err = new Error('子树分页已变化或未完成，请重试')
+            err.code = 'SUBTREE_PAGE_INCOMPLETE'
+            throw err
+          }
+          children.push(...next.children)
+          offset += next.children.length
+          result = { ...next, children, offset: 0 }
+        }
+        if (result.has_more) {
+          const err = new Error('子树分页未完成，请重试')
+          err.code = 'SUBTREE_PAGE_INCOMPLETE'
+          throw err
+        }
+      }
+      if (!data.children || !data.children.length) {
+        data.children = ((result && result.children) || []).map(clearHydratedSelection)
+      } else {
+        this.mergeHttpChildren(data, result && result.children)
+      }
+      if (data.data) {
+        data.data.hasMore = !!(result && result.has_more)
+        const serverTotal = Number(result && result.total)
+        data.data.childCount = result && result.total != null &&
+          Number.isInteger(serverTotal) && serverTotal >= 0
+          ? serverTotal
+          : count
+        if (result && Number.isInteger(result.descendantCount)) {
+          data.data.descendantCount = result.descendantCount
+        }
+        if (result && result.version != null) {
+          data.data.subtreeVersion = Number(result.version) || 0
+        }
+      }
+      const loaded = Array.isArray(data.children) ? data.children.length : 0
+      const authoritativeEmpty = result && result.total != null && Number(result.total) === 0
+      const complete = !data.data.hasMore && loaded >= Number(data.data.childCount || 0) &&
+        (loaded > 0 || authoritativeEmpty)
+      if (complete) {
+        this.dirtySubtrees.delete(uid)
+        this.hydratedUids.add(uid)
+      } else {
+        data.data.hasMore = true
+        this.hydratedUids.delete(uid)
+        if (!this.dirtySubtrees.has(uid)) this.dirtySubtrees.set(uid, Number(result && result.version) || 1)
+      }
+      this.markUidPushed(uid, data.data, 'server')
+      const serverKids = (result && result.children) || []
+      serverKids.forEach(child => {
+        const childUid = child && child.data && child.data.uid
+        this.markUidPushed(childUid, child && child.data, 'server')
+      })
       return data
+    } catch (err) {
+      if (!isCurrent()) return data
+      throw err
+    } finally {
+      guard.release()
     }
-    if (!data.children || !data.children.length) {
-      data.children = ((result && result.children) || []).map(clearHydratedSelection)
-    } else {
-      this.mergeHttpChildren(data, result && result.children)
-    }
-    if (data.data) {
-      data.data.hasMore = !!(result && result.has_more)
-      const serverTotal = Number(result && result.total)
-      data.data.childCount = result && result.total != null &&
-        Number.isInteger(serverTotal) && serverTotal >= 0
-        ? serverTotal
-        : count
-      if (result && Number.isInteger(result.descendantCount)) {
-        data.data.descendantCount = result.descendantCount
-      }
-      if (result && result.version != null) {
-        data.data.subtreeVersion = Number(result.version) || 0
-      }
-    }
-    this.dirtySubtrees.delete(uid)
-    this.hydratedUids.add(uid)
-    this.markUidPushed(uid, data.data, 'server')
-    const serverKids = (result && result.children) || []
-    serverKids.forEach(child => {
-      const childUid = child && child.data && child.data.uid
-      this.markUidPushed(childUid, child && child.data, 'server')
-    })
-    return data
   }
 
   findTreeNode(root, uid) {
@@ -4922,8 +5004,6 @@ class Cooperate {
           console.error('[mind-map] hydrate path failed', id, err)
         }
         if (options.expand !== false && this.expandTreeNode(treeNode)) changed = true
-        this.hydratedUids.add(id)
-        this.dirtySubtrees.delete(id)
       }
     }
     return changed || !!this.findTreeNode(tree, uid)
@@ -4958,6 +5038,7 @@ class Cooperate {
         console.error('[mind-map] dirty subtree sync failed', uid, err)
         continue
       }
+      if ((treeNode.data && treeNode.data.hasMore) || !this.hydratedUids.has(uid)) continue
       if (treeNodeIndex) {
         const currentChildren = new Set(treeNode.children || [])
         previousChildren.forEach(child => {
@@ -4971,8 +5052,6 @@ class Cooperate {
           }
         })
       }
-      this.hydratedUids.add(uid)
-      this.dirtySubtrees.delete(uid)
       if ((treeNode.children || []).length !== before) changed = true
     }
     return changed
@@ -6777,6 +6856,7 @@ class Cooperate {
 
   tombstoneDeletedUid(uid) {
     if (!uid) return
+    invalidateHydration(this, uid)
     this.forgetHttpUid(uid)
     if (!this.deletedUids) this.deletedUids = new Set()
     this.deletedUids.add(uid)
@@ -6787,6 +6867,7 @@ class Cooperate {
 
   reviveDeletedUid(uid) {
     if (!uid) return
+    invalidateHydration(this, uid)
     if (this.deletedUids) this.deletedUids.delete(uid)
     if (this.abandonedInsertUids) this.abandonedInsertUids.delete(uid)
     if (this.recentHttpDeleted) this.recentHttpDeleted.delete(uid)

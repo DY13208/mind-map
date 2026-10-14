@@ -166,7 +166,13 @@ export function patchDelta(previous = {}, next = {}) {
   keys.delete(FV_KEY)
   const delta = {}
   keys.forEach(key => {
-    if (stableValue(prev[key]) === stableValue(curr[key])) return
+    const normalize = value =>
+      key === 'isFloating' && (value === null || value === undefined)
+        ? false
+        : value
+    const previousValue = normalize(prev[key])
+    const nextValue = normalize(curr[key])
+    if (stableValue(previousValue) === stableValue(nextValue)) return
     delta[key] = curr[key] === undefined ? null : curr[key]
   })
   return delta
