@@ -178,7 +178,8 @@ const NODE_FEATURE_MATRIX = [
       'attachmentId',
       'attachmentStatus',
       'attachmentError',
-      'attachmentExtractedText'
+      'attachmentExtractedText',
+      'attachmentErrorIgnored'
     ],
     operation: 'node.update',
     pgField: 'room_nodes.data.attachment*',
@@ -186,6 +187,18 @@ const NODE_FEATURE_MATRIX = [
     undoRedo: 'inverse attachment fields',
     refreshPersistence: true,
     status: 'fixed'
+  },
+  {
+    feature: 'Comment',
+    uiEntry: 'Contextmenu 评论 / NodeCommentCard',
+    command: 'SET_NODE_COMMENT',
+    fields: ['comments', 'commentResolved'],
+    operation: 'node.update',
+    pgField: 'room_nodes.data.comments + data.commentResolved',
+    remoteApply: 'applyHttpRemoteNodeFields patch-only',
+    undoRedo: 'inverse patch of comment fields',
+    refreshPersistence: true,
+    status: 'pass'
   }
 ]
 
@@ -218,7 +231,8 @@ const NULLABLE_FEATURE_GROUPS = {
   hyperlink: ['hyperlink', 'hyperlinkTitle'],
   tag: ['tag'],
   icon: ['icon'],
-  mapRef: ['mapRef']
+  mapRef: ['mapRef'],
+  comment: ['comments']
 }
 
 function isEmptyFeatureValue(key, value) {
@@ -373,6 +387,9 @@ const FEATURE_RECREATE_KEYS = {
   attachmentStatus: ['attachment'],
   attachmentError: ['attachment'],
   attachmentExtractedText: ['attachment'],
+  attachmentErrorIgnored: ['attachment'],
+  comments: ['comment'],
+  commentResolved: ['comment'],
   formula: ['text'],
   shape: ['text'],
   fillColor: ['text'],
@@ -400,6 +417,9 @@ const GEOMETRY_KEYS = {
   attachmentStatus: true,
   attachmentError: true,
   attachmentExtractedText: true,
+  attachmentErrorIgnored: true,
+  comments: true,
+  commentResolved: true,
   note: true,
   shape: true,
   fontSize: true,

@@ -342,18 +342,16 @@ class CatalogOrganization extends Base {
         top,
         bottom,
         right,
-        generalizationLineMargin,
-        generalizationNodeMargin
+        generalizationLineMargin
       } = this.getNodeGeneralizationRenderBoundaries(item, 'h')
-      let x1 = right + generalizationLineMargin
-      let y1 = top
-      let x2 = right + generalizationLineMargin
-      let y2 = bottom
-      let cx = x1 + 20
-      let cy = y1 + (y2 - y1) / 2
-      let path = `M ${x1},${y1} Q ${cx},${cy} ${x2},${y2}`
-      item.generalizationLine.plot(this.transformPath(path))
-      item.generalizationNode.left = right + generalizationNodeMargin
+      const nodeMargin = this.plotGeneralizationLine(item, {
+        pos: right + generalizationLineMargin,
+        start: top,
+        end: bottom,
+        dir: 'right',
+        baseOffset: generalizationLineMargin
+      })
+      item.generalizationNode.left = right + nodeMargin
       item.generalizationNode.top =
         top + (bottom - top - item.generalizationNode.height) / 2
       this.layoutGeneralizationChildren(item.generalizationNode, 'h', false)

@@ -305,18 +305,16 @@ class OrganizationStructure extends Base {
         bottom,
         left,
         right,
-        generalizationLineMargin,
-        generalizationNodeMargin
+        generalizationLineMargin
       } = this.getNodeGeneralizationRenderBoundaries(item, 'v')
-      let x1 = left
-      let y1 = bottom + generalizationLineMargin
-      let x2 = right
-      let y2 = bottom + generalizationLineMargin
-      let cx = x1 + (x2 - x1) / 2
-      let cy = y1 + 20
-      let path = `M ${x1},${y1} Q ${cx},${cy} ${x2},${y2}`
-      item.generalizationLine.plot(this.transformPath(path))
-      item.generalizationNode.top = bottom + generalizationNodeMargin
+      const nodeMargin = this.plotGeneralizationLine(item, {
+        pos: bottom + generalizationLineMargin,
+        start: left,
+        end: right,
+        dir: 'down',
+        baseOffset: generalizationLineMargin
+      })
+      item.generalizationNode.top = bottom + nodeMargin
       item.generalizationNode.left =
         left + (right - left - item.generalizationNode.width) / 2
       this.layoutGeneralizationChildren(item.generalizationNode, 'v', false)

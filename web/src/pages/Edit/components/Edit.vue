@@ -60,6 +60,10 @@
     <NodeAutoExpand v-if="mindMap" :mindMap="mindMap"></NodeAutoExpand>
     <NodeAttachment v-if="mindMap" :mindMap="mindMap"></NodeAttachment>
     <NodeAttachmentPreview v-if="mindMap"></NodeAttachmentPreview>
+    <NodeHyperlinkPopover v-if="mindMap"></NodeHyperlinkPopover>
+    <NodeCommentCard v-if="mindMap"></NodeCommentCard>
+    <NodeCommentEntry v-if="mindMap"></NodeCommentEntry>
+    <NodeQuickToolbar v-if="mindMap"></NodeQuickToolbar>
     <CooperateDialog :mindMap="mindMap"></CooperateDialog>
     <!-- 保留旧分享弹窗，节点分享目前直接复制链接并继承文件权限。 -->
     <NodeShareDialog v-if="false"></NodeShareDialog>
@@ -162,6 +166,12 @@ import AiChat from './AiChat.vue'
 import NodeAutoExpand from './NodeAutoExpand.vue'
 import NodeAttachment from './NodeAttachment.vue'
 import NodeAttachmentPreview from './NodeAttachmentPreview.vue'
+import NodeHyperlinkPopover from './NodeHyperlinkPopover.vue'
+import NodeCommentCard from './NodeCommentCard.vue'
+import NodeCommentEntry from './NodeCommentEntry.vue'
+import NodeQuickToolbar from './NodeQuickToolbar.vue'
+import { isNodeCommentUnread } from '@/utils/commentRead'
+import { currentCommentUser } from '@/utils/commentUser'
 import CooperateDialog from './CooperateDialog.vue'
 import NodeShareDialog from './NodeShareDialog.vue'
 import MapRefDialog from './MapRefDialog.vue'
@@ -235,6 +245,10 @@ export default {
     NodeAutoExpand,
     NodeAttachment,
     NodeAttachmentPreview,
+    NodeHyperlinkPopover,
+    NodeCommentCard,
+    NodeCommentEntry,
+    NodeQuickToolbar,
     CooperateDialog,
     NodeShareDialog,
     MapRefDialog
@@ -1116,6 +1130,13 @@ export default {
         viewData: view,
         nodeTextEditZIndex: 1000,
         nodeNoteTooltipZIndex: 1000,
+        // 评论未读红点：已读时间保存在本地，按用户 + 导图 + 节点区分
+        isNodeCommentUnread: node =>
+          isNodeCommentUnread(
+            roomFromLocation(this.$route) || '',
+            node,
+            currentCommentUser().userId
+          ),
         customNoteContentShow: {
           show: (content, left, top, node) => {
             this.$bus.$emit('showNoteContent', content, left, top, node)
@@ -1274,6 +1295,10 @@ export default {
         'translate',
         'node_attachmentClick',
         'node_attachmentContextmenu',
+        'node_hyperlinkClick',
+        'node_commentClick',
+        'node_mouseenter',
+        'node_mouseleave',
         'demonstrate_jump',
         'exit_demonstrate',
         'node_note_dblclick',

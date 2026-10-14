@@ -10,6 +10,22 @@ import { CONSTANTS } from '../constants/constant'
 import AutoMove from '../utils/AutoMove'
 import collabPaste from '../utils/collabPaste'
 
+// Parse #rgb/#rrggbb/rgb()/rgba() and report whether the colour is dark.
+const isDarkColor = color => {
+  if (typeof color !== 'string') return false
+  const c = color.trim()
+  let rgb = null
+  let m = c.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)
+  if (m) {
+    const h = m[1].length === 3 ? m[1].split('').map(x => x + x).join('') : m[1]
+    rgb = [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16))
+  } else if ((m = c.match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i))) {
+    rgb = [m[1], m[2], m[3]].map(Number)
+  }
+  if (!rgb) return false
+  return (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255 < 0.5
+}
+
 // 节点拖动插件
 class Drag extends Base {
   //  构造函数
@@ -50,6 +66,16 @@ class Drag extends Base {
     this.placeholderHeight = 10
     this.placeHolderLine = null
     this.placeHolderExtraLines = []
+    this.placeholderContent = null
+    this.placeholderIsBar = false
+    // Drag feedback that points from the would-be parent to the clone.
+    this.targetLine = null
+    this.targetExtraLines = []
+    this.targetHighlight = null
+    this._targetParent = null
+    this._targetLineRaf = null
+    this.cloneWidth = 0
+    this.cloneHeight = 0
     // 鼠标按下位置和节点左上角的偏移量
     this.offsetX = 0
     this.offsetY = 0
@@ -70,12 +96,18 @@ class Drag extends Base {
     this.onNodeMousedown = this.onNodeMousedown.bind(this)
     this.onMousemove = this.onMousemove.bind(this)
     this.onMouseup = this.onMouseup.bind(this)
+    this.onKeydown = this.onKeydown.bind(this)
+    this.cancelDrag = this.cancelDrag.bind(this)
     this.checkOverlapNode = throttle(this.checkOverlapNode, 300, this)
 
     this.mindMap.on('node_mousedown', this.onNodeMousedown)
     this.mindMap.on('mousemove', this.onMousemove)
     this.mindMap.on('node_mouseup', this.onMouseup)
     this.mindMap.on('mouseup', this.onMouseup)
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('keydown', this.onKeydown)
+      window.addEventListener('blur', this.cancelDrag)
+    }
   }
 
   // 解绑事件
@@ -84,6 +116,31 @@ class Drag extends Base {
     this.mindMap.off('mousemove', this.onMousemove)
     this.mindMap.off('node_mouseup', this.onMouseup)
     this.mindMap.off('mouseup', this.onMouseup)
+    if (typeof window !== 'undefined' && window.removeEventListener) {
+      window.removeEventListener('keydown', this.onKeydown)
+      window.removeEventListener('blur', this.cancelDrag)
+    }
+  }
+
+  // Esc cancels the drag in progress.
+  onKeydown(e) {
+    if (e && (e.key === 'Escape' || e.keyCode === 27) && this.isMousedown) {
+      this.cancelDrag()
+    }
+  }
+
+  // Abort the gesture: restore the source nodes and drop every temporary element.
+  cancelDrag() {
+    if (!this.isMousedown && !this.isDragging) return
+    if (this.autoMove) this.autoMove.clearAutoMoveTimer()
+    if (this.isDragging || this.clone) {
+      (this.beingDragNodeList || []).forEach(node => {
+        node.setOpacity(1)
+        node.showChildren()
+        node.endDrag()
+      })
+    }
+    this.reset()
   }
 
   // 节点鼠标按下事件
@@ -374,6 +431,7 @@ class Drag extends Base {
     y = (cloneNodeTop - translateY) / scaleY
     let t = this.clone.transform()
     this.clone.translate(x - t.translateX, y - t.translateY)
+    this.scheduleTargetLine()
     // 检测新位置
     this.checkOverlapNode()
     // 边缘自动移动画布
@@ -422,7 +480,7 @@ class Drag extends Base {
         this.nodeTreeToList()
         // 创建克隆节点
         this.createCloneNode()
-        this.createDragRangeGuide()
+        if (this.mindMap.opt.showDragOriginGuide) this.createDragRangeGuide()
         // 清除当前所有激活的节点
         this.mindMap.execCommand('CLEAR_ACTIVE_NODE')
         this.isDragging = true
@@ -458,8 +516,6 @@ class Drag extends Base {
     if (!this.clone) {
       const {
         dragMultiNodeRectConfig,
-        dragPlaceholderRectFill,
-        dragPlaceholderLineConfig,
         dragOpacityConfig,
         handleDragCloneNode
       } = this.mindMap.opt
@@ -493,7 +549,7 @@ class Drag extends Base {
         if (shape) {
           const fill = node.style.merge('fillColor')
           shape.css({
-            stroke: '#246bff', 'stroke-width': 2, 'stroke-dasharray': 'none',
+            stroke: this.getDragAccentColor(), 'stroke-width': 2, 'stroke-dasharray': 'none',
             fill: !fill || fill === 'none' || fill === 'transparent'
               ? this.mindMap.themeConfig.backgroundColor || '#fff' : fill
           })
@@ -503,24 +559,24 @@ class Drag extends Base {
           handleDragCloneNode(this.clone)
         }
       }
+      const isMulti = this.beingDragNodeList.length > 1
+      this.cloneWidth = isMulti ? rectWidth : Number(node.width) || 0
+      this.cloneHeight = isMulti ? rectHeight : Number(node.height) || 0
       // 拖拽预览也要保留节点的选中轮廓，即使拖动前未选中节点。
       this.clone.addClass('smm-drag-preview')
       this.clone.opacity(dragOpacityConfig.cloneNodeOpacity)
       this.clone.css('z-index', 99999)
-      // 同级位置提示元素
-      this.placeholder = this.mindMap.otherDraw
-        .rect()
-        .fill({
-          color: dragPlaceholderRectFill || lineColor
-        })
-        .radius(5)
-      this.placeHolderLine = this.mindMap.otherDraw
-        .path()
-        .stroke({
-          color: dragPlaceholderLineConfig.color || lineColor,
-          width: dragPlaceholderLineConfig.width
-        })
-        .fill({ color: 'none' })
+      // 落点占位：与被拖节点同尺寸的虚线框（或细条）
+      this.createPlaceholder(node)
+      // 父节点到占位的连线，使用主题连线样式
+      this.placeHolderLine = this.mindMap.otherDraw.path()
+      this.placeHolderLine.addClass('smm-drag-placeholder-artifact')
+      this.applyLineStroke(this.placeHolderLine, this.getThemeLineStroke())
+      // 目标父节点到跟随鼠标的克隆节点的连线，无目标时隐藏
+      this.targetLine = this.mindMap.otherDraw.path()
+      this.targetLine.addClass('smm-drag-target-connector')
+      this.targetLine.attr('pointer-events', 'none')
+      this.targetLine.hide()
       // 当前被拖拽的节点的临时设置
       this.beingDragNodeList.forEach(node => {
         // 降低透明度
@@ -533,6 +589,220 @@ class Drag extends Base {
     }
   }
 
+  // 拖拽反馈的强调色：优先使用配置，否则按主题背景明暗选择
+  getDragAccentColor() {
+    const mindMap = this.mindMap || {}
+    const opt = mindMap.opt || {}
+    if (opt.dragAccentColor) return opt.dragAccentColor
+    const bg = mindMap.themeConfig && mindMap.themeConfig.backgroundColor
+    return isDarkColor(bg) ? '#5aa0ff' : '#2a7cff'
+  }
+
+  // 主题连线样式（颜色、线宽），与真实连线一致
+  getThemeLineStroke() {
+    const node = this.beingDragNodeList && this.beingDragNodeList[0]
+    const opt = (this.mindMap && this.mindMap.opt) || {}
+    const fallback = opt.dragPlaceholderLineConfig || {}
+    let color = fallback.color
+    let width = fallback.width
+    try {
+      if (node && node.style && typeof node.style.merge === 'function') {
+        color = node.style.merge('lineColor', true) || color
+      }
+      if (node && typeof this.getConnectorLineWidth === 'function') {
+        width = this.getConnectorLineWidth(node) || width
+      }
+    } catch (e) {
+      // Keep the configured fallback when the node style cannot be resolved.
+    }
+    return { color, width }
+  }
+
+  applyLineStroke(line, { color, width }) {
+    if (!line) return
+    if (typeof line.stroke === 'function') {
+      line.stroke({ color, width, linejoin: 'round', linecap: 'round' })
+    }
+    if (typeof line.fill === 'function') line.fill({ color: 'none' })
+  }
+
+  // 创建落点占位：box 模式与被拖节点同尺寸，虚线描边并显示淡化的节点内容
+  createPlaceholder(node) {
+    const opt = this.mindMap.opt || {}
+    const accent = this.getDragAccentColor()
+    const isBar = opt.dragPlaceholderMode === 'bar'
+    const w = Number(node && node.width) || 50
+    const h = Number(node && node.height) || 10
+    this.placeholderIsBar = isBar
+    this.placeholderWidth = isBar ? Math.max(w, 50) : w
+    this.placeholderHeight = isBar ? 4 : h
+    this.placeholder = this.mindMap.otherDraw.rect()
+    this.placeholder.addClass('smm-drag-placeholder')
+    this.placeholder.attr('pointer-events', 'none')
+    if (isBar) {
+      this.placeholder.fill({ color: accent }).radius(2)
+    } else {
+      this.placeholder
+        .fill({ color: accent, opacity: 0.08 })
+        .stroke({ color: accent, width: 1.5, dasharray: '5 3' })
+        .radius(Math.min(8, h / 2))
+    }
+    this.placeholder.size(0, 0)
+    this.placeholderContent = null
+    if (!isBar && this.beingDragNodeList.length === 1 && node && node.group) {
+      const content = node.group.clone()
+      ;['.smm-expand-btn', '.smm-hover-node', '.smm-quick-create-child-btn'].forEach(selector => {
+        const element = content.findOne(selector)
+        if (element) element.remove()
+      })
+      const shape = content.findOne('.smm-node-shape')
+      if (shape) shape.css({ fill: 'none', stroke: 'none' })
+      content.opacity(0.45)
+      content.attr('pointer-events', 'none')
+      content.addClass('smm-drag-placeholder-content')
+      this.mindMap.otherDraw.add(content)
+      content.hide()
+      this.placeholderContent = content
+    }
+  }
+
+  hidePlaceholder() {
+    if (this.placeholder) this.placeholder.size(0, 0)
+    if (this.placeholderContent) this.placeholderContent.hide()
+  }
+
+  positionPlaceholderContent(x, y) {
+    const content = this.placeholderContent
+    if (!content) return
+    const t = content.transform()
+    content.translate(x - t.translateX, y - t.translateY)
+    content.show()
+  }
+
+  // 根据当前落点解析目标父节点，更新高亮与目标连线
+  updateDropTarget() {
+    const sibling = this.prevNode || this.nextNode
+    const parent = this.overlapNode || (sibling && sibling.parent) || null
+    this._targetParent = parent
+    if (!parent || !this.clone) {
+      this.clearDropTarget()
+      return
+    }
+    const opt = this.mindMap.opt || {}
+    if (opt.dragTargetHighlight !== false && this.mindMap.otherDraw) {
+      if (!this.targetHighlight) {
+        this.targetHighlight = this.mindMap.otherDraw.rect()
+        this.targetHighlight.addClass('smm-drag-target-highlight')
+        this.targetHighlight.attr('pointer-events', 'none')
+        this.targetHighlight.fill({ color: 'none' })
+      }
+      const pad = 3
+      this.targetHighlight
+        .stroke({ color: this.getDragAccentColor(), width: 2 })
+        .radius(Math.min(10, (Number(parent.height) || 0) / 2 + pad))
+        .size((Number(parent.width) || 0) + pad * 2, (Number(parent.height) || 0) + pad * 2)
+        .move(parent.left - pad, parent.top - pad)
+      this.targetHighlight.show()
+    } else if (this.targetHighlight) {
+      this.targetHighlight.remove()
+      this.targetHighlight = null
+    }
+    this.scheduleTargetLine()
+  }
+
+  clearDropTarget() {
+    this._targetParent = null
+    if (this.targetHighlight) {
+      this.targetHighlight.remove()
+      this.targetHighlight = null
+    }
+    this.removeTargetExtraLines()
+    if (this.targetLine) this.targetLine.hide()
+  }
+
+  removeTargetExtraLines() {
+    (this.targetExtraLines || []).forEach(item => {
+      if (item && typeof item.remove === 'function') item.remove()
+    })
+    this.targetExtraLines = []
+  }
+
+  // 每帧最多重绘一次目标连线
+  scheduleTargetLine() {
+    if (!this.targetLine) return
+    if (typeof requestAnimationFrame !== 'function') {
+      this.drawTargetLine()
+      return
+    }
+    if (this._targetLineRaf) return
+    this._targetLineRaf = requestAnimationFrame(() => {
+      this._targetLineRaf = null
+      this.drawTargetLine()
+    })
+  }
+
+  // 从目标父节点画一条与真实连线同样式（曲线/直线随布局）的连线到克隆节点
+  drawTargetLine() {
+    const parentNode = this._targetParent
+    const line = this.targetLine
+    if (!line) return
+    this.removeTargetExtraLines()
+    if (!parentNode || !this.clone || !this.beingDragNodeList.length) {
+      line.hide()
+      return
+    }
+    try {
+      const t = this.clone.transform()
+      const x = t.translateX || 0
+      const y = t.translateY || 0
+      const w = this.cloneWidth
+      const h = this.cloneHeight
+      const { LEFT, RIGHT } = CONSTANTS.LAYOUT_GROW_DIR
+      let dir = this.getNewChildNodeDir(parentNode)
+      if (this.mindMap.opt.layout === CONSTANTS.LAYOUT.MIND_MAP) {
+        dir = parentNode.isRoot
+          ? (x + w / 2 < parentNode.left + parentNode.width / 2 ? LEFT : RIGHT)
+          : parentNode.dir
+      }
+      const parent = parentNode.fakeClone()
+      const tmpNode = this.beingDragNodeList[0].fakeClone()
+      tmpNode.nodeData = {
+        ...tmpNode.nodeData,
+        data: { ...tmpNode.nodeData.data, isFloating: false, customLeft: null, customTop: null }
+      }
+      tmpNode.customLeft = undefined
+      tmpNode.customTop = undefined
+      tmpNode.parent = parent
+      tmpNode.dir = dir
+      tmpNode.left = x
+      tmpNode.top = y
+      tmpNode.width = w
+      tmpNode.height = h
+      parent.children = [tmpNode]
+      parent._lines = []
+      line.show()
+      this.mindMap.renderer.layout.renderLine(
+        parent,
+        [line],
+        () => {},
+        parentNode.style.getStyle('lineStyle', true)
+      )
+      const { width } = this.getThemeLineStroke()
+      const stroke = { color: this.getDragAccentColor(), width: Math.max(2, Number(width) || 0) }
+      this.applyLineStroke(line, stroke)
+      this.targetExtraLines = [...parent._lines]
+      this.targetExtraLines.forEach(item => {
+        if (typeof item.addClass === 'function') item.addClass('smm-drag-target-connector')
+        this.mindMap.otherDraw.add(item)
+        this.applyLineStroke(item, stroke)
+      })
+    } catch (e) {
+      // A preview must never break the drag; just hide it.
+      this.removeTargetExtraLines()
+      line.hide()
+    }
+  }
+
   // Trace each original node's own shape, without its descendants or padding.
   createDragRangeGuide() {
     this.dragRangeGuide = this.mindMap.otherDraw.group()
@@ -540,7 +810,7 @@ class Drag extends Base {
     this.beingDragNodeList.forEach(node => {
       if (!node.shapeNode) return
       const shape = node.shapeNode.clone()
-      shape.css({ fill: 'none', stroke: '#246bff', 'stroke-width': 2,
+      shape.css({ fill: 'none', stroke: this.getDragAccentColor(), 'stroke-width': 2,
         'stroke-dasharray': '6 4', opacity: 1 })
       this.dragRangeGuide.group().translate(node.left, node.top).add(shape)
     })
@@ -565,6 +835,18 @@ class Drag extends Base {
       this.placeHolderLine = null
     }
     this.removeExtraLines()
+    if (this._targetLineRaf && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(this._targetLineRaf)
+    }
+    this._targetLineRaf = null
+    ;['placeholderContent', 'targetLine', 'targetHighlight'].forEach(key => {
+      if (this[key]) {
+        this[key].remove()
+        this[key] = null
+      }
+    })
+    this.removeTargetExtraLines()
+    this._targetParent = null
   }
 
   // 移除额外创建的连线
@@ -600,7 +882,7 @@ class Drag extends Base {
     this.overlapNode = null
     this.prevNode = null
     this.nextNode = null
-    this.placeholder.size(0, 0)
+    this.hidePlaceholder()
     this.placeHolderLine.hide()
     this.removeExtraLines()
     this.nodeList.forEach(node => {
@@ -650,6 +932,7 @@ class Drag extends Base {
     if (this.overlapNode) {
       this.handleOverlapNode()
     }
+    this.updateDropTarget()
   }
 
   // 处理作为子节点的情况
@@ -1289,17 +1572,19 @@ class Drag extends Base {
     this.removeExtraLines()
     let w = this.placeholderWidth
     let h = this.placeholderHeight
-    if (rotate) {
+    // 占位为真实节点尺寸时不旋转
+    if (rotate && this.placeholderIsBar !== false) {
       const tmp = w
       w = h
       h = tmp
     }
     this.placeholder.size(w, h).move(x, y)
+    this.positionPlaceholderContent(x, y)
     if (notRenderLine) {
       if (this.placeHolderLine) this.placeHolderLine.hide()
       return
     }
-    const { dragPlaceholderLineConfig } = this.mindMap.opt
+    const stroke = this.getThemeLineStroke()
     let node = null
     let parent = null
     if (this.overlapNode) {
@@ -1338,18 +1623,14 @@ class Drag extends Base {
       },
       node.style.getStyle('lineStyle', true)
     )
+    this.applyLineStroke(this.placeHolderLine, stroke)
     this.placeHolderExtraLines = [...parent._lines]
     this.placeHolderExtraLines.forEach(line => {
       if (typeof line.addClass === 'function') {
         line.addClass('smm-drag-placeholder-artifact')
       }
       this.mindMap.otherDraw.add(line)
-      line
-        .stroke({
-          color: dragPlaceholderLineConfig.color,
-          width: dragPlaceholderLineConfig.width
-        })
-        .fill({ color: 'none' })
+      this.applyLineStroke(line, stroke)
     })
   }
 

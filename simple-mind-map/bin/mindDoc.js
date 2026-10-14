@@ -568,6 +568,15 @@ function attachmentMark(data) {
   return `  (附件 ${parts.join(' ')})`
 }
 
+// 大纲里标出评论数量，提示模型用 list_node_comments 读取正文
+function commentMark(data) {
+  const list = data && Array.isArray(data.comments) ? data.comments : null
+  if (!list || !list.length) return ''
+  const count = require('./commentMerge').liveComments(list).length
+  if (!count) return ''
+  return `  (评论 ${count}${data.commentResolved ? ' 已解决' : ''})`
+}
+
 function toOutline(obj, options = {}) {
   const maxNodes = Number(options.maxNodes) > 0 ? Number(options.maxNodes) : 0
   const rootUid = findRootUid(obj)
@@ -585,7 +594,7 @@ function toOutline(obj, options = {}) {
     count += 1
     const text = stripHtml(node.data && node.data.text) || '(无标题)'
     const prefix = depth === 0 ? '# ' : `${'  '.repeat(depth - 1)}- `
-    lines.push(`${prefix}${text}  [${uid}]${attachmentMark(node.data)}`)
+    lines.push(`${prefix}${text}  [${uid}]${attachmentMark(node.data)}${commentMark(node.data)}`)
     ;(node.children || []).forEach(child => walk(child, depth + 1))
   }
   walk(rootUid, 0)
@@ -866,6 +875,9 @@ const NODE_DATA_PATCH_KEYS = [
   'attachmentError',
   'attachmentExtractedText',
   'attachmentProgress',
+  'attachmentErrorIgnored',
+  'comments',
+  'commentResolved',
   'color',
   'fillColor',
   'fontFamily',

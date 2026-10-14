@@ -326,7 +326,7 @@ body {
 
     /* 富文本编辑器 */
     .toastui-editor-main-container {
-      background-color: #fff;
+      background-color: #1f2226;
     }
   }
 }

@@ -17,6 +17,8 @@ export const defaultOpt = {
   layout: CONSTANTS.LAYOUT.LOGICAL_STRUCTURE,
   // 第一种逻辑结构图的紧凑排列开关
   compactLayout: true,
+  // 概要连线样式，覆盖主题的 generalizationLineStyle：'brace'（花括号）| 'arc'（弧线），为空时使用主题配置
+  generalizationLineStyle: '',
   // 如果结构为鱼骨图，那么可以通过该选项控制倾斜角度
   fishboneDeg: 45,
   // 主题
@@ -280,6 +282,9 @@ export const defaultOpt = {
       // color: '',// 图标颜色，不手动设置则会使用节点文本的颜色
     }
   },
+  // 点击节点超链接图标的行为：popover（弹出打开/复制/编辑/删除操作条，触发 node_hyperlinkClick 事件）| open（直接打开）
+  // 按住 Ctrl/Cmd 点击时始终直接打开
+  hyperlinkClickMode: 'popover',
   // 自定义节点超链接图标
   hyperlinkIcon: {
     icon: '', // svg字符串，如果不是确定要使用svg自带的样式，否则请去除其中的fill等样式属性
@@ -358,9 +363,17 @@ export const defaultOpt = {
   },
   // 节点拖拽时的透明度配置
   dragOpacityConfig: {
-    cloneNodeOpacity: 0.5, // 跟随鼠标移动的克隆节点或矩形的透明度
+    cloneNodeOpacity: 1, // 跟随鼠标移动的克隆节点或矩形的透明度
     beingDragNodeOpacity: 0.3 // 被拖拽节点的透明度
   },
+  // 拖拽时是否在原位置显示虚线轮廓
+  showDragOriginGuide: false,
+  // 落点占位样式：box（与节点同尺寸的虚线框，显示淡化的节点内容）| bar（细插入条）
+  dragPlaceholderMode: 'box',
+  // 拖拽时是否高亮目标父节点
+  dragTargetHighlight: true,
+  // 拖拽反馈强调色，不设置时按主题背景明暗自动选择（浅色 #2a7cff / 深色 #5aa0ff）
+  dragAccentColor: '',
   // 拖拽单个节点时会克隆被拖拽节点，如果想修改该克隆节点，那么可以通过该选项提供一个处理函数，函数接收克隆节点对象
   // 需要注意的是节点对象指的是@svgdotjs/svg.js库的元素对象，所以你需要阅读该库的文档来操作该对象
   handleDragCloneNode: null,

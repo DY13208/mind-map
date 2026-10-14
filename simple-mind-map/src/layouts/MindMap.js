@@ -276,7 +276,7 @@ class MindMap extends Base {
         [x1 + _s, y1],
         [x1 + _s, y2],
         [x2 + nodeUseLineStyleOffset, y2]
-      ])
+      ], this.getConnectorLineWidth(item))
       this.setLineStyle(style, lines[index], path, item)
     })
   }
@@ -409,23 +409,20 @@ class MindMap extends Base {
         bottom,
         left,
         right,
-        generalizationLineMargin,
-        generalizationNodeMargin
+        generalizationLineMargin
       } = this.getNodeGeneralizationRenderBoundaries(item, 'h')
       let x = isLeft
         ? left - generalizationLineMargin
         : right + generalizationLineMargin
-      let x1 = x
-      let y1 = top
-      let x2 = x
-      let y2 = bottom
-      let cx = x1 + (isLeft ? -20 : 20)
-      let cy = y1 + (y2 - y1) / 2
-      let path = `M ${x1},${y1} Q ${cx},${cy} ${x2},${y2}`
-      item.generalizationLine.plot(path)
+      const nodeMargin = this.plotGeneralizationLine(item, {
+        pos: x,
+        start: top,
+        end: bottom,
+        dir: isLeft ? 'left' : 'right'
+      })
       item.generalizationNode.left =
         x +
-        (isLeft ? -generalizationNodeMargin : generalizationNodeMargin) -
+        (isLeft ? -nodeMargin : nodeMargin) -
         (isLeft ? item.generalizationNode.width : 0)
       item.generalizationNode.top =
         top + (bottom - top - item.generalizationNode.height) / 2

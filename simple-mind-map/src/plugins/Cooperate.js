@@ -132,6 +132,7 @@ const HTTP_RECOVER_RETRY_BASE_MS = 500
 const HTTP_RECOVER_RETRY_MAX_MS = 30000
 const HTTP_RECOVER_RESTORE_WAIT_MS = 60000
 const NULLABLE_PATCH_KEYS = [
+  'comments',
   'autoFill',
   'image',
   'imageTitle',
@@ -156,6 +157,9 @@ const NULLABLE_PATCH_KEYS = [
   'attachmentStatus',
   'attachmentError',
   'attachmentExtractedText',
+  'attachmentErrorIgnored',
+  'comments',
+  'commentResolved',
   'customLeft',
   'customTop',
   'isFloating'
@@ -172,6 +176,7 @@ const FIELD_COMMANDS = {
   SET_NODE_HYPERLINK: true,
   SET_NODE_MAP_REF: true,
   SET_NODE_ATTACHMENT: true,
+  SET_NODE_COMMENT: true,
   SET_NODE_TAG: true,
   SET_NODE_SHAPE: true,
   SET_NODE_CUSTOM_POSITION: true,
@@ -4396,6 +4401,9 @@ class Cooperate {
       attachmentStatus: next.attachmentStatus,
       attachmentError: next.attachmentError,
       attachmentExtractedText: next.attachmentExtractedText,
+      attachmentErrorIgnored: next.attachmentErrorIgnored,
+      comments: next.comments,
+      commentResolved: next.commentResolved,
       customLeft: next.customLeft,
       customTop: next.customTop,
       isFloating: next.isFloating
@@ -5513,6 +5521,7 @@ class Cooperate {
         name === 'SET_NODE_TAG' ||
         name === 'SET_NODE_IMAGE' ||
         name === 'SET_NODE_HYPERLINK' ||
+        name === 'SET_NODE_COMMENT' ||
         name === 'SET_NODE_MAP_REF' ||
         name === 'SET_NODE_ICON' ||
         name === 'ADD_ASSOCIATIVE_LINE' ||

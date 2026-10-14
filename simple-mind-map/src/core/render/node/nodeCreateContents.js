@@ -9,14 +9,22 @@ import {
   getNodeRichTextStyles,
   measureText as measureTextCanvas
 } from '../../../utils'
-import { Image as SVGImage, SVG, A, G, Rect, Text, Circle } from '@svgdotjs/svg.js'
+import { Image as SVGImage, SVG, A, G, Rect, Text, Circle, Path } from '@svgdotjs/svg.js'
 import iconsSvg from '../../../svg/icons'
-import { noneRichTextNodeLineHeight } from '../../../constants/constant'
+import { noneRichTextNodeLineHeight, CONSTANTS } from '../../../constants/constant'
 import mapRefUtil from '../../../utils/mapRef'
+import { resolveHyperlinkClick } from '../../../utils/hyperlinkClick'
 import {
   hasAttachmentIcon,
-  attachmentIconViewState
+  attachmentIconViewState,
+  attachmentBadgeGeometry
 } from '../../../utils/attachmentIconState'
+import {
+  nodeCommentCount,
+  commentMarkerViewState,
+  commentTabGeometry,
+  commentTabColors
+} from '../../../utils/nodeComment'
 
 // 测量svg文本宽高
 const measureText = (text, style) => {
@@ -618,35 +626,75 @@ function createHyperlinkNode() {
   if (!hyperlink) {
     return
   }
-  const { customHyperlinkJump, hyperlinkIcon } = this.mindMap.opt
+  const { customHyperlinkJump, hyperlinkIcon, hyperlinkClickMode } = this.mindMap.opt
   const { icon, style } = hyperlinkIcon
   const iconSize = this.getNodeIconSize('hyperlinkIcon')
-  const node = new SVG().size(iconSize, iconSize)
-  // 超链接节点
+  // 图标外留一圈透明命中区（chip），悬停时显示浅色底
+  const chipPadding = Math.max(3, Math.round(iconSize * 0.2))
+  const chipSize = iconSize + chipPadding * 2
+  const node = new SVG().size(chipSize, chipSize)
+  const dark =
+    typeof document !== 'undefined' &&
+    !!document.body &&
+    document.body.classList.contains('isDark')
+  // 默认透明，只在悬停时显示浅底；透明底仍作为点击区域
+  const chipFill = 'rgba(0, 0, 0, 0)'
+  const chipHoverFill = dark ? 'rgba(255, 255, 255, 0.16)' : 'rgba(16, 24, 40, 0.1)'
+  // 超链接节点：保留 <a>，Ctrl/Cmd+点击或 open 模式下仍直接打开
   const a = new A().to(hyperlink).target('_blank')
+  a.attr('rel', 'noopener noreferrer')
+  a.css('cursor', 'pointer')
   a.node.addEventListener('click', e => {
-    if (typeof customHyperlinkJump === 'function') {
-      e.preventDefault()
+    const action = resolveHyperlinkClick({
+      mode: hyperlinkClickMode,
+      event: e,
+      customHyperlinkJump
+    })
+    if (action === 'native') return
+    e.preventDefault()
+    if (action === 'custom') {
       customHyperlinkJump(hyperlink, this)
+      return
     }
+    // popover：交给上层弹出“打开/复制/编辑/删除”操作条
+    e.stopPropagation()
+    hideHyperlinkTip.call(this)
+    this.mindMap.emit(
+      'node_hyperlinkClick',
+      this,
+      e,
+      node.node.getBoundingClientRect()
+    )
   })
-  // 添加一个透明的层，作为鼠标区域
-  a.rect(iconSize, iconSize).fill({ color: 'transparent' })
+  // 圆角底，同时作为鼠标区域
+  const chip = a
+    .rect(chipSize, chipSize)
+    .radius(Math.round(chipSize / 4))
+    .fill({ color: chipFill })
+  chip.addClass('smm-hyperlink-chip')
   // 超链接图标
-  const iconNode = SVG(icon || iconsSvg.hyperlink).size(iconSize, iconSize)
+  const iconNode = SVG(icon || iconsSvg.hyperlink)
+    .size(iconSize, iconSize)
+    .move(chipPadding, chipPadding)
   this.style.iconNode(iconNode, style.color)
+  if (!icon) {
+    // 默认图标为描边样式
+    iconNode.attr({ stroke: style.color || this.style.merge('color'), fill: 'none' })
+  }
   a.add(iconNode)
   node.add(a)
   node.on('mouseenter', () => {
+    chip.fill({ color: chipHoverFill })
     showHyperlinkTip.call(this, node)
   })
   node.on('mouseleave', () => {
+    chip.fill({ color: chipFill })
     hideHyperlinkTip.call(this)
   })
   return {
     node,
-    width: iconSize,
-    height: iconSize
+    width: chipSize,
+    height: chipSize
   }
 }
 
@@ -895,6 +943,9 @@ function applyAttachmentIconVisual(view, data) {
   if (state.badge) {
     view.badge.show()
     view.badgeCircle.fill({ color: state.badge.color })
+    if (view.badgeGlyph) {
+      view.badgeGlyph[state.badge.glyph === 'error' ? 'show' : 'hide']()
+    }
   } else {
     view.badge.hide()
   }
@@ -920,15 +971,12 @@ function createAttachmentNode() {
   // 透明的层，用来作为鼠标区域
   node.add(new Rect().size(iconSize, iconSize).fill({ color: 'transparent' }))
   // 自定义图标优先；未自定义时根据附件名称使用相应的文件类型图标。
-  const useBuiltInFileIcon = !icon
-  const iconNode = SVG(
+  const iconSvg =
     icon || iconsSvg.getAttachmentFileIcon(attachmentName, attachmentMimeType)
-  ).size(iconSize, iconSize)
-  this.style.iconNode(iconNode, style.color)
-  // 内置文件类型图标由描边构成；只为它补充描边颜色，避免改变用户自定义 SVG 的表现。
-  if (useBuiltInFileIcon) {
-    const iconColor = style.color || this.style.merge('color')
-    iconNode.attr({ color: iconColor, stroke: iconColor })
+  const iconNode = SVG(iconSvg).size(iconSize, iconSize)
+  // 内置的彩色文件类型图标保留自身配色；只有用户自定义图标和无类型信息时的回形针图标跟随主题颜色。
+  if (icon || iconSvg === iconsSvg.attachment) {
+    this.style.iconNode(iconNode, style.color)
   }
   node.add(iconNode)
 
@@ -973,14 +1021,32 @@ function createAttachmentNode() {
   percentText.addClass('smm-attachment-percent')
   node.add(percentText)
 
-  const badgeSize = Math.max(6, Math.round(iconSize * 0.38))
+  // 角标完整画在图标框内（嵌套 svg 会裁剪溢出部分），失败时带白色感叹号。
+  const badgeGeo = attachmentBadgeGeometry(iconSize)
   const badge = new G().addClass('smm-attachment-badge')
   const badgeCircle = new Circle()
-    .radius(badgeSize / 2)
-    .cx(iconSize - badgeSize / 2 + 1)
-    .cy(iconSize - badgeSize / 2 + 1)
-    .stroke({ color: '#fff', width: 1.2 })
+    .radius(badgeGeo.r)
+    .cx(badgeGeo.cx)
+    .cy(badgeGeo.cy)
+    .stroke({ color: '#fff', width: badgeGeo.ring })
+  const badgeGlyph = new G().addClass('smm-attachment-badge-glyph')
+  badgeGlyph.add(
+    new Rect()
+      .size(badgeGeo.bar.width, badgeGeo.bar.height)
+      .move(badgeGeo.bar.x, badgeGeo.bar.y)
+      .attr({ rx: badgeGeo.bar.width / 2 })
+      .fill('#fff')
+  )
+  badgeGlyph.add(
+    new Circle()
+      .radius(badgeGeo.dot.r)
+      .cx(badgeGeo.dot.cx)
+      .cy(badgeGeo.dot.cy)
+      .fill('#fff')
+  )
   badge.add(badgeCircle)
+  badge.add(badgeGlyph)
+  badge.attr({ 'pointer-events': 'none' })
   node.add(badge)
 
   const view = {
@@ -992,6 +1058,7 @@ function createAttachmentNode() {
     percentText,
     badge,
     badgeCircle,
+    badgeGlyph,
     radius
   }
   applyAttachmentIconVisual(view, data)
@@ -1008,6 +1075,147 @@ function createAttachmentNode() {
     height: iconSize,
     view
   }
+}
+
+const COMMENT_BUBBLE_ICON =
+  '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.5c4.97 0 9 3.36 9 7.5s-4.03 7.5-9 7.5c-1.1 0-2.15-.16-3.12-.46L4 20l1.33-3.6C3.89 15.04 3 13.12 3 11c0-4.14 4.03-7.5 9-7.5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>'
+
+function isDarkMode() {
+  return (
+    typeof document !== 'undefined' &&
+    !!document.body &&
+    document.body.classList.contains('isDark')
+  )
+}
+
+//  评论标记数据：不占用文字行宽度，真正的图形在 layout 时画成右上角融合标签
+function createCommentNode() {
+  const data = this.getData() || {}
+  const count = nodeCommentCount(data)
+  if (!count) return
+  const { isNodeCommentUnread } = this.mindMap.opt
+  let unread = false
+  if (typeof isNodeCommentUnread === 'function') {
+    try {
+      unread = !!isNodeCommentUnread(this)
+    } catch (e) {
+      unread = false
+    }
+  }
+  const view = commentMarkerViewState({
+    count,
+    resolved: !!data.commentResolved,
+    dark: isDarkMode(),
+    unread
+  })
+  return { count, view, resolved: !!data.commentResolved, width: 0, height: 0 }
+}
+
+// 只有矩形（含圆角矩形）与节点边框融合，其他形状用悬浮标签
+function commentTabCanMerge(node) {
+  const shape = typeof node.getShape === 'function' ? node.getShape() : ''
+  return !shape || shape === CONSTANTS.SHAPE.RECTANGLE
+}
+
+//  在节点右上角绘制评论标签，contentTop 为节点内容顶部（用于计算标签上抬高度）
+function renderCommentTab(contentTop) {
+  this._commentTab = null
+  this._commentTabBorder = null
+  const meta = this._commentData
+  if (!meta || !this.group) return
+  const { width, height } = this
+  const borderWidth = this.getBorderWidth()
+  const dark = isDarkMode()
+  const merge = commentTabCanMerge(this)
+  const geo = commentTabGeometry({
+    width,
+    height,
+    borderWidth,
+    borderRadius: Number(this.style.merge('borderRadius')) || 0,
+    contentTop,
+    iconSize: this.getNodeIconSize('hyperlinkIcon'),
+    label: meta.view.label,
+    merge
+  })
+  const colors = commentTabColors({
+    fill: this.style.merge('fillColor'),
+    border: this.style.merge('borderColor'),
+    dark,
+    resolved: meta.resolved
+  })
+  const tab = new G()
+  tab.addClass('smm-comment-tab')
+  tab.addClass('smm-comment-marker')
+  tab.add(SVG(`<title>${meta.view.title}</title>`))
+  tab.css('cursor', 'pointer')
+  const fill = new Path().plot(geo.fillPath)
+  fill.fill({ color: colors.tabFill }).stroke({ width: 0, color: 'none' })
+  fill.addClass('smm-comment-tab-fill')
+  tab.add(fill)
+  if (geo.innerPath) {
+    const inner = new Path().plot(geo.innerPath)
+    inner.fill('none').stroke({ color: colors.innerLine, width: 1, linecap: 'round' })
+    inner.attr({ 'pointer-events': 'none' })
+    tab.add(inner)
+  }
+  // 外轮廓与节点边框同色同宽，选中时随节点一起高亮（见 updateNodeActiveClass）
+  const border = new Path().plot(geo.outerPath)
+  border.fill('none').stroke({
+    color: borderWidth > 0 ? colors.border : colors.innerLine,
+    width: borderWidth > 0 ? borderWidth : 1,
+    linecap: 'round',
+    linejoin: 'round'
+  })
+  border.attr({ 'pointer-events': 'none' })
+  border.addClass('smm-comment-tab-border')
+  tab.add(border)
+  const iconNode = SVG(COMMENT_BUBBLE_ICON).size(geo.icon.size, geo.icon.size)
+  iconNode.move(geo.icon.x, geo.icon.y)
+  iconNode.css('color', colors.iconColor)
+  iconNode.attr({ 'pointer-events': 'none' })
+  tab.add(iconNode)
+  const countText = new Text().text(meta.view.label).fill(colors.iconColor)
+  countText.font({
+    size: geo.text.size,
+    family: 'ui-sans-serif, system-ui, sans-serif',
+    weight: 600
+  })
+  countText.attr({
+    x: geo.text.x,
+    y: geo.text.y,
+    'dominant-baseline': 'central',
+    'pointer-events': 'none'
+  })
+  tab.add(countText)
+  if (meta.view.unread) {
+    const dot = new Circle()
+      .radius(geo.dot.r)
+      .cx(geo.dot.cx)
+      .cy(geo.dot.cy)
+      .fill(colors.dot)
+      .stroke({ color: colors.dotRing, width: 1.5 })
+    dot.addClass('smm-comment-unread')
+    dot.attr({ 'pointer-events': 'none' })
+    tab.add(dot)
+  }
+  // 透明命中区域：覆盖整个标签（含伸出节点顶部的部分）
+  const hit = new Rect().size(geo.hit.w, geo.hit.h).move(geo.hit.x, geo.hit.y)
+  hit.fill({ color: 'transparent' })
+  hit.addClass('smm-comment-tab-hit')
+  tab.add(hit)
+  tab.on('mouseenter', () => fill.css('filter', 'brightness(0.96)'))
+  tab.on('mouseleave', () => fill.css('filter', ''))
+  tab.on('mousedown', e => e.stopPropagation())
+  tab.on('dblclick', e => e.stopPropagation())
+  tab.on('click', e => {
+    e.stopPropagation()
+    this.mindMap.emit('node_commentClick', this, e, tab.node.getBoundingClientRect())
+  })
+  this.group.add(tab)
+  this._commentTab = tab
+  this._commentTabBorder = border
+  this._commentTabGeometry = geo
+  return tab
 }
 
 function updateAttachmentIconState() {
@@ -1076,6 +1284,8 @@ export default {
   createTagNode,
   createNoteNode,
   createAttachmentNode,
+  createCommentNode,
+  renderCommentTab,
   updateAttachmentIconState,
   getNoteContentPosition,
   getNodeIconSize,

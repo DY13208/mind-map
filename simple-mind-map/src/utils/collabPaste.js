@@ -59,7 +59,10 @@ const COPY_DATA_KEYS = [
   'attachmentMimeType',
   'attachmentStatus',
   'attachmentError',
-  'attachmentExtractedText'
+  'attachmentExtractedText',
+  'attachmentErrorIgnored',
+  'comments',
+  'commentResolved'
 ]
 
 function clonePlain(value) {

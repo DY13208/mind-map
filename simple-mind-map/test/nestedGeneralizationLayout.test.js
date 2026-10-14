@@ -28,6 +28,8 @@ function makeLayout() {
   layout.mindMap = {
     themeConfig: {
       generalizationNodeMargin: GEN_MARGIN,
+      // 这些用例校验的是嵌套概要的间距计算，固定使用旧版弧线（不额外预留花括号尖端）
+      generalizationLineStyle: 'arc',
       generalizationLineMargin: 5
     }
   }

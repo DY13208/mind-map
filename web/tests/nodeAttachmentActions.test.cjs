@@ -802,6 +802,39 @@ async function run() {
   await assert.rejects(pollRun, error => error && error.name === 'AbortError')
   assert.equal(staleUpdateCalled, false)
 
+  // 忽略错误 / 恢复错误提示 write attachmentErrorIgnored through SET_NODE_ATTACHMENT (undoable + synced).
+  const failedNode = node('n-failed', {
+    attachmentId: 'att-failed', attachmentName: 'bad.docx', attachmentStatus: 'failed', attachmentError: 'boom'
+  })
+  const ignoreVm = makeAttachmentVm(component, api, [failedNode])
+  await ignoreVm.onManageAttachment({
+    action: 'ignoreError', uid: 'n-failed', node: failedNode,
+    expectedAttachmentId: 'att-failed', expectedAttachmentName: 'bad.docx'
+  })
+  assert.equal(ignoreVm.confirmation, undefined, 'ignoring needs no confirmation')
+  assert.equal(ignoreVm.commands.length, 1)
+  assert.equal(ignoreVm.commands[0][0], 'SET_NODE_ATTACHMENT')
+  assert.deepEqual(ignoreVm.commands[0][4], { attachmentErrorIgnored: true })
+  assert.equal(failedNode.getData('attachmentErrorIgnored'), true)
+  assert.equal(failedNode.getData('attachmentId'), 'att-failed')
+  assert.ok(ignoreVm.messages.entries.some(entry => entry[0] === 'success'))
+  await ignoreVm.onManageAttachment({
+    action: 'restoreError', uid: 'n-failed', node: failedNode,
+    expectedAttachmentId: 'att-failed', expectedAttachmentName: 'bad.docx'
+  })
+  assert.equal(failedNode.getData('attachmentErrorIgnored'), false)
+  // Read-only maps cannot change attachments from the error dialog.
+  const ignoreReadonlyNode = node('n-ro', { attachmentId: 'att-ro', attachmentName: 'ro.docx', attachmentStatus: 'failed' })
+  const ignoreReadonlyVm = makeAttachmentVm(component, api, [ignoreReadonlyNode])
+  ignoreReadonlyVm.mindMap.opt = { readonly: true }
+  await ignoreReadonlyVm.onManageAttachment({
+    action: 'ignoreError', uid: 'n-ro', node: ignoreReadonlyNode,
+    expectedAttachmentId: 'att-ro', expectedAttachmentName: 'ro.docx'
+  })
+  assert.equal(ignoreReadonlyVm.commands.length, 0)
+  assert.equal(ignoreReadonlyNode.getData('attachmentErrorIgnored'), undefined)
+  assert.ok(ignoreReadonlyVm.messages.entries.some(entry => entry[0] === 'warning'))
+
   console.log('Node attachment delete/replace concurrency tests passed')
 }
 

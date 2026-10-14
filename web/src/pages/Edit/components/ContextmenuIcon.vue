@@ -51,6 +51,7 @@ const paths = {
   brush: 'M15 4l5 5M14 5l5 5-9 9H5v-5z',
   smiley: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8 10h.01M16 10h.01M8 15c1.5 2 6.5 2 8 0',
   note: 'M6 3h9l4 4v14H6zM15 3v4h4M9 12h6M9 16h6',
+  comment: 'M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4h0A2.5 2.5 0 0 1 4 13.5zM8 8.5h8M8 12h5',
   tag: 'M3 12V4h8l10 10-8 8zM7 8h.01',
   formula: 'M6 5h6M9 5c2 5-2 9 2 14M14 10h6M14 16h6M16 8l4 10',
   frame: 'M4 4h16v16H4zM8 4v16M4 8h16',

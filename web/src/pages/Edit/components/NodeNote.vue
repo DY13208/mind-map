@@ -27,6 +27,8 @@
 <script>
 import Editor from '@toast-ui/editor'
 import '@toast-ui/editor/dist/toastui-editor.css' // Editor's Style
+import '@toast-ui/editor/dist/theme/toastui-editor-dark.css'
+import { mapState } from 'vuex'
 import { isMobile } from 'simple-mind-map/src/utils/index'
 
 // 节点备注内容设置
@@ -42,7 +44,15 @@ export default {
       appointNode: null
     }
   },
+  computed: {
+    ...mapState({
+      isDark: state => state.localConfig.isDark
+    })
+  },
   watch: {
+    isDark() {
+      this.applyEditorTheme()
+    },
     dialogVisible(val, oldVal) {
       if (!val && oldVal) {
         this.$bus.$emit('endTextEdit')
@@ -93,7 +103,14 @@ export default {
           previewStyle: 'vertical'
         })
       }
+      this.applyEditorTheme()
       this.editor.setMarkdown(this.note)
+    },
+
+    // toast-ui 的 theme 只能在创建时指定，这里切换官方暗色主题的类名以跟随深色模式
+    applyEditorTheme() {
+      const el = this.$refs.noteEditor
+      if (el) el.classList.toggle('toastui-editor-dark', !!this.isDark)
     },
 
     cancel() {
@@ -125,6 +142,40 @@ export default {
   .tip {
     margin-top: 5px;
     color: #dcdfe6;
+  }
+}
+</style>
+
+<style lang="less">
+/* 深色模式：在 toast-ui 官方暗色主题上统一到应用配色 */
+.toastui-editor-dark.toastui-editor-defaultUI {
+  border-color: #3a3f45;
+  background-color: #1f2226;
+  color: hsla(0, 0%, 100%, 0.85);
+
+  .toastui-editor-defaultUI-toolbar {
+    background-color: #262a2e;
+    border-bottom-color: #3a3f45;
+  }
+  .toastui-editor-main-container,
+  .toastui-editor-md-container,
+  .toastui-editor-ww-container,
+  .toastui-editor-md-preview {
+    background-color: #1f2226;
+  }
+  .toastui-editor-md-splitter { background-color: #3a3f45; }
+  .toastui-editor-mode-switch {
+    background-color: #262a2e;
+    border-top-color: #3a3f45;
+    .tab-item {
+      background-color: #1f2226;
+      border-color: #3a3f45;
+      color: hsla(0, 0%, 100%, 0.55);
+      &.active { background-color: #262a2e; color: hsla(0, 0%, 100%, 0.9); }
+    }
+  }
+  .toastui-editor-contents .toastui-editor-md-preview-highlight::after {
+    background-color: hsla(0, 0%, 100%, 0.06);
   }
 }
 </style>

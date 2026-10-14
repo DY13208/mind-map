@@ -39,6 +39,8 @@ export default {
   generalizationLineMargin: 0,
   // 概要节点距节点的距离
   generalizationNodeMargin: 20,
+  // 概要连线样式：brace（花括号）| arc（弧线）
+  generalizationLineStyle: 'brace',
   // 关联线默认状态的粗细
   associativeLineWidth: 2,
   // 关联线默认状态的颜色

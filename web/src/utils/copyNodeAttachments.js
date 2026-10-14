@@ -51,6 +51,7 @@ export async function copyNodeAttachments(payload, destinationRoom, onTransferSt
         attachmentExtractedText: String(attachment.extractedText || '').slice(0, 2400)
       })
       delete data.attachmentProgress
+      delete data.attachmentErrorIgnored
     }
     for (const child of node.children || []) await visit(child)
     const summaries = Array.isArray(data.generalization) ? data.generalization : data.generalization ? [data.generalization] : []

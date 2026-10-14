@@ -4,6 +4,11 @@ import Lru from '../utils/Lru'
 import { createUid, walk } from '../utils/index'
 
 //  布局基类
+// 概要花括号的尺寸参数
+const GENERALIZATION_BRACE_MIN_RADIUS = 4
+const GENERALIZATION_BRACE_MAX_RADIUS = 12
+const GENERALIZATION_BRACE_GAP = 8
+
 class Base {
   //  构造函数
   constructor(renderer) {
@@ -496,7 +501,7 @@ class Base {
       return 0
     }
     const size = node.getVisibleGeneralizationSize()
-    const { generalizationNodeMargin } = this.mindMap.themeConfig
+    const generalizationNodeMargin = this.getGeneralizationNodeMargin()
     const extent =
       dir === 'v'
         ? size.subtreeHeight ||
@@ -642,6 +647,88 @@ class Base {
     return Math.max(...widthArr) + totalGeneralizationNodeWidth
   }
 
+  // 概要连线样式：'brace'（花括号，默认）| 'arc'（旧版弧线）
+  getGeneralizationLineStyle() {
+    const mindMap = this.mindMap || {}
+    const opt = mindMap.opt || {}
+    const theme = mindMap.themeConfig || {}
+    return (opt.generalizationLineStyle || theme.generalizationLineStyle) === 'arc'
+      ? 'arc'
+      : 'brace'
+  }
+
+  // 概要节点预留间距：花括号样式下至少容纳括号尖端加间隙
+  getGeneralizationNodeMargin() {
+    const theme = (this.mindMap && this.mindMap.themeConfig) || {}
+    const margin = Number(theme.generalizationNodeMargin) || 0
+    if (this.getGeneralizationLineStyle() === 'arc') return margin
+    const lineMargin = Number(theme.generalizationLineMargin) || 0
+    return Math.max(
+      margin,
+      lineMargin + 2 * GENERALIZATION_BRACE_MAX_RADIUS + GENERALIZATION_BRACE_GAP
+    )
+  }
+
+  // 花括号 '}' 路径。start/end 为沿轴方向的区间，pos 为括号所在位置，
+  // dir 为尖端朝向：right/left（竖直括号）、down/up（水平括号）。
+  // 返回 { path, tip }，tip 为尖端距 pos 的距离。
+  generalizationBracePath(start, end, pos, dir = 'right') {
+    const a0 = Math.min(start, end)
+    const a1 = Math.max(start, end)
+    const span = a1 - a0
+    const sign = dir === 'left' || dir === 'up' ? -1 : 1
+    const vertical = dir === 'down' || dir === 'up'
+    const fmt = n => Math.round(n * 100) / 100
+    const P = (a, d) => {
+      const o = pos + sign * d
+      return vertical ? `${fmt(a)},${fmt(o)}` : `${fmt(o)},${fmt(a)}`
+    }
+    const r = Math.max(
+      GENERALIZATION_BRACE_MIN_RADIUS,
+      Math.min(GENERALIZATION_BRACE_MAX_RADIUS, span / 6)
+    )
+    const mid = a0 + span / 2
+    if (span < 4 * r) {
+      // 区间太小，退化为简单的括弧
+      return {
+        path: `M ${P(a0, 0)} Q ${P(mid, 2 * r)} ${P(a1, 0)}`,
+        tip: r
+      }
+    }
+    const path = [
+      `M ${P(a0, 0)}`,
+      `Q ${P(a0, r)} ${P(a0 + r, r)}`,
+      `L ${P(mid - r, r)}`,
+      `Q ${P(mid, r)} ${P(mid, 2 * r)}`,
+      `Q ${P(mid, r)} ${P(mid + r, r)}`,
+      `L ${P(a1 - r, r)}`,
+      `Q ${P(a1, r)} ${P(a1, 0)}`
+    ].join(' ')
+    return { path, tip: 2 * r }
+  }
+
+  // 绘制概要连线，返回概要节点距基准位置的间距。
+  // baseOffset：连线位置相对基准位置的距离（用于布局以 right/bottom 为基准的情况）
+  plotGeneralizationLine(item, { pos, start, end, dir, baseOffset = 0 }) {
+    const theme = (this.mindMap && this.mindMap.themeConfig) || {}
+    let path
+    let nodeMargin
+    if (this.getGeneralizationLineStyle() === 'arc') {
+      const sign = dir === 'left' || dir === 'up' ? -1 : 1
+      const mid = start + (end - start) / 2
+      path = dir === 'down' || dir === 'up'
+        ? `M ${start},${pos} Q ${mid},${pos + sign * 20} ${end},${pos}`
+        : `M ${pos},${start} Q ${pos + sign * 20},${mid} ${pos},${end}`
+      nodeMargin = theme.generalizationNodeMargin
+    } else {
+      const brace = this.generalizationBracePath(start, end, pos, dir)
+      path = brace.path
+      nodeMargin = baseOffset + brace.tip + GENERALIZATION_BRACE_GAP
+    }
+    item.generalizationLine.plot(this.transformPath(path))
+    return nodeMargin
+  }
+
   //  二次贝塞尔曲线
   quadraticCurvePath(x1, y1, x2, y2, v = false) {
     let cx, cy
@@ -672,6 +759,30 @@ class Base {
     return `M ${x1},${y1} C ${cx1},${cy1} ${cx2},${cy2} ${x2},${y2}`
   }
 
+  // 计算折线最后一个拐角的实际圆角半径
+  getFoldLineRadius(start, center, end, lineRadius, lineWidth = 0) {
+    if (!(lineRadius > 0)) return 0
+    const width = Math.max(0, Number(lineWidth) || 0)
+    const segIn = Math.hypot(center[0] - start[0], center[1] - start[1])
+    const segOut = Math.hypot(end[0] - center[0], end[1] - center[1])
+    const max = Math.min(segIn, segOut) / 2
+    const radius = Math.max(lineRadius, width > 0 ? width / 2 + 1 : 0)
+    return Math.max(0, Math.min(radius, max))
+  }
+
+  // 获取子节点连线的实际线宽，与 MindMapNode.styleLine 的取值方式保持一致
+  getConnectorLineWidth(childNode) {
+    if (!childNode) return 0
+    const getName = this.mindMap.opt && this.mindMap.opt.enableInheritAncestorLineStyle
+      ? 'getSelfInhertStyle'
+      : 'getSelfStyle'
+    let width = typeof childNode[getName] === 'function' ? childNode[getName]('lineWidth') : 0
+    if (!width && typeof childNode.getStyle === 'function') {
+      width = childNode.getStyle('lineWidth', true)
+    }
+    return Number(width) || 0
+  }
+
   // 根据a,b两个点的位置，计算去除圆角大小后的新的b点
   computeNewPoint(a, b, radius = 0) {
     // x坐标相同
@@ -696,7 +807,9 @@ class Base {
 
   // 创建一段折线路径
   // 最后一个拐角支持圆角
-  createFoldLine(list) {
+  // lineWidth：该段连线的实际线宽。圆角半径至少为线宽一半+1（否则粗线内侧会折出缺口），
+  // 且不超过相邻两段中较短一段的一半。
+  createFoldLine(list, lineWidth = 0) {
     const { lineRadius } = this.mindMap.themeConfig
     const len = list.length
     let path = ''
@@ -712,10 +825,14 @@ class Base {
         (start[1].toFixed(0) === center[1].toFixed(0) &&
           center[1].toFixed(0) === end[1].toFixed(0))
       if (!isOneLine) {
-        const cStart = this.computeNewPoint(start, center, lineRadius)
-        const cEnd = this.computeNewPoint(end, center, lineRadius)
-        radiusPath = `Q ${center[0]},${center[1]} ${cEnd[0]},${cEnd[1]}`
-        list.splice(len - 2, 1, cStart, radiusPath)
+        const radius = this.getFoldLineRadius(start, center, end, lineRadius, lineWidth)
+        const cStart = radius > 0 ? this.computeNewPoint(start, center, radius) : null
+        const cEnd = radius > 0 ? this.computeNewPoint(end, center, radius) : null
+        // 非轴对齐等异常情况 computeNewPoint 返回 undefined：保留直角，避免生成 NaN 路径
+        if (cStart && cEnd) {
+          radiusPath = `Q ${center[0]},${center[1]} ${cEnd[0]},${cEnd[1]}`
+          list.splice(len - 2, 1, cStart, radiusPath)
+        }
       }
     }
     list.forEach((item, index) => {
@@ -779,8 +896,8 @@ class Base {
    * isLeft：是否向左生长
    */
   getNodeBoundaries(node, dir) {
-    let { generalizationLineMargin, generalizationNodeMargin } =
-      this.mindMap.themeConfig
+    let { generalizationLineMargin } = this.mindMap.themeConfig
+    let generalizationNodeMargin = this.getGeneralizationNodeMargin()
     let walk = root => {
       let _left = Infinity
       let _right = -Infinity
@@ -845,8 +962,8 @@ class Base {
 
   // 获取指定索引区间的子节点的边界范围
   getChildrenBoundaries(node, dir, startIndex = 0, endIndex) {
-    let { generalizationLineMargin, generalizationNodeMargin } =
-      this.mindMap.themeConfig
+    let { generalizationLineMargin } = this.mindMap.themeConfig
+    let generalizationNodeMargin = this.getGeneralizationNodeMargin()
     const children = node.children.slice(startIndex, endIndex + 1)
     let left = Infinity
     let right = -Infinity
@@ -918,7 +1035,7 @@ class Base {
     } else if (Math.abs(x2 - x1) < lineRadius * 2 || Math.abs(y2 - y1) < lineRadius) {
       path = `M ${x1},${y1} L ${mid},${y1} L ${mid},${y2} L ${x2},${y2}`
     } else {
-      path = this.createFoldLine([[x1, y1], [mid, y1], [mid, y2], [x2, y2]])
+      path = this.createFoldLine([[x1, y1], [mid, y1], [mid, y2], [x2, y2]], this.getConnectorLineWidth(child))
     }
     if (nodeUseLineStyle) {
       path += ` L ${childIsLeft ? child.left : child.left + child.width},${y2}`

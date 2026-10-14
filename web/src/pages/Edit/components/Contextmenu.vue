@@ -246,6 +246,11 @@
           <MenuIcon name="note" />
           <span class="name">{{ $t('toolbar.note') }}</span>
         </div>
+        <div class="item" data-testid="node-comment" @click="openComment">
+          <MenuIcon name="comment" />
+          <span class="name">评论</span>
+          <span v-if="nodeCommentCount" class="desc">{{ nodeCommentCount }}</span>
+        </div>
         <div class="item" v-on:click="useNodeTool('tag')">
           <MenuIcon name="tag" />
           <span class="name">{{ $t('toolbar.tag') }}</span>
@@ -298,6 +303,10 @@
           <div class="item" data-testid="replace-node-attachment" @click="manageNodeAttachment('replace')">
             <MenuIcon name="attachment" />
             <span class="name">替换附件</span>
+          </div>
+          <div v-if="nodeAttachmentErrorIgnored" class="item" data-testid="restore-node-attachment-error" @click="manageNodeAttachment('restoreError')">
+            <MenuIcon name="attachment" />
+            <span class="name">恢复错误提示</span>
           </div>
         </template>
       </template>
@@ -511,6 +520,10 @@ export default {
       const ref = this.node && this.node.getData && this.node.getData('mapRef')
       return !!(ref && (ref.mapId || ref.map_id || ref.room_key))
     },
+    nodeCommentCount() {
+      const list = this.node && this.node.getData && this.node.getData('comments')
+      return Array.isArray(list) ? list.length : 0
+    },
     hasNote() {
       return !!this.node.getData('note')
     },
@@ -522,6 +535,14 @@ export default {
           data.attachmentUrl ||
           data.attachmentName ||
           data.attachmentStatus)
+      )
+    },
+    nodeAttachmentErrorIgnored() {
+      const data = this.node && this.node.getData && this.node.getData()
+      return !!(
+        data &&
+        data.attachmentErrorIgnored &&
+        String(data.attachmentStatus || '').toLowerCase() === 'failed'
       )
     },
     numberTypeList() {
@@ -583,6 +604,14 @@ export default {
   },
   methods: {
     ...mapMutations(['setLocalConfig', 'setActiveSidebar']),
+
+    // 评论：只读用户也可以打开查看
+    openComment() {
+      if (!this.node) return
+      const node = this.node
+      this.hide()
+      this.$bus.$emit('showNodeComment', node)
+    },
 
     useNodeTool(name) {
       if (!this.node) return
@@ -848,7 +877,7 @@ export default {
         !this.hasExplicitNodeContext ||
         !node ||
         !uid ||
-        !['delete', 'replace'].includes(action) ||
+        !['delete', 'replace', 'restoreError'].includes(action) ||
         !(await this.canExecuteCommand('SET_NODE_ATTACHMENT'))
       ) {
         return

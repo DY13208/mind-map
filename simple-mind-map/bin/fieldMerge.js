@@ -1,3 +1,4 @@
+const { mergeComments } = require('./commentMerge')
 const FIELD_GROUPS = {
   text: ['text', 'richText'],
   note: ['note'],
@@ -24,8 +25,10 @@ const FIELD_GROUPS = {
     'attachmentStatus',
     'attachmentError',
     'attachmentExtractedText',
-    'attachmentProgress'
-  ]
+    'attachmentProgress',
+    'attachmentErrorIgnored'
+  ],
+  comment: ['comments', 'commentResolved']
 }
 
 const FV_KEY = '__fv'
@@ -150,6 +153,12 @@ function mergeNodeDataLww(baseData = {}, patch = {}, version) {
     if (incoming[key] === null) delete next[key]
     else next[key] = incoming[key]
   })
+  // 评论：与已有数组按 id 合并，而不是整体覆盖；null 不会清空评论
+  if (Object.prototype.hasOwnProperty.call(incoming, 'comments')) {
+    const mergedComments = mergeComments(base.comments, incoming.comments)
+    if (mergedComments.length) next.comments = mergedComments
+    else delete next.comments
+  }
   const stamped = stampFieldVersions(next, changed, version)
   return {
     data: stamped,
@@ -166,6 +175,7 @@ function mergeNodeDataLww(baseData = {}, patch = {}, version) {
 function applyRemoteNodeData(localData = {}, remoteData = {}, options = {}) {
   const local = { ...(localData || {}) }
   const remote = { ...(remoteData || {}) }
+  const localComments = local.comments
   const localFv = readFieldVersions(local)
   const remoteFv = readFieldVersions(remote)
   const explicitFields = Array.isArray(options.changedFields)
@@ -201,6 +211,13 @@ function applyRemoteNodeData(localData = {}, remoteData = {}, options = {}) {
       if (remote[key] === null) delete local[key]
       else local[key] = remote[key]
     })
+  }
+
+  // 评论数组按 id 并集合并（删除为墓碑），并发评论互不覆盖
+  if (remote.comments !== undefined || keys.includes('comments')) {
+    const mergedComments = mergeComments(localComments, remote.comments)
+    if (mergedComments.length) local.comments = mergedComments
+    else delete local.comments
   }
 
   const mergedFv = { ...localFv }

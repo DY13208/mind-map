@@ -56,6 +56,42 @@ function canPreviewOriginalAttachment(data = {}) {
     (/\.(png|jpe?g|webp|gif|pdf)$/i.test(name) || /^(image\/(png|jpe?g|webp|gif)|application\/pdf)$/i.test(mime))
 }
 
+const ATTACHMENT_ERROR_TITLE_MAX = 120
+const FAILED_BADGE_COLOR = '#B42318'
+
+function attachmentErrorText(data = {}) {
+  return String((data && (data.attachmentError || data.errorMessage)) || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function truncateText(text, max = ATTACHMENT_ERROR_TITLE_MAX) {
+  const chars = Array.from(String(text || ''))
+  return chars.length > max ? chars.slice(0, max - 1).join('') + '…' : chars.join('')
+}
+
+function failedAttachmentTitle(name, error) {
+  return `${name} · 处理失败${error ? '：' + truncateText(error) : ''} · 点击处理`
+}
+
+// 状态角标几何：完整位于图标框内（含 1.5px 白色描边），避免被嵌套 svg 裁剪。
+function attachmentBadgeGeometry(iconSize) {
+  const size = Math.max(0, Number(iconSize) || 0)
+  const r = Math.max(3, Math.round(size * 0.2))
+  const ring = 1.5
+  const c = size - r - ring / 2
+  const barWidth = Math.max(0.9, r * 0.3)
+  const barHeight = r * 0.75
+  return {
+    r,
+    cx: c,
+    cy: c,
+    ring,
+    bar: { x: c - barWidth / 2, y: c - r * 0.6, width: barWidth, height: barHeight },
+    dot: { cx: c, cy: c + r * 0.5, r: Math.max(0.5, r * 0.17) }
+  }
+}
+
 function attachmentIconViewState(data = {}) {
   const status = attachmentStatusOf(data)
   const name = String(data.attachmentName || '附件')
@@ -91,6 +127,20 @@ function attachmentIconViewState(data = {}) {
     return { phase: 'ready', previewable: true, iconOpacity: 1, progressMode: 'none',
       percent: 100, progressColor: '#12b76a', badge: null, showPercent: false, title: name }
   }
+  if (status === 'failed' && data.attachmentErrorIgnored) {
+    return {
+      phase: 'ready',
+      previewable: hasAttachmentFile(data),
+      iconOpacity: 1,
+      progressMode: 'none',
+      percent: 100,
+      progressColor: '#12b76a',
+      badge: null,
+      showPercent: false,
+      errorIgnored: true,
+      title: `${name} · 已忽略错误`
+    }
+  }
   if (status === 'failed') {
     return {
       phase: 'failed',
@@ -99,9 +149,9 @@ function attachmentIconViewState(data = {}) {
       progressMode: 'none',
       percent: 0,
       progressColor: '#f04438',
-      badge: { color: '#f04438' },
+      badge: { color: FAILED_BADGE_COLOR, glyph: 'error' },
       showPercent: false,
-      title: `${name} · ${canPreviewOriginalAttachment(data) ? '文字提取失败，点击查看原文件' : '处理失败'}`
+      title: failedAttachmentTitle(name, attachmentErrorText(data))
     }
   }
   if (isAttachmentPreviewReady(data)) {
@@ -130,8 +180,15 @@ function attachmentIconViewState(data = {}) {
   }
 }
 
+function isAttachmentErrorActive(data) {
+  return attachmentIconViewState(data || {}).phase === 'failed'
+}
+
 module.exports = {
   hasAttachmentIcon,
+  isAttachmentErrorActive,
+  attachmentErrorText,
+  attachmentBadgeGeometry,
   isAttachmentBusy,
   isAttachmentPreviewReady,
   canPreviewOriginalAttachment,

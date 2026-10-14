@@ -96,6 +96,7 @@ class MindMapNode {
     this.noteEl = null
     this.noteContentIsShow = false
     this._attachmentData = null
+    this._commentData = null
     this._prefixData = null
     this._postfixData = null
     this._expandBtn = null
@@ -249,6 +250,7 @@ class MindMapNode {
       'tag',
       'note',
       'attachment',
+      'comment',
       'prefix',
       'postfix',
       ...this.mindMap.nodeInnerPrefixList.map(item => {
@@ -293,6 +295,7 @@ class MindMapNode {
     if (createTypes.note) this._noteData = this.createNoteNode()
     if (createTypes.attachment)
       this._attachmentData = this.createAttachmentNode()
+    if (createTypes.comment) this._commentData = this.createCommentNode()
     this.mindMap.nodeInnerPrefixList.forEach(item => {
       if (createTypes[item.name]) {
         this[`_${item.name}Data`] = item.createContent(this)
@@ -676,6 +679,18 @@ class MindMapNode {
         ['stroke', 'stroke-width', 'stroke-dasharray'].forEach(property => {
           style.removeProperty(property)
         })
+      }
+    }
+    // 评论标签外轮廓与节点边框一起高亮
+    const tabBorder = this._commentTabBorder && this._commentTabBorder.node
+    if (tabBorder) {
+      const style = tabBorder.style
+      if (isActive) {
+        const color = this.getStyle('hoverRectColor') || this.mindMap.opt.hoverRectColor
+        style.setProperty('stroke', color)
+        style.setProperty('stroke-width', String(Math.max(2, this.getBorderWidth())))
+      } else {
+        ['stroke', 'stroke-width'].forEach(property => style.removeProperty(property))
       }
     }
     // Keep the auxiliary rectangle for hover/search, never for selection.

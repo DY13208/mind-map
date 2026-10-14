@@ -17,6 +17,7 @@ new Function('require', 'module', 'exports', code)(name => {
   }
   if (name === '@/utils/nodeAttachmentPreview') return require('./loadAttachmentUtils.cjs')()
   if (name === '@/utils/attachmentProgressiveText') return require('./loadAttachmentUtils.cjs')('attachmentProgressiveText')
+  if (name === 'simple-mind-map/src/utils/attachmentIconState') return require('../../simple-mind-map/src/utils/attachmentIconState')
   return {}
 }, moduleRef, moduleRef.exports)
 const component = moduleRef.exports.default
@@ -96,6 +97,50 @@ async function main() {
   rowRequests[2].resolve({ rows: [['stale Sheet1']] })
   await switched
   assert.equal(sheetVm.rows.length, 0, 'switching sheets invalidates in-flight row requests')
+  // Failed attachments open the error action dialog instead of a toast or preview.
+  const emitted = []
+  const infos = []
+  const errVm = makeVm()
+  errVm.$bus = { $emit: (...args) => emitted.push(args) }
+  errVm.$message = { info: m => infos.push(m), warning() {}, success() {} }
+  const failedData = { uid: 'n-failed', attachmentId: 'att-f', attachmentName: '报告.docx', attachmentStatus: 'failed', attachmentError: 'Word 解析失败' }
+  const failedNode = { getData: key => key ? failedData[key] : failedData, mindMap: { opt: {} } }
+  const pendingBefore = pending.length
+  errVm.onAttachmentClick(failedNode)
+  assert.equal(errVm.errorDialog.visible, true, 'failed click opens the error actions')
+  assert.equal(errVm.errorDialog.editable, true)
+  assert.equal(errVm.errorDialog.data.attachmentError, 'Word 解析失败')
+  assert.equal(pending.length, pendingBefore, 'failed click does not start a preview request')
+  assert.equal(infos.length, 0)
+  for (const action of ['replace', 'delete', 'ignoreError']) {
+    errVm.errorDialog.visible = true
+    errVm.errorAction(action)
+    assert.equal(errVm.errorDialog.visible, false)
+    assert.deepEqual(emitted[emitted.length - 1], ['manageNodeAttachment', {
+      action, uid: 'n-failed', node: failedNode,
+      expectedAttachmentId: 'att-f', expectedAttachmentUrl: '', expectedAttachmentName: '报告.docx'
+    }])
+  }
+  // Read-only users can see the error but not run mutating actions.
+  const readonlyNode = { getData: key => key ? failedData[key] : failedData, mindMap: { opt: { readonly: true } } }
+  const emittedBefore = emitted.length
+  let prevented = 0
+  let stopped = 0
+  errVm.onAttachmentContextmenu(readonlyNode, { preventDefault: () => prevented++, stopPropagation: () => stopped++ })
+  assert.equal(errVm.errorDialog.visible, true, 'right-click on a failed icon opens the dialog')
+  assert.equal(errVm.errorDialog.editable, false)
+  assert.equal(prevented + stopped, 2)
+  errVm.errorAction('delete')
+  assert.equal(emitted.length, emittedBefore, 'read-only dialog cannot emit mutations')
+  // Ignored errors behave like a normal attachment again.
+  errVm.errorDialog.visible = false
+  const ignoredData = { attachmentName: '旧.docx', attachmentStatus: 'failed', attachmentError: 'x', attachmentErrorIgnored: true }
+  errVm.onAttachmentClick({ getData: () => ignoredData })
+  assert.equal(errVm.errorDialog.visible, false)
+  assert.equal(infos.length, 1)
+  errVm.onAttachmentContextmenu({ getData: () => ignoredData }, { preventDefault() { throw new Error('should not prevent') } })
+  assert.equal(errVm.errorDialog.visible, false)
+  console.log('Failed attachment error dialog, read-only and ignore checks passed')
   console.log('Attachment shell stale response, close, route, download and maximize checks passed')
   console.log('Spreadsheet rapid scrolling and sheet-switch race checks passed')
 }

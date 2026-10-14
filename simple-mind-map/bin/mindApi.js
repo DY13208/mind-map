@@ -628,7 +628,8 @@ async function detachNodeAttachment(req, input = {}) {
     'attachmentStatus',
     'attachmentError',
     'attachmentExtractedText',
-    'attachmentProgress'
+    'attachmentProgress',
+    'attachmentErrorIgnored'
   ]
   const patch = Object.fromEntries(attachmentFields.map(field => [field, null]))
   const commandBody = {
@@ -1939,6 +1940,24 @@ async function handleApi(req, res) {
       pathname,
       detachAttachment: input => detachNodeAttachment(req, input)
     })
+  ) {
+    return true
+  }
+
+  // 节点评论：读取 / 全图检索 / 新增 / 回复 / 删除 / 解决
+  if (
+    await require('./nodeComments')
+      .createCommentApi({
+        executeOperation,
+        normalizeCommand,
+        loadSnapshot,
+        readBody,
+        sendJson,
+        roomAcl,
+        getPool,
+        operationResponse
+      })
+      .handle(req, res, { url, pathname })
   ) {
     return true
   }

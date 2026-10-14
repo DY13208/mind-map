@@ -252,7 +252,8 @@ class Style {
     if (typeof customHandleLine === 'function') {
       customHandleLine(this.ctx, line, { width, color, dasharray })
     }
-    line.stroke({ color, dasharray, width }).fill({ color: 'none' })
+    // 圆角连接，避免粗线在折线拐角处出现拼接感；线帽保持默认 butt，线端仍贴合节点边缘
+    line.stroke({ color, dasharray, width, linejoin: 'round' }).fill({ color: 'none' })
     // 可以显示箭头
     if (enableMarker) {
       const showMarker = this.merge('showLineMarker', true)
@@ -292,10 +293,18 @@ class Style {
 
   //  概要连线
   generalizationLine(node) {
+    const mindMap = (this.ctx && this.ctx.mindMap) || {}
+    const opt = mindMap.opt || {}
+    const theme = mindMap.themeConfig || {}
+    const isBrace =
+      (opt.generalizationLineStyle || theme.generalizationLineStyle) !== 'arc'
+    const width = this.merge('generalizationLineWidth', true)
     node
       .stroke({
-        width: this.merge('generalizationLineWidth', true),
-        color: this.merge('generalizationLineColor', true)
+        // 花括号样式线宽至少 2，端点与拐角圆润
+        width: isBrace ? Math.max(2, Number(width) || 0) : width,
+        color: this.merge('generalizationLineColor', true),
+        ...(isBrace ? { linecap: 'round', linejoin: 'round' } : {})
       })
       .fill({ color: 'none' })
   }

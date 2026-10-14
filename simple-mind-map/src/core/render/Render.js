@@ -493,6 +493,9 @@ class Render {
     // 设置节点备注
     this.setNodeNote = this.setNodeNote.bind(this)
     this.mindMap.command.add('SET_NODE_NOTE', this.setNodeNote)
+    // 设置节点评论
+    this.setNodeComment = this.setNodeComment.bind(this)
+    this.mindMap.command.add('SET_NODE_COMMENT', this.setNodeComment)
     // 设置节点附件
     this.setNodeAttachment = this.setNodeAttachment.bind(this)
     this.mindMap.command.add('SET_NODE_ATTACHMENT', this.setNodeAttachment)
@@ -2803,6 +2806,15 @@ class Render {
     })
   }
 
+  //  设置节点评论（评论列表 + 是否已解决）
+  setNodeComment(node, comments, resolved = false) {
+    this.setNodeDataRender(node, {
+      // 始终提交完整数组（含删除墓碑），由合并层按 id 合并
+      comments: Array.isArray(comments) ? comments : [],
+      commentResolved: !!resolved
+    })
+  }
+
   //  设置节点附件
   setNodeAttachment(node, url, name = '', meta = null) {
     const patch = {
@@ -2816,10 +2828,24 @@ class Render {
         'attachmentStatus',
         'attachmentError',
         'attachmentExtractedText',
-        'attachmentProgress'
+        'attachmentProgress',
+        'attachmentErrorIgnored'
       ].forEach(key => {
         if (meta[key] != null) patch[key] = meta[key]
       })
+    }
+    // 「忽略错误」只对当前这次失败有效：换了文件或状态不再是 failed 时自动清除。
+    const current = (node && typeof node.getData === 'function' && node.getData()) || {}
+    if (current.attachmentErrorIgnored && patch.attachmentErrorIgnored == null) {
+      const nextId = patch.attachmentId != null ? patch.attachmentId : current.attachmentId
+      const nextStatus = patch.attachmentStatus != null ? patch.attachmentStatus : current.attachmentStatus
+      const sameFile =
+        String(nextId || '') === String(current.attachmentId || '') &&
+        String(patch.attachmentName || '') === String(current.attachmentName || '') &&
+        String(patch.attachmentUrl || '') === String(current.attachmentUrl || '')
+      if (!sameFile || String(nextStatus || '').trim().toLowerCase() !== 'failed') {
+        patch.attachmentErrorIgnored = false
+      }
     }
     this.setNodeDataRender(node, patch)
   }

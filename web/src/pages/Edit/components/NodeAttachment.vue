@@ -31,7 +31,8 @@ const ATTACHMENT_FIELDS = [
   'attachmentStatus',
   'attachmentError',
   'attachmentExtractedText',
-  'attachmentProgress'
+  'attachmentProgress',
+  'attachmentErrorIgnored'
 ]
 const ATTACHMENT_IDENTITY_FIELDS = [
   'attachmentId',
@@ -307,7 +308,8 @@ export default {
         'attachmentStatus',
         'attachmentError',
         'attachmentExtractedText',
-        'attachmentProgress'
+        'attachmentProgress',
+        'attachmentErrorIgnored'
       ]
       const patch = {}
       fields.forEach(key => {
@@ -315,6 +317,8 @@ export default {
           ? serverData[key]
           : key === 'attachmentProgress'
           ? 0
+          : key === 'attachmentErrorIgnored'
+          ? false
           : ''
       })
       this.applyLocalAttachment(node, patch)
@@ -607,6 +611,27 @@ export default {
         .filter(Boolean)
       this.$refs.fileInput && this.$refs.fileInput.click()
     },
+    // 「忽略错误」/「恢复错误提示」：通过 SET_NODE_ATTACHMENT 写入节点数据，可撤销并同步给协作者。
+    setAttachmentErrorIgnored(target, ignored) {
+      const node = this.liveNode(target.uid)
+      if (!node) {
+        this.$message.warning('节点附件已发生变化，请重新操作')
+        return null
+      }
+      const data = (node.getData && node.getData()) || {}
+      const result = this.applyAttachment(
+        { uid: target.uid, node },
+        data.attachmentUrl || '',
+        data.attachmentName || '',
+        { attachmentErrorIgnored: !!ignored }
+      )
+      if (result && result.applied) {
+        this.$message.success(ignored ? '已忽略该附件的错误提示' : '已恢复该附件的错误提示')
+      } else {
+        this.$message.warning((result && result.error && result.error.message) || '操作未生效，请重试')
+      }
+      return result
+    },
     async onManageAttachment(item) {
       const action = item && item.action ? item.action : 'replace'
       const itemNode = (item && item.node) || item
@@ -624,7 +649,15 @@ export default {
         target.expectedAttachmentName ||
         data.attachmentStatus
       )
-      if (!hasAttachment || !['delete', 'replace'].includes(action)) return
+      if (!hasAttachment || !['delete', 'replace', 'ignoreError', 'restoreError'].includes(action)) return
+      if (this.mindMap && this.mindMap.opt && this.mindMap.opt.readonly) {
+        this.$message.warning('当前为只读权限，无法修改附件')
+        return
+      }
+      if (action === 'ignoreError' || action === 'restoreError') {
+        this.setAttachmentErrorIgnored(target, action === 'ignoreError')
+        return
+      }
       const fileName = target.expectedAttachmentName || '未命名附件'
       try {
         await this.$confirm(

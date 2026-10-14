@@ -138,7 +138,9 @@ test('compact branches use separate routed trunks without crossing other branche
     horizontal.push(...result.horizontal)
     vertical.push(...result.vertical)
   })
-  assert.equal(vertical.length, 4, 'single-child branches are horizontal; other parents share one trunk')
+  // Each child now draws its own continuous connector, so count trunk lanes.
+  assert.equal(new Set(vertical.map(v => `${v.owner}@${v.x}`)).size, 4,
+    'single-child branches are horizontal; other parents share one trunk lane')
   for (const v of vertical) {
     for (const h of horizontal) {
       if (v.owner === h.owner) continue
@@ -471,5 +473,65 @@ test('floating themes near a branch leave its node positions and connector route
     assert.equal(floating.left, 200)
     assert.equal(floating.top, 315)
     if (expanded) assert.equal(floating.children[0].left - floating.left - floating.width, 36)
+  }
+})
+
+// --- continuous connector subpaths -------------------------------------
+const baseSource = fs.readFileSync(path.join(__dirname, '../src/layouts/Base.js'), 'utf8')
+  .replace(/^import[\s\S]*?from ['"][^'"]+['"]\s*;?\r?\n/gm, '')
+  .replace('export default Base', 'module.exports = Base')
+const baseModule = { exports: {} }
+vm.runInNewContext(baseSource, { module: baseModule, CONSTANTS: {}, lineStyleProps: [], createUid: () => '' })
+const BaseProto = baseModule.exports.prototype
+
+const sampleLayout = ({ lineWidth = 7, lineRadius = 5, styles = [], parentTop = 100 } = {}) => {
+  const layout = new moduleMock.exports({ mindMap: {
+    opt: { alwaysShowExpandBtn: false }, themeConfig: { nodeUseLineStyle: false, lineRadius }
+  } })
+  layout.getFoldLineRadius = BaseProto.getFoldLineRadius
+  layout.getConnectorLineWidth = BaseProto.getConnectorLineWidth
+  layout.renderReversedHorizontalLine = () => false
+  const mk = (left, top, width, height, style = {}) => ({
+    left, top, width, height, layerIndex: 1, children: [], getData: () => false,
+    getSelfStyle: prop => prop === 'lineWidth' ? lineWidth : style[prop],
+    getStyle: () => undefined
+  })
+  const parent = mk(260, parentTop, 115, 44)
+  parent.children = [mk(470, 60, 180, 30, styles[0]), mk(470, 155, 120, 30, styles[1]), mk(470, 250, 120, 30, styles[2])]
+  const lines = parent.children.map(() => ({ attrs: {}, attr(k, v) { this.attrs[k] = v } }))
+  const paths = []
+  layout.setLineStyle = (style, line, d) => { line.d = d; paths.push(d) }
+  layout.renderLineStraight(parent, lines)
+  return { paths, lines }
+}
+
+test('each compact connector is one continuous subpath with rounded corners', () => {
+  const { paths, lines } = sampleLayout({ lineWidth: 7 })
+  paths.forEach(d => assert.equal((d.match(/M/g) || []).length, 1, d))
+  // T-junction: the stub corner stays square, child corners are rounded.
+  assert.equal(paths[0], 'M 375,122 L 422.5,122 L 422.5,80 Q 422.5,75 427.5,75 L 470,75')
+  assert.equal(paths[1], 'M 375,122 L 422.5,122 L 422.5,165 Q 422.5,170 427.5,170 L 470,170')
+  lines.forEach(line => assert.equal(line.attrs['stroke-linecap'], 'butt'))
+})
+
+test('corner radius grows with line width and is clamped by short segments', () => {
+  const wide = sampleLayout({ lineWidth: 12 }).paths[0]
+  assert.match(wide, /L 415\.5,75 Q 422\.5,75 429\.5,75|L 422\.5,82 Q 422\.5,75 429\.5,75 /, 'radius = lineWidth/2 + 1 = 7')
+  const square = sampleLayout({ lineRadius: 0 }).paths[0]
+  assert.equal(square, 'M 375,122 L 422.5,122 L 422.5,75 L 470,75')
+})
+
+test('when all children are on one side the stub corner is rounded too', () => {
+  const { paths } = sampleLayout({ parentTop: 20 })
+  assert.equal(paths[0], 'M 375,42 L 417.5,42 Q 422.5,42 422.5,47 L 422.5,70 Q 422.5,75 427.5,75 L 470,75')
+})
+
+test('dashed or mixed-colour children fall back to one shared trunk without notches', () => {
+  for (const styles of [[{ lineDasharray: '6 4' }], [{ lineColor: '#fff' }, { lineColor: '#f00' }], [{ lineColor: 'rgba(255,255,255,0.5)' }]]) {
+    const { paths, lines } = sampleLayout({ styles })
+    paths.forEach(d => assert.equal((d.match(/M/g) || []).length, 1, d))
+    assert.equal(paths[0], 'M 375,122 L 422.5,122 L 422.5,75 L 422.5,265 L 422.5,75 L 470,75')
+    assert.equal(paths[1], 'M 422.5,170 L 470,170')
+    lines.forEach(line => assert.equal(line.attrs['stroke-linecap'], 'round'))
   }
 })

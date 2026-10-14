@@ -1,3 +1,4 @@
+import { mergeComments } from './nodeComment'
 export const FV_KEY = '__fv'
 
 export const FIELD_GROUPS = {
@@ -33,8 +34,10 @@ export const FIELD_GROUPS = {
     'attachmentStatus',
     'attachmentError',
     'attachmentExtractedText',
-    'attachmentProgress'
-  ]
+    'attachmentProgress',
+    'attachmentErrorIgnored'
+  ],
+  comment: ['comments', 'commentResolved']
 }
 
 export const ALL_PATCH_KEYS = [
@@ -109,6 +112,7 @@ function stableValue(value) {
 export function applyRemoteNodeData(localData = {}, remoteData = {}, options = {}) {
   const local = { ...(localData || {}) }
   const remote = { ...(remoteData || {}) }
+  const localComments = local.comments
   const localFv = readFieldVersions(local)
   const remoteFv = readFieldVersions(remote)
   const explicitFields = Array.isArray(options.changedFields)
@@ -143,6 +147,13 @@ export function applyRemoteNodeData(localData = {}, remoteData = {}, options = {
       if (remote[key] === null) delete local[key]
       else local[key] = remote[key]
     })
+  }
+
+  // 评论数组按 id 并集合并（删除为墓碑），并发评论互不覆盖
+  if (remote.comments !== undefined || keys.includes('comments')) {
+    const mergedComments = mergeComments(localComments, remote.comments)
+    if (mergedComments.length) local.comments = mergedComments
+    else delete local.comments
   }
 
   const mergedFv = { ...localFv }

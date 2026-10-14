@@ -1,9 +1,10 @@
 <template>
+  <div class="nodeAttachmentPreviewRoot">
   <el-dialog :visible.sync="visible" :title="title" width="92vw" top="5vh" append-to-body
     :custom-class="isMaximized ? 'attachmentViewer is-maximized' : 'attachmentViewer'"
     :show-close="false" :close-on-click-modal="true" :close-on-press-escape="true" @close="onClosed">
     <header slot="title" class="attachmentViewerHeader">
-      <div class="attachmentFileIcon" :class="'is-' + kind"><i :class="fileIcon" aria-hidden="true"></i></div>
+      <div class="attachmentFileIcon" :class="'is-' + kind"><span class="attachmentFileIconSvg" aria-hidden="true" v-html="fileIconSvg"></span></div>
       <div class="attachmentFileInfo">
         <h2 :title="title">{{ title }}</h2>
         <p><span>{{ fileSize }}</span><span class="fileMetaDivider">·</span><span>{{ typeLabel }}</span></p>
@@ -27,11 +28,30 @@
         <iframe :src="externalUrl" :title="title" sandbox="allow-same-origin allow-popups allow-forms allow-downloads" referrerpolicy="no-referrer"></iframe>
       </div>
       <div v-else class="attachmentViewerState">
-        <i class="el-icon-document"></i><strong>暂不支持在线预览此文件类型</strong><p>{{ typeLabel }} · {{ fileSize }}</p>
+        <span class="attachmentFileIconSvg is-large" aria-hidden="true" v-html="fileIconSvg"></span><strong>暂不支持在线预览此文件类型</strong><p>{{ typeLabel }} · {{ fileSize }}</p>
         <el-button v-if="attachmentId" type="primary" size="small" icon="el-icon-download" @click="download">下载原文件</el-button>
       </div>
     </main>
   </el-dialog>
+  <el-dialog :visible.sync="errorDialog.visible" title="附件处理失败" width="440px" append-to-body
+    custom-class="attachmentErrorDialog" :close-on-click-modal="true" @closed="onErrorDialogClosed">
+    <div class="attachmentErrorHead">
+      <span class="attachmentFileIconSvg" aria-hidden="true" v-html="errorFileIconSvg"></span>
+      <strong :title="errorDialogName">{{ errorDialogName }}</strong>
+    </div>
+    <div class="attachmentErrorMessage" role="alert">{{ errorDialogMessage }}</div>
+    <p v-if="!errorDialog.editable" class="attachmentErrorReadonly">当前为只读权限，只能查看错误信息。</p>
+    <div slot="footer" class="attachmentErrorActions">
+      <el-button size="small" icon="el-icon-document-copy" @click="copyErrorMessage">复制错误信息</el-button>
+      <el-button v-if="errorCanViewOriginal" size="small" icon="el-icon-view" @click="viewOriginalFromError">查看原文件</el-button>
+      <template v-if="errorDialog.editable">
+        <el-button size="small" data-testid="attachment-error-ignore" @click="errorAction('ignoreError')">忽略错误</el-button>
+        <el-button size="small" type="danger" plain data-testid="attachment-error-delete" @click="errorAction('delete')">移除附件</el-button>
+        <el-button size="small" type="primary" icon="el-icon-upload2" data-testid="attachment-error-replace" @click="errorAction('replace')">重新上传</el-button>
+      </template>
+    </div>
+  </el-dialog>
+  </div>
 </template>
 
 <script>
@@ -39,6 +59,8 @@ import { roomFromLocation } from '@/utils/roomLocation'
 import { getNodeAttachment, nodeAttachmentContentUrl } from '@/utils/nodeAttachmentApi'
 import { attachmentPreviewKind, isHtmlAttachment, attachmentBusyMessage } from '@/utils/nodeAttachmentPreview'
 import { formatPreviewBytes } from '@/utils/attachmentProgressiveText'
+import { getAttachmentFileIconSvg } from 'simple-mind-map/src/svg/attachmentFileIcons'
+import { isAttachmentErrorActive, attachmentErrorText, canPreviewOriginalAttachment } from 'simple-mind-map/src/utils/attachmentIconState'
 import '@/style/attachment-preview.less'
 
 export default {
@@ -54,7 +76,8 @@ export default {
   data: () => ({
     visible: false, loading: false, title: '附件预览', attachmentId: '', attachment: null,
     kind: 'unsupported', source: null, externalUrl: '', error: '', requestId: 0,
-    isMaximized: false, selectedData: null
+    isMaximized: false, selectedData: null,
+    errorDialog: { visible: false, node: null, data: null, editable: false }
   }),
   computed: {
     fileSize() { return formatPreviewBytes(this.attachment && this.attachment.byteSize) },
@@ -62,9 +85,24 @@ export default {
       const ext = this.title.includes('.') ? this.title.split('.').pop().toUpperCase() : ''
       return ext || '文件'
     },
-    fileIcon() {
-      return this.kind === 'image' ? 'el-icon-picture-outline' :
-        this.kind === 'office' && /\.(xls|xlsx|xlsm|ods)$/i.test(this.title) ? 'el-icon-s-grid' : 'el-icon-document'
+    fileIconSvg() {
+      const mime = (this.attachment && this.attachment.mimeType) || (this.selectedData && this.selectedData.attachmentMimeType) || ''
+      return getAttachmentFileIconSvg(this.title, mime, { label: true })
+    },
+    errorDialogName() {
+      const data = this.errorDialog.data || {}
+      return data.attachmentName || '附件'
+    },
+    errorDialogMessage() {
+      return attachmentErrorText(this.errorDialog.data || {}) || '处理失败，服务端未返回具体原因'
+    },
+    errorCanViewOriginal() {
+      const data = this.errorDialog.data
+      return !!(data && data.attachmentId && canPreviewOriginalAttachment(data))
+    },
+    errorFileIconSvg() {
+      const data = this.errorDialog.data || {}
+      return getAttachmentFileIconSvg(data.attachmentName, data.attachmentMimeType, { label: true })
     },
     previewComponent() {
       if (this.kind === 'image') return 'AttachmentImagePreview'
@@ -81,11 +119,63 @@ export default {
       if (roomFromLocation(to) !== roomFromLocation(from)) { this.visible = false; this.resetPreview() }
     }
   },
-  created() { this.$bus.$on('node_attachmentClick', this.onAttachmentClick) },
-  beforeDestroy() { this.$bus.$off('node_attachmentClick', this.onAttachmentClick); this.resetPreview() },
+  created() {
+    this.$bus.$on('node_attachmentClick', this.onAttachmentClick)
+    this.$bus.$on('node_attachmentContextmenu', this.onAttachmentContextmenu)
+  },
+  beforeDestroy() {
+    this.$bus.$off('node_attachmentClick', this.onAttachmentClick)
+    this.$bus.$off('node_attachmentContextmenu', this.onAttachmentContextmenu)
+    this.resetPreview()
+  },
   methods: {
+    isNodeEditable(node) {
+      const mindMap = node && node.mindMap
+      return !(mindMap && mindMap.opt && mindMap.opt.readonly)
+    },
+    openErrorActions(node, data) {
+      this.errorDialog = { visible: true, node, data: { ...data }, editable: this.isNodeEditable(node) }
+    },
+    onAttachmentContextmenu(node, e) {
+      const data = node && node.getData ? node.getData() || {} : {}
+      if (!isAttachmentErrorActive(data)) return
+      if (e && typeof e.preventDefault === 'function') e.preventDefault()
+      if (e && typeof e.stopPropagation === 'function') e.stopPropagation()
+      this.openErrorActions(node, data)
+    },
+    errorAction(action) {
+      const { node, data, editable } = this.errorDialog
+      if (!node || !data || !editable) return
+      const uid = String((node.getData && node.getData('uid')) || data.uid || node.uid || '')
+      this.errorDialog.visible = false
+      this.$bus.$emit('manageNodeAttachment', {
+        action,
+        uid,
+        node,
+        expectedAttachmentId: String(data.attachmentId || ''),
+        expectedAttachmentUrl: String(data.attachmentUrl || ''),
+        expectedAttachmentName: String(data.attachmentName || '')
+      })
+    },
+    viewOriginalFromError() {
+      const data = this.errorDialog.data
+      this.errorDialog.visible = false
+      if (data && data.attachmentId) this.openStoredAttachment(data)
+    },
+    async copyErrorMessage() {
+      const data = this.errorDialog.data || {}
+      const text = (data.attachmentName || '附件') + '\n' + (attachmentErrorText(data) || '处理失败')
+      try {
+        await navigator.clipboard.writeText(text)
+        this.$message.success('已复制错误信息')
+      } catch (err) {
+        this.$message.warning('复制失败，请手动选择错误信息复制')
+      }
+    },
+    onErrorDialogClosed() { this.errorDialog.node = null; this.errorDialog.data = null },
     onAttachmentClick(node) {
       const data = node && node.getData ? node.getData() || {} : {}
+      if (isAttachmentErrorActive(data)) { this.openErrorActions(node, data); return }
       if (!data.attachmentId && !data.attachmentUrl) { this.$message.info(attachmentBusyMessage(data)); return }
       if (isHtmlAttachment(data.attachmentName, data.attachmentMimeType, data.attachmentUrl)) {
         if (data.attachmentId) this.openHtmlInNewPage(data)

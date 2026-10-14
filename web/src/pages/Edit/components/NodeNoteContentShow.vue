@@ -1,6 +1,7 @@
 <template>
   <div
     class="noteContentViewer customScrollbar"
+    :class="{ isDark: isDark }"
     ref="noteContentViewer"
     :style="{
       left: this.left + 'px',
@@ -20,6 +21,8 @@
 <script>
 import Viewer from '@toast-ui/editor/dist/toastui-editor-viewer'
 import '@toast-ui/editor/dist/toastui-editor-viewer.css'
+import '@toast-ui/editor/dist/theme/toastui-editor-dark.css'
+import { mapState } from 'vuex'
 
 // 节点备注内容显示
 export default {
@@ -29,6 +32,16 @@ export default {
       default() {
         return null
       }
+    }
+  },
+  computed: {
+    ...mapState({
+      isDark: state => state.localConfig.isDark
+    })
+  },
+  watch: {
+    isDark() {
+      this.applyViewerTheme()
     }
   },
   data() {
@@ -120,6 +133,12 @@ export default {
           el: this.$refs.noteContentWrap
         })
       }
+      this.applyViewerTheme()
+    },
+
+    applyViewerTheme() {
+      const el = this.$refs.noteContentWrap
+      if (el) el.classList.toggle('toastui-editor-dark', !!this.isDark)
     }
   }
 }
@@ -134,6 +153,17 @@ export default {
   box-shadow: 0 2px 16px 0 rgba(0, 0, 0, 0.06);
   border: 1px solid rgba(0, 0, 0, 0.06);
   z-index: 2;
+
+  &.isDark {
+    background-color: #2b2f33;
+    border-color: #3a3f45;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    color: hsla(0, 0%, 100%, 0.85);
+
+    /deep/ .toastui-editor-contents {
+      color: hsla(0, 0%, 100%, 0.85);
+    }
+  }
 
   .noteContentWrap {
     max-width: 250px;

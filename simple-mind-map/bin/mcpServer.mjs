@@ -315,7 +315,7 @@ function createServer(authorization) {
     },
     {
       instructions:
-        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps；该工具默认每页20个房间、最多100个，只返回当前页，has_more=true 时必须原样传 next_cursor 继续，直到 false 后再判断可见房间总数。只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。需要完整读取整间房间时只调用一次 export_room_tree，禁止用反复 query_nodes 拼整图。该工具在服务端读完快照；complete 为 true 才表示整图已读完。节点超过 500 时响应只含 export_path 和摘要，完整内容在该文件里；打不开文件时用 read_room_export 按 offset 读这份导出，不要回到 query_nodes。complete 为 false 时查看 incomplete_reason，不得声称已读完。历史版本只提供元数据和新增、修改、删除、移动计数，不提供历史脑图正文。回滚必须依次调用 list_versions、get_version，向用户展示目标版本和变更摘要并获得明确确认，再用列表返回的 currentRevision 调用 restore_version；RESTORE_CONFLICT 后必须重新查询并再次确认，禁止自动重试。附件（与网页工具栏「附件」同一套能力）：生成或拿到产物后必须调用 upload_attachment 挂到目标节点，节点会出现可点击回形针图标；禁止只把本机路径、挂载说明、「请拖到节点」写进 text/note；禁止用 update_node 的 note 代替挂载。节点超链接在 query_nodes 的 data.hyperlink 和 data.hyperlinkTitle；新增、修改或批量写入时必须原样传回这两个字段，空字符串表示清除。只复制 text/note 会丢掉超链接。upload_attachment 优先 file_path（WorkBuddy 目录或 ./output），否则 content_base64 / source_url。已有附件用 list_attachments / read_attachment；attachmentExtractedText 只是截断预览。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。一次写多个节点必须用 apply_nodes，整批一次提交、版本只加 1；不要循环 add_node、update_node 或 delete_node。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。工具返回 isError 表示没有写入，禁止声称已完成。'
+        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps；该工具默认每页20个房间、最多100个，只返回当前页，has_more=true 时必须原样传 next_cursor 继续，直到 false 后再判断可见房间总数。只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。需要完整读取整间房间时只调用一次 export_room_tree，禁止用反复 query_nodes 拼整图。该工具在服务端读完快照；complete 为 true 才表示整图已读完。节点超过 500 时响应只含 export_path 和摘要，完整内容在该文件里；打不开文件时用 read_room_export 按 offset 读这份导出，不要回到 query_nodes。complete 为 false 时查看 incomplete_reason，不得声称已读完。历史版本只提供元数据和新增、修改、删除、移动计数，不提供历史脑图正文。回滚必须依次调用 list_versions、get_version，向用户展示目标版本和变更摘要并获得明确确认，再用列表返回的 currentRevision 调用 restore_version；RESTORE_CONFLICT 后必须重新查询并再次确认，禁止自动重试。附件（与网页工具栏「附件」同一套能力）：生成或拿到产物后必须调用 upload_attachment 挂到目标节点，节点会出现可点击回形针图标；禁止只把本机路径、挂载说明、「请拖到节点」写进 text/note；禁止用 update_node 的 note 代替挂载。节点超链接在 query_nodes 的 data.hyperlink 和 data.hyperlinkTitle；新增、修改或批量写入时必须原样传回这两个字段，空字符串表示清除。只复制 text/note 会丢掉超链接。upload_attachment 优先 file_path（WorkBuddy 目录或 ./output），否则 content_base64 / source_url。已有附件用 list_attachments / read_attachment；attachmentExtractedText 只是截断预览。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。一次写多个节点必须用 apply_nodes，整批一次提交、版本只加 1；不要循环 add_node、update_node 或 delete_node。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。工具返回 isError 表示没有写入，禁止声称已完成。节点评论用 list_node_comments（单个节点）或 list_comments（全图，可按未解决、@某人、时间筛选并分页）读取；用 add_comment、reply_comment、delete_comment、resolve_comment 写入，禁止用 update_node 或 apply_nodes 直接改 comments 字段。'
     }
   )
 
@@ -901,6 +901,216 @@ function createServer(authorization) {
         )
       } catch (err) {
         return attachmentUploadFail(err)
+      }
+    }
+  )
+
+  // ---- 节点评论 ----
+  const locateNodeUid = async (roomKey, node) => {
+    const located = await api(
+      `/api/files/${encodeURIComponent(roomKey)}/locate?uid=${encodeURIComponent(node)}`,
+      { timeoutMs: 15000 }
+    )
+    const uid = String((located && located.uid) || '').trim()
+    if (!uid) {
+      const err = new Error('找不到唯一节点，请改用节点 uid 或完整路径')
+      err.code = 'NODE_NOT_FOUND'
+      err.statusCode = 404
+      throw err
+    }
+    return uid
+  }
+  const commentPath = (roomKey, uid) =>
+    `/api/files/${encodeURIComponent(roomKey)}/nodes/${encodeURIComponent(uid)}/comments`
+  // 评论写入同样按房间串行排队，避免与其他 MCP 写入抢锁
+  const writeComment = (roomKey, fn, extra = {}) =>
+    mcpSubmitGate.run(roomKey, fn, { signal: extra && extra.signal, estimatedBytes: 4096 })
+  const mentionSchema = z
+    .array(
+      z.object({
+        user_id: z.string().describe('被 @ 成员的用户 id').optional(),
+        name: z.string().min(1).describe('被 @ 成员的显示名，正文里应包含 @name')
+      })
+    )
+    .max(20)
+    .describe('@ 的成员列表')
+    .optional()
+  const toMentions = list =>
+    Array.isArray(list) ? list.map(m => ({ userId: m.user_id || '', name: m.name })) : undefined
+
+  server.tool(
+    'list_node_comments',
+    '读取单个节点的全部评论（按时间正序，已删除的不返回）以及是否已解决。node 支持 uid、完整标题或路径；同名节点用 uid。只读。',
+    {
+      room_key: z.string().describe('房间号'),
+      node: z.string().describe('节点 uid、完整标题或路径')
+    },
+    async ({ room_key, node }) => {
+      try {
+        const uid = await locateNodeUid(room_key, node)
+        return ok(await api(commentPath(room_key, uid), { timeoutMs: 20000 }))
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'list_comments',
+    '在整张导图里检索评论，按时间倒序分页。可按未解决、@某人、作者、起始时间、关键词筛选。has_more=true 时原样传 next_cursor 继续。只读。',
+    {
+      room_key: z.string().describe('房间号'),
+      unresolved: z.boolean().describe('只看未解决的讨论').optional(),
+      mentioned: z.string().describe('只看 @ 了该用户（user_id 或显示名）的评论').optional(),
+      author: z.string().describe('只看该 user_id 发表的评论').optional(),
+      since: z.string().describe('只看该时间之后的评论，ISO 时间或毫秒时间戳').optional(),
+      query: z.string().describe('评论正文关键词').optional(),
+      limit: z.number().int().min(1).max(200).describe('每页条数，默认 50').optional(),
+      cursor: z.string().describe('上次返回的 next_cursor').optional()
+    },
+    async ({ room_key, unresolved, mentioned, author, since, query, limit, cursor }) => {
+      try {
+        const params = new URLSearchParams()
+        if (unresolved) params.set('unresolved', '1')
+        if (mentioned) params.set('mentioned', mentioned)
+        if (author) params.set('author', author)
+        if (since) params.set('since', since)
+        if (query) params.set('q', query)
+        if (limit) params.set('limit', String(limit))
+        if (cursor) params.set('cursor', cursor)
+        const qs = params.toString()
+        return ok(
+          await api(`/api/files/${encodeURIComponent(room_key)}/comments${qs ? `?${qs}` : ''}`, {
+            timeoutMs: 25000
+          })
+        )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'add_comment',
+    '给节点发表一条评论（与网页「评论」相同，所有在线用户实时看到）。评论人是当前授权用户。content 最长 2000 字，单节点最多 500 条。可传 comment_id 作为幂等键：超时后用同一 comment_id 重试不会重复发表。',
+    {
+      room_key: z.string().describe('房间号'),
+      node: z.string().describe('节点 uid、完整标题或路径'),
+      content: z.string().min(1).max(2000).describe('评论正文'),
+      mentions: mentionSchema,
+      comment_id: z.string().regex(/^[A-Za-z0-9_.:-]{1,80}$/).describe('可选幂等 id').optional()
+    },
+    async ({ room_key, node, content, mentions, comment_id }, extra = {}) => {
+      try {
+        const uid = await locateNodeUid(room_key, node)
+        return ok(
+          await writeComment(
+            room_key,
+            () =>
+              api(commentPath(room_key, uid), {
+                method: 'POST',
+                timeoutMs: 30000,
+                body: JSON.stringify({ id: comment_id, content, mentions: toMentions(mentions) })
+              }),
+            extra
+          )
+        )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'reply_comment',
+    '回复节点上的某条评论（reply_to 为被回复评论的 id，来自 list_node_comments）。回复会重新打开已解决的讨论。其余规则同 add_comment。',
+    {
+      room_key: z.string().describe('房间号'),
+      node: z.string().describe('节点 uid、完整标题或路径'),
+      reply_to: z.string().describe('被回复的评论 id'),
+      content: z.string().min(1).max(2000).describe('回复正文'),
+      mentions: mentionSchema,
+      comment_id: z.string().regex(/^[A-Za-z0-9_.:-]{1,80}$/).describe('可选幂等 id').optional()
+    },
+    async ({ room_key, node, reply_to, content, mentions, comment_id }, extra = {}) => {
+      try {
+        const uid = await locateNodeUid(room_key, node)
+        return ok(
+          await writeComment(
+            room_key,
+            () =>
+              api(commentPath(room_key, uid), {
+                method: 'POST',
+                timeoutMs: 30000,
+                body: JSON.stringify({
+                  id: comment_id,
+                  content,
+                  reply_to,
+                  mentions: toMentions(mentions)
+                })
+              }),
+            extra
+          )
+        )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'delete_comment',
+    '删除节点上的一条评论。只能删除自己的评论；房主/管理员可删除任何人的。重复删除是幂等的。',
+    {
+      room_key: z.string().describe('房间号'),
+      node: z.string().describe('节点 uid、完整标题或路径'),
+      comment_id: z.string().describe('要删除的评论 id')
+    },
+    async ({ room_key, node, comment_id }, extra = {}) => {
+      try {
+        const uid = await locateNodeUid(room_key, node)
+        return ok(
+          await writeComment(
+            room_key,
+            () =>
+              api(`${commentPath(room_key, uid)}/${encodeURIComponent(comment_id)}`, {
+                method: 'DELETE',
+                timeoutMs: 30000
+              }),
+            extra
+          )
+        )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'resolve_comment',
+    '把节点的评论讨论标记为已解决（归档），或传 resolved=false 重新打开。',
+    {
+      room_key: z.string().describe('房间号'),
+      node: z.string().describe('节点 uid、完整标题或路径'),
+      resolved: z.boolean().describe('true=解决（默认），false=重新打开').optional()
+    },
+    async ({ room_key, node, resolved }, extra = {}) => {
+      try {
+        const uid = await locateNodeUid(room_key, node)
+        return ok(
+          await writeComment(
+            room_key,
+            () =>
+              api(`${commentPath(room_key, uid)}/resolve`, {
+                method: 'POST',
+                timeoutMs: 30000,
+                body: JSON.stringify({ resolved: resolved !== false })
+              }),
+            extra
+          )
+        )
+      } catch (err) {
+        return fail(err)
       }
     }
   )

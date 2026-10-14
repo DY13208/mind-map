@@ -9,6 +9,7 @@ import Sidebar from './Sidebar.vue'
 import { mapState, mapMutations } from 'vuex'
 import Viewer from '@toast-ui/editor/dist/toastui-editor-viewer'
 import '@toast-ui/editor/dist/toastui-editor-viewer.css'
+import '@toast-ui/editor/dist/theme/toastui-editor-dark.css'
 
 export default {
   components: {
@@ -32,6 +33,9 @@ export default {
     })
   },
   watch: {
+    isDark() {
+      this.applyViewerTheme()
+    },
     activeSidebar(val) {
       if (val === 'noteSidebar') {
         this.$refs.sidebar.show = true
@@ -75,6 +79,12 @@ export default {
           el: this.$refs.noteContentWrap
         })
       }
+      this.applyViewerTheme()
+    },
+
+    applyViewerTheme() {
+      const el = this.$refs.noteContentWrap
+      if (el) el.classList.toggle('toastui-editor-dark', !!this.isDark)
     },
 
     onNodeNoteClick(node) {
@@ -89,5 +99,13 @@ export default {
 <style lang="less" scoped>
 .noteContentWrap {
   padding: 12px 20px;
+
+  &.toastui-editor-dark {
+    color: hsla(0, 0%, 100%, 0.85);
+
+    /deep/ .toastui-editor-contents {
+      color: hsla(0, 0%, 100%, 0.85);
+    }
+  }
 }
 </style>

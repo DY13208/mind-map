@@ -516,23 +516,129 @@ class CompactStructure extends LogicalStructure {
     const sourceY = y1 + armOffsets.source
     const topY = branches.reduce((min, branch) => Math.min(min, branch.y2 + branch.offset), sourceY)
     const bottomY = branches.reduce((max, branch) => Math.max(max, branch.y2 + branch.offset), sourceY)
-    branches.forEach(({ item, index, x2, y2, offset }, branchIndex) => {
-      // The first child owns the shared trunk. Other children draw only their
-      // horizontal branch, so the same vertical segment is never painted twice.
-      const sourceStubX = Math.min(trunkX - 2, x1 + 6)
-      const sourceArm = armOffsets.source && sourceStubX > x1
-        ? `M ${x1},${y1} L ${sourceStubX},${y1} L ${sourceStubX},${sourceY} L ${trunkX},${sourceY}`
-        : `M ${x1},${y1} L ${trunkX},${y1}`
+    const sourceStubX = Math.min(trunkX - 2, x1 + 6)
+    const hasSourceStub = !!armOffsets.source && sourceStubX > x1
+    const sourcePoints = hasSourceStub
+      ? [[x1, y1], [sourceStubX, y1], [sourceStubX, sourceY], [trunkX, sourceY]]
+      : [[x1, y1], [trunkX, y1]]
+    const childPoints = ({ x2, y2, offset }) => {
       const childArmY = y2 + offset
       const childStubX = Math.max(trunkX + 2, x2 - 6)
-      const childArm = offset && childStubX < x2
-        ? `M ${trunkX},${childArmY} L ${childStubX},${childArmY} L ${childStubX},${y2} L ${x2},${y2}`
-        : `M ${trunkX},${y2} L ${x2},${y2}`
-      const path = branchIndex === 0
-        ? `${sourceArm} M ${trunkX},${topY} L ${trunkX},${bottomY} ${childArm}`
-        : childArm
+      return offset && childStubX < x2
+        ? [[trunkX, childArmY], [childStubX, childArmY], [childStubX, y2], [x2, y2]]
+        : [[trunkX, y2], [x2, y2]]
+    }
+    if (!this.useSharedTrunk(branches.map(branch => branch.item))) {
+      // Each child gets one continuous subpath from the parent, with rounded
+      // corners, so the stroke joins cleanly instead of butting square ends.
+      // At a T-junction (children above and below the stub) the stub corner
+      // stays square: rounding it both ways would leave a brace-like bump.
+      const armYs = branches.map(branch => branch.y2 + branch.offset)
+      const junction = armYs.some(y => y < sourceY) && armYs.some(y => y > sourceY)
+        ? sourcePoints[sourcePoints.length - 1]
+        : null
+      branches.forEach(({ item, index, x2, y2, offset }) => {
+        const points = [...sourcePoints, ...childPoints({ x2, y2, offset })]
+        const path = this.buildRoundedPolyline(points, this.getConnectorLineWidth
+          ? this.getConnectorLineWidth(item) : 0, true, junction)
+        this.setLineStyle(style, lines[index], path, item)
+        this.setConnectorLinecap(lines[index], 'butt')
+      })
+      return
+    }
+    // Shared-trunk fallback (dashed, translucent or mixed colours): the trunk is
+    // painted once. The first child's path is a single continuous subpath that
+    // retraces along the trunk; round caps hide the joins of the other arms.
+    branches.forEach(({ item, index, x2, y2, offset }, branchIndex) => {
+      const arm = childPoints({ x2, y2, offset })
+      const points = branchIndex === 0
+        ? [...sourcePoints, [trunkX, topY], [trunkX, bottomY], ...arm]
+        : arm
+      const path = this.buildRoundedPolyline(points, 0, false)
       this.setLineStyle(style, lines[index], path, item)
+      this.setConnectorLinecap(lines[index], 'round')
     })
+  }
+
+  // Style lookup mirroring MindMapNode.styleLine.
+  getConnectorStyle(childNode, prop) {
+    if (!childNode) return undefined
+    const getName = this.mindMap.opt && this.mindMap.opt.enableInheritAncestorLineStyle
+      ? 'getSelfInhertStyle'
+      : 'getSelfStyle'
+    let value = typeof childNode[getName] === 'function' ? childNode[getName](prop) : undefined
+    if ((value === undefined || value === null || value === '') && typeof childNode.getStyle === 'function') {
+      value = childNode.getStyle(prop, true)
+    }
+    return value
+  }
+
+  // Overlapping per-child paths are only invisible for solid, opaque lines of
+  // one colour; otherwise keep a single shared trunk.
+  useSharedTrunk(children) {
+    const isTranslucent = color => {
+      if (typeof color !== 'string') return false
+      const c = color.trim().toLowerCase()
+      if (c === 'transparent') return true
+      const rgba = c.match(/^rgba\(([^)]+)\)$/)
+      if (rgba) {
+        const alpha = Number(rgba[1].split(',')[3])
+        return Number.isFinite(alpha) && alpha < 1
+      }
+      return /^#([0-9a-f]{4}|[0-9a-f]{8})$/.test(c) &&
+        !/^#(?:[0-9a-f]{3}f|[0-9a-f]{6}ff)$/.test(c)
+    }
+    const colors = new Set()
+    for (const child of children) {
+      const dash = this.getConnectorStyle(child, 'lineDasharray')
+      if (dash && dash !== 'none' && String(dash).trim() !== '0') return true
+      const color = this.getConnectorStyle(child, 'lineColor')
+      if (isTranslucent(color)) return true
+      if (color !== undefined && color !== null) colors.add(String(color).trim().toLowerCase())
+    }
+    return colors.size > 1
+  }
+
+  // One continuous subpath through the points; interior corners are rounded
+  // with Base.getFoldLineRadius when a positive lineRadius is configured.
+  buildRoundedPolyline(rawPoints, lineWidth = 0, round = true, sharpPoint = null) {
+    const points = []
+    rawPoints.forEach(point => {
+      const last = points[points.length - 1]
+      if (last && last[0] === point[0] && last[1] === point[1]) return
+      points.push(point)
+    })
+    const fmt = point => `${point[0]},${point[1]}`
+    if (!points.length) return 'M 0,0'
+    const lineRadius = Number(this.mindMap.themeConfig && this.mindMap.themeConfig.lineRadius) || 0
+    const canRound = round && lineRadius > 0 && typeof this.getFoldLineRadius === 'function'
+    let d = `M ${fmt(points[0])}`
+    for (let k = 1; k < points.length - 1; k++) {
+      const prev = points[k - 1]
+      const cur = points[k]
+      const next = points[k + 1]
+      const collinear = (prev[0] === cur[0] && cur[0] === next[0]) ||
+        (prev[1] === cur[1] && cur[1] === next[1])
+      const sharp = !!sharpPoint && cur[0] === sharpPoint[0] && cur[1] === sharpPoint[1]
+      const r = canRound && !collinear && !sharp
+        ? this.getFoldLineRadius(prev, cur, next, lineRadius, lineWidth)
+        : 0
+      if (r > 0) {
+        const toward = (from, to) => {
+          const len = Math.hypot(to[0] - from[0], to[1] - from[1]) || 1
+          return [from[0] + (to[0] - from[0]) * r / len, from[1] + (to[1] - from[1]) * r / len]
+        }
+        d += ` L ${fmt(toward(cur, prev))} Q ${fmt(cur)} ${fmt(toward(cur, next))}`
+      } else {
+        d += ` L ${fmt(cur)}`
+      }
+    }
+    if (points.length > 1) d += ` L ${fmt(points[points.length - 1])}`
+    return d
+  }
+
+  setConnectorLinecap(line, cap) {
+    if (line && typeof line.attr === 'function') line.attr('stroke-linecap', cap)
   }
 }
 

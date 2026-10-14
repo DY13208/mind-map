@@ -504,6 +504,11 @@ function layout() {
   }
   textContentNested.translate(translateX, translateY)
   this.addHoverNode(width, height)
+  // 评论：右上角融合标签，不占文字行宽度；内容顶部用于决定标签是否上抬
+  if (this.renderCommentTab) {
+    const contentTop = imgHeight > 0 && imgPlacement === IMG_PLACEMENT.TOP ? paddingY : translateY
+    this.renderCommentTab(contentTop)
+  }
   if (this._customContentAddToNodeAdd && this._customContentAddToNodeAdd.el) {
     const foreignObject = createForeignObjectNode(
       this._customContentAddToNodeAdd
