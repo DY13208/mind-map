@@ -2237,15 +2237,23 @@ async function handleApi(req, res) {
     const afterVersion = Number(url.searchParams.get('after') || 0) || 0
     const limit = Number(url.searchParams.get('limit') || 100) || 100
     const actorId = url.searchParams.get('actor') || url.searchParams.get('actorId')
-    const operations = await listRoomOperations(roomKey, afterVersion, limit, {
+    const paged = url.searchParams.has('offset')
+    const requestedThrough = Number(url.searchParams.get('throughVersion'))
+    const throughVersion = url.searchParams.has('throughVersion') && Number.isSafeInteger(requestedThrough) && requestedThrough >= 0
+      ? Math.min(currentVersion, requestedThrough) : currentVersion
+    const page = paged ? await require('./roomAuditPage').listRoomAuditPage(getPool(), roomKey, {
+      limit, offset: url.searchParams.get('offset'), actorId, throughVersion
+    }) : null
+    const operations = page ? page.items : await listRoomOperations(roomKey, afterVersion, limit, {
       actorId: actorId || undefined
     })
     sendJson(res, 200, {
       mapId: roomKey,
       currentVersion,
       afterVersion,
+      ...(page ? { total: page.total, limit: page.limit, offset: page.offset, throughVersion: page.throughVersion } : {}),
       items: operations.map(item => ({
-        version: item.version,
+        version: Number(item.version),
         operationId: item.operation_id,
         actorId: item.actor_id,
         clientId: item.client_id,
@@ -3531,6 +3539,22 @@ async function handleApi(req, res) {
       return true
     }
     sendVersionedSubtree(res, roomKey, loaded, uid, url)
+    return true
+  }
+
+  const parentsMatch = pathname.match(/^\/api\/files\/([^/]+)\/parents$/)
+  if (parentsMatch && req.method === 'GET') {
+    try {
+      const result = await require('./parentMaps').listParentMaps(
+        getPool(), req, decodeURIComponent(parentsMatch[1]),
+        Object.fromEntries(url.searchParams)
+      )
+      sendJson(res, 200, { ok: true, ...result })
+    } catch (err) {
+      sendJson(res, err.statusCode || 500, {
+        error: '父脑图查询失败，请重试', code: err.code || 'PARENT_QUERY_FAILED'
+      })
+    }
     return true
   }
 

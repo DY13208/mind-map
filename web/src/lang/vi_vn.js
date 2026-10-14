@@ -376,8 +376,9 @@ export default {
       'Vui lòng xuất tệp đang chỉnh sửa trước khi mở tệp, Cẩn thận mất nội dung',
     ai: 'AI',
     cooperate: 'Cộng tác',
-    backToMainMap: 'Về sơ đồ chính',
-    backToParentMap: 'Về sơ đồ cấp trên',
+    home: 'Trang chủ',
+    backToMainMap: 'Sơ đồ cha',
+    backToParentMap: 'Sơ đồ cha',
     mapNavSaveFailedTip: 'Chưa hoàn tất tự động lưu. Bạn vẫn ở sơ đồ hiện tại; vui lòng thử quay lại sau.',
     mapNavUnsavedTitle: 'Chưa lưu thay đổi',
     mapNavUnsavedTip:
@@ -634,7 +635,17 @@ export default {
     noAccess: 'Bạn không có quyền truy cập sơ đồ tư duy này'
   },
   cooperate: {
-    title: 'Chỉnh sửa cộng tác',
+    searchOnlinePeers: 'Tìm thành viên trực tuyến',
+    viewAllPeers: 'Xem tất cả ({count})',
+    noMatchingPeers: 'Không có thành viên phù hợp',
+    listLoadFailed: 'Không tải được danh sách. Hãy thử lại.',
+    noMembers: 'Chưa có thành viên được cấp quyền',
+    userSearchHint: 'Hiển thị tối đa 8 kết quả. Nhập tên cụ thể hơn để tìm tiếp.',
+
+    title: 'Quyền truy cập',
+    close: 'Đóng',
+    connectionTitle: 'Kết nối cộng tác',
+    leaveHint: 'Rời cộng tác sẽ dừng đồng bộ sơ đồ này. Đóng cửa sổ vẫn giữ kết nối.',
     userName: 'Tên',
     userNamePlaceholder: 'Nhập biệt danh',
     roomName: 'Phòng',

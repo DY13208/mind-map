@@ -470,6 +470,7 @@ async function handleFileSystemApi(req, res, options = {}) {
         limit: url.searchParams.get('limit') || 200,
         offset: url.searchParams.get('offset') || 0,
         cursor: url.searchParams.get('cursor') || '',
+        includeTeams: sharedParam === 'accessible',
         shared:
           sharedParam === '1' ||
           sharedParam === 'true' ||
