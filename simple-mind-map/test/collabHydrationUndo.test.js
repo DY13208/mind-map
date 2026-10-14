@@ -10,7 +10,8 @@ function loadMethod(name, next) {
   const end = source.indexOf(`\n  async ${next}(`, start)
   assert.ok(start >= 0 && end > start, `${name} source found`)
   const declaration = source.slice(start, end).trim().replace(/^async /, 'async function ')
-  return vm.runInNewContext(`(${declaration})`, { console, Promise, Date, Map, Set, Number, Array, Error })
+  return vm.runInNewContext(`(${declaration})`, { console, Promise, Date, Map, Set, Number, Array, Error,
+    ...require('../src/utils/hydrationLifecycle') })
 }
 
 const hydrateFromHttp = loadMethod('hydrateFromHttp', 'hydrateNodeData')

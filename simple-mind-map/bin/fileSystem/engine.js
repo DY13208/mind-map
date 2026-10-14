@@ -238,6 +238,27 @@ function createFileSystem(options = {}) {
   }
 
   async function listRooms(input = {}) {
+    if (input.cursor) {
+      const cursor = decodeCursor(input.cursor)
+      const validOffset =
+        cursor &&
+        (cursor.offset === undefined ||
+          (Number.isSafeInteger(cursor.offset) && cursor.offset >= 0))
+      if (
+        !cursor ||
+        typeof cursor !== 'object' ||
+        Array.isArray(cursor) ||
+        typeof cursor.roomKey !== 'string' ||
+        !cursor.roomKey.trim() ||
+        !validOffset
+      ) {
+        throw fsError(
+          'INVALID_CURSOR',
+          '分页游标无效，请从第一页重新查询',
+          400
+        )
+      }
+    }
     const userId = roomAcl.normalizeUserId(input.userId || '')
     const bypass = !!input.bypass || !userId
     const q = String(input.q || input.search || '').trim()
