@@ -1,23 +1,33 @@
 import { productRequest } from './productHttp'
-
+const query = filters => new URLSearchParams(filters || {}).toString()
 export default {
-  request(roomKey, role = 'viewer') {
+  request(roomKey, role = 'viewer', reason = '') {
     return productRequest('/api/access-requests', {
       method: 'POST',
-      body: JSON.stringify({ roomKey, role })
+      body: JSON.stringify({ roomKey, role, reason })
     })
   },
   mine(roomKey) {
-    const query = new URLSearchParams({ roomKey }).toString()
-    return productRequest(`/api/access-requests/mine?${query}`)
+    return productRequest(`/api/access-requests/mine?${query({ roomKey })}`)
   },
-  inbox() {
-    return productRequest('/api/notifications/access-requests')
+  inbox(filters) {
+    return productRequest(
+      `/api/notifications/access-requests?${query(filters)}`
+    )
   },
-  decide(id, decision) {
+  results(filters) {
+    return productRequest(`/api/notifications/access-results?${query(filters)}`)
+  },
+  seen(ids) {
+    return productRequest('/api/notifications/access-results/seen', {
+      method: 'POST',
+      body: JSON.stringify({ ids })
+    })
+  },
+  decide(id, decision, role, reason = '') {
     return productRequest(`/api/access-requests/${encodeURIComponent(id)}`, {
       method: 'PATCH',
-      body: JSON.stringify({ decision })
+      body: JSON.stringify({ decision, role, reason })
     })
   }
 }

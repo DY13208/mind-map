@@ -1877,8 +1877,23 @@ async function handleApi(req, res) {
       return true
     }
     if (pathname === '/api/notifications/access-requests' && req.method === 'GET') {
-      const list = await accessRequests.listInbox(getPool(), req)
-      sendJson(res, 200, { ok: true, list, total: list.length })
+      const page = await accessRequests.listInbox(getPool(), req, Object.fromEntries(url.searchParams))
+      sendJson(res, 200, { ok: true, ...page })
+      return true
+    }
+    if (pathname === '/api/notifications/access-requests/events' && req.method === 'GET') {
+      const who = accessRequests.actor(req)
+      require('./accessRequestEvents').stream(getPool(), req, res, who.id)
+      return true
+    }
+    if (pathname === '/api/notifications/access-results' && req.method === 'GET') {
+      const page = await accessRequests.listResults(getPool(), req, Object.fromEntries(url.searchParams))
+      sendJson(res, 200, { ok: true, ...page })
+      return true
+    }
+    if (pathname === '/api/notifications/access-results/seen' && req.method === 'POST') {
+      const body = await readBody(req)
+      sendJson(res, 200, await accessRequests.markSeen(getPool(), req, body.ids))
       return true
     }
     const accessDecision = pathname.match(/^\/api\/access-requests\/([^/]+)$/)
@@ -1888,7 +1903,8 @@ async function handleApi(req, res) {
         getPool(),
         req,
         decodeURIComponent(accessDecision[1]),
-        body.decision
+        body.decision,
+        { role: body.role, reason: body.reason }
       )
       sendJson(res, 200, { ok: true, item })
       return true

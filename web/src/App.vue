@@ -132,6 +132,7 @@
       </div>
     </div>
     <template v-else>
+      <AccessNotifications v-if="authState.authenticated && authState.user" :key="authState.user.id" :user-id="authState.user.id" :floating="$route.path === '/'" />
       <router-view :key="$route.path === '/' ? 'editor:' + String($route.query.room || '') : 'page'"></router-view>
       <div
         v-if="authState.workbuddyEnabled && (workbuddyLinkNeeded || workbuddyLinkSuccess)"
@@ -171,6 +172,7 @@ import {
 } from '@/utils/auth'
 import { mountWecomLoginPanel } from '@/utils/wecomLogin'
 import LoginGridBackground from '@/components/LoginGridBackground.vue'
+import AccessNotifications from '@/components/AccessNotifications.vue'
 
 const PAGE_TITLE = 'WCPD'
 const AUTH_BOOTSTRAP_MS = 45000
@@ -222,7 +224,7 @@ const authErrors = {
 
 export default {
   name: 'App',
-  components: { LoginGridBackground },
+  components: { AccessNotifications, LoginGridBackground },
   data() {
     return {
       authLoading: true,

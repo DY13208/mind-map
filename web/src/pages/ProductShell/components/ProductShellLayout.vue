@@ -138,7 +138,7 @@
           <span>wiki-compiler</span>
         </router-link>
       </nav>
-      <AccessNotifications v-if="profile" :key="profile.id" :collapsed="sidebarCollapsed" class="sidebarNotifications" />
+      <AccessNotificationTrigger v-if="profile" :key="profile.id" :collapsed="sidebarCollapsed" class="sidebarNotifications" />
       <div class="sidebarFooter" v-if="profile">
         <div class="accountInfo" :title="`${profile.name}（${profile.id}）`">
           <UserAvatar :person="profile" size="small" fallback="依" />
@@ -174,7 +174,7 @@ import productService from '@/services/productService'
 import { logoutAndRedirect } from '@/utils/auth'
 import { openWikiWithSso } from '@/utils/wikiSso'
 import UserAvatar from '@/components/UserAvatar.vue'
-import AccessNotifications from '@/components/AccessNotifications.vue'
+import AccessNotificationTrigger from '@/components/AccessNotificationTrigger.vue'
 const SIDEBAR_PREFERENCE_KEY = 'product-shell-sidebar-collapsed'
 const isSmallScreen = () => window.matchMedia('(max-width: 760px)').matches
 const readSidebarPreference = () => {
@@ -187,7 +187,7 @@ const readSidebarPreference = () => {
 }
 export default {
   name: 'ProductShellLayout',
-  components: { UserAvatar, AccessNotifications },
+  components: { UserAvatar, AccessNotificationTrigger },
   data() {
     const preference = readSidebarPreference()
     return {
