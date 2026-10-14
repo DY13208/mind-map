@@ -41,7 +41,7 @@ export default {
   watch: {
     show(val, oldVal) {
       if (val && !oldVal) {
-        this.zIndex = store.sidebarZIndex++
+        this.zIndex = 20 + store.sidebarZIndex++
       }
     }
   },
@@ -73,15 +73,18 @@ export default {
 <style lang="less" scoped>
 .sidebarContainer {
   position: fixed;
-  right: -300px;
-  top: 110px;
-  bottom: 0;
+  right: -340px;
+  top: 72px;
+  bottom: 72px;
   width: 300px;
   background-color: #fff;
-  border-left: 1px solid #e8e8e8;
+  border: 1px solid rgba(16, 24, 40, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
   display: flex;
   flex-direction: column;
-  transition: all 0.3s;
+  overflow: hidden;
+  transition: right 0.2s ease;
 
   &.isDark {
     background-color: #262a2e;
@@ -98,7 +101,7 @@ export default {
   }
 
   &.show {
-    right: 0;
+    right: 16px;
   }
 
   .closeBtn {
@@ -122,7 +125,8 @@ export default {
 
   .sidebarContent {
     width: 100%;
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     overflow: auto;
   }
 }

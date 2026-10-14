@@ -209,7 +209,9 @@ export default {
   },
   fullscreen: {
     fullscreenShow: 'Full screen show',
-    fullscreenEdit: 'Full screen edit'
+    fullscreenEdit: 'Full screen edit',
+    fullscreen: 'Full screen',
+    exitFullscreen: 'Exit full screen'
   },
   demonstrate: {
     demonstrate: 'Enter demonstration mode'

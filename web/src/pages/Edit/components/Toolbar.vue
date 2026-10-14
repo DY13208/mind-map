@@ -1,100 +1,189 @@
 <template>
   <div class="toolbarContainer" :class="{ isDark: isDark }">
-    <div class="toolbar" :class="{ readonly: isReadonly }" ref="toolbarRef">
-      <!-- 节点操作 -->
-      <div
-        class="toolbarBlockWrapper nodeToolbarWrapper"
-        :class="{ collapsed: nodeToolbarCollapsed }"
-        v-if="!isReadonly"
-      >
-        <div class="toolbarBlock" ref="nodeToolbarBlock">
-          <button
-            type="button"
-            class="collapseToggleBtn"
-            :class="{ collapsed: nodeToolbarCollapsed }"
-            :title="
-              nodeToolbarCollapsed
-                ? $t('toolbar.expandToolbar')
-                : $t('toolbar.collapseToolbar')
-            "
-            :aria-label="
-              nodeToolbarCollapsed
-                ? $t('toolbar.expandToolbar')
-                : $t('toolbar.collapseToolbar')
-            "
-            :aria-expanded="String(!nodeToolbarCollapsed)"
-            @click.stop="toggleNodeToolbar"
-          >
-            <span class="iconfont iconjiantouyou"></span>
-          </button>
-          <ToolbarNodeBtnList :list="horizontalList"></ToolbarNodeBtnList>
-          <!-- 更多 -->
+    <div class="toolbar dockShell" :class="{ readonly: isReadonly }" ref="toolbarRef">
+      <div class="dock fileDock" :class="{ collapsed: fileToolbarCollapsed }">
+        <div class="toolbarBlock iconOnly" ref="fileToolbarBlock">
           <el-popover
-            v-model="popoverShow"
-            placement="bottom-end"
-            width="120"
-            trigger="hover"
-            v-if="showMoreBtn"
-            :style="{ marginLeft: horizontalList.length > 0 ? '20px' : 0 }"
+            v-model="mapTreeShow"
+            placement="bottom-start"
+            trigger="click"
+            append-to-body
+            popper-class="mapFileTreePopper"
           >
-            <ToolbarNodeBtnList
-              dir="v"
-              :list="verticalList"
-              @click.native="popoverShow = false"
-            ></ToolbarNodeBtnList>
-            <div slot="reference" class="toolbarBtn">
-              <span class="icon el-icon-more moreIcon"></span>
-              <span class="text">{{ $t('toolbar.more') }}</span>
-            </div>
+            <MapFileTree
+              v-if="mapTreeShow"
+              :current-room-key="currentRoomKey()"
+              @open="openMapFromTree"
+            />
+            <button
+              slot="reference"
+              type="button"
+              class="toolIconBtn"
+              :class="{ active: mapTreeShow }"
+              aria-label="脑图目录"
+              title="脑图目录"
+            >
+              <span class="el-icon-folder"></span>
+            </button>
           </el-popover>
-        </div>
-      </div>
-      <!-- 文件与协作操作 -->
-      <div
-        class="toolbarBlockWrapper fileToolbarWrapper"
-        :class="{ collapsed: fileToolbarCollapsed }"
-      >
-        <div class="toolbarBlock" ref="fileToolbarBlock">
+          <el-popover
+            v-model="fileMenuShow"
+            placement="bottom-start"
+            width="168"
+            trigger="click"
+            append-to-body
+          >
+            <ToolbarFileBtnList
+              dir="v"
+              :list="menuFileActions"
+              :is-dark="isDark"
+              @select="onFileMenuSelect"
+            />
+            <button
+              slot="reference"
+              type="button"
+              class="dockIconBtn"
+              aria-label="文件菜单"
+              title="文件菜单"
+            >
+              <span class="el-icon-s-operation"></span>
+            </button>
+          </el-popover>
+          <button
+            v-if="$route.query.room"
+            type="button"
+            class="dockIconBtn backBtn"
+            data-testid="back-to-my-maps"
+            aria-label="返回脑图"
+            title="返回脑图"
+            @click="onFileToolbarAction('maps')"
+          >
+            <span class="el-icon-back"></span>
+          </button>
+          <ToolbarFileBtnList
+            v-if="mapNavBackActions.length"
+            class="mapNavBackList"
+            :list="mapNavBackActions"
+            :is-dark="isDark"
+            @select="onFileToolbarAction"
+          />
+          <div class="fileIdentity">
+          <span class="fileName" :title="fileTitle">{{ fileTitle }}</span>
+          <el-popover
+            v-if="displayedSaveChip === 'failed'"
+            placement="bottom-start"
+            width="380"
+            trigger="click"
+            append-to-body
+            popper-class="collabDiagPopper"
+          >
+            <div class="collabDiag">
+              <div class="diagHead">{{ $t('cooperate.diagTitle') }}</div>
+              <div class="diagRow" v-for="row in collabDiagRows" :key="row.key">
+                <span class="k">{{ row.key }}</span>
+                <span class="v">{{ row.value }}</span>
+              </div>
+              <el-button
+                v-if="isCollabDiagDev"
+                size="mini"
+                type="primary"
+                plain
+                class="diagCopy"
+                @click="copyCollabDiag"
+              >{{ diagCopied ? $t('cooperate.diagCopied') : $t('cooperate.diagCopy') }}</el-button>
+            </div>
+            <span
+              slot="reference"
+              class="saveChip clickable"
+              :class="displayedSaveChip"
+              data-testid="collab-sync-failed"
+            >{{ collabSaveLabel }}</span>
+          </el-popover>
+          <span v-else class="saveChip" :class="displayedSaveChip" :title="collabError || collabSaveLabel">{{ collabSaveLabel }}</span>
+          </div>
           <button
             type="button"
-            class="collapseToggleBtn"
-            :class="{ collapsed: fileToolbarCollapsed }"
-            :title="fileToolbarCollapsed ? $t('toolbar.expandToolbar') : $t('toolbar.collapseToolbar')"
-            :aria-label="fileToolbarCollapsed ? $t('toolbar.expandToolbar') : $t('toolbar.collapseToolbar')"
-            :aria-expanded="String(!fileToolbarCollapsed)"
-            @click.stop="toggleFileToolbar"
+            class="toolIconBtn"
+            aria-label="搜索"
+            title="搜索"
+            @click="showSearch"
           >
-            <span class="iconfont iconjiantouyou"></span>
+            <span class="iconfont iconsousuo"></span>
+          </button>
+          <ToolbarFileBtnList
+            :list="leftQuickActions"
+            :is-dark="isDark"
+            @select="onFileToolbarAction"
+          />
+          <button
+            v-if="!isReadonly"
+            type="button"
+            class="toolIconBtn"
+            :class="{ active: nodeToolsOpen }"
+            title="节点工具"
+            aria-label="节点工具"
+            :aria-expanded="String(nodeToolsOpen)"
+            @click="setNodeToolsOpen(!nodeToolsOpen)"
+          >
+            <span class="el-icon-s-grid"></span>
           </button>
           <div
-            class="collabStatus"
-            data-testid="collab-status"
-            :class="[displayedSaveChip, { cooperating: collabLive }]"
+            class="fileTreeBox"
+            v-if="fileTreeVisible"
+            :class="{ expand: fileTreeExpand }"
           >
-            <el-popover
-              placement="bottom"
-              width="240"
-              trigger="hover"
-              popper-class="collabPeerPopper"
-            >
+            <div class="fileTreeToolbar">
+              <div class="fileTreeName">
+                {{ rootDirName ? '/' + rootDirName : '' }}
+              </div>
+              <div class="fileTreeActionList">
+                <div
+                  class="btn"
+                  :class="[fileTreeExpand ? 'el-icon-arrow-up' : 'el-icon-arrow-down']"
+                  @click="fileTreeExpand = !fileTreeExpand"
+                ></div>
+                <div class="btn el-icon-close" @click="fileTreeVisible = false"></div>
+              </div>
+            </div>
+            <div class="fileTreeWrap">
+              <el-tree
+                :props="fileTreeProps"
+                :load="loadFileTreeNode"
+                :expand-on-click-node="false"
+                node-key="id"
+                lazy
+              >
+                <span class="customTreeNode" slot-scope="{ node, data }">
+                  <div class="treeNodeInfo">
+                    <span
+                      class="treeNodeIcon iconfont"
+                      :class="[data.type === 'file' ? 'iconwenjian' : 'icondakai']"
+                    ></span>
+                    <span class="treeNodeName">{{ node.label }}</span>
+                  </div>
+                  <div class="treeNodeBtnList" v-if="data.type === 'file'">
+                    <el-button type="text" size="mini" v-if="data.enableEdit" @click="editLocalFile(data)">编辑</el-button>
+                    <el-button type="text" size="mini" v-else @click="importLocalFile(data)">导入</el-button>
+                  </div>
+                </span>
+              </el-tree>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="dock collabDock" :class="{ collapsed: fileToolbarCollapsed }">
+        <div class="toolbarBlock iconOnly">
+          <div class="collabStatus" data-testid="collab-status" :class="{ cooperating: collabLive }">
+            <el-popover placement="bottom" width="240" trigger="click" popper-class="collabPeerPopper">
               <div class="collabPeerPopover">
                 <div class="peerHead">{{ $t('cooperate.peers') }} {{ collabPeers.length }}</div>
-                <div
-                  class="peerRow"
-                  v-for="peer in collabPeers"
-                  :key="peer.id"
-                >
-                  <span
-                    class="miniAvatar"
-                    :style="peerAvatarStyle(peer)"
-                    >{{ peer.shortName || '?' }}</span
-                  >
+                <div class="peerRow" v-for="peer in collabPeers" :key="peer.id">
+                  <span class="miniAvatar" :style="peerAvatarStyle(peer)">{{ peer.shortName || '?' }}</span>
                   <span class="peerName">{{ peer.name }}</span>
+                  <span class="you" v-if="peer.mcp">MCP</span>
                   <span class="you" v-if="peer.isMe">{{ $t('cooperate.you') }}</span>
                 </div>
-                <div class="empty" v-if="!collabPeers.length">
-                  {{ $t('cooperate.noOnlinePeers') }}
-                </div>
+                <div class="empty" v-if="!collabPeers.length">{{ $t('cooperate.noOnlinePeers') }}</div>
               </div>
               <button
                 slot="reference"
@@ -111,143 +200,55 @@
                     :style="peerAvatarStyle(peer)"
                   >{{ peer.shortName || '?' }}</span>
                 </span>
-                <span class="peerCount">{{ $t('cooperate.onlineCount', { count: collabPeers.length }) }}</span>
+                <span class="peerCount">{{ collabPeers.length }}</span>
               </button>
             </el-popover>
-            <el-popover
-              v-if="displayedSaveChip === 'failed'"
-              placement="bottom-end"
-              width="380"
-              trigger="click"
-              popper-class="collabDiagPopper"
-            >
-              <div class="collabDiag">
-                <div class="diagHead">{{ $t('cooperate.diagTitle') }}</div>
-                <div
-                  class="diagRow"
-                  v-for="row in collabDiagRows"
-                  :key="row.key"
-                >
-                  <span class="k">{{ row.key }}</span>
-                  <span class="v">{{ row.value }}</span>
-                </div>
-                <el-button
-                  v-if="isCollabDiagDev"
-                  size="mini"
-                  type="primary"
-                  plain
-                  class="diagCopy"
-                  @click="copyCollabDiag"
-                >{{
-                  diagCopied
-                    ? $t('cooperate.diagCopied')
-                    : $t('cooperate.diagCopy')
-                }}</el-button>
-              </div>
-              <span
-                slot="reference"
-                class="saveChip clickable"
-                data-testid="collab-sync-failed"
-                >{{ collabSaveLabel }}</span
-              >
-            </el-popover>
-            <span v-else class="saveChip" :title="collabError">{{
-              collabSaveLabel
-            }}</span>
           </div>
           <ToolbarFileBtnList
-            :list="fileHorizontalActions"
+            :list="rightFileActions"
             :is-dark="isDark"
             @select="onFileToolbarAction"
           />
           <el-popover
-            v-if="fileVerticalActions.length"
+            v-if="overflowFileActions.length"
             v-model="filePopoverShow"
             placement="bottom-end"
-            width="120"
-            trigger="hover"
+            width="168"
+            trigger="click"
+            append-to-body
           >
             <ToolbarFileBtnList
               dir="v"
-              :list="fileVerticalActions"
+              :list="overflowFileActions"
               :is-dark="isDark"
-              @select="onFileToolbarAction"
+              @select="onFileMenuSelect"
             />
-            <div slot="reference" class="toolbarBtn fileMoreBtn">
-              <span class="icon el-icon-more moreIcon"></span>
-              <span class="text">{{ $t('toolbar.more') }}</span>
-            </div>
+            <button slot="reference" type="button" class="dockIconBtn" aria-label="更多" title="更多">
+              <span class="el-icon-more"></span>
+            </button>
           </el-popover>
-          <!-- 返回主脑图 / 上级脑图：固定在最右侧，不参与「更多」收纳 -->
-          <ToolbarFileBtnList
-            v-if="mapNavBackActions.length"
-            class="mapNavBackList"
-            :list="mapNavBackActions"
-            :is-dark="isDark"
-            @select="onFileToolbarAction"
-          />
-          <!-- 本地文件树 -->
-          <div
-            class="fileTreeBox"
-            v-if="fileTreeVisible"
-            :class="{ expand: fileTreeExpand }"
+        </div>
+      </div>
+      <div v-if="!isReadonly && nodeToolsOpen" class="dock nodeToolRail">
+        <div class="toolbarBlock">
+          <ToolbarNodeBtnList :list="nodeToolList"></ToolbarNodeBtnList>
+          <el-popover
+            v-model="popoverShow"
+            placement="right-start"
+            width="168"
+            trigger="click"
+            append-to-body
+            v-if="showMoreBtn"
           >
-            <div class="fileTreeToolbar">
-              <div class="fileTreeName">
-                {{ rootDirName ? '/' + rootDirName : '' }}
-              </div>
-              <div class="fileTreeActionList">
-                <div
-                  class="btn"
-                  :class="[
-                    fileTreeExpand ? 'el-icon-arrow-up' : 'el-icon-arrow-down'
-                  ]"
-                  @click="fileTreeExpand = !fileTreeExpand"
-                ></div>
-                <div
-                  class="btn el-icon-close"
-                  @click="fileTreeVisible = false"
-                ></div>
-              </div>
-            </div>
-            <div class="fileTreeWrap">
-              <el-tree
-                :props="fileTreeProps"
-                :load="loadFileTreeNode"
-                :expand-on-click-node="false"
-                node-key="id"
-                lazy
-              >
-                <span class="customTreeNode" slot-scope="{ node, data }">
-                  <div class="treeNodeInfo">
-                    <span
-                      class="treeNodeIcon iconfont"
-                      :class="[
-                        data.type === 'file' ? 'iconwenjian' : 'icondakai'
-                      ]"
-                    ></span>
-                    <span class="treeNodeName">{{ node.label }}</span>
-                  </div>
-                  <div class="treeNodeBtnList" v-if="data.type === 'file'">
-                    <el-button
-                      type="text"
-                      size="mini"
-                      v-if="data.enableEdit"
-                      @click="editLocalFile(data)"
-                      >编辑</el-button
-                    >
-                    <el-button
-                      type="text"
-                      size="mini"
-                      v-else
-                      @click="importLocalFile(data)"
-                      >导入</el-button
-                    >
-                  </div>
-                </span>
-              </el-tree>
-            </div>
-          </div>
+            <ToolbarNodeBtnList
+              dir="v"
+              :list="verticalList"
+              @click.native="popoverShow = false"
+            ></ToolbarNodeBtnList>
+            <button slot="reference" type="button" class="toolIconBtn" :aria-label="$t('toolbar.more')" title="更多">
+              <span class="el-icon-more"></span>
+            </button>
+          </el-popover>
         </div>
       </div>
     </div>
@@ -550,9 +551,11 @@ import exampleData from 'simple-mind-map/example/exampleData'
 import { getData } from '../../../api'
 import ToolbarNodeBtnList from './ToolbarNodeBtnList.vue'
 import ToolbarFileBtnList from './ToolbarFileBtnList.vue'
+import MapFileTree from './MapFileTree.vue'
 import { throttle, isMobile } from 'simple-mind-map/src/utils/index'
 import { stringifyJsonOffMainThread } from '@/utils/importTree'
 import { navigateToMyMaps } from '@/utils/roomLocation'
+import roomService from '@/services/roomService'
 import { inspectMapRef } from '@/utils/mapRefNav'
 import {
   buildParentEntryNav,
@@ -872,7 +875,8 @@ export default {
     Import,
     CPDCheckPanel,
     ToolbarNodeBtnList,
-    ToolbarFileBtnList
+    ToolbarFileBtnList,
+    MapFileTree
   },
   data() {
     return {
@@ -883,6 +887,10 @@ export default {
       popoverShow: false,
       fileHorizontalCount: 0,
       filePopoverShow: false,
+      fileMenuShow: false,
+      mapTreeShow: false,
+      historyBtnList: ['back', 'forward'],
+      nodeToolsOpen: false,
       toolbarLayoutRevision: 0,
       mapNavContext: null,
       mapNavReturning: false,
@@ -1190,6 +1198,49 @@ export default {
       return actions
     },
 
+    fileTitle() {
+      const room = this.$parent && this.$parent.historyRoom
+      return (room && (room.title || room.name)) || '脑图'
+    },
+
+    nodeToolList() {
+      return [...this.historyBtnList, ...this.horizontalList]
+    },
+
+    leftQuickActions() {
+      return this.fileActionsByKey(['refresh', 'check', 'run'])
+    },
+
+    rightFileActions() {
+      return this.fileActionsByKey(['copyInvite', 'share', 'import'])
+    },
+
+    menuFileActions() {
+      return this.fileActionsByKey([
+        'export',
+        'history',
+        'new',
+        'saveAs'
+      ])
+    },
+
+    overflowFileActions() {
+      const shown = new Set([
+        'refresh',
+        'check',
+        'run',
+        'copyInvite',
+        'share',
+        'import',
+        'maps',
+        'export',
+        'history',
+        'new',
+        'saveAs'
+      ])
+      return this.fileToolbarActions.filter(item => !shown.has(item.key))
+    },
+
     fileHorizontalActions() {
       return this.fileToolbarActions.slice(0, this.fileHorizontalCount)
     },
@@ -1368,6 +1419,11 @@ export default {
       this.setCanvasToolbarsCollapsed
     )
     this.$bus.$on('node_active', this.onNodeActive)
+    try {
+      this.nodeToolsOpen = localStorage.getItem('mindmap.nodeToolsOpen') === '1'
+    } catch (err) {
+      this.nodeToolsOpen = true
+    }
     this.$bus.$on('open_workbuddy_job_history', this.openJobHistory)
     this.$bus.$on('open_local_directory', this.openDirectory)
     this.$bus.$on('open_local_file', this.openLocalFile)
@@ -1827,6 +1883,29 @@ export default {
 
     onNodeActive(_node, activeNodeList) {
       this.activeNodes = Array.isArray(activeNodeList) ? [...activeNodeList] : []
+    },
+
+    setNodeToolsOpen(open) {
+      this.nodeToolsOpen = open
+      if (!open) this.popoverShow = false
+      try {
+        localStorage.setItem('mindmap.nodeToolsOpen', open ? '1' : '0')
+      } catch (err) {}
+    },
+
+    fileActionsByKey(keys) {
+      const byKey = new Map(this.fileToolbarActions.map(item => [item.key, item]))
+      return keys.map(key => byKey.get(key)).filter(Boolean)
+    },
+
+    onFileMenuSelect(key) {
+      this.fileMenuShow = false
+      this.filePopoverShow = false
+      this.onFileToolbarAction(key)
+    },
+
+    showSearch() {
+      this.$bus.$emit('show_search')
     },
 
     /** 概要点所属的那个节点（概要自己不能当运行落点） */
@@ -5043,57 +5122,23 @@ export default {
 
     // 两侧面板等宽；首次溢出时同时出现“更多”，之后各自按半区宽度收纳。
     async computeToolbarShow() {
-      if (!this.$refs.toolbarRef) return
-      const revision = (this.toolbarLayoutRevision || 0) + 1
-      this.toolbarLayoutRevision = revision
       const nodeActions = this.isReadonly ? [] : [...this.btnLit]
-      this.horizontalList = nodeActions
-      this.verticalList = []
-      this.showMoreBtn = false
+      const primary = [
+        'painter',
+        'siblingNode',
+        'childNode',
+        'deleteNode',
+        'image',
+        'icon',
+        'link',
+        'note',
+        'tag'
+      ]
+      this.horizontalList = primary.filter(key => nodeActions.includes(key))
+      const shown = new Set([...this.historyBtnList, ...this.horizontalList])
+      this.verticalList = nodeActions.filter(key => !shown.has(key))
+      this.showMoreBtn = this.verticalList.length > 0
       this.fileHorizontalCount = this.fileToolbarActions.length
-      this.popoverShow = false
-      this.filePopoverShow = false
-      await this.$nextTick()
-      const overflows = block => {
-        if (!block) return false
-        const blockStyle = window.getComputedStyle(block)
-        const available = block.clientWidth -
-          parseFloat(blockStyle.paddingLeft) -
-          parseFloat(blockStyle.paddingRight)
-        const used = Array.from(block.children).reduce((width, child) => {
-          const style = window.getComputedStyle(child)
-          if (style.position === 'absolute') return width
-          return width + child.getBoundingClientRect().width +
-            parseFloat(style.marginLeft) + parseFloat(style.marginRight)
-        }, 0)
-        return used > available + 1
-      }
-      const nodeOverflows = () => overflows(this.$refs.nodeToolbarBlock)
-      const fileOverflows = () => overflows(this.$refs.fileToolbarBlock)
-      while (
-        revision === this.toolbarLayoutRevision &&
-        (nodeOverflows() || fileOverflows())
-      ) {
-        let changed = false
-        if (
-          this.horizontalList.length > 0 &&
-          (nodeOverflows() || !this.showMoreBtn)
-        ) {
-          this.horizontalList = nodeActions.slice(0, this.horizontalList.length - 1)
-          this.verticalList = nodeActions.slice(this.horizontalList.length)
-          this.showMoreBtn = this.verticalList.length > 0
-          changed = true
-        }
-        if (
-          this.fileHorizontalCount > 0 &&
-          (fileOverflows() || this.fileVerticalActions.length === 0)
-        ) {
-          this.fileHorizontalCount--
-          changed = true
-        }
-        if (!changed) break
-        await this.$nextTick()
-      }
     },
 
     // 监听本地文件读写
@@ -5162,6 +5207,19 @@ export default {
 
     goToMyMaps() {
       navigateToMyMaps(this.$router)
+    },
+
+    async openMapFromTree(node) {
+      const roomKey = node && node.roomKey
+      if (!roomKey) return
+      this.mapTreeShow = false
+      if (roomKey === this.currentRoomKey()) return
+      try {
+        await roomService.markOpened(roomKey)
+      } catch (error) {
+        // 最近打开记失败不影响跳转
+      }
+      this.$router.push({ path: '/', query: { room: roomKey } }).catch(() => {})
     },
 
     prepareReload(options = {}) {
@@ -5404,6 +5462,10 @@ export default {
           border-color: rgba(255, 255, 255, 0.14);
         }
       }
+      .fileName,
+      .dockIconBtn {
+        color: hsla(0, 0%, 100%, 0.9);
+      }
       .toolbarBlock {
         background-color: #262a2e;
 
@@ -5487,39 +5549,188 @@ export default {
   }
   .toolbar {
     position: fixed;
-    left: 20px;
-    right: 20px;
-    top: 20px;
-    display: flex;
-    gap: 20px;
+    inset: 0;
+    pointer-events: none;
     font-size: 12px;
     font-family:
       PingFangSC-Regular,
       PingFang SC;
     font-weight: 400;
     color: rgba(26, 26, 26, 0.8);
-    z-index: 2;
+    z-index: 4;
 
-    &.readonly .toolbarBlockWrapper.fileToolbarWrapper .toolbarBlock {
-      margin-left: auto;
-      margin-right: auto;
+    .dock {
+      position: absolute;
+      pointer-events: auto;
+      transition: transform 0.2s ease;
+
+      &.collapsed {
+        transform: translateY(calc(-100% - 24px));
+      }
+    }
+
+    .fileDock {
+      top: 16px;
+      left: 16px;
+      max-width: min(560px, calc(100vw - 360px));
+
+      .toolbarBlock {
+        min-width: 0;
+        max-width: 100%;
+      }
+    }
+
+    .collabDock {
+      top: 16px;
+      right: 16px;
+    }
+
+    .fileIdentity {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      max-width: 240px;
+    }
+
+    .nodeToolRail {
+      top: 50%;
+      left: 16px;
+      z-index: 5;
+      overflow: visible;
+      transform: translateY(-50%);
+
+      .toolbarBlock {
+        flex-direction: column;
+        align-items: center;
+        width: 48px;
+        padding: 8px 6px;
+        gap: 6px;
+        overflow: visible;
+      }
+
+      /deep/ .toolbarNodeBtnList {
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        overflow: visible;
+      }
+
+      /deep/ .toolbarNodeBtnList .toolbarBtn {
+        position: relative;
+        margin-right: 0;
+        overflow: visible;
+
+        .text {
+          display: none;
+        }
+
+        &:hover .text {
+          display: block;
+          position: absolute;
+          left: calc(100% + 10px);
+          top: 50%;
+          z-index: 6;
+          width: max-content;
+          max-width: none;
+          transform: translateY(-50%);
+          padding: 6px 10px;
+          border-radius: 6px;
+          background: #1d2939;
+          color: #fff;
+          font-size: 12px;
+          line-height: 1.2;
+          text-align: left;
+          white-space: nowrap;
+          overflow: visible;
+          pointer-events: none;
+        }
+      }
+    }
+
+    .toolIconBtn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      width: 28px;
+      min-width: 28px;
+      height: 26px;
+      padding: 0;
+      border: 1px solid #e9e9e9;
+      border-radius: 4px;
+      background: #fff;
+      color: #344054;
+      font-size: 16px;
+      cursor: pointer;
+
+      &:hover,
+      &.active {
+        border-color: #409eff;
+        color: #409eff;
+        background: #ecf5ff;
+      }
+    }
+
+    .dockIconBtn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: #344054;
+      cursor: pointer;
+
+      &:hover {
+        background: #f2f4f7;
+        color: #409eff;
+      }
+    }
+
+    .backBtn,
+    .mapNavBackList {
+      flex: 0 0 auto;
+    }
+
+    .fileName {
+      display: block;
+      flex: 0 1 auto;
+      width: auto;
+      max-width: 140px;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 600;
+      color: #1d2939;
+      line-height: 32px;
+    }
+
+    .fileIdentity .saveChip {
+      flex: 0 1 auto;
+      max-width: 88px;
+      overflow: hidden;
+      font-size: 12px;
+      line-height: 32px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+
+      &.saved { color: #059669; }
+      &.saving,
+      &.syncing { color: #2563eb; }
+      &.offline { color: #98a2b3; }
+      &.failed { color: #dc2626; cursor: pointer; }
     }
 
     .toolbarBlockWrapper {
       position: relative;
-      flex: 1 1 0;
       min-width: 0;
       transition: transform 0.3s;
-
-      &.nodeToolbarWrapper .toolbarBlock {
-        margin-left: auto;
-        margin-right: 0;
-      }
-
-      &.fileToolbarWrapper .toolbarBlock {
-        margin-left: 0;
-        margin-right: auto;
-      }
 
       &.collapsed {
         transform: translateY(calc(-100% - 20px));
@@ -5565,18 +5776,39 @@ export default {
 
     .toolbarBlock {
       display: flex;
-      justify-content: center;
+      align-items: center;
+      gap: 4px;
+      justify-content: flex-start;
       box-sizing: border-box;
       width: max-content;
       max-width: 100%;
-      margin: 0 auto;
+      margin: 0;
       background-color: #fff;
-      padding: 10px 20px;
-      border-radius: 6px;
-      box-shadow: 0 2px 16px 0 rgba(0, 0, 0, 0.06);
-      border: 1px solid rgba(0, 0, 0, 0.06);
+      padding: 6px 8px;
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
+      border: 1px solid rgba(16, 24, 40, 0.08);
       position: relative;
       z-index: 1;
+
+      &.iconOnly {
+        /deep/ .toolbarNodeBtnList .toolbarBtn,
+        /deep/ .toolbarFileBtnList .toolbarBtn {
+          position: relative;
+          margin-right: 0;
+
+          .text {
+            display: none;
+          }
+        }
+
+        /deep/ .toolbarNodeBtnList,
+        /deep/ .toolbarFileBtnList {
+          display: flex;
+          align-items: center;
+          gap: 2px;
+        }
+      }
 
       /deep/ .toolbarNodeBtnList,
       /deep/ .toolbarFileBtnList,
@@ -5587,7 +5819,7 @@ export default {
       .fileTreeBox {
         position: absolute;
         left: 0;
-        top: 68px;
+        top: 52px;
         width: 100%;
         height: 30px;
         background-color: #fff;
@@ -5769,7 +6001,8 @@ export default {
     }
 
     .mapNavBackList {
-      margin-left: 20px;
+      flex: 0 0 auto;
+      margin-left: 0;
     }
 
     .moreIcon {

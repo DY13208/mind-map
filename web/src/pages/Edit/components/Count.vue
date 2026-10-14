@@ -8,6 +8,14 @@
       <span class="name">{{ $t('count.nodes') }}</span>
       <span class="value">{{ num }}</span>
     </div>
+    <button
+      type="button"
+      class="miniMapBtn iconfont icondaohang1"
+      :class="{ active: openMiniMap }"
+      title="小地图"
+      aria-label="小地图"
+      @click="toggleMiniMap"
+    ></button>
   </div>
 </template>
 
@@ -26,7 +34,8 @@ export default {
     return {
       textStr: '',
       words: 0,
-      num: 0
+      num: 0,
+      openMiniMap: false
     }
   },
   computed: {
@@ -36,15 +45,25 @@ export default {
   },
   created() {
     this.$bus.$on('data_change', this.onDataChange)
+    this.$bus.$on('toggle_mini_map', this.onMiniMapToggle)
     if (this.mindMap) {
       this.onDataChange(this.mindMap.getData())
     }
   },
   beforeDestroy() {
     this.$bus.$off('data_change', this.onDataChange)
+    this.$bus.$off('toggle_mini_map', this.onMiniMapToggle)
   },
   methods: {
     // 监听数据变化
+    onMiniMapToggle(show) {
+      this.openMiniMap = !!show
+    },
+
+    toggleMiniMap() {
+      this.$bus.$emit('toggle_mini_map', !this.openMiniMap)
+    },
+
     onDataChange(data) {
       this.textStr = ''
       this.words = 0
@@ -71,23 +90,48 @@ export default {
 
 <style lang="less" scoped>
 .countContainer {
-  padding: 0 12px;
+  padding: 0 8px 0 12px;
   position: fixed;
-  left: 20px;
-  bottom: 20px;
-  background: hsla(0, 0%, 100%, 0.8);
-  border-radius: 2px;
-  opacity: 0.8;
-  height: 22px;
-  line-height: 22px;
+  left: 16px;
+  bottom: 16px;
+  background: #fff;
+  border-radius: 12px;
+  height: 36px;
   font-size: 12px;
   display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(16, 24, 40, 0.08);
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
+  z-index: 3;
 
   &.isDark {
     background: #262a2e;
+    border-color: hsla(0, 0%, 100%, 0.1);
 
     .item {
       color: hsla(0, 0%, 100%, 0.6);
+    }
+
+    .miniMapBtn {
+      color: hsla(0, 0%, 100%, 0.8);
+    }
+  }
+
+  .miniMapBtn {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #344054;
+    cursor: pointer;
+
+    &.active,
+    &:hover {
+      color: #409eff;
+      background: #f2f4f7;
     }
   }
 

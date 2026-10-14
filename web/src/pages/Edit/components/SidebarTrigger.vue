@@ -41,6 +41,7 @@
           item.value === 'structure' ? 'layout' : item.value === 'theme' ? 'theme' : 'sidebar-' + item.value
         "
         :class="{ active: activeSidebar === item.value }"
+        :title="item.name"
         @click="trigger(item)"
       >
         <div class="triggerIcon iconfont" :class="[item.icon]"></div>
@@ -130,6 +131,11 @@ export default {
     },
 
     trigger(item) {
+      if (this.activeSidebar === item.value) {
+        this.setActiveSidebar(null)
+        this.$bus.$emit('closeSideBar')
+        return
+      }
       this.setActiveSidebar(item.value)
     },
 
@@ -155,13 +161,18 @@ export default {
 <style lang="less" scoped>
 .sidebarTriggerContainer {
   position: fixed;
-  top: 110px;
-  bottom: 80px;
-  right: -60px;
-  transition: all 0.3s;
+  top: 50%;
+  right: 16px;
+  z-index: 5;
+  transform: translateY(-50%);
+  transition: right 0.2s ease, transform 0.2s ease;
   display: flex;
   flex-direction: column;
   justify-content: center;
+
+  &:not(.show) {
+    transform: translate(140%, -50%);
+  }
 
   &.isDark {
     .trigger {
@@ -193,15 +204,12 @@ export default {
     }
   }
 
-  &.show {
-    right: 0;
-  }
-
   &.hasActive {
-    right: 305px;
+    right: 332px;
   }
 
   .toggleShowBtn {
+    display: none;
     position: absolute;
     left: -6px;
     width: 35px;
@@ -214,7 +222,6 @@ export default {
     z-index: 0;
     border-top-left-radius: 10px;
     border-bottom-left-radius: 10px;
-    display: flex;
     align-items: center;
     padding-left: 4px;
 
@@ -238,11 +245,11 @@ export default {
 
   .trigger {
     position: relative;
-    width: 60px;
-    border-color: #eee;
+    width: 44px;
+    border: 1px solid rgba(16, 24, 40, 0.08);
     background-color: #fff;
-    box-shadow: 0 2px 16px 0 rgba(0, 0, 0, 0.06);
-    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
+    border-radius: 12px;
     max-height: 100%;
     overflow-y: auto;
     overflow-x: hidden;
@@ -284,14 +291,7 @@ export default {
   }
 
   .authName {
-    width: 100%;
-    overflow: hidden;
-    color: #34463d;
-    font-size: 11px;
-    line-height: 1.3;
-    text-align: center;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    display: none;
   }
 
   .authLogout {
@@ -313,7 +313,7 @@ export default {
   }
 
   .triggerItem {
-    height: 60px;
+    height: 40px;
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -334,11 +334,11 @@ export default {
 
     .triggerIcon {
       font-size: 18px;
-      margin-bottom: 5px;
+      margin-bottom: 0;
     }
 
     .triggerName {
-      font-size: 13px;
+      display: none;
     }
   }
 }

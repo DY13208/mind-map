@@ -11,19 +11,22 @@ export function startPerformanceDiagnostics(mindMap, roomKey, bus) {
   let stopped = false
   let sending = false
   let renderAt = null
+  let renderId = null
   let dropped = 0
   const pending = new Map()
   const observers = []
   const started = performance.now()
   const add = row => { if (!stopped) { queue.push(row); if (queue.length > 99) { queue.shift(); dropped += 1 } } }
-  const onStart = () => { renderAt = performance.now() }
+  const onStart = info => { renderAt = performance.now(); renderId = info && info.renderId }
   const onEnd = info => {
+    if (!info || info.renderId !== renderId) return
     if (renderAt !== null) add({ kind: 'render', durationMs: performance.now() - renderAt, count: Number(info && info.renderedNodes) || 0 })
     renderAt = null
+    renderId = null
   }
-  const onCancel = () => { renderAt = null; add({ kind: 'cancel-render', count: 1 }) }
+  const onCancel = () => { renderAt = null; renderId = null; add({ kind: 'cancel-render', count: 1 }) }
   const onReady = () => add({ kind: 'canvas-ready', durationMs: performance.now() - started })
-  mindMap.on('node_tree_render_start', onStart)
+  mindMap.on('render_started', onStart)
   mindMap.on('render_complete', onEnd)
   mindMap.on('render_cancelled', onCancel)
   bus.$on('room_canvas_ready', onReady)
@@ -79,7 +82,7 @@ export function startPerformanceDiagnostics(mindMap, roomKey, bus) {
   function cleanup() {
     if (stopped) return
     stopped = true; clearInterval(timer); observers.forEach(o => o.disconnect()); unsubscribe()
-    mindMap.off('node_tree_render_start', onStart); mindMap.off('render_complete', onEnd)
+    mindMap.off('render_started', onStart); mindMap.off('render_complete', onEnd)
     mindMap.off('render_cancelled', onCancel); bus.$off('room_canvas_ready', onReady)
     pending.clear(); queue = []
   }

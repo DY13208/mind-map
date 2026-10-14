@@ -203,7 +203,9 @@ export default {
   },
   fullscreen: {
     fullscreenShow: '全屏查看',
-    fullscreenEdit: '全屏编辑'
+    fullscreenEdit: '全屏编辑',
+    fullscreen: '全屏',
+    exitFullscreen: '退出全屏'
   },
   demonstrate: {
     demonstrate: '进入演示模式'

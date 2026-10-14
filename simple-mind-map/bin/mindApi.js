@@ -1295,6 +1295,7 @@ async function persistPatch(roomKey, ydoc, extra = {}) {
 async function handleApi(req, res) {
   const url = new URL(req.url, 'http://127.0.0.1')
   const pathname = url.pathname
+  require('./collabV2/mcpPresence').observe(req, res, pathname)
 
   // 按 SOP 标题/编号列出 output 目录里已有文件（台账漏记时仍可预览下载）
   if (req.method === 'GET' && pathname === '/api/artifacts/search') {

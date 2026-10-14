@@ -1,12 +1,19 @@
 <template>
   <div class="toolbarFileBtnList" :class="[dir, { isDark }]" @mousedown.prevent>
-    <div
+    <el-tooltip
       v-for="item in list"
       :key="item.key"
+      :disabled="dir === 'v'"
+      :content="item.title || item.label"
+      placement="bottom"
+      effect="dark"
+      :open-delay="280"
+      append-to-body
+    >
+    <div
       class="toolbarBtn"
       :class="{ disabled: item.disabled, busy: item.busy }"
       :data-testid="item.testId"
-      :title="item.title || item.label"
       @click="!item.disabled && $emit('select', item.key)"
     >
       <!-- 图标类挂在内层 <i> 上而不是 .icon 方块上：el-icon-loading 自带旋转动画，
@@ -14,6 +21,7 @@
       <span class="icon"><i :class="[item.iconClass, item.icon]"></i></span>
       <span class="text">{{ item.label }}</span>
     </div>
+    </el-tooltip>
   </div>
 </template>
 

@@ -41,6 +41,7 @@
             peer.shortName
           }}</span>
           <span class="name">{{ peer.name }}</span>
+          <span class="you" v-if="peer.mcp">MCP</span>
           <span class="you" v-if="peer.isMe">{{ $t('cooperate.you') }}</span>
         </div>
       </div>
@@ -648,18 +649,41 @@ export default {
 
     mapV2Peers(peers) {
       const mine = this.collabV2Adapter && this.collabV2Adapter.getClientId()
-      const list = (peers || []).map(peer => ({
-        id: peer.clientId || peer.userId,
-        name: peer.name || peer.userId || 'user',
-        color: peer.color || '#409EFF',
-        shortName: String(peer.name || peer.userId || '?').slice(0, 1),
-        isMe: peer.clientId === mine,
-        avatar: peer.avatar || '',
-        editingUid: peer.editingUid || null
-      }))
+      // The member list counts accounts; node presence still tracks each client.
+      const byAccount = new Map()
+      const ownUserId = this.userId == null ? '' : String(this.userId)
+      ;(peers || []).forEach(peer => {
+        if (!peer) return
+        const userId = peer.userId == null ? '' : String(peer.userId)
+        const clientId = peer.clientId == null ? '' : String(peer.clientId)
+        if (!userId && !clientId) return
+        const key = userId ? `user:${userId}` : `client:${clientId}`
+        const currentClient = !!mine && clientId === String(mine)
+        const isMe = currentClient || (!!ownUserId && userId === ownUserId)
+        const previous = byAccount.get(key)
+        const member = {
+          id: key,
+          name: peer.name || userId || 'user',
+          color: peer.color || '#409EFF',
+          shortName: String(peer.name || userId || '?').slice(0, 1),
+          isMe,
+          avatar: peer.avatar || '',
+          mcp: peer.source === 'mcp',
+          editingUid: peer.editingUid || null
+        }
+        if (!previous || currentClient || (previous.mcp && !member.mcp)) {
+          member.mcp = member.mcp || !!(previous && previous.mcp)
+          member.isMe = member.isMe || !!(previous && previous.isMe)
+          byAccount.set(key, member)
+        } else {
+          previous.isMe = previous.isMe || isMe
+          previous.mcp = previous.mcp || member.mcp
+        }
+      })
+      const list = Array.from(byAccount.values())
       if (!list.some(item => item.isMe)) {
         list.unshift({
-          id: this.userId,
+          id: ownUserId ? `user:${ownUserId}` : 'local:self',
           name: this.userName,
           color: this.userColor,
           shortName: (this.userName || '?').slice(0, 1),
@@ -873,6 +897,7 @@ export default {
                 peer.name,
                 peer.color,
                 peer.avatar,
+                !!peer.mcp,
                 peer.editingUid || null,
                 !!peer.isMe
               ])

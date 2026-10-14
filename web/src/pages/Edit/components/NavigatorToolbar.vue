@@ -10,19 +10,7 @@
     >
       <div class="navigatorContainer customScrollbar">
         <div class="item">
-          <el-select
-            v-model="lang"
-            size="small"
-            style="width: 100px"
-            @change="onLangChange"
-          >
-            <el-option
-              v-for="item in langList"
-              :key="item.value"
-              :label="item.name"
-              :value="item.value"
-            />
-          </el-select>
+          <Scale :isDark="isDark" :mindMap="mindMap"></Scale>
         </div>
         <div class="item">
           <el-tooltip
@@ -34,120 +22,100 @@
           </el-tooltip>
         </div>
         <div class="item">
-          <div class="btn iconfont iconsousuo" @click="showSearch"></div>
-        </div>
-        <div class="item">
-          <MouseAction :isDark="isDark" :mindMap="mindMap"></MouseAction>
-        </div>
-        <div class="item">
-          <el-tooltip
-            effect="dark"
-            :content="
-              openMiniMap
-                ? $t('navigatorToolbar.closeMiniMap')
-                : $t('navigatorToolbar.openMiniMap')
-            "
-            placement="top"
-          >
-            <div class="btn iconfont icondaohang1" @click="toggleMiniMap"></div>
-          </el-tooltip>
-        </div>
-        <div class="item">
-          <!-- <el-switch
-        v-model="isReadonly"
-        :active-text="$t('navigatorToolbar.readonly')"
-        :inactive-text="$t('navigatorToolbar.edit')"
-        @change="readonlyChange"
-      >
-      </el-switch> -->
-          <el-tooltip
-            effect="dark"
-            :content="
-              isReadonly
-                ? $t('navigatorToolbar.edit')
-                : $t('navigatorToolbar.readonly')
-            "
-            placement="top"
-          >
-            <div
-              class="btn iconfont"
-              :class="[isReadonly ? 'iconyanjing' : 'iconbianji1']"
-              v-if="roomCanEdit"
-              @click="readonlyChange"
-            ></div>
-          </el-tooltip>
-        </div>
-        <div class="item">
           <Fullscreen :isDark="isDark" :mindMap="mindMap"></Fullscreen>
         </div>
-        <div class="item">
-          <Scale :isDark="isDark" :mindMap="mindMap"></Scale>
-        </div>
-        <div class="item">
-          <el-tooltip
-            effect="dark"
-            :content="darkModeActionLabel"
-            placement="top"
-          >
-            <div
-              class="btn iconfont"
-              :class="[isDark ? 'iconmoon_line' : 'iconlieri']"
-              role="button"
-              tabindex="0"
-              :aria-label="darkModeActionLabel"
-              @click="toggleDark"
-              @keydown.enter.prevent="toggleDark"
-              @keydown.space.prevent="toggleDark"
-            ></div>
-          </el-tooltip>
-        </div>
-        <!-- <div class="item">
-      <el-tooltip
-        effect="dark"
-        :content="$t('navigatorToolbar.changeSourceCodeEdit')"
-        placement="top"
-      >
-        <div class="btn iconfont iconyuanma" @click="openSourceCodeEdit"></div>
-      </el-tooltip>
-      </div> -->
-        <div class="item">
-          <Demonstrate :isDark="isDark" :mindMap="mindMap"></Demonstrate>
-        </div>
-        <div class="item">
-          <el-dropdown trigger="click" @command="handleCommand">
-            <div class="btn el-icon-more" aria-label="更多操作" title="更多操作"></div>
-            <el-dropdown-menu slot="dropdown">
-              <el-dropdown-item v-if="!isMobile" command="directory">
-                <span class="iconfont icondakai"></span>
-                {{ $t('toolbar.directory') }}
-              </el-dropdown-item>
-              <el-dropdown-item v-if="!isMobile" command="openFile">
-                <span class="iconfont iconwenjian1"></span>
-                {{ $t('toolbar.openFile') }}
-              </el-dropdown-item>
-              <el-dropdown-item
-                v-if="!isReadonly"
-                command="jobHistory"
-                data-testid="run-workbuddy-history"
+        <div class="item extraTools">
+          <el-popover placement="top-end" width="220" trigger="click">
+            <div class="extraToolPanel">
+              <el-select
+                v-model="lang"
+                size="small"
+                style="width: 100%"
+                @change="onLangChange"
               >
-                <span class="el-icon-tickets"></span>
-                运行历史
-              </el-dropdown-item>
-              <el-dropdown-item command="shortcutKey">
-                <span class="iconfont iconjianpan"></span>
-                {{ $t('navigatorToolbar.shortcutKeys') }}
-              </el-dropdown-item>
-              <el-dropdown-item command="aiChat">
-                <span class="iconfont iconAIshengcheng"></span>
-                {{ $t('navigatorToolbar.ai') }}
-              </el-dropdown-item>
-              <el-dropdown-item disabled
-                >{{ $t('navigatorToolbar.current') }}v{{
-                  version
-                }}</el-dropdown-item
-              >
-            </el-dropdown-menu>
-          </el-dropdown>
+                <el-option
+                  v-for="item in langList"
+                  :key="item.value"
+                  :label="item.name"
+                  :value="item.value"
+                />
+              </el-select>
+              <div class="extraRow">
+                <el-tooltip
+                  v-if="roomCanEdit"
+                  effect="dark"
+                  :content="
+                    isReadonly
+                      ? $t('navigatorToolbar.edit')
+                      : $t('navigatorToolbar.readonly')
+                  "
+                  placement="top"
+                >
+                  <div
+                    class="btn iconfont"
+                    :class="[isReadonly ? 'iconyanjing' : 'iconbianji1']"
+                    @click="readonlyChange"
+                  ></div>
+                </el-tooltip>
+                <MouseAction :isDark="isDark" :mindMap="mindMap"></MouseAction>
+                <el-tooltip
+                  effect="dark"
+                  :content="
+                    openMiniMap
+                      ? $t('navigatorToolbar.closeMiniMap')
+                      : $t('navigatorToolbar.openMiniMap')
+                  "
+                  placement="top"
+                >
+                  <div class="btn iconfont icondaohang1" @click="toggleMiniMap"></div>
+                </el-tooltip>
+                <el-tooltip
+                  effect="dark"
+                  :content="darkModeActionLabel"
+                  placement="top"
+                >
+                  <div
+                    class="btn iconfont"
+                    :class="[isDark ? 'iconmoon_line' : 'iconlieri']"
+                    role="button"
+                    tabindex="0"
+                    :aria-label="darkModeActionLabel"
+                    @click="toggleDark"
+                  ></div>
+                </el-tooltip>
+                <Demonstrate :isDark="isDark" :mindMap="mindMap"></Demonstrate>
+              </div>
+              <div class="extraMenu">
+                <button v-if="!isMobile" type="button" @click="handleCommand('directory')">
+                  <span class="iconfont icondakai"></span>
+                  {{ $t('toolbar.directory') }}
+                </button>
+                <button v-if="!isMobile" type="button" @click="handleCommand('openFile')">
+                  <span class="iconfont iconwenjian1"></span>
+                  {{ $t('toolbar.openFile') }}
+                </button>
+                <button
+                  v-if="!isReadonly"
+                  type="button"
+                  data-testid="run-workbuddy-history"
+                  @click="handleCommand('jobHistory')"
+                >
+                  <span class="el-icon-tickets"></span>
+                  运行历史
+                </button>
+                <button type="button" @click="handleCommand('shortcutKey')">
+                  <span class="iconfont iconjianpan"></span>
+                  {{ $t('navigatorToolbar.shortcutKeys') }}
+                </button>
+                <button type="button" @click="handleCommand('aiChat')">
+                  <span class="iconfont iconAIshengcheng"></span>
+                  {{ $t('navigatorToolbar.ai') }}
+                </button>
+                <div class="extraVersion">{{ $t('navigatorToolbar.current') }}v{{ version }}</div>
+              </div>
+            </div>
+            <div slot="reference" class="btn el-icon-more" aria-label="更多画布操作" title="更多"></div>
+          </el-popover>
         </div>
       </div>
       <button
@@ -228,12 +196,14 @@ export default {
       'set_canvas_toolbars_collapsed',
       this.setCanvasToolbarsCollapsed
     )
+    this.$bus.$on('toggle_mini_map', this.onMiniMapToggle)
   },
   beforeDestroy() {
     this.$bus.$off(
       'set_canvas_toolbars_collapsed',
       this.setCanvasToolbarsCollapsed
     )
+    this.$bus.$off('toggle_mini_map', this.onMiniMapToggle)
   },
   methods: {
     ...mapMutations([
@@ -253,9 +223,12 @@ export default {
       this.mindMap.setMode(this.isReadonly ? 'readonly' : 'edit')
     },
 
+    onMiniMapToggle(show) {
+      this.openMiniMap = !!show
+    },
+
     toggleMiniMap() {
-      this.openMiniMap = !this.openMiniMap
-      this.$bus.$emit('toggle_mini_map', this.openMiniMap)
+      this.$bus.$emit('toggle_mini_map', !this.openMiniMap)
     },
 
     onLangChange(lang) {
@@ -308,8 +281,8 @@ export default {
 <style lang="less" scoped>
 .navigatorToolbarDock {
   position: fixed;
-  right: 68px;
-  bottom: 20px;
+  right: 16px;
+  bottom: 16px;
   z-index: 3;
   pointer-events: none;
 
@@ -319,9 +292,7 @@ export default {
 }
 
 .navigatorToolbarActions {
-  position: absolute;
-  left: calc(100% + 12px);
-  bottom: 0;
+  display: none;
 }
 
 .navigatorToolbarWrapper {
@@ -349,6 +320,7 @@ export default {
   }
 
   .collapseToggleBtn {
+    display: none;
     position: absolute;
     left: 50%;
     bottom: calc(100% - 22px);
@@ -360,7 +332,6 @@ export default {
     background-color: #409eff;
     color: #fff;
     cursor: pointer;
-    display: flex;
     align-items: center;
     justify-content: center;
     transform: translateX(-50%);
@@ -391,12 +362,58 @@ export default {
   }
 }
 
+.extraToolPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.extraRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.extraMenu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid rgba(16, 24, 40, 0.08);
+  padding-top: 8px;
+
+  button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 4px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #344054;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover {
+      background: #f2f4f7;
+      color: #409eff;
+    }
+  }
+}
+
+.extraVersion {
+  padding: 6px 4px 0;
+  color: #98a2b3;
+  font-size: 12px;
+}
+
 .navigatorContainer {
-  padding: 0 12px;
+  padding: 0 8px;
   background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 6px;
-  box-shadow: 0 2px 16px 0 rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(16, 24, 40, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
   height: 44px;
   font-size: 12px;
   display: flex;
@@ -405,7 +422,7 @@ export default {
   z-index: 1;
 
   .item {
-    margin-right: 20px;
+    margin-right: 8px;
 
     &:last-of-type {
       margin-right: 0;

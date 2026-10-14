@@ -193,7 +193,7 @@ function updateExpandBtnPos() {
 
 //  创建展开收缩按钮
 function renderExpandBtn() {
-  if (this.isGeneralization) return
+  if (!this.group || this.isGeneralization) return
   if (this.getChildrenLength() <= 0 || this.isRoot) {
     return
   }
@@ -260,7 +260,11 @@ function removeExpandBtn() {
 function showExpandBtn() {
   const { alwaysShowExpandBtn, notShowExpandBtn } = this.mindMap.opt
   if (alwaysShowExpandBtn || notShowExpandBtn) return
+  const group = this.group
+  if (!group) return
   setTimeout(() => {
+    // Hover callbacks may run after this node was removed or recreated.
+    if (this.group !== group) return
     const { isActive, expand } = this.getData()
     if (!isActive && expand !== false && !this._isMouseenter) return
     this.renderExpandBtn()

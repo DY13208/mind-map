@@ -15,6 +15,7 @@ const {
 const { submitOperation, listOperations } = require('./sequencer')
 const { isValidClientId, requireClientId } = require('./protocol')
 const { createPresenceHub } = require('./presenceHub')
+const mcpPresence = require('./mcpPresence')
 const { collabTrace } = require('./trace')
 
 let activeOperationEventBridge = null
@@ -84,7 +85,7 @@ function attachCollabV2(httpServer, options = {}) {
   function broadcastPresence(roomKey, { immediate = false } = {}) {
     const send = () => {
       presenceTimers.delete(roomKey)
-      const peers = presence.list(roomKey)
+      const peers = [...presence.list(roomKey), ...mcpPresence.list(roomKey)]
       const sig = presenceSignature(peers)
       if (presenceSent.get(roomKey) === sig) return
       if (peers.length) presenceSent.set(roomKey, sig)
@@ -109,6 +110,10 @@ function attachCollabV2(httpServer, options = {}) {
     pingTimeout: 20000,
     maxHttpBufferSize: 8 * 1024 * 1024
   })
+  const onMcpPresence = roomKey => broadcastPresence(roomKey)
+  mcpPresence.changes.on('change', onMcpPresence)
+  const mcpPresenceTimer = setInterval(() => mcpPresence.prune(), 5000)
+  mcpPresenceTimer.unref()
 
   let operationEventBridge = null
   if (isCollabV2EventBridgeEnabled()) {
@@ -304,7 +309,7 @@ function attachCollabV2(httpServer, options = {}) {
           themeConfig: metadata.themeConfig,
           layout: metadata.layout,
           sync,
-          peers: presence.list(roomKey)
+          peers: [...presence.list(roomKey), ...mcpPresence.list(roomKey)]
         })
         if (operationEventBridge) {
           operationEventBridge.activateRoom(roomKey, headVersion)
@@ -492,6 +497,8 @@ function attachCollabV2(httpServer, options = {}) {
   })
 
   async function stop() {
+    clearInterval(mcpPresenceTimer)
+    mcpPresence.changes.off('change', onMcpPresence)
     if (operationEventBridge) {
       await operationEventBridge.stop()
       if (activeOperationEventBridge === operationEventBridge) {

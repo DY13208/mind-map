@@ -718,6 +718,7 @@ class Render {
     this.renderSourceList = []
     this.mindMap.emit('node_tree_render_end')
     this.mindMap.emit('render_complete', {
+      renderId: this._diagnosticRenderId,
       renderedNodes: Object.keys(this.nodeCache).length
     })
     callbacks.forEach(fn => fn())
@@ -757,6 +758,8 @@ class Render {
     const forceOverviewPaint = !!this._forceOverviewPaintOnce
     this._forceOverviewPaintOnce = false
     this.isRendering = true
+    this._diagnosticRenderId = (this._diagnosticRenderId || 0) + 1
+    this.mindMap.emit('render_started', { renderId: this._diagnosticRenderId })
     const renderGeneration = this._renderGeneration
     const isLayoutSwitch = this.checkHasRenderSource(CONSTANTS.CHANGE_LAYOUT)
     if (isLayoutSwitch) {
@@ -2491,15 +2494,21 @@ class Render {
   }
 
   waitForRender() {
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
       let settled = false
       const done = () => {
         if (settled) return
         settled = true
+        this.mindMap.off('render_cancelled', done)
         resolve()
       }
-      this.render(done)
-      setTimeout(done, 1200)
+      this.mindMap.on('render_cancelled', done)
+      try {
+        this.render(done)
+      } catch (err) {
+        this.mindMap.off('render_cancelled', done)
+        reject(err)
+      }
     })
   }
 

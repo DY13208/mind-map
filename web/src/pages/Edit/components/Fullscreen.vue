@@ -1,28 +1,48 @@
 <template>
   <div class="fullscreenContainer" :class="{ isDark: isDark }">
     <el-tooltip
-      class="item"
       effect="dark"
-      :content="$t('fullscreen.fullscreenShow')"
+      :content="fullscreenLabel"
       placement="top"
+      append-to-body
     >
-      <div class="btn iconfont iconquanping" @click="toFullscreenShow"></div>
-    </el-tooltip>
-    <el-tooltip
-      class="item"
-      effect="dark"
-      :content="$t('fullscreen.fullscreenEdit')"
-      placement="top"
-    >
-      <div class="btn iconfont iconquanping1" @click="toFullscreenEdit"></div>
+      <div
+        class="btn iconfont"
+        :class="active ? 'iconquanping1' : 'iconquanping'"
+        role="button"
+        tabindex="0"
+        :aria-pressed="String(active)"
+        :aria-label="fullscreenLabel"
+        @click="toggleFullscreen"
+        @keydown.enter.prevent="toggleFullscreen"
+        @keydown.space.prevent="toggleFullscreen"
+      ></div>
     </el-tooltip>
   </div>
 </template>
 
 <script>
-import { fullscrrenEvent, fullScreen } from '@/utils'
+import { fullScreen } from '@/utils'
 
-// 全屏
+function fullscreenElement() {
+  return (
+    document.fullscreenElement ||
+    document.webkitFullscreenElement ||
+    document.mozFullScreenElement ||
+    document.msFullscreenElement ||
+    null
+  )
+}
+
+function exitFullscreen() {
+  const exit =
+    document.exitFullscreen ||
+    document.webkitExitFullscreen ||
+    document.mozCancelFullScreen ||
+    document.msExitFullscreen
+  if (exit) return exit.call(document)
+}
+
 export default {
   props: {
     mindMap: {
@@ -33,23 +53,38 @@ export default {
     }
   },
   data() {
-    return {}
-  },
-  created() {
-    document[fullscrrenEvent] = () => {
-      setTimeout(() => {
-        this.mindMap.resize()
-      }, 1000)
+    return {
+      active: false
     }
   },
+  computed: {
+    fullscreenLabel() {
+      return this.active
+        ? this.$t('fullscreen.exitFullscreen')
+        : this.$t('fullscreen.fullscreen')
+    }
+  },
+  created() {
+    this.onFullscreenChange = () => {
+      this.active = !!fullscreenElement()
+      setTimeout(() => {
+        if (this.mindMap) this.mindMap.resize()
+      }, 300)
+    }
+    document.addEventListener('fullscreenchange', this.onFullscreenChange)
+    document.addEventListener('webkitfullscreenchange', this.onFullscreenChange)
+    this.active = !!fullscreenElement()
+  },
+  beforeDestroy() {
+    document.removeEventListener('fullscreenchange', this.onFullscreenChange)
+    document.removeEventListener('webkitfullscreenchange', this.onFullscreenChange)
+  },
   methods: {
-    // 全屏查看
-    toFullscreenShow() {
-      fullScreen(this.mindMap.el)
-    },
-
-    // 全屏编辑
-    toFullscreenEdit() {
+    toggleFullscreen() {
+      if (fullscreenElement()) {
+        exitFullscreen()
+        return
+      }
       fullScreen(document.body)
     }
   }
@@ -63,20 +98,13 @@ export default {
 
   &.isDark {
     .btn {
-      color: hsla(0,0%,100%,.6);
-    }
-  }
-
-  .item {
-    margin-right: 12px;
-
-    &:last-of-type {
-      margin-right: 0;
+      color: hsla(0, 0%, 100%, 0.6);
     }
   }
 
   .btn {
     cursor: pointer;
+    font-size: 18px;
   }
 }
 </style>

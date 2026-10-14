@@ -204,7 +204,9 @@ export default {
   },
   fullscreen: {
     fullscreenShow: '全螢幕檢視',
-    fullscreenEdit: '全螢幕編輯'
+    fullscreenEdit: '全螢幕編輯',
+    fullscreen: '全螢幕',
+    exitFullscreen: '退出全螢幕'
   },
   demonstrate: {
     demonstrate: '進入展示模式'

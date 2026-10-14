@@ -187,7 +187,9 @@ export default {
   },
   fullscreen: {
     fullscreenShow: 'Hiển thị toàn màn hình',
-    fullscreenEdit: 'Chỉnh sửa toàn màn hình'
+    fullscreenEdit: 'Chỉnh sửa toàn màn hình',
+    fullscreen: 'Toàn màn hình',
+    exitFullscreen: 'Thoát toàn màn hình'
   },
   demonstrate: {
     demonstrate: 'Vào chế độ trình diễn'
