@@ -1,9 +1,6 @@
 <template>
   <div class="mapFileTree">
     <div class="treeHead">
-      <span class="dot red"></span>
-      <span class="dot yellow"></span>
-      <span class="dot green"></span>
       <span class="headLabel">脑图</span>
     </div>
     <div v-if="loading" class="treeState">正在加载…</div>
@@ -237,26 +234,7 @@ export default {
   flex: none;
 }
 
-.dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-
-.dot.red {
-  background: #e06c5a;
-}
-
-.dot.yellow {
-  background: #e6b84d;
-}
-
-.dot.green {
-  background: #5dae73;
-}
-
 .headLabel {
-  margin-left: 6px;
   font-size: 12px;
   color: #98a2b3;
 }

@@ -26,29 +26,6 @@
               <span class="el-icon-folder"></span>
             </button>
           </el-popover>
-          <el-popover
-            v-model="fileMenuShow"
-            placement="bottom-start"
-            width="168"
-            trigger="click"
-            append-to-body
-          >
-            <ToolbarFileBtnList
-              dir="v"
-              :list="menuFileActions"
-              :is-dark="isDark"
-              @select="onFileMenuSelect"
-            />
-            <button
-              slot="reference"
-              type="button"
-              class="dockIconBtn"
-              aria-label="文件菜单"
-              title="文件菜单"
-            >
-              <span class="el-icon-s-operation"></span>
-            </button>
-          </el-popover>
           <button
             v-if="$route.query.room"
             type="button"
@@ -209,6 +186,29 @@
             :is-dark="isDark"
             @select="onFileToolbarAction"
           />
+          <el-popover
+            v-model="fileMenuShow"
+            placement="bottom-end"
+            width="168"
+            trigger="click"
+            append-to-body
+          >
+            <ToolbarFileBtnList
+              dir="v"
+              :list="menuFileActions"
+              :is-dark="isDark"
+              @select="onFileMenuSelect"
+            />
+            <button
+              slot="reference"
+              type="button"
+              class="dockIconBtn"
+              aria-label="文件菜单"
+              title="文件菜单"
+            >
+              <span class="el-icon-s-operation"></span>
+            </button>
+          </el-popover>
           <el-popover
             v-if="overflowFileActions.length"
             v-model="filePopoverShow"
