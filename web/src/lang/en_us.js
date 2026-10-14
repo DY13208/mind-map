@@ -399,8 +399,9 @@ export default {
     flowExpand: 'Complete flow',
     sopRegistry: 'SOP registry',
     cooperate: 'Collab',
-    backToMainMap: 'Back to main map',
-    backToParentMap: 'Back to parent map',
+    home: 'Home',
+    backToMainMap: 'Parent map',
+    backToParentMap: 'Parent map',
     mapNavSaveFailedTip: 'Auto-save has not completed. You are still on this map; please try going back again shortly.',
     mapNavUnsavedTitle: 'Unsaved changes',
     mapNavUnsavedTip:
@@ -657,7 +658,17 @@ export default {
     noAccess: 'You do not have access to this mind map'
   },
   cooperate: {
-    title: 'Collaborative editing',
+    searchOnlinePeers: 'Search online members',
+    viewAllPeers: 'View all ({count})',
+    noMatchingPeers: 'No matching online members',
+    listLoadFailed: 'Could not load list. Please retry.',
+    noMembers: 'No members with assigned access',
+    userSearchHint: 'Showing up to 8 matches. Enter a more specific name to refine results.',
+
+    title: 'Permissions',
+    close: 'Close',
+    connectionTitle: 'Collaboration connection',
+    leaveHint: 'Leaving stops live sync for this map. Closing this window keeps you connected.',
     userName: 'Name',
     userNamePlaceholder: 'Enter your nickname',
     roomName: 'Room',

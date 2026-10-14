@@ -179,13 +179,22 @@
             </div>
           </el-popover>
           <!-- 返回主脑图 / 上级脑图：固定在最右侧，不参与「更多」收纳 -->
-          <ToolbarFileBtnList
+          <ParentMapPicker
             v-if="mapNavBackActions.length"
-            class="mapNavBackList"
-            :list="mapNavBackActions"
-            :is-dark="isDark"
-            @select="onFileToolbarAction"
-          />
+            :visible="parentMapPickerVisible"
+            :room="currentRoomKey()"
+            :busy="mapNavReturning"
+            @close="parentMapPickerVisible = false"
+            @loading="parentMapLoading = $event"
+            @select="returnToParentMap($event)"
+          >
+            <ToolbarFileBtnList
+              class="mapNavBackList"
+              :list="mapNavBackActions"
+              :is-dark="isDark"
+              @select="onFileToolbarAction"
+            />
+          </ParentMapPicker>
           <!-- 本地文件树 -->
           <div
             class="fileTreeBox"
@@ -535,6 +544,7 @@
 </template>
 
 <script>
+import ParentMapPicker from './ParentMapPicker.vue'
 import NodeImage from './NodeImage.vue'
 import NodeHyperlink from './NodeHyperlink.vue'
 import NodeIcon from './NodeIcon.vue'
@@ -552,10 +562,12 @@ import ToolbarNodeBtnList from './ToolbarNodeBtnList.vue'
 import ToolbarFileBtnList from './ToolbarFileBtnList.vue'
 import { throttle, isMobile } from 'simple-mind-map/src/utils/index'
 import { stringifyJsonOffMainThread } from '@/utils/importTree'
-import { navigateToMyMaps } from '@/utils/roomLocation'
+import { navigateToMyMaps, roomFromLocation } from '@/utils/roomLocation'
 import { inspectMapRef } from '@/utils/mapRefNav'
 import {
   buildParentEntryNav,
+  ensureEntryNav,
+  withMapNavSaveDeadline,
   getMapNavContext,
   isParentEntry,
   markMapNavViewRestore,
@@ -863,6 +875,7 @@ const defaultBtnList = [
 
 export default {
   components: {
+    ParentMapPicker,
     NodeImage,
     NodeHyperlink,
     NodeIcon,
@@ -886,6 +899,9 @@ export default {
       toolbarLayoutRevision: 0,
       mapNavContext: null,
       mapNavReturning: false,
+      parentMapPickerVisible: false,
+      parentMapLoading: false,
+      mapNavGeneration: 0,
       fileTreeProps: {
         label: 'name',
         children: 'children',
@@ -1123,8 +1139,8 @@ export default {
 
     mapNavBackActions() {
       const context = this.mapNavContext
-      if (!context) return []
-      const label = context.toMain
+      if (!this.$route.query.room) return []
+      const label = !context || context.toMain
         ? this.$t('toolbar.backToMainMap')
         : this.$t('toolbar.backToParentMap')
       return [
@@ -1132,8 +1148,8 @@ export default {
           key: 'mapNavBack',
           label,
           title: label,
-          icon: 'el-icon-top-left',
-          disabled: this.mapNavReturning,
+          icon: this.mapNavReturning || this.parentMapLoading ? 'el-icon-loading' : 'el-icon-top-left',
+          disabled: this.mapNavReturning || this.parentMapLoading,
           testId: 'map-nav-back'
         }
       ]
@@ -1142,7 +1158,7 @@ export default {
     fileToolbarActions() {
       const actions = []
       if (this.$route.query.room) {
-        actions.push({ key: 'maps', label: '脑图', icon: 'el-icon-back', title: '返回脑图', testId: 'back-to-my-maps' })
+        actions.push({ key: 'maps', label: this.$t('toolbar.home'), icon: 'el-icon-back', title: this.$t('toolbar.home'), testId: 'back-to-my-maps' })
       }
       actions.push({
         key: 'refresh', label: this.$t('toolbar.refresh'),
@@ -1350,6 +1366,8 @@ export default {
       this.computeToolbarShow()
     },
     '$route.fullPath'() {
+      this.mapNavGeneration++
+      this.parentMapPickerVisible = false
       this.refreshMapNavContext()
     },
     collabSaveChip: {
@@ -1404,6 +1422,7 @@ export default {
     this.scheduleAutoRepair()
   },
   beforeDestroy() {
+    this.mapNavGeneration++
     if (this.autoRepairTimer) {
       clearTimeout(this.autoRepairTimer)
       this.autoRepairTimer = null
@@ -4897,23 +4916,33 @@ export default {
       this.$nextTick(this.refreshMapNavContext)
     },
 
-    /** 返回上级脑图：只走本标签页记录的真实访问路径，不用 history.back() 兜底到别的页面 */
-    async returnToParentMap() {
+    /** 历史优先；直接关联由下拉菜单解析，最终复用同一保存与权限校验流程。 */
+    async returnToParentMap(selected) {
       if (this.mapNavReturning) return
       const currentRoom = this.currentRoomKey()
       const context = getMapNavContext(window.history.state, currentRoom)
-      if (!context) {
+      if (selected && selected.fromRoom !== currentRoom) return
+      if (!context && !selected) {
         this.mapNavContext = null
+        this.parentMapPickerVisible = !this.parentMapPickerVisible
         return
       }
+      const parent = selected || context.parent
+      const generation = this.mapNavGeneration
+      const isCurrent = () => this.currentRoomKey() === currentRoom && this.mapNavGeneration === generation
       this.mapNavReturning = true
       try {
         if (!(await this.saveBeforeMapNavLeave())) return
-        if (!(await this.verifyMapNavParentAccess(context.parent.room))) return
-        // 等待期间用户可能已经切走了
-        if (this.currentRoomKey() !== currentRoom) return
-        markMapNavViewRestore(context.parent.room)
-        await this.traverseBackToParentMap(context.parent, currentRoom)
+        if (!isCurrent()) return
+        const targetRoom = parent.roomKey || parent.room
+        if (!(await this.verifyMapNavParentAccess(targetRoom))) {
+          if (context && !selected && isCurrent()) this.parentMapPickerVisible = true
+          return
+        }
+        if (!isCurrent()) return
+        markMapNavViewRestore(targetRoom)
+        if (context && !selected) await this.traverseBackToParentMap(parent, currentRoom)
+        else await this.replaceWithParentMap({ room: targetRoom }, null)
       } catch (err) {
         console.error('[mapNav] return to parent failed', err)
         this.$message.warning(this.$t('mapRef.openFailed'))
@@ -4935,19 +4964,25 @@ export default {
         !this.waitingWriteToLocalFile
       ) return true
       try {
-        const result = await this.prepareReload({ retryPending: true })
-        if (!result || !result.ok || result.timeout) throw new Error('Save preparation failed')
-        await this.flushLocalFileNow()
-        if (!(await this.waitForCollabSaved(MAP_NAV_SAVE_WAIT_MS))) {
-          throw new Error('Save acknowledgement timed out')
-        }
-        const status = this.collabLiveStatus()
-        if (
-          this.waitingWriteToLocalFile ||
-          this.collabBusyReason() ||
-          status.saveState === 'requires_confirmation' ||
-          this.collabSaveState === 'requires_confirmation'
-        ) throw new Error('Map still has unsaved changes')
+        const deadline = Date.now() + MAP_NAV_SAVE_WAIT_MS
+        const currentRoom = this.currentRoomKey()
+        const generation = this.mapNavGeneration
+        await withMapNavSaveDeadline(async () => {
+          const result = await this.prepareReload({ retryPending: true })
+          if (Date.now() >= deadline || this.currentRoomKey() !== currentRoom || this.mapNavGeneration !== generation) throw new Error('Save target changed')
+          if (!result || !result.ok || result.timeout) throw new Error('Save preparation failed')
+          await this.flushLocalFileNow()
+          if (!(await this.waitForCollabSaved(Math.max(1, deadline - Date.now())))) {
+            throw new Error('Save acknowledgement timed out')
+          }
+          const status = this.collabLiveStatus()
+          if (
+            this.waitingWriteToLocalFile ||
+            this.collabBusyReason() ||
+            status.saveState === 'requires_confirmation' ||
+            this.collabSaveState === 'requires_confirmation'
+          ) throw new Error('Map still has unsaved changes')
+        }, MAP_NAV_SAVE_WAIT_MS)
         return true
       } catch (err) {
         console.warn('[mapNav] auto save failed', err)
@@ -4993,7 +5028,7 @@ export default {
      */
     traverseBackToParentMap(parent, fromRoom) {
       const childNav = readEntryNav(window.history.state, fromRoom)
-      return new Promise(resolve => {
+      return new Promise((resolve, reject) => {
         let settled = false
         let timer = null
         const cleanup = () => {
@@ -5010,9 +5045,11 @@ export default {
             resolve()
             return
           }
-          this.replaceWithParentMap(parent, childNav).then(resolve, resolve)
+          this.replaceWithParentMap(parent, childNav).then(resolve, reject)
         }
-        const onPopstate = () => finish(isParentEntry(window.history.state, parent))
+        const onPopstate = () => finish(
+          roomFromLocation() === parent.room && isParentEntry(window.history.state, parent)
+        )
         // 上级条目属于刷新前的文档：浏览器会整页加载上级地址，不能再触发兜底 replace
         const onUnload = () => {
           settled = true
@@ -5028,17 +5065,13 @@ export default {
     },
 
     async replaceWithParentMap(parent, childNav) {
-      if (this.currentRoomKey() === parent.room) return
       const query = { ...this.$route.query, room: parent.room }
       delete query.focus
       delete query.shallowExpand
-      try {
-        await this.$router.replace({ query })
-      } catch (err) {
-        return
-      }
+      if (this.currentRoomKey() !== parent.room) await this.$router.replace({ query })
       if (this.currentRoomKey() !== parent.room) return
-      replaceEntryNav(buildParentEntryNav(childNav && childNav.trail, parent))
+      if (childNav) replaceEntryNav(buildParentEntryNav(childNav.trail, parent))
+      else ensureEntryNav(parent.room)
     },
 
     // 两侧面板等宽；首次溢出时同时出现“更多”，之后各自按半区宽度收纳。

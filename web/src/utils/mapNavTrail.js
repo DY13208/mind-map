@@ -1,6 +1,6 @@
 // 子脑图返回路径：只记录本标签页里用户真实走过的「上级 → 子脑图」路径，不是脑图数据里的父子关系。
 // 存在 history.state 里：每条历史记录各存一份，刷新、前进后退自动取回对应那份；
-// 新标签页 / 直接打开链接没有这份状态，所以不会出现返回按钮。
+// 新标签页 / 直接打开链接没有这份状态，由父脑图关联查询提供返回目标。
 // vue-router 3 的 replace 会保留 history.state 里的自定义字段；它自带的 key 在刷新后会变，不能拿来认条目。
 
 export const MAP_NAV_STATE_FIELD = 'mindMapNav'
@@ -71,7 +71,7 @@ export function readEntryNav(state, currentRoom) {
 }
 
 /**
- * 当前脑图的返回上下文：null = 不显示返回按钮。
+ * 当前脑图的返回上下文：null = 无有效历史路径，由关联查询兜底。
  * toMain：上一级就是用户进入的第一张脑图（显示「返回主脑图」）。
  */
 export function getMapNavContext(state, currentRoom) {
@@ -190,4 +190,17 @@ export function consumeMapNavViewRestore(room, storage = defaultStorage()) {
   } catch (err) {
     return false
   }
+}
+
+/** Bound the entire preparation/write/ack sequence, not just its final wait. */
+export async function withMapNavSaveDeadline(task, timeoutMs = 15000) {
+  let timer
+  try {
+    return await Promise.race([
+      task(),
+      new Promise((resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('Auto-save timed out')), timeoutMs)
+      })
+    ])
+  } finally { clearTimeout(timer) }
 }

@@ -286,7 +286,8 @@ function createFileSystem(options = {}) {
         limit,
         offset,
         cursor: input.cursor,
-        shared
+        shared,
+        includeTeams: !!input.includeTeams
       })
     }
     store.resetQueryCount && store.resetQueryCount()
@@ -322,7 +323,7 @@ function createFileSystem(options = {}) {
       rows = rows.filter(
         row => row.role === 'editor' || row.role === 'viewer'
       )
-    } else {
+    } else if (!input.includeTeams) {
       rows = rows.filter(row => !row.team_id)
     }
     rows = await overlayUserState(rows, userId)
@@ -343,7 +344,7 @@ function createFileSystem(options = {}) {
     // PG 查询使用 offset 分页。游标同时携带已读取数量，避免第二页仍以
     // offset=0 查询而反复返回第一页；保留旧游标的兼容回退。
     const cursor = decodeCursor(opts.cursor)
-    const cursorOffset = Number(cursor && cursor.offset)
+    const cursorOffset = cursor && Number(cursor.offset)
     const pageOffset = Number.isSafeInteger(cursorOffset) && cursorOffset >= 0
       ? cursorOffset
       : opts.offset
@@ -368,7 +369,7 @@ function createFileSystem(options = {}) {
       }
     }
     // Personal file browser excludes team-owned rooms; those live under /spaces.
-    if (kind === 'files' && !opts.shared) {
+    if (kind === 'files' && !opts.shared && !opts.includeTeams) {
       where += ' and r.team_id is null'
     }
     let userParam = 0

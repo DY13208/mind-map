@@ -4,7 +4,7 @@
     :custom-class="'cooperateDialogShell' + (isDark ? ' isDark' : '')"
     :title="$t('cooperate.title')"
     :visible.sync="dialogVisible"
-    width="720px"
+    width="680px"
     append-to-body
   >
     <div class="cooperateBox" :class="{ isDark: isDark }">
@@ -36,21 +36,65 @@
         {{ roomLoadError }}
       </div>
       <div class="peerList" v-if="peerList.length">
-        <div class="peer" v-for="peer in peerList" :key="peer.id">
+        <div class="peer" v-for="peer in visiblePeers" :key="peer.id">
           <span class="avatar" :style="{ background: peer.color }">{{
             peer.shortName
           }}</span>
-          <span class="name">{{ peer.name }}</span>
+          <span class="name" :title="peer.name">{{ peer.name }}</span>
           <span class="you" v-if="peer.isMe">{{ $t('cooperate.you') }}</span>
         </div>
+        <el-popover v-if="peerList.length > visiblePeers.length" placement="bottom-start" width="280" trigger="click" :popper-class="'onlinePeersPopover' + (isDark ? ' isDark' : '')" @show="onlinePeerPage = 1; onlinePeerQuery = ''">
+          <div class="onlinePeersHeading">{{ $t('cooperate.onlineCount', { count: peerList.length }) }}</div>
+          <el-input v-model="onlinePeerQuery" size="mini" clearable prefix-icon="el-icon-search" :placeholder="$t('cooperate.searchOnlinePeers')" @input="onlinePeerPage = 1" @keydown.native.stop></el-input>
+          <div class="onlinePeerList">
+            <div class="onlinePeerRow" v-for="peer in pagedOnlinePeers" :key="peer.id">
+              <span class="avatar" :style="{ background: peer.color }">{{ peer.shortName }}</span>
+              <span class="name" :title="peer.name">{{ peer.name }}</span>
+              <span class="you" v-if="peer.isMe">{{ $t('cooperate.you') }}</span>
+            </div>
+            <div class="onlinePeersEmpty" v-if="!filteredOnlinePeers.length">{{ $t('cooperate.noMatchingPeers') }}</div>
+          </div>
+          <el-pagination v-if="filteredOnlinePeers.length > 8" small layout="prev, pager, next" :page-size="8" :total="filteredOnlinePeers.length" :current-page.sync="onlinePeerPage" :pager-count="5"></el-pagination>
+          <el-button slot="reference" class="peerOverflow" size="mini" round>{{ $t('cooperate.viewAllPeers', { count: peerList.length }) }}</el-button>
+        </el-popover>
       </div>
 
-      <el-tabs v-model="activeDialogTab" class="cooperateTabs" @tab-click="onDialogTabClick">
-        <el-tab-pane :label="$t('acl.share')" name="members">
+      <el-tabs v-model="activeDialogTab" type="card" class="cooperateTabs" @tab-click="onDialogTabClick">
+        <el-tab-pane lazy name="members">
+          <span slot="label" class="dialogTabLabel"><i class="el-icon-lock" aria-hidden="true"></i>{{ $t('acl.share') }}</span>
           <section class="memberPanel" v-if="connected && roomName">
+            <div v-if="roomCanManage" class="memberAdd">
+              <el-input
+                v-model.trim="memberQuery"
+                size="small"
+                :placeholder="$t('acl.searchUsers')"
+                @input="searchMemberUsers"
+                @keydown.native.stop
+              ></el-input>
+              <div class="userHits" v-if="userHits.length">
+                <div
+                  class="memberItem"
+                  v-for="user in userHits"
+                  :key="user.user_id"
+                >
+                  <span class="name">{{ user.name || user.user_id }}</span>
+                  <el-button
+                    type="text"
+                    @click="addMember(user, 'viewer')"
+                    >{{ $t('acl.addViewer') }}</el-button
+                  >
+                  <el-button type="text" @click="addMember(user, 'editor')">{{
+                    $t('acl.addEditor')
+                  }}</el-button>
+                </div>
+              </div>
+              <p class="userSearchHint" v-if="userHits.length === 8">{{ $t('cooperate.userSearchHint') }}</p>
+            </div>
             <div v-if="membersLoading" class="empty">{{ $t('other.loading') }}</div>
+            <div v-else-if="membersError" class="empty">{{ membersError }} <el-button type="text" @click="loadMembers">{{ $t('cooperate.refresh') }}</el-button></div>
+            <div v-else-if="!memberList.length" class="empty">{{ $t('cooperate.noMembers') }}</div>
             <div v-else class="memberList">
-              <div class="memberItem" v-for="item in memberList" :key="item.user_id">
+              <div class="memberItem" v-for="item in pagedMembers" :key="item.user_id">
                 <span
                   class="avatar"
                   :style="memberAvatarStyle(item)"
@@ -81,48 +125,20 @@
                 </template>
               </div>
             </div>
-            <div v-if="roomCanManage" class="memberAdd">
-              <el-input
-                v-model.trim="memberQuery"
-                size="small"
-                :placeholder="$t('acl.searchUsers')"
-                @input="searchMemberUsers"
-                @keydown.native.stop
-              ></el-input>
-              <div class="userHits" v-if="userHits.length">
-                <div
-                  class="memberItem"
-                  v-for="user in userHits"
-                  :key="user.user_id"
-                >
-                  <span class="name">{{ user.name || user.user_id }}</span>
-                  <el-button
-                    type="text"
-                    @click="addMember(user, 'viewer')"
-                    >{{ $t('acl.addViewer') }}</el-button
-                  >
-                  <el-button type="text" @click="addMember(user, 'editor')">{{
-                    $t('acl.addEditor')
-                  }}</el-button>
-                </div>
-              </div>
+            <div class="filePager" v-if="memberList.length">
+              <el-pagination
+                background small layout="total, prev, pager, next"
+                :page-size="memberPageSize" :current-page.sync="memberPage"
+                :total="memberList.length" :pager-count="5" :disabled="membersLoading || !!membersError"
+              ></el-pagination>
             </div>
           </section>
           <div v-else class="empty">{{ $t('cooperate.disconnected') }}</div>
         </el-tab-pane>
 
-        <el-tab-pane :label="$t('cooperate.files')" name="files">
+        <el-tab-pane lazy name="files">
+          <span slot="label" class="dialogTabLabel"><i class="el-icon-folder-opened" aria-hidden="true"></i>{{ $t('cooperate.files') }}</span>
           <section class="filePanel">
-            <div class="fileHead">
-            <div class="fileHeadTitle">
-              <span class="fileCount">{{
-                  $t('cooperate.fileCount', { count: fileTotal })
-                }}</span>
-              </div>
-              <el-button type="text" :disabled="filesLoading" @click="loadFiles">{{
-                $t('cooperate.refresh')
-              }}</el-button>
-            </div>
             <el-input
               v-model.trim="fileQuery"
               class="fileSearch"
@@ -138,6 +154,9 @@
               </div>
               <div
                 class="empty"
+                v-else-if="filesError"
+              >{{ filesError }} <el-button type="text" @click="loadFiles">{{ $t('cooperate.refresh') }}</el-button></div>
+              <div class="empty"
                 v-else-if="!fileList.length"
               >
                 {{
@@ -156,7 +175,7 @@
                 >
                 <div class="fileMeta">
                   <div class="fileTitle">
-                    {{ item.title }}
+                    <span class="fileName" :title="item.title"><i class="el-icon-document" aria-hidden="true"></i>{{ item.title }}</span>
                     <span
                       v-if="connected && roomName === item.roomKey"
                       class="currentTag"
@@ -169,18 +188,17 @@
                   <div class="fileTime">{{ formatTime(item.updatedAt) }}</div>
                 </div>
                 <div class="fileActions" @click.stop>
-                  <el-button type="text" @click="openFile(item)">{{
+                  <el-button type="primary" size="mini" icon="el-icon-folder-opened" class="fileAction fileOpenAction" @click="openFile(item)">{{
                     $t('cooperate.openFile')
                   }}</el-button>
                   <el-button
-                    type="text"
+                    size="mini" icon="el-icon-edit" class="fileAction fileRenameAction"
                     v-if="item.canManage"
                     @click="renameSavedFile(item)"
                     >{{ $t('cooperate.renameFile') }}</el-button
                   >
                   <el-button
-                    type="text"
-                    class="danger"
+                    type="danger" plain size="mini" icon="el-icon-delete" class="fileAction fileDeleteAction"
                     v-if="item.canManage"
                     @click="removeSavedFile(item)"
                     >{{ $t('cooperate.deleteFile') }}</el-button
@@ -189,20 +207,28 @@
                 </div>
               </template>
             </div>
-            <div class="filePager" v-if="fileTotal > filePageSize">
+            <div class="fileBottomBar">
+              <div class="fileSummary">
+                <el-button type="text" icon="el-icon-refresh" :disabled="filesLoading" @click="loadFiles">{{ $t('cooperate.refresh') }}</el-button>
+              </div>
+              <div class="filePager" v-if="fileTotal > 0">
               <el-pagination
-                small
+                background small
                 layout="total, prev, pager, next"
+                :pager-count="5" :disabled="filesLoading || !!filesError"
                 :page-size="filePageSize"
                 :current-page="filePage"
                 :total="fileTotal"
                 @current-change="onFilePageChange"
               ></el-pagination>
+              </div>
             </div>
           </section>
         </el-tab-pane>
 
-        <el-tab-pane :label="$t('cooperate.settingsTab')" name="settings">
+        <el-tab-pane lazy name="settings">
+          <span slot="label" class="dialogTabLabel"><i class="el-icon-setting" aria-hidden="true"></i>{{ $t('cooperate.settingsTab') }}</span>
+          <section class="settingsPanel">
           <el-form class="joinForm" label-width="88px" size="small" @submit.native.prevent>
             <el-form-item :label="$t('cooperate.userName')" required>
               <el-input
@@ -252,21 +278,36 @@
               </el-form-item>
             </el-form>
           </div>
+          <div class="connectionActions">
+            <template v-if="connected">
+              <div class="connectionCopy">
+                <strong>{{ $t('cooperate.connectionTitle') }}</strong>
+                <p>{{ $t('cooperate.leaveHint') }}</p>
+              </div>
+              <el-button type="danger" plain size="small" icon="el-icon-switch-button" @click="leave">{{ $t('cooperate.leave') }}</el-button>
+            </template>
+            <el-button v-else type="primary" :loading="connecting" :disabled="connecting" @click="joinFromDialog">{{ $t('cooperate.join') }}</el-button>
+          </div>
+          </section>
         </el-tab-pane>
 
-        <el-tab-pane :label="$t('cooperate.history')" name="history" :disabled="!connected">
+        <el-tab-pane lazy name="history" :disabled="!connected">
+          <span slot="label" class="dialogTabLabel"><i class="el-icon-time" aria-hidden="true"></i>{{ $t('cooperate.history') }}</span>
           <section class="historyPanel" v-if="connected">
             <div class="fileHead">
               <span>{{ $t('cooperate.history') }}</span>
-              <el-button type="text" @click="loadHistory">{{
+              <el-button type="text" icon="el-icon-refresh" @click="loadHistory">{{
                 $t('cooperate.refresh')
               }}</el-button>
             </div>
-            <div class="empty" v-if="!historyList.length && !historyLoading">
+            <div class="empty" v-if="historyLoading"><i class="el-icon-loading"></i> {{ $t('other.loading') }}</div>
+            <div class="empty" v-else-if="historyError">{{ historyError }} <el-button type="text" @click="loadHistory(false)">{{ $t('cooperate.refresh') }}</el-button></div>
+            <div class="empty" v-else-if="!historyList.length">
               {{ $t('cooperate.noHistory') }}
             </div>
             <div
               class="historyItem"
+              v-show="!historyLoading && !historyError"
               v-for="item in filteredHistory"
               :key="item.operationId"
             >
@@ -280,30 +321,19 @@
                 >{{ $t('toolbar.undo') }}</el-button
               >
             </div>
-            <div class="filePager" v-if="historyList.length > historyPageSize">
+            <div class="filePager" v-if="historyTotal">
               <el-pagination
-                small
-                layout="prev, pager, next"
+                background small :pager-count="5" :disabled="historyLoading || !!historyError"
+                layout="total, prev, pager, next"
                 :page-size="historyPageSize"
-                :current-page.sync="historyPage"
-                :total="historyList.length"
+                :current-page="historyPage"
+                :total="historyTotal"
+                @current-change="onHistoryPageChange"
               ></el-pagination>
             </div>
           </section>
         </el-tab-pane>
       </el-tabs>
-    </div>
-    <div slot="footer" class="dialog-footer">
-      <el-button v-if="connected" @click="leave">{{
-        $t('cooperate.leave')
-      }}</el-button>
-      <el-button
-        type="primary"
-        :disabled="connecting"
-        @click="joinFromDialog"
-        v-else
-        >{{ $t('cooperate.join') }}</el-button
-      >
     </div>
   </el-dialog>
 </template>
@@ -463,6 +493,8 @@ export default {
       userId: '',
       userColor: USER_COLORS[0],
       peerList: [],
+      onlinePeerQuery: '',
+      onlinePeerPage: 1,
       provider: null,
       connectTimer: null,
       saveStatusTimer: null,
@@ -487,7 +519,7 @@ export default {
       filesLoading: false,
       fileQuery: '',
       filePage: 1,
-      filePageSize: 8,
+      filePageSize: 4,
       fileTotal: 0,
       showAdvanced: false,
       httpCollab: false,
@@ -495,7 +527,14 @@ export default {
       historyLoading: false,
       historyPage: 1,
       historyPageSize: 6,
+      historyTotal: 0,
+      historyThroughVersion: null,
+      historyError: '',
+      membersError: '',
+      filesError: '',
       memberList: [],
+      memberPage: 1,
+      memberPageSize: 6,
       membersLoading: false,
       memberQuery: '',
       userHits: [],
@@ -544,12 +583,32 @@ export default {
         : 'saving'
       return this.$t(`cooperate.${status}`)
     },
+    visiblePeers() {
+      return this.peerList.filter(peer => peer.isMe).concat(this.peerList.filter(peer => !peer.isMe)).slice(0, 3)
+    },
+    filteredOnlinePeers() {
+      const q = this.onlinePeerQuery.trim().toLowerCase()
+      return this.peerList.filter(peer => !q || String(peer.name || '').toLowerCase().includes(q))
+    },
+    pagedOnlinePeers() {
+      return this.filteredOnlinePeers.slice((this.onlinePeerPage - 1) * 8, this.onlinePeerPage * 8)
+    },
+    pagedMembers() {
+      const start = (this.memberPage - 1) * this.memberPageSize
+      return this.memberList.slice(start, start + this.memberPageSize)
+    },
     filteredHistory() {
-      const start = (this.historyPage - 1) * this.historyPageSize
-      return this.historyList.slice(start, start + this.historyPageSize)
+      return this.historyList
     }
   },
   watch: {
+    filteredOnlinePeers() {
+      this.onlinePeerPage = Math.min(this.onlinePeerPage, Math.max(1, Math.ceil(this.filteredOnlinePeers.length / 8)))
+    },
+    memberList() {
+      const lastPage = Math.max(1, Math.ceil(this.memberList.length / this.memberPageSize))
+      this.memberPage = Math.min(this.memberPage, lastPage)
+    },
     mindMap(val, prev) {
       if (prev) {
         prev.off('room_acl_denied', this.onAclDenied)
@@ -602,6 +661,8 @@ export default {
     this.tryAutoJoin()
   },
   beforeDestroy() {
+    this._membersAttempt = (this._membersAttempt || 0) + 1
+    this._historyAttempt = (this._historyAttempt || 0) + 1
     this.$bus.$off('showCooperate', this.open)
     this.$bus.$off('map_ref_click', this.onMapRefClick)
     this.$bus.$off('node_dblclick', this.onNodeDblclickMapRef)
@@ -1323,6 +1384,11 @@ export default {
         this.persistCurrentMapView()
         this.leave({ silent: true })
       }
+      this.memberPage = 1
+      this._membersAttempt = (this._membersAttempt || 0) + 1
+      this._historyAttempt = (this._historyAttempt || 0) + 1
+      this.memberList = []; this.membersError = ''; this.membersLoading = false
+      this.historyList = []; this.historyTotal = 0; this.historyThroughVersion = null; this.historyLoading = false
       this.roomName = room
       await this.openSavedRoom({ silent: true })
     },
@@ -1736,6 +1802,9 @@ export default {
     },
 
     leave(options = {}) {
+      this._membersAttempt = (this._membersAttempt || 0) + 1
+      this._historyAttempt = (this._historyAttempt || 0) + 1
+      this.membersLoading = false; this.historyLoading = false
       const silent = !!options.silent
       if (this.connectTimer) {
         clearTimeout(this.connectTimer)
@@ -2157,19 +2226,32 @@ export default {
       return item.actorId === this.userId || item.actorId === 'anonymous'
     },
 
-    async loadHistory() {
+    async loadHistory(reset = true) {
       if (!this.connected || !this.roomName) return
-      this.historyLoading = true
+      if (reset !== false) { this.historyPage = 1; this.historyThroughVersion = null }
+      const room = this.roomName
+      const attempt = this._historyAttempt = (this._historyAttempt || 0) + 1
+      this.historyLoading = true; this.historyError = ''
       try {
-        const data = await getMapAudit(this.roomName, { limit: 30 })
-        this.historyList = (data.items || []).slice().reverse()
-        this.historyPage = 1
+        const data = await getMapAudit(room, {
+          limit: this.historyPageSize, offset: (this.historyPage - 1) * this.historyPageSize,
+          ...(this.historyThroughVersion != null ? { throughVersion: this.historyThroughVersion } : {})
+        })
+        if (attempt !== this._historyAttempt || this.roomName !== room) return
+        this.historyList = data.items || []
+        this.historyTotal = Number(data.total || 0)
+        this.historyThroughVersion = data.throughVersion
+        const lastPage = Math.max(1, Math.ceil(this.historyTotal / this.historyPageSize))
+        if (this.historyPage > lastPage) { this.historyPage = lastPage; await this.loadHistory(false) }
       } catch (err) {
-        this.historyList = []
+        if (attempt !== this._historyAttempt || this.roomName !== room) return
+        this.historyError = this.$t('cooperate.listLoadFailed')
       } finally {
-        this.historyLoading = false
+        if (attempt === this._historyAttempt && this.roomName === room) this.historyLoading = false
       }
     },
+
+    onHistoryPageChange(page) { this.historyPage = page; this.loadHistory(false) },
 
     async undoHistoryItem(item) {
       if (!item || !item.operationId || !this.roomName) return
@@ -2199,12 +2281,13 @@ export default {
 
     async loadFiles() {
       const attempt = (this._filesAttempt = (this._filesAttempt || 0) + 1)
-      this.filesLoading = true
+      this.filesLoading = true; this.filesError = ''
       const query = String(this.fileQuery || '').trim()
       const offset = (this.filePage - 1) * this.filePageSize
       try {
         const data = await listFiles({
           q: query,
+          scope: 'accessible',
           limit: this.filePageSize,
           offset
         })
@@ -2215,10 +2298,14 @@ export default {
         this.fileTotal = Number(
           data.total != null ? data.total : this.fileList.length
         )
+        const lastPage = Math.max(1, Math.ceil(this.fileTotal / this.filePageSize))
+        if (this.filePage > lastPage) {
+          this.filePage = lastPage
+          await this.loadFiles()
+        }
       } catch (err) {
         if (attempt !== this._filesAttempt) return
-        this.fileList = []
-        this.fileTotal = 0
+        this.filesError = this.$t('cooperate.listLoadFailed')
       } finally {
         if (attempt === this._filesAttempt) this.filesLoading = false
       }
@@ -2841,19 +2928,20 @@ export default {
     },
 
     async loadMembers() {
-      if (!this.roomName) {
-        this.memberList = []
-        return
-      }
-      this.membersLoading = true
+      const room = this.roomName
+      const attempt = this._membersAttempt = (this._membersAttempt || 0) + 1
+      if (!room) { this.memberList = []; this.membersError = ''; return }
+      this.membersLoading = true; this.membersError = ''
       try {
-        const data = await getFileMembers(this.roomName)
+        const data = await getFileMembers(room)
+        if (attempt !== this._membersAttempt || this.roomName !== room) return
         this.memberList = data.list || []
         if (data.role || data.canEdit != null) this.applyAccess(data)
       } catch (err) {
-        this.memberList = []
+        if (attempt !== this._membersAttempt || this.roomName !== room) return
+        this.membersError = this.$t('cooperate.listLoadFailed')
       } finally {
-        this.membersLoading = false
+        if (attempt === this._membersAttempt && this.roomName === room) this.membersLoading = false
       }
     },
 
@@ -2930,7 +3018,7 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    min-height: 36px;
+    min-height: 30px;
     padding: 0 12px;
     margin-bottom: 10px;
     border: 1px solid #e6e8eb;
@@ -2984,9 +3072,15 @@ export default {
 
   .peerList {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
     margin-bottom: 12px;
+    > .peer { min-width: 0; flex: 0 1 auto; }
+    > span { flex-shrink: 0; }
+    .name { max-width: 84px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .peerOverflow { white-space: nowrap; }
+
   }
 
   .peer {
@@ -3017,7 +3111,7 @@ export default {
   .filePanel,
   .historyPanel {
     margin-top: 0;
-    padding: 12px;
+    padding: 10px;
     border: 1px solid #e6e8eb;
     border-radius: 10px;
     background: #fff;
@@ -3054,8 +3148,8 @@ export default {
   }
 
   .fileList {
-    min-height: 168px;
-    max-height: 208px;
+    min-height: 192px;
+    max-height: 260px;
     overflow: auto;
   }
 
@@ -3082,8 +3176,9 @@ export default {
     justify-content: space-between;
     gap: 8px;
     width: 100%;
+    box-sizing: border-box;
     margin: 0 0 4px;
-    padding: 10px 10px;
+    padding: 8px 10px;
     border: 1px solid transparent;
     border-radius: 8px;
     cursor: pointer;
@@ -3151,13 +3246,15 @@ export default {
   .userHits {
     border: 1px solid #e6e8eb;
     border-radius: 8px;
-    max-height: 180px;
+    max-height: 260px;
     overflow: auto;
   }
   .memberItem {
     display: flex;
     align-items: center;
     gap: 8px;
+    box-sizing: border-box;
+    min-height: 40px;
     padding: 6px 10px;
     font-size: 13px;
     .avatar {
@@ -3182,9 +3279,12 @@ export default {
     .roleSelect {
       width: 96px;
     }
+    .danger { color: #d14343; }
   }
+  .userSearchHint { margin: 6px 0 0; font-size: 12px; color: #6b7280; }
   .memberAdd {
-    margin-top: 8px;
+    margin-bottom: 12px;
+    .userHits { margin-top: 8px; }
   }
 
   .fileTime {
@@ -3193,16 +3293,59 @@ export default {
     margin-top: 2px;
   }
 
+  .fileMeta { min-width: 0; flex: 1; }
+  .fileTitle { flex-wrap: wrap; gap: 6px; }
+  .fileName { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+  .fileName i { color: #409eff; flex-shrink: 0; }
   .fileActions {
     display: flex;
     align-items: center;
     flex-shrink: 0;
-
-    .danger {
-      color: #dc2626;
-    }
+    gap: 6px;
+    .el-button + .el-button { margin-left: 0; }
+    .fileAction { min-height: 28px; padding: 6px 10px; border-radius: 999px; font-weight: 500; }
+  }
+  .settingsPanel {
+    padding: 14px 12px;
+    border: 1px solid #e6e8eb;
+    border-radius: 10px;
+    background: #fff;
+    .joinForm { margin-top: 0; }
+  }
+  .connectionActions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding-top: 14px;
+    margin-top: 14px;
+    border-top: 1px solid #e6e8eb;
+    .el-button { flex-shrink: 0; }
+  }
+  .connectionCopy {
+    font-size: 13px;
+    strong { font-weight: 600; }
+    p { margin: 6px 0 0; line-height: 1.7; color: #6b7280; }
+  }
+  @media (max-width: 600px) {
+    .statusBar { flex-wrap: wrap; padding: 10px; }
+    .peerCount { margin-left: 0; }
+    .fileItem { flex-direction: column; align-items: stretch; }
+    .fileActions { justify-content: flex-end; .fileAction { min-height: 32px; padding: 8px 12px; } }
+    .connectionActions { align-items: flex-start; flex-direction: column; gap: 12px; }
+    .filePager { justify-content: center; }
   }
 
+  .fileBottomBar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+    .filePager { margin-top: 0; margin-left: auto; }
+  }
+  .fileSummary { display: inline-flex; align-items: center; gap: 6px; }
   .filePager {
     display: flex;
     justify-content: flex-end;
@@ -3274,7 +3417,8 @@ export default {
 
     .filePanel,
     .historyPanel,
-    .memberPanel {
+    .memberPanel,
+    .settingsPanel {
       background: #262b30;
       border-color: hsla(0, 0%, 100%, 0.08);
     }
@@ -3306,6 +3450,8 @@ export default {
       color: hsla(0, 0%, 100%, 0.55);
     }
 
+    .connectionCopy p { color: hsla(0, 0%, 100%, 0.65); }
+    .connectionActions { border-color: hsla(0, 0%, 100%, 0.12); }
     .historyItem {
       border-bottom-color: hsla(0, 0%, 100%, 0.06);
     }
@@ -3344,13 +3490,72 @@ export default {
   margin-top: ~"min(6vh, 48px)" !important;
 
   .el-dialog__body {
-    padding: 12px 20px 8px;
-    max-height: ~"min(calc(100vh - 180px), 560px)";
+    padding: 12px 20px 20px;
+    max-height: ~"min(calc(100vh - 160px), 560px)";
     overflow-y: auto;
   }
 
   .el-dialog__header {
-    padding: 16px 20px 10px;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid #eef0f3;
+  }
+  .el-dialog__headerbtn { top: 18px; right: 20px; }
+  .el-dialog__footer {
+    padding: 10px 20px;
+    border-top: 1px solid #eef0f3;
+    .el-button { min-width: 72px; border-radius: 999px; }
+  }
+  .el-button { border-radius: 999px; padding: 6px 12px; min-height: 28px; font-size: 12px; }
+  .el-input__inner { border-radius: 999px; height: 30px; line-height: 30px; }
+  .el-input__icon { line-height: 30px; }
+  .el-input-group__append { border-radius: 0 999px 999px 0; }
+  .el-input-group .el-input__inner { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  .el-select .el-input__inner { height: 28px; line-height: 28px; }
+  .el-select .el-input__icon { line-height: 28px; }
+  .fileHead { min-height: 26px; margin-bottom: 6px; }
+  .fileHead .el-button, .fileSummary .el-button { background: #edf4ff; color: #2563eb; min-height: 26px; padding: 5px 10px; }
+  .fileCount { padding: 3px 9px; border-radius: 999px; background: #f3f5f8; }
+  .el-pagination.is-background .el-pager li,
+  .el-pagination.is-background .btn-prev,
+  .el-pagination.is-background .btn-next { border-radius: 999px; }
+  .cooperateTabs {
+    .el-tabs__header { margin-bottom: 12px; border: 0; }
+    .el-tabs__nav-wrap::after { display: none; }
+    .el-tabs__nav {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      width: 100%;
+      box-sizing: border-box;
+      gap: 6px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+    .el-tabs__item {
+      height: 32px;
+      line-height: 32px;
+      padding: 0 10px !important;
+      border: 0 !important;
+      border-radius: 999px;
+      background: #f3f5f8;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 500;
+      color: #5b6472;
+      &.is-active { background: #e8f1ff; color: #2563eb; font-weight: 600; }
+      &.is-disabled { color: #9ca3af; }
+      &:focus-visible { outline: 2px solid #409eff; outline-offset: -2px; }
+    }
+    .dialogTabLabel { display: inline-flex; align-items: center; gap: 7px; }
+    .el-tabs__content { min-height: 0; }
+    .el-tabs__nav-prev, .el-tabs__nav-next { display: none; }
+    .el-tabs__nav-wrap.is-scrollable { padding: 0; }
+  }
+  @media (max-width: 600px) {
+    .el-dialog__body { padding: 12px 12px 20px; }
+    .el-dialog__header { padding: 18px 16px; }
+    .el-dialog__headerbtn { right: 16px; top: 20px; }
+    .cooperateTabs .el-tabs__nav { grid-template-columns: repeat(2, minmax(0, 1fr)); transform: none !important; }
   }
 
   .el-dialog__title {
@@ -3373,11 +3578,39 @@ export default {
       color: hsla(0, 0%, 100%, 0.9);
     }
 
+    .el-dialog__header, .el-dialog__footer { border-color: hsla(0,0%,100%,.1); }
+    .cooperateTabs {
+      .el-tabs__nav { background: transparent; }
+      .el-tabs__item { background: #2b333e; color: #c5cdd6; &.is-active { background: #354052; color: #a7cdff; } &.is-disabled { color: #7b8796; } }
+    }
+    .fileHead .el-button, .fileSummary .el-button { background: #293c56; color: #a7cdff; }
+    .fileCount { background: #2b333e; color: #c5cdd6; }
+    .el-input__inner, .el-input-group__append, .el-dialog__footer .el-button { background: #29313b; border-color: #465363; color: #e1e7ee; }
+    .el-input__inner::placeholder { color: #9ba9ba; }
+    .fileActions .fileRenameAction { background: #323a44; border-color: #485463; color: #e1e7ee; }
+    .fileActions .fileDeleteAction { background: rgba(245,108,108,.1); border-color: rgba(245,108,108,.35); color: #ffacac; }
+    .el-pagination.is-background .el-pager li:not(.active), .el-pagination.is-background button { background: #323a44; color: #c5cdd6; }
     .el-pagination button,
     .el-pagination .el-pager li {
       background: transparent;
       color: hsla(0, 0%, 100%, 0.75);
     }
   }
+}
+</style>
+
+<style lang="less">
+.onlinePeersPopover {
+  max-width: calc(100vw - 40px);
+  .onlinePeersHeading { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+  .el-input__inner { height: 28px; line-height: 28px; border-radius: 999px; }
+  .el-input__icon { line-height: 28px; }
+  .onlinePeerList { margin-top: 8px; max-height: 272px; overflow: auto; }
+  .onlinePeerRow { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 12px; }
+  .avatar { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex-shrink: 0; border-radius: 50%; color: #fff; }
+  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .you { color: #2563eb; }
+  .onlinePeersEmpty { text-align: center; font-size: 12px; padding: 16px; color: #6b7280; }
+  &.isDark { background: #262b30; border-color: #465363; color: #dce3ec; .el-input__inner { background: #29313b; border-color: #465363; color: #dce3ec; } .you { color: #a7cdff; } }
 }
 </style>
