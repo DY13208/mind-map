@@ -3542,22 +3542,6 @@ async function handleApi(req, res) {
     return true
   }
 
-  const parentsMatch = pathname.match(/^\/api\/files\/([^/]+)\/parents$/)
-  if (parentsMatch && req.method === 'GET') {
-    try {
-      const result = await require('./parentMaps').listParentMaps(
-        getPool(), req, decodeURIComponent(parentsMatch[1]),
-        Object.fromEntries(url.searchParams)
-      )
-      sendJson(res, 200, { ok: true, ...result })
-    } catch (err) {
-      sendJson(res, err.statusCode || 500, {
-        error: '父脑图查询失败，请重试', code: err.code || 'PARENT_QUERY_FAILED'
-      })
-    }
-    return true
-  }
-
   const refResolveMatch = pathname.match(/^\/api\/files\/([^/]+)\/ref-resolve$/)
   if (refResolveMatch && req.method === 'GET') {
     const roomKey = decodeURIComponent(refResolveMatch[1])

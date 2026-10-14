@@ -137,7 +137,22 @@
   .zoomValue { min-width: 40px; text-align: center; font-variant-numeric: tabular-nums; }
 }
 .formatToolbarDivider { width: 1px; height: 18px; background: #e1e7f0; margin: 0 5px; }
-.attachmentPdfLayout, .attachmentImageSurface { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
+.attachmentPdfLayout, .attachmentImageSurface, .attachmentPresentationLayout { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
+.presentationContent { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
+.presentationToolbar { flex: 0 0 44px; display: flex; align-items: center; justify-content: center; gap: 8px; border-bottom: 1px solid #e3e8f0; background: #f9fafc; color: #617086; font-size: 12px;
+  button, select { height: 28px; border: 0; border-radius: 4px; background: transparent; color: #4e5c70; cursor: pointer; }
+  button:hover, select:hover { background: #eaf0f9; }
+  button:disabled { opacity: .35; cursor: default; }
+}
+.attachmentPagedBody { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.attachmentThumbnailRail { flex: 0 0 168px; box-sizing: border-box; overflow: auto; padding: 12px 10px; border-right: 1px solid #e9edf3; background: #f8fafc;
+  button { display: block; width: 100%; margin: 0 0 10px; padding: 4px; border: 1px solid transparent; border-radius: 6px; background: transparent; cursor: pointer; }
+  button.active { border-color: #287bff; background: #e7f0ff; }
+  .attachmentThumbnail { display: block; min-height: 72px; overflow: hidden; background: #fff; box-shadow: 0 1px 4px rgba(28, 39, 58, .12); }
+  .attachmentThumbnailNumber { display: block; margin-top: 4px; color: #8290a5; font-size: 11px; text-align: center; }
+}
+.presentationViewport { flex: 1; min-width: 0; min-height: 0; overflow: auto; background: #edf1f6; }
+.presentationSlides { min-height: 100%; }
 .attachmentPdfViewport { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 24px; box-sizing: border-box; background: #edf1f6; }
 .attachmentPdfPage { position: relative; max-width: none; margin: 0 auto 20px; background: #fff; box-shadow: 0 2px 8px rgba(28, 39, 58, .12); overflow: hidden;
   canvas { display: block; position: relative; z-index: 1; }
@@ -175,3 +190,60 @@
   th:last-child, td:last-child { width: 110px; white-space: nowrap; }
 }
 @media (max-width:640px) { .attachmentPresentationViewport { padding: 12px; } .attachmentArchiveTable th, .attachmentArchiveTable td { padding: 10px; } }
+body.isDark {
+  .attachmentViewer.el-dialog {
+    background: #262a2e;
+    color: rgba(255, 255, 255, .92);
+    box-shadow: 0 16px 60px rgba(0, 0, 0, .45);
+    .el-dialog__header { border-bottom-color: rgba(255, 255, 255, .08); }
+    .el-dialog__body { background: #262a2e; }
+  }
+  .attachmentFileInfo p { color: rgba(255, 255, 255, .45); }
+  .attachmentFileIcon { background: rgba(255, 255, 255, .08); color: #8eb4ff;
+    &.is-image { color: #c4b5fd; background: rgba(134, 97, 211, .2); }
+    &.is-pdf { color: #f0a8a4; background: rgba(223, 89, 83, .18); }
+    &.is-office { color: #8ddeaf; background: rgba(37, 123, 86, .22); }
+  }
+  .attachmentViewerActions .el-button { border-color: rgba(255, 255, 255, .12); }
+  .attachmentViewerActions .el-button--primary { background: #287bff; border-color: #287bff; color: #fff; }
+  .attachmentViewerState { color: rgba(255, 255, 255, .55);
+    strong { color: rgba(255, 255, 255, .88); }
+  }
+  .attachmentOutline { background: #1c2126; border-right-color: rgba(255, 255, 255, .08);
+    h3 { color: rgba(255, 255, 255, .88); }
+    button { color: rgba(255, 255, 255, .62);
+      &:hover, &.active { color: #8eb4ff; background: rgba(40, 123, 255, .16); }
+    }
+  }
+  .attachmentDocumentViewport, .attachmentWordViewport, .attachmentSpreadsheetViewport, .attachmentArchiveViewport { background: #1b1f23; }
+  .attachmentMarkdownDocument, .attachmentWordDocument { background: #fff; box-shadow: 0 2px 16px rgba(0, 0, 0, .35); }
+  .attachmentTextDocument:not(.is-code) { color: rgba(255, 255, 255, .88); }
+  .attachmentFormatToolbar, .presentationToolbar { background: #22272c; border-bottom-color: rgba(255, 255, 255, .08); color: rgba(255, 255, 255, .65);
+    button, select { color: rgba(255, 255, 255, .75); }
+    button:hover, select:hover { background: rgba(255, 255, 255, .08); }
+    input { background: #1b1f23; border-color: rgba(255, 255, 255, .12); color: rgba(255, 255, 255, .9); }
+  }
+  .formatToolbarDivider { background: rgba(255, 255, 255, .12); }
+  .attachmentThumbnailRail { background: #1c2126; border-right-color: rgba(255, 255, 255, .08);
+    button.active { background: rgba(40, 123, 255, .18); }
+    .attachmentThumbnailNumber { color: rgba(255, 255, 255, .45); }
+  }
+  .attachmentPdfViewport, .attachmentImageViewport, .presentationViewport, .attachmentPresentationViewport { background: #171b1f; }
+  .attachmentPreviewOverlay { background: rgba(23, 27, 31, .92); color: rgba(255, 255, 255, .8); }
+  .attachmentSheetTabs { background: #1c2126; border-bottom-color: rgba(255, 255, 255, .08);
+    button { color: rgba(255, 255, 255, .55); }
+    button.active { color: #8eb4ff; background: #262a2e; }
+  }
+  .attachmentSpreadsheet { color: rgba(255, 255, 255, .88);
+    th, td { border-color: rgba(255, 255, 255, .08); }
+    thead th, tbody th, thead th:first-child { background: #2a3036; color: rgba(255, 255, 255, .5); }
+    tbody td { background: #1e242a; }
+    tbody tr:not(.sheetSpacer):hover td { background: #283038; }
+  }
+  .attachmentSheetStatus { border-top-color: rgba(255, 255, 255, .08); color: rgba(255, 255, 255, .45); }
+  .attachmentArchiveTable { color: rgba(255, 255, 255, .82);
+    th { background: #2a3036; }
+    th, td { border-bottom-color: rgba(255, 255, 255, .08); }
+  }
+  .attachmentLoadSentinel { color: rgba(255, 255, 255, .45); }
+}

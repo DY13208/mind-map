@@ -23,7 +23,11 @@ let presentationRuntime
 export function loadPresentationPreviewRuntime() {
   if (!presentationRuntime) {
     const url = previewAssetUrl('pptx/renderer-1.3.0.js')
-    presentationRuntime = import(/* webpackIgnore: true */ url).catch(error => { presentationRuntime = null; throw error })
+    presentationRuntime = import(/* webpackIgnore: true */ url).then(mod => {
+      const lib = mod.PptxViewer ? mod : mod.default || {}
+      if (!lib.PptxViewer) throw new Error('幻灯片渲染器不可用')
+      return lib
+    }).catch(error => { presentationRuntime = null; throw error })
   }
   return presentationRuntime
 }

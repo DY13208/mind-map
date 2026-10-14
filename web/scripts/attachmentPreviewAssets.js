@@ -21,9 +21,11 @@ module.exports = function prepareAttachmentPreviewAssets() {
   }
   fs.copyFileSync(path.join(pdf, 'LICENSE'), path.join(dest, 'pdf', 'LICENSE'))
   const pptx = path.resolve(path.dirname(require.resolve('@aiden0z/pptx-renderer')), '..')
-  fs.mkdirSync(path.join(dest, 'pptx'), { recursive: true })
-  fs.copyFileSync(path.join(pptx, 'dist/aiden0z-pptx-renderer.browser.es.js'), path.join(dest, 'pptx/renderer-1.3.0.js'))
-  for (const file of ['LICENSE', 'THIRD_PARTY_NOTICES.md']) fs.copyFileSync(path.join(pptx, file), path.join(dest, 'pptx', file))
+  const pptxDest = path.join(dest, 'pptx')
+  fs.rmSync(pptxDest, { recursive: true, force: true })
+  fs.mkdirSync(pptxDest, { recursive: true })
+  fs.copyFileSync(path.join(pptx, 'dist/aiden0z-pptx-renderer.browser.es.js'), path.join(pptxDest, 'renderer-1.3.0.js'))
+  for (const file of ['LICENSE', 'THIRD_PARTY_NOTICES.md']) fs.copyFileSync(path.join(pptx, file), path.join(pptxDest, file))
   esbuild.buildSync({
     entryPoints: [path.join(root, 'src/workers/attachmentWorkbook.worker.js')],
     bundle: true, platform: 'browser', format: 'iife', target: 'es2018',

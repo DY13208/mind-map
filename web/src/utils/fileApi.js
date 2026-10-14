@@ -295,7 +295,6 @@ function requestWithUploadProgress(path, options = {}) {
 export function listFiles(extra = {}) {
   const params = new URLSearchParams()
   if (extra.q) params.set('q', extra.q)
-  if (extra.scope) params.set('scope', extra.scope)
   // `null` represents the root directory.  Keep the key in that case so the
   // server can distinguish it from an unfiltered list request.
   if (Object.prototype.hasOwnProperty.call(extra, 'folderId')) {
@@ -645,8 +644,6 @@ export function getMapAudit(roomKey, extra = {}) {
   if (extra.after != null) params.set('after', String(extra.after))
   if (extra.limit != null) params.set('limit', String(extra.limit))
   if (extra.actorId) params.set('actor', extra.actorId)
-  if (extra.offset != null) params.set('offset', String(extra.offset))
-  if (extra.throughVersion != null) params.set('throughVersion', String(extra.throughVersion))
   const query = params.toString()
   return request(
     `/api/maps/${encodeURIComponent(roomKey)}/audit${query ? `?${query}` : ''}`
@@ -884,11 +881,3 @@ export function createRoomTodo(roomKey, body = {}) {
 }
 
 export { request as apiRequest }
-
-/** 按需查询直接父脑图；后端过滤权限，游标只能用于同一脑图和搜索词。 */
-export function listParentMaps(roomKey, { q = '', cursor = '', signal } = {}) {
-  const params = new URLSearchParams({ limit: '20' })
-  if (q) params.set('q', q)
-  if (cursor) params.set('cursor', cursor)
-  return request(`/api/files/${encodeURIComponent(roomKey)}/parents?${params}`, { signal })
-}

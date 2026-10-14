@@ -402,8 +402,8 @@ export default {
     sopRegistry: 'SOP registry',
     cooperate: 'Collab',
     home: 'Home',
-    backToMainMap: 'Parent map',
-    backToParentMap: 'Parent map',
+    backToMainMap: 'Back to main map',
+    backToParentMap: 'Back to parent map',
     mapNavSaveFailedTip: 'Auto-save has not completed. You are still on this map; please try going back again shortly.',
     mapNavUnsavedTitle: 'Unsaved changes',
     mapNavUnsavedTip:

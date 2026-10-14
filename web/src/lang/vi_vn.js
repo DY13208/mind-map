@@ -377,8 +377,8 @@ export default {
     ai: 'AI',
     cooperate: 'Cộng tác',
     home: 'Trang chủ',
-    backToMainMap: 'Sơ đồ cha',
-    backToParentMap: 'Sơ đồ cha',
+    backToMainMap: 'Về sơ đồ chính',
+    backToParentMap: 'Về sơ đồ cấp trên',
     mapNavSaveFailedTip: 'Chưa hoàn tất tự động lưu. Bạn vẫn ở sơ đồ hiện tại; vui lòng thử quay lại sau.',
     mapNavUnsavedTitle: 'Chưa lưu thay đổi',
     mapNavUnsavedTip:

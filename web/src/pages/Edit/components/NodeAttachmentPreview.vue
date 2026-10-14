@@ -1,7 +1,7 @@
 <template>
   <el-dialog :visible.sync="visible" :title="title" width="92vw" top="5vh" append-to-body
     :custom-class="isMaximized ? 'attachmentViewer is-maximized' : 'attachmentViewer'"
-    :show-close="false" :close-on-click-modal="false" :close-on-press-escape="true" @close="onClosed">
+    :show-close="false" :close-on-click-modal="true" :close-on-press-escape="true" @close="onClosed">
     <header slot="title" class="attachmentViewerHeader">
       <div class="attachmentFileIcon" :class="'is-' + kind"><i :class="fileIcon" aria-hidden="true"></i></div>
       <div class="attachmentFileInfo">

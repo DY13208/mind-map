@@ -861,4 +861,30 @@ export default {
 .historyDatePopper {
   z-index: 4000 !important;
 }
+body.isDark .historyDialog {
+  .historyMapPreview { background: #1b1f23; }
+  .previewToolbar {
+    background: #22272c;
+    border-bottom-color: rgba(255, 255, 255, .08);
+    color: rgba(255, 255, 255, .72);
+  }
+  .previewCanvas,
+  .previewCanvas .smm-mind-map-container { background: #1b1f23 !important; }
+  .previewState { color: rgba(255, 255, 255, .55); }
+  .noteCard {
+    background: #262b30;
+    border-color: rgba(255, 255, 255, .1);
+    color: rgba(255, 255, 255, .88);
+    p { color: rgba(255, 255, 255, .72); }
+  }
+  .timelinePane { background: #1c2126; border-color: rgba(255, 255, 255, .08); }
+  .timelineTools { border-bottom-color: rgba(255, 255, 255, .08); }
+  .dateSep, .dayGroup h4, .versionMeta, .versionSummary, .emptyWrap, .loadMore, .narrowSwitch { color: rgba(255, 255, 255, .45); }
+  .versionItem {
+    strong { color: rgba(255, 255, 255, .9); }
+    &.selected, &:hover { background: rgba(255, 255, 255, .06); }
+  }
+  .el-tag { background: rgba(255, 255, 255, .08); border-color: rgba(255, 255, 255, .12); color: rgba(255, 255, 255, .72); }
+  .restoreStatus { color: #b7ebc8; background: rgba(61, 139, 110, .22); }
+}
 </style>

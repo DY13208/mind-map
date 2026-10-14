@@ -1,222 +1,378 @@
 <template>
   <div
-    class="contextmenuContainer listBox"
+    class="contextmenuContainer"
     v-if="isShow"
     ref="contextmenuRef"
     :style="{ left: left + 'px', top: top + 'px' }"
     :class="{ isDark: isDark, nodeMenu: type === 'node' }"
+    @mouseenter="cancelSubmenuClose"
   >
+    <div class="listBox menuScroll" :class="{ isDark: isDark }">
     <template v-if="type === 'node'">
-      <div
-        class="item"
-        @click="exec('INSERT_NODE', insertNodeBtnDisabled)"
-        :class="{ disabled: insertNodeBtnDisabled }"
-      >
-        <span class="name">{{ $t('contextmenu.insertSiblingNode') }}</span>
-        <span class="desc">Enter</span>
-      </div>
-      <div
-        class="item"
-        @click="exec('INSERT_CHILD_NODE')"
-      >
+      <div class="item" @click="exec('INSERT_CHILD_NODE')">
+        <MenuIcon name="plus" />
         <span class="name">{{ $t('contextmenu.insertChildNode') }}</span>
         <span class="desc">Tab</span>
       </div>
       <div
         class="item"
-        @click="exec('INSERT_PARENT_NODE', insertNodeBtnDisabled)"
+        @click="exec('INSERT_NODE', insertNodeBtnDisabled)"
         :class="{ disabled: insertNodeBtnDisabled }"
       >
-        <span class="name">{{ $t('contextmenu.insertParentNode') }}</span>
-        <span class="desc">Shift + Tab</span>
+        <MenuIcon name="sibling" />
+        <span class="name">{{ $t('contextmenu.insertSiblingNode') }}</span>
+        <span class="desc">Enter</span>
       </div>
-      <div
-        class="item"
-        data-testid="insert-summary"
-        @click="exec('ADD_GENERALIZATION', insertSummaryBtnDisabled)"
-        :class="{ disabled: insertSummaryBtnDisabled }"
-      >
-        <span class="name">{{ $t('contextmenu.insertSummary') }}</span>
-        <span class="desc">Ctrl + G</span>
+      <div class="splitLine"></div>
+      <div class="item" @click="exec('UNEXPAND_ALL')">
+        <MenuIcon name="collapse" />
+        <span class="name">{{ $t('contextmenu.unExpandNodeChild') }}</span>
+        <span class="desc">Ctrl + Alt + C</span>
+      </div>
+      <div class="item" @click="exec('EXPAND_ALL')">
+        <MenuIcon name="expand" />
+        <span class="name">{{ $t('contextmenu.expandNodeChild') }}</span>
+        <span class="desc">Ctrl + Alt + E</span>
+      </div>
+      <div class="splitLine"></div>
+      <div class="item" data-testid="share-node" @click="shareNode">
+        <MenuIcon name="share" />
+        <span class="name">分享此节点</span>
+        <span class="desc">Ctrl + Alt + S</span>
+      </div>
+      <div class="item" data-testid="copy-node-for-ai" @click="copyNodeForAi">
+        <MenuIcon name="clipboard" />
+        <span class="name">复制给 AI（SOP）</span>
+        <span class="desc">Ctrl + Alt + A</span>
       </div>
       <div class="splitLine"></div>
       <div
         class="item"
-        @click="exec('UP_NODE', upNodeBtnDisabled)"
-        :class="{ disabled: upNodeBtnDisabled }"
+        @mouseenter="openSubmenu('structure', $event)"
+        v-on:click="openSubmenu('structure', $event)"
+        @mouseleave="scheduleSubmenuClose"
       >
-        <span class="name">{{ $t('contextmenu.moveUpNode') }}</span>
-        <span class="desc">Ctrl + ↑</span>
+        <MenuIcon name="network" />
+        <span class="name">节点结构</span>
+        <MenuIcon name="chevron" />
       </div>
       <div
         class="item"
-        @click="exec('DOWN_NODE', downNodeBtnDisabled)"
-        :class="{ disabled: downNodeBtnDisabled }"
+        @mouseenter="openSubmenu('content', $event)"
+        v-on:click="openSubmenu('content', $event)"
+        @mouseleave="scheduleSubmenuClose"
       >
-        <span class="name">{{ $t('contextmenu.moveDownNode') }}</span>
-        <span class="desc">Ctrl + ↓</span>
+        <MenuIcon name="pencil" />
+        <span class="name">编辑与内容</span>
+        <MenuIcon name="chevron" />
       </div>
-      <div class="item" @click="exec('UNEXPAND_ALL')">
-        <span class="name">{{ $t('contextmenu.unExpandNodeChild') }}</span>
+      <div
+        class="item"
+        @mouseenter="openSubmenu('style', $event)"
+        v-on:click="openSubmenu('style', $event)"
+        @mouseleave="scheduleSubmenuClose"
+      >
+        <MenuIcon name="palette" />
+        <span class="name">样式与格式</span>
+        <MenuIcon name="chevron" />
       </div>
-      <div class="item" @click="exec('EXPAND_ALL')">
-        <span class="name">{{ $t('contextmenu.expandNodeChild') }}</span>
+      <div
+        class="item"
+        @mouseenter="openSubmenu('more', $event)"
+        v-on:click="openSubmenu('more', $event)"
+        @mouseleave="scheduleSubmenuClose"
+      >
+        <MenuIcon name="ellipsis" />
+        <span class="name">更多操作</span>
+        <MenuIcon name="chevron" />
       </div>
       <div class="splitLine"></div>
       <div class="item danger" @click="exec('REMOVE_NODE')">
+        <MenuIcon name="trash" />
         <span class="name">{{ $t('contextmenu.deleteNode') }}</span>
         <span class="desc">Delete</span>
-      </div>
-      <div class="item danger" @click="exec('REMOVE_CURRENT_NODE')">
-        <span class="name">{{ $t('contextmenu.deleteCurrentNode') }}</span>
-        <span class="desc">Shift + Backspace</span>
-      </div>
-      <div class="splitLine"></div>
-      <div
-        class="item"
-        @click="exec('COPY_NODE', isGeneralization)"
-        :class="{ disabled: isGeneralization }"
-      >
-        <span class="name">{{ $t('contextmenu.copyNode') }}</span>
-        <span class="desc">Ctrl + C</span>
-      </div>
-      <div
-        class="item"
-        @click="exec('CUT_NODE', isGeneralization)"
-        :class="{ disabled: isGeneralization }"
-      >
-        <span class="name">{{ $t('contextmenu.cutNode') }}</span>
-        <span class="desc">Ctrl + X</span>
-      </div>
-      <div class="item" data-testid="copy-node-for-ai" @click="copyNodeForAi">
-        <span class="name">复制给 AI（SOP）</span>
-      </div>
-      <div class="item" @click="exec('PASTE_NODE')">
-        <span class="name">{{ $t('contextmenu.pasteNode') }}</span>
-        <span class="desc">Ctrl + V</span>
-      </div>
-      <template v-if="hasNodeAttachment && hasExplicitNodeContext">
-        <div class="splitLine"></div>
-        <div
-          class="item danger"
-          data-testid="delete-node-attachment"
-          @click="manageNodeAttachment('delete')"
-        >
-          <span class="name">删除附件</span>
-        </div>
-        <div
-          class="item"
-          data-testid="replace-node-attachment"
-          @click="manageNodeAttachment('replace')"
-        >
-          <span class="name">替换附件</span>
-        </div>
-      </template>
-      <div class="splitLine"></div>
-      <div class="item" data-testid="mapref" @click="openMapRef">
-        <span class="name">{{ $t('contextmenu.mapRef') }}</span>
-      </div>
-      <div class="item" @click="clearMapRef" v-if="hasMapRef">
-        <span class="name">{{ $t('contextmenu.removeMapRef') }}</span>
-      </div>
-      <template v-if="hasHyperlink && hasExplicitNodeContext">
-        <div class="item" data-testid="edit-node-hyperlink" @click="editHyperlink">
-          <span class="name">编辑超链接</span>
-        </div>
-        <div class="item danger" data-testid="delete-node-hyperlink" @click="exec('REMOVE_HYPERLINK')">
-          <span class="name">删除超链接</span>
-        </div>
-      </template>
-      <div class="item" @click="exec('REMOVE_NOTE')" v-if="hasNote">
-        <span class="name">{{ $t('contextmenu.removeNote') }}</span>
-      </div>
-      <div class="item" @click="exec('REMOVE_CUSTOM_STYLES')">
-        <span class="name">{{ $t('contextmenu.removeCustomStyles') }}</span>
-      </div>
-      <div class="item" @click="exec('EXPORT_CUR_NODE_TO_PNG')">
-        <span class="name">{{ $t('contextmenu.exportNodeToPng') }}</span>
-      </div>
-      <div class="item" data-testid="share-node" @click="shareNode">
-        <span class="name">分享此节点</span>
-      </div>
-      <div class="splitLine" v-if="enableAi"></div>
-      <div class="item" @click="aiCreate" v-if="enableAi">
-        <span class="name">{{ $t('contextmenu.aiCreate') }}</span>
       </div>
     </template>
     <template v-if="type === 'svg'">
       <div class="item" @click="exec('RETURN_CENTER')">
+        <MenuIcon name="house" />
         <span class="name">{{ $t('contextmenu.backCenter') }}</span>
         <span class="desc">Ctrl + Enter</span>
       </div>
-      <div class="splitLine"></div>
-      <div class="item" @click="exec('EXPAND_ALL')">
-        <span class="name">{{ $t('contextmenu.expandAll') }}</span>
-      </div>
-      <div class="item" @click="exec('UNEXPAND_ALL')">
-        <span class="name">{{ $t('contextmenu.unExpandAll') }}</span>
-      </div>
-      <div class="item">
-        <span class="name">{{ $t('contextmenu.expandTo') }}</span>
-        <span class="el-icon-arrow-right"></span>
-        <div
-          class="subItems listBox"
-          :class="{ isDark: isDark, showLeft: subItemsShowLeft }"
-          style="top: -10px"
-        >
-          <div
-            class="item"
-            v-for="(item, index) in expandList"
-            :key="item"
-            @click="exec('UNEXPAND_TO_LEVEL', false, index + 1)"
-          >
-            {{ item }}
-          </div>
-        </div>
-      </div>
-      <div class="splitLine"></div>
-      <div class="item" @click="exec('RESET_LAYOUT')">
-        <span class="name">{{ $t('contextmenu.arrangeLayout') }}</span>
-        <span class="desc">Ctrl + L</span>
-      </div>
       <div class="item" @click="exec('FIT_CANVAS')">
+        <MenuIcon name="maximize" />
         <span class="name">{{ $t('contextmenu.fitCanvas') }}</span>
         <span class="desc">Ctrl + i</span>
       </div>
-      <div class="item" @click="exec('TOGGLE_ZEN_MODE')">
-        <span class="name">{{ $t('contextmenu.zenMode') }}</span>
-        {{ isZenMode ? '√' : '' }}
+      <div class="splitLine"></div>
+      <div class="item" @click="exec('EXPAND_ALL')">
+        <MenuIcon name="expand" />
+        <span class="name">{{ $t('contextmenu.expandAll') }}</span>
+      </div>
+      <div class="item" @click="exec('UNEXPAND_ALL')">
+        <MenuIcon name="collapse" />
+        <span class="name">{{ $t('contextmenu.unExpandAll') }}</span>
+      </div>
+      <div
+        class="item"
+        @mouseenter="openSubmenu('expand', $event)"
+        v-on:click="openSubmenu('expand', $event)"
+        @mouseleave="scheduleSubmenuClose"
+      >
+        <MenuIcon name="expand" />
+        <span class="name">{{ $t('contextmenu.expandTo') }}</span>
+        <MenuIcon name="chevron" />
+      </div>
+      <div class="item" @click="exec('RESET_LAYOUT')">
+        <MenuIcon name="grid" />
+        <span class="name">{{ $t('contextmenu.arrangeLayout') }}</span>
+        <span class="desc">Ctrl + L</span>
       </div>
       <div class="splitLine"></div>
-      <div class="item" @click="exec('REMOVE_ALL_NODE_CUSTOM_STYLES')">
-        <span class="name">{{
-          $t('contextmenu.removeAllNodeCustomStyles')
-        }}</span>
+      <div class="item" @click="exec('TOGGLE_ZEN_MODE')">
+        <MenuIcon name="focus" />
+        <span class="name">{{ $t('contextmenu.zenMode') }}</span>
+        <span class="desc" v-if="isZenMode">开</span>
       </div>
-      <div class="item">
+      <div class="item" @click="exec('REMOVE_ALL_NODE_CUSTOM_STYLES')">
+        <MenuIcon name="eraser" />
+        <span class="name">{{ $t('contextmenu.removeAllNodeCustomStyles') }}</span>
+      </div>
+      <div
+        class="item"
+        @mouseenter="openSubmenu('clipboard', $event)"
+        v-on:click="openSubmenu('clipboard', $event)"
+        @mouseleave="scheduleSubmenuClose"
+      >
+        <MenuIcon name="clipboard" />
         <span class="name">{{ $t('contextmenu.copyToClipboard') }}</span>
-        <span class="el-icon-arrow-right"></span>
-        <div
-          class="subItems listBox"
-          :class="{ isDark: isDark, showLeft: subItemsShowLeft }"
-          style="top: -130px"
-        >
-          <div
-            class="item"
-            v-for="item in copyList"
-            :key="item.value"
-            @click="copyToClipboard(item.value)"
-          >
-            {{ item.name }}
-          </div>
-        </div>
+        <MenuIcon name="chevron" />
       </div>
     </template>
+    </div>
+    <div v-if="activeSubmenu"
+      ref="submenuRef"
+      class="submenu listBox"
+      :class="{ isDark: isDark }"
+      :style="{ left: submenuLeft + 'px', top: submenuTop + 'px' }"
+      @mouseenter="cancelSubmenuClose"
+      @mouseleave="scheduleSubmenuClose"
+    >
+      <template v-if="activeSubmenu === 'structure'">
+        <div
+          class="item"
+          @click="exec('INSERT_PARENT_NODE', insertNodeBtnDisabled)"
+          :class="{ disabled: insertNodeBtnDisabled }"
+        >
+          <MenuIcon name="plus" />
+          <span class="name">{{ $t('contextmenu.insertParentNode') }}</span>
+          <span class="desc">Shift + Tab</span>
+        </div>
+        <div
+          class="item"
+          data-testid="insert-summary"
+          @click="exec('ADD_GENERALIZATION', insertSummaryBtnDisabled)"
+          :class="{ disabled: insertSummaryBtnDisabled }"
+        >
+          <MenuIcon name="summary" />
+          <span class="name">{{ $t('contextmenu.insertSummary') }}</span>
+          <span class="desc">Ctrl + G</span>
+        </div>
+        <div
+          class="item"
+          @click="exec('UP_NODE', upNodeBtnDisabled)"
+          :class="{ disabled: upNodeBtnDisabled }"
+        >
+          <MenuIcon name="up" />
+          <span class="name">{{ $t('contextmenu.moveUpNode') }}</span>
+          <span class="desc">Ctrl + ↑</span>
+        </div>
+        <div
+          class="item"
+          @click="exec('DOWN_NODE', downNodeBtnDisabled)"
+          :class="{ disabled: downNodeBtnDisabled }"
+        >
+          <MenuIcon name="down" />
+          <span class="name">{{ $t('contextmenu.moveDownNode') }}</span>
+          <span class="desc">Ctrl + ↓</span>
+        </div>
+        <div
+          class="item"
+          :class="{ disabled: isGeneralization }"
+          v-on:click="useNodeTool('associativeLine')"
+        >
+          <MenuIcon name="curve" />
+          <span class="name">{{ $t('toolbar.associativeLine') }}</span>
+        </div>
+      </template>
+      <template v-if="activeSubmenu === 'content'">
+        <div
+          class="item"
+          @click="exec('COPY_NODE', isGeneralization)"
+          :class="{ disabled: isGeneralization }"
+        >
+          <MenuIcon name="copy" />
+          <span class="name">{{ $t('contextmenu.copyNode') }}</span>
+          <span class="desc">Ctrl + C</span>
+        </div>
+        <div
+          class="item"
+          @click="exec('CUT_NODE', isGeneralization)"
+          :class="{ disabled: isGeneralization }"
+        >
+          <MenuIcon name="scissors" />
+          <span class="name">{{ $t('contextmenu.cutNode') }}</span>
+          <span class="desc">Ctrl + X</span>
+        </div>
+        <div class="item" @click="exec('PASTE_NODE')">
+          <MenuIcon name="paste" />
+          <span class="name">{{ $t('contextmenu.pasteNode') }}</span>
+          <span class="desc">Ctrl + V</span>
+        </div>
+        <div class="splitLine"></div>
+        <div class="item" v-on:click="useNodeTool('image')">
+          <MenuIcon name="image" />
+          <span class="name">{{ $t('toolbar.image') }}</span>
+        </div>
+        <div class="item" v-on:click="useNodeTool('icon')">
+          <MenuIcon name="smiley" />
+          <span class="name">{{ $t('toolbar.icon') }}</span>
+        </div>
+        <div class="item" v-if="!hasHyperlink" v-on:click="useNodeTool('link')">
+          <MenuIcon name="link" />
+          <span class="name">{{ $t('toolbar.link') }}</span>
+        </div>
+        <div class="item" v-on:click="useNodeTool('note')">
+          <MenuIcon name="note" />
+          <span class="name">{{ $t('toolbar.note') }}</span>
+        </div>
+        <div class="item" v-on:click="useNodeTool('tag')">
+          <MenuIcon name="tag" />
+          <span class="name">{{ $t('toolbar.tag') }}</span>
+        </div>
+        <div
+          class="item"
+          v-if="openNodeRichText"
+          :class="{ disabled: isGeneralization }"
+          v-on:click="useNodeTool('formula')"
+        >
+          <MenuIcon name="formula" />
+          <span class="name">{{ $t('toolbar.formula') }}</span>
+        </div>
+        <div
+          class="item"
+          v-if="!hasNodeAttachment"
+          :class="{ disabled: isGeneralization }"
+          v-on:click="useNodeTool('attachment')"
+        >
+          <MenuIcon name="attachment" />
+          <span class="name">{{ $t('toolbar.attachment') }}</span>
+        </div>
+        <div class="item" data-testid="mapref" @click="openMapRef">
+          <MenuIcon name="network" />
+          <span class="name">{{ $t('contextmenu.mapRef') }}</span>
+        </div>
+        <div class="item" @click="clearMapRef" v-if="hasMapRef">
+          <MenuIcon name="unlink" />
+          <span class="name">{{ $t('contextmenu.removeMapRef') }}</span>
+        </div>
+        <template v-if="hasHyperlink && hasExplicitNodeContext">
+          <div class="item" data-testid="edit-node-hyperlink" @click="editHyperlink">
+            <MenuIcon name="link" />
+            <span class="name">编辑超链接</span>
+          </div>
+          <div class="item danger" data-testid="delete-node-hyperlink" @click="exec('REMOVE_HYPERLINK')">
+            <MenuIcon name="unlink" />
+            <span class="name">删除超链接</span>
+          </div>
+        </template>
+        <div class="item" @click="exec('REMOVE_NOTE')" v-if="hasNote">
+          <MenuIcon name="eraser" />
+          <span class="name">{{ $t('contextmenu.removeNote') }}</span>
+        </div>
+        <template v-if="hasNodeAttachment && hasExplicitNodeContext">
+          <div class="item danger" data-testid="delete-node-attachment" @click="manageNodeAttachment('delete')">
+            <MenuIcon name="trash" />
+            <span class="name">删除附件</span>
+          </div>
+          <div class="item" data-testid="replace-node-attachment" @click="manageNodeAttachment('replace')">
+            <MenuIcon name="attachment" />
+            <span class="name">替换附件</span>
+          </div>
+        </template>
+      </template>
+      <template v-if="activeSubmenu === 'style'">
+        <div
+          class="item"
+          :class="{ disabled: isGeneralization }"
+          v-on:click="useNodeTool('painter')"
+        >
+          <MenuIcon name="brush" />
+          <span class="name">{{ $t('toolbar.painter') }}</span>
+        </div>
+        <div
+          class="item"
+          :class="{ disabled: isGeneralization }"
+          v-on:click="useNodeTool('outerFrame')"
+        >
+          <MenuIcon name="frame" />
+          <span class="name">{{ $t('toolbar.outerFrame') }}</span>
+        </div>
+        <div class="item" @click="exec('REMOVE_CUSTOM_STYLES')">
+          <MenuIcon name="eraser" />
+          <span class="name">{{ $t('contextmenu.removeCustomStyles') }}</span>
+        </div>
+      </template>
+      <template v-if="activeSubmenu === 'more'">
+        <div class="item danger" @click="exec('REMOVE_CURRENT_NODE')">
+          <MenuIcon name="trash" />
+          <span class="name">{{ $t('contextmenu.deleteCurrentNode') }}</span>
+          <span class="desc">Shift + Backspace</span>
+        </div>
+        <div class="item" @click="exec('EXPORT_CUR_NODE_TO_PNG')">
+          <MenuIcon name="image" />
+          <span class="name">{{ $t('contextmenu.exportNodeToPng') }}</span>
+        </div>
+        <div
+          class="item"
+          :class="{ disabled: isGeneralization || (node && node.isRoot) }"
+          v-on:click="useNodeTool('flowExpand')"
+        >
+          <MenuIcon name="spark" />
+          <span class="name">{{ $t('toolbar.flowExpand') }}</span>
+        </div>
+        <div class="item" @click="aiCreate" v-if="enableAi">
+          <MenuIcon name="pencil" />
+          <span class="name">{{ $t('contextmenu.aiCreate') }}</span>
+        </div>
+      </template>
+      <template v-if="activeSubmenu === 'expand'">
+        <div
+          class="item"
+          v-for="(item, index) in expandList"
+          :key="item"
+          @click="exec('UNEXPAND_TO_LEVEL', false, index + 1)"
+        >
+          <span class="name">{{ item }}</span>
+        </div>
+      </template>
+      <template v-if="activeSubmenu === 'clipboard'">
+        <div
+          class="item"
+          v-for="item in copyList"
+          :key="item.value"
+          @click="copyToClipboard(item.value)"
+        >
+          <span class="name">{{ item.name }}</span>
+        </div>
+      </template>
+    </div>
   </div>
 </template>
 
 <script>
 import { mapState, mapMutations } from 'vuex'
+import MenuIcon from './ContextmenuIcon.vue'
 import { getTextFromHtml, imgToDataUrl } from 'simple-mind-map/src/utils'
 import { transformToMarkdown } from 'simple-mind-map/src/parse/toMarkdown'
 import { transformToTxt } from 'simple-mind-map/src/parse/toTxt'
@@ -227,6 +383,7 @@ import { getRuntimeConfig } from '@/utils/runtimeConfig'
 
 // 右键菜单
 export default {
+  components: { MenuIcon },
   props: {
     mindMap: {
       type: Object
@@ -260,7 +417,10 @@ export default {
       subItemsShowLeft: false,
       isNodeMousedown: false,
       selectedNodes: [],
-      hasExplicitNodeContext: false
+      hasExplicitNodeContext: false,
+      activeSubmenu: '',
+      submenuLeft: 0,
+      submenuTop: 0
     }
   },
   computed: {
@@ -268,6 +428,7 @@ export default {
       isZenMode: state => state.localConfig.isZenMode,
       isDark: state => state.localConfig.isDark,
       enableAi: state => state.localConfig.enableAi,
+      openNodeRichText: state => state.localConfig.openNodeRichText,
       roomCanShare: state => state.roomCanShare
     }),
     expandList() {
@@ -388,7 +549,27 @@ export default {
     this.$bus.$on('node_mousedown', this.onNodeMousedown)
     this.$bus.$on('node_mouseup', this.onNodeMouseup)
   },
+  mounted() {
+    this.bindMenuShortcuts()
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      document.addEventListener('pointerdown', this.onOutsidePointer, true)
+    }
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('keydown', this.onMenuKeydown)
+    }
+  },
   beforeDestroy() {
+    if (this._menuShortcuts && this.mindMap && this.mindMap.keyCommand) {
+      this._menuShortcuts.forEach(([key, handler]) => {
+        this.mindMap.keyCommand.removeShortcut(key, handler)
+      })
+    }
+    if (typeof document !== 'undefined' && document.removeEventListener) {
+      document.removeEventListener('pointerdown', this.onOutsidePointer, true)
+    }
+    if (typeof window !== 'undefined' && window.removeEventListener) {
+      window.removeEventListener('keydown', this.onMenuKeydown)
+    }
     this.$bus.$off('node_contextmenu', this.show)
     this.$bus.$off('multi_select_end', this.onMultiSelectEnd)
     this.$bus.$off('node_click', this.hide)
@@ -401,7 +582,34 @@ export default {
     this.$bus.$off('node_mouseup', this.onNodeMouseup)
   },
   methods: {
-    ...mapMutations(['setLocalConfig']),
+    ...mapMutations(['setLocalConfig', 'setActiveSidebar']),
+
+    useNodeTool(name) {
+      if (!this.node) return
+      if (!this.editable) {
+        if (this.$message) this.$message.warning('当前为只读权限，无法修改导图')
+        return
+      }
+      const structureTool = ['painter', 'associativeLine', 'formula', 'attachment', 'outerFrame', 'flowExpand'].includes(name)
+      if (structureTool && this.isGeneralization) return
+      if (name === 'flowExpand' && this.node.isRoot) return
+      const nodes = this.resolveLiveSelectedNodes()
+      const list = nodes.length ? nodes : [this.node]
+      this.hide()
+      if (name === 'image') this.$bus.$emit('showNodeImage')
+      else if (name === 'icon') {
+        this.$bus.$emit('close_node_icon_toolbar')
+        this.setActiveSidebar('nodeIconSidebar')
+      } else if (name === 'link') this.$bus.$emit('showNodeLink')
+      else if (name === 'note') this.$bus.$emit('showNodeNote')
+      else if (name === 'tag') this.$bus.$emit('showNodeTag')
+      else if (name === 'painter') this.$bus.$emit('startPainter')
+      else if (name === 'associativeLine') this.$bus.$emit('createAssociativeLine')
+      else if (name === 'formula') this.setActiveSidebar('formulaSidebar')
+      else if (name === 'attachment') this.$bus.$emit('selectAttachment', list)
+      else if (name === 'outerFrame') this.$bus.$emit('execCommand', 'ADD_OUTER_FRAME')
+      else if (name === 'flowExpand') this.$bus.$emit('node_flow_expand', list[0])
+    },
 
     async copyNodeForAi() {
       const node = this.node
@@ -725,6 +933,85 @@ export default {
       this.hasExplicitNodeContext = false
       this.numberType = ''
       this.numberLevel = ''
+      this.activeSubmenu = ''
+    },
+
+    bindMenuShortcuts() {
+      if (!this.mindMap || !this.mindMap.keyCommand) return
+      const actions = [
+        ['Control+Alt+c', 'UNEXPAND_ALL'],
+        ['Control+Alt+e', 'EXPAND_ALL'],
+        ['Control+Alt+s', 'share'],
+        ['Control+Alt+a', 'sop']
+      ]
+      this._menuShortcuts = actions.map(([key, action]) => {
+        const handler = () => this.runMenuShortcut(action)
+        this.mindMap.keyCommand.addShortcut(key, handler)
+        return [key, handler]
+      })
+    },
+
+    runMenuShortcut(action) {
+      const active =
+        (this.mindMap &&
+          this.mindMap.renderer &&
+          this.mindMap.renderer.activeNodeList) ||
+        []
+      const menuNode = this.isShow && this.type === 'node' ? this.node : null
+      const node = action === 'share' && menuNode ? menuNode : active[0]
+      if (!node) return
+      this.node = node
+      if (action === 'share') this.shareNode()
+      else if (action === 'sop') this.copyNodeForAi()
+      else this.exec(action)
+    },
+
+    openSubmenu(name, event) {
+      this.cancelSubmenuClose()
+      const item = event.currentTarget.getBoundingClientRect()
+      const menu =
+        (this.$refs.submenuRef && this.$refs.submenuRef.getBoundingClientRect()) ||
+        {}
+      const width = menu.width || 280
+      const height = menu.height || 360
+      let left = item.right
+      if (left + width > window.innerWidth) left = item.left - width
+      let top = item.top
+      if (top + height > window.innerHeight) {
+        top = window.innerHeight - height - 10
+      }
+      this.submenuLeft = left
+      this.submenuTop = top
+      this.activeSubmenu = name
+    },
+
+    scheduleSubmenuClose() {
+      if (typeof clearTimeout === 'function') clearTimeout(this._submenuTimer)
+      if (typeof setTimeout !== 'function') {
+        this.activeSubmenu = ''
+        return
+      }
+      this._submenuTimer = setTimeout(() => {
+        this.activeSubmenu = ''
+      }, 160)
+    },
+
+    cancelSubmenuClose() {
+      if (typeof clearTimeout === 'function') clearTimeout(this._submenuTimer)
+    },
+
+    onOutsidePointer(event) {
+      if (!this.isShow) return
+      if (this.$el && this.$el.contains(event.target)) return
+      const submenu = this.$refs.submenuRef
+      if (submenu && submenu.contains && submenu.contains(event.target)) return
+      this.hide()
+    },
+
+    onMenuKeydown(event) {
+      if (!this.isShow || event.key !== 'Escape') return
+      if (event.stopPropagation) event.stopPropagation()
+      this.hide()
     },
 
     // 执行命令
@@ -916,103 +1203,115 @@ export default {
 
 <style lang="less" scoped>
 .listBox {
-  width: 250px;
+  width: 280px;
   background: #fff;
-  box-shadow: 0 4px 12px 0 hsla(0, 0%, 69%, 0.5);
-  border-radius: 4px;
-  padding-top: 16px;
-  padding-bottom: 16px;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.12);
+  border-radius: 12px;
+  padding: 6px;
+  box-sizing: border-box;
 
   &.isDark {
-    background: #363b3f;
+    background: #262a2e;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   }
 }
+
 .contextmenuContainer {
   position: fixed;
-  max-width: calc(100vw - 20px);
-  max-height: calc(100vh - 20px);
-  box-sizing: border-box;
-  // 只有节点菜单需要滚动；画布菜单保留可溢出的子菜单。
-  &.nodeMenu {
-    overflow-y: auto;
-  }
-  font-size: 14px;
+  z-index: 3000;
+  font-size: 13px;
   font-family: PingFangSC-Regular, PingFang SC;
   font-weight: 400;
   color: #1a1a1a;
+}
 
-  &.isDark {
-    color: #fff;
+.menuScroll,
+.submenu {
+  max-width: calc(100vw - 20px);
+  max-height: calc(100vh - 20px);
+  overflow: auto;
+}
 
-    .item {
-      &:hover {
-        background: hsla(0, 0%, 100%, 0.05);
-      }
-    }
-  }
+.submenu {
+  position: fixed;
+  z-index: 3001;
+}
+
+.contextmenuContainer.isDark,
+.submenu.isDark {
+  color: rgba(255, 255, 255, 0.92);
 
   .splitLine {
-    width: 95%;
-    height: 1px;
-    background-color: #e9edf2;
-    margin: 2px auto;
+    background: rgba(255, 255, 255, 0.08);
   }
 
-  .item {
-    position: relative;
-    height: 28px;
-    padding: 0 16px;
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+  .item:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
 
-    &.danger {
-      color: #f56c6c;
-    }
+  .desc,
+  .item /deep/ .menuIcon {
+    color: rgba(255, 255, 255, 0.45);
+  }
 
-    &:hover {
-      background: #f5f5f5;
+  .item.danger,
+  .item.danger .desc,
+  .item.danger /deep/ .menuIcon {
+    color: #f87171;
+  }
+}
 
-      .subItems {
-        visibility: visible;
-      }
-    }
+.splitLine {
+  height: 1px;
+  background: #eef0f3;
+  margin: 4px 8px;
+}
 
-    &.disabled {
-      color: grey;
-      cursor: not-allowed;
-      pointer-events: none;
+.item {
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 
-      &:hover {
-        background: #fff;
-      }
-    }
+  /deep/ .menuIcon {
+    flex: none;
+    color: #667085;
+  }
 
-    .name {
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
+  .name {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
+  .desc {
+    flex: none;
+    color: #98a2b3;
+    font-size: 12px;
+  }
+
+  &:hover {
+    background: #f3f4f6;
+  }
+
+  &.danger {
+    color: #dc2626;
+
+    /deep/ .menuIcon,
     .desc {
-      color: #999;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      color: #dc2626;
     }
+  }
 
-    .subItems {
-      position: absolute;
-      left: 100%;
-      visibility: hidden;
-      width: 150px;
-      cursor: auto;
-
-      &.showLeft {
-        left: -150px;
-      }
-    }
+  &.disabled {
+    color: #98a2b3;
+    cursor: not-allowed;
+    pointer-events: none;
   }
 }
 </style>

@@ -1682,13 +1682,6 @@ async function initSchemaOnce() {
       primary key (room_key, uid)
     )
   `)
-  // Reverse map navigation scans only live nodes carrying a mapRef, not the
-  // full node table. No duplicated relation table or content backfill needed.
-  await pool.query(`
-    create index if not exists room_nodes_live_map_ref_idx
-    on room_nodes(room_key)
-    where deleted_at is null and data ? 'mapRef'
-  `)
   // pg_trgm is an optional acceleration for explicit fuzzy queries.  A
   // restricted production role may not be allowed to install extensions;
   // that must not prevent the exact UID/name/path indexes from starting.

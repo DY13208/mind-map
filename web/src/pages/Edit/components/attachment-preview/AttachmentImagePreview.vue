@@ -8,7 +8,7 @@
     </div>
     <div v-if="loading" class="attachmentViewerState" role="status"><i class="el-icon-loading"></i><strong>正在加载图片…</strong></div>
     <div v-else-if="error" class="attachmentViewerState" role="alert"><i class="el-icon-picture-outline"></i><strong>{{ error }}</strong><el-button size="small" @click="$emit('download')">下载原文件</el-button></div>
-    <div v-else ref="viewport" class="attachmentImageViewport" tabindex="0" aria-label="图片预览">
+    <div v-else ref="viewport" class="attachmentImageViewport" tabindex="0" aria-label="图片预览" @wheel.prevent="onWheel">
       <div class="attachmentImageStage"><img :src="url" :alt="source.fileName" :style="{ width: fittedWidth ? fittedWidth * zoom / 100 + 'px' : 'auto' }" @error="error = '图片加载失败，请下载后查看'" /></div>
     </div>
   </section>
@@ -23,6 +23,10 @@ export default {
   beforeDestroy() { this._disposed = true; if (this._controller) this._controller.abort(); if (this._resize) this._resize.disconnect(); if (this.url) URL.revokeObjectURL(this.url) },
   methods: {
     changeZoom(delta) { this.zoom = Math.max(25, Math.min(400, this.zoom + delta)) },
+    onWheel(event) {
+      if (this.loading || this.error || !event || !event.deltaY) return
+      this.changeZoom(event.deltaY < 0 ? 25 : -25)
+    },
     fit() {
       if (this._disposed || !this.$refs.viewport || !this._dimensions) return
       const el = this.$refs.viewport

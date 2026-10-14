@@ -537,9 +537,84 @@ function createTextNode(specifyText) {
   }
 }
 
+function hyperlinkHoverLabel(hyperlink, hyperlinkTitle) {
+  const title = String(hyperlinkTitle || '').trim()
+  const url = String(hyperlink || '').trim()
+  return { title, url, text: title || url }
+}
+
+function ensureHyperlinkTip(mindMap) {
+  if (this.hyperlinkTipEl) return this.hyperlinkTipEl
+  const tip = document.createElement('div')
+  tip.className = 'smm-hyperlink-tip'
+  tip.style.cssText = `
+    position: fixed;
+    max-width: 280px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(16, 24, 40, 0.16);
+    display: none;
+    z-index: ${mindMap.opt.nodeNoteTooltipZIndex};
+    pointer-events: none;
+    font-size: 12px;
+    line-height: 1.45;
+    word-break: break-word;
+  `
+  const nameEl = document.createElement('div')
+  const urlEl = document.createElement('div')
+  urlEl.style.marginTop = '2px'
+  tip.appendChild(nameEl)
+  tip.appendChild(urlEl)
+  tip._nameEl = nameEl
+  tip._urlEl = urlEl
+  const targetNode = mindMap.opt.customInnerElsAppendTo || document.body
+  targetNode.appendChild(tip)
+  this.hyperlinkTipEl = tip
+  return tip
+}
+
+function showHyperlinkTip(anchor) {
+  const { hyperlink, hyperlinkTitle } = this.getData()
+  const label = hyperlinkHoverLabel(hyperlink, hyperlinkTitle)
+  if (!label.text) return
+  const tip = ensureHyperlinkTip.call(this, this.mindMap)
+  const dark = document.body && document.body.classList.contains('isDark')
+  tip.style.background = dark ? '#262a2e' : '#fff'
+  tip.style.color = dark ? 'rgba(255, 255, 255, 0.92)' : '#1a1a1a'
+  tip.style.border = dark ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(16, 24, 40, 0.08)'
+  tip._nameEl.textContent = label.title || label.url
+  tip._nameEl.style.fontWeight = label.title ? '600' : '400'
+  if (label.title && label.url && label.title !== label.url) {
+    tip._urlEl.textContent = label.url
+    tip._urlEl.style.display = 'block'
+    tip._urlEl.style.color = dark ? 'rgba(255, 255, 255, 0.55)' : '#667085'
+  } else {
+    tip._urlEl.textContent = ''
+    tip._urlEl.style.display = 'none'
+  }
+  const rect = anchor.node.getBoundingClientRect()
+  tip.style.display = 'block'
+  const tipRect = tip.getBoundingClientRect()
+  let left = rect.left
+  let top = rect.bottom + 6
+  if (left + tipRect.width > window.innerWidth - 8) {
+    left = Math.max(8, window.innerWidth - tipRect.width - 8)
+  }
+  if (top + tipRect.height > window.innerHeight - 8) {
+    top = Math.max(8, rect.top - tipRect.height - 6)
+  }
+  tip.style.left = left + 'px'
+  tip.style.top = top + 'px'
+}
+
+function hideHyperlinkTip() {
+  if (this.hyperlinkTipEl) this.hyperlinkTipEl.style.display = 'none'
+}
+
 //  创建超链接节点
 function createHyperlinkNode() {
   const { hyperlink, hyperlinkTitle } = this.getData()
+  hideHyperlinkTip.call(this)
   if (!hyperlink) {
     return
   }
@@ -555,9 +630,6 @@ function createHyperlinkNode() {
       customHyperlinkJump(hyperlink, this)
     }
   })
-  if (hyperlinkTitle) {
-    node.add(SVG(`<title>${hyperlinkTitle}</title>`))
-  }
   // 添加一个透明的层，作为鼠标区域
   a.rect(iconSize, iconSize).fill({ color: 'transparent' })
   // 超链接图标
@@ -565,6 +637,12 @@ function createHyperlinkNode() {
   this.style.iconNode(iconNode, style.color)
   a.add(iconNode)
   node.add(a)
+  node.on('mouseenter', () => {
+    showHyperlinkTip.call(this, node)
+  })
+  node.on('mouseleave', () => {
+    hideHyperlinkTip.call(this)
+  })
   return {
     node,
     width: iconSize,

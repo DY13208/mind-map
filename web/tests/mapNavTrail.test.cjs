@@ -91,7 +91,7 @@ function enterSubMap(history, fromRoom, toRoom) {
 }
 
 // ---- 1. 导航上下文 ----
-test('直接进入主脑图：没有历史返回上下文', () => {
+test('直接进入主脑图：没有返回按钮', () => {
   const history = createFakeHistory()
   assert.equal(nav.getMapNavContext(history.state, 'room-main'), null)
 })
@@ -115,7 +115,7 @@ test('子脑图 A → 子脑图 B：显示「返回上级脑图」，目标是 A
   assert.equal(context.depth, 2)
 })
 
-test('直接通过链接打开子脑图：无历史上下文，交给关联查询', () => {
+test('直接通过链接打开子脑图（新条目没有状态）：没有返回按钮', () => {
   const history = createFakeHistory()
   history.pushState({ key: 'fresh-tab' })
   assert.equal(nav.getMapNavContext(history.state, 'room-b'), null)
@@ -251,13 +251,13 @@ test('Toolbar.vue 模板编译无错误', () => {
   assert.deepEqual(compiled.errors, [])
 })
 
-test('返回按钮复用 ToolbarFileBtnList，排在「更多」之后（文件工具栏最右侧），关联选择入口常驻', () => {
+test('返回按钮复用 ToolbarFileBtnList，排在「更多」之后（文件工具栏最右侧），无上下文时不渲染', () => {
   const tpl = toolbarSfc.template.content
-  const moreIndex = tpl.indexOf('aria-label="更多"')
+  const moreIndex = tpl.indexOf('class="toolbarBtn fileMoreBtn"')
   const backIndex = tpl.indexOf('class="mapNavBackList"')
-  const nodeToolsIndex = tpl.indexOf('class="dock nodeToolRail"')
-  assert.ok(moreIndex > 0 && backIndex > moreIndex && backIndex < nodeToolsIndex)
-  const block = tpl.slice(tpl.lastIndexOf('<ParentMapPicker', backIndex), backIndex + 200)
+  const fileTreeIndex = tpl.indexOf('class="fileTreeBox"')
+  assert.ok(moreIndex > 0 && backIndex > moreIndex && backIndex < fileTreeIndex)
+  const block = tpl.slice(tpl.lastIndexOf('<ToolbarFileBtnList', backIndex), backIndex + 200)
   assert.match(block, /v-if="mapNavBackActions\.length"/)
   assert.match(block, /:list="mapNavBackActions"/)
   assert.match(block, /@select="onFileToolbarAction"/)
@@ -265,7 +265,7 @@ test('返回按钮复用 ToolbarFileBtnList，排在「更多」之后（文件�
 
 test('按钮文案按场景切换，使用线条图标，不进入「更多」收纳列表', () => {
   assert.match(toolbarScript, /context\.toMain\s*\?\s*this\.\$t\('toolbar\.backToMainMap'\)\s*:\s*this\.\$t\('toolbar\.backToParentMap'\)/)
-  assert.match(toolbarScript, /'el-icon-top-left'/)
+  assert.match(toolbarScript, /icon:\s*'el-icon-top-left'/)
   assert.match(toolbarScript, /testId:\s*'map-nav-back'/)
   const actionsBody = toolbarScript.slice(
     toolbarScript.indexOf('fileToolbarActions() {'),
@@ -277,10 +277,10 @@ test('按钮文案按场景切换，使用线条图标，不进入「更多」�
 
 test('返回前检查未保存修改与上级权限；只在落点不是上级条目时 replace，不 push 新记录', () => {
   const body = toolbarScript.slice(
-    toolbarScript.indexOf('async returnToParentMap(selected) {'),
+    toolbarScript.indexOf('async returnToParentMap() {'),
     toolbarScript.indexOf('async replaceWithParentMap(')
   )
-  assert.ok(body.indexOf('saveBeforeMapNavLeave()') < body.indexOf('verifyMapNavParentAccess('))
+  assert.ok(body.indexOf('confirmMapNavLeave()') < body.indexOf('verifyMapNavParentAccess('))
   assert.match(body, /inspectMapRef\(\{ mapId: room \}\)/)
   assert.match(body, /isParentEntry\(window\.history\.state, parent\)/)
   assert.doesNotMatch(body, /\$router\.push/)
@@ -289,7 +289,7 @@ test('返回前检查未保存修改与上级权限；只在落点不是上级�
 })
 
 test('路由变化 / popstate / 进入子脑图事件都会刷新返回上下文，销毁时解绑', () => {
-  assert.match(toolbarScript, /'\$route\.fullPath'\(\)[\s\S]*?this\.refreshMapNavContext\(\)/)
+  assert.match(toolbarScript, /'\$route\.fullPath'\(\)\s*\{\s*this\.refreshMapNavContext\(\)/)
   assert.match(toolbarScript, /\$bus\.\$on\('map_nav_context_change', this\.refreshMapNavContext\)/)
   assert.match(toolbarScript, /\$bus\.\$off\('map_nav_context_change', this\.refreshMapNavContext\)/)
   assert.match(toolbarScript, /addEventListener\('popstate', this\.onMapNavPopstate\)/)

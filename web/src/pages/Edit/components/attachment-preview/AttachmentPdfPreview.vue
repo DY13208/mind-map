@@ -15,12 +15,15 @@
     <div v-else-if="error" class="attachmentViewerState" role="alert">
       <i class="el-icon-warning-outline"></i><strong>{{ error }}</strong><el-button size="small" @click="$emit('download')">下载原文件</el-button>
     </div>
-    <div v-else ref="viewport" class="attachmentPdfViewport" tabindex="0" aria-label="PDF 页面" @scroll.passive="onScroll">
-      <div v-for="page in loadedPages" :key="page" class="attachmentPdfPage" :data-page="page" :style="{ width: pageWidth + 'px', height: pageHeight + 'px' }">
-        <canvas :data-canvas-page="page" :aria-label="'PDF 第 ' + page + ' 页'"></canvas>
-        <span class="pdfPagePlaceholder">第 {{ page }} 页</span>
+    <div v-else class="attachmentPagedBody">
+      <AttachmentThumbnailRail v-if="pageCount" :count="pageCount" :active="currentPage" :render-thumbnail="renderThumbnail" @select="goToPage" />
+      <div ref="viewport" class="attachmentPdfViewport" tabindex="0" aria-label="PDF 页面" @scroll.passive="onScroll">
+        <div v-for="page in loadedPages" :key="page" class="attachmentPdfPage" :data-page="page" :style="{ width: pageWidth + 'px', height: pageHeight + 'px' }">
+          <canvas :data-canvas-page="page" :aria-label="'PDF 第 ' + page + ' 页'"></canvas>
+          <span class="pdfPagePlaceholder">第 {{ page }} 页</span>
+        </div>
+        <div class="attachmentLoadSentinel" v-if="loadedPages < pageCount" role="status">向下滚动加载更多页面</div>
       </div>
-      <div class="attachmentLoadSentinel" v-if="loadedPages < pageCount" role="status">向下滚动加载更多页面</div>
     </div>
   </section>
 </template>
@@ -28,7 +31,9 @@
 import { loadPdfPreviewRuntime, previewAssetUrl } from '@/utils/attachmentPreviewRuntime'
 import { nodeAttachmentContentUrl } from '@/utils/nodeAttachmentApi'
 import { PDF_PREVIEW_MAX_BYTES } from '@/utils/nodeAttachmentPreview'
+import AttachmentThumbnailRail from './AttachmentThumbnailRail.vue'
 export default {
+  components: { AttachmentThumbnailRail },
   props: { source: { type: Object, required: true } },
   data: () => ({ loading: true, error: '', pageCount: 0, loadedPages: 0, currentPage: 1, pageInput: 1, zoom: 100, pageWidth: 700, pageHeight: 990 }),
   mounted() {
@@ -173,6 +178,22 @@ export default {
       this.measure()
       this.invalidate()
       this.goToPage(page)
+    },
+    async renderThumbnail(n, target) {
+      if (this._disposed || !this._doc || !target) return null
+      const page = await this._doc.getPage(n)
+      if (this._disposed) { page.cleanup(); return null }
+      const canvas = document.createElement('canvas')
+      const base = page.getViewport({ scale: 1 })
+      const width = Math.min(136, target.clientWidth || 136)
+      const viewport = page.getViewport({ scale: width / base.width })
+      canvas.width = Math.max(1, Math.floor(viewport.width))
+      canvas.height = Math.max(1, Math.floor(viewport.height))
+      target.replaceChildren(canvas)
+      const task = page.render({ canvasContext: canvas.getContext('2d'), viewport })
+      await task.promise
+      page.cleanup()
+      return { dispose() { task.cancel(); canvas.width = 0; canvas.height = 0 } }
     },
     async goToPage(value) {
       const page = Math.max(1, Math.min(this.pageCount, Math.floor(Number(value) || 1)))

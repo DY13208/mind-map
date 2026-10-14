@@ -539,6 +539,40 @@ export default {
   }
 }
 
+</style>
+<style lang="less">
+body.isDark .nodeImportDialog {
+  .el-dialog__title { color: rgba(255, 255, 255, .9); }
+  .importDescription { color: rgba(255, 255, 255, .55); }
+  .importUpload .el-upload-dragger {
+    background: #1c2228;
+    border-color: rgba(255, 255, 255, .16);
+    &:hover, &.is-dragover { border-color: #409eff; background: #1a2836; }
+  }
+  .uploadPrompt {
+    color: rgba(255, 255, 255, .55);
+    strong { color: #79b8ff; }
+  }
+  .formatRow { color: rgba(255, 255, 255, .45); }
+  .formatTag {
+    background: #2a3138;
+    border-color: rgba(255, 255, 255, .1);
+    color: rgba(255, 255, 255, .75);
+  }
+  .selectedFile { background: #1c2228; border-color: rgba(64, 158, 255, .35); }
+  .selectedFileIcon { background: rgba(64, 158, 255, .16); }
+  .selectedFileName span { color: rgba(255, 255, 255, .45); }
+  .selectedFileName strong { color: rgba(255, 255, 255, .9); }
+  .removeFile {
+    color: rgba(255, 255, 255, .55);
+    &:hover { background: rgba(255, 255, 255, .08); color: #79b8ff; }
+  }
+}
+body.isDark .xmindCanvasSelectDialog {
+  .el-radio { color: rgba(255, 255, 255, .82); }
+}
+</style>
+<style lang="less" scoped>
 .canvasList {
   display: flex;
   flex-direction: column;

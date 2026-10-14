@@ -12,8 +12,11 @@
       <button type="button" :disabled="busy" @click="setZoom(100)">适应窗口</button>
     </div>
     <div v-if="error" class="attachmentViewerState" role="alert"><i class="el-icon-warning-outline"></i><strong>{{ error }}</strong><el-button size="small" @click="$emit('download')">下载原文件</el-button></div>
-    <div v-show="!error" ref="viewport" class="attachmentPresentationViewport" aria-label="幻灯片预览" tabindex="0"><div ref="slides"></div></div>
-    <div v-if="busy" class="attachmentViewerState attachmentPreviewOverlay" role="status"><i class="el-icon-loading"></i><strong>正在加载幻灯片…</strong></div>
+    <div v-show="!error" class="attachmentPagedBody">
+      <AttachmentThumbnailRail v-if="count" :count="count" :active="page" :render-thumbnail="renderThumbnail" @select="goToPage" />
+      <div ref="viewport" class="attachmentPresentationViewport" aria-label="幻灯片预览" tabindex="0"><div ref="slides"></div></div>
+    </div>
+    <div v-if="busy && !count" class="attachmentViewerState attachmentPreviewOverlay" role="status"><i class="el-icon-loading"></i><strong>正在加载幻灯片…</strong></div>
     <div v-if="partial && !error" class="attachmentSheetStatus">部分元素无法预览，可下载原文件查看</div>
   </section>
 </template>
@@ -23,6 +26,7 @@ import { fetchNodeAttachmentContent } from '@/utils/nodeAttachmentApi'
 import { OFFICE_PREVIEW_MAX_BYTES, assertOfficeZipBudget } from '@/utils/nodeAttachmentPreview'
 import { loadPresentationPreviewRuntime } from '@/utils/attachmentPreviewRuntime'
 export default {
+  components: { AttachmentThumbnailRail: () => import('./AttachmentThumbnailRail.vue') },
   props: { source: { type: Object, required: true } },
   data: () => ({ busy: true, error: '', partial: false, page: 1, pageInput: 1, count: 0, zoom: 100 }),
   mounted() { this.load() },
@@ -49,6 +53,12 @@ export default {
         if (!this._disposed) this.count = this._viewer.slideCount
       } catch (error) { if (!this._disposed && error.name !== 'AbortError') this.error = error.message || '幻灯片加载失败，请下载查看' }
       finally { if (!this._disposed) this.busy = false }
+    },
+    renderThumbnail(n, target) {
+      if (this._disposed || !this._viewer || !target) return null
+      const handle = this._viewer.renderThumbnailToContainer(n - 1, target, { width: 136 })
+      if (!handle) return null
+      return { dispose() { try { handle.dispose() } catch (error) {} } }
     },
     async goToPage(value) {
       if (this.busy || !this._viewer || this._disposed) return
