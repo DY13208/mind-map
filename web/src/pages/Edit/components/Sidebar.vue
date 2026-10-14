@@ -88,7 +88,8 @@ export default {
 
   &.isDark {
     background-color: #262a2e;
-    border-left-color: hsla(0, 0%, 100%, 0.1);
+    border-color: hsla(0, 0%, 100%, 0.1);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 
     .sidebarHeader {
       border-bottom-color: hsla(0, 0%, 100%, 0.1);

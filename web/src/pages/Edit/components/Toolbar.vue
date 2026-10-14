@@ -8,11 +8,12 @@
             placement="bottom-start"
             trigger="click"
             append-to-body
-            popper-class="mapFileTreePopper"
+            :popper-class="isDark ? 'mapFileTreePopper isDark' : 'mapFileTreePopper'"
           >
             <MapFileTree
               v-if="mapTreeShow"
               :current-room-key="currentRoomKey()"
+              :is-dark="isDark"
               @open="openMapFromTree"
             />
             <button
@@ -186,6 +187,7 @@
             width="168"
             trigger="click"
             append-to-body
+            :popper-class="isDark ? 'dockMenuPopper isDark' : 'dockMenuPopper'"
           >
             <ToolbarFileBtnList
               dir="v"
@@ -210,6 +212,7 @@
             width="168"
             trigger="click"
             append-to-body
+            :popper-class="isDark ? 'dockMenuPopper isDark' : 'dockMenuPopper'"
           >
             <ToolbarFileBtnList
               dir="v"
@@ -248,6 +251,7 @@
             width="168"
             trigger="click"
             append-to-body
+            :popper-class="isDark ? 'dockMenuPopper isDark' : 'dockMenuPopper'"
             v-if="showMoreBtn"
           >
             <ToolbarNodeBtnList
@@ -5500,8 +5504,48 @@ export default {
       .dockIconBtn {
         color: hsla(0, 0%, 100%, 0.9);
       }
+      .dockIconBtn:hover {
+        background: hsla(0, 0%, 100%, 0.08);
+        color: #79bbff;
+      }
+      .toolIconBtn {
+        background: transparent;
+        border-color: hsla(0, 0%, 100%, 0.16);
+        color: hsla(0, 0%, 100%, 0.88);
+
+        &:hover,
+        &.active {
+          border-color: #409eff;
+          color: #79bbff;
+          background: rgba(64, 158, 255, 0.16);
+        }
+      }
+      .fileIdentity .saveChip {
+        &.saved {
+          color: #6ee7a8;
+          background: rgba(52, 199, 89, 0.16);
+        }
+        &.saving {
+          color: #fbbf24;
+          background: rgba(245, 165, 36, 0.16);
+        }
+        &.syncing {
+          color: #93c5fd;
+          background: rgba(59, 130, 246, 0.18);
+        }
+        &.offline {
+          color: #d0d5dd;
+          background: rgba(255, 255, 255, 0.08);
+        }
+        &.failed {
+          color: #fda29b;
+          background: rgba(240, 68, 56, 0.18);
+        }
+      }
       .toolbarBlock {
         background-color: #262a2e;
+        border-color: hsla(0, 0%, 100%, 0.08);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 
         .fileTreeBox {
           background-color: #262a2e;
@@ -5746,19 +5790,52 @@ export default {
     }
 
     .fileIdentity .saveChip {
-      flex: 0 1 auto;
-      max-width: 88px;
-      overflow: hidden;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      flex: 0 0 auto;
+      height: 22px;
+      padding: 0 8px 0 7px;
+      border-radius: 999px;
       font-size: 12px;
-      line-height: 32px;
-      text-overflow: ellipsis;
+      font-weight: 500;
+      line-height: 22px;
       white-space: nowrap;
 
-      &.saved { color: #059669; }
-      &.saving,
-      &.syncing { color: #2563eb; }
-      &.offline { color: #98a2b3; }
-      &.failed { color: #dc2626; cursor: pointer; }
+      &::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        flex: none;
+      }
+
+      &.saved {
+        color: #178a45;
+        background: #e7f8ee;
+        &::before { background: #34c759; }
+      }
+      &.saving {
+        color: #b45309;
+        background: #fef4e6;
+        &::before { background: #f5a524; }
+      }
+      &.syncing {
+        color: #1d4ed8;
+        background: #e8f1fe;
+        &::before { background: #3b82f6; }
+      }
+      &.offline {
+        color: #667085;
+        background: #f2f4f7;
+        &::before { background: #98a2b3; }
+      }
+      &.failed {
+        color: #b42318;
+        background: #fdecec;
+        cursor: pointer;
+        &::before { background: #f04438; }
+      }
     }
 
     .toolbarBlockWrapper {
@@ -7044,5 +7121,69 @@ export default {
       margin-left: auto;
     }
   }
+}
+</style>
+
+<style lang="less">
+body.isDark .dockMenuPopper.el-popover,
+body.isDark .collabPeerPopper.el-popover,
+body.isDark .collabDiagPopper.el-popover,
+body.isDark .navExtraPopper.el-popover {
+  background: #262a2e;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+body.isDark .dockMenuPopper.el-popover[x-placement^='bottom'] .popper__arrow::after,
+body.isDark .collabPeerPopper.el-popover[x-placement^='bottom'] .popper__arrow::after,
+body.isDark .collabDiagPopper.el-popover[x-placement^='bottom'] .popper__arrow::after,
+body.isDark .navExtraPopper.el-popover[x-placement^='top'] .popper__arrow::after,
+body.isDark .dockMenuPopper.el-popover[x-placement^='right'] .popper__arrow::after {
+  border-bottom-color: #262a2e;
+  border-top-color: #262a2e;
+  border-right-color: #262a2e;
+}
+
+body.isDark .navExtraPopper .el-input__inner {
+  background: #1c2126;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+body.isDark .collabPeerPopover {
+  .peerHead,
+  .empty,
+  .you {
+    color: rgba(255, 255, 255, 0.55);
+  }
+  .peerName {
+    color: rgba(255, 255, 255, 0.92);
+  }
+}
+
+body.isDark .collabDiagPopper .collabDiag {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+body.isDark .collabDiagPopper .k {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+body.isDark .el-select-dropdown {
+  background: #262a2e;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+body.isDark .el-select-dropdown__item {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+body.isDark .el-select-dropdown__item.hover,
+body.isDark .el-select-dropdown__item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+body.isDark .el-select-dropdown__item.selected {
+  color: #79bbff;
 }
 </style>

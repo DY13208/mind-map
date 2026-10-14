@@ -1,5 +1,5 @@
 <template>
-  <div class="mapFileTree">
+  <div class="mapFileTree" :class="{ isDark: isDark }">
     <div class="treeHead">
       <span class="headLabel">脑图</span>
     </div>
@@ -143,7 +143,8 @@ function ancestorIds(nodes, currentKey, acc = []) {
 export default {
   name: 'MapFileTree',
   props: {
-    currentRoomKey: { type: String, default: '' }
+    currentRoomKey: { type: String, default: '' },
+    isDark: { type: Boolean, default: false }
   },
   data() {
     return {
@@ -212,16 +213,39 @@ export default {
 
 <style lang="less" scoped>
 .mapFileTree {
+  --tree-bg: #f7f8fa;
+  --tree-border: rgba(16, 24, 40, 0.08);
+  --tree-muted: #98a2b3;
+  --tree-text: #667085;
+  --tree-title: #1d2939;
+  --tree-hover: #eef2f6;
+  --tree-current: #ecf5ff;
+  --tree-line: rgba(16, 24, 40, 0.12);
+  --tree-mark: #7a8ca0;
   width: 280px;
   max-height: 460px;
   display: flex;
   flex-direction: column;
-  background: #f7f8fa;
-  border: 1px solid rgba(16, 24, 40, 0.08);
+  background: var(--tree-bg);
+  border: 1px solid var(--tree-border);
   border-radius: 12px;
   padding: 12px;
   box-shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
   font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  color: var(--tree-text);
+
+  &.isDark {
+    --tree-bg: #262a2e;
+    --tree-border: rgba(255, 255, 255, 0.1);
+    --tree-muted: rgba(255, 255, 255, 0.45);
+    --tree-text: rgba(255, 255, 255, 0.72);
+    --tree-title: rgba(255, 255, 255, 0.92);
+    --tree-hover: rgba(255, 255, 255, 0.06);
+    --tree-current: rgba(64, 158, 255, 0.18);
+    --tree-line: rgba(255, 255, 255, 0.12);
+    --tree-mark: rgba(255, 255, 255, 0.4);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
 }
 
 .treeHead {
@@ -230,19 +254,19 @@ export default {
   gap: 6px;
   padding-bottom: 10px;
   margin-bottom: 6px;
-  border-bottom: 1px solid rgba(16, 24, 40, 0.08);
+  border-bottom: 1px solid var(--tree-border);
   flex: none;
 }
 
 .headLabel {
   font-size: 12px;
-  color: #98a2b3;
+  color: var(--tree-muted);
 }
 
 .treeState {
   padding: 16px 8px;
   font-size: 12px;
-  color: #667085;
+  color: var(--tree-text);
   background: transparent;
   border: 0;
   text-align: left;
@@ -268,18 +292,18 @@ export default {
   padding-right: 8px;
   border-radius: 6px;
   cursor: pointer;
-  color: #667085;
+  color: var(--tree-text);
   user-select: none;
 }
 
 .treeRow:hover {
-  background: #eef2f6;
-  color: #1d2939;
+  background: var(--tree-hover);
+  color: var(--tree-title);
 }
 
 .treeRow.current {
-  background: #ecf5ff;
-  color: #1d2939;
+  background: var(--tree-current);
+  color: var(--tree-title);
 }
 
 .treeLine {
@@ -287,7 +311,7 @@ export default {
   top: 0;
   bottom: 0;
   width: 1px;
-  background: rgba(16, 24, 40, 0.12);
+  background: var(--tree-line);
 }
 
 .treeRow:hover .treeLine {
@@ -300,7 +324,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #98a2b3;
+  color: var(--tree-muted);
   transition: transform 0.2s ease;
   flex: none;
 }
@@ -312,7 +336,7 @@ export default {
 
 .fileMark {
   font-size: 12px;
-  color: #7a8ca0;
+  color: var(--tree-mark);
 }
 
 .glyph {
@@ -347,7 +371,7 @@ export default {
 }
 
 .treeRow.folder .nodeName {
-  color: #1d2939;
+  color: var(--tree-title);
 }
 
 .hoverDot {

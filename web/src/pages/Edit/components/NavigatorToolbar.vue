@@ -25,8 +25,13 @@
           <Fullscreen :isDark="isDark" :mindMap="mindMap"></Fullscreen>
         </div>
         <div class="item extraTools">
-          <el-popover placement="top-end" width="220" trigger="click">
-            <div class="extraToolPanel">
+          <el-popover
+            placement="top-end"
+            width="220"
+            trigger="click"
+            :popper-class="isDark ? 'navExtraPopper isDark' : 'navExtraPopper'"
+          >
+            <div class="extraToolPanel" :class="{ isDark: isDark }">
               <el-select
                 v-model="lang"
                 size="small"
@@ -306,6 +311,8 @@ export default {
   &.isDark {
     .navigatorContainer {
       background: #262a2e;
+      border-color: hsla(0, 0%, 100%, 0.08);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
     }
 
     .item {
@@ -406,6 +413,25 @@ export default {
   padding: 6px 4px 0;
   color: #98a2b3;
   font-size: 12px;
+}
+
+.extraToolPanel.isDark {
+  .extraMenu {
+    border-top-color: rgba(255, 255, 255, 0.08);
+
+    button {
+      color: rgba(255, 255, 255, 0.88);
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.06);
+        color: #79bbff;
+      }
+    }
+  }
+
+  .extraVersion {
+    color: rgba(255, 255, 255, 0.45);
+  }
 }
 
 .navigatorContainer {

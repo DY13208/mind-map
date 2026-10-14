@@ -953,10 +953,32 @@ export default {
       color: #fff;
     }
 
+    /deep/ .el-checkbox__label {
+      color: hsla(0, 0%, 100%, 0.88);
+    }
+
+    /deep/ .el-checkbox__input.is-checked + .el-checkbox__label {
+      color: #79bbff;
+    }
+
+    /deep/ .el-input__inner,
+    /deep/ .el-textarea__inner {
+      background: #1c2126;
+      border-color: hsla(0, 0%, 100%, 0.12);
+      color: hsla(0, 0%, 100%, 0.9);
+    }
+
+    /deep/ .el-input-number__decrease,
+    /deep/ .el-input-number__increase {
+      background: #1c2126;
+      color: hsla(0, 0%, 100%, 0.7);
+      border-color: hsla(0, 0%, 100%, 0.12);
+    }
+
     .row {
       .rowItem {
         .name {
-          color: hsla(0, 0%, 100%, 0.6);
+          color: hsla(0, 0%, 100%, 0.82);
         }
       }
     }
