@@ -21,14 +21,15 @@ export default {
   },
   mounted() {
     this.mindMap.on('node_img_dblclick', this.onNodeTmgDblclick)
+    this.mindMap.on('node_img_preview', this.onNodeTmgDblclick)
   },
   beforeDestroy() {
     this.mindMap.off('node_img_dblclick', this.onNodeTmgDblclick)
+    this.mindMap.off('node_img_preview', this.onNodeTmgDblclick)
   },
   methods: {
     onNodeTmgDblclick(node, e) {
-      e.stopPropagation()
-      e.preventDefault()
+      if (e) { e.stopPropagation(); e.preventDefault() }
       this.images = [node.getImageUrl()]
       this.$viewerApi({
         images: this.images

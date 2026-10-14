@@ -1,6 +1,6 @@
 # 通用附件预览
 
-2026-10-14：统一弹窗外壳，按文件类型加载独立预览器。原有附件元数据、存储、上传和下载接口不变。
+2026-10-14：统一弹窗外壳，按文件类型加载独立预览器；原文件扩展名优先于 MIME，防止提取结果的 Markdown MIME 覆盖原始格式。原有附件元数据、存储、上传和下载接口不变。
 
 ## 界面与加载
 
@@ -13,7 +13,8 @@
 | Excel / XLS / XLSM / ODS | 复用 XLSX，放到 Worker 中解析。每批传回 100 行，界面仅保留视口与缓冲行。最多 10 张表、每表 10000 行、40 列；原文件及 ZIP 边界同上。 |
 | PDF | 自托管 PDF.js 与 Worker；初始 3 页占位，滚动追加 3 页，仅渲染附近页面，远处画布释放。支持翻页、页码定位、50–200% 缩放和适应宽度。最多 32 MiB、2000 页，单页画布最多约 250 万像素。 |
 | 图片 | 原文件最多 16 MiB、2000 万像素，先检查文件头尺寸，再解码；适应窗口、25–400% 缩放，关闭释放 Blob URL。 |
-| PPTX | 保留原有提取文本预览，最多 20000 字符。 |
+| PPTX | 同源加载固定版本 @aiden0z/pptx-renderer 1.3.0，直接解析原文件，每次只渲染当前幻灯片；支持翻页、定位和缩放，不使用提取文字作为预览。最多 5 MiB、200 页；ZIP 展开最多 16 MiB、2000 项。复杂元素按浏览器能力预览，保留原文件下载。 |
+| ZIP | 仅读取原文件目录，不展开或执行文件内容；初始显示 100 项，滚动追加 100 项。原文件最多 5 MiB，目录与展开体积预算同 Office；超限可下载。 |
 | HTML / 外部链接 | 保留原有独立页面 / 外部查看入口。 |
 | 不支持、超限或解析失败 | 清晰显示状态与原文件下载入口，不挂载空白预览器。 |
 
@@ -48,3 +49,7 @@ node test/attachmentContentBudget.test.js
 ```
 
 构建会复制 PDF.js 字体、CMap、WASM 和 Worker，以及编译表格 Worker 到 `dist/attachment-preview/`。ES 模块以 `.js` 发布以兼容现有 Nginx MIME 配置；部署时随前端产物一起发布，不依赖外部 CDN。Node 构建环境须满足依赖要求（Node >= 20.16；项目 Docker 使用 Node 20）。
+
+图片节点右下角斜箭头：单击查看大图，拖动仍调整尺寸，双击图片保留预览入口。4px 以内的指针抖动按单击处理；拖动在画布缩放后仍保存正确逻辑尺寸。卸载插件清理角按钮和事件。
+
+新增回归：`node simple-mind-map/scripts/verifyImagePreviewGesture.cjs`、`node web/scripts/verifyPresentationPreviewLifecycle.cjs`（仓库根目录）。PPTX 运行库来自 [pptx-renderer](https://github.com/aiden0z/pptx-renderer)，随静态产物发布许可证与第三方说明。

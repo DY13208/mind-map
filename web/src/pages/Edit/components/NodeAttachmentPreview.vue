@@ -47,6 +47,8 @@ export default {
     AttachmentDocumentPreview: () => import('./attachment-preview/AttachmentDocumentPreview.vue').then(module => module.default || module),
     AttachmentOfficePreview: () => import('./attachment-preview/AttachmentOfficePreview.vue').then(module => module.default || module),
     AttachmentPdfPreview: () => import('./attachment-preview/AttachmentPdfPreview.vue').then(module => module.default || module),
+    AttachmentPresentationPreview: () => import('./attachment-preview/AttachmentPresentationPreview.vue').then(module => module.default || module),
+    AttachmentArchivePreview: () => import('./attachment-preview/AttachmentArchivePreview.vue').then(module => module.default || module),
     AttachmentImagePreview: () => import('./attachment-preview/AttachmentImagePreview.vue').then(module => module.default || module)
   },
   data: () => ({
@@ -68,7 +70,9 @@ export default {
       if (this.kind === 'image') return 'AttachmentImagePreview'
       if (this.kind === 'pdf') return 'AttachmentPdfPreview'
       if (this.kind === 'office') return 'AttachmentOfficePreview'
-      if (['markdown', 'text', 'json', 'presentation'].includes(this.kind)) return 'AttachmentDocumentPreview'
+      if (this.kind === 'presentation') return 'AttachmentPresentationPreview'
+      if (this.kind === 'archive') return 'AttachmentArchivePreview'
+      if (['markdown', 'text', 'json'].includes(this.kind)) return 'AttachmentDocumentPreview'
       return null
     }
   },
@@ -126,6 +130,11 @@ export default {
         this.attachmentId = attachment.id
         this.title = attachment.fileName || this.title
         this.kind = attachmentPreviewKind(this.title, attachment.mimeType || data.attachmentMimeType)
+        if (this.kind === 'html') {
+          this.openHtmlInNewPage({ attachmentId: attachment.id })
+          this.visible = false
+          return
+        }
         this.source = Object.freeze({ ...attachment, roomKey, url: nodeAttachmentContentUrl(roomKey, attachment.id) })
       } catch (error) {
         if (token === this.requestId) this.error = error.message || '附件加载失败'

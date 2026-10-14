@@ -65,28 +65,36 @@ export function assertImagePreviewBudget(buffer) {
   return { width, height }
 }
 
-const IMAGE_EXT = /\.(png|jpe?g|webp|gif)$/i
 const TEXT_EXT = /\.(txt|log|csv|js|ts|jsx|tsx|css|scss|less|py|java|go|rs|c|cpp|h|sh|sql|xml|ya?ml|vue|toml|ini|conf)$/i
-const HTML_EXT = /\.html?$/i
 
 export function attachmentPreviewKind(fileName, mimeType = '') {
-  const name = String(fileName || '')
-  const mime = String(mimeType || '').toLowerCase().split(';')[0]
-  if (IMAGE_EXT.test(name) || /^image\/(png|jpe?g|webp|gif)$/.test(mime)) {
-    return 'image'
+  const name = String(fileName || '').trim()
+  const ext = name.match(/\.([a-z0-9]+)$/i)
+  // Original file extensions take precedence over extraction/legacy MIME metadata.
+  if (ext) {
+    const suffix = ext[1].toLowerCase()
+    if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(suffix)) return 'image'
+    if (suffix === 'pdf') return 'pdf'
+    if (['html', 'htm'].includes(suffix)) return 'html'
+    if (['md', 'markdown'].includes(suffix)) return 'markdown'
+    if (suffix === 'json') return 'json'
+    if (['docx', 'xls', 'xlsx', 'xlsm', 'ods'].includes(suffix)) return 'office'
+    if (suffix === 'pptx') return 'presentation'
+    if (suffix === 'zip') return 'archive'
+    if (TEXT_EXT.test(name)) return 'text'
+    // An explicit unknown extension must not be mistaken for extracted Markdown.
+    if (String(mimeType || '').toLowerCase().split(';')[0].trim() === 'text/markdown') return 'unsupported'
   }
-  if (/\.pdf$/i.test(name) || mime === 'application/pdf') return 'pdf'
-  if (HTML_EXT.test(name) || mime === 'text/html' || mime === 'application/xhtml+xml') {
-    return 'html'
-  }
-  if (/\.(md|markdown)$/i.test(name) || mime === 'text/markdown') return 'markdown'
-  if (/\.json$/i.test(name) || mime === 'application/json') return 'json'
-  if (/\.(docx|xls|xlsx|xlsm|ods)$/i.test(name) || /wordprocessingml|spreadsheetml|ms-excel|opendocument\.spreadsheet/.test(mime)) {
-    return 'office'
-  }
-  if (/\.pptx$/i.test(name) || /presentationml/.test(mime)) return 'presentation'
-  if (TEXT_EXT.test(name) || /^text\//.test(mime)) return 'text'
-  return 'unsupported'
+  const mime = String(mimeType || '').toLowerCase().split(';')[0].trim()
+  if (/^image\/(png|jpe?g|webp|gif)$/.test(mime)) return 'image'
+  if (mime === 'application/pdf') return 'pdf'
+  if (mime === 'text/html' || mime === 'application/xhtml+xml') return 'html'
+  if (mime === 'text/markdown') return 'markdown'
+  if (mime === 'application/json') return 'json'
+  if (/wordprocessingml|spreadsheetml|ms-excel|opendocument\.spreadsheet/.test(mime)) return 'office'
+  if (/presentationml/.test(mime)) return 'presentation'
+  if (/application\/(zip|x-zip-compressed)/.test(mime)) return 'archive'
+  return /^text\//.test(mime) ? 'text' : 'unsupported'
 }
 
 export function isHtmlAttachment(fileName, mimeType, url) {

@@ -76,13 +76,6 @@ export default {
         }
         return '<' + token.tag + ' id="' + id + '">'
       }
-      if (this.kind === 'presentation') {
-        const text = String(this.source.extractedText || '').slice(0, 20000)
-        this.chunks = [Object.freeze({ id: 0, text })]
-        this.done = true
-        if (!text) this.error = '该演示文稿暂无可读文本，请下载原文件查看'
-        return
-      }
       this._controller = new AbortController()
       this.loading = true
       try {
