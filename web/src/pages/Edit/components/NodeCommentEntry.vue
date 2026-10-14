@@ -13,19 +13,16 @@
     @mousedown.stop.prevent
     @click.stop="openCard"
   >
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 3.5c4.97 0 9 3.36 9 7.5s-4.03 7.5-9 7.5c-1.1 0-2.15-.16-3.12-.46L4 20l1.33-3.6C3.89 15.04 3 13.12 3 11c0-4.14 4.03-7.5 9-7.5Z"/></svg>
-    <span class="plus">+</span>
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><path d="M11 3.6C6.6 3.9 3 7 3 11c0 2.1.9 4 2.3 5.4L4 20l4.9-1.5c1 .3 2 .5 3.1.5 4.6 0 8.4-2.9 8.9-6.7"/><path d="M18 2.5v6M15 5.5h6"/></svg>
   </button>
 </template>
 
 <script>
-// 幽灵标签尺寸，与节点右上角评论标签一致
-const ENTRY_WIDTH = 38
-const ENTRY_LIFT = 10
+const ENTRY_SIZE = 24
 const HIDE_DELAY = 160
 const HIDE_EVENTS = ['scale', 'translate', 'node_dragging', 'svg_mousedown', 'mode_change', 'node_contextmenu', 'node_tree_render_end']
 
-// 悬停在无评论的节点上时，在节点右上角浮出虚线「幽灵标签」作为添加评论入口（覆盖层，不改变节点布局）
+// 悬停在无评论的节点上时，在节点右上角浮出「添加评论」入口（覆盖层，不改变节点布局）
 export default {
   name: 'NodeCommentEntry',
   data() {
@@ -72,9 +69,10 @@ export default {
       const opt = (node.mindMap && node.mindMap.opt) || {}
       if (opt.readonly) return false
       const list = node.getData('comments')
-      return !(Array.isArray(list) && list.length)
+      // ???????????????
+      return !(Array.isArray(list) && list.some(c => c && !c.deleted))
     },
-    // ????????????????
+    // 编辑节点文本时不显示添加评论入口
     onTextEditStart() {
       this.editing = true
       this.hide()
@@ -101,16 +99,15 @@ export default {
         this.hide()
         return
       }
-      const shape = node.shapeNode && node.shapeNode.node
-      const el = shape || (node.group && node.group.node)
+      const el = node.group && node.group.node
       const r = el && typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : null
       if (!r) return
       this.node = node
       this.isDark =
         typeof document !== 'undefined' && !!document.body && document.body.classList.contains('isDark')
-      // 与评论标签同位置：右对齐节点边框，略高出节点顶部
-      this.left = r.right - ENTRY_WIDTH
-      this.top = r.top - ENTRY_LIFT
+      // 骑在节点右上角（一半在框外），不遮挡文字、不改变布局
+      this.left = r.right - ENTRY_SIZE / 2 - 2
+      this.top = r.top - ENTRY_SIZE / 2 + 2
       this.visible = true
     },
     scheduleHide() {
@@ -142,39 +139,32 @@ export default {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  width: 38px;
-  height: 21px;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  border: 1px dashed rgba(51, 112, 255, 0.45);
-  border-radius: 8px 8px 8px 10px;
-  background: rgba(51, 112, 255, 0.05);
-  color: rgba(51, 112, 255, 0.7);
-  font: 600 12px/1 ui-sans-serif, system-ui, sans-serif;
+  border: 1px solid #e4e7ec;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(16, 24, 40, 0.1);
+  color: #8f959e;
   cursor: pointer;
-  opacity: 0.8;
-  transition: opacity 0.15s, background 0.15s;
-
-  .plus {
-    font-size: 13px;
-    margin-top: -1px;
-  }
+  opacity: 0.85;
 
   &:hover {
     opacity: 1;
-    border-style: solid;
     color: #3370ff;
-    background: rgba(51, 112, 255, 0.12);
+    background: rgba(51, 112, 255, 0.1);
   }
 
   &.isDark {
-    border-color: rgba(105, 177, 255, 0.45);
-    background: rgba(105, 177, 255, 0.08);
-    color: rgba(105, 177, 255, 0.75);
+    border-color: #3a3f45;
+    background: #2b2f33;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    color: rgba(255, 255, 255, 0.5);
 
     &:hover {
       color: #69b1ff;
-      background: rgba(105, 177, 255, 0.18);
+      background: rgba(64, 150, 255, 0.18);
     }
   }
 }
