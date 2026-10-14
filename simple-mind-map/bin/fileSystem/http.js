@@ -330,9 +330,15 @@ async function handleFileSystemApi(req, res, options = {}) {
           params
         )).rows
         : []
-      const userIds = rows
+      let userIds = rows
         .map(row => String(row.user_id || '').trim())
         .filter(id => id && id !== folder.created_by)
+      const requestedCount = userIds.length
+      if (body.onlyChanges === true && userIds.length) {
+        const existing = await fs.store.listFolderMembers(bulkFolderId)
+        const unchanged = new Set(existing.filter(member => member.role === role).map(member => member.user_id))
+        userIds = userIds.filter(id => !unchanged.has(id))
+      }
       if (fs.store.kind === 'pg' && userIds.length) {
         await fs.store.withTx(async db => {
           await db.query(
@@ -369,7 +375,9 @@ async function handleFileSystemApi(req, res, options = {}) {
       sendJson(res, 200, {
         ok: true,
         list: await listFolderMembersWithOwner(fs.store, bulkFolderId),
-        added: userIds.length
+        added: userIds.length,
+        changed: userIds.length,
+        unchanged: requestedCount - userIds.length
       })
       return true
     }

@@ -1,6 +1,6 @@
 export function summarizeAccess(access = {}) {
   const canEdit = access.canEdit !== false && access.role !== 'viewer'
-  const canManage = !!access.canManage || access.role === 'owner'
+  const canManage = !!access.canManage || ['owner', 'manager'].includes(access.role)
   const shareId = access.shareId || null
   const role =
     access.role ||
@@ -38,12 +38,14 @@ export function applyRoomAccess(store, mindMap, access) {
 
 export function fileRoleLabelKey(role) {
   if (role === 'owner') return 'acl.mine'
+  if (role === 'manager') return 'acl.manager'
   if (role === 'viewer') return 'acl.viewer'
   return 'acl.editor'
 }
 
 export function memberRoleLabelKey(role) {
   if (role === 'owner') return 'acl.owner'
+  if (role === 'manager') return 'acl.manager'
   if (role === 'viewer') return 'acl.viewer'
   return 'acl.editor'
 }

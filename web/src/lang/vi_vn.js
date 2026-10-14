@@ -622,6 +622,7 @@ export default {
     copyLink: 'Sao chép liên kết',
     mine: 'Của tôi',
     owner: 'Chủ sở hữu',
+    manager: 'Có thể quản lý',
     editor: 'Được sửa',
     viewer: 'Chỉ xem',
     remove: 'Gỡ',

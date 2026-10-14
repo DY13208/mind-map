@@ -286,6 +286,7 @@ async function syncRoomMembers(db, id, userId) {
       team_role = excluded.team_role,
       role = case
         when room_members.direct_role = 'owner' or excluded.team_role = 'owner' or room_members.folder_role = 'owner' then 'owner'
+        when room_members.direct_role = 'manager' or excluded.team_role = 'manager' then 'manager'
         when room_members.direct_role = 'editor' or excluded.team_role = 'editor' or room_members.folder_role in ('editor', 'manager') then 'editor'
         when room_members.direct_role = 'viewer' or excluded.team_role = 'viewer' or room_members.folder_role = 'viewer' then 'viewer'
         else coalesce(room_members.direct_role, excluded.team_role, room_members.folder_role)
@@ -353,6 +354,7 @@ async function removeMember(db, who, id, target) {
       set team_role = null,
           role = case
             when direct_role = 'owner' or folder_role = 'owner' then 'owner'
+            when direct_role = 'manager' then 'manager'
             when direct_role = 'editor' or folder_role in ('editor', 'manager') then 'editor'
             when direct_role = 'viewer' or folder_role = 'viewer' then 'viewer'
             else coalesce(direct_role, folder_role)
@@ -479,6 +481,7 @@ async function assignRoom(db, who, id, roomKey) {
         team_role = excluded.team_role,
         role = case
           when room_members.direct_role = 'owner' or excluded.team_role = 'owner' or room_members.folder_role = 'owner' then 'owner'
+          when room_members.direct_role = 'manager' or excluded.team_role = 'manager' then 'manager'
           when room_members.direct_role = 'editor' or excluded.team_role = 'editor' or room_members.folder_role in ('editor', 'manager') then 'editor'
           when room_members.direct_role = 'viewer' or excluded.team_role = 'viewer' or room_members.folder_role = 'viewer' then 'viewer'
           else coalesce(room_members.direct_role, excluded.team_role, room_members.folder_role)

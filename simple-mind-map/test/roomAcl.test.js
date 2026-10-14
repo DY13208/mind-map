@@ -104,6 +104,14 @@ function testNormalizeAndInfer() {
 }
 
 function testRoleMatrix() {
+  assert.strictEqual(roomAcl.normalizeRole('Manager'), 'manager')
+  for (const action of ['view', 'edit', 'manage']) {
+    assert.strictEqual(roomAcl.roleAllows('manager', action), true)
+  }
+  assert.strictEqual(roomAcl.effectiveRole('manager', 'editor', 'viewer'), 'manager')
+  assert.strictEqual(roomAcl.effectiveRole(null, null, 'manager'), 'editor')
+  assert.strictEqual(roomAcl.effectiveRole('viewer', null, 'manager'), 'editor')
+  assert.strictEqual(roomAcl.effectiveRole('owner', 'manager', 'editor'), 'owner')
   assert.strictEqual(roomAcl.roleAllows('viewer', 'view'), true)
   assert.strictEqual(roomAcl.roleAllows('viewer', 'edit'), false)
   assert.strictEqual(roomAcl.roleAllows('viewer', 'manage'), false)
@@ -293,6 +301,14 @@ async function testAccessAndMembers() {
   const viewer = await roomAcl.getAccess(db, 'room-a', 'carol')
   assert.strictEqual(viewer.role, 'viewer')
   assert.strictEqual(roomAcl.roleAllows(viewer.role, 'edit'), false)
+
+  await roomAcl.setMember(db, 'room-a', 'manager', 'Manager', 'alice')
+  await roomAcl.setMember(db, 'room-a', 'managed-user', 'editor', 'manager')
+  assert.strictEqual((await roomAcl.getAccess(db, 'room-a', 'manager')).role, 'manager')
+  await assert.rejects(roomAcl.setMember(db, 'room-a', 'managed-user', 'owner', 'manager'), error => error.code === 'OWNER_REQUIRED')
+  await assert.rejects(roomAcl.setMember(db, 'room-a', 'alice', 'viewer', 'manager'), error => error.code === 'OWNER_REQUIRED')
+  await assert.rejects(roomAcl.removeMember(db, 'room-a', 'alice', '', 'manager'), error => error.code === 'OWNER_REQUIRED')
+  await roomAcl.removeMember(db, 'room-a', 'managed-user', '', 'manager')
 
   let lastOwnerFailed = false
   try {

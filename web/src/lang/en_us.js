@@ -647,6 +647,7 @@ export default {
     copyLink: 'Copy link',
     mine: 'Mine',
     owner: 'Owner',
+    manager: 'Can manage',
     editor: 'Can edit',
     viewer: 'View only',
     remove: 'Remove',

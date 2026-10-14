@@ -624,6 +624,7 @@ export default {
     copyLink: '複製連結',
     mine: '我的',
     owner: '所有者',
+    manager: '可管理',
     editor: '可編輯',
     viewer: '唯讀',
     remove: '移除',

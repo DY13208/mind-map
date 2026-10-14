@@ -38,7 +38,7 @@ async function readableRooms(pool, userId, env = process.env) {
     left join room_tombstones t using(room_key)
     where r.deleted_at is null and t.room_key is null
     and ($2::boolean or not exists (select 1 from room_members all_members where all_members.room_key=r.room_key) or exists (
-      select 1 from room_members m where m.room_key=r.room_key and m.user_id=$1 and m.role in ('owner','editor','viewer')))
+      select 1 from room_members m where m.room_key=r.room_key and m.user_id=$1 and m.role in ('owner','manager','editor','viewer')))
     order by r.room_key`, [userId, admin])).rows
   return new Set(rows.map(r => r.room_key))
 }

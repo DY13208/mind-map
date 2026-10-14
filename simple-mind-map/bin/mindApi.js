@@ -2599,7 +2599,8 @@ async function handleApi(req, res) {
           body.user_id || body.userId,
           body.role,
           roomAcl.actorFromReq(req).id,
-          req.authUser && req.authUser.corpId
+          req.authUser && req.authUser.corpId,
+          { bypass: roomAcl.actorFromReq(req).bypass }
         )
         sendJson(res, 200, row)
         return true
@@ -2612,7 +2613,8 @@ async function handleApi(req, res) {
           memberId,
           body.role,
           roomAcl.actorFromReq(req).id,
-          req.authUser && req.authUser.corpId
+          req.authUser && req.authUser.corpId,
+          { bypass: roomAcl.actorFromReq(req).bypass }
         )
         sendJson(res, 200, row)
         return true
@@ -2622,7 +2624,9 @@ async function handleApi(req, res) {
           getPool(),
           roomKey,
           memberId,
-          req.authUser && req.authUser.corpId
+          req.authUser && req.authUser.corpId,
+          roomAcl.actorFromReq(req).id,
+          { bypass: roomAcl.actorFromReq(req).bypass }
         )
         sendJson(res, 200, result)
         return true

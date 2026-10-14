@@ -62,7 +62,7 @@
             <div
               v-for="row in visibleRows"
               :key="row.key"
-              :class="['treeRow', row.type, { selected: isRowSelected(row) }]"
+              :class="['treeRow', row.type, { selected: isRowSelected(row), authorized: !!rowPermission(row) }]"
               :style="{ paddingLeft: `${10 + row.level * 18}px` }"
               role="treeitem"
             >
@@ -85,6 +85,8 @@
               ><span v-else class="expandSpacer" />
               <el-checkbox
                 :value="isRowSelected(row)"
+                :disabled="row.type === 'member' && isOwnerMember(row.contact)"
+                :aria-label="`选择${row.name}`"
                 :indeterminate="
                   row.type === 'department' && isDepartmentPartial(row.id)
                 "
@@ -104,6 +106,13 @@
                   row.contact.position || '成员'
                 }}</small></span
               >
+              <button
+                v-if="rowPermission(row)"
+                type="button"
+                :class="['permissionBadge', rowPermission(row).tone]"
+                :aria-label="`${row.name}已有权限：${rowPermission(row).label}`"
+                @click="inspectRowPermission(row)"
+              ><i class="el-icon-check" />{{ rowPermission(row).label }}</button>
               <el-checkbox
                 v-if="row.type === 'department'"
                 class="departmentMemberToggle"
@@ -125,11 +134,12 @@
               }}</span>
             </div>
           </div>
+          <div class="treeLegend"><span><i class="el-icon-check" /> 徽标表示已有权限</span><span>勾选表示本次授权对象</span></div>
         </section>
         <aside class="permissionDetailPane" aria-label="授权设置与预览">
           <section class="detailSection selectedSection">
             <div class="detailTitle">
-              <h3>已选对象</h3>
+              <h3>已选对象 <span class="selectionCount">{{ selectionCount }}</span></h3>
               <button
                 v-if="selectionCount"
                 type="button"
@@ -168,19 +178,20 @@
             </div>
           </section>
           <section class="detailSection">
-            <h3>权限级别</h3>
+            <h3>本次授权的目标权限</h3>
             <el-radio-group v-model="role" class="roleOptions">
               <el-radio-button
                 v-for="option in roleOptions"
                 :key="option.value"
                 :label="option.value"
+                :disabled="option.disabled"
                 ><strong>{{ option.title }}</strong
                 ><small>{{ option.caption }}</small></el-radio-button
               >
             </el-radio-group>
           </section>
           <section class="detailSection previewSection">
-            <h3>应用设置</h3>
+            <h3>授权范围</h3>
             <div class="applicationSettings">
               <el-checkbox v-model="autoSelectMembers"
                 >勾选部门时自动选中全部成员</el-checkbox
@@ -188,25 +199,11 @@
                 >部门授权包含下属部门</el-checkbox
               >
             </div>
-            <div class="grantStats">
-              <div>
-                <i class="el-icon-office-building" /><span
-                  >部门<strong>{{ selectedDepartmentIds.length }}</strong
-                  ><small>个</small></span
-                >
-              </div>
-              <div>
-                <i class="el-icon-user" /><span
-                  >成员<strong>{{ selectedUserIds.length }}</strong
-                  ><small>人</small></span
-                >
-              </div>
-            </div>
             <div class="previewBox">
               <i class="el-icon-circle-check" />
               <p v-if="selectionCount">
                 <strong>{{ selectionSummary }}</strong
-                ><span>将获得「{{ roleLabel(role) }}」权限</span>
+                ><span>将设为「{{ roleLabel(role) }}」 · {{ pendingChangeSummary }}</span>
               </p>
               <p v-else>
                 <strong>尚未选择授权对象</strong
@@ -214,7 +211,7 @@
               </p>
             </div>
           </section>
-          <section class="detailSection existingSection">
+          <section ref="existingSection" class="detailSection existingSection">
             <div class="detailTitle">
               <h3>已有权限</h3>
               <div class="existingMeta">
@@ -230,6 +227,13 @@
                   <el-option :value="50" label="50 条/页" />
                 </el-select>
               </div>
+            </div>
+            <div class="permissionFilters" role="tablist" aria-label="按权限筛选">
+              <button v-for="filter in roleFilters" :key="filter.value" type="button"
+                role="tab" :aria-selected="roleFilter === filter.value"
+                :class="['permissionFilter', { active: roleFilter === filter.value }]"
+                @click="roleFilter = filter.value"
+              >{{ filter.label }} <span>{{ filter.count }}</span></button>
             </div>
             <div class="existingSearch">
               <el-input
@@ -252,7 +256,7 @@
                 <span class="memberAvatar small">{{ avatarText(member) }}</span
                 ><span class="existingIdentity"
                   ><strong>{{ member.name || member.id }}</strong
-                  ><small>{{ member.department || '成员' }}</small></span
+                  ><small>{{ member.department || '成员' }}<template v-if="memberSourceLabel(member)"> · {{ memberSourceLabel(member) }}</template></small></span
                 ><span
                   v-if="isOwnerRole(member.role)"
                   class="ownerRoleLabel"
@@ -260,13 +264,15 @@
                 ><el-select
                   v-else
                   size="mini"
+                  :class="['memberRoleSelect', String(member.role).toLowerCase()]"
                   :value="member.role"
+                  :aria-label="`修改${member.name || member.id}的权限`"
                   @change="updateRole(member, $event)"
                   ><el-option
                     v-for="option in memberRoleSelectOptions"
                     :key="option.value"
                     :label="option.label"
-                    :value="option.value"/></el-select
+                    :value="option.value" :disabled="option.disabled"/></el-select
                 ><template v-if="isOwnerRole(member.role)">
                   <button
                     v-if="canTransferOwnership"
@@ -281,6 +287,9 @@
                 <button
                   v-else
                   class="removeBtn"
+                  :disabled="isInheritedOnly(member)"
+                  :title="isInheritedOnly(member) ? '请在来源文件夹或团队中移除继承权限' : '移除成员直接权限'"
+                  :aria-label="`移除${member.name || member.id}的权限`"
                   type="button"
                   @click="remove(member)"
                 >
@@ -289,7 +298,7 @@
               </div>
               <p v-if="!filteredMembers.length && !loading" class="existingEmpty">
                 {{
-                  memberQuery
+                  memberQuery || roleFilter
                     ? '未找到匹配的已有权限成员'
                     : '暂未添加成员'
                 }}
@@ -366,12 +375,12 @@
     </el-dialog>
     <span slot="footer" class="permissionFooter"
       ><span class="footerHint"
-        ><i class="el-icon-success" /> {{ resourceLabel }}权限变更实时生效</span
+        ><i class="el-icon-success" /> {{ loadFailed ? '加载失败，请关闭后重试' : isFolderManager ? '可管理成员请在右侧调整权限；批量授权仅限所有者' : '勾选授权保存后生效；列表修改即时生效' }}</span
       ><span
         ><el-button @click="shown = false">取消</el-button
         ><el-button
           type="primary"
-          :disabled="!selectionCount"
+          :disabled="!selectionCount || loadFailed || (isFolderManager && !isRoom && !isTeam)"
           :loading="busy"
           @click="grantSelected"
           >{{ busy ? '正在保存授权…' : '保存授权' }}</el-button
@@ -412,7 +421,10 @@ export default {
     memberQuery: '',
     searchTimer: null,
     searching: false,
-    role: 'Viewer',
+    role: 'Manager',
+    roleFilter: '',
+    loadVersion: 0,
+    loadFailed: false,
     loading: false,
     busy: false,
     page: 1,
@@ -420,6 +432,7 @@ export default {
     expandedDepartments: [],
     selectedDepartmentIds: [],
     selectedUserIds: [],
+    explicitUserIds: [],
     autoSelectMembers: true,
     includeChildren: true,
     transferVisible: false,
@@ -479,35 +492,56 @@ export default {
           { value: 'admin', title: '管理员', caption: '管理成员与内容' }
         ]
       }
-      const options = [
+      return [
         { value: 'Viewer', title: '可查看', caption: '仅查看内容' },
-        { value: 'Editor', title: '可编辑', caption: '查看并编辑' }
+        { value: 'Editor', title: '可编辑', caption: '查看并编辑' },
+        { value: 'Manager', title: '可管理', caption: '管理成员权限', disabled: this.isFolderManager }
       ]
-      if (!this.isRoom) {
-        options.push({
-          value: 'Manager',
-          title: '可管理',
-          caption: '管理成员权限'
-        })
-      }
-      return options
     },
     memberRoleSelectOptions() {
-      if (this.isTeam) {
-        return [
-          { value: 'member', label: '成员' },
-          { value: 'admin', label: '管理员' }
-        ]
-      }
-      const options = [
-        { value: 'Viewer', label: '可查看' },
-        { value: 'Editor', label: '可编辑' }
-      ]
-      if (!this.isRoom) options.push({ value: 'Manager', label: '可管理' })
-      return options
+      return this.roleOptions.map(option => ({ ...option, label: option.title }))
     },
     defaultRole() {
-      return this.isTeam ? 'member' : 'Viewer'
+      return this.isTeam ? 'member' : this.isFolderManager ? 'Editor' : 'Manager'
+    },
+    isFolderManager() {
+      return !this.isRoom && !this.isTeam && this.members.some(member =>
+        this.isCurrentUserMember(member) && String(member.role).toLowerCase() === 'manager') && !this.canTransferOwnership
+    },
+    memberByIdentity() {
+      const map = new Map()
+      this.members.forEach(member => {
+        this.identityKeys(member).forEach(key => map.set(key, member))
+      })
+      return map
+    },
+    roleFilters() {
+      const filters = this.isTeam
+        ? [{ value: 'member', label: '成员' }, { value: 'admin', label: '管理员' }]
+        : [{ value: 'viewer', label: '可查看' }, { value: 'editor', label: '可编辑' }, { value: 'manager', label: '可管理' }]
+      return [{ value: '', label: '全部', count: this.members.length },
+        ...filters.concat({ value: 'owner', label: '所有者' }).map(filter => ({
+          ...filter, count: this.members.filter(member => String(member.role).toLowerCase() === filter.value).length
+        }))]
+    },
+    selectedMemberChanges() {
+      const ids = new Set(this.selectedUserIds)
+      this.selectedDepartmentIds.forEach(id => this.memberIdsForDepartment(id).forEach(userId => ids.add(userId)))
+      return Array.from(ids).map(id => ({ id, member: this.memberByIdentity.get(id) }))
+        .filter(item => !item.member || !this.isOwnerRole(item.member.role))
+    },
+    selectionFullyLoaded() {
+      return this.selectedDepartmentIds.every(id => this.descendantDepartmentIds(id).every(departmentId =>
+        this.loadedDepartmentIds.includes(departmentId) &&
+        (this.contactsByDepartment[departmentId] || []).length >= (this.departmentTotals[departmentId] || 0)
+      ))
+    },
+    pendingChangeSummary() {
+      const changes = this.selectedMemberChanges
+      const changed = changes.filter(item => this.needsRoleChange(item.member))
+      const existing = changed.filter(item => item.member).length
+      const unchanged = changes.length - changed.length
+      return `${changed.length - existing} 人新增、${existing} 人调整${unchanged ? `，${unchanged} 人无变更` : ''}${this.selectedDepartmentIds.length ? '（部门范围以保存时为准）' : ''}`
     },
     currentUserId() {
       const user = getCurrentUser() || {}
@@ -515,8 +549,9 @@ export default {
     },
     filteredMembers() {
       const term = this.memberQuery.trim().toLowerCase()
-      if (!term) return this.members
-      return this.members.filter(member =>
+      const members = this.members.filter(member => !this.roleFilter || String(member.role).toLowerCase() === this.roleFilter)
+      if (!term) return members
+      return members.filter(member =>
         [
           member.name,
           member.id,
@@ -719,7 +754,15 @@ export default {
   watch: {
     visible(value) {
       if (value) this.resetAndLoad()
+      else { this.loadVersion += 1; clearTimeout(this.searchTimer) }
     },
+    resourceId() {
+      if (this.visible) this.resetAndLoad()
+    },
+    resourceType() {
+      if (this.visible) this.resetAndLoad()
+    },
+    roleFilter() { this.page = 1 },
     query() {
       this.searchContacts()
     },
@@ -742,21 +785,26 @@ export default {
         this.toggleDepartmentMembers(id, true)
       })
     },
-    includeChildren() {
-      this.selectedDepartmentIds.forEach(id => {
-        if (this.areDepartmentMembersSelected(id) || this.autoSelectMembers) {
-          this.toggleDepartmentMembers(id, true)
-        }
-      })
+    includeChildren(value, previous) {
+      this.syncDepartmentScope(previous)
     }
   },
   beforeDestroy() {
     clearTimeout(this.searchTimer)
     clearTimeout(this.transferSearchTimer)
     this.transferSearchVersion += 1
+    this.loadVersion += 1
+  },
+  mounted() {
+    if (this.visible) this.resetAndLoad()
   },
   methods: {
     async resetAndLoad() {
+      const version = ++this.loadVersion
+      this.loadFailed = false
+      this.members = []
+      this.departmentOptions = []
+      this.roleFilter = ''
       this.query = ''
       this.memberQuery = ''
       this.page = 1
@@ -777,11 +825,15 @@ export default {
           teamService.listDepartments(),
           this.loadMembers()
         ])
+        if (version !== this.loadVersion) return
         this.departmentOptions = departments
+        this.role = this.defaultRole
       } catch (error) {
+        if (version !== this.loadVersion) return
+        this.loadFailed = true
         this.$message.error(error.message || '加载权限数据失败')
       } finally {
-        this.loading = false
+        if (version === this.loadVersion) this.loading = false
       }
     },
     cacheContacts(items) {
@@ -793,6 +845,7 @@ export default {
     },
     async loadDepartmentContacts(id) {
       id = String(id)
+      const version = this.loadVersion
       if (this.loadedDepartmentIds.includes(id)) return true
       if (this.departmentLoadTasks[id]) return this.departmentLoadTasks[id]
       this.loadingDepartmentIds = this.loadingDepartmentIds.concat(id)
@@ -822,15 +875,16 @@ export default {
             )
               break
           }
+          if (version !== this.loadVersion) return false
           this.cacheContacts(items)
           this.$set(this.departmentTotals, id, total)
           this.loadedDepartmentIds = this.loadedDepartmentIds.concat(id)
           return true
         } catch (error) {
-          this.$message.error(error.message || '加载部门成员失败')
+          if (version === this.loadVersion) this.$message.error(error.message || '加载部门成员失败')
           return false
         } finally {
-          this.loadingDepartmentIds = this.loadingDepartmentIds.filter(
+          if (version === this.loadVersion) this.loadingDepartmentIds = this.loadingDepartmentIds.filter(
             item => item !== id
           )
         }
@@ -839,12 +893,13 @@ export default {
       try {
         return await task
       } finally {
-        this.$delete(this.departmentLoadTasks, id)
+        if (version === this.loadVersion) this.$delete(this.departmentLoadTasks, id)
       }
     },
     searchContacts() {
       clearTimeout(this.searchTimer)
       const term = this.query.trim()
+      const version = this.loadVersion
       if (!term) {
         this.searchResults = []
         this.searching = false
@@ -857,15 +912,15 @@ export default {
             search: term,
             limit: 100
           })
-          if (this.query.trim() === term) {
+          if (version === this.loadVersion && this.query.trim() === term) {
             this.searchResults = result.list
             this.cacheContacts(result.list)
           }
         } catch (error) {
-          if (this.query.trim() === term)
+          if (version === this.loadVersion && this.query.trim() === term)
             this.$message.error(error.message || '搜索成员失败')
         } finally {
-          if (this.query.trim() === term) this.searching = false
+          if (version === this.loadVersion && this.query.trim() === term) this.searching = false
         }
       }, 250)
     },
@@ -882,14 +937,32 @@ export default {
     collapseAllDepartments() {
       this.expandedDepartments = []
     },
-    descendantDepartmentIds(id) {
+    descendantDepartmentIds(id, includeChildren = this.includeChildren) {
       const ids = [String(id)]
-      if (!this.includeChildren) return ids
+      if (!includeChildren) return ids
       for (let index = 0; index < ids.length; index += 1)
         (this.childDepartmentMap[ids[index]] || []).forEach(item => {
           if (!ids.includes(item.id)) ids.push(item.id)
         })
       return ids
+    },
+    async syncDepartmentScope(previous) {
+      const version = this.loadVersion
+      const departments = this.selectedDepartmentIds.slice()
+      const oldDepartments = new Set(departments.reduce((ids, id) =>
+        ids.concat(this.descendantDepartmentIds(id, previous)), []))
+      const previousAutoUsers = this.contacts.filter(contact =>
+        (contact.departmentIds || [contact.departmentId]).map(String).some(id => oldDepartments.has(id))
+      ).map(contact => String(contact.userId || contact.id))
+      const shouldSelect = this.autoSelectMembers || (previousAutoUsers.length > 0 &&
+        previousAutoUsers.every(id => this.selectedUserIds.includes(id)))
+      if (!shouldSelect) return
+      const loaded = await Promise.all(departments.map(id => this.ensureDepartmentTreeLoaded(id)))
+      if (version !== this.loadVersion || loaded.some(result => !result)) return
+      const nextAutoUsers = departments.reduce((ids, id) => ids.concat(this.memberIdsForDepartment(id)), [])
+      this.selectedUserIds = Array.from(new Set(this.selectedUserIds.filter(id =>
+        !previousAutoUsers.includes(id) || this.explicitUserIds.includes(id)
+      ).concat(nextAutoUsers)))
     },
     async ensureDepartmentTreeLoaded(id) {
       const ids = this.descendantDepartmentIds(id)
@@ -901,6 +974,7 @@ export default {
     memberIdsForDepartment(id) {
       const ids = this.descendantDepartmentIds(id)
       return this.contacts
+        .filter(contact => !this.isOwnerMember(contact))
         .filter(contact =>
           (contact.departmentIds || [contact.departmentId])
             .map(String)
@@ -927,8 +1001,9 @@ export default {
       )
     },
     async toggleDepartmentMembers(id, checked) {
+      const version = this.loadVersion
       const loaded = await this.ensureDepartmentTreeLoaded(id)
-      if (!loaded) return
+      if (!loaded || version !== this.loadVersion) return
       const ids = this.memberIdsForDepartment(id)
       if (checked && !ids.length) {
         this.$message.warning('该部门暂无可选成员')
@@ -949,7 +1024,16 @@ export default {
         }
         return
       }
+      if (this.isOwnerMember(row.contact)) return
       const id = String(row.id)
+      this.explicitUserIds = checked
+        ? Array.from(new Set(this.explicitUserIds.concat(id)))
+        : this.explicitUserIds.filter(item => item !== id)
+      // A member exclusion turns a department selection into explicit members,
+      // otherwise the department payload would silently grant that member again.
+      if (!checked) this.selectedDepartmentIds = this.selectedDepartmentIds.filter(
+        departmentId => !this.memberIdsForDepartment(departmentId).includes(id)
+      )
       this.selectedUserIds = checked
         ? Array.from(new Set(this.selectedUserIds.concat(id)))
         : this.selectedUserIds.filter(item => item !== id)
@@ -987,12 +1071,63 @@ export default {
     clearSelection() {
       this.selectedDepartmentIds = []
       this.selectedUserIds = []
+      this.explicitUserIds = []
     },
     removeSelection(item) {
       if (item.type === 'department')
         this.toggleRow({ type: 'department', id: item.id }, false)
       else
-        this.selectedUserIds = this.selectedUserIds.filter(id => id !== item.id)
+        this.toggleRow({ type: 'member', id: item.id, contact: this.contacts.find(contact => String(contact.userId || contact.id) === item.id) }, false)
+    },
+    identityKeys(item) {
+      return [item && item.id, item && item.userId, item && item.wecomUserId].filter(Boolean).map(String)
+    },
+    existingMember(contact) {
+      return this.identityKeys(contact).map(id => this.memberByIdentity.get(id)).find(Boolean)
+    },
+    isOwnerMember(contact) {
+      const member = this.existingMember(contact)
+      return member && this.isOwnerRole(member.role)
+    },
+    rowPermission(row) {
+      if (row.type === 'member') {
+        const member = this.existingMember(row.contact)
+        return member ? { label: this.roleLabel(member.role), tone: String(member.role).toLowerCase() } : null
+      }
+      const allContacts = this.contactsByDepartment[row.id] || []
+      const contacts = allContacts.filter(contact => !this.isOwnerMember(contact))
+      const authorized = contacts.map(contact => this.existingMember(contact)).filter(Boolean)
+      if (!authorized.length) return null
+      const roles = new Set(authorized.map(member => String(member.role).toLowerCase()))
+      // Department grants are expanded into member grants by the server. Never
+      // present a partially loaded department as if it had its own ACL record.
+      const complete = this.loadedDepartmentIds.includes(String(row.id)) && allContacts.length >= (this.departmentTotals[row.id] || 0)
+      return complete && authorized.length === contacts.length && roles.size === 1
+        ? { label: `全员${this.roleLabel(authorized[0].role)}`, tone: Array.from(roles)[0] }
+        : { label: `${roles.size > 1 ? '混合权限 · ' : ''}${authorized.length} 人已授权`, tone: 'mixed' }
+    },
+    inspectRowPermission(row) {
+      this.memberQuery = row.type === 'member' ? row.name : ''
+      this.roleFilter = ''
+      this.$refs.existingSection.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    },
+    isInheritedOnly(member) {
+      return this.isRoom && member.directRole === null && !!(member.folderRole || member.teamRole)
+    },
+    memberSourceLabel(member) {
+      if (!this.isRoom) return ''
+      const sources = []
+      if (member.folderRole) sources.push('文件夹继承')
+      if (member.teamRole) sources.push('团队继承')
+      if (member.directRole) sources.push('直接授权')
+      return sources.join(' / ')
+    },
+    needsRoleChange(member) {
+      if (!member) return true
+      if (this.isOwnerRole(member.role)) return false
+      if (this.isTeam && this.role === 'member') return false
+      const existing = this.isRoom && member.directRole !== undefined ? member.directRole : member.role
+      return String(existing || '').toLowerCase() !== String(this.role).toLowerCase()
     },
     avatarText(item) {
       return String((item && item.name) || '企').slice(0, 1)
@@ -1019,7 +1154,8 @@ export default {
           owner: '所有者',
           Member: '成员',
           Admin: '管理员',
-          Owner: '所有者'
+          Owner: '所有者',
+          viewer: '可查看', editor: '可编辑', manager: '可管理'
         }[role] || (this.isTeam ? '成员' : '可查看')
       )
     },
@@ -1072,45 +1208,61 @@ export default {
     },
     async confirmTransferOwnership() {
       if (!this.transferTargetId) return
+      const version = this.loadVersion
+      const resourceId = this.resourceId
       this.busy = true
       try {
+        let members
         if (this.isTeam) {
-          this.members = await teamService.transferOwnership(
-            this.resourceId,
+          members = await teamService.transferOwnership(
+            resourceId,
             this.transferTargetId
           )
         } else if (this.isRoom) {
-          this.members = await shareService.transferOwnership(
-            this.resourceId,
+          members = await shareService.transferOwnership(
+            resourceId,
             this.transferTargetId
           )
         } else {
-          this.members = await folderService.transferOwnership(
-            this.resourceId,
+          members = await folderService.transferOwnership(
+            resourceId,
             this.transferTargetId
           )
         }
+        if (version !== this.loadVersion) return
+        this.members = members
         this.transferVisible = false
         this.transferTargetId = ''
         this.$emit('changed')
         this.$message.success(`${this.resourceLabel}所有权已转移`)
       } catch (error) {
-        this.$message.error(error.message || '转移所有权失败')
+        if (version === this.loadVersion) this.$message.error(error.message || '转移所有权失败')
       } finally {
         this.busy = false
       }
     },
     async grantSelected() {
+      if (this.busy || this.loading || this.loadFailed || !this.selectionCount) return
+      if (this.selectionFullyLoaded && !this.selectedMemberChanges.some(item => this.needsRoleChange(item.member))) {
+        this.$message.info('所选成员权限未变化，无需保存')
+        return
+      }
+      const version = this.loadVersion
       this.busy = true
       try {
-        if (this.isTeam) await this.grantTeamSelection()
-        else if (this.isRoom) await this.grantRoomSelection()
-        else await this.grantFolderSelection()
+        let result
+        if (this.isTeam) result = await this.grantTeamSelection()
+        else if (this.isRoom) result = await this.grantRoomSelection()
+        else result = await this.grantFolderSelection()
+        if (version !== this.loadVersion) return
         await this.loadMembers()
+        if (version !== this.loadVersion) return
         this.clearSelection()
         this.$emit('changed')
-        this.$message.success(`${this.resourceLabel}权限已更新`)
+        if (result && result.changed === 0) this.$message.info('所选成员权限已一致，无需变更')
+        else this.$message.success(`${this.resourceLabel}权限已更新`)
       } catch (error) {
+        if (version !== this.loadVersion) return
         try {
           await this.loadMembers()
         } catch (_) {
@@ -1122,14 +1274,18 @@ export default {
       }
     },
     async grantFolderSelection() {
-      await folderService.bulkSetMembers(this.resourceId, {
+      return folderService.bulkSetMembers(this.resourceId, {
         departmentIds: this.selectedDepartmentIds,
-        userIds: this.selectedUserIds,
+        userIds: this.selectedUserIds.filter(id => this.needsRoleChange(this.memberByIdentity.get(id))),
         includeChildren: this.includeChildren,
-        role: this.role.toLowerCase()
-      })
+        role: this.role.toLowerCase(),
+        onlyChanges: true
+      }, { includeSummary: true })
     },
     async grantRoomSelection() {
+      const resourceId = this.resourceId
+      const version = this.loadVersion
+      const role = this.role
       const departmentIds = Array.from(
         new Set(
           this.selectedDepartmentIds.reduce(
@@ -1143,6 +1299,7 @@ export default {
       )
       if (loadResults.some(result => result === false))
         throw new Error('部分部门成员加载失败，请重试后再授权')
+      if (version !== this.loadVersion) throw new Error('授权对象已切换，请重新选择')
 
       const departmentUsers = this.selectedDepartmentIds.reduce(
         (all, id) => all.concat(this.memberIdsForDepartment(id)),
@@ -1156,22 +1313,27 @@ export default {
       const selectedIds = Array.from(
         new Set(this.selectedUserIds.concat(departmentUsers).map(String))
       )
-      const userIds = selectedIds.filter(id => !ownerIds.has(id))
+      const userIds = selectedIds.filter(id => !ownerIds.has(id) && this.needsRoleChange(this.memberByIdentity.get(id)))
       if (!userIds.length) {
-        if (selectedIds.length)
-          throw new Error('所选成员已拥有所有者权限，无需重复授权')
+        if (selectedIds.length) return { changed: 0 }
         throw new Error('所选部门暂无可授权成员')
       }
-      for (let index = 0; index < userIds.length; index += 5)
+      for (let index = 0; index < userIds.length; index += 5) {
+        if (version !== this.loadVersion) throw new Error('授权对象已切换，请重新选择')
         await Promise.all(
           userIds
             .slice(index, index + 5)
             .map(id =>
-              shareService.addMember(this.resourceId, id, this.role)
+              shareService.addMember(resourceId, id, role)
             )
         )
+      }
+      return { changed: userIds.length }
     },
     async grantTeamSelection() {
+      const version = this.loadVersion
+      const resourceId = this.resourceId
+      const role = this.role
       const departmentIds = Array.from(
         new Set(
           this.selectedDepartmentIds.reduce(
@@ -1185,6 +1347,7 @@ export default {
       )
       if (loadResults.some(result => result === false))
         throw new Error('部分部门成员加载失败，请重试后再授权')
+      if (version !== this.loadVersion) throw new Error('授权对象已切换，请重新选择')
 
       const departmentUsers = this.selectedDepartmentIds.reduce(
         (all, id) => all.concat(this.memberIdsForDepartment(id)),
@@ -1214,9 +1377,10 @@ export default {
         ])
       )
       const toAdd = userIds.filter(id => !existingByWecom.has(id))
-      if (toAdd.length) await teamService.addMembers(this.resourceId, toAdd)
+      if (toAdd.length) await teamService.addMembers(resourceId, toAdd)
 
-      if (this.role === 'admin') {
+      if (role === 'admin') {
+        if (version !== this.loadVersion) return
         await this.loadMembers()
         const refreshed = new Map(
           this.members.map(member => [
@@ -1225,13 +1389,14 @@ export default {
           ])
         )
         for (const id of userIds) {
+          if (version !== this.loadVersion) return
           const member = refreshed.get(id)
           if (!member || this.isOwnerRole(member.role || member.teamRole))
             continue
           if (String(member.role || member.teamRole).toLowerCase() === 'admin')
             continue
           await teamService.updateMemberRole(
-            this.resourceId,
+            resourceId,
             member.id,
             'admin'
           )
@@ -1239,49 +1404,42 @@ export default {
       }
     },
     async loadMembers() {
-      if (this.isTeam) {
-        this.members = await teamService.listMembers(this.resourceId)
-        return
+      const version = this.loadVersion
+      const resourceId = this.resourceId
+      const folder = this.folder
+      let list
+      if (this.isTeam) list = await teamService.listMembers(resourceId)
+      else if (this.isRoom) list = await shareService.getMembers(resourceId)
+      else {
+        const result = await folderService.getMembers(resourceId)
+        list = (result.list || []).slice()
+        const owner = (folder && (folder.owner || folder.createdBy)) || {}
+        const ownerId = String(owner.id || owner.userId || (folder && folder.createdById) || '')
+        if (ownerId && !list.some(member => this.identityKeys(member).includes(ownerId))) {
+          list.unshift({ id: ownerId, userId: ownerId, name: owner.name || ownerId, role: 'Owner', department: '所有者' })
+        }
       }
-      if (this.isRoom) {
-        this.members = await shareService.getMembers(this.resourceId)
-        return
-      }
-      const result = await folderService.getMembers(this.resourceId)
-      const list = (result.list || []).slice()
-      const owner = (this.folder && (this.folder.owner || this.folder.createdBy)) || {}
-      const ownerId = String(
-        owner.id || owner.userId || (this.folder && this.folder.createdById) || ''
-      )
-      if (
-        ownerId &&
-        !list.some(member => String(member.id || member.userId) === ownerId)
-      ) {
-        list.unshift({
-          id: ownerId,
-          userId: ownerId,
-          name: owner.name || ownerId,
-          avatar: owner.avatar || '',
-          role: 'Owner',
-          department: '所有者'
-        })
-      }
-      this.members = list
+      if (version === this.loadVersion && resourceId === this.resourceId) this.members = list
     },
     async run(action) {
+      if (this.busy || this.loadFailed) return
+      const version = this.loadVersion
       this.busy = true
       try {
         await action()
+        if (version !== this.loadVersion) return
         await this.loadMembers()
+        if (version !== this.loadVersion) return
         this.$emit('changed')
         this.$message.success(`${this.resourceLabel}权限已更新`)
       } catch (error) {
-        this.$message.error(error.message || '更新权限失败')
+        if (version === this.loadVersion) this.$message.error(error.message || '更新权限失败')
       } finally {
         this.busy = false
       }
     },
     updateRole(member, role) {
+      if (String(role).toLowerCase() === String(member.role).toLowerCase()) return
       return this.run(() => {
         if (this.isTeam)
           return teamService.updateMemberRole(
@@ -1813,6 +1971,7 @@ export default {
   }
 }
 </style>
+
 <style lang="less" scoped>
 .applicationSettings {
   display: flex;
@@ -1915,7 +2074,8 @@ export default {
 .folderPermissionDialog {
   display: flex;
   flex-direction: column;
-  width: min(1080px, calc(100vw - 32px)) !important;
+  width: calc(100vw - 32px) !important;
+  max-width: 1080px;
 
   height: 96vh;
   max-height: 96vh;
@@ -1955,16 +2115,16 @@ export default {
     max-height: 96vh;
   }
   .folderPermissionDialog .el-dialog__body {
-    overflow-y: auto;
+    overflow: hidden;
   }
   .folderPermissionDialog .permissionDialogBody {
-    height: auto;
+    height: 100%;
   }
   .folderPermissionDialog .permissionWorkspace {
     display: flex;
     flex-direction: column;
-    flex: none;
-    height: calc(96vh - 150px);
+    flex: 1;
+    height: auto;
     min-height: 0;
     overflow-y: auto;
   }
@@ -1976,5 +2136,59 @@ export default {
     flex: 0 0 auto;
     overflow: visible;
   }
+}
+</style>
+<style lang="less" scoped>
+.permissionDetailPane { display: flex; flex-direction: column; overflow: hidden; }
+.detailSection { flex: 0 0 auto; padding: 12px 16px; }
+.selectedSection { min-height: 0; }
+.selectionCount { margin-left: 5px; padding: 2px 7px; background: #f0f3f2; border-radius: 12px; color: #66756e; font-size: 11px; font-weight: 500; }
+.selectionEmpty { min-height: 36px; }
+.selectedList { max-height: 70px; margin-top: 8px; }
+.selectedItem small { max-width: 180px; }
+.roleOptions { gap: 4px; padding: 4px; border-radius: 9px; background: #f3f5f4; box-sizing: border-box; }
+.roleOptions /deep/ .el-radio-button__inner { border: 0 !important; border-radius: 6px !important; background: transparent; box-shadow: none !important; padding: 8px 4px; }
+.roleOptions /deep/ .el-radio-button__orig-radio:checked + .el-radio-button__inner { background: #fff; color: #087854; box-shadow: 0 1px 5px #193e2114 !important; }
+.applicationSettings { flex-direction: row; flex-wrap: wrap; gap: 7px 12px; }
+.applicationSettings /deep/ .el-checkbox { margin-right: 0; }
+.previewBox { border: 0; background: #f6f9f7; }
+.previewSection h3 { display: none; }
+.existingSection { flex: 1; min-height: 180px; display: flex; flex-direction: column; }
+.existingList { flex: 1; min-height: 0; overflow: auto; border: 1px solid #e7ece9; }
+.existingHead { position: sticky; top: 0; z-index: 1; }
+.existingRow { min-height: 52px; }
+.existingIdentity strong { font-size: 13px; }
+.existingIdentity small { margin-top: 4px; }
+.permissionFilters { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
+.permissionFilter { padding: 5px 8px; border: 1px solid #e2e7e4; border-radius: 20px; background: #fff; color: #66756e; cursor: pointer; font-size: 12px; }
+.permissionFilter span { margin-left: 3px; font-variant-numeric: tabular-nums; opacity: .8; }
+.permissionFilter.active { background: #23342c; border-color: #23342c; color: #fff; }
+.permissionFilter:hover:not(.active) { border-color: #9cbcad; color: #087854; }
+.treeRow { min-height: 46px; gap: 0; }
+.treeLabel { flex-direction: column; align-items: flex-start; gap: 2px; padding: 5px 0; }
+.treeLabel small { font-size: 11px; }
+.permissionBadge { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; padding: 3px 6px; margin: 0 3px 0 6px; border: 0; border-radius: 12px; background: #f0f2f4; color: #66717d; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.permissionBadge.editor { background: #eaf2ff; color: #3268ae; }
+.permissionBadge.manager, .permissionBadge.admin { background: #e6f5ed; color: #087854; }
+.permissionBadge.owner { background: #f4f0e8; color: #8b6d35; }
+.permissionBadge:hover { filter: brightness(.96); }
+.treeLegend { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px; padding: 10px 12px; border-top: 1px solid #e7ece9; background: #fff; font-size: 11px; color: #7b8982; }
+.treeLegend i { color: #087854; }
+.removeBtn:disabled { color: #8b9691; cursor: help; }
+.permissionFooter .el-button--primary.is-disabled { background: #c5d9cf; border-color: #c5d9cf; color: #fff; cursor: not-allowed; }
+.memberRoleSelect.viewer /deep/ .el-input__inner { color: #66717d; background: #f5f6f7; border-color: #edf0f2; }
+.memberRoleSelect.editor /deep/ .el-input__inner { color: #3268ae; background: #f0f6ff; border-color: #e4edfa; }
+.memberRoleSelect.manager /deep/ .el-input__inner, .memberRoleSelect.admin /deep/ .el-input__inner { color: #087854; background: #f0f9f4; border-color: #dfeee5; }
+button:focus-visible { outline: 2px solid #087854; outline-offset: 2px; }
+@media (max-width: 900px) {
+  .permissionDetailPane { overflow: visible; display: block; }
+  .existingSection { min-height: 280px; }
+  .existingList { max-height: 320px; flex: none; }
+  .permissionHeader p { line-height: 1.5; }
+  .permissionBadge { font-size: 10px; }
+  .treeRow.department { flex-wrap: wrap; }
+  .departmentMemberToggle { margin-left: 50px; margin-bottom: 7px; }
+  .footerHint { max-width: 48%; line-height: 1.5; font-size: 11px; }
+  .permissionFooter .el-button { padding: 9px 11px; }
 }
 </style>

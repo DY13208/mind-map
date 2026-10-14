@@ -3200,11 +3200,11 @@ export default {
         this.canEditSop =
           fromList.canEdit != null
             ? !!fromList.canEdit
-            : fromList.role === 'owner' || fromList.role === 'editor'
+            : ['owner', 'manager', 'editor'].includes(fromList.role)
         this.canManageSop =
           fromList.canManage != null
             ? !!fromList.canManage
-            : fromList.role === 'owner'
+            : ['owner', 'manager'].includes(fromList.role)
       }
       try {
         // 用授权接口探测 edit；viewer 得 403，但仍保留查看能力

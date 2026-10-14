@@ -126,9 +126,9 @@ export function normalizeRoomDto(apiRoom = {}, extras = {}) {
     canEdit:
       apiRoom.canEdit != null
         ? !!apiRoom.canEdit
-        : role === 'owner' || role === 'editor',
+        : ['owner', 'manager', 'editor'].includes(role),
     canManage:
-      apiRoom.canManage != null ? !!apiRoom.canManage : role === 'owner'
+      apiRoom.canManage != null ? !!apiRoom.canManage : ['owner', 'manager'].includes(role)
   }
 }
 
@@ -242,8 +242,15 @@ export function normalizeMemberDto(row = {}) {
     id: userId,
     userId,
     name,
+    wecomUserId: row.wecom_userid || row.wecomUserId || userId,
+    department: row.department || '',
+    position: row.position || '',
     avatar: row.avatar || (name ? name.slice(0, 1) : '用'),
     email: row.email || userId,
+    directRole: row.direct_role !== undefined ? row.direct_role : row.directRole,
+    folderRole: row.folder_role || row.folderRole || null,
+    teamRole: row.team_role || row.teamRole || null,
+    source: row.source || '',
     role: apiRole(role),
     roleLabel: displayRole(role),
     joinedAt: row.created_at || row.joinedAt || ''

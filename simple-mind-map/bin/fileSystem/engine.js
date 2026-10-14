@@ -321,7 +321,7 @@ function createFileSystem(options = {}) {
     if (input.shared) {
       // 与我共享：当前用户是成员，但不是 owner（排除本人创建/拥有的脑图）。
       rows = rows.filter(
-        row => row.role === 'editor' || row.role === 'viewer'
+        row => ['manager', 'editor', 'viewer'].includes(row.role)
       )
     } else if (!input.includeTeams) {
       rows = rows.filter(row => !row.team_id)
@@ -396,7 +396,7 @@ function createFileSystem(options = {}) {
             select 1 from room_members m
             where m.room_key = r.room_key
               and m.user_id = $${userParam}
-              and m.role in ('editor', 'viewer')
+              and m.role in ('manager', 'editor', 'viewer')
           )`
         } else {
           where += ` and (
