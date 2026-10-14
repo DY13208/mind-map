@@ -164,6 +164,16 @@ class NodeImgAdjust {
       cursor: nwse-resize;
     `
     btnEl.className = 'node-image-resize'
+    btnEl.title = '点击查看大图，拖动调整图片大小'
+    btnEl.setAttribute('role', 'button')
+    btnEl.setAttribute('aria-label', '查看大图或调整图片大小')
+    btnEl.tabIndex = 0
+    btnEl.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return
+      e.stopPropagation()
+      e.preventDefault()
+      this.mindMap.emit('node_img_preview', this.node, e)
+    })
     // 给按钮元素绑定事件
     btnEl.addEventListener('mouseenter', () => {
       // 移入按钮，会触发节点图片的移出事件，所以需要再次显示按钮
@@ -233,6 +243,8 @@ class NodeImgAdjust {
   onMousedown(e) {
     this.mindMap.emit('node_img_adjust_btn_mousedown', this.node)
     this.isMousedown = true
+    this.resizeStart = { x: e.clientX, y: e.clientY }
+    this.resizeMoved = false
     this.mousedownDrawTransform = this.mindMap.draw.transform()
     // 隐藏节点实际图片
     this.hideNodeImage()
@@ -246,6 +258,8 @@ class NodeImgAdjust {
   onMousemove(e) {
     if (!this.isMousedown) return
     e.preventDefault()
+    if (!this.resizeMoved && Math.hypot(e.clientX - this.resizeStart.x, e.clientY - this.resizeStart.y) < 4) return
+    this.resizeMoved = true
     const { scaleX, scaleY } = this.mousedownDrawTransform
     // 图片原始大小
     const { width: imageOriginWidth, height: imageOriginHeight } =
@@ -299,20 +313,28 @@ class NodeImgAdjust {
   }
 
   // 鼠标松开
-  onMouseup() {
+  onMouseup(e) {
     if (!this.isMousedown) return
     // 显示节点实际图片
     this.showNodeImage()
     // 隐藏自定义元素
     this.hideHandleEl()
+    if (!this.resizeMoved) {
+      this.isMousedown = false
+      this.mousedownDrawTransform = null
+      this.mousedownOffset.x = 0
+      this.mousedownOffset.y = 0
+      this.mindMap.emit('node_img_preview', this.node, e)
+      return
+    }
     // 更新节点图片为新的大小
     const { image, imageTitle } = this.node.getData()
     const { scaleX, scaleY } = this.mousedownDrawTransform
     const newWidth = this.currentImgWidth / scaleX
     const newHeight = this.currentImgHeight / scaleY
     if (
-      Math.abs(newWidth - this.rect.width) > 1 ||
-      Math.abs(newHeight - this.rect.height) > 1
+      Math.abs(newWidth - this.rect.width / scaleX) > 1 ||
+      Math.abs(newHeight - this.rect.height / scaleY) > 1
     ) {
       this.mindMap.execCommand('SET_NODE_IMAGE', this.node, {
         url: image,
@@ -341,11 +363,23 @@ class NodeImgAdjust {
   // 插件被移除前做的事情
   beforePluginRemove() {
     this.unBindEvent()
+    this.disposeHandle()
   }
 
   // 插件被卸载前做的事情
   beforePluginDestroy() {
     this.unBindEvent()
+    this.disposeHandle()
+  }
+
+  disposeHandle() {
+    this.showNodeImage()
+    if (this.handleEl) this.handleEl.remove()
+    this.handleEl = null
+    this.isShowHandleEl = false
+    this.isMousedown = false
+    this.node = null
+    this.img = null
   }
 }
 

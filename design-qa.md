@@ -35,3 +35,15 @@
 - 未修改附件存储、上传、下载、协同协议和服务端业务接口。
 
 验收边界：预览使用本地生成的真实格式测试文件，线上 COS、企业微信会话和 OCR 服务需要部署后验收。文本采取响应流逐步解码与渲染；浏览器可能预读网络字节，本次没有新增服务端分段下载协议。超出预览预算时可下载完整原文件。复现入口和详细预算见 [附件预览说明](docs/attachment-preview-safety.md)。
+
+## 原格式与节点图片回归（2026-10-14）
+
+状态：passed。基于最新主分支 `7b9dc77d`。
+
+- 完整应用在隔离测试房间通过实际 UI 插入图片；单击右下角箭头打开大图，关闭后显示已保存，浏览器无错误。另在生产组件测试环境验证双击仍可打开，拖拽将 64px 图片调整为约 94.39px，且不打开预览。单元测试覆盖 50% / 100% / 200% 画布缩放、指针轻微抖动、重复 mouseup 和插件卸载。
+- DOCX / XLSX / PPTX / ZIP 故意使用错误的 `text/markdown` 元数据仍进入原格式预览；未知 BIN 不被当作 Markdown。
+- 图片、HTML、DOCX、XLSX、Markdown、TXT、PDF 逐类浏览器打开/关闭通过。HTML 新页面显示原始网页与表格；ZIP 目录初始 100 项，滚动追加到 200 项；下载为原始 ZIP。
+- PPTX 直接显示原文件的背景、标题与图片，支持 3 页翻页、页码定位、125% 缩放、最大化/还原、ESC 和原始 PPTX 下载；不再显示提取文字。390px 手机工具栏与预览宽度均为 370px，无横向控件溢出。
+- 新增关闭过程中终止幻灯片解析与销毁渲染器的回归；晚到结果不更新已关闭弹窗。所有既有附件测试、相关 lint 与生产构建通过。
+
+证据：[完整应用图片放大](docs/assets/attachment-preview/inline-image-preview.jpg)、[PPTX 原格式](docs/assets/attachment-preview/pptx-slides.jpg)、[PPTX 手机](docs/assets/attachment-preview/pptx-mobile.jpg)、[ZIP 目录](docs/assets/attachment-preview/zip-directory.jpg)。

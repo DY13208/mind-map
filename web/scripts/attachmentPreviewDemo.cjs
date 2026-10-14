@@ -36,6 +36,18 @@ async function fixtures() {
   zip.file('word/document.xml', '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>项目方案</w:t></w:r></w:p>' + drawing + table +
     Array.from({ length: 180 }, (_, index) => (index % 30 === 0 ? '<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>' + (index / 30 + 1) + '. 项目章节</w:t></w:r></w:p>' : '') + paragraph('文档段落 ' + (index + 1) + '：明确项目背景、需求分析和实施计划。保留基本段落、标题、表格与图片排版。')).join('') +
     '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1000" w:right="1000" w:bottom="1000" w:left="1000"/></w:sectPr></w:body></w:document>')
+  const archive = new JSZip()
+  for (let i = 0; i < 260; i++) archive.file('资料/文件' + i + '.txt', 'archive content ' + i)
+  const pptx = new JSZip()
+  pptx.file('[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>' + [1,2,3].map(i => '<Override PartName="/ppt/slides/slide'+i+'.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>').join('') + '</Types>')
+  pptx.file('_rels/.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>')
+  pptx.file('ppt/presentation.xml', '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst>'+[1,2,3].map(i => '<p:sldId id="'+(255+i)+'" r:id="rId'+i+'"/>').join('')+'</p:sldIdLst><p:sldSz cx="9144000" cy="5143500"/></p:presentation>')
+  pptx.file('ppt/_rels/presentation.xml.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+[1,2,3].map(i => '<Relationship Id="rId'+i+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide'+i+'.xml"/>').join('')+'</Relationships>')
+  for (const i of [1,2,3]) {
+    pptx.file('ppt/slides/slide'+i+'.xml', '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val="EAF2FF"/></a:solidFill></p:bgPr></p:bg><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="914400" y="914400"/><a:ext cx="7000000" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr sz="3200" b="1"><a:solidFill><a:srgbClr val="2455AA"/></a:solidFill></a:rPr><a:t>项目方案 · 第 '+i+' 页</a:t></a:r></a:p></p:txBody></p:sp><p:pic><p:nvPicPr><p:cNvPr id="3" name="Logo"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="image1"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="914400" y="2286000"/><a:ext cx="1200000" cy="1200000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic></p:spTree></p:cSld></p:sld>')
+    pptx.file('ppt/slides/_rels/slide'+i+'.xml.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="image1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo.png"/></Relationships>')
+  }
+  pptx.file('ppt/media/logo.png', image)
   const pdf = await PDFDocument.create()
   const font = await pdf.embedFont(StandardFonts.Helvetica)
   for (let index = 1; index <= 24; index++) {
@@ -48,12 +60,15 @@ async function fixtures() {
   return {
     markdown: make('markdown', '公司模型_整理版.md', Buffer.from(markdown), { mimeType: 'text/markdown' }),
     pdf: make('pdf', '项目说明书.pdf', Buffer.from(await pdf.save()), { mimeType: 'application/pdf' }),
-    word: make('word', '项目方案.docx', await zip.generateAsync({ type: 'nodebuffer' })),
-    excel: make('excel', '财务数据.xlsx', XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })),
+    word: make('word', '项目方案.docx', await zip.generateAsync({ type: 'nodebuffer' }), {mimeType:'text/markdown'}),
+    excel: make('excel', '财务数据.xlsx', XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), {mimeType:'text/markdown'}),
     image: make('image', '项目图片.png', image, { mimeType: 'image/png', status: 'failed', errorMessage: '图片 OCR 服务未配置' }),
     text: make('text', '日志记录.txt', Buffer.from(Array.from({ length: 35000 }, (_, i) => '2026-10-14 10:00:00 [INFO] 日志记录 ' + i + '\n').join(''))),
     code: make('code', 'app.js', Buffer.from(Array.from({ length: 15000 }, (_, i) => 'const value' + i + ' = { ready: true }; // async preview\n').join(''))),
-    unsupported: make('unsupported', '压缩包.zip', Buffer.from('unsupported')),
+    archive: make('archive', '项目资料.zip', await archive.generateAsync({type:'nodebuffer'}), {mimeType:'text/markdown'}),
+    presentation: make('presentation', '项目汇报.pptx', await pptx.generateAsync({type:'nodebuffer'}), {mimeType:'text/markdown',extractedText:'这段提取文字不应显示为预览'}),
+    html: make('html', '项目网页.html', Buffer.from('<!doctype html><meta charset="utf-8"><h1>原始 HTML 页面</h1><table><tr><td>保留网页排版</td></tr></table>'), {mimeType:'text/html'}),
+    unsupported: make('unsupported', '未知格式.bin', Buffer.from('unsupported'), {mimeType:'text/markdown'}),
     large: make('large', '大型文档.docx', Buffer.from('large'), { byteSize: 100 * 1024 * 1024 }),
     slow: make('slow', '慢速文件.txt', Buffer.from('slow')),
     error: make('error', '无权访问.txt', Buffer.from('denied'))
@@ -69,10 +84,10 @@ async function main() {
   let compiled
   const context = await esbuild.context({
     stdin: { resolveDir: root, contents:
-      "import Vue from './web/node_modules/vue/dist/vue.esm.js'; import ElementUI from './web/node_modules/element-ui'; import './web/node_modules/element-ui/lib/theme-chalk/index.css'; import MindMap from './simple-mind-map/index.js'; import Preview from './web/src/pages/Edit/components/NodeAttachmentPreview.vue';" +
-      "Vue.use(ElementUI); const bus=new Vue(); Vue.prototype.$bus=bus; Vue.prototype.$route={query:{room:'preview-fixtures'}}; window.__MIND_MAP_RUNTIME__={gateway:true,publicPath:'/'};window.externalPublicPath='/';" +
+      "import Vue from './web/node_modules/vue/dist/vue.esm.js'; import ElementUI from './web/node_modules/element-ui'; import './web/node_modules/element-ui/lib/theme-chalk/index.css'; import MindMap from './simple-mind-map/index.js'; import ImgAdjust from './simple-mind-map/src/plugins/NodeImgAdjust.js'; import VueViewer from './web/node_modules/v-viewer'; import './web/node_modules/viewerjs/dist/viewer.css'; import ImgPreview from './web/src/pages/Edit/components/NodeImgPreview.vue'; import Preview from './web/src/pages/Edit/components/NodeAttachmentPreview.vue';" +
+      "Vue.use(ElementUI); Vue.use(VueViewer); MindMap.usePlugin(ImgAdjust); const bus=new Vue(); Vue.prototype.$bus=bus; Vue.prototype.$route={query:{room:'preview-fixtures'}}; window.__MIND_MAP_RUNTIME__={gateway:true,publicPath:'/'};window.externalPublicPath='/';" +
       'const files=' + JSON.stringify(meta) + ';' +
-      "window.previewHost=new Vue({render:h=>h(Preview)}).$mount('#preview');window.map=new MindMap({el:document.querySelector('#map'),data:{data:{uid:'root',text:'附件预览 · 本地验证'},children:Object.values(files).map(file=>({data:{uid:file.id,text:file.fileName,attachmentId:file.id,attachmentName:file.fileName,attachmentMimeType:file.mimeType,attachmentStatus:file.status,attachmentError:file.errorMessage||''},children:[]}))}});map.on('node_attachmentClick',node=>bus.$emit('node_attachmentClick',node));" +
+      "window.previewHost=new Vue({render:h=>h(Preview)}).$mount('#preview');window.map=new MindMap({el:document.querySelector('#map'),data:{data:{uid:'root',text:'附件预览 · 本地验证'},children:[{data:{uid:'inline-image',text:'插入图片',image:" + JSON.stringify('data:image/png;base64,' + fs.readFileSync(path.join(root,'web/src/assets/img/logo2.png')).toString('base64')) + ",imageSize:{width:64,height:64,custom:true}},children:[]},...Object.values(files).map(file=>({data:{uid:file.id,text:file.fileName,attachmentId:file.id,attachmentName:file.fileName,attachmentMimeType:file.mimeType,attachmentStatus:file.status,attachmentError:file.errorMessage||''},children:[]}))]}});new Vue({render:h=>h(ImgPreview,{props:{mindMap:map}})}).$mount(document.body.appendChild(document.createElement('div')));map.on('node_attachmentClick',node=>bus.$emit('node_attachmentClick',node));" +
       "Object.values(files).forEach(file=>{const button=document.createElement('button');button.textContent=file.fileName;button.onclick=()=>bus.$emit('node_attachmentClick',{getData:()=>({attachmentId:file.id,attachmentName:file.fileName,attachmentMimeType:file.mimeType,attachmentStatus:file.status})});document.querySelector('#fixtures').appendChild(button)});setTimeout(()=>map.view.fit(),100);"
     },
     bundle: true, write: false, outdir: 'demo', platform: 'browser',

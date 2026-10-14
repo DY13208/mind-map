@@ -19,7 +19,10 @@ class Viewer {
 }
 const binary = new Uint8Array([80, 75, 3, 4]).buffer
 const ctx = {
-  AttachmentThumbnailRail: {}, AbortController, PRESENTATION_PREVIEW_MAX_BYTES: 32 * 1024 * 1024,
+  AbortController,
+  JSZip: { loadAsync: async () => ({ files: { 'ppt/slides/slide1.xml': {} } }) },
+  OFFICE_PREVIEW_MAX_BYTES: 5 * 1024 * 1024,
+  assertOfficeZipBudget() {},
   fetchNodeAttachmentContent: async (room, id, options) => { calls.push(['fetch', room, id, options]); return { buffer: binary } },
   loadPresentationPreviewRuntime: async () => ({ PptxViewer: Viewer, RECOMMENDED_ZIP_LIMITS: {} })
 }
@@ -29,10 +32,10 @@ async function test() {
   const instance = { ...component.data(), ...component.methods, source: { id: 'pptx', roomKey: 'fixture', byteSize: 4 }, $refs: { slides: {}, viewport: {} }, $nextTick: async () => {} }
   await instance.load()
   assert.equal(instance.error, '')
-  assert.equal(instance.pageCount, 3)
+  assert.equal(instance.count, 3)
   assert.equal(calls.find(call => call[0] === 'open')[1], binary)
   assert.equal(calls.find(call => call[0] === 'open')[2].renderMode, 'slide')
-  await instance.goTo(2)
+  await instance.goToPage(2)
   await instance.setZoom(125)
   assert.equal(instance.page, 2)
   assert.equal(instance.zoom, 125)
@@ -46,7 +49,7 @@ async function test() {
   const fn = classifier.slice(classifier.indexOf('export function attachmentPreviewKind'), classifier.indexOf('export function isHtmlAttachment')).replace('export ', '')
   const kindContext = { IMAGE_EXT: /\.(png|jpe?g|webp|gif)$/i, HTML_EXT: /\.html?$/i, TEXT_EXT: /\.(txt|js)$/i }
   vm.runInNewContext(fn, kindContext)
-  for (const [name, expected] of [['deck.pptx', 'presentation'], ['deck.ppt', 'unsupported'], ['archive.zip', 'unsupported'], ['file.md', 'markdown'], ['file.pdf', 'pdf'], ['file.docx', 'office'], ['file.xlsx', 'office'], ['file.png', 'image'], ['file.txt', 'text']]) assert.equal(kindContext.attachmentPreviewKind(name, 'text/plain'), expected)
+  for (const [name, expected] of [['deck.pptx', 'presentation'], ['deck.ppt', 'unsupported'], ['archive.zip', 'archive'], ['file.md', 'markdown'], ['file.pdf', 'pdf'], ['file.docx', 'office'], ['file.xlsx', 'office'], ['file.png', 'image'], ['file.txt', 'text']]) assert.equal(kindContext.attachmentPreviewKind(name, ''), expected)
   assert(read('src/pages/Edit/components/NodeAttachmentPreview.vue').includes("if (this.kind === 'presentation') return 'AttachmentPresentationPreview'"))
   console.log('PASS: binary PPTX routing/rendering, navigation, zoom preserves page, close cleanup, size budget, per-format routing and unsupported legacy files.')
 }

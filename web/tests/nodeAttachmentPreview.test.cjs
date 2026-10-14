@@ -32,6 +32,13 @@ assert.equal(attachmentPreviewKind('说明.html'), 'html')
 assert.equal(attachmentPreviewKind('说明.HTM'), 'html')
 assert.equal(attachmentPreviewKind('page', 'text/html'), 'html')
 assert.equal(attachmentPreviewKind('说明.txt'), 'text')
+for (const [file, kind] of Object.entries({ '截图.png': 'image', '页面.html': 'html', '方案.docx': 'office', '数据.xlsx': 'office', '汇报.pptx': 'presentation', '说明.txt': 'text', '文件.zip': 'archive', '未知.bin': 'unsupported' })) {
+  assert.equal(attachmentPreviewKind(file, 'text/markdown'), kind, 'original extension must override extracted Markdown MIME: ' + file)
+}
+assert.equal(attachmentPreviewKind('image.unknown', 'image/png'), 'image', 'keep MIME fallback for legacy filenames')
+assert.equal(attachmentPreviewKind('说明.md', 'application/pdf'), 'markdown')
+assert.equal(attachmentPreviewKind('汇报.pptx', 'application/zip'), 'presentation')
+assert.equal(attachmentPreviewKind('报价#2026.xlsx', 'text/markdown'), 'office')
 assert.equal(isHtmlAttachment('说明.html'), true)
 assert.equal(isHtmlAttachment('page.htm', 'text/html'), true)
 assert.equal(isHtmlAttachment('', '', 'https://cdn.example.test/a.html'), true)
@@ -72,7 +79,7 @@ assert.equal(
   formatOfficePreviewText('标题,,,\n甲,乙,,\n,,,', '旧表.xls'),
   '标题\n甲,乙'
 )
-assert.equal(attachmentPreviewKind('archive.zip'), 'unsupported')
+assert.equal(attachmentPreviewKind('archive.zip'), 'archive')
 
 assert.equal(canPreviewOriginalAttachment({ attachmentId: 'a', attachmentName: '图.png', attachmentStatus: 'failed' }), true)
 assert.equal(canPreviewOriginalAttachment({ attachmentId: 'a', attachmentName: '图.png', attachmentStatus: 'uploading' }), false)

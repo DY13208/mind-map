@@ -18,3 +18,12 @@ export function loadPdfPreviewRuntime() {
   }
   return pdfRuntime
 }
+
+let presentationRuntime
+export function loadPresentationPreviewRuntime() {
+  if (!presentationRuntime) {
+    const url = previewAssetUrl('pptx/renderer-1.3.0.js')
+    presentationRuntime = import(/* webpackIgnore: true */ url).catch(error => { presentationRuntime = null; throw error })
+  }
+  return presentationRuntime
+}
