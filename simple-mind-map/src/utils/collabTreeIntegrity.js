@@ -1,24 +1,26 @@
 /* global module:readonly */
 
 function walkTree(root, visit) {
-  const stack = root ? [root] : []
+  const stack = root ? [{ node: root, parentUid: null }] : []
   while (stack.length) {
-    const node = stack.pop()
+    const { node, parentUid } = stack.pop()
     if (!node) continue
-    visit(node)
+    visit(node, parentUid)
     const kids = node.children || []
-    for (let i = kids.length - 1; i >= 0; i--) stack.push(kids[i])
+    for (let i = kids.length - 1; i >= 0; i--) {
+      stack.push({ node: kids[i], parentUid: node.data && node.data.uid })
+    }
   }
 }
 
 function rowsFromTree(root) {
   const rows = []
-  walkTree(root, node => {
+  walkTree(root, (node, parentUid) => {
     const uid = node && node.data && node.data.uid
     if (!uid) return
     rows.push({
       uid,
-      parent_uid: node.parent_uid || (node.data && node.data.parent_uid) || null,
+      parent_uid: node.parent_uid || (node.data && node.data.parent_uid) || parentUid || null,
       deleted_at: node.deleted_at || null,
       is_root: !!(node.isRoot || (node.data && node.data.isRoot)),
       text: node.data && node.data.text

@@ -411,7 +411,9 @@ export default {
       let current = node
       while (current) {
         const raw = String(current.getData('text') || '')
-        const text = (current.getData('richText') ? getTextFromHtml(raw) : raw)
+        // Older nodes may contain HTML without the richText flag.
+        const hasHtml = /<\/?[a-z][^>]*>/i.test(raw)
+        const text = (current.getData('richText') || hasHtml ? getTextFromHtml(raw) : raw)
           .replace(/\s+/g, ' ')
           .trim()
         if (text) path.unshift(text)

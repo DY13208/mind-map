@@ -60,3 +60,4 @@ output/*.py
 .planning/2026-10-09-local-knowledge-fill/task_plan.md
 # Local planning scratch files and build/test logs.
 /.planning/
+/.skill-review/

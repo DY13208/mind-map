@@ -2875,7 +2875,7 @@ async function handleApi(req, res) {
           text: body.text,
           note: body.note,
           index: body.index,
-          data: dataFields(body),
+          data: dataFields({ ...(body.data || {}), ...body }),
           confirm_sop_change: body.confirm_sop_change === true
         })
         const committed = await executeOperation(req, roomKey, command)

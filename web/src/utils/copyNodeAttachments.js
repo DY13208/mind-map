@@ -36,6 +36,9 @@ export async function copyNodeAttachments(payload, destinationRoom, onTransferSt
             throw new Error('附件仍在处理中，请稍后重新粘贴')
           }
         }
+        if (attachment.status === 'failed') {
+          throw new Error(attachment.errorMessage || '复制附件处理失败')
+        }
         copies.set(data.attachmentId, attachment)
       }
       Object.assign(data, {

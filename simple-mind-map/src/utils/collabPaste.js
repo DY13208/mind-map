@@ -181,6 +181,10 @@ function assignTreeUids(node, uidMap, imgMap) {
   const newUid = createUid()
   if (oldUid) uidMap[oldUid] = newUid
   next.data.uid = newUid
+  // Parent/root identity belongs to the destination tree, not the copied source.
+  delete next.data.isRoot
+  delete next.data.parent_uid
+  delete next.data.parentUid
   delete next.data.isActive
   delete next.data.inserting
   const gens = Array.isArray(next.data.generalization)
@@ -193,6 +197,9 @@ function assignTreeUids(node, uidMap, imgMap) {
       const gen = clonePlain(item) || {}
       const oldGenUid = gen.uid
       gen.uid = createUid()
+      delete gen.isRoot
+      delete gen.parent_uid
+      delete gen.parentUid
       if (oldGenUid) uidMap[oldGenUid] = gen.uid
       if (Array.isArray(gen.range) && gen.range.length >= 2) {
         gen.range = [Number(gen.range[0]), Number(gen.range[1])]
