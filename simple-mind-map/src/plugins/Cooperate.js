@@ -56,7 +56,7 @@ import mapRefUtil from '../utils/mapRef'
 import collabInsertCollect from '../utils/collabInsertCollect'
 import collabGeneralization from '../utils/collabGeneralization'
 import collabMove from '../utils/collabMove'
-import { beginHydration, invalidateHydration } from '../utils/hydrationLifecycle'
+import { beginHydration, invalidateHydration, invalidateHydrationSession } from '../utils/hydrationLifecycle'
 import {
   collabTrace,
   createTraceId,
@@ -1822,7 +1822,10 @@ class Cooperate {
   }
 
   setLazyLoaders(config = {}) {
-    if (config.roomKey) this.httpRoomKey = config.roomKey
+    if (config.roomKey) {
+      if (this.httpRoomKey !== config.roomKey) invalidateHydrationSession(this)
+      this.httpRoomKey = config.roomKey
+    }
     if (config.fetchSubtree) this.httpFetchSubtree = config.fetchSubtree
     if (config.fetchDeepSubtree) this.httpFetchDeepSubtree = config.fetchDeepSubtree
     if (config.fetchExportTree) this.httpFetchExportTree = config.fetchExportTree
@@ -3079,7 +3082,10 @@ class Cooperate {
     this.pendingGenIntent = new Map()
     this.enableLargeMapMode(Number(config.nodeCount) || 0)
     const roomKey = config.roomKey || this.httpRoomKey || ''
-    if (roomKey) this.httpRoomKey = roomKey
+    if (roomKey) {
+      if (this.httpRoomKey !== roomKey) invalidateHydrationSession(this)
+      this.httpRoomKey = roomKey
+    }
     this.collabStore.reset(roomKey, Number(config.version) || 0)
     this.collabStore.setStatus('live')
     this.wrapHttpMutators(config)
@@ -3512,6 +3518,7 @@ class Cooperate {
   }
 
   clearHttpCollab() {
+    invalidateHydrationSession(this)
     this.httpLocateFailures = new Map()
     this.httpLocateInflight = new Map()
     const restoreWaiters = Array.isArray(this.httpRestoreWaiters)
@@ -4810,7 +4817,10 @@ class Cooperate {
       const live = Array.isArray(data.children) ? data.children.length : 0
       const count = Number(data.data && data.data.childCount) || 0
       const dirtyAt = uid && this.dirtySubtrees && this.dirtySubtrees.get(uid)
-      if (live && (!count || live >= count) && !dirtyAt) return data
+      // Only a previous authoritative read establishes that an empty node is
+      // complete. A new dirty marker must still trigger a fresh read.
+      if (!dirtyAt && count === 0 && live === 0 && !data.data.hasMore && this.hydratedUids.has(uid)) return data
+      if (live && (!count || live >= count) && !dirtyAt && !data.data.hasMore) return data
       const knownVersion = live
         ? Number((data.data && data.data.subtreeVersion) || 0) || 0
         : 0
@@ -4842,6 +4852,31 @@ class Cooperate {
         }
         return data
       }
+      if (result && result.has_more && Array.isArray(result.children)) {
+        const children = result.children.slice()
+        const pageVersion = result.version
+        let offset = (Number(result.offset) || 0) + children.length
+        for (let page = 0; page < 20 && result.has_more; page += 1) {
+          const next = await this.httpFetchSubtree(uid, {
+            knownVersion: 0, offset, limit: 500, isCurrent, priority: 'low'
+          })
+          if (!isCurrent()) return data
+          if (!next || !Array.isArray(next.children) || !next.children.length ||
+              (pageVersion != null && next.version != null && Number(pageVersion) !== Number(next.version))) {
+            const err = new Error('子树分页已变化或未完成，请重试')
+            err.code = 'SUBTREE_PAGE_INCOMPLETE'
+            throw err
+          }
+          children.push(...next.children)
+          offset += next.children.length
+          result = { ...next, children, offset: 0 }
+        }
+        if (result.has_more) {
+          const err = new Error('子树分页未完成，请重试')
+          err.code = 'SUBTREE_PAGE_INCOMPLETE'
+          throw err
+        }
+      }
       if (!data.children || !data.children.length) {
         data.children = ((result && result.children) || []).map(clearHydratedSelection)
       } else {
@@ -4861,8 +4896,18 @@ class Cooperate {
           data.data.subtreeVersion = Number(result.version) || 0
         }
       }
-      this.dirtySubtrees.delete(uid)
-      this.hydratedUids.add(uid)
+      const loaded = Array.isArray(data.children) ? data.children.length : 0
+      const authoritativeEmpty = result && result.total != null && Number(result.total) === 0
+      const complete = !data.data.hasMore && loaded >= Number(data.data.childCount || 0) &&
+        (loaded > 0 || authoritativeEmpty)
+      if (complete) {
+        this.dirtySubtrees.delete(uid)
+        this.hydratedUids.add(uid)
+      } else {
+        data.data.hasMore = true
+        this.hydratedUids.delete(uid)
+        if (!this.dirtySubtrees.has(uid)) this.dirtySubtrees.set(uid, Number(result && result.version) || 1)
+      }
       this.markUidPushed(uid, data.data, 'server')
       const serverKids = (result && result.children) || []
       serverKids.forEach(child => {
@@ -4870,6 +4915,9 @@ class Cooperate {
         this.markUidPushed(childUid, child && child.data, 'server')
       })
       return data
+    } catch (err) {
+      if (!isCurrent()) return data
+      throw err
     } finally {
       guard.release()
     }
@@ -4956,8 +5004,6 @@ class Cooperate {
           console.error('[mind-map] hydrate path failed', id, err)
         }
         if (options.expand !== false && this.expandTreeNode(treeNode)) changed = true
-        this.hydratedUids.add(id)
-        this.dirtySubtrees.delete(id)
       }
     }
     return changed || !!this.findTreeNode(tree, uid)
@@ -4992,6 +5038,7 @@ class Cooperate {
         console.error('[mind-map] dirty subtree sync failed', uid, err)
         continue
       }
+      if ((treeNode.data && treeNode.data.hasMore) || !this.hydratedUids.has(uid)) continue
       if (treeNodeIndex) {
         const currentChildren = new Set(treeNode.children || [])
         previousChildren.forEach(child => {
@@ -5005,8 +5052,6 @@ class Cooperate {
           }
         })
       }
-      this.hydratedUids.add(uid)
-      this.dirtySubtrees.delete(uid)
       if ((treeNode.children || []).length !== before) changed = true
     }
     return changed

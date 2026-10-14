@@ -1,8 +1,11 @@
 // Track only active reads. Delete/restore invalidates their original UID
 // lifetime, even when the UID is live again by the time an old response arrives.
 const activeByOwner = new WeakMap()
+const sessionByOwner = new WeakMap()
 
 function beginHydration(owner, uid) {
+  if (!sessionByOwner.has(owner)) sessionByOwner.set(owner, {})
+  const session = sessionByOwner.get(owner)
   let states = activeByOwner.get(owner)
   if (!states) {
     states = new Map()
@@ -19,6 +22,7 @@ function beginHydration(owner, uid) {
   let released = false
   return {
     isCurrent: () => !released && state.generation === generation &&
+      sessionByOwner.get(owner) === session &&
       owner.httpRoomKey === roomKey &&
       (typeof owner.isTombstonedUid !== 'function' || !owner.isTombstonedUid(uid)),
     release() {
@@ -26,9 +30,14 @@ function beginHydration(owner, uid) {
       released = true
       state.readers -= 1
       if (!state.readers && states.get(uid) === state) states.delete(uid)
-      if (!states.size) activeByOwner.delete(owner)
+      if (!states.size && activeByOwner.get(owner) === states) activeByOwner.delete(owner)
     }
   }
+}
+
+function invalidateHydrationSession(owner) {
+  sessionByOwner.set(owner, {})
+  activeByOwner.delete(owner)
 }
 
 function invalidateHydration(owner, uid) {
@@ -37,4 +46,4 @@ function invalidateHydration(owner, uid) {
   if (state) state.generation += 1
 }
 
-module.exports = { beginHydration, invalidateHydration }
+module.exports = { beginHydration, invalidateHydration, invalidateHydrationSession }
