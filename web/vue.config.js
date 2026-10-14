@@ -74,6 +74,10 @@ module.exports = {
     'docx-preview'
   ],
   chainWebpack: config => {
+    config.plugin('attachment-preview-assets').use(require('copy-webpack-plugin'), [[{
+      from: require('./scripts/attachmentPreviewAssets')(),
+      to: 'attachment-preview'
+    }]])
     // 移除 preload 插件
     config.plugins.delete('preload')
     // 移除 prefetch 插件

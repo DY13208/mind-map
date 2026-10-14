@@ -86,6 +86,11 @@ function attachmentIconViewState(data = {}) {
       title: `${name} · 正在处理${canPreviewOriginalAttachment(data) ? '，点击查看原文件' : ''}`
     }
   }
+  if (status === 'failed' && canPreviewOriginalAttachment(data) &&
+      /OCR.*(未配置|not.configured)|未配置.*OCR/i.test(data.attachmentError || data.errorMessage || '')) {
+    return { phase: 'ready', previewable: true, iconOpacity: 1, progressMode: 'none',
+      percent: 100, progressColor: '#12b76a', badge: null, showPercent: false, title: name }
+  }
   if (status === 'failed') {
     return {
       phase: 'failed',

@@ -135,6 +135,43 @@ assert.equal(
 )
 assert.equal(safeMarkdownSource('# 标题\n<script>alert(1)</script>'), '# 标题\n&lt;script&gt;alert(1)&lt;/script&gt;')
 
+async function verifyProgressiveText() {
+  const { openProgressiveAttachmentText, attachmentUploadNotice } = require('./loadAttachmentUtils.cjs')('attachmentProgressiveText')
+  const previousFetch = global.fetch
+  try {
+    const original = '第一行\n'.repeat(20000)
+    let cancelled = false
+    global.fetch = async () => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode(original)); controller.close() },
+      cancel() { cancelled = true }
+    }))
+    const reader = await openProgressiveAttachmentText('http://fixture', new AbortController().signal)
+    const first = await reader.next()
+    assert.equal(first.done, false)
+    assert.ok(first.consumed <= 16384, 'first paint only consumes one bounded chunk')
+    const second = await reader.next()
+    assert.equal(first.text + second.text, original.slice(0, (first.text + second.text).length))
+    await reader.cancel()
+    assert.equal((await reader.next()).text, '', 'closing prevents further reads')
+    // Split the UTF-16 BOM and a character across response packets.
+    const utf16 = Buffer.concat([Buffer.from([255, 254]), Buffer.from('编码测试', 'utf16le')])
+    global.fetch = async () => new Response(new ReadableStream({ start(controller) {
+      for (const byte of utf16) controller.enqueue(new Uint8Array([byte]))
+      controller.close()
+    } }))
+    const encoded = await openProgressiveAttachmentText('http://fixture')
+    assert.equal((await encoded.next()).text, '编码测试')
+    global.fetch = async () => new Response('{}', { status: 403 })
+    await assert.rejects(openProgressiveAttachmentText('http://fixture'), /无权/)
+    assert.equal(attachmentUploadNotice({ fileName: '图.png', status: 'failed', errorMessage: '图片 OCR 服务未配置' }).type, 'success')
+    assert.equal(attachmentUploadNotice({ fileName: '图.png', status: 'failed', errorMessage: 'OCR 服务失败 HTTP 503' }).type, 'warning')
+    assert.equal(attachmentUploadNotice({ fileName: '文档.docx', status: 'failed', errorMessage: '解析失败' }).type, 'warning')
+    assert.equal(typeof cancelled, 'boolean')
+    console.log('Progressive text and OCR notification checks passed')
+  } finally { global.fetch = previousFetch }
+}
+verifyProgressiveText().catch(error => { console.error(error); process.exitCode = 1 })
+
 const XLSX = require('xlsx')
 sparse(XLSX)
 const workbook = XLSX.utils.book_new()

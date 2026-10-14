@@ -10,6 +10,7 @@
 
 <script>
 import { roomFromLocation } from '@/utils/roomLocation'
+import { attachmentUploadNotice } from '@/utils/attachmentProgressiveText'
 import {
   getNodeAttachment,
   getRoomRevision,
@@ -574,7 +575,8 @@ export default {
           )
           if (attachment.status === 'failed') {
             if (options.notify) {
-              this.$message.warning(attachment.errorMessage || '处理失败')
+              const notice = attachmentUploadNotice(attachment)
+              this.$message[notice.type](notice.message)
             }
           }
         })
@@ -819,7 +821,8 @@ export default {
         } else if (attachment.status === 'processing' || attachment.status === 'pending') {
           this.$message.success('已上传，正在处理')
         } else {
-          this.$message.warning(attachment.errorMessage || '处理失败')
+          const notice = attachmentUploadNotice(attachment)
+          this.$message[notice.type](notice.message)
         }
         if (attachment.status === 'processing' || attachment.status === 'pending') {
           attachedTargets.forEach(({ uid, token }) => {

@@ -1,1216 +1,159 @@
 <template>
-  <el-dialog
-    ref="dialog"
-    :visible.sync="visible"
-    :title="title"
-    :width="dialogWidth"
-    append-to-body
-    :custom-class="dialogClass"
-    :close-on-click-modal="false"
-    @close="onClosed"
-  >
-    <div class="attachmentPreviewLayout" :style="{ height: `${dialogHeight}px` }">
-      <div class="attachmentPreviewToolbar" role="toolbar" aria-label="附件预览操作">
-        <el-button
-          size="small"
-          :aria-label="isMaximized ? '还原预览窗口' : '最大化预览窗口'"
-          @click="toggleMaximize"
-        >
-          {{ isMaximized ? '还原' : '最大化' }}
-        </el-button>
-        <el-button
-          v-if="externalUrl"
-          size="small"
-          @click="openExternal"
-        >
-          外部打开
-        </el-button>
-        <el-button
-          v-if="attachmentId"
-          type="primary"
-          size="small"
-          :loading="downloading"
-          @click="download"
-        >
-          下载
-        </el-button>
-        <el-button size="small" @click="visible = false">关闭</el-button>
+  <el-dialog :visible.sync="visible" :title="title" width="92vw" top="5vh" append-to-body
+    :custom-class="isMaximized ? 'attachmentViewer is-maximized' : 'attachmentViewer'"
+    :show-close="false" :close-on-click-modal="false" :close-on-press-escape="true" @close="onClosed">
+    <header slot="title" class="attachmentViewerHeader">
+      <div class="attachmentFileIcon" :class="'is-' + kind"><i :class="fileIcon" aria-hidden="true"></i></div>
+      <div class="attachmentFileInfo">
+        <h2 :title="title">{{ title }}</h2>
+        <p><span>{{ fileSize }}</span><span class="fileMetaDivider">·</span><span>{{ typeLabel }}</span></p>
       </div>
-      <p v-if="previewHint" class="previewHint" role="status">{{ previewHint }}</p>
-      <section
-        v-loading="loading"
-        class="attachmentPreviewBody"
-        :aria-busy="loading ? 'true' : 'false'"
-      >
-        <div v-if="error" class="previewState previewError" role="alert">
-          {{ error }}
-        </div>
-        <div v-else-if="previewBlocked" class="previewState">
-          文件较大，已停止自动加载。请下载原文件后查看。
-        </div>
-        <div v-else-if="kind === 'image'" class="imagePreviewWrap">
-          <img
-            v-if="blobUrl"
-            :src="blobUrl"
-            :alt="title"
-            class="imagePreview"
-            @error="error = '图片加载失败，请下载原文件查看'"
-          />
-        </div>
-        <iframe
-          v-else-if="kind === 'pdf' && blobUrl"
-          :src="blobUrl"
-          :title="title"
-          class="documentPreviewFrame"
-        ></iframe>
-        <div
-          v-else-if="kind === 'markdown'"
-          ref="markdownViewer"
-          class="markdownPreview customScrollbar"
-        ></div>
-        <section
-          v-else-if="kind === 'office' || kind === 'presentation'"
-          class="officePreviewCanvas"
-        >
-          <template v-if="workbookSheets.length">
-            <header class="workbookHeader">
-              <div>
-                <span class="canvasEyebrow">工作簿预览</span>
-                <strong>{{ activeWorkbookSheet.name }}</strong>
-              </div>
-              <span class="workbookMeta">
-                {{ activeWorkbookSheet.rows.length }} 行 · {{ activeWorkbookSheet.columnCount }} 列
-                <template v-if="activeWorkbookSheet.truncated"> · 已显示前 500 行</template>
-              </span>
-            </header>
-            <nav class="workbookTabs" aria-label="工作表">
-              <button
-                v-for="sheet in workbookSheets"
-                :key="sheet.name"
-                type="button"
-                class="workbookTab"
-                :class="{ active: sheet.name === activeSheetName }"
-                :aria-current="sheet.name === activeSheetName ? 'page' : null"
-              @click="activeSheetName = sheet.name; workbookPage = 1"
-            >
-              {{ sheet.name }}
-            </button>
-          </nav>
-            <div
-              class="spreadsheetViewport customScrollbar"
-              tabindex="0"
-              role="region"
-              :aria-label="`${activeWorkbookSheet.name} 工作表内容`"
-            >
-              <table class="spreadsheetTable">
-                <thead>
-                  <tr>
-                    <th class="sheetCorner" scope="col">#</th>
-                    <th
-                      v-for="column in activeWorkbookSheet.columnCount"
-                      :key="column"
-                      scope="col"
-                    >
-                      {{ spreadsheetColumnName(column - 1) }}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                <tr v-for="(row, rowIndex) in workbookPageRows" :key="rowIndex">
-                  <th scope="row">{{ workbookPageStart + rowIndex + 1 }}</th>
-                  <td v-for="column in activeWorkbookSheet.columnCount" :key="column">
-                    {{ row[column - 1] || '' }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <el-pagination
-            v-if="activeWorkbookSheet.rows.length > workbookPageSize"
-            :current-page.sync="workbookPage"
-            :page-size="workbookPageSize"
-            :total="activeWorkbookSheet.rows.length"
-            layout="prev, pager, next"
-          />
-        </template>
-          <div v-else-if="isDocxFile" ref="docxViewer" class="docxPreview customScrollbar"></div>
-          <div v-else-if="kind === 'presentation'" class="documentPreviewCanvas">
-            <header class="documentCanvasHeader">
-              <span class="canvasEyebrow">演示文稿</span>
-              <span>幻灯片文本</span>
-            </header>
-            <pre class="textPreview customScrollbar">{{ previewText }}</pre>
-          </div>
-          <div v-else-if="!loading && isSpreadsheetFile" class="previewState">
-            无法预览该表格，请下载后查看
-          </div>
-        </section>
-        <pre
-          v-else-if="kind === 'text' || kind === 'json'"
-          class="textPreview customScrollbar"
-        >{{ previewText }}</pre>
-        <div v-else-if="kind === 'external'" class="externalPreviewWrap">
-          <iframe
-            :src="externalUrl"
-            :title="title"
-            class="documentPreviewFrame"
-            sandbox="allow-same-origin allow-popups allow-forms allow-downloads"
-            referrerpolicy="no-referrer"
-          ></iframe>
-          <p class="externalPreviewHint">
-            若内容为空或被站点限制嵌入，请使用“外部打开”。
-          </p>
-        </div>
-        <div v-else class="previewState">暂不支持该文件类型的站内预览。</div>
-      </section>
-    </div>
-    <button
-      class="dialogResizeHandle"
-      type="button"
-      aria-label="拖动调整预览窗口大小；也可使用最大化按钮"
-      title="拖动调整大小"
-      @mousedown.stop.prevent="startResize"
-    ></button>
+      <div class="attachmentViewerActions" role="toolbar" aria-label="附件操作">
+        <el-button size="small" icon="el-icon-full-screen" :aria-label="isMaximized ? '还原预览窗口' : '最大化预览窗口'" @click="toggleMaximize">
+          <span class="actionLabel">{{ isMaximized ? '还原' : '最大化' }}</span>
+        </el-button>
+        <el-button v-if="attachmentId" size="small" type="primary" icon="el-icon-download" @click="download">下载</el-button>
+        <el-button v-else-if="externalUrl" size="small" type="primary" icon="el-icon-top-right" @click="openExternal">外部打开</el-button>
+        <el-button class="attachmentCloseButton" size="small" icon="el-icon-close" aria-label="关闭附件预览" @click="visible = false"></el-button>
+      </div>
+    </header>
+    <main v-if="visible" class="attachmentViewerMain">
+      <div v-if="loading" class="attachmentViewerState" role="status"><i class="el-icon-loading"></i><strong>正在加载文件…</strong></div>
+      <div v-else-if="error" class="attachmentViewerState" role="alert">
+        <i class="el-icon-warning-outline"></i><strong>{{ error }}</strong><el-button size="small" @click="retry">重新加载</el-button>
+      </div>
+      <component v-else-if="source && previewComponent" :is="previewComponent" :key="requestId" :source="source" :kind="kind" @download="download" />
+      <div v-else-if="externalUrl" class="attachmentExternal">
+        <iframe :src="externalUrl" :title="title" sandbox="allow-same-origin allow-popups allow-forms allow-downloads" referrerpolicy="no-referrer"></iframe>
+      </div>
+      <div v-else class="attachmentViewerState">
+        <i class="el-icon-document"></i><strong>暂不支持在线预览此文件类型</strong><p>{{ typeLabel }} · {{ fileSize }}</p>
+        <el-button v-if="attachmentId" type="primary" size="small" icon="el-icon-download" @click="download">下载原文件</el-button>
+      </div>
+    </main>
   </el-dialog>
 </template>
 
 <script>
-import Viewer from '@toast-ui/editor/dist/toastui-editor-viewer'
-import '@toast-ui/editor/dist/toastui-editor-viewer.css'
 import { roomFromLocation } from '@/utils/roomLocation'
-import {
-  fetchNodeAttachmentContent,
-  getNodeAttachment,
-  nodeAttachmentContentUrl
-} from '@/utils/nodeAttachmentApi'
-import {
-  attachmentPreviewKind,
-  formatAttachmentText,
-  attachmentBusyMessage,
-  isAttachmentBusy,
-  isHtmlAttachment,
-  isSpreadsheetAttachment,
-  slimSpreadsheetZip,
-  workbookSheetsFromXlsx,
-  safeMarkdownSource,
-  canPreviewOriginalAttachment,
-  attachmentPreviewByteLimit,
-  assertOfficeZipBudget,
-  assertImagePreviewBudget,
-  WORKBOOK_PAGE_ROWS
-} from '@/utils/nodeAttachmentPreview'
-
-const MIME_BY_EXT = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.gif': 'image/gif',
-  '.pdf': 'application/pdf',
-  '.html': 'text/html',
-  '.htm': 'text/html'
-}
-
-function previewMimeType(fileName, kind) {
-  const name = String(fileName || '').toLowerCase()
-  const ext = Object.keys(MIME_BY_EXT).find(item => name.endsWith(item))
-  if (ext) return MIME_BY_EXT[ext]
-  if (kind === 'image') return 'image/*'
-  if (kind === 'pdf') return 'application/pdf'
-  if (kind === 'html') return 'text/html'
-  return 'application/octet-stream'
-}
-
-/**
- * 预览弹窗的尺寸：为标题、工具栏、底部空间和上下边距预留高度。
- *
- * 操作栏位于预览内容上方，预览区需要在短视口内保持独立滚动，不能让
- * 弹窗整体被内容挤出视口；因此这里按可用高度给预览区设上限。
- */
-function previewSize() {
-  const vw = typeof window === 'undefined' ? 1440 : window.innerWidth
-  const vh = typeof window === 'undefined' ? 900 : window.innerHeight
-  return {
-    dialogWidth: `${Math.round(Math.max(720, Math.min(1360, vw - 96)))}px`,
-    dialogHeight: Math.round(Math.max(96, Math.min(900, vh - 220)))
-  }
-}
+import { getNodeAttachment, nodeAttachmentContentUrl } from '@/utils/nodeAttachmentApi'
+import { attachmentPreviewKind, isHtmlAttachment, attachmentBusyMessage } from '@/utils/nodeAttachmentPreview'
+import { formatPreviewBytes } from '@/utils/attachmentProgressiveText'
+import '@/style/attachment-preview.less'
 
 export default {
   name: 'NodeAttachmentPreview',
-  data() {
-    return {
-      visible: false,
-      loading: false,
-      downloading: false,
-      title: '附件预览',
-      attachmentId: '',
-      attachment: null,
-      kind: 'unsupported',
-      previewText: '',
-      blobUrl: '',
-      sourceBlob: null,
-      externalUrl: '',
-      error: '',
-      previewBlocked: false,
-      previewHint: '',
-      requestId: 0,
-      controller: null,
-      markdownViewer: null,
-      markdownViewerContainer: null,
-      workbookSheets: [],
-      activeSheetName: '',
-      workbookPage: 1,
-      workbookPageSize: WORKBOOK_PAGE_ROWS,
-      // 打开时就接近满屏，别让用户第一眼看到挤巴巴的小窗
-      ...previewSize(),
-      isMaximized: false,
-      previousDialogSize: null,
-      resizeSession: null
-    }
+  components: {
+    AttachmentDocumentPreview: () => import('./attachment-preview/AttachmentDocumentPreview.vue').then(module => module.default || module),
+    AttachmentOfficePreview: () => import('./attachment-preview/AttachmentOfficePreview.vue').then(module => module.default || module),
+    AttachmentPdfPreview: () => import('./attachment-preview/AttachmentPdfPreview.vue').then(module => module.default || module),
+    AttachmentImagePreview: () => import('./attachment-preview/AttachmentImagePreview.vue').then(module => module.default || module)
   },
+  data: () => ({
+    visible: false, loading: false, title: '附件预览', attachmentId: '', attachment: null,
+    kind: 'unsupported', source: null, externalUrl: '', error: '', requestId: 0,
+    isMaximized: false, selectedData: null
+  }),
   computed: {
-    dialogClass() {
-      return this.isMaximized
-        ? 'nodeAttachmentPreviewDialog is-maximized'
-        : 'nodeAttachmentPreviewDialog'
+    fileSize() { return formatPreviewBytes(this.attachment && this.attachment.byteSize) },
+    typeLabel() {
+      const ext = this.title.includes('.') ? this.title.split('.').pop().toUpperCase() : ''
+      return ext || '文件'
     },
-    activeWorkbookSheet() {
-      return (
-        this.workbookSheets.find(sheet => sheet.name === this.activeSheetName) ||
-        this.workbookSheets[0] ||
-        { name: '', rows: [], columnCount: 0, truncated: false }
-      )
+    fileIcon() {
+      return this.kind === 'image' ? 'el-icon-picture-outline' :
+        this.kind === 'office' && /\.(xls|xlsx|xlsm|ods)$/i.test(this.title) ? 'el-icon-s-grid' : 'el-icon-document'
     },
-    workbookPageStart() {
-      return (this.workbookPage - 1) * this.workbookPageSize
-    },
-    workbookPageRows() {
-      return this.activeWorkbookSheet.rows.slice(this.workbookPageStart, this.workbookPageStart + this.workbookPageSize)
-    },
-    isDocxFile() {
-      return /\.docx$/i.test(
-        String((this.attachment && this.attachment.fileName) || this.title || '')
-      )
-    },
-    isSpreadsheetFile() {
-      return isSpreadsheetAttachment(
-        (this.attachment && this.attachment.fileName) || this.title,
-        this.attachment && this.attachment.mimeType
-      )
+    previewComponent() {
+      if (this.kind === 'image') return 'AttachmentImagePreview'
+      if (this.kind === 'pdf') return 'AttachmentPdfPreview'
+      if (this.kind === 'office') return 'AttachmentOfficePreview'
+      if (['markdown', 'text', 'json', 'presentation'].includes(this.kind)) return 'AttachmentDocumentPreview'
+      return null
     }
   },
   watch: {
     $route(to, from) {
-      if (roomFromLocation(to) !== roomFromLocation(from)) {
-        this.visible = false
-        this.resetPreview()
-      }
+      if (roomFromLocation(to) !== roomFromLocation(from)) { this.visible = false; this.resetPreview() }
     }
   },
-  created() {
-    this.$bus.$on('node_attachmentClick', this.onAttachmentClick)
-    window.addEventListener('resize', this.onWindowResize)
-  },
-  beforeDestroy() {
-    this.requestId += 1
-    this.$bus.$off('node_attachmentClick', this.onAttachmentClick)
-    window.removeEventListener('resize', this.onWindowResize)
-    this.cancelActiveRequest()
-    this.releaseBlobUrl()
-    this.destroyMarkdownViewer()
-    this.stopResize()
-  },
+  created() { this.$bus.$on('node_attachmentClick', this.onAttachmentClick) },
+  beforeDestroy() { this.$bus.$off('node_attachmentClick', this.onAttachmentClick); this.resetPreview() },
   methods: {
     onAttachmentClick(node) {
       const data = node && node.getData ? node.getData() || {} : {}
-      if (canPreviewOriginalAttachment(data)) {
-        if (data.attachmentId) this.openStoredAttachment(data)
-        else this.openExternalAttachment(data)
+      if (!data.attachmentId && !data.attachmentUrl) { this.$message.info(attachmentBusyMessage(data)); return }
+      if (isHtmlAttachment(data.attachmentName, data.attachmentMimeType, data.attachmentUrl)) {
+        if (data.attachmentId) this.openHtmlInNewPage(data)
+        else this.openUrlInNewPage(data.attachmentUrl)
         return
       }
-      if (isAttachmentBusy(data) || (data.attachmentStatus === 'failed' && !data.attachmentId)) {
-        this.$message.info(attachmentBusyMessage(data))
-        return
-      }
-      if (data.attachmentStatus === 'failed' && data.attachmentId) {
-        this.$bus.$emit('manageNodeAttachment', node)
-        return
-      }
-      if (data.attachmentId) {
-        if (
-          isHtmlAttachment(
-            data.attachmentName,
-            data.attachmentMimeType,
-            data.attachmentUrl
-          )
-        ) {
-          this.openHtmlInNewPage(data)
-          return
-        }
-        this.openStoredAttachment(data)
-      } else if (data.attachmentUrl) {
-        if (isHtmlAttachment(data.attachmentName, data.attachmentMimeType, data.attachmentUrl)) {
-          this.openUrlInNewPage(data.attachmentUrl)
-          return
-        }
-        this.openExternalAttachment(data)
-      }
+      if (data.attachmentId) this.openStoredAttachment(data)
+      else this.openExternalAttachment(data)
     },
-    openUrlInNewPage(url) {
-      const href = String(url || '')
-      if (!href) return
-      const opened = window.open(href, '_blank', 'noopener')
-      if (!opened && this.$message) {
-        this.$message.warning('浏览器拦截了新窗口，请允许弹出窗口后重试')
-      }
-    },
+    openUrlInNewPage(url) { if (url) window.open(url, '_blank', 'noopener') },
     openHtmlInNewPage(data) {
-      const roomKey = roomFromLocation(this.$route)
-      if (!roomKey) {
-        if (this.$message) this.$message.warning('请先进入协作房间后再打开网页附件')
-        return
-      }
-      const attachmentId = data && (data.attachmentId || data.id)
-      if (!attachmentId) return
-      this.openUrlInNewPage(nodeAttachmentContentUrl(roomKey, attachmentId))
+      const room = roomFromLocation(this.$route)
+      if (!room) { this.$message.warning('请先进入协作房间后再打开网页附件'); return }
+      this.openUrlInNewPage(nodeAttachmentContentUrl(room, data.attachmentId || data.id))
     },
     resetPreview() {
-      this.requestId += 1
-      this.cancelActiveRequest()
-      this.releaseBlobUrl()
-      this.destroyMarkdownViewer()
-      if (this.$refs && this.$refs.docxViewer) {
-        this.$refs.docxViewer.textContent = ''
-      }
+      this.requestId++
+      this.source = null
       this.loading = false
-      this.downloading = false
-      this.attachmentId = ''
-      this.attachment = null
-      this.kind = 'unsupported'
-      this.previewText = ''
-      this.sourceBlob = null
-      this.externalUrl = ''
       this.error = ''
-      this.previewBlocked = false
-      this.previewHint = ''
-      this.workbookSheets = []
-      this.activeSheetName = ''
-      this.workbookPage = 1
-    },
-    cancelActiveRequest() {
-      if (this.controller) this.controller.abort()
-      this.controller = null
-    },
-    releaseBlobUrl() {
-      if (this.blobUrl && this.blobUrl.startsWith('blob:')) URL.revokeObjectURL(this.blobUrl)
-      this.blobUrl = ''
-    },
-    destroyMarkdownViewer() {
-      const container = this.markdownViewerContainer
-      if (
-        this.markdownViewer &&
-        typeof this.markdownViewer.destroy === 'function'
-      ) {
-        this.markdownViewer.destroy()
-      }
-      // Toast UI Viewer.destroy() detaches listeners but leaves its rendered
-      // .toastui-editor-contents element in the host. Clear only the container
-      // owned by this instance so reopen and route changes cannot retain stale
-      // attachment content.
-      if (container) container.textContent = ''
-      this.markdownViewer = null
-      this.markdownViewerContainer = null
+      this.attachment = null
+      this.attachmentId = ''
+      this.externalUrl = ''
     },
     async openStoredAttachment(data) {
-      const roomKey = roomFromLocation(this.$route)
       this.resetPreview()
+      this.selectedData = { ...data }
+      this.title = data.attachmentName || '附件预览'
+      this.attachmentId = data.attachmentId
+      this.kind = attachmentPreviewKind(this.title, data.attachmentMimeType)
       this.visible = true
-      this.title = String(data.attachmentName || '附件预览')
-      this.attachmentId = data.attachmentId || ''
-      this.kind = attachmentPreviewKind(data.attachmentName, data.attachmentMimeType)
-      const localText = String(data.attachmentExtractedText || '').trim()
-      if (
-        localText &&
-        (this.kind === 'presentation' ||
-          this.kind === 'text' ||
-          this.kind === 'json' ||
-          this.kind === 'markdown')
-      ) {
-        this.previewText = localText
-        this.loading = false
-      }
-      if (!roomKey) {
-        this.error = '请先进入协作房间后再预览附件'
-        return
-      }
-      const requestId = this.requestId
-      if (!this.previewText) this.loading = true
+      this.loading = true
+      const token = this.requestId
+      const roomKey = roomFromLocation(this.$route)
       try {
+        if (!roomKey) throw new Error('请先进入协作房间后再预览附件')
         const result = await getNodeAttachment(roomKey, data.attachmentId)
-        if (requestId !== this.requestId) return
-        const attachment = (result && result.attachment) || {}
-        this.attachmentId = attachment.id || data.attachmentId
+        if (token !== this.requestId || !this.visible) return
+        const attachment = result && result.attachment
+        if (!attachment || !attachment.id) throw new Error('附件不存在或已移除')
         this.attachment = attachment
-        this.title = String(attachment.fileName || data.attachmentName || '附件预览')
-        this.kind = attachmentPreviewKind(attachment.fileName || data.attachmentName, attachment.mimeType || data.attachmentMimeType)
-        const originalPreview = canPreviewOriginalAttachment(attachment)
-        if (originalPreview && attachment.status === 'failed') {
-          this.previewHint = '文字提取失败不影响原文件预览。'
-        }
-        if (isAttachmentBusy(attachment) && !originalPreview && !this.previewText) {
-          this.error = attachmentBusyMessage(attachment.status ? attachment : data)
-          return
-        }
-        if (isAttachmentBusy(attachment) && !originalPreview && this.previewText) {
-          this.loading = false
-          return
-        }
-        if (this.kind === 'html') {
-          const htmlId = this.attachmentId
-          this.visible = false
-          this.openHtmlInNewPage({
-            attachmentId: htmlId
-          })
-          return
-        }
-        const maxBytes = attachmentPreviewByteLimit(this.kind)
-        const textKind = ['text', 'json', 'markdown'].includes(this.kind)
-        if (!textKind && this.kind !== 'presentation' && Number(attachment.byteSize) > maxBytes) {
-          this.previewBlocked = true
-          this.previewHint = `文件大小 ${(Number(attachment.byteSize) / 1024 / 1024).toFixed(1)} MB，超过此类型的站内预览限制。`
-          return
-        }
-        if (this.kind === 'pdf') {
-          // Let the browser's PDF viewer own the response, without an extra
-          // full ArrayBuffer and Blob in the mind-map page.
-          this.blobUrl = nodeAttachmentContentUrl(roomKey, this.attachmentId, { maxBytes })
-          return
-        }
-        if (this.kind === 'office') {
-          this.controller = typeof AbortController !== 'undefined' ? new AbortController() : null
-          const content = await fetchNodeAttachmentContent(roomKey, this.attachmentId, {
-            signal: this.controller && this.controller.signal,
-            maxBytes
-          })
-          if (requestId !== this.requestId) return
-          if (/\.docx$/i.test(attachment.fileName || '')) {
-            const zipModule = await import('jszip')
-            const zip = await (zipModule.default || zipModule).loadAsync(content.buffer)
-            assertOfficeZipBudget(zip)
-            if (requestId !== this.requestId) return
-            this.sourceBlob = new Blob([content.buffer], {
-              type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-            })
-            await this.renderDocxPreview(this.sourceBlob, requestId)
-            return
-          }
-          this.sourceBlob = new Blob([content.buffer], {
-            type: /\.xlsm$/i.test(attachment.fileName || '')
-              ? 'application/vnd.ms-excel.sheet.macroenabled.12'
-              : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-          })
-          await this.loadWorkbookCanvas(content.buffer, requestId)
-          return
-        }
-        if (this.kind === 'presentation') {
-          this.previewText = String(attachment.extractedText || this.previewText || '').slice(0, 20000)
-          if (!this.previewText.trim()) {
-            this.error = attachment.errorMessage || '该演示文稿未生成可读文本，请下载后查看'
-          }
-          return
-        }
-        if (this.kind === 'unsupported') {
-          this.error = '暂不支持该文件类型的站内预览，请下载后查看'
-          return
-        }
-        this.controller = typeof AbortController !== 'undefined' ? new AbortController() : null
-        const content = await fetchNodeAttachmentContent(roomKey, this.attachmentId, {
-          signal: this.controller && this.controller.signal,
-          maxBytes,
-          prefix: textKind
-        })
-        if (requestId !== this.requestId) return
-        if (this.kind === 'image') assertImagePreviewBudget(content.buffer)
-        this.sourceBlob = new Blob([content.buffer], {
-          type: previewMimeType(attachment.fileName, this.kind)
-        })
-        if (this.kind === 'image' || this.kind === 'pdf') {
-          this.blobUrl = URL.createObjectURL(this.sourceBlob)
-        } else {
-          this.previewText = formatAttachmentText(content.buffer, this.kind, content.truncated)
-          if (content.truncated) this.previewHint = '当前仅预览文件开头 256 KB；完整内容请下载查看。'
-          if (this.kind === 'markdown') this.renderMarkdown()
-        }
-      } catch (err) {
-        if (err && err.name === 'AbortError') return
-        if (requestId === this.requestId && (err.code === 'PREVIEW_TOO_LARGE' || err.statusCode === 413)) {
-          this.previewBlocked = true
-          this.previewText = ''
-          return
-        }
-        if (requestId === this.requestId && !this.previewText) {
-          this.error = (err && err.message) || '附件预览加载失败'
-        }
-      } finally {
-        if (requestId === this.requestId) {
-          this.loading = false
-          this.controller = null
-        }
-      }
+        this.attachmentId = attachment.id
+        this.title = attachment.fileName || this.title
+        this.kind = attachmentPreviewKind(this.title, attachment.mimeType || data.attachmentMimeType)
+        this.source = Object.freeze({ ...attachment, roomKey, url: nodeAttachmentContentUrl(roomKey, attachment.id) })
+      } catch (error) {
+        if (token === this.requestId) this.error = error.message || '附件加载失败'
+      } finally { if (token === this.requestId) this.loading = false }
     },
     openExternalAttachment(data) {
       this.resetPreview()
-      this.title = String(data.attachmentName || '附件预览')
+      this.title = data.attachmentName || '附件预览'
       this.kind = 'external'
-      this.externalUrl = String(data.attachmentUrl)
+      this.externalUrl = String(data.attachmentUrl || '')
       this.visible = true
     },
-    renderMarkdown() {
-      const requestId = this.requestId
-      const markdown = this.previewText
-      this.$nextTick(() => {
-        if (
-          requestId !== this.requestId ||
-          this.kind !== 'markdown' ||
-          !this.$refs.markdownViewer
-        ) return
-        const container = this.$refs.markdownViewer
-        // Markdown 的 v-if 节点会在切换图片、表格等附件时重建。不能继续
-        // 向已脱离页面的旧 Viewer 写内容，否则弹窗会看起来是空白的。
-        if (
-          this.markdownViewer &&
-          this.markdownViewerContainer !== container
-        ) {
-          this.destroyMarkdownViewer()
-        }
-        if (!this.markdownViewer) {
-          this.markdownViewer = new Viewer({ el: container })
-          this.markdownViewerContainer = container
-        }
-        this.markdownViewer.setMarkdown(safeMarkdownSource(markdown))
-      })
+    retry() { if (this.selectedData) this.openStoredAttachment(this.selectedData) },
+    toggleMaximize() { this.isMaximized = !this.isMaximized },
+    download() {
+      const room = (this.source && this.source.roomKey) || roomFromLocation(this.$route)
+      if (!room || !this.attachmentId) return
+      const link = document.createElement('a')
+      link.href = nodeAttachmentContentUrl(room, this.attachmentId, { download: true })
+      link.download = this.title || 'attachment'
+      link.target = '_blank'
+      link.rel = 'noopener'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
     },
-    async renderDocxPreview(blob, requestId, renderAsync) {
-      await this.$nextTick()
-      const container = this.$refs.docxViewer
-      if (!container || requestId !== this.requestId) return
-      const staging = document.createElement('div')
-      try {
-        let render = renderAsync
-        if (!render) {
-          const module = await import('docx-preview')
-          if (requestId !== this.requestId || container !== this.$refs.docxViewer) return
-          render = (input, target, options) =>
-            module.renderAsync(input, target, null, options)
-        }
-        await render(blob, staging, {
-          inWrapper: true,
-          breakPages: true,
-          renderHeaders: true,
-          renderFooters: true,
-          renderFootnotes: true,
-          renderEndnotes: true,
-          renderComments: false,
-          experimental: true
-        })
-        if (requestId !== this.requestId || container !== this.$refs.docxViewer) return
-        container.textContent = ''
-        while (staging.firstChild) container.appendChild(staging.firstChild)
-      } catch (err) {
-        if (requestId !== this.requestId) return
-        this.error = 'DOCX 原样预览加载失败，请下载后使用本地 Office 打开'
-      }
-    },
-    async loadWorkbookCanvas(buffer, requestId = this.requestId, loadModules) {
-      try {
-        const [xlsxModule, zipModule] = loadModules
-          ? await loadModules()
-          : await Promise.all([import('xlsx'), import('jszip')])
-        if (requestId !== this.requestId) return
-        const XLSX = xlsxModule.default || xlsxModule
-        const JSZip = zipModule.default || zipModule
-        const slim = await slimSpreadsheetZip(buffer, JSZip)
-        if (requestId !== this.requestId) return
-        const workbook = XLSX.read(slim, {
-          type: 'array',
-          raw: false,
-          cellStyles: false,
-          cellHTML: false,
-          sheetRows: 501
-        })
-        const sheets = workbookSheetsFromXlsx(XLSX, workbook)
-        if (requestId !== this.requestId) return
-        this.workbookSheets = sheets
-        this.activeSheetName = (sheets[0] && sheets[0].name) || ''
-        if (!sheets.length) {
-          this.error = '无法预览该表格，请下载后查看'
-        }
-      } catch (err) {
-        if (requestId !== this.requestId) return
-        this.workbookSheets = []
-        this.error = (err && err.message) || '无法预览该表格，请下载后查看'
-      }
-    },
-    spreadsheetColumnName(index) {
-      let value = Number(index) + 1
-      let name = ''
-      while (value > 0) {
-        const remainder = (value - 1) % 26
-        name = String.fromCharCode(65 + remainder) + name
-        value = Math.floor((value - 1) / 26)
-      }
-      return name
-    },
-    dialogElement() {
-      return (
-        this.$refs.dialog &&
-        this.$refs.dialog.$el &&
-        this.$refs.dialog.$el.querySelector('.el-dialog')
-      )
-    },
-    startResize(event) {
-      if (this.isMaximized || window.innerWidth <= 768) return
-      const dialog = this.dialogElement()
-      if (!dialog) return
-      const rect = dialog.getBoundingClientRect()
-      this.resizeSession = {
-        startX: event.clientX,
-        startY: event.clientY,
-        width: rect.width,
-        height: this.dialogHeight
-      }
-      document.addEventListener('mousemove', this.resizeDialog)
-      document.addEventListener('mouseup', this.stopResize)
-      dialog.classList.add('is-resizing')
-      document.body.classList.add('nodeAttachmentResizing')
-    },
-    resizeDialog(event) {
-      if (!this.resizeSession) return
-      const maxWidth = Math.max(640, window.innerWidth - 32)
-      const maxHeight = Math.max(96, window.innerHeight - 220)
-      const minHeight = Math.min(260, maxHeight)
-      const width = Math.min(
-        maxWidth,
-        Math.max(640, this.resizeSession.width + event.clientX - this.resizeSession.startX)
-      )
-      const height = Math.min(
-        maxHeight,
-        Math.max(minHeight, this.resizeSession.height + event.clientY - this.resizeSession.startY)
-      )
-      this.dialogWidth = `${Math.round(width)}px`
-      this.dialogHeight = Math.round(height)
-    },
-    stopResize() {
-      this.resizeSession = null
-      document.removeEventListener('mousemove', this.resizeDialog)
-      document.removeEventListener('mouseup', this.stopResize)
-      const dialog = this.dialogElement()
-      if (dialog) dialog.classList.remove('is-resizing')
-      document.body.classList.remove('nodeAttachmentResizing')
-    },
-    toggleMaximize() {
-      if (!this.isMaximized) {
-        this.previousDialogSize = {
-          width: this.dialogWidth,
-          height: this.dialogHeight
-        }
-        this.dialogWidth = `${Math.max(320, window.innerWidth - 32)}px`
-        // 高度也要撑开 —— 以前只放大宽度，最大化后仍然只有 500 高，照样挤
-        this.dialogHeight = Math.max(96, Math.min(900, window.innerHeight - 220))
-        this.isMaximized = true
-        return
-      }
-      if (this.previousDialogSize) {
-        this.dialogWidth = this.previousDialogSize.width
-        this.dialogHeight = this.previousDialogSize.height
-      } else {
-        const fresh = previewSize()
-        this.dialogWidth = fresh.dialogWidth
-        this.dialogHeight = fresh.dialogHeight
-      }
-      this.isMaximized = false
-    },
-    onWindowResize() {
-      if (!this.isMaximized) return
-      this.dialogWidth = `${Math.max(320, window.innerWidth - 32)}px`
-    },
-    async download() {
-      if (!this.attachmentId || this.downloading) return
-      this.downloading = true
-      try {
-        const roomKey = roomFromLocation(this.$route)
-        if (!roomKey) throw new Error('无法确认当前协作房间')
-        const url = nodeAttachmentContentUrl(roomKey, this.attachmentId, { download: true })
-        const link = document.createElement('a')
-        link.href = url
-        link.download = this.title || 'attachment'
-        link.target = '_blank'
-        link.rel = 'noopener'
-        link.style.display = 'none'
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-      } catch (err) {
-        this.$message.error((err && err.message) || '附件下载失败')
-      } finally {
-        this.downloading = false
-      }
-    },
-    openExternal() {
-      if (this.externalUrl) window.open(this.externalUrl, '_blank', 'noopener')
-    },
-    onClosed() {
-      this.resetPreview()
-    }
+    openExternal() { this.openUrlInNewPage(this.externalUrl) },
+    onClosed() { this.resetPreview() }
   }
 }
 </script>
-
-<style lang="less" scoped>
-.attachmentPreviewLayout {
-  box-sizing: border-box;
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  flex-direction: column;
-}
-
-.attachmentPreviewToolbar {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 2px 0 12px;
-}
-
-/deep/ .attachmentPreviewToolbar .el-button {
-  margin-left: 0;
-}
-
-.attachmentPreviewBody {
-  position: relative;
-  box-sizing: border-box;
-  min-width: 0;
-  min-height: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  border: 1px solid #e8edf4;
-  border-radius: 6px;
-  background: #f8fafc;
-}
-
-.previewState {
-  box-sizing: border-box;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  color: #667085;
-  line-height: 1.6;
-  text-align: center;
-}
-
-.previewError {
-  color: #c45656;
-}
-
-.previewHint {
-  margin: 0 0 12px;
-  color: #667085;
-  line-height: 1.6;
-}
-
-.imagePreviewWrap {
-  box-sizing: border-box;
-  height: 100%;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 16px;
-  background: #fff;
-}
-
-.imagePreview {
-  display: block;
-  max-width: 100%;
-  max-height: calc(100% - 32px);
-  object-fit: contain;
-}
-
-.documentPreviewFrame {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  background: #fff;
-}
-
-.textPreview {
-  box-sizing: border-box;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  margin: 0;
-  padding: 18px;
-  overflow: auto;
-  background: #fff;
-  color: #303133;
-  font-family: Consolas, 'Courier New', monospace;
-  font-size: 13px;
-  line-height: 1.65;
-  tab-size: 2;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.officePreviewCanvas {
-  height: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  background: #fff;
-}
-
-.workbookHeader,
-.documentCanvasHeader {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 64px;
-  padding: 14px 18px;
-  border-bottom: 1px solid #e8edf4;
-  color: #667085;
-  font-size: 13px;
-}
-
-.workbookHeader strong {
-  display: block;
-  margin-top: 3px;
-  color: #1d2939;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.canvasEyebrow {
-  display: block;
-  color: #98a2b3;
-  font-size: 12px;
-  line-height: 1.3;
-}
-
-.workbookMeta {
-  flex: 0 0 auto;
-  color: #667085;
-  font-variant-numeric: tabular-nums;
-}
-
-.workbookTabs {
-  display: flex;
-  gap: 4px;
-  min-height: 42px;
-  padding: 7px 12px 0;
-  overflow-x: auto;
-  border-bottom: 1px solid #e8edf4;
-  background: #f8fafc;
-}
-
-.workbookTab {
-  max-width: 180px;
-  height: 34px;
-  padding: 0 13px;
-  overflow: hidden;
-  border: 1px solid transparent;
-  border-radius: 5px 5px 0 0;
-  background: transparent;
-  color: #667085;
-  font-size: 13px;
-  line-height: 32px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.workbookTab:hover,
-.workbookTab:focus {
-  color: #1677ff;
-  outline: none;
-}
-
-.workbookTab:focus-visible {
-  outline: 2px solid #409eff;
-  outline-offset: -2px;
-}
-
-.workbookTab.active {
-  border-color: #d8e8ff;
-  border-bottom-color: #fff;
-  background: #fff;
-  color: #1677ff;
-  font-weight: 600;
-}
-
-.spreadsheetViewport {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  background: #fff;
-}
-
-.spreadsheetTable {
-  width: max-content;
-  min-width: 100%;
-  border-spacing: 0;
-  border-collapse: separate;
-  color: #344054;
-  font-size: 13px;
-  line-height: 1.55;
-}
-
-.spreadsheetTable th,
-.spreadsheetTable td {
-  box-sizing: border-box;
-  min-width: 120px;
-  max-width: 360px;
-  padding: 8px 10px;
-  overflow: hidden;
-  border-right: 1px solid #edf1f6;
-  border-bottom: 1px solid #edf1f6;
-  text-align: left;
-  text-overflow: ellipsis;
-  vertical-align: top;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.spreadsheetTable thead th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  min-width: 120px;
-  padding: 7px 10px;
-  background: #f6f8fb;
-  color: #667085;
-  font-size: 12px;
-  font-weight: 600;
-  text-align: center;
-}
-
-.spreadsheetTable tbody th,
-.sheetCorner {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  min-width: 46px !important;
-  width: 46px;
-  padding: 7px 8px !important;
-  background: #f8fafc;
-  color: #98a2b3;
-  font-size: 12px;
-  font-weight: 500;
-  text-align: center !important;
-}
-
-.spreadsheetTable .sheetCorner {
-  z-index: 3;
-}
-
-.spreadsheetTable tbody tr:hover td,
-.spreadsheetTable tbody tr:hover th {
-  background: #f7fbff;
-}
-
-.documentPreviewCanvas .textPreview {
-  height: calc(100% - 64px);
-}
-
-.docxPreview {
-  box-sizing: border-box;
-  height: 100%;
-  padding: 24px;
-  overflow: auto;
-  background: #eef1f5;
-}
-
-/deep/ .docxPreview .docx-wrapper {
-  min-width: min-content;
-  padding: 0;
-  background: transparent;
-}
-
-/deep/ .docxPreview .docx {
-  margin: 0 auto 24px;
-  box-shadow: 0 2px 10px rgba(16, 24, 40, 0.16);
-}
-
-.markdownPreview {
-  box-sizing: border-box;
-  height: 100%;
-  min-height: 0;
-  padding: 18px;
-  overflow: auto;
-  background: #fff;
-}
-
-.externalPreviewHint {
-  margin: 0;
-  padding: 10px 16px;
-  color: #909399;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.externalPreviewWrap {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: #fff;
-}
-
-.externalPreviewWrap .documentPreviewFrame {
-  flex: 1;
-  min-height: 0;
-}
-
-.dialogResizeHandle {
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  z-index: 2;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: nwse-resize;
-  touch-action: none;
-}
-
-.dialogResizeHandle::after {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  width: 12px;
-  height: 12px;
-  border-right: 2px solid #98a2b3;
-  border-bottom: 2px solid #98a2b3;
-  content: '';
-}
-
-.dialogResizeHandle:focus-visible {
-  outline: 2px solid #409eff;
-  outline-offset: -3px;
-}
-
-/deep/ .nodeAttachmentPreviewDialog {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  min-width: 640px;
-  max-width: calc(100vw - 32px);
-  max-height: calc(100vh - 32px);
-  margin-top: 16px !important;
-  margin-bottom: 16px !important;
-  transition: width 160ms ease-out;
-}
-
-/deep/ .nodeAttachmentPreviewDialog .el-dialog__header {
-  flex: 0 0 auto;
-}
-
-/deep/ .nodeAttachmentPreviewDialog .el-dialog__body {
-  box-sizing: border-box;
-  display: flex;
-  min-height: 0;
-  flex: 1 1 auto;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 14px 20px 10px;
-}
-
-/deep/ .nodeAttachmentPreviewDialog .el-dialog__footer {
-  flex: 0 0 auto;
-}
-
-/deep/ .nodeAttachmentPreviewDialog.is-resizing {
-  transition: none;
-}
-
-/deep/ .nodeAttachmentPreviewDialog.is-maximized {
-  box-sizing: border-box;
-  height: calc(100vh - 32px);
-  margin-top: 16px !important;
-  margin-bottom: 16px !important;
-  display: flex;
-  flex-direction: column;
-}
-
-/deep/ .nodeAttachmentPreviewDialog.is-maximized .el-dialog__body {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-}
-
-/deep/ .nodeAttachmentPreviewDialog.is-maximized .attachmentPreviewLayout {
-  height: auto !important;
-  min-height: 0;
-  flex: 1;
-}
-
-/deep/ .nodeAttachmentPreviewDialog.is-maximized .attachmentPreviewBody {
-  min-height: 0;
-  flex: 1;
-}
-
-/deep/ .nodeAttachmentPreviewDialog .attachmentPreviewBody {
-  min-height: 0;
-  flex: 1 1 auto;
-}
-
-@media (max-width: 768px) {
-  /deep/ .nodeAttachmentPreviewDialog {
-    min-width: 0;
-    width: calc(100vw - 24px) !important;
-    margin-top: 8px !important;
-    margin-bottom: 8px !important;
-  }
-
-  .attachmentPreviewBody {
-    min-height: 0;
-  }
-
-  .documentPreviewFrame {
-    height: 100%;
-  }
-
-  .workbookHeader,
-  .documentCanvasHeader {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .spreadsheetViewport {
-    min-height: 0;
-  }
-
-  /deep/ .nodeAttachmentPreviewDialog {
-    min-width: 0;
-  }
-
-  .dialogResizeHandle {
-    display: none;
-  }
-
-  .docxPreview {
-    padding: 12px;
-  }
-}
-</style>

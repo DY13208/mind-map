@@ -66,7 +66,7 @@ export function assertImagePreviewBudget(buffer) {
 }
 
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif)$/i
-const TEXT_EXT = /\.(txt|log|csv)$/i
+const TEXT_EXT = /\.(txt|log|csv|js|ts|jsx|tsx|css|scss|less|py|java|go|rs|c|cpp|h|sh|sql|xml|ya?ml|vue|toml|ini|conf)$/i
 const HTML_EXT = /\.html?$/i
 
 export function attachmentPreviewKind(fileName, mimeType = '') {

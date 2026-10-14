@@ -1,0 +1,166 @@
+.attachmentViewer.el-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 92vw;
+  max-width: 1200px;
+  height: 90vh;
+  max-height: 950px;
+  margin: 5vh auto !important;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 16px 60px rgba(15, 23, 42, .22);
+  color: #18212f;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  .el-dialog__header { flex: 0 0 auto; padding: 0; border-bottom: 1px solid #e9edf3; }
+  .el-dialog__body { flex: 1; min-height: 0; padding: 0; display: flex; color: inherit; }
+  button, input { font: inherit; }
+  button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2px solid #2f7fff; outline-offset: -2px; }
+  &.is-maximized { width: 100vw !important; max-width: none; height: 100vh; max-height: none; margin: 0 !important; border-radius: 0; }
+}
+.attachmentViewerHeader {
+  display: flex; align-items: center; gap: 12px; min-height: 70px; padding: 0 22px; box-sizing: border-box;
+}
+.attachmentFileIcon {
+  display: flex; align-items: center; justify-content: center; flex: 0 0 38px; height: 42px;
+  border-radius: 8px; background: #edf4ff; color: #3078e8; font-size: 25px;
+  &.is-image { color: #8661d3; background: #f4efff; }
+  &.is-pdf { color: #df5953; background: #fff0ef; }
+  &.is-office { color: #257b56; background: #eaf6ef; }
+}
+.attachmentFileInfo {
+  flex: 1; min-width: 0;
+  h2 { overflow: hidden; margin: 0 0 5px; font-size: 15px; line-height: 1.4; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+  p { margin: 0; color: #8290a5; font-size: 12px; }
+}
+.fileMetaDivider { margin: 0 8px; }
+.attachmentViewerActions {
+  display: flex; align-items: center; flex-shrink: 0; gap: 8px;
+  .el-button { margin: 0; min-height: 34px; border-radius: 6px; border-color: #e3e9f2; }
+  .el-button--primary { background: #287bff; border-color: #287bff; box-shadow: 0 2px 5px rgba(40, 123, 255, .14); }
+  .attachmentCloseButton { padding: 9px 10px; font-size: 16px; }
+}
+.attachmentViewerMain { flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden; }
+.attachmentViewerState {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 16px; min-height: 160px; padding: 24px; box-sizing: border-box; color: #738096; text-align: center;
+  > i { font-size: 36px; color: #397ff4; }
+  strong { font-size: 14px; font-weight: 500; color: #3d495b; }
+  p { margin: 0; font-size: 12px; }
+}
+.attachmentDocumentLayout, .attachmentOfficeLayout { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.attachmentOfficeLayout.is-spreadsheet { flex-direction: column; }
+.attachmentOutline {
+  flex: 0 0 196px; box-sizing: border-box; padding: 22px 12px; overflow-y: auto; border-right: 1px solid #e9edf3; background: #f8fafc;
+  h3 { padding: 0 10px; margin: 0 0 14px; font-size: 14px; line-height: 1.5; color: #202b3b; }
+  button { display: block; width: 100%; padding: 10px 12px; margin-bottom: 3px; border: 0; border-radius: 6px;
+    text-align: left; line-height: 1.5; color: #48566b; font-size: 13px; cursor: pointer; background: transparent;
+    &:hover, &.active { color: #2474ef; background: #e7f0ff; }
+    &.nested { padding-left: 22px; font-size: 12px; }
+  }
+}
+.attachmentDocumentViewport, .attachmentWordViewport {
+  flex: 1; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; background: #fff;
+}
+.attachmentDocumentViewport.is-initial-loading {
+  article { min-height: 100%; display: grid; place-items: center; }
+  .attachmentLoadSentinel { display: flex; flex-direction: column; align-items: center; gap: 16px; font-size: 14px; color: #617086; }
+  .el-icon-loading { color: #397ff4; font-size: 36px; }
+}
+.attachmentMarkdownDocument, .attachmentWordDocument { max-width: 900px; margin: 0 auto; padding: 24px 30px 10px; box-sizing: border-box; }
+.attachmentDocumentChunk {
+  content-visibility: auto; contain-intrinsic-size: auto 600px;
+  font-size: 14px; line-height: 1.85; color: #283447; overflow-wrap: anywhere;
+  h1, h2, h3, h4, h5, h6 { color: #111c2c; line-height: 1.5; scroll-margin-top: 20px; }
+  h1 { font-size: 28px; margin: 0 0 22px; padding-bottom: 12px; border-bottom: 2px solid #e5e9ef; }
+  h2 { font-size: 22px; margin: 28px 0 16px; padding-bottom: 8px; border-bottom: 1px solid #e5e9ef; }
+  h3 { font-size: 18px; margin: 22px 0 12px; }
+  p { margin: 10px 0 14px; }
+  ul, ol { padding-left: 25px; }
+  li { padding-left: 2px; }
+  a { color: #287bff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  blockquote { margin: 18px 0; padding: 12px 18px; border-left: 3px solid #d5dfed; border-radius: 4px; background: #f5f7fb; color: #5d6b7e; }
+  blockquote p { margin: 4px 0; }
+  pre { padding: 18px; border-radius: 8px; overflow-x: auto; background: #192332; color: #d7e3f5; line-height: 1.7; }
+  pre code { background: transparent; padding: 0; color: inherit; white-space: pre; }
+  code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; padding: 2px 5px; border-radius: 3px; background: #eef2f7; }
+  img { max-width: 100%; height: auto; }
+  table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 18px 0; }
+  th, td { min-width: 90px; border: 1px solid #e5eaf1; padding: 9px 13px; text-align: left; }
+  th { background: #f5f7fa; font-weight: 600; }
+  tr:nth-child(even) td { background: #fafbfd; }
+}
+.attachmentTextDocument { min-width: 100%; box-sizing: border-box; padding: 20px 24px; }
+.attachmentTextDocument.is-code { background: #192332; color: #d7e3f5; min-height: 100%; }
+.attachmentTextChunk { margin: 0; padding: 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; content-visibility: auto; contain-intrinsic-size: auto 600px; }
+.attachmentLoadSentinel { padding: 18px 24px; min-height: 24px; text-align: center; color: #8895a7; font-size: 12px;
+  button { border: 0; background: transparent; color: #287bff; cursor: pointer; }
+}
+.attachmentViewer {
+  .hljs-keyword, .hljs-selector-tag { color: #ba79d5; }
+  .hljs-string, .hljs-attr { color: #76b9b0; }
+  .hljs-number, .hljs-literal { color: #d69b66; }
+  .hljs-title, .hljs-function { color: #6ca6de; }
+  .hljs-comment { color: #8d9aae; }
+}
+.attachmentSheetTabs { display: flex; flex: 0 0 44px; gap: 2px; padding: 0 14px; overflow-x: auto; border-bottom: 1px solid #e9edf3; background: #f8fafc;
+  button { flex-shrink: 0; padding: 0 18px; border: 0; border-bottom: 2px solid transparent; font-size: 13px; cursor: pointer; color: #5d6b7e; background: transparent; }
+  button.active { color: #2474ef; border-bottom-color: #2474ef; background: #fff; }
+}
+.attachmentSpreadsheetViewport { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.attachmentSpreadsheet { border-collapse: separate; border-spacing: 0; font-size: 12px; min-width: 100%;
+  th, td { box-sizing: border-box; min-width: 130px; max-width: 280px; height: 36px; max-height: 36px; padding: 0 12px;
+    border-right: 1px solid #e9edf3; border-bottom: 1px solid #e9edf3; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  thead th { position: sticky; top: 0; z-index: 2; background: #f3f6fa; color: #718098; font-weight: 500; text-align: center; }
+  tbody th, thead th:first-child { position: sticky; left: 0; min-width: 46px; width: 46px; color: #8390a3; background: #f8fafc; text-align: center; font-weight: 400; }
+  thead th:first-child { z-index: 3; }
+  tbody tr:not(.sheetSpacer):hover td { background: #f6faff; }
+  .sheetSpacer td { padding: 0; border: 0; line-height: 0; }
+}
+.attachmentSheetStatus { padding: 7px 16px; border-top: 1px solid #e9edf3; color: #8290a5; font-size: 11px; }
+.attachmentWordChunk { content-visibility: auto; contain-intrinsic-size: auto 800px; }
+.attachmentWordDocument {
+  .docx { width: 100% !important; max-width: 100%; min-height: 0 !important; padding: 10px 0 !important; box-shadow: none !important; font-family: inherit; font-size: 14px; line-height: 1.8; color: #283447; }
+  .docx p { margin: 0 0 12px; }
+  img, svg { max-width: 100%; object-fit: contain; }
+  table { max-width: 100%; border-collapse: collapse; margin: 16px 0; }
+  td, th { border: 1px solid #e5eaf1; padding: 8px 12px; }
+  .docx td p, .docx th p { margin: 0; }
+  section { box-sizing: border-box; }
+}
+.attachmentFormatToolbar { flex: 0 0 44px; display: flex; align-items: center; justify-content: center; flex-wrap: nowrap; gap: 8px; padding: 0 12px; box-sizing: border-box; border-bottom: 1px solid #e3e8f0; background: #f9fafc; color: #617086; font-size: 12px;
+  button { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; padding: 0 7px; border: 0; border-radius: 4px; background: transparent; color: #4e5c70; cursor: pointer; white-space: nowrap; }
+  button:hover { background: #eaf0f9; }
+  button:disabled { opacity: .35; cursor: default; }
+  input { width: 44px; height: 25px; border: 1px solid #e0e7f1; border-radius: 4px; text-align: center; color: #344155; }
+  .zoomValue { min-width: 40px; text-align: center; font-variant-numeric: tabular-nums; }
+}
+.formatToolbarDivider { width: 1px; height: 18px; background: #e1e7f0; margin: 0 5px; }
+.attachmentPdfLayout, .attachmentImageSurface { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
+.attachmentPdfViewport { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 24px; box-sizing: border-box; background: #edf1f6; }
+.attachmentPdfPage { position: relative; max-width: none; margin: 0 auto 20px; background: #fff; box-shadow: 0 2px 8px rgba(28, 39, 58, .12); overflow: hidden;
+  canvas { display: block; position: relative; z-index: 1; }
+  .pdfPagePlaceholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #9ba7b6; font-size: 13px; }
+  &.is-rendered .pdfPagePlaceholder { display: none; }
+}
+.attachmentImageViewport { display: flex; flex: 1; min-height: 0; padding: 24px; box-sizing: border-box; overflow: auto; background: #eff2f7; overscroll-behavior: contain;
+  img { display: block; object-fit: contain; }
+}
+.attachmentImageStage { flex-shrink: 0; min-width: 100%; min-height: 100%; margin: auto; width: max-content; display: grid; place-items: center; }
+.attachmentExternal { flex: 1; iframe { width: 100%; height: 100%; border: 0; } }
+@media (max-width: 640px) {
+  .attachmentViewer.el-dialog { width: calc(100vw - 20px) !important; height: 94vh; margin: 3vh auto !important; max-height: none; }
+  .attachmentViewer.el-dialog.is-maximized { width: 100vw !important; height: 100vh; margin: 0 !important; }
+  .attachmentViewerHeader { gap: 8px; padding: 0 12px; min-height: 64px; }
+  .attachmentFileIcon { flex-basis: 28px; height: 34px; font-size: 21px; }
+  .attachmentFileInfo h2 { font-size: 13px; }
+  .attachmentFileInfo p { font-size: 10px; }
+  .attachmentViewerActions { gap: 5px; .actionLabel { display: none; } .el-button { padding: 8px; } }
+  .attachmentOutline { display: none; }
+  .attachmentMarkdownDocument, .attachmentWordDocument { padding: 20px 18px; }
+  .attachmentDocumentChunk h1 { font-size: 25px; }
+  .attachmentDocumentChunk h2 { font-size: 20px; }
+  .attachmentFormatToolbar { gap: 3px; padding: 0 6px; font-size: 11px; }
+  .attachmentPdfViewport, .attachmentImageViewport { padding: 12px; }
+}

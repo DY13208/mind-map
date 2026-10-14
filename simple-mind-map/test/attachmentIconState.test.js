@@ -90,6 +90,13 @@ assert.equal(ready.showPercent, false)
 assert.equal(ready.title, '表.xlsx')
 
 assert.equal(uploading.showPercent, true)
+const noOcr = attachmentIconViewState({
+  attachmentId: 'image-ocr', attachmentName: '图片.png',
+  attachmentStatus: 'failed', attachmentError: '图片 OCR 服务未配置'
+})
+assert.equal(noOcr.phase, 'ready')
+assert.equal(noOcr.badge, null)
+assert.equal(noOcr.previewable, true)
 for (const status of ['failed', 'processing', 'pending']) {
   const image = { attachmentId: 'image-1', attachmentName: '截图.png', attachmentStatus: status }
   assert.equal(isAttachmentPreviewReady(image), true)
