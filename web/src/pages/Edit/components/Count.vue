@@ -44,18 +44,19 @@ export default {
     })
   },
   created() {
+    this._counts = new Map()
     this.$bus.$on('data_change', this.onDataChange)
     this.$bus.$on('toggle_mini_map', this.onMiniMapToggle)
     if (this.mindMap) {
-      this.onDataChange(this.mindMap.getData())
+      this.onDataChange(this.mindMap.renderer.renderTree)
     }
   },
   beforeDestroy() {
     this.$bus.$off('data_change', this.onDataChange)
     this.$bus.$off('toggle_mini_map', this.onMiniMapToggle)
+    this._counts.clear()
   },
   methods: {
-    // 监听数据变化
     onMiniMapToggle(show) {
       this.openMiniMap = !!show
     },
@@ -64,20 +65,47 @@ export default {
       this.$bus.$emit('toggle_mini_map', !this.openMiniMap)
     },
 
-    onDataChange(data) {
+    // 监听数据变化
+    onDataChange(data, change) {
+      if (change && change.incremental && this._counts) {
+        const remove = tree => {
+          if (!tree || !tree.data) return
+          const old = this._counts.get(tree.data.uid)
+          if (old != null) { this.num--; this.words -= old; this._counts.delete(tree.data.uid) }
+          (tree.children || []).forEach(remove)
+        }
+        change.removed.forEach(entry => remove(entry.tree))
+        change.added.forEach(entry => { if (entry.countable) this.walk(entry.tree) })
+        change.nodes.forEach(entry => { if (entry.countable && this._counts.has(entry.tree.data.uid)) this.updateCount(entry.tree) })
+        return
+      }
       this.textStr = ''
       this.words = 0
       this.num = 0
+      this._counts = new Map()
       this.walk(data)
-      countEl.innerHTML = this.textStr
-      this.words = countEl.textContent.length
+    },
+
+    updateCount(data) {
+      if (!data || !data.data) return
+      const uid = data.data.uid
+      const text = String(data.data.text) || ''
+      let words = text.length
+      if (text.includes('<') || text.includes('&')) {
+        countEl.innerHTML = text
+        words = countEl.textContent.length
+      }
+      const old = this._counts.get(uid)
+      if (old == null) this.num++
+      else this.words -= old
+      this.words += words
+      this._counts.set(uid, words)
     },
 
     // 遍历
     walk(data) {
       if (!data) return
-      this.num++
-      this.textStr += String(data.data.text) || ''
+      this.updateCount(data)
       if (data.children && data.children.length > 0) {
         data.children.forEach(item => {
           this.walk(item)

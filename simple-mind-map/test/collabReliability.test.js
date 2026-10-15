@@ -287,7 +287,9 @@ async function testViewerForbidden() {
   const adapter = createCollaborationAdapter({
     clientId: randomUUID(),
     memory: true,
-    socket: fakeJoinSocket(sent, { role: 'viewer', canEdit: false }),
+    // This permission case starts caught up. Claiming head 654 with an empty
+    // sync page from revision 1 is an invalid fixture, rejected before ACL.
+    socket: fakeJoinSocket(sent, { role: 'viewer', canEdit: false, serverRevision: 1 }),
     timeoutMs: 400
   })
   await adapter.connect({ roomKey: 'r-view', userId: 'v1', lastServerRevision: 1 })
@@ -301,13 +303,14 @@ async function testViewerForbidden() {
     code = err.code
   }
   assert.strictEqual(code, 'FORBIDDEN')
+  assert.ok(!sent.some(item => item.ev === 'op'), 'viewer must not emit a write')
 }
 
 async function testOfflineSaveState() {
   const adapter = createCollaborationAdapter({
     clientId: randomUUID(),
     memory: true,
-    socket: fakeJoinSocket([]),
+    socket: fakeJoinSocket([], { serverRevision: 1 }),
     timeoutMs: 400
   })
   await adapter.connect({ roomKey: 'r-off', userId: 'u1', lastServerRevision: 1 })

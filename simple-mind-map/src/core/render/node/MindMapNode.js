@@ -18,6 +18,13 @@ import {
   isUndef
 } from '../../../utils/index'
 
+// svg.js translate() 默认以 center 为原点，内部会走
+// getOrigin -> element.bbox() -> getBBox()，对已经挂到画布上的节点每次都会
+// 触发布局强制回流。纯平移与原点无关，显式指定数值原点 [0,0] 可跳过几何读取，
+// relative 合并语义不变（矩阵 a/b/c/d 保留，仅 e/f 变化）。
+const translateWithoutBbox = (element, x, y) =>
+  element.transform({ translate: [x, y], origin: [0, 0] }, true)
+
 //  节点类
 class MindMapNode {
   //  构造函数
@@ -625,7 +632,7 @@ class MindMapNode {
     // 保存一份当前节点数据快照
     // 节点位置变化才更新，因为即使值没有变化属性设置操作也是耗时的
     if (this.left !== t.translateX || this.top !== t.translateY) {
-      this.group.translate(this.left - t.translateX, this.top - t.translateY)
+      translateWithoutBbox(this.group, this.left - t.translateX, this.top - t.translateY)
     }
   }
 
@@ -644,9 +651,10 @@ class MindMapNode {
   // 判断节点是否可见
   checkIsInClient(padding = 0) {
     const { left: nx, top: ny } = this.getNodePosInClient(this.left, this.top)
+    const { scaleX, scaleY } = this.mindMap.view.getTransformData().transform
     return (
-      nx + this.width > 0 - padding &&
-      ny + this.height > 0 - padding &&
+      nx + this.width * scaleX > 0 - padding &&
+      ny + this.height * scaleY > 0 - padding &&
       nx < this.mindMap.width + padding &&
       ny < this.mindMap.height + padding
     )
@@ -735,10 +743,10 @@ class MindMapNode {
   // 递归渲染
   // forceRender：强制渲染，无论是否处于画布可视区域
   // async：异步渲染
-  render(callback = () => {}, forceRender = false, async = false) {
+  render(callback = () => {}, forceRender = false, async = false, selfOnly = false, skipLine = false) {
     // 节点
     // 重新渲染连线
-    this.renderLine()
+    if (!skipLine) this.renderLine()
     const { openPerformance, performanceConfig } = this.mindMap.opt
     // 强制渲染、或没有开启性能模式、或不在画布可视区域内不渲染节点内容
     // 根节点不进行懒加载，始终渲染，因为滚动条插件依赖根节点进行计算
@@ -760,7 +768,7 @@ class MindMapNode {
         this.layout()
         this.update(forceRender)
       } else {
-        if (!this.nodeDraw.has(this.group)) {
+        if (this.group.node.parentNode !== this.nodeDraw.node) {
           this.nodeDraw.add(this.group)
         }
         if (this.needLayout) {
@@ -772,10 +780,13 @@ class MindMapNode {
       }
     } else if (openPerformance && performanceConfig.removeNodeWhenOutCanvas) {
       this.removeSelf()
+      // Summary geometry is independent of its owner's viewport visibility.
+      // Its custom position/range can still intersect the visible canvas.
+      if (this.checkHasGeneralization()) this.renderGeneralization(forceRender)
     }
     // 子节点
     if (
-      this.children &&
+      !selfOnly && this.children &&
       this.children.length &&
       this.getData('expand') !== false
     ) {
@@ -822,9 +833,11 @@ class MindMapNode {
 
   // 删除自身，只是从画布删除，节点容器还在，后续还可以重新插回画布
   removeSelf() {
-    if (!this.group) return
-    this.group.remove()
-    this.removeGeneralization()
+    if (this.group) this.group.remove()
+    this._generalizationList.forEach(item => {
+      if (item.generalizationNode) item.generalizationNode.removeSelf()
+      if (item.generalizationLine) item.generalizationLine.remove()
+    })
   }
 
   //  递归删除，只是从画布删除，节点容器还在，后续还可以重新插回画布
@@ -995,6 +1008,9 @@ class MindMapNode {
       this.style.getStyle('lineStyle', true)
     )
     this._lines.forEach(line => {
+      // A viewport pass detaches geometry without deleting its model slot.
+      // Reattach before a layout/explicit export updates or measures it.
+      if (line.node && line.node.parentNode !== this.lineDraw.node) this.lineDraw.add(line)
       if (typeof line.addClass === 'function') line.addClass('smm-tree-connector')
     })
     // 子级的连线也需要更新

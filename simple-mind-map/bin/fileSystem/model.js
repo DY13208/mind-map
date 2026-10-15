@@ -94,6 +94,7 @@ function publicFile(row, access = {}) {
     contentUpdatedAt: row.content_updated_at || row.contentUpdatedAt || row.updated_at || row.updatedAt,
     resourceUpdatedAt: row.updated_at || row.updatedAt,
     revision: Number(row.version != null ? row.version : row.revision || 0),
+    generation: row.node_counts_generation == null ? undefined : String(row.node_counts_generation),
     canView: access.canView != null ? access.canView : true,
     canEdit: !!access.canEdit,
     canManage: !!access.canManage,

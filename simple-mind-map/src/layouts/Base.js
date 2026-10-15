@@ -600,6 +600,52 @@ class Base {
   }
 
   //  更新子节点属性
+  // Accumulate the same sibling displacements as updateBrothers, then apply
+  // them once. Custom-position boundaries stop inherited subtree movement.
+  adjustSiblingSubtrees(getShift, directional = false, walker = walk) {
+    const totals = new Map()
+    const inherited = new Map()
+    const siblingOffsets = new Map()
+    const collect = walker(this.root, null, null, node => {
+      const own = getShift(node, node.layerIndex)
+      const sum = [own[0], own[1]]
+      ;(node.children || []).forEach(child => {
+        const value = totals.get(child) || [0, 0]
+        sum[0] += value[0]
+        sum[1] += value[1]
+      })
+      // Logical floating components have their own layout; their adjustments
+      // must not propagate to siblings of the component in the main tree.
+      totals.set(node, !directional && node.getData('isFloating') ? [0, 0] : sum)
+    }, true)
+    const position = () => walker(this.root, null, (node, parent) => {
+      const incoming = parent && !parent.hasCustomPosition()
+        ? inherited.get(parent) || 0 : 0
+      const shift = node.hasCustomPosition() ? 0 : incoming + (siblingOffsets.get(node) || 0)
+      if (shift) node.top += shift
+      inherited.set(node, shift)
+      const groups = new Map()
+      ;(node.children || []).forEach(child => {
+        const key = directional ? child.dir : 'all'
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key).push(child)
+      })
+      groups.forEach((children, direction) => {
+        const component = directional && direction === CONSTANTS.LAYOUT_GROW_DIR.RIGHT ? 1 : 0
+        let remaining = children.reduce((sum, child) => sum + totals.get(child)[component], 0)
+        let preceding = 0
+        children.forEach(child => {
+          const own = totals.get(child)[component]
+          remaining -= own
+          siblingOffsets.set(child, preceding - remaining)
+          preceding += own
+        })
+      })
+    }, null, true)
+    return collect && typeof collect.then === 'function'
+      ? collect.then(completed => completed && position()) : position()
+  }
+
   updateChildren(children, prop, offset) {
     children.forEach(item => {
       item[prop] += offset
@@ -1052,8 +1098,18 @@ class Base {
       if (typeof line.hide === 'function') line.hide()
       return
     }
+    const nextPath = this.transformPath(path)
+    const dom = line.node
+    // Compare the live `d` attribute, not a private cache: other layouts,
+    // plugins or hide paths can rewrite the same path element outside this
+    // helper. Reading `d` is far cheaper than re-plotting an unchanged path.
+    const alreadyVisible = typeof line.visible === 'function' ? line.visible() : !(dom && dom.style.display === 'none')
+    if (dom && dom.getAttribute('d') === nextPath && alreadyVisible) {
+      style && style(line, childNode, true)
+      return
+    }
     if (typeof line.show === 'function') line.show()
-    line.plot(this.transformPath(path))
+    line.plot(nextPath)
     style && style(line, childNode, true)
   }
 

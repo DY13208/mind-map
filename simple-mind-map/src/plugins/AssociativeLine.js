@@ -208,7 +208,10 @@ class AssociativeLine {
   }
 
   // 渲染所有连线
-  renderAllLines() {
+  renderAllLines(metadata) {
+    // The whole relation layer already shares the canvas view transform.
+    // A view-only paint changes no endpoints or control points.
+    if (metadata && metadata.reason === 'view') return
     if (this.isNotRenderAllLines) {
       this.isNotRenderAllLines = false
       return

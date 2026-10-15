@@ -16,10 +16,11 @@ class LogicalStructure extends Base {
     if (this.mindMap.opt.openPerformance) {
       const generation = this.renderer._renderGeneration
       const cancelled = () => generation !== this.renderer._renderGeneration
-      this.computedBaseValue((...args) => walkLayoutInSlices(args, { cancelled })).then(completed => {
+      const walker = (...args) => walkLayoutInSlices(args, { cancelled })
+      this.computedBaseValue(walker).then(async completed => {
         if (!completed || cancelled()) return
-        this.computedTopValue()
-        this.adjustTopValue()
+        if (!(await this.computedTopValue(walker)) || cancelled()) return
+        if (!(await this.adjustTopValue(walker)) || cancelled()) return
         callback(this.root)
       }).catch(error => this.mindMap.opt.errorHandler('layout_error', error))
       return
@@ -104,8 +105,8 @@ class LogicalStructure extends Base {
   }
 
   //  遍历节点树计算节点的top
-  computedTopValue() {
-    walk(
+  computedTopValue(walker = walk) {
+    return walker(
       this.root,
       null,
       (node, parent, isRoot, layerIndex) => {
@@ -126,26 +127,12 @@ class LogicalStructure extends Base {
   }
 
   //  调整节点top
-  adjustTopValue() {
-    walk(
-      this.root,
-      null,
-      (node, parent, isRoot, layerIndex) => {
-        if (!node.getData('expand')) {
-          return
-        }
-        // 判断子节点所占的高度之和是否大于该节点自身，大于则需要调整位置
-        let difference =
-          node.childrenAreaHeight2 -
-          this.getMarginY(layerIndex + 1) * 2 -
-          node.height
-        if (difference > 0) {
-          this.updateBrothers(node, difference / 2)
-        }
-      },
-      null,
-      true
-    )
+  adjustTopValue(walker = walk) {
+    return this.adjustSiblingSubtrees((node, layerIndex) => {
+      if (!node.getData('expand')) return [0, 0]
+      const difference = node.childrenAreaHeight2 - this.getMarginY(layerIndex + 1) * 2 - node.height
+      return [Math.max(0, difference) / 2, 0]
+    }, false, walker)
   }
 
   //  更新兄弟节点的top

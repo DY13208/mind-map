@@ -72,6 +72,10 @@ export default {
     this.$bus.$on('demonstrate_jump', this.onJump)
     this.$bus.$on('exit_demonstrate', this.onExit)
   },
+  beforeDestroy() {
+    this.$bus.$off('demonstrate_jump', this.onJump)
+    this.$bus.$off('exit_demonstrate', this.onExit)
+  },
   methods: {
     enterDemoMode() {
       this.isEnterDemonstrate = true

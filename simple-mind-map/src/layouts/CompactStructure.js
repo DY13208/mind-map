@@ -321,12 +321,57 @@ class CompactStructure extends LogicalStructure {
           Math.max(segment.y1, segment.y2) > top &&
           Math.min(segment.y1, segment.y2) < bottom
       }
+      // Obstacle probes only ever need a node whose strict `left` bound is on
+      // the correct side of the candidate segment. Index each layout component
+      // by left once per depth so a wide sibling band cannot make every arm
+      // rescan the whole level. Order of the original visible list is untouched.
+      // Invariant: within one assignConnectorLanes call, node.left only grows
+      // (`route.childLeft += shift` moves children right by a positive shift),
+      // so cached left <= live left. The cached-left prefix is therefore a
+      // conservative superset of nodes matching the strict `segment > left`
+      // predicate, and hitsNode() still decides each candidate exactly.
+      const componentNodes = new Map()
+      levels.slice(0, depth + 2).flat().forEach(other => {
+        const otherComponent = this.getLayoutComponent(other)
+        if (!componentNodes.has(otherComponent)) componentNodes.set(otherComponent, [])
+        componentNodes.get(otherComponent).push(other)
+      })
+      const componentIndex = new Map()
+      componentNodes.forEach((nodes, otherComponent) => {
+        const decorated = nodes.map(other => ({ node: other, left: other.left }))
+        decorated.sort((a, b) => a.left - b.left)
+        componentIndex.set(otherComponent, { nodes: decorated.map(item => item.node), lefts: decorated.map(item => item.left) })
+      })
+      const leftBound = (lefts, value) => {
+        let low = 0
+        let high = lefts.length
+        while (low < high) {
+          const middle = (low + high) >> 1
+          if (lefts[middle] < value) low = middle + 1
+          else high = middle
+        }
+        return low
+      }
       ordered.forEach(route => {
         const { node, component } = route
         const placed = this.placedConnectorRoutes.filter(other => other.component === component)
         const visibleNodes = levels.slice(0, depth + 2).flat().filter(other => {
           return this.getLayoutComponent(other) === component
         })
+        const indexed = componentIndex.get(component) || { nodes: [], lefts: [] }
+        const sortedNodes = indexed.nodes
+        const sortedLefts = indexed.lefts
+        const childSet = new Set(route.children)
+        const hitsAnyObstacle = (segment, target) => {
+          const limit = segment.y1 === segment.y2
+            ? Math.max(segment.x1, segment.x2)
+            : segment.x1
+          for (let position = leftBound(sortedLefts, limit) - 1; position >= 0; position--) {
+            const other = sortedNodes[position]
+            if (other !== node && other !== target && hitsNode(segment, other)) return true
+          }
+          return false
+        }
         const expandBtnSize = alwaysShowExpandBtn && !notShowExpandBtn && depth > 0
           ? node.expandBtnSize || 0
           : 0
@@ -350,25 +395,27 @@ class CompactStructure extends LogicalStructure {
             })
           })
           visibleNodes.forEach(other => {
-            if (other === node || route.children.includes(other)) return
+            if (other === node || childSet.has(other)) return
             candidates.push(
               other.left - this.compactConfig.connectorMargin,
               other.left + other.width + this.compactConfig.connectorMargin
             )
           })
-          candidates.forEach(x => {
-            if (x < minX || x > maxX) return
+          for (const x of candidates) {
+            if (x < minX || x > maxX) continue
             const nearby = placed.some(other => {
               return route.minY < other.maxY && route.maxY > other.minY &&
                 Math.abs(x - other.busX) < this.compactConfig.connectorLaneGap
             })
-            if (nearby) return
+            if (nearby) continue
             route.busX = x
             const routeArms = arms(route)
-            const nodeCollisions = visibleNodes.filter(other => {
-              return other !== node && !route.children.includes(other) &&
-                hitsNode({ x1: x, y1: route.minY, x2: x, y2: route.maxY }, other)
-            }).length
+            const verticalSegment = { x1: x, y1: route.minY, x2: x, y2: route.maxY }
+            let nodeCollisions = 0
+            for (let position = leftBound(sortedLefts, x) - 1; position >= 0; position--) {
+              const other = sortedNodes[position]
+              if (other !== node && !childSet.has(other) && hitsNode(verticalSegment, other)) nodeCollisions++
+            }
             const lineCollisions = placed.reduce((count, other) => {
               const otherArms = arms(other)
               return count + otherArms.reduce((sum, arm) => sum + crossingCount(route, arm), 0) +
@@ -377,7 +424,9 @@ class CompactStructure extends LogicalStructure {
             const collisions = nodeCollisions + lineCollisions
             const score = nodeCollisions * 100000 + lineCollisions * 10000 + Math.abs(x - middle)
             if (!best || score < best.score) best = { x, score, collisions }
-          })
+            // All score terms are nonnegative, so zero is the global minimum.
+            if (score === 0) break
+          }
           if (best && best.collisions === 0) break
           if (route.children.some(child => child.hasCustomPosition())) break
           const previousX = placed.reduce((max, other) => {
@@ -409,7 +458,6 @@ class CompactStructure extends LogicalStructure {
           offsets.push(-distance, distance)
         }
         const chooseOffset = (arm, target, isSource) => {
-          const obstacles = visibleNodes.filter(other => other !== node && other !== target)
           for (const offset of offsets) {
             const candidate = { ...arm, y: arm.y + offset }
             if (existingArms.some(other => armConflict(candidate, other))) continue
@@ -432,7 +480,7 @@ class CompactStructure extends LogicalStructure {
                     { x1: stubX, y1: arm.y, x2: arm.to, y2: arm.y }
                   ]
               : [{ x1: arm.from, y1: arm.y, x2: arm.to, y2: arm.y }]
-            if (segments.some(segment => obstacles.some(other => hitsNode(segment, other)))) {
+            if (segments.some(segment => hitsAnyObstacle(segment, target))) {
               continue
             }
             if (placed.some(other => segments.some(segment => {

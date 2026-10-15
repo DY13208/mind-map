@@ -346,6 +346,8 @@ export default {
     collapseToolbar: '收起顶部工具栏',
     expandToolbar: '展开顶部工具栏',
     undo: '回退',
+    undoRange: '可撤销最近 {count} 步',
+    undoRangeLimited: '可撤销最近 {count} 步；更早历史已达到存储上限。导出和手动保存仍可用。',
     redo: '前进',
     insertSiblingNode: '同级节点',
     insertChildNode: '子节点',

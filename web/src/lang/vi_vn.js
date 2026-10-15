@@ -330,6 +330,8 @@ export default {
     collapseToolbar: 'Thu gọn thanh công cụ trên',
     expandToolbar: 'Mở rộng thanh công cụ trên',
     undo: 'Hoàn tác',
+    undoRange: 'Có thể hoàn tác {count} bước gần nhất',
+    undoRangeLimited: 'Có thể hoàn tác {count} bước gần nhất. Lịch sử cũ đã đạt giới hạn lưu trữ. Xuất và lưu thủ công vẫn khả dụng.',
     redo: 'Làm lại',
     insertSiblingNode: 'Nút cùng cấp',
     insertChildNode: 'Nút con',

@@ -1,6 +1,7 @@
 const assert = require('assert')
 const http = require('http')
 const { randomUUID } = require('crypto')
+const isolatedConfig = require('../../tests/performance/isolation.cjs').readConfig()
 
 function assertIsolatedDatabaseEnvironment() {
   const errors = []
@@ -10,8 +11,8 @@ function assertIsolatedDatabaseEnvironment() {
   if (!['127.0.0.1', 'localhost', '::1'].includes(String(process.env.PGHOST || ''))) {
     errors.push('PGHOST must point to loopback')
   }
-  if (String(process.env.PGPORT || '') !== '25492') {
-    errors.push('PGPORT must be the isolated Compose port 25492')
+  if (String(process.env.PGPORT || '') !== String(isolatedConfig.pg.port)) {
+    errors.push('PGPORT must match the owned isolated Compose configuration')
   }
   if (String(process.env.PGDATABASE || '') !== 'mcp_incremental_test') {
     errors.push('PGDATABASE must be mcp_incremental_test')
@@ -569,7 +570,7 @@ async function main() {
   }
   try {
     const pool = storage.getPool()
-    assert.strictEqual(Number(pool.options.port), 25492, 'storage pool is not configured for PG25492')
+    assert.strictEqual(Number(pool.options.port), isolatedConfig.pg.port, 'storage pool is not configured for the owned isolated PG')
     await storage.initSchema()
     const identity = await pool.query('select current_database() as database')
     assert.strictEqual(identity.rows[0].database, 'mcp_incremental_test')

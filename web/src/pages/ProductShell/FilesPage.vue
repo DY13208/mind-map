@@ -21,7 +21,7 @@
       :show-import="mode === 'files' || mode === 'folder'"
       :show-batch="supportsBatchSelect"
       :select-mode="selectMode"
-      :hide-opened-sort="isRealFilesMode"
+      :hide-opened-sort="isRealFilesMode && !isTeamView"
       @create-room="createRoom"
       @create-folder="createFolder"
       @import="openImport"
@@ -229,6 +229,7 @@ import { isNavigationFailure, NavigationFailureType } from 'vue-router'
 import roomService from '@/services/roomService'
 import folderService from '@/services/folderService'
 import teamService from '@/services/teamService'
+import { getCurrentUser } from '@/utils/auth'
 import { getFileExport, replaceFileTree } from '@/utils/fileApi'
 import EmptyState from './components/EmptyState.vue'
 import FileToolbar from './components/FileToolbar.vue'
@@ -325,6 +326,8 @@ export default {
       searchTimer: null,
       teams: [],
       teamsLoading: false,
+      metadataKey: '',
+      metadataAt: 0,
       selectMode: false,
       selectedRoomKeys: [],
       selectedFolderIds: [],
@@ -443,7 +446,6 @@ export default {
     },
     isRealFilesMode() {
       return (
-        !this.isTeamView &&
         (this.mode === 'files' ||
           this.mode === 'folder' ||
           this.mode === 'shared')
@@ -504,14 +506,10 @@ export default {
       return this.folder ? this.folder.id : null
     },
     childFolders() {
-      return this.folders
-        .filter(folder => (folder.parentId || null) === this.currentParentId)
-        .map(folder => ({
-          ...folder,
-          itemCount:
-            Number(folder.roomCount || 0) +
-            this.folders.filter(child => child.parentId === folder.id).length
-        }))
+      const counts = new Map()
+      this.folders.forEach(folder => counts.set(folder.parentId, (counts.get(folder.parentId) || 0) + 1))
+      return this.folders.filter(folder => (folder.parentId || null) === this.currentParentId)
+        .map(folder => ({ ...folder, itemCount: Number(folder.roomCount || 0) + (counts.get(folder.id) || 0) }))
     },
     filteredFolders() {
       const q = this.search.trim().toLowerCase()
@@ -536,19 +534,7 @@ export default {
               .includes(q)
         )
       })
-      if (!this.isTeamView) return rooms
-      const direction = this.sort === 'title' ? 1 : -1
-      return rooms.slice().sort((left, right) => {
-        if (this.sort === 'title') {
-          return String(left.title || '').localeCompare(
-            String(right.title || ''),
-            'zh-CN'
-          )
-        }
-        return direction *
-          (new Date(left.updatedAt || 0).getTime() -
-            new Date(right.updatedAt || 0).getTime())
-      })
+      return rooms
     },
     emptyTitle() {
       if (this.search || this.roleFilter) return '没有搜索结果'
@@ -585,6 +571,11 @@ export default {
         this.load({ reset: true, keepPage: true })
       }, 300)
     },
+    roleFilter() {
+      if (!this.isTeamView) return
+      this.page = 1
+      this.load({ reset: true, keepPage: true })
+    },
     sort() {
       if (!this.isRealFilesMode) return
       this.page = 1
@@ -602,10 +593,12 @@ export default {
     this.resetPage()
   },
   beforeDestroy() {
+    clearTimeout(this.searchTimer)
     this.requestId++
   },
   methods: {
     resetPage() {
+      this.metadataAt = 0
       this.clearSelection()
       this.selectMode = false
       this.search = ''
@@ -793,6 +786,7 @@ export default {
           }
         }
         this.clearSelection()
+        this.metadataAt = 0
         await this.load({ reset: true, keepPage: true })
         this.summarizeBatchResult(ok, fail, '已删除')
       } catch (error) {
@@ -820,16 +814,22 @@ export default {
       this.loading = reset
       this.error = ''
       try {
-        if (mode === 'files' || (mode === 'folder' && this.selectedTeamId)) {
+        const user = getCurrentUser()
+        const metadataKey = JSON.stringify([user && user.id, user && user.corpId, this.selectedTeamId || 'personal'])
+        const refreshMetadata = metadataKey !== this.metadataKey || Date.now() - this.metadataAt > 30000
+        if (refreshMetadata && (mode === 'files' || (mode === 'folder' && this.selectedTeamId))) {
           this.teamsLoading = true
           try {
-            this.teams = await teamService.listSpaces()
+            const teams = await teamService.listSpaces()
+            if (request !== this.requestId) return
+            this.teams = teams
           } catch (error) {
+            if (request !== this.requestId) return
             this.teams = []
             // 团队接口异常不能阻断个人文件；但用户正在访问某个团队时需要明确报错。
             if (this.selectedTeamId) throw error
           } finally {
-            this.teamsLoading = false
+            if (request === this.requestId) this.teamsLoading = false
           }
           if (
             this.selectedTeamId &&
@@ -838,11 +838,13 @@ export default {
             throw new Error('团队不存在、已删除或你已无权访问')
           }
         }
-        const folders = this.isTeamView
+        const folders = refreshMetadata ? (this.isTeamView
           ? await teamService.listFolders(this.selectedTeamId)
-          : await folderService.listFolders()
+          : await folderService.listFolders()) : this.folders
         if (request !== this.requestId) return
         this.folders = folders
+        this.metadataKey = metadataKey
+        this.metadataAt = Date.now()
         if (
           mode === 'folder' &&
           !this.folders.some(folder => folder.id === folderId)
@@ -863,29 +865,16 @@ export default {
         }
         if (this.isRealFilesMode) {
           filters.q = this.search.trim()
-          filters.sort = this.sort === 'lastOpenedAt' ? 'updatedAt' : this.sort
+          filters.role = this.roleFilter
+          filters.sort = this.sort === 'lastOpenedAt' && !this.isTeamView ? 'updatedAt' : this.sort
           filters.order = this.sort === 'title' ? 'asc' : 'desc'
           filters.limit = this.limit
           filters.offset = Math.max(0, (this.page - 1) * this.limit)
         }
         let rooms = this.isTeamView
-          ? await teamService.listRooms(this.selectedTeamId)
+          ? await teamService.listRoomsPage(this.selectedTeamId, filters)
           : await roomService.listRooms(filters)
         if (request !== this.requestId) return
-        if (this.isTeamView) {
-          const list = rooms.list || rooms
-          const q = this.search.trim().toLowerCase()
-          rooms = list.filter(room => {
-            if (mode === 'folder') {
-              if (String(room.folderId || '') !== String(folderId || '')) {
-                return false
-              }
-            } else if (!q && room.folderId) {
-              return false
-            }
-            return true
-          })
-        }
         const list = rooms.list || rooms
         const total = Number(rooms.total != null ? rooms.total : list.length)
         this.total = total
@@ -931,6 +920,7 @@ export default {
       this.busy = true
       try {
         await action()
+        this.metadataAt = 0
         if (message) this.$message.success(message)
         await this.load({ reset: true, keepPage: true })
       } catch (error) {
@@ -1037,6 +1027,7 @@ export default {
       this.importVisible = true
     },
     async onImported(result) {
+      this.metadataAt = 0
       await this.load({ reset: true, keepPage: true })
       if (result && result.mode === 'folder' && result.folderId) {
         const route = { path: `${this.filesBasePath}/folder/` + result.folderId }
@@ -1088,6 +1079,7 @@ export default {
       this.deleteFolderVisible = true
     },
     async onFolderDeleted(result) {
+      this.metadataAt = 0
       this.clearSelection()
       if (this.mode === 'folder' && result.deletedFolderIds.includes(this.$route.params.id)) {
         await this.$router.push({ path: this.filesBasePath, query: this.$route.query })
@@ -1110,6 +1102,7 @@ export default {
           )
           this.batchAction = null
           this.clearSelection()
+          this.metadataAt = 0
           await this.load({ reset: true, keepPage: true })
           this.summarizeBatchResult(ok, fail, '已移动')
         } catch (error) {
@@ -1156,6 +1149,7 @@ export default {
           )
           this.batchAction = null
           this.clearSelection()
+          this.metadataAt = 0
           await this.load({ reset: true, keepPage: true })
           this.summarizeBatchResult(ok, fail, '已移入团队')
         } catch (error) {
@@ -1223,6 +1217,7 @@ export default {
           await roomService.deleteRoom(createdRoomKey).catch(() => {})
           throw error
         }
+        this.metadataAt = 0
         await this.load({ reset: true, keepPage: true })
         this.$message.success(`已创建副本「${title}」`)
       } catch (error) {

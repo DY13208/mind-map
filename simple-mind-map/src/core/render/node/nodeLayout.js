@@ -2,6 +2,35 @@ import { CONSTANTS } from '../../../constants/constant'
 import { G, Rect } from '@svgdotjs/svg.js'
 import { createForeignObjectNode } from '../../../utils/index'
 
+// svg.js translate() 默认以 center 为原点，内部会走
+// getOrigin -> element.bbox() -> getBBox()，对已经挂到画布上的节点每次都会
+// 触发布局强制回流。纯平移与原点无关，这里显式指定数值原点 [0,0]，relative
+// 合并语义不变（矩阵 a/b/c/d 保留，仅 e/f 变化），同时不读取任何几何。
+const translateWithoutBbox = (element, x, y) =>
+  element.transform({ translate: [x, y], origin: [0, 0] }, true)
+
+// textContentNested 里是否除文本外还有可能溢出声明尺寸的内容。
+const hasExtraTextContent = node =>
+  !!node._prefixData ||
+  !!node._postfixData ||
+  !!(node._iconData && node._iconData.length) ||
+  !!node._hyperlinkData ||
+  !!node._mapRefData ||
+  !!node._noteData ||
+  !!node._attachmentData ||
+  !!(node._tagData && node._tagData.length) ||
+  node.mindMap.nodeInnerPrefixList.some(item => node[`_${item.name}Data`]) ||
+  node.mindMap.nodeInnerPostfixList.some(item => node[`_${item.name}Data`])
+
+// 只有富文本 foreignObject 这一种内容时，textContentNested.bbox() 与 getNodeRect
+// 已经算好的 _rectInfo 完全一致，可直接复用以免触发 getBBox；只要存在前后缀、
+// 图标、标签、超链接、备注、附件、子脑图等可能溢出的内容，就保留原始 bbox。
+const canUseRectInfoForTextContent = node =>
+  !!node.getData('richText') &&
+  !!node._textData &&
+  !!node._textData.nodeContent &&
+  !hasExtraTextContent(node)
+
 // 根据图片放置位置返回图片和文本的间距值
 function getImgTextMarin(dir, imgWidth, textWidth, imgHeight, textHeight) {
   // 图片和文字节点的间距
@@ -214,7 +243,7 @@ function customNodeContentRealtimeLayout() {
   // 节点形状
   this.shapeNode = this.shapeInstance.createShape()
   this.shapeNode.addClass('smm-node-shape')
-  this.shapeNode.translate(halfBorderWidth, halfBorderWidth)
+  translateWithoutBbox(this.shapeNode, halfBorderWidth, halfBorderWidth)
   this.style.shape(this.shapeNode)
   this.group.add(this.shapeNode)
   // 渲染一个隐藏的矩形区域，用来触发展开收起按钮的显示
@@ -258,7 +287,7 @@ function layout() {
   // 节点形状
   this.shapeNode = this.shapeInstance.createShape()
   this.shapeNode.addClass('smm-node-shape')
-  this.shapeNode.translate(halfBorderWidth, halfBorderWidth)
+  translateWithoutBbox(this.shapeNode, halfBorderWidth, halfBorderWidth)
   this.style.shape(this.shapeNode)
   this.group.add(this.shapeNode)
   // 渲染一个隐藏的矩形区域，用来触发展开收起按钮的显示
@@ -475,7 +504,16 @@ function layout() {
   })
   this.group.add(textContentNested)
   // 文字内容整体
-  const { width: bboxWidth, height: bboxHeight } = textContentNested.bbox()
+  let bboxWidth
+  let bboxHeight
+  if (canUseRectInfoForTextContent(this)) {
+    bboxWidth = this._rectInfo.textContentWidth
+    bboxHeight = this._rectInfo.textContentHeight
+  } else {
+    const bbox = textContentNested.bbox()
+    bboxWidth = bbox.width
+    bboxHeight = bbox.height
+  }
   let translateX = 0
   let translateY = 0
   switch (imgPlacement) {
@@ -502,7 +540,7 @@ function layout() {
       translateY = height / 2 - bboxHeight / 2
       break
   }
-  textContentNested.translate(translateX, translateY)
+  translateWithoutBbox(textContentNested, translateX, translateY)
   this.addHoverNode(width, height)
   // 评论：右上角融合标签，不占文字行宽度；内容顶部用于决定标签是否上抬
   if (this.renderCommentTab) {

@@ -1,7 +1,6 @@
 import {
   copyRenderTree,
   simpleDeepClone,
-  throttle,
   isSameObject,
   transformTreeDataToObject
 } from '../../utils'
@@ -9,6 +8,7 @@ import { ERROR_TYPES } from '../../constants/constant'
 import pkg from '../../../package.json'
 import { undoTrace } from '../../utils/collabTrace'
 import { isPersonalViewCommand } from '../../utils/personalViewCommands'
+import { createContentTreeView } from '../../utils/contentTreeView'
 
 //  命令类
 class Command {
@@ -19,14 +19,24 @@ class Command {
     this.commands = {}
     this.history = [] // 字符串形式存储
     this.activeHistoryIndex = 0
+    this._historyByteLengths = []
+    this.historyBytes = 0
+    this._historyDiscardedEntries = 0
+    this._execDepth = 0
+    this._commandNames = []
+    this._contentChange = null
+    this.contentRevision = 0
     // 注册快捷键
     this.registerShortcutKeys()
     this.originAddHistory = this.addHistory.bind(this)
-    this.addHistory = throttle(
-      this.addHistory,
-      this.mindMap.opt.addHistoryTime,
-      this
-    )
+    this._historyTimer = null
+    this.addHistory = (...args) => {
+      if (this._historyTimer || this.mindMap._destroyed) return
+      this._historyTimer = setTimeout(() => {
+        try { this.originAddHistory(...args) }
+        finally { this._historyTimer = null }
+      }, this.mindMap.opt.addHistoryTime)
+    }
     // 是否暂停收集历史数据
     this.isPause = false
   }
@@ -41,11 +51,36 @@ class Command {
     this.isPause = false
   }
 
+  destroy() {
+    clearTimeout(this._historyTimer)
+    this._historyTimer = null
+    this.isPause = true
+    this.clearHistory()
+    this.commands = {}
+    this._contentChange = null
+    this._contentView = null
+    this._contentViewRoot = null
+    this._commandNames = []
+  }
+
   //  清空历史数据
   clearHistory() {
     this.history = []
+    this._historyByteLengths = []
+    this.historyBytes = 0
+    this._historyDiscardedEntries = 0
     this.activeHistoryIndex = 0
-    this.mindMap.emit('back_forward', 0, 0)
+    this.mindMap.emit('back_forward', 0, 0, this.getHistoryStatus())
+  }
+
+  getHistoryStatus() {
+    const maxCount = Math.max(1, Number(this.mindMap.opt.maxHistoryCount) || 100)
+    const maxBytes = Math.max(1, Number(this.mindMap.opt.maxHistoryBytes) || 32 * 1024 * 1024)
+    const currentTooLarge = (this._historyByteLengths[this.activeHistoryIndex] || 0) > maxBytes
+    return { undoSteps: this.activeHistoryIndex, redoSteps: Math.max(0, this.history.length - this.activeHistoryIndex - 1),
+      retainedEntries: this.history.length, historyBytes: this.historyBytes, maxCount, maxBytes,
+      discardedEntries: this._historyDiscardedEntries, currentTooLarge,
+      limited: currentTooLarge || this._historyDiscardedEntries > 0 }
   }
 
   //  注册快捷键
@@ -76,6 +111,7 @@ class Command {
 
   //  执行命令
   exec(name, ...args) {
+    if (this.mindMap._destroyed) return
     if (this.mindMap.opt.readonly) {
       const data = name === 'SET_NODE_DATA' ? args[1] : null
       const allowed = {
@@ -102,6 +138,19 @@ class Command {
       }
     }
     if (this.commands[name]) {
+      const contentCommand = !['BACK', 'FORWARD', 'SET_NODE_ACTIVE', 'CLEAR_ACTIVE_NODE', 'SELECT_ALL', 'GO_TARGET_NODE', 'RETURN_CENTER'].includes(name) && !isPersonalViewCommand(name, args)
+      const before = new Map()
+      const collectBefore = value => {
+        if (Array.isArray(value)) value.forEach(collectBefore)
+        else if (value && value.nodeData) before.set(value, { data: { ...value.nodeData.data }, parent: value.parent })
+      }
+      if (contentCommand && this.usesV2History()) {
+        args.forEach(collectBefore)
+        if (!before.size) (this.mindMap.renderer.activeNodeList || []).forEach(collectBefore)
+      }
+      this._execDepth++
+      this._commandNames.push(name)
+      try {
       this.mindMap.emit('beforeExecCommand', name, ...args)
       if (name === 'BACK' || name === 'FORWARD') {
         const cooperate = this.mindMap.cooperate
@@ -118,6 +167,22 @@ class Command {
         fn(...args)
       })
       this.mindMap.emit('afterExecCommand', name, ...args)
+      if (contentCommand) {
+        const collect = value => {
+          if (Array.isArray(value)) value.forEach(collect)
+          else if (value && value.nodeData) {
+            const previous = before.get(value)
+            const data = value.nodeData.data
+            if (!previous || previous.parent !== value.parent ||
+              Object.keys(data).some(key => data[key] !== previous.data[key]) ||
+              Object.keys(previous.data).some(key => !(key in data))) this.recordContentChange({ nodes: [value] })
+          }
+        }
+        args.forEach(collect)
+        if (!args.some(arg => arg && (arg.nodeData || Array.isArray(arg)))) {
+          ;(this.mindMap.renderer.activeNodeList || []).forEach(collect)
+        }
+      }
       // Personal expand state is persisted separately. Serializing a whole
       // room snapshot here is costly and must not create a content undo step.
       if (this.mindMap.cooperate && this.mindMap.cooperate.httpCollabMode &&
@@ -129,8 +194,87 @@ class Command {
       ) {
         return
       }
-      this.addHistory()
+      if (!this.usesV2History()) this.addHistory()
+      } finally {
+        this._commandNames.pop()
+        this._execDepth--
+        if (!this._execDepth) this.flushContentChange()
+      }
     }
+  }
+
+  usesV2History() {
+    return !!(this.mindMap.cooperate && this.mindMap.cooperate.collabV2Adapter)
+  }
+
+  isCountableNode(node) {
+    for (let current = node; current; current = current.parent) {
+      if (current.isGeneralization) return false
+    }
+    return true
+  }
+
+  recordContentChange({ nodes = [], added = [], removed = [], source = 'local', countable = true } = {}) {
+    if (!this.usesV2History() || this.mindMap._destroyed) return
+    const cooperate = this.mindMap.cooperate
+    if (source === 'local' && (cooperate.isApplyingRemote || cooperate.isSetData || cooperate.httpReplacing)) return
+    if (!this._contentChange) this._contentChange = { nodes: new Map(), added: [], removed: [], source, commands: new Set() }
+    // A hydrated range and the local command that requested it can finish in
+    // one turn. Keep that local edit eligible for collaboration persistence.
+    if (source === 'local') this._contentChange.source = 'local'
+    ;(this._commandNames.length ? this._commandNames : [source === 'remote' ? 'REMOTE_APPLY' : 'ASYNC_APPLY']).forEach(name => this._contentChange.commands.add(name))
+    const wrap = node => {
+      const ordinary = countable && this.isCountableNode(node)
+      return { tree: node.nodeData || node, countable: ordinary }
+    }
+    nodes.forEach(node => {
+      const entry = wrap(node)
+      if (entry.tree && entry.tree.data) this._contentChange.nodes.set(entry.tree.data.uid, entry)
+    })
+    this._contentChange.added.push(...added.map(wrap))
+    this._contentChange.removed.push(...removed.map(wrap))
+    if (!this._execDepth && !this.isPause) {
+      Promise.resolve().then(() => { if (!this._execDepth) this.flushContentChange() })
+    }
+  }
+
+  notifyTreeChange(commandName = 'SET_DATA') {
+    if (!this.usesV2History() || this.mindMap._destroyed) return
+    this._contentChange = null
+    const root = this.mindMap.renderer.renderTree
+    this._contentViewRoot = root
+    this._contentView = createContentTreeView(root, pkg.version)
+    const change = { full: true, source: 'load', commands: [commandName],
+      revision: ++this.contentRevision, contentRevision: this.contentRevision }
+    this.mindMap.emit('content_change', change)
+    this.mindMap.emit('data_change', this._contentView, change)
+  }
+
+  flushContentChange() {
+    if (this._execDepth || this.isPause || this.mindMap._destroyed || !this._contentChange) return
+    const pending = this._contentChange
+    this._contentChange = null
+    if (!pending.nodes.size && !pending.added.length && !pending.removed.length) return
+    const affected = new Set(pending.nodes.keys())
+    const visit = entry => {
+      if (!entry || !entry.data) return
+      affected.add(entry.data.uid)
+      ;(entry.children || []).forEach(visit)
+    }
+    ;[...pending.added, ...pending.removed].forEach(entry => visit(entry.tree))
+    const change = { incremental: true, revision: ++this.contentRevision, contentRevision: this.contentRevision,
+      commands: Array.from(pending.commands), affectedUids: Array.from(affected), source: pending.source,
+      nodes: Array.from(pending.nodes.values()), added: pending.added, removed: pending.removed }
+    this.mindMap.emit('before_content_change', change)
+    const expose = entry => ({ tree: createContentTreeView(entry.tree, pkg.version), countable: entry.countable })
+    const publicChange = { ...change, nodes: change.nodes.map(expose), added: change.added.map(expose), removed: change.removed.map(expose) }
+    this.mindMap.emit('content_change', publicChange)
+    const root = this.mindMap.renderer.renderTree
+    if (this._contentViewRoot !== root) {
+      this._contentViewRoot = root
+      this._contentView = createContentTreeView(root, pkg.version)
+    }
+    this.mindMap.emit('data_change', this._contentView, publicChange)
   }
 
   //  添加命令
@@ -162,6 +306,11 @@ class Command {
 
   //  添加回退数据
   addHistory() {
+    if (this.mindMap._destroyed) return
+    if (this.usesV2History()) {
+      this.flushContentChange()
+      return
+    }
     if (this.mindMap.opt.readonly || this.isPause) {
       return
     }
@@ -176,18 +325,30 @@ class Command {
     }
     this.emitDataUpdatesEvent(lastDataStr, dataStr)
     // 删除当前历史指针后面的数据
+    if (this._historyByteLengths.length !== this.history.length) {
+      this._historyByteLengths = this.history.map(value => new TextEncoder().encode(value).length)
+    }
     this.history = this.history.slice(0, this.activeHistoryIndex + 1)
+    this._historyByteLengths = this._historyByteLengths.slice(0, this.activeHistoryIndex + 1)
     this.history.push(dataStr)
-    // 历史记录数超过最大数量
-    if (this.history.length > this.mindMap.opt.maxHistoryCount) {
+    this._historyByteLengths.push(new TextEncoder().encode(dataStr).length)
+    this.historyBytes = this._historyByteLengths.reduce((total, bytes) => total + bytes, 0)
+    const maxCount = Math.max(1, Number(this.mindMap.opt.maxHistoryCount) || 100)
+    const maxBytes = Math.max(1, Number(this.mindMap.opt.maxHistoryBytes) || 32 * 1024 * 1024)
+    // One current state remains usable even if that single snapshot exceeds
+    // the byte budget. Older states are evicted oldest-first.
+    while (this.history.length > 1 && (this.history.length > maxCount || this.historyBytes > maxBytes)) {
       this.history.shift()
+      this.historyBytes -= this._historyByteLengths.shift()
+      this._historyDiscardedEntries++
     }
     this.activeHistoryIndex = this.history.length - 1
     this.mindMap.emit('data_change', data)
     this.mindMap.emit(
       'back_forward',
       this.activeHistoryIndex,
-      this.history.length
+      this.history.length,
+      this.getHistoryStatus()
     )
   }
 
@@ -202,7 +363,8 @@ class Command {
       this.mindMap.emit(
         'back_forward',
         this.activeHistoryIndex,
-        this.history.length
+        this.history.length,
+        this.getHistoryStatus()
       )
       const dataStr = this.history[this.activeHistoryIndex]
       const data = JSON.parse(dataStr)
@@ -223,7 +385,8 @@ class Command {
       this.mindMap.emit(
         'back_forward',
         this.activeHistoryIndex,
-        this.history.length
+        this.history.length,
+        this.getHistoryStatus()
       )
       const dataStr = this.history[this.activeHistoryIndex]
       const data = JSON.parse(dataStr)

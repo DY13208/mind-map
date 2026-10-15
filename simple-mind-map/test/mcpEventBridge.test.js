@@ -624,6 +624,11 @@ function makeSyncPage(afterRevision, headVersion, clientId, pageSize) {
 }
 
 async function createConnectedAdapter(options = {}) {
+  // Node 26 exposes process-local sessionStorage. Independent adapter fixtures
+  // share this synthetic room name, so isolate their persisted watermark too.
+  if (typeof sessionStorage !== 'undefined') {
+    sessionStorage.removeItem('mind-map-collab-v2-rev:adapter-room')
+  }
   let clientId = 'adapter-client-1234'
   let serverHead = Number(options.initialHead || 1)
   let reloadCount = 0

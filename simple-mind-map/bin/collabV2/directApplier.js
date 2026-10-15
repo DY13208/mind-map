@@ -1,4 +1,4 @@
-const { generateKeyBetween, generateNKeysBetween, isPaddedIndex, isValidPosition } = require('../fractionalIndex')
+const { generateKeyBetween, generateNKeysBetween, isPaddedIndex, isValidPosition, comparePositions } = require('../fractionalIndex')
 const { mergeNodeDataLww, expandInverseByGroups } = require('../fieldMerge')
 const {
   parentDeletedError,
@@ -132,10 +132,10 @@ function clampIndex(index, max) {
   return Math.min(Math.floor(n), max)
 }
 
-async function assertNotSop(store, uid, payload, type) {
+async function assertNotSop(store, uid, payload, type, target) {
   if (payload && payload.confirm_sop_change === true) return
   if (!uid) return
-  const live = await store.getLive(uid)
+  const live = target || await store.getLive(uid)
   const trace = inspectSopChange({
     type: type || 'node.update',
     payload,
@@ -330,7 +330,7 @@ async function applyUpdate(store, op, version) {
   if (!uid) throw nodeDeletedError(uid)
   const live = await store.getLive(uid)
   if (!live) throw nodeDeletedError(uid)
-  await assertNotSop(store, uid, payload, type)
+  await assertNotSop(store, uid, payload, type, live)
   assertExpectedNodeData(live.data || {}, payload)
   const structural =
     payload.parentUid !== undefined ||
@@ -497,6 +497,7 @@ async function applyRestore(store, op, version) {
   const payload = op.payload || {}
   let rows = normalizeRestoreRows(payload)
   const uid =
+    (!rows.length && payload.uid != null && String(payload.uid)) ||
     (rows.some(row => row.uid === String(payload.uid || '')) && String(payload.uid)) ||
     (rows[0] && rows[0].uid)
   if (!rows.length) {
@@ -526,13 +527,15 @@ async function applyRestore(store, op, version) {
     parentFallback = true
     if (!parent) throw parentDeletedError(parentUid)
   }
-  const stamp = await placeAmongSiblings(
-    store,
-    parent.uid,
-    root.uid,
-    payload.index,
-    version
-  )
+  let restoredStamp = null
+  if (payload.index == null && !parentFallback && isValidPosition(root.position)) {
+    const kids = await store.listChildren(parent.uid)
+    if (kids.every(kid => isValidPosition(kid.position) && kid.position !== root.position)) {
+      const next = kids.findIndex(kid => comparePositions(kid.position, root.position, kid.uid, root.uid) > 0)
+      restoredStamp = { position: root.position, index: next < 0 ? kids.length : next, reindexed: false }
+    }
+  }
+  const stamp = restoredStamp || await placeAmongSiblings(store, parent.uid, root.uid, payload.index, version)
   const revived = rows.map(row => {
     const next = {
       uid: row.uid,

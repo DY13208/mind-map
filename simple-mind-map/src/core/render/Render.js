@@ -10,6 +10,8 @@ import Timeline from '../../layouts/Timeline'
 import VerticalTimeline from '../../layouts/VerticalTimeline'
 import Fishbone from '../../layouts/Fishbone'
 import TextEdit from './TextEdit'
+import ViewportIndex from '../../utils/viewportIndex'
+import { walkLayoutInSlices, runWorkInSlices } from '../../utils/layoutSlices'
 import {
   copyNodeTree,
   simpleDeepClone,
@@ -38,8 +40,6 @@ import {
   checkIsNodeStyleDataKey,
   formatGetNodeGeneralization,
   sortNodeList,
-  throttle,
-  debounce,
   checkClipboardReadEnable,
   isNodeNotNeedRenderData
 } from '../../utils'
@@ -125,12 +125,19 @@ class Render {
     // 用于缓存节点
     this.nodeCache = {}
     this.lastNodeCache = {}
+    // Only current model instances belong here; detached/retired generations
+    // must never be returned to commands or selection caches.
+    this.nodeIndex = new Map()
+    this._nodeIndexRoot = null
     // 收集触发render的来源
     this.renderSourceList = []
     // 收集render的回调函数
     this.renderCallbackList = []
     // 当前激活的节点列表
     this.activeNodeList = []
+    this._activeNodeIndexes = new Map()
+    this._activeIndexList = this.activeNodeList
+    this._activeIndexLength = 0
     // 防抖定时器
     this.emitNodeActiveEventTimer = null
     this.renderTimer = null
@@ -278,6 +285,7 @@ class Render {
 
   // 重新设置思维导图数据
   setData(data) {
+    if (this._destroyed) return
     const cooperate = this.mindMap.cooperate
     if (cooperate && cooperate._v2UndoActive && !cooperate._v2UndoAllowReplace) {
       undoFullTreeForbidden('Render.setData', {
@@ -291,6 +299,8 @@ class Render {
       }
       return
     }
+    this.cancelRender()
+    this._viewportIndex = null
     this.renderTree = data || null
   }
 
@@ -315,26 +325,37 @@ class Render {
       this.setRootNodeCenter()
     })
     // 性能模式
-    const onViewDataChange = throttle(() => {
+    const paintView = () => {
       if (!this.renderTree) {
         return
       }
-      if (this.root) {
+      if (this.root && this._viewportIndex && !this.isRendering) {
         this.mindMap.emit('node_tree_render_start')
-        this.root.render(
-          () => {
-            this.mindMap.emit('node_tree_render_end')
-          },
-          false,
-          true
-        )
+        this.paintViewport().then(completed => {
+          if (completed) this.mindMap.emit('node_tree_render_end', { reason: 'view', layoutEpoch: this._layoutEpoch || 0 })
+        }).catch(error => this.mindMap.opt.errorHandler('render_error', error))
       }
-    }, performanceConfig.time)
+    }
+    const onViewDataChange = () => {
+      if (this._viewRenderTimer || this._destroyed) return
+      this._viewRenderTimer = setTimeout(() => {
+        this._viewRenderTimer = null
+        if (!this._destroyed) paintView()
+      }, performanceConfig.time)
+    }
     if (openPerformance) {
       this.mindMap.on('view_data_change', onViewDataChange)
     }
     // 文本编辑时实时更新节点大小
-    this.onNodeTextEditChange = debounce(this.onNodeTextEditChange, 100, this)
+    const textEditChange = this.onNodeTextEditChange.bind(this)
+    this.onNodeTextEditChange = data => {
+      clearTimeout(this._nodeTextEditChangeTimer)
+      if (this._destroyed) return
+      this._nodeTextEditChangeTimer = setTimeout(() => {
+        this._nodeTextEditChangeTimer = null
+        if (!this._destroyed) textEditChange(data)
+      }, 100)
+    }
     if (openRealtimeRenderOnNodeTextEdit) {
       this.mindMap.on('node_text_edit_change', this.onNodeTextEditChange)
     }
@@ -387,7 +408,8 @@ class Render {
     if (node) {
       this.mindMap.emit('node_tree_render_start')
       node.render(() => {
-        this.mindMap.emit('node_tree_render_end')
+        if (this.mindMap.opt.openPerformance) this.buildViewportIndex()
+        this.mindMap.emit('node_tree_render_end', { reason: 'export', layoutEpoch: this._layoutEpoch || 0 })
       }, true)
     }
   }
@@ -669,6 +691,8 @@ class Render {
     this.layout.lru.clear()
     this.nodeCache = {}
     this.lastNodeCache = {}
+    if (this.nodeIndex) this.nodeIndex.clear()
+    this._nodeIndexRoot = null
   }
 
   // 保存触发渲染的参数
@@ -705,6 +729,8 @@ class Render {
   cancelRender() {
     this._renderGeneration = (this._renderGeneration || 0) + 1
     clearTimeout(this.renderTimer)
+    this.renderTimer = null
+    this._viewportPaintToken = (this._viewportPaintToken || 0) + 1
     this.isRendering = false
     this.hasWaitRendering = false
     this.renderCallbackList = []
@@ -719,7 +745,7 @@ class Render {
     this.reRender = false
     this.renderCallbackList = []
     this.renderSourceList = []
-    this.mindMap.emit('node_tree_render_end')
+    this.mindMap.emit('node_tree_render_end', { reason: 'layout', layoutEpoch: this._layoutEpoch || 0 })
     this.mindMap.emit('render_complete', {
       renderId: this._diagnosticRenderId,
       renderedNodes: Object.keys(this.nodeCache).length
@@ -729,15 +755,20 @@ class Render {
 
   // 渲染
   render(callback, source) {
+    if (this._destroyed) return
     this.addRenderParams(callback, source)
     clearTimeout(this.renderTimer)
     this.renderTimer = setTimeout(() => {
+      this.renderTimer = null
       this._render()
     }, 0)
   }
 
   // 更新的渲染已经接管画布时，把这次中断的渲染让出去，避免位置一直停在重叠的旧布局上
-  finishSupersededRender() {
+  finishSupersededRender(generation = this._renderGeneration) {
+    // Cancellation already released the old pass. Its delayed callback must
+    // not release a newer pass that now owns the renderer state.
+    if (this._destroyed || generation !== this._renderGeneration) return
     this.isRendering = false
     if (!this.hasWaitRendering) return
     this.hasWaitRendering = false
@@ -746,6 +777,7 @@ class Render {
 
   // 真正的渲染
   _render() {
+    if (this._destroyed) return
     // 切换主题时，被收起的节点需要添加样式复位的标注
     if (this.checkHasRenderSource(CONSTANTS.CHANGE_THEME)) {
       this.resetUnExpandNodeStyle()
@@ -763,6 +795,8 @@ class Render {
     this.isRendering = true
     this._diagnosticRenderId = (this._diagnosticRenderId || 0) + 1
     this.mindMap.emit('render_started', { renderId: this._diagnosticRenderId })
+    this._viewportPaintToken = (this._viewportPaintToken || 0) + 1
+    this._viewportIndex = null
     const renderGeneration = this._renderGeneration
     const isLayoutSwitch = this.checkHasRenderSource(CONSTANTS.CHANGE_LAYOUT)
     if (isLayoutSwitch) {
@@ -801,7 +835,7 @@ class Render {
         superseded: renderGeneration !== this._renderGeneration
       })
       if (renderGeneration !== this._renderGeneration) {
-        this.finishSupersededRender()
+        this.finishSupersededRender(renderGeneration)
         return
       }
       const stale = destroyStaleLayoutNodes(this.lastNodeCache, this.nodeCache)
@@ -812,14 +846,16 @@ class Render {
       if (stale.destroyed.length) this.emitNodeActiveEvent()
       // 更新根节点
       this.root = root
+      this._layoutEpoch = (this._layoutEpoch || 0) + 1
+      this.rebuildNodeIndex()
       // Layout switch must paint synchronously so an in-flight performance
       // pass cannot leave the previous structure on the canvas.
       const asyncPaint =
         !!this.mindMap.opt.openPerformance && !isLayoutSwitch && !syncPaint
-      this.root.render(
+      this.paintLayoutTree(
         () => {
           if (renderGeneration !== this._renderGeneration) {
-            this.finishSupersededRender()
+            this.finishSupersededRender(renderGeneration)
             return
           }
           this.isRendering = false
@@ -847,6 +883,178 @@ class Render {
       )
     })
     this.emitNodeActiveEvent()
+  }
+
+  // Full layout paints use one budgeted DFS rather than a timer per child.
+  // Explicit forceLoadNode/export keeps the existing synchronous full pass.
+  paintLayoutTree(callback, forceRender, asyncPaint) {
+    const generation = this._renderGeneration
+    const cancelled = () => this._destroyed || generation !== this._renderGeneration
+    const done = async () => {
+      if (cancelled()) return
+      if (this.mindMap.opt.openPerformance) {
+        if (!(await this.buildViewportIndex({ async: true, cancelled })) || cancelled()) return
+        if (!forceRender && (!(await this.paintViewport()) || cancelled())) return
+      }
+      callback()
+    }
+    if (!asyncPaint) {
+      this.root.render(() => { done().catch(error => this.mindMap.opt.errorHandler('render_error', error)) }, forceRender)
+      return
+    }
+    walkLayoutInSlices([this.root, null, node => {
+      node.render(() => {}, forceRender, false, true)
+      return node.getData('expand') === false
+    }, null, true], { cancelled }).then(completed => {
+      if (completed && !cancelled()) return done()
+    }).catch(error => this.mindMap.opt.errorHandler('render_error', error))
+  }
+
+  buildViewportIndex(options = {}) {
+    const items = []
+    const visibleNodes = new Set(), visibleEdges = new Set()
+    if (!this._edgeBounds) this._edgeBounds = new WeakMap()
+    const seen = new Set()
+    const addEdge = element => {
+      if (!element || seen.has(element)) return
+      // Floating themes deliberately keep a hidden M0,0 model path. It is
+      // not painted geometry and must not make every theme a pan candidate.
+      if (element.style.display === 'none' || element.getAttribute('display') === 'none') return
+      seen.add(element)
+      const parent = element.parentNode || this.mindMap.lineDraw.node
+      const strokeWidth = parseFloat(element.getAttribute('stroke-width') || parent.getAttribute('stroke-width') || '0') || 0
+      const miterLimit = parseFloat(element.getAttribute('stroke-miterlimit') || '4') || 4
+      const markers = [element.getAttribute('marker-start'), element.getAttribute('marker-end')]
+      const d = element.getAttribute('d')
+      // Compare the raw geometry inputs individually instead of allocating a
+      // joined string per connector on every collect pass.
+      const cached = this._edgeBounds.get(element)
+      let bounds = cached && cached.d === d && cached.strokeWidth === strokeWidth &&
+        cached.miterLimit === miterLimit && cached.markerStart === markers[0] && cached.markerEnd === markers[1]
+        ? cached.bounds
+        : null
+      if (!bounds) {
+        const rect = element.getBBox()
+        // Native getBBox omits painted stroke and marker extents. Use a
+        // conservative miter envelope and the built-in 20px marker reserve.
+        const padding = Math.max(strokeWidth / 2 * Math.max(1, miterLimit), markers.some(Boolean) ? 20 : 0)
+        bounds = { left: rect.x - padding, top: rect.y - padding,
+          right: rect.x + rect.width + padding, bottom: rect.y + rect.height + padding }
+        this._edgeBounds.set(element, { d, strokeWidth, miterLimit, markerStart: markers[0], markerEnd: markers[1], bounds })
+      }
+      const item = { element, parent, bounds }
+      items.push(item)
+      if (element.isConnected) visibleEdges.add(item)
+    }
+    // The model owns detached paths. DOM enumeration alone loses them after
+    // a local resize or a scoped explicit export refreshes the index.
+    const collect = function * (renderer) {
+      const nodes = renderer.nodeIndex ? renderer.nodeIndex.values() : Object.values(renderer.nodeCache)
+      for (const node of nodes) {
+        const { left, top, width, height } = node
+        items.push({ node, bounds: { left, top, right: left + width, bottom: top + height } })
+        if (node.group && node.group.node.parentNode) visibleNodes.add(node)
+        yield
+        for (const line of node._lines || []) { addEdge(line.node); yield }
+        for (const item of node._generalizationList || []) {
+          if (item.generalizationLine) addEdge(item.generalizationLine.node)
+          yield
+        }
+      }
+      for (const path of renderer.mindMap.lineDraw.node.querySelectorAll('path')) { addEdge(path); yield }
+    }
+    const publish = index => {
+      if (!index || this._destroyed || (options.cancelled && options.cancelled())) return false
+      this._viewportIndex = index
+      this._visibleViewportNodes = visibleNodes
+      this._visibleViewportEdges = visibleEdges
+      return true
+    }
+    if (options.async) return (async () => {
+      // collect() may call SVG getBBox (heavy step) so it keeps the per-step
+      // clock; the packed index build batches only its own pure arithmetic
+      // yields internally and is still bounded by the same slice budget.
+      if (!(await runWorkInSlices(collect(this), options))) return false
+      return publish(await ViewportIndex.create(items, options))
+    })()
+    const work = collect(this)
+    while (!work.next().done) { /* Explicit export needs the complete scene now. */ }
+    return publish(new ViewportIndex(items))
+  }
+
+  async paintViewport(changedNodes) {
+    if (!this._viewportIndex || this._destroyed) return false
+    const token = this._viewportPaintToken = (this._viewportPaintToken || 0) + 1
+    const generation = this._renderGeneration
+    const cancelled = () => this._destroyed || token !== this._viewportPaintToken || generation !== this._renderGeneration
+    const { transform } = this.mindMap.view.getTransformData()
+    const padding = this.mindMap.opt.performanceConfig.padding || 0
+    const sx = transform.scaleX || 1, sy = transform.scaleY || 1
+    const viewport = { left: (-padding - transform.translateX) / sx, top: (-padding - transform.translateY) / sy,
+      right: (this.mindMap.width + padding - transform.translateX) / sx, bottom: (this.mindMap.height + padding - transform.translateY) / sy }
+    const candidates = this._viewportIndex.query(viewport)
+    const nodes = new Set(candidates.filter(item => item.node).map(item => item.node))
+    nodes.add(this.root)
+    const edges = new Set(candidates.filter(item => item.element))
+    const tasks = []
+    ;(this._visibleViewportNodes || []).forEach(node => {
+      if (!nodes.has(node)) tasks.push(() => {
+        if (node.group) node.group.remove()
+        this._visibleViewportNodes.delete(node)
+      })
+    })
+    ;(this._visibleViewportEdges || []).forEach(item => {
+      if (!edges.has(item)) tasks.push(() => {
+        item.element.remove()
+        this._visibleViewportEdges.delete(item)
+      })
+    })
+    nodes.forEach(node => {
+      if (changedNodes && !changedNodes.has(node) && this._visibleViewportNodes.has(node)) return
+      tasks.push(() => {
+      node.render(() => {}, false, false, true, true)
+      this._visibleViewportNodes.add(node)
+      })
+    })
+    edges.forEach(item => tasks.push(() => {
+      if (item.element.parentNode !== item.parent) item.parent.appendChild(item.element)
+      this._visibleViewportEdges.add(item)
+    }))
+    // Update the actual attached sets per task. A superseding view must see
+    // partial attachment, not the previous pass's not-yet-painted targets.
+    return walkLayoutInSlices([{ children: tasks.map(run => ({ run })) }, null, task => {
+      if (task.run) task.run()
+    }, null, true], { cancelled })
+  }
+
+  destroy() {
+    if (this._destroyed) return
+    this._destroyed = true
+    this.cancelRender()
+    clearTimeout(this.emitNodeActiveEventTimer)
+    this.emitNodeActiveEventTimer = null
+    clearTimeout(this._viewRenderTimer)
+    clearTimeout(this._nodeTextEditChangeTimer)
+    this._viewRenderTimer = null
+    this._nodeTextEditChangeTimer = null
+    this.clearCache()
+    this.layout.root = null
+    Object.values(this.layout).forEach(value => { if (value instanceof Map || value instanceof Set) value.clear() })
+    this._viewportIndex = null
+    this._visibleViewportNodes = null
+    this._visibleViewportEdges = null
+    this._edgeBounds = null
+    this.renderTree = null
+    this.root = null
+    this.beingCopyData = null
+    this.activeNodeList = []
+    this.lastActiveNodeList = []
+    this._activeNodeIndexes.clear()
+    this._activeIndexList = this.activeNodeList
+    this._activeIndexLength = 0
+    this._expandAllToken = 0
+    this._expandOperationId = (this._expandOperationId || 0) + 1
+    this._lazyCommandPending = false
   }
 
   // 当某个自定义节点内容改变后，可以调用该方法实时更新该节点大小和整体节点的定位
@@ -885,6 +1093,7 @@ class Render {
       this.mindMap.execCommand('SET_NODE_ACTIVE', item, false)
     })
     this.activeNodeList = []
+    this.syncActiveNodeIndexes()
   }
 
   // 添加节点到激活列表里
@@ -901,6 +1110,8 @@ class Render {
       }
       this.mindMap.execCommand('SET_NODE_ACTIVE', node, true)
       this.activeNodeList.push(node)
+      this._activeNodeIndexes.set(getNodeUid(node), this.activeNodeList.length - 1)
+      this._activeIndexLength = this.activeNodeList.length
     }
   }
 
@@ -912,6 +1123,11 @@ class Render {
     }
     this.mindMap.execCommand('SET_NODE_ACTIVE', node, false)
     this.activeNodeList.splice(index, 1)
+    this._activeNodeIndexes.delete(getNodeUid(node))
+    for (let i = index; i < this.activeNodeList.length; i++) {
+      this._activeNodeIndexes.set(getNodeUid(this.activeNodeList[i]), i)
+    }
+    this._activeIndexLength = this.activeNodeList.length
   }
 
   // 手动激活多个节点，激活单个节点请直接调用节点实例的active()方法
@@ -921,22 +1137,36 @@ class Render {
       this.mindMap.emit('before_node_active', node, this.activeNodeList)
       // 激活节点，并将该节点添加到激活节点列表里
       this.addNodeToActiveList(node, true)
-      // 手动派发节点激活事件
-      this.emitNodeActiveEvent(node)
     })
+    this.emitNodeActiveEvent(nodeList[nodeList.length - 1] || null)
   }
 
   // 手动取消激活多个节点
   cancelActiveMultiNode(nodeList = []) {
-    nodeList.forEach(node => {
-      this.removeNodeFromActiveList(node)
-      this.emitNodeActiveEvent(null)
+    const cancelledUids = new Set(nodeList.map(getNodeUid))
+    this.activeNodeList = this.activeNodeList.filter(node => {
+      if (!cancelledUids.has(getNodeUid(node))) return true
+      this.mindMap.execCommand('SET_NODE_ACTIVE', node, false)
+      return false
     })
+    this.syncActiveNodeIndexes()
+    this.emitNodeActiveEvent(null)
+  }
+
+  syncActiveNodeIndexes() {
+    const list = this.activeNodeList || []
+    if (this._activeIndexList === list && this._activeIndexLength === list.length && this._activeNodeIndexes) return
+    this._activeNodeIndexes = new Map()
+    list.forEach((node, index) => this._activeNodeIndexes.set(getNodeUid(node), index))
+    this._activeIndexList = list
+    this._activeIndexLength = list.length
   }
 
   //  检索某个节点在激活列表里的索引
   findActiveNodeIndex(node) {
-    return getNodeIndexInNodeList(node, this.activeNodeList)
+    this.syncActiveNodeIndexes()
+    const index = this._activeNodeIndexes.get(getNodeUid(node))
+    return index === undefined ? -1 : index
   }
 
   //  全选
@@ -1045,6 +1275,7 @@ class Render {
   }
 
   runAfterHydrate(nodes, fn, commandName) {
+    if (this._destroyed) return true
     const cooperate = this.mindMap.cooperate
     if (
       this._skipLazyHydrate ||
@@ -1072,6 +1303,7 @@ class Render {
     )
     hydrate
       .then(() => {
+        if (this._destroyed) return
         this._skipLazyHydrate = true
         this._lazyCommandPending = false
         try {
@@ -1092,6 +1324,7 @@ class Render {
         }
       })
       .catch(err => {
+        if (this._destroyed) return
         this._lazyCommandPending = false
         this._skipLazyHydrate = false
         if (command && command.isPause) command.recovery()
@@ -1173,6 +1406,7 @@ class Render {
       }
       createNewId = true
       parent.nodeData.children.splice(index + 1, 0, newNodeData)
+      this.mindMap.command.recordContentChange?.({ added: [newNodeData], countable: this.mindMap.command.isCountableNode(parent) })
     })
     // 如果同时对多个节点插入子节点，需要清除原来激活的节点
     if (focusNewNode) {
@@ -1211,6 +1445,7 @@ class Render {
       const newNodeList = createUidForAppointNodes(nodeList, createNewId)
       createNewId = true
       parent.nodeData.children.splice(index + 1, 0, ...newNodeList)
+      this.mindMap.command.recordContentChange?.({ added: newNodeList, countable: this.mindMap.command.isCountableNode(parent) })
     })
     if (focusNewNode) {
       this.clearActiveNodeList()
@@ -1295,6 +1530,7 @@ class Render {
       }
       createNewId = true
       node.nodeData.children.push(newNode)
+      this.mindMap.command.recordContentChange?.({ added: [newNode], countable: this.mindMap.command.isCountableNode(node) })
       const live = node.nodeData.children.length
       const prev = Number(node.getData && node.getData('childCount')) || 0
       node.setData({
@@ -1340,6 +1576,7 @@ class Render {
       // 第一个引用不需要重新创建uid，后面的需要重新创建，否则id会重复
       createNewId = true
       node.nodeData.children.push(...childList)
+      this.mindMap.command.recordContentChange?.({ added: childList, countable: this.mindMap.command.isCountableNode(node) })
       const live = node.nodeData.children.length
       const prev = Number(node.getData && node.getData('childCount')) || 0
       node.setData({
@@ -1407,6 +1644,7 @@ class Render {
       // 获取当前节点所在位置
       const index = getNodeDataIndex(node)
       parent.nodeData.children.splice(index, 1, newNode)
+      this.mindMap.command.recordContentChange?.({ added: [newNode], countable: this.mindMap.command.isCountableNode(parent) })
     })
     // 如果同时对多个节点插入子节点，需要清除原来激活的节点
     if (focusNewNode) {
@@ -2034,6 +2272,7 @@ class Render {
     })
     if (root) {
       this.clearActiveNodeList()
+      this.mindMap.command.recordContentChange?.({ removed: root.nodeData.children.slice() })
       root.children = []
       root.nodeData.children = []
     } else {
@@ -2056,6 +2295,7 @@ class Render {
           i--
         } else {
           this.removeNodeFromActiveList(node)
+          this.mindMap.command.recordContentChange?.({ removed: [node] })
           removeFromParentNodeData(node)
           i--
         }
@@ -2135,6 +2375,7 @@ class Render {
         // 删除概要节点
         this.deleteNodeGeneralization(node)
       } else {
+        this.mindMap.command.recordContentChange?.({ removed: [{ data: node.nodeData.data, children: [] }] })
         const parent = node.parent
         const index = getNodeDataIndex(node)
         parent.nodeData.children.splice(
@@ -2217,6 +2458,7 @@ class Render {
     })
     // 从父节点的数据中移除
     nodeList.forEach(node => {
+      this.mindMap.command.recordContentChange?.({ removed: [node] })
       removeFromParentNodeData(node)
     })
     // 清空激活节点列表
@@ -2382,6 +2624,7 @@ class Render {
 
   //  设置节点是否展开
   setNodeExpand(node, expand) {
+    if (this._destroyed) return
     const apply = nextExpand => {
       this.mindMap.execCommand('SET_NODE_DATA', node, {
         expand: nextExpand
@@ -2400,6 +2643,7 @@ class Render {
       return
     }
     const after = () => {
+      if (this._destroyed) return
       const hasKids =
         node.nodeData && node.nodeData.children && node.nodeData.children.length
       if (hasKids) {
@@ -2418,6 +2662,7 @@ class Render {
     const hydrated = cooperate.hydrateLazyChildren(node)
     if (hydrated && typeof hydrated.then === 'function') {
       hydrated.then(after).catch(err => {
+        if (this._destroyed) return
         console.error('[mind-map] load children failed', err)
         if (typeof cooperate.repairEmptyExpand === 'function') {
           cooperate.repairEmptyExpand(node)
@@ -2468,8 +2713,10 @@ class Render {
   }
 
   hydrateThen(root, level, options, after) {
+    if (this._destroyed) return
     const command = this.mindMap.command
     const finish = () => {
+      if (this._destroyed) return
       after()
       if (command && command.isPause) {
         command.recovery()
@@ -2540,6 +2787,7 @@ class Render {
   }
 
   async hydrateFrontier(nodes) {
+    if (this._destroyed) return false
     const cooperate = this.mindMap.cooperate
     if (!cooperate || typeof cooperate.hydrateNodeData !== 'function') return false
     const stubs = (nodes || []).filter(node => {
@@ -2558,10 +2806,12 @@ class Render {
     let changed = false
     const worker = async () => {
       while (index < jobs.length) {
+        if (this._destroyed) return
         const node = jobs[index++]
         const before = (node.children && node.children.length) || 0
         try {
           await cooperate.hydrateNodeData(node)
+          if (this._destroyed) return
           const after = (node.children && node.children.length) || 0
           if (after > before) changed = true
         } catch (err) {
@@ -2621,7 +2871,7 @@ class Render {
   }
 
   async expandSubtreeProgressive(start, token) {
-    if (!start) return
+    if (!start || this._destroyed) return
     // Queue stable identities: collaboration hydration can replace renderTree.
     const entryFor = node => ({
       node,
@@ -3113,8 +3363,35 @@ class Render {
 
   // 重新节点某个节点，判断节点大小是否发生了改变，是的话触发重绘
   reRenderNodeCheckChange(node, notRender) {
+    const oldHeight = node.height
     let changed = node.reRender()
     if (changed) {
+      // A right-growing logical leaf with unchanged height has no descendants
+      // to move, and its incoming connector's left endpoint stays fixed.
+      // Summaries/compact routes/other layouts retain the full correct path.
+      let hasSummary = node.isGeneralization
+      for (let current = node; current; current = current.parent) {
+        if (current.checkHasGeneralization()) hasSummary = true
+      }
+      if (!notRender && !hasSummary && !node.isRoot && node.customLeft === undefined && node.customTop === undefined && !node.children.length &&
+        oldHeight === node.height && this.mindMap.opt.layout === CONSTANTS.LAYOUT.LOGICAL_STRUCTURE &&
+        !this.mindMap.opt.compactLayout && !this.mindMap.themeConfig.nodeUseLineStyle) {
+        this._layoutEpoch = (this._layoutEpoch || 0) + 1
+        const metadata = { reason: 'layout', layoutEpoch: this._layoutEpoch }
+        if (this.mindMap.opt.openPerformance) {
+          if (!this._viewportIndex || !this._viewportIndex.update({ node, bounds: {
+            left: node.left, top: node.top, right: node.left + node.width, bottom: node.top + node.height
+          } })) {
+            this.mindMap.render()
+            return
+          }
+          if (node.group && node.group.node.parentNode) this._visibleViewportNodes.add(node)
+          this.paintViewport(new Set([node])).then(completed => {
+            if (completed && !this._destroyed) this.mindMap.emit('node_tree_render_end', metadata)
+          }).catch(error => this.mindMap.opt.errorHandler('render_error', error))
+        } else this.mindMap.emit('node_tree_render_end', metadata)
+        return
+      }
       if (!notRender) this.mindMap.render()
     } else {
       this.mindMap.emit('node_tree_render_end')
@@ -3210,37 +3487,47 @@ class Render {
     }
   }
 
-  // 根据uid找到对应的节点实例
+  registerNodeIndex(node) {
+    if (!node) return
+    if (!this.nodeIndex) this.nodeIndex = new Map()
+    const pending = [node], seen = new Set()
+    while (pending.length) {
+      const current = pending.pop()
+      if (!current || seen.has(current)) continue
+      seen.add(current)
+      const uid = getNodeUid(current)
+      if (uid) this.nodeIndex.set(uid, current)
+      ;(current.children || []).forEach(child => pending.push(child))
+      ;(current._generalizationList || []).forEach(item => pending.push(item.generalizationNode))
+    }
+  }
+
+  unregisterNodeIndex(node) {
+    if (!node || !this.nodeIndex) return
+    const pending = [node], seen = new Set()
+    while (pending.length) {
+      const current = pending.pop()
+      if (!current || seen.has(current)) continue
+      seen.add(current)
+      const uid = getNodeUid(current)
+      // A late callback from an old instance cannot remove the new one.
+      if (this.nodeIndex.get(uid) === current) this.nodeIndex.delete(uid)
+      ;(current.children || []).forEach(child => pending.push(child))
+      ;(current._generalizationList || []).forEach(item => pending.push(item.generalizationNode))
+    }
+  }
+
+  rebuildNodeIndex() {
+    this.nodeIndex = new Map()
+    this.registerNodeIndex(this.root)
+    this._nodeIndexRoot = this.root
+  }
+
+  // Current rendered model only, including nested summary subtrees.
   findNodeByUid(uid) {
     if (!this.root) return
-    let res = null
-    walk(this.root, null, node => {
-      if (node.getData('uid') === uid) {
-        res = node
-        return true
-      }
-      // 概要节点及其子树（子树里的节点还能再挂概要）
-      let isGeneralization = false
-      const findInTree = gNode => {
-        if (!gNode) return false
-        if (gNode.getData('uid') === uid) {
-          res = gNode
-          isGeneralization = true
-          return true
-        }
-        if ((gNode.children || []).some(findInTree)) return true
-        return (gNode._generalizationList || []).some(item =>
-          findInTree(item && item.generalizationNode)
-        )
-      }
-      ;(node._generalizationList || []).forEach(item => {
-        if (!isGeneralization) findInTree(item.generalizationNode)
-      })
-      if (isGeneralization) {
-        return true
-      }
-    })
-    return res
+    if (!this.nodeIndex || this._nodeIndexRoot !== this.root) this.rebuildNodeIndex()
+    return this.nodeIndex.get(uid)
   }
 
   // 高亮节点或子节点

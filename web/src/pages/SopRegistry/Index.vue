@@ -886,6 +886,9 @@ export default {
       spaceDirectorySearchLoading: false,
       spaceDirectorySearchTimer: null,
       spaceDirectorySearchRequestId: 0,
+      spaceDirectorySearchController: null,
+      selectedDirectoryLabel: '',
+      selectedDirectoryRoomKey: '',
       spaceDirectoryVisible: false,
       spaceDirectoryQuery: '',
       spaceDirectoryTreeProps: {
@@ -990,7 +993,7 @@ export default {
       if (!room) return '选择文件夹 / 脑图'
       const path = this.findSpaceDirectoryPath(room)
       if (path.length) return path.map(item => item.label).join(' / ')
-      return room
+      return this.selectedDirectoryRoomKey === room ? this.selectedDirectoryLabel || room : room
     },
     sopQueueSummary() {
       const s = this.sopQueueSnap || {}
@@ -1287,6 +1290,9 @@ export default {
     } else this.statusText = '请选择空间'
   },
   beforeDestroy() {
+    clearTimeout(this.spaceDirectorySearchTimer)
+    this.spaceDirectorySearchRequestId++
+    if (this.spaceDirectorySearchController) this.spaceDirectorySearchController.abort()
     this._sopPageAlive = false
     this._subtreeLoadToken = (this._subtreeLoadToken || 0) + 1
     this.teardownPreview()
@@ -1540,11 +1546,13 @@ export default {
         if (data.spaceType === 'personal') return resolve(this.buildPersonalSpaceDirectoryOptions())
         if (data.spaceType === 'team') {
           try {
-            const rooms = await teamService.listRooms(data.teamId)
-            return resolve((rooms || []).map(room => {
-              const option = this.mapSpaceOption(room)
-              return { ...option, value: option.room_key, kind: 'room', isLeaf: true, roomKey: option.room_key }
-            }))
+            const result = await teamService.listRoomsPage(data.teamId, { limit: 20, offset: 0 })
+            const rooms = result.list.map(room => this.directoryRoomNode(room))
+            if (rooms.length < result.total) rooms.push({
+              value: `more:team:${data.teamId}:20`, label: '加载更多脑图', kind: 'more',
+              isLeaf: true, teamId: data.teamId, offset: rooms.length
+            })
+            return resolve(rooms)
           } catch (err) {
             this.$message.error('团队空间加载失败，请重试')
             return resolve([])
@@ -1604,8 +1612,13 @@ export default {
         resolve([])
       }
     },
+    directoryRoomNode(room) {
+      const option = this.mapSpaceOption(room)
+      return { ...option, value: option.room_key, kind: 'room', isLeaf: true, roomKey: option.room_key }
+    },
     scheduleSpaceDirectorySearch() {
-      if (this.spaceDirectorySearchTimer) clearTimeout(this.spaceDirectorySearchTimer)
+      clearTimeout(this.spaceDirectorySearchTimer)
+      if (this.spaceDirectorySearchController) this.spaceDirectorySearchController.abort()
       const requestId = ++this.spaceDirectorySearchRequestId
       const keyword = String(this.spaceDirectoryQuery || '').trim()
       if (!keyword) {
@@ -1614,15 +1627,40 @@ export default {
         this.refreshSpaceDirectorySearchTree()
         return
       }
+      const controller = new AbortController()
+      this.spaceDirectorySearchController = controller
       this.spaceDirectorySearchLoading = true
       this.spaceDirectorySearchTimer = setTimeout(async () => {
         try {
-          const result = await listFiles({ q: keyword, limit: 100 })
+          const personal = listFiles({ q: keyword, limit: 100 }, { signal: controller.signal })
+            .then(result => ({ result }), error => ({ error }))
+          const teams = this.teamSpaces.slice()
+          const pages = []
+          let next = 0
+          // Bound requests across teams; every query filters before its page.
+          await Promise.all(Array.from({ length: Math.min(4, teams.length) }, async () => {
+            while (next < teams.length && !controller.signal.aborted) {
+              const team = teams[next++]
+              try {
+                const result = await teamService.listRoomsPage(team.id, { q: keyword, limit: 20, offset: 0 }, { signal: controller.signal })
+                pages.push(...result.list)
+              } catch (error) {
+                // Team metadata can outlive a membership. Skip only that
+                // revoked/deleted team while preserving other authorized hits.
+                if (controller.signal.aborted || ![403, 404].includes(error && error.statusCode)) throw error
+              }
+            }
+          }))
+          const completed = await personal
+          if (completed.error) throw completed.error
+          const result = completed.result
           if (requestId !== this.spaceDirectorySearchRequestId) return
-          this.spaceDirectorySearchResults = ((result && result.list) || []).map(room => {
-            const option = this.mapSpaceOption(room)
-            return { ...option, value: option.room_key, kind: 'room', isLeaf: true, roomKey: option.room_key }
+          const unique = new Map()
+          ;((result && result.list) || []).concat(pages).forEach(room => {
+            const option = this.directoryRoomNode(room)
+            unique.set(option.roomKey, option)
           })
+          this.spaceDirectorySearchResults = Array.from(unique.values()).slice(0, 100)
         } catch (err) {
           if (requestId !== this.spaceDirectorySearchRequestId) return
           this.spaceDirectorySearchResults = []
@@ -1698,6 +1736,8 @@ export default {
       }
       const room = String(data.roomKey || data.value || '').trim()
       if (!room) return
+      this.selectedDirectoryRoomKey = room
+      this.selectedDirectoryLabel = data.label || room
       this.roomKey = room
       this.spaceDirectoryVisible = false
       this.onSpaceChange(room)
@@ -1706,7 +1746,9 @@ export default {
       if (!node || node.loading) return
       node.loading = true
       try {
-        const result = await listFiles({ folderId: data.folderId, cursor: data.cursor, limit: 100 })
+        const result = data.teamId
+          ? await teamService.listRoomsPage(data.teamId, { limit: 20, offset: data.offset })
+          : await listFiles({ folderId: data.folderId, cursor: data.cursor, limit: 100 })
         const parent = node.parent
         let insertAt = parent.childNodes.indexOf(node)
         parent.removeChild(node)
@@ -1714,9 +1756,10 @@ export default {
           const option = this.mapSpaceOption(room)
           return { ...option, value: option.room_key, kind: 'room', isLeaf: true, roomKey: option.room_key }
         })
-        const next = result && result.nextCursor
-          ? [{ ...data, value: `more:${parent.data.value}:${result.nextCursor}`, cursor: result.nextCursor }]
-          : []
+        const nextOffset = Number(data.offset || 0) + rooms.length
+        const next = data.teamId
+          ? (nextOffset < result.total ? [{ ...data, value: `more:team:${data.teamId}:${nextOffset}`, offset: nextOffset }] : [])
+          : (result && result.nextCursor ? [{ ...data, value: `more:${parent.data.value}:${result.nextCursor}`, cursor: result.nextCursor }] : [])
         rooms.concat(next).forEach(item => {
           parent.insertChild({ data: item }, insertAt)
           insertAt += 1

@@ -1,0 +1,18 @@
+{
+  "purpose": "Self-contained frozen pre-change reference for the rich/plain node geometry-parity guard. Not production code; imported only by tests/performance/richtext-node-geometry-frozen.browser.cjs via the esbuild stub mechanism.",
+  "capturedFrom": "final17 accepted source (worktree HEAD d5793106098afe8a2ff9bbb60193bc25e5e45f88, prior approved uncommitted changes included)",
+  "recordedForReviewAt": "2026-10-14T07:45:40.715269+00:00 (codex-red-review.json verification time; the pre-change copies themselves predate it and are identified by sha256 below)",
+  "auditSnapshotUntouched": "work/performance-tdd/pi/richtext-full-render/pre-change-source-snapshot/",
+  "files": {
+    "nodeLayout.before.js": {
+      "sourcePath": "simple-mind-map/src/core/render/node/nodeLayout.js",
+      "sha256": "633b899367420f4ca0571c204e1c0c75922dde560916a756e1c6eebfbe3fffb0",
+      "knownPreChangePatterns": ["this.shapeNode.translate(halfBorderWidth, halfBorderWidth)", "textContentNested.bbox()", "textContentNested.translate(translateX, translateY)"]
+    },
+    "MindMapNode.before.js": {
+      "sourcePath": "simple-mind-map/src/core/render/node/MindMapNode.js",
+      "sha256": "a749fdd0a3e00a1a5b5fcb26931378af82c190a13e026d471fc1bde897b3d7aa",
+      "knownPreChangePatterns": ["this.nodeDraw.has(this.group)", "this.group.translate(this.left - t.translateX, this.top - t.translateY)"]
+    }
+  }
+}

@@ -201,13 +201,14 @@ export default {
       throw error
     }
   },
-  getCardPreview: async roomKey => {
+  getCardPreview: async (roomKey, options = {}) => {
     try {
       const data = await productRequest(
-        `/api/files/${encodeURIComponent(roomKey)}/card-preview`
+        `/api/files/${encodeURIComponent(roomKey)}/card-preview`, options
       )
       return (data && data.preview) || data || null
     } catch (error) {
+      if (error && error.name === 'AbortError') throw error
       error.message = userMessageFromError(error)
       throw error
     }

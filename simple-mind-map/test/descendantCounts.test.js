@@ -67,11 +67,20 @@ async function run() {
     queries++
     assert.ok(sql.includes('deleted_at is null'))
     assert.ok(!/limit|depth/i.test(sql), 'count query cannot clip depth or rows')
-    assert.deepStrictEqual(params, ['test-room'])
-    return { rows }
+    assert.strictEqual(params[0], 'test-room')
+    assert.ok(sql.includes('with recursive relevant'))
+    const scoped = new Set()
+    const pending = [...params[1]]
+    while (pending.length) {
+      const uid = pending.pop()
+      if (scoped.has(uid)) continue
+      scoped.add(uid)
+      pending.push(...obj[uid].children)
+    }
+    return { rows: rows.filter(row => scoped.has(row.uid)) }
   } }
   await stampAuthoritativeChildCounts(db, 'test-room', deep.tree)
-  assert.strictEqual(queries, 1, 'one edge query, not one query per node')
+  assert.strictEqual(queries, 1, 'one scoped aggregate query, not one query per node')
   assert.strictEqual(deep.tree.data.descendantCount, 55)
   assert.strictEqual(getDescendantCount(deep.tree), 55)
 

@@ -49,7 +49,7 @@ function createPgFileStore(pool) {
     async getRoom(roomKey) {
       queryCount += 1
       const res = await pool.query(
-        `select r.room_key, r.title, r.cos_key, r.version, r.metadata,
+        `select r.room_key, r.title, r.cos_key, r.version, r.metadata, r.node_counts_generation,
                 r.folder_id, r.owner_id, r.created_at, r.updated_at,
                 r.content_updated_at, r.deleted_at, r.deleted_by,
                 r.deleted_from_folder_id
@@ -562,27 +562,44 @@ function createPgFileStore(pool) {
       })
       return true
     },
-    async getPreviewNodes(roomKey) {
+    async getPreviewProjection(roomKey) {
       queryCount += 1
-      const res = await pool.query(
-        `with recursive walk as (
-           select uid, parent_uid, position, data, is_root, deleted_at, 0 as depth
+      // Apply limits while walking each indexed parent prefix, before joining.
+      // The metadata and the sketch share PostgreSQL's single-statement snapshot.
+      const res = await pool.query({
+        name: 'mind-map-card-preview-v1',
+        text: `with root as materialized (
+           select uid, parent_uid, position, data->>'text' as text, is_root
            from room_nodes
            where room_key = $1 and is_root and deleted_at is null
+           limit 1
+         ), children as materialized (
+           select n.* from root r cross join lateral (
+             select uid, parent_uid, position, data->>'text' as text, is_root
+             from room_nodes where room_key = $1 and parent_uid = r.uid and deleted_at is null
+             order by position, uid limit 6
+           ) n
+         ), sketch as (
+           select * from root union all select * from children
            union all
-           select n.uid, n.parent_uid, n.position, n.data, n.is_root, n.deleted_at, w.depth + 1
-           from room_nodes n
-           inner join walk w
-             on n.room_key = $1 and n.parent_uid = w.uid and n.deleted_at is null
-           where w.depth < 2
+           select n.* from children c cross join lateral (
+             select uid, parent_uid, position, data->>'text' as text, is_root
+             from room_nodes where room_key = $1 and parent_uid = c.uid and deleted_at is null
+             order by position, uid limit 2
+           ) n
          )
-         select uid, parent_uid, position, data, is_root, deleted_at
-         from walk
-         order by depth, position, uid
-         limit 40`,
-        [String(roomKey || '')]
-      )
-      return res.rows
+         select r.room_key, r.title, r.version, r.updated_at, r.content_updated_at,
+                r.deleted_at, r.node_counts_generation::text as generation,
+                n.uid, n.parent_uid, n.position, n.text, n.is_root
+         from rooms r left join room_tombstones t on t.room_key = r.room_key
+         left join sketch n on true
+         where r.room_key = $1 and t.room_key is null`,
+        values: [String(roomKey || '')]
+      })
+      return { room: res.rows[0] || null, nodes: res.rows.filter(row => row.uid) }
+    },
+    async getPreviewNodes(roomKey) {
+      return (await this.getPreviewProjection(roomKey)).nodes
     }
   }
 }

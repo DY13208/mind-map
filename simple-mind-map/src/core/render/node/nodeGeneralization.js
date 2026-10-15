@@ -139,6 +139,11 @@ function createGeneralizationNode() {
     // 线和节点
     if (!cur.generalizationLine) {
       cur.generalizationLine = this.lineDraw.path()
+    } else if (
+      cur.generalizationLine.node && this.lineDraw.node &&
+      cur.generalizationLine.node.parentNode !== this.lineDraw.node
+    ) {
+      this.lineDraw.add(cur.generalizationLine)
     }
     if (!cur.generalizationNode) {
       cur.generalizationNode = new MindMapNode({
@@ -170,6 +175,9 @@ function createGeneralizationNode() {
     cur.generalizationNode.generalizationBelongNode = this
     cur.generalizationNode.parent = this
     layout.createGeneralizationChildNodes(cur.generalizationNode)
+    if (this.renderer.registerNodeIndex) {
+      this.renderer.registerNodeIndex(cur.generalizationNode)
+    }
     // 大小
     if (cur.generalizationNode.width > maxWidth)
       maxWidth = cur.generalizationNode.width
@@ -301,6 +309,9 @@ function removeGeneralization() {
       item.generalizationLine = null
     }
     if (item.generalizationNode) {
+      if (this.renderer.unregisterNodeIndex) {
+        this.renderer.unregisterNodeIndex(item.generalizationNode)
+      }
       // 删除概要节点时要同步从激活节点里删除
       this.renderer.removeNodeFromActiveList(item.generalizationNode)
       item.generalizationNode.remove()

@@ -353,6 +353,8 @@ export default {
     collapseToolbar: 'Collapse top toolbar',
     expandToolbar: 'Expand top toolbar',
     undo: 'Undo',
+    undoRange: 'Undo the most recent {count} steps',
+    undoRangeLimited: 'Undo the most recent {count} steps. Earlier history has reached the storage limit. Export and manual save remain available.',
     redo: 'Redo',
     insertSiblingNode: 'Sibling node',
     insertChildNode: 'Child node',

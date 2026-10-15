@@ -122,6 +122,8 @@ export function normalizeRoomDto(apiRoom = {}, extras = {}) {
       apiRoom.updated_at ||
       '',
     revision: Number(apiRoom.revision || apiRoom.version || 0),
+    generation: apiRoom.generation == null ? undefined : String(apiRoom.generation),
+    resourceUpdatedAt: apiRoom.resourceUpdatedAt || apiRoom.updated_at || apiRoom.updatedAt || '',
     canView: apiRoom.canView !== false,
     canEdit:
       apiRoom.canEdit != null

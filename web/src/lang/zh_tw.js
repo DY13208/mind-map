@@ -347,6 +347,8 @@ export default {
     collapseToolbar: '收起頂部工具列',
     expandToolbar: '展開頂部工具列',
     undo: '復原',
+    undoRange: '可復原最近 {count} 步',
+    undoRangeLimited: '可復原最近 {count} 步；較早歷史已達到儲存上限。匯出及手動儲存仍可用。',
     redo: '重做',
     insertSiblingNode: '同層節點',
     insertChildNode: '子節點',

@@ -292,7 +292,7 @@ function requestWithUploadProgress(path, options = {}) {
   })
 }
 
-export function listFiles(extra = {}) {
+export function listFiles(extra = {}, options = {}) {
   const params = new URLSearchParams()
   if (extra.q) params.set('q', extra.q)
   // `null` represents the root directory.  Keep the key in that case so the
@@ -304,7 +304,7 @@ export function listFiles(extra = {}) {
   if (extra.offset != null) params.set('offset', String(extra.offset))
   if (extra.cursor) params.set('cursor', String(extra.cursor))
   const query = params.toString()
-  return request(`/api/files${query ? `?${query}` : ''}`)
+  return request(`/api/files${query ? `?${query}` : ''}`, options)
 }
 
 /** 按游标拉完当前用户可访问的全部脑图（引擎单页上限 100） */
