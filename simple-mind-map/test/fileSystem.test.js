@@ -175,9 +175,14 @@ function mockRes() {
   const sharedRoom = await folderAccess.fs.createRoom({
     title: 'shared-file', folderId: sharedParent.id, userId: OWNER
   })
-  await folderAccess.fs.createRoom({
+  const childRoom = await folderAccess.fs.createRoom({
     title: 'shared-child-file', folderId: sharedChild.id, userId: OWNER
   })
+  // Parent folder grants apply to direct files, never to a new child folder.
+  assert.deepStrictEqual(await folderAccess.store.listFolderMembers(sharedChild.id), [])
+  assert.ok(folderAccess.store.members.some(m => m.room_key === sharedRoom.room.roomKey && m.user_id === VIEWER && m.folder_role === 'viewer'))
+  assert.ok(!folderAccess.store.members.some(m => m.room_key === childRoom.room.roomKey && m.user_id === VIEWER))
+  assert.ok(!(await folderAccess.fs.listFolders({ userId: VIEWER })).list.some(f => f.id === sharedChild.id))
   const folderCounts = await folderAccess.fs.listFolders({ userId: OWNER })
   assert.strictEqual(
     folderCounts.list.find(item => item.id === sharedParent.id).roomCount,
