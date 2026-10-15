@@ -253,8 +253,17 @@ export default {
   },
   nodeHyperlink: {
     title: '超連結',
-    link: '連結',
-    name: '名稱'
+    description: '為節點新增相關資料，點擊連結即可查看。',
+    link: '連結網址',
+    name: '顯示名稱',
+    optional: '選填',
+    linkPlaceholder: '貼上網址，例如 https://example.com',
+    linkHint: '未填寫協定時將自動使用 HTTPS',
+    namePlaceholder: '例如：產品文件、專案資料',
+    openHint: '連結將在新分頁開啟，目前腦圖會保留',
+    remove: '移除連結',
+    invalidLink: '請輸入有效網址，僅支援 HTTP 或 HTTPS',
+    requiredLink: '請先輸入連結網址'
   },
   nodeIcon: {
     title: '圖示'

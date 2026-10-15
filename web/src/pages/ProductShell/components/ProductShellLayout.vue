@@ -458,6 +458,39 @@ export default {
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     scrollbar-gutter: stable;
+    &::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    &::-webkit-scrollbar-thumb {
+      min-height: 32px;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      background: var(--ui-scrollbar-thumb, rgba(111, 130, 121, 0.24));
+      background-clip: padding-box;
+    }
+    &:hover::-webkit-scrollbar-thumb,
+    &:focus-within::-webkit-scrollbar-thumb {
+      background-color: var(--ui-scrollbar-thumb-hover, rgba(111, 130, 121, 0.44));
+    }
+    &::-webkit-scrollbar-thumb:hover {
+      background-color: var(--ui-scrollbar-thumb-active, rgba(111, 130, 121, 0.64));
+    }
+    @supports (-moz-appearance: none) {
+      scrollbar-width: thin;
+      scrollbar-color: var(--ui-scrollbar-thumb, rgba(111, 130, 121, 0.24)) transparent;
+      &:hover,
+      &:focus-within {
+        scrollbar-color: var(--ui-scrollbar-thumb-hover, rgba(111, 130, 121, 0.44)) transparent;
+      }
+    }
+    @media (forced-colors: active) {
+      scrollbar-color: auto;
+      &::-webkit-scrollbar-thumb { background-color: CanvasText; }
+    }
   }
   a {
     height: 40px;
