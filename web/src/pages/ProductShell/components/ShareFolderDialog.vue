@@ -1,5 +1,7 @@
 <template>
-  <el-dialog
+  <component
+    :is="embedded ? 'section' : 'el-dialog'"
+    :class="{ permissionEmbedded: embedded, permissionReadOnly: readOnly }"
     :visible.sync="shown"
     custom-class="folderPermissionDialog"
     width="1080px"
@@ -26,6 +28,7 @@
           </p>
         </div>
         <button
+          v-if="!embedded"
           class="closeBtn"
           type="button"
           aria-label="关闭"
@@ -35,7 +38,7 @@
         </button>
       </header>
       <div class="permissionWorkspace">
-        <section class="organizationPane" aria-label="组织成员选择">
+        <section v-if="!readOnly" class="organizationPane" aria-label="组织成员选择">
           <div class="paneHeader">
             <div>
               <h3>选择部门与成员</h3>
@@ -137,7 +140,7 @@
           <div class="treeLegend"><span><i class="el-icon-check" /> 徽标表示已有权限</span><span>勾选表示本次授权对象</span></div>
         </section>
         <aside class="permissionDetailPane" aria-label="授权设置与预览">
-          <section class="detailSection selectedSection">
+          <section v-if="!readOnly" class="detailSection selectedSection">
             <div class="detailTitle">
               <h3>已选对象 <span class="selectionCount">{{ selectionCount }}</span></h3>
               <button
@@ -177,8 +180,8 @@
               <i class="el-icon-user" /><span>从左侧选择部门或成员</span>
             </div>
           </section>
-          <section class="detailSection">
-            <h3>本次授权的目标权限</h3>
+          <section v-if="!readOnly" class="detailSection">
+            <h3>{{ isRoom ? '本次直接授权' : '本次授权的目标权限' }}</h3>
             <el-radio-group v-model="role" class="roleOptions">
               <el-radio-button
                 v-for="option in roleOptions"
@@ -190,7 +193,7 @@
               >
             </el-radio-group>
           </section>
-          <section class="detailSection previewSection">
+          <section v-if="!readOnly" class="detailSection previewSection">
             <h3>授权范围</h3>
             <div class="applicationSettings">
               <el-checkbox v-model="autoSelectMembers"
@@ -246,7 +249,7 @@
             </div>
             <div class="existingList">
               <div v-if="filteredMembers.length" class="existingHead">
-                <span>对象</span><span>权限</span><span>操作</span>
+                <span>对象</span><span>{{ isRoom ? '直接授权' : '权限' }}</span><span>操作</span>
               </div>
               <div
                 v-for="member in pagedMembers"
@@ -256,26 +259,27 @@
                 <span class="memberAvatar small">{{ avatarText(member) }}</span
                 ><span class="existingIdentity"
                   ><strong>{{ member.name || member.id }}</strong
-                  ><small>{{ member.department || '成员' }}<template v-if="memberSourceLabel(member)"> · {{ memberSourceLabel(member) }}</template></small></span
+                  ><small>{{ member.department || '成员' }}<template v-if="memberSourceLabel(member)"> · {{ memberSourceLabel(member) }}</template><template v-if="isRoom && (member.folderRole || member.teamRole)"> · 实际{{ roleLabel(member.role) }}</template></small></span
                 ><span
-                  v-if="isOwnerRole(member.role)"
+                  v-if="isOwnerRole(member.role) || readOnly"
                   class="ownerRoleLabel"
-                  >所有者</span
+                  >{{ roleLabel(member.role) }}</span
                 ><el-select
                   v-else
                   size="mini"
                   :class="['memberRoleSelect', String(member.role).toLowerCase()]"
-                  :value="member.role"
+                  :value="editableMemberRole(member)"
                   :aria-label="`修改${member.name || member.id}的权限`"
                   @change="updateRole(member, $event)"
-                  ><el-option
+                  ><el-option v-if="isRoom && !member.directRole" value="" label="继承权限" disabled />
+                  <el-option
                     v-for="option in memberRoleSelectOptions"
                     :key="option.value"
                     :label="option.label"
                     :value="option.value" :disabled="option.disabled"/></el-select
                 ><template v-if="isOwnerRole(member.role)">
                   <button
-                    v-if="canTransferOwnership"
+                    v-if="!readOnly && canTransferOwnership"
                     class="transferBtn"
                     type="button"
                     @click="openTransferDialog(member)"
@@ -285,7 +289,7 @@
                   <span v-else class="ownerBadge">所有者</span>
                 </template>
                 <button
-                  v-else
+                  v-else-if="!readOnly"
                   class="removeBtn"
                   :disabled="isInheritedOnly(member)"
                   :title="isInheritedOnly(member) ? '请在来源文件夹或团队中移除继承权限' : '移除成员直接权限'"
@@ -373,11 +377,11 @@
         >
       </span>
     </el-dialog>
-    <span slot="footer" class="permissionFooter"
+    <span v-if="!readOnly" slot="footer" class="permissionFooter"
       ><span class="footerHint"
         ><i class="el-icon-success" /> {{ loadFailed ? '加载失败，请关闭后重试' : isFolderManager ? '可管理成员请在右侧调整权限；批量授权仅限所有者' : '勾选授权保存后生效；列表修改即时生效' }}</span
       ><span
-        ><el-button @click="shown = false">取消</el-button
+        ><el-button v-if="!embedded" @click="shown = false">取消</el-button
         ><el-button
           type="primary"
           :disabled="!selectionCount || loadFailed || (isFolderManager && !isRoom && !isTeam)"
@@ -387,7 +391,7 @@
         ></span
       ></span
     >
-  </el-dialog>
+  </component>
 </template>
 
 <script>
@@ -399,6 +403,8 @@ export default {
   name: 'ShareFolderDialog',
   props: {
     visible: Boolean,
+    embedded: Boolean,
+    readOnly: Boolean,
     folder: Object,
     room: Object,
     team: Object,
@@ -482,8 +488,8 @@ export default {
     resourceDescription() {
       if (this.isTeam) return '权限将应用于整个团队空间与成员协作'
       return this.isRoom
-        ? '权限仅应用于当前脑图'
-        : '权限将应用于文件夹内现有及后续脑图'
+        ? '修改当前脑图的直接授权；文件夹和团队继承权限仍然有效'
+        : '权限应用于直属现有及后续脑图；子文件夹需要单独授权'
     },
     roleOptions() {
       if (this.isTeam) {
@@ -822,7 +828,7 @@ export default {
       this.loading = true
       try {
         const [departments] = await Promise.all([
-          teamService.listDepartments(),
+          this.readOnly ? Promise.resolve([]) : teamService.listDepartments(),
           this.loadMembers()
         ])
         if (version !== this.loadVersion) return
@@ -1111,6 +1117,11 @@ export default {
       this.roleFilter = ''
       this.$refs.existingSection.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     },
+    editableMemberRole(member) {
+      const role = this.isRoom && member.directRole !== undefined ? member.directRole || '' : member.role
+      const option = this.roleOptions.find(item => String(item.value).toLowerCase() === String(role).toLowerCase())
+      return option ? option.value : role
+    },
     isInheritedOnly(member) {
       return this.isRoom && member.directRole === null && !!(member.folderRole || member.teamRole)
     },
@@ -1207,7 +1218,7 @@ export default {
       }
     },
     async confirmTransferOwnership() {
-      if (!this.transferTargetId) return
+      if (this.readOnly || !this.transferTargetId) return
       const version = this.loadVersion
       const resourceId = this.resourceId
       this.busy = true
@@ -1242,7 +1253,7 @@ export default {
       }
     },
     async grantSelected() {
-      if (this.busy || this.loading || this.loadFailed || !this.selectionCount) return
+      if (this.readOnly || this.busy || this.loading || this.loadFailed || !this.selectionCount) return
       if (this.selectionFullyLoaded && !this.selectedMemberChanges.some(item => this.needsRoleChange(item.member))) {
         this.$message.info('所选成员权限未变化，无需保存')
         return
@@ -1421,17 +1432,22 @@ export default {
       }
       if (version === this.loadVersion && resourceId === this.resourceId) this.members = list
     },
-    async run(action) {
-      if (this.busy || this.loadFailed) return
+    async run(action, requestedRole, removedId) {
+      if (this.readOnly || this.busy || this.loadFailed) return
       const version = this.loadVersion
       this.busy = true
       try {
-        await action()
+        const updated = await action()
         if (version !== this.loadVersion) return
         await this.loadMembers()
         if (version !== this.loadVersion) return
         this.$emit('changed')
-        this.$message.success(`${this.resourceLabel}权限已更新`)
+        const remaining = removedId && this.members.find(member => member.id === removedId)
+        if (this.isRoom && remaining && (remaining.folderRole || remaining.teamRole)) {
+          this.$message.warning(`直接授权已移除，仍有${this.roleLabel(remaining.role)}的继承权限；请在来源文件夹或团队调整`)
+        } else if (this.isRoom && requestedRole && updated && String(updated.role).toLowerCase() !== String(requestedRole).toLowerCase()) {
+          this.$message.warning(`直接授权已更新，实际仍为${this.roleLabel(updated.role)}；请在来源文件夹或团队调整继承权限`)
+        } else this.$message.success(`${this.resourceLabel}权限已更新`)
       } catch (error) {
         if (version === this.loadVersion) this.$message.error(error.message || '更新权限失败')
       } finally {
@@ -1439,7 +1455,7 @@ export default {
       }
     },
     updateRole(member, role) {
-      if (String(role).toLowerCase() === String(member.role).toLowerCase()) return
+      if (String(role).toLowerCase() === String(this.editableMemberRole(member)).toLowerCase()) return
       return this.run(() => {
         if (this.isTeam)
           return teamService.updateMemberRole(
@@ -1450,7 +1466,7 @@ export default {
         return this.isRoom
           ? shareService.updateMemberRole(this.resourceId, member.id, role)
           : folderService.updateMember(this.resourceId, member.id, role)
-      })
+      }, role)
     },
     remove(member) {
       return this.run(() => {
@@ -1459,7 +1475,7 @@ export default {
         return this.isRoom
           ? shareService.removeMember(this.resourceId, member.id)
           : folderService.removeMember(this.resourceId, member.id)
-      })
+      }, null, member.id)
     }
   }
 }
@@ -2190,5 +2206,18 @@ button:focus-visible { outline: 2px solid #087854; outline-offset: 2px; }
   .departmentMemberToggle { margin-left: 50px; margin-bottom: 7px; }
   .footerHint { max-width: 48%; line-height: 1.5; font-size: 11px; }
   .permissionFooter .el-button { padding: 9px 11px; }
+}
+</style>
+
+<style lang="less">
+.permissionEmbedded {
+  .permissionWorkspace { height: ~"min(580px, calc(100vh - 400px))"; min-height: 340px; }
+  .permissionFooter { padding: 14px 0 0; }
+  .permissionHeader h2 { font-size: 15px; }
+  .permissionHeader p { line-height: 1.6; }
+}
+.permissionReadOnly .permissionWorkspace { grid-template-columns: 1fr; }
+@media (max-width: 900px) {
+  .permissionEmbedded .permissionWorkspace { height: 58vh; min-height: 320px; }
 }
 </style>

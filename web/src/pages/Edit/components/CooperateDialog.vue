@@ -1,10 +1,10 @@
 <template>
   <el-dialog
     class="cooperateDialog"
-    :custom-class="'cooperateDialogShell' + (isDark ? ' isDark' : '')"
+    :custom-class="'cooperateDialogShell' + (isDark ? ' isDark' : '') + (activeDialogTab === 'members' && connected ? ' isPermissions' : '')"
     :title="$t('cooperate.title')"
     :visible.sync="dialogVisible"
-    width="680px"
+    :width="activeDialogTab === 'members' && connected ? '1080px' : '680px'"
     append-to-body
   >
     <div class="cooperateBox" :class="{ isDark: isDark }">
@@ -64,78 +64,17 @@
       <el-tabs v-model="activeDialogTab" type="card" class="cooperateTabs" @tab-click="onDialogTabClick">
         <el-tab-pane lazy name="members">
           <span slot="label" class="dialogTabLabel"><i class="el-icon-lock" aria-hidden="true"></i>{{ $t('acl.share') }}</span>
-          <section class="memberPanel" v-if="connected && roomName">
-            <div v-if="roomCanManage" class="memberAdd">
-              <el-input
-                v-model.trim="memberQuery"
-                size="small"
-                :placeholder="$t('acl.searchUsers')"
-                @input="searchMemberUsers"
-                @keydown.native.stop
-              ></el-input>
-              <div class="userHits" v-if="userHits.length">
-                <div
-                  class="memberItem"
-                  v-for="user in userHits"
-                  :key="user.user_id"
-                >
-                  <span class="name">{{ user.name || user.user_id }}</span>
-                  <el-button
-                    type="text"
-                    @click="addMember(user, 'viewer')"
-                    >{{ $t('acl.addViewer') }}</el-button
-                  >
-                  <el-button type="text" @click="addMember(user, 'editor')">{{
-                    $t('acl.addEditor')
-                  }}</el-button>
-                </div>
-              </div>
-              <p class="userSearchHint" v-if="userHits.length === 8">{{ $t('cooperate.userSearchHint') }}</p>
-            </div>
-            <div v-if="membersLoading" class="empty">{{ $t('other.loading') }}</div>
-            <div v-else-if="membersError" class="empty">{{ membersError }} <el-button type="text" @click="loadMembers">{{ $t('cooperate.refresh') }}</el-button></div>
-            <div v-else-if="!memberList.length" class="empty">{{ $t('cooperate.noMembers') }}</div>
-            <div v-else class="memberList">
-              <div class="memberItem" v-for="item in pagedMembers" :key="item.user_id">
-                <span
-                  class="avatar"
-                  :style="memberAvatarStyle(item)"
-                >{{ memberInitial(item) }}</span>
-                <span class="name">{{ item.name || item.user_id }}</span>
-                <span class="roleTag" v-if="!roomCanManage" :class="item.role">{{
-                  memberRoleText(item.role)
-                }}</span>
-                <template v-if="roomCanManage">
-                  <el-select
-                    :value="item.role"
-                    size="mini"
-                    class="roleSelect"
-                    :disabled="memberBusy"
-                    @change="val => changeMemberRole(item, val)"
-                  >
-                    <el-option :label="$t('acl.owner')" value="owner"></el-option>
-                    <el-option :label="$t('acl.editor')" value="editor"></el-option>
-                    <el-option :label="$t('acl.viewer')" value="viewer"></el-option>
-                  </el-select>
-                  <el-button
-                    type="text"
-                    class="danger"
-                    :disabled="memberBusy"
-                    @click="dropMember(item)"
-                    >{{ $t('acl.remove') }}</el-button
-                  >
-                </template>
-              </div>
-            </div>
-            <div class="filePager" v-if="memberList.length">
-              <el-pagination
-                background small layout="total, prev, pager, next"
-                :page-size="memberPageSize" :current-page.sync="memberPage"
-                :total="memberList.length" :pager-count="5" :disabled="membersLoading || !!membersError"
-              ></el-pagination>
-            </div>
-          </section>
-          <div v-else class="empty">{{ $t('cooperate.disconnected') }}</div>
+          <ShareFolderDialog
+            v-if="connected && roomName && dialogVisible && activeDialogTab === 'members'"
+            :key="roomName"
+            embedded
+            :visible="true"
+            resource-type="room"
+            :room="permissionRoom"
+            :read-only="!roomCanManage"
+            @changed="refreshRoomAccess"
+          />
+          <div v-else-if="!connected" class="empty">{{ $t('cooperate.disconnected') }}</div>
         </el-tab-pane>
 
         <el-tab-pane lazy name="files">
@@ -350,6 +289,7 @@ import { getCurrentUser } from '@/utils/auth'
 import { buildInviteUrl, roomFromLocation } from '@/utils/roomLocation'
 import { normalizeRoomDto, requireRoomKey } from '@/services/roomDto'
 import roomService from '@/services/roomService'
+import ShareFolderDialog from '@/pages/ProductShell/components/ShareFolderDialog.vue'
 import historyService from '@/services/historyService'
 import {
   listFiles,
@@ -375,11 +315,7 @@ import {
   patchFileNode,
   deleteFileNode,
   replaceFileTree,
-  getFileMembers,
-  addFileMember,
-  updateFileMember,
-  removeFileMember,
-  searchUsers
+  getFileMembers
 } from '@/utils/fileApi'
 import { countNodes, stubImportedTree } from '@/utils/importTree'
 import {
@@ -477,6 +413,7 @@ const defaultServerUrl = () => {
 }
 
 export default {
+  components: { ShareFolderDialog },
   props: {
     mindMap: {
       type: Object,
@@ -532,15 +469,7 @@ export default {
       historyTotal: 0,
       historyThroughVersion: null,
       historyError: '',
-      membersError: '',
       filesError: '',
-      memberList: [],
-      memberPage: 1,
-      memberPageSize: 6,
-      membersLoading: false,
-      memberQuery: '',
-      userHits: [],
-      memberBusy: false,
       collabV2Adapter: null,
       personalExpandState: null,
       personalExpandRoomKey: '',
@@ -595,9 +524,9 @@ export default {
     pagedOnlinePeers() {
       return this.filteredOnlinePeers.slice((this.onlinePeerPage - 1) * 8, this.onlinePeerPage * 8)
     },
-    pagedMembers() {
-      const start = (this.memberPage - 1) * this.memberPageSize
-      return this.memberList.slice(start, start + this.memberPageSize)
+    permissionRoom() {
+      const root = this.mindMap && this.mindMap.renderer && this.mindMap.renderer.root
+      return { roomKey: this.roomName, title: root ? String(root.getData('text') || '').replace(/<[^>]*>/g, '') : this.roomName }
     },
     filteredHistory() {
       return this.historyList
@@ -606,10 +535,6 @@ export default {
   watch: {
     filteredOnlinePeers() {
       this.onlinePeerPage = Math.min(this.onlinePeerPage, Math.max(1, Math.ceil(this.filteredOnlinePeers.length / 8)))
-    },
-    memberList() {
-      const lastPage = Math.max(1, Math.ceil(this.memberList.length / this.memberPageSize))
-      this.memberPage = Math.min(this.memberPage, lastPage)
     },
     mindMap(val, prev) {
       if (prev) {
@@ -692,10 +617,6 @@ export default {
     if (this._fileSearchTimer) {
       clearTimeout(this._fileSearchTimer)
       this._fileSearchTimer = null
-    }
-    if (this._memberSearchTimer) {
-      clearTimeout(this._memberSearchTimer)
-      this._memberSearchTimer = null
     }
   },
   methods: {
@@ -1010,7 +931,7 @@ export default {
           this.applyAccess({
             role: snap.role,
             canEdit: snap.canEdit,
-            canManage: snap.role === 'owner',
+            canManage: ['owner', 'manager'].includes(snap.role),
             shareId: snap.shareId || null,
             canView: snap.canView
           })
@@ -1092,22 +1013,6 @@ export default {
       return this.$t(memberRoleLabelKey(role))
     },
 
-    memberInitial(item) {
-      const name = String((item && (item.name || item.user_id)) || '?').trim()
-      return name.slice(0, 1)
-    },
-
-    memberAvatarStyle(item) {
-      if (item && item.avatar) {
-        return {
-          backgroundImage: `url(${item.avatar})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center'
-        }
-      }
-      return {}
-    },
-
     onAclDenied() {
       this.applyAccess({ role: 'viewer', canEdit: false, canManage: false })
       this.$message.warning(this.$t('acl.demoted'))
@@ -1129,11 +1034,11 @@ export default {
     openShare() {
       this.activeDialogTab = this.connected ? 'members' : 'settings'
       this.dialogVisible = true
-      this.loadMembers()
+      this.refreshRoomAccess()
     },
 
     onDialogTabClick(tab) {
-      if (tab.name === 'members' && this.connected) this.loadMembers()
+      if (tab.name === 'members' && this.connected) this.refreshRoomAccess()
       if (tab.name === 'files') this.loadFiles()
       if (tab.name === 'history') this.loadHistory()
     },
@@ -1169,7 +1074,7 @@ export default {
       this.dialogVisible = true
       this.filePage = 1
       this.loadFiles()
-      if (this.connected) this.loadMembers()
+      if (this.connected) this.refreshRoomAccess()
     },
 
     createRoom() {
@@ -1410,10 +1315,8 @@ export default {
         this.persistCurrentMapView()
         this.leave({ silent: true })
       }
-      this.memberPage = 1
       this._membersAttempt = (this._membersAttempt || 0) + 1
       this._historyAttempt = (this._historyAttempt || 0) + 1
-      this.memberList = []; this.membersError = ''; this.membersLoading = false
       this.historyList = []; this.historyTotal = 0; this.historyThroughVersion = null; this.historyLoading = false
       this.roomName = room
       await this.openSavedRoom({ silent: true })
@@ -1830,7 +1733,7 @@ export default {
     leave(options = {}) {
       this._membersAttempt = (this._membersAttempt || 0) + 1
       this._historyAttempt = (this._historyAttempt || 0) + 1
-      this.membersLoading = false; this.historyLoading = false
+      this.historyLoading = false
       const silent = !!options.silent
       if (this.connectTimer) {
         clearTimeout(this.connectTimer)
@@ -2666,7 +2569,7 @@ export default {
         this.$message.success(this.$t('cooperate.openSuccess'))
       }
       this.applyAccess(preview)
-      this.loadMembers()
+      this.refreshRoomAccess()
       await this.afterMapOpened()
       return true
     },
@@ -2953,85 +2856,19 @@ export default {
       }
     },
 
-    async loadMembers() {
+    async refreshRoomAccess() {
       const room = this.roomName
       const attempt = this._membersAttempt = (this._membersAttempt || 0) + 1
-      if (!room) { this.memberList = []; this.membersError = ''; return }
-      this.membersLoading = true; this.membersError = ''
+      if (!room) return
       try {
         const data = await getFileMembers(room)
         if (attempt !== this._membersAttempt || this.roomName !== room) return
-        this.memberList = data.list || []
         if (data.role || data.canEdit != null) this.applyAccess(data)
       } catch (err) {
-        if (attempt !== this._membersAttempt || this.roomName !== room) return
-        this.membersError = this.$t('cooperate.listLoadFailed')
-      } finally {
-        if (attempt === this._membersAttempt && this.roomName === room) this.membersLoading = false
-      }
-    },
-
-    async searchMemberUsers() {
-      if (this._memberSearchTimer) clearTimeout(this._memberSearchTimer)
-      if (!this.memberQuery) {
-        this.userHits = []
-        return
-      }
-      this._memberSearchTimer = setTimeout(async () => {
-        this._memberSearchTimer = null
-        const q = this.memberQuery
-        try {
-          const data = await searchUsers(q, 8)
-          if (this.memberQuery !== q) return
-          this.userHits = data.list || []
-        } catch (err) {
-          this.userHits = []
-        }
-      }, 280)
-    },
-
-    async addMember(user, role) {
-      if (!this.roomCanManage || !user || !user.user_id) return
-      this.memberBusy = true
-      try {
-        await addFileMember(this.roomName, user.user_id, role || 'viewer')
-        this.memberQuery = ''
-        this.userHits = []
-        await this.loadMembers()
-        this.$message.success(this.$t('acl.memberAdded'))
-      } catch (err) {
-        this.$message.error(err.message || this.$t('acl.updateFailed'))
-      } finally {
-        this.memberBusy = false
-      }
-    },
-
-    async changeMemberRole(item, role) {
-      if (!this.roomCanManage || !item) return
-      this.memberBusy = true
-      try {
-        await updateFileMember(this.roomName, item.user_id, role)
-        await this.loadMembers()
-      } catch (err) {
-        this.$message.error(err.message || this.$t('acl.updateFailed'))
-      } finally {
-        this.memberBusy = false
-      }
-    },
-
-    async dropMember(item) {
-      if (!this.roomCanManage || !item) return
-      this.memberBusy = true
-      try {
-        await removeFileMember(this.roomName, item.user_id)
-        await this.loadMembers()
-        this.$message.success(this.$t('acl.memberRemoved'))
-      } catch (err) {
-        this.$message.error(err.message || this.$t('acl.updateFailed'))
-      } finally {
-        this.memberBusy = false
+        if (attempt === this._membersAttempt && this.roomName === room && err.statusCode === 403) this.onAclDenied()
       }
     }
+
   }
 }
 </script>
@@ -3259,58 +3096,6 @@ export default {
   .roleTag.viewer {
     color: #92400e;
     background: #fef3c7;
-  }
-
-  .memberPanel {
-    margin-bottom: 0;
-    padding: 12px;
-    border: 1px solid #e6e8eb;
-    border-radius: 10px;
-    background: #fff;
-  }
-  .memberList,
-  .userHits {
-    border: 1px solid #e6e8eb;
-    border-radius: 8px;
-    max-height: 260px;
-    overflow: auto;
-  }
-  .memberItem {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    box-sizing: border-box;
-    min-height: 40px;
-    padding: 6px 10px;
-    font-size: 13px;
-    .avatar {
-      width: 22px;
-      height: 22px;
-      border-radius: 50%;
-      background: #94a3b8;
-      color: #fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      flex-shrink: 0;
-    }
-    .name {
-      flex: 1;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .roleSelect {
-      width: 96px;
-    }
-    .danger { color: #d14343; }
-  }
-  .userSearchHint { margin: 6px 0 0; font-size: 12px; color: #6b7280; }
-  .memberAdd {
-    margin-bottom: 12px;
-    .userHits { margin-top: 8px; }
   }
 
   .fileTime {
@@ -3638,5 +3423,11 @@ export default {
   .you { color: #2563eb; }
   .onlinePeersEmpty { text-align: center; font-size: 12px; padding: 16px; color: #6b7280; }
   &.isDark { background: #262b30; border-color: #465363; color: #dce3ec; .el-input__inner { background: #29313b; border-color: #465363; color: #dce3ec; } .you { color: #a7cdff; } }
+}
+</style>
+
+<style lang="less">
+.cooperateDialogShell.isPermissions .el-dialog__body {
+  max-height: calc(100vh - 145px);
 }
 </style>

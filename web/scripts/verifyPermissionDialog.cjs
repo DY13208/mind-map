@@ -36,6 +36,33 @@ async function main() {
   vm.$props.resourceType='room';vm.members=[normalizeMemberDto({user_id:'id-0',wecom_userid:'wx-0',role:'editor',direct_role:null,folder_role:'editor'})];vm.role='Editor'
   assert.equal(vm.isInheritedOnly(vm.members[0]),true);assert.equal(vm.needsRoleChange(vm.members[0]),true,'Direct grant differs from inherited access')
   assert.equal(normalizeRoomDto({room_key:'room',role:'manager'}).canManage,true)
+  const inherited = vm.members[0]
+  assert.equal(vm.editableMemberRole(inherited),'','Pure inheritance is not a direct grant')
+  assert.equal(vm.editableMemberRole({...inherited,directRole:'viewer'}),'Viewer','Normalize backend role casing to UI options')
+  let patchCount=0
+  const patched={user_id:'id-0',role:'editor',direct_role:'viewer',folder_role:'editor'}
+  setProductHttp(async (url, options={})=>{if(options.method==='PATCH'){patchCount++;return patched}if(options.method==='DELETE'){patched.direct_role=null;return {ok:true}}return {list:[patched]}})
+  await vm.updateRole(inherited,'Viewer')
+  assert.equal(patchCount,1)
+  assert.equal(vm.members[0].directRole,'viewer')
+  assert.equal(vm.members[0].role,'Editor')
+  assert.match(messages.pop(),/继承权限/)
+  await vm.updateRole(vm.members[0],'Viewer')
+  assert.equal(patchCount,1,'Unchanged direct grant must not submit again')
+  vm.$props.readOnly=true
+  await vm.updateRole(vm.members[0],'Editor')
+  assert.equal(patchCount,1,'Read-only mode must not submit mutations')
+  vm.$props.readOnly=false
+  await vm.remove(vm.members[0])
+  assert.equal(vm.members[0].directRole,null)
+  assert.equal(vm.members[0].role,'Editor')
+  assert.match(messages.pop(),/直接授权已移除/,'Explain remaining inherited access after removal')
+  const template=compiler.parseComponent(fs.readFileSync(path.join(root,'src/pages/Edit/components/CooperateDialog.vue'),'utf8')).template.content
+  assert.deepEqual(compiler.compile(template).errors,[])
+  assert.match(template,/<ShareFolderDialog/)
+  assert(!template.includes('changeMemberRole'))
+  const sharedTemplate=compiler.parseComponent(fs.readFileSync(path.join(root,'src/pages/ProductShell/components/ShareFolderDialog.vue'),'utf8')).template.content
+  assert.deepEqual(compiler.compile(sharedTemplate).errors,[])
   // Late reads from a closed/switched dialog must not replace current ACL data.
   let resolveRead;setProductHttp(()=>new Promise(resolve=>{resolveRead=resolve}));const pending=vm.loadMembers();vm.loadVersion++;const current=vm.members;resolveRead({list:[{user_id:'stale',role:'owner'}]});await pending;assert.equal(vm.members,current)
   vm.$destroy();setProductHttp(null)
