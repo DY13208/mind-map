@@ -3427,7 +3427,44 @@ export default {
 </style>
 
 <style lang="less">
-.cooperateDialogShell.isPermissions .el-dialog__body {
-  max-height: calc(100vh - 145px);
+.cooperateDialogShell.isPermissions {
+  display: flex;
+  flex-direction: column;
+  height: 96vh;
+  max-height: 96vh;
+  margin: 2vh auto 0 !important;
+
+  > .el-dialog__header { flex-shrink: 0; }
+  > .el-dialog__body {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    display: flex;
+    overflow: hidden;
+  }
+  .cooperateBox,
+  .cooperateTabs,
+  .permissionEmbedded,
+  .permissionDialogBody {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .statusBar,
+  .peerList,
+  .el-tabs__header,
+  .permissionHeader,
+  .permissionFooter { flex-shrink: 0; }
+  .el-tabs__content {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+  }
+  #pane-members { flex: 1; min-height: 0; display: flex; }
+  .permissionWorkspace { flex: 1; height: auto; min-height: 0; }
 }
 </style>

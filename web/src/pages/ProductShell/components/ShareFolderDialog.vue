@@ -2155,7 +2155,7 @@ export default {
 }
 </style>
 <style lang="less" scoped>
-.permissionDetailPane { display: flex; flex-direction: column; overflow: hidden; }
+.permissionDetailPane { display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; }
 .detailSection { flex: 0 0 auto; padding: 12px 16px; }
 .selectedSection { min-height: 0; }
 .selectionCount { margin-left: 5px; padding: 2px 7px; background: #f0f3f2; border-radius: 12px; color: #66756e; font-size: 11px; font-weight: 500; }
@@ -2169,8 +2169,11 @@ export default {
 .applicationSettings /deep/ .el-checkbox { margin-right: 0; }
 .previewBox { border: 0; background: #f6f9f7; }
 .previewSection h3 { display: none; }
-.existingSection { flex: 1; min-height: 180px; display: flex; flex-direction: column; }
-.existingList { flex: 1; min-height: 0; overflow: auto; border: 1px solid #e7ece9; }
+.existingSection { flex: 1 0 auto; min-height: 0; display: flex; flex-direction: column; }
+.existingSection > * { flex-shrink: 0; }
+// Keep at least five complete member rows visible, even when grant settings
+// fill the pane. Short windows scroll the pane instead of crushing the list.
+.existingList { flex: 1 0 300px; min-height: 300px; overflow: auto; border: 1px solid #e7ece9; }
 .existingHead { position: sticky; top: 0; z-index: 1; }
 .existingRow { min-height: 52px; }
 .existingIdentity strong { font-size: 13px; }
