@@ -184,20 +184,34 @@ const INCREMENTAL_EVENT_TYPES = new Set([
   'node.reordered',
   'node.deleted',
   'node.restored',
+  'batch.applied',
   'operation.undone',
   'operation.redone'
 ])
 
+function isSupportedIncrementalEvent(event, depth = 0) {
+  if (!event || depth > 8) return false
+  const payload = event.payload || {}
+  const type = String(event.type || '')
+  if (type === 'batch.applied') {
+    return (
+      Array.isArray(payload.events) &&
+      payload.events.every(child => isSupportedIncrementalEvent(child, depth + 1))
+    )
+  }
+  return INCREMENTAL_EVENT_TYPES.has(type)
+}
+
 function operationRequiresSnapshot(op) {
-  const event = (op && op.event) || {}
+  const event = (op && op.event) || op || {}
   const payload = (op && op.payload) || event.payload || {}
-  const type = String(op && (op.type || event.type) || '')
+  const type = String((op && op.type) || event.type || '')
   return (
     event.resnapshot === true ||
     payload.resnapshot === true ||
     type === 'map.replaced' ||
     isVersionRestoreEvent(op) ||
-    !INCREMENTAL_EVENT_TYPES.has(type)
+    !isSupportedIncrementalEvent({ ...event, type, payload })
   )
 }
 
@@ -408,6 +422,7 @@ function createCollaborationAdapter(options = {}) {
   let historyQueue = Promise.resolve()
   let remoteEventsBuffered = false
   let bufferedRemoteOps = []
+  let remoteApplyQueue = Promise.resolve()
   let pendingResnapshotNotice = null
   let resyncPromise = null
   let resyncRetryTimer = null
@@ -982,7 +997,23 @@ function createCollaborationAdapter(options = {}) {
     }
     let diagnosticCallbackResult
     if (options.onRemoteOperation && !meta.local) {
-      diagnosticCallbackResult = await options.onRemoteOperation(op)
+      try {
+        diagnosticCallbackResult = await options.onRemoteOperation(op)
+      } catch (err) {
+        if (meta.fromSync) throw err
+        bufferRemoteOperation(op)
+        await resync()
+        return
+      }
+      if (diagnosticCallbackResult === false) {
+        const error = new Error('remote operation was not applied')
+        error.code = 'REMOTE_APPLY_FAILED'
+        error.currentRevision = state.lastServerRevision
+        if (meta.fromSync) throw error
+        bufferRemoteOperation(op)
+        await resync()
+        return
+      }
     }
     if (opId) state.seenOpIds.add(opId)
     advanceRevision(rev)
@@ -1004,7 +1035,16 @@ function createCollaborationAdapter(options = {}) {
         bufferRemoteOperation(op)
         return
       }
-      applyRemoteOperation(op).catch(err => {
+      const receivedRoomKey = state.roomKey
+      const task = remoteApplyQueue.then(async () => {
+        if (state.roomKey !== receivedRoomKey) return
+        if (remoteEventsBuffered) {
+          bufferRemoteOperation(op)
+          return
+        }
+        await applyRemoteOperation(op)
+      })
+      remoteApplyQueue = task.catch(err => {
         performanceObserver.record('event_apply_failed', { roomKey: state.roomKey, opId: op && (op.opId || op.operationId), code: err && err.code || 'REMOTE_APPLY_FAILED' })
         recordError({
           code: (err && err.code) || 'REMOTE_APPLY_FAILED',

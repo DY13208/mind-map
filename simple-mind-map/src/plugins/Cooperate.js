@@ -125,7 +125,7 @@ const STRUCTURE_COMMANDS = {
 
 const RECENT_HTTP_MS = 8000
 const RECENT_PUSH_GRACE_MS = 2500
-const REMOTE_GEOMETRY_RENDER_MS = 120
+const REMOTE_GEOMETRY_RENDER_MS = 50
 const GEN_INTENT_MS = 30000
 const PATCH_CONCURRENCY = 2
 const HTTP_RECOVER_RETRY_BASE_MS = 500
@@ -2190,7 +2190,7 @@ class Cooperate {
     })
   }
 
-  applyV2RemoteOperation(op, meta = {}) {
+  async applyV2RemoteOperation(op, meta = {}) {
     const renderer = this.mindMap && this.mindMap.renderer
     const adapter = this.collabV2Adapter
     const status = adapter && adapter.getStatus && adapter.getStatus()
@@ -2200,7 +2200,28 @@ class Cooperate {
     // Serialize all entry calls, including ones that arrive after a layout-end
     // but before an older renderer waiter resumes. Never let newer text rewind.
     const task = Promise.resolve(this._v2RemoteApplyQueue).catch(() => {})
-      .then(() => this.applyV2RemoteOperationNow(op, meta, context))
+      .then(async () => {
+        const beginBatch = renderer && renderer.beginRemoteRenderBatch
+        const endBatch = renderer && renderer.endRemoteRenderBatch
+        if (typeof beginBatch === 'function') beginBatch.call(renderer)
+        try {
+          const applied = await this.applyV2RemoteOperationNow(op, meta, context)
+          const event = (op && op.event) || op || {}
+          const version = Number(op && (op.serverRevision || op.version) || event.version)
+          const last = Number(this.lastAppliedVersion) || 0
+          if (applied && Number.isFinite(version) && version > last) {
+            if (version === last + 1) {
+              this.lastAppliedVersion = version
+              if (this.collabStore) this.collabStore.setLastAppliedVersion(version)
+            } else if (typeof this.scheduleRemoteRecover === 'function') {
+              this.scheduleRemoteRecover(version)
+            }
+          }
+          return applied
+        } finally {
+          if (typeof endBatch === 'function') endBatch.call(renderer)
+        }
+      })
     this._v2RemoteApplyQueue = task.catch(() => {})
     return task
   }
@@ -2294,38 +2315,10 @@ class Cooperate {
       return this.syncHttpRemoteOperations([op])
     }
     if (type === 'batch.applied' && Array.isArray(payload.events)) {
-      const pending = payload.events.slice()
-      let guard = 0
-      while (pending.length && guard < pending.length + 3) {
-        guard += 1
-        const next = []
-        for (const child of pending) {
-          const applied = await this.applyV2RemoteOperationNow(
-            {
-              event: child,
-              serverRevision: op.serverRevision
-            },
-            { ...meta, deferFallback: true },
-            context
-          )
-          if (!applied) next.push(child)
-        }
-        if (next.length === pending.length) break
-        pending.splice(0, pending.length, ...next)
-      }
-      if (pending.length) {
-        v2Trace('remote.apply.batch.leftover', { left: pending.length })
-        if (this.deferUnloadedRemoteEvents(pending)) return true
-        return this.syncHttpRemoteOperations([op])
-      }
-      return true
+      return this.applyV2RemoteBatchEvents(op, meta, payload.events, context)
     }
     if (type === 'map.updated') {
       this.applyRemoteMapMeta(payload)
-      this.lastAppliedVersion = Math.max(
-        Number(this.lastAppliedVersion) || 0,
-        Number(op.serverRevision) || 0
-      )
       return true
     }
     if (type === 'map.replaced' || payload.resnapshot) {
@@ -2419,6 +2412,14 @@ class Cooperate {
         this.notifySearchInvalidate()
         return true
       }
+      if (meta.deferFallback && normalized.uid && renderer && renderer.renderTree) {
+        const pendingNode = this.findTreeNode(renderer.renderTree, normalized.uid)
+        if (pendingNode && pendingNode.data) {
+          Object.assign(pendingNode.data, normalized.patch || {})
+          this.notifySearchInvalidate()
+          return true
+        }
+      }
       if (meta.deferFallback) return false
     } else if (
       type === 'operation.undone' ||
@@ -2510,6 +2511,37 @@ class Cooperate {
     const applied = this.syncHttpRemoteOperations([op])
     this.notifySearchInvalidate()
     return applied
+  }
+
+  async applyV2RemoteBatchEvents(op, meta = {}, events = [], context) {
+    const deferred = []
+    for (let index = 0; index < events.length; index += 1) {
+      const child = events[index]
+      const childOp = { event: child, serverRevision: op.serverRevision }
+      const applied = await this.applyV2RemoteOperationNow(childOp, {
+        ...meta,
+        deferFallback: true
+      }, context)
+      if (applied) continue
+      if (this.deferUnloadedRemoteEvents([child])) {
+        deferred.push(child)
+        continue
+      }
+      const unresolved = events.slice(index)
+      unresolved.forEach(event => {
+        const childPayload = (event && event.payload) || {}
+        this.markRemoteDirty(childPayload.uid, payloadParentUid(childPayload))
+      })
+      v2Trace('remote.apply.batch.reconcile', {
+        failedAt: index,
+        remaining: unresolved.length
+      })
+      return this.syncHttpRemoteOperations(
+        unresolved.map(event => ({ event, serverRevision: op.serverRevision }))
+      )
+    }
+    if (deferred.length) v2Trace('remote.apply.batch.defer', { count: deferred.length })
+    return true
   }
 
   remoteTargetRendered(uid) {
@@ -2616,6 +2648,19 @@ class Cooperate {
     return !!(treeNode && treeNode.data && generalizationUidsOf(treeNode.data).has(uid))
   }
 
+  requestRemoteApplyRender(uids, callback, source = 'remote apply') {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (renderer && typeof renderer.requestRemoteRender === 'function') {
+      renderer.requestRemoteRender(uids, callback, source)
+      return
+    }
+    if (this.mindMap && typeof this.mindMap.render === 'function') {
+      this.mindMap.render(callback, source)
+      return
+    }
+    if (typeof callback === 'function') callback()
+  }
+
   applyV2PayloadInsert(payload = {}) {
     const uid = payload.uid
     const parentUid = payloadParentUid(payload)
@@ -2676,7 +2721,7 @@ class Cooperate {
       renderer.setNodeData(parentNode, {
         childCount: Math.max(count, live)
       })
-      this.mindMap.render()
+      this.requestRemoteApplyRender([uid, parentUid])
     } catch (err) {
       v2Trace('remote.apply.insert.err', { uid, message: err && err.message })
       return false
@@ -2861,7 +2906,7 @@ class Cooperate {
         if (typeof renderer.resetMovedNodePosition === 'function') {
           renderer.resetMovedNodePosition(node)
         }
-        if (typeof this.mindMap.render === 'function') this.mindMap.render()
+        this.requestRemoteApplyRender([uid, parentUid])
       }
       // Move events can carry restored coordinates when undoing a move.
       const positionData = { ...(payload.data || {}), ...(payload.patch || {}) }
@@ -2883,20 +2928,31 @@ class Cooperate {
       syncChildCount(oldParent)
       syncChildCount(nextParent)
       this.cleanupDragArtifacts()
-      await this.waitForMoveRender()
-      // Rendering may replace both parent instances. Repainting a detached
-      // instance recreates its old connectors in the shared SVG line layer.
-      const parentUids = new Set([
-        oldParentUid,
-        parentUid || (nextParent.getData && nextParent.getData('uid'))
-      ])
-      parentUids.forEach(parentId => {
-        const liveParent = parentId && renderer.findNodeByUid(parentId)
-        if (liveParent && typeof liveParent.renderLine === 'function') {
-          liveParent.renderLine(true)
-        }
-      })
-      this.restoreActiveUids(activeUids)
+      const finishMovePaint = () => {
+        // Rendering may replace both parent instances. Repainting a detached
+        // instance recreates its old connectors in the shared SVG line layer.
+        const liveRenderer = this.mindMap && this.mindMap.renderer
+        const parentUids = new Set([
+          oldParentUid,
+          parentUid || (nextParent.getData && nextParent.getData('uid'))
+        ])
+        parentUids.forEach(parentId => {
+          const liveParent =
+            parentId && liveRenderer && liveRenderer.findNodeByUid(parentId)
+          if (liveParent && typeof liveParent.renderLine === 'function') {
+            liveParent.renderLine(true)
+          }
+        })
+        this.restoreActiveUids(activeUids)
+      }
+      if (typeof this.mindMap.render === 'function') {
+        this.requestRemoteApplyRender(
+          [uid, oldParentUid, parentUid || (nextParent.getData && nextParent.getData('uid'))],
+          finishMovePaint
+        )
+      } else {
+        finishMovePaint()
+      }
     } catch (err) {
       v2Trace('remote.apply.move.err', { uid, message: err && err.message })
       return false
@@ -2965,7 +3021,7 @@ class Cooperate {
       if (assoc && typeof assoc.removeAllLines === 'function') {
         assoc.removeAllLines()
       }
-      this.mindMap.render()
+      this.requestRemoteApplyRender([uid, parentUid, ...removed])
     } catch (err) {
       v2Trace('remote.apply.delete.err', { uid, message: err && err.message })
       return false
@@ -3023,7 +3079,7 @@ class Cooperate {
         }
       }
       renderer.setNodeData(parentNode, { expand: true })
-      this.mindMap.render()
+      this.requestRemoteApplyRender([uid, parentUid, ...reviveIds])
     } catch (err) {
       v2Trace('remote.apply.restore.err', { uid, message: err && err.message })
       return false
@@ -3077,7 +3133,7 @@ class Cooperate {
       }
     }
     if (this.mindMap && typeof this.mindMap.render === 'function') {
-      this.mindMap.render(run)
+      this.requestRemoteApplyRender(ids, run)
     } else {
       run()
     }
@@ -3307,7 +3363,8 @@ class Cooperate {
       const shouldRender =
         theme != null || themeConfig !== undefined || layoutChanged
       if (shouldRender && typeof this.mindMap.render === 'function') {
-        this.mindMap.render(
+        this.requestRemoteApplyRender(
+          [],
           null,
           theme != null || themeConfig !== undefined
             ? 'changeTheme'
@@ -4609,7 +4666,9 @@ class Cooperate {
     }
     this.hydrateGeneralizationParent(node, nextGen)
       .then(hydrated => {
-        if (hydrated && this.mindMap) this.mindMap.render()
+        if (hydrated && this.mindMap) {
+          this.requestRemoteApplyRender(node.getData && node.getData('uid'))
+        }
       })
       .catch(() => {})
     return true
@@ -4786,7 +4845,7 @@ class Cooperate {
         !this.httpRefreshing &&
         collabNodeFeatures.needsGeometryRefresh(stylePayload)
       ) {
-        this.scheduleRemoteGeometryRender()
+        this.scheduleRemoteGeometryRender(node.getData && node.getData('uid'))
       }
       changed = true
     }
@@ -5421,7 +5480,14 @@ class Cooperate {
       this.httpHydrating = false
       this.flushPendingHttpRefresh()
     }
-    if (changed && this.mindMap) this.mindMap.render()
+    if (changed && this.mindMap) {
+      const renderer = this.mindMap.renderer
+      if (renderer && typeof renderer.requestRemoteRender === 'function') {
+        renderer.requestRemoteRender(Array.from(uids))
+      } else {
+        this.mindMap.render()
+      }
+    }
     return changed
   }
 
@@ -5890,7 +5956,12 @@ class Cooperate {
   }
 
   // 节点是逐个改的，但排版要看整棵树。多条远端改字落在同一窗口里只排一次。
-  scheduleRemoteGeometryRender() {
+  scheduleRemoteGeometryRender(uid) {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (renderer && typeof renderer.requestRemoteRender === 'function') {
+      renderer.requestRemoteRender(uid)
+      return
+    }
     if (this._remoteGeometryTimer) return
     this._remoteGeometryTimer = setTimeout(() => {
       this._remoteGeometryTimer = null
@@ -7477,11 +7548,12 @@ class Cooperate {
 
   acknowledgeLocalVersion(version, extra = {}) {
     const next = Number(version)
-    if (Number.isFinite(next) && next > this.lastAppliedVersion) {
+    const last = Number(this.lastAppliedVersion) || 0
+    if (Number.isFinite(next) && next === last + 1) {
       this.lastAppliedVersion = next
-    }
-    if (this.collabStore && Number.isFinite(next)) {
-      this.collabStore.setLastAppliedVersion(next)
+      if (this.collabStore) this.collabStore.setLastAppliedVersion(next)
+    } else if (Number.isFinite(next) && next > last + 1) {
+      this.scheduleRemoteRecover(next)
     }
     const operationId = extra.operationId || extra.operation_id
     if (operationId && extra.duplicate !== true) {
@@ -7591,6 +7663,7 @@ class Cooperate {
     let recoveredVersion = retryVersion
     let retryAllowed = true
     let refreshApplied = false
+    let recoveryEvents = []
     try {
       let action = plan
       if (plan.type === 'fetch_operations' && this.httpFetchOperations) {
@@ -7665,7 +7738,7 @@ class Cooperate {
               event: op.event || op
             })
           })
-          this.collabStore.drainReadyEvents()
+          recoveryEvents = this.collabStore.peekReadyEvents()
         }
         const dirty = markDirtySubtrees(
           this.collectLoadedUids(),
@@ -7754,6 +7827,16 @@ class Cooperate {
       if (Number.isFinite(applied)) recoveredVersion = applied
       if (Number.isFinite(refreshedVersion) && refreshedVersion >= recoveredVersion) {
         recoveredVersion = refreshedVersion
+      }
+      if (this.collabStore && recoveryEvents.length) {
+        const eventsToCommit = recoveryEvents.filter(
+          event => Number(event.version) <= recoveredVersion
+        )
+        const committed = this.collabStore.commitReadyEvents(eventsToCommit)
+        if (!committed.committed) {
+          this.scheduleRemoteRecover(retryVersion)
+          return { applied: false, skipped: true, reason: 'EVENT_COMMIT_GAP', version: retryVersion }
+        }
       }
       if (Number.isFinite(recoveredVersion) && recoveredVersion > this.lastAppliedVersion) {
         this.lastAppliedVersion = recoveredVersion
@@ -8284,7 +8367,9 @@ class Cooperate {
         }
         if (changed) {
           await this.syncHttpDirtySubtrees(treeNodesByUid)
-          await new Promise(resolve => this.mindMap.render(resolve))
+          await new Promise(resolve => {
+            this.requestRemoteApplyRender(Array.from(treeNodesByUid.keys()), resolve)
+          })
         }
         // Only acknowledge a revision after every fetch and merge completed.
         // A transient request/render failure must remain retryable by polling.

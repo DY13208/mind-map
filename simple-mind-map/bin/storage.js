@@ -34,9 +34,14 @@ const { queryRoomNodes } = require('./nodeQuery')
 const { isCollabV2Enabled, isCollabV2Trace } = require('./collabV2/flag')
 const { persistMapReplaceHistory } = require('./collabHistory/pgStore')
 const {
+  digestMcpOperation,
   resolveDuplicate: resolveMcpDuplicate,
   stripMcpRequestMetadata
 } = require('./mcpOperationIdentity')
+const {
+  missingSchemaError: missingMcpReceiptSchemaError,
+  resultForReceipt: mcpReceiptResultForReplay
+} = require('./mcpOperationReceipt')
 
 const pool = new Pool({
   host: process.env.PGHOST,
@@ -1121,6 +1126,27 @@ async function getRoomMeta(roomKey) {
   })
 }
 
+async function getRoomNodeUidSnapshot(roomKey, uids) {
+  if (!isCollabV2Enabled()) {
+    return { ready: false, reason: 'collab_v2_disabled', room: null, nodes: [] }
+  }
+  return withPgRetry(async () => {
+    const snapshot = await readRoomNodeUids(pool, roomKey, uids)
+    if (!snapshot || snapshot.notFound) {
+      return { ready: false, reason: 'room_row_missing', room: null, nodes: [] }
+    }
+    const room = {
+      room_key: snapshot.room_key,
+      version: Number(snapshot.version || 0),
+      updated_at: snapshot.updated_at
+    }
+    if (!snapshot.initialized) {
+      return { ready: false, reason: 'room_nodes_not_ready', room, nodes: [] }
+    }
+    return { ready: true, reason: '', room, nodes: snapshot.nodes || [] }
+  })
+}
+
 async function nodesFromTableIfCurrent(roomKey, json, version) {
   try {
     const table = await readRoomNodes(pool, roomKey)
@@ -1446,6 +1472,26 @@ async function getRoomLocate(roomKey, ref) {
   }
 }
 
+async function getRoomUidProofs(roomKey, uids = []) {
+  const key = String(roomKey || '').trim()
+  const refs = [
+    ...new Set(
+      (Array.isArray(uids) ? uids : [])
+        .map(value => String(value || '').trim())
+        .filter(Boolean)
+    )
+  ]
+  if (!key || !refs.length) return new Set()
+  const result = await withPgRetry(() =>
+    pool.query(
+      `select uid from room_nodes
+       where room_key = $1 and uid = any($2::text[])`,
+      [key, refs]
+    )
+  )
+  return new Set((result.rows || []).map(row => String(row.uid || '')))
+}
+
 async function getRoomRef(roomKey, uid) {
   try {
     return await resolveRoomRef(pool, roomKey, uid)
@@ -1455,7 +1501,7 @@ async function getRoomRef(roomKey, uid) {
   }
 }
 
-async function getRoomSnapshot(roomKey) {
+async function getRoomSnapshot(roomKey, options = {}) {
   const res = await pool.query(
     `select room_key, title, nodes, version, updated_at, metadata
      from rooms
@@ -1481,7 +1527,12 @@ async function getRoomSnapshot(roomKey) {
     roomKey,
     collabV2: isCollabV2Enabled()
   })
-  if (picked.migrate && json && nodesDualWriteEnabled()) {
+  if (
+    picked.migrate &&
+    json &&
+    nodesDualWriteEnabled() &&
+    options.allowLegacyMigration !== false
+  ) {
     try {
       await migrateRoomNodesFromJson(pool, roomKey, json, version)
       const migrated = await readRoomNodes(pool, roomKey)
@@ -1912,12 +1963,19 @@ function operationRow(row) {
   }
 }
 
+function resolveOperationDiagnosticSource(internalOptions = {}) {
+  if (internalOptions.mcpRequest) return 'mcp'
+  const source = String(internalOptions.diagnosticSource || '')
+  return ['socket', 'http', 'node-share'].includes(source) ? source : 'other'
+}
+
 async function commitRoomOperation(roomKey, command, apply, internalOptions = {}) {
   return withPgRetry(async () => {
     const diag = require('./performanceDiagnostics')
     const started = diag.now()
+    const source = resolveOperationDiagnosticSource(internalOptions)
     const client = await pool.connect()
-    diag.record({ kind: 'pool', roomKey, path: 'full', source: internalOptions.mcpRequest ? 'mcp' : 'other', durationMs: diag.now() - started })
+    diag.record({ kind: 'pool', roomKey, path: 'full', source, operationId: command.operationId, type: command.type, durationMs: diag.now() - started })
     const txStarted = diag.now()
     let ok = false
     let queryStats = null
@@ -1936,7 +1994,7 @@ async function commitRoomOperation(roomKey, command, apply, internalOptions = {}
       await client.query('rollback').catch(() => {})
       throw err
     } finally {
-      diag.record({ kind: 'transaction', roomKey, path: 'full', source: internalOptions.mcpRequest ? 'mcp' : 'other', type: command.type, durationMs: diag.now() - txStarted, ok, queries: queryStats?.queries, writes: queryStats?.writes })
+      diag.record({ kind: 'transaction', roomKey, path: 'full', source, operationId: command.operationId, type: command.type, durationMs: diag.now() - txStarted, ok, queries: queryStats?.queries, writes: queryStats?.writes })
       client.release()
     }
   })
@@ -1951,8 +2009,19 @@ async function commitDirectRoomOperation(
   return withPgRetry(async () => {
     const diag = require('./performanceDiagnostics')
     const started = diag.now()
+    const source = resolveOperationDiagnosticSource(internalOptions)
+    const diagnosticContext = diag.enabled()
+      ? {
+          roomKey,
+          source,
+          operationId: command.operationId,
+          type: command.type,
+          lockAcquiredAt: null,
+          lockHoldRecorded: false
+        }
+      : null
     const client = await pool.connect()
-    diag.record({ kind: 'pool', roomKey, path: 'direct', source: internalOptions.mcpRequest ? 'mcp' : 'socket-or-other', durationMs: diag.now() - started })
+    diag.record({ kind: 'pool', roomKey, path: 'direct', source, operationId: command.operationId, type: command.type, durationMs: diag.now() - started })
     const txStarted = diag.now()
     let ok = false
     let queryStats = null
@@ -1962,19 +2031,50 @@ async function commitDirectRoomOperation(
         roomKey,
         command,
         apply,
-        internalOptions
+        internalOptions,
+        diagnosticContext
       )
       ok = true
       queryStats = result && result.queryStats
       return result
     } catch (err) {
-      await client.query('rollback').catch(() => {})
+      let rollbackError = null
+      try {
+        await client.query('rollback')
+      } catch (rollbackErr) {
+        rollbackError = rollbackErr
+      }
+      finishDirectLockHold(
+        diag,
+        diagnosticContext,
+        'lock-held-until-rollback',
+        !rollbackError,
+        rollbackError
+      )
       throw err
     } finally {
-      diag.record({ kind: 'transaction', roomKey, path: 'direct', source: internalOptions.mcpRequest ? 'mcp' : 'socket-or-other', type: command.type, durationMs: diag.now() - txStarted, ok, queries: queryStats?.queries, writes: queryStats?.writes })
+      diag.record({ kind: 'transaction', roomKey, path: 'direct', source, operationId: command.operationId, type: command.type, durationMs: diag.now() - txStarted, ok, queries: queryStats?.queries, writes: queryStats?.writes })
       client.release()
     }
   })
+}
+
+function finishDirectLockHold(diag, context, stage, ok, error) {
+  if (!context || context.lockAcquiredAt == null || context.lockHoldRecorded) return
+  const input = {
+    kind: 'transaction-stage',
+    roomKey: context.roomKey,
+    source: context.source,
+    path: 'direct',
+    operationId: context.operationId,
+    type: context.type,
+    stage,
+    durationMs: diag.now() - context.lockAcquiredAt,
+    ok
+  }
+  if (error && typeof error.code === 'string') input.code = error.code
+  diag.record(input)
+  context.lockHoldRecorded = true
 }
 
 async function findRoomOperationById(
@@ -2004,6 +2104,49 @@ async function findRoomOperationById(
   return result.rows[0] || null
 }
 
+async function findMcpTerminalReceipt(client, roomKey, operationId) {
+  try {
+    const result = await client.query(
+      `select operation_id, principal_id, request_digest, result, current_revision
+       from mcp_terminal_receipts
+       where room_key = $1 and operation_id = $2`,
+      [roomKey, operationId]
+    )
+    return result.rows[0] || null
+  } catch (err) {
+    const schemaError = missingMcpReceiptSchemaError(err)
+    if (schemaError) throw schemaError
+    throw err
+  }
+}
+
+function assertMcpReceiptIdentity(roomKey, command, mcpRequest) {
+  if (!mcpRequest) return false
+  if (
+    mcpRequest.v !== 1 ||
+    !String(mcpRequest.principalId || '').trim() ||
+    !/^sha256:[a-f0-9]{64}$/i.test(String(mcpRequest.digest || ''))
+  ) {
+    const err = new Error('MCP node.batch 缺少有效的幂等身份或请求摘要')
+    err.statusCode = 400
+    err.code = 'MCP_BATCH_RECEIPT_IDENTITY_INVALID'
+    throw err
+  }
+  const expectedDigest = digestMcpOperation({
+    roomKey,
+    principalId: mcpRequest.principalId,
+    type: command && command.type,
+    payload: command && command.payload
+  })
+  if (expectedDigest !== String(mcpRequest.digest)) {
+    const err = new Error('MCP 请求摘要与当前房间或写入内容不匹配')
+    err.statusCode = 409
+    err.code = 'MCP_REQUEST_DIGEST_INVALID'
+    throw err
+  }
+  return true
+}
+
 function checkOperationDuplicate(existing, internalOptions = {}) {
   if (!existing) return null
   const incoming = internalOptions.mcpRequest || null
@@ -2018,10 +2161,20 @@ function checkOperationDuplicate(existing, internalOptions = {}) {
       digest: incoming && incoming.digest
     })
   }
-  return operationRow(existing)
+  const operation = operationRow(existing)
+  if (incoming) {
+    const savedResult =
+      existing.payload && typeof existing.payload === 'object'
+        ? existing.payload.__mcpResult
+        : null
+    if (savedResult && typeof savedResult === 'object') {
+      operation.mcpResult = savedResult
+    }
+  }
+  return operation
 }
 
-function storedOperationPayload(command, internalOptions = {}) {
+function storedOperationPayload(command, internalOptions = {}, mcpResult) {
   const payload = stripMcpRequestMetadata(command && command.payload)
   const metadata = internalOptions.mcpRequest
   if (
@@ -2034,6 +2187,9 @@ function storedOperationPayload(command, internalOptions = {}) {
       v: 1,
       principalId: String(metadata.principalId).slice(0, 160),
       digest: String(metadata.digest)
+    }
+    if (mcpResult && typeof mcpResult === 'object') {
+      payload.__mcpResult = stripMcpRequestMetadata(mcpResult)
     }
   }
   return payload
@@ -2065,69 +2221,213 @@ async function commitDirectRoomOperationOnce(
   roomKey,
   command,
   apply,
-  internalOptions = {}
+  internalOptions = {},
+  diagnosticContext = null
 ) {
-  await client.query('begin')
   const diag = require('./performanceDiagnostics')
+  const source = resolveOperationDiagnosticSource(internalOptions)
+  const operationId = command.operationId
+  const diagnosticsEnabled = diag.enabled()
+  const runStage = diagnosticsEnabled
+    ? async (stage, fn) => {
+        const stageStarted = diag.now()
+        try {
+          const result = await fn()
+          diag.record({
+            kind: 'transaction-stage',
+            roomKey,
+            source,
+            path: 'direct',
+            operationId,
+            type: command.type,
+            stage,
+            durationMs: diag.now() - stageStarted,
+            ok: true
+          })
+          return result
+        } catch (err) {
+          const input = {
+            kind: 'transaction-stage',
+            roomKey,
+            source,
+            path: 'direct',
+            operationId,
+            type: command.type,
+            stage,
+            durationMs: diag.now() - stageStarted,
+            ok: false
+          }
+          if (err && typeof err.code === 'string') input.code = err.code
+          diag.record(input)
+          throw err
+        }
+      }
+    : (_stage, fn) => fn()
+  await runStage('begin', () => client.query('begin'))
   const lockStarted = diag.now()
-  const roomResult = await client.query(
-    `select room_key, title, version, updated_at, metadata,
-            coalesce(restore_epoch_revision, 0) as restore_epoch_revision
-     from rooms where room_key = $1 for update`,
-    [roomKey]
-  )
+  let roomResult
+  try {
+    roomResult = await client.query(
+      `select room_key, title, version, updated_at, metadata,
+              coalesce(restore_epoch_revision, 0) as restore_epoch_revision
+       from rooms where room_key = $1 for update`,
+      [roomKey]
+    )
+  } catch (err) {
+    const input = {
+      kind: 'lock-query',
+      roomKey,
+      path: 'direct',
+      source,
+      operationId,
+      type: command.type,
+      durationMs: diag.now() - lockStarted,
+      ok: false
+    }
+    if (err && typeof err.code === 'string') input.code = err.code
+    diag.record(input)
+    throw err
+  }
   const room = roomResult.rows[0]
-  diag.record({ kind: 'lock-query', roomKey, path: 'direct', source: internalOptions.mcpRequest ? 'mcp' : 'socket-or-other', durationMs: diag.now() - lockStarted })
+  if (room && diagnosticContext) diagnosticContext.lockAcquiredAt = diag.now()
+  diag.record({ kind: 'lock-query', roomKey, path: 'direct', source, operationId, type: command.type, durationMs: diag.now() - lockStarted, ok: true })
   if (!room) {
     const err = new Error('not found')
     err.statusCode = 404
     throw err
   }
   const currentVersion = Number(room.version || 0)
-  const existing = await findRoomOperationById(
-    client,
-    roomKey,
-    command.operationId,
-    !!internalOptions.mcpRequest
-  )
-  if (existing) {
-    const operation = checkOperationDuplicate(existing, internalOptions)
-    await client.query('commit')
+  const identity = await runStage('identity', async () => {
+    const existing = await findRoomOperationById(
+      client,
+      roomKey,
+      operationId,
+      !!internalOptions.mcpRequest
+    )
+    if (existing) {
+      return {
+        kind: 'duplicate',
+        operation: checkOperationDuplicate(existing, internalOptions)
+      }
+    }
+    const hasMcpRequest = assertMcpReceiptIdentity(
+      roomKey,
+      command,
+      internalOptions.mcpRequest
+    )
+    if (hasMcpRequest) {
+      const receipt = await findMcpTerminalReceipt(client, roomKey, operationId)
+      if (receipt) {
+        return {
+          kind: 'receipt',
+          replay: mcpReceiptResultForReplay(receipt, internalOptions.mcpRequest)
+        }
+      }
+    }
+    if (
+      command.baseVersion !== null &&
+      command.baseVersion !== undefined &&
+      Number(command.baseVersion) > currentVersion
+    ) {
+      const err = new Error('baseVersion不能大于房间当前版本')
+      err.statusCode = 409
+      err.code = 'VERSION_AHEAD'
+      err.currentVersion = currentVersion
+      err.details = {
+        opId: operationId,
+        baseVersion: Number(command.baseVersion),
+        baseRevision: Number(command.baseVersion),
+        currentVersion,
+        roomCurrentRevision: currentVersion
+      }
+      throw err
+    }
+    rejectIfStaleAfterRestore(room, command)
+    return { kind: 'continue', hasMcpRequest }
+  })
+  const commit = async (beforeCommit = null) => {
+    await runStage('commit', async () => {
+      if (beforeCommit) await beforeCommit()
+      await client.query('commit')
+    })
+    finishDirectLockHold(
+      diag,
+      diagnosticContext,
+      'lock-held-until-commit',
+      true
+    )
+  }
+  if (identity.kind === 'duplicate') {
+    await commit()
     rememberRoomMeta(roomKey, {
       version: currentVersion,
       updated_at: room.updated_at
     })
     return {
       duplicate: true,
-      operation,
+      operation: identity.operation,
+      result: identity.operation && identity.operation.mcpResult,
       currentRevision: currentVersion,
       roomMeta: { title: room.title, updated_at: room.updated_at }
     }
   }
-  if (
-    command.baseVersion !== null &&
-    command.baseVersion !== undefined &&
-    Number(command.baseVersion) > currentVersion
-  ) {
-    const err = new Error('baseVersion不能大于房间当前版本')
-    err.statusCode = 409
-    err.code = 'VERSION_AHEAD'
-    err.currentVersion = currentVersion
-    err.details = {
-      opId: command.operationId,
-      baseVersion: Number(command.baseVersion),
-      baseRevision: Number(command.baseVersion),
-      currentVersion,
-      roomCurrentRevision: currentVersion
+  if (identity.kind === 'receipt') {
+    await commit()
+    rememberRoomMeta(roomKey, {
+      version: currentVersion,
+      updated_at: room.updated_at
+    })
+    return {
+      noop: true,
+      duplicate: true,
+      operationId,
+      result: identity.replay.result,
+      currentRevision: identity.replay.currentRevision,
+      currentRoomRevision: currentVersion
     }
-    throw err
   }
-  rejectIfStaleAfterRestore(room, command)
-  const applied = await apply({
-    client,
-    room,
-    currentVersion
-  })
+  const hasMcpRequest = identity.hasMcpRequest
+  const applied = await runStage('apply', () =>
+    apply({
+      client,
+      room,
+      currentVersion
+    })
+  )
+  if (applied && applied.noop) {
+    if (hasMcpRequest && command.type === 'node.batch') {
+      await runStage('persist', async () => {
+        try {
+          await client.query(
+            `insert into mcp_terminal_receipts
+             (room_key, operation_id, principal_id, request_digest, result, current_revision)
+             values ($1, $2, $3, $4, $5::jsonb, $6)`,
+            [
+              roomKey,
+              operationId,
+              String(internalOptions.mcpRequest.principalId),
+              String(internalOptions.mcpRequest.digest),
+              JSON.stringify(stripMcpRequestMetadata(applied.result || {})),
+              currentVersion
+            ]
+          )
+        } catch (err) {
+          const schemaError = missingMcpReceiptSchemaError(err)
+          if (schemaError) throw schemaError
+          throw err
+        }
+      })
+    }
+    await commit()
+    return {
+      noop: true,
+      duplicate: false,
+      operationId,
+      result: applied.result || {},
+      currentRevision: currentVersion,
+      queryStats: applied.queryStats || null
+    }
+  }
   const version = currentVersion + 1
   const event = stripMcpRequestMetadata({
     ...(applied.event || {}),
@@ -2136,80 +2436,86 @@ async function commitDirectRoomOperationOnce(
     operationId: command.operationId,
     actorId: command.actorId
   })
-  const updatedRoom = await client.query(
-    `update rooms
-     set version = $2,
-         title = coalesce($3, title),
-         metadata = coalesce(metadata, '{}'::jsonb) || coalesce($4::jsonb, '{}'::jsonb),
-         updated_at = now(),
-         content_updated_at = now()
-     where room_key = $1
-     returning title, updated_at`,
-    [
-      roomKey,
-      version,
-      applied.title
-        ? String(applied.title)
-            .replace(/<[^>]+>/g, ' ')
-            .replace(/&nbsp;/gi, ' ')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .slice(0, 80) || null
-        : null,
-      applied.metadata ? JSON.stringify(applied.metadata) : null
-    ]
-  )
-  const inserted = await client.query(
-    `insert into room_operations
-     (room_key, version, operation_id, actor_id, client_id,
-      operation_type, payload, event, inverse_payload, client_seq, target_id)
-     values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11)
-     returning room_key, version, operation_id, actor_id, client_id,
-               operation_type, payload, event, inverse_payload, created_at,
-               client_seq, target_id`,
-    [
-      roomKey,
-      version,
-      command.operationId,
-      command.actorId,
-      command.clientId || null,
-      command.type,
-      JSON.stringify(storedOperationPayload(command, internalOptions)),
-      JSON.stringify(event),
-      applied.inversePayload == null
-        ? null
-        : JSON.stringify(applied.inversePayload),
-      Number.isFinite(Number(command.payload && command.payload.clientSeq))
-        ? Number(command.payload.clientSeq)
-        : null,
-      (command.payload && (command.payload.uid || command.payload.targetId)) ||
-        null
-    ]
-  )
-  await client.query(
-    `insert into room_outbox (room_key, version, event)
-     values ($1, $2, $3::jsonb)
-     on conflict (room_key, version) do nothing`,
-    [roomKey, version, JSON.stringify(event)]
-  )
-  await client.query('select pg_notify($1, $2)', [
-    'collab_events',
-    JSON.stringify({
-      type: 'event',
-      mapId: roomKey,
-      version,
-      operationId: command.operationId
-    }).slice(0, 7900)
-  ])
-  if (process.env.COLLAB_FAULT_INJECT === 'before_commit_once') {
-    process.env.COLLAB_FAULT_INJECT = ''
-    const err = new Error('injected fault before commit')
-    err.statusCode = 500
-    err.code = 'FAULT_INJECTED'
-    throw err
-  }
-  await client.query('commit')
-  const operation = operationRow(inserted.rows[0])
+  const inserted = await runStage('persist', async () => {
+    const updatedRoom = await client.query(
+      `update rooms
+       set version = $2,
+           title = coalesce($3, title),
+           metadata = coalesce(metadata, '{}'::jsonb) || coalesce($4::jsonb, '{}'::jsonb),
+           updated_at = now(),
+           content_updated_at = now()
+       where room_key = $1
+       returning title, updated_at`,
+      [
+        roomKey,
+        version,
+        applied.title
+          ? String(applied.title)
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/&nbsp;/gi, ' ')
+              .replace(/\s+/g, ' ')
+              .trim()
+              .slice(0, 80) || null
+          : null,
+        applied.metadata ? JSON.stringify(applied.metadata) : null
+      ]
+    )
+    const result = await client.query(
+      `insert into room_operations
+       (room_key, version, operation_id, actor_id, client_id,
+        operation_type, payload, event, inverse_payload, client_seq, target_id)
+       values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11)
+       returning room_key, version, operation_id, actor_id, client_id,
+                 operation_type, payload, event, inverse_payload, created_at,
+                 client_seq, target_id`,
+      [
+        roomKey,
+        version,
+        operationId,
+        command.actorId,
+        command.clientId || null,
+        command.type,
+        JSON.stringify(
+          storedOperationPayload(command, internalOptions, applied.result)
+        ),
+        JSON.stringify(event),
+        applied.inversePayload == null
+          ? null
+          : JSON.stringify(applied.inversePayload),
+        Number.isFinite(Number(command.payload && command.payload.clientSeq))
+          ? Number(command.payload.clientSeq)
+          : null,
+        (command.payload && (command.payload.uid || command.payload.targetId)) ||
+          null
+      ]
+    )
+    await client.query(
+      `insert into room_outbox (room_key, version, event)
+       values ($1, $2, $3::jsonb)
+       on conflict (room_key, version) do nothing`,
+      [roomKey, version, JSON.stringify(event)]
+    )
+    await client.query('select pg_notify($1, $2)', [
+      'collab_events',
+      JSON.stringify({
+        type: 'event',
+        mapId: roomKey,
+        version,
+        operationId
+      }).slice(0, 7900)
+    ])
+    return { inserted: result, roomMeta: updatedRoom.rows[0] || null }
+  })
+  await commit(async () => {
+    if (process.env.COLLAB_FAULT_INJECT === 'before_commit_once') {
+      process.env.COLLAB_FAULT_INJECT = ''
+      const err = new Error('injected fault before commit')
+      err.statusCode = 500
+      err.code = 'FAULT_INJECTED'
+      throw err
+    }
+  })
+  const operation = operationRow(inserted.inserted.rows[0])
   rememberRoomMeta(roomKey, {
     version,
     updated_at: operation.created_at || new Date().toISOString()
@@ -2226,7 +2532,7 @@ async function commitDirectRoomOperationOnce(
     operation,
     result: applied.result || {},
     queryStats: applied.queryStats || null,
-    roomMeta: updatedRoom.rows[0] || null
+    roomMeta: inserted.roomMeta
   }
 }
 
@@ -2239,6 +2545,7 @@ async function commitRoomOperationOnce(
 ) {
   await client.query('begin')
   const diag = require('./performanceDiagnostics')
+  const source = resolveOperationDiagnosticSource(internalOptions)
   const lockStarted = diag.now()
   const roomResult = await client.query(
     `select room_key, title, nodes, metadata, version, updated_at,
@@ -2247,7 +2554,7 @@ async function commitRoomOperationOnce(
     [roomKey]
   )
   const room = roomResult.rows[0]
-  diag.record({ kind: 'lock-query', roomKey, path: 'full', source: internalOptions.mcpRequest ? 'mcp' : 'other', durationMs: diag.now() - lockStarted })
+  diag.record({ kind: 'lock-query', roomKey, path: 'full', source, operationId: command.operationId, type: command.type, durationMs: diag.now() - lockStarted, ok: true })
   if (!room) {
     const err = new Error('not found')
     err.statusCode = 404
@@ -2271,6 +2578,37 @@ async function commitRoomOperationOnce(
       duplicate: true,
       operation,
       currentRevision: currentVersion
+    }
+  }
+  const hasMcpRequest = assertMcpReceiptIdentity(
+    roomKey,
+    command,
+    internalOptions.mcpRequest
+  )
+  if (hasMcpRequest) {
+    const receipt = await findMcpTerminalReceipt(
+      client,
+      roomKey,
+      command.operationId
+    )
+    if (receipt) {
+      const replay = mcpReceiptResultForReplay(
+        receipt,
+        internalOptions.mcpRequest
+      )
+      await client.query('commit')
+      rememberRoomMeta(roomKey, {
+        version: currentVersion,
+        updated_at: room.updated_at
+      })
+      return {
+        noop: true,
+        duplicate: true,
+        operationId: command.operationId,
+        result: replay.result,
+        currentRevision: replay.currentRevision,
+        currentRoomRevision: currentVersion
+      }
     }
   }
   if (
@@ -2842,8 +3180,10 @@ module.exports = {
   hydrateRoomMetadata: require('./mapMetadata').hydrateRoomMetadata,
   mergeMapMetadata: require('./mapMetadata').mergeMapMetadata,
   getRoomSnapshot,
+  getRoomNodeUidSnapshot,
   getRoomSubtree,
   getRoomLocate,
+  getRoomUidProofs,
   getRoomRef,
   renameRoom,
   removeRoom,

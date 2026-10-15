@@ -16,6 +16,7 @@ const TRANSPORT_KEYS = new Set([
   'clientId',
   'client_id',
   '__mcpRequest',
+  '__mcpResult',
   'requestDigest'
 ])
 
@@ -26,7 +27,7 @@ function stableValue(value, topLevel = false) {
   Object.keys(value)
     .filter(
       key =>
-        (key !== '__mcpRequest' && key !== 'requestDigest') &&
+        (key !== '__mcpRequest' && key !== '__mcpResult' && key !== 'requestDigest') &&
         (!topLevel || !TRANSPORT_KEYS.has(key))
     )
     .sort()
@@ -82,7 +83,12 @@ function stripMcpRequestMetadata(payload) {
   if (!payload || typeof payload !== 'object') return payload
   return Object.fromEntries(
     Object.entries(payload)
-      .filter(([key]) => key !== '__mcpRequest' && key !== 'requestDigest')
+      .filter(
+        ([key]) =>
+          key !== '__mcpRequest' &&
+          key !== '__mcpResult' &&
+          key !== 'requestDigest'
+      )
       .map(([key, value]) => [key, stripMcpRequestMetadata(value)])
   )
 }

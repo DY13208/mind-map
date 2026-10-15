@@ -202,6 +202,7 @@ test('operation digest ignores retry metadata but covers business identity and f
       parentUid: 'root',
       text: '新节点',
       note: '备注',
+      __mcpResult: { outcome: 'partial', items: [{ index: 0, status: 'applied' }] },
       operation_id: '550e8400-e29b-41d4-a716-446655440000',
       baseVersion: 4,
       clientSeq: 8
@@ -212,6 +213,7 @@ test('operation digest ignores retry metadata but covers business identity and f
     ...input,
     payload: {
       ...input.payload,
+      __mcpResult: { outcome: 'all_failed', items: [{ index: 0, status: 'failed' }] },
       operation_id: '6ba7b810-9dad-41d1-80b4-00c04fd430c8',
       baseVersion: 19,
       clientSeq: 99
@@ -431,6 +433,18 @@ test('MCP submit gate permits one write per room and four across rooms', async (
   roomRelease.resolve()
   assert.deepEqual(await Promise.all([first, sameRoomQueued]), ['first', 'second'])
   assert.equal(sameRoomQueuedStarted, true)
+  assert.deepEqual(gate.status().metrics, {
+    submitted: 3,
+    started: 3,
+    completed: 3,
+    failed: 0,
+    queued: 1,
+    rejected: 0,
+    timedOut: 0,
+    cancelled: 0,
+    queueHighWater: 1,
+    queuedBytesHighWater: 0
+  })
 
   const globalGate = createMcpSubmitGate({
     maxGlobal: 4,
@@ -498,6 +512,9 @@ test('MCP submit gate bounds queued writes and reports stable busy/timeout error
   )
   release.resolve()
   await Promise.all([active, queued])
+  assert.equal(gate.status().metrics.submitted, 3)
+  assert.equal(gate.status().metrics.rejected, 1)
+  assert.equal(gate.status().metrics.completed, 2)
 
   const timeoutGate = createMcpSubmitGate({
     maxGlobal: 1,
@@ -528,6 +545,8 @@ test('MCP submit gate bounds queued writes and reports stable busy/timeout error
     }
   )
   assert.equal(queuedBytes(timeoutGate), 0)
+  assert.equal(timeoutGate.status().metrics.timedOut, 1)
+  assert.equal(timeoutGate.status().metrics.queued, 1)
   timeoutRelease.resolve()
   await timeoutActive
 })
@@ -695,11 +714,24 @@ test('only ordinary node tools retry transient failures, at most three times wit
   const token = 'mcp-incremental-retry-test-token'
   const attemptsByText = new Map()
   const requests = []
+  const diagnosticsQueries = []
+  let revisionReads = 0
   const apiServer = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1')
     const body = await readRequestJson(req)
+    if (req.method === 'GET' && url.pathname === '/api/diagnostics/performance') {
+      diagnosticsQueries.push(url.searchParams)
+      return sendJson(res, 200, { cursor: 555, events: [] })
+    }
     if (req.method === 'GET' && url.searchParams.get('format') === 'meta') {
-      return sendJson(res, 200, { room_key: 'retry-room', currentRevision: 1 })
+      if (url.pathname.endsWith('/no-meta-room')) {
+        return sendJson(res, 503, {
+          code: 'META_UNAVAILABLE',
+          error: 'room metadata unavailable'
+        })
+      }
+      revisionReads += 1
+      return sendJson(res, 200, { room_key: 'retry-room', currentRevision: revisionReads })
     }
     if (req.method === 'POST' && url.pathname.endsWith('/nodes')) {
       const text = String(body.text || '')
@@ -723,6 +755,16 @@ test('only ordinary node tools retry transient failures, at most three times wit
       if (text === 'retry-network' && attempts === 1) {
         res.destroy()
         return
+      }
+      if (text === 'retry-network-reject' && attempts === 1) {
+        res.destroy()
+        return
+      }
+      if (text === 'retry-network-reject') {
+        return sendJson(res, 403, {
+          code: 'FORBIDDEN',
+          error: 'write is forbidden'
+        })
       }
       if (text === 'retry-exhaust') {
         return sendJson(res, 503, {
@@ -762,7 +804,8 @@ test('only ordinary node tools retry transient failures, at most three times wit
       MCP_PORT: String(mcpPort),
       MCP_HOST: '127.0.0.1',
       MCP_TOKEN: token,
-      MCP_CLIENT_ID: 'incremental-retry-test'
+      MCP_CLIENT_ID: 'incremental-retry-test',
+      PERFORMANCE_DIAGNOSTICS: '1'
     },
     stdio: ['ignore', 'ignore', 'pipe']
   })
@@ -796,6 +839,12 @@ test('only ordinary node tools retry transient failures, at most three times wit
     return rpc('tools/call', { name, arguments: args })
   }
 
+  function toolPayload(result) {
+    if (result.structuredContent) return result.structuredContent
+    const text = result.content.find(item => item.type === 'text')?.text
+    return text ? JSON.parse(text) : null
+  }
+
   try {
     await waitForMcp(`http://127.0.0.1:${mcpPort}`, mcpServer, stderr)
     await rpc('initialize', {
@@ -812,11 +861,17 @@ test('only ordinary node tools retry transient failures, at most three times wit
       operation_id: successId
     })
     assert.equal(success.isError, undefined)
+    assert.equal(toolPayload(success).base_revision, 1)
     const successAttempts = requests.filter(item => item.text === 'retry-success')
     assert.equal(successAttempts.length, 3)
     assert.deepEqual(
       successAttempts.map(item => item.body.operation_id || item.body.operationId),
       [successId, successId, successId]
+    )
+    assert.deepEqual(
+      successAttempts.map(item => item.body.baseVersion),
+      [1, 1, 1],
+      'automatic retries must keep the first observed base revision'
     )
 
     const generated = await callTool('add_node', {
@@ -873,7 +928,65 @@ test('only ordinary node tools retry transient failures, at most three times wit
     assert.equal(errorMeta.operation_id || errorMeta.operationId, exhaustedId)
     assert.equal(errorMeta.code, 'MCP_WRITE_BUSY')
     assert.equal(Number(errorMeta.statusCode), 503)
+    assert.equal(errorMeta.outcomeUnknown, false, 'queue rejection is known not to have applied')
+    assert.equal(errorMeta.base_revision, exhaustedAttempts[0].body.baseVersion)
+    assert.equal(errorMeta.writeSubmitted, true)
     assert.ok(Number(errorMeta.retryAfterMs) > 0)
+
+    const uncertainId = '9ba7b810-9dad-41d1-80b4-00c04fd430c8'
+    const uncertain = await callTool('add_node', {
+      room_key: 'retry-room',
+      parent: 'root',
+      text: 'retry-network-reject',
+      operation_id: uncertainId
+    })
+    assert.equal(uncertain.isError, true)
+    assert.equal(uncertain.structuredContent.outcome, 'unknown')
+    assert.equal(uncertain.structuredContent.outcomeUnknown, true)
+    const uncertainAttempts = requests.filter(item => item.text === 'retry-network-reject')
+    assert.equal(uncertainAttempts.length, 2)
+    assert.equal(uncertainAttempts[0].body.baseVersion, uncertainAttempts[1].body.baseVersion)
+    assert.equal(uncertain.structuredContent.base_revision, uncertainAttempts[0].body.baseVersion)
+    assert.equal(uncertain.structuredContent.writeSubmitted, true)
+
+    const metadataFailure = await callTool('add_node', {
+      room_key: 'no-meta-room',
+      parent: 'root',
+      text: 'metadata-never-submitted',
+      operation_id: '7ba7b811-9dad-41d1-80b4-00c04fd430c8'
+    })
+    assert.equal(metadataFailure.isError, true)
+    assert.equal(metadataFailure.structuredContent.writeSubmitted, false)
+    assert.equal(Object.hasOwn(metadataFailure.structuredContent, 'base_revision'), false)
+    assert.equal(
+      requests.filter(item => item.text === 'metadata-never-submitted').length,
+      0,
+      'metadata failure happens before the write request is submitted'
+    )
+
+    const diagnostics = await callTool('get_performance_diagnostics', {
+      room_key: 'retry-room',
+      after: 17,
+      writer_after: 0
+    })
+    assert.equal(diagnostics.isError, undefined)
+    const diagnosticResult =
+      diagnostics.structuredContent ||
+      JSON.parse(diagnostics.content.find(item => item.type === 'text').text)
+    assert.equal(diagnosticResult.cursor, 555)
+    assert.ok(diagnosticResult.mcpWriter.samples.events.length > 0)
+    assert.ok(
+      diagnosticResult.mcpWriter.samples.events.some(
+        event =>
+          event.kind === 'mcp-queue' &&
+          event.stage === 'start' &&
+          Number.isFinite(Number(event.durationMs))
+      ),
+      'queue-start samples include the measured queue wait'
+    )
+    assert.equal(diagnosticsQueries.length, 1)
+    assert.equal(diagnosticsQueries[0].get('after'), '17')
+    assert.equal(diagnosticsQueries[0].has('writer_after'), false)
 
     const conflict = await callTool('add_node', {
       room_key: 'retry-room',

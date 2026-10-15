@@ -367,13 +367,23 @@ Promise.all([initSchema(), initAuth()])
         return engine.flushPendingAutoVersion(roomKey, { source: 'room_idle' })
       }
     })
-    diagnosticsRuntime = roomKey => ({
-      ready: true, collabV2: !!v2.enabled,
-      connections: v2.io ? v2.io.engine.clientsCount : openSockets,
-      roomPeers: roomKey && v2.presence ? v2.presence.list(roomKey).length : null,
-      mcpDirectConfigured: require('./collabV2/flag').envFlag('COLLAB_MCP_DIRECT', true),
-      eventBridge: getOperationEventBridgeStatus()
-    })
+    diagnosticsRuntime = roomKey => {
+      const configured = require('./collabV2/flag').envFlag('COLLAB_MCP_DIRECT', true)
+      const bridge = getOperationEventBridgeStatus()
+      return {
+        ready: true, collabV2: !!v2.enabled,
+        connections: v2.io ? v2.io.engine.clientsCount : openSockets,
+        roomPeers: roomKey && v2.presence ? v2.presence.list(roomKey).length : null,
+        mcpDirectConfigured: configured,
+        // This is the global gate only; room readiness and operation shape are
+        // separately checked by the write handler and recorded on each write.
+        mcpDirectGateEnabled: configured && !!v2.enabled && bridge.enabled,
+        mcpDirectDisabledReason: !configured ? 'MCP_DIRECT_DISABLED'
+          : !v2.enabled ? 'COLLAB_V2_DISABLED'
+            : !bridge.enabled ? 'EVENT_BRIDGE_DISABLED' : null,
+        eventBridge: bridge
+      }
+    }
     server.listen(port, host, () => {
       require('./localKnowledge/http').checkConfiguration().catch(error => console.warn('[local-knowledge]', error.message))
       console.log(`Collab server running at ws://${host}:${port}`)

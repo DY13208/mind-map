@@ -16,10 +16,13 @@ import {
 import { deleteNodeAttachment } from './mcpAttachmentDelete.mjs'
 import mcpSubmitGateModule from './mcpSubmitGate.js'
 import mcpHyperlink from './mcpHyperlink.js'
+import performanceDiagnosticsModule from './performanceDiagnostics.js'
 
 const { bearerToken, verifyMcpUserToken } = mcpUserToken
 const { createMcpSubmitGate } = mcpSubmitGateModule
 const { hyperlinkFields } = mcpHyperlink
+const mcpDiagnostics = performanceDiagnosticsModule
+mcpDiagnostics.start()
 
 const API = (process.env.MIND_MAP_API || 'http://127.0.0.1:1234').replace(
   /\/$/,
@@ -43,6 +46,17 @@ function ok(data) {
   }
 }
 
+function okWrite(data) {
+  if (data && data.outcome === 'all_failed') {
+    return {
+      isError: true,
+      content: [{ type: 'text', text: JSON.stringify(data) }],
+      structuredContent: data
+    }
+  }
+  return ok(data)
+}
+
 function fail(err) {
   const result = {
     isError: true,
@@ -59,7 +73,17 @@ function fail(err) {
       ...(Number(err.retryAfterMs) > 0
         ? { retryAfterMs: Number(err.retryAfterMs) }
         : {}),
-      ...(err.operationId ? { operation_id: err.operationId } : {})
+      ...(err.operationId ? { operation_id: err.operationId } : {}),
+      ...(Number.isSafeInteger(Number(err.pinnedBaseVersion)) &&
+      Number(err.pinnedBaseVersion) >= 0
+        ? { base_revision: Number(err.pinnedBaseVersion) }
+        : {}),
+      ...(typeof err.writeSubmitted === 'boolean'
+        ? { writeSubmitted: err.writeSubmitted }
+        : {}),
+      outcome: err.outcomeUnknown ? 'unknown' : 'rejected',
+      outcomeUnknown: !!err.outcomeUnknown,
+      ...(err.details ? { details: err.details } : {})
     }
   }
   return result
@@ -228,22 +252,149 @@ function createServer(authorization) {
     pathName,
     method,
     body,
-    { signal, timeoutMs = 25000 } = {}
+    {
+      signal,
+      timeoutMs = 25000,
+      baseVersion,
+      onBaseVersion,
+      operationId,
+      writeType
+    } = {}
   ) => {
     const estimatedBytes = Buffer.byteLength(JSON.stringify(body || {}), 'utf8')
-    return mcpSubmitGate.run(
+    const before = mcpSubmitGate.status()
+    const writeStarted = Date.now()
+    const enqueuedAt = writeStarted
+    let writeSubmitted = false
+    const type = writeType || body.type || method.toLowerCase()
+    mcpDiagnostics.record({
+      kind: 'mcp-queue',
       roomKey,
-      async () => {
-        const baseVersion = await currentMapRevision(roomKey)
-        return api(pathName, {
-          method,
-          timeoutMs,
-          signal,
-          body: JSON.stringify({ ...body, baseVersion })
-        })
-      },
-      { signal, estimatedBytes }
-    )
+      operationId,
+      source: 'mcp',
+      type,
+      stage: 'enqueue',
+      outcome:
+        before.activeGlobal >= before.limits.maxGlobal ||
+        (before.activeByRoom[roomKey] || 0) >= before.limits.maxPerRoom
+          ? 'queued'
+          : 'started',
+      queueDepth: before.queuedGlobal,
+      queuedBytes: before.queuedBytes
+    })
+    try {
+      return await mcpSubmitGate.run(
+        roomKey,
+        async () => {
+          const queueStartedAt = Date.now()
+          const queue = mcpSubmitGate.status()
+          mcpDiagnostics.record({
+            kind: 'mcp-queue',
+            roomKey,
+            operationId,
+            source: 'mcp',
+            type,
+            stage: 'start',
+            outcome: 'started',
+            durationMs: queueStartedAt - enqueuedAt,
+            queueDepth: queue.queuedGlobal,
+            queuedBytes: queue.queuedBytes
+          })
+          const selectedBaseVersion =
+            baseVersion == null ? await currentMapRevision(roomKey) : Number(baseVersion)
+          if (typeof onBaseVersion === 'function') onBaseVersion(selectedBaseVersion)
+          try {
+            const serializedBody = JSON.stringify({
+              ...body,
+              baseVersion: selectedBaseVersion
+            })
+            writeSubmitted = true
+            const result = await api(pathName, {
+              method,
+              timeoutMs,
+              signal,
+              headers: {
+                'x-mcp-queue-depth': String(queue.queuedGlobal),
+                'x-mcp-queue-bytes': String(queue.queuedBytes),
+                'x-mcp-queue-active': String(queue.activeGlobal),
+                ...(operationId ? { 'x-operation-id': operationId } : {})
+              },
+              body: serializedBody
+            })
+            const responseOutcome =
+              ['applied', 'partial', 'all_failed', 'duplicate'].includes(
+                String(result && result.outcome)
+              )
+                ? String(result.outcome)
+                : result && result.duplicate
+                  ? 'duplicate'
+                  : result && result.ok === false
+                    ? 'all_failed'
+                    : 'applied'
+            mcpDiagnostics.record({
+              kind: 'mcp-write',
+              roomKey,
+              operationId,
+              source: 'mcp',
+              type,
+              path: 'rest',
+              stage: 'response',
+              outcome: responseOutcome,
+              durationMs: Date.now() - writeStarted,
+              ok: true
+            })
+            return result
+          } catch (err) {
+            err.writeSubmitted = writeSubmitted
+            const definitelyNotApplied = new Set([
+              'MCP_WRITE_BUSY',
+              'MCP_WRITE_QUEUE_TIMEOUT',
+              'MCP_WRITE_ABORTED',
+              'MCP_DIRECT_UNAVAILABLE',
+              'MCP_DIRECT_REFERENCE_UNAVAILABLE',
+              'MCP_BATCH_RECEIPT_SCHEMA_MISSING',
+              'MCP_OPERATION_RECEIPT_SCHEMA_MISSING'
+            ])
+            err.outcomeUnknown =
+              !definitelyNotApplied.has(String(err.code || '')) &&
+              ![400, 403, 409, 423, 429].includes(Number(err.statusCode)) &&
+              (!err.statusCode || Number(err.statusCode) >= 500)
+            mcpDiagnostics.record({
+              kind: 'mcp-write',
+              roomKey,
+              operationId,
+              source: 'mcp',
+              type,
+              path: 'rest',
+              stage: 'response',
+              outcome: err.outcomeUnknown ? 'unknown' : 'rejected',
+              code: err.code || 'MCP_WRITE_ERROR',
+              durationMs: Date.now() - writeStarted,
+              ok: false
+            })
+            throw err
+          }
+        },
+        { signal, estimatedBytes }
+      )
+    } catch (err) {
+      if (typeof err.writeSubmitted !== 'boolean') {
+        err.writeSubmitted = writeSubmitted
+      }
+      mcpDiagnostics.record({
+        kind: 'mcp-queue',
+        roomKey,
+        operationId,
+        source: 'mcp',
+        type,
+        stage: 'reject',
+        outcome: 'failed',
+        code: err.code || 'MCP_WRITE_ERROR',
+        queueDepth: mcpSubmitGate.status().queuedGlobal,
+        queuedBytes: mcpSubmitGate.status().queuedBytes
+      })
+      throw err
+    }
   }
   const isTransientNodeWriteError = (err, signal) => {
     if (signal && signal.aborted) return false
@@ -291,19 +442,62 @@ function createServer(authorization) {
     method,
     body,
     operationId,
-    { signal } = {}
+    { signal, baseRevision, writeType } = {}
   ) => {
     const stableBody = { ...body, operation_id: operationId }
+    let unknownObserved = false
+    let submittedObserved = false
+    let pinnedBaseVersion =
+      baseRevision == null ? null : Number(baseRevision)
+    if (
+      pinnedBaseVersion != null &&
+      (!Number.isSafeInteger(pinnedBaseVersion) || pinnedBaseVersion < 0)
+    ) {
+      const err = new Error('base_revision 必须是非负整数')
+      err.code = 'BAD_BASE_REVISION'
+      err.statusCode = 400
+      err.operationId = operationId
+      err.writeSubmitted = false
+      throw err
+    }
     for (let retry = 0; retry <= 3; retry += 1) {
       try {
-        return await writeMap(roomKey, pathName, method, stableBody, {
+        const result = await writeMap(roomKey, pathName, method, stableBody, {
           signal,
-          timeoutMs: 65000
+          timeoutMs: 65000,
+          baseVersion: pinnedBaseVersion,
+          onBaseVersion: revision => {
+            if (pinnedBaseVersion == null) pinnedBaseVersion = revision
+          },
+          operationId,
+          writeType: writeType || stableBody.type || method.toLowerCase()
         })
+        return result && typeof result === 'object' && !Array.isArray(result)
+          ? { ...result, base_revision: pinnedBaseVersion }
+          : result
       } catch (err) {
         err.operationId = operationId
-        if (retry >= 3 || !isTransientNodeWriteError(err, signal)) throw err
-        await waitBeforeRetry(err.retryAfterMs, signal)
+        unknownObserved = unknownObserved || err.outcomeUnknown === true
+        submittedObserved = submittedObserved || err.writeSubmitted === true
+        err.writeSubmitted = submittedObserved
+        if (Number.isSafeInteger(pinnedBaseVersion) && pinnedBaseVersion >= 0) {
+          err.pinnedBaseVersion = pinnedBaseVersion
+        }
+        if (retry >= 3 || !isTransientNodeWriteError(err, signal)) {
+          if (unknownObserved) err.outcomeUnknown = true
+          throw err
+        }
+        try {
+          await waitBeforeRetry(err.retryAfterMs, signal)
+        } catch (waitError) {
+          waitError.operationId = operationId
+          waitError.writeSubmitted = submittedObserved
+          if (Number.isSafeInteger(pinnedBaseVersion) && pinnedBaseVersion >= 0) {
+            waitError.pinnedBaseVersion = pinnedBaseVersion
+          }
+          if (unknownObserved) waitError.outcomeUnknown = true
+          throw waitError
+        }
       }
     }
     throw new Error('MCP 节点写入重试失败')
@@ -315,7 +509,7 @@ function createServer(authorization) {
     },
     {
       instructions:
-        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps；该工具默认每页20个房间、最多100个，只返回当前页，has_more=true 时必须原样传 next_cursor 继续，直到 false 后再判断可见房间总数。只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。需要完整读取整间房间时只调用一次 export_room_tree，禁止用反复 query_nodes 拼整图。该工具在服务端读完快照；complete 为 true 才表示整图已读完。节点超过 500 时响应只含 export_path 和摘要，完整内容在该文件里；打不开文件时用 read_room_export 按 offset 读这份导出，不要回到 query_nodes。complete 为 false 时查看 incomplete_reason，不得声称已读完。历史版本只提供元数据和新增、修改、删除、移动计数，不提供历史脑图正文。回滚必须依次调用 list_versions、get_version，向用户展示目标版本和变更摘要并获得明确确认，再用列表返回的 currentRevision 调用 restore_version；RESTORE_CONFLICT 后必须重新查询并再次确认，禁止自动重试。附件（与网页工具栏「附件」同一套能力）：生成或拿到产物后必须调用 upload_attachment 挂到目标节点，节点会出现可点击回形针图标；禁止只把本机路径、挂载说明、「请拖到节点」写进 text/note；禁止用 update_node 的 note 代替挂载。节点超链接在 query_nodes 的 data.hyperlink 和 data.hyperlinkTitle；新增、修改或批量写入时必须原样传回这两个字段，空字符串表示清除。只复制 text/note 会丢掉超链接。upload_attachment 优先 file_path（WorkBuddy 目录或 ./output），否则 content_base64 / source_url。已有附件用 list_attachments / read_attachment；attachmentExtractedText 只是截断预览。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。一次写多个节点必须用 apply_nodes，整批一次提交、版本只加 1；不要循环 add_node、update_node 或 delete_node。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。工具返回 isError 表示没有写入，禁止声称已完成。节点评论用 list_node_comments（单个节点）或 list_comments（全图，可按未解决、@某人、时间筛选并分页）读取；用 add_comment、reply_comment、delete_comment、resolve_comment 写入，禁止用 update_node 或 apply_nodes 直接改 comments 字段。'
+        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps；该工具默认每页20个房间、最多100个，只返回当前页，has_more=true 时必须原样传 next_cursor 继续，直到 false 后再判断可见房间总数。只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。需要完整读取整间房间时只调用一次 export_room_tree，禁止用反复 query_nodes 拼整图。该工具在服务端读完快照；complete 为 true 才表示整图已读完。节点超过 500 时响应只含 export_path 和摘要，完整内容在该文件里；打不开文件时用 read_room_export 按 offset 读这份导出，不要回到 query_nodes。complete 为 false 时查看 incomplete_reason，不得声称已读完。历史版本只提供元数据和新增、修改、删除、移动计数，不提供历史脑图正文。回滚必须依次调用 list_versions、get_version，向用户展示目标版本和变更摘要并获得明确确认，再用列表返回的 currentRevision 调用 restore_version；RESTORE_CONFLICT 后必须重新查询并再次确认，禁止自动重试。附件（与网页工具栏「附件」同一套能力）：生成或拿到产物后必须调用 upload_attachment 挂到目标节点，节点会出现可点击回形针图标；禁止只把本机路径、挂载说明、「请拖到节点」写进 text/note；禁止用 update_node 的 note 代替挂载。节点超链接在 query_nodes 的 data.hyperlink 和 data.hyperlinkTitle；新增、修改或批量写入时必须原样传回这两个字段，空字符串表示清除。只复制 text/note 会丢掉超链接。upload_attachment 优先 file_path（WorkBuddy 目录或 ./output），否则 content_base64 / source_url。已有附件用 list_attachments / read_attachment；attachmentExtractedText 只是截断预览。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。一次写多个节点必须用 apply_nodes，整批一次请求、有成功修改时版本只加 1、全部失败时不增加版本；检查 outcome 和每项 items，失败依赖项暂停，核实后使用新操作 ID 补处理；不要循环 add_node、update_node 或 delete_node。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。移动节点使用 move_node 的 uid 和 parent_uid，保持原 UID，禁止删除后新增模拟移动。isError 不代表肯定没有写入：outcome=unknown 或 outcomeUnknown=true 表示结果未知，使用原 operation_id、原内容和 base_revision 核实重放，禁止换新 ID 重复新增；确定拒绝或全部失败也不得声称已完成。节点评论用 list_node_comments（单个节点）或 list_comments（全图，可按未解决、@某人、时间筛选并分页）读取；用 add_comment、reply_comment、delete_comment、resolve_comment 写入，禁止用 update_node 或 apply_nodes 直接改 comments 字段。'
     }
   )
 
@@ -325,16 +519,29 @@ function createServer(authorization) {
     {
       room_key: z.string().max(100).optional().describe('按房间过滤；不填则读全进程'),
       after: z.number().int().nonnegative().optional().describe('上次返回的 cursor；只返回其后的事件'),
-      since: z.number().int().nonnegative().optional().describe('采样起点 Unix 毫秒时间戳')
+      since: z.number().int().nonnegative().optional().describe('采样起点 Unix 毫秒时间戳'),
+      writer_after: z.number().int().nonnegative().optional().describe('MCP写入进程独立游标；不能复用服务端 after')
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    async ({ room_key, after, since }) => {
+    async ({ room_key, after, since, writer_after }) => {
       try {
         const params = new URLSearchParams()
         if (room_key) params.set('room', room_key)
         if (after != null) params.set('after', String(after))
         if (since != null) params.set('since', String(since))
-        return ok(await api(`/api/diagnostics/performance?${params}`))
+        const backend = await api(`/api/diagnostics/performance?${params}`)
+        return ok({
+          ...backend,
+          mcpWriter: {
+            processId: process.pid,
+            queue: mcpSubmitGate.status(),
+            samples: mcpDiagnostics.snapshot({
+              roomKey: room_key || '',
+              after: writer_after,
+              since
+            })
+          }
+        })
       } catch (err) { return fail(err) }
     }
   )
@@ -664,6 +871,7 @@ function createServer(authorization) {
         return ok(
           await api(`/api/files/${encodeURIComponent(room_key)}/export-tree`, {
             method: 'POST',
+            headers: { 'x-mcp-tool': 'export_room_tree' },
             body: JSON.stringify({
               include_notes,
               include_references,
@@ -718,7 +926,10 @@ function createServer(authorization) {
         return ok(
           await api(
             `/api/files/${encodeURIComponent(room_key)}/export-tree${suffix}`,
-            { timeoutMs: 60000 }
+            {
+              timeoutMs: 60000,
+              headers: { 'x-mcp-tool': 'read_room_export' }
+            }
           )
         )
       } catch (err) {
@@ -1298,7 +1509,8 @@ function createServer(authorization) {
         .boolean()
         .describe('父节点属于SOP时，必须先获得用户确认并传true')
         .optional(),
-      operation_id: z.string().uuid().describe('可选幂等请求ID，超时后使用同一ID重试').optional()
+      operation_id: z.string().uuid().describe('可选幂等请求ID，超时后使用同一ID重试').optional(),
+      base_revision: z.number().int().min(0).describe('可选预期基准修订号；版本恢复冲突后不会自动换基准重试').optional()
     },
     async ({
       room_key,
@@ -1308,10 +1520,11 @@ function createServer(authorization) {
       hyperlink,
       hyperlinkTitle,
       confirm_sop_change,
-      operation_id
+      operation_id,
+      base_revision
     }, extra = {}) => {
       try {
-        return ok(
+        return okWrite(
           await writeNodeMap(
             room_key,
             `/api/files/${encodeURIComponent(room_key)}/nodes`,
@@ -1324,7 +1537,11 @@ function createServer(authorization) {
               confirm_sop_change
             },
             operation_id || randomUUID(),
-            { signal: extra && extra.signal }
+            {
+              signal: extra && extra.signal,
+              baseRevision: base_revision,
+              writeType: 'node.insert'
+            }
           )
         )
       } catch (err) {
@@ -1353,7 +1570,8 @@ function createServer(authorization) {
         .boolean()
         .describe('节点属于SOP时，必须先获得用户确认并传true')
         .optional(),
-      operation_id: z.string().uuid().describe('可选幂等请求ID，超时后使用同一ID重试').optional()
+      operation_id: z.string().uuid().describe('可选幂等请求ID，超时后使用同一ID重试').optional(),
+      base_revision: z.number().int().min(0).describe('可选预期基准修订号；版本恢复冲突后不会自动换基准重试').optional()
     },
     async ({
       room_key,
@@ -1363,10 +1581,11 @@ function createServer(authorization) {
       hyperlink,
       hyperlinkTitle,
       confirm_sop_change,
-      operation_id
+      operation_id,
+      base_revision
     }, extra = {}) => {
       try {
-        return ok(
+        return okWrite(
           await writeNodeMap(
             room_key,
             `/api/files/${encodeURIComponent(
@@ -1380,7 +1599,66 @@ function createServer(authorization) {
               confirm_sop_change
             },
             operation_id || randomUUID(),
-            { signal: extra && extra.signal }
+            {
+              signal: extra && extra.signal,
+              baseRevision: base_revision,
+              writeType: 'node.update'
+            }
+          )
+        )
+      } catch (err) {
+        return fail(err)
+      }
+    }
+  )
+
+  server.tool(
+    'move_node',
+    '把节点移动到指定父节点并可指定同级位置。必填 uid 和 parent_uid（目标父节点可为 root），不支持标题路径；保留节点 uid、子树、附件、超链接和历史关联。兼容 node/parent 别名；同一字段的两种名字不能冲突。',
+    {
+      room_key: z.string().describe('房间号'),
+      uid: z.string().trim().min(1).describe('要移动的节点 UID；与 node 至少提供一个').optional(),
+      parent_uid: z.string().trim().min(1).describe('目标父节点 UID 或 root；与 parent 至少提供一个').optional(),
+      node: z.string().trim().min(1).describe('uid 的兼容别名').optional(),
+      parent: z.string().trim().min(1).describe('parent_uid 的兼容别名').optional(),
+      index: z.number().int().min(0).describe('目标父节点下的零基位置；省略时追加到末尾').optional(),
+      confirm_sop_change: z
+        .boolean()
+        .describe('节点或父节点属于SOP时，必须先获得用户确认并传true')
+        .optional(),
+      operation_id: z.string().uuid().describe('可选幂等请求ID，超时后使用同一ID重试').optional(),
+      base_revision: z.number().int().min(0).describe('可选预期基准修订号；版本恢复冲突后不会自动换基准重试').optional()
+    },
+    async ({ room_key, uid, parent_uid, node, parent, index, confirm_sop_change, operation_id, base_revision }, extra = {}) => {
+      try {
+        if ((!uid && !node) || (!parent_uid && !parent) ||
+          (uid && node && uid !== node) ||
+          (parent_uid && parent && parent_uid !== parent)) {
+          const error = new Error('move_node 需要 uid 和 parent_uid；兼容别名不能与它们冲突')
+          error.code = 'MCP_MOVE_REFERENCE_INVALID'
+          error.statusCode = 400
+          error.operationId = operation_id || randomUUID()
+          error.writeSubmitted = false
+          throw error
+        }
+        const nodeUid = uid || node
+        const parentUid = parent_uid || parent
+        return okWrite(
+          await writeNodeMap(
+            room_key,
+            `/api/files/${encodeURIComponent(room_key)}/nodes/${encodeURIComponent(nodeUid)}`,
+            'PATCH',
+            {
+              parent_uid: parentUid,
+              ...(index == null ? {} : { index }),
+              confirm_sop_change
+            },
+            operation_id || randomUUID(),
+            {
+              signal: extra && extra.signal,
+              baseRevision: base_revision,
+              writeType: 'node.move'
+            }
           )
         )
       } catch (err) {
@@ -1399,11 +1677,12 @@ function createServer(authorization) {
         .boolean()
         .describe('节点属于SOP时，必须先获得用户确认并传true')
         .optional(),
-      operation_id: z.string().uuid().describe('可选幂等请求ID，超时后使用同一ID重试').optional()
+      operation_id: z.string().uuid().describe('可选幂等请求ID，超时后使用同一ID重试').optional(),
+      base_revision: z.number().int().min(0).describe('可选预期基准修订号；版本恢复冲突后不会自动换基准重试').optional()
     },
-    async ({ room_key, node, confirm_sop_change, operation_id }, extra = {}) => {
+    async ({ room_key, node, confirm_sop_change, operation_id, base_revision }, extra = {}) => {
       try {
-        return ok(
+        return okWrite(
           await writeNodeMap(
             room_key,
             `/api/files/${encodeURIComponent(
@@ -1412,7 +1691,11 @@ function createServer(authorization) {
             'DELETE',
             { confirm_sop_change },
             operation_id || randomUUID(),
-            { signal: extra && extra.signal }
+            {
+              signal: extra && extra.signal,
+              baseRevision: base_revision,
+              writeType: 'node.delete'
+            }
           )
         )
       } catch (err) {
@@ -1423,15 +1706,17 @@ function createServer(authorization) {
 
   server.tool(
     'apply_nodes',
-    '一次提交多个节点的新增、修改或删除，整批共用一个版本号。operations 里的 parent 和 node 必须是 uid 或 root，不要用文字路径。同一批里新建的节点要带上 uid，后续操作用这个 uid 当 parent。任一条失败则整批回滚。适合按块写入；单个节点仍用 add_node、update_node、delete_node。',
+    '一次提交最多 100 个新增、修改、移动或删除操作，成功项目共用一个版本号。operations 里的 parent 和 node 必须是 uid 或 root，不要用文字路径。同一批里新建的节点要带上 uid，后续操作用这个 uid 当 parent。失败项目会回滚到保存点并返回逐项结果；depends_on 使用此前项目的零基索引，依赖失败的项目状态为 dependency_failed。全批失败时不增加版本。仅 Direct 和房间节点表就绪时支持；不可用会明确报错，不走 legacy 批量写。单个节点使用对应单项工具。',
     {
       room_key: z.string().describe('房间号'),
       operations: z
         .array(
           z.object({
-            op: z.enum(['add', 'update', 'delete']).describe('add 新增，update 修改，delete 删除'),
-            parent: z.string().describe('add 的父节点 uid 或 root').optional(),
-            node: z.string().describe('update/delete 的节点 uid；add 时可指定新节点 uid').optional(),
+            op: z.enum(['add', 'update', 'move', 'delete']).describe('add 新增，update 修改，move 移动，delete 删除'),
+            parent: z.string().describe('add 的父节点，或 move 的目标父节点 uid/root').optional(),
+            node: z.string().describe('update/move/delete 的节点 uid；add 时可指定新节点 uid').optional(),
+            index: z.number().int().min(0).describe('add/move 的零基同级位置；省略时追加').optional(),
+            depends_on: z.array(z.number().int().min(0).max(99)).describe('依赖的此前操作零基索引；任一依赖失败则本项返回 dependency_failed').optional(),
             text: z.string().describe('节点文字').optional(),
             note: z.string().describe('备注').optional(),
             hyperlink: z
@@ -1451,10 +1736,26 @@ function createServer(authorization) {
         .min(1)
         .max(100)
         .describe('最多 100 条，按顺序执行'),
-      operation_id: z.string().uuid().describe('可选幂等请求ID，超时后使用同一ID重试').optional()
+      operation_id: z.string().uuid().describe('可选幂等请求ID，超时后使用同一ID重试并复用原逐项结果').optional(),
+      base_revision: z.number().int().min(0).describe('可选预期基准修订号；版本恢复冲突后不会自动换基准重试').optional()
     },
-    async ({ room_key, operations, operation_id }, extra = {}) => {
+    async ({ room_key, operations, operation_id, base_revision }, extra = {}) => {
       try {
+        for (let index = 0; index < operations.length; index += 1) {
+          const item = operations[index]
+          const dependencies = item.depends_on || []
+          if ((item.op !== 'add' && !String(item.node || '').trim()) ||
+            (item.op === 'move' && !String(item.parent || '').trim()) ||
+            dependencies.some(dependency => dependency >= index) ||
+            new Set(dependencies).size !== dependencies.length) {
+            const error = new Error(`apply_nodes 第 ${index} 项缺少必填节点引用，或 depends_on 不是互不重复的此前项下标`)
+            error.code = 'BAD_BATCH_REQUEST'
+            error.statusCode = 400
+            error.operationId = operation_id || randomUUID()
+            error.writeSubmitted = false
+            throw error
+          }
+        }
         const ops = operations.map(item => {
           const confirm = item.confirm_sop_change
           if (item.op === 'add') {
@@ -1465,9 +1766,11 @@ function createServer(authorization) {
                 ...(item.node ? { uid: item.node } : {}),
                 ...(item.text != null ? { text: item.text } : {}),
                 ...(item.note != null ? { note: item.note } : {}),
+                ...(item.index != null ? { index: item.index } : {}),
                 ...hyperlinkFields(item),
                 ...(confirm != null ? { confirm_sop_change: confirm } : {})
-              }
+              },
+              ...(item.depends_on ? { depends_on: item.depends_on } : {})
             }
           }
           if (item.op === 'update') {
@@ -1482,7 +1785,20 @@ function createServer(authorization) {
                 uid: item.node,
                 patch,
                 ...(confirm != null ? { confirm_sop_change: confirm } : {})
-              }
+              },
+              ...(item.depends_on ? { depends_on: item.depends_on } : {})
+            }
+          }
+          if (item.op === 'move') {
+            return {
+              type: 'node.move',
+              payload: {
+                uid: item.node,
+                parentUid: item.parent,
+                ...(item.index != null ? { index: item.index } : {}),
+                ...(confirm != null ? { confirm_sop_change: confirm } : {})
+              },
+              ...(item.depends_on ? { depends_on: item.depends_on } : {})
             }
           }
           return {
@@ -1490,17 +1806,22 @@ function createServer(authorization) {
             payload: {
               uid: item.node,
               ...(confirm != null ? { confirm_sop_change: confirm } : {})
-            }
+            },
+            ...(item.depends_on ? { depends_on: item.depends_on } : {})
           }
         })
-        return ok(
+        return okWrite(
           await writeNodeMap(
             room_key,
             `/api/maps/${encodeURIComponent(room_key)}/operations`,
             'POST',
             { type: 'node.batch', payload: { ops } },
             operation_id || randomUUID(),
-            { signal: extra && extra.signal }
+            {
+              signal: extra && extra.signal,
+              baseRevision: base_revision,
+              writeType: 'node.batch'
+            }
           )
         )
       } catch (err) {

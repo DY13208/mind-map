@@ -23,6 +23,8 @@ const {
   getRoomSnapshot,
   getRoomSubtree,
   getRoomLocate,
+  getRoomNodeUidSnapshot,
+  getRoomUidProofs,
   getRoomRef,
   removeRoom,
   ensureDoc,
@@ -270,7 +272,8 @@ function normalizeOperationId(req, body = {}) {
 
 function normalizeCommand(req, roomKey, body, fallbackType, fallbackPayload) {
   const base = body || {}
-  const baseVersionRaw = base.baseVersion ?? base.base_version
+  const baseVersionRaw =
+    base.baseVersion ?? base.base_version ?? base.baseRevision ?? base.base_revision
   const command = {
     operationId: normalizeOperationId(req, base),
     mapId: roomKey,
@@ -293,6 +296,7 @@ function normalizeCommand(req, roomKey, body, fallbackType, fallbackPayload) {
       command.clientId
     )
   }
+  if (req && req.verifiedMcpSource) req.diagnosticOperationId = command.operationId
   return command
 }
 
@@ -396,7 +400,10 @@ async function executeTrustedOperation(roomKey, command, internalOptions = {}) {
             tempDoc.destroy()
           }
         },
-        { mcpRequest: internalOptions.mcpRequest }
+        {
+          mcpRequest: internalOptions.mcpRequest,
+          diagnosticSource: internalOptions.diagnosticSource
+        }
       )
     })
     const live = await applyCommittedLive(roomKey, command, committed)
@@ -444,22 +451,37 @@ function isHttpDirectEnabled() {
     flags.isCollabV2Enabled() && flags.isCollabV2EventBridgeEnabled()
 }
 
+function mcpDirectFallbackReason() {
+  const flags = require('./collabV2/flag')
+  if (!flags.isCollabV2Enabled()) return 'collab_v2_disabled'
+  if (!flags.isCollabV2EventBridgeEnabled()) return 'event_bridge_disabled'
+  if (!flags.envFlag('COLLAB_MCP_DIRECT', true)) return 'mcp_direct_disabled'
+  return null
+}
+
 async function executeDirectOperation(roomKey, command, source, mcpRequest, httpActorId, preflightMeta) {
+  const disabledReason = mcpRequest ? mcpDirectFallbackReason() : null
+  if (disabledReason) return { committed: null, fallbackReason: disabledReason }
   const meta = preflightMeta || await getRoomMeta(roomKey)
   if (!meta || !(meta.room_nodes_initialized === true || meta.room_nodes_initialized === 't')) {
-    return null
+    return { committed: null, fallbackReason: 'room_nodes_not_initialized' }
   }
   const policy = require('./mcpDirectPolicy')
   const refs = []
   const payload = command.payload || {}
   if (command.type === 'node.batch') {
     // 批量直写只开放给 MCP（逐项 uid 校验）
-    if (!mcpRequest || !policy.isMcpDirectBatch(command)) return null
+    if (!mcpRequest || !policy.isMcpDirectBatch(command)) {
+      return { committed: null, fallbackReason: 'direct_policy_unsupported' }
+    }
   } else {
     if (command.type === 'node.insert') {
       refs.push(payload.parentUid || payload.parent_uid || payload.parent || 'root')
     } else {
       refs.push(payload.uid || '')
+      if (command.type === 'node.move' || command.type === 'node.reorder') {
+        refs.push(payload.parentUid || payload.parent_uid || payload.parent || '')
+      }
     }
     const knownUids = new Set()
     const uidRefs = refs.filter(ref => ref && !policy.isUidReference(ref)).map(String)
@@ -471,7 +493,9 @@ async function executeDirectOperation(roomKey, command, source, mcpRequest, http
     const supported = mcpRequest
       ? policy.isMcpDirectShape(command, source, knownUids)
       : !!httpActorId && policy.isDirectNodeShape(command, knownUids)
-    if (!supported) return null
+    if (!supported) {
+      return { committed: null, fallbackReason: 'direct_policy_unsupported' }
+    }
   }
 
   assertRoomWritable(roomKey)
@@ -502,7 +526,11 @@ async function executeDirectOperation(roomKey, command, source, mcpRequest, http
             targetId: payload.uid || '',
             opId: command.operationId
           },
-          { version: currentVersion + 1 }
+          {
+            version: currentVersion + 1,
+            mcpPartial: command.type === 'node.batch',
+            operationId: command.operationId
+          }
         )
         return { ...applied, queryStats: store.stats }
       },
@@ -514,9 +542,12 @@ async function executeDirectOperation(roomKey, command, source, mcpRequest, http
     if (!mcpRequest && err.code === 'ROOT_DELETE') err.code = 'OPERATION_REJECTED'
     throw err
   })
+  if (committed && committed.noop) {
+    return { committed, fallbackReason: null }
+  }
   invalidateRoomCache(roomKey)
   dropLiveDoc(roomKey)
-  return committed
+  return { committed, fallbackReason: null }
 }
 
 async function executeOperation(req, roomKey, command, internalOptions = {}) {
@@ -526,7 +557,14 @@ async function executeOperation(req, roomKey, command, internalOptions = {}) {
     let mcpRequest = null
     if (
       req.verifiedMcpSource &&
-      ['node.insert', 'node.update', 'node.delete', 'node.batch'].includes(
+      [
+        'node.insert',
+        'node.update',
+        'node.move',
+        'node.reorder',
+        'node.delete',
+        'node.batch'
+      ].includes(
         command.type
       )
     ) {
@@ -546,12 +584,15 @@ async function executeOperation(req, roomKey, command, internalOptions = {}) {
     let submissionPath = 'legacy'
     const preflight = directPreflightMeta.get(req)
     const preflightMeta = preflight && preflight.roomKey === roomKey ? preflight.meta : null
+    let fallbackReason = mcpRequest ? mcpDirectFallbackReason() : null
+    if (mcpRequest && Object.keys(internalOptions || {}).length) {
+      fallbackReason = 'internal_validation_required'
+    }
     if (
       mcpRequest &&
-      !Object.keys(internalOptions || {}).length &&
-      isMcpDirectEnabled()
+      !Object.keys(internalOptions || {}).length
     ) {
-      const directCommitted = await executeDirectOperation(
+      const directAttempt = await executeDirectOperation(
         roomKey,
         command,
         req.verifiedMcpSource,
@@ -559,34 +600,58 @@ async function executeOperation(req, roomKey, command, internalOptions = {}) {
         null,
         preflightMeta
       )
-      if (directCommitted) {
-        committed = directCommitted
+      fallbackReason = directAttempt.fallbackReason
+      if (directAttempt.committed) {
+        committed = directAttempt.committed
         submissionPath = 'direct'
       }
     }
-    if (!committed && command.type === 'node.batch' && mcpRequest && isMcpDirectEnabled()) {
-      const err = new Error('批量节点请使用 uid，不能整图提交')
-      err.statusCode = 400
-      err.code = 'MCP_BATCH_NOT_DIRECT'
+    if (!committed && command.type === 'node.batch' && mcpRequest) {
+      const err = new Error(
+        fallbackReason === 'room_nodes_not_initialized'
+          ? 'MCP Direct 批量写入不可用：房间节点表尚未就绪'
+          : 'MCP Direct 批量写入不可用；当前 REST/MCP legacy 路径不支持 node.batch'
+      )
+      err.statusCode = fallbackReason === 'direct_policy_unsupported' ? 400 : 503
+      err.code = 'MCP_DIRECT_UNAVAILABLE'
+      err.details = { fallbackReason: fallbackReason || 'direct_unavailable' }
       throw err
     }
     if (!mcpRequest && !Object.keys(internalOptions || {}).length && isHttpDirectEnabled()) {
       // ACL was checked above; identity comes only from the server's auth user.
       // Ordinary HTTP keeps its existing old-result operation-id contract.
       const actor = roomAcl.actorFromReq(req)
-      const directCommitted = await executeDirectOperation(roomKey, command, null, null, actor.id, preflightMeta)
-      if (directCommitted) {
-        committed = directCommitted
+      const httpAttempt = await executeDirectOperation(roomKey, command, null, null, actor.id, preflightMeta)
+      if (httpAttempt && httpAttempt.committed) {
+        committed = httpAttempt.committed
         submissionPath = 'direct'
       }
     }
     if (!committed) {
       committed = await executeTrustedOperation(roomKey, command, {
         ...internalOptions,
+        diagnosticSource: internalOptions.diagnosticSource || 'http',
         ...(mcpRequest ? { mcpRequest } : {})
       })
     }
-    if (committed && committed.noop) return { ...committed, submissionPath }
+    if (committed && committed.noop) {
+      if (mcpRequest) {
+        require('./performanceDiagnostics').record({
+          kind: 'mcp-write',
+          roomKey,
+          operationId: command.operationId,
+          source: 'mcp',
+          type: command.type,
+          path: submissionPath,
+          stage: 'commit',
+          outcome: 'all_failed',
+          fallbackReason,
+          durationMs: Date.now() - started,
+          ok: true
+        })
+      }
+      return { ...committed, submissionPath, fallbackReason }
+    }
     const version = Number(
       (committed.operation && committed.operation.version) || 0
     )
@@ -600,7 +665,26 @@ async function executeOperation(req, roomKey, command, internalOptions = {}) {
       duplicate: !!committed.duplicate,
       code: command.type
     })
-    return { ...committed, submissionPath }
+    if (mcpRequest) {
+      require('./performanceDiagnostics').record({
+        kind: 'mcp-write',
+        roomKey,
+        operationId: command.operationId,
+        source: 'mcp',
+        type: command.type,
+        path: submissionPath,
+        stage: 'commit',
+        outcome: committed.duplicate
+          ? 'duplicate'
+          : committed.result && Number(committed.result.failed) > 0
+            ? 'partial'
+            : 'applied',
+        fallbackReason,
+        durationMs,
+        ok: true
+      })
+    }
+    return { ...committed, submissionPath, fallbackReason }
   } catch (err) {
     const durationMs = Date.now() - started
     recordOperation({
@@ -609,6 +693,24 @@ async function executeOperation(req, roomKey, command, internalOptions = {}) {
       durationMs,
       code: err.code || 'OPERATION_REJECTED'
     })
+    if (req && req.verifiedMcpSource) {
+      require('./performanceDiagnostics').record({
+        kind: 'mcp-write',
+        roomKey,
+        operationId: command.operationId,
+        source: 'mcp',
+        type: command.type,
+        stage: 'reject',
+        outcome: 'failed',
+        code: err.code || 'OPERATION_REJECTED',
+        fallbackReason:
+          err.details && err.details.fallbackReason
+            ? err.details.fallbackReason
+            : undefined,
+        durationMs,
+        ok: false
+      })
+    }
     logCollab('operation.reject', {
       mapId: roomKey,
       operationId: command.operationId,
@@ -932,6 +1034,25 @@ async function executeSnapshotOperation(
 }
 
 function operationResponse(roomKey, committed) {
+  if (committed && committed.noop) {
+    const result = committed.result || {}
+    return {
+      ok: false,
+      duplicate: !!committed.duplicate,
+      outcome: 'all_failed',
+      room_key: roomKey,
+      mapId: roomKey,
+      version: Number(committed.currentRevision || 0),
+      currentRevision: Number(committed.currentRevision || 0),
+      operationId: committed.operationId,
+      count: Number(result.count || 0),
+      failed: Number(result.failed || 0),
+      batchId: result.batchId,
+      items: result.items || [],
+      submissionPath: committed.submissionPath || 'direct',
+      fallbackReason: committed.fallbackReason || undefined
+    }
+  }
   const operation = committed.operation
   const payload = (operation.event && operation.event.payload) || {}
   return {
@@ -955,7 +1076,20 @@ function operationResponse(roomKey, committed) {
         ? committed.result.index
         : payload.index,
     removed: (committed.result && committed.result.removed) || payload.removed || [],
-    submissionPath: committed.submissionPath || 'legacy'
+    submissionPath: committed.submissionPath || 'legacy',
+    fallbackReason: committed.fallbackReason || undefined,
+    ...(committed.result && Array.isArray(committed.result.items)
+      ? {
+          outcome:
+            Number(committed.result.failed || 0) > 0
+              ? 'partial'
+              : 'applied',
+          count: Number(committed.result.count || 0),
+          failed: Number(committed.result.failed || 0),
+          batchId: committed.result.batchId,
+          items: committed.result.items
+        }
+      : {})
   }
 }
 
@@ -1009,10 +1143,10 @@ function withFileAcl(row, options = {}) {
   }
 }
 
-async function loadMap(roomKey) {
+async function loadMap(roomKey, options = {}) {
   if (isDeletedRoom(roomKey)) return null
   if (require('./collabV2/flag').isCollabV2Enabled()) {
-    const snapshot = await getRoomSnapshot(roomKey)
+    const snapshot = await getRoomSnapshot(roomKey, options)
     if (snapshot && snapshot.nodes && Object.keys(snapshot.nodes).length) {
       return { obj: snapshot.nodes, row: snapshot }
     }
@@ -1024,13 +1158,13 @@ async function loadMap(roomKey) {
   return { ydoc, obj, row }
 }
 
-async function loadSnapshot(roomKey) {
+async function loadSnapshot(roomKey, options = {}) {
   if (isDeletedRoom(roomKey)) return null
-  const snapshot = await getRoomSnapshot(roomKey)
+  const snapshot = await getRoomSnapshot(roomKey, options)
   const live = getLiveObject(roomKey)
   const obj = nodesFromSnapshotOrLive(snapshot, live)
   if (obj) return { obj, row: snapshot }
-  return loadMap(roomKey)
+  return loadMap(roomKey, options)
 }
 
 async function loadCheckSnapshot(roomKey, nodeUid) {
@@ -2454,7 +2588,7 @@ async function handleApi(req, res) {
         const committed = await executeOperation(req, roomKey, command)
         sendJson(
           res,
-          committed.duplicate ? 200 : 201,
+          committed.noop || committed.duplicate ? 200 : 201,
           operationResponse(roomKey, committed)
         )
       } catch (err) {
@@ -2931,21 +3065,28 @@ async function handleApi(req, res) {
         .split(',')
         .map(item => item.trim())
         .filter(Boolean)
-      if (require('./collabV2/flag').isCollabV2Enabled()) {
-        const selected = await readRoomNodeUids(roomKey, uids)
-        if (selected.notFound) {
-          sendJson(res, 404, { error: 'not found' })
-          return true
-        }
-        if (selected.initialized) {
-          const { initialized, ...payload } = selected
-          sendJson(res, 200, payload)
-          return true
-        }
+      const range = uids.length
+        ? await getRoomNodeUidSnapshot(roomKey, uids)
+        : { ready: false, reason: 'uids_not_requested' }
+      if (range && range.ready) {
+        req.diagnosticReadPath = 'direct'
+        sendJson(res, 200, {
+          room_key: roomKey,
+          version: Number((range.room && range.room.version) || 0),
+          updated_at: range.room && range.room.updated_at,
+          nodes: range.nodes
+        })
+        return true
       }
-      // Always read from authoritative snapshot/cache. Live Y.Doc can lag behind
-      // HTTP commits during ensureDoc warmup and would poison remote recover.
-      const loaded = await loadSnapshot(roomKey)
+      req.diagnosticReadPath = 'full'
+      req.diagnosticFallbackReason = range && range.reason
+        ? range.reason
+        : 'room_nodes_not_ready'
+      // If the indexed range is unavailable, preserve the existing snapshot
+      // compatibility path. Live Y.Doc can lag behind HTTP commits during
+      // ensureDoc warmup, so the persisted snapshot remains authoritative.
+      // This read is side-effect free; migration belongs to startup tooling.
+      const loaded = await loadSnapshot(roomKey, { allowLegacyMigration: false })
       if (!loaded) {
         sendJson(res, 404, { error: 'not found' })
         return true
