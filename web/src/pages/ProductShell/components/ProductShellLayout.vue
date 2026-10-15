@@ -140,7 +140,17 @@
       </nav>
       <AccessNotificationTrigger v-if="profile" :key="profile.id" :collapsed="sidebarCollapsed" class="sidebarNotifications" />
       <div class="sidebarFooter" v-if="profile">
-        <div class="accountInfo" :title="`${profile.name}（${profile.id}）`">
+        <div
+          class="accountInfo"
+          role="link"
+          tabindex="0"
+          data-testid="sidebar-profile"
+          aria-label="打开个人主页"
+          :title="`个人主页 · ${profile.name}（${profile.id}）`"
+          @click="openProfile"
+          @keydown.enter.prevent="openProfile"
+          @keydown.space.prevent="openProfile"
+        >
           <UserAvatar :person="profile" size="small" fallback="依" />
           <div class="accountMeta">
             <strong>{{ profile.name }}</strong
@@ -221,6 +231,9 @@ export default {
   methods: {
     updateAutoSidebar() {
       if (!this.hasSidebarPreference) this.sidebarCollapsed = isSmallScreen()
+    },
+    openProfile() {
+      if (this.$route.path !== '/profile') this.$router.push('/profile')
     },
     async signOut() {
       if (this.loggingOut) return
@@ -540,6 +553,20 @@ export default {
     display: flex;
     gap: 10px;
     align-items: center;
+    min-width: 0;
+    flex: 1;
+    padding: 4px;
+    margin: -4px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+    &:hover {
+      background: #e8f4ef;
+    }
+    &:focus-visible {
+      outline: 2px solid #087854;
+      outline-offset: 2px;
+    }
   }
   .accountMeta {
     min-width: 0;

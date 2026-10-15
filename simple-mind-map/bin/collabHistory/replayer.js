@@ -6,6 +6,38 @@ const { normalizeType } = require('../collabV2/protocol')
 const { cloneJson } = require('./canonical')
 const { historyError } = require('./errors')
 
+function replayPayload(type, payload, event) {
+  // Requests may omit server-generated node IDs. The committed event contains
+  // the identities that subsequent operations actually reference.
+  if (type === 'node.insert' && !String(payload.uid || '').trim()) {
+    if (!event || event.type !== 'node.inserted' || !event.payload?.uid) {
+      throw historyError('HISTORY_REPLAY_FAILED', 'insert has no committed node identity', 409)
+    }
+    return { ...payload, uid: event.payload.uid }
+  }
+  if (type === 'node.batch') {
+    const ops = payload.ops || []
+    const inserts = ops.length && ops.every(child => normalizeType(child.type) === 'node.insert')
+    if (inserts && ops.some(child => !String(child.payload?.uid || '').trim())) {
+      const events = event && event.type === 'batch.applied' && event.payload?.events
+      // Bulk inserts group events by parent, so do not zip them with request
+      // indices. Replay the complete committed insert sequence instead.
+      if (!Array.isArray(events) || events.length !== ops.length ||
+          events.some(child => child.type !== 'node.inserted' || !child.payload?.uid)) {
+        throw historyError('HISTORY_REPLAY_FAILED', 'batch insert has no complete committed identities', 409)
+      }
+      return {
+        ...payload,
+        ops: events.map(child => ({ type: 'node.insert', payload: {
+          ...child.payload,
+          confirm_sop_change: ops[0].payload?.confirm_sop_change
+        } }))
+      }
+    }
+  }
+  return payload
+}
+
 function asReplayOp(row) {
   const type = normalizeType(row.operation_type || row.type)
   return {
@@ -14,7 +46,8 @@ function asReplayOp(row) {
     roomKey: row.room_key || row.roomKey,
     userId: row.actor_id || row.userId,
     clientId: row.client_id || row.clientId,
-    payload: row.payload || {},
+    payload: replayPayload(type, row.payload || {}, row.event),
+    event: row.event,
     version: Number(row.version || row.serverRevision || 0),
     operation_id: row.operation_id || row.opId,
     operation_type: type,

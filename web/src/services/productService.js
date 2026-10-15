@@ -4,6 +4,8 @@ import { productRequest } from './productHttp'
 export default {
   backendStatus: 'REAL',
   getMcpConfig: () => productRequest('/api/mcp-config'),
+  getMyActivity: (days = 371) =>
+    productRequest('/api/users/me/activity?days=' + encodeURIComponent(days)),
   getProfile: async () => {
     const user = getCurrentUser()
     if (!user || !user.id) {
