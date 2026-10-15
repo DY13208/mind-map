@@ -522,7 +522,8 @@ export default {
     },
     nodeCommentCount() {
       const list = this.node && this.node.getData && this.node.getData('comments')
-      return Array.isArray(list) ? list.length : 0
+      // Count live comments only (skip deletion tombstones)
+      return Array.isArray(list) ? list.filter(c => c && !c.deleted && String(c.content || '').trim()).length : 0
     },
     hasNote() {
       return !!this.node.getData('note')

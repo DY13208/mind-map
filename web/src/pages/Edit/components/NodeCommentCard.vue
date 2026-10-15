@@ -418,7 +418,7 @@ export default {
       if (!this.visible) return
       const target = e && e.target
       if (this.$el && target && typeof this.$el.contains === 'function' && this.$el.contains(target)) return
-      if (target && typeof target.closest === 'function' && target.closest('.smm-comment-marker, .nodeCommentEntry, .nodeQuickToolbar')) return
+      if (target && typeof target.closest === 'function' && target.closest('.smm-comment-marker')) return
       this.close()
     },
     onKeydown(e) {

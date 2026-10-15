@@ -62,8 +62,6 @@
     <NodeAttachmentPreview v-if="mindMap"></NodeAttachmentPreview>
     <NodeHyperlinkPopover v-if="mindMap"></NodeHyperlinkPopover>
     <NodeCommentCard v-if="mindMap"></NodeCommentCard>
-    <NodeCommentEntry v-if="mindMap"></NodeCommentEntry>
-    <NodeQuickToolbar v-if="mindMap"></NodeQuickToolbar>
     <CooperateDialog :mindMap="mindMap"></CooperateDialog>
     <!-- 保留旧分享弹窗，节点分享目前直接复制链接并继承文件权限。 -->
     <NodeShareDialog v-if="false"></NodeShareDialog>
@@ -168,8 +166,6 @@ import NodeAttachment from './NodeAttachment.vue'
 import NodeAttachmentPreview from './NodeAttachmentPreview.vue'
 import NodeHyperlinkPopover from './NodeHyperlinkPopover.vue'
 import NodeCommentCard from './NodeCommentCard.vue'
-import NodeCommentEntry from './NodeCommentEntry.vue'
-import NodeQuickToolbar from './NodeQuickToolbar.vue'
 import { isNodeCommentUnread } from '@/utils/commentRead'
 import { currentCommentUser } from '@/utils/commentUser'
 import CooperateDialog from './CooperateDialog.vue'
@@ -247,8 +243,6 @@ export default {
     NodeAttachmentPreview,
     NodeHyperlinkPopover,
     NodeCommentCard,
-    NodeCommentEntry,
-    NodeQuickToolbar,
     CooperateDialog,
     NodeShareDialog,
     MapRefDialog
@@ -1297,17 +1291,13 @@ export default {
         'node_attachmentContextmenu',
         'node_hyperlinkClick',
         'node_commentClick',
-        'node_mouseenter',
-        'node_mouseleave',
         'demonstrate_jump',
         'exit_demonstrate',
         'node_note_dblclick',
         'node_mousedown',
         'node_mouseup',
         'map_ref_click',
-        'multi_select_end',
-        'before_show_text_edit',
-        'hide_text_edit'
+        'multi_select_end'
       ].forEach(event => {
         this.mindMap.on(event, (...args) => {
           this.$bus.$emit(event, ...args)
