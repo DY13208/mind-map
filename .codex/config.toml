@@ -1,6 +1,8 @@
-[mcp_servers.mind-map]
+# 日常使用用户级 mind-map HTTP 服务；本地 stdio 服务单独命名，按需启用。
+[mcp_servers.mind-map-local]
+enabled = false
 command = "node"
 args = ["simple-mind-map/bin/mcpServer.mjs"]
 
-[mcp_servers.mind-map.env]
+[mcp_servers.mind-map-local.env]
 MIND_MAP_API = "http://127.0.0.1:1234"

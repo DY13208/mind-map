@@ -252,8 +252,17 @@ export default {
   },
   nodeHyperlink: {
     title: '超链接',
-    link: '链接',
-    name: '名称'
+    description: '为节点添加相关资料，点击链接即可查看。',
+    link: '链接地址',
+    name: '显示名称',
+    optional: '可选',
+    linkPlaceholder: '粘贴网址，例如 https://example.com',
+    linkHint: '未填写协议时将自动使用 HTTPS',
+    namePlaceholder: '例如：产品文档、项目资料',
+    openHint: '链接将在新标签页打开，当前脑图会保留',
+    remove: '移除链接',
+    invalidLink: '请输入有效的网址，仅支持 HTTP 或 HTTPS',
+    requiredLink: '请先输入链接地址'
   },
   nodeIcon: {
     title: '图标'

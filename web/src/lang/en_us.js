@@ -258,8 +258,17 @@ export default {
   },
   nodeHyperlink: {
     title: 'Link',
-    link: 'Href',
-    name: 'Name'
+    description: 'Link related resources to this node.',
+    link: 'Link address',
+    name: 'Display name',
+    optional: 'Optional',
+    linkPlaceholder: 'Paste a URL, e.g. https://example.com',
+    linkHint: 'HTTPS is added when no protocol is provided',
+    namePlaceholder: 'e.g. Product documentation',
+    openHint: 'Opens in a new tab. Your map stays open.',
+    remove: 'Remove link',
+    invalidLink: 'Enter a valid HTTP or HTTPS URL',
+    requiredLink: 'Enter a link address'
   },
   nodeIcon: {
     title: 'Icon'

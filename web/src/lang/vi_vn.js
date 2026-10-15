@@ -236,8 +236,17 @@ export default {
   },
   nodeHyperlink: {
     title: 'Liên kết',
-    link: 'Href',
-    name: 'Tên'
+    description: 'Thêm tài liệu liên quan vào nút này.',
+    link: 'Địa chỉ liên kết',
+    name: 'Tên hiển thị',
+    optional: 'Không bắt buộc',
+    linkPlaceholder: 'Dán URL, ví dụ https://example.com',
+    linkHint: 'Tự động thêm HTTPS nếu chưa có giao thức',
+    namePlaceholder: 'Ví dụ: Tài liệu sản phẩm',
+    openHint: 'Mở trong tab mới. Sơ đồ hiện tại vẫn được giữ.',
+    remove: 'Xóa liên kết',
+    invalidLink: 'Nhập URL HTTP hoặc HTTPS hợp lệ',
+    requiredLink: 'Vui lòng nhập địa chỉ liên kết'
   },
   nodeIcon: {
     title: 'Biểu tượng'
