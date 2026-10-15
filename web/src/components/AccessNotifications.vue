@@ -120,6 +120,7 @@
                 :id="`grant-${item.id}`"
                 :value="grantRole(item)"
                 size="small"
+                popper-class="accessNotificationPopper"
                 :disabled="!!busyId"
                 :aria-label="
                   `授予${item.requester_name || item.requester_id}的权限`
@@ -1069,5 +1070,74 @@ button:focus-visible {
     margin: 4vh auto !important;
     border-radius: 12px;
   }
+}
+/* 暗色模式：编辑页 body.isDark 时生效（ProductShell 页不加 isDark，保持浅色） */
+body.isDark .accessNotificationDialog.el-dialog {
+  background: #1f2329;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  .messageCenter { color: #e6e8eb; background: #1f2329; }
+  .messageIcon { background: rgba(37, 152, 109, 0.16); color: #4cc596; }
+  .connectionState { color: #9aa0a6; }
+  .connectionState i { background: #5f656b; }
+  .connectionState.live i { background: #3fbf8a; }
+  .closeMessage, .refreshMessage { color: #9aa0a6; }
+  .closeMessage:hover, .refreshMessage:hover { background: #2c3036; color: #4cc596; }
+  .el-tabs__item { color: #9aa0a6; }
+  .el-tabs__item:hover, .el-tabs__item.is-active { color: #4cc596; }
+  .el-tabs__active-bar { background: #3fbf8a; }
+  .el-tabs__nav-wrap::after { background-color: #3a3d42; }
+  .messageContent { background: #25282d; }
+  .sectionIntro p, .historyRoles, .requestIdentity small, .messageFooter,
+  .resultCard small, .announcementRow time, .emptyMessages { color: #9aa0a6; }
+  .historyTools, .messageFooter { border-color: #3a3d42; }
+  .historyCard, .accessRequestCard { background: #1f2329; border-color: #3a3d42; }
+  .grantedRole, .requestedRole { background: #2c3036; color: #b4bac0; }
+  .grantedRole.manager { background: rgba(37, 152, 109, 0.18); color: #4cc596; }
+  .grantedRole.editor, .requestedRole.editor { background: rgba(80, 140, 220, 0.18); color: #8db8ef; }
+  .historyReason, .requestReason, .resultCard p, .announcementRow ul { color: #b4bac0; }
+  .historyReason > span:first-child, .grantLabel { color: #9aa0a6; }
+  .requestAvatar { background: #2f3a35; color: #6fd1a8; }
+  .requestFile { background: #2a2e34; color: #d5d9dd; }
+  .requestFile:disabled { color: #7d848b; }
+  .requestActions .el-button--primary { background: #1f8f66; border-color: #1f8f66; color: #fff; }
+  .emptyMessages > i { color: #4f7a66; }
+  .emptyMessages h3 { color: #d5d9dd; }
+  .messageError { background: rgba(230, 140, 70, 0.14); color: #e6a77a; }
+  .resultCard, .announcementRow { border-color: #3a3d42; }
+  .resultIcon { background: rgba(37, 152, 109, 0.18); color: #4cc596; }
+  .resultIcon.rejected { background: rgba(220, 110, 90, 0.16); color: #e39582; }
+  button:focus-visible { outline-color: #3fbf8a; }
+  /* Element UI 控件 */
+  .el-input__inner, .el-textarea__inner {
+    background: #2a2e34; border-color: #3a3d42; color: #e6e8eb;
+    &::placeholder { color: #7d848b; }
+    &:hover { border-color: #4a4e54; }
+    &:focus { border-color: #3fbf8a; }
+  }
+  .el-input.is-disabled .el-input__inner { background: #25282d; color: #7d848b; }
+  .el-select .el-input__icon, .el-input__prefix, .el-input__suffix { color: #9aa0a6; }
+  .el-radio-button__inner { background: #2a2e34; border-color: #3a3d42; color: #b4bac0; }
+  .el-radio-button:first-child .el-radio-button__inner { border-left-color: #3a3d42; }
+  .el-radio-button__orig-radio:checked + .el-radio-button__inner {
+    background: rgba(37, 152, 109, 0.2); border-color: #2f8f6a; color: #4cc596; box-shadow: -1px 0 0 #2f8f6a;
+  }
+  .el-button--default { background: #2a2e34; border-color: #3a3d42; color: #d5d9dd; }
+  .el-button--default:hover { border-color: #3fbf8a; color: #4cc596; }
+  .el-button--text { color: #4cc596; }
+  .el-pagination { color: #9aa0a6; }
+  .el-pagination button, .el-pagination .el-pager li, .el-pagination button:disabled { background: transparent; color: #9aa0a6; }
+  .el-pagination .el-pager li.active, .el-pagination .el-pager li:hover { color: #4cc596; }
+}
+body.isDark .v-modal { background: #000; }
+/* 下拉框挂在 body 上，单独覆盖 */
+body.isDark .accessNotificationPopper.el-select-dropdown {
+  background: #25282d; border-color: #3a3d42;
+  .el-select-dropdown__item { color: #d5d9dd; }
+  .el-select-dropdown__item.hover, .el-select-dropdown__item:hover { background: #2f343a; }
+  .el-select-dropdown__item.selected { color: #4cc596; }
+  .popper__arrow { border-bottom-color: #3a3d42 !important; }
+  .popper__arrow::after { border-bottom-color: #25282d !important; }
+  &[x-placement^='top'] .popper__arrow { border-top-color: #3a3d42 !important; }
+  &[x-placement^='top'] .popper__arrow::after { border-top-color: #25282d !important; }
 }
 </style>

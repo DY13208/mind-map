@@ -156,3 +156,8 @@ export default {
   transform: translate(50%, -50%);
 }
 </style>
+<style lang="less">
+body.isDark .notificationBadge .notificationButton { color: #b4bac0; }
+body.isDark .notificationBadge .notificationButton:hover { background: #2c3036; color: #4cc596; }
+body.isDark .notificationBadge--avatar .el-badge__content.is-dot { border-color: #1f2329; }
+</style>
