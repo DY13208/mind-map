@@ -240,6 +240,40 @@ async function main() {
   f.branch.data.expand = true
   listeners.personal_expand_change()
   assert.strictEqual(component.personalExpandState.branch, true, 'async batch event updates personal preferences')
+
+  // 收起后再展开只露出下一级，子节点不恢复收起前的展开状态。
+  const setExpand = method('setNodeExpand', 'collapseChildrenOf')
+  const collapseChildren = method('collapseChildrenOf', 'nodeHasChildren')
+  const makeExpandCase = parentExpand => {
+    const grandchild = { data: { uid: 'g', expand: true }, children: [{ data: { uid: 'g-leaf' }, children: [] }] }
+    const child = { data: { uid: 'c', expand: true }, children: [grandchild] }
+    const leafChild = { data: { uid: 'c-leaf' }, children: [] }
+    const parentData = { data: { uid: 'p', expand: parentExpand }, children: [child, leafChild] }
+    const events = []
+    const r = {
+      nodeHasChildren: node => node.children.length > 0 || Number(node.data.childCount) > 0,
+      collapseChildrenOf: collapseChildren,
+      mindMap: {
+        cooperate: null,
+        execCommand(name, node, patch) { node.nodeData.data.expand = patch.expand },
+        emit(name) { events.push(name) },
+        render() {}
+      }
+    }
+    const node = { nodeData: parentData, getData: key => parentData.data[key] }
+    return { r, node, child, grandchild, leafChild, parentData, events }
+  }
+  let c = makeExpandCase(false)
+  setExpand.call(c.r, c.node, true)
+  assert.strictEqual(c.parentData.data.expand, true)
+  assert.strictEqual(c.child.data.expand, false, 'expanding a collapsed node must collapse its child branches')
+  assert.strictEqual(c.grandchild.data.expand, true, 'only the next level is reset')
+  assert.strictEqual(c.leafChild.data.expand, undefined, 'leaf children stay untouched')
+  assert.deepStrictEqual(c.events, ['personal_expand_change'], 'child collapse must be persisted')
+  c = makeExpandCase(true)
+  setExpand.call(c.r, c.node, true)
+  assert.strictEqual(c.child.data.expand, true, 're-expanding an already expanded node must not reset children')
+  assert.deepStrictEqual(c.events, [])
   console.log('Personal expansion async batch, collapse, level, and cancellation regressions passed')
 }
 main().catch(err => { console.error(err); process.exitCode = 1 })
