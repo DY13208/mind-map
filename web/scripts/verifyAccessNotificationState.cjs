@@ -25,6 +25,8 @@ async function main() {
     },
     setInterval: () => 1,
     clearInterval: () => {},
+    clearTimeout,
+    setTimeout,
     addEventListener: (k, v) => listeners.set(k, v),
     removeEventListener: k => listeners.delete(k)
   }
@@ -92,6 +94,7 @@ async function main() {
     startNotifications,
     stopNotifications,
     refreshNotifications,
+    refreshApprovalHistory,
     setProductHttp,
     openNotifications,
     Center
@@ -171,16 +174,70 @@ async function main() {
   deferred[9].resolve({ list: [], total: 0, unread: 0 })
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(state.page, 2)
+  state.activeTab = 'history'
+  component.changePage(2)
+  assert.match(deferred[10].url, /access-history.*offset=20/)
+  deferred[10].resolve({
+    list: [{ id: 'history-21', granted_role: 'manager' }],
+    total: 25,
+    counts: { all: 25, approved: 20, rejected: 5 }
+  })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(state.historyPage, 2)
+  assert.equal(state.history[0].granted_role, 'manager')
+  state.historyStatus = 'rejected'
+  const filter = component.filterHistory()
+  assert.match(deferred[11].url, /offset=0&status=rejected/)
+  const stale = refreshApprovalHistory()
+  state.historySearch = 'Jasmine'
+  const latest = refreshApprovalHistory()
+  assert.match(deferred[13].url, /search=Jasmine/)
+  deferred[13].resolve({
+    list: [{ id: 'current-history' }],
+    total: 1,
+    counts: { all: 1, approved: 0, rejected: 1 }
+  })
+  await latest
+  deferred[11].resolve({ list: [{ id: 'stale-filter' }], total: 5 })
+  deferred[12].resolve({ list: [{ id: 'stale-search' }], total: 5 })
+  await Promise.all([filter, stale])
+  assert.equal(
+    state.history[0].id,
+    'current-history',
+    'Old filter/search results cannot replace current history'
+  )
+  assert.equal(state.historyLoading, false)
+  setProductHttp(() =>
+    Promise.reject(new Error('Temporary connection failure'))
+  )
+  await refreshApprovalHistory()
+  assert.match(state.historyError, /Temporary connection failure/)
+  assert.equal(
+    state.history[0].id,
+    'current-history',
+    'A transient error retains the visible history with a retry message'
+  )
+  assert.equal(state.historyLoading, false)
+  setProductHttp(url => new Promise(resolve => deferred.push({ url, resolve })))
+  const lateHistory = refreshApprovalHistory()
   openNotifications('results')
   assert.equal(state.visible, true)
   assert.equal(state.activeTab, 'results')
   stopNotifications()
+  deferred[14].resolve({ list: [{ id: 'private-old-history' }], total: 1 })
+  await lateHistory
+  assert.equal(
+    state.history.length,
+    0,
+    'History is cleared on logout and late results are ignored'
+  )
+  assert.equal(state.historySearch, '')
   assert.equal(streams[1].closed, true)
   assert.equal(listeners.size, 0)
   assert.equal(state.items.length, 0)
   component.$destroy()
   console.log(
-    'Notification state checks passed: identity isolation, stale reads, realtime reconnect, durable refresh, toast deduplication, actual granted role, lifecycle cleanup'
+    'Notification state checks passed: identity isolation, stale reads, realtime reconnect, durable refresh, toast deduplication, actual granted role, history pagination, status/search races, logout cleanup'
   )
 }
 main().catch(error => {

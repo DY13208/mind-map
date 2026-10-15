@@ -7,6 +7,14 @@ export const state = Vue.observable({
   activeTab: 'requests',
   items: [],
   results: [],
+  history: [],
+  historyTotal: 0,
+  historyCounts: { all: 0, approved: 0, rejected: 0 },
+  historyPage: 1,
+  historyStatus: '',
+  historySearch: '',
+  historyLoading: false,
+  historyError: '',
   total: 0,
   resultTotal: 0,
   unread: 0,
@@ -24,6 +32,7 @@ let userId = '',
   generation = 0,
   inFlight = null,
   queued = false,
+  historySequence = 0,
   announced = new Set()
 const notices = { requests: null, results: null }
 function showNotice(kind, options) {
@@ -131,6 +140,12 @@ export async function refreshNotifications() {
         if (error.statusCode === 401) {
           state.items = []
           state.results = []
+          state.resultTotal = 0
+          historySequence++
+          state.historyLoading = false
+          state.history = []
+          state.historyTotal = 0
+          state.historyCounts = { all: 0, approved: 0, rejected: 0 }
           state.total = 0
           state.unread = 0
           state.connected = false
@@ -151,8 +166,55 @@ export async function refreshNotifications() {
   inFlight = task
   return task
 }
+export async function refreshApprovalHistory() {
+  if (!userId) return
+  const version = generation,
+    sequence = ++historySequence
+  const filters = {
+    limit: 20,
+    offset: (state.historyPage - 1) * 20,
+    status: state.historyStatus,
+    search: state.historySearch.trim()
+  }
+  state.historyLoading = true
+  try {
+    const data = await service.history(filters)
+    if (
+      version !== generation ||
+      sequence !== historySequence ||
+      filters.status !== state.historyStatus ||
+      filters.search !== state.historySearch.trim()
+    )
+      return
+    state.history = data.list || []
+    state.historyTotal = Number(data.total) || 0
+    state.historyCounts = data.counts || { all: 0, approved: 0, rejected: 0 }
+    state.historyError = ''
+    const max = Math.max(1, Math.ceil(state.historyTotal / 20))
+    if (state.historyPage > max) {
+      state.historyPage = max
+      return refreshApprovalHistory()
+    }
+  } catch (error) {
+    if (version === generation && sequence === historySequence) {
+      state.historyError = error.message || '审批历史加载失败，请重试'
+      if (error.statusCode === 401) {
+        state.history = []
+        state.historyTotal = 0
+        state.historyCounts = { all: 0, approved: 0, rejected: 0 }
+      }
+    }
+  } finally {
+    if (version === generation && sequence === historySequence)
+      state.historyLoading = false
+  }
+}
+function syncNotifications() {
+  refreshNotifications()
+  if (state.visible && state.activeTab === 'history') refreshApprovalHistory()
+}
 function onVisibility() {
-  if (!document.hidden) refreshNotifications()
+  if (!document.hidden) syncNotifications()
 }
 export function startNotifications(id) {
   if (userId === String(id)) return
@@ -181,18 +243,18 @@ export function startNotifications(id) {
     stream.addEventListener('ready', () => {
       if (version === generation) {
         state.connected = true
-        refreshNotifications()
+        syncNotifications()
       }
     })
     stream.addEventListener('invalidate', () => {
-      if (version === generation) refreshNotifications()
+      if (version === generation) syncNotifications()
     })
     stream.onerror = () => {
       if (version === generation) state.connected = false
     }
   }
   timer = window.setInterval(() => {
-    if (!document.hidden) refreshNotifications()
+    if (!document.hidden) syncNotifications()
   }, 60000)
   document.addEventListener('visibilitychange', onVisibility)
   window.addEventListener('online', onVisibility)
@@ -217,8 +279,17 @@ export function stopNotifications(expectedUserId) {
   window.removeEventListener('online', onVisibility)
   Object.assign(state, {
     visible: false,
+    activeTab: 'requests',
     items: [],
     results: [],
+    history: [],
+    historyTotal: 0,
+    historyCounts: { all: 0, approved: 0, rejected: 0 },
+    historyPage: 1,
+    historyStatus: '',
+    historySearch: '',
+    historyLoading: false,
+    historyError: '',
     total: 0,
     resultTotal: 0,
     unread: 0,

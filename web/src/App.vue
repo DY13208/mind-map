@@ -132,7 +132,7 @@
       </div>
     </div>
     <template v-else>
-      <AccessNotifications v-if="authState.authenticated && authState.user" :key="authState.user.id" :user-id="authState.user.id" :floating="$route.path === '/'" />
+      <AccessNotifications v-if="authState.authenticated && authState.user" :key="authState.user.id" :user-id="authState.user.id" />
       <router-view :key="$route.path === '/' ? 'editor:' + String($route.query.room || '') : 'page'"></router-view>
       <div
         v-if="authState.workbuddyEnabled && (workbuddyLinkNeeded || workbuddyLinkSuccess)"

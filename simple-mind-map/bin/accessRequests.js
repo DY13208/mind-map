@@ -47,6 +47,9 @@ async function initSchema(db) {
   await db.query(
     `create index if not exists room_access_requests_requester_result_idx on room_access_requests(requester_id,decided_at desc) where status <> 'pending'`
   )
+  await db.query(
+    `create index if not exists room_access_requests_decider_history_idx on room_access_requests(decided_by,decided_at desc,id desc) where status <> 'pending'`
+  )
 }
 function actor(req) {
   const who = roomAcl.actorFromReq(req)
@@ -197,6 +200,56 @@ async function listResults(db, req, filters = {}) {
     offset
   }
 }
+// Audit history belongs to the person who made the decision, even after an
+// ownership transfer or permission revocation. It never grants file access.
+async function listHistory(db, req, filters = {}) {
+  const who = actor(req)
+  const limit = Math.min(
+    50,
+    Math.max(1, Math.floor(Number(filters.limit)) || 20)
+  )
+  const offset = Math.min(
+    10000,
+    Math.max(0, Math.floor(Number(filters.offset)) || 0)
+  )
+  const status = String(filters.status || '')
+  if (status && !['approved', 'rejected'].includes(status))
+    throw error(400, 'BAD_REQUEST', '无效的审批状态')
+  const search = String(filters.search || '')
+    .trim()
+    .slice(0, 100)
+  const from = `from room_access_requests ar join rooms r using(room_key)
+    left join wecom_users u on u.user_id=ar.requester_id
+    where ar.decided_by=$1 and ar.status <> 'pending'
+    and ($2='' or position(lower($2) in lower(concat_ws(' ',r.title,u.name,ar.requester_id)))>0)`
+  const [items, count] = await Promise.all([
+    db.query(
+      `select ar.*,r.title,r.deleted_at,
+      coalesce(u.name,ar.requester_id) requester_name,coalesce(u.avatar,'') requester_avatar
+      ${from} and ($3='' or ar.status=$3)
+      order by ar.decided_at desc,ar.id desc limit $4 offset $5`,
+      [who.id, search, status, limit, offset]
+    ),
+    db.query(
+      `select count(*)::int as all_count,
+      count(*) filter(where ar.status='approved')::int approved,
+      count(*) filter(where ar.status='rejected')::int rejected ${from}`,
+      [who.id, search]
+    )
+  ])
+  const counts = {
+    all: count.rows[0].all_count,
+    approved: count.rows[0].approved,
+    rejected: count.rows[0].rejected
+  }
+  return {
+    list: items.rows,
+    total: counts[status || 'all'],
+    counts,
+    limit,
+    offset
+  }
+}
 async function markSeen(db, req, ids) {
   const who = actor(req)
   const safeIds = (Array.isArray(ids) ? ids : [])
@@ -272,6 +325,7 @@ module.exports = {
   mine,
   listInbox,
   listResults,
+  listHistory,
   markSeen,
   decide,
   actor,

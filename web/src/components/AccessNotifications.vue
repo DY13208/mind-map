@@ -1,18 +1,14 @@
 <template>
   <div>
-    <AccessNotificationTrigger
-      v-if="floating"
-      collapsed
-      class="floatingNotification"
-    />
-    <el-drawer
+    <el-dialog
       :visible.sync="state.visible"
-      direction="rtl"
-      size="480px"
+      title="消息中心"
       append-to-body
-      :with-header="false"
-      custom-class="accessNotificationDrawer"
+      :show-close="false"
+      :close-on-click-modal="false"
+      custom-class="accessNotificationDialog"
       @opened="onOpened"
+      @closed="onClosed"
     >
       <section class="messageCenter" aria-label="消息中心">
         <header class="messageHeader">
@@ -45,8 +41,9 @@
             :label="`访问申请${state.total ? ' ' + state.total : ''}`"
             name="requests"
           />
+          <el-tab-pane label="我已审批" name="history" />
           <el-tab-pane
-            :label="`审批结果${state.unread ? ' ' + state.unread : ''}`"
+            :label="`我的申请${state.unread ? ' ' + state.unread : ''}`"
             name="results"
           />
           <el-tab-pane
@@ -66,6 +63,7 @@
           v-if="state.activeTab === 'requests'"
           v-loading="state.loading"
           class="messageContent"
+          ref="messageContent"
         >
           <div class="sectionIntro">
             <div>
@@ -81,96 +79,105 @@
               <i class="el-icon-refresh" />
             </button>
           </div>
-          <article
-            v-for="item in state.items"
-            :key="item.id"
-            class="accessRequestCard"
-            :data-request-id="item.id"
-          >
-            <div class="requestIdentity">
-              <span class="requestAvatar">{{
-                (item.requester_name || item.requester_id).slice(0, 1)
-              }}</span>
-              <div>
-                <strong>{{ item.requester_name || item.requester_id }}</strong
-                ><small>{{ formatTime(item.created_at) }}</small>
+          <div class="requestGrid">
+            <article
+              v-for="item in state.items"
+              :key="item.id"
+              class="accessRequestCard"
+              :data-request-id="item.id"
+            >
+              <div class="requestIdentity">
+                <UserAvatar
+                  :person="{
+                    name: item.requester_name || item.requester_id,
+                    avatar: item.requester_avatar
+                  }"
+                  :size="34"
+                />
+                <div>
+                  <strong>{{ item.requester_name || item.requester_id }}</strong
+                  ><small>{{ formatTime(item.created_at) }}</small>
+                </div>
+                <span :class="['requestedRole', item.requested_role]"
+                  >申请{{ roleText(item.requested_role) }}</span
+                >
               </div>
-              <span :class="['requestedRole', item.requested_role]"
-                >申请{{ roleText(item.requested_role) }}</span
+              <button type="button" class="requestFile" @click="openFile(item)">
+                <i class="el-icon-document" /><span>{{
+                  item.title || '未命名脑图'
+                }}</span
+                ><i class="el-icon-top-right" />
+              </button>
+              <p
+                v-if="item.request_reason"
+                class="requestReason"
+                v-text="item.request_reason"
+              ></p>
+              <label class="grantLabel" :for="`grant-${item.id}`"
+                >同意后授予</label
               >
-            </div>
-            <button type="button" class="requestFile" @click="openFile(item)">
-              <i class="el-icon-document" /><span>{{
-                item.title || '未命名脑图'
-              }}</span
-              ><i class="el-icon-top-right" />
-            </button>
-            <p
-              v-if="item.request_reason"
-              class="requestReason"
-              v-text="item.request_reason"
-            ></p>
-            <label class="grantLabel" :for="`grant-${item.id}`"
-              >同意后授予</label
-            >
-            <el-select
-              :id="`grant-${item.id}`"
-              :value="grantRole(item)"
-              size="small"
-              :disabled="!!busyId"
-              :aria-label="
-                `授予${item.requester_name || item.requester_id}的权限`
-              "
-              @change="$set(roles, item.id, $event)"
-            >
-              <el-option label="可查看 · 仅阅读内容" value="viewer" /><el-option
-                label="可编辑 · 查看与修改"
-                value="editor"
-              /><el-option label="可管理 · 编辑与管理成员" value="manager" />
-            </el-select>
-            <el-input
-              v-if="rejectingId === item.id"
-              v-model="decisionReason"
-              type="textarea"
-              :rows="2"
-              maxlength="500"
-              show-word-limit
-              placeholder="拒绝原因（选填）"
-              class="decisionReason"
-            />
-            <div class="requestActions">
-              <template v-if="rejectingId === item.id"
-                ><el-button
-                  size="small"
-                  :disabled="!!busyId"
-                  @click="rejectingId = ''"
-                  >取消</el-button
-                ><el-button
-                  size="small"
-                  type="danger"
-                  plain
-                  :loading="busyId === item.id"
-                  :disabled="!!busyId && busyId !== item.id"
-                  @click="decide(item, 'reject')"
-                  >确认拒绝</el-button
-                ></template
-              ><template v-else
-                ><el-button
-                  size="small"
-                  :disabled="!!busyId"
-                  @click="beginReject(item)"
-                  >拒绝</el-button
-                ><el-button
-                  size="small"
-                  type="primary"
-                  :loading="busyId === item.id"
-                  :disabled="!!busyId && busyId !== item.id"
-                  @click="decide(item, 'approve')"
-                  >同意并授权</el-button
-                ></template
+              <el-select
+                :id="`grant-${item.id}`"
+                :value="grantRole(item)"
+                size="small"
+                :disabled="!!busyId"
+                :aria-label="
+                  `授予${item.requester_name || item.requester_id}的权限`
+                "
+                @change="$set(roles, item.id, $event)"
               >
-            </div>
-          </article>
+                <el-option
+                  label="可查看 · 仅阅读内容"
+                  value="viewer"
+                /><el-option
+                  label="可编辑 · 查看与修改"
+                  value="editor"
+                /><el-option label="可管理 · 编辑与管理成员" value="manager" />
+              </el-select>
+              <el-input
+                v-if="rejectingId === item.id"
+                v-model="decisionReason"
+                type="textarea"
+                :rows="2"
+                maxlength="500"
+                show-word-limit
+                placeholder="拒绝原因（选填）"
+                class="decisionReason"
+              />
+              <div class="requestActions">
+                <template v-if="rejectingId === item.id"
+                  ><el-button
+                    size="small"
+                    :disabled="!!busyId"
+                    @click="rejectingId = ''"
+                    >取消</el-button
+                  ><el-button
+                    size="small"
+                    type="danger"
+                    plain
+                    :loading="busyId === item.id"
+                    :disabled="!!busyId && busyId !== item.id"
+                    @click="decide(item, 'reject')"
+                    >确认拒绝</el-button
+                  ></template
+                ><template v-else
+                  ><el-button
+                    size="small"
+                    :disabled="!!busyId"
+                    @click="beginReject(item)"
+                    >拒绝</el-button
+                  ><el-button
+                    size="small"
+                    type="primary"
+                    :loading="busyId === item.id"
+                    :disabled="!!busyId && busyId !== item.id"
+                    @click="decide(item, 'approve')"
+                    >同意并授权</el-button
+                  ></template
+                >
+              </div>
+            </article>
+          </div>
           <div
             v-if="!state.items.length && !state.loading && !state.error"
             class="emptyMessages"
@@ -180,10 +187,144 @@
             <p>新的访问申请会在这里实时提醒</p>
           </div>
         </div>
+        <template v-else-if="state.activeTab === 'history'">
+          <div class="historyTools">
+            <el-radio-group
+              v-model="state.historyStatus"
+              size="small"
+              aria-label="审批状态筛选"
+              @change="filterHistory"
+            >
+              <el-radio-button label=""
+                >全部 {{ state.historyCounts.all }}</el-radio-button
+              >
+              <el-radio-button label="approved"
+                >已同意 {{ state.historyCounts.approved }}</el-radio-button
+              >
+              <el-radio-button label="rejected"
+                >已拒绝 {{ state.historyCounts.rejected }}</el-radio-button
+              >
+            </el-radio-group>
+            <el-input
+              v-model="state.historySearch"
+              size="small"
+              clearable
+              prefix-icon="el-icon-search"
+              placeholder="搜索申请人或文件"
+              aria-label="搜索审批历史"
+              @input="searchHistory"
+            />
+          </div>
+          <div
+            class="messageContent historyContent"
+            ref="messageContent"
+            v-loading="state.historyLoading"
+          >
+            <div class="sectionIntro">
+              <div>
+                <h3>我处理的申请</h3>
+                <p>按审批时间排列，保留当时的授权决定</p>
+              </div>
+              <button
+                type="button"
+                class="refreshMessage"
+                aria-label="刷新审批历史"
+                @click="refresh"
+              >
+                <i class="el-icon-refresh" />
+              </button>
+            </div>
+            <article
+              v-for="item in state.history"
+              :key="item.id"
+              class="historyCard"
+              :data-history-id="item.id"
+            >
+              <div class="requestIdentity">
+                <UserAvatar
+                  :person="{
+                    name: item.requester_name || item.requester_id,
+                    avatar: item.requester_avatar
+                  }"
+                  :size="34"
+                />
+                <div class="historyIdentity">
+                  <strong>{{ item.requester_name || item.requester_id }}</strong
+                  ><small>{{ formatTime(item.decided_at) }}</small>
+                </div>
+                <el-tag
+                  size="small"
+                  :type="item.status === 'approved' ? 'success' : 'info'"
+                  effect="light"
+                  >{{
+                    item.status === 'approved' ? '已同意' : '已拒绝'
+                  }}</el-tag
+                >
+              </div>
+              <button
+                type="button"
+                class="requestFile"
+                :disabled="!!item.deleted_at"
+                @click="openFile(item)"
+              >
+                <i class="el-icon-document" /><span>{{
+                  item.title || '未命名脑图'
+                }}</span
+                ><small v-if="item.deleted_at">已删除</small
+                ><i v-else class="el-icon-top-right" />
+              </button>
+              <div class="historyRoles">
+                <span>申请{{ roleText(item.requested_role) }}</span
+                ><template v-if="item.status === 'approved'"
+                  ><i class="el-icon-right" /><span
+                    :class="[
+                      'grantedRole',
+                      item.granted_role || item.requested_role
+                    ]"
+                    >已授予{{
+                      roleText(item.granted_role || item.requested_role)
+                    }}</span
+                  ></template
+                >
+              </div>
+              <p v-if="item.request_reason" class="historyReason">
+                <span>申请说明</span><span v-text="item.request_reason" />
+              </p>
+              <p v-if="item.decision_reason" class="historyReason">
+                <span>审批说明</span><span v-text="item.decision_reason" />
+              </p>
+            </article>
+            <div
+              v-if="
+                !state.history.length &&
+                  !state.historyLoading &&
+                  !state.historyError
+              "
+              class="emptyMessages"
+            >
+              <i class="el-icon-finished" />
+              <h3>
+                {{
+                  state.historySearch || state.historyStatus
+                    ? '没有匹配的审批记录'
+                    : '暂无历史审批'
+                }}
+              </h3>
+              <p>
+                {{
+                  state.historySearch || state.historyStatus
+                    ? '调整筛选条件或搜索关键词'
+                    : '处理后的申请会保留在这里'
+                }}
+              </p>
+            </div>
+          </div>
+        </template>
         <div
           v-else-if="state.activeTab === 'results'"
           v-loading="state.loading"
           class="messageContent"
+          ref="messageContent"
         >
           <div class="sectionIntro">
             <div>
@@ -236,7 +377,7 @@
             <p>所有者处理后会在这里通知你</p>
           </div>
         </div>
-        <div v-else class="messageContent">
+        <div v-else ref="messageContent" class="messageContent">
           <article
             v-for="announcement in announcements"
             :key="announcement.id"
@@ -258,36 +399,27 @@
           class="messageFooter"
         >
           <span
-            >{{
-              state.activeTab === 'requests' ? state.total : state.resultTotal
-            }}
-            条{{
+            >{{ currentTotal }} 条{{
               state.activeTab === 'requests' ? '待处理申请' : '审批记录'
             }}</span
-          ><el-pagination
-            v-if="
-              (state.activeTab === 'requests'
-                ? state.total
-                : state.resultTotal) > 20
-            "
+          >
+          <el-pagination
+            v-if="currentTotal > 20"
             small
             layout="prev,pager,next"
-            :current-page="
-              state.activeTab === 'requests' ? state.page : state.resultPage
-            "
+            :pager-count="5"
+            :current-page="currentPage"
             :page-size="20"
-            :total="
-              state.activeTab === 'requests' ? state.total : state.resultTotal
-            "
+            :total="currentTotal"
             @current-change="changePage"
           />
         </footer>
       </section>
-    </el-drawer>
+    </el-dialog>
   </div>
 </template>
 <script>
-import AccessNotificationTrigger from './AccessNotificationTrigger.vue'
+import UserAvatar from './UserAvatar.vue'
 import announcements from '@/config/announcements'
 import service from '@/services/accessRequestService'
 import {
@@ -295,14 +427,14 @@ import {
   roleText,
   startNotifications,
   stopNotifications,
-  refreshNotifications
+  refreshNotifications,
+  refreshApprovalHistory
 } from '@/services/accessNotificationState'
 export default {
   name: 'AccessNotifications',
-  components: { AccessNotificationTrigger },
+  components: { UserAvatar },
   props: {
-    userId: { type: String, required: true },
-    floating: { type: Boolean, default: true }
+    userId: { type: String, required: true }
   },
   data: () => ({
     state,
@@ -311,8 +443,32 @@ export default {
     busyId: '',
     rejectingId: '',
     decisionReason: '',
-    seenBusy: false
+    seenBusy: false,
+    searchTimer: null
   }),
+  computed: {
+    currentTotal() {
+      return this.state.activeTab === 'history'
+        ? this.state.historyTotal
+        : this.state.activeTab === 'requests'
+        ? this.state.total
+        : this.state.resultTotal
+    },
+    currentPage() {
+      return this.state.activeTab === 'history'
+        ? this.state.historyPage
+        : this.state.activeTab === 'requests'
+        ? this.state.page
+        : this.state.resultPage
+    },
+    currentError() {
+      return this.state.activeTab === 'history'
+        ? this.state.historyError
+        : this.state.activeTab === 'announcements'
+        ? ''
+        : this.state.error
+    }
+  },
   watch: {
     userId(id) {
       startNotifications(id)
@@ -326,6 +482,7 @@ export default {
     startNotifications(this.userId)
   },
   beforeDestroy() {
+    window.clearTimeout(this.searchTimer)
     stopNotifications(this.userId)
   },
   methods: {
@@ -335,6 +492,7 @@ export default {
       return Number.isNaN(date.getTime())
         ? ''
         : date.toLocaleString('zh-CN', {
+            year: 'numeric',
             month: '2-digit',
             day: '2-digit',
             hour: '2-digit',
@@ -345,17 +503,44 @@ export default {
       return this.roles[item.id] || item.requested_role
     },
     refresh() {
-      return refreshNotifications()
+      return this.state.activeTab === 'history'
+        ? refreshApprovalHistory()
+        : refreshNotifications()
+    },
+    filterHistory() {
+      window.clearTimeout(this.searchTimer)
+      this.state.historyPage = 1
+      return refreshApprovalHistory().then(() => this.resetScroll('history'))
+    },
+    searchHistory() {
+      window.clearTimeout(this.searchTimer)
+      this.searchTimer = window.setTimeout(() => this.filterHistory(), 300)
+    },
+    onClosed() {
+      window.clearTimeout(this.searchTimer)
+      if (!this.busyId) {
+        this.rejectingId = ''
+        this.decisionReason = ''
+      }
     },
     changePage(page) {
       if (this.state.activeTab === 'requests') this.state.page = page
+      else if (this.state.activeTab === 'history') this.state.historyPage = page
       else this.state.resultPage = page
-      this.refresh()
+      const tab = this.state.activeTab
+      this.refresh().then(() => this.resetScroll(tab))
+    },
+    resetScroll(tab) {
+      this.$nextTick(() => {
+        if (this.state.activeTab === tab && this.$refs.messageContent)
+          this.$refs.messageContent.scrollTop = 0
+      })
     },
     onOpened() {
       this.onTab()
     },
     onTab() {
+      if (this.state.activeTab === 'history') refreshApprovalHistory()
       if (this.state.activeTab === 'results') this.markResultsSeen()
       if (this.state.activeTab === 'announcements') {
         try {
@@ -501,6 +686,10 @@ h2 {
   padding: 0 24px;
   flex: none;
 }
+.messageTabs /deep/ .el-tabs__item {
+  font-size: 13px;
+  padding: 0 12px;
+}
 .messageTabs /deep/ .el-tabs__header {
   margin: 0;
 }
@@ -532,12 +721,95 @@ h3 {
   color: #819087;
   margin: 5px 0 0;
 }
-.accessRequestCard {
+.requestGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.historyTools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 24px;
+  flex: none;
+  border-bottom: 1px solid #e7ece9;
+}
+.historyTools /deep/ .el-input {
+  width: 235px;
+}
+.historyTools
+  /deep/
+  .el-radio-button__orig-radio:checked
+  + .el-radio-button__inner {
+  background: #edf7f2;
+  border-color: #8ac7ae;
+  color: #087854;
+  box-shadow: -1px 0 0 #8ac7ae;
+}
+.historyCard {
   padding: 18px;
   border: 1px solid #e1e8e4;
   border-radius: 12px;
   background: #fff;
   margin-bottom: 12px;
+}
+.historyIdentity {
+  flex: 1;
+  min-width: 0;
+}
+.historyIdentity strong {
+  overflow-wrap: anywhere;
+}
+.historyRoles {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #819087;
+}
+.grantedRole {
+  border-radius: 5px;
+  padding: 3px 7px;
+  background: #f1f3f4;
+  color: #64727d;
+}
+.grantedRole.manager {
+  color: #087854;
+  background: #eaf6ef;
+}
+.grantedRole.editor {
+  color: #386ba7;
+  background: #edf4ff;
+}
+.historyReason {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 10px 0 0;
+  color: #68796f;
+}
+.historyReason > span:first-child {
+  flex: none;
+  color: #91a097;
+}
+.historyReason > span:last-child {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.requestFile:disabled {
+  cursor: default;
+  color: #91a097;
+}
+.accessRequestCard {
+  padding: 18px;
+  border: 1px solid #e1e8e4;
+  border-radius: 12px;
+  background: #fff;
+  margin-bottom: 0;
 }
 .requestIdentity {
   display: flex;
@@ -555,7 +827,11 @@ h3 {
   color: #317259;
   font-weight: 600;
 }
+.requestIdentity > div {
+  min-width: 0;
+}
 .requestIdentity strong {
+  overflow-wrap: anywhere;
   font-size: 14px;
   display: block;
 }
@@ -729,26 +1005,26 @@ h3 {
   line-height: 1.8;
   color: #64766a;
 }
-.floatingNotification {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
-  z-index: 1800;
-}
-.floatingNotification /deep/ .notificationButton {
-  width: 44px;
-  height: 44px;
-  background: #fff;
-  border: 1px solid #dce6e0;
-  box-shadow: 0 4px 16px #244e3612;
-  border-radius: 50%;
-}
-.floatingNotification /deep/ .notificationButton i {
-  font-size: 20px;
-}
 button:focus-visible {
   outline: 2px solid #087854;
   outline-offset: 2px;
+}
+@media (max-width: 700px) {
+  .requestGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .historyTools {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 14px 16px;
+  }
+  .historyTools /deep/ .el-input {
+    width: 100%;
+  }
+  .historyTools /deep/ .el-radio-button__inner {
+    padding: 9px 12px;
+  }
 }
 @media (max-width: 520px) {
   .messageHeader {
@@ -763,20 +1039,35 @@ button:focus-visible {
   .messageFooter {
     padding: 14px 16px;
   }
-  .floatingNotification {
-    right: 16px;
-    bottom: 20px;
-  }
   .accessRequestCard {
     padding: 15px;
   }
 }
 </style>
 <style lang="less">
-.accessNotificationDrawer {
-  max-width: 100vw;
-}
-.accessNotificationDrawer .el-drawer__body {
+.accessNotificationDialog.el-dialog {
+  width: 92vw;
+  max-width: 840px;
+  height: 86vh;
+  max-height: 860px;
+  margin: 7vh auto !important;
+  border-radius: 16px;
   overflow: hidden;
+  box-shadow: 0 24px 80px rgba(16, 37, 26, 0.2);
+}
+.accessNotificationDialog .el-dialog__header {
+  display: none;
+}
+.accessNotificationDialog .el-dialog__body {
+  padding: 0;
+  height: 100%;
+}
+@media (max-width: 520px) {
+  .accessNotificationDialog.el-dialog {
+    width: 96vw;
+    height: 92vh;
+    margin: 4vh auto !important;
+    border-radius: 12px;
+  }
 }
 </style>

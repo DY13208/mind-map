@@ -216,6 +216,69 @@ async function main() {
       (await requests.mine(pool, actor('applicant'), 'room')).decision_reason,
       '请补充项目用途'
     )
+    const historyBeforeTransfer = await requests.listHistory(
+      pool,
+      actor('owner')
+    )
+    assert.ok(
+      historyBeforeTransfer.list.some(
+        item =>
+          item.id === second.id &&
+          item.status === 'rejected' &&
+          item.decision_reason === '请补充项目用途'
+      )
+    )
+    assert.ok(
+      historyBeforeTransfer.list.some(
+        item => item.status === 'approved' && item.granted_role === 'manager'
+      )
+    )
+    assert.equal(
+      (await requests.listHistory(pool, actor('applicant'))).total,
+      0,
+      'A requester cannot read the owner audit trail'
+    )
+    assert.equal((await requests.listHistory(pool, actor('other'))).total, 0)
+    assert.equal(
+      (await requests.listHistory(pool, actor('owner'), { search: '项目规划' }))
+        .total,
+      historyBeforeTransfer.total
+    )
+    assert.equal(
+      (await requests.listHistory(pool, actor('owner'), { search: 'no-match' }))
+        .total,
+      0
+    )
+    assert.equal(
+      (await requests.listHistory(pool, actor('owner'), { search: '项目%' }))
+        .total,
+      0,
+      'Search treats SQL wildcard characters literally'
+    )
+    const rejected = await requests.listHistory(pool, actor('owner'), {
+      status: 'rejected'
+    })
+    assert.equal(rejected.total, rejected.counts.rejected)
+    assert.ok(rejected.list.every(item => item.status === 'rejected'))
+    await assert.rejects(
+      requests.listHistory(pool, actor('owner'), { status: 'pending' }),
+      e => e.statusCode === 400
+    )
+    const firstPage = await requests.listHistory(pool, actor('owner'), {
+      limit: 1
+    })
+    const secondPage = await requests.listHistory(pool, actor('owner'), {
+      limit: 1,
+      offset: 1
+    })
+    assert.equal(firstPage.total, secondPage.total)
+    assert.equal(firstPage.list.length, 1)
+    assert.notEqual(firstPage.list[0].id, secondPage.list[0].id)
+    const emptyPage = await requests.listHistory(pool, actor('owner'), {
+      offset: 9999
+    })
+    assert.equal(emptyPage.list.length, 0)
+    assert.equal(emptyPage.total, historyBeforeTransfer.total)
     const transferRequest = await requests.requestAccess(pool, actor('other'), {
       roomKey: 'room',
       role: 'viewer'
@@ -233,6 +296,17 @@ async function main() {
       { role: 'viewer' }
     )
     assert.equal((await acl.getAccess(pool, 'room', 'other')).role, 'viewer')
+    assert.equal(
+      (await requests.listHistory(pool, actor('owner'))).total,
+      historyBeforeTransfer.total,
+      'The decider retains audit history after ownership transfer'
+    )
+    assert.ok(
+      !(await requests.listHistory(pool, actor('second'))).list.some(
+        item => item.id === second.id
+      ),
+      'A new owner cannot read another decider’s personal history'
+    )
     const editorRequest = await requests.requestAccess(
       pool,
       actor('applicant'),
@@ -255,8 +329,13 @@ async function main() {
       e => e.statusCode === 404
     )
     assert.equal((await requests.listInbox(pool, actor('owner'))).total, 0)
+    assert.equal(
+      (await requests.listHistory(pool, actor('owner'))).total,
+      historyBeforeTransfer.total,
+      'Soft deletion does not hide historical decisions'
+    )
     console.log(
-      'Access request checks passed: durable inbox, SSE, identity isolation, custom grant, concurrent approval, retry, transaction rollback, results/read status, rejection, deleted file'
+      'Access request checks passed: durable inbox, SSE, identity isolation, custom grant, concurrent approval, retry, transaction rollback, results/read status, rejection, historical decisions, status/search/pagination, ownership-transfer retention, deleted file'
     )
   } finally {
     if (unsubscribeSpy) unsubscribeSpy()

@@ -1920,6 +1920,11 @@ async function handleApi(req, res) {
       require('./accessRequestEvents').stream(getPool(), req, res, who.id)
       return true
     }
+    if (pathname === '/api/notifications/access-history' && req.method === 'GET') {
+      const page = await accessRequests.listHistory(getPool(), req, Object.fromEntries(url.searchParams))
+      sendJson(res, 200, { ok: true, ...page })
+      return true
+    }
     if (pathname === '/api/notifications/access-results' && req.method === 'GET') {
       const page = await accessRequests.listResults(getPool(), req, Object.fromEntries(url.searchParams))
       sendJson(res, 200, { ok: true, ...page })
