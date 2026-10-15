@@ -84,15 +84,7 @@ import UserAvatar from '@/components/UserAvatar.vue'
 import roomService from '@/services/roomService'
 import MindMapPreview from './MindMapPreview.vue'
 
-const previewCache = new Map()
-
-function cacheKey(room) {
-  return [
-    room.roomKey || room.id || '',
-    room.revision || 0,
-    room.contentUpdatedAt || room.updatedAt || ''
-  ].join('|')
-}
+import { cachedCardPreview, subscribeCardPreview } from '@/services/cardPreviewQueue'
 
 export default {
   name: 'RoomCard',
@@ -109,11 +101,14 @@ export default {
     return {
       sketch: null,
       observer: null,
-      loadingPreview: false
+      loadingPreview: false,
+      previewSubscription: null,
+      previewSequence: 0
     }
   },
   computed: {
     previewStyle() {
+      if (this.room.canView === false) return {}
       const url = this.room.previewUrl || this.room.thumbnailUrl || this.room.coverUrl
       return url ? { backgroundImage: `url(${url})` } : {}
     },
@@ -128,6 +123,7 @@ export default {
     room: {
       deep: false,
       handler() {
+        this.cancelPreview()
         this.sketch = null
         this.hydrateFromCache()
         this.observePreview()
@@ -139,12 +135,19 @@ export default {
     this.observePreview()
   },
   beforeDestroy() {
+    this.cancelPreview()
     this.disconnectObserver()
   },
   methods: {
+    cancelPreview() {
+      this.previewSequence++
+      if (this.previewSubscription) this.previewSubscription.cancel()
+      this.previewSubscription = null
+      this.loadingPreview = false
+    },
     hydrateFromCache() {
-      if (this.hasImageCover) return
-      const cached = previewCache.get(cacheKey(this.room))
+      if (this.room.canView === false || this.hasImageCover) return
+      const cached = cachedCardPreview(this.room)
       if (cached) this.sketch = cached
     },
     disconnectObserver() {
@@ -171,28 +174,30 @@ export default {
       if (this.$refs.preview) this.observer.observe(this.$refs.preview)
     },
     async loadPreview() {
-      if (this.hasImageCover || this.loadingPreview || this.sketch) return
-      const key = this.room.roomKey || this.room.id
+      if (this.loadingPreview && this.previewSubscription) {
+        return this.previewSubscription.promise.catch(() => {})
+      }
+      if (this.room.canView === false || this.hasImageCover || this.sketch) return
+      const requested = { ...this.room }
+      const key = requested.roomKey || requested.id
       if (!key) return
+      const sequence = ++this.previewSequence
       this.loadingPreview = true
+      const subscription = subscribeCardPreview(requested, roomService.getCardPreview)
+      this.previewSubscription = subscription
       try {
-        const preview = await roomService.getCardPreview(key)
-        const sketch =
-          (preview && preview.sketch) || {
-            text: this.room.title || '未命名',
-            children: []
-          }
-        previewCache.set(cacheKey(this.room), sketch)
-        if ((this.room.roomKey || this.room.id) === key) {
-          this.sketch = sketch
-        }
+        const preview = await subscription.promise
+        if (sequence !== this.previewSequence) return
+        if (Number(preview.revision || 0) !== Number(requested.revision || 0)) return
+        if (requested.generation != null && String(preview.generation) !== String(requested.generation)) return
+        this.sketch = preview.sketch
       } catch (error) {
-        this.sketch = {
-          text: this.room.title || '未命名',
-          children: []
-        }
+        // Cancellation and failures remain retryable; title artwork stays visible.
       } finally {
-        this.loadingPreview = false
+        if (sequence === this.previewSequence) {
+          this.loadingPreview = false
+          this.previewSubscription = null
+        }
       }
     }
   }

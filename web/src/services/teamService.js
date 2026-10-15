@@ -115,6 +115,7 @@ function queryString(filters = {}) {
 }
 
 function handleError(error) {
+  if (error && error.name === 'AbortError') throw error
   error.message = userMessageFromError(error)
   throw error
 }
@@ -127,11 +128,32 @@ async function request(action) {
   }
 }
 
-async function listRooms(teamId) {
-  const data = await productRequest(`/api/teams/${encodeURIComponent(teamId)}/rooms`)
-  return unwrapList(data, ['files', 'rooms']).map(room =>
+async function listRoomsPage(teamId, filters = {}, options = {}) {
+  const params = new URLSearchParams()
+  ;['q', 'search', 'sort', 'order', 'role', 'limit', 'offset'].forEach(key => {
+    if (filters[key] != null && filters[key] !== '') params.set(key, String(filters[key]))
+  })
+  if (filters.folderId !== undefined) params.set('folderId', filters.folderId || 'root')
+  const data = await productRequest(`/api/teams/${encodeURIComponent(teamId)}/rooms?${params}`, options)
+  const list = unwrapList(data, ['items', 'files', 'rooms']).map(room =>
     normalizeRoomDto(room, { folderName: room.folderName || (room.folderId ? '' : '根目录') })
   )
+  return { ...data, list, total: Number(data.total != null ? data.total : list.length),
+    limit: Number(data.limit || filters.limit || 20), offset: Number(data.offset || filters.offset || 0) }
+}
+
+// Retain the legacy array contract for non-page consumers during migration.
+// Each HTTP request stays bounded; all interactive lists use listRoomsPage.
+async function listRooms(teamId) {
+  let offset = 0
+  const result = []
+  while (offset < Number.MAX_SAFE_INTEGER) {
+    const page = await listRoomsPage(teamId, { limit: 100, offset })
+    result.push(...page.list)
+    if (!page.list.length || result.length >= page.total) return result
+    offset += page.list.length
+  }
+  return result
 }
 
 const teamService = {
@@ -202,6 +224,7 @@ const teamService = {
     }),
 
   listRooms: id => request(() => listRooms(id)),
+  listRoomsPage: (id, filters, options) => request(() => listRoomsPage(id, filters, options)),
 
   listFolders: id =>
     request(async () => {

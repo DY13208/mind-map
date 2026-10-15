@@ -267,6 +267,7 @@ class Select {
     let maxx = Math.max(this.mouseDownX, this.mouseMoveX)
     let maxy = Math.max(this.mouseDownY, this.mouseMoveY)
 
+    let changed = false
     const check = node => {
       let { left, top, width, height } = node
       let right = (left + width) * scaleX + translateX
@@ -280,13 +281,13 @@ class Select {
           return
         }
         this.mindMap.renderer.addNodeToActiveList(node)
-        this.mindMap.renderer.emitNodeActiveEvent()
+        changed = true
       } else if (node.getData('isActive')) {
         if (!node.getData('isActive')) {
           return
         }
         this.mindMap.renderer.removeNodeFromActiveList(node)
-        this.mindMap.renderer.emitNodeActiveEvent()
+        changed = true
       }
     }
 
@@ -307,6 +308,7 @@ class Select {
       check(node)
       checkGeneralizations(node)
     })
+    if (changed) this.mindMap.renderer.emitNodeActiveEvent()
     this.rememberMultiSelect()
   }
 

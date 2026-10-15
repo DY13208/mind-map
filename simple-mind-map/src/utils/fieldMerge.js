@@ -98,7 +98,11 @@ export function publicNodeData(data) {
 }
 
 function stableValue(value) {
-  if (value === undefined) return undefined
+  // A cleared nullable field is represented as an explicit null in the pushed
+  // content snapshot but as a missing key in canonical node data (and vice
+  // versa). Treat null and undefined as the same empty value so an already
+  // cleared field does not keep producing a phantom notification delta.
+  if (value === undefined || value === null) return null
   try {
     return JSON.stringify(value)
   } catch (err) {

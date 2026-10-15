@@ -89,6 +89,8 @@
               v-on="roomListeners"
             />
           </div>
+          <el-pagination v-if="total > 0" :current-page="page" :page-size="limit"
+            :total="total" layout="prev, pager, next" @current-change="onRoomPage" />
           <EmptyState
             v-if="!loading && !childFolders.length && !visibleRooms.length"
             title="暂无内容"
@@ -156,6 +158,9 @@ export default {
   data: () => ({
     team: null,
     rooms: [],
+    page: 1,
+    limit: 20,
+    total: 0,
     members: [],
     folders: [],
     tab: 'rooms',
@@ -180,13 +185,7 @@ export default {
       if (role === 'admin') return '我是管理员'
       return '我是成员'
     },
-    visibleRooms() {
-      return this.rooms.filter(room =>
-        this.folderId
-          ? room.folderId === this.folderId
-          : !room.folderId
-      )
-    },
+    visibleRooms() { return this.rooms },
     folderMap() {
       return Object.fromEntries(this.folders.map(folder => [folder.id, folder]))
     },
@@ -202,14 +201,10 @@ export default {
       return path
     },
     childFolders() {
-      return this.folders
-        .filter(folder => (folder.parentId || null) === (this.folderId || null))
-        .map(folder => ({
-          ...folder,
-          itemCount:
-            Number(folder.roomCount || 0) +
-            this.folders.filter(child => child.parentId === folder.id).length
-        }))
+      const counts = new Map()
+      this.folders.forEach(folder => counts.set(folder.parentId, (counts.get(folder.parentId) || 0) + 1))
+      return this.folders.filter(folder => (folder.parentId || null) === (this.folderId || null))
+        .map(folder => ({ ...folder, itemCount: Number(folder.roomCount || 0) + (counts.get(folder.id) || 0) }))
     },
     folderListeners() {
       return {
@@ -236,8 +231,10 @@ export default {
     }
   },
   watch: {
+    folderId() { this.page = 1; this.loadRooms() },
     '$route.params.id'() {
       this.folderId = null
+      this.page = 1
       this.tab = 'rooms'
       this.load()
     }
@@ -267,18 +264,37 @@ export default {
       try {
         const [team, rooms, members, folders] = await Promise.all([
           teamService.getSpace(id),
-          teamService.listRooms(id),
+          teamService.listRoomsPage(id, { folderId: this.folderId, limit: this.limit, offset: (this.page - 1) * this.limit }),
           teamService.listMembers(id),
           teamService.listFolders(id)
         ])
-        if (request === this.requestId)
-          Object.assign(this, { team, rooms, members, folders })
+        if (request === this.requestId) {
+          Object.assign(this, { team, rooms: rooms.list, total: rooms.total, members, folders })
+          const maxPage = Math.max(1, Math.ceil(rooms.total / this.limit))
+          if (this.page > maxPage) { this.page = maxPage; await this.loadRooms() }
+        }
       } catch (error) {
         if (request === this.requestId) this.error = error.message
       } finally {
         if (request === this.requestId) this.loading = false
       }
     },
+    async loadRooms() {
+      const request = ++this.requestId
+      this.loading = true
+      try {
+        const result = await teamService.listRoomsPage(this.$route.params.id,
+          { folderId: this.folderId, limit: this.limit, offset: (this.page - 1) * this.limit })
+        if (request === this.requestId) {
+          this.rooms = result.list
+          this.total = result.total
+          const maxPage = Math.max(1, Math.ceil(result.total / this.limit))
+          if (this.page > maxPage) { this.page = maxPage; await this.loadRooms() }
+        }
+      } catch (error) { if (request === this.requestId) this.error = error.message }
+      finally { if (request === this.requestId) this.loading = false }
+    },
+    onRoomPage(page) { this.page = page; this.loadRooms() },
     openFolder(folder) {
       this.folderId = folder.id
       this.tab = 'rooms'

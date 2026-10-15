@@ -8,6 +8,7 @@
       <div
         v-if="item === 'back'"
         class="toolbarBtn"
+        :title="undoRangeTitle"
         :class="{
           disabled: readonly || backEnd
         }"
@@ -249,6 +250,7 @@ export default {
       forwardEnd: true,
       nativeBackEnd: true,
       nativeForwardEnd: true,
+      nativeHistoryStatus: null,
       collabHistoryEnabled: false,
       readonly: false,
       isFullDataFile: false,
@@ -263,6 +265,11 @@ export default {
     ...mapState({
       isDark: state => state.localConfig.isDark
     }),
+    undoRangeTitle() {
+      if (this.collabHistoryEnabled || !this.nativeHistoryStatus) return this.$t('toolbar.undo')
+      return this.$t(this.nativeHistoryStatus.limited ? 'toolbar.undoRangeLimited' : 'toolbar.undoRange',
+        { count: this.nativeHistoryStatus.undoSteps })
+    },
     hasRoot() {
       return (
         this.activeNodes.findIndex(node => {
@@ -321,7 +328,8 @@ export default {
     },
 
     // 监听前进后退
-    onBackForward(index, len) {
+    onBackForward(index, len, status) {
+      this.nativeHistoryStatus = status || { undoSteps: Math.max(0, index), limited: false }
       this.nativeBackEnd = index <= 0
       this.nativeForwardEnd = index >= len - 1
       if (!this.collabHistoryEnabled) {

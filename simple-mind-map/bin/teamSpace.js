@@ -191,6 +191,15 @@ async function initCorpConstraints(db) {
 
 async function getTeam(db, corpId, id, userId, options = {}) {
   const superAdmin = !!(options && options.superAdmin)
+  if (options && options.accessOnly) {
+    const result = await db.query(`
+      select t.id, ${superAdmin ? "coalesce(m.role, 'owner')" : 'm.role'} as role
+      from teams t ${superAdmin ? 'left join' : 'join'} team_members m
+        on m.team_id = t.id and m.user_id = $3 and m.corp_id = $1
+      where t.id = $2 and t.corp_id = $1 and t.deleted_at is null`, [corpId, id, userId])
+    if (!result.rows.length) throw error(404, 'TEAM_NOT_FOUND', '团队不存在')
+    return result.rows[0]
+  }
   const result = await db.query(
     superAdmin
       ? `
@@ -406,28 +415,73 @@ async function transferOwnership(db, who, id, target) {
   })
 }
 
-async function listRooms(db, who, id) {
-  await getTeam(db, who.corpId, id, who.userId, teamAccessOpts(who))
-  const result = await db.query(`
-    select r.room_key, r.title, r.folder_id, r.owner_id, r.created_at, r.updated_at,
-      m.role, coalesce(state.is_favorite, false) as is_favorite,
-      coalesce(owner.name, r.owner_id) as owner_name, coalesce(owner.avatar, '') as owner_avatar
-    from rooms r left join room_tombstones rt on rt.room_key = r.room_key
+function roomPageNumber(value, fallback, positive) {
+  if (value == null || value === '') return fallback
+  if (!/^\d+$/.test(String(value))) throw error(400, 'INVALID_PAGING', '分页参数无效')
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || (positive && parsed < 1)) throw error(400, 'INVALID_PAGING', '分页参数无效')
+  return parsed
+}
+
+async function listRooms(db, who, id, filters = {}) {
+  await getTeam(db, who.corpId, id, who.userId, { ...teamAccessOpts(who), accessOnly: true })
+  const limit = Math.min(100, roomPageNumber(filters.limit, 20, true))
+  const offset = roomPageNumber(filters.offset, 0, false)
+  const params = [id, who.userId, who.corpId]
+  const conditions = ['r.team_id = $1', 'r.deleted_at is null', 'rt.room_key is null']
+  if (filters.folderId != null && filters.folderId !== '') {
+    if (filters.folderId === 'root') conditions.push('r.folder_id is null')
+    else {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(filters.folderId)) throw error(400, 'INVALID_FOLDER', '文件夹参数无效')
+      params.push(filters.folderId)
+      conditions.push(`r.folder_id = $${params.length}::uuid`)
+    }
+  }
+  if (filters.role) {
+    params.push(String(filters.role).toLowerCase())
+    conditions.push(`m.role = $${params.length}`)
+  }
+  const keyword = String(filters.q || filters.search || '').trim()
+  if (keyword) {
+    params.push('%' + keyword.replace(/[\\%_]/g, value => '\\' + value) + '%')
+    conditions.push(`(r.title ilike $${params.length} or coalesce(owner.name,r.owner_id) ilike $${params.length} or folder.name ilike $${params.length})`)
+  }
+  const joins = `from rooms r left join room_tombstones rt on rt.room_key = r.room_key
     left join room_members m on m.room_key = r.room_key and m.user_id = $2
     left join room_user_state state on state.room_key = r.room_key and state.user_id = $2
     left join wecom_users owner on owner.user_id = r.owner_id and owner.corp_id = $3
-    where r.team_id = $1 and r.deleted_at is null and rt.room_key is null order by r.updated_at desc`, [id, who.userId, who.corpId])
-  return result.rows.map(row => ({
-    id: row.room_key,
-    roomKey: row.room_key,
-    title: row.title,
-    folderId: row.folder_id || null,
+    left join folders folder on folder.id = r.folder_id and folder.team_id = $1 and folder.deleted_at is null`
+  const where = conditions.join(' and ')
+  const sort = { title: 'r.title', createdAt: 'r.created_at', updatedAt: 'r.updated_at', lastOpenedAt: 'state.last_opened_at' }[filters.sort] || 'r.updated_at'
+  const direction = String(filters.order || (filters.sort === 'title' ? 'asc' : 'desc')).toLowerCase() === 'asc' ? 'asc' : 'desc'
+  // Counting is after all filters; paging is in SQL, not after serialization.
+  const countJoins = `from rooms r left join room_tombstones rt on rt.room_key = r.room_key
+    ${filters.role ? 'left join room_members m on m.room_key = r.room_key and m.user_id = $2' : ''}
+    ${keyword ? "left join wecom_users owner on owner.user_id = r.owner_id and owner.corp_id = $3 left join folders folder on folder.id = r.folder_id and folder.team_id = $1 and folder.deleted_at is null" : ''}`
+  // Keep parameter numbering stable even when optional joins do not use $2/$3.
+  const count = await db.query(`select count(*)::int as total ${countJoins} where ${where}
+    and $2::text is not null and $3::text is not null`, params)
+  const result = await db.query(`
+    select r.room_key, r.title, r.folder_id, r.owner_id, r.created_at, r.updated_at,
+      r.content_updated_at, r.version, r.node_counts_generation::text as generation,
+      m.role, coalesce(state.is_favorite, false) as is_favorite,
+      state.last_opened_at, folder.name as folder_name,
+      coalesce(owner.name, r.owner_id) as owner_name, coalesce(owner.avatar, '') as owner_avatar
+    ${joins} where ${where} order by ${sort} ${direction} nulls last, r.room_key ${direction}
+    limit $${params.length + 1} offset $${params.length + 2}`, [...params, limit, offset])
+  const items = result.rows.map(row => ({
+    id: row.room_key, roomKey: row.room_key, title: row.title,
+    folderId: row.folder_id || null, folderName: row.folder_name || (row.folder_id ? '' : '根目录'),
     owner: { id: row.owner_id || '', name: row.owner_name || row.owner_id || '', avatar: row.owner_avatar || '' },
-    role: row.role || null,
-    favorite: !!row.is_favorite,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
+    role: row.role || null, favorite: !!row.is_favorite,
+    revision: Number(row.version || 0), generation: String(row.generation || '0'),
+    createdAt: row.created_at, updatedAt: row.updated_at,
+    contentUpdatedAt: row.content_updated_at || row.updated_at,
+    resourceUpdatedAt: row.updated_at, lastOpenedAt: row.last_opened_at || null
   }))
+  const total = Number(count.rows[0].total)
+  return { items, list: items, total, limit, offset,
+    nextOffset: offset + items.length < total ? offset + items.length : null }
 }
 
 async function assignRoom(db, who, id, roomKey) {
@@ -626,7 +680,7 @@ async function handleApi(req, res, options) {
     if (sub === 'members' && req.method === 'POST' && !target) { const body = await readBody(req); const items = await addMembers(db, who, id, body.wecomUserIds); sendJson(res, 200, { items, list: items }); return true }
     if (sub === 'members' && target && req.method === 'PATCH') { sendJson(res, 200, await updateMember(db, who, id, target, (await readBody(req)).role)); return true }
     if (sub === 'members' && target && req.method === 'DELETE') { sendJson(res, 200, await removeMember(db, who, id, target)); return true }
-    if (sub === 'rooms' && req.method === 'GET') { const items = await listRooms(db, who, id); sendJson(res, 200, { items, list: items }); return true }
+    if (sub === 'rooms' && req.method === 'GET') { const page = await listRooms(db, who, id, Object.fromEntries(url.searchParams)); sendJson(res, 200, page); return true }
     if (sub === 'rooms' && req.method === 'POST') {
       const body = await readBody(req)
       const existingKey = String(body.roomKey || body.room_key || '').trim()

@@ -56,7 +56,7 @@ function dbForTeam(allowedCorp = 'corp-a') {
 
 assert.deepStrictEqual(
   teamSpace.identity({ authUser: { id: 'alice', corpId: 'corp-a' } }),
-  { userId: 'alice', corpId: 'corp-a', wecomUserId: 'alice' }
+  { userId: 'alice', corpId: 'corp-a', wecomUserId: 'alice', superAdmin: false }
 )
 assert.throws(
   () => teamSpace.identity({ authUser: { id: 'alice', corpId: 'corp-a', service: true } }),

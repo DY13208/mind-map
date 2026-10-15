@@ -72,7 +72,8 @@ const {
   archiveAllRoomOperations,
   purgeDeletedNodes,
   searchRoomNodes,
-  queryRoomNodes
+  queryRoomNodes,
+  readRoomNodeUids
 } = require('./storage')
 const { beatPresence, listPresence, leavePresence, getPresenceStatus } = require('./presence')
 const { applyCollabEvents } = require('./collabRecovery')
@@ -92,6 +93,7 @@ const {
 } = require('./collabMetrics')
 
 const roomMutationQueues = new Map()
+const directPreflightMeta = new WeakMap()
 const pausedRooms = new Map()
 const SUBTREE_SNAPSHOT_SLOTS = 2
 let subtreeSnapshotActive = 0
@@ -435,8 +437,14 @@ function isMcpDirectEnabled() {
   )
 }
 
-async function executeMcpDirectOperation(roomKey, command, source, mcpRequest) {
-  const meta = await getRoomMeta(roomKey)
+function isHttpDirectEnabled() {
+  const flags = require('./collabV2/flag')
+  return flags.envFlag('COLLAB_HTTP_DIRECT', false) &&
+    flags.isCollabV2Enabled() && flags.isCollabV2EventBridgeEnabled()
+}
+
+async function executeDirectOperation(roomKey, command, source, mcpRequest, httpActorId, preflightMeta) {
+  const meta = preflightMeta || await getRoomMeta(roomKey)
   if (!meta || !(meta.room_nodes_initialized === true || meta.room_nodes_initialized === 't')) {
     return null
   }
@@ -449,12 +457,16 @@ async function executeMcpDirectOperation(roomKey, command, source, mcpRequest) {
     refs.push(payload.uid || '')
   }
   const knownUids = new Set()
-  for (const ref of refs) {
-    if (!ref || policy.isUidReference(ref)) continue
-    const resolved = await getRoomRef(roomKey, ref)
-    if (resolved && resolved.nodeExists) knownUids.add(String(ref))
+  const uidRefs = refs.filter(ref => ref && !policy.isUidReference(ref)).map(String)
+  if (uidRefs.length) {
+    const found = await getPool().query(`select uid from room_nodes
+      where room_key = $1 and uid = any($2::text[]) and deleted_at is null`, [roomKey, uidRefs])
+    for (const row of found.rows) knownUids.add(row.uid)
   }
-  if (!policy.isMcpDirectShape(command, source, knownUids)) return null
+  const supported = mcpRequest
+    ? policy.isMcpDirectShape(command, source, knownUids)
+    : !!httpActorId && policy.isDirectNodeShape(command, knownUids)
+  if (!supported) return null
 
   assertRoomWritable(roomKey)
   assertRateLimit(roomKey)
@@ -487,7 +499,12 @@ async function executeMcpDirectOperation(roomKey, command, source, mcpRequest) {
       },
       { mcpRequest }
     )
-  )
+  ).catch(err => {
+    // The ordinary HTTP root-delete response historically uses this code.
+    // Preserve it without attempting a second mutation on the legacy path.
+    if (!mcpRequest && err.code === 'ROOT_DELETE') err.code = 'OPERATION_REJECTED'
+    throw err
+  })
   invalidateRoomCache(roomKey)
   dropLiveDoc(roomKey)
   return committed
@@ -516,17 +533,31 @@ async function executeOperation(req, roomKey, command, internalOptions = {}) {
     }
     let committed = null
     let submissionPath = 'legacy'
+    const preflight = directPreflightMeta.get(req)
+    const preflightMeta = preflight && preflight.roomKey === roomKey ? preflight.meta : null
     if (
       mcpRequest &&
       !Object.keys(internalOptions || {}).length &&
       isMcpDirectEnabled()
     ) {
-      const directCommitted = await executeMcpDirectOperation(
+      const directCommitted = await executeDirectOperation(
         roomKey,
         command,
         req.verifiedMcpSource,
-        mcpRequest
+        mcpRequest,
+        null,
+        preflightMeta
       )
+      if (directCommitted) {
+        committed = directCommitted
+        submissionPath = 'direct'
+      }
+    }
+    if (!mcpRequest && !Object.keys(internalOptions || {}).length && isHttpDirectEnabled()) {
+      // ACL was checked above; identity comes only from the server's auth user.
+      // Ordinary HTTP keeps its existing old-result operation-id contract.
+      const actor = roomAcl.actorFromReq(req)
+      const directCommitted = await executeDirectOperation(roomKey, command, null, null, actor.id, preflightMeta)
       if (directCommitted) {
         committed = directCommitted
         submissionPath = 'direct'
@@ -914,7 +945,8 @@ async function nodeMutationResponse(roomKey, committed) {
   const op = operationResponse(roomKey, committed)
   const row =
     committed.submissionPath === 'direct'
-      ? await getRoomMeta(roomKey)
+      ? committed.roomMeta && String(committed.roomMeta.title || '').trim()
+        ? committed.roomMeta : await getRoomMeta(roomKey)
       : await getRoom(roomKey)
   return {
     ...op,
@@ -2829,6 +2861,18 @@ async function handleApi(req, res) {
         .split(',')
         .map(item => item.trim())
         .filter(Boolean)
+      if (require('./collabV2/flag').isCollabV2Enabled()) {
+        const selected = await readRoomNodeUids(roomKey, uids)
+        if (selected.notFound) {
+          sendJson(res, 404, { error: 'not found' })
+          return true
+        }
+        if (selected.initialized) {
+          const { initialized, ...payload } = selected
+          sendJson(res, 200, payload)
+          return true
+        }
+      }
       // Always read from authoritative snapshot/cache. Live Y.Doc can lag behind
       // HTTP commits during ensureDoc warmup and would poison remote recover.
       const loaded = await loadSnapshot(roomKey)
@@ -2844,7 +2888,9 @@ async function handleApi(req, res) {
       })
       return true
     }
-    const row = await getRoom(roomKey)
+    const directGate = ['POST', 'PATCH', 'DELETE'].includes(req.method) && (isHttpDirectEnabled() || isMcpDirectEnabled())
+    const row = await (directGate ? getRoomMeta(roomKey) : getRoom(roomKey))
+    if (directGate && row) directPreflightMeta.set(req, { roomKey, meta: row })
     if (!row && !getLiveDoc(roomKey)) {
       sendJson(res, 404, { error: 'not found' })
       return true

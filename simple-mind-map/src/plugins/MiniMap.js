@@ -1,3 +1,4 @@
+import { SVG } from '@svgdotjs/svg.js'
 import {
   isWhite,
   isTransparent,
@@ -19,6 +20,10 @@ class MiniMap {
       y: 0
     }
     this.currentState = null
+    this._outlineCache = null
+    this._outlineDirty = true
+    this.invalidateOutline = () => { this._outlineDirty = true }
+    this.mindMap.on('data_change', this.invalidateOutline)
   }
 
   //  计算小地图的渲染数据
@@ -26,92 +31,83 @@ class MiniMap {
    * boxWidth：小地图容器的宽度
    * boxHeight：小地图容器的高度
    */
-  calculationMiniMap(boxWidth, boxHeight) {
-    let { svg, rect, origWidth, origHeight, scaleX, scaleY } =
-      this.mindMap.getSvgData({
-        ignoreWatermark: true
+  getOutline() {
+    const renderer = this.mindMap.renderer
+    const version = renderer._layoutEpoch || 0
+    if (this._outlineCache && !this._outlineDirty && this._outlineCache.version === version && this._outlineCache.root === renderer.root) {
+      return this._outlineCache
+    }
+    const nodes = renderer.nodeIndex ? Array.from(renderer.nodeIndex.values()) : Object.values(renderer.nodeCache || {})
+    const measured = nodes.filter(node => [node.left, node.top, node.width, node.height].every(Number.isFinite))
+    const left = Math.min(...measured.map(node => node.left), 0)
+    const top = Math.min(...measured.map(node => node.top), 0)
+    // Bounds come from the layout model, including expanded nodes outside the
+    // viewport. No main canvas nodes need to be mounted to build the outline.
+    const actualLeft = measured.length ? Math.min(...measured.map(node => node.left)) : left
+    const actualTop = measured.length ? Math.min(...measured.map(node => node.top)) : top
+    const right = measured.length ? Math.max(...measured.map(node => node.left + node.width)) : 1
+    const bottom = measured.length ? Math.max(...measured.map(node => node.top + node.height)) : 1
+    const bounds = { left: actualLeft, top: actualTop, width: Math.max(1, right - actualLeft), height: Math.max(1, bottom - actualTop) }
+    const svg = SVG().size(bounds.width, bounds.height).viewbox(bounds.left, bounds.top, bounds.width, bounds.height)
+    measured.forEach(node => {
+      ;(node._lines || []).forEach(line => { if (line && line.node) svg.add(line.clone()) })
+      ;(node._generalizationList || []).forEach(item => {
+        if (item.generalizationLine && item.generalizationLine.node) svg.add(item.generalizationLine.clone())
       })
-    // 计算数据
-    const elRect = this.mindMap.elRect
-    rect.x -= elRect.left
-    rect.x2 -= elRect.left
-    rect.y -= elRect.top
-    rect.y2 -= elRect.top
-    let boxRatio = boxWidth / boxHeight
-    let actWidth = 0
-    let actHeight = 0
-    if (boxRatio > rect.ratio) {
-      // 高度以box为准，缩放宽度
-      actHeight = boxHeight
-      actWidth = rect.ratio * actHeight
-    } else {
-      // 宽度以box为准，缩放高度
-      actWidth = boxWidth
-      actHeight = actWidth / rect.ratio
-    }
-    // svg图形的缩放及位置
-    let miniMapBoxScale = actWidth / rect.width
-    let miniMapBoxLeft = (boxWidth - actWidth) / 2
-    let miniMapBoxTop = (boxHeight - actHeight) / 2
-    // 当前思维导图图形实际的宽高，即在缩放后的宽高
-    let _rectWidth = rect.width * scaleX
-    let _rectHeight = rect.height * scaleY
-    // 视口框大小及位置
-    let _rectWidthOffsetHalf = (_rectWidth - rect.width) / 2
-    let _rectHeightOffsetHalf = (_rectHeight - rect.height) / 2
-    let _rectX = rect.x - _rectWidthOffsetHalf
-    let _rectX2 = rect.x2 + _rectWidthOffsetHalf
-    let _rectY = rect.y - _rectHeightOffsetHalf
-    let _rectY2 = rect.y2 + _rectHeightOffsetHalf
-    let viewBoxStyle = {
-      left: 0,
-      top: 0,
-      right: 0,
-      bottom: 0
-    }
-    viewBoxStyle.left =
-      Math.max(0, (-_rectX / _rectWidth) * actWidth) + miniMapBoxLeft
-    viewBoxStyle.right =
-      Math.max(0, ((_rectX2 - origWidth) / _rectWidth) * actWidth) +
-      miniMapBoxLeft
-
-    viewBoxStyle.top =
-      Math.max(0, (-_rectY / _rectHeight) * actHeight) + miniMapBoxTop
-    viewBoxStyle.bottom =
-      Math.max(0, ((_rectY2 - origHeight) / _rectHeight) * actHeight) +
-      miniMapBoxTop
-
-    if (viewBoxStyle.top > miniMapBoxTop + actHeight) {
-      viewBoxStyle.top = miniMapBoxTop + actHeight
-    }
-    if (viewBoxStyle.left > miniMapBoxLeft + actWidth) {
-      viewBoxStyle.left = miniMapBoxLeft + actWidth
-    }
-
-    Object.keys(viewBoxStyle).forEach(key => {
-      viewBoxStyle[key] = viewBoxStyle[key] + 'px'
     })
-    this.removeNodeContent(svg)
-    const svgStr = svg.svg()
-    this.currentState = {
-      viewBoxStyle: {
-        ...viewBoxStyle
+    measured.forEach(node => {
+      const shape = node.shapeInstance.createShape()
+      let fill = node.style.getStyle('fillColor')
+      if (!fill || isWhite(fill) || isTransparent(fill)) fill = getVisibleColorFromTheme(this.mindMap.themeConfig)
+      shape.fill(fill).stroke({ color: node.style.getStyle('borderColor') || fill, width: node.getBorderWidth() || 1 })
+      shape.translate(node.left, node.top)
+      svg.add(shape)
+    })
+    this._outlineDirty = false
+    this._outlineCache = { version, root: renderer.root, bounds, svgStr: svg.svg(), image: null }
+    return this._outlineCache
+  }
+
+  calculationMiniMap(boxWidth, boxHeight) {
+    const outline = this.getOutline()
+    const { bounds, svgStr } = outline
+    const transform = this.mindMap.view.getTransformData().transform
+    const scaleX = transform.scaleX || 1, scaleY = transform.scaleY || 1
+    const miniMapBoxScale = Math.min(boxWidth / bounds.width, boxHeight / bounds.height)
+    const actWidth = bounds.width * miniMapBoxScale
+    const actHeight = bounds.height * miniMapBoxScale
+    const miniMapBoxLeft = (boxWidth - actWidth) / 2
+    const miniMapBoxTop = (boxHeight - actHeight) / 2
+    const clamp = (value, max) => Math.max(0, Math.min(max, value))
+    const viewBoxStyle = {
+      left: miniMapBoxLeft + clamp((-transform.translateX / scaleX - bounds.left) * miniMapBoxScale, actWidth),
+      right: miniMapBoxLeft + actWidth - clamp(((this.mindMap.width - transform.translateX) / scaleX - bounds.left) * miniMapBoxScale, actWidth),
+      top: miniMapBoxTop + clamp((-transform.translateY / scaleY - bounds.top) * miniMapBoxScale, actHeight),
+      bottom: miniMapBoxTop + actHeight - clamp(((this.mindMap.height - transform.translateY) / scaleY - bounds.top) * miniMapBoxScale, actHeight)
+    }
+    Object.keys(viewBoxStyle).forEach(key => { viewBoxStyle[key] += 'px' })
+    this.currentState = { viewBoxStyle: { ...viewBoxStyle }, miniMapBoxScale, miniMapBoxLeft, miniMapBoxTop }
+    return {
+      getImgUrl: async callback => {
+        if (!outline.image) outline.image = this.mindMap.doExport.fixSvgStrAndToBlob(svgStr)
+        callback(await outline.image)
       },
+      svgHTML: svgStr,
+      viewBoxStyle,
       miniMapBoxScale,
       miniMapBoxLeft,
       miniMapBoxTop
     }
-    return {
-      getImgUrl: async callback => {
-        const res = await this.mindMap.doExport.fixSvgStrAndToBlob(svgStr)
-        callback(res)
-      },
-      svgHTML: svgStr, // 小地图html
-      viewBoxStyle, // 视图框的位置信息
-      miniMapBoxScale, // 视图框的缩放值
-      miniMapBoxLeft, // 视图框的left值
-      miniMapBoxTop // 视图框的top值
-    }
+  }
+
+  beforePluginRemove() {
+    this.mindMap.off('data_change', this.invalidateOutline)
+    this._outlineCache = null
+    this.currentState = null
+  }
+
+  beforePluginDestroy() {
+    this.beforePluginRemove()
   }
 
   // 移除节点的内容
@@ -213,8 +209,9 @@ class MiniMap {
       bottom: bottom + 'px'
     })
     // 在视图最初偏移量上累加更新量
-    this.mindMap.view.translateXTo(-ox / miniMapBoxScale + this.startViewPos.x)
-    this.mindMap.view.translateYTo(-oy / miniMapBoxScale + this.startViewPos.y)
+    const transform = this.mindMap.view.getTransformData().transform
+    this.mindMap.view.translateXTo(-ox * (transform.scaleX || 1) / miniMapBoxScale + this.startViewPos.x)
+    this.mindMap.view.translateYTo(-oy * (transform.scaleY || 1) / miniMapBoxScale + this.startViewPos.y)
   }
 }
 

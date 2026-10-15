@@ -1,4 +1,5 @@
 const crypto = require('crypto')
+const countCache = require('./nodeCountCache').createNodeCountCache()
 const { countGraphDescendants } = require('./descendantCounts')
 const {
   applyPositionsToTree,
@@ -513,6 +514,19 @@ function nodesReadPreferEnabled() {
 }
 
 async function replaceRoomNodes(db, roomKey, obj, version, options = {}) {
+  if (isPool(db)) {
+    const client = await db.connect()
+    try {
+      await client.query('begin')
+      await client.query('select room_key from rooms where room_key = $1 for update', [roomKey])
+      const result = await replaceRoomNodes(client, roomKey, obj, version, options)
+      await client.query('commit')
+      return result
+    } catch (err) {
+      await client.query('rollback').catch(() => {})
+      throw err
+    } finally { client.release() }
+  }
   const graph = obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}
   let allRows
   let rootUid
@@ -697,6 +711,189 @@ async function readRoomNodes(db, roomKey) {
   }
 }
 
+function isPool(db) {
+  return db && typeof db.connect === 'function' && typeof db.totalCount === 'number'
+}
+
+function countCacheEnabled() {
+  const { envFlag } = require('./collabV2/flag')
+  return envFlag('COLLAB_NODE_COUNT_CACHE', false) && envFlag('COLLAB_NODE_COUNT_CACHE_WRITERS_READY', false)
+}
+
+const generationReadiness = new WeakMap()
+
+async function hasNodeCountsGeneration(db) {
+  if (!generationReadiness.has(db)) {
+    const ready = db.query(`select
+      to_regclass('room_node_counts_generation_seq') is not null and
+      exists(select 1 from pg_attribute where attrelid = to_regclass('rooms')
+        and attname = 'node_counts_generation' and not attisdropped)
+      and (select count(*) = 3 from pg_trigger where tgrelid = to_regclass('room_nodes')
+        and tgenabled = 'O' and tgname in ('room_node_counts_generation_insert',
+          'room_node_counts_generation_update', 'room_node_counts_generation_delete')) as ready`)
+      .then(result => !!(result.rows[0] && result.rows[0].ready))
+      .catch(err => { generationReadiness.delete(db); throw err })
+    generationReadiness.set(db, ready)
+  }
+  return generationReadiness.get(db)
+}
+
+async function readRoomCountMeta(db, roomKey) {
+  let ready = false
+  if (countCacheEnabled()) {
+    // Readiness is a startup capability, not a notification-based data stamp.
+    // Migration rollback requires disabling the feature and draining readers.
+    ready = await hasNodeCountsGeneration(db)
+  }
+  const result = await db.query(`select version, updated_at${ready ? ', node_counts_generation' : ''}
+    from rooms where room_key = $1`, [roomKey])
+  return result.rows[0] || null
+}
+
+async function withRoomReadSnapshot(db, roomKey, read) {
+  if (!isPool(db)) {
+    return read(db, await readRoomCountMeta(db, roomKey))
+  }
+  const client = await db.connect()
+  try {
+    await client.query('begin isolation level repeatable read read only')
+    await client.query("set local statement_timeout = '20000ms'")
+    const value = await read(client, await readRoomCountMeta(client, roomKey))
+    await client.query('commit')
+    return value
+  } catch (error) {
+    await client.query('rollback').catch(() => {})
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
+/** Enumerate only the union of requested live subtrees, deduplicating overlaps.
+ * Bottom-up counting is linear in that edge set, including deep chains. A cold
+ * root scope covers the room and intentionally reads all its live edges. */
+async function readSelectedNodeCounts(db, roomKey, inputUids, meta) {
+  const uids = Array.from(new Set(inputUids || [])).sort()
+  if (!uids.length) return new Map()
+  const key = countCacheEnabled() && meta && Number(meta.version) > 0 && meta.node_counts_generation != null
+    ? JSON.stringify([roomKey, String(meta.version), String(meta.node_counts_generation), uids]) : null
+  const hit = key && countCache.get(key)
+  if (hit) {
+    const counts = new Map(hit)
+    counts.queryCount = 0
+    return counts
+  }
+  // Root-scope fast path. If the requested set contains the authoritative DB
+  // root -- the room_nodes.is_root column (the same authority used by
+  // resolveRoomNodeUid, readRoomNodeCounts and room_nodes_one_root_idx),
+  // additionally requiring parent_uid is null -- read the whole live edge set
+  // once and count bottom-up. Never data.isRoot or a literal name, and never
+  // parent_uid null alone (a detached live orphan must stay a targeted scope).
+  // This is exact for orphans and live children of deleted parents (they are
+  // simply not reachable from the root) and it does not depend on the planner
+  // turning the recursive step into a per-node filtered scan, which degraded
+  // catastrophically with stale statistics. Non-root scopes keep the targeted
+  // recursive read so an unrelated room is never enumerated.
+  const rootRows = await db.query(
+    `select uid from room_nodes
+     where room_key = $1 and is_root and parent_uid is null and deleted_at is null and uid = any($2::text[])`,
+    [roomKey, uids]
+  )
+  const result = rootRows.rows.length
+    ? await db.query(
+      `select uid, parent_uid from room_nodes where room_key = $1 and deleted_at is null`,
+      [roomKey]
+    )
+    : await db.query(
+      `with recursive relevant as (
+         select uid, parent_uid from room_nodes
+         where room_key = $1 and uid = any($2::text[]) and deleted_at is null
+         union
+         select n.uid, n.parent_uid from relevant p
+         cross join lateral (
+           select uid, parent_uid from room_nodes
+           where room_key = $1 and parent_uid = p.uid and deleted_at is null
+           offset 0
+         ) n
+       )
+       select uid, parent_uid from relevant`,
+      [roomKey, uids]
+    )
+  // OFFSET 0 above keeps the recursive step parameterized by parent UID.
+  // Otherwise PG can repeatedly scan the entire room at every chain level.
+  const children = new Map(result.rows.map(row => [row.uid, []]))
+  for (const row of result.rows) {
+    if (children.has(row.parent_uid)) children.get(row.parent_uid).push(row.uid)
+  }
+  const descendants = countGraphDescendants(children)
+  const counts = new Map(uids.map(uid => [uid, {
+    childCount: (children.get(uid) || []).length,
+    descendantCount: descendants.get(uid) || 0
+  }]))
+  // One authoritative root probe plus one count read (the single-pass live
+  // edge set for root scope, or the targeted recursive read otherwise). A cache
+  // hit reports 0. Report the real statement count so API childCountQueryCount
+  // does not under-count the root fast path.
+  counts.queryCount = 2
+  if (key) countCache.set(key, counts)
+  return counts
+}
+
+async function readRoomNodeUids(db, roomKey, inputUids) {
+  const uids = (Array.isArray(inputUids) ? inputUids : []).slice(0, 200)
+  const canonical = Array.from(new Set(uids)).sort()
+  const prefix = JSON.stringify(['uid-dto', roomKey, canonical]) + '|'
+  const dtoKey = meta => countCacheEnabled() && meta && Number(meta.version) > 0 && meta.node_counts_generation != null
+    ? prefix + JSON.stringify([String(meta.version), String(meta.node_counts_generation)]) : null
+  const response = cached => {
+    const copy = JSON.parse(JSON.stringify(cached))
+    const byUid = new Map(copy.nodes.map(node => [node.uid, node]))
+    return { ...copy, nodes: uids.filter(uid => byUid.has(uid)).map(uid => byUid.get(uid)) }
+  }
+  if (isPool(db) && countCacheEnabled() && countCache.hasPrefix(prefix)) {
+    // One metadata statement selects a complete cached DTO for that exact
+    // revision/generation. No fields from a later graph read are mixed into it.
+    const meta = await readRoomCountMeta(db, roomKey)
+    const key = dtoKey(meta)
+    const hit = key && countCache.get(key)
+    if (hit) return response({ ...hit, updated_at: meta.updated_at })
+  }
+  return withRoomReadSnapshot(db, roomKey, async (client, meta) => {
+    if (!meta) return { notFound: true }
+    const initialized = await client.query(
+      `select uid from room_nodes where room_key = $1 and is_root and deleted_at is null limit 1`, [roomKey]
+    )
+    if (!initialized.rows.length) return { initialized: false }
+    const result = await client.query(
+      `select uid, data, is_root from room_nodes
+       where room_key = $1 and uid = any($2::text[]) and deleted_at is null`, [roomKey, uids]
+    )
+    const present = result.rows.map(row => row.uid)
+    const children = await client.query(
+      `select uid, parent_uid, position from room_nodes
+       where room_key = $1 and parent_uid = any($2::text[]) and deleted_at is null
+       order by position, uid`, [roomKey, present]
+    )
+    const counts = await readSelectedNodeCounts(client, roomKey, present, meta)
+    const byParent = new Map(present.map(uid => [uid, []]))
+    children.rows.forEach(row => byParent.get(row.parent_uid).push(row.uid))
+    const byUid = new Map(result.rows.map(row => [row.uid, row]))
+    const dto = {
+      room_key: roomKey, version: Number(meta.version), updated_at: meta.updated_at,
+      initialized: true,
+      nodes: canonical.filter(uid => byUid.has(uid)).map(uid => {
+        const row = byUid.get(uid)
+        const data = JSON.parse(JSON.stringify(row.data || {}))
+        delete data.imgMap
+        return { uid, isRoot: !!row.is_root, data: { ...data, ...counts.get(uid) }, children: byParent.get(uid) }
+      })
+    }
+    const key = dtoKey(meta)
+    if (key) countCache.set(key, dto)
+    return response(dto)
+  })
+}
+
 const SEARCH_PAGE = 500
 const SEARCH_HARD_CAP = 10000
 const SEARCH_DEFAULT_LIMIT = 200
@@ -853,36 +1050,20 @@ function collectTreeUids(tree, out = []) {
 /**
  * Stamp authoritative direct-child and full descendant totals from room_nodes.
  * childCount must NEVER equal clipped children.length.
- * Read only live UID/parent edges once, then count bottom-up without depth caps.
+ * Aggregate the union of the displayed nodes' subtrees in PG without depth caps.
  */
-async function stampAuthoritativeChildCounts(db, roomKey, tree) {
+async function stampAuthoritativeChildCounts(db, roomKey, tree, meta) {
   const uids = Array.from(new Set(collectTreeUids(tree)))
   if (!uids.length) return { queryCount: 0, stamped: 0 }
-  const res = await db.query(
-    `select uid, parent_uid
-     from room_nodes
-     where room_key = $1
-       and deleted_at is null`,
-    [roomKey]
-  )
-  const childrenByUid = new Map(res.rows.map(row => [row.uid, []]))
-  res.rows.forEach(row => {
-    if (childrenByUid.has(row.parent_uid)) {
-      childrenByUid.get(row.parent_uid).push(row.uid)
-    }
-  })
-  const descendants = countGraphDescendants(childrenByUid)
-  const totals = new Map()
-  childrenByUid.forEach((children, uid) => {
-    totals.set(uid, children.length)
-  })
+  const counts = await readSelectedNodeCounts(db, roomKey, uids, meta)
+  const totals = new Map(Array.from(counts, ([uid, count]) => [uid, count.childCount]))
   let stamped = 0
   const walk = node => {
     if (!node || !node.data) return
     const uid = String(node.data.uid || '')
     const total = totals.has(uid) ? totals.get(uid) : 0
     node.data.childCount = total
-    node.data.descendantCount = descendants.get(uid) || 0
+    node.data.descendantCount = (counts.get(uid) || {}).descendantCount || 0
     stamped += 1
     const loaded = Array.isArray(node.children) ? node.children.length : 0
     if (total > loaded) node.data.hasMore = true
@@ -890,18 +1071,19 @@ async function stampAuthoritativeChildCounts(db, roomKey, tree) {
     ;(node.children || []).forEach(walk)
   }
   walk(tree)
-  return { queryCount: 1, stamped, totals }
+  return { queryCount: counts.queryCount || 0, stamped, totals }
 }
 
 async function readRoomSubtree(db, roomKey, uid, options = {}) {
   if (!nodesTableAuthorityEnabled()) return null
-  const meta = await db.query(
-    `select version, updated_at from rooms where room_key = $1`,
-    [roomKey]
-  )
-  if (!meta.rows.length) return { notFound: true }
-  const version = Number(meta.rows[0].version || 0)
-  const updated_at = meta.rows[0].updated_at
+  return withRoomReadSnapshot(db, roomKey, (client, meta) =>
+    readRoomSubtreeAtSnapshot(client, roomKey, uid, options, meta))
+}
+
+async function readRoomSubtreeAtSnapshot(db, roomKey, uid, options, meta) {
+  if (!meta) return { notFound: true }
+  const version = Number(meta.version || 0)
+  const updated_at = meta.updated_at
   const resolved = await resolveRoomNodeUid(db, roomKey, uid)
   if (!resolved) return { missing: true, version, updated_at }
   const known = Number(options.knownVersion) || 0
@@ -942,7 +1124,8 @@ async function readRoomSubtree(db, roomKey, uid, options = {}) {
     const stamp = await stampAuthoritativeChildCounts(
       db,
       roomKey,
-      payload.tree
+      payload.tree,
+      meta
     )
     return {
       ...payload,
@@ -964,18 +1147,12 @@ async function readRoomSubtree(db, roomKey, uid, options = {}) {
      offset $3 limit $4`,
     [roomKey, resolved, offset, limit]
   )
-  const totalRes = await db.query(
-    `select count(*)::int as total
-     from room_nodes
-     where room_key = $1 and parent_uid = $2 and deleted_at is null`,
-    [roomKey, resolved]
-  )
-  const total = Number((totalRes.rows[0] && totalRes.rows[0].total) || 0)
   const children = kids.rows.map(row =>
     childStubFromRow(row, 0, version)
   )
   const countTree = { data: { uid: resolved }, children }
-  await stampAuthoritativeChildCounts(db, roomKey, countTree)
+  await stampAuthoritativeChildCounts(db, roomKey, countTree, meta)
+  const total = countTree.data.childCount
   return {
     uid: resolved,
     total,
@@ -1063,6 +1240,9 @@ module.exports = {
   replaceRoomNodes,
   replaceRoomNodeRows,
   readRoomNodes,
+  readRoomNodeUids,
+  readSelectedNodeCounts,
+  withRoomReadSnapshot,
   searchRoomNodes,
   stripSearchHtml,
   dedupeMatchesByUid,

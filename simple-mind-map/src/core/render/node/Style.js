@@ -252,7 +252,22 @@ class Style {
     if (typeof customHandleLine === 'function') {
       customHandleLine(this.ctx, line, { width, color, dasharray })
     }
-    line.stroke({ color, dasharray, width }).fill({ color: 'none' })
+    const dom = line.node
+    // A layout pass re-applies the same stroke to every unchanged connector.
+    // Compare the live attributes instead of re-writing them; reading is cheap
+    // relative to the SVG attribute writes and stays correct if anything
+    // rewrote the element outside this helper.
+    const expectedStroke = color == null ? null : String(color)
+    const expectedWidth = width == null ? null : String(width)
+    const expectedDash = dasharray == null || dasharray === '' ? null : String(dasharray)
+    const sameStroke = !!dom &&
+      (dom.getAttribute('stroke') || null) === expectedStroke &&
+      (dom.getAttribute('stroke-width') || null) === expectedWidth &&
+      (dom.getAttribute('stroke-dasharray') || null) === expectedDash &&
+      (dom.getAttribute('fill') || null) === 'none'
+    if (!sameStroke) {
+      line.stroke({ color, dasharray, width }).fill({ color: 'none' })
+    }
     // 可以显示箭头
     if (enableMarker) {
       const showMarker = this.merge('showLineMarker', true)

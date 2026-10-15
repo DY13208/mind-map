@@ -41,7 +41,12 @@ setProductHttp(async (url, options = {}) => {
     return { members: [{ id: 'u1', wecomUserId: 'wx1', name: '李依然', department: '产品部', position: '负责人', role: 'owner' }] }
   }
   if (url === '/api/wecom/contacts?search=%E9%99%88%E6%99%A8') return { contacts: [{ id: 'u2', wecomUserId: 'wx2', name: '陈晨', departments: ['产品部'], position: '设计师', avatarUrl: '/avatar.png' }], total: 1 }
-  if (url === '/api/teams/t1/rooms') {
+  if (new URL(url, 'http://fixture.invalid').pathname === '/api/teams/t1/rooms') {
+    if (!options.method || options.method === 'GET') {
+      const paging = new URL(url, 'http://fixture.invalid').searchParams
+      assert.equal(paging.get('limit'), '100')
+      assert.equal(paging.get('offset'), '0')
+    }
     if (options.method === 'POST') return { room: { roomKey: 'room-new', title: '新脑图', role: 'owner', owner: { id: 'u1', name: '李依然' } } }
     return { list: [{ roomKey: 'room-1', title: '规划脑图', role: 'editor', owner: { id: 'u1', name: '李依然' } }] }
   }

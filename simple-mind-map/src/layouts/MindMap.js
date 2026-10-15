@@ -16,10 +16,11 @@ class MindMap extends Base {
     if (this.mindMap.opt.openPerformance) {
       const generation = this.renderer._renderGeneration
       const cancelled = () => generation !== this.renderer._renderGeneration
-      this.computedBaseValue((...args) => walkLayoutInSlices(args, { cancelled })).then(completed => {
+      const walker = (...args) => walkLayoutInSlices(args, { cancelled })
+      this.computedBaseValue(walker).then(async completed => {
         if (!completed || cancelled()) return
-        this.computedTopValue()
-        this.adjustTopValue()
+        if (!(await this.computedTopValue(walker)) || cancelled()) return
+        if (!(await this.adjustTopValue(walker)) || cancelled()) return
         callback(this.root)
       }).catch(error => this.mindMap.opt.errorHandler('layout_error', error))
       return
@@ -138,8 +139,8 @@ class MindMap extends Base {
   }
 
   //  遍历节点树计算节点的top
-  computedTopValue() {
-    walk(
+  computedTopValue(walker = walk) {
+    return walker(
       this.root,
       null,
       (node, parent, isRoot, layerIndex) => {
@@ -166,25 +167,14 @@ class MindMap extends Base {
   }
 
   //  调整节点top
-  adjustTopValue() {
-    walk(
-      this.root,
-      null,
-      (node, parent, isRoot, layerIndex) => {
-        if (!node.getData('expand')) {
-          return
-        }
-        // 判断子节点所占的高度之和是否大于该节点自身，大于则需要调整位置
-        let base = this.getMarginY(layerIndex + 1) * 2 + node.height
-        let leftDifference = node.leftChildrenAreaHeight2 - base
-        let rightDifference = node.rightChildrenAreaHeight2 - base
-        if (leftDifference > 0 || rightDifference > 0) {
-          this.updateBrothers(node, leftDifference / 2, rightDifference / 2)
-        }
-      },
-      null,
-      true
-    )
+  adjustTopValue(walker = walk) {
+    return this.adjustSiblingSubtrees((node, layerIndex) => {
+      if (!node.getData('expand')) return [0, 0]
+      const base = this.getMarginY(layerIndex + 1) * 2 + node.height
+      const left = node.leftChildrenAreaHeight2 - base
+      const right = node.rightChildrenAreaHeight2 - base
+      return left > 0 || right > 0 ? [left / 2, right / 2] : [0, 0]
+    }, true, walker)
   }
 
   //  更新兄弟节点的top

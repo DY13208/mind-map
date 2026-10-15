@@ -55,6 +55,7 @@ class OuterFrame {
     this.isNotRenderOuterFrames = false
     this.textNodeList = []
     this.outerFrameElList = []
+    this._frameCandidates = []
     this.activeOuterFrame = null
     // 文字相关方法
     this.textEditNode = null
@@ -77,8 +78,10 @@ class OuterFrame {
   // 绑定事件
   bindEvent() {
     this.renderOuterFrames = this.renderOuterFrames.bind(this)
-    this.mindMap.on('node_tree_render_end', this.renderOuterFrames)
-    this.mindMap.on('data_change', this.renderOuterFrames)
+    this.onFrameRenderEnd = () => this.renderOuterFrames({ useCache: true })
+    this.onFrameDataChange = () => this.renderOuterFrames()
+    this.mindMap.on('node_tree_render_end', this.onFrameRenderEnd)
+    this.mindMap.on('data_change', this.onFrameDataChange)
     // 监听画布和节点点击事件，用于清除当前激活的连接线
     this.clearActiveOuterFrame = this.clearActiveOuterFrame.bind(this)
     this.mindMap.on('draw_click', this.clearActiveOuterFrame)
@@ -101,8 +104,9 @@ class OuterFrame {
 
   // 解绑事件
   unBindEvent() {
-    this.mindMap.off('node_tree_render_end', this.renderOuterFrames)
-    this.mindMap.off('data_change', this.renderOuterFrames)
+    this.onBeforeDestroy()
+    this.mindMap.off('node_tree_render_end', this.onFrameRenderEnd)
+    this.mindMap.off('data_change', this.onFrameDataChange)
     this.mindMap.off('draw_click', this.clearActiveOuterFrame)
     this.mindMap.off('node_click', this.clearActiveOuterFrame)
     this.mindMap.off('scale', this.onScale)
@@ -112,12 +116,21 @@ class OuterFrame {
       'Del|Backspace',
       this.removeActiveOuterFrame
     )
+    this._frameCandidates = []
+    this._frameRoot = null
+    this._frameOwners = []
+    this._frameSignature = null
+    this.clearTextNodes()
+    this.clearOuterFrameElList()
+    if (this.draw) this.draw.remove()
+    this.draw = null
   }
 
   // 实例销毁时清除关联线文字编辑框
   onBeforeDestroy() {
     this.hideEditTextBox()
     this.removeTextEditEl()
+    this.textEditNode = null
   }
 
   // 给节点添加外框数据
@@ -244,66 +257,74 @@ class OuterFrame {
   }
 
   // 渲染外框
-  renderOuterFrames() {
+  renderOuterFrames({ useCache = false } = {}) {
     if (this.isNotRenderOuterFrames) {
       this.isNotRenderOuterFrames = false
       return
     }
+    const specs = []
+    const tree = this.mindMap.renderer.root
+    const epoch = this.mindMap.renderer._layoutEpoch || 0
+    // Keep offscreen frame owners too: viewport entry can make their bounds
+    // measurable without changing either the model root or the layout epoch.
+    if (!useCache || this._frameRoot !== tree || this._frameEpoch !== epoch) {
+      this._frameCandidates = []
+      if (tree) {
+        walk(tree, null, cur => {
+          if (!cur) return
+          ;(getNodeOuterFrameList(cur) || []).forEach(({ nodeList, range }) => {
+            if (range[0] === -1 || range[1] === -1) return
+            this._frameCandidates.push({
+              node: cur, nodeList, range,
+              style: this.getStyle(nodeList[0]), text: this.getText(nodeList[0])
+            })
+          })
+        }, () => {}, true, 0)
+      }
+    }
+    this._frameRoot = tree
+    this._frameEpoch = epoch
+    const t = this.mindMap.draw.transform()
+    const { outerFramePaddingX, outerFramePaddingY } = this.mindMap.opt
+    // Pure view paints only inspect known frame groups, not every loaded node.
+    this._frameCandidates.forEach(({ node, nodeList, range, style, text }) => {
+      const { left, top, width, height } = getNodeListBoundingRect(nodeList)
+      if (![left, top, width, height].every(Number.isFinite)) return
+      specs.push({
+        node,
+        range,
+        x: (left - outerFramePaddingX - this.mindMap.elRect.left - t.translateX) / t.scaleX,
+        y: (top - outerFramePaddingY - this.mindMap.elRect.top - t.translateY) / t.scaleY,
+        width: (width + outerFramePaddingX * 2) / t.scaleX,
+        height: (height + outerFramePaddingY * 2) / t.scaleY,
+        style,
+        text
+      })
+    })
+    // Layout and content notifications can describe the same frames. Reuse
+    // their live elements, but rebuild when geometry, text, style or owners change.
+    const signature = JSON.stringify(specs.map(({ node, ...spec }) => spec))
+    if (
+      signature === this._frameSignature &&
+      specs.length === this.outerFrameElList.length &&
+      specs.every((spec, index) => this._frameOwners[index] === spec.node) &&
+      this.outerFrameElList.every(el => el.node && el.node.isConnected)
+    ) return
     this.clearActiveOuterFrame()
     this.clearTextNodes()
     this.clearOuterFrameElList()
-    let tree = this.mindMap.renderer.root
-    if (!tree) return
-    const t = this.mindMap.draw.transform()
-    const { outerFramePaddingX, outerFramePaddingY } = this.mindMap.opt
-    walk(
-      tree,
-      null,
-      cur => {
-        if (!cur) return
-        const outerFrameList = getNodeOuterFrameList(cur)
-        if (outerFrameList && outerFrameList.length > 0) {
-          outerFrameList.forEach(({ nodeList, range }) => {
-            if (range[0] === -1 || range[1] === -1) return
-            const { left, top, width, height } =
-              getNodeListBoundingRect(nodeList)
-            if (
-              !Number.isFinite(left) ||
-              !Number.isFinite(top) ||
-              !Number.isFinite(width) ||
-              !Number.isFinite(height)
-            )
-              return
-            const el = this.createOuterFrameEl(
-              (left -
-                outerFramePaddingX -
-                this.mindMap.elRect.left -
-                t.translateX) /
-                t.scaleX,
-              (top -
-                outerFramePaddingY -
-                this.mindMap.elRect.top -
-                t.translateY) /
-                t.scaleY,
-              (width + outerFramePaddingX * 2) / t.scaleX,
-              (height + outerFramePaddingY * 2) / t.scaleY,
-              this.getStyle(nodeList[0]) // 使用第一个节点的外框样式
-            )
-            // 渲染文字，如果有的话
-            const textNode = this.createText(el, cur, range)
-            this.textNodeList.push(textNode)
-            this.renderText(this.getText(nodeList[0]), el, textNode, cur, range)
-            el.on('click', e => {
-              e.stopPropagation()
-              this.setActiveOuterFrame(el, cur, range, textNode)
-            })
-          })
-        }
-      },
-      () => {},
-      true,
-      0
-    )
+    specs.forEach(({ node, range, x, y, width, height, style, text }) => {
+      const el = this.createOuterFrameEl(x, y, width, height, style)
+      const textNode = this.createText(el, node, range)
+      this.textNodeList.push(textNode)
+      this.renderText(text, el, textNode, node, range)
+      el.on('click', e => {
+        e.stopPropagation()
+        this.setActiveOuterFrame(el, node, range, textNode)
+      })
+    })
+    this._frameSignature = signature
+    this._frameOwners = specs.map(spec => spec.node)
   }
 
   // 激活外框
@@ -383,6 +404,7 @@ class OuterFrame {
     this.textNodeList.forEach(item => {
       item.remove()
     })
+    this.textNodeList = []
   }
 
   // 清除外框元素

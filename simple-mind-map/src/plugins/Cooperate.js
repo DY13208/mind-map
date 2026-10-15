@@ -532,6 +532,9 @@ class Cooperate {
     this.httpCollabMode = false
     this.safeLoadMode = false
     this.collabV2Adapter = null
+    this._v2RemoteApplyQueue = Promise.resolve()
+    this._v2RemoteApplyEpoch = 0
+    this._v2RendererWaiters = new Set()
     this._v2UndoActive = false
     this._v2UndoAllowReplace = false
     this._v2HistoryBaselined = false
@@ -584,6 +587,11 @@ class Cooperate {
     this.lastPushed = {}
     this.ackedUids = new Set()
     this.pendingUids = new Set()
+    this._pendingTextUids = new Set()
+    this._httpTextFlushAfterRender = false
+    this._localIntentEpochByUid = new Map()
+    this._localIntentSeq = 0
+    this._authoritativeRevByUid = new Map()
     this.recentPushed = new Map()
     this.recentHttpDeleted = new Map()
     this.pendingHttpDeletes = []
@@ -926,7 +934,9 @@ class Cooperate {
     // 监听设置思维导图数据事件
     this.onSetData = this.onSetData.bind(this)
     this.onBeforeSetData = this.onBeforeSetData.bind(this)
+    this.cancelV2RemoteApply = this.cancelV2RemoteApply.bind(this)
     this.mindMap.on('before_set_data', this.onBeforeSetData)
+    this.mindMap.on('before_update_data', this.cancelV2RemoteApply)
     this.mindMap.on('set_data', this.onSetData)
     this.onAfterExecCommand = this.onAfterExecCommand.bind(this)
     this.mindMap.on('afterExecCommand', this.onAfterExecCommand)
@@ -948,6 +958,8 @@ class Cooperate {
 
   // 解绑事件
   unBindEvent() {
+    this.cancelV2RemoteApply()
+    this._v2RemoteApplyQueue = Promise.resolve()
     clearTimeout(this.observeApplyTimer)
     clearTimeout(this.localApplyTimer)
     this.observeApplyTimer = null
@@ -958,11 +970,32 @@ class Cooperate {
     this.pendingRemoteDeleted = new Set()
     this.pendingRemoteStructure = false
     this.pendingLocalData = null
-    this.disconnectProvider()
+    this.disconnectProvider({ recreateDoc: false })
+    if (this.ymap && this.onObserve) this.ymap.unobserveDeep(this.onObserve)
+    if (this.ydoc) this.ydoc.destroy()
+    this.ydoc = null
+    this.ymap = null
+    this.currentData = null
+    this.pendingInitData = null
+    this.lastPushed = {}
+    this.ackedUids && this.ackedUids.clear()
+    this.pendingUids && this.pendingUids.clear()
+    this.httpTextFlushQueued = false
+    this.deletedUids && this.deletedUids.clear()
+    this.abandonedInsertUids && this.abandonedInsertUids.clear()
+    this.recentHttpDeleted && this.recentHttpDeleted.clear()
+    this.pendingGenIntent && this.pendingGenIntent.clear()
+    this._pendingTextUids && this._pendingTextUids.clear()
+    this._httpTextFlushAfterRender = false
+    this.hydrateInflight && this.hydrateInflight.clear()
+    this.hydratedUids && this.hydratedUids.clear()
+    this.hydrateFailedUids && this.hydrateFailedUids.clear()
+    this.collabV2Adapter = null
     this.mindMap.off('data_change', this.onDataChange)
     this.mindMap.off('node_active', this.onNodeActive)
     this.mindMap.off('node_tree_render_end', this.onNodeTreeRenderEnd)
     this.mindMap.off('before_set_data', this.onBeforeSetData)
+    this.mindMap.off('before_update_data', this.cancelV2RemoteApply)
     this.mindMap.off('set_data', this.onSetData)
     this.mindMap.off('afterExecCommand', this.onAfterExecCommand)
     setCollabTraceSnapshotProvider(null)
@@ -981,13 +1014,18 @@ class Cooperate {
     clearTimeout(this._remoteGeometryTimer)
     this._remoteGeometryTimer = null
     clearTimeout(this.httpTextTimer)
+    this.httpTextTimer = null
     clearTimeout(this.httpStructureTimer)
+    this.httpStructureTimer = null
     clearTimeout(this.httpRecoverRetryTimer)
     clearTimeout(this.httpRemoteRecoverTimer)
+    clearTimeout(this.httpSettleTimer)
+    this.httpSettleTimer = null
     this.httpRecoverRetryTimer = null
     this.httpRemoteRecoverTimer = null
     this.httpPendingRemoteVersion = 0
     clearTimeout(this._v2InsertRetryTimer)
+    if (this._inflightTextKeys) this._inflightTextKeys.clear()
   }
 
   // 数据同步时的处理，更新当前思维导图
@@ -1267,7 +1305,17 @@ class Cooperate {
   }
 
   // 当前思维导图改变后的处理，触发同步
-  onDataChange(data) {
+  onDataChange(data, change) {
+    if (change && change.source && change.source !== 'local') return
+    // Effective local deltas must stay queued even during the short remote
+    // settle/history window. The legacy recovery scan used to rediscover
+    // these edits later; an affected-UID queue must remember them explicitly.
+    if (change && change.incremental && this.collabV2Adapter) {
+      if (!this._pendingTextUids) this._pendingTextUids = new Set()
+      change.nodes.forEach(entry => { if (entry.tree && entry.tree.data) this._pendingTextUids.add(entry.tree.data.uid) })
+      this.scheduleHttpTextSync()
+      return
+    }
     if (this.isSetData || this.isApplyingRemote || this.httpReplacing) {
       return
     }
@@ -1320,7 +1368,69 @@ class Cooperate {
     }
   }
 
+  resetLocalIntentState() {
+    this._localIntentEpochByUid = new Map()
+    this._localIntentSeq = 0
+    this._authoritativeRevByUid = new Map()
+  }
+
+  localIntentEpochOf(uid) {
+    return (this._localIntentEpochByUid && this._localIntentEpochByUid.get(uid)) || 0
+  }
+
+  bumpAuthoritativeUidRev(uid, revision) {
+    if (!uid || !revision) return
+    if (!this._authoritativeRevByUid) this._authoritativeRevByUid = new Map()
+    const next = Number(revision)
+    if (next > (this._authoritativeRevByUid.get(uid) || 0)) this._authoritativeRevByUid.set(uid, next)
+  }
+
+  // One authoritative per-command local intent epoch. Recorded exactly once per
+  // command here (never in onDataChange, which the same command also emits).
+  recordLocalIntentUids(uids) {
+    if (!this._localIntentEpochByUid) this._localIntentEpochByUid = new Map()
+    for (const uid of uids) {
+      if (!uid) continue
+      this._localIntentSeq = (this._localIntentSeq || 0) + 1
+      this._localIntentEpochByUid.set(uid, this._localIntentSeq)
+    }
+  }
+
+  commandIntentUids(name, args) {
+    const uids = []
+    const pushNode = node => {
+      if (!node) return
+      const target = typeof this.resolveHttpPatchNode === 'function' ? this.resolveHttpPatchNode(node) : node
+      if (target && typeof target.getData === 'function') {
+        const uid = target.getData('uid')
+        if (uid) uids.push(uid)
+      }
+    }
+    const structural = name === 'REMOVE_NODE' || name === 'MOVE_NODE_TO' || name === 'MOVE_UP_ONE_LEVEL'
+    if (FIELD_COMMANDS[name] || structural) {
+      for (const arg of args) {
+        if (Array.isArray(arg)) arg.forEach(pushNode)
+        else pushNode(arg)
+      }
+      if (!uids.length && FIELD_COMMANDS[name]) {
+        const active = this.mindMap && this.mindMap.renderer && this.mindMap.renderer.activeNodeList
+        if (Array.isArray(active)) active.forEach(pushNode)
+      }
+    }
+    return Array.from(new Set(uids))
+  }
+
   onAfterExecCommand(name) {
+    if (this.collabV2Adapter && !this.isApplyingRemote && !this.isSetData && !this.httpReplacing) {
+      this.recordLocalIntentUids(this.commandIntentUids(name, Array.prototype.slice.call(arguments, 1)))
+    }
+    if (this.collabV2Adapter && (name === 'SET_NODE_TEXT' || name === 'SET_NODE_NOTE')) {
+      const node = arguments[1]
+      if (node && node.getData) {
+        if (!this._pendingTextUids) this._pendingTextUids = new Set()
+        this._pendingTextUids.add(node.getData('uid'))
+      }
+    }
     if (name === 'PASTE_NODE') {
       this._pasteTraceId = this._commandTraceId || createTraceId()
       collabTrace('paste.command', {
@@ -1772,6 +1882,10 @@ class Cooperate {
         editing: true
       })
     })
+    if (this._httpTextFlushAfterRender && this.isHttpTextRendererReady()) {
+      this._httpTextFlushAfterRender = false
+      this.flushHttpText()
+    }
     const renderer = this.mindMap && this.mindMap.renderer
     if (renderer && renderer._lastRenderWasLayoutSwitch) {
       inspectLayoutRenderer(
@@ -1783,6 +1897,7 @@ class Cooperate {
   }
 
   onBeforeSetData() {
+    this.cancelV2RemoteApply()
     clearTimeout(this.localApplyTimer)
     this.localApplyTimer = null
     this.pendingLocalData = null
@@ -1850,6 +1965,50 @@ class Cooperate {
     })
   }
 
+  // On a successful local ACK, reconcile the committed canonical content into
+  // the model when a competing remote op may have overwritten the optimistic
+  // value. Per-UID: skip if a newer local intent epoch exists, or if the ACK is
+  // older than the authoritative revision. Runs on the serialized remote-apply
+  // queue so it cannot interleave with a remote apply.
+  reconcileAckedLocalOperation(result, capturedIntentEpochs, originalScope, type, payload) {
+    const committed = (result && result.operation) || null
+    const committedType = (committed && committed.type) || type
+    const committedPayload = (committed && committed.payload) || payload || {}
+    const committedRev = Number((committed && committed.serverRevision) || (result && result.serverRevision) || 0)
+    const clientId = this.collabV2Adapter && this.collabV2Adapter.getClientId && this.collabV2Adapter.getClientId()
+    const isCanonicalUpdate = name => name === 'node.update' || name === 'node.updated'
+    const events = []
+    if (committedType === 'batch.applied' && Array.isArray(committedPayload.events)) {
+      for (const child of committedPayload.events) if (child && isCanonicalUpdate(child.type)) events.push({ event: child, serverRevision: committedRev })
+    } else if (Array.isArray(committedPayload.ops)) {
+      for (const item of committedPayload.ops) {
+        const childType = (item && item.type) || committedType
+        if (isCanonicalUpdate(childType)) events.push({ type: childType, payload: (item && item.payload) || item, clientId, serverRevision: committedRev })
+      }
+    } else if (isCanonicalUpdate(committedType)) {
+      events.push({ type: committedType, payload: committedPayload, clientId, serverRevision: committedRev })
+    }
+    if (!events.length) return Promise.resolve()
+    const renderer = this.mindMap && this.mindMap.renderer
+    // Equal fastpath: a canonical patch already present in the current node must
+    // not trigger a redundant apply/render/remote notice (ordinary optimistic
+    // self echo must stay a no-op).
+    const needed = events.filter(event => {
+      if (!renderer || typeof renderer.findNodeByUid !== 'function') return false
+      const normalized = collabNodeFeatures.normalizeAppliedUpdatePayload(event.event || event)
+      const uid = normalized.uid
+      const patch = normalized.patch || {}
+      if (!uid || !Object.keys(patch).length) return false
+      const node = renderer.findNodeByUid(uid)
+      if (!node || typeof node.getData !== 'function') return true
+      return !Object.keys(patch).every(key => JSON.stringify(node.getData(key)) === JSON.stringify(patch[key]))
+    })
+    if (!needed.length) return Promise.resolve()
+    const meta = { applySelf: true, fromAck: true, originalScope, capturedIntentEpochs: capturedIntentEpochs || new Map() }
+    return Promise.all(needed.map(event => this.applyV2RemoteOperation(event, meta)))
+      .catch(err => { v2Trace('ack.reconcile.fail', { message: err && err.message }) })
+  }
+
   submitV2(type, payload) {
     if (!this.collabV2Adapter) {
       return Promise.reject(new Error('collab v2 adapter missing'))
@@ -1901,6 +2060,10 @@ class Cooperate {
     }
     const uids = uidsFromPayload(type, payload)
     uids.forEach(uid => this.pendingUids.add(uid))
+    // Capture the local intent epoch at submit time. On ACK, canonical content
+    // is reconciled only for UIDs whose intent epoch has not advanced since.
+    const capturedIntentEpochs = new Map(uids.map(uid => [uid, this.localIntentEpochOf(uid)]))
+    const originalScope = { roomKey: this.httpRoomKey, adapter: this.collabV2Adapter, remoteApplyEpoch: this._v2RemoteApplyEpoch || 0 }
     collabTrace('2.adapter.submit', {
       traceId,
       type,
@@ -1918,12 +2081,13 @@ class Cooperate {
         clientId,
         traceId
       })
-      .then(result => {
+      .then(async result => {
         this.acknowledgeLocalVersion(result && result.serverRevision, {
           operationId: result && result.opId,
           duplicate: !!(result && result.duplicate)
         })
         this.markAckedFromPayload(type, payload)
+        await this.reconcileAckedLocalOperation(result, capturedIntentEpochs, originalScope, type, payload)
         collabTrace('8.ack', {
           traceId,
           opId: result && result.opId,
@@ -1949,10 +2113,123 @@ class Cooperate {
       })
   }
 
-  async applyV2RemoteOperation(op, meta = {}) {
+  cancelV2RemoteApply() {
+    this._v2RemoteApplyEpoch = (this._v2RemoteApplyEpoch || 0) + 1
+    Array.from(this._v2RendererWaiters || []).forEach(cancel => cancel(false))
+  }
+
+  isV2RemoteApplyScopeCurrent(context) {
+    const mm = this.mindMap
+    return !this._disposed && mm && !mm._destroyed && mm.renderer &&
+      context.room === this.httpRoomKey && context.adapter === this.collabV2Adapter
+  }
+
+  isV2RemoteApplyCurrent(context) {
+    return this.isV2RemoteApplyScopeCurrent(context) &&
+      context.epoch === (this._v2RemoteApplyEpoch || 0) &&
+      context.tree === this.mindMap.renderer.renderTree
+  }
+
+  rebaseV2RemoteApplyContext(context) {
+    if (!this.isV2RemoteApplyScopeCurrent(context)) return false
+    context.epoch = this._v2RemoteApplyEpoch || 0
+    context.tree = this.mindMap.renderer.renderTree
+    return true
+  }
+
+  waitV2RendererReady(context) {
+    if (!this.isV2RemoteApplyCurrent(context)) return Promise.resolve(false)
+    const mm = this.mindMap, renderer = mm.renderer
+    const ready = () => renderer.root && !renderer.isRendering &&
+      !renderer.renderTimer && !renderer.hasWaitRendering &&
+      renderer.root.nodeData === renderer.renderTree
+    if (ready()) return Promise.resolve(true)
+    return new Promise(resolve => {
+      const finish = value => {
+        mm.off('node_tree_render_end', onEnd)
+        this._v2RendererWaiters.delete(finish)
+        resolve(value)
+      }
+      const onEnd = info => {
+        if (!this.isV2RemoteApplyCurrent(context)) return finish(false)
+        if (info && (info.reason === 'view' || info.reason === 'export')) return
+        if (ready()) finish(true)
+      }
+      if (!this._v2RendererWaiters) this._v2RendererWaiters = new Set()
+      this._v2RendererWaiters.add(finish)
+      mm.on('node_tree_render_end', onEnd)
+      // A renderer pass may legitimately exceed a network ACK timeout. Keep
+      // the operation pending until its actual model is ready or its editor
+      // scope is cancelled; rejecting here permanently discards the last op.
+    })
+  }
+
+  applyV2RemoteOperation(op, meta = {}) {
+    const renderer = this.mindMap && this.mindMap.renderer
+    const adapter = this.collabV2Adapter
+    const status = adapter && adapter.getStatus && adapter.getStatus()
+    const context = { epoch: this._v2RemoteApplyEpoch || 0,
+      tree: renderer && renderer.renderTree, room: this.httpRoomKey, adapter,
+      revision: Math.max(Number(status && status.lastServerRevision) || 0, Number(this.lastAppliedVersion) || 0) }
+    // Serialize all entry calls, including ones that arrive after a layout-end
+    // but before an older renderer waiter resumes. Never let newer text rewind.
+    const task = Promise.resolve(this._v2RemoteApplyQueue).catch(() => {})
+      .then(() => this.applyV2RemoteOperationNow(op, meta, context))
+    this._v2RemoteApplyQueue = task.catch(() => {})
+    return task
+  }
+
+  async applyV2RemoteOperationNow(op, meta = {}, context) {
     const event = (op && op.event) || op || {}
     const type = event.type || op.type
     const payload = event.payload || op.payload || {}
+    const opRevision = Number(op.serverRevision || event.version || op.version) || 0
+    if (!this.rebaseV2RemoteApplyContext(context)) return false
+    if (type && (type.startsWith('node.') || type.startsWith('operation.'))) {
+      // setData/updateData can replace the local tree without advancing the
+      // server head. Rebind the queued op to that same room's current model;
+      // returning false would still let the adapter acknowledge an unapplied op.
+      while (true) {
+        if (!this.rebaseV2RemoteApplyContext(context)) return false
+        if (await this.waitV2RendererReady(context)) {
+          if (this.isV2RemoteApplyCurrent(context)) break
+        }
+      }
+      const adapter = this.collabV2Adapter
+      const status = adapter && adapter.getStatus && adapter.getStatus()
+      const currentRevision = Math.max(Number(status && status.lastServerRevision) || 0, Number(this.lastAppliedVersion) || 0)
+      const revision = opRevision
+      if (revision && (
+        (meta.fromOutbox && currentRevision > revision) ||
+        (!meta.applySelf && currentRevision >= revision && currentRevision > context.revision)
+      )) {
+        v2Trace('remote.skip-authoritative-progress', { type, revision, currentRevision })
+        return false
+      }
+      const intentUid = (payload && payload.uid) || (event && event.payload && event.payload.uid) || ''
+      if (meta.originalScope && (
+        meta.originalScope.adapter !== this.collabV2Adapter ||
+        meta.originalScope.roomKey !== this.httpRoomKey ||
+        meta.originalScope.remoteApplyEpoch !== (this._v2RemoteApplyEpoch || 0)
+      )) {
+        // The ACK belongs to an older room/adapter/apply epoch; never reconcile
+        // it into a different current room sharing the same UID.
+        v2Trace('ack.reconcile.skip-scope-changed', { uid: intentUid })
+        return true
+      }
+      if (meta.fromAck && meta.applySelf && intentUid && meta.capturedIntentEpochs) {
+        const captured = meta.capturedIntentEpochs.get ? (meta.capturedIntentEpochs.get(intentUid) || 0) : 0
+        if (this.localIntentEpochOf(intentUid) > captured) {
+          v2Trace('ack.reconcile.skip-newer-intent', { uid: intentUid, captured, current: this.localIntentEpochOf(intentUid) })
+          return true
+        }
+        const uidRev = this._authoritativeRevByUid ? (this._authoritativeRevByUid.get(intentUid) || 0) : 0
+        if (revision && uidRev > revision) {
+          v2Trace('ack.reconcile.skip-uid-authoritative', { uid: intentUid, revision, uidRev })
+          return true
+        }
+      }
+    }
     const mine =
       this.collabV2Adapter &&
       this.collabV2Adapter.getClientId &&
@@ -1997,12 +2274,13 @@ class Cooperate {
         guard += 1
         const next = []
         for (const child of pending) {
-          const applied = await this.applyV2RemoteOperation(
+          const applied = await this.applyV2RemoteOperationNow(
             {
               event: child,
               serverRevision: op.serverRevision
             },
-            { deferFallback: true }
+            { ...meta, deferFallback: true },
+            context
           )
           if (!applied) next.push(child)
         }
@@ -2041,6 +2319,7 @@ class Cooperate {
     }
     const uid = payload.uid
     const renderer = this.mindMap && this.mindMap.renderer
+    const previousNode = uid && renderer && renderer.findNodeByUid(uid)
     if (this.currentData && type && type !== 'map.replaced') {
       try {
         this.currentData = applyCollabEvent(this.currentData, event, {
@@ -2054,6 +2333,7 @@ class Cooperate {
       const inserted = this.applyV2PayloadInsert(payload)
       v2Trace('remote.apply.insert', { uid, ok: inserted })
       if (inserted) {
+        this.notifyV2ContentChange('insert', payload, previousNode)
         this.notifySearchInvalidate()
         return true
       }
@@ -2067,6 +2347,7 @@ class Cooperate {
       const moved = await this.applyV2PayloadMove(payload)
       v2Trace('remote.apply.move', { uid, ok: moved, parent: payloadParentUid(payload) })
       if (moved) {
+        this.notifyV2ContentChange('move', payload, previousNode)
         this.notifySearchInvalidate()
         return true
       }
@@ -2075,6 +2356,7 @@ class Cooperate {
       const removed = this.applyV2PayloadDelete(payload)
       v2Trace('remote.apply.delete', { uid, ok: removed })
       if (removed) {
+        this.notifyV2ContentChange('delete', payload, previousNode)
         this.notifySearchInvalidate()
         return true
       }
@@ -2087,6 +2369,7 @@ class Cooperate {
         rows: Array.isArray(payload.rows) ? payload.rows.length : 0
       })
       if (restored) {
+        this.notifyV2ContentChange('restore', payload, previousNode)
         this.notifySearchInvalidate()
         return true
       }
@@ -2104,6 +2387,8 @@ class Cooperate {
         keys: Object.keys(normalized.patch || {})
       })
       if (updated) {
+        this.bumpAuthoritativeUidRev(normalized.uid || uid, opRevision)
+        this.notifyV2ContentChange('update', { ...payload, uid: normalized.uid || uid }, previousNode)
         this.notifySearchInvalidate()
         return true
       }
@@ -2133,13 +2418,14 @@ class Cooperate {
           rendererRefreshed: !!updated
         })
         if (updated) {
+          this.notifyV2ContentChange('update', { ...payload, uid: normalized.uid }, previousNode)
           this.notifySearchInvalidate()
           return true
         }
       }
       const inner = payload.inverse || payload.forward || (op && op.inversePayload)
       if (inner && inner.type) {
-        const applied = await this.applyV2RemoteOperation({
+        const applied = await this.applyV2RemoteOperationNow({
           event: {
             type:
               inner.type === 'node.update'
@@ -2158,7 +2444,7 @@ class Cooperate {
             payload: inner.payload || {}
           },
           serverRevision: op.serverRevision
-        }, meta)
+        }, meta, context)
         if (applied) return true
       }
     }
@@ -2173,6 +2459,7 @@ class Cooperate {
           this.isApplyingRemote = false
         }
         this.notifySearchInvalidate()
+        this.notifyV2ContentChange('update', payload, previousNode)
         return true
       }
     }
@@ -2192,6 +2479,34 @@ class Cooperate {
     const applied = this.syncHttpRemoteOperations([op])
     this.notifySearchInvalidate()
     return applied
+  }
+
+  notifyV2ContentChange(type, payload, previousNode) {
+    const command = this.mindMap && this.mindMap.command
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!command || !command.recordContentChange || !renderer || this._disposed) return
+    const notify = () => {
+      if (this._disposed || this.mindMap._destroyed) return
+      const uid = payload.uid
+      const node = uid && renderer.findNodeByUid(uid)
+      const change = { source: 'remote' }
+      if (type === 'delete') change.removed = previousNode ? [previousNode] : []
+      else if (type === 'insert') change.added = node ? [node] : []
+      else if (type === 'restore') {
+        change.added = (payload.rows || []).map(row => renderer.findNodeByUid(row.uid)).filter(Boolean)
+        if (!change.added.length && node) change.added = [node]
+      } else change.nodes = node ? [node] : []
+      command.recordContentChange(change)
+      command.flushContentChange()
+    }
+    if ((type === 'insert' || type === 'restore') && (renderer.isRendering || !(payload.uid && renderer.findNodeByUid(payload.uid)))) {
+      const done = info => {
+        if (info && (info.reason === 'view' || info.reason === 'export')) return
+        this.mindMap.off('node_tree_render_end', done)
+        notify()
+      }
+      this.mindMap.on('node_tree_render_end', done)
+    } else notify()
   }
 
   isGeneralizationUid(parentUid, uid) {
@@ -2972,6 +3287,7 @@ class Cooperate {
   }
 
   setHttpCollab(config = {}) {
+    if (config.roomKey && config.roomKey !== this.httpRoomKey) this.cancelV2RemoteApply()
     this.setLazyLoaders(config)
     this.httpCollabMode = true
     this.hydratedUids = new Set()
@@ -2980,6 +3296,7 @@ class Cooperate {
     this.lastPushed = {}
     this.ackedUids = new Set()
     this.pendingUids = new Set()
+    this.resetLocalIntentState()
     this.recentPushed = new Map()
     this.recentHttpDeleted = new Map()
     this.abandonedInsertUids = new Set()
@@ -3423,6 +3740,7 @@ class Cooperate {
   }
 
   clearHttpCollab() {
+    this.cancelV2RemoteApply()
     const restoreWaiters = Array.isArray(this.httpRestoreWaiters)
       ? this.httpRestoreWaiters.splice(0)
       : []
@@ -3437,6 +3755,7 @@ class Cooperate {
     this.httpCollabMode = false
     this.safeLoadMode = false
     this.httpRoomKey = ''
+    this.resetLocalIntentState()
     this.httpFetchSubtree = null
     this.httpFetchDeepSubtree = null
     this.httpFetchExportTree = null
@@ -3928,13 +4247,23 @@ class Cooperate {
     const have = new Set(
       data.children.map(child => child && child.data && child.data.uid)
     )
+    const added = []
     ;(incoming || []).forEach(child => {
       const uid = child && child.data && child.data.uid
       if (!uid || have.has(uid) || this.isTombstonedUid(uid)) return
-      data.children.push(clearHydratedSelection(child))
+      const hydrated = clearHydratedSelection(child)
+      data.children.push(hydrated)
+      added.push(hydrated)
       have.add(uid)
       this.markUidPushed(uid, child.data, 'server')
     })
+    if (added.length) this.notifyHttpHydration(data, added)
+  }
+
+  notifyHttpHydration(data, added) {
+    const node = data._node || this.mindMap.renderer.findNodeByUid(data.data && data.data.uid)
+    this.mindMap.command.recordContentChange({ added, source: 'hydrate',
+      countable: !node || this.mindMap.command.isCountableNode(node) })
   }
 
   markUidPushed(uid, data, source = 'server') {
@@ -4149,6 +4478,7 @@ class Cooperate {
   }
 
   async hydrateGeneralizationParent(node, generalization) {
+    if (this._disposed || this.mindMap._destroyed) return false
     if (!node || !this.httpFetchSubtree) return false
     const uid = node.getData && node.getData('uid')
     if (!uid) return false
@@ -4164,6 +4494,7 @@ class Cooperate {
         knownVersion: 0,
         priority: 'high'
       })
+      if (this._disposed || this.mindMap._destroyed) return false
       if (treeNode) {
         this.mergeHttpChildren(treeNode, (result && result.children) || [])
         if (treeNode.data) {
@@ -4207,8 +4538,7 @@ class Cooperate {
     const imageFields = Object.prototype.hasOwnProperty.call(next, 'image')
       ? collabSpecialObjects.canonicalImageFields(
           next,
-          imgMap,
-          node.getImageUrl && node.getImageUrl.bind(node)
+          imgMap
         )
       : null
     if (imageFields) {
@@ -4485,6 +4815,7 @@ class Cooperate {
   }
 
   async hydrateFromHttp(node) {
+    if (this._disposed || this.mindMap._destroyed) return
     if (!node || !this.httpFetchSubtree) return
     const uid = node.getData && node.getData('uid')
     const data = node.nodeData
@@ -4519,6 +4850,7 @@ class Cooperate {
           ? Number((data.data && data.data.subtreeVersion) || 0) || 0
           : 0
         let result = await fetchSubtree({ knownVersion })
+        if (this._disposed || this.mindMap._destroyed) return false
         const needsLocalChildren = count > 0 && liveLen < count
         if (result && result.unchanged && needsLocalChildren) {
           result = await fetchSubtree({ knownVersion: 0 })
@@ -4580,6 +4912,7 @@ class Cooperate {
           err.code = 'SUBTREE_MISSING'
           throw err
         }
+        if (this._disposed || this.mindMap._destroyed) return false
         const beforeChildren = Array.isArray(data.children) ? data.children.length : 0
         const beforeCount = Number(data.data && data.data.childCount) || 0
         const beforeDescendants = Number(data.data && data.data.descendantCount) || 0
@@ -4623,7 +4956,7 @@ class Cooperate {
         return changed
       } finally {
         this.httpHydrating = false
-        this.flushPendingHttpRefresh()
+        if (!this._disposed && !this.mindMap._destroyed) this.flushPendingHttpRefresh()
       }
     })()
     if (!this.hydrateInflight) this.hydrateInflight = new Map()
@@ -4638,6 +4971,7 @@ class Cooperate {
   }
 
   async hydrateNodeData(data) {
+    if (this._disposed || this.mindMap._destroyed) return data
     if (!data || !this.httpFetchSubtree) return data
     const uid = data.data && data.data.uid
     if (!uid) return data
@@ -4652,12 +4986,14 @@ class Cooperate {
       knownVersion,
       priority: 'low'
     })
+    if (this._disposed || this.mindMap._destroyed) return data
     const needsLocalChildren = count > 0 && live < count
     if (result && result.unchanged && needsLocalChildren) {
       result = await this.httpFetchSubtree(uid, {
         knownVersion: 0,
         priority: 'low'
       })
+      if (this._disposed || this.mindMap._destroyed) return data
     }
     if (result && result.unchanged && !needsLocalChildren) {
       this.dirtySubtrees.delete(uid)
@@ -4668,6 +5004,7 @@ class Cooperate {
     }
     if (!data.children || !data.children.length) {
       data.children = ((result && result.children) || []).map(clearHydratedSelection)
+      if (data.children.length) this.notifyHttpHydration(data, data.children)
     } else {
       this.mergeHttpChildren(data, result && result.children)
     }
@@ -5283,8 +5620,8 @@ class Cooperate {
       ) {
         if (name === 'SET_NODE_IMAGE') {
           const store = this.mindMap && this.mindMap.nodeBase64ImageStorage
-          if (store && typeof store.onBeforeAddHistory === 'function') {
-            store.onBeforeAddHistory()
+          if (store && typeof store.storeNodeImage === 'function' && args[0]) {
+            store.storeNodeImage(args[0])
           }
         }
         this.flushHttpText()
@@ -5697,9 +6034,31 @@ class Cooperate {
     return !!this.nodePatchPayload(node, { onlyChanged: true })
   }
 
+  isHttpTextRendererReady() {
+    const renderer = this.mindMap && this.mindMap.renderer
+    return !this._disposed && renderer && !renderer._destroyed &&
+      renderer.root && renderer.root.nodeData === renderer.renderTree &&
+      !renderer.isRendering && !renderer.renderTimer && !renderer.hasWaitRendering
+  }
+
   collectNodesWithPendingText() {
     const renderer = this.mindMap.renderer
     if (!renderer) return []
+    if (this.collabV2Adapter && this._pendingTextUids) {
+      const pending = []
+      this._pendingTextUids.forEach(uid => {
+        const node = renderer.findNodeByUid(uid)
+        if (!node && !this.isHttpTextRendererReady()) {
+          // Full layout temporarily clears root/index. A missing instance here
+          // is not a deleted model node; retry once a real render completes.
+          this._httpTextFlushAfterRender = true
+          return
+        }
+        if (node && this.hasUnsyncedLocalText(node)) pending.push(node)
+        else this._pendingTextUids.delete(uid)
+      })
+      return pending
+    }
     const byUid = new Map()
     const skipUid = uid =>
       uid && this.abandonedInsertUids && this.abandonedInsertUids.has(uid)
@@ -5726,6 +6085,26 @@ class Cooperate {
       if (!uid || !this.lastPushed[uid]) return
       if (this.hasUnsyncedLocalText(target)) byUid.set(uid, target)
     })
+    // Explicitly queued local deltas are real edits. They must still be flushed
+    // during the short post-remote settle window even when their node is not the
+    // current selection, otherwise a fast exit (or an unselected node) can drop
+    // the durable content operation. Key by the resolved owner uid so a queued
+    // generalization uid cannot duplicate an already-active owner.
+    if (this.collabV2Adapter && this._pendingTextUids) {
+      this._pendingTextUids.forEach(uid => {
+        const node = renderer.findNodeByUid(uid)
+        if (!node) {
+          if (!this.isHttpTextRendererReady()) this._httpTextFlushAfterRender = true
+          else this._pendingTextUids.delete(uid)
+          return
+        }
+        if (!this.hasUnsyncedLocalText(node)) return
+        const target = this.resolveHttpPatchNode(node)
+        const targetUid = target.getData && target.getData('uid')
+        if (!targetUid || !this.lastPushed[targetUid]) return
+        if (!byUid.has(targetUid)) byUid.set(targetUid, target)
+      })
+    }
     return Array.from(byUid.values())
   }
 
@@ -5777,6 +6156,7 @@ class Cooperate {
         if (imageFields.unresolvedKey || imageFields.skipTransient) return
         value = imageFields.image
       }
+      if (key === 'generalization') value = collabGeneralization.ownerGeneralizationPayload(value)
       const empty =
         collabNodeFeatures.isEmptyFeatureValue(key, value) ||
         (key === 'mapRef' && !mapRefUtil.normalizeMapRef(value))
@@ -5795,7 +6175,11 @@ class Cooperate {
     if (!options.onlyChanged || !uid) return full
     const prev = this.lastPushed[uid]
     if (!prev || !prev.full) return full
-    const delta = patchDelta(prev.full, full)
+    const previous = { ...prev.full }
+    if (Object.prototype.hasOwnProperty.call(previous, 'generalization')) {
+      previous.generalization = collabGeneralization.ownerGeneralizationPayload(previous.generalization)
+    }
+    const delta = patchDelta(previous, full)
     return Object.keys(delta).length ? delta : null
   }
 
@@ -5803,6 +6187,21 @@ class Cooperate {
     this.flushHttpTextNow().catch(err => {
       console.error('[mind-map] text sync failed', err)
     })
+  }
+
+  // Exit-time durable handoff. The normal flush can be blocked awaiting an
+  // earlier ACK (httpTextFlushPromise), which would strand the latest locally
+  // edited delta when the editor is destroyed. Submit the latest pending delta
+  // directly so its durable outbox row is written before teardown clears timers
+  // and queues. The adapter serializes the actual send and the IndexedDB
+  // transaction completes independently, so this is intentionally not awaited.
+  flushLatestPendingForExit() {
+    if (this._disposed || this.httpReplacing || !this.collabV2Adapter || typeof this.httpPatchNode !== 'function') return
+    try {
+      Promise.resolve(this.flushHttpTextOnce({ forExit: true })).catch(() => {})
+    } catch (err) {
+      // Exit must never throw.
+    }
   }
 
   async flushHttpTextNow() {
@@ -5822,7 +6221,7 @@ class Cooperate {
         do {
           this.httpTextFlushQueued = false
           didFlush = (await this.flushHttpTextOnce()) || didFlush
-        } while (this.httpTextFlushQueued)
+        } while (this.httpTextFlushQueued && !this._disposed)
         return didFlush
       } finally {
         this.httpTextFlushing = false
@@ -5833,12 +6232,39 @@ class Cooperate {
     return run
   }
 
-  async flushHttpTextOnce() {
+  async flushHttpTextOnce(options = {}) {
     const settling =
       this.httpSettlingAfterReplace || Date.now() < this.suppressLocalUntil
     const pending = settling
       ? this.collectActivePendingText()
       : this.collectNodesWithPendingText()
+    if (options.forExit && !this.isHttpTextRendererReady() && this._pendingTextUids && this._pendingTextUids.size) {
+      const renderer = this.mindMap && this.mindMap.renderer
+      // Exit cannot wait for the layout that teardown is about to cancel. Reuse
+      // only affected cached instances still backed by the exact current model;
+      // same-UID replacements and deleted nodes must never become old writes.
+      const current = indexTreeNodesByUid(renderer && renderer.renderTree)
+      for (let i = pending.length - 1; i >= 0; i--) {
+        const target = this.resolveHttpPatchNode(pending[i])
+        const uid = target && target.getData && target.getData('uid')
+        if (!uid || this.isTombstonedUid(uid) || current.get(uid) !== target.nodeData) pending.splice(i, 1)
+      }
+      const seen = new Set(pending.map(node => {
+        const target = this.resolveHttpPatchNode(node)
+        return target.getData && target.getData('uid')
+      }))
+      this._pendingTextUids.forEach(uid => {
+        if (this.isTombstonedUid(uid)) return
+        const node = renderer && renderer.nodeIndex && renderer.nodeIndex.get(uid)
+        if (!node) return
+        const target = this.resolveHttpPatchNode(node)
+        const targetUid = target && target.getData && target.getData('uid')
+        if (!targetUid || seen.has(targetUid) || this.isTombstonedUid(targetUid)) return
+        if (current.get(targetUid) !== target.nodeData || !this.hasUnsyncedLocalText(target)) return
+        pending.push(target)
+        seen.add(targetUid)
+      })
+    }
     if (settling && !pending.length) return false
     const jobs = []
     const items = []
@@ -5854,10 +6280,17 @@ class Cooperate {
       const full = this.nodePatchPayload(node)
       const delta = this.nodePatchPayload(node, { onlyChanged: true })
       if (!delta) return
+      // Skip a payload that is already in flight unchanged. Relying only on the
+      // pending Set is not enough: an active node can be re-collected from
+      // activeNodeList with a stale lastPushed baseline.
+      const deltaKey = uid + '|' + JSON.stringify(delta)
+      if (this._inflightTextKeys && this._inflightTextKeys.get(uid) === deltaKey) return
       if(this.fillRepairGuards?.has(uid))delta.expected=this.fillRepairGuards.get(uid)
       const snap = JSON.stringify(full)
-      items.push({ uid, node, target, full, delta, snap })
+      items.push({ uid, node, target, full, delta, snap, deltaKey })
     })
+    if (!this._inflightTextKeys) this._inflightTextKeys = new Map()
+    items.forEach(item => this._inflightTextKeys.set(item.uid, item.deltaKey))
     if (this.collabV2Adapter && items.length > 1) {
       try {
         await this.submitV2('node.batch', {
@@ -5866,8 +6299,13 @@ class Cooperate {
             payload: { uid: item.uid, ...item.delta }
           }))
         })
+        if (this._disposed) {
+          items.forEach(item => { if (this._inflightTextKeys.get(item.uid) === item.deltaKey) this._inflightTextKeys.delete(item.uid) })
+          return true
+        }
         items.forEach(item => {
           this.fillRepairGuards?.delete(item.uid)
+          if (this._inflightTextKeys.get(item.uid) === item.deltaKey) this._inflightTextKeys.delete(item.uid)
           this.lastPushed[item.uid] = {
             text: item.full.text,
             note: item.full.note,
@@ -5877,6 +6315,8 @@ class Cooperate {
         })
         return true
       } catch (err) {
+        // Keep the delta retryable instead of silently losing it.
+        items.forEach(item => { if (this._inflightTextKeys.get(item.uid) === item.deltaKey) this._inflightTextKeys.delete(item.uid) })
         console.error('[mind-map] batch style/text sync failed', err)
       }
       return false
@@ -5887,6 +6327,10 @@ class Cooperate {
       jobs.push(() =>
         this.httpPatchNode(uid, delta)
           .then(() => {
+            // Delete only this submission's own key: an older ACK must not erase
+            // a newer same-UID in-flight key.
+            if (this._inflightTextKeys && this._inflightTextKeys.get(uid) === item.deltaKey) this._inflightTextKeys.delete(uid)
+            if (this._disposed) return
             this.fillRepairGuards?.delete(uid)
             succeeded = true
             this.lastPushed[uid] = {
@@ -5897,6 +6341,10 @@ class Cooperate {
             }
           })
           .catch(err => {
+            // Keep the delta retryable rather than dropping it on a transient
+            // enqueue/send failure, but do not erase a newer same-UID key.
+            if (this._inflightTextKeys && this._inflightTextKeys.get(uid) === item.deltaKey) this._inflightTextKeys.delete(uid)
+            if (this._disposed && err && err.code === 'ROOM_LEFT') return
             if (isPermanentNodeError(err)) {
               droppedGhosts = true
               this.abandonGhostNodeByUid(uid, node)
@@ -6486,6 +6934,8 @@ class Cooperate {
         kind,
         oldParent: origin && origin.parent
       })
+      const positionPatch = collabMove.movePositionPatch(item.node)
+      item.positionPatch = positionPatch
       const payload = {
         uid: item.uid,
         parent: item.parent,
@@ -6494,7 +6944,7 @@ class Cooperate {
         index: item.index,
         oldParentUid: origin && origin.parent,
         oldIndex: origin && origin.index,
-        patch: collabMove.movePositionPatch(item.node),
+        patch: positionPatch,
         kind
       }
       const send = this.collabV2Adapter
@@ -6506,6 +6956,7 @@ class Cooperate {
           })
       return send
         .then(result => {
+          this.baselineCommittedMovePatch(item, result)
           this.cleanupDragArtifacts()
           return result
         })
@@ -6547,12 +6998,43 @@ class Cooperate {
                 : 'move'
           }
         }))
+      }).then(result => {
+        moves.forEach(item => this.baselineCommittedMovePatch(item, result))
+        return result
       }).catch(err => {
         console.error('[mind-map] batch move failed', err)
         return Promise.all(moves.map(submitOne))
       })
     }
     return Promise.all(moves.map(submitOne))
+  }
+
+  // Baseline only the ACK-confirmed position fields of a committed move. Using
+  // the committed patch (or the submitted position patch) instead of
+  // rememberPushedNode(full live node) avoids marking unsent text as saved while
+  // preventing a later flush from re-emitting isFloating/customLeft/customTop.
+  baselineCommittedMovePatch(item, result) {
+    const uid = item && item.uid
+    if (!uid) return
+    const prev = this.lastPushed && this.lastPushed[uid]
+    if (!prev || !prev.full) return
+    let patch = item && item.positionPatch
+    const committed = result && result.operation && result.operation.payload
+    if (committed) {
+      if (committed.patch && (!committed.uid || committed.uid === uid)) patch = committed.patch
+      else if (Array.isArray(committed.ops)) {
+        const match = committed.ops.find(op => op && op.payload && op.payload.uid === uid)
+        if (match && match.payload.patch) patch = match.payload.patch
+      }
+    }
+    if (!patch || typeof patch !== 'object') return
+    const fields = {}
+    for (const key of ['customLeft', 'customTop', 'isFloating']) {
+      if (Object.prototype.hasOwnProperty.call(patch, key)) fields[key] = patch[key]
+    }
+    if (!Object.keys(fields).length) return
+    prev.full = { ...prev.full, ...fields }
+    if (Object.prototype.hasOwnProperty.call(prev, 'snap')) prev.snap = JSON.stringify(prev.full)
   }
 
   flushHttpReparentChildren(node) {
@@ -7658,11 +8140,17 @@ class Cooperate {
 
   // 插件被移除前做的事情
   beforePluginRemove() {
+    this.flushLatestPendingForExit()
+    this._disposed = true
+    this.resetLocalIntentState()
     this.unBindEvent()
   }
 
   // 插件被卸载前做的事情
   beforePluginDestroy() {
+    this.flushLatestPendingForExit()
+    this._disposed = true
+    this.resetLocalIntentState()
     this.unBindEvent()
   }
 }

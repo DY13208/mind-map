@@ -21,7 +21,7 @@ let mindMapData = null
 let localSaveVersion = 0
 let idb = null
 let skipHeavyLocalDraft = false
-let collabDraftAt = 0
+const collabDraftAt = new Map()
 const LOCAL_DRAFT_NODE_LIMIT = 400
 // 房间模式下本地留底的草稿（协作连不上时的兜底），由 Edit.vue 决定要不要用它恢复
 let pendingRoomDraft = null
@@ -35,8 +35,7 @@ function currentRoom() {
 }
 
 /** 草稿 key：有房间时按房间存，同一个浏览器开多个房间不会互相覆盖 */
-function draftKey() {
-  const room = currentRoom()
+function draftKey(room = currentRoom()) {
   return room ? `room:${room}` : IDB_KEY
 }
 
@@ -212,8 +211,10 @@ export const getDataAsync = async () => {
   }
 }
 
-export const storeData = data => {
+export const storeData = (data, options = {}) => {
   try {
+    const room = options.room == null ? currentRoom() : options.room
+    const isCurrentRoom = room === currentRoom()
     let originData = null
     if (window.takeOverApp) {
       originData = mindMapData
@@ -232,16 +233,16 @@ export const storeData = data => {
       window.takeOverAppMethods.saveMindMapData(originData)
       return
     }
-    Vue.prototype.$bus.$emit('write_local_file', originData)
+    if (isCurrentRoom) Vue.prototype.$bus.$emit('write_local_file', originData)
     if (vuexStore.state.isHandleLocalFile) {
       return
     }
-    mindMapData = originData
-    if (isCollabSession()) {
+    if (isCurrentRoom) mindMapData = originData
+    if (room || (options.room == null && isCollabSession())) {
       skipHeavyLocalDraft = true
-      writeSession({
+      if (isCurrentRoom) writeSession({
         backend: 'collab',
-        room: currentRoom(),
+        room,
         at: Date.now()
       })
       clearLegacyLocalStorageTree()
@@ -250,13 +251,14 @@ export const storeData = data => {
       // 现在照样往本地 IndexedDB 留一份底（节流，别每次改动都写），
       // 由 Edit.vue 在协作连不上时恢复出来。
       const now = Date.now()
-      if (now - collabDraftAt < COLLAB_DRAFT_MIN_INTERVAL_MS) return
-      collabDraftAt = now
+      const key = draftKey(room)
+      if (!options.force && now - (collabDraftAt.get(key) || 0) < COLLAB_DRAFT_MIN_INTERVAL_MS) return
+      collabDraftAt.set(key, now)
       const saveVersion = ++localSaveVersion
-      return writeDraft(originData, draftKey())
+      return writeDraft(originData, key)
         .then(() => {
           if (saveVersion !== localSaveVersion) return
-          pendingRoomDraft = null
+          if (isCurrentRoom) pendingRoomDraft = null
         })
         .catch(error => {
           console.log(error)

@@ -78,6 +78,8 @@ export default {
     )
   },
   destroyed() {
+    this.cancelPendingDraw()
+    clearTimeout(this.setSizeTimer)
     window.removeEventListener('resize', this.setSize)
     this.$bus.$off('toggle_mini_map', this.toggle_mini_map)
     this.$bus.$off('data_change', this.data_change)
@@ -92,8 +94,11 @@ export default {
   methods: {
     // 切换显示小地图
     toggle_mini_map(show) {
+      this.cancelPendingDraw()
       this.showMiniMap = show
+      if (!show) return
       this.$nextTick(() => {
+        if (this._isDestroyed || !this.showMiniMap) return
         if (this.$refs.navigatorBox) {
           this.init()
         }
@@ -110,8 +115,16 @@ export default {
       }
       clearTimeout(this.timer)
       this.timer = setTimeout(() => {
+        this.timer = null
+        if (this._isDestroyed || !this.showMiniMap) return
         this.drawMiniMap()
       }, 500)
+    },
+
+    cancelPendingDraw() {
+      clearTimeout(this.timer)
+      this.timer = null
+      this.drawGeneration = (this.drawGeneration || 0) + 1
     },
 
     // 计算容器宽度
@@ -137,6 +150,8 @@ export default {
 
     // 渲染小地图
     drawMiniMap() {
+      if (this._isDestroyed || !this.showMiniMap || !this.mindMap.miniMap) return
+      const generation = this.drawGeneration = (this.drawGeneration || 0) + 1
       let {
         getImgUrl,
         viewBoxStyle,
@@ -146,6 +161,7 @@ export default {
       } = this.mindMap.miniMap.calculationMiniMap(this.boxWidth, this.boxHeight)
       // 渲染到小地图
       getImgUrl(img => {
+        if (generation !== this.drawGeneration || this._isDestroyed || !this.showMiniMap) return
         this.mindMapImg = img
       })
       this.viewBoxStyle = viewBoxStyle

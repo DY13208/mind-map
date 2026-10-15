@@ -16,6 +16,7 @@ const {
   auditRoomNodesState,
   replaceRoomNodes,
   readRoomNodes,
+  readRoomNodeUids,
   searchRoomNodes,
   readRoomSubtree,
   resolveRoomRef,
@@ -1672,6 +1673,7 @@ async function initSchemaOnce() {
       primary key (room_key, uid)
     )
   `)
+  await require('./nodeCountsGeneration').installNodeCountsGeneration(pool)
   // pg_trgm is an optional acceleration for explicit fuzzy queries.  A
   // restricted production role may not be allowed to install extensions;
   // that must not prevent the exact UID/name/path indexes from starting.
@@ -2065,7 +2067,8 @@ async function commitDirectRoomOperationOnce(
     return {
       duplicate: true,
       operation,
-      currentRevision: currentVersion
+      currentRevision: currentVersion,
+      roomMeta: { title: room.title, updated_at: room.updated_at }
     }
   }
   if (
@@ -2100,14 +2103,15 @@ async function commitDirectRoomOperationOnce(
     operationId: command.operationId,
     actorId: command.actorId
   })
-  await client.query(
+  const updatedRoom = await client.query(
     `update rooms
      set version = $2,
          title = coalesce($3, title),
          metadata = coalesce(metadata, '{}'::jsonb) || coalesce($4::jsonb, '{}'::jsonb),
          updated_at = now(),
          content_updated_at = now()
-     where room_key = $1`,
+     where room_key = $1
+     returning title, updated_at`,
     [
       roomKey,
       version,
@@ -2188,7 +2192,8 @@ async function commitDirectRoomOperationOnce(
     duplicate: false,
     operation,
     result: applied.result || {},
-    queryStats: applied.queryStats || null
+    queryStats: applied.queryStats || null,
+    roomMeta: updatedRoom.rows[0] || null
   }
 }
 
@@ -2867,6 +2872,7 @@ module.exports = {
   getPool,
   operationEvents,
   readRoomNodes: roomKey => readRoomNodes(pool, roomKey),
+  readRoomNodeUids: (roomKey, uids) => readRoomNodeUids(pool, roomKey, uids),
   searchRoomNodes: (roomKey, query, options) =>
     searchRoomNodes(pool, roomKey, query, options),
   queryRoomNodes: (roomKey, query) => queryRoomNodes(pool, roomKey, query),

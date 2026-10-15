@@ -490,6 +490,7 @@ class MindMap {
     this.render()
     this.command.addHistory()
     this.emit('update_data', data)
+    this.command.notifyTreeChange('UPDATE_DATA')
   }
 
   //  动态设置思维导图数据，纯节点数据
@@ -503,6 +504,7 @@ class MindMap {
     this.renderer.setData(data)
     this.reRender()
     this.emit('set_data', data)
+    this.command.notifyTreeChange('SET_DATA')
   }
 
   //  动态设置思维导图数据，包括节点数据、布局、主题、视图
@@ -785,6 +787,8 @@ class MindMap {
 
   // 销毁
   destroy() {
+    if (this._destroyed) return
+    this._destroyed = true
     this.emit('beforeDestroy')
     if (this.view && typeof this.view.setCanvasPanningCursor === 'function') {
       this.view.setCanvasPanningCursor(false)
@@ -792,6 +796,10 @@ class MindMap {
     // 清除节点编辑框
     this.renderer.textEdit.hideEditTextBox()
     this.renderer.textEdit.removeTextEditEl()
+    this.renderer.destroy()
+    this.command.destroy()
+    this.opt.data = null
+    this.commonCaches = {}
     // 移除插件
     ;[...MindMap.pluginList].forEach(plugin => {
       if (

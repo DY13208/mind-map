@@ -636,7 +636,10 @@ async function handleFileSystemApi(req, res, options = {}) {
     if (previewKey && method === 'GET') {
       const preview = await fs.getRoomPreview(safeRoomKey(previewKey), {
         userId,
-        bypass
+        bypass,
+        // req.roomAccess is constructed by the server ACL middleware. Node-share
+        // scopes must be checked again against whole-room membership.
+        roomScope: req.roomAccess || null
       })
       sendJson(res, 200, { ok: true, preview })
       return true

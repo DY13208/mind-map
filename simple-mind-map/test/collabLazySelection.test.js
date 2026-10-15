@@ -24,6 +24,13 @@ test('revealing lazy children does not select them or their descendants', () => 
   const hydrator = new moduleMock.exports()
   hydrator.isTombstonedUid = () => false
   hydrator.markUidPushed = () => {}
+  const notifications = []
+  // The extracted merge method now reports hydration to the command boundary.
+  // Keep exercising the real merge/selection logic with its required owner.
+  hydrator.mindMap = {
+    renderer: { findNodeByUid: () => null },
+    command: { recordContentChange: change => notifications.push(change) }
+  }
   const parent = { data: { uid: 'parent', isActive: true }, children: [] }
   const incoming = [{
     data: { uid: 'child', isActive: true },
@@ -33,6 +40,10 @@ test('revealing lazy children does not select them or their descendants', () => 
   assert.equal(parent.data.isActive, true)
   assert.equal(parent.children[0].data.isActive, false)
   assert.equal(parent.children[0].children[0].data.isActive, false)
+  assert.equal(notifications.length, 1)
+  assert.equal(notifications[0].source, 'hydrate')
+  assert.equal(notifications[0].countable, true)
+  assert.equal(notifications[0].added[0], parent.children[0])
 })
 
 

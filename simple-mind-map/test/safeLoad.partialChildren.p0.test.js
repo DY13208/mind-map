@@ -276,6 +276,37 @@ async function openEditor(page, roomKey) {
   await recoverServiceGate(page)
   await recoverServiceGate(page)
   await waitEditor(page, 120000)
+  // Current large/partial rooms open as a shallow overview. Navigate through
+  // the actual expansion commands before inspecting third-level parent stubs;
+  // do not replace the model or pre-hydrate the insertion target itself.
+  await page.evaluate(async () => {
+    const mm = window.__C2_MINDMAP__
+    for (const uid of ['root', 'a_l1', 'a_l2']) {
+      const deadline = Date.now() + 20000
+      let node, instanceReady = false
+      while (Date.now() < deadline) {
+        node = mm.renderer.findNodeByUid(uid)
+        if (node && !mm.renderer.isRendering && !mm.renderer.renderTimer && !mm.renderer.hasWaitRendering) { instanceReady = true; break }
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      if (!instanceReady) throw new Error('fixture navigation ancestor not ready: ' + uid)
+      if (node.getData('expand') === false || mm.cooperate.nodeNeedsHydrate(node)) {
+        mm.execCommand('SET_NODE_EXPAND', node, true)
+      }
+      let expandedReady = false
+      while (Date.now() < deadline) {
+        node = mm.renderer.findNodeByUid(uid)
+        const ready = node && node.getData('expand') !== false &&
+          !mm.cooperate.nodeNeedsHydrate(node) && !mm.renderer.isRendering &&
+          !mm.renderer.renderTimer && !mm.renderer.hasWaitRendering
+        if (ready) { expandedReady = true; break }
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      if (!expandedReady) {
+        throw new Error('fixture navigation did not complete: ' + uid)
+      }
+    }
+  })
 }
 
 async function editorParentState(page, parentUid) {
@@ -476,8 +507,19 @@ async function structuralContextChecks(page, parentUid) {
       }
       return null
     }
-    const parent = find(parentUid)
+    let parent = find(parentUid)
     if (!parent) return { ok: false, error: 'missing' }
+    // Child-context assertions need actual rendered child instances. A fetched
+    // but still collapsed parent's raw children are not selectable instances.
+    mm.execCommand('SET_NODE_EXPAND', parent, true)
+    const renderDeadline = Date.now() + 20000
+    let expandedReady = false
+    while (Date.now() < renderDeadline) {
+      parent = find(parentUid)
+      if (parent && !mm.renderer.isRendering && !mm.renderer.renderTimer && !mm.renderer.hasWaitRendering) { expandedReady = true; break }
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+    if (!expandedReady) throw new Error('fixture structural parent render did not become ready')
     const kids = (parent.nodeData && parent.nodeData.children) || []
     const child = kids[0] && find(kids[0].data.uid)
     const ensure = mm.cooperate.ensurePlacementParent
@@ -690,8 +732,8 @@ async function main() {
       'childCountAuthority must be room_nodes'
     )
     assert.ok(
-      Number(report.SAFE_LOAD_CHILDCOUNT_QUERY_COUNT) === 1,
-      'SAFE_LOAD_CHILDCOUNT_QUERY_COUNT must be 1 (batch)'
+      Number(report.SAFE_LOAD_CHILDCOUNT_QUERY_COUNT) === 2,
+      'SAFE_LOAD_CHILDCOUNT_QUERY_COUNT must be 2: a cold root-scope count issues the authoritative root probe plus one live-edge read (cache hits report 0)'
     )
 
     const p5 = report.parents.PARENT_5
@@ -1429,6 +1471,12 @@ async function main() {
       JSON.stringify(report, null, 2)
     )
     console.log('wrote test/reports/p0-safeload-partial.json')
+  } catch (error) {
+    if (process.env.PERF_SAFE_RUN_DIR) {
+      fs.writeFileSync(path.join(process.env.PERF_SAFE_RUN_DIR, 'legacy-failure-report.json'),
+        JSON.stringify({ ...report, failure: error.message }, null, 2))
+    }
+    throw error
   } finally {
     await browser.close().catch(() => {})
     await pool.end().catch(() => {})

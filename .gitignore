@@ -60,3 +60,36 @@ output/*.py
 .planning/2026-10-09-local-knowledge-fill/task_plan.md
 # Local planning scratch files and build/test logs.
 /.planning/
+
+# Keep the reviewed performance regression suite in version control.
+!/tests/
+/tests/*
+!/tests/performance/
+!/tests/performance/**
+/tests/performance/results/
+/tests/performance/*.log
+!/simple-mind-map/test/
+/simple-mind-map/test/*
+!/simple-mind-map/test/performanceBackendHarness.js
+!/simple-mind-map/test/backendPerformanceSample.js
+!/simple-mind-map/test/backendCountSample.js
+!/simple-mind-map/test/nodeCountCache.test.js
+!/simple-mind-map/test/nodeRestoreReplay.test.js
+!/simple-mind-map/test/nodeRestoreReplay.pg.test.js
+!/simple-mind-map/test/helpers/
+!/simple-mind-map/test/helpers/**
+!/simple-mind-map/test/nodeUidRead.test.js
+!/simple-mind-map/test/nodeUidRead.pg.test.js
+!/simple-mind-map/test/subtreeCounts.pg.test.js
+!/simple-mind-map/test/directHttpParity.pg.test.js
+!/simple-mind-map/test/cardPreview.pg.test.js
+!/simple-mind-map/test/teamRoomsPaging.pg.test.js
+!/web/tests/
+/web/tests/*
+!/web/tests/helpers/
+!/web/tests/helpers/**
+!/web/tests/cardPreviewQueue.test.cjs
+!/web/tests/teamRoomsPaging.test.cjs
+!/simple-mind-map/e2e/performance/
+!/simple-mind-map/e2e/performance/*.cjs
+/work/

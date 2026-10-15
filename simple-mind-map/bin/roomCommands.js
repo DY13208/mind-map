@@ -1,5 +1,5 @@
 const mindDoc = require('./mindDoc')
-const { insertPositionAt } = require('./fractionalIndex')
+const { insertPositionAt, comparePositions } = require('./fractionalIndex')
 const { mergeNodeDataLww } = require('./fieldMerge')
 const { assertExpectedNodeData } = require('./nodeUpdateExpected')
 const {
@@ -511,7 +511,13 @@ function restoreNodesOnDoc(ydoc, payload = {}) {
   if (parentUid && obj[parentUid] && uid) {
     let kids = [...(obj[parentUid].children || [])].filter(id => id !== uid)
     kids = kids.filter(id => !promoted.includes(id))
-    const index = Number(payload.index)
+    let index = payload.index == null ? NaN : Number(payload.index)
+    if (!Number.isFinite(index) && rootRow && rootRow.position) {
+      const next = kids.findIndex(id => comparePositions(
+        (obj[id] && obj[id].position) || '', rootRow.position, id, uid
+      ) > 0)
+      index = next < 0 ? kids.length : next
+    }
     if (!Number.isFinite(index) || index < 0 || index > kids.length) {
       kids.push(uid)
     } else {

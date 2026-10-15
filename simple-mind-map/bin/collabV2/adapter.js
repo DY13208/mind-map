@@ -369,6 +369,8 @@ function createCollaborationAdapter(options = {}) {
   let unbindNetworkRecovery = null
   let drainLoop = null
   let draining = false
+  let roomEpoch = 0
+  const ackRequests = new Set()
   let enqueueGate = Promise.resolve()
   let historyQueue = Promise.resolve()
   let remoteEventsBuffered = false
@@ -378,6 +380,35 @@ function createCollaborationAdapter(options = {}) {
   let resyncRetryTimer = null
   let resyncRetryAttempts = 0
   let resnapshotBufferOwned = false
+
+  function roomScope() {
+    return { epoch: roomEpoch, roomKey: state.roomKey, clientId: state.clientId }
+  }
+
+  function scopeIsCurrent(scope) {
+    return scope.epoch === roomEpoch && !!scope.roomKey &&
+      scope.roomKey === state.roomKey && scope.clientId === state.clientId
+  }
+
+  function roomLeftError() {
+    const error = new Error('Room session has ended; durable operation remains queued')
+    error.code = 'ROOM_LEFT'
+    return error
+  }
+
+  function releaseRoomTransient() {
+    roomEpoch += 1
+    const error = roomLeftError()
+    Array.from(state.pendingAcks.keys()).forEach(opId => settleAck(opId, error))
+    Array.from(ackRequests).forEach(cancel => cancel({ ok: false, code: 'ROOM_LEFT', error: error.message }))
+    state.outboxPending = 0
+    state.outboxSending = 0
+    state.sendingOpId = ''
+    state.outboxInspect = []
+    // Old drain finally blocks must not reset a replacement room's drain.
+    draining = false
+    drainLoop = null
+  }
 
   function withEnqueueLock(fn) {
     const prev = enqueueGate
@@ -1390,18 +1421,26 @@ function createCollaborationAdapter(options = {}) {
         reject(new Error('socket missing'))
         return
       }
-      const timer = setTimeout(() => {
-        resolve({ ok: false, code: 'ACK_TIMEOUT', error: 'socket timeout' })
-      }, options.timeoutMs || 12000)
-      socket.emit(event, payload, result => {
+      let finished = false
+      const finish = result => {
+        if (finished) return
+        finished = true
         clearTimeout(timer)
+        ackRequests.delete(finish)
         resolve(result)
-      })
+      }
+      const timer = setTimeout(() => {
+        finish({ ok: false, code: 'ACK_TIMEOUT', error: 'socket timeout' })
+      }, options.timeoutMs || 12000)
+      ackRequests.add(finish)
+      socket.emit(event, payload, finish)
     })
   }
 
   async function connect(input = {}) {
-    state.roomKey = String(input.roomKey || state.roomKey)
+    const nextRoom = String(input.roomKey || state.roomKey)
+    if (state.roomKey && nextRoom !== state.roomKey) releaseRoomTransient()
+    state.roomKey = nextRoom
     state.userId = String(input.userId || state.userId)
     if (isValidClientId(input.clientId)) {
       state.clientId = String(input.clientId).trim()
@@ -1455,6 +1494,7 @@ function createCollaborationAdapter(options = {}) {
   }
 
   async function disconnect() {
+    releaseRoomTransient()
     if (state.heartbeatTimer) {
       clearInterval(state.heartbeatTimer)
       state.heartbeatTimer = null
@@ -1516,6 +1556,12 @@ function createCollaborationAdapter(options = {}) {
   }
 
   async function submitOperation(raw) {
+    // Capture the original room before the enqueue lock/IDB put can yield.
+    // A final editor write stays durable in A even if its caller has left A.
+    const scope = roomScope()
+    const identity = { roomKey: scope.roomKey, userId: state.userId,
+      clientId: scope.clientId, role: state.role, canEdit: state.canEdit,
+      observedRevision: Number(state.lastServerRevision) || 0 }
     const batchOps = (raw && raw.payload && raw.payload.ops) || []
     if (
       normalizeType(raw && raw.type) === 'node.batch' &&
@@ -1527,14 +1573,14 @@ function createCollaborationAdapter(options = {}) {
     }
     let wait
     await withEnqueueLock(async () => {
-    const clientId = requireClientId(state.clientId)
+    const clientId = requireClientId(identity.clientId)
     const op = normalizeOperation(raw, {
-      roomKey: state.roomKey,
-      userId: state.userId,
+      roomKey: identity.roomKey,
+      userId: identity.userId,
       clientId
     })
     op.clientId = clientId
-    op.userId = state.userId || op.userId
+    op.userId = identity.userId || op.userId
     if (!op.opId) op.opId = createOpId()
     if (!isOpId(op.opId)) {
       const err = new Error('opId必须是UUID')
@@ -1560,7 +1606,7 @@ function createCollaborationAdapter(options = {}) {
       })
       throw err
     }
-    if (state.role === 'viewer' || state.canEdit === false) {
+    if (identity.role === 'viewer' || identity.canEdit === false) {
       const err = new Error('当前为只读权限，无法修改')
       err.code = 'FORBIDDEN'
       err.statusCode = 403
@@ -1575,16 +1621,19 @@ function createCollaborationAdapter(options = {}) {
     }
     state.clientSeq += 1
     op.clientSeq = state.clientSeq
-    op.observedRevision = Number(state.lastServerRevision) || 0
+    op.observedRevision = scopeIsCurrent(scope) ? Number(state.lastServerRevision) || 0 : identity.observedRevision
     op.baseRevision = op.observedRevision
     op.status = 'pending'
     op.skipUndoStack = !!raw.skipUndoStack || isPositionOnlyUpdate(op)
     op.traceId = raw.traceId || op.traceId || (op.payload && op.payload.traceId) || ''
-    state.lastOpId = op.opId
-    state.stage = STAGES.OUTBOX_PUT
+    if (scopeIsCurrent(scope)) {
+      state.lastOpId = op.opId
+      state.stage = STAGES.OUTBOX_PUT
+    }
     try {
       await outbox.put(op)
     } catch (err) {
+      if (!scopeIsCurrent(scope)) throw err
       recordError({
         code: 'OUTBOX_FAILED',
         message: (err && err.message) || 'outbox put failed',
@@ -1594,6 +1643,7 @@ function createCollaborationAdapter(options = {}) {
       setStatus(state.status, { saveState: 'error', phase: 'ERROR' })
       throw err
     }
+    if (!scopeIsCurrent(scope)) throw roomLeftError()
     bumpOutboxPending(1)
     adapterTrace('3.outbox.put', {
       traceId: op.traceId,
@@ -1685,8 +1735,11 @@ function createCollaborationAdapter(options = {}) {
   }
 
   async function refreshOutboxCounts() {
+    const scope = roomScope()
+    if (!scope.roomKey) return
     try {
-      const rows = await outbox.list(state.clientId, state.roomKey)
+      const rows = await outbox.list(scope.clientId, scope.roomKey)
+      if (!scopeIsCurrent(scope)) return
       state.outboxInspect = summarizeOutbox(rows)
       state.outboxPending = (rows || []).filter(
         item =>
@@ -1910,8 +1963,20 @@ function createCollaborationAdapter(options = {}) {
     return true
   }
 
+  async function writeOutboxInScope(scope, method, ...args) {
+    const result = await outbox[method](...args)
+    if (!scopeIsCurrent(scope)) throw roomLeftError()
+    return result
+  }
+
   async function sendOp(op, extra = {}) {
+    const scope = roomScope()
+    if (op.roomKey !== scope.roomKey) return { deferred: true }
     const sendBase = Math.max(0, Number(state.lastServerRevision) || 0)
+    // An inherited durable row has no current optimistic submit/ACK caller.
+    // Its self echo may advance the transport watermark without applying the
+    // new editor's model, so successful replay ACK must apply its canonical op.
+    const replayedFromOutbox = !state.pendingAcks.has(op.opId)
     const originalBase =
       op.originalBaseRevision != null
         ? op.originalBaseRevision
@@ -1927,13 +1992,14 @@ function createCollaborationAdapter(options = {}) {
       clientSeq: op.clientSeq
     }
     beginSending(op)
-    await outbox.update(op.opId, {
+    await writeOutboxInScope(scope, 'update', op.opId, {
       status: 'sending',
       originalBaseRevision: originalBase,
       sendBaseRevision: sendBase,
       baseRevision: sendBase,
       payload: op.payload
     })
+    if (!scopeIsCurrent(scope)) return { deferred: true }
     adapterTrace('4.socket.emit', {
       traceId: op.traceId,
       opId: op.opId,
@@ -1954,14 +2020,14 @@ function createCollaborationAdapter(options = {}) {
       endSending()
       if (state.droppedInsertOpIds && state.droppedInsertOpIds.has(op.opId)) {
         state.droppedInsertOpIds.delete(op.opId)
-        await outbox.remove(op.opId)
+        await writeOutboxInScope(scope, 'remove', op.opId)
         bumpOutboxPending(-1)
         const err = new Error('dropped deleted insert')
         err.code = 'DROPPED_DELETED'
         settleAck(op.opId, err)
         return { skipped: true, err }
       }
-      await outbox.update(op.opId, { status: 'pending', baseRevision: sendBase })
+      await writeOutboxInScope(scope, 'update', op.opId, { status: 'pending', baseRevision: sendBase })
       setStatus(state.status === 'live' ? 'live' : state.status, {
         saveState: 'offline'
       })
@@ -1969,11 +2035,12 @@ function createCollaborationAdapter(options = {}) {
     }
     state.stage = STAGES.ACK_WAIT
     const result = await emitAck('op', op)
+    if (!scopeIsCurrent(scope)) return { deferred: true }
     if (result && (result.code === 'TIMEOUT' || result.code === 'ACK_TIMEOUT')) {
       endSending()
-      await outbox.update(op.opId, { status: 'retryable', baseRevision: sendBase })
+      await writeOutboxInScope(scope, 'update', op.opId, { status: 'retryable', baseRevision: sendBase })
       if (state.seenOpIds.has(op.opId)) {
-        await outbox.remove(op.opId)
+        await writeOutboxInScope(scope, 'remove', op.opId)
         bumpOutboxPending(-1)
         settleAck(op.opId, null, { opId: op.opId, duplicate: true })
         return { ok: true, duplicate: true }
@@ -2000,7 +2067,7 @@ function createCollaborationAdapter(options = {}) {
       err.currentVersion = result && result.currentVersion
       endSending()
       if (err.code === 'VERSION_AHEAD') {
-        await outbox.update(op.opId, { status: 'retryable', error: err.message })
+        await writeOutboxInScope(scope, 'update', op.opId, { status: 'retryable', error: err.message })
         return { ahead: true, err }
       }
       if (err.code === 'STALE_AFTER_VERSION_RESTORE') {
@@ -2009,7 +2076,7 @@ function createCollaborationAdapter(options = {}) {
         return { stale: true, err }
       }
       if (err.code === 'STALE_BASE' || err.code === 'VERSION_CONFLICT' || err.code === 'REVISION_GAP') {
-        await outbox.update(op.opId, { status: 'retryable', error: err.message })
+        await writeOutboxInScope(scope, 'update', op.opId, { status: 'retryable', error: err.message })
         return { stale: true, err }
       }
       if (
@@ -2017,7 +2084,7 @@ function createCollaborationAdapter(options = {}) {
         (state.droppedInsertOpIds && state.droppedInsertOpIds.has(op.opId))
       ) {
         if (state.droppedInsertOpIds) state.droppedInsertOpIds.delete(op.opId)
-        await outbox.remove(op.opId)
+        await writeOutboxInScope(scope, 'remove', op.opId)
         bumpOutboxPending(-1)
         recordDiagnosticError({
           code: err.code,
@@ -2051,7 +2118,7 @@ function createCollaborationAdapter(options = {}) {
         return { skipped: true, err }
       }
       const terminal = shouldQuarantineError(err.code, op) || isTerminalError(err.code)
-      await outbox.update(op.opId, {
+      await writeOutboxInScope(scope, 'update', op.opId, {
         status: terminal ? 'quarantined' : 'failed',
         error: err.message,
         errorCode: err.code,
@@ -2097,7 +2164,16 @@ function createCollaborationAdapter(options = {}) {
       await refreshOutboxCounts()
       return { terminal: true, stopDrain: err.code === 'FORBIDDEN', err }
     }
-    await outbox.remove(op.opId)
+    const replayRevision = Number(result.serverRevision) || 0
+    if (replayedFromOutbox && options.onRemoteOperation &&
+        replayRevision >= Math.max(sendBase, Number(state.lastServerRevision) || 0)) {
+      await options.onRemoteOperation(
+        result.operation || { ...op, serverRevision: replayRevision },
+        { applySelf: true, fromOutbox: true }
+      )
+      if (!scopeIsCurrent(scope)) return { deferred: true }
+    }
+    await writeOutboxInScope(scope, 'remove', op.opId)
     bumpOutboxPending(-1)
     state.seenOpIds.add(op.opId)
     const rev = Number(result.serverRevision || 0)
@@ -2118,6 +2194,7 @@ function createCollaborationAdapter(options = {}) {
     } else if (ackDisposition.advance) {
       advanceRevision(rev)
     }
+    if (!scopeIsCurrent(scope)) return { deferred: true }
     const kind = normalizeType(op.type)
     if (kind === 'operation.undo') {
       // stacks updated by undo()
@@ -2151,11 +2228,13 @@ function createCollaborationAdapter(options = {}) {
     if (!socket || !socket.connected || !isLive()) return drainLoop
     state.drainKickCount = Number(state.drainKickCount || 0) + 1
     draining = true
+    const scope = roomScope()
     let stopDrain = false
-    drainLoop = runDrain()
+    drainLoop = runDrain(scope)
       .then(outcome => { stopDrain = !!(outcome && outcome.stopDrain) })
       .catch(() => { stopDrain = true })
       .finally(() => {
+        if (!scopeIsCurrent(scope)) return
         draining = false
         drainLoop = null
         state.outboxSending = 0
@@ -2167,6 +2246,7 @@ function createCollaborationAdapter(options = {}) {
           .then(({ head }) => {
             if (
               head &&
+              scopeIsCurrent(scope) &&
               !state.drainPaused &&
               socket &&
               socket.connected &&
@@ -2180,9 +2260,10 @@ function createCollaborationAdapter(options = {}) {
     return drainLoop
   }
 
-  async function runDrain() {
-    while (!state.drainPaused && state.roomKey) {
+  async function runDrain(scope) {
+    while (scopeIsCurrent(scope) && !state.drainPaused) {
       const picked = await pickDrainHead()
+      if (!scopeIsCurrent(scope)) break
       const head = picked.head
       if (!head) {
         if ((picked.blockedPending || []).length) {
@@ -2199,6 +2280,7 @@ function createCollaborationAdapter(options = {}) {
         adapterTrace('drain.sending.overflow', { sending: state.outboxSending })
       }
       const outcome = await sendOp(head, { outboxIndex: picked.index })
+      if (!scopeIsCurrent(scope)) break
       if (outcome && outcome.deferred) break
       if (outcome && outcome.timeout) {
         const waitMs = Math.min(Number(options.timeoutMs || 12000), 800)

@@ -436,7 +436,7 @@ function createFileSystem(options = {}) {
       ? `, us.is_favorite as is_favorite, us.last_opened_at as last_opened_at`
       : `, false as is_favorite, null::timestamptz as last_opened_at`
     const listRes = await store.query(
-      `select r.room_key, r.title, r.folder_id, r.owner_id, r.version,
+      `select r.room_key, r.title, r.folder_id, r.owner_id, r.version, r.node_counts_generation,
               r.created_at, r.updated_at, r.content_updated_at,
               r.deleted_at, r.deleted_by, r.deleted_from_folder_id
               ${roleSelect}
@@ -1088,31 +1088,32 @@ function createFileSystem(options = {}) {
   }
 
   async function getRoomPreview(roomKey, input = {}) {
-    const file = await getRoom(roomKey, input)
-    let sketch = { text: file.title || '未命名', children: [] }
-    try {
-      if (typeof store.getPreviewNodes === 'function') {
-        const previewNodes = await store.getPreviewNodes(roomKey)
-        if (Array.isArray(previewNodes)) {
-          sketch = sketchFromPreviewRows(previewNodes)
-        } else {
-          sketch = buildPreviewSketch(previewNodes)
+    if (store.kind === 'pg' && store.getPreviewProjection) {
+      const userId = roomAcl.normalizeUserId(input.userId || '')
+      const trusted = input.roomScope
+      const reusable = roomAcl.consumeRoomAccess(trusted, roomKey, userId)
+      if (!reusable) {
+        const access = await roomAcl.getAccess(require('../storage').getPool(), roomKey, userId)
+        if (!access.exists || access.deleted) throw fsError('ROOM_NOT_FOUND', 'room not found', 404)
+        if (!input.bypass && !roomAcl.roleAllows(access.role, 'view', { legacyOpen: access.legacyOpen })) {
+          throw fsError('FORBIDDEN', '没有权限执行该操作', 403)
         }
-      } else if (typeof store.getNodes === 'function') {
-        sketch = buildPreviewSketch(await store.getNodes(roomKey))
       }
-    } catch (err) {
-      // Fall back to title-only sketch so list cards still render.
+      const projection = await store.getPreviewProjection(roomKey)
+      const row = projection.room
+      if (!row) throw fsError('ROOM_NOT_FOUND', 'room not found', 404)
+      if (row.deleted_at) throw fsError('ROOM_TRASHED', '房间已在回收站', 409)
+      const sketch = projection.nodes.length ? sketchFromPreviewRows(projection.nodes) :
+        { text: row.title || '未命名', children: [] }
+      return { roomKey: row.room_key, revision: Number(row.version || 0),
+        generation: String(row.generation || '0'), updatedAt: row.updated_at || '',
+        contentUpdatedAt: row.content_updated_at || '', sketch }
     }
-    if (!sketch || !sketch.text) {
-      sketch = { text: file.title || '未命名', children: [] }
-    }
-    return {
-      roomKey: file.roomKey,
-      revision: file.revision,
-      updatedAt: file.updatedAt || file.contentUpdatedAt || '',
-      sketch
-    }
+    const file = await getRoom(roomKey, input)
+    const nodes = store.getPreviewNodes ? await store.getPreviewNodes(roomKey) : await store.getNodes(roomKey)
+    const sketch = Array.isArray(nodes) ? sketchFromPreviewRows(nodes) : buildPreviewSketch(nodes)
+    return { roomKey: file.roomKey, revision: file.revision,
+      updatedAt: file.updatedAt || file.contentUpdatedAt || '', sketch }
   }
 
   return {

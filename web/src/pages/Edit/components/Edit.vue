@@ -307,6 +307,7 @@ export default {
     }
   },
   async mounted() {
+    this._saveRoomKey = roomFromLocation() || (this.$route.query.room || '')
     // 先注册关闭 loading，避免 init 渲染结束事件早于监听导致遮罩锁死
     this.$bus.$on('node_tree_render_end', this.handleHideLoading)
     this.$bus.$on('showLoading', this.handleShowLoading)
@@ -329,6 +330,7 @@ export default {
       }
       this.mindMapConfig = getConfig() || {}
     }
+    if (this._editorDisposed) return
     this.init()
     if (!dataReady) {
       this.getData()
@@ -365,15 +367,28 @@ export default {
   },
 
   beforeDestroy() {
+    const editing = this.mindMap && this.mindMap.renderer.textEdit.isShowTextEdit()
+    this.commitOpenTextEdit()
+    // Hand the latest unsent collaborative text delta to the durable outbox
+    // before the engine is destroyed. The normal debounced flush can still be
+    // awaiting an earlier ACK at this point, so this must not go through it.
+    const exitCooperate = this.mindMap && this.mindMap.cooperate
+    if (exitCooperate && typeof exitCooperate.flushLatestPendingForExit === 'function') {
+      exitCooperate.flushLatestPendingForExit()
+    }
+    if (editing) {
+      this.pendingStoreData = true
+      this._pendingSaveData = null
+    }
+    this.flushStoreData(true)
+    this._editorDisposed = true
     this.stopCollabDraftFallback()
     if (this.storeDataTimer) {
       clearTimeout(this.storeDataTimer)
       this.storeDataTimer = null
     }
-    if (this.pendingStoreData) {
-      storeData(this.pendingStoreData)
-      this.pendingStoreData = null
-    }
+    clearTimeout(this.storeConfigTimer)
+    this.storeConfigTimer = null
     if (this.loadingSafetyTimer) {
       clearTimeout(this.loadingSafetyTimer)
       this.loadingSafetyTimer = null
@@ -407,11 +422,20 @@ export default {
     this.$bus.$off('toggle_appearance_mode', this.handleToggleAppearanceMode)
     this.$bus.$off('prepare_reload', this.prepareReload)
     this.$bus.$off('room_canvas_ready', this.onRoomCanvasReady)
+    this.$bus.$off('data_change', this.onSaveDataChange)
+    this.$bus.$off('view_data_change', this.onSaveViewChange)
     window.removeEventListener('resize', this.handleResize)
     if (this.mindMap) {
       this.unbindCanvasThemeEvents()
       this.mindMap.destroy()
     }
+    if (Vue.prototype.getCurrentData === this._getCurrentData) {
+      delete Vue.prototype.getCurrentData
+    }
+    this._getCurrentData = null
+    this._pendingSaveData = null
+    this.mindMap = null
+    this.mindMapData = null
   },
   methods: {
     onRoomCanvasReady() {
@@ -998,7 +1022,9 @@ export default {
 
     // 获取思维导图数据，实际应该调接口获取
     async getData() {
-      this.mindMapData = await getDataAsync()
+      const data = await getDataAsync()
+      if (this._editorDisposed) return
+      this.mindMapData = data
       const prepared = prepareImportedTree(this.mindMapData)
       this.mindMapData = prepared.data
       this.isLargeMap = prepared.collapsed
@@ -1007,27 +1033,46 @@ export default {
 
     // 存储数据当数据有变时
     bindSaveEvent() {
-      this.$bus.$on('data_change', data => {
-        this.pendingStoreData = { root: data }
-        clearTimeout(this.storeDataTimer)
-        this.storeDataTimer = setTimeout(
-          () => {
-            const pending = this.pendingStoreData
-            this.pendingStoreData = null
-            this.storeDataTimer = null
-            if (pending) storeData(pending)
-          },
-          this.isLargeMap ? 1000 : 300
-        )
-      })
-      this.$bus.$on('view_data_change', data => {
-        clearTimeout(this.storeConfigTimer)
-        this.storeConfigTimer = setTimeout(() => {
-          storeData({
-            view: data
-          })
-        }, 300)
-      })
+      this.$bus.$on('data_change', this.onSaveDataChange)
+      this.$bus.$on('view_data_change', this.onSaveViewChange)
+    },
+
+    onSaveDataChange(data, change) {
+      if (this._editorDisposed) return
+      this.pendingStoreData = true
+      // Keep the live render tree outside Vue observation. A full snapshot is
+      // made only when a physical draft is due, not for each content event.
+      this._pendingSaveData = change && (change.incremental || change.full) ? null : data
+      const collaborate = this.mindMap && this.mindMap.cooperate && this.mindMap.cooperate.collabV2Adapter
+      if (collaborate && this.storeDataTimer && this._saveTimerV2) return
+      clearTimeout(this.storeDataTimer)
+      this._saveTimerV2 = !!collaborate
+      this.storeDataTimer = setTimeout(() => this.flushStoreData(), collaborate ? 3000 : (this.isLargeMap ? 1000 : 300))
+    },
+
+    onSaveViewChange(data) {
+      if (this._editorDisposed) return
+      this._pendingSaveView = data
+      clearTimeout(this.storeConfigTimer)
+      this.storeConfigTimer = setTimeout(() => this.flushStoreData(), 300)
+    },
+
+    flushStoreData(force = false) {
+      if (this._editorDisposed) return
+      const pending = {}
+      if (this.pendingStoreData) {
+        pending.root = this._pendingSaveData || (this.mindMap && this.mindMap.command.getCopyData())
+      }
+      if (this._pendingSaveView) pending.view = this._pendingSaveView
+      clearTimeout(this.storeDataTimer)
+      clearTimeout(this.storeConfigTimer)
+      this.storeDataTimer = null
+      this._saveTimerV2 = false
+      this.storeConfigTimer = null
+      this.pendingStoreData = null
+      this._pendingSaveData = null
+      this._pendingSaveView = null
+      if (Object.keys(pending).length) return storeData(pending, { room: this._saveRoomKey, force })
     },
 
     // 手动保存
@@ -1037,7 +1082,7 @@ export default {
         this.storeDataTimer = null
       }
       this.pendingStoreData = null
-      if (this.mindMap) storeData(this.mindMap.getData(true))
+      if (this.mindMap) storeData(this.mindMap.getData(true), { room: this._saveRoomKey, force: true })
     },
 
     commitOpenTextEdit() {
@@ -1264,10 +1309,11 @@ export default {
       }
       // api/index.js文件使用
       // 当正在编辑本地文件时通过该方法获取最新数据
-      Vue.prototype.getCurrentData = () => {
+      this._getCurrentData = () => {
         const fullData = this.mindMap.getData(true)
         return { ...fullData }
       }
+      Vue.prototype.getCurrentData = this._getCurrentData
       this.syncCanvasDarkBackground()
     },
 

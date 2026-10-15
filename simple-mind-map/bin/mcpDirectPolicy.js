@@ -10,8 +10,8 @@ function isPlainData(value, allowed) {
   return Object.keys(value).every(key => allowed.has(key))
 }
 
-function isMcpDirectShape(command, source, knownUids = new Set()) {
-  if (!source || !source.principalId || !command) return false
+function isDirectNodeShape(command, knownUids = new Set()) {
+  if (!command) return false
   const payload = command.payload || {}
   if (command.type === 'node.insert') {
     const parent = payload.parentUid || payload.parent_uid || payload.parent
@@ -53,4 +53,8 @@ function isMcpDirectShape(command, source, knownUids = new Set()) {
   return false
 }
 
-module.exports = { isMcpDirectShape, isUidReference }
+function isMcpDirectShape(command, source, knownUids = new Set()) {
+  return !!(source && source.principalId) && isDirectNodeShape(command, knownUids)
+}
+
+module.exports = { isMcpDirectShape, isDirectNodeShape, isUidReference }

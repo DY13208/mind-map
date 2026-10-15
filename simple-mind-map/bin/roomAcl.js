@@ -526,6 +526,24 @@ async function getAccess(db, roomKey, userId) {
   }
 }
 
+// Server-issued authorization contexts remain unforgeable inside public engine
+// inputs. WeakMap metadata does not alter response DTOs or retain old requests.
+const issuedRoomAccess = new WeakMap()
+function issueRoomAccess(access, roomKey) {
+  issuedRoomAccess.set(access, { roomKey: String(roomKey), userId: normalizeUserId(access.userId),
+    wholeRoom: !!access.canView && !access.shareId })
+  return access
+}
+function consumeRoomAccess(access, roomKey, userId) {
+  const proof = access && issuedRoomAccess.get(access)
+  const trusted = !!(proof && proof.wholeRoom && proof.roomKey === String(roomKey) &&
+    proof.userId === normalizeUserId(userId))
+  // Reuse only once within the current HTTP request. Retained objects are not
+  // permission caches and cannot authorize a later request after revocation.
+  if (trusted) issuedRoomAccess.delete(access)
+  return trusted
+}
+
 async function assertRoomAccess(db, req, roomKey, action) {
   const actor = actorFromReq(req)
   if (actor.bypass) {
@@ -535,25 +553,25 @@ async function assertRoomAccess(db, req, roomKey, action) {
     }
     // Dev / MCP: keep WS-first create working for rooms not yet persisted.
     if (!access.exists) {
-      return {
+      return issueRoomAccess({
         ...accessSummary('owner', { bypass: true, legacyOpen: true }),
         exists: false,
         deleted: false,
         members: 0,
         userId: actor.id
-      }
+      }, roomKey)
     }
     const summary = accessSummary(access.role || 'owner', {
       bypass: true,
       legacyOpen: access.legacyOpen
     })
-    return {
+    return issueRoomAccess({
       ...access,
       ...summary,
       role: summary.role || 'owner',
       userId: actor.id,
       superAdmin: !!actor.superAdmin
-    }
+    }, roomKey)
   }
   if (!actor.id) {
     throw aclError(401, 'unauthorized', '请先使用企业微信扫码登录')
@@ -574,7 +592,7 @@ async function assertRoomAccess(db, req, roomKey, action) {
   if (!roleAllows(summary.role, action, { legacyOpen: summary.legacyOpen })) {
     throw aclError(403, 'FORBIDDEN', '没有权限执行该操作')
   }
-  return { ...access, ...summary, userId: actor.id, shareId }
+  return issueRoomAccess({ ...access, ...summary, userId: actor.id, shareId }, roomKey)
 }
 
 async function ensureOwner(db, roomKey, userId) {
@@ -1292,6 +1310,7 @@ module.exports = {
   migrateFolderRoles,
   getAccess,
   assertRoomAccess,
+  consumeRoomAccess,
   ensureOwner,
   listAccessibleRooms,
   listMembers,

@@ -766,9 +766,9 @@ export default {
           )
           return res.json().catch(() => ({ ok: false }))
         },
-        onRemoteOperation: op => {
+        onRemoteOperation: (op, meta) => {
           if (cooperate && typeof cooperate.applyV2RemoteOperation === 'function') {
-            return cooperate.applyV2RemoteOperation(op)
+            return cooperate.applyV2RemoteOperation(op, meta)
           }
         },
         onReloadRequired: async sync => {

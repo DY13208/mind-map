@@ -13,15 +13,16 @@ Module._initPaths()
 
 // This integration test is intentionally pinned to the isolated baseline
 // containers. It never loads the repository .env or a developer database.
+const isolatedConfig = require('../../tests/performance/isolation.cjs').configureIsolatedEnvironment()
 const TEST_ENV = {
   MIND_MAP_SKIP_ROOT_ENV: '1',
   PGHOST: '127.0.0.1',
-  PGPORT: '25492',
+  PGPORT: String(isolatedConfig.pg.port),
   PGDATABASE: 'mcp_incremental_test',
-  PGUSER: 'mcp_test',
-  PGPASSWORD: 'mcp-incremental-test-db-password',
+  PGUSER: isolatedConfig.pg.user,
+  PGPASSWORD: isolatedConfig.pg.password,
   PGAPPNAME: 'mcp-incremental-bridge-integration',
-  REDIS_URL: 'redis://127.0.0.1:16389',
+  REDIS_URL: isolatedConfig.redis,
   COLLAB_EVENT_BUS: 'redis',
   COLLAB_V2: '1',
   COLLAB_V2_EVENT_BRIDGE: '1',
@@ -106,7 +107,10 @@ async function waitHealthy(base, child) {
     try {
       const response = await fetch(`${base}/api/health`)
       if (!response.ok) return null
-      return await response.json()
+      const value = await response.json()
+      // HTTP can be ready before the asynchronous PG LISTEN connection.
+      return value.ok && value.eventBridge && value.eventBridge.enabled &&
+        value.eventBridge.listenerHealthy ? value : null
     } catch (_) {
       return null
     }
