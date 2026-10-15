@@ -143,14 +143,16 @@ export default {
   transition: border-color 0.18s, box-shadow 0.18s;
 }
 .notificationBadge--avatar .notificationButton.hasMessages {
-  border-color: #15956a;
-  box-shadow: 0 0 0 2px rgba(21, 149, 106, 0.12);
+  border-color: #e64b57;
+  box-shadow: 0 0 0 3px rgba(230, 75, 87, 0.2);
 }
 .notificationBadge--avatar /deep/ .el-badge__content.is-dot {
-  top: 3px;
-  right: 5px;
-  width: 8px;
-  height: 8px;
+  top: 2px;
+  right: 3px;
+  width: 10px;
+  height: 10px;
+  background-color: #e64b57;
   border: 2px solid #fff;
+  transform: translate(50%, -50%);
 }
 </style>
