@@ -11,6 +11,7 @@ import { lineStyleProps } from '../theme/default'
 import {
   nodesToTabOutline,
   nodesToOutlineHtml,
+  compactSmmClipboardData,
   clipboardTextLooksLikeOutline
 } from './copyOutline'
 import parseAddGeneralizationUtil from './parseAddGeneralizationNodeList'
@@ -1140,53 +1141,67 @@ export const checkClipboardReadEnable = () => {
 }
 
 // 将数据设置到用户剪切板中（同时写入 Tab 大纲，便于粘贴到企业微信等外部思维导图）
-export const setDataToClipboard = data => {
-  const trees = data && data.data ? data.data : []
+export const setDataToClipboard = async data => {
+  const clipboardData = compactSmmClipboardData(data)
+  const trees = clipboardData && clipboardData.data ? clipboardData.data : []
   const outline = nodesToTabOutline(trees)
-  const html = nodesToOutlineHtml(trees, data)
-  const smmJson = JSON.stringify(data)
-  // Paste events may omit HTML even after a successful multi-format write.
-  // Keep complete data in plain text too; HTML still provides the readable outline.
-  const plain = smmJson
+  const html = nodesToOutlineHtml(trees, clipboardData)
+  // External apps receive readable titles; editor pages restore node data from HTML.
+  const plain = outline
 
-  const fallbackCopy = text => {
+  const fallbackCopy = () => {
     const ta = document.createElement('textarea')
-    ta.value = text
+    ta.value = plain
     ta.setAttribute('readonly', '')
     ta.style.position = 'fixed'
     ta.style.left = '-9999px'
     document.body.appendChild(ta)
     ta.select()
+    const onCopy = event => {
+      if (!event.clipboardData) return
+      event.clipboardData.setData('text/plain', plain)
+      if (html) event.clipboardData.setData('text/html', html)
+      event.preventDefault()
+    }
+    document.addEventListener('copy', onCopy)
     try {
-      document.execCommand('copy')
+      return document.execCommand('copy')
+    } catch (error) {
+      return false
     } finally {
+      document.removeEventListener('copy', onCopy)
       document.body.removeChild(ta)
     }
   }
 
-  if (navigator.clipboard && navigator.clipboard.write && outline) {
+  if (
+    navigator.clipboard && navigator.clipboard.write &&
+    typeof ClipboardItem !== 'undefined' && html
+  ) {
     const items = {
       'text/plain': new Blob([plain], { type: 'text/plain' })
     }
     if (html) {
       items['text/html'] = new Blob([html], { type: 'text/html' })
     }
-    navigator.clipboard.write([new ClipboardItem(items)]).catch(() => {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(plain).catch(() => fallbackCopy(plain))
-      } else {
-        fallbackCopy(plain)
-      }
-    })
-    return
+    try {
+      await navigator.clipboard.write([new ClipboardItem(items)])
+      return true
+    } catch (error) {
+      // Native copy can still write both formats on HTTP or after API denial.
+    }
   }
 
+  if (fallbackCopy()) return true
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(plain).catch(() => fallbackCopy(plain))
-    return
+    try {
+      await navigator.clipboard.writeText(plain)
+      return true
+    } catch (error) {
+      return false
+    }
   }
-
-  fallbackCopy(plain)
+  return false
 }
 export const getDataFromClipboard = async () => {
   let text = null

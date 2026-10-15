@@ -5,6 +5,27 @@ function formatGetNodeGeneralizationLocal(data) {
   return Array.isArray(generalization) ? generalization : [generalization]
 }
 
+// Only the system clipboard drops summaries recoverable from room attachments.
+// Keep the source tree intact for in-app paste and offline knowledge access.
+export function compactSmmClipboardData(payload) {
+  const copied = JSON.parse(JSON.stringify(payload))
+  if (!copied || !copied.sourceRoom) return copied
+  const pending = Array.isArray(copied.data)
+    ? copied.data.slice()
+    : copied.data ? [copied.data] : []
+  while (pending.length) {
+    const node = pending.pop()
+    if (!node) continue
+    const data = node.data
+    if (data && data.attachmentId) delete data.attachmentExtractedText
+    ;(node.children || []).forEach(child => pending.push(child))
+    formatGetNodeGeneralizationLocal(data).forEach(summary => {
+      if (summary) pending.push({ data: summary, children: summary.children || [] })
+    })
+  }
+  return copied
+}
+
 function stripHtml(text) {
   return String(text || '')
     .replace(/<[^>]+>/g, '')
@@ -86,16 +107,15 @@ function treeToHtml(node) {
 
 /** 节点树 → HTML 嵌套列表（部分应用粘贴更友好） */
 export function nodesToOutlineHtml(trees, clipboardData = {}) {
-  const list = Array.isArray(trees) ? trees : [trees]
+  const list = (Array.isArray(trees) ? trees : [trees]).filter(Boolean)
+  if (!list.length) return ''
   const body = list
-    .filter(Boolean)
     .map(tree => treeToHtml(tree))
     .filter(Boolean)
     .join('')
-  if (!body) return ''
   const payload = encodeURIComponent(JSON.stringify({
     simpleMindMap: true,
-    data: list.filter(Boolean),
+    data: list,
     ...(clipboardData.sourceRoom ? { sourceRoom: clipboardData.sourceRoom } : {})
   }))
   return `<ul data-simple-mind-map="${payload}">${body}</ul>`

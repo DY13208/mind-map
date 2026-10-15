@@ -1,5 +1,5 @@
 import merge from 'deepmerge'
-import { readSmmClipboardHtml } from '../../utils/copyOutline'
+import { readSmmClipboardHtml, nodesToTabOutline } from '../../utils/copyOutline'
 import performanceObserver from '../../../bin/collabV2/performanceObserver'
 import LogicalStructure from '../../layouts/LogicalStructure'
 import CompactStructure from '../../layouts/CompactStructure'
@@ -36,7 +36,6 @@ import {
   checkNodeListIsEqual,
   createSmmFormatData,
   checkSmmFormatData,
-  clipboardTextLooksLikeOutline,
   checkIsNodeStyleDataKey,
   formatGetNodeGeneralization,
   sortNodeList,
@@ -1833,7 +1832,7 @@ class Render {
     }
     if (!this.beingCopyData) return
     if (!this.mindMap.opt.disabledClipboard) {
-      setDataToClipboard(createSmmFormatData(this.beingCopyData, cooperate && cooperate.httpRoomKey))
+      await setDataToClipboard(createSmmFormatData(this.beingCopyData, cooperate && cooperate.httpRoomKey))
     }
   }
 
@@ -2026,13 +2025,14 @@ class Render {
       onlyPasteTextWhenHasImgAndText
     } = this.mindMap.opt
 
-    // 本应用刚复制的节点：剪贴板已是 Tab 大纲，用内存中的完整数据粘贴
+    // Some clipboard paths expose only text. Match our copy exactly, including
+    // single leaves, so unrelated external outlines cannot paste stale node data.
     if (
       this.beingCopyData &&
       !this.getHistoryCopyForCurrentRoom() &&
       text &&
-      !checkSmmFormatData(text).isSmm &&
-      clipboardTextLooksLikeOutline(text)
+      !html && !img &&
+      text.replace(/\r\n?/g, '\n') === nodesToTabOutline(this.beingCopyData)
     ) {
       this.mindMap.execCommand('PASTE_NODE', this.beingCopyData)
       return
