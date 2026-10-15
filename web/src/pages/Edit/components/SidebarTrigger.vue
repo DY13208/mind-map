@@ -10,17 +10,7 @@
     </div>
     <div class="trigger customScrollbar">
       <div class="authSection" v-if="authUser">
-        <div class="authAvatarWrap" :title="authUser.name">
-          <img
-            v-if="avatarUrl"
-            class="authAvatarImg"
-            :src="avatarUrl"
-            :alt="authUser.name"
-            referrerpolicy="no-referrer"
-            @error="avatarFailed = true"
-          />
-          <span v-else class="authAvatar">{{ userInitial }}</span>
-        </div>
+        <AccessNotificationTrigger avatar :person="authUser" />
         <div class="authMeta">
           <span class="authName">{{ authUser.name }}</span>
           <button
@@ -38,7 +28,11 @@
         v-for="item in triggerList"
         :key="item.value"
         :data-testid="
-          item.value === 'structure' ? 'layout' : item.value === 'theme' ? 'theme' : 'sidebar-' + item.value
+          item.value === 'structure'
+            ? 'layout'
+            : item.value === 'theme'
+            ? 'theme'
+            : 'sidebar-' + item.value
         "
         :class="{ active: activeSidebar === item.value }"
         :title="item.name"
@@ -55,16 +49,16 @@
 import { mapState, mapMutations } from 'vuex'
 import { sidebarTriggerList } from '@/config'
 import { getCurrentUser, logoutAndRedirect } from '@/utils/auth'
-import { isAvatarImage } from '@/utils/avatar'
+import AccessNotificationTrigger from '@/components/AccessNotificationTrigger.vue'
 
 export default {
+  components: { AccessNotificationTrigger },
   data() {
     return {
       show: true,
       maxHeight: 0,
       authUser: null,
-      loggingOut: false,
-      avatarFailed: false
+      loggingOut: false
     }
   },
   computed: {
@@ -88,16 +82,6 @@ export default {
         })
       }
       return list
-    },
-
-    userInitial() {
-      const name = (this.authUser && this.authUser.name) || '依'
-      return name.trim().slice(0, 1)
-    },
-
-    avatarUrl() {
-      if (this.avatarFailed) return ''
-      return isAvatarImage(this.authUser && this.authUser.avatar) ? this.authUser.avatar : ''
     }
   },
   watch: {
@@ -262,24 +246,6 @@ export default {
     gap: 6px;
     padding: 10px 4px 8px;
     border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  }
-
-  .authAvatar,
-  .authAvatarImg {
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    display: block;
-  }
-
-  .authAvatar {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(145deg, #0f9d68, #0a7a52);
-    color: #fff;
-    font-size: 13px;
-    font-weight: 700;
   }
 
   .authMeta {

@@ -18,6 +18,9 @@ export default {
   results(filters) {
     return productRequest(`/api/notifications/access-results?${query(filters)}`)
   },
+  history(filters) {
+    return productRequest(`/api/notifications/access-history?${query(filters)}`)
+  },
   seen(ids) {
     return productRequest('/api/notifications/access-results/seen', {
       method: 'POST',

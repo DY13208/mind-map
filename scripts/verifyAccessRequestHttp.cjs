@@ -166,6 +166,25 @@ async function main() {
     })
     assert.equal(decision.status, 200)
     assert.equal(decision.data.item.granted_role, 'manager')
+    const history = await api(
+      0,
+      '/api/notifications/access-history?status=approved&search=HTTP'
+    )
+    assert.equal(history.status, 200)
+    assert.ok(
+      history.data.list.some(
+        item => item.id === id && item.granted_role === 'manager'
+      )
+    )
+    assert.equal(history.data.counts.rejected, 0)
+    assert.equal(
+      (await api(1, '/api/notifications/access-history')).data.total,
+      0
+    )
+    assert.equal(
+      (await api(null, '/api/notifications/access-history')).status,
+      401
+    )
     const info = await api(1, `/api/files/${roomKey}/info`)
     assert.equal(info.status, 200)
     const mine = await api(1, '/api/access-requests/mine?roomKey=' + roomKey)

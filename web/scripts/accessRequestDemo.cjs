@@ -62,12 +62,41 @@ async function main() {
       )
     }
   }
+  for (
+    let index = 1;
+    index <= (process.env.ACCESS_DEMO_MANY_REQUESTS === '1' ? 25 : 2);
+    index++
+  ) {
+    const id = `demo-history-${index}`
+    await pool.query(
+      `insert into wecom_users values($1,$1,'demo-corp',$2,'')`,
+      [id, `历史审批成员 ${index}`]
+    )
+    const item = await access.requestAccess(pool, reqFor(id), {
+      roomKey: room,
+      role: 'viewer',
+      reason: '项目评审与资料整理'
+    })
+    await access.decide(
+      pool,
+      reqFor('demo-owner'),
+      item.id,
+      index % 3 ? 'approve' : 'reject',
+      index % 3
+        ? { role: index % 2 ? 'manager' : 'editor' }
+        : { reason: '请先补充所属项目与用途' }
+    )
+    await pool.query(
+      `update room_access_requests set decided_at=now()-interval '2 days' where id=$1`,
+      [item.id]
+    )
+  }
   let compiled
-  const template = `<main><header class="demoHeader"><a href="/owner">所有者视角</a><a href="/applicant">申请人视角</a><span>隔离测试环境 · 不连接线上数据</span><button v-if="owner" @click="disconnect">模拟通知断线</button><button v-if="!owner" @click="revoke">恢复未授权测试状态</button></header><aside v-if="owner || allowed" class="demoSidebar"><div class="demoBrand">WCPD <small>团队协作空间</small></div><span class="workspaceLabel">工作空间</span><div class="sideItem"><i class="el-icon-document" /> 我的脑图</div><div class="sideItem"><i class="el-icon-folder" /> 公司资料</div><div class="sideItem"><i class="el-icon-user" /> 团队协作</div><Trigger/><div class="demoProfile">{{owner?'李继兵 · 文件所有者':'林佳敏 · 申请人'}}</div></aside><section v-if="owner" class="demoWorkspace"><span class="eyebrow">团队文件 / 公司资料</span><h1>公司模型 · 项目规划</h1><p>消息中心可查看访问申请，并配置对应权限。</p><div class="workspaceCard"><i class="el-icon-document"/><div><strong>项目规划与实施方案</strong><p>由李继兵管理 · 本地协作验证</p></div><el-button @click="openCenter">查看访问申请</el-button></div></section><Denied v-else-if="ready && !allowed" room-key="${room}" @back="back"/><section v-else-if="ready" class="demoWorkspace grantedWorkspace"><span class="grantedIcon"><i class="el-icon-check"/></span><h1>已获得{{grantLabel}}权限</h1><p>「公司模型 · 项目规划」已可以访问。</p><el-button type="primary" @click="openResults">查看审批结果</el-button></section><Center :user-id="userId" :floating="false"/></main>`
+  const template = `<main><header class="demoHeader"><a href="/owner">所有者视角</a><a href="/applicant">申请人视角</a><span>隔离测试环境 · 不连接线上数据</span><button v-if="owner" @click="disconnect">模拟通知断线</button><button v-if="!owner" @click="revoke">恢复未授权测试状态</button></header><aside v-if="owner || allowed" class="demoSidebar"><div class="demoBrand">WCPD <small>团队协作空间</small></div><span class="workspaceLabel">工作空间</span><div class="sideItem"><i class="el-icon-document" /> 我的脑图</div><div class="sideItem"><i class="el-icon-folder" /> 公司资料</div><div class="sideItem"><i class="el-icon-user" /> 团队协作</div><Trigger/><div class="demoProfile">{{owner?'李继兵 · 文件所有者':'林佳敏 · 申请人'}}</div></aside><section v-if="owner" class="demoWorkspace"><span class="eyebrow">团队文件 / 公司资料</span><h1>公司模型 · 项目规划</h1><p>消息中心可查看访问申请，并配置对应权限。</p><div class="workspaceCard"><i class="el-icon-document"/><div><strong>项目规划与实施方案</strong><p>由李继兵管理 · 本地协作验证</p></div><el-button @click="openCenter">查看访问申请</el-button></div></section><Denied v-else-if="ready && !allowed" room-key="${room}" @back="back"/><section v-else-if="ready" class="demoWorkspace grantedWorkspace"><span class="grantedIcon"><i class="el-icon-check"/></span><h1>已获得{{grantLabel}}权限</h1><p>「公司模型 · 项目规划」已可以访问。</p><el-button type="primary" @click="openResults">查看审批结果</el-button></section><SidebarTrigger v-if="owner || allowed"/><Center :user-id="userId"/></main>`
   const ctx = await esbuild.context({
     stdin: {
       resolveDir: root,
-      contents: `import Vue from 'vue/dist/vue.esm.js';import ElementUI from 'element-ui';import 'element-ui/lib/theme-chalk/index.css';import Center from './src/components/AccessNotifications.vue';import Trigger from './src/components/AccessNotificationTrigger.vue';import Denied from './src/pages/Edit/components/AccessDeniedPanel.vue';import {openNotifications,roleText} from './src/services/accessNotificationState';Vue.use(ElementUI);const owner=location.pathname!='/applicant',actor=owner?'owner':'applicant',base='/actor/'+actor;new Vue({components:{Center,Trigger,Denied},data:()=>({owner,userId:owner?'demo-owner':'demo-applicant',allowed:false,ready:false,grantLabel:''}),async created(){const data=await(await fetch(base+'/fixture/access')).json();this.allowed=data.canView;this.grantLabel=roleText(data.role);this.ready=true},methods:{openCenter(){openNotifications('requests')},openResults(){openNotifications('results')},async disconnect(){await fetch(base+'/fixture/disconnect',{method:'POST'})},async revoke(){await fetch(base+'/fixture/revoke',{method:'POST'});location.reload()},back(){location.href='/owner'}},template:${JSON.stringify(
+      contents: `import Vue from 'vue/dist/vue.esm.js';import Vuex from 'vuex';import SidebarTrigger from './src/pages/Edit/components/SidebarTrigger.vue';import ElementUI from 'element-ui';import 'element-ui/lib/theme-chalk/index.css';import Center from './src/components/AccessNotifications.vue';import Trigger from './src/components/AccessNotificationTrigger.vue';import Denied from './src/pages/Edit/components/AccessDeniedPanel.vue';import {openNotifications,roleText} from './src/services/accessNotificationState';Vue.use(ElementUI);Vue.use(Vuex);Vue.prototype.$bus=new Vue();Vue.prototype.$i18n={locale:'zh'};const store=new Vuex.Store({state:{localConfig:{isDark:false,enableAi:true},activeSidebar:'',isReadonly:false},mutations:{setActiveSidebar(s,v){s.activeSidebar=v}}});const owner=location.pathname!='/applicant',actor=owner?'owner':'applicant',base='/actor/'+actor;new Vue({store,components:{Center,Trigger,Denied,SidebarTrigger},data:()=>({owner,userId:owner?'demo-owner':'demo-applicant',allowed:false,ready:false,grantLabel:''}),async created(){const data=await(await fetch(base+'/fixture/access')).json();this.allowed=data.canView;this.grantLabel=roleText(data.role);this.ready=true},methods:{openCenter(){openNotifications('requests')},openResults(){openNotifications('results')},async disconnect(){await fetch(base+'/fixture/disconnect',{method:'POST'})},async revoke(){await fetch(base+'/fixture/revoke',{method:'POST'});location.reload()},back(){location.href='/owner'}},template:${JSON.stringify(
         template
       )}}).$mount('#app')`
     },
@@ -87,7 +116,7 @@ async function main() {
           })
           build.onLoad({ filter: /src\/utils\/auth\.js$/ }, () => ({
             contents:
-              'export const getCurrentUser=()=>({id:location.pathname==="/applicant"?"demo-applicant":"demo-owner"})',
+              'export const getCurrentUser=()=>({id:location.pathname==="/applicant"?"demo-applicant":"demo-owner",name:location.pathname==="/applicant"?"林佳敏 Jasmine":"李继兵"});export const logoutAndRedirect=()=>Promise.resolve()',
             loader: 'js'
           }))
           build.onLoad({ filter: /src\/utils\/runtimeConfig\.js$/ }, () => ({
@@ -187,6 +216,14 @@ async function main() {
         if (pathname === '/api/notifications/access-requests')
           return json(
             await access.listInbox(
+              pool,
+              request,
+              Object.fromEntries(url.searchParams)
+            )
+          )
+        if (pathname === '/api/notifications/access-history')
+          return json(
+            await access.listHistory(
               pool,
               request,
               Object.fromEntries(url.searchParams)

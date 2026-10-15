@@ -2,28 +2,46 @@
   <el-badge
     :value="count"
     :max="99"
+    :is-dot="avatar"
     :hidden="!count"
     class="notificationBadge"
-    :class="{ 'notificationBadge--collapsed': collapsed }"
+    :class="{
+      'notificationBadge--collapsed': collapsed,
+      'notificationBadge--avatar': avatar
+    }"
   >
     <button
       type="button"
       class="notificationButton"
       :title="`消息中心${count ? ` · ${count} 条待处理/未读` : ''}`"
       aria-label="消息中心"
+      :class="{ hasMessages: count > 0 }"
+      aria-haspopup="dialog"
+      :aria-expanded="state.visible ? 'true' : 'false'"
       @click="open"
     >
-      <i class="el-icon-bell" /><span v-if="!collapsed">消息中心</span>
+      <UserAvatar v-if="avatar" :person="person" :size="28" />
+      <template v-else
+        ><i class="el-icon-bell" /><span v-if="!collapsed"
+          >消息中心</span
+        ></template
+      >
     </button>
   </el-badge>
 </template>
 <script>
 import { state, openNotifications } from '@/services/accessNotificationState'
 import announcements from '@/config/announcements'
+import UserAvatar from './UserAvatar.vue'
 import { getCurrentUser } from '@/utils/auth'
 export default {
   name: 'AccessNotificationTrigger',
-  props: { collapsed: Boolean },
+  components: { UserAvatar },
+  props: {
+    collapsed: Boolean,
+    avatar: Boolean,
+    person: { type: Object, default: () => ({}) }
+  },
   data: () => ({ state }),
   computed: {
     count() {
@@ -110,5 +128,29 @@ export default {
 .notificationBadge--collapsed .notificationButton {
   justify-content: center;
   padding: 0;
+}
+.notificationBadge--avatar {
+  margin: 0;
+  width: 34px;
+}
+.notificationBadge--avatar .notificationButton {
+  padding: 1px;
+  width: 34px;
+  min-height: 34px;
+  border-radius: 50%;
+  justify-content: center;
+  border: 2px solid transparent;
+  transition: border-color 0.18s, box-shadow 0.18s;
+}
+.notificationBadge--avatar .notificationButton.hasMessages {
+  border-color: #15956a;
+  box-shadow: 0 0 0 2px rgba(21, 149, 106, 0.12);
+}
+.notificationBadge--avatar /deep/ .el-badge__content.is-dot {
+  top: 3px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid #fff;
 }
 </style>
