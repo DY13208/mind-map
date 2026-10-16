@@ -33,11 +33,9 @@ export function stripWikiKnowledgePrefix(text) {
   return stripText(text).replace(WIKI_KNOWLEDGE_PREFIX_RE, '')
 }
 
-/** 写入图上的知识节点统一为「W：正文」。已有前缀只规范冒号，不叠两层。 */
+/** 保留旧调用入口；新写入仅显示正文，兼容移除旧 W 前缀。 */
 export function withWikiKnowledgePrefix(text) {
-  const body = stripWikiKnowledgePrefix(text)
-  if (!body) return ''
-  return 'W：' + body
+  return stripWikiKnowledgePrefix(text)
 }
 
 function usefulTitle(text) {
@@ -403,7 +401,7 @@ export async function searchWikiCompiler(query, options = {}) {
   }
 }
 
-/** 简写结果落成子节点：标题加 W：，与已有子节点按去掉前缀后的正文去重。 */
+/** 简写结果只写正文，与已有子节点按去掉旧前缀后的正文去重。 */
 export function toKnowledgeChildTrees(lines, existingTexts) {
   const seen = new Set(
     (existingTexts || []).map(text => usefulTitle(text)).filter(Boolean)

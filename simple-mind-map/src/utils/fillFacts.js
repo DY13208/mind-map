@@ -5,10 +5,25 @@ function visibleText(value) {
   if(/^(?:来源脑图|来源文件|roomId|章节|原文(?:（行\s*\d+）)?|页码|提取方式)[：:]/.test(text))return ''
   if(/mindmap:node=/.test(text)||/^\|?\s*:?-{3,}/.test(text))return ''
   if(/^\|.*\|$/.test(text))text=text.split('|').map(s=>s.trim()).filter(Boolean).join(' ')
-  return text.replace(/&nbsp;/gi,' ').trim()
+  return text.replace(/&nbsp;/gi,' ').trim().replace(/^(?:W\s*[：:]\s*)+/i,'')
+}
+// Presentation only: remove a leading label for this field, never neighbouring fields.
+function fillValue(value,field) {
+  let text=visibleText(value)
+  const labels={法人代表:['法人代表','法定代表人'],法定代表人:['法定代表人','法人代表'],注册地址:['注册地址','注册住所','住所'],注册资本:['注册资本','注册资金']}
+  for(const label of labels[field]||[field]) {
+    if(!label || !text.startsWith(label))continue
+    const rest=text.slice(label.length)
+    const delimiter=rest.match(/^(?:\s*[：:]\s*|\s+|为\s*)/)
+    if(delimiter && rest.slice(delimiter[0].length).trim()) {
+      text=rest.slice(delimiter[0].length).trim()
+      break
+    }
+  }
+  return text
 }
 function factKey(value,field,owner='') {
-  const text=visibleText(value)
+  const text=field==='股东'?visibleText(value):fillValue(value,field)
   if(!text)return ''
   if(field==='股东')owner=shareholderName(text)||owner
   const dates=(text.match(/(?:19|20)\d{2}(?:年(?:\d{1,2}月(?:\d{1,2}日)?)?|[-/.]\d{1,2}(?:[-/.]\d{1,2})?)/g)||[]).join('|')
@@ -42,7 +57,10 @@ function shareholderName(text) {
 }
 function presentFillTrees(trees,titles,confirmedNames={}) {
   const field=titles[titles.length-1]
-  if(field!=='股东')return trees
+  if(field!=='股东')return trees.map(tree=>{
+    const text=fillValue(tree.data?.text,field)
+    return {...tree,data:{...tree.data,text,...(tree.data?.autoFill?{autoFill:{...tree.data.autoFill,key:factKey(text,field)}}:{})}}
+  }).filter(tree=>tree.data.text)
   const company=titles.slice(0,-1).reverse().find(t=>/公司|Limited|Co\.,?\s*Ltd/i.test(t))
   const seen=new Set(),result=[]
   for(const tree of trees) {
