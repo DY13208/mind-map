@@ -118,16 +118,6 @@
           <i class="el-icon-search" aria-hidden="true"></i>
           <span>Cognee</span>
         </a>
-        <a
-          href="#"
-          title="Wiki 知识库"
-          aria-label="Wiki 知识库"
-          data-testid="nav-wiki"
-          @click.prevent="openWiki"
-        >
-          <i class="el-icon-reading" aria-hidden="true"></i>
-          <span>Wiki</span>
-        </a>
         <router-link
           to="/graph"
           title="wiki-compiler"
@@ -140,7 +130,17 @@
       </nav>
       <AccessNotificationTrigger v-if="profile" :key="profile.id" :collapsed="sidebarCollapsed" class="sidebarNotifications" />
       <div class="sidebarFooter" v-if="profile">
-        <div class="accountInfo" :title="`${profile.name}（${profile.id}）`">
+        <div
+          class="accountInfo"
+          role="link"
+          tabindex="0"
+          data-testid="sidebar-profile"
+          aria-label="打开个人主页"
+          :title="`个人主页 · ${profile.name}（${profile.id}）`"
+          @click="openProfile"
+          @keydown.enter.prevent="openProfile"
+          @keydown.space.prevent="openProfile"
+        >
           <UserAvatar :person="profile" size="small" fallback="依" />
           <div class="accountMeta">
             <strong>{{ profile.name }}</strong
@@ -172,7 +172,6 @@
 <script>
 import productService from '@/services/productService'
 import { logoutAndRedirect } from '@/utils/auth'
-import { openWikiWithSso } from '@/utils/wikiSso'
 import UserAvatar from '@/components/UserAvatar.vue'
 import AccessNotificationTrigger from '@/components/AccessNotificationTrigger.vue'
 const SIDEBAR_PREFERENCE_KEY = 'product-shell-sidebar-collapsed'
@@ -222,6 +221,9 @@ export default {
     updateAutoSidebar() {
       if (!this.hasSidebarPreference) this.sidebarCollapsed = isSmallScreen()
     },
+    openProfile() {
+      if (this.$route.path !== '/profile') this.$router.push('/profile')
+    },
     async signOut() {
       if (this.loggingOut) return
       try {
@@ -235,16 +237,6 @@ export default {
       }
       this.loggingOut = true
       await logoutAndRedirect('/')
-    },
-    async openWiki() {
-      try {
-        await openWikiWithSso({ target: '_blank' })
-      } catch (error) {
-        const message =
-          (error && error.message) || '打开 Wiki 失败，请稍后重试'
-        if (this.$message) this.$message.error(message)
-        else window.alert(message)
-      }
     },
     setSidebarCollapsed(collapsed) {
       this.sidebarCollapsed = collapsed
@@ -540,6 +532,20 @@ export default {
     display: flex;
     gap: 10px;
     align-items: center;
+    min-width: 0;
+    flex: 1;
+    padding: 4px;
+    margin: -4px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+    &:hover {
+      background: #e8f4ef;
+    }
+    &:focus-visible {
+      outline: 2px solid #087854;
+      outline-offset: 2px;
+    }
   }
   .accountMeta {
     min-width: 0;

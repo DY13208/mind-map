@@ -151,6 +151,23 @@ const routes = [
     ]
   },
   {
+    path: '/profile',
+    component: () =>
+      import(
+        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'
+      ),
+    children: [
+      {
+        path: '',
+        name: 'Profile',
+        component: () =>
+          import(
+            /* webpackChunkName: "product-shell" */ './pages/ProductShell/ProfilePage.vue'
+          )
+      }
+    ]
+  },
+  {
     path: '/mcp-access',
     component: () =>
       import(

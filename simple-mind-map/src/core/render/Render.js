@@ -2669,10 +2669,14 @@ class Render {
   //  设置节点是否展开
   setNodeExpand(node, expand) {
     if (this._destroyed) return
+    const wasCollapsed = node.getData('expand') === false
     const apply = nextExpand => {
+      const collapsedChildren =
+        nextExpand && wasCollapsed ? this.collapseChildrenOf(node) : false
       this.mindMap.execCommand('SET_NODE_DATA', node, {
         expand: nextExpand
       })
+      if (collapsedChildren) this.mindMap.emit('personal_expand_change')
       this.mindMap.render()
     }
     if (!expand) {
@@ -2715,6 +2719,20 @@ class Render {
       return
     }
     after()
+  }
+
+  // 从收起状态展开时只露出下一级，子节点不沿用收起前的展开状态
+  collapseChildrenOf(node) {
+    const children = (node.nodeData && node.nodeData.children) || []
+    let changed = false
+    children.forEach(child => {
+      if (!child || !child.data || !this.nodeHasChildren(child)) return
+      if (child.data.expand !== false) {
+        child.data.expand = false
+        changed = true
+      }
+    })
+    return changed
   }
 
   nodeHasChildren(node) {

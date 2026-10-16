@@ -1862,6 +1862,8 @@ async function initSchemaOnce() {
     create index if not exists room_operations_archive_lookup_idx
     on room_operations_archive(room_key, version)
   `)
+  // 个人主页编辑活动：后台并发建 (actor_id, created_at) 索引，不阻塞启动
+  require('./userActivity').ensureUserActivityIndexes(pool)
   const tombstones = await pool.query('select room_key from room_tombstones')
   tombstones.rows.forEach(row => deletedRooms.add(row.room_key))
   // Room ACL migrates folder-derived roles, so the folder tables and the

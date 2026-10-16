@@ -256,7 +256,7 @@ function operationFromCommittedEvent(event, row, index = null) {
       eventType
     })
   }
-  const payload = objectValue(item.payload)
+  const payload = cloneJson(objectValue(item.payload))
   if (type === 'node.insert') {
     payload.uid = canonicalInsertUid(row, asReplayOp(row), payload, null)
     if (payload.data && typeof payload.data === 'object') {
