@@ -1,17 +1,14 @@
 const { cloneJson } = require('../collabHistory/canonical')
 const { canonicalizeNodes, validateNodeGraph } = require('../roomNodes')
 const { DEFAULT_METADATA, newFolderId, normalizeTitle } = require('./model')
+const { resolveMemberRole } = require('../roomAcl')
 
 function nowIso() {
   return new Date().toISOString()
 }
 
 function effectiveRole(row) {
-  const roles = [row.direct_role, row.team_role, row.folder_role, row.role]
-  if (roles.includes('owner')) return 'owner'
-  if (roles.includes('editor') || roles.includes('manager')) return 'editor'
-  if (roles.includes('viewer')) return 'viewer'
-  return row.role || ''
+  return resolveMemberRole(row)
 }
 
 function createMemoryFileStore(seed = {}) {

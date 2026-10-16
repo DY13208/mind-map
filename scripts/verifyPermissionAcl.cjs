@@ -51,6 +51,25 @@ async function main() {
     assert.equal((await acl.getAccess(db,'test-room','manager')).role,'manager','Inherited access cannot demote direct manager')
     await acl.removeMember(db,'test-room','manager','','owner')
     assert.equal((await acl.getAccess(db,'test-room','manager')).role,'viewer','Removing direct access preserves inherited viewer')
+    // Per-file viewer/editor settings win in both directions and survive
+    // folder permission changes until inheritance is restored.
+    await acl.setFolderRole(db,'test-room','viewer','editor','folder')
+    assert.equal((await acl.getAccess(db,'test-room','viewer')).role,'viewer','Per-file viewer must cap a folder editor grant')
+    await acl.setMember(db,'test-room','viewer','inherit','owner')
+    assert.equal((await acl.getAccess(db,'test-room','viewer')).role,'editor','Restoring inherit adopts the current folder grant')
+    await acl.setFolderRole(db,'test-room','viewer','viewer','folder')
+    assert.equal((await acl.getAccess(db,'test-room','viewer')).role,'viewer','Inherit follows later folder changes')
+    await acl.setMember(db,'test-room','viewer','editor','owner')
+    assert.equal((await acl.getAccess(db,'test-room','viewer')).role,'editor','Per-file editor must raise a folder viewer grant')
+    await acl.setFolderRole(db,'test-room','viewer','editor','folder')
+    assert.equal((await acl.getAccess(db,'test-room','viewer')).role,'editor','Folder updates must not clear the per-file setting')
+    // SQL/JS parity for the override-aware resolver.
+    for(const override of [null,'viewer','editor','manager']) for(const team of [null,'viewer','editor']) for(const folder of [null,'viewer','editor','manager']) {
+      const js=acl.resolveMemberRole({acl_v2:true,override_role:override,team_role:team,folder_role:folder})
+      const sql=`select ${acl.sqlResolveMemberRole('null::text','$1::text','$2::text','null::text','$3::text','true')} as role`
+      const row=(await db.query(sql,[team,folder,override])).rows[0]
+      assert.equal(row.role,js||null,`override=${override} team=${team} folder=${folder}`)
+    }
     // Check parity of SQL and JS role composition for all existing grant sources.
     for(const direct of [null,'viewer','editor','manager','owner']) for(const team of [null,'viewer','editor']) for(const folder of [null,'viewer','editor','manager']) {
       const sql=`select ${acl.sqlEffectiveRole('$1::text','$2::text','$3::text')} as role`

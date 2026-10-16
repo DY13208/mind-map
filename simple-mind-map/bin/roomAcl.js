@@ -1,11 +1,33 @@
 const crypto = require('crypto')
+const { EventEmitter } = require('events')
 const { isAuthEnabled } = require('./auth')
 
 const ROLES = ['owner', 'manager', 'editor', 'viewer']
 const FOLDER_ROLES = ['manager', 'editor', 'viewer']
+const OVERRIDE_ROLES = ['manager', 'editor', 'viewer']
 const ROLE_RANK = { owner: 4, manager: 3, editor: 2, viewer: 1 }
 const ACTION_RANK = { view: 1, edit: 2, manage: 3 }
 
+// In-process notification so live collaboration can drop cached write access
+// right after an ACL change and re-check on the next operation. Multi-instance
+// deployments keep the existing short TTL as the cross-instance fallback.
+const aclChangeEvents = new EventEmitter()
+aclChangeEvents.setMaxListeners(200)
+function notifyAclChanged(roomKey) {
+  const key = String(roomKey || '')
+  if (!key) return
+  try {
+    aclChangeEvents.emit('changed', key)
+  } catch (err) {
+    // A broken listener must never fail a committed grant.
+  }
+}
+
+/**
+ * Historical merge: max(direct, team, folder, summary). Kept for rows that
+ * predate the per-file override model (acl_v2 = false) so existing grants
+ * never change meaning until an admin edits that member.
+ */
 function effectiveRole(directRole, teamRole, folderRole, legacyRole) {
   const roleValues = [directRole, teamRole, folderRole, legacyRole]
   const roles = roleValues.map(normalizeRole).filter(Boolean)
@@ -15,6 +37,55 @@ function effectiveRole(directRole, teamRole, folderRole, legacyRole) {
   if (roleValues.map(normalizeFolderRole).includes('manager')) return 'editor'
   if (roles.includes('viewer')) return 'viewer'
   return ''
+}
+
+/**
+ * Per-file override model (acl_v2 = true):
+ *  - override_role = viewer|editor|manager → wins over inherited grants,
+ *    raising or lowering the folder/team result.
+ *  - override_role = null → follow inheritance: the existing default
+ *    folder/team merge rules apply unchanged.
+ * Owner identity always wins and is never produced by inheritance or the
+ * ordinary role selector. The summary `role` column is a derived result and
+ * is never re-merged as a grant source: it only backs very old rows that
+ * carry no scoped grant columns at all.
+ */
+function resolveMemberRole(row = {}) {
+  const direct = normalizeRole(row.direct_role)
+  const summary = normalizeRole(row.role)
+  if (direct === 'owner' || summary === 'owner') return 'owner'
+  if (row.acl_v2) {
+    const override = normalizeOverrideRole(row.override_role)
+    if (override) return override
+    return effectiveRole(null, row.team_role, row.folder_role, null)
+  }
+  const scoped =
+    normalizeRole(row.direct_role) ||
+    normalizeRole(row.team_role) ||
+    normalizeFolderRole(row.folder_role)
+  return effectiveRole(row.direct_role, row.team_role, row.folder_role, scoped ? '' : row.role)
+}
+
+/** True when this member has a per-file setting that overrides inheritance. */
+function overrideLocksShare(row = {}) {
+  const direct = normalizeRole(row.direct_role)
+  const summary = normalizeRole(row.role)
+  if (direct === 'owner' || summary === 'owner') return false
+  return !!row.acl_v2 && !!normalizeOverrideRole(row.override_role)
+}
+
+/** Which rule actually produced the member's access (for UI and diagnostics). */
+function memberAccessSource(row = {}) {
+  const direct = normalizeRole(row.direct_role)
+  const summary = normalizeRole(row.role)
+  if (direct === 'owner' || summary === 'owner') return 'owner'
+  if (row.acl_v2) {
+    if (normalizeOverrideRole(row.override_role)) return 'override'
+    if (normalizeFolderRole(row.folder_role)) return 'folder'
+    if (normalizeRole(row.team_role)) return 'team'
+    return 'none'
+  }
+  return sourceForRoles(row.direct_role, row.team_role, row.folder_role) || 'none'
 }
 
 function sourceForRoles(directRole, teamRole, folderRole) {
@@ -55,6 +126,26 @@ function sqlPrimarySource(directCol, teamCol, folderCol) {
   end`
 }
 
+/**
+ * SQL mirror of resolveMemberRole for ACL rows. Columns are trusted
+ * identifiers or expressions only. An override row that follows inheritance
+ * (override_role is null) reuses the existing default merge; a row left
+ * without any usable source yields null and trips the role NOT NULL
+ * constraint instead of silently falling back to open access.
+ */
+function sqlResolveMemberRole(directCol, teamCol, folderCol, roleCol, overrideCol, aclV2Col) {
+  return `case
+    when coalesce(${directCol}, '') = 'owner'
+      or coalesce(${roleCol}, '') = 'owner' then 'owner'
+    when ${aclV2Col} then
+      case
+        when coalesce(${overrideCol}, '') in ('manager', 'editor', 'viewer') then ${overrideCol}
+        else ${sqlEffectiveRole('null::text', teamCol, folderCol)}
+      end
+    else ${sqlEffectiveRole(directCol, teamCol, folderCol)}
+  end`
+}
+
 function aclError(status, code, message) {
   const err = new Error(message)
   err.statusCode = status
@@ -79,6 +170,11 @@ function normalizeRole(value) {
 function normalizeFolderRole(value) {
   const role = String(value || '').trim().toLowerCase()
   return FOLDER_ROLES.includes(role) ? role : ''
+}
+
+function normalizeOverrideRole(value) {
+  const role = String(value || '').trim().toLowerCase()
+  return OVERRIDE_ROLES.includes(role) ? role : ''
 }
 
 /**
@@ -297,6 +393,9 @@ async function initSchema(db) {
       direct_role text,
       team_role text,
       folder_role text,
+      override_role text,
+      acl_v2 boolean not null default false,
+      direct_role_archive text,
       source text not null default 'direct_share',
       source_team_id text,
       source_folder_id text,
@@ -324,17 +423,25 @@ async function initSchema(db) {
   await db.query(`alter table room_members add column if not exists team_role text`)
   await db.query(`alter table room_members add column if not exists folder_role text`)
   await db.query(`alter table room_members add column if not exists source_folder_id text`)
+  // Per-file override model (viewer/editor). acl_v2 = false keeps the
+  // historical merge, so existing rows never silently change meaning before
+  // an admin edits that member; direct_role_archive preserves the previous
+  // direct grant when a row is converted to the new semantics.
+  await db.query(`alter table room_members add column if not exists override_role text`)
+  await db.query(`alter table room_members add column if not exists acl_v2 boolean not null default false`)
+  await db.query(`alter table room_members add column if not exists direct_role_archive text`)
   await db.query(`
     update room_members
     set direct_role = role
     where direct_role is null
       and folder_role is null
+      and role in ('owner', 'manager', 'editor', 'viewer')
       and coalesce(source, 'direct_share') = 'direct_share'
   `)
   await db.query(`
     update room_members
     set team_role = role
-    where team_role is null and source = 'team'
+    where team_role is null and role in ('owner', 'manager', 'editor', 'viewer') and source = 'team'
   `)
   await db.query(`
     create index if not exists room_members_folder_source_idx
@@ -505,26 +612,29 @@ async function migrateLegacyOwners(db) {
 }
 
 async function getAccess(db, roomKey, userId) {
-  const key = String(roomKey || '')
-  if (!key) {
-    return { exists: false, deleted: false, role: null, legacyOpen: false, members: 0 }
+  const empty = {
+    exists: false, deleted: false, role: null, legacyOpen: false,
+    aclV2: false, overrideRole: null, overrideActive: false, source: null, members: 0
   }
+  const key = String(roomKey || '')
+  if (!key) return { ...empty }
   const tomb = await db.query(
     `select 1 from room_tombstones where room_key = $1`,
     [key]
   )
   if (tomb.rows.length) {
-    return { exists: false, deleted: true, role: null, legacyOpen: false, members: 0 }
+    return { ...empty, deleted: true }
   }
   const room = await db.query(
     `select room_key from rooms where room_key = $1`,
     [key]
   )
   if (!room.rows.length) {
-    return { exists: false, deleted: false, role: null, legacyOpen: false, members: 0 }
+    return { ...empty }
   }
   const members = await db.query(
-    `select user_id, role from room_members where room_key = $1`,
+    `select user_id, role, direct_role, team_role, folder_role, override_role, acl_v2
+     from room_members where room_key = $1`,
     [key]
   )
   const uid = normalizeUserId(userId)
@@ -532,7 +642,11 @@ async function getAccess(db, roomKey, userId) {
   return {
     exists: true,
     deleted: false,
-    role: mine ? mine.role : null,
+    role: mine ? resolveMemberRole(mine) || null : null,
+    aclV2: mine ? !!mine.acl_v2 : false,
+    overrideRole: mine ? normalizeOverrideRole(mine.override_role) || null : null,
+    overrideActive: mine ? overrideLocksShare(mine) : false,
+    source: mine ? memberAccessSource(mine) : null,
     legacyOpen: members.rows.length === 0,
     members: members.rows.length
   }
@@ -594,7 +708,10 @@ async function assertRoomAccess(db, req, roomKey, action) {
   }
   let summary = accessSummary(access.role, { legacyOpen: access.legacyOpen })
   let shareId = null
-  if (!summary.canManage && req && req.headers && req.headers.cookie) {
+  // A per-file setting caps what share credentials may grant: once a member
+  // has an explicit viewer/editor setting, another share link cannot raise it.
+  // Inherit rows keep the historical behaviour where a share can raise the role.
+  if (!summary.canManage && !access.overrideActive && req && req.headers && req.headers.cookie) {
     const shared = await getNodeShareAccess(db, req, roomKey, actor.id)
     if (shared && ROLE_RANK[shared.role] > (ROLE_RANK[summary.role] || 0)) {
       summary = shared
@@ -676,7 +793,14 @@ async function listAccessibleRooms(db, options = {}) {
     ? `left join room_members my on my.room_key = r.room_key and my.user_id = $${userParam}`
     : ''
   const roleSelect = userParam
-    ? `, my.role as role,
+    ? `, ${sqlResolveMemberRole(
+        'my.direct_role',
+        'my.team_role',
+        'my.folder_role',
+        'my.role',
+        'my.override_role',
+        'my.acl_v2'
+      )} as role,
        (not exists (
          select 1 from room_members mx where mx.room_key = r.room_key
        )) as legacy_open`
@@ -708,6 +832,8 @@ async function listMembers(db, roomKey) {
          m.direct_role,
          m.team_role,
          m.folder_role,
+         m.override_role,
+         m.acl_v2,
          m.source,
          m.source_team_id,
          m.source_folder_id,
@@ -727,7 +853,7 @@ async function listMembers(db, roomKey) {
   } catch (err) {
     if (err.code !== '42P01') throw err
     const res = await db.query(
-       `select user_id, user_id as wecom_userid, role, direct_role, team_role, folder_role, source, source_team_id, source_folder_id, created_at, updated_at, user_id as name, '' as avatar
+       `select user_id, user_id as wecom_userid, role, direct_role, team_role, folder_role, override_role, acl_v2, source, source_team_id, source_folder_id, created_at, updated_at, user_id as name, '' as avatar
        from room_members
        where room_key = $1
        order by
@@ -812,13 +938,7 @@ async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId 
     }
     const actorRow = memberRows.find(row => row.user_id === actor)
     const actorIsOwner =
-      (actorRow &&
-        effectiveRole(
-          actorRow.direct_role,
-          actorRow.team_role,
-          actorRow.folder_role,
-          actorRow.role
-        ) === 'owner') ||
+      (actorRow && resolveMemberRole(actorRow) === 'owner') ||
       room.owner_id === actor
     if (!actorIsOwner) {
       throw aclError(403, 'FORBIDDEN', '只有所有者可以转移所有权')
@@ -836,6 +956,8 @@ async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId 
         direct_role: 'owner',
         team_role: null,
         folder_role: null,
+        override_role: null,
+        acl_v2: false,
         source: 'direct_share',
         source_team_id: null,
         source_folder_id: null,
@@ -845,23 +967,20 @@ async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId 
       db.members.push(targetRow)
     } else {
       targetRow.direct_role = 'owner'
+      targetRow.override_role = null
+      targetRow.acl_v2 = false
       targetRow.role = 'owner'
       targetRow.source = 'direct_share'
       targetRow.updated_at = new Date().toISOString()
     }
     for (const previous of memberRows) {
       if (previous.user_id === target) continue
-      if (
-        effectiveRole(
-          previous.direct_role,
-          previous.team_role,
-          previous.folder_role,
-          previous.role
-        ) !== 'owner'
-      ) {
+      if (resolveMemberRole(previous) !== 'owner') {
         continue
       }
       previous.direct_role = 'editor'
+      previous.override_role = null
+      previous.acl_v2 = false
       previous.role = effectiveRole(
         previous.direct_role,
         previous.team_role,
@@ -870,6 +989,7 @@ async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId 
       previous.source = 'direct_share'
       previous.updated_at = new Date().toISOString()
     }
+    notifyAclChanged(key)
     return db.members
       .filter(item => item.room_key === key)
       .map(item => ({
@@ -879,6 +999,8 @@ async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId 
         direct_role: item.direct_role,
         team_role: item.team_role,
         folder_role: item.folder_role,
+        override_role: item.override_role || null,
+        acl_v2: !!item.acl_v2,
         source: item.source,
         source_team_id: item.source_team_id,
         source_folder_id: item.source_folder_id,
@@ -898,7 +1020,7 @@ async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId 
 
     let memberRows = (
       await conn.query(
-        `select user_id, role, direct_role, team_role, folder_role from room_members where room_key = $1`,
+        `select user_id, role, direct_role, team_role, folder_role, override_role, acl_v2 from room_members where room_key = $1`,
         [key]
       )
     ).rows
@@ -906,7 +1028,7 @@ async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId 
       await ensureOwner(conn, key, actor)
       memberRows = (
         await conn.query(
-          `select user_id, role, direct_role, team_role, folder_role from room_members where room_key = $1`,
+          `select user_id, role, direct_role, team_role, folder_role, override_role, acl_v2 from room_members where room_key = $1`,
           [key]
         )
       ).rows
@@ -914,13 +1036,7 @@ async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId 
 
     const actorRow = memberRows.find(row => row.user_id === actor)
     const actorIsOwner =
-      (actorRow &&
-        effectiveRole(
-          actorRow.direct_role,
-          actorRow.team_role,
-          actorRow.folder_role,
-          actorRow.role
-        ) === 'owner') ||
+      (actorRow && resolveMemberRole(actorRow) === 'owner') ||
       room.rows[0].owner_id === actor
     if (!actorIsOwner) {
       throw aclError(403, 'FORBIDDEN', '只有所有者可以转移所有权')
@@ -932,10 +1048,12 @@ async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId 
     )
 
     await conn.query(
-      `insert into room_members (room_key, user_id, role, direct_role, team_role, folder_role, source, source_team_id, source_folder_id)
-       values ($1, $2, 'owner', 'owner', null, null, 'direct_share', null, null)
+      `insert into room_members (room_key, user_id, role, direct_role, team_role, folder_role, override_role, acl_v2, source, source_team_id, source_folder_id)
+       values ($1, $2, 'owner', 'owner', null, null, null, false, 'direct_share', null, null)
        on conflict (room_key, user_id) do update set
          direct_role = 'owner',
+         override_role = null,
+         acl_v2 = false,
          role = 'owner',
          source = 'direct_share',
          updated_at = now()`,
@@ -943,19 +1061,14 @@ async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId 
     )
 
     const previousOwners = memberRows.filter(
-      row =>
-        row.user_id !== target &&
-        effectiveRole(
-          row.direct_role,
-          row.team_role,
-          row.folder_role,
-          row.role
-        ) === 'owner'
+      row => row.user_id !== target && resolveMemberRole(row) === 'owner'
     )
     for (const previous of previousOwners) {
       await conn.query(
         `update room_members
          set direct_role = 'editor',
+             override_role = null,
+             acl_v2 = false,
              role = ${sqlEffectiveRole(
                `'editor'`,
                'team_role',
@@ -968,6 +1081,7 @@ async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId 
       )
     }
 
+    notifyAclChanged(key)
     return listMembers(conn, key)
   }
 
@@ -992,61 +1106,117 @@ async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId 
 
 async function setMember(db, roomKey, targetUserId, role, actorUserId, corpId = '', options = {}) {
   const uid = await resolveUserId(db, targetUserId, corpId)
-  const nextRole = normalizeRole(role)
+  const rawRole = String(role || '').trim().toLowerCase()
+  const nextRole = normalizeRole(rawRole)
+  const overrideRole = normalizeOverrideRole(rawRole)
+  const inherit = rawRole === 'inherit'
   if (!uid) throw aclError(400, 'BAD_REQUEST', '缺少用户')
-  if (!nextRole) throw aclError(400, 'BAD_REQUEST', '无效的权限角色')
+  if (!nextRole && !overrideRole && !inherit) {
+    throw aclError(400, 'BAD_REQUEST', '无效的权限角色')
+  }
+  const columns = `user_id, role, direct_role, team_role, folder_role, override_role, acl_v2`
   let memberRows = (
-    await db.query(
-      `select user_id, role, direct_role, team_role, folder_role from room_members where room_key = $1`,
-      [roomKey]
-    )
+    await db.query(`select ${columns} from room_members where room_key = $1`, [roomKey])
   ).rows
   if (!memberRows.length) {
     const actor = normalizeUserId(actorUserId) || uid
     await ensureOwner(db, roomKey, actor)
     memberRows = (
-      await db.query(
-        `select user_id, role, direct_role, team_role, folder_role from room_members where room_key = $1`,
-        [roomKey]
-      )
+      await db.query(`select ${columns} from room_members where room_key = $1`, [roomKey])
     ).rows
   }
-  const owners = memberRows.filter(row =>
-    effectiveRole(row.direct_role, row.team_role, row.folder_role, row.role) === 'owner'
-  )
+  const owners = memberRows.filter(row => resolveMemberRole(row) === 'owner')
   const current = memberRows.find(row => row.user_id === uid)
   const actor = memberRows.find(row => row.user_id === normalizeUserId(actorUserId))
-  const actorRole = actor && effectiveRole(actor.direct_role, actor.team_role, actor.folder_role, actor.role)
-  if (!options.bypass && actorRole === 'manager' && (nextRole === 'owner' ||
-      (current && effectiveRole(current.direct_role, current.team_role, current.folder_role, current.role) === 'owner'))) {
+  const actorRole = actor ? resolveMemberRole(actor) : ''
+  const managerActor = !options.bypass && actorRole === 'manager'
+  const currentEffective = current ? resolveMemberRole(current) : ''
+  if (managerActor && (nextRole === 'owner' || currentEffective === 'owner')) {
     throw aclError(403, 'OWNER_REQUIRED', '只有所有者可以授予或修改所有者权限')
   }
-  if (
-    current &&
-    effectiveRole(current.direct_role, current.team_role, current.folder_role, current.role) ===
-      'owner' &&
-    effectiveRole(nextRole, current.team_role, current.folder_role) !== 'owner' &&
-    owners.length <= 1
-  ) {
+
+  const returning = `room_key, user_id, role, direct_role, team_role, folder_role, override_role, acl_v2, source, source_team_id, source_folder_id, created_at, updated_at`
+
+  if (nextRole === 'owner') {
+    const res = await db.query(
+      `insert into room_members (room_key, user_id, role, direct_role, team_role, folder_role, override_role, acl_v2, source, source_team_id, source_folder_id)
+       values ($1, $2, 'owner', 'owner', null, null, null, false, 'direct_share', null, null)
+       on conflict (room_key, user_id) do update set
+         direct_role = 'owner',
+         override_role = null,
+         acl_v2 = false,
+         role = 'owner',
+         source = 'direct_share',
+         updated_at = now()
+       returning ${returning}`,
+      [roomKey, uid]
+    )
+    if (!res.rows.length) throw aclError(403, 'OWNER_REQUIRED', '只有所有者可以修改所有者权限')
+    notifyAclChanged(roomKey)
+    return res.rows[0]
+  }
+
+  if (inherit) {
+    if (!current) {
+      // Nothing to restore: no per-file setting and no inherited source.
+      return { room_key: roomKey, user_id: uid, role: null, restored: 'none' }
+    }
+    if (currentEffective === 'owner') {
+      throw aclError(400, 'OWNER_REQUIRED', '所有者身份请使用所有权转移流程')
+    }
+    if (!normalizeFolderRole(current.folder_role) && !normalizeRole(current.team_role)) {
+      const del = await db.query(
+        `delete from room_members where room_key = $1 and user_id = $2`,
+        [roomKey, uid]
+      )
+      notifyAclChanged(roomKey)
+      return { room_key: roomKey, user_id: uid, role: null, restored: 'none', removed: true, deleted: del.rowCount }
+    }
+    const res = await db.query(
+      `update room_members
+       set acl_v2 = true,
+           override_role = null,
+           direct_role_archive = coalesce(direct_role_archive, direct_role),
+           direct_role = null,
+           role = ${sqlResolveMemberRole('null::text', 'team_role', 'folder_role', 'null::text', 'null::text', 'true')},
+           source = ${sqlPrimarySource('null::text', 'team_role', 'folder_role')},
+           updated_at = now()
+       where room_key = $1 and user_id = $2
+       returning ${returning}`,
+      [roomKey, uid]
+    )
+    if (!res.rows.length) throw aclError(404, 'NOT_FOUND', '成员不存在')
+    notifyAclChanged(roomKey)
+    return res.rows[0]
+  }
+
+  if (currentEffective === 'owner' && owners.length <= 1) {
     throw aclError(400, 'LAST_OWNER', '不能取消最后一个所有者')
   }
   const res = await db.query(
-    `insert into room_members (room_key, user_id, role, direct_role, team_role, folder_role, source, source_team_id, source_folder_id)
-     values ($1, $2, $3, $3, null, null, 'direct_share', null, null)
+    `insert into room_members (room_key, user_id, role, direct_role, team_role, folder_role, override_role, acl_v2, source, source_team_id, source_folder_id)
+     values ($1, $2, $3, null, null, null, $3, true, 'override', null, null)
      on conflict (room_key, user_id) do update set
-       direct_role = excluded.direct_role,
-       role = ${sqlEffectiveRole(
-         'excluded.direct_role',
+       direct_role_archive = coalesce(room_members.direct_role_archive, room_members.direct_role),
+       direct_role = null,
+       override_role = $3,
+       acl_v2 = true,
+       role = ${sqlResolveMemberRole(
+         'null::text',
          'room_members.team_role',
-         'room_members.folder_role'
+         'room_members.folder_role',
+         'null::text',
+         '$3',
+         'true'
        )},
-       source = 'direct_share',
+       source = 'override',
        updated_at = now()
      where not $4::boolean or room_members.role <> 'owner'
-     returning room_key, user_id, role, direct_role, team_role, folder_role, source, source_team_id, source_folder_id, created_at, updated_at`,
-    [roomKey, uid, nextRole, !options.bypass && actorRole === 'manager']
+     returning ${returning}`,
+    [roomKey, uid, overrideRole, managerActor]
   )
   if (!res.rows.length) throw aclError(403, 'OWNER_REQUIRED', '只有所有者可以修改所有者权限')
+  notifyAclChanged(roomKey)
   return res.rows[0]
 }
 
@@ -1054,7 +1224,7 @@ async function removeMember(db, roomKey, targetUserId, corpId = '', actorUserId 
   const uid = await resolveUserId(db, targetUserId, corpId)
   if (!uid) throw aclError(400, 'BAD_REQUEST', '缺少用户')
   const current = await db.query(
-    `select user_id, role, direct_role, team_role, folder_role from room_members
+    `select user_id, role, direct_role, team_role, folder_role, override_role, acl_v2 from room_members
       where room_key = $1 and user_id = $2`,
     [roomKey, uid]
   )
@@ -1062,24 +1232,16 @@ async function removeMember(db, roomKey, targetUserId, corpId = '', actorUserId 
     throw aclError(404, 'NOT_FOUND', '成员不存在')
   }
   const currentRow = current.rows[0]
+  const currentEffective = resolveMemberRole(currentRow)
   const actor = !options.bypass && actorUserId ? await getAccess(db, roomKey, actorUserId) : null
   const managerActor = !!(actor && actor.role === 'manager')
-  if (managerActor && effectiveRole(currentRow.direct_role, currentRow.team_role, currentRow.folder_role, currentRow.role) === 'owner') {
+  if (managerActor && currentEffective === 'owner') {
     throw aclError(403, 'OWNER_REQUIRED', '只有所有者可以移除所有者权限')
   }
-  const nextRole = effectiveRole('', currentRow.team_role, currentRow.folder_role)
-  if (
-    effectiveRole(
-      currentRow.direct_role,
-      currentRow.team_role,
-      currentRow.folder_role,
-      currentRow.role
-    ) === 'owner' &&
-    nextRole !== 'owner'
-  ) {
+  if (currentEffective === 'owner') {
     const owners = await db.query(
-       `select count(*)::int as total from room_members
-        where room_key = $1 and role = 'owner' and user_id <> $2`,
+      `select count(*)::int as total from room_members
+       where room_key = $1 and role = 'owner' and user_id <> $2`,
       [roomKey, uid]
     )
     if (Number(owners.rows[0].total) < 1) {
@@ -1087,7 +1249,29 @@ async function removeMember(db, roomKey, targetUserId, corpId = '', actorUserId 
     }
   }
   let result
-  if (currentRow.team_role || currentRow.folder_role) {
+  if (currentRow.acl_v2) {
+    // Override rows: removing the per-file setting restores inheritance when
+    // a folder/team source exists, otherwise the member loses access.
+    if (!normalizeFolderRole(currentRow.folder_role) && !normalizeRole(currentRow.team_role)) {
+      result = await db.query(
+        `delete from room_members where room_key = $1 and user_id = $2 and (not $3::boolean or role <> 'owner')`,
+        [roomKey, uid, managerActor]
+      )
+    } else {
+      result = await db.query(
+        `update room_members
+         set override_role = null,
+             acl_v2 = true,
+             direct_role_archive = coalesce(direct_role_archive, direct_role),
+             direct_role = null,
+             role = ${sqlResolveMemberRole('null::text', 'team_role', 'folder_role', 'null::text', 'null::text', 'true')},
+             source = ${sqlPrimarySource('null::text', 'team_role', 'folder_role')},
+             updated_at = now()
+         where room_key = $1 and user_id = $2 and (not $3::boolean or role <> 'owner')`,
+        [roomKey, uid, managerActor]
+      )
+    }
+  } else if (currentRow.team_role || currentRow.folder_role) {
     result = await db.query(
       `update room_members
        set direct_role = null,
@@ -1104,6 +1288,7 @@ async function removeMember(db, roomKey, targetUserId, corpId = '', actorUserId 
     )
   }
   if (managerActor && result.rowCount === 0) throw aclError(403, 'OWNER_REQUIRED', '成员权限已变化，请刷新后重试')
+  notifyAclChanged(roomKey)
   return { ok: true, user_id: uid }
 }
 
@@ -1130,6 +1315,8 @@ async function setFolderRole(db, roomKey, targetUserId, role, folderId, corpId =
         direct_role: null,
         team_role: null,
         folder_role: nextRole,
+        override_role: null,
+        acl_v2: false,
         source: 'folder',
         source_team_id: null,
         source_folder_id: folder,
@@ -1140,14 +1327,13 @@ async function setFolderRole(db, roomKey, targetUserId, role, folderId, corpId =
     } else {
       current.folder_role = nextRole
       current.source_folder_id = folder
-      current.role = effectiveRole(current.direct_role, current.team_role, current.folder_role)
-      current.source = sourceForRoles(
-        current.direct_role,
-        current.team_role,
-        current.folder_role
-      )
+      current.role = resolveMemberRole(current)
+      current.source = current.acl_v2
+        ? current.override_role ? 'override' : 'inherit'
+        : sourceForRoles(current.direct_role, current.team_role, current.folder_role)
       current.updated_at = new Date().toISOString()
     }
+    notifyAclChanged(key)
     return { ...current }
   }
   const res = await db.query(
@@ -1157,20 +1343,28 @@ async function setFolderRole(db, roomKey, targetUserId, role, folderId, corpId =
      on conflict (room_key, user_id) do update set
        folder_role = excluded.folder_role,
        source_folder_id = excluded.source_folder_id,
-       role = ${sqlEffectiveRole(
+       role = ${sqlResolveMemberRole(
          'room_members.direct_role',
          'room_members.team_role',
-         'excluded.folder_role'
+         'excluded.folder_role',
+         'room_members.role',
+         'room_members.override_role',
+         'room_members.acl_v2'
        )},
-       source = ${sqlPrimarySource(
-         'room_members.direct_role',
-         'room_members.team_role',
-         'excluded.folder_role'
-       )},
+       source = case
+         when room_members.acl_v2 and room_members.override_role is not null then 'override'
+         when room_members.acl_v2 then 'inherit'
+         else ${sqlPrimarySource(
+           'room_members.direct_role',
+           'room_members.team_role',
+           'excluded.folder_role'
+         )}
+       end,
        updated_at = now()
-     returning room_key, user_id, role, direct_role, team_role, folder_role, source, source_team_id, source_folder_id, created_at, updated_at`,
+     returning room_key, user_id, role, direct_role, team_role, folder_role, override_role, acl_v2, source, source_team_id, source_folder_id, created_at, updated_at`,
     [roomKey, uid, nextRole, folder]
   )
+  notifyAclChanged(roomKey)
   return res.rows[0]
 }
 
@@ -1186,19 +1380,24 @@ async function clearFolderRole(db, roomKey, targetUserId, corpId = '') {
     if (idx < 0) return { ok: true, user_id: uid, removed: false }
     const row = db.members[idx]
     if (!row.folder_role) return { ok: true, user_id: uid, removed: false }
-    if (row.direct_role || row.team_role) {
+    const hasOtherSource =
+      !!row.direct_role || !!row.team_role || (!!row.acl_v2 && !!row.override_role)
+    if (hasOtherSource) {
       row.folder_role = null
       row.source_folder_id = null
-      row.role = effectiveRole(row.direct_role, row.team_role, null)
-      row.source = sourceForRoles(row.direct_role, row.team_role, null)
+      row.role = resolveMemberRole(row)
+      row.source = row.acl_v2
+        ? row.override_role ? 'override' : 'inherit'
+        : sourceForRoles(row.direct_role, row.team_role, null)
       row.updated_at = new Date().toISOString()
     } else {
       db.members.splice(idx, 1)
     }
+    notifyAclChanged(key)
     return { ok: true, user_id: uid, removed: true }
   }
   const current = await db.query(
-    `select user_id, role, direct_role, team_role, folder_role from room_members
+    `select user_id, role, direct_role, team_role, folder_role, override_role, acl_v2 from room_members
       where room_key = $1 and user_id = $2`,
     [roomKey, uid]
   )
@@ -1209,13 +1408,26 @@ async function clearFolderRole(db, roomKey, targetUserId, corpId = '') {
   if (!row.folder_role) {
     return { ok: true, user_id: uid, removed: false }
   }
-  if (row.direct_role || row.team_role) {
+  const hasOtherSource =
+    !!row.direct_role || !!row.team_role || (!!row.acl_v2 && !!normalizeOverrideRole(row.override_role))
+  if (hasOtherSource) {
     await db.query(
       `update room_members
        set folder_role = null,
            source_folder_id = null,
-           role = ${sqlEffectiveRole('direct_role', 'team_role', 'null::text')},
-           source = ${sqlPrimarySource('direct_role', 'team_role', 'null::text')},
+           role = ${sqlResolveMemberRole(
+             'direct_role',
+             'team_role',
+             'null::text',
+             'role',
+             'override_role',
+             'acl_v2'
+           )},
+           source = case
+             when acl_v2 and override_role is not null then 'override'
+             when acl_v2 then 'inherit'
+             else ${sqlPrimarySource('direct_role', 'team_role', 'null::text')}
+           end,
            updated_at = now()
        where room_key = $1 and user_id = $2`,
       [roomKey, uid]
@@ -1226,6 +1438,7 @@ async function clearFolderRole(db, roomKey, targetUserId, corpId = '') {
       [roomKey, uid]
     )
   }
+  notifyAclChanged(roomKey)
   return { ok: true, user_id: uid, removed: true }
 }
 
@@ -1237,16 +1450,21 @@ async function clearRoomFolderRoles(db, roomKey) {
     for (let i = db.members.length - 1; i >= 0; i--) {
       const row = db.members[i]
       if (row.room_key !== key || !row.folder_role) continue
-      if (row.direct_role || row.team_role) {
+      const hasOtherSource =
+        !!row.direct_role || !!row.team_role || (!!row.acl_v2 && !!row.override_role)
+      if (hasOtherSource) {
         row.folder_role = null
         row.source_folder_id = null
-        row.role = effectiveRole(row.direct_role, row.team_role, null)
-        row.source = sourceForRoles(row.direct_role, row.team_role, null)
+        row.role = resolveMemberRole(row)
+        row.source = row.acl_v2
+          ? row.override_role ? 'override' : 'inherit'
+          : sourceForRoles(row.direct_role, row.team_role, null)
         row.updated_at = new Date().toISOString()
       } else {
         db.members.splice(i, 1)
       }
     }
+    notifyAclChanged(key)
     return { ok: true }
   }
   // Remove folder-only grants before recomputing role: their remaining role
@@ -1256,20 +1474,34 @@ async function clearRoomFolderRoles(db, roomKey) {
      where room_key = $1
        and folder_role is not null
        and direct_role is null
-       and team_role is null`,
+       and team_role is null
+       and (not coalesce(acl_v2, false) or override_role is null)`,
     [key]
   )
   await db.query(
     `update room_members
      set folder_role = null,
          source_folder_id = null,
-         role = ${sqlEffectiveRole('direct_role', 'team_role', 'null::text')},
-         source = ${sqlPrimarySource('direct_role', 'team_role', 'null::text')},
+         role = ${sqlResolveMemberRole(
+           'direct_role',
+           'team_role',
+           'null::text',
+           'role',
+           'override_role',
+           'acl_v2'
+         )},
+         source = case
+           when acl_v2 and override_role is not null then 'override'
+           when acl_v2 then 'inherit'
+           else ${sqlPrimarySource('direct_role', 'team_role', 'null::text')}
+         end,
          updated_at = now()
      where room_key = $1 and folder_role is not null
-       and (direct_role is not null or team_role is not null)`,
+       and (direct_role is not null or team_role is not null
+         or (coalesce(acl_v2, false) and override_role is not null))`,
     [key]
   )
+  notifyAclChanged(key)
   return { ok: true }
 }
 
@@ -1316,11 +1548,19 @@ function readonlyCommandAllowed(name, data) {
 
 module.exports = {
   ROLES,
+  FOLDER_ROLES,
+  OVERRIDE_ROLES,
   normalizeUserId,
   normalizeRole,
+  normalizeFolderRole,
+  normalizeOverrideRole,
   effectiveRole,
+  resolveMemberRole,
+  overrideLocksShare,
+  memberAccessSource,
   sourceForRoles,
   sqlEffectiveRole,
+  sqlResolveMemberRole,
   sqlPrimarySource,
   normalizeActorId,
   parseSuperAdminIds,
@@ -1350,6 +1590,8 @@ module.exports = {
   clearFolderRole,
   clearRoomFolderRoles,
   applyFolderRoles,
+  aclChangeEvents,
+  notifyAclChanged,
   readonlyCommandAllowed,
   aclError
 }

@@ -110,6 +110,18 @@ function attachCollabV2(httpServer, options = {}) {
     pingTimeout: 20000,
     maxHttpBufferSize: 8 * 1024 * 1024
   })
+  // ACL changes drop cached write access so the next operation re-checks the
+  // fresh per-file setting instead of the short-lived cache. Multi-instance
+  // deployments keep EDIT_ACCESS_TTL_MS as the cross-instance fallback.
+  const onAclChanged = roomKey => {
+    const sockets = io.sockets && io.sockets.sockets
+    if (!sockets || typeof sockets.values !== 'function') return
+    for (const socket of sockets.values()) {
+      const cache = socket.data && socket.data.editAccess
+      if (cache && cache.has(roomKey)) cache.delete(roomKey)
+    }
+  }
+  roomAcl.aclChangeEvents.on('changed', onAclChanged)
   const onMcpPresence = roomKey => broadcastPresence(roomKey)
   mcpPresence.changes.on('change', onMcpPresence)
   const mcpPresenceTimer = setInterval(() => mcpPresence.prune(), 5000)
@@ -499,6 +511,7 @@ function attachCollabV2(httpServer, options = {}) {
   async function stop() {
     clearInterval(mcpPresenceTimer)
     mcpPresence.changes.off('change', onMcpPresence)
+    roomAcl.aclChangeEvents.off('changed', onAclChanged)
     if (operationEventBridge) {
       await operationEventBridge.stop()
       if (activeOperationEventBridge === operationEventBridge) {
