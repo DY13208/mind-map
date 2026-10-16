@@ -72,8 +72,9 @@
           </nav>
           <div v-if="childFolders.length" class="folderGrid">
             <FolderCard
-              v-for="folder in childFolders"
+              v-for="(folder, index) in childFolders"
               :key="folder.id"
+              :style="{ '--i': index }"
               :folder="folder"
               :editable="canManage"
               :allow-share="false"
@@ -82,15 +83,15 @@
           </div>
           <div v-if="visibleRooms.length" class="roomGrid">
             <RoomCard
-              v-for="room in visibleRooms"
+              v-for="(room, index) in visibleRooms"
               :key="room.id"
+              :style="{ '--i': childFolders.length + index }"
               :room="room"
-              :allow-move-to-team="false"
               v-on="roomListeners"
             />
           </div>
-          <el-pagination v-if="total > 0" :current-page="page" :page-size="limit"
-            :total="total" layout="prev, pager, next" @current-change="onRoomPage" />
+          <el-pagination v-if="total > limit" :current-page="page" :page-size="limit"
+            :total="total" layout="prev, next" @current-change="onRoomPage" />
           <EmptyState
             v-if="!loading && !childFolders.length && !visibleRooms.length"
             title="暂无内容"
@@ -209,25 +210,20 @@ export default {
     folderListeners() {
       return {
         open: this.openFolder,
-        rename: this.renameFolder,
+        'rename-inline': this.renameFolder,
         delete: this.deleteFolder
       }
     },
     roomListeners() {
-      return Object.fromEntries(
-        [
-          'open',
-          'favorite',
-          'rename',
-          'move',
-          'share',
-          'history',
-          'delete'
-        ].map(action => [
-          action,
-          room => this.$refs.actions.handle(action, room)
-        ])
-      )
+      return {
+        ...Object.fromEntries(
+          ['open', 'favorite', 'move', 'share', 'delete'].map(action => [
+            action,
+            room => this.$refs.actions.handle(action, room)
+          ])
+        ),
+        'rename-inline': (room, name) => this.$refs.actions.renameDirect(room, name)
+      }
     }
   },
   watch: {
@@ -346,29 +342,19 @@ export default {
         this.busy = false
       }
     },
-    async renameFolder(folder) {
+    async renameFolder(folder, name) {
       if (!this.canManage) {
         this.$message.error('只有团队所有者或管理员可以重命名文件夹')
         return
       }
+      if (this.busy) return
       try {
-        const result = await this.$prompt('请输入新的文件夹名称', '重命名文件夹', {
-          inputValue: folder.name,
-          inputValidator: value =>
-            (!!value && !!value.trim() && value.length <= 60) ||
-            '请输入 1 至 60 个字符'
-        })
         this.busy = true
-        await teamService.renameFolder(
-          this.$route.params.id,
-          folder.id,
-          result.value.trim()
-        )
+        await teamService.renameFolder(this.$route.params.id, folder.id, name)
         await this.load()
         this.$message.success('文件夹已重命名')
       } catch (error) {
-        if (error !== 'cancel' && error !== 'close')
-          this.$message.error(error.message || '重命名失败')
+        this.$message.error(error.message || '重命名失败')
       } finally {
         this.busy = false
       }
@@ -452,20 +438,21 @@ export default {
     border-radius: 15px;
     display: grid;
     place-items: center;
-    background: #0d9066;
-    color: white;
+    background: var(--ui-primary);
+    color: var(--ui-on-primary);
     font-size: 25px;
   }
   h1 {
     margin: 0;
     font-size: 25px;
+    color: var(--ui-text);
   }
   p {
     margin: 6px 0;
-    color: #63776f;
+    color: var(--ui-text-secondary);
   }
   span {
-    color: #76897f;
+    color: var(--ui-text-muted);
     font-size: 12px;
   }
   .teamActions {
@@ -483,22 +470,22 @@ export default {
   gap: 2px;
   margin: 0 0 12px;
   .folderSep {
-    color: #83918c;
+    color: var(--ui-text-muted);
   }
 }
 .roomGrid,
 .folderGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 28px 20px;
 }
 .folderGrid {
-  margin-bottom: 14px;
+  margin-bottom: 28px;
 }
 .memberPanel {
   max-width: 720px;
-  background: white;
-  border: 1px solid #e3e9e6;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
   padding: 12px 20px;
   border-radius: 12px;
 }

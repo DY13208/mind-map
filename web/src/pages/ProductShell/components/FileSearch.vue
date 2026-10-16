@@ -89,14 +89,15 @@ export default {
 
   /deep/ .el-input__inner {
     border: 0;
-    background: var(--ui-surface-muted);
+    background: var(--ui-input-bg);
+    color: var(--ui-text);
     border-radius: 8px;
     height: 36px;
     line-height: 36px;
     box-shadow: none;
 
     &:focus {
-      background: #eef2f0;
+      background: var(--ui-input-focus-bg);
     }
   }
 }

@@ -308,4 +308,69 @@ export default {
     }
   }
 }
+@import (reference) '../../../style/notch.less';
+
+// ===== 右侧竖向工具栏：外框色悬浮胶囊 =====
+.sidebarTriggerContainer.sidebarTriggerContainer {
+  right: calc(@mm-frame-width + 8px);
+
+  &.hasActive {
+    right: 332px;
+  }
+
+  .trigger,
+  &.isDark .trigger {
+    .mm-notch-capsule();
+    width: 46px;
+    padding: 6px 5px;
+    box-sizing: border-box;
+  }
+
+  .authSection,
+  &.isDark .trigger .authSection {
+    border-bottom-color: var(--mm-notch-sep);
+  }
+
+  .triggerItem,
+  &.isDark .trigger .triggerItem {
+    height: 34px;
+    margin: 2px 0;
+    border-radius: 10px;
+    color: var(--mm-notch-icon);
+    font-weight: normal;
+    transition: @mm-notch-transition;
+
+    &:hover {
+      background-color: var(--mm-notch-hover-bg);
+      color: var(--mm-notch-icon-hover);
+    }
+
+    .triggerIcon {
+      font-size: 18px;
+    }
+
+    .mm-notch-glyph();
+
+    .triggerName {
+      font-weight: 500;
+    }
+
+    // 激活项：药丸 + 显示名称（如「主题」）
+    &.active {
+      height: auto;
+      padding: 6px 0;
+      gap: 2px;
+      .mm-notch-pill();
+
+      .triggerName {
+        display: block;
+        font-size: 11px;
+        line-height: 1.2;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    }
+  }
+}
 </style>

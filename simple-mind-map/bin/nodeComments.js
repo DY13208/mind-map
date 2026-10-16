@@ -4,6 +4,7 @@
 // 协作提交管道（房间锁、修订号、历史、实时广播）。评论补丁在房间锁内基于最新数据
 // 计算，并由 fieldMerge 按评论 id 合并，所以并发评论互不覆盖。
 const crypto = require('crypto')
+const { resolveDisplayName } = require('./displayName')
 const {
   COMMENT_MAX_PER_NODE,
   COMMENT_ID_RE,
@@ -51,7 +52,11 @@ function actorOf(req, access = {}) {
   const userId = String(access.userId || user.id || mcp.principalId || 'anonymous').slice(0, 160)
   return {
     userId,
-    userName: String(user.name || user.display_name || user.username || mcp.principalName || userId).slice(0, 64),
+    userName: String(
+      (user && Object.keys(user).length ? resolveDisplayName(user) : '') ||
+        mcp.principalName ||
+        userId
+    ).slice(0, 64),
     avatar: String(user.avatar || '')
   }
 }

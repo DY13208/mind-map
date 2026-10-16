@@ -86,127 +86,112 @@ export function mixColor(a, b, t, fallback = '#ffffff') {
   return toHex({ r: ca.r + (cb.r - ca.r) * t, g: ca.g + (cb.g - ca.g) * t, b: ca.b + (cb.b - ca.b) * t })
 }
 
-// 标签配色：底色基于节点填充色提亮并带一点主题蓝，保证在彩色节点上也清晰
+// 评论标签配色：实心填充，取节点边框色，让标签看起来像是从边框“长”出来的
 export function commentTabColors({ fill, border, dark = false, resolved = false } = {}) {
-  const base = parseColor(fill)
-  const solidFill = base && base.a > 0.05 ? toHex(base) : dark ? '#262a30' : '#ffffff'
   const accent = resolved ? (dark ? '#8c9198' : '#98a2b3') : dark ? '#69b1ff' : '#3370ff'
-  const tabFill = dark
-    ? mixColor(mixColor(solidFill, '#000000', 0.2), accent, 0.2)
-    : mixColor(mixColor(solidFill, '#ffffff', 0.55), accent, resolved ? 0.06 : 0.1)
-  // 图标颜色按标签底色亮度选择，保证彩色节点 / 暗色模式下都清晰
+  const borderColor = parseColor(border)
+  const base = borderColor && borderColor.a > 0.05 ? toHex(borderColor) : accent
+  const tabFill = resolved ? mixColor(base, dark ? '#3a3f46' : '#c9cdd4', 0.6, accent) : base
+  // 文字/图标颜色根据标签底色的明暗选择，保证在任意边框色下可读
   const lum = luminance(tabFill)
-  const iconColor = resolved
-    ? lum > 0.45 ? '#7d8796' : '#a6adb8'
-    : lum > 0.45 ? '#3370ff' : '#8cc4ff'
+  const iconColor = lum > 0.55 ? '#1f2329' : '#ffffff'
   return {
     accent,
     iconColor,
     tabFill,
-    border: parseColor(border) ? border : accent,
-    innerLine: mixColor(tabFill, accent, 0.35),
+    border: tabFill,
+    innerLine: tabFill,
     dot: '#f54a45',
-    dotRing: tabFill
+    dotRing: tabFill,
+    fill
   }
 }
 
 const r1 = n => Math.round(n * 10) / 10
 
+// 评论标签尺寸（与节点无关，只取决于数字长度）：约 17px 高、12px 字号、11px 图标
+export function commentTabSize({ label = '1' } = {}) {
+  const icon = 11
+  const fontSize = 12
+  const textW = Math.ceil(String(label).length * fontSize * 0.62)
+  const padL = 5
+  const padR = 6
+  const gap = 3
+  const tabH = 17
+  const tabW = padL + icon + gap + textW + padR
+  return { icon, fontSize, textW, padL, padR, gap, tabH, tabW }
+}
+
 /**
- * 右上角标签几何（节点组坐标系）。
- * width/height 为节点总尺寸（含边框），节点轮廓位于 [hb, width-hb]。
- * merge=true：标签与节点边框融合——外轮廓从顶边弯起，经标签顶部绕到右边，
- *   内侧用一条 S 形曲线与节点内容分隔；标签可略高于节点顶部（lift），
- *   以免压到文字（contentTop 为内容顶部 y）。
- * merge=false：非矩形形状，退化为悬浮在右上角的圆角标签。
+ * 右上角评论标签几何（节点局部坐标）。
+ * width/height 为节点总尺寸（含边框），节点外框位于 [hb, width-hb]。
+ * merge=true（矩形/圆角矩形）：标签嵌在节点右上角内侧，上边、右边与节点边框重合，
+ *   填充色同边框色，形成从边框长出的“页签”；节点布局在右侧预留了宽度（见
+ *   nodeLayout.getNodeRect 的 commentReserve），文字永远不会落在标签下方，
+ *   标签也不伸出节点外框，所以不会盖住相邻节点，各布局无需改动。
+ * merge=false（其他形状）：退化为一个紧凑的小胶囊，放在预留列的顶部。
  */
 export function commentTabGeometry({
   width,
   height,
   borderWidth = 0,
   borderRadius = 0,
-  contentTop = 0,
-  iconSize = 16,
   label = '1',
   merge = true
 } = {}) {
   const hb = Math.max(0, Number(borderWidth) || 0) / 2
   const W = Math.max(0, Number(width) || 0)
   const H = Math.max(0, Number(height) || 0)
-  const icon = Math.max(11, Math.min(16, Math.round((Number(iconSize) || 16) * 0.8)))
-  const fontSize = Math.max(11, Math.round(icon * 0.86))
-  const textW = Math.ceil(String(label).length * fontSize * 0.62)
-  const padL = 7
-  const padR = 8
-  const gap = 3
-  const tabH = icon + 8
-  let tabW = padL + icon + gap + textW + padR
+  const { icon, fontSize, padL, gap, tabH, tabW } = commentTabSize({ label })
   const right = W - hb
-  const top0 = hb
-  // 节点太窄时不超过节点宽度的 70%
-  tabW = Math.min(tabW, Math.max(icon + padL + padR, (W - 2 * hb) * 0.7))
+  const top = hb
   const left = right - tabW
-  let lift
-  let top
-  let curve
+  const yb = top + tabH
   let rt
   let outerPath
   let fillPath
-  let innerPath
-  let yb
   if (merge) {
     const R = Math.max(0, Math.min(Number(borderRadius) || 0, (H - 2 * hb) / 2))
-    // 标签底部不压到内容：内容上方留 1px
-    lift = Math.max(0, Math.ceil(top0 + tabH - (Number(contentTop) || 0) + 1))
-    lift = Math.min(lift, tabH - 6)
-    top = top0 - lift
-    curve = Math.min(10, Math.round(tabH * 0.45))
-    rt = lift > 0 ? Math.max(3, Math.min(R || 4, tabH / 2)) : Math.min(R, tabH / 2)
-    yb = Math.max(top + tabH, top0 + R + hb + 1)
-    yb = Math.min(yb, H - hb - R)
-    const sx = left - curve
-    const outer =
-      lift > 0
-        ? `M${r1(sx)},${r1(top0)} C${r1(left - curve * 0.4)},${r1(top0)} ${r1(left - curve * 0.55)},${r1(top)} ${r1(left)},${r1(top)} `
-        : `M${r1(sx)},${r1(top0)} `
-    const corner = `L${r1(right - rt)},${r1(top)} Q${r1(right)},${r1(top)} ${r1(right)},${r1(top + rt)} L${r1(right)},${r1(yb)}`
-    outerPath = outer + corner
-    const inner = `M${r1(right)},${r1(yb)} L${r1(left + curve)},${r1(yb)} C${r1(left - curve * 0.15)},${r1(yb)} ${r1(left - curve * 0.35)},${r1(top0)} ${r1(sx)},${r1(top0)}`
-    innerPath = inner
-    fillPath = `${outerPath} L${r1(left + curve)},${r1(yb)} C${r1(left - curve * 0.15)},${r1(yb)} ${r1(left - curve * 0.35)},${r1(top0)} ${r1(sx)},${r1(top0)} Z`
+    rt = Math.min(R, tabH)
+    const bl = Math.min(6, tabH / 2)
+    const corner = rt > 0
+      ? `L${r1(right - rt)},${r1(top)} Q${r1(right)},${r1(top)} ${r1(right)},${r1(top + rt)} `
+      : `L${r1(right)},${r1(top)} `
+    // 与节点边框重合的部分（上边 + 右边），选中态时跟随节点边框高亮
+    outerPath = `M${r1(left)},${r1(top)} ${corner}L${r1(right)},${r1(Math.max(yb, top + rt))}`
+    fillPath = `M${r1(left)},${r1(top)} ${corner}L${r1(right)},${r1(Math.max(yb, top + rt))} L${r1(right)},${r1(yb)} L${r1(left + bl)},${r1(yb)} Q${r1(left)},${r1(yb)} ${r1(left)},${r1(yb - bl)} Z`
   } else {
-    lift = Math.round(tabH / 2)
-    top = top0 - lift
     rt = tabH / 2
-    curve = 0
-    yb = top + tabH
     const l = left - 2
     const r = right - 2
-    outerPath = `M${r1(l + rt)},${r1(top)} L${r1(r - rt)},${r1(top)} A${r1(rt)},${r1(rt)} 0 0 1 ${r1(r - rt)},${r1(yb)} L${r1(l + rt)},${r1(yb)} A${r1(rt)},${r1(rt)} 0 0 1 ${r1(l + rt)},${r1(top)} Z`
+    const t = top + 2
+    const b = t + tabH
+    outerPath = `M${r1(l + rt)},${r1(t)} L${r1(r - rt)},${r1(t)} A${r1(rt)},${r1(rt)} 0 0 1 ${r1(r - rt)},${r1(b)} L${r1(l + rt)},${r1(b)} A${r1(rt)},${r1(rt)} 0 0 1 ${r1(l + rt)},${r1(t)} Z`
     fillPath = outerPath
-    innerPath = ''
   }
   const shift = merge ? 0 : -2
-  const midY = top + tabH / 2
+  const vshift = merge ? 0 : 2
+  const tabTop = top + vshift
+  const midY = tabTop + tabH / 2
   const iconX = left + padL + shift
-  const dotR = 3.5
+  const dotR = 3
   return {
     merge,
     left: left + shift,
     right: right + shift,
-    top,
-    bottom: yb,
+    top: tabTop,
+    bottom: tabTop + tabH,
     tabW,
     tabH,
-    lift,
+    lift: 0,
     radius: rt,
     outerPath,
     fillPath,
-    innerPath,
+    innerPath: '',
     icon: { x: r1(iconX), y: r1(midY - icon / 2), size: icon },
     text: { x: r1(iconX + icon + gap), y: r1(midY), size: fontSize },
-    dot: { cx: r1(right + shift - Math.max(2, rt * 0.35)), cy: r1(top + Math.max(2, rt * 0.35)), r: dotR },
-    hit: { x: r1(left - (merge ? curve * 0.5 : 0) + shift), y: r1(top), w: r1(tabW + (merge ? curve * 0.5 : 0)), h: r1(Math.max(tabH, yb - top)) }
+    dot: { cx: r1(left + shift), cy: r1(tabTop), r: dotR },
+    hit: { x: r1(left + shift), y: r1(tabTop), w: r1(tabW), h: r1(tabH) }
   }
 }
 

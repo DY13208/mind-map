@@ -47,6 +47,10 @@
             name="results"
           />
           <el-tab-pane
+            :label="`@我的${state.mentionUnread ? ' ' + state.mentionUnread : ''}`"
+            name="mentions"
+          />
+          <el-tab-pane
             :label="
               `更新公告${
                 state.announcementUnread ? ' ' + state.announcementUnread : ''
@@ -378,6 +382,120 @@
             <p>所有者处理后会在这里通知你</p>
           </div>
         </div>
+        <div
+          v-else-if="state.activeTab === 'mentions'"
+          ref="messageContent"
+          v-loading="state.mentionLoading && !state.mentions.length"
+          class="messageContent mentionContent"
+        >
+          <div class="sectionIntro">
+            <div>
+              <h3>提到我的</h3>
+              <p>同事在节点评论中 @你 时会出现在这里</p>
+            </div>
+            <div class="mentionTools">
+              <button
+                type="button"
+                class="markAllRead"
+                data-testid="mentions-mark-all"
+                :disabled="!state.mentionUnread || markingAll"
+                @click="markAllMentions"
+              >
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/></svg
+                ><span>全部标为已读</span>
+              </button>
+              <button
+                type="button"
+                class="refreshMessage"
+                aria-label="刷新提及"
+                @click="reloadMentions"
+              >
+                <i class="el-icon-refresh" />
+              </button>
+            </div>
+          </div>
+          <div
+            v-if="state.mentionError && !state.mentions.length"
+            class="emptyMessages mentionErrorState"
+            role="alert"
+          >
+            <i class="el-icon-warning-outline" />
+            <h3>提及加载失败</h3>
+            <p>{{ state.mentionError }}</p>
+            <el-button size="small" @click="reloadMentions">重试</el-button>
+          </div>
+          <ul v-else-if="state.mentions.length" class="mentionList">
+            <li
+              v-for="item in state.mentions"
+              :key="item.room_key + ':' + item.id"
+              class="mentionItem"
+              :class="{ unread: item.unread }"
+              role="button"
+              tabindex="0"
+              :data-mention-id="item.id"
+              :aria-label="`${item.author_name} 在 ${item.room_name} 中提到了你`"
+              @click="openMention(item)"
+              @keydown.enter.prevent="openMention(item)"
+            >
+              <span
+                class="mentionAvatar"
+                :style="{ background: mentionColor(item) }"
+                aria-hidden="true"
+              >
+                <img
+                  v-if="item.author_avatar && !brokenAvatars[item.author_avatar]"
+                  :src="item.author_avatar"
+                  alt=""
+                  @error="$set(brokenAvatars, item.author_avatar, true)"
+                />
+                <template v-else>{{ mentionInitial(item.author_name) }}</template>
+              </span>
+              <div class="mentionBody">
+                <div class="mentionTitle">
+                  <span
+                    ><b>{{ item.author_name }}</b> 在
+                    <b>{{ item.room_name }}</b> 中提到了你</span
+                  >
+                  <i v-if="item.unread" class="mentionDot" title="未读" />
+                </div>
+                <div class="mentionTime">
+                  <span>{{ absoluteTime(item.created_at) }}</span>
+                  <span>{{ relativeTime(item.created_at) }}</span>
+                </div>
+                <div class="mentionQuote"
+                  ><span
+                    v-for="(seg, index) in segments(item)"
+                    :key="index"
+                    :class="{ mentionAt: seg.mention }"
+                    >{{ seg.text }}</span
+                  ></div
+                >
+                <div class="mentionRef">
+                  <i class="el-icon-share" /><span>节点：{{ item.node_text }}</span>
+                </div>
+              </div>
+            </li>
+          </ul>
+          <div v-else-if="!state.mentionLoading" class="emptyMessages">
+            <i class="el-icon-bell" />
+            <h3>暂时没有人 @你</h3>
+            <p>同事在评论中 @你 后，会在这里提醒</p>
+          </div>
+          <div v-if="state.mentionHasMore" class="mentionMore">
+            <el-button
+              type="text"
+              :loading="state.mentionLoading"
+              @click="loadMoreMentions"
+              >加载更多</el-button
+            >
+          </div>
+          <p
+            v-if="state.mentionError && state.mentions.length"
+            class="mentionInlineError"
+          >
+            {{ state.mentionError }}
+          </p>
+        </div>
         <div v-else ref="messageContent" class="messageContent">
           <article
             v-for="announcement in announcements"
@@ -396,7 +514,10 @@
           </article>
         </div>
         <footer
-          v-if="state.activeTab !== 'announcements'"
+          v-if="
+            state.activeTab !== 'announcements' &&
+              state.activeTab !== 'mentions'
+          "
           class="messageFooter"
         >
           <span
@@ -429,8 +550,19 @@ import {
   startNotifications,
   stopNotifications,
   refreshNotifications,
-  refreshApprovalHistory
+  refreshApprovalHistory,
+  refreshMentions,
+  markMentionRead,
+  markAllMentionsRead
 } from '@/services/accessNotificationState'
+import {
+  formatMentionAbsolute,
+  formatMentionRelative,
+  mentionInitial,
+  mentionAvatarColor,
+  mentionRoute,
+  mentionSegments
+} from '@/utils/mentionFormat'
 export default {
   name: 'AccessNotifications',
   components: { UserAvatar },
@@ -445,7 +577,10 @@ export default {
     rejectingId: '',
     decisionReason: '',
     seenBusy: false,
-    searchTimer: null
+    searchTimer: null,
+    markingAll: false,
+    mentionNow: Date.now(),
+    brokenAvatars: {}
   }),
   computed: {
     currentTotal() {
@@ -504,9 +639,78 @@ export default {
       return this.roles[item.id] || item.requested_role
     },
     refresh() {
+      if (this.state.activeTab === 'mentions') return this.reloadMentions()
       return this.state.activeTab === 'history'
         ? refreshApprovalHistory()
         : refreshNotifications()
+    },
+    mentionInitial,
+    mentionColor(item) {
+      return mentionAvatarColor(item)
+    },
+    absoluteTime(value) {
+      return formatMentionAbsolute(value, this.mentionNow)
+    },
+    relativeTime(value) {
+      return formatMentionRelative(value, this.mentionNow)
+    },
+    segments(item) {
+      return mentionSegments(item.content, item.mentions)
+    },
+    reloadMentions() {
+      this.mentionNow = Date.now()
+      return refreshMentions(true)
+    },
+    loadMoreMentions() {
+      this.mentionNow = Date.now()
+      return refreshMentions(false)
+    },
+    async markAllMentions() {
+      if (this.markingAll) return
+      this.markingAll = true
+      try {
+        await markAllMentionsRead()
+        this.$message.success('已全部标为已读')
+      } catch (error) {
+        this.$message.error(error.message || '操作失败，请重试')
+      } finally {
+        this.markingAll = false
+      }
+    },
+    // 标记已读 → 关闭消息中心 → 打开脑图并定位到节点、展开评论卡片
+    openMention(item) {
+      markMentionRead(item)
+      this.state.visible = false
+      const target = mentionRoute(item)
+      const request = () =>
+        window.dispatchEvent(
+          new CustomEvent('mindmap:focus-comment', {
+            detail: {
+              room: target.query.room,
+              node: target.query.focus,
+              comment: target.query.comment
+            }
+          })
+        )
+      if (!this.$router) {
+        this.$emit('open-file', item.room_key)
+        return
+      }
+      const current = (this.$route && this.$route.query) || {}
+      if (
+        this.$route &&
+        this.$route.path === '/' &&
+        String(current.room || '') === target.query.room &&
+        String(current.focus || '') === target.query.focus &&
+        String(current.comment || '') === target.query.comment
+      ) {
+        // 地址没变（已在该脑图且刚看过同一条），直接让编辑页重新定位
+        request()
+        return
+      }
+      this.$router.push(target).catch(err => {
+        if (err && err.name === 'NavigationDuplicated') request()
+      })
     },
     filterHistory() {
       window.clearTimeout(this.searchTimer)
@@ -543,6 +747,7 @@ export default {
     onTab() {
       if (this.state.activeTab === 'history') refreshApprovalHistory()
       if (this.state.activeTab === 'results') this.markResultsSeen()
+      if (this.state.activeTab === 'mentions') this.reloadMentions()
       if (this.state.activeTab === 'announcements') {
         try {
           window.localStorage.setItem(
@@ -1010,6 +1215,151 @@ button:focus-visible {
   outline: 2px solid #087854;
   outline-offset: 2px;
 }
+.mentionTools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.markAllRead {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #087854;
+  font-size: 12px;
+  cursor: pointer;
+}
+.markAllRead:hover:not(:disabled) {
+  background: #eaf5ef;
+}
+.markAllRead:disabled {
+  color: #a3b0a9;
+  cursor: default;
+}
+.mentionList {
+  list-style: none;
+  margin: 0;
+  padding: 0 18px;
+  background: #fff;
+  border: 1px solid #e1e8e4;
+  border-radius: 12px;
+}
+.mentionItem {
+  display: flex;
+  gap: 14px;
+  padding: 16px 0;
+  cursor: pointer;
+  border-radius: 8px;
+  outline: none;
+}
+.mentionItem + .mentionItem {
+  border-top: 1px dashed #dbe3df;
+}
+.mentionItem:hover .mentionTitle b:last-of-type,
+.mentionItem:focus-visible .mentionTitle b:last-of-type {
+  color: #087854;
+}
+.mentionItem:focus-visible {
+  box-shadow: 0 0 0 2px #087854;
+}
+.mentionAvatar {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 600;
+}
+.mentionAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.mentionBody {
+  flex: 1;
+  min-width: 0;
+}
+.mentionTitle {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 20px;
+  color: #42544b;
+}
+.mentionTitle b {
+  color: #1e3028;
+  font-weight: 600;
+}
+.mentionDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: #25986d;
+  box-shadow: 0 0 0 3px rgba(37, 152, 109, 0.15);
+}
+.mentionTime {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 3px;
+  font-size: 12px;
+  color: #8a978f;
+}
+.mentionQuote {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f3f6f4;
+  color: #33453c;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.mentionAt {
+  color: #087854;
+  font-weight: 600;
+}
+.mentionRef {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #8a978f;
+  min-width: 0;
+}
+.mentionRef span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mentionMore {
+  text-align: center;
+  padding-top: 8px;
+}
+.mentionMore /deep/ .el-button--text {
+  color: #087854;
+}
+.mentionInlineError {
+  text-align: center;
+  font-size: 12px;
+  color: #c0703d;
+}
+.mentionErrorState /deep/ .el-button {
+  margin-top: 8px;
+}
 @media (max-width: 700px) {
   .requestGrid {
     grid-template-columns: minmax(0, 1fr);
@@ -1104,6 +1454,19 @@ body.isDark .accessNotificationDialog.el-dialog {
   .emptyMessages h3 { color: #d5d9dd; }
   .messageError { background: rgba(230, 140, 70, 0.14); color: #e6a77a; }
   .resultCard, .announcementRow { border-color: #3a3d42; }
+  .markAllRead { color: #4cc596; }
+  .markAllRead:hover:not(:disabled) { background: #2c3036; }
+  .markAllRead:disabled { color: #5f656b; }
+  .mentionList { background: #1f2329; border-color: #3a3d42; }
+  .mentionItem + .mentionItem { border-top-color: #3a3d42; }
+  .mentionTitle { color: #b4bac0; }
+  .mentionTitle b { color: #e6e8eb; }
+  .mentionItem:hover .mentionTitle b:last-of-type { color: #4cc596; }
+  .mentionDot { background: #3fbf8a; box-shadow: 0 0 0 3px rgba(63, 191, 138, 0.18); }
+  .mentionTime, .mentionRef { color: #8b9198; }
+  .mentionQuote { background: #2a2e34; color: #d5d9dd; }
+  .mentionAt { color: #4cc596; }
+  .mentionMore .el-button--text { color: #4cc596; }
   .resultIcon { background: rgba(37, 152, 109, 0.18); color: #4cc596; }
   .resultIcon.rejected { background: rgba(220, 110, 90, 0.16); color: #e39582; }
   button:focus-visible { outline-color: #3fbf8a; }
@@ -1139,5 +1502,14 @@ body.isDark .accessNotificationPopper.el-select-dropdown {
   .popper__arrow::after { border-bottom-color: #25282d !important; }
   &[x-placement^='top'] .popper__arrow { border-top-color: #3a3d42 !important; }
   &[x-placement^='top'] .popper__arrow::after { border-top-color: #25282d !important; }
+}
+body.isDark .accessNotificationDialog .el-loading-mask {
+  background-color: rgba(24, 27, 33, 0.72);
+}
+body.isDark .accessNotificationDialog .el-loading-spinner .path {
+  stroke: #34c759;
+}
+.accessNotificationDialog .el-loading-spinner .path {
+  stroke: #0f8a3a;
 }
 </style>

@@ -1,6 +1,7 @@
 import { CONSTANTS } from '../../../constants/constant'
 import { G, Rect } from '@svgdotjs/svg.js'
 import { createForeignObjectNode } from '../../../utils/index'
+import { commentTabSize } from '../../../utils/nodeComment'
 
 // svg.js translate() 默认以 center 为原点，内部会走
 // getOrigin -> element.bbox() -> getBBox()，对已经挂到画布上的节点每次都会
@@ -212,9 +213,18 @@ function getNodeRect() {
   this.shapePadding.paddingY = shapePaddingY
   // 边框宽度，因为边框是以中线向两端发散，所以边框会超出节点
   const borderWidth = this.getBorderWidth()
+  // 评论标签：在节点右侧预留一列宽度，标签嵌在右上角，文字/图片永远不会落在标签下方
+  let commentReserve = 0
+  let minHeight = 0
+  if (this._commentData && this._commentData.view) {
+    const { tabW, tabH } = commentTabSize({ label: this._commentData.view.label })
+    commentReserve = Math.max(0, Math.ceil(tabW + 3 + borderWidth / 2 - paddingX - shapePaddingX))
+    minHeight = tabH + 6 + borderWidth
+  }
+  this._commentReserve = commentReserve
   return {
-    width: _width + paddingX * 2 + shapePaddingX * 2 + borderWidth,
-    height: _height + paddingY * 2 + shapePaddingY * 2 + borderWidth
+    width: _width + paddingX * 2 + shapePaddingX * 2 + borderWidth + commentReserve,
+    height: Math.max(minHeight, _height + paddingY * 2 + shapePaddingY * 2 + borderWidth)
   }
 }
 
@@ -337,16 +347,16 @@ function layout() {
     this.group.add(this._imgData.node)
     switch (imgPlacement) {
       case IMG_PLACEMENT.TOP:
-        this._imgData.node.cx(width / 2).y(paddingY)
+        this._imgData.node.cx((width - (this._commentReserve || 0)) / 2).y(paddingY)
         break
       case IMG_PLACEMENT.BOTTOM:
-        this._imgData.node.cx(width / 2).y(height - paddingY - imgHeight)
+        this._imgData.node.cx((width - (this._commentReserve || 0)) / 2).y(height - paddingY - imgHeight)
         break
       case IMG_PLACEMENT.LEFT:
         this._imgData.node.x(paddingX).cy(height / 2)
         break
       case IMG_PLACEMENT.RIGHT:
-        this._imgData.node.x(width - paddingX - imgWidth).cy(height / 2)
+        this._imgData.node.x(width - paddingX - imgWidth - (this._commentReserve || 0)).cy(height / 2)
         break
       default:
         break
@@ -518,14 +528,14 @@ function layout() {
   let translateY = 0
   switch (imgPlacement) {
     case IMG_PLACEMENT.TOP:
-      translateX = width / 2 - bboxWidth / 2
+      translateX = (width - (this._commentReserve || 0)) / 2 - bboxWidth / 2
       translateY =
         paddingY + // 内边距
         imgHeight + // 图片高度
         this.getImgTextMarin('v', 0, 0, imgHeight, textContentHeightWithTag) // 和图片的间距
       break
     case IMG_PLACEMENT.BOTTOM:
-      translateX = width / 2 - bboxWidth / 2
+      translateX = (width - (this._commentReserve || 0)) / 2 - bboxWidth / 2
       translateY = paddingY
       break
     case IMG_PLACEMENT.LEFT:

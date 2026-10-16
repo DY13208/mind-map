@@ -8,6 +8,8 @@
       class="navigatorToolbarWrapper"
       :class="{ isDark: isDark, collapsed: toolbarCollapsed }"
     >
+      <NotchWing side="right" position="bottom" variant="edge" />
+      <NotchWing side="right" position="bottom" variant="side" />
       <div class="navigatorContainer customScrollbar">
         <div class="item">
           <Scale :isDark="isDark" :mindMap="mindMap"></Scale>
@@ -158,10 +160,12 @@ import { mapState, mapMutations } from 'vuex'
 import pkg from 'simple-mind-map/package.json'
 import { isMobile } from 'simple-mind-map/src/utils/index'
 import Demonstrate from './Demonstrate.vue'
+import NotchWing from '@/components/NotchWing.vue'
 
 // 导航器工具栏
 export default {
   components: {
+    NotchWing,
     Scale,
     Fullscreen,
     MouseAction,
@@ -497,6 +501,92 @@ export default {
   .navigatorToolbarWrapper .collapseToggleBtn,
   .navigatorToolbarWrapper .collapseToggleBtn span {
     transition: none;
+  }
+}
+@import (reference) '../../../style/notch.less';
+
+// ===== 刘海：右下角缩放 / 导航 =====
+.navigatorToolbarDock.navigatorToolbarDock {
+  right: calc(@mm-frame-width + @mm-notch-inset);
+  bottom: calc(@mm-frame-width + @mm-notch-inset);
+}
+
+.navigatorToolbarWrapper.navigatorToolbarWrapper {
+  &.collapsed {
+    transform: translateY(calc(100% + 32px));
+  }
+
+  .navigatorContainer {
+    .mm-notch-surface();
+    height: @mm-notch-height-bottom;
+    padding: 0 16px 0 14px;
+    border-radius: @mm-notch-inner-radius @mm-notch-edge-radius @mm-notch-edge-radius
+      @mm-notch-edge-radius;
+  }
+
+  .item {
+    margin-right: 6px;
+
+    a {
+      color: var(--mm-notch-icon);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      font-size: 18px;
+      .mm-notch-icon-btn();
+    }
+
+    // Scale / Fullscreen 子组件内部的按钮
+    /deep/ .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 30px;
+      height: 30px;
+      border-radius: 9px;
+      color: var(--mm-notch-icon);
+      transition: @mm-notch-transition;
+
+      &:hover {
+        background: var(--mm-notch-hover-bg);
+        color: var(--mm-notch-icon-hover);
+      }
+
+      .iconfont {
+        font-size: 18px;
+      }
+
+      .mm-notch-glyph();
+    }
+
+    /deep/ .scaleInfo {
+      margin: 0 8px;
+      color: var(--mm-notch-text);
+
+      input {
+        color: var(--mm-notch-text);
+      }
+    }
+  }
+}
+
+@media screen and (max-width: 700px) {
+  .navigatorToolbarDock.navigatorToolbarDock {
+    left: auto;
+    right: calc(@mm-frame-width + @mm-notch-inset);
+    bottom: calc(@mm-frame-width + @mm-notch-inset);
+    max-width: calc(100vw - @mm-frame-width * 2 - @mm-notch-inset * 2 - 24px);
+  }
+
+  .navigatorToolbarWrapper.navigatorToolbarWrapper .navigatorContainer {
+    height: @mm-notch-height-bottom;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
 }
 </style>

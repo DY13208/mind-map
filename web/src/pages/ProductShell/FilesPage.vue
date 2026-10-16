@@ -1,32 +1,28 @@
 <template>
   <section class="productPage">
-    <div v-if="folder" class="productHeader productHeader--breadcrumb">
-      <FolderBreadcrumb
-        :path="folderPath"
-        :team-id="selectedTeamId"
-        :base-path="filesBasePath"
-        :root-label="isTeamView && selectedTeam ? selectedTeam.name : '脑图'"
-      />
-    </div>
     <FileToolbar
       :search.sync="search"
-      :role-filter.sync="roleFilter"
-      :sort.sync="sort"
-      :view.sync="view"
+      :show-favorites="!isTeamView && ['files', 'folder', 'favorites'].includes(mode)"
+      :favorites-active="mode === 'favorites'"
       :show-create="mode === 'files' || mode === 'folder'"
       :show-create-folder="
         (mode === 'files' || mode === 'folder') &&
           (!isTeamView || canManageTeam)
       "
       :show-import="mode === 'files' || mode === 'folder'"
-      :show-batch="supportsBatchSelect"
-      :select-mode="selectMode"
-      :hide-opened-sort="isRealFilesMode && !isTeamView"
       @create-room="createRoom"
       @create-folder="createFolder"
       @import="openImport"
-      @toggle-select-mode="toggleSelectMode"
-    />
+      @toggle-favorites="toggleFavorites"
+    >
+      <FolderBreadcrumb
+        slot="title"
+        :path="folder ? folderPath : mode === 'favorites' ? favoritesCrumb : []"
+        :team-id="selectedTeamId"
+        :base-path="filesBasePath"
+        :root-label="isTeamView && selectedTeam ? selectedTeam.name : '脑图'"
+      />
+    </FileToolbar>
     <BatchActionBar
       v-if="selectMode"
       :count="batchSelectionCount"
@@ -61,19 +57,18 @@
       <div v-if="mode !== 'trash' && view === 'card' && itemCount" class="itemGrid">
         <template v-if="showFolders">
           <FolderCard
-            v-for="item in filteredFolders"
+            v-for="(item, index) in filteredFolders"
             :key="item.id"
+            :style="{ '--i': index }"
             :folder="item"
             :editable="!selectMode && (isTeamView ? canManageTeam : item.canManage !== false)"
             :allow-share="!isTeamView"
-            :allow-move-to-team="!isTeamView"
             :selectable="selectMode"
             :selected="isFolderSelected(item)"
             :can-select="canSelectFolder(item)"
             @open="openFolder"
-            @rename="renameFolder"
+            @rename-inline="renameFolderInline"
             @share="shareFolder"
-            @move-to-team="moveFolderToTeam"
             @delete="deleteFolder"
             @toggle-select="toggleFolderSelect"
           />
@@ -101,22 +96,20 @@
         </div></template
       >
         <RoomCard
-          v-for="room in visibleRooms"
+          v-for="(room, index) in visibleRooms"
           :key="room.roomKey || room.id"
+          :style="{ '--i': (showFolders ? filteredFolders.length : 0) + index }"
           :room="room"
           :allow-delete="!!room.canManage"
-          :allow-move-to-team="!isTeamView"
           :selectable="selectMode"
           :selected="isRoomSelected(room)"
           :can-select="canSelectRoom(room)"
           @open="openRoom"
           @favorite="favorite"
           @duplicate="duplicateRoom"
-          @rename="renameRoom"
+          @rename-inline="renameRoomInline"
           @move="moveRoom"
-          @move-to-team="moveToTeam"
           @share="shareRoom"
-          @history="historyRoom"
           @delete="deleteRoom"
           @toggle-select="toggleRoomSelect"
         />
@@ -128,7 +121,6 @@
         :folders="showFolders ? filteredFolders : []"
         :allow-delete="true"
         :allow-share="!isTeamView"
-        :allow-move-to-team="!isTeamView"
         :select-mode="selectMode"
         :selected-room-keys="selectedRoomKeys"
         :selected-folder-ids="selectedFolderIds"
@@ -137,29 +129,24 @@
         @open="openRoom"
         @open-folder="openFolder"
         @share-folder="shareFolder"
-        @rename-folder="renameFolder"
-        @move-folder-to-team="moveFolderToTeam"
+        @rename-folder-inline="renameFolderInline"
         @delete-folder="deleteFolder"
         @favorite="favorite"
         @duplicate="duplicateRoom"
-        @rename="renameRoom"
+        @rename-inline="renameRoomInline"
         @move="moveRoom"
-        @move-to-team="moveToTeam"
         @share="shareRoom"
-        @history="historyRoom"
         @delete="deleteRoom"
         @selection-change="onListSelectionChange"
       />
       <div v-if="showPager" class="pager">
         <el-pagination
           background
-          layout="total, sizes, prev, pager, next, jumper"
+          layout="prev, next"
           :current-page="page"
           :page-size="limit"
-          :page-sizes="pageSizes"
           :total="total"
           :disabled="loading || busy"
-          @size-change="onPageSizeChange"
           @current-change="onPageChange"
         />
       </div>
@@ -172,12 +159,6 @@
         @action="createRoom"
       />
     </div>
-    <RenameDialog
-      :visible.sync="renameVisible"
-      :value="activeItem ? activeItem.title || activeItem.name : ''"
-      :title="renameKind === 'folder' ? '重命名文件夹' : '重命名脑图'"
-      @confirm="confirmRename"
-    />
     <MoveToFolderDialog
       :visible.sync="moveVisible"
       :room="activeRoom"
@@ -201,11 +182,6 @@
       :visible.sync="folderShareVisible"
       :folder="activeFolder"
       @changed="() => load({ reset: true, keepPage: true })"
-    />
-    <HistoryPanel
-      :visible.sync="historyVisible"
-      :room="activeRoom"
-      @restored="() => load({ reset: true, keepPage: true })"
     />
     <HomeImportDialog
       :visible.sync="importVisible"
@@ -236,10 +212,8 @@ import FileToolbar from './components/FileToolbar.vue'
 import FolderBreadcrumb from './components/FolderBreadcrumb.vue'
 import FolderCard from './components/FolderCard.vue'
 import DeleteFolderDialog from './components/DeleteFolderDialog.vue'
-import HistoryPanel from './components/HistoryPanel.vue'
 import MoveToFolderDialog from './components/MoveToFolderDialog.vue'
 import MoveToTeamDialog from './components/MoveToTeamDialog.vue'
-import RenameDialog from './components/RenameDialog.vue'
 import RoomCard from './components/RoomCard.vue'
 import RoomList from './components/RoomList.vue'
 import ShareRoomDialog from './components/ShareRoomDialog.vue'
@@ -281,10 +255,8 @@ export default {
     FolderBreadcrumb,
     FolderCard,
     DeleteFolderDialog,
-    HistoryPanel,
     MoveToFolderDialog,
     MoveToTeamDialog,
-    RenameDialog,
     RoomCard,
     RoomList,
     ShareRoomDialog,
@@ -309,7 +281,6 @@ export default {
       activeRoom: null,
       activeItem: null,
       renameKind: 'room',
-      renameVisible: false,
       deleteFolderVisible: false,
       folderToDelete: null,
       moveVisible: false,
@@ -317,9 +288,7 @@ export default {
       shareVisible: false,
       folderShareVisible: false,
       activeFolder: null,
-      historyVisible: false,
       importVisible: false,
-      pageSizes: PAGE_SIZES,
       limit: savedPageSize(),
       page: 1,
       total: 0,
@@ -435,6 +404,9 @@ export default {
         (this.mode === 'files' || this.mode === 'folder')
       )
     },
+    favoritesCrumb() {
+      return [{ id: 'favorites', name: '收藏' }]
+    },
     filesBasePath() {
       return this.$route.path.startsWith('/my-maps') ? '/my-maps' : '/files'
     },
@@ -452,8 +424,7 @@ export default {
       )
     },
     showPager() {
-      // 无数据时不展示分页/加载更多；有数据时提供页码与每页数量调节。
-      return this.isRealFilesMode && !this.loading && Number(this.total || 0) > 0
+      return this.isRealFilesMode && !this.loading && Number(this.total || 0) > this.limit
     },
     folder() {
       return this.mode === 'folder'
@@ -795,6 +766,14 @@ export default {
         this.busy = false
       }
     },
+    toggleFavorites() {
+      this.exitSelectMode()
+      this.$router.push({
+        path: this.mode === 'favorites'
+          ? this.filesBasePath
+          : this.filesBasePath + '/favorites'
+      })
+    },
     changeWorkspace(teamId) {
       this.exitSelectMode()
       const team = String(teamId || '')
@@ -902,17 +881,6 @@ export default {
     },
     onPageChange(page) {
       this.page = Math.max(1, Number(page) || 1)
-      this.load({ reset: true, keepPage: true })
-    },
-    onPageSizeChange(size) {
-      const next = PAGE_SIZES.includes(Number(size)) ? Number(size) : 20
-      this.limit = next
-      this.page = 1
-      try {
-        localStorage.setItem(PAGE_SIZE_KEY, String(next))
-      } catch (error) {
-        /* preference is optional */
-      }
       this.load({ reset: true, keepPage: true })
     },
     async perform(action, message) {
@@ -1042,15 +1010,19 @@ export default {
         }
       }
     },
-    renameRoom(room) {
+    renameRoomInline(room, name) {
       this.activeItem = room
       this.renameKind = 'room'
-      this.renameVisible = true
+      return this.confirmRename(name)
     },
-    renameFolder(folder) {
+    renameFolderInline(folder, name) {
+      if (this.isTeamView && !this.canManageTeam) {
+        this.$message.error('只有团队所有者或管理员可以重命名文件夹')
+        return
+      }
       this.activeItem = folder
       this.renameKind = 'folder'
-      this.renameVisible = true
+      return this.confirmRename(name)
     },
     confirmRename(name) {
       return this.perform(
@@ -1121,18 +1093,6 @@ export default {
         '移动成功'
       )
     },
-    moveToTeam(room) {
-      this.batchAction = null
-      this.activeFolder = null
-      this.activeRoom = room
-      this.moveToTeamVisible = true
-    },
-    moveFolderToTeam(folder) {
-      this.batchAction = null
-      this.activeFolder = folder
-      this.activeRoom = { title: folder.name }
-      this.moveToTeamVisible = true
-    },
     async confirmMoveToTeam(teamId) {
       if (!this.batchAction && this.activeFolder) {
         const folder = this.activeFolder
@@ -1176,10 +1136,6 @@ export default {
       if (this.isTeamView) return
       this.activeFolder = folder
       this.folderShareVisible = true
-    },
-    historyRoom(room) {
-      this.activeRoom = room
-      this.historyVisible = true
     },
     favorite(room) {
       return this.perform(
@@ -1291,8 +1247,8 @@ export default {
 }
 .itemGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 28px 20px;
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -1303,7 +1259,7 @@ export default {
   }
 }
 .sectionTitle span {
-  color: #9aa7a2;
+  color: var(--ui-text-muted);
   font-weight: 400;
   margin-left: 4px;
 }
@@ -1323,8 +1279,8 @@ export default {
   padding-top: 4px;
 }
 .trashList {
-  background: white;
-  border: 1px solid #e3e9e6;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
   border-radius: 12px;
   overflow: hidden;
 }
@@ -1333,7 +1289,7 @@ export default {
   align-items: center;
   gap: 13px;
   padding: 16px;
-  border-bottom: 1px solid #eef1ef;
+  border-bottom: 1px solid var(--ui-border);
   &:last-child {
     border-bottom: 0;
   }
@@ -1341,10 +1297,10 @@ export default {
     width: 38px;
     height: 38px;
     border-radius: 9px;
-    background: #f1f5f3;
+    background: var(--ui-surface-muted);
     display: grid;
     place-items: center;
-    color: #7b8c85;
+    color: var(--ui-text-muted);
   }
   div:nth-child(2) {
     flex: 1;
@@ -1353,7 +1309,7 @@ export default {
     gap: 5px;
   }
   span {
-    color: #8a9893;
+    color: var(--ui-text-muted);
     font-size: 12px;
   }
 }

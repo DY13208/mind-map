@@ -8,6 +8,7 @@ const {
   isCollabV2Enabled,
   isCollabV2EventBridgeEnabled
 } = require('./collabV2/flag')
+const { resolveDisplayName } = require('./displayName')
 
 const SESSION_COOKIE = 'mind_map_session'
 const OAUTH_BROWSER_COOKIE = 'mind_map_oauth_browser'
@@ -1188,6 +1189,8 @@ async function exchangeWecomCode(code) {
     id: userId,
     corpId: config.corpId,
     name: String((profile && profile.name) || userId).slice(0, 100),
+    // 通讯录真实名：拿不到 profile 时为空，不能拿 userid 覆盖已存储的好名字
+    directoryName: String((profile && profile.name) || '').slice(0, 100),
     avatar: wecomAvatarUrl(profile),
     position: String((profile && profile.position) || '').slice(0, 100),
     departments: Array.isArray(profile && profile.department)
@@ -1304,6 +1307,7 @@ async function resolveOAuthWecomIdentity(claims, providerName = 'OAuth') {
     return {
       id: userId,
       name: String(profile.name || '').slice(0, 100),
+      directoryName: String(profile.name || '').slice(0, 100),
       avatar: wecomAvatarUrl(profile),
       position: String(profile.position || '').slice(0, 100),
       departments: Array.isArray(profile.department)
@@ -1381,12 +1385,16 @@ async function exchangeOneIdCode(code) {
   return {
     id: mapped ? mapped.id : fallbackId,
     corpId: mapped ? config.corpId : fallbackCorpId,
-    name: String(
-      claims.name ||
-        claims.preferred_username ||
-        (mapped && mapped.name) ||
-        'OneID 用户'
-    ).slice(0, 100),
+    // 通讯录真实名 / 已存储名优先，OneID 昵称次之，最后才是账号名
+    name: resolveDisplayName({
+      id: mapped ? mapped.wecomUserId || mapped.id : fallbackId,
+      username: claims.preferred_username,
+      name: mapped && mapped.name,
+      directoryName: mapped && mapped.directoryName,
+      nickname: claims.name
+    }, 'OneID 用户'),
+    directoryName: String((mapped && mapped.directoryName) || ''),
+    nickname: String(claims.name || '').slice(0, 100),
     avatar:
       safeProfileImage(claims.picture || claims.avatar) ||
       (mapped && mapped.avatar) ||
@@ -1564,14 +1572,17 @@ async function exchangeWorkBuddyCode(code) {
   return {
     id: mapped ? mapped.id : fallbackId,
     corpId: mapped ? mapped.corpId || config.corpId : fallbackCorpId,
-    name: String(
-      claims.name ||
-        claims.display_name ||
-        claims.displayName ||
-        claims.preferred_username ||
-        claims.username ||
-        (mapped && mapped.name) ||
-        'WorkBuddy 用户'
+    // 通讯录真实名 / 已存储名优先，WorkBuddy 昵称次之，最后才是账号名
+    name: resolveDisplayName({
+      id: mapped ? mapped.wecomUserId || mapped.id : fallbackId,
+      username: claims.preferred_username || claims.username,
+      name: mapped && mapped.name,
+      directoryName: mapped && mapped.directoryName,
+      nickname: claims.name || claims.display_name || claims.displayName
+    }, 'WorkBuddy 用户'),
+    directoryName: String((mapped && mapped.directoryName) || ''),
+    nickname: String(
+      claims.name || claims.display_name || claims.displayName || ''
     ).slice(0, 100),
     avatar:
       safeProfileImage(
@@ -1799,16 +1810,36 @@ async function upsertUser(user) {
   if (!wecomUserId)
     throw new AuthError('invalid_user', '企业微信成员身份为空', 400)
   const internalUserId = await resolveInternalUserId(corpId, wecomUserId)
+  // 只有通讯录真实名（或显式指定名字的开发/测试登录）才能覆盖已存储的名字；
+  // 昵称、userid 只在库里还没有像样名字时补位。
+  const directoryName = resolveDisplayName(
+    { id: wecomUserId, name: user.directoryName },
+    ''
+  )
+  const authoritativeName =
+    !!directoryName && directoryName !== wecomUserId
+      ? directoryName
+      : user.nameAuthoritative
+        ? String(user.name || '')
+        : ''
+  const candidateName =
+    authoritativeName ||
+    resolveDisplayName({ id: wecomUserId, nickname: user.nickname, name: user.name }, '')
   const result = await authPool.query(
     `insert into wecom_users
        (user_id, corp_id, wecom_userid, name, avatar, position, departments, last_login_at)
      values ($1, $2, $3, $4, $5, $6, $7::jsonb, now())
      on conflict (corp_id, wecom_userid) do update set
        name = case
-         when excluded.name <> '' and excluded.name is distinct from excluded.wecom_userid
+         when $9::boolean and excluded.name <> ''
+              and excluded.name is distinct from excluded.wecom_userid
            then excluded.name
-         when wecom_users.name <> '' then wecom_users.name
-         else excluded.name
+         when wecom_users.name <> ''
+              and wecom_users.name is distinct from wecom_users.wecom_userid
+              and wecom_users.name is distinct from wecom_users.user_id
+           then wecom_users.name
+         when excluded.name <> '' then excluded.name
+         else wecom_users.name
        end,
        avatar = case
          when excluded.avatar <> '' then excluded.avatar
@@ -1824,16 +1855,17 @@ async function upsertUser(user) {
        end,
        updated_at = now(),
        last_login_at = now()
-     returning user_id, corp_id, wecom_userid`,
+     returning user_id, corp_id, wecom_userid, name`,
     [
       internalUserId,
       corpId,
       wecomUserId,
-      user.name,
+      String(candidateName || wecomUserId).slice(0, 100),
       user.avatar,
       user.position || '',
       JSON.stringify(user.departments),
-      user.externalProvider === OAUTH_PROVIDER_WORKBUDDY
+      user.externalProvider === OAUTH_PROVIDER_WORKBUDDY,
+      !!authoritativeName
     ]
   )
   const row = result.rows[0]
@@ -1841,7 +1873,15 @@ async function upsertUser(user) {
     ...user,
     id: row.user_id,
     corpId: row.corp_id,
-    wecomUserId: row.wecom_userid
+    wecomUserId: row.wecom_userid,
+    // 会话名字统一从数据库行解析，各登录方式结果一致
+    name: resolveDisplayName({
+      id: row.user_id,
+      wecomUserId: row.wecom_userid,
+      name: row.name,
+      directoryName: user.directoryName,
+      nickname: user.nickname
+    })
   }
 }
 
@@ -1919,7 +1959,11 @@ async function authenticateRequest(req) {
     id: row.user_id,
     corpId: row.corp_id,
     wecomUserId: row.wecom_userid,
-    name: row.name,
+    name: resolveDisplayName({
+      id: row.user_id,
+      wecomUserId: row.wecom_userid,
+      name: row.name
+    }),
     avatar: row.avatar,
     position: row.position || '',
     departments: Array.isArray(row.departments) ? row.departments : [],
@@ -2026,7 +2070,7 @@ function publicUser(user) {
     id: user.id,
     corpId: user.corpId,
     wecomUserId: user.wecomUserId || user.id,
-    name: user.name,
+    name: resolveDisplayName(user),
     avatar: user.avatar,
     departments: user.departments,
     expiresAt: user.expiresAt,
@@ -2091,10 +2135,12 @@ async function createDevBypassSession(req, res, options = {}) {
     id: wecomUserId,
     corpId: config.corpId,
     name,
+    nameAuthoritative: !!name && name !== wecomUserId,
     avatar,
     departments: []
   }
   const stored = await upsertUser(user)
+  user.name = stored.name
   const session = await createSession(stored.id)
   user.id = stored.id
   user.wecomUserId = stored.wecomUserId
@@ -2623,6 +2669,7 @@ async function handleAuthApi(req, res) {
       const session = await createSession(stored.id)
       user.id = stored.id
       user.wecomUserId = stored.wecomUserId
+      user.name = stored.name
       setCookie(res, req, SESSION_COOKIE, session, config.sessionMaxSeconds)
       redirect(res, appRedirectUrl(returnTo))
     } catch (err) {
@@ -2758,6 +2805,7 @@ async function createTestIdentity(options = {}) {
     id: String(options.userId || 'e2e-user').slice(0, 160),
     corpId: config.corpId,
     name: String(options.name || options.userId || 'E2E'),
+    nameAuthoritative: !!options.name,
     avatar: '',
     departments: []
   }
@@ -2766,7 +2814,7 @@ async function createTestIdentity(options = {}) {
   return {
     userId: stored.id,
     wecomUserId: stored.wecomUserId,
-    name: user.name,
+    name: stored.name,
     token
   }
 }
@@ -2786,6 +2834,7 @@ module.exports = {
   listWecomDepartments,
   upsertWecomUser,
   resolveInternalUserId,
+  resolveDisplayName,
   __test: {
     readConfig,
     safeReturnTo,

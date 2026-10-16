@@ -1,6 +1,7 @@
 <template>
   <div
     class="editContainer"
+    :class="{ hasCanvasFrame: showCanvasFrame }"
     @dragenter.stop.prevent="onDragenter"
     @dragleave.stop.prevent
     @dragover.stop.prevent
@@ -249,6 +250,7 @@ export default {
   },
   data() {
     return {
+      isDocFullscreen: !!document.fullscreenElement,
       enableShowLoading: true,
       loadingSafetyTimer: null,
       importPersistLock: false,
@@ -294,10 +296,20 @@ export default {
       enableAi: state => state.localConfig.enableAi,
       isDark: state => state.localConfig.isDark,
       extendThemeGroupList: state => state.extendThemeGroupList
-    })
+    }),
+    // 刘海外框：禅模式 / 全屏（含演示模式）时隐藏，画布恢复铺满
+    showCanvasFrame() {
+      return !this.isZenMode && !this.isDocFullscreen
+    }
   },
   watch: {
+    showCanvasFrame() {
+      // 外框显隐会改变画布容器尺寸，等 DOM 更新后让思维导图重新测量
+      this.$nextTick(() => this.resizeMindMapSafely())
+    },
     isDark() {
+      // light/dark use different frame widths (--mm-frame-width), so re-measure the canvas
+      this.$nextTick(() => this.resizeMindMapSafely())
       if (this.appearanceTransitioning) return
       this.syncCanvasDarkBackground()
     },
@@ -372,6 +384,7 @@ export default {
     this.$bus.$on('prepare_reload', this.prepareReload)
     this.$bus.$on('room_canvas_ready', this.onRoomCanvasReady)
     window.addEventListener('resize', this.handleResize)
+    document.addEventListener('fullscreenchange', this.onDocFullscreenChange)
     // 房间模式下协作挂了不能等于"图没了"：等一会儿还没连上就用本地留底恢复
     this.startCollabDraftFallback()
   },
@@ -436,6 +449,7 @@ export default {
     this.$bus.$off('data_change', this.onSaveDataChange)
     this.$bus.$off('view_data_change', this.onSaveViewChange)
     window.removeEventListener('resize', this.handleResize)
+    document.removeEventListener('fullscreenchange', this.onDocFullscreenChange)
     if (this.mindMap) {
       this.unbindCanvasThemeEvents()
       this.mindMap.destroy()
@@ -573,6 +587,16 @@ export default {
 
     handleStartPainter() {
       this.mindMap.painter.startPainter()
+    },
+
+    onDocFullscreenChange() {
+      this.isDocFullscreen = !!document.fullscreenElement
+    },
+
+    resizeMindMapSafely() {
+      if (this.mindMap && typeof this.mindMap.resize === 'function') {
+        this.mindMap.resize()
+      }
     },
 
     handleResize() {
@@ -1995,12 +2019,33 @@ export default {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '../../../style/notch.less';
+
 .editContainer {
   position: fixed;
   left: 0;
   right: 0;
   top: 0;
   bottom: 0;
+
+  // 刘海外框：8px 外框 + 圆角内画布。四角工具栏以外框色「长」在画布角上。
+  &.hasCanvasFrame {
+    background-color: var(--mm-notch-frame);
+
+    .mindMapContainer {
+      left: @mm-frame-width;
+      top: @mm-frame-width;
+      width: calc(100% - @mm-frame-width * 2);
+      height: calc(100% - @mm-frame-width * 2);
+      border-radius: @mm-canvas-radius;
+      overflow: hidden;
+    }
+  }
+
+  // 演示模式会把画布容器本身全屏，此时去掉圆角
+  .mindMapContainer:fullscreen {
+    border-radius: 0;
+  }
 
   .dragMask {
     position: absolute;
@@ -2043,6 +2088,16 @@ export default {
 </style>
 
 <style lang="less">
+@import (reference) '../../../style/notch.less';
+
+// 刘海外框 / 工具栏调色板（浅色默认，body.isDark 时切深色）
+body {
+  .mm-notch-palette-light();
+}
+body.isDark {
+  .mm-notch-palette-dark();
+}
+
 /* SVG 节点由脑图库动态插入，选中框需要使用非 scoped 样式。 */
 #mindMapContainer .smm-node.active .smm-hover-node {
   display: none !important;
