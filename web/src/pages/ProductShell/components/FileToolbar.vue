@@ -1,97 +1,59 @@
 <template>
   <div class="fileToolbar">
-    <div class="toolbarTitle">脑图</div>
+    <div class="toolbarTitle"><slot name="title">脑图</slot></div>
     <div class="toolbarActions">
     <FileSearch
       class="toolbarSearch"
       :value="search"
       @input="$emit('update:search', $event)"
     />
-    <FileSort
-      :value="sort"
-      :hide-opened-sort="hideOpenedSort"
-      @input="$emit('update:sort', $event)"
-    />
-    <el-dropdown trigger="click" @command="onRole">
-      <button
-        type="button"
-        class="iconGhost"
-        :class="{ active: !!roleFilter }"
-        :title="roleTitle"
-        :aria-label="roleTitle"
-      >
-        <i class="el-icon-user" aria-hidden="true" />
-      </button>
-      <el-dropdown-menu slot="dropdown">
-        <el-dropdown-item
-          command="__all__"
-          :class="{ isActive: !roleFilter }"
-        >
-          <i
-            class="checkIcon"
-            :class="!roleFilter ? 'el-icon-check' : ''"
-            aria-hidden="true"
-          />
-          全部角色
-        </el-dropdown-item>
-        <el-dropdown-item
-          v-for="role in roleOptions"
-          :key="role.value"
-          :command="role.value"
-          :class="{ isActive: roleFilter === role.value }"
-        >
-          <i
-            class="checkIcon"
-            :class="roleFilter === role.value ? 'el-icon-check' : ''"
-            aria-hidden="true"
-          />
-          {{ role.label }}
-        </el-dropdown-item>
-      </el-dropdown-menu>
-    </el-dropdown>
-
-    <div class="viewSwitch" role="group" aria-label="视图切换">
-      <button
-        type="button"
-        class="iconGhost"
-        :class="{ active: view === 'card' }"
-        title="卡片视图"
-        aria-label="卡片视图"
-        @click="$emit('update:view', 'card')"
-      >
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-          <rect x="3" y="3" width="8" height="8" rx="1.5" fill="currentColor" />
-          <rect x="13" y="3" width="8" height="8" rx="1.5" fill="currentColor" />
-          <rect x="3" y="13" width="8" height="8" rx="1.5" fill="currentColor" />
-          <rect x="13" y="13" width="8" height="8" rx="1.5" fill="currentColor" />
-        </svg>
-      </button>
-      <button
-        type="button"
-        class="iconGhost"
-        :class="{ active: view === 'list' }"
-        title="列表视图"
-        aria-label="列表视图"
-        @click="$emit('update:view', 'list')"
-      >
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-          <rect x="3" y="5" width="18" height="2.5" rx="1" fill="currentColor" />
-          <rect x="3" y="10.75" width="18" height="2.5" rx="1" fill="currentColor" />
-          <rect x="3" y="16.5" width="18" height="2.5" rx="1" fill="currentColor" />
-        </svg>
-      </button>
-    </div>
-
     <button
-      v-if="showBatch"
+      v-if="showFavorites"
       type="button"
       class="iconGhost"
-      :class="{ active: selectMode }"
-      :title="selectMode ? '退出多选' : '多选'"
-      :aria-label="selectMode ? '退出多选' : '多选'"
-      @click="$emit('toggle-select-mode')"
+      :class="{ active: favoritesActive }"
+      :title="favoritesActive ? '查看全部' : '只看收藏'"
+      :aria-label="favoritesActive ? '查看全部' : '只看收藏'"
+      :aria-pressed="favoritesActive ? 'true' : 'false'"
+      @click="$emit('toggle-favorites')"
     >
-      <i class="el-icon-finished" aria-hidden="true" />
+      <i :class="favoritesActive ? 'el-icon-star-on' : 'el-icon-star-off'" aria-hidden="true" />
+    </button>
+    <button
+      type="button"
+      class="iconGhost themeToggle"
+      :title="isDark ? '切换到浅色模式' : '切换到深色模式'"
+      :aria-label="isDark ? '切换到浅色模式' : '切换到深色模式'"
+      @click="toggleTheme"
+    >
+      <svg
+        v-if="isDark"
+        viewBox="0 0 24 24"
+        width="18"
+        height="18"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+      </svg>
+      <svg
+        v-else
+        viewBox="0 0 24 24"
+        width="18"
+        height="18"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+      </svg>
     </button>
 
     <el-dropdown
@@ -133,47 +95,31 @@
 </template>
 <script>
 import FileSearch from './FileSearch.vue'
-import FileSort from './FileSort.vue'
+import { shellTheme, toggleShellTheme } from '@/utils/shellTheme'
 export default {
   name: 'FileToolbar',
-  components: { FileSearch, FileSort },
+  components: { FileSearch },
   props: {
     search: String,
-    roleFilter: { type: String, default: '' },
-    sort: String,
-    view: String,
+    showFavorites: { type: Boolean, default: false },
+    favoritesActive: { type: Boolean, default: false },
     showCreate: { type: Boolean, default: true },
     showCreateFolder: { type: Boolean, default: true },
-    showImport: { type: Boolean, default: true },
-    showBatch: { type: Boolean, default: false },
-    selectMode: { type: Boolean, default: false },
-    hideOpenedSort: { type: Boolean, default: false }
+    showImport: { type: Boolean, default: true }
   },
-  data: () => ({
-    roleOptions: [
-      { value: 'Owner', label: '所有者' },
-      { value: 'Editor', label: '可编辑' },
-      { value: 'Viewer', label: '可查看' }
-    ]
-  }),
   computed: {
-    roleTitle() {
-      if (!this.roleFilter) return '筛选角色'
-      const hit = this.roleOptions.find(item => item.value === this.roleFilter)
-      return hit ? `角色：${hit.label}` : '筛选角色'
+    isDark() {
+      return shellTheme.theme === 'dark'
     }
   },
   methods: {
+    toggleTheme() {
+      toggleShellTheme()
+    },
     create(command) {
       if (command === 'folder') this.$emit('create-folder')
       else if (command === 'import') this.$emit('import')
       else this.$emit('create-room')
-    },
-    onRole(command) {
-      this.$emit(
-        'update:roleFilter',
-        command === '__all__' || command == null ? '' : String(command)
-      )
     }
   }
 }
@@ -189,16 +135,27 @@ export default {
   min-width: 0;
   box-sizing: border-box;
   padding: 0 0 14px;
-  border-bottom: 1px solid var(--ui-border);
+  border-bottom: 0;
 
   .toolbarTitle {
-    flex: 0 0 auto;
+    flex: 0 1 auto;
+    min-width: 0;
     margin: 0;
     font-size: 22px;
     font-weight: 650;
     letter-spacing: -0.3px;
     color: var(--ui-text);
     line-height: 1.2;
+
+    /deep/ .el-breadcrumb {
+      font-size: inherit;
+      line-height: inherit;
+    }
+
+    /deep/ .el-breadcrumb__inner,
+    /deep/ .el-breadcrumb__inner.is-link {
+      font-weight: inherit;
+    }
   }
 
   .toolbarActions {
@@ -212,13 +169,6 @@ export default {
 
   .toolbarSearch {
     margin-right: 4px;
-  }
-
-  .viewSwitch {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    margin-left: 2px;
   }
 
   .iconGhost {
@@ -245,11 +195,7 @@ export default {
 
     &.active {
       background: var(--ui-primary-soft);
-      color: var(--ui-primary);
-    }
-
-    svg {
-      display: block;
+      color: var(--ui-star);
     }
   }
 
@@ -260,23 +206,8 @@ export default {
     &:hover,
     &:focus-visible {
       background: var(--ui-primary);
-      color: #fff;
+      color: var(--ui-on-primary);
     }
   }
-
-  .checkIcon {
-    display: inline-block;
-    width: 14px;
-    margin-right: 6px;
-    font-size: 12px;
-    color: var(--ui-primary);
-  }
-}
-</style>
-<style lang="less">
-.fileToolbar .el-dropdown-menu__item.isActive {
-  color: var(--ui-primary);
-  font-weight: 600;
-  background: var(--ui-primary-soft);
 }
 </style>

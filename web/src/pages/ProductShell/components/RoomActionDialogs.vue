@@ -102,6 +102,10 @@ export default {
         }
       }
     },
+    renameDirect(room, name) {
+      this.room = room
+      return this.rename(name)
+    },
     rename(name) {
       return this.perform(
         () => roomService.renameRoom(this.roomKey(this.room), name),
