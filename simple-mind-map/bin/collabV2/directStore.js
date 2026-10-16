@@ -83,6 +83,7 @@ function createMemoryStore(graph) {
   }
 
   let meta = {}
+  const savepoints = new Map()
   return {
     kind: 'memory',
     stats,
@@ -307,6 +308,38 @@ function createMemoryStore(graph) {
         syncNode(item.uid)
       })
       parents.forEach(syncParentChildren)
+    },
+    async savepoint(name) {
+      const safeName = String(name || '')
+      if (!/^mcp_batch_item_[0-9]{1,3}$/.test(safeName)) {
+        throw new Error('invalid savepoint name')
+      }
+      savepoints.set(safeName, {
+        rows: new Map([...rows].map(([uid, row]) => [uid, {
+          ...row,
+          data: { ...(row.data || {}) }
+        }])),
+        childIndex: new Map([...childIndex].map(([uid, kids]) => [uid, kids.slice()])),
+        graph: JSON.parse(JSON.stringify(g)),
+        meta: { ...meta }
+      })
+    },
+    async rollbackToSavepoint(name) {
+      const snapshot = savepoints.get(String(name || ''))
+      if (!snapshot) throw new Error('savepoint not found')
+      rows.clear()
+      snapshot.rows.forEach((row, uid) => rows.set(uid, {
+        ...row,
+        data: { ...(row.data || {}) }
+      }))
+      childIndex.clear()
+      snapshot.childIndex.forEach((kids, uid) => childIndex.set(uid, kids.slice()))
+      Object.keys(g).forEach(uid => delete g[uid])
+      Object.assign(g, JSON.parse(JSON.stringify(snapshot.graph)))
+      meta = { ...snapshot.meta }
+    },
+    async releaseSavepoint(name) {
+      savepoints.delete(String(name || ''))
     },
     resetStats() {
       stats.queries = 0
@@ -591,6 +624,32 @@ function createPgStore(client, roomKey) {
           )
         ]
       )
+      childCache.clear()
+    },
+    async savepoint(name) {
+      const safeName = String(name || '')
+      if (!/^mcp_batch_item_[0-9]{1,3}$/.test(safeName)) {
+        throw new Error('invalid savepoint name')
+      }
+      await query(`savepoint ${safeName}`)
+    },
+    async rollbackToSavepoint(name) {
+      const safeName = String(name || '')
+      if (!/^mcp_batch_item_[0-9]{1,3}$/.test(safeName)) {
+        throw new Error('invalid savepoint name')
+      }
+      await query(`rollback to savepoint ${safeName}`)
+      // PostgreSQL restores rows, but not this per-store read cache.
+      childCache.clear()
+    },
+    async releaseSavepoint(name) {
+      const safeName = String(name || '')
+      if (!/^mcp_batch_item_[0-9]{1,3}$/.test(safeName)) {
+        throw new Error('invalid savepoint name')
+      }
+      await query(`release savepoint ${safeName}`)
+    },
+    invalidateCaches() {
       childCache.clear()
     },
     resetStats() {

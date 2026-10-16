@@ -161,21 +161,42 @@ function memoryDb() {
   const rooms = new Set()
   const tombs = new Set()
   const members = []
+  const nodeShares = []
+  const findRow = (roomKey, userId) =>
+    members.find(item => item.room_key === roomKey && item.user_id === userId)
+  const recompute = row => {
+    const resolved = roomAcl.resolveMemberRole(row)
+    if (resolved) row.role = resolved
+    return row
+  }
   return {
     rooms,
     tombs,
     members,
+    nodeShares,
     async query(sql, params) {
       const text = String(sql)
       if (text.includes('from room_tombstones')) {
         return { rows: tombs.has(params[0]) ? [{}] : [] }
       }
+      if (text.includes('from node_shares')) {
+        const share = nodeShares.find(
+          item =>
+            item.id === params[0] &&
+            item.room_key === params[1] &&
+            item.token_hash === params[2] &&
+            !item.revoked_at
+        )
+        return { rows: share ? [share] : [] }
+      }
       if (text.includes('select room_key from rooms')) {
         return { rows: rooms.has(params[0]) ? [{ room_key: params[0] }] : [] }
       }
       if (
-        text.includes('from room_members where room_key') &&
-        !text.includes('and user_id')
+        text.includes('from room_members') &&
+        text.includes('where room_key') &&
+        !text.includes('and user_id') &&
+        !text.includes('count(*)')
       ) {
         return {
           rows: members.filter(item => item.room_key === params[0])
@@ -184,22 +205,48 @@ function memoryDb() {
       if (text.includes('insert into room_members') && text.includes('on conflict')) {
         const roomKey = params[0]
         const userId = params[1]
-        const role =
-          params[2] || (text.includes("'owner'") ? 'owner' : 'editor')
+        if (text.includes("'override'")) {
+          const next = String(params[2] || '').toLowerCase()
+          let row = findRow(roomKey, userId)
+          if (!row) {
+            row = {
+              room_key: roomKey,
+              user_id: userId,
+              role: next,
+              direct_role: null,
+              team_role: null,
+              folder_role: null,
+              override_role: next,
+              acl_v2: true,
+              source: 'override'
+            }
+            members.push(row)
+          } else {
+            row.direct_role_archive = row.direct_role_archive || row.direct_role || null
+            row.direct_role = null
+            row.override_role = next
+            row.acl_v2 = true
+            row.source = 'override'
+            recompute(row)
+          }
+          return { rows: [row] }
+        }
+        const role = params[2] || (text.includes("'owner'") ? 'owner' : 'editor')
         const keepExisting = text.includes('role = room_members.role')
-        const current = members.find(
-          item => item.room_key === roomKey && item.user_id === userId
-        )
         const isTeam = text.includes("'team'")
+        const current = findRow(roomKey, userId)
         if (current) {
           if (!keepExisting) current.role = role
           if (isTeam) current.team_role = role
           else current.direct_role = role
-          current.role = roomAcl.effectiveRole(
-            current.direct_role,
-            current.team_role,
-            current.folder_role
-          )
+          if (text.includes("direct_role = 'owner'")) {
+            current.direct_role = 'owner'
+            current.override_role = null
+            current.acl_v2 = false
+            current.role = 'owner'
+          } else {
+            recompute(current)
+          }
         } else {
           members.push({
             room_key: roomKey,
@@ -210,10 +257,7 @@ function memoryDb() {
             folder_role: null
           })
         }
-        const row = members.find(
-          item => item.room_key === roomKey && item.user_id === userId
-        )
-        return { rows: [row] }
+        return { rows: [findRow(roomKey, userId)] }
       }
       if (text.includes("role = 'owner'") && text.includes('select 1')) {
         return {
@@ -224,17 +268,26 @@ function memoryDb() {
             : []
         }
       }
+      if (
+        text.includes('update room_members') &&
+        text.includes('acl_v2 = true') &&
+        text.includes('direct_role_archive')
+      ) {
+        const row = findRow(params[0], params[1])
+        if (row) {
+          row.direct_role_archive = row.direct_role_archive || row.direct_role || null
+          row.direct_role = null
+          row.override_role = null
+          row.acl_v2 = true
+          recompute(row)
+        }
+        return { rows: row ? [row] : [] }
+      }
       if (text.includes('update room_members') && text.includes('direct_role = null')) {
-        const current = members.find(
-          item => item.room_key === params[0] && item.user_id === params[1]
-        )
+        const current = findRow(params[0], params[1])
         if (current) {
           current.direct_role = null
-          current.role = roomAcl.effectiveRole(
-            null,
-            current.team_role,
-            current.folder_role
-          )
+          recompute(current)
           current.source = current.team_role
             ? 'team'
             : current.folder_role
@@ -391,15 +444,17 @@ async function testFolderRoleSource() {
   await roomAcl.setMember(db, 'room-folder', 'bob', 'viewer')
   await roomAcl.setFolderRole(db, 'room-folder', 'bob', 'editor', 'folder-1')
   const bob = db.members.find(item => item.user_id === 'bob')
-  assert.strictEqual(bob.direct_role, 'viewer')
+  assert.strictEqual(bob.acl_v2, true)
+  assert.strictEqual(bob.override_role, 'viewer')
+  assert.strictEqual(bob.direct_role, null)
   assert.strictEqual(bob.folder_role, 'editor')
-  assert.strictEqual(bob.role, 'editor')
-  assert.strictEqual((await roomAcl.getAccess(db, 'room-folder', 'bob')).role, 'editor')
+  assert.strictEqual(bob.role, 'viewer')
+  assert.strictEqual((await roomAcl.getAccess(db, 'room-folder', 'bob')).role, 'viewer')
 
   await roomAcl.clearFolderRole(db, 'room-folder', 'bob')
   const afterClear = db.members.find(item => item.user_id === 'bob')
   assert.strictEqual(afterClear.folder_role, null)
-  assert.strictEqual(afterClear.direct_role, 'viewer')
+  assert.strictEqual(afterClear.override_role, 'viewer')
   assert.strictEqual(afterClear.role, 'viewer')
 
   await roomAcl.setFolderRole(db, 'room-folder', 'carol', 'viewer', 'folder-1')
@@ -442,6 +497,175 @@ async function testClearRoomFolderRolesSqlOrder() {
   calls.forEach(call => assert.deepStrictEqual(call.params, ['room-folder']))
 }
 
+function testResolveMemberRoleMatrix() {
+  // Per-file viewer lowers a folder/team editor grant.
+  assert.strictEqual(
+    roomAcl.resolveMemberRole({ acl_v2: true, override_role: 'viewer', folder_role: 'editor', team_role: 'editor', role: 'editor' }),
+    'viewer'
+  )
+  // Per-file editor raises a folder/team viewer grant.
+  assert.strictEqual(
+    roomAcl.resolveMemberRole({ acl_v2: true, override_role: 'editor', folder_role: 'viewer', team_role: 'viewer' }),
+    'editor'
+  )
+  // Follow inheritance keeps the existing default merge unchanged.
+  assert.strictEqual(
+    roomAcl.resolveMemberRole({ acl_v2: true, override_role: null, folder_role: 'viewer', team_role: 'editor' }),
+    'editor'
+  )
+  assert.strictEqual(
+    roomAcl.resolveMemberRole({ acl_v2: true, override_role: null, folder_role: 'editor' }),
+    'editor'
+  )
+  assert.strictEqual(
+    roomAcl.resolveMemberRole({ acl_v2: true, override_role: null }),
+    ''
+  )
+  // Pre-migration rows keep the historical max() merge.
+  assert.strictEqual(
+    roomAcl.resolveMemberRole({ direct_role: 'viewer', folder_role: 'editor', role: 'editor' }),
+    'editor'
+  )
+  assert.strictEqual(
+    roomAcl.resolveMemberRole({ direct_role: 'editor', team_role: 'viewer', role: 'editor' }),
+    'editor'
+  )
+  // The summary column is a derived result and never raises the role again.
+  assert.strictEqual(
+    roomAcl.resolveMemberRole({ direct_role: 'viewer', role: 'editor' }),
+    'viewer'
+  )
+  // Owner identity always wins.
+  assert.strictEqual(
+    roomAcl.resolveMemberRole({ direct_role: 'owner', acl_v2: true, override_role: 'viewer' }),
+    'owner'
+  )
+  // SQL mirror carries the same distinct columns and no removed states.
+  const sql = roomAcl.sqlResolveMemberRole(
+    'direct_role', 'team_role', 'folder_role', 'role', 'override_role', 'acl_v2'
+  )
+  assert.match(sql, /acl_v2/)
+  assert.match(sql, /override_role/)
+  assert.ok(!sql.includes('denied'))
+}
+
+async function testPerFileOverrideModel() {
+  const db = memoryDb()
+  db.rooms.add('room-x')
+  await roomAcl.ensureOwner(db, 'room-x', 'owner')
+
+  // Folder editor + per-file viewer → the member stays viewer (reported bug).
+  await roomAcl.setFolderRole(db, 'room-x', 'bob', 'editor', 'folder-1')
+  assert.strictEqual((await roomAcl.getAccess(db, 'room-x', 'bob')).role, 'editor')
+  await roomAcl.setMember(db, 'room-x', 'bob', 'viewer', 'owner')
+  let bob = db.members.find(item => item.user_id === 'bob')
+  assert.strictEqual(bob.acl_v2, true)
+  assert.strictEqual(bob.override_role, 'viewer')
+  assert.strictEqual(bob.folder_role, 'editor')
+  assert.strictEqual(bob.role, 'viewer')
+  let access = await roomAcl.getAccess(db, 'room-x', 'bob')
+  assert.strictEqual(access.role, 'viewer')
+  assert.strictEqual(access.overrideActive, true)
+  assert.strictEqual(access.source, 'override')
+
+  // Folder permission changes do not override the per-file setting.
+  await roomAcl.setFolderRole(db, 'room-x', 'bob', 'manager', 'folder-1')
+  assert.strictEqual((await roomAcl.getAccess(db, 'room-x', 'bob')).role, 'viewer')
+
+  // Restoring inheritance adopts the current folder result.
+  await roomAcl.setMember(db, 'room-x', 'bob', 'inherit', 'owner')
+  bob = db.members.find(item => item.user_id === 'bob')
+  assert.strictEqual(bob.override_role, null)
+  assert.strictEqual(bob.acl_v2, true)
+  assert.strictEqual(bob.folder_role, 'manager')
+  assert.strictEqual((await roomAcl.getAccess(db, 'room-x', 'bob')).role, 'editor')
+
+  // Folder viewer + per-file editor → editor.
+  await roomAcl.setFolderRole(db, 'room-x', 'carol', 'viewer', 'folder-1')
+  await roomAcl.setMember(db, 'room-x', 'carol', 'editor', 'owner')
+  access = await roomAcl.getAccess(db, 'room-x', 'carol')
+  assert.strictEqual(access.role, 'editor')
+  assert.strictEqual(access.overrideActive, true)
+
+  // Removing the per-file setting drops back to the inherited result.
+  await roomAcl.removeMember(db, 'room-x', 'carol', '', 'owner')
+  access = await roomAcl.getAccess(db, 'room-x', 'carol')
+  assert.strictEqual(access.role, 'viewer')
+  assert.strictEqual(access.overrideActive, false)
+
+  // One member's setting does not leak to other members.
+  assert.strictEqual(
+    (await roomAcl.getAccess(db, 'room-x', 'owner')).role,
+    'owner'
+  )
+}
+
+async function testLegacyRowConvertsOnEdit() {
+  const db = memoryDb()
+  db.rooms.add('room-legacy')
+  await roomAcl.ensureOwner(db, 'room-legacy', 'owner')
+  await roomAcl.setFolderRole(db, 'room-legacy', 'bob', 'editor', 'folder-1')
+  // Simulate a pre-migration direct grant that was raised by the folder.
+  const row = db.members.find(item => item.user_id === 'bob')
+  row.direct_role = 'viewer'
+  row.role = 'editor'
+  assert.strictEqual((await roomAcl.getAccess(db, 'room-legacy', 'bob')).role, 'editor')
+
+  // The first explicit edit through the new UI takes over with new semantics.
+  await roomAcl.setMember(db, 'room-legacy', 'bob', 'viewer', 'owner')
+  const updated = db.members.find(item => item.user_id === 'bob')
+  assert.strictEqual(updated.acl_v2, true)
+  assert.strictEqual(updated.override_role, 'viewer')
+  assert.strictEqual(updated.direct_role, null)
+  assert.strictEqual(updated.direct_role_archive, 'viewer')
+  assert.strictEqual((await roomAcl.getAccess(db, 'room-legacy', 'bob')).role, 'viewer')
+}
+
+async function testShareCannotRaiseOverride() {
+  const crypto = require('crypto')
+  const db = memoryDb()
+  db.rooms.add('room-share')
+  await roomAcl.ensureOwner(db, 'room-share', 'owner')
+  await roomAcl.setFolderRole(db, 'room-share', 'bob', 'viewer', 'folder-1')
+  await roomAcl.setMember(db, 'room-share', 'bob', 'viewer', 'owner')
+  await roomAcl.setFolderRole(db, 'room-share', 'carol', 'viewer', 'folder-1')
+
+  const token = 'share-token-abcdefghijklmnopqrstuvwxyz123456'
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
+  const shareId = '11111111-2222-4333-8444-555555555555'
+  const cookie =
+    roomAcl.nodeShareCookieName('room-share') +
+    '=' +
+    encodeURIComponent(`${shareId}.${token}`)
+  db.nodeShares.push({
+    id: shareId,
+    room_key: 'room-share',
+    role: 'editor',
+    token_hash: tokenHash,
+    recipient_user_id: null,
+    recipient_user_ids: ['bob', 'carol'],
+    expires_at: null,
+    revoked_at: null
+  })
+
+  // A member with an explicit per-file viewer stays viewer even when an
+  // editor share link points at the same account (acceptance scenario 8).
+  const bobReq = { authUser: { id: 'bob' }, forceAcl: true, headers: { cookie } }
+  await assert.rejects(
+    roomAcl.assertRoomAccess(db, bobReq, 'room-share', 'edit'),
+    error => error.statusCode === 403
+  )
+  const bobView = await roomAcl.assertRoomAccess(db, bobReq, 'room-share', 'view')
+  assert.strictEqual(bobView.role, 'viewer')
+  assert.strictEqual(bobView.canEdit, false)
+
+  // Members without a per-file setting keep the historical share behaviour.
+  const carolReq = { authUser: { id: 'carol' }, forceAcl: true, headers: { cookie } }
+  const carolEdit = await roomAcl.assertRoomAccess(db, carolReq, 'room-share', 'edit')
+  assert.strictEqual(carolEdit.canEdit, true)
+  assert.strictEqual(carolEdit.shareId, shareId)
+}
+
 function testSuperAdminActor() {
   const prev = process.env.MIND_MAP_SUPER_ADMIN_IDS
   process.env.MIND_MAP_SUPER_ADMIN_IDS = 'alice, wecom:bob'
@@ -475,11 +699,15 @@ function testSuperAdminActor() {
 testNormalizeAndInfer()
 testRoleMatrix()
 testSuperAdminActor()
+testResolveMemberRoleMatrix()
 testAccessAndMembers()
   .then(testMultiSourceGrants)
   .then(testFolderRoleSource)
   .then(testClearRoomFolderRolesSqlOrder)
   .then(testSearchUsersPassesCorpId)
+  .then(testPerFileOverrideModel)
+  .then(testLegacyRowConvertsOnEdit)
+  .then(testShareCannotRaiseOverride)
   .then(() => {
     console.log('roomAcl tests passed')
   })

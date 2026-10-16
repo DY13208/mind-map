@@ -30,6 +30,18 @@ function createMcpSubmitGate(options = {}) {
   const queue = []
   let activeGlobal = 0
   let queuedBytes = 0
+  const metrics = {
+    submitted: 0,
+    started: 0,
+    completed: 0,
+    failed: 0,
+    queued: 0,
+    rejected: 0,
+    timedOut: 0,
+    cancelled: 0,
+    queueHighWater: 0,
+    queuedBytesHighWater: 0
+  }
 
   function activeRoom(roomKey) {
     return activeByRoom.get(roomKey) || 0
@@ -59,10 +71,20 @@ function createMcpSubmitGate(options = {}) {
     const task = waiter.task
     waiter.task = null
     activeGlobal += 1
+    metrics.started += 1
     activeByRoom.set(waiter.roomKey, activeRoom(waiter.roomKey) + 1)
     Promise.resolve()
       .then(task)
-      .then(waiter.resolve, waiter.reject)
+      .then(
+        value => {
+          metrics.completed += 1
+          waiter.resolve(value)
+        },
+        error => {
+          metrics.failed += 1
+          waiter.reject(error)
+        }
+      )
       .finally(() => {
         activeGlobal = Math.max(0, activeGlobal - 1)
         const next = activeRoom(waiter.roomKey) - 1
@@ -94,7 +116,11 @@ function createMcpSubmitGate(options = {}) {
   function run(roomKey, task, runOptions = {}) {
     const key = String(roomKey || '')
     const signal = runOptions.signal
-    if (signal && signal.aborted) return Promise.reject(abortError())
+    metrics.submitted += 1
+    if (signal && signal.aborted) {
+      metrics.cancelled += 1
+      return Promise.reject(abortError())
+    }
     if (activeGlobal < config.maxGlobal && activeRoom(key) < config.maxPerRoom) {
       const waiter = { roomKey: key, task, resolve: null, reject: null, estimatedBytes: 0 }
       return new Promise((resolve, reject) => {
@@ -111,6 +137,7 @@ function createMcpSubmitGate(options = {}) {
       perRoomQueued >= config.maxQueuedPerRoom ||
       queuedBytes + estimatedBytes > config.maxQueuedBytes
     ) {
+      metrics.rejected += 1
       return Promise.reject(gateError('MCP_WRITE_BUSY', 'MCP 写入队列繁忙，请稍后重试'))
     }
 
@@ -127,15 +154,20 @@ function createMcpSubmitGate(options = {}) {
       }
       waiter.timer = setTimeout(() => {
         if (!removeWaiter(waiter)) return
+        metrics.timedOut += 1
         reject(gateError('MCP_WRITE_QUEUE_TIMEOUT', 'MCP 写入排队超时，请使用相同 operation_id 重试'))
       }, Math.max(1, Number(config.maxWaitMs) || DEFAULTS.maxWaitMs))
       waiter.abort = () => {
         if (!removeWaiter(waiter)) return
+        metrics.cancelled += 1
         reject(abortError())
       }
       if (signal) signal.addEventListener('abort', waiter.abort, { once: true })
       queue.push(waiter)
+      metrics.queued += 1
       queuedBytes += estimatedBytes
+      metrics.queueHighWater = Math.max(metrics.queueHighWater, queue.length)
+      metrics.queuedBytesHighWater = Math.max(metrics.queuedBytesHighWater, queuedBytes)
       pump()
     })
   }
@@ -150,7 +182,8 @@ function createMcpSubmitGate(options = {}) {
       queuedByRoom,
       queuedBytes,
       queuedBytesLimit: config.maxQueuedBytes,
-      limits: { ...config }
+      limits: { ...config },
+      metrics: { ...metrics }
     }
   }
 

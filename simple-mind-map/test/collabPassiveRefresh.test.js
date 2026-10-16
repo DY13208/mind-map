@@ -12,7 +12,7 @@ ${method('  findTreeNode(root, uid) {', '  expandTreeNode(node) {')},
 ${method('  expandTreeNode(node) {', '  async ensureHttpNodePath(')},
 ${method('  async ensureHttpNodePath(', '  async syncHttpDirtySubtrees(treeNodeIndex) {')},
 ${method('  applyHttpRemoteNodeFields(node, next = {}, merged = {}) {', '  syncGeneralizationChildStubs(')},
-${method('  scheduleRemoteGeometryRender() {', '  scheduleRemoteRecover(')}
+${method('  scheduleRemoteGeometryRender(uid) {', '  scheduleRemoteRecover(')}
 })`, {
   console,
   setTimeout: fn => { renderTimers.push(fn); return renderTimers.length },

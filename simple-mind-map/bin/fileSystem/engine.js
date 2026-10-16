@@ -35,6 +35,11 @@ function createFileSystem(options = {}) {
     return publicFile(row, summary)
   }
 
+  function memberRoleFromRow(mine) {
+    if (!mine) return { role: null }
+    return { role: roomAcl.resolveMemberRole(mine) || null }
+  }
+
   function notifyStorage(roomKey, action) {
     try {
       const storage = require('../storage')
@@ -307,9 +312,10 @@ function createFileSystem(options = {}) {
       const list = byRoom[row.room_key] || []
       const mine = userId ? list.find(item => item.user_id === userId) : null
       const owner = list.find(item => item.role === 'owner')
+      const { role } = memberRoleFromRow(mine)
       return {
         ...row,
-        role: mine ? mine.role : null,
+        role,
         legacy_open: list.length === 0,
         owner_user_id: (owner && owner.user_id) || row.owner_id || '',
         owner_name: (owner && owner.user_id) || row.owner_id || ''
@@ -451,7 +457,14 @@ function createFileSystem(options = {}) {
       ? `left join room_members my on my.room_key = r.room_key and my.user_id = $${stateParam}`
       : ''
     const roleSelect = stateParam
-      ? `, my.role as role,
+      ? `, ${roomAcl.sqlResolveMemberRole(
+          'my.direct_role',
+          'my.team_role',
+          'my.folder_role',
+          'my.role',
+          'my.override_role',
+          'my.acl_v2'
+        )} as role,
          (not exists (select 1 from room_members mx where mx.room_key = r.room_key)) as legacy_open`
       : `, null::text as role, true as legacy_open`
     const stateSelect = stateParam
@@ -515,7 +528,7 @@ function createFileSystem(options = {}) {
       const members = await store.listMembersForRooms([roomKey])
       legacyOpen = members.length === 0
       const mine = members.find(item => item.user_id === userId)
-      role = mine ? mine.role : null
+      role = memberRoleFromRow(mine).role
       const owner = members.find(item => item.role === 'owner')
       row.owner_user_id = (owner && owner.user_id) || row.owner_id
       row.owner_name = row.owner_user_id
@@ -750,7 +763,9 @@ function createFileSystem(options = {}) {
       const rooms = await store.listRooms({})
       const members = await store.listMembersForRooms(rooms.map(item => item.room_key))
       const mine = new Set(
-        members.filter(item => item.user_id === userId).map(item => item.room_key)
+        members
+          .filter(item => item.user_id === userId)
+          .map(item => item.room_key)
       )
       accessibleFolderIds = new Set()
       rooms.forEach(room => {
@@ -844,9 +859,10 @@ function createFileSystem(options = {}) {
       const list = byRoom[row.room_key] || []
       const mine = userId ? list.find(item => item.user_id === userId) : null
       const owner = list.find(item => item.role === 'owner')
+      const { role } = memberRoleFromRow(mine)
       return {
         ...row,
-        role: mine ? mine.role : null,
+        role,
         legacy_open: list.length === 0,
         owner_user_id: (owner && owner.user_id) || row.owner_id || '',
         owner_name: (owner && owner.user_id) || row.owner_id || ''

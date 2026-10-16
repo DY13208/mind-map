@@ -24,6 +24,7 @@ export function createCollaborationStore(options = {}) {
     status: 'disconnected',
     lastAppliedVersion: 0,
     pendingOperations: new Map(),
+    pendingConfirmations: new Map(),
     eventBuffer: new Map(),
     seenVersions: new Set(),
     retryTimers: new Map()
@@ -71,6 +72,12 @@ export function createCollaborationStore(options = {}) {
       lastAppliedVersion: state.lastAppliedVersion,
       pendingCount: pending.length,
       pendingOperations: pending,
+      pendingConfirmations: Array.from(state.pendingConfirmations.entries())
+        .map(([version, confirmation]) => ({
+          version,
+          operationId: confirmation.operationId
+        }))
+        .sort((a, b) => a.version - b.version),
       bufferedVersions: Array.from(state.eventBuffer.keys()).sort((a, b) => a - b)
     }
   }
@@ -81,6 +88,7 @@ export function createCollaborationStore(options = {}) {
     state.status = state.mapId ? 'connecting' : 'disconnected'
     state.lastAppliedVersion = Math.max(0, Number(version) || 0)
     state.pendingOperations.clear()
+    state.pendingConfirmations.clear()
     state.eventBuffer.clear()
     state.seenVersions.clear()
     emit()
@@ -100,6 +108,12 @@ export function createCollaborationStore(options = {}) {
     if (!Number.isFinite(next) || next < 0) return getSnapshot()
     if (next > state.lastAppliedVersion) {
       state.lastAppliedVersion = next
+      for (const version of state.pendingConfirmations.keys()) {
+        if (version <= next) state.pendingConfirmations.delete(version)
+      }
+      for (const version of state.eventBuffer.keys()) {
+        if (version <= next) state.eventBuffer.delete(version)
+      }
       emit()
     }
     return getSnapshot()
@@ -161,12 +175,32 @@ export function createCollaborationStore(options = {}) {
       state.pendingOperations.delete(id)
     }
     const next = Number(version)
+    let recoveryVersion = 0
     if (Number.isFinite(next) && next > 0) {
-      if (!state.seenVersions.has(next)) state.seenVersions.add(next)
-      if (next > state.lastAppliedVersion) state.lastAppliedVersion = next
+      if (next <= state.lastAppliedVersion) {
+        state.pendingConfirmations.delete(next)
+        state.eventBuffer.delete(next)
+        state.seenVersions.add(next)
+      } else if (next === state.lastAppliedVersion + 1) {
+        state.pendingConfirmations.delete(next)
+        state.eventBuffer.delete(next)
+        state.seenVersions.add(next)
+        state.lastAppliedVersion = next
+      } else {
+        state.pendingConfirmations.set(next, {
+          operationId: id,
+          extra
+        })
+        recoveryVersion = next
+      }
     }
     emit()
-    return { confirmed: !!entry, version: state.lastAppliedVersion, extra }
+    return {
+      confirmed: !!entry,
+      version: state.lastAppliedVersion,
+      recoveryVersion,
+      extra
+    }
   }
 
   function rejectPending(operationId, error) {
@@ -202,6 +236,7 @@ export function createCollaborationStore(options = {}) {
     if (state.eventBuffer.size >= maxBuffer) {
       const first = Array.from(state.eventBuffer.keys()).sort((a, b) => a - b)[0]
       state.eventBuffer.delete(first)
+      state.seenVersions.delete(first)
     }
     state.eventBuffer.set(version, event)
     state.seenVersions.add(version)
@@ -209,16 +244,43 @@ export function createCollaborationStore(options = {}) {
     return { accepted: true, version }
   }
 
-  function drainReadyEvents() {
+  function peekReadyEvents() {
     const ready = []
     let cursor = state.lastAppliedVersion + 1
     while (state.eventBuffer.has(cursor)) {
       ready.push(state.eventBuffer.get(cursor))
-      state.eventBuffer.delete(cursor)
-      state.lastAppliedVersion = cursor
       cursor += 1
     }
-    if (ready.length) emit()
+    return ready
+  }
+
+  function commitReadyEvents(events) {
+    const ready = Array.isArray(events) ? events : []
+    let cursor = state.lastAppliedVersion + 1
+    for (const event of ready) {
+      if (
+        !event ||
+        Number(event.version) !== cursor ||
+        state.eventBuffer.get(cursor) !== event
+      ) {
+        return { committed: false, version: state.lastAppliedVersion }
+      }
+      cursor += 1
+    }
+    if (!ready.length) return { committed: true, version: state.lastAppliedVersion }
+    ready.forEach(event => {
+      const version = Number(event.version)
+      state.eventBuffer.delete(version)
+      state.pendingConfirmations.delete(version)
+    })
+    state.lastAppliedVersion = cursor - 1
+    emit()
+    return { committed: true, version: state.lastAppliedVersion }
+  }
+
+  function drainReadyEvents() {
+    const ready = peekReadyEvents()
+    commitReadyEvents(ready)
     return ready
   }
 
@@ -250,6 +312,8 @@ export function createCollaborationStore(options = {}) {
     confirmPending,
     rejectPending,
     enqueueRemoteEvent,
+    peekReadyEvents,
+    commitReadyEvents,
     drainReadyEvents,
     hasGapBefore,
     subscribe,

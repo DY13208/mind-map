@@ -130,6 +130,7 @@ function clientSafePayload(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return {}
   const safe = { ...payload }
   delete safe.__mcpRequest
+  delete safe.__mcpResult
   delete safe.requestDigest
   return safe
 }

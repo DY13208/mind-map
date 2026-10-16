@@ -181,7 +181,7 @@
             </div>
           </section>
           <section v-if="!readOnly" class="detailSection">
-            <h3>{{ isRoom ? '本次直接授权' : '本次授权的目标权限' }}</h3>
+            <h3>{{ isRoom ? '本次单独授权' : '本次授权的目标权限' }}</h3>
             <el-radio-group v-model="role" class="roleOptions">
               <el-radio-button
                 v-for="option in roleOptions"
@@ -249,7 +249,7 @@
             </div>
             <div class="existingList">
               <div v-if="filteredMembers.length" class="existingHead">
-                <span>对象</span><span>{{ isRoom ? '直接授权' : '权限' }}</span><span>操作</span>
+                <span>对象</span><span>{{ isRoom ? '单独设置' : '权限' }}</span><span>操作</span>
               </div>
               <div
                 v-for="member in pagedMembers"
@@ -259,7 +259,7 @@
                 <span class="memberAvatar small">{{ avatarText(member) }}</span
                 ><span class="existingIdentity"
                   ><strong>{{ member.name || member.id }}</strong
-                  ><small>{{ member.department || '成员' }}<template v-if="memberSourceLabel(member)"> · {{ memberSourceLabel(member) }}</template><template v-if="isRoom && (member.folderRole || member.teamRole)"> · 实际{{ roleLabel(member.role) }}</template></small></span
+                  ><small>{{ member.department || '成员' }}<template v-if="memberSourceLabel(member)"> · {{ memberSourceLabel(member) }}</template></small></span
                 ><span
                   v-if="isOwnerRole(member.role) || readOnly"
                   class="ownerRoleLabel"
@@ -271,8 +271,7 @@
                   :value="editableMemberRole(member)"
                   :aria-label="`修改${member.name || member.id}的权限`"
                   @change="updateRole(member, $event)"
-                  ><el-option v-if="isRoom && !member.directRole" value="" label="继承权限" disabled />
-                  <el-option
+                  ><el-option
                     v-for="option in memberRoleSelectOptions"
                     :key="option.value"
                     :label="option.label"
@@ -292,12 +291,12 @@
                   v-else-if="!readOnly"
                   class="removeBtn"
                   :disabled="isInheritedOnly(member)"
-                  :title="isInheritedOnly(member) ? '请在来源文件夹或团队中移除继承权限' : '移除成员直接权限'"
-                  :aria-label="`移除${member.name || member.id}的权限`"
+                  :title="isInheritedOnly(member) ? '该成员的权限来自文件夹或团队继承，请到来源处调整' : '移除单独授权，之后按继承权限生效'"
+                  :aria-label="`移除${member.name || member.id}的单独授权`"
                   type="button"
                   @click="remove(member)"
                 >
-                  移除
+                  移除单独授权
                 </button>
               </div>
               <p v-if="!filteredMembers.length && !loading" class="existingEmpty">
@@ -488,7 +487,7 @@ export default {
     resourceDescription() {
       if (this.isTeam) return '权限将应用于整个团队空间与成员协作'
       return this.isRoom
-        ? '修改当前脑图的直接授权；文件夹和团队继承权限仍然有效'
+        ? '修改当前脑图的成员设置；单独设置优先于文件夹和团队继承'
         : '权限应用于直属现有及后续脑图；子文件夹需要单独授权'
     },
     roleOptions() {
@@ -505,6 +504,12 @@ export default {
       ]
     },
     memberRoleSelectOptions() {
+      if (this.isRoom) {
+        return [
+          { value: 'Inherit', label: '跟随继承' },
+          ...this.roleOptions.map(option => ({ ...option, label: option.title }))
+        ]
+      }
       return this.roleOptions.map(option => ({ ...option, label: option.title }))
     },
     defaultRole() {
@@ -1117,27 +1122,60 @@ export default {
       this.roleFilter = ''
       this.$refs.existingSection.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     },
+    roleSelectValue(raw) {
+      const value = String(raw || '').trim().toLowerCase()
+      if (!value) return ''
+      if (value === 'viewer') return 'Viewer'
+      if (value === 'editor') return 'Editor'
+      if (value === 'manager') return 'Manager'
+      if (value === 'owner') return 'Owner'
+      return ''
+    },
     editableMemberRole(member) {
-      const role = this.isRoom && member.directRole !== undefined ? member.directRole || '' : member.role
+      if (this.isRoom) {
+        // Per-file setting first (override model), then the legacy direct grant.
+        const current = member.aclV2 ? member.overrideRole : member.directRole
+        return this.roleSelectValue(current) || 'Inherit'
+      }
+      const role = member.role
       const option = this.roleOptions.find(item => String(item.value).toLowerCase() === String(role).toLowerCase())
       return option ? option.value : role
     },
     isInheritedOnly(member) {
-      return this.isRoom && member.directRole === null && !!(member.folderRole || member.teamRole)
+      if (!this.isRoom) return false
+      const hasPerFileSetting = member.aclV2 ? !!member.overrideRole : !!member.directRole
+      return !hasPerFileSetting && !!(member.folderRole || member.teamRole)
+    },
+    inheritedSourceLabel(member) {
+      if (member.folderRole) return '文件夹继承'
+      if (member.teamRole) return '团队继承'
+      return ''
     },
     memberSourceLabel(member) {
       if (!this.isRoom) return ''
-      const sources = []
-      if (member.folderRole) sources.push('文件夹继承')
-      if (member.teamRole) sources.push('团队继承')
-      if (member.directRole) sources.push('直接授权')
-      return sources.join(' / ')
+      const parts = []
+      const actual = String(member.role || '').toLowerCase()
+      if (actual && actual !== 'owner') parts.push(`实际${this.roleLabel(member.role)}`)
+      if (member.aclV2) {
+        if (member.overrideRole) {
+          const inherited = this.inheritedSourceLabel(member)
+          parts.push(inherited ? `本图单独设置，覆盖${inherited}` : '本图单独设置')
+        } else {
+          parts.push(this.inheritedSourceLabel(member) || '无有效来源')
+        }
+      } else if (member.directRole) {
+        const inherited = this.inheritedSourceLabel(member)
+        parts.push(inherited ? `历史直接授权，与${inherited}取较高权限` : '历史直接授权')
+      } else {
+        parts.push(this.inheritedSourceLabel(member) || '无有效来源')
+      }
+      return parts.filter(Boolean).join(' · ')
     },
     needsRoleChange(member) {
       if (!member) return true
       if (this.isOwnerRole(member.role)) return false
       if (this.isTeam && this.role === 'member') return false
-      const existing = this.isRoom && member.directRole !== undefined ? member.directRole : member.role
+      const existing = this.isRoom ? this.editableMemberRole(member) : member.role
       return String(existing || '').toLowerCase() !== String(this.role).toLowerCase()
     },
     avatarText(item) {
@@ -1435,6 +1473,7 @@ export default {
     async run(action, requestedRole, removedId) {
       if (this.readOnly || this.busy || this.loadFailed) return
       const version = this.loadVersion
+      const requested = String(requestedRole || '').toLowerCase()
       this.busy = true
       try {
         const updated = await action()
@@ -1442,12 +1481,25 @@ export default {
         await this.loadMembers()
         if (version !== this.loadVersion) return
         this.$emit('changed')
-        const remaining = removedId && this.members.find(member => member.id === removedId)
-        if (this.isRoom && remaining && (remaining.folderRole || remaining.teamRole)) {
-          this.$message.warning(`直接授权已移除，仍有${this.roleLabel(remaining.role)}的继承权限；请在来源文件夹或团队调整`)
-        } else if (this.isRoom && requestedRole && updated && String(updated.role).toLowerCase() !== String(requestedRole).toLowerCase()) {
-          this.$message.warning(`直接授权已更新，实际仍为${this.roleLabel(updated.role)}；请在来源文件夹或团队调整继承权限`)
-        } else this.$message.success(`${this.resourceLabel}权限已更新`)
+        if (this.isRoom && removedId) {
+          const remaining = this.members.find(member => member.id === removedId)
+          if (remaining && (remaining.folderRole || remaining.teamRole)) {
+            this.$message.warning(`已移除单独授权；该成员仍有继承权限（实际${this.roleLabel(remaining.role)}），如需收回请在来源文件夹或团队调整`)
+          } else {
+            this.$message.success('已移除该成员的本图授权')
+          }
+        } else if (this.isRoom && requested === 'inherit') {
+          const remaining =
+            updated && this.members.find(member => member.id === (updated.user_id || updated.userId))
+          if (remaining && remaining.role) {
+            const source = this.inheritedSourceLabel(remaining)
+            this.$message.success(`已恢复继承，实际为${this.roleLabel(remaining.role)}${source ? ` · ${source}` : ''}`)
+          } else {
+            this.$message.success('已恢复继承，该成员当前无继承权限')
+          }
+        } else {
+          this.$message.success(`${this.resourceLabel}权限已更新`)
+        }
       } catch (error) {
         if (version === this.loadVersion) this.$message.error(error.message || '更新权限失败')
       } finally {

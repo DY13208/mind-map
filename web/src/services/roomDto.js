@@ -240,6 +240,11 @@ export function normalizeMemberDto(row = {}) {
   const userId = String(row.user_id || row.userId || row.id || '')
   const name = String(row.name || userId)
   const role = normalizeRole(row.role)
+  const overrideRole = normalizeRole(
+    row.override_role !== undefined ? row.override_role : row.overrideRole
+  )
+  const aclV2 =
+    row.acl_v2 !== undefined ? !!row.acl_v2 : !!row.aclV2
   return {
     id: userId,
     userId,
@@ -252,6 +257,8 @@ export function normalizeMemberDto(row = {}) {
     directRole: row.direct_role !== undefined ? row.direct_role : row.directRole,
     folderRole: row.folder_role || row.folderRole || null,
     teamRole: row.team_role || row.teamRole || null,
+    overrideRole: overrideRole || '',
+    aclV2,
     source: row.source || '',
     role: apiRole(role),
     roleLabel: displayRole(role),

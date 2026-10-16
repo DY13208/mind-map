@@ -267,6 +267,39 @@ function attachmentMountIsPersisted(actual, expected) {
   )
 }
 
+/**
+ * Resolve the requested node from the supported /nodes read-back shapes.
+ * Current APIs return an array; older callers may provide a UID-keyed map.
+ * In either case, an explicitly reported UID must agree with the requested UID.
+ */
+export function readbackNodeByUid(readback, nodeUid) {
+  const targetUid = String(nodeUid || '').trim()
+  const nodes = readback && readback.nodes
+  if (!targetUid || !nodes || typeof nodes !== 'object') return null
+
+  const explicitUid = node => {
+    if (!node || typeof node !== 'object') return ''
+    const outerUid = String(node.uid || '').trim()
+    const dataUid = String((node.data && node.data.uid) || '').trim()
+    if (outerUid && dataUid && outerUid !== dataUid) return null
+    return outerUid || dataUid
+  }
+  const matches = node => {
+    const uid = explicitUid(node)
+    return uid === null || (uid && uid !== targetUid) ? null : node
+  }
+
+  if (Array.isArray(nodes)) {
+    return nodes.find(node => {
+      const uid = explicitUid(node)
+      return uid === targetUid
+    }) || null
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(nodes, targetUid)) return null
+  return matches(nodes[targetUid])
+}
+
 function attachmentWorkflowError(message, code, details, cause) {
   return new AttachmentUploadWorkflowError(
     message,
@@ -483,7 +516,7 @@ export async function uploadAttachmentAndMountNode({
     )
   }
 
-  const persistedNode = readback && readback.nodes && readback.nodes[nodeUid]
+  const persistedNode = readbackNodeByUid(readback, nodeUid)
   const persistedData = persistedNode && persistedNode.data
   const persistedRevision =
     safeRevision(readback && readback.version) ??

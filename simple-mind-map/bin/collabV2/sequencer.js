@@ -106,7 +106,8 @@ async function submitOperation(req, raw, options = {}) {
             })
           }
           return applyMapReplace(room.nodes || {}, op, command)
-        }
+        },
+        { diagnosticSource: 'socket' }
       )
     } else if (isDirectType(op.type) || op.type === 'operation.undo' || op.type === 'operation.redo') {
       committed = await commitDirectRoomOperation(
@@ -127,7 +128,8 @@ async function submitOperation(req, raw, options = {}) {
             ...applied,
             queryStats: store.stats
           }
-        }
+        },
+        { diagnosticSource: 'socket' }
       )
     } else {
       throw unsupportedOperation(op.type, op.roomKey)

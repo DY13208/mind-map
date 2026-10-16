@@ -125,7 +125,7 @@ const STRUCTURE_COMMANDS = {
 
 const RECENT_HTTP_MS = 8000
 const RECENT_PUSH_GRACE_MS = 2500
-const REMOTE_GEOMETRY_RENDER_MS = 120
+const REMOTE_GEOMETRY_RENDER_MS = 50
 const GEN_INTENT_MS = 30000
 const PATCH_CONCURRENCY = 2
 const HTTP_RECOVER_RETRY_BASE_MS = 500
@@ -1967,7 +1967,9 @@ class Cooperate {
   }
 
   setCollabV2Adapter(adapter) {
-    this.collabV2Adapter = adapter || null
+    const next = adapter || null
+    if (this.collabV2Adapter !== next) this.cancelV2RemoteApply()
+    this.collabV2Adapter = next
   }
 
   establishV2HistoryBaseline() {
@@ -1991,11 +1993,188 @@ class Cooperate {
     })
   }
 
+  getV2RevisionScope() {
+    return {
+      roomKey: this.httpRoomKey || '',
+      adapter: this.collabV2Adapter || null,
+      epoch: Number(this._v2RemoteApplyEpoch) || 0
+    }
+  }
+
+  isV2RevisionScopeCurrent(scope) {
+    return !!scope && scope.roomKey === (this.httpRoomKey || '') &&
+      scope.adapter === (this.collabV2Adapter || null) &&
+      scope.epoch === (Number(this._v2RemoteApplyEpoch) || 0)
+  }
+
+  clearV2RevisionCompletions() {
+    this._v2RevisionCompletionScope = this.getV2RevisionScope()
+    this._v2RevisionCompletions = new Map()
+    this._v2RevisionBlockedCompletion = null
+  }
+
+  async replayV2AckCompletion(completion, scope, context) {
+    if (!completion || completion.kind !== 'ack') return true
+    if (!this.isV2RevisionScopeCurrent(scope)) return false
+    if (completion.snapshotValid === false) return false
+
+    const renderer = this.mindMap && this.mindMap.renderer
+    const meta = {
+      applySelf: true,
+      fromAck: true,
+      originalScope: completion.originalScope,
+      capturedIntentEpochs: completion.capturedIntentEpochs || new Map(),
+      deferFallback: true
+    }
+    for (const event of completion.events || []) {
+      if (!this.isV2RevisionScopeCurrent(scope)) return false
+      const normalized = collabNodeFeatures.normalizeAppliedUpdatePayload(event)
+      const uid = normalized.uid
+      const patch = normalized.patch || {}
+      if (!uid || !Object.keys(patch).length) continue
+      const node = renderer && typeof renderer.findNodeByUid === 'function'
+        ? renderer.findNodeByUid(uid)
+        : null
+      const alreadyEqual = !!(node && typeof node.getData === 'function' &&
+        Object.keys(patch).every(key => JSON.stringify(node.getData(key)) === JSON.stringify(patch[key])))
+      if (alreadyEqual) continue
+
+      // Replay the ACK's canonical fields after the missing earlier revisions
+      // have applied. This stays in the caller's serialized queue task.
+      const applied = await this.applyV2RemoteOperationNow(event, meta, context)
+      const succeeded = applied === true || !!(applied && typeof applied === 'object' && applied.applied === true)
+      if (!succeeded || !this.isV2RevisionScopeCurrent(scope)) return false
+    }
+    return this.isV2RevisionScopeCurrent(scope)
+  }
+
+  // Must be called from the serialized V2 apply/reconcile task. Future ACK
+  // records retain only canonical update patches and are replayed before their
+  // revision advances the watermark.
+  async markV2RevisionComplete(version, scope = this.getV2RevisionScope(), completion = null, context = null) {
+    const revision = Number(version)
+    if (!Number.isSafeInteger(revision) || revision <= 0 || !this.isV2RevisionScopeCurrent(scope)) return false
+
+    const currentScope = this._v2RevisionCompletionScope
+    if (!currentScope || currentScope.roomKey !== scope.roomKey ||
+      currentScope.adapter !== scope.adapter || currentScope.epoch !== scope.epoch) {
+      this._v2RevisionCompletionScope = { ...scope }
+      this._v2RevisionCompletions = new Map()
+      this._v2RevisionBlockedCompletion = null
+    }
+    if (!this._v2RevisionCompletions) this._v2RevisionCompletions = new Map()
+
+    let watermark = Number(this.lastAppliedVersion) || 0
+    for (const completed of this._v2RevisionCompletions.keys()) {
+      if (completed <= watermark) this._v2RevisionCompletions.delete(completed)
+    }
+    if (this._v2RevisionBlockedCompletion && this._v2RevisionBlockedCompletion.revision <= watermark) {
+      this._v2RevisionBlockedCompletion = null
+    }
+    const limit = 2000
+    let advanced = false
+    const record = completion || { kind: 'remote' }
+    let currentRecord = null
+    if (revision > watermark && revision === watermark + 1) {
+      const existing = this._v2RevisionCompletions.get(revision)
+      const blocked = this._v2RevisionBlockedCompletion
+      const blockedForCurrent = blocked && blocked.revision === revision && blocked.scope &&
+        blocked.scope.roomKey === scope.roomKey && blocked.scope.adapter === scope.adapter &&
+        blocked.scope.epoch === scope.epoch
+      currentRecord = blockedForCurrent
+        ? blocked.record
+        : (record.kind === 'ack' || !existing ? record : existing)
+      if (blockedForCurrent) this._v2RevisionBlockedCompletion = null
+      this._v2RevisionCompletions.delete(revision)
+    } else if (revision > watermark && !this._v2RevisionCompletions.has(revision) && this._v2RevisionCompletions.size >= limit) {
+      v2Trace('revision.completion.overflow', { revision, count: this._v2RevisionCompletions.size })
+      if (typeof this.scheduleRemoteRecover === 'function') this.scheduleRemoteRecover(revision)
+      return false
+    } else if (revision > watermark) {
+      const existing = this._v2RevisionCompletions.get(revision)
+      // Prefer ACK replay data over a plain remote completion for the same
+      // revision, while never replacing one ACK with a weaker record.
+      this._v2RevisionCompletions.set(revision,
+        record.kind === 'ack' || !existing ? record : existing)
+    }
+
+    const renderer = this.mindMap && this.mindMap.renderer
+    const applyContext = context || {
+      epoch: scope.epoch,
+      tree: renderer && renderer.renderTree,
+      room: scope.roomKey,
+      adapter: scope.adapter,
+      revision: watermark
+    }
+    const complete = async (nextRevision, nextRecord) => {
+      if (!this.isV2RevisionScopeCurrent(scope)) return false
+      try {
+        if (nextRecord && nextRecord.kind === 'ack') {
+          const replayed = await this.replayV2AckCompletion(nextRecord, scope, applyContext)
+          if (!replayed) {
+            if (this.isV2RevisionScopeCurrent(scope) && typeof this.scheduleRemoteRecover === 'function') {
+              this.scheduleRemoteRecover(nextRevision)
+            }
+            return false
+          }
+        }
+      } catch (err) {
+        v2Trace('revision.completion.replay-fail', { revision: nextRevision })
+        if (this.isV2RevisionScopeCurrent(scope) && typeof this.scheduleRemoteRecover === 'function') {
+          this.scheduleRemoteRecover(nextRevision)
+        }
+        return false
+      }
+      return this.isV2RevisionScopeCurrent(scope)
+    }
+
+    if (currentRecord) {
+      if (!await complete(revision, currentRecord)) {
+        if (!this.isV2RevisionScopeCurrent(scope)) return false
+        if (this._v2RevisionCompletions.size < limit) {
+          this._v2RevisionCompletions.set(revision, currentRecord)
+        } else {
+          // A single blocked head entry is retained separately when the future
+          // map is full, keeping memory bounded without discarding its ACK.
+          this._v2RevisionBlockedCompletion = { revision, record: currentRecord, scope: { ...scope } }
+        }
+        return false
+      }
+      watermark = revision
+      advanced = true
+    }
+
+    const commitWatermark = () => {
+      if (!advanced || !this.isV2RevisionScopeCurrent(scope)) return
+      this.lastAppliedVersion = watermark
+      if (this.collabStore) this.collabStore.setLastAppliedVersion(watermark)
+      advanced = false
+    }
+    commitWatermark()
+
+    while (true) {
+      const nextRevision = watermark + 1
+      const blocked = this._v2RevisionBlockedCompletion
+      const hasBlocked = blocked && blocked.revision === nextRevision &&
+        blocked.scope && blocked.scope.roomKey === scope.roomKey &&
+        blocked.scope.adapter === scope.adapter && blocked.scope.epoch === scope.epoch
+      const nextRecord = hasBlocked ? blocked.record : this._v2RevisionCompletions.get(nextRevision)
+      if (!nextRecord) break
+      if (!await complete(nextRevision, nextRecord)) return false
+      if (hasBlocked) this._v2RevisionBlockedCompletion = null
+      this._v2RevisionCompletions.delete(nextRevision)
+      watermark += 1
+      advanced = true
+      commitWatermark()
+    }
+    commitWatermark()
+    return true
+  }
+
   // On a successful local ACK, reconcile the committed canonical content into
   // the model when a competing remote op may have overwritten the optimistic
-  // value. Per-UID: skip if a newer local intent epoch exists, or if the ACK is
-  // older than the authoritative revision. Runs on the serialized remote-apply
-  // queue so it cannot interleave with a remote apply.
+  // value. Queue the equality check itself behind prior remote applies; otherwise
+  // an optimistic value can look equal before an older queued event overwrites it.
   reconcileAckedLocalOperation(result, capturedIntentEpochs, originalScope, type, payload) {
     const committed = (result && result.operation) || null
     const committedType = (committed && committed.type) || type
@@ -2014,25 +2193,111 @@ class Cooperate {
     } else if (isCanonicalUpdate(committedType)) {
       events.push({ type: committedType, payload: committedPayload, clientId, serverRevision: committedRev })
     }
-    if (!events.length) return Promise.resolve()
-    const renderer = this.mindMap && this.mindMap.renderer
-    // Equal fastpath: a canonical patch already present in the current node must
-    // not trigger a redundant apply/render/remote notice (ordinary optimistic
-    // self echo must stay a no-op).
-    const needed = events.filter(event => {
-      if (!renderer || typeof renderer.findNodeByUid !== 'function') return false
+    const scope = {
+      roomKey: originalScope ? originalScope.roomKey : (this.httpRoomKey || ''),
+      adapter: originalScope ? originalScope.adapter : (this.collabV2Adapter || null),
+      epoch: originalScope ? Number(originalScope.remoteApplyEpoch) || 0 : (Number(this._v2RemoteApplyEpoch) || 0)
+    }
+    const meta = { applySelf: true, fromAck: true, originalScope, capturedIntentEpochs: capturedIntentEpochs || new Map(), deferFallback: true }
+    let allSnapshotsValid = true
+    const replayEvents = events.map(event => {
       const normalized = collabNodeFeatures.normalizeAppliedUpdatePayload(event.event || event)
-      const uid = normalized.uid
-      const patch = normalized.patch || {}
-      if (!uid || !Object.keys(patch).length) return false
-      const node = renderer.findNodeByUid(uid)
-      if (!node || typeof node.getData !== 'function') return true
-      return !Object.keys(patch).every(key => JSON.stringify(node.getData(key)) === JSON.stringify(patch[key]))
+      let patchSnapshot = {}
+      let snapshotValid = true
+      try {
+        patchSnapshot = JSON.parse(JSON.stringify(normalized.patch || {}))
+      } catch (err) {
+        snapshotValid = false
+        allSnapshotsValid = false
+        v2Trace('ack.reconcile.snapshot-fail', {})
+      }
+      return {
+        type: 'node.updated',
+        payload: { uid: normalized.uid, patch: patchSnapshot },
+        clientId,
+        serverRevision: committedRev,
+        snapshotValid
+      }
+    }).filter(event => event.payload.uid && Object.keys(event.payload.patch).length)
+    const replayScope = { roomKey: scope.roomKey, adapter: scope.adapter, epoch: scope.epoch }
+    const replayIntentEpochs = new Map()
+    replayEvents.forEach(event => {
+      if (capturedIntentEpochs && capturedIntentEpochs.has(event.payload.uid)) {
+        replayIntentEpochs.set(event.payload.uid, capturedIntentEpochs.get(event.payload.uid))
+      }
     })
-    if (!needed.length) return Promise.resolve()
-    const meta = { applySelf: true, fromAck: true, originalScope, capturedIntentEpochs: capturedIntentEpochs || new Map() }
-    return Promise.all(needed.map(event => this.applyV2RemoteOperation(event, meta)))
-      .catch(err => { v2Trace('ack.reconcile.fail', { message: err && err.message }) })
+    const completion = {
+      kind: 'ack',
+      events: replayEvents,
+      snapshotValid: allSnapshotsValid,
+      originalScope: {
+        roomKey: replayScope.roomKey,
+        adapter: replayScope.adapter,
+        remoteApplyEpoch: replayScope.epoch
+      },
+      capturedIntentEpochs: replayIntentEpochs
+    }
+    const task = Promise.resolve(this._v2RemoteApplyQueue).catch(() => {}).then(async () => {
+      if (!this.isV2RevisionScopeCurrent(scope)) {
+        v2Trace('ack.reconcile.skip-scope-changed', {})
+        return false
+      }
+      const renderer = this.mindMap && this.mindMap.renderer
+      const context = {
+        epoch: scope.epoch,
+        tree: renderer && renderer.renderTree,
+        room: scope.roomKey,
+        adapter: scope.adapter,
+        revision: Number(this.lastAppliedVersion) || 0
+      }
+      const beginBatch = renderer && renderer.beginRemoteRenderBatch
+      const endBatch = renderer && renderer.endRemoteRenderBatch
+      if (events.length && typeof beginBatch === 'function') beginBatch.call(renderer)
+      try {
+        // A non-update optimistic operation has already changed the local model;
+        // its ACK still fills the revision only after earlier queued applies finish.
+        for (const event of events) {
+          if (!this.isV2RevisionScopeCurrent(scope)) return false
+          const normalized = collabNodeFeatures.normalizeAppliedUpdatePayload(event.event || event)
+          const uid = normalized.uid
+          const patch = normalized.patch || {}
+          if (!uid || !Object.keys(patch).length) continue
+          const node = renderer && typeof renderer.findNodeByUid === 'function'
+            ? renderer.findNodeByUid(uid)
+            : null
+          const alreadyEqual = !!(node && typeof node.getData === 'function' &&
+            Object.keys(patch).every(key => JSON.stringify(node.getData(key)) === JSON.stringify(patch[key])))
+          if (alreadyEqual) continue
+
+          // Call Now directly inside this queue task. Calling the public wrapper
+          // here would append behind ourselves and deadlock.
+          const applied = await this.applyV2RemoteOperationNow(event, meta, context)
+          const succeeded = applied === true || !!(applied && typeof applied === 'object' && applied.applied === true)
+          if (!succeeded) {
+            return false
+          }
+        }
+        if (!this.isV2RevisionScopeCurrent(scope)) return { reconciled: false, completionRecorded: false }
+        const completionRecorded = await this.markV2RevisionComplete(
+          committedRev,
+          scope,
+          completion,
+          context
+        )
+        if (!completionRecorded && (!Number.isSafeInteger(committedRev) || committedRev <= 0) &&
+          this.isV2RevisionScopeCurrent(scope) && typeof this.scheduleRemoteRecover === 'function') {
+          this.scheduleRemoteRecover(committedRev)
+        }
+        return { reconciled: true, completionRecorded }
+      } finally {
+        if (events.length && typeof endBatch === 'function') endBatch.call(renderer)
+      }
+    }).catch(err => {
+      v2Trace('ack.reconcile.fail', { message: err && err.message })
+      return { reconciled: false, completionRecorded: false }
+    })
+    this._v2RemoteApplyQueue = task.catch(() => {})
+    return task
   }
 
   submitV2(type, payload) {
@@ -2110,10 +2375,21 @@ class Cooperate {
       .then(async result => {
         this.acknowledgeLocalVersion(result && result.serverRevision, {
           operationId: result && result.opId,
-          duplicate: !!(result && result.duplicate)
+          duplicate: !!(result && result.duplicate),
+          deferV2Watermark: true
         })
         this.markAckedFromPayload(type, payload)
-        await this.reconcileAckedLocalOperation(result, capturedIntentEpochs, originalScope, type, payload)
+        const reconciled = await this.reconcileAckedLocalOperation(result, capturedIntentEpochs, originalScope, type, payload)
+        if (!reconciled || !reconciled.reconciled) {
+          const scope = {
+            roomKey: originalScope.roomKey,
+            adapter: originalScope.adapter,
+            epoch: originalScope.remoteApplyEpoch
+          }
+          if (this.isV2RevisionScopeCurrent(scope)) {
+            this.scheduleRemoteRecover(result && result.serverRevision)
+          }
+        }
         collabTrace('8.ack', {
           traceId,
           opId: result && result.opId,
@@ -2141,13 +2417,14 @@ class Cooperate {
 
   cancelV2RemoteApply() {
     this._v2RemoteApplyEpoch = (this._v2RemoteApplyEpoch || 0) + 1
+    this.clearV2RevisionCompletions()
     Array.from(this._v2RendererWaiters || []).forEach(cancel => cancel(false))
   }
 
   isV2RemoteApplyScopeCurrent(context) {
     const mm = this.mindMap
     return !this._disposed && mm && !mm._destroyed && mm.renderer &&
-      context.room === this.httpRoomKey && context.adapter === this.collabV2Adapter
+      context.room === (this.httpRoomKey || '') && context.adapter === (this.collabV2Adapter || null)
   }
 
   isV2RemoteApplyCurrent(context) {
@@ -2190,17 +2467,36 @@ class Cooperate {
     })
   }
 
-  applyV2RemoteOperation(op, meta = {}) {
+  async applyV2RemoteOperation(op, meta = {}) {
     const renderer = this.mindMap && this.mindMap.renderer
-    const adapter = this.collabV2Adapter
-    const status = adapter && adapter.getStatus && adapter.getStatus()
+    const adapter = this.collabV2Adapter || null
     const context = { epoch: this._v2RemoteApplyEpoch || 0,
-      tree: renderer && renderer.renderTree, room: this.httpRoomKey, adapter,
-      revision: Math.max(Number(status && status.lastServerRevision) || 0, Number(this.lastAppliedVersion) || 0) }
+      tree: renderer && renderer.renderTree, room: this.httpRoomKey || '', adapter,
+      revision: Number(this.lastAppliedVersion) || 0 }
     // Serialize all entry calls, including ones that arrive after a layout-end
     // but before an older renderer waiter resumes. Never let newer text rewind.
     const task = Promise.resolve(this._v2RemoteApplyQueue).catch(() => {})
-      .then(() => this.applyV2RemoteOperationNow(op, meta, context))
+      .then(async () => {
+        const beginBatch = renderer && renderer.beginRemoteRenderBatch
+        const endBatch = renderer && renderer.endRemoteRenderBatch
+        if (typeof beginBatch === 'function') beginBatch.call(renderer)
+        try {
+          const applied = await this.applyV2RemoteOperationNow(op, meta, context)
+          const event = (op && op.event) || op || {}
+          const version = Number(op && (op.serverRevision || op.version) || event.version)
+          const succeeded = applied === true || !!(applied && typeof applied === 'object' && applied.applied === true)
+          if (succeeded && Number.isSafeInteger(version) && version > 0 && this.isV2RemoteApplyCurrent(context)) {
+            await this.markV2RevisionComplete(version, {
+              roomKey: context.room,
+              adapter: context.adapter,
+              epoch: context.epoch
+            }, null, context)
+          }
+          return applied
+        } finally {
+          if (typeof endBatch === 'function') endBatch.call(renderer)
+        }
+      })
     this._v2RemoteApplyQueue = task.catch(() => {})
     return task
   }
@@ -2221,16 +2517,15 @@ class Cooperate {
           if (this.isV2RemoteApplyCurrent(context)) break
         }
       }
-      const adapter = this.collabV2Adapter
-      const status = adapter && adapter.getStatus && adapter.getStatus()
-      const currentRevision = Math.max(Number(status && status.lastServerRevision) || 0, Number(this.lastAppliedVersion) || 0)
+      const currentRevision = Number(this.lastAppliedVersion) || 0
       const revision = opRevision
-      if (revision && (
-        (meta.fromOutbox && currentRevision > revision) ||
-        (!meta.applySelf && currentRevision >= revision && currentRevision > context.revision)
-      )) {
-        v2Trace('remote.skip-authoritative-progress', { type, revision, currentRevision })
+      if (revision && meta.fromOutbox && currentRevision > revision) {
+        v2Trace('remote.skip-authoritative-progress', { type, revision, currentRevision, source: 'applied-watermark' })
         return false
+      }
+      if (revision && !meta.applySelf && currentRevision >= revision) {
+        v2Trace('remote.skip-applied-revision', { type, revision, currentRevision })
+        return true
       }
       const intentUid = (payload && payload.uid) || (event && event.payload && event.payload.uid) || ''
       if (meta.originalScope && (
@@ -2294,38 +2589,10 @@ class Cooperate {
       return this.syncHttpRemoteOperations([op])
     }
     if (type === 'batch.applied' && Array.isArray(payload.events)) {
-      const pending = payload.events.slice()
-      let guard = 0
-      while (pending.length && guard < pending.length + 3) {
-        guard += 1
-        const next = []
-        for (const child of pending) {
-          const applied = await this.applyV2RemoteOperationNow(
-            {
-              event: child,
-              serverRevision: op.serverRevision
-            },
-            { ...meta, deferFallback: true },
-            context
-          )
-          if (!applied) next.push(child)
-        }
-        if (next.length === pending.length) break
-        pending.splice(0, pending.length, ...next)
-      }
-      if (pending.length) {
-        v2Trace('remote.apply.batch.leftover', { left: pending.length })
-        if (this.deferUnloadedRemoteEvents(pending)) return true
-        return this.syncHttpRemoteOperations([op])
-      }
-      return true
+      return this.applyV2RemoteBatchEvents(op, meta, payload.events, context)
     }
     if (type === 'map.updated') {
       this.applyRemoteMapMeta(payload)
-      this.lastAppliedVersion = Math.max(
-        Number(this.lastAppliedVersion) || 0,
-        Number(op.serverRevision) || 0
-      )
       return true
     }
     if (type === 'map.replaced' || payload.resnapshot) {
@@ -2419,6 +2686,14 @@ class Cooperate {
         this.notifySearchInvalidate()
         return true
       }
+      if (meta.deferFallback && normalized.uid && renderer && renderer.renderTree) {
+        const pendingNode = this.findTreeNode(renderer.renderTree, normalized.uid)
+        if (pendingNode && pendingNode.data) {
+          Object.assign(pendingNode.data, normalized.patch || {})
+          this.notifySearchInvalidate()
+          return true
+        }
+      }
       if (meta.deferFallback) return false
     } else if (
       type === 'operation.undone' ||
@@ -2510,6 +2785,37 @@ class Cooperate {
     const applied = this.syncHttpRemoteOperations([op])
     this.notifySearchInvalidate()
     return applied
+  }
+
+  async applyV2RemoteBatchEvents(op, meta = {}, events = [], context) {
+    const deferred = []
+    for (let index = 0; index < events.length; index += 1) {
+      const child = events[index]
+      const childOp = { event: child, serverRevision: op.serverRevision }
+      const applied = await this.applyV2RemoteOperationNow(childOp, {
+        ...meta,
+        deferFallback: true
+      }, context)
+      if (applied) continue
+      if (this.deferUnloadedRemoteEvents([child])) {
+        deferred.push(child)
+        continue
+      }
+      const unresolved = events.slice(index)
+      unresolved.forEach(event => {
+        const childPayload = (event && event.payload) || {}
+        this.markRemoteDirty(childPayload.uid, payloadParentUid(childPayload))
+      })
+      v2Trace('remote.apply.batch.reconcile', {
+        failedAt: index,
+        remaining: unresolved.length
+      })
+      return this.syncHttpRemoteOperations(
+        unresolved.map(event => ({ event, serverRevision: op.serverRevision }))
+      )
+    }
+    if (deferred.length) v2Trace('remote.apply.batch.defer', { count: deferred.length })
+    return true
   }
 
   remoteTargetRendered(uid) {
@@ -2616,6 +2922,19 @@ class Cooperate {
     return !!(treeNode && treeNode.data && generalizationUidsOf(treeNode.data).has(uid))
   }
 
+  requestRemoteApplyRender(uids, callback, source = 'remote apply') {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (renderer && typeof renderer.requestRemoteRender === 'function') {
+      renderer.requestRemoteRender(uids, callback, source)
+      return
+    }
+    if (this.mindMap && typeof this.mindMap.render === 'function') {
+      this.mindMap.render(callback, source)
+      return
+    }
+    if (typeof callback === 'function') callback()
+  }
+
   applyV2PayloadInsert(payload = {}) {
     const uid = payload.uid
     const parentUid = payloadParentUid(payload)
@@ -2676,7 +2995,7 @@ class Cooperate {
       renderer.setNodeData(parentNode, {
         childCount: Math.max(count, live)
       })
-      this.mindMap.render()
+      this.requestRemoteApplyRender([uid, parentUid])
     } catch (err) {
       v2Trace('remote.apply.insert.err', { uid, message: err && err.message })
       return false
@@ -2861,7 +3180,7 @@ class Cooperate {
         if (typeof renderer.resetMovedNodePosition === 'function') {
           renderer.resetMovedNodePosition(node)
         }
-        if (typeof this.mindMap.render === 'function') this.mindMap.render()
+        this.requestRemoteApplyRender([uid, parentUid])
       }
       // Move events can carry restored coordinates when undoing a move.
       const positionData = { ...(payload.data || {}), ...(payload.patch || {}) }
@@ -2883,20 +3202,31 @@ class Cooperate {
       syncChildCount(oldParent)
       syncChildCount(nextParent)
       this.cleanupDragArtifacts()
-      await this.waitForMoveRender()
-      // Rendering may replace both parent instances. Repainting a detached
-      // instance recreates its old connectors in the shared SVG line layer.
-      const parentUids = new Set([
-        oldParentUid,
-        parentUid || (nextParent.getData && nextParent.getData('uid'))
-      ])
-      parentUids.forEach(parentId => {
-        const liveParent = parentId && renderer.findNodeByUid(parentId)
-        if (liveParent && typeof liveParent.renderLine === 'function') {
-          liveParent.renderLine(true)
-        }
-      })
-      this.restoreActiveUids(activeUids)
+      const finishMovePaint = () => {
+        // Rendering may replace both parent instances. Repainting a detached
+        // instance recreates its old connectors in the shared SVG line layer.
+        const liveRenderer = this.mindMap && this.mindMap.renderer
+        const parentUids = new Set([
+          oldParentUid,
+          parentUid || (nextParent.getData && nextParent.getData('uid'))
+        ])
+        parentUids.forEach(parentId => {
+          const liveParent =
+            parentId && liveRenderer && liveRenderer.findNodeByUid(parentId)
+          if (liveParent && typeof liveParent.renderLine === 'function') {
+            liveParent.renderLine(true)
+          }
+        })
+        this.restoreActiveUids(activeUids)
+      }
+      if (typeof this.mindMap.render === 'function') {
+        this.requestRemoteApplyRender(
+          [uid, oldParentUid, parentUid || (nextParent.getData && nextParent.getData('uid'))],
+          finishMovePaint
+        )
+      } else {
+        finishMovePaint()
+      }
     } catch (err) {
       v2Trace('remote.apply.move.err', { uid, message: err && err.message })
       return false
@@ -2965,7 +3295,7 @@ class Cooperate {
       if (assoc && typeof assoc.removeAllLines === 'function') {
         assoc.removeAllLines()
       }
-      this.mindMap.render()
+      this.requestRemoteApplyRender([uid, parentUid, ...removed])
     } catch (err) {
       v2Trace('remote.apply.delete.err', { uid, message: err && err.message })
       return false
@@ -3023,7 +3353,7 @@ class Cooperate {
         }
       }
       renderer.setNodeData(parentNode, { expand: true })
-      this.mindMap.render()
+      this.requestRemoteApplyRender([uid, parentUid, ...reviveIds])
     } catch (err) {
       v2Trace('remote.apply.restore.err', { uid, message: err && err.message })
       return false
@@ -3077,7 +3407,7 @@ class Cooperate {
       }
     }
     if (this.mindMap && typeof this.mindMap.render === 'function') {
-      this.mindMap.render(run)
+      this.requestRemoteApplyRender(ids, run)
     } else {
       run()
     }
@@ -3307,7 +3637,8 @@ class Cooperate {
       const shouldRender =
         theme != null || themeConfig !== undefined || layoutChanged
       if (shouldRender && typeof this.mindMap.render === 'function') {
-        this.mindMap.render(
+        this.requestRemoteApplyRender(
+          [],
           null,
           theme != null || themeConfig !== undefined
             ? 'changeTheme'
@@ -4609,7 +4940,9 @@ class Cooperate {
     }
     this.hydrateGeneralizationParent(node, nextGen)
       .then(hydrated => {
-        if (hydrated && this.mindMap) this.mindMap.render()
+        if (hydrated && this.mindMap) {
+          this.requestRemoteApplyRender(node.getData && node.getData('uid'))
+        }
       })
       .catch(() => {})
     return true
@@ -4786,7 +5119,7 @@ class Cooperate {
         !this.httpRefreshing &&
         collabNodeFeatures.needsGeometryRefresh(stylePayload)
       ) {
-        this.scheduleRemoteGeometryRender()
+        this.scheduleRemoteGeometryRender(node.getData && node.getData('uid'))
       }
       changed = true
     }
@@ -5421,7 +5754,14 @@ class Cooperate {
       this.httpHydrating = false
       this.flushPendingHttpRefresh()
     }
-    if (changed && this.mindMap) this.mindMap.render()
+    if (changed && this.mindMap) {
+      const renderer = this.mindMap.renderer
+      if (renderer && typeof renderer.requestRemoteRender === 'function') {
+        renderer.requestRemoteRender(Array.from(uids))
+      } else {
+        this.mindMap.render()
+      }
+    }
     return changed
   }
 
@@ -5890,7 +6230,12 @@ class Cooperate {
   }
 
   // 节点是逐个改的，但排版要看整棵树。多条远端改字落在同一窗口里只排一次。
-  scheduleRemoteGeometryRender() {
+  scheduleRemoteGeometryRender(uid) {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (renderer && typeof renderer.requestRemoteRender === 'function') {
+      renderer.requestRemoteRender(uid)
+      return
+    }
     if (this._remoteGeometryTimer) return
     this._remoteGeometryTimer = setTimeout(() => {
       this._remoteGeometryTimer = null
@@ -6082,7 +6427,8 @@ class Cooperate {
           .then(result => {
             if (result && result.serverRevision != null) {
               this.acknowledgeLocalVersion(result.serverRevision, {
-                duplicate: true
+                duplicate: true,
+                deferV2Watermark: true
               })
             }
             const op = result && result.operation
@@ -6091,6 +6437,7 @@ class Cooperate {
               this._v2UndoAllowReplace = true
             }
             if (op && (op.event || op.type || op.payload)) {
+              const ackScope = this.getV2RevisionScope()
               const normalized = collabNodeFeatures.normalizeAppliedUpdatePayload(op)
               const applied = this.applyV2RemoteOperation(op, { applySelf: true })
               collabNodeFeatures.publishUndoApplyTrace({
@@ -6107,8 +6454,18 @@ class Cooperate {
                 originNodeDataAfter: true,
                 rendererRefreshed: true
               })
-              return applied
+              return Promise.resolve(applied).then(value => {
+                const succeeded = value === true || !!(value && typeof value === 'object' && value.applied === true)
+                if (!succeeded && this.isV2RevisionScopeCurrent(ackScope)) {
+                  this.scheduleRemoteRecover(result.serverRevision)
+                }
+                return value
+              }, err => {
+                if (this.isV2RevisionScopeCurrent(ackScope)) this.scheduleRemoteRecover(result.serverRevision)
+                throw err
+              })
             }
+            if (result && result.serverRevision != null) this.scheduleRemoteRecover(result.serverRevision)
           })
           .catch(err => {
             if (err && (err.code === 'UNDO_EMPTY' || err.code === 'REDO_EMPTY' || err.code === 'UNDO_PENDING')) {
@@ -7477,11 +7834,14 @@ class Cooperate {
 
   acknowledgeLocalVersion(version, extra = {}) {
     const next = Number(version)
-    if (Number.isFinite(next) && next > this.lastAppliedVersion) {
-      this.lastAppliedVersion = next
-    }
-    if (this.collabStore && Number.isFinite(next)) {
-      this.collabStore.setLastAppliedVersion(next)
+    const last = Number(this.lastAppliedVersion) || 0
+    if (extra.deferV2Watermark !== true) {
+      if (Number.isFinite(next) && next === last + 1) {
+        this.lastAppliedVersion = next
+        if (this.collabStore) this.collabStore.setLastAppliedVersion(next)
+      } else if (Number.isFinite(next) && next > last + 1) {
+        this.scheduleRemoteRecover(next)
+      }
     }
     const operationId = extra.operationId || extra.operation_id
     if (operationId && extra.duplicate !== true) {
@@ -7591,6 +7951,7 @@ class Cooperate {
     let recoveredVersion = retryVersion
     let retryAllowed = true
     let refreshApplied = false
+    let recoveryEvents = []
     try {
       let action = plan
       if (plan.type === 'fetch_operations' && this.httpFetchOperations) {
@@ -7665,7 +8026,7 @@ class Cooperate {
               event: op.event || op
             })
           })
-          this.collabStore.drainReadyEvents()
+          recoveryEvents = this.collabStore.peekReadyEvents()
         }
         const dirty = markDirtySubtrees(
           this.collectLoadedUids(),
@@ -7754,6 +8115,16 @@ class Cooperate {
       if (Number.isFinite(applied)) recoveredVersion = applied
       if (Number.isFinite(refreshedVersion) && refreshedVersion >= recoveredVersion) {
         recoveredVersion = refreshedVersion
+      }
+      if (this.collabStore && recoveryEvents.length) {
+        const eventsToCommit = recoveryEvents.filter(
+          event => Number(event.version) <= recoveredVersion
+        )
+        const committed = this.collabStore.commitReadyEvents(eventsToCommit)
+        if (!committed.committed) {
+          this.scheduleRemoteRecover(retryVersion)
+          return { applied: false, skipped: true, reason: 'EVENT_COMMIT_GAP', version: retryVersion }
+        }
       }
       if (Number.isFinite(recoveredVersion) && recoveredVersion > this.lastAppliedVersion) {
         this.lastAppliedVersion = recoveredVersion
@@ -8284,7 +8655,9 @@ class Cooperate {
         }
         if (changed) {
           await this.syncHttpDirtySubtrees(treeNodesByUid)
-          await new Promise(resolve => this.mindMap.render(resolve))
+          await new Promise(resolve => {
+            this.requestRemoteApplyRender(Array.from(treeNodesByUid.keys()), resolve)
+          })
         }
         // Only acknowledge a revision after every fetch and merge completed.
         // A transient request/render failure must remain retryable by polling.

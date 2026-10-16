@@ -54,6 +54,7 @@ import {
   inspectLayoutRenderer
 } from '../../utils/collabLayoutCleanup'
 import historyClipboard from '../../utils/historyClipboard'
+import remoteRenderScheduler from '../../utils/remoteRenderScheduler'
 
 // 布局列表
 const layouts = {
@@ -140,6 +141,19 @@ class Render {
     // 防抖定时器
     this.emitNodeActiveEventTimer = null
     this.renderTimer = null
+    this._remoteRenderBatchDepth = 0
+    this._remoteRenderPending = false
+    this._remoteRenderDirtyUids = new Set()
+    this._remoteRenderScheduler = remoteRenderScheduler.createRemoteRenderScheduler({
+      maxWaitMs: 50,
+      isBackground: () =>
+        typeof document !== 'undefined' && document.visibilityState === 'hidden',
+      onFlush: () => {
+        this._remoteRenderPending = false
+        this._remoteRenderDirtyUids.clear()
+        this._render()
+      }
+    })
     this._expandAllToken = 0
     this._renderGeneration = 0
     this._layoutSwitchCount = 0
@@ -729,6 +743,9 @@ class Render {
     this._renderGeneration = (this._renderGeneration || 0) + 1
     clearTimeout(this.renderTimer)
     this.renderTimer = null
+    if (this._remoteRenderScheduler) this._remoteRenderScheduler.cancel()
+    this._remoteRenderPending = false
+    if (this._remoteRenderDirtyUids) this._remoteRenderDirtyUids.clear()
     this._viewportPaintToken = (this._viewportPaintToken || 0) + 1
     this.isRendering = false
     this.hasWaitRendering = false
@@ -761,6 +778,33 @@ class Render {
       this.renderTimer = null
       this._render()
     }, 0)
+  }
+
+  beginRemoteRenderBatch() {
+    this._remoteRenderBatchDepth = Number(this._remoteRenderBatchDepth || 0) + 1
+  }
+
+  endRemoteRenderBatch() {
+    this._remoteRenderBatchDepth = Math.max(0, Number(this._remoteRenderBatchDepth || 0) - 1)
+    if (this._remoteRenderBatchDepth || !this._remoteRenderPending) return
+    this._remoteRenderPending = false
+    const dirtyUids = Array.from(this._remoteRenderDirtyUids)
+    this._remoteRenderDirtyUids.clear()
+    this._remoteRenderScheduler.schedule(dirtyUids)
+  }
+
+  requestRemoteRender(uid, callback, source) {
+    this.addRenderParams(callback, source)
+    const uids = Array.isArray(uid) ? uid : uid == null ? [] : [uid]
+    uids.forEach(item => {
+      if (item != null && String(item)) this._remoteRenderDirtyUids.add(String(item))
+    })
+    this._remoteRenderPending = true
+    if (this._remoteRenderBatchDepth) return
+    this._remoteRenderPending = false
+    const dirtyUids = Array.from(this._remoteRenderDirtyUids)
+    this._remoteRenderDirtyUids.clear()
+    this._remoteRenderScheduler.schedule(dirtyUids)
   }
 
   // 更新的渲染已经接管画布时，把这次中断的渲染让出去，避免位置一直停在重叠的旧布局上

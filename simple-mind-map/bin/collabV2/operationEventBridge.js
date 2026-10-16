@@ -8,6 +8,7 @@ const SUPPORTED_EVENT_TYPES = new Set([
   'node.reordered',
   'node.deleted',
   'node.restored',
+  'batch.applied',
   'operation.undone',
   'operation.redone'
 ])
@@ -26,6 +27,18 @@ function operationVersion(operation) {
   return nonNegativeInteger(operation && (operation.version || operation.serverRevision), 0)
 }
 
+function isIncrementalEvent(event, depth = 0, budget = { remaining: 2001 }) {
+  if (!event || typeof event !== 'object' || depth > 4 || --budget.remaining < 0) return false
+  const payload = event.payload || {}
+  if (event.resnapshot === true || payload.resnapshot === true) return false
+  if (!SUPPORTED_EVENT_TYPES.has(String(event.type || ''))) return false
+  if (event.type !== 'batch.applied') return true
+  // A batch carries committed child events, never replays the original requests
+  // (which may contain failed MCP items). Unsupported children require recovery.
+  return Array.isArray(payload.events) && payload.events.length <= 1000 &&
+    payload.events.every(child => isIncrementalEvent(child, depth + 1, budget))
+}
+
 function requiresSnapshot(operation, clientOperation) {
   const event = (operation && operation.event) || {}
   const payload = event.payload || {}
@@ -35,7 +48,7 @@ function requiresSnapshot(operation, clientOperation) {
     event.type === 'map.replaced' ||
     clientOperation.type === 'map.replaced'
   ) return true
-  return !SUPPORTED_EVENT_TYPES.has(String(clientOperation.type || ''))
+  return !isIncrementalEvent({ type: clientOperation.type, payload: clientOperation.payload })
 }
 
 function createOperationEventBridge(options = {}) {

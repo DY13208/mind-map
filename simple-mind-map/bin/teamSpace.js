@@ -131,12 +131,13 @@ async function initSchema(db) {
     set direct_role = role
     where direct_role is null
       and folder_role is null
+      and role in ('owner', 'manager', 'editor', 'viewer')
       and source = 'direct_share'
   `)
   await db.query(`
     update room_members
     set team_role = role
-    where team_role is null and source = 'team'
+    where team_role is null and role in ('owner', 'manager', 'editor', 'viewer') and source = 'team'
   `)
   await db.query(`create index if not exists room_members_team_source_idx on room_members(source, source_team_id) where source = 'team'`)
   await db.query(`
@@ -293,14 +294,17 @@ async function syncRoomMembers(db, id, userId) {
     where r.team_id = $1 and r.deleted_at is null and rt.room_key is null
     on conflict (room_key, user_id) do update set
       team_role = excluded.team_role,
-      role = case
-        when room_members.direct_role = 'owner' or excluded.team_role = 'owner' or room_members.folder_role = 'owner' then 'owner'
-        when room_members.direct_role = 'manager' or excluded.team_role = 'manager' then 'manager'
-        when room_members.direct_role = 'editor' or excluded.team_role = 'editor' or room_members.folder_role in ('editor', 'manager') then 'editor'
-        when room_members.direct_role = 'viewer' or excluded.team_role = 'viewer' or room_members.folder_role = 'viewer' then 'viewer'
-        else coalesce(room_members.direct_role, excluded.team_role, room_members.folder_role)
-      end,
+      role = ${roomAcl.sqlResolveMemberRole(
+        'room_members.direct_role',
+        'excluded.team_role',
+        'room_members.folder_role',
+        'room_members.role',
+        'room_members.override_role',
+        'room_members.acl_v2'
+      )},
       source = case
+        when room_members.acl_v2 and room_members.override_role is not null then 'override'
+        when room_members.acl_v2 then 'inherit'
         when room_members.direct_role is not null then 'direct_share'
         else 'team'
       end,
@@ -361,14 +365,17 @@ async function removeMember(db, who, id, target) {
     await tx.query(`
       update room_members
       set team_role = null,
-          role = case
-            when direct_role = 'owner' or folder_role = 'owner' then 'owner'
-            when direct_role = 'manager' then 'manager'
-            when direct_role = 'editor' or folder_role in ('editor', 'manager') then 'editor'
-            when direct_role = 'viewer' or folder_role = 'viewer' then 'viewer'
-            else coalesce(direct_role, folder_role)
-          end,
+          role = ${roomAcl.sqlResolveMemberRole(
+            'direct_role',
+            'null::text',
+            'folder_role',
+            'role',
+            'override_role',
+            'acl_v2'
+          )},
           source = case
+            when coalesce(acl_v2, false) and override_role is not null then 'override'
+            when coalesce(acl_v2, false) then case when folder_role is not null then 'folder' else 'inherit' end
             when direct_role is not null then 'direct_share'
             when folder_role is not null then 'folder'
             else 'direct_share'
@@ -376,11 +383,13 @@ async function removeMember(db, who, id, target) {
           source_team_id = null,
           updated_at = now()
       where source_team_id = $1 and user_id = $2
-        and (direct_role is not null or folder_role is not null)`, [id, targetId])
+        and (direct_role is not null or folder_role is not null
+          or (coalesce(acl_v2, false) and override_role is not null))`, [id, targetId])
     await tx.query(`
       delete from room_members
       where source_team_id = $1 and user_id = $2
-        and direct_role is null and folder_role is null`, [id, targetId])
+        and direct_role is null and folder_role is null
+        and (not coalesce(acl_v2, false) or override_role is null)`, [id, targetId])
     return { ok: true, userId: target }
   })
 }
@@ -439,9 +448,17 @@ async function listRooms(db, who, id, filters = {}) {
       conditions.push(`r.folder_id = $${params.length}::uuid`)
     }
   }
+  const memberRoleExpr = roomAcl.sqlResolveMemberRole(
+    'm.direct_role',
+    'm.team_role',
+    'm.folder_role',
+    'm.role',
+    'm.override_role',
+    'm.acl_v2'
+  )
   if (filters.role) {
     params.push(String(filters.role).toLowerCase())
-    conditions.push(`m.role = $${params.length}`)
+    conditions.push(`${memberRoleExpr} = $${params.length}`)
   }
   const keyword = String(filters.q || filters.search || '').trim()
   if (keyword) {
@@ -458,7 +475,7 @@ async function listRooms(db, who, id, filters = {}) {
   const direction = String(filters.order || (filters.sort === 'title' ? 'asc' : 'desc')).toLowerCase() === 'asc' ? 'asc' : 'desc'
   // Counting is after all filters; paging is in SQL, not after serialization.
   const countJoins = `from rooms r left join room_tombstones rt on rt.room_key = r.room_key
-    ${filters.role ? 'left join room_members m on m.room_key = r.room_key and m.user_id = $2' : ''}
+    left join room_members m on m.room_key = r.room_key and m.user_id = $2
     ${keyword ? "left join wecom_users owner on owner.user_id = r.owner_id and owner.corp_id = $3 left join folders folder on folder.id = r.folder_id and folder.team_id = $1 and folder.deleted_at is null" : ''}`
   // Keep parameter numbering stable even when optional joins do not use $2/$3.
   const count = await db.query(`select count(*)::int as total ${countJoins} where ${where}
@@ -466,7 +483,7 @@ async function listRooms(db, who, id, filters = {}) {
   const result = await db.query(`
     select r.room_key, r.title, r.folder_id, r.owner_id, r.created_at, r.updated_at,
       r.content_updated_at, r.version, r.node_counts_generation::text as generation,
-      m.role, coalesce(state.is_favorite, false) as is_favorite,
+      ${memberRoleExpr} as role, coalesce(state.is_favorite, false) as is_favorite,
       state.last_opened_at, folder.name as folder_name,
       coalesce(owner.name, r.owner_id) as owner_name, coalesce(owner.avatar, '') as owner_avatar
     ${joins} where ${where} order by ${sort} ${direction} nulls last, r.room_key ${direction}
@@ -533,14 +550,20 @@ async function assignRoom(db, who, id, roomKey) {
       insert into room_members (room_key, user_id, role, direct_role, team_role, folder_role, source, source_team_id) values ($1, $2, 'editor', null, 'editor', null, 'team', $3)
       on conflict (room_key, user_id) do update set
         team_role = excluded.team_role,
-        role = case
-          when room_members.direct_role = 'owner' or excluded.team_role = 'owner' or room_members.folder_role = 'owner' then 'owner'
-          when room_members.direct_role = 'manager' or excluded.team_role = 'manager' then 'manager'
-          when room_members.direct_role = 'editor' or excluded.team_role = 'editor' or room_members.folder_role in ('editor', 'manager') then 'editor'
-          when room_members.direct_role = 'viewer' or excluded.team_role = 'viewer' or room_members.folder_role = 'viewer' then 'viewer'
-          else coalesce(room_members.direct_role, excluded.team_role, room_members.folder_role)
+        role = ${roomAcl.sqlResolveMemberRole(
+          'room_members.direct_role',
+          'excluded.team_role',
+          'room_members.folder_role',
+          'room_members.role',
+          'room_members.override_role',
+          'room_members.acl_v2'
+        )},
+        source = case
+          when room_members.acl_v2 and room_members.override_role is not null then 'override'
+          when room_members.acl_v2 then 'inherit'
+          when room_members.direct_role is not null then 'direct_share'
+          else 'team'
         end,
-        source = case when room_members.direct_role is not null then 'direct_share' else 'team' end,
         source_team_id = excluded.source_team_id,
         updated_at = now()`,
         [key, teamMember.user_id, id]

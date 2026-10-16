@@ -365,8 +365,19 @@ async function handleFileSystemApi(req, res, options = {}) {
              on conflict(room_key, user_id) do update set
                folder_role = excluded.folder_role,
                source_folder_id = excluded.source_folder_id,
-               role = ${roomAcl.sqlEffectiveRole('room_members.direct_role', 'room_members.team_role', 'excluded.folder_role')},
-               source = ${roomAcl.sqlPrimarySource('room_members.direct_role', 'room_members.team_role', 'excluded.folder_role')},
+               role = ${roomAcl.sqlResolveMemberRole(
+                 'room_members.direct_role',
+                 'room_members.team_role',
+                 'excluded.folder_role',
+                 'room_members.role',
+                 'room_members.override_role',
+                 'room_members.acl_v2'
+               )},
+               source = case
+                 when room_members.acl_v2 and room_members.override_role is not null then 'override'
+                 when room_members.acl_v2 then 'inherit'
+                 else ${roomAcl.sqlPrimarySource('room_members.direct_role', 'room_members.team_role', 'excluded.folder_role')}
+               end,
                updated_at = now()`,
             [bulkFolderId, userIds, role]
           )

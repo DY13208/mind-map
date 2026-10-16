@@ -740,10 +740,14 @@ async function applyBatch(store, op, options) {
   if (childOps.length > BATCH_MAX) {
     throw commandError(`batch 超过上限 ${BATCH_MAX}`, 'BATCH_TOO_LARGE', 400)
   }
+  if (options.mcpPartial === true) {
+    return applyMcpBatch(store, op, childOps, options)
+  }
   const normalized = childOps.map(child =>
     normalizeOperation({ ...child, roomKey: op.roomKey })
   )
   const allInserts =
+    options.preserveBatchOrder !== true &&
     normalized.length >= 2 &&
     normalized.every(child => normalizeType(child.type) === 'node.insert')
   if (allInserts && typeof store.insertMany === 'function') {
@@ -756,6 +760,7 @@ async function applyBatch(store, op, options) {
   let appliedCount = 0
   let last = { result: {} }
   const allDeletes =
+    options.preserveBatchOrder !== true &&
     normalized.length >= 1 &&
     normalized.every(child => normalizeType(child.type) === 'node.delete')
   let deleteOps = normalized
@@ -817,6 +822,229 @@ async function applyBatch(store, op, options) {
         count: appliedCount,
         skipped: skipped.length,
         skippedItems: skipped,
+        events,
+        resnapshot: false,
+        batchId: op.payload && op.payload.batchId
+      },
+      affectedUids: unique(affected)
+    }
+  }
+}
+
+function batchItemError(err) {
+  const code = String((err && err.code) || 'ITEM_REJECTED')
+    .replace(/[^A-Za-z0-9_.-]/g, '')
+    .slice(0, 100) || 'ITEM_REJECTED'
+  const message = String((err && err.message) || '批次项目失败')
+    .replace(/[\r\n\t]+/g, ' ')
+    .slice(0, 240)
+  return { code, message }
+}
+
+function recordMcpBatchItem(options, index, stage, outcome, extra = {}) {
+  require('../performanceDiagnostics').record({
+    kind: 'batch-item',
+    roomKey: options.roomKey,
+    operationId: options.operationId,
+    source: 'mcp',
+    itemIndex: index,
+    stage,
+    outcome,
+    code: extra.code
+  })
+}
+
+const MCP_BATCH_ITEM_ERRORS = new Set([
+  'PARENT_DELETED',
+  'NODE_DELETED',
+  'MOVE_CONFLICT',
+  'UID_REUSED',
+  'CYCLE_REJECTED',
+  'REPLACE_CONFLICT',
+  'ROOT_DELETE',
+  'SOP_CONFIRM_REQUIRED',
+  'UID_ALREADY_EXISTS',
+  'UID_EXISTS'
+])
+
+function isMcpBatchItemError(err) {
+  return (
+    MCP_BATCH_ITEM_ERRORS.has(String(err && err.code || '')) &&
+    [400, 403, 409].includes(Number(err && err.statusCode))
+  )
+}
+
+async function applyMcpBatch(store, op, childOps, options) {
+  if (
+    !store ||
+    typeof store.savepoint !== 'function' ||
+    typeof store.rollbackToSavepoint !== 'function' ||
+    typeof store.releaseSavepoint !== 'function'
+  ) {
+    throw commandError(
+      'MCP Direct 批量部分提交不可用：存储层不支持事务保存点',
+      'MCP_BATCH_SAVEPOINT_UNAVAILABLE',
+      503
+    )
+  }
+  const normalized = childOps.map(child =>
+    normalizeOperation({ ...child, roomKey: op.roomKey })
+  )
+  const insertedUidIndexes = new Map()
+  normalized.forEach((child, index) => {
+    if (child.type !== 'node.insert') return
+    const uid = String((child.payload && child.payload.uid) || '').trim()
+    if (uid && !insertedUidIndexes.has(uid)) insertedUidIndexes.set(uid, index)
+  })
+  const dependencies = childOps.map((child, index) => {
+    const raw = child && child.depends_on
+    if (
+      raw != null &&
+      (!Array.isArray(raw) ||
+        raw.some(dependency =>
+          !Number.isInteger(dependency) || dependency < 0 || dependency >= index
+        ) ||
+        new Set(raw).size !== raw.length)
+    ) {
+      throw commandError(
+        `operations[${index}].depends_on 必须是此前项目的零基索引`,
+        'MCP_BATCH_INVALID_DEPENDENCY',
+        400
+      )
+    }
+    const inferred = new Set(raw || [])
+    const normalizedChild = normalized[index]
+    const payload = normalizedChild.payload || {}
+    const references = []
+    if (normalizedChild.type !== 'node.insert' && payload.uid) {
+      references.push(payload.uid)
+    }
+    if (
+      normalizedChild.type === 'node.insert' ||
+      normalizedChild.type === 'node.move' ||
+      normalizedChild.type === 'node.reorder'
+    ) {
+      const parent = payload.parentUid || payload.parent_uid || payload.parent
+      if (parent) references.push(parent)
+    }
+    for (const ref of references) {
+      const parentIndex = insertedUidIndexes.get(String(ref).trim())
+      if (parentIndex != null && parentIndex < index) inferred.add(parentIndex)
+    }
+    return Array.from(inferred).sort((left, right) => left - right)
+  })
+  const results = new Array(normalized.length)
+  const events = []
+  const affected = []
+  const inverses = []
+  let appliedCount = 0
+  let failedCount = 0
+  let last = { result: {} }
+  const version = Number(options.version) || 0
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    const failedDependencies = dependencies[index].filter(
+      dependency => results[dependency].status !== 'applied'
+    )
+    if (failedDependencies.length) {
+      results[index] = {
+        index,
+        status: 'dependency_failed',
+        code: 'MCP_BATCH_DEPENDENCY_FAILED',
+        depends_on: failedDependencies,
+        type: normalized[index].type
+      }
+      failedCount += 1
+      recordMcpBatchItem({ ...options, roomKey: op.roomKey }, index, 'dependency', 'dependency_failed', {
+        code: 'MCP_BATCH_DEPENDENCY_FAILED'
+      })
+      continue
+    }
+
+    const savepoint = `mcp_batch_item_${index}`
+    await store.savepoint(savepoint)
+    const started = Date.now()
+    try {
+      last = await applyDirect(store, normalized[index], options)
+      await store.releaseSavepoint(savepoint)
+      appliedCount += 1
+      results[index] = {
+        index,
+        status: 'applied',
+        type: normalized[index].type,
+        result: last.result || {}
+      }
+      if (last.event) {
+        events.push(last.event)
+        affected.push(...(last.event.affectedUids || []))
+      }
+      if (last.inversePayload) inverses.push(last.inversePayload)
+      recordMcpBatchItem({ ...options, roomKey: op.roomKey }, index, 'apply', 'applied')
+    } catch (err) {
+      // A failed SQL statement aborts the PostgreSQL transaction until it is
+      // rolled back to this savepoint. Clear read caches after that rollback.
+      await store.rollbackToSavepoint(savepoint)
+      await store.releaseSavepoint(savepoint)
+      if (typeof store.invalidateCaches === 'function') store.invalidateCaches()
+      if (!isMcpBatchItemError(err)) {
+        const failure = batchItemError(err)
+        recordMcpBatchItem(
+          { ...options, roomKey: op.roomKey },
+          index,
+          'apply',
+          'transaction_failed',
+          { code: failure.code }
+        )
+        throw err
+      }
+      const failure = batchItemError(err)
+      results[index] = {
+        index,
+        status: 'failed',
+        type: normalized[index].type,
+        code: failure.code,
+        message: failure.message
+      }
+      failedCount += 1
+      recordMcpBatchItem({ ...options, roomKey: op.roomKey }, index, 'apply', 'failed', {
+        code: failure.code
+      })
+    } finally {
+      require('../performanceDiagnostics').record({
+        kind: 'batch-item',
+        roomKey: op.roomKey,
+        operationId: options.operationId,
+        source: 'mcp',
+        itemIndex: index,
+        stage: 'duration',
+        durationMs: Date.now() - started,
+        outcome: results[index] && results[index].status
+      })
+    }
+  }
+
+  const result = {
+    count: appliedCount,
+    failed: failedCount,
+    items: results,
+    batchId: op.payload && op.payload.batchId
+  }
+  if (!appliedCount) return { noop: true, result }
+
+  return {
+    result,
+    inversePayload: {
+      type: 'node.batch',
+      payload: { ops: inverses.reverse(), batchId: op.payload && op.payload.batchId }
+    },
+    // Per-item failures are MCP response metadata stored with the operation;
+    // the shared socket event contains only successful operations.
+    event: {
+      type: 'batch.applied',
+      payload: {
+        count: appliedCount,
+        skipped: 0,
+        skippedItems: [],
         events,
         resnapshot: false,
         batchId: op.payload && op.payload.batchId

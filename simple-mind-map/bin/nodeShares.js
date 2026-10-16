@@ -387,7 +387,7 @@ async function submitShareOperation(req, row, raw) {
       [row.id, op.userId, op.type, String(op.payload && op.payload.uid || op.targetId || '') || null, currentVersion + 1]
     )
     return applied
-  })
+  }, { diagnosticSource: 'node-share' })
   return { duplicate: !!committed.duplicate, operation: fromCommitted(committed.operation, { roomKey: row.room_key }) }
 }
 

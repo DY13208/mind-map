@@ -1,7 +1,7 @@
 const { randomUUID } = require('crypto')
 const { replaceRoomNodes, canonicalizeNodes, validateNodeGraph } = require('../roomNodes')
 const { DEFAULT_METADATA, normalizeTitle } = require('./model')
-const { sqlEffectiveRole, sqlPrimarySource } = require('../roomAcl')
+const { sqlResolveMemberRole, sqlPrimarySource } = require('../roomAcl')
 
 function createPgFileStore(pool) {
   let queryCount = 0
@@ -118,6 +118,9 @@ function createPgFileStore(pool) {
       const conn = db || pool
       if (!db) queryCount += 1
       const source = row.source || 'direct_share'
+      const nextDirect = `case when excluded.source in ('team', 'folder') then room_members.direct_role else excluded.direct_role end`
+      const nextTeam = `case when excluded.source = 'team' then excluded.team_role else room_members.team_role end`
+      const nextFolder = `case when excluded.source = 'folder' then excluded.folder_role else room_members.folder_role end`
       await conn.query(
         `insert into room_members
            (room_key, user_id, role, direct_role, team_role, folder_role, source, source_team_id, source_folder_id)
@@ -129,32 +132,26 @@ function createPgFileStore(pool) {
            $4, $5, $6
          )
          on conflict (room_key, user_id) do update set
-           direct_role = case
-             when excluded.source in ('team', 'folder') then room_members.direct_role
-             else excluded.direct_role
-           end,
-           team_role = case
-             when excluded.source = 'team' then excluded.team_role
-             else room_members.team_role
-           end,
-           folder_role = case
-             when excluded.source = 'folder' then excluded.folder_role
-             else room_members.folder_role
-           end,
+           direct_role = ${nextDirect},
+           team_role = ${nextTeam},
+           folder_role = ${nextFolder},
            source_folder_id = case
              when excluded.source = 'folder' then excluded.source_folder_id
              else room_members.source_folder_id
            end,
-           role = ${sqlEffectiveRole(
-             `case when excluded.source in ('team', 'folder') then room_members.direct_role else excluded.direct_role end`,
-             `case when excluded.source = 'team' then excluded.team_role else room_members.team_role end`,
-             `case when excluded.source = 'folder' then excluded.folder_role else room_members.folder_role end`
+           role = ${sqlResolveMemberRole(
+             nextDirect,
+             nextTeam,
+             nextFolder,
+             'room_members.role',
+             'room_members.override_role',
+             'room_members.acl_v2'
            )},
-           source = ${sqlPrimarySource(
-             `case when excluded.source in ('team', 'folder') then room_members.direct_role else excluded.direct_role end`,
-             `case when excluded.source = 'team' then excluded.team_role else room_members.team_role end`,
-             `case when excluded.source = 'folder' then excluded.folder_role else room_members.folder_role end`
-           )},
+           source = case
+             when room_members.acl_v2 and room_members.override_role is not null then 'override'
+             when room_members.acl_v2 then 'inherit'
+             else ${sqlPrimarySource(nextDirect, nextTeam, nextFolder)}
+           end,
            source_team_id = case
              when excluded.source = 'team' then excluded.source_team_id
              when room_members.team_role is not null then room_members.source_team_id
