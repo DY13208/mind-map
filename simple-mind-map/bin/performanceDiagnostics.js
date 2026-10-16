@@ -3,7 +3,8 @@
 const { performance, monitorEventLoopDelay } = require('node:perf_hooks')
 const MAX_EVENTS = 3000
 const WINDOW_MS = 15 * 60 * 1000
-const KINDS = new Set(['http', 'pool', 'lock-query', 'transaction', 'transaction-stage', 'acl', 'render', 'longtask', 'ack', 'ack-failed', 'remote', 'local', 'resource', 'canvas-ready', 'cancel-render', 'api-queue', 'client-state', 'mcp-queue', 'mcp-write', 'batch-item'])
+const KINDS = new Set(['http', 'mcp-http', 'pool', 'lock-query', 'transaction', 'transaction-stage', 'acl', 'render', 'longtask', 'ack', 'ack-failed', 'remote', 'local', 'resource', 'canvas-ready', 'cancel-render', 'api-queue', 'client-state', 'mcp-queue', 'mcp-write', 'batch-item'])
+const SAFE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 // Fixed storage: recording an event must not shift thousands of array entries.
 const events = new Array(MAX_EVENTS)
 let eventHead = 0
@@ -42,12 +43,19 @@ function record(input = {}) {
   for (const key of ['roomKey', 'sessionId', 'route', 'source', 'path', 'type', 'method', 'stage', 'code', 'fallbackReason', 'outcome']) {
     if (typeof input[key] === 'string' && /^[a-zA-Z0-9_.:/-]{1,100}$/.test(input[key])) row[key] = input[key]
   }
-  if (typeof input.operationId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.operationId)) row.operationId = input.operationId
+  if (typeof input.operationId === 'string' && SAFE_UUID.test(input.operationId)) row.operationId = input.operationId
+  if (typeof input.requestId === 'string' && SAFE_UUID.test(input.requestId)) row.requestId = input.requestId
+  if (typeof input.clientRequestId === 'string' && SAFE_UUID.test(input.clientRequestId)) row.clientRequestId = input.clientRequestId
+  if (Number.isSafeInteger(input.rpcId) || (typeof input.rpcId === 'string' && SAFE_UUID.test(input.rpcId))) row.rpcId = input.rpcId
+  if (typeof input.rpcIdHash === 'string' && /^[0-9a-f]{16}$/.test(input.rpcIdHash)) row.rpcIdHash = input.rpcIdHash
   if (MCP_READ_TOOLS.has(input.mcpTool)) row.mcpTool = input.mcpTool
   for (const key of ['durationMs', 'count', 'status', 'queries', 'writes', 'version', 'queueDepth', 'queuedBytes', 'itemIndex', 'retry']) {
     if (typeof input[key] === 'number' && Number.isFinite(input[key]) && input[key] >= 0) row[key] = Math.min(input[key], 1e9)
   }
   if (typeof input.ok === 'boolean') row.ok = input.ok
+  for (const key of ['bodyComplete', 'bodyParsed', 'headersSent', 'sessionPresent', 'responseFinished']) {
+    if (typeof input[key] === 'boolean') row[key] = input[key]
+  }
   if (eventCount < MAX_EVENTS) {
     events[(eventHead + eventCount) % MAX_EVENTS] = row
     eventCount += 1

@@ -70,6 +70,26 @@ function sourceMethods(clock = null) {
   })
   const cooperateMethods = vm.runInNewContext(`({${method(
     cooperateSource,
+    '  getV2RevisionScope() {',
+    '\n  isV2RevisionScopeCurrent('
+  )}, ${method(
+    cooperateSource,
+    '  isV2RevisionScopeCurrent(scope) {',
+    '\n  clearV2RevisionCompletions('
+  )}, ${method(
+    cooperateSource,
+    '  clearV2RevisionCompletions() {',
+    '\n  async replayV2AckCompletion('
+  )}, ${method(
+    cooperateSource,
+    '  async replayV2AckCompletion(completion, scope, context) {',
+    '\n  // Must be called from the serialized V2 apply/reconcile task'
+  )}, ${method(
+    cooperateSource,
+    '  async markV2RevisionComplete(version, scope = this.getV2RevisionScope(), completion = null, context = null) {',
+    '\n  // On a successful local ACK'
+  )}, ${method(
+    cooperateSource,
     '  cancelV2RemoteApply() {',
     '\n  isV2RemoteApplyScopeCurrent('
   )}, ${method(
@@ -309,6 +329,7 @@ async function testLocalRenderDuringRemoteApply() {
   const remoteCallback = () => {}
   const context = {
     ...renderMethods,
+    ...cooperateMethods,
     _remoteRenderBatchDepth: 0,
     _remoteRenderPending: false,
     _remoteRenderDirtyUids: new Set(),
@@ -392,6 +413,7 @@ async function testBatchDispatchAndWatermark() {
   const calls = []
   const context = {
     ...cooperateMethods,
+    httpRoomKey: '',
     collabV2Adapter: null,
     currentData: null,
     applyV2RemoteOperationNow: async (op, meta) => {
@@ -437,6 +459,7 @@ async function testBatchDispatchAndWatermark() {
   const wrapper = cooperateMethods.applyV2RemoteOperation
   const batchCalls = { begin: 0, end: 0, recover: [] }
   const watermarkContext = {
+    ...cooperateMethods,
     mindMap: { renderer: {
       beginRemoteRenderBatch() { batchCalls.begin += 1 },
       endRemoteRenderBatch() { batchCalls.end += 1 }
@@ -455,9 +478,14 @@ async function testBatchDispatchAndWatermark() {
   assert.deepEqual(watermarkContext.collabStore.versions, [11])
   assert.equal(await wrapper.call(watermarkContext, { serverRevision: 13 }), true)
   assert.equal(watermarkContext.lastAppliedVersion, 11)
-  assert.deepEqual(batchCalls.recover, [13])
-  assert.equal(batchCalls.begin, 3)
-  assert.equal(batchCalls.end, 3)
+  assert.equal(watermarkContext._v2RevisionCompletions.has(13), true)
+  assert.deepEqual(batchCalls.recover, [])
+  assert.equal(await wrapper.call(watermarkContext, { serverRevision: 12 }), true)
+  assert.equal(watermarkContext.lastAppliedVersion, 13)
+  assert.deepEqual(watermarkContext.collabStore.versions, [11, 12, 13], 'each contiguous completion publishes its applied prefix')
+  assert.deepEqual(batchCalls.recover, [])
+  assert.equal(batchCalls.begin, 4)
+  assert.equal(batchCalls.end, 4)
 
   let reconcileCalls = 0
   let appliedBeforeFailure = false

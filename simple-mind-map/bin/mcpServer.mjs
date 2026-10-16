@@ -17,6 +17,7 @@ import { deleteNodeAttachment } from './mcpAttachmentDelete.mjs'
 import mcpSubmitGateModule from './mcpSubmitGate.js'
 import mcpHyperlink from './mcpHyperlink.js'
 import performanceDiagnosticsModule from './performanceDiagnostics.js'
+import { createMcpHttpLifecycle } from './mcpHttpDiagnostics.mjs'
 
 const { bearerToken, verifyMcpUserToken } = mcpUserToken
 const { createMcpSubmitGate } = mcpSubmitGateModule
@@ -1937,7 +1938,7 @@ function setCors(res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS')
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, mcp-session-id, MCP-Protocol-Version'
+    'Content-Type, Authorization, mcp-session-id, MCP-Protocol-Version, x-mcp-request-id'
   )
   res.setHeader('Access-Control-Expose-Headers', 'mcp-session-id')
 }
@@ -1987,6 +1988,8 @@ async function startHttp() {
       return
     }
 
+    const httpLifecycle = createMcpHttpLifecycle(req, res, mcpDiagnostics)
+
     const authorization = authorized(req)
     if (authorization === null) {
       res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' })
@@ -1998,6 +2001,7 @@ async function startHttp() {
       const sessionId = req.headers['mcp-session-id']
       if (req.method === 'POST') {
         const body = await readJson(req)
+        httpLifecycle?.markBodyParsed(body)
         let transport = sessionId ? transports.get(sessionId) : undefined
         if (!transport && isInitializeRequest(body)) {
           transport = new StreamableHTTPServerTransport({
@@ -2028,6 +2032,7 @@ async function startHttp() {
           )
           return
         }
+        httpLifecycle?.markTransportDispatched()
         await transport.handleRequest(req, res, body)
         return
       }
@@ -2040,6 +2045,7 @@ async function startHttp() {
         res.end(JSON.stringify({ error: 'invalid session' }))
         return
       }
+      httpLifecycle?.markTransportDispatched()
       await transport.handleRequest(req, res)
     } catch (err) {
       if (!res.headersSent) {

@@ -27,6 +27,12 @@ const methods = vm.runInNewContext(
     ${[
       methodSource('  collectVisibleUids() {', '  async fetchHttpNodes(uids) {'),
       methodSource('  async fetchHttpNodes(uids) {', '  acknowledgeLocalVersion(version, extra = {}) {'),
+      methodSource('  requestRemoteApplyRender(uids, callback, source = \'remote apply\') {', '  applyV2PayloadInsert(payload = {}) {'),
+      methodSource('  isHttpSettling() {', '  httpRecoverBlocked() {'),
+      methodSource('  httpRecoverBlocked() {', '  async waitUntilHttpRecoverIdle(budgetMs) {'),
+      methodSource('  async waitUntilHttpRecoverIdle(budgetMs) {', '  waitForHttpRecoverTurn() {'),
+      methodSource('  waitForHttpRecoverTurn() {', '  releaseHttpRecoverTurnWaiters(reason) {'),
+      methodSource('  releaseHttpRecoverTurnWaiters(reason) {', '  postReplaceSettleMs() {'),
       methodSource('  scheduleRemoteRecover(version, options = {}) {', '  scheduleHttpRecoverRetry(version, options = {}) {'),
       methodSource('  scheduleHttpRecoverRetry(version, options = {}) {', '  scheduleHttpStructureSync'),
       methodSource('  async syncHttpDirtySubtrees(treeNodeIndex) {', '  async syncHttpRemoteOperations(operations) {'),
@@ -1011,6 +1017,7 @@ test('dirty subtree hydration removes stale UIDs and indexes replacement childre
   plugin.dirtySubtrees.set('root', 1)
   plugin.hydrateNodeData = async treeNode => {
     treeNode.children = [replacement]
+    plugin.hydratedUids.add(treeNode.data.uid)
   }
   plugin.syncHttpDirtySubtrees = methods.syncHttpDirtySubtrees
   const treeNodeIndex = methods.indexTreeNodesByUid(root)

@@ -1022,7 +1022,7 @@ test('only ordinary node tools retry transient failures, at most three times wit
 })
 
 test.todo(
-  'isolated PG/API: ordinary add/update/delete use Direct only for authenticated UID/root references; title/path, move, expected, attachment, validateBase, and business/slow operations stay on the legacy path'
+  'isolated PG/API: ordinary add/update/delete/move use Direct for authenticated UID/root references; title/path, expected, attachment, validateBase, and business/slow operations retain their explicit compatibility path'
 )
 test.todo(
   'isolated PG/API: active and archived rows with one operation_id resolve from one consistent lookup and cannot be committed twice'

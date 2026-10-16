@@ -483,12 +483,29 @@ async function executeDirectOperation(roomKey, command, source, mcpRequest, http
         refs.push(payload.parentUid || payload.parent_uid || payload.parent || '')
       }
     }
-    const knownUids = new Set()
+    let knownUids = new Set()
     const uidRefs = refs.filter(ref => ref && !policy.isUidReference(ref)).map(String)
     if (uidRefs.length) {
-      const found = await getPool().query(`select uid from room_nodes
-        where room_key = $1 and uid = any($2::text[]) and deleted_at is null`, [roomKey, uidRefs])
+      const liveOnly = mcpRequest ? '' : ' and deleted_at is null'
+      let found
+      try {
+        found = await getPool().query(`select uid from room_nodes
+          where room_key = $1 and uid = any($2::text[])${liveOnly}`, [roomKey, uidRefs])
+      } catch (err) {
+        if (mcpRequest) {
+          throw policy.referenceUnavailableError('uid_proof_query_failed')
+        }
+        throw err
+      }
       for (const row of found.rows) knownUids.add(row.uid)
+    }
+    if (mcpRequest) {
+      const classified = policy.classifyMcpDirectReferences(
+        command,
+        refs,
+        knownUids
+      )
+      knownUids = classified.knownUids
     }
     const supported = mcpRequest
       ? policy.isMcpDirectShape(command, source, knownUids)
