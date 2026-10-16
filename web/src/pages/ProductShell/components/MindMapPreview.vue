@@ -5,32 +5,31 @@
     xmlns="http://www.w3.org/2000/svg"
     aria-hidden="true"
   >
-    <rect width="320" height="160" fill="#f3f7f5" />
+    <rect class="mmBg" width="320" height="160" />
     <g v-for="(line, index) in lines" :key="'l' + index">
       <path
+        class="mmLine"
         :d="line"
         fill="none"
-        stroke="#9ac8b6"
         stroke-width="1.4"
       />
     </g>
     <g v-for="(node, index) in nodes" :key="'n' + index">
       <rect
+        :class="node.root ? 'mmRoot' : 'mmNode'"
         :x="node.x"
         :y="node.y"
         :width="node.w"
         :height="node.h"
         :rx="node.root ? 8 : 5"
-        :fill="node.root ? '#0c9065' : '#ffffff'"
-        :stroke="node.root ? '#0c9065' : '#9ac8b6'"
         stroke-width="1.2"
       />
       <text
+        :class="node.root ? 'mmRootText' : 'mmNodeText'"
         :x="node.x + node.w / 2"
         :y="node.y + node.h / 2 + 0.5"
         text-anchor="middle"
         dominant-baseline="middle"
-        :fill="node.root ? '#ffffff' : '#244038'"
         :font-size="node.root ? 11 : 10"
         font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif"
       >
@@ -134,5 +133,31 @@ export default {
   width: 100%;
   height: 100%;
   display: block;
+
+  .mmBg {
+    fill: var(--ui-preview-bg, #f3f7f5);
+  }
+
+  .mmLine {
+    stroke: var(--ui-preview-line, #9ac8b6);
+  }
+
+  .mmNode {
+    fill: var(--ui-preview-node, #ffffff);
+    stroke: var(--ui-preview-line, #9ac8b6);
+  }
+
+  .mmRoot {
+    fill: var(--ui-preview-root, #0c9065);
+    stroke: var(--ui-preview-root, #0c9065);
+  }
+
+  .mmNodeText {
+    fill: var(--ui-preview-node-text, #244038);
+  }
+
+  .mmRootText {
+    fill: var(--ui-preview-root-text, #ffffff);
+  }
 }
 </style>

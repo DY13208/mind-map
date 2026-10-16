@@ -115,6 +115,15 @@ const routes = [
         props: { mode: 'files' }
       },
       {
+        path: 'favorites',
+        name: 'MyMapsFavorites',
+        component: () =>
+          import(
+            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'
+          ),
+        props: { mode: 'favorites' }
+      },
+      {
         path: 'folder/:id',
         name: 'MyMapsFolder',
         component: () =>
@@ -314,6 +323,12 @@ router.beforeEach((to, from, next) => {
     return
   }
   if (consumeSkipMyMapsRedirect()) {
+    next()
+    return
+  }
+  // 列表内部导航（面包屑回根目录、删除文件夹后返回等）不回跳房间
+  const fromPath = String((from && from.path) || '')
+  if (fromPath === '/my-maps' || fromPath.startsWith('/my-maps/')) {
     next()
     return
   }

@@ -23,20 +23,20 @@ export default {
 .emptyState {
   text-align: center;
   padding: 70px 20px;
-  color: #7b8b85;
+  color: var(--ui-text-muted);
   .emptyIcon {
     margin: auto;
     width: 62px;
     height: 62px;
     border-radius: 18px;
-    background: #eaf5f0;
+    background: var(--ui-primary-soft);
     display: grid;
     place-items: center;
-    color: #0b8f64;
+    color: var(--ui-primary);
     font-size: 27px;
   }
   h3 {
-    color: #344b42;
+    color: var(--ui-text);
     margin: 17px 0 7px;
   }
   p {

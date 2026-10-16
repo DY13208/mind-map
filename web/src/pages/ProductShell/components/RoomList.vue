@@ -14,7 +14,13 @@
     /><el-table-column label="名称" min-width="220"
       ><template slot-scope="scope"
         ><div class="roomName">
-          <i :class="scope.row.__kind === 'folder' ? 'el-icon-folder' : 'el-icon-document'" /><strong>{{ scope.row.title || scope.row.name }}</strong>
+          <i :class="scope.row.__kind === 'folder' ? 'el-icon-folder' : 'el-icon-document'" /><strong
+            ><InlineTitle
+              :value="scope.row.title || scope.row.name"
+              :editable="!selectMode && (scope.row.__kind !== 'folder' || scope.row.canManage !== false)"
+              @open="openItem(scope.row)"
+              @rename="renameInline(scope.row, $event)"
+          /></strong>
         </div></template
       ></el-table-column
     ><el-table-column label="类型" width="90"><template slot-scope="scope">{{ scope.row.__kind === 'folder' ? '文件夹' : '脑图' }}</template></el-table-column><el-table-column
@@ -60,24 +66,17 @@
           @command="$emit($event, scope.row)"
           @click.native.stop
           ><i class="el-icon-more" /><el-dropdown-menu slot="dropdown"
-            ><el-dropdown-item command="open">打开</el-dropdown-item
             ><el-dropdown-item command="duplicate">创建副本</el-dropdown-item
-            ><el-dropdown-item command="rename">重命名</el-dropdown-item
             ><el-dropdown-item command="move">移动到文件夹</el-dropdown-item
-            ><el-dropdown-item v-if="allowMoveToTeam" command="move-to-team"
-              >移至团队空间</el-dropdown-item
             ><el-dropdown-item command="share">分享</el-dropdown-item
-            ><el-dropdown-item command="history">历史版本</el-dropdown-item
             ><el-dropdown-item v-if="allowDelete && scope.row.canManage" command="delete" divided
               >删除</el-dropdown-item
             ></el-dropdown-menu
           ></el-dropdown
-        ><el-dropdown v-if="scope.row.__kind === 'folder' && !selectMode"
+        ><el-dropdown v-if="scope.row.__kind === 'folder' && !selectMode && (allowShare || (allowDelete && scope.row.canManage !== false))"
           trigger="click" @command="$emit($event, scope.row)" @click.native.stop>
           <i class="el-icon-more" /><el-dropdown-menu slot="dropdown">
             <el-dropdown-item v-if="allowShare" command="share-folder">分享 / 权限</el-dropdown-item>
-            <el-dropdown-item v-if="scope.row.canManage !== false" command="rename-folder">重命名</el-dropdown-item>
-            <el-dropdown-item v-if="allowMoveToTeam" command="move-folder-to-team">移至团队空间</el-dropdown-item>
             <el-dropdown-item v-if="allowDelete && scope.row.canManage !== false" command="delete-folder" divided>删除</el-dropdown-item>
           </el-dropdown-menu>
         </el-dropdown></template
@@ -87,16 +86,16 @@
 >
 <script>
 import UserAvatar from '@/components/UserAvatar.vue'
+import InlineTitle from './InlineTitle.vue'
 
 export default {
   name: 'RoomList',
-  components: { UserAvatar },
+  components: { UserAvatar, InlineTitle },
   props: {
     rooms: Array,
     folders: { type: Array, default: () => [] },
     allowDelete: { type: Boolean, default: false },
     allowShare: { type: Boolean, default: true },
-    allowMoveToTeam: { type: Boolean, default: true },
     selectMode: { type: Boolean, default: false },
     selectedRoomKeys: { type: Array, default: () => [] },
     selectedFolderIds: { type: Array, default: () => [] },
@@ -139,6 +138,9 @@ export default {
     openItem(item) {
       if (this.selectMode) return
       this.$emit(item.__kind === 'folder' ? 'open-folder' : 'open', item)
+    },
+    renameInline(item, name) {
+      this.$emit(item.__kind === 'folder' ? 'rename-folder-inline' : 'rename-inline', item, name)
     },
     onSelectionChange(rows) {
       if (!this.selectMode) return
@@ -185,7 +187,7 @@ export default {
 </script>
 <style lang="less" scoped>
 .roomTable {
-  border: 1px solid #e3e9e6;
+  border: 1px solid var(--ui-border);
   border-radius: 12px;
   overflow: hidden;
   /deep/ .el-table__row {
@@ -195,17 +197,17 @@ export default {
     display: flex;
     gap: 9px;
     align-items: center;
-    color: #234238;
+    color: var(--ui-text);
     cursor: pointer;
     i {
-      color: #0b9366;
+      color: var(--ui-primary);
     }
   }
   .avatars {
     display: flex;
     /deep/ .userAvatar {
       margin-right: -5px;
-      border: 2px solid white;
+      border: 2px solid var(--ui-surface);
     }
   }
 }

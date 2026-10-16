@@ -3,7 +3,8 @@
     class="productShell"
     :class="{
       'productShell--collapsed': !hideSidebar && sidebarCollapsed,
-      'productShell--solo': hideSidebar
+      'productShell--solo': hideSidebar,
+      'productShell--dark': isDarkTheme
     }"
   >
     <button
@@ -174,6 +175,7 @@ import productService from '@/services/productService'
 import { logoutAndRedirect } from '@/utils/auth'
 import UserAvatar from '@/components/UserAvatar.vue'
 import AccessNotificationTrigger from '@/components/AccessNotificationTrigger.vue'
+import { shellTheme, applyShellThemeToRoot } from '@/utils/shellTheme'
 const SIDEBAR_PREFERENCE_KEY = 'product-shell-sidebar-collapsed'
 const isSmallScreen = () => window.matchMedia('(max-width: 760px)').matches
 const readSidebarPreference = () => {
@@ -208,13 +210,18 @@ export default {
       return this.$route.matched.some(
         record => record.meta && record.meta.hideSidebar
       )
+    },
+    isDarkTheme() {
+      return shellTheme.theme === 'dark'
     }
   },
   mounted() {
     document.body.classList.remove('isDark')
+    applyShellThemeToRoot(true)
     window.addEventListener('resize', this.updateAutoSidebar)
   },
   beforeDestroy() {
+    applyShellThemeToRoot(false)
     window.removeEventListener('resize', this.updateAutoSidebar)
   },
   methods: {
@@ -285,11 +292,13 @@ export default {
   width: 100%;
   max-width: 100%;
   overflow-x: hidden;
-  background: var(--ui-bg);
+  background: var(--ui-page-glow), var(--ui-bg);
+  background-attachment: fixed;
   color: var(--ui-text);
   display: flex;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-    sans-serif;
+  transition: background-color 0.25s ease, color 0.25s ease;
+  font-family: 'Microsoft YaHei', '微软雅黑', SimHei, '黑体', 'PingFang SC',
+    'Hiragino Sans GB', sans-serif;
 }
 .productShell .sidebarBackdrop {
   display: none;
@@ -303,19 +312,19 @@ export default {
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: #5d5d5d;
+  color: var(--ui-text-secondary);
   cursor: pointer;
   box-shadow: none;
   transition: background 0.15s ease, color 0.15s ease;
   &:hover {
-    background: rgba(0, 0, 0, 0.06);
-    color: #0d0d0d;
+    background: var(--ui-hover-overlay);
+    color: var(--ui-text);
   }
   &:active {
-    background: rgba(0, 0, 0, 0.09);
+    background: var(--ui-active-overlay);
   }
   &:focus-visible {
-    outline: 2px solid #087854;
+    outline: 2px solid var(--ui-focus);
     outline-offset: 2px;
   }
 }
@@ -332,7 +341,7 @@ export default {
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: #5d5d5d;
+  color: var(--ui-text-secondary);
   cursor: pointer;
   padding: 0;
   transition: background 0.15s ease, color 0.15s ease;
@@ -342,7 +351,7 @@ export default {
     border-radius: 9px;
     display: grid;
     place-items: center;
-    color: white;
+    color: var(--ui-on-primary);
     background: var(--ui-primary);
     font-size: 18px;
     line-height: 1;
@@ -362,8 +371,8 @@ export default {
     white-space: nowrap;
     padding: 6px 10px;
     border-radius: 999px;
-    background: #0d0d0d;
-    color: #fff;
+    background: var(--ui-tooltip-bg);
+    color: var(--ui-tooltip-text);
     font-size: 12px;
     line-height: 1.2;
     opacity: 0;
@@ -375,8 +384,8 @@ export default {
   &:hover,
   &:focus,
   &:focus-visible {
-    background: rgba(0, 0, 0, 0.06);
-    color: #0d0d0d;
+    background: var(--ui-hover-overlay);
+    color: var(--ui-text);
     .collapsedLogoMark {
       opacity: 0;
     }
@@ -386,7 +395,7 @@ export default {
     }
   }
   &:focus-visible {
-    outline: 2px solid #087854;
+    outline: 2px solid var(--ui-focus);
     outline-offset: 2px;
   }
 }
@@ -428,7 +437,7 @@ export default {
       border-radius: 9px;
       display: grid;
       place-items: center;
-      color: white;
+      color: var(--ui-on-primary);
       background: var(--ui-primary);
       font-size: 18px;
       flex-shrink: 0;
@@ -514,7 +523,7 @@ export default {
   }
   .navLabel {
     margin: 6px 12px 7px;
-    color: #9aa7a2;
+    color: var(--ui-text-muted);
     font-size: 12px;
     flex-shrink: 0;
     &--space {
@@ -525,7 +534,7 @@ export default {
     flex-shrink: 0;
     margin-top: 0;
     padding: 10px 10px 2px;
-    border-top: 1px solid #eef1ef;
+    border-top: 1px solid var(--ui-border);
   }
   .sidebarNotifications { flex-shrink: 0; }
   .accountInfo {
@@ -560,7 +569,7 @@ export default {
       white-space: nowrap;
     }
     span {
-      color: #98a59f;
+      color: var(--ui-text-muted);
       margin-top: 2px;
     }
   }
@@ -572,19 +581,19 @@ export default {
     align-items: center;
     justify-content: center;
     gap: 6px;
-    border: 1px solid #e3e9e6;
+    border: 1px solid var(--ui-border);
     border-radius: 8px;
-    background: #fff;
-    color: #52665f;
+    background: var(--ui-surface);
+    color: var(--ui-text-secondary);
     font-size: 13px;
     cursor: pointer;
     &:hover:not(:disabled) {
-      border-color: #f0c9c4;
-      background: #fdf5f4;
-      color: #b4473c;
+      border-color: var(--ui-danger-border);
+      background: var(--ui-danger-soft);
+      color: var(--ui-danger);
     }
     &:focus-visible {
-      outline: 2px solid #087854;
+      outline: 2px solid var(--ui-focus);
       outline-offset: 2px;
     }
     &:disabled {
@@ -639,7 +648,7 @@ export default {
 .productShell .sectionTitle {
   font-size: 15px;
   margin: 26px 0 14px;
-  color: #40564e;
+  color: var(--ui-text-secondary);
 }
 .productShell--collapsed {
   .productSidebar {
@@ -760,7 +769,7 @@ export default {
     display: block;
     position: fixed;
     inset: 0 0 0 72px;
-    background: rgba(23, 54, 44, 0.18);
+    background: var(--ui-backdrop);
     border: 0;
     z-index: 9;
   }

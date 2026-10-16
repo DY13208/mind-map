@@ -2,7 +2,7 @@ const fs = require('fs')
 const crypto = require('crypto')
 const os = require('os')
 const path = require('path')
-const { spawn, execSync } = require('child_process')
+const { spawn, execSync, execFileSync } = require('child_process')
 const { stopWorkbuddyApi } = require('./workbuddy-api')
 const {
   DEFAULT_PORT: OPENCLAW_PORT,
@@ -18,6 +18,44 @@ const {
 
 const ROOT = path.resolve(__dirname, '..')
 const ENV_FILE = path.join(ROOT, '.env')
+
+// Compose v5 只走 buildx bake，会把构建目录放进 gRPC header；Windows 路径含中文时
+// 直接报 "contains value with non-printable ASCII characters"，只能换 ASCII 路径构建。
+let buildRootCache = ''
+function getBuildRoot() {
+  if (buildRootCache) return buildRootCache
+  if (process.platform !== 'win32' || /^[\x20-\x7e]*$/.test(ROOT)) {
+    buildRootCache = ROOT
+    return ROOT
+  }
+  const marker = path.join(ROOT, 'docker-compose.yml')
+  const markerIno = fs.statSync(marker, { bigint: true }).ino
+  const letters = 'LMNOPQRSTUVWXYZ'.split('')
+  for (const letter of letters) {
+    const drive = letter + ':\\'
+    if (!fs.existsSync(drive)) continue
+    try {
+      const ino = fs.statSync(path.join(drive, 'docker-compose.yml'), { bigint: true }).ino
+      if (ino === markerIno) {
+        buildRootCache = drive
+        return drive
+      }
+    } catch (_) {}
+  }
+  for (const letter of letters) {
+    const drive = letter + ':\\'
+    if (fs.existsSync(drive)) continue
+    try {
+      execFileSync('subst', [letter + ':', ROOT], { stdio: 'ignore' })
+      console.log('  项目路径含非 ASCII 字符，镜像构建改用映射盘 ' + drive)
+      buildRootCache = drive
+      return drive
+    } catch (_) {}
+  }
+  console.warn('  未能为构建映射 ASCII 盘符，docker compose build 可能失败')
+  buildRootCache = ROOT
+  return ROOT
+}
 
 function loadRootEnv() {
   if (!fs.existsSync(ENV_FILE)) return
@@ -330,13 +368,13 @@ function ensureAppBuilt(extraEnv) {
   else console.log('  检测到前端源码有变化，开始 rebuild app...')
 
   execSync('docker compose -f docker-compose.yml -f docker-compose.wiki.yml build app', {
-    cwd: ROOT,
+    cwd: getBuildRoot(),
     stdio: 'inherit',
     env: { ...process.env, ...(extraEnv || {}) },
     shell: true
   })
   execSync('docker compose -f docker-compose.yml -f docker-compose.wiki.yml build wiki-graph', {
-    cwd: ROOT,
+    cwd: getBuildRoot(),
     stdio: 'inherit',
     env: { ...process.env, ...(extraEnv || {}) },
     shell: true
@@ -382,7 +420,7 @@ function ensureDocmostBuilt(extraEnv) {
 
   // 同步 build，便于启动脚本判断成败
   execSync('docker compose -f docker-compose.yml -f docker-compose.wiki.yml build docmost', {
-    cwd: ROOT,
+    cwd: getBuildRoot(),
     stdio: 'inherit',
     env: { ...process.env, ...(extraEnv || {}) },
     shell: true
@@ -585,7 +623,7 @@ async function up() {
   // 单独构建 app，避免无源码变动时也重新构建耗时很长的 Docmost 镜像。
   // wiki-graph 是侧栏 wiki-compiler 的图谱服务，和 app 一起构建。
   execSync('docker compose -f docker-compose.yml -f docker-compose.wiki.yml build app wiki-graph', {
-    cwd: ROOT,
+    cwd: getBuildRoot(),
     stdio: 'inherit',
     env: process.env,
     shell: true
