@@ -1,49 +1,60 @@
 // 玻璃文件夹背板的生成艺术：域扭曲噪声场按液面打光，分帧绘制并在所有文件夹间共享缓存。
 
-// 参考 GlassFolder：浓郁流体背板，或素磨砂背板 + 纸张上的图案
+// 与脑图白底卡片兼容：浅粉彩 marble，含品牌绿；无近黑大块，并排不抢戏
 export const ART_PRESETS = {
-  aurora: {
-    style: 'streak',
-    colors: ['#f4efe9', '#e9c2b8', '#c2433f', '#2a1e2a', '#22395e', '#6f97c2', '#e5edf4'],
-    scale: 0.7,
-    warp: 1.4,
-    angle: -0.62,
-    gloss: 0.18
-  },
-  ember: {
+  mint: {
     style: 'marble',
-    colors: ['#07090c', '#16252c', '#3d5f68', '#1a1416', '#a3201a', '#ef4a2b', '#ff8a5c'],
-    scale: 0.62,
-    warp: 3.2,
-    angle: -0.5,
-    gloss: 0.55,
-    veins: 0.6
+    colors: ['#f7fcf9', '#eaf6f0', '#d5ecdf', '#bfe2d0', '#a8d5bf', '#dff0e7', '#ffffff'],
+    scale: 0.72,
+    warp: 2.5,
+    angle: 1.2,
+    gloss: 0.16,
+    veins: 0.08
   },
-  dusk: {
+  sky: {
     style: 'marble',
-    colors: ['#120c18', '#3e2850', '#8f6c9c', '#2b1a24', '#b3502f', '#eab08a', '#fbe7d2'],
-    scale: 0.75,
-    warp: 3.6,
-    angle: 0.8,
-    gloss: 0.5,
-    veins: 0.5
+    colors: ['#f7fbfe', '#eaf3fb', '#d7e9f6', '#c2dcf0', '#a9cce6', '#ddeff8', '#ffffff'],
+    scale: 0.72,
+    warp: 2.45,
+    angle: -0.45,
+    gloss: 0.16,
+    veins: 0.08
   },
-  glacier: {
-    style: 'streak',
-    colors: ['#f7f8fa', '#d9e2ea', '#9fb4c7', '#e8edf2', '#bccbd8', '#ffffff'],
-    scale: 0.7,
-    warp: 1.6,
-    angle: 0.35,
-    gloss: 0.25
-  },
-  verdant: {
+  lilac: {
     style: 'marble',
-    colors: ['#070b08', '#173024', '#4f7a5a', '#141812', '#a7843a', '#e9cf87', '#fbf3d6'],
+    colors: ['#fbf8ff', '#f3ecfb', '#e7daf4', '#d8c6eb', '#c7b2e0', '#ebe1f5', '#ffffff'],
     scale: 0.7,
-    warp: 3.4,
-    angle: 2.1,
-    gloss: 0.5,
-    veins: 0.5
+    warp: 2.55,
+    angle: 0.9,
+    gloss: 0.16,
+    veins: 0.08
+  },
+  peach: {
+    style: 'marble',
+    colors: ['#fffaf6', '#fff1e8', '#fde3d2', '#f5d0b8', '#e8bda4', '#f7e2d4', '#ffffff'],
+    scale: 0.72,
+    warp: 2.4,
+    angle: -0.9,
+    gloss: 0.15,
+    veins: 0.06
+  },
+  mist: {
+    style: 'marble',
+    colors: ['#fafbfc', '#f0f3f5', '#e2e8ec', '#d0d8de', '#bcc7d0', '#e8ecef', '#ffffff'],
+    scale: 0.74,
+    warp: 2.35,
+    angle: 0.3,
+    gloss: 0.12,
+    veins: 0.05
+  },
+  sage: {
+    style: 'marble',
+    colors: ['#f6faf7', '#e8f2eb', '#d4e5da', '#bdd6c6', '#a5c5b0', '#dce9e1', '#ffffff'],
+    scale: 0.72,
+    warp: 2.5,
+    angle: 2.0,
+    gloss: 0.15,
+    veins: 0.07
   }
 }
 
