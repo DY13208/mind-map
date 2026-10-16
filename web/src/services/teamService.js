@@ -2,6 +2,7 @@ import { productRequest } from './productHttp'
 import { userMessageFromError } from './apiError'
 import { C3_SERVICE_STATUS_MATRIX } from './serviceStatus'
 import { folderIdForApi, normalizeFolderDto, normalizeRoomDto } from './roomDto'
+import { displayName } from '../utils/displayName'
 import { validName } from './mockStore'
 
 const TEAM_ROLES = ['owner', 'admin', 'member']
@@ -68,7 +69,13 @@ function normalizeTeam(row = {}) {
 
 function normalizeMember(row = {}) {
   const user = row.user || row.member || row
-  const name = String(user.name || user.displayName || user.userName || user.user_id || user.userId || '')
+  const name = String(displayName({
+    name: user.name,
+    displayName: user.displayName,
+    nickname: user.userName,
+    user_id: user.user_id,
+    userId: user.userId
+  }) || '')
   const avatarUrl = user.avatarUrl || user.avatar_url || user.avatar || ''
   return {
     id: String(row.id || row.userId || row.user_id || user.id || user.userId || user.user_id || ''),

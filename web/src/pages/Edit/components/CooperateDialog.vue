@@ -285,7 +285,8 @@ import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import { mapMutations, mapState } from 'vuex'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
-import { getCurrentUser } from '@/utils/auth'
+import { getCurrentUser, onAuthUserChange } from '@/utils/auth'
+import { displayName, stableColor } from '@/utils/displayName'
 import { buildInviteUrl, roomFromLocation } from '@/utils/roomLocation'
 import { normalizeRoomDto, requireRoomKey } from '@/services/roomDto'
 import roomService from '@/services/roomService'
@@ -341,6 +342,7 @@ import {
 import { bindPersonalAppearance } from '@/utils/personalAppearance'
 import { applyRoomAccess, fileRoleLabelKey, memberRoleLabelKey } from '@/utils/roomAcl'
 import { createCollaborationAdapter } from 'simple-mind-map/bin/collabV2/adapter'
+import { isLiveComment } from '@/utils/mentionFormat'
 import { io } from 'socket.io-client'
 
 const USER_NAME_KEY = 'COOPERATE_USER_NAME'
@@ -557,24 +559,21 @@ export default {
     '$route.query.focus'() {
       if (!this.connected) return
       if (this.roomName !== roomFromLocation(this.$route)) return
-      this.tryFocusFromQuery()
+      this.scheduleFocusFromQuery()
+    },
+    // 「@我的」跳转：同一脑图内只换了评论 id 时也要重新定位
+    '$route.query.comment'(value) {
+      if (!value || !this.connected) return
+      if (this.roomName !== roomFromLocation(this.$route)) return
+      this.scheduleFocusFromQuery()
     }
   },
   created() {
-    const authenticatedUser = getCurrentUser()
-    this.userId = authenticatedUser
-      ? `wecom:${authenticatedUser.id}`
-      : localStorage.getItem(USER_ID_KEY) || createId()
-    localStorage.setItem(USER_ID_KEY, this.userId)
-    this.userName = authenticatedUser
-      ? authenticatedUser.name
-      : this.$route.query.userName ||
-        localStorage.getItem(USER_NAME_KEY) ||
-        defaultGuestName(this.userId)
-    localStorage.setItem(USER_NAME_KEY, this.userName)
+    this.applyIdentity(getCurrentUser())
+    this._offAuthUserChange = onAuthUserChange(user => {
+      this.onAuthUserChanged(user)
+    })
     this.roomName = roomFromLocation(this.$route) || ''
-    this.userColor =
-      USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)]
     this.$bus.$on('showCooperate', this.open)
     this.$bus.$on('map_ref_click', this.onMapRefClick)
     this.$bus.$on('node_dblclick', this.onNodeDblclickMapRef)
@@ -586,8 +585,14 @@ export default {
   },
   mounted() {
     this.tryAutoJoin()
+    window.addEventListener('mindmap:focus-comment', this.onFocusCommentRequest)
   },
   beforeDestroy() {
+    window.removeEventListener('mindmap:focus-comment', this.onFocusCommentRequest)
+    if (this._offAuthUserChange) {
+      this._offAuthUserChange()
+      this._offAuthUserChange = null
+    }
     this._membersAttempt = (this._membersAttempt || 0) + 1
     this._historyAttempt = (this._historyAttempt || 0) + 1
     this.$bus.$off('showCooperate', this.open)
@@ -736,10 +741,16 @@ export default {
           roomKey: this.roomName || ''
         }
       }
+      const identityVm = this
       const adapter = createCollaborationAdapter({
         clientId,
-        name: this.userName,
-        color: this.userColor,
+        // getter：重连 join 时取最新名字 / 颜色
+        get name() {
+          return identityVm.userName
+        },
+        get color() {
+          return identityVm.userColor
+        },
         createSocket: () => {
           const cfg = getRuntimeConfig()
           const raw = String(cfg.collabApi || this.serverUrl || '')
@@ -1322,15 +1333,65 @@ export default {
       await this.openSavedRoom({ silent: true })
     },
 
+    // focus 与 comment 常在同一次跳转里一起变化，合并成一次定位
+    scheduleFocusFromQuery() {
+      if (this._focusQueryScheduled) return
+      this._focusQueryScheduled = true
+      this.$nextTick(() => {
+        this._focusQueryScheduled = false
+        this.tryFocusFromQuery()
+      })
+    },
+
     async tryFocusFromQuery() {
       const focus = this.$route.query.focus
       if (!focus || !this.mindMap || !this.mindMap.cooperate) return false
+      const commentId = String(this.$route.query.comment || '')
       const found = await this.mindMap.cooperate.revealUid(focus)
       if (!found) {
-        this.$message.warning(this.$t('mapRef.missingNode'))
+        this.$message.warning(
+          commentId ? '该评论所在的节点已被删除' : this.$t('mapRef.missingNode')
+        )
+        if (commentId) this.clearCommentQuery()
         return false
       }
+      if (commentId) {
+        this.openCommentOnNode(found, commentId)
+        this.clearCommentQuery()
+      }
       return true
+    },
+
+    // 选中并居中节点后打开评论卡片，滚动并高亮指定评论
+    openCommentOnNode(node, commentId) {
+      const comments = (node && typeof node.getData === 'function' && node.getData('comments')) || []
+      if (!isLiveComment(comments, commentId)) {
+        this.$message.warning('该评论已被删除')
+        return false
+      }
+      this.$bus.$emit('showNodeComment', node, { highlightCommentId: commentId })
+      return true
+    },
+
+    // 评论 id 只用于这一次定位；保留 focus，避免刷新时重复弹出卡片
+    clearCommentQuery() {
+      if (!this.$route.query.comment) return
+      const query = { ...this.$route.query }
+      delete query.comment
+      this.$router.replace({ query }).catch(() => {})
+    },
+
+    // 消息中心在地址未变化时（已在该节点）直接请求重新定位
+    async onFocusCommentRequest(event) {
+      const detail = (event && event.detail) || {}
+      if (!detail.node || !detail.room || detail.room !== this.roomName) return
+      if (!this.connected || !this.mindMap || !this.mindMap.cooperate) return
+      const found = await this.mindMap.cooperate.revealUid(String(detail.node))
+      if (!found) {
+        this.$message.warning('该评论所在的节点已被删除')
+        return
+      }
+      if (detail.comment) this.openCommentOnNode(found, String(detail.comment))
     },
 
     /**
@@ -1622,7 +1683,9 @@ export default {
       if (this.connecting) return
       this.connecting = true
       this.setCooperateStatus('connecting')
-      localStorage.setItem(USER_NAME_KEY, this.userName)
+      if (!this.isAuthenticatedIdentity) {
+        localStorage.setItem(USER_NAME_KEY, this.userName)
+      }
       this.syncRoomQuery()
       const cooperate = this.mindMap.cooperate
       cooperate.setUserInfo({
@@ -2297,6 +2360,82 @@ export default {
         }
         this.loadHistory()
       }, 0)
+    },
+
+    // 计算本端身份：登录用户只用账号信息（不读写访客专用的 COOPERATE_USER_NAME）；
+    // 颜色按稳定 id 哈希，保证同一人在各标签页 / 各端颜色一致。
+    applyIdentity(authenticatedUser) {
+      if (authenticatedUser) {
+        this.isAuthenticatedIdentity = true
+        this.userId = `wecom:${authenticatedUser.id}`
+        localStorage.setItem(USER_ID_KEY, this.userId)
+        this.userName = displayName(
+          authenticatedUser,
+          defaultGuestName(this.userId)
+        )
+      } else {
+        this.isAuthenticatedIdentity = false
+        const storedId = localStorage.getItem(USER_ID_KEY)
+        this.userId =
+          storedId && !/^wecom:/.test(storedId) ? storedId : createId()
+        localStorage.setItem(USER_ID_KEY, this.userId)
+        this.userName =
+          this.$route.query.userName ||
+          localStorage.getItem(USER_NAME_KEY) ||
+          defaultGuestName(this.userId)
+        localStorage.setItem(USER_NAME_KEY, this.userName)
+      }
+      this.userColor =
+        stableColor(this.userId || this.userName, USER_COLORS) || USER_COLORS[0]
+    },
+
+    // 登录态在组件创建之后才到达或发生变化时，刷新名字并重新广播在线信息。
+    onAuthUserChanged(user) {
+      const prevName = this.userName
+      const prevColor = this.userColor
+      const prevId = this.userId
+      if (!user && !this.isAuthenticatedIdentity) return
+      this.applyIdentity(user)
+      if (
+        prevName === this.userName &&
+        prevColor === this.userColor &&
+        prevId === this.userId
+      ) {
+        return
+      }
+      this.republishIdentity()
+    },
+
+    republishIdentity() {
+      const info = { id: this.userId, name: this.userName, color: this.userColor }
+      if (this._collabV2AdapterOptions) {
+        this._collabV2AdapterOptions.name = this.userName
+        this._collabV2AdapterOptions.color = this.userColor
+      }
+      const cooperate = this.mindMap && this.mindMap.cooperate
+      if (cooperate && typeof cooperate.setUserInfo === 'function') {
+        try {
+          cooperate.setUserInfo(info)
+        } catch (err) {
+          console.warn('[cooperate] setUserInfo failed', err)
+        }
+      }
+      this.publishLocalAwarenessPresence()
+      if (Array.isArray(this.peerList)) {
+        this.peerList = this.peerList.map(peer =>
+          peer && peer.isMe
+            ? {
+                ...peer,
+                name: this.userName,
+                color: this.userColor,
+                shortName: (this.userName || '?').slice(0, 1)
+              }
+            : peer
+        )
+      }
+      if (this.connected && typeof this.schedulePresenceSync === 'function') {
+        this.schedulePresenceSync()
+      }
     },
 
     publishLocalAwarenessPresence() {

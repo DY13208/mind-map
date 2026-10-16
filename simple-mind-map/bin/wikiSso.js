@@ -10,6 +10,7 @@
  */
 const crypto = require('crypto')
 const { Pool } = require('pg')
+const { resolveDisplayName } = require('./displayName')
 
 const ASSERTION_TTL_SEC = 90
 const JWT_TTL_SEC = 90 * 24 * 60 * 60
@@ -69,9 +70,7 @@ function emailForMindMapUser(user) {
 }
 
 function displayNameForUser(user) {
-  const name = String((user && user.name) || '').trim()
-  if (name) return name.slice(0, 120)
-  return String((user && (user.wecomUserId || user.id)) || 'MindMap User').slice(
+  return String(resolveDisplayName(user || {}, 'MindMap User') || 'MindMap User').slice(
     0,
     120
   )

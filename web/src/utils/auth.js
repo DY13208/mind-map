@@ -9,6 +9,31 @@ export const WECOM_CLIENT_AUTO_ATTEMPT_KEY =
   'mind_map_wecom_client_auto_attempted'
 
 let currentUser = null
+export const AUTH_USER_CHANGED_EVENT = 'mind-map:auth-user-changed'
+
+function setCurrentUser(user) {
+  const prev = currentUser
+  currentUser = user || null
+  const prevKey = prev ? JSON.stringify([prev.id, prev.name, prev.wecomUserId]) : ''
+  const nextKey = currentUser
+    ? JSON.stringify([currentUser.id, currentUser.name, currentUser.wecomUserId])
+    : ''
+  if (prevKey === nextKey) return
+  try {
+    window.dispatchEvent(
+      new CustomEvent(AUTH_USER_CHANGED_EVENT, { detail: { user: currentUser } })
+    )
+  } catch (err) {
+    // 非浏览器环境忽略
+  }
+}
+
+// 订阅登录用户变化；返回取消订阅函数。
+export function onAuthUserChange(handler) {
+  const listener = event => handler((event && event.detail && event.detail.user) || null)
+  window.addEventListener(AUTH_USER_CHANGED_EVENT, listener)
+  return () => window.removeEventListener(AUTH_USER_CHANGED_EVENT, listener)
+}
 
 export function getAuthApiUrl(path) {
   return `${getRuntimeConfig().collabApi}${path}`
@@ -74,7 +99,7 @@ export async function loadAuthState() {
   if (!response.ok) {
     throw new Error(data.error || '认证服务暂不可用')
   }
-  currentUser = data.authenticated && data.user ? data.user : null
+  setCurrentUser(data.authenticated && data.user ? data.user : null)
   return data
 }
 
@@ -231,7 +256,7 @@ export async function logout() {
   } catch (err) {
     confirmed = false
   }
-  currentUser = null
+  setCurrentUser(null)
   return confirmed
 }
 
@@ -294,7 +319,7 @@ export async function devLogin(key, mobile = '') {
   if (!response.ok || !data.authenticated) {
     throw new Error(data.error || '开发者登录失败')
   }
-  currentUser = data.user || null
+  setCurrentUser(data.user || null)
   storeDevAuthKey(key)
   return data
 }

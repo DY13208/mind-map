@@ -46,7 +46,10 @@ export default {
   computed: {
     count() {
       return (
-        this.state.total + this.state.unread + this.state.announcementUnread
+        this.state.total +
+        this.state.unread +
+        this.state.mentionUnread +
+        this.state.announcementUnread
       )
     }
   },
@@ -83,6 +86,8 @@ export default {
       openNotifications(
         this.state.total
           ? 'requests'
+          : this.state.mentionUnread
+          ? 'mentions'
           : this.state.unread
           ? 'results'
           : this.state.announcementUnread

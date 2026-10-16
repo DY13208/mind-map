@@ -1,6 +1,7 @@
 import Vue from 'vue'
 import { Notification } from 'element-ui'
 import service from './accessRequestService'
+import mentionService from './mentionService'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
 export const state = Vue.observable({
   visible: false,
@@ -24,8 +25,17 @@ export const state = Vue.observable({
   connected: false,
   page: 1,
   resultPage: 1,
-  syncVersion: 0
+  syncVersion: 0,
+  // 「@我的」
+  mentions: [],
+  mentionUnread: 0,
+  mentionLoading: false,
+  mentionError: '',
+  mentionCursor: null,
+  mentionHasMore: false,
+  mentionLoaded: false
 })
+let mentionSequence = 0
 let userId = '',
   stream = null,
   timer = null,
@@ -48,6 +58,8 @@ export function openNotifications(tab) {
   if (tab) state.activeTab = tab
   state.visible = true
   refreshNotifications()
+  // 「@我的」列表由消息中心打开/切换标签时加载，这里只刷新角标
+  refreshMentionUnread()
 }
 function remember(id) {
   announced.add(id)
@@ -209,8 +221,72 @@ export async function refreshApprovalHistory() {
       state.historyLoading = false
   }
 }
+export async function refreshMentionUnread() {
+  if (!userId) return
+  const version = generation
+  try {
+    const data = await mentionService.unreadCount()
+    if (version === generation) state.mentionUnread = Number(data.unread) || 0
+  } catch (_) {
+    /* 角标刷新失败时保留上次的值 */
+  }
+}
+// reset=true 重新加载第一页；否则按游标加载下一页
+export async function refreshMentions(reset = true) {
+  if (!userId) return
+  if (!reset && (!state.mentionHasMore || state.mentionLoading)) return
+  const version = generation,
+    sequence = ++mentionSequence
+  state.mentionLoading = true
+  try {
+    const data = await mentionService.list({
+      limit: 20,
+      before: reset ? '' : state.mentionCursor || ''
+    })
+    if (version !== generation || sequence !== mentionSequence) return
+    const list = data.list || []
+    if (reset) state.mentions = list
+    else {
+      const seen = new Set(state.mentions.map(item => `${item.room_key}:${item.id}`))
+      state.mentions = state.mentions.concat(list.filter(item => !seen.has(`${item.room_key}:${item.id}`)))
+    }
+    state.mentionCursor = data.next_cursor || null
+    state.mentionHasMore = !!data.has_more
+    state.mentionUnread = Number(data.unread) || 0
+    state.mentionError = ''
+    state.mentionLoaded = true
+  } catch (error) {
+    if (version === generation && sequence === mentionSequence)
+      state.mentionError = error.message || '提及加载失败，请重试'
+  } finally {
+    if (version === generation && sequence === mentionSequence)
+      state.mentionLoading = false
+  }
+}
+export async function markMentionRead(item) {
+  if (!item || !item.unread) return
+  item.unread = false
+  state.mentionUnread = Math.max(0, state.mentionUnread - 1)
+  try {
+    const data = await mentionService.markRead([
+      { room_key: item.room_key, comment_id: item.comment_id || item.id }
+    ])
+    if (data && data.unread != null) state.mentionUnread = Number(data.unread) || 0
+  } catch (_) {
+    /* 下次同步时以服务端为准 */
+  }
+}
+export async function markAllMentionsRead() {
+  const data = await mentionService.markAllRead()
+  state.mentions.forEach(item => {
+    item.unread = false
+  })
+  state.mentionUnread = Number(data && data.unread) || 0
+}
 function syncNotifications() {
   refreshNotifications()
+  refreshMentionUnread()
+  if (state.visible && state.activeTab === 'mentions') refreshMentions(true)
   if (state.visible && state.activeTab === 'history') refreshApprovalHistory()
 }
 function onVisibility() {
@@ -232,6 +308,7 @@ export function startNotifications(id) {
     announced = new Set()
   }
   refreshNotifications()
+  refreshMentionUnread()
   if (typeof EventSource !== 'undefined') {
     stream = new EventSource(
       `${
@@ -298,6 +375,14 @@ export function stopNotifications(expectedUserId) {
     error: '',
     connected: false,
     page: 1,
-    resultPage: 1
+    resultPage: 1,
+    mentions: [],
+    mentionUnread: 0,
+    mentionLoading: false,
+    mentionError: '',
+    mentionCursor: null,
+    mentionHasMore: false,
+    mentionLoaded: false
   })
+  mentionSequence++
 }

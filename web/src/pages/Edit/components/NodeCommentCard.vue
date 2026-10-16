@@ -57,7 +57,13 @@
 
     <template v-else>
       <div v-if="comments.length" ref="list" class="ncList">
-        <div v-for="item in comments" :key="item.id" class="ncItem">
+        <div
+          v-for="item in comments"
+          :key="item.id"
+          class="ncItem"
+          :class="{ ncHighlight: item.id === highlightId }"
+          :data-comment-id="item.id"
+        >
           <span class="ncAvatar" :style="avatarStyle(item)">
             <img v-if="avatarSrc(item)" :src="avatarSrc(item)" alt="" />
             <template v-else>{{ initial(item.userName) }}</template>
@@ -195,7 +201,8 @@ export default {
       mentionQuery: '',
       mentionIndex: 0,
       pickedMentions: [],
-      replyTargetId: ''
+      replyTargetId: '',
+      highlightId: ''
     }
   },
   computed: {
@@ -279,8 +286,10 @@ export default {
     onMarkerClick(node) {
       this.open(node)
     },
-    open(node) {
+    // options.highlightCommentId：从「@我的」跳转时滚动到并高亮该评论
+    open(node, options) {
       if (!node || typeof node.getData !== 'function') return
+      const highlightId = String((options && options.highlightCommentId) || '')
       const mindMap = node.mindMap
       this.node = node
       this.readonly = !!(mindMap && mindMap.opt && mindMap.opt.readonly)
@@ -297,10 +306,28 @@ export default {
       this.reposition()
       this.markRead()
       this.loadMembers()
-      this.focusInput()
+      this.setHighlight(highlightId)
+      if (!highlightId) this.focusInput()
+    },
+    setHighlight(id) {
+      clearTimeout(this._highlightTimer)
+      this.highlightId = id || ''
+      if (!id) return
+      this.$nextTick && this.$nextTick(() => {
+        const list = this.$refs && this.$refs.list
+        if (!list || typeof list.querySelector !== 'function') return
+        const safe = String(id).replace(/["\\]/g, '\\$&')
+        const el = list.querySelector(`[data-comment-id="${safe}"]`)
+        if (el) list.scrollTop = Math.max(0, el.offsetTop - list.offsetTop - 12)
+      })
+      this._highlightTimer = setTimeout(() => {
+        this.highlightId = ''
+      }, 3000)
     },
     close() {
       if (!this.visible && !this.node) return
+      clearTimeout(this._highlightTimer)
+      this.highlightId = ''
       this.visible = false
       this.node = null
       this.draft = ''
@@ -739,6 +766,12 @@ export default {
     display: flex;
     gap: 10px;
     padding: 12px 16px;
+    transition: background-color 0.6s ease;
+
+    &.ncHighlight {
+      background: rgba(37, 152, 109, 0.12);
+      box-shadow: inset 3px 0 0 #25986d;
+    }
 
     & + .ncItem {
       border-top: 1px solid #f0f1f3;
@@ -1052,6 +1085,11 @@ export default {
   }
 
   &.isDark {
+    .ncItem.ncHighlight {
+      background: rgba(63, 191, 138, 0.16);
+      box-shadow: inset 3px 0 0 #3fbf8a;
+    }
+
     background: #2b2f33;
     border-color: #3a3f45;
     color: rgba(255, 255, 255, 0.88);

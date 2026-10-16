@@ -2005,6 +2005,20 @@ async function handleApi(req, res) {
     if (handled) return true
   }
 
+  // 「@我的」：提及当前用户的评论列表 / 未读数 / 标记已读
+  if (pathname.startsWith('/api/users/me/mentions')) {
+    const handled = await require('./commentMentions').handleMentionsRequest(req, res, {
+      url,
+      pathname,
+      db: getPool(),
+      sendJson,
+      readBody,
+      roomAcl,
+      loadSnapshot
+    })
+    if (handled) return true
+  }
+
   if (req.method === 'GET' && pathname === '/api/users/me/activity') {
     return require('./userActivity').handleActivityRequest(req, res, {
       url,
