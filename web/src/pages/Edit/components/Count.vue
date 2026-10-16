@@ -1,5 +1,7 @@
 <template>
   <div class="countContainer" :class="{ isDark: isDark }">
+    <NotchWing side="left" position="bottom" variant="edge" />
+    <NotchWing side="left" position="bottom" variant="side" />
     <div class="item">
       <span class="name">{{ $t('count.words') }}</span>
       <span class="value">{{ words }}</span>
@@ -21,10 +23,12 @@
 
 <script>
 import { mapState } from 'vuex'
+import NotchWing from '@/components/NotchWing.vue'
 
 // 字数及节点数量统计
 let countEl = document.createElement('div')
 export default {
+  components: { NotchWing },
   props: {
     mindMap: {
       type: Object
@@ -187,6 +191,41 @@ export default {
 @media screen and (max-width: 900px) {
   .countContainer {
     display: none;
+  }
+}
+@import (reference) '../../../style/notch.less';
+
+// ===== 刘海：左下角统计 =====
+.countContainer.countContainer {
+  .mm-notch-surface();
+  left: calc(@mm-frame-width + @mm-notch-inset);
+  bottom: calc(@mm-frame-width + @mm-notch-inset);
+  height: @mm-notch-height-bottom;
+  padding: 0 10px 0 16px;
+  border-radius: @mm-notch-edge-radius @mm-notch-inner-radius @mm-notch-edge-radius
+    @mm-notch-edge-radius;
+
+  .item,
+  &.isDark .item {
+    color: var(--mm-notch-icon);
+    font-size: 12.5px;
+
+    .value {
+      color: var(--mm-notch-text);
+      font-weight: 600;
+    }
+  }
+
+  .miniMapBtn,
+  &.isDark .miniMapBtn {
+    .mm-notch-icon-btn();
+    width: 30px;
+    height: 30px;
+    font-size: 18px;
+
+    &.active {
+      .mm-notch-pill();
+    }
   }
 }
 </style>

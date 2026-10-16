@@ -1203,7 +1203,7 @@ function renderCommentTab(contentTop) {
   hit.fill({ color: 'transparent' })
   hit.addClass('smm-comment-tab-hit')
   tab.add(hit)
-  tab.on('mouseenter', () => fill.css('filter', 'brightness(0.96)'))
+  tab.on('mouseenter', () => fill.css('filter', 'brightness(1.12)'))
   tab.on('mouseleave', () => fill.css('filter', ''))
   tab.on('mousedown', e => e.stopPropagation())
   tab.on('dblclick', e => e.stopPropagation())

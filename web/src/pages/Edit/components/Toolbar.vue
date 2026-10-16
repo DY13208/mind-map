@@ -2,12 +2,15 @@
   <div class="toolbarContainer" :class="{ isDark: isDark }">
     <div class="toolbar dockShell" :class="{ readonly: isReadonly }" ref="toolbarRef">
       <div class="dock fileDock" :class="{ collapsed: fileToolbarCollapsed }">
+        <NotchWing side="left" position="top" variant="edge" />
+        <NotchWing side="left" position="top" variant="side" />
         <div class="toolbarBlock iconOnly" ref="fileToolbarBlock">
           <el-popover
             v-model="mapTreeShow"
             placement="bottom-start"
             trigger="click"
             append-to-body
+            :visible-arrow="false"
             :popper-class="isDark ? 'mapFileTreePopper isDark' : 'mapFileTreePopper'"
           >
             <MapFileTree
@@ -150,6 +153,8 @@
         </div>
       </div>
       <div class="dock collabDock" :class="{ collapsed: fileToolbarCollapsed }">
+        <NotchWing side="right" position="top" variant="edge" />
+        <NotchWing side="right" position="top" variant="side" />
         <div class="toolbarBlock iconOnly">
           <div class="collabStatus" data-testid="collab-status" :class="{ cooperating: collabLive }">
             <el-popover placement="bottom" width="240" trigger="click" popper-class="collabPeerPopper">
@@ -554,6 +559,7 @@ import MarkdownIt from 'markdown-it'
 import exampleData from 'simple-mind-map/example/exampleData'
 import { getData } from '../../../api'
 import ToolbarNodeBtnList from './ToolbarNodeBtnList.vue'
+import NotchWing from '@/components/NotchWing.vue'
 import ToolbarFileBtnList from './ToolbarFileBtnList.vue'
 import MapFileTree from './MapFileTree.vue'
 import { throttle, isMobile } from 'simple-mind-map/src/utils/index'
@@ -870,6 +876,7 @@ const defaultBtnList = [
 
 export default {
   components: {
+    NotchWing,
     NodeImage,
     NodeHyperlink,
     NodeIcon,
@@ -6219,6 +6226,205 @@ export default {
     transition: none;
   }
 }
+@import (reference) '../../../style/notch.less';
+
+// ===== 刘海（Dynamic Island）样式层：左上 / 右上刘海 + 左侧悬浮胶囊 =====
+// 统一挂在 .dockShell 下，选择器比上面浅色/深色旧规则多一层类，保证覆盖。
+.toolbarContainer .toolbar.dockShell {
+  .fileDock,
+  .collabDock {
+    top: calc(@mm-frame-width + @mm-notch-inset);
+
+    > .toolbarBlock {
+      .mm-notch-surface();
+      height: @mm-notch-height;
+      padding: 0 14px;
+      gap: 4px;
+      border-radius: @mm-notch-edge-radius;
+    }
+  }
+
+  .fileDock {
+    left: calc(@mm-frame-width + @mm-notch-inset);
+
+    > .toolbarBlock {
+      padding-left: 10px;
+      padding-right: 16px;
+      border-bottom-right-radius: @mm-notch-inner-radius;
+    }
+  }
+
+  .collabDock {
+    right: calc(@mm-frame-width + @mm-notch-inset);
+
+    > .toolbarBlock {
+      padding-left: 16px;
+      padding-right: 10px;
+      border-bottom-left-radius: @mm-notch-inner-radius;
+    }
+  }
+
+  // 收起时连同翼片一起移出视口
+  .dock.collapsed {
+    transform: translateY(calc(-100% - 32px));
+  }
+
+  .fileName {
+    color: var(--mm-notch-text);
+    font-size: 14px;
+    margin: 0 4px;
+  }
+
+  .dock .dockIconBtn,
+  .dock .toolIconBtn {
+    .mm-notch-icon-btn();
+    width: 30px;
+    min-width: 30px;
+    height: 30px;
+    font-size: 18px;
+
+    &.active {
+      .mm-notch-pill();
+    }
+  }
+
+  // 子组件里的按钮（ToolbarFileBtnList / ToolbarNodeBtnList）
+  .dock .toolbarBlock /deep/ .toolbarBtn {
+    color: var(--mm-notch-icon);
+    transition: @mm-notch-transition;
+
+    .icon {
+      min-width: 30px;
+      height: 30px;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      font-size: 18px;
+      transition: @mm-notch-transition;
+    }
+
+    .mm-notch-glyph();
+
+    &:hover:not(.disabled) {
+      color: var(--mm-notch-icon-hover);
+
+      .icon {
+        background: var(--mm-notch-hover-bg);
+      }
+    }
+
+    &.active .icon {
+      .mm-notch-pill();
+    }
+
+    &.disabled {
+      color: var(--mm-notch-icon);
+      opacity: 0.45;
+    }
+
+    &.busy {
+      color: var(--mm-notch-icon-hover);
+
+      .icon {
+        background: rgba(64, 158, 255, 0.16);
+      }
+    }
+
+    &.cooperating {
+      color: #22c55e;
+    }
+  }
+
+  // 已保存等状态胶囊保持原有语义色（绿/黄/蓝/红），这里只确保深色下的绿色与示意图一致
+  .fileIdentity .saveChip.saved {
+    color: #22c55e;
+    background: rgba(34, 197, 94, 0.16);
+
+    &::before {
+      background: #22c55e;
+    }
+  }
+
+  // 右上：在线用户 chip 改成药丸
+  .collabStatus {
+    margin-right: 4px;
+    padding: 3px 10px 3px 3px;
+    border: 0;
+    .mm-notch-pill();
+    transition: @mm-notch-transition;
+
+    &.cooperating {
+      border: 0;
+      box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.45);
+    }
+
+    .collabPresence {
+      color: inherit;
+
+      &:hover {
+        color: inherit;
+        opacity: 0.85;
+      }
+    }
+
+    .miniAvatar {
+      width: 22px;
+      height: 22px;
+      line-height: 18px;
+      border-color: var(--mm-notch-pill);
+    }
+  }
+
+  // 左侧竖向工具栏：保留悬浮胶囊
+  .nodeToolRail {
+    left: calc(@mm-frame-width + 8px);
+
+    > .toolbarBlock {
+      .mm-notch-capsule();
+      width: 46px;
+      padding: 8px 6px;
+      gap: 3px;
+    }
+
+    /deep/ .toolbarNodeBtnList {
+      gap: 3px;
+    }
+
+    /deep/ .toolbarNodeBtnList .toolbarBtn:hover .text {
+      background: #18181b;
+      color: #fafafa;
+    }
+  }
+}
+
+// 窄屏：标题再收一点，刘海整体不超出视口（溢出项本就进「更多」菜单）
+@media screen and (max-width: 1280px) {
+  .toolbarContainer .toolbar.dockShell {
+    .fileDock {
+      max-width: min(520px, calc(100vw - 300px));
+    }
+
+    .fileName {
+      max-width: 110px;
+    }
+  }
+}
+
+@media screen and (max-width: 900px) {
+  .toolbarContainer .toolbar.dockShell {
+    .fileDock {
+      max-width: calc(100vw - 180px);
+
+      > .toolbarBlock {
+        overflow-x: hidden;
+      }
+    }
+
+    .fileName {
+      max-width: 80px;
+    }
+  }
+}
 </style>
 
 <style lang="less">
@@ -7150,5 +7356,46 @@ body.isDark .el-select-dropdown__item:hover {
 
 body.isDark .el-select-dropdown__item.selected {
   color: #79bbff;
+}
+</style>
+<style lang="less">
+.mapFileTreePopper {
+  margin-top: 6px !important;
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.22) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+    background: transparent;
+  }
+  *::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.18);
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.32);
+  }
+  &.isDark {
+    * {
+      scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+    }
+    *::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.16);
+    }
+    *::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
+  }
 }
 </style>

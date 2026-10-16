@@ -18,6 +18,15 @@ let clipboardWrite = () => Promise.resolve()
 new Function('require', 'module', 'exports', code)(name => {
   if (name === 'vuex') return { mapState: () => ({}), mapMutations: () => ({}) }
   if (name === '@/utils') return { setDataToClipboard: data => clipboardWrite(data) }
+  if (name === '@/utils/menuPlacement') {
+    const m = { exports: {} }
+    const src = fs.readFileSync(path.join(__dirname, '../src/utils/menuPlacement.js'), 'utf8')
+    new Function('module', 'exports', babel.transformSync(src, {
+      babelrc: false, configFile: false,
+      plugins: [require.resolve('@babel/plugin-transform-modules-commonjs')]
+    }).code)(m, m.exports)
+    return m.exports
+  }
   return {}
 }, mod, mod.exports)
 const component = mod.exports.default
@@ -95,7 +104,8 @@ vm.ticks.forEach(fn => assert.doesNotThrow(fn))
 // 窄/矮视口中的定位不能变成负数。
 global.window = { innerWidth: 280, innerHeight: 400 }
 vm = makeVm()
-assert.deepEqual(vm.getShowPosition(270, 390), { x: 10, y: 10 })
+// 安全区 = 视口 - 外框(4) - 边距(8)
+assert.deepEqual(vm.getShowPosition(270, 390), { x: 12, y: 12 })
 delete global.window
 
 // 禁用菜单不执行；编译真实模板校验点击事件确实传入禁用状态。

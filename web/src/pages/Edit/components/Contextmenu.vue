@@ -7,7 +7,12 @@
     :class="{ isDark: isDark, nodeMenu: type === 'node' }"
     @mouseenter="cancelSubmenuClose"
   >
-    <div class="listBox menuScroll" :class="{ isDark: isDark }">
+    <div
+      class="listBox menuScroll"
+      ref="menuListRef"
+      :class="{ isDark: isDark }"
+      :style="menuMaxHeight ? { maxHeight: menuMaxHeight + 'px' } : null"
+    >
     <template v-if="type === 'node'">
       <div class="item" @click="exec('INSERT_CHILD_NODE')">
         <MenuIcon name="plus" />
@@ -154,7 +159,11 @@
       ref="submenuRef"
       class="submenu listBox"
       :class="{ isDark: isDark }"
-      :style="{ left: submenuLeft + 'px', top: submenuTop + 'px' }"
+      :style="{
+        left: submenuLeft + 'px',
+        top: submenuTop + 'px',
+        maxHeight: submenuMaxHeight ? submenuMaxHeight + 'px' : null
+      }"
       @mouseenter="cancelSubmenuClose"
       @mouseleave="scheduleSubmenuClose"
     >
@@ -389,6 +398,14 @@ import { setDataToClipboard, setImgToClipboard, copy } from '@/utils'
 import { numberTypeList, numberLevelList } from '@/config'
 import { buildInviteUrl, roomFromLocation } from '@/utils/roomLocation'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
+import {
+  getSafeArea,
+  getViewport,
+  readFrameWidth,
+  collectObstacles,
+  placeMenu,
+  placeSubmenu
+} from '@/utils/menuPlacement'
 
 // 右键菜单
 export default {
@@ -429,7 +446,9 @@ export default {
       hasExplicitNodeContext: false,
       activeSubmenu: '',
       submenuLeft: 0,
-      submenuTop: 0
+      submenuTop: 0,
+      submenuMaxHeight: 0,
+      menuMaxHeight: 0
     }
   },
   computed: {
@@ -578,6 +597,7 @@ export default {
     }
     if (typeof window !== 'undefined' && window.addEventListener) {
       window.addEventListener('keydown', this.onMenuKeydown)
+      window.addEventListener('resize', this.onWindowResize)
     }
   },
   beforeDestroy() {
@@ -591,7 +611,9 @@ export default {
     }
     if (typeof window !== 'undefined' && window.removeEventListener) {
       window.removeEventListener('keydown', this.onMenuKeydown)
+      window.removeEventListener('resize', this.onWindowResize)
     }
+    this.disconnectMenuObserver()
     this.$bus.$off('node_contextmenu', this.show)
     this.$bus.$off('multi_select_end', this.onMultiSelectEnd)
     this.$bus.$off('node_click', this.hide)
@@ -720,17 +742,84 @@ export default {
       }
     },
 
-    // 计算右键菜单元素的显示位置
+    // 安全区：视口 - 外框 - 边距；刘海条作为障碍物单独避让
+    getPlacementContext() {
+      const win = typeof window !== 'undefined' ? window : null
+      const doc = typeof document !== 'undefined' ? document : null
+      return {
+        safeArea: getSafeArea(getViewport(win), undefined, readFrameWidth(win)),
+        obstacles: collectObstacles(doc)
+      }
+    },
+
+    // 计算右键菜单元素的显示位置（x/y 为鼠标位置）
     getShowPosition(x, y) {
-      const rect = this.$refs.contextmenuRef.getBoundingClientRect()
-      if (x + rect.width > window.innerWidth) {
-        x = x - rect.width - 20
+      const container = this.$refs.contextmenuRef
+      const rect = container.getBoundingClientRect()
+      const list = this.$refs.menuListRef
+      const height = Math.max(rect.height || 0, (list && list.scrollHeight) || 0)
+      const { safeArea, obstacles } = this.getPlacementContext()
+      const placed = placeMenu(
+        { width: rect.width || 280, height },
+        { x, y },
+        safeArea,
+        { obstacles }
+      )
+      this.menuMaxHeight = height > placed.maxHeight ? placed.maxHeight : 0
+      this._menuAnchor = { x, y }
+      return { x: placed.left, y: placed.top }
+    },
+
+    applyShowPosition(x, y) {
+      if (!this.isShow || !this.$refs.contextmenuRef) return
+      const pos = this.getShowPosition(x, y)
+      this.left = pos.x
+      this.top = pos.y
+      this.observeMenuContent()
+    },
+
+    // 视口变化或菜单内容变化时重新定位
+    repositionMenu() {
+      if (!this.isShow || !this.$refs.contextmenuRef || !this._menuAnchor) return
+      const { x, y } = this._menuAnchor
+      const pos = this.getShowPosition(x, y)
+      this.left = pos.x
+      this.top = pos.y
+      if (this.activeSubmenu) this.$nextTick(() => this.repositionSubmenu())
+    },
+
+    onWindowResize() {
+      if (!this.isShow) return
+      this.repositionMenu()
+    },
+
+    observeMenuContent() {
+      if (typeof MutationObserver === 'undefined') return
+      const el = this.$refs.contextmenuRef
+      if (!el || this._menuObservedEl === el) return
+      this.disconnectMenuObserver()
+      this._menuObserver = new MutationObserver(() => {
+        if (this._menuRaf) return
+        const run = () => {
+          this._menuRaf = null
+          this.repositionMenu()
+        }
+        this._menuRaf = typeof requestAnimationFrame === 'function'
+          ? requestAnimationFrame(run) : (run(), null)
+      })
+      // 只监听结构/文本变化，定位写入的 style 属性不会触发，避免死循环
+      this._menuObserver.observe(el, { childList: true, subtree: true, characterData: true })
+      this._menuObservedEl = el
+    },
+
+    disconnectMenuObserver() {
+      if (this._menuObserver) this._menuObserver.disconnect()
+      if (this._menuRaf && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(this._menuRaf)
       }
-      this.subItemsShowLeft = x + rect.width + 150 > window.innerWidth
-      if (y + rect.height > window.innerHeight) {
-        y = window.innerHeight - rect.height - 10
-      }
-      return { x: Math.max(10, x), y: Math.max(10, y) }
+      this._menuObserver = null
+      this._menuObservedEl = null
+      this._menuRaf = null
     },
 
     // 节点右键显示
@@ -745,12 +834,7 @@ export default {
         this.numberType = number.type || 1
         this.numberLevel = number.level === '' ? 1 : number.level
       }
-      this.$nextTick(() => {
-        if (!this.isShow || !this.$refs.contextmenuRef) return
-        const { x, y } = this.getShowPosition(e.clientX + 10, e.clientY + 10)
-        this.left = x
-        this.top = y
-      })
+      this.$nextTick(() => this.applyShowPosition(e.clientX, e.clientY))
     },
 
     onMultiSelectEnd() {
@@ -773,15 +857,7 @@ export default {
         this.numberType = number.type || 1
         this.numberLevel = number.level === '' ? 1 : number.level
       }
-      this.$nextTick(() => {
-        if (!this.isShow || !this.$refs.contextmenuRef) return
-        const { x, y } = this.getShowPosition(
-          (clientX || 0) + 10,
-          (clientY || 0) + 10
-        )
-        this.left = x
-        this.top = y
-      })
+      this.$nextTick(() => this.applyShowPosition(clientX || 0, clientY || 0))
       return true
     },
 
@@ -944,12 +1020,7 @@ export default {
       this.hide()
       this.type = 'svg'
       this.isShow = true
-      this.$nextTick(() => {
-        if (!this.isShow || !this.$refs.contextmenuRef) return
-        const { x, y } = this.getShowPosition(e.clientX + 10, e.clientY + 10)
-        this.left = x
-        this.top = y
-      })
+      this.$nextTick(() => this.applyShowPosition(e.clientX, e.clientY))
     },
 
     // 隐藏
@@ -964,6 +1035,11 @@ export default {
       this.numberType = ''
       this.numberLevel = ''
       this.activeSubmenu = ''
+      this.menuMaxHeight = 0
+      this.submenuMaxHeight = 0
+      this._menuAnchor = null
+      this._submenuItemEl = null
+      this.disconnectMenuObserver()
     },
 
     bindMenuShortcuts() {
@@ -998,21 +1074,38 @@ export default {
 
     openSubmenu(name, event) {
       this.cancelSubmenuClose()
-      const item = event.currentTarget.getBoundingClientRect()
-      const menu =
-        (this.$refs.submenuRef && this.$refs.submenuRef.getBoundingClientRect()) ||
-        {}
-      const width = menu.width || 280
-      const height = menu.height || 360
-      let left = item.right
-      if (left + width > window.innerWidth) left = item.left - width
-      let top = item.top
-      if (top + height > window.innerHeight) {
-        top = window.innerHeight - height - 10
+      const itemEl = event.currentTarget
+      const changed = this.activeSubmenu !== name || this._submenuItemEl !== itemEl
+      this._submenuItemEl = itemEl
+      if (changed) {
+        // 先用估算尺寸放置，渲染后再按真实尺寸校正
+        this.placeSubmenuAt({ width: 280, height: 360 })
+        this.submenuMaxHeight = 0
       }
-      this.submenuLeft = left
-      this.submenuTop = top
       this.activeSubmenu = name
+      this.$nextTick(() => this.repositionSubmenu())
+    },
+
+    placeSubmenuAt(size) {
+      const itemEl = this._submenuItemEl
+      if (!itemEl || !itemEl.getBoundingClientRect) return null
+      const list = this.$refs.menuListRef || this.$refs.contextmenuRef
+      const parentRect = list && list.getBoundingClientRect
+        ? list.getBoundingClientRect() : itemEl.getBoundingClientRect()
+      const { safeArea, obstacles } = this.getPlacementContext()
+      const placed = placeSubmenu(size, itemEl.getBoundingClientRect(), parentRect, safeArea, { obstacles })
+      this.submenuLeft = placed.left
+      this.submenuTop = placed.top
+      return placed
+    },
+
+    repositionSubmenu() {
+      const el = this.$refs.submenuRef
+      if (!this.isShow || !this.activeSubmenu || !el) return
+      const rect = el.getBoundingClientRect()
+      const height = Math.max(rect.height || 0, el.scrollHeight || 0)
+      const placed = this.placeSubmenuAt({ width: rect.width || 280, height })
+      if (placed) this.submenuMaxHeight = height > placed.maxHeight ? placed.maxHeight : 0
     },
 
     scheduleSubmenuClose() {
@@ -1257,9 +1350,49 @@ export default {
 
 .menuScroll,
 .submenu {
-  max-width: calc(100vw - 20px);
-  max-height: calc(100vh - 20px);
-  overflow: auto;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.18);
+    border-radius: 3px;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.3);
+  }
+
+  &::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  &.isDark {
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+
+    &::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    &::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.32);
+    }
+  }
 }
 
 .submenu {

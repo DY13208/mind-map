@@ -1,0 +1,115 @@
+// 编辑页「刘海 / 灵动岛」外框与工具栏的共享变量与 mixin。
+// 颜色走 CSS 自定义属性（随 body.isDark 切换），这样 scoped 组件、
+// NotchWing 的 SVG（fill: currentColor）和外框本身共用一套取值。
+// frame/radius are themeable via CSS vars (light: 0, dark: 4px/12px)
+@mm-frame-width: var(--mm-frame-width, 4px);
+@mm-canvas-radius: var(--mm-canvas-radius, 12px);
+@mm-notch-radius: 22px;
+// light: notches float as rounded cards inset from edges; dark: flush (0) with wings
+@mm-notch-inset: var(--mm-notch-inset, 0px);
+@mm-notch-edge-radius: var(--mm-notch-edge-radius, 0px);
+@mm-notch-inner-radius: var(--mm-notch-inner-radius, @mm-notch-radius);
+@mm-notch-height: 48px;
+@mm-notch-height-bottom: 42px;
+@mm-capsule-radius: 18px;
+@mm-notch-transition: color 0.18s ease, background-color 0.18s ease,
+  box-shadow 0.18s ease, transform 0.18s ease;
+
+// 浅色 / 深色调色板（zinc 系）
+.mm-notch-palette-light() {
+  // light: no frame, canvas edge to edge; notches are white panels flush at corners
+  --mm-frame-width: 0px;
+  --mm-canvas-radius: 0px;
+  --mm-notch-wing-display: none;
+  --mm-notch-inset: 8px;
+  --mm-notch-edge-radius: 12px;
+  --mm-notch-inner-radius: 12px;
+  --mm-notch-frame: #ffffff;
+  --mm-notch-icon: #3f3f46;
+  --mm-notch-icon-hover: #18181b;
+  --mm-notch-hover-bg: rgba(24, 24, 27, 0.06);
+  --mm-notch-pill: #e4e4e7;
+  --mm-notch-pill-text: #18181b;
+  --mm-notch-text: #27272a;
+  --mm-notch-sep: #e4e4e7;
+  // full 1px ring + soft shadow all around (cards are inset, nothing clipped)
+  --mm-notch-surface-shadow: 0 0 0 1px #e4e4e7, 0 4px 14px rgba(24, 24, 27, 0.06);
+  --mm-notch-shadow: 0 0 0 1px #e4e4e7, 0 6px 20px rgba(24, 24, 27, 0.08);
+}
+.mm-notch-palette-dark() {
+  --mm-notch-frame: #111315;
+  --mm-frame-width: 4px;
+  --mm-canvas-radius: 12px;
+  --mm-notch-wing-display: block;
+  --mm-notch-inset: 0px;
+  --mm-notch-edge-radius: 0px;
+  --mm-notch-inner-radius: 22px;
+  --mm-notch-surface-shadow: none;
+  --mm-notch-icon: #d4d4d8;
+  --mm-notch-icon-hover: #ffffff;
+  --mm-notch-hover-bg: rgba(255, 255, 255, 0.06);
+  --mm-notch-pill: #27272a;
+  --mm-notch-pill-text: #ffffff;
+  --mm-notch-text: #e4e4e7;
+  --mm-notch-sep: #2a2d31;
+  --mm-notch-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+// 刘海本体：外框色、无边框无阴影（与外框融为一体）
+.mm-notch-surface() {
+  background: var(--mm-notch-frame);
+  border: 0;
+  box-shadow: var(--mm-notch-surface-shadow, none);
+  color: var(--mm-notch-icon);
+  transition: @mm-notch-transition;
+}
+
+// 悬浮胶囊（左右竖向工具栏）
+.mm-notch-capsule() {
+  background: var(--mm-notch-frame);
+  border: 0;
+  border-radius: @mm-capsule-radius;
+  box-shadow: var(--mm-notch-shadow);
+  color: var(--mm-notch-icon);
+}
+
+// 图标按钮：zinc-400，hover zinc-200
+.mm-notch-icon-btn() {
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--mm-notch-icon);
+  transition: @mm-notch-transition;
+
+  &:hover {
+    background: var(--mm-notch-hover-bg);
+    color: var(--mm-notch-icon-hover);
+  }
+
+  .mm-notch-glyph();
+}
+
+// thicken icons: iconfont glyphs get a hairline text stroke, lucide-like SVGs stroke-width 2
+.mm-notch-glyph() {
+  .iconfont,
+  &.iconfont {
+    -webkit-text-stroke: 0.3px currentColor;
+  }
+
+  svg:not(.notchWing) {
+    stroke-width: 2;
+  }
+}
+
+// 激活项：药丸
+.mm-notch-pill() {
+  background: var(--mm-notch-pill);
+  color: var(--mm-notch-pill-text);
+}
+
+// 竖分隔线
+.mm-notch-sep() {
+  width: 1px;
+  height: 18px;
+  background: var(--mm-notch-sep);
+}

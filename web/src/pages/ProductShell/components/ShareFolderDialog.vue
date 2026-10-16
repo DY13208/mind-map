@@ -2224,3 +2224,87 @@ button:focus-visible { outline: 2px solid #087854; outline-offset: 2px; }
   .permissionEmbedded .permissionWorkspace { height: 58vh; min-height: 320px; }
 }
 </style>
+
+<style lang="less">
+// Both the editor's embedded permissions and the workspace dialogs use this UI.
+body.isDark, .productShell--dark {
+  .permissionEmbedded, .folderPermissionDialog {
+    color-scheme: dark;
+    background: #262b30;
+    .permissionDialogBody { color: #e8eef4; }
+    .permissionHeader, .permissionWorkspace, .organizationPane,
+    .paneHeader, .treeToolbar, .detailSection, .existingList,
+    .existingRow, .treeLegend, .selectedItem, .el-dialog__footer {
+      border-color: #424c57;
+    }
+    .organizationPane { background: #23282e; }
+    .paneHeader, .permissionDetailPane, .treeLegend, .el-dialog__footer {
+      background: #262b30;
+    }
+    .permissionHeader h2, .paneHeader h3, .detailSection h3,
+    .existingIdentity strong, .selectedItem strong, .previewBox strong,
+    .ownerRoleLabel, .grantStats strong { color: #e8eef4; }
+    .permissionHeader p, .permissionHeader p strong, .paneHeader span,
+    .treeLabel small, .treeEmpty, .selectionEmpty, .selectedItem small,
+    .selectedItem button, .previewBox span, .existingIdentity small,
+    .memberCount, .ownerBadge, .existingEmpty, .treeLegend,
+    .footerHint, .transferHint, .detailTitle > span, .grantStats span,
+    .expandBtn, .closeBtn, .el-checkbox__label { color: #acbac8; }
+    .treeEmpty i, .selectionEmpty i { color: #acbac8; }
+    .treeRow { color: #e8eef4; }
+    .treeRow:hover, .closeBtn:hover { background: #343e49; }
+    .treeRow.selected, .previewBox, .selectedItem, .grantStats > div {
+      background: #293b37;
+    }
+    .existingHead, .roleOptions, .selectionCount, .treeIcon, .selectedIcon {
+      background: #323c47;
+      color: #acbac8;
+    }
+    .resourceIcon, .resourceIcon.team, .memberAvatar,
+    .selectedIcon.department, .inheritedTag {
+      background: #28463d;
+      color: #74dfbd;
+    }
+    .resourceIcon.room { background: #2b3d56; color: #a7cdff; }
+    .paneHeader button, .detailTitle button, .previewBox i,
+    .treeLegend i, .footerHint i, .grantStats i, .transferBtn { color: #74dfbd; }
+    .permissionFilter, .el-input__inner {
+      background: #29313b;
+      border-color: #526170;
+      color: #dce5ee;
+    }
+    .el-input__inner::placeholder, .el-input__icon { color: #acbac8; }
+    .el-input__inner:focus { border-color: #74dfbd; }
+    .permissionFilter.active { background: #284f43; border-color: #74dfbd; color: #b5f5df; }
+    .permissionFilter:hover:not(.active) { border-color: #74dfbd; color: #b5f5df; }
+    .roleOptions .el-radio-button__inner {
+      background: transparent; color: #dce5ee;
+    }
+    .roleOptions .el-radio-button__orig-radio:checked + .el-radio-button__inner {
+      background: #285745; color: #c5f9e6; box-shadow: none !important;
+    }
+    .roleOptions .el-radio-button.is-disabled .el-radio-button__inner {
+      background: #30363d; color: #97a4b1;
+    }
+    .permissionBadge, .memberRoleSelect.viewer .el-input__inner {
+      background: #323c47; border-color: #526170; color: #c5d1dd;
+    }
+    .permissionBadge.editor, .memberRoleSelect.editor .el-input__inner {
+      background: #293e59; border-color: #49658a; color: #a7cdff;
+    }
+    .permissionBadge.manager, .permissionBadge.admin,
+    .memberRoleSelect.manager .el-input__inner, .memberRoleSelect.admin .el-input__inner {
+      background: #28463d; border-color: #497b69; color: #9be8cd;
+    }
+    .permissionBadge.owner { background: #493f2d; color: #efd098; }
+    .removeBtn { color: #ffaaa4; }
+    .removeBtn:disabled { color: #97a4b1; }
+    .el-checkbox__inner { background: #29313b; border-color: #8292a2; }
+    .permissionFooter .el-button--primary.is-disabled {
+      background: #384b45; border-color: #50685f; color: #b3c4bd;
+    }
+    .el-loading-mask { background: rgba(35, 40, 46, .9); }
+    button:focus-visible { outline-color: #74dfbd; }
+  }
+}
+</style>
