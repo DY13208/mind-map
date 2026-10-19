@@ -100,6 +100,13 @@
         <router-link to="/assistant" title="助理" aria-label="助理"
           ><i class="el-icon-chat-dot-round"></i>助理</router-link
         >
+        <router-link
+          v-if="kbEnabled"
+          to="/kb"
+          title="文件知识库"
+          aria-label="文件知识库"
+          ><i class="el-icon-collection"></i>文件知识库</router-link
+        >
         <p class="navLabel navLabel--space">工具</p>
         <router-link
           to="/mcp-access"
@@ -206,6 +213,11 @@ export default {
     }
   },
   computed: {
+    kbEnabled() {
+      const runtime = typeof window !== 'undefined' && window.__MIND_MAP_RUNTIME__
+      if (!runtime || runtime.FILE_KB_UI_ENABLED == null) return true
+      return runtime.FILE_KB_UI_ENABLED === true
+    },
     hideSidebar() {
       return this.$route.matched.some(
         record => record.meta && record.meta.hideSidebar

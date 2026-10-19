@@ -591,7 +591,8 @@ function writeOpenclawRuntimeConfig({
     openclawBridgeWs: '/openclaw-bridge/ws',
     cogneeBase: '/cognee-api',
     cogneeDataset: String(process.env.COGNEE_DATASET || 'liangce'),
-    graphServiceUrl: '/wiki-compiler/'
+    graphServiceUrl: '/wiki-compiler/',
+    FILE_KB_ENABLED: /^(1|true|yes|on)$/i.test(String(process.env.FILE_KB_ENABLED || '').trim())
   }
   if (resolvedWikiBase) config.wikiBase = resolvedWikiBase
   fs.writeFileSync(

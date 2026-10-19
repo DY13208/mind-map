@@ -86,6 +86,9 @@
               <p class="mcpHint">
                 配置包含 mind-map，以及已就绪时的 mind-map-wiki。若客户端要求
                 mcpServers 根字段，请将条目放入该字段。可在高级配置中预览。
+                <template v-if="kbIncluded"
+                  >已在本页创建文件知识库令牌，配置还包含 file-kb。</template
+                >
               </p>
             </div>
             <el-button
@@ -141,6 +144,108 @@
                   >{{ copied === 'wikiUrl' ? '已复制' : '复制地址' }}</el-button
                 >
               </div>
+            </div>
+            <div v-if="kbVisible" class="mcpService">
+              <div class="mcpServiceLabel">
+                <h3>文件知识库 MCP</h3>
+                <code>file-kb</code
+                ><span v-if="!kbAvailable" class="mcpUnavailable"
+                  >暂不可用</span
+                ><span v-else-if="!kbPlainToken" class="mcpUnavailable"
+                  >需创建令牌</span
+                >
+              </div>
+              <div class="mcpAddress mcpAddressKb">
+                <code :title="kbMcpUrl">{{ kbMcpUrl }}</code
+                ><el-button
+                  size="small"
+                  :disabled="!kbAvailable"
+                  @click="copyText(kbMcpUrl, 'kbUrl')"
+                  >{{ copied === 'kbUrl' ? '已复制' : '复制地址' }}</el-button
+                ><template v-if="kbAvailable"
+                  ><el-button
+                    v-if="kbPlainToken"
+                    type="primary"
+                    size="small"
+                    @click="copyText(kbConfigText, 'kbConfig')"
+                    >{{ copied === 'kbConfig' ? '已复制' : '复制配置' }}</el-button
+                  ><el-button
+                    :type="kbPlainToken ? 'default' : 'primary'"
+                    size="small"
+                    :loading="kbIssuing"
+                    @click="createKbToken"
+                    >{{ kbPlainToken ? '重新创建令牌' : '创建访问令牌' }}</el-button
+                  ><el-button
+                    size="small"
+                    title="使用环境变量写法（不含令牌明文）"
+                    @click="copyText(kbEnvTemplateText, 'kbTemplate')"
+                    >{{ copied === 'kbTemplate' ? '已复制' : '模板' }}</el-button
+                  ></template
+                >
+              </div>
+              <div v-if="kbAvailable" class="mcpKbPanel">
+                <div class="mcpKbActions">
+                  <el-checkbox v-model="kbAllowGeekcloud" size="small"
+                    >允许吉客云只读查询</el-checkbox
+                  ><el-button
+                    v-if="kbTokenState === 'error'"
+                    size="small"
+                    @click="loadKbTokens"
+                    >重新检查</el-button
+                  >
+                </div>
+                <p class="mcpHint">
+                  <template v-if="kbPlainToken"
+                    >已创建只读令牌（前缀 {{ kbIssuedPrefix }}），「复制配置」和「复制完整配置」都包含真实
+                    Authorization，可直接粘贴使用。令牌只保存在本页内存中，刷新或离开后无法再次显示，需重新创建。</template
+                  ><template v-else-if="kbTokenState === 'ready'"
+                    >你已有 {{ kbTokenCount }} 个可用令牌，但令牌明文创建后无法再次显示。要复制可直接使用的配置，请新建一个访问令牌；「复制完整配置」在此之前不包含
+                    file-kb。</template
+                  ><template v-else-if="kbTokenState === 'none'"
+                    >尚未创建文件知识库令牌，「复制完整配置」暂不包含
+                    file-kb。点击「创建访问令牌」后即可直接复制。</template
+                  ><template v-else-if="kbTokenState === 'error'"
+                    >无法确认已有令牌（{{ kbTokenError }}）。可重新检查，或直接「创建访问令牌」；在此之前「复制完整配置」不包含
+                    file-kb。</template
+                  ><template v-else>正在检查文件知识库令牌…</template>
+                  勾选「允许吉客云只读查询」后新建的令牌会带 geekcloud:read，仍需管理员为你配置吉客云范围。
+                  令牌为只读 kb:read，永久有效，可随时撤销，与脑图 MCP 密钥不通用，可在「文件知识库 → MCP
+                  接入」中查看和撤销。复制配置不代表已连接，请在客户端检查。
+                </p>
+                <div v-if="kbPlainToken" class="mcpKbIssued">
+                  <el-button size="small" @click="clearKbIssued"
+                    >清除本页令牌</el-button
+                  >
+                </div>
+                <details class="mcpKbGuide">
+                  <summary>使用环境变量写法与安全提示</summary>
+                  <ol class="mcpSteps">
+                    <li>
+                      「复制配置」包含真实令牌，粘贴后即可使用；请只写入本机客户端配置，不要提交到
+                      Git，也不要发送给他人。
+                    </li>
+                    <li>
+                      「模板」复制的是环境变量写法，配置为
+                      <code>Bearer {{ kbPlaceholder }}</code>（Cursor 写法），需在本机设置环境变量
+                      {{ kbTokenEnv }} 后完全退出 Cursor 再打开。
+                    </li>
+                    <li>
+                      使用其它变量写法的客户端（例如 Claude Code 为
+                      <code>{{ kbClaudePlaceholder }}</code>）：按该客户端文档改写占位符。
+                    </li>
+                    <li>
+                      支持密钥或凭据存储的客户端，可把令牌存在其中，配置里只引用。
+                    </li>
+                    <li>
+                      令牌泄露或不再使用时，在「文件知识库 → MCP
+                      接入」中撤销，下一次请求即失效。
+                    </li>
+                  </ol>
+                </details>
+              </div>
+              <p v-else class="mcpHint">
+                服务端未开启 FILE_KB_ENABLED，文件知识库 MCP 暂不可用，也不会加入「复制完整配置」。
+              </p>
             </div>
           </div>
           <el-alert
@@ -241,6 +346,17 @@ import json from 'highlight.js/lib/languages/json'
 import { userMessageFromError } from '@/services/apiError'
 import productService from '@/services/productService'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
+import kbApi from '@/features/knowledge-base/services/kbApi'
+import {
+  KB_TOKEN_ENV,
+  KB_TOKEN_PLACEHOLDER,
+  fileKbAccessConfig,
+  kbEnabled,
+  kbPageEnabled,
+  mcpEndpoint,
+  usableKbTokenCount,
+  withFileKbServer
+} from '@/features/knowledge-base/utils/format'
 
 hljs.registerLanguage('json', json)
 
@@ -259,7 +375,19 @@ export default {
       setupMethod: 'workbuddy',
       advancedOpen: false,
       showAuthorization: false,
-      copyTimer: null
+      copyTimer: null,
+      kbVisible: kbPageEnabled(),
+      kbAvailable: kbEnabled(),
+      kbPlaceholder: KB_TOKEN_PLACEHOLDER,
+      kbTokenEnv: KB_TOKEN_ENV,
+      kbClaudePlaceholder: '${' + KB_TOKEN_ENV + '}',
+      kbTokenState: 'unknown',
+      kbTokenCount: 0,
+      kbTokenError: '',
+      kbIssuing: false,
+      kbAllowGeekcloud: false,
+      kbPlainToken: '',
+      kbIssuedPrefix: ''
     }
   },
   computed: {
@@ -294,6 +422,22 @@ export default {
       }
       return `${window.location.origin}${this.wikiMcpPath}`
     },
+    kbMcpUrl() {
+      if (typeof window === 'undefined' || !window.location) {
+        return mcpEndpoint({ origin: '' })
+      }
+      return mcpEndpoint(window.location)
+    },
+    kbConfigText() {
+      return fileKbAccessConfig(this.kbMcpUrl, this.kbPlainToken)
+    },
+    kbEnvTemplateText() {
+      return fileKbAccessConfig(this.kbMcpUrl)
+    },
+    // 只有服务开启、条目可见、且本页刚创建了令牌（明文在内存里）时才并入完整配置。
+    kbIncluded() {
+      return Boolean(this.kbVisible && this.kbAvailable && this.kbPlainToken)
+    },
     configText() {
       const servers = {
         'mind-map': {
@@ -315,14 +459,24 @@ export default {
           }
         }
       }
-      return JSON.stringify(servers, null, 2)
+      return JSON.stringify(
+        withFileKbServer(
+          servers,
+          this.kbIncluded ? this.kbMcpUrl : '',
+          this.kbPlainToken
+        ),
+        null,
+        2
+      )
     }
   },
   created() {
     this.loadConfig()
+    this.loadKbTokens()
   },
   beforeDestroy() {
     clearTimeout(this.copyTimer)
+    this.clearKbIssued()
   },
   methods: {
     async loadConfig() {
@@ -349,6 +503,48 @@ export default {
         this.loading = false
       }
     },
+    // 只读取令牌列表判断是否已有可用令牌；页面加载和复制都不会签发令牌。
+    async loadKbTokens() {
+      if (!this.kbVisible || !this.kbAvailable) return
+      this.kbTokenState = 'loading'
+      this.kbTokenError = ''
+      try {
+        const list = await kbApi.listMcpTokens()
+        this.kbTokenCount = usableKbTokenCount(list && list.items)
+        this.kbTokenState = this.kbTokenCount > 0 ? 'ready' : 'none'
+      } catch (error) {
+        this.kbTokenCount = 0
+        this.kbTokenState = 'error'
+        this.kbTokenError = (error && error.message) || '请求失败'
+      }
+    },
+    // 只有用户点击「创建访问令牌」才签发。明文只留在本组件内存里，用于生成可直接粘贴的配置；
+    // 不做本地持久化、不打日志；清除或离开页面即丢弃。
+    async createKbToken() {
+      if (this.kbIssuing || !this.kbAvailable) return
+      this.kbIssuing = true
+      try {
+        const created = await kbApi.createMcpToken({
+          name: 'MCP 接入页',
+          scopes: this.kbAllowGeekcloud
+            ? ['kb:read', 'geekcloud:read']
+            : ['kb:read']
+        })
+        const token = String((created && created.token) || '')
+        if (!token) throw new Error('服务没有返回令牌')
+        this.kbIssuedPrefix = String(created.tokenPrefix || token.slice(0, 8))
+        this.kbPlainToken = token
+      } catch (error) {
+        this.$message.error((error && error.message) || '创建令牌失败')
+      } finally {
+        this.kbIssuing = false
+      }
+      if (this.kbPlainToken) await this.loadKbTokens()
+    },
+    clearKbIssued() {
+      this.kbPlainToken = ''
+      this.kbIssuedPrefix = ''
+    },
     async copyText(text, kind) {
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -373,6 +569,12 @@ export default {
             ? 'MCP 配置已复制'
             : kind === 'wikiUrl'
             ? 'Wiki MCP 地址已复制'
+            : kind === 'kbUrl'
+            ? '文件知识库 MCP 地址已复制'
+            : kind === 'kbConfig'
+            ? '文件知识库 MCP 配置已复制（含令牌，请妥善保管）'
+            : kind === 'kbTemplate'
+            ? `环境变量写法已复制，请在本机设置 ${KB_TOKEN_ENV}`
             : 'MCP 地址已复制'
         this.$message.success(msg)
         clearTimeout(this.copyTimer)
@@ -536,6 +738,51 @@ pre:focus-visible {
 }
 .mcpWikiWarn {
   margin-top: 16px;
+}
+.mcpAddressKb {
+  flex-wrap: wrap;
+  > code {
+    flex: 1 1 180px;
+  }
+  .el-button {
+    margin: 0;
+  }
+}
+.mcpKbPanel {
+  margin: 8px 0 0 6px;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--ui-border);
+}
+.mcpKbActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  .el-button {
+    margin: 0;
+  }
+}
+.mcpKbIssued {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  .el-alert {
+    width: 100%;
+  }
+}
+.mcpKbGuide {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--ui-text-secondary);
+  summary {
+    cursor: pointer;
+    color: var(--ui-text);
+  }
+  .mcpSteps {
+    font-size: 12px;
+  }
 }
 .mcpAdvanced {
   padding: 0;

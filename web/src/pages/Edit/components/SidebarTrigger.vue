@@ -1,8 +1,14 @@
 <template>
+  <div class="sidebarTriggerRoot">
   <div
     class="sidebarTriggerContainer "
     @click.stop
-    :class="{ hasActive: show && activeSidebar, show: show, isDark: isDark }"
+    :class="{
+      hasActive: show && activeSidebar,
+      show: show,
+      isDark: isDark,
+      rightCollapsed: rightCollapsed
+    }"
     :style="{ maxHeight: maxHeight + 'px' }"
   >
     <div class="toggleShowBtn" :class="{ hide: !show }" @click="show = !show">
@@ -41,7 +47,34 @@
         <div class="triggerIcon iconfont" :class="[item.icon]"></div>
         <div class="triggerName">{{ item.name }}</div>
       </div>
+      <div class="collapseDivider"></div>
+      <div
+        class="collapseBtn"
+        :title="'\u6536\u8d77\u4fa7\u680f'"
+        data-testid="right-sidebar-collapse"
+        @click="setRightCollapsed(true)"
+      >
+        &rsaquo;
+      </div>
     </div>
+  </div>
+  <div
+    class="rightExpandTab"
+    :class="{ show: rightCollapsed, isDark: isDark }"
+    :title="'\u5c55\u5f00\u4fa7\u680f'"
+    data-testid="right-sidebar-expand"
+    @click.stop="setRightCollapsed(false)"
+  >
+    <svg class="tabWing top" width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
+      <path d="M 8 0 V 8 H 0 A 8 8 0 0 0 8 0 Z" />
+    </svg>
+    <svg class="tabWing bottom" width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
+      <path d="M 8 8 V 0 H 0 A 8 8 0 0 1 8 8 Z" />
+    </svg>
+    <svg class="tabChevron" width="8" height="12" viewBox="0 0 8 12" aria-hidden="true">
+      <path d="M 6 1 L 2 6 L 6 11" />
+    </svg>
+  </div>
   </div>
 </template>
 
@@ -51,6 +84,15 @@ import { sidebarTriggerList } from '@/config'
 import { getCurrentUser, logoutAndRedirect } from '@/utils/auth'
 import AccessNotificationTrigger from '@/components/AccessNotificationTrigger.vue'
 
+const RIGHT_COLLAPSED_KEY = 'mm-right-sidebar-collapsed'
+const readRightCollapsed = () => {
+  try {
+    return window.localStorage.getItem(RIGHT_COLLAPSED_KEY) === '1'
+  } catch (e) {
+    return false
+  }
+}
+
 export default {
   components: { AccessNotificationTrigger },
   data() {
@@ -58,7 +100,8 @@ export default {
       show: true,
       maxHeight: 0,
       authUser: null,
-      loggingOut: false
+      loggingOut: false,
+      rightCollapsed: readRightCollapsed()
     }
   },
   computed: {
@@ -109,6 +152,13 @@ export default {
   },
   methods: {
     ...mapMutations(['setActiveSidebar']),
+
+    setRightCollapsed(val) {
+      this.rightCollapsed = !!val
+      try {
+        window.localStorage.setItem(RIGHT_COLLAPSED_KEY, val ? '1' : '0')
+      } catch (e) {}
+    },
 
     setCanvasToolbarsCollapsed(collapsed) {
       this.show = !collapsed
@@ -370,6 +420,116 @@ export default {
         overflow: hidden;
         text-overflow: ellipsis;
       }
+    }
+  }
+}
+// ===== Right capsule collapse =====
+.sidebarTriggerContainer.sidebarTriggerContainer {
+  transition: right 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
+
+  &.rightCollapsed {
+    transform: translate(calc(100% + 24px), -50%);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .collapseDivider {
+    height: 1px;
+    margin: 4px 4px;
+    background-color: var(--mm-notch-sep);
+  }
+
+  .collapseBtn {
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 20px;
+    font-weight: bold;
+    line-height: 1;
+    color: var(--mm-notch-icon);
+    transition: @mm-notch-transition;
+
+    &:hover {
+      background-color: var(--mm-notch-hover-bg);
+      color: var(--mm-notch-icon-hover);
+    }
+  }
+}
+
+.rightExpandTab {
+  position: fixed;
+  top: 50%;
+  right: @mm-frame-width;
+  z-index: 5;
+  width: 14px;
+  height: 48px;
+  margin-top: -24px;
+  box-sizing: border-box;
+  background-color: #fff;
+  border-radius: 8px 0 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateX(100%);
+  pointer-events: none;
+  transition: width 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease,
+    transform 0.2s ease;
+
+  &.show {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
+
+  &:hover {
+    width: 20px;
+    box-shadow: -4px 0 12px rgba(16, 24, 40, 0.12);
+  }
+
+  .tabWing {
+    position: absolute;
+    right: 0;
+    width: 8px;
+    height: 8px;
+    pointer-events: none;
+
+    path {
+      fill: var(--mm-notch-wing-fill, #fff);
+    }
+
+    &.top {
+      bottom: 100%;
+    }
+
+    &.bottom {
+      top: 100%;
+    }
+  }
+
+  .tabChevron path {
+    fill: none;
+    stroke: #3f3f46;
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: stroke 0.2s ease;
+  }
+
+  &.isDark {
+    background-color: #111315;
+
+    .tabChevron path {
+      stroke: #d4d4d8;
+    }
+
+    &:hover .tabChevron path {
+      stroke: #fff;
     }
   }
 }

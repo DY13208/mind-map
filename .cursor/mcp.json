@@ -6,6 +6,13 @@
       "env": {
         "MIND_MAP_API": "http://127.0.0.1:1234"
       }
+    },
+    "file-kb": {
+      "type": "http",
+      "url": "http://127.0.0.1:8990/file-kb-mcp/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:FILE_KB_MCP_TOKEN}"
+      }
     }
   }
 }

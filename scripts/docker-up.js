@@ -79,6 +79,17 @@ function loadRootEnv() {
 }
 
 loadRootEnv()
+
+// File KB (docs/file-kb): services live in compose profile "kb" and only start when FILE_KB_ENABLED=true.
+function fileKbEnabled() {
+  return /^(1|true|yes|on)$/i.test(String(process.env.FILE_KB_ENABLED || '').trim())
+}
+function kbProfileArgs() {
+  return fileKbEnabled() ? ['--profile', 'kb'] : []
+}
+function kbServices() {
+  return fileKbEnabled() ? ['file-kb', 'file-kb-worker', 'file-kb-mcp', 'docling-serve'] : []
+}
 require('./wiki-compiler-env').ensureCompilerEnv(ROOT)
 
 const PORT = Number(process.env.MIND_MAP_PORT || 8080)
@@ -175,9 +186,26 @@ function loadWikiSecretsIntoEnv() {
   }
 }
 
+// JackYun MCP key stays out of .env, because app loads the whole .env via env_file.
+// Loaded here only for compose interpolation into file-kb and file-kb-mcp.
+function loadGeekcloudSecretIntoEnv() {
+  const file = path.join(ROOT, '.secrets', 'geekcloud.env')
+  if (!fs.existsSync(file)) return
+  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eq = trimmed.indexOf('=')
+    if (eq <= 0) continue
+    const key = trimmed.slice(0, eq).trim()
+    if (!key.startsWith('FILE_KB_GEEKCLOUD_')) continue
+    if (!(key in process.env)) process.env[key] = trimmed.slice(eq + 1).trim()
+  }
+}
+
 function compose(args, extraEnv) {
   require('./wiki-env').ensureWikiEnv()
   loadWikiSecretsIntoEnv()
+  loadGeekcloudSecretIntoEnv()
   return spawn('docker', ['compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.wiki.yml', ...args], {
     cwd: ROOT,
     stdio: 'inherit',
@@ -631,6 +659,7 @@ async function up() {
   // 不要在这里 --force-recreate openclaw-gateway：否则会与后面的 ensure 双重启动抢 migration 锁
   const child = compose(
     [
+      ...kbProfileArgs(),
       'up',
       '-d',
       '--wait',
@@ -646,7 +675,8 @@ async function up() {
       'docmost',
       'wiki-gateway',
       'knowledge-mcp',
-      'wiki-graph'
+      'wiki-graph',
+      ...kbServices()
     ],
     {
       PUBLIC_HOST: host,
@@ -793,7 +823,7 @@ function down() {
     console.error('未检测到 Docker。')
     process.exit(1)
   }
-  const child = compose(['down'])
+  const child = compose([...kbProfileArgs(), 'down'])
   child.on('exit', code => process.exit(code || 0))
 }
 

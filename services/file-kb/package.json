@@ -1,0 +1,27 @@
+{
+  "name": "mind-map-file-kb",
+  "private": true,
+  "version": "0.2.0",
+  "description": "File KB service (phase 1 skeleton). Isolated from mind-map collab/MCP; schema kb only.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "worker": "node src/worker.js",
+    "migrate": "node src/migrate.js",
+    "test": "node --test \"test/*.test.js\"",
+    "test:pg": "node --test \"test/pg/*.test.js\"",
+    "test:batch:unit": "node --test test/batch-contract.cjs",
+    "test:batch:lab": "node test/live/batch-acceptance.cjs",
+    "bench:batch": "node test/live/batch-benchmark.cjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.2",
+    "busboy": "1.6.0",
+    "exceljs": "4.4.0",
+    "pg": "8.13.1",
+    "jszip": "3.10.2"
+  }
+}

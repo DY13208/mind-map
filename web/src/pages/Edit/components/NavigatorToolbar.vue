@@ -522,6 +522,8 @@ export default {
     padding: 0 16px 0 14px;
     border-radius: @mm-notch-inner-radius @mm-notch-edge-radius @mm-notch-edge-radius
       @mm-notch-edge-radius;
+    border-top: @mm-notch-outline;
+    border-left: @mm-notch-outline;
   }
 
   .item {

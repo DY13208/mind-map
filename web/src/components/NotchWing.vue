@@ -8,11 +8,14 @@
     aria-hidden="true"
     focusable="false"
   >
-    <path
-      :transform="transform"
-      d="M 0 0 C 12.15 0 22 9.85 22 22 H 23 V -1 H 0 Z"
-      fill="currentColor"
-    />
+    <g :transform="transform">
+      <path
+        class="notchWingFill"
+        d="M 0 0 C 12.15 0 22 9.85 22 22 H 22 V 0 Z"
+      />
+      <!-- optional outline on the curve only; no overhang so nothing protrudes past the wing -->
+      <path class="notchWingStroke" :d="strokePath" />
+    </g>
   </svg>
 </template>
 
@@ -41,6 +44,11 @@ export default {
     }
   },
   computed: {
+    strokePath() {
+      return this.variant === 'edge'
+        ? 'M 0 0 C 12.15 0 22 9.85 22 22'
+        : 'M 0 0 C 12.15 0 22 9.85 22 22'
+    },
     transform() {
       const fx = this.side === 'left'
       const fy = this.position === 'bottom'
@@ -63,6 +71,16 @@ export default {
   pointer-events: none;
   color: var(--mm-notch-frame, #e4e4e7);
   z-index: 1;
+
+  .notchWingFill {
+    fill: var(--mm-notch-wing-fill, var(--mm-notch-frame, #e4e4e7));
+  }
+
+  .notchWingStroke {
+    fill: none;
+    stroke: var(--mm-notch-wing-stroke, none);
+    stroke-width: 1px;
+  }
 
   // 贴水平外框：位于刘海的左/右外侧
   &.is-edge {

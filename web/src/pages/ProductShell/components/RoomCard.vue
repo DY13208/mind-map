@@ -76,6 +76,7 @@
             </svg>
           </button>
           <el-dropdown-menu slot="dropdown"
+            ><el-dropdown-item v-if="room.canManage !== false" command="rename">???</el-dropdown-item
             ><el-dropdown-item command="duplicate">创建副本</el-dropdown-item
             ><el-dropdown-item command="move">移动到文件夹</el-dropdown-item
             ><el-dropdown-item command="favorite">{{

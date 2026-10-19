@@ -51,7 +51,14 @@ case "$COGNEE_API_KEY" in
   *";"*|*"|"*|*"{"*|*"}"*|*" "*) echo "[gateway] invalid COGNEE_API_KEY characters" >&2; exit 1 ;;
 esac
 
+# File KB: nginx serves /api/kb/ and /file-kb-mcp/ only when FILE_KB_ENABLED is true.
+case "$(printf '%s' "${FILE_KB_ENABLED:-false}" | tr '[:upper:]' '[:lower:]')" in
+  1|true|yes|on) FILE_KB_NGINX_FLAG=1 ;;
+  *) FILE_KB_NGINX_FLAG=0 ;;
+esac
+
 sed -e "s|__YIRAN_UPSTREAM__|$YIRAN_UPSTREAM|g" \
+    -e "s|__FILE_KB_ENABLED__|$FILE_KB_NGINX_FLAG|g" \
     -e "s|__COGNEE_UPSTREAM__|$COGNEE_UPSTREAM|g" \
     -e "s|__COGNEE_API_KEY__|$COGNEE_API_KEY|g" \
     -e "s|__JOBHUB_UPSTREAM__|$JOBHUB_UPSTREAM|g" \
@@ -61,6 +68,7 @@ echo "[gateway] Yiran upstream: $YIRAN_UPSTREAM"
 echo "[gateway] Cognee upstream: $COGNEE_UPSTREAM"
 echo "[gateway] Job hub upstream: $JOBHUB_UPSTREAM"
 echo "[gateway] Bridge upstream: $BRIDGE_UPSTREAM"
+echo "[gateway] File KB enabled: $FILE_KB_NGINX_FLAG"
 
 echo "[gateway] waiting for postgres ${PGHOST:-postgres}:${PGPORT:-5432}..."
 i=0

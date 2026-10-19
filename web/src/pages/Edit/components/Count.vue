@@ -204,6 +204,8 @@ export default {
   padding: 0 10px 0 16px;
   border-radius: @mm-notch-edge-radius @mm-notch-inner-radius @mm-notch-edge-radius
     @mm-notch-edge-radius;
+  border-top: @mm-notch-outline;
+  border-right: @mm-notch-outline;
 
   .item,
   &.isDark .item {

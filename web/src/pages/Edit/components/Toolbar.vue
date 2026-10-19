@@ -6251,6 +6251,8 @@ export default {
       padding-left: 10px;
       padding-right: 16px;
       border-bottom-right-radius: @mm-notch-inner-radius;
+      border-right: @mm-notch-outline;
+      border-bottom: @mm-notch-outline;
     }
   }
 
@@ -6261,6 +6263,8 @@ export default {
       padding-left: 16px;
       padding-right: 10px;
       border-bottom-left-radius: @mm-notch-inner-radius;
+      border-left: @mm-notch-outline;
+      border-bottom: @mm-notch-outline;
     }
   }
 

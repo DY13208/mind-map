@@ -107,6 +107,7 @@
           @duplicate="duplicateRoom"
           @rename-inline="renameRoomInline"
           @move="moveRoom"
+          @rename="renameRoom"
           @share="shareRoom"
           @delete="deleteRoom"
           @toggle-select="toggleRoomSelect"
@@ -133,6 +134,7 @@
         @duplicate="duplicateRoom"
         @rename-inline="renameRoomInline"
         @move="moveRoom"
+        @rename="renameRoom"
         @share="shareRoom"
         @delete="deleteRoom"
         @selection-change="onListSelectionChange"
@@ -157,6 +159,11 @@
         @action="createRoom"
       />
     </div>
+    <RenameDialog
+      :visible.sync="renameVisible"
+      :value="activeItem ? activeItem.title || '' : ''"
+      @confirm="renameRoomFromDialog"
+    />
     <MoveToFolderDialog
       :visible.sync="moveVisible"
       :room="activeRoom"
@@ -211,6 +218,7 @@ import FolderBreadcrumb from './components/FolderBreadcrumb.vue'
 import FolderCard from './components/FolderCard.vue'
 import DeleteFolderDialog from './components/DeleteFolderDialog.vue'
 import MoveToFolderDialog from './components/MoveToFolderDialog.vue'
+import RenameDialog from './components/RenameDialog.vue'
 import MoveToTeamDialog from './components/MoveToTeamDialog.vue'
 import RoomCard from './components/RoomCard.vue'
 import RoomList from './components/RoomList.vue'
@@ -254,6 +262,7 @@ export default {
     FolderCard,
     DeleteFolderDialog,
     MoveToFolderDialog,
+    RenameDialog,
     MoveToTeamDialog,
     RoomCard,
     RoomList,
@@ -282,6 +291,7 @@ export default {
       deleteFolderVisible: false,
       folderToDelete: null,
       moveVisible: false,
+      renameVisible: false,
       moveToTeamVisible: false,
       shareVisible: false,
       folderShareVisible: false,
@@ -1021,6 +1031,17 @@ export default {
       this.activeItem = folder
       this.renameKind = 'folder'
       return this.confirmRename(name)
+    },
+    renameRoom(room) {
+      this.activeItem = room
+      this.renameKind = 'room'
+      this.renameVisible = true
+    },
+    async renameRoomFromDialog(name) {
+      const title = String(name || '').trim()
+      if (!title || !this.activeItem || title === this.activeItem.title) return
+      this.renameKind = 'room'
+      await this.confirmRename(title)
     },
     confirmRename(name) {
       return this.perform(

@@ -1,10 +1,14 @@
-<!DOCTYPE html><html lang=""><head><meta charset="utf-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width,user-scalable=no,initial-scale=1,maximum-scale=1,minimum-scale=1"><link rel="icon" href="dist/logo.ico"><title>CPD</title><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"><script src="dist/runtime-config.js"></script><script>window.externalPublicPath =
+<!DOCTYPE html><html lang=""><head><meta charset="utf-8"><script>if (window.location.pathname.startsWith('/node-share/')) {
+        const referrerPolicy = document.createElement('meta')
+        referrerPolicy.name = 'referrer'
+        referrerPolicy.content = 'no-referrer'
+        document.head.appendChild(referrerPolicy)
+      }</script><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width,user-scalable=no,initial-scale=1,maximum-scale=1,minimum-scale=1"><link rel="icon" href="dist/logo.ico"><title>WCPD</title><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"><script src="dist/runtime-config.js"></script><script>window.externalPublicPath =
         (window.__MIND_MAP_RUNTIME__ &&
           window.__MIND_MAP_RUNTIME__.publicPath) ||
         './dist/'
       // 接管应用
-      window.takeOverApp = false</script><link href="dist/css/chunk-vendors.css?b54c84bcd81965f1d64f" rel="stylesheet"><link href="dist/css/app.css?b54c84bcd81965f1d64f" rel="stylesheet"><script>
-  ;(function () {
+      window.takeOverApp = false</script><script>;(function () {
     var hostname = window.location.hostname.toLowerCase()
     if (hostname === 'localhost' || hostname === '::1' || hostname === '[::1]' || /^127\./.test(hostname)) return
     var analytics = document.createElement('script')
@@ -15,8 +19,7 @@
       if (window.LA) window.LA.init({ id: 'KRO0WxK8GT66tYCQ', ck: 'KRO0WxK8GT66tYCQ' })
     }
     document.head.appendChild(analytics)
-  })()
-</script></head><body><noscript><strong>We're sorry but thoughts doesn't work properly without JavaScript enabled. Please enable it to continue.</strong></noscript><div id="app"></div><script>const getDataFromBackend = () => {
+  })()</script><link href="dist/css/chunk-vendors.css?233df33b42ed9e948fee" rel="stylesheet"><link href="dist/css/app.css?233df33b42ed9e948fee" rel="stylesheet"></head><body><noscript><strong>We're sorry but thoughts doesn't work properly without JavaScript enabled. Please enable it to continue.</strong></noscript><div id="app"></div><script>const getDataFromBackend = () => {
         return new Promise((resolve, reject) => {
           setTimeout(() => {
             resolve({
@@ -90,4 +93,4 @@
         // 可以通过window.$bus.$on()来监听应用的一些事件
         // 实例化页面
         window.initApp()
-      }</script><script src="dist/js/chunk-vendors.js?b54c84bcd81965f1d64f"></script><script src="dist/js/app.js?b54c84bcd81965f1d64f"></script></body></html>
+      }</script><script src="dist/js/chunk-vendors.js?233df33b42ed9e948fee"></script><script src="dist/js/app.js?233df33b42ed9e948fee"></script></body></html>

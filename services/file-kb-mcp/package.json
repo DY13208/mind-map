@@ -1,0 +1,15 @@
+{
+  "name": "mind-map-file-kb-mcp",
+  "private": true,
+  "version": "0.1.0",
+  "description": "File KB MCP server. Streamable HTTP, same client shape as the mind-map MCP.",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": { "start": "node src/server.mjs", "test": "node --test \"test/*.test.mjs\"" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.2",
+    "pg": "8.13.1",
+    "zod": "^3.24.2"
+  }
+}

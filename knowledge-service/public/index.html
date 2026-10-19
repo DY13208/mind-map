@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>文件知识库</title>
+  <link rel="stylesheet" href="/vendor/theme-chalk/index.css" />
+  <style>
+    body { margin: 0; background: #f4efe6; color: #1d1914; font-family: "Palatino Linotype", Palatino, "Songti SC", serif; }
+    main { max-width: 980px; margin: 0 auto; padding: 40px 20px 72px; }
+    h1 { font-weight: 500; font-size: 42px; margin: 0 0 8px; }
+    .lede { max-width: 40em; color: #4d463d; }
+    .panel { background: #fffaf3; border: 1px solid #d9cfc0; padding: 18px; margin-top: 18px; }
+    .row { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+    .rule { font-size: 13px; color: #5c5348; }
+  </style>
+</head>
+<body>
+  <main id="app">
+    <h1>文件知识库</h1>
+    <p class="lede">文件和文件夹的授权只存在于知识库。直接授权覆盖同一对象的继承权限；用户本人和所属团队取较高角色。</p>
+    <section class="panel">
+      <el-input v-model="token" placeholder="知识库令牌，留空则使用已登录会话" size="small"></el-input>
+      <div class="row">
+        <input type="file" ref="file" />
+        <el-button size="small" type="primary" @click="upload">上传到当前文件夹</el-button>
+        <el-input v-model="folderName" size="small" placeholder="新文件夹名称" style="width: 180px"></el-input>
+        <el-button size="small" @click="createFolder">新建文件夹</el-button>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>文件夹</h2>
+      <el-table :data="folders" size="small" empty-text="没有可见文件夹">
+        <el-table-column prop="name" label="名称"></el-table-column>
+        <el-table-column prop="effectiveRole" label="我的权限" width="120"></el-table-column>
+        <el-table-column label="" width="220">
+          <template slot-scope="scope">
+            <el-button size="mini" @click="currentFolder = scope.row.id">进入</el-button>
+            <el-button size="mini" @click="openAccess('folder', scope.row.id)" :disabled="!canGrant(scope.row.effectiveRole)">权限管理</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </section>
+    <section class="panel">
+      <h2>文件</h2>
+      <el-table :data="files" size="small" empty-text="没有可见文件">
+        <el-table-column prop="fileName" label="名称"></el-table-column>
+        <el-table-column prop="status" label="状态" width="100"></el-table-column>
+        <el-table-column prop="effectiveRole" label="我的权限" width="120"></el-table-column>
+        <el-table-column label="" width="280">
+          <template slot-scope="scope">
+            <el-button size="mini" @click="preview(scope.row)">原文</el-button>
+            <el-button size="mini" @click="openAccess('file', scope.row.id)" :disabled="!canGrant(scope.row.effectiveRole)">权限管理</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </section>
+    <el-dialog title="权限管理" :visible.sync="aclOpen" width="760px">
+      <p class="rule">直接授权优先于继承。继承链从最近的文件夹向上，遇到“不继承”即停止。所有者和团队授权同时存在时，取较高角色。变更立即生效，没有权限缓存。</p>
+      <p v-if="acl">{{ acl.name }} · 我的有效权限：{{ acl.actorRole }}</p>
+      <el-switch v-if="acl" v-model="acl.inherit" active-text="继承上级权限" @change="saveInherit"></el-switch>
+      <el-table v-if="acl" :data="acl.entries" size="small" style="margin-top: 12px">
+        <el-table-column prop="subjectName" label="成员 / 团队"></el-table-column>
+        <el-table-column prop="subjectType" label="类型" width="90"></el-table-column>
+        <el-table-column prop="role" label="角色" width="110"></el-table-column>
+        <el-table-column label="来源">
+          <template slot-scope="scope">
+            <span v-if="scope.row.source === 'direct'">直接授权</span>
+            <span v-else-if="scope.row.source === 'owner'">资源所有者</span>
+            <span v-else>继承自 {{ scope.row.inheritedFromName || '上级文件夹' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="是否生效" width="100">
+          <template slot-scope="scope">
+            <el-tag size="mini" :type="scope.row.applied ? 'success' : 'info'">{{ scope.row.applied ? '有效' : '被覆盖' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column width="90">
+          <template slot-scope="scope">
+            <el-button v-if="scope.row.source === 'direct'" size="mini" type="text" @click="revoke(scope.row)">撤销</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="row">
+        <el-select v-model="draft.subjectType" size="small" style="width: 100px">
+          <el-option label="用户" value="user"></el-option>
+          <el-option label="团队" value="team"></el-option>
+        </el-select>
+        <el-input v-model="draft.subjectId" size="small" placeholder="用户 ID 或团队 ID" style="width: 220px"></el-input>
+        <el-select v-model="draft.role" size="small" style="width: 130px">
+          <el-option v-for="role in grantRoles" :key="role" :label="roleLabel(role)" :value="role"></el-option>
+        </el-select>
+        <el-button size="small" type="primary" @click="saveGrant">保存</el-button>
+      </div>
+    </el-dialog>
+  </main>
+  <script src="/vendor/vue.js"></script>
+  <script src="/vendor/element.js"></script>
+  <script>
+    if (!window.Vue || !window.ELEMENT) {
+      document.body.insertAdjacentHTML('beforeend', '<p style="padding:24px">Element UI 资源未安装。请在 knowledge-service 目录执行 npm install。</p>')
+    } else {
+      Vue.use(ELEMENT)
+      new Vue({
+        el: '#app',
+        data: {
+          token: '',
+          files: [],
+          folders: [],
+          currentFolder: null,
+          folderName: '',
+          aclOpen: false,
+          acl: null,
+          aclType: 'file',
+          aclId: '',
+          draft: { subjectType: 'user', subjectId: '', role: 'viewer' }
+        },
+        computed: {
+          grantRoles: function () {
+            if (!this.acl) return ['viewer']
+            return this.acl.actorRole === 'owner'
+              ? ['owner', 'manager', 'editor', 'viewer']
+              : ['manager', 'editor', 'viewer']
+          }
+        },
+        created: function () { this.refresh() },
+        methods: {
+          roleLabel: function (role) {
+            return { owner: '所有者', manager: '管理者', editor: '编辑者', viewer: '查看者' }[role] || role
+          },
+          canGrant: function (role) { return role === 'owner' || role === 'manager' },
+          headers: function (json) {
+            var value = {}
+            if (this.token.trim()) value.Authorization = 'Bearer ' + this.token.trim()
+            if (json) value['Content-Type'] = 'application/json'
+            return value
+          },
+          refresh: function () {
+            var self = this
+            fetch('/api/files', { headers: this.headers() }).then(function (res) { return res.json() }).then(function (data) {
+              self.files = data.files || []
+            }).catch(function () {})
+            fetch('/api/folders', { headers: this.headers() }).then(function (res) { return res.json() }).then(function (data) {
+              self.folders = data.folders || []
+            }).catch(function () {})
+          },
+          upload: function () {
+            var self = this
+            var body = new FormData()
+            body.append('file', this.$refs.file.files[0])
+            var path = '/api/files' + (this.currentFolder ? '?folderId=' + encodeURIComponent(this.currentFolder) : '')
+            fetch(path, { method: 'POST', headers: this.headers(), body: body }).then(function () { self.refresh() })
+          },
+          createFolder: function () {
+            var self = this
+            fetch('/api/folders', {
+              method: 'POST',
+              headers: this.headers(true),
+              body: JSON.stringify({ name: this.folderName, parentId: this.currentFolder })
+            }).then(function () { self.folderName = ''; self.refresh() })
+          },
+          preview: function (row) {
+            var self = this
+            fetch('/api/files/' + row.id + '/content?disposition=inline', { headers: this.headers() })
+              .then(function (res) {
+                if (!res.ok) { self.$message.error('没有权限'); return null }
+                return res.blob()
+              })
+              .then(function (blob) {
+                if (blob) window.open(URL.createObjectURL(blob), '_blank')
+              })
+          },
+          openAccess: function (type, id) {
+            var self = this
+            this.aclType = type
+            this.aclId = id
+            fetch('/api/' + type + 's/' + id + '/access', { headers: this.headers() })
+              .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data } }) })
+              .then(function (result) {
+                if (!result.ok) { self.$message.error(result.data.error || '没有权限'); return }
+                self.acl = result.data
+                self.aclOpen = true
+              })
+          },
+          saveGrant: function () {
+            var self = this
+            fetch('/api/' + this.aclType + 's/' + this.aclId + '/access', {
+              method: 'PUT',
+              headers: this.headers(true),
+              body: JSON.stringify(this.draft)
+            }).then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data } }) })
+              .then(function (result) {
+                if (!result.ok) { self.$message.error(result.data.error || '保存失败'); return }
+                self.acl = result.data
+                self.refresh()
+              })
+          },
+          revoke: function (row) {
+            var self = this
+            fetch('/api/' + this.aclType + 's/' + this.aclId + '/access', {
+              method: 'PUT',
+              headers: this.headers(true),
+              body: JSON.stringify({ subjectType: row.subjectType, subjectId: row.subjectId, role: null })
+            }).then(function (res) { return res.json() }).then(function (data) { self.acl = data; self.refresh() })
+          },
+          saveInherit: function (value) {
+            var self = this
+            fetch('/api/' + this.aclType + 's/' + this.aclId + '/access', {
+              method: 'PUT',
+              headers: this.headers(true),
+              body: JSON.stringify({ inherit: value })
+            }).then(function (res) { return res.json() }).then(function (data) { self.acl = data; self.refresh() })
+          }
+        }
+      })
+    }
+  </script>
+</body>
+</html>

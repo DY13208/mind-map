@@ -9,6 +9,7 @@
 @mm-notch-inset: var(--mm-notch-inset, 0px);
 @mm-notch-edge-radius: var(--mm-notch-edge-radius, 0px);
 @mm-notch-inner-radius: var(--mm-notch-inner-radius, @mm-notch-radius);
+@mm-notch-outline: var(--mm-notch-outline, 0 solid transparent);
 @mm-notch-height: 48px;
 @mm-notch-height-bottom: 42px;
 @mm-capsule-radius: 18px;
@@ -20,10 +21,15 @@
   // light: no frame, canvas edge to edge; notches are white panels flush at corners
   --mm-frame-width: 0px;
   --mm-canvas-radius: 0px;
-  --mm-notch-wing-display: none;
-  --mm-notch-inset: 8px;
-  --mm-notch-edge-radius: 12px;
-  --mm-notch-inner-radius: 12px;
+  // light: attached island flush to window edges, concave wings + 1px outline on canvas-facing sides
+  --mm-notch-wing-display: block;
+  --mm-notch-inset: 0px;
+  --mm-notch-edge-radius: 0px;
+  --mm-notch-inner-radius: 18px;
+  --mm-notch-wing-fill: #ffffff;
+  // no wing stroke / notch border: a 1px border runs to the window edge beside each wing and shows as a stray tick at the joint
+  --mm-notch-wing-stroke: none;
+  --mm-notch-outline: 0 solid transparent;
   --mm-notch-frame: #ffffff;
   --mm-notch-icon: #3f3f46;
   --mm-notch-icon-hover: #18181b;
@@ -32,8 +38,8 @@
   --mm-notch-pill-text: #18181b;
   --mm-notch-text: #27272a;
   --mm-notch-sep: #e4e4e7;
-  // full 1px ring + soft shadow all around (cards are inset, nothing clipped)
-  --mm-notch-surface-shadow: 0 0 0 1px #e4e4e7, 0 4px 14px rgba(24, 24, 27, 0.06);
+  // outline drawn via per-side borders (canvas-facing only) so it flows into the wing stroke
+  --mm-notch-surface-shadow: none;
   --mm-notch-shadow: 0 0 0 1px #e4e4e7, 0 6px 20px rgba(24, 24, 27, 0.08);
 }
 .mm-notch-palette-dark() {
@@ -44,6 +50,9 @@
   --mm-notch-inset: 0px;
   --mm-notch-edge-radius: 0px;
   --mm-notch-inner-radius: 22px;
+  --mm-notch-wing-fill: #111315;
+  --mm-notch-wing-stroke: none;
+  --mm-notch-outline: 0 solid transparent;
   --mm-notch-surface-shadow: none;
   --mm-notch-icon: #d4d4d8;
   --mm-notch-icon-hover: #ffffff;

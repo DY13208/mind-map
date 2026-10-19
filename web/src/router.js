@@ -285,6 +285,23 @@ const routes = [
     ]
   },
   {
+    path: '/kb',
+    component: () =>
+      import(
+        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'
+      ),
+    children: [
+      {
+        path: ':tab(files|parse|data|search|mcp)?',
+        name: 'FileKb',
+        component: () =>
+          import(
+            /* webpackChunkName: "file-kb" */ './features/knowledge-base/pages/KbIndexPage.vue'
+          )
+      }
+    ]
+  },
+  {
     path: '/sop-tasks',
     redirect: '/sop'
   },

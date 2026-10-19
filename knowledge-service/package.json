@@ -1,0 +1,23 @@
+{
+  "name": "file-knowledge-service",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Isolated file knowledge library. It does not read or write mind-map nodes.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node bin/start.js",
+    "api": "node bin/api.js",
+    "worker": "node bin/worker.js",
+    "mcp": "node bin/mcp.js",
+    "rollback": "node bin/rollback.js",
+    "test": "node tests/run.js"
+  },
+  "dependencies": {
+    "element-ui": "2.15.14",
+    "pg": "8.13.1",
+    "vue": "2.6.14"
+  }
+}

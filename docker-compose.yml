@@ -1,5 +1,38 @@
 name: mind-map
 
+# File KB base env, shared by file-kb and file-kb-worker.
+x-file-kb-env: &file-kb-env
+  FILE_KB_ENABLED: ${FILE_KB_ENABLED:-false}
+  FILE_KB_PORT: "18800"
+  PGHOST: postgres
+  PGPORT: "5432"
+  PGDATABASE: ${PGDATABASE:-mind_map}
+  PGUSER: kb_app
+  PGPASSWORD: ${KB_PGPASSWORD:-}
+  FILE_KB_PG_POOL_MAX: "10"
+  FILE_KB_AUTH_CACHE_TTL_MS: ${FILE_KB_AUTH_CACHE_TTL_MS:-0}
+  MIND_MAP_SUPER_ADMIN_IDS: ${MIND_MAP_SUPER_ADMIN_IDS:-}
+  # Verified 2026-10-16 against GHCR manifest digest
+  # sha256:6eda9c524992147c1b0b06a1a9be4894bd68b1f43c86d92c32f996c4c60d18a3
+  # docling-serve runs in the same "kb" profile (worker breaker defers jobs while it is down).
+  DOCLING_URL: ${DOCLING_URL:-http://docling-serve:5001}
+  KB_STORAGE_ROOT: /data/kb
+  TZ: Asia/Shanghai
+
+# JackYun (吉客云) MCP data source. Only file-kb (API) and file-kb-mcp receive it; never the worker or frontend.
+x-file-kb-geekcloud-env: &file-kb-geekcloud-env
+  FILE_KB_GEEKCLOUD_ENABLED: ${FILE_KB_GEEKCLOUD_ENABLED:-false}
+  FILE_KB_GEEKCLOUD_MCP_URL: ${FILE_KB_GEEKCLOUD_MCP_URL:-}
+  FILE_KB_GEEKCLOUD_MCP_TOKEN: ${FILE_KB_GEEKCLOUD_MCP_TOKEN:-}
+  FILE_KB_GEEKCLOUD_TIMEOUT_MS: ${FILE_KB_GEEKCLOUD_TIMEOUT_MS:-8000}
+  FILE_KB_GEEKCLOUD_ALLOWED_TOOLS: ${FILE_KB_GEEKCLOUD_ALLOWED_TOOLS:-}
+  FILE_KB_GEEKCLOUD_ALLOWED_USERS: ${FILE_KB_GEEKCLOUD_ALLOWED_USERS:-}
+  FILE_KB_GEEKCLOUD_WAREHOUSE_SCOPE: ${FILE_KB_GEEKCLOUD_WAREHOUSE_SCOPE:-}
+  FILE_KB_GEEKCLOUD_OWNER_SCOPE: ${FILE_KB_GEEKCLOUD_OWNER_SCOPE:-}
+  FILE_KB_GEEKCLOUD_PRICE_USERS: ${FILE_KB_GEEKCLOUD_PRICE_USERS:-}
+  FILE_KB_GEEKCLOUD_MAX_CONCURRENCY: ${FILE_KB_GEEKCLOUD_MAX_CONCURRENCY:-2}
+  FILE_KB_GEEKCLOUD_RATE_PER_MINUTE: ${FILE_KB_GEEKCLOUD_RATE_PER_MINUTE:-60}
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -72,6 +105,8 @@ services:
       # only MCP Direct without its event bridge is rejected at startup.
       COLLAB_V2_EVENT_BRIDGE: ${COLLAB_V2_EVENT_BRIDGE:-false}
       COLLAB_MCP_DIRECT: ${COLLAB_MCP_DIRECT:-false}
+      # File KB feature flag (nginx /api/kb/ + /file-kb-mcp/ return 404 unless true)
+      FILE_KB_ENABLED: ${FILE_KB_ENABLED:-false}
       TZ: Asia/Shanghai
       HISTORY_DISPLAY_TZ: Asia/Shanghai
       SOP_OUTPUT_DIR: /app/output
@@ -329,9 +364,127 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # ===== File KB (docs/file-kb) =====
+  # Profile "kb": started only by Start-Docker when FILE_KB_ENABLED=true.
+  # Not in app.depends_on; app/collab/MCP keep working when these are absent.
+  # Prerequisite: scripts/file-kb/bootstrap.sql (role kb_app + schema kb) and KB_PGPASSWORD in .env.
+  file-kb:
+    profiles: ["kb"]
+    build:
+      context: services/file-kb
+    image: mind-map-file-kb:0.1.0
+    environment:
+      <<: [*file-kb-env, *file-kb-geekcloud-env]
+      FILE_KB_MCP_TOKEN_DEFAULT_TTL_DAYS: ${FILE_KB_MCP_TOKEN_DEFAULT_TTL_DAYS:-}
+      FILE_KB_MCP_TOKEN_MAX_TTL_DAYS: ${FILE_KB_MCP_TOKEN_MAX_TTL_DAYS:-}
+    volumes:
+      - kb-files:/data/kb
+    expose:
+      - "18800"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 768M
+    restart: unless-stopped
+
+  file-kb-worker:
+    profiles: ["kb"]
+    image: mind-map-file-kb:0.1.0
+    build:
+      context: services/file-kb
+    command: ["node", "src/worker.js"]
+    environment:
+      <<: *file-kb-env
+      FILE_KB_WORKER_ID: file-kb-worker-1
+      KB_WORKER_CONCURRENCY: "2"
+    volumes:
+      - kb-files:/data/kb
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+    restart: unless-stopped
+
+  file-kb-mcp:
+    profiles: ["kb"]
+    build:
+      context: services
+      dockerfile: file-kb-mcp/Dockerfile
+    image: mind-map-file-kb-mcp:0.1.0
+    environment:
+      <<: *file-kb-geekcloud-env
+      FILE_KB_ENABLED: ${FILE_KB_ENABLED:-false}
+      FILE_KB_MCP_PORT: "18801"
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${PGDATABASE:-mind_map}
+      PGUSER: kb_app
+      PGPASSWORD: ${KB_PGPASSWORD:-}
+    expose:
+      - "18801"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    restart: unless-stopped
+
+  # docling-serve, pinned by tag + digest (verified 2026-10-16, see docs/file-kb/docling.md).
+  # Internal only (no host port). No healthcheck on purpose: model loading takes minutes and
+  # the worker's circuit breaker defers jobs while it is unavailable.
+  docling-serve:
+    profiles: ["kb"]
+    image: ghcr.io/docling-project/docling-serve-cpu:v1.37.0@sha256:6eda9c524992147c1b0b06a1a9be4894bd68b1f43c86d92c32f996c4c60d18a3
+    environment:
+      DOCLING_SERVE_ENG_LOC_NUM_WORKERS: "1"
+      DOCLING_SERVE_MAX_SYNC_WAIT: "600"
+      DOCLING_SERVE_ENABLE_REMOTE_SERVICES: "false"
+    expose:
+      - "5001"
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 6G
+    restart: unless-stopped
+
 volumes:
   local-knowledge-cache:
   mind-map-pg:
   mind-map-openclaw:
   knowledge-mcp-audit:
+  kb-files:
 
