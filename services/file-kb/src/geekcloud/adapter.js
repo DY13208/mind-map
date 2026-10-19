@@ -256,7 +256,7 @@ function createGeekcloudAdapter({ config, sdk, audit = async () => {}, now = () 
     const owners = new Set(access.owners)
     const inOwnerScope = r => !!r.ownerName && owners.has(r.ownerName)
     const ctx = { via }
-    const out = { ...base, status: 'ok', scope: { warehouses: access.warehouses, owners: access.owners, price: access.price }, goods: null, stock: null, price: null, errors: [], missing: [] }
+    const out = { ...base, status: 'ok', scope: { warehouses: access.warehouses, allWarehouses: access.allWarehouses, owners: access.owners, price: access.price }, goods: null, stock: null, price: null, errors: [], missing: [] }
     const can = name => allowed.has(name)
 
     if (can('getGoodsListInfoByGoodsNo')) {
@@ -295,8 +295,11 @@ function createGeekcloudAdapter({ config, sdk, audit = async () => {}, now = () 
       else if (!access.warehouses.length) out.stock = { status: 'no_warehouse_scope', items: [], totals: null, truncated: false }
       else {
         try {
+          // ["*"] = all warehouses: no warehouse filter is sent and rows are not filtered by warehouse.
+          // Pages are still capped (STOCK_MAX_PAGES x STOCK_PAGE rows); hitting the cap sets truncated.
+          const all = access.allWarehouses === true
           const scope = new Set(access.warehouses)
-          const single = access.warehouses.length === 1 ? access.warehouses[0] : null
+          const single = !all && access.warehouses.length === 1 ? access.warehouses[0] : null
           const items = []
           const seen = new Set()
           let truncated = false
@@ -305,7 +308,7 @@ function createGeekcloudAdapter({ config, sdk, audit = async () => {}, now = () 
             const rows = await invoke(user, 'getGoodsStockQuantityListInfo', { sku, warehouseCode: single, pageIndex: page, pageSize: STOCK_PAGE }, ctx)
             for (const r of rows) {
               const key = `${r.goodsNo}|${r.skuBarcode || ''}|${r.warehouseCode}`
-              if (r.goodsNo !== sku || !scope.has(r.warehouseCode) || seen.has(key)) continue
+              if (r.goodsNo !== sku || (!all && !scope.has(r.warehouseCode)) || seen.has(key)) continue
               seen.add(key)
               items.push(r)
             }
@@ -346,6 +349,8 @@ function createGeekcloudAdapter({ config, sdk, audit = async () => {}, now = () 
     const queriedAt = new Date(now()).toISOString()
     const base = { source: 'geekcloud', dataKind: 'realtime', queriedAt }
     if (!access.allowed) return { ...base, status: FORBIDDEN_REASONS.includes(access.reason) ? 'forbidden' : 'unavailable', reason: access.reason }
+    // All warehouses: JackYun needs a code per lookup, so there is no list to show; nothing is called.
+    if (access.allWarehouses) return { ...base, status: 'ok', items: [], allWarehouses: true, errors: [], truncated: false }
     if (!allowed.has('getWarehouseListInfo')) return { ...base, status: 'ok', items: access.warehouses.map(code => ({ warehouseCode: code })), missing: ['warehouse'] }
     const items = []
     const errors = []
@@ -414,7 +419,7 @@ function createGeekcloudAdapter({ config, sdk, audit = async () => {}, now = () 
       endpointHost: host,
       token: { configured: !!config.token, fingerprint: tokenFingerprint(config.token) },
       allowedTools: config.allowedTools.map(name => ({ name, label: CATALOG[name].label, description: CATALOG[name].description })),
-      access: { allowed: access.allowed, reason: access.reason, warehouses: access.warehouses, owners: access.owners, price: access.price },
+      access: { allowed: access.allowed, reason: access.reason, warehouses: access.warehouses, allWarehouses: access.allWarehouses, owners: access.owners, price: access.price },
       connection: { ...conn },
       breaker: breaker.state(),
       lastError,

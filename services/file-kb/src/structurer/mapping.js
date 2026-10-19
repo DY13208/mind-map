@@ -42,4 +42,11 @@ function normalizeMappings(sheets,preview,previous){
     return {sheet:s.sheet,headerRows:s.headerRows,dataStartRow:s.dataStartRow,columns,mappingVersion:2,legacyColumnsIgnored:s.columnOverrides==null&&!same&&!!s.columns?.length}
   })
 }
-module.exports={normalizeMappings}
+// Sheets the client did not submit keep the confirmed mapping of the current effective run,
+// so confirming one sheet never resets another sheet back to automatic detection.
+function carryConfirmed(sheets,previousStructure){
+  const prior=previousStructure&&previousStructure.confirmed&&Array.isArray(previousStructure.sheets)?previousStructure.sheets:[]
+  const submitted=new Set(sheets.map(s=>s.sheet))
+  return sheets.concat(prior.filter(s=>s&&s.sheet&&!submitted.has(s.sheet)))
+}
+module.exports={normalizeMappings,carryConfirmed}

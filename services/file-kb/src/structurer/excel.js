@@ -163,11 +163,24 @@ async function consume(sheetKey, rows, { merges, userRegion, onBatch, batchSize,
     return jobs
   }
 
+  // A confirmed region ends at the same boundary automatic detection uses (two blank rows);
+  // later tables on the sheet fall through to automatic detection with their own table_index.
   if (userRegion) {
+    const it = rows[Symbol.asyncIterator]()
     const buffered = []
     let region = null
-    for await (const row of rows) {
+    let gap = 0
+    let ended = false
+    for (let step = await it.next(); !step.done; step = await it.next()) {
+      const row = step.value
       if (row.number < userRegion.dataStartRow) { buffered.push(row); continue }
+      if (region && region.dataEndRow) {
+        if (!(row.values || []).some(v => v != null && v !== '')) {
+          if (++gap >= 2) { ended = true; break }
+          continue
+        }
+        gap = 0
+      }
       if (!region) {
         const headerRows = userRegion.headerRows.map(n => buffered.find(r => r.number === n)).filter(Boolean)
         const headers = applyNames(headerRows.length ? combineHeaders(headerRows, merges) : [], userRegion.columns)
@@ -194,8 +207,11 @@ async function consume(sheetKey, rows, { merges, userRegion, onBatch, batchSize,
         confidence: 1, needsConfirmation: false, synthetic: false, confirmed: true
       })
     }
-    await flush()
-    return { regions, notes, rows: sheetRows }
+    if (!ended) {
+      await flush()
+      return { regions, notes, rows: sheetRows }
+    }
+    rows = { [Symbol.asyncIterator]: () => it }
   }
 
   const window = []

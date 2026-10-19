@@ -102,6 +102,8 @@
 
 令牌权限（迁移 `008_mcp_token_geekcloud_scope.sql` 放宽 `kb_mcp_tokens_scopes_chk`）：令牌调用吉客云要同时满足令牌带 `geekcloud:read` 和用户在 `FILE_KB_GEEKCLOUD_ALLOWED_USERS`；登录会话不变。令牌所属用户已不在 `public.wecom_users` 时，令牌认证 401 `token_user_inactive`。
 
+通配：`FILE_KB_GEEKCLOUD_ALLOWED_USERS`、`FILE_KB_GEEKCLOUD_PRICE_USERS` 里的 `*` 表示所有已登录用户；`FILE_KB_GEEKCLOUD_WAREHOUSE_SCOPE`、`FILE_KB_GEEKCLOUD_OWNER_SCOPE` 的键 `"*"` 是没有单独配置用户的默认范围，用户自己的键整体覆盖、不合并。`*` 不能作为货主的值（配置错误，吉客云整体不可用）。仓库范围的值恰好为 `["*"]` 表示全部仓库：库存不发仓库过滤、不按仓库筛行，仍受分页上限（10 页 × 10 行）约束，超出时 `stock.truncated = true`；`"*"` 与仓库编号混写是配置错误。`access` 新增 `allWarehouses`（布尔），全部仓库时为 `true` 且 `warehouses` 为 `['*']`；`lookupSku` 的 `scope` 同样带 `allWarehouses`。全部仓库时「查询可见仓库」不调用吉客云，返回 `{status:'ok', items:[], allWarehouses:true}`。令牌规则不变。`/geekcloud/status` 的 `access` 返回按当前用户解析后的范围。
+
 货主与价格：`FILE_KB_GEEKCLOUD_OWNER_SCOPE` 为 JSON `{用户: [货主名称]}`（格式同 `FILE_KB_GEEKCLOUD_WAREHOUSE_SCOPE`），按商品行 `ownerName` 过滤；没有货主范围 `goods` 为 forbidden `no_owner_scope`，SKU 不在范围内整体 forbidden `owner_out_of_scope`，不返回库存与价格；货品工具不可用时 `owner_unverifiable`。价格只对 `FILE_KB_GEEKCLOUD_PRICE_USERS`（逗号分隔）里的用户查询，否则 `price` 为 forbidden `price_not_allowed`。
 
 smart-query 与 MCP 工具 `smart_knowledge_query` 返回同一结构：

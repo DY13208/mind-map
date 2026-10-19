@@ -24,7 +24,7 @@
             <el-option v-for="(item, i) in sheets" :key="item.name" :label="sheetLabel(item, i)" :value="i" />
           </el-select>
           <el-checkbox v-model="sheet.include">本次提交此工作表</el-checkbox>
-          <span v-if="!sheet.include" class="kb-muted">未提交的工作表由后端自动检测表头{{ sheet.detection.confirmed ? '，之前的人工确认不会保留' : '' }}</span>
+          <span v-if="!sheet.include" class="kb-muted">{{ sheet.detection.confirmed ? '未提交的工作表保留当前已确认的表头和字段名' : '未提交的工作表由后端自动检测表头' }}</span>
         </div>
         <p v-if="sheet.detection.needsConfirmation && !sheet.detection.confirmed" class="kb-map-warn">后端自动判断把握不够，当前不会把猜测字段当成已确认数据。请选择表头行和数据起始行，核对后再入库。</p>
         <p class="kb-muted kb-map-reason">

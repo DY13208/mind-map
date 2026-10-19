@@ -20,6 +20,12 @@ const list = v => String(v || '').split(/[,\s]+/).map(s => s.trim()).filter(Bool
 // Owner (货主) names as JackYun returns them in ownerName. Plain text, no control or markup characters.
 const OWNER = /^[^\u0000-\u001f\u007f<>]{1,64}$/
 
+// "*" as a user key / list entry means "every user without an own entry". It is never a wildcard value.
+const ALL_USERS = '*'
+// The one exception: a warehouse scope of exactly ["*"] means all warehouses.
+const ALL_WAREHOUSES = '*'
+const wildcardValue = values => Array.isArray(values) && values.some(v => typeof v === 'string' && v.trim() === ALL_USERS)
+
 // {"userId":["value"]} maps from env. Bad shape reports an error and loads nothing (deny by default).
 function userScope(env, name, valid, errors) {
   if (!env[name]) return {}
@@ -28,6 +34,10 @@ function userScope(env, name, valid, errors) {
     const parsed = JSON.parse(env[name])
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('shape')
     for (const [userId, values] of Object.entries(parsed)) {
+      if (wildcardValue(values)) {
+        errors.push(`${name}: "*" is only allowed as a user key, not as a value`)
+        return {}
+      }
       if (!Array.isArray(values) || values.some(v => typeof v !== 'string' || !valid.test(v))) throw new Error('shape')
       out[userId] = [...new Set(values)]
     }
@@ -68,11 +78,19 @@ function loadGeekcloudConfig(env = process.env) {
       const parsed = JSON.parse(env.FILE_KB_GEEKCLOUD_WAREHOUSE_SCOPE)
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('shape')
       for (const [userId, codes] of Object.entries(parsed)) {
+        // Exactly ["*"] = all warehouses (stock not filtered by warehouse). "*" mixed with codes is ambiguous.
+        if (Array.isArray(codes) && codes.length && codes.every(c => c === ALL_WAREHOUSES)) {
+          warehouseScope[userId] = [ALL_WAREHOUSES]
+          continue
+        }
+        if (wildcardValue(codes)) throw new Error('wildcard')
         if (!Array.isArray(codes) || codes.some(c => typeof c !== 'string' || !/^[\w.-]{1,64}$/.test(c))) throw new Error('shape')
         warehouseScope[userId] = [...new Set(codes)]
       }
-    } catch (_) {
-      errors.push('FILE_KB_GEEKCLOUD_WAREHOUSE_SCOPE must be JSON {"userId":["WAREHOUSE_CODE"]}')
+    } catch (err) {
+      errors.push(err && err.message === 'wildcard'
+        ? 'FILE_KB_GEEKCLOUD_WAREHOUSE_SCOPE: ["*"] (all warehouses) must be used alone, not mixed with warehouse codes'
+        : 'FILE_KB_GEEKCLOUD_WAREHOUSE_SCOPE must be JSON {"userId":["WAREHOUSE_CODE"]}')
       warehouseScope = {}
     }
   }

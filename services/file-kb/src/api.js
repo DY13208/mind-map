@@ -7,7 +7,7 @@ const readApi = require('./read')
 const { previewExcel } = require('./structurer/excel')
 const { colLetter } = require('./structurer/header')
 const { createBatches } = require('./batches')
-const { normalizeMappings } = require('./structurer/mapping')
+const { normalizeMappings, carryConfirmed } = require('./structurer/mapping')
 const { instrumentPool, measureUpload, scope } = require('./metrics')
 const { retryAfterMsFor } = require('./errors')
 const { smartQuery } = require('./geekcloud/smart')
@@ -418,8 +418,8 @@ function createApi({ pool, storage, queue, config, limiter, geekcloud = null }) 
       const active = await c.query(`select id from kb.jobs where file_id = $1 and state in ('queued','running')`, [f.id])
       if (active.rows.length) throw new HttpError(409, 'job_in_progress')
       const preview=await previewExcel(storage.resolveKey(f.storage_key),{maxCols:500,selectedBySheet:Object.fromEntries(sheets.map(s=>[s.sheet,s.headerRows]))})
-      const previous=f.current_run_id?(await c.query('select stats from kb.parse_runs where id=$1',[f.current_run_id])).rows[0]?.stats?.layout:null
-      sheets=normalizeMappings(sheets,preview,previous)
+      const current=f.current_run_id?(await c.query('select stats, options from kb.parse_runs where id=$1',[f.current_run_id])).rows[0]:null
+      sheets=carryConfirmed(normalizeMappings(sheets,preview,current?.stats?.layout),current?.options?.structure)
       const options = { source: 'structure', by: user.id, structure: { confirmed: true, sheets } }
       const run = await c.query(
         `insert into kb.parse_runs (file_id, options, raw_json_key, docling_status)

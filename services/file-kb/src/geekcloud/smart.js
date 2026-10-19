@@ -152,6 +152,8 @@ async function smartQuery({ db, geekcloud, via = 'mcp' }, user, args = {}) {
   if (geek.price && geek.price.status === 'forbidden') out.notes.push('当前用户没有吉客云价格查询权限，未查询价格。')
   if (geek.status === 'unavailable') out.notes.push('吉客云数据源未启用或未配置，未调用吉客云。')
   if (geek.stock && geek.stock.status === 'no_warehouse_scope') out.notes.push('当前用户没有配置可查询的仓库，未查询库存。')
+  if (geek.stock && geek.stock.truncated) out.notes.push('库存结果超过分页上限，只返回了前面的仓库，结果不完整。')
+  if (geek.allWarehouses) out.notes.push('当前用户可查询全部仓库，吉客云不提供全部仓库列表；请按 SKU 查询库存。')
   if (geek.status === 'needs_clarification') out.notes.push('吉客云没有该 SKU 的精确匹配，只返回了候选，请确认后再查。')
   if (geek.status === 'not_found') out.notes.push('吉客云没有该 SKU。')
   if (file.status === 'empty' && route.sku) out.notes.push(`File KB 中没有 SKU ${route.sku} 的精确匹配记录或文件块。`)

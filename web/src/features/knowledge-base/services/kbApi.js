@@ -61,7 +61,8 @@ export default {
   getFile: id => http.get(`/files/${enc(id)}`),
   updateFile: (id, body) => http.patch(`/files/${enc(id)}`, body),
   deleteFile: id => http.delete(`/files/${enc(id)}`),
-  reparseFile: id => http.post(`/files/${enc(id)}/reparse`),
+  // 后端变更请求要求 JSON Content-Type；axios 在没有请求体时会去掉它，所以必须带 {}
+  reparseFile: id => http.post(`/files/${enc(id)}/reparse`, {}),
   previewLayout: id => http.get(`/files/${enc(id)}/layout`),
   restructureFile: (id, body) => http.post(`/files/${enc(id)}/structure`, body),
   // 单文件上传。onProgress(percent, loaded, total)。batchId / clientKey 只有后端批次接口可用时才传（见 detectBatchSupport）。
