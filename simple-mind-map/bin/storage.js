@@ -1873,6 +1873,7 @@ async function initSchemaOnce() {
   const roomAcl = require('./roomAcl')
   await roomAcl.initSchema(pool)
   await require('./accessRequests').initSchema(pool)
+  await require('./leaveWorkflow/service').initSchema(pool)
   // 「@我的」提及索引 / 已读状态（幂等建表，新表建索引很快）
   await require('./commentMentions').initSchema(pool)
   await roomAcl.migrateLegacyOwners(pool)

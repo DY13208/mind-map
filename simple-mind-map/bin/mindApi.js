@@ -2042,6 +2042,8 @@ async function handleApi(req, res) {
     return true
   }
 
+  if (await require('./leaveWorkflow/http').handle(req, res, { url, db: getPool(), writer: executeTrustedOperation, readBody, sendJson })) return true
+
   try {
     if (pathname === '/api/access-requests' && req.method === 'POST') {
       const item = await accessRequests.requestAccess(

@@ -8,6 +8,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import { buildSopContext } from './sopContext.mjs'
+import { registerLeaveTools } from './leaveWorkflow/mcp.mjs'
 import mcpUserToken from './mcpUserToken.js'
 import {
   resolveAttachmentUploadInput,
@@ -513,6 +514,8 @@ function createServer(authorization) {
         '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps；该工具默认每页20个房间、最多100个，只返回当前页，has_more=true 时必须原样传 next_cursor 继续，直到 false 后再判断可见房间总数。只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。需要完整读取整间房间时只调用一次 export_room_tree，禁止用反复 query_nodes 拼整图。该工具在服务端读完快照；complete 为 true 才表示整图已读完。节点超过 500 时响应只含 export_path 和摘要，完整内容在该文件里；打不开文件时用 read_room_export 按 offset 读这份导出，不要回到 query_nodes。complete 为 false 时查看 incomplete_reason，不得声称已读完。历史版本只提供元数据和新增、修改、删除、移动计数，不提供历史脑图正文。回滚必须依次调用 list_versions、get_version，向用户展示目标版本和变更摘要并获得明确确认，再用列表返回的 currentRevision 调用 restore_version；RESTORE_CONFLICT 后必须重新查询并再次确认，禁止自动重试。附件（与网页工具栏「附件」同一套能力）：生成或拿到产物后必须调用 upload_attachment 挂到目标节点，节点会出现可点击回形针图标；禁止只把本机路径、挂载说明、「请拖到节点」写进 text/note；禁止用 update_node 的 note 代替挂载。节点超链接在 query_nodes 的 data.hyperlink 和 data.hyperlinkTitle；新增、修改或批量写入时必须原样传回这两个字段，空字符串表示清除。只复制 text/note 会丢掉超链接。upload_attachment 优先 file_path（WorkBuddy 目录或 ./output），否则 content_base64 / source_url。已有附件用 list_attachments / read_attachment；attachmentExtractedText 只是截断预览。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。一次写多个节点必须用 apply_nodes，整批一次请求、有成功修改时版本只加 1、全部失败时不增加版本；检查 outcome 和每项 items，失败依赖项暂停，核实后使用新操作 ID 补处理；不要循环 add_node、update_node 或 delete_node。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。移动节点使用 move_node 的 uid 和 parent_uid，保持原 UID，禁止删除后新增模拟移动。isError 不代表肯定没有写入：outcome=unknown 或 outcomeUnknown=true 表示结果未知，使用原 operation_id、原内容和 base_revision 核实重放，禁止换新 ID 重复新增；确定拒绝或全部失败也不得声称已完成。节点评论用 list_node_comments（单个节点）或 list_comments（全图，可按未解决、@某人、时间筛选并分页）读取；用 add_comment、reply_comment、delete_comment、resolve_comment 写入，禁止用 update_node 或 apply_nodes 直接改 comments 字段。'
     }
   )
+
+  registerLeaveTools(server, { api, z, ok, fail })
 
   server.tool(
     'get_performance_diagnostics',

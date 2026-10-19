@@ -63,6 +63,7 @@
     <NodeAttachmentPreview v-if="mindMap"></NodeAttachmentPreview>
     <NodeHyperlinkPopover v-if="mindMap"></NodeHyperlinkPopover>
     <NodeCommentCard v-if="mindMap"></NodeCommentCard>
+    <LeaveIntentTrigger v-if="mindMap" :mindMap="mindMap" />
     <CooperateDialog :mindMap="mindMap"></CooperateDialog>
     <!-- 保留旧分享弹窗，节点分享目前直接复制链接并继承文件权限。 -->
     <NodeShareDialog v-if="false"></NodeShareDialog>
@@ -167,6 +168,7 @@ import NodeAttachment from './NodeAttachment.vue'
 import NodeAttachmentPreview from './NodeAttachmentPreview.vue'
 import NodeHyperlinkPopover from './NodeHyperlinkPopover.vue'
 import NodeCommentCard from './NodeCommentCard.vue'
+import LeaveIntentTrigger from './LeaveIntentTrigger.vue'
 import { isNodeCommentUnread } from '@/utils/commentRead'
 import { currentCommentUser } from '@/utils/commentUser'
 import CooperateDialog from './CooperateDialog.vue'
@@ -244,6 +246,7 @@ export default {
     NodeAttachmentPreview,
     NodeHyperlinkPopover,
     NodeCommentCard,
+    LeaveIntentTrigger,
     CooperateDialog,
     NodeShareDialog,
     MapRefDialog

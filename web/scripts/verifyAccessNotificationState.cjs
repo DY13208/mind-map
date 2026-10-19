@@ -28,7 +28,8 @@ async function main() {
     clearTimeout,
     setTimeout,
     addEventListener: (k, v) => listeners.set(k, v),
-    removeEventListener: k => listeners.delete(k)
+    removeEventListener: k => listeners.delete(k),
+    dispatchEvent: e => { if (listeners.has(e.type)) listeners.get(e.type)(e); return true }
   }
   global.document = {
     hidden: false,
@@ -99,7 +100,10 @@ async function main() {
     openNotifications,
     Center
   } = mod.exports
-  setProductHttp(url => new Promise(resolve => deferred.push({ url, resolve })))
+  const deferredHttp = url => /\/api\/(?:leave-notifications|users\/me\/mentions)/.test(url)
+    ? Promise.resolve({ item: { unread: 0, list: [] }, unread: 0, list: [] })
+    : new Promise(resolve => deferred.push({ url, resolve }))
+  setProductHttp(deferredHttp)
   startNotifications('old-user')
   assert.equal(streams.length, 1)
   assert.equal(deferred.length, 2)
@@ -218,7 +222,7 @@ async function main() {
     'A transient error retains the visible history with a retry message'
   )
   assert.equal(state.historyLoading, false)
-  setProductHttp(url => new Promise(resolve => deferred.push({ url, resolve })))
+  setProductHttp(deferredHttp)
   const lateHistory = refreshApprovalHistory()
   openNotifications('results')
   assert.equal(state.visible, true)
@@ -235,6 +239,18 @@ async function main() {
   assert.equal(streams[1].closed, true)
   assert.equal(listeners.size, 0)
   assert.equal(state.items.length, 0)
+  setProductHttp(url => Promise.resolve(url.includes('/leave-notifications')
+    ? { item: { unread: 1, list: [{ id: 'leave-notice', request_id: 'leave-case' }] } }
+    : { list: [], total: 0, unread: 0 }))
+  startNotifications('leave-user')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(state.leaveUnread, 1, 'Business notifications participate in the unread count')
+  const beforeLeaveReplay = messages.length
+  streams[2].handlers.invalidate()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(messages.length, beforeLeaveReplay, 'Business notifications deduplicate SSE replays')
+  stopNotifications()
+  assert.equal(state.leaveUnread, 0)
   component.$destroy()
   console.log(
     'Notification state checks passed: identity isolation, stale reads, realtime reconnect, durable refresh, toast deduplication, actual granted role, history pagination, status/search races, logout cleanup'

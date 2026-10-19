@@ -1,0 +1,498 @@
+[
+  {
+    "uid": "1f580e83-3ced-43da-9f52-1e72f68992e0",
+    "parent_uid": "4a7e2f37-9d05-4696-8505-042e0d77ec47",
+    "position": "N555555555555550",
+    "data": {
+      "text": "<p>请假</p>"
+    }
+  },
+  {
+    "uid": "186c8333-5b89-42c4-ab0b-c08b2a284936",
+    "parent_uid": "1f580e83-3ced-43da-9f52-1e72f68992e0",
+    "position": "K8ZZZZZZZZZZZZZY",
+    "data": {
+      "text": "<p>部门负责人</p>"
+    }
+  },
+  {
+    "uid": "6fd5774c-f5de-4153-a6a2-3a7f23d1621d",
+    "parent_uid": "186c8333-5b89-42c4-ab0b-c08b2a284936",
+    "position": "7777777777777777",
+    "data": {
+      "text": "所有请假至少提前1天（制度原文）"
+    }
+  },
+  {
+    "uid": "59964d01-623d-4f5c-863f-7f4f7cdfc163",
+    "parent_uid": "186c8333-5b89-42c4-ab0b-c08b2a284936",
+    "position": "EEEEEEEEEEEEEEEE",
+    "data": {
+      "text": "写明类型:事假/病假/年假/婚假/产假/陪产假/丧假/调休/长假"
+    }
+  },
+  {
+    "uid": "5ed509ae-9197-4081-ac86-6a03ad56612f",
+    "parent_uid": "186c8333-5b89-42c4-ab0b-c08b2a284936",
+    "position": "LLLLLLLLLLLLLLLL",
+    "data": {
+      "text": "事假最小1小时；离开和返回须打卡，否则按忘记打卡"
+    }
+  },
+  {
+    "uid": "6535955e-8ea1-4e22-bd63-955055d4cf93",
+    "parent_uid": "186c8333-5b89-42c4-ab0b-c08b2a284936",
+    "position": "QZZZZZZZZZZZZZZZ",
+    "data": {
+      "text": "病假按标准后补证明，当月内；无证明按事假"
+    }
+  },
+  {
+    "uid": "7c2bd83b-304c-4a1a-8162-dcabb6736588",
+    "parent_uid": "186c8333-5b89-42c4-ab0b-c08b2a284936",
+    "position": "VHZZZZZZZZZZZZZZ",
+    "data": {
+      "text": "<p>工作已交接，假期可覆盖</p>"
+    }
+  },
+  {
+    "uid": "bfd17c53-5fe0-4005-85f3-fada27e69942",
+    "parent_uid": "186c8333-5b89-42c4-ab0b-c08b2a284936",
+    "position": "XQZZZZZZZZZZZZZZ",
+    "data": {
+      "text": "<p>事假:试用期累计≤5天，转正全年累计≤20天</p>"
+    }
+  },
+  {
+    "uid": "acffec66-5aea-432b-955c-31a4364c0253",
+    "parent_uid": "186c8333-5b89-42c4-ab0b-c08b2a284936",
+    "position": "YVHZZZZZZZZZZZZZ",
+    "data": {
+      "text": "<p>长假(司龄≥5年，最长3个月，仅一次):上级同意+交接人同意</p>"
+    }
+  },
+  {
+    "uid": "d1986169-862f-4c95-b476-482eb91e4c4a",
+    "parent_uid": "1f580e83-3ced-43da-9f52-1e72f68992e0",
+    "position": "NMHZZZZZZZZZZZZY",
+    "data": {
+      "text": "<p>SSC</p>"
+    }
+  },
+  {
+    "uid": "f6c43e2b-f49f-4e38-87f9-e3176d6b9cb4",
+    "parent_uid": "d1986169-862f-4c95-b476-482eb91e4c4a",
+    "position": "000000000000MH34",
+    "data": {
+      "text": "<p>类型、时长、材料符合考勤制度</p>"
+    }
+  },
+  {
+    "uid": "b646d7fb-3f32-4ee5-b02e-cfe0e92941f3",
+    "parent_uid": "d1986169-862f-4c95-b476-482eb91e4c4a",
+    "position": "I00000000000B8JJ",
+    "data": {
+      "text": "病假材料"
+    }
+  },
+  {
+    "uid": "7abed490-60a0-476c-87e9-c8652b7bbba7",
+    "parent_uid": "b646d7fb-3f32-4ee5-b02e-cfe0e92941f3",
+    "position": "5ZZZZZZZZZZZZZZZ",
+    "data": {
+      "text": "1天:医院病假单（医生开具）"
+    }
+  },
+  {
+    "uid": "434af106-0f66-4f07-9e1e-89498b9fca3c",
+    "parent_uid": "b646d7fb-3f32-4ee5-b02e-cfe0e92941f3",
+    "position": "BZZZZZZZZZZZZZZY",
+    "data": {
+      "text": "<p><span>超过1天且不足3天:病假单+诊断书；恰好3天按3天及以上标准</span></p>"
+    }
+  },
+  {
+    "uid": "d7e20bf6-5241-4f0d-9a6f-ac68f63d9f92",
+    "parent_uid": "b646d7fb-3f32-4ee5-b02e-cfe0e92941f3",
+    "position": "HZZZZZZZZZZZZZZX",
+    "data": {
+      "text": "3天及以上:二级(含)以上医院公章病假证明"
+    }
+  },
+  {
+    "uid": "96d193e0-6d67-48a3-a1ae-a8f10336ebae",
+    "parent_uid": "b646d7fb-3f32-4ee5-b02e-cfe0e92941f3",
+    "position": "NZZZZZZZZZZZZZZW",
+    "data": {
+      "text": "挂号单、无身份信息缴费单不予审核；虚假病假记违纪2次"
+    }
+  },
+  {
+    "uid": "03f22c76-f5e7-4eaa-9323-63b550e64676",
+    "parent_uid": "b646d7fb-3f32-4ee5-b02e-cfe0e92941f3",
+    "position": "TZZZZZZZZZZZZZZV",
+    "data": {
+      "text": "无证明按事假；病假按60%发薪（扣40%）"
+    }
+  },
+  {
+    "uid": "3638b75e-bb6d-4607-8b27-e6d82bb66cd5",
+    "parent_uid": "d1986169-862f-4c95-b476-482eb91e4c4a",
+    "position": "R000000000005M9R",
+    "data": {
+      "text": "其他假"
+    }
+  },
+  {
+    "uid": "3f8677f3-b1d9-4eb0-bd38-693f660c9937",
+    "parent_uid": "3638b75e-bb6d-4607-8b27-e6d82bb66cd5",
+    "position": "5ZZZZZZZZZZZZZZZ",
+    "data": {
+      "text": "年假:司龄满1年未满10年5天（年底统一放）；满10年额外5天可自由支配"
+    }
+  },
+  {
+    "uid": "1fdbce03-e37f-4998-9078-fe96ba186c23",
+    "parent_uid": "3638b75e-bb6d-4607-8b27-e6d82bb66cd5",
+    "position": "BZZZZZZZZZZZZZZY",
+    "data": {
+      "text": "婚假:领证半年内3天"
+    }
+  },
+  {
+    "uid": "adfc90af-3083-426e-ae80-48f07097ffc8",
+    "parent_uid": "3638b75e-bb6d-4607-8b27-e6d82bb66cd5",
+    "position": "HZZZZZZZZZZZZZZX",
+    "data": {
+      "text": "产假178天/陪产假15天:结婚证+出生证明+出院小结或病历"
+    }
+  },
+  {
+    "uid": "c581f490-15cd-4d6e-8e13-0d5c8ffb2e3f",
+    "parent_uid": "3638b75e-bb6d-4607-8b27-e6d82bb66cd5",
+    "position": "NZZZZZZZZZZZZZZW",
+    "data": {
+      "text": "丧假直系3天，省外可+1天路程假"
+    }
+  },
+  {
+    "uid": "8ba8a225-312d-4b9d-b6d6-89140486327b",
+    "parent_uid": "3638b75e-bb6d-4607-8b27-e6d82bb66cd5",
+    "position": "TZZZZZZZZZZZZZZV",
+    "data": {
+      "text": "调休:提前1天，单次≥2小时，当年底用完；11-12月产生的可延3个月"
+    }
+  },
+  {
+    "uid": "9c201b67-0f9a-4b57-842d-6bd43a29d3a3",
+    "parent_uid": "d1986169-862f-4c95-b476-482eb91e4c4a",
+    "position": "VI00000000002T4V",
+    "data": {
+      "text": "以下情况拒绝/改类型"
+    }
+  },
+  {
+    "uid": "470fb52b-277e-483e-9bff-d29389703345",
+    "parent_uid": "9c201b67-0f9a-4b57-842d-6bd43a29d3a3",
+    "position": "8ZZZZZZZZZZZZZZZ",
+    "data": {
+      "text": "未提前1天且非紧急"
+    }
+  },
+  {
+    "uid": "eab9669a-0d0c-47d5-a4dd-219859468920",
+    "parent_uid": "9c201b67-0f9a-4b57-842d-6bd43a29d3a3",
+    "position": "HZZZZZZZZZZZZZZY",
+    "data": {
+      "text": "病假材料不符标准"
+    }
+  },
+  {
+    "uid": "84dc033c-25da-404e-94dc-5a4c98dfa93b",
+    "parent_uid": "9c201b67-0f9a-4b57-842d-6bd43a29d3a3",
+    "position": "QZZZZZZZZZZZZZZX",
+    "data": {
+      "text": "调休拆分不足2小时，或已过有效期"
+    }
+  },
+  {
+    "uid": "08a2213c-ef12-44a9-8f66-8fd99dc0ff52",
+    "parent_uid": "1f580e83-3ced-43da-9f52-1e72f68992e0",
+    "position": "QZZZZZZZZZZZZZZY",
+    "data": {
+      "text": "<p>抄送总经理、副总、人事组、部门负责人</p>"
+    }
+  },
+  {
+    "uid": "5c393498-2998-4c1a-bbd3-79c700ed3295",
+    "parent_uid": "08a2213c-ef12-44a9-8f66-8fd99dc0ff52",
+    "position": "000000000000MH34",
+    "data": {
+      "text": "<p>抄送不审批</p>"
+    }
+  },
+  {
+    "uid": "8a78fcb4-47b6-4156-835d-2cad845397ec",
+    "parent_uid": "1f580e83-3ced-43da-9f52-1e72f68992e0",
+    "position": "VHZZZZZZZZZZZZZY",
+    "data": {
+      "text": "<p>必要条件</p>"
+    }
+  },
+  {
+    "uid": "d3abf559-fb38-4a5c-9df9-0396d44e2992",
+    "parent_uid": "8a78fcb4-47b6-4156-835d-2cad845397ec",
+    "position": "000000000000MH34",
+    "data": {
+      "text": "<p>请假类型</p>"
+    }
+  },
+  {
+    "uid": "11d4b2d0-e676-47af-93b4-93cc3472bf3b",
+    "parent_uid": "d3abf559-fb38-4a5c-9df9-0396d44e2992",
+    "position": "000000000000MH34",
+    "data": {
+      "text": "<p>年假</p>"
+    }
+  },
+  {
+    "uid": "f9e1fc68-f1ba-43de-a113-8ebbc0f7ce26",
+    "parent_uid": "11d4b2d0-e676-47af-93b4-93cc3472bf3b",
+    "position": "000000000000MH34",
+    "data": {
+      "text": "<p>年假需要有余额</p>"
+    }
+  },
+  {
+    "uid": "cf622d79-6abe-4246-b57d-66f7d6d5621a",
+    "parent_uid": "d3abf559-fb38-4a5c-9df9-0396d44e2992",
+    "position": "I00000000000B8JJ",
+    "data": {
+      "text": "<p>事假</p>"
+    }
+  },
+  {
+    "uid": "4b542c93-471c-4b55-90fa-d03f3c666656",
+    "parent_uid": "d3abf559-fb38-4a5c-9df9-0396d44e2992",
+    "position": "R000000000005M9R",
+    "data": {
+      "text": "<p>调休假</p>"
+    }
+  },
+  {
+    "uid": "72259ebf-5491-437b-91ec-89dd66db292b",
+    "parent_uid": "4b542c93-471c-4b55-90fa-d03f3c666656",
+    "position": "000000000000MH34",
+    "data": {
+      "text": "<p>需要有调休假余额</p>"
+    }
+  },
+  {
+    "uid": "e66cf65a-de70-44f3-951e-852631eac02a",
+    "parent_uid": "d3abf559-fb38-4a5c-9df9-0396d44e2992",
+    "position": "VI00000000002T4V",
+    "data": {
+      "text": "<p>婚假</p>"
+    }
+  },
+  {
+    "uid": "e8e3ac57-3ae6-4a85-a7b0-d8361ec91c3d",
+    "parent_uid": "e66cf65a-de70-44f3-951e-852631eac02a",
+    "position": "000000000000MH34",
+    "data": {
+      "text": "<p>附件需要有结婚证明文件</p>"
+    }
+  },
+  {
+    "uid": "0290e458-e5e6-4e83-a02a-a838a5409856",
+    "parent_uid": "d3abf559-fb38-4a5c-9df9-0396d44e2992",
+    "position": "XR00000000001EKF",
+    "data": {
+      "text": "<p>产假</p>"
+    }
+  },
+  {
+    "uid": "7c261b9e-4ced-46e6-ae49-a088061c4b1e",
+    "parent_uid": "0290e458-e5e6-4e83-a02a-a838a5409856",
+    "position": "000000000000MH34",
+    "data": {
+      "text": "<p>附件需要有证明文件</p>"
+    }
+  },
+  {
+    "uid": "8de4ad21-2896-4546-91fe-4da72b517a61",
+    "parent_uid": "d3abf559-fb38-4a5c-9df9-0396d44e2992",
+    "position": "YVI0000000000PA7",
+    "data": {
+      "text": "<p>陪产假</p>"
+    }
+  },
+  {
+    "uid": "1311e030-94be-4025-ae0e-1c56b8ab661b",
+    "parent_uid": "8de4ad21-2896-4546-91fe-4da72b517a61",
+    "position": "000000000000MH34",
+    "data": {
+      "text": "<p>附件需要有预产期文件</p>"
+    }
+  },
+  {
+    "uid": "c587daab-0066-4f6b-8409-ba63b5712da3",
+    "parent_uid": "d3abf559-fb38-4a5c-9df9-0396d44e2992",
+    "position": "ZFR0000000000CN3",
+    "data": {
+      "text": "<p>产检假</p>"
+    }
+  },
+  {
+    "uid": "2de014d9-c577-441f-8e1f-8e99afcf0ae4",
+    "parent_uid": "c587daab-0066-4f6b-8409-ba63b5712da3",
+    "position": "000000000000MH34",
+    "data": {
+      "text": "<p>附件需要有产检证明</p>"
+    }
+  },
+  {
+    "uid": "bbf6b23f-5479-47ba-96e3-5a2f416959f3",
+    "parent_uid": "d3abf559-fb38-4a5c-9df9-0396d44e2992",
+    "position": "ZPVI0000000006BJ",
+    "data": {
+      "text": "<p>长假</p>"
+    }
+  },
+  {
+    "uid": "d4eca792-0c23-4bd6-93e2-0c549ae992e5",
+    "parent_uid": "d3abf559-fb38-4a5c-9df9-0396d44e2992",
+    "position": "ZUXR00000000035R",
+    "data": {
+      "text": "<p>丧假</p>"
+    }
+  },
+  {
+    "uid": "55a1102d-4217-457e-bed0-07ec96813315",
+    "parent_uid": "d3abf559-fb38-4a5c-9df9-0396d44e2992",
+    "position": "ZXGVI000000001KV",
+    "data": {
+      "text": "<p><span>病假</span></p>"
+    }
+  },
+  {
+    "uid": "4dc0458f-c669-4f3e-a782-c5c3281414a2",
+    "parent_uid": "8a78fcb4-47b6-4156-835d-2cad845397ec",
+    "position": "I00000000000B8JJ",
+    "data": {
+      "text": "<p>开始时间</p>"
+    }
+  },
+  {
+    "uid": "b360e719-2738-4a15-8632-a6764cc57444",
+    "parent_uid": "8a78fcb4-47b6-4156-835d-2cad845397ec",
+    "position": "R000000000005M9R",
+    "data": {
+      "text": "<p>结束时间</p>"
+    }
+  },
+  {
+    "uid": "65d720d5-945e-46bc-acd8-8322fbdf8153",
+    "parent_uid": "8a78fcb4-47b6-4156-835d-2cad845397ec",
+    "position": "VI00000000002T4V",
+    "data": {
+      "text": "<p>工作替补人</p>"
+    }
+  },
+  {
+    "uid": "a0d68ee5-d393-4273-9603-dd600ff8ebe1",
+    "parent_uid": "65d720d5-945e-46bc-acd8-8322fbdf8153",
+    "position": "000000000000MH34",
+    "data": {
+      "text": "<p>必须填写替补人员</p>"
+    }
+  },
+  {
+    "uid": "e41f4c3e-5056-4867-a957-a648a376ae1a",
+    "parent_uid": "8a78fcb4-47b6-4156-835d-2cad845397ec",
+    "position": "XR00000000001EKF",
+    "data": {
+      "text": "<p>请假事由</p>"
+    }
+  },
+  {
+    "uid": "7808a4f2-9294-429c-8c69-09cf77aa93fb",
+    "parent_uid": "8a78fcb4-47b6-4156-835d-2cad845397ec",
+    "position": "YVI0000000000PA7",
+    "data": {
+      "text": "<p>附件</p>"
+    }
+  },
+  {
+    "uid": "350682e1-2ee9-43dd-be30-7d0c744253c1",
+    "parent_uid": "1f580e83-3ced-43da-9f52-1e72f68992e0",
+    "position": "XQZZZZZZZZZZZZZY",
+    "data": {
+      "text": "<p><span>工作时间：工作日9:00-12:00、13:30-18:30；每日8小时</span></p>"
+    }
+  },
+  {
+    "uid": "29365bbc-b6a0-4416-8109-8ec33384e254",
+    "parent_uid": "1f580e83-3ced-43da-9f52-1e72f68992e0",
+    "position": "YVHZZZZZZZZZZZZY",
+    "data": {
+      "text": "<p><span>审批配置</span></p>"
+    }
+  },
+  {
+    "uid": "426433ac-98a5-4ff1-b88d-7f89a3d0d1b1",
+    "parent_uid": "29365bbc-b6a0-4416-8109-8ec33384e254",
+    "position": "000000000000MH34",
+    "data": {
+      "text": "<p><span>部门负责人</span></p>"
+    }
+  },
+  {
+    "uid": "72ebccd8-9845-497e-be03-8eb2afb6e898",
+    "parent_uid": "29365bbc-b6a0-4416-8109-8ec33384e254",
+    "position": "I00000000000B8JJ",
+    "data": {
+      "text": "<p><span>SSC</span></p>"
+    }
+  },
+  {
+    "uid": "28d60173-0322-4088-8b8c-28bbe99c851b",
+    "parent_uid": "29365bbc-b6a0-4416-8109-8ec33384e254",
+    "position": "R000000000005M9R",
+    "data": {
+      "text": "<p><span>抄送</span></p>"
+    }
+  },
+  {
+    "uid": "afa4582f-82b5-467d-81ed-103c72dc8cdf",
+    "parent_uid": "28d60173-0322-4088-8b8c-28bbe99c851b",
+    "position": "000000000000MH34",
+    "data": {
+      "text": "<p><span>总经理</span></p>"
+    }
+  },
+  {
+    "uid": "23ad59fe-d530-4c93-ae6e-979a3c838e73",
+    "parent_uid": "28d60173-0322-4088-8b8c-28bbe99c851b",
+    "position": "I00000000000B8JJ",
+    "data": {
+      "text": "<p><span>副总</span></p>"
+    }
+  },
+  {
+    "uid": "ba4cbeb0-939f-425d-86c7-961ab30bca5f",
+    "parent_uid": "28d60173-0322-4088-8b8c-28bbe99c851b",
+    "position": "R000000000005M9R",
+    "data": {
+      "text": "<p><span>人事组</span></p>"
+    }
+  },
+  {
+    "uid": "358b5672-a55f-48e0-b0d7-e80050d9ea67",
+    "parent_uid": "28d60173-0322-4088-8b8c-28bbe99c851b",
+    "position": "VI00000000002T4V",
+    "data": {
+      "text": "<p><span>部门负责人</span></p>"
+    }
+  }
+]

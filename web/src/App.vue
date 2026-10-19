@@ -133,6 +133,8 @@
     </div>
     <template v-else>
       <AccessNotifications v-if="authState.authenticated && authState.user" :key="authState.user.id" :user-id="authState.user.id" />
+      <LeaveRequestDialog v-if="authState.authenticated && authState.user" :key="'leave-' + authState.user.id" :user-id="authState.user.id" />
+      <LeavePolicyDialog v-if="authState.authenticated && authState.user" :key="'leave-policy-' + authState.user.id" />
       <router-view :key="$route.path === '/' ? 'editor:' + String($route.query.room || '') : 'page'"></router-view>
       <div
         v-if="authState.workbuddyEnabled && (workbuddyLinkNeeded || workbuddyLinkSuccess)"
@@ -173,6 +175,8 @@ import {
 import { mountWecomLoginPanel } from '@/utils/wecomLogin'
 import LoginGridBackground from '@/components/LoginGridBackground.vue'
 import AccessNotifications from '@/components/AccessNotifications.vue'
+import LeaveRequestDialog from '@/components/LeaveRequestDialog.vue'
+import LeavePolicyDialog from '@/components/LeavePolicyDialog.vue'
 
 const PAGE_TITLE = 'WCPD'
 const AUTH_BOOTSTRAP_MS = 45000
@@ -224,7 +228,7 @@ const authErrors = {
 
 export default {
   name: 'App',
-  components: { AccessNotifications, LoginGridBackground },
+  components: { AccessNotifications, LeaveRequestDialog, LeavePolicyDialog, LoginGridBackground },
   data() {
     return {
       authLoading: true,

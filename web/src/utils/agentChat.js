@@ -69,7 +69,8 @@ async function streamOpenclawUnified({
   model,
   signal,
   onDelta,
-  onEvent
+  onEvent,
+  allowTools = true
 } = {}) {
   const cfg = getOpenclawConfig()
   const useModel = String(model || cfg.model || 'openclaw/default').trim()
@@ -91,6 +92,24 @@ async function streamOpenclawUnified({
       /* ignore */
     } else content += p
     if (onDelta) onDelta(content)
+  }
+
+  // Advisory reviews use the HTTP text stream, never the tool-enabled gateway.
+  if (!allowTools) {
+    const result = await streamOpenclawChat({
+      messages,
+      conversationId,
+      model: useModel,
+      signal,
+      toolsDisabled: true,
+      onDelta: pushDelta
+    })
+    return {
+      content: content || result.content || '',
+      events: [],
+      toolCalls: [],
+      eventToolCalls: []
+    }
   }
 
   try {

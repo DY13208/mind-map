@@ -28,17 +28,11 @@ export function getOpenclawConfig() {
   ).trim()
   return {
     baseUrl: String(
-      runtime.openclawBase ||
-        cfg.openclawBase ||
-        baseUrl ||
-        '/openclaw-api'
+      runtime.openclawBase || cfg.openclawBase || baseUrl || '/openclaw-api'
     ).replace(/\/$/, ''),
     token: String(runtimeToken || token || '').trim(),
     model: String(
-      runtime.openclawModel ||
-        cfg.openclawModel ||
-        model ||
-        'openclaw/default'
+      runtime.openclawModel || cfg.openclawModel || model || 'openclaw/default'
     ).trim(),
     controlUrl: String(
       runtime.openclawControlUrl ||
@@ -121,7 +115,8 @@ export async function streamOpenclawChat({
   conversationId,
   model,
   signal,
-  onDelta
+  onDelta,
+  toolsDisabled = false
 } = {}) {
   const cfg = getOpenclawConfig()
   const useModel = String(model || cfg.model || 'openclaw/default').trim()
@@ -135,6 +130,10 @@ export async function streamOpenclawChat({
     model: useModel,
     stream: true,
     messages: messages || []
+  }
+  if (toolsDisabled) {
+    body.tools = []
+    body.tool_choice = 'none'
   }
   if (conversationId) {
     body.user = `conv:${conversationId}`
@@ -152,8 +151,7 @@ export async function streamOpenclawChat({
     let message = text || `HTTP ${res.status}`
     try {
       const json = JSON.parse(text)
-      message =
-        (json.error && json.error.message) || json.message || message
+      message = (json.error && json.error.message) || json.message || message
     } catch (e) {
       /* keep */
     }

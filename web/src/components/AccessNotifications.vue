@@ -42,6 +42,7 @@
             name="requests"
           />
           <el-tab-pane label="我已审批" name="history" />
+          <el-tab-pane :label="`业务审批${state.leaveUnread ? ' ' + state.leaveUnread : ''}`" name="business" />
           <el-tab-pane
             :label="`我的申请${state.unread ? ' ' + state.unread : ''}`"
             name="results"
@@ -59,7 +60,8 @@
             name="announcements"
           />
         </el-tabs>
-        <div v-if="state.error" class="messageError" role="alert">
+        <LeaveInbox v-if="state.activeTab === 'business' && state.visible" @open="state.visible = false" />
+        <div v-if="state.error && state.activeTab !== 'business'" class="messageError" role="alert">
           <i class="el-icon-warning-outline" /><span>{{ state.error }}</span
           ><el-button type="text" @click="refresh">重试</el-button>
         </div>
@@ -515,7 +517,7 @@
         </div>
         <footer
           v-if="
-            state.activeTab !== 'announcements' &&
+            state.activeTab !== 'announcements' && state.activeTab !== 'business' &&
               state.activeTab !== 'mentions'
           "
           class="messageFooter"
@@ -542,6 +544,7 @@
 </template>
 <script>
 import UserAvatar from './UserAvatar.vue'
+import LeaveInbox from './LeaveInbox.vue'
 import announcements from '@/config/announcements'
 import service from '@/services/accessRequestService'
 import {
@@ -565,7 +568,7 @@ import {
 } from '@/utils/mentionFormat'
 export default {
   name: 'AccessNotifications',
-  components: { UserAvatar },
+  components: { UserAvatar, LeaveInbox },
   props: {
     userId: { type: String, required: true }
   },
@@ -584,6 +587,7 @@ export default {
   }),
   computed: {
     currentTotal() {
+      if (this.state.activeTab === 'business') return 0
       return this.state.activeTab === 'history'
         ? this.state.historyTotal
         : this.state.activeTab === 'requests'

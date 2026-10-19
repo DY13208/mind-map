@@ -48,6 +48,7 @@ export default {
       return (
         this.state.total +
         this.state.unread +
+        this.state.leaveUnread +
         this.state.mentionUnread +
         this.state.announcementUnread
       )
@@ -84,7 +85,9 @@ export default {
     },
     open() {
       openNotifications(
-        this.state.total
+        this.state.leaveUnread
+          ? 'business'
+          : this.state.total
           ? 'requests'
           : this.state.mentionUnread
           ? 'mentions'
@@ -162,7 +165,14 @@ export default {
 }
 </style>
 <style lang="less">
-body.isDark .notificationBadge .notificationButton { color: #b4bac0; }
-body.isDark .notificationBadge .notificationButton:hover { background: #2c3036; color: #4cc596; }
-body.isDark .notificationBadge--avatar .el-badge__content.is-dot { border-color: #1f2329; }
+body.isDark .notificationBadge .notificationButton {
+  color: #b4bac0;
+}
+body.isDark .notificationBadge .notificationButton:hover {
+  background: #2c3036;
+  color: #4cc596;
+}
+body.isDark .notificationBadge--avatar .el-badge__content.is-dot {
+  border-color: #1f2329;
+}
 </style>

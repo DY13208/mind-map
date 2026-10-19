@@ -2,6 +2,7 @@ import Vue from 'vue'
 import { Notification } from 'element-ui'
 import service from './accessRequestService'
 import mentionService from './mentionService'
+import leaveService from './leaveService'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
 export const state = Vue.observable({
   visible: false,
@@ -33,8 +34,10 @@ export const state = Vue.observable({
   mentionError: '',
   mentionCursor: null,
   mentionHasMore: false,
-  mentionLoaded: false
+  mentionLoaded: false,
+  leaveUnread: 0
 })
+let leaveFingerprint = ''
 let mentionSequence = 0
 let userId = '',
   stream = null,
@@ -44,7 +47,7 @@ let userId = '',
   queued = false,
   historySequence = 0,
   announced = new Set()
-const notices = { requests: null, results: null }
+const notices = { requests: null, results: null, leave: null }
 function showNotice(kind, options) {
   const previous = notices[kind]
   if (previous && typeof previous.close === 'function') previous.close()
@@ -60,6 +63,36 @@ export function openNotifications(tab) {
   refreshNotifications()
   // 「@我的」列表由消息中心打开/切换标签时加载，这里只刷新角标
   refreshMentionUnread()
+  refreshLeaveNotifications()
+}
+export async function refreshLeaveNotifications() {
+  if (!userId) return
+  const version = generation
+  try {
+    const data = await leaveService.notices()
+    if (version !== generation) return
+    state.leaveUnread = Number(data.unread) || 0
+    const fingerprint = data.list.map(n => n.id).join(',')
+    if (fingerprint !== leaveFingerprint) {
+      leaveFingerprint = fingerprint
+      window.dispatchEvent(new CustomEvent('mindmap:leave-refresh'))
+    }
+    const unseen = data.list.filter(
+      item => !item.seen_at && !announced.has('leave:' + item.id)
+    )
+    if (data.unread && unseen.length) {
+      unseen.forEach(item => remember('leave:' + item.id))
+      showNotice('leave', {
+        title: '业务审批消息',
+        message: '有新的请假待办或处理结果，请前往消息中心查看',
+        duration: 6000,
+        type: 'info',
+        onClick: () => openNotifications('business')
+      })
+    }
+  } catch (_) {
+    if (version === generation) state.leaveUnread = 0
+  }
 }
 function remember(id) {
   announced.add(id)
@@ -247,8 +280,12 @@ export async function refreshMentions(reset = true) {
     const list = data.list || []
     if (reset) state.mentions = list
     else {
-      const seen = new Set(state.mentions.map(item => `${item.room_key}:${item.id}`))
-      state.mentions = state.mentions.concat(list.filter(item => !seen.has(`${item.room_key}:${item.id}`)))
+      const seen = new Set(
+        state.mentions.map(item => `${item.room_key}:${item.id}`)
+      )
+      state.mentions = state.mentions.concat(
+        list.filter(item => !seen.has(`${item.room_key}:${item.id}`))
+      )
     }
     state.mentionCursor = data.next_cursor || null
     state.mentionHasMore = !!data.has_more
@@ -271,7 +308,8 @@ export async function markMentionRead(item) {
     const data = await mentionService.markRead([
       { room_key: item.room_key, comment_id: item.comment_id || item.id }
     ])
-    if (data && data.unread != null) state.mentionUnread = Number(data.unread) || 0
+    if (data && data.unread != null)
+      state.mentionUnread = Number(data.unread) || 0
   } catch (_) {
     /* 下次同步时以服务端为准 */
   }
@@ -286,6 +324,7 @@ export async function markAllMentionsRead() {
 function syncNotifications() {
   refreshNotifications()
   refreshMentionUnread()
+  refreshLeaveNotifications()
   if (state.visible && state.activeTab === 'mentions') refreshMentions(true)
   if (state.visible && state.activeTab === 'history') refreshApprovalHistory()
 }
@@ -309,6 +348,9 @@ export function startNotifications(id) {
   }
   refreshNotifications()
   refreshMentionUnread()
+  refreshLeaveNotifications()
+  window.addEventListener('mindmap:leave-seen', refreshLeaveNotifications)
+  window.addEventListener('mindmap:leave-changed', refreshLeaveNotifications)
   if (typeof EventSource !== 'undefined') {
     stream = new EventSource(
       `${
@@ -346,6 +388,7 @@ export function stopNotifications(expectedUserId) {
   })
   generation++
   userId = ''
+  leaveFingerprint = ''
   if (stream) stream.close()
   stream = null
   if (timer) window.clearInterval(timer)
@@ -354,6 +397,8 @@ export function stopNotifications(expectedUserId) {
   queued = false
   document.removeEventListener('visibilitychange', onVisibility)
   window.removeEventListener('online', onVisibility)
+  window.removeEventListener('mindmap:leave-seen', refreshLeaveNotifications)
+  window.removeEventListener('mindmap:leave-changed', refreshLeaveNotifications)
   Object.assign(state, {
     visible: false,
     activeTab: 'requests',
@@ -382,7 +427,8 @@ export function stopNotifications(expectedUserId) {
     mentionError: '',
     mentionCursor: null,
     mentionHasMore: false,
-    mentionLoaded: false
+    mentionLoaded: false,
+    leaveUnread: 0
   })
   mentionSequence++
 }
