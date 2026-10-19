@@ -6,7 +6,6 @@
     :aria-label="`打开 ${room.title}`"
     :data-tone="tone"
     :data-open="opening || undefined"
-    :data-entered="entered || undefined"
     :style="{ height: rootHeight + 'px' }"
     @keydown.enter.self="activate"
     @click="activate"
@@ -647,37 +646,6 @@ export default {
     background-color: var(--ui-primary);
     border-color: var(--ui-primary);
   }
-}
-
-/* ---- 入场：背板落位、纸张插入、玻璃合上 ---- */
-.gf-root:not([data-entered]) {
-  .gf-back {
-    translate: 0 22px;
-    opacity: 0;
-  }
-
-  .gf-sheet {
-    translate: 0 -70px;
-    opacity: 0;
-  }
-
-  .gf-front {
-    translate: 0 46px;
-    opacity: 0;
-  }
-
-  .gf-keyWrap {
-    opacity: 0;
-    scale: 0.6;
-  }
-
-  .gf-shadow {
-    opacity: 0;
-  }
-}
-
-.gf-root[data-entered] .gf-front {
-  transition-delay: 0s, 0.36s, 0.36s;
 }
 
 @media (prefers-reduced-motion: reduce) {

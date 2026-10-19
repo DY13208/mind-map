@@ -72,9 +72,8 @@
           </nav>
           <div v-if="childFolders.length" class="folderGrid">
             <FolderCard
-              v-for="(folder, index) in childFolders"
+              v-for="folder in childFolders"
               :key="folder.id"
-              :style="{ '--i': index }"
               :folder="folder"
               :editable="canManage"
               :allow-share="false"
@@ -83,9 +82,8 @@
           </div>
           <div v-if="visibleRooms.length" class="roomGrid">
             <RoomCard
-              v-for="(room, index) in visibleRooms"
+              v-for="room in visibleRooms"
               :key="room.id"
-              :style="{ '--i': childFolders.length + index }"
               :room="room"
               v-on="roomListeners"
             />

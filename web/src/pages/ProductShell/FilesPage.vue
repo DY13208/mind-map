@@ -57,9 +57,8 @@
       <div v-if="mode !== 'trash' && view === 'card' && itemCount" class="itemGrid">
         <template v-if="showFolders">
           <FolderCard
-            v-for="(item, index) in filteredFolders"
+            v-for="item in filteredFolders"
             :key="item.id"
-            :style="{ '--i': index }"
             :folder="item"
             :editable="!selectMode && (isTeamView ? canManageTeam : item.canManage !== false)"
             :allow-share="!isTeamView"
@@ -96,9 +95,8 @@
         </div></template
       >
         <RoomCard
-          v-for="(room, index) in visibleRooms"
+          v-for="room in visibleRooms"
           :key="room.roomKey || room.id"
-          :style="{ '--i': (showFolders ? filteredFolders.length : 0) + index }"
           :room="room"
           :allow-delete="!!room.canManage"
           :selectable="selectMode"
