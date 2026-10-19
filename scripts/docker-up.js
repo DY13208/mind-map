@@ -650,7 +650,10 @@ async function up() {
   // build，Nginx 仍会继续提供旧 bundle，表现为“已重启但页面未变”。
   // 单独构建 app，避免无源码变动时也重新构建耗时很长的 Docmost 镜像。
   // wiki-graph 是侧栏 wiki-compiler 的图谱服务，和 app 一起构建。
-  execSync('docker compose -f docker-compose.yml -f docker-compose.wiki.yml build app wiki-graph', {
+  // File KB 开启时一起构建 file-kb（API 与 worker 共用）和 file-kb-mcp，否则 git pull 后仍运行旧镜像。
+  const kbBuild = fileKbEnabled() ? ' --profile kb' : ''
+  const kbTargets = fileKbEnabled() ? ' file-kb file-kb-mcp' : ''
+  execSync(`docker compose -f docker-compose.yml -f docker-compose.wiki.yml${kbBuild} build app wiki-graph${kbTargets}`, {
     cwd: getBuildRoot(),
     stdio: 'inherit',
     env: process.env,
