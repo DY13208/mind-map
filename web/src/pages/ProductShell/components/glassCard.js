@@ -12,12 +12,11 @@ export function reducedMotion() {
   return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
 }
 
-// 测量宽度、首次进入视口时的入场、指针视差（写 --gf-px / --gf-py，不触发重渲染）
+// 测量宽度、指针视差（写 --gf-px / --gf-py，不触发重渲染）
 export default {
   data() {
     return {
-      width: 260,
-      entered: false
+      width: 260
     }
   },
   computed: {
@@ -45,36 +44,15 @@ export default {
       this.resizeObserver = new ResizeObserver(() => this.measure())
       this.resizeObserver.observe(this.$el)
     }
-    this.observeEntrance()
   },
   beforeDestroy() {
     if (this.resizeObserver) this.resizeObserver.disconnect()
-    if (this.entranceObserver) this.entranceObserver.disconnect()
-    clearTimeout(this.entranceTimer)
     cancelAnimationFrame(this.pointerFrame)
   },
   methods: {
     measure() {
       const w = this.$el.clientWidth
       if (w > 0 && Math.abs(w - this.width) > 0.5) this.width = w
-    },
-    observeEntrance() {
-      if (typeof IntersectionObserver === 'undefined' || reducedMotion()) {
-        this.entered = true
-        return
-      }
-      const index = Number(getComputedStyle(this.$el).getPropertyValue('--i')) || 0
-      this.entranceObserver = new IntersectionObserver(
-        entries => {
-          if (!entries.some(entry => entry.isIntersecting)) return
-          this.entranceObserver.disconnect()
-          this.entranceTimer = setTimeout(() => {
-            this.entered = true
-          }, Math.min(index, 12) * 60)
-        },
-        { threshold: 0.2 }
-      )
-      this.entranceObserver.observe(this.$el)
     },
     onPointerMove(event) {
       if (event.pointerType === 'touch') return

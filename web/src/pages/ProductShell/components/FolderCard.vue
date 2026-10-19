@@ -7,7 +7,6 @@
     :aria-label="`打开文件夹 ${folder.name}，${itemCountText}`"
     :data-tone="tone"
     :data-open="opening || undefined"
-    :data-entered="entered || undefined"
     :style="{ height: rootHeight + 'px' }"
     @keydown.enter.self="activate"
     @click="activate"
@@ -629,41 +628,6 @@ export default {
     background-color: var(--ui-primary);
     border-color: var(--ui-primary);
   }
-}
-
-.gf-root:not([data-entered]) {
-  .gf-back {
-    translate: 0 22px;
-    opacity: 0;
-  }
-
-  .gf-sheet {
-    translate: 0 -120px;
-    opacity: 0;
-  }
-
-  .gf-front {
-    translate: 0 46px;
-    opacity: 0;
-  }
-
-  .gf-keyWrap {
-    opacity: 0;
-    scale: 0.6;
-  }
-
-  .gf-shadow {
-    opacity: 0;
-  }
-}
-
-.gf-root[data-entered] .gf-sheet {
-  transition-delay: calc(var(--gf-depth) * 40ms), calc(0.18s + var(--gf-depth) * 90ms),
-    calc(0.18s + var(--gf-depth) * 90ms);
-}
-
-.gf-root[data-entered] .gf-front {
-  transition-delay: 0s, 0.42s, 0.42s;
 }
 
 @media (prefers-reduced-motion: reduce) {
