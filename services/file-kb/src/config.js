@@ -21,6 +21,33 @@ function optInt(env, name, min, max) {
   return int(env, name, null, min, max)
 }
 
+const OCR_MODES = ['auto', 'off', 'always']
+
+// docling OCR. KB_DOCLING_OCR_MODE wins; legacy KB_DOCLING_OCR=true/false maps to always/off; default auto
+// (OCR re-run only for PDFs/images whose first pass looks scanned).
+function doclingOcrConfig(env) {
+  const rawMode = String(env.KB_DOCLING_OCR_MODE || '').trim().toLowerCase()
+  const legacy = env.KB_DOCLING_OCR == null || String(env.KB_DOCLING_OCR).trim() === '' ? null : flag(env.KB_DOCLING_OCR)
+  const mode = rawMode || (legacy === null ? 'auto' : legacy ? 'always' : 'off')
+  if (!OCR_MODES.includes(mode)) throw new Error('KB_DOCLING_OCR_MODE must be auto, off or always')
+  const engine = String(env.KB_DOCLING_OCR_ENGINE || '').trim() || 'rapidocr'
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(engine)) throw new Error('KB_DOCLING_OCR_ENGINE must be a docling-serve ocr_preset id')
+  const lang = String(env.KB_DOCLING_OCR_LANG || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean)
+  if (lang.length > 8 || lang.some(l => !/^[A-Za-z0-9:_-]{1,32}$/.test(l))) throw new Error('KB_DOCLING_OCR_LANG must be a comma-separated list of language tags')
+  return {
+    doclingOcr: mode === 'always',
+    doclingOcrMode: mode,
+    doclingOcrEngine: engine,
+    doclingOcrLang: lang,
+    doclingOcrForce: flag(env.KB_DOCLING_OCR_FORCE, true),
+    doclingOcrMinCharsPerPage: int(env, 'KB_DOCLING_OCR_MIN_CHARS_PER_PAGE', 20, 0, 100000),
+    doclingOcrTextlessPagePct: int(env, 'KB_DOCLING_OCR_TEXTLESS_PAGE_PCT', 60, 1, 100),
+    doclingOcrMixedMinPages: int(env, 'KB_DOCLING_OCR_MIXED_MIN_PAGES', 1, 0, 100000),
+    doclingOcrDocumentTimeoutS: int(env, 'KB_DOCLING_OCR_DOCUMENT_TIMEOUT_S', 1800, 60, 86400),
+    doclingOcrTotalTimeoutMs: int(env, 'KB_DOCLING_OCR_TOTAL_TIMEOUT_MS', 60 * 60000, 10000, 6 * 3600000)
+  }
+}
+
 function loadConfig(env = process.env) {
   const doclingUrl = String(env.DOCLING_URL || '').trim().replace(/\/+$/, '')
   if (doclingUrl && !/^https?:\/\//i.test(doclingUrl)) {
@@ -56,7 +83,7 @@ function loadConfig(env = process.env) {
     doclingUrl,
     doclingHealthTimeoutMs: int(env, 'FILE_KB_DOCLING_HEALTH_TIMEOUT_MS', 2000, 100, 30000),
     doclingApiKey: env.DOCLING_API_KEY || '',
-    doclingOcr: flag(env.KB_DOCLING_OCR, false),
+    ...doclingOcrConfig(env),
     doclingTotalTimeoutMs: int(env, 'KB_DOCLING_TOTAL_TIMEOUT_MS', 30 * 60000, 10000, 6 * 3600000),
     breakerThreshold: int(env, 'KB_BREAKER_THRESHOLD', 5, 1, 100),
     breakerOpenMs: int(env, 'KB_BREAKER_OPEN_MS', 60000, 1000, 3600000),

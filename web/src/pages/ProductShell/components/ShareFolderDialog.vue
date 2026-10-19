@@ -13,7 +13,9 @@
         <div :class="['resourceIcon', { room: isRoom, team: isTeam }]">
           <i
             :class="
-              isTeam
+              adapter && adapter.icon
+                ? adapter.icon
+                : isTeam
                 ? 'el-icon-office-building'
                 : isRoom
                 ? 'el-icon-document'
@@ -200,6 +202,15 @@
                 >勾选部门时自动选中全部成员</el-checkbox
               ><el-checkbox v-model="includeChildren"
                 >部门授权包含下属部门</el-checkbox
+              ><el-tooltip
+                v-if="adapter"
+                content="暂不可用：文件知识库尚未支持按部门或团队整体授权，保存时按所选成员逐人授权，部门后续新成员不会自动获得权限"
+                placement="top"
+                ><span class="adapterDisabledOption"
+                  ><el-checkbox :value="false" disabled
+                    >按部门/团队整体授权（暂不可用）</el-checkbox
+                  ></span
+                ></el-tooltip
               >
             </div>
             <div class="previewBox">
@@ -261,7 +272,7 @@
                   ><strong>{{ member.name || member.id }}</strong
                   ><small>{{ member.department || '成员' }}<template v-if="memberSourceLabel(member)"> · {{ memberSourceLabel(member) }}</template></small></span
                 ><span
-                  v-if="isOwnerRole(member.role) || readOnly"
+                  v-if="isOwnerRole(member.role) || readOnly || (adapter && member.inheritedOnly)"
                   class="ownerRoleLabel"
                   >{{ roleLabel(member.role) }}</span
                 ><el-select
@@ -411,6 +422,12 @@ export default {
       type: String,
       default: 'folder',
       validator: value => ['folder', 'room', 'team'].includes(value)
+    },
+    // Optional data adapter for non-mind-map resources (File KB). null keeps the
+    // folder/room/team service calls exactly as before.
+    adapter: {
+      type: Object,
+      default: null
     }
   },
   data: () => ({
@@ -478,6 +495,7 @@ export default {
       return item.title || item.name || ''
     },
     resourceLabel() {
+      if (this.adapter) return this.adapter.label || '资源'
       if (this.isTeam) return '团队'
       return this.isRoom ? '脑图' : '文件夹'
     },
@@ -485,12 +503,14 @@ export default {
       return `${this.resourceLabel}权限`
     },
     resourceDescription() {
+      if (this.adapter) return this.adapter.description || ''
       if (this.isTeam) return '权限将应用于整个团队空间与成员协作'
       return this.isRoom
         ? '修改当前脑图的成员设置；单独设置优先于文件夹和团队继承'
         : '权限应用于直属现有及后续脑图；子文件夹需要单独授权'
     },
     roleOptions() {
+      if (this.adapter) return this.adapter.roleOptions
       if (this.isTeam) {
         return [
           { value: 'member', title: '成员', caption: '参与团队协作' },
@@ -513,10 +533,11 @@ export default {
       return this.roleOptions.map(option => ({ ...option, label: option.title }))
     },
     defaultRole() {
+      if (this.adapter) return this.adapter.defaultRole || 'Viewer'
       return this.isTeam ? 'member' : this.isFolderManager ? 'Editor' : 'Manager'
     },
     isFolderManager() {
-      return !this.isRoom && !this.isTeam && this.members.some(member =>
+      return !this.adapter && !this.isRoom && !this.isTeam && this.members.some(member =>
         this.isCurrentUserMember(member) && String(member.role).toLowerCase() === 'manager') && !this.canTransferOwnership
     },
     memberByIdentity() {
@@ -853,6 +874,7 @@ export default {
       )
       items.forEach(item => map.set(String(item.userId || item.id), item))
       this.contacts = Array.from(map.values())
+      if (this.adapter && typeof this.adapter.noteContacts === 'function') this.adapter.noteContacts(items)
     },
     async loadDepartmentContacts(id) {
       id = String(id)
@@ -1142,6 +1164,7 @@ export default {
       return option ? option.value : role
     },
     isInheritedOnly(member) {
+      if (this.adapter) return !!(member && member.inheritedOnly)
       if (!this.isRoom) return false
       const hasPerFileSetting = member.aclV2 ? !!member.overrideRole : !!member.directRole
       return !hasPerFileSetting && !!(member.folderRole || member.teamRole)
@@ -1152,6 +1175,7 @@ export default {
       return ''
     },
     memberSourceLabel(member) {
+      if (this.adapter) return (member && member.sourceLabel) || ''
       if (!this.isRoom) return ''
       const parts = []
       const actual = String(member.role || '').toLowerCase()
@@ -1262,7 +1286,9 @@ export default {
       this.busy = true
       try {
         let members
-        if (this.isTeam) {
+        if (this.adapter) {
+          members = await this.adapter.transferOwnership(this.transferTargetId)
+        } else if (this.isTeam) {
           members = await teamService.transferOwnership(
             resourceId,
             this.transferTargetId
@@ -1300,7 +1326,8 @@ export default {
       this.busy = true
       try {
         let result
-        if (this.isTeam) result = await this.grantTeamSelection()
+        if (this.adapter) result = await this.grantAdapterSelection()
+        else if (this.isTeam) result = await this.grantTeamSelection()
         else if (this.isRoom) result = await this.grantRoomSelection()
         else result = await this.grantFolderSelection()
         if (version !== this.loadVersion) return
@@ -1330,6 +1357,31 @@ export default {
         role: this.role.toLowerCase(),
         onlyChanges: true
       }, { includeSummary: true })
+    },
+    // Same expansion as rooms: departments become per-user grants through the adapter.
+    async grantAdapterSelection() {
+      const version = this.loadVersion
+      const role = this.role
+      const departmentIds = Array.from(new Set(this.selectedDepartmentIds.reduce(
+        (all, id) => all.concat(this.descendantDepartmentIds(id)), [])))
+      const loadResults = await Promise.all(departmentIds.map(id => this.loadDepartmentContacts(id)))
+      if (loadResults.some(result => result === false)) throw new Error('部分部门成员加载失败，请重试后再授权')
+      if (version !== this.loadVersion) throw new Error('授权对象已切换，请重新选择')
+      const departmentUsers = this.selectedDepartmentIds.reduce(
+        (all, id) => all.concat(this.memberIdsForDepartment(id)), [])
+      const ownerIds = new Set(this.members.filter(member => this.isOwnerRole(member.role))
+        .map(member => String(member.id || member.userId)))
+      const selectedIds = Array.from(new Set(this.selectedUserIds.concat(departmentUsers).map(String)))
+      const userIds = selectedIds.filter(id => !ownerIds.has(id) && this.needsRoleChange(this.memberByIdentity.get(id)))
+      if (!userIds.length) {
+        if (selectedIds.length) return { changed: 0 }
+        throw new Error('所选部门暂无可授权成员')
+      }
+      for (let index = 0; index < userIds.length; index += 5) {
+        if (version !== this.loadVersion) throw new Error('授权对象已切换，请重新选择')
+        await Promise.all(userIds.slice(index, index + 5).map(id => this.adapter.grant(id, role)))
+      }
+      return { changed: userIds.length }
     },
     async grantRoomSelection() {
       const resourceId = this.resourceId
@@ -1457,7 +1509,8 @@ export default {
       const resourceId = this.resourceId
       const folder = this.folder
       let list
-      if (this.isTeam) list = await teamService.listMembers(resourceId)
+      if (this.adapter) list = await this.adapter.listMembers()
+      else if (this.isTeam) list = await teamService.listMembers(resourceId)
       else if (this.isRoom) list = await shareService.getMembers(resourceId)
       else {
         const result = await folderService.getMembers(resourceId)
@@ -1509,6 +1562,7 @@ export default {
     updateRole(member, role) {
       if (String(role).toLowerCase() === String(this.editableMemberRole(member)).toLowerCase()) return
       return this.run(() => {
+        if (this.adapter) return this.adapter.updateRole(member, role)
         if (this.isTeam)
           return teamService.updateMemberRole(
             this.resourceId,
@@ -1522,6 +1576,7 @@ export default {
     },
     remove(member) {
       return this.run(() => {
+        if (this.adapter) return this.adapter.remove(member)
         if (this.isTeam)
           return teamService.removeMember(this.resourceId, member.id)
         return this.isRoom
@@ -2050,6 +2105,10 @@ export default {
 .applicationSettings /deep/ .el-checkbox__label {
   font-size: 12px;
   color: #334b41;
+}
+.adapterDisabledOption {
+  display: inline-flex;
+  cursor: not-allowed;
 }
 .grantStats {
   display: grid;

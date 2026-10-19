@@ -459,17 +459,44 @@ function createApi({ pool, storage, queue, config, limiter, geekcloud = null }) 
       await access.assertNoCycle(pool, null, parent.id)
       parentPath = parent.path
     }
-    const r = await pool.query(
-      `insert into kb.folders (owner_id, parent_id, name, path) values ($1,$2,$3,$4) returning *`,
-      [user.id, parentId, name, `${parentPath.replace(/\/$/, '')}/${name}`])
-    send(res, 201, folderView(r.rows[0]))
+    const path = `${parentPath.replace(/\/$/, '')}/${name}`
+    if (body.reuse !== true) {
+      const r = await pool.query(
+        `insert into kb.folders (owner_id, parent_id, name, path) values ($1,$2,$3,$4) returning *`,
+        [user.id, parentId, name, path])
+      return send(res, 201, folderView(r.rows[0]))
+    }
+    // reuse: folder upload asks for "this name under this parent" and gets the existing folder
+    // when the caller can write into it. Serialized per (parent, name) so concurrent calls make one.
+    // At the root only the caller's own folders are reused; elsewhere any sibling the caller can edit.
+    const out = await withTx(pool, async c => {
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [`kb.folder.ensure:${parentId || 'root:' + user.id}:${name}`])
+      const same = await c.query(
+        `select * from kb.folders
+          where parent_id is not distinct from $1 and name = $2 and deleted_at is null
+            and ($1::uuid is not null or owner_id = $3)
+          order by created_at, id limit 20`, [parentId, name, user.id])
+      for (const row of same.rows) {
+        const role = await access.effectiveRole(c, 'folder', row.id, user)
+        if (access.rank(role) >= access.rank('editor')) return { status: 200, row: { ...row, role }, reused: true }
+      }
+      const r = await c.query(
+        `insert into kb.folders (owner_id, parent_id, name, path) values ($1,$2,$3,$4) returning *`,
+        [user.id, parentId, name, path])
+      return { status: 201, row: r.rows[0], reused: false }
+    })
+    send(res, out.status, { ...folderView(out.row), reused: out.reused })
   }
 
   async function listFolders(res, user, url) {
     const params = []
     const where = ['f.deleted_at is null', ownerClause(user, 'f', params, 'folder')]
     const parent = qp(url, 'parentId', 'parent_id')
-    if (!parent || parent === 'root') where.push('f.parent_id is null')
+    // Root = top-level folders plus visible folders whose parent the caller cannot see
+    // (e.g. a subfolder shared directly), so shared folders are reachable from the tree.
+    if (!parent || parent === 'root') {
+      where.push(`(f.parent_id is null or not exists (select 1 from kb.folders p where p.id = f.parent_id and p.deleted_at is null and ${ownerClause(user, 'p', params, 'folder')}))`)
+    }
     else { if (!UUID.test(parent)) throw new HttpError(400, 'bad_parent_id'); params.push(parent); where.push(`f.parent_id = $${params.length}`) }
     const cursor = url.searchParams.get('cursor')
     if (cursor) {

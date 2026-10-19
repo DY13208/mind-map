@@ -38,8 +38,8 @@
 | 方法 | 路径 | 前端函数 | 请求 | 响应 |
 |---|---|---|---|---|
 | GET | /health | health | – | `{ok,enabled,db:{ok,error?},docling:{ok,status},queue:{queued,running,failed},user:{id}}`。数据库失败时 HTTP 503，结构相同 |
-| GET | /folders | listFolders | `parent_id=root\|uuid&limit&cursor` | `{items:[{id,parentId,name,path,effectiveRole,inherit,hasChildren}],next_cursor}` |
-| POST | /folders | createFolder | `{name,parentId?}` | 201 folder。父级需要 editor |
+| GET | /folders | listFolders | `parent_id=root\|uuid&limit&cursor` | `{items:[{id,parentId,name,path,effectiveRole,inherit,hasChildren}],next_cursor}`。`root` 同时包含父级对当前用户不可见的文件夹（例如单独分享的子文件夹） |
+| POST | /folders | createFolder | `{name,parentId?,reuse?}` | 201 folder。父级需要 editor。`reuse:true`（文件夹上传用）：同一父级下已有同名且当前用户可编辑的文件夹时返回它（200，`reused:true`），按（父级, 名称）串行，并发也只建一个；根目录只沿用自己的文件夹 |
 | PATCH | /folders/:id | renameFolder | `{name,parentId?,updatedAt?}` | folder。改父级需要 manager，拒绝成环。时间戳不一致 409 `stale_update` |
 | DELETE | /folders/:id | deleteFolder | – | `{id,deleted:true}`。非空 409 `FOLDER_NOT_EMPTY`。需要 manager |
 | GET | /files | listFiles | `folder_id&q&status&limit&cursor`；轮询 `ids` 最多 50 个 | `{items:[{id,folderId,name,ext,mime,size,status,statusDetail,error,parseVersion,updatedAt}],next_cursor,total?}` |
@@ -65,6 +65,12 @@
 | PUT | /acl/:type/:id | putGrant | `{subjectType,subjectId,role}` | 同 GET。`role` 只能是 viewer、editor、manager。`owner` 为 400 `OWNER_SINGLE` |
 | DELETE | /acl/:type/:id | deleteGrant | `{subjectType,subjectId}` | 同 GET。不能删除所有者锚点（409 `OWNER_ANCHOR`） |
 | POST | /acl/:type/:id/transfer | transferOwner | `{userId}` | 同 GET，调用方视角变为新所有者。只改当前资源的 `owner_id`，不改子资源。原所有者变为该资源的 manager |
+
+上级文件夹所有者（迁移 009）：资源所在继承链（`resource_chain`，遇到 `inherit_acl=false` 截止）上任一文件夹的所有者，对该资源至少是 manager（可读写、授权，不能转移所有者）。`describeAcl` 为其返回 `{source:'inherited', via:'folder_owner', role:'manager', inheritedFrom}`，界面只读显示；同一人更低的直接授权 `applied:false`。没有拒绝类授权。
+
+文件夹上传：上传面板「选择文件夹」（`webkitdirectory`）或拖入目录（`webkitGetAsEntry`）。在当前选中的文件夹下按相对路径逐层 `POST /folders {reuse:true}`（父级完成后才建子级，同一路径只建一次，网络错误/超时/503/429 最多重试 2 次），再把文件按目标文件夹交给原上传队列（重试、去重、429 退避、批次不变）。跳过隐藏/系统文件（任意一级以 `.` 开头、`__MACOSX`、`~$` 锁文件、`.DS_Store`、`Thumbs.db`、`desktop.ini`），大小/类型不合格的文件不上传，只装着跳过文件的目录不建；单次最多 1000 个文件夹、32 层、读取 20000 个条目。去重仍按内容：同内容文件已在别的文件夹时返回已有文件，不会复制。
+
+权限界面：`KbPermissionDialog` 直接复用脑图的 `ShareFolderDialog`（`adapter` 属性，默认 `null` 时脑图行为不变），数据由 `services/kbAclAdapter.js` 转换。成员来自企业通讯录 `/api/wecom/contacts`，其 `id` 即主应用 `user_id`，直接作为 `subjectId`。部门只用于批量选人，保存时逐人 `PUT`（后续新成员不会自动获得）；「按部门/团队整体授权」显示为暂不可用（`kb.teams` 没有任何同步来源）。仅继承的授权只读，需到来源文件夹调整。没有 `grant` 能力时整页只读。角色：可查看=viewer、可编辑=editor、可管理=manager，所有者只能转移。
 
 外部客户端走 `/file-kb-mcp/mcp`，传输与脑图 MCP 相同：Streamable HTTP，`type: http`，`Authorization: Bearer`。调试器仍走登录会话的 `POST /mcp/call`，不把令牌放进调试参数。令牌管理页只在创建成功时显示一次明文，不写入 localStorage。复制用的长期模板使用环境变量 `FILE_KB_MCP_TOKEN`。
 

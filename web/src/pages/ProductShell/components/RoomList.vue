@@ -66,7 +66,7 @@
           @command="$emit($event, scope.row)"
           @click.native.stop
           ><i class="el-icon-more" /><el-dropdown-menu slot="dropdown"
-            ><el-dropdown-item v-if="scope.row.canManage !== false" command="rename">???</el-dropdown-item
+            ><el-dropdown-item v-if="scope.row.canManage !== false" command="rename">重命名</el-dropdown-item
             ><el-dropdown-item command="duplicate">创建副本</el-dropdown-item
             ><el-dropdown-item command="move">移动到文件夹</el-dropdown-item
             ><el-dropdown-item command="share">分享</el-dropdown-item

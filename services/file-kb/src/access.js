@@ -140,6 +140,25 @@ async function describeAcl(db, user, kind, id) {
   if (!ownerApplied) {
     // anchor row already added
   }
+  // 009: owners of ancestor folders (within the inherit chain) are at least manager here.
+  const anc = await db.query(
+    `select c.depth, fo.id, fo.name, fo.owner_id
+       from kb.resource_chain($1, $2) c
+       join kb.folders fo on c.target_kind = 'folder' and fo.id = c.target_id and fo.deleted_at is null
+      where c.depth > 0
+      order by c.depth asc`, [kind, id])
+  const floorSeen = new Set()
+  for (const row of anc.rows) {
+    if (!row.owner_id || row.owner_id === resource.owner_id || floorSeen.has(row.owner_id)) continue
+    floorSeen.add(row.owner_id)
+    for (const g of grants) {
+      if (g.subjectType === 'user' && g.subjectId === row.owner_id && rank(g.role) < RANK.manager) g.applied = false
+    }
+    grants.push({
+      subjectType: 'user', subjectId: row.owner_id, role: 'manager', source: 'inherited', via: 'folder_owner',
+      applied: true, inheritedFrom: { id: row.id, name: row.name || null }
+    })
+  }
   return {
     name: resource.name,
     inherit: resource.inherit_acl !== false,

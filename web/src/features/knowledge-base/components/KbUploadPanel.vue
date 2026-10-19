@@ -12,14 +12,28 @@
       @drop.prevent="onDrop"
     >
       <i class="el-icon-upload2 kb-drop-icon" aria-hidden="true" />
-      <div><strong>点击或拖拽文件到此处批量上传</strong></div>
+      <div><strong>点击或拖拽文件、文件夹到此处批量上传</strong></div>
       <div class="kb-drop-sub">支持 {{ extText }}，单个文件不超过 {{ maxText }}{{ limitSource === 'fallback' ? '（后端缺省值）' : '' }}</div>
       <div class="kb-drop-sub">
-        <el-button type="text" size="mini" @click.stop="pickFolder">选择文件夹</el-button>
-        <span>（只上传其中的文件，不保留子目录结构）</span>
+        <el-button type="text" size="mini" :disabled="folderBusy" @click.stop="pickFolder">选择文件夹</el-button>
+        <span>（保留子目录结构，建在「{{ folderLabel }}」下；跳过隐藏和系统文件）</span>
       </div>
       <input ref="input" type="file" multiple class="kb-hidden-input" @change="onPick" />
-      <input ref="folder" type="file" multiple webkitdirectory directory class="kb-hidden-input" @change="onPick" />
+      <input ref="folder" type="file" multiple webkitdirectory directory class="kb-hidden-input" @change="onPickFolder" />
+    </div>
+    <div v-if="folderJob" class="kb-folder-job">
+      <div class="kb-folder-job-main">
+        <strong>文件夹上传</strong>
+        <span class="kb-muted">{{ folderJobText }}</span>
+        <span class="kb-spacer" />
+        <el-button v-if="folderJob.phase === 'folders'" type="text" size="mini" :disabled="folderJob.cancelled" @click="folderJob.cancelled = true">{{ folderJob.cancelled ? '正在取消' : '取消' }}</el-button>
+        <el-button v-if="folderJob.phase === 'done'" type="text" size="mini" @click="folderJob = null">关闭</el-button>
+      </div>
+      <el-progress v-if="folderJob.phase === 'folders' && folderJob.dirsTotal" :percentage="Math.floor(folderJob.dirsDone * 100 / folderJob.dirsTotal)" :stroke-width="4" :show-text="false" />
+      <div v-if="folderJob.problems.length" class="kb-folder-job-list kb-thin-scroll">
+        <div v-for="(p, i) in folderJob.problems.slice(0, 50)" :key="i" class="kb-queue-note"><span class="kb-folder-job-path">{{ p.path }}</span>：{{ p.message }}</div>
+        <div v-if="folderJob.problems.length > 50" class="kb-muted">另有 {{ folderJob.problems.length - 50 }} 项未列出</div>
+      </div>
     </div>
     <div class="kb-batch-mode">
       <el-checkbox v-model="useBatch" :disabled="!batchAvailable || creatingBatch">作为批次任务上传</el-checkbox>
@@ -109,11 +123,15 @@ import {
   DEFAULT_CONCURRENCY, MAX_CONCURRENCY, DEFAULT_MAX_FILE_BYTES, ALLOWED_EXTS, PAGE_SIZE
 } from '../utils/uploadQueue'
 import { planBatches, clientKeyFor, sealDecision, localBatchSummary, defaultBatchName } from '../utils/batchState'
+import {
+  entriesFromInput, hasDirectoryEntry, collectDropped, planFolderUpload, ensureFolders, assignFolders, MAX_FOLDERS, MAX_SCAN_ENTRIES
+} from '../utils/folderUpload'
 
 export default {
   name: 'KbUploadPanel',
   props: {
     folderId: { type: String, default: '' },
+    folderLabel: { type: String, default: '当前文件夹' },
     defaultConcurrency: { type: Number, default: DEFAULT_CONCURRENCY }
   },
   data() {
@@ -123,7 +141,9 @@ export default {
       maxFileBytes: DEFAULT_MAX_FILE_BYTES, allowed: ALLOWED_EXTS, limitSource: 'fallback',
       batch: { supported: null, reason: '' }, useBatch: false, creatingBatch: false,
       // 本页面创建或补传的批次；批次本身的状态以 GET /batches/:id 为准
-      localBatches: []
+      localBatches: [],
+      // 当前这次文件夹上传：读取目录 → 逐层建文件夹 → 文件进入上传队列（之后的进度看队列）
+      folderJob: null
     }
   },
   computed: {
@@ -132,6 +152,17 @@ export default {
     pageRows() { return this.paged.rows },
     maxText() { return formatBytes(this.maxFileBytes) },
     extText() { return this.allowed.map(e => e.toUpperCase()).join('、') },
+    folderBusy() { return !!this.folderJob && (this.folderJob.phase === 'scanning' || this.folderJob.phase === 'folders') },
+    folderJobText() {
+      const j = this.folderJob
+      if (!j) return ''
+      if (j.phase === 'scanning') return '正在读取本地文件夹…'
+      if (j.phase === 'folders') return `正在创建文件夹 ${j.dirsDone} / ${j.dirsTotal}`
+      const parts = [`文件夹：新建 ${j.created} · 沿用已有 ${j.reused}` + (j.failedDirs ? ` · 失败 ${j.failedDirs}` : '')]
+      parts.push(`文件：加入上传队列 ${j.queued}` + (j.ignored ? ` · 跳过隐藏/系统文件 ${j.ignored}` : '') + (j.invalid ? ` · 未通过大小/类型检查 ${j.invalid}` : '') + (j.blocked ? ` · 因文件夹失败未上传 ${j.blocked}` : ''))
+      if (j.cancelled) parts.push('已取消')
+      return parts.join('；')
+    },
     batchAvailable() { return this.batch.supported === true && !this.batch.restricted },
     batchModeHint() {
       if (this.batch.supported == null) return '正在检查批次接口'
@@ -216,17 +247,86 @@ export default {
       this.add(Array.from(e.target.files || []))
       e.target.value = ''
     },
+    onPickFolder(e) {
+      const files = Array.from(e.target.files || [])
+      e.target.value = ''
+      if (files.length) this.uploadFolder({ entries: entriesFromInput(files) })
+    },
     onDrop(e) {
       this.dragging = false
-      this.add(Array.from((e.dataTransfer && e.dataTransfer.files) || []))
+      const dt = e.dataTransfer
+      // 目录必须在 drop 事件内同步取 entry；含目录时整体按文件夹上传（顶层散文件放到目标文件夹本身）
+      if (hasDirectoryEntry(dt)) {
+        if (this.folderBusy) return this.$message.warning('上一个文件夹还在创建目录，请稍候')
+        return this.uploadFolder({ scan: collectDropped(dt) })
+      }
+      this.add(Array.from((dt && dt.files) || []))
     },
-    async add(files) {
-      if (!files.length) return
-      if (!this.useBatch || !this.batchAvailable) return this.enqueue(files, '', this.folderId)
+    async uploadFolder({ entries = null, scan = null }) {
+      if (this.folderBusy) return this.$message.warning('上一个文件夹还在创建目录，请稍候')
+      const baseId = this.folderId
+      this.folderJob = { phase: 'scanning', dirsTotal: 0, dirsDone: 0, created: 0, reused: 0, failedDirs: 0, queued: 0, ignored: 0, invalid: 0, blocked: 0, problems: [], cancelled: false }
+      const job = this.folderJob
+      let emptyDirs = []
+      try {
+        if (scan) {
+          const r = await scan
+          entries = r.entries
+          emptyDirs = r.emptyDirs
+          job.ignored += r.ignored.length
+          r.errors.forEach(p => job.problems.push(p))
+          if (r.truncated) job.problems.push({ path: '（文件夹）', message: `条目超过 ${MAX_SCAN_ENTRIES} 个，只处理了前面的部分` })
+        }
+      } catch (e) {
+        job.phase = 'done'
+        job.problems.push({ path: '（文件夹）', message: '浏览器没有允许读取这个文件夹' })
+        return
+      }
+      if (this.destroyed) return
+      const plan = planFolderUpload(entries || [], {
+        emptyDirs, precheck: f => precheckFile(f, { maxFileBytes: this.maxFileBytes, allowed: this.allowed })
+      })
+      job.ignored += plan.ignored.length
+      job.invalid = plan.invalid.length
+      plan.invalid.forEach(p => job.problems.push(p))
+      if (plan.dirs.length > MAX_FOLDERS) {
+        job.phase = 'done'
+        job.problems.unshift({ path: '（文件夹）', message: `包含 ${plan.dirs.length} 个文件夹，超过单次上限 ${MAX_FOLDERS}，请分开上传，没有创建任何文件夹` })
+        return
+      }
+      job.phase = 'folders'
+      job.dirsTotal = plan.dirs.length
+      const made = await ensureFolders(plan.dirs, {
+        baseId,
+        create: body => kbApi.createFolder({ ...body, reuse: true }),
+        onStep: () => { job.dirsDone++ },
+        isCancelled: () => job.cancelled || this.destroyed
+      })
+      if (this.destroyed) return
+      job.created = made.created
+      job.reused = made.reused
+      job.failedDirs = Array.from(made.failed.values()).filter(m => m !== '已取消').length
+      made.failed.forEach((message, path) => { if (message !== '已取消') job.problems.push({ path: path + '/', message }) })
+      if (made.created) this.$emit('folders-changed', baseId)
+      const { ready, blocked } = assignFolders(plan.files, made.ids, made.failed)
+      job.phase = 'done'
+      if (job.cancelled) return
+      job.blocked = blocked.length
+      blocked.forEach(p => job.problems.push(p))
+      job.queued = ready.length
+      if (ready.length) await this.addPlanned(ready.map(f => ({ file: f.file, folderId: f.folderId, name: f.path })))
+    },
+    add(files) {
+      const folderId = this.folderId
+      return this.addPlanned(files.map(file => ({ file, folderId })))
+    },
+    // list: [{ file, folderId, name? }]；同一批次可以跨多个目标文件夹
+    async addPlanned(list) {
+      if (!list.length) return
+      if (!this.useBatch || !this.batchAvailable) return this.enqueueList(list, '')
       // 同一次选择里重复的文件只算一次，计划数 = 去重后的文件数（含本地预检不通过的，它们计入「未上传」）
       const seen = new Set()
-      const unique = files.filter(f => { const k = fileIdentity(f, this.folderId); if (seen.has(k)) return false; seen.add(k); return true })
-      const folderId = this.folderId
+      const unique = list.filter(x => { const k = fileIdentity(x.file, x.folderId); if (seen.has(k)) return false; seen.add(k); return true })
       this.creatingBatch = true
       try {
         let offset = 0
@@ -240,28 +340,52 @@ export default {
             if (this.destroyed) return
             const unknown = e.kind === 'network' || e.kind === 'timeout'
             this.$message.error(`批次创建失败：${e.message}。这 ${n} 个文件改为普通上传，不纳入批次${unknown ? '；请求结果未知，后端可能留下一个空批次，可在「批次任务」里取消' : ''}`)
-            this.enqueue(chunk, '', folderId)
+            this.enqueueList(chunk, '')
             continue
           }
           if (this.destroyed) return
           this.localBatches.push({ id: created.id, name: created.name, total: created.total, sealed: false, sealing: false, sealError: '', decision: 'wait', sum: localBatchSummary([]) })
-          this.enqueue(chunk, created.id, folderId)
+          this.enqueueList(chunk, created.id)
           this.$emit('batch-changed', created)
         }
       } finally {
         this.creatingBatch = false
       }
     },
-    enqueue(files, batchId, folderId) {
+    enqueue(files, batchId, folderId, { quiet = false, names = null } = {}) {
       const opts = { maxFileBytes: this.maxFileBytes, allowed: this.allowed }
       const { skipped, revived } = this.queue.add(files, {
-        folderId, batchId, clientKey: f => clientKeyFor(f, folderId), precheck: f => precheckFile(f, opts)
+        folderId, batchId, clientKey: f => clientKeyFor(f, folderId), precheck: f => precheckFile(f, opts),
+        nameOf: names ? f => names.get(f) : null
       })
-      const notes = []
-      if (skipped.length) notes.push(`${skipped.length} 个文件已在队列中，已跳过`)
-      if (revived.length) notes.push(`${revived.length} 个之前失败或取消的文件已重新排队`)
-      if (notes.length) this.$message.info(notes.join('；'))
+      if (!quiet) this.notifyQueued(skipped.length, revived.length)
+      if (batchId && !quiet) this.checkSeal(batchId)
+      return { skipped: skipped.length, revived: revived.length }
+    },
+    // 按目标文件夹分组入队；所有分组入队后再判断批次封口
+    enqueueList(list, batchId) {
+      const groups = new Map()
+      list.forEach(x => {
+        const k = x.folderId || ''
+        if (!groups.has(k)) groups.set(k, [])
+        groups.get(k).push(x)
+      })
+      let skipped = 0
+      let revived = 0
+      groups.forEach((xs, folderId) => {
+        const names = new Map(xs.filter(x => x.name).map(x => [x.file, x.name]))
+        const r = this.enqueue(xs.map(x => x.file), batchId, folderId, { quiet: true, names: names.size ? names : null })
+        skipped += r.skipped
+        revived += r.revived
+      })
+      this.notifyQueued(skipped, revived)
       if (batchId) this.checkSeal(batchId)
+    },
+    notifyQueued(skipped, revived) {
+      const notes = []
+      if (skipped) notes.push(`${skipped} 个文件已在队列中，已跳过`)
+      if (revived) notes.push(`${revived} 个之前失败或取消的文件已重新排队`)
+      if (notes.length) this.$message.info(notes.join('；'))
     },
     // 向已有的未封口批次补传（例如刷新后本地队列已清空）。同一文件得到同一个 client_key，后端按已上传处理
     addToBatch(files, status) {
@@ -515,4 +639,17 @@ export default {
   &.is-active { color: var(--ui-primary); }
 }
 .kb-queue-pager { margin-top: 6px; }
+.kb-folder-job {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--ui-border);
+  border-left: 3px solid var(--ui-primary);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface);
+  font-size: 13px;
+  strong { font-weight: 600; }
+}
+.kb-folder-job-main { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.kb-folder-job-list { max-height: 160px; overflow: auto; margin-top: 6px; }
+.kb-folder-job-path { word-break: break-all; }
 </style>

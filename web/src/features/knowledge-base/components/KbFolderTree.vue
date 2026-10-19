@@ -28,7 +28,7 @@
       :props="treeProps"
       :expand-on-click-node="false"
       highlight-current
-      empty-text="暂无文件夹"
+      empty-text="暂无文件夹：点右上角新建，或在上传面板选择文件夹上传"
       @node-click="onNodeClick"
     >
       <span slot-scope="{ node, data }" class="kb-tree-node" :class="{ 'is-more': data.__more }">

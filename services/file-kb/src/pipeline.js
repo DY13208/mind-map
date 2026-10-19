@@ -59,7 +59,7 @@ function createPipeline({ pool, queue, storage, docling, nativeLightParse = fals
     let cancelled=false
     await queue.withFence(job, async c => {
       await c.query(`update kb.parse_runs set raw_json_key = $2, docling_status = $3, stats = stats || $4 where id = $1`,
-        [job.run_id, rawKey, out.status, { parser: native ? (file.ext === 'xlsx' ? 'exceljs' : 'native-markdown') : 'docling', doclingErrors: out.errors.length, processingTime: out.processingTime }])
+        [job.run_id, rawKey, out.status, { parser: native ? (file.ext === 'xlsx' ? 'exceljs' : 'native-markdown') : 'docling', doclingErrors: out.errors.length, processingTime: out.processingTime, ...(out.ocr ? { ocr: out.ocr } : {}) }])
       await queue.complete(c, job)
       const batch=job.batch_id?(await c.query('select control from kb.batches where id=$1 for update',[job.batch_id])).rows[0]:null
       if(batch?.control==='cancelled'){

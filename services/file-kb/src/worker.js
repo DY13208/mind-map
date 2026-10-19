@@ -63,10 +63,14 @@ if (require.main === module) {
     const docling = createDoclingClient({
       baseUrl: config.doclingUrl, apiKey: config.doclingApiKey, doOcr: config.doclingOcr,
       breaker: createBreaker({ threshold: config.breakerThreshold, openMs: config.breakerOpenMs }),
-      totalTimeoutMs: config.doclingTotalTimeoutMs
+      totalTimeoutMs: config.doclingTotalTimeoutMs,
+      ocrMode: config.doclingOcrMode, ocrEngine: config.doclingOcrEngine, ocrLang: config.doclingOcrLang,
+      ocrForce: config.doclingOcrForce, ocrDocumentTimeoutS: config.doclingOcrDocumentTimeoutS,
+      ocrTotalTimeoutMs: config.doclingOcrTotalTimeoutMs, ocrMinCharsPerPage: config.doclingOcrMinCharsPerPage,
+      ocrTextlessPageRatio: config.doclingOcrTextlessPagePct / 100, ocrMixedMinPages: config.doclingOcrMixedMinPages
     })
     const w = createWorker({ pool, config, docling })
-    w.start().then(() => console.log(`[file-kb-worker] ${config.workerId} started concurrency=${config.concurrency} lease=${config.leaseMs}ms`))
+    w.start().then(() => console.log(`[file-kb-worker] ${config.workerId} started concurrency=${config.concurrency} lease=${config.leaseMs}ms ocr=${config.doclingOcrMode}/${config.doclingOcrEngine}`))
     const stop = async () => { await w.stop(); await pool.end().catch(() => {}); process.exit(0) }
     process.on('SIGTERM', stop)
     process.on('SIGINT', stop)

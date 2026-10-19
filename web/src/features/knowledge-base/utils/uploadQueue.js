@@ -221,7 +221,8 @@ export function createUploadQueue(opts = {}) {
         key: `u${++seq}`,
         identity,
         file,
-        name: file.name,
+        // 文件夹上传时显示相对路径（如「报表/2026/a.xlsx」）
+        name: (extra.nameOf && extra.nameOf(file)) || file.name,
         size: Number(file.size) || 0,
         folderId: extra.folderId || '',
         // 批次上传：同一批次内 clientKey 稳定，重试和补传都带同一个 key，后端据此幂等
