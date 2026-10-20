@@ -138,7 +138,7 @@ smart-query 与 MCP 工具 `smart_knowledge_query` 返回同一结构：
 - 503 视为请求未进入上传处理（认证不可用或无上游），502/504/网络中断视为「可能已被后端接收」。字节已全部发出后被取消的文件，提示「后端可能已接收，请以文件列表为准」。
 - 同一文件（名称 + 大小 + 修改时间 + 目标文件夹）在本地队列里只保留一项：重复选择时跳过；之前失败或取消的同一文件再次选择时重新排队原项。
 - 单文件上限：后端没有暴露运行时值。前端读 `GET /health` 的 `limits.maxFileBytes`（**待后端支持**），没有就回退到后端代码缺省 100 MiB（`config.js` `KB_MAX_FILE_BYTES`）。已删除旧的 200MB 前端默认值。
-- 允许类型：与 `limits.js#ALLOWED` 一致：pdf docx pptx xlsx xls csv html htm md png jpg jpeg tif tiff bmp webp。前端本地预检扩展名/空文件/超限，后端仍会校验文件头。
+- 允许类型：与 `limits.js#ALLOWED` 一致：pdf docx pptx xlsx xls csv html htm md txt png jpg jpeg tif tiff bmp webp。前端本地预检扩展名/空文件/超限，后端仍会校验文件头。TXT 由 worker 本地解析，支持 UTF-8、UTF-16 和 GB18030。
 - 每个文件的反馈按后端 code：`duplicate`（去重命中）、`unsupported_type`、`file_too_large`、`empty_file`、`content_type_mismatch`、`too_many_files`、`batch_too_large`、`folder_required`、`missing`（文件夹不存在/无权）、`forbidden`、网络异常、超时、取消。响应同时有 `files` 和 `rejected` 时显示为部分成功。
 - 状态：排队中 / 上传中(%) / 已上传·等待解析 / 解析中 / 结构化入库中 / 完成 / 部分完成 / 解析失败 / 失败 / 已取消。上传后的状态只来自 `GET /files?ids=`（每次 ≤50 个；先查当前可见页，再轮转一片其余进行中的项），不在本地伪造。
 - 列表每页 50 条，只渲染当前页；队列项不做 Vue 响应式，进度渲染节流 200ms。

@@ -55,7 +55,7 @@ function loadConfig(env = process.env) {
   }
   let formatConcurrency
   try { formatConcurrency=JSON.parse(env.KB_FORMAT_CONCURRENCY || '{}') } catch (_) { throw new Error('KB_FORMAT_CONCURRENCY must be JSON') }
-  if(!formatConcurrency || Array.isArray(formatConcurrency) || typeof formatConcurrency!=='object' || Object.entries(formatConcurrency).some(([ext,n])=>!['pdf','docx','xlsx','pptx','md','csv','png','jpg','jpeg','tif','tiff','bmp','webp','html','htm','xls'].includes(ext)||!Number.isInteger(n)||n<1||n>8))throw new Error('invalid KB_FORMAT_CONCURRENCY limits')
+  if(!formatConcurrency || Array.isArray(formatConcurrency) || typeof formatConcurrency!=='object' || Object.entries(formatConcurrency).some(([ext,n])=>!['pdf','docx','xlsx','pptx','md','txt','csv','png','jpg','jpeg','tif','tiff','bmp','webp','html','htm','xls'].includes(ext)||!Number.isInteger(n)||n<1||n>8))throw new Error('invalid KB_FORMAT_CONCURRENCY limits')
   return {
     enabled: flag(env.FILE_KB_ENABLED, false),
     host: env.FILE_KB_HOST || '0.0.0.0',

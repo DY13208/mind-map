@@ -7,6 +7,7 @@ const { structureExcel } = require('./structurer/excel')
 const { DoclingUnavailableError, BreakerOpenError } = require('./docling/client')
 const { LeaseLostError } = require('./queue')
 const { instrumentPool, measured, scope } = require('./metrics')
+const { parseTextFile } = require('./text')
 const fs = require('fs')
 
 const BATCH = 1000
@@ -45,9 +46,10 @@ function createPipeline({ pool, queue, storage, docling, nativeLightParse = fals
       c.query(`update kb.parse_runs set status = 'running', started_at = coalesce(started_at, now()) where id = $1`, [job.run_id])
     ]))
     const filePath = storage.resolveKey(file.storage_key)
-    const native = nativeLightParse && ['xlsx','md'].includes(file.ext) && Number(file.size)<=nativeLightMaxBytes
+    // TXT is always parsed locally: Docling has no plain-text input format and no OCR/layout work is needed.
+    const native = file.ext === 'txt' || (nativeLightParse && ['xlsx','md'].includes(file.ext) && Number(file.size)<=nativeLightMaxBytes)
     const out = native ? {
-      json: { nativeBlocks: file.ext === 'md' ? [{seq:0,type:'paragraph',text:await fs.promises.readFile(filePath,'utf8'),page:null,bbox:null,heading_path:[],table:null}] : [] },
+      json: { nativeBlocks: file.ext === 'txt' ? await parseTextFile(filePath) : file.ext === 'md' ? [{seq:0,type:'paragraph',text:await fs.promises.readFile(filePath,'utf8'),page:null,bbox:null,heading_path:[],table:null}] : [] },
       status:'native_success',errors:[],processingTime:0
     } : await docling.convertFile({
       filePath, fileName: file.name, ext: file.ext,
@@ -59,7 +61,7 @@ function createPipeline({ pool, queue, storage, docling, nativeLightParse = fals
     let cancelled=false
     await queue.withFence(job, async c => {
       await c.query(`update kb.parse_runs set raw_json_key = $2, docling_status = $3, stats = stats || $4 where id = $1`,
-        [job.run_id, rawKey, out.status, { parser: native ? (file.ext === 'xlsx' ? 'exceljs' : 'native-markdown') : 'docling', doclingErrors: out.errors.length, processingTime: out.processingTime, ...(out.ocr ? { ocr: out.ocr } : {}) }])
+        [job.run_id, rawKey, out.status, { parser: native ? (file.ext === 'xlsx' ? 'exceljs' : file.ext === 'txt' ? 'native-text' : 'native-markdown') : 'docling', doclingErrors: out.errors.length, processingTime: out.processingTime, ...(out.ocr ? { ocr: out.ocr } : {}) }])
       await queue.complete(c, job)
       const batch=job.batch_id?(await c.query('select control from kb.batches where id=$1 for update',[job.batch_id])).rows[0]:null
       if(batch?.control==='cancelled'){

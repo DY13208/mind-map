@@ -9,6 +9,7 @@ const ALLOWED = {
   html: { mime: 'text/html', magic: null },
   htm: { mime: 'text/html', magic: null },
   md: { mime: 'text/markdown', magic: null },
+  txt: { mime: 'text/plain', magic: null },
   png: { mime: 'image/png', magic: [[0x89, 0x50, 0x4e, 0x47]] },
   jpg: { mime: 'image/jpeg', magic: [[0xff, 0xd8, 0xff]] },
   jpeg: { mime: 'image/jpeg', magic: [[0xff, 0xd8, 0xff]] },
@@ -36,6 +37,8 @@ function checkMagic(ext, head) {
   if (!spec) return false
   if (!spec.magic) {
     // text formats: reject NUL bytes in the first chunk
+    if (ext === 'txt' && head.length >= 2 &&
+        ((head[0] === 0xff && head[1] === 0xfe) || (head[0] === 0xfe && head[1] === 0xff))) return true
     return !head.subarray(0, 4096).includes(0)
   }
   return spec.magic.some(sig => sig.every((b, i) => head[i] === b))

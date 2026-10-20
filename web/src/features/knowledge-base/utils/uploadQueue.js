@@ -7,7 +7,7 @@ export const MAX_CONCURRENCY = 6
 // 后端 services/file-kb/src/config.js：KB_MAX_FILE_BYTES 缺省 100 MiB。运行时值后端暂未暴露（见 CONTRACT.md 待后端支持）。
 export const DEFAULT_MAX_FILE_BYTES = 100 * 1024 * 1024
 // 与后端 services/file-kb/src/limits.js#ALLOWED 的扩展名一致（后端还会校验文件头）
-export const ALLOWED_EXTS = ['pdf', 'docx', 'pptx', 'xlsx', 'xls', 'csv', 'html', 'htm', 'md', 'png', 'jpg', 'jpeg', 'tif', 'tiff', 'bmp', 'webp']
+export const ALLOWED_EXTS = ['pdf', 'docx', 'pptx', 'xlsx', 'xls', 'csv', 'html', 'htm', 'md', 'txt', 'png', 'jpg', 'jpeg', 'tif', 'tiff', 'bmp', 'webp']
 export const PAGE_SIZE = 50
 
 export function clampConcurrency(n) {

@@ -36,6 +36,7 @@ export function fileKind(file) {
   if (mime.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp)$/.test(name)) return 'image'
   if (/sheet|excel|csv/.test(mime) || /\.(xlsx|xls|csv)$/.test(name)) return 'sheet'
   if (mime.includes('markdown') || /\.(md|markdown)$/.test(name) || String(file && file.ext).toLowerCase() === 'md') return 'markdown'
+  if (mime.startsWith('text/') || /\.(txt|html?)$/.test(name)) return 'text'
   return 'other'
 }
 export function kbEnabled() {
