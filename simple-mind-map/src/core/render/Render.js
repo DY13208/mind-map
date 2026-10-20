@@ -981,6 +981,47 @@ class Render {
     return publish(new ViewportIndex(items))
   }
 
+  // 编辑中/已激活节点及其祖先：视口剔除时不得卸 DOM，否则会出现
+  // 「数据还在、搜索能命中、画布空白，刷新才恢复」的假丢失。
+  collectPinnedViewportNodes() {
+    const pinned = new Set()
+    const addWithAncestors = node => {
+      let cur = node
+      while (cur) {
+        pinned.add(cur)
+        cur = cur.parent || null
+      }
+    }
+    ;(this.activeNodeList || []).forEach(addWithAncestors)
+    if (
+      this.textEdit &&
+      typeof this.textEdit.isShowTextEdit === 'function' &&
+      this.textEdit.isShowTextEdit() &&
+      this.textEdit.currentNode
+    ) {
+      addWithAncestors(this.textEdit.currentNode)
+    }
+    const richText = this.mindMap && this.mindMap.richText
+    if (richText && richText.showTextEdit && richText.node) {
+      addWithAncestors(richText.node)
+    }
+    return pinned
+  }
+
+  getPinnedViewportNodesCached() {
+    const gen = this._renderGeneration || 0
+    if (this._pinnedViewportNodesGen === gen && this._pinnedViewportNodesCache) {
+      return this._pinnedViewportNodesCache
+    }
+    this._pinnedViewportNodesGen = gen
+    this._pinnedViewportNodesCache = this.collectPinnedViewportNodes()
+    return this._pinnedViewportNodesCache
+  }
+
+  isNodeGroupAttached(node) {
+    return !!(node && node.group && node.group.node && node.group.node.parentNode)
+  }
+
   async paintViewport(changedNodes) {
     if (!this._viewportIndex || this._destroyed) return false
     const token = this._viewportPaintToken = (this._viewportPaintToken || 0) + 1
@@ -994,10 +1035,16 @@ class Render {
     const candidates = this._viewportIndex.query(viewport)
     const nodes = new Set(candidates.filter(item => item.node).map(item => item.node))
     nodes.add(this.root)
+    // 视口重绘时必须用最新激活/编辑集；布局 DFS 里再用 generation 缓存
+    this._pinnedViewportNodesCache = null
+    const pinned = this.collectPinnedViewportNodes()
+    this._pinnedViewportNodesGen = this._renderGeneration || 0
+    this._pinnedViewportNodesCache = pinned
+    pinned.forEach(node => nodes.add(node))
     const edges = new Set(candidates.filter(item => item.element))
     const tasks = []
     ;(this._visibleViewportNodes || []).forEach(node => {
-      if (!nodes.has(node)) tasks.push(() => {
+      if (!nodes.has(node) && !pinned.has(node)) tasks.push(() => {
         if (node.group) node.group.remove()
         this._visibleViewportNodes.delete(node)
       })
@@ -1009,9 +1056,18 @@ class Render {
       })
     })
     nodes.forEach(node => {
-      if (changedNodes && !changedNodes.has(node) && this._visibleViewportNodes.has(node)) return
+      // 已标记可见但 group 已被卸掉时必须补挂，否则会一直「搜得到却看不见」
+      const attached = this.isNodeGroupAttached(node)
+      if (
+        changedNodes &&
+        !changedNodes.has(node) &&
+        this._visibleViewportNodes.has(node) &&
+        attached
+      ) {
+        return
+      }
       tasks.push(() => {
-      node.render(() => {}, false, false, true, true)
+      node.render(() => {}, pinned.has(node), false, true, true)
       this._visibleViewportNodes.add(node)
       })
     })
@@ -3357,6 +3413,17 @@ class Render {
       if (targetNode) {
         targetNode.active()
         this.moveNodeToCenter(targetNode)
+        // 性能模式下 group 可能已被视口剔除；居中后强制补绘，避免搜索定位空白
+        if (this.mindMap.opt.openPerformance) {
+          if (!this.isNodeGroupAttached(targetNode)) {
+            targetNode.render(() => {}, true)
+          }
+          if (this._viewportIndex && !this.isRendering) {
+            this.paintViewport(new Set([targetNode])).catch(error =>
+              this.mindMap.opt.errorHandler('render_error', error)
+            )
+          }
+        }
         callback(targetNode)
       }
     })
