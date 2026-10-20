@@ -4,6 +4,7 @@
     :data="items"
     class="roomTable"
     row-key="__key"
+    :row-class-name="rowClassName"
     @row-click="openItem"
     @selection-change="onSelectionChange"
     ><el-table-column
@@ -100,6 +101,7 @@ export default {
     selectMode: { type: Boolean, default: false },
     selectedRoomKeys: { type: Array, default: () => [] },
     selectedFolderIds: { type: Array, default: () => [] },
+    highlightRoomKey: { type: String, default: '' },
     canSelectFolder: { type: Function, default: () => true },
     canSelectRoom: { type: Function, default: () => true }
   },
@@ -131,6 +133,12 @@ export default {
     items: 'syncTableSelection'
   },
   methods: {
+    rowClassName({ row }) {
+      return row.__kind === 'room' &&
+        String(row.roomKey || row.id) === String(this.highlightRoomKey)
+        ? 'is-return-highlighted'
+        : ''
+    },
     rowSelectable(row) {
       return row.__kind === 'folder'
         ? this.canSelectFolder(row)
@@ -193,6 +201,10 @@ export default {
   overflow: hidden;
   /deep/ .el-table__row {
     cursor: pointer;
+  }
+  /deep/ .el-table__row.is-return-highlighted > td {
+    background-color: var(--ui-primary-soft, rgba(54, 129, 97, 0.12));
+    transition: background-color 220ms ease-out;
   }
   .roomName {
     display: flex;

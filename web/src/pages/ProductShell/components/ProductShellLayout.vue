@@ -2,18 +2,20 @@
   <div
     class="productShell"
     :class="{
-      'productShell--collapsed': !hideSidebar && sidebarCollapsed,
+      'productShell--collapsed': shellMode === 'full' && sidebarCollapsed,
       'productShell--solo': hideSidebar,
+      'productShell--focus': shellMode === 'focus',
+      'productShell--embed': shellMode === 'embed',
       'productShell--dark': isDarkTheme
     }"
   >
     <button
-      v-if="!hideSidebar && !sidebarCollapsed"
+      v-if="shellMode === 'full' && !sidebarCollapsed"
       class="sidebarBackdrop"
       aria-label="关闭展开的侧栏"
       @click="setSidebarCollapsed(true)"
     />
-    <aside v-if="!hideSidebar" class="productSidebar">
+    <aside v-if="shellMode === 'full'" class="productSidebar">
       <div class="sidebarHeader">
         <div
           v-if="!sidebarCollapsed"
@@ -80,62 +82,19 @@
           </svg>
         </button>
       </div>
-      <nav id="product-navigation" aria-label="产品导航">
-        <p class="navLabel">文件</p>
-        <router-link
-          v-for="item in fileNav"
-          :key="item.path"
-          :to="item.path"
-          :title="item.label"
-          :aria-label="item.label"
-          ><i :class="item.icon"></i>{{ item.label }}</router-link
+      <ProductNavigation :file-nav="fileNav" :kb-enabled="kbEnabled" />
+      <div class="sidebarModeSwitch">
+        <button
+          type="button"
+          title="进入专注模式"
+          aria-label="进入专注模式"
+          data-testid="shell-focus-mode"
+          @click="switchShellMode('focus')"
         >
-        <p class="navLabel navLabel--space">空间</p>
-        <router-link to="/spaces" title="我的团队" aria-label="我的团队"
-          ><i class="el-icon-office-building"></i>我的团队</router-link
-        >
-        <router-link to="/sop" title="SOP台账" aria-label="SOP台账"
-          ><i class="el-icon-notebook-2"></i>SOP台账</router-link
-        >
-        <router-link to="/assistant" title="助理" aria-label="助理"
-          ><i class="el-icon-chat-dot-round"></i>助理</router-link
-        >
-        <router-link
-          v-if="kbEnabled"
-          to="/kb"
-          title="文件知识库"
-          aria-label="文件知识库"
-          ><i class="el-icon-collection"></i>文件知识库</router-link
-        >
-        <p class="navLabel navLabel--space">工具</p>
-        <router-link
-          to="/mcp-access"
-          title="获取 MCP 配置"
-          aria-label="获取 MCP 配置"
-        >
-          <i class="el-icon-connection" aria-hidden="true"></i>
-          <span>MCP 接入</span>
-        </router-link>
-        <a
-          href="https://xx.stillgroup.net:3030/dashboard"
-          target="_blank"
-          rel="noopener noreferrer"
-          title="Cognee 知识图谱（新标签页打开）"
-          aria-label="Cognee 知识图谱（新标签页打开）"
-        >
-          <i class="el-icon-search" aria-hidden="true"></i>
-          <span>Cognee</span>
-        </a>
-        <router-link
-          to="/graph"
-          title="wiki-compiler"
-          aria-label="wiki-compiler"
-          data-testid="nav-wiki-compiler"
-        >
-          <i class="el-icon-share" aria-hidden="true"></i>
-          <span>wiki-compiler</span>
-        </router-link>
-      </nav>
+          <i class="el-icon-full-screen" aria-hidden="true"></i>
+          <span>专注模式</span>
+        </button>
+      </div>
       <AccessNotificationTrigger v-if="profile" :key="profile.id" :collapsed="sidebarCollapsed" class="sidebarNotifications" />
       <div class="sidebarFooter" v-if="profile">
         <div
@@ -172,8 +131,70 @@
       </div>
     </aside>
     <main class="productMain">
+      <div v-if="shellMode === 'focus'" class="shellModeToolbar" role="group" aria-label="页面导航模式">
+        <button
+          ref="navigationTrigger"
+          type="button"
+          class="shellModeButton shellModeButton--navigation"
+          aria-label="打开导航菜单"
+          aria-haspopup="dialog"
+          :aria-expanded="navigationOpen ? 'true' : 'false'"
+          @click="openNavigation"
+        >
+          <i class="el-icon-menu" aria-hidden="true"></i>
+          <span>导航</span>
+        </button>
+        <button
+          type="button"
+          class="shellModeButton"
+          title="恢复完整侧栏"
+          data-testid="shell-full-mode"
+          @click="switchShellMode('full')"
+        >
+          <i class="el-icon-s-fold" aria-hidden="true"></i>
+          <span>完整模式</span>
+        </button>
+      </div>
       <router-view />
     </main>
+    <el-drawer
+      v-if="shellMode === 'focus'"
+      :visible.sync="navigationOpen"
+      size="288px"
+      direction="ltr"
+      :with-header="false"
+      :wrapper-closable="true"
+      :close-on-press-escape="true"
+      :append-to-body="false"
+      custom-class="productNavigationDrawer"
+      @opened="focusNavigationStart"
+      @closed="restoreNavigationFocus"
+    >
+      <div
+        class="navigationDrawerContent"
+        role="dialog"
+        aria-modal="true"
+        aria-label="导航菜单"
+        tabindex="-1"
+      >
+        <div class="navigationDrawerHeader">
+          <strong>导航</strong>
+          <button
+            type="button"
+            class="shellModeButton"
+            aria-label="关闭导航菜单"
+            @click="closeNavigation"
+          >
+            <i class="el-icon-close" aria-hidden="true"></i>
+          </button>
+        </div>
+        <ProductNavigation
+          :file-nav="fileNav"
+          :kb-enabled="kbEnabled"
+          @navigate="closeNavigation"
+        />
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -183,6 +204,8 @@ import { logoutAndRedirect } from '@/utils/auth'
 import UserAvatar from '@/components/UserAvatar.vue'
 import AccessNotificationTrigger from '@/components/AccessNotificationTrigger.vue'
 import { shellTheme, applyShellThemeToRoot } from '@/utils/shellTheme'
+import { resolveShellMode } from '@/utils/shellMode'
+import ProductNavigation from './ProductNavigation.vue'
 const SIDEBAR_PREFERENCE_KEY = 'product-shell-sidebar-collapsed'
 const isSmallScreen = () => window.matchMedia('(max-width: 760px)').matches
 const readSidebarPreference = () => {
@@ -195,13 +218,15 @@ const readSidebarPreference = () => {
 }
 export default {
   name: 'ProductShellLayout',
-  components: { UserAvatar, AccessNotificationTrigger },
+  components: { UserAvatar, AccessNotificationTrigger, ProductNavigation },
   data() {
     const preference = readSidebarPreference()
     return {
       sidebarCollapsed: preference === null ? isSmallScreen() : preference,
       hasSidebarPreference: preference !== null,
       profile: null,
+      navigationOpen: false,
+      navigationTrigger: null,
       fileNav: [
         { path: '/files/recent', label: '最近', icon: 'el-icon-time' },
         { path: '/files', label: '脑图', icon: 'el-icon-files' },
@@ -213,15 +238,16 @@ export default {
     }
   },
   computed: {
+    shellMode() {
+      return resolveShellMode(this.$route)
+    },
     kbEnabled() {
       const runtime = typeof window !== 'undefined' && window.__MIND_MAP_RUNTIME__
       if (!runtime || runtime.FILE_KB_UI_ENABLED == null) return true
       return runtime.FILE_KB_UI_ENABLED === true
     },
     hideSidebar() {
-      return this.$route.matched.some(
-        record => record.meta && record.meta.hideSidebar
-      )
+      return this.shellMode !== 'full'
     },
     isDarkTheme() {
       return shellTheme.theme === 'dark'
@@ -235,6 +261,19 @@ export default {
   beforeDestroy() {
     applyShellThemeToRoot(false)
     window.removeEventListener('resize', this.updateAutoSidebar)
+    document.removeEventListener('keydown', this.onNavigationKeydown)
+  },
+  watch: {
+    navigationOpen(open) {
+      if (open) document.addEventListener('keydown', this.onNavigationKeydown)
+      else document.removeEventListener('keydown', this.onNavigationKeydown)
+    },
+    '$route.fullPath'() {
+      if (this.navigationOpen) this.closeNavigation()
+    },
+    shellMode(mode) {
+      if (mode !== 'focus' && this.navigationOpen) this.closeNavigation()
+    }
   },
   methods: {
     updateAutoSidebar() {
@@ -242,6 +281,68 @@ export default {
     },
     openProfile() {
       if (this.$route.path !== '/profile') this.$router.push('/profile')
+    },
+    switchShellMode(mode) {
+      if (mode === this.shellMode) return
+      return this.$router.push({
+        path: this.$route.path,
+        query: { ...this.$route.query, shell: mode },
+        hash: this.$route.hash
+      })
+    },
+    openNavigation(event) {
+      if (event && event.currentTarget) {
+        this.navigationTrigger = event.currentTarget
+      }
+      this.navigationOpen = true
+    },
+    closeNavigation() {
+      this.navigationOpen = false
+    },
+    focusNavigationStart() {
+      this.$nextTick(() => {
+        const firstLink = document.querySelector(
+          '.productNavigationDrawer .productNavigation a'
+        )
+        if (firstLink && typeof firstLink.focus === 'function') firstLink.focus()
+      })
+    },
+    restoreNavigationFocus() {
+      this.$nextTick(() => {
+        const trigger = this.$refs.navigationTrigger || this.navigationTrigger
+        if (trigger && typeof trigger.focus === 'function') trigger.focus()
+      })
+    },
+    onNavigationKeydown(event) {
+      if (!this.navigationOpen) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        this.closeNavigation()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const drawer = document.querySelector('.productNavigationDrawer')
+      if (!drawer) return
+      const focusable = Array.from(
+        drawer.querySelectorAll(
+          'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter(element => element.getClientRects().length > 0)
+      if (focusable.length === 0) {
+        event.preventDefault()
+        return
+      }
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement
+      if (event.shiftKey && (active === first || !drawer.contains(active))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (active === last || !drawer.contains(active))) {
+        event.preventDefault()
+        first.focus()
+      }
     },
     async signOut() {
       if (this.loggingOut) return
@@ -342,6 +443,75 @@ export default {
 }
 .productShell .sidebarToggleIcon {
   display: block;
+}
+.productShell .sidebarModeSwitch {
+  flex-shrink: 0;
+  padding: 8px 0;
+  border-top: 1px solid var(--ui-border);
+  button {
+    width: 100%;
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 11px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ui-text-secondary);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    &:hover {
+      background: var(--ui-surface-muted);
+      color: var(--ui-primary);
+    }
+    &:focus-visible {
+      outline: 2px solid var(--ui-focus);
+      outline-offset: 2px;
+    }
+    i { font-size: 16px; }
+  }
+}
+.productShell .shellModeToolbar {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 clamp(16px, 2.2vw, 44px);
+  border-bottom: 1px solid var(--ui-border);
+  background: var(--ui-surface);
+}
+.productShell .shellModeButton {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ui-text-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  &:hover {
+    background: var(--ui-hover-overlay);
+    color: var(--ui-text);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--ui-focus);
+    outline-offset: 2px;
+  }
+  i { font-size: 16px; }
+}
+.productShell .shellModeButton--navigation {
+  color: var(--ui-primary);
+  font-weight: 600;
 }
 .productShell .collapsedLogoTrigger {
   position: relative;
@@ -730,7 +900,8 @@ export default {
     }
     .navLabel,
     .accountMeta,
-    .accountLogoutText {
+    .accountLogoutText,
+    .sidebarModeSwitch span {
       display: none;
     }
     .sidebarNotifications {
@@ -764,11 +935,96 @@ export default {
       gap: 0;
       justify-content: center;
     }
+    .sidebarModeSwitch {
+      width: 100%;
+      padding-inline: 0;
+      button {
+        width: var(--rail-item);
+        height: var(--rail-item);
+        min-height: var(--rail-item);
+        margin-inline: auto;
+        padding: 0;
+        justify-content: center;
+        gap: 0;
+      }
+    }
   }
   .productMain {
     margin-left: 72px;
     width: calc(100% - 72px);
     max-width: calc(100% - 72px);
+  }
+}
+.productNavigationDrawer {
+  max-width: min(288px, calc(100vw - 32px));
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  .el-drawer__body {
+    height: 100%;
+    padding: 0;
+    overflow: hidden;
+  }
+  .navigationDrawerContent {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 12px;
+    box-sizing: border-box;
+  }
+  .navigationDrawerHeader {
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 4px 0 12px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--ui-border);
+    strong { font-size: 15px; }
+  }
+  .productNavigation {
+    min-height: 0;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 4px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .navLabel {
+    flex-shrink: 0;
+    margin: 6px 12px 7px;
+    color: var(--ui-text-muted);
+    font-size: 12px;
+    &--space { margin-top: 22px; }
+  }
+  .productNavigation a {
+    min-height: 40px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 0 12px;
+    border-radius: 8px;
+    color: var(--ui-text-secondary);
+    text-decoration: none;
+    font-size: 14px;
+    &:hover {
+      background: var(--ui-surface-muted);
+      color: var(--ui-primary);
+    }
+    &.router-link-exact-active {
+      background: var(--ui-primary-soft);
+      color: var(--ui-primary);
+      font-weight: 600;
+    }
+    &:focus-visible {
+      outline: 2px solid var(--ui-focus);
+      outline-offset: 2px;
+    }
+    i { font-size: 17px; }
   }
 }
 @media (max-width: 760px) {
@@ -790,6 +1046,9 @@ export default {
   }
   .productShell .productPage {
     padding: 24px 16px 40px;
+  }
+  .productShell .shellModeToolbar {
+    padding-inline: 16px;
   }
   .productShell .productHeader {
     flex-direction: column;
@@ -825,6 +1084,16 @@ export default {
     margin-left: 0 !important;
     width: 100% !important;
     max-width: 100% !important;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .productShell,
+  .productShell .shellModeButton,
+  .productNavigationDrawer,
+  .productNavigationDrawer .el-drawer {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 </style>

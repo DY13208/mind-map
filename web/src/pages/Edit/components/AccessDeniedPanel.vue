@@ -87,8 +87,8 @@
         >
       </div>
       <div class="secondaryActions">
-        <button type="button" @click="$emit('back')">
-          <i class="el-icon-arrow-left" /> 返回文件列表</button
+        <button type="button" :disabled="returning" :title="returnLabel" @click="$emit('back')">
+          <i class="el-icon-arrow-left" /> {{ returnLabel }}</button
         ><span><i class="el-icon-lock" /> 仅所有者可审批</span>
       </div>
     </section>
@@ -99,7 +99,11 @@ import service from '@/services/accessRequestService'
 import { state, roleText } from '@/services/accessNotificationState'
 export default {
   name: 'AccessDeniedPanel',
-  props: { roomKey: { type: String, required: true } },
+  props: {
+    roomKey: { type: String, required: true },
+    returnLabel: { type: String, default: '返回脑图列表' },
+    returning: { type: Boolean, default: false }
+  },
   data: () => ({
     role: 'viewer',
     reason: '',

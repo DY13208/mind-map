@@ -35,8 +35,9 @@
             type="button"
             class="dockIconBtn backBtn"
             data-testid="back-to-my-maps"
-            aria-label="返回脑图"
-            title="返回脑图"
+            :aria-label="fileListReturnLabel"
+            :title="fileListReturnLabel"
+            :disabled="returningToList"
             @click="onFileToolbarAction('maps')"
           >
             <span class="el-icon-back"></span>
@@ -564,7 +565,8 @@ import ToolbarFileBtnList from './ToolbarFileBtnList.vue'
 import MapFileTree from './MapFileTree.vue'
 import { throttle, isMobile } from 'simple-mind-map/src/utils/index'
 import { stringifyJsonOffMainThread } from '@/utils/importTree'
-import { navigateToMyMaps } from '@/utils/roomLocation'
+import { returnFromEditor } from '@/utils/editorFileReturn'
+import { getReturnLabel } from '@/utils/fileNavigation'
 import roomService from '@/services/roomService'
 import { inspectMapRef } from '@/utils/mapRefNav'
 import {
@@ -875,6 +877,9 @@ const defaultBtnList = [
 ]
 
 export default {
+  props: {
+    listReturnFile: { type: Object, default: null }
+  },
   components: {
     NotchWing,
     NodeImage,
@@ -905,6 +910,7 @@ export default {
       toolbarLayoutRevision: 0,
       mapNavContext: null,
       mapNavReturning: false,
+      returningToList: false,
       fileTreeProps: {
         label: 'name',
         children: 'children',
@@ -1013,6 +1019,11 @@ export default {
     }
   },
   computed: {
+    fileListReturnLabel() {
+      const file = this.listReturnFile
+      return getReturnLabel(this.$route,
+        file && String(file.roomKey || file.id || '') === String(this.$route.query.room || '') ? file : null)
+    },
     ...mapState({
       isDark: state => state.localConfig.isDark,
       isHandleLocalFile: state => state.isHandleLocalFile,
@@ -1161,7 +1172,7 @@ export default {
     fileToolbarActions() {
       const actions = []
       if (this.$route.query.room) {
-        actions.push({ key: 'maps', label: '脑图', icon: 'el-icon-back', title: '返回脑图', testId: 'back-to-my-maps' })
+        actions.push({ key: 'maps', label: '脑图', icon: 'el-icon-back', title: this.fileListReturnLabel, disabled: this.returningToList, testId: 'back-to-my-maps' })
       }
       actions.push({
         key: 'refresh', label: this.$t('toolbar.refresh'),
@@ -5216,8 +5227,16 @@ export default {
       }
     },
 
-    goToMyMaps() {
-      navigateToMyMaps(this.$router)
+    async goToMyMaps() {
+      if (this.returningToList) return
+      this.returningToList = true
+      try {
+        await returnFromEditor(this.$router, this.$route, this.listReturnFile)
+      } catch (error) {
+        this.$message.error('返回目录失败，请稍后重试')
+      } finally {
+        this.returningToList = false
+      }
     },
 
     async openMapFromTree(node) {

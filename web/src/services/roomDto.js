@@ -83,6 +83,7 @@ export function normalizeRoomDto(apiRoom = {}, extras = {}) {
     roomKey,
     title: stripTitleHtml(apiRoom.title) || '未命名',
     folderId,
+    teamId: apiRoom.teamId || apiRoom.team_id || null,
     folderName:
       extras.folderName ||
       apiRoom.folderName ||
