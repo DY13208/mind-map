@@ -25,7 +25,7 @@
       <div v-if="file" class="kb-parse-panes">
         <div class="kb-card kb-pane">
           <div class="kb-pane-title">原文预览</div>
-          <KbSourcePreview :file="file" :block="activeBlock" />
+          <KbSourcePreview :file="file" :block="previewBlock" @markdown-source="markdownSource = $event" />
         </div>
         <div class="kb-card kb-pane">
           <div class="kb-pane-title">
@@ -40,7 +40,7 @@
             @retry="loadBlocks"
           >
             <div class="kb-block-scroll">
-              <KbBlockList :blocks="blocks" :active-id="activeId" @select="onSelect" />
+              <KbBlockList :blocks="locatedBlocks" :active-id="activeId" @select="onSelect" />
               <div v-if="blocksCursor" class="kb-more">
                 <el-button size="small" :loading="loadingMore" @click="loadMoreBlocks">加载更多解析块</el-button>
               </div>
@@ -52,6 +52,7 @@
   </div>
 </template>
 <script>
+import { locateMarkdownBlocks } from '../utils/markdown'
 import kbApi from '../services/kbApi'
 import { createPoller } from '../services/kbPolling'
 import { ACTIVE_STATUSES } from '../constants/status'
@@ -66,9 +67,11 @@ export default {
   name: 'KbParseDetailTab',
   components: { KbFilePicker, KbStatusTag, KbStateBlock, KbSourcePreview, KbBlockList, KbHeaderMap },
   data() {
-    return { file: null, fileError: null, loadingFile: false, blocks: [], blocksCursor: null, loadingMore: false, blocksError: null, loadingBlocks: false, activeId: null, activeBlock: null, reparsing: false }
+    return { markdownSource: null, file: null, fileError: null, loadingFile: false, blocks: [], blocksCursor: null, loadingMore: false, blocksError: null, loadingBlocks: false, activeId: null, activeBlock: null, reparsing: false }
   },
   computed: {
+    locatedBlocks() { return locateMarkdownBlocks(this.blocks, this.markdownSource) },
+    previewBlock() { return this.locatedBlocks.find(b => this.activeBlock && b.id === this.activeBlock.id) || this.activeBlock },
     fileId() { return String(this.$route.query.file || '') },
     active() { return !!this.file && ACTIVE_STATUSES.includes(this.file.status) }
   },
@@ -94,6 +97,7 @@ export default {
       this.$router.replace({ name: 'FileKb', params: { tab: 'parse' }, query: id ? { file: id } : {} }).catch(() => {})
     },
     async loadFile() {
+      this.markdownSource = null
       this.file = null
       this.blocks = []
       this.blocksCursor = null
