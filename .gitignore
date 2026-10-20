@@ -93,6 +93,10 @@ output/*.py
 !/web/tests/helpers/**
 !/web/tests/cardPreviewQueue.test.cjs
 !/web/tests/teamRoomsPaging.test.cjs
+!/web/tests/fileNavigation.test.cjs
+!/web/tests/editorFileReturn.test.cjs
+!/web/tests/shellMode.test.cjs
+!/web/tests/productShell.fileReturn.test.cjs
 !/simple-mind-map/e2e/performance/
 !/simple-mind-map/e2e/performance/*.cjs
 /work/

@@ -1,7 +1,7 @@
 <template>
   <article
     class="roomCard gf-root"
-    :class="{ selected, selectable }"
+    :class="{ selected, selectable, 'is-return-highlighted': highlighted }"
     tabindex="0"
     :aria-label="`打开 ${room.title}`"
     :data-tone="tone"
@@ -111,6 +111,7 @@ export default {
     allowDelete: { type: Boolean, default: false },
     selectable: { type: Boolean, default: false },
     selected: { type: Boolean, default: false },
+    highlighted: { type: Boolean, default: false },
     canSelect: { type: Boolean, default: true }
   },
   data() {
@@ -260,6 +261,29 @@ export default {
 
 .roomCard.gf-root:focus-visible {
   outline: none;
+}
+
+.roomCard.gf-root.is-return-highlighted .gf-stage::after {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  z-index: 20;
+  box-sizing: border-box;
+  border: 3px solid var(--ui-primary);
+  border-radius: 21px;
+  pointer-events: none;
+  animation: returnRoomHighlight 2.4s ease-out both;
+}
+
+@keyframes returnRoomHighlight {
+  0%, 100% { opacity: 0; }
+  15%, 65% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .roomCard.gf-root.is-return-highlighted .gf-stage::after {
+    animation: none;
+  }
 }
 
 .gf-root[data-tone='dark'] {

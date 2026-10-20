@@ -7,6 +7,8 @@ import {
   migrateLegacyHashUrl,
   rememberLastRoom
 } from './utils/roomLocation'
+import { resolveNavigationShell } from './utils/shellMode'
+import { normalizeReturnTo, readReturnContext } from './utils/fileNavigation'
 
 Vue.use(VueRouter)
 
@@ -19,6 +21,53 @@ const roomPathRedirect = to => ({
     room: to.params.roomKey
   }
 })
+
+const PRODUCT_SHELL_PATHS = new Set([
+  '/files',
+  '/my-maps',
+  '/spaces',
+  '/profile',
+  '/mcp-access',
+  '/graph',
+  '/cognee',
+  '/assistant',
+  '/kb',
+  '/sop'
+])
+
+const isProductShellRoute = route =>
+  !!(route && route.matched && route.matched.some(record => PRODUCT_SHELL_PATHS.has(record.path)))
+
+const editorRoomQuery = (to, from, isHistoryNavigation) => {
+  const query = { ...(to.query || {}) }
+  if (
+    isHistoryNavigation ||
+    to.path !== '/' ||
+    from.path !== '/' ||
+    !query.room ||
+    !(from.query && from.query.room)
+  ) {
+    return query
+  }
+
+  const sourceQuery = from.query || {}
+  const sourceReturnTo = normalizeReturnTo(sourceQuery.returnTo)
+  if (!sourceReturnTo) return query
+
+  const hasExplicitReturnTo =
+    typeof query.returnTo === 'string' && query.returnTo.trim() !== ''
+  const targetReturnTo = normalizeReturnTo(query.returnTo)
+  if (!hasExplicitReturnTo) query.returnTo = sourceReturnTo
+
+  // A new list destination starts a new navigation context; never attach the
+  // prior directory's session token to a different destination.
+  const sameReturnTarget = !hasExplicitReturnTo || targetReturnTo === sourceReturnTo
+  if (sameReturnTarget && !query.nav) {
+    const context = readReturnContext(from)
+    if (context && sourceQuery.nav) query.nav = sourceQuery.nav
+  }
+  return query
+}
 
 const routes = [
   {
@@ -103,7 +152,6 @@ const routes = [
       import(
         /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'
       ),
-    meta: { hideSidebar: true },
     children: [
       {
         path: '',
@@ -234,7 +282,11 @@ const routes = [
     beforeEnter(to, from, next) {
       const room = to.query && to.query.room
       if (room == null || String(room).trim() === '') {
-        next({ path: '/files', replace: true })
+        next({
+          path: '/files',
+          query: to.query && to.query.shell ? { shell: to.query.shell } : {},
+          replace: true
+        })
         return
       }
       rememberLastRoom(room)
@@ -333,8 +385,49 @@ const router = new VueRouter({
   routes
 })
 
+let historyNavigationPending = false
+if (typeof window !== 'undefined') {
+  // Capture phase runs before VueRouter's popstate listener, so a Back/Forward
+  // target keeps the mode encoded in that history entry instead of inheriting
+  // the route being left.
+  window.addEventListener(
+    'popstate',
+    () => {
+      historyNavigationPending = true
+      setTimeout(() => {
+        historyNavigationPending = false
+      }, 0)
+    },
+    true
+  )
+}
+router.afterEach(() => {
+  historyNavigationPending = false
+})
+
 // 仅 /my-maps 根路径回跳最近房间；/my-maps/folder/... 保持文件夹浏览
 router.beforeEach((to, from, next) => {
+  const isShellRoute = isProductShellRoute(to) || to.path === '/'
+  if (isShellRoute) {
+    const query = editorRoomQuery(to, from, historyNavigationPending)
+    const targetWithContext = { ...to, query }
+    const shell = resolveNavigationShell(targetWithContext, from, historyNavigationPending)
+    if (
+      !to.query ||
+      to.query.shell !== shell ||
+      to.query.returnTo !== query.returnTo ||
+      to.query.nav !== query.nav
+    ) {
+      next({
+        path: to.path,
+        query: { ...query, shell },
+        hash: to.hash,
+        replace: true
+      })
+      return
+    }
+  }
+
   if (!isMyMapsRootPath(to.path)) {
     next()
     return
@@ -346,6 +439,19 @@ router.beforeEach((to, from, next) => {
   // 列表内部导航（面包屑回根目录、删除文件夹后返回等）不回跳房间
   const fromPath = String((from && from.path) || '')
   if (fromPath === '/my-maps' || fromPath.startsWith('/my-maps/')) {
+    next()
+    return
+  }
+  // Returning from an editor to the list is an intentional top-level visit;
+  // do not let the recent-room shortcut send the user back into the editor.
+  if (fromPath === '/' && from && from.query && from.query.room) {
+    next()
+    return
+  }
+  // A list history entry carrying a valid navigation snapshot represents an
+  // intentional return destination. Let browser Back reach it instead of
+  // immediately redirecting to the most recently opened room.
+  if (readReturnContext(to)) {
     next()
     return
   }
