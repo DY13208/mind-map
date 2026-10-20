@@ -100,3 +100,4 @@ output/*.py
 !/simple-mind-map/e2e/performance/
 !/simple-mind-map/e2e/performance/*.cjs
 /work/
+!/simple-mind-map/test/roomAclStartup.pg.test.js

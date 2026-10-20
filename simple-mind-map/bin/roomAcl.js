@@ -437,11 +437,13 @@ async function initSchema(db) {
       and folder_role is null
       and role in ('owner', 'manager', 'editor', 'viewer')
       and coalesce(source, 'direct_share') = 'direct_share'
+      and not coalesce(acl_v2, false)
   `)
   await db.query(`
     update room_members
     set team_role = role
     where team_role is null and role in ('owner', 'manager', 'editor', 'viewer') and source = 'team'
+      and not coalesce(acl_v2, false)
   `)
   await db.query(`
     create index if not exists room_members_folder_source_idx
@@ -456,6 +458,16 @@ async function initSchema(db) {
  * non-owner direct shares, then ensure current folder_members → folder_role.
  */
 async function migrateFolderRoles(db) {
+  // Startup must use the same override-aware calculation as live ACL writes.
+  const syncedRole = sqlResolveMemberRole(
+    'room_members.direct_role', 'room_members.team_role', 'excluded.folder_role',
+    'room_members.role', 'room_members.override_role', 'room_members.acl_v2'
+  )
+  const syncedSource = `case
+    when room_members.acl_v2 and room_members.override_role is not null then 'override'
+    when room_members.acl_v2 then 'inherit'
+    else ${sqlPrimarySource('room_members.direct_role', 'room_members.team_role', 'excluded.folder_role')}
+  end`
   await db.query(`
     create table if not exists room_members_folder_mig_backup (
       room_key text not null,
@@ -521,6 +533,7 @@ async function migrateFolderRoles(db) {
       and m.direct_role is not null
       and m.direct_role = fm.role
       and m.folder_role is null
+      and not coalesce(m.acl_v2, false)
   `)
   await db.query(`
     insert into room_members (
@@ -542,17 +555,11 @@ async function migrateFolderRoles(db) {
     on conflict (room_key, user_id) do update set
       folder_role = excluded.folder_role,
       source_folder_id = excluded.source_folder_id,
-      role = ${sqlEffectiveRole(
-        'room_members.direct_role',
-        'room_members.team_role',
-        'excluded.folder_role'
-      )},
-      source = ${sqlPrimarySource(
-        'room_members.direct_role',
-        'room_members.team_role',
-        'excluded.folder_role'
-      )},
+      role = ${syncedRole},
+      source = ${syncedSource},
       updated_at = now()
+    where (room_members.folder_role, room_members.source_folder_id, room_members.role, room_members.source)
+      is distinct from (excluded.folder_role, excluded.source_folder_id, ${syncedRole}, ${syncedSource})
   `)
 }
 
@@ -849,7 +856,8 @@ async function listMembers(db, roomKey) {
          m.created_at asc`,
       [roomKey]
     )
-    return res.rows
+    // Read through old summaries left by earlier startup syncs. Never rewrite grants here.
+    return res.rows.map(row => ({ ...row, role: resolveMemberRole(row) || null }))
   } catch (err) {
     if (err.code !== '42P01') throw err
     const res = await db.query(
@@ -861,7 +869,8 @@ async function listMembers(db, roomKey) {
          created_at asc`,
       [roomKey]
     )
-    return res.rows
+    // Read through old summaries left by earlier startup syncs. Never rewrite grants here.
+    return res.rows.map(row => ({ ...row, role: resolveMemberRole(row) || null }))
   }
 }
 
