@@ -8,7 +8,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import { buildSopContext } from './sopContext.mjs'
-import { registerLeaveTools } from './leaveWorkflow/mcp.mjs'
+import { registerLeaveTools, registerApprovalTools } from './leaveWorkflow/mcp.mjs'
 import mcpUserToken from './mcpUserToken.js'
 import {
   resolveAttachmentUploadInput,
@@ -516,6 +516,7 @@ function createServer(authorization) {
   )
 
   registerLeaveTools(server, { api, z, ok, fail })
+  registerApprovalTools(server, { api, z, ok, fail })
 
   server.tool(
     'get_performance_diagnostics',

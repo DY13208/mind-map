@@ -2,6 +2,7 @@ const { randomUUID } = require('crypto')
 const acl = require('../roomAcl')
 const events = require('../accessRequestEvents')
 const core = require('./core')
+const workflow = require('./workflowCore')
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i
 const SOURCE = {
   roomKey: process.env.WCPD_LEAVE_TEMPLATE_ROOM || 'room-yk3tz4aj',
@@ -33,6 +34,7 @@ async function initSchema(db) {
     current_step integer not null default 0, revision integer not null default 1, round integer not null default 1,
     projection_pending boolean not null default true, projection_retry_at timestamptz not null default now(), projection_error text not null default '', created_at timestamptz not null default now(), updated_at timestamptz not null default now());
     create unique index if not exists leave_active_anchor on leave_requests(corp_id,requester_id,room_key,node_uid) where status in ('draft','pending','returned');
+    create index if not exists leave_anchor_all_idx on leave_requests(room_key,node_uid,created_at desc);
     create index if not exists leave_requester_idx on leave_requests(corp_id,requester_id,updated_at desc);
     create index if not exists leave_todo_idx on leave_requests(corp_id,(steps->current_step->>'assigneeId'),updated_at desc) where status='pending';
     create table if not exists leave_events (
@@ -50,6 +52,9 @@ async function initSchema(db) {
     id bigserial primary key, corp_id text not null, source_room text not null, source_uid text not null,
     fingerprint text not null, published_by text not null, operation_id uuid not null unique, created_at timestamptz not null default now());
     create index if not exists leave_policy_current_idx on leave_policy_publications(corp_id,source_room,source_uid,id desc);`)
+  await db.query(
+    "create index if not exists room_nodes_workflow_markers_idx on room_nodes(room_key,parent_uid,uid) where deleted_at is null and data->>'text' like '%流程标识%'"
+  )
 }
 async function identity(db, req, human = false) {
   const user = req.authUser
@@ -94,6 +99,16 @@ async function subtree(db, roomKey, uid) {
   return rows
 }
 async function template(db, req, source = SOURCE, enforceAccess = true) {
+  if (
+    !source ||
+    typeof source.roomKey !== 'string' ||
+    typeof source.nodeUid !== 'string' ||
+    !source.roomKey ||
+    !source.nodeUid ||
+    source.roomKey.length > 200 ||
+    source.nodeUid.length > 200
+  )
+    throw fail('INVALID_SOURCE', '请明确指定审批模板所在房间和节点')
   if (enforceAccess)
     await acl.assertRoomAccess(
       db,
@@ -102,7 +117,14 @@ async function template(db, req, source = SOURCE, enforceAccess = true) {
       'view'
     )
   const nodes = await subtree(db, source.roomKey, source.nodeUid)
-  return { ...core.compileTemplate(nodes, source.nodeUid), source }
+  const kind =
+    source.roomKey === SOURCE.roomKey && source.nodeUid === SOURCE.nodeUid
+      ? 'leave'
+      : 'generic'
+  return {
+    ...workflow.compile(nodes, source.nodeUid, kind),
+    source: { roomKey: source.roomKey, nodeUid: source.nodeUid }
+  }
 }
 async function publication(db, tpl, who) {
   const latest = (
@@ -119,7 +141,7 @@ async function publication(db, tpl, who) {
 async function publish(pool, req, body) {
   return transaction(pool, async db => {
     const who = await identity(db, req, true),
-      tpl = await template(db, req)
+      tpl = await template(db, req, body.source || SOURCE)
     await acl.assertRoomAccess(
       db,
       { ...req, forceAcl: true },
@@ -129,18 +151,19 @@ async function publish(pool, req, body) {
     operation(body)
     if (body.expectedFingerprint !== tpl.fingerprint)
       throw fail('POLICY_CHANGED', '流程已变化，请重新读取再发布', 409)
-    const structural = core
+    const structural = workflow
       .evaluate(tpl, {})
       .blockers.filter(x => x.startsWith('模板必要') || x === '审批步骤待配置')
     if (
-      !tpl.calendar.periods.length ||
+      (tpl.kind !== 'generic' && !tpl.calendar.periods.length) ||
+      (tpl.configurationErrors || []).length ||
       tpl.steps.some(s => !s.criteria.length || !s.accounts.length) ||
       tpl.ccMissing.length ||
       structural.length
     )
       throw fail(
         'POLICY_INCOMPLETE',
-        '请先在脑图补齐工作时间、各审核人账号、审核要点和抄送人员'
+        '请先在脑图补齐字段、审批步骤、审核人及审核要点；请假还须登记工作时间'
       )
     const ids = [...new Set([...tpl.steps.flatMap(s => s.accounts), ...tpl.cc])]
     const count = (
@@ -204,31 +227,36 @@ async function routing(db, tpl, who, fields = {}) {
   const missing = [],
     steps = []
   if (!tpl.steps.length) missing.push('审批步骤待配置')
-  // Names are an input convenience, never a fuzzy or cross-company assignment.
-  if (fields.replacementId) {
-    const input = fields.replacementId
-    const exact = (
-      await db.query(
-        'select user_id,name from wecom_users where corp_id=$1 and user_id=$2',
-        [who.corp_id, input]
-      )
-    ).rows
-    const matches = exact.length
-      ? exact
-      : (
-          await db.query(
-            'select user_id,name from wecom_users where corp_id=$1 and name=$2 limit 2',
-            [who.corp_id, input]
-          )
-        ).rows
-    if (matches.length === 1) fields.replacementId = matches[0].user_id
-    else
-      missing.push(
-        matches.length
-          ? '工作替补人姓名重复，请填写账号：成员ID'
-          : '工作替补人未匹配到本企业成员，请填写准确姓名或账号：成员ID'
-      )
-  }
+  missing.push(...(tpl.configurationErrors || []))
+  const memberFields =
+    tpl.kind === 'generic'
+      ? tpl.fields.filter(f => f.type === 'member')
+      : [{ key: 'replacementId', label: '工作替补人' }]
+  for (const field of memberFields)
+    if (fields[field.key]) {
+      const input = fields[field.key]
+      const exact = (
+        await db.query(
+          'select user_id,name from wecom_users where corp_id=$1 and user_id=$2',
+          [who.corp_id, input]
+        )
+      ).rows
+      const matches = exact.length
+        ? exact
+        : (
+            await db.query(
+              'select user_id,name from wecom_users where corp_id=$1 and name=$2 limit 2',
+              [who.corp_id, input]
+            )
+          ).rows
+      if (matches.length === 1) fields[field.key] = matches[0].user_id
+      else
+        missing.push(
+          matches.length
+            ? `${field.label}姓名重复，请填写账号：成员ID`
+            : `${field.label}未匹配到本企业成员，请填写准确姓名或账号：成员ID`
+        )
+    }
   if (fields.replacementId === who.user_id)
     missing.push('工作替补人不能是申请人本人')
   for (const step of tpl.steps) {
@@ -263,9 +291,11 @@ async function routing(db, tpl, who, fields = {}) {
   }
   const ids = [
     ...new Set(
-      [...steps.map(s => s.assigneeId), ...cc, fields.replacementId].filter(
-        Boolean
-      )
+      [
+        ...steps.map(s => s.assigneeId),
+        ...cc,
+        ...memberFields.map(f => fields[f.key])
+      ].filter(Boolean)
     )
   ]
   const users = ids.length
@@ -287,7 +317,8 @@ async function routing(db, tpl, who, fields = {}) {
   }
   return { steps, cc: [...new Set(cc)], missing }
 }
-function cleanFields(fields) {
+function cleanFields(fields, tpl) {
+  if (tpl && tpl.kind === 'generic') return cleanGenericFields(fields, tpl)
   if (!fields || typeof fields !== 'object' || Array.isArray(fields))
     throw fail('INVALID_FIELDS', '申请字段无效')
   const out = {}
@@ -318,6 +349,45 @@ function cleanFields(fields) {
   }
   return out
 }
+function cleanGenericFields(fields, tpl) {
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields))
+    throw fail('INVALID_FIELDS', '申请资料无效')
+  const allowed = new Set([...tpl.fields.map(f => f.key), 'attachmentIds'])
+  if (Object.keys(fields).some(key => !allowed.has(key)))
+    throw fail(
+      'UNKNOWN_FIELD',
+      '资料包含未在当前模板登记的字段，请重新读取模板'
+    )
+  const out = {}
+  const ids = new Set()
+  for (const f of [
+    ...tpl.fields,
+    { key: 'attachmentIds', label: '附件', type: 'attachment' }
+  ]) {
+    const value = fields[f.key]
+    if (f.type === 'attachment') {
+      if (
+        value != null &&
+        (!Array.isArray(value) ||
+          value.length > 10 ||
+          value.some(id => typeof id !== 'string' || id.length > 80))
+      )
+        throw fail('INVALID_ATTACHMENTS', '附件引用无效或超过10项')
+      out[f.key] = [...new Set(value || [])].sort()
+      out[f.key].forEach(id => ids.add(id))
+    } else {
+      if (value != null && typeof value !== 'string')
+        throw fail('INVALID_FIELDS', `${f.label}须为文本`)
+      const text = String(value || '').trim()
+      if (text.length > 3000)
+        throw fail('FIELD_TOO_LONG', `${f.label}超过3000字`)
+      out[f.key] = text
+    }
+  }
+  if (ids.size > 10) throw fail('INVALID_ATTACHMENTS', '证明附件合计超过10项')
+  out.attachmentIds = [...ids].sort()
+  return out
+}
 async function checkAttachments(db, row, fields) {
   const result = []
   const nodes = await subtree(db, row.room_key, row.node_uid)
@@ -341,7 +411,14 @@ async function checkAttachments(db, row, fields) {
     .filter(
       n =>
         parents.has(n.parent_uid) &&
-        /^附件(?:[:：]|$)/.test(core.plain(n.data.text))
+        (row.template.kind === 'generic'
+          ? row.template.fields.some(
+              f =>
+                f.type === 'attachment' &&
+                core.label(core.plain(n.data.text).split(/[:：]/)[0]) ===
+                  f.label
+            )
+          : /^附件(?:[:：]|$)/.test(core.plain(n.data.text)))
     )
     .forEach(n => visit(n.uid))
   for (const id of fields.attachmentIds || []) {
@@ -465,6 +542,17 @@ function expectRevision(row, value) {
   if (Number(value) !== row.revision)
     throw fail('REVISION_CONFLICT', '申请已变化，请刷新后再操作', 409)
 }
+function bindFields(tpl, id) {
+  return tpl.kind === 'generic'
+    ? {
+        ...tpl,
+        fields: tpl.fields.map(f => ({
+          ...f,
+          instanceUid: core.projectionId(id + ':field:' + f.key)
+        }))
+      }
+    : tpl
+}
 async function prepare(pool, req, body) {
   return transaction(pool, async db => {
     const who = await identity(db, req),
@@ -472,8 +560,47 @@ async function prepare(pool, req, body) {
       node = String(body.nodeUid || '')
     if (!room || !node) throw fail('ANCHOR_REQUIRED', '请指定自己的申请节点')
     await acl.assertRoomAccess(db, { ...req, forceAcl: true }, room, 'edit')
-    const tpl = await template(db, req)
+    // One business application per node, across users and workflow types. This
+    // prevents a new request from silently reusing an older request's field tree.
+    await db.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [
+      'workflow-anchor:' + room + ':' + node
+    ])
+    const previous = (
+      await db.query(
+        'select requester_id,corp_id,status from leave_requests where room_key=$1 and node_uid=$2 order by created_at desc limit 1',
+        [room, node]
+      )
+    ).rows[0]
+    if (
+      previous &&
+      (previous.requester_id !== who.user_id ||
+        previous.corp_id !== who.corp_id)
+    )
+      throw fail(
+        'ANCHOR_IN_USE',
+        '该节点已绑定申请，请在自己的独立子节点登记',
+        409
+      )
+    if (previous && !['draft', 'pending', 'returned'].includes(previous.status))
+      throw fail(
+        'ANCHOR_USED',
+        '该节点已是历史申请，请新增独立申请子节点，避免复用旧资料',
+        409
+      )
+    const id = randomUUID(),
+      tpl = bindFields(await template(db, req, body.source || SOURCE), id)
     const anchor = await subtree(db, room, node)
+    const ancestors = (
+      await db.query(
+        `with recursive path as (select uid,parent_uid,1 depth from room_nodes where room_key=$1 and uid=$2 and deleted_at is null union all select n.uid,n.parent_uid,p.depth+1 from room_nodes n join path p on n.uid=p.parent_uid where n.room_key=$1 and n.deleted_at is null and p.depth<20) select m.data->>'text' text from path p join room_nodes m on m.room_key=$1 and m.parent_uid=p.uid and m.deleted_at is null and m.data->>'text' like '%流程标识%'`,
+        [room, node]
+      )
+    ).rows
+    if (ancestors.some(n => workflow.marker(n.text)))
+      throw fail(
+        'TEMPLATE_AS_REQUEST',
+        '不能在审批模板内登记真实申请，请使用自己的业务节点'
+      )
     if (room === tpl.source.roomKey && anchor.some(n => n.uid === tpl.rootUid))
       throw fail('TEMPLATE_AS_REQUEST', '不能在制度模板或其祖先上发起申请')
     if (
@@ -486,16 +613,22 @@ async function prepare(pool, req, body) {
         'TEMPLATE_AS_REQUEST',
         '请在自己的业务节点发起，不要在制度节点下登记真实申请'
       )
-    const fields = cleanFields(core.extractFields(anchor, node)),
+    const fields = cleanFields(
+        core.extractFields(
+          anchor,
+          node,
+          tpl.kind === 'generic' ? tpl.fields : undefined
+        ),
+        tpl
+      ),
       nodeInputHash = core.digest(fields),
       route = await routing(db, tpl, who, fields)
     const report = {
-      ...core.evaluate(tpl, fields),
+      ...workflow.evaluate(tpl, fields),
       nodeInputHash,
       configurationRequired: route.missing,
       publication: await publication(db, tpl, who)
     }
-    const id = randomUUID()
     const saved = await db.query(
       `insert into leave_requests(id,corp_id,requester_id,room_key,node_uid,source_room,source_uid,template,fields,report,steps,cc) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) on conflict(corp_id,requester_id,room_key,node_uid) where status in ('draft','pending','returned') do nothing returning *`,
       [
@@ -514,12 +647,22 @@ async function prepare(pool, req, body) {
       ]
     )
     if (saved.rows.length) return saved.rows[0]
-    return (
+    const existing = (
       await db.query(
         `select * from leave_requests where corp_id=$1 and requester_id=$2 and room_key=$3 and node_uid=$4 and status in ('draft','pending','returned')`,
         [who.corp_id, who.user_id, room, node]
       )
     ).rows[0]
+    if (
+      existing.source_room !== tpl.source.roomKey ||
+      existing.source_uid !== tpl.source.nodeUid
+    )
+      throw fail(
+        'FLOW_CONFLICT',
+        '该节点已有另一类在途申请，请使用新节点发起或先处理原申请',
+        409
+      )
+    return existing
   })
 }
 async function get(pool, req, id, options = {}) {
@@ -634,7 +777,7 @@ async function mutate(pool, req, id, action, body) {
             : item
       )
     const originalMaterial = materialHash(row)
-    const reviewedFields = core.digest(cleanFields(row.fields))
+    const reviewedFields = core.digest(cleanFields(row.fields, row.template))
     const reviewedPolicy = row.template.fingerprint
     let detail = {}
     if (['save', 'import', 'submit', 'withdraw'].includes(action) && !owner)
@@ -648,10 +791,13 @@ async function mutate(pool, req, id, action, body) {
         row.room_key,
         'edit'
       )
-      row.template = await template(db, req, {
-        roomKey: row.source_room,
-        nodeUid: row.source_uid
-      })
+      row.template = bindFields(
+        await template(db, req, {
+          roomKey: row.source_room,
+          nodeUid: row.source_uid
+        }),
+        row.id
+      )
       if (
         action === 'submit' &&
         body.nodeSource === true &&
@@ -670,13 +816,16 @@ async function mutate(pool, req, id, action, body) {
         const fromNodes = cleanFields(
           core.extractFields(
             await subtree(db, row.room_key, row.node_uid),
-            row.node_uid
-          )
+            row.node_uid,
+            row.template.kind === 'generic' ? row.template.fields : undefined
+          ),
+          row.template
         )
         nodeInputHash = core.digest(fromNodes)
         if (
           body.expectedFields &&
-          core.digest(cleanFields(body.expectedFields)) !== nodeInputHash
+          core.digest(cleanFields(body.expectedFields, row.template)) !==
+            nodeInputHash
         )
           throw fail(
             'NODE_DATA_PENDING',
@@ -691,22 +840,22 @@ async function mutate(pool, req, id, action, body) {
           )
         row.fields = fromNodes
       } else if (action === 'save') {
-        row.fields = cleanFields(body.fields)
+        row.fields = cleanFields(body.fields, row.template)
         nodeInputHash = null
       }
       const route = await routing(db, row.template, who, row.fields)
       if (
         action === 'submit' &&
         body.nodeSource === true &&
-        core.digest(cleanFields(row.fields)) !== reviewedFields
+        core.digest(cleanFields(row.fields, row.template)) !== reviewedFields
       )
         throw fail(
           'MEMBER_MATCH_CHANGED',
-          '成员匹配已变化，请重新读取节点并核对工作替补人',
+          '成员匹配已变化，请重新读取节点并核对人员字段',
           409
         )
       row.report = {
-        ...core.evaluate(row.template, row.fields),
+        ...workflow.evaluate(row.template, row.fields),
         nodeInputHash,
         configurationRequired: route.missing,
         attachments: await checkAttachments(db, row, row.fields),
@@ -867,7 +1016,7 @@ async function list(pool, req, filters = {}) {
   }[scope]
   const rows = (
     await pool.query(
-      `select r.id,r.status,r.revision,r.round,r.current_step,r.steps,r.created_at,r.updated_at,coalesce(u.name,r.requester_id) requester_name from leave_requests r left join wecom_users u on u.user_id=r.requester_id and u.corp_id=r.corp_id where r.corp_id=$1 and ${condition} order by r.updated_at desc,r.id limit $3 offset $4`,
+      `select r.id,r.status,r.revision,r.round,r.current_step,r.steps,r.created_at,r.updated_at,coalesce(u.name,r.requester_id) requester_name,case when r.template->>'kind'='generic' then r.template->>'title' else '请假申请' end title from leave_requests r left join wecom_users u on u.user_id=r.requester_id and u.corp_id=r.corp_id where r.corp_id=$1 and ${condition} order by r.updated_at desc,r.id limit $3 offset $4`,
       [who.corp_id, who.user_id, limit, offset]
     )
   ).rows
@@ -1010,8 +1159,12 @@ async function project(pool, writer, requestId = null) {
           const group = existing.find(
             n => core.plain(n.data.text) === '申请资料'
           )
-          const directFields = existing.some(
-            n => core.FIELDS[core.label(n.data.text).split(/[:：]/)[0]]
+          const directFields = existing.some(n =>
+            row.template.kind === 'generic'
+              ? row.template.fields.some(
+                  f => f.label === core.label(n.data.text).split(/[:：]/)[0]
+                )
+              : core.FIELDS[core.label(n.data.text).split(/[:：]/)[0]]
           )
           const parent = group
             ? group.uid
@@ -1028,12 +1181,32 @@ async function project(pool, writer, requestId = null) {
           ).rows
           for (const f of row.template.fields) {
             const present = fieldRows.find(
-              n => core.label(n.data.text).split(/[:：]/)[0] === f.label
+              n =>
+                n.uid === f.instanceUid ||
+                core.label(n.data.text).split(/[:：]/)[0] === f.label
             )
-            if (present) continue // Never overwrite any user-entered field or child.
+            if (present) {
+              if (
+                present.uid === f.instanceUid &&
+                !/[:：]/.test(core.plain(present.data.text)) &&
+                core.plain(present.data.text) !== f.label
+              )
+                await writer(row.room_key, {
+                  operationId: core.projectionId(
+                    row.id + ':label:' + f.key + ':' + row.revision
+                  ),
+                  mapId: row.room_key,
+                  actorId: 'leave-workflow',
+                  clientId: 'leave-workflow',
+                  baseVersion: null,
+                  type: 'node.update',
+                  payload: { uid: present.uid, patch: { text: f.label } }
+                })
+              continue // Never overwrite a user-entered value or child.
+            }
             const fieldUid = core.projectionId(row.id + ':field:' + f.key)
             await insert(fieldUid, parent, f.label)
-            if (f.key !== 'attachmentIds')
+            if (f.key !== 'attachmentIds' && f.type !== 'attachment')
               await insert(
                 core.projectionId(row.id + ':value:' + f.key),
                 fieldUid,
@@ -1079,7 +1252,9 @@ async function project(pool, writer, requestId = null) {
               [row.room_key, uid]
             )
           ).rows.length
-        const text = `请假申请：${core.statusText(row.status)}${
+        const text = `${
+          row.template.kind === 'generic' ? row.template.title : '请假申请'
+        }：${core.statusText(row.status)}${
           row.status === 'pending'
             ? ' · ' + row.steps[row.current_step].role
             : ''
@@ -1089,7 +1264,7 @@ async function project(pool, writer, requestId = null) {
           hyperlink: `/?room=${encodeURIComponent(row.room_key)}&leaveRequest=${
             row.id
           }`,
-          hyperlinkTitle: '查看请假申请与审批记录'
+          hyperlinkTitle: '查看申请与审批记录'
         }
         const command = {
           operationId: core.projectionId(row.id + ':' + row.revision),
@@ -1129,6 +1304,10 @@ async function project(pool, writer, requestId = null) {
 }
 module.exports = {
   SOURCE,
+  catalog: (db, req, options = {}) =>
+    require('./catalog').page(db, req, options, { identity, SOURCE }),
+  resolve: (db, req, text) =>
+    require('./catalog').resolve(db, req, text, { identity, SOURCE }),
   initSchema,
   identity,
   subtree,

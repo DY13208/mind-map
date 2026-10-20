@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     :visible.sync="visible"
-    title="请假流程配置"
+    title="审批流程配置"
     custom-class="leavePolicyDialog"
     append-to-body
     :close-on-click-modal="false"
@@ -12,7 +12,7 @@
       <template v-if="policy">
         <div class="policyHeading">
           <div>
-            <small>公司模型 / SOP / 请假</small>
+            <small>{{ policy.title }}</small>
             <h2>脑图定义规则，发布后执行</h2>
           </div>
           <el-tag :type="policy.publication.valid ? 'success' : 'warning'">{{
@@ -20,7 +20,7 @@
           }}</el-tag>
         </div>
         <p class="policyHint">
-          审核人和抄送人统一登记在「请假 →
+          审核人和抄送人统一登记在「当前流程 →
           审批配置」子节点。角色下新增「账号：成员ID」；按部门分配时新增「部门：部门ID
           → 账号：成员ID」。未配置或匹配不唯一会阻止提交。
         </p>
@@ -57,7 +57,7 @@
           ><code v-if="member">账号：{{ member }}</code>
         </div>
         <p class="policyHint">
-          时长按已登记工作时段计算。节假日及补班日、余额、司龄、特殊情形和证明真实性仍须核验。修改规则或人员后应重新发布；在途申请须退回重提。
+          字段、顺序和审核要点来自当前脑图；特殊业务事实与证明真实性仍须人工核验。修改规则或人员后应重新发布；在途申请须退回重提。
         </p>
         <footer>
           <el-button @click="locate">定位制度节点</el-button
@@ -87,6 +87,7 @@ export default {
     searching: false,
     members: [],
     member: '',
+    source: null,
     sequence: 0,
     searchSequence: 0
   }),
@@ -110,7 +111,8 @@ export default {
     this.searchSequence++
   },
   methods: {
-    open() {
+    open(event) {
+      this.source = (event && event.detail && event.detail.source) || null
       this.visible = true
       this.policy = null
       this.load()
@@ -120,7 +122,7 @@ export default {
       this.loading = true
       this.error = ''
       try {
-        const data = await service.template()
+        const data = await service.template(this.source)
         if (seq === this.sequence) this.policy = data
       } catch (e) {
         if (seq === this.sequence) this.error = e.message
@@ -144,7 +146,7 @@ export default {
       this.busy = true
       this.error = ''
       try {
-        await service.publish(this.policy.fingerprint)
+        await service.publish(this.policy.fingerprint, this.policy.source)
         await this.load()
         this.$message.success('流程已发布，后续提交使用此版本')
       } catch (e) {

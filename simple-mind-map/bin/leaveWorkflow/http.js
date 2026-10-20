@@ -20,14 +20,40 @@ function startWorker(pool, writer) {
   return run
 }
 async function handle(req, res, { url, db, writer, readBody, sendJson }) {
-  if (!url.pathname.startsWith('/api/leave-')) return false
+  if (!/^\/api\/(?:leave|workflow)-/.test(url.pathname)) return false
   const run = startWorker(db, writer)
   try {
-    const path = url.pathname
+    const genericEntry = url.pathname.startsWith('/api/workflow-')
+    const path = url.pathname.replace('/api/workflow-', '/api/leave-')
+    const source =
+      url.searchParams.get('source_room') && url.searchParams.get('source_node')
+        ? {
+            roomKey: url.searchParams.get('source_room'),
+            nodeUid: url.searchParams.get('source_node')
+          }
+        : undefined
     let result
-    if (path === '/api/leave-template' && req.method === 'GET') {
+    if (genericEntry) await service.identity(db, req)
+    if (
+      genericEntry &&
+      path === '/api/leave-template' &&
+      req.method === 'GET' &&
+      !source
+    )
+      throw Object.assign(
+        new Error('请指定审批模板来源，通用入口不会默认选择请假'),
+        { code: 'SOURCE_REQUIRED', statusCode: 400 }
+      )
+    if (path === '/api/leave-catalog' && req.method === 'GET')
+      result = await service.catalog(db, req, {
+        cursor: url.searchParams.get('cursor'),
+        limit: url.searchParams.get('limit')
+      })
+    else if (path === '/api/leave-resolve' && req.method === 'POST')
+      result = await service.resolve(db, req, (await readBody(req)).text)
+    else if (path === '/api/leave-template' && req.method === 'GET') {
       const who = await service.identity(db, req)
-      result = await service.template(db, req)
+      result = await service.template(db, req, source)
       result.publication = await service.publication(db, result, who)
       try {
         await require('../roomAcl').assertRoomAccess(
@@ -44,7 +70,13 @@ async function handle(req, res, { url, db, writer, readBody, sendJson }) {
       path === '/api/leave-template/publish' &&
       req.method === 'POST'
     ) {
-      result = await service.publish(db, req, await readBody(req))
+      const body = await readBody(req)
+      if (genericEntry && !body.source)
+        throw Object.assign(new Error('发布必须指定模板来源'), {
+          code: 'SOURCE_REQUIRED',
+          statusCode: 400
+        })
+      result = await service.publish(db, req, body)
     } else if (path === '/api/leave-members' && req.method === 'GET') {
       const who = await service.identity(db, req),
         q = String(url.searchParams.get('q') || '').slice(0, 80)
@@ -69,7 +101,13 @@ async function handle(req, res, { url, db, writer, readBody, sendJson }) {
     else if (path === '/api/leave-requests' && req.method === 'GET')
       result = await service.list(db, req, Object.fromEntries(url.searchParams))
     else if (path === '/api/leave-requests' && req.method === 'POST') {
-      result = await service.prepare(db, req, await readBody(req))
+      const body = await readBody(req)
+      if (genericEntry && !body.source)
+        throw Object.assign(
+          new Error('请先选择审批模板，通用入口不会默认选择请假'),
+          { code: 'SOURCE_REQUIRED', statusCode: 400 }
+        )
+      result = await service.prepare(db, req, body)
       await service.project(db, writer, result.id)
       result = await service.get(db, req, result.id)
     } else {
@@ -106,6 +144,11 @@ async function handle(req, res, { url, db, writer, readBody, sendJson }) {
     }
     if (req.method === 'POST' && /\/(import|submit)$/.test(path))
       await service.project(db, writer, result.id)
+    if (path === '/api/leave-catalog')
+      result = {
+        ...result,
+        list: result.list.map(({ aliases, ...entry }) => entry)
+      }
     sendJson(res, 200, { ok: true, item: result })
     setImmediate(run)
   } catch (e) {

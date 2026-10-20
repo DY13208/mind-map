@@ -12,10 +12,20 @@ export function leaveOperationId() {
 }
 const item = async (path, options) => (await productRequest(path, options)).item
 export default {
-  prepare: (roomKey, nodeUid) =>
-    item('/api/leave-requests', {
+  resolve: text =>
+    item('/api/workflow-resolve', {
       method: 'POST',
-      body: JSON.stringify({ roomKey, nodeUid })
+      body: JSON.stringify({ text })
+    }),
+  catalog: cursor =>
+    item(
+      '/api/workflow-catalog' +
+        (cursor ? '?cursor=' + encodeURIComponent(cursor) : '')
+    ),
+  prepare: (roomKey, nodeUid, source) =>
+    item(source ? '/api/workflow-requests' : '/api/leave-requests', {
+      method: 'POST',
+      body: JSON.stringify({ roomKey, nodeUid, source })
     }),
   get: (id, before) =>
     item(
@@ -23,7 +33,17 @@ export default {
         encodeURIComponent(id) +
         (before ? '?before=' + encodeURIComponent(before) : '')
     ),
-  template: () => item('/api/leave-template'),
+  template: source =>
+    item(
+      (source ? '/api/workflow-template' : '/api/leave-template') +
+        (source
+          ? '?' +
+            new URLSearchParams({
+              source_room: source.roomKey,
+              source_node: source.nodeUid
+            })
+          : '')
+    ),
   members: q => item('/api/leave-members?q=' + encodeURIComponent(q || '')),
   list: filters =>
     item('/api/leave-requests?' + new URLSearchParams(filters || {})),
@@ -33,10 +53,11 @@ export default {
       method: 'POST',
       body: JSON.stringify({ ids })
     }),
-  publish: fingerprint =>
+  publish: (fingerprint, source) =>
     item('/api/leave-template/publish', {
       method: 'POST',
       body: JSON.stringify({
+        source,
         expectedFingerprint: fingerprint,
         operationId: leaveOperationId()
       })

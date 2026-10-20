@@ -150,6 +150,10 @@ async function main() {
   trigger.$route = { query: { room: 'personal' } }
   trigger.requestByNode = new Map()
   trigger.signatures = new Map()
+  trigger.requestTemplates = new Map()
+  service.resolve = async () => ({
+    candidates: [{ source: { roomKey: 'policy', nodeUid: 'template' } }]
+  })
   const node = text => ({
     nodeData: { data: { uid: 'anchor', text }, children: [] },
     getData: key =>
@@ -192,6 +196,31 @@ async function main() {
     emitted.slice(count).some(e => e.type === 'mindmap:leave-open'),
     false
   )
+  trigger.$store.state.isReadonly = false
+  trigger.requestByNode.clear()
+  service.resolve = async () => ({
+    candidates: [
+      { title: '合同签约', source: { roomKey: 'contracts', nodeUid: 'one' } },
+      { title: '其他签约', source: { roomKey: 'other', nodeUid: 'two' } }
+    ]
+  })
+  trigger.onTextEnd(null, [], node('我要签合同'))
+  await tick()
+  assert.equal(trigger.choosing, true)
+  assert.equal(
+    prepared,
+    1,
+    'ambiguous matches must not prepare the first candidate'
+  )
+  await trigger.begin({ roomKey: 'other', nodeUid: 'two' })
+  assert.equal(prepared, 2, 'an explicit choice prepares that workflow')
+  trigger.requestByNode.clear()
+  service.catalog = async () => ({ list: [], hasMore: false })
+  service.resolve = async () => ({ candidates: [], reason: '未登记此审批' })
+  trigger.onTextEnd(null, [], node('我要补卡'))
+  await tick()
+  assert.equal(prepared, 2)
+  assert.equal(trigger.error, '未登记此审批')
   vm.$destroy()
   trigger.$destroy()
   console.log(

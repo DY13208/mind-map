@@ -14,19 +14,53 @@
     <button type="button" :disabled="busy" @click="open">
       <i class="el-icon-date" /><span>{{
         isPolicy
-          ? '配置请假流程'
+          ? '配置审批流程'
           : requestId
           ? '核对申请与审批'
-          : '生成请假资料子节点'
+          : '匹配审批流程'
       }}</span
       ><i class="el-icon-arrow-right" />
     </button>
+    <el-dialog
+      :visible.sync="choosing"
+      append-to-body
+      title="选择本次审批流程"
+      custom-class="workflowPickerDialog"
+      width="min(560px, 94vw)"
+      :close-on-click-modal="false"
+    >
+      <p class="workflowChoiceHint">
+        请选择本次使用的流程并核对来源。此操作只创建草稿，不提交审批。
+      </p>
+      <button
+        v-for="choice in choices"
+        :key="choice.source.roomKey + choice.source.nodeUid"
+        class="workflowChoice"
+        type="button"
+        :disabled="busy"
+        @click="begin(choice.source)"
+      >
+        <strong>{{ choice.title }}</strong
+        ><span>{{ choice.roomTitle }} · {{ choice.flowId || '请假制度' }}</span
+        ><i class="el-icon-arrow-right" />
+      </button>
+      <el-button
+        v-if="catalogCursor"
+        size="small"
+        :loading="busy"
+        @click="loadMoreChoices"
+        >加载更多流程</el-button
+      >
+    </el-dialog>
   </div>
 </template>
 <script>
 import service, { openLeaveRequest } from '@/services/leaveService'
 import { roomFromLocation } from '@/utils/roomLocation'
-import { extractFields } from '../../../../../simple-mind-map/src/utils/leaveNodeFields'
+import {
+  extractFields,
+  isWorkflowIntent
+} from '../../../../../simple-mind-map/src/utils/leaveNodeFields'
 function requestLink(data) {
   try {
     const url = new URL(data.hyperlink, window.location.origin)
@@ -39,7 +73,7 @@ function requestLink(data) {
     return ''
   }
 }
-function fieldsOf(node) {
+function fieldsOf(node, template) {
   const rows = []
   const walk = (item, parent, position = '') => {
     if (rows.length >= 500)
@@ -57,7 +91,11 @@ function fieldsOf(node) {
       : node.nodeData || { data: node.getData() },
     null
   )
-  return extractFields(rows, node.getData('uid'))
+  return extractFields(
+    rows,
+    node.getData('uid'),
+    template && template.kind === 'generic' ? template.fields : undefined
+  )
 }
 export default {
   props: { mindMap: Object },
@@ -69,11 +107,16 @@ export default {
     policyUids: [],
     busy: false,
     error: '',
-    checkedLabel: ''
+    checkedLabel: '',
+    choices: [],
+    catalogCursor: null,
+    choosing: false,
+    policySource: null
   }),
   mounted() {
     this.requestByNode = new Map()
     this.signatures = new Map()
+    this.requestTemplates = new Map()
     this.$bus.$on('node_active', this.select)
     this.mindMap.on('hide_text_edit', this.onTextEnd)
     this.mindMap.on('data_change', this.onDataChange)
@@ -114,10 +157,7 @@ export default {
         .replace(/<[^>]*>/g, '')
         .trim()
       if (
-        /^(?:我要|我想|我需要|我准备|申请|我要申请|我想申请|需要申请|准备申请).{0,6}(?:请假|年假|病假|事假|调休|婚假|产假|陪产假|丧假|长假)/.test(
-          text
-        ) &&
-        !/取消|撤回|不请|不想|不要|无需/.test(text) &&
+        isWorkflowIntent(text) &&
         !this.readonly &&
         !this.isPolicy &&
         this.node &&
@@ -140,6 +180,7 @@ export default {
       const d = n && n.getData()
       this.readonly = !!this.$store.state.isReadonly
       this.requestId = ''
+      this.policySource = null
       this.isPolicy =
         roomFromLocation(this.$route) === this.policyRoom &&
         !!d &&
@@ -164,16 +205,51 @@ export default {
           break
         }
       }
-      if (
-        !this.node &&
-        d &&
-        /(?:我要|申请|想|需要|准备).{0,12}(?:请假|年假|病假|事假|调休|婚假|产假|陪产假|丧假|长假)/.test(
-          String(d.text || '').replace(/<[^>]*>/g, '')
-        )
-      )
-        this.node = n
+      for (let depth = 0, p = n; p && depth < 20; p = p.parent, depth++) {
+        if (
+          ((p.nodeData && p.nodeData.children) || []).some(c =>
+            /^流程标识\s*[:：]\s*.+/.test(
+              String(c.data.text || '').replace(/<[^>]+>/g, '')
+            )
+          )
+        ) {
+          this.isPolicy = true
+          this.node = p
+          this.policySource = {
+            roomKey: roomFromLocation(this.$route),
+            nodeUid: p.getData('uid')
+          }
+          break
+        }
+      }
+      if (this.isPolicy && !this.policySource)
+        this.policySource = {
+          roomKey: this.policyRoom,
+          nodeUid: this.policyUids[0]
+        }
+      if (!this.node && d && isWorkflowIntent(d.text)) this.node = n
     },
-    async begin() {
+    async loadMoreChoices() {
+      if (this.busy || !this.catalogCursor) return
+      this.busy = true
+      try {
+        const page = await service.catalog(this.catalogCursor)
+        const known = new Set(
+          this.choices.map(c => c.source.roomKey + ':' + c.source.nodeUid)
+        )
+        this.choices.push(
+          ...page.list.filter(
+            c => !known.has(c.source.roomKey + ':' + c.source.nodeUid)
+          )
+        )
+        this.catalogCursor = page.nextCursor
+      } catch (e) {
+        this.error = e.message
+      } finally {
+        this.busy = false
+      }
+    },
+    async begin(source) {
       if (this.busy || !this.node || this.readonly) return
       const node = this.node,
         uid = node.getData('uid'),
@@ -181,10 +257,32 @@ export default {
       this.busy = true
       this.error = ''
       try {
+        if (!source) {
+          const result = await service.resolve(node.getData('text'))
+          if (this._isDestroyed || room !== roomFromLocation(this.$route))
+            return
+          if (!result.candidates.length) {
+            const page = await service.catalog()
+            if (!page.list.length && !page.hasMore)
+              throw new Error(result.reason || '未找到可访问的审批模板')
+            this.choices = page.list
+            this.catalogCursor = page.nextCursor
+            this.choosing = true
+            return
+          }
+          if (result.candidates.length > 1) {
+            this.choices = result.candidates
+            this.catalogCursor = null
+            this.choosing = true
+            return
+          }
+          source = result.candidates[0].source
+        }
+        this.choosing = false
         let row
         for (let attempt = 0; attempt < 4; attempt++) {
           try {
-            row = await service.prepare(room, uid)
+            row = await service.prepare(room, uid, source)
             break
           } catch (e) {
             if (e.code !== 'NODE_SCOPE_INVALID' || attempt === 3) throw e
@@ -195,6 +293,7 @@ export default {
         }
         if (this._isDestroyed || room !== roomFromLocation(this.$route)) return
         this.requestByNode.set(uid, row.id)
+        this.requestTemplates.set(row.id, row.template)
         this.checkedLabel = '已生成资料子节点，直接双击“待填写”编辑'
         this.update()
         window.dispatchEvent(new CustomEvent('mindmap:leave-changed'))
@@ -220,19 +319,19 @@ export default {
       if (!this.node || !this.requestId || this.busy || this.readonly) return
       const id = this.requestId,
         node = this.node
-      let fields
-      try {
-        fields = fieldsOf(node)
-      } catch (e) {
-        this.error = e.message
-        return
-      }
-      const signature = JSON.stringify(fields)
-      if (this.signatures.get(id) === signature) return
       this.busy = true
       this.error = ''
       try {
+        const cached = this.requestTemplates.get(id)
+        if (
+          cached &&
+          this.signatures.get(id) === JSON.stringify(fieldsOf(node, cached))
+        )
+          return
         const row = await service.get(id)
+        this.requestTemplates.set(id, row.template)
+        const fields = fieldsOf(node, row.template),
+          signature = JSON.stringify(fields)
         if (!['draft', 'returned'].includes(row.status)) {
           this.signatures.set(id, signature)
           return
@@ -258,24 +357,47 @@ export default {
         }
       }
     },
-    open() {
+    async open() {
       clearTimeout(this.checkTimer)
       if (this.isPolicy)
-        return window.dispatchEvent(new CustomEvent('mindmap:leave-policy'))
+        return window.dispatchEvent(
+          new CustomEvent('mindmap:leave-policy', {
+            detail: { source: this.policySource }
+          })
+        )
       if (!this.requestId) return this.begin()
-      let expectedFields
+      const id = this.requestId,
+        node = this.node,
+        room = roomFromLocation(this.$route)
+      this.busy = true
       try {
-        expectedFields = fieldsOf(this.node)
+        let tpl = this.requestTemplates.get(id)
+        if (!tpl) {
+          const row = await service.get(id)
+          tpl = row.template
+          this.requestTemplates.set(id, tpl)
+        }
+        if (
+          this._isDestroyed ||
+          this.requestId !== id ||
+          roomFromLocation(this.$route) !== room
+        )
+          return
+        const live =
+          (this.mindMap.renderer &&
+            this.mindMap.renderer.findNodeByUid(node.getData('uid'))) ||
+          node
+        openLeaveRequest({
+          requestId: id,
+          roomKey: room,
+          nodeUid: node.getData('uid'),
+          expectedFields: fieldsOf(live, tpl)
+        })
       } catch (e) {
         this.error = e.message
-        return
+      } finally {
+        this.busy = false
       }
-      openLeaveRequest({
-        requestId: this.requestId,
-        roomKey: roomFromLocation(this.$route),
-        nodeUid: this.node.getData('uid'),
-        expectedFields
-      })
     }
   }
 }
@@ -332,6 +454,57 @@ export default {
   .leaveNodeStatus,
   .leaveNodeError {
     font-size: 12px;
+  }
+}
+</style>
+
+<style lang="less">
+.workflowPickerDialog {
+  border-radius: 14px;
+  .el-dialog__body {
+    max-height: 62vh;
+    overflow: auto;
+    padding-top: 12px;
+  }
+  .el-dialog__header {
+    padding: 22px 22px 14px;
+  }
+}
+.workflowChoiceHint {
+  font-size: 13px;
+  color: #748094;
+  line-height: 1.7;
+  margin-top: 0;
+}
+.workflowChoice {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  text-align: left;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid #e4eaf1;
+  border-radius: 12px;
+  margin-top: 12px;
+  background: white;
+  color: #293d53;
+  cursor: pointer;
+  strong {
+    font-size: 15px;
+  }
+  span {
+    grid-column: 1;
+    color: #7b8a9c;
+    font-size: 12px;
+  }
+  i {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    align-self: center;
+  }
+  &:hover {
+    border-color: #82a9d7;
+    background: #f8fbff;
   }
 }
 </style>

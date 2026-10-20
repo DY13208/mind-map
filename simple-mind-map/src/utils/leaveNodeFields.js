@@ -17,7 +17,10 @@ const FIELDS = {
   请假事由: 'reason',
   附件: 'attachmentIds'
 }
-function extractFields(nodes, rootUid) {
+function extractFields(nodes, rootUid, definitions) {
+  const declared = definitions
+    ? Object.fromEntries(definitions.map(f => [f.label, f]))
+    : null
   const children = uid =>
     nodes
       .filter(n => n.parent_uid === uid)
@@ -38,14 +41,30 @@ function extractFields(nodes, rootUid) {
   const root = nodes.find(n => n.uid === rootUid)
   if (root && (root.data || root).attachmentId)
     attachments.add(String((root.data || root).attachmentId))
-  for (const n of group ? children(group.uid) : children(rootUid)) {
+  for (const n of [
+    ...children(rootUid).filter(item => !group || item.uid !== group.uid),
+    ...(group ? children(group.uid) : [])
+  ]) {
     const text = data(n),
       split = text.match(/^([^:：]+)[:：](.*)$/),
       name = label(split ? split[1] : text),
-      key = FIELDS[name]
+      field = declared
+        ? definitions.find(f => f.instanceUid === n.uid) || declared[name]
+        : null,
+      key = declared ? field && field.key : FIELDS[name]
     if (!key) continue
-    if (key === 'attachmentIds') {
+    if (key === 'attachmentIds' || (field && field.type === 'attachment')) {
       collect(n)
+      if (key !== 'attachmentIds') {
+        const ids = new Set()
+        const scan = item => {
+          const id = (item.data || item).attachmentId
+          if (id) ids.add(String(id))
+          children(item.uid).forEach(scan)
+        }
+        scan(n)
+        values[key] = [...new Set([...(values[key] || []), ...ids])].sort()
+      }
       continue
     }
     const raw =
@@ -56,9 +75,11 @@ function extractFields(nodes, rootUid) {
         .join('\n')
     if (!raw || /^待填写(?:$|[（(：:])/.test(raw)) continue
     const value =
-      key === 'replacementId'
+      key === 'replacementId' || (field && field.type === 'member')
         ? raw.replace(/^(账号|user_id)[:：]\s*/i, '').replace(/^@/, '')
-        : key === 'start' || key === 'end'
+        : key === 'start' ||
+          key === 'end' ||
+          (field && field.type === 'datetime')
         ? raw.replace(' ', 'T')
         : raw
     if (values[key] && values[key] !== value)
@@ -71,4 +92,15 @@ function extractFields(nodes, rootUid) {
   values.attachmentIds = [...attachments].sort()
   return values
 }
-module.exports = { plain, label, FIELDS, extractFields }
+function isWorkflowIntent(text) {
+  const value = plain(text)
+  return (
+    value.length <= 500 &&
+    /^(?:我要|我想|我需要|我准备|申请|发起|提请|需要申请|准备申请)/.test(
+      value
+    ) &&
+    !/取消|撤回|不请|不想|不要|无需/.test(value) &&
+    !/^申请(?:资料|字段|内容|事由|时间|人)\s*[:：]/.test(value)
+  )
+}
+module.exports = { plain, label, FIELDS, extractFields, isWorkflowIntent }

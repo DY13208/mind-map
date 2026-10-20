@@ -435,6 +435,189 @@ async function main() {
       ).rows[0].text,
       '请假申请：已通过'
     )
+    // A second workflow in a separate source room, through the registered MCP
+    // tool adapter and real HTTP/database/command writer (only auth is a fixture).
+    const generic = require('./fixtures/approval-templates.cjs').template(
+      'channel',
+      'http-channel'
+    )
+    const genericTree = uid => ({
+      data: { ...generic.nodes.find(n => n.uid === uid).data, uid },
+      children: generic.nodes
+        .filter(n => n.parent_uid === uid)
+        .map(n => genericTree(n.uid))
+    })
+    for (const [room, owner, graph] of [
+      ['http-policy', 'owner', genericTree(generic.root)],
+      [
+        'http-personal',
+        'applicant',
+        { data: { uid: 'generic-anchor', text: '我要关停渠道' }, children: [] }
+      ]
+    ]) {
+      await db.query(
+        'insert into rooms(room_key,title,cos_key,owner_id,nodes) values($1,$1,$2,$3,$4)',
+        [room, 'test/' + room, owner, graph]
+      )
+      await db.query(
+        "insert into room_members(room_key,user_id,role,direct_role) values($1,$2,'owner','owner')",
+        [room, owner]
+      )
+    }
+    await db.query(
+      "insert into room_members(room_key,user_id,role,direct_role) values('http-policy','applicant','viewer','viewer')"
+    )
+    for (const n of generic.nodes)
+      await db.query(
+        'insert into room_nodes(room_key,uid,parent_uid,position,data,is_root) values($1,$2,$3,$4,$5,$6)',
+        [
+          'http-policy',
+          n.uid,
+          n.parent_uid,
+          n.position,
+          n.data,
+          n.uid === generic.root
+        ]
+      )
+    await db.query(
+      "insert into room_nodes(room_key,uid,parent_uid,position,data,is_root) values('http-personal','generic-anchor',null,'A','{\"text\":\"我要关停渠道\"}',true)"
+    )
+    check(
+      (
+        await api('applicant', '/api/workflow-requests', 'POST', {
+          roomKey: 'http-personal',
+          nodeUid: 'generic-anchor'
+        })
+      ).data.code,
+      'SOURCE_REQUIRED'
+    )
+    check(
+      (await api('applicant', '/api/workflow-template')).data.code,
+      'SOURCE_REQUIRED'
+    )
+    const sourceGeneric = { roomKey: 'http-policy', nodeUid: generic.root }
+    const policyGeneric = await item(
+      'owner',
+      '/api/workflow-template?' +
+        new URLSearchParams({
+          source_room: sourceGeneric.roomKey,
+          source_node: sourceGeneric.nodeUid
+        })
+    )
+    check(policyGeneric.kind, 'generic')
+    await item('owner', '/api/workflow-template/publish', 'POST', {
+      source: sourceGeneric,
+      expectedFingerprint: policyGeneric.fingerprint,
+      operationId: randomUUID()
+    })
+    const { registerApprovalTools } = await import(
+      '../simple-mind-map/bin/leaveWorkflow/mcp.mjs'
+    )
+    const { z } = require('../simple-mind-map/node_modules/zod')
+    let toolSchema, toolHandler
+    registerApprovalTools(
+      {
+        tool(name, _description, schema, handler) {
+          check(name, 'approval_request')
+          toolSchema = z.object(schema)
+          toolHandler = handler
+        }
+      },
+      {
+        api: async (path, options = {}) =>
+          item(
+            'mcp:applicant',
+            path,
+            options.method,
+            options.body ? JSON.parse(options.body) : undefined
+          ),
+        z,
+        ok: v => v,
+        fail: e => ({ isError: true, error: e.message })
+      }
+    )
+    const call = input => toolHandler(toolSchema.parse(input))
+    const match = await call({ action: 'resolve', text: '我要关停渠道' })
+    check(match.candidates.length, 1)
+    check(match.candidates[0].source, sourceGeneric)
+    check(
+      toolSchema.safeParse({ action: 'decide' }).success,
+      false,
+      'MCP does not expose formal decisions'
+    )
+    const noSource = await call({
+      action: 'prepare',
+      room_key: 'http-personal',
+      node_uid: 'generic-anchor'
+    })
+    check(
+      noSource.isError,
+      true,
+      'generic MCP prepare cannot fall back silently to leave'
+    )
+    const prepared = await call({
+      action: 'prepare',
+      room_key: 'http-personal',
+      node_uid: 'generic-anchor',
+      template_source: { room_key: 'http-policy', node_uid: generic.root }
+    })
+    check(prepared.source, sourceGeneric)
+    let g = await item(
+      'applicant',
+      '/api/workflow-requests/' + prepared.request_id
+    )
+    check(g.template.fields.length, 4)
+    const values = {
+      渠道名称: '测试渠道A',
+      申请措施: '关停',
+      预计日期: '2026-10-26',
+      库存及结款说明: '隔离验证：无真实库存或资金操作'
+    }
+    for (const f of g.template.fields)
+      await db.query(
+        "update room_nodes set data=jsonb_build_object('text',$3::text) where room_key=$1 and uid=$2",
+        [
+          'http-personal',
+          core.projectionId(g.id + ':value:' + f.key),
+          values[f.label]
+        ]
+      )
+    const imported = await call({
+      action: 'import',
+      request_id: g.id,
+      expected_revision: g.revision,
+      operation_id: randomUUID()
+    })
+    check(imported.validation.blockers, [])
+    const submitted = await call({
+      action: 'submit',
+      request_id: g.id,
+      expected_revision: imported.revision,
+      expected_node_hash: imported.validation.nodeInputHash,
+      operation_id: randomUUID(),
+      confirm_submission: true
+    })
+    check(submitted.status, 'pending')
+    g = await item('manager', '/api/workflow-requests/' + g.id)
+    g = await item(
+      'manager',
+      '/api/workflow-requests/' + g.id + '/decide',
+      'POST',
+      {
+        expectedRevision: g.revision,
+        operationId: randomUUID(),
+        decision: 'approve',
+        reason: '隔离测试：已按渠道模板核对全部要点',
+        checkedCriteria: g.steps[0].criteria.map(c => c.uid)
+      }
+    )
+    check(g.status, 'approved')
+    check(
+      (await item('applicant', '/api/workflow-requests/' + g.id)).history.some(
+        e => e.action === 'decide'
+      ),
+      true
+    )
     console.log(
       JSON.stringify({
         ok: true,
@@ -448,7 +631,9 @@ async function main() {
           'HTTP flow',
           'real SSE notification',
           'persistent history/CC',
-          'trusted graph projection'
+          'trusted graph projection',
+          'distributed generic templates',
+          'registered generic MCP over real HTTP'
         ]
       })
     )

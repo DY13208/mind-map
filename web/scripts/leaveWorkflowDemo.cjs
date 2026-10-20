@@ -111,7 +111,7 @@ async function main() {
       [service.SOURCE.roomKey, n.uid, n.parent_uid, n.position, n.data]
     )
   await pool.query(
-    "insert into room_nodes values('personal','anchor',null,'A','{\"text\":\"待登记事项\"}',null)"
+    "insert into room_nodes values('personal','home',null,'A','{\"text\":\"我的业务申请\"}',null),('personal','anchor','home','A','{\"text\":\"待登记事项\"}',null),('personal','contract-anchor','home','B','{\"text\":\"待登记合同申请\"}',null),('personal','channel-anchor','home','C','{\"text\":\"待登记渠道申请\"}',null)"
   )
   const tpl = await service.template(pool, reqFor('owner'))
   await service.publish(pool, reqFor('owner'), {
@@ -131,6 +131,34 @@ async function main() {
         'update room_nodes set data=data || $3::jsonb where room_key=$1 and uid=$2',
         [room, p.uid, p.patch]
       )
+  }
+  // Deliberately different source rooms: there is no fixed workflow directory.
+  const {
+    template: approvalFixture
+  } = require('../../scripts/fixtures/approval-templates.cjs')
+  for (const [room, kind] of [
+    ['contracts', 'contract'],
+    ['channels', 'channel']
+  ]) {
+    await pool.query(
+      "insert into rooms(room_key,owner_id,title) values($1,'owner',$2)",
+      [room, kind === 'contract' ? '合同SOP测试图' : '渠道SOP测试图']
+    )
+    await acl.ensureOwner(pool, room, 'owner')
+    await acl.setMember(pool, room, 'applicant', 'viewer', 'owner')
+    const fixture = approvalFixture(kind)
+    for (const n of fixture.nodes)
+      await pool.query(
+        'insert into room_nodes(room_key,uid,parent_uid,position,data) values($1,$2,$3,$4,$5)',
+        [room, n.uid, n.parent_uid, n.position, n.data]
+      )
+    const source = { roomKey: room, nodeUid: fixture.root },
+      template = await service.template(pool, reqFor('owner'), source)
+    await service.publish(pool, reqFor('owner'), {
+      source,
+      expectedFingerprint: template.fingerprint,
+      operationId: randomUUID()
+    })
   }
   let compiled
   const ctx = await esbuild.context({
@@ -256,7 +284,7 @@ async function main() {
             )
               return sendJson(res, 400, { error: '无效节点' })
             if (
-              node.uid !== 'anchor' &&
+              node.uid !== 'home' &&
               !(
                 await pool.query(
                   "select uid from room_nodes where room_key='personal' and uid=$1 and deleted_at is null",
@@ -269,7 +297,7 @@ async function main() {
               "insert into room_nodes(room_key,uid,parent_uid,position,data) values('personal',$1,$2,'Z',$3) on conflict(room_key,uid) do update set data=room_nodes.data || excluded.data",
               [
                 node.uid,
-                node.uid === 'anchor' ? null : node.parentUid,
+                node.uid === 'home' ? null : node.parentUid,
                 { text: node.text }
               ]
             )
@@ -290,7 +318,7 @@ async function main() {
                   .map(n => make(n.uid))
               }
             }
-            return sendJson(res, 200, { tree: make('anchor') })
+            return sendJson(res, 200, { tree: make('home') })
           }
           return sendJson(res, 404, { error: '测试接口不存在' })
         }
@@ -318,7 +346,7 @@ async function main() {
       }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       res.end(
-        '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WCPD 请假闭环验证</title><link rel="stylesheet" href="/demo.css"><style>body{margin:0;background:#f5f7fa;color:#243247;font-family:system-ui}nav{padding:16px 5vw;display:flex;flex-wrap:wrap;gap:24px;background:#fff;border-bottom:1px solid #e5eaf0}a{color:#4b6c95;text-decoration:none}header{padding:36px 5vw 20px}header h1{font-size:28px}header p,header small{color:#7c8a9d;font-size:13px}.workspace{margin:0 5vw 40px;background:white;border:1px solid #e4e9f0;border-radius:16px;max-width:1100px}</style><div id="app"></div><script src="/demo.js"></script>'
+        '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WCPD 脑图审批验证</title><link rel="stylesheet" href="/demo.css"><style>body{margin:0;background:#f5f7fa;color:#243247;font-family:system-ui}nav{padding:16px 5vw;display:flex;flex-wrap:wrap;gap:24px;background:#fff;border-bottom:1px solid #e5eaf0}a{color:#4b6c95;text-decoration:none}header{padding:36px 5vw 20px}header h1{font-size:28px}header p,header small{color:#7c8a9d;font-size:13px}.workspace{margin:0 5vw 40px;background:white;border:1px solid #e4e9f0;border-radius:16px;max-width:1100px}</style><div id="app"></div><script src="/demo.js"></script>'
       )
     } catch (e) {
       sendJson(res, e.statusCode || 500, { error: e.message, code: e.code })

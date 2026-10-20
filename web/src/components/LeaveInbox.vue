@@ -24,7 +24,9 @@
       <article v-for="item in items" :key="item.id" class="leaveInboxItem">
         <span class="leaveInboxGlyph"><i class="el-icon-date"/></span>
         <div>
-          <strong>{{ item.requester_name }}的请假申请</strong>
+          <strong
+            >{{ item.requester_name }}的{{ item.title || '请假申请' }}</strong
+          >
           <p>
             第{{ item.round }}轮 · {{ status(item.status)
             }}<span v-if="item.status === 'pending'">
@@ -103,11 +105,11 @@ export default {
     noticeText(s) {
       return (
         {
-          todo: '有请假待办需要你审核',
-          approved: '请假申请已通过',
-          returned: '请假申请被退回补充',
-          rejected: '请假申请未通过',
-          withdrawn: '请假申请已撤回'
+          todo: '有审批待办需要你审核',
+          approved: '申请已通过',
+          returned: '申请被退回补充',
+          rejected: '申请未通过',
+          withdrawn: '申请已撤回'
         }[s] || s
       )
     },
