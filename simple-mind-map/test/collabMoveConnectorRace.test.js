@@ -27,7 +27,7 @@ for (const mode of ['unchanged', 'replaced', 'deleted', 'same-parent', 'independ
     const live = new Map([['old', old], ['target', target], ['child', child]])
     let nextOld, nextTarget
     const co = {
-      mindMap: { renderer: { findNodeByUid: uid => live.get(uid) }, command: { pause() {}, recovery() {} } },
+      mindMap: { renderer: { findNodeByUid: uid => live.get(uid) }, render() {}, command: { pause() {}, recovery() {} } },
       snapshotActiveUids: () => [], restoreActiveUids() {}, cleanupDragArtifacts() {},
       nodeDataHasChild: (parent, uid) => parent.nodeData.children.some(n => n.data.uid === uid),
       applyNativeMoveCommand() {
@@ -36,7 +36,8 @@ for (const mode of ['unchanged', 'replaced', 'deleted', 'same-parent', 'independ
         child.parent = target
         return true
       },
-      async waitForMoveRender() {
+      requestRemoteApplyRender(uids, finish) {
+        if (!finish) return
         if (mode === 'replaced') {
           nextOld = node('old')
           nextTarget = node('target')
@@ -49,6 +50,7 @@ for (const mode of ['unchanged', 'replaced', 'deleted', 'same-parent', 'independ
           live.delete('target')
           live.delete('child')
         }
+        finish()
       }
     }
     await applyV2PayloadMove.call(co, { uid: 'child', parentUid: target.getData('uid'), index: 0,

@@ -95,6 +95,7 @@ class Drag extends Base {
   bindEvent() {
     this.onNodeMousedown = this.onNodeMousedown.bind(this)
     this.onMousemove = this.onMousemove.bind(this)
+    this.onNodeMouseup = this.onNodeMouseup.bind(this)
     this.onMouseup = this.onMouseup.bind(this)
     this.onKeydown = this.onKeydown.bind(this)
     this.cancelDrag = this.cancelDrag.bind(this)
@@ -102,7 +103,7 @@ class Drag extends Base {
 
     this.mindMap.on('node_mousedown', this.onNodeMousedown)
     this.mindMap.on('mousemove', this.onMousemove)
-    this.mindMap.on('node_mouseup', this.onMouseup)
+    this.mindMap.on('node_mouseup', this.onNodeMouseup)
     this.mindMap.on('mouseup', this.onMouseup)
     if (typeof window !== 'undefined' && window.addEventListener) {
       window.addEventListener('keydown', this.onKeydown)
@@ -114,7 +115,7 @@ class Drag extends Base {
   unBindEvent() {
     this.mindMap.off('node_mousedown', this.onNodeMousedown)
     this.mindMap.off('mousemove', this.onMousemove)
-    this.mindMap.off('node_mouseup', this.onMouseup)
+    this.mindMap.off('node_mouseup', this.onNodeMouseup)
     this.mindMap.off('mouseup', this.onMouseup)
     if (typeof window !== 'undefined' && window.removeEventListener) {
       window.removeEventListener('keydown', this.onKeydown)
@@ -184,6 +185,12 @@ class Drag extends Base {
     this.mindMap.emit('node_dragging', this.mousedownNode)
     this.handleStartMove()
     this.onMove(x, y, e)
+  }
+
+  // node_mouseup emits (node, event), while canvas mouseup emits (event).
+  // Keep the real release coordinates when a touch ends on its source node.
+  onNodeMouseup(node, e) {
+    return this.onMouseup(e)
   }
 
   //  鼠标松开事件

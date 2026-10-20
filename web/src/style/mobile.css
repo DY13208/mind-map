@@ -1,0 +1,123 @@
+:root {
+  --mm-viewport-height: 100vh;
+  --mm-viewport-top: 0px;
+}
+@supports (height: 100dvh) {
+  :root { --mm-viewport-height: 100dvh; }
+}
+/* Only the canvas owns pan/pinch gestures. Sheets, forms and lists scroll
+   natively, including when an editor exists behind an open dialog. */
+.editContainer.editContainer {
+  top: var(--mm-viewport-top);
+  bottom: auto;
+  height: var(--mm-viewport-height);
+}
+button, [role="button"], .toolbarBtn, .triggerItem, .el-dropdown-menu__item {
+  touch-action: manipulation;
+}
+@media (pointer: coarse) {
+  .container .toolbarContainer .toolbar.dockShell .dock .toolIconBtn,
+  .container .toolbarContainer .toolbar.dockShell .dock .dockIconBtn,
+  .container .toolbarContainer .toolbar.dockShell .toolbarBtn .icon,
+  .navigatorToolbarDock .navigatorToolbarWrapper .item .btn,
+  .sidebarTriggerRoot .sidebarTriggerContainer .triggerItem,
+  .sidebarContainer .closeBtn,
+  .fileToolbar .iconGhost {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+  .el-dropdown-menu__item, .el-select-dropdown__item { min-height: 44px; line-height: 44px; }
+  .container .toolbarContainer .toolbar.dockShell .nodeToolRail > .toolbarBlock { width: 56px; }
+  .container .toolbarContainer .toolbar.dockShell .dock > .toolbarBlock { height: auto; min-height: 52px; }
+  .navigatorToolbarDock.navigatorToolbarDock {
+    bottom: calc(100vh - var(--mm-viewport-height) - var(--mm-viewport-top) + max(4px, env(safe-area-inset-bottom)));
+  }
+  .sidebarTriggerRoot .sidebarTriggerContainer,
+  .sidebarTriggerRoot .rightExpandTab { top: calc(var(--mm-viewport-top) + var(--mm-viewport-height) / 2); }
+  .sidebarContainer .sidebarContent, .organizationTree, .permissionDetailPane,
+  .existingList, .contextmenuContainer, .el-dialog__body {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+  .container .toolbarContainer .toolbar.dockShell .dock.fileDock { left: env(safe-area-inset-left); }
+  .container .toolbarContainer .toolbar.dockShell .dock.collabDock { right: env(safe-area-inset-right); }
+}
+@media (max-width: 1024px) {
+  .el-dialog__wrapper {
+    top: var(--mm-viewport-top);
+    bottom: auto;
+    height: var(--mm-viewport-height);
+    overscroll-behavior: contain;
+  }
+  .el-dialog__wrapper .el-dialog {
+    max-width: calc(100% - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    max-height: calc(var(--mm-viewport-height) - 24px);
+  }
+  .el-dialog__wrapper .folderPermissionDialog,
+  .el-dialog__wrapper .cooperateDialogShell.isPermissions {
+    height: calc(var(--mm-viewport-height) - 24px);
+    max-height: calc(var(--mm-viewport-height) - 24px);
+    margin-top: 12px !important;
+  }
+  .el-dialog__wrapper .el-dialog__body { overflow: auto; }
+  .sidebarContainer.sidebarContainer {
+    top: calc(var(--mm-viewport-top) + 112px + env(safe-area-inset-top));
+    bottom: auto;
+    max-width: calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    height: max(120px, calc(var(--mm-viewport-height) - 180px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+  }
+  .sidebarContainer.sidebarContainer.show { right: max(12px, env(safe-area-inset-right)); }
+}
+@media (max-width: 700px) {
+  .container .toolbarContainer .toolbar.dockShell .dock.fileDock {
+    top: calc(var(--mm-viewport-top) + env(safe-area-inset-top));
+    left: env(safe-area-inset-left);
+    right: env(safe-area-inset-right);
+    width: auto;
+    max-width: none;
+  }
+  .container .toolbarContainer .toolbar.dockShell .dock.fileDock > .toolbarBlock {
+    min-height: 48px;
+    height: auto;
+    padding: 4px;
+    gap: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .container .toolbarContainer .toolbar.dockShell .fileIdentity { flex: 1 1 auto; }
+  .container .toolbarContainer .toolbar.dockShell .fileName { max-width: 100px; font-size: 12px; }
+  .container .toolbarContainer .toolbar.dockShell .dock.collabDock {
+    top: calc(var(--mm-viewport-top) + 56px + env(safe-area-inset-top));
+    right: env(safe-area-inset-right);
+    max-width: calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right));
+  }
+  .container .toolbarContainer .toolbar.dockShell .dock.collabDock > .toolbarBlock { padding: 2px 6px; gap: 0; }
+  .container .toolbarContainer .toolbar.dockShell .notchWing { display: none; }
+  .container .toolbarContainer .toolbar.dockShell .nodeToolRail {
+    top: calc(var(--mm-viewport-top) + 116px + env(safe-area-inset-top));
+    bottom: calc(64px + env(safe-area-inset-bottom));
+    transform: none;
+    max-height: calc(var(--mm-viewport-height) - 184px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+  .container .toolbarContainer .toolbar.dockShell .nodeToolRail > .toolbarBlock {
+    max-height: 100%; overflow-y: auto; overflow-x: hidden;
+  }
+  .navigatorToolbarDock.navigatorToolbarDock {
+    bottom: calc(100vh - var(--mm-viewport-height) - var(--mm-viewport-top) + max(4px, env(safe-area-inset-bottom)));
+    max-width: calc(100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right));
+  }
+  .navigatorToolbarDock .navigatorToolbarWrapper .navigatorContainer { height: auto; min-height: 48px; padding: 4px 8px; }
+  .sidebarTriggerRoot .sidebarTriggerContainer { max-height: calc(var(--mm-viewport-height) - 190px); }
+  .sidebarTriggerRoot .sidebarTriggerContainer .trigger { max-height: inherit; overflow-y: auto; }
+  .productShell.productShell .productPage { padding: 16px 12px 32px; }
+  .productShell.productShell .fileToolbar { flex-wrap: wrap; gap: 8px; }
+  .productShell.productShell .toolbarActions { min-width: 0; max-width: 100%; flex-wrap: wrap; }
+  .el-dialog__wrapper .el-dialog { margin-top: 12px !important; }
+  .el-dialog__wrapper .el-dialog__body { padding: 16px 12px; }
+  .el-dialog__wrapper .permissionFooter { gap: 8px; }
+  .el-dialog__wrapper .permissionFooter .footerHint { min-width: 0; }
+  .el-dialog__wrapper .permissionFooter .el-button { flex-shrink: 0; }
+  .el-message { max-width: calc(100vw - 24px); min-width: 0; }
+  /* Prevent Safari from zooming the whole page when opening a text field. */
+  input:not([type=checkbox]):not([type=radio]), textarea, [contenteditable=true] { font-size: 16px; }
+}

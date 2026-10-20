@@ -231,6 +231,14 @@ import workbuddyFillIcon from '@/assets/img/workbuddy-fill.svg'
 
 export default {
   props: {
+    activeNodeList: {
+      type: Array,
+      default: null
+    },
+    historyState: {
+      type: Object,
+      default: null
+    },
     dir: {
       type: String,
       default: 'h' // h（水平排列）、v（垂直排列）
@@ -252,7 +260,7 @@ export default {
       nativeForwardEnd: true,
       nativeHistoryStatus: null,
       collabHistoryEnabled: false,
-      readonly: false,
+      readonly: !!(this.$store && this.$store.state.isReadonly),
       isFullDataFile: false,
       timer: null,
       isInPainter: false,
@@ -294,6 +302,22 @@ export default {
         return item === 'annotation'
       })
       return index !== -1 && index < this.list.length - 1
+    }
+  },
+  watch: {
+    historyState: {
+      immediate: true,
+      handler(state) {
+        if (state) this.onCollabHistory(state)
+      }
+    },
+    // The toolbar can mount after a node has already been selected. Re-tapping
+    // that node does not emit another node_active event, so seed the live state.
+    activeNodeList: {
+      immediate: true,
+      handler(nodes) {
+        if (Array.isArray(nodes)) this.activeNodes = [...nodes]
+      }
     }
   },
   created() {

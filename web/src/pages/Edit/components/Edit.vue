@@ -387,6 +387,14 @@ export default {
     this.$bus.$on('prepare_reload', this.prepareReload)
     this.$bus.$on('room_canvas_ready', this.onRoomCanvasReady)
     window.addEventListener('resize', this.handleResize)
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', this.handleResize)
+      window.visualViewport.addEventListener('scroll', this.handleResize)
+    }
+    if (typeof ResizeObserver !== 'undefined') {
+      this._canvasResizeObserver = new ResizeObserver(this.handleResize)
+      this._canvasResizeObserver.observe(this.$refs.mindMapContainer)
+    }
     document.addEventListener('fullscreenchange', this.onDocFullscreenChange)
     // 房间模式下协作挂了不能等于"图没了"：等一会儿还没连上就用本地留底恢复
     this.startCollabDraftFallback()
@@ -452,6 +460,12 @@ export default {
     this.$bus.$off('data_change', this.onSaveDataChange)
     this.$bus.$off('view_data_change', this.onSaveViewChange)
     window.removeEventListener('resize', this.handleResize)
+    if (window.visualViewport) {
+      window.visualViewport.removeEventListener('resize', this.handleResize)
+      window.visualViewport.removeEventListener('scroll', this.handleResize)
+    }
+    if (this._canvasResizeObserver) this._canvasResizeObserver.disconnect()
+    if (this._canvasResizeFrame != null) cancelAnimationFrame(this._canvasResizeFrame)
     document.removeEventListener('fullscreenchange', this.onDocFullscreenChange)
     if (this.mindMap) {
       this.unbindCanvasThemeEvents()
@@ -603,7 +617,18 @@ export default {
     },
 
     handleResize() {
-      this.mindMap.resize()
+      if (this._canvasResizeFrame != null) return
+      this._canvasResizeFrame = requestAnimationFrame(() => {
+        this._canvasResizeFrame = null
+        if (this._editorDisposed || !this.mindMap) return
+        const el = this.$refs.mindMapContainer
+        if (!el || !el.clientWidth || !el.clientHeight) return
+        const rect = el.getBoundingClientRect()
+        const size = `${rect.width}:${rect.height}:${rect.left}:${rect.top}`
+        if (size === this._lastCanvasSize) return
+        this._lastCanvasSize = size
+        this.resizeMindMapSafely()
+      })
     },
 
     // 显示loading

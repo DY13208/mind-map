@@ -240,7 +240,7 @@
       </div>
       <div v-if="!isReadonly && nodeToolsOpen" class="dock nodeToolRail">
         <div class="toolbarBlock">
-          <ToolbarNodeBtnList :list="nodeToolList"></ToolbarNodeBtnList>
+          <ToolbarNodeBtnList :list="nodeToolList" :active-node-list="activeNodes" :history-state="collabHistoryState"></ToolbarNodeBtnList>
           <el-popover
             v-model="popoverShow"
             placement="right-start"
@@ -253,6 +253,8 @@
             <ToolbarNodeBtnList
               dir="v"
               :list="verticalList"
+              :active-node-list="activeNodes"
+              :history-state="collabHistoryState"
               @click.native="popoverShow = false"
             ></ToolbarNodeBtnList>
             <button slot="reference" type="button" class="toolIconBtn" :aria-label="$t('toolbar.more')" title="更多">
@@ -1015,7 +1017,8 @@ export default {
       jobPendingPrompt: '',
       // 点过的概要 = 这次运行的「继续执行」指令来源 { ownerUid, genUid, title }
       jobGeneralization: null,
-      activeNodes: []
+      activeNodes: [],
+      collabHistoryState: null
     }
   },
   computed: {
@@ -1441,6 +1444,7 @@ export default {
       this.setCanvasToolbarsCollapsed
     )
     this.$bus.$on('node_active', this.onNodeActive)
+    this.$bus.$on('collab_history', this.onCollabHistory)
     try {
       this.nodeToolsOpen = localStorage.getItem('mindmap.nodeToolsOpen') === '1'
     } catch (err) {
@@ -1498,6 +1502,7 @@ export default {
       this.setCanvasToolbarsCollapsed
     )
     this.$bus.$off('node_active', this.onNodeActive)
+    this.$bus.$off('collab_history', this.onCollabHistory)
     this.$bus.$off('open_workbuddy_job_history', this.openJobHistory)
     this.$bus.$off('open_local_directory', this.openDirectory)
     this.$bus.$off('open_local_file', this.openLocalFile)
@@ -1905,6 +1910,10 @@ export default {
 
     onNodeActive(_node, activeNodeList) {
       this.activeNodes = Array.isArray(activeNodeList) ? [...activeNodeList] : []
+    },
+
+    onCollabHistory(state) {
+      this.collabHistoryState = state ? { ...state } : null
     },
 
     setNodeToolsOpen(open) {
