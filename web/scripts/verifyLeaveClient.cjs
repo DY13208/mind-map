@@ -221,10 +221,99 @@ async function main() {
   await tick()
   assert.equal(prepared, 2)
   assert.equal(trigger.error, '未登记此审批')
+  // Copied/imported maps can retain node UIDs. A cached application belongs
+  // only to its original room, even when the editor component is reused.
+  clearTimeout(trigger.checkTimer)
+  trigger.requestByNode.clear()
+  trigger.$route.query.room = 'personal'
+  service.resolve = async () => ({
+    candidates: [{ source: { roomKey: 'policy', nodeUid: 'template' } }]
+  })
+  trigger.onTextEnd(null, [], intent)
+  await tick()
+  assert.ok(trigger.requestId)
+  clearTimeout(trigger.checkTimer)
+  trigger.$route.query.room = 'copied-room'
+  trigger.candidate = node('我要请假')
+  trigger.update()
+  assert.equal(
+    trigger.requestId,
+    '',
+    'An identical UID in another room must not reuse the old application'
+  )
+
+  // An outstanding read must not import data after navigation or a switch to
+  // read-only. These assertions exercise the boundary before the write.
+  let finishRead,
+    imports = 0
+  service.get = () =>
+    new Promise(resolve => {
+      finishRead = resolve
+    })
+  service.act = async () => {
+    imports++
+    return row('pending')
+  }
+  for (const change of ['room', 'request', 'readonly', 'destroy']) {
+    trigger.$route.query.room = 'personal'
+    trigger.$store.state.isReadonly = false
+    trigger.readonly = false
+    trigger.requestId = 'pending'
+    trigger.node = intent
+    trigger.signatures.clear()
+    trigger._isDestroyed = false
+    const pending = trigger.checkNodes()
+    if (change === 'room') trigger.$route.query.room = 'other'
+    if (change === 'request') trigger.requestId = 'another'
+    if (change === 'readonly') trigger.$store.state.isReadonly = true
+    if (change === 'destroy') trigger._isDestroyed = true
+    finishRead(row('pending'))
+    await pending
+    assert.equal(
+      imports,
+      0,
+      'A stale ' + change + ' context must not import application data'
+    )
+    trigger.busy = false
+    trigger._isDestroyed = false
+    clearTimeout(trigger.checkTimer)
+  }
+  // Discovering a template is asynchronous too: do not create a draft if the
+  // user has left the node or lost editing permission while matching it.
+  let finishResolve
+  const previousPrepared = prepared
+  for (const change of ['room', 'node', 'readonly', 'destroy']) {
+    trigger.$route.query.room = 'personal'
+    trigger.$store.state.isReadonly = false
+    trigger.requestByNode.clear()
+    trigger.candidate = intent
+    trigger.update()
+    service.resolve = () =>
+      new Promise(resolve => {
+        finishResolve = resolve
+      })
+    const pending = trigger.begin()
+    if (change === 'room') trigger.$route.query.room = 'other'
+    if (change === 'node') trigger.node = null
+    if (change === 'readonly') trigger.$store.state.isReadonly = true
+    if (change === 'destroy') trigger._isDestroyed = true
+    finishResolve({
+      candidates: [{ source: { roomKey: 'policy', nodeUid: 'template' } }]
+    })
+    await pending
+    assert.equal(
+      prepared,
+      previousPrepared,
+      'A stale ' + change + ' match must not create a draft'
+    )
+    trigger.busy = false
+    trigger._isDestroyed = false
+    clearTimeout(trigger.checkTimer)
+  }
   vm.$destroy()
   trigger.$destroy()
   console.log(
-    'Leave client checks passed: node-only submission, no automatic form, stale-submit isolation, late-response isolation, bounded pending-node retries, permission denial, explicit intent, deduplication, cancellation and read-only safety'
+    'Leave client checks passed: node-only submission, no automatic form, stale-submit isolation, late-response isolation, bounded pending-node retries, permission denial, explicit intent, deduplication, cancellation, room-scoped cache and stale-check/read-only safety'
   )
 }
 main().catch(e => {

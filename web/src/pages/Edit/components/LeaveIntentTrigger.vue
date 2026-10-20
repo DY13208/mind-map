@@ -73,6 +73,7 @@ function requestLink(data) {
     return ''
   }
 }
+const nodeKey = (room, uid) => JSON.stringify([room, uid])
 function fieldsOf(node, template) {
   const rows = []
   const walk = (item, parent, position = '') => {
@@ -198,7 +199,10 @@ export default {
         const id =
           direct ||
           childLink ||
-          (this.requestByNode && this.requestByNode.get(p.getData('uid')))
+          (this.requestByNode &&
+            this.requestByNode.get(
+              nodeKey(roomFromLocation(this.$route), p.getData('uid'))
+            ))
         if (id) {
           this.node = direct && p.parent ? p.parent : p
           this.requestId = id
@@ -254,15 +258,21 @@ export default {
       const node = this.node,
         uid = node.getData('uid'),
         room = roomFromLocation(this.$route)
+      const current = () =>
+        !this._isDestroyed &&
+        !this.$store.state.isReadonly &&
+        room === roomFromLocation(this.$route) &&
+        this.node &&
+        this.node.getData('uid') === uid
       this.busy = true
       this.error = ''
       try {
         if (!source) {
           const result = await service.resolve(node.getData('text'))
-          if (this._isDestroyed || room !== roomFromLocation(this.$route))
-            return
+          if (!current()) return
           if (!result.candidates.length) {
             const page = await service.catalog()
+            if (!current()) return
             if (!page.list.length && !page.hasMore)
               throw new Error(result.reason || '未找到可访问的审批模板')
             this.choices = page.list
@@ -281,6 +291,7 @@ export default {
         this.choosing = false
         let row
         for (let attempt = 0; attempt < 4; attempt++) {
+          if (!current()) return
           try {
             row = await service.prepare(room, uid, source)
             break
@@ -291,14 +302,14 @@ export default {
             )
           }
         }
-        if (this._isDestroyed || room !== roomFromLocation(this.$route)) return
-        this.requestByNode.set(uid, row.id)
+        if (!current()) return
+        this.requestByNode.set(nodeKey(room, uid), row.id)
         this.requestTemplates.set(row.id, row.template)
         this.checkedLabel = '已生成资料子节点，直接双击“待填写”编辑'
         this.update()
         window.dispatchEvent(new CustomEvent('mindmap:leave-changed'))
       } catch (e) {
-        if (!this._isDestroyed) this.error = e.message
+        if (current()) this.error = e.message
       } finally {
         if (!this._isDestroyed) {
           this.busy = false
@@ -318,7 +329,15 @@ export default {
     async checkNodes() {
       if (!this.node || !this.requestId || this.busy || this.readonly) return
       const id = this.requestId,
-        node = this.node
+        node = this.node,
+        room = roomFromLocation(this.$route)
+      const current = () =>
+        !this._isDestroyed &&
+        !this.$store.state.isReadonly &&
+        room === roomFromLocation(this.$route) &&
+        id === this.requestId &&
+        this.node &&
+        this.node.getData('uid') === node.getData('uid')
       this.busy = true
       this.error = ''
       try {
@@ -329,6 +348,7 @@ export default {
         )
           return
         const row = await service.get(id)
+        if (!current()) return
         this.requestTemplates.set(id, row.template)
         const fields = fieldsOf(node, row.template),
           signature = JSON.stringify(fields)
@@ -340,13 +360,14 @@ export default {
           expectedRevision: row.revision,
           expectedFields: fields
         })
-        this.signatures.set(id, signature)
-        if (id === this.requestId && !this._isDestroyed)
+        if (current()) {
+          this.signatures.set(id, signature)
           this.checkedLabel = (fresh.report.blockers || []).length
             ? '缺项已标在填写检查节点中'
             : '资料已读取，可核对并提交'
+        }
       } catch (e) {
-        if (id === this.requestId && !this._isDestroyed) this.error = e.message
+        if (current()) this.error = e.message
       } finally {
         if (!this._isDestroyed) {
           this.busy = false

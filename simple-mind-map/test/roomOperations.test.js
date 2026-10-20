@@ -301,7 +301,7 @@ function testRecoveryPlannerDetectsGapsAndResnapshot() {
       operations: [],
       hasMore: false
     }),
-    { type: 'resnapshot', version: 20 }
+    { type: 'resnapshot', version: 20, reason: 'AUTHORITATIVE_SNAPSHOT_RECOVERY' }
   )
   assert.deepStrictEqual(
     planAfterOperations(10, {
@@ -317,7 +317,7 @@ function testRecoveryPlannerDetectsGapsAndResnapshot() {
       ],
       hasMore: false
     }),
-    { type: 'resnapshot', version: 11 }
+    { type: 'resnapshot', version: 11, reason: 'AUTHORITATIVE_SNAPSHOT_RECOVERY' }
   )
 }
 

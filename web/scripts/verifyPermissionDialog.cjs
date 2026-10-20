@@ -37,7 +37,7 @@ async function main() {
   assert.equal(vm.isInheritedOnly(vm.members[0]),true);assert.equal(vm.needsRoleChange(vm.members[0]),true,'Direct grant differs from inherited access')
   assert.equal(normalizeRoomDto({room_key:'room',role:'manager'}).canManage,true)
   const inherited = vm.members[0]
-  assert.equal(vm.editableMemberRole(inherited),'','Pure inheritance is not a direct grant')
+  assert.equal(vm.editableMemberRole(inherited),'Inherit','Pure inheritance selects the explicit restore-inheritance option')
   assert.equal(vm.editableMemberRole({...inherited,directRole:'viewer'}),'Viewer','Normalize backend role casing to UI options')
   let patchCount=0
   const patched={user_id:'id-0',role:'editor',direct_role:'viewer',folder_role:'editor'}
@@ -46,7 +46,7 @@ async function main() {
   assert.equal(patchCount,1)
   assert.equal(vm.members[0].directRole,'viewer')
   assert.equal(vm.members[0].role,'Editor')
-  assert.match(messages.pop(),/继承权限/)
+  assert.match(messages.pop(),/权限已更新/)
   await vm.updateRole(vm.members[0],'Viewer')
   assert.equal(patchCount,1,'Unchanged direct grant must not submit again')
   vm.$props.readOnly=true
@@ -56,7 +56,30 @@ async function main() {
   await vm.remove(vm.members[0])
   assert.equal(vm.members[0].directRole,null)
   assert.equal(vm.members[0].role,'Editor')
-  assert.match(messages.pop(),/直接授权已移除/,'Explain remaining inherited access after removal')
+  assert.match(messages.pop(),/已移除单独授权.*仍有继承权限/,'Explain remaining inherited access after removal')
+  // New deployments allow per-file overrides in both directions. The effective
+  // role is authoritative; a viewer override must not display the folder editor.
+  Object.assign(patched,{acl_v2:true,direct_role:null,override_role:'viewer',role:'viewer'})
+  await vm.loadMembers()
+  assert.equal(vm.members[0].role,'Viewer')
+  assert.equal(vm.editableMemberRole(vm.members[0]),'Viewer')
+  assert.equal(vm.isInheritedOnly(vm.members[0]),false)
+  assert.match(vm.memberSourceLabel(vm.members[0]),/本图单独设置，覆盖文件夹继承/)
+  await vm.updateRole(vm.members[0],'Viewer')
+  assert.equal(patchCount,1,'Unchanged per-file override must not submit again')
+  setProductHttp(async (url, options={})=>{
+    if(options.method==='PATCH'){
+      assert.equal(JSON.parse(options.body).role,'inherit')
+      patchCount++;patched.override_role=null;patched.role='editor';return patched
+    }
+    return {list:[patched]}
+  })
+  await vm.updateRole(vm.members[0],'Inherit')
+  assert.equal(patchCount,2)
+  assert.equal(vm.members[0].role,'Editor')
+  assert.equal(vm.editableMemberRole(vm.members[0]),'Inherit')
+  assert.equal(vm.isInheritedOnly(vm.members[0]),true)
+  assert.match(messages.pop(),/已恢复继承.*可编辑.*文件夹继承/)
   const template=compiler.parseComponent(fs.readFileSync(path.join(root,'src/pages/Edit/components/CooperateDialog.vue'),'utf8')).template.content
   assert.deepEqual(compiler.compile(template).errors,[])
   assert.match(template,/<ShareFolderDialog/)
