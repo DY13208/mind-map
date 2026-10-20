@@ -68,9 +68,11 @@ async function handle(req, res, { url, db, writer, readBody, sendJson }) {
       )
     else if (path === '/api/leave-requests' && req.method === 'GET')
       result = await service.list(db, req, Object.fromEntries(url.searchParams))
-    else if (path === '/api/leave-requests' && req.method === 'POST')
+    else if (path === '/api/leave-requests' && req.method === 'POST') {
       result = await service.prepare(db, req, await readBody(req))
-    else {
+      await service.project(db, writer, result.id)
+      result = await service.get(db, req, result.id)
+    } else {
       const hit = path.match(
         /^\/api\/leave-requests\/([^/]+)(?:\/(save|import|submit|withdraw|decide|analysis|attachments)(?:\/([^/]+))?)?$/
       )
@@ -102,6 +104,8 @@ async function handle(req, res, { url, db, writer, readBody, sendJson }) {
         return true
       } else return false
     }
+    if (req.method === 'POST' && /\/(import|submit)$/.test(path))
+      await service.project(db, writer, result.id)
     sendJson(res, 200, { ok: true, item: result })
     setImmediate(run)
   } catch (e) {

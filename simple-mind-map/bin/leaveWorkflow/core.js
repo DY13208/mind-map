@@ -1,26 +1,14 @@
 const { createHash } = require('crypto')
-const plain = value =>
-  String(value || '')
-    .replace(/<[^>]*>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .trim()
+const {
+  plain,
+  label,
+  FIELDS,
+  extractFields
+} = require('../../src/utils/leaveNodeFields')
 const digest = value =>
   createHash('sha256')
     .update(JSON.stringify(value))
     .digest('hex')
-const label = value =>
-  plain(value)
-    .replace(/〔.*?〕|\[.*?\]/g, '')
-    .trim()
-const FIELDS = {
-  请假类型: 'leaveType',
-  开始时间: 'start',
-  结束时间: 'end',
-  工作替补人: 'replacementId',
-  请假事由: 'reason',
-  附件: 'attachmentIds'
-}
 function failure(code, message, statusCode = 400) {
   return Object.assign(new Error(message), { code, statusCode })
 }
@@ -289,32 +277,6 @@ function workingMinutes(start, end, calendar) {
           ) / 60000
   }
   return Math.round(total)
-}
-function extractFields(nodes, rootUid) {
-  const children = uid => nodes.filter(n => n.parent_uid === uid)
-  const data = n => plain((n.data || n).text)
-  const group = children(rootUid).find(n => /^申请资料$/.test(data(n)))
-  const values = {}
-  for (const n of group ? children(group.uid) : children(rootUid)) {
-    const text = data(n),
-      split = text.match(/^([^:：]+)[:：](.*)$/),
-      name = label(split ? split[1] : text),
-      key = FIELDS[name]
-    if (!key) continue
-    const raw =
-      (split && split[2].trim()) ||
-      children(n.uid)
-        .map(data)
-        .filter(s => !/待填写/.test(s))
-        .join('\n')
-    if (!raw || raw === '待填写') continue
-    if (key === 'attachmentIds') continue // Attachments must be resolved from actual metadata, never arbitrary text IDs.
-    values[key] =
-      key === 'replacementId'
-        ? raw.replace(/^(账号|user_id)[:：]\s*/i, '')
-        : raw.replace(' ', key === 'start' || key === 'end' ? 'T' : ' ')
-  }
-  return values
 }
 function evaluate(template, fields, now = new Date()) {
   const missing = template.fields

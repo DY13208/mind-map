@@ -28,6 +28,7 @@ export function compactLeaveResult(result) {
     leave_types: template.types,
     calendar: template.calendar,
     validation: {
+      nodeInputHash: report.nodeInputHash,
       missing: report.missing,
       blockers: report.blockers,
       warnings: report.warnings,
@@ -73,7 +74,7 @@ export function compactLeaveResult(result) {
 export function registerLeaveTools(server, { api, z, ok, fail }) {
   server.tool(
     'leave_request',
-    '脑图请假闭环。遇到“我要请假/申请年假”等意图，先prepare读取公司登记的请假制度、必要条件、审批要点与人员配置，提示缺失信息。用户在自己的申请节点下按“申请资料→字段→值”登记，也可save结构化字段。人员须先members查询真实账号；缺少流程/人员配置时展示configurationRequired，不能猜人或跳过。准备好后核对最终数据，获得用户明确提交指令再submit。AI可analysis写入针对当前步骤/原文依据的建议，建议不等于正式审批；审核人只能登录页面办理。所有写入使用个人MCP令牌，不能使用共享服务令牌。不要把私密材料正文写入公共图。status返回正式状态，编辑“已通过”文字不会审批。',
+    '脑图请假闭环。遇到“我要请假/申请年假”等意图，先prepare读取公司登记的请假制度、必要条件、审批要点与人员配置，提示缺失信息。prepare会在自己的申请节点下生成“申请资料→字段→待填写”，用户或获授权AI只能编辑这些脑图节点，再import读取校验；不要另建填写表单。save仅兼容为import核对，不向独立字段副本写入。人员须先members查询真实账号；缺少流程/人员配置时展示configurationRequired，不能猜人或跳过。准备好后核对最终数据，获得用户明确提交指令再submit并携带validation.nodeInputHash，节点变化必须重新核对。AI可analysis写入针对当前步骤/原文依据的建议，建议不等于正式审批；审核人只能登录页面办理。所有写入使用个人MCP令牌，不能使用共享服务令牌。不要把私密材料正文写入公共图。status返回正式状态，编辑“已通过”文字不会审批。',
     {
       action: z.enum([
         'prepare',
@@ -123,6 +124,12 @@ export function registerLeaveTools(server, { api, z, ok, fail }) {
         .string()
         .uuid()
         .optional(),
+      expected_node_hash: z
+        .string()
+        .optional()
+        .describe(
+          'import/status返回的validation.nodeInputHash，submit必须与已核对节点一致'
+        ),
       confirm_submission: z
         .boolean()
         .optional()
@@ -170,16 +177,21 @@ export function registerLeaveTools(server, { api, z, ok, fail }) {
           )
         return ok(
           compactLeaveResult(
-            await api(path + '/' + input.action, {
-              method: 'POST',
-              body: JSON.stringify({
-                fields: input.fields,
-                operationId: input.operation_id,
-                expectedRevision: input.expected_revision,
-                confirmSubmission: input.confirm_submission === true,
-                content: input.analysis
-              })
-            })
+            await api(
+              path + '/' + (input.action === 'save' ? 'import' : input.action),
+              {
+                method: 'POST',
+                body: JSON.stringify({
+                  expectedFields: input.fields,
+                  nodeSource: input.action === 'submit',
+                  expectedNodeHash: input.expected_node_hash,
+                  operationId: input.operation_id,
+                  expectedRevision: input.expected_revision,
+                  confirmSubmission: input.confirm_submission === true,
+                  content: input.analysis
+                })
+              }
+            )
           )
         )
       } catch (error) {

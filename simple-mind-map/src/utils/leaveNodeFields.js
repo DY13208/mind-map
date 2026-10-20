@@ -1,0 +1,74 @@
+// Shared by the editor and the authoritative API; collapsed branches remain data.
+const plain = value =>
+  String(value || '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .trim()
+const label = value =>
+  plain(value)
+    .replace(/〔.*?〕|\[.*?\]/g, '')
+    .trim()
+const FIELDS = {
+  请假类型: 'leaveType',
+  开始时间: 'start',
+  结束时间: 'end',
+  工作替补人: 'replacementId',
+  请假事由: 'reason',
+  附件: 'attachmentIds'
+}
+function extractFields(nodes, rootUid) {
+  const children = uid =>
+    nodes
+      .filter(n => n.parent_uid === uid)
+      .sort(
+        (a, b) =>
+          String(a.position || '').localeCompare(String(b.position || '')) ||
+          a.uid.localeCompare(b.uid)
+      )
+  const data = n => plain((n.data || n).text)
+  const group = children(rootUid).find(n => data(n) === '申请资料')
+  const values = {},
+    attachments = new Set()
+  const collect = n => {
+    const id = (n.data || n).attachmentId
+    if (id) attachments.add(String(id))
+    for (const child of children(n.uid)) collect(child)
+  }
+  const root = nodes.find(n => n.uid === rootUid)
+  if (root && (root.data || root).attachmentId)
+    attachments.add(String((root.data || root).attachmentId))
+  for (const n of group ? children(group.uid) : children(rootUid)) {
+    const text = data(n),
+      split = text.match(/^([^:：]+)[:：](.*)$/),
+      name = label(split ? split[1] : text),
+      key = FIELDS[name]
+    if (!key) continue
+    if (key === 'attachmentIds') {
+      collect(n)
+      continue
+    }
+    const raw =
+      (split && split[2].trim()) ||
+      children(n.uid)
+        .map(data)
+        .filter(s => !/^待填写(?:$|[（(：:])/.test(s))
+        .join('\n')
+    if (!raw || /^待填写(?:$|[（(：:])/.test(raw)) continue
+    const value =
+      key === 'replacementId'
+        ? raw.replace(/^(账号|user_id)[:：]\s*/i, '').replace(/^@/, '')
+        : key === 'start' || key === 'end'
+        ? raw.replace(' ', 'T')
+        : raw
+    if (values[key] && values[key] !== value)
+      throw Object.assign(
+        new Error(`${name}有多个不同值，请在脑图中合并后重新检查`),
+        { code: 'DUPLICATE_FIELD' }
+      )
+    values[key] = value
+  }
+  values.attachmentIds = [...attachments].sort()
+  return values
+}
+module.exports = { plain, label, FIELDS, extractFields }

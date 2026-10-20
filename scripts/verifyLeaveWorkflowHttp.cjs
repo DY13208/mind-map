@@ -281,16 +281,44 @@ async function main() {
       )
       return request
     }
-    await act('applicant', 'save', {
-      fields: {
-        leaveType: '事假',
-        start: '2026-10-22T09:00',
-        end: '2026-10-22T11:00',
-        replacementId: 'replacement',
-        reason: '真实HTTP与身份校验，已交接',
-        attachmentIds: []
-      }
-    })
+    const nodeFields = {
+      leaveType: '事假',
+      start: '2026-10-22T09:00',
+      end: '2026-10-22T11:00',
+      replacementId: 'replacement',
+      reason: '真实HTTP与身份校验，已交接',
+      attachmentIds: []
+    }
+    // Fixture only writes the user-entered node values; real HTTP imports and validates them.
+    for (const [key, value] of Object.entries(nodeFields)) {
+      if (key === 'attachmentIds') continue
+      await db.query(
+        "update room_nodes set data=jsonb_build_object('text',$3::text) where room_key=$1 and uid=$2",
+        ['personal', core.projectionId(request.id + ':value:' + key), value]
+      )
+    }
+    check(
+      (
+        await api(
+          'applicant',
+          '/api/leave-requests/' + request.id + '/import',
+          'POST',
+          {
+            expectedRevision: request.revision,
+            operationId: randomUUID(),
+            expectedFields: { ...nodeFields, reason: '尚未同步' }
+          }
+        )
+      ).data.code,
+      'NODE_DATA_PENDING'
+    )
+    await act('applicant', 'import', { expectedFields: nodeFields })
+    check(
+      request.fields.reason,
+      nodeFields.reason,
+      'real HTTP reads graph values'
+    )
+    check(request.report.hours, 2, 'node values calculate two working hours')
     // Wait for the same production projection worker to persist empty field nodes.
     for (let i = 0; i < 50; i++) {
       if (
@@ -329,7 +357,11 @@ async function main() {
     // The LISTEN connection emits one initial invalidation after it is established.
     while (!received.includes('invalidate'))
       received += decoder.decode((await reader.read()).value)
-    await act('applicant', 'submit', { confirmSubmission: true })
+    await act('applicant', 'submit', {
+      confirmSubmission: true,
+      nodeSource: true,
+      expectedNodeHash: request.report.nodeInputHash
+    })
     const timeout = setTimeout(() => controller.abort(), 3000)
     const invalidation = decoder.decode((await reader.read()).value)
     clearTimeout(timeout)

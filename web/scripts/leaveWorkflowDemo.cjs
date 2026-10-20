@@ -111,7 +111,7 @@ async function main() {
       [service.SOURCE.roomKey, n.uid, n.parent_uid, n.position, n.data]
     )
   await pool.query(
-    "insert into room_nodes values('personal','anchor',null,'A','{\"text\":\"我要请假\"}',null)"
+    "insert into room_nodes values('personal','anchor',null,'A','{\"text\":\"待登记事项\"}',null)"
   )
   const tpl = await service.template(pool, reqFor('owner'))
   await service.publish(pool, reqFor('owner'), {
@@ -135,10 +135,11 @@ async function main() {
   let compiled
   const ctx = await esbuild.context({
     stdin: {
-      resolveDir: root,
-      contents: `import Vue from 'vue';import MindMap from '../simple-mind-map/index.js';import Intent from './src/pages/Edit/components/LeaveIntentTrigger.vue';import ElementUI from 'element-ui';import 'element-ui/lib/theme-chalk/index.css';import Request from './src/components/LeaveRequestDialog.vue';import Policy from './src/components/LeavePolicyDialog.vue';import Inbox from './src/components/LeaveInbox.vue';import {openLeaveRequest} from './src/services/leaveService';Vue.use(ElementUI);Vue.prototype.$bus=new Vue();Vue.prototype.$store={state:{isReadonly:false}};Vue.prototype.$route={query:{room:'personal'}};Vue.prototype.$router={push:()=>Promise.resolve()};const actor=location.pathname.slice(1)||'applicant';new Vue({components:{Request,Policy,Inbox,Intent},data:()=>({actor,map:null}),mounted(){if(actor==='applicant'){this.map=new MindMap({el:this.$refs.canvas,data:{data:{uid:'anchor',text:'待登记事项'},children:[]},fit:true});this.map.on('node_active',(...args)=>this.$bus.$emit('node_active',...args))}},methods:{open(){openLeaveRequest({roomKey:'personal',nodeUid:'anchor'})},policy(){window.dispatchEvent(new CustomEvent('mindmap:leave-policy'))}},template:${JSON.stringify(
-        '<main><nav><a href="/applicant">申请人</a><a href="/manager">部门负责人</a><a href="/ssc">SSC</a><a href="/ceo">抄送人</a><a href="/owner">管理员</a></nav><header><small>WCPD · 隔离验证环境</small><h1>请假申请与审批</h1><p>当前身份：{{actor}} · 数据保存在临时数据库，不连接线上人员。</p><el-button v-if="actor===\'applicant\'" type="primary" @click="open">我要请假</el-button><el-button v-if="actor===\'owner\'" @click="policy">配置请假流程</el-button></header><section v-if="actor===\'applicant\'" style="position:relative;margin:20px 5vw;background:white;border-radius:12px"><p style="padding:12px">双击节点，输入“我要请假”，完成编辑后自动补全资料。</p><div ref="canvas" style="height:300px"></div><Intent v-if="map" :mind-map="map"/></section><section class="workspace"><Inbox/></section><Request :user-id="actor"/><Policy/></main>'
-      )}}).$mount('#app')`
+      resolveDir: path.join(__dirname, 'fixtures'),
+      contents: fs.readFileSync(
+        path.join(__dirname, 'fixtures/leaveWorkflowDemoApp.js'),
+        'utf8'
+      )
     },
     bundle: true,
     write: false,
@@ -241,6 +242,57 @@ async function main() {
           let raw = ''
           for await (const c of r) raw += c
           return raw ? JSON.parse(raw) : {}
+        }
+        if (url.pathname.startsWith('/fixture/')) {
+          if (hit[1] !== 'applicant')
+            return sendJson(res, 403, { error: '仅测试申请人可编辑' })
+          if (url.pathname === '/fixture/node' && req.method === 'POST') {
+            const node = await readBody(req)
+            if (
+              typeof node.uid !== 'string' ||
+              !/^[a-zA-Z0-9_-]{1,80}$/.test(node.uid) ||
+              typeof node.text !== 'string' ||
+              node.text.length > 3000
+            )
+              return sendJson(res, 400, { error: '无效节点' })
+            if (
+              node.uid !== 'anchor' &&
+              !(
+                await pool.query(
+                  "select uid from room_nodes where room_key='personal' and uid=$1 and deleted_at is null",
+                  [node.parentUid]
+                )
+              ).rows.length
+            )
+              return sendJson(res, 400, { error: '父节点不存在' })
+            await pool.query(
+              "insert into room_nodes(room_key,uid,parent_uid,position,data) values('personal',$1,$2,'Z',$3) on conflict(room_key,uid) do update set data=room_nodes.data || excluded.data",
+              [
+                node.uid,
+                node.uid === 'anchor' ? null : node.parentUid,
+                { text: node.text }
+              ]
+            )
+            return sendJson(res, 200, { ok: true })
+          }
+          if (url.pathname === '/fixture/tree' && req.method === 'GET') {
+            const nodes = (
+              await pool.query(
+                "select uid,parent_uid,data from room_nodes where room_key='personal' and deleted_at is null order by position,uid limit 500"
+              )
+            ).rows
+            const make = uid => {
+              const row = nodes.find(n => n.uid === uid)
+              return {
+                data: { ...row.data, uid },
+                children: nodes
+                  .filter(n => n.parent_uid === uid)
+                  .map(n => make(n.uid))
+              }
+            }
+            return sendJson(res, 200, { tree: make('anchor') })
+          }
+          return sendJson(res, 404, { error: '测试接口不存在' })
         }
         if (
           await handler.handle(req, res, {

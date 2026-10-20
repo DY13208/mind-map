@@ -71,7 +71,11 @@ async function main() {
     status: 'draft',
     revision: 1,
     fields: { attachmentIds: [] },
-    report: {},
+    report: {
+      nodeInputHash: 'hash',
+      blockers: [],
+      publication: { valid: true }
+    },
     template: {},
     history: []
   })
@@ -86,7 +90,6 @@ async function main() {
   }
   // Closing and opening another request while save is in flight cannot submit the new one.
   vm.row = row('one')
-  vm.form = {}
   service.act = async (...args) => {
     writes.push(args)
     await new Promise(r => {
@@ -99,7 +102,13 @@ async function main() {
   lateResolve()
   await submission
   assert.equal(writes.length, 1)
-  assert.equal(writes[0][1], 'save')
+  assert.equal(writes[0][1], 'submit')
+  assert.equal(writes[0][2].nodeSource, true)
+  assert.equal(writes[0][2].expectedNodeHash, 'hash')
+  service.act = async (...args) => {
+    writes.push(args)
+    return row(args[0])
+  }
   // Late prepare responses cannot replace the newly opened application.
   let firstResolve
   service.prepare = async (room, uid) =>
@@ -139,28 +148,54 @@ async function main() {
   trigger.$bus = new Vue()
   trigger.$store = { state: { isReadonly: false } }
   trigger.$route = { query: { room: 'personal' } }
+  trigger.requestByNode = new Map()
+  trigger.signatures = new Map()
   const node = text => ({
-    getData: key => (key === 'uid' ? 'anchor' : { uid: 'anchor', text })
+    nodeData: { data: { uid: 'anchor', text }, children: [] },
+    getData: key =>
+      key ? { uid: 'anchor', text }[key] : { uid: 'anchor', text }
   })
+  let prepared = 0
+  service.prepare = async () => {
+    prepared++
+    return row('11111111-1111-4111-a111-111111111111')
+  }
+  const tick = () => new Promise(r => setImmediate(r))
   let count = emitted.length
   const intent = node('我要请假')
   trigger.onTextEnd(null, [], intent)
-  await Vue.nextTick()
-  assert.equal(emitted.length, count + 1)
+  await tick()
+  assert.equal(prepared, 1)
+  assert.equal(
+    emitted.slice(count).some(e => e.type === 'mindmap:leave-open'),
+    false
+  )
   trigger.onTextEnd(null, [], intent)
-  await Vue.nextTick()
-  assert.equal(emitted.length, count + 1)
+  await tick()
+  assert.equal(prepared, 1)
+  assert.equal(
+    emitted.slice(count).some(e => e.type === 'mindmap:leave-open'),
+    false
+  )
   trigger.onTextEnd(null, [], node('我要取消请假'))
-  await Vue.nextTick()
-  assert.equal(emitted.length, count + 1)
+  await tick()
+  assert.equal(prepared, 1)
+  assert.equal(
+    emitted.slice(count).some(e => e.type === 'mindmap:leave-open'),
+    false
+  )
   trigger.$store.state.isReadonly = true
   trigger.onTextEnd(null, [], node('申请年假'))
-  await Vue.nextTick()
-  assert.equal(emitted.length, count + 1)
+  await tick()
+  assert.equal(prepared, 1)
+  assert.equal(
+    emitted.slice(count).some(e => e.type === 'mindmap:leave-open'),
+    false
+  )
   vm.$destroy()
   trigger.$destroy()
   console.log(
-    'Leave client checks passed: stale-submit isolation, late-response isolation, bounded pending-node retries, permission denial, explicit intent, deduplication, cancellation and read-only safety'
+    'Leave client checks passed: node-only submission, no automatic form, stale-submit isolation, late-response isolation, bounded pending-node retries, permission denial, explicit intent, deduplication, cancellation and read-only safety'
   )
 }
 main().catch(e => {

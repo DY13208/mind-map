@@ -52,108 +52,56 @@
           >
         </div>
         <el-tabs v-model="tab">
-          <el-tab-pane label="申请内容" name="form">
-            <el-form
-              label-position="top"
-              class="leaveForm"
-              @submit.native.prevent
-            >
-              <el-form-item label="请假类型" required
-                ><el-select
-                  v-model="form.leaveType"
-                  :disabled="!editable"
-                  placeholder="按制度选择"
-                  ><el-option
-                    v-for="type in row.template.types"
-                    :key="type"
-                    :label="type"
-                    :value="type"/></el-select
-              ></el-form-item>
-              <div class="leaveColumns">
-                <el-form-item label="开始时间" required
-                  ><el-date-picker
-                    v-model="form.start"
-                    :disabled="!editable"
-                    type="datetime"
-                    value-format="yyyy-MM-ddTHH:mm"
-                    format="yyyy-MM-dd HH:mm"
-                    placeholder="北京时间"/></el-form-item
-                ><el-form-item label="结束时间" required
-                  ><el-date-picker
-                    v-model="form.end"
-                    :disabled="!editable"
-                    type="datetime"
-                    value-format="yyyy-MM-ddTHH:mm"
-                    format="yyyy-MM-dd HH:mm"
-                    placeholder="北京时间"
-                /></el-form-item>
-              </div>
-              <div class="leaveDuration">
-                <i class="el-icon-time" /> 保存后按脑图工作时段计算：<strong>{{
-                  row.report.hours == null
-                    ? '待补全时间'
-                    : row.report.hours +
-                      ' 小时 / ' +
-                      row.report.days +
-                      ' 工作日'
-                }}</strong>
-              </div>
-              <p v-if="!editable" class="leaveHint">
-                当前显示已提交的材料版本；编辑脑图子节点不会改变本次申请，变更须撤回或退回后重新导入提交。
-              </p>
-              <el-form-item label="工作替补人" required
-                ><el-select
-                  v-model="form.replacementId"
-                  :disabled="!editable"
-                  filterable
-                  remote
-                  :remote-method="searchMembers"
-                  :loading="memberLoading"
-                  placeholder="选择真实成员"
-                  ><el-option
-                    v-for="m in members"
-                    :key="m.user_id"
-                    :label="m.name || m.user_id"
-                    :value="m.user_id"/></el-select
-              ></el-form-item>
-              <el-form-item label="请假事由" required
-                ><el-input
-                  v-model="form.reason"
-                  :disabled="!editable"
-                  type="textarea"
-                  :rows="3"
-                  maxlength="3000"
-                  show-word-limit
-              /></el-form-item>
-              <el-form-item label="证明附件"
-                ><el-select
-                  v-model="form.attachmentIds"
-                  :disabled="!editable"
-                  multiple
-                  placeholder="选择已绑定此申请节点的附件"
-                  ><el-option
-                    v-for="a in attachments"
-                    :key="a.id"
-                    :label="a.fileName"
-                    :value="a.id"
-                /></el-select>
-                <p class="leaveHint">
-                  在申请节点附件入口上传后刷新；该脑图已有协作者仍可能读取附件，请使用受限的个人脑图，不在公共图上传敏感证明。
+          <el-tab-pane label="节点资料核对" name="form">
+            <div v-if="editable" class="leaveNodeIntro">
+              <div>
+                <i class="el-icon-connection" /><strong
+                  >资料在思维导图中填写</strong
+                >
+                <p>
+                  编辑「申请资料 → 字段 →
+                  值」，或将字段改为「请假类型：事假」。此处仅核对服务器已读取的节点内容。
                 </p>
-                <div v-for="a in row.report.attachments || []" :key="a.id">
-                  <a :href="attachmentUrl(a.id)" target="_blank" rel="noopener"
-                    >{{ a.fileName }} <i class="el-icon-download"
-                  /></a></div
-              ></el-form-item>
-            </el-form>
-            <div v-if="editable" class="leaveImport">
-              <span
-                >也可在「申请资料 → 字段 →
-                值」子节点填写后导入。脑图中的文字对现有协作者可见，敏感材料请在此面板填写。</span
-              ><el-button size="small" :disabled="busy" @click="act('import')"
-                >从子节点导入</el-button
+              </div>
+              <el-button size="small" :disabled="busy" @click="backToNodes"
+                >回到脑图填写</el-button
               >
             </div>
+            <dl class="leaveNodeSummary">
+              <div v-for="item in summaryItems" :key="item.label">
+                <dt>{{ item.label }}</dt>
+                <dd
+                  :class="{ missing: !item.value }"
+                  v-text="item.value || '待在子节点填写'"
+                />
+              </div>
+            </dl>
+            <div class="leaveDuration">
+              <i class="el-icon-time" /> 按脑图工作时段计算：<strong>{{
+                row.report.hours == null
+                  ? '待补全时间'
+                  : row.report.hours + ' 小时 / ' + row.report.days + ' 工作日'
+              }}</strong>
+            </div>
+            <p class="leaveHint">
+              {{
+                editable
+                  ? '证明上传到本申请的「附件」节点。节点内容对该脑图现有协作者可见，请使用受限的个人脑图。'
+                  : '当前为已提交的材料快照；修改脑图不会改变本轮审批材料，须撤回或退回后重新读取提交。'
+              }}
+            </p>
+            <div
+              v-for="a in row.report.attachments || []"
+              :key="a.id"
+              class="leaveAttachment"
+            >
+              <a :href="attachmentUrl(a.id)" target="_blank" rel="noopener"
+                >{{ a.fileName }} <i class="el-icon-download"
+              /></a>
+            </div>
+            <p v-if="!(row.report.attachments || []).length" class="leaveHint">
+              未登记证明附件
+            </p>
             <div
               v-for="s in row.report.blockers || []"
               :key="s"
@@ -292,9 +240,14 @@
             row.projection_error
           }}</span
           ><template v-if="editable"
-            ><el-button :disabled="busy" @click="save">保存草稿</el-button
-            ><el-button type="primary" :loading="busy" @click="submit"
-              >确认并提交</el-button
+            ><el-button :disabled="busy" @click="refreshNodes()"
+              >重新读取节点</el-button
+            ><el-button
+              type="primary"
+              :loading="busy"
+              :disabled="!canSubmit"
+              @click="submit"
+              >资料无误，提交审批</el-button
             ></template
           ><el-button
             v-if="
@@ -311,7 +264,6 @@
 </template>
 <script>
 import service, { leaveOperationId } from '@/services/leaveService'
-import { productRequest } from '@/services/productHttp'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
 import { streamChat, checkAiBackend } from '@/utils/agentChat'
 export default {
@@ -323,10 +275,6 @@ export default {
     busy: false,
     error: '',
     row: null,
-    form: {},
-    members: [],
-    memberLoading: false,
-    attachments: [],
     currentTemplate: null,
     tab: 'form',
     checked: [],
@@ -336,7 +284,6 @@ export default {
     analysisError: '',
     analysisSequence: 0,
     sequence: 0,
-    memberSequence: 0,
     controller: null,
     openDetail: null,
     historyLoading: false
@@ -347,6 +294,27 @@ export default {
     },
     editable() {
       return this.owner && ['draft', 'returned'].includes(this.row.status)
+    },
+    summaryItems() {
+      const f = this.row.fields || {}
+      return [
+        { label: '请假类型', value: f.leaveType },
+        { label: '开始时间（北京）', value: (f.start || '').replace('T', ' ') },
+        { label: '结束时间（北京）', value: (f.end || '').replace('T', ' ') },
+        { label: '工作替补人', value: f.replacementId },
+        { label: '请假事由', value: f.reason }
+      ]
+    },
+    canSubmit() {
+      return (
+        this.editable &&
+        !this.busy &&
+        !this.error &&
+        !!this.row.report.nodeInputHash &&
+        !(this.row.report.blockers || []).length &&
+        !this.configMissing.length &&
+        (this.row.report.publication || {}).valid
+      )
     },
     configMissing() {
       return this.row.report.configurationRequired || []
@@ -454,6 +422,8 @@ export default {
         if (seq !== this.sequence) return
         this.row = { ...data, history: data.history || [] }
         await this.load()
+        if (seq === this.sequence && this.editable)
+          await this.refreshNodes(detail.expectedFields)
       } catch (e) {
         if (seq === this.sequence) this.error = e.message
       } finally {
@@ -463,9 +433,6 @@ export default {
     close() {
       this.analysisSequence++
       this.sequence++
-      this.memberSequence++
-      this.members = []
-      this.attachments = []
       this.currentTemplate = null
       this.busy = false
       this.historyLoading = false
@@ -507,10 +474,6 @@ export default {
         const data = await service.get(this.row.id)
         if (seq !== this.sequence) return
         this.row = data
-        this.form = {
-          ...data.fields,
-          attachmentIds: [...(data.fields.attachmentIds || [])]
-        }
         this.checked = []
         this.reason = ''
         this.error = ''
@@ -528,18 +491,6 @@ export default {
           : null
         if (seq !== this.sequence) return
         this.currentTemplate = currentTemplate
-        await this.searchMembers('')
-        if (this.editable) {
-          const result = await productRequest(
-            `/api/files/${encodeURIComponent(
-              data.room_key
-            )}/attachments?node_uid=${encodeURIComponent(
-              data.node_uid
-            )}&limit=50`
-          ).catch(() => ({}))
-          if (seq === this.sequence)
-            this.attachments = result.attachments || result.list || []
-        }
         if (data.canDecide) {
           this.tab = 'flow'
           if (!this.analysis) this.analyze()
@@ -548,18 +499,6 @@ export default {
         if (seq === this.sequence) this.error = e.message
       } finally {
         if (seq === this.sequence) this.loading = false
-      }
-    },
-    async searchMembers(q) {
-      const seq = ++this.memberSequence
-      this.memberLoading = true
-      try {
-        const data = await service.members(q)
-        if (seq === this.memberSequence) this.members = data.list
-      } catch (e) {
-        if (seq === this.memberSequence) this.error = e.message
-      } finally {
-        if (seq === this.memberSequence) this.memberLoading = false
       }
     },
     async act(action, extra = {}) {
@@ -592,21 +531,32 @@ export default {
         if (seq === this.sequence) this.busy = false
       }
     },
-    save() {
-      return this.act('save', { fields: this.form })
+    refreshNodes(expectedFields) {
+      return this.act('import', expectedFields ? { expectedFields } : {})
+    },
+    backToNodes() {
+      const row = this.row
+      this.visible = false
+      window.dispatchEvent(
+        new CustomEvent('mindmap:leave-focus', {
+          detail: { roomKey: row.room_key, nodeUid: row.node_uid }
+        })
+      )
+      if (this.$route.query.room !== row.room_key)
+        this.$router
+          .push({
+            path: '/',
+            query: { room: row.room_key, focus: row.node_uid }
+          })
+          .catch(() => {})
     },
     async submit() {
-      if (this.busy) return
-      const seq = this.sequence,
-        id = this.row.id
-      await this.save()
-      if (
-        seq === this.sequence &&
-        this.row &&
-        this.row.id === id &&
-        !this.error
-      )
-        await this.act('submit', { confirmSubmission: true })
+      if (!this.canSubmit) return
+      await this.act('submit', {
+        confirmSubmission: true,
+        nodeSource: true,
+        expectedNodeHash: this.row.report.nodeInputHash
+      })
     },
     decide(decision) {
       return this.act('decide', {
@@ -639,7 +589,7 @@ export default {
     },
     async actAfterPublish() {
       this.busy = false
-      await this.save()
+      await this.refreshNodes()
     },
     attachmentUrl(id) {
       return `${
@@ -921,6 +871,88 @@ export default {
     .leaveDecision > div:last-child {
       flex-wrap: wrap;
     }
+  }
+}
+</style>
+
+<style lang="less">
+.leaveNodeIntro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 20px;
+  background: #f5f8fc;
+  border: 1px solid #e4ebf4;
+  border-radius: 12px;
+  color: #354b65;
+  margin-bottom: 16px;
+  i {
+    margin-right: 8px;
+  }
+  p {
+    font-size: 13px;
+    line-height: 1.7;
+    color: #6a7b8e;
+    margin: 8px 0 0;
+  }
+  .el-button {
+    flex-shrink: 0;
+  }
+}
+.leaveNodeSummary {
+  margin: 0 0 16px;
+  border: 1px solid #e5eaf0;
+  border-radius: 10px;
+  overflow: hidden;
+  > div {
+    display: grid;
+    grid-template-columns: 170px 1fr;
+    border-bottom: 1px solid #edf0f4;
+    min-height: 48px;
+    align-items: start;
+    &:last-child {
+      border: 0;
+    }
+  }
+  dt {
+    padding: 15px 18px;
+    color: #6c7b8f;
+    background: #fafbfd;
+    height: 100%;
+    box-sizing: border-box;
+    font-size: 13px;
+  }
+  dd {
+    margin: 0;
+    padding: 14px 20px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: #27394d;
+    font-size: 14px;
+    &.missing {
+      color: #a3adba;
+    }
+  }
+}
+.leaveAttachment {
+  padding: 10px 0;
+  font-size: 14px;
+}
+@media (max-width: 600px) {
+  .leaveNodeIntro {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+  }
+  .leaveNodeSummary > div {
+    grid-template-columns: 120px 1fr;
+  }
+  .leaveNodeSummary dt,
+  .leaveNodeSummary dd {
+    padding: 12px;
   }
 }
 </style>

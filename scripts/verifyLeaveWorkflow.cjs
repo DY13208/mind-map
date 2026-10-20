@@ -132,7 +132,11 @@ async function main() {
   const admin = new Client(config)
   await admin.connect()
   const schema = 'leave_test_' + process.pid + '_' + Date.now(),
-    pool = new Pool({ ...config, options: '-c search_path=' + schema, max: 12 })
+    pool = new Pool({
+      ...config,
+      options: '-c search_path=' + schema,
+      max: 12
+    })
   try {
     await admin.query(`create schema ${schema}`)
     await pool.query(`create table rooms(room_key text primary key, owner_id text, folder_id text, deleted_at timestamptz, updated_at timestamptz default now(), title text, version integer default 1);
@@ -721,6 +725,266 @@ async function main() {
       false,
       'only draft/returned requests get empty field scaffolds'
     )
+    assert.throws(
+      () => service.cleanFields({ ...fields, reason: '长'.repeat(3001) }),
+      e => e.code === 'FIELD_TOO_LONG'
+    )
+    assertions++
+    // Node-only path: actual children, authoritative import, snapshot confirmation and attachment ACL.
+    await pool.query(
+      "insert into room_nodes values('personal','node-only',null,'A','{\"text\":\"我要请假\"}',null)"
+    )
+    let native = await service.prepare(pool, actor, {
+      roomKey: 'personal',
+      nodeUid: 'node-only'
+    })
+    const nodeWriter = async (room, cmd) => {
+      const p = cmd.payload
+      if (cmd.type === 'node.insert')
+        await pool.query(
+          'insert into room_nodes(room_key,uid,parent_uid,position,data) values($1,$2,$3,$4,$5) on conflict do nothing',
+          [room, p.uid, p.parentUid, 'A', { text: p.text, ...p.data }]
+        )
+      else
+        await pool.query(
+          'update room_nodes set data=data || $3::jsonb where room_key=$1 and uid=$2',
+          [room, p.uid, p.patch]
+        )
+    }
+    await service.project(pool, nodeWriter, native.id)
+    const scaffold = await service.subtree(pool, 'personal', 'node-only')
+    check(
+      scaffold.filter(n => n.data.text === '待填写').length,
+      5,
+      'editable values are scaffolded in the graph'
+    )
+    const entries = {
+      请假类型: '事假',
+      开始时间: fields.start.replace('T', ' '),
+      结束时间: fields.end.replace('T', ' '),
+      工作替补人: '@replacement',
+      请假事由: fields.reason
+    }
+    for (const [name, value] of Object.entries(entries)) {
+      const heading = scaffold.find(n => n.data.text === name)
+      await pool.query(
+        "update room_nodes set data=jsonb_build_object('text',$2::text) where room_key='personal' and parent_uid=$1",
+        [heading.uid, value]
+      )
+    }
+    let nodeFields = core.extractFields(
+      await service.subtree(pool, 'personal', 'node-only'),
+      'node-only'
+    )
+    check(nodeFields.replacementId, 'replacement', '@ member entry is parsed')
+    check(
+      nodeFields.start,
+      fields.start,
+      'node time normalizes to explicit local time'
+    )
+    await rejects(
+      () =>
+        service.mutate(
+          pool,
+          actor,
+          native.id,
+          'import',
+          body(native, {
+            expectedFields: { ...nodeFields, reason: 'not yet synced' }
+          })
+        ),
+      'NODE_DATA_PENDING'
+    )
+    native = await service.mutate(
+      pool,
+      actor,
+      native.id,
+      'import',
+      body(native, { expectedFields: nodeFields })
+    )
+    check(native.report.hours, 2)
+    check(!!native.report.nodeInputHash, true)
+    const unchangedBody = body(native, { expectedFields: nodeFields })
+    const same = await service.mutate(
+      pool,
+      actor,
+      native.id,
+      'import',
+      unchangedBody
+    )
+    check(
+      same.revision,
+      native.revision,
+      'unchanged imports do not create material revisions'
+    )
+    check(
+      (await service.mutate(pool, actor, native.id, 'import', unchangedBody))
+        .duplicate,
+      true,
+      'even no-op imports remember their operation IDs'
+    )
+    const reasonNode = scaffold.find(n => n.data.text === '请假事由')
+    await pool.query(
+      "update room_nodes set data=jsonb_build_object('text','已修改原因') where room_key='personal' and parent_uid=$1",
+      [reasonNode.uid]
+    )
+    await rejects(
+      () =>
+        service.mutate(
+          pool,
+          actor,
+          native.id,
+          'submit',
+          body(native, {
+            nodeSource: true,
+            expectedNodeHash: native.report.nodeInputHash,
+            confirmSubmission: true
+          })
+        ),
+      'NODE_DATA_CHANGED'
+    )
+    native = await service.mutate(
+      pool,
+      actor,
+      native.id,
+      'import',
+      body(native)
+    )
+    check(
+      native.fields.reason,
+      '已修改原因',
+      'refresh imports graph, never a separate form value'
+    )
+    await pool.query(
+      "update room_nodes set data=jsonb_set(data,'{text}','\"请假制度变更测试\"'::jsonb) where room_key=$1 and uid=$2",
+      [service.SOURCE.roomKey, service.SOURCE.nodeUid]
+    )
+    await rejects(
+      () =>
+        service.mutate(
+          pool,
+          actor,
+          native.id,
+          'submit',
+          body(native, {
+            nodeSource: true,
+            expectedNodeHash: native.report.nodeInputHash,
+            confirmSubmission: true
+          })
+        ),
+      'POLICY_CHANGED'
+    )
+    await pool.query(
+      "update room_nodes set data=jsonb_set(data,'{text}','\"请假\"'::jsonb) where room_key=$1 and uid=$2",
+      [service.SOURCE.roomKey, service.SOURCE.nodeUid]
+    )
+    const attachmentField = scaffold.find(n => n.data.text === '附件')
+    await pool.query(
+      'insert into room_nodes values(\'personal\',\'native-proof-node\',$1,\'A\',\'{"text":"证明","attachmentId":"native-proof"}\',null)',
+      [attachmentField.uid]
+    )
+    await pool.query(
+      "insert into node_attachments values('native-proof','personal','native-proof-node','hash-native','证明.pdf','ready','test')"
+    )
+    native = await service.mutate(
+      pool,
+      actor,
+      native.id,
+      'import',
+      body(native)
+    )
+    check(
+      native.report.attachments.map(a => a.id),
+      ['native-proof'],
+      'real attachments on attachment descendants are imported'
+    )
+    await service.project(pool, nodeWriter, native.id)
+    check(
+      (await service.subtree(pool, 'personal', 'node-only')).some(
+        n => n.data.text === '已修改原因'
+      ),
+      true,
+      'projection preserves entered values'
+    )
+    const person = { user_id: 'applicant', corp_id: 'corp', departments: [1] }
+    await pool.query(
+      "update wecom_users set name='替补姓名' where user_id='replacement'"
+    )
+    const nameFields = { ...fields, replacementId: '替补姓名' }
+    check(
+      (
+        await service.routing(pool, native.template, person, nameFields)
+      ).missing.some(s => s.includes('工作替补人')),
+      false
+    )
+    check(
+      nameFields.replacementId,
+      'replacement',
+      'unique exact name resolves to actual account'
+    )
+    const replacementHeading = scaffold.find(n => n.data.text === '工作替补人')
+    await pool.query(
+      "update room_nodes set data=jsonb_build_object('text','替补姓名') where room_key='personal' and parent_uid=$1",
+      [replacementHeading.uid]
+    )
+    native = await service.mutate(
+      pool,
+      actor,
+      native.id,
+      'import',
+      body(native)
+    )
+    await pool.query(
+      "update wecom_users set name=case when user_id='replacement' then '旧替补姓名' else '替补姓名' end where user_id in ('replacement','other')"
+    )
+    await rejects(
+      () =>
+        service.mutate(
+          pool,
+          actor,
+          native.id,
+          'submit',
+          body(native, {
+            nodeSource: true,
+            expectedNodeHash: native.report.nodeInputHash,
+            confirmSubmission: true
+          })
+        ),
+      'MEMBER_MATCH_CHANGED'
+    )
+    await pool.query(
+      "update wecom_users set name=case when user_id='replacement' then '替补姓名' else 'other' end where user_id in ('replacement','other')"
+    )
+    await pool.query(
+      "update wecom_users set name='替补姓名' where user_id='other'"
+    )
+    check(
+      (
+        await service.routing(pool, native.template, person, {
+          ...fields,
+          replacementId: '替补姓名'
+        })
+      ).missing.some(s => s.includes('姓名重复')),
+      true
+    )
+    const duplicateRows = [
+      { uid: 'a', parent_uid: null, data: { text: '我要请假' } },
+      { uid: 'b', parent_uid: 'a', data: { text: '请假类型：事假' } },
+      { uid: 'c', parent_uid: 'a', data: { text: '请假类型：病假' } }
+    ]
+    assert.throws(
+      () => core.extractFields(duplicateRows, 'a'),
+      e => e.code === 'DUPLICATE_FIELD'
+    )
+    assertions++
+    native = await service.mutate(
+      pool,
+      actor,
+      native.id,
+      'withdraw',
+      body(native)
+    )
+    check(native.status, 'withdrawn')
     await pool.query("delete from room_nodes where room_key='personal'")
     await service.project(pool, async () => {
       throw new Error('deleted anchor')

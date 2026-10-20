@@ -204,6 +204,31 @@ async function routing(db, tpl, who, fields = {}) {
   const missing = [],
     steps = []
   if (!tpl.steps.length) missing.push('审批步骤待配置')
+  // Names are an input convenience, never a fuzzy or cross-company assignment.
+  if (fields.replacementId) {
+    const input = fields.replacementId
+    const exact = (
+      await db.query(
+        'select user_id,name from wecom_users where corp_id=$1 and user_id=$2',
+        [who.corp_id, input]
+      )
+    ).rows
+    const matches = exact.length
+      ? exact
+      : (
+          await db.query(
+            'select user_id,name from wecom_users where corp_id=$1 and name=$2 limit 2',
+            [who.corp_id, input]
+          )
+        ).rows
+    if (matches.length === 1) fields.replacementId = matches[0].user_id
+    else
+      missing.push(
+        matches.length
+          ? '工作替补人姓名重复，请填写账号：成员ID'
+          : '工作替补人未匹配到本企业成员，请填写准确姓名或账号：成员ID'
+      )
+  }
   if (fields.replacementId === who.user_id)
     missing.push('工作替补人不能是申请人本人')
   for (const step of tpl.steps) {
@@ -276,15 +301,49 @@ function cleanFields(fields) {
       )
         throw fail('INVALID_ATTACHMENTS', '附件引用无效或超过10项')
       out[key] = fields[key] || []
-    } else
-      out[key] = String(fields[key] || '')
-        .trim()
-        .slice(0, key === 'reason' ? 3000 : 180)
+    } else {
+      if (fields[key] != null && typeof fields[key] !== 'string')
+        throw fail('INVALID_FIELDS', '申请字段必须是文本')
+      const text = String(fields[key] || '').trim(),
+        limit = key === 'reason' ? 3000 : 180
+      if (text.length > limit)
+        throw fail(
+          'FIELD_TOO_LONG',
+          `${Object.keys(core.FIELDS).find(
+            label => core.FIELDS[label] === key
+          )}超过${limit}字，请精简节点内容`
+        )
+      out[key] = text
+    }
   }
   return out
 }
 async function checkAttachments(db, row, fields) {
   const result = []
+  const nodes = await subtree(db, row.room_key, row.node_uid)
+  const bound = new Set([row.node_uid])
+  // Only this application’s attachment branch, never an unrelated sibling request.
+  const parents = new Set([
+    row.node_uid,
+    ...nodes
+      .filter(
+        n =>
+          n.parent_uid === row.node_uid &&
+          core.plain(n.data.text) === '申请资料'
+      )
+      .map(n => n.uid)
+  ])
+  const visit = uid => {
+    bound.add(uid)
+    nodes.filter(n => n.parent_uid === uid).forEach(n => visit(n.uid))
+  }
+  nodes
+    .filter(
+      n =>
+        parents.has(n.parent_uid) &&
+        /^附件(?:[:：]|$)/.test(core.plain(n.data.text))
+    )
+    .forEach(n => visit(n.uid))
   for (const id of fields.attachmentIds || []) {
     const meta = (
       await db.query(
@@ -292,10 +351,10 @@ async function checkAttachments(db, row, fields) {
         [row.room_key, id]
       )
     ).rows[0]
-    if (!meta || meta.node_uid !== row.node_uid || meta.status !== 'ready')
+    if (!meta || !bound.has(meta.node_uid) || meta.status !== 'ready')
       throw fail(
         'ATTACHMENT_NOT_BOUND',
-        '附件必须绑定当前申请节点且可读取，不能引用其他申请的证明',
+        '附件必须绑定当前申请节点或其附件子节点且可读取，不能引用其他申请的证明',
         403
       )
     result.push({ id, hash: meta.content_hash, fileName: meta.file_name })
@@ -428,9 +487,11 @@ async function prepare(pool, req, body) {
         '请在自己的业务节点发起，不要在制度节点下登记真实申请'
       )
     const fields = cleanFields(core.extractFields(anchor, node)),
+      nodeInputHash = core.digest(fields),
       route = await routing(db, tpl, who, fields)
     const report = {
       ...core.evaluate(tpl, fields),
+      nodeInputHash,
       configurationRequired: route.missing,
       publication: await publication(db, tpl, who)
     }
@@ -559,6 +620,22 @@ async function mutate(pool, req, id, action, body) {
         : { ...row, duplicate: true }
     expectRevision(row, body.expectedRevision)
     const owner = row.requester_id === who.user_id
+    // jsonb may reorder object keys; compare canonical data rather than serialization order.
+    const materialHash = value =>
+      JSON.stringify(
+        [value.fields, value.template, value.report, value.steps, value.cc],
+        (_key, item) =>
+          item && typeof item === 'object' && !Array.isArray(item)
+            ? Object.fromEntries(
+                Object.keys(item)
+                  .sort()
+                  .map(key => [key, item[key]])
+              )
+            : item
+      )
+    const originalMaterial = materialHash(row)
+    const reviewedFields = core.digest(cleanFields(row.fields))
+    const reviewedPolicy = row.template.fingerprint
     let detail = {}
     if (['save', 'import', 'submit', 'withdraw'].includes(action) && !owner)
       throw fail('REQUESTER_ONLY', '只有申请人可以修改或提交', 403)
@@ -575,17 +652,62 @@ async function mutate(pool, req, id, action, body) {
         roomKey: row.source_room,
         nodeUid: row.source_uid
       })
-      if (action === 'import')
-        row.fields = cleanFields(
+      if (
+        action === 'submit' &&
+        body.nodeSource === true &&
+        row.template.fingerprint !== reviewedPolicy
+      )
+        throw fail(
+          'POLICY_CHANGED',
+          '流程或人员配置已变化，请重新读取节点并核对审批流程',
+          409
+        )
+      let nodeInputHash = row.report.nodeInputHash
+      if (
+        action === 'import' ||
+        (action === 'submit' && body.nodeSource === true)
+      ) {
+        const fromNodes = cleanFields(
           core.extractFields(
             await subtree(db, row.room_key, row.node_uid),
             row.node_uid
           )
         )
-      else if (action === 'save') row.fields = cleanFields(body.fields)
+        nodeInputHash = core.digest(fromNodes)
+        if (
+          body.expectedFields &&
+          core.digest(cleanFields(body.expectedFields)) !== nodeInputHash
+        )
+          throw fail(
+            'NODE_DATA_PENDING',
+            '节点修改尚未同步到服务器，请等待同步完成后重新检查',
+            409
+          )
+        if (action === 'submit' && body.expectedNodeHash !== nodeInputHash)
+          throw fail(
+            'NODE_DATA_CHANGED',
+            '脑图资料已改变，请重新读取并核对摘要后提交',
+            409
+          )
+        row.fields = fromNodes
+      } else if (action === 'save') {
+        row.fields = cleanFields(body.fields)
+        nodeInputHash = null
+      }
       const route = await routing(db, row.template, who, row.fields)
+      if (
+        action === 'submit' &&
+        body.nodeSource === true &&
+        core.digest(cleanFields(row.fields)) !== reviewedFields
+      )
+        throw fail(
+          'MEMBER_MATCH_CHANGED',
+          '成员匹配已变化，请重新读取节点并核对工作替补人',
+          409
+        )
       row.report = {
         ...core.evaluate(row.template, row.fields),
+        nodeInputHash,
         configurationRequired: route.missing,
         attachments: await checkAttachments(db, row, row.fields),
         publication: await publication(db, row.template, who)
@@ -696,6 +818,10 @@ async function mutate(pool, req, id, action, body) {
       await event(db, row, who, action, replay, detail)
       return row
     } else throw fail('INVALID_ACTION', '操作无效')
+    if (action === 'import' && originalMaterial === materialHash(row)) {
+      await event(db, row, who, action, replay, { unchanged: true })
+      return { ...row, unchanged: true }
+    }
     row.revision++
     const saved = await update(db, row)
     await event(db, saved, who, action, replay, detail)
@@ -829,13 +955,14 @@ async function attachment(pool, req, id, attachmentId) {
     throw fail('MATERIAL_CHANGED', '附件已变更，请重新核验', 409)
   return content
 }
-async function project(pool, writer) {
+async function project(pool, writer, requestId = null) {
   const db = await pool.connect()
   try {
     await db.query('begin')
     const pending = (
       await db.query(
-        'select * from leave_requests where projection_pending and projection_retry_at<=now() order by projection_retry_at limit 5 for update skip locked'
+        'select * from leave_requests where projection_pending and projection_retry_at<=now() and ($1::uuid is null or id=$1) order by projection_retry_at limit 5 for update skip locked',
+        [requestId]
       )
     ).rows
     for (const row of pending) {
@@ -899,17 +1026,51 @@ async function project(pool, writer) {
               [row.room_key, parent]
             )
           ).rows
-          for (const f of row.template.fields)
-            if (
-              !fieldRows.some(
-                n => core.label(n.data.text).split(/[:：]/)[0] === f.label
-              )
+          for (const f of row.template.fields) {
+            const present = fieldRows.find(
+              n => core.label(n.data.text).split(/[:：]/)[0] === f.label
             )
+            if (present) continue // Never overwrite any user-entered field or child.
+            const fieldUid = core.projectionId(row.id + ':field:' + f.key)
+            await insert(fieldUid, parent, f.label)
+            if (f.key !== 'attachmentIds')
               await insert(
-                core.projectionId(row.id + ':field:' + f.key),
-                parent,
-                f.label
+                core.projectionId(row.id + ':value:' + f.key),
+                fieldUid,
+                '待填写'
               )
+          }
+          const hints = [
+            ...(row.report.blockers || []),
+            ...(row.report.configurationRequired || [])
+          ]
+          if (!(row.report.publication || {}).valid)
+            hints.push('流程待管理员配置并发布')
+          const hintText =
+            row.report.hours == null
+              ? ''
+              : `时长：${row.report.hours}小时 / ${row.report.days}工作日；`
+          const text = `填写检查：${hintText}${
+            hints.length ? hints.join('；') : '资料齐全，可核对并提交'
+          }`
+          const hintUid = core.projectionId(row.id + ':check')
+          const hint = (
+            await db.query(
+              'select data from room_nodes where room_key=$1 and uid=$2 and deleted_at is null',
+              [row.room_key, hintUid]
+            )
+          ).rows[0]
+          if (!hint) await insert(hintUid, row.node_uid, text)
+          else if (hint.data.text !== text)
+            await writer(row.room_key, {
+              operationId: core.projectionId(row.id + ':check:' + row.revision),
+              mapId: row.room_key,
+              actorId: 'leave-workflow',
+              clientId: 'leave-workflow',
+              baseVersion: null,
+              type: 'node.update',
+              payload: { uid: hintUid, patch: { text } }
+            })
         }
         const uid = core.projectionId(row.id),
           exists = (
