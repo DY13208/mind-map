@@ -6,11 +6,14 @@
     <AccessDeniedPanel
       v-if="accessDenied"
       :room-key="roomKey"
+      :return-label="fileListReturnLabel"
+      :returning="returningToList"
       @back="goToMyMaps"
     />
     <template v-else-if="show">
       <Toolbar
         v-if="!isZenMode"
+        :list-return-file="historyRoom"
         @open-history="historyVisible = true"
       ></Toolbar>
       <Edit ref="editor"></Edit>
@@ -33,7 +36,8 @@ import { productRequest } from '@/services/productHttp'
 import { normalizeRoomDto } from '@/services/roomDto'
 import { mapState, mapMutations } from 'vuex'
 import { getLocalConfig, withRightDragDefault } from '@/api'
-import { navigateToMyMaps } from '@/utils/roomLocation'
+import { returnFromEditor } from '@/utils/editorFileReturn'
+import { getReturnLabel } from '@/utils/fileNavigation'
 
 export default {
   name: 'EditPage',
@@ -48,10 +52,14 @@ export default {
       show: false,
       accessDenied: false,
       historyVisible: false,
+      returningToList: false,
       historyRoom: null
     }
   },
   computed: {
+    fileListReturnLabel() {
+      return getReturnLabel(this.$route, this.historyRoom)
+    },
     roomKey() {
       return String((this.$route.query && this.$route.query.room) || '')
     },
@@ -155,8 +163,16 @@ export default {
       return Promise.resolve()
     },
 
-    goToMyMaps() {
-      navigateToMyMaps(this.$router)
+    async goToMyMaps() {
+      if (this.returningToList) return
+      this.returningToList = true
+      try {
+        await returnFromEditor(this.$router, this.$route, this.historyRoom)
+      } catch (error) {
+        this.$message.error('返回目录失败，请稍后重试')
+      } finally {
+        this.returningToList = false
+      }
     },
 
     waitForRoomCanvas() {

@@ -335,6 +335,7 @@ import {
 } from '@/utils/mapNavTrail'
 import {
   applyPersonalExpandState,
+  collectExpandProtectUids,
   collectPersonalExpandState,
   loadPersonalExpandState,
   savePersonalExpandState
@@ -1202,11 +1203,22 @@ export default {
       }
       this.personalExpandOnChange = snapshotNow
       this.mindMap.on('personal_expand_change', this.personalExpandOnChange)
-      this.personalExpandOnRender = () => {
+      this.personalExpandOnRender = (meta = {}) => {
         if (this.largeMapInitialOverview || this.personalExpandApplying || !this.mindMap) return
         // Do not memoize a restore before the first layout has produced nodes.
         // The same renderTree identity is retained when that layout finishes.
         if (!this.mindMap.renderer || !this.mindMap.renderer.root) return
+        // 纯视口平移/缩放不改 expand；编辑中恢复会把祖先收起，造成节点「假丢失」
+        if (meta && meta.reason === 'view') return
+        const renderer = this.mindMap.renderer
+        if (
+          (renderer.textEdit &&
+            typeof renderer.textEdit.isShowTextEdit === 'function' &&
+            renderer.textEdit.isShowTextEdit()) ||
+          (this.mindMap.richText && this.mindMap.richText.showTextEdit)
+        ) {
+          return
+        }
         const cooperate = this.mindMap.cooperate
         if (!restoreGate.shouldRestore(
           this.mindMap.renderer && this.mindMap.renderer.renderTree,
@@ -1255,7 +1267,8 @@ export default {
           if (!roomKey || this.personalExpandRoomKey !== roomKey) break
           const changed = applyPersonalExpandState(
             this.mindMap,
-            this.personalExpandState
+            this.personalExpandState,
+            { protectUids: collectExpandProtectUids(this.mindMap) }
           )
           // Hydration inspects rendered instances, not only renderTree data.
           // Wait until expanded parents exist before checking their children.

@@ -51,7 +51,7 @@
         :title="error"
         :closable="false"
         show-icon
-      /><el-button @click="load">重试</el-button>
+      /><el-button @click="load({ reset: true, keepPage: true })">重试</el-button>
     </div>
     <div v-else v-loading="loading || busy" class="contentArea">
       <div v-if="mode !== 'trash' && view === 'card' && itemCount" class="itemGrid">
@@ -102,6 +102,7 @@
           :selectable="selectMode"
           :selected="isRoomSelected(room)"
           :can-select="canSelectRoom(room)"
+          :highlighted="highlightRoomKey === String(room.roomKey || room.id)"
           @open="openRoom"
           @favorite="favorite"
           @duplicate="duplicateRoom"
@@ -123,6 +124,7 @@
         :select-mode="selectMode"
         :selected-room-keys="selectedRoomKeys"
         :selected-folder-ids="selectedFolderIds"
+        :highlight-room-key="highlightRoomKey"
         :can-select-folder="canSelectFolder"
         :can-select-room="canSelectRoom"
         @open="openRoom"
@@ -212,6 +214,18 @@ import folderService from '@/services/folderService'
 import teamService from '@/services/teamService'
 import { getCurrentUser } from '@/utils/auth'
 import { getFileExport, replaceFileTree } from '@/utils/fileApi'
+import {
+  captureListState,
+  captureScrollPosition,
+  clampListPage,
+  createEditorLocation,
+  isShellOnlyRouteChange,
+  readReturnContext,
+  restoreListState,
+  restoreScrollPosition
+} from '@/utils/fileNavigation'
+import { armSkipMyMapsRedirect } from '@/utils/roomLocation'
+import { resolveShellMode, withShell } from '@/utils/shellMode'
 import EmptyState from './components/EmptyState.vue'
 import FileToolbar from './components/FileToolbar.vue'
 import FolderBreadcrumb from './components/FolderBreadcrumb.vue'
@@ -308,7 +322,12 @@ export default {
       selectMode: false,
       selectedRoomKeys: [],
       selectedFolderIds: [],
-      batchAction: null
+      batchAction: null,
+      returnContext: null,
+      highlightRoomKey: '',
+      highlightTimer: null,
+      restoringListState: false,
+      returnStatePending: false
     }
   },
   computed: {
@@ -541,8 +560,12 @@ export default {
     }
   },
   watch: {
-    '$route.fullPath': 'resetPage',
+    '$route'(to, from) {
+      if (isShellOnlyRouteChange(to, from)) return
+      this.restoreNavigationState()
+    },
     search() {
+      if (this.restoringListState) return
       if (!this.isRealFilesMode) return
       clearTimeout(this.searchTimer)
       this.searchTimer = setTimeout(() => {
@@ -551,11 +574,13 @@ export default {
       }, 300)
     },
     roleFilter() {
+      if (this.restoringListState) return
       if (!this.isTeamView) return
       this.page = 1
       this.load({ reset: true, keepPage: true })
     },
     sort() {
+      if (this.restoringListState) return
       if (!this.isRealFilesMode) return
       this.page = 1
       this.load({ reset: true, keepPage: true })
@@ -569,14 +594,20 @@ export default {
     }
   },
   created() {
-    this.resetPage()
+    this.restoreNavigationState()
   },
   beforeDestroy() {
     clearTimeout(this.searchTimer)
+    clearTimeout(this.highlightTimer)
     this.requestId++
   },
   methods: {
     resetPage() {
+      clearTimeout(this.highlightTimer)
+      this.returnContext = null
+      this.returnStatePending = false
+      this.restoringListState = false
+      this.highlightRoomKey = ''
       this.metadataAt = 0
       this.clearSelection()
       this.selectMode = false
@@ -585,6 +616,99 @@ export default {
       this.sort = this.mode === 'recent' ? 'lastOpenedAt' : 'updatedAt'
       this.page = 1
       this.load({ reset: true, keepPage: true })
+    },
+    restoreNavigationState() {
+      const context = readReturnContext(this.$route)
+      const state = context && restoreListState(context)
+      if (!context || !state) {
+        this.resetPage()
+        return
+      }
+      this.returnContext = context
+      this.returnStatePending = true
+      this.restoringListState = true
+      this.search = state.search
+      this.roleFilter = state.roleFilter
+      this.sort = state.sort
+      this.page = state.page
+      this.limit = state.limit
+      this.view = state.view
+      this.$nextTick(() => {
+        if (this._isDestroyed) return
+        this.restoringListState = false
+        this.load({ reset: true, keepPage: true })
+      })
+    },
+    captureCurrentListState() {
+      return captureListState({
+        search: this.search,
+        roleFilter: this.roleFilter,
+        sort: this.sort,
+        page: this.page,
+        limit: this.limit,
+        view: this.view,
+        scroll: captureScrollPosition(this.$el)
+      })
+    },
+    sourceFolderName() {
+      if (this.folder) return this.folder.name
+      if (this.mode === 'files' && this.isTeamView)
+        return this.selectedTeam ? this.selectedTeam.name : ''
+      return ''
+    },
+    editorLocation(room, state, route = this.$route) {
+      return createEditorLocation({
+        route,
+        room,
+        state: state || this.captureCurrentListState(),
+        folderName: this.sourceFolderName()
+      })
+    },
+    async navigateToEditor(room, state, sourceRoute = this.$route) {
+      const location = this.editorLocation(room, state, sourceRoute)
+      const nav = location.query && location.query.nav
+      if (nav) {
+        const listLocation = {
+          path: sourceRoute.path,
+          query: { ...(sourceRoute.query || {}), nav }
+        }
+        await this.$router.replace(listLocation)
+        if (
+          this._isDestroyed ||
+          this.$route.path !== sourceRoute.path ||
+          String(this.$route.query.nav || '') !== String(nav)
+        ) return
+      }
+      return this.$router.push(location)
+    },
+    async restoreReturnPosition() {
+      if (!this.returnStatePending || !this.returnContext) return
+      this.returnStatePending = false
+      const context = this.returnContext
+      await this.$nextTick()
+      if (this._isDestroyed) return
+      restoreScrollPosition(context.state && context.state.scroll, this.$el)
+      const roomKey = String(context.roomKey || '')
+      if (roomKey && this.visibleRooms.some(room => this.roomKey(room) === roomKey)) {
+        clearTimeout(this.highlightTimer)
+        this.highlightRoomKey = roomKey
+        this.highlightTimer = setTimeout(() => {
+          this.highlightRoomKey = ''
+        }, 2400)
+      }
+    },
+    async returnToEntryRoot() {
+      this.returnStatePending = false
+      this.returnContext = null
+      this.$message.warning('原目录已不可访问，已返回脑图列表')
+      const query = this.selectedTeamId ? { team: this.selectedTeamId } : {}
+      const shell = resolveShellMode(this.$route)
+      const target = withShell(
+        { path: this.filesBasePath, query },
+        { path: this.filesBasePath, query: { shell } }
+      )
+      if (target.path === '/my-maps') armSkipMyMapsRedirect()
+      await this.$router.push(target).catch(() => {})
     },
     roomKey(room) {
       return String((room && (room.roomKey || room.id)) || '')
@@ -776,19 +900,19 @@ export default {
     },
     toggleFavorites() {
       this.exitSelectMode()
-      this.$router.push({
+      this.$router.push(withShell({
         path: this.mode === 'favorites'
           ? this.filesBasePath
           : this.filesBasePath + '/favorites'
-      })
+      }, this.$route))
     },
     changeWorkspace(teamId) {
       this.exitSelectMode()
       const team = String(teamId || '')
-      this.$router.push({
+      this.$router.push(withShell({
         path: this.filesBasePath,
         query: team ? { team } : {}
-      })
+      }, this.$route))
     },
     async load(options = {}) {
       const reset = options.reset !== false
@@ -834,9 +958,11 @@ export default {
         this.metadataAt = Date.now()
         if (
           mode === 'folder' &&
-          !this.folders.some(folder => folder.id === folderId)
-        )
-          throw new Error('文件夹不存在或已删除')
+          !this.folders.some(folder => String(folder.id) === String(folderId))
+        ) {
+          await this.returnToEntryRoot()
+          return
+        }
         const filters = {
           favorite: mode === 'favorites',
           shared: mode === 'shared',
@@ -867,8 +993,8 @@ export default {
         this.total = total
         // 删到最后一页为空时，自动回到有效页。
         const maxPage = Math.max(1, Math.ceil(total / this.limit) || 1)
-        if (this.isRealFilesMode && total > 0 && this.page > maxPage) {
-          this.page = maxPage
+        if (this.isRealFilesMode && this.page > maxPage) {
+          this.page = clampListPage(this.page, total, this.limit)
           await this.load({ reset: true, keepPage: true })
           return
         }
@@ -884,7 +1010,10 @@ export default {
         if (request === this.requestId)
           this.error = userMessageFromError(error)
       } finally {
-        if (request === this.requestId) this.loading = false
+        if (request === this.requestId) {
+          this.loading = false
+          if (!this.error) this.restoreReturnPosition()
+        }
       }
     },
     onPageChange(page) {
@@ -910,21 +1039,19 @@ export default {
       if (this.selectedTeamId) {
         route.query = { team: this.selectedTeamId }
       }
-      this.$router.push(route)
+      this.$router.push(withShell(route, this.$route))
     },
     async openRoom(room) {
       if (this.openingRoom) return
       this.openingRoom = true
       const sourceRoute = this.$route
       try {
+        const state = this.captureCurrentListState()
         const roomKey = room.roomKey || room.id
         await roomService.markOpened(roomKey)
         // A slow recent-open request must not undo the user's later navigation.
         if (this._isDestroyed || this.$route !== sourceRoute) return
-        await this.$router.push({
-          path: '/',
-          query: { room: roomKey }
-        })
+        await this.navigateToEditor(room, state, sourceRoute)
       } catch (error) {
         if (
           isNavigationFailure(error, NavigationFailureType.cancelled) ||
@@ -955,10 +1082,7 @@ export default {
             )
           : await roomService.createRoom(result.value.trim(), folderId)
         this.$message.success('脑图已创建')
-        await this.$router.push({
-          path: '/',
-          query: { room: created.roomKey }
-        })
+        await this.navigateToEditor(created)
       } catch (error) {
         this.$message.error(userMessageFromError(error))
       } finally {
@@ -1008,13 +1132,13 @@ export default {
       if (result && result.mode === 'folder' && result.folderId) {
         const route = { path: `${this.filesBasePath}/folder/` + result.folderId }
         if (this.selectedTeamId) route.query = { team: this.selectedTeamId }
-        this.$router.push(route)
+        this.$router.push(withShell(route, this.$route))
         return
       }
       if (result && result.mode === 'single' && result.room) {
         const roomKey = result.room.roomKey || result.room.id
         if (roomKey) {
-          await this.$router.push({ path: '/', query: { room: roomKey } })
+          await this.navigateToEditor(result.room)
         }
       }
     },
@@ -1073,7 +1197,8 @@ export default {
       this.metadataAt = 0
       this.clearSelection()
       if (this.mode === 'folder' && result.deletedFolderIds.includes(this.$route.params.id)) {
-        await this.$router.push({ path: this.filesBasePath, query: this.$route.query })
+        const query = this.selectedTeamId ? { team: this.selectedTeamId } : {}
+        await this.$router.push(withShell({ path: this.filesBasePath, query }, this.$route))
       } else await this.load({ reset: true, keepPage: true })
     },
     moveRoom(room) {

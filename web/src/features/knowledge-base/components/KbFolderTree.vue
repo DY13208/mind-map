@@ -230,6 +230,23 @@ export default {
 ::v-deep .el-tree {
   background: transparent;
   color: var(--ui-text);
+  // 多行空提示按内容撑开，避免默认绝对居中后覆盖上方的根目录。
+  .el-tree__empty-block {
+    min-height: 0;
+    padding: 16px 8px 8px;
+  }
+  .el-tree__empty-text {
+    position: static;
+    display: block;
+    width: auto;
+    transform: none;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--ui-text-secondary);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: left;
+  }
   .el-tree-node__content { border-radius: var(--ui-radius-sm); height: 32px; }
   .el-tree-node__content:hover { background: var(--ui-hover-overlay); }
   &.el-tree--highlight-current .el-tree-node.is-current > .el-tree-node__content {

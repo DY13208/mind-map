@@ -83,6 +83,7 @@ function publicFile(row, access = {}) {
     roomKey: row.room_key || row.roomKey,
     title: row.title || '未命名',
     folderId: row.folder_id || row.folderId || null,
+    teamId: row.team_id || row.teamId || null,
     owner: {
       userId: row.owner_user_id || row.owner_id || (row.owner && row.owner.userId) || '',
       name: row.owner_name || (row.owner && row.owner.name) || row.owner_id || '',

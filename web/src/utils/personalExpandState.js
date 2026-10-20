@@ -66,9 +66,46 @@ export function collectPersonalExpandState(mindMap, previous = {}) {
   return result
 }
 
-export function applyPersonalExpandState(mindMap, state) {
+// 正在编辑/激活的节点及其祖先：恢复偏好时不得把它们收起，否则会出现
+// 「搜索能找到、画布上看不见，刷新才回来」的假丢失。
+export function collectExpandProtectUids(mindMap) {
+  const protect = new Set()
+  const renderer = mindMap && mindMap.renderer
+  if (!renderer) return protect
+  const addAncestors = node => {
+    let cur = node
+    while (cur) {
+      const uid =
+        (cur.getData && cur.getData('uid')) ||
+        (cur.nodeData && cur.nodeData.data && cur.nodeData.data.uid) ||
+        (cur.data && cur.data.uid)
+      if (uid) protect.add(uid)
+      cur = cur.parent || null
+    }
+  }
+  ;(renderer.activeNodeList || []).forEach(addAncestors)
+  if (
+    renderer.textEdit &&
+    typeof renderer.textEdit.isShowTextEdit === 'function' &&
+    renderer.textEdit.isShowTextEdit() &&
+    renderer.textEdit.currentNode
+  ) {
+    addAncestors(renderer.textEdit.currentNode)
+  }
+  const richText = mindMap.richText
+  if (richText && richText.showTextEdit && richText.node) {
+    addAncestors(richText.node)
+  }
+  return protect
+}
+
+export function applyPersonalExpandState(mindMap, state, options = {}) {
   if (!mindMap || !state || typeof state !== 'object') return false
   const renderer = mindMap.renderer
+  const protect =
+    options.protectUids instanceof Set
+      ? options.protectUids
+      : new Set(options.protectUids || [])
   let changed = false
   walkTree(renderer && renderer.renderTree, node => {
     const data = nodeDataOf(node)
@@ -76,6 +113,8 @@ export function applyPersonalExpandState(mindMap, state) {
     if (!uid || !Object.prototype.hasOwnProperty.call(state, uid)) return
     const next = state[uid] !== false
     if ((data.expand !== false) !== next) {
+      // 保护路径只挡「收起」，仍允许按偏好展开
+      if (!next && protect.has(uid)) return
       data.expand = next
       changed = true
     }

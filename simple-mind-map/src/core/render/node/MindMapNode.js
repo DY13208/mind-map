@@ -779,7 +779,14 @@ class MindMapNode {
         this.update(forceRender)
       }
     } else if (openPerformance && performanceConfig.removeNodeWhenOutCanvas) {
-      this.removeSelf()
+      // 激活/编辑中的节点及其祖先保留 DOM，避免编辑过程中被当成「画布外」卸掉
+      const pinned =
+        this.renderer &&
+        typeof this.renderer.getPinnedViewportNodesCached === 'function' &&
+        this.renderer.getPinnedViewportNodesCached()
+      if (!(pinned && pinned.has(this))) {
+        this.removeSelf()
+      }
       // Summary geometry is independent of its owner's viewport visibility.
       // Its custom position/range can still intersect the visible canvas.
       if (this.checkHasGeneralization()) this.renderGeneralization(forceRender)

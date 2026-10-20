@@ -35,6 +35,7 @@ export function fileKind(file) {
   if (mime.includes('pdf') || name.endsWith('.pdf')) return 'pdf'
   if (mime.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp)$/.test(name)) return 'image'
   if (/sheet|excel|csv/.test(mime) || /\.(xlsx|xls|csv)$/.test(name)) return 'sheet'
+  if (mime.includes('markdown') || /\.(md|markdown)$/.test(name) || String(file && file.ext).toLowerCase() === 'md') return 'markdown'
   return 'other'
 }
 export function kbEnabled() {
@@ -71,8 +72,11 @@ export function blockLocation(b) {
   const row = indexed != null ? spreadsheetRow(indexed) : finiteNumber(pick('row'))
   const col = pick('col') != null ? Number(pick('col')) : null
   const cell = pick('cell') || null
-  const precise = !!bbox || (!!sheet && (row != null || !!cell))
-  return { page, bbox, sheet, row, col, cell, precise, known: precise || page != null || !!sheet }
+  const lineStart = finiteNumber(pick('lineStart'))
+  const lineEnd = finiteNumber(pick('lineEnd'))
+  const lines = Number.isInteger(lineStart) && lineStart > 0 && Number.isInteger(lineEnd) && lineEnd >= lineStart
+  const precise = lines || !!bbox || (!!sheet && (row != null || !!cell))
+  return { page, bbox, sheet, row, col, cell, lineStart: lines ? lineStart : null, lineEnd: lines ? lineEnd : null, precise, known: precise || page != null || !!sheet }
 }
 
 function presentSource(source) {
@@ -215,6 +219,7 @@ export function codexMcpConfig(url) {
 
 export function locationLabel(loc) {
   if (!loc || !loc.known) return '位置未知'
+  if (loc.lineStart != null) return loc.lineStart === loc.lineEnd ? `第 ${loc.lineStart} 行` : `第 ${loc.lineStart}–${loc.lineEnd} 行`
   const parts = []
   if (loc.page != null) parts.push(`第 ${loc.page} 页`)
   if (loc.sheet) parts.push(`工作表「${loc.sheet}」`)

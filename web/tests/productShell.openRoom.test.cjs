@@ -24,7 +24,11 @@ async function main() {
     $route: { path: '/files/folder/example' },
     $router: { push: async () => { pushes++ } },
     $message: { error: message => errors.push(message) },
-    openingRoom: false
+    openingRoom: false,
+    captureCurrentListState: () => ({ page: 1 }),
+    navigateToEditor(room) {
+      return this.$router.push({ path: '/', query: { room: room.roomKey || room.id } })
+    }
   }
   const open = makeOpen({ markOpened: () => { requests++; return request.promise } },
     VueRouter.isNavigationFailure, VueRouter.NavigationFailureType, error => error.message)
@@ -71,6 +75,23 @@ async function main() {
   await open.call(context, { roomKey: 'room-example' })
   assert.deepStrictEqual(errors, ['Chunk load failed'])
   assert.equal(context.openingRoom, false)
+
+  const captureErrors = []
+  const captureFailureContext = {
+    $route: { path: '/files/folder/example' },
+    $router: { push: async () => { throw new Error('Should not navigate') } },
+    $message: { error: message => captureErrors.push(message) },
+    openingRoom: false,
+    captureCurrentListState() { throw new Error('Scroll capture failed') },
+    navigateToEditor() { throw new Error('Should not navigate') }
+  }
+  let markedOpened = false
+  const captureFailureOpen = makeOpen({ markOpened: async () => { markedOpened = true } },
+    VueRouter.isNavigationFailure, VueRouter.NavigationFailureType, error => error.message)
+  await captureFailureOpen.call(captureFailureContext, { roomKey: 'room-example' })
+  assert.equal(markedOpened, false)
+  assert.deepStrictEqual(captureErrors, ['Scroll capture failed'])
+  assert.equal(captureFailureContext.openingRoom, false, 'A snapshot error must release the open lock')
   console.log('Room opening navigation tests passed')
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })
