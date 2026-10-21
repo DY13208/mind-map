@@ -29,21 +29,12 @@ const {
   normalizeType,
   BATCH_CHUNK
 } = require('./protocol')
+const { isCollabTraceOn } = require('../../src/utils/collabTraceSwitch.cjs')
 
 function adapterTrace(stage, detail) {
   try {
     if (typeof window !== 'undefined') {
-      const host = (window.location && window.location.hostname) || ''
-      const on =
-        window.__COLLAB_V2_TRACE__ === true ||
-        (window.localStorage &&
-          window.localStorage.getItem('COLLAB_V2_TRACE') === '1') ||
-        host === 'localhost' ||
-        host === '127.0.0.1' ||
-        /^192\.168\./.test(host) ||
-        /^10\./.test(host) ||
-        /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
-      if (!on) return
+      if (!isCollabTraceOn(window)) return
       if (!Array.isArray(window.__V2_TRACE_LOG__)) window.__V2_TRACE_LOG__ = []
       const row = { t: Date.now(), stage, ...(detail || {}) }
       window.__V2_TRACE_LOG__.push(row)

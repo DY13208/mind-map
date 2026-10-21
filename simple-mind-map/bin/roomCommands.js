@@ -203,13 +203,14 @@ function applyNodeCommand(ydoc, command, options = {}) {
     }
     if (payload.uid !== result.uid) payload.uid = result.uid
     const stamp = stampPositions(ydoc, result.parent_uid, result.uid)
+    const createdData = ydoc.getMap().get(result.uid).toJSON().data
     return {
       result: { ...result, position: stamp.position, index: stamp.index },
       inversePayload: { type: 'node.delete', payload: { uid: result.uid } },
       event: withAuthoritativeOrder(
         {
           type: 'node.inserted',
-          payload: { ...payload, uid: result.uid, parentUid: result.parent_uid },
+          payload: { ...payload, uid: result.uid, parentUid: result.parent_uid, data: createdData },
           affectedUids: [result.uid, result.parent_uid].filter(Boolean)
         },
         stamp

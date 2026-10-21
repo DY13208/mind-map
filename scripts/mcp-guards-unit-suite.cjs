@@ -7,6 +7,8 @@ fs.mkdirSync(out, { recursive: true })
 const files = [
   'scripts/mcp-write-guards.unit.cjs', 'scripts/mcp-guard-terminal.unit.cjs', 'scripts/mcp-client-guards.unit.cjs',
   'scripts/mcp-authority-partial.unit.cjs',
+  'scripts/mcp-background-edit.unit.cjs',
+  'simple-mind-map/test/collabTraceSwitch.test.cjs',
   'simple-mind-map/scripts/collab-edit-session.unit.cjs', 'simple-mind-map/scripts/collab-remote-render.unit.cjs',
   'simple-mind-map/scripts/testEditorEditSessionDiscard.cjs',
   'simple-mind-map/scripts/collab-revision-completion.unit.cjs', 'scripts/mcp-own-creation.unit.cjs',

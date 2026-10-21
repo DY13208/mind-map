@@ -1,26 +1,8 @@
+import collabTraceSwitch from './collabTraceSwitch.cjs'
+
 function runtimeTraceFlag() {
-  if (typeof window === 'undefined') return false
-  if (window.__COLLAB_V2_TRACE__ === false) return false
-  if (window.__COLLAB_V2_TRACE__ === true) return true
-  try {
-    if (window.localStorage && window.localStorage.getItem('COLLAB_V2_TRACE') === '1') {
-      return true
-    }
-  } catch (err) {
-    // ignore
-  }
-  const runtime = window.__MIND_MAP_RUNTIME__ || {}
-  if (runtime.collabV2Trace === true || runtime.collabV2Trace === '1') return true
-  if (runtime.collabV2Trace === false || runtime.collabV2Trace === '0') return false
-  const search = window.location && window.location.search
-  if (search && /(?:\?|&)collabTrace=1(?:&|$)/.test(search)) return true
-  const host = (window.location && window.location.hostname) || ''
-  return (
-    host === 'localhost' ||
-    host === '127.0.0.1' ||
-    /^192\.168\./.test(host) ||
-    /^10\./.test(host) ||
-    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+  return collabTraceSwitch.isCollabTraceOn(
+    typeof window === 'undefined' ? null : window
   )
 }
 
@@ -52,6 +34,11 @@ export function setCollabTraceSnapshotProvider(fn) {
 }
 
 export function collabPersistSnapshot() {
+  if (!runtimeTraceFlag()) return {}
+  return readTraceSnapshot()
+}
+
+function readTraceSnapshot() {
   try {
     return snapshotProvider ? snapshotProvider() || {} : {}
   } catch (err) {
@@ -120,7 +107,7 @@ export function moveFullTreeForbidden(reason, extra = {}) {
 export function collabTrace(stage, detail = {}) {
   recordCollabPerformance(stage, detail)
   if (!runtimeTraceFlag()) return
-  const snap = collabPersistSnapshot()
+  const snap = readTraceSnapshot()
   const row = {
     t: Date.now(),
     stage,

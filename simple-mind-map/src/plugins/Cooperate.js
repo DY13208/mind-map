@@ -7764,6 +7764,26 @@ class Cooperate {
       }
     })
     collabNodeFeatures.applyNullableGroupClears(full, data, prevFull)
+    if (data.resetRichText && prevFull && full.text === prevFull.text) {
+      // RichText prepares plain nodes for display on load. That flag alone
+      // does not mean the user edited the text field group.
+      if (prevFull.richText !== undefined) full.richText = prevFull.richText
+      else delete full.richText
+    }
+    // Editors own independent drafts. Realtime preview/format normalization
+    // must not race their guarded save through the background patch channel.
+    if (uid && this.editSessionManager) {
+      this.editSessionManager.list().forEach(session => {
+        if (session.uid !== String(uid) ||
+          (session.roomKey && session.roomKey !== this.httpRoomKey) ||
+          !['editing', 'conflict'].includes(session.state)) return
+        session.fields.forEach(field => {
+          const baseline = this.currentData?.[uid]?.data || prevFull || {}
+          if (Object.prototype.hasOwnProperty.call(baseline, field)) full[field] = baseline[field]
+          else delete full[field]
+        })
+      })
+    }
     if (!options.onlyChanged || !uid) return full
     const prev = this.lastPushed[uid]
     if (!prev || !prev.full) return full
@@ -7772,6 +7792,9 @@ class Cooperate {
       previous.generalization = collabGeneralization.ownerGeneralizationPayload(previous.generalization)
     }
     const delta = patchDelta(previous, full)
+    Object.keys(delta).forEach(field => {
+      if (delta[field] === undefined) delete delta[field]
+    })
     return Object.keys(delta).length ? delta : null
   }
 

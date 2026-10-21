@@ -32,6 +32,10 @@ async function check(name, fn) {
   try { result = await fn() } catch (error) {
     report.failedCheck = name
     for (const { page, actor } of activeClients) {
+      const failure = await page.evaluate(() => ({ trace: window.__concurrentAddTrace,
+        sessions: window.__guardMM?.cooperate?.editSessionManager?.list(),
+        status: window.__guardMM?.cooperate?.collabV2Adapter?.getStatus() })).catch(() => null)
+      fs.writeFileSync(path.join(OUT, 'failure-state-' + actor + '.json'), JSON.stringify(failure, null, 2))
       await page.screenshot({ path: path.join(OUT, 'failed-check-client-' + actor + '.png') }).catch(() => {})
     }
     throw error
@@ -118,12 +122,13 @@ async function openClient(chromium, origin, identity, actor) {
     return url.origin === origin || ['data:', 'blob:'].includes(url.protocol) ? route.continue() : route.abort()
   })
   await context.addInitScript(() => localStorage.setItem('SIMPLE_MIND_MAP_LOCAL_CONFIG', JSON.stringify({ enableAi: false, showNavigator: false, showNavigatorToolbar: false })))
-  const page = await context.newPage(), errors = []
+  const page = await context.newPage(), errors = [], consoleCounts = { v2Trace: 0 }
   page.setDefaultTimeout(20000)
   page.setDefaultNavigationTimeout(120000)
   page.on('pageerror', error => errors.push(error.message))
   page.on('console', message => {
     const value = redact(message.text())
+    if (value.startsWith('[v2-trace]')) consoleCounts.v2Trace += 1
     if (/v2-trace|collab-trace|remote\.|failed|Error|error/i.test(value)) {
       fs.appendFileSync(path.join(OUT, 'browser-' + actor + '.log'), value.slice(0, 8000) + '\n')
     }
@@ -132,11 +137,18 @@ async function openClient(chromium, origin, identity, actor) {
   await page.waitForFunction(`(() => { const mm = (${mapInBrowser.toString()})(); if(mm) window.__guardMM=mm; return mm && mm.renderer.root && !mm.renderer.isRendering && mm.cooperate.collabV2Adapter.getStatus().phase==='LIVE'; })()`, null, { timeout: 120000 })
   await page.evaluate(() => {
     window.__guardMetrics = { layouts: 0, remote: 0 }
+    const originalSnapshot = __guardMM.cooperate.persistTraceSnapshot
+    window.__traceSnapshotCalls = 0
+    __guardMM.cooperate.persistTraceSnapshot = function (...args) {
+      window.__traceSnapshotCalls++
+      return originalSnapshot.apply(this, args)
+    }
+    __guardMM.cooperate.__guardTraceSnapshotWrapped = true
     __guardMM.on('node_tree_render_end', () => __guardMetrics.layouts++)
     const original = __guardMM.cooperate.applyV2RemoteOperation.bind(__guardMM.cooperate)
     __guardMM.cooperate.applyV2RemoteOperation = (...args) => { __guardMetrics.remote++; return original(...args) }
   })
-  return { context, page, actor, errors }
+  return { context, page, actor, errors, consoleCounts }
 }
 async function mcpClient(origin, token) {
   let session, sequence = 0
@@ -167,6 +179,9 @@ async function main() {
   const apiOnly = process.argv.includes('--api-check')
   const interactionsOnly = process.argv.includes('--interactions-only')
   const concurrentAddOnly = process.argv.includes('--concurrent-add-only')
+  const compatMode = process.argv.includes('--compat-mode')
+  const traceQuietCheck = process.argv.includes('--trace-quiet-check')
+  report.writeMode = compatMode ? 'compatibility (Direct and event bridge disabled)' : 'Direct + event bridge'
   const expectConcurrentAddSuccess = process.argv.includes('--expect-concurrent-add-success')
   if (concurrentAddOnly) report.scope = 'Focused concurrent child-add repro: owned 10000-node PostgreSQL room + three native browsers; no full acceptance suite'
   if (apiOnly) report.scope = 'Owned 10000-node PostgreSQL room + native MCP/HTTP only; browser acceptance not run'
@@ -183,8 +198,8 @@ async function main() {
   const origin = gateway.origin, secret = randomBytes(32).toString('hex'); secrets.push(secret)
   const env = { ...process.env, MIND_MAP_SKIP_ROOT_ENV: '1', PGHOST: pg.host, PGPORT: String(pg.port), PGDATABASE: database,
     NODE_PATH: [path.join(ROOT, 'output/performance-repair-20261013/dependencies/node_modules'), path.join(APP, 'node_modules'), process.env.NODE_PATH || ''].filter(Boolean).join(path.delimiter),
-    PGUSER: pg.user, PGPASSWORD: pg.password, HOST: '127.0.0.1', PORT: String(apiPort), COLLAB_V2: '1', COLLAB_V2_EVENT_BRIDGE: '1',
-    COLLAB_HTTP_DIRECT: '1', COLLAB_MCP_DIRECT: '1', COLLAB_EVENT_BUS: 'postgres', COLLAB_OUTBOX_PUBLISHER: '0',
+    PGUSER: pg.user, PGPASSWORD: pg.password, HOST: '127.0.0.1', PORT: String(apiPort), COLLAB_V2: '1', COLLAB_V2_EVENT_BRIDGE: compatMode ? '0' : '1',
+    COLLAB_HTTP_DIRECT: compatMode ? '0' : '1', COLLAB_MCP_DIRECT: compatMode ? '0' : '1', COLLAB_EVENT_BUS: 'postgres', COLLAB_OUTBOX_PUBLISHER: '0',
     COLLAB_RATE_LIMIT_PER_ROOM: '4000', COLLAB_RATE_LIMIT_GLOBAL: '8000', COLLAB_E2E: '1',
     WECOM_AUTH_ENABLED: '1', WECOM_CORP_ID: 'ww1234567890abcdef', WECOM_AGENT_ID: '1000001', WECOM_SECRET: 'isolated-only-secret',
     AUTH_SESSION_SECRET: randomBytes(32).toString('hex'), WECOM_REDIRECT_URI: origin + '/api/auth/wecom/callback',
@@ -271,7 +286,42 @@ async function main() {
   await check('10000-node initial database' + (apiOnly ? ' (API only)' : ' and three native browsers'), async () => ({ nodes: (await pool.query('select count(*)::int as n from room_nodes where room_key=$1 and deleted_at is null', [roomKey])).rows[0].n, clients: clients.length }))
   if (concurrentAddOnly) {
     await require('./mcp-guards-concurrent-add.cjs')({ clients, call, batch, query, serverChildren, state, converge, roomKey, check, OUT,
-      expectSuccess: expectConcurrentAddSuccess })
+      expectSuccess: expectConcurrentAddSuccess, compatMode })
+    if (traceQuietCheck) {
+      await check('日志默认关闭：真实协同事件不输出追踪、不生成快照或缓存', async () => {
+        const rows = await Promise.all(clients.map(async client => ({ actor: client.actor,
+          console: client.consoleCounts.v2Trace,
+          ...await client.page.evaluate(() => ({ snapshots: window.__traceSnapshotCalls,
+            ring: (window.__V2_TRACE_LOG__ || []).length, remote: window.__guardMetrics?.remote || 0 })) })))
+        rows.forEach(row => { assert.equal(row.console, 0); assert.equal(row.snapshots, 0); assert.equal(row.ring, 0) })
+        assert.ok(rows.some(row => row.remote > 0), 'The quiet check must include actual remote events')
+        return { clients: rows }
+      })
+      await check('显式开启可诊断；显式关闭同时静默主入口和 adapter', async () => {
+        const probe = clients[2]
+        const insert = async () => {
+          await probe.page.evaluate(uid => window.__guardMM.cooperate.submitV2('node.insert', {
+            parent: 'root', uid, text: '日志开关隔离验证' }), randomUUID())
+          await converge(await state())
+        }
+        await probe.page.evaluate(() => { window.__COLLAB_V2_TRACE__ = true })
+        await insert()
+        const enabled = await probe.page.evaluate(() => ({ snapshots: window.__traceSnapshotCalls,
+          ring: (window.__V2_TRACE_LOG__ || []).length, stages: (window.__V2_TRACE_LOG__ || []).map(row => row.stage) }))
+        assert.ok(enabled.snapshots > 0)
+        assert.ok(enabled.stages.includes('2.adapter.submit') && enabled.stages.includes('4.socket.emit'))
+        assert.ok(probe.consoleCounts.v2Trace > 0)
+        const countBefore = probe.consoleCounts.v2Trace
+        await probe.page.evaluate(() => { localStorage.setItem('COLLAB_V2_TRACE', '1'); window.__COLLAB_V2_TRACE__ = false })
+        await insert()
+        const disabled = await probe.page.evaluate(() => ({ snapshots: window.__traceSnapshotCalls,
+          ring: (window.__V2_TRACE_LOG__ || []).length }))
+        assert.equal(disabled.snapshots, enabled.snapshots)
+        assert.equal(disabled.ring, enabled.ring)
+        assert.equal(probe.consoleCounts.v2Trace, countBefore)
+        return { enabled, disabled, consoleAfterDisable: probe.consoleCounts.v2Trace }
+      })
+    }
     report.passed = true
     return
   }

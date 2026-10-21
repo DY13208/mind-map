@@ -160,8 +160,15 @@ async function fillAndSave(client, editor, text) {
   await page.locator(editor.selector).waitFor({ state: 'visible' })
   await page.locator(editor.selector).fill(text)
   const input = await editorState(page)
-  const result = await page.evaluate(() => window.__guardMM.renderer.textEdit.hideEditTextBox())
+  const result = await saveEditor(page)
   return { input, result, after: await editorState(page) }
+}
+
+async function saveEditor(page) {
+  return page.evaluate(() => Promise.race([
+    Promise.resolve(window.__guardMM.renderer.textEdit.hideEditTextBox()),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Editor save stalled for 15 seconds')), 15000))
+  ]))
 }
 
 function instrument(client) {
@@ -169,6 +176,15 @@ function instrument(client) {
     const mm = window.__guardMM
     const c = mm.cooperate
     const trace = []
+    if (!c.__guardTraceSnapshotWrapped) {
+      const originalSnapshot = c.persistTraceSnapshot
+      window.__traceSnapshotCalls = 0
+      c.persistTraceSnapshot = function (...args) {
+        window.__traceSnapshotCalls++
+        return originalSnapshot.apply(this, args)
+      }
+      c.__guardTraceSnapshotWrapped = true
+    }
     const currentEditor = () => {
       const editor = mm.richText && mm.richText.showTextEdit ? mm.richText : mm.renderer.textEdit
       const node = editor.node || editor.currentNode
@@ -380,14 +396,23 @@ async function waitForOwnInsertAck(client, nodeUid) {
   return (await traceFor(client)).filter(row => row.phase === 'ack' && row.type === 'node.insert' && JSON.stringify(row).includes(nodeUid))
 }
 
-module.exports = async function runConcurrentAddRepro({ clients, call, batch, query, serverChildren, state, converge, roomKey, check, OUT, expectSuccess = false }) {
+module.exports = async function runConcurrentAddRepro({ clients, call, batch, query, serverChildren, state, converge, roomKey, check, OUT, expectSuccess = false, compatMode = false }) {
   assert.ok(clients.length >= 2, 'Concurrent add reproduction needs two browser clients')
   await Promise.all(clients.map(instrument))
 
   async function createParent(label) {
-    const parentUid = uid(label)
-    const created = await batch([{ op: 'add', node: parentUid, parent: 'root', text: `并发新增父节点 ${label}` }])
+    let parentUid = uid(label)
+    const created = compatMode
+      ? await call('add_node', { room_key: roomKey, parent: 'root', text: `并发新增父节点 ${label}` })
+      : await batch([{ op: 'add', node: parentUid, parent: 'root', text: `并发新增父节点 ${label}` }])
     assert.equal(created.toolError, false, JSON.stringify(created))
+    if (compatMode) {
+      parentUid = created.uid || created.result?.uid || created.data?.uid
+      assert.ok(parentUid, JSON.stringify(created))
+      // Legacy MCP writes have no event bridge; explicitly recover only this
+      // fixture before the browser-driven concurrent operation begins.
+      await Promise.all(clients.map(({ page }) => page.evaluate(() => window.__guardMM.cooperate.collabV2Adapter.resync?.())))
+    }
     await converge(await state())
     return parentUid
   }
@@ -413,7 +438,7 @@ module.exports = async function runConcurrentAddRepro({ clients, call, batch, qu
     const bNewNode = await currentAuthority(b, child.uid)
     const childServer = await serverNode(query, child.uid)
     const aSave = await fillAndSave(a, { ...parentEditor, ...(await editorState(a.page)) }, parentDraft)
-    const bSave = await b.page.evaluate(() => window.__guardMM.renderer.textEdit.hideEditTextBox())
+    const bSave = await saveEditor(b.page)
     await converge(await state())
     const parentServer = await serverNode(query, parentUid)
     const aEvents = await traceFor(a), bEvents = await traceFor(b)
@@ -634,7 +659,7 @@ module.exports = async function runConcurrentAddRepro({ clients, call, batch, qu
     }
   })
 
-  await check('真实同字段竞争仍拒绝旧文本并保留人工草稿', async () => {
+  await check('真实同字段竞争仍拒绝旧文本并保留人工草稿' + (compatMode ? '（第三浏览器提交）' : '（MCP 提交）'), async () => {
     const a = clients[0]
     await reloadClient(a, await state())
     const targetUid = await createParent('same-field')
@@ -644,21 +669,25 @@ module.exports = async function runConcurrentAddRepro({ clients, call, batch, qu
     const editor = await openEditor(a, targetUid)
     const draft = `浏览器人工草稿 ${targetUid.slice(-6)}`
     await a.page.locator(editor.selector).fill(draft)
-    const competitor = await call('update_node', { room_key: roomKey, node: targetUid,
-      text: `MCP 同字段竞争 ${targetUid.slice(-6)}`,
+    const competitor = compatMode ? await clients[2].page.evaluate(async ({ uid, version }) => {
+      await window.__guardMM.cooperate.submitV2('node.update', { uid,
+        patch: { text: `远端同字段竞争 ${uid.slice(-6)}` }, expected: { uid, '__fv.text': version } })
+      return { toolError: false }
+    }, { uid: targetUid, version: baseline.data.__fv?.text || 0 }) : await call('update_node', { room_key: roomKey, node: targetUid,
+      text: `远端同字段竞争 ${targetUid.slice(-6)}`,
       expected: { uid: targetUid, '__fv.text': baseline.data.__fv?.text || 0 } })
     assert.equal(competitor.toolError, false, JSON.stringify(competitor))
     const competitorRevision = Number(await state())
     await converge(competitorRevision)
     const conflictView = await editorState(a.page)
-    const saveResult = await a.page.evaluate(() => window.__guardMM.renderer.textEdit.hideEditTextBox())
+    const saveResult = await saveEditor(a.page)
     const afterSave = await editorState(a.page)
     const server = await serverNode(query, targetUid)
     const trace = await traceFor(a)
     const conflicts = trace.filter(row => row.phase === 'event' && row.name === 'edit_session_conflict' && row.session?.uid === targetUid)
     assert.equal(saveResult, false, 'A stale same-field editor must remain open and reject save')
     assert.equal(Number(await state()), competitorRevision, 'Rejected stale browser save must not add a revision')
-    assert.ok(String(server?.data?.text || '').includes('MCP 同字段竞争'), 'The winning server text must remain intact')
+    assert.ok(String(server?.data?.text || '').includes('远端同字段竞争'), 'The winning server text must remain intact')
     assert.ok(String(conflictView.session?.draft?.text || '').includes(draft), 'The browser draft must remain available')
     if (expectSuccess) assert.ok(conflicts.some(row => row.error?.code === 'REPLACE_CONFLICT'), 'Same-field competition must still report REPLACE_CONFLICT')
     const detail = { roomKey, targetUid, baseline: { text: baseline.data.text, fv: baseline.data.__fv },
