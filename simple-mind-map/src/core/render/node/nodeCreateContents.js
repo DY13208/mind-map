@@ -262,8 +262,9 @@ function createRichTextNode(specifyText) {
   const g = new G()
   // 创建富文本结构，或复位富文本样式
   let recoverText = false
+  const hasCollabAuthority = !!this.mindMap.cooperate?.collabV2Adapter
   if (this.getData('resetRichText')) {
-    delete this.nodeData.data.resetRichText
+    if (!hasCollabAuthority) delete this.nodeData.data.resetRichText
     recoverText = true
   }
   if (recoverText && !isUndef(text)) {
@@ -287,7 +288,9 @@ function createRichTextNode(specifyText) {
     // Keep the normalized value on the authoritative node data; real user
     // edits still use SET_NODE_TEXT and retain their normal history entry.
     if (!this.nodeData.data) this.nodeData.data = {}
-    this.nodeData.data.text = text
+    // Collaborative node data belongs to the committed model. Rendering a
+    // plain value as HTML must not manufacture an unrelated text mutation.
+    if (!hasCollabAuthority) this.nodeData.data.text = text
   }
   // 节点的富文本样式数据
   const nodeTextStyleList = []

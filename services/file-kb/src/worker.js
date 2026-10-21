@@ -40,6 +40,7 @@ function createWorker({ pool, config, docling, log = console.log }) {
   return {
     queue, storage,
     async start(n = config.concurrency) {
+      await require('./prepare').cleanupPrepared()
       await storage.init()
       for (let i = 0; i < n; i++) { const p = loop(); running.add(p); p.finally(() => running.delete(p)) }
     },

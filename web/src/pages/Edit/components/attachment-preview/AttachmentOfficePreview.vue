@@ -7,6 +7,7 @@
         <button v-for="sheet in sheets" :key="sheet.name" type="button" :class="{ active: sheet.name === activeSheet }" :aria-current="sheet.name === activeSheet ? 'page' : null" @click="selectSheet(sheet.name)">{{ sheet.name }}</button>
       </nav>
       <div ref="sheetViewport" class="attachmentSpreadsheetViewport" tabindex="0" role="region" :aria-label="activeSheet + ' 工作表'" @scroll.passive="onSheetScroll">
+        <p v-if="!currentSheet.rows" class="attachmentEmptySheet">此工作表没有数据</p>
         <table class="attachmentSpreadsheet">
           <thead><tr><th>#</th><th v-for="column in currentSheet.columns" :key="column">{{ columnName(column - 1) }}</th></tr></thead>
           <tbody>
@@ -100,7 +101,7 @@ export default {
             for (const pending of this._requests.values()) { clearTimeout(pending.timer); pending.reject(new Error('表格预览服务加载失败，请下载后查看')) }
             this._requests.clear()
           }
-          const result = await this.workerCall({ action: 'open', buffer: content.buffer }, [content.buffer])
+          const result = await this.workerCall({ action: 'open', buffer: content.buffer, fileName: this.source.fileName, mimeType: this.source.mimeType }, [content.buffer])
           if (this._disposed) return
           this.sheets = result.sheets.map(Object.freeze)
           if (!this.sheets.length) throw new Error('此工作簿没有可读工作表')

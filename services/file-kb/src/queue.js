@@ -24,7 +24,7 @@ function createQueue(pool, { workerId = `w-${process.pid}`, leaseMs = 600000, ba
       `insert into kb.jobs (file_id, run_id, kind, run_after, max_attempts, batch_id, resource_class)
        select $1,$2,$3,now()+($4::bigint*interval '1 millisecond'),$5,
          coalesce($6::uuid,(select batch_id from kb.jobs where run_id=$2 order by id limit 1)),
-         case when $3='structure' or ext in ('xlsx','md','csv','txt') then 'light' else 'heavy' end from kb.files where id=$1
+         case when $3='structure' or ext in ('xlsx','xls','md','csv','txt') then 'light' else 'heavy' end from kb.files where id=$1
        on conflict (file_id, kind) where state in ('queued', 'running') do nothing
        returning id`, [fileId, runId, kind, delayMs, maxAttempts, batchId])
     return r.rows[0] ? r.rows[0].id : null

@@ -258,6 +258,29 @@ export default {
   nodeNote: {
     title: 'Ghi chú'
   },
+  editConflict: {
+    title: 'Xung đột cộng tác',
+    message: 'Nội dung trên máy chủ đã thay đổi. Bản sửa của bạn chưa được tự động áp dụng.',
+    myDraft: 'Nội dung chưa lưu của tôi',
+    copyDraft: 'Sao chép nội dung của tôi',
+    copied: 'Đã sao chép',
+    viewLatest: 'Xem nội dung mới nhất trên máy chủ',
+    hideLatest: 'Ẩn nội dung máy chủ',
+    latest: 'Nội dung mới nhất trên máy chủ',
+    latestUnavailable: 'Hiện không có nội dung máy chủ để đọc.',
+    savedLocally: 'Đã lưu trên thiết bị này. Bạn có thể tìm trong danh sách bản nháp sau khi tải lại.',
+    storageFailed: 'Không thể lưu bản nháp cục bộ. Hãy sao chép nội dung; trình chỉnh sửa sẽ vẫn mở.',
+    inbox: 'Bản nháp chưa lưu',
+    inboxTitle: 'Bản nháp xung đột cộng tác',
+    empty: 'Sơ đồ này không có bản nháp xung đột chưa lưu.',
+    node: 'Nút',
+    discard: 'Xóa bản nháp',
+    discardConfirm: 'Xóa nội dung chưa lưu này? Không thể hoàn tác.',
+    closeBlocked: 'Hãy lưu thành công hoặc chủ động xóa nội dung chưa lưu trước.',
+    partial: 'Một số nút đã được lưu. Bản nháp này hiện chỉ áp dụng cho các nút bị xung đột.',
+    precondition: 'Thiếu điều kiện phiên bản cộng tác. Hãy tải lại hoặc kết nối lại trước khi sửa.',
+    saveFailed: 'Lưu thất bại. Nội dung vẫn còn trong trình chỉnh sửa.'
+  },
   nodeTag: {
     title: 'Thẻ',
     addTip: 'Nhấn Enter để thêm'

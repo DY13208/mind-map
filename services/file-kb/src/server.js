@@ -145,6 +145,7 @@ async function main() {
   let pool = null
   let query = async () => { throw Object.assign(new Error('db disabled'), { code: 'KB_DISABLED' }) }
   if (config.enabled) {
+    await require('./prepare').cleanupPrepared()
     const { createPool } = require('./db')
     pool = createPool(config.db)
     query = (text, params) => pool.query(text, params)

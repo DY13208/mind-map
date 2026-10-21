@@ -3,9 +3,10 @@
     class="nodeHyperlinkDialog"
     :title="$t('nodeHyperlink.title')"
     :visible.sync="dialogVisible"
+    :close-on-click-modal="false"
+    :before-close="beforeDialogClose"
     width="520px"
     top="15vh"
-    :close-on-click-modal="false"
     @opened="focusLink"
     @closed="resetTargets"
   >
@@ -47,13 +48,29 @@
       </div>
       <p class="fieldHint openHint">{{ $t('nodeHyperlink.openHint') }}</p>
     </form>
+    <div v-for="entry in conflictEntries" :key="entry.id" class="conflictEntry">
+      <p v-if="partialSave">{{ $t('editConflict.partial') }} · {{ entry.uid }}</p>
+      <ConflictDraftPanel
+        :draft="entry.session"
+        :latest="entry.latestSnapshot"
+        :persisted="entry.persisted"
+        :storage-error="entry.storageError"
+        @show-latest="refreshLatest(entry)"
+      >
+        <el-button slot="discard" type="text" size="mini" @click="discardConflicts">
+          {{ $t('editConflict.discard') }}
+        </el-button>
+      </ConflictDraftPanel>
+    </div>
+    <p v-if="saveError" class="saveError" role="alert">{{ saveError }}</p>
     <div slot="footer" class="linkFooter">
-      <el-button v-if="hasExistingLink" type="text" class="removeLink" @click="removeLink">
+      <el-button v-if="hasExistingLink && !conflictEntries.length" type="text" class="removeLink" :disabled="saving" @click="removeLink">
         {{ $t('nodeHyperlink.remove') }}
       </el-button>
       <div class="footerActions">
-        <el-button size="small" round @click="cancel">{{ $t('dialog.cancel') }}</el-button>
-        <el-button size="small" round type="primary" :disabled="!link.trim()" @click="confirm">
+        <el-button v-if="conflictEntries.length" size="small" round type="danger" plain @click="discardConflicts">{{ $t('editConflict.discard') }}</el-button>
+        <el-button v-else size="small" round :disabled="saving" @click="cancel">{{ $t('dialog.cancel') }}</el-button>
+        <el-button size="small" round type="primary" :loading="saving" :disabled="saving || conflictEntries.length > 0 || !link.trim()" @click="confirm">
           {{ $t('dialog.confirm') }}
         </el-button>
       </div>
@@ -62,15 +79,36 @@
 </template>
 
 <script>
+import ConflictDraftPanel from './ConflictDraftPanel.vue'
+import {
+  currentEditPrincipal,
+  discardEditSession,
+  getEditCooperate,
+  getLiveNode,
+  isCollaborativeRoom,
+  isEditConflictError,
+  persistConflictSessionDraft,
+  persistEditConflict
+} from '@/utils/conflictEdit'
+import { conflictDraftKey, removeConflictDraft } from '@/utils/conflictDraftStore'
+import { roomFromLocation } from '@/utils/roomLocation'
+
 // Keep draft fields and target nodes stable until the dialog is saved or cancelled.
 export default {
+  components: { ConflictDraftPanel },
   data() {
     return {
       dialogVisible: false,
       link: '',
       linkTitle: '',
       activeNodes: [],
-      targetNodes: [],
+      targetUids: [],
+      mindMap: null,
+      sessions: [],
+      conflictEntries: [],
+      saving: false,
+      saveError: '',
+      partialSave: false,
       hasExistingLink: false,
       error: ''
     }
@@ -91,6 +129,14 @@ export default {
   beforeDestroy() {
     this.$bus.$off('node_active', this.handleNodeActive)
     this.$bus.$off('showNodeLink', this.handleShowNodeLink)
+  },
+  watch: {
+    link(value) {
+      this.updateSessionDraft({ hyperlink: value })
+    },
+    linkTitle(value) {
+      this.updateSessionDraft({ hyperlinkTitle: value })
+    }
   },
   methods: {
     handleNodeActive(...args) {
@@ -125,20 +171,65 @@ export default {
     },
     handleShowNodeLink(node) {
       if (this.dialogVisible) return
-      this.targetNodes = node && typeof node.getData === 'function' ? [node] : [...this.activeNodes]
-      if (!this.targetNodes.length) return
-      const first = this.targetNodes[0]
-      this.link = first.getData('hyperlink') || ''
-      this.linkTitle = first.getData('hyperlinkTitle') || ''
-      this.hasExistingLink = this.targetNodes.some(target => !!target.getData('hyperlink'))
+      const targets = node && typeof node.getData === 'function' ? [node] : [...this.activeNodes]
+      const uids = [...new Set(targets.map(item => item && item.getData && item.getData('uid')).filter(Boolean))]
+      if (!uids.length) return
+      this.mindMap = (targets[0] && targets[0].mindMap) || this.mindMap
+      this.targetUids = uids.map(String)
+      const first = getLiveNode(this.mindMap, this.targetUids[0]) || targets[0]
+      const cooperate = getEditCooperate(this.mindMap)
+      const snapshot =
+        isCollaborativeRoom(this.$route) &&
+        cooperate &&
+        cooperate.getEditSessionSnapshot &&
+        cooperate.getEditSessionSnapshot(this.targetUids[0])
+      const data = (snapshot && snapshot.data) || (first && first.getData()) || {}
+      this.link = data.hyperlink || ''
+      this.linkTitle = data.hyperlinkTitle || ''
+      this.hasExistingLink = targets.some(target => !!target.getData('hyperlink'))
+      this.sessions = []
+      this.conflictEntries = []
+      this.partialSave = false
+      this.saving = false
+      this.saveError = ''
       this.error = ''
+      this.beginSessions()
       this.dialogVisible = true
+    },
+    beginSessions() {
+      if (!isCollaborativeRoom(this.$route)) return
+      const cooperate = getEditCooperate(this.mindMap)
+      if (!cooperate || typeof cooperate.beginEditSession !== 'function') {
+        this.saveError = this.$t('editConflict.precondition')
+        return
+      }
+      const opened = []
+      try {
+        this.targetUids.forEach(uid => {
+          const session = cooperate.beginEditSession({
+            uid,
+            fields: ['hyperlink', 'hyperlinkTitle'],
+            kind: 'hyperlink',
+            initialDraft: { hyperlink: this.link, hyperlinkTitle: this.linkTitle }
+          })
+          if (!session) throw new Error('编辑节点已不可用')
+          opened.push({ uid, id: session.id, session, conflict: false, persisted: false, storageError: '' })
+        })
+        this.sessions = opened
+      } catch (_) {
+        opened.forEach(entry => discardEditSession(cooperate, entry.id))
+        this.sessions = []
+        this.saveError = this.$t('editConflict.precondition')
+      }
     },
     focusLink() {
       this.$refs.linkInput.focus()
     },
     resetTargets() {
-      if (!this.dialogVisible) this.targetNodes = []
+      if (!this.dialogVisible) {
+        this.targetUids = []
+        this.sessions = []
+      }
     },
     onInputKeydown(event) {
       if (event.key === 'Escape') return
@@ -148,19 +239,199 @@ export default {
         this.confirm()
       }
     },
-    cancel() {
+    async cancel() {
+      if (this.conflictEntries.length) return this.discardConflicts()
+      this.sessions.forEach(entry => discardEditSession(getEditCooperate(this.mindMap), entry.id))
+      this.sessions = []
       this.dialogVisible = false
     },
-    removeLink() {
-      if (!this.dialogVisible) return
-      this.targetNodes.forEach(node => node.setHyperlink('', ''))
-      this.cancel()
+    beforeDialogClose(done) {
+      this.requestClose(done)
     },
-    confirm() {
-      if (!this.dialogVisible || !this.validateLink()) return
-      const link = this.normalizeLink(this.link)
-      this.targetNodes.forEach(node => node.setHyperlink(link, this.linkTitle.trim()))
-      this.cancel()
+    requestClose(done) {
+      if (this.conflictEntries.length) {
+        this.$message.warning(this.$t('editConflict.closeBlocked'))
+        return
+      }
+      if (this.saving) {
+        this.$message.warning(this.$t('editConflict.saveFailed'))
+        return
+      }
+      this.sessions.forEach(entry => discardEditSession(getEditCooperate(this.mindMap), entry.id))
+      this.sessions = []
+      if (done) done()
+      else this.dialogVisible = false
+    },
+    updateSessionDraft(patch) {
+      const cooperate = getEditCooperate(this.mindMap)
+      this.sessions.forEach(entry => {
+        if (!cooperate || typeof cooperate.updateEditSessionDraft !== 'function') return
+        try {
+          entry.session = cooperate.updateEditSessionDraft(entry.id, patch) || entry.session
+        } catch (_) {
+          // Keep the visible editor draft if the session manager is unavailable.
+        }
+        if (entry.conflict) this.persistConflictEntry(entry)
+      })
+    },
+    async removeLink() {
+      await this.saveLink('', '')
+    },
+    async confirm() {
+      if (!this.dialogVisible || this.saving || this.conflictEntries.length || !this.validateLink()) return
+      await this.saveLink(this.normalizeLink(this.link), this.linkTitle.trim())
+    },
+    async saveLink(link, linkTitle) {
+      this.saveError = ''
+      const patch = { hyperlink: link, hyperlinkTitle: linkTitle }
+      if (isCollaborativeRoom(this.$route)) {
+        const cooperate = getEditCooperate(this.mindMap)
+        if (!this.sessions.length || !cooperate || typeof cooperate.commitEditSession !== 'function') {
+          this.saveError = this.$t('editConflict.precondition')
+          return
+        }
+        this.saving = true
+        try {
+          const results = await Promise.all(this.sessions.map(async entry => {
+            if (cooperate.updateEditSessionDraft) {
+              entry.session = cooperate.updateEditSessionDraft(entry.id, patch) || entry.session
+            }
+            try {
+              await cooperate.commitEditSession(entry.id, patch)
+              if (cooperate.resolveEditSession) cooperate.resolveEditSession(entry.id)
+              return { entry, ok: true }
+            } catch (error) {
+              if (isEditConflictError(error)) {
+                entry.conflict = true
+                try {
+                  const retained = await persistEditConflict({
+                    mindMap: this.mindMap,
+                    route: this.$route,
+                    sessionId: entry.id,
+                    error,
+                    fallbackSession: entry.session
+                  })
+                  const currentSession = cooperate.getEditSession(entry.id) || retained.session
+                  entry.session = currentSession
+                  entry.latestSnapshot = retained.latestSnapshot
+                  entry.record = { key: retained.key, sessionId: entry.id }
+                  entry.persisted = retained.saved && currentSession.draftRevision === retained.revision
+                  entry.storageError = ''
+                  if (entry.persisted) this.$bus.$emit('conflict_draft_saved')
+                } catch (storageError) {
+                  entry.session = cooperate.getEditSession(entry.id) || entry.session
+                  entry.latestSnapshot = cooperate.getEditSessionSnapshot
+                    ? cooperate.getEditSessionSnapshot(entry.uid) || entry.latestSnapshot
+                    : entry.latestSnapshot
+                  entry.persisted = false
+                  entry.storageError = storageError.message || 'draft storage failed'
+                }
+              } else {
+                entry.saveError = error
+              }
+              return { entry, ok: false, error }
+            }
+          }))
+          const failed = results.filter(result => !result.ok).map(result => result.entry)
+          if (!failed.length) {
+            this.sessions = []
+            this.dialogVisible = false
+            return
+          }
+          this.sessions = failed
+          this.targetUids = failed.map(entry => entry.uid)
+          this.conflictEntries = failed.filter(entry => entry.conflict)
+          this.partialSave = results.some(result => result.ok) && this.conflictEntries.length > 0
+          if (!this.conflictEntries.length) this.saveError = this.$t('editConflict.saveFailed')
+        } finally {
+          this.saving = false
+        }
+        return
+      }
+
+      this.saving = true
+      try {
+        const nodes = this.targetUids.map(uid => getLiveNode(this.mindMap, uid))
+        if (nodes.some(node => !node || typeof node.setHyperlink !== 'function')) {
+          this.saveError = this.$t('editConflict.saveFailed')
+          return
+        }
+        nodes.forEach(node => node.setHyperlink(link, linkTitle))
+        this.dialogVisible = false
+      } catch (_) {
+        this.saveError = this.$t('editConflict.saveFailed')
+      } finally {
+        this.saving = false
+      }
+    },
+    async persistConflictEntry(entry) {
+      const expectedRevision = Number((entry.session && entry.session.draftRevision) || 0)
+      const cooperate = getEditCooperate(this.mindMap)
+      try {
+        const result = await persistConflictSessionDraft({
+          mindMap: this.mindMap,
+          route: this.$route,
+          sessionId: entry.id,
+          latestSnapshot: entry.latestSnapshot,
+          error: entry.session && entry.session.error
+        })
+        const currentSession = cooperate && cooperate.getEditSession
+          ? cooperate.getEditSession(entry.id)
+          : null
+        if (currentSession && currentSession.draftRevision !== expectedRevision) return
+        entry.session = currentSession || result.session
+        entry.latestSnapshot = result.latestSnapshot || entry.latestSnapshot
+        if (result.saved && result.revision === expectedRevision) {
+          entry.persisted = true
+          entry.storageError = ''
+        }
+      } catch (error) {
+        const currentSession = cooperate && cooperate.getEditSession
+          ? cooperate.getEditSession(entry.id)
+          : null
+        if (currentSession && currentSession.draftRevision !== expectedRevision) return
+        entry.persisted = false
+        entry.storageError = error.message || 'draft storage failed'
+      }
+    },
+    refreshLatest(entry) {
+      const cooperate = getEditCooperate(this.mindMap)
+      if (cooperate && typeof cooperate.getEditSessionSnapshot === 'function') {
+        entry.latestSnapshot = cooperate.getEditSessionSnapshot(entry.uid) || entry.latestSnapshot
+      }
+    },
+    async discardConflicts() {
+      try {
+        await this.$confirm(
+          this.$t('editConflict.discardConfirm'),
+          this.$t('editConflict.title'),
+          { type: 'warning' }
+        )
+      } catch (_) {
+        return
+      }
+      const cooperate = getEditCooperate(this.mindMap)
+      try {
+        await Promise.all(this.conflictEntries.map(async entry => {
+          const key = (entry.record && entry.record.key) || conflictDraftKey({
+            principal: currentEditPrincipal(),
+            room: roomFromLocation(this.$route),
+            uid: entry.uid,
+            group: 'hyperlink',
+            sessionId: entry.id
+          })
+          await removeConflictDraft({ key, sessionId: entry.id })
+          discardEditSession(cooperate, entry.id)
+        }))
+        this.sessions.forEach(entry => {
+          if (!entry.conflict) discardEditSession(cooperate, entry.id)
+        })
+        this.sessions = []
+        this.conflictEntries = []
+        this.dialogVisible = false
+      } catch (_) {
+        this.$message.error(this.$t('editConflict.storageFailed'))
+      }
     }
   }
 }

@@ -14,6 +14,15 @@
         <span class="kb-dot" :class="healthClass" />{{ healthText }}
       </div>
     </header>
+    <KbServiceBanner
+      :health="health" :error="healthError" :loading="healthLoading"
+      :failed-jobs="failedJobs" :failed-total="failedTotal"
+      @recheck="recheck" @show-failures="failuresOpen = true"
+    />
+    <KbFailedJobsDialog
+      :visible="failuresOpen" :items="failedJobs" :total="failedTotal"
+      @close="failuresOpen = false" @changed="onFailuresChanged" @open-file="openFailedFile"
+    />
     <form v-if="isMobileViewport" class="kb-hero-search" role="search" @submit.prevent="searchKnowledge">
       <i class="el-icon-search" aria-hidden="true" />
       <input v-model.trim="mobileQuery" type="search" aria-label="搜索知识库" placeholder="搜索文档、知识点或关键词…" enterkeyhint="search" />
@@ -26,7 +35,7 @@
       </el-tab-pane>
     </el-tabs>
     <keep-alive>
-      <component :is="tabComponent" :key="tab" :health="health" @navigate="navigate" />
+      <component :is="tabComponent" ref="tab" :key="tab" :health="health" @navigate="navigate" />
     </keep-alive>
   </div>
 </template>
@@ -36,6 +45,7 @@ import { errorPresentation } from '../services/kbErrors'
 import { pendingUploads } from '../services/kbSignals'
 import { KB_TABS } from '../constants/status'
 import KbServiceBanner from '../components/KbServiceBanner.vue'
+import KbFailedJobsDialog from '../components/KbFailedJobsDialog.vue'
 import KbFilesTab from './KbFilesTab.vue'
 import KbParseDetailTab from './KbParseDetailTab.vue'
 import KbStructuredTab from './KbStructuredTab.vue'
@@ -46,9 +56,11 @@ import AccessNotificationTrigger from '@/components/AccessNotificationTrigger.vu
 const COMPONENTS = { files: 'KbFilesTab', parse: 'KbParseDetailTab', data: 'KbStructuredTab', search: 'KbSearchTab', mcp: 'KbMcpTab' }
 export default {
   name: 'KbIndexPage',
+  components: { KbServiceBanner, KbFailedJobsDialog, KbFilesTab, KbParseDetailTab, KbStructuredTab, KbSearchTab, KbMcpTab },
   mixins: [mobileViewport],
   components: { AccessNotificationTrigger, KbServiceBanner, KbFilesTab, KbParseDetailTab, KbStructuredTab, KbSearchTab, KbMcpTab },
   data() {
+    return { tabs: KB_TABS, health: null, healthError: null, healthLoading: false, failedJobs: [], failedTotal: 0, failuresOpen: false }
     return { tabs: KB_TABS, health: null, healthError: null, healthLoading: false, mobileQuery: '', mobileLabels: { files: '全部', parse: '文档', data: '数据', search: '检索', mcp: '接入' } }
   },
   computed: {
@@ -74,6 +86,7 @@ export default {
   },
   created() {
     this.loadHealth()
+    this.loadFailures()
   },
   // 离开文件知识库时，本地上传队列会被销毁（进行中的请求中止）；已提交到后端的文件不受影响
   beforeRouteLeave(to, from, next) {
@@ -103,6 +116,39 @@ export default {
       } finally {
         this.healthLoading = false
       }
+    },
+    async loadFailures() {
+      try {
+        const { items, total } = await kbApi.listFailedJobs()
+        this.failedJobs = items
+        this.failedTotal = total != null ? total : items.length
+      } catch (_) {
+        // 旧后端没有该接口，或服务不可用（由服务横幅提示）：不显示任务失败
+        this.failedJobs = []
+        this.failedTotal = 0
+      }
+    },
+    async recheck() {
+      await Promise.all([this.loadHealth(), this.loadFailures()])
+      if (this.healthError) this.$message.error(`检测完成：${errorPresentation(this.healthError).title}`)
+      else {
+        const h = this.health || {}
+        const down = []
+        if (h.db && h.db.ok === false) down.push('数据库')
+        if (h.docling && h.docling.ok === false) down.push('Docling 解析服务')
+        if (down.length) this.$message.warning(`检测完成：${down.join('、')}仍不可用`)
+        else this.$message.success('检测完成：服务已恢复正常')
+      }
+    },
+    async onFailuresChanged() {
+      await this.loadFailures()
+      if (!this.failedTotal) this.failuresOpen = false
+      const tab = this.$refs.tab
+      if (tab && typeof tab.reload === 'function') tab.reload()
+    },
+    openFailedFile(job) {
+      this.failuresOpen = false
+      this.navigate({ tab: 'parse', query: { file: job.fileId } })
     },
     onTab(name) {
       if (name === this.tab) return

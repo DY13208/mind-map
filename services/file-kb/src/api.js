@@ -332,6 +332,42 @@ function createApi({ pool, storage, queue, config, limiter, geekcloud = null }) 
     send(res, 202, out)
   }
 
+  // Failures the user can act on: the latest job of a live file they can see.
+  // Jobs superseded by a newer run and files in the recycle bin are excluded.
+  async function listFailedJobs(res, user, url) {
+    const params = []
+    const visible = ownerClause(user, 'f', params)
+    params.push(user.id)
+    const roleOf = `kb.effective_role('file', f.id, $${params.length})`
+    params.push(Math.min(Math.max(Number(url.searchParams.get('limit')) || 50, 1), 100))
+    const r = await pool.query(
+      `select j.id, j.file_id, j.kind, j.attempts, j.max_attempts, j.last_error, j.updated_at,
+              f.name, f.ext, f.status, ${roleOf} as role, count(*) over ()::int as total
+       from kb.jobs j join kb.files f on f.id = j.file_id
+       where j.state = 'failed' and f.deleted_at is null and ${visible}
+         and not exists (select 1 from kb.jobs n where n.file_id = j.file_id and n.id > j.id)
+       order by j.updated_at desc limit $${params.length}`, params)
+    const items = r.rows.map(j => ({
+      id: String(j.id), fileId: j.file_id, fileName: j.name, ext: j.ext, fileStatus: j.status,
+      kind: j.kind, attempts: j.attempts, maxAttempts: j.max_attempts, lastError: j.last_error,
+      failedAt: j.updated_at, canRetry: access.rank(j.role) >= access.rank('editor')
+    }))
+    send(res, 200, { items, total: r.rows[0] ? r.rows[0].total : 0 })
+  }
+
+  async function dismissJob(res, user, id) {
+    if (!/^\d{1,18}$/.test(id)) throw new HttpError(400, 'bad_job_id')
+    await withTx(pool, async c => {
+      const j = (await c.query('select id, file_id, state from kb.jobs where id = $1 for update', [id])).rows[0]
+      if (!j) throw new HttpError(404, 'missing')
+      await getFile(c, user, j.file_id, 'editor')
+      if (j.state !== 'failed') throw new HttpError(409, 'job_not_failed')
+      await c.query(`update kb.jobs set state = 'cancelled', updated_at = now() where id = $1`, [j.id])
+      await c.query(`insert into kb.audit (actor, action, target, meta) values ($1,'job.dismiss',$2,$3)`, [user.id, j.file_id, { jobId: String(j.id) }])
+    })
+    send(res, 200, { id: String(id), dismissed: true })
+  }
+
   function parseStructureBody(body) {
     const list = Array.isArray(body && body.sheets) ? body.sheets : []
     if (!list.length || list.length>100) throw new HttpError(400, 'bad_layout')
@@ -575,6 +611,8 @@ function createApi({ pool, storage, queue, config, limiter, geekcloud = null }) 
     if (pathname === '/api/kb/fields' && method === 'GET') return listFields(res, user, url)
     if (pathname === '/api/kb/records' && method === 'GET') return listRecords(res, user, url)
     if ((m = /^\/api\/kb\/files\/([^/]+)\/reparse$/.exec(pathname)) && method === 'POST') return reparse(res, user, m[1])
+    if (pathname === '/api/kb/jobs/failed' && method === 'GET') return listFailedJobs(res, user, url)
+    if ((m = /^\/api\/kb\/jobs\/([^/]+)\/dismiss$/.exec(pathname)) && method === 'POST') return dismissJob(res, user, m[1])
     if ((m = /^\/api\/kb\/files\/([^/]+)\/layout$/.exec(pathname)) && method === 'GET') return fileLayout(res, user, m[1], url)
     if ((m = /^\/api\/kb\/files\/([^/]+)\/structure$/.exec(pathname)) && method === 'POST') return restructure(req, res, user, m[1])
     if (pathname === '/api/kb/folders' && method === 'POST') return createFolder(req, res, user)

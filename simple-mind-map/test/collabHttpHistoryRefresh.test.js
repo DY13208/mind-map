@@ -27,7 +27,7 @@ const methods = vm.runInNewContext(
     ${[
       methodSource('  collectVisibleUids() {', '  async fetchHttpNodes(uids) {'),
       methodSource('  async fetchHttpNodes(uids) {', '  acknowledgeLocalVersion(version, extra = {}) {'),
-      methodSource('  requestRemoteApplyRender(uids, callback, source = \'remote apply\') {', '  applyV2PayloadInsert(payload = {}) {'),
+      methodSource('  requestRemoteApplyRender(uids, callback, source = \'remote apply\') {', '  projectCanonicalChildOrder(parentUid) {'),
       methodSource('  isHttpSettling() {', '  httpRecoverBlocked() {'),
       methodSource('  httpRecoverBlocked() {', '  async waitUntilHttpRecoverIdle(budgetMs) {'),
       methodSource('  async waitUntilHttpRecoverIdle(budgetMs) {', '  waitForHttpRecoverTurn() {'),

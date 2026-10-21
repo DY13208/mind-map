@@ -15,6 +15,8 @@ const CODE_MESSAGES = {
   UNKNOWN_TEAM: '团队不存在',
   FOLDER_NOT_EMPTY: '文件夹不为空',
   job_in_progress: '该文件已有进行中的解析任务',
+  job_not_failed: '该任务已不是失败状态，请刷新',
+  bad_job_id: '任务编号无效',
   INVALID_NAME: '名称无效',
   bad_ttl: '有效期需在 1 到 366 天之间',
   bad_scope: '令牌权限无效',
@@ -123,6 +125,22 @@ export function errorPresentation(err) {
   const known = err && PRESENTATION[err.kind]
   if (known) return { title: known.title, description: (err && err.message) || known.description }
   return { title: '加载失败', description: (err && err.message) || '请求失败，请重试' }
+}
+
+// 后台任务 last_error（英文、偏技术）→ 给用户看的原因；原文另行展示
+const JOB_ERROR_RULES = [
+  [/exceeded \d+ms|timed? ?out|timeout/i, '解析超时，文件可能过大或页数过多'],
+  [/docling task failed/i, '解析服务无法处理该文件，可能已损坏、加密或格式不受支持'],
+  [/no json_content|result missing/i, '解析服务没有返回内容'],
+  [/HTTP 5\d\d|ECONNREFUSED|ECONNRESET|connect|breaker/i, '解析服务暂时不可用'],
+  [/lease expired/i, '处理中多次中断，可能是内存不足或服务重启'],
+  [/object_missing|ENOENT/i, '原始文件已丢失，请重新上传'],
+  [/cancel/i, '任务已被取消']
+]
+export function describeJobError(lastError) {
+  const text = String(lastError || '')
+  const hit = JOB_ERROR_RULES.find(([re]) => re.test(text))
+  return hit ? hit[1] : '处理失败，原因见错误详情'
 }
 
 export function isNotReady(err) {

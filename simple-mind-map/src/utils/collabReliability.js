@@ -14,6 +14,13 @@ const TERMINAL_ERROR_SET = {
   UNSUPPORTED_OPERATION: true,
   BAD_OP_ID: true,
   INVALID_PAYLOAD: true,
+  PRECONDITION_REQUIRED: true,
+  PRECONDITION_INVALID: true,
+  PRECONDITION_UNSUPPORTED: true,
+  REPLACE_CONFLICT: true,
+  TARGET_DELETED: true,
+  NODE_DELETED: true,
+  PARENT_DELETED: true,
   ROOT_DELETE: true,
   CYCLE_REJECTED: true
 }
@@ -40,6 +47,18 @@ function isRetryableError(code) {
   const raw = String(code || '')
   if (isTerminalError(raw)) return false
   return !!RETRYABLE_ERROR_SET[raw]
+}
+
+// Protected content can be the only surviving copy of an offline/old-client
+// draft. A gone target must quarantine it rather than erase the outbox row.
+function hasProtectedContentMutation(op) {
+  const payload = (op && op.payload) || {}
+  const type = String((op && op.type) || '')
+  if ((payload.ops || []).some(hasProtectedContentMutation)) return true
+  if (type !== 'node.update' && type !== 'node.move') return false
+  const patch = payload.patch || payload.data || payload
+  return ['text', 'richText', 'note', 'hyperlink', 'hyperlinkTitle']
+    .some(key => Object.prototype.hasOwnProperty.call(patch, key))
 }
 
 function collectOpUids(op, includeParents = true) {
@@ -139,6 +158,7 @@ const api = {
   TERMINAL_ERROR_SET,
   RETRYABLE_ERROR_SET,
   isTerminalError,
+  hasProtectedContentMutation,
   isRetryableError,
   collectOpUids,
   dependsOnBlockedOp,

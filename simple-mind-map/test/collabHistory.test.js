@@ -2,6 +2,7 @@ const assert = require('assert')
 const { randomUUID } = require('crypto')
 const { applyDirect } = require('../bin/collabV2/directApplier')
 const { createMemoryStore } = require('../bin/collabV2/directStore')
+const { protectedGroupsForPatch, patchFor } = require('../bin/nodeUpdateExpected')
 const { applyMapReplace } = require('../bin/collabV2/slowPath')
 const {
   createHistoryEngine,
@@ -44,6 +45,77 @@ function engineWith(config) {
   return { store, engine }
 }
 
+function isMoveCommand(type, payload = {}) {
+  return ['node.move', 'node.reorder'].includes(type) || (type === 'node.update' && (
+    payload.parentUid !== undefined || payload.parent_uid !== undefined ||
+    payload.parent !== undefined || payload.index !== undefined ||
+    payload.position !== undefined || payload.order !== undefined
+  ))
+}
+
+async function withCommitExpected(mem, raw) {
+  if (raw && raw.type === 'node.batch' && raw.payload && Array.isArray(raw.payload.ops)) {
+    const ops = []
+    for (const op of raw.payload.ops) ops.push(await withCommitExpected(mem, op))
+    return { ...raw, payload: { ...raw.payload, ops } }
+  }
+
+  const payload = { ...(raw && raw.payload || {}) }
+  const uid = String(payload.uid || '')
+  const row = uid ? await mem.getLive(uid) : null
+  if (!row) return raw
+
+  const groups = protectedGroupsForPatch(patchFor(payload))
+  const moving = isMoveCommand(raw.type, payload)
+  const deleting = raw.type === 'node.delete'
+  if (!groups.length && !moving && !deleting) return raw
+
+  const expected = { ...(payload.expected || {}) }
+  if (expected.uid == null) expected.uid = uid
+  for (const group of groups) {
+    const key = `__fv.${group}`
+    if (!Object.prototype.hasOwnProperty.call(expected, key)) {
+      expected[key] = Number(row.data && row.data.__fv && row.data.__fv[group]) || 0
+    }
+  }
+
+  if (moving) {
+    if (!Object.prototype.hasOwnProperty.call(expected, 'parent_uid')) expected.parent_uid = row.parent_uid
+    if (!Object.prototype.hasOwnProperty.call(expected, 'position')) expected.position = row.position || ''
+    const destinationUid = String(
+      payload.parentUid !== undefined ? payload.parentUid
+        : payload.parent_uid !== undefined ? payload.parent_uid
+          : payload.parent !== undefined ? payload.parent
+            : row.parent_uid || ''
+    )
+    const target = destinationUid ? await mem.getLive(destinationUid) : null
+    if (target) {
+      if (!Object.prototype.hasOwnProperty.call(expected, 'target_uid')) expected.target_uid = destinationUid
+      if (!Object.prototype.hasOwnProperty.call(expected, 'target_parent_uid')) expected.target_parent_uid = target.parent_uid
+      if (!Object.prototype.hasOwnProperty.call(expected, 'target_position')) expected.target_position = target.position || ''
+      if (payload.index !== undefined && !expected.anchor_uid && expected.target_empty !== true) {
+        const siblings = (await mem.listChildren(destinationUid)).filter(child => child.uid !== uid)
+        if (!siblings.length) {
+          expected.target_empty = true
+        } else {
+          const index = Math.max(0, Math.min(Number(payload.index) || 0, siblings.length))
+          const anchor = index >= siblings.length ? siblings[siblings.length - 1] : siblings[index]
+          expected.anchor_uid = anchor.uid
+          expected.anchor_parent_uid = destinationUid
+          expected.anchor_position = anchor.position || ''
+          expected.anchor_side = index >= siblings.length ? 'after' : 'before'
+        }
+      }
+    }
+  }
+
+  if (deleting && !Object.prototype.hasOwnProperty.call(expected, 'subtree_token')) {
+    expected.subtree_token = await mem.subtreeToken(uid)
+  }
+  payload.expected = expected
+  return { ...raw, payload }
+}
+
 async function commit(engine, raw) {
   const store = engine.store
   const live = await store.getLiveState(ROOM)
@@ -58,7 +130,8 @@ async function commit(engine, raw) {
     event = replaced.event
     mem.setMeta(live.metadata)
   } else {
-    const applied = await applyDirect(mem, raw, { version: nextRev })
+    const command = await withCommitExpected(mem, raw)
+    const applied = await applyDirect(mem, command, { version: nextRev })
     nodes = mem.graph
     event = applied.event
   }

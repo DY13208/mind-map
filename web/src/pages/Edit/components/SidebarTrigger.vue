@@ -1,5 +1,5 @@
 <template>
-  <div class="sidebarTriggerRoot">
+  <div class="sidebarTriggerRoot" :class="{ touchEditorRail: isTouchEditor }">
   <div
     class="sidebarTriggerContainer "
     @click.stop
@@ -42,6 +42,12 @@
         "
         :class="{ active: activeSidebar === item.value }"
         :title="item.name"
+        role="button"
+        tabindex="0"
+        :aria-label="item.name"
+        :aria-pressed="String(activeSidebar === item.value)"
+        @keydown.enter="trigger(item)"
+        @keydown.space.prevent="trigger(item)"
         @click="trigger(item)"
       >
         <div class="triggerIcon iconfont" :class="[item.icon]"></div>
@@ -83,6 +89,7 @@ import { mapState, mapMutations } from 'vuex'
 import { sidebarTriggerList } from '@/config'
 import { getCurrentUser, logoutAndRedirect } from '@/utils/auth'
 import AccessNotificationTrigger from '@/components/AccessNotificationTrigger.vue'
+import editorViewport from '@/utils/editorViewport'
 
 const RIGHT_COLLAPSED_KEY = 'mm-right-sidebar-collapsed'
 const readRightCollapsed = () => {
@@ -94,6 +101,7 @@ const readRightCollapsed = () => {
 }
 
 export default {
+  mixins: [editorViewport],
   components: { AccessNotificationTrigger },
   data() {
     return {

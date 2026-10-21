@@ -15,6 +15,14 @@
 
 根节点、循环关系、已删除目标、无权限及未确认的 SOP 修改明确拒绝。`index` 省略时沿用现有移动排序规则。
 
+## 并发前置条件
+
+- 修改已有节点的 `text`、富文本内容、`note`、`hyperlink` 或 `hyperlinkTitle` 时，`expected` 必须含 `uid` 和每个被改字段组的 `__fv.text`、`__fv.note`、`__fv.hyperlink`。旧节点缺少字段版本时按 `0` 处理；同一批多次操作按批次开始时的不可变基线校验，批内成功的前序修改不会被误判为外部冲突。
+- 移动/重排已有节点必须提供 `expected.uid`、原 `parent_uid` 和原 `position`。当请求指定零基 `index` 时，还必须提供 `expected.anchor_uid`、`anchor_parent_uid`、`anchor_position` 与 `anchor_side`（`before` 或 `after`），或者 `expected.target_empty=true`。锚点方式会在事务锁内重新找到锚点并计算相对位置；锚点在本批前序操作中被删除或移动时返回 `REPLACE_CONFLICT`。空目标方式要求锁内目标父节点除源节点外没有子节点，否则返回 `REPLACE_CONFLICT`。省略 `index` 表示追加到末尾。可选 `target_uid`、`target_parent_uid`、`target_position` 用于校验目标父节点未变化。
+- 删除必须提供 `expected.uid` 与 `expected.subtree_token`。先用 `query_nodes(scope="self", selector={type:"uid", value:"..."}, include_subtree_token=true)` 读取节点，返回值包含其完整子树摘要；该摘要是对 `(uid,parent_uid,position,node_version)` 排序后的行元组计算的 SHA-256。子树新增、移动、更新或删除都会改变摘要。数据库及写入路径无法计算摘要时明确拒绝，不会退回无保护删除。
+- 缺少必要校验信息返回 `PRECONDITION_REQUIRED`（HTTP 428）；基线已变化返回 `REPLACE_CONFLICT`（HTTP 409）。`apply_nodes` 将这些请求级业务错误作为固定的逐项失败回执保存；相同操作 ID 重放优先返回原回执，不会用新基线重试。
+- HTTP、MCP Direct、V2 Socket 与 legacy 兼容写入使用同一前置条件语义。兼容路径无法取得完整删除子树索引时返回 `PRECONDITION_UNSUPPORTED`，不会跳过校验。undo/redo 使用现有操作冲突验证，其内部逆操作不要求外部 MCP CAS 字段。
+
 ## 批量部分成功
 
 - `apply_nodes` 最多 100 项。按输入顺序执行，允许独立项目部分成功；只提交成功项目的事件与逆操作。
@@ -35,7 +43,7 @@
 | `items[].result` | 成功项目的服务端结果，例如 UID 与位置 |
 | `items[].code` | 失败码；调用方据此核实，而不是忽略该项 |
 
-批次重复请求使用原 `operation_id` 返回首次已提交结果，不重新执行失败项。AI 应展示部分完成状态，核实后只补处理失败项，并为新意图生成新操作 ID。
+批次重复请求使用原 `operation_id` 返回首次已提交结果，不重新执行失败项。AI 应展示部分完成状态；遇到 `REPLACE_CONFLICT` 或 `PRECONDITION_REQUIRED` 必须报告并等待用户后续指示，不能自动读取新条件重写旧内容。其他失败核实后只补处理失败项，并为新意图生成新操作 ID。超过 100 项分批提交，禁止用循环单项调用代替已知批量意图。
 
 ## 重试、恢复与取消
 
@@ -50,6 +58,8 @@
 ## 协作与诊断
 
 服务端操作仍按连续版本传播，客户端应用成功才推进水位。批次仅回放服务端成功子事件，不回放包含失败项的原请求。远端连续事件只合并渲染，不丢弃同一 UID 上的多次操作。
+
+同一父节点下新增不同 UID 的子节点互不构成内容冲突；新增不校验或推进父节点的文字字段版本。浏览器自动打开新节点编辑时，首次服务端字段版本可能尚未返回：文字保存等待该节点的新增回执，只能从本客户端对应新增请求的成功回执中，一次性接受内容初值未变的初始化版本，并保留当前输入。既有新增通道若明确返回 `resetRichText=true`，只在原富文本提取的文字与回执纯文字完全一致时接受这次格式归一化；会话基线记录实际服务端值，输入草稿保持不变。它不能读取最新条件补写，不能采用其他请求、其他房间或较旧回执覆盖已知的新内容。自身保存的成功回执不向该保存会话报告“他人修改”；实际同 UID、同字段竞争仍按原条件拒绝并保留草稿。
 
 诊断为有界、按进程采样。`get_performance_diagnostics` 的 `after` 只用于后端，新增 `writer_after` 用于 MCP 写入进程；响应的 `mcpWriter` 包含该进程的队列及采样。采集时不得混用游标；重启或 `cursorResetRequired` 后重置游标。`retentionGap` 表示样本已被容量覆盖，不能将缺失样本计为零延迟或零错误。
 

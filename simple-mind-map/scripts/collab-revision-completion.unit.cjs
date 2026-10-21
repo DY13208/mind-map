@@ -29,7 +29,9 @@ function loadMethods() {
     method('  clearV2RevisionCompletions() {', '\n  async replayV2AckCompletion('),
     method('  async replayV2AckCompletion(completion, scope, context) {', '\n  // Must be called from the serialized V2 apply/reconcile task'),
     method('  async markV2RevisionComplete(version, scope = this.getV2RevisionScope(), completion = null, context = null) {', '\n  // On a successful local ACK'),
-    method('  reconcileAckedLocalOperation(result, capturedIntentEpochs, originalScope, type, payload) {', '\n  submitV2('),
+    method('  reconcileAckedLocalOperation(result, capturedIntentEpochs, originalScope, type, payload) {', '\n  acknowledgeLocalNodeCreation('),
+    method('  acknowledgeLocalNodeCreation(event, revision) {', '\n  submitV2('),
+    method('  editSessionOperationFingerprint(uid, patch, expected) {', '\n  updateEditSessionDraft('),
     method('  submitV2(type, payload) {', '\n  cancelV2RemoteApply()'),
     method('  cancelV2RemoteApply() {', '\n  isV2RemoteApplyScopeCurrent('),
     method('  isV2RemoteApplyScopeCurrent(context) {', '\n  isV2RemoteApplyCurrent('),
@@ -49,6 +51,7 @@ function loadMethods() {
     uidsFromPayload(type, payload = {}) { return payload.uid ? [payload.uid] : [] },
     payloadParentUid(payload = {}) { return payload.parentUid || payload.parent_uid || payload.parent || '' },
     applyCollabEvent(data) { return data },
+    transformTreeDataToObject() { return {} },
     collabNodeFeatures: {
       normalizeAppliedUpdatePayload,
       guardFeatureStructuralMutation(payload) { return { hit: [], payload } }
@@ -100,6 +103,9 @@ function createContext({ version = 1, data = { text: 'optimistic-v3', note: 'not
   }
   const context = {
     ...methods,
+    guardWritePayload(type, payload) { return payload },
+    observeGuardedIntentEvent() {},
+    expectedFieldVersions(uid) { return { uid, '__fv.text': 0, '__fv.note': 0 } },
     httpRoomKey: 'room-a',
     httpCollabMode: true,
     collabV2Adapter: adapter,
@@ -111,6 +117,7 @@ function createContext({ version = 1, data = { text: 'optimistic-v3', note: 'not
     localUndoStack: [],
     localRedoStack: [],
     pendingUids: new Set(),
+    _pendingEditSessionByFingerprint: new Map(),
     dirtySubtrees: new Map(),
     _authoritativeRevByUid: new Map(),
     mindMap: { _destroyed: false, renderer },

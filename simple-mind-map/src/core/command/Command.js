@@ -138,6 +138,11 @@ class Command {
       }
     }
     if (this.commands[name]) {
+      const cooperate = this.mindMap.cooperate
+      if (cooperate && typeof cooperate.interceptGuardedCommand === 'function') {
+        const guarded = cooperate.interceptGuardedCommand(name, args)
+        if (guarded !== undefined) return guarded
+      }
       const contentCommand = !['BACK', 'FORWARD', 'SET_NODE_ACTIVE', 'CLEAR_ACTIVE_NODE', 'SELECT_ALL', 'GO_TARGET_NODE', 'RETURN_CENTER'].includes(name) && !isPersonalViewCommand(name, args)
       const before = new Map()
       const collectBefore = value => {

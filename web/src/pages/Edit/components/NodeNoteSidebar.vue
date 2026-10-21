@@ -23,7 +23,8 @@ export default {
   data() {
     return {
       editor: null,
-      node: null
+      nodeUid: '',
+      renderedNote: ''
     }
   },
   computed: {
@@ -47,6 +48,7 @@ export default {
   created() {
     this.$bus.$on('node_active', this.onNodeActive)
     this.mindMap.on('node_note_click', this.onNodeNoteClick)
+    this.mindMap.on('data_change', this.onMapDataChange)
   },
   mounted() {
     this.initEditor()
@@ -54,6 +56,7 @@ export default {
   beforeDestroy() {
     this.$bus.$off('node_active', this.onNodeActive)
     this.mindMap.off('node_note_click', this.onNodeNoteClick)
+    this.mindMap.off('data_change', this.onMapDataChange)
   },
   methods: {
     ...mapMutations(['setActiveSidebar']),
@@ -64,7 +67,7 @@ export default {
       }
       const nodes = [...args[1]]
       if (nodes.length > 0) {
-        if (nodes[0] !== this.node) {
+        if (String(nodes[0].getData('uid')) !== this.nodeUid) {
           this.setActiveSidebar(null)
         }
       } else {
@@ -88,9 +91,26 @@ export default {
     },
 
     onNodeNoteClick(node) {
-      this.node = node
+      this.nodeUid = String(node.getData('uid') || '')
       this.setActiveSidebar('noteSidebar')
-      this.editor.setMarkdown(node.getData('note'))
+      this.renderNote(node.getData('note') || '')
+    },
+
+    onMapDataChange() {
+      if (this.activeSidebar !== 'noteSidebar' || !this.nodeUid || !this.mindMap.renderer) return
+      const node = this.mindMap.renderer.findNodeByUid(this.nodeUid)
+      if (!node) {
+        this.setActiveSidebar(null)
+        return
+      }
+      this.renderNote(node.getData('note') || '')
+    },
+
+    renderNote(note) {
+      const content = String(note || '')
+      if (content === this.renderedNote) return
+      this.renderedNote = content
+      this.editor.setMarkdown(content)
     }
   }
 }

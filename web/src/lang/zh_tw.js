@@ -275,6 +275,29 @@ export default {
   nodeNote: {
     title: '備註'
   },
+  editConflict: {
+    title: '協同修改衝突',
+    message: '伺服器內容已變更，本次修改沒有自動覆蓋。',
+    myDraft: '我的未儲存內容',
+    copyDraft: '複製我的內容',
+    copied: '已複製',
+    viewLatest: '查看伺服器最新內容',
+    hideLatest: '收起伺服器內容',
+    latest: '伺服器最新內容',
+    latestUnavailable: '目前沒有可讀取的伺服器內容',
+    savedLocally: '已保存在本機，重新整理後可從草稿入口找回。',
+    storageFailed: '本機草稿儲存失敗。請先複製內容，編輯框仍會保留。',
+    inbox: '未儲存草稿',
+    inboxTitle: '協同衝突草稿',
+    empty: '目前導圖沒有未儲存的衝突草稿。',
+    node: '節點',
+    discard: '丟棄草稿',
+    discardConfirm: '丟棄這份未儲存內容？此操作無法復原。',
+    closeBlocked: '請先成功儲存或明確丟棄未儲存內容。',
+    partial: '部分節點已儲存；目前草稿只保留在發生衝突的節點。',
+    precondition: '協同版本條件不完整，請重新整理或重新連線後再編輯。',
+    saveFailed: '儲存失敗，內容仍保留在編輯框中。'
+  },
   nodeTag: {
     title: '標籤',
     addTip: '請按 Enter 鍵新增'

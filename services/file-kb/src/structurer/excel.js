@@ -428,4 +428,9 @@ async function previewExcel(filePath, { maxRows = 12, maxCols = 80, fromRow = 1,
   return { sheets }
 }
 
-module.exports = { structureExcel, sheetNames, previewExcel }
+const { withPreparedExcel } = require('../prepare')
+module.exports = {
+  structureExcel: (filePath, options) => withPreparedExcel(filePath, prepared => structureExcel(prepared, options), options),
+  sheetNames: filePath => withPreparedExcel(filePath, sheetNames),
+  previewExcel: (filePath, options) => withPreparedExcel(filePath, prepared => previewExcel(prepared, options), options)
+}

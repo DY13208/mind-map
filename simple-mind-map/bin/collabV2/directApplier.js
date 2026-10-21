@@ -13,7 +13,13 @@ const { inspectSopChange, sopConfirmError } = require('../collabSopGuard')
 const { normalizeOperation, normalizeType, BATCH_MAX } = require('./protocol')
 const { collabTrace } = require('./trace')
 const { stripSearchHtml } = require('../roomNodes')
-const { assertExpectedNodeData } = require('../nodeUpdateExpected')
+const {
+  assertNodeWritePreconditions,
+  preflightNodeWritePreconditions,
+  PRECONDITION_REQUIRED,
+  PRECONDITION_INVALID,
+  PRECONDITION_UNSUPPORTED
+} = require('../nodeUpdateExpected')
 const { mergeMapMetadata, pickMetaPatch } = require('../mapMetadata')
 const { normalizeRestoreRows } = require('../nodeRestoreCodec')
 const {
@@ -286,6 +292,25 @@ async function applyMove(store, op, version, live) {
   const oldParent = live.parent_uid
   let index = payload.index
   let restoredStamp = null
+  const expected = payload.expected || payload.expectedValue || {}
+  if (index !== undefined && Object.prototype.hasOwnProperty.call(expected, 'anchor_uid')) {
+    const siblings = (await store.listChildren(parent.uid)).filter(item => item.uid !== uid)
+    const anchorIndex = siblings.findIndex(item => String(item.uid) === String(expected.anchor_uid))
+    const anchor = anchorIndex >= 0 ? siblings[anchorIndex] : null
+    if (
+      !anchor ||
+      String(anchor.position || '') !== String(expected.anchor_position || '')
+    ) {
+      throw commandError('移动锚点已在本批前序操作中删除或移动', 'REPLACE_CONFLICT', 409)
+    }
+    index = anchorIndex + (expected.anchor_side === 'after' ? 1 : 0)
+  } else if (index !== undefined && expected.target_empty === true) {
+    const siblings = (await store.listChildren(parent.uid)).filter(item => item.uid !== uid)
+    if (siblings.length) {
+      throw commandError('移动目标已不再为空', 'REPLACE_CONFLICT', 409)
+    }
+    index = 0
+  }
   // Move inverses store the original fractional ordering key, not an index.
   // Resolve it against the current siblings so undo/redo restores the slot
   // instead of appending every node (especially in a reversed move batch).
@@ -322,16 +347,108 @@ async function applyMove(store, op, version, live) {
   }
 }
 
-async function applyUpdate(store, op, version) {
+function guardUidsForOperation(op) {
+  const payload = (op && op.payload) || {}
+  const expected = payload.expected || payload.expectedValue || {}
+  const out = []
+  if (payload.uid) out.push(String(payload.uid))
+  ;['target_uid', 'anchor_uid'].forEach(key => {
+    if (expected[key]) out.push(String(expected[key]))
+  })
+  return out
+}
+
+function collectGuardOperations(ops) {
+  const list = []
+  ;(ops || []).forEach(op => {
+    const type = normalizeType(op && op.type)
+    if (['node.update', 'node.move', 'node.reorder', 'node.delete'].includes(type)) {
+      list.push(op)
+    }
+  })
+  return list
+}
+
+function preconditionUnsupported(message) {
+  return commandError(message, PRECONDITION_UNSUPPORTED, 503)
+}
+
+async function preparePreconditionBaseline(store, ops) {
+  const guarded = collectGuardOperations(ops)
+  const uids = Array.from(new Set(guarded.flatMap(guardUidsForOperation)))
+  let rows = []
+  if (uids.length) {
+    if (typeof store.getMany !== 'function') {
+      throw preconditionUnsupported('当前写入路径无法读取批次校验基线')
+    }
+    rows = await store.getMany(uids)
+  }
+  const nodes = new Map((rows || []).filter(Boolean).map(row => [String(row.uid), row]))
+  const subtreeTokens = new Map()
+  const deleteUids = Array.from(new Set(guarded
+    .filter(op => normalizeType(op.type) === 'node.delete')
+    .map(op => String((op.payload && op.payload.uid) || '').trim())
+    .filter(Boolean)))
+  if (deleteUids.length) {
+    if (typeof store.subtreeTokens !== 'function') {
+      throw preconditionUnsupported('当前写入路径无法批量计算删除子树校验值')
+    }
+    const batchTokens = await store.subtreeTokens(deleteUids)
+    if (!(batchTokens instanceof Map)) {
+      throw preconditionUnsupported('当前写入路径无法批量计算删除子树校验值')
+    }
+    deleteUids.forEach(uid => subtreeTokens.set(uid, batchTokens.get(uid)))
+  }
+  return { nodes, subtreeTokens }
+}
+
+async function singleOperationBaseline(store, op, live, supplied) {
+  if (supplied && supplied.nodes instanceof Map) return supplied
+  const uids = Array.from(new Set(guardUidsForOperation(op)))
+  const rows = typeof store.getMany === 'function'
+    ? await store.getMany(uids)
+    : await Promise.all(uids.map(uid => store.getLive(uid)))
+  const nodes = new Map((rows || []).filter(Boolean).map(row => [String(row.uid), row]))
+  const sourceUid = String((op.payload && op.payload.uid) || '')
+  if (live && sourceUid && !nodes.has(sourceUid)) nodes.set(sourceUid, live)
+  const subtreeTokens = new Map()
+  if (normalizeType(op.type) === 'node.delete') {
+    if (typeof store.subtreeToken !== 'function') {
+      throw preconditionUnsupported('当前写入路径无法计算删除子树校验值')
+    }
+    subtreeTokens.set(sourceUid, await store.subtreeToken(sourceUid))
+  }
+  return { nodes, subtreeTokens }
+}
+
+async function applyUpdate(store, op, version, options = {}) {
   const type = normalizeType(op.type)
   const allowMove = type === 'node.move' || type === 'node.reorder'
   const payload = op.payload || {}
   const uid = payload.uid
+  const allowNewUid = options.allowNewUid === true
+  const enforcePreconditions = options.skipWritePreconditions !== true
+  if (enforcePreconditions) {
+    preflightNodeWritePreconditions({ type, payload, uid, allowNewUid })
+  }
   if (!uid) throw nodeDeletedError(uid)
   const live = await store.getLive(uid)
   if (!live) throw nodeDeletedError(uid)
+  const baseline = enforcePreconditions
+    ? await singleOperationBaseline(store, op, live, options.preconditionBaseline)
+    : { nodes: new Map(), subtreeTokens: new Map() }
+  const baselineNode = baseline.nodes.get(String(uid)) || live
   await assertNotSop(store, uid, payload, type, live)
-  assertExpectedNodeData(live.data || {}, payload)
+  if (enforcePreconditions) {
+    assertNodeWritePreconditions({
+      type,
+      payload,
+      uid,
+      baselineNode,
+      baseline,
+      allowNewUid
+    })
+  }
   const structural =
     payload.parentUid !== undefined ||
     payload.parent_uid !== undefined ||
@@ -427,14 +544,31 @@ async function applyUpdate(store, op, version) {
   }
 }
 
-async function applyDelete(store, op, version) {
+async function applyDelete(store, op, version, options = {}) {
   const payload = op.payload || {}
   const uid = payload.uid
+  const allowNewUid = options.allowNewUid === true
+  const enforcePreconditions = options.skipWritePreconditions !== true
+  if (enforcePreconditions) {
+    preflightNodeWritePreconditions({ type: 'node.delete', payload, uid, allowNewUid })
+  }
   if (!uid) throw nodeDeletedError(uid)
   const live = await store.getLive(uid)
   if (!live) throw nodeDeletedError(uid)
-  if(payload.expected && Object.keys(payload.expected).some(key=>stableValue(live.data[key])!==stableValue(payload.expected[key]))) {
-    throw commandError('目标已被其他协作者修改', 'REPLACE_CONFLICT', 409)
+  const baseline = enforcePreconditions
+    ? await singleOperationBaseline(store, op, live, options.preconditionBaseline)
+    : { nodes: new Map(), subtreeTokens: new Map() }
+  const baselineNode = baseline.nodes.get(String(uid)) || live
+  if (enforcePreconditions) {
+    assertNodeWritePreconditions({
+      type: 'node.delete',
+      payload,
+      uid,
+      baselineNode,
+      baseline,
+      subtreeToken: baseline.subtreeTokens.get(String(uid)),
+      allowNewUid
+    })
   }
   if (live.is_root) {
     throw commandError('不能删除根节点', 'ROOT_DELETE', 400)
@@ -753,6 +887,9 @@ async function applyBatch(store, op, options) {
   if (allInserts && typeof store.insertMany === 'function') {
     return applyInsertBulk(store, normalized, Number(options.version) || 0, op.roomKey)
   }
+  const preconditionBaseline = options.skipWritePreconditions === true
+    ? { nodes: new Map(), subtreeTokens: new Map() }
+    : await preparePreconditionBaseline(store, normalized)
   const events = []
   const affected = []
   const inverses = []
@@ -765,6 +902,18 @@ async function applyBatch(store, op, options) {
     normalized.every(child => normalizeType(child.type) === 'node.delete')
   let deleteOps = normalized
   if (allDeletes && store.getLive) {
+    if (options.skipWritePreconditions !== true) normalized.forEach(child => {
+      const uid = String((child.payload && child.payload.uid) || '')
+      preflightNodeWritePreconditions({ type: 'node.delete', payload: child.payload || {}, uid })
+      assertNodeWritePreconditions({
+        type: 'node.delete',
+        payload: child.payload || {},
+        uid,
+        baselineNode: preconditionBaseline.nodes.get(uid),
+        baseline: preconditionBaseline,
+        subtreeToken: preconditionBaseline.subtreeTokens.get(uid)
+      })
+    })
     const parentOf = {}
     for (let i = 0; i < normalized.length; i++) {
       const uid = normalized[i].payload && normalized[i].payload.uid
@@ -772,14 +921,36 @@ async function applyBatch(store, op, options) {
       const live = await store.getLive(uid).catch(() => null)
       if (live) parentOf[uid] = live.parent_uid
     }
+    const originalsByUid = new Map()
+    normalized.forEach(item => {
+      const uid = String((item.payload && item.payload.uid) || '')
+      const items = originalsByUid.get(uid) || []
+      items.push(item)
+      originalsByUid.set(uid, items)
+    })
     const collapsed = collapseDeleteOpsToForestRoots(normalized, uid => parentOf[uid])
-    deleteOps = collapsed.map(child => normalizeOperation({ ...child, roomKey: op.roomKey }))
+    deleteOps = collapsed.map(child => {
+      const uid = String((child.payload && child.payload.uid) || '')
+      const originals = originalsByUid.get(uid) || []
+      const original = originals.shift()
+      return normalizeOperation({ ...(original || child), roomKey: op.roomKey })
+    })
   }
   const toApply = allDeletes ? deleteOps : normalized
+  const insertedUids = new Set()
   for (let i = 0; i < toApply.length; i++) {
     try {
-      last = await applyDirect(store, toApply[i], options)
+      const childUid = String((toApply[i].payload && toApply[i].payload.uid) || '')
+      const itemOptions = {
+        ...options,
+        preconditionBaseline,
+        allowNewUid: !!childUid && insertedUids.has(childUid)
+      }
+      last = await applyDirect(store, toApply[i], itemOptions)
       appliedCount += 1
+      if (normalizeType(toApply[i].type) === 'node.insert' && last.result && last.result.uid) {
+        insertedUids.add(String(last.result.uid))
+      }
       if (last.event) {
         events.push(last.event)
         affected.push(...(last.event.affectedUids || []))
@@ -789,6 +960,8 @@ async function applyBatch(store, op, options) {
       const code = err && err.code
       if (
         code === 'REPLACE_CONFLICT' ||
+        code === PRECONDITION_REQUIRED ||
+        code === PRECONDITION_INVALID ||
         code === 'TARGET_DELETED' ||
         code === 'NODE_DELETED'
       ) {
@@ -861,6 +1034,8 @@ const MCP_BATCH_ITEM_ERRORS = new Set([
   'UID_REUSED',
   'CYCLE_REJECTED',
   'REPLACE_CONFLICT',
+  PRECONDITION_REQUIRED,
+  PRECONDITION_INVALID,
   'ROOT_DELETE',
   'SOP_CONFIRM_REQUIRED',
   'UID_ALREADY_EXISTS',
@@ -870,7 +1045,7 @@ const MCP_BATCH_ITEM_ERRORS = new Set([
 function isMcpBatchItemError(err) {
   return (
     MCP_BATCH_ITEM_ERRORS.has(String(err && err.code || '')) &&
-    [400, 403, 409].includes(Number(err && err.statusCode))
+    [400, 403, 409, 428].includes(Number(err && err.statusCode))
   )
 }
 
@@ -941,6 +1116,10 @@ async function applyMcpBatch(store, op, childOps, options) {
   let failedCount = 0
   let last = { result: {} }
   const version = Number(options.version) || 0
+  const preconditionBaseline = options.skipWritePreconditions === true
+    ? { nodes: new Map(), subtreeTokens: new Map() }
+    : await preparePreconditionBaseline(store, normalized)
+  const insertedUids = new Set()
 
   for (let index = 0; index < normalized.length; index += 1) {
     const failedDependencies = dependencies[index].filter(
@@ -965,9 +1144,17 @@ async function applyMcpBatch(store, op, childOps, options) {
     await store.savepoint(savepoint)
     const started = Date.now()
     try {
-      last = await applyDirect(store, normalized[index], options)
+      const uid = String((normalized[index].payload && normalized[index].payload.uid) || '')
+      last = await applyDirect(store, normalized[index], {
+        ...options,
+        preconditionBaseline,
+        allowNewUid: !!uid && insertedUids.has(uid)
+      })
       await store.releaseSavepoint(savepoint)
       appliedCount += 1
+      if (normalized[index].type === 'node.insert' && last.result && last.result.uid) {
+        insertedUids.add(String(last.result.uid))
+      }
       results[index] = {
         index,
         status: 'applied',
@@ -1068,11 +1255,11 @@ async function applyDirect(store, raw, options = {}) {
   let applied
   if (type === 'node.batch') applied = await applyBatch(store, op, options)
   else if (type === 'node.insert') applied = await applyInsert(store, op, version)
-  else if (type === 'node.delete') applied = await applyDelete(store, op, version)
+  else if (type === 'node.delete') applied = await applyDelete(store, op, version, options)
   else if (type === 'node.restore') applied = await applyRestore(store, op, version)
   else if (type === 'map.meta.update') applied = await applyMeta(store, op, version)
   else if (type === 'node.update' || type === 'node.move' || type === 'node.reorder') {
-    applied = await applyUpdate(store, op, version)
+    applied = await applyUpdate(store, op, version, options)
   } else {
     const err = new Error('不支持的操作类型: ' + type)
     err.code = 'UNSUPPORTED_OPERATION'
