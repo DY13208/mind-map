@@ -135,12 +135,13 @@
     </aside>
     <header v-if="shellMode !== 'embed'" class="mobileShellHeader">
       <template v-if="$route.path === '/spaces'">
-        <button class="mobileTeamBrand" aria-label="打开全部功能" @click="openNavigation"><span class="mobileBrandMark">C</span></button>
-        <h1 class="mobilePageTitle">团队空间</h1>
+        <button class="mobileBrandButton mobileTeamBrand" aria-label="打开全部功能" @click="openNavigation"><span class="mobileBrandMark">W</span><strong>WCPD</strong></button>
+        <div class="mobileHeaderSpacer" />
         <button aria-label="搜索团队" @click="$bus.$emit('mobile-search-teams')"><i class="el-icon-search" /></button>
+        <button aria-label="全部功能与设置" @click="openNavigation"><i class="el-icon-menu" /></button>
       </template>
       <template v-else>
-      <button aria-label="打开全部功能" @click="openNavigation"><span class="mobileBrandMark">W</span><strong>WCPD</strong></button>
+      <button class="mobileBrandButton" aria-label="打开全部功能" @click="openNavigation"><span class="mobileBrandMark">W</span><strong>WCPD</strong></button>
       <button v-if="$route.path.startsWith('/spaces/')" class="detailLauncher" aria-label="全部功能与设置" @click="openNavigation"><i class="el-icon-menu" /></button>
       <template v-else-if="!$route.path.startsWith('/spaces/')">
       <button aria-label="全部功能与设置" @click="openNavigation"><i class="el-icon-menu" /></button>
@@ -1149,6 +1150,18 @@ export default {
 </style>
 <style lang="less">
 @media (max-width: 767px) {
+  .productShell .mobileShellHeader {
+    left: 0; right: 0; transform: none; width: 100%; max-width: none; box-sizing: border-box;
+    height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 16px 0;
+    font-family: Arial, 'Microsoft YaHei', sans-serif;
+    .mobileBrandButton { gap: 10px; min-width: 44px; margin: 0; padding: 0; }
+    .mobileBrandButton .mobileBrandMark { width: 36px; height: 36px; flex: 0 0 36px; border-radius: 10px; font: 400 25px/1 Arial, sans-serif; background: #087854; box-shadow: none; }
+    .mobileBrandButton strong { font: 700 17px/1 Arial, sans-serif; letter-spacing: normal; }
+  }
+}
+</style>
+<style lang="less">
+@media (max-width: 767px) {
   .productShell--team-detail {
     --ui-bg: #f6f9f7; --ui-primary: #08785d; --ui-text: #182d29; --ui-text-secondary: #7c8e88;
     font-family: -apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
@@ -1171,7 +1184,9 @@ export default {
     .productMain { max-width: 640px !important; margin-inline: auto !important; padding-top: calc(104px + env(safe-area-inset-top)); padding-bottom: calc(114px + env(safe-area-inset-bottom)); min-height: 100dvh; box-sizing: border-box; background: radial-gradient(ellipse 64% 230px at 100% -62px,rgba(212,239,224,.58),transparent 76%),#f6f9f7; box-shadow: 0 0 50px rgba(20,52,39,.10); }
     .spacesPage { padding: 0 24px 0 !important; }
     .mobileShellHeader { left: 50%; right: auto; transform: translateX(-50%); width: 100%; max-width: 640px; box-sizing: border-box; height: calc(104px + env(safe-area-inset-top)); padding-inline: 24px; background: #f6f9f7; gap: 8px; }
-    .mobileShellHeader .mobileTeamBrand { min-width: 52px; margin-right: 7px; }
+    .mobileShellHeader .mobileTeamBrand { min-width: 52px; margin-right: 7px; gap: 11px; }
+    .mobileHeaderSpacer { flex: 1; }
+    .mobileShellHeader .mobileTeamBrand strong { font-size: 20px; }
     .mobileBrandMark { width: 52px; height: 52px; border-radius: 16px; font-family: Georgia,serif; font-size: 35px; font-weight: 600; background: linear-gradient(145deg,#0a886a,#05694f); box-shadow: 0 6px 14px rgba(4,115,83,.15); }
     .mobilePageTitle { font-size: 27px; font-weight: 750; letter-spacing: -.6px; white-space: nowrap; }
     .mobileShellHeader .userAvatar { width: 45px !important; height: 45px !important; font-size: 19px !important; background: linear-gradient(135deg,#159c77,#087255); }
@@ -1206,4 +1221,17 @@ export default {
   }
 }
 @media (max-width: 470px) { .productShell .mobileBottomNav { padding-inline: 7px; } }
+</style>
+<style lang="less">
+@media (max-width: 767px) {
+  .productShell--teams {
+    .productMain { padding-top: calc(56px + env(safe-area-inset-top)); }
+    .mobileShellHeader { height: calc(56px + env(safe-area-inset-top)); padding-inline: 16px; gap: 4px; }
+    .mobileShellHeader .mobileTeamBrand { margin-right: 0; min-width: 44px; gap: 10px; }
+    .mobileShellHeader .mobileTeamBrand strong { font-size: 17px; }
+    .mobileBrandMark { width: 36px; height: 36px; border-radius: 10px; font: 400 25px sans-serif; background: #087854; box-shadow: none; }
+    .mobileShellHeader > button:last-child { margin-left: 0; }
+    .mobileShellHeader i { font-size: 23px; }
+  }
+}
 </style>
