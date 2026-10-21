@@ -1,8 +1,8 @@
 <template>
   <div class="toolbarContainer" :class="{ isDark: isDark }">
     <header v-if="isTouchEditor" class="touchEditorHeader" aria-label="脑图工具栏">
-      <button type="button" aria-label="脑图目录" :aria-expanded="String(mapTreeShow)" @click="toggleTouchMapTree"><i class="el-icon-folder" aria-hidden="true"></i></button>
-      <button v-if="$route.query.room" type="button" data-testid="back-to-my-maps" :aria-label="fileListReturnLabel" :disabled="returningToList" @click="onFileToolbarAction('maps')"><i class="el-icon-arrow-left"></i></button>
+      <button type="button" class="touchMapTreeBtn" aria-label="脑图目录" :aria-expanded="String(mapTreeShow)" @click="toggleTouchMapTree"><i class="el-icon-folder" aria-hidden="true"></i></button>
+      <button v-if="$route.query.room" type="button" class="touchBackBtn" data-testid="back-to-my-maps" :aria-label="fileListReturnLabel" :disabled="returningToList" @click="onFileToolbarAction('maps')"><i class="el-icon-arrow-left"></i></button>
       <div class="touchFileIdentity">
         <strong :title="fileTitle">{{ fileTitle }}</strong>
         <button v-if="displayedSaveChip === 'failed'" type="button" class="saveChip failed" data-testid="collab-sync-failed" @click="openMobileFileMenu">{{ collabSaveLabel }}</button>

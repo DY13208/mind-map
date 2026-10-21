@@ -2,8 +2,8 @@
   <main class="accessDenied">
     <section class="accessRequestPanel" aria-label="申请文件访问权限">
       <div class="requestBrand">
-        <span class="brandMark">W</span
-        ><span>WCPD <small>团队知识与协作</small></span>
+        <img class="brandMark" :src="brandLogo" alt="" />
+        <span>WCPD <small>团队知识与协作</small></span>
       </div>
       <span :class="['accessIcon', { pending: status === 'pending' }]"
         ><i :class="status === 'pending' ? 'el-icon-time' : 'el-icon-lock'"
@@ -105,6 +105,7 @@ export default {
     returning: { type: Boolean, default: false }
   },
   data: () => ({
+    brandLogo: process.env.BASE_URL + 'wcpd-logo.png',
     role: 'viewer',
     reason: '',
     item: {},
@@ -237,13 +238,14 @@ export default {
   margin-bottom: 36px;
 }
 .brandMark {
-  background: #163b2d;
+  background: transparent;
+  object-fit: contain;
   color: #fff;
   width: 30px;
   height: 30px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
+  border-radius: 0;
   font-size: 16px;
 }
 .requestBrand small {

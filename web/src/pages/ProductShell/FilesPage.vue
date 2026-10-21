@@ -7,9 +7,9 @@
       :search.sync="search"
       :show-favorites="!isTeamView && ['files', 'folder', 'favorites'].includes(mode)"
       :favorites-active="mode === 'favorites'"
-      :show-create="mode === 'files' || mode === 'folder'"
+      :show-create="!isMobileViewport && (mode === 'files' || mode === 'folder')"
       :show-create-folder="
-        (mode === 'files' || mode === 'folder') &&
+        !isMobileViewport && (mode === 'files' || mode === 'folder') &&
           (!isTeamView || canManageTeam)
       "
       :show-import="mode === 'files' || mode === 'folder'"
@@ -30,10 +30,7 @@
       <button v-for="option in [{value:'all',label:'全部'},{value:'folders',label:'文件夹'},{value:'rooms',label:'脑图'}]" :key="option.value" :aria-pressed="mobileKind === option.value" :class="{active: mobileKind === option.value}" @click="mobileKind = option.value">{{ option.label }}</button>
       <el-select v-model="sort" aria-label="排序方式"><el-option value="updatedAt" label="最近更新" /><el-option value="title" label="名称排序" /></el-select>
     </div>
-    <el-drawer :visible.sync="mobileCreateOpen" direction="btt" size="auto" :with-header="false" append-to-body custom-class="mobileActionSheet">
-      <header><strong>新建</strong><button aria-label="关闭新建菜单" @click="mobileCreateOpen = false"><i class="el-icon-close" /></button></header>
-      <div class="mobileActionGrid"><button @click="mobileCreateOpen = false; createRoom()">新建脑图</button><button v-if="!isTeamView || canManageTeam" @click="mobileCreateOpen = false; createFolder()">新建文件夹</button><button @click="mobileCreateOpen = false; openImport()">导入脑图</button></div>
-    </el-drawer>
+    <MobileCreateMenu :visible="mobileCreateOpen" :can-create-folder="!isTeamView || canManageTeam" @close="mobileCreateOpen = false" @select="selectMobileCreate" />
     <BatchActionBar
       v-if="selectMode"
       :count="batchSelectionCount"
@@ -220,6 +217,8 @@
 
 <script>
 import mobileViewport from '@/utils/mobileViewport'
+import './creation-dialogs.less'
+import MobileCreateMenu from './components/MobileCreateMenu.vue'
 import { userMessageFromError } from '@/services/apiError'
 import { isNavigationFailure, NavigationFailureType } from 'vue-router'
 import roomService from '@/services/roomService'
@@ -284,6 +283,7 @@ export default {
   mixins: [mobileViewport],
   name: 'FilesPage',
   components: {
+    MobileCreateMenu,
     EmptyState,
     FileToolbar,
     FolderBreadcrumb,
@@ -578,7 +578,9 @@ export default {
     }
   },
   watch: {
+    mobileCreateOpen(open) { this.$bus.$emit('mobile-create-state', open) },
     '$route'(to, from) {
+      if (to.path !== from.path) this.mobileCreateOpen = false
       if (isShellOnlyRouteChange(to, from)) return
       this.restoreNavigationState()
     },
@@ -614,8 +616,17 @@ export default {
   created() {
     this.$bus.$on('mobile-create-file', this.openMobileCreate)
     this.restoreNavigationState()
+    if (this.$route.query.mobileCreate === '1') {
+      this.openMobileCreate()
+      this.$nextTick(() => {
+        const query = { ...this.$route.query }
+        delete query.mobileCreate
+        this.$router.replace({ path: this.$route.path, query, hash: this.$route.hash })
+      })
+    }
   },
   beforeDestroy() {
+    this.$bus.$emit('mobile-create-state', false)
     this.$bus.$off('mobile-create-file', this.openMobileCreate)
     clearTimeout(this.searchTimer)
     clearTimeout(this.highlightTimer)
@@ -623,7 +634,13 @@ export default {
   },
   methods: {
     renameFolderFromMenu(folder) { this.activeItem = { ...folder, title: folder.name }; this.renameKind = 'folder'; this.renameVisible = true },
-    openMobileCreate() { this.mobileCreateOpen = true },
+    openMobileCreate() { this.mobileCreateOpen = !this.mobileCreateOpen },
+    selectMobileCreate(action) {
+      this.mobileCreateOpen = false
+      if (action === 'room') return this.createRoom()
+      if (action === 'folder') return this.createFolder()
+      if (action === 'import') return this.openImport()
+    },
     resetPage() {
       clearTimeout(this.highlightTimer)
       this.returnContext = null
@@ -1086,6 +1103,10 @@ export default {
     },
     async createRoom() {
       const result = await this.$prompt('请输入脑图名称', '新建脑图', {
+        customClass: 'wcpdCreateDialog wcpdCreateDialog--room',
+        confirmButtonText: '创建脑图',
+        cancelButtonText: '取消',
+        inputPlaceholder: '为你的想法起个名字',
         inputValue: '未命名脑图',
         inputValidator: value =>
           (!!value && !!value.trim() && value.length <= 60) ||
@@ -1124,6 +1145,10 @@ export default {
             : '将在“脑图”根目录创建文件夹',
         '新建文件夹',
         {
+          customClass: 'wcpdCreateDialog wcpdCreateDialog--folder',
+          confirmButtonText: '创建文件夹',
+          cancelButtonText: '取消',
+          inputPlaceholder: '输入文件夹名称',
           inputValidator: value =>
             (!!value && !!value.trim() && value.length <= 60) ||
             '请输入 1 至 60 个字符'
