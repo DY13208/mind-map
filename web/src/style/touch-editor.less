@@ -113,3 +113,30 @@
   }
 }
 @media (prefers-reduced-motion: reduce) { .container.isTouchEditor .sidebarContainer, .container.isTouchEditor .searchContainer { transition: none; } }
+
+// Phone reading mode keeps a single persistent action entry. iPad keeps its rails.
+.container.isPhoneReader {
+  .touchEditorLeftRail, .sidebarTriggerRoot.touchEditorRail { display: none !important; }
+  .touchEditorHeader > button { display: none !important; }
+  .touchEditorHeader { padding-left: max(16px, env(safe-area-inset-left)); }
+  .searchContainer { left: 8px; max-width: calc(100vw - 16px); transform: translateX(calc(-100% - 24px)); &.show { transform: none; } }
+  .contextmenuContainer .item, .contextmenuContainer .submenu .item { min-height: 44px; height: auto; }
+  .contextmenuContainer .desc { display: none; }
+}
+.mobileCircleMenu {
+  position: fixed; right: max(12px, env(safe-area-inset-right)); bottom: calc(100vh - var(--mm-viewport-height) - var(--mm-viewport-top) + max(12px, env(safe-area-inset-bottom)));
+  width: 296px; height: 296px; z-index: 49; pointer-events: none; color: #153052;
+  .circleMenuBackdrop { position: fixed; inset: 0; border: 0; background: #10253612; pointer-events: auto; }
+  .circleMenuOrbit { position: absolute; inset: 0; border-radius: 50%; transition: background-color .18s; }
+  .circleMenuTrigger { position: absolute; right: 0; bottom: 0; width: 56px; height: 56px; border-radius: 50%; border: 0; background: #087854; color: #fff; font-size: 24px; box-shadow: 0 4px 18px #123c3530; pointer-events: auto; transition: transform .2s ease; }
+  .circleMenuItem { position: absolute; left: 124px; top: 124px; width: 48px; height: 48px; border: 0; border-radius: 50%; background: #fff; color: inherit; box-shadow: 0 3px 12px #10253618; display: grid; place-items: center; opacity: 0; visibility: hidden; transform: translate(0, 0) scale(.7); transition: transform .22s cubic-bezier(.2,.8,.2,1), opacity .15s, visibility .15s; i { font-size: 22px; } span { position: absolute; top: 52px; left: -8px; right: -8px; font-size: 12px; font-weight: 500; white-space: nowrap; } }
+  &.open {
+    .circleMenuOrbit { background: #f4f7f5f5; box-shadow: 0 4px 24px #10253614; }
+    .circleMenuTrigger { transform: translate(-120px, -120px); }
+    .circleMenuItem { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(var(--circle-x), var(--circle-y)) scale(1); transition-delay: var(--circle-delay); }
+  }
+  &.isDark { color: #edf2f7; .circleMenuItem { background: #363b3f; } &.open .circleMenuOrbit { background: #262a2ef5; } }
+  button:focus-visible { outline: 2px solid #087854; outline-offset: 3px; }
+}
+.mobileNodeEditing .mobileCircleMenu { display: none; }
+@media (prefers-reduced-motion: reduce) { .mobileCircleMenu .circleMenuTrigger, .mobileCircleMenu .circleMenuItem, .mobileCircleMenu .circleMenuOrbit { transition: none; } }

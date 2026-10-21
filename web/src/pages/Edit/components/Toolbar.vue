@@ -285,6 +285,7 @@
       <header><strong>脑图操作</strong><button aria-label="关闭脑图操作" @click="mobileMenuOpen = false"><i class="el-icon-close" /></button></header>
       <div v-if="displayedSaveChip === 'failed'" class="collabDiag" role="alert"><p v-for="row in collabDiagRows" :key="row.key">{{ row.key }}：{{ row.value }}</p></div>
       <div class="mobileActionGrid"><button v-for="item in fileToolbarActions" :key="item.key" :disabled="item.disabled" @click="mobileMenuOpen = false; onFileMenuSelect(item.key)">{{ item.label }}</button></div>
+      <button v-if="isPhoneReader" type="button" @click="toggleTouchMapTree">脑图目录</button>
     </el-drawer>
     <el-drawer v-if="isTouchEditor" :visible.sync="mapTreeShow" direction="ltr" size="320px" :with-header="false" :modal="false" :lock-scroll="false" append-to-body class="touchEditorDrawer" :custom-class="isDark ? 'touchEditorActionSidebar touchEditorMapTree isDark' : 'touchEditorActionSidebar touchEditorMapTree'">
       <MapFileTree v-if="mapTreeShow" :current-room-key="currentRoomKey()" :is-dark="isDark" @open="openMapFromTree" @close="mapTreeShow = false" />
@@ -1477,6 +1478,7 @@ export default {
   created() {
     this.$bus.$on('open_mobile_file_menu', this.openMobileFileMenu)
     this.$bus.$on('close_mobile_file_menu', this.closeMobileFileMenus)
+    this.$bus.$on('open_mobile_map_tree', this.toggleTouchMapTree)
     // 概要点：点它只记下「按这条概要继续」，派发仍由「运行」按钮触发
     this.$bus.$on('node_click', this.onJobNodeClick)
     this.$bus.$on('write_local_file', this.onWriteLocalFile)
@@ -1529,6 +1531,7 @@ export default {
   beforeDestroy() {
     this.$bus.$off('open_mobile_file_menu', this.openMobileFileMenu)
     this.$bus.$off('close_mobile_file_menu', this.closeMobileFileMenus)
+    this.$bus.$off('open_mobile_map_tree', this.toggleTouchMapTree)
     if (this.autoRepairTimer) {
       clearTimeout(this.autoRepairTimer)
       this.autoRepairTimer = null

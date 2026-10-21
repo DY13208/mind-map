@@ -13,7 +13,12 @@
       :class="{ isDark: isDark }"
       :style="menuMaxHeight ? { maxHeight: menuMaxHeight + 'px' } : null"
     >
-    <template v-if="type === 'node'">
+    <template v-if="type === 'node' && !editable">
+      <div class="item" @click="exec('EXPAND_ALL')"><MenuIcon name="expand" /><span class="name">{{ $t('contextmenu.expandNodeChild') }}</span></div>
+      <div class="item" @click="exec('UNEXPAND_ALL')"><MenuIcon name="collapse" /><span class="name">{{ $t('contextmenu.unExpandNodeChild') }}</span></div>
+      <div class="item" @click="copyNodeForAi"><MenuIcon name="clipboard" /><span class="name">复制给 AI（SOP）</span></div>
+    </template>
+    <template v-if="type === 'node' && editable">
       <div class="item" @click="exec('INSERT_CHILD_NODE')">
         <MenuIcon name="plus" />
         <span class="name">{{ $t('contextmenu.insertChildNode') }}</span>
