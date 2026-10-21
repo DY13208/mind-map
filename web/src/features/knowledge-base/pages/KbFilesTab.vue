@@ -1,10 +1,19 @@
 <template>
   <div class="kb-files">
-    <aside class="kb-card kb-files-side">
-      <KbFolderTree ref="tree" v-model="folderId" @path="p => (folderPath = p)" @acl="openAcl" />
+    <button v-if="isMobileViewport && foldersOpen" class="kb-folder-backdrop" aria-label="关闭文件夹面板" tabindex="-1" @click="closeFolders" />
+    <aside v-show="!isMobileViewport || foldersOpen" class="kb-card kb-files-side" :role="isMobileViewport ? 'dialog' : null" :aria-modal="isMobileViewport ? 'true' : null" aria-label="文件夹导航" @keydown="onFolderKeydown">
+      <button v-if="isMobileViewport" class="kb-folder-close" aria-label="关闭文件夹面板" @click="closeFolders"><i class="el-icon-close" /></button>
+      <KbFolderTree ref="tree" v-model="folderId" @path="onFolderPath" @roots="onRootFolders" @acl="openAcl" />
     </aside>
     <section class="kb-files-main">
+      <div v-if="isMobileViewport" class="kb-mobile-stats" aria-label="文件概览">
+        <div><i class="el-icon-document stat-blue" /><strong>{{ summaryCount }}</strong><span>{{ total != null ? '筛选文件总数' : '本页文档' }}</span></div>
+        <div><i class="el-icon-folder-opened stat-teal" /><strong>{{ rootFoldersLoaded ? rootFolders.length : '—' }}{{ moreRootFolders ? '+' : '' }}</strong><span>根目录分类</span></div>
+        <div><i class="el-icon-circle-check stat-purple" /><strong>{{ loaded && !error ? files.filter(f => f.status === 'done').length : '—' }}</strong><span>本页已完成</span></div>
+        <div><i class="el-icon-time stat-orange" /><strong>{{ loaded && !error ? activeIds.length : '—' }}</strong><span>本页处理中</span></div>
+      </div>
       <div class="kb-card">
+        <div v-if="isMobileViewport" class="kb-section-heading"><h2>{{ folderId ? '分类文档' : '文档动态' }}</h2><button @click="mobileShowAll = !mobileShowAll">{{ mobileShowAll ? '收起列表' : '查看全部' }}<i class="el-icon-arrow-right" /></button></div>
         <div class="kb-toolbar">
           <div class="kb-crumb">
             <span class="kb-crumb-item" @click="$refs.tree.select('')">全部文件</span>
@@ -13,13 +22,14 @@
               <span :key="p.id" class="kb-crumb-item" @click="$refs.tree.select(p.id)">{{ p.name }}</span>
             </template>
           </div>
+          <button v-if="isMobileViewport" class="kb-folder-trigger" @click="openFolders"><i class="el-icon-folder-opened" />文件夹</button>
           <div class="kb-toolbar-actions">
             <el-input v-model="q" size="small" prefix-icon="el-icon-search" placeholder="搜索文件名" clearable class="kb-search" @input="debouncedLoad" />
             <el-select v-model="status" size="small" placeholder="全部状态" clearable popper-class="kb-popper" class="kb-status-filter" @change="reload">
               <el-option v-for="(m, k) in statuses" :key="k" :label="m.label" :value="k" />
             </el-select>
-            <el-button size="small" icon="el-icon-refresh-right" @click="load">刷新</el-button>
-            <el-button size="small" icon="el-icon-files" @click="openBatches('')">批次任务</el-button>
+            <el-button size="small" icon="el-icon-refresh-right" aria-label="刷新文件" @click="load">刷新</el-button>
+            <el-button size="small" icon="el-icon-files" aria-label="批次任务" @click="openBatches('')">批次任务</el-button>
             <el-button size="small" type="primary" :icon="showUpload ? 'el-icon-close' : 'el-icon-upload2'" @click="showUpload = !showUpload">{{ showUpload ? '收起上传' : '上传文件' }}</el-button>
           </div>
         </div>
@@ -38,7 +48,7 @@
         <KbStateBlock :loading="loading && !loaded" :error="error" :empty="loaded && !files.length" empty-title="暂无文件" empty-description="上传文件后会自动解析并结构化入库" empty-icon="el-icon-folder-opened" @retry="load">
           <KbFileTable
             ref="table"
-            :files="files"
+            :files="isMobileViewport && !mobileShowAll ? files.slice(0, 5) : files"
             @open="f => go('parse', f)"
             @data="f => go('data', f)"
             @reparse="reparse([$event])"
@@ -48,6 +58,7 @@
             @batch-delete="remove"
           />
           <KbCursorPager
+            v-if="!isMobileViewport || mobileShowAll"
             :page="cursor.index + 1"
             :count="files.length"
             :total="total"
@@ -59,6 +70,19 @@
           />
         </KbStateBlock>
       </div>
+      <template v-if="isMobileViewport">
+        <router-link class="kb-graph-card" :to="{ path: '/graph', query: { shell: $route.query.shell } }">
+          <div><h2>知识图谱</h2><p>探索知识之间的关联，发现更多价值</p><span>进入图谱 <i class="el-icon-right" /></span></div>
+          <div class="kb-graph-art" aria-hidden="true"><i class="el-icon-document" /><b>产品</b><b>流程</b><b>制度</b><b>组织</b><b>项目</b></div>
+        </router-link>
+        <section class="kb-categories">
+          <div class="kb-section-heading"><h2>知识分类</h2><button @click="openFolders">查看全部<i class="el-icon-arrow-right" /></button></div>
+          <div v-if="rootFolders.length" class="kb-category-grid">
+            <button v-for="(folder, i) in rootFolders.slice(0, 5)" :key="folder.id" @click="selectRootFolder(folder.id)"><i :class="['el-icon-folder-opened', 'category-' + i]" /><span>{{ folder.name }}</span><small>查看文档</small></button>
+          </div>
+          <p v-else class="kb-category-empty">{{ rootFoldersLoaded ? '在文件夹面板中创建你的第一个分类' : '打开文件夹面板查看分类或重试' }}</p>
+        </section>
+      </template>
     </section>
     <KbPermissionDialog :visible.sync="aclVisible" :target="aclTarget" />
     <KbBatchDrawer
@@ -86,19 +110,23 @@ import KbStateBlock from '../components/KbStateBlock.vue'
 import KbCursorPager from '../components/KbCursorPager.vue'
 import KbPermissionDialog from '../components/KbPermissionDialog.vue'
 import KbBatchDrawer from '../components/KbBatchDrawer.vue'
+import mobileViewport from '@/utils/mobileViewport'
 // 大数据量策略：服务端 keyset 分页（每页固定 50 条，DOM 只渲染当前页）；
 // 搜索 300ms 防抖后走服务端；轮询只针对当前页中处于进行中状态的行（ids=...）。
 export default {
   name: 'KbFilesTab',
+  mixins: [mobileViewport],
   components: { KbFolderTree, KbUploadPanel, KbFileTable, KbStateBlock, KbCursorPager, KbPermissionDialog, KbBatchDrawer },
   data() {
     return {
       folderId: '', folderPath: [], files: [], total: null, limit: DEFAULT_LIMIT, q: '', status: '',
       cursor: createCursorState(), loading: false, loaded: false, error: null, showUpload: false,
-      aclVisible: false, aclTarget: null, statuses: FILE_STATUS, reqSeq: 0, localActiveBatches: []
+      aclVisible: false, aclTarget: null, statuses: FILE_STATUS, reqSeq: 0, localActiveBatches: [],
+      foldersOpen: false, rootFolders: [], rootFoldersLoaded: false, moreRootFolders: false, mobileShowAll: false
     }
   },
   computed: {
+    summaryCount() { return !this.loaded || this.error ? '—' : this.total != null ? this.total.toLocaleString() : this.files.length },
     activeIds() { return this.files.filter(f => ACTIVE_STATUSES.includes(f.status)).map(f => f.id) },
     hasActive() { return this.activeIds.length > 0 },
     // 批次视图放在路由 query 里（batches=1、batch=<id>），刷新后从后端重新读取，不依赖内存
@@ -114,12 +142,34 @@ export default {
     this.load()
   },
   activated() { if (this.hasActive) this.poller.start() },
-  deactivated() { this.poller.stop() },
+  deactivated() { this.poller.stop(); this.foldersOpen = false },
   beforeDestroy() {
     this.poller.stop()
     clearTimeout(this.timer)
   },
   methods: {
+    onRootFolders({ items, hasMore }) { this.rootFolders = items; this.moreRootFolders = hasMore; this.rootFoldersLoaded = true },
+    onFolderPath(path) { this.folderPath = path; this.closeFolders() },
+    closeFolders() {
+      this.foldersOpen = false
+      this.$nextTick(() => { if (this._folderTrigger && this._folderTrigger.isConnected) this._folderTrigger.focus() })
+    },
+    openFolders() {
+      this._folderTrigger = document.activeElement
+      this.foldersOpen = true
+      this.$nextTick(() => { const button = this.$el.querySelector('.kb-folder-close'); if (button) button.focus() })
+    },
+    onFolderKeydown(event) {
+      if (!this.isMobileViewport || !this.foldersOpen) return
+      if (event.key === 'Escape') { event.preventDefault(); this.closeFolders(); return }
+      if (event.key !== 'Tab') return
+      const controls = Array.from(event.currentTarget.querySelectorAll('button, a[href], input, [tabindex="0"]')).filter(el => el.getClientRects().length && !el.disabled)
+      if (!controls.length) return
+      const first = controls[0], last = controls[controls.length - 1]
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    },
+    selectRootFolder(id) { this.$refs.tree.select(id); this.mobileShowAll = true },
     debouncedLoad() {
       clearTimeout(this.timer)
       this.timer = setTimeout(this.reload, 300)

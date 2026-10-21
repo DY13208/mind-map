@@ -2,17 +2,27 @@
   <div class="kb-page">
     <header class="kb-header">
       <div>
-        <h1 class="kb-title"><i class="el-icon-collection" aria-hidden="true" />文件知识库</h1>
-        <p class="kb-subtitle">上传文件，自动解析与结构化入库，支持检索与 MCP 调用</p>
+        <h1 class="kb-title"><i class="el-icon-collection" aria-hidden="true" />{{ isMobileViewport ? '知识库' : '文件知识库' }}</h1>
+        <p class="kb-subtitle">{{ isMobileViewport ? '沉淀企业知识，让经验创造更大价值' : '上传文件，自动解析与结构化入库，支持检索与 MCP 调用' }}</p>
       </div>
+      <div v-if="isMobileViewport" class="kb-hero-actions">
+        <AccessNotificationTrigger collapsed />
+        <router-link to="/profile" aria-label="个人主页"><i class="el-icon-user-solid" /></router-link>
+      </div>
+      <div v-if="isMobileViewport" class="kb-hero-art" aria-hidden="true"><span /><span /><span><i /><i /><i /></span></div>
       <div class="kb-header-status">
         <span class="kb-dot" :class="healthClass" />{{ healthText }}
       </div>
     </header>
+    <form v-if="isMobileViewport" class="kb-hero-search" role="search" @submit.prevent="searchKnowledge">
+      <i class="el-icon-search" aria-hidden="true" />
+      <input v-model.trim="mobileQuery" type="search" aria-label="搜索知识库" placeholder="搜索文档、知识点或关键词…" enterkeyhint="search" />
+      <button type="submit" aria-label="开始搜索"><i class="el-icon-right" /></button>
+    </form>
     <KbServiceBanner :health="health" :error="healthError" :loading="healthLoading" @retry="loadHealth" />
     <el-tabs :value="tab" class="kb-tabs" @input="onTab">
       <el-tab-pane v-for="t in tabs" :key="t.name" :name="t.name">
-        <span slot="label"><i :class="t.icon" class="kb-tab-icon" aria-hidden="true" />{{ t.label }}</span>
+        <span slot="label"><i :class="t.icon" class="kb-tab-icon" aria-hidden="true" />{{ isMobileViewport ? mobileLabels[t.name] : t.label }}</span>
       </el-tab-pane>
     </el-tabs>
     <keep-alive>
@@ -31,12 +41,15 @@ import KbParseDetailTab from './KbParseDetailTab.vue'
 import KbStructuredTab from './KbStructuredTab.vue'
 import KbSearchTab from './KbSearchTab.vue'
 import KbMcpTab from './KbMcpTab.vue'
+import mobileViewport from '@/utils/mobileViewport'
+import AccessNotificationTrigger from '@/components/AccessNotificationTrigger.vue'
 const COMPONENTS = { files: 'KbFilesTab', parse: 'KbParseDetailTab', data: 'KbStructuredTab', search: 'KbSearchTab', mcp: 'KbMcpTab' }
 export default {
   name: 'KbIndexPage',
-  components: { KbServiceBanner, KbFilesTab, KbParseDetailTab, KbStructuredTab, KbSearchTab, KbMcpTab },
+  mixins: [mobileViewport],
+  components: { AccessNotificationTrigger, KbServiceBanner, KbFilesTab, KbParseDetailTab, KbStructuredTab, KbSearchTab, KbMcpTab },
   data() {
-    return { tabs: KB_TABS, health: null, healthError: null, healthLoading: false }
+    return { tabs: KB_TABS, health: null, healthError: null, healthLoading: false, mobileQuery: '', mobileLabels: { files: '全部', parse: '文档', data: '数据', search: '检索', mcp: '接入' } }
   },
   computed: {
     tab() {
@@ -71,6 +84,9 @@ export default {
     }).then(() => next()).catch(() => next(false))
   },
   methods: {
+    searchKnowledge() {
+      this.navigate({ tab: 'search', query: this.mobileQuery ? { q: this.mobileQuery } : {} })
+    },
     async loadHealth() {
       this.healthLoading = true
       try {
@@ -90,10 +106,10 @@ export default {
     },
     onTab(name) {
       if (name === this.tab) return
-      this.$router.push({ name: 'FileKb', params: { tab: name }, query: name === 'files' ? {} : this.$route.query }).catch(() => {})
+      this.$router.push({ name: 'FileKb', params: { tab: name }, query: name === 'files' ? { shell: this.$route.query.shell } : this.$route.query }).catch(() => {})
     },
     navigate({ tab, query }) {
-      this.$router.push({ name: 'FileKb', params: { tab }, query: query || {} }).catch(() => {})
+      this.$router.push({ name: 'FileKb', params: { tab }, query: { shell: this.$route.query.shell, ...(query || {}) } }).catch(() => {})
     }
   }
 }
@@ -200,6 +216,7 @@ export default {
   ::v-deep .el-tabs__nav-wrap::after { background: var(--ui-border); }
 }
 </style>
+<style lang="less" src="../mobile.less"></style>
 <style lang="less">
 /* 下拉弹层挂载在 body 下，无法被 scoped 覆盖；只作用于 KB 自有 popper-class */
 .kb-popper .popper__arrow { display: none !important; }

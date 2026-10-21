@@ -6,7 +6,8 @@
       'productShell--solo': hideSidebar,
       'productShell--focus': shellMode === 'focus',
       'productShell--embed': shellMode === 'embed',
-      'productShell--dark': isDarkTheme
+      'productShell--dark': isDarkTheme,
+      'productShell--knowledge': isKnowledgeRoute
     }"
   >
     <button
@@ -251,6 +252,7 @@ export default {
     }
   },
   computed: {
+    isKnowledgeRoute() { return this.$route.name === 'FileKb' },
     shellMode() {
       return resolveShellMode(this.$route)
     },
