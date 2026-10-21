@@ -1157,7 +1157,6 @@ export default {
     .mobileShellHeader > button.detailLauncher:last-child { margin-left: auto; }
     .mobileBrandMark { width: 40px; height: 40px; border-radius: 12px; font-size: 27px; font-family: Georgia,serif; }
     .mobileShellHeader strong { font-size: 20px; }
-    .mobileBottomNav { min-height: 65px; box-shadow: 0 -8px 24px #214c3a08; }
   }
 }
 </style>
@@ -1175,12 +1174,6 @@ export default {
     .mobilePageTitle { font-size: 27px; font-weight: 750; letter-spacing: -.6px; white-space: nowrap; }
     .mobileShellHeader .userAvatar { width: 45px !important; height: 45px !important; font-size: 19px !important; background: linear-gradient(135deg,#159c77,#087255); }
     .mobileShellHeader i { font-size: 26px; }
-    .mobileBottomNav { left: 50%; right: auto; transform: translateX(-50%); width: 100%; max-width: 640px; min-height: 85px; padding: 11px 16px calc(12px + env(safe-area-inset-bottom)); border: 1px solid #e7eee9; border-bottom: 0; border-radius: 20px 20px 0 0; background: rgba(255,255,255,.96); backdrop-filter: blur(16px); box-shadow: 0 -7px 25px rgba(42,74,56,.052); }
-    .mobileBottomNav > a, .mobileBottomNav .notificationButton { min-height: 62px; font-size: 12px; gap: 4px; color: #7b8c81; }
-    .mobileBottomNav i { display: grid; place-items: center; width: 65px; height: 38px; font-size: 27px; box-sizing: border-box; }
-    .mobileBottomNav .notificationButton i { font-size: 27px; }
-    .mobileBottomNav .router-link-active { color: #087659; font-weight: 700; }
-    .mobileBottomNav .router-link-active i { padding: 0; margin: 0; border-radius: 12px; background: #e5f4ec; }
   }
 }
 @media (max-width: 470px) {
@@ -1192,8 +1185,23 @@ export default {
     .mobileBrandMark { width: 46px; height: 46px; border-radius: 14px; font-size: 31px; }
     .mobilePageTitle { font-size: 23px; }
     .mobileShellHeader .userAvatar { width: 39px !important; height: 39px !important; font-size: 16px !important; }
-    .mobileBottomNav { padding-inline: 7px; }
   }
 }
 @media (max-width: 355px) { .productShell--teams .mobilePageTitle { font-size: 20px; } }
+</style>
+<style lang="less">
+// Navigation geometry stays identical across routes; only selection colors change.
+@media (max-width: 767px) {
+  .productShell .mobileBottomNav {
+    left: 50%; right: auto; transform: translateX(-50%); width: 100%; max-width: 640px;
+    min-height: 85px; padding: 11px 16px calc(12px + env(safe-area-inset-bottom));
+    border: 1px solid #e7eee9; border-bottom: 0; border-radius: 20px 20px 0 0;
+    background: rgba(255,255,255,.96); backdrop-filter: blur(16px); box-shadow: 0 -7px 25px rgba(42,74,56,.052);
+    > a, .notificationButton { min-height: 62px; font-size: 12px; gap: 4px; color: #7b8c81; }
+    i, .notificationButton i { display: grid; place-items: center; width: 65px; height: 38px; font-size: 27px; box-sizing: border-box; padding: 0; margin: 0; border-radius: 12px; }
+    .router-link-active { color: #087659; font-weight: 700; }
+    .router-link-active i { padding: 0; margin: 0; background: #e5f4ec; border-radius: 12px; }
+  }
+}
+@media (max-width: 470px) { .productShell .mobileBottomNav { padding-inline: 7px; } }
 </style>
