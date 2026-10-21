@@ -1,6 +1,7 @@
 <template>
-  <div class="assistantPage">
+  <div class="assistantPage" :class="{ mobileChatOpen }">
     <aside class="chatSidebar">
+      <button class="mobileChatToggle" type="button" aria-label="关闭对话列表" @click="mobileChatOpen = false"><i class="el-icon-close" /> 对话列表</button>
       <button class="newChatBtn" type="button" @click="newChat">
         <i class="el-icon-plus" aria-hidden="true"></i>
         新对话
@@ -36,6 +37,7 @@
 
     <section class="chatMain">
       <header class="mainHead">
+        <button class="mobileChatToggle" type="button" aria-label="打开对话列表" @click="mobileChatOpen = true"><i class="el-icon-chat-line-square" /></button>
         <div class="headLeft">
           <strong>助理</strong>
           <span class="statusDot" :class="health.ok ? 'ok' : 'bad'"></span>
@@ -382,6 +384,7 @@ export default {
     const store = loadStore()
     return {
       conversations: store.conversations,
+      mobileChatOpen: false,
       activeId: store.activeId,
       draft: '',
       sending: false,
@@ -563,6 +566,7 @@ export default {
       })
     },
     selectChat(id) {
+      this.mobileChatOpen = false
       this.activeId = id
       this.persist()
       this.scrollBottom()

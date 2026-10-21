@@ -8,7 +8,7 @@
     :close-on-click-modal="false"
     :show-close="false"
   >
-    <div v-loading="loading || busy" class="permissionDialogBody">
+    <div v-loading="loading || busy" :class="['permissionDialogBody', 'mobilePermission-' + mobilePermissionView]">
       <header class="permissionHeader">
         <div :class="['resourceIcon', { room: isRoom, team: isTeam }]">
           <i
@@ -39,6 +39,10 @@
           ×
         </button>
       </header>
+      <nav class="mobilePermissionTabs" aria-label="权限工作视图">
+        <button :class="{ active: mobilePermissionView === 'existing' }" @click="mobilePermissionView = 'existing'">已有权限</button>
+        <button v-if="!readOnly" :class="{ active: mobilePermissionView === 'add' }" @click="mobilePermissionView = 'add'">添加授权 · {{ selectionCount }}</button>
+      </nav>
       <div class="permissionWorkspace">
         <section v-if="!readOnly" class="organizationPane" aria-label="组织成员选择">
           <div class="paneHeader">
@@ -68,7 +72,7 @@
               v-for="row in visibleRows"
               :key="row.key"
               :class="['treeRow', row.type, { selected: isRowSelected(row), authorized: !!rowPermission(row) }]"
-              :style="{ paddingLeft: `${10 + row.level * 18}px` }"
+              :style="{ paddingLeft: `${isMobileViewport ? Math.min(10 + row.level * 14, 66) : 10 + row.level * 18}px` }"
               role="treeitem"
             >
               <button
@@ -179,7 +183,7 @@
               </div>
             </div>
             <div v-else class="selectionEmpty">
-              <i class="el-icon-user" /><span>从左侧选择部门或成员</span>
+              <i class="el-icon-user" /><span>选择部门或成员后，在此确认本次授权对象</span>
             </div>
           </section>
           <section v-if="!readOnly" class="detailSection">
@@ -275,7 +279,7 @@
                   v-if="isOwnerRole(member.role) || readOnly || (adapter && member.inheritedOnly)"
                   class="ownerRoleLabel"
                   >{{ roleLabel(member.role) }}</span
-                ><el-select
+                ><button v-else-if="isMobileViewport" type="button" class="mobileMemberRole" :aria-label="`修改${member.name || member.id}的权限`" @click="mobileRoleMember = member">{{ roleLabel(editableMemberRole(member)) || '跟随继承' }} <i class="el-icon-arrow-down" /></button><el-select
                   v-else
                   size="mini"
                   :class="['memberRoleSelect', String(member.role).toLowerCase()]"
@@ -331,6 +335,10 @@
         </aside>
       </div>
     </div>
+    <el-drawer :visible="!!mobileRoleMember" direction="btt" size="auto" :with-header="false" append-to-body custom-class="mobileActionSheet" @close="mobileRoleMember = null">
+      <header><strong>{{ mobileRoleMember && mobileRoleMember.name }} · 权限</strong><button aria-label="关闭权限选项" @click="mobileRoleMember = null"><i class="el-icon-close" /></button></header>
+      <div class="mobileActionGrid"><button v-for="option in memberRoleSelectOptions" :key="option.value" :disabled="option.disabled || busy" @click="updateRole(mobileRoleMember, option.value); mobileRoleMember = null">{{ option.label }}</button></div>
+    </el-drawer>
     <el-dialog
       :visible.sync="transferVisible"
       append-to-body
@@ -406,11 +414,13 @@
 
 <script>
 import folderService from '@/services/folderService'
+import mobileViewport from '@/utils/mobileViewport'
 import shareService from '@/services/shareService'
 import teamService from '@/services/teamService'
 import { getCurrentUser } from '@/utils/auth'
 export default {
   name: 'ShareFolderDialog',
+  mixins: [mobileViewport],
   props: {
     visible: Boolean,
     embedded: Boolean,
@@ -431,6 +441,8 @@ export default {
     }
   },
   data: () => ({
+    mobilePermissionView: 'existing',
+    mobileRoleMember: null,
     members: [],
     contacts: [],
     searchResults: [],
@@ -785,6 +797,8 @@ export default {
   },
   watch: {
     visible(value) {
+      this.mobileRoleMember = null
+      this.mobilePermissionView = 'existing'
       if (value) this.resetAndLoad()
       else { this.loadVersion += 1; clearTimeout(this.searchTimer) }
     },
@@ -1140,9 +1154,10 @@ export default {
         : { label: `${roles.size > 1 ? '混合权限 · ' : ''}${authorized.length} 人已授权`, tone: 'mixed' }
     },
     inspectRowPermission(row) {
+      this.mobilePermissionView = 'existing'
       this.memberQuery = row.type === 'member' ? row.name : ''
       this.roleFilter = ''
-      this.$refs.existingSection.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      this.$nextTick(() => this.$refs.existingSection.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
     },
     roleSelectValue(raw) {
       const value = String(raw || '').trim().toLowerCase()

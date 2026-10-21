@@ -1,0 +1,191 @@
+TAP version 13
+# Subtest: 复制链接即使没有 session 记录也优先原目录，不额外请求脑图
+ok 1 - 复制链接即使没有 session 记录也优先原目录，不额外请求脑图
+  ---
+  duration_ms: 610.5839
+  type: 'test'
+  ...
+# Subtest: 直接打开时复用当前详情，旧脑图详情不能用作新脑图归属
+ok 2 - 直接打开时复用当前详情，旧脑图详情不能用作新脑图归属
+  ---
+  duration_ms: 38.6846
+  type: 'test'
+  ...
+# Subtest: 网络超时、服务故障和登录失效保留当前编辑页，点击可重试
+ok 3 - 网络超时、服务故障和登录失效保留当前编辑页，点击可重试
+  ---
+  duration_ms: 62.0535
+  type: 'test'
+  ...
+# Subtest: 脑图详情已不可访问时允许列表兜底，不能将该规则扩大到临时故障
+ok 4 - 脑图详情已不可访问时允许列表兜底，不能将该规则扩大到临时故障
+  ---
+  duration_ms: 23.8767
+  type: 'test'
+  ...
+# Subtest: 等待详情期间切换页面或脑图不会发生过期跳转
+ok 5 - 等待详情期间切换页面或脑图不会发生过期跳转
+  ---
+  duration_ms: 11.2962
+  type: 'test'
+  ...
+# Subtest: 现有团队归属字段从服务端 DTO 到编辑器详情保持完整，个人脑图兼容 null
+ok 6 - 现有团队归属字段从服务端 DTO 到编辑器详情保持完整，个人脑图兼容 null
+  ---
+  duration_ms: 74.0042
+  type: 'test'
+  ...
+# Subtest: returnTo only accepts known list routes and rejects external or unknown my-maps paths
+ok 7 - returnTo only accepts known list routes and rejects external or unknown my-maps paths
+  ---
+  duration_ms: 2.4868
+  type: 'test'
+  ...
+# Subtest: a valid files source takes precedence over room ownership metadata
+ok 8 - a valid files source takes precedence over room ownership metadata
+  ---
+  duration_ms: 3.9325
+  type: 'test'
+  ...
+# Subtest: a valid my-maps source takes precedence over room ownership metadata
+ok 9 - a valid my-maps source takes precedence over room ownership metadata
+  ---
+  duration_ms: 0.6472
+  type: 'test'
+  ...
+# Subtest: a source team root takes precedence over the room folder/team assignment
+ok 10 - a source team root takes precedence over the room folder/team assignment
+  ---
+  duration_ms: 0.6729
+  type: 'test'
+  ...
+# Subtest: without a source context, folderId and teamId resolve to the folder in the legacy my-maps shell
+ok 11 - without a source context, folderId and teamId resolve to the folder in the legacy my-maps shell
+  ---
+  duration_ms: 0.3841
+  type: 'test'
+  ...
+# Subtest: without source or folder context, old editor links return to the my-maps root
+ok 12 - without source or folder context, old editor links return to the my-maps root
+  ---
+  duration_ms: 0.249
+  type: 'test'
+  ...
+# Subtest: a direct file-folder fallback preserves team scope and explicit full-shell mode
+ok 13 - a direct file-folder fallback preserves team scope and explicit full-shell mode
+  ---
+  duration_ms: 0.3869
+  type: 'test'
+  ...
+# Subtest: list snapshots are isolated by nav and remain readable after switching rooms inside the editor
+ok 14 - list snapshots are isolated by nav and remain readable after switching rooms inside the editor
+  ---
+  duration_ms: 7.4591
+  type: 'test'
+  ...
+# Subtest: snapshot capture and restore retain list filters and clamp the page to current results
+ok 15 - snapshot capture and restore retain list filters and clamp the page to current results
+  ---
+  duration_ms: 1.1964
+  type: 'test'
+  ...
+# Subtest: malformed and mismatched session snapshots degrade to no return context
+ok 16 - malformed and mismatched session snapshots degrade to no return context
+  ---
+  duration_ms: 1.8899
+  type: 'test'
+  ...
+# Subtest: bounded session storage evicts old records and quota failures do not block editor navigation
+ok 17 - bounded session storage evicts old records and quota failures do not block editor navigation
+  ---
+  duration_ms: 2.76
+  type: 'test'
+  ...
+# Subtest: scroll capture and restore use the nearest scrollable container and clamp to its bounds
+ok 18 - scroll capture and restore use the nearest scrollable container and clamp to its bounds
+  ---
+  duration_ms: 0.8948
+  type: 'test'
+  ...
+# Subtest: returning to the my-maps root arms the existing router redirect bypass
+ok 19 - returning to the my-maps root arms the existing router redirect bypass
+  ---
+  duration_ms: 0.4985
+  type: 'test'
+  ...
+# Subtest: touches outside the canvas do not synthesize mouse events or prevent panel scrolling
+ok 20 - touches outside the canvas do not synthesize mouse events or prevent panel scrolling
+  ---
+  duration_ms: 5.6834
+  type: 'test'
+  ...
+# Subtest: pinch terminates single-finger dragging and transforms the existing view
+ok 21 - pinch terminates single-finger dragging and transforms the existing view
+  ---
+  duration_ms: 2.6211
+  type: 'test'
+  ...
+# Subtest: dragging never counts as a double tap
+ok 22 - dragging never counts as a double tap
+  ---
+  duration_ms: 2.9527
+  type: 'test'
+  ...
+# Subtest: cancellation releases drag state and plugin teardown removes every listener
+ok 23 - cancellation releases drag state and plugin teardown removes every listener
+  ---
+  duration_ms: 1.8378
+  type: 'test'
+  ...
+# FilesPage return navigation tests passed
+# Subtest: web\\tests\\productShell.fileReturn.test.cjs
+ok 4 - web\\tests\\productShell.fileReturn.test.cjs
+  ---
+  duration_ms: 147.09
+  type: 'test'
+  ...
+# Subtest: shell mode uses a valid explicit URL value before entry defaults
+ok 25 - shell mode uses a valid explicit URL value before entry defaults
+  ---
+  duration_ms: 38.3268
+  type: 'test'
+  ...
+# Subtest: new in-app navigation inherits the source mode unless the target is explicit
+ok 26 - new in-app navigation inherits the source mode unless the target is explicit
+  ---
+  duration_ms: 2.6902
+  type: 'test'
+  ...
+# Subtest: history navigation follows the target entry instead of inheriting the page being left
+ok 27 - history navigation follows the target entry instead of inheriting the page being left
+  ---
+  duration_ms: 0.498
+  type: 'test'
+  ...
+# Subtest: withShell preserves target parameters, hash, repeated queries, and explicit mode
+ok 28 - withShell preserves target parameters, hash, repeated queries, and explicit mode
+  ---
+  duration_ms: 4.7526
+  type: 'test'
+  ...
+# Subtest: withShell leaves external links untouched
+ok 29 - withShell leaves external links untouched
+  ---
+  duration_ms: 0.6065
+  type: 'test'
+  ...
+# Subtest: withShell uses the destination entry default when no source route is available
+ok 30 - withShell uses the destination entry default when no source route is available
+  ---
+  duration_ms: 0.7076
+  type: 'test'
+  ...
+1..30
+# tests 30
+# suites 0
+# pass 30
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1449.7022

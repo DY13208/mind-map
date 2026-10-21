@@ -5,6 +5,8 @@ class TouchEvent {
   //  构造函数
   constructor({ mindMap }) {
     this.mindMap = mindMap
+    this.gestureActive = false
+    this.touchMoved = false
     this.touchesNum = 0
     this.singleTouchstartEvent = null
     this.clickNum = 0
@@ -38,6 +40,14 @@ class TouchEvent {
 
   // 手指按下事件
   onTouchstart(e) {
+    // Drawers and form controls outside the canvas keep native touch behavior.
+    if (!this.mindMap.el.contains(e.target)) return
+    this.gestureActive = true
+    this.touchMoved = false
+    if (e.touches.length > 1 && this.singleTouchstartEvent) {
+      this.dispatchMouseEvent('mouseup', this.singleTouchstartEvent.target)
+      this.singleTouchstartEvent = null
+    }
     this.touchesNum = e.touches.length
     this.touchStartScaleView = null
     if (this.touchesNum === 1) {
@@ -61,6 +71,10 @@ class TouchEvent {
 
   // 手指移动事件
   onTouchmove(e) {
+    if (!this.gestureActive) return
+    if (e.cancelable) e.preventDefault()
+    const start = this.singleTouchstartEvent
+    if (start && e.touches[0] && Math.hypot(start.clientX - e.touches[0].clientX, start.clientY - e.touches[0].clientY) > 8) this.touchMoved = true
     let len = e.touches.length
     if (len === 1) {
       let touch = e.touches[0]
@@ -129,12 +143,21 @@ class TouchEvent {
   }
 
   // 手指取消事件
-  onTouchcancel() {}
+  onTouchcancel(e) {
+    if (!this.gestureActive) return
+    this.dispatchMouseEvent('mouseup', e.target)
+    this.gestureActive = false
+    this.touchesNum = 0
+    this.singleTouchstartEvent = null
+    this.touchStartScaleView = null
+    this.clickNum = 0
+  }
 
   // 手指松开事件
   onTouchend(e) {
+    if (!this.gestureActive) return
     this.dispatchMouseEvent('mouseup', e.target)
-    if (this.touchesNum === 1) {
+    if (this.touchesNum === 1 && !this.touchMoved && this.singleTouchstartEvent) {
       // 模拟双击事件
       this.clickNum++
       setTimeout(() => {
@@ -151,6 +174,7 @@ class TouchEvent {
         // this.dispatchMouseEvent('click', ev.target, ev)
       }
     }
+    this.gestureActive = false
     this.touchesNum = 0
     this.singleTouchstartEvent = null
     this.touchStartScaleView = null

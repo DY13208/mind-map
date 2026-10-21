@@ -1,0 +1,107 @@
+Browserslist: caniuse-lite is outdated. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+
+-  Building for production...
+Browserslist: caniuse-lite is outdated. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+(node:32164) [DEP0180] DeprecationWarning: fs.Stats constructor is deprecated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Browserslist: caniuse-lite is outdated. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+(node:32260) [DEP0180] DeprecationWarning: fs.Stats constructor is deprecated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ WARNING  Compiled with 2 warnings09:30:50
+
+ warning  
+
+asset size limit: The following asset(s) exceed the recommended size limit (244 KiB).
+This can impact web performance.
+Assets: 
+  js/app.js (247 KiB)
+  css/chunk-2b3fe6c8.css (484 KiB)
+  js/chunk-2b3fe6c8.js (3.93 MiB)
+  js/chunk-d3d48fda.js (527 KiB)
+  js/chunk-vendors.js (1020 KiB)
+  js/file-kb.js (703 KiB)
+  js/product-shell.js (1.5 MiB)
+  js/sop-registry.js (1.33 MiB)
+  attachment-preview/pdf/wasm/openjpeg.wasm (244 KiB)
+  attachment-preview/pdf/wasm/openjpeg_nowasm_fallback.js (441 KiB)
+  attachment-preview/workbook.worker.js (433 KiB)
+  attachment-preview/pdf/pdf.js (954 KiB)
+  attachment-preview/pptx/renderer-1.3.0.js (1.74 MiB)
+  attachment-preview/pdf/pdf.worker.js (2.04 MiB)
+
+ warning  
+
+entrypoint size limit: The following entrypoint(s) combined asset size exceeds the recommended limit (244 KiB). This can impact web performance.
+Entrypoints:
+  app (1.51 MiB)
+      css/chunk-vendors.css
+      js/chunk-vendors.js
+      css/app.css
+      js/app.js
+
+
+  File                                      Size             Gzipped
+
+  ..\.mobile-build\js\chunk-2b3fe6c8.js     4021.02 KiB      1366.93 KiB
+  ..\.mobile-build\attachment-preview\pd    2089.08 KiB      415.62 KiB
+  f\pdf.worker.js
+  ..\.mobile-build\attachment-preview\pp    1782.73 KiB      441.32 KiB
+  tx\renderer-1.3.0.js
+  ..\.mobile-build\js\product-shell.js      1539.54 KiB      516.74 KiB
+  ..\.mobile-build\js\sop-registry.js       1365.65 KiB      413.83 KiB
+  ..\.mobile-build\js\chunk-vendors.js      1022.71 KiB      283.34 KiB
+  ..\.mobile-build\attachment-preview\pd    953.93 KiB       196.96 KiB
+  f\pdf.js
+  ..\.mobile-build\js\file-kb.js            702.99 KiB       226.90 KiB
+  ..\.mobile-build\js\chunk-d3d48fda.js     526.99 KiB       153.18 KiB
+  ..\.mobile-build\attachment-preview\pd    441.19 KiB       114.67 KiB
+  f\wasm\openjpeg_nowasm_fallback.js
+  ..\.mobile-build\attachment-preview\wo    432.94 KiB       143.70 KiB
+  rkbook.worker.js
+  ..\.mobile-build\js\app.js                247.22 KiB       77.66 KiB
+  ..\.mobile-build\js\chunk-7844cb3a.js     134.31 KiB       42.15 KiB
+  ..\.mobile-build\js\assistant.js          125.91 KiB       45.60 KiB
+  ..\.mobile-build\js\chunk-17695f69.js     101.10 KiB       35.58 KiB
+  ..\.mobile-build\js\chunk-2d217155.js     94.87 KiB        27.64 KiB
+  ..\.mobile-build\js\chunk-2d0a3537.js     77.10 KiB        21.01 KiB
+  ..\.mobile-build\js\chunk-0290670a.js     50.64 KiB        18.03 KiB
+  ..\.mobile-build\js\chunk-4f33867c.js     48.27 KiB        14.62 KiB
+  ..\.mobile-build\js\login-grid.js         14.87 KiB        5.18 KiB
+  ..\.mobile-build\js\chunk-45a638b5.js     11.90 KiB        4.14 KiB
+  ..\.mobile-build\js\chunk-13d15924.js     10.56 KiB        3.96 KiB
+  ..\.mobile-build\js\chunk-78d931f2.js     6.24 KiB         2.52 KiB
+  ..\.mobile-build\js\cognee.js             5.13 KiB         2.36 KiB
+  ..\.mobile-build\js\chunk-2d0c53a9.js     3.21 KiB         1.48 KiB
+  ..\.mobile-build\js\chunk-6b729ebb.js     2.71 KiB         1.07 KiB
+  ..\.mobile-build\js\chunk-2d0aa55b.js     2.64 KiB         1.36 KiB
+  ..\.mobile-build\js\chunk-2d0e5800.js     2.14 KiB         1.03 KiB
+  ..\.mobile-build\js\graph-service.js      0.58 KiB         0.37 KiB
+  ..\.mobile-build\js\chunk-3222d6ee.js     0.53 KiB         0.38 KiB
+  ..\.mobile-build\runtime-config.js        0.17 KiB         0.15 KiB
+  ..\.mobile-build\css\chunk-2b3fe6c8.cs    484.06 KiB       163.37 KiB
+  s
+  ..\.mobile-build\css\chunk-vendors.css    213.63 KiB       36.33 KiB
+  ..\.mobile-build\css\product-shell.css    166.26 KiB       36.11 KiB
+  ..\.mobile-build\css\file-kb.css          81.18 KiB        11.93 KiB
+  ..\.mobile-build\css\sop-registry.css     71.73 KiB        11.83 KiB
+  ..\.mobile-build\css\app.css              63.02 KiB        12.82 KiB
+  ..\.mobile-build\css\assistant.css        8.78 KiB         2.20 KiB
+  ..\.mobile-build\css\cognee.css           1.38 KiB         0.53 KiB
+  ..\.mobile-build\css\chunk-6b729ebb.cs    0.60 KiB         0.33 KiB
+  s
+  ..\.mobile-build\css\chunk-3222d6ee.cs    0.19 KiB         0.16 KiB
+  s
+  ..\.mobile-build\css\graph-service.css    0.18 KiB         0.14 KiB
+  ..\.mobile-build\wecom-login.css          0.10 KiB         0.10 KiB
+
+  Images and other types of assets omitted.
+
+ DONE  Build complete. The ..\.mobile-build directory is ready to be deployed.
+ INFO  Check out deployment instructions at https://cli.vuejs.org/guide/deployment.html
+      

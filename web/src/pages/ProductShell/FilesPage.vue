@@ -1,5 +1,8 @@
 <template>
   <section class="productPage">
+    <nav class="mobileFileTabs" aria-label="脑图分类">
+      <router-link to="/files/recent">最近</router-link><router-link to="/files" exact>我的</router-link><router-link to="/files/shared">共享</router-link><router-link to="/files/favorites">收藏</router-link>
+    </nav>
     <FileToolbar
       :search.sync="search"
       :show-favorites="!isTeamView && ['files', 'folder', 'favorites'].includes(mode)"
@@ -23,6 +26,14 @@
         :root-label="isTeamView && selectedTeam ? selectedTeam.name : '脑图'"
       />
     </FileToolbar>
+    <div v-if="isMobileViewport && mode !== 'trash'" class="mobileFileFilters">
+      <button v-for="option in [{value:'all',label:'全部'},{value:'folders',label:'文件夹'},{value:'rooms',label:'脑图'}]" :key="option.value" :aria-pressed="mobileKind === option.value" :class="{active: mobileKind === option.value}" @click="mobileKind = option.value">{{ option.label }}</button>
+      <el-select v-model="sort" aria-label="排序方式"><el-option value="updatedAt" label="最近更新" /><el-option value="title" label="名称排序" /></el-select>
+    </div>
+    <el-drawer :visible.sync="mobileCreateOpen" direction="btt" size="auto" :with-header="false" append-to-body custom-class="mobileActionSheet">
+      <header><strong>新建</strong><button aria-label="关闭新建菜单" @click="mobileCreateOpen = false"><i class="el-icon-close" /></button></header>
+      <div class="mobileActionGrid"><button @click="mobileCreateOpen = false; createRoom()">新建脑图</button><button v-if="!isTeamView || canManageTeam" @click="mobileCreateOpen = false; createFolder()">新建文件夹</button><button @click="mobileCreateOpen = false; openImport()">导入脑图</button></div>
+    </el-drawer>
     <BatchActionBar
       v-if="selectMode"
       :count="batchSelectionCount"
@@ -54,7 +65,7 @@
       /><el-button @click="load({ reset: true, keepPage: true })">重试</el-button>
     </div>
     <div v-else v-loading="loading || busy" class="contentArea">
-      <div v-if="mode !== 'trash' && view === 'card' && itemCount" class="itemGrid">
+      <div v-if="mode !== 'trash' && (view === 'card' || isMobileViewport) && itemCount" class="itemGrid">
         <template v-if="showFolders">
           <FolderCard
             v-for="item in filteredFolders"
@@ -67,6 +78,7 @@
             :can-select="canSelectFolder(item)"
             @open="openFolder"
             @rename-inline="renameFolderInline"
+            @rename-request="renameFolderFromMenu"
             @share="shareFolder"
             @delete="deleteFolder"
             @toggle-select="toggleFolderSelect"
@@ -115,7 +127,7 @@
         />
       </div>
       <RoomList
-        v-if="mode !== 'trash' && view === 'list' && itemCount"
+        v-if="mode !== 'trash' && (view === 'list' && !isMobileViewport) && itemCount"
         ref="roomList"
         :rooms="visibleRooms"
         :folders="showFolders ? filteredFolders : []"
@@ -207,6 +219,7 @@
 </template>
 
 <script>
+import mobileViewport from '@/utils/mobileViewport'
 import { userMessageFromError } from '@/services/apiError'
 import { isNavigationFailure, NavigationFailureType } from 'vue-router'
 import roomService from '@/services/roomService'
@@ -268,6 +281,7 @@ const savedPageSize = () => {
   }
 }
 export default {
+  mixins: [mobileViewport],
   name: 'FilesPage',
   components: {
     EmptyState,
@@ -298,6 +312,8 @@ export default {
       search: '',
       roleFilter: '',
       sort: 'updatedAt',
+      mobileKind: 'all',
+      mobileCreateOpen: false,
       view: savedView(),
       activeRoom: null,
       activeItem: null,
@@ -510,6 +526,7 @@ export default {
         .map(folder => ({ ...folder, itemCount: Number(folder.roomCount || 0) + (counts.get(folder.id) || 0) }))
     },
     filteredFolders() {
+      if (this.isMobileViewport && this.mobileKind === 'rooms') return []
       const q = this.search.trim().toLowerCase()
       return this.showFolders && !this.roleFilter
         ? this.childFolders.filter(
@@ -518,6 +535,7 @@ export default {
         : []
     },
     visibleRooms() {
+      if (this.isMobileViewport && this.mobileKind === 'folders') return []
       const q = this.search.trim().toLowerCase()
       const rooms = this.rooms.filter(room => {
         if (this.roleFilter && room.role !== String(this.roleFilter).toLowerCase()) {
@@ -594,14 +612,18 @@ export default {
     }
   },
   created() {
+    this.$bus.$on('mobile-create-file', this.openMobileCreate)
     this.restoreNavigationState()
   },
   beforeDestroy() {
+    this.$bus.$off('mobile-create-file', this.openMobileCreate)
     clearTimeout(this.searchTimer)
     clearTimeout(this.highlightTimer)
     this.requestId++
   },
   methods: {
+    renameFolderFromMenu(folder) { this.activeItem = { ...folder, title: folder.name }; this.renameKind = 'folder'; this.renameVisible = true },
+    openMobileCreate() { this.mobileCreateOpen = true },
     resetPage() {
       clearTimeout(this.highlightTimer)
       this.returnContext = null

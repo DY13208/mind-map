@@ -18,6 +18,7 @@
               :current-room-key="currentRoomKey()"
               :is-dark="isDark"
               @open="openMapFromTree"
+              @close="mapTreeShow = false"
             />
             <button
               slot="reference"
@@ -83,6 +84,7 @@
           </el-popover>
           <span v-else class="saveChip" :class="displayedSaveChip" :title="collabError || collabSaveLabel">{{ collabSaveLabel }}</span>
           </div>
+          <button type="button" class="mobileEditorFileMore" aria-label="更多文件操作" @click="mobileMenuOpen = true"><i class="el-icon-more" /></button>
           <button
             type="button"
             class="toolIconBtn"
@@ -262,6 +264,10 @@
         </div>
       </div>
     </div>
+    <el-drawer :visible.sync="mobileMenuOpen" direction="btt" size="auto" :with-header="false" append-to-body custom-class="mobileActionSheet">
+      <header><strong>脑图操作</strong><button aria-label="关闭脑图操作" @click="mobileMenuOpen = false"><i class="el-icon-close" /></button></header>
+      <div class="mobileActionGrid"><button v-for="item in fileToolbarActions" :key="item.key" :disabled="item.disabled" @click="mobileMenuOpen = false; onFileMenuSelect(item.key)">{{ item.label }}</button></div>
+    </el-drawer>
     <el-dialog
       :visible.sync="jobHistoryVisible"
       width="960px"
@@ -917,6 +923,7 @@ export default {
         isLeaf: 'leaf'
       },
       fileTreeVisible: false,
+      mobileMenuOpen: false,
       rootDirName: '',
       fileTreeExpand: true,
       waitingWriteToLocalFile: false,
@@ -1912,7 +1919,7 @@ export default {
       if (!open) this.popoverShow = false
       try {
         localStorage.setItem('mindmap.nodeToolsOpen', open ? '1' : '0')
-      } catch (err) {}
+      } catch (err) { /* Toolbar preference is optional. */ }
     },
 
     fileActionsByKey(keys) {

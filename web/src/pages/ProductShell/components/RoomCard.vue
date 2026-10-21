@@ -4,6 +4,7 @@
     :class="{ selected, selectable, 'is-return-highlighted': highlighted }"
     tabindex="0"
     :aria-label="`打开 ${room.title}`"
+    :data-room-key="room.roomKey || room.id"
     :data-tone="tone"
     :data-open="opening || undefined"
     :style="{ height: rootHeight + 'px' }"

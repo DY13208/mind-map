@@ -1,0 +1,96 @@
+<!DOCTYPE html><html lang=""><head><meta charset="utf-8"><script>if (window.location.pathname.startsWith('/node-share/')) {
+        const referrerPolicy = document.createElement('meta')
+        referrerPolicy.name = 'referrer'
+        referrerPolicy.content = 'no-referrer'
+        document.head.appendChild(referrerPolicy)
+      }</script><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/logo.ico"><title>WCPD</title><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"><script src="/runtime-config.js"></script><script>window.externalPublicPath =
+        (window.__MIND_MAP_RUNTIME__ &&
+          window.__MIND_MAP_RUNTIME__.publicPath) ||
+        './dist/'
+      // 接管应用
+      window.takeOverApp = false</script><script>;(function () {
+    var hostname = window.location.hostname.toLowerCase()
+    if (hostname === 'localhost' || hostname === '::1' || hostname === '[::1]' || /^127\./.test(hostname)) return
+    var analytics = document.createElement('script')
+    analytics.src = 'https://sdk.51.la/js-sdk-pro.min.js'
+    analytics.id = 'LA_COLLECT'
+    analytics.async = true
+    analytics.onload = function () {
+      if (window.LA) window.LA.init({ id: 'KRO0WxK8GT66tYCQ', ck: 'KRO0WxK8GT66tYCQ' })
+    }
+    document.head.appendChild(analytics)
+  })()</script><link href="/css/chunk-vendors.css?a5649257621d240a143f" rel="stylesheet"><link href="/css/app.css?a5649257621d240a143f" rel="stylesheet"></head><body><noscript><strong>We're sorry but thoughts doesn't work properly without JavaScript enabled. Please enable it to continue.</strong></noscript><div id="app"></div><script>const getDataFromBackend = () => {
+        return new Promise((resolve, reject) => {
+          setTimeout(() => {
+            resolve({
+              mindMapData: {
+                root: {
+                  data: {
+                    text: '根节点'
+                  },
+                  children: []
+                },
+                theme: {
+                  template: 'avocado',
+                  config: {}
+                },
+                layout: 'logicalStructure',
+                config: {},
+                view: null
+              },
+              mindMapConfig: {},
+              lang: 'zh',
+              localConfig: null
+            })
+          }, 200)
+        })
+      }
+      const setTakeOverAppMethods = data => {
+        window.takeOverAppMethods = {}
+        // 获取思维导图数据的函数
+        window.takeOverAppMethods.getMindMapData = () => {
+          return data.mindMapData
+        }
+        // 保存思维导图数据的函数
+        window.takeOverAppMethods.saveMindMapData = data => {
+          console.log(data)
+        }
+        // 获取思维导图配置，也就是实例化时会传入的选项
+        window.takeOverAppMethods.getMindMapConfig = () => {
+          return data.mindMapConfig
+        }
+        // 保存思维导图配置
+        window.takeOverAppMethods.saveMindMapConfig = config => {
+          console.log(config)
+        }
+        // 获取语言的函数
+        window.takeOverAppMethods.getLanguage = () => {
+          return data.lang
+        }
+        // 保存语言的函数
+        window.takeOverAppMethods.saveLanguage = lang => {
+          console.log(lang)
+        }
+        // 获取本地配置的函数
+        window.takeOverAppMethods.getLocalConfig = () => {
+          return data.localConfig
+        }
+        // 保存本地配置的函数
+        window.takeOverAppMethods.saveLocalConfig = config => {
+          console.log(config)
+        }
+      }
+      window.onload = async () => {
+        if (!window.takeOverApp) return
+        // 请求数据
+        const data = await getDataFromBackend()
+        // 设置全局的方法
+        setTakeOverAppMethods(data)
+        // 思维导图实例创建完成事件
+        window.$bus.$on('app_inited', mindMap => {
+          console.log(mindMap)
+        })
+        // 可以通过window.$bus.$on()来监听应用的一些事件
+        // 实例化页面
+        window.initApp()
+      }</script><script src="/js/chunk-vendors.js?a5649257621d240a143f"></script><script src="/js/app.js?a5649257621d240a143f"></script></body></html>

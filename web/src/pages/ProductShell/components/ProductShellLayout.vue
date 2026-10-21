@@ -130,6 +130,17 @@
         </button>
       </div>
     </aside>
+    <header v-if="shellMode !== 'embed'" class="mobileShellHeader">
+      <button aria-label="打开全部功能" @click="openNavigation"><span class="mobileBrandMark">W</span><strong>WCPD</strong></button>
+      <button aria-label="全部功能与设置" @click="openNavigation"><i class="el-icon-menu" /></button>
+    </header>
+    <nav v-if="shellMode !== 'embed'" class="mobileBottomNav" aria-label="主导航">
+      <router-link to="/files"><i class="el-icon-house" /><span>脑图</span></router-link>
+      <router-link to="/spaces"><i class="el-icon-office-building" /><span>空间</span></router-link>
+      <button class="mobilePrimary" aria-label="新建" @click="mobileCreate"><i class="el-icon-plus" /></button>
+      <AccessNotificationTrigger v-if="profile" :key="'mobile-' + profile.id" />
+      <router-link to="/profile"><i class="el-icon-user" /><span>我的</span></router-link>
+    </nav>
     <main class="productMain">
       <div v-if="shellMode === 'focus'" class="shellModeToolbar" role="group" aria-label="页面导航模式">
         <button
@@ -158,7 +169,7 @@
       <router-view />
     </main>
     <el-drawer
-      v-if="shellMode === 'focus'"
+      v-if="shellMode === 'focus' || isMobileViewport"
       :visible.sync="navigationOpen"
       size="288px"
       direction="ltr"
@@ -199,6 +210,7 @@
 </template>
 
 <script>
+import mobileViewport from '@/utils/mobileViewport'
 import productService from '@/services/productService'
 import { logoutAndRedirect } from '@/utils/auth'
 import UserAvatar from '@/components/UserAvatar.vue'
@@ -218,6 +230,7 @@ const readSidebarPreference = () => {
 }
 export default {
   name: 'ProductShellLayout',
+  mixins: [mobileViewport],
   components: { UserAvatar, AccessNotificationTrigger, ProductNavigation },
   data() {
     const preference = readSidebarPreference()
@@ -276,6 +289,12 @@ export default {
     }
   },
   methods: {
+    async mobileCreate() {
+      if (!['/files', '/my-maps'].some(path => this.$route.path === path || this.$route.path.startsWith(path + '/folder/'))) {
+        await this.$router.push('/files')
+      }
+      this.$nextTick(() => this.$bus.$emit('mobile-create-file'))
+    },
     updateAutoSidebar() {
       if (!this.hasSidebarPreference) this.sidebarCollapsed = isSmallScreen()
     },

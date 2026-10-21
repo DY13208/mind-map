@@ -15,7 +15,14 @@
       <span class="kb-batch-scope">仅限当前页</span>
       <el-button size="small" icon="el-icon-refresh-right" class="kb-batch-reparse" @click="$emit('batch-reparse', selection.slice())">批量重新解析</el-button>
     </div>
-    <el-table
+    <div v-if="isMobileViewport" class="kb-mobile-files">
+      <article v-for="row in files" :key="row.id" class="kb-mobile-file">
+        <div class="kb-mobile-file-head"><el-checkbox :value="selection.some(f => f.id === row.id)" :aria-label="`选择${row.name || row.fileName}`" @change="toggleMobile(row, $event)" /><button @click="$emit('open', row)"><i :class="iconOf(row)" /> {{ row.name || row.fileName }}</button></div>
+        <div class="kb-mobile-file-meta"><KbStatusTag :status="row.status" :detail="row.error || row.statusDetail || ''" /><span>{{ size(row.size != null ? row.size : row.byteSize) }} · {{ time(row.updatedAt || row.createdAt) }}</span></div>
+        <div class="kb-mobile-file-actions"><el-button size="small" @click="$emit('open', row)">解析</el-button><el-button size="small" @click="$emit('data', row)">数据</el-button><el-dropdown trigger="click" @command="c => $emit(c, row)"><el-button size="small" aria-label="更多文件操作" icon="el-icon-more" /><el-dropdown-menu slot="dropdown"><el-dropdown-item command="reparse">重新解析</el-dropdown-item><el-dropdown-item command="acl">权限设置</el-dropdown-item><el-dropdown-item command="delete">删除</el-dropdown-item></el-dropdown-menu></el-dropdown></div>
+      </article>
+    </div>
+    <el-table v-else
       ref="table"
       :data="files"
       row-key="id"
@@ -60,26 +67,31 @@
 </template>
 <script>
 import BatchActionBar from '@/pages/ProductShell/components/BatchActionBar.vue'
+import mobileViewport from '@/utils/mobileViewport'
 import KbStatusTag from './KbStatusTag.vue'
 import { formatSize, formatTime, fileKind } from '../utils/format'
 export default {
   name: 'KbFileTable',
+  mixins: [mobileViewport],
   components: { BatchActionBar, KbStatusTag },
   props: { files: { type: Array, default: () => [] } },
   data() {
     return { selection: [] }
   },
   methods: {
+    toggleMobile(row, selected) { this.selection = this.selection.filter(f => f.id !== row.id); if (selected) this.selection.push(row) },
     size: formatSize,
     time: formatTime,
     iconOf(row) {
       return { pdf: 'el-icon-document', image: 'el-icon-picture-outline', sheet: 'el-icon-s-grid' }[fileKind(row)] || 'el-icon-tickets'
     },
     toggleAll(v) {
+      if (this.isMobileViewport) { this.selection = v ? this.files.slice() : []; return }
       this.$refs.table.clearSelection()
       if (v) this.files.forEach(r => this.$refs.table.toggleRowSelection(r, true))
     },
     clearSelection() {
+      if (!this.$refs.table) { this.selection = []; return }
       this.$refs.table.clearSelection()
     }
   }

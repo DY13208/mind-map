@@ -1,0 +1,1373 @@
+TAP version 13
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# Subtest: [R26] production card/service dispatch bounds 100 actual pending HTTP requests to four
+not ok 1 - [R26] production card/service dispatch bounds 100 actual pending HTTP requests to four
+  ---
+  duration_ms: 937.8823
+  type: 'test'
+  location: 'D:\\mind-map\\web\\tests\\cardPreviewQueue.test.cjs:11:1'
+  failureType: 'testCodeFailure'
+  error: 'cancelAnimationFrame is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Vue.beforeDestroy (eval at load (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:68:5), <anonymous>:60:5)
+    invokeWithErrorHandling (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:2931:61)
+    callHook$1 (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3996:13)
+    Vue.$destroy (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3767:9)
+    D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:54
+    Array.forEach (<anonymous>)
+    Object.destroy (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:13)
+    TestContext.<anonymous> (D:\mind-map\web\tests\cardPreviewQueue.test.cjs:37:13)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# Subtest: [R26] two real cards with the same identity and revision share one pending request
+not ok 2 - [R26] two real cards with the same identity and revision share one pending request
+  ---
+  duration_ms: 272.3436
+  type: 'test'
+  location: 'D:\\mind-map\\web\\tests\\cardPreviewQueue.test.cjs:41:1'
+  failureType: 'testCodeFailure'
+  error: 'cancelAnimationFrame is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Vue.beforeDestroy (eval at load (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:68:5), <anonymous>:60:5)
+    invokeWithErrorHandling (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:2931:61)
+    callHook$1 (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3996:13)
+    Vue.$destroy (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3767:9)
+    D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:54
+    Array.forEach (<anonymous>)
+    Object.destroy (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:13)
+    TestContext.<anonymous> (D:\mind-map\web\tests\cardPreviewQueue.test.cjs:56:13)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# Subtest: [R26] destroying the last subscriber aborts the real transport signal
+not ok 3 - [R26] destroying the last subscriber aborts the real transport signal
+  ---
+  duration_ms: 236.0429
+  type: 'test'
+  location: 'D:\\mind-map\\web\\tests\\cardPreviewQueue.test.cjs:60:1'
+  failureType: 'testCodeFailure'
+  error: 'cancelAnimationFrame is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Vue.beforeDestroy (eval at load (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:68:5), <anonymous>:60:5)
+    invokeWithErrorHandling (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:2931:61)
+    callHook$1 (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3996:13)
+    Vue.$destroy (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3767:9)
+    D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:54
+    Array.forEach (<anonymous>)
+    Object.destroy (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:13)
+    TestContext.<anonymous> (D:\mind-map\web\tests\cardPreviewQueue.test.cjs:75:13)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# Subtest: [R27] delayed revision one cannot populate revision two cache for the same room
+not ok 4 - [R27] delayed revision one cannot populate revision two cache for the same room
+  ---
+  duration_ms: 223.6129
+  type: 'test'
+  location: 'D:\\mind-map\\web\\tests\\cardPreviewQueue.test.cjs:79:1'
+  failureType: 'testCodeFailure'
+  error: 'cancelAnimationFrame is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Vue.beforeDestroy (eval at load (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:68:5), <anonymous>:60:5)
+    invokeWithErrorHandling (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:2931:61)
+    callHook$1 (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3996:13)
+    Vue.$destroy (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3767:9)
+    D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:54
+    Array.forEach (<anonymous>)
+    Object.destroy (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:13)
+    TestContext.<anonymous> (D:\mind-map\web\tests\cardPreviewQueue.test.cjs:103:13)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: [R27] fulfilled preview cache is isolated between real identity contexts
+not ok 5 - [R27] fulfilled preview cache is isolated between real identity contexts
+  ---
+  duration_ms: 213.8323
+  type: 'test'
+  location: 'D:\\mind-map\\web\\tests\\cardPreviewQueue.test.cjs:107:1'
+  failureType: 'testCodeFailure'
+  error: 'cancelAnimationFrame is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Vue.beforeDestroy (eval at load (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:68:5), <anonymous>:60:5)
+    invokeWithErrorHandling (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:2931:61)
+    callHook$1 (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3996:13)
+    Vue.$destroy (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3767:9)
+    D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:54
+    Array.forEach (<anonymous>)
+    Object.destroy (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:13)
+    TestContext.<anonymous> (D:\mind-map\web\tests\cardPreviewQueue.test.cjs:119:23)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: [R28] aborted production preview remains retryable instead of retaining a fallback title
+not ok 6 - [R28] aborted production preview remains retryable instead of retaining a fallback title
+  ---
+  duration_ms: 210.8142
+  type: 'test'
+  location: 'D:\\mind-map\\web\\tests\\cardPreviewQueue.test.cjs:122:1'
+  failureType: 'testCodeFailure'
+  error: 'cancelAnimationFrame is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Vue.beforeDestroy (eval at load (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:68:5), <anonymous>:60:5)
+    invokeWithErrorHandling (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:2931:61)
+    callHook$1 (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3996:13)
+    Vue.$destroy (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3767:9)
+    D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:54
+    Array.forEach (<anonymous>)
+    Object.destroy (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:13)
+    TestContext.<anonymous> (D:\mind-map\web\tests\cardPreviewQueue.test.cjs:136:23)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# Subtest: [R26] one cancelled subscriber leaves the other subscriber and shared request alive
+not ok 7 - [R26] one cancelled subscriber leaves the other subscriber and shared request alive
+  ---
+  duration_ms: 210.1191
+  type: 'test'
+  location: 'D:\\mind-map\\web\\tests\\cardPreviewQueue.test.cjs:139:1'
+  failureType: 'testCodeFailure'
+  error: 'cancelAnimationFrame is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Vue.beforeDestroy (eval at load (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:68:5), <anonymous>:60:5)
+    invokeWithErrorHandling (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:2931:61)
+    callHook$1 (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3996:13)
+    Vue.$destroy (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3767:9)
+    D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:54
+    Array.forEach (<anonymous>)
+    Object.destroy (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:13)
+    TestContext.<anonymous> (D:\mind-map\web\tests\cardPreviewQueue.test.cjs:159:13)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# Subtest: [R26] different revisions issue independent requests instead of coalescing by room alone
+not ok 8 - [R26] different revisions issue independent requests instead of coalescing by room alone
+  ---
+  duration_ms: 227.8485
+  type: 'test'
+  location: 'D:\\mind-map\\web\\tests\\cardPreviewQueue.test.cjs:163:1'
+  failureType: 'testCodeFailure'
+  error: 'cancelAnimationFrame is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Vue.beforeDestroy (eval at load (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:68:5), <anonymous>:60:5)
+    invokeWithErrorHandling (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:2931:61)
+    callHook$1 (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3996:13)
+    Vue.$destroy (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3767:9)
+    D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:54
+    Array.forEach (<anonymous>)
+    Object.destroy (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:13)
+    TestContext.<anonymous> (D:\mind-map\web\tests\cardPreviewQueue.test.cjs:175:13)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: [R28] fulfilled cache evicts its oldest entry after more than 128 production previews
+not ok 9 - [R28] fulfilled cache evicts its oldest entry after more than 128 production previews
+  ---
+  duration_ms: 264.3194
+  type: 'test'
+  location: 'D:\\mind-map\\web\\tests\\cardPreviewQueue.test.cjs:179:1'
+  failureType: 'testCodeFailure'
+  error: 'cancelAnimationFrame is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Vue.beforeDestroy (eval at load (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:68:5), <anonymous>:60:5)
+    invokeWithErrorHandling (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:2931:61)
+    callHook$1 (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3996:13)
+    Vue.$destroy (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3767:9)
+    D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:54
+    Array.forEach (<anonymous>)
+    Object.destroy (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:13)
+    TestContext.<anonymous> (D:\mind-map\web\tests\cardPreviewQueue.test.cjs:189:23)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: [R28] fulfilled cache also evicts by four MiB even while its item count is below 128
+not ok 10 - [R28] fulfilled cache also evicts by four MiB even while its item count is below 128
+  ---
+  duration_ms: 215.5469
+  type: 'test'
+  location: 'D:\\mind-map\\web\\tests\\cardPreviewQueue.test.cjs:192:1'
+  failureType: 'testCodeFailure'
+  error: 'cancelAnimationFrame is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Vue.beforeDestroy (eval at load (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:68:5), <anonymous>:60:5)
+    invokeWithErrorHandling (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:2931:61)
+    callHook$1 (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3996:13)
+    Vue.$destroy (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3767:9)
+    D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:54
+    Array.forEach (<anonymous>)
+    Object.destroy (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:13)
+    TestContext.<anonymous> (D:\mind-map\web\tests\cardPreviewQueue.test.cjs:202:23)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# Subtest: [R26] cancelling a queued card never starts its obsolete HTTP request
+not ok 11 - [R26] cancelling a queued card never starts its obsolete HTTP request
+  ---
+  duration_ms: 270.4131
+  type: 'test'
+  location: 'D:\\mind-map\\web\\tests\\cardPreviewQueue.test.cjs:205:1'
+  failureType: 'testCodeFailure'
+  error: 'cancelAnimationFrame is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Vue.beforeDestroy (eval at load (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:68:5), <anonymous>:60:5)
+    invokeWithErrorHandling (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:2931:61)
+    callHook$1 (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3996:13)
+    Vue.$destroy (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3767:9)
+    TestContext.<anonymous> (D:\mind-map\web\tests\cardPreviewQueue.test.cjs:212:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: [R27] cache keys use actual response revision instead of requested revision
+not ok 12 - [R27] cache keys use actual response revision instead of requested revision
+  ---
+  duration_ms: 258.633
+  type: 'test'
+  location: 'D:\\mind-map\\web\\tests\\cardPreviewQueue.test.cjs:220:1'
+  failureType: 'testCodeFailure'
+  error: 'cancelAnimationFrame is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Vue.beforeDestroy (eval at load (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:68:5), <anonymous>:60:5)
+    invokeWithErrorHandling (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:2931:61)
+    callHook$1 (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3996:13)
+    Vue.$destroy (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3767:9)
+    D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:54
+    Array.forEach (<anonymous>)
+    Object.destroy (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:13)
+    TestContext.<anonymous> (D:\mind-map\web\tests\cardPreviewQueue.test.cjs:230:23)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# [Vue warn]: Error in beforeDestroy hook: "ReferenceError: cancelAnimationFrame is not defined"
+# (found in <Root>)
+# Subtest: [R27] generation changes retire old work even when content revision is unchanged
+not ok 13 - [R27] generation changes retire old work even when content revision is unchanged
+  ---
+  duration_ms: 374.2137
+  type: 'test'
+  location: 'D:\\mind-map\\web\\tests\\cardPreviewQueue.test.cjs:233:1'
+  failureType: 'testCodeFailure'
+  error: 'cancelAnimationFrame is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Vue.beforeDestroy (eval at load (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:68:5), <anonymous>:60:5)
+    invokeWithErrorHandling (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:2931:61)
+    callHook$1 (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3996:13)
+    Vue.$destroy (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3767:9)
+    D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:54
+    Array.forEach (<anonymous>)
+    Object.destroy (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:13)
+    TestContext.<anonymous> (D:\mind-map\web\tests\cardPreviewQueue.test.cjs:252:21)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: [R27] a fresh authentication object for the same user retires cached session content
+not ok 14 - [R27] a fresh authentication object for the same user retires cached session content
+  ---
+  duration_ms: 238.805
+  type: 'test'
+  location: 'D:\\mind-map\\web\\tests\\cardPreviewQueue.test.cjs:255:1'
+  failureType: 'testCodeFailure'
+  error: 'cancelAnimationFrame is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Vue.beforeDestroy (eval at load (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:68:5), <anonymous>:60:5)
+    invokeWithErrorHandling (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:2931:61)
+    callHook$1 (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3996:13)
+    Vue.$destroy (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3767:9)
+    D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:54
+    Array.forEach (<anonymous>)
+    Object.destroy (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:13)
+    TestContext.<anonymous> (D:\mind-map\web\tests\cardPreviewQueue.test.cjs:264:23)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: [R28] native fetch AbortError passes through the real service without becoming a read-only-message TypeError
+ok 15 - [R28] native fetch AbortError passes through the real service without becoming a read-only-message TypeError
+  ---
+  duration_ms: 252.121
+  type: 'test'
+  ...
+# Subtest: [R27] refreshed room authorization cannot hydrate or request a full preview from a prior grant
+not ok 16 - [R27] refreshed room authorization cannot hydrate or request a full preview from a prior grant
+  ---
+  duration_ms: 234.8283
+  type: 'test'
+  location: 'D:\\mind-map\\web\\tests\\cardPreviewQueue.test.cjs:275:1'
+  failureType: 'testCodeFailure'
+  error: 'cancelAnimationFrame is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Vue.beforeDestroy (eval at load (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:68:5), <anonymous>:60:5)
+    invokeWithErrorHandling (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:2931:61)
+    callHook$1 (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3996:13)
+    Vue.$destroy (D:\mind-map\web\node_modules\vue\dist\vue.runtime.common.dev.js:3767:9)
+    D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:54
+    Array.forEach (<anonymous>)
+    Object.destroy (D:\mind-map\web\tests\helpers\directoryRuntime.cjs:87:13)
+    TestContext.<anonymous> (D:\mind-map\web\tests\cardPreviewQueue.test.cjs:290:23)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 复制链接即使没有 session 记录也优先原目录，不额外请求脑图
+ok 17 - 复制链接即使没有 session 记录也优先原目录，不额外请求脑图
+  ---
+  duration_ms: 537.9339
+  type: 'test'
+  ...
+# Subtest: 直接打开时复用当前详情，旧脑图详情不能用作新脑图归属
+ok 18 - 直接打开时复用当前详情，旧脑图详情不能用作新脑图归属
+  ---
+  duration_ms: 25.5101
+  type: 'test'
+  ...
+# Subtest: 网络超时、服务故障和登录失效保留当前编辑页，点击可重试
+ok 19 - 网络超时、服务故障和登录失效保留当前编辑页，点击可重试
+  ---
+  duration_ms: 65.79
+  type: 'test'
+  ...
+# Subtest: 脑图详情已不可访问时允许列表兜底，不能将该规则扩大到临时故障
+ok 20 - 脑图详情已不可访问时允许列表兜底，不能将该规则扩大到临时故障
+  ---
+  duration_ms: 24.2801
+  type: 'test'
+  ...
+# Subtest: 等待详情期间切换页面或脑图不会发生过期跳转
+ok 21 - 等待详情期间切换页面或脑图不会发生过期跳转
+  ---
+  duration_ms: 11.2735
+  type: 'test'
+  ...
+# Subtest: 现有团队归属字段从服务端 DTO 到编辑器详情保持完整，个人脑图兼容 null
+ok 22 - 现有团队归属字段从服务端 DTO 到编辑器详情保持完整，个人脑图兼容 null
+  ---
+  duration_ms: 60.437
+  type: 'test'
+  ...
+# Subtest: returnTo only accepts known list routes and rejects external or unknown my-maps paths
+ok 23 - returnTo only accepts known list routes and rejects external or unknown my-maps paths
+  ---
+  duration_ms: 4.6001
+  type: 'test'
+  ...
+# Subtest: a valid files source takes precedence over room ownership metadata
+ok 24 - a valid files source takes precedence over room ownership metadata
+  ---
+  duration_ms: 2.1146
+  type: 'test'
+  ...
+# Subtest: a valid my-maps source takes precedence over room ownership metadata
+ok 25 - a valid my-maps source takes precedence over room ownership metadata
+  ---
+  duration_ms: 0.4309
+  type: 'test'
+  ...
+# Subtest: a source team root takes precedence over the room folder/team assignment
+ok 26 - a source team root takes precedence over the room folder/team assignment
+  ---
+  duration_ms: 0.5094
+  type: 'test'
+  ...
+# Subtest: without a source context, folderId and teamId resolve to the folder in the legacy my-maps shell
+ok 27 - without a source context, folderId and teamId resolve to the folder in the legacy my-maps shell
+  ---
+  duration_ms: 0.3553
+  type: 'test'
+  ...
+# Subtest: without source or folder context, old editor links return to the my-maps root
+ok 28 - without source or folder context, old editor links return to the my-maps root
+  ---
+  duration_ms: 0.2165
+  type: 'test'
+  ...
+# Subtest: a direct file-folder fallback preserves team scope and explicit full-shell mode
+ok 29 - a direct file-folder fallback preserves team scope and explicit full-shell mode
+  ---
+  duration_ms: 0.2881
+  type: 'test'
+  ...
+# Subtest: list snapshots are isolated by nav and remain readable after switching rooms inside the editor
+ok 30 - list snapshots are isolated by nav and remain readable after switching rooms inside the editor
+  ---
+  duration_ms: 9.2074
+  type: 'test'
+  ...
+# Subtest: snapshot capture and restore retain list filters and clamp the page to current results
+ok 31 - snapshot capture and restore retain list filters and clamp the page to current results
+  ---
+  duration_ms: 1.1645
+  type: 'test'
+  ...
+# Subtest: malformed and mismatched session snapshots degrade to no return context
+ok 32 - malformed and mismatched session snapshots degrade to no return context
+  ---
+  duration_ms: 1.9451
+  type: 'test'
+  ...
+# Subtest: bounded session storage evicts old records and quota failures do not block editor navigation
+ok 33 - bounded session storage evicts old records and quota failures do not block editor navigation
+  ---
+  duration_ms: 4.7804
+  type: 'test'
+  ...
+# Subtest: scroll capture and restore use the nearest scrollable container and clamp to its bounds
+ok 34 - scroll capture and restore use the nearest scrollable container and clamp to its bounds
+  ---
+  duration_ms: 0.9099
+  type: 'test'
+  ...
+# Subtest: returning to the my-maps root arms the existing router redirect bypass
+ok 35 - returning to the my-maps root arms the existing router redirect bypass
+  ---
+  duration_ms: 0.5205
+  type: 'test'
+  ...
+# Subtest: touches outside the canvas do not synthesize mouse events or prevent panel scrolling
+ok 36 - touches outside the canvas do not synthesize mouse events or prevent panel scrolling
+  ---
+  duration_ms: 14.6557
+  type: 'test'
+  ...
+# Subtest: pinch terminates single-finger dragging and transforms the existing view
+ok 37 - pinch terminates single-finger dragging and transforms the existing view
+  ---
+  duration_ms: 3.8475
+  type: 'test'
+  ...
+# Subtest: dragging never counts as a double tap
+ok 38 - dragging never counts as a double tap
+  ---
+  duration_ms: 2.8824
+  type: 'test'
+  ...
+# Subtest: cancellation releases drag state and plugin teardown removes every listener
+ok 39 - cancellation releases drag state and plugin teardown removes every listener
+  ---
+  duration_ms: 1.5598
+  type: 'test'
+  ...
+# FilesPage return navigation tests passed
+# Subtest: web\\tests\\productShell.fileReturn.test.cjs
+ok 5 - web\\tests\\productShell.fileReturn.test.cjs
+  ---
+  duration_ms: 256.4137
+  type: 'test'
+  ...
+# node:assert:883
+#     throw err;
+#     ^
+# AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /redirect:\\s*'\\/files'/. Input:
+# "import Vue from 'vue'\\r\\n" +
+#   "import VueRouter from 'vue-router'\\r\\n" +
+#   'import {\\r\\n' +
+#   '  consumeSkipMyMapsRedirect,\\r\\n' +
+#   '  getLastRoom,\\r\\n' +
+#   '  isMyMapsRootPath,\\r\\n' +
+#   '  migrateLegacyHashUrl,\\r\\n' +
+#   '  rememberLastRoom\\r\\n' +
+#   "} from './utils/roomLocation'\\r\\n" +
+#   "import { resolveNavigationShell } from './utils/shellMode'\\r\\n" +
+#   "import { normalizeReturnTo, readReturnContext } from './utils/fileNavigation'\\r\\n" +
+#   '\\r\\n' +
+#   'Vue.use(VueRouter)\\r\\n' +
+#   '\\r\\n' +
+#   'migrateLegacyHashUrl()\\r\\n' +
+#   '\\r\\n' +
+#   'const roomPathRedirect = to => ({\\r\\n' +
+#   "  path: '/',\\r\\n" +
+#   '  query: {\\r\\n' +
+#   '    ...to.query,\\r\\n' +
+#   '    room: to.params.roomKey\\r\\n' +
+#   '  }\\r\\n' +
+#   '})\\r\\n' +
+#   '\\r\\n' +
+#   'const PRODUCT_SHELL_PATHS = new Set([\\r\\n' +
+#   "  '/files',\\r\\n" +
+#   "  '/my-maps',\\r\\n" +
+#   "  '/spaces',\\r\\n" +
+#   "  '/profile',\\r\\n" +
+#   "  '/mcp-access',\\r\\n" +
+#   "  '/graph',\\r\\n" +
+#   "  '/cognee',\\r\\n" +
+#   "  '/assistant',\\r\\n" +
+#   "  '/kb',\\r\\n" +
+#   "  '/sop'\\r\\n" +
+#   '])\\r\\n' +
+#   '\\r\\n' +
+#   'const isProductShellRoute = route =>\\r\\n' +
+#   '  !!(route && route.matched && route.matched.some(record => PRODUCT_SHELL_PATHS.has(record.path)))\\r\\n' +
+#   '\\r\\n' +
+#   'const editorRoomQuery = (to, from, isHistoryNavigation) => {\\r\\n' +
+#   '  const query = { ...(to.query || {}) }\\r\\n' +
+#   '  if (\\r\\n' +
+#   '    isHistoryNavigation ||\\r\\n' +
+#   "    to.path !== '/' ||\\r\\n" +
+#   "    from.path !== '/' ||\\r\\n" +
+#   '    !query.room ||\\r\\n' +
+#   '    !(from.query && from.query.room)\\r\\n' +
+#   '  ) {\\r\\n' +
+#   '    return query\\r\\n' +
+#   '  }\\r\\n' +
+#   '\\r\\n' +
+#   '  const sourceQuery = from.query || {}\\r\\n' +
+#   '  const sourceReturnTo = normalizeReturnTo(sourceQuery.returnTo)\\r\\n' +
+#   '  if (!sourceReturnTo) return query\\r\\n' +
+#   '\\r\\n' +
+#   '  const hasExplicitReturnTo =\\r\\n' +
+#   "    typeof query.returnTo === 'string' && query.returnTo.trim() !== ''\\r\\n" +
+#   '  const targetReturnTo = normalizeReturnTo(query.returnTo)\\r\\n' +
+#   '  if (!hasExplicitReturnTo) query.returnTo = sourceReturnTo\\r\\n' +
+#   '\\r\\n' +
+#   '  // A new list destination starts a new navigation context; never attach the\\r\\n' +
+#   "  // prior directory's session token to a different destination.\\r\\n" +
+#   '  const sameReturnTarget = !hasExplicitReturnTo || targetReturnTo === sourceReturnTo\\r\\n' +
+#   '  if (sameReturnTarget && !query.nav) {\\r\\n' +
+#   '    const context = readReturnContext(from)\\r\\n' +
+#   '    if (context && sourceQuery.nav) query.nav = sourceQuery.nav\\r\\n' +
+#   '  }\\r\\n' +
+#   '  return query\\r\\n' +
+#   '}\\r\\n' +
+#   '\\r\\n' +
+#   'const routes = [\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/node-share/:id',\\r\\n" +
+#   "    name: 'NodeShare',\\r\\n" +
+#   "    component: () => import('./pages/NodeShare/Index.vue')\\r\\n" +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/dashboards',\\r\\n" +
+#   "    redirect: '/files'\\r\\n" +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/dashboards/:id',\\r\\n" +
+#   "    redirect: '/files'\\r\\n" +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/files',\\r\\n" +
+#   '    component: () =>\\r\\n' +
+#   '      import(\\r\\n' +
+#   `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#   '      ),\\r\\n' +
+#   '    children: [\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: '',\\r\\n" +
+#   "        name: 'Files',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#   '          ),\\r\\n' +
+#   "        props: { mode: 'files' }\\r\\n" +
+#   '      },\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: 'recent',\\r\\n" +
+#   "        name: 'RecentFiles',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#   '          ),\\r\\n' +
+#   "        props: { mode: 'recent' }\\r\\n" +
+#   '      },\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: 'favorites',\\r\\n" +
+#   "        name: 'FavoriteFiles',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#   '          ),\\r\\n' +
+#   "        props: { mode: 'favorites' }\\r\\n" +
+#   '      },\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: 'shared',\\r\\n" +
+#   "        name: 'SharedFiles',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#   '          ),\\r\\n' +
+#   "        props: { mode: 'shared' }\\r\\n" +
+#   '      },\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: 'trash',\\r\\n" +
+#   "        name: 'TrashFiles',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#   '          ),\\r\\n' +
+#   "        props: { mode: 'trash' }\\r\\n" +
+#   '      },\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: 'folder/:id',\\r\\n" +
+#   "        name: 'FolderFiles',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#   '          ),\\r\\n' +
+#   "        props: { mode: 'folder' }\\r\\n" +
+#   '      }\\r\\n' +
+#   '    ]\\r\\n' +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/my-maps',\\r\\n" +
+#   '    component: () =>\\r\\n' +
+#   '      import(\\r\\n' +
+#   `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#   '      ),\\r\\n' +
+#   '    children: [\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: '',\\r\\n" +
+#   "        name: 'MyMaps',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#   '          ),\\r\\n' +
+#   "        props: { mode: 'files' }\\r\\n" +
+#   '      },\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: 'favorites',\\r\\n" +
+#   "        name: 'MyMapsFavorites',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#   '          ),\\r\\n' +
+#   "        props: { mode: 'favorites' }\\r\\n" +
+#   '      },\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: 'folder/:id',\\r\\n" +
+#   "        name: 'MyMapsFolder',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#   '          ),\\r\\n' +
+#   "        props: { mode: 'folder' }\\r\\n" +
+#   '      }\\r\\n' +
+#   '    ]\\r\\n' +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/spaces',\\r\\n" +
+#   '    component: () =>\\r\\n' +
+#   '      import(\\r\\n' +
+#   `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#   '      ),\\r\\n' +
+#   '    children: [\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: '',\\r\\n" +
+#   "        name: 'Spaces',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/SpacesPage.vue'\\r\\n` +
+#   '          )\\r\\n' +
+#   '      },\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: ':id',\\r\\n" +
+#   "        name: 'SpaceDetail',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/SpaceDetailPage.vue'\\r\\n` +
+#   '          )\\r\\n' +
+#   '      }\\r\\n' +
+#   '    ]\\r\\n' +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/profile',\\r\\n" +
+#   '    component: () =>\\r\\n' +
+#   '      import(\\r\\n' +
+#   `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#   '      ),\\r\\n' +
+#   '    children: [\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: '',\\r\\n" +
+#   "        name: 'Profile',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/ProfilePage.vue'\\r\\n` +
+#   '          )\\r\\n' +
+#   '      }\\r\\n' +
+#   '    ]\\r\\n' +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/mcp-access',\\r\\n" +
+#   '    component: () =>\\r\\n' +
+#   '      import(\\r\\n' +
+#   `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#   '      ),\\r\\n' +
+#   '    children: [\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: '',\\r\\n" +
+#   "        name: 'McpAccess',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/McpAccessPage.vue'\\r\\n` +
+#   '          )\\r\\n' +
+#   '      }\\r\\n' +
+#   '    ]\\r\\n' +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/graph',\\r\\n" +
+#   '    component: () =>\\r\\n' +
+#   '      import(\\r\\n' +
+#   `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#   '      ),\\r\\n' +
+#   '    children: [\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: '',\\r\\n" +
+#   "        name: 'GraphService',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "graph-service" */ './pages/ProductShell/GraphServicePage.vue'\\r\\n` +
+#   '          )\\r\\n' +
+#   '      }\\r\\n' +
+#   '    ]\\r\\n' +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/cognee',\\r\\n" +
+#   '    component: () =>\\r\\n' +
+#   '      import(\\r\\n' +
+#   `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#   '      ),\\r\\n' +
+#   '    children: [\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: '',\\r\\n" +
+#   "        name: 'CogneeAccess',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "cognee" */ './pages/ProductShell/CogneeAccessPage.vue'\\r\\n` +
+#   '          )\\r\\n' +
+#   '      }\\r\\n' +
+#   '    ]\\r\\n' +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/',\\r\\n" +
+#   "    name: 'Edit',\\r\\n" +
+#   '    component: () => import(`./pages/Edit/Index.vue`),\\r\\n' +
+#   '    beforeEnter(to, from, next) {\\r\\n' +
+#   '      const room = to.query && to.query.room\\r\\n' +
+#   "      if (room == null || String(room).trim() === '') {\\r\\n" +
+#   '        next({\\r\\n' +
+#   "          path: '/files',\\r\\n" +
+#   '          query: to.query && to.query.shell ? { shell: to.query.shell } : {},\\r\\n' +
+#   '          replace: true\\r\\n' +
+#   '        })\\r\\n' +
+#   '        return\\r\\n' +
+#   '      }\\r\\n' +
+#   '      rememberLastRoom(room)\\r\\n' +
+#   '      next()\\r\\n' +
+#   '    }\\r\\n' +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/room-:roomSuffix',\\r\\n" +
+#   '    redirect: to =>\\r\\n' +
+#   '      roomPathRedirect({\\r\\n' +
+#   '        ...to,\\r\\n' +
+#   '        params: { roomKey: `room-${to.params.roomSuffix}` }\\r\\n' +
+#   '      })\\r\\n' +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/room/:roomKey',\\r\\n" +
+#   '    redirect: roomPathRedirect\\r\\n' +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/index',\\r\\n" +
+#   '    redirect: to =>\\r\\n' +
+#   '      to.query && to.query.room\\r\\n' +
+#   "        ? { path: '/', query: to.query }\\r\\n" +
+#   "        : { path: '/files', replace: true }\\r\\n" +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/map',\\r\\n" +
+#   '    redirect: to =>\\r\\n' +
+#   '      to.query && to.query.room\\r\\n' +
+#   "        ? { path: '/', query: to.query }\\r\\n" +
+#   "        : { path: '/files', replace: true }\\r\\n" +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/assistant',\\r\\n" +
+#   '    component: () =>\\r\\n' +
+#   '      import(\\r\\n' +
+#   `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#   '      ),\\r\\n' +
+#   '    children: [\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: '',\\r\\n" +
+#   "        name: 'Assistant',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "assistant" */ './pages/ProductShell/AssistantPage.vue'\\r\\n` +
+#   '          )\\r\\n' +
+#   '      }\\r\\n' +
+#   '    ]\\r\\n' +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/kb',\\r\\n" +
+#   '    component: () =>\\r\\n' +
+#   '      import(\\r\\n' +
+#   `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#   '      ),\\r\\n' +
+#   '    children: [\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: ':tab(files|parse|data|search|mcp)?',\\r\\n" +
+#   "        name: 'FileKb',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "file-kb" */ './features/knowledge-base/pages/KbIndexPage.vue'\\r\\n` +
+#   '          )\\r\\n' +
+#   '      }\\r\\n' +
+#   '    ]\\r\\n' +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/sop-tasks',\\r\\n" +
+#   "    redirect: '/sop'\\r\\n" +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/sop',\\r\\n" +
+#   '    component: () =>\\r\\n' +
+#   '      import(\\r\\n' +
+#   `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#   '      ),\\r\\n' +
+#   '    children: [\\r\\n' +
+#   '      {\\r\\n' +
+#   "        path: '',\\r\\n" +
+#   "        name: 'SopRegistry',\\r\\n" +
+#   '        component: () =>\\r\\n' +
+#   '          import(\\r\\n' +
+#   `            /* webpackChunkName: "sop-registry" */ './pages/SopRegistry/Index.vue'\\r\\n` +
+#   '          )\\r\\n' +
+#   '      }\\r\\n' +
+#   '    ]\\r\\n' +
+#   '  },\\r\\n' +
+#   '  {\\r\\n' +
+#   "    path: '/doc/zh',\\r\\n" +
+#   '    component: () => import(`./pages/Doc.vue`)\\r\\n' +
+#   '  }\\r\\n' +
+#   ']\\r\\n' +
+#   '\\r\\n' +
+#   'const router = new VueRouter({\\r\\n' +
+#   "  mode: 'history',\\r\\n" +
+#   '  routes\\r\\n' +
+#   '})\\r\\n' +
+#   '\\r\\n' +
+#   'let historyNavigationPending = false\\r\\n' +
+#   "if (typeof window !== 'undefined') {\\r\\n" +
+#   "  // Capture phase runs before VueRouter's popstate listener, so a Back/Forwa"... 2219 more characters
+#     at Object.<anonymous> (D:\\mind-map\\web\\tests\\productShell.router.test.cjs:30:8)
+#     at Module._compile (node:internal/modules/cjs/loader:1781:14)
+#     at Object..js (node:internal/modules/cjs/loader:1913:10)
+#     at Module.load (node:internal/modules/cjs/loader:1505:32)
+#     at Function._load (node:internal/modules/cjs/loader:1309:12)
+#     at wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+#     at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:171:5)
+#     at node:internal/main/run_main_module:36:49 {
+#   generatedMessage: true,
+#   code: 'ERR_ASSERTION',
+#   actual: "import Vue from 'vue'\\r\\n" +
+#     "import VueRouter from 'vue-router'\\r\\n" +
+#     'import {\\r\\n' +
+#     '  consumeSkipMyMapsRedirect,\\r\\n' +
+#     '  getLastRoom,\\r\\n' +
+#     '  isMyMapsRootPath,\\r\\n' +
+#     '  migrateLegacyHashUrl,\\r\\n' +
+#     '  rememberLastRoom\\r\\n' +
+#     "} from './utils/roomLocation'\\r\\n" +
+#     "import { resolveNavigationShell } from './utils/shellMode'\\r\\n" +
+#     "import { normalizeReturnTo, readReturnContext } from './utils/fileNavigation'\\r\\n" +
+#     '\\r\\n' +
+#     'Vue.use(VueRouter)\\r\\n' +
+#     '\\r\\n' +
+#     'migrateLegacyHashUrl()\\r\\n' +
+#     '\\r\\n' +
+#     'const roomPathRedirect = to => ({\\r\\n' +
+#     "  path: '/',\\r\\n" +
+#     '  query: {\\r\\n' +
+#     '    ...to.query,\\r\\n' +
+#     '    room: to.params.roomKey\\r\\n' +
+#     '  }\\r\\n' +
+#     '})\\r\\n' +
+#     '\\r\\n' +
+#     'const PRODUCT_SHELL_PATHS = new Set([\\r\\n' +
+#     "  '/files',\\r\\n" +
+#     "  '/my-maps',\\r\\n" +
+#     "  '/spaces',\\r\\n" +
+#     "  '/profile',\\r\\n" +
+#     "  '/mcp-access',\\r\\n" +
+#     "  '/graph',\\r\\n" +
+#     "  '/cognee',\\r\\n" +
+#     "  '/assistant',\\r\\n" +
+#     "  '/kb',\\r\\n" +
+#     "  '/sop'\\r\\n" +
+#     '])\\r\\n' +
+#     '\\r\\n' +
+#     'const isProductShellRoute = route =>\\r\\n' +
+#     '  !!(route && route.matched && route.matched.some(record => PRODUCT_SHELL_PATHS.has(record.path)))\\r\\n' +
+#     '\\r\\n' +
+#     'const editorRoomQuery = (to, from, isHistoryNavigation) => {\\r\\n' +
+#     '  const query = { ...(to.query || {}) }\\r\\n' +
+#     '  if (\\r\\n' +
+#     '    isHistoryNavigation ||\\r\\n' +
+#     "    to.path !== '/' ||\\r\\n" +
+#     "    from.path !== '/' ||\\r\\n" +
+#     '    !query.room ||\\r\\n' +
+#     '    !(from.query && from.query.room)\\r\\n' +
+#     '  ) {\\r\\n' +
+#     '    return query\\r\\n' +
+#     '  }\\r\\n' +
+#     '\\r\\n' +
+#     '  const sourceQuery = from.query || {}\\r\\n' +
+#     '  const sourceReturnTo = normalizeReturnTo(sourceQuery.returnTo)\\r\\n' +
+#     '  if (!sourceReturnTo) return query\\r\\n' +
+#     '\\r\\n' +
+#     '  const hasExplicitReturnTo =\\r\\n' +
+#     "    typeof query.returnTo === 'string' && query.returnTo.trim() !== ''\\r\\n" +
+#     '  const targetReturnTo = normalizeReturnTo(query.returnTo)\\r\\n' +
+#     '  if (!hasExplicitReturnTo) query.returnTo = sourceReturnTo\\r\\n' +
+#     '\\r\\n' +
+#     '  // A new list destination starts a new navigation context; never attach the\\r\\n' +
+#     "  // prior directory's session token to a different destination.\\r\\n" +
+#     '  const sameReturnTarget = !hasExplicitReturnTo || targetReturnTo === sourceReturnTo\\r\\n' +
+#     '  if (sameReturnTarget && !query.nav) {\\r\\n' +
+#     '    const context = readReturnContext(from)\\r\\n' +
+#     '    if (context && sourceQuery.nav) query.nav = sourceQuery.nav\\r\\n' +
+#     '  }\\r\\n' +
+#     '  return query\\r\\n' +
+#     '}\\r\\n' +
+#     '\\r\\n' +
+#     'const routes = [\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/node-share/:id',\\r\\n" +
+#     "    name: 'NodeShare',\\r\\n" +
+#     "    component: () => import('./pages/NodeShare/Index.vue')\\r\\n" +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/dashboards',\\r\\n" +
+#     "    redirect: '/files'\\r\\n" +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/dashboards/:id',\\r\\n" +
+#     "    redirect: '/files'\\r\\n" +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/files',\\r\\n" +
+#     '    component: () =>\\r\\n' +
+#     '      import(\\r\\n' +
+#     `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#     '      ),\\r\\n' +
+#     '    children: [\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: '',\\r\\n" +
+#     "        name: 'Files',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#     '          ),\\r\\n' +
+#     "        props: { mode: 'files' }\\r\\n" +
+#     '      },\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: 'recent',\\r\\n" +
+#     "        name: 'RecentFiles',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#     '          ),\\r\\n' +
+#     "        props: { mode: 'recent' }\\r\\n" +
+#     '      },\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: 'favorites',\\r\\n" +
+#     "        name: 'FavoriteFiles',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#     '          ),\\r\\n' +
+#     "        props: { mode: 'favorites' }\\r\\n" +
+#     '      },\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: 'shared',\\r\\n" +
+#     "        name: 'SharedFiles',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#     '          ),\\r\\n' +
+#     "        props: { mode: 'shared' }\\r\\n" +
+#     '      },\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: 'trash',\\r\\n" +
+#     "        name: 'TrashFiles',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#     '          ),\\r\\n' +
+#     "        props: { mode: 'trash' }\\r\\n" +
+#     '      },\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: 'folder/:id',\\r\\n" +
+#     "        name: 'FolderFiles',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#     '          ),\\r\\n' +
+#     "        props: { mode: 'folder' }\\r\\n" +
+#     '      }\\r\\n' +
+#     '    ]\\r\\n' +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/my-maps',\\r\\n" +
+#     '    component: () =>\\r\\n' +
+#     '      import(\\r\\n' +
+#     `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#     '      ),\\r\\n' +
+#     '    children: [\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: '',\\r\\n" +
+#     "        name: 'MyMaps',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#     '          ),\\r\\n' +
+#     "        props: { mode: 'files' }\\r\\n" +
+#     '      },\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: 'favorites',\\r\\n" +
+#     "        name: 'MyMapsFavorites',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#     '          ),\\r\\n' +
+#     "        props: { mode: 'favorites' }\\r\\n" +
+#     '      },\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: 'folder/:id',\\r\\n" +
+#     "        name: 'MyMapsFolder',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/FilesPage.vue'\\r\\n` +
+#     '          ),\\r\\n' +
+#     "        props: { mode: 'folder' }\\r\\n" +
+#     '      }\\r\\n' +
+#     '    ]\\r\\n' +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/spaces',\\r\\n" +
+#     '    component: () =>\\r\\n' +
+#     '      import(\\r\\n' +
+#     `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#     '      ),\\r\\n' +
+#     '    children: [\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: '',\\r\\n" +
+#     "        name: 'Spaces',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/SpacesPage.vue'\\r\\n` +
+#     '          )\\r\\n' +
+#     '      },\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: ':id',\\r\\n" +
+#     "        name: 'SpaceDetail',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/SpaceDetailPage.vue'\\r\\n` +
+#     '          )\\r\\n' +
+#     '      }\\r\\n' +
+#     '    ]\\r\\n' +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/profile',\\r\\n" +
+#     '    component: () =>\\r\\n' +
+#     '      import(\\r\\n' +
+#     `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#     '      ),\\r\\n' +
+#     '    children: [\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: '',\\r\\n" +
+#     "        name: 'Profile',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/ProfilePage.vue'\\r\\n` +
+#     '          )\\r\\n' +
+#     '      }\\r\\n' +
+#     '    ]\\r\\n' +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/mcp-access',\\r\\n" +
+#     '    component: () =>\\r\\n' +
+#     '      import(\\r\\n' +
+#     `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#     '      ),\\r\\n' +
+#     '    children: [\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: '',\\r\\n" +
+#     "        name: 'McpAccess',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "product-shell" */ './pages/ProductShell/McpAccessPage.vue'\\r\\n` +
+#     '          )\\r\\n' +
+#     '      }\\r\\n' +
+#     '    ]\\r\\n' +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/graph',\\r\\n" +
+#     '    component: () =>\\r\\n' +
+#     '      import(\\r\\n' +
+#     `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#     '      ),\\r\\n' +
+#     '    children: [\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: '',\\r\\n" +
+#     "        name: 'GraphService',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "graph-service" */ './pages/ProductShell/GraphServicePage.vue'\\r\\n` +
+#     '          )\\r\\n' +
+#     '      }\\r\\n' +
+#     '    ]\\r\\n' +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/cognee',\\r\\n" +
+#     '    component: () =>\\r\\n' +
+#     '      import(\\r\\n' +
+#     `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#     '      ),\\r\\n' +
+#     '    children: [\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: '',\\r\\n" +
+#     "        name: 'CogneeAccess',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "cognee" */ './pages/ProductShell/CogneeAccessPage.vue'\\r\\n` +
+#     '          )\\r\\n' +
+#     '      }\\r\\n' +
+#     '    ]\\r\\n' +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/',\\r\\n" +
+#     "    name: 'Edit',\\r\\n" +
+#     '    component: () => import(`./pages/Edit/Index.vue`),\\r\\n' +
+#     '    beforeEnter(to, from, next) {\\r\\n' +
+#     '      const room = to.query && to.query.room\\r\\n' +
+#     "      if (room == null || String(room).trim() === '') {\\r\\n" +
+#     '        next({\\r\\n' +
+#     "          path: '/files',\\r\\n" +
+#     '          query: to.query && to.query.shell ? { shell: to.query.shell } : {},\\r\\n' +
+#     '          replace: true\\r\\n' +
+#     '        })\\r\\n' +
+#     '        return\\r\\n' +
+#     '      }\\r\\n' +
+#     '      rememberLastRoom(room)\\r\\n' +
+#     '      next()\\r\\n' +
+#     '    }\\r\\n' +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/room-:roomSuffix',\\r\\n" +
+#     '    redirect: to =>\\r\\n' +
+#     '      roomPathRedirect({\\r\\n' +
+#     '        ...to,\\r\\n' +
+#     '        params: { roomKey: `room-${to.params.roomSuffix}` }\\r\\n' +
+#     '      })\\r\\n' +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/room/:roomKey',\\r\\n" +
+#     '    redirect: roomPathRedirect\\r\\n' +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/index',\\r\\n" +
+#     '    redirect: to =>\\r\\n' +
+#     '      to.query && to.query.room\\r\\n' +
+#     "        ? { path: '/', query: to.query }\\r\\n" +
+#     "        : { path: '/files', replace: true }\\r\\n" +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/map',\\r\\n" +
+#     '    redirect: to =>\\r\\n' +
+#     '      to.query && to.query.room\\r\\n' +
+#     "        ? { path: '/', query: to.query }\\r\\n" +
+#     "        : { path: '/files', replace: true }\\r\\n" +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/assistant',\\r\\n" +
+#     '    component: () =>\\r\\n' +
+#     '      import(\\r\\n' +
+#     `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#     '      ),\\r\\n' +
+#     '    children: [\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: '',\\r\\n" +
+#     "        name: 'Assistant',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "assistant" */ './pages/ProductShell/AssistantPage.vue'\\r\\n` +
+#     '          )\\r\\n' +
+#     '      }\\r\\n' +
+#     '    ]\\r\\n' +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/kb',\\r\\n" +
+#     '    component: () =>\\r\\n' +
+#     '      import(\\r\\n' +
+#     `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#     '      ),\\r\\n' +
+#     '    children: [\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: ':tab(files|parse|data|search|mcp)?',\\r\\n" +
+#     "        name: 'FileKb',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "file-kb" */ './features/knowledge-base/pages/KbIndexPage.vue'\\r\\n` +
+#     '          )\\r\\n' +
+#     '      }\\r\\n' +
+#     '    ]\\r\\n' +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/sop-tasks',\\r\\n" +
+#     "    redirect: '/sop'\\r\\n" +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/sop',\\r\\n" +
+#     '    component: () =>\\r\\n' +
+#     '      import(\\r\\n' +
+#     `        /* webpackChunkName: "product-shell" */ './pages/ProductShell/components/ProductShellLayout.vue'\\r\\n` +
+#     '      ),\\r\\n' +
+#     '    children: [\\r\\n' +
+#     '      {\\r\\n' +
+#     "        path: '',\\r\\n" +
+#     "        name: 'SopRegistry',\\r\\n" +
+#     '        component: () =>\\r\\n' +
+#     '          import(\\r\\n' +
+#     `            /* webpackChunkName: "sop-registry" */ './pages/SopRegistry/Index.vue'\\r\\n` +
+#     '          )\\r\\n' +
+#     '      }\\r\\n' +
+#     '    ]\\r\\n' +
+#     '  },\\r\\n' +
+#     '  {\\r\\n' +
+#     "    path: '/doc/zh',\\r\\n" +
+#     '    component: () => import(`./pages/Doc.vue`)\\r\\n' +
+#     '  }\\r\\n' +
+#     ']\\r\\n' +
+#     '\\r\\n' +
+#     'const router = new VueRouter({\\r\\n' +
+#     "  mode: 'history',\\r\\n" +
+#     '  routes\\r\\n' +
+#     '})\\r\\n' +
+#     '\\r\\n' +
+#     'let historyNavigationPending = false\\r\\n' +
+#     "if (typeof window !== 'undefined') {\\r\\n" +
+#     "  // Capture phase runs before VueRouter's popstate listener, so a Back/Forwa"... 2219 more characters,
+#   expected: /redirect:\\s*'\\/files'/,
+#   operator: 'doesNotMatch',
+#   diff: 'simple'
+# }
+# Node.js v22.23.1
+# Subtest: web\\tests\\productShell.router.test.cjs
+not ok 6 - web\\tests\\productShell.router.test.cjs
+  ---
+  duration_ms: 212.9302
+  type: 'test'
+  location: 'D:\\mind-map\\web\\tests\\productShell.router.test.cjs:1:1'
+  failureType: 'testCodeFailure'
+  exitCode: 1
+  signal: ~
+  error: 'test failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: shell mode uses a valid explicit URL value before entry defaults
+ok 42 - shell mode uses a valid explicit URL value before entry defaults
+  ---
+  duration_ms: 26.9096
+  type: 'test'
+  ...
+# Subtest: new in-app navigation inherits the source mode unless the target is explicit
+ok 43 - new in-app navigation inherits the source mode unless the target is explicit
+  ---
+  duration_ms: 0.7095
+  type: 'test'
+  ...
+# Subtest: history navigation follows the target entry instead of inheriting the page being left
+ok 44 - history navigation follows the target entry instead of inheriting the page being left
+  ---
+  duration_ms: 0.2818
+  type: 'test'
+  ...
+# Subtest: withShell preserves target parameters, hash, repeated queries, and explicit mode
+ok 45 - withShell preserves target parameters, hash, repeated queries, and explicit mode
+  ---
+  duration_ms: 3.5442
+  type: 'test'
+  ...
+# Subtest: withShell leaves external links untouched
+ok 46 - withShell leaves external links untouched
+  ---
+  duration_ms: 0.3545
+  type: 'test'
+  ...
+# Subtest: withShell uses the destination entry default when no source route is available
+ok 47 - withShell uses the destination entry default when no source route is available
+  ---
+  duration_ms: 0.7158
+  type: 'test'
+  ...
+1..47
+# tests 47
+# suites 0
+# pass 31
+# fail 16
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5535.9448

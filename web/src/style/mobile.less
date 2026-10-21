@@ -1,0 +1,164 @@
+// Mobile-only presentation. Desktop component styles remain authoritative.
+.mobileShellHeader, .mobileBottomNav, .mobileFileTabs, .mobilePermissionTabs, .mobileEditorFileMore, .mobileChatToggle { display: none; }
+@media (max-width: 767px) {
+  :root { --mobile-nav-height: 68px; }
+  body { overscroll-behavior-y: contain; }
+  button, a, input, textarea { -webkit-tap-highlight-color: transparent; }
+  .productShell .productSidebar, .productShell .sidebarBackdrop, .productShell .shellModeToolbar { display: none !important; }
+  .productShell .productMain {
+    margin-left: 0 !important; width: 100% !important; max-width: 100% !important; min-width: 0;
+    padding-top: calc(56px + env(safe-area-inset-top));
+    padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));
+  }
+  .productShell .productPage { padding: 12px 12px 24px !important; min-width: 0; }
+  .mobileShellHeader {
+    position: fixed; inset: 0 0 auto; z-index: 30; display: flex; align-items: center; justify-content: space-between;
+    height: 56px; padding: env(safe-area-inset-top) 12px 0; background: var(--ui-surface); border-bottom: 1px solid var(--ui-border);
+    button { display: flex; align-items: center; gap: 10px; min-height: 44px; min-width: 44px; border: 0; background: transparent; color: var(--ui-text); font-size: 17px; }
+  }
+  .mobileBrandMark { display: grid; place-items: center; width: 30px; height: 30px; background: #087854; color: #fff; border-radius: 8px; font-weight: 700; }
+  .mobileBottomNav, .mobileEditorDock {
+    position: fixed; inset: auto 0 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: center;
+    z-index: 30; box-sizing: border-box; min-height: var(--mobile-nav-height); padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    background: var(--ui-surface, #fff); border-top: 1px solid var(--ui-border, #e7ece9);
+    > a, > button, .notificationButton { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; min-height: 48px; min-width: 44px; padding: 4px; background: transparent; border: 0; color: var(--ui-text-secondary, #66756e); font-size: 11px; text-decoration: none; }
+    i { font-size: 22px; }
+    .notificationBadge { justify-self: center; }
+    .router-link-active { color: var(--ui-primary); }
+    .mobilePrimary { width: 48px; height: 48px; min-height: 48px; border-radius: 50%; background: #087854; color: #fff; justify-self: center; }
+  }
+  .mobileFileTabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 16px;
+    a { display: grid; place-items: center; min-height: 44px; color: var(--ui-text-secondary); text-decoration: none; border-radius: 22px; font-size: 14px; }
+    .router-link-exact-active { background: var(--ui-primary-soft); color: var(--ui-primary); font-weight: 600; }
+  }
+  .mobileFileFilters { display: flex; align-items: center; gap: 4px; margin-bottom: 14px;
+    button { min-height: 44px; min-width: 44px; padding: 6px 9px; border: 0; border-radius: 22px; background: transparent; color: var(--ui-text-secondary); white-space: nowrap; }
+    .active { background: var(--ui-primary-soft); color: var(--ui-primary); }
+    .el-select { margin-left: auto; width: 112px; min-width: 0; }
+    .el-input__inner { font-size: 12px; padding-left: 10px; }
+  }
+  .mapFileTree .treeHead { display: flex; justify-content: space-between; align-items: center; button { width: 44px; height: 44px; border: 0; background: transparent; } }
+  .treeLoadMore { width: 100%; min-height: 44px; border: 0; background: #e8f4ef; color: #087854; }
+  .contextmenuContainer .submenu { position: static !important; width: auto !important; max-height: none !important; box-shadow: none; }
+  .productShell .fileToolbar { gap: 10px; .toolbarTitle { font-size: 18px; max-width: 100%; } .toolbarActions { width: 100%; flex-wrap: nowrap !important; } .toolbarSearch { flex: 1 1 0% !important; min-width: 0; } .iconGhost { width: 44px; height: 44px; } }
+  .productShell .fileToolbar .searchTrigger, .productShell .fileToolbar .iconGhost { width: 44px; height: 44px; }
+  .productShell .fileToolbar .toolbarActions { min-height: 44px; }
+  .mobileBottomNav .notificationButton { width: 100%; padding: 4px !important; min-height: 48px; height: auto; span { white-space: nowrap; font-size: 11px; } }
+  .productShell .folderCard .gf-files { display: none; }
+  .productShell .itemGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 12px !important; }
+  .productShell .gf-root { min-width: 0; height: 178px !important; border-radius: 14px; overflow: hidden; background: var(--ui-surface); border: 1px solid var(--ui-border); box-shadow: 0 2px 8px #17261f06; }
+  .productShell .gf-root .gf-stage { zoom: 1 !important; transform: none !important; width: 100%; height: 100%; }
+  .productShell .gf-root .gf-tilt { transform: none !important; }
+  .productShell .gf-root .gf-back { border-radius: 0; }
+  .productShell .gf-root .gf-shadow, .productShell .gf-root .gf-ring, .productShell .gf-root .gf-spec, .productShell .gf-root .gf-rim { display: none; }
+  .productShell .gf-root .gf-sheet { left: 8px; top: 8px; width: calc(100% - 16px); height: 106px; transform: none !important; border-radius: 8px; }
+  .productShell .gf-root .gf-front { top: auto; bottom: 0; height: 66px; width: 100%; border-radius: 0; clip-path: none !important; transform: none !important; background: var(--ui-surface); }
+  .productShell .gf-root .gf-label { left: 10px; right: 8px; top: 8px; bottom: auto; padding: 0; width: auto; }
+  .productShell .gf-root .gf-title { font-size: 13px; line-height: 20px; padding-right: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .productShell .gf-root .gf-meta { font-size: 11px; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .productShell .gf-root .gf-keyWrap { right: 0; top: auto; bottom: 20px; transform: none; }
+  .productShell .gf-root .gf-key { width: 44px; height: 44px; padding: 13px; border-radius: 0; background: transparent; box-shadow: none; }
+  .productShell .gf-root .gf-files { top: 0; height: 110px; }
+  .productShell .el-breadcrumb { display: flex; flex-wrap: wrap; gap: 4px; line-height: 1.5; }
+  .productShell .el-breadcrumb__item { max-width: 100%; overflow-wrap: anywhere; }
+  .productShell .el-breadcrumb__inner { white-space: normal; }
+  .mobileFolderPath { display: flex; align-items: center; gap: 8px; min-width: 0; strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } a, button { min-width: 44px; min-height: 44px; display: grid; place-items: center; border: 0; background: transparent; color: var(--ui-text); } }
+  .el-dialog { width: calc(100% - 16px) !important; max-width: calc(100vw - 16px) !important; margin: ~"max(8px, env(safe-area-inset-top))" auto !important; max-height: calc(100dvh - 16px); display: flex; flex-direction: column; border-radius: 16px; }
+  .el-dialog__body { min-height: 0; overflow: auto; padding: 16px; overflow-wrap: anywhere; }
+  .el-dialog__footer { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
+  .el-message-box { width: calc(100vw - 32px) !important; }
+  .el-message { min-width: 0 !important; max-width: calc(100vw - 24px); }
+  .el-drawer { max-width: 100vw; }
+  .el-button, .el-input__inner, .el-select .el-input__inner { min-height: 44px; }
+  .el-input__inner, textarea { font-size: 16px; }
+  .el-dropdown-menu__item, .el-select-dropdown__item { min-height: 44px; line-height: 44px; }
+  .el-select-dropdown { max-width: calc(100vw - 16px); }
+  .productNavigationDrawer { width: 100vw !important; max-width: 100vw; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  .productNavigationDrawer .productNavigation a { min-height: 48px; }
+  .el-dialog.folderPermissionDialog { margin: 8px auto !important; width: calc(100% - 16px) !important; height: calc(100dvh - 16px) !important; max-height: calc(100dvh - 16px) !important; }
+  .el-dialog.folderPermissionDialog .permissionHeader { flex-shrink: 0; h2 { font-size: 18px; } p { overflow-wrap: anywhere; } > div { min-width: 0; } }
+  .el-dialog.folderPermissionDialog .mobilePermissionTabs { display: flex; flex-shrink: 0; gap: 8px; padding: 10px 0; button { min-height: 44px; flex: 1; background: #f1f5f3; border: 0; border-radius: 10px; color: #44564c; } .active { background: #e8f4ef; color: #087854; font-weight: 600; } }
+  .el-dialog.folderPermissionDialog .permissionWorkspace { overflow-y: auto !important; }
+  .el-dialog.folderPermissionDialog .mobilePermission-existing .organizationPane,
+  .el-dialog.folderPermissionDialog .mobilePermission-existing .permissionDetailPane > .detailSection:not(.existingSection),
+  .el-dialog.folderPermissionDialog .mobilePermission-add .existingSection { display: none; }
+  .el-dialog.folderPermissionDialog .permissionDetailPane { width: 100%; min-width: 0; }
+  .el-dialog.folderPermissionDialog .organizationPane { min-height: 280px !important; flex: 0 0 auto !important; max-height: 45dvh; }
+  .el-dialog.folderPermissionDialog .organizationTree { min-height: 180px; overflow: auto; }
+  .el-dialog.folderPermissionDialog .existingList { min-height: 0; max-height: none; overflow: visible; }
+  .el-dialog.folderPermissionDialog .existingHead { display: none; }
+  .el-dialog.folderPermissionDialog .existingRow { display: grid; grid-template-columns: 30px minmax(0, 1fr) 106px; gap: 8px; padding: 12px 0; }
+  .el-dialog.folderPermissionDialog .existingIdentity { min-width: 0; small { white-space: normal; overflow-wrap: anywhere; } }
+  .el-dialog.folderPermissionDialog .existingRow .removeBtn, .el-dialog.folderPermissionDialog .existingRow .transferBtn, .el-dialog.folderPermissionDialog .existingRow .ownerBadge { grid-column: 2 / -1; justify-self: end; min-height: 44px; }
+  .el-dialog.folderPermissionDialog .existingRow .removeBtn { width: auto; padding: 0 8px; }
+  .el-dialog.folderPermissionDialog .mobileMemberRole { min-height: 44px; border: 1px solid #dfeee5; border-radius: 22px; background: #f0f9f4; color: #087854; font-size: 12px; }
+  .el-dialog.folderPermissionDialog .permissionFilter { min-height: 44px; }
+  .el-dialog.folderPermissionDialog .detailSection { padding: 12px 0; }
+  .el-dialog.folderPermissionDialog .permissionFooter { display: flex; flex-direction: column; align-items: stretch; gap: 8px; .footerHint { max-width: 100%; } > span:last-child { display: flex; gap: 8px; .el-button { flex: 1; margin: 0; } } }
+  .el-dialog.folderPermissionDialog .treeRow { min-height: 48px;  }
+  .el-dialog.folderPermissionDialog .expandBtn { width: 44px; height: 44px; }
+  .el-dialog.folderPermissionDialog .roleOptions { width: 100%; display: flex; .el-radio-button { flex: 1; min-width: 0; } .el-radio-button__inner { width: 100%; white-space: normal; min-height: 58px; } }
+  .container .editContainer .mindMapContainer { left: 0 !important; top: calc(56px + env(safe-area-inset-top)) !important; width: 100% !important; height: calc(100% - 124px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important; border-radius: 0 !important; touch-action: none; }
+  .container .toolbarContainer { position: fixed !important; inset: 0 0 auto !important; z-index: 31; height: 56px; padding-top: env(safe-area-inset-top); background: #fff; }
+  .container .toolbar.dockShell { position: static; display: flex; width: 100%; height: 56px; padding: 0; gap: 0; }
+  .container .toolbar .fileDock { position: static !important; flex: 1; min-width: 0; width: auto !important; max-width: none; border-radius: 0; box-shadow: none; height: 56px; }
+  .container .toolbar .fileDock .toolbarBlock { width: 100%; min-width: 0; padding: 0 4px; display: flex; flex-wrap: nowrap; height: 56px; }
+  .container .toolbar .fileDock .toolbarBlock > * { flex-shrink: 0; }
+  .container .toolbar .fileIdentity { flex: 1 1 auto !important; min-width: 0; max-width: none; width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+  .container .toolbar .fileName { max-width: 100%; width: 100%; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .container .toolbar .toolIconBtn, .container .toolbar .dockIconBtn { width: 44px; height: 44px; min-width: 44px; }
+  .container .toolbar .mobileEditorFileMore { display: grid; place-items: center; order: 5; width: 44px; height: 44px; border: 0; background: transparent; color: inherit; font-size: 20px; }
+  .container .toolbar .fileDock .toolbarBlock > .toolIconBtn,
+  .container .toolbar .fileDock .toolbarBlock > .toolbarFileBtnList,
+  .container .toolbar .nodeToolRail, .container .toolbar .notchWing,
+  .container .toolbar .collabDock { display: none !important; }
+  .container .sidebarTriggerRoot, .container .countContainer, .container .navigatorToolbarContainer { display: none !important; }
+  .container .sidebarContainer { top: auto !important; bottom: 0 !important; left: 0 !important; right: auto !important; width: 100% !important; max-height: 78dvh; height: 70dvh; z-index: 40 !important; box-sizing: border-box; border-radius: 16px 16px 0 0; transform: translateY(110%); transition: transform .2s ease; padding-bottom: env(safe-area-inset-bottom); }
+  .container .sidebarContainer.show { transform: translateY(0); }
+  .container .sidebarContainer .closeBtn { width: 44px; height: 44px; right: 4px; top: 0; display: grid; place-items: center; }
+  .mobileCanvasControls { position: fixed; z-index: 12; right: 12px; bottom: calc(90px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; border: 1px solid #e7ece9; border-radius: 14px; background: #fff; box-shadow: 0 3px 16px #17261f0d; }
+  .mobileCanvasControls button { width: 44px; height: 44px; border: 0; background: transparent; font-size: 19px; color: #344a3e; }
+  .mobileEditorDock { background: #fff; }
+  .mobileNodeEditing .mobileEditorDock, .mobileNodeEditing .mobileCanvasControls { display: none; }
+  .container .leaveIntentTrigger { bottom: calc(82px + env(safe-area-inset-bottom)); left: 12px; right: 64px; max-width: none; flex-wrap: wrap; padding: 8px; button { min-height: 44px; } }
+  .mobileActionSheet { border-radius: 18px 18px 0 0; max-height: 85dvh; padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); box-sizing: border-box; overflow-y: auto;
+    header { display: flex; align-items: center; justify-content: space-between; }
+    button { min-height: 48px; border: 0; border-radius: 10px; background: #f1f5f3; color: #17261f; font-size: 14px; padding: 8px 12px; }
+    button:disabled { opacity: .45; }
+    header button { background: transparent; min-width: 44px; }
+  }
+  .mobileActionGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding-top: 12px; }
+  .mapFileTreePopper { position: fixed !important; inset: calc(8px + env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom)) !important; transform: none !important; min-width: 0 !important; width: auto !important; overflow: auto; border-radius: 16px; }
+  .mapFileTreePopper .mapFileTree { width: 100%; max-height: none; height: 100%; }
+  .mapFileTreePopper .treeRow { min-height: 48px; }
+  .nodeCommentCard { position: fixed !important; top: auto !important; bottom: calc(72px + env(safe-area-inset-bottom)) !important; left: 8px !important; width: calc(100vw - 16px) !important; max-height: 65dvh; overflow: auto; box-sizing: border-box; }
+  .contextmenuContainer { position: fixed !important; top: auto !important; left: 8px !important; bottom: calc(76px + env(safe-area-inset-bottom)); max-width: calc(100vw - 16px); max-height: 65dvh; overflow: auto; .item { min-height: 44px; } .desc { display: none; } }
+  .productShell .teamGrid, .productShell .profileGrid { grid-template-columns: minmax(0, 1fr) !important; }
+  .productShell .productHeader { flex-direction: column; align-items: stretch; }
+  .kb-page { min-width: 0; max-width: 100%; padding: 12px !important; }
+  .kb-header { flex-wrap: wrap; gap: 12px; }
+  .accessNotificationDialog .messageHeader { flex-wrap: wrap; }
+  .accessNotificationDialog .messageTabs { flex-wrap: wrap; }
+  .productShell .profilePage { padding: 16px 12px; }
+  .productShell .teamHero { flex-wrap: wrap; gap: 12px; }
+  .productShell .teamActions { display: flex; flex-wrap: wrap; gap: 8px; .el-button { margin: 0; } }
+  .productShell .graphServicePage { height: calc(100dvh - 124px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  .productShell .kb-files { display: flex; flex-direction: column; }
+  .productShell .kb-files-side { width: 100%; max-height: 220px; overflow: auto; }
+  .productShell .kb-files-main { width: 100%; }
+  .kb-mobile-file { padding: 14px 0; border-bottom: 1px solid var(--ui-border); }
+  .kb-mobile-file-head { display: flex; align-items: center; gap: 12px; button { flex: 1; min-width: 0; min-height: 44px; border: 0; text-align: left; background: transparent; color: var(--ui-text); font-size: 14px; overflow-wrap: anywhere; } }
+  .kb-mobile-file-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; color: var(--ui-text-secondary); font-size: 12px; }
+  .kb-mobile-file-actions { display: flex; gap: 8px; .el-button { margin: 0; } }
+  .productShell .assistantPage { height: calc(100dvh - 124px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); min-height: 0; }
+  .productShell .assistantPage .chatSidebar { position: fixed; top: calc(56px + env(safe-area-inset-top)); bottom: calc(68px + env(safe-area-inset-bottom)); left: 0; z-index: 40; width: 100%; box-sizing: border-box; transform: translateX(-110%); }
+  .productShell .assistantPage.mobileChatOpen .chatSidebar { transform: translateX(0); }
+  .productShell .assistantPage .chatSidebar .chatTitle, .productShell .assistantPage .chatSidebar .chatMeta, .productShell .assistantPage .chatSidebar .sideFooter { display: block; }
+  .productShell .assistantPage .chatMain { min-width: 0; width: 100%; }
+  .productShell .assistantPage .mainHead { flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
+  .productShell .assistantPage .hero { padding: 20px 16px; }
+  .productShell .assistantPage .mobileChatToggle { display: flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; border: 0; border-radius: 8px; background: #f1f5f3; color: #087854; }
+  .productShell .kb-toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; > * { max-width: 100%; margin: 0; } }
+  .productShell .sopHeader { flex-wrap: wrap; gap: 12px; .left, .right { flex-wrap: wrap; min-width: 0; max-width: 100%; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+}

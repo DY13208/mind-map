@@ -17,6 +17,7 @@
       ref="mindMapContainer"
       data-testid="mindmap-canvas"
     ></div>
+    <MobileEditorControls v-if="mindMap" :mind-map="mindMap" />
     <Count :mindMap="mindMap" v-if="!isZenMode"></Count>
     <Navigator v-if="mindMap && !isZenMode && showNavigator" :mindMap="mindMap"></Navigator>
     <NavigatorToolbar :mindMap="mindMap" v-if="!isZenMode && showNavigatorToolbar"></NavigatorToolbar>
@@ -81,6 +82,7 @@
 </template>
 
 <script>
+import MobileEditorControls from './MobileEditorControls.vue'
 import MindMap from 'simple-mind-map'
 import { startPerformanceDiagnostics } from '@/utils/performanceDiagnostics'
 import MiniMap from 'simple-mind-map/src/plugins/MiniMap.js'
@@ -213,6 +215,7 @@ if (typeof window.MoreThemes !== 'undefined') {
 
 export default {
   components: {
+    MobileEditorControls,
     OutlineSidebar,
     Style,
     BaseStyle,

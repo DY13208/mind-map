@@ -90,6 +90,7 @@
             </svg>
           </button>
           <el-dropdown-menu slot="dropdown"
+            ><el-dropdown-item v-if="isMobileViewport && editable" command="rename-request">重命名</el-dropdown-item
             ><el-dropdown-item v-if="allowShare" command="share">分享 / 权限</el-dropdown-item
             ><el-dropdown-item v-if="editable" command="delete" divided
               >删除</el-dropdown-item
@@ -102,6 +103,7 @@
 >
 <script>
 import InlineTitle from './InlineTitle.vue'
+import mobileViewport from '@/utils/mobileViewport'
 import glassCard, { STAGE_W as W, STAGE_H as H, reducedMotion } from './glassCard'
 import { artForKey, hashString, paintArt, rng } from './glassFolderArt'
 
@@ -128,7 +130,7 @@ const FRONT_PATH =
 export default {
   name: 'FolderCard',
   components: { InlineTitle },
-  mixins: [glassCard],
+  mixins: [glassCard, mobileViewport],
   props: {
     folder: Object,
     editable: { type: Boolean, default: true },
