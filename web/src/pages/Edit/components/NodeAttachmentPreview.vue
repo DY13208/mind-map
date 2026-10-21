@@ -4,7 +4,7 @@
     :custom-class="isMaximized ? 'attachmentViewer is-maximized' : 'attachmentViewer'"
     :show-close="false" :close-on-click-modal="true" :close-on-press-escape="true" @close="onClosed">
     <header slot="title" class="attachmentViewerHeader">
-      <div class="attachmentFileIcon" :class="'is-' + kind"><span class="attachmentFileIconSvg" aria-hidden="true" v-html="fileIconSvg"></span></div>
+      <div class="attachmentFileIcon"><span class="attachmentFileIconSvg" aria-hidden="true" v-html="fileIconSvg"></span></div>
       <div class="attachmentFileInfo">
         <h2 :title="title">{{ title }}</h2>
         <p><span>{{ fileSize }}</span><span class="fileMetaDivider">·</span><span>{{ typeLabel }}</span></p>
