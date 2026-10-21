@@ -11,7 +11,7 @@
     "start": "node src/server.js",
     "worker": "node src/worker.js",
     "migrate": "node src/migrate.js",
-    "test": "node --test \"test/*.test.js\"",
+    "test": "node --test \"test/*.test.js\" test/prepare-contract.cjs",
     "test:pg": "node --test \"test/pg/*.test.js\"",
     "test:batch:unit": "node --test test/batch-contract.cjs",
     "test:batch:lab": "node test/live/batch-acceptance.cjs",

@@ -9,6 +9,7 @@ const { LeaseLostError } = require('./queue')
 const { instrumentPool, measured, scope } = require('./metrics')
 const { parseTextFile } = require('./text')
 const fs = require('fs')
+const { withPreparedInput, IMAGE_EXTS } = require('./prepare')
 
 const BATCH = 1000
 
@@ -47,21 +48,21 @@ function createPipeline({ pool, queue, storage, docling, nativeLightParse = fals
     ]))
     const filePath = storage.resolveKey(file.storage_key)
     // TXT is always parsed locally: Docling has no plain-text input format and no OCR/layout work is needed.
-    const native = file.ext === 'txt' || (nativeLightParse && ['xlsx','md'].includes(file.ext) && Number(file.size)<=nativeLightMaxBytes)
+    const native = file.ext === 'txt' || file.ext === 'xls' || (nativeLightParse && ['xlsx','md'].includes(file.ext) && Number(file.size)<=nativeLightMaxBytes)
     const out = native ? {
       json: { nativeBlocks: file.ext === 'txt' ? await parseTextFile(filePath) : file.ext === 'md' ? [{seq:0,type:'paragraph',text:await fs.promises.readFile(filePath,'utf8'),page:null,bbox:null,heading_path:[],table:null}] : [] },
       status:'native_success',errors:[],processingTime:0
-    } : await docling.convertFile({
+    } : await withPreparedInput({
       filePath, fileName: file.name, ext: file.ext,
       existingTaskId: file.docling_task_id,
       onTaskId: id => queue.withFence(job, c => c.query(`update kb.parse_runs set docling_task_id = $2 where id = $1`, [job.run_id, id])),
       signal
-    })
+    }, async prepared => ({ ...await docling.convertFile(prepared), preprocessing: prepared.preprocessing }))
     const rawKey = await storage.writeRaw(job.run_id, out.json)
     let cancelled=false
     await queue.withFence(job, async c => {
       await c.query(`update kb.parse_runs set raw_json_key = $2, docling_status = $3, stats = stats || $4 where id = $1`,
-        [job.run_id, rawKey, out.status, { parser: native ? (file.ext === 'xlsx' ? 'exceljs' : file.ext === 'txt' ? 'native-text' : 'native-markdown') : 'docling', doclingErrors: out.errors.length, processingTime: out.processingTime, ...(out.ocr ? { ocr: out.ocr } : {}) }])
+        [job.run_id, rawKey, out.status, { parser: native ? (EXCEL.has(file.ext) ? 'exceljs' : file.ext === 'txt' ? 'native-text' : 'native-markdown') : 'docling', doclingErrors: out.errors.length, processingTime: out.processingTime, ...(out.preprocessing ? { preprocessing: out.preprocessing } : {}), ...(out.ocr ? { ocr: out.ocr } : {}) }])
       await queue.complete(c, job)
       const batch=job.batch_id?(await c.query('select control from kb.batches where id=$1 for update',[job.batch_id])).rows[0]:null
       if(batch?.control==='cancelled'){
@@ -75,7 +76,7 @@ function createPipeline({ pool, queue, storage, docling, nativeLightParse = fals
     return cancelled?'cancelled':'parsed'
   }
 
-  async function runStructure(job, file) {
+  async function runStructure(job, file, signal) {
     await queue.withFence(job, async c => {
       await c.query(`update kb.files set status = 'structuring', updated_at = now() where id = $1`, [file.id])
       // idempotent: wipe anything a previous (crashed) attempt wrote for this run
@@ -104,12 +105,14 @@ function createPipeline({ pool, queue, storage, docling, nativeLightParse = fals
       try {
         const userStructure = file.run_options && file.run_options.structure
         const res = await structureExcel(storage.resolveKey(file.storage_key), {
+          signal,
           batchSize: BATCH,
           layout: userStructure || null,
           onBatch: batch => queue.withFence(job, c => insertBatch(c, 'records',
             ['run_id', 'file_id', 'sheet', 'table_index', 'cell_range', 'row_index', 'data', 'sku', 'price', 'stock', 'record_date'],
             batch.map(r => ({ ...r, run_id: job.run_id, file_id: file.id, data: JSON.stringify(r.data) }))))
         })
+        if (res.preprocessing) stats.preprocessing = res.preprocessing
         const fields = res.sheets.flatMap(s => s.fields.map(f => ({
           header_row: null, confidence: null, confirmed: false, table_index: 0,
           ...f, run_id: job.run_id, file_id: file.id
@@ -157,6 +160,7 @@ function createPipeline({ pool, queue, storage, docling, nativeLightParse = fals
       }
     }
     const empty = !stats.blocks && !stats.records
+    if (empty) partialReasons.push(IMAGE_EXTS.has(file.ext) ? '已执行 OCR，但未识别到文字' : EXCEL.has(file.ext) ? '表格未读取到可入库内容' : '未解析到可入库内容')
     const hold = stats.needsConfirmation === true && !empty
     const status = empty ? 'failed' : (partialReasons.length || hold) ? 'partial' : 'done'
     await queue.withFence(job, async c => {
@@ -197,7 +201,7 @@ function createPipeline({ pool, queue, storage, docling, nativeLightParse = fals
         return 'failed'
       }
       if (job.kind === 'parse') return await runParse(job, file, signal)
-      if (job.kind === 'structure') return await runStructure(job, file)
+      if (job.kind === 'structure') return await runStructure(job, file, signal)
       throw Object.assign(new Error(`unknown job kind ${job.kind}`), { retryable: false })
     } catch (err) {
       if(scope.getStore())scope.getStore().failureReason=String(err.message).slice(0,2000)

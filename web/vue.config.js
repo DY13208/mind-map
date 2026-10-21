@@ -192,14 +192,16 @@ module.exports = {
       },
       '/collab-v2': {
         target: process.env.COLLAB_API || 'http://127.0.0.1:1234',
-        changeOrigin: true,
+        // Preserve the browser Host through gateway proxies, which rebuild
+        // X-Forwarded-Host from Host before enforcing write-request origins.
+        changeOrigin: false,
         ws: true,
         onProxyReq: forwardBrowserOrigin,
         onProxyReqWs: forwardBrowserOrigin
       },
       '/api': {
         target: process.env.COLLAB_API || 'http://127.0.0.1:1234',
-        changeOrigin: true,
+        changeOrigin: false,
         ws: true,
         onProxyReq: forwardBrowserOrigin,
         onProxyReqWs: forwardBrowserOrigin

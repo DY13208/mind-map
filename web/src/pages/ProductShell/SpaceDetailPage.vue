@@ -1,5 +1,5 @@
 <template>
-  <section class="productPage">
+  <section class="productPage spaceDetailPage">
     <el-button
       type="text"
       icon="el-icon-arrow-left"
@@ -13,39 +13,47 @@
       >
     </div>
     <div v-else v-loading="loading || busy" class="teamBody">
-      <div v-if="team" class="teamHero">
+      <div v-if="team" class="teamOverview">
+      <div class="teamHero">
         <div class="teamMark"><i class="el-icon-office-building" /></div>
-        <div>
-          <h1>{{ team.name }}</h1>
+        <div class="teamHeroText">
+          <div class="heroTitleLine"><h1>{{ team.name }}</h1><span v-if="team.role === 'owner'" class="detailOwnerBadge">我创建的</span></div>
           <p v-if="team.description">{{ team.description }}</p>
-          <span
+          <span class="desktopHeroMeta"
             >{{ team.memberCount }} 位成员 · {{ team.roomCount }} 个脑图 ·
             创建者 {{ team.owner || '—' }} · {{ roleLabel }} · 更新于
             {{ format(team.updatedAt) }}</span
           >
+          <div class="mobileHeroMeta"><span><i class="el-icon-user" /> {{ team.memberCount }} 位成员</span><span><i class="el-icon-files" /> {{ team.roomCount }} 个脑图</span><span><i class="el-icon-lock" /> {{ roleLabel }}</span></div>
         </div>
+        <div class="mobileHeroFooter"><span>创建者 <strong>{{ team.owner || '—' }}</strong></span><span>最近更新 <strong>{{ team.updatedAt ? format(team.updatedAt) : '—' }}</strong></span></div>
+      </div>
         <div class="teamActions">
           <el-button
+            class="detailViewAction"
             icon="el-icon-files"
             @click="openInFiles"
             >在脑图查看</el-button
           >
           <el-button
+            class="detailFolderAction"
             v-if="canManage"
             icon="el-icon-folder-add"
             @click="createFolder"
             >新建文件夹</el-button
           >
-          <el-button type="primary" icon="el-icon-plus" @click="createRoom"
+          <el-button class="detailCreateAction" type="primary" icon="el-icon-plus" @click="createRoom"
             >新建脑图</el-button
           >
           <el-button
+            class="detailShareAction"
             icon="el-icon-share"
             :disabled="!canManage"
             @click="openShare"
             >分享 / 权限</el-button
           >
           <el-button
+            class="detailSettingsAction"
             icon="el-icon-setting"
             :disabled="!canManage"
             @click="openSettings"
@@ -53,6 +61,7 @@
           >
         </div>
       </div>
+      <div class="detailContentHeading"><h2>团队内容</h2></div>
       <el-tabs v-model="tab">
         <el-tab-pane label="脑图" name="rooms">
           <nav v-if="folderId" class="folderNav">
@@ -422,6 +431,10 @@ export default {
 }
 </script>
 <style lang="less" scoped>
+.detailOwnerBadge, .mobileHeroMeta, .mobileHeroFooter, .detailContentHeading { display: none; }
+.teamOverview { display: flex; align-items: center; gap: 16px; margin: 18px 0 28px; }
+.teamOverview .teamHero { flex: 1; min-width: 0; margin: 0; }
+.teamActions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .teamBody {
   min-height: 240px;
 }
@@ -491,4 +504,45 @@ export default {
   .teamHero { align-items: flex-start; flex-wrap: wrap; }
   .teamHero .teamActions { margin-left: 0; width: 100%; justify-content: flex-start; }
 }
+</style>
+<style lang="less" scoped>
+@media (max-width: 767px) {
+  .spaceDetailPage {
+    > .el-button { padding: 0; margin-bottom: 17px; color: #52877a; font-size: 13px; }
+    .teamOverview { display: block; margin: 0; }
+    .teamHero { position: relative; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 15px; padding: 22px 20px; border: 1px solid #e2eae6; border-radius: 18px; background: linear-gradient(112deg,#fff 3%,#fcfffd 70%,#edf7f0 130%); box-shadow: 0 9px 30px rgba(21,66,50,.045); overflow: hidden; }
+    .teamHero::after { content: ''; position: absolute; right: -70px; top: -130px; width: 310px; height: 310px; border-radius: 50%; border: 65px solid rgba(9,133,97,.035); pointer-events: none; }
+    .teamMark { width: 61px; height: 61px; flex: 0 0 61px; border-radius: 17px; font-size: 31px; color: white; background: linear-gradient(145deg,#07906b,#076a52); box-shadow: 0 12px 26px rgba(6,116,86,.14); }
+    .teamHeroText { flex: 1; min-width: 0; position: relative; z-index: 1; }
+    .heroTitleLine { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding-top: 2px; }
+    .teamHero h1 { font-size: 26px; line-height: 1.25; letter-spacing: -.7px; overflow-wrap: anywhere; }
+    .teamHero .detailOwnerBadge { display: inline-block; padding: 3px 9px; border-radius: 99px; border: 1px solid #cce9db; background: #ecf8f1; font-size: 12px; color: #087658; white-space: nowrap; }
+    .desktopHeroMeta { display: none; }
+    .mobileHeroMeta { display: flex; flex-wrap: wrap; gap: 6px 11px; margin-top: 8px; span { display: inline-flex; align-items: center; gap: 5px; color: #7c8e88; font-size: 12px; } i { color: #9aae9e; } }
+    .mobileHeroFooter { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 7px 10px; width: 100%; margin-top: 2px; padding-top: 14px; border-top: 1px solid #edf1ee; span { font-size: 12px; color: #647d72; overflow-wrap: anywhere; } strong { font-weight: 650; color: #42665a; } }
+    .teamActions { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 11px 7px; margin: 14px 0 0; padding: 13px; border: 1px solid #e2eae6; border-radius: 16px; background: white; box-shadow: 0 9px 30px rgba(21,66,50,.045); }
+    .teamActions .el-button { margin: 0; min-width: 0; border-radius: 12px; padding: 0 8px; font-size: 14px; height: 46px; display: flex; align-items: center; justify-content: center; gap: 5px; }
+    .detailCreateAction { order: 0; grid-column: span 3; background: #08785d; border-color: #08785d; }
+    .detailFolderAction { order: 1; grid-column: span 3; }
+    .teamActions .detailViewAction, .teamActions .detailShareAction, .teamActions .detailSettingsAction { order: 2; grid-column: span 2; height: 56px; padding: 9px 0 0; border: 0; border-top: 1px solid #edf1ed; border-radius: 0; background: transparent; flex-direction: column; gap: 5px; font-size: 11px; color: #72867b; }
+    .teamActions /deep/ .el-button i { font-size: 19px; }
+    .teamActions /deep/ .el-button span { margin: 0; }
+    .teamActions .is-disabled { opacity: .45; }
+    .detailContentHeading { display: block; margin-top: 27px; h2 { margin: 0; font-size: 19px; font-weight: 800; color: #182d29; } p { margin: 4px 0 0; font-size: 12px; color: #92a199; } }
+    /deep/ .el-tabs__header { margin: 11px 0 14px; }
+    /deep/ .el-tabs__item { color: #7e9187; padding-bottom: 15px; font-size: 15px; font-weight: 620; &.is-active { color: #086e55; } }
+    /deep/ .el-tabs__active-bar { height: 3px; background: #098162; }
+    .roomGrid, .folderGrid { grid-template-columns: minmax(0,1fr); gap: 13px; }
+    .memberPanel { padding: 16px; border-radius: 17px; }
+    /deep/ .roomCard.gf-root { height: 251px !important; border-radius: 17px; border: 1px solid #e2eae6; box-shadow: 0 9px 30px rgba(21,66,50,.045); }
+    /deep/ .roomCard .gf-sheet { top: 0; left: 0; width: 100%; height: 176px; border-radius: 0; background-color: #fbfdfb; background-image: radial-gradient(#d9e7df 1.18px,transparent 1.18px); background-size: 21px 21px; }
+    /deep/ .roomCard .gf-front { height: 75px; }
+    /deep/ .roomCard .gf-label { left: 16px; right: 44px; top: 14px; }
+    /deep/ .roomCard .gf-title { font-size: 15px; padding-right: 0; }
+    /deep/ .roomCard .gf-meta { font-size: 12px; color: #91a099; }
+    /deep/ .roomCard .gf-keyWrap { right: 6px; bottom: 13px; }
+    /deep/ .roomCard .gf-glyph { width: 19px; }
+  }
+}
+@media (max-width: 370px) { .spaceDetailPage { .teamHero { padding: 20px 16px; gap: 12px; } .teamMark { width: 55px; height: 55px; flex-basis: 55px; } .teamHero h1 { font-size: 24px; } .teamActions .el-button { font-size: 13px; } .teamActions .detailViewAction, .teamActions .detailShareAction, .teamActions .detailSettingsAction { font-size: 11px; } } }
 </style>

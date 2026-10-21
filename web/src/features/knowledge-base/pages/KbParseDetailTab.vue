@@ -12,7 +12,7 @@
       </template>
     </div>
     <div v-if="file && file.error" class="kb-parse-error"><i class="el-icon-warning" aria-hidden="true" />{{ file.error }}</div>
-    <KbHeaderMap v-if="file && file.ext === 'xlsx'" :file-id="fileId" :file-size="Number(file.size) || 0" :active="active" @submitted="refreshFile" @done="refreshFile" />
+    <KbHeaderMap v-if="file && ['xlsx', 'xls'].includes(file.ext)" :file-id="fileId" :file-size="Number(file.size) || 0" :active="active" @submitted="refreshFile" @done="refreshFile" />
     <KbStateBlock
       :loading="loadingFile"
       :error="fileError"

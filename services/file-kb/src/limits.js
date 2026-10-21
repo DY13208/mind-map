@@ -18,7 +18,7 @@ const ALLOWED = {
   bmp: { mime: 'image/bmp', magic: [[0x42, 0x4d]] },
   webp: { mime: 'image/webp', magic: [[0x52, 0x49, 0x46, 0x46]] }
 }
-const EXCEL = new Set(['xlsx'])
+const EXCEL = new Set(['xlsx', 'xls'])
 
 function extOf(name) {
   const m = /\.([a-z0-9]{1,8})$/i.exec(String(name || ''))

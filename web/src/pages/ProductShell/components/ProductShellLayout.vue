@@ -6,6 +6,8 @@
       'productShell--solo': hideSidebar,
       'productShell--focus': shellMode === 'focus',
       'productShell--embed': shellMode === 'embed',
+      'productShell--teams': $route.path === '/spaces',
+      'productShell--team-detail': $route.path.startsWith('/spaces/'),
       'productShell--dark': isDarkTheme
     }"
   >
@@ -131,14 +133,23 @@
       </div>
     </aside>
     <header v-if="shellMode !== 'embed'" class="mobileShellHeader">
+      <template v-if="$route.path === '/spaces'">
+        <button class="mobileTeamBrand" aria-label="打开全部功能" @click="openNavigation"><span class="mobileBrandMark">C</span></button>
+        <h1 class="mobilePageTitle">团队空间</h1>
+        <button aria-label="搜索团队" @click="$bus.$emit('mobile-search-teams')"><i class="el-icon-search" /></button>
+      </template>
+      <template v-else>
       <button aria-label="打开全部功能" @click="openNavigation"><span class="mobileBrandMark">W</span><strong>WCPD</strong></button>
+      <button v-if="$route.path.startsWith('/spaces/')" class="detailLauncher" aria-label="全部功能与设置" @click="openNavigation"><i class="el-icon-menu" /></button>
+      <template v-else-if="!$route.path.startsWith('/spaces/')">
       <button aria-label="全部功能与设置" @click="openNavigation"><i class="el-icon-menu" /></button>
+      </template>
+      </template>
     </header>
     <nav v-if="shellMode !== 'embed'" class="mobileBottomNav" aria-label="主导航">
       <router-link to="/files"><i class="el-icon-house" /><span>脑图</span></router-link>
-      <router-link to="/spaces"><i class="el-icon-office-building" /><span>空间</span></router-link>
-      <button class="mobilePrimary" aria-label="新建" @click="mobileCreate"><i class="el-icon-plus" /></button>
-      <AccessNotificationTrigger v-if="profile" :key="'mobile-' + profile.id" />
+      <router-link to="/spaces"><i class="el-icon-office-building" /><span>团队</span></router-link>
+      <AccessNotificationTrigger v-if="profile" :key="'mobile-' + profile.id" label="消息" icon="el-icon-chat-dot-round" />
       <router-link to="/profile"><i class="el-icon-user" /><span>我的</span></router-link>
     </nav>
     <main class="productMain">
@@ -289,12 +300,6 @@ export default {
     }
   },
   methods: {
-    async mobileCreate() {
-      if (!['/files', '/my-maps'].some(path => this.$route.path === path || this.$route.path.startsWith(path + '/folder/'))) {
-        await this.$router.push('/files')
-      }
-      this.$nextTick(() => this.$bus.$emit('mobile-create-file'))
-    },
     updateAutoSidebar() {
       if (!this.hasSidebarPreference) this.sidebarCollapsed = isSmallScreen()
     },
@@ -398,6 +403,30 @@ export default {
 </script>
 
 <style lang="less">
+.mobileShellHeader, .mobileBottomNav { display: none; }
+// Keep shell overrides after component styles, including asynchronously loaded chunks.
+@media (max-width: 767px) {
+  .productShell .productSidebar, .productShell .sidebarBackdrop, .productShell .shellModeToolbar { display: none !important; }
+  .productShell .productMain { margin-left: 0 !important; width: 100% !important; max-width: 100% !important; padding-top: calc(56px + env(safe-area-inset-top)); padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
+  .productShell--teams .productMain { padding-top: calc(64px + env(safe-area-inset-top)); }
+  .productShell--embed .productMain { padding-top: 0; padding-bottom: 0; }
+  .productShell .mobileShellHeader { display: flex; justify-content: flex-start; gap: 4px; height: 56px; padding-inline: 16px; background: var(--ui-bg); border-bottom: 0; }
+  .productShell--teams .mobileShellHeader { height: 64px; }
+  .productShell .mobileShellHeader button { padding: 0; justify-content: center; flex-shrink: 0; cursor: pointer; }
+  .productShell .mobileShellHeader > button:last-child { margin-left: auto; }
+  .productShell .mobileShellHeader .mobileTeamBrand { min-width: 36px; margin-right: 8px; }
+  .productShell .mobileBrandMark { width: 36px; height: 36px; font-weight: 400; font-size: 25px; border-radius: 10px; }
+  .mobilePageTitle { flex: 1; min-width: 0; margin: 0; font-size: 22px; line-height: 1.3; letter-spacing: -0.5px; }
+  .productShell .mobileShellHeader i { font-size: 23px; }
+  .productShell .mobileBottomNav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .productShell .mobileBottomNav > a { min-width: 0; }
+  .productShell .mobileBottomNav .notificationBadge { width: 100%; margin: 0; }
+  .productShell .mobileBottomNav .notificationButton { height: auto; min-height: 48px; gap: 4px; }
+  .productShell .mobileBottomNav .notificationButton i { font-size: 22px; }
+  .productShell .mobileBottomNav .router-link-active { font-weight: 600; }
+  .productShell .mobileBottomNav .router-link-active i { background: var(--ui-primary-soft); border-radius: 10px; padding: 4px 14px; margin: -4px -14px; }
+  .productShell .spacesPage { padding: 12px 16px 24px !important; }
+}
 .productShell .el-dialog {
   max-width: calc(100vw - 24px);
 }
@@ -1115,4 +1144,56 @@ export default {
     scroll-behavior: auto !important;
   }
 }
+</style>
+<style lang="less">
+@media (max-width: 767px) {
+  .productShell--team-detail {
+    --ui-bg: #f6f9f7; --ui-primary: #08785d; --ui-text: #182d29; --ui-text-secondary: #7c8e88;
+    font-family: -apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
+    .productMain { padding-top: calc(65px + env(safe-area-inset-top)); }
+    .spaceDetailPage { padding: 20px 15px 44px !important; }
+    .mobileShellHeader { height: 65px; padding-inline: 19px; background: rgba(255,255,255,.93); border-bottom: 1px solid #e9efeb; backdrop-filter: blur(16px); }
+    .mobileShellHeader .detailLauncher { margin-left: auto; }
+    .mobileShellHeader > button.detailLauncher:last-child { margin-left: auto; }
+    .mobileBrandMark { width: 40px; height: 40px; border-radius: 12px; font-size: 27px; font-family: Georgia,serif; }
+    .mobileShellHeader strong { font-size: 20px; }
+    .mobileBottomNav { min-height: 65px; box-shadow: 0 -8px 24px #214c3a08; }
+  }
+}
+</style>
+<style lang="less">
+@media (max-width: 767px) {
+  .productShell--teams {
+    --ui-bg: #f6f9f7; --ui-primary: #08795d; --ui-primary-soft: #e6f4ee; --ui-text: #152925; --ui-text-secondary: #83938c;
+    background: #e9efeb;
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+    .productMain { max-width: 640px !important; margin-inline: auto !important; padding-top: calc(104px + env(safe-area-inset-top)); padding-bottom: calc(114px + env(safe-area-inset-bottom)); min-height: 100dvh; box-sizing: border-box; background: radial-gradient(ellipse 64% 230px at 100% -62px,rgba(212,239,224,.58),transparent 76%),#f6f9f7; box-shadow: 0 0 50px rgba(20,52,39,.10); }
+    .spacesPage { padding: 0 24px 0 !important; }
+    .mobileShellHeader { left: 50%; right: auto; transform: translateX(-50%); width: 100%; max-width: 640px; box-sizing: border-box; height: calc(104px + env(safe-area-inset-top)); padding-inline: 24px; background: #f6f9f7; gap: 8px; }
+    .mobileShellHeader .mobileTeamBrand { min-width: 52px; margin-right: 7px; }
+    .mobileBrandMark { width: 52px; height: 52px; border-radius: 16px; font-family: Georgia,serif; font-size: 35px; font-weight: 600; background: linear-gradient(145deg,#0a886a,#05694f); box-shadow: 0 6px 14px rgba(4,115,83,.15); }
+    .mobilePageTitle { font-size: 27px; font-weight: 750; letter-spacing: -.6px; white-space: nowrap; }
+    .mobileShellHeader .userAvatar { width: 45px !important; height: 45px !important; font-size: 19px !important; background: linear-gradient(135deg,#159c77,#087255); }
+    .mobileShellHeader i { font-size: 26px; }
+    .mobileBottomNav { left: 50%; right: auto; transform: translateX(-50%); width: 100%; max-width: 640px; min-height: 85px; padding: 11px 16px calc(12px + env(safe-area-inset-bottom)); border: 1px solid #e7eee9; border-bottom: 0; border-radius: 20px 20px 0 0; background: rgba(255,255,255,.96); backdrop-filter: blur(16px); box-shadow: 0 -7px 25px rgba(42,74,56,.052); }
+    .mobileBottomNav > a, .mobileBottomNav .notificationButton { min-height: 62px; font-size: 12px; gap: 4px; color: #7b8c81; }
+    .mobileBottomNav i { display: grid; place-items: center; width: 65px; height: 38px; font-size: 27px; box-sizing: border-box; }
+    .mobileBottomNav .notificationButton i { font-size: 27px; }
+    .mobileBottomNav .router-link-active { color: #087659; font-weight: 700; }
+    .mobileBottomNav .router-link-active i { padding: 0; margin: 0; border-radius: 12px; background: #e5f4ec; }
+  }
+}
+@media (max-width: 470px) {
+  .productShell--teams {
+    .productMain { padding-top: calc(87px + env(safe-area-inset-top)); }
+    .spacesPage { padding-inline: 17px !important; }
+    .mobileShellHeader { height: calc(87px + env(safe-area-inset-top)); padding-inline: 17px; gap: 5px; }
+    .mobileShellHeader .mobileTeamBrand { min-width: 46px; margin-right: 6px; }
+    .mobileBrandMark { width: 46px; height: 46px; border-radius: 14px; font-size: 31px; }
+    .mobilePageTitle { font-size: 23px; }
+    .mobileShellHeader .userAvatar { width: 39px !important; height: 39px !important; font-size: 16px !important; }
+    .mobileBottomNav { padding-inline: 7px; }
+  }
+}
+@media (max-width: 355px) { .productShell--teams .mobilePageTitle { font-size: 20px; } }
 </style>

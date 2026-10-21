@@ -22,8 +22,8 @@
     >
       <UserAvatar v-if="avatar" :person="person" :size="28" />
       <template v-else
-        ><i class="el-icon-bell" /><span v-if="!collapsed"
-          >消息中心</span
+        ><i :class="icon" /><span v-if="!collapsed"
+          >{{ label }}</span
         ></template
       >
     </button>
@@ -39,6 +39,8 @@ export default {
   components: { UserAvatar },
   props: {
     collapsed: Boolean,
+    label: { type: String, default: '消息中心' },
+    icon: { type: String, default: 'el-icon-bell' },
     avatar: Boolean,
     person: { type: Object, default: () => ({}) }
   },
