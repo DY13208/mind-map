@@ -184,11 +184,8 @@
                 >
               </div>
               <div v-if="kbAvailable" class="mcpKbPanel">
-                <div class="mcpKbActions">
-                  <el-checkbox v-model="kbAllowGeekcloud" size="small"
-                    >允许吉客云只读查询</el-checkbox
-                  ><el-button
-                    v-if="kbTokenState === 'error'"
+                <div v-if="kbTokenState === 'error'" class="mcpKbActions">
+                  <el-button
                     size="small"
                     @click="loadKbTokens"
                     >重新检查</el-button
@@ -208,8 +205,8 @@
                     >无法确认已有令牌（{{ kbTokenError }}）。可重新检查，或直接「创建访问令牌」；在此之前「复制完整配置」不包含
                     file-kb。</template
                   ><template v-else>正在检查文件知识库令牌…</template>
-                  勾选「允许吉客云只读查询」后新建的令牌会带 geekcloud:read，仍需管理员为你配置吉客云范围。
-                  令牌为只读 kb:read，永久有效，可随时撤销，与脑图 MCP 密钥不通用，可在「文件知识库 → MCP
+                  此页面新建的令牌默认包含文件知识库和吉客云只读权限（kb:read、geekcloud:read），仍需管理员为你配置吉客云范围。
+                  令牌永久有效，可随时撤销，与脑图 MCP 密钥不通用，可在「文件知识库 → MCP
                   接入」中查看和撤销。复制配置不代表已连接，请在客户端检查。
                 </p>
                 <div v-if="kbPlainToken" class="mcpKbIssued">
@@ -385,7 +382,6 @@ export default {
       kbTokenCount: 0,
       kbTokenError: '',
       kbIssuing: false,
-      kbAllowGeekcloud: false,
       kbPlainToken: '',
       kbIssuedPrefix: ''
     }
@@ -526,9 +522,7 @@ export default {
       try {
         const created = await kbApi.createMcpToken({
           name: 'MCP 接入页',
-          scopes: this.kbAllowGeekcloud
-            ? ['kb:read', 'geekcloud:read']
-            : ['kb:read']
+          scopes: ['kb:read', 'geekcloud:read']
         })
         const token = String((created && created.token) || '')
         if (!token) throw new Error('服务没有返回令牌')
