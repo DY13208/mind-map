@@ -1,48 +1,40 @@
-# Mobile editor and attachment preview verification
+# 手机浏览模式与列表菜单验收
 
-Date: 2026-10-21. Base: `origin/main` at `009a1535`.
+日期：2026-10-21。分支：`fix/mobile-reader-circle-menu`；沿用已验收的侧栏版本 `ac7dfee62`，主分支基线 `44b8ec994`。
 
-## Findings and fixes
+## 最终行为
 
-| Severity | Finding | Fix and post-fix evidence |
-| --- | --- | --- |
-| P2, resolved | Six header buttons squeezed the reference title at 393px. | Keep 44px touch targets; put Refresh in the existing file menu at widths up to 420px. `final-phone.png` shows the full `UN项目工程` title and saved state; the file-menu capture retains Refresh. Long titles still truncate with their full title available. |
-| P2, resolved | Icon-font generated content polluted bottom-button accessible names. | Give Theme, Style, Map and More explicit labels, hide their decorative icons from accessibility. Real role-based taps pass in Chromium and WebKit. |
-| P1, resolved | The first long press could claim the gesture without opening a menu because `node_active` arrives after the handler. | Seed the pressed node immediately and open the action sheet. A unit regression and native Chromium touch sequence now pass. |
-| P2, resolved | Phone-only CSS hid the reference's right tool rail and left iPad using desktop chrome. | Use one editor-specific width/coarse-pointer query, a scrollable right rail, five-item bottom dock and bottom sheets. Portrait, landscape and desktop transition checks pass. |
+手机默认以查看脑图为主。标题与真实保存状态保留，目录、返回、左右工具栏和缩放入口收进一个 44px 半透明浮动按钮。展开后使用参考 PC 菜单的矩形列表：文件、节点、画布、外观、工具、消息，图标和文字同行排列。点击区域至少 44px；关闭后列表从 DOM 移除，不接收点击或键盘焦点。
 
-## Visual comparison
+使用现有 Vue 2 组件、图标和样式实现。一级菜单保留在按钮上方，展开时按钮不移位，没有环形动画。文件、节点、画布、外观和工具的二级菜单统一使用平面图标列表与细分隔线。横屏时菜单可滚动，二级菜单标题和关闭按钮保持可见。iPad 常规横竖屏和桌面保留侧栏组织；手机横屏与窄屏采用浏览模式。
 
-Source: the user-supplied `codex-clipboard-60844d16-e014-4882-a12b-18fa812a1136.png`, 941 × 1672 pixels. It contains a phone frame and OS chrome. Crop the app-owned area `(96,151)-(845,1615)` and normalize it to **393 × 768**. The implementation capture uses the same CSS viewport, screenshot scale `css`, device scale factor 1, light theme and an authenticated synthetic room. The source and implementation were inspected together in `output/playwright/reference-editor/design-comparison.png`, with focused header, rail and dock comparisons in `design-comparison-details.png`.
+手机单指从节点或空白处开始都优先平移画布。需要移动节点时，可在“画布”分组主动启用节点拖动。该状态只作用于当前手机编辑器，切换到 iPad/桌面或卸载组件会恢复原有手势配置。
 
-The synthetic room supplies three branches and Chinese node text. User content, comments, notifications, attachments and map theme are data-dependent, so the source's exact graph and avatar are not copied into production data. Existing map typography is preserved. This change adapts editor chrome; it does not replace users' themes or map contents.
+长按节点打开应用已有右键菜单；原有编辑、内容、结构、样式、分享、复制与删除操作沿用原处理函数。只读权限下仅显示展开、收起、复制三个查看入口，修改命令仍被权限检查拒绝。iPad 长按继续使用此前的节点操作侧栏。
 
-Required fidelity surfaces checked:
+文件目录、历史、导入导出、权限、搜索、撤销重做、主题/样式/结构/设置、消息中心均有入口。打开一级菜单时先关闭已有操作面板。点击外部、入口按钮或按 Escape 均可关闭菜单。
 
-- **Typography:** navy system-font chrome, readable bold title and green saved chip; bottom labels remain on one line. Source canvas fonts remain controlled by each map's theme.
-- **Spacing/layout:** single white header, right vertical rail, separate zoom controls and rounded bottom dock with a central green plus. All tested persistent buttons have at least 44 × 44px targets. Short landscape uses a horizontal zoom strip and a scrollable rail; iPad uses a centered dock and a 360px panel.
-- **Colors/tokens:** white surfaces, navy icons/text, muted grey labels and green add/saved states follow the reference. Dark mode inherits separate editor surface/text tokens. Existing notification indicators remain functional.
-- **Image/icon quality:** sharp existing Element UI/project vector and icon-font assets; no screenshot layers, phone frame, OS status bar or home indicator inserted into the app. The rail keeps existing product action icons and permissions.
-- **Copy/content:** Theme / Style / Add / Map / More follow the reference. Existing file operations, permissions, import/export and history remain reachable. Refresh moves into the file sheet on narrow phones to preserve touch area and title legibility.
+## 验证结果
 
-The larger rail/zoom/add targets compared with the normalized mock are intentional for touch usability. Desktop chrome remains unchanged. No open P0/P1/P2 findings remain.
+- Chromium 与 WebKit 各 6 个场景，共 12 个：393×852、320×740、手机横屏 852×393、iPad 820×1180、iPad 横屏 1194×834、桌面 1440×900。
+- 检查单一常驻入口、列表边界与 44px 点击区域、菜单分组、外部点击/Escape 关闭、明暗色、横屏滚动、目录与搜索开关、主题入口、iPad/桌面侧栏；浏览器没有未捕获页面错误。
+- Chromium 原生触摸验证：手机节点触摸平移，长按打开真实右键菜单，菜单在视口内，只读菜单不暴露删除入口；覆盖三种手机尺寸。
+- Chromium 与 WebKit 使用真实应用会话、API、独立本地 PostgreSQL 验证新增/编辑/保存和刷新恢复。Chromium 还验证主动启用节点拖动后的真实重设父节点、撤销与重做、刷新恢复层级。
+- 消息中心通过列表菜单打开并关闭。Chromium 原生触摸滑动确认横屏文件列表可以滚动，关闭按钮保持可见；WebKit 验证滚动后的边界与关闭行为。两种浏览器均检查手机竖屏和横屏的二级菜单、44px 关闭按钮。
+- `npm run test:touch-editor`：选择、历史、权限、长按、菜单选择/关闭、手机手势恢复、只读右键命令保护。
+- `npm run test:mobile`：15 项手势回归与 3 项新增/移动/ACK 回归通过。
+- Vue 模板编译、修改文件 ESLint、生产构建、Git 空白检查通过。保留原有依赖与构建体积提示。
 
-## Functional verification
+## 视觉证据
 
-- `npm run test:attachment-preview`: existing decoding, progressive loading and PDF/PPT/image lifecycle checks, plus new CSV/TSV and real workbook-worker cases. Covers UTF-8/BOM, GB18030, UTF-16 LE/BE, quoted separators/newlines, leading zeros, long numbers, literal formulas, empty files, malformed input and row bounds. XLSX/XLS/XLSB/ODS multi-sheet values are checked.
-- `npm run test:touch-editor`: live selection/history on mount, first long press, read-only guards, panels, keyboard chrome and listener disposal.
-- `npm run test:mobile`: 14 gesture regressions and 3 insert/move/ACK persistence regressions pass.
-- Browser layout: **14 cases**, Chromium and WebKit, each at 393×852, 320×740, 820×1180, 1194×834, 1366×1024, 852×393 and desktop 1440×900. No horizontal overflow, clipped persistent controls, rail/zoom overlap or out-of-viewport panels.
-- Browser attachments: Chromium and WebKit at desktop, phone and iPad sizes. CSV/GBK CSV/TSV show real table cells and exact identifiers; XLSX/XLS/XLSB/ODS switch sheets and keep bounded DOM rows. Empty CSV, WAV metadata, unsupported video codec fallback, DOCX, PDF, PPTX, Markdown, ZIP, denied access and closing/reopening a pending preview pass. Browser runs report zero uncaught page errors.
-- Authenticated editor → API → isolated local PostgreSQL: tap to add/edit two nodes, save acknowledgements, zoom/fit, read-only controls, orientation and desktop/touch switching, permission sheet and member-list height. Chromium native touch additionally verifies pan, pinch, touch cancellation, long press, drag-to-reparent, undo and redo. Reload restores edits and hierarchy. WebKit verifies edit/save/reload and menu/viewport behavior.
-- Normal local preview: `/files` returns HTTP 200; collaboration health reports `ok: true` and a healthy PostgreSQL event bus. Production build and focused ESLint pass; existing Browserslist/deprecation/bundle-size notices remain.
+本地输出目录：`output/playwright/list-menu/`，证据不提交到远端。
 
-## Scope and evidence
+- `chromium-phone-closed.png`：手机默认只显示一个浮动菜单入口。
+- `chromium-phone-open.png`、`webkit-dark.png`：六组列表菜单、文字、明暗色。
+- `webkit-phone-node-final.png`、`webkit-landscape-scrolled.png`：二级菜单和横屏滚动后的固定标题。
+- `chromium-phone-longpress.png`、`chromium-narrow-longpress.png`：实际节点右键菜单及窄屏布局。
+- `report.json`：双浏览器布局。编辑持久化与拖动复验结果仍保存在 `output/playwright/circle-reader/edit-report.json`。
 
-Browser emulation is not physical-device acceptance. iPhone/iPad OS keyboards, Apple Pencil and each media codec still depend on the real device/browser. Attachment content/permission tests use a local fixture HTTP server with the production preview components; they do not validate production object-storage uploads or production SSO. Spreadsheet preview retains its existing 5 MiB, 10-sheet, 10,000-row and 40-column limits and download fallback. Legacy DOC/PPT and unsupported formats retain download fallback.
-
-Raw browser artifacts are local, uncommitted test output under `output/playwright/reference-editor/`: `layout-report.json`, `preview-report.json`, `interaction-report.json`, `final-phone.png`, `final-ipad.png`, `final-dark.png`, `final-file-menu.png`, `chromium-phone-csv.png` and both visual comparison images. Temporary test accounts/rooms live in a dedicated local QA database, never in the user's working maps.
-
-Implementation checklist: responsive reference chrome, narrow-title fix, first-long-press fix, typed delimited-text preview, other spreadsheet formats, media controls/fallback, read-only/history behavior, build/lint/tests, source/render comparison — complete.
+生产配置和用户的脑图数据未修改。自动化数据位于独立的临时数据库。物理手机键盘、真实企业微信登录、生产对象存储及 Apple Pencil 未做现场验收。
 
 final result: passed

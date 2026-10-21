@@ -1,42 +1,44 @@
 <template>
   <div v-if="isTouchEditor && mindMap" class="mobileEditorControls">
-    <div class="mobileCanvasControls" aria-label="画布控制">
+    <MobileEditorMenu v-if="isPhoneReader" :is-dark="isDark" @select="menuAction" @toggle="onMenuToggle" />
+    <div v-else class="mobileCanvasControls" aria-label="画布控制">
       <button aria-label="放大" @click="mindMap.view.enlarge()"><i class="el-icon-plus" /></button>
       <button aria-label="缩小" @click="mindMap.view.narrow()"><i class="el-icon-minus" /></button>
       <button aria-label="适应画布" @click="mindMap.view.fit()"><i class="el-icon-full-screen" /></button>
       <button aria-label="定位中心" @click="mindMap.renderer.setRootNodeCenter()"><i class="el-icon-aim" /></button>
     </div>
-    <nav class="mobileEditorDock" aria-label="编辑工具" data-testid="touch-editor-dock">
-      <button aria-label="主题" :disabled="readonly" :aria-pressed="String(activeSidebar === 'theme')" @click="panel('theme')"><i class="el-icon-picture-outline" aria-hidden="true" />主题</button>
-      <button aria-label="样式" :disabled="readonly" :aria-pressed="String(activeSidebar === 'nodeStyle')" @click="panel('nodeStyle')"><i class="el-icon-brush" aria-hidden="true" />样式</button>
-      <button :disabled="readonly" class="mobilePrimary" aria-label="新增节点" @click="sheet = 'node'"><i class="el-icon-plus" /></button>
-      <button aria-label="图谱" :disabled="readonly" :aria-pressed="String(activeSidebar === 'structure')" @click="panel('structure')"><i class="el-icon-connection" aria-hidden="true" />图谱</button>
-      <button aria-label="更多" @click="sheet = 'more'"><i class="el-icon-more" aria-hidden="true" />更多</button>
-    </nav>
-    <el-drawer :visible="!!sheet" direction="btt" size="auto" :with-header="false" append-to-body custom-class="mobileActionSheet touchEditorActionSheet" @close="sheet = ''">
-      <header><strong>{{ sheet === 'node' ? '节点操作' : '更多工具' }}</strong><button aria-label="关闭" @click="sheet = ''"><i class="el-icon-close" /></button></header>
+    <el-drawer :visible="!!sheet" direction="ltr" size="320px" :with-header="false" :modal="false" :lock-scroll="false" append-to-body class="touchEditorDrawer" :custom-class="isDark ? 'touchEditorActionSidebar isDark' : 'touchEditorActionSidebar'" @close="sheet = ''">
+      <header><strong>{{ sheetTitle }}</strong><button aria-label="关闭" @click="sheet = ''"><i class="el-icon-close" /></button></header>
       <p v-if="sheet === 'node' && !activeNodes.length">请先点击选择一个节点</p>
       <div class="mobileActionGrid">
         <template v-if="sheet === 'node'">
-          <button :disabled="!canEdit" @click="command('INSERT_CHILD_NODE')">新增子节点</button>
-          <button :disabled="!canEdit || activeNodes.some(n => n.isRoot)" @click="command('INSERT_NODE')">新增同级节点</button>
-          <button :disabled="!canEdit" @click="editText">编辑文字</button>
-          <button :disabled="!activeNodes.length" @click="nodeEvent('showNodeComment')">节点评论</button>
-          <button :disabled="!canEdit" @click="nodeEvent('selectAttachment', true)">附件</button>
-          <button :disabled="!canEdit" @click="nodeEvent('showNodeLink')">超链接</button>
-          <button :disabled="!activeNodes.length" @click="context">全部节点操作</button>
-          <button :disabled="!canEdit || activeNodes.some(n => n.isRoot)" @click="remove">删除节点</button>
+          <button :disabled="!canEdit" @click="command('INSERT_CHILD_NODE')"><i aria-hidden="true" class="el-icon-plus" />新增子节点</button>
+          <button :disabled="!canEdit || activeNodes.some(n => n.isRoot)" @click="command('INSERT_NODE')"><i aria-hidden="true" class="el-icon-circle-plus-outline" />新增同级节点</button>
+          <button :disabled="!canEdit" @click="editText"><i aria-hidden="true" class="el-icon-edit" />编辑文字</button>
+          <button :disabled="!activeNodes.length" @click="nodeEvent('showNodeComment')"><i aria-hidden="true" class="el-icon-chat-dot-round" />节点评论</button>
+          <button :disabled="!canEdit" @click="nodeEvent('selectAttachment', true)"><i aria-hidden="true" class="el-icon-paperclip" />附件</button>
+          <button :disabled="!canEdit" @click="nodeEvent('showNodeLink')"><i aria-hidden="true" class="el-icon-link" />超链接</button>
+          <button :disabled="!activeNodes.length" @click="context"><i aria-hidden="true" class="el-icon-more" />全部节点操作</button>
+          <button :disabled="!canEdit || activeNodes.some(n => n.isRoot)" @click="remove"><i aria-hidden="true" class="el-icon-delete" />删除节点</button>
+        </template>
+        <template v-else-if="sheet === 'canvas'">
+          <button @click="canvasAction('enlarge')"><i aria-hidden="true" class="el-icon-zoom-in" />放大</button><button @click="canvasAction('narrow')"><i aria-hidden="true" class="el-icon-zoom-out" />缩小</button>
+          <button @click="canvasAction('fit')"><i aria-hidden="true" class="el-icon-full-screen" />适应画布</button><button @click="canvasAction('center')"><i aria-hidden="true" class="el-icon-aim" />定位中心</button>
+          <button v-if="isPhoneReader" :disabled="readonly" :aria-pressed="String(phoneNodeDragEnabled)" @click="phoneNodeDragEnabled = !phoneNodeDragEnabled"><i aria-hidden="true" class="el-icon-rank" />{{ phoneNodeDragEnabled ? '关闭节点拖动（浏览优先）' : '启用节点拖动' }}</button>
+        </template>
+        <template v-else-if="sheet === 'appearance'">
+          <button v-for="item in appearancePanels" :key="item.value" :disabled="readonly" @click="panel(item.value)"><i aria-hidden="true" class="iconfont" :class="item.icon" />{{ item.name }}</button>
         </template>
         <template v-else>
-          <button :disabled="readonly || !canUndo" @click="history('BACK')">撤销</button>
-          <button :disabled="readonly || !canRedo" @click="history('FORWARD')">重做</button>
-          <button @click="nodeMenu">节点操作</button>
-          <button @click="emit('open_mobile_file_menu')">文件操作</button>
-          <button @click="panel('outline')">大纲</button>
-          <button @click="emit('show_search')">搜索节点</button>
-          <button @click="emit('showShareAcl')">分享与权限</button>
-          <button v-for="item in extraPanels" :key="item.value" @click="panel(item.value)">{{ item.name }}</button>
-          <button @click="emit('showExport')">导出</button>
+          <button :disabled="readonly || !canUndo" @click="history('BACK')"><i aria-hidden="true" class="el-icon-back" />撤销</button>
+          <button :disabled="readonly || !canRedo" @click="history('FORWARD')"><i aria-hidden="true" class="el-icon-right" />重做</button>
+          <button @click="nodeMenu"><i aria-hidden="true" class="el-icon-s-grid" />节点操作</button>
+          <button @click="emit('open_mobile_file_menu')"><i aria-hidden="true" class="el-icon-folder-opened" />文件操作</button>
+          <button @click="panel('outline')"><i aria-hidden="true" class="el-icon-tickets" />大纲</button>
+          <button @click="emit('show_search')"><i aria-hidden="true" class="el-icon-search" />搜索节点</button>
+          <button @click="emit('showShareAcl')"><i aria-hidden="true" class="el-icon-lock" />分享与权限</button>
+          <button v-for="item in extraPanels" :key="item.value" @click="panel(item.value)"><i aria-hidden="true" class="iconfont" :class="item.icon" />{{ item.name }}</button>
+          <button @click="emit('showExport')"><i aria-hidden="true" class="el-icon-download" />导出</button>
         </template>
       </div>
     </el-drawer>
@@ -45,17 +47,25 @@
 <script>
 import editorViewport from '@/utils/editorViewport'
 import { sidebarTriggerList } from '@/config'
+import MobileEditorMenu from './MobileEditorMenu.vue'
+import { openNotifications } from '@/services/accessNotificationState'
 export default {
+  components: { MobileEditorMenu },
   mixins: [editorViewport],
   props: { mindMap: Object },
-  data: () => ({ sheet: '', activeNodes: [], canUndo: false, canRedo: false, collabHistoryEnabled: false }),
+  data: () => ({ sheet: '', activeNodes: [], canUndo: false, canRedo: false, collabHistoryEnabled: false, phoneNodeDragEnabled: false }),
   computed: {
     readonly() { return this.$store.state.isReadonly },
+    isDark() { return this.$store.state.localConfig.isDark },
     activeSidebar() { return this.$store.state.activeSidebar },
     canEdit() { return !this.readonly && this.activeNodes.length > 0 },
-    extraPanels() { return (sidebarTriggerList[this.$i18n.locale] || sidebarTriggerList.zh).filter(i => !['theme', 'nodeStyle', 'structure', 'outline'].includes(i.value) && (!this.readonly || ['shortcutKey', 'ai'].includes(i.value))) }
+    sheetTitle() { return ({ node: '节点操作', canvas: '画布', appearance: '外观' })[this.sheet] || '更多工具' },
+    appearancePanels() { return (sidebarTriggerList[this.$i18n.locale] || sidebarTriggerList.zh).filter(i => ['theme', 'nodeStyle', 'baseStyle', 'structure'].includes(i.value)) },
+    extraPanels() { return (sidebarTriggerList[this.$i18n.locale] || sidebarTriggerList.zh).filter(i => !['theme', 'nodeStyle', 'structure', 'outline', ...(this.isPhoneReader ? ['baseStyle'] : [])].includes(i.value) && (!this.readonly || ['shortcutKey', 'ai'].includes(i.value))) }
   },
   watch: {
+    isPhoneReader() { this.sheet = ''; this.applyPhoneGestures() },
+    phoneNodeDragEnabled() { this.applyPhoneGestures() },
     isTouchEditor(value) {
       if (!value) this.sheet = ''
       this.$nextTick(() => { if (this.mindMap) this.mindMap.resize() })
@@ -65,8 +75,11 @@ export default {
     }
   },
   mounted() {
+    this._originalTouchNodeDrag = this.mindMap.opt.touchNodeDragEnabled
+    this.applyPhoneGestures()
     this.activeNodes = [...(this.mindMap.renderer.activeNodeList || [])]
     this.$bus.$on('open_mobile_editor_sheet', this.openSheet)
+    this.$bus.$on('close_mobile_editor_sheet', this.closeSheet)
     this.mindMap.on('back_forward', this.nativeHistory)
     this.$bus.$on('collab_history', this.collabHistory)
     const adapter = this.mindMap.cooperate && this.mindMap.cooperate.collabV2Adapter
@@ -80,7 +93,9 @@ export default {
     if (window.visualViewport) window.visualViewport.addEventListener('resize', this.keyboardResize)
   },
   beforeDestroy() {
+    if (this.mindMap.opt && !this.mindMap._destroyed) this.mindMap.updateConfig({ touchNodeDragEnabled: this._originalTouchNodeDrag })
     this.$bus.$off('open_mobile_editor_sheet', this.openSheet)
+    this.$bus.$off('close_mobile_editor_sheet', this.closeSheet)
     this.$bus.$off('collab_history', this.collabHistory)
     this.mindMap.off('back_forward', this.nativeHistory)
     this.mindMap.off('node_active', this.active)
@@ -93,7 +108,28 @@ export default {
     this._pressedNode = null
   },
   methods: {
-    openSheet(name) { if (this.isTouchEditor) this.sheet = name === 'node' ? 'node' : 'more' },
+    onMenuToggle(open) {
+      if (!open) return
+      this.closeSheet()
+      this.$bus.$emit('close_mobile_file_menu')
+      this.$bus.$emit('close_search')
+      this.$bus.$emit('closeSideBar')
+    },
+    applyPhoneGestures() { this.mindMap.updateConfig({ touchNodeDragEnabled: this.isPhoneReader ? this.phoneNodeDragEnabled : this._originalTouchNodeDrag }) },
+    menuAction(key) {
+      if (key === 'file') this.emit('open_mobile_file_menu')
+      else if (key === 'messages') { this.closeSheet(); openNotifications('requests') }
+      else this.openSheet(key)
+    },
+    canvasAction(key) { if (key === 'center') this.mindMap.renderer.setRootNodeCenter(); else this.mindMap.view[key](); this.closeSheet() },
+    openSheet(name) {
+      if (!this.isTouchEditor) return
+      this.$bus.$emit('close_mobile_file_menu')
+      this.$bus.$emit('closeSideBar')
+      this.$bus.$emit('close_search')
+      this.sheet = ['node', 'canvas', 'appearance'].includes(name) ? name : 'more'
+    },
+    closeSheet() { this.sheet = '' },
     nativeHistory(index, length) {
       if (this.collabHistoryEnabled) return
       this.canUndo = index > 0; this.canRedo = index < length - 1
@@ -118,7 +154,13 @@ export default {
       // node_active is batched by the renderer. Seed the selected node now so
       // the first long press can open the sheet before that event arrives.
       this.activeNodes = [node]
-      this.sheet = 'node'
+      if (this.isPhoneReader) {
+        this.closeSheet()
+        this.$bus.$emit('close_mobile_file_menu')
+        this.$bus.$emit('close_search')
+        this.$bus.$emit('closeSideBar')
+        this.$bus.$emit('node_contextmenu', { clientX: e.clientX, clientY: e.clientY }, node)
+      } else this.openSheet('node')
     },
     beforeEdit() { if (this.isTouchEditor) document.body.classList.add('mobileNodeEditing') },
     afterEdit() { document.body.classList.remove('mobileNodeEditing') },

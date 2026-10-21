@@ -35,7 +35,7 @@
     <Theme v-if="mindMap" :data="mindMapData" :mindMap="mindMap"></Theme>
     <Structure v-if="mindMap" :mindMap="mindMap"></Structure>
     <ShortcutKey></ShortcutKey>
-    <Contextmenu v-if="mindMap" :mindMap="mindMap"></Contextmenu>
+    <Contextmenu v-if="mindMap" :mindMap="mindMap" :editable="!isReadonly"></Contextmenu>
     <RichTextToolbar v-if="mindMap" :mindMap="mindMap"></RichTextToolbar>
     <NodeNoteContentShow
       v-if="mindMap"
@@ -292,6 +292,7 @@ export default {
   },
   computed: {
     ...mapState({
+      isReadonly: state => state.isReadonly,
       isZenMode: state => state.localConfig.isZenMode,
       openNodeRichText: state => state.localConfig.openNodeRichText,
       isShowScrollbar: state => state.localConfig.isShowScrollbar,

@@ -86,12 +86,12 @@ class TouchEvent {
     const nodeTouch = target.closest && target.closest('.smm-node')
     // Middle-button canvas panning works regardless of the user's desktop
     // left-selection/right-drag preference. Editable nodes retain left dragging.
-    this.mouseButton = !panOnly && nodeTouch && !this.mindMap.opt.readonly &&
+    this.mouseButton = !panOnly && nodeTouch && !this.mindMap.opt.readonly && this.mindMap.opt.touchNodeDragEnabled !== false &&
       !(rootEl && rootEl.contains(target)) ? 0 : 1
     this.mouseTarget = panOnly ? this.mindMap.el : target
     this.mouseDown = true
     this.dispatchMouseEvent('mousedown', this.mouseTarget, touch)
-    if (!panOnly && nodeTouch && !this.mindMap.opt.readonly) {
+    if (!panOnly && nodeTouch) {
       this.longPressTimer = setTimeout(() => {
         const point = this.lastTouch
         const menuTarget = this.mouseTarget

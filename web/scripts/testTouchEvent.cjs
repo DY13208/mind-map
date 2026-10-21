@@ -59,6 +59,13 @@ test('node dragging uses actual release coordinates and does not synthesize taps
   assert.equal(f.events.at(-1).clientX, 70)
   assert.equal(f.events.some(e => e.type === 'dblclick' || e.type === 'click'), false)
 })
+test('phone reading mode pans node touches, preserves long press, and restores opt-in dragging', () => {
+  const f = fixture({ touchNodeDragEnabled: false })
+  f.plugin.onTouchstart(f.event([f.touch(10,10)])); assert.equal(f.events[0].button, 1)
+  f.advance(550); assert(f.events.some(e => e.type === 'contextmenu')); f.plugin.onTouchend(f.event([], [f.touch(10,10)]))
+  f.map.opt.touchNodeDragEnabled = true; f.plugin.onTouchstart(f.event([f.touch(10,10)])); assert.equal(f.events.at(-1).button, 0)
+  const readOnly = fixture({readonly:true}); readOnly.plugin.onTouchstart(readOnly.event([readOnly.touch(10,10)]));readOnly.advance(550);assert(readOnly.events.some(e=>e.type==='contextmenu'))
+})
 test('node and canvas mouseup pass the same release event to the drop handler and remove listeners', () => {
   const parser=require('@babel/parser'),{EventEmitter}=require('node:events')
   const drag=fs.readFileSync(path.resolve(__dirname,'../../simple-mind-map/src/plugins/Drag.js'),'utf8')

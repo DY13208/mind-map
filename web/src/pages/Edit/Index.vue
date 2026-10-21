@@ -1,7 +1,7 @@
 <template>
   <div
     class="container"
-    :class="{ isDark: isDark, activeSidebar: activeSidebar, isTouchEditor: isTouchEditor && !isZenMode }"
+    :class="{ isDark: isDark, activeSidebar: activeSidebar, isTouchEditor: isTouchEditor && !isZenMode, isPhoneReader: isPhoneReader && !isZenMode }"
   >
     <AccessDeniedPanel
       v-if="accessDenied"

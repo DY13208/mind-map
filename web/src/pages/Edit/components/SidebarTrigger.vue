@@ -58,6 +58,11 @@
         class="collapseBtn"
         :title="'\u6536\u8d77\u4fa7\u680f'"
         data-testid="right-sidebar-collapse"
+        role="button"
+        tabindex="0"
+        aria-label="收起侧栏"
+        @keydown.enter="setRightCollapsed(true)"
+        @keydown.space.prevent="setRightCollapsed(true)"
         @click="setRightCollapsed(true)"
       >
         &rsaquo;
@@ -69,6 +74,11 @@
     :class="{ show: rightCollapsed, isDark: isDark }"
     :title="'\u5c55\u5f00\u4fa7\u680f'"
     data-testid="right-sidebar-expand"
+    role="button"
+    tabindex="0"
+    aria-label="展开侧栏"
+    @keydown.enter="setRightCollapsed(false)"
+    @keydown.space.prevent="setRightCollapsed(false)"
     @click.stop="setRightCollapsed(false)"
   >
     <svg class="tabWing top" width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
@@ -173,6 +183,11 @@ export default {
     },
 
     trigger(item) {
+      if (this.isTouchEditor) {
+        this.$bus.$emit('close_mobile_editor_sheet')
+        this.$bus.$emit('close_mobile_file_menu')
+        this.$bus.$emit('close_search')
+      }
       if (this.activeSidebar === item.value) {
         this.setActiveSidebar(null)
         this.$bus.$emit('closeSideBar')
