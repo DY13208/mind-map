@@ -1,22 +1,34 @@
 <template>
-  <div v-if="visible" class="kb-banner" :class="'kb-banner--' + level" role="status">
-    <i :class="icon" class="kb-banner-icon" aria-hidden="true" />
-    <div class="kb-banner-text">
-      <strong>{{ title }}</strong>
-      <span v-if="description">{{ description }}</span>
+  <div v-if="serviceVisible || failedTotal" class="kb-banners">
+    <div v-if="serviceVisible" class="kb-banner" :class="'kb-banner--' + level" role="status">
+      <i :class="icon" class="kb-banner-icon" aria-hidden="true" />
+      <div class="kb-banner-text">
+        <strong>{{ title }}</strong>
+        <span v-if="description">{{ description }}</span>
+      </div>
+      <el-button size="mini" icon="el-icon-refresh-right" :loading="loading" @click="$emit('recheck')">重新检测</el-button>
     </div>
-    <el-button size="mini" icon="el-icon-refresh-right" :loading="loading" @click="$emit('retry')">重试</el-button>
+    <div v-if="failedTotal" class="kb-banner kb-banner--task" role="status">
+      <i class="el-icon-document-delete kb-banner-icon" aria-hidden="true" />
+      <div class="kb-banner-text">
+        <strong>{{ failedTotal }} 个文件处理失败</strong>
+        <span>{{ failedSummary }}</span>
+      </div>
+      <el-button size="mini" type="primary" plain @click="$emit('show-failures')">查看原因</el-button>
+    </div>
   </div>
 </template>
 <script>
-import { errorPresentation } from '../services/kbErrors'
-// 展示 /api/kb/health 结果或接口错误（未启用 / 未登录 / 未实现 / 不可用）
+import { errorPresentation, describeJobError } from '../services/kbErrors'
+// 两类提示分开：服务本身不可用（/health 或接口错误）→ 重新检测；后台任务失败 → 查看原因并处理
 export default {
   name: 'KbServiceBanner',
   props: {
     health: { type: Object, default: null },
     error: { type: Error, default: null },
-    loading: { type: Boolean, default: false }
+    loading: { type: Boolean, default: false },
+    failedJobs: { type: Array, default: () => [] },
+    failedTotal: { type: Number, default: 0 }
   },
   computed: {
     issues() {
@@ -25,11 +37,10 @@ export default {
       const out = []
       if (h.db && h.db.ok === false) out.push(h.db.error === 'schema_missing' ? '数据库结构未初始化' : '数据库不可用')
       if (h.docling && h.docling.ok === false) out.push('Docling 解析服务不可用，新文件将排队等待')
-      if (h.queue && h.queue.failed) out.push(`队列中有 ${h.queue.failed} 个失败任务`)
       return out
     },
     view() { return errorPresentation(this.error) },
-    visible() {
+    serviceVisible() {
       return !!this.error || this.issues.length > 0
     },
     level() {
@@ -51,17 +62,28 @@ export default {
     description() {
       if (this.error) return this.error.message
       return this.issues.join('；')
+    },
+    failedSummary() {
+      const first = this.failedJobs[0]
+      if (!first) return ''
+      const more = this.failedTotal > 1 ? ` 等 ${this.failedTotal} 个文件` : ''
+      return `「${first.fileName}」${more}：${describeJobError(first.lastError)}`
     }
   }
 }
 </script>
 <style scoped lang="less">
+.kb-banners {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
 .kb-banner {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  margin-bottom: 14px;
   border-radius: var(--ui-radius-md);
   border: 1px solid var(--ui-border);
   background: var(--ui-surface-muted);
@@ -73,6 +95,11 @@ export default {
   }
   &--warning .kb-banner-icon { color: var(--ui-star); }
   &--info .kb-banner-icon { color: var(--ui-primary); }
+  &--task {
+    background: var(--ui-surface);
+    border-left: 3px solid var(--ui-danger);
+    .kb-banner-icon { color: var(--ui-danger); }
+  }
 }
 .kb-banner-icon {
   font-size: 18px;
@@ -80,10 +107,11 @@ export default {
 }
 .kb-banner-text {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 4px 10px;
   font-size: 13px;
-  span { color: var(--ui-text-secondary); }
+  span { color: var(--ui-text-secondary); overflow-wrap: anywhere; }
 }
 </style>

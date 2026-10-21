@@ -8,7 +8,6 @@
       'productShell--embed': shellMode === 'embed',
       'productShell--teams': $route.path === '/spaces',
       'productShell--team-detail': $route.path.startsWith('/spaces/'),
-      'productShell--dark': isDarkTheme
       'productShell--dark': isDarkTheme,
       'productShell--knowledge': isKnowledgeRoute
     }"

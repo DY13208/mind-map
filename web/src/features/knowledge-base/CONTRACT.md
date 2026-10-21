@@ -48,6 +48,8 @@
 | PATCH | /files/:id | updateFile | `{name?,folderId?}` | file。需要 editor |
 | DELETE | /files/:id | deleteFile | – | `{id,deleted:true}`。需要 manager |
 | POST | /files/:id/reparse | reparseFile | – | 202 `{id,status,runId,jobId}`。需要 editor。已有任务 409 `job_in_progress` |
+| GET | /jobs/failed | listFailedJobs | – | `{items:[{id,fileId,fileName,ext,fileStatus,kind,attempts,maxAttempts,lastError,failedAt,canRetry}],total}`。只含当前用户可见、未删除文件的最新一次任务；已被新任务取代的失败不计入。`/health` 的 `queue.failed` 仍是全库原始计数，页面不再用它提示 |
+| POST | /jobs/:id/dismiss | dismissJob | – | 200 `{id,dismissed:true}`。需要 editor；任务置为 `cancelled` 并记审计 `job.dismiss`。非失败状态 409 `job_not_failed` |
 | GET | /files/:id/layout | previewLayout | – | `{fileId,sheets:[{name,confidence,needsConfirmation,confirmed,headerRows,dataStartRow,columns,preview,regions}]}`。只读原始 Excel 的前若干行，不改文件。非 xlsx 为 415 `not_excel` |
 | POST | /files/:id/structure | restructureFile | `{sheets:[{sheet,headerRows,dataStartRow,columnOverrides}]}`，前端只发 `columnOverrides`（只含用户明确改过的列 `{index,name}`），不再发旧的 `columns` 快照 | 202 `{id,status,runId,jobId}`。只重新结构化，不调用 Docling，不改原始文件。表头行必须早于数据起始行，否则 400 `bad_layout`。低置信度的自动结果不会替换当前有效版本 |
 | GET | /files/:id/blocks | getBlocks | `limit&cursor` | `{items:[{id,seq,type,text,page,bbox,sheet,row,cell,headingPath}],next_cursor,runId,status?}`。`bbox` 为 0–1 的 `[x0,y0,x1,y1]` |
