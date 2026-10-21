@@ -480,7 +480,11 @@ async function replayOperation(store, row, lookup) {
     return store
   }
   if (isDirectType(type)) {
-    await applyDirect(store, op, { version })
+    // Durable historical events predate public CAS tokens. This caller reads
+    // committed operation rows from the history store, so replay uses its
+    // existing internal ordering/conflict logic without requiring new-client
+    // preconditions from persisted payloads.
+    await applyDirect(store, op, { version, skipWritePreconditions: true })
     return store
   }
   throw historyError(
@@ -504,7 +508,11 @@ async function replayHistoricalChild(store, operation, version) {
     throw err
   }
   await avoidReplaySnapshotRestamping(store, operation)
-  await applyDirect(store, operation, { version, preserveBatchOrder: true })
+  await applyDirect(store, operation, {
+    version,
+    preserveBatchOrder: true,
+    skipWritePreconditions: true
+  })
 }
 
 async function replayOperations(baseTree, baseMeta, rows, options = {}) {

@@ -65,11 +65,13 @@ function testInsertRecordsInverseAndResolvedUid() {
   const applied = applyNodeCommand(doc, {
     type: 'node.insert',
     payload
-  })
+  }, { version: 7 })
   assert.ok(applied.result.uid)
   assert.strictEqual(payload.uid, applied.result.uid)
   assert.strictEqual(applied.inversePayload.type, 'node.delete')
   assert.strictEqual(applied.event.type, 'node.inserted')
+  assert.deepStrictEqual(applied.event.payload.data, mindDoc.readObject(doc)[applied.result.uid].data)
+  assert.strictEqual(applied.event.payload.data.__fv.text, 7)
   assert.ok(applied.event.payload.position)
   assert.strictEqual(applied.event.payload.index, 0)
   assert.strictEqual(applied.result.position, applied.event.payload.position)

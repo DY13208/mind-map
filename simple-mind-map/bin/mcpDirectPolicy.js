@@ -41,6 +41,24 @@ function isPlainData(value, allowed) {
   return Object.keys(value).every(key => allowed.has(key))
 }
 
+function isExpectedShape(value, allowed) {
+  if (value === undefined) return true
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  return Object.keys(value).every(key => allowed.has(key))
+}
+
+const FIELD_EXPECTED_KEYS = new Set([
+  'uid', '__fv.text', '__fv.note', '__fv.hyperlink'
+])
+const MOVE_EXPECTED_KEYS = new Set([
+  ...FIELD_EXPECTED_KEYS,
+  'parent_uid', 'position',
+  'target_uid', 'target_parent_uid', 'target_position',
+  'anchor_uid', 'anchor_parent_uid', 'anchor_position', 'anchor_side',
+  'target_empty'
+])
+const DELETE_EXPECTED_KEYS = new Set(['uid', 'subtree_token'])
+
 function isDirectNodeShape(command, knownUids = new Set()) {
   if (!command) return false
   const payload = command.payload || {}
@@ -60,10 +78,9 @@ function isDirectNodeShape(command, knownUids = new Set()) {
     )
   }
   if (command.type === 'node.move' || command.type === 'node.reorder') {
-    if (payload.expected || payload.expectedValue) return false
     const moveKeys = new Set([
       'uid', 'parentUid', 'parent_uid', 'parent', 'index', 'position',
-      'order', 'patch', 'data', 'confirm_sop_change'
+      'order', 'patch', 'data', 'expected', 'confirm_sop_change'
     ])
     const patch = payload.patch || payload.data || {}
     const parent = payload.parentUid || payload.parent_uid || payload.parent
@@ -71,31 +88,33 @@ function isDirectNodeShape(command, knownUids = new Set()) {
       isUidReference(payload.uid, knownUids) &&
       (!parent || isUidReference(parent, knownUids)) &&
       Object.keys(payload).every(key => moveKeys.has(key)) &&
+      isExpectedShape(payload.expected, MOVE_EXPECTED_KEYS) &&
       isPlainData(patch, new Set(['text', 'note', 'hyperlink', 'hyperlinkTitle', '__fv']))
     )
   }
   if (command.type === 'node.update') {
-    if (payload.expected || payload.expectedValue) return false
     const structuralKeys = [
       'parentUid', 'parent_uid', 'parent', 'index', 'position', 'order'
     ]
     if (structuralKeys.some(key => payload[key] != null)) return false
     const patch = payload.patch || payload.data || payload
     const allowedPayload = new Set([
-      'uid', 'patch', 'data', 'confirm_sop_change', '__fv', ...structuralKeys
+      'uid', 'patch', 'data', 'expected', 'confirm_sop_change', '__fv', ...structuralKeys
     ])
     return (
       isUidReference(payload.uid, knownUids) &&
       Object.keys(payload).every(key => allowedPayload.has(key)) &&
+      isExpectedShape(payload.expected, FIELD_EXPECTED_KEYS) &&
       isPlainData(patch, new Set(['text', 'note', 'hyperlink', 'hyperlinkTitle', '__fv']))
     )
   }
   if (command.type === 'node.delete') {
-    const allowedPayload = new Set(['uid', 'keepChildren', 'confirm_sop_change'])
+    const allowedPayload = new Set(['uid', 'keepChildren', 'expected', 'confirm_sop_change'])
     return (
       isUidReference(payload.uid, knownUids) &&
       !payload.keepChildren &&
-      Object.keys(payload).every(key => allowedPayload.has(key))
+      Object.keys(payload).every(key => allowedPayload.has(key)) &&
+      isExpectedShape(payload.expected, DELETE_EXPECTED_KEYS)
     )
   }
   return false
@@ -135,18 +154,19 @@ function isMcpDirectBatch(command) {
       )
     }
     if (type === 'node.update') {
-      const allowed = new Set(['uid', 'patch', 'data', 'confirm_sop_change'])
+      const allowed = new Set(['uid', 'patch', 'data', 'expected', 'confirm_sop_change'])
       const patch = payload.patch || payload.data || {}
       return (
         isUidToken(payload.uid) &&
         Object.keys(payload).every(key => allowed.has(key)) &&
+        isExpectedShape(payload.expected, FIELD_EXPECTED_KEYS) &&
         isPlainData(patch, new Set(['text', 'note', 'hyperlink', 'hyperlinkTitle', '__fv']))
       )
     }
     if (type === 'node.move' || type === 'node.reorder') {
       const allowed = new Set([
         'uid', 'parentUid', 'parent_uid', 'parent', 'index', 'position',
-        'order', 'patch', 'data', 'confirm_sop_change'
+        'order', 'patch', 'data', 'expected', 'confirm_sop_change'
       ])
       const parent = payload.parentUid || payload.parent_uid || payload.parent
       const patch = payload.patch || payload.data || {}
@@ -154,13 +174,15 @@ function isMcpDirectBatch(command) {
         isUidToken(payload.uid) &&
         (!parent || parent === 'root' || isUidToken(parent)) &&
         Object.keys(payload).every(key => allowed.has(key)) &&
+        isExpectedShape(payload.expected, MOVE_EXPECTED_KEYS) &&
         isPlainData(patch, new Set(['text', 'note', 'hyperlink', 'hyperlinkTitle', '__fv']))
       )
     }
     if (type === 'node.delete') {
       return (
         isUidToken(payload.uid) &&
-        Object.keys(payload).every(key => ['uid', 'confirm_sop_change'].includes(key))
+        Object.keys(payload).every(key => ['uid', 'expected', 'confirm_sop_change'].includes(key)) &&
+        isExpectedShape(payload.expected, DELETE_EXPECTED_KEYS)
       )
     }
     return false

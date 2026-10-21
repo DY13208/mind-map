@@ -274,6 +274,29 @@ export default {
   nodeNote: {
     title: '备注'
   },
+  editConflict: {
+    title: '协同修改冲突',
+    message: '服务器内容已变化，本次修改没有自动覆盖。',
+    myDraft: '我的未保存内容',
+    copyDraft: '复制我的内容',
+    copied: '已复制',
+    viewLatest: '查看服务器最新内容',
+    hideLatest: '收起服务器内容',
+    latest: '服务器最新内容',
+    latestUnavailable: '当前没有可读取的服务器内容',
+    savedLocally: '已保存在本机，可刷新后从草稿入口找回。',
+    storageFailed: '本机草稿保存失败。请先复制内容，编辑框仍会保留。',
+    inbox: '未保存草稿',
+    inboxTitle: '协同冲突草稿',
+    empty: '当前导图没有未保存的冲突草稿。',
+    node: '节点',
+    discard: '丢弃草稿',
+    discardConfirm: '丢弃这份未保存内容？此操作无法撤销。',
+    closeBlocked: '请先成功保存或明确丢弃未保存内容。',
+    partial: '部分节点已保存；当前草稿只保留在发生冲突的节点。',
+    precondition: '协同版本条件不完整，请刷新或重新连接后再编辑。',
+    saveFailed: '保存失败，内容仍保留在编辑框中。'
+  },
   nodeTag: {
     title: '标签',
     addTip: '请按回车键添加'

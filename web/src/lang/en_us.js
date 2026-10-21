@@ -280,6 +280,29 @@ export default {
   nodeNote: {
     title: 'Note'
   },
+  editConflict: {
+    title: 'Collaboration conflict',
+    message: 'The server content changed. Your edit was not applied automatically.',
+    myDraft: 'My unsaved content',
+    copyDraft: 'Copy my content',
+    copied: 'Copied',
+    viewLatest: 'View latest server content',
+    hideLatest: 'Hide server content',
+    latest: 'Latest server content',
+    latestUnavailable: 'No server content is available right now.',
+    savedLocally: 'Saved on this device. You can find it in the draft list after a refresh.',
+    storageFailed: 'Could not save the local draft. Copy your content; the editor will stay open.',
+    inbox: 'Unsaved drafts',
+    inboxTitle: 'Collaboration conflict drafts',
+    empty: 'There are no unsaved conflict drafts in this map.',
+    node: 'Node',
+    discard: 'Discard draft',
+    discardConfirm: 'Discard this unsaved content? This cannot be undone.',
+    closeBlocked: 'Save successfully or explicitly discard the unsaved content first.',
+    partial: 'Some nodes were saved. This draft now applies only to conflicting nodes.',
+    precondition: 'Collaboration version conditions are missing. Refresh or reconnect before editing.',
+    saveFailed: 'Save failed. Your content is still in the editor.'
+  },
   nodeTag: {
     title: 'Tag',
     addTip: 'Press Enter to add'

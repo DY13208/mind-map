@@ -52,6 +52,10 @@ import {
   FV_KEY
 } from '../utils/fieldMerge'
 import { createCollaborationStore } from '../utils/collaborationStore'
+import {
+  createEditSessionManager,
+  editFieldGroup
+} from '../utils/collabEditSession'
 import mapRefUtil from '../utils/mapRef'
 import collabInsertCollect from '../utils/collabInsertCollect'
 import collabGeneralization from '../utils/collabGeneralization'
@@ -512,6 +516,16 @@ class Cooperate {
     this.waitNodeUidMap = {} // 该列表中的uid对应的节点还未渲染完毕
     // 当前的平级对象类型的思维导图数据
     this.currentData = null
+    this.editSessionManager = createEditSessionManager()
+    this._pendingEditSessionByFingerprint = new Map()
+    this.viewDeferred = false
+    this.dirtyUIDSet = new Set()
+    this.viewStructureDirtyUIDSet = new Set()
+    this.renderedVersion = 0
+    this._dragViewDeferred = false
+    this._dragStructureBaseline = null
+    this._pendingDragExpectedByUid = null
+    this._flushingDeferredView = false
     // 用户信息
     this.userInfo = null
     // 是否正在重新设置思维导图数据
@@ -637,11 +651,649 @@ class Cooperate {
     return this.currentData ? Object.keys(this.currentData).length : 0
   }
 
+  getEditSessionSnapshot(uid) {
+    const key = String(uid || '')
+    if (!key) return null
+    const entry = this.currentData && this.currentData[key]
+    if (entry && entry.data && !entry.partial) {
+      return {
+        uid: key,
+        data: { ...entry.data },
+        fieldVersions: readFieldVersions(entry.data),
+        serverRevision:
+          (this._authoritativeRevByUid && this._authoritativeRevByUid.get(key)) ||
+          Number(this.lastAppliedVersion) ||
+          0,
+        source: 'currentData'
+      }
+    }
+    const renderer = this.mindMap && this.mindMap.renderer
+    const node = renderer && renderer.findNodeByUid && renderer.findNodeByUid(key)
+    const data = node && node.getData && node.getData()
+    if (!data) return null
+    return {
+      uid: key,
+      data: { ...data },
+      fieldVersions: readFieldVersions(data),
+      serverRevision:
+        (this._authoritativeRevByUid && this._authoritativeRevByUid.get(key)) ||
+        Number(this.lastAppliedVersion) ||
+        0,
+      source: 'renderer'
+    }
+  }
+
+  beginEditSession({ uid, fields, kind, initialDraft } = {}) {
+    if (!uid) return null
+    const snapshot = this.getEditSessionSnapshot(uid)
+    if (!snapshot) return null
+    const session = this.editSessionManager.begin({
+      uid,
+      fields: fields || ['text'],
+      kind: kind || 'field',
+      initialDraft,
+      snapshot,
+      roomKey: this.httpRoomKey || ''
+    })
+    this.mindMap.emit('edit_session_open', session)
+    return session
+  }
+
+  getEditSession(id) {
+    return this.editSessionManager.get(id)
+  }
+
+  listEditSessions() {
+    return this.editSessionManager.list()
+  }
+
+  onOutboxConflict(op, error) {
+    const payload = (op && (op.payload || (op.event && op.event.payload))) || {}
+    const uid = String(payload.uid || '')
+    if (!uid) return null
+    const patch = payload.patch || payload.data || {}
+    const fields = Object.keys(patch).filter(field =>
+      ['text', 'richText', 'note', 'hyperlink', 'hyperlinkTitle'].includes(field)
+    )
+    if (!fields.length) return null
+    const roomKey = String((op && op.roomKey) || this.httpRoomKey || '')
+    const opId = String((op && (op.opId || op.operationId || op.id)) || '')
+    const expected = payload.expected || {}
+    const fingerprint = this.editSessionOperationFingerprint(uid, patch, expected)
+    const linkedSessionId = this._pendingEditSessionByFingerprint.get(fingerprint)
+    const linkedSession = linkedSessionId && this.editSessionManager.get(linkedSessionId)
+    const fieldVersions = {}
+    fields.forEach(field => {
+      const group = editFieldGroup(field)
+      const version = expected[`__fv.${group}`]
+      if (version != null) fieldVersions[group] = Number(version) || 0
+    })
+    const latestSnapshot = this.getEditSessionSnapshot(uid)
+    const stableId = linkedSession
+      ? linkedSession.id
+      : `outbox-conflict:${roomKey}:${opId || uid}`
+    let session = linkedSession
+    if (session) {
+      // Keep the current draft: this outbox payload may predate later typing.
+    } else if (!this.editSessionManager.get(stableId)) {
+      const baseValues = {}
+      fields.forEach(field => {
+        baseValues[field] = undefined
+      })
+      session = this.editSessionManager.restore({
+        id: stableId,
+        uid,
+        roomKey,
+        kind: 'outbox-conflict',
+        fields,
+        baseValues,
+        baseVersions: fieldVersions,
+        draft: Object.fromEntries(fields.map(field => [field, patch[field]])),
+        draftRevision: 1,
+        startedAt: Date.now(),
+        updatedAt: Date.now(),
+        conflict: { latestSnapshot, restored: true }
+      })
+    } else {
+      session = this.editSessionManager.get(stableId)
+    }
+    const conflict = this.editSessionManager.retainConflict(stableId, {
+      latestSnapshot,
+      error
+    })
+    const safeError = {
+      code: String((error && error.code) || ''),
+      message: String((error && error.message) || error || ''),
+      status: Number((error && (error.status || error.statusCode)) || 0)
+    }
+    const detail = {
+      id: stableId,
+      uid,
+      roomKey,
+      opId,
+      patch: Object.fromEntries(fields.map(field => [field, patch[field]])),
+      expected,
+      error: safeError,
+      latestSnapshot,
+      session: conflict || session
+    }
+    this.mindMap.emit('edit_session_outbox_conflict', detail)
+    return detail
+  }
+
+  editSessionOperationFingerprint(uid, patch, expected) {
+    const stableObject = value => {
+      const source = value && typeof value === 'object' ? value : {}
+      const out = {}
+      Object.keys(source).sort().forEach(key => {
+        out[key] = source[key]
+      })
+      return out
+    }
+    return JSON.stringify({
+      uid: String(uid || ''),
+      patch: stableObject(patch),
+      expected: stableObject(expected)
+    })
+  }
+
+  updateEditSessionDraft(id, patch) {
+    const session = this.editSessionManager.updateDraft(id, patch)
+    if (session) this.mindMap.emit('edit_session_draft_change', session)
+    return session
+  }
+
+  setEditSessionComposing(id, composing) {
+    return this.editSessionManager.setComposing(id, composing)
+  }
+
+  buildEditSessionExpected(id, fields) {
+    return this.editSessionManager.buildExpected(id, fields)
+  }
+
+  validateEditSession(id, fields) {
+    const session = this.editSessionManager.get(id)
+    if (!session) {
+      return {
+        ok: false,
+        code: 'EDIT_SESSION_MISSING',
+        conflicts: [],
+        latestSnapshot: null
+      }
+    }
+    return this.editSessionManager.validate(
+      id,
+      this.getEditSessionSnapshot(session.uid),
+      fields
+    )
+  }
+
+  retainEditSessionConflict(id, options = {}) {
+    const session = this.editSessionManager.get(id)
+    const latestSnapshot =
+      options.latestSnapshot ||
+      (session && this.getEditSessionSnapshot(session.uid)) ||
+      null
+    const next = this.editSessionManager.retainConflict(id, {
+      ...options,
+      latestSnapshot
+    })
+    if (next) this.mindMap.emit('edit_session_conflict', next, options.error)
+    return next
+  }
+
+  rebaseEditSession(id) {
+    const session = this.editSessionManager.get(id)
+    if (!session) return null
+    const next = this.editSessionManager.rebase(
+      id,
+      this.getEditSessionSnapshot(session.uid)
+    )
+    if (next) this.mindMap.emit('edit_session_draft_change', next)
+    return next
+  }
+
+  serializeEditSession(id) {
+    return this.editSessionManager.serialize(id)
+  }
+
+  restoreEditSession(snapshot) {
+    const session = this.editSessionManager.restore(snapshot)
+    if (session) this.mindMap.emit('edit_session_restored', session)
+    return session
+  }
+
+  resolveEditSession(id) {
+    const session = this.editSessionManager.resolve(id)
+    if (session) this.mindMap.emit('edit_session_resolved', session)
+    return session
+  }
+
+  discardEditSession(id) {
+    const session = this.editSessionManager.discard(id)
+    const textEdit = this.mindMap && this.mindMap.renderer && this.mindMap.renderer.textEdit
+    ;[textEdit, this.mindMap && this.mindMap.richText].forEach(editor => {
+      if (editor && typeof editor.discardEditSession === 'function') editor.discardEditSession(id)
+    })
+    if (session) this.mindMap.emit('edit_session_discarded', session)
+    return session
+  }
+
+  async commitEditSession(id, patch = {}) {
+    const session = this.editSessionManager.get(id)
+    if (!session) {
+      const err = new Error('edit session missing')
+      err.code = 'EDIT_SESSION_MISSING'
+      throw err
+    }
+    if (session.composing) {
+      const err = new Error('编辑器仍在输入法合成中')
+      err.code = 'IME_COMPOSITION_ACTIVE'
+      throw err
+    }
+    if (!this.collabV2Adapter || !this.httpCollabMode) {
+      const err = new Error('协作提交通道不可用')
+      err.code = 'COLLAB_WRITE_UNAVAILABLE'
+      throw err
+    }
+    if (session.roomKey && session.roomKey !== this.httpRoomKey) {
+      const err = new Error('编辑会话所属房间已切换')
+      err.code = 'EDIT_SESSION_SCOPE_CHANGED'
+      this.retainEditSessionConflict(id, { error: err })
+      throw err
+    }
+    // An editor opens immediately on a newly inserted local node. Its text
+    // update must follow the insert ACK, which establishes its first versions.
+    const uninitializedVersion = Object.values(session.baseVersions || {}).every(version => Number(version) === 0)
+    if (this.httpInsertPromise && (!this.isPersistAcked(session.uid) || uninitializedVersion)) {
+      await this.httpInsertPromise
+      if (!this.editSessionManager.get(id) ||
+        (session.roomKey && session.roomKey !== this.httpRoomKey)) {
+        const err = new Error('编辑会话已结束或所属房间已切换')
+        err.code = 'EDIT_SESSION_SCOPE_CHANGED'
+        throw err
+      }
+    }
+    const changes = {}
+    Object.keys(patch || {}).forEach(field => {
+      if (session.fields.includes(field)) changes[field] = patch[field]
+    })
+    const changedFields = Object.keys(changes)
+    if (!changedFields.length) {
+      this.resolveEditSession(id)
+      return { saved: true, draftSaved: true, unchanged: true }
+    }
+    const validation = this.validateEditSession(id, changedFields)
+    if (!validation.ok) {
+      const err = new Error('编辑字段已被其他协作者修改，请先核对最新内容')
+      const hasBaseline = !!(
+        validation.latestSnapshot &&
+        validation.latestSnapshot.data &&
+        Object.keys(validation.latestSnapshot.data).length
+      )
+      err.code = hasBaseline ? 'REPLACE_CONFLICT' : 'PRECONDITION_REQUIRED'
+      err.status = hasBaseline ? 409 : 428
+      err.details = {
+        conflicts: validation.conflicts,
+        latest: validation.latestSnapshot
+      }
+      this.retainEditSessionConflict(id, {
+        error: err,
+        validation,
+        latestSnapshot: validation.latestSnapshot
+      })
+      throw err
+    }
+    const expected = this.editSessionManager.buildExpected(id, changedFields)
+    const submittedDraftRevision = session.draftRevision
+    const fingerprint = this.editSessionOperationFingerprint(
+      session.uid,
+      changes,
+      expected
+    )
+    this._pendingEditSessionByFingerprint.set(fingerprint, id)
+    let result
+    try {
+      result = await this.submitV2('node.update', {
+        uid: session.uid,
+        patch: changes,
+        expected
+      })
+    } catch (err) {
+      const code = String((err && err.code) || '')
+      const status = Number((err && (err.status || err.statusCode)) || 0)
+      if (
+        code === 'REPLACE_CONFLICT' ||
+        code === 'PRECONDITION_REQUIRED' ||
+        status === 409 ||
+        status === 428
+      ) {
+        const rejectedOp = {
+          type: 'node.update',
+          roomKey: session.roomKey,
+          payload: { uid: session.uid, patch: changes, expected }
+        }
+        this.onOutboxConflict(rejectedOp, err)
+        this.retainEditSessionConflict(id, {
+          error: err,
+          latestSnapshot: this.getEditSessionSnapshot(session.uid)
+        })
+      } else {
+        this._pendingEditSessionByFingerprint.delete(fingerprint)
+        this.mindMap.emit('edit_session_save_failed', this.getEditSession(id), err)
+      }
+      throw err
+    }
+    const latestSession = this.editSessionManager.get(id)
+    if (!latestSession) return { ...result, saved: true, draftSaved: true }
+    if (latestSession.draftRevision === submittedDraftRevision) {
+      this._pendingEditSessionByFingerprint.delete(fingerprint)
+      this.resolveEditSession(id)
+      return { ...result, saved: true, draftSaved: true }
+    }
+    const latestSnapshot = this.getEditSessionSnapshot(session.uid)
+    const committedVersion = Number(result && result.version) || 0
+    const sameCommittedFields = changedFields.every(field => {
+      const group = editFieldGroup(field)
+      const expectedVersion = Number(
+        latestSnapshot && latestSnapshot.fieldVersions[group]
+      ) || 0
+      const committedData = latestSnapshot && latestSnapshot.data
+      return (
+        committedData &&
+        stableFieldValue(committedData[field]) ===
+          stableFieldValue(changes[field]) &&
+        committedVersion > 0 && expectedVersion === committedVersion
+      )
+    })
+    if (sameCommittedFields) {
+      const rebased = this.editSessionManager.rebase(id, latestSnapshot)
+      this.mindMap.emit('edit_session_draft_change', rebased)
+      return { ...result, saved: true, draftSaved: false, session: rebased }
+    }
+    const err = new Error('保存期间草稿发生变化，已保留新草稿，请核对后再次保存')
+    err.code = 'EDIT_SESSION_CHANGED_DURING_COMMIT'
+    this.retainEditSessionConflict(id, {
+      error: err,
+      latestSnapshot
+    })
+    return {
+      ...result,
+      saved: true,
+      draftSaved: false,
+      session: this.getEditSession(id)
+    }
+  }
+
+  expectedFieldVersions(uid, changedFields = []) {
+    const snapshot = this.getEditSessionSnapshot(uid)
+    const expected = { uid: String(uid || '') }
+    const groups = new Set((changedFields || []).map(editFieldGroup).filter(Boolean))
+    groups.forEach(group => {
+      const fromSnapshot =
+        snapshot && snapshot.fieldVersions && snapshot.fieldVersions[group]
+      const fromPushed =
+        this.lastPushed && this.lastPushed[uid] &&
+        this.lastPushed[uid].fieldVersions &&
+        this.lastPushed[uid].fieldVersions[group]
+      expected[`__fv.${group}`] = Number(
+        snapshot
+          ? (fromSnapshot != null ? fromSnapshot : 0)
+          : fromPushed
+      ) || 0
+    })
+    return expected
+  }
+
+  onNodeDragStart() {
+    if (this._dragViewDeferred || !this.collabV2Adapter) return
+    const loaded = transformTreeDataToObject(this.mindMap.renderer.renderTree)
+    if (!this.currentData) this.currentData = loaded
+    else {
+      Object.keys(loaded).forEach(uid => {
+        const entry = this.currentData[uid]
+        if (entry && entry.partial) {
+          const versions = readFieldVersions(entry.data), loadedVersions = readFieldVersions(loaded[uid].data)
+          const data = { ...loaded[uid].data, ...entry.data }
+          Object.keys(entry.data || {}).forEach(field => {
+            const group = editFieldGroup(field)
+            if (field !== FV_KEY && Object.prototype.hasOwnProperty.call(loaded[uid].data, field) &&
+              Number(loadedVersions[group] || 0) >= Number(versions[group] || 0)) data[field] = loaded[uid].data[field]
+          })
+          data[FV_KEY] = { ...versions }
+          Object.keys(loadedVersions).forEach(group => { data[FV_KEY][group] = Math.max(Number(versions[group] || 0), Number(loadedVersions[group] || 0)) })
+          this.currentData[uid] = { ...loaded[uid], ...entry, partial: false, data,
+            children: Array.from(new Set([...(entry.children || []), ...(loaded[uid].children || [])])) }
+        }
+      })
+      const additions = new Set(Object.keys(loaded).filter(uid => !this.currentData[uid] && !this.isTombstonedUid(uid) && !this.pendingUids.has(uid)))
+      additions.forEach(uid => { this.currentData[uid] = loaded[uid] })
+      Object.keys(loaded).forEach(uid => {
+        const entry = this.currentData[uid]
+        if (!entry) return
+        const children = loaded[uid].children.filter(id => additions.has(id))
+        if (children.length) entry.children = Array.from(new Set([...(entry.children || []), ...children]))
+      })
+    }
+    this._dragViewDeferred = true
+    this._dragStartRevision = Number(this.lastAppliedVersion) || 0
+    this._dragStructureBaseline = indexMindTree(this.mindMap.renderer.renderTree)
+  }
+
+  onNodeDragEnd() {
+    this._dragViewDeferred = false
+    this._dragStructureBaseline = null
+    this.projectDeferredView().catch(err => this.mindMap.emit('collab_write_conflict', err))
+  }
+
+  onNodeDragCancel() { this.onNodeDragEnd() }
+
+  async projectDeferredView(force = false) {
+    if ((!this.viewDeferred && !force) || this._dragViewDeferred || this._disposed) return
+    if (this._flushingDeferredView) return this._flushingDeferredView
+    const room = this.httpRoomKey, adapter = this.collabV2Adapter
+    const task = Promise.resolve(this._v2RemoteApplyQueue).catch(() => {}).then(async () => {
+      if (room !== this.httpRoomKey || adapter !== this.collabV2Adapter || this._disposed) return
+      const renderer = this.mindMap.renderer
+      const root = renderer && renderer.renderTree
+      if (!root || !this.currentData || !this.currentData[root.data.uid]) return
+      const old = indexTreeNodesByUid(root)
+      const activeUids = (renderer.activeNodeList || []).map(node => node.getData && node.getData('uid')).filter(Boolean)
+      const visiting = new Set()
+      const build = uid => {
+        if (visiting.has(uid)) throw new Error('协作树包含循环')
+        const entry = this.currentData[uid], previous = old.get(uid)
+        if (!entry) return this.pendingUids.has(uid) ? previous : null
+        if (entry.partial) return previous || null
+        visiting.add(uid)
+        const node = previous || { data: { uid }, children: [] }
+        const expand = node.data && node.data.expand
+        node.data = { ...(node.data || {}), ...(entry.data || {}), uid }
+        if (expand !== undefined) node.data.expand = expand
+        if (entry.position != null) node.data.position = entry.position
+        const children = Array.isArray(entry.children) ? entry.children : []
+        node.children = children.map(build).filter(Boolean)
+        visiting.delete(uid)
+        return node
+      }
+      this.isApplyingRemote = true
+      try {
+        build(root.data.uid)
+        await new Promise(resolve => this.mindMap.render(resolve))
+        if (room !== this.httpRoomKey || adapter !== this.collabV2Adapter) return
+        if (typeof this.restoreActiveUids === 'function') this.restoreActiveUids(activeUids)
+        this.renderedVersion = Number(this.lastAppliedVersion) || 0
+        this.viewDeferred = false
+        this.dirtyUIDSet.clear()
+        this.viewStructureDirtyUIDSet.clear()
+      } finally { this.isApplyingRemote = false }
+    })
+    this._flushingDeferredView = task
+    this._v2RemoteApplyQueue = task.catch(() => {})
+    try { return await task } finally { if (this._flushingDeferredView === task) this._flushingDeferredView = false }
+  }
+
+  async readWriteGuard(uid, subtree = false) {
+    if (!this.httpFetchWriteGuard) throw Object.assign(new Error('请刷新客户端以获取协同校验能力'), { code: 'PRECONDITION_REQUIRED' })
+    const result = await this.httpFetchWriteGuard(uid, subtree)
+    const row = result && result.items && result.items[0]
+    if (!row || row.uid !== uid) throw Object.assign(new Error('目标节点已不存在'), { code: 'NODE_DELETED' })
+    return { ...row, revision: Number(result.version) || 0 }
+  }
+
+  observeGuardedIntentEvent(type, payload, revision) {
+    const watch = this._guardIntentWatch
+    if (!watch || revision <= watch.revision || watch.conflict) return
+    const within = uid => {
+      const visited = new Set()
+      while (uid && !visited.has(uid)) {
+        if (watch.roots.has(uid)) return true
+        visited.add(uid)
+        uid = watch.nodes.get(uid)?.parent
+      }
+      return false
+    }
+    const uid = payload.uid, parent = payloadParentUid(payload)
+    const structural = /insert|move|reorder|delete|restore/.test(type)
+    if (type === 'map.replaced' || payload.resnapshot) watch.conflict = true
+    else if (within(uid) || (structural && [parent, payload.oldParentUid, payload.fromParentUid].some(within))) watch.conflict = true
+    else if (uid && !watch.nodes.has(uid)) {
+      // An insert can prove its ancestry via a loaded parent. Unknown content
+      // updates cannot prove they are outside a partially loaded delete subtree.
+      if (!/insert/.test(type) || !parent || !watch.nodes.has(parent)) watch.conflict = true
+    }
+  }
+
+  interceptGuardedCommand(name, args = []) {
+    if (!this.collabV2Adapter || !this.httpCollabMode || this.isApplyingRemote || this._allowGuardedCommand) return
+    const deleting = ['REMOVE_NODE', 'REMOVE_CURRENT_NODE', 'CUT_NODE'].includes(name)
+    const moving = MOVE_COMMANDS[name] && name !== 'INSERT_PARENT_NODE'
+    if (!deleting && !moving) return
+    const room = this.httpRoomKey, revision = this._dragViewDeferred
+      ? this._dragStartRevision : Number(this.lastAppliedVersion) || 0
+    const renderer = this.mindMap.renderer
+    const active = (renderer.activeNodeList || []).slice()
+    const explicit = Array.isArray(args[0]) ? args[0] : args[0] && args[0].getData ? [args[0]] : active
+    const targets = deleting ? collabDelete.collectDeleteRoots(explicit, name).roots : explicit.map(node => ({ uid: node.getData('uid'), node }))
+    if (!targets.length) return
+    if (this._guardIntentActive) return Promise.resolve(false)
+    this._guardIntentActive = true
+    if (deleting) this._guardIntentWatch = {
+      revision, nodes: indexMindTree(renderer.renderTree), roots: new Set(targets.map(item => item.uid)), conflict: false
+    }
+    return (async () => {
+      const locations = new Map(), deleteGuards = new Map()
+      const ids = new Set(targets.map(item => item.uid))
+      if (moving) {
+        args.forEach(value => { if (value && value.getData) ids.add(value.getData('uid')) })
+        explicit.forEach(node => {
+          if (node.parent) {
+            ids.add(node.parent.getData('uid'))
+            if (node.parent.parent) ids.add(node.parent.parent.getData('uid'))
+            const siblings = node.parent.children || [], index = siblings.indexOf(node)
+            siblings.slice(Math.max(0, index - 2), index + 3).forEach(item => ids.add(item.getData('uid')))
+          }
+        })
+      }
+      for (const uid of ids) {
+        const row = await this.readWriteGuard(uid, deleting && targets.some(item => item.uid === uid))
+        if (row.revision > Number(this.lastAppliedVersion || 0)) {
+          await this.recoverHttpCollab(row.revision)
+        }
+        const structuralRevision = this._structuralGuardRevisions && this._structuralGuardRevisions.get(uid) || 0
+        if (room !== this.httpRoomKey || (deleting && (this._guardIntentWatch.conflict || row.revision > Number(this.lastAppliedVersion || 0))) ||
+          (moving && (row.revision > Number(this.lastAppliedVersion || 0) || structuralRevision > revision))) {
+          throw Object.assign(new Error('操作期间导图已更新，请核对最新位置后重新操作'), { code: 'REPLACE_CONFLICT' })
+        }
+        locations.set(uid, row)
+        if (deleting) deleteGuards.set(uid, { uid, subtree_token: row.subtree_token })
+      }
+      this._preparedMoveLocations = locations
+      this._preparedDeleteGuards = deleteGuards
+      this._guardIntentWatch = null
+      const resolveNode = value => {
+        if (Array.isArray(value)) return value.map(resolveNode)
+        if (!value?.getData) return value
+        const node = renderer.findNodeByUid(value.getData('uid'))
+        if (!node) throw Object.assign(new Error('操作目标已失效，请重新选择'), { code: 'NODE_DELETED' })
+        return node
+      }
+      const liveArgs = args.map(resolveNode)
+      if (!args[0] && (name === 'REMOVE_NODE' || name === 'REMOVE_CURRENT_NODE')) {
+        liveArgs[0] = targets.map(item => resolveNode(item.node))
+      } else if (!args[0] && active.map(node => node.getData('uid')).join('|') !==
+        (renderer.activeNodeList || []).map(node => node.getData('uid')).join('|')) {
+        throw Object.assign(new Error('选择已变化，请重新操作'), { code: 'REPLACE_CONFLICT' })
+      }
+      this._preparedMoveCommand = { name, args: liveArgs, sourceUids: new Set(targets.map(item => item.uid)) }
+      this._allowGuardedCommand = true
+      this._latestStructuralWrite = null
+      let result
+      try { result = this.mindMap.execCommand(name, ...liveArgs) }
+      finally { this._allowGuardedCommand = false }
+      if (this._latestStructuralWrite) await this._latestStructuralWrite
+      return result === undefined ? true : result
+    })().catch(async err => {
+      this.mindMap.emit('collab_write_conflict', err)
+      if (!this._dragViewDeferred) await this.projectDeferredView(true)
+      return false
+    }).finally(() => { this._guardIntentActive = false; this._guardIntentWatch = null })
+  }
+
+  guardWritePayload(type, payload = {}) {
+    if (type === 'node.batch') {
+      const inserted = new Set()
+      return { ...payload, ops: (payload.ops || []).map(op => {
+        const uid = op.payload && op.payload.uid
+        const next = inserted.has(uid) ? op : { ...op, payload: this.guardWritePayload(op.type, op.payload) }
+        if (op.type === 'node.insert' && uid) inserted.add(uid)
+        return next
+      }) }
+    }
+    if (type === 'node.update') {
+      const patch = payload.patch || payload.data || payload
+      const fields = Object.keys(patch).filter(field => ['text', 'richText', 'note', 'hyperlink', 'hyperlinkTitle'].includes(field))
+      return fields.length ? { ...payload, expected: { ...this.expectedFieldVersions(payload.uid, fields), ...(payload.expected || {}) } } : payload
+    }
+    if (type === 'node.delete') return { ...payload, expected: { ...(this._preparedDeleteGuards && this._preparedDeleteGuards.get(payload.uid)), ...(payload.expected || {}) } }
+    if (!['node.move', 'node.reorder'].includes(type) || payload.expected) return payload
+    const locations = this._preparedMoveLocations || new Map()
+    const source = locations.get(payload.uid)
+    if (!source) return payload // Server rejects an operation without a proved baseline.
+    const expected = { uid: payload.uid, parent_uid: source.parent_uid, position: source.position }
+    const parentUid = payload.parentUid || payload.parent_uid || payload.parent || source.parent_uid
+    const target = locations.get(parentUid)
+    if (target) Object.assign(expected, { target_uid: parentUid, target_parent_uid: target.parent_uid, target_position: target.position })
+    const command = this._preparedMoveCommand || {}
+    const next = { ...payload, expected }
+    if (command.name === 'MOVE_NODE_TO') delete next.index // Drop inside a parent appends; no stale numeric slot.
+    else if (next.index != null) {
+      const anchorNode = command.args && command.args[1]
+      let anchor = anchorNode && anchorNode.getData && locations.get(anchorNode.getData('uid'))
+      let side = command.name === 'INSERT_AFTER' ? 'after' : 'before'
+      if (!anchor) {
+        const parent = this.mindMap.renderer.findNodeByUid(parentUid)
+        const siblings = (parent && parent.children || []).filter(node => !(command.sourceUids && command.sourceUids.has(node.getData('uid'))))
+        const index = Math.max(0, Number(next.index) || 0)
+        const node = siblings[index] || siblings[index - 1]
+        anchor = node && locations.get(node.getData('uid'))
+        side = siblings[index] ? 'before' : 'after'
+        if (!siblings.length) expected.target_empty = true
+      }
+      if (anchor) Object.assign(expected, { anchor_uid: anchor.uid, anchor_parent_uid: anchor.parent_uid, anchor_position: anchor.position, anchor_side: side })
+    }
+    return next
+  }
+
   largeMapDelay(smallMs, largeMs) {
     return this.mapSize() >= 200 ? largeMs : smallMs
   }
 
   // 初始化数据
+  setAuthoritySnapshot(data) {
+    this.currentData = transformTreeDataToObject(data)
+  }
+
   initData(data, { replace = false } = {}) {
     data = simpleDeepClone(data)
     if (this.collabV2Only || !this.ydoc) {
@@ -956,6 +1608,12 @@ class Cooperate {
     this.onHideTextEdit = this.onHideTextEdit.bind(this)
     this.mindMap.on('before_show_text_edit', this.onBeforeShowTextEdit)
     this.mindMap.on('hide_text_edit', this.onHideTextEdit)
+    this.onNodeDragStart = this.onNodeDragStart.bind(this)
+    this.onNodeDragEnd = this.onNodeDragEnd.bind(this)
+    this.onNodeDragCancel = this.onNodeDragCancel.bind(this)
+    this.mindMap.on('node_drag_start', this.onNodeDragStart)
+    this.mindMap.on('node_dragend', this.onNodeDragEnd)
+    this.mindMap.on('node_drag_cancel', this.onNodeDragCancel)
     this.onThemeChange = this.onThemeChange.bind(this)
     this.onLayoutChange = this.onLayoutChange.bind(this)
     this.mindMap.on('view_theme_change', this.onThemeChange)
@@ -1016,6 +1674,9 @@ class Cooperate {
     if (this.onHideTextEdit) {
       this.mindMap.off('hide_text_edit', this.onHideTextEdit)
     }
+    if (this.onNodeDragStart) this.mindMap.off('node_drag_start', this.onNodeDragStart)
+    if (this.onNodeDragEnd) this.mindMap.off('node_dragend', this.onNodeDragEnd)
+    if (this.onNodeDragCancel) this.mindMap.off('node_drag_cancel', this.onNodeDragCancel)
     if (this.onThemeChange) this.mindMap.off('view_theme_change', this.onThemeChange)
     if (this.onLayoutChange) this.mindMap.off('layout_change', this.onLayoutChange)
     clearTimeout(this._remoteGeometryTimer)
@@ -1713,7 +2374,7 @@ class Cooperate {
     return restored > 0
   }
 
-  onBeforeShowTextEdit(editingNode) {
+  canBeginNodeEdit(editingNode) {
     const node = editingNode && editingNode.getData ? editingNode : null
     const uid = node && node.getData && node.getData('uid')
     if (uid && this.collabV2Adapter) {
@@ -1726,21 +2387,23 @@ class Cooperate {
           peer.clientId !== mine
       )
       if (other) {
-        const editor =
-          this.mindMap.renderer && this.mindMap.renderer.textEdit
-        if (editor && typeof editor.hideEditTextBox === 'function') {
-          setTimeout(() => editor.hideEditTextBox(), 0)
-        }
         this.mindMap.emit('collab_lock_denied', other)
-        return
+        return false
       }
     }
+    return true
+  }
+
+  onBeforeShowTextEdit(editingNode) {
+    if (!this.canBeginNodeEdit(editingNode)) return
+    const node = editingNode && editingNode.getData ? editingNode : null
+    const uid = node && node.getData && node.getData('uid')
     this.setLocalPresence({ editingUid: uid || null })
   }
 
-  onHideTextEdit() {
+  onHideTextEdit(textEditNode, list, node, options = {}) {
     this.setLocalPresence({ editingUid: null })
-    if (this.httpCollabMode) {
+    if (this.httpCollabMode && !(options && options.editSessionSaved)) {
       this.flushHttpTextNow().catch(err => {
         console.error('[mind-map] text sync failed', err)
       })
@@ -1883,6 +2546,21 @@ class Cooperate {
 
   // 节点树渲染完毕事件
   onNodeTreeRenderEnd() {
+    const reorderedParents = []
+    if (!this._dragViewDeferred && this._pendingChildOrderParents) {
+      this._pendingChildOrderParents.forEach(uid => {
+        if (this.projectCanonicalChildOrder(uid)) reorderedParents.push(uid)
+      })
+    }
+    if (reorderedParents.length) this.requestRemoteApplyRender(reorderedParents)
+    const pendingVisibleOrder = this._pendingChildOrderParents && Array.from(this._pendingChildOrderParents).some(uid => {
+      const parent = this.mindMap.renderer.findNodeByUid(uid)
+      return parent && parent.getData && parent.getData('expand') !== false
+    })
+    if (!reorderedParents.length && !pendingVisibleOrder && !this.viewDeferred && !this._dragViewDeferred) {
+      this.renderedVersion = Math.max(Number(this.renderedVersion) || 0,
+        Math.min(Number(this._pendingRenderedVersion) || 0, Number(this.lastAppliedVersion) || 0))
+    }
     Object.keys(this.waitNodeUidMap).forEach(uid => {
       const node = this.mindMap.renderer.findNodeByUid(uid)
       if (node) {
@@ -1930,6 +2608,9 @@ class Cooperate {
   // 监听思维导图数据的重新设置事件
   onSetData(data) {
     if (this.previewApplied || this.httpCollabMode) {
+      if (this.httpCollabMode && (this.isApplyingRemote || this.httpRecovering || !this.currentData)) {
+        this.currentData = transformTreeDataToObject(data)
+      }
       this.isSetData = false
       this.pendingInitData = null
       return
@@ -1943,13 +2624,23 @@ class Cooperate {
 
   setLazyLoaders(config = {}) {
     if (config.roomKey) {
-      if (this.httpRoomKey !== config.roomKey) invalidateHydrationSession(this)
+      if (this.httpRoomKey !== config.roomKey) {
+        invalidateHydrationSession(this)
+        this._structuralGuardRevisions = new Map()
+        if (this._pendingChildOrderParents) this._pendingChildOrderParents.clear()
+        this._dragViewDeferred = false
+        this.viewDeferred = false
+        this.dirtyUIDSet.clear()
+        this.viewStructureDirtyUIDSet.clear()
+        this._guardIntentWatch = null
+      }
       this.httpRoomKey = config.roomKey
     }
     if (config.fetchSubtree) this.httpFetchSubtree = config.fetchSubtree
     if (config.fetchDeepSubtree) this.httpFetchDeepSubtree = config.fetchDeepSubtree
     if (config.fetchExportTree) this.httpFetchExportTree = config.fetchExportTree
     if (config.fetchNodes) this.httpFetchNodes = config.fetchNodes
+    if (config.fetchWriteGuard) this.httpFetchWriteGuard = config.fetchWriteGuard
     if (config.fetchLocate) this.httpFetchLocate = config.fetchLocate
     if (config.patchNode) this.httpPatchNode = config.patchNode
     if (config.addNode) this.httpAddNode = config.addNode
@@ -1970,6 +2661,9 @@ class Cooperate {
     const next = adapter || null
     if (this.collabV2Adapter !== next) this.cancelV2RemoteApply()
     this.collabV2Adapter = next
+    if (next && !this.currentData && this.mindMap?.renderer?.renderTree) {
+      this.currentData = transformTreeDataToObject(this.mindMap.renderer.renderTree)
+    }
   }
 
   establishV2HistoryBaseline() {
@@ -2024,6 +2718,7 @@ class Cooperate {
       fromAck: true,
       originalScope: completion.originalScope,
       capturedIntentEpochs: completion.capturedIntentEpochs || new Map(),
+      ackSessionId: completion.ackSessionId,
       deferFallback: true
     }
     for (const event of completion.events || []) {
@@ -2147,6 +2842,13 @@ class Cooperate {
     const commitWatermark = () => {
       if (!advanced || !this.isV2RevisionScopeCurrent(scope)) return
       this.lastAppliedVersion = watermark
+      this._pendingRenderedVersion = Math.max(Number(this._pendingRenderedVersion) || 0, watermark)
+      const view = this.mindMap && this.mindMap.renderer
+      if (view && !this.viewDeferred && !this._dragViewDeferred && !view.isRendering &&
+        !view.renderTimer && !view.hasWaitRendering && !view._remoteRenderPending &&
+        !(view._remoteRenderScheduler && view._remoteRenderScheduler.isPending())) {
+        this.renderedVersion = Math.max(Number(this.renderedVersion) || 0, watermark)
+      }
       if (this.collabStore) this.collabStore.setLastAppliedVersion(watermark)
       advanced = false
     }
@@ -2181,6 +2883,28 @@ class Cooperate {
     const committedPayload = (committed && committed.payload) || payload || {}
     const committedRev = Number((committed && committed.serverRevision) || (result && result.serverRevision) || 0)
     const clientId = this.collabV2Adapter && this.collabV2Adapter.getClientId && this.collabV2Adapter.getClientId()
+    const insertedUids = new Set()
+    const collectInserted = (name, body) => {
+      if (name === 'node.insert' && body && body.uid) insertedUids.add(String(body.uid))
+      if (name === 'node.batch') (body && body.ops || []).forEach(item => collectInserted(item.type, item.payload))
+    }
+    collectInserted(type, payload)
+    const creationEvents = []
+    const collectCreationAck = (name, body) => {
+      if ((name === 'node.inserted' || name === 'node.insert') && body && insertedUids.has(String(body.uid))) {
+        creationEvents.push({ type: 'node.inserted', payload: body })
+      }
+    }
+    if (Array.isArray(committedPayload.events)) {
+      committedPayload.events.forEach(item => collectCreationAck(item.type, item.payload))
+    } else if (Array.isArray(committedPayload.ops)) {
+      committedPayload.ops.forEach(item => collectCreationAck(item.type, item.payload))
+    } else {
+      collectCreationAck(committedType, committedPayload)
+    }
+    const ackSessionId = type === 'node.update' && payload && payload.uid
+      ? this._pendingEditSessionByFingerprint.get(this.editSessionOperationFingerprint(payload.uid, payload.patch, payload.expected))
+      : null
     const isCanonicalUpdate = name => name === 'node.update' || name === 'node.updated'
     const events = []
     if (committedType === 'batch.applied' && Array.isArray(committedPayload.events)) {
@@ -2198,7 +2922,7 @@ class Cooperate {
       adapter: originalScope ? originalScope.adapter : (this.collabV2Adapter || null),
       epoch: originalScope ? Number(originalScope.remoteApplyEpoch) || 0 : (Number(this._v2RemoteApplyEpoch) || 0)
     }
-    const meta = { applySelf: true, fromAck: true, originalScope, capturedIntentEpochs: capturedIntentEpochs || new Map(), deferFallback: true }
+    const meta = { applySelf: true, fromAck: true, originalScope, capturedIntentEpochs: capturedIntentEpochs || new Map(), ackSessionId, deferFallback: true }
     let allSnapshotsValid = true
     const replayEvents = events.map(event => {
       const normalized = collabNodeFeatures.normalizeAppliedUpdatePayload(event.event || event)
@@ -2235,13 +2959,15 @@ class Cooperate {
         adapter: replayScope.adapter,
         remoteApplyEpoch: replayScope.epoch
       },
-      capturedIntentEpochs: replayIntentEpochs
+      capturedIntentEpochs: replayIntentEpochs,
+      ackSessionId
     }
     const task = Promise.resolve(this._v2RemoteApplyQueue).catch(() => {}).then(async () => {
       if (!this.isV2RevisionScopeCurrent(scope)) {
         v2Trace('ack.reconcile.skip-scope-changed', {})
         return false
       }
+      creationEvents.forEach(event => this.acknowledgeLocalNodeCreation(event, committedRev))
       const renderer = this.mindMap && this.mindMap.renderer
       const context = {
         epoch: scope.epoch,
@@ -2300,10 +3026,90 @@ class Cooperate {
     return task
   }
 
+  acknowledgeLocalNodeCreation(event, revision) {
+    const payload = event && event.payload || {}
+    const uid = String(payload.uid || '')
+    const data = payload.data
+    if (!uid || !data || !this.currentData || !Number.isSafeInteger(revision) || revision <= 0) return
+    if (this.isTombstonedUid(uid)) return
+    const existing = this.currentData[uid]
+    const structureRevision = this._structuralGuardRevisions && this._structuralGuardRevisions.get(uid) || 0
+    if (!existing && structureRevision > revision) return
+    const versions = readFieldVersions(existing && existing.data)
+    if (!existing) {
+      this.currentData = applyCollabEvent(this.currentData, event, { allowPartial: true })
+    } else {
+      // Fill missing creation fields without rewinding any authoritative
+      // value. A newer change in another group does not block text editing.
+      const mergedVersions = { ...readFieldVersions(data) }
+      Object.keys(versions).forEach(group => {
+        mergedVersions[group] = Math.max(Number(mergedVersions[group]) || 0, Number(versions[group]) || 0)
+      })
+      const mergedData = { ...existing.data }
+      Object.keys(data).forEach(field => {
+        if (field === FV_KEY) return
+        const group = editFieldGroup(field)
+        const protectedField = ['text', 'note', 'hyperlink'].includes(group)
+        if (!Object.prototype.hasOwnProperty.call(mergedData, field) ||
+          (protectedField && (Number(versions[group]) || 0) < (Number(mergedVersions[group]) || 0))) {
+          mergedData[field] = data[field]
+        }
+      })
+      this.currentData[uid] = {
+        ...existing, partial: false,
+        data: { ...mergedData, uid, [FV_KEY]: mergedVersions }
+      }
+    }
+    if (structureRevision <= revision) {
+      // Optimistic creation has no committed position yet. Reconcile its
+      // canonical position without replaying an old insert after a later move.
+      const siblingPositions = Object.fromEntries(Object.entries(payload.siblingPositions || {}).filter(([id]) =>
+        !this._structuralGuardRevisions || (this._structuralGuardRevisions.get(String(id)) || 0) <= revision
+      ))
+      this.currentData = applyCollabEvent(this.currentData, {
+        ...event, payload: { ...payload, siblingPositions }
+      }, { allowPartial: true })
+      if (!this._structuralGuardRevisions) this._structuralGuardRevisions = new Map()
+      ;[uid, ...Object.keys(siblingPositions)].forEach(id => {
+        this._structuralGuardRevisions.set(String(id), Math.max(this._structuralGuardRevisions.get(String(id)) || 0, revision))
+      })
+    }
+    // A later sibling insert may already have superseded this creation's
+    // position. Project that latest authority even when the older position
+    // itself must be ignored.
+    const parentUid = payloadParentUid(payload)
+    if (!this._pendingChildOrderParents) this._pendingChildOrderParents = new Set()
+    this._pendingChildOrderParents.add(parentUid)
+    if (this.projectCanonicalChildOrder(parentUid)) this.requestRemoteApplyRender([uid, parentUid])
+    const snapshot = this.getEditSessionSnapshot(uid)
+    this.editSessionManager.list().forEach(session => {
+      if (session.uid !== uid || (session.roomKey && session.roomKey !== this.httpRoomKey)) return
+      if (!snapshot || !session.fields.every(field =>
+        Number(snapshot.fieldVersions[editFieldGroup(field)]) === revision &&
+        stableFieldValue(snapshot.data[field]) === stableFieldValue(data[field])
+      )) return
+      let initialValues = data
+      // The existing insert transport can return plain text plus this explicit
+      // reset marker for an initially rich node. Match only that known creation
+      // normalization; neither the draft nor arbitrary remote HTML is rebased.
+      if (data.resetRichText === true && data.richText === true &&
+        session.baseValues.richText === true &&
+        typeof session.baseValues.text === 'string' &&
+        getTextFromHtml(session.baseValues.text) === data.text) {
+        initialValues = { ...data, text: session.baseValues.text }
+      }
+      const initialized = this.editSessionManager.acknowledgeCreation(session.id, {
+        uid, data, fieldVersions: readFieldVersions(data)
+      }, revision, initialValues)
+      if (initialized) this.mindMap.emit('edit_session_draft_change', initialized)
+    })
+  }
+
   submitV2(type, payload) {
     if (!this.collabV2Adapter) {
       return Promise.reject(new Error('collab v2 adapter missing'))
     }
+    payload = this.guardWritePayload(type, payload)
     if (type === 'map.replace') {
       payload = collabSpecialObjects.buildMapReplacePayload(
         payload && payload.tree,
@@ -2311,6 +3117,21 @@ class Cooperate {
       )
     }
     if (type === 'node.update' && payload) {
+      const guardedFields = Object.keys(payload.patch || {}).filter(field =>
+        ['text', 'richText', 'note', 'hyperlink', 'hyperlinkTitle'].includes(field)
+      )
+      if (payload.uid && guardedFields.length) {
+        payload = {
+          ...payload,
+          expected: {
+            ...this.expectedFieldVersions(payload.uid, guardedFields),
+            ...(payload.expected || {}),
+            uid: payload.expected && payload.expected.uid
+              ? payload.expected.uid
+              : String(payload.uid)
+          }
+        }
+      }
       const guarded = collabNodeFeatures.guardFeatureStructuralMutation(payload)
       if (guarded.hit.length) {
         v2Trace('NODE_FEATURE_STRUCTURAL_MUTATION', {
@@ -2364,7 +3185,7 @@ class Cooperate {
     })
     const clientId =
       this.collabV2Adapter.getClientId && this.collabV2Adapter.getClientId()
-    return this.collabV2Adapter
+    const submitted = this.collabV2Adapter
       .submitOperation({
         type,
         payload,
@@ -2373,6 +3194,7 @@ class Cooperate {
         traceId
       })
       .then(async result => {
+        this.submittedVersion = Math.max(Number(this.submittedVersion) || 0, Number(result && result.serverRevision) || 0)
         this.acknowledgeLocalVersion(result && result.serverRevision, {
           operationId: result && result.opId,
           duplicate: !!(result && result.duplicate),
@@ -2413,6 +3235,10 @@ class Cooperate {
         })
         throw err
       })
+    if (['node.move', 'node.reorder', 'node.delete', 'node.batch'].includes(type)) {
+      this._latestStructuralWrite = submitted
+    }
+    return submitted
   }
 
   cancelV2RemoteApply() {
@@ -2502,9 +3328,9 @@ class Cooperate {
   }
 
   async applyV2RemoteOperationNow(op, meta = {}, context) {
-    const event = (op && op.event) || op || {}
+    let event = (op && op.event) || op || {}
     const type = event.type || op.type
-    const payload = event.payload || op.payload || {}
+    let payload = event.payload || op.payload || {}
     const opRevision = Number(op.serverRevision || event.version || op.version) || 0
     if (!this.rebaseV2RemoteApplyContext(context)) return false
     if (type && (type.startsWith('node.') || type.startsWith('operation.'))) {
@@ -2519,11 +3345,11 @@ class Cooperate {
       }
       const currentRevision = Number(this.lastAppliedVersion) || 0
       const revision = opRevision
-      if (revision && meta.fromOutbox && currentRevision > revision) {
+      if (!meta.forceViewProjection && revision && meta.fromOutbox && currentRevision > revision) {
         v2Trace('remote.skip-authoritative-progress', { type, revision, currentRevision, source: 'applied-watermark' })
         return false
       }
-      if (revision && !meta.applySelf && currentRevision >= revision) {
+      if (!meta.forceViewProjection && revision && !meta.applySelf && currentRevision >= revision) {
         v2Trace('remote.skip-applied-revision', { type, revision, currentRevision })
         return true
       }
@@ -2540,7 +3366,15 @@ class Cooperate {
       }
       if (meta.fromAck && meta.applySelf && intentUid && meta.capturedIntentEpochs) {
         const captured = meta.capturedIntentEpochs.get ? (meta.capturedIntentEpochs.get(intentUid) || 0) : 0
-        if (this.localIntentEpochOf(intentUid) > captured) {
+        // A field edit owns an independent draft. Its exact successful ACK
+        // must update authority even if display normalization emitted a local
+        // command meanwhile. The session completion retains any newer draft;
+        // ordinary command ACKs still use the newer-intent protection.
+        const savingSession = meta.ackSessionId && this.editSessionManager &&
+          this.editSessionManager.get(meta.ackSessionId)
+        const ownsFieldDraft = savingSession && savingSession.uid === String(intentUid) &&
+          (!savingSession.roomKey || savingSession.roomKey === this.httpRoomKey)
+        if (this.localIntentEpochOf(intentUid) > captured && !ownsFieldDraft) {
           v2Trace('ack.reconcile.skip-newer-intent', { uid: intentUid, captured, current: this.localIntentEpochOf(intentUid) })
           return true
         }
@@ -2596,6 +3430,7 @@ class Cooperate {
       return true
     }
     if (type === 'map.replaced' || payload.resnapshot) {
+      this.observeGuardedIntentEvent(type, payload, opRevision)
       if (this._v2UndoActive && !this._v2UndoAllowReplace) {
         this._undoFullTreeHits = Number(this._undoFullTreeHits || 0) + 1
         undoFullTreeForbidden('applyV2RemoteOperation.map.replaced')
@@ -2614,14 +3449,94 @@ class Cooperate {
     const uid = payload.uid
     const renderer = this.mindMap && this.mindMap.renderer
     const previousNode = uid && renderer && renderer.findNodeByUid(uid)
-    if (this.currentData && type && type !== 'map.replaced') {
+    this.observeGuardedIntentEvent(type, payload, opRevision)
+    if (/^node\.(insert|inserted|move|moved|reorder|reordered|delete|deleted|restore|restored)$/.test(type)) {
+      if (!this._structuralGuardRevisions) this._structuralGuardRevisions = new Map()
+      ;[uid, ...(payload.deletedUids || payload.removed || []), ...Object.keys(payload.siblingPositions || {})]
+        .filter(Boolean).forEach(id => this._structuralGuardRevisions.set(String(id), opRevision))
+    }
+    if (this.currentData && type && type !== 'map.replaced' && !meta.skipAuthority) {
       try {
-        this.currentData = applyCollabEvent(this.currentData, event, {
-          liveFieldUpdate: true
+        const canonicalType = { 'node.insert': 'node.inserted', 'node.update': 'node.updated',
+          'node.move': 'node.moved', 'node.reorder': 'node.reordered', 'node.delete': 'node.deleted', 'node.restore': 'node.restored' }[type] || type
+        let authorityEvent = { ...event, type: canonicalType }
+        if (type === 'node.updated' || type === 'node.update') {
+          const normalized = collabNodeFeatures.normalizeAppliedUpdatePayload(op)
+          const previous = this.currentData[normalized.uid]
+          const previousFv = readFieldVersions(previous && previous.data)
+          const incomingPatch = normalized.patch || {}
+          if (Object.prototype.hasOwnProperty.call(incomingPatch, FV_KEY)) {
+            const nextFv = {
+              ...previousFv,
+              ...readFieldVersions(incomingPatch)
+            }
+            const mergedPatch = { ...incomingPatch, [FV_KEY]: nextFv }
+            authorityEvent = {
+              ...authorityEvent,
+              payload: {
+                ...payload,
+                uid: normalized.uid,
+                patch: mergedPatch
+              }
+            }
+            event = authorityEvent
+            payload = authorityEvent.payload
+          }
+        }
+        this.currentData = applyCollabEvent(this.currentData, authorityEvent, {
+          liveFieldUpdate: true, allowPartial: true
         })
+        if (canonicalType === 'node.deleted') {
+          // Keep the deletion revision even after a later restore clears its
+          // tombstone. An older successful edit ACK must never recreate a
+          // removed entry or overwrite the restored incarnation of that UID.
+          ;[uid, ...(payload.deletedUids || payload.removed || [])]
+            .filter(Boolean)
+            .forEach(id => this.bumpAuthoritativeUidRev(String(id), opRevision))
+        }
+        if (uid) {
+          this.editSessionManager.list().forEach(session => {
+            if (session.uid !== String(uid) || session.state !== 'editing') return
+            // This exact session is waiting for its own successful commit.
+            // Its completion code resolves it or preserves a newer draft.
+            if (meta.fromAck && meta.ackSessionId === session.id) return
+            const validation = this.editSessionManager.validate(
+              session.id,
+              this.getEditSessionSnapshot(uid)
+            )
+            if (!validation.ok) {
+              this.retainEditSessionConflict(session.id, {
+                error: Object.assign(new Error('编辑期间收到同字段远端修改'), {
+                  code: 'REPLACE_CONFLICT',
+                  status: 409
+                }),
+                validation,
+                latestSnapshot: validation.latestSnapshot
+              })
+            }
+          })
+        }
       } catch (err) {
         v2Trace('remote.currentData.fail', { type, uid, message: err && err.message })
+        return false
       }
+    }
+    if (
+      this._dragViewDeferred &&
+      !meta.forceViewProjection &&
+      type &&
+      (type.startsWith('node.') || type.startsWith('operation.'))
+    ) {
+      this.viewDeferred = true
+      ;[uid, payloadParentUid(payload)].filter(Boolean).forEach(id => this.dirtyUIDSet.add(String(id)))
+      if (/^(node\.(insert|inserted|move|moved|reorder|reordered|delete|deleted|restore|restored))$/.test(type)) {
+        ;[uid, payloadParentUid(payload), payload.fromParentUid, payload.oldParentUid]
+          .filter(Boolean)
+          .forEach(id => this.viewStructureDirtyUIDSet.add(String(id)))
+        ;(payload.deletedUids || payload.removed || []).forEach(id => this.viewStructureDirtyUIDSet.add(String(id)))
+      }
+      v2Trace('remote.defer-view-during-drag', { type, uid, revision: opRevision })
+      return true
     }
     if (type === 'node.inserted' || type === 'node.insert') {
       const inserted = this.applyV2PayloadInsert(payload)
@@ -2935,6 +3850,42 @@ class Cooperate {
     if (typeof callback === 'function') callback()
   }
 
+  projectCanonicalChildOrder(parentUid) {
+    const entry = this.currentData && this.currentData[parentUid]
+    if (!entry || !Array.isArray(entry.children)) {
+      if (this._pendingChildOrderParents) this._pendingChildOrderParents.delete(parentUid)
+      return false
+    }
+    if (this._dragViewDeferred) {
+      this.viewDeferred = true
+      this.dirtyUIDSet.add(String(parentUid))
+      this.viewStructureDirtyUIDSet.add(String(parentUid))
+      return false
+    }
+    const renderer = this.mindMap && this.mindMap.renderer
+    const parent = renderer && renderer.findNodeByUid && renderer.findNodeByUid(parentUid)
+    const children = parent && parent.nodeData && parent.nodeData.children
+    if (!Array.isArray(children)) return false
+    const loaded = new Set(children.map(node => String(node && node.data && node.data.uid || '')))
+    if (entry.children.every(uid => loaded.has(String(uid))) && this._pendingChildOrderParents) {
+      this._pendingChildOrderParents.delete(parentUid)
+    }
+    const ranks = new Map(entry.children.map((uid, index) => [String(uid), index]))
+    const ordered = children.map((node, index) => {
+      const uid = String(node && node.data && node.data.uid || '')
+      const canonical = this.currentData[uid]
+      if (canonical && canonical.position != null && node && node.data) {
+        node.data.position = canonical.position
+      }
+      return { node, index, rank: ranks.has(uid) ? ranks.get(uid) : Infinity }
+    }).sort((a, b) => a.rank - b.rank || a.index - b.index)
+    if (!ordered.some((item, index) => item.node !== children[index])) return false
+    // Keep optimistic children and the existing node/data objects, including
+    // any open editor; only project the committed sibling order.
+    children.splice(0, children.length, ...ordered.map(item => item.node))
+    return true
+  }
+
   applyV2PayloadInsert(payload = {}) {
     const uid = payload.uid
     const parentUid = payloadParentUid(payload)
@@ -2955,7 +3906,10 @@ class Cooperate {
       this.removeLocalDeletedUids(new Set([uid]), parentUid, live)
       return true
     }
-    if (renderer.findNodeByUid(uid)) return true
+    if (renderer.findNodeByUid(uid)) {
+      if (this.projectCanonicalChildOrder(parentUid)) this.requestRemoteApplyRender([uid, parentUid])
+      return true
+    }
     const parentNode = renderer.findNodeByUid(parentUid)
     if (!parentNode) return false
     if (parentNode.getData && parentNode.getData('expand') === false) {
@@ -2995,6 +3949,7 @@ class Cooperate {
       renderer.setNodeData(parentNode, {
         childCount: Math.max(count, live)
       })
+      this.projectCanonicalChildOrder(parentUid)
       this.requestRemoteApplyRender([uid, parentUid])
     } catch (err) {
       v2Trace('remote.apply.insert.err', { uid, message: err && err.message })
@@ -3256,6 +4211,7 @@ class Cooperate {
 
   applyV2PayloadDelete(payload = {}) {
     const uid = payload.uid
+    const parentUid = payloadParentUid(payload)
     const renderer = this.mindMap && this.mindMap.renderer
     if (!uid || !renderer) return false
     const node =
@@ -3540,6 +4496,18 @@ class Cooperate {
     }
     const stripped = collabNodeFeatures.stripFeatureStructuralKeys(next)
     next = stripped.payload
+    const previousVersions = readFieldVersions(node.getData && node.getData())
+    const incomingVersions = readFieldVersions(next)
+    if (Object.keys(incomingVersions).length) {
+      const mergedVersions = { ...previousVersions }
+      Object.keys(incomingVersions).forEach(group => {
+        mergedVersions[group] = Math.max(
+          Number(mergedVersions[group] || 0),
+          Number(incomingVersions[group] || 0)
+        )
+      })
+      next = { ...next, [FV_KEY]: mergedVersions }
+    }
     if (node.isGeneralization && node.generalizationBelongNode) {
       const owner = node.generalizationBelongNode
       const genUid = (node.getData && node.getData('uid')) || uid
@@ -3715,9 +4683,13 @@ class Cooperate {
   }
 
   setHttpCollab(config = {}) {
+    const previousRoom = this.httpRoomKey
     if (config.roomKey && config.roomKey !== this.httpRoomKey) this.cancelV2RemoteApply()
     this.setLazyLoaders(config)
     this.httpCollabMode = true
+    if (!this.currentData || previousRoom !== this.httpRoomKey) {
+      this.currentData = transformTreeDataToObject(this.mindMap.renderer.renderTree)
+    }
     this.hydratedUids = new Set()
     this.hydrateFailedUids = new Set()
     this.hydrateInflight = new Map()
@@ -5082,6 +6054,18 @@ class Cooperate {
     // HTTP recovery includes complete records, including unchanged nodes.
     // Only recreate visual content whose value actually changed.
     const currentData = (node.getData && node.getData()) || {}
+    const incomingVersions = readFieldVersions(next)
+    if (Object.keys(incomingVersions).length) {
+      const mergedVersions = { ...readFieldVersions(currentData) }
+      Object.keys(incomingVersions).forEach(group => {
+        mergedVersions[group] = Math.max(
+          Number(mergedVersions[group] || 0),
+          Number(incomingVersions[group] || 0)
+        )
+      })
+      const nodeData = node.nodeData && node.nodeData.data
+      if (nodeData) nodeData[FV_KEY] = mergedVersions
+    }
     Object.keys(stylePayload).forEach(key => {
       const value = stylePayload[key]
       if (
@@ -5940,7 +6924,7 @@ class Cooperate {
     ) {
       return
     }
-    const list = name==='REMOVE_NODE' && args[0] && (Array.isArray(args[0])?args[0].length:true)
+    const list = (name==='REMOVE_NODE' || name==='REMOVE_CURRENT_NODE') && args[0] && (Array.isArray(args[0])?args[0].length:true)
       ? (Array.isArray(args[0])?args[0]:[args[0]])
       : (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
     const selection = collabDelete.collectDeleteRoots(list, name)
@@ -6114,7 +7098,7 @@ class Cooperate {
         generatedOperation:
           ops.length === 1 ? 'node.delete' : ops.length > 1 ? 'node.batch' : ''
       })
-      Promise.resolve(
+      const deleting = Promise.resolve(
         drop ? Promise.all(allLocal.map(uid => drop.call(this.collabV2Adapter, uid))) : null
       )
         .then(() => {
@@ -6141,8 +7125,14 @@ class Cooperate {
           })
         })
         .catch(err => {
+          allLocal.forEach(uid => { if (this.currentData[uid]) this.reviveDeletedUid(uid) })
+          this.mindMap.emit('collab_write_conflict', err)
+          this.projectDeferredView(true).catch(() => {})
           console.error('[mind-map] subtree delete failed', err)
+          throw err
         })
+      this._latestStructuralWrite = deleting
+      deleting.catch(() => {})
       owners.forEach(owner => this.syncHttpGeneralization(owner))
       return
     }
@@ -6774,6 +7764,26 @@ class Cooperate {
       }
     })
     collabNodeFeatures.applyNullableGroupClears(full, data, prevFull)
+    if (data.resetRichText && prevFull && full.text === prevFull.text) {
+      // RichText prepares plain nodes for display on load. That flag alone
+      // does not mean the user edited the text field group.
+      if (prevFull.richText !== undefined) full.richText = prevFull.richText
+      else delete full.richText
+    }
+    // Editors own independent drafts. Realtime preview/format normalization
+    // must not race their guarded save through the background patch channel.
+    if (uid && this.editSessionManager) {
+      this.editSessionManager.list().forEach(session => {
+        if (session.uid !== String(uid) ||
+          (session.roomKey && session.roomKey !== this.httpRoomKey) ||
+          !['editing', 'conflict'].includes(session.state)) return
+        session.fields.forEach(field => {
+          const baseline = this.currentData?.[uid]?.data || prevFull || {}
+          if (Object.prototype.hasOwnProperty.call(baseline, field)) full[field] = baseline[field]
+          else delete full[field]
+        })
+      })
+    }
     if (!options.onlyChanged || !uid) return full
     const prev = this.lastPushed[uid]
     if (!prev || !prev.full) return full
@@ -6782,6 +7792,9 @@ class Cooperate {
       previous.generalization = collabGeneralization.ownerGeneralizationPayload(previous.generalization)
     }
     const delta = patchDelta(previous, full)
+    Object.keys(delta).forEach(field => {
+      if (delta[field] === undefined) delete delta[field]
+    })
     return Object.keys(delta).length ? delta : null
   }
 
@@ -7623,7 +8636,8 @@ class Cooperate {
         return result
       }).catch(err => {
         console.error('[mind-map] batch move failed', err)
-        return Promise.all(moves.map(submitOne))
+        this.mindMap.emit('collab_write_conflict', err)
+        return this.projectDeferredView(true)
       })
     }
     return Promise.all(moves.map(submitOne))

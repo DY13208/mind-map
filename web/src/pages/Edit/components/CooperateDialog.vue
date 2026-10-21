@@ -307,6 +307,7 @@ import {
   getFileExport,
   locateFileNode,
   getFileNodes,
+  getFileWriteGuard,
   getMapVersion,
   getMapOperations,
   getMapAudit,
@@ -831,6 +832,34 @@ export default {
           return { applied: true, version: appliedRevision }
         },
         onRejected: (op, err) => {
+          const code = String((err && err.code) || '')
+          const status = Number(
+            (err && (err.status || err.statusCode)) ||
+              (err && err.response && err.response.status) ||
+              0
+          )
+          const terminalTextConflict =
+            code === 'REPLACE_CONFLICT' ||
+            code === 'TARGET_DELETED' ||
+            code.indexOf('PRECONDITION_') === 0 ||
+            status === 409 ||
+            status === 428
+          if (
+            terminalTextConflict &&
+            cooperate &&
+            typeof cooperate.onOutboxConflict === 'function'
+          ) {
+            try {
+              const notification = cooperate.onOutboxConflict(op, err)
+              if (notification && typeof notification.catch === 'function') {
+                notification.catch(() => {
+                  this.$message.error(this.$t('editConflict.storageFailed'))
+                })
+              }
+            } catch (_) {
+              this.$message.error(this.$t('editConflict.storageFailed'))
+            }
+          }
           if (err && err.code === 'SOP_CONFIRM_REQUIRED') {
             this.promptSopConfirmation(op, err)
             return
@@ -2400,6 +2429,7 @@ export default {
       }
       this.userColor =
         stableColor(this.userId || this.userName, USER_COLORS) || USER_COLORS[0]
+      this.$bus.$emit('collab_identity_changed', this.userId)
     },
 
     // 登录态在组件创建之后才到达或发生变化时，刷新名字并重新广播在线信息。
@@ -2542,6 +2572,7 @@ export default {
           }),
         fetchExportTree: () => getFileExport(roomKey),
         fetchNodes: uids => getFileNodes(roomKey, uids),
+        fetchWriteGuard: (uid, subtree) => getFileWriteGuard(roomKey, uid, subtree),
         fetchLocate: (uid, options) => locateFileNode(roomKey, uid, options),
         fetchOperations: after => getMapOperations(roomKey, after),
         fetchVersion: () => getMapVersion(roomKey),
@@ -2654,6 +2685,9 @@ export default {
         if (this.largeMapInitialOverview) this.mindMap.view.reset()
         if (this.largeMapInitialOverview && this.mindMap.renderer) {
           this.mindMap.renderer._forceOverviewPaintOnce = true
+        }
+        if (typeof cooperate.setAuthoritySnapshot === 'function') {
+          cooperate.setAuthoritySnapshot(tree)
         }
         this.$bus.$emit('setData', tree, {
           quiet: true,

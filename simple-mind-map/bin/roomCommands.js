@@ -1,7 +1,12 @@
 const mindDoc = require('./mindDoc')
 const { insertPositionAt, comparePositions } = require('./fractionalIndex')
 const { mergeNodeDataLww } = require('./fieldMerge')
-const { assertExpectedNodeData } = require('./nodeUpdateExpected')
+const {
+  assertExpectedNodeData,
+  assertNodeWritePreconditions,
+  preflightNodeWritePreconditions
+} = require('./nodeUpdateExpected')
+const { graphBaseline } = require('./nodePreconditions')
 const {
   parentDeletedError,
   nodeDeletedError,
@@ -48,6 +53,38 @@ function parentPosition(obj, uid) {
     index: (obj[parentUid].children || []).indexOf(uid),
     position: (obj[uid] && obj[uid].position) || ''
   }
+}
+
+function guardedDropIndex(obj, payload, uid, targetParentUid) {
+  if (payload.index === undefined || !payload.expected) return payload.index
+  const expected = payload.expected
+  const children = (obj[targetParentUid] && obj[targetParentUid].children) || []
+  const siblings = children.filter(childUid => String(childUid) !== String(uid))
+  if (Object.prototype.hasOwnProperty.call(expected, 'anchor_uid')) {
+    const anchorUid = String(expected.anchor_uid)
+    const anchorLocation = parentPosition(obj, anchorUid)
+    const anchor = obj[anchorUid]
+    if (
+      !anchor ||
+      String(anchorLocation.parentUid || '') !== String(targetParentUid || '') ||
+      String(anchorLocation.position || '') !== String(expected.anchor_position || '') ||
+      String(expected.anchor_parent_uid || '') !== String(targetParentUid || '')
+    ) {
+      throw commandError('移动锚点已在本批前序操作中删除或移动', 'REPLACE_CONFLICT', 409)
+    }
+    const anchorIndex = siblings.findIndex(childUid => String(childUid) === anchorUid)
+    if (anchorIndex < 0) {
+      throw commandError('移动锚点已不在目标父节点下', 'REPLACE_CONFLICT', 409)
+    }
+    return anchorIndex + (expected.anchor_side === 'after' ? 1 : 0)
+  }
+  if (expected.target_empty === true) {
+    if (siblings.length) {
+      throw commandError('移动目标已不再为空', 'REPLACE_CONFLICT', 409)
+    }
+    return 0
+  }
+  return payload.index
 }
 
 function writeNodePatch(ydoc, obj, uids) {
@@ -166,13 +203,14 @@ function applyNodeCommand(ydoc, command, options = {}) {
     }
     if (payload.uid !== result.uid) payload.uid = result.uid
     const stamp = stampPositions(ydoc, result.parent_uid, result.uid)
+    const createdData = ydoc.getMap().get(result.uid).toJSON().data
     return {
       result: { ...result, position: stamp.position, index: stamp.index },
       inversePayload: { type: 'node.delete', payload: { uid: result.uid } },
       event: withAuthoritativeOrder(
         {
           type: 'node.inserted',
-          payload: { ...payload, uid: result.uid, parentUid: result.parent_uid },
+          payload: { ...payload, uid: result.uid, parentUid: result.parent_uid, data: createdData },
           affectedUids: [result.uid, result.parent_uid].filter(Boolean)
         },
         stamp
@@ -192,7 +230,24 @@ function applyNodeCommand(ydoc, command, options = {}) {
     if (!uid || !before[uid]) {
       throw moving ? moveConflictError(uid) : nodeDeletedError(uid)
     }
-    assertExpectedNodeData(before[uid].data || {}, payload)
+    if (options.enforcePreconditions === true) {
+      preflightNodeWritePreconditions({ type: command.type, payload, uid })
+      const baseline = options.preconditionBaseline || { nodes: graphBaseline(before) }
+      const baselineNode = baseline.nodes.get(String(uid)) || {
+        uid,
+        ...parentPosition(before, uid),
+        data: before[uid].data || {}
+      }
+      assertNodeWritePreconditions({
+        type: command.type,
+        payload,
+        uid,
+        baselineNode,
+        baseline
+      })
+    } else {
+      assertExpectedNodeData(before[uid].data || {}, payload)
+    }
     const oldLocation = parentPosition(before, uid)
     const oldData = { ...(before[uid].data || {}) }
     const eventPayload = { ...payload }
@@ -204,7 +259,11 @@ function applyNodeCommand(ydoc, command, options = {}) {
         throw parentDeletedError(parent)
       }
       try {
-        mindDoc.moveNodeOnDoc(ydoc, { uid, parent, index: payload.index })
+        const destination = parent == null ? oldLocation.parentUid : parent
+        const index = options.enforcePreconditions === true
+          ? guardedDropIndex(before, payload, uid, destination)
+          : payload.index
+        mindDoc.moveNodeOnDoc(ydoc, { uid, parent, index })
       } catch (err) {
         wrapMindDocError(err)
       }
@@ -270,6 +329,22 @@ function applyNodeCommand(ydoc, command, options = {}) {
   }
   if (command.type === 'node.reorder') {
     const uid = payload.uid
+    if (options.enforcePreconditions === true) {
+      preflightNodeWritePreconditions({ type: 'node.reorder', payload, uid })
+      const baseline = options.preconditionBaseline || { nodes: graphBaseline(before) }
+      const baselineNode = baseline.nodes.get(String(uid)) || {
+        uid,
+        ...parentPosition(before, uid),
+        data: before[uid] && before[uid].data || {}
+      }
+      assertNodeWritePreconditions({
+        type: 'node.reorder',
+        payload,
+        uid,
+        baselineNode,
+        baseline
+      })
+    }
     if (!uid || !before[uid]) throw moveConflictError(uid)
     const oldLocation = parentPosition(before, uid)
     if (!oldLocation.parentUid) {
@@ -292,10 +367,13 @@ function applyNodeCommand(ydoc, command, options = {}) {
       throw commandError('node.reorder 需要 index 或 position', 'REORDER_TARGET', 400)
     }
     try {
+      const index = options.enforcePreconditions === true
+        ? guardedDropIndex(before, payload, uid, oldLocation.parentUid)
+        : payload.index
       mindDoc.moveNodeOnDoc(ydoc, {
         uid,
         parent: oldLocation.parentUid,
-        index: payload.index
+        index
       })
     } catch (err) {
       wrapMindDocError(err)
@@ -336,6 +414,19 @@ function applyNodeCommand(ydoc, command, options = {}) {
   }
   if (command.type === 'node.delete') {
     const uid = payload.uid
+    if (options.enforcePreconditions === true) {
+      preflightNodeWritePreconditions({ type: 'node.delete', payload, uid })
+      const baseline = options.preconditionBaseline || { nodes: graphBaseline(before), subtreeTokens: new Map() }
+      const baselineNode = baseline.nodes.get(String(uid))
+      assertNodeWritePreconditions({
+        type: 'node.delete',
+        payload,
+        uid,
+        baselineNode,
+        baseline,
+        subtreeToken: baseline.subtreeTokens && baseline.subtreeTokens.get(String(uid))
+      })
+    }
     if (!uid || !before[uid]) throw nodeDeletedError(uid)
     const oldLocation = parentPosition(before, uid)
     const keepChildren = !!(payload.keepChildren || payload.keep_children)

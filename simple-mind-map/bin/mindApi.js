@@ -11,6 +11,7 @@ const {
 } = require('./exportRoomTree')
 const { applyNodeCommand, dataFields } = require('./roomCommands')
 const { withExpectedCondition } = require('./nodeUpdateExpected')
+const { readLegacyPreconditionBaseline } = require('./nodePreconditions')
 const roomAcl = require('./roomAcl')
 const accessRequests = require('./accessRequests')
 const teamSpace = require('./teamSpace')
@@ -370,7 +371,7 @@ async function executeTrustedOperation(roomKey, command, internalOptions = {}) {
       return commitRoomOperation(
         roomKey,
         command,
-        async ({ room, currentVersion, deletedUids, allowUidReuse }) => {
+        async ({ room, currentVersion, deletedUids, allowUidReuse, client }) => {
           const base =
             room.nodes && Object.keys(room.nodes).length
               ? room.nodes
@@ -387,13 +388,25 @@ async function executeTrustedOperation(roomKey, command, internalOptions = {}) {
               throw err
             }
           }
+          const enforcePreconditions = internalOptions.enforcePreconditions === true &&
+            !['operation.undo', 'operation.redo'].includes(command.type)
+          const preconditionBaseline = enforcePreconditions
+            ? await readLegacyPreconditionBaseline(
+                client,
+                roomKey,
+                command,
+                base
+              )
+            : null
           const tempDoc = new Y.Doc()
           try {
             mindDoc.applyObjectToDoc(tempDoc, base, { replace: true })
             const applied = applyNodeCommand(tempDoc, command, {
               version: currentVersion + 1,
               deletedUids: deletedUids || new Set(),
-              allowUidReuse: !!allowUidReuse
+              allowUidReuse: !!allowUidReuse,
+              enforcePreconditions,
+              preconditionBaseline
             })
             return { ...applied, nodes: mindDoc.readObject(tempDoc) }
           } finally {
@@ -648,6 +661,7 @@ async function executeOperation(req, roomKey, command, internalOptions = {}) {
       committed = await executeTrustedOperation(roomKey, command, {
         ...internalOptions,
         diagnosticSource: internalOptions.diagnosticSource || 'http',
+        enforcePreconditions: true,
         ...(mcpRequest ? { mcpRequest } : {})
       })
     }
@@ -3207,7 +3221,9 @@ async function handleApi(req, res) {
         const command = normalizeCommand(req, roomKey, body, 'node.delete', {
           uid: nodeRef,
           keepChildren: !!(body && (body.keep_children || body.keepChildren)),
-          confirm_sop_change: !!(body && body.confirm_sop_change)
+          confirm_sop_change: !!(body && body.confirm_sop_change),
+          ...(body && body.expected !== undefined ? { expected: body.expected } : {}),
+          ...(body && body.expectedValue !== undefined ? { expectedValue: body.expectedValue } : {})
         })
         const committed = await executeOperation(req, roomKey, command)
         sendJson(res, 200, await nodeMutationResponse(roomKey, committed))

@@ -123,7 +123,7 @@ function sourceMethods(clock = null) {
   )}, ${method(
     cooperateSource,
     '  requestRemoteApplyRender(uids, callback, source = \'remote apply\') {',
-    '\n  applyV2PayloadInsert('
+    '\n  projectCanonicalChildOrder('
   )}})`, {
     v2Trace() {},
     collabTrace() {},

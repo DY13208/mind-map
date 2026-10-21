@@ -1,5 +1,6 @@
 const crypto = require('crypto')
 const { stripHtml } = require('./mindDoc')
+const { subtreeToken: makeSubtreeToken, readSubtreeRows } = require('./subtreeToken')
 
 const DEFAULT_PAGE_SIZE = 800
 const MAX_PAGE_SIZE = 5000
@@ -42,6 +43,19 @@ function stableJson(value) {
 
 function queryFingerprint(input) {
   return crypto.createHash('sha256').update(stableJson(input)).digest('base64url')
+}
+
+function queryFingerprintForRequest(request) {
+  const value = {
+    scope: request.scope,
+    selector: request.selector,
+    level: request.level,
+    level_mode: request.level_mode,
+    page_size: request.page_size,
+    byte_limit: request.byte_limit
+  }
+  if (request.include_subtree_token) value.include_subtree_token = true
+  return queryFingerprint(value)
 }
 
 function encodeCursor(value) {
@@ -101,6 +115,17 @@ function normalizeRequest(input = {}) {
     throw queryError('相对层级读取必须指定 selector', 'MISSING_SELECTOR')
   }
 
+  const includeSubtreeToken = input.include_subtree_token === true
+  if (input.include_subtree_token != null && typeof input.include_subtree_token !== 'boolean') {
+    throw queryError('include_subtree_token 必须是布尔值', 'INVALID_QUERY')
+  }
+  if (includeSubtreeToken && (scope !== 'self' || !selector || selector.type !== 'uid')) {
+    throw queryError(
+      'include_subtree_token 仅支持 scope=self 且显式 UID selector',
+      'INVALID_QUERY'
+    )
+  }
+
   if (selector) {
     const type = String(selector.type || '')
     if (!['uid', 'name', 'path'].includes(type)) {
@@ -132,7 +157,8 @@ function normalizeRequest(input = {}) {
     level_mode: levelMode,
     page_size: pageSize,
     byte_limit: byteLimit,
-    cursor: input.cursor ? String(input.cursor) : null
+    cursor: input.cursor ? String(input.cursor) : null,
+    include_subtree_token: includeSubtreeToken
   }
 }
 
@@ -140,7 +166,7 @@ async function withQueryTimeout(db, fn) {
   if (!db || typeof db.connect !== 'function') return fn(db)
   const client = await db.connect()
   try {
-    await client.query('begin read only')
+    await client.query('begin isolation level repeatable read read only')
     await client.query(`set local statement_timeout = '${QUERY_TIMEOUT_MS}ms'`)
     const value = await fn(client)
     await client.query('commit')
@@ -175,7 +201,7 @@ async function rootUid(db, roomKey) {
 async function nodeRows(db, roomKey, uids) {
   if (!uids.length) return []
   const res = await db.query(
-    `select uid, parent_uid, position, data, is_root
+    `select uid, parent_uid, position, data, is_root, node_version
      from room_nodes
      where room_key = $1 and uid = any($2::text[]) and deleted_at is null`,
     [roomKey, uids]
@@ -371,7 +397,7 @@ async function selectScopeRows(db, roomKey, targetUid, request, offset) {
   }
   if (request.scope === 'children') {
     const res = await db.query(
-      `select uid, parent_uid, position, data, is_root, 1::int as relative_depth
+      `select uid, parent_uid, position, data, is_root, node_version, 1::int as relative_depth
        from room_nodes
        where room_key = $1 and parent_uid = $2 and deleted_at is null
        order by position, uid offset $3 limit $4`,
@@ -395,7 +421,7 @@ async function selectScopeRows(db, roomKey, targetUid, request, offset) {
          join room_nodes n on n.room_key = $1 and n.parent_uid = w.uid and n.deleted_at is null
          where not w.cycle and ($3::int is null or w.relative_depth < $3)
        )
-       select n.uid, n.parent_uid, n.position, n.data, n.is_root, w.relative_depth, w.cycle,
+       select n.uid, n.parent_uid, n.position, n.data, n.is_root, n.node_version, w.relative_depth, w.cycle,
               bool_or(w.cycle) over() as has_cycle
        from walk w
        join room_nodes n on n.room_key = $1 and n.uid = w.uid and n.deleted_at is null
@@ -422,7 +448,7 @@ async function selectScopeRows(db, roomKey, targetUid, request, offset) {
          join room_nodes p on p.room_key = $1 and p.uid = a.parent_uid and p.deleted_at is null
          where not a.cycle
        )
-       select n.uid, n.parent_uid, n.position, n.data, n.is_root, a.relative_depth, a.cycle
+       select n.uid, n.parent_uid, n.position, n.data, n.is_root, n.node_version, a.relative_depth, a.cycle
        from ancestors a
        join room_nodes n on n.room_key = $1 and n.uid = a.uid and n.deleted_at is null
        order by a.relative_depth asc
@@ -463,6 +489,7 @@ function itemFromRow(row, pathInfo, targetDepth, omitted) {
     depth: absoluteDepth,
     relative_depth: targetDepth == null ? Number(row.relative_depth || 0) : absoluteDepth - targetDepth,
     position: row.position || '',
+    node_version: Number(row.node_version) || 0,
     path: (pathInfo && pathInfo.path) || [],
     data: cleanData(row.data, omitted)
   }
@@ -551,14 +578,7 @@ function cursorFor(fingerprint, version, offset, fragment) {
 
 async function queryRoomNodes(db, roomKey, input) {
   const request = normalizeRequest(input)
-  const fingerprint = queryFingerprint({
-    scope: request.scope,
-    selector: request.selector,
-    level: request.level,
-    level_mode: request.level_mode,
-    page_size: request.page_size,
-    byte_limit: request.byte_limit
-  })
+  const fingerprint = queryFingerprintForRequest(request)
   const cursor = decodeCursor(request.cursor)
   if (cursor && cursor.q !== fingerprint) {
     throw queryError('分页游标与当前查询条件不一致，请从第一页重新读取', 'INVALID_CURSOR', 400)
@@ -593,11 +613,21 @@ async function queryRoomNodes(db, roomKey, input) {
     const targetPath = await pathsForUids(client, roomKey, [targetUid])
     const targetInfo = targetPath.get(targetUid)
     if (!targetInfo) throw queryError('节点不存在', 'NODE_NOT_FOUND', 404)
+    let targetSubtreeToken = null
+    if (request.include_subtree_token) {
+      const tokenRows = await readSubtreeRows(client, roomKey, targetUid)
+      if (!tokenRows.length) throw queryError('节点不存在', 'NODE_NOT_FOUND', 404)
+      if (tokenRows.some(row => row.cycle)) {
+        throw queryError('导图节点关系存在循环，无法安全计算子树校验值', 'NODE_GRAPH_CYCLE', 409)
+      }
+      targetSubtreeToken = makeSubtreeToken(tokenRows)
+    }
 
     const offset = cursor ? Number(cursor.offset || 0) : 0
     const omitted = new Set(['data.imgMap'])
     if (cursor && cursor.fragment) {
       const item = await itemForFragment(client, roomKey, cursor.fragment, targetInfo.depth, omitted)
+      if (targetSubtreeToken && item.uid === targetUid) item.subtree_token = targetSubtreeToken
       const fragmented = fragmentItem(item, cursor.fragment, request.byte_limit, omitted)
       const nextCursor = fragmented.nextFragment
         ? cursorFor(fingerprint, version, offset, fragmented.nextFragment)
@@ -625,6 +655,7 @@ async function queryRoomNodes(db, roomKey, input) {
     for (let index = 0; index < pageRows.length; index += 1) {
       const row = pageRows[index]
       const item = itemFromRow(row, paths.get(String(row.uid)), targetInfo.depth, omitted)
+      if (targetSubtreeToken && item.uid === targetUid) item.subtree_token = targetSubtreeToken
       if (responseFitsByteLimit({
         roomKey,
         version,
@@ -813,14 +844,14 @@ function legacyScopeRows(obj, targetUid, request, parents) {
 
 function queryLegacyNodes(obj, roomKey, version, input) {
   const request = normalizeRequest(input)
-  const fingerprint = queryFingerprint({
-    scope: request.scope,
-    selector: request.selector,
-    level: request.level,
-    level_mode: request.level_mode,
-    page_size: request.page_size,
-    byte_limit: request.byte_limit
-  })
+  if (request.include_subtree_token) {
+    throw queryError(
+      'legacy 快照不含 node_version，无法生成删除子树校验值',
+      'PRECONDITION_UNSUPPORTED',
+      503
+    )
+  }
+  const fingerprint = queryFingerprintForRequest(request)
   const cursor = decodeCursor(request.cursor)
   if (cursor && cursor.q !== fingerprint) {
     throw queryError('分页游标与当前查询条件不一致，请从第一页重新读取', 'INVALID_CURSOR', 400)

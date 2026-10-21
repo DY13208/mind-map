@@ -625,6 +625,15 @@ export function getFileNodes(roomKey, uids = []) {
   return request(`/api/files/${encodeURIComponent(roomKey)}/nodes${query}`)
 }
 
+export function getFileWriteGuard(roomKey, uid, includeSubtreeToken = false) {
+  return request(`/api/files/${encodeURIComponent(roomKey)}/nodes/query`, {
+    method: 'POST',
+    priority: 'high',
+    body: JSON.stringify({ scope: 'self', selector: { type: 'uid', value: uid },
+      ...(includeSubtreeToken ? { include_subtree_token: true } : {}) })
+  })
+}
+
 export function getMapVersion(roomKey) {
   return request(`/api/maps/${encodeURIComponent(roomKey)}/version`)
 }

@@ -483,6 +483,14 @@ function normalizeAppliedUpdatePayload(op) {
         ? preferred
         : eventPayload
   )
+  // Canonical events can carry business fields in patch and the committed
+  // field versions in data. Keep those versions without copying unrelated
+  // data fields into this mutation.
+  const canonicalData = (preferred && preferred.data) || eventPayload.data || opPayload.data
+  if (canonicalData && (!canonicalData.uid || String(canonicalData.uid) === String(uid)) &&
+    canonicalData.__fv && typeof canonicalData.__fv === 'object' && !Array.isArray(canonicalData.__fv)) {
+    next.__fv = { ...(next.__fv || {}), ...canonicalData.__fv }
+  }
   return {
     uid,
     patch: next,

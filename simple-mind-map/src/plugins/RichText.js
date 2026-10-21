@@ -56,6 +56,7 @@ class RichText {
     this.lastRange = null
     this.pasteUseRange = null
     this.node = null
+    this.editSessionId = null
     this.isInserting = false
     this.styleEl = null
     this.cacheEditingText = ''
@@ -76,7 +77,9 @@ class RichText {
     this.onCompositionStart = this.onCompositionStart.bind(this)
     this.onCompositionUpdate = this.onCompositionUpdate.bind(this)
     this.onCompositionEnd = this.onCompositionEnd.bind(this)
+    this.onEditorInput = this.onEditorInput.bind(this)
     this.handleSetData = this.handleSetData.bind(this)
+    window.addEventListener('input', this.onEditorInput)
     window.addEventListener('compositionstart', this.onCompositionStart)
     window.addEventListener('compositionupdate', this.onCompositionUpdate)
     window.addEventListener('compositionend', this.onCompositionEnd)
@@ -86,6 +89,7 @@ class RichText {
 
   // 解绑事件
   unbindEvent() {
+    window.removeEventListener('input', this.onEditorInput)
     window.removeEventListener('compositionstart', this.onCompositionStart)
     window.removeEventListener('compositionupdate', this.onCompositionUpdate)
     window.removeEventListener('compositionend', this.onCompositionEnd)
@@ -208,6 +212,23 @@ class RichText {
 
   // 显示文本编辑控件
   showEditText({ node, rect, isInserting, isFromKeyDown, isFromScale }) {
+    const cooperate = this.mindMap && this.mindMap.cooperate
+    const isExistingScaleSession =
+      isFromScale &&
+      this.showTextEdit &&
+      this.node === node &&
+      this.editSessionId &&
+      cooperate &&
+      typeof cooperate.getEditSession === 'function' &&
+      cooperate.getEditSession(this.editSessionId)
+    if (
+      !isExistingScaleSession &&
+      cooperate &&
+      typeof cooperate.canBeginNodeEdit === 'function' &&
+      !cooperate.canBeginNodeEdit(node)
+    ) {
+      return
+    }
     if (this.showTextEdit) {
       return
     }
@@ -315,6 +336,7 @@ class RichText {
       isInserting || (selectTextOnEnterEditText && !isFromKeyDown) ? 0 : null
     )
     this.cacheEditingText = ''
+    this.beginEditSession(node, isFromScale)
   }
 
   // 当openRealtimeRenderOnNodeTextEdit配置更新后需要更新编辑框样式
@@ -371,7 +393,14 @@ class RichText {
   // 获取当前正在编辑的内容
   getEditText() {
     // https://github.com/slab/quill/issues/4509
-    return this.quill.container.firstChild.innerHTML.replace(/  +/g, match =>
+    // During IME composition Quill's model can lag behind the live contenteditable DOM.
+    const root = this.quill && this.quill.root
+    const html = root
+      ? root.innerHTML
+      : this.quill && this.quill.container && this.quill.container.firstChild
+      ? this.quill.container.firstChild.innerHTML
+      : ''
+    return html.replace(/  +/g, match =>
       '&nbsp;'.repeat(match.length)
     )
     // 去除ql-cursor节点
@@ -387,6 +416,7 @@ class RichText {
     if (!this.showTextEdit) {
       return
     }
+    if (this.isCompositing) return Promise.resolve(false)
     const { beforeHideRichTextEdit } = this.mindMap.opt
     if (typeof beforeHideRichTextEdit === 'function') {
       beforeHideRichTextEdit(this)
@@ -394,20 +424,128 @@ class RichText {
     const html = trimNodeEditText(this.getEditText(), true)
     const list = nodes && nodes.length > 0 ? nodes : [this.node]
     const node = this.node
-    this.textEditNode.style.display = 'none'
+    const cooperate = this.mindMap && this.mindMap.cooperate
+    const sessionId = this.editSessionId
+    const finish = editSessionSaved => {
+      this.textEditNode.style.display = 'none'
+      this.setIsShowTextEdit(false)
+      this.mindMap.emit('rich_text_selection_change', false)
+      this.node = null
+      this.editSessionId = null
+      this.isInserting = false
+      if (!editSessionSaved) {
+        list.forEach(target => {
+          this.mindMap.execCommand('SET_NODE_TEXT', target, html, true)
+          this.mindMap.render()
+        })
+      }
+      this.mindMap.emit('hide_text_edit', this.textEditNode, list, node, {
+        editSessionSaved: !!editSessionSaved
+      })
+      return true
+    }
+    if (sessionId) {
+      const session =
+        cooperate &&
+        typeof cooperate.getEditSession === 'function' &&
+        cooperate.getEditSession(sessionId)
+      if (
+        list.length !== 1 ||
+        !session ||
+        !session.baseVersions ||
+        !Object.prototype.hasOwnProperty.call(session.baseVersions, 'text') ||
+        typeof session.baseVersions.text !== 'number' ||
+        !Number.isFinite(session.baseVersions.text) ||
+        session.baseVersions.text < 0 ||
+        !cooperate ||
+        typeof cooperate.commitEditSession !== 'function'
+      ) {
+        // Multi-node edits do not have a protected batch contract yet. Keep the
+        // editor open rather than replaying an unconditional write per node.
+        return Promise.resolve(false)
+      }
+      this.syncEditSessionDraft()
+      return cooperate
+        .commitEditSession(sessionId, { text: html, richText: true })
+        .then(result => result && result.draftSaved === false ? false : finish(true))
+        .catch(() => false)
+    }
+    return finish(false)
+  }
+
+  // Explicitly discard a conflict draft without issuing a node write.
+  discardEditSession(id) {
+    if (
+      !id ||
+      !this.editSessionId ||
+      String(this.editSessionId) !== String(id)
+    ) {
+      return false
+    }
+    const node = this.node
+    this.editSessionId = null
+    this.node = null
+    this.isCompositing = false
+    this.isInserting = false
+    this.cacheEditingText = ''
+    if (this.quill && this.quill.root) this.quill.root.innerHTML = ''
+    if (this.textEditNode) {
+      this.textEditNode.style.display = 'none'
+    }
+    const textNode = node && node._textData && node._textData.node
+    if (
+      this.mindMap.opt.openRealtimeRenderOnNodeTextEdit &&
+      textNode &&
+      typeof textNode.show === 'function'
+    ) {
+      textNode.show()
+    }
     this.setIsShowTextEdit(false)
     this.mindMap.emit('rich_text_selection_change', false)
-    this.node = null
-    this.isInserting = false
-    list.forEach(node => {
-      this.mindMap.execCommand('SET_NODE_TEXT', node, html, true)
-      // if (node.isGeneralization) {
-      // 概要节点
-      // node.generalizationBelongNode.updateGeneralization()
-      // }
-      this.mindMap.render()
+    this.mindMap.emit(
+      'hide_text_edit',
+      this.textEditNode,
+      node ? [node] : [],
+      node,
+      { editSessionSaved: true, editSessionDiscarded: true }
+    )
+    return true
+  }
+
+  beginEditSession(node, isFromScale) {
+    const cooperate = this.mindMap && this.mindMap.cooperate
+    if (!cooperate || !cooperate.httpCollabMode || !cooperate.collabV2Adapter) return
+    if (isFromScale && this.editSessionId && cooperate.getEditSession(this.editSessionId)) {
+      this.syncEditSessionDraft()
+      return
+    }
+    const uid = node && node.getData && node.getData('uid')
+    if (!uid) return
+    const session = cooperate.beginEditSession({
+      uid,
+      fields: ['text', 'richText'],
+      kind: 'rich-text',
+      initialDraft: { text: this.getEditText(), richText: true }
     })
-    this.mindMap.emit('hide_text_edit', this.textEditNode, list, node)
+    this.editSessionId = session && session.id
+    this.syncEditSessionDraft()
+  }
+
+  syncEditSessionDraft() {
+    const cooperate = this.mindMap && this.mindMap.cooperate
+    if (!this.editSessionId || !cooperate || !cooperate.updateEditSessionDraft) return
+    if (!this.quill) return
+    cooperate.updateEditSessionDraft(this.editSessionId, {
+      text: this.getEditText(),
+      richText: true
+    })
+  }
+
+  setEditSessionComposing(composing) {
+    const cooperate = this.mindMap && this.mindMap.cooperate
+    if (this.editSessionId && cooperate && cooperate.setEditSessionComposing) {
+      cooperate.setEditSessionComposing(this.editSessionId, composing)
+    }
   }
 
   // 初始化Quill富文本编辑器
@@ -535,6 +673,10 @@ class RichText {
       }
     })
     this.quill.on('text-change', () => {
+      this.syncEditSessionDraft()
+      // Keep in-progress IME candidates in the private draft only. Rendering
+      // them into the map would expose half-composed text to other UI paths.
+      if (this.isCompositing) return
       this.mindMap.emit('node_text_edit_change', {
         node: this.node,
         text: this.getEditText(),
@@ -602,29 +744,64 @@ class RichText {
   }
 
   // 正则输入中文
-  onCompositionStart() {
-    if (!this.showTextEdit) {
+  onCompositionStart(event) {
+    if (
+      !this.showTextEdit ||
+      !this.textEditNode ||
+      !event ||
+      !this.textEditNode.contains(event.target)
+    ) {
       return
     }
     this.isCompositing = true
+    this.setEditSessionComposing(true)
+  }
+
+  // Keep the local edit session current from actual contenteditable input,
+  // including IME candidate updates that Quill may not emit as text-change.
+  onEditorInput(event) {
+    if (
+      !this.showTextEdit ||
+      !this.node ||
+      !this.textEditNode ||
+      !event ||
+      !this.textEditNode.contains(event.target)
+    ) {
+      return
+    }
+    this.syncEditSessionDraft()
   }
 
   // 中文输入中
-  onCompositionUpdate() {
-    if (!this.showTextEdit || !this.node) return
+  onCompositionUpdate(event) {
+    if (
+      !this.showTextEdit ||
+      !this.node ||
+      !this.textEditNode ||
+      !event ||
+      !this.textEditNode.contains(event.target)
+    ) return
+    this.syncEditSessionDraft()
+  }
+
+  // 中文输入结束
+  onCompositionEnd(event) {
+    if (
+      !this.showTextEdit ||
+      !this.textEditNode ||
+      !event ||
+      !this.textEditNode.contains(event.target)
+    ) {
+      return
+    }
+    this.isCompositing = false
+    this.syncEditSessionDraft()
+    this.setEditSessionComposing(false)
     this.mindMap.emit('node_text_edit_change', {
       node: this.node,
       text: this.getEditText(),
       richText: true
     })
-  }
-
-  // 中文输入结束
-  onCompositionEnd() {
-    if (!this.showTextEdit) {
-      return
-    }
-    this.isCompositing = false
   }
 
   // 设置文本编辑框是否处于显示状态

@@ -511,7 +511,7 @@ function createServer(authorization) {
     },
     {
       instructions:
-        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps；该工具默认每页20个房间、最多100个，只返回当前页，has_more=true 时必须原样传 next_cursor 继续，直到 false 后再判断可见房间总数。只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。需要完整读取整间房间时只调用一次 export_room_tree，禁止用反复 query_nodes 拼整图。该工具在服务端读完快照；complete 为 true 才表示整图已读完。节点超过 500 时响应只含 export_path 和摘要，完整内容在该文件里；打不开文件时用 read_room_export 按 offset 读这份导出，不要回到 query_nodes。complete 为 false 时查看 incomplete_reason，不得声称已读完。历史版本只提供元数据和新增、修改、删除、移动计数，不提供历史脑图正文。回滚必须依次调用 list_versions、get_version，向用户展示目标版本和变更摘要并获得明确确认，再用列表返回的 currentRevision 调用 restore_version；RESTORE_CONFLICT 后必须重新查询并再次确认，禁止自动重试。附件（与网页工具栏「附件」同一套能力）：生成或拿到产物后必须调用 upload_attachment 挂到目标节点，节点会出现可点击回形针图标；禁止只把本机路径、挂载说明、「请拖到节点」写进 text/note；禁止用 update_node 的 note 代替挂载。节点超链接在 query_nodes 的 data.hyperlink 和 data.hyperlinkTitle；新增、修改或批量写入时必须原样传回这两个字段，空字符串表示清除。只复制 text/note 会丢掉超链接。upload_attachment 优先 file_path（WorkBuddy 目录或 ./output），否则 content_base64 / source_url。已有附件用 list_attachments / read_attachment；attachmentExtractedText 只是截断预览。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。一次写多个节点必须用 apply_nodes，整批一次请求、有成功修改时版本只加 1、全部失败时不增加版本；检查 outcome 和每项 items，失败依赖项暂停，核实后使用新操作 ID 补处理；不要循环 add_node、update_node 或 delete_node。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。移动节点使用 move_node 的 uid 和 parent_uid，保持原 UID，禁止删除后新增模拟移动。isError 不代表肯定没有写入：outcome=unknown 或 outcomeUnknown=true 表示结果未知，使用原 operation_id、原内容和 base_revision 核实重放，禁止换新 ID 重复新增；确定拒绝或全部失败也不得声称已完成。节点评论用 list_node_comments（单个节点）或 list_comments（全图，可按未解决、@某人、时间筛选并分页）读取；用 add_comment、reply_comment、delete_comment、resolve_comment 写入，禁止用 update_node 或 apply_nodes 直接改 comments 字段。'
+        '这是局域网思维导图的 MCP。除通用节点协同外，它按 CPDA 处理业务：SOP 的 C 是检查/验收标准，P 是执行计划；用户输入待办是 D，AI/WorkBuddy 负责 A。未提供房间号时先 list_maps；该工具默认每页20个房间、最多100个，只返回当前页，has_more=true 时必须原样传 next_cursor 继续，直到 false 后再判断可见房间总数。只有一张图可直接使用，多张图必须让用户确认。读取策略：用户问某个节点、直属子节点、子树、根到节点的链路、某个层级或“上下节点/上下文”时，必须先用 query_nodes，禁止为此调用 get_map；get_map 只用于用户明确要求整图概览/完整大纲。“上”用 scope=path 读取根到目标的链路；要看同级关系，先从目标返回的 parent_uid 定位父节点，再用 scope=children 读取父节点的直属子节点；“下”用 scope=children，需全部后代用 scope=subtree。query_nodes 返回 has_more=true 时必须原样传 next_cursor 继续，直到 false；同名或 fuzzy 候选只展示候选和路径，不可擅自选择。需要完整读取整间房间时只调用一次 export_room_tree，禁止用反复 query_nodes 拼整图。该工具在服务端读完快照；complete 为 true 才表示整图已读完。节点超过 500 时响应只含 export_path 和摘要，完整内容在该文件里；打不开文件时用 read_room_export 按 offset 读这份导出，不要回到 query_nodes。complete 为 false 时查看 incomplete_reason，不得声称已读完。历史版本只提供元数据和新增、修改、删除、移动计数，不提供历史脑图正文。回滚必须依次调用 list_versions、get_version，向用户展示目标版本和变更摘要并获得明确确认，再用列表返回的 currentRevision 调用 restore_version；RESTORE_CONFLICT 后必须重新查询并再次确认，禁止自动重试。附件（与网页工具栏「附件」同一套能力）：生成或拿到产物后必须调用 upload_attachment 挂到目标节点，节点会出现可点击回形针图标；禁止只把本机路径、挂载说明、「请拖到节点」写进 text/note；禁止用 update_node 的 note 代替挂载。节点超链接在 query_nodes 的 data.hyperlink 和 data.hyperlinkTitle；新增、修改或批量写入时必须原样传回这两个字段，空字符串表示清除。只复制 text/note 会丢掉超链接。upload_attachment 优先 file_path（WorkBuddy 目录或 ./output），否则 content_base64 / source_url。已有附件用 list_attachments / read_attachment；attachmentExtractedText 只是截断预览。处理任务时先 prepare_todo，按 P 执行并在对话中展示缺失信息、进度、错误和人工事项；只有全部 C 通过后才能 complete_todo。未完成的任务始终留在「待办」，完成后才移入「已完成」。不得把过程日志写入导图。一次写多个节点必须用 apply_nodes，整批一次请求、有成功修改时版本只加 1、全部失败时不增加版本；检查 outcome 和每项 items；超过 100 项分批提交，逐批核对结果。失败依赖项暂停；遇到 REPLACE_CONFLICT 或 PRECONDITION_REQUIRED 必须报告冲突并等待用户后续指示，禁止自动读取最新条件后重写旧内容。其他失败核实后使用新操作 ID 补处理；不要循环 add_node、update_node 或 delete_node。AI 可以 propose_sop_improvement，但未经用户明确确认不得 apply，也不得借通用节点工具绕过确认修改 SOP。移动节点使用 move_node 的 uid 和 parent_uid，保持原 UID，禁止删除后新增模拟移动。isError 不代表肯定没有写入：outcome=unknown 或 outcomeUnknown=true 表示结果未知，使用原 operation_id、原内容和 base_revision 核实重放，禁止换新 ID 重复新增；确定拒绝或全部失败也不得声称已完成。节点评论用 list_node_comments（单个节点）或 list_comments（全图，可按未解决、@某人、时间筛选并分页）读取；用 add_comment、reply_comment、delete_comment、resolve_comment 写入，禁止用 update_node 或 apply_nodes 直接改 comments 字段。'
     }
   )
 
@@ -818,6 +818,10 @@ function createServer(authorization) {
       level_mode: z
         .enum(['absolute', 'relative'])
         .describe('absolute=全图层级且不传 selector；relative=目标节点下的层级')
+        .optional(),
+      include_subtree_token: z
+        .boolean()
+        .describe('显式 selector.type=uid 且 scope=self 时返回完整子树校验值；删除前用于并发保护')
         .optional(),
       page_size: z.number().int().min(1).max(5000).describe('每页最多节点数，默认 800').optional(),
       cursor: z.string().describe('上次返回的 next_cursor，用于继续读取').optional()
@@ -1571,6 +1575,10 @@ function createServer(authorization) {
         .string()
         .describe('超链接标题。不传则保持原标题；空字符串清除')
         .optional(),
+      expected: z
+        .record(z.any())
+        .describe('并发前置条件：expected.uid 必须匹配；按修改字段提供 __fv.text、__fv.note 或 __fv.hyperlink')
+        .optional(),
       confirm_sop_change: z
         .boolean()
         .describe('节点属于SOP时，必须先获得用户确认并传true')
@@ -1585,6 +1593,7 @@ function createServer(authorization) {
       note,
       hyperlink,
       hyperlinkTitle,
+      expected,
       confirm_sop_change,
       operation_id,
       base_revision
@@ -1601,6 +1610,7 @@ function createServer(authorization) {
               text,
               note,
               ...hyperlinkFields({ hyperlink, hyperlinkTitle }),
+              ...(expected ? { expected } : {}),
               confirm_sop_change
             },
             operation_id || randomUUID(),
@@ -1619,7 +1629,7 @@ function createServer(authorization) {
 
   server.tool(
     'move_node',
-    '把节点移动到指定父节点并可指定同级位置。必填 uid 和 parent_uid（目标父节点可为 root），不支持标题路径；保留节点 uid、子树、附件、超链接和历史关联。兼容 node/parent 别名；同一字段的两种名字不能冲突。',
+    '把节点移动到指定父节点并可指定同级位置。必填 uid 和 parent_uid（目标父节点可为 root），不支持标题路径；保留节点 uid、子树、附件、超链接和历史关联。兼容 node/parent 别名；同一字段的两种名字不能冲突。修改已有节点须提供 expected.uid、原 parent_uid 和 position。有明确 index 时还须提供 expected.anchor_uid/anchor_parent_uid/anchor_position 与 anchor_side=before|after，服务端会按当前锚点重算相对位置；真正空父节点可改用 expected.target_empty=true。省略 index 时追加到末尾。',
     {
       room_key: z.string().describe('房间号'),
       uid: z.string().trim().min(1).describe('要移动的节点 UID；与 node 至少提供一个').optional(),
@@ -1627,6 +1637,10 @@ function createServer(authorization) {
       node: z.string().trim().min(1).describe('uid 的兼容别名').optional(),
       parent: z.string().trim().min(1).describe('parent_uid 的兼容别名').optional(),
       index: z.number().int().min(0).describe('目标父节点下的零基位置；省略时追加到末尾').optional(),
+      expected: z
+        .record(z.any())
+        .describe('并发前置条件：必需 uid、原 parent_uid、原 position；指定 index 时必需 anchor_uid/anchor_parent_uid/anchor_position/anchor_side(before|after)，或 target_empty=true（目标父节点无其他子节点）。可选 target_* 三元组保护目标父节点')
+        .optional(),
       confirm_sop_change: z
         .boolean()
         .describe('节点或父节点属于SOP时，必须先获得用户确认并传true')
@@ -1634,7 +1648,7 @@ function createServer(authorization) {
       operation_id: z.string().uuid().describe('可选幂等请求ID，超时后使用同一ID重试').optional(),
       base_revision: z.number().int().min(0).describe('可选预期基准修订号；版本恢复冲突后不会自动换基准重试').optional()
     },
-    async ({ room_key, uid, parent_uid, node, parent, index, confirm_sop_change, operation_id, base_revision }, extra = {}) => {
+    async ({ room_key, uid, parent_uid, node, parent, index, expected, confirm_sop_change, operation_id, base_revision }, extra = {}) => {
       try {
         if ((!uid && !node) || (!parent_uid && !parent) ||
           (uid && node && uid !== node) ||
@@ -1656,6 +1670,7 @@ function createServer(authorization) {
             {
               parent_uid: parentUid,
               ...(index == null ? {} : { index }),
+              ...(expected ? { expected } : {}),
               confirm_sop_change
             },
             operation_id || randomUUID(),
@@ -1678,6 +1693,10 @@ function createServer(authorization) {
     {
       room_key: z.string().describe('房间号'),
       node: z.string().describe('节点 uid 或文字路径'),
+      expected: z
+        .record(z.any())
+        .describe('并发前置条件：必需 uid 与通过 query_nodes include_subtree_token 取得的 subtree_token')
+        .optional(),
       confirm_sop_change: z
         .boolean()
         .describe('节点属于SOP时，必须先获得用户确认并传true')
@@ -1685,7 +1704,7 @@ function createServer(authorization) {
       operation_id: z.string().uuid().describe('可选幂等请求ID，超时后使用同一ID重试').optional(),
       base_revision: z.number().int().min(0).describe('可选预期基准修订号；版本恢复冲突后不会自动换基准重试').optional()
     },
-    async ({ room_key, node, confirm_sop_change, operation_id, base_revision }, extra = {}) => {
+    async ({ room_key, node, expected, confirm_sop_change, operation_id, base_revision }, extra = {}) => {
       try {
         return okWrite(
           await writeNodeMap(
@@ -1694,7 +1713,7 @@ function createServer(authorization) {
               room_key
             )}/nodes/${encodeURIComponent(node)}`,
             'DELETE',
-            { confirm_sop_change },
+            { ...(expected ? { expected } : {}), confirm_sop_change },
             operation_id || randomUUID(),
             {
               signal: extra && extra.signal,
@@ -1711,7 +1730,7 @@ function createServer(authorization) {
 
   server.tool(
     'apply_nodes',
-    '一次提交最多 100 个新增、修改、移动或删除操作，成功项目共用一个版本号。operations 里的 parent 和 node 必须是 uid 或 root，不要用文字路径。同一批里新建的节点要带上 uid，后续操作用这个 uid 当 parent。失败项目会回滚到保存点并返回逐项结果；depends_on 使用此前项目的零基索引，依赖失败的项目状态为 dependency_failed。全批失败时不增加版本。仅 Direct 和房间节点表就绪时支持；不可用会明确报错，不走 legacy 批量写。单个节点使用对应单项工具。',
+    '一次提交最多 100 个新增、修改、移动或删除操作，成功项目共用一个版本号。operations 里的 parent 和 node 必须是 uid 或 root，不要用文字路径。同一批里新建的节点要带上 uid，后续操作用这个 uid 当 parent。已有节点的 update 必须在 expected 中提供 uid 和本次修改字段的 __fv.text/__fv.note/__fv.hyperlink；move 必须提供源 parent_uid/position；有明确 index 时还要提供 anchor_* 与 anchor_side=before|after，或 target_empty=true。delete 必须提供 query_nodes(scope=self, selector.type=uid, include_subtree_token=true) 返回的 subtree_token。失败项目会回滚到保存点并返回逐项结果；depends_on 使用此前项目的零基索引，依赖失败的项目状态为 dependency_failed。全批失败时不增加版本。超过 100 项分批调用，禁止循环单项工具代替已知批量意图。遇到 REPLACE_CONFLICT 或 PRECONDITION_REQUIRED 必须报告并等待用户指示，不得自动补最新条件重写。仅 Direct 和房间节点表就绪时支持；不可用会明确报错，不走 legacy 批量写。单个节点使用对应单项工具。',
     {
       room_key: z.string().describe('房间号'),
       operations: z
@@ -1731,6 +1750,10 @@ function createServer(authorization) {
             hyperlinkTitle: z
               .string()
               .describe('超链接标题，对应 data.hyperlinkTitle；空字符串清除')
+              .optional(),
+            expected: z
+              .record(z.any())
+              .describe('并发前置条件：update 提供 uid 与所改字段的 __fv 版本；move 提供原 parent_uid/position，有明确 index 时提供 anchor_* + anchor_side=before|after 或 target_empty=true；delete 提供 subtree_token')
               .optional(),
             confirm_sop_change: z
               .boolean()
@@ -1789,6 +1812,7 @@ function createServer(authorization) {
               payload: {
                 uid: item.node,
                 patch,
+                ...(item.expected ? { expected: item.expected } : {}),
                 ...(confirm != null ? { confirm_sop_change: confirm } : {})
               },
               ...(item.depends_on ? { depends_on: item.depends_on } : {})
@@ -1801,6 +1825,7 @@ function createServer(authorization) {
                 uid: item.node,
                 parentUid: item.parent,
                 ...(item.index != null ? { index: item.index } : {}),
+                ...(item.expected ? { expected: item.expected } : {}),
                 ...(confirm != null ? { confirm_sop_change: confirm } : {})
               },
               ...(item.depends_on ? { depends_on: item.depends_on } : {})
@@ -1810,6 +1835,7 @@ function createServer(authorization) {
             type: 'node.delete',
             payload: {
               uid: item.node,
+              ...(item.expected ? { expected: item.expected } : {}),
               ...(confirm != null ? { confirm_sop_change: confirm } : {})
             },
             ...(item.depends_on ? { depends_on: item.depends_on } : {})

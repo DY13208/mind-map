@@ -79,6 +79,17 @@ function placeChild(next, parentUid, uid, payload) {
 }
 
 export function applyCollabEvent(obj, event, options = {}) {
+  if (options.allowPartial && event && event.payload) {
+    const payload = event.payload, type = event.type, missing = {}
+    const partial = uid => {
+      if (uid && !obj[uid] && !missing[uid]) missing[uid] = { data: { uid }, children: [], partial: true }
+    }
+    if (['node.updated', 'node.moved', 'node.reordered'].includes(type)) partial(payload.uid)
+    if (['node.inserted', 'node.moved', 'node.reordered', 'node.restored'].includes(type)) {
+      partial(payload.parentUid || payload.parent_uid || payload.parent)
+    }
+    if (Object.keys(missing).length) obj = { ...obj, ...missing }
+  }
   // Live collaboration owns its node index. Plain field updates can replace
   // one entry without copying every key in a large room on every keystroke.
   // Recovery callers retain the immutable behavior, as do structural events.
