@@ -6,7 +6,9 @@ import ElementUI from 'element-ui'
 import 'element-ui/lib/theme-chalk/index.css'
 import '@/assets/icon-font/iconfont.css'
 import '@/style/product-system.less'
+import '@/style/tablet-touch.css'
 import '@/style/mobile.less'
+import { installMobileViewport } from '@/utils/visualViewport'
 import 'viewerjs/dist/viewer.css'
 import VueViewer from 'v-viewer'
 import i18n from './i18n'
@@ -15,6 +17,8 @@ import { getLang } from '@/api'
 // const vConsole = new VConsole()
 
 Vue.config.productionTip = false
+const stopMobileViewport = installMobileViewport()
+if (module.hot) module.hot.dispose(stopMobileViewport)
 const APP_BUILD_COMMIT = process.env.VUE_APP_BUILD_COMMIT || 'dev'
 const APP_BUILD_TIME = process.env.VUE_APP_BUILD_TIME || ''
 if (typeof window !== 'undefined') {

@@ -6031,11 +6031,9 @@ class Cooperate {
       note: (owner.getData && owner.getData('note')) || ''
     }
     const prevFull = prev.full || { text: prev.text, note: prev.note }
-    if (
-      Object.prototype.hasOwnProperty.call(prevFull, 'generalization') &&
-      generalizationSignature(prevFull.generalization) ===
-        generalizationSignature(cloned)
-    ) {
+    // Missing and null both mean no summary. Do not append an empty summary
+    // update after a move: it would consume the user's first undo step.
+    if (generalizationSignature(prevFull.generalization) === generalizationSignature(cloned)) {
       return
     }
     if (!this.pendingGenIntent) this.pendingGenIntent = new Map()
@@ -7206,6 +7204,20 @@ class Cooperate {
     }
   }
 
+  acknowledgeInsertedNode(row) {
+    this.markUidPushed(row.uid, row.data || { text: row.text, note: row.note || '' }, 'ack')
+    this.recentPushed.set(row.uid, Date.now())
+    const renderer = this.mindMap && this.mindMap.renderer
+    const node = renderer && renderer.findNodeByUid(row.uid)
+    // Typing can finish while the insert ACK is still in flight. Only the
+    // submitted snapshot is acknowledged; newer text must get its own update.
+    if (node && this.hasUnsyncedLocalText(node)) {
+      if (!this._pendingTextUids) this._pendingTextUids = new Set()
+      this._pendingTextUids.add(row.uid)
+      this.scheduleHttpTextSync()
+    }
+  }
+
   async flushHttpInsertNow(opts = {}) {
     const fromCommand = !!opts.fromCommand
     let records =
@@ -7247,6 +7259,12 @@ class Cooperate {
       }
       return true
     })
+    // Records may reference live node data. Freeze exactly what this insert
+    // will send before any await, including top-level text/note overrides.
+    records = records.map(row => ({
+      ...row,
+      data: collabGeneralization.snapshotValue({ ...(row.data || {}), text: row.text, note: row.note || '' })
+    }))
     if (records.length) {
       const flushed = await this.flushHttpTextNow()
       if (flushed && this.httpFlushHistoryVersion) {
@@ -7292,8 +7310,7 @@ class Cooperate {
       try {
         const submitted = await this.submitV2('node.batch', { ops })
         records.forEach(row => {
-          this.markUidPushed(row.uid, row.data || { text: row.text, note: row.note }, 'ack')
-          this.recentPushed.set(row.uid, Date.now())
+          this.acknowledgeInsertedNode(row)
         })
         const inverse = collabPasteUndo.pasteUndoInverse(ops)
         const insertedUids = records.map(row => row.uid)
@@ -7352,13 +7369,11 @@ class Cooperate {
           index: row.index,
           data: row.data || undefined
         })
-        this.markUidPushed(uid, row.data || { text, note }, 'ack')
-        this.recentPushed.set(uid, Date.now())
+        this.acknowledgeInsertedNode(row)
       } catch (err) {
         const msg = String((err && err.message) || err)
         if (/节点已存在/.test(msg)) {
-          this.markUidPushed(uid, row.data || { text, note }, 'ack')
-          this.recentPushed.set(uid, Date.now())
+          this.acknowledgeInsertedNode(row)
         } else if (isPermanentNodeError(err)) {
           this.abandonGhostNodeByUid(uid)
           droppedOrphans = true

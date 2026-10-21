@@ -53,45 +53,39 @@ export default {
   },
   watch: {
     isMobileViewport(value) {
-      if (value) {
-        this._desktopDrag = this.mindMap.opt.useLeftKeySelectionRightKeyDrag
-        this.mindMap.opt.useLeftKeySelectionRightKeyDrag = false
-      } else if (this._desktopDrag !== undefined) {
-        this.mindMap.opt.useLeftKeySelectionRightKeyDrag = this._desktopDrag
-        this._desktopDrag = undefined
-        this.sheet = ''
-      }
+      if (!value) this.sheet = ''
       this.$nextTick(() => this.mindMap.resize())
     }
   },
   mounted() {
     this.mindMap.on('node_active', this.active)
     this.mindMap.on('node_mousedown', this.nodeDown)
+    this.mindMap.on('node_touch_longpress', this.longPress)
     this.mindMap.on('before_show_text_edit', this.beforeEdit)
     this.mindMap.on('hide_text_edit', this.afterEdit)
     if (window.visualViewport) window.visualViewport.addEventListener('resize', this.keyboardResize)
-    this._canvas = this.mindMap.el
-    this._canvas.addEventListener('pointerdown', this.pointerDown)
-    this._canvas.addEventListener('pointermove', this.pointerMove)
-    this._canvas.addEventListener('pointerup', this.cancelHold)
-    this._canvas.addEventListener('pointercancel', this.cancelHold)
   },
   beforeDestroy() {
-    this.cancelHold()
     this.mindMap.off('node_active', this.active)
     this.mindMap.off('node_mousedown', this.nodeDown)
+    this.mindMap.off('node_touch_longpress', this.longPress)
     this.mindMap.off('before_show_text_edit', this.beforeEdit)
     this.mindMap.off('hide_text_edit', this.afterEdit)
     if (window.visualViewport) window.visualViewport.removeEventListener('resize', this.keyboardResize)
-    if (this._desktopDrag !== undefined) this.mindMap.opt.useLeftKeySelectionRightKeyDrag = this._desktopDrag
     document.body.classList.remove('mobileNodeEditing')
-    this._canvas.removeEventListener('pointerdown', this.pointerDown)
-    this._canvas.removeEventListener('pointermove', this.pointerMove)
-    this._canvas.removeEventListener('pointerup', this.cancelHold)
-    this._canvas.removeEventListener('pointercancel', this.cancelHold)
+    this._pressedNode = null
   },
   methods: {
-    nodeDown(node) { if (this._point) this._heldNode = node },
+    nodeDown(node) { this._pressedNode = node },
+    // Phones replace the desktop context menu with the node action sheet.
+    longPress(e) {
+      const node = this._pressedNode
+      this._pressedNode = null
+      if (!this.isMobileViewport || !node) return
+      e.handled = true
+      node.active()
+      if (this.activeNodes.length) this.sheet = 'node'
+    },
     beforeEdit() { if (this.isMobileViewport) document.body.classList.add('mobileNodeEditing') },
     afterEdit() { document.body.classList.remove('mobileNodeEditing') },
     keyboardResize() {
@@ -107,19 +101,7 @@ export default {
     command(name) { if (!this.canEdit) return; this.sheet = ''; this.mindMap.execCommand(name) },
     editText() { if (!this.canEdit) return; this.sheet = ''; this.$nextTick(() => this.mindMap.renderer.textEdit.show({ node: this.activeNodes[0] })) },
     async remove() { try { await this.$confirm('删除所选节点及其子节点？', '删除节点'); this.command('REMOVE_NODE') } catch (e) { /* cancelled */ } },
-    context() { this.sheet = ''; this.$bus.$emit('node_contextmenu', { clientX: 12, clientY: 100 }, this.activeNodes[0]) },
-    pointerDown(e) {
-      this.cancelHold()
-      if (!this.isMobileViewport || e.pointerType !== 'touch' || !e.isPrimary) return
-      if (!e.target.closest('.smm-node')) return
-      this._point = { x: e.clientX, y: e.clientY }
-      this._hold = setTimeout(() => {
-        if (this._heldNode) this._heldNode.active()
-        if (this.activeNodes.length) this.sheet = 'node'
-      }, 550)
-    },
-    pointerMove(e) { if (this._point && Math.hypot(e.clientX - this._point.x, e.clientY - this._point.y) > 8) this.cancelHold() },
-    cancelHold() { clearTimeout(this._hold); this._point = null; this._heldNode = null }
+    context() { this.sheet = ''; this.$bus.$emit('node_contextmenu', { clientX: 12, clientY: 100 }, this.activeNodes[0]) }
   }
 }
 </script>

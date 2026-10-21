@@ -1,217 +1,259 @@
-import { getTwoPointDistance } from '../utils'
+const MOVE_THRESHOLD = 10
+const DOUBLE_TAP_DELAY = 300
+const LONG_PRESS_DELAY = 500
 
-// 手势事件支持插件
+// Only gestures that start on this canvas belong to the map. The mouse bridge
+// keeps node selection/dragging on the same command and permission paths as a mouse.
 class TouchEvent {
-  //  构造函数
   constructor({ mindMap }) {
     this.mindMap = mindMap
-    this.gestureActive = false
-    this.touchMoved = false
-    this.touchesNum = 0
-    this.singleTouchstartEvent = null
-    this.clickNum = 0
+    this.mode = null
+    this.mouseDown = false
+    this.lastTap = null
+    this.longPressTimer = null
     this.touchStartScaleView = null
-    this.lastTouchStartPosition = null
-    this.lastTouchStartDistance = 0
     this.bindEvent()
   }
 
-  // 绑定事件
   bindEvent() {
     this.onTouchstart = this.onTouchstart.bind(this)
     this.onTouchmove = this.onTouchmove.bind(this)
     this.onTouchcancel = this.onTouchcancel.bind(this)
     this.onTouchend = this.onTouchend.bind(this)
-    window.addEventListener('touchstart', this.onTouchstart, { passive: false })
+    this.onVisibilityChange = this.onVisibilityChange.bind(this)
+    const el = this.mindMap.el
+    this.previousTouchAction = el.style.touchAction
+    this.previousTouchCallout = el.style.webkitTouchCallout
+    el.style.touchAction = 'none'
+    el.style.webkitTouchCallout = 'none'
+    el.addEventListener('touchstart', this.onTouchstart, { passive: false })
     window.addEventListener('touchmove', this.onTouchmove, { passive: false })
-    window.addEventListener('touchcancel', this.onTouchcancel, {
-      passive: false
-    })
     window.addEventListener('touchend', this.onTouchend, { passive: false })
+    window.addEventListener('touchcancel', this.onTouchcancel, { passive: false })
+    window.addEventListener('blur', this.onTouchcancel)
+    document.addEventListener('visibilitychange', this.onVisibilityChange)
   }
 
-  // 解绑事件
   unBindEvent() {
-    window.removeEventListener('touchstart', this.onTouchstart)
+    this.onTouchcancel()
+    const el = this.mindMap.el
+    el.removeEventListener('touchstart', this.onTouchstart)
     window.removeEventListener('touchmove', this.onTouchmove)
-    window.removeEventListener('touchcancel', this.onTouchcancel)
     window.removeEventListener('touchend', this.onTouchend)
+    window.removeEventListener('touchcancel', this.onTouchcancel)
+    window.removeEventListener('blur', this.onTouchcancel)
+    document.removeEventListener('visibilitychange', this.onVisibilityChange)
+    el.style.touchAction = this.previousTouchAction
+    el.style.webkitTouchCallout = this.previousTouchCallout
   }
 
-  // 手指按下事件
-  onTouchstart(e) {
-    // Drawers and form controls outside the canvas keep native touch behavior.
-    if (!this.mindMap.el.contains(e.target)) return
-    this.gestureActive = true
-    this.touchMoved = false
-    if (e.touches.length > 1 && this.singleTouchstartEvent) {
-      this.dispatchMouseEvent('mouseup', this.singleTouchstartEvent.target)
-      this.singleTouchstartEvent = null
-    }
-    this.touchesNum = e.touches.length
-    this.touchStartScaleView = null
-    if (this.touchesNum === 1) {
-      let touch = e.touches[0]
-      if (this.lastTouchStartPosition) {
-        this.lastTouchStartDistance = getTwoPointDistance(
-          this.lastTouchStartPosition.x,
-          this.lastTouchStartPosition.y,
-          touch.clientX,
-          touch.clientY
-        )
-      }
-      this.lastTouchStartPosition = {
-        x: touch.clientX,
-        y: touch.clientY
-      }
-      this.singleTouchstartEvent = touch
-      this.dispatchMouseEvent('mousedown', touch.target, touch)
-    }
+  getTouches(e) {
+    return Array.from(e.touches || []).filter(touch =>
+      this.mindMap.el.contains(touch.target)
+    )
   }
 
-  // 手指移动事件
-  onTouchmove(e) {
-    if (!this.gestureActive) return
+  preventDefault(e) {
     if (e.cancelable) e.preventDefault()
-    const start = this.singleTouchstartEvent
-    if (start && e.touches[0] && Math.hypot(start.clientX - e.touches[0].clientX, start.clientY - e.touches[0].clientY) > 8) this.touchMoved = true
-    let len = e.touches.length
-    if (len === 1) {
-      let touch = e.touches[0]
-      this.dispatchMouseEvent('mousemove', touch.target, touch)
-    } else if (len === 2) {
-      let { disableTouchZoom, minTouchZoomScale, maxTouchZoomScale } =
-        this.mindMap.opt
-      if (disableTouchZoom) return
-      minTouchZoomScale =
-        minTouchZoomScale === -1 ? -Infinity : minTouchZoomScale / 100
-      maxTouchZoomScale =
-        maxTouchZoomScale === -1 ? Infinity : maxTouchZoomScale / 100
-      let touch1 = e.touches[0]
-      let touch2 = e.touches[1]
-      let ox = touch1.clientX - touch2.clientX
-      let oy = touch1.clientY - touch2.clientY
-      let distance = Math.sqrt(Math.pow(ox, 2) + Math.pow(oy, 2))
-      // 以两指中心点进行缩放
-      let { x: touch1ClientX, y: touch1ClientY } = this.mindMap.toPos(
-        touch1.clientX,
-        touch1.clientY
-      )
-      let { x: touch2ClientX, y: touch2ClientY } = this.mindMap.toPos(
-        touch2.clientX,
-        touch2.clientY
-      )
-      let cx = (touch1ClientX + touch2ClientX) / 2
-      let cy = (touch1ClientY + touch2ClientY) / 2
-      // 手势缩放,基于最开始的位置进行缩放(基于前一个位置缩放不是线性关系); 缩放同时支持位置拖动
-      const view = this.mindMap.view
-      if (!this.touchStartScaleView) {
-        this.touchStartScaleView = {
-          distance: distance,
-          scale: view.scale,
-          x: view.x,
-          y: view.y,
-          cx: cx,
-          cy: cy
-        }
+  }
+
+  clearLongPress() {
+    clearTimeout(this.longPressTimer)
+    this.longPressTimer = null
+  }
+
+  onTouchstart(e) {
+    const target = e.target.nodeType === 3 ? e.target.parentElement : e.target
+    // Text editing, links and native controls must retain their own touch behavior.
+    if (target.closest && target.closest('input,textarea,select,button,a,[contenteditable="true"],[contenteditable=""]')) return
+    const touches = this.getTouches(e)
+    if (!touches.length) return
+    this.preventDefault(e)
+    if (touches.length >= 2) this.beginPinch(touches)
+    else if (!this.mode) this.beginSingle(touches[0])
+  }
+
+  beginSingle(touch, panOnly = false) {
+    this.clearLongPress()
+    this.mode = 'single'
+    this.startTouch = touch
+    this.lastTouch = touch
+    this.moved = panOnly
+    const target = touch.target.nodeType === 3 ? touch.target.parentElement : touch.target
+    this.tapTarget = target.closest ? target.closest('.smm-node') || target : target
+    const root = this.mindMap.renderer && this.mindMap.renderer.root
+    const rootEl = root && root.group && root.group.node
+    const nodeTouch = target.closest && target.closest('.smm-node')
+    // Middle-button canvas panning works regardless of the user's desktop
+    // left-selection/right-drag preference. Editable nodes retain left dragging.
+    this.mouseButton = !panOnly && nodeTouch && !this.mindMap.opt.readonly &&
+      !(rootEl && rootEl.contains(target)) ? 0 : 1
+    this.mouseTarget = panOnly ? this.mindMap.el : target
+    this.mouseDown = true
+    this.dispatchMouseEvent('mousedown', this.mouseTarget, touch)
+    if (!panOnly && nodeTouch && !this.mindMap.opt.readonly) {
+      this.longPressTimer = setTimeout(() => {
+        const point = this.lastTouch
+        const menuTarget = this.mouseTarget
+        this.cancelMouseGesture()
+        this.mode = 'longpress'
+        this.lastTap = null
+        // A host UI (e.g. a phone action sheet) may claim the long press
+        // instead of the desktop context menu.
+        const longPress = { handled: false, target: menuTarget, clientX: point.clientX, clientY: point.clientY }
+        this.mindMap.emit('node_touch_longpress', longPress)
+        if (longPress.handled) return
+        this.dispatchMouseEvent('mousedown', menuTarget, point, 2)
+        this.dispatchMouseEvent('mouseup', menuTarget, point, 2)
+        this.dispatchMouseEvent('contextmenu', menuTarget, point, 2)
+      }, LONG_PRESS_DELAY)
+    }
+  }
+
+  cancelMouseGesture() {
+    this.clearLongPress()
+    if (!this.mouseDown) return
+    // A second finger or an OS cancellation must abort, rather than commit,
+    // a pending node drop (including its asynchronous hydration/preview).
+    if (this.mindMap.drag) this.mindMap.drag.cancelDrag()
+    if (this.mindMap.select) this.mindMap.select.clearSelectionState()
+    this.mouseDown = false
+    this.dispatchMouseEvent('mouseup', this.mindMap.el, this.lastTouch)
+  }
+
+  beginPinch(touches) {
+    this.cancelMouseGesture()
+    this.lastTap = null
+    this.mode = 'pinch'
+    const { distance, cx, cy } = this.getPinchPosition(touches)
+    const view = this.mindMap.view
+    this.touchStartScaleView = { distance, cx, cy, scale: view.scale, x: view.x, y: view.y }
+  }
+
+  getPinchPosition(touches) {
+    const [a, b] = touches
+    const center = this.mindMap.toPos((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2)
+    return { distance: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), cx: center.x, cy: center.y }
+  }
+
+  onTouchmove(e) {
+    if (!this.mode) return
+    if (e.changedTouches && !Array.from(e.changedTouches).some(touch => this.mindMap.el.contains(touch.target))) return
+    const touches = this.getTouches(e)
+    if (!touches.length) return
+    this.preventDefault(e)
+    if (touches.length >= 2) {
+      if (this.mode !== 'pinch') this.beginPinch(touches)
+      const { distance, cx, cy } = this.getPinchPosition(touches)
+      const before = this.touchStartScaleView
+      if (before.distance <= 0 || before.scale <= 0) {
+        this.beginPinch(touches)
         return
       }
-      const viewBefore = this.touchStartScaleView
-      let scale = viewBefore.scale * (distance / viewBefore.distance)
-      if (Math.abs(distance - viewBefore.distance) <= 10) {
-        scale = viewBefore.scale
-      }
-      scale =
-        scale < minTouchZoomScale
-          ? minTouchZoomScale
-          : scale > maxTouchZoomScale
-          ? maxTouchZoomScale
-          : scale
-      const ratio = 1 - scale / viewBefore.scale
+      const opt = this.mindMap.opt
+      const min = opt.minTouchZoomScale === -1 ? 0.01 : (opt.minTouchZoomScale || 20) / 100
+      const max = opt.maxTouchZoomScale == null || opt.maxTouchZoomScale === -1
+        ? Infinity : opt.maxTouchZoomScale / 100
+      const scale = opt.disableTouchZoom ? before.scale : Math.max(min, Math.min(max, before.scale * distance / before.distance))
+      const ratio = scale / before.scale
+      const view = this.mindMap.view
       view.scale = scale
-      view.x =
-        viewBefore.x +
-        (cx - viewBefore.x) * ratio +
-        (cx - viewBefore.cx) * scale
-      view.y =
-        viewBefore.y +
-        (cy - viewBefore.y) * ratio +
-        (cy - viewBefore.cy) * scale
+      // Keep the original map point under the fingers, at every zoom level.
+      view.x = (opt.isDisableDrag ? before.cx : cx) - (before.cx - before.x) * ratio
+      view.y = (opt.isDisableDrag ? before.cy : cy) - (before.cy - before.y) * ratio
       view.transform()
       this.mindMap.emit('scale', scale)
+    } else if (this.mode === 'single') {
+      const touch = touches[0]
+      this.lastTouch = touch
+      if (Math.hypot(touch.clientX - this.startTouch.clientX, touch.clientY - this.startTouch.clientY) > MOVE_THRESHOLD) {
+        this.moved = true
+        this.lastTap = null
+        this.clearLongPress()
+      }
+      if (this.moved) this.dispatchMouseEvent('mousemove', this.mouseTarget, touch)
     }
   }
 
-  // 手指取消事件
-  onTouchcancel(e) {
-    if (!this.gestureActive) return
-    this.dispatchMouseEvent('mouseup', e.target)
-    this.gestureActive = false
-    this.touchesNum = 0
-    this.singleTouchstartEvent = null
-    this.touchStartScaleView = null
-    this.clickNum = 0
-  }
-
-  // 手指松开事件
   onTouchend(e) {
-    if (!this.gestureActive) return
-    this.dispatchMouseEvent('mouseup', e.target)
-    if (this.touchesNum === 1 && !this.touchMoved && this.singleTouchstartEvent) {
-      // 模拟双击事件
-      this.clickNum++
-      setTimeout(() => {
-        this.clickNum = 0
-        this.lastTouchStartPosition = null
-        this.lastTouchStartDistance = 0
-      }, 300)
-      let ev = this.singleTouchstartEvent
-      if (this.clickNum > 1 && this.lastTouchStartDistance <= 5) {
-        this.clickNum = 0
-        this.dispatchMouseEvent('dblclick', ev.target, ev)
+    if (!this.mode) return
+    if (e.changedTouches && !Array.from(e.changedTouches).some(touch => this.mindMap.el.contains(touch.target))) return
+    const touches = this.getTouches(e)
+    this.preventDefault(e)
+    if (touches.length >= 2) {
+      this.beginPinch(touches)
+      return
+    }
+    if (touches.length === 1) {
+      // Continuing after a pinch pans from the remaining finger's current
+      // position; it cannot accidentally turn into a node drag or a double tap.
+      this.cancelMouseGesture()
+      this.touchStartScaleView = null
+      this.beginSingle(touches[0], true)
+      return
+    }
+    this.clearLongPress()
+    const point = Array.from(e.changedTouches || []).find(touch =>
+      this.startTouch && touch.identifier === this.startTouch.identifier
+    ) || this.lastTouch
+    if (point && this.startTouch && Math.hypot(point.clientX - this.startTouch.clientX, point.clientY - this.startTouch.clientY) > MOVE_THRESHOLD) this.moved = true
+    if (this.mouseDown) {
+      this.mouseDown = false
+      this.dispatchMouseEvent('mouseup', this.mouseTarget, point)
+    }
+    if (this.mode === 'single' && !this.moved && point) {
+      const now = Date.now()
+      const last = this.lastTap
+      this.dispatchMouseEvent('click', this.mouseTarget, point, 0)
+      if (last && now - last.time < DOUBLE_TAP_DELAY && last.target === this.tapTarget &&
+        Math.hypot(point.clientX - last.x, point.clientY - last.y) <= 24) {
+        this.dispatchMouseEvent('dblclick', this.mouseTarget, point, 0)
+        this.lastTap = null
       } else {
-        // 点击事件应该不用模拟
-        // this.dispatchMouseEvent('click', ev.target, ev)
+        this.lastTap = { time: now, target: this.tapTarget, x: point.clientX, y: point.clientY }
       }
     }
-    this.gestureActive = false
-    this.touchesNum = 0
-    this.singleTouchstartEvent = null
+    this.mode = null
+    this.startTouch = null
+    this.lastTouch = null
     this.touchStartScaleView = null
   }
 
-  // 发送鼠标事件
-  dispatchMouseEvent(eventName, target, e) {
-    let opt = {}
-    if (e) {
-      opt = {
-        screenX: e.screenX,
-        screenY: e.screenY,
-        clientX: e.clientX,
-        clientY: e.clientY,
-        which: 1
-      }
-    }
-    let event = new MouseEvent(eventName, {
+  onTouchcancel(e) {
+    if (e && e.changedTouches && !Array.from(e.changedTouches).some(touch => this.mindMap.el.contains(touch.target))) return
+    this.cancelMouseGesture()
+    this.mode = null
+    this.startTouch = null
+    this.lastTouch = null
+    this.lastTap = null
+    this.touchStartScaleView = null
+  }
+
+  onVisibilityChange() {
+    if (document.hidden) this.onTouchcancel()
+  }
+
+  dispatchMouseEvent(eventName, target, point, button = this.mouseButton) {
+    if (!target || !point) return
+    const event = new MouseEvent(eventName, {
       view: document.defaultView,
       bubbles: true,
       cancelable: true,
-      ...opt
+      screenX: point.screenX,
+      screenY: point.screenY,
+      clientX: point.clientX,
+      clientY: point.clientY,
+      button,
+      buttons: eventName === 'mouseup' || eventName === 'click' || eventName === 'dblclick'
+        ? 0 : button === 1 ? 4 : button === 2 ? 2 : 1,
+      detail: eventName === 'dblclick' ? 2 : 1
     })
     target.dispatchEvent(event)
   }
 
-  // 插件被移除前做的事情
-  beforePluginRemove() {
-    this.unBindEvent()
-  }
-
-  // 插件被卸载前做的事情
-  beforePluginDestroy() {
-    this.unBindEvent()
-  }
+  beforePluginRemove() { this.unBindEvent() }
+  beforePluginDestroy() { this.unBindEvent() }
 }
 
 TouchEvent.instanceName = 'touchEvent'
-
 export default TouchEvent

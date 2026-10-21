@@ -99,7 +99,7 @@
   .el-dialog.folderPermissionDialog .expandBtn { width: 44px; height: 44px; }
   .el-dialog.folderPermissionDialog .roleOptions { width: 100%; display: flex; .el-radio-button { flex: 1; min-width: 0; } .el-radio-button__inner { width: 100%; white-space: normal; min-height: 58px; } }
   .container .editContainer .mindMapContainer { left: 0 !important; top: calc(56px + env(safe-area-inset-top)) !important; width: 100% !important; height: calc(100% - 124px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important; border-radius: 0 !important; touch-action: none; }
-  .container .toolbarContainer { position: fixed !important; inset: 0 0 auto !important; z-index: 31; height: 56px; padding-top: env(safe-area-inset-top); background: #fff; }
+  .container .toolbarContainer { position: fixed !important; inset: var(--mm-viewport-top, 0px) 0 auto !important; z-index: 31; height: 56px; padding-top: env(safe-area-inset-top); background: #fff; }
   .container .toolbar.dockShell { position: static; display: flex; width: 100%; height: 56px; padding: 0; gap: 0; }
   .container .toolbar .fileDock { position: static !important; flex: 1; min-width: 0; width: auto !important; max-width: none; border-radius: 0; box-shadow: none; height: 56px; }
   .container .toolbar .fileDock .toolbarBlock { width: 100%; min-width: 0; padding: 0 4px; display: flex; flex-wrap: nowrap; height: 56px; }
