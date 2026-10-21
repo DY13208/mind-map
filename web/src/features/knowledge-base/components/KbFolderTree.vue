@@ -78,6 +78,7 @@ export default {
     },
     async fetch(parentId, cursor) {
       const { items, nextCursor } = await kbApi.listFolders({ parentId, limit: PAGE, cursor })
+      if (!parentId && !cursor) this.$emit('roots', { items, hasMore: !!nextCursor })
       const list = items.map(f => ({ ...f }))
       if (nextCursor) list.push({ id: '__more_' + ++moreSeq, __more: true, parentId: parentId || '', cursor: nextCursor, loading: false })
       return list

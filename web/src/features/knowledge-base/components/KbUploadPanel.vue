@@ -134,6 +134,10 @@ export default {
     folderLabel: { type: String, default: '当前文件夹' },
     defaultConcurrency: { type: Number, default: DEFAULT_CONCURRENCY }
   },
+  beforeCreate() {
+    // paged 的 watcher 在 created 前求值；列表仍保持非响应式，由 tick 驱动刷新。
+    this.items = []
+  },
   data() {
     return {
       dragging: false, concurrency: DEFAULT_CONCURRENCY, maxConcurrency: MAX_CONCURRENCY,
@@ -180,7 +184,6 @@ export default {
     this.concurrency = Math.min(MAX_CONCURRENCY, Math.max(1, this.defaultConcurrency))
     this.lastTick = 0
     // 队列项刻意不做 Vue 响应式（1000 个文件 × 高频进度事件），由 tick 节流触发重新渲染
-    this.items = []
     this.queue = createUploadQueue({
       items: this.items,
       concurrency: this.concurrency,

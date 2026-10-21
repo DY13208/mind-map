@@ -9,6 +9,8 @@
       'productShell--teams': $route.path === '/spaces',
       'productShell--team-detail': $route.path.startsWith('/spaces/'),
       'productShell--dark': isDarkTheme
+      'productShell--dark': isDarkTheme,
+      'productShell--knowledge': isKnowledgeRoute
     }"
   >
     <button
@@ -262,6 +264,7 @@ export default {
     }
   },
   computed: {
+    isKnowledgeRoute() { return this.$route.name === 'FileKb' },
     shellMode() {
       return resolveShellMode(this.$route)
     },

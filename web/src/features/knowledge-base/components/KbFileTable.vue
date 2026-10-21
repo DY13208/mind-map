@@ -17,9 +17,22 @@
     </div>
     <div v-if="isMobileViewport" class="kb-mobile-files">
       <article v-for="row in files" :key="row.id" class="kb-mobile-file">
-        <div class="kb-mobile-file-head"><el-checkbox :value="selection.some(f => f.id === row.id)" :aria-label="`选择${row.name || row.fileName}`" @change="toggleMobile(row, $event)" /><button @click="$emit('open', row)"><i :class="iconOf(row)" /> {{ row.name || row.fileName }}</button></div>
-        <div class="kb-mobile-file-meta"><KbStatusTag :status="row.status" :detail="row.error || row.statusDetail || ''" /><span>{{ size(row.size != null ? row.size : row.byteSize) }} · {{ time(row.updatedAt || row.createdAt) }}</span></div>
-        <div class="kb-mobile-file-actions"><el-button size="small" @click="$emit('open', row)">解析</el-button><el-button size="small" @click="$emit('data', row)">数据</el-button><el-dropdown trigger="click" @command="c => $emit(c, row)"><el-button size="small" aria-label="更多文件操作" icon="el-icon-more" /><el-dropdown-menu slot="dropdown"><el-dropdown-item command="reparse">重新解析</el-dropdown-item><el-dropdown-item command="acl">权限设置</el-dropdown-item><el-dropdown-item command="delete">删除</el-dropdown-item></el-dropdown-menu></el-dropdown></div>
+        <el-checkbox v-if="selection.length" :value="selection.some(f => f.id === row.id)" :aria-label="`选择${row.name || row.fileName}`" @change="toggleMobile(row, $event)" />
+        <button class="kb-document-icon" :class="'file-' + badgeOf(row).kind" :aria-label="`打开${row.name || row.fileName}`" @click="$emit('open', row)">{{ badgeOf(row).label }}</button>
+        <div class="kb-document-body">
+          <button class="kb-document-title" @click="$emit('open', row)">{{ row.name || row.fileName }}</button>
+          <div class="kb-document-meta"><KbStatusTag :status="row.status" :detail="row.error || row.statusDetail || ''" /><span>{{ size(row.size != null ? row.size : row.byteSize) }}</span></div>
+          <time class="kb-document-date">{{ time(row.updatedAt || row.createdAt).slice(0, 10) }}</time>
+        </div>
+        <el-dropdown trigger="click" @command="command => mobileCommand(command, row)">
+          <button class="kb-document-more" :aria-label="`${row.name || row.fileName}的更多操作`"><i class="el-icon-more" /></button>
+          <el-dropdown-menu slot="dropdown">
+            <el-dropdown-item command="open" icon="el-icon-document">查看解析</el-dropdown-item>
+            <el-dropdown-item command="data" icon="el-icon-s-grid">查看数据</el-dropdown-item>
+            <el-dropdown-item command="select" icon="el-icon-check">{{ selection.some(f => f.id === row.id) ? '取消选择' : '选择文件' }}</el-dropdown-item>
+            <el-dropdown-item command="reparse">重新解析</el-dropdown-item><el-dropdown-item command="acl">权限设置</el-dropdown-item><el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+          </el-dropdown-menu>
+        </el-dropdown>
       </article>
     </div>
     <el-table v-else
@@ -79,6 +92,18 @@ export default {
     return { selection: [] }
   },
   methods: {
+    badgeOf(row) {
+      const ext = String(row.name || row.fileName || '').split('.').pop().toLowerCase()
+      if (ext === 'pdf') return { kind: 'pdf', label: 'PDF' }
+      if (['doc', 'docx'].includes(ext)) return { kind: 'word', label: 'W' }
+      if (['xls', 'xlsx', 'csv'].includes(ext)) return { kind: 'sheet', label: 'X' }
+      if (['ppt', 'pptx'].includes(ext)) return { kind: 'slide', label: 'P' }
+      return { kind: 'text', label: '≡' }
+    },
+    mobileCommand(command, row) {
+      if (command === 'select') this.toggleMobile(row, !this.selection.some(f => f.id === row.id))
+      else this.$emit(command, row)
+    },
     toggleMobile(row, selected) { this.selection = this.selection.filter(f => f.id !== row.id); if (selected) this.selection.push(row) },
     size: formatSize,
     time: formatTime,

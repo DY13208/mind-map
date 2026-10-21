@@ -51,6 +51,13 @@ export default {
     return { q: String(this.$route.query.q || ''), mode: 'hybrid', results: [], total: null, cursor: createCursorState(), reqSeq: 0, loading: false, error: null, searched: false }
   },
   created() { if (this.q) this.run() },
+  watch: {
+    '$route.query.q'(value) {
+      if (this.$route.params.tab !== 'search') return
+      const q = String(value || '')
+      if (q !== this.q) { this.q = q; this.run() }
+    }
+  },
   beforeDestroy() { clearTimeout(this.timer) },
   methods: {
     loc: blockLocation,
