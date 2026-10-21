@@ -69,7 +69,10 @@ async function testOrdinaryUpdateDoesNotTripSop() {
   const store = createMemoryStore(sopGraph())
   const applied = await applyDirect(
     store,
-    { type: 'node.update', payload: { uid: 'child', text: 'A-edit' } },
+    {
+      type: 'node.update',
+      payload: { uid: 'child', text: 'A-edit', expected: { uid: 'child', '__fv.text': 0 } }
+    },
     { version: 2 }
   )
   assert.strictEqual(applied.event.type, 'node.updated')
@@ -100,7 +103,10 @@ async function testRealSopRenameRequiresConfirm() {
   try {
     await applyDirect(
       store,
-      { type: 'node.update', payload: { uid: 'sop', text: '流程' } },
+      {
+        type: 'node.update',
+        payload: { uid: 'sop', text: '流程', expected: { uid: 'sop', '__fv.text': 0 } }
+      },
       { version: 3 }
     )
   } catch (err) {
@@ -111,7 +117,10 @@ async function testRealSopRenameRequiresConfirm() {
     store,
     {
       type: 'node.update',
-      payload: { uid: 'sop', text: '流程', confirm_sop_change: true }
+      payload: {
+        uid: 'sop', text: '流程', confirm_sop_change: true,
+        expected: { uid: 'sop', '__fv.text': 0 }
+      }
     },
     { version: 4 }
   )
@@ -261,7 +270,13 @@ async function testInsertThenUpdateOrder() {
   )
   await applyDirect(
     store,
-    { type: 'node.update', payload: { uid: 'n', text: 'Hello' } },
+    {
+      type: 'node.update',
+      payload: {
+        uid: 'n', text: 'Hello',
+        expected: { uid: 'n', '__fv.text': (await store.getLive('n')).data.__fv.text }
+      }
+    },
     { version: 6 }
   )
   assert.strictEqual(store.graph.n.data.text, 'Hello')
@@ -276,7 +291,10 @@ async function testInsertThenDelete() {
   )
   await applyDirect(
     store,
-    { type: 'node.delete', payload: { uid: 'gone' } },
+    {
+      type: 'node.delete',
+      payload: { uid: 'gone', expected: { uid: 'gone', subtree_token: await store.subtreeToken('gone') } }
+    },
     { version: 8 }
   )
   assert.ok(!store.graph.gone || store.graph.gone.deleted)

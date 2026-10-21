@@ -66,6 +66,7 @@
     <NodeCommentCard v-if="mindMap"></NodeCommentCard>
     <LeaveIntentTrigger v-if="mindMap" :mindMap="mindMap" />
     <CooperateDialog :mindMap="mindMap"></CooperateDialog>
+    <ConflictDraftInbox v-if="mindMap" :mindMap="mindMap"></ConflictDraftInbox>
     <!-- 保留旧分享弹窗，节点分享目前直接复制链接并继承文件权限。 -->
     <NodeShareDialog v-if="false"></NodeShareDialog>
     <MapRefDialog></MapRefDialog>
@@ -174,6 +175,7 @@ import LeaveIntentTrigger from './LeaveIntentTrigger.vue'
 import { isNodeCommentUnread } from '@/utils/commentRead'
 import { currentCommentUser } from '@/utils/commentUser'
 import CooperateDialog from './CooperateDialog.vue'
+import ConflictDraftInbox from './ConflictDraftInbox.vue'
 import NodeShareDialog from './NodeShareDialog.vue'
 import MapRefDialog from './MapRefDialog.vue'
 import { normalizeMapRef } from '@/utils/mapRefNav'
@@ -251,6 +253,7 @@ export default {
     NodeCommentCard,
     LeaveIntentTrigger,
     CooperateDialog,
+    ConflictDraftInbox,
     NodeShareDialog,
     MapRefDialog
   },

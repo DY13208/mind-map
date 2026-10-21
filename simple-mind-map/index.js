@@ -479,7 +479,7 @@ class MindMap {
 
   //  执行命令
   execCommand(...args) {
-    this.command.exec(...args)
+    return this.command.exec(...args)
   }
 
   // 更新画布数据，如果新的数据是在当前画布节点数据基础上增删改查后形成的，那么可以使用该方法来更新画布数据

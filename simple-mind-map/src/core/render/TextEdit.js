@@ -34,6 +34,8 @@ export default class TextEdit {
     this.showTextEdit = false
     // 如果编辑过程中缩放画布了，那么缓存当前编辑的内容
     this.cacheEditingText = ''
+    this.editSessionId = null
+    this.isEditSessionComposing = false
     this.hasBodyMousedown = false
     this.textNodePaddingX = 5
     this.textNodePaddingY = 3
@@ -240,10 +242,34 @@ export default class TextEdit {
       this.mindMap.emit('map_ref_click', node, mapRef)
       return
     }
+    const cooperate = this.mindMap && this.mindMap.cooperate
+    const richTextEditor = this.mindMap.richText
+    const isRichTextActive = !!(richTextEditor && richTextEditor.showTextEdit)
+    const activeEditor = isRichTextActive ? richTextEditor : this
+    const activeNode = isRichTextActive
+      ? richTextEditor.node
+      : this.currentNode
+    const activeSessionId = activeEditor && activeEditor.editSessionId
+    const isExistingScaleSession =
+      isFromScale &&
+      activeNode === node &&
+      activeSessionId &&
+      cooperate &&
+      typeof cooperate.getEditSession === 'function' &&
+      cooperate.getEditSession(activeSessionId)
+    if (
+      !isExistingScaleSession &&
+      cooperate &&
+      typeof cooperate.canBeginNodeEdit === 'function' &&
+      !cooperate.canBeginNodeEdit(node)
+    ) {
+      return
+    }
     // 如果有正在编辑中的节点，那么先结束它
     const currentEditNode = this.getCurrentEditNode()
     if (currentEditNode) {
-      this.hideEditTextBox()
+      const hidden = await Promise.resolve(this.hideEditTextBox())
+      if (hidden === false) return
     }
     const { beforeTextEdit, openRealtimeRenderOnNodeTextEdit } =
       this.mindMap.opt
@@ -378,6 +404,13 @@ export default class TextEdit {
       this.textEditNode.addEventListener('input', () => {
         this.emitTextChangeEvent()
       })
+      this.textEditNode.addEventListener('compositionstart', () => {
+        this.setEditSessionComposing(true)
+      })
+      this.textEditNode.addEventListener('compositionend', () => {
+        this.syncEditSessionDraft()
+        this.setEditSessionComposing(false)
+      })
       const targetNode =
         this.mindMap.opt.customInnerElsAppendTo || document.body
       targetNode.appendChild(this.textEditNode)
@@ -427,10 +460,45 @@ export default class TextEdit {
       focusInput(this.textEditNode)
     }
     this.cacheEditingText = ''
+    this.beginEditSession(node, isFromScale)
+  }
+
+  beginEditSession(node, isFromScale) {
+    const cooperate = this.mindMap && this.mindMap.cooperate
+    if (!cooperate || !cooperate.httpCollabMode || !cooperate.collabV2Adapter) return
+    if (isFromScale && this.editSessionId && cooperate.getEditSession(this.editSessionId)) {
+      this.syncEditSessionDraft()
+      return
+    }
+    const uid = node && node.getData && node.getData('uid')
+    if (!uid) return
+    const session = cooperate.beginEditSession({
+      uid,
+      fields: ['text'],
+      kind: 'text',
+      initialDraft: { text: this.getEditText() }
+    })
+    this.editSessionId = session && session.id
+    this.syncEditSessionDraft()
+  }
+
+  syncEditSessionDraft() {
+    const cooperate = this.mindMap && this.mindMap.cooperate
+    if (!this.editSessionId || !cooperate || !cooperate.updateEditSessionDraft) return
+    cooperate.updateEditSessionDraft(this.editSessionId, { text: this.getEditText() })
+  }
+
+  setEditSessionComposing(composing) {
+    this.isEditSessionComposing = !!composing
+    const cooperate = this.mindMap && this.mindMap.cooperate
+    if (this.editSessionId && cooperate && cooperate.setEditSessionComposing) {
+      cooperate.setEditSessionComposing(this.editSessionId, composing)
+    }
   }
 
   // 派发节点文本编辑事件
   emitTextChangeEvent() {
+    this.syncEditSessionDraft()
     this.mindMap.emit('node_text_edit_change', {
       node: this.currentNode,
       text: this.getEditText(),
@@ -501,28 +569,102 @@ export default class TextEdit {
     if (!this.showTextEdit) {
       return
     }
+    if (this.isEditSessionComposing) return Promise.resolve(false)
     const currentNode = this.currentNode
     const text = trimNodeEditText(this.getEditText(), false)
+    const cooperate = this.mindMap && this.mindMap.cooperate
+    const sessionId = this.editSessionId
+    const finish = editSessionSaved => {
+      this.currentNode = null
+      this.editSessionId = null
+      this.isEditSessionComposing = false
+      this.textEditNode.style.display = 'none'
+      this.textEditNode.innerHTML = ''
+      this.textEditNode.style.fontFamily = 'inherit'
+      this.textEditNode.style.fontSize = 'inherit'
+      this.textEditNode.style.fontWeight = 'normal'
+      this.textEditNode.style.transform = 'translateY(0)'
+      this.setIsShowTextEdit(false)
+      if (!editSessionSaved) {
+        this.mindMap.execCommand('SET_NODE_TEXT', currentNode, text)
+        this.mindMap.render()
+      }
+      this.mindMap.emit(
+        'hide_text_edit',
+        this.textEditNode,
+        this.renderer.activeNodeList,
+        currentNode,
+        { editSessionSaved: !!editSessionSaved }
+      )
+      return true
+    }
+    if (sessionId) {
+      const session =
+        cooperate &&
+        typeof cooperate.getEditSession === 'function' &&
+        cooperate.getEditSession(sessionId)
+      if (
+        !session ||
+        !session.baseVersions ||
+        !Object.prototype.hasOwnProperty.call(session.baseVersions, 'text') ||
+        typeof session.baseVersions.text !== 'number' ||
+        !Number.isFinite(session.baseVersions.text) ||
+        session.baseVersions.text < 0 ||
+        !cooperate ||
+        typeof cooperate.commitEditSession !== 'function'
+      ) {
+        // A protected editor must never fall back to an unconditional command
+        // when its edit session or captured field-version baseline is missing.
+        return Promise.resolve(false)
+      }
+      this.syncEditSessionDraft()
+      return cooperate
+        .commitEditSession(sessionId, { text })
+        .then(result => result && result.draftSaved === false ? false : finish(true))
+        .catch(() => false)
+    }
+    return finish(false)
+  }
+
+  // Explicitly discard a conflict draft without issuing a node write.
+  discardEditSession(id) {
+    if (
+      !id ||
+      !this.editSessionId ||
+      String(this.editSessionId) !== String(id)
+    ) {
+      return false
+    }
+    const currentNode = this.currentNode
     this.currentNode = null
-    this.textEditNode.style.display = 'none'
-    this.textEditNode.innerHTML = ''
-    this.textEditNode.style.fontFamily = 'inherit'
-    this.textEditNode.style.fontSize = 'inherit'
-    this.textEditNode.style.fontWeight = 'normal'
-    this.textEditNode.style.transform = 'translateY(0)'
+    this.editSessionId = null
+    this.isEditSessionComposing = false
+    this.cacheEditingText = ''
+    if (this.textEditNode) {
+      this.textEditNode.style.display = 'none'
+      this.textEditNode.innerHTML = ''
+      this.textEditNode.style.fontFamily = 'inherit'
+      this.textEditNode.style.fontSize = 'inherit'
+      this.textEditNode.style.fontWeight = 'normal'
+      this.textEditNode.style.transform = 'translateY(0)'
+    }
+    const textNode = currentNode && currentNode._textData && currentNode._textData.node
+    if (
+      this.mindMap.opt.openRealtimeRenderOnNodeTextEdit &&
+      textNode &&
+      typeof textNode.show === 'function'
+    ) {
+      textNode.show()
+    }
     this.setIsShowTextEdit(false)
-    this.mindMap.execCommand('SET_NODE_TEXT', currentNode, text)
-    // if (currentNode.isGeneralization) {
-    //   // 概要节点
-    //   currentNode.generalizationBelongNode.updateGeneralization()
-    // }
-    this.mindMap.render()
     this.mindMap.emit(
       'hide_text_edit',
       this.textEditNode,
       this.renderer.activeNodeList,
-      currentNode
+      currentNode,
+      { editSessionSaved: true, editSessionDiscarded: true }
     )
+    return true
   }
 
   // 获取当前正在编辑中的节点实例

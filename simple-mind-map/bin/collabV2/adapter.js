@@ -6,6 +6,7 @@ const {
 } = require('../collabRoomRecovery')
 const {
   isTerminalError,
+  hasProtectedContentMutation,
   isRetryableError,
   dependsOnBlockedOp,
   collectCreatedUids,
@@ -2157,7 +2158,7 @@ function createCollaborationAdapter(options = {}) {
         return { stale: true, err }
       }
       if (
-        isSkippableGoneError(err.code) ||
+        (isSkippableGoneError(err.code) && !hasProtectedContentMutation(op)) ||
         (state.droppedInsertOpIds && state.droppedInsertOpIds.has(op.opId))
       ) {
         if (state.droppedInsertOpIds) state.droppedInsertOpIds.delete(op.opId)

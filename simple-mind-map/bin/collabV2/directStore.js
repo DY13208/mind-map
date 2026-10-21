@@ -1,4 +1,10 @@
 const { comparePositions } = require('../fractionalIndex')
+const {
+  subtreeToken: makeSubtreeToken,
+  readSubtreeRows,
+  readSubtreeRowsForRoots,
+  subtreeTokensFromRows
+} = require('../subtreeToken')
 
 function emptyGraph() {
   return {
@@ -268,6 +274,37 @@ function createMemoryStore(graph) {
         kids.forEach(child => stack.push(child))
       }
       return out
+    },
+    async subtreeToken(uid) {
+      touch()
+      stats.reads += 1
+      const root = rows.get(uid)
+      if (!root || root.deleted) return null
+      const out = []
+      const stack = [uid]
+      const seen = new Set()
+      while (stack.length) {
+        const current = stack.pop()
+        if (seen.has(current)) {
+          const err = new Error('导图节点关系存在循环，无法计算子树校验值')
+          err.code = 'NODE_GRAPH_CYCLE'
+          err.statusCode = 409
+          throw err
+        }
+        seen.add(current)
+        const row = rows.get(current)
+        if (!row || row.deleted) continue
+        out.push(row)
+        const kids = childIndex.get(current) || []
+        kids.forEach(child => stack.push(child))
+      }
+      return makeSubtreeToken(out)
+    },
+    async subtreeTokens(uids) {
+      touch()
+      stats.reads += 1
+      const rowsForRoom = [...rows.values()].filter(row => row && !row.deleted)
+      return subtreeTokensFromRows(rowsForRoom, uids)
     },
     async getMany(uids) {
       touch()
@@ -555,6 +592,23 @@ function createPgStore(client, roomKey) {
         [roomKey, uid]
       )
       return res.rows.map(row => row.uid)
+    },
+    async subtreeToken(uid) {
+      stats.reads += 1
+      const rows = await readSubtreeRows(query, roomKey, uid)
+      if (!rows.length) return null
+      if (rows.some(row => row.cycle)) {
+        const err = new Error('导图节点关系存在循环，无法计算子树校验值')
+        err.code = 'NODE_GRAPH_CYCLE'
+        err.statusCode = 409
+        throw err
+      }
+      return makeSubtreeToken(rows)
+    },
+    async subtreeTokens(uids) {
+      stats.reads += 1
+      const rows = await readSubtreeRowsForRoots(query, roomKey, uids)
+      return subtreeTokensFromRows(rows, uids)
     },
     async getMany(uids) {
       stats.reads += 1

@@ -107,6 +107,55 @@ async function writeDraft(data, key = IDB_KEY) {
     tx.objectStore(IDB_STORE).put(data, key)
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error || new Error('IndexedDB write aborted'))
+  })
+}
+
+// Small scoped records (for example, an unsaved collaborative edit) share the
+// existing local KV store without mixing with the whole-map `current`/`room:*`
+// drafts or changing the database version.
+export const readLocalDraftValue = key => readDraft(key)
+
+export const writeLocalDraftValue = (value, key) => writeDraft(value, key)
+
+export const deleteLocalDraftValue = async key => {
+  const db = await openDraftDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite')
+    tx.objectStore(IDB_STORE).delete(key)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error || new Error('IndexedDB delete aborted'))
+  })
+}
+
+export const listLocalDraftEntries = async prefix => {
+  const db = await openDraftDb()
+  const expectedPrefix = String(prefix || '')
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readonly')
+    const store = tx.objectStore(IDB_STORE)
+    const entries = []
+    const cursorRequest = store.openKeyCursor()
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result
+      if (!cursor) return
+      const key = String(cursor.key)
+      if (key.startsWith(expectedPrefix)) {
+        const valueRequest = store.get(cursor.key)
+        valueRequest.onsuccess = () => {
+          if (valueRequest.result != null) {
+            entries.push({ key, value: valueRequest.result })
+          }
+        }
+        valueRequest.onerror = () => reject(valueRequest.error)
+      }
+      cursor.continue()
+    }
+    cursorRequest.onerror = () => reject(cursorRequest.error)
+    tx.oncomplete = () => resolve(entries)
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error || new Error('IndexedDB list aborted'))
   })
 }
 

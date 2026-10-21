@@ -337,7 +337,12 @@ async function applyUndoOrRedo(store, raw, options = {}) {
       replaced.generatedType = 'map.replace'
       return replaced
     }
-    const applied = await applyDirect(store, { ...generated, roomKey: raw.roomKey }, { version })
+    const applied = await applyDirect(store, { ...generated, roomKey: raw.roomKey }, {
+      version,
+      // Undo conflict checks live in this module; generated inverse payloads
+      // are trusted internal commands and do not carry public CAS tokens.
+      skipWritePreconditions: true
+    })
     if (applied.event && applied.event.payload) {
       applied.event.payload.undoOf = opIdOf(target)
     }
@@ -369,7 +374,10 @@ async function applyUndoOrRedo(store, raw, options = {}) {
     replaced.generatedType = 'map.replace'
     return replaced
   }
-  const applied = await applyDirect(store, { ...forward, roomKey: raw.roomKey }, { version })
+  const applied = await applyDirect(store, { ...forward, roomKey: raw.roomKey }, {
+    version,
+    skipWritePreconditions: true
+  })
   if (applied.event && applied.event.payload) {
     applied.event.payload.redoOf = opIdOf(target)
   }

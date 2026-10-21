@@ -141,6 +141,7 @@ class Drag extends Base {
         node.endDrag()
       })
     }
+    this.mindMap.emit('node_drag_cancel')
     this.reset()
   }
 
@@ -182,6 +183,7 @@ class Drag extends Base {
     ) {
       return
     }
+    if (!this.isDragging) this.mindMap.emit('node_drag_start', this.mousedownNode)
     this.mindMap.emit('node_dragging', this.mousedownNode)
     this.handleStartMove()
     this.onMove(x, y, e)
@@ -225,6 +227,7 @@ class Drag extends Base {
       node.endDrag()
     })
     if (droppedOnDescendant) {
+      this.mindMap.emit('node_drag_cancel')
       this.reset()
       return
     }
@@ -262,6 +265,7 @@ class Drag extends Base {
         beingDragNodeList: [...this.beingDragNodeList]
       })
       if (isCancel) {
+        this.mindMap.emit('node_drag_cancel')
         this.reset()
         return
       }
@@ -290,36 +294,36 @@ class Drag extends Base {
       markRemeasure(this.overlapNode)
       ;(this.beingDragNodeList || []).forEach(markRemeasure)
       this.removeNodeActive(this.overlapNode)
-      this.mindMap.execCommand(
+      const moved = await this.mindMap.execCommand(
         'MOVE_NODE_TO',
         this.beingDragNodeList,
         this.overlapNode
       )
-      didMove = true
+      didMove = moved !== false
     } else if (this.prevNode) {
       requestSyncPaint()
       markRemeasure(this.prevNode)
       ;(this.beingDragNodeList || []).forEach(markRemeasure)
       // 存在前一个相邻节点，作为其下一个兄弟节点
       this.removeNodeActive(this.prevNode)
-      this.mindMap.execCommand(
+      const moved = await this.mindMap.execCommand(
         'INSERT_AFTER',
         this.beingDragNodeList,
         this.prevNode
       )
-      didMove = true
+      didMove = moved !== false
     } else if (this.nextNode) {
       requestSyncPaint()
       markRemeasure(this.nextNode)
       ;(this.beingDragNodeList || []).forEach(markRemeasure)
       // 存在下一个相邻节点，作为其前一个兄弟节点
       this.removeNodeActive(this.nextNode)
-      this.mindMap.execCommand(
+      const moved = await this.mindMap.execCommand(
         'INSERT_BEFORE',
         this.beingDragNodeList,
         this.nextNode
       )
-      didMove = true
+      didMove = moved !== false
     } else if (hadClone && this.mindMap.opt.enableDetachedDrag !== false) {
       // Store independent themes beneath the document root so the existing
       // tree persistence, search and undo paths retain the whole subtree.
@@ -340,8 +344,8 @@ class Drag extends Base {
           isFloating: true
         }))
         requestSyncPaint()
-        this.mindMap.execCommand('MOVE_NODE_TO', this.beingDragNodeList, root, positions)
-        didMove = true
+        const moved = await this.mindMap.execCommand('MOVE_NODE_TO', this.beingDragNodeList, root, positions)
+        didMove = moved !== false
       }
     } else if (
       hadClone &&
