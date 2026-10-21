@@ -147,6 +147,7 @@ export default {
   },
   created() {
     this.$bus.$on('show_search', this.showSearch)
+    this.$bus.$on('close_search', this.close)
     this.mindMap.on('search_info_change', this.handleSearchInfoChange)
     this.mindMap.on('node_click', this.blur)
     this.mindMap.on('draw_click', this.blur)
@@ -166,6 +167,7 @@ export default {
   },
   beforeDestroy() {
     this.$bus.$off('show_search', this.showSearch)
+    this.$bus.$off('close_search', this.close)
     this.mindMap.off('search_info_change', this.handleSearchInfoChange)
     this.mindMap.off('node_click', this.blur)
     this.mindMap.off('draw_click', this.blur)

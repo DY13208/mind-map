@@ -2,9 +2,9 @@
   <div class="mapFileTree" :class="{ isDark: isDark }">
     <div class="treeHead">
       <span class="headLabel">脑图</span>
-      <button v-if="isMobileViewport" type="button" aria-label="关闭脑图目录" @click="$emit('close')"><i class="el-icon-close" /></button>
+      <button v-if="isTouchEditor" type="button" aria-label="关闭脑图目录" @click="$emit('close')"><i class="el-icon-close" /></button>
     </div>
-    <el-input v-if="isMobileViewport" v-model="mobileSearch" clearable prefix-icon="el-icon-search" placeholder="搜索文件夹或脑图" aria-label="搜索文件夹或脑图" />
+    <el-input v-if="isTouchEditor" v-model="mobileSearch" clearable prefix-icon="el-icon-search" placeholder="搜索文件夹或脑图" aria-label="搜索文件夹或脑图" />
     <div v-if="loading" class="treeState">正在加载…</div>
     <button v-else-if="error" type="button" class="treeState retry" @click="load">
       {{ error }}，点击重试
@@ -51,14 +51,14 @@
         <span class="nodeName">{{ row.node.name }}</span>
         <span class="hoverDot"></span>
       </div>
-      <button v-if="isMobileViewport && visibleRows.length > mobileLimit" type="button" class="treeLoadMore" @click="mobileLimit += 150">加载更多目录项</button>
+      <button v-if="isTouchEditor && visibleRows.length > mobileLimit" type="button" class="treeLoadMore" @click="mobileLimit += 150">加载更多目录项</button>
     </div>
   </div>
 </template>
 
 <script>
 import folderService from '@/services/folderService'
-import mobileViewport from '@/utils/mobileViewport'
+import editorViewport from '@/utils/editorViewport'
 import { listAllAccessibleFiles } from '@/utils/fileApi'
 import { normalizeRoomDto } from '@/services/roomDto'
 
@@ -146,7 +146,7 @@ function ancestorIds(nodes, currentKey, acc = []) {
 
 export default {
   name: 'MapFileTree',
-  mixins: [mobileViewport],
+  mixins: [editorViewport],
   props: {
     currentRoomKey: { type: String, default: '' },
     isDark: { type: Boolean, default: false }
@@ -162,10 +162,10 @@ export default {
     }
   },
   computed: {
-    renderedRows() { return this.isMobileViewport ? this.visibleRows.slice(0, this.mobileLimit) : this.visibleRows },
+    renderedRows() { return this.isTouchEditor ? this.visibleRows.slice(0, this.mobileLimit) : this.visibleRows },
     visibleRows() {
       const rows = []
-      const query = this.isMobileViewport ? this.mobileSearch.trim().toLowerCase() : ''
+      const query = this.isTouchEditor ? this.mobileSearch.trim().toLowerCase() : ''
       const matches = node => String(node.name).toLowerCase().includes(query) || (node.children || []).some(matches)
       const walk = (nodes, depth) => {
         nodes.forEach(node => {

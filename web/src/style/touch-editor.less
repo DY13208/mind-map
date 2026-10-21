@@ -1,5 +1,5 @@
-// App chrome from the mobile reference. Product navigation keeps its own
-// breakpoint; these selectors apply only to the mind-map editor.
+// Touch editor uses the same left actions / right settings organization as PC.
+// Product navigation has its own breakpoint and is not changed here.
 .container.isTouchEditor {
   --touch-surface: #fff;
   --touch-ink: #153052;
@@ -12,18 +12,13 @@
     height: auto !important; padding: 0 !important; z-index: 31; background: transparent !important;
   }
   .touchEditorHeader {
-    display: flex; align-items: center; box-sizing: border-box; gap: 0;
-    height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) max(4px, env(safe-area-inset-right)) 0 max(4px, env(safe-area-inset-left));
+    display: flex; align-items: center; box-sizing: border-box;
+    height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) max(8px, env(safe-area-inset-right)) 0 max(4px, env(safe-area-inset-left));
     background: var(--touch-surface); color: var(--touch-ink); border-radius: 0 0 18px 18px;
-    > button, > span { flex: 0 0 auto; }
-    button:not(.saveChip) {
-      width: 44px; min-width: 44px; height: 48px; border: 0; padding: 0;
-      display: inline-grid; place-items: center; background: transparent; color: inherit; font-size: 21px;
-      &:disabled { opacity: .4; }
-      .iconfont { font-size: 21px; }
-    }
+    > button { flex: 0 0 auto; }
+    button:not(.saveChip) { width: 44px; min-width: 44px; height: 48px; border: 0; padding: 0; display: inline-grid; place-items: center; background: transparent; color: inherit; font-size: 21px; &:disabled { opacity: .4; } }
     .touchFileIdentity { min-width: 0; flex: 1; display: flex; align-items: center; gap: 7px; }
-    strong { min-width: 0; max-width: 300px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 700; }
+    strong { min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 700; }
     .saveChip { flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px; margin: 0; border: 0; border-radius: 20px; padding: 4px 7px; font-size: 10px; line-height: 16px; white-space: nowrap; background: #e7f6ed; color: #159749; }
     .saveChip.saved::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
     .saveChip.failed { background: #fff0ed; color: #bc342a; }
@@ -31,83 +26,90 @@
   }
   .editContainer .mindMapContainer {
     left: 0 !important; top: calc(56px + env(safe-area-inset-top)) !important; width: 100% !important;
-    height: calc(100% - 128px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    height: calc(100% - 56px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
     border-radius: 0 !important; touch-action: none;
   }
   .countContainer, .navigatorToolbarDock, .navigatorToolbarContainer { display: none !important; }
+  .touchEditorLeftRail {
+    position: fixed; left: max(8px, env(safe-area-inset-left)); top: calc(var(--mm-viewport-top) + var(--mm-viewport-height) / 2);
+    transform: translateY(-50%); display: flex; flex-direction: column;
+    max-height: calc(var(--mm-viewport-height) - 140px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior: contain;
+    padding: 4px 0; border-radius: 18px; background: var(--touch-surface); color: var(--touch-ink); box-shadow: 0 5px 24px #17261f0a;
+    button { flex-shrink: 0; display: grid; place-items: center; width: 44px; min-height: 44px; border: 0; padding: 0; background: transparent; color: inherit; font-size: 21px; &:disabled { opacity: .4; } }
+    .iconfont { font-size: 21px; }
+  }
   .sidebarTriggerRoot.touchEditorRail { display: block !important; }
   .touchEditorRail .sidebarTriggerContainer {
-    top: calc(var(--mm-viewport-top) + 68px + env(safe-area-inset-top)) !important;
-    right: max(8px, env(safe-area-inset-right)) !important; transform: none;
-    max-height: calc(var(--mm-viewport-height) - 354px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    top: calc(var(--mm-viewport-top) + var(--mm-viewport-height) / 2) !important;
+    right: max(8px, env(safe-area-inset-right)) !important; transform: translateY(-50%);
+    // Reserve space below the centered rail for the four zoom buttons.
+    max-height: calc(var(--mm-viewport-height) - 400px - env(safe-area-inset-bottom) * 2) !important;
     .toggleShowBtn, .authMeta, .triggerName, .tabWing { display: none; }
-    .trigger { padding: 4px 0; width: 44px; min-width: 44px; border: 0; border-radius: 20px; background: var(--touch-surface); color: var(--touch-ink); box-shadow: 0 5px 24px #17261f0a; }
+    .trigger { min-height: 0; padding: 4px 0; width: 44px; min-width: 44px; border: 0; border-radius: 20px; background: var(--touch-surface); color: var(--touch-ink); box-shadow: 0 5px 24px #17261f0a; overscroll-behavior: contain; }
     .authSection { margin: 0; padding: 0; border: 0; }
     .notificationBadge { margin: 0; }
     .notificationButton { min-height: 44px; padding: 4px; }
     .triggerItem { box-sizing: border-box; min-width: 44px; width: 44px; height: 44px; min-height: 44px; margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; }
     .triggerIcon { font-size: 21px; color: var(--touch-ink); }
     .collapseDivider { margin: 2px 8px; }
-    .collapseBtn { display: grid; place-items: center; min-height: 40px; margin: 0; font-size: 26px; color: var(--touch-ink); }
+    .collapseBtn { display: grid; place-items: center; min-height: 44px; margin: 0; font-size: 26px; color: var(--touch-ink); }
     &.rightCollapsed { display: none; }
-    &:not(.show) { transform: translateX(150%); }
+    &:not(.show) { transform: translate(150%, -50%); }
   }
-  .touchEditorRail .rightExpandTab { top: calc(var(--mm-viewport-top) + 88px + env(safe-area-inset-top)) !important; z-index: 14; }
+  .touchEditorRail .rightExpandTab { top: calc(var(--mm-viewport-top) + var(--mm-viewport-height) / 2) !important; width: 44px; z-index: 14; }
   .mobileCanvasControls {
-    position: fixed; right: max(8px, env(safe-area-inset-right)); bottom: calc(var(--touch-bottom) + 90px + env(safe-area-inset-bottom));
+    position: fixed; right: max(8px, env(safe-area-inset-right)); bottom: calc(var(--touch-bottom) + 12px + env(safe-area-inset-bottom));
     z-index: 12; display: flex; flex-direction: column; border: 0; border-radius: 19px; overflow: hidden;
     background: var(--touch-surface); box-shadow: 0 5px 24px #17261f0a;
     button { width: 44px; height: 44px; border: 0; padding: 0; background: transparent; color: var(--touch-ink); font-size: 21px; }
   }
-  .mobileEditorDock {
-    position: fixed; left: 0; right: 0; bottom: var(--touch-bottom); z-index: 30;
-    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: center; box-sizing: border-box;
-    min-height: 72px; padding: 6px max(8px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
-    border: 0; border-radius: 24px 24px 0 0; background: var(--touch-surface); box-shadow: 0 -4px 24px #17261f04;
-    button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 44px; min-height: 52px; border: 0; padding: 4px; background: transparent; color: var(--touch-muted); font-size: 12px; }
-    button i { color: var(--touch-ink); font-size: 24px; }
-    button[aria-pressed=true] { color: #008763; }
-    button:disabled { opacity: .4; }
-    button.mobilePrimary { justify-self: center; width: 56px; height: 56px; border-radius: 50%; background: #008763; color: #fff; box-shadow: 0 3px 12px #00876333; }
-    button.mobilePrimary i { font-size: 30px; color: #fff; }
-  }
   .sidebarContainer.sidebarContainer {
-    top: auto !important; left: 0 !important; right: auto !important; bottom: var(--touch-bottom) !important;
-    width: 100% !important; max-width: 100% !important; height: 70dvh !important;
-    max-height: calc(var(--mm-viewport-height) - 70px) !important; z-index: 40 !important; box-sizing: border-box;
-    border-radius: 20px 20px 0 0; transform: translateY(calc(100% + 24px)); transition: transform .2s ease;
-    padding-bottom: env(safe-area-inset-bottom);
-    &.show { transform: translateY(0); }
+    top: calc(var(--mm-viewport-top) + 64px + env(safe-area-inset-top)) !important;
+    left: auto !important; right: 8px !important; bottom: calc(var(--touch-bottom) + 8px + env(safe-area-inset-bottom)) !important;
+    width: 340px !important; max-width: calc(100vw - 72px) !important; height: auto !important;
+    max-height: calc(var(--mm-viewport-height) - 72px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    z-index: 40 !important; box-sizing: border-box; border-radius: 14px;
+    transform: translateX(calc(100% + 24px)); transition: transform .2s ease;
+    &.show { transform: translateX(0); }
     .closeBtn { width: 44px; height: 44px; top: 0; right: 4px; display: grid; place-items: center; }
+  }
+  .searchContainer {
+    top: calc(var(--mm-viewport-top) + 64px + env(safe-area-inset-top)); left: 64px; right: auto;
+    width: 320px; max-width: calc(100vw - 72px); box-sizing: border-box; z-index: 42;
+    max-height: calc(var(--mm-viewport-height) - 80px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    transform: translateX(calc(-100% - 88px)); transition: transform .2s ease;
+    &.show { transform: translateX(0); }
+    .closeBtnBox { position: static; display: flex; justify-content: flex-end; width: 100%; height: 44px; margin-bottom: 4px; background: transparent; border-radius: 0; box-shadow: none; }
+    .closeBtn { display: grid; place-items: center; width: 44px; height: 44px; }
+    .searchResultList { position: static; max-height: calc(var(--mm-viewport-height) - 280px); min-height: 0; box-sizing: border-box; }
+    input, .el-input-group__append button { min-height: 44px; }
   }
   button:focus-visible, [role=button]:focus-visible { outline: 2px solid #008763; outline-offset: -3px; }
 }
-.touchEditorActionSheet {
-  bottom: calc(100vh - var(--mm-viewport-height) - var(--mm-viewport-top)) !important;
-  max-height: calc(var(--mm-viewport-height) - 24px); box-sizing: border-box; border-radius: 20px 20px 0 0;
-  padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); overflow-y: auto; color: #153052;
+// Non-modal left panels keep the canvas usable while choosing a node.
+.touchEditorDrawer { pointer-events: none; }
+.touchEditorActionSidebar {
+  pointer-events: auto; top: calc(var(--mm-viewport-top) + 64px + env(safe-area-inset-top)) !important;
+  bottom: calc(100vh - var(--mm-viewport-height) - var(--mm-viewport-top) + 8px + env(safe-area-inset-bottom)) !important;
+  left: max(8px, env(safe-area-inset-left)) !important; height: auto !important;
+  max-width: calc(100vw - 72px); box-sizing: border-box; border-radius: 14px;
+  padding: 12px 16px; overflow-y: auto; overscroll-behavior: contain; color: #153052;
   header { display: flex; align-items: center; justify-content: space-between; }
   button { min-height: 48px; border: 0; border-radius: 10px; background: #f1f5f3; color: inherit; font-size: 14px; padding: 8px 12px; }
   button:disabled { opacity: .4; }
   header button { min-width: 44px; background: transparent; }
-  .mobileActionGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding-top: 12px; }
+  .mobileActionGrid { display: grid; grid-template-columns: 1fr; gap: 10px; padding-top: 12px; }
   .collabDiag { max-height: 160px; overflow: auto; font-size: 12px; overflow-wrap: anywhere; }
+  &.isDark { background: #262a2e; color: #edf2f7; button { background: #363b3f; } header button { background: transparent; } }
 }
+.touchEditorMapTree { padding: 0; .mapFileTree { width: 100%; height: 100%; max-height: none; box-sizing: border-box; } .treeHead button { min-width: 44px; } }
 .mobileNodeEditing .container.isTouchEditor {
-  .mobileEditorDock, .mobileCanvasControls, .sidebarTriggerRoot.touchEditorRail { display: none !important; }
-  .editContainer .mindMapContainer { height: calc(100% - 56px - env(safe-area-inset-top)) !important; }
+  .touchEditorLeftRail, .mobileCanvasControls, .sidebarTriggerRoot.touchEditorRail { display: none !important; }
 }
-@media (min-width: 768px) {
-  .container.isTouchEditor {
-    .mobileEditorDock { left: 50%; right: auto; width: calc(100% - 32px); max-width: 560px; transform: translateX(-50%); bottom: calc(var(--touch-bottom) + max(12px, env(safe-area-inset-bottom))); border-radius: 24px; }
-    .sidebarContainer.sidebarContainer { left: auto !important; right: 12px !important; width: 360px !important; max-width: calc(100vw - 24px) !important; }
-  }
-}
-@media (max-width: 420px) { .container.isTouchEditor .touchEditorHeader .touchRefresh { display: none !important; } }
 @media (max-height: 560px) {
   .container.isTouchEditor {
     .mobileCanvasControls { flex-direction: row; }
-    .touchEditorRail .sidebarTriggerContainer { max-height: calc(var(--mm-viewport-height) - 228px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important; }
+    .touchEditorRail .sidebarTriggerContainer { max-height: calc(var(--mm-viewport-height) - 144px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important; }
   }
 }
-@media (prefers-reduced-motion: reduce) { .container.isTouchEditor .sidebarContainer { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .container.isTouchEditor .sidebarContainer, .container.isTouchEditor .searchContainer { transition: none; } }

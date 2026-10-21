@@ -6,14 +6,7 @@
       <button aria-label="适应画布" @click="mindMap.view.fit()"><i class="el-icon-full-screen" /></button>
       <button aria-label="定位中心" @click="mindMap.renderer.setRootNodeCenter()"><i class="el-icon-aim" /></button>
     </div>
-    <nav class="mobileEditorDock" aria-label="编辑工具" data-testid="touch-editor-dock">
-      <button aria-label="主题" :disabled="readonly" :aria-pressed="String(activeSidebar === 'theme')" @click="panel('theme')"><i class="el-icon-picture-outline" aria-hidden="true" />主题</button>
-      <button aria-label="样式" :disabled="readonly" :aria-pressed="String(activeSidebar === 'nodeStyle')" @click="panel('nodeStyle')"><i class="el-icon-brush" aria-hidden="true" />样式</button>
-      <button :disabled="readonly" class="mobilePrimary" aria-label="新增节点" @click="sheet = 'node'"><i class="el-icon-plus" /></button>
-      <button aria-label="图谱" :disabled="readonly" :aria-pressed="String(activeSidebar === 'structure')" @click="panel('structure')"><i class="el-icon-connection" aria-hidden="true" />图谱</button>
-      <button aria-label="更多" @click="sheet = 'more'"><i class="el-icon-more" aria-hidden="true" />更多</button>
-    </nav>
-    <el-drawer :visible="!!sheet" direction="btt" size="auto" :with-header="false" append-to-body custom-class="mobileActionSheet touchEditorActionSheet" @close="sheet = ''">
+    <el-drawer :visible="!!sheet" direction="ltr" size="320px" :with-header="false" :modal="false" :lock-scroll="false" append-to-body class="touchEditorDrawer" :custom-class="isDark ? 'touchEditorActionSidebar isDark' : 'touchEditorActionSidebar'" @close="sheet = ''">
       <header><strong>{{ sheet === 'node' ? '节点操作' : '更多工具' }}</strong><button aria-label="关闭" @click="sheet = ''"><i class="el-icon-close" /></button></header>
       <p v-if="sheet === 'node' && !activeNodes.length">请先点击选择一个节点</p>
       <div class="mobileActionGrid">
@@ -51,6 +44,7 @@ export default {
   data: () => ({ sheet: '', activeNodes: [], canUndo: false, canRedo: false, collabHistoryEnabled: false }),
   computed: {
     readonly() { return this.$store.state.isReadonly },
+    isDark() { return this.$store.state.localConfig.isDark },
     activeSidebar() { return this.$store.state.activeSidebar },
     canEdit() { return !this.readonly && this.activeNodes.length > 0 },
     extraPanels() { return (sidebarTriggerList[this.$i18n.locale] || sidebarTriggerList.zh).filter(i => !['theme', 'nodeStyle', 'structure', 'outline'].includes(i.value) && (!this.readonly || ['shortcutKey', 'ai'].includes(i.value))) }
@@ -67,6 +61,7 @@ export default {
   mounted() {
     this.activeNodes = [...(this.mindMap.renderer.activeNodeList || [])]
     this.$bus.$on('open_mobile_editor_sheet', this.openSheet)
+    this.$bus.$on('close_mobile_editor_sheet', this.closeSheet)
     this.mindMap.on('back_forward', this.nativeHistory)
     this.$bus.$on('collab_history', this.collabHistory)
     const adapter = this.mindMap.cooperate && this.mindMap.cooperate.collabV2Adapter
@@ -81,6 +76,7 @@ export default {
   },
   beforeDestroy() {
     this.$bus.$off('open_mobile_editor_sheet', this.openSheet)
+    this.$bus.$off('close_mobile_editor_sheet', this.closeSheet)
     this.$bus.$off('collab_history', this.collabHistory)
     this.mindMap.off('back_forward', this.nativeHistory)
     this.mindMap.off('node_active', this.active)
@@ -93,7 +89,14 @@ export default {
     this._pressedNode = null
   },
   methods: {
-    openSheet(name) { if (this.isTouchEditor) this.sheet = name === 'node' ? 'node' : 'more' },
+    openSheet(name) {
+      if (!this.isTouchEditor) return
+      this.$bus.$emit('close_mobile_file_menu')
+      this.$bus.$emit('closeSideBar')
+      this.$bus.$emit('close_search')
+      this.sheet = name === 'node' ? 'node' : 'more'
+    },
+    closeSheet() { this.sheet = '' },
     nativeHistory(index, length) {
       if (this.collabHistoryEnabled) return
       this.canUndo = index > 0; this.canRedo = index < length - 1
@@ -118,7 +121,7 @@ export default {
       // node_active is batched by the renderer. Seed the selected node now so
       // the first long press can open the sheet before that event arrives.
       this.activeNodes = [node]
-      this.sheet = 'node'
+      this.openSheet('node')
     },
     beforeEdit() { if (this.isTouchEditor) document.body.classList.add('mobileNodeEditing') },
     afterEdit() { document.body.classList.remove('mobileNodeEditing') },

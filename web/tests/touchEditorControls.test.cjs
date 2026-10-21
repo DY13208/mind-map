@@ -9,6 +9,8 @@ const viewport = load('editorViewport').default
 const componentPath = path.resolve(__dirname, '../src/pages/Edit/components/MobileEditorControls.vue')
 const parsed = compiler.parseComponent(fs.readFileSync(componentPath, 'utf8'))
 assert.deepEqual(compiler.compile(parsed.template.content).errors, [])
+assert(!parsed.template.content.includes('mobileEditorDock'), 'touch editor must not render a duplicate bottom menu')
+assert(parsed.template.content.includes('direction="ltr"'), 'node actions open from the left')
 const panels = ['nodeStyle', 'baseStyle', 'theme', 'structure', 'outline', 'setting'].map(value => ({ value, name: value }))
 const context = { module: { exports: {} }, editorViewport: viewport, sidebarTriggerList: { zh: panels } }
 vm.runInNewContext(parsed.script.content.replace(/^import .*$/gm, '').replace('export default', 'module.exports='), context)
@@ -23,7 +25,7 @@ function fixture() {
   Object.assign(map, { renderer: { activeNodeList: [selected] }, execCommand: command => commands.push(command), resize() {},
     command: { activeHistoryIndex: 1, history: ['initial', 'current'] }, cooperate: { collabV2Adapter: { getStatus: () => ({ undoDepth: 2, redoDepth: 0 }) } } })
   const instance = { ...component.data(), ...component.methods, isTouchEditor: true, mindMap: map, $bus: bus,
-    $i18n: { locale: 'zh' }, $nextTick: callback => callback(), $store: { state: { isReadonly: false, activeSidebar: '' }, commit(name, value) { commits.push([name, value]); this.state.activeSidebar = value } } }
+    $i18n: { locale: 'zh' }, $nextTick: callback => callback(), $store: { state: { isReadonly: false, activeSidebar: '', localConfig: { isDark: false } }, commit(name, value) { commits.push([name, value]); this.state.activeSidebar = value } } }
   for (const name of Object.keys(component.methods)) instance[name] = instance[name].bind(instance)
   for (const [name, fn] of Object.entries(component.computed)) Object.defineProperty(instance, name, { get: () => fn.call(instance) })
   component.mounted.call(instance)
@@ -33,6 +35,7 @@ const f = fixture(), app = f.instance
 assert.equal(app.activeNodes[0], f.selected, 'late mount keeps selected node')
 assert.equal(app.canUndo, true, 'late mount keeps collaboration undo history')
 f.bus.$emit('open_mobile_editor_sheet', 'node'); assert.equal(app.sheet, 'node')
+f.bus.$emit('close_mobile_editor_sheet'); assert.equal(app.sheet, '', 'switching to file or settings closes node tools')
 app.command('INSERT_CHILD_NODE'); assert.deepEqual(f.commands, ['INSERT_CHILD_NODE']); assert.equal(app.sheet, '')
 app.panel('theme'); app.panel('theme'); assert.deepEqual(f.commits.slice(-2), [['setActiveSidebar', 'theme'], ['setActiveSidebar', '']])
 app.activeNodes = []; app.history('BACK'); assert.equal(f.commands.at(-1), 'BACK', 'undo works without node selection')

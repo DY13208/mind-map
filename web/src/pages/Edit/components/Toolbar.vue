@@ -1,21 +1,21 @@
 <template>
   <div class="toolbarContainer" :class="{ isDark: isDark }">
     <header v-if="isTouchEditor" class="touchEditorHeader" aria-label="脑图工具栏">
-      <el-popover v-model="mapTreeShow" placement="bottom-start" trigger="click" append-to-body :visible-arrow="false" popper-class="mapFileTreePopper">
-        <MapFileTree v-if="mapTreeShow" :current-room-key="currentRoomKey()" :is-dark="isDark" @open="openMapFromTree" @close="mapTreeShow = false" />
-        <button slot="reference" type="button" aria-label="脑图目录" :aria-expanded="String(mapTreeShow)"><i class="el-icon-folder"></i></button>
-      </el-popover>
+      <button type="button" aria-label="脑图目录" :aria-expanded="String(mapTreeShow)" @click="toggleTouchMapTree"><i class="el-icon-folder" aria-hidden="true"></i></button>
       <button v-if="$route.query.room" type="button" data-testid="back-to-my-maps" :aria-label="fileListReturnLabel" :disabled="returningToList" @click="onFileToolbarAction('maps')"><i class="el-icon-arrow-left"></i></button>
       <div class="touchFileIdentity">
         <strong :title="fileTitle">{{ fileTitle }}</strong>
-        <button v-if="displayedSaveChip === 'failed'" type="button" class="saveChip failed" data-testid="collab-sync-failed" @click="mobileMenuOpen = true">{{ collabSaveLabel }}</button>
+        <button v-if="displayedSaveChip === 'failed'" type="button" class="saveChip failed" data-testid="collab-sync-failed" @click="openMobileFileMenu">{{ collabSaveLabel }}</button>
         <span v-else class="saveChip" :class="[displayedSaveChip, { cooperating: collabLive }]" data-testid="collab-status" :title="collabError || collabSaveLabel" role="status">{{ collabSaveLabel }}</span>
       </div>
-      <button type="button" aria-label="搜索" @click="showSearch"><i class="iconfont iconsousuo"></i></button>
-      <button v-for="item in touchQuickActions" :key="item.key" type="button" :class="{ touchRefresh: item.key === 'refresh' }" :data-testid="item.testId" :aria-label="item.label" :disabled="item.disabled" @click="onFileToolbarAction(item.key)"><i :class="item.icon"></i></button>
-      <button type="button" aria-label="节点工具" @click="$bus.$emit('open_mobile_editor_sheet', 'node')"><i class="el-icon-s-grid"></i></button>
     </header>
-    <div v-else class="toolbar dockShell" :class="{ readonly: isReadonly }" ref="toolbarRef">
+    <nav v-if="isTouchEditor" class="touchEditorLeftRail" aria-label="脑图操作" data-testid="touch-editor-left-rail">
+      <button type="button" aria-label="搜索" title="搜索" @click="showTouchSearch"><i class="iconfont iconsousuo" aria-hidden="true"></i></button>
+      <button v-for="item in touchQuickActions" :key="item.key" type="button" :data-testid="item.testId" :aria-label="item.label" :title="item.label" :disabled="item.disabled" @click="onFileToolbarAction(item.key)"><i :class="item.icon" aria-hidden="true"></i></button>
+      <button type="button" aria-label="节点工具" title="节点工具" @click="openTouchTools('node')"><i class="el-icon-s-grid" aria-hidden="true"></i></button>
+      <button type="button" aria-label="更多工具" title="更多工具" @click="openTouchTools('more')"><i class="el-icon-more" aria-hidden="true"></i></button>
+    </nav>
+    <div v-if="!isTouchEditor" class="toolbar dockShell" :class="{ readonly: isReadonly }" ref="toolbarRef">
       <div class="dock fileDock" :class="{ collapsed: fileToolbarCollapsed }">
         <NotchWing side="left" position="top" variant="edge" />
         <NotchWing side="left" position="top" variant="side" />
@@ -281,10 +281,13 @@
         </div>
       </div>
     </div>
-    <el-drawer :visible.sync="mobileMenuOpen" direction="btt" size="auto" :with-header="false" append-to-body custom-class="mobileActionSheet touchEditorActionSheet">
+    <el-drawer :visible.sync="mobileMenuOpen" direction="ltr" size="320px" :with-header="false" :modal="false" :lock-scroll="false" append-to-body class="touchEditorDrawer" :custom-class="isDark ? 'touchEditorActionSidebar isDark' : 'touchEditorActionSidebar'">
       <header><strong>脑图操作</strong><button aria-label="关闭脑图操作" @click="mobileMenuOpen = false"><i class="el-icon-close" /></button></header>
       <div v-if="displayedSaveChip === 'failed'" class="collabDiag" role="alert"><p v-for="row in collabDiagRows" :key="row.key">{{ row.key }}：{{ row.value }}</p></div>
       <div class="mobileActionGrid"><button v-for="item in fileToolbarActions" :key="item.key" :disabled="item.disabled" @click="mobileMenuOpen = false; onFileMenuSelect(item.key)">{{ item.label }}</button></div>
+    </el-drawer>
+    <el-drawer v-if="isTouchEditor" :visible.sync="mapTreeShow" direction="ltr" size="320px" :with-header="false" :modal="false" :lock-scroll="false" append-to-body class="touchEditorDrawer" :custom-class="isDark ? 'touchEditorActionSidebar touchEditorMapTree isDark' : 'touchEditorActionSidebar touchEditorMapTree'">
+      <MapFileTree v-if="mapTreeShow" :current-room-key="currentRoomKey()" :is-dark="isDark" @open="openMapFromTree" @close="mapTreeShow = false" />
     </el-drawer>
     <el-dialog
       :visible.sync="jobHistoryVisible"
@@ -1262,7 +1265,7 @@ export default {
     },
 
     touchQuickActions() {
-      return this.fileActionsByKey(['refresh', 'run'])
+      return this.fileActionsByKey(['refresh', 'check', 'run'])
     },
 
     rightFileActions() {
@@ -1473,6 +1476,7 @@ export default {
   },
   created() {
     this.$bus.$on('open_mobile_file_menu', this.openMobileFileMenu)
+    this.$bus.$on('close_mobile_file_menu', this.closeMobileFileMenus)
     // 概要点：点它只记下「按这条概要继续」，派发仍由「运行」按钮触发
     this.$bus.$on('node_click', this.onJobNodeClick)
     this.$bus.$on('write_local_file', this.onWriteLocalFile)
@@ -1524,6 +1528,7 @@ export default {
   },
   beforeDestroy() {
     this.$bus.$off('open_mobile_file_menu', this.openMobileFileMenu)
+    this.$bus.$off('close_mobile_file_menu', this.closeMobileFileMenus)
     if (this.autoRepairTimer) {
       clearTimeout(this.autoRepairTimer)
       this.autoRepairTimer = null
@@ -1967,7 +1972,22 @@ export default {
       return keys.map(key => byKey.get(key)).filter(Boolean)
     },
 
-    openMobileFileMenu() { this.mobileMenuOpen = true },
+    closeMobileFileMenus() {
+      this.mobileMenuOpen = false
+      this.mapTreeShow = false
+    },
+
+    closeTouchMenus() {
+      this.closeMobileFileMenus()
+      this.$bus.$emit('close_mobile_editor_sheet')
+      this.$bus.$emit('closeSideBar')
+      this.$bus.$emit('close_search')
+    },
+
+    openMobileFileMenu() { this.closeTouchMenus(); this.mobileMenuOpen = true },
+    openTouchTools(name) { this.closeTouchMenus(); this.$bus.$emit('open_mobile_editor_sheet', name) },
+    toggleTouchMapTree() { const open = !this.mapTreeShow; this.closeTouchMenus(); this.mapTreeShow = open },
+    showTouchSearch() { this.closeTouchMenus(); this.showSearch() },
 
     onFileMenuSelect(key) {
       this.fileMenuShow = false
