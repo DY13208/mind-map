@@ -396,7 +396,7 @@ async function waitForOwnInsertAck(client, nodeUid) {
   return (await traceFor(client)).filter(row => row.phase === 'ack' && row.type === 'node.insert' && JSON.stringify(row).includes(nodeUid))
 }
 
-module.exports = async function runConcurrentAddRepro({ clients, call, batch, query, serverChildren, state, converge, roomKey, check, OUT, expectSuccess = false, compatMode = false }) {
+module.exports = async function runConcurrentAddRepro({ clients, call, batch, query, serverChildren, state, converge, roomKey, check, OUT, expectSuccess = false, compatMode = false, draftDisplayCheck = false }) {
   assert.ok(clients.length >= 2, 'Concurrent add reproduction needs two browser clients')
   await Promise.all(clients.map(instrument))
 
@@ -669,12 +669,13 @@ module.exports = async function runConcurrentAddRepro({ clients, call, batch, qu
     const editor = await openEditor(a, targetUid)
     const draft = `浏览器人工草稿 ${targetUid.slice(-6)}`
     await a.page.locator(editor.selector).fill(draft)
-    const competitor = compatMode ? await clients[2].page.evaluate(async ({ uid, version }) => {
+    const competitorText = draftDisplayCheck ? `<p>远端同字段竞争 ${targetUid.slice(-6)}</p><p>服务端第二段 &amp; 内容</p>` : `远端同字段竞争 ${targetUid.slice(-6)}`
+    const competitor = compatMode ? await clients[2].page.evaluate(async ({ uid, version, text, richText }) => {
       await window.__guardMM.cooperate.submitV2('node.update', { uid,
-        patch: { text: `远端同字段竞争 ${uid.slice(-6)}` }, expected: { uid, '__fv.text': version } })
+        patch: { text, ...(richText ? { richText: true } : {}) }, expected: { uid, '__fv.text': version } })
       return { toolError: false }
-    }, { uid: targetUid, version: baseline.data.__fv?.text || 0 }) : await call('update_node', { room_key: roomKey, node: targetUid,
-      text: `远端同字段竞争 ${targetUid.slice(-6)}`,
+    }, { uid: targetUid, version: baseline.data.__fv?.text || 0, text: competitorText, richText: draftDisplayCheck }) : await call('update_node', { room_key: roomKey, node: targetUid,
+      text: competitorText,
       expected: { uid: targetUid, '__fv.text': baseline.data.__fv?.text || 0 } })
     assert.equal(competitor.toolError, false, JSON.stringify(competitor))
     const competitorRevision = Number(await state())
@@ -695,6 +696,32 @@ module.exports = async function runConcurrentAddRepro({ clients, call, batch, qu
       server: server && { text: server.data?.text, fv: server.data?.__fv }, conflicts }
     fs.writeFileSync(path.join(OUT, 'concurrent-add-same-field-control.json'), JSON.stringify(detail, null, 2))
     await a.page.screenshot({ path: path.join(OUT, 'conflict-editor.png') })
+    if (draftDisplayCheck) {
+      assert.match(conflictView.session.draft.text, /<p>/, 'The original rich-text draft must remain intact')
+      await a.page.locator('.conflictDraftInbox > button').click()
+      const item = a.page.locator('.conflictDraftItem').filter({ hasText: targetUid }).first()
+      await item.waitFor({ state: 'visible' })
+      if (!(await item.locator('.conflictDraftPanel').count())) await item.locator('.itemHead button').click()
+      const panel = item.locator('.conflictDraftPanel')
+      await panel.waitFor({ state: 'visible' })
+      await panel.locator('.draftActions > button').first().click()
+      const draftDisplay = await panel.locator('.draftSection pre').first().innerText()
+      await a.page.waitForFunction(text => [...document.querySelectorAll('.latestSection pre')].some(el => el.textContent.includes(text)), '服务端第二段')
+      const latestDisplay = await panel.locator('.latestSection pre').innerText()
+      assert.ok(draftDisplay.includes(draft))
+      assert.doesNotMatch(draftDisplay, /<\/?p>/)
+      await a.page.evaluate(() => Object.defineProperty(navigator, 'clipboard', {
+        configurable: true, value: { writeText: async text => { window.__copiedConflictDraft = text } }
+      }))
+      await panel.locator('.draftSectionHead button').click()
+      assert.equal(await a.page.evaluate(() => window.__copiedConflictDraft), draftDisplay, 'Copy must match the readable draft without changing the system clipboard')
+      assert.ok(latestDisplay.includes('服务端第二段 & 内容'))
+      assert.doesNotMatch(latestDisplay, /<\/?p>|&amp;/)
+      assert.equal((await serverNode(query, targetUid)).data.text, server.data.text, 'Viewing drafts must not rewrite the server')
+      detail.display = { draftDisplay, latestDisplay, originalDraftHtml: conflictView.session.draft.text }
+      fs.writeFileSync(path.join(OUT, 'concurrent-add-same-field-control.json'), JSON.stringify(detail, null, 2))
+      await a.page.screenshot({ path: path.join(OUT, 'conflict-draft-readable.png') })
+    }
     return { targetUid, competitorRevision, rejectedOldSave: saveResult === false, draftPreserved: true,
       conflictCodes: conflicts.map(row => row.error?.code), evidence: 'concurrent-add-same-field-control.json' }
   })
