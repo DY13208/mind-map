@@ -7,7 +7,7 @@
     :aria-label="`打开文件夹 ${folder.name}，${itemCountText}`"
     :data-tone="tone"
     :data-open="opening || undefined"
-    :style="{ height: rootHeight + 'px' }"
+    :style="cardStyle"
     @keydown.enter.self="activate"
     @click="activate"
     @pointermove="onPointerMove"
@@ -24,80 +24,122 @@
         @change="$emit('toggle-select', folder)"
       />
     </label>
-    <div class="gf-stage" :style="stageStyle">
-      <div class="gf-tilt">
-        <div class="gf-shadow" aria-hidden="true" />
+    <div class="folderCardMedia">
+      <div class="folderCardArtField" :style="mobileArtStyle">
+        <div class="gf-stage" :style="stageStyle">
+          <div class="gf-tilt">
+            <div class="gf-shadow" aria-hidden="true" />
 
-        <div class="gf-back" :style="{ clipPath: backClip }" aria-hidden="true">
-          <canvas
-            v-if="!plain"
-            ref="art"
-            class="gf-art"
-            :data-ready="artReady || undefined"
-            :style="{ width: artW + 'px', height: artH + 'px' }"
-          />
-          <div class="gf-back-sheen" />
-        </div>
+            <div class="gf-back" :style="{ clipPath: backClip }" aria-hidden="true">
+              <canvas
+                v-if="!plain"
+                ref="art"
+                class="gf-art"
+                :data-ready="artReady || undefined"
+                :style="{ width: artW + 'px', height: artH + 'px' }"
+              />
+              <div class="gf-back-sheen" />
+            </div>
 
-        <div class="gf-files" aria-hidden="true">
-          <div
-            v-for="sheet in sheets"
-            :key="sheet.key"
-            class="gf-sheet"
-            :class="{ 'gf-sheet--art': sheet.art }"
-            :style="sheet.style"
-          >
-            <canvas
-              v-if="sheet.art"
-              ref="sheetArt"
-              class="gf-sheet-art"
-              :data-ready="artReady || undefined"
-              :style="{ width: SHEET_W + 'px', height: SHEET_H + 'px' }"
-            />
+            <div class="gf-files" aria-hidden="true">
+              <div
+                v-for="sheet in sheets"
+                :key="sheet.key"
+                class="gf-sheet"
+                :class="{ 'gf-sheet--art': sheet.art }"
+                :style="sheet.style"
+              >
+                <canvas
+                  v-if="sheet.art"
+                  ref="sheetArt"
+                  class="gf-sheet-art"
+                  :data-ready="artReady || undefined"
+                  :style="{ width: SHEET_W + 'px', height: SHEET_H + 'px' }"
+                />
+              </div>
+            </div>
+
+            <div class="gf-front" :style="{ clipPath: frontClip }">
+              <div class="gf-tint" aria-hidden="true" />
+              <div class="gf-spec" aria-hidden="true" />
+              <svg class="gf-rim gf-front-rim" :viewBox="`0 0 ${W} ${FRONT_H}`" aria-hidden="true">
+                <path :d="frontPath" />
+              </svg>
+              <div class="gf-label">
+                <strong class="gf-title"
+                  ><InlineTitle
+                    :value="folder.name"
+                    :editable="editable && !selectable"
+                    @open="activate"
+                    @rename="$emit('rename-inline', folder, $event)"
+                /></strong>
+                <span class="gf-meta">{{ itemCountText }} · {{ dateText }}</span>
+              </div>
+            </div>
+
+            <el-dropdown
+              v-if="allowShare || editable"
+              class="gf-keyWrap"
+              trigger="click"
+              @command="$emit($event, folder)"
+              @click.native.stop
+            >
+              <button type="button" class="gf-key" :aria-label="`${folder.name} 更多操作`">
+                <svg class="gf-glyph" viewBox="0 0 30 8" aria-hidden="true">
+                  <circle cx="4" cy="4" r="3" />
+                  <circle cx="15" cy="4" r="3" />
+                  <circle cx="26" cy="4" r="3" />
+                </svg>
+              </button>
+              <el-dropdown-menu slot="dropdown"
+                ><el-dropdown-item v-if="isMobileViewport && editable" command="rename-request">重命名</el-dropdown-item
+                ><el-dropdown-item v-if="allowShare" command="share">分享 / 权限</el-dropdown-item
+                ><el-dropdown-item v-if="editable" command="delete" divided
+                  >删除</el-dropdown-item
+                ></el-dropdown-menu
+              >
+            </el-dropdown>
           </div>
         </div>
-
-        <div class="gf-front" :style="{ clipPath: frontClip }">
-          <div class="gf-tint" aria-hidden="true" />
-          <div class="gf-spec" aria-hidden="true" />
-          <svg class="gf-rim gf-front-rim" :viewBox="`0 0 ${W} ${FRONT_H}`" aria-hidden="true">
-            <path :d="frontPath" />
-          </svg>
-          <div class="gf-label">
-            <strong class="gf-title"
-              ><InlineTitle
-                :value="folder.name"
-                :editable="editable && !selectable"
-                @open="activate"
-                @rename="$emit('rename-inline', folder, $event)"
-            /></strong>
-            <span class="gf-meta">{{ itemCountText }} · {{ dateText }}</span>
-          </div>
-        </div>
-
-        <el-dropdown
-          v-if="allowShare || editable"
-          class="gf-keyWrap"
-          trigger="click"
-          @command="$emit($event, folder)"
-          @click.native.stop
-        >
-          <button type="button" class="gf-key" :aria-label="`${folder.name} 更多操作`">
-            <svg class="gf-glyph" viewBox="0 0 30 8" aria-hidden="true">
-              <circle cx="4" cy="4" r="3" />
-              <circle cx="15" cy="4" r="3" />
-              <circle cx="26" cy="4" r="3" />
-            </svg>
-          </button>
-          <el-dropdown-menu slot="dropdown"
-            ><el-dropdown-item v-if="isMobileViewport && editable" command="rename-request">重命名</el-dropdown-item
-            ><el-dropdown-item v-if="allowShare" command="share">分享 / 权限</el-dropdown-item
-            ><el-dropdown-item v-if="editable" command="delete" divided
-              >删除</el-dropdown-item
-            ></el-dropdown-menu
-          >
-        </el-dropdown>
       </div>
+    </div>
+    <div class="cardInfo folderCardInfo">
+      <div class="cardInfoText">
+        <strong class="cardInfoTitle"
+          ><InlineTitle
+            :value="folder.name"
+            :editable="editable && !selectable"
+            @open="activate"
+            @rename="$emit('rename-inline', folder, $event)"
+        /></strong>
+        <span class="cardInfoMeta">{{ itemCountText }} · {{ dateText }}</span>
+      </div>
+      <el-dropdown
+        v-if="allowShare || editable"
+        class="cardInfoActions"
+        trigger="click"
+        @command="$emit($event, folder)"
+        @click.native.stop
+      >
+        <button
+          type="button"
+          class="cardMoreButton"
+          :aria-label="`${folder.name} 更多操作`"
+        >
+          <svg class="cardMoreGlyph" viewBox="0 0 30 8" aria-hidden="true">
+            <circle cx="4" cy="4" r="3" />
+            <circle cx="15" cy="4" r="3" />
+            <circle cx="26" cy="4" r="3" />
+          </svg>
+        </button>
+        <el-dropdown-menu slot="dropdown"
+          ><el-dropdown-item v-if="editable" command="rename-request">重命名</el-dropdown-item
+          ><el-dropdown-item v-if="allowShare" command="share">分享 / 权限</el-dropdown-item
+          ><el-dropdown-item v-if="editable" command="delete" divided
+            >删除</el-dropdown-item
+          ></el-dropdown-menu
+        >
+      </el-dropdown>
     </div>
   </article></template
 >
@@ -106,6 +148,7 @@ import InlineTitle from './InlineTitle.vue'
 import mobileViewport from '@/utils/mobileViewport'
 import glassCard, { STAGE_W as W, STAGE_H as H, reducedMotion } from './glassCard'
 import { artForKey, hashString, paintArt, rng } from './glassFolderArt'
+import { fitFolderStageToWidth } from './mobileFolderLayout'
 
 const FRONT_H = H - 74
 const ART_PAD = 24
@@ -157,6 +200,39 @@ export default {
     },
     frontClip() {
       return `path('${FRONT_PATH}')`
+    },
+    mobileCardLayout() {
+      return fitFolderStageToWidth(this.width)
+    },
+    mobileArtLayout() {
+      return fitFolderStageToWidth(this.width + 2)
+    },
+    cardStyle() {
+      return {
+        height:
+          (this.isMobileViewport
+            ? this.mobileCardLayout.height
+            : this.rootHeight) + 'px'
+      }
+    },
+    mobileArtStyle() {
+      if (!this.isMobileViewport) return {}
+      return {
+        width: `${this.mobileArtLayout.width.toFixed(2)}px`,
+        height: `${this.mobileArtLayout.height.toFixed(2)}px`
+      }
+    },
+    stageStyle() {
+      if (!this.isMobileViewport) {
+        return glassCard.computed.stageStyle.call(this)
+      }
+      return {
+        zoom: 1,
+        width: `${W}px`,
+        height: `${H}px`,
+        transform: `scale(${this.mobileArtLayout.scale.toFixed(6)})`,
+        transformOrigin: '0 0'
+      }
     },
     artW() {
       return W + ART_PAD
@@ -224,6 +300,10 @@ export default {
     this.paintSeq = (this.paintSeq || 0) + 1
   },
   methods: {
+    measure() {
+      const width = this.$el ? this.$el.getBoundingClientRect().width : 0
+      if (width > 0 && Math.abs(width - this.width) > 0.5) this.width = width
+    },
     paint() {
       const seq = (this.paintSeq = (this.paintSeq || 0) + 1)
       const { recipe, seed } = this.art

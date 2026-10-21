@@ -1,9 +1,24 @@
 <template>
   <section class="productPage">
-    <nav class="mobileFileTabs" aria-label="脑图分类">
-      <router-link to="/files/recent">最近</router-link><router-link to="/files" exact>我的</router-link><router-link to="/files/shared">共享</router-link><router-link to="/files/favorites">收藏</router-link>
-    </nav>
+    <MobileFilesHeader
+      v-if="useMobileFilesHeader"
+      :mode="mode"
+      :title="pageTitle"
+      :search.sync="search"
+      :kind="mobileKind"
+      :folder-path="folderPath"
+      :is-folder="mode === 'folder'"
+      :is-team-view="isTeamView"
+      :loading="loading"
+      :root-label="mobileRootLabel"
+      @update:kind="mobileKind = $event"
+      @navigate-view="navigateMobileView"
+      @navigate-folder="navigateMobileFolder"
+      @navigate-root="navigateMobileRoot"
+      @navigate-parent="navigateMobileParent"
+    />
     <FileToolbar
+      v-else
       :search.sync="search"
       :show-favorites="!isTeamView && ['files', 'folder', 'favorites'].includes(mode)"
       :favorites-active="mode === 'favorites'"
@@ -26,10 +41,6 @@
         :root-label="isTeamView && selectedTeam ? selectedTeam.name : '脑图'"
       />
     </FileToolbar>
-    <div v-if="isMobileViewport && mode !== 'trash'" class="mobileFileFilters">
-      <button v-for="option in [{value:'all',label:'全部'},{value:'folders',label:'文件夹'},{value:'rooms',label:'脑图'}]" :key="option.value" :aria-pressed="mobileKind === option.value" :class="{active: mobileKind === option.value}" @click="mobileKind = option.value">{{ option.label }}</button>
-      <el-select v-model="sort" aria-label="排序方式"><el-option value="updatedAt" label="最近更新" /><el-option value="title" label="名称排序" /></el-select>
-    </div>
     <MobileCreateMenu :visible="mobileCreateOpen" :can-create-folder="!isTeamView || canManageTeam" @close="mobileCreateOpen = false" @select="selectMobileCreate" />
     <BatchActionBar
       v-if="selectMode"
@@ -240,6 +251,7 @@ import { armSkipMyMapsRedirect } from '@/utils/roomLocation'
 import { resolveShellMode, withShell } from '@/utils/shellMode'
 import EmptyState from './components/EmptyState.vue'
 import FileToolbar from './components/FileToolbar.vue'
+import MobileFilesHeader from './components/MobileFilesHeader.vue'
 import FolderBreadcrumb from './components/FolderBreadcrumb.vue'
 import FolderCard from './components/FolderCard.vue'
 import DeleteFolderDialog from './components/DeleteFolderDialog.vue'
@@ -252,6 +264,13 @@ import ShareRoomDialog from './components/ShareRoomDialog.vue'
 import ShareFolderDialog from './components/ShareFolderDialog.vue'
 import HomeImportDialog from './components/HomeImportDialog.vue'
 import BatchActionBar from './components/BatchActionBar.vue'
+import {
+  mobileFolderTarget,
+  mobileParentTarget,
+  mobileRootTarget,
+  mobileViewTarget,
+  shouldNavigateMobile
+} from './components/mobileFilesNavigation'
 const copy = {
   files: ['脑图', '管理你的文件夹与脑图'],
   recent: ['最近', '快速回到最近打开的脑图'],
@@ -286,6 +305,7 @@ export default {
     MobileCreateMenu,
     EmptyState,
     FileToolbar,
+    MobileFilesHeader,
     FolderBreadcrumb,
     FolderCard,
     DeleteFolderDialog,
@@ -347,6 +367,12 @@ export default {
     }
   },
   computed: {
+    useMobileFilesHeader() {
+      return this.isMobileViewport && this.mode !== 'trash'
+    },
+    mobileRootLabel() {
+      return this.isTeamView && this.selectedTeam ? this.selectedTeam.name : '脑图'
+    },
     supportsBatchSelect() {
       return this.mode === 'files' || this.mode === 'folder'
     },
@@ -1079,6 +1105,41 @@ export default {
         route.query = { team: this.selectedTeamId }
       }
       this.$router.push(withShell(route, this.$route))
+    },
+    navigateMobileView(view) {
+      return this.pushMobileTarget(
+        mobileViewTarget(this.filesBasePath, view)
+      )
+    },
+    navigateMobileFolder(folderId) {
+      return this.pushMobileTarget(
+        mobileFolderTarget(this.filesBasePath, folderId, {
+          team: this.selectedTeamId
+        })
+      )
+    },
+    navigateMobileRoot() {
+      return this.pushMobileTarget(
+        mobileRootTarget(this.filesBasePath, { team: this.selectedTeamId })
+      )
+    },
+    navigateMobileParent() {
+      return this.pushMobileTarget(
+        mobileParentTarget(this.filesBasePath, this.folderPath, {
+          team: this.selectedTeamId
+        })
+      )
+    },
+    pushMobileTarget(target) {
+      const location = withShell(target, this.$route)
+      if (!shouldNavigateMobile(location, this.$route)) return
+      return this.$router.push(location).catch(error => {
+        if (
+          isNavigationFailure(error, NavigationFailureType.cancelled) ||
+          isNavigationFailure(error, NavigationFailureType.duplicated)
+        ) return
+        this.$message.error(userMessageFromError(error))
+      })
     },
     async openRoom(room) {
       if (this.openingRoom) return

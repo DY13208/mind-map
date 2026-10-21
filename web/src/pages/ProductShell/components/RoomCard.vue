@@ -91,6 +91,48 @@
         </el-dropdown>
       </div>
     </div>
+    <div class="cardInfo roomCardInfo">
+      <div class="cardInfoText">
+        <strong class="cardInfoTitle"
+          ><InlineTitle
+            :value="room.title"
+            :editable="!selectable"
+            @open="activate"
+            @rename="$emit('rename-inline', room, $event)"
+        /></strong>
+        <span class="cardInfoMeta">{{ ownerName }} · {{ dateText }}</span>
+      </div>
+      <el-dropdown
+        class="cardInfoActions"
+        trigger="click"
+        @command="$emit($event, room)"
+        @click.native.stop
+      >
+        <button
+          type="button"
+          class="cardMoreButton"
+          :aria-label="`${room.title} 更多操作`"
+        >
+          <svg class="cardMoreGlyph" viewBox="0 0 30 8" aria-hidden="true">
+            <circle cx="4" cy="4" r="3" />
+            <circle cx="15" cy="4" r="3" />
+            <circle cx="26" cy="4" r="3" />
+          </svg>
+        </button>
+        <el-dropdown-menu slot="dropdown"
+          ><el-dropdown-item v-if="room.canManage !== false" command="rename">重命名</el-dropdown-item
+          ><el-dropdown-item command="duplicate">创建副本</el-dropdown-item
+          ><el-dropdown-item command="move">移动到文件夹</el-dropdown-item
+          ><el-dropdown-item command="favorite">{{
+            room.favorite ? '取消收藏' : '收藏'
+          }}</el-dropdown-item
+          ><el-dropdown-item command="share">分享</el-dropdown-item
+          ><el-dropdown-item v-if="allowDelete" command="delete" divided
+            >删除</el-dropdown-item
+          ></el-dropdown-menu
+        >
+      </el-dropdown>
+    </div>
   </article>
 </template>
 <script>
